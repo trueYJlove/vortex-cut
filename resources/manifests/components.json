@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "release_blocked_until_pinned": true,
+  "components": [
+    {
+      "name": "aivs-core",
+      "version": "0.0.1",
+      "path": "core/aivs-core",
+      "sha256": "UNPINNED_REQUIRES_APPROVAL",
+      "hash_status": "unverified",
+      "license": "project"
+    },
+    {
+      "name": "ffmpeg.exe",
+      "version": "UNPINNED_REQUIRES_APPROVAL",
+      "path": "ffmpeg/win-x64/ffmpeg.exe",
+      "sha256": "UNPINNED_REQUIRES_APPROVAL",
+      "hash_status": "unverified",
+      "license": "REVIEW_REQUIRED_LGPL_OR_GPL"
+    },
+    {
+      "name": "ffprobe.exe",
+      "version": "UNPINNED_REQUIRES_APPROVAL",
+      "path": "ffmpeg/win-x64/ffprobe.exe",
+      "sha256": "UNPINNED_REQUIRES_APPROVAL",
+      "hash_status": "unverified",
+      "license": "REVIEW_REQUIRED_LGPL_OR_GPL"
+    },
+    {
+      "name": "THIRD_PARTY_NOTICES.txt",
+      "version": "UNPINNED_REQUIRES_APPROVAL",
+      "path": "licenses/THIRD_PARTY_NOTICES.txt",
+      "sha256": "UNPINNED_REQUIRES_APPROVAL",
+      "hash_status": "unverified",
+      "license": "notices"
+    }
+  ]
+}

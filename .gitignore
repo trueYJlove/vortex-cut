@@ -1,0 +1,17 @@
+node_modules/
+apps/desktop/node_modules/
+apps/desktop/out/
+apps/desktop/dist/
+apps/desktop/release/
+packages/*/dist/
+.venv/
+.eggs/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+**/__pycache__/
+.aivideo-integration/
+.aivideo/
+test-assets/generated/
+dist/

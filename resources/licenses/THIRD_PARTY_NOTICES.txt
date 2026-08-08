@@ -1,0 +1,3 @@
+AI Video Studio Stage 0 third-party notices
+
+FFmpeg: update this file with the exact approved version, source URL, license text, and source offer before distributing an installer. The current manifest intentionally blocks release until legal review and SHA-256 pinning are complete.

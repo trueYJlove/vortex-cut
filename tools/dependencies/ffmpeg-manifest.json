@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "component": "FFmpeg",
+  "platform": "win-x64",
+  "version": "UNPINNED_REQUIRES_APPROVAL",
+  "source_url": "https://ffmpeg.org/download.html",
+  "archive_sha256": "",
+  "build_configuration": "H.264/AAC, ffprobe JSON, libx264 and hardware encoder discovery",
+  "license": "REVIEW_REQUIRED_LGPL_OR_GPL",
+  "binary_layout": ["ffmpeg.exe", "ffprobe.exe"],
+  "release_blocked_until_pinned": true
+}

@@ -1,0 +1,39 @@
+appId: com.aivideo.studio
+productName: AIVideo Studio
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist
+  - dist-electron
+  - package.json
+extraResources:
+  - from: ../../resources/core/aivs-core
+    to: core/aivs-core
+    filter:
+      - '**/*'
+  - from: ../../resources/ffmpeg/win-x64
+    to: ffmpeg/win-x64
+    filter:
+      - ffmpeg.exe
+      - ffprobe.exe
+  - from: ../../resources/licenses
+    to: licenses
+    filter:
+      - '**/*'
+  - from: ../../resources/manifests
+    to: manifests
+    filter:
+      - components.json
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: AIVideoStudio-Setup-${version}-x64.exe
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  deleteAppDataOnUninstall: false
