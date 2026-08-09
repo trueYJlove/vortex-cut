@@ -39,6 +39,14 @@ class FakeRenderProcess:
         self.returncode = -15
 
 
+class RunningRenderProcess(FakeRenderProcess):
+    def __init__(self):
+        super().__init__(returncode=None, lines=[])
+
+    def kill(self):
+        self.returncode = -9
+
+
 @pytest.mark.asyncio
 async def test_sha256_file(tmp_path: Path):
     path = tmp_path / "data.bin"
@@ -98,4 +106,62 @@ async def test_render_media_cancel_and_failure(monkeypatch, tmp_path: Path):
             1,
             asyncio.Event(),
             lambda _: None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_render_media_cancellation_kills_running_process(monkeypatch, tmp_path: Path):
+    process = RunningRenderProcess()
+
+    async def fake_exec(*args, **kwargs):
+        return process
+
+    monkeypatch.setattr(render.asyncio, "create_subprocess_exec", fake_exec)
+    event = asyncio.Event()
+    event.set()
+    with pytest.raises(RuntimeError, match="JOB_CANCELLED"):
+        await render.render_media(
+            Path("ffmpeg"), object(), [], tmp_path / "missing.mp4", 1, event, lambda _: None
+        )
+    assert process.returncode == -9
+
+
+@pytest.mark.asyncio
+async def test_render_media_ignores_invalid_progress_and_validates_output(
+    monkeypatch, tmp_path: Path
+):
+    output = tmp_path / "out.mp4"
+    output.write_bytes(b"rendered")
+    process = FakeRenderProcess(lines=["out_time_us=bad\n"])
+
+    async def fake_exec(*args, **kwargs):
+        return process
+
+    class Probe:
+        async def probe(self, path):
+            return {"duration_us": 0, "video_streams": [{}], "audio_streams": []}
+
+    monkeypatch.setattr(render.asyncio, "create_subprocess_exec", fake_exec)
+    progress = []
+    result = await render.render_media(
+        Path("ffmpeg"), Probe(), [], output, 0, asyncio.Event(), progress.append
+    )
+    assert result["size_bytes"] == len(b"rendered")
+    assert progress == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("content", [None, b""])
+async def test_render_media_rejects_missing_or_empty_output(monkeypatch, tmp_path: Path, content):
+    output = tmp_path / "out.mp4"
+    if content is not None:
+        output.write_bytes(content)
+
+    async def fake_exec(*args, **kwargs):
+        return FakeRenderProcess(lines=[])
+
+    monkeypatch.setattr(render.asyncio, "create_subprocess_exec", fake_exec)
+    with pytest.raises(RuntimeError, match="OUTPUT_VALIDATION_FAILED"):
+        await render.render_media(
+            Path("ffmpeg"), object(), [], output, 1, asyncio.Event(), lambda _: None
         )

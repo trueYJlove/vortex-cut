@@ -1,6 +1,8 @@
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from aivs_core.app import create_app
 from aivs_core.config import Settings
@@ -87,3 +89,76 @@ def test_core_api_auth_grant_probe_job_and_websocket(tmp_path: Path, monkeypatch
             event = websocket.receive_json()
             assert event["type"] == "system.ready"
             assert event["payload"]["protocol_version"] == 1
+
+
+def test_core_api_error_paths_and_websocket_rejection(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("AIVS_ADMIN_TOKEN", "admin-test")
+    settings = Settings(
+        data_dir=tmp_path, ffmpeg=Path("missing-ffmpeg"), ffprobe=Path("missing-ffprobe")
+    )
+    media = tmp_path / "sample.mp4"
+    media.write_bytes(b"fake media")
+    app = create_app(settings)
+
+    async def failed_probe(_path):
+        raise RuntimeError("MEDIA_UNSUPPORTED")
+
+    app.state.core.ffprobe.probe = failed_probe
+    with TestClient(app) as client:
+        admin = {"Authorization": "Bearer admin-test"}
+        assert client.get("/api/v1/internal/health", headers=admin).status_code == 200
+        assert client.post("/api/v1/internal/sessions").status_code == 401
+        assert client.get("/api/v1/system/capabilities").status_code == 401
+        session = client.post("/api/v1/internal/sessions", headers=admin).json()
+        ui = {"Authorization": f"Bearer {session['token']}"}
+
+        missing = client.post(
+            "/api/v1/internal/file-grants",
+            headers=admin,
+            json={"path": str(tmp_path / "missing.mp4")},
+        )
+        assert missing.status_code == 400
+        assert missing.json()["detail"]["code"] == "MEDIA_NOT_FOUND"
+        directory = client.post(
+            "/api/v1/internal/file-grants", headers=admin, json={"path": str(tmp_path)}
+        )
+        assert directory.status_code == 400
+        assert directory.json()["detail"]["code"] == "MEDIA_UNSUPPORTED"
+        assert client.post(
+            "/api/v1/media/probe", headers=ui, json={"grant_id": "unknown"}
+        ).status_code == 404
+        grant = client.post(
+            "/api/v1/internal/file-grants", headers=admin, json={"path": str(media)}
+        ).json()
+        probe = client.post(
+            "/api/v1/media/probe", headers=ui, json={"grant_id": grant["grant_id"]}
+        )
+        assert probe.status_code == 400
+        assert probe.json()["detail"]["code"] == "MEDIA_UNSUPPORTED"
+        assert client.get("/api/v1/jobs/unknown", headers=ui).status_code == 404
+        assert client.post("/api/v1/jobs/unknown/cancel", headers=ui).status_code == 404
+        assert (
+            client.get("/api/v1/internal/artifacts/unknown/resolve", headers=admin).status_code
+            == 404
+        )
+        shutdown = client.post("/api/v1/internal/shutdown", headers=admin).json()
+        assert shutdown["status"] == "shutting_down"
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect("/api/v1/events") as websocket:
+                websocket.send_json({"type": "authenticate", "token": "invalid"})
+                websocket.receive_text()
+
+
+@pytest.mark.asyncio
+async def test_core_emit_removes_dead_websocket(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("AIVS_ADMIN_TOKEN", "admin-test")
+    app = create_app(Settings(data_dir=tmp_path))
+
+    class DeadSocket:
+        async def send_json(self, _message):
+            raise RuntimeError("closed")
+
+    dead = DeadSocket()
+    app.state.core.connections.add(dead)
+    await app.state.core.emit({"type": "test"})
+    assert dead not in app.state.core.connections

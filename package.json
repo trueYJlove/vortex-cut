@@ -16,7 +16,9 @@
     "verify:stage0:real": "python tools/verify_stage0_real.py",
     "verify:desktop:real": "pnpm --filter @aivideo/desktop build && node tools/verify_desktop_real.mjs",
     "contracts:generate": "pnpm --filter @aivideo/contracts build",
-    "sidecar:build": "uv run pyinstaller --noconfirm --clean --onedir --name aivs-core services/core/src/aivs_core/bootstrap.py",
+    "sidecar:build": "uv run --locked --extra dev pyinstaller --noconfirm --clean --onedir --name aivs-core services/core/src/aivs_core/bootstrap.py",
+    "bootstrap:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/packaging/bootstrap-windows.ps1",
+    "test:bootstrap:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/packaging/test-bootstrap-windows.ps1",
     "package:win": "pnpm --filter @aivideo/desktop package:win",
     "package:verify": "pnpm --filter @aivideo/desktop package:verify",
     "ci": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"

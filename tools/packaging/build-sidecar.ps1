@@ -1,6 +1,9 @@
 param([string]$OutputRoot = (Join-Path $PSScriptRoot "../../dist/sidecar"))
 $ErrorActionPreference = "Stop"
-uv run pyinstaller --clean --noconfirm (Join-Path $PSScriptRoot "../../services/core/aivs-core.spec")
+$uv = (Get-Command uv -ErrorAction Stop).Source
+& $uv run --locked --extra dev pyinstaller --version
+if ($LASTEXITCODE -ne 0) { throw "PyInstaller dependency is unavailable; run uv sync --locked --extra dev and ensure network or uv cache access." }
+& $uv run --locked --extra dev pyinstaller --clean --noconfirm (Join-Path $PSScriptRoot "../../services/core/aivs-core.spec")
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller build failed" }
 $core = Join-Path $OutputRoot "core/aivs-core"
 New-Item -ItemType Directory -Force -Path $core | Out-Null
