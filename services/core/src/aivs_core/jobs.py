@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import shutil
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from .database import Database, json_dumps, json_loads, utc_now
 from .ids import new_id
@@ -15,8 +15,15 @@ from .state import transition_sql
 
 
 class JobService:
-    def __init__(self, db: Database, data_dir: Path, ffmpeg: Path, ffprobe: FFprobe,
-                 encoders: EncoderDetector, emit: Callable[[dict[str, Any]], Awaitable[None]]) -> None:
+    def __init__(
+        self,
+        db: Database,
+        data_dir: Path,
+        ffmpeg: Path,
+        ffprobe: FFprobe,
+        encoders: EncoderDetector,
+        emit: Callable[[dict[str, Any]], Awaitable[None]],
+    ) -> None:
         self.db = db
         self.data_dir = data_dir
         self.ffmpeg = ffmpeg
@@ -38,9 +45,16 @@ class JobService:
             await asyncio.gather(self.worker, return_exceptions=True)
         await asyncio.gather(*self.tasks.values(), return_exceptions=True)
 
-    def create(self, kind: str, media_id: str, input_data: dict[str, Any], encoder: str,
-               start_us: int = 0, duration_us: int = 10_000_000,
-               layout: str = "blurred_background") -> dict[str, Any]:
+    def create(
+        self,
+        kind: str,
+        media_id: str,
+        input_data: dict[str, Any],
+        encoder: str,
+        start_us: int = 0,
+        duration_us: int = 10_000_000,
+        layout: str = "blurred_background",
+    ) -> dict[str, Any]:
         if kind == "vertical_sample" and layout != "blurred_background":
             raise ValueError("LAYOUT_UNSUPPORTED")
         job_id = new_id()
@@ -56,7 +70,8 @@ class JobService:
         }
         with self.db.connection() as db:
             db.execute(
-                "INSERT INTO jobs (id,type,status,input_json,encoder_requested,created_at,updated_at) "
+                "INSERT INTO jobs (id,type,status,input_json,encoder_requested,"
+                "created_at,updated_at) "
                 "VALUES (?,?,?,?,?,?,?)",
                 (job_id, kind, "queued", json_dumps(payload), encoder, now, now),
             )
@@ -69,7 +84,8 @@ class JobService:
                 return None
             artifacts = db.execute(
                 "SELECT id,kind,size_bytes,sha256,media_info_json,created_at "
-                "FROM artifacts WHERE job_id=?", (job_id,)
+                "FROM artifacts WHERE job_id=?",
+                (job_id,),
             ).fetchall()
         result = dict(row)
         result["job_id"] = result.pop("id")
@@ -79,7 +95,10 @@ class JobService:
         for artifact in result["artifacts"]:
             artifact["media_info"] = json_loads(artifact.pop("media_info_json"))
         if result.get("error_code"):
-            result["error"] = {"code": result.pop("error_code"), "message": result.pop("error_message")}
+            result["error"] = {
+                "code": result.pop("error_code"),
+                "message": result.pop("error_message"),
+            }
         else:
             result.pop("error_code", None)
             result.pop("error_message", None)
@@ -129,10 +148,16 @@ class JobService:
 
     async def _emit_update(self, job: dict[str, Any] | None) -> None:
         if job:
-            await self.emit({
-                "type": "job.updated",
-                "payload": {"job_id": job["job_id"], "status": job["status"], "progress": job["progress"]},
-            })
+            await self.emit(
+                {
+                    "type": "job.updated",
+                    "payload": {
+                        "job_id": job["job_id"],
+                        "status": job["status"],
+                        "progress": job["progress"],
+                    },
+                }
+            )
 
     def _transition_job(self, job_id: str, current: str, target: str, **fields: Any) -> None:
         status = transition_sql(current, target)
@@ -172,14 +197,30 @@ class JobService:
             probe = await self.ffprobe.probe(input_path)
             encoder, fallback = await self.encoders.choose(row["encoder_requested"])
             with self.db.connection() as db:
-                db.execute("UPDATE jobs SET encoder_used=?,fallback_reason=?,updated_at=? WHERE id=?",
-                           (encoder, fallback, utc_now(), job_id))
-            output = work / ("vertical-sample.mp4" if row["type"] == "vertical_sample" else "proxy.mp4")
-            args = build_render_args(input_path, output, row["type"], encoder, payload["start_us"],
-                                     payload["duration_us"], bool(probe["audio_streams"]))
+                db.execute(
+                    "UPDATE jobs SET encoder_used=?,fallback_reason=?,updated_at=? WHERE id=?",
+                    (encoder, fallback, utc_now(), job_id),
+                )
+            output = work / (
+                "vertical-sample.mp4" if row["type"] == "vertical_sample" else "proxy.mp4"
+            )
+            args = build_render_args(
+                input_path,
+                output,
+                row["type"],
+                encoder,
+                payload["start_us"],
+                payload["duration_us"],
+                bool(probe["audio_streams"]),
+            )
             cancel_event = self.cancel_events.setdefault(job_id, asyncio.Event())
             result = await render_media(
-                self.ffmpeg, self.ffprobe, args, output, payload["duration_us"], cancel_event,
+                self.ffmpeg,
+                self.ffprobe,
+                args,
+                output,
+                payload["duration_us"],
+                cancel_event,
                 lambda progress: self._set_progress(job_id, progress),
             )
             if cancel_event.is_set():
@@ -188,14 +229,31 @@ class JobService:
             final = artifacts / output.name
             shutil.move(output, final)
             with self.db.connection() as db:
-                db.execute("INSERT INTO artifacts VALUES (?,?,?,?,?,?,?,?)",
-                           (artifact_id, job_id, row["type"], str(final), result["size_bytes"],
-                            result["sha256"], json_dumps(result["media_info"]), utc_now()))
+                db.execute(
+                    "INSERT INTO artifacts VALUES (?,?,?,?,?,?,?,?)",
+                    (
+                        artifact_id,
+                        job_id,
+                        row["type"],
+                        str(final),
+                        result["size_bytes"],
+                        result["sha256"],
+                        json_dumps(result["media_info"]),
+                        utc_now(),
+                    ),
+                )
             current_status = self._current_status(job_id)
             if current_status != "running":
                 raise RuntimeError("JOB_CANCELLED")
-            self._transition_job(job_id, current_status, "succeeded", stage="completed", progress=1,
-                                 finished_at=utc_now(), worker_pid=None)
+            self._transition_job(
+                job_id,
+                current_status,
+                "succeeded",
+                stage="completed",
+                progress=1,
+                finished_at=utc_now(),
+                worker_pid=None,
+            )
         except RuntimeError as exc:
             code = str(exc).split(":", 1)[0]
             target = "cancelled" if code == "JOB_CANCELLED" else "failed"
@@ -203,23 +261,40 @@ class JobService:
             if current_status in {"running", "cancelling"}:
                 if current_status == "cancelling":
                     target = "cancelled" if code == "JOB_CANCELLED" else "interrupted"
-                self._transition_job(job_id, current_status, target, stage="failed", error_code=code,
-                                     error_message=code, finished_at=utc_now(), worker_pid=None)
+                self._transition_job(
+                    job_id,
+                    current_status,
+                    target,
+                    stage="failed",
+                    error_code=code,
+                    error_message=code,
+                    finished_at=utc_now(),
+                    worker_pid=None,
+                )
         except Exception:
             current_status = self._current_status(job_id)
             if current_status in {"running", "cancelling"}:
                 target = "interrupted" if current_status == "cancelling" else "failed"
-                self._transition_job(job_id, current_status, target, stage="failed",
-                                     error_code="INTERNAL_ERROR", error_message="任务执行失败",
-                                     finished_at=utc_now(), worker_pid=None)
+                self._transition_job(
+                    job_id,
+                    current_status,
+                    target,
+                    stage="failed",
+                    error_code="INTERNAL_ERROR",
+                    error_message="任务执行失败",
+                    finished_at=utc_now(),
+                    worker_pid=None,
+                )
         finally:
             self.cancel_events.pop(job_id, None)
             await self._emit_update(self.get(job_id))
 
     def _set_progress(self, job_id: str, progress: float) -> None:
         with self.db.connection() as db:
-            db.execute("UPDATE jobs SET progress=?,updated_at=? WHERE id=? AND status='running'",
-                       (progress, utc_now(), job_id))
+            db.execute(
+                "UPDATE jobs SET progress=?,updated_at=? WHERE id=? AND status='running'",
+                (progress, utc_now(), job_id),
+            )
 
     def _current_status(self, job_id: str) -> str | None:
         with self.db.connection() as db:

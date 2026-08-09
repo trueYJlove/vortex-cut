@@ -7,7 +7,7 @@
 
 - 协议版本：`1`。
 - API 前缀：`/api/v1`。
-- Sidecar 就绪消息：`AIVS_READY {json}`。
+- Sidecar 就绪握手：运行目录中的 `ready.json`；Core stdout/stderr 写入同目录 `core.log`。
 - 管理认证：`admin_token`，仅 Electron 主进程与 Core 持有。
 - UI 认证：`ui_token`，只允许系统读取、媒体探测和任务读写。
 - Renderer 只持有 `grant_id`、`media_id`、`job_id` 和 `artifact_id`，不得持有输入绝对路径。

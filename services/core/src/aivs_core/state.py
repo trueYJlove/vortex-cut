@@ -5,7 +5,10 @@ TRANSITIONS: dict[str, set[str]] = {
     "queued": {"running", "cancelled"},
     "running": {"succeeded", "failed", "cancelling", "interrupted"},
     "cancelling": {"cancelled", "interrupted"},
-    "succeeded": set(), "failed": set(), "cancelled": set(), "interrupted": set(),
+    "succeeded": set(),
+    "failed": set(),
+    "cancelled": set(),
+    "interrupted": set(),
 }
 
 

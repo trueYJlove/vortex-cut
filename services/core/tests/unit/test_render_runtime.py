@@ -61,8 +61,9 @@ async def test_render_media_success_and_progress(monkeypatch, tmp_path: Path):
 
     monkeypatch.setattr(render.asyncio, "create_subprocess_exec", fake_exec)
     progress = []
-    result = await render.render_media(Path("ffmpeg"), Probe(), [], output, 1_000_000,
-                                       asyncio.Event(), progress.append)
+    result = await render.render_media(
+        Path("ffmpeg"), Probe(), [], output, 1_000_000, asyncio.Event(), progress.append
+    )
     assert result["sha256"] == hashlib.sha256(b"rendered").hexdigest()
     assert progress == [0.5]
 
@@ -78,8 +79,9 @@ async def test_render_media_cancel_and_failure(monkeypatch, tmp_path: Path):
     event = asyncio.Event()
     event.set()
     with pytest.raises(RuntimeError, match="JOB_CANCELLED"):
-        await render.render_media(Path("ffmpeg"), object(), [], tmp_path / "missing.mp4", 1,
-                                  event, lambda _: None)
+        await render.render_media(
+            Path("ffmpeg"), object(), [], tmp_path / "missing.mp4", 1, event, lambda _: None
+        )
 
     failed = FakeRenderProcess(returncode=1, lines=[])
 
@@ -88,5 +90,12 @@ async def test_render_media_cancel_and_failure(monkeypatch, tmp_path: Path):
 
     monkeypatch.setattr(render.asyncio, "create_subprocess_exec", fake_failed)
     with pytest.raises(RuntimeError, match="FFMPEG_FAILED"):
-        await render.render_media(Path("ffmpeg"), object(), [], tmp_path / "missing.mp4", 1,
-                                  asyncio.Event(), lambda _: None)
+        await render.render_media(
+            Path("ffmpeg"),
+            object(),
+            [],
+            tmp_path / "missing.mp4",
+            1,
+            asyncio.Event(),
+            lambda _: None,
+        )

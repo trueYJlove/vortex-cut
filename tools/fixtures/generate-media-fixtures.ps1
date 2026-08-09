@@ -8,9 +8,9 @@ function Invoke-Ffmpeg([string[]]$Arguments, [string]$Target) {
   if ($LASTEXITCODE -ne 0) { throw "FFmpeg fixture generation failed: $Target" }
 }
 
-Invoke-Ffmpeg @("-hide_banner", "-y", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "3", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest") (Join-Path $output "cfr-landscape-av.mp4")
-Invoke-Ffmpeg @("-hide_banner", "-y", "-f", "lavfi", "-i", "testsrc2=size=360x640:rate=30", "-t", "3", "-c:v", "libx264", "-pix_fmt", "yuv420p") (Join-Path $output "cfr-portrait-video-only.mp4")
-Invoke-Ffmpeg @("-hide_banner", "-y", "-f", "lavfi", "-i", "testsrc2=size=641x359:rate=30", "-t", "2", "-c:v", "libx264", "-pix_fmt", "yuv420p") (Join-Path $output "short-odd-size.mp4")
+Invoke-Ffmpeg @("-hide_banner", "-y", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "3", "-c:v", "libopenh264", "-b:v", "4M", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest") (Join-Path $output "cfr-landscape-av.mp4")
+Invoke-Ffmpeg @("-hide_banner", "-y", "-f", "lavfi", "-i", "testsrc2=size=360x640:rate=30", "-t", "3", "-c:v", "libopenh264", "-b:v", "4M", "-pix_fmt", "yuv420p") (Join-Path $output "cfr-portrait-video-only.mp4")
+Invoke-Ffmpeg @("-hide_banner", "-y", "-f", "lavfi", "-i", "testsrc2=size=641x359:rate=30", "-t", "2", "-c:v", "libopenh264", "-b:v", "4M", "-pix_fmt", "yuv420p") (Join-Path $output "short-odd-size.mp4")
 
 $source = Join-Path $output "cfr-landscape-av.mp4"
 $corrupt = Join-Path $output "corrupt.mp4"

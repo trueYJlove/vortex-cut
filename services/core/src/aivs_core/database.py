@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 class Database:
@@ -43,7 +44,8 @@ class Database:
                   encoder_requested TEXT, encoder_used TEXT, fallback_reason TEXT,
                   error_code TEXT, error_message TEXT, worker_pid INTEGER,
                   cancel_requested INTEGER NOT NULL DEFAULT 0, attempt INTEGER NOT NULL DEFAULT 1,
-                  created_at TEXT NOT NULL, started_at TEXT, finished_at TEXT, updated_at TEXT NOT NULL
+                  created_at TEXT NOT NULL, started_at TEXT, finished_at TEXT,
+                  updated_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS artifacts (
                   id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES jobs(id), kind TEXT NOT NULL,
@@ -58,9 +60,11 @@ class Database:
         now = utc_now()
         with self.connection() as db:
             cursor = db.execute(
-                "UPDATE jobs SET status='interrupted', worker_pid=NULL, error_code='INTERNAL_ERROR', "
+                "UPDATE jobs SET status='interrupted', worker_pid=NULL, "
+                "error_code='INTERNAL_ERROR', "
                 "error_message='Core 在任务执行期间退出', updated_at=? "
-                "WHERE status IN ('running','cancelling')", (now,),
+                "WHERE status IN ('running','cancelling')",
+                (now,),
             )
             return cursor.rowcount
 

@@ -43,24 +43,36 @@ def normalize_probe(payload: dict[str, Any], path: Path) -> dict[str, Any]:
     for stream in payload.get("streams") or []:
         if stream.get("codec_type") == "video":
             num, den = parse_fraction(stream.get("avg_frame_rate") or stream.get("r_frame_rate"))
-            video.append({
-                "index": stream.get("index", 0), "codec": stream.get("codec_name"),
-                "width": int(stream.get("width") or 0), "height": int(stream.get("height") or 0),
-                "avg_frame_rate_num": num, "avg_frame_rate_den": den,
-                "rotation": _rotation(stream), "pixel_format": stream.get("pix_fmt"),
-            })
+            video.append(
+                {
+                    "index": stream.get("index", 0),
+                    "codec": stream.get("codec_name"),
+                    "width": int(stream.get("width") or 0),
+                    "height": int(stream.get("height") or 0),
+                    "avg_frame_rate_num": num,
+                    "avg_frame_rate_den": den,
+                    "rotation": _rotation(stream),
+                    "pixel_format": stream.get("pix_fmt"),
+                }
+            )
         elif stream.get("codec_type") == "audio":
-            audio.append({
-                "index": stream.get("index", 0), "codec": stream.get("codec_name"),
-                "sample_rate": int(stream.get("sample_rate") or 0),
-                "channels": int(stream.get("channels") or 0),
-            })
+            audio.append(
+                {
+                    "index": stream.get("index", 0),
+                    "codec": stream.get("codec_name"),
+                    "sample_rate": int(stream.get("sample_rate") or 0),
+                    "channels": int(stream.get("channels") or 0),
+                }
+            )
     stat = path.stat()
     return {
         "display_name": path.name,
         "format_name": (payload.get("format") or {}).get("format_name"),
         "duration_us": duration_us((payload.get("format") or {}).get("duration")),
-        "size_bytes": stat.st_size, "video_streams": video, "audio_streams": audio, "warnings": [],
+        "size_bytes": stat.st_size,
+        "video_streams": video,
+        "audio_streams": audio,
+        "warnings": [],
     }
 
 
@@ -73,7 +85,15 @@ class FFprobe:
         try:
             result = await run_process(
                 self.executable,
-                ["-v", "error", "-print_format", "json", "-show_format", "-show_streams", str(path)],
+                [
+                    "-v",
+                    "error",
+                    "-print_format",
+                    "json",
+                    "-show_format",
+                    "-show_streams",
+                    str(path),
+                ],
                 self.timeout,
             )
         except TimeoutError as exc:

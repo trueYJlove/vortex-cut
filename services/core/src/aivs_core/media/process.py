@@ -17,8 +17,11 @@ async def run_process(
     executable: Path, args: list[str], timeout: float, *, max_output: int = 10 * 1024 * 1024
 ) -> ProcessResult:
     process = await asyncio.create_subprocess_exec(
-        str(executable), *args, stdin=asyncio.subprocess.DEVNULL,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        str(executable),
+        *args,
+        stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
         creationflags=getattr(asyncio.subprocess, "CREATE_NO_WINDOW", 0),
     )
     try:

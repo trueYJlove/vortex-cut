@@ -2,6 +2,9 @@ import { randomBytes } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
 import { join } from "node:path";
+import { appendFile, readFile, unlink } from "node:fs/promises";
+import { mkdirSync, openSync, closeSync, existsSync, readFileSync } from "node:fs";
+import { request as httpRequest } from "node:http";
 import { parseSidecarReadyLine, type SidecarReady } from "@aivideo/contracts";
 
 export interface SidecarLaunchOptions {
@@ -15,6 +18,7 @@ export interface SidecarLaunchOptions {
   adminToken?: string;
   timeoutMs?: number;
   spawnImpl?: typeof spawn;
+  logPath?: string;
 }
 
 export class SidecarStartupError extends Error {}
@@ -35,51 +39,91 @@ export class SidecarSupervisor {
   async start(): Promise<SidecarReady> {
     if (this.child) throw new Error("Sidecar already started");
     const spawnImpl = this.options.spawnImpl ?? spawn;
+    const readyFile = join(this.options.runtimeDir, "ready.json");
+    await unlink(readyFile).catch(() => undefined);
     const args = [
       "--host", "127.0.0.1", "--port", "0",
       "--parent-pid", String(process.pid), "--data-dir", this.options.dataDir,
       "--ffmpeg", this.options.ffmpegPath, "--ffprobe", this.options.ffprobePath,
-      "--runtime-dir", this.options.runtimeDir, "--log-level", "info"
+      "--runtime-dir", this.options.runtimeDir, "--ready-file", readyFile, "--log-level", "info"
     ];
     const adminToken = this.options.adminToken ?? randomBytes(32).toString("hex");
+    mkdirSync(this.options.runtimeDir, { recursive: true });
+    const coreLogPath = join(this.options.runtimeDir, "core.log");
+    const coreLogFd = openSync(coreLogPath, "a");
     const child = spawnImpl(this.options.executable, args, {
       cwd: this.options.resourcesPath,
       env: { ...process.env, AIVS_ADMIN_TOKEN: adminToken },
       shell: false,
       windowsHide: true,
-      stdio: ["pipe", "pipe", "pipe"]
+      stdio: ["ignore", coreLogFd, coreLogFd]
     });
-    this.child = child;
-    child.stdin?.end();
+    this.child = child as unknown as ChildProcessWithoutNullStreams;
     const timeout = this.options.timeoutMs ?? 20_000;
     return new Promise<SidecarReady>((resolve, reject) => {
       let settled = false;
+      let childExit: string | undefined;
       let buffer = "";
+      let fileTimer: NodeJS.Timeout | undefined;
       const finish = (error?: Error, value?: SidecarReady) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        if (fileTimer) clearTimeout(fileTimer);
         if (error) reject(error); else if (value) resolve(value);
       };
-      const timer = setTimeout(() => finish(new SidecarStartupError(`Sidecar startup timed out after ${timeout}ms`)), timeout);
-      child.stdout.setEncoding("utf8");
-      child.stdout.on("data", (chunk: string) => {
-        buffer += chunk;
-        const lines = buffer.split(/\r?\n/);
-        buffer = lines.pop() ?? "";
-        for (const line of lines) {
-          if (!line.startsWith("AIVS_READY ")) continue;
-          try {
-            const ready = parseSidecarReadyLine(line);
-            if (ready.pid !== child.pid) throw new Error("Sidecar pid mismatch");
+      const timer = setTimeout(() => finish(new SidecarStartupError((childExit ? childExit + "; " : "") + `Sidecar startup timed out after ${timeout}ms`)), timeout);
+      if (this.options.logPath) void appendFile(this.options.logPath, `${new Date().toISOString()} [aivs-core] spawned with file-backed stdio log=${coreLogPath}\n`, "utf8");
+      child.once("error", error => { finish(new SidecarStartupError(error.message)); });
+      child.once("exit", (code, signal) => {
+        // PyInstaller/uvicorn may leave the serving child alive after the
+        // launcher process exits. Keep polling ready.json until timeout so a
+        // late but valid Core handshake is not discarded.
+        childExit = `Sidecar launcher exited before ready (${code ?? signal})`;
+        closeSync(coreLogFd);
+      });
+      const pollReadyFile = (): void => {
+        if (settled) return;
+        try {
+          if (existsSync(readyFile)) {
+            const ready = JSON.parse(readFileSync(readyFile, "utf8")) as SidecarReady;
+            if (!Number.isInteger(ready.pid) || ready.pid <= 0) throw new Error("Invalid sidecar pid");
+            if (this.options.logPath) void appendFile(this.options.logPath, `${new Date().toISOString()} [aivs-core] ready file received ${readyFile}\n`, "utf8");
             this.ready = ready;
             finish(undefined, ready);
-          } catch (error) { finish(new SidecarStartupError((error as Error).message)); }
+            return;
+          }
+        } catch (error) {
+          if (this.options.logPath) void appendFile(this.options.logPath, `${new Date().toISOString()} [aivs-core] ready file check failed ${(error as Error).message}\n`, "utf8");
         }
-      });
-      child.once("error", error => finish(new SidecarStartupError(error.message)));
-      child.once("exit", (code, signal) => finish(new SidecarStartupError(`Sidecar exited before ready (${code ?? signal})`)));
+        fileTimer = setTimeout(pollReadyFile, 100);
+      };
+      fileTimer = setTimeout(pollReadyFile, 50);
     });
+  }
+
+  private async waitForHttpReady(ready: SidecarReady, timeoutMs = 20_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    let lastError = "unknown error";
+    while (Date.now() < deadline) {
+      try {
+        const status = await new Promise<number>((resolve, reject) => {
+          const req = httpRequest({ hostname: "127.0.0.1", port: ready.port, path: "/api/v1/health", method: "GET" }, response => {
+            response.resume();
+            response.once("end", () => resolve(response.statusCode ?? 0));
+          });
+          req.setTimeout(1000, () => req.destroy(new Error("health request timed out")));
+          req.once("error", reject);
+          req.end();
+        });
+        if (status === 200) return;
+        lastError = `health status ${status}`;
+      } catch (error) {
+        lastError = (error as Error).message;
+      }
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+    throw new Error(`Core HTTP readiness timed out: ${lastError}`);
   }
 
   async stop(force = false): Promise<void> {

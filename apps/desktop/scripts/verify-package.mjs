@@ -3,7 +3,11 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const root = resolve(process.cwd());
-const packageDir = resolve(process.env.AIVS_PACKAGE_DIR ?? join(root, "release"));
+const defaultRelease = join(root, "release");
+const defaultPackageDir = existsSync(join(defaultRelease, "win-unpacked", "resources"))
+  ? join(defaultRelease, "win-unpacked", "resources")
+  : defaultRelease;
+const packageDir = resolve(process.env.AIVS_PACKAGE_DIR ?? defaultPackageDir);
 const required = [
   "core/aivs-core/aivs-core.exe",
   "ffmpeg/win-x64/ffmpeg.exe",

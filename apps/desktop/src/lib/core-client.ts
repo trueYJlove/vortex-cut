@@ -33,7 +33,10 @@ export class CoreClient {
   private readonly listeners = new Map<JobId, Set<JobListener>>();
   private readonly pollers = new Map<JobId, ReturnType<typeof setInterval>>();
   constructor(private readonly options: CoreClientOptions) {
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    // `window.fetch` requires `this === window`; storing the bare reference and
+    // calling it as a method later throws "Failed to execute 'fetch' on 'Window':
+    // Illegal invocation". Wrap it so it is always invoked as a plain call.
+    this.fetchImpl = options.fetchImpl ?? ((input, init) => fetch(input, init));
     this.webSocketFactory = options.webSocketFactory ?? (url => new WebSocket(url));
   }
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {

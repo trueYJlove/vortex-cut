@@ -1,3 +1,9 @@
 AI Video Studio Stage 0 third-party notices
 
+FFmpeg 8.0.1-20260228 (BtbN LGPL build)
+Source: https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-02-28-12-59/ffmpeg-n8.0.1-66-g27b8d1a017-win64-lgpl-8.0.zip
+License: LGPL-2.1-or-later. The corresponding source and build metadata are available from the BtbN FFmpeg-Builds project.
+
+This distribution uses the LGPL build and its libopenh264 software encoder fallback; hardware encoders are selected only after a runtime smoke test.
+
 FFmpeg: update this file with the exact approved version, source URL, license text, and source offer before distributing an installer. The current manifest intentionally blocks release until legal review and SHA-256 pinning are complete.

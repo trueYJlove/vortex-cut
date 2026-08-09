@@ -13,7 +13,7 @@ class FakeProbe:
 
 class FakeEncoders:
     async def choose(self, mode: str):
-        return "libx264", None
+        return "libopenh264", None
 
 
 async def make_service(tmp_path, monkeypatch, error):
@@ -21,16 +21,28 @@ async def make_service(tmp_path, monkeypatch, error):
     db.initialize()
     source = tmp_path / "input.mp4"
     source.write_bytes(b"input")
+
     async def emit(_event):
         return None
+
     service = JobService(db, tmp_path, Path("ffmpeg"), FakeProbe(), FakeEncoders(), emit)
-    created = service.create("proxy", "media-1", {"path": str(source), "size_bytes": source.stat().st_size,
-                                                   "modified_at": source.stat().st_mtime_ns}, "software",
-                             duration_us=1_000_000)
+    created = service.create(
+        "proxy",
+        "media-1",
+        {
+            "path": str(source),
+            "size_bytes": source.stat().st_size,
+            "modified_at": source.stat().st_mtime_ns,
+        },
+        "software",
+        duration_us=1_000_000,
+    )
 
     async def fake_render(*_args, **_kwargs):
         with db.connection() as connection:
-            connection.execute("UPDATE jobs SET status='cancelling' WHERE id=?", (created["job_id"],))
+            connection.execute(
+                "UPDATE jobs SET status='cancelling' WHERE id=?", (created["job_id"],)
+            )
         raise RuntimeError(error)
 
     monkeypatch.setattr("aivs_core.jobs.render_media", fake_render)
@@ -54,7 +66,11 @@ def test_job_serialization_hides_input_path(tmp_path):
     db = Database(tmp_path / "stage0.db")
     db.initialize()
     service = JobService(db, tmp_path, Path("ffmpeg"), FakeProbe(), FakeEncoders(), lambda _: None)
-    job = service.create("proxy", "media-1", {"path": "C:/secret/input.mp4", "size_bytes": 1,
-                                                "modified_at": 1}, "software")
+    job = service.create(
+        "proxy",
+        "media-1",
+        {"path": "C:/secret/input.mp4", "size_bytes": 1, "modified_at": 1},
+        "software",
+    )
     detail = service.get(job["job_id"])
     assert detail and "path" not in detail["input"]

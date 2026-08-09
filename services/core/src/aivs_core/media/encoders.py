@@ -6,7 +6,7 @@ from .process import run_process
 
 
 class EncoderDetector:
-    candidates = ("h264_nvenc", "h264_qsv", "h264_amf", "libx264")
+    candidates = ("h264_nvenc", "h264_qsv", "h264_amf", "libopenh264", "libx264")
 
     def __init__(self, ffmpeg: Path) -> None:
         self.ffmpeg = ffmpeg
@@ -19,9 +19,21 @@ class EncoderDetector:
 
     async def smoke_test(self, encoder: str) -> bool:
         args = [
-            "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
-            "testsrc2=size=128x128:rate=30", "-t", "1", "-an", "-c:v", encoder,
-            "-f", "null", "-",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=128x128:rate=30",
+            "-t",
+            "1",
+            "-an",
+            "-c:v",
+            encoder,
+            "-f",
+            "null",
+            "-",
         ]
         try:
             result = await run_process(self.ffmpeg, args, 10)
@@ -31,18 +43,24 @@ class EncoderDetector:
 
     async def choose(self, mode: str) -> tuple[str, str | None]:
         if mode == "software":
-            mode = "libx264"
-        if mode not in {"auto", "libx264", "h264_nvenc", "h264_qsv", "h264_amf"}:
+            mode = "libopenh264"
+        if mode not in {"auto", "libopenh264", "libx264", "h264_nvenc", "h264_qsv", "h264_amf"}:
             raise RuntimeError("ENCODER_UNAVAILABLE")
         available = await self.available() if mode == "auto" else [mode]
-        hardware = [encoder for encoder in available if encoder != "libx264"]
+        hardware = [encoder for encoder in available if encoder not in {"libopenh264", "libx264"}]
         options = hardware if mode == "auto" else [mode]
         for encoder in options:
             if await self.smoke_test(encoder):
                 return encoder, None
-        if mode == "auto" and await self.smoke_test("libx264"):
-            reason = "hardware encoder smoke test failed; fell back to software" if hardware else None
-            return "libx264", reason
+        if mode == "auto":
+            for software in ("libopenh264", "libx264"):
+                if await self.smoke_test(software):
+                    reason = (
+                        "hardware encoder smoke test failed; fell back to software"
+                        if hardware
+                        else None
+                    )
+                    return software, reason
         raise RuntimeError("ENCODER_UNAVAILABLE")
 
     async def capabilities(self) -> dict[str, object]:

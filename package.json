@@ -13,6 +13,8 @@
     "typecheck": "pnpm --filter @aivideo/contracts build && pnpm --filter @aivideo/desktop typecheck",
     "test": "pnpm --filter @aivideo/contracts build && pnpm --filter @aivideo/desktop test",
     "test:e2e": "pnpm --filter @aivideo/desktop test:e2e",
+    "verify:stage0:real": "python tools/verify_stage0_real.py",
+    "verify:desktop:real": "pnpm --filter @aivideo/desktop build && node tools/verify_desktop_real.mjs",
     "contracts:generate": "pnpm --filter @aivideo/contracts build",
     "sidecar:build": "uv run pyinstaller --noconfirm --clean --onedir --name aivs-core services/core/src/aivs_core/bootstrap.py",
     "package:win": "pnpm --filter @aivideo/desktop package:win",

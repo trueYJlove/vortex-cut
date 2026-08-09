@@ -3,9 +3,9 @@ productName: AIVideo Studio
 directories:
   output: release
   buildResources: build
+electronDist: node_modules/electron/dist
 files:
-  - dist
-  - dist-electron
+  - out
   - package.json
 extraResources:
   - from: ../../resources/core/aivs-core

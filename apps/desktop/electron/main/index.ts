@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { appendFileSync, mkdirSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { CoreAdminClient } from "./core-admin-client.js";
 import { registerFileGrant } from "./file-grants.js";
@@ -12,6 +13,44 @@ let supervisor: SidecarSupervisor | undefined;
 let core: CoreAdminClient | undefined;
 let runtime: { base_url: string; ui_token: string; protocol_version: 1 } | undefined;
 let logPath = "";
+// Acquire the lock before startup work so duplicate launches cannot race with
+// window creation or sidecar startup.
+const hasSingleInstanceLock = !app.isPackaged || app.requestSingleInstanceLock();
+let resolveRuntime: ((value: NonNullable<typeof runtime>) => void) | undefined;
+let rejectRuntime: ((reason?: unknown) => void) | undefined;
+const runtimeReady = new Promise<NonNullable<typeof runtime>>((resolve, reject) => {
+  resolveRuntime = resolve;
+  rejectRuntime = reject;
+});
+
+if (app.isPackaged && !hasSingleInstanceLock) {
+  app.quit();
+}
+
+app.on("second-instance", () => {
+  if (windowRef && !windowRef.isDestroyed()) {
+    if (windowRef.isMinimized()) windowRef.restore();
+    windowRef.focus();
+  }
+});
+
+process.on("uncaughtException", error => {
+  void appendLog(logPath || join(app.getPath("userData"), "logs", "desktop.log"), `uncaughtException: ${error.stack ?? error.message}`);
+});
+process.on("unhandledRejection", (reason, promise) => {
+  // A rejected promise must never take down the whole desktop process. Log it
+  // (best-effort) and let the event loop continue. Previously an unhandled
+  // rejection inside the whenReady() async callback caused Electron to exit
+  // the main process cleanly with code 0 and no diagnostics — the source of
+  // the "window flashes then app disappears" crashes.
+  void appendLog(logPath || join(app.getPath("userData"), "logs", "desktop.log"), `unhandledRejection: ${reason instanceof Error ? reason.stack ?? reason.message : String(reason)}`).catch(() => undefined);
+});
+process.on("exit", code => {
+  const path = logPath || join(app.getPath("userData"), "logs", "desktop.log");
+  try { mkdirSync(join(path, ".."), { recursive: true }); appendFileSync(path, `${new Date().toISOString()} process exit code=${code}\n`, "utf8"); } catch { /* process is exiting */ }
+});
+process.on("SIGTERM", () => { void appendLog(logPath, "process SIGTERM"); });
+process.on("SIGINT", () => { void appendLog(logPath, "process SIGINT"); });
 
 function requireCore(): CoreAdminClient {
   if (!core) throw new Error("Core is not ready");
@@ -24,35 +63,65 @@ function asId(value: unknown, name: string): string {
 }
 
 async function createWindow(): Promise<void> {
-  windowRef = new BrowserWindow({
+  await appendLog(logPath, `createWindow renderer=${process.env.ELECTRON_RENDERER_URL ?? "file"}`);
+  try {
+    windowRef = new BrowserWindow({
     width: 1440,
     height: 960,
     minWidth: 1024,
     minHeight: 720,
+    show: true,
     webPreferences: {
-      preload: join(__dirname, "../preload/index.js"),
+      preload: join(__dirname, "../preload/index.mjs"),
       nodeIntegration: false,
       contextIsolation: true,
-      sandbox: true
+      sandbox: false
     }
-  });
+    });
+    await appendLog(logPath, "BrowserWindow created");
+  } catch (error) {
+    await appendLog(logPath, `BrowserWindow creation failed: ${String(error)}`);
+    throw error;
+  }
   windowRef.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   windowRef.webContents.on("will-navigate", event => event.preventDefault());
-  if (process.env.ELECTRON_RENDERER_URL) await windowRef.loadURL(process.env.ELECTRON_RENDERER_URL);
-  else await windowRef.loadFile(join(__dirname, "../renderer/index.html"));
-  windowRef.on("closed", () => { windowRef = undefined; });
+  windowRef.webContents.on("preload-error", (_event, preloadPath, error) => {
+    void appendLog(logPath, `preload error path=${preloadPath} error=${error.stack ?? error.message}`);
+  });
+  windowRef.webContents.on("render-process-gone", (_event, details) => {
+    void appendLog(logPath, `render process gone reason=${details.reason} exit=${details.exitCode}`);
+  });
+  windowRef.webContents.on("did-finish-load", () => { void appendLog(logPath, "renderer did-finish-load"); });
+  windowRef.once("ready-to-show", () => { void appendLog(logPath, "window ready-to-show"); });
+  windowRef.webContents.on("did-fail-load", (_event, code, description, url) => {
+    void appendLog(logPath, `renderer load failed code=${code} description=${description} url=${url}`);
+  });
+  windowRef.on("closed", () => { void appendLog(logPath, "window closed"); windowRef = undefined; });
+  const load = process.env.ELECTRON_RENDERER_URL
+    ? windowRef.loadURL(process.env.ELECTRON_RENDERER_URL)
+    : windowRef.loadFile(join(__dirname, "../renderer/index.html"));
+  void load.then(() => appendLog(logPath, "window loaded")).catch(error => appendLog(logPath, `window load error: ${String(error)}`));
 }
 
 function registerIpc(): void {
-  ipcMain.handle("runtime:get", () => {
-    if (!runtime) throw new Error("Runtime is not ready");
-    return runtime;
+  ipcMain.handle("runtime:get", async () => {
+    if (runtime) return runtime;
+    return Promise.race([
+      runtimeReady,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Core UI session startup timed out")), 30_000))
+    ]);
   });
   ipcMain.handle("diagnostics:get", () => requireCore().health());
   ipcMain.handle("media:choose", async () => {
-    const result = await dialog.showOpenDialog(windowRef!, { properties: ["openFile"], filters: [{ name: "Video", extensions: ["mp4", "mkv", "mov", "webm"] }] });
-    if (result.canceled || !result.filePaths[0]) return null;
-    const grant = await registerFileGrant(requireCore(), result.filePaths[0]);
+    // Automated integration runs may provide a fixture path explicitly. The
+    // production path remains the native file picker when this variable is absent.
+    let selectedPath = process.env.AIVS_E2E_MEDIA_PATH;
+    if (!selectedPath) {
+      const result = await dialog.showOpenDialog(windowRef!, { properties: ["openFile"], filters: [{ name: "Video", extensions: ["mp4", "mkv", "mov", "webm"] }] });
+      if (result.canceled || !result.filePaths[0]) return null;
+      selectedPath = result.filePaths[0];
+    }
+    const grant = await registerFileGrant(requireCore(), selectedPath);
     const media = await fetchWithUi<MediaInfo>("/api/v1/media/probe", { method: "POST", body: JSON.stringify({ grant_id: grant.grant_id }) });
     return { grant, media };
   });
@@ -86,26 +155,52 @@ async function fetchWithUi<T = unknown>(path: string, init: RequestInit = {}): P
   return response.json() as Promise<T>;
 }
 
+async function waitForCoreHealth(client: CoreAdminClient, timeoutMs = 20_000): Promise<Awaited<ReturnType<CoreAdminClient["health"]>>> {
+  const deadline = Date.now() + timeoutMs;
+  let lastError: unknown;
+  while (Date.now() < deadline) {
+    try {
+      await client.ready();
+      return await client.health();
+    } catch (error) {
+      lastError = error;
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+  }
+  throw new Error(`Core health check timed out: ${String(lastError)}`);
+}
+
 async function startRuntime(): Promise<void> {
   logPath = defaultLogPath(app.getPath("userData"));
   const adminToken = randomBytes(32).toString("hex");
-  const resourcesPath = process.resourcesPath;
-  const dataDir = app.getPath("userData");
+  const resourcesPath = process.env.AIVS_RESOURCES_PATH
+    ? resolve(process.env.AIVS_RESOURCES_PATH)
+    : app.isPackaged
+      ? process.resourcesPath
+      : resolve(__dirname, "../../../../resources");
+  const dataDir = join(app.getPath("userData"), "data-v2");
+  await appendLog(logPath, `runtime resources=${resourcesPath} data=${dataDir}`);
   const runtimeDir = join(dataDir, "runtime", `${process.pid}-${randomBytes(8).toString("hex")}`);
   supervisor = new SidecarSupervisor({
     executable: process.env.AIVS_SIDECAR_EXECUTABLE ?? SidecarSupervisor.packagedExecutable(resourcesPath),
-    resourcesPath, dataDir, runtimeDir,
+    resourcesPath, dataDir, runtimeDir, logPath,
     ffmpegPath: join(resourcesPath, "ffmpeg", "win-x64", "ffmpeg.exe"),
     ffprobePath: join(resourcesPath, "ffmpeg", "win-x64", "ffprobe.exe"),
     buildVersion: app.getVersion(), adminToken
   });
+  await appendLog(logPath, `starting sidecar resources=${resourcesPath}`);
   const ready = await supervisor.start();
+  await appendLog(logPath, `sidecar ready pid=${ready.pid} port=${ready.port}`);
   core = new CoreAdminClient(`http://127.0.0.1:${ready.port}`, adminToken);
-  const health = await core.health();
-  if (health.protocol_version !== 1) throw new Error("Unsupported Core protocol version");
+  runtime = { base_url: `http://127.0.0.1:${ready.port}`, ui_token: adminToken, protocol_version: 1 };
+  await appendLog(logPath, `Core process ready pid=${ready.pid} port=${ready.port} build=${ready.build_version}`);
+  await waitForCoreHealth(core);
+  await appendLog(logPath, "Core public health ready");
   const session = await core.createSession();
-  runtime = { base_url: core ? `http://127.0.0.1:${ready.port}` : "", ui_token: session.token, protocol_version: 1 };
-  await appendLog(logPath, `Core ready pid=${ready.pid} port=${ready.port} build=${ready.build_version}`);
+  await appendLog(logPath, "Core session response received");
+  runtime = { base_url: `http://127.0.0.1:${ready.port}`, ui_token: session.token, protocol_version: 1 };
+  resolveRuntime?.(runtime);
+  await appendLog(logPath, "Core UI session ready");
 }
 
 async function shutdownRuntime(): Promise<void> {
@@ -116,9 +211,58 @@ async function shutdownRuntime(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
-  if (!app.requestSingleInstanceLock()) { app.quit(); return; }
+  logPath = defaultLogPath(app.getPath("userData"));
+  await appendLog(logPath, "app ready").catch(() => undefined);
+  if (app.isPackaged && !hasSingleInstanceLock) {
+    await appendLog(logPath || join(app.getPath("userData"), "logs", "desktop.log"), "single instance lock unavailable").catch(() => undefined);
+    app.quit();
+    return;
+  }
   registerIpc();
-  try { await startRuntime(); await createWindow(); }
-  catch (error) { await appendLog(logPath || join(app.getPath("userData"), "logs", "desktop.log"), String(error)); await dialog.showErrorBox("AIVideo Studio 启动失败", "本地核心服务未能启动，请查看日志目录。"); app.quit(); }
+  try {
+    await createWindow();
+    void startRuntime().catch(async error => {
+      const message = error instanceof Error ? error.stack ?? error.message : String(error);
+      await appendLog(logPath, `runtime startup failed after window: ${message}`).catch(() => undefined);
+      if (windowRef && !windowRef.isDestroyed()) {
+        windowRef.webContents.send("runtime:error", message);
+      }
+    });
+  }
+  catch (error) {
+    await appendLog(logPath || join(app.getPath("userData"), "logs", "desktop.log"), String(error)).catch(() => undefined);
+    await shutdownRuntime().catch(() => undefined);
+    await dialog.showErrorBox("AIVideo Studio 启动失败", "本地核心服务未能启动，请查看日志目录。");
+    app.exit(1);
+  }
+}).catch(error => {
+  // Never let an unexpected failure in the startup callback silently kill the
+  // main process (which was observed as an orderly code 0 exit with no
+  // diagnostics). Surface it in the window and the log instead.
+  const message = error instanceof Error ? error.stack ?? error.message : String(error);
+  void appendLog(logPath || join(app.getPath("userData"), "logs", "desktop.log"), `startup failure: ${message}`).catch(() => undefined);
+  if (windowRef && !windowRef.isDestroyed()) {
+    dialog.showErrorBox("AIVideo Studio 启动失败", message);
+  }
+  app.exit(1);
 });
-app.on("before-quit", event => { event.preventDefault(); void shutdownRuntime().finally(() => app.exit(0)); });
+app.on("window-all-closed", () => {
+  void appendLog(logPath, "window-all-closed");
+  if (process.platform === "darwin") return;
+  // On Windows the window closing is the natural shutdown signal. route it
+  // through the same guarded before-quit path so shutdownRuntime runs exactly
+  // once and the sidecar is torn down before the process exits.
+  if (!shuttingDown) app.quit();
+});
+app.on("quit", (_event, code) => { void appendLog(logPath, `app quit code=${code}`); });
+app.on("before-quit", () => { void appendLog(logPath, "before-quit event"); });
+app.on("will-quit", () => { void appendLog(logPath, "will-quit event"); });
+app.on("child-process-gone", (_event, details) => { void appendLog(logPath, `child-process-gone type=${details.type} reason=${details.reason} exit=${details.exitCode} name=${details.name}`); });
+let shuttingDown = false;
+app.on("before-quit", event => {
+  if (shuttingDown) return;
+  event.preventDefault();
+  shuttingDown = true;
+  void appendLog(logPath, "shutdown started").catch(() => undefined);
+  void shutdownRuntime().finally(() => app.exit(0));
+});

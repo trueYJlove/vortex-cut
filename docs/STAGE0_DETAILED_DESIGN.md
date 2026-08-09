@@ -224,7 +224,7 @@ pnpm contracts:generate   从 OpenAPI 生成 TypeScript 契约
 pnpm sidecar:build        构建 Python onedir Sidecar
 pnpm package:win          生成 Windows x64 NSIS 安装包
 pnpm package:verify       校验安装包内容、哈希和依赖
-pnpm ci                   lint + typecheck + test + build
+pnpm run ci              lint + typecheck + test + build
 ```
 
 `pnpm bootstrap` 必须是幂等命令，不允许修改锁文件；首次锁版本由单独的维护命令完成。CI 使用 `pnpm install --frozen-lockfile` 和 `uv sync --frozen`。
@@ -277,10 +277,10 @@ Core、FFmpeg 和 FFprobe 的路径由 Electron 根据 `process.resourcesPath` �
 3. 创建窗口，显示“正在启动本地核心服务”状态。
 4. 生成 32 字节随机 `admin_token`，只保存在 Electron 主进程和 Sidecar 环境变量中。
 5. 创建 `%LOCALAPPDATA%/AIVideoStudio/runtime/<electron-pid>-<nonce>/`。
-6. 使用 `spawn` 启动 Sidecar，`shell: false`、`windowsHide: true`、管道化 stdout/stderr。
+6. 使用 `spawn` 启动 Sidecar，`shell: false`、`windowsHide: true`；stdout/stderr 写入当前运行目录的 `core.log`，不依赖 Windows 管道。
 7. Sidecar 在 `127.0.0.1:0` 预绑定随机端口并启动 API。
-8. Sidecar 在 stdout 输出一行就绪消息；消息中不得包含令牌和用户路径。
-9. Electron 使用管理令牌请求健康检查并核对协议版本。
+8. Sidecar 在 `--ready-file` 指定的运行目录写入一次 `ready.json`；文件内容不得包含令牌和用户路径。Core stdout/stderr 同步写入 `core.log`。
+9. Electron 轮询并读取 `ready.json`，校验 PID、端口和协议版本，再使用管理令牌请求健康检查。
 10. Electron 请求创建 Renderer 会话，得到权限受限的 `ui_token`。
 11. preload 将 `base_url`、`ui_token` 和协议版本交给 Renderer 内存客户端。
 12. Renderer 建立 WebSocket 并进入可用状态。
@@ -303,13 +303,13 @@ aivs-core.exe
 
 ### 8.2 就绪消息
 
-stdout 第一条协议消息必须小于 4 KB，并严格采用：
+就绪文件内容必须是小于 4 KB 的 JSON，并严格采用：
 
 ```text
-AIVS_READY {"protocol_version":1,"port":49152,"pid":12345,"build_version":"0.0.1"}
+{"protocol_version":1,"port":49152,"pid":12345,"build_version":"0.0.1"}
 ```
 
-Electron 只接受一次合法 `AIVS_READY`。其余 stdout/stderr 进入脱敏日志。启动超时为 20 秒；超时、提前退出、JSON 非法或协议版本不匹配均进入错误页，并提供“重试启动”和“打开日志目录”。
+Electron 只接受一次合法 `ready.json`。启动超时为 20 秒；超时、提前退出、JSON 非法或协议版本不匹配均进入错误页，并提供“重试启动”和“打开日志目录”。
 
 ### 8.3 开发模式
 
@@ -511,7 +511,7 @@ POST /api/v1/jobs/{job_id}/cancel
 }
 ```
 
-约束：`duration_us` 默认 10 秒，最大 30 秒；起止时间必须在媒体时长内。阶段 0 只支持 `blurred_background` 布局。
+约束：竖屏样片的 `duration_us` 默认 10 秒、最大 30 秒；代理任务未指定 `duration_us` 时使用从 `start_us` 到媒体结尾的剩余时长，显式时长最大 30 秒。起止时间必须在媒体时长内。阶段 0 只支持 `blurred_background` 布局。
 
 创建响应：
 
@@ -696,7 +696,7 @@ ffprobe -v error -print_format json -show_format -show_streams <input>
 尺寸：保持比例，宽高均不超过 960，尺寸为偶数
 音频：首个音轨，AAC 128 kbps，48 kHz；无音轨时允许纯视频
 其他：faststart
-软件编码：libx264, preset veryfast, CRF 28
+软件编码：LGPL 构建使用 libopenh264，固定 4 Mbps；若部署包含 libx264 的构建，则可使用 preset veryfast、CRF 28。
 ```
 
 核心视频滤镜：
@@ -734,12 +734,12 @@ fps=30,format=yuv420p
 能力检测不能只解析 `ffmpeg -encoders`，还要对候选硬件编码器执行 1 秒 `testsrc2` 烟雾测试。优先级：
 
 ```text
-h264_nvenc -> h264_qsv -> h264_amf -> libx264
+h264_nvenc -> h264_qsv -> h264_amf -> libopenh264 (LGPL build) -> libx264 (optional)
 ```
 
-`encoder_mode=auto` 时使用第一个烟雾测试通过的编码器。若真实任务在硬件编码初始化阶段失败，任务自动重试一次 `libx264`，并写入 `fallback_reason`；内容错误、磁盘错误和用户取消不得触发回退。
+`encoder_mode=auto` 时使用第一个烟雾测试通过的编码器。批准的 LGPL FFmpeg 构建不包含 `libx264`，因此软件回退优先使用 `libopenh264`；若部署了包含 `libx264` 的构建，则可继续作为可选回退。硬件编码初始化失败时写入 `fallback_reason`；内容错误、磁盘错误和用户取消不得触发回退。
 
-阶段 0 验收同时保留 `software` 模式，确保任何受支持机器都能强制使用 `libx264`。
+阶段 0 验收同时保留 `software` 模式，映射到 `libopenh264`，确保 LGPL 组件在无硬件编码器的机器上仍可运行。
 
 ### 13.6 进度计算
 
@@ -925,7 +925,7 @@ artifactName: AIVideoStudio-Setup-${version}-x64.exe
 - [ ] FFprobe 能正确展示测试素材的时长、画幅、帧率和音轨。
 - [ ] 标准、VFR、无音轨和中文路径素材均能生成代理。
 - [ ] 能生成 `1080x1920`、H.264/AAC、CFR 30fps 的竖屏样片。
-- [ ] 自动模式能够选择可用硬件编码器，失败时回退 `libx264` 并记录原因。
+- [ ] 自动模式能够选择可用硬件编码器，失败时回退 `libopenh264` 并记录原因。
 - [ ] UI 显示任务阶段和进度，刷新窗口后状态仍来自 SQLite。
 - [ ] 取消任务后 5 秒内无相关 FFmpeg 进程，且不存在伪成功产物。
 - [ ] 强制终止 Sidecar 后重新启动，遗留任务显示 `interrupted`。
@@ -935,7 +935,7 @@ artifactName: AIVideoStudio-Setup-${version}-x64.exe
 
 ### 20.2 质量验收
 
-- [ ] `pnpm ci` 全部通过。
+- [ ] `pnpm run ci` 全部通过。
 - [ ] `pnpm test:e2e` 在开发构建通过。
 - [ ] `pnpm package:win` 和 `pnpm package:verify` 通过。
 - [ ] Python 核心关键模块单元测试覆盖率不低于 80%。

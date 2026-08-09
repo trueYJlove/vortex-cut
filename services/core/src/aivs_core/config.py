@@ -18,6 +18,7 @@ class Settings:
     runtime_dir: Path | None = None
     build_version: str = __version__
     log_level: str = "info"
+    ready_file: Path | None = None
 
     def prepare(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -30,13 +31,21 @@ class Settings:
         return self.data_dir / "stage0.db"
 
     @classmethod
-    def from_args(cls, args: object) -> "Settings":
+    def from_args(cls, args: object) -> Settings:
         return cls(
-            host=getattr(args, "host"), port=getattr(args, "port"),
-            data_dir=Path(getattr(args, "data_dir")), ffmpeg=Path(getattr(args, "ffmpeg")),
-            ffprobe=Path(getattr(args, "ffprobe")), parent_pid=getattr(args, "parent_pid"),
-            runtime_dir=Path(getattr(args, "runtime_dir")) if getattr(args, "runtime_dir", None) else None,
+            host=getattr(args, "host"),
+            port=getattr(args, "port"),
+            data_dir=Path(getattr(args, "data_dir")),
+            ffmpeg=Path(getattr(args, "ffmpeg")),
+            ffprobe=Path(getattr(args, "ffprobe")),
+            parent_pid=getattr(args, "parent_pid"),
+            runtime_dir=Path(getattr(args, "runtime_dir"))
+            if getattr(args, "runtime_dir", None)
+            else None,
             log_level=getattr(args, "log_level"),
+            ready_file=Path(getattr(args, "ready_file"))
+            if getattr(args, "ready_file", None)
+            else None,
         )
 
 

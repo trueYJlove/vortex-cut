@@ -2,11 +2,11 @@
   "schema_version": 1,
   "component": "FFmpeg",
   "platform": "win-x64",
-  "version": "UNPINNED_REQUIRES_APPROVAL",
-  "source_url": "https://ffmpeg.org/download.html",
-  "archive_sha256": "",
-  "build_configuration": "H.264/AAC, ffprobe JSON, libx264 and hardware encoder discovery",
-  "license": "REVIEW_REQUIRED_LGPL_OR_GPL",
+  "version": "8.0.1-20260228",
+  "source_url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-02-28-12-59/ffmpeg-n8.0.1-66-g27b8d1a017-win64-lgpl-8.0.zip",
+  "archive_sha256": "ef2b1179f226c7a953675623bff13e38ecd806a425f6f229e44660abdcd0c077",
+  "build_configuration": "H.264/AAC, ffprobe JSON, libopenh264 software fallback, gblur vertical background and hardware encoder discovery",
+  "license": "LGPL-2.1-or-later",
   "binary_layout": ["ffmpeg.exe", "ffprobe.exe"],
-  "release_blocked_until_pinned": true
+  "release_blocked_until_pinned": false
 }

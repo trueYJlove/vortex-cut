@@ -1,38 +1,38 @@
 {
-  "schema_version": 1,
-  "release_blocked_until_pinned": true,
-  "components": [
-    {
-      "name": "aivs-core",
-      "version": "0.0.1",
-      "path": "core/aivs-core",
-      "sha256": "UNPINNED_REQUIRES_APPROVAL",
-      "hash_status": "unverified",
-      "license": "project"
-    },
-    {
-      "name": "ffmpeg.exe",
-      "version": "UNPINNED_REQUIRES_APPROVAL",
-      "path": "ffmpeg/win-x64/ffmpeg.exe",
-      "sha256": "UNPINNED_REQUIRES_APPROVAL",
-      "hash_status": "unverified",
-      "license": "REVIEW_REQUIRED_LGPL_OR_GPL"
-    },
-    {
-      "name": "ffprobe.exe",
-      "version": "UNPINNED_REQUIRES_APPROVAL",
-      "path": "ffmpeg/win-x64/ffprobe.exe",
-      "sha256": "UNPINNED_REQUIRES_APPROVAL",
-      "hash_status": "unverified",
-      "license": "REVIEW_REQUIRED_LGPL_OR_GPL"
-    },
-    {
-      "name": "THIRD_PARTY_NOTICES.txt",
-      "version": "UNPINNED_REQUIRES_APPROVAL",
-      "path": "licenses/THIRD_PARTY_NOTICES.txt",
-      "sha256": "UNPINNED_REQUIRES_APPROVAL",
-      "hash_status": "unverified",
-      "license": "notices"
-    }
-  ]
+    "schema_version":  1,
+    "release_blocked_until_pinned":  false,
+    "components":  [
+                       {
+                           "name":  "aivs-core",
+                           "version":  "0.0.1",
+                           "path":  "core/aivs-core/aivs-core.exe",
+                           "sha256":  "7bc0b2aaf72b0fff98ea0a80419ef3560d35735e007fe2ebd63efa7adba28f17",
+                           "hash_status":  "verified",
+                           "license":  "project"
+                       },
+                       {
+                           "name":  "ffmpeg.exe",
+                           "version":  "8.0.1-20260228",
+                           "path":  "ffmpeg/win-x64/ffmpeg.exe",
+                           "sha256":  "a9eb7fb296bb7a7d140038f65064feb7a71fd79911f3341071c0fa8250db93ad",
+                           "hash_status":  "verified",
+                           "license":  "LGPL-2.1-or-later"
+                       },
+                       {
+                           "name":  "ffprobe.exe",
+                           "version":  "8.0.1-20260228",
+                           "path":  "ffmpeg/win-x64/ffprobe.exe",
+                           "sha256":  "08bae3206890afd5bd0a57f1e17c3d00527f464276f217f70d2625521f9adf52",
+                           "hash_status":  "verified",
+                           "license":  "LGPL-2.1-or-later"
+                       },
+                       {
+                           "name":  "THIRD_PARTY_NOTICES.txt",
+                           "version":  "0.0.1",
+                           "path":  "licenses/THIRD_PARTY_NOTICES.txt",
+                           "sha256":  "8ba632076cc22974bfd0e0c43bb9027c78e3eeee8513e5d4a2bf4c3fe4438d3b",
+                           "hash_status":  "verified",
+                           "license":  "notices"
+                       }
+                   ]
 }

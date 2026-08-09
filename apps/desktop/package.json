@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "main": "dist-electron/main/index.js",
+  "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
@@ -11,8 +11,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test --config=tests/playwright.config.ts",
-    "package:win": "pnpm build && electron-builder --win nsis --config electron-builder.yml",
+    "test:e2e": "pnpm build && playwright test --config=tests/playwright.config.ts",
+    "package:win": "node scripts/package-win.mjs",
     "package:verify": "node scripts/verify-package.mjs"
   },
   "dependencies": {
