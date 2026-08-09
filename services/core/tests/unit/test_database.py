@@ -40,7 +40,7 @@ def test_settings_and_admin_token_paths(tmp_path, monkeypatch):
         )
     )
     settings.prepare()
-    assert settings.database_path == tmp_path / "data" / "stage0.db"
+    assert settings.database_path == tmp_path / "data" / "app.db"
     monkeypatch.delenv("AIVS_ADMIN_TOKEN", raising=False)
     with pytest.raises(RuntimeError, match="AIVS_ADMIN_TOKEN"):
         admin_token_from_environment()

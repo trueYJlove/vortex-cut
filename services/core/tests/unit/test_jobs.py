@@ -21,6 +21,7 @@ def make_basic_service(tmp_path: Path) -> tuple[Database, JobService, Path]:
     db.initialize()
     source = tmp_path / "input.mp4"
     source.write_bytes(b"input")
+
     async def emit(_event):
         return None
 
@@ -136,9 +137,7 @@ async def test_job_run_success_and_input_change(tmp_path: Path, monkeypatch):
     await service._run(success["job_id"])
     detail = service.get(success["job_id"])
     assert detail and detail["status"] == "succeeded" and detail["artifacts"]
-    assert (
-        tmp_path / "jobs" / success["job_id"] / "artifacts" / "proxy.mp4"
-    ).is_file()
+    assert (tmp_path / "jobs" / success["job_id"] / "artifacts" / "proxy.mp4").is_file()
 
     changed = service.create(
         "proxy",

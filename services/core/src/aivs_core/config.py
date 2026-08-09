@@ -23,12 +23,14 @@ class Settings:
     def prepare(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         (self.data_dir / "jobs").mkdir(exist_ok=True)
+        (self.data_dir / "backups").mkdir(exist_ok=True)
+        (self.data_dir / "projects").mkdir(exist_ok=True)
         if self.runtime_dir:
             self.runtime_dir.mkdir(parents=True, exist_ok=True)
 
     @property
     def database_path(self) -> Path:
-        return self.data_dir / "stage0.db"
+        return self.data_dir / "app.db"
 
     @classmethod
     def from_args(cls, args: object) -> Settings:

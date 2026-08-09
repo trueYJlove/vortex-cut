@@ -1,17 +1,48 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { CoreHealth, FileGrant, Job, MediaInfo, GrantId, JobId, ArtifactId } from "@aivideo/contracts";
+import type {
+  Asset,
+  AssetAvailability,
+  AssetKind,
+  AssetPage,
+  AssetPresentationPage,
+  AssetPresentation,
+  CoreHealth,
+  FileGrant,
+  GrantId,
+  ImportedAsset,
+  Job,
+  JobId,
+  JobPage,
+  MediaInfo,
+  Project,
+  ProjectId,
+  ProjectPage,
+  ProjectStatus
+} from "@aivideo/contracts";
 
 export interface MediaSelection { grant: FileGrant; media: MediaInfo }
+export interface DesktopRuntime { protocol_version: 1; status: "ready" }
 
 export interface DesktopApi {
-  getRuntime: () => Promise<{ base_url: string; ui_token: string; protocol_version: 1 }>;
+  getRuntime: () => Promise<DesktopRuntime>;
   chooseMedia: () => Promise<MediaSelection | null>;
   probeMedia: (grantId: GrantId) => Promise<MediaInfo>;
-  createJob: (input: { media_id: MediaInfo["media_id"]; kind: "proxy" | "portrait_sample"; encoder_mode?: "auto" | "software"; start_us?: number; duration_us?: number; layout?: "blurred_background" }) => Promise<Job>;
+  listProjects: (params?: { status?: ProjectStatus; limit?: number; cursor?: string }) => Promise<ProjectPage>;
+  createProject: (input: { name: string; root_dir_name?: string }) => Promise<Project>;
+  getProject: (projectId: ProjectId) => Promise<Project>;
+  renameProject: (input: { project_id: ProjectId; name: string }) => Promise<Project>;
+  archiveProject: (projectId: ProjectId) => Promise<Project>;
+  reopenProject: (projectId: ProjectId) => Promise<Project>;
+  listAssets: (input: { project_id: ProjectId; availability?: AssetAvailability; limit?: number; cursor?: string }) => Promise<AssetPresentationPage>;
+  importAsset: (input: { project_id: ProjectId; kind?: AssetKind }) => Promise<ImportedAsset | null>;
+  refreshAsset: (assetId: string) => Promise<AssetPresentation>;
+  relocateAsset: (input: { asset_id: string }) => Promise<ImportedAsset | null>;
+  listJobs: (input: { project_id: ProjectId; status?: Job["status"]; limit?: number; cursor?: string }) => Promise<JobPage>;
+  createJob: (input: { project_id: ProjectId; media_id: MediaInfo["media_id"]; kind: "proxy" | "portrait_sample"; encoder_mode?: "auto" | "software"; start_us?: number; duration_us?: number; layout?: "blurred_background" }) => Promise<Job>;
   getJob: (jobId: JobId) => Promise<Job>;
   cancelJob: (jobId: JobId) => Promise<Job>;
-  openArtifact: (artifactId: ArtifactId) => Promise<void>;
-  openArtifactFolder: (artifactId: ArtifactId) => Promise<void>;
+  openArtifact: (artifactId: string) => Promise<void>;
+  openArtifactFolder: (artifactId: string) => Promise<void>;
   subscribeJob: (jobId: JobId, listener: (job: Job) => void) => () => void;
   diagnostics: () => Promise<CoreHealth>;
 }
@@ -20,6 +51,17 @@ const api: DesktopApi = {
   getRuntime: () => ipcRenderer.invoke("runtime:get"),
   chooseMedia: () => ipcRenderer.invoke("media:choose"),
   probeMedia: grantId => ipcRenderer.invoke("media:probe", grantId),
+  listProjects: params => ipcRenderer.invoke("project:list", params),
+  createProject: input => ipcRenderer.invoke("project:create", input),
+  getProject: projectId => ipcRenderer.invoke("project:get", projectId),
+  renameProject: input => ipcRenderer.invoke("project:rename", input),
+  archiveProject: projectId => ipcRenderer.invoke("project:archive", projectId),
+  reopenProject: projectId => ipcRenderer.invoke("project:reopen", projectId),
+  listAssets: input => ipcRenderer.invoke("asset:list", input),
+  importAsset: input => ipcRenderer.invoke("asset:import", input),
+  refreshAsset: assetId => ipcRenderer.invoke("asset:refresh", assetId),
+  relocateAsset: input => ipcRenderer.invoke("asset:relocate", input),
+  listJobs: input => ipcRenderer.invoke("job:list", input),
   createJob: input => ipcRenderer.invoke("job:create", input),
   getJob: jobId => ipcRenderer.invoke("job:get", jobId),
   cancelJob: jobId => ipcRenderer.invoke("job:cancel", jobId),

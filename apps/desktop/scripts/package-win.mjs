@@ -26,6 +26,7 @@ const run = (command, args) => new Promise((resolvePromise, reject) => {
   });
 });
 
+await run("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(workspaceRoot, "tools", "packaging", "build-sidecar.ps1")]);
 await run("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(workspaceRoot, "tools", "packaging", "bootstrap-windows.ps1"), "-PreflightOnly"]);
 await run(process.execPath, ["scripts/prepare-electron-builder.mjs"]);
 await run("pnpm", ["build"]);

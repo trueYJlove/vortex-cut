@@ -9,6 +9,7 @@ import { parseSidecarReadyLine, type SidecarReady } from "@aivideo/contracts";
 
 export interface SidecarLaunchOptions {
   executable: string;
+  executableArgs?: string[];
   resourcesPath: string;
   dataDir: string;
   runtimeDir: string;
@@ -42,6 +43,7 @@ export class SidecarSupervisor {
     const readyFile = join(this.options.runtimeDir, "ready.json");
     await unlink(readyFile).catch(() => undefined);
     const args = [
+      ...(this.options.executableArgs ?? []),
       "--host", "127.0.0.1", "--port", "0",
       "--parent-pid", String(process.pid), "--data-dir", this.options.dataDir,
       "--ffmpeg", this.options.ffmpegPath, "--ffprobe", this.options.ffprobePath,

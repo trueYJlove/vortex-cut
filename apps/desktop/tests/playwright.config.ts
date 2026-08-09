@@ -10,16 +10,12 @@ const executablePath = chromeCandidates.find(path => existsSync(path));
 
 export default defineConfig({
   testDir: "../e2e",
-  timeout: 30_000,
-  webServer: {
-    command: "node scripts/serve-renderer.mjs",
-    cwd: "..",
-    url: "http://127.0.0.1:5173",
-    reuseExistingServer: true,
-    timeout: 120_000
-  },
+  timeout: 120_000,
+  fullyParallel: false,
   use: {
-    viewport: { width: 1280, height: 900 },
-    launchOptions: executablePath ? { executablePath } : undefined
+    viewport: { width: 1440, height: 960 },
+    launchOptions: executablePath ? { executablePath } : undefined,
+    trace: "retain-on-failure",
+    screenshot: "only-on-failure"
   }
 });

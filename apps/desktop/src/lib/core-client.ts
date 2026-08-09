@@ -1,22 +1,107 @@
-import type { Artifact, ArtifactId, GrantId, Job, JobId, JobKind, MediaInfo } from "@aivideo/contracts";
+import {
+  API_PREFIX,
+  isApiErrorResponse,
+  isJobEvent,
+  parseAsset,
+  parseFileGrant,
+  parseJob,
+  parseProject,
+  type ApiError,
+  type Asset,
+  type AssetAvailability,
+  type AssetKind,
+  type Artifact,
+  type ArtifactId,
+  type FileGrant,
+  type GrantId,
+  type Job,
+  type JobId,
+  type JobKind,
+  type JobPage,
+  type MediaInfo,
+  type Project,
+  type ProjectId,
+  type ProjectPage,
+  type ProjectStatus,
+  type AssetPage
+} from "@aivideo/contracts";
+
+export class CoreApiError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly code: string,
+    message: string,
+    public readonly traceId?: string
+  ) {
+    super(message);
+    this.name = "CoreApiError";
+  }
+}
 
 function normalizeArtifact(value: Record<string, unknown>, jobId: JobId): Artifact {
   return {
-    artifact_id: (value.artifact_id ?? value.id) as ArtifactId,
+    artifact_id: String(value.artifact_id ?? value.id) as ArtifactId,
     job_id: jobId,
-    display_name: typeof value.display_name === "string" ? value.display_name : typeof value.kind === "string" ? value.kind + ".mp4" : "artifact.mp4",
+    display_name: typeof value.display_name === "string" ? value.display_name : `${String(value.kind ?? "artifact")}.mp4`,
     size_bytes: Number(value.size_bytes ?? 0),
     sha256: String(value.sha256 ?? ""),
     media_info: value.media_info as MediaInfo
   };
 }
 
-function normalizeJob(value: unknown): Job {
-  const raw = value as Record<string, unknown>;
-  const jobId = String(raw.job_id ?? raw.id) as JobId;
-  const artifacts = Array.isArray(raw.artifacts) ? raw.artifacts.map(item => normalizeArtifact(item as Record<string, unknown>, jobId)) : undefined;
-  return { ...raw, job_id: jobId, type: (raw.type ?? raw.kind) as JobKind, status: raw.status as Job["status"], stage: String(raw.stage ?? "queued"), progress: raw.progress == null ? null : Number(raw.progress), encoder: (raw.encoder ?? raw.encoder_used) as string | undefined, artifacts } as Job;
+function removeSensitiveFields(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(removeSensitiveFields);
+  if (!value || typeof value !== "object") return value;
+  const result: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (["path", "uri", "root_dir", "database_path", "admin_token", "ui_token", "token"].includes(key)) continue;
+    result[key] = removeSensitiveFields(item);
+  }
+  return result;
 }
+
+function normalizeProject(value: unknown): Project {
+  return parseProject(value);
+}
+
+function normalizeAsset(value: unknown): Asset {
+  return parseAsset(removeSensitiveFields(value));
+}
+
+export function normalizeJob(value: unknown): Job {
+  const raw = removeSensitiveFields(value) as Record<string, unknown>;
+  const jobId = String(raw.job_id ?? raw.id) as JobId;
+  const kind = (raw.kind ?? raw.type ?? "proxy") as JobKind;
+  const input = (raw.input && typeof raw.input === "object" ? raw.input : {}) as Record<string, unknown>;
+  const normalized: Job = {
+    ...raw,
+    job_id: jobId,
+    project_id: raw.project_id == null ? null : String(raw.project_id) as ProjectId,
+    kind,
+    type: kind,
+    status: raw.status as Job["status"],
+    stage: String(raw.stage ?? "queued"),
+    progress: raw.progress == null ? null : Number(raw.progress),
+    attempt: Number(raw.attempt ?? 1),
+    input: input as Job["input"],
+    error: raw.error == null ? null : raw.error as Job["error"],
+    created_at: String(raw.created_at ?? new Date(0).toISOString()),
+    updated_at: String(raw.updated_at ?? raw.created_at ?? new Date(0).toISOString()),
+    started_at: raw.started_at == null ? null : String(raw.started_at),
+    finished_at: raw.finished_at == null ? null : String(raw.finished_at),
+    encoder: (raw.encoder ?? raw.encoder_used) as string | null | undefined,
+    artifacts: Array.isArray(raw.artifacts) ? raw.artifacts.map(item => normalizeArtifact(item as Record<string, unknown>, jobId)) : []
+  };
+  return parseJob(normalized);
+}
+
+export interface ListParams {
+  limit?: number;
+  cursor?: string;
+}
+export interface ProjectListParams extends ListParams { status?: ProjectStatus; }
+export interface AssetListParams extends ListParams { availability?: AssetAvailability; }
+export interface JobListParams extends ListParams { status?: Job["status"]; }
 
 export interface CoreClientOptions {
   baseUrl: string;
@@ -27,50 +112,103 @@ export interface CoreClientOptions {
 }
 export type JobListener = (job: Job) => void;
 
+function query(params: object): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) if (value !== undefined) search.set(key, String(value));
+  const result = search.toString();
+  return result ? `?${result}` : "";
+}
+
 export class CoreClient {
   private readonly fetchImpl: typeof fetch;
   private readonly webSocketFactory: (url: string) => WebSocket;
   private readonly listeners = new Map<JobId, Set<JobListener>>();
   private readonly pollers = new Map<JobId, ReturnType<typeof setInterval>>();
+
   constructor(private readonly options: CoreClientOptions) {
-    // `window.fetch` requires `this === window`; storing the bare reference and
-    // calling it as a method later throws "Failed to execute 'fetch' on 'Window':
-    // Illegal invocation". Wrap it so it is always invoked as a plain call.
     this.fetchImpl = options.fetchImpl ?? ((input, init) => fetch(input, init));
     this.webSocketFactory = options.webSocketFactory ?? (url => new WebSocket(url));
   }
+
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
-    const response = await this.fetchImpl(this.options.baseUrl + path, { ...init, headers: { Authorization: "Bearer " + this.options.uiToken, ...(init.body ? { "Content-Type": "application/json" } : {}), ...init.headers } });
-    if (!response.ok) throw new Error("Core request failed: " + response.status);
-    return response.json() as Promise<T>;
+    const response = await this.fetchImpl(this.options.baseUrl + path, {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${this.options.uiToken}`,
+        ...(init.body ? { "Content-Type": "application/json" } : {}),
+        ...init.headers
+      }
+    });
+    let data: unknown = null;
+    try { data = await response.json(); } catch { /* empty error responses are handled below */ }
+    if (!response.ok) {
+      const apiError = isApiErrorResponse(data) ? data.error : undefined;
+      throw new CoreApiError(response.status, apiError?.code ?? statusCode(response.status), apiError?.message ?? `Core request failed: ${response.status}`, apiError?.trace_id);
+    }
+    return data as T;
   }
-  probe(grantId: GrantId): Promise<MediaInfo> { return this.request("/api/v1/media/probe", { method: "POST", body: JSON.stringify({ grant_id: grantId }) }); }
+
+  listProjects(params: ProjectListParams = {}): Promise<ProjectPage> {
+    return this.request<unknown>(`${API_PREFIX}/projects${query(params)}`).then(value => {
+      const page = value as ProjectPage;
+      return { items: page.items.map(normalizeProject), next_cursor: page.next_cursor ?? null };
+    });
+  }
+  createProject(name: string, root_dir_name?: string): Promise<Project> {
+    return this.request<unknown>(`${API_PREFIX}/projects`, { method: "POST", body: JSON.stringify({ name, ...(root_dir_name ? { root_dir_name } : {}) }) }).then(normalizeProject);
+  }
+  getProject(projectId: ProjectId): Promise<Project> { return this.request<unknown>(`${API_PREFIX}/projects/${projectId}`).then(normalizeProject); }
+  renameProject(projectId: ProjectId, name: string): Promise<Project> { return this.request<unknown>(`${API_PREFIX}/projects/${projectId}`, { method: "PATCH", body: JSON.stringify({ name }) }).then(normalizeProject); }
+  archiveProject(projectId: ProjectId): Promise<Project> { return this.request<unknown>(`${API_PREFIX}/projects/${projectId}/archive`, { method: "POST" }).then(normalizeProject); }
+  reopenProject(projectId: ProjectId): Promise<Project> { return this.request<unknown>(`${API_PREFIX}/projects/${projectId}/reopen`, { method: "POST" }).then(normalizeProject); }
+
+  listAssets(projectId: ProjectId, params: AssetListParams = {}): Promise<AssetPage> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${projectId}/assets${query(params)}`).then(value => {
+      const page = value as AssetPage;
+      return { items: page.items.map(normalizeAsset), next_cursor: page.next_cursor ?? null };
+    });
+  }
+  importAsset(projectId: ProjectId, grantId: GrantId, kind?: AssetKind): Promise<Asset> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${projectId}/assets`, { method: "POST", body: JSON.stringify({ grant_id: grantId, ...(kind ? { kind } : {}) }) }).then(normalizeAsset);
+  }
+  getAsset(assetId: string): Promise<Asset> { return this.request<unknown>(`${API_PREFIX}/assets/${assetId}`).then(normalizeAsset); }
+  refreshAsset(assetId: string): Promise<Asset> { return this.request<unknown>(`${API_PREFIX}/assets/${assetId}/refresh`, { method: "POST" }).then(normalizeAsset); }
+  relocateAsset(assetId: string, grantId: GrantId): Promise<Asset> { return this.request<unknown>(`${API_PREFIX}/assets/${assetId}/relocate`, { method: "POST", body: JSON.stringify({ grant_id: grantId }) }).then(normalizeAsset); }
+
+  listJobs(projectId: ProjectId, params: JobListParams = {}): Promise<JobPage> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${projectId}/jobs${query(params)}`).then(value => {
+      const page = value as JobPage;
+      return { items: page.items.map(normalizeJob), next_cursor: page.next_cursor ?? null };
+    });
+  }
+  probe(grantId: GrantId): Promise<MediaInfo> { return this.request(`${API_PREFIX}/media/probe`, { method: "POST", body: JSON.stringify({ grant_id: grantId }) }); }
   createJob(mediaId: string, kind: JobKind, options: { encoder_mode?: "auto" | "software"; start_us?: number; duration_us?: number; layout?: "blurred_background" } = {}): Promise<Job> {
-    const path = kind === "proxy" ? "/api/v1/jobs/proxy" : "/api/v1/jobs/vertical-sample";
+    const path = kind === "proxy" ? `${API_PREFIX}/jobs/proxy` : `${API_PREFIX}/jobs/vertical-sample`;
     const body = kind === "proxy"
       ? { media_id: mediaId, encoder_mode: options.encoder_mode ?? "auto" }
       : { media_id: mediaId, encoder_mode: options.encoder_mode ?? "auto", start_us: options.start_us ?? 0, duration_us: options.duration_us ?? 10_000_000, layout: options.layout ?? "blurred_background" };
     return this.request<unknown>(path, { method: "POST", body: JSON.stringify(body) }).then(normalizeJob);
   }
-  getJob(jobId: JobId): Promise<Job> { return this.request<unknown>("/api/v1/jobs/" + jobId).then(normalizeJob); }
-  cancelJob(jobId: JobId): Promise<Job> { return this.request<unknown>("/api/v1/jobs/" + jobId + "/cancel", { method: "POST" }).then(normalizeJob); }
+  getJob(jobId: JobId): Promise<Job> { return this.request<unknown>(`${API_PREFIX}/jobs/${jobId}`).then(normalizeJob); }
+  cancelJob(jobId: JobId): Promise<Job> { return this.request<unknown>(`${API_PREFIX}/jobs/${jobId}/cancel`, { method: "POST" }).then(normalizeJob); }
+
   subscribe(jobId: JobId, listener: JobListener): () => void {
     let set = this.listeners.get(jobId);
     if (!set) { set = new Set(); this.listeners.set(jobId, set); }
     set.add(listener);
-    const ws = this.webSocketFactory(this.options.baseUrl.replace(/^http/, "ws") + "/api/v1/events");
+    const ws = this.webSocketFactory(this.options.baseUrl.replace(/^http/, "ws") + `${API_PREFIX}/events`);
     let authenticated = false;
     const poll = () => {
       if (this.pollers.has(jobId)) return;
-      const interval = setInterval(() => { void this.getJob(jobId).then(job => this.emit(jobId, job)); }, this.options.pollIntervalMs ?? 1000);
+      const interval = setInterval(() => { void this.getJob(jobId).then(job => this.emit(jobId, job)).catch(() => undefined); }, this.options.pollIntervalMs ?? 1000);
       this.pollers.set(jobId, interval);
     };
     ws.onopen = () => ws.send(JSON.stringify({ type: "authenticate", token: this.options.uiToken }));
     ws.onmessage = event => {
       try {
-        const message = JSON.parse(String(event.data)) as { type?: string; job?: Job; payload?: { job_id?: string } };
-        if (message.type === "authenticated") { authenticated = true; return; }
-        if (message.type === "job.updated" && (message.job?.job_id === jobId || message.payload?.job_id === jobId)) void this.getJob(jobId).then(job => this.emit(jobId, job));
+        const message: unknown = JSON.parse(String(event.data));
+        if (isRecordEvent(message) && message.type === "authenticated") { authenticated = true; return; }
+        if (isJobEvent(message) && (message.job?.job_id === jobId || message.payload?.job_id === jobId)) void this.getJob(jobId).then(job => this.emit(jobId, job)).catch(() => undefined);
       } catch { /* polling remains the source of truth after malformed frames */ }
     };
     ws.onerror = poll;
@@ -88,4 +226,18 @@ export class CoreClient {
   }
   private emit(jobId: JobId, job: Job): void { for (const listener of this.listeners.get(jobId) ?? []) listener(job); }
 }
+
+function isRecordEvent(value: unknown): value is { type: string } {
+  return Boolean(value) && typeof value === "object" && typeof (value as { type?: unknown }).type === "string";
+}
+function statusCode(status: number): string {
+  if (status === 400) return "VALIDATION_ERROR";
+  if (status === 401) return "UNAUTHORIZED";
+  if (status === 403) return "FORBIDDEN";
+  if (status === 404) return "NOT_FOUND";
+  if (status === 409) return "CONFLICT";
+  return "INTERNAL_ERROR";
+}
+
+export function normalizeFileGrant(value: unknown): FileGrant { return parseFileGrant(value); }
 export function createDesktopCoreClient(runtime: { base_url: string; ui_token: string }): CoreClient { return new CoreClient({ baseUrl: runtime.base_url, uiToken: runtime.ui_token }); }

@@ -1,13 +1,9 @@
 import { basename, isAbsolute, normalize, resolve } from "node:path";
 import { open } from "node:fs/promises";
 import type { CoreAdminClient } from "./core-admin-client.js";
+import { parseFileGrant, type FileGrant } from "@aivideo/contracts";
 
-export interface RendererFileGrant {
-  grant_id: string;
-  display_name: string;
-  size_bytes: number;
-  modified_at: string;
-}
+export type RendererFileGrant = FileGrant;
 
 export async function registerFileGrant(core: CoreAdminClient, inputPath: string): Promise<RendererFileGrant> {
   if (!isAbsolute(inputPath)) throw new Error("Only absolute file paths can be registered");
@@ -16,7 +12,7 @@ export async function registerFileGrant(core: CoreAdminClient, inputPath: string
   try {
     const stat = await file.stat();
     if (!stat.isFile()) throw new Error("Only regular files can be registered");
-    return await core.registerFile(resolved) as RendererFileGrant;
+    return parseFileGrant(await core.registerFile(resolved));
   } finally {
     await file.close();
   }

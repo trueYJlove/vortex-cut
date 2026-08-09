@@ -118,23 +118,22 @@ def test_core_api_error_paths_and_websocket_rejection(tmp_path: Path, monkeypatc
             json={"path": str(tmp_path / "missing.mp4")},
         )
         assert missing.status_code == 400
-        assert missing.json()["detail"]["code"] == "MEDIA_NOT_FOUND"
+        assert missing.json()["error"]["code"] == "MEDIA_NOT_FOUND"
         directory = client.post(
             "/api/v1/internal/file-grants", headers=admin, json={"path": str(tmp_path)}
         )
         assert directory.status_code == 400
-        assert directory.json()["detail"]["code"] == "MEDIA_UNSUPPORTED"
-        assert client.post(
-            "/api/v1/media/probe", headers=ui, json={"grant_id": "unknown"}
-        ).status_code == 404
+        assert directory.json()["error"]["code"] == "MEDIA_UNSUPPORTED"
+        assert (
+            client.post("/api/v1/media/probe", headers=ui, json={"grant_id": "unknown"}).status_code
+            == 404
+        )
         grant = client.post(
             "/api/v1/internal/file-grants", headers=admin, json={"path": str(media)}
         ).json()
-        probe = client.post(
-            "/api/v1/media/probe", headers=ui, json={"grant_id": grant["grant_id"]}
-        )
+        probe = client.post("/api/v1/media/probe", headers=ui, json={"grant_id": grant["grant_id"]})
         assert probe.status_code == 400
-        assert probe.json()["detail"]["code"] == "MEDIA_UNSUPPORTED"
+        assert probe.json()["error"]["code"] == "MEDIA_UNSUPPORTED"
         assert client.get("/api/v1/jobs/unknown", headers=ui).status_code == 404
         assert client.post("/api/v1/jobs/unknown/cancel", headers=ui).status_code == 404
         assert (

@@ -1,94 +1,196 @@
 import { useEffect, useMemo, useState, type ReactElement } from "react";
-import type { Artifact, FileGrant, Job, MediaInfo } from "@aivideo/contracts";
-import { createDesktopCoreClient, type CoreClient } from "../lib/core-client.js";
+import type { Asset, AssetAvailability, AssetKind, AssetPresentation, Job, Project, ProjectId } from "@aivideo/contracts";
 
-const activeStates = ["queued", "running", "cancelling"];
+const assetKinds: AssetKind[] = ["video", "audio", "image", "text"];
+const availabilityLabels: Record<AssetAvailability, string> = {
+  available: "可用",
+  missing: "缺失",
+  changed: "已变更",
+  unsupported: "不支持"
+};
+const projectStatusLabels: Record<Project["status"], string> = { active: "活动", archived: "已归档", missing: "目录缺失" };
 
-function formatDuration(us: number): string {
-  const seconds = Math.round(us / 1000000);
-  return Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0");
+function errorMessage(cause: unknown): string {
+  if (cause && typeof cause === "object") {
+    const value = cause as { code?: unknown; message?: unknown };
+    if (typeof value.code === "string" && typeof value.message === "string") return `[${value.code}] ${value.message}`;
+    if (typeof value.message === "string") return value.message;
+  }
+  return cause instanceof Error ? cause.message : "操作失败";
+}
+
+function formatBytes(value: number): string {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  if (value < 1024 * 1024 * 1024) return `${(value / 1048576).toFixed(1)} MB`;
+  return `${(value / 1073741824).toFixed(1)} GB`;
+}
+
+function jobLabel(job: Job): string {
+  if (job.kind === "asset_probe") return "素材探测";
+  if (job.kind === "asset_fingerprint") return "素材指纹";
+  if (job.kind === "proxy") return "代理素材";
+  return job.kind;
 }
 
 export function App(): ReactElement {
-  const [client, setClient] = useState<CoreClient>();
-  const [status, setStatus] = useState("Connecting to Core");
-  const [grant, setGrant] = useState<FileGrant | null>(null);
-  const [media, setMedia] = useState<MediaInfo | null>(null);
-  const [job, setJob] = useState<Job | null>(null);
-  const [artifact, setArtifact] = useState<Artifact | null>(null);
+  const [status, setStatus] = useState("连接中");
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<ProjectId>();
+  const [assets, setAssets] = useState<AssetPresentation[]>([]);
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [projectName, setProjectName] = useState("");
+  const [rename, setRename] = useState("");
+  const [availability, setAvailability] = useState<AssetAvailability | "all">("all");
   const [error, setError] = useState<string>();
+  const [busy, setBusy] = useState<string>();
+
+  const selectedProject = useMemo(() => projects.find(project => project.project_id === selectedProjectId), [projects, selectedProjectId]);
+  const canEdit = selectedProject?.status === "active";
+  const hasInterruptedJob = jobs.some(job => job.status === "interrupted");
+
+  async function loadProjects(selectFirst = false): Promise<void> {
+    const page = await window.desktop.listProjects({ limit: 100 });
+    setProjects(page.items);
+    if (selectFirst || !selectedProjectId || !page.items.some(project => project.project_id === selectedProjectId)) {
+      const next = page.items.find(project => project.status === "active") ?? page.items[0];
+      setSelectedProjectId(next?.project_id);
+      setRename(next?.name ?? "");
+    }
+  }
+
+  async function loadWorkspace(projectId = selectedProjectId): Promise<void> {
+    if (!projectId) { setAssets([]); setJobs([]); return; }
+    const [assetPage, jobPage] = await Promise.all([
+      window.desktop.listAssets({ project_id: projectId, ...(availability !== "all" ? { availability } : {}), limit: 100 }),
+      window.desktop.listJobs({ project_id: projectId, limit: 100 })
+    ]);
+    setAssets(assetPage.items);
+    setJobs(jobPage.items);
+  }
 
   useEffect(() => {
     let mounted = true;
-    void window.desktop.getRuntime().then(runtime => {
-      if (mounted) { setClient(createDesktopCoreClient(runtime)); setStatus("Core connected"); }
-    }).catch(() => {
-      if (mounted) { setStatus("Core connection failed"); setError("Unable to establish the Core session"); }
-    });
+    void window.desktop.getRuntime().then(() => {
+      if (!mounted) return;
+      setStatus("Core 已连接");
+      return loadProjects(true);
+    }).catch(cause => { if (mounted) { setStatus("Core 连接失败"); setError(errorMessage(cause)); } });
     return () => { mounted = false; };
   }, []);
 
   useEffect(() => {
-    if (!client || !job || !activeStates.includes(job.status)) return;
-    return client.subscribe(job.job_id, setJob);
-  }, [client, job?.job_id]);
+    setRename(selectedProject?.name ?? "");
+    void loadWorkspace().catch(cause => setError(errorMessage(cause)));
+  }, [selectedProjectId, availability]);
 
   useEffect(() => {
-    if (job?.status === "succeeded" && job.artifacts?.[0]) setArtifact(job.artifacts[0]);
-  }, [job?.status, job?.artifacts]);
+    if (!selectedProjectId) return;
+    const timer = setInterval(() => { void window.desktop.listJobs({ project_id: selectedProjectId, limit: 100 }).then(page => setJobs(page.items)).catch(() => undefined); }, 1500);
+    return () => clearInterval(timer);
+  }, [selectedProjectId]);
 
-  const stream = useMemo(() => media?.video_streams[0], [media]);
-  const jobType = job?.type ?? job?.kind;
-  const canCreate = Boolean(client && media && !job);
-
-  async function chooseMedia(): Promise<void> {
+  async function run(label: string, action: () => Promise<void>): Promise<void> {
     setError(undefined);
-    try {
-      const selected = await window.desktop.chooseMedia();
-      if (!selected) return;
-      setGrant(selected.grant);
-      setMedia(selected.media);
-      setJob(null);
-      setArtifact(null);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Media probe failed");
-    }
+    setBusy(label);
+    try { await action(); } catch (cause) { setError(errorMessage(cause)); }
+    finally { setBusy(undefined); }
   }
 
-  async function createJob(kind: "proxy" | "portrait_sample"): Promise<void> {
-    if (!client || !media) return;
-    setError(undefined);
-    try {
-      setJob(await client.createJob(media.media_id, kind, {
-        encoder_mode: "auto",
-        start_us: 0,
-        duration_us: kind === "portrait_sample" ? 10000000 : undefined,
-        layout: "blurred_background"
-      }));
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Job creation failed");
-    }
+  async function createProject(): Promise<void> {
+    const name = projectName.trim();
+    if (!name) return;
+    await run("create-project", async () => {
+      const created = await window.desktop.createProject({ name });
+      setProjectName("");
+      await loadProjects();
+      setSelectedProjectId(created.project_id);
+    });
   }
 
-  async function cancelJob(): Promise<void> {
-    if (!client || !job) return;
-    try { setJob(await client.cancelJob(job.job_id)); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : "Cancellation failed"); }
+  async function renameProject(): Promise<void> {
+    if (!selectedProjectId || !rename.trim()) return;
+    await run("rename-project", async () => {
+      const updated = await window.desktop.renameProject({ project_id: selectedProjectId, name: rename.trim() });
+      setProjects(current => current.map(project => project.project_id === updated.project_id ? updated : project));
+    });
+  }
+
+  async function archiveOrReopen(): Promise<void> {
+    if (!selectedProject) return;
+    await run("project-status", async () => {
+      const updated = selectedProject.status === "archived"
+        ? await window.desktop.reopenProject(selectedProject.project_id)
+        : await window.desktop.archiveProject(selectedProject.project_id);
+      setProjects(current => current.map(project => project.project_id === updated.project_id ? updated : project));
+    });
+  }
+
+  async function importAsset(kind: AssetKind): Promise<void> {
+    if (!selectedProjectId || !canEdit) return;
+    await run(`import-${kind}`, async () => {
+      const result = await window.desktop.importAsset({ project_id: selectedProjectId, kind });
+      if (!result) return;
+      setAssets(current => [{ asset: result.asset, media_url: result.media_url }, ...current.filter(item => item.asset.asset_id !== result.asset.asset_id)]);
+    });
+  }
+
+  async function refreshAsset(asset: Asset): Promise<void> {
+    await run(`refresh-${asset.asset_id}`, async () => {
+      const result = await window.desktop.refreshAsset(asset.asset_id);
+      setAssets(current => current.map(item => item.asset.asset_id === result.asset.asset_id ? result : item));
+    });
+  }
+
+  async function relocateAsset(asset: Asset): Promise<void> {
+    await run(`relocate-${asset.asset_id}`, async () => {
+      const result = await window.desktop.relocateAsset({ asset_id: asset.asset_id });
+      if (result) setAssets(current => current.map(item => item.asset.asset_id === result.asset.asset_id ? { asset: result.asset, media_url: result.media_url } : item));
+    });
+  }
+
+  async function cancelJob(job: Job): Promise<void> {
+    await run(`cancel-${job.job_id}`, async () => {
+      const updated = await window.desktop.cancelJob(job.job_id);
+      setJobs(current => current.map(item => item.job_id === updated.job_id ? updated : item));
+    });
   }
 
   return <main className="workspace">
     <header className="topbar">
-      <div><span className="brand-mark">AI</span><strong>AIVideo Studio</strong><span className="stage-label">Stage 0</span></div>
+      <div className="brand"><span className="brand-mark">AI</span><strong>AIVideo Studio</strong><span className="stage-label">Stage 1A</span></div>
       <div className="status"><span className="status-dot" />{status}</div>
     </header>
     <section className="content">
-      <div className="intro"><div><p className="eyebrow">LOCAL MEDIA PIPELINE</p><h1>Stage 0 verification</h1><p className="subhead">Grant a source file, probe it, create a Core job, and validate its artifact.</p></div><div className="protocol"><span>Protocol</span><strong>v1</strong><span>127.0.0.1</span></div></div>
-      <div className="grid">
-        <section className="panel"><div className="panel-heading"><h2>Media input</h2><span className="step">01</span></div><button className="dropzone" onClick={() => void chooseMedia()}><span className="drop-icon">+</span><strong>{grant ? grant.display_name : "Choose a video file"}</strong><small>{grant ? String((grant.size_bytes / 1048576).toFixed(1)) + " MB - granted" : "The path stays in the main process"}</small></button>{media && <div className="facts"><div><span>Duration</span><strong>{formatDuration(media.duration_us)}</strong></div><div><span>Frame</span><strong>{stream?.width} x {stream?.height}</strong></div><div><span>Rate</span><strong>{stream?.avg_frame_rate_num && stream?.avg_frame_rate_den ? String((stream.avg_frame_rate_num / stream.avg_frame_rate_den).toFixed(2)) + " fps" : "unknown"}</strong></div><div><span>Audio</span><strong>{media.audio_streams.length ? media.audio_streams[0].codec : "none"}</strong></div></div>}</section>
-        <section className="panel"><div className="panel-heading"><h2>Generate sample</h2><span className="step">02</span></div><p className="panel-copy">Portrait output is 1080 x 1920, blurred_background, CFR 30 fps, H.264/AAC.</p><div className="actions"><button disabled={!canCreate} onClick={() => void createJob("proxy")}>Generate proxy</button><button className="primary" disabled={!canCreate} onClick={() => void createJob("portrait_sample")}>Generate portrait sample</button></div><div className="output-spec"><strong>1080 x 1920</strong><small>CFR 30 fps - H.264 + AAC</small></div></section>
-        <section className="panel"><div className="panel-heading"><h2>Job status</h2><span className="step">03</span></div>{job ? <><div className="job-row"><div><strong>{jobType === "portrait_sample" || jobType === "vertical_sample" ? "Portrait sample" : "Proxy"}</strong><span className={"job-status " + job.status}>{job.status}</span></div>{activeStates.includes(job.status) && <button className="quiet" onClick={() => void cancelJob()}>Cancel</button>}</div><div className="progress"><span style={{ width: String(Math.max(0, (job.progress ?? 0) * 100)) + "%" }} /></div><div className="job-meta"><span>{job.stage}</span><span>{job.progress === null ? "processing" : String(Math.round(job.progress * 100)) + "%"}</span></div>{job.encoder && <div className="encoder">Encoder <strong>{job.encoder}</strong>{job.fallback_reason && <small>Fallback: {job.fallback_reason}</small>}</div>}</> : <div className="empty"><span>o</span><p>Choose media and create a job<br /><small>WebSocket events with polling fallback</small></p></div>}</section>
-        <section className="panel"><div className="panel-heading"><h2>Artifact validation</h2><span className="step">04</span></div>{artifact ? <><div className="artifact-title"><span className="file-icon">MP4</span><div><strong>Validated artifact</strong><small>{String((artifact.size_bytes / 1048576).toFixed(2))} MB - SHA-256</small></div></div><div className="hash">{artifact.sha256}</div><div className="actions"><button onClick={() => void window.desktop.openArtifact(artifact.artifact_id)}>Open file</button><button onClick={() => void window.desktop.openArtifactFolder(artifact.artifact_id)}>Open folder</button></div></> : <div className="empty"><span>OK</span><p>Successful jobs show FFprobe and SHA-256 output</p></div>}</section>
-      </div>{error && <div className="error-banner">{error}</div>}
+      <div className="intro">
+        <div><p className="eyebrow">PROJECT WORKSPACE</p><h1>素材工作区</h1><p className="subhead">项目、外部素材和可恢复任务集中管理。</p></div>
+        <div className="protocol"><span>契约</span><strong>stage1a-v1</strong></div>
+      </div>
+      <div className="workspace-grid">
+        <aside className="sidebar panel">
+          <div className="panel-heading"><h2>项目</h2><span className="count">{projects.length}</span></div>
+          <div className="project-create"><input aria-label="项目名称" placeholder="新项目名称" value={projectName} onChange={event => setProjectName(event.target.value)} onKeyDown={event => { if (event.key === "Enter") void createProject(); }} /><button className="primary" disabled={!projectName.trim() || busy !== undefined} onClick={() => void createProject()}>创建</button></div>
+          <div className="project-list">{projects.map(project => <button key={project.project_id} className={`project-item ${project.project_id === selectedProjectId ? "selected" : ""}`} onClick={() => setSelectedProjectId(project.project_id)}><span><strong>{project.name}</strong><small>{projectStatusLabels[project.status]}</small></span><span className={`status-chip ${project.status}`}>{project.status === "active" ? "" : "!"}</span></button>)}{projects.length === 0 && <div className="empty compact"><span>+</span><p>创建第一个项目</p></div>}</div>
+        </aside>
+        <section className="main-column">
+          {selectedProject ? <>
+            <section className="panel project-header">
+              <div><p className="eyebrow">当前项目</p><h2>{selectedProject.name}</h2><span className={`project-state ${selectedProject.status}`}>{projectStatusLabels[selectedProject.status]}</span></div>
+              <div className="project-actions"><input aria-label="重命名项目" value={rename} onChange={event => setRename(event.target.value)} /><button disabled={!rename.trim() || rename.trim() === selectedProject.name || busy !== undefined} onClick={() => void renameProject()}>重命名</button><button className="quiet" disabled={busy !== undefined} onClick={() => void archiveOrReopen()}>{selectedProject.status === "archived" ? "重新打开" : "归档"}</button></div>
+            </section>
+            <section className="panel">
+              <div className="panel-heading"><div><h2>素材库</h2><small>{assets.length} 项外部素材</small></div><div className="toolbar"><select aria-label="可用性筛选" value={availability} onChange={event => setAvailability(event.target.value as AssetAvailability | "all")}><option value="all">全部状态</option>{Object.keys(availabilityLabels).map(value => <option key={value} value={value}>{availabilityLabels[value as AssetAvailability]}</option>)}</select>{assetKinds.map(kind => <button key={kind} disabled={!canEdit || busy !== undefined} onClick={() => void importAsset(kind)}>导入{kind}</button>)}</div></div>
+              <div className="asset-table"><div className="table-head"><span>名称</span><span>类型</span><span>状态</span><span>大小</span><span>操作</span></div>{assets.map(({ asset, media_url }) => <div className="asset-row" key={asset.asset_id}><div className="asset-name"><span className={`kind-icon ${asset.kind}`}>{asset.kind.slice(0, 1).toUpperCase()}</span><div><strong>{asset.display_name}</strong><small>{media_url ?? "受限媒体 URL 不可用"}</small></div></div><span>{asset.kind}</span><span className={`availability ${asset.availability}`}>{availabilityLabels[asset.availability]}</span><span>{formatBytes(asset.size_bytes)}</span><div className="row-actions"><button disabled={busy !== undefined} onClick={() => void refreshAsset(asset)}>刷新</button><button disabled={busy !== undefined} onClick={() => void relocateAsset(asset)}>重新定位</button></div></div>)}{assets.length === 0 && <div className="empty"><span>○</span><p>素材库为空</p></div>}</div>
+            </section>
+            <section className="panel jobs-panel">
+              <div className="panel-heading"><div><h2>任务</h2><small>持久化状态自动刷新</small></div><span className="count">{jobs.length}</span></div>
+              {hasInterruptedJob && <div className="recovery-banner"><strong>检测到可恢复任务</strong><span>Core 重启前有任务未完成，状态已恢复为 interrupted。</span></div>}
+              <div className="job-list">{jobs.map(job => <div className="job-row" key={job.job_id}><div className="job-main"><strong>{jobLabel(job)}</strong><span className={`job-status ${job.status}`}>{job.status}</span><small>{job.stage} · {job.progress === null ? "处理中" : `${Math.round(job.progress * 100)}%`}</small></div>{["queued", "running", "cancelling"].includes(job.status) && <button className="quiet" disabled={busy !== undefined} onClick={() => void cancelJob(job)}>取消</button>}</div>)}{jobs.length === 0 && <div className="empty compact"><span>○</span><p>暂无任务</p></div>}</div>
+            </section>
+          </> : <section className="panel empty-state"><span>＋</span><h2>创建一个项目开始工作</h2><p>项目状态和外部素材会在本地 Core 中持久化。</p></section>}
+        </section>
+      </div>
+      {error && <div className="error-banner" role="alert">{error}</div>}
     </section>
   </main>;
 }

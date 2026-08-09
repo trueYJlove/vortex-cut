@@ -81,7 +81,7 @@ class FFprobe:
         self.executable = executable
         self.timeout = timeout
 
-    async def probe(self, path: Path) -> dict[str, Any]:
+    async def probe(self, path: Path, require_video: bool = True) -> dict[str, Any]:
         try:
             result = await run_process(
                 self.executable,
@@ -107,6 +107,6 @@ class FFprobe:
         except json.JSONDecodeError as exc:
             raise RuntimeError("MEDIA_UNSUPPORTED") from exc
         normalized = normalize_probe(payload, path)
-        if not normalized["video_streams"]:
+        if require_video and not normalized["video_streams"]:
             raise RuntimeError("MEDIA_HAS_NO_VIDEO")
         return normalized

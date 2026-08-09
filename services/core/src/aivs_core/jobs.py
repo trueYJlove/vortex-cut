@@ -54,6 +54,7 @@ class JobService:
         start_us: int = 0,
         duration_us: int = 10_000_000,
         layout: str = "blurred_background",
+        project_id: str | None = None,
     ) -> dict[str, Any]:
         if kind == "vertical_sample" and layout != "blurred_background":
             raise ValueError("LAYOUT_UNSUPPORTED")
@@ -70,12 +71,25 @@ class JobService:
         }
         with self.db.connection() as db:
             db.execute(
-                "INSERT INTO jobs (id,type,status,input_json,encoder_requested,"
-                "created_at,updated_at) "
-                "VALUES (?,?,?,?,?,?,?)",
-                (job_id, kind, "queued", json_dumps(payload), encoder, now, now),
+                "INSERT INTO jobs (id,project_id,kind,type,status,stage,progress,input_json,"
+                "encoder_requested,attempt,created_at,updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    job_id,
+                    project_id,
+                    kind,
+                    kind,
+                    "queued",
+                    "queued",
+                    0,
+                    json_dumps(payload),
+                    encoder,
+                    1,
+                    now,
+                    now,
+                ),
             )
-        return {"job_id": job_id, "status": "queued", "created_at": now}
+        return self.get(job_id) or {"job_id": job_id, "status": "queued", "created_at": now}
 
     def get(self, job_id: str) -> dict[str, Any] | None:
         with self.db.connection() as db:
@@ -89,6 +103,8 @@ class JobService:
             ).fetchall()
         result = dict(row)
         result["job_id"] = result.pop("id")
+        result["kind"] = result.get("kind") or result.get("type")
+        result.pop("type", None)
         result["input"] = json_loads(result.pop("input_json"))
         result["input"].pop("path", None)
         result["artifacts"] = [dict(artifact) for artifact in artifacts]
@@ -104,12 +120,45 @@ class JobService:
             result.pop("error_message", None)
             result["error"] = None
         result.pop("cancel_requested", None)
+        result.pop("encoder_requested", None)
+        result["encoder"] = result.pop("encoder_used", None)
+        result.pop("fallback_reason", None)
+        result.pop("worker_pid", None)
+        result["stage"] = result.get("stage") or result["status"]
+        result["attempt"] = int(result.get("attempt") or 1)
         result["progress"] = float(result["progress"])
         return result
 
-    def list(self) -> list[dict[str, Any]]:
+    def list(
+        self,
+        project_id: str | None = None,
+        status: str | None = None,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> list[dict[str, Any]]:
+        try:
+            offset = int(cursor or 0)
+        except ValueError as exc:
+            raise ValueError("VALIDATION_ERROR") from exc
+        if offset < 0 or not 1 <= limit <= 100:
+            raise ValueError("VALIDATION_ERROR")
+        where: list[str] = []
+        values: list[Any] = []
+        if project_id is not None:
+            where.append("project_id=?")
+            values.append(project_id)
+        if status is not None:
+            where.append("status=?")
+            values.append(status)
+        clause = f" WHERE {' AND '.join(where)}" if where else ""
+        values.extend([limit, offset])
         with self.db.connection() as db:
-            ids = [row[0] for row in db.execute("SELECT id FROM jobs ORDER BY created_at DESC")]
+            ids = [
+                row[0]
+                for row in db.execute(
+                    f"SELECT id FROM jobs{clause} ORDER BY created_at DESC LIMIT ? OFFSET ?", values
+                )
+            ]
         return [job for job_id in ids if (job := self.get(job_id)) is not None]
 
     async def cancel(self, job_id: str) -> dict[str, Any] | None:
@@ -178,19 +227,30 @@ class JobService:
             row = db.execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
         if not row:
             return
-        self._transition_job(job_id, row[0], "running", stage="encoding", started_at=now)
+        self._transition_job(job_id, row[0], "running", stage="running", started_at=now)
         with self.db.connection() as db:
             row = db.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
         if not row:
             return
         await self._emit_update(self.get(job_id))
+        if row["kind"] in {"asset_probe", "asset_fingerprint"}:
+            self._transition_job(
+                job_id,
+                "running",
+                "succeeded",
+                stage="completed",
+                progress=1,
+                finished_at=utc_now(),
+            )
+            await self._emit_update(self.get(job_id))
+            return
         payload = json_loads(row["input_json"])
         work = self.data_dir / "jobs" / job_id / "work"
         artifacts = self.data_dir / "jobs" / job_id / "artifacts"
         work.mkdir(parents=True, exist_ok=True)
         artifacts.mkdir(parents=True, exist_ok=True)
-        input_path = Path(payload["path"])
         try:
+            input_path = Path(payload["path"])
             stat = input_path.stat()
             if stat.st_size != payload["size_bytes"] or stat.st_mtime_ns != payload["modified_at"]:
                 raise RuntimeError("MEDIA_CHANGED")
@@ -207,7 +267,7 @@ class JobService:
             args = build_render_args(
                 input_path,
                 output,
-                row["type"],
+                row["kind"],
                 encoder,
                 payload["start_us"],
                 payload["duration_us"],
@@ -234,7 +294,7 @@ class JobService:
                     (
                         artifact_id,
                         job_id,
-                        row["type"],
+                        row["kind"],
                         str(final),
                         result["size_bytes"],
                         result["sha256"],
