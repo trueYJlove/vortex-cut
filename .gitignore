@@ -15,3 +15,16 @@ packages/*/dist/
 .aivideo/
 test-assets/generated/
 dist/
+
+# Local build, packaging and dependency staging outputs
+.deps-download/
+build/
+package/
+resources/core/
+resources/ffmpeg/win-x64/
+services/core/build/
+*.tgz
+
+# Local desktop and integration test state
+test-results/
+apps/desktop/test-results/
