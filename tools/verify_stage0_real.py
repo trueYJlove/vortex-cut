@@ -140,6 +140,19 @@ def main() -> None:
         assert any(item.get("asset") == "corrupt.mp4" and item.get("probe") == "error" for item in records)
         if media is None:
             raise RuntimeError("landscape fixture probe failed")
+        # The short fixture is useful for normal output assertions but can
+        # finish before the cancellation request reaches Core. Create an
+        # isolated long fixture for the cancellation contract so the test
+        # observes a real running FFmpeg process deterministically.
+        cancel_fixture = DATA / "cancel-long.mp4"
+        subprocess.run([str(ffmpeg), "-y", "-stream_loop", "-1", "-i",
+                        str(assets / "cfr-landscape-av.mp4"), "-t", "45",
+                        "-c", "copy", str(cancel_fixture)],
+                       check=True, capture_output=True, timeout=30)
+        cancel_grant = request(base, "/api/v1/internal/file-grants", TOKEN, "POST",
+                               {"path": str(cancel_fixture)})
+        cancel_media = request(base, "/api/v1/media/probe", session["token"], "POST",
+                               {"grant_id": cancel_grant["grant_id"]})
         for kind, path in (("proxy", "/api/v1/jobs/proxy"), ("vertical_sample", "/api/v1/jobs/vertical-sample")):
             body = {"media_id": media["media_id"], "encoder_mode": "software", "start_us": 0,
                 "duration_us": 3_000_000, "layout": "blurred_background"}
@@ -150,7 +163,7 @@ def main() -> None:
             checkpoint(report, report_data, f"job_{kind}_{state['status']}")
             if state["status"] != "succeeded":
                 raise RuntimeError(f"{kind} failed: {state}")
-        cancel_job = request(base, "/api/v1/jobs/proxy", session["token"], "POST", {"media_id": media["media_id"], "encoder_mode": "software"})
+        cancel_job = request(base, "/api/v1/jobs/proxy", session["token"], "POST", {"media_id": cancel_media["media_id"], "encoder_mode": "software", "duration_us": 25_000_000})
         running = wait_status(base, session["token"], cancel_job["job_id"], {"running", "succeeded", "failed"}, 30)
         if running["status"] != "running":
             raise RuntimeError(f"cancel scenario did not reach running: {running}")

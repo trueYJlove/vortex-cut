@@ -13,7 +13,7 @@
 
 ## 已通过
 
-- Python Core：`uv run pytest services/core/tests -q`，19 passed；`uv run ruff check services/core/src services/core/tests` 和 `uv run pyright services/core/src` 均通过。
+- Python Core：`uv run pytest services/core/tests -q`，19 passed；`uv run ruff check services/core/src services/core/tests` 和 `uv run pyright services/core/src` 均通过。按第 20 节覆盖率门槛执行 `uv run --extra dev pytest services/core/tests --cov=services/core/src --cov-fail-under=80` 时为 78.10%，因此覆盖率验收未通过。
 - 桌面端：`pnpm run ci` 通过，包含 lint、TypeScript typecheck、Vitest 和生产构建。
 - 真实媒体链路：FFprobe 探测成功；真实竖屏输出为 H.264/AAC、`1080x1920`、CFR 30fps；软件编码回退为 `libopenh264`，背景模糊使用 `gblur`。
 - Renderer E2E：`pnpm --filter @aivideo/desktop test:e2e` 当前为页面级 smoke/mock，覆盖页面加载、`Generate portrait sample` 和 `Artifact validation`；不等同于真实导入、转码、取消和产物 E2E。
@@ -58,4 +58,12 @@
 - 真实验收发现并修复 proxy API 对短素材默认 10 秒导致 `MEDIA_RANGE_INVALID` 的缺陷；现在未指定时长时使用媒体剩余时长，并增加 API 回归测试。
 - 修复后重新构建 Sidecar 和 Windows 安装包：`apps/desktop/release/AIVideoStudio-Setup-0.0.1-x64.exe`，190,976,122 bytes，SHA-256 `FEB7AB3F22DF631C678E9A9A37199AAA6C2053FDB9A4C8C3C765F8471679307F`。
 
-阶段 0 的桌面端、Core、Sidecar、真实 FFmpeg 链路、安装包和本机安装生命周期已形成可运行基线。由于真实媒体矩阵、桌面真实 E2E、干净 Windows、硬件编码器和完整兼容矩阵尚未完成，当前结论为：**阶段 0 集成验收进行中，不能宣称阶段 0 已完成。**
+## 最新复核证据（2026-08-09，当前构建）
+
+- `python tools/verify_stage0_real.py`：退出码 0，`%TEMP%\aivideo-stage0-real-py\report.json` 状态为 `passed`。报告覆盖 health/ready、CFR 有音轨、无音轨、奇数尺寸、损坏素材、proxy、竖屏样片、H.264/AAC、`1080x1920`、CFR 30fps、`yuv420p`、产物规格及 SHA-256；取消任务前记录 FFmpeg PID `19676`，取消后 5 秒内残留 PID 为空。取消场景使用临时 45 秒素材，未修改产品取消语义。
+- `pnpm run verify:desktop:real`：退出码 0。真实打包 Electron 窗口启动成功，页面显示 `Core connected`，选择真实 `cfr-landscape-av.mp4` 后完成 `Generate proxy`，任务状态为 `succeeded`，并通过 `Validated artifact`；测试结束后 Electron/Core 进程已回收。
+- 当前安装包文件大小为 190,977,489 bytes，SHA-256 为 `C2E052559CF47AFE2475D7545713BFAB7A238F78493F01B82847B5BDD2ACFDCA`；以该哈希为当前构建证据，历史哈希仅保留作历史记录。
+- `pnpm run package:verify` 和 `pnpm run ci` 均通过；`uv run --extra dev pytest services/core/tests -q` 为 19 passed，但覆盖率门槛命令结果为 78.10%（低于 80%），该项未通过。
+- `resources/manifests/components.json` 中 `aivs-core` 的 SHA-256 已更新为当前 Sidecar 构建值 `577c0afc94171878d76a8763ce9f5ec69d37740711b749ba07843034396bc59a`。
+
+阶段 0 的桌面端、Core、Sidecar、真实 FFmpeg 链路、真实打包 Electron E2E、安装包和本机安装生命周期已形成可运行基线。当前仍未满足第 20 节全部验收条件：Python 核心覆盖率为 78.10%，只有一台开发机无法完成无开发环境/干净 Windows 书面验收；NVIDIA/AMD/Intel 硬件编码器、VFR、中文路径等兼容矩阵尚未完整验证；且 `package:win` 仍依赖构建前置资源准备而非完全从空 checkout 自举。因此当前结论为：**阶段 0 本机集成验收通过，阶段 0 全量验收未通过，暂不应将阶段 0 标记为 complete。**
