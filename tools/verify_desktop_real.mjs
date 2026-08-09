@@ -1,6 +1,5 @@
 import { spawn } from "node:child_process";
 import { request as httpRequest } from "node:http";
-import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { fileURLToPath } from "node:url";
@@ -38,14 +37,6 @@ const electronProcess = spawn(electron, ["--remote-debugging-port=" + port, "--u
   stdio: "ignore",
   windowsHide: true,
 });
-electronProcess.on("error", error => console.error("ELECTRON_PROCESS_ERROR", error.message));
-electronProcess.on("exit", (code, signal) => console.error("ELECTRON_PROCESS_EXIT", code, signal));
-if (process.env.AIVS_E2E_OBSERVE_ONLY === "1") {
-  await new Promise(resolvePromise => setTimeout(resolvePromise, 20_000));
-  console.log(JSON.stringify({ status: electronProcess.exitCode === null ? "alive" : "exited", exitCode: electronProcess.exitCode }));
-  if (!electronProcess.killed) electronProcess.kill();
-  process.exit(0);
-}
 
 try {
   let version;
@@ -57,22 +48,10 @@ try {
   if (!version?.webSocketDebuggerUrl) throw new Error("Electron CDP endpoint timeout");
   const { chromium } = await import(pathToFileURL(playwright).href);
   const browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
-  if (process.env.AIVS_E2E_CONNECT_ONLY === "1") {
-    console.error("CDP_CONNECTED_ONLY");
-    await new Promise(resolvePromise => setTimeout(resolvePromise, 20_000));
-    console.error("CDP_CONNECT_ONLY_STATUS", electronProcess.exitCode === null ? "alive" : `exited:${electronProcess.exitCode}`);
-    process.exit(0);
-  }
   const context = browser.contexts()[0];
   let page = context?.pages()[0];
   while (!page && Date.now() < deadline) { await sleep(250); page = context?.pages()[0]; }
   if (!page) throw new Error("Electron renderer page not found");
-  console.error("ELECTRON_PAGES", JSON.stringify(context.pages().map(item => ({ url: item.url() }))));
-  page.on("console", message => console.error("RENDERER_CONSOLE", message.type(), message.text()));
-  page.on("pageerror", error => console.error("RENDERER_ERROR", error.message));
-  page.on("close", () => console.error("RENDERER_PAGE_CLOSE"));
-  browser.on("disconnected", () => console.error("CDP_DISCONNECTED"));
-  console.error("RENDERER_BODY", (await page.locator("body").innerText().catch(error => String(error))).slice(0, 500));
   await page.getByRole("heading", { name: "Stage 0 verification" }).waitFor();
   await page.getByText("Core connected").waitFor({ timeout: 30_000 });
   await page.getByRole("button", { name: /Choose a video file/ }).click();

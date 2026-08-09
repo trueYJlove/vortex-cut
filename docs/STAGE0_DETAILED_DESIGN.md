@@ -78,14 +78,14 @@ sequenceDiagram
 
 | 范围 | 选择 | 说明 |
 |---|---|---|
-| Node 开发环境 | Node.js 24 LTS | 使用根目录版本文件固定 |
+| Node 开发环境 | 使用开发机已有 Node.js | 能运行项目命令即可；Node.js 24 LTS 作为可重复构建推荐版本 |
 | 包管理 | pnpm 10 workspace | 单仓库、严格锁文件 |
 | 桌面构建 | Electron + electron-vite | 主进程、preload、Renderer 一体开发 |
 | 前端 | React 19 + TypeScript strict | 阶段 1 可直接延续 |
 | 状态/请求 | TanStack Query + 轻量本地状态 | 服务状态来自 API，不复制任务事实 |
 | 前端测试 | Vitest + Testing Library | 单元与组件测试 |
 | 桌面端到端 | Playwright Electron | 启动、导入、任务和退出验证 |
-| Python | CPython 3.12 | 生态成熟、便于打包 |
+| Python | 使用开发机已有 Python | 能运行 `uv`、测试和 Sidecar 构建即可；CPython 3.12 作为可重复构建推荐版本 |
 | Python 依赖 | uv | 生成并严格使用 `uv.lock` |
 | API | FastAPI + Pydantic v2 | OpenAPI 契约和异步子进程 |
 | 数据 | SQLite + SQLAlchemy 2 + Alembic | 阶段 0 只保存任务与产物 |
@@ -95,7 +95,9 @@ sequenceDiagram
 | 安装包 | electron-builder + NSIS | Windows x64、按用户安装 |
 | 媒体 | FFmpeg + FFprobe | 通过受控参数数组调用 |
 
-具体依赖补丁版本由首次脚手架实现时选取当日稳定版并写入锁文件；后续构建禁止隐式升级。`packageManager`、Node 版本文件、`uv.lock` 和 Electron 版本必须提交。
+开发调试优先复用本机已有的 Node.js、Python、pnpm/uv 和 FFmpeg；只有本机缺少必要工具时才安装或下载。开发机版本只要能通过项目检查和测试即可，不因未达到推荐版本而阻塞本地调试。
+
+发布构建另行使用锁文件和推荐版本复现；具体依赖补丁版本写入锁文件，发布构建禁止隐式升级。`packageManager`、Node 版本文件、`uv.lock` 和 Electron 版本必须提交。
 
 ### 4.2 不采用的方案
 
@@ -918,7 +920,7 @@ artifactName: AIVideoStudio-Setup-${version}-x64.exe
 
 ### 20.1 功能验收
 
-- [ ] 安装包可在无开发环境的 Windows x64 机器安装和启动。
+- [ ] 安装包可在无开发环境的 Windows x64 机器安装和启动（必须在独立干净环境验证；本机开发环境结果不计入此项）。
 - [ ] 用户不需要配置 Python、FFmpeg、数据库、端口或环境变量。
 - [ ] Electron 能在 20 秒内启动并认证 Sidecar；失败时提供可理解错误和日志入口。
 - [ ] Renderer 不能调用管理接口，也不能向 Core 提交任意文件路径。
@@ -942,7 +944,7 @@ artifactName: AIVideoStudio-Setup-${version}-x64.exe
 - [ ] 所有外部进程调用均使用参数数组且有超时/取消策略。
 - [ ] 日志和错误响应不包含令牌、授权头和未经脱敏的用户路径。
 - [ ] 安装包内组件版本、哈希和许可证清单完整。
-- [ ] 在至少一台干净 Windows 机器完成书面验收记录。
+- [ ] 在至少一台干净 Windows 机器完成书面验收记录（没有独立干净环境时必须明确标记为未验证，不得用本机替代）。
 
 ### 20.3 性能观察项
 

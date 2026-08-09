@@ -4,6 +4,13 @@
 - 验收角色：LiuWei（架构师）
 - 设计基线：`ARCHITECTURE.md`、`docs/STAGE0_DETAILED_DESIGN.md`
 
+## 环境与证据边界
+
+- 开发调试阶段优先使用本机已有的 Node.js、Python、pnpm/uv 和 FFmpeg；只有本机缺少必要工具时才安装或下载。开发机版本只要能够完成项目命令、测试和调试即可。
+- 发布构建仍使用仓库锁文件和推荐版本复现；安装包运行不依赖用户机器上的 Node.js、Python 或系统 FFmpeg。
+- 当前只有这一台开发机，因此已执行的安装、启动、Sidecar 握手、Core/FFmpeg 链路和卸载只能记为“本机集成验证”。它们不能证明“无开发环境 Windows x64 机器”或“干净 Windows 机器”验收。
+- “干净 Windows 机器”必须在 Windows Sandbox、虚拟机、重置后的独立系统或另一台没有开发工具的 Windows x64 机器上执行，并保存安装、启动、覆盖安装/升级、卸载和数据保留记录。新建普通用户、关闭终端或在本机卸载部分工具均不等价于干净机。
+
 ## 已通过
 
 - Python Core：`uv run pytest services/core/tests -q`，19 passed；`uv run ruff check services/core/src services/core/tests` 和 `uv run pyright services/core/src` 均通过。
@@ -22,7 +29,7 @@
 
 ## 未完成或不应宣称已通过
 
-- 尚未在一台真正干净、没有开发工具和运行时的独立 Windows x64 机器完成安装、覆盖安装、升级和卸载书面验收。当前结果是本机安装器集成验收。
+- **干净机验收未执行**：当前只有本机，不能提供无开发环境 Windows x64 或干净 Windows 机器的证据。已完成的只是本机安装器集成验收。
 - 尚未验证 NVIDIA、AMD、Intel 硬件编码器；当前只验证了软件 `libopenh264` 路径。
 - 已形成打包版独立运行目录下 Electron 完成 Sidecar 认证并写入 `Core UI session ready` 的稳定记录；仍需干净机复核。
 - 尚未完成 VFR、无音轨和中文路径四类媒体的逐项真实输出验收；`pnpm run verify:stage0:real` 已提供可重复入口，但当前工具会话无法可靠回传其子进程输出，需在普通 PowerShell 中执行并保存 JSON 报告。

@@ -1,6 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { join, resolve } from "node:path";
-import { appendFileSync, mkdirSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { CoreAdminClient } from "./core-admin-client.js";
 import { registerFileGrant } from "./file-grants.js";
@@ -17,10 +16,8 @@ let logPath = "";
 // window creation or sidecar startup.
 const hasSingleInstanceLock = !app.isPackaged || app.requestSingleInstanceLock();
 let resolveRuntime: ((value: NonNullable<typeof runtime>) => void) | undefined;
-let rejectRuntime: ((reason?: unknown) => void) | undefined;
-const runtimeReady = new Promise<NonNullable<typeof runtime>>((resolve, reject) => {
+const runtimeReady = new Promise<NonNullable<typeof runtime>>(resolve => {
   resolveRuntime = resolve;
-  rejectRuntime = reject;
 });
 
 if (app.isPackaged && !hasSingleInstanceLock) {
@@ -37,21 +34,9 @@ app.on("second-instance", () => {
 process.on("uncaughtException", error => {
   void appendLog(logPath || join(app.getPath("userData"), "logs", "desktop.log"), `uncaughtException: ${error.stack ?? error.message}`);
 });
-process.on("unhandledRejection", (reason, promise) => {
-  // A rejected promise must never take down the whole desktop process. Log it
-  // (best-effort) and let the event loop continue. Previously an unhandled
-  // rejection inside the whenReady() async callback caused Electron to exit
-  // the main process cleanly with code 0 and no diagnostics — the source of
-  // the "window flashes then app disappears" crashes.
+process.on("unhandledRejection", reason => {
   void appendLog(logPath || join(app.getPath("userData"), "logs", "desktop.log"), `unhandledRejection: ${reason instanceof Error ? reason.stack ?? reason.message : String(reason)}`).catch(() => undefined);
 });
-process.on("exit", code => {
-  const path = logPath || join(app.getPath("userData"), "logs", "desktop.log");
-  try { mkdirSync(join(path, ".."), { recursive: true }); appendFileSync(path, `${new Date().toISOString()} process exit code=${code}\n`, "utf8"); } catch { /* process is exiting */ }
-});
-process.on("SIGTERM", () => { void appendLog(logPath, "process SIGTERM"); });
-process.on("SIGINT", () => { void appendLog(logPath, "process SIGINT"); });
-
 function requireCore(): CoreAdminClient {
   if (!core) throw new Error("Core is not ready");
   return core;
@@ -236,9 +221,6 @@ app.whenReady().then(async () => {
     app.exit(1);
   }
 }).catch(error => {
-  // Never let an unexpected failure in the startup callback silently kill the
-  // main process (which was observed as an orderly code 0 exit with no
-  // diagnostics). Surface it in the window and the log instead.
   const message = error instanceof Error ? error.stack ?? error.message : String(error);
   void appendLog(logPath || join(app.getPath("userData"), "logs", "desktop.log"), `startup failure: ${message}`).catch(() => undefined);
   if (windowRef && !windowRef.isDestroyed()) {
@@ -257,7 +239,6 @@ app.on("window-all-closed", () => {
 app.on("quit", (_event, code) => { void appendLog(logPath, `app quit code=${code}`); });
 app.on("before-quit", () => { void appendLog(logPath, "before-quit event"); });
 app.on("will-quit", () => { void appendLog(logPath, "will-quit event"); });
-app.on("child-process-gone", (_event, details) => { void appendLog(logPath, `child-process-gone type=${details.type} reason=${details.reason} exit=${details.exitCode} name=${details.name}`); });
 let shuttingDown = false;
 app.on("before-quit", event => {
   if (shuttingDown) return;
