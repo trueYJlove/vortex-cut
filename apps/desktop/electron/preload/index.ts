@@ -14,10 +14,19 @@ import type {
   JobId,
   JobPage,
   MediaInfo,
+  ModelDetail,
+  ModelDownloadPage,
+  ModelDownloadResponse,
+  ModelDownloadStatusResponse,
+  ModelId,
   Project,
   ProjectId,
   ProjectPage,
-  ProjectStatus
+  ProjectStatus,
+  Transcript,
+  TranscriptId,
+  TranscriptPage,
+  TranscriptionCreateResponse
 } from "@aivideo/contracts";
 
 export interface MediaSelection { grant: FileGrant; media: MediaInfo }
@@ -41,6 +50,14 @@ export interface DesktopApi {
   createJob: (input: { project_id: ProjectId; media_id: MediaInfo["media_id"]; kind: "proxy" | "portrait_sample"; encoder_mode?: "auto" | "software"; start_us?: number; duration_us?: number; layout?: "blurred_background" }) => Promise<Job>;
   getJob: (jobId: JobId) => Promise<Job>;
   cancelJob: (jobId: JobId) => Promise<Job>;
+  listModels: (params?: { status?: string; limit?: number; cursor?: string }) => Promise<ModelDownloadPage>;
+  getModel: (modelId: ModelId) => Promise<ModelDetail>;
+  downloadModel: (input: { model_id: ModelId; license_acceptance: string | null }) => Promise<ModelDownloadResponse>;
+  getModelDownload: (modelId: ModelId) => Promise<ModelDownloadStatusResponse>;
+  cancelModelDownload: (modelId: ModelId) => Promise<ModelDownloadResponse>;
+  createTranscription: (input: { asset_id: string; model_id: ModelId; language: string; word_timestamps: boolean; license_acceptance: string | null }) => Promise<TranscriptionCreateResponse>;
+  listTranscripts: (assetId: string) => Promise<TranscriptPage>;
+  getTranscript: (transcriptId: TranscriptId) => Promise<Transcript>;
   openArtifact: (artifactId: string) => Promise<void>;
   openArtifactFolder: (artifactId: string) => Promise<void>;
   subscribeJob: (jobId: JobId, listener: (job: Job) => void) => () => void;
@@ -65,6 +82,14 @@ const api: DesktopApi = {
   createJob: input => ipcRenderer.invoke("job:create", input),
   getJob: jobId => ipcRenderer.invoke("job:get", jobId),
   cancelJob: jobId => ipcRenderer.invoke("job:cancel", jobId),
+  listModels: params => ipcRenderer.invoke("model:list", params),
+  getModel: modelId => ipcRenderer.invoke("model:get", modelId),
+  downloadModel: input => ipcRenderer.invoke("model:download", input),
+  getModelDownload: modelId => ipcRenderer.invoke("model:download-status", modelId),
+  cancelModelDownload: modelId => ipcRenderer.invoke("model:cancel", modelId),
+  createTranscription: input => ipcRenderer.invoke("transcription:create", input),
+  listTranscripts: assetId => ipcRenderer.invoke("transcription:list", assetId),
+  getTranscript: transcriptId => ipcRenderer.invoke("transcript:get", transcriptId),
   openArtifact: artifactId => ipcRenderer.invoke("artifact:open", artifactId),
   openArtifactFolder: artifactId => ipcRenderer.invoke("artifact:folder", artifactId),
   subscribeJob: (jobId, listener) => {

@@ -20,6 +20,7 @@ class MigrationError(RuntimeError):
 
 
 V1_VERSION = "v1"
+V2_VERSION = "v2"
 V1_SQL = """
 CREATE TABLE IF NOT EXISTS media_inputs (
   id TEXT PRIMARY KEY, path TEXT NOT NULL, display_name TEXT NOT NULL,
@@ -98,7 +99,58 @@ CREATE TABLE IF NOT EXISTS artifacts (
 CREATE INDEX IF NOT EXISTS idx_jobs_queue ON jobs(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_assets_project ON assets(project_id, created_at);
 """
-MIGRATIONS: dict[str, str] = {V1_VERSION: V1_SQL}
+V2_SQL = """
+CREATE TABLE IF NOT EXISTS model_installations (
+  model_id TEXT PRIMARY KEY,
+  provider TEXT NOT NULL,
+  revision TEXT NOT NULL,
+  status TEXT NOT NULL,
+  install_dir TEXT NOT NULL,
+  expected_bytes INTEGER NOT NULL,
+  installed_bytes INTEGER NOT NULL,
+  manifest_sha256 TEXT NOT NULL,
+  license_id TEXT NOT NULL,
+  last_error TEXT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS transcripts (
+  id TEXT PRIMARY KEY,
+  asset_id TEXT NOT NULL REFERENCES assets(id),
+  status TEXT NOT NULL,
+  language TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  model_id TEXT NOT NULL,
+  model_revision TEXT NOT NULL,
+  source_fingerprint TEXT NOT NULL,
+  duration_us INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS transcript_segments (
+  id TEXT PRIMARY KEY,
+  transcript_id TEXT NOT NULL REFERENCES transcripts(id) ON DELETE CASCADE,
+  ordinal INTEGER NOT NULL,
+  start_us INTEGER NOT NULL,
+  end_us INTEGER NOT NULL,
+  text TEXT NOT NULL,
+  confidence REAL NULL
+);
+CREATE TABLE IF NOT EXISTS transcript_words (
+  id TEXT PRIMARY KEY,
+  segment_id TEXT NOT NULL REFERENCES transcript_segments(id) ON DELETE CASCADE,
+  ordinal INTEGER NOT NULL,
+  start_us INTEGER NOT NULL,
+  end_us INTEGER NOT NULL,
+  text TEXT NOT NULL,
+  confidence REAL NULL
+);
+CREATE INDEX IF NOT EXISTS idx_transcripts_asset ON transcripts(asset_id, updated_at);
+CREATE INDEX IF NOT EXISTS idx_transcript_segments_transcript
+  ON transcript_segments(transcript_id, ordinal);
+CREATE INDEX IF NOT EXISTS idx_transcript_words_segment
+  ON transcript_words(segment_id, ordinal);
+"""
+MIGRATIONS: dict[str, str] = {V1_VERSION: V1_SQL, V2_VERSION: V2_SQL}
 
 
 class Database:
@@ -143,6 +195,7 @@ class Database:
                 try:
                     db.execute("BEGIN")
                     self._apply_v1_compatibility(db)
+                    self._apply_v2_compatibility(db)
                     for statement in _statements(sql):
                         db.execute(statement)
                     db.execute(
@@ -199,12 +252,31 @@ class Database:
         if "kind" in columns:
             db.execute("UPDATE jobs SET kind=COALESCE(kind,type)")
 
+    @staticmethod
+    def _apply_v2_compatibility(db: sqlite3.Connection) -> None:
+        tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "jobs" not in tables:
+            return
+        columns = {row[1] for row in db.execute("PRAGMA table_info(jobs)")}
+        additions = {
+            "asset_id": "TEXT REFERENCES assets(id)",
+            "model_id": "TEXT",
+            "model_revision": "TEXT",
+            "input_fingerprint": "TEXT",
+            "resource_class": "TEXT",
+            "result_json": "TEXT",
+        }
+        for name, definition in additions.items():
+            if name not in columns:
+                db.execute(f"ALTER TABLE jobs ADD COLUMN {name} {definition}")
+
     def recover_interrupted(self) -> int:
         now = utc_now()
         with self.connection() as db:
             cursor = db.execute(
                 "UPDATE jobs SET status='interrupted', worker_pid=NULL, "
-                "error_code='JOB_INTERRUPTED', error_message='Core 重启前任务未完成', "
+                "stage='interrupted', error_code='JOB_INTERRUPTED', "
+                "error_message='Core 重启前任务未完成', "
                 "finished_at=?, updated_at=? "
                 "WHERE status IN ('running','cancelling')",
                 (now, now),

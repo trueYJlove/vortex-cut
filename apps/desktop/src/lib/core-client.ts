@@ -4,8 +4,12 @@ import {
   isJobEvent,
   parseAsset,
   parseFileGrant,
+  parseModelDetail,
+  parseModelSummary,
   parseJob,
   parseProject,
+  parseTranscript,
+  parseTranscriptSummary,
   type ApiError,
   type Asset,
   type AssetAvailability,
@@ -18,12 +22,22 @@ import {
   type JobId,
   type JobKind,
   type JobPage,
+  type ModelDetail,
+  type ModelDownloadPage,
+  type ModelDownloadResponse,
+  type ModelDownloadStatusResponse,
+  type ModelId,
+  type ModelSummary,
   type MediaInfo,
   type Project,
   type ProjectId,
   type ProjectPage,
   type ProjectStatus,
-  type AssetPage
+  type AssetPage,
+  type Transcript,
+  type TranscriptionCreateInput,
+  type TranscriptPage,
+  type TranscriptionCreateResponse
 } from "@aivideo/contracts";
 
 export class CoreApiError extends Error {
@@ -54,7 +68,7 @@ function removeSensitiveFields(value: unknown): unknown {
   if (!value || typeof value !== "object") return value;
   const result: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) {
-    if (["path", "uri", "root_dir", "database_path", "admin_token", "ui_token", "token"].includes(key)) continue;
+    if (["path", "uri", "root_dir", "database_path", "admin_token", "ui_token", "token", "installed_path", "install_dir", "source_file"].includes(key)) continue;
     result[key] = removeSensitiveFields(item);
   }
   return result;
@@ -77,12 +91,16 @@ export function normalizeJob(value: unknown): Job {
     ...raw,
     job_id: jobId,
     project_id: raw.project_id == null ? null : String(raw.project_id) as ProjectId,
+    asset_id: raw.asset_id == null ? (input.asset_id == null ? null : String(input.asset_id) as Asset["asset_id"]) : String(raw.asset_id) as Asset["asset_id"],
     kind,
     type: kind,
     status: raw.status as Job["status"],
     stage: String(raw.stage ?? "queued"),
     progress: raw.progress == null ? null : Number(raw.progress),
     attempt: Number(raw.attempt ?? 1),
+    model_id: raw.model_id == null ? null : String(raw.model_id) as ModelId,
+    model_revision: raw.model_revision == null ? null : String(raw.model_revision),
+    input_fingerprint: raw.input_fingerprint == null ? null : String(raw.input_fingerprint),
     input: input as Job["input"],
     error: raw.error == null ? null : raw.error as Job["error"],
     created_at: String(raw.created_at ?? new Date(0).toISOString()),
@@ -102,6 +120,7 @@ export interface ListParams {
 export interface ProjectListParams extends ListParams { status?: ProjectStatus; }
 export interface AssetListParams extends ListParams { availability?: AssetAvailability; }
 export interface JobListParams extends ListParams { status?: Job["status"]; }
+export interface ModelListParams extends ListParams { status?: ModelSummary["status"]; }
 
 export interface CoreClientOptions {
   baseUrl: string;
@@ -191,6 +210,53 @@ export class CoreClient {
   }
   getJob(jobId: JobId): Promise<Job> { return this.request<unknown>(`${API_PREFIX}/jobs/${jobId}`).then(normalizeJob); }
   cancelJob(jobId: JobId): Promise<Job> { return this.request<unknown>(`${API_PREFIX}/jobs/${jobId}/cancel`, { method: "POST" }).then(normalizeJob); }
+
+  listModels(params: ModelListParams = {}): Promise<ModelDownloadPage> {
+    return this.request<unknown>(`${API_PREFIX}/models${query(params)}`).then(value => {
+      const page = value as { items: unknown[]; next_cursor?: string | null };
+      return { items: page.items.map(item => parseModelSummary(removeSensitiveFields(item))), next_cursor: page.next_cursor ?? null };
+    });
+  }
+  getModel(modelId: ModelId): Promise<ModelDetail> {
+    return this.request<unknown>(`${API_PREFIX}/models/${encodeURIComponent(modelId)}`).then(value => parseModelDetail(removeSensitiveFields(value)));
+  }
+  downloadModel(modelId: ModelId, licenseAcceptance: string | null): Promise<ModelDownloadResponse> {
+    return this.request<unknown>(`${API_PREFIX}/models/${encodeURIComponent(modelId)}/download`, {
+      method: "POST", body: JSON.stringify({ license_acceptance: licenseAcceptance })
+    }).then(value => {
+      const result = value as { model: unknown; job: unknown };
+      return { model: parseModelDetail(removeSensitiveFields(result.model)), job: normalizeJob(result.job) };
+    });
+  }
+  getModelDownload(modelId: ModelId): Promise<ModelDownloadStatusResponse> {
+    return this.request<unknown>(`${API_PREFIX}/models/${encodeURIComponent(modelId)}/download`).then(value => {
+      const result = value as { model: unknown; job: unknown | null };
+      return { model: parseModelDetail(removeSensitiveFields(result.model)), job: result.job === null ? null : normalizeJob(result.job) };
+    });
+  }
+  cancelModelDownload(modelId: ModelId): Promise<ModelDownloadResponse> {
+    return this.request<unknown>(`${API_PREFIX}/models/${encodeURIComponent(modelId)}/cancel`, { method: "POST" }).then(value => {
+      const result = value as { model: unknown; job: unknown };
+      return { model: parseModelDetail(removeSensitiveFields(result.model)), job: normalizeJob(result.job) };
+    });
+  }
+  createTranscription(assetId: Asset["asset_id"], input: TranscriptionCreateInput): Promise<TranscriptionCreateResponse> {
+    return this.request<unknown>(`${API_PREFIX}/assets/${encodeURIComponent(assetId)}/transcription`, {
+      method: "POST", body: JSON.stringify(input)
+    }).then(value => {
+      const result = value as { job: unknown; transcript: unknown | null };
+      return { job: normalizeJob(result.job), transcript: result.transcript === null ? null : parseTranscript(removeSensitiveFields(result.transcript)) };
+    });
+  }
+  listTranscripts(assetId: Asset["asset_id"]): Promise<TranscriptPage> {
+    return this.request<unknown>(`${API_PREFIX}/assets/${encodeURIComponent(assetId)}/transcription`).then(value => {
+      const page = value as { items: unknown[]; next_cursor?: string | null };
+      return { items: page.items.map(item => parseTranscriptSummary(removeSensitiveFields(item))), next_cursor: page.next_cursor ?? null };
+    });
+  }
+  getTranscript(transcriptId: string): Promise<Transcript> {
+    return this.request<unknown>(`${API_PREFIX}/transcriptions/${encodeURIComponent(transcriptId)}`).then(value => parseTranscript(removeSensitiveFields(value)));
+  }
 
   subscribe(jobId: JobId, listener: JobListener): () => void {
     let set = this.listeners.get(jobId);

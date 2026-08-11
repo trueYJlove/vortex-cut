@@ -41,10 +41,12 @@ class ProjectAssetService:
         db: Database,
         data_dir: Path,
         probe: Callable[..., Awaitable[dict[str, Any]]],
+        transcript_stale: Callable[[str, str | None], None] | None = None,
     ) -> None:
         self.db = db
         self.data_dir = data_dir
         self.probe = probe
+        self.transcript_stale = transcript_stale
 
     def create_project(self, name: str, root_dir_name: str | None = None) -> dict[str, Any]:
         project_name = _project_name(name)
@@ -82,7 +84,7 @@ class ProjectAssetService:
         self, status: str | None = None, limit: int = 50, cursor: str | None = None
     ) -> tuple[list[dict[str, Any]], str | None]:
         if status is not None and status not in PROJECT_STATUSES:
-            raise DomainError("VALIDATION_ERROR", "项目状态无效")
+            raise DomainError("VALIDATION_ERROR", "状态筛选条件不合法")
         offset = _cursor_offset(cursor)
         query = "SELECT * FROM projects"
         values: list[Any] = []
@@ -136,7 +138,7 @@ class ProjectAssetService:
     ) -> tuple[list[dict[str, Any]], str | None]:
         self._require_project(project_id)
         if availability is not None and availability not in ASSET_AVAILABILITIES:
-            raise DomainError("VALIDATION_ERROR", "素材可用性无效")
+            raise DomainError("VALIDATION_ERROR", "可用性筛选条件不合法")
         offset = _cursor_offset(cursor)
         query = "SELECT * FROM assets WHERE project_id=?"
         values: list[Any] = [project_id]
@@ -161,7 +163,7 @@ class ProjectAssetService:
     ) -> dict[str, Any]:
         project = self._require_project_row(project_id)
         if project["status"] == "archived":
-            raise DomainError("PROJECT_ARCHIVED", "归档项目不能导入新素材")
+            raise DomainError("PROJECT_ARCHIVED", "项目已归档，无法导入素材")
         path = _grant_path(grant)
         kind = _asset_kind(path, requested_kind)
         fingerprint = sha256_file(path)
@@ -171,7 +173,7 @@ class ProjectAssetService:
                 (project_id, fingerprint),
             ).fetchone()
         if duplicate:
-            raise DomainError("ASSET_DUPLICATE", "项目中已存在相同指纹的素材")
+            raise DomainError("ASSET_DUPLICATE", "素材已存在于项目中")
         availability = "available"
         try:
             media_info = await self._media_info(path, kind)
@@ -218,14 +220,18 @@ class ProjectAssetService:
         row = self._require_asset_row(asset_id)
         location = self._location(asset_id)
         if not location:
-            raise DomainError("ASSET_NOT_FOUND", "素材位置不存在")
+            raise DomainError("ASSET_NOT_FOUND", "素材不存在")
         path = _path_from_uri(location["uri"])
         now = utc_now()
         if not path.is_file():
             self._update_asset(asset_id, "missing", now=now)
+            self._mark_transcripts_stale(asset_id, None)
             return self.get_asset(asset_id)  # type: ignore[return-value]
         try:
             fingerprint = sha256_file(path)
+            if fingerprint != row["fingerprint"]:
+                self._remember_previous_fingerprint(asset_id, row["fingerprint"])
+                self._mark_transcripts_stale(asset_id, fingerprint)
             media_info = await self._media_info(path, row["kind"])
             availability = "available" if fingerprint == row["fingerprint"] else "changed"
         except DomainError:
@@ -235,6 +241,7 @@ class ProjectAssetService:
         self._update_asset(
             asset_id,
             availability,
+            fingerprint=fingerprint if availability == "changed" else None,
             size_bytes=path.stat().st_size,
             modified_at=modified_iso(path),
             media_info=media_info,
@@ -247,12 +254,38 @@ class ProjectAssetService:
             )
         return self.get_asset(asset_id)  # type: ignore[return-value]
 
+    def current_source(self, asset_id: str) -> tuple[dict[str, Any], str | None, str | None]:
+        row = self._require_asset_row(asset_id)
+        location = self._location(asset_id)
+        if not location:
+            self._update_asset(asset_id, "missing")
+            self._mark_transcripts_stale(asset_id, None)
+            return self.get_asset(asset_id) or _asset_dto(row), None, None
+        path = _path_from_uri(location["uri"])
+        if not path.is_file():
+            self._update_asset(asset_id, "missing")
+            self._mark_transcripts_stale(asset_id, None)
+            return self.get_asset(asset_id) or _asset_dto(row), None, None
+        try:
+            fingerprint = sha256_file(path)
+        except OSError as exc:
+            raise DomainError("ASSET_MISSING", "素材文件缺失") from exc
+        if fingerprint != row["fingerprint"]:
+            self._remember_previous_fingerprint(asset_id, row["fingerprint"])
+            self._update_asset(asset_id, "changed", fingerprint=fingerprint)
+            self._mark_transcripts_stale(asset_id, fingerprint)
+        elif row["availability"] != "changed":
+            self._update_asset(asset_id, "available")
+        return self.get_asset(asset_id) or _asset_dto(row), path.as_uri(), fingerprint
+
     async def relocate_asset(self, asset_id: str, grant: dict[str, Any]) -> dict[str, Any]:
         row = self._require_asset_row(asset_id)
         path = _grant_path(grant)
         fingerprint = sha256_file(path)
-        if fingerprint != row["fingerprint"]:
-            raise DomainError("ASSET_CHANGED", "重新定位的文件指纹与原素材不一致")
+        location = self._location(asset_id)
+        previous_fingerprint = location["previous_fingerprint"] if location else None
+        if fingerprint not in {row["fingerprint"], previous_fingerprint}:
+            raise DomainError("ASSET_CHANGED", "素材文件已变化，无法重新定位")
         try:
             media_info = await self._media_info(path, row["kind"])
             availability = "available"
@@ -267,7 +300,6 @@ class ProjectAssetService:
             media_info = None
             availability = "unsupported"
         now = utc_now()
-        location = self._location(asset_id)
         with self.db.connection() as db:
             db.execute(
                 "UPDATE asset_locations SET uri=?,last_verified_at=?,previous_uri=?,"
@@ -284,6 +316,7 @@ class ProjectAssetService:
         self._update_asset(
             asset_id,
             availability,
+            fingerprint=fingerprint,
             size_bytes=path.stat().st_size,
             modified_at=modified_iso(path),
             media_info=media_info,
@@ -296,7 +329,7 @@ class ProjectAssetService:
             try:
                 path.read_text(encoding="utf-8")
             except UnicodeDecodeError as exc:
-                raise DomainError("ASSET_UNSUPPORTED", "文本素材必须使用 UTF-8 编码") from exc
+                raise DomainError("ASSET_UNSUPPORTED", "文本素材必须为 UTF-8 编码") from exc
             return {"format_name": path.suffix.lower().lstrip("."), "duration_us": 0}
         if kind == "image":
             return {"format_name": path.suffix.lower().lstrip("."), "duration_us": 0}
@@ -305,12 +338,15 @@ class ProjectAssetService:
         except TypeError:
             result = await self.probe(path)
         except RuntimeError as exc:
-            raise DomainError(str(exc), "无法读取素材媒体信息") from exc
+            raise DomainError(str(exc), "媒体文件探测失败") from exc
         return result
 
     def _update_asset(self, asset_id: str, availability: str, **fields: Any) -> None:
         assignments = ["availability=?", "updated_at=?"]
         values: list[Any] = [availability, fields.pop("now", utc_now())]
+        if "fingerprint" in fields and fields["fingerprint"] is not None:
+            assignments.append("fingerprint=?")
+            values.append(fields["fingerprint"])
         if "size_bytes" in fields:
             assignments.append("size_bytes=?")
             values.append(fields["size_bytes"])
@@ -350,16 +386,27 @@ class ProjectAssetService:
                 "SELECT * FROM asset_locations WHERE asset_id=?", (asset_id,)
             ).fetchone()
 
+    def _remember_previous_fingerprint(self, asset_id: str, fingerprint: str) -> None:
+        with self.db.connection() as db:
+            db.execute(
+                "UPDATE asset_locations SET previous_fingerprint=? WHERE asset_id=?",
+                (fingerprint, asset_id),
+            )
+
+    def _mark_transcripts_stale(self, asset_id: str, fingerprint: str | None) -> None:
+        if self.transcript_stale:
+            self.transcript_stale(asset_id, fingerprint)
+
 
 def _project_name(value: str) -> str:
     if not isinstance(value, str) or not 1 <= len(value) <= 120 or not value.strip():
-        raise DomainError("PROJECT_NAME_INVALID", "项目名称长度必须为 1-120 个字符")
+        raise DomainError("PROJECT_NAME_INVALID", "项目名称不合法，长度需为 1-120 个字符")
     return value
 
 
 def _limit(value: int) -> int:
     if value < 1 or value > 100:
-        raise DomainError("VALIDATION_ERROR", "limit 必须在 1-100 之间")
+        raise DomainError("VALIDATION_ERROR", "limit 参数范围需为 1-100")
     return value
 
 
@@ -369,9 +416,9 @@ def _cursor_offset(value: str | None) -> int:
     try:
         offset = int(value)
     except ValueError as exc:
-        raise DomainError("VALIDATION_ERROR", "cursor 无效") from exc
+        raise DomainError("VALIDATION_ERROR", "cursor 参数不合法") from exc
     if offset < 0:
-        raise DomainError("VALIDATION_ERROR", "cursor 无效")
+        raise DomainError("VALIDATION_ERROR", "cursor 参数不合法")
     return offset
 
 
@@ -435,10 +482,10 @@ def _asset_kind(path: Path, requested_kind: str | None) -> str:
     )
     if requested_kind is not None:
         if requested_kind not in ASSET_KINDS:
-            raise DomainError("ASSET_UNSUPPORTED", "素材类型不受支持")
+            raise DomainError("ASSET_UNSUPPORTED", "不支持的素材格式")
         if inferred is not None and inferred != requested_kind:
-            raise DomainError("ASSET_UNSUPPORTED", "素材类型与文件扩展名不匹配")
+            raise DomainError("ASSET_UNSUPPORTED", "素材类型与文件格式不匹配")
         return requested_kind
     if inferred is None:
-        raise DomainError("ASSET_UNSUPPORTED", "素材类型不受支持")
+        raise DomainError("ASSET_UNSUPPORTED", "不支持的素材格式")
     return inferred

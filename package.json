@@ -21,7 +21,8 @@
     "test:bootstrap:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/packaging/test-bootstrap-windows.ps1",
     "package:win": "pnpm --filter @aivideo/desktop package:win",
     "package:verify": "pnpm --filter @aivideo/desktop package:verify",
-    "ci": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+    "ci": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "ci:verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   },
   "devDependencies": {
     "typescript": "^5.8.3"

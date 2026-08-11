@@ -2,10 +2,11 @@ import { randomBytes } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
 import { join } from "node:path";
-import { appendFile, readFile, unlink } from "node:fs/promises";
-import { mkdirSync, openSync, closeSync, existsSync, readFileSync } from "node:fs";
+import { unlink } from "node:fs/promises";
+import { mkdirSync, existsSync, readFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
-import { parseSidecarReadyLine, type SidecarReady } from "@aivideo/contracts";
+import type { SidecarReady } from "@aivideo/contracts";
+import { appendLog } from "./logging.js";
 
 export interface SidecarLaunchOptions {
   executable: string;
@@ -51,21 +52,18 @@ export class SidecarSupervisor {
     ];
     const adminToken = this.options.adminToken ?? randomBytes(32).toString("hex");
     mkdirSync(this.options.runtimeDir, { recursive: true });
-    const coreLogPath = join(this.options.runtimeDir, "core.log");
-    const coreLogFd = openSync(coreLogPath, "a");
     const child = spawnImpl(this.options.executable, args, {
       cwd: this.options.resourcesPath,
       env: { ...process.env, AIVS_ADMIN_TOKEN: adminToken },
       shell: false,
       windowsHide: true,
-      stdio: ["ignore", coreLogFd, coreLogFd]
+      stdio: ["ignore", "pipe", "pipe"]
     });
     this.child = child as unknown as ChildProcessWithoutNullStreams;
     const timeout = this.options.timeoutMs ?? 20_000;
     return new Promise<SidecarReady>((resolve, reject) => {
       let settled = false;
       let childExit: string | undefined;
-      let buffer = "";
       let fileTimer: NodeJS.Timeout | undefined;
       const finish = (error?: Error, value?: SidecarReady) => {
         if (settled) return;
@@ -75,14 +73,26 @@ export class SidecarSupervisor {
         if (error) reject(error); else if (value) resolve(value);
       };
       const timer = setTimeout(() => finish(new SidecarStartupError((childExit ? childExit + "; " : "") + `Sidecar startup timed out after ${timeout}ms`)), timeout);
-      if (this.options.logPath) void appendFile(this.options.logPath, `${new Date().toISOString()} [aivs-core] spawned with file-backed stdio log=${coreLogPath}\n`, "utf8");
+      const logCore = (stream: NodeJS.ReadableStream | null | undefined, level: string): void => {
+        if (!stream || !this.options.logPath) return;
+        let pending = "";
+        stream.on("data", chunk => {
+          pending += String(chunk);
+          const lines = pending.split(/\r?\n/);
+          pending = lines.pop() ?? "";
+          for (const line of lines) if (line.trim()) void appendLog(this.options.logPath!, `[aivs-core] ${level} ${line}`);
+        });
+        stream.on("end", () => { if (pending.trim()) void appendLog(this.options.logPath!, `[aivs-core] ${level} ${pending}`); });
+      };
+      logCore(child.stdout, "stdout");
+      logCore(child.stderr, "stderr");
+      if (this.options.logPath) void appendLog(this.options.logPath, "[aivs-core] spawned with redacted stdio");
       child.once("error", error => { finish(new SidecarStartupError(error.message)); });
       child.once("exit", (code, signal) => {
         // PyInstaller/uvicorn may leave the serving child alive after the
         // launcher process exits. Keep polling ready.json until timeout so a
         // late but valid Core handshake is not discarded.
         childExit = `Sidecar launcher exited before ready (${code ?? signal})`;
-        closeSync(coreLogFd);
       });
       const pollReadyFile = (): void => {
         if (settled) return;
@@ -90,13 +100,13 @@ export class SidecarSupervisor {
           if (existsSync(readyFile)) {
             const ready = JSON.parse(readFileSync(readyFile, "utf8")) as SidecarReady;
             if (!Number.isInteger(ready.pid) || ready.pid <= 0) throw new Error("Invalid sidecar pid");
-            if (this.options.logPath) void appendFile(this.options.logPath, `${new Date().toISOString()} [aivs-core] ready file received ${readyFile}\n`, "utf8");
+            if (this.options.logPath) void appendLog(this.options.logPath, `[aivs-core] ready file received ${readyFile}`);
             this.ready = ready;
             finish(undefined, ready);
             return;
           }
         } catch (error) {
-          if (this.options.logPath) void appendFile(this.options.logPath, `${new Date().toISOString()} [aivs-core] ready file check failed ${(error as Error).message}\n`, "utf8");
+          if (this.options.logPath) void appendLog(this.options.logPath, `[aivs-core] ready file check failed ${(error as Error).message}`);
         }
         fileTimer = setTimeout(pollReadyFile, 100);
       };

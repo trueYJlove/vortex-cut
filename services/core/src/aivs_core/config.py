@@ -6,6 +6,8 @@ from pathlib import Path
 
 from . import __version__
 
+DEFAULT_MANIFEST_DIR = Path(__file__).resolve().parents[4] / "resources" / "model-manifests"
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -19,6 +21,7 @@ class Settings:
     build_version: str = __version__
     log_level: str = "info"
     ready_file: Path | None = None
+    manifest_dir: Path = DEFAULT_MANIFEST_DIR
 
     def prepare(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -34,6 +37,7 @@ class Settings:
 
     @classmethod
     def from_args(cls, args: object) -> Settings:
+        manifest_dir = getattr(args, "manifest_dir", None)
         return cls(
             host=getattr(args, "host"),
             port=getattr(args, "port"),
@@ -48,6 +52,7 @@ class Settings:
             ready_file=Path(getattr(args, "ready_file"))
             if getattr(args, "ready_file", None)
             else None,
+            manifest_dir=Path(manifest_dir) if manifest_dir else DEFAULT_MANIFEST_DIR,
         )
 
 

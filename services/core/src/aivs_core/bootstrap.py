@@ -26,6 +26,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--runtime-dir")
     result.add_argument("--log-level", default="info")
     result.add_argument("--ready-file")
+    result.add_argument("--manifest-dir")
     return result
 
 

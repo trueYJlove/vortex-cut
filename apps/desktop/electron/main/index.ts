@@ -2,13 +2,32 @@ import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from "elect
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { randomBytes } from "node:crypto";
+import { access, readdir } from "node:fs/promises";
 import { CoreAdminClient, CoreHttpError } from "./core-admin-client.js";
 import { registerFileGrant } from "./file-grants.js";
-import { defaultLogPath, appendLog } from "./logging.js";
+import { defaultLogPath, appendLog, redact } from "./logging.js";
 import { SidecarSupervisor } from "./sidecar-supervisor.js";
 import { assetIdFromRestrictedUrl, RESTRICTED_MEDIA_SCHEME, RestrictedMediaRegistry } from "./restricted-media.js";
 import { normalizeJob } from "../../src/lib/core-client.js";
-import { isApiErrorResponse, isAssetKind, type Asset, type AssetKind, type ArtifactId, type GrantId, type Job, type JobId, type MediaInfo, type ProjectId } from "@aivideo/contracts";
+import {
+  isApiErrorResponse,
+  isAssetKind,
+  parseModelDetail,
+  parseModelSummary,
+  parseTranscript,
+  parseTranscriptSummary,
+  type Asset,
+  type AssetKind,
+  type ArtifactId,
+  type GrantId,
+  type Job,
+  type JobId,
+  type MediaInfo,
+  type ModelId,
+  type ModelSummary,
+  type ProjectId,
+  type TranscriptId
+} from "@aivideo/contracts";
 
 protocol.registerSchemesAsPrivileged([{
   scheme: RESTRICTED_MEDIA_SCHEME,
@@ -61,6 +80,31 @@ function restrictedMediaUrl(assetId: string): string {
 
 function assetPresentation(asset: Asset): { asset: Asset; media_url: string } {
   return { asset, media_url: restrictedMediaUrl(asset.asset_id) };
+}
+
+const rendererSensitiveKeys = new Set([
+  "path", "uri", "root_dir", "database", "database_path", "admin_token", "ui_token", "token", "authorization",
+  "installed_path", "install_dir", "source_file", "model_path", "model_dir", "runtime_dir", "ready_file"
+]);
+function rendererSafe(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(rendererSafe);
+  if (!value || typeof value !== "object") return value;
+  const result: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) if (!rendererSensitiveKeys.has(key)) result[key] = rendererSafe(item);
+  return result;
+}
+
+function modelSummary(value: unknown): ModelSummary { return parseModelSummary(rendererSafe(value)); }
+function modelDetail(value: unknown) { return parseModelDetail(rendererSafe(value)); }
+function transcript(value: unknown) { return parseTranscript(rendererSafe(value)); }
+function transcriptSummary(value: unknown) { return parseTranscriptSummary(rendererSafe(value)); }
+function rendererHealth(value: Awaited<ReturnType<CoreAdminClient["health"]>>): Awaited<ReturnType<CoreAdminClient["health"]>> {
+  return {
+    status: value.status,
+    protocol_version: value.protocol_version,
+    build_version: value.build_version,
+    ...(typeof value.scheduler === "string" && !/[\\/]|(?:file|https?):\/\//i.test(value.scheduler) ? { scheduler: value.scheduler } : {})
+  };
 }
 
 function envAssetPath(kind: AssetKind | undefined): string | undefined {
@@ -143,7 +187,7 @@ function registerIpc(): void {
     ]);
     return rendererRuntime();
   });
-  ipcMain.handle("diagnostics:get", () => requireCore().health());
+  ipcMain.handle("diagnostics:get", async () => rendererHealth(await requireCore().health()));
   ipcMain.handle("media:choose", async () => {
     const selectedPath = await chooseAssetPath(undefined, "选择媒体");
     if (!selectedPath) return null;
@@ -207,6 +251,42 @@ function registerIpc(): void {
   });
   ipcMain.handle("job:get", (_event, jobId: JobId) => fetchWithUi<unknown>(`/api/v1/jobs/${asId(jobId, "job_id")}`).then(normalizeJob));
   ipcMain.handle("job:cancel", (_event, jobId: JobId) => fetchWithUi<unknown>(`/api/v1/jobs/${asId(jobId, "job_id")}/cancel`, { method: "POST" }).then(normalizeJob));
+
+  ipcMain.handle("model:list", async (_event, params: { status?: string; limit?: number; cursor?: string } = {}) => {
+    const page = await fetchWithUi<{ items: unknown[]; next_cursor: string | null }>(`${API_PREFIX}/models${buildQuery(params)}`);
+    return { next_cursor: page.next_cursor ?? null, items: page.items.map(modelSummary) };
+  });
+  ipcMain.handle("model:get", (_event, modelId: ModelId) => fetchWithUi<unknown>(`${API_PREFIX}/models/${encodeURIComponent(asId(modelId, "model_id"))}`).then(modelDetail));
+  ipcMain.handle("model:download", async (_event, input: { model_id: ModelId; license_acceptance: string | null }) => {
+    const modelId = asId(input.model_id, "model_id");
+    if (!(input.license_acceptance === null || typeof input.license_acceptance === "string")) throw new Error("Invalid license acceptance");
+    const result = await fetchWithUi<{ model: unknown; job: unknown }>(`${API_PREFIX}/models/${encodeURIComponent(modelId)}/download`, {
+      method: "POST", body: JSON.stringify({ license_acceptance: input.license_acceptance })
+    });
+    return { model: modelDetail(result.model), job: normalizeJob(result.job) };
+  });
+  ipcMain.handle("model:download-status", async (_event, modelId: ModelId) => {
+    const result = await fetchWithUi<{ model: unknown; job: unknown | null }>(`${API_PREFIX}/models/${encodeURIComponent(asId(modelId, "model_id"))}/download`);
+    return { model: modelDetail(result.model), job: result.job === null ? null : normalizeJob(result.job) };
+  });
+  ipcMain.handle("model:cancel", async (_event, modelId: ModelId) => {
+    const result = await fetchWithUi<{ model: unknown; job: unknown }>(`${API_PREFIX}/models/${encodeURIComponent(asId(modelId, "model_id"))}/cancel`, { method: "POST" });
+    return { model: modelDetail(result.model), job: normalizeJob(result.job) };
+  });
+  ipcMain.handle("transcription:create", async (_event, input: { asset_id: string; model_id: string; language: string; word_timestamps: boolean; license_acceptance: string | null }) => {
+    const assetId = asId(input.asset_id, "asset_id");
+    const modelId = asId(input.model_id, "model_id");
+    if (typeof input.language !== "string" || input.language.length === 0 || typeof input.word_timestamps !== "boolean" || !(input.license_acceptance === null || typeof input.license_acceptance === "string")) throw new Error("Invalid transcription input");
+    const result = await fetchWithUi<{ job: unknown; transcript: unknown | null }>(`${API_PREFIX}/assets/${encodeURIComponent(assetId)}/transcription`, {
+      method: "POST", body: JSON.stringify({ model_id: modelId, language: input.language, word_timestamps: input.word_timestamps, license_acceptance: input.license_acceptance })
+    });
+    return { job: normalizeJob(result.job), transcript: result.transcript === null ? null : transcript(result.transcript) };
+  });
+  ipcMain.handle("transcription:list", async (_event, assetId: string) => {
+    const page = await fetchWithUi<{ items: unknown[]; next_cursor: string | null }>(`${API_PREFIX}/assets/${encodeURIComponent(asId(assetId, "asset_id"))}/transcription`);
+    return { next_cursor: page.next_cursor ?? null, items: page.items.map(transcriptSummary) };
+  });
+  ipcMain.handle("transcript:get", (_event, transcriptId: TranscriptId) => fetchWithUi<unknown>(`${API_PREFIX}/transcriptions/${encodeURIComponent(asId(transcriptId, "transcript_id"))}`).then(transcript));
   ipcMain.handle("artifact:resolve", (_event, artifactId: ArtifactId) => requireCore().resolveArtifact(asId(artifactId, "artifact_id")));
   ipcMain.handle("artifact:open", async (_event, artifactId: ArtifactId) => {
     const result = await requireCore().resolveArtifact(asId(artifactId, "artifact_id"));
@@ -225,7 +305,7 @@ async function fetchWithUi<T = unknown>(path: string, init: RequestInit = {}): P
   try { data = await response.json(); } catch { /* preserve HTTP status for empty responses */ }
   if (!response.ok) {
     const error = isApiErrorResponse(data) ? data.error : undefined;
-    throw new CoreHttpError(response.status, error?.message ?? `Core request failed: ${response.status}`, error?.code ?? statusCode(response.status), error?.trace_id);
+    throw new CoreHttpError(response.status, redact(error?.message ?? `Core request failed: ${response.status}`), error?.code ?? statusCode(response.status), error?.trace_id);
   }
   return data as T;
 }
@@ -275,6 +355,7 @@ async function startRuntime(): Promise<void> {
       ? process.resourcesPath
       : resolve(__dirname, "../../../../resources");
   const dataDir = join(app.getPath("userData"), "data-v2");
+  await assertRuntimeResources(resourcesPath);
   await appendLog(logPath, `runtime resources=${resourcesPath} data=${dataDir}`);
   const runtimeDir = join(dataDir, "runtime", `${process.pid}-${randomBytes(8).toString("hex")}`);
   supervisor = new SidecarSupervisor({
@@ -298,6 +379,21 @@ async function startRuntime(): Promise<void> {
   runtime = { base_url: `http://127.0.0.1:${ready.port}`, ui_token: session.token, protocol_version: 1 };
   resolveRuntime?.(runtime);
   await appendLog(logPath, "Core UI session ready");
+}
+
+async function assertRuntimeResources(resourcesPath: string): Promise<void> {
+  const required = [
+    SidecarSupervisor.packagedExecutable(resourcesPath),
+    join(resourcesPath, "ffmpeg", "win-x64", "ffmpeg.exe"),
+    join(resourcesPath, "ffmpeg", "win-x64", "ffprobe.exe"),
+    join(resourcesPath, "licenses", "THIRD_PARTY_NOTICES.txt"),
+    join(resourcesPath, "model-manifests")
+  ];
+  await Promise.all(required.map(path => access(path)));
+  const manifests = await readdir(join(resourcesPath, "model-manifests"), { withFileTypes: true });
+  if (!manifests.some(entry => entry.isFile() && entry.name.toLowerCase().endsWith(".json"))) {
+    throw new Error("ASR model manifest is missing from packaged resources");
+  }
 }
 
 function parseExecutableArgs(value: string | undefined): string[] | undefined {
@@ -342,7 +438,7 @@ app.whenReady().then(async () => {
       const message = error instanceof Error ? error.stack ?? error.message : String(error);
       await appendLog(logPath, `runtime startup failed after window: ${message}`).catch(() => undefined);
       if (windowRef && !windowRef.isDestroyed()) {
-        windowRef.webContents.send("runtime:error", message);
+        windowRef.webContents.send("runtime:error", redact(message));
       }
     });
   }

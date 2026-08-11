@@ -62,4 +62,35 @@ describe("CoreClient", () => {
     const client = new CoreClient({ baseUrl: "http://127.0.0.1:4000", uiToken: "ui-secret", fetchImpl });
     await expect(client.getProject("project_1" as ProjectId)).rejects.toMatchObject({ status: 409, code: "PROJECT_ARCHIVED", traceId: "trace_1" });
   });
+  it("covers real Stage 1B model and transcript endpoint shapes without exposing install paths", async () => {
+    const hash = "a".repeat(64);
+    const model = {
+      model_id: "model_1", display_name: "Tiny", purpose: "ASR", provider: "faster-whisper", revision: "rev_1",
+      supported_languages: ["auto", "zh", "en"], supports_word_timestamps: true, runtime_version: "1.0",
+      model_size_bytes: 10, installed_size_bytes: 10, model_sha256: hash,
+      license: { id: "mit", name: "MIT", url: null, attribution: null, acceptance_required: false },
+      source: { kind: "trusted_manifest", display_name: "trusted", host: "example.test", url: "https://example.test/model" },
+      requires_network: true, local_only: true, status: "unavailable", provider_status: "unavailable", progress: null,
+      required_disk_bytes: 12, runtime_requirements: {}, files: [{ relative_path: "model.bin", size_bytes: 10, sha256: hash }],
+      available_disk_bytes: 100, installed_path: "C:\\private\\model", install_dir: "C:\\private\\model"
+    };
+    const transcript = {
+      transcript_id: "transcript_1", asset_id: "asset_1", status: "ready", language: "en", provider: "faster-whisper",
+      model_id: "model_1", model_revision: "rev_1", source_media_fingerprint: "sha256:abc", duration_us: 1_000_000,
+      segments: [{ segment_id: "segment_1", ordinal: 0, start_us: 0, end_us: 1_000_000, text: "hello", confidence: 1, words: null }],
+      words: null, created_at: "2026-08-10T00:00:00.000Z", updated_at: "2026-08-10T00:00:00.000Z"
+    };
+    const job = { job_id: "job_1", project_id: "project_1", asset_id: "asset_1", kind: "transcription", status: "failed", stage: "failed", progress: 1, attempt: 1, model_id: "model_1", model_revision: "rev_1", input_fingerprint: "sha256:abc", input: { asset_id: "asset_1" }, error: { code: "TRANSCRIPTION_FAILED", message: "失败" }, created_at: "2026-08-10T00:00:00.000Z", updated_at: "2026-08-10T00:00:00.000Z", started_at: null, finished_at: "2026-08-10T00:00:00.000Z" };
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(response({ items: [model], next_cursor: null }))
+      .mockResolvedValueOnce(response({ model, job }))
+      .mockResolvedValueOnce(response({ items: [{ ...transcript, installed_path: "C:\\private\\model" }], next_cursor: null }))
+      .mockResolvedValueOnce(response(transcript));
+    const client = new CoreClient({ baseUrl: "http://127.0.0.1:4000", uiToken: "ui-secret", fetchImpl });
+    await expect(client.listModels()).resolves.toMatchObject({ items: [{ model_id: "model_1" }] });
+    await expect(client.downloadModel("model_1" as never, null)).resolves.toMatchObject({ job: { kind: "transcription" } });
+    await expect(client.listTranscripts("asset_1" as never)).resolves.toMatchObject({ items: [{ transcript_id: "transcript_1" }] });
+    await expect(client.getTranscript("transcript_1")).resolves.toMatchObject({ transcript_id: "transcript_1" });
+    expect(JSON.stringify(fetchImpl.mock.calls)).not.toContain("private\\model");
+  });
 });

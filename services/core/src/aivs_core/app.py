@@ -8,7 +8,7 @@ import shutil
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from . import PROTOCOL_VERSION, __version__
+from .asr_jobs import AsrCoordinator
 from .auth import AuthStore
 from .config import Settings
 from .database import Database, MigrationError, json_dumps, json_loads, utc_now
@@ -23,7 +24,9 @@ from .ids import new_id
 from .jobs import JobService
 from .media.encoders import EncoderDetector
 from .media.ffprobe import FFprobe
+from .model_registry import ModelError, ModelManager, ModelRegistry
 from .projects import DomainError, ProjectAssetService
+from .transcription import TranscriptionError, TranscriptRepository
 
 
 class SessionResponse(BaseModel):
@@ -58,6 +61,17 @@ class AssetRelocateRequest(BaseModel):
     grant_id: str
 
 
+class ModelDownloadRequest(BaseModel):
+    license_acceptance: str | None = None
+
+
+class TranscriptionRequest(BaseModel):
+    model_id: str
+    language: str = "auto"
+    word_timestamps: bool = False
+    license_acceptance: str | None = None
+
+
 class JobRequest(BaseModel):
     media_id: str
     project_id: str | None = None
@@ -81,14 +95,32 @@ class CoreState:
         self.shutdown_event = asyncio.Event()
         self.ffprobe = FFprobe(settings.ffprobe)
         self.encoders = EncoderDetector(settings.ffmpeg)
+        self.model_registry = ModelRegistry(settings.manifest_dir)
+        self.model_manager = ModelManager(self.db, settings.data_dir, self.model_registry)
+        self.transcripts = TranscriptRepository(self.db)
+        self.asr = AsrCoordinator(
+            self.db, self.model_registry, self.model_manager, self.transcripts
+        )
         self.jobs = JobService(
-            self.db, settings.data_dir, settings.ffmpeg, self.ffprobe, self.encoders, self.emit
+            self.db,
+            settings.data_dir,
+            settings.ffmpeg,
+            self.ffprobe,
+            self.encoders,
+            self.emit,
+            asr_runner=self.asr.run,
+            retry_validator=self.asr.validate_retry,
         )
 
         async def probe_asset(path: Path, **kwargs: Any) -> dict[str, Any]:
             return await self.ffprobe.probe(path, **kwargs)
 
-        self.projects = ProjectAssetService(self.db, settings.data_dir, probe_asset)
+        self.projects = ProjectAssetService(
+            self.db,
+            settings.data_dir,
+            probe_asset,
+            transcript_stale=self.transcripts.mark_asset_stale,
+        )
 
     async def emit(self, event: dict[str, Any]) -> None:
         message = {"event_id": new_id(), "occurred_at": utc_now(), **event}
@@ -110,6 +142,27 @@ class CoreState:
 
 def _error(code: str, message: str, status: int) -> HTTPException:
     return HTTPException(status, detail={"code": code, "message": message})
+
+
+def _model_error(exc: ModelError, model: dict[str, Any] | None = None) -> HTTPException:
+    status = 404 if exc.code == "MODEL_NOT_FOUND" else 409 if exc.code in {
+        "MODEL_NOT_INSTALLED",
+        "MODEL_LICENSE_REQUIRED",
+        "MODEL_DISK_SPACE_INSUFFICIENT",
+    } else 400
+    detail: dict[str, Any] = {"code": exc.code, "message": exc.message}
+    if model is not None:
+        detail["model"] = model
+    return HTTPException(status, detail=detail)
+
+
+def _transcription_error(exc: TranscriptionError) -> HTTPException:
+    status = 404 if exc.code == "ASSET_NOT_FOUND" else 409 if exc.code in {
+        "TRANSCRIPTION_INPUT_CHANGED",
+        "TRANSCRIPTION_NOT_READY",
+        "MODEL_NOT_INSTALLED",
+    } else 400
+    return _error(exc.code, exc.message, status)
 
 
 def _domain(exc: DomainError) -> HTTPException:
@@ -145,6 +198,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except MigrationError:
             raise
         state.db.recover_interrupted()
+        seed_dir = os.environ.get("AIVS_E2E_MODEL_DIR")
+        if seed_dir:
+            state.model_manager.seed_external(Path(seed_dir))
         await state.jobs.start()
         ready_file = os.environ.get("AIVS_READY_FILE")
         if ready_file:
@@ -168,18 +224,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.exception_handler(HTTPException)
     async def http_error(_: Request, exc: HTTPException) -> JSONResponse:
-        detail = exc.detail if isinstance(exc.detail, dict) else {}
+        detail = cast(
+            dict[str, Any], exc.detail if isinstance(exc.detail, dict) else {}
+        )
+        if "model" in detail:
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={
+                    **_error_payload(
+                        str(detail.get("code", "INTERNAL_ERROR")),
+                        str(detail.get("message", "request failed")),
+                    ),
+                    "model": detail["model"],
+                },
+            )
         return JSONResponse(
             status_code=exc.status_code,
             content=_error_payload(
-                str(detail.get("code", "INTERNAL_ERROR")), str(detail.get("message", "请求失败"))
+                str(detail.get("code", "INTERNAL_ERROR")), str(detail.get("message", "内部错误"))
             ),
         )
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(_: Request, __: RequestValidationError) -> JSONResponse:
         return JSONResponse(
-            status_code=400, content=_error_payload("VALIDATION_ERROR", "请求参数无效")
+            status_code=400, content=_error_payload("VALIDATION_ERROR", "请求参数不合法")
         )
 
     @app.exception_handler(MigrationError)
@@ -190,12 +259,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     def require_admin(authorization: str | None = Header(default=None)) -> CoreState:
         if not state.auth.is_admin(state.bearer(authorization)):
-            raise _error("UNAUTHORIZED", "需要管理权限", 401)
+            raise _error("UNAUTHORIZED", "未授权访问", 401)
         return state
 
     def require_ui(authorization: str | None = Header(default=None)) -> CoreState:
         if not state.auth.is_ui(state.bearer(authorization)):
-            raise _error("UNAUTHORIZED", "需要界面会话权限", 401)
+            raise _error("UNAUTHORIZED", "未授权访问", 401)
         return state
 
     @app.get("/api/v1/health")
@@ -238,7 +307,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except OSError as exc:
             raise _error("MEDIA_NOT_FOUND", "媒体文件不存在", 400) from exc
         if not path.is_file():
-            raise _error("MEDIA_UNSUPPORTED", "必须选择普通文件", 400)
+            raise _error("MEDIA_UNSUPPORTED", "不支持的媒体格式", 400)
         stat = path.stat()
         expires_at = (
             (datetime.now(UTC) + timedelta(hours=1))
@@ -271,7 +340,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         with state.db.connection() as db:
             row = db.execute("SELECT path FROM artifacts WHERE id=?", (artifact_id,)).fetchone()
         if not row:
-            raise _error("NOT_FOUND", "产物不存在", 404)
+            raise _error("NOT_FOUND", "工件不存在", 404)
         return {"artifact_id": artifact_id, "path": row[0]}
 
     @app.post("/api/v1/internal/shutdown")
@@ -303,7 +372,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         with state.db.connection() as db:
             row = db.execute("SELECT * FROM media_inputs WHERE id=?", (media_id,)).fetchone()
         if not row:
-            raise _error("MEDIA_NOT_FOUND", "媒体不存在", 404)
+            raise _error("MEDIA_NOT_FOUND", "媒体文件不存在", 404)
         return dict(row)
 
     def project_id_for_media(path: str, preferred_project_id: str | None = None) -> str | None:
@@ -333,7 +402,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             result = await state.ffprobe.probe(Path(grant["path"]))
         except RuntimeError as exc:
-            raise _error(str(exc), "无法读取媒体文件", 400) from exc
+            raise _error(str(exc), "操作失败", 400) from exc
         media_id = new_id()
         now = utc_now()
         with state.db.connection() as db:
@@ -385,7 +454,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         project_id: str, request: ProjectPatchRequest, _: CoreState = Depends(require_ui)
     ) -> dict[str, Any]:
         if request.name is None:
-            raise _error("VALIDATION_ERROR", "必须提供 name", 400)
+            raise _error("VALIDATION_ERROR", "请求参数不合法", 400)
         try:
             return state.projects.rename_project(project_id, request.name)
         except DomainError as exc:
@@ -455,6 +524,199 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except DomainError as exc:
             raise _domain(exc) from exc
 
+    @app.get("/api/v1/models")
+    async def list_models(
+        limit: int = 50,
+        cursor: str | None = None,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        if limit < 1 or limit > 100 or (
+            cursor is not None and (not cursor.isdigit() or int(cursor) < 0)
+        ):
+            raise _error("CONFLICT", "操作冲突，请刷新后重试", 400)
+        items = state.model_manager.list_details()
+        offset = int(cursor or 0)
+        page = items[offset : offset + limit]
+        return {
+            "items": [
+                {
+                    key: value
+                    for key, value in item.items()
+                    if key not in {"runtime_requirements", "files", "available_disk_bytes"}
+                }
+                for item in page
+            ],
+            "next_cursor": str(offset + len(page)) if len(page) == limit else None,
+        }
+
+    @app.get("/api/v1/models/{model_id}")
+    async def get_model(model_id: str, _: CoreState = Depends(require_ui)) -> dict[str, Any]:
+        try:
+            return state.model_manager.detail(model_id)
+        except ModelError as exc:
+            raise _model_error(exc) from exc
+
+    @app.post("/api/v1/models/{model_id}/download")
+    async def download_model(
+        model_id: str,
+        request: ModelDownloadRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            manifest = state.model_registry.get(model_id)
+            if manifest.license.acceptance_required and not request.license_acceptance:
+                raise ModelError("MODEL_LICENSE_REQUIRED", "需要确认模型许可证后才能下载")
+            existing = state.jobs.latest_model_download(model_id, manifest.revision)
+            if existing and existing["status"] in {"queued", "running", "cancelling"}:
+                return {"model": state.model_manager.detail(model_id), "job": existing}
+            state.model_manager.queue(manifest)
+            job = state.jobs.create_model_download(model_id, manifest.revision)
+            return {"model": state.model_manager.detail(model_id), "job": job}
+        except ModelError as exc:
+            raise _model_error(exc) from exc
+
+    @app.get("/api/v1/models/{model_id}/download")
+    async def model_download_status(
+        model_id: str, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        try:
+            manifest = state.model_registry.get(model_id)
+            return {
+                "model": state.model_manager.detail(model_id),
+                "job": state.jobs.latest_model_download(model_id, manifest.revision),
+            }
+        except ModelError as exc:
+            raise _model_error(exc) from exc
+
+    @app.post("/api/v1/models/{model_id}/cancel")
+    async def cancel_model(model_id: str, _: CoreState = Depends(require_ui)) -> dict[str, Any]:
+        try:
+            manifest = state.model_registry.get(model_id)
+            job = state.jobs.latest_model_download(model_id, manifest.revision)
+            if not job:
+                raise ModelError("CONFLICT", "操作冲突，请刷新后重试")
+            cancelled = await state.jobs.cancel(job["job_id"])
+            return {"model": state.model_manager.detail(model_id), "job": cancelled}
+        except ModelError as exc:
+            raise _model_error(exc) from exc
+
+    @app.post("/api/v1/assets/{asset_id}/transcription")
+    async def create_transcription(
+        asset_id: str,
+        request: TranscriptionRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            manifest = state.model_registry.get(request.model_id)
+            if manifest.license.acceptance_required and not request.license_acceptance:
+                raise ModelError("MODEL_LICENSE_REQUIRED", "需要确认模型许可证后才能下载")
+            if request.language != "auto" and request.language not in manifest.supported_languages:
+                raise TranscriptionError("TRANSCRIPTION_UNSUPPORTED_LANGUAGE", "不支持的转录语言")
+            if request.word_timestamps and not manifest.supports_word_timestamps:
+                raise TranscriptionError("TRANSCRIPTION_NOT_READY", "转录结果尚未就绪")
+            model_detail = state.model_manager.detail(request.model_id)
+            if model_detail["status"] != "ready":
+                raise ModelError("MODEL_NOT_INSTALLED", "模型尚未安装")
+            asset, audio_uri, fingerprint = state.projects.current_source(asset_id)
+            if not audio_uri or not fingerprint:
+                raise TranscriptionError(
+                    "TRANSCRIPTION_INPUT_CHANGED", "素材指纹已变化，转录结果失效"
+                )
+            if asset["fingerprint"] != fingerprint or asset["availability"] != "available":
+                raise TranscriptionError(
+                    "TRANSCRIPTION_INPUT_CHANGED", "素材指纹已变化，转录结果失效"
+                )
+            existing = state.transcripts.find_ready(
+                asset_id,
+                fingerprint,
+                request.model_id,
+                manifest.revision,
+                request.word_timestamps,
+            )
+            if existing:
+                latest = state.jobs.latest_transcription(
+                    asset_id, fingerprint, request.model_id, manifest.revision
+                )
+                if latest is None:
+                    latest = state.jobs.create_transcription(
+                        asset_id,
+                        request.model_id,
+                        manifest.revision,
+                        fingerprint,
+                        audio_uri,
+                        request.language,
+                        request.word_timestamps,
+                        asset["project_id"],
+                    )
+                    with state.db.connection() as db:
+                        db.execute(
+                            "UPDATE jobs SET status='succeeded',stage='completed',progress=1,"
+                            "finished_at=?,updated_at=?,result_json=? WHERE id=?",
+                            (
+                                utc_now(),
+                                utc_now(),
+                                json_dumps({"transcript_id": existing["transcript_id"]}),
+                                latest["job_id"],
+                            ),
+                        )
+                    latest = state.jobs.get(latest["job_id"])
+                return {"job": latest, "transcript": existing}
+            job = state.jobs.create_transcription(
+                asset_id,
+                request.model_id,
+                manifest.revision,
+                fingerprint,
+                audio_uri,
+                request.language,
+                request.word_timestamps,
+                asset["project_id"],
+            )
+            return {"job": job, "transcript": None}
+        except ModelError as exc:
+            model = (
+                state.model_manager.detail(request.model_id)
+                if exc.code == "MODEL_NOT_INSTALLED"
+                else None
+            )
+            raise _model_error(exc, model) from exc
+        except (DomainError, TranscriptionError) as exc:
+            if isinstance(exc, DomainError):
+                raise _transcription_error(TranscriptionError(exc.code, exc.message)) from exc
+            raise _transcription_error(exc) from exc
+
+    @app.get("/api/v1/assets/{asset_id}/transcription")
+    async def list_transcriptions(
+        asset_id: str,
+        limit: int = 50,
+        cursor: str | None = None,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        if limit < 1 or limit > 100:
+            raise _error("CONFLICT", "操作冲突，请刷新后重试", 400)
+        try:
+            asset_dto, source_uri, fingerprint = state.projects.current_source(asset_id)
+            items, next_cursor = state.transcripts.list_for_asset(
+                asset_id, fingerprint, limit, cursor
+            )
+            return {"items": items, "next_cursor": next_cursor}
+        except DomainError as exc:
+            raise _transcription_error(TranscriptionError(exc.code, exc.message)) from exc
+        except TranscriptionError as exc:
+            raise _transcription_error(exc) from exc
+
+    @app.get("/api/v1/transcriptions/{transcript_id}")
+    async def get_transcription(
+        transcript_id: str, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        transcript = state.transcripts.get(transcript_id)
+        if not transcript:
+            raise _error("TRANSCRIPTION_NOT_READY", "转录结果尚未就绪", 404)
+        try:
+            state.projects.current_source(transcript["asset_id"])
+        except DomainError:
+            pass
+        return state.transcripts.get(transcript_id) or transcript
+
     async def create_job(
         request: JobRequest,
         kind: str,
@@ -469,14 +731,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             1, int(probe_data["duration_us"]) - start_us
         )
         if start_us + duration_us > probe_data["duration_us"]:
-            raise _error("VALIDATION_ERROR", "任务区间超出媒体时长", 400)
+            raise _error("VALIDATION_ERROR", "请求参数不合法", 400)
         data = {
             "path": media["path"],
             "size_bytes": media["size_bytes"],
             "modified_at": int(media["modified_at"]),
         }
         if request.project_id is not None and not state.projects.get_project(request.project_id):
-            raise _error("PROJECT_NOT_FOUND", "Project not found", 404)
+            raise _error("PROJECT_NOT_FOUND", "项目不存在", 404)
         project_id = project_id_for_media(media["path"], request.project_id)
         if project_id is None:
             project_id = request.project_id
@@ -492,7 +754,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 project_id=project_id,
             )
         except ValueError as exc:
-            raise _error(str(exc), "任务参数不受支持", 400) from exc
+            raise _error(str(exc), "操作失败", 400) from exc
 
     @app.post("/api/v1/jobs/proxy")
     async def proxy(request: JobRequest, _: CoreState = Depends(require_ui)) -> dict[str, Any]:
@@ -519,7 +781,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             items = state.jobs.list(project_id, status, limit, cursor)
         except ValueError as exc:
-            raise _error(str(exc), "浠诲姟鍒楄〃鍙傛暟鏃犳晥", 400) from exc
+            raise _error(str(exc), "操作失败", 400) from exc
         next_cursor = str(int(cursor or 0) + len(items)) if len(items) == limit else None
         return {"items": items, "next_cursor": next_cursor}
 
@@ -537,6 +799,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/api/v1/jobs/{job_id}/cancel")
     async def cancel(job_id: str, _: CoreState = Depends(require_ui)) -> dict[str, Any]:
         result = await state.jobs.cancel(job_id)
+        if not result:
+            raise _error("JOB_NOT_FOUND", "任务不存在", 404)
+        return result
+
+    @app.post("/api/v1/jobs/{job_id}/retry")
+    async def retry(job_id: str, _: CoreState = Depends(require_ui)) -> dict[str, Any]:
+        try:
+            result = state.jobs.retry(job_id)
+        except ValueError as exc:
+            raise _error(str(exc), "操作失败", 409) from exc
         if not result:
             raise _error("JOB_NOT_FOUND", "任务不存在", 404)
         return result

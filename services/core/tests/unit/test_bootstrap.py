@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from aivs_core import bootstrap
-from aivs_core.config import Settings
+from aivs_core.config import DEFAULT_MANIFEST_DIR, Settings
 
 
 def test_parser_defaults_and_arguments():
@@ -13,6 +13,17 @@ def test_parser_defaults_and_arguments():
     assert args.host == "127.0.0.1"
     assert args.port == 1234
     assert args.data_dir == "data"
+
+
+def test_settings_from_args_uses_default_or_explicit_manifest_dir(tmp_path: Path):
+    default_settings = Settings.from_args(bootstrap.parser().parse_args([]))
+    explicit_manifest_dir = tmp_path / "manifests"
+    explicit_settings = Settings.from_args(
+        bootstrap.parser().parse_args(["--manifest-dir", str(explicit_manifest_dir)])
+    )
+
+    assert default_settings.manifest_dir == DEFAULT_MANIFEST_DIR
+    assert explicit_settings.manifest_dir == explicit_manifest_dir
 
 
 @pytest.mark.asyncio

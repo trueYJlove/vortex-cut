@@ -115,6 +115,33 @@ async def test_job_cancel_paths_and_lifecycle(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_job_stop_recovers_running_and_cancelling_jobs(tmp_path: Path):
+    db, service, source = make_basic_service(tmp_path)
+    payload = {
+        "path": str(source),
+        "size_bytes": source.stat().st_size,
+        "modified_at": source.stat().st_mtime_ns,
+    }
+    running = service.create("proxy", "running", payload, "software")
+    cancelling = service.create("proxy", "cancelling", payload, "software")
+    service._transition_job(running["job_id"], "queued", "running", stage="rendering")
+    service._transition_job(cancelling["job_id"], "queued", "running", stage="rendering")
+    service._transition_job(cancelling["job_id"], "running", "cancelling")
+
+    await service.stop()
+
+    running_after = service.get(running["job_id"])
+    cancelling_after = service.get(cancelling["job_id"])
+    assert running_after and running_after["status"] == "interrupted"
+    assert running_after["stage"] == "interrupted"
+    assert running_after["error"]["code"] == "JOB_INTERRUPTED"
+    assert cancelling_after and cancelling_after["status"] == "interrupted"
+    assert cancelling_after["stage"] == "interrupted"
+    assert cancelling_after["error"]["code"] == "JOB_INTERRUPTED"
+    assert db.recover_interrupted() == 0
+
+
+@pytest.mark.asyncio
 async def test_job_run_success_and_input_change(tmp_path: Path, monkeypatch):
     db, service, source = make_basic_service(tmp_path)
     payload = {

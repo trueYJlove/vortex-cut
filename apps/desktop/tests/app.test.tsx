@@ -5,7 +5,7 @@ import type { DesktopApi } from "../electron/preload/index.js";
 
 const project = { project_id: "project_1" as never, name: "Demo", status: "active" as const, canvas: { width: 1080, height: 1920, fps_num: 30, fps_den: 1 }, root_dir_name: "Demo", current_timeline_revision_id: null, created_at: "2026-08-09T00:00:00.000Z", updated_at: "2026-08-09T00:00:00.000Z", last_opened_at: "2026-08-09T00:00:00.000Z" };
 const asset = { asset_id: "asset_1" as never, project_id: "project_1" as never, kind: "text" as const, storage_mode: "external" as const, display_name: "notes.txt", fingerprint: "sha256:1", size_bytes: 8, modified_at: "2026-08-09T00:00:00.000Z", availability: "available" as const, media_info: { format_name: "txt", duration_us: 0 }, created_at: "2026-08-09T00:00:00.000Z", updated_at: "2026-08-09T00:00:00.000Z" };
-const job = { job_id: "job_1" as never, project_id: "project_1" as never, kind: "asset_probe" as const, status: "interrupted" as const, stage: "failed", progress: 0, attempt: 1, input: { asset_id: "asset_1" as never }, error: { code: "JOB_INTERRUPTED", message: "interrupted" }, created_at: "2026-08-09T00:00:00.000Z", updated_at: "2026-08-09T00:00:00.000Z", started_at: null, finished_at: "2026-08-09T00:00:00.000Z" };
+const job = { job_id: "job_1" as never, project_id: "project_1" as never, asset_id: "asset_1" as never, kind: "asset_probe" as const, status: "interrupted" as const, stage: "failed", progress: 0, attempt: 1, model_id: null, model_revision: null, input_fingerprint: null, input: { asset_id: "asset_1" as never }, error: { code: "JOB_INTERRUPTED", message: "interrupted" }, created_at: "2026-08-09T00:00:00.000Z", updated_at: "2026-08-09T00:00:00.000Z", started_at: null, finished_at: "2026-08-09T00:00:00.000Z" };
 
 function desktopApi(): DesktopApi {
   return {
@@ -23,6 +23,7 @@ function desktopApi(): DesktopApi {
     relocateAsset: vi.fn().mockResolvedValue({ grant: {}, asset, media_url: "aivideo://asset/asset_1" }),
     listJobs: vi.fn().mockResolvedValue({ items: [job], next_cursor: null }),
     createJob: vi.fn(), getJob: vi.fn(), cancelJob: vi.fn().mockResolvedValue({ ...job, status: "cancelled" }),
+    listModels: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), getModel: vi.fn(), downloadModel: vi.fn(), getModelDownload: vi.fn(), cancelModelDownload: vi.fn(), createTranscription: vi.fn(), listTranscripts: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), getTranscript: vi.fn(),
     openArtifact: vi.fn(), openArtifactFolder: vi.fn(), subscribeJob: vi.fn().mockReturnValue(() => undefined), diagnostics: vi.fn()
   } as DesktopApi;
 }
@@ -47,6 +48,7 @@ describe("Stage 1A workspace", () => {
     window.desktop = api;
     render(<App />);
     await screen.findByRole("heading", { name: "Demo" });
+    await waitFor(() => expect(screen.getByLabelText("重命名项目")).toHaveValue("Demo"));
     fireEvent.change(screen.getByLabelText("重命名项目"), { target: { value: "Renamed" } });
     fireEvent.click(screen.getByRole("button", { name: "重命名" }));
     await waitFor(() => expect(api.renameProject).toHaveBeenCalledWith({ project_id: "project_1", name: "Renamed" }));

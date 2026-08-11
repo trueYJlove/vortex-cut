@@ -25,6 +25,10 @@ extraResources:
     to: manifests
     filter:
       - components.json
+  - from: ../../resources/model-manifests
+    to: model-manifests
+    filter:
+      - '*.json'
 win:
   target:
     - target: nsis

@@ -73,7 +73,9 @@ test("真实 Electron 覆盖 Stage 1A 项目、四类素材和 availability 流�
     const expectedNames: Record<string, string> = { video: "clip.mp4", audio: "sound.wav", image: "still.png", text: "notes.txt" };
     for (const kind of ["video", "audio", "image", "text"]) {
       await page.getByRole("button", { name: `导入${kind}` }).click();
-      await expect(page.getByText(expectedNames[kind])).toBeVisible({ timeout: 30_000 });
+      const assetRow = page.locator(".asset-row").filter({ hasText: expectedNames[kind] });
+      await expect(assetRow).toBeVisible({ timeout: 30_000 });
+      await expect(assetRow.locator(".asset-name strong")).toHaveText(expectedNames[kind]);
     }
     await expect(page.getByText("aivideo://asset/").first()).toBeVisible();
     const textMediaUrl = await page.locator(".asset-row").filter({ hasText: "notes.txt" }).locator(".asset-name small").innerText();

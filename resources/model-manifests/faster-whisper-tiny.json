@@ -1,0 +1,50 @@
+{
+  "manifest_version": 1,
+  "model_id": "faster-whisper-tiny",
+  "provider": "faster-whisper",
+  "revision": "d90ca5fe260221311c53c58e660288d3deb8d356",
+  "display_name": "Whisper Tiny",
+  "purpose": "Local multilingual speech recognition for low-resource devices",
+  "download_url": "https://huggingface.co/Systran/faster-whisper-tiny/resolve/d90ca5fe260221311c53c58e660288d3deb8d356",
+  "trusted_source_id": "huggingface-systran",
+  "size_bytes": 78203619,
+  "installed_size_bytes": 78203619,
+  "sha256": "848a0e35060b1cf50a96d436ddd8fa1591e71274fcd7fb3ecfb3e2eae562c609",
+  "supports_word_timestamps": true,
+  "runtime_version": "faster-whisper>=1.0",
+  "license": {
+    "id": "mit",
+    "name": "MIT License",
+    "url": "https://opensource.org/license/mit",
+    "attribution": "Systran faster-whisper-tiny model",
+    "acceptance_required": false
+  },
+  "supported_languages": ["auto", "zh", "en", "ja", "ko", "de", "fr", "es", "ru"],
+  "runtime_requirements": {
+    "python": ">=3.12,<3.14",
+    "faster_whisper": ">=1.0"
+  },
+  "files": [
+    {
+      "path": "config.json",
+      "size_bytes": 2249,
+      "sha256": "a73a28cdfe1c43ccc7202fa333d1f89c202477271407ae9a7f19afa52039cac8"
+    },
+    {
+      "path": "model.bin",
+      "size_bytes": 75538270,
+      "sha256": "dcb76c6586fc06cbdac6dd21f14cfd129cc4cdd9dce19bf4ffa62e59cbe6e6d1"
+    },
+    {
+      "path": "tokenizer.json",
+      "size_bytes": 2203239,
+      "sha256": "fb7b63191e9bb045082c79fd742a3106a12c99513ab30df4a0d47fa6cb6fd0ab"
+    },
+    {
+      "path": "vocabulary.txt",
+      "size_bytes": 459861,
+      "sha256": "34ce3fe1c5041027b3f8d42912270993f986dbc4bb34cf27f951e34a1e453913"
+    }
+  ],
+  "created_at": "2026-08-10T00:00:00.000Z"
+}
