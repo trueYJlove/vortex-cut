@@ -41,6 +41,7 @@ import type {
   , ExportRecord
   , RenderArtifact
   , RenderArtifactId
+  , Brief, BriefInput, Recipe, ProviderConfig, EgressPreview, CandidatePlan
 } from "@aivideo/contracts";
 
 export interface MediaSelection { grant: FileGrant; media: MediaInfo }
@@ -75,6 +76,19 @@ export interface DesktopApi {
   createTranscription: (input: { asset_id: string; model_id: ModelId; language: string; word_timestamps: boolean; license_acceptance: string | null }) => Promise<TranscriptionCreateResponse>;
   listTranscripts: (assetId: string) => Promise<TranscriptPage>;
   getTranscript: (transcriptId: TranscriptId) => Promise<Transcript>;
+  getBrief?: (projectId: ProjectId) => Promise<Brief>;
+  putBrief?: (input: { project_id: ProjectId; brief: BriefInput }) => Promise<Brief>;
+  listRecipes?: () => Promise<{ items: Recipe[] }>;
+  listProviders?: () => Promise<{ items: ProviderConfig[] }>;
+  createProvider?: (input: Record<string, unknown>) => Promise<ProviderConfig>;
+  setProviderSecret?: (input: { provider_config_id: string; secret: string }) => Promise<{ provider_config_id: string; credential_status: "configured" }>;
+  deleteProviderSecret?: (providerId: string) => Promise<{ provider_config_id: string; credential_status: "missing" }>;
+  testProvider?: (providerId: string) => Promise<{ ok?: boolean; message?: string }>;
+  preparePlanning?: (input: { project_id: ProjectId; provider_config_id: string; recipe_id: string; transcript_ids: string[] }) => Promise<EgressPreview>;
+  createPlanning?: (input: { project_id: ProjectId; egress_preview_id: string; payload_sha256: string }) => Promise<{ job: Job }>;
+  listCandidatePlans?: (projectId: ProjectId) => Promise<{ items: CandidatePlan[] }>;
+  getCandidateClipMedia?: (input: { project_id: ProjectId; candidate_plan_id: string; candidate_clip_id: string }) => Promise<{ media_url: string; source_start_us: number; source_end_us: number }>;
+  adoptCandidatePlan?: (input: { project_id: ProjectId; candidate_plan_id: string; adoption: { schema_version: 1; candidate_document_sha256: string; base_revision_id: TimelineRevisionId | null } }) => Promise<TimelineState>;
   createTimeline: (input: { project_id: ProjectId; timeline: TimelineCreateInput }) => Promise<TimelineState>;
   getTimeline: (projectId: ProjectId) => Promise<TimelineState>;
   patchTimeline: (input: { project_id: ProjectId; patch: TimelinePatch }) => Promise<TimelineState>;
@@ -122,6 +136,19 @@ const api: DesktopApi = {
   createTranscription: input => ipcRenderer.invoke("transcription:create", input),
   listTranscripts: assetId => ipcRenderer.invoke("transcription:list", assetId),
   getTranscript: transcriptId => ipcRenderer.invoke("transcript:get", transcriptId),
+  getBrief: projectId => ipcRenderer.invoke("brief:get", projectId),
+  putBrief: input => ipcRenderer.invoke("brief:put", input),
+  listRecipes: () => ipcRenderer.invoke("recipe:list"),
+  listProviders: () => ipcRenderer.invoke("provider:list"),
+  createProvider: input => ipcRenderer.invoke("provider:create", input),
+  setProviderSecret: input => ipcRenderer.invoke("provider:set-secret", input),
+  deleteProviderSecret: providerId => ipcRenderer.invoke("provider:delete-secret", providerId),
+  testProvider: providerId => ipcRenderer.invoke("provider:test", providerId),
+  preparePlanning: input => ipcRenderer.invoke("planning:prepare", input),
+  createPlanning: input => ipcRenderer.invoke("planning:create", input),
+  listCandidatePlans: projectId => ipcRenderer.invoke("planning:list", projectId),
+  getCandidateClipMedia: input => ipcRenderer.invoke("planning:clip-media", input),
+  adoptCandidatePlan: input => ipcRenderer.invoke("planning:adopt", input),
   createTimeline: input => ipcRenderer.invoke("timeline:create", input),
   getTimeline: projectId => ipcRenderer.invoke("timeline:get", projectId),
   patchTimeline: input => ipcRenderer.invoke("timeline:patch", input),

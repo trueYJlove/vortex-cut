@@ -25,7 +25,9 @@ from .jobs import JobService
 from .media.encoders import EncoderDetector
 from .media.ffprobe import FFprobe
 from .model_registry import ModelError, ModelManager, ModelRegistry
+from .planning import PlanningService, ProviderRepository, RecipeRegistry
 from .projects import DomainError, ProjectAssetService
+from .providers import ProviderError, ProviderSecretVault
 from .rendering.ass import CaptionResources
 from .rendering.plan import RenderPlanCompiler
 from .rendering.service import (
@@ -140,6 +142,69 @@ class ExportCreateRequest(BaseModel):
     encoder_mode: str = "auto"
 
 
+class BriefPutRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    schema_version: int
+    topic: str
+    audience: str
+    target_platform: str
+    target_duration_us: int
+    narrative_goal: str
+    style_notes: str
+    must_keep: list[str]
+    forbidden: list[str]
+    original_audio_policy: str
+    caption_policy: str
+    caption_preset_id: str
+    default_layout: str
+
+
+class ProviderCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    kind: str
+    display_name: str
+    base_url: str
+    model: str
+    enabled: bool = True
+    input_price_per_million: float | None = None
+    output_price_per_million: float | None = None
+
+
+class ProviderPatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    display_name: str | None = None
+    base_url: str | None = None
+    model: str | None = None
+    enabled: bool | None = None
+    input_price_per_million: float | None = None
+    output_price_per_million: float | None = None
+
+
+class ProviderSecretRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    secret: str
+
+
+class EgressPrepareRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    provider_config_id: str
+    recipe_id: str
+    transcript_ids: list[str]
+
+
+class CandidateGenerationCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    egress_preview_id: str
+    payload_sha256: str
+
+
+class CandidateAdoptRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    schema_version: int
+    candidate_document_sha256: str
+    base_revision_id: str | None = None
+
+
 class DestinationGrantRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -161,10 +226,17 @@ class CoreState:
         self.model_manager = ModelManager(self.db, settings.data_dir, self.model_registry)
         self.transcripts = TranscriptRepository(self.db)
         self.timelines = TimelineService(self.db)
+        self.provider_secrets = ProviderSecretVault()
+        self.providers = ProviderRepository(self.db, self.provider_secrets)
+        self.recipes = RecipeRegistry(settings.recipe_dir)
+        self.planning = PlanningService(
+            self.db, self.recipes, self.providers, self.provider_secrets, self.timelines
+        )
         self.destinations = DestinationGrantStore()
         self.asr = AsrCoordinator(
             self.db, self.model_registry, self.model_manager, self.transcripts
         )
+
         async def probe_asset(path: Path, **kwargs: Any) -> dict[str, Any]:
             return await self.ffprobe.probe(path, **kwargs)
 
@@ -195,6 +267,7 @@ class CoreState:
             asr_runner=self.asr.run,
             retry_validator=self.asr.validate_retry,
             render_runner=self.render_coordinator.run,
+            planning_runner=self.planning.run_generation,
         )
         self.renders = RenderService(
             self.db,
@@ -228,11 +301,18 @@ def _error(code: str, message: str, status: int) -> HTTPException:
 
 
 def _model_error(exc: ModelError, model: dict[str, Any] | None = None) -> HTTPException:
-    status = 404 if exc.code == "MODEL_NOT_FOUND" else 409 if exc.code in {
-        "MODEL_NOT_INSTALLED",
-        "MODEL_LICENSE_REQUIRED",
-        "MODEL_DISK_SPACE_INSUFFICIENT",
-    } else 400
+    status = (
+        404
+        if exc.code == "MODEL_NOT_FOUND"
+        else 409
+        if exc.code
+        in {
+            "MODEL_NOT_INSTALLED",
+            "MODEL_LICENSE_REQUIRED",
+            "MODEL_DISK_SPACE_INSUFFICIENT",
+        }
+        else 400
+    )
     detail: dict[str, Any] = {"code": exc.code, "message": exc.message}
     if model is not None:
         detail["model"] = model
@@ -240,11 +320,18 @@ def _model_error(exc: ModelError, model: dict[str, Any] | None = None) -> HTTPEx
 
 
 def _transcription_error(exc: TranscriptionError) -> HTTPException:
-    status = 404 if exc.code == "ASSET_NOT_FOUND" else 409 if exc.code in {
-        "TRANSCRIPTION_INPUT_CHANGED",
-        "TRANSCRIPTION_NOT_READY",
-        "MODEL_NOT_INSTALLED",
-    } else 400
+    status = (
+        404
+        if exc.code == "ASSET_NOT_FOUND"
+        else 409
+        if exc.code
+        in {
+            "TRANSCRIPTION_INPUT_CHANGED",
+            "TRANSCRIPTION_NOT_READY",
+            "MODEL_NOT_INSTALLED",
+        }
+        else 400
+    )
     return _error(exc.code, exc.message, status)
 
 
@@ -281,6 +368,9 @@ def _domain(exc: DomainError) -> HTTPException:
         "PREVIEW_NOT_FOUND",
         "EXPORT_NOT_FOUND",
         "ARTIFACT_NOT_FOUND",
+        "CANDIDATE_PLAN_NOT_FOUND",
+        "CANDIDATE_CLIP_NOT_FOUND",
+        "CANDIDATE_GENERATION_NOT_FOUND",
     }:
         status = 404
     return _error(exc.code, exc.message, status)
@@ -335,9 +425,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.exception_handler(HTTPException)
     async def http_error(_: Request, exc: HTTPException) -> JSONResponse:
-        detail = cast(
-            dict[str, Any], exc.detail if isinstance(exc.detail, dict) else {}
-        )
+        detail = cast(dict[str, Any], exc.detail if isinstance(exc.detail, dict) else {})
         if "model" in detail:
             return JSONResponse(
                 status_code=exc.status_code,
@@ -408,6 +496,169 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ],
         )
 
+    @app.put("/api/v1/internal/provider-secrets/{provider_config_id}")
+    async def set_provider_secret(
+        provider_config_id: str,
+        request: ProviderSecretRequest,
+        _: CoreState = Depends(require_admin),
+    ) -> dict[str, Any]:
+        try:
+            state.providers.get(provider_config_id)
+            state.provider_secrets.set(provider_config_id, request.secret)
+            return {"provider_config_id": provider_config_id, "credential_status": "configured"}
+        except (DomainError, ProviderError) as exc:
+            raise _error(exc.code, exc.message, 400) from exc
+
+    @app.delete("/api/v1/internal/provider-secrets/{provider_config_id}", status_code=204)
+    async def delete_provider_secret(
+        provider_config_id: str, _: CoreState = Depends(require_admin)
+    ) -> None:
+        state.provider_secrets.delete(provider_config_id)
+
+    @app.get("/api/v1/projects/{project_id}/brief")
+    async def get_brief(project_id: str, _: CoreState = Depends(require_ui)) -> dict[str, Any]:
+        try:
+            return state.planning.get_brief(project_id)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.put("/api/v1/projects/{project_id}/brief")
+    async def put_brief(
+        project_id: str, request: BriefPutRequest, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        try:
+            return state.planning.put_brief(project_id, request.model_dump())
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/recipes")
+    async def list_recipes(_: CoreState = Depends(require_ui)) -> dict[str, Any]:
+        return {"items": state.recipes.list()}
+
+    @app.get("/api/v1/recipes/{recipe_id}")
+    async def get_recipe(recipe_id: str, _: CoreState = Depends(require_ui)) -> dict[str, Any]:
+        try:
+            return state.recipes.public(state.recipes.get(recipe_id))
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/providers")
+    async def list_providers(_: CoreState = Depends(require_ui)) -> dict[str, Any]:
+        return {"items": state.providers.list()}
+
+    @app.post("/api/v1/providers")
+    async def create_provider(
+        request: ProviderCreateRequest, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        try:
+            return state.providers.create(request.model_dump())
+        except (DomainError, ProviderError) as exc:
+            raise _error(exc.code, exc.message, 400) from exc
+
+    @app.patch("/api/v1/providers/{provider_config_id}")
+    async def patch_provider(
+        provider_config_id: str, request: ProviderPatchRequest, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        try:
+            return state.providers.patch(
+                provider_config_id, {k: v for k, v in request.model_dump().items() if v is not None}
+            )
+        except (DomainError, ProviderError) as exc:
+            raise (
+                _domain(exc) if isinstance(exc, DomainError) else _error(exc.code, exc.message, 400)
+            )
+
+    @app.post("/api/v1/providers/{provider_config_id}/test")
+    async def test_provider(
+        provider_config_id: str, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        try:
+            return await state.planning.test_provider(provider_config_id)
+        except (DomainError, ProviderError) as exc:
+            raise (
+                _domain(exc) if isinstance(exc, DomainError) else _error(exc.code, exc.message, 503)
+            )
+
+    @app.post("/api/v1/projects/{project_id}/candidate-generations/prepare")
+    async def prepare_generation(
+        project_id: str, request: EgressPrepareRequest, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        try:
+            return state.planning.prepare(project_id, request.model_dump())
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/candidate-generations")
+    async def create_generation(
+        project_id: str,
+        request: CandidateGenerationCreateRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return state.planning.create_generation(
+                project_id, request.egress_preview_id, request.payload_sha256, state.jobs
+            )
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/projects/{project_id}/candidate-generations")
+    async def list_candidate_generations(
+        project_id: str, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        return {"items": state.planning.list_generations(project_id)}
+
+    @app.get("/api/v1/candidate-generations/{candidate_generation_id}")
+    async def get_candidate_generation(
+        candidate_generation_id: str, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        try:
+            return state.planning.get_generation(candidate_generation_id)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/projects/{project_id}/candidate-plans")
+    async def list_candidate_plans(
+        project_id: str, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        return {"items": state.planning.list_candidates(project_id)}
+
+    @app.get("/api/v1/candidate-plans/{candidate_plan_id}")
+    async def get_candidate_plan(
+        candidate_plan_id: str, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        try:
+            return state.planning.get_candidate(candidate_plan_id)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get(
+        "/api/v1/projects/{project_id}/candidate-plans/{candidate_plan_id}/clips/{candidate_clip_id}"
+    )
+    async def get_candidate_clip(
+        project_id: str,
+        candidate_plan_id: str,
+        candidate_clip_id: str,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return state.planning.get_candidate_clip(
+                project_id, candidate_plan_id, candidate_clip_id
+            )
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/candidate-plans/{candidate_plan_id}/adopt")
+    async def adopt_candidate(
+        project_id: str,
+        candidate_plan_id: str,
+        request: CandidateAdoptRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return state.planning.adopt(project_id, candidate_plan_id, request.model_dump())
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
     @app.post("/api/v1/internal/file-grants")
     async def create_grant(
         request: FileGrantRequest, _: CoreState = Depends(require_admin)
@@ -454,9 +705,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise _domain(exc) from exc
 
     @app.get("/api/v1/internal/assets/{asset_id}/resolve")
-    async def resolve_asset(
-        asset_id: str, _: CoreState = Depends(require_admin)
-    ) -> dict[str, str]:
+    async def resolve_asset(asset_id: str, _: CoreState = Depends(require_admin)) -> dict[str, str]:
         try:
             return state.projects.resolve_asset_path(asset_id)
         except DomainError as exc:
@@ -659,16 +908,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: CoreState = Depends(require_ui),
     ) -> dict[str, Any]:
         try:
-            return with_current_preview(
-                state.timelines.create(project_id, request.model_dump())
-            )
+            return with_current_preview(state.timelines.create(project_id, request.model_dump()))
         except DomainError as exc:
             raise _domain(exc) from exc
 
     @app.get("/api/v1/projects/{project_id}/timeline")
-    async def get_timeline(
-        project_id: str, _: CoreState = Depends(require_ui)
-    ) -> dict[str, Any]:
+    async def get_timeline(project_id: str, _: CoreState = Depends(require_ui)) -> dict[str, Any]:
         try:
             return with_current_preview(state.timelines.get_state(project_id))
         except DomainError as exc:
@@ -681,9 +926,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: CoreState = Depends(require_ui),
     ) -> dict[str, Any]:
         try:
-            return with_current_preview(
-                state.timelines.patch(project_id, request.model_dump())
-            )
+            return with_current_preview(state.timelines.patch(project_id, request.model_dump()))
         except DomainError as exc:
             raise _domain(exc) from exc
 
@@ -694,9 +937,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: CoreState = Depends(require_ui),
     ) -> dict[str, Any]:
         try:
-            return with_current_preview(
-                state.timelines.undo(project_id, request.base_revision_id)
-            )
+            return with_current_preview(state.timelines.undo(project_id, request.base_revision_id))
         except DomainError as exc:
             raise _domain(exc) from exc
 
@@ -707,9 +948,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: CoreState = Depends(require_ui),
     ) -> dict[str, Any]:
         try:
-            return with_current_preview(
-                state.timelines.redo(project_id, request.base_revision_id)
-            )
+            return with_current_preview(state.timelines.redo(project_id, request.base_revision_id))
         except DomainError as exc:
             raise _domain(exc) from exc
 
@@ -725,9 +964,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise _domain(exc) from exc
 
     @app.delete("/api/v1/projects/{project_id}/timeline/draft", status_code=204)
-    async def delete_timeline_draft(
-        project_id: str, _: CoreState = Depends(require_ui)
-    ) -> None:
+    async def delete_timeline_draft(project_id: str, _: CoreState = Depends(require_ui)) -> None:
         try:
             state.timelines.delete_draft(project_id)
         except DomainError as exc:
@@ -829,8 +1066,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         cursor: str | None = None,
         _: CoreState = Depends(require_ui),
     ) -> dict[str, Any]:
-        if limit < 1 or limit > 100 or (
-            cursor is not None and (not cursor.isdigit() or int(cursor) < 0)
+        if (
+            limit < 1
+            or limit > 100
+            or (cursor is not None and (not cursor.isdigit() or int(cursor) < 0))
         ):
             raise _error("CONFLICT", "操作冲突，请刷新后重试", 400)
         items = state.model_manager.list_details()

@@ -27,6 +27,7 @@ function desktopApi(options: { timeline?: TimelineState | null; models?: ModelDe
     listAssets: vi.fn().mockResolvedValue({ items: [{ asset: video, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGH" }, { asset: image, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGHI" }], next_cursor: null }), importAsset: vi.fn().mockImplementation(async ({ kind }: { kind?: string }) => ({ grant: {}, asset: { ...image, asset_id: `import_${kind}` as never, kind: kind ?? "video", display_name: `import-${kind}` }, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGHI" })), refreshAsset: vi.fn().mockResolvedValue({ asset: video, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGH" }), relocateAsset: vi.fn().mockResolvedValue({ grant: {}, asset: video, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGH" }),
     listJobs: vi.fn().mockResolvedValue({ items: options.jobs ?? [], next_cursor: null }), createJob: vi.fn(), getJob: vi.fn(), cancelJob: vi.fn().mockImplementation(async (jobId: string) => ({ ...createdJob, job_id: jobId, status: "cancelled" })), listModels: vi.fn().mockResolvedValue({ items: options.models ?? [], next_cursor: null }), getModel: vi.fn().mockResolvedValue(model), downloadModel: vi.fn().mockResolvedValue({ model: { ...model, status: "queued" }, job: downloadJob }), getModelDownload: vi.fn(), cancelModelDownload: vi.fn().mockResolvedValue({ model: { ...model, status: "cancelled" }, job: { ...downloadJob, status: "cancelled" } }), createTranscription: vi.fn().mockImplementation(async () => ({ job: { ...createdJob, job_id: `job_created_${++transcriptionSequence}` as never }, transcript: null })),
     listTranscripts: vi.fn().mockResolvedValue({ items: [{ ...transcript, segments: undefined, words: undefined }], next_cursor: null }), getTranscript: vi.fn().mockResolvedValue(transcript),
+    getBrief: vi.fn().mockRejectedValue(new Error("BRIEF_NOT_FOUND")), putBrief: vi.fn().mockResolvedValue({}), listRecipes: vi.fn().mockResolvedValue({ items: [{ schema_version: 1, recipe_id: "balanced-narrative-v1", name: "Balanced", summary: "测试", rules: { selection: "keyword", pace: "balanced", max_gap_us: 1 }, document_sha256: `sha256:${"a".repeat(64)}` }] }), listProviders: vi.fn().mockResolvedValue({ items: [{ provider_config_id: "provider_1", display_name: "测试 Provider", credential_status: "configured" }] }), createProvider: vi.fn(), setProviderSecret: vi.fn(), deleteProviderSecret: vi.fn().mockResolvedValue({ provider_config_id: "provider_1", credential_status: "missing" }), testProvider: vi.fn().mockResolvedValue({ status: "succeeded" }), preparePlanning: vi.fn().mockResolvedValue({ egress_preview_id: "preview_1", provider: { display_name: "测试", origin: "https://provider.test", model: "model" }, prompt_template_version: "candidate-plan-v1", sent_fields: ["segments.text"], payload_sha256: `sha256:${"b".repeat(64)}`, expires_at: now, payload: { segments: [{ segment_ref: "s1", text: "第一句" }] }, stats: { transcript_count: 1, segment_count: 1, character_count: 3, estimated_tokens: 1 } }), createPlanning: vi.fn().mockResolvedValue({ job: { ...createdJob, kind: "candidate_generation" } }), listCandidatePlans: vi.fn().mockResolvedValue({ items: [] }), getCandidateClipMedia: vi.fn(), adoptCandidatePlan: vi.fn().mockResolvedValue(state),
     createTimeline: vi.fn().mockResolvedValue(state), getTimeline: timeline ? vi.fn().mockResolvedValue(timeline) : vi.fn().mockRejectedValue(new Error("TIMELINE_NOT_FOUND 404")), patchTimeline: vi.fn().mockResolvedValue(state), undoTimeline: vi.fn().mockResolvedValue(state), redoTimeline: vi.fn().mockResolvedValue(state), saveTimelineDraft: vi.fn().mockResolvedValue({ project_id: project.project_id, base_revision_id: state.current_revision.timeline_revision_id, document: timelineDocument, updated_at: now, conflict: false }), deleteTimelineDraft: vi.fn().mockResolvedValue(undefined), listTimelineRevisions: vi.fn(), getTimelineRevision: vi.fn(),
     createPreview: vi.fn().mockResolvedValue({ job: null, preview: null, reused: false }), listPreviews: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), chooseExportDestination: vi.fn().mockResolvedValue(null), createExport: vi.fn(), listExports: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), getRenderArtifact: vi.fn(),
     openArtifact: vi.fn(), openArtifactFolder: vi.fn(), subscribeJob: vi.fn().mockReturnValue(() => undefined), diagnostics: vi.fn()
@@ -38,15 +39,43 @@ describe("Stage 1A/1B 工作流", () => {
   afterEach(() => { vi.useRealTimers(); cleanup(); });
 
   it("支持项目创建、重命名、归档、重开和四类素材导入", async () => {
-    const createApi = desktopApi(); window.desktop = createApi; render(<App />);
+    const api = desktopApi();
+    const createdProject = { ...project, project_id: "project_2" as never, name: "新项目" };
+    api.createProject = vi.fn().mockResolvedValue(createdProject);
+    api.listProjects = vi.fn()
+      .mockResolvedValueOnce({ items: [project], next_cursor: null })
+      .mockResolvedValue({ items: [project, createdProject], next_cursor: null });
+    window.desktop = api; render(<App />);
     await screen.findByRole("option", { name: "演示项目" });
-    fireEvent.change(screen.getByLabelText("项目名称"), { target: { value: "新项目" } }); fireEvent.click(screen.getByRole("button", { name: /^创建$/ })); await waitFor(() => expect(createApi.createProject).toHaveBeenCalledWith({ name: "新项目" }));
-    cleanup(); const api = desktopApi(); window.desktop = api; render(<App />); await screen.findByRole("option", { name: "演示项目" });
+    fireEvent.change(screen.getByLabelText("项目名称"), { target: { value: "新项目" } }); fireEvent.click(screen.getByRole("button", { name: /^创建$/ })); await waitFor(() => expect(api.createProject).toHaveBeenCalledWith({ name: "新项目" }));
+    // Wait for the finished create mutation, then use the real project picker
+    // to continue the remaining workflow on project_1.  API invocation alone
+    // is not completion: createProject still refreshes and selects its result.
+    await screen.findByRole("heading", { name: "新项目" });
+    fireEvent.change(screen.getByLabelText("当前项目"), { target: { value: "project_1" } });
+    await screen.findByRole("heading", { name: "演示项目" });
     fireEvent.change(screen.getByLabelText("重命名项目"), { target: { value: "已重命名" } }); fireEvent.click(screen.getByRole("button", { name: "重命名" })); await waitFor(() => expect(api.renameProject).toHaveBeenCalledWith({ project_id: "project_1", name: "已重命名" }));
-    fireEvent.click(screen.getByRole("button", { name: "归档" })); await waitFor(() => expect(api.archiveProject).toHaveBeenCalledWith("project_1")); fireEvent.click(screen.getByRole("button", { name: "重新打开" })); await waitFor(() => expect(api.reopenProject).toHaveBeenCalledWith("project_1"));
+    await screen.findByRole("heading", { name: "已重命名" });
+    fireEvent.click(screen.getByRole("button", { name: "归档" })); await waitFor(() => expect(api.archiveProject).toHaveBeenCalledWith("project_1"));
+    await screen.findByRole("button", { name: "重新打开" });
+    fireEvent.click(screen.getByRole("button", { name: "重新打开" })); await waitFor(() => expect(api.reopenProject).toHaveBeenCalledWith("project_1"));
+    await screen.findByRole("button", { name: "归档" });
     for (const kind of ["video", "audio", "image", "text"] as const) fireEvent.click(screen.getByRole("button", { name: `导入${kind}` }));
     await waitFor(() => expect(api.importAsset).toHaveBeenCalledTimes(4));
     expect(api.importAsset).toHaveBeenNthCalledWith(1, { project_id: "project_1", kind: "video" }); expect(api.importAsset).toHaveBeenNthCalledWith(4, { project_id: "project_1", kind: "text" });
+  });
+
+  it("卸载后的启动请求不会穿透到后来挂载的 Desktop bridge", async () => {
+    let resolveRuntime!: () => void;
+    const lateRuntime = new Promise<{ protocol_version: 1; status: "ready" }>(resolve => { resolveRuntime = () => resolve({ protocol_version: 1, status: "ready" }); });
+    const staleApi = desktopApi(); staleApi.getRuntime = vi.fn().mockReturnValue(lateRuntime);
+    window.desktop = staleApi; const stale = render(<App />); stale.unmount();
+    const freshApi = desktopApi(); window.desktop = freshApi; render(<App />);
+    await screen.findByRole("option", { name: "演示项目" });
+    const freshProjectCalls = vi.mocked(freshApi.listProjects).mock.calls.length;
+    resolveRuntime(); await act(async () => { await Promise.resolve(); });
+    await waitFor(() => expect(vi.mocked(freshApi.listProjects).mock.calls.length).toBe(freshProjectCalls));
+    expect(staleApi.listProjects).toHaveBeenCalledTimes(1);
   });
 
   it("迟到的同项目刷新不会覆盖重命名草稿，且切换与确认后仍会同步服务端名称", async () => {
@@ -136,6 +165,47 @@ describe("Stage 1C Editor", () => {
   });
 });
 
+describe("Stage 2A AI 粗剪", () => {
+  afterEach(() => cleanup());
+  it("必须先 prepare 再经明确确认创建，且不渲染密钥", async () => {
+    const api = desktopApi(); window.desktop = api; render(<App />);
+    await screen.findByRole("option", { name: "演示项目" });
+    fireEvent.click(screen.getByRole("button", { name: "AI 粗剪" }));
+    fireEvent.change(await screen.findByLabelText("主题"), { target: { value: "游戏高光" } });
+    fireEvent.change(screen.getByLabelText("受众"), { target: { value: "玩家" } });
+    fireEvent.change(screen.getByLabelText("叙事目标"), { target: { value: "展示关键操作" } });
+    fireEvent.change(screen.getByLabelText("制作配方"), { target: { value: "balanced-narrative-v1" } });
+    fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "provider_1" } });
+    fireEvent.change(screen.getByLabelText("就绪转录"), { target: { value: "transcript_1" } });
+    fireEvent.change(screen.getByLabelText("Provider 密钥"), { target: { value: "SENTINEL-SECRET" } });
+    fireEvent.click(screen.getByRole("button", { name: "安全保存密钥" }));
+    await waitFor(() => expect(api.setProviderSecret).toHaveBeenCalledWith({ provider_config_id: "provider_1", secret: "SENTINEL-SECRET" }));
+    expect(document.body.textContent).not.toContain("SENTINEL-SECRET");
+    expect(api.createPlanning).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "准备外传确认" }));
+    await screen.findByText("确认发送的精确内容"); expect(api.preparePlanning).toHaveBeenCalled(); expect(api.createPlanning).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "我确认发送以上内容" }));
+    await waitFor(() => expect(api.createPlanning).toHaveBeenCalledWith({ project_id: "project_1", egress_preview_id: "preview_1", payload_sha256: `sha256:${"b".repeat(64)}` }));
+  });
+  it("删除密钥使用白名单桥接且不回显", async () => {
+    const api = desktopApi(); window.desktop = api; render(<App />); await screen.findByRole("option", { name: "演示项目" });
+    fireEvent.click(screen.getByRole("button", { name: "AI 粗剪" })); fireEvent.change(await screen.findByLabelText("Provider"), { target: { value: "provider_1" } });
+    fireEvent.click(screen.getByRole("button", { name: "删除当前 Provider 密钥" })); await waitFor(() => expect(api.deleteProviderSecret).toHaveBeenCalledWith("provider_1"));
+    expect(document.body.textContent).not.toContain("SENTINEL-KEY-NEVER-LOG");
+  });
+  it.each(["failed", "cancelled", "interrupted"] as const)("任务 %s 会清除旧外传预览，取消按钮调用任务取消并强制重新准备", async status => {
+    const api = desktopApi(); let listener: ((value: Job) => void) | undefined;
+    api.subscribeJob = vi.fn((_id, next) => { listener = next; return () => undefined; });
+    window.desktop = api; render(<App />); await screen.findByRole("option", { name: "演示项目" });
+    fireEvent.click(screen.getByRole("button", { name: "AI 粗剪" }));
+    fireEvent.change(await screen.findByLabelText("主题"), { target: { value: "游戏高光" } }); fireEvent.change(screen.getByLabelText("受众"), { target: { value: "玩家" } }); fireEvent.change(screen.getByLabelText("叙事目标"), { target: { value: "展示操作" } }); fireEvent.change(screen.getByLabelText("制作配方"), { target: { value: "balanced-narrative-v1" } }); fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "provider_1" } }); fireEvent.change(screen.getByLabelText("就绪转录"), { target: { value: "transcript_1" } });
+    fireEvent.click(screen.getByRole("button", { name: "准备外传确认" })); await screen.findByText("确认发送的精确内容"); fireEvent.click(screen.getByRole("button", { name: "我确认发送以上内容" }));
+    expect(await screen.findByRole("button", { name: "取消生成" })).toBeVisible(); fireEvent.click(screen.getByRole("button", { name: "取消生成" })); expect(api.cancelJob).toHaveBeenCalledWith("job_created");
+    expect(listener).toBeTypeOf("function"); listener?.({ ...createdJob, status, stage: status, progress: 0, error: { code: `JOB_${status.toUpperCase()}`, message: status } });
+    expect(await screen.findByRole("button", { name: "准备外传确认" })).toBeVisible(); expect(screen.queryByText("确认发送的精确内容")).not.toBeInTheDocument(); expect(api.createPlanning).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("Stage 1C Render", () => {
   beforeEach(() => { window.desktop = desktopApi(); });
   afterEach(() => cleanup());
@@ -149,8 +219,10 @@ describe("Stage 1C Render", () => {
     vi.mocked(api.createExport).mockResolvedValue({ job: exportJob, export_record: null });
     window.desktop = api; render(<App />);
     await screen.findByRole("option", { name: "演示项目" });
+    const previewButton = screen.getByRole("button", { name: "生成预览" });
+    await waitFor(() => expect(previewButton).toBeEnabled());
     fireEvent.change(screen.getByLabelText("编码模式"), { target: { value: "software" } });
-    fireEvent.click(screen.getByRole("button", { name: "生成预览" }));
+    fireEvent.click(previewButton);
     await waitFor(() => expect(api.createPreview).toHaveBeenCalledWith({ project_id: project.project_id, preview: { timeline_revision_id: state.current_revision.timeline_revision_id, encoder_mode: "software" } }));
     fireEvent.click(screen.getByRole("button", { name: "导出" }));
     await waitFor(() => expect(api.chooseExportDestination).toHaveBeenCalledWith(project.project_id));
@@ -165,6 +237,9 @@ describe("Stage 1C Render", () => {
     cleanup();
     const draftState = { ...state, draft: { project_id: project.project_id, base_revision_id: state.current_revision.timeline_revision_id, document: timelineDocument, updated_at: now, conflict: false } };
     const draftApi = desktopApi({ timeline: draftState }); window.desktop = draftApi; render(<App />);
-    await waitFor(() => expect(screen.getByRole("button", { name: "生成预览" })).toHaveAttribute("title", "存在未提交草稿，请先形成正式 Revision"));
+    await waitFor(() => {
+      expect(screen.getByText("检测到上次未恢复草稿")).toBeVisible();
+      expect(screen.getByRole("button", { name: "生成预览" })).toHaveAttribute("title", "存在未提交草稿，请先形成正式 Revision");
+    });
   });
 });

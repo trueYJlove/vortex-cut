@@ -1,0 +1,1 @@
+{"schema_version":1,"recipe_id":"funny-mistake-v1","name":"Funny mistake","summary":"Prioritize text cues for mistakes, surprises, and reactions.","rules":{"selection":"keyword_relevance","keywords":["mistake","oops","wrong","笑","失误"],"pace":"comic"}}

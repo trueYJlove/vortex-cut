@@ -30,6 +30,7 @@ def _resource_path(name: str) -> Path:
 
 DEFAULT_MANIFEST_DIR = _resource_path("model-manifests")
 DEFAULT_FONT_DIR = _resource_path("fonts")
+DEFAULT_RECIPE_DIR = _resource_path("recipes")
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,7 @@ class Settings:
     ready_file: Path | None = None
     manifest_dir: Path = field(default_factory=lambda: _resource_path("model-manifests"))
     font_dir: Path = field(default_factory=lambda: _resource_path("fonts"))
+    recipe_dir: Path = field(default_factory=lambda: _resource_path("recipes"))
 
     def prepare(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -62,6 +64,7 @@ class Settings:
     @classmethod
     def from_args(cls, args: object) -> Settings:
         manifest_dir = getattr(args, "manifest_dir", None)
+        recipe_dir = getattr(args, "recipe_dir", None)
         return cls(
             host=getattr(args, "host"),
             port=getattr(args, "port"),
@@ -79,6 +82,7 @@ class Settings:
             manifest_dir=(
                 Path(manifest_dir) if manifest_dir else _resource_path("model-manifests")
             ),
+            recipe_dir=Path(recipe_dir) if recipe_dir else _resource_path("recipes"),
         )
 
 

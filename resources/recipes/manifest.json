@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "recipes": [
+    "balanced-narrative-v1",
+    "energetic-highlight-v1",
+    "funny-mistake-v1",
+    "tutorial-explainer-v1"
+  ]
+}

@@ -27,6 +27,9 @@ RenderRunner = Callable[
     ],
     Awaitable[dict[str, Any]],
 ]
+PlanningRunner = Callable[
+    [Any, asyncio.Event, Callable[[float], None], Callable[[str], None]], Awaitable[dict[str, Any]]
+]
 
 
 class JobService:
@@ -41,6 +44,7 @@ class JobService:
         asr_runner: AsrRunner | None = None,
         retry_validator: Callable[[Any], None] | None = None,
         render_runner: RenderRunner | None = None,
+        planning_runner: PlanningRunner | None = None,
     ) -> None:
         self.db = db
         self.data_dir = data_dir
@@ -51,6 +55,7 @@ class JobService:
         self.asr_runner = asr_runner
         self.retry_validator = retry_validator
         self.render_runner = render_runner
+        self.planning_runner = planning_runner
         self.tasks: dict[str, asyncio.Task[None]] = {}
         self.cancel_events: dict[str, asyncio.Event] = {}
         self.worker: asyncio.Task[None] | None = None
@@ -227,6 +232,39 @@ class JobService:
             )
         return self.get(job_id) or {"job_id": job_id, "status": "queued", "created_at": now}
 
+    def create_candidate_generation(
+        self, project_id: str, generation_id: str, invocation_id: str, payload_sha256: str
+    ) -> dict[str, Any]:
+        job_id, now = new_id(), utc_now()
+        with self.db.connection() as db:
+            db.execute(
+                "INSERT INTO jobs(id,project_id,kind,type,status,stage,progress,input_json,"
+                "candidate_generation_id,provider_invocation_id,resource_class,attempt,created_at,updated_at) "  # noqa: E501
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    job_id,
+                    project_id,
+                    "candidate_generation",
+                    "candidate_generation",
+                    "queued",
+                    "queued",
+                    0,
+                    json_dumps(
+                        {
+                            "candidate_generation_id": generation_id,
+                            "egress_payload_sha256": payload_sha256,
+                        }
+                    ),
+                    generation_id,
+                    invocation_id,
+                    "network",
+                    1,
+                    now,
+                    now,
+                ),
+            )
+        return self.get(job_id) or {"job_id": job_id, "status": "queued", "created_at": now}
+
     def delete_queued(self, job_id: str) -> None:
         with self.db.connection() as db:
             db.execute("DELETE FROM jobs WHERE id=? AND status='queued'", (job_id,))
@@ -307,6 +345,8 @@ class JobService:
                 return None
             if row["status"] not in {"interrupted", "failed"}:
                 raise ValueError("JOB_INVALID_STATE")
+            if row["kind"] == "candidate_generation":
+                raise ValueError("CANDIDATE_GENERATION_RECONFIRM_REQUIRED")
             if self.retry_validator:
                 self.retry_validator(row)
             db.execute(
@@ -361,6 +401,9 @@ class JobService:
         elif status == "running":
             self._transition_job(job_id, status, "cancelling", cancel_requested=1)
             self.cancel_events.setdefault(job_id, asyncio.Event()).set()
+            job = self.get(job_id)
+            if job_id in self.tasks and job and job["kind"] == "candidate_generation":
+                self.tasks[job_id].cancel()
         elif status == "cancelling":
             self.cancel_events.setdefault(job_id, asyncio.Event()).set()
         result = self.get(job_id)
@@ -445,6 +488,20 @@ class JobService:
                         "UPDATE jobs SET result_json=?,updated_at=? WHERE id=?",
                         (json_dumps(result), utc_now(), job_id),
                     )
+            elif row["kind"] == "candidate_generation":
+                if self.planning_runner is None:
+                    raise RuntimeError("PLANNING_UNAVAILABLE")
+                result = await self.planning_runner(
+                    row,
+                    cancel_event,
+                    lambda value: self._set_progress(job_id, value),
+                    lambda value: self._set_stage(job_id, value),
+                )
+                with self.db.connection() as db:
+                    db.execute(
+                        "UPDATE jobs SET result_json=?,updated_at=? WHERE id=?",
+                        (json_dumps(result), utc_now(), job_id),
+                    )
             elif row["kind"] in {"asset_probe", "asset_fingerprint"}:
                 pass
             else:
@@ -479,10 +536,27 @@ class JobService:
                     finished_at=utc_now(),
                     worker_pid=None,
                 )
+        except asyncio.CancelledError:
+            current_status = self._current_status(job_id)
+            if current_status in {"running", "cancelling"}:
+                target = "cancelled" if current_status == "cancelling" else "interrupted"
+                self._transition_job(
+                    job_id,
+                    current_status,
+                    target,
+                    stage=target,
+                    error_code="JOB_CANCELLED" if target == "cancelled" else "JOB_INTERRUPTED",
+                    error_message=_job_error_message(
+                        "JOB_CANCELLED" if target == "cancelled" else "JOB_INTERRUPTED"
+                    ),
+                    finished_at=utc_now(),
+                    worker_pid=None,
+                )
+            raise
         except Exception:
             current_status = self._current_status(job_id)
             if current_status in {"running", "cancelling"}:
-                target = "interrupted" if current_status == "cancelling" else "failed"
+                target = "cancelled" if current_status == "cancelling" else "failed"
                 self._transition_job(
                     job_id,
                     current_status,
@@ -497,9 +571,7 @@ class JobService:
             self.cancel_events.pop(job_id, None)
             await self._emit_update(self.get(job_id))
 
-    async def _run_asr(
-        self, row: Any, cancel_event: asyncio.Event, job_id: str
-    ) -> dict[str, Any]:
+    async def _run_asr(self, row: Any, cancel_event: asyncio.Event, job_id: str) -> dict[str, Any]:
         if self.asr_runner is None:
             raise RuntimeError("MODEL_RUNTIME_UNAVAILABLE")
         result = await self.asr_runner(
@@ -512,9 +584,7 @@ class JobService:
             raise RuntimeError("JOB_CANCELLED")
         return result
 
-    async def _run_media(
-        self, row: Any, job_id: str, cancel_event: asyncio.Event
-    ) -> None:
+    async def _run_media(self, row: Any, job_id: str, cancel_event: asyncio.Event) -> None:
         payload = json_loads(row["input_json"])
         work = self.data_dir / "jobs" / job_id / "work"
         artifacts = self.data_dir / "jobs" / job_id / "artifacts"
@@ -531,9 +601,7 @@ class JobService:
                 "UPDATE jobs SET encoder_used=?,fallback_reason=?,updated_at=? WHERE id=?",
                 (encoder, fallback, utc_now(), job_id),
             )
-        output = work / (
-            "vertical-sample.mp4" if row["type"] == "vertical_sample" else "proxy.mp4"
-        )
+        output = work / ("vertical-sample.mp4" if row["type"] == "vertical_sample" else "proxy.mp4")
         args = build_render_args(
             input_path,
             output,
@@ -570,6 +638,7 @@ class JobService:
                     utc_now(),
                 ),
             )
+
     def _set_progress(self, job_id: str, progress: float) -> None:
         with self.db.connection() as db:
             db.execute(

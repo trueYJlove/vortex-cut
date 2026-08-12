@@ -11,6 +11,10 @@ const executablePath = chromeCandidates.find(path => existsSync(path));
 export default defineConfig({
   testDir: "../e2e",
   timeout: 120_000,
+  // Each Electron test owns a fresh user-data database and spawned sidecar.
+  // A single worker makes teardown observable before the next instance starts,
+  // preventing process/port/token overlap while preserving every E2E assertion.
+  workers: 1,
   fullyParallel: false,
   use: {
     viewport: { width: 1440, height: 960 },

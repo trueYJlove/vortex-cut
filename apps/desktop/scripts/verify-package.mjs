@@ -25,6 +25,7 @@ const required = [
   "licenses/THIRD_PARTY_NOTICES.txt",
   "manifests/components.json",
   "model-manifests",
+  "recipes/manifest.json",
   "fonts/bundle.json",
   "fonts/caption-presets.json",
   "fonts/noto-sans-sc/NotoSansCJKsc-VF.ttf",
@@ -124,3 +125,7 @@ const embeddedDeclaredWeights = packagedWeightFiles.filter(path => {
 });
 if (embeddedDeclaredWeights.length) throw new Error("安装包资源目录不得包含 manifest 声明的 ASR 模型权重: " + embeddedDeclaredWeights.join(", "));
 console.log("package verify passed: ASR model manifests present and model weights excluded");
+
+const recipeManifest = JSON.parse(readFileSync(join(packageDir, "recipes/manifest.json"), "utf8"));
+if (!Array.isArray(recipeManifest.recipes) || !recipeManifest.recipes.length || recipeManifest.recipes.some(id => typeof id !== "string" || !existsSync(join(packageDir, "recipes", `${id}.json`)))) throw new Error("AI recipe manifest 或配方文件无效");
+console.log("package verify passed: AI recipe manifest and recipe files are present");

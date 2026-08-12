@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CONTRACT_VERSION, ERROR_CODES, isApiErrorResponse, isAuthoritativePreview, isCaptionPresetId, isDestinationGrant, isExportCreateInput, isExportRecord, isFileGrant, isInternalModelManifest, isJobKind, isJobStatus, isModelDetail, isPreviewCreateResponse, isProject, isRenderArtifact, isSidecarReady, isTimelineCreateInput, isTimelineDocument, isTimelineLayout, isTimelinePatch, isTimelinePatchOperation, isTimelineState, isTranscript, parseSidecarReadyLine } from "@aivideo/contracts";
+import { CONTRACT_VERSION, ERROR_CODES, isApiErrorResponse, isAuthoritativePreview, isCaptionPresetId, isCandidateGeneration, isDestinationGrant, isExportCreateInput, isExportRecord, isFileGrant, isInternalModelManifest, isJobKind, isJobStatus, isModelDetail, isPreviewCreateResponse, isProject, isProviderConfig, isRecipe, isRenderArtifact, isSidecarReady, isTimelineCreateInput, isTimelineDocument, isTimelineLayout, isTimelinePatch, isTimelinePatchOperation, isTimelineState, isTranscript, parseSidecarReadyLine } from "@aivideo/contracts";
 
 const now = "2026-08-11T00:00:00.000Z";
 
@@ -53,7 +53,7 @@ describe("Stage 0 contract", () => {
     expect(isTranscript({ ...transcript, segments: [{ ...transcript.segments[0], end_us: 3_000_000 }] })).toBe(false);
   });
   it("freezes Stage 1C enums, error codes and every patch operation", () => {
-    expect(CONTRACT_VERSION).toBe("stage1c-v1"); expect(isTimelineLayout("crop_fill")).toBe(true); expect(isTimelineLayout("smart_crop")).toBe(false); expect(isCaptionPresetId("high-contrast")).toBe(true); expect(isJobKind("authoritative_preview")).toBe(true); expect(ERROR_CODES).toContain("TIMELINE_CONFLICT"); expect(ERROR_CODES).toContain("PLAYBACK_TICKET_INVALID");
+    expect(CONTRACT_VERSION).toBe("stage2a-v1"); expect(isTimelineLayout("crop_fill")).toBe(true); expect(isTimelineLayout("smart_crop")).toBe(false); expect(isCaptionPresetId("high-contrast")).toBe(true); expect(isJobKind("authoritative_preview")).toBe(true); expect(ERROR_CODES).toContain("TIMELINE_CONFLICT"); expect(ERROR_CODES).toContain("PLAYBACK_TICKET_INVALID");
     const operations = [
       { op: "insert_asset_clip", asset_id: "asset_1", at_index: 0, duration_us: 3_000_000 },
       { op: "insert_transcript_segments", transcript_id: "transcript_1", segment_ids: ["segment_1"], at_index: 0, padding_before_us: 0, padding_after_us: 300_000, create_captions: true },
@@ -63,6 +63,14 @@ describe("Stage 0 contract", () => {
     expect(isTimelinePatch({ schema_version: 1, base_revision_id: "revision_1", operations, summary: "完整编辑" })).toBe(true);
     expect(isTimelinePatchOperation({ op: "insert_asset_clip", asset_id: "asset_1", to_index: 0 })).toBe(false);
     expect(isTimelinePatchOperation({ ...operations[1], padding_after_us: 300_001 })).toBe(false);
+  });
+  it("严格接收 Core Stage2A 公开 DTO 并拒绝多余或敏感字段", () => {
+    const hash = `sha256:${"a".repeat(64)}`;
+    const recipe = { schema_version: 1, recipe_id: "balanced-narrative-v1", name: "Balanced", summary: "规则", rules: { selection: "keyword", pace: "balanced", max_gap_us: 1_500_000 }, document_sha256: hash };
+    const provider = { provider_config_id: "provider_1", kind: "openai_compatible_text", display_name: "Provider", base_url: "https://provider.test", model: "model", enabled: true, credential_status: "unavailable", input_price_per_million: null, output_price_per_million: null, created_at: now, updated_at: now };
+    const generation = { candidate_generation_id: "generation_1", project_id: "project_1", status: "interrupted", payload_sha256: hash, created_at: now, updated_at: now, finished_at: now };
+    expect(isRecipe(recipe)).toBe(true); expect(isProviderConfig(provider)).toBe(true); expect(isCandidateGeneration(generation)).toBe(true);
+    expect(isRecipe({ ...recipe, prompt: "secret" })).toBe(false); expect(isProviderConfig({ ...provider, api_key: "secret" })).toBe(false); expect(isCandidateGeneration({ ...generation, stale: true })).toBe(false);
   });
   it("validates Timeline create/state DTOs and rejects renderer-sensitive fields", () => {
     const document = { schema_version: 1, project_id: "project_1", canvas: { width: 1080, height: 1920, fps_num: 30, fps_den: 1, background_color: "#000000" }, tracks: [{ id: "V1", kind: "visual", locked: false }, { id: "C1", kind: "caption", locked: false }], clips: [{ clip_id: "clip_1", track_id: "V1", order_index: 0, asset_id: "asset_1", asset_kind: "video", source_start_us: 0, source_end_us: 1_000_000, timeline_start_us: 0, timeline_end_us: 1_000_000, layout: "fit", audio: { enabled: true, gain_db: 0 } }], captions: [], provenance: { created_by: "user", source_transcript_ids: [] } };

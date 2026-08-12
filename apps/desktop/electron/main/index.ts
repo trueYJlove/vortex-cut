@@ -3,6 +3,9 @@ import { join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { access, readdir } from "node:fs/promises";
 import { CoreAdminClient, CoreHttpError } from "./core-admin-client.js";
+import { ProviderSecretStore, reinjectProviderSecrets, removeProviderSecret, saveProviderSecret } from "./provider-secrets.js";
+import { issueCandidateClipMedia } from "./candidate-media.js";
+import { registerStage2aIpc } from "./stage2a-ipc.js";
 import { registerFileGrant } from "./file-grants.js";
 import { exportFileName, normalizeExportPath } from "./export-destination.js";
 import { defaultLogPath, appendLog, redact } from "./logging.js";
@@ -57,6 +60,7 @@ let core: CoreAdminClient | undefined;
 let runtime: { base_url: string; ui_token: string; protocol_version: 1 } | undefined;
 const restrictedMedia = new RestrictedMediaRegistry();
 let logPath = "";
+let providerSecrets: ProviderSecretStore | undefined;
 // Acquire the lock before startup work so duplicate launches cannot race with
 // window creation or sidecar startup.
 const hasSingleInstanceLock = !app.isPackaged || app.requestSingleInstanceLock();
@@ -325,6 +329,24 @@ function registerIpc(): void {
     return { next_cursor: page.next_cursor ?? null, items: page.items.map(transcriptSummary) };
   });
   ipcMain.handle("transcript:get", (_event, transcriptId: TranscriptId) => fetchWithUi<unknown>(`${API_PREFIX}/transcriptions/${encodeURIComponent(asId(transcriptId, "transcript_id"))}`).then(transcript));
+  registerStage2aIpc({
+    handle: ipcMain.handle.bind(ipcMain),
+    fetchWithUi,
+    saveSecret: async (providerConfigId, secret) => {
+      providerSecrets ??= new ProviderSecretStore(app.getPath("userData"));
+      await saveProviderSecret(providerSecrets, requireCore(), providerConfigId, secret);
+    },
+    deleteSecret: async providerConfigId => {
+      providerSecrets ??= new ProviderSecretStore(app.getPath("userData"));
+      await removeProviderSecret(providerSecrets, requireCore(), providerConfigId);
+    },
+    issueCandidateClipMedia,
+    candidateMediaDependencies: {
+      fetchPlan: candidatePlanId => fetchWithUi(`${API_PREFIX}/candidate-plans/${encodeURIComponent(candidatePlanId)}`),
+      listProjectAssets: projectId => fetchWithUi(`${API_PREFIX}/projects/${projectId}/assets?limit=100`),
+      issueAssetTicket: restrictedMediaUrl
+    }
+  });
   ipcMain.handle("timeline:create", (_event, input: { project_id: ProjectId; timeline: TimelineCreateInput }) => fetchWithUi(`${API_PREFIX}/projects/${asId(input.project_id, "project_id")}/timelines`, { method: "POST", body: JSON.stringify(input.timeline) }).then(rendererSafe));
   ipcMain.handle("timeline:get", (_event, projectId: ProjectId) => fetchWithUi(`${API_PREFIX}/projects/${asId(projectId, "project_id")}/timeline`).then(rendererSafe));
   ipcMain.handle("timeline:patch", (_event, input: { project_id: ProjectId; patch: TimelinePatch }) => fetchWithUi(`${API_PREFIX}/projects/${asId(input.project_id, "project_id")}/timeline/patches`, { method: "POST", body: JSON.stringify(input.patch) }).then(rendererSafe));
@@ -461,12 +483,17 @@ async function startRuntime(): Promise<void> {
   const ready = await supervisor.start();
   await appendLog(logPath, `sidecar ready pid=${ready.pid} port=${ready.port}`);
   core = new CoreAdminClient(`http://127.0.0.1:${ready.port}`, adminToken);
-  runtime = { base_url: `http://127.0.0.1:${ready.port}`, ui_token: adminToken, protocol_version: 1 };
   await appendLog(logPath, `Core process ready pid=${ready.pid} port=${ready.port} build=${ready.build_version}`);
   await waitForCoreHealth(core);
   await appendLog(logPath, "Core public health ready");
   const session = await core.createSession();
+  providerSecrets ??= new ProviderSecretStore(app.getPath("userData"));
+  await reinjectProviderSecrets(providerSecrets, core);
   await appendLog(logPath, "Core session response received");
+  // Do not publish a runtime until the per-sidecar UI session exists.  The
+  // admin client remains Main-only; returning readiness while it was briefly
+  // stored here let an eager renderer issue public requests with a token that
+  // Core correctly rejects after session isolation is enabled.
   runtime = { base_url: `http://127.0.0.1:${ready.port}`, ui_token: session.token, protocol_version: 1 };
   resolveRuntime?.(runtime);
   await appendLog(logPath, "Core UI session ready");
@@ -478,13 +505,16 @@ async function assertRuntimeResources(resourcesPath: string): Promise<void> {
     join(resourcesPath, "ffmpeg", "win-x64", "ffmpeg.exe"),
     join(resourcesPath, "ffmpeg", "win-x64", "ffprobe.exe"),
     join(resourcesPath, "licenses", "THIRD_PARTY_NOTICES.txt"),
-    join(resourcesPath, "model-manifests")
+    join(resourcesPath, "model-manifests"),
+    join(resourcesPath, "recipes")
   ];
   await Promise.all(required.map(path => access(path)));
   const manifests = await readdir(join(resourcesPath, "model-manifests"), { withFileTypes: true });
   if (!manifests.some(entry => entry.isFile() && entry.name.toLowerCase().endsWith(".json"))) {
     throw new Error("ASR model manifest is missing from packaged resources");
   }
+  const recipes = await readdir(join(resourcesPath, "recipes"), { withFileTypes: true });
+  if (!recipes.some(entry => entry.isFile() && entry.name === "manifest.json")) throw new Error("AI recipe manifest is missing from packaged resources");
 }
 
 function parseExecutableArgs(value: string | undefined): string[] | undefined {

@@ -1,0 +1,1 @@
+{"schema_version":1,"recipe_id":"balanced-narrative-v1","name":"Balanced narrative","summary":"Text relevance with a clear beginning, middle, and end.","rules":{"selection":"keyword_relevance","pace":"balanced","max_gap_us":1500000}}

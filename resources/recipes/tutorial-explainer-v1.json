@@ -1,0 +1,1 @@
+{"schema_version":1,"recipe_id":"tutorial-explainer-v1","name":"Tutorial explainer","summary":"Prefer explanatory text and a steady instructional sequence.","rules":{"selection":"keyword_relevance","keywords":["first","next","then","步骤","方法"],"pace":"steady"}}

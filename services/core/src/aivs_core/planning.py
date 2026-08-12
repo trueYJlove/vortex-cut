@@ -1,0 +1,1156 @@
+from __future__ import annotations
+
+import asyncio
+import copy
+import hashlib
+import json
+import time
+import unicodedata
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
+
+from .database import Database, json_dumps, json_loads, utc_now
+from .ids import new_id
+from .projects import DomainError
+from .providers import (
+    OpenAICompatibleTextProvider,
+    ProviderError,
+    ProviderSecretVault,
+    StructuredTextRequest,
+    TextReasoningProvider,
+)
+from .timeline import CAPTION_PRESETS, LAYOUTS, TimelineService
+
+VARIANTS = ("balanced", "compact", "bold")
+
+
+def canonical_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def sha256(value: Any) -> str:
+    return f"sha256:{hashlib.sha256(canonical_json(value).encode()).hexdigest()}"
+
+
+def document_sha256(document: dict[str, Any]) -> str:
+    return sha256({key: value for key, value in document.items() if key != "document_sha256"})
+
+
+def invocation_cost(provider: Any, usage: dict[str, Any] | None) -> float | None:
+    """Estimate a request cost only from configured unit prices and returned token usage."""
+    if usage is None:
+        return None
+    total = 0.0
+    priced = False
+    for usage_keys, price_key in (
+        (("prompt_tokens", "input_tokens"), "input_price_per_million"),
+        (("completion_tokens", "output_tokens"), "output_price_per_million"),
+    ):
+        tokens = next((usage.get(key) for key in usage_keys if key in usage), None)
+        price = provider[price_key]
+        if isinstance(tokens, int) and not isinstance(tokens, bool) and tokens >= 0:
+            token_count = tokens
+        else:
+            token_count = None
+        if token_count is not None and price is not None:
+            total += token_count * float(price) / 1_000_000
+            priced = True
+    return total if priced else None
+
+
+def _clean_text(value: Any, minimum: int, maximum: int, field: str) -> str:
+    if not isinstance(value, str):
+        raise DomainError("BRIEF_INVALID", f"{field} 无效")
+    text = unicodedata.normalize("NFC", " ".join(value.split()))
+    if not minimum <= len(text) <= maximum or any(
+        unicodedata.category(char) in {"Cc", "Cs"} for char in text
+    ):
+        raise DomainError("BRIEF_INVALID", f"{field} 无效")
+    return text
+
+
+def _id(value: Any, code: str = "PLANNING_INVALID") -> str:
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value) > 128
+        or any(not (x.isascii() and (x.isalnum() or x in "_-")) for x in value)
+    ):
+        raise DomainError(code, "标识符无效")
+    return value
+
+
+class RecipeRegistry:
+    def __init__(self, recipe_dir: Path) -> None:
+        self.recipe_dir = recipe_dir
+        self._recipes = self._load()
+
+    def _load(self) -> dict[str, dict[str, Any]]:
+        manifest = json.loads((self.recipe_dir / "manifest.json").read_text(encoding="utf-8"))
+        recipes: dict[str, dict[str, Any]] = {}
+        for recipe_id in manifest["recipes"]:
+            document = json.loads(
+                (self.recipe_dir / f"{recipe_id}.json").read_text(encoding="utf-8")
+            )
+            if document.get("recipe_id") != recipe_id or document.get("schema_version") != 1:
+                raise RuntimeError("invalid recipe resource")
+            recipes[recipe_id] = document
+        return recipes
+
+    def list(self) -> list[dict[str, Any]]:
+        return [self.public(recipe) for recipe in self._recipes.values()]
+
+    def get(self, recipe_id: str) -> dict[str, Any]:
+        try:
+            return copy.deepcopy(self._recipes[recipe_id])
+        except KeyError as exc:
+            raise DomainError("RECIPE_NOT_FOUND", "Recipe 不存在") from exc
+
+    def public(self, document: dict[str, Any]) -> dict[str, Any]:
+        result = copy.deepcopy(document)
+        result["document_sha256"] = document_sha256(document)
+        return result
+
+
+class ProviderRepository:
+    def __init__(self, db: Database, vault: ProviderSecretVault) -> None:
+        self.db, self.vault = db, vault
+
+    def list(self) -> list[dict[str, Any]]:
+        with self.db.connection() as db:
+            rows = db.execute("SELECT * FROM provider_configs ORDER BY created_at,id").fetchall()
+        return [self._dto(row) for row in rows]
+
+    def get(self, provider_id: str) -> dict[str, Any]:
+        with self.db.connection() as db:
+            row = db.execute("SELECT * FROM provider_configs WHERE id=?", (provider_id,)).fetchone()
+        if not row:
+            raise DomainError("PROVIDER_NOT_FOUND", "Provider 不存在")
+        return self._dto(row)
+
+    def create(self, request: dict[str, Any]) -> dict[str, Any]:
+        from .providers import normalized_base_url
+
+        allowed = {
+            "kind",
+            "display_name",
+            "base_url",
+            "model",
+            "enabled",
+            "input_price_per_million",
+            "output_price_per_million",
+        }
+        if set(request) - allowed or not {"kind", "display_name", "base_url", "model"} <= set(
+            request
+        ):
+            raise DomainError("PROVIDER_INVALID_CONFIG", "Provider 字段无效")
+        if request["kind"] != "openai_compatible_text":
+            raise DomainError(
+                "PROVIDER_CAPABILITY_UNSUPPORTED", "只支持 OpenAI-compatible 文本 Provider"
+            )
+        provider_id, now = f"provider_{new_id()}", utc_now()
+        with self.db.connection() as db:
+            db.execute(
+                "INSERT INTO provider_configs(id,kind,display_name,base_url,model,enabled,input_price_per_million,output_price_per_million,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",  # noqa: E501
+                (
+                    provider_id,
+                    request["kind"],
+                    _clean_text(request["display_name"], 1, 100, "display_name"),
+                    normalized_base_url(request["base_url"]),
+                    _clean_text(request["model"], 1, 200, "model"),
+                    int(request.get("enabled", True)),
+                    request.get("input_price_per_million"),
+                    request.get("output_price_per_million"),
+                    now,
+                    now,
+                ),
+            )
+        return self.get(provider_id)
+
+    def patch(self, provider_id: str, request: dict[str, Any]) -> dict[str, Any]:
+        current = self.get(provider_id)
+        merged = {**current, **request}
+        from .providers import normalized_base_url
+
+        with self.db.connection() as db:
+            db.execute(
+                "UPDATE provider_configs SET display_name=?,base_url=?,model=?,enabled=?,input_price_per_million=?,output_price_per_million=?,updated_at=? WHERE id=?",  # noqa: E501
+                (
+                    _clean_text(merged["display_name"], 1, 100, "display_name"),
+                    normalized_base_url(merged["base_url"]),
+                    _clean_text(merged["model"], 1, 200, "model"),
+                    int(merged["enabled"]),
+                    merged.get("input_price_per_million"),
+                    merged.get("output_price_per_million"),
+                    utc_now(),
+                    provider_id,
+                ),
+            )
+        return self.get(provider_id)
+
+    def _dto(self, row: Any) -> dict[str, Any]:
+        return {
+            "provider_config_id": row["id"],
+            "kind": row["kind"],
+            "display_name": row["display_name"],
+            "base_url": row["base_url"],
+            "model": row["model"],
+            "enabled": bool(row["enabled"]),
+            "credential_status": self.vault.status(row["id"]),
+            "input_price_per_million": row["input_price_per_million"],
+            "output_price_per_million": row["output_price_per_million"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+
+class PlanningService:
+    def __init__(
+        self,
+        db: Database,
+        recipes: RecipeRegistry,
+        providers: ProviderRepository,
+        vault: ProviderSecretVault,
+        timelines: TimelineService,
+        provider_factory: Callable[[], TextReasoningProvider] = OpenAICompatibleTextProvider,
+    ) -> None:
+        self.db, self.recipes, self.providers, self.vault, self.timelines = (
+            db,
+            recipes,
+            providers,
+            vault,
+            timelines,
+        )
+        self.provider_factory = provider_factory
+
+    def put_brief(self, project_id: str, raw: dict[str, Any]) -> dict[str, Any]:
+        required = {
+            "schema_version",
+            "topic",
+            "audience",
+            "target_platform",
+            "target_duration_us",
+            "narrative_goal",
+            "style_notes",
+            "must_keep",
+            "forbidden",
+            "original_audio_policy",
+            "caption_policy",
+            "caption_preset_id",
+            "default_layout",
+        }
+        if set(raw) != required or raw.get("schema_version") != 1:
+            raise DomainError("BRIEF_INVALID", "Brief 字段无效")
+        if (
+            raw["target_platform"] != "generic_vertical"
+            or raw["original_audio_policy"] not in {"preserve", "mute"}
+            or raw["caption_policy"] not in {"auto_from_transcript", "none"}
+            or raw["caption_preset_id"] not in CAPTION_PRESETS
+            or raw["default_layout"] not in LAYOUTS
+            or not isinstance(raw["target_duration_us"], int)
+            or not 15_000_000 <= raw["target_duration_us"] <= 180_000_000
+        ):
+            raise DomainError("BRIEF_INVALID", "Brief 字段无效")
+        lists = {}
+        for key in ("must_keep", "forbidden"):
+            values = raw[key]
+            if not isinstance(values, list) or len(values) > 20:
+                raise DomainError("BRIEF_INVALID", "Brief 列表无效")
+            cleaned = sorted(set(_clean_text(v, 1, 100, key) for v in values))
+            lists[key] = cleaned
+        with self.db.connection() as db:
+            if not db.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
+                raise DomainError("PROJECT_NOT_FOUND", "项目不存在")
+            existing = db.execute(
+                "SELECT id,created_at FROM project_briefs WHERE project_id=?", (project_id,)
+            ).fetchone()
+            brief_id = existing["id"] if existing else f"brief_{new_id()}"
+            now = utc_now()
+            doc = {
+                "schema_version": 1,
+                "brief_id": brief_id,
+                "project_id": project_id,
+                "topic": _clean_text(raw["topic"], 1, 200, "topic"),
+                "audience": _clean_text(raw["audience"], 1, 200, "audience"),
+                "target_platform": "generic_vertical",
+                "target_duration_us": raw["target_duration_us"],
+                "narrative_goal": _clean_text(raw["narrative_goal"], 1, 500, "narrative_goal"),
+                "style_notes": _clean_text(raw["style_notes"], 0, 1000, "style_notes"),
+                **lists,
+                "original_audio_policy": raw["original_audio_policy"],
+                "caption_policy": raw["caption_policy"],
+                "caption_preset_id": raw["caption_preset_id"],
+                "default_layout": raw["default_layout"],
+            }
+            doc["document_sha256"] = document_sha256(doc)
+            db.execute(
+                "INSERT INTO project_briefs(id,project_id,document_json,document_sha256,created_at,updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(project_id) DO UPDATE SET document_json=excluded.document_json,document_sha256=excluded.document_sha256,updated_at=excluded.updated_at",  # noqa: E501
+                (
+                    brief_id,
+                    project_id,
+                    json_dumps(doc),
+                    doc["document_sha256"],
+                    existing["created_at"] if existing else now,
+                    now,
+                ),
+            )
+        return doc
+
+    def get_brief(self, project_id: str) -> dict[str, Any]:
+        with self.db.connection() as db:
+            row = db.execute(
+                "SELECT document_json FROM project_briefs WHERE project_id=?", (project_id,)
+            ).fetchone()
+        if not row:
+            raise DomainError("BRIEF_NOT_FOUND", "尚未设置 Brief")
+        return json_loads(row[0])
+
+    def prepare(self, project_id: str, request: dict[str, Any]) -> dict[str, Any]:
+        if set(request) != {"provider_config_id", "recipe_id", "transcript_ids"}:
+            raise DomainError("PLANNING_INVALID", "准备请求无效")
+        transcript_ids = request["transcript_ids"]
+        if (
+            not isinstance(transcript_ids, list)
+            or not 1 <= len(transcript_ids) <= 20
+            or len(set(transcript_ids)) != len(transcript_ids)
+        ):
+            raise DomainError("PLANNING_INVALID", "转录选择无效")
+        brief = self.get_brief(project_id)
+        provider = self.providers.get(_id(request["provider_config_id"]))
+        recipe = self.recipes.get(_id(request["recipe_id"]))
+        if not provider["enabled"]:
+            raise DomainError("PROVIDER_DISABLED", "Provider 未启用")
+        with self.db.connection() as db:
+            selected = []
+            for transcript_id in transcript_ids:
+                row = db.execute(
+                    "SELECT t.*,a.project_id,a.availability,a.fingerprint FROM transcripts t JOIN assets a ON a.id=t.asset_id WHERE t.id=?",  # noqa: E501
+                    (transcript_id,),
+                ).fetchone()
+                if (
+                    not row
+                    or row["project_id"] != project_id
+                    or row["status"] != "ready"
+                    or row["availability"] != "available"
+                    or row["source_fingerprint"] != row["fingerprint"]
+                ):
+                    raise DomainError("TRANSCRIPTION_NOT_READY", "所选转录不可用")
+                selected.extend(
+                    {**dict(x), "transcript_id": transcript_id, "asset_id": row["asset_id"]}
+                    for x in db.execute(
+                        "SELECT id,ordinal,start_us,end_us,text,confidence FROM transcript_segments WHERE transcript_id=? ORDER BY ordinal",  # noqa: E501
+                        (transcript_id,),
+                    ).fetchall()
+                )
+        segments = self._select(brief, selected)
+        payload = {
+            "brief": {
+                k: v
+                for k, v in brief.items()
+                if k not in {"brief_id", "project_id", "document_sha256"}
+            },
+            "recipe": recipe,
+            "variants": list(VARIANTS),
+            "segments": [
+                {
+                    "segment_ref": f"s{n + 1}",
+                    "transcript_ref": f"t{transcript_ids.index(s['transcript_id']) + 1}",
+                    "start_us": s["start_us"],
+                    "end_us": s["end_us"],
+                    "text": s["text"],
+                }
+                for n, s in enumerate(segments)
+            ],
+        }
+        # Preserve references only internally; provider receives the same selected content visible in preview.  # noqa: E501
+        payload_hash = sha256(payload)
+        now = utc_now()
+        expiry = (
+            (datetime.now(UTC) + timedelta(minutes=15))
+            .isoformat(timespec="milliseconds")
+            .replace("+00:00", "Z")
+        )
+        snapshot_id = f"recipe_snapshot_{new_id()}"
+        preview_id = f"preview_{new_id()}"
+        provider_snapshot = {
+            key: provider[key]
+            for key in (
+                "provider_config_id",
+                "kind",
+                "display_name",
+                "base_url",
+                "model",
+                "enabled",
+            )
+        }
+        whitelist = [
+            {"segment_ref": f"s{i + 1}", "segment_id": segment["id"]}
+            for i, segment in enumerate(segments)
+        ]
+        with self.db.connection() as db:
+            db.execute(
+                "INSERT INTO recipe_snapshots(id,recipe_id,document_json,document_sha256,created_at) VALUES (?,?,?,?,?)",  # noqa: E501
+                (
+                    snapshot_id,
+                    recipe["recipe_id"],
+                    json_dumps(recipe),
+                    document_sha256(recipe),
+                    now,
+                ),
+            )
+            db.execute(
+                "INSERT INTO egress_previews(id,project_id,provider_config_id,brief_snapshot_json,brief_sha256,recipe_snapshot_id,provider_snapshot_json,provider_config_sha256,transcript_refs_json,segment_whitelist_json,payload_sha256,payload_json,stats_json,expires_at,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",  # noqa: E501
+                (
+                    preview_id,
+                    project_id,
+                    provider["provider_config_id"],
+                    json_dumps(brief),
+                    brief["document_sha256"],
+                    snapshot_id,
+                    json_dumps(provider_snapshot),
+                    sha256(provider_snapshot),
+                    json_dumps(transcript_ids),
+                    json_dumps(whitelist),
+                    payload_hash,
+                    json_dumps(payload),
+                    json_dumps(
+                        {
+                            "segment_count": len(segments),
+                            "character_count": sum(len(x["text"]) for x in segments),
+                            "estimated_tokens": max(1, sum(len(x["text"]) for x in segments) // 4),
+                        }
+                    ),
+                    expiry,
+                    now,
+                ),
+            )
+        return {
+            "egress_preview_id": preview_id,
+            "provider": {
+                "display_name": provider["display_name"],
+                "origin": provider["base_url"],
+                "model": provider["model"],
+            },
+            "prompt_template_version": "candidate-plan-v1",
+            "sent_fields": [
+                "brief",
+                "recipe",
+                "variants",
+                "segments.segment_ref",
+                "segments.transcript_ref",
+                "segments.start_us",
+                "segments.end_us",
+                "segments.text",
+            ],
+            "payload_sha256": payload_hash,
+            "expires_at": expiry,
+            "payload": payload,
+            "stats": {
+                "transcript_count": len(transcript_ids),
+                "segment_count": len(segments),
+                "character_count": sum(len(x["text"]) for x in segments),
+                "estimated_tokens": max(1, sum(len(x["text"]) for x in segments) // 4),
+            },
+        }
+
+    def _select(self, brief: dict[str, Any], rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        keys = set(
+            (brief["topic"] + " " + brief["narrative_goal"] + " " + " ".join(brief["must_keep"]))
+            .lower()
+            .split()
+        )
+        ranked = sorted(
+            rows,
+            key=lambda row: (
+                -sum(key in row["text"].lower() for key in keys),
+                -(row["confidence"] or 0),
+                row["start_us"],
+                row["id"],
+            ),
+        )
+        chosen = []
+        chars = 0
+        duration = 0
+        for row in ranked:
+            if (
+                len(chosen) >= 160
+                or chars + len(row["text"]) > 32000
+                or duration + row["end_us"] - row["start_us"] > 1_200_000_000
+            ):
+                continue
+            chosen.append(row)
+            chars += len(row["text"])
+            duration += row["end_us"] - row["start_us"]
+        if not chosen:
+            raise DomainError("PLANNING_NO_SEGMENTS", "预筛未得到可用片段")
+        return sorted(chosen, key=lambda row: (row["start_us"], row["id"]))
+
+    def create_generation(
+        self, project_id: str, preview_id: str, payload_sha256: str, jobs: Any
+    ) -> dict[str, Any]:
+        with self.db.connection() as db:
+            preview = db.execute(
+                "SELECT * FROM egress_previews WHERE id=? AND project_id=?",
+                (preview_id, project_id),
+            ).fetchone()
+            if not preview:
+                raise DomainError("EGRESS_PREVIEW_NOT_FOUND", "外传预览不存在")
+            if preview["payload_sha256"] != payload_sha256:
+                raise DomainError("EGRESS_PREVIEW_CHANGED", "外传内容已变化")
+            if datetime.fromisoformat(preview["expires_at"].replace("Z", "+00:00")) <= datetime.now(
+                UTC
+            ):
+                raise DomainError("EGRESS_PREVIEW_EXPIRED", "外传预览已过期")
+            payload = json_loads(preview["payload_json"])
+            if sha256(payload) != payload_sha256:
+                raise DomainError("EGRESS_PREVIEW_CHANGED", "外传内容已变化")
+            if (
+                document_sha256(json_loads(preview["brief_snapshot_json"]))
+                != preview["brief_sha256"]
+            ):
+                raise DomainError("EGRESS_PREVIEW_CHANGED", "Brief 快照已变化")
+            current_brief = self.get_brief(project_id)
+            if (
+                current_brief["document_sha256"] != document_sha256(current_brief)
+                or current_brief["document_sha256"] != preview["brief_sha256"]
+            ):
+                raise DomainError("EGRESS_PREVIEW_CHANGED", "Brief 已变化")
+            recipe = db.execute(
+                "SELECT document_json,document_sha256 FROM recipe_snapshots WHERE id=?",
+                (preview["recipe_snapshot_id"],),
+            ).fetchone()
+            if (
+                not recipe
+                or document_sha256(json_loads(recipe["document_json"])) != recipe["document_sha256"]
+            ):
+                raise DomainError("EGRESS_PREVIEW_CHANGED", "Recipe 快照已变化")
+            provider = db.execute(
+                "SELECT * FROM provider_configs WHERE id=?", (preview["provider_config_id"],)
+            ).fetchone()
+            if not provider or not provider["enabled"]:
+                raise DomainError("PROVIDER_DISABLED", "Provider 未启用")
+            current_provider = self.providers.get(provider["id"])
+            provider_snapshot = json_loads(preview["provider_snapshot_json"])
+            if sha256(provider_snapshot) != preview["provider_config_sha256"] or any(
+                current_provider[key] != provider_snapshot[key]
+                for key in (
+                    "provider_config_id",
+                    "kind",
+                    "display_name",
+                    "base_url",
+                    "model",
+                    "enabled",
+                )
+            ):
+                raise DomainError("EGRESS_PREVIEW_CHANGED", "Provider 配置已变化")
+            transcript_ids = json_loads(preview["transcript_refs_json"])
+            for transcript_id in transcript_ids:
+                transcript = db.execute(
+                    "SELECT t.status,t.source_fingerprint,a.availability,a.fingerprint,a.project_id "  # noqa: E501
+                    "FROM transcripts t JOIN assets a ON a.id=t.asset_id WHERE t.id=?",
+                    (transcript_id,),
+                ).fetchone()
+                if (
+                    not transcript
+                    or transcript["project_id"] != project_id
+                    or transcript["status"] != "ready"
+                    or transcript["availability"] != "available"
+                    or transcript["source_fingerprint"] != transcript["fingerprint"]
+                ):
+                    raise DomainError("EGRESS_PREVIEW_CHANGED", "转录或素材已变化")
+            generation_id = f"generation_{new_id()}"
+            consent_id = f"consent_{new_id()}"
+            invocation_id = f"invocation_{new_id()}"
+            now = utc_now()
+            db.execute("BEGIN")
+            try:
+                db.execute(
+                    "INSERT INTO egress_consents(id,egress_preview_id,payload_sha256,created_at) VALUES (?,?,?,?)",  # noqa: E501
+                    (consent_id, preview_id, payload_sha256, now),
+                )
+                baseline = db.execute(
+                    "SELECT current_timeline_revision_id FROM projects WHERE id=?", (project_id,)
+                ).fetchone()[0]
+                db.execute(
+                    "INSERT INTO candidate_generations(id,project_id,egress_preview_id,egress_consent_id,provider_config_id,brief_snapshot_json,brief_sha256,recipe_snapshot_id,timeline_baseline_revision_id,status,payload_sha256,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",  # noqa: E501
+                    (
+                        generation_id,
+                        project_id,
+                        preview_id,
+                        consent_id,
+                        provider["id"],
+                        preview["brief_snapshot_json"],
+                        preview["brief_sha256"],
+                        preview["recipe_snapshot_id"],
+                        baseline,
+                        "queued",
+                        payload_sha256,
+                        now,
+                        now,
+                    ),
+                )
+                db.execute(
+                    "INSERT INTO provider_invocations(id,candidate_generation_id,provider_config_id,capability,provider_name,model,prompt_template_version,output_schema_version,input_sha256,status,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",  # noqa: E501
+                    (
+                        invocation_id,
+                        generation_id,
+                        provider["id"],
+                        "candidate_planning",
+                        provider["display_name"],
+                        provider["model"],
+                        "candidate-plan-v1",
+                        "candidate-plan-output-v1",
+                        payload_sha256,
+                        "queued",
+                        now,
+                    ),
+                )
+                db.execute("COMMIT")
+            except Exception:
+                db.execute("ROLLBACK")
+                raise
+        job = jobs.create_candidate_generation(
+            project_id, generation_id, invocation_id, payload_sha256
+        )
+        return {"candidate_generation_id": generation_id, "job": job}
+
+    async def run_generation(
+        self, row: Any, cancel: asyncio.Event, progress: Any, stage: Any
+    ) -> dict[str, Any]:
+        generation_id = row["candidate_generation_id"]
+        payload_info = json_loads(row["input_json"])
+        stage("loading_inputs")
+        with self.db.connection() as db:
+            generation = db.execute(
+                "SELECT * FROM candidate_generations WHERE id=?", (generation_id,)
+            ).fetchone()
+            invocation = db.execute(
+                "SELECT * FROM provider_invocations WHERE id=?", (row["provider_invocation_id"],)
+            ).fetchone()
+            preview = (
+                db.execute(
+                    "SELECT * FROM egress_previews WHERE id=?", (generation["egress_preview_id"],)
+                ).fetchone()
+                if generation
+                else None
+            )
+            consent = (
+                db.execute(
+                    "SELECT * FROM egress_consents WHERE id=?", (generation["egress_consent_id"],)
+                ).fetchone()
+                if generation
+                else None
+            )
+            provider = (
+                db.execute(
+                    "SELECT * FROM provider_configs WHERE id=?", (generation["provider_config_id"],)
+                ).fetchone()
+                if generation
+                else None
+            )
+        if not generation or not invocation or not preview or not consent or not provider:
+            raise ProviderError("PLANNING_INPUT_INVALID", "规划输入无效")
+        payload = json_loads(preview["payload_json"])
+        if (
+            consent["consumed_at"]
+            or sha256(payload) != payload_info["egress_payload_sha256"]
+            or generation["payload_sha256"] != payload_info["egress_payload_sha256"]
+        ):
+            raise ProviderError("EGRESS_CONSENT_INVALID", "确认已失效")
+        if cancel.is_set():
+            raise ProviderError("PROVIDER_CANCELLED", "调用已取消")
+        stage("building_payload")
+        key = self.vault.for_request(provider["id"])
+        with self.db.connection() as db:
+            now = utc_now()
+            db.execute("UPDATE egress_consents SET consumed_at=? WHERE id=?", (now, consent["id"]))
+            db.execute(
+                "UPDATE candidate_generations SET status='running',updated_at=? WHERE id=?",
+                (now, generation_id),
+            )
+            db.execute(
+                "UPDATE provider_invocations SET status='running',started_at=? WHERE id=?",
+                (now, invocation["id"]),
+            )
+        stage("calling_provider")
+        progress(0.25)
+        started = time.monotonic()
+        try:
+            result = await self.provider_factory().generate(
+                StructuredTextRequest(
+                    provider["id"], provider["base_url"], provider["model"], key, payload
+                ),
+                cancel,
+            )
+            stage("validating_response")
+            candidates = self._validated_candidates(generation, preview, result.value)
+            stage("persisting_candidates")
+            progress(0.75)
+            self._persist_candidates(
+                generation,
+                invocation,
+                candidates,
+                result,
+                duration_ms=round((time.monotonic() - started) * 1000),
+                estimated_cost=invocation_cost(provider, result.usage),
+            )
+        except asyncio.CancelledError:
+            self._archive_generation_failure(
+                generation_id,
+                invocation["id"],
+                "PROVIDER_CANCELLED",
+                "Provider 调用已取消",
+            )
+            raise
+        except ProviderError as exc:
+            self._archive_generation_failure(generation_id, invocation["id"], exc.code, exc.message)
+            raise
+        progress(1)
+        return {"candidate_generation_id": generation_id, "candidate_count": 3}
+
+    def _archive_generation_failure(
+        self, generation_id: str, invocation_id: str, code: str, message: str
+    ) -> None:
+        with self.db.connection() as db:
+            now = utc_now()
+            status = "cancelled" if code == "PROVIDER_CANCELLED" else "failed"
+            db.execute(
+                "UPDATE candidate_generations SET status=?,updated_at=?,finished_at=? WHERE id=?",  # noqa: E501
+                (status, now, now, generation_id),
+            )
+            db.execute(
+                "UPDATE provider_invocations SET status=?,finished_at=?,provider_may_have_processed=?,error_code=?,error_message=? WHERE id=?",  # noqa: E501
+                (status, now, int(code == "PROVIDER_CANCELLED"), code, message, invocation_id),
+            )
+
+    async def test_provider(self, provider_id: str) -> dict[str, Any]:
+        provider = self.providers.get(provider_id)
+        secret = self.vault.for_request(provider_id)
+        invocation_id = f"invocation_{new_id()}"
+        now = utc_now()
+        with self.db.connection() as db:
+            db.execute(
+                "INSERT INTO provider_invocations(id,candidate_generation_id,provider_config_id,capability,provider_name,model,prompt_template_version,output_schema_version,input_sha256,status,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",  # noqa: E501
+                (
+                    invocation_id,
+                    None,
+                    provider_id,
+                    "connection_test",
+                    provider["display_name"],
+                    provider["model"],
+                    "connection-test-v1",
+                    "candidate-plan-output-v1",
+                    sha256({"capability": "connection_test"}),
+                    "running",
+                    now,
+                ),
+            )
+        payload = {
+            "capability": "connection_test",
+            "instruction": "Return exactly three empty candidate variants for capability verification.",  # noqa: E501
+        }
+        try:
+            result = await self.provider_factory().generate(
+                StructuredTextRequest(
+                    provider_id,
+                    provider["base_url"],
+                    provider["model"],
+                    secret,
+                    payload,
+                    capability="connection_test",
+                ),
+                asyncio.Event(),
+            )
+            with self.db.connection() as db:
+                db.execute(
+                    "UPDATE provider_invocations SET status='succeeded',finished_at=?,usage_json=?,provider_request_id=? WHERE id=?",  # noqa: E501
+                    (
+                        utc_now(),
+                        json_dumps(result.usage) if result.usage else None,
+                        result.provider_request_id,
+                        invocation_id,
+                    ),
+                )
+        except ProviderError as exc:
+            with self.db.connection() as db:
+                db.execute(
+                    "UPDATE provider_invocations SET status='failed',finished_at=?,error_code=?,error_message=? WHERE id=?",  # noqa: E501
+                    (utc_now(), exc.code, exc.message, invocation_id),
+                )
+            raise
+        return {
+            "provider_config_id": provider_id,
+            "provider_invocation_id": invocation_id,
+            "status": "succeeded",
+        }
+
+    def _validated_candidates(
+        self, generation: Any, preview: Any, value: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        entries = value.get("candidates") if isinstance(value, dict) else None
+        if (
+            not isinstance(entries, list)
+            or len(entries) != 3
+            or {x.get("variant") for x in entries if isinstance(x, dict)} != set(VARIANTS)
+        ):
+            raise ProviderError("PROVIDER_SCHEMA_MISMATCH", "候选输出不符合固定三方案约束")
+        brief = json_loads(generation["brief_snapshot_json"])
+        whitelist = json_loads(preview["segment_whitelist_json"])
+        refs = {x["segment_ref"]: x["segment_id"] for x in whitelist}
+        placeholders = ",".join("?" * len(refs))
+        with self.db.connection() as db:
+            rows = {
+                r["id"]: r
+                for r in db.execute(
+                    "SELECT s.id,s.transcript_id,s.start_us,s.end_us,s.text,t.asset_id "
+                    "FROM transcript_segments s JOIN transcripts t ON t.id=s.transcript_id "
+                    f"WHERE s.id IN ({placeholders})",
+                    list(refs.values()),
+                ).fetchall()
+            }
+        documents = []
+        for ordinal, variant in enumerate(VARIANTS):
+            entry = next(x for x in entries if x["variant"] == variant)
+            clips = entry.get("clips")
+            if not isinstance(clips, list) or not 1 <= len(clips) <= 30:
+                raise ProviderError("PROVIDER_SCHEMA_MISMATCH", "候选片段数量无效")
+            normalized = []
+            duration = 0
+            for index, clip in enumerate(clips):
+                selected = clip.get("segment_ids") if isinstance(clip, dict) else None
+                if (
+                    not isinstance(selected, list)
+                    or not selected
+                    or any(x not in refs for x in selected)
+                ):
+                    raise ProviderError("PROVIDER_SCHEMA_MISMATCH", "候选引用越界")
+                actual = [rows[refs[x]] for x in selected]
+                if len({x["transcript_id"] for x in actual}) != 1 or any(
+                    actual[n]["end_us"] > actual[n + 1]["start_us"] for n in range(len(actual) - 1)
+                ):
+                    raise ProviderError("PROVIDER_SCHEMA_MISMATCH", "候选片段不连续")
+                reason = _clean_text(clip.get("reason"), 1, 300, "reason")
+                score = clip.get("model_score")
+                if score is not None and (
+                    not isinstance(score, (int, float))
+                    or isinstance(score, bool)
+                    or not 0 <= score <= 1
+                ):
+                    raise ProviderError("PROVIDER_SCHEMA_MISMATCH", "模型参考分无效")
+                duration += actual[-1]["end_us"] - actual[0]["start_us"]
+                normalized.append(
+                    {
+                        "clip_id": f"candidate_clip_{new_id()}",
+                        "order_index": index,
+                        "asset_id": actual[0]["asset_id"],
+                        "transcript_id": actual[0]["transcript_id"],
+                        "segment_ids": [x["id"] for x in actual],
+                        "source_start_us": actual[0]["start_us"],
+                        "source_end_us": actual[-1]["end_us"],
+                        "reason": reason,
+                        "model_score": float(score) if score is not None else None,
+                        "caption_text": " ".join(x["text"] for x in actual),
+                    }
+                )
+            if (
+                not 0.8 * brief["target_duration_us"]
+                <= duration
+                <= 1.2 * brief["target_duration_us"]
+                or not 15_000_000 <= duration <= 180_000_000
+            ):
+                raise ProviderError("PROVIDER_SCHEMA_MISMATCH", "候选时长无效")
+            doc = {
+                "schema_version": 1,
+                "candidate_plan_id": f"candidate_{new_id()}",
+                "candidate_generation_id": generation["id"],
+                "project_id": generation["project_id"],
+                "ordinal": ordinal,
+                "variant": variant,
+                "title_suggestion": _clean_text(entry.get("title_suggestion"), 1, 200, "title"),
+                "summary": _clean_text(entry.get("summary"), 1, 500, "summary"),
+                "duration_us": duration,
+                "clips": normalized,
+                "warnings": [],
+            }
+            doc["document_sha256"] = document_sha256(doc)
+            documents.append(doc)
+        return documents
+
+    def _persist_candidates(
+        self,
+        generation: Any,
+        invocation: Any,
+        candidates: list[dict[str, Any]],
+        result: Any,
+        duration_ms: int | None = None,
+        estimated_cost: float | None = None,
+    ) -> None:
+        with self.db.connection() as db:
+            db.execute("BEGIN")
+            try:
+                now = utc_now()
+                for candidate in candidates:
+                    db.execute(
+                        "INSERT INTO candidate_plans(id,candidate_generation_id,project_id,ordinal,variant,document_json,document_sha256,created_at) VALUES (?,?,?,?,?,?,?,?)",  # noqa: E501
+                        (
+                            candidate["candidate_plan_id"],
+                            generation["id"],
+                            generation["project_id"],
+                            candidate["ordinal"],
+                            candidate["variant"],
+                            json_dumps(candidate),
+                            candidate["document_sha256"],
+                            now,
+                        ),
+                    )
+                db.execute(
+                    "UPDATE candidate_generations SET status='succeeded',updated_at=?,finished_at=? WHERE id=?",  # noqa: E501
+                    (now, now, generation["id"]),
+                )
+                db.execute(
+                    "UPDATE provider_invocations SET status='succeeded',finished_at=?,duration_ms=?,usage_json=?,estimated_cost=?,provider_request_id=?,output_sha256=? WHERE id=?",  # noqa: E501
+                    (
+                        now,
+                        duration_ms,
+                        json_dumps(result.usage) if result.usage else None,
+                        estimated_cost,
+                        result.provider_request_id,
+                        sha256(result.value),
+                        invocation["id"],
+                    ),
+                )
+                db.execute("COMMIT")
+            except Exception:
+                db.execute("ROLLBACK")
+                raise
+
+    def list_generations(self, project_id: str) -> list[dict[str, Any]]:
+        with self.db.connection() as db:
+            rows = db.execute(
+                "SELECT id,status,payload_sha256,created_at,updated_at,finished_at FROM candidate_generations WHERE project_id=? ORDER BY created_at DESC,id DESC",  # noqa: E501
+                (project_id,),
+            ).fetchall()
+        return [
+            {
+                "candidate_generation_id": r["id"],
+                "status": r["status"],
+                "payload_sha256": r["payload_sha256"],
+                "created_at": r["created_at"],
+                "updated_at": r["updated_at"],
+                "finished_at": r["finished_at"],
+            }
+            for r in rows
+        ]
+
+    def get_generation(self, generation_id: str) -> dict[str, Any]:
+        with self.db.connection() as db:
+            row = db.execute(
+                "SELECT * FROM candidate_generations WHERE id=?", (generation_id,)
+            ).fetchone()
+            if not row:
+                raise DomainError("CANDIDATE_GENERATION_NOT_FOUND", "候选生成不存在")
+            candidates = db.execute(
+                "SELECT document_json FROM candidate_plans WHERE candidate_generation_id=? ORDER BY ordinal",  # noqa: E501
+                (generation_id,),
+            ).fetchall()
+        return {
+            "candidate_generation_id": row["id"],
+            "project_id": row["project_id"],
+            "status": row["status"],
+            "payload_sha256": row["payload_sha256"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "finished_at": row["finished_at"],
+            "candidate_plans": [json_loads(x[0]) for x in candidates],
+        }
+
+    def list_candidates(self, project_id: str) -> list[dict[str, Any]]:
+        with self.db.connection() as db:
+            rows = db.execute(
+                "SELECT document_json FROM candidate_plans WHERE project_id=? ORDER BY created_at DESC,ordinal",  # noqa: E501
+                (project_id,),
+            ).fetchall()
+        return [json_loads(x[0]) for x in rows]
+
+    def get_candidate(self, candidate_id: str) -> dict[str, Any]:
+        with self.db.connection() as db:
+            row = db.execute(
+                "SELECT document_json FROM candidate_plans WHERE id=?", (candidate_id,)
+            ).fetchone()
+        if not row:
+            raise DomainError("CANDIDATE_PLAN_NOT_FOUND", "候选不存在")
+        return json_loads(row[0])
+
+    def get_candidate_clip(
+        self, project_id: str, candidate_id: str, candidate_clip_id: str
+    ) -> dict[str, Any]:
+        candidate = self.get_candidate(candidate_id)
+        if candidate["project_id"] != project_id:
+            raise DomainError("CANDIDATE_PLAN_NOT_FOUND", "候选不存在")
+        for clip in candidate["clips"]:
+            if clip["clip_id"] == candidate_clip_id:
+                return {
+                    "candidate_plan_id": candidate_id,
+                    "project_id": project_id,
+                    "candidate_clip_id": clip["clip_id"],
+                    "asset_id": clip["asset_id"],
+                    "transcript_id": clip["transcript_id"],
+                    "segment_ids": clip["segment_ids"],
+                    "source_start_us": clip["source_start_us"],
+                    "source_end_us": clip["source_end_us"],
+                    "caption_text": clip["caption_text"],
+                }
+        raise DomainError("CANDIDATE_CLIP_NOT_FOUND", "候选片段不存在")
+
+    def adopt(self, project_id: str, candidate_id: str, request: dict[str, Any]) -> dict[str, Any]:
+        if (
+            set(request) != {"schema_version", "candidate_document_sha256", "base_revision_id"}
+            or request["schema_version"] != 1
+        ):
+            raise DomainError("CANDIDATE_ADOPT_INVALID", "采用请求无效")
+        with self.db.connection() as db:
+            db.execute("BEGIN")
+            try:
+                candidate_row = db.execute(
+                    "SELECT * FROM candidate_plans WHERE id=? AND project_id=?",
+                    (candidate_id, project_id),
+                ).fetchone()
+                if not candidate_row:
+                    raise DomainError("CANDIDATE_PLAN_NOT_FOUND", "候选不存在")
+                if candidate_row["document_sha256"] != request["candidate_document_sha256"]:
+                    raise DomainError("CANDIDATE_ADOPT_INVALID", "候选哈希不匹配")
+                if db.execute(
+                    "SELECT 1 FROM candidate_adoptions WHERE candidate_plan_id=?", (candidate_id,)
+                ).fetchone():
+                    raise DomainError("CANDIDATE_ALREADY_ADOPTED", "候选已被采用")
+                if db.execute(
+                    "SELECT 1 FROM timeline_drafts WHERE project_id=?", (project_id,)
+                ).fetchone():
+                    raise DomainError("TIMELINE_DRAFT_CONFLICT", "存在未处理时间线草稿")
+                generation = db.execute(
+                    "SELECT * FROM candidate_generations WHERE id=?",
+                    (candidate_row["candidate_generation_id"],),
+                ).fetchone()
+                project = db.execute(
+                    "SELECT current_timeline_revision_id,canvas_json FROM projects WHERE id=?",
+                    (project_id,),
+                ).fetchone()
+                if (
+                    not project
+                    or project["current_timeline_revision_id"]
+                    != generation["timeline_baseline_revision_id"]
+                    or request["base_revision_id"] != generation["timeline_baseline_revision_id"]
+                ):
+                    raise DomainError("TIMELINE_CONFLICT", "生成后的时间线基线已变化")
+                candidate = json_loads(candidate_row["document_json"])
+                brief = json_loads(generation["brief_snapshot_json"])
+                clips = []
+                captions = []
+                offset = 0
+                transcripts = []
+                for candidate_clip in candidate["clips"]:
+                    asset = db.execute(
+                        "SELECT * FROM assets WHERE id=? AND project_id=?",
+                        (candidate_clip["asset_id"], project_id),
+                    ).fetchone()
+                    transcript = db.execute(
+                        "SELECT * FROM transcripts WHERE id=?", (candidate_clip["transcript_id"],)
+                    ).fetchone()
+                    ids = candidate_clip["segment_ids"]
+                    marks = ",".join("?" * len(ids))
+                    segments = db.execute(
+                        f"SELECT id,start_us,end_us,text FROM transcript_segments WHERE id IN ({marks}) ORDER BY start_us",  # noqa: E501
+                        ids,
+                    ).fetchall()
+                    if (
+                        not asset
+                        or not transcript
+                        or asset["availability"] != "available"
+                        or asset["fingerprint"] != transcript["source_fingerprint"]
+                        or transcript["status"] != "ready"
+                        or len(segments) != len(ids)
+                    ):
+                        raise DomainError("CANDIDATE_SOURCE_INVALID", "候选引用的素材或转录已变化")
+                    duration = candidate_clip["source_end_us"] - candidate_clip["source_start_us"]
+                    clip_id = f"clip_{new_id()}"
+                    clips.append(
+                        {
+                            "clip_id": clip_id,
+                            "track_id": "V1",
+                            "order_index": len(clips),
+                            "asset_id": asset["id"],
+                            "asset_kind": "video",
+                            "source_start_us": candidate_clip["source_start_us"],
+                            "source_end_us": candidate_clip["source_end_us"],
+                            "timeline_start_us": offset,
+                            "timeline_end_us": offset + duration,
+                            "layout": brief["default_layout"],
+                            "audio": {
+                                "enabled": brief["original_audio_policy"] == "preserve",
+                                "gain_db": 0.0,
+                            },
+                        }
+                    )
+                    if brief["caption_policy"] == "auto_from_transcript":
+                        captions.append(
+                            {
+                                "caption_id": f"caption_{new_id()}",
+                                "track_id": "C1",
+                                "source_clip_id": clip_id,
+                                "start_us": offset,
+                                "end_us": offset + duration,
+                                "text": " ".join(x["text"] for x in segments),
+                                "preset_id": brief["caption_preset_id"],
+                                "origin": "transcript",
+                                "edited": False,
+                                "source_segment_ids": ids,
+                            }
+                        )
+                    offset += duration
+                    transcripts.append(transcript["id"])
+                canvas = json_loads(project["canvas_json"])
+                document = {
+                    "schema_version": 1,
+                    "project_id": project_id,
+                    "canvas": {
+                        "width": 1080,
+                        "height": 1920,
+                        "fps_num": 30,
+                        "fps_den": 1,
+                        "background_color": canvas.get("background_color", "#000000"),
+                    },
+                    "tracks": [
+                        {"id": "V1", "kind": "visual", "locked": False},
+                        {"id": "C1", "kind": "caption", "locked": False},
+                    ],
+                    "clips": clips,
+                    "captions": captions,
+                    "provenance": {
+                        "created_by": "user",
+                        "source_transcript_ids": sorted(set(transcripts)),
+                    },
+                }
+                revision = self.timelines.create_revision_from_document(
+                    db,
+                    project_id,
+                    generation["timeline_baseline_revision_id"],
+                    document,
+                    "采用 AI 候选方案",
+                )
+                db.execute(
+                    "INSERT INTO candidate_adoptions(id,candidate_plan_id,project_id,timeline_revision_id,created_at) VALUES (?,?,?,?,?)",  # noqa: E501
+                    (
+                        f"adoption_{new_id()}",
+                        candidate_id,
+                        project_id,
+                        revision["timeline_revision_id"],
+                        utc_now(),
+                    ),
+                )
+                db.execute("COMMIT")
+            except Exception:
+                db.execute("ROLLBACK")
+                raise
+        return {"candidate_plan_id": candidate_id, "timeline_revision": revision}

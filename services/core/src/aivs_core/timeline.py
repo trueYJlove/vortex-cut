@@ -47,9 +47,7 @@ class TimelineService:
         )
         self._require_schema(request)
         default_layout = _enum(request.get("default_layout"), LAYOUTS, "布局不合法")
-        caption_preset = _enum(
-            request.get("caption_preset_id"), CAPTION_PRESETS, "字幕预设不合法"
-        )
+        caption_preset = _enum(request.get("caption_preset_id"), CAPTION_PRESETS, "字幕预设不合法")
         source = _mapping(request.get("source"), "创建来源不合法")
         with self.db.connection() as db:
             project = self._project(db, project_id)
@@ -102,9 +100,7 @@ class TimelineService:
                 if latest is None or latest[0] is not None:
                     raise DomainError("TIMELINE_ALREADY_EXISTS", "项目已存在时间线")
                 self._normalize_and_validate(db, document)
-                revision = self._insert_revision(
-                    db, project_id, None, document, summary, "user"
-                )
+                revision = self._insert_revision(db, project_id, None, document, summary, "user")
                 now = utc_now()
                 db.execute(
                     "UPDATE projects SET current_timeline_revision_id=?,updated_at=? WHERE id=?",
@@ -145,6 +141,34 @@ class TimelineService:
             "can_redo": bool(redo_stack),
             "current_preview": None,
         }
+
+    def create_revision_from_document(
+        self,
+        db: sqlite3.Connection,
+        project_id: str,
+        base_revision_id: str | None,
+        document: dict[str, Any],
+        summary: str,
+    ) -> dict[str, Any]:
+        """Internal Planning boundary. Callers own the surrounding transaction."""
+        project = self._project(db, project_id)
+        if project["current_timeline_revision_id"] != base_revision_id:
+            raise DomainError("TIMELINE_CONFLICT", "时间线基线已变化")
+        self._normalize_and_validate(db, document)
+        revision = self._insert_revision(
+            db, project_id, base_revision_id, document, summary, "user"
+        )
+        now = utc_now()
+        db.execute(
+            "UPDATE projects SET current_timeline_revision_id=?,updated_at=? WHERE id=?",
+            (revision["timeline_revision_id"], now, project_id),
+        )
+        db.execute(
+            "INSERT INTO timeline_navigation(project_id,redo_stack_json,updated_at) VALUES (?,?,?) "
+            "ON CONFLICT(project_id) DO UPDATE SET redo_stack_json=excluded.redo_stack_json,updated_at=excluded.updated_at",  # noqa: E501
+            (project_id, "[]", now),
+        )
+        return revision
 
     def get_revision(self, revision_id: str) -> dict[str, Any]:
         with self.db.connection() as db:
@@ -266,9 +290,7 @@ class TimelineService:
                 raise DomainError("TIMELINE_NOT_FOUND", "项目尚未创建时间线")
             db.execute("DELETE FROM timeline_drafts WHERE project_id=?", (project_id,))
 
-    def _navigate(
-        self, project_id: str, base_revision_id: str, *, redo: bool
-    ) -> dict[str, Any]:
+    def _navigate(self, project_id: str, base_revision_id: str, *, redo: bool) -> dict[str, Any]:
         base_revision_id = _identifier(base_revision_id, "Revision ID 不合法")
         with self.db.connection() as db:
             db.execute("BEGIN")
@@ -533,8 +555,10 @@ class TimelineService:
             if not isinstance(asset_duration, int) or asset_duration < MIN_VIDEO_US:
                 raise DomainError("TIMELINE_SOURCE_INVALID", "视频素材时长无效")
             start = 0 if source_start_us is None else _integer(source_start_us, "源开始时间不合法")
-            end = asset_duration if source_end_us is None else _integer(
-                source_end_us, "源结束时间不合法"
+            end = (
+                asset_duration
+                if source_end_us is None
+                else _integer(source_end_us, "源结束时间不合法")
             )
             if start < 0 or end > asset_duration or end - start < MIN_VIDEO_US:
                 raise DomainError("TIMELINE_SOURCE_INVALID", "视频源范围无效")
@@ -643,9 +667,7 @@ class TimelineService:
                         "start_us": timeline_offset + segment["start_us"] - start,
                         "end_us": timeline_offset + segment["end_us"] - start,
                         "text": _caption_text(segment["text"]),
-                        "preset_id": _enum(
-                            caption_preset, CAPTION_PRESETS, "字幕预设不合法"
-                        ),
+                        "preset_id": _enum(caption_preset, CAPTION_PRESETS, "字幕预设不合法"),
                         "origin": "transcript",
                         "edited": False,
                         "source_segment_ids": [segment["id"]],
@@ -654,9 +676,7 @@ class TimelineService:
             timeline_offset += end - start
         return clips, captions, transcript_id
 
-    def _normalize_and_validate(
-        self, db: sqlite3.Connection, document: dict[str, Any]
-    ) -> None:
+    def _normalize_and_validate(self, db: sqlite3.Connection, document: dict[str, Any]) -> None:
         _exact_keys(
             document,
             {"schema_version", "project_id", "canvas", "tracks", "clips", "captions", "provenance"},
@@ -803,9 +823,7 @@ class TimelineService:
             raise DomainError("TIMELINE_INVALID", "Timeline provenance 不合法")
         _exact_keys(provenance, {"created_by", "source_transcript_ids"})
 
-    def _normalize_timing(
-        self, document: dict[str, Any], old_starts: dict[str, int]
-    ) -> None:
+    def _normalize_timing(self, document: dict[str, Any], old_starts: dict[str, int]) -> None:
         clips = document.get("clips")
         captions = document.get("captions")
         if not isinstance(clips, list) or not isinstance(captions, list):

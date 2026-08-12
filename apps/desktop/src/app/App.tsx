@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Archive, ChevronLeft, ChevronRight, Download, Eye, FileAudio, FileText, FolderPlus, ImagePlus, MapPin, Pause, Play, Plus, Redo2, RefreshCw, RotateCcw, Save, Scissors, Square, Trash2, Undo2, Video, Volume2, VolumeX, X } from "lucide-react";
-import type { Asset, AssetKind, AssetPresentation, CaptionPresetId, EncoderMode, Job, ModelDetail, ModelSummary, Project, TimelineCaption, TimelineClip, TimelineDocument, TimelineLayout, TimelinePatchOperation, TimelineState, Transcript, TranscriptSegment, TranscriptSummary } from "@aivideo/contracts";
+import type { Asset, AssetKind, AssetPresentation, BriefInput, CaptionPresetId, EncoderMode, EgressPreview, Job, ModelDetail, ModelSummary, Project, TimelineCaption, TimelineClip, TimelineDocument, TimelineLayout, TimelinePatchOperation, TimelineState, Transcript, TranscriptSegment, TranscriptSummary } from "@aivideo/contracts";
 import type { AuthoritativePreviewPresentation, ExportRecordPresentation } from "../../electron/preload/index.js";
 import { CONTRACT_VERSION } from "@aivideo/contracts";
 
@@ -52,6 +52,17 @@ export function App() {
   const [previews, setPreviews] = useState<AuthoritativePreviewPresentation[]>([]);
   const [exports, setExports] = useState<ExportRecordPresentation[]>([]);
   const [exportPlayback, setExportPlayback] = useState<ExportRecordPresentation>();
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiStep, setAiStep] = useState<"form" | "confirm" | "running" | "candidates">("form");
+  const [aiError, setAiError] = useState("");
+  const [aiProviders, setAiProviders] = useState<Array<{ provider_config_id: string; display_name: string; credential_status: string }>>([]);
+  const [aiRecipes, setAiRecipes] = useState<Array<{ recipe_id: string; name?: string; display_name?: string; summary: string }>>([]);
+  const [aiPreview, setAiPreview] = useState<EgressPreview>();
+  const [aiCandidates, setAiCandidates] = useState<Array<Record<string, unknown>>>([]);
+  const [aiJob, setAiJob] = useState<Job>();
+  const [aiPlayback, setAiPlayback] = useState<{ media_url: string; source_start_us: number; source_end_us: number }>();
+  const [aiProviderDraft, setAiProviderDraft] = useState({ display_name: "", base_url: "", model: "" });
+  const [aiForm, setAiForm] = useState({ topic: "", audience: "", narrative_goal: "", style_notes: "", provider_id: "", recipe_id: "", transcript_id: "" });
   const draftTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const projectNameProjectId = useRef<Project["project_id"] | undefined>(undefined);
   const projectNameDirty = useRef(false);
@@ -83,7 +94,66 @@ export function App() {
     setPreviews(previewPage.items);
     setExports(exportPage.items);
   };
-  useEffect(() => { void window.desktop.getRuntime().then(async () => { setRuntimeReady(true); await Promise.all([refreshProjects(), loadModels()]); }).catch(error => setNotice(String(error))); }, []);
+  const openAi = async () => {
+    if (!project || !window.desktop.listProviders || !window.desktop.listRecipes) return;
+    setAiError(""); setAiOpen(true); setAiStep("form");
+    try {
+      const [providers, recipes] = await Promise.all([window.desktop.listProviders(), window.desktop.listRecipes()]);
+      if (!Array.isArray(recipes.items)) throw new Error("Recipe 响应无效");
+      setAiProviders(providers.items); setAiRecipes(recipes.items);
+      await loadProjectData(project);
+      const current = await window.desktop.getBrief?.(project.project_id).catch(() => undefined);
+      if (current) setAiForm(value => ({ ...value, topic: current.topic, audience: current.audience, narrative_goal: current.narrative_goal, style_notes: current.style_notes }));
+    } catch { setAiError("无法加载 AI 粗剪配置。"); }
+  };
+  const prepareAi = async () => {
+    if (!project || !window.desktop.putBrief || !window.desktop.preparePlanning) return;
+    const brief: BriefInput = { schema_version: 1, topic: aiForm.topic, audience: aiForm.audience, target_platform: "generic_vertical", target_duration_us: 30_000_000, narrative_goal: aiForm.narrative_goal, style_notes: aiForm.style_notes, must_keep: [], forbidden: [], original_audio_policy: "preserve", caption_policy: "auto_from_transcript", caption_preset_id: "default-bottom", default_layout: "fit" };
+    try { setAiError(""); await window.desktop.putBrief({ project_id: project.project_id, brief }); const preview = await window.desktop.preparePlanning({ project_id: project.project_id, provider_config_id: aiForm.provider_id, recipe_id: aiForm.recipe_id, transcript_ids: [aiForm.transcript_id] }); setAiPreview(preview); setAiStep("confirm"); }
+    catch { setAiError("准备失败。请检查 Brief、Provider 凭据及就绪转录后重试。"); }
+  };
+  const createAi = async () => {
+    if (!project || !aiPreview || !window.desktop.createPlanning) return;
+    try { setAiStep("running"); const result = await window.desktop.createPlanning({ project_id: project.project_id, egress_preview_id: aiPreview.egress_preview_id, payload_sha256: aiPreview.payload_sha256 }); setAiJob(result.job); trackRenderJob(result.job); const stop = window.desktop.subscribeJob(result.job.job_id, job => { setAiJob(job); if (["failed", "cancelled", "interrupted"].includes(job.status)) { setAiPreview(undefined); setAiStep("form"); setAiError("生成未完成。请重新准备外传内容并再次确认。"); } }); const poll = async () => { const items = await window.desktop.listCandidatePlans?.(project.project_id); if (items?.items.length) { stop(); setAiCandidates(items.items as unknown as Array<Record<string, unknown>>); setAiStep("candidates"); } else setTimeout(() => void poll(), 1500); }; void poll(); }
+    catch { setAiPreview(undefined); setAiError("调用失败；重试前必须重新准备并确认外传内容。"); setAiStep("form"); }
+  };
+  const saveAiProvider = async () => {
+    if (!window.desktop.createProvider) return;
+    try { const created = await window.desktop.createProvider({ kind: "openai_compatible_text", ...aiProviderDraft, enabled: true, input_price_per_million: null, output_price_per_million: null }); setAiProviders(current => [...current, created]); setAiForm(current => ({ ...current, provider_id: created.provider_config_id })); setAiProviderDraft({ display_name: "", base_url: "", model: "" }); }
+    catch { setAiError("Provider 配置无效。请检查名称、HTTPS/HTTP 地址和模型名。"); }
+  };
+  const saveAiSecret = async () => {
+    if (!window.desktop.setProviderSecret || !aiForm.provider_id) return;
+    const input = document.getElementById("ai-provider-secret") as HTMLInputElement | null;
+    const secret = input?.value ?? "";
+    if (!secret) return;
+    try { await window.desktop.setProviderSecret({ provider_config_id: aiForm.provider_id, secret }); if (input) input.value = ""; setAiProviders(current => current.map(item => item.provider_config_id === aiForm.provider_id ? { ...item, credential_status: "configured" } : item)); }
+    catch { setAiError("密钥未能同步到本地核心；未显示或记录密钥内容。"); }
+  };
+  const deleteAiSecret = async () => { if (!window.desktop.deleteProviderSecret || !aiForm.provider_id) return; try { await window.desktop.deleteProviderSecret(aiForm.provider_id); setAiProviders(current => current.map(item => item.provider_config_id === aiForm.provider_id ? { ...item, credential_status: "missing" } : item)); setAiError("密钥已从本机安全存储与 Core 内存中删除。"); } catch { setAiError("删除密钥失败；未显示密钥内容。"); } };
+  const testAiProvider = async () => { if (!window.desktop.testProvider || !aiForm.provider_id) return; try { await window.desktop.testProvider(aiForm.provider_id); setAiError("连接测试通过。"); } catch { setAiError("连接测试失败，请检查 Provider、网络和凭据。"); } };
+  const playAiClip = async (candidateOrClip: Record<string, unknown>, selectedClip?: Record<string, unknown>) => { if (!project || !window.desktop.getCandidateClipMedia) return; const clip = selectedClip ?? candidateOrClip; const candidate = selectedClip ? candidateOrClip : aiCandidates.find(item => Array.isArray(item.clips) && (item.clips as Array<Record<string, unknown>>).some(item => item.clip_id === clip.clip_id)); if (!candidate) { setAiError("候选片段当前不可播放。"); return; } try { setAiPlayback(await window.desktop.getCandidateClipMedia({ project_id: project.project_id, candidate_plan_id: String(candidate.candidate_plan_id), candidate_clip_id: String(clip.clip_id) })); } catch { setAiError("候选片段当前不可播放。"); } };
+  const adoptAi = async (candidate: Record<string, unknown>) => { if (!project || !window.desktop.adoptCandidatePlan) return; try { const state = await window.desktop.adoptCandidatePlan({ project_id: project.project_id, candidate_plan_id: String(candidate.candidate_plan_id), adoption: { schema_version: 1, candidate_document_sha256: String(candidate.document_sha256), base_revision_id: timeline?.current_revision.timeline_revision_id ?? null } }); setTimeline(state); setWorking(state.current_revision.document); setAiOpen(false); setNotice("候选已采用为正式时间线；可使用撤销恢复。"); } catch { setAiError("采用冲突：请先处理当前草稿或刷新 Timeline 后重试。"); } };
+  useEffect(() => {
+    // The preload bridge is immutable in production, but capture it for this
+    // mounted editor instance.  This prevents a late startup continuation from
+    // an unmounted window from issuing requests through a subsequently created
+    // renderer bridge and racing its project/timeline state.
+    const desktop = window.desktop;
+    let active = true;
+    void desktop.getRuntime().then(async () => {
+      const [projectPage, modelPage] = await Promise.all([
+        desktop.listProjects({ limit: 100 }),
+        desktop.listModels({ limit: 100 })
+      ]);
+      if (!active) return;
+      setRuntimeReady(true);
+      setProjects(projectPage.items);
+      setProject(current => projectPage.items.find(item => item.project_id === current?.project_id) ?? projectPage.items[0]);
+      setModels(modelPage.items);
+    }).catch(error => { if (active) setNotice(String(error)); });
+    return () => { active = false; };
+  }, []);
   useEffect(() => {
     if (!project) return;
     let active = true;
@@ -251,11 +321,13 @@ export function App() {
       <aside className="properties-pane">{selectedClip ? <ClipProperties clip={selectedClip} onPatch={patchTimeline} onDraft={queueDraft} working={working!} /> : selectedCaption ? <CaptionProperties caption={selectedCaption} onPatch={patchTimeline} onDraft={queueDraft} working={working!} /> : <div className="properties-empty"><strong>属性</strong><p>选择 V1 片段或 C1 字幕后编辑。</p></div>}</aside>
     </section>
     <TimelinePanel document={working} selection={selection} setSelection={setSelection} onPatch={patchTimeline} />
-    <footer>{CONTRACT_VERSION} · 权威预览与最终导出均由冻结 Timeline Revision 生成。</footer>
+    <footer><button className="ai-entry" disabled={!project} onClick={() => void openAi()}>AI 粗剪</button><button className="ai-entry" disabled={!aiForm.provider_id} onClick={() => void deleteAiSecret()}>删除当前 Provider 密钥</button>{CONTRACT_VERSION} · 权威预览与最终导出均由冻结 Timeline Revision 生成。</footer>
     {confirmModel && <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-labelledby="model-confirm-title"><div className="modal-heading"><h2 id="model-confirm-title">确认下载本地模型</h2><IconButton label="关闭" onClick={() => setConfirmModel(undefined)}><X /></IconButton></div><h3>{confirmModel.display_name}</h3><p>{confirmModel.purpose}</p><dl><dt>下载大小</dt><dd>{formatBytes(confirmModel.model_size_bytes)}</dd><dt>许可证</dt><dd>{confirmModel.license.name}</dd><dt>隐私</dt><dd>模型在本机运行，不上传媒体或转录正文。</dd></dl>{confirmModel.license.acceptance_required && <label className="check-line"><input type="checkbox" checked={licenseAccepted} onChange={event => setLicenseAccepted(event.target.checked)} />我已阅读并接受该许可证</label>}<div className="modal-actions"><button onClick={() => setConfirmModel(undefined)}>暂不下载</button><button disabled={confirmModel.license.acceptance_required && !licenseAccepted} onClick={() => void downloadModel()}>确认并下载</button></div></section></div>}
     {transcriptionAsset && <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-labelledby="transcription-title"><div className="modal-heading"><h2 id="transcription-title">创建本地转录</h2><IconButton label="关闭" onClick={() => setTranscriptionAsset(undefined)}><X /></IconButton></div><p title={transcriptionAsset.display_name}>{transcriptionAsset.display_name}</p><label>语言<select value={language} onChange={event => setLanguage(event.target.value)}><option value="auto">自动检测</option><option value="zh">中文</option><option value="en">English</option></select></label><label className="check-line"><input type="checkbox" checked={wordTimestamps} onChange={event => setWordTimestamps(event.target.checked)} />生成词级时间戳</label><div className="modal-actions"><button onClick={() => setTranscriptionAsset(undefined)}>取消</button><button onClick={() => void submitTranscription()}>开始转录</button></div></section></div>}
     {viewingTranscript && <div className="modal-backdrop"><section className="modal transcript-viewer" role="dialog" aria-modal="true" aria-labelledby="transcript-title"><div className="modal-heading"><div><h2 id="transcript-title">原始转录</h2><small>{viewingTranscript.language} · {viewingTranscript.provider} · {viewingTranscript.model_revision}</small></div><IconButton label="关闭" onClick={() => setViewingTranscript(undefined)}><X /></IconButton></div><div className="readonly-note">原始 ASR 结果只读。字幕修订不会覆盖这份记录。</div><div className="readonly-segments">{viewingTranscript.segments.map(segment => <div key={segment.segment_id}><span>{formatTime(segment.start_us)}-{formatTime(segment.end_us)}</span><p>{segment.text}</p></div>)}</div></section></div>}
-  </main>;
+    {aiOpen && <div className="modal-backdrop"><section className="modal ai-roughcut" role="dialog" aria-modal="true" aria-labelledby="ai-roughcut-title"><div className="modal-heading"><div><h2 id="ai-roughcut-title">AI 粗剪</h2><p>仅在确认外传内容后调用 Provider。</p></div><IconButton label="关闭 AI 粗剪" onClick={() => setAiOpen(false)}><X /></IconButton></div>{aiError && <p className="ai-status" role="status">{aiError}</p>}{aiStep === "form" && <><label>主题<input value={aiForm.topic} onChange={e => setAiForm(v => ({ ...v, topic: e.target.value }))} /></label><label>受众<input value={aiForm.audience} onChange={e => setAiForm(v => ({ ...v, audience: e.target.value }))} /></label><label>叙事目标<textarea value={aiForm.narrative_goal} onChange={e => setAiForm(v => ({ ...v, narrative_goal: e.target.value }))} /></label><label>风格说明<textarea value={aiForm.style_notes} onChange={e => setAiForm(v => ({ ...v, style_notes: e.target.value }))} /></label><label>制作配方<select value={aiForm.recipe_id} onChange={e => setAiForm(v => ({ ...v, recipe_id: e.target.value }))}><option value="">选择配方</option>{aiRecipes.map(item => <option key={item.recipe_id} value={item.recipe_id}>{item.name ?? item.display_name} · {item.summary}</option>)}</select></label><label>Provider<select value={aiForm.provider_id} onChange={e => setAiForm(v => ({ ...v, provider_id: e.target.value }))}><option value="">选择 Provider</option>{aiProviders.map(item => <option key={item.provider_config_id} value={item.provider_config_id}>{item.display_name} · {item.credential_status === "configured" ? "已配置密钥" : "缺少密钥"}</option>)}</select></label><div className="ai-inline"><input id="ai-provider-secret" aria-label="Provider 密钥" type="password" autoComplete="off" placeholder="仅提交新密钥" /><button onClick={() => void saveAiSecret()}>安全保存密钥</button><button onClick={() => void testAiProvider()}>连接测试</button></div><fieldset><legend>新建 Provider（可选）</legend><input aria-label="Provider 名称" value={aiProviderDraft.display_name} onChange={e => setAiProviderDraft(v => ({ ...v, display_name: e.target.value }))} placeholder="名称" /><input aria-label="Provider 地址" value={aiProviderDraft.base_url} onChange={e => setAiProviderDraft(v => ({ ...v, base_url: e.target.value }))} placeholder="https://…" /><input aria-label="Provider 模型" value={aiProviderDraft.model} onChange={e => setAiProviderDraft(v => ({ ...v, model: e.target.value }))} placeholder="模型" /><button onClick={() => void saveAiProvider()}>创建 Provider</button></fieldset><label>就绪转录<select value={aiForm.transcript_id} onChange={e => setAiForm(v => ({ ...v, transcript_id: e.target.value }))}><option value="">选择已就绪转录</option>{Object.values(transcripts).flat().map(item => <option key={item.transcript_id} value={item.transcript_id}>{item.language} · {item.segments.length} 段</option>)}</select></label><div className="modal-actions"><button disabled={!aiForm.topic || !aiForm.audience || !aiForm.narrative_goal || !aiForm.provider_id || !aiForm.recipe_id || !aiForm.transcript_id} onClick={() => void prepareAi()}>准备外传确认</button></div></>}{aiStep === "confirm" && aiPreview && <><h3>确认发送的精确内容</h3><dl><dt>目标</dt><dd>{aiPreview.provider.origin}</dd><dt>模型</dt><dd>{aiPreview.provider.model}</dd><dt>字段</dt><dd>{aiPreview.sent_fields.join("、")}</dd><dt>段落/字符</dt><dd>{aiPreview.stats.segment_count} 段 / {aiPreview.stats.character_count} 字</dd><dt>估算 Token</dt><dd>{aiPreview.stats.estimated_tokens}</dd><dt>费用提示</dt><dd>按 Provider 配置的单价估算，最终费用以服务商账单为准。</dd><dt>哈希</dt><dd>{aiPreview.payload_sha256}</dd><dt>有效期</dt><dd>{aiPreview.expires_at}</dd></dl><div className="egress-text">{Array.isArray(aiPreview.payload.segments) && (aiPreview.payload.segments as Array<Record<string, unknown>>).map(segment => <p key={String(segment.segment_ref)}>{String(segment.text)}</p>)}</div><div className="modal-actions"><button onClick={() => { setAiPreview(undefined); setAiStep("form"); }}>返回修改</button><button onClick={() => void createAi()}>我确认发送以上内容</button></div></>}{aiStep === "running" && <><h3>正在生成候选方案</h3><p>任务进度与取消操作沿用现有任务中心；如失败或取消，请重新准备并再次确认。</p></>}{aiStep === "candidates" && <><h3>三个候选方案</h3><div className="candidate-columns">{(["balanced", "compact", "bold"] as const).map((variant, index) => { const item = aiCandidates.find(candidate => candidate.variant === variant); const title = ["稳妥版", "紧凑版", "高能版"][index]; return <section key={variant}><h4>{title}</h4>{item ? <><strong>{String(item.title_suggestion)}</strong><p>{String(item.summary)}</p><small>{Number(item.duration_us) / 1_000_000}s · 模型参考</small>{Array.isArray(item.clips) && (item.clips as Array<Record<string, unknown>>).map(clip => <div className="candidate-clip" key={String(clip.clip_id)}><span>{Number(clip.source_start_us) / 1_000_000}s–{Number(clip.source_end_us) / 1_000_000}s</span><button onClick={() => void playAiClip(clip)}>试播片段</button><p>{String(clip.reason)}</p></div>)}<button onClick={() => void adoptAi(item)}>采用此方案</button></> : <p>等待有效响应</p>}</section>; })}</div>{aiPlayback && <video className="candidate-player" src={aiPlayback.media_url} controls autoPlay onLoadedMetadata={e => { e.currentTarget.currentTime = aiPlayback.source_start_us / 1_000_000; }} onTimeUpdate={e => { if (e.currentTarget.currentTime >= aiPlayback.source_end_us / 1_000_000) e.currentTarget.pause(); }} />}</>}</section></div>}
+     {aiOpen && aiStep === "running" && <section className="ai-job-progress" aria-live="polite" aria-label="AI 粗剪任务进度"><strong>阶段：{aiJob?.stage ?? "queued"}</strong><span>进度：{Math.round((aiJob?.progress ?? 0) * 100)}%</span><progress aria-label="AI 粗剪进度" max="1" value={aiJob?.progress ?? 0} /><button disabled={!aiJob || !["queued", "running", "cancelling"].includes(aiJob.status)} onClick={() => { if (!aiJob) return; void window.desktop.cancelJob(aiJob.job_id).then(job => { setAiJob(job); setAiPreview(undefined); setAiCandidates([]); setAiPlayback(undefined); setAiStep("form"); setAiError("生成已取消。请重新准备外传内容并再次确认。"); }).catch(() => setAiError("取消请求失败；请等待当前任务状态刷新。")); }}>取消生成</button></section>}
+   </main>;
 }
 
 function SegmentRow({ segment, selected, onToggle }: { segment: TranscriptSegment; selected: boolean; onToggle: () => void }) { return <label className="segment-row"><input type="checkbox" checked={selected} onChange={onToggle} /><span>{formatTime(segment.start_us)}-{formatTime(segment.end_us)}</span><p>{segment.text}</p></label>; }

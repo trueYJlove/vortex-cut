@@ -22,6 +22,7 @@ class MigrationError(RuntimeError):
 V1_VERSION = "v1"
 V2_VERSION = "v2"
 V3_VERSION = "v3"
+V4_VERSION = "v4"
 V1_SQL = """
 CREATE TABLE IF NOT EXISTS media_inputs (
   id TEXT PRIMARY KEY, path TEXT NOT NULL, display_name TEXT NOT NULL,
@@ -208,10 +209,78 @@ BEGIN
   SELECT RAISE(ABORT, 'timeline revisions are immutable');
 END;
 """
+V4_SQL = """
+CREATE TABLE IF NOT EXISTS project_briefs (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL UNIQUE REFERENCES projects(id),
+  document_json TEXT NOT NULL, document_sha256 TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS provider_configs (
+  id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind='openai_compatible_text'), display_name TEXT NOT NULL,
+  base_url TEXT NOT NULL, model TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1,
+  input_price_per_million REAL NULL, output_price_per_million REAL NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS recipe_snapshots (
+  id TEXT PRIMARY KEY, recipe_id TEXT NOT NULL, document_json TEXT NOT NULL, document_sha256 TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS egress_previews (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), provider_config_id TEXT NOT NULL REFERENCES provider_configs(id),
+  brief_snapshot_json TEXT NOT NULL, brief_sha256 TEXT NOT NULL, recipe_snapshot_id TEXT NOT NULL REFERENCES recipe_snapshots(id),
+  provider_snapshot_json TEXT NOT NULL, provider_config_sha256 TEXT NOT NULL,
+  transcript_refs_json TEXT NOT NULL, segment_whitelist_json TEXT NOT NULL, payload_sha256 TEXT NOT NULL,
+  payload_json TEXT NOT NULL, stats_json TEXT NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS egress_consents (
+  id TEXT PRIMARY KEY, egress_preview_id TEXT NOT NULL UNIQUE REFERENCES egress_previews(id), payload_sha256 TEXT NOT NULL,
+  consumed_at TEXT NULL, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS candidate_generations (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), egress_preview_id TEXT NOT NULL REFERENCES egress_previews(id),
+  egress_consent_id TEXT NOT NULL REFERENCES egress_consents(id), provider_config_id TEXT NOT NULL REFERENCES provider_configs(id),
+  brief_snapshot_json TEXT NOT NULL, brief_sha256 TEXT NOT NULL, recipe_snapshot_id TEXT NOT NULL REFERENCES recipe_snapshots(id),
+  timeline_baseline_revision_id TEXT NULL REFERENCES timeline_revisions(id), status TEXT NOT NULL,
+  payload_sha256 TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, finished_at TEXT NULL
+);
+CREATE TABLE IF NOT EXISTS provider_invocations (
+  id TEXT PRIMARY KEY, candidate_generation_id TEXT NULL REFERENCES candidate_generations(id), provider_config_id TEXT NOT NULL REFERENCES provider_configs(id),
+  capability TEXT NOT NULL, provider_name TEXT NOT NULL, model TEXT NOT NULL, prompt_template_version TEXT NOT NULL,
+  output_schema_version TEXT NOT NULL, input_sha256 TEXT NOT NULL, output_sha256 TEXT NULL, status TEXT NOT NULL,
+  started_at TEXT NULL, finished_at TEXT NULL, duration_ms INTEGER NULL, provider_request_id TEXT NULL,
+  usage_json TEXT NULL, estimated_cost REAL NULL, actual_cost REAL NULL, provider_may_have_processed INTEGER NOT NULL DEFAULT 0,
+  error_code TEXT NULL, error_message TEXT NULL, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS candidate_plans (
+  id TEXT PRIMARY KEY, candidate_generation_id TEXT NOT NULL REFERENCES candidate_generations(id), project_id TEXT NOT NULL REFERENCES projects(id),
+  ordinal INTEGER NOT NULL, variant TEXT NOT NULL, document_json TEXT NOT NULL, document_sha256 TEXT NOT NULL, created_at TEXT NOT NULL,
+  UNIQUE(candidate_generation_id, ordinal), UNIQUE(candidate_generation_id, variant)
+);
+CREATE TABLE IF NOT EXISTS candidate_adoptions (
+  id TEXT PRIMARY KEY, candidate_plan_id TEXT NOT NULL UNIQUE REFERENCES candidate_plans(id), project_id TEXT NOT NULL REFERENCES projects(id),
+  timeline_revision_id TEXT NOT NULL REFERENCES timeline_revisions(id), created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_briefs_project ON project_briefs(project_id);
+CREATE INDEX IF NOT EXISTS idx_previews_expiry ON egress_previews(expires_at);
+CREATE INDEX IF NOT EXISTS idx_generations_project ON candidate_generations(project_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_invocations_generation ON provider_invocations(candidate_generation_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_invocations_status ON provider_invocations(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_candidates_project ON candidate_plans(project_id, created_at DESC);
+CREATE TRIGGER IF NOT EXISTS recipe_snapshots_no_update BEFORE UPDATE ON recipe_snapshots BEGIN SELECT RAISE(ABORT,'recipe snapshots are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS recipe_snapshots_no_delete BEFORE DELETE ON recipe_snapshots BEGIN SELECT RAISE(ABORT,'recipe snapshots are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS egress_previews_no_update BEFORE UPDATE ON egress_previews BEGIN SELECT RAISE(ABORT,'egress previews are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS egress_previews_no_delete BEFORE DELETE ON egress_previews BEGIN SELECT RAISE(ABORT,'egress previews are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS egress_consents_no_delete BEFORE DELETE ON egress_consents BEGIN SELECT RAISE(ABORT,'egress consents are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS egress_consents_only_consume BEFORE UPDATE ON egress_consents
+WHEN NOT (OLD.consumed_at IS NULL AND NEW.consumed_at IS NOT NULL AND NEW.id=OLD.id AND NEW.egress_preview_id=OLD.egress_preview_id AND NEW.payload_sha256=OLD.payload_sha256 AND NEW.created_at=OLD.created_at)
+BEGIN SELECT RAISE(ABORT,'egress consents are immutable except first consumption'); END;
+CREATE TRIGGER IF NOT EXISTS candidate_plans_no_update BEFORE UPDATE ON candidate_plans BEGIN SELECT RAISE(ABORT,'candidate plans are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS candidate_plans_no_delete BEFORE DELETE ON candidate_plans BEGIN SELECT RAISE(ABORT,'candidate plans are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS candidate_adoptions_no_update BEFORE UPDATE ON candidate_adoptions BEGIN SELECT RAISE(ABORT,'candidate adoptions are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS candidate_adoptions_no_delete BEFORE DELETE ON candidate_adoptions BEGIN SELECT RAISE(ABORT,'candidate adoptions are immutable'); END;
+"""  # noqa: E501
 MIGRATIONS: dict[str, str] = {
     V1_VERSION: V1_SQL,
     V2_VERSION: V2_SQL,
     V3_VERSION: V3_SQL,
+    V4_VERSION: V4_SQL,
 }
 
 
@@ -259,6 +328,7 @@ class Database:
                     self._apply_v1_compatibility(db)
                     self._apply_v2_compatibility(db)
                     self._apply_v3_compatibility(db)
+                    self._apply_v4_compatibility(db)
                     for statement in _statements(sql):
                         db.execute(statement)
                     db.execute(
@@ -342,6 +412,20 @@ class Database:
         additions = {
             "timeline_revision_id": "TEXT REFERENCES timeline_revisions(id)",
             "idempotency_key": "TEXT",
+        }
+        for name, definition in additions.items():
+            if name not in columns:
+                db.execute(f"ALTER TABLE jobs ADD COLUMN {name} {definition}")
+
+    @staticmethod
+    def _apply_v4_compatibility(db: sqlite3.Connection) -> None:
+        tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "jobs" not in tables:
+            return
+        columns = {row[1] for row in db.execute("PRAGMA table_info(jobs)")}
+        additions = {
+            "provider_invocation_id": "TEXT REFERENCES provider_invocations(id)",
+            "candidate_generation_id": "TEXT REFERENCES candidate_generations(id)",
         }
         for name, definition in additions.items():
             if name not in columns:

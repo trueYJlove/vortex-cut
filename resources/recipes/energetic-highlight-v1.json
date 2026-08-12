@@ -1,0 +1,1 @@
+{"schema_version":1,"recipe_id":"energetic-highlight-v1","name":"Energetic highlight","summary":"Prioritize concise, high-confidence moments and brisk pacing.","rules":{"selection":"keyword_relevance","pace":"energetic","max_gap_us":800000}}

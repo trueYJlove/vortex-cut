@@ -1,6 +1,8 @@
 import json
 import sqlite3
+from os import replace
 from pathlib import Path
+from shutil import copyfile
 
 from fastapi.testclient import TestClient
 
@@ -164,6 +166,7 @@ def test_stage1a_project_asset_lifecycle_and_redaction(tmp_path: Path, monkeypat
             ("v1",),
             ("v2",),
             ("v3",),
+            ("v4",),
         ]
     assert list((tmp_path / "backups").glob("app-*.db"))
 
@@ -212,3 +215,81 @@ def test_core_restart_recovers_running_job(tmp_path: Path, monkeypatch):
         assert any(
             item["job_id"] == "job_restart" for item in project_jobs.json()["items"]
         )
+
+
+def test_refresh_detects_real_video_replacement_and_missing_file(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("AIVS_ADMIN_TOKEN", "admin-refresh")
+    root = Path.cwd()
+    original = root / "test-assets" / "generated" / "cfr-landscape-av.mp4"
+    replacement = root / "test-assets" / "generated" / "short-odd-size.mp4"
+    assert original.is_file() and replacement.is_file()
+    target = tmp_path / "clip.mp4"
+    copyfile(original, target)
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        ffmpeg=root / "resources" / "ffmpeg" / "win-x64" / "ffmpeg.exe",
+        ffprobe=root / "resources" / "ffmpeg" / "win-x64" / "ffprobe.exe",
+    )
+    with TestClient(create_app(settings)) as client:
+        admin = {"Authorization": "Bearer admin-refresh"}
+        ui = {
+            "Authorization": (
+                f"Bearer {client.post('/api/v1/internal/sessions', headers=admin).json()['token']}"
+            )
+        }
+        project_id = client.post(
+            "/api/v1/projects", headers=ui, json={"name": "real refresh"}
+        ).json()["project_id"]
+        grant_id = client.post(
+            "/api/v1/internal/file-grants", headers=admin, json={"path": str(target)}
+        ).json()["grant_id"]
+        imported = client.post(
+            f"/api/v1/projects/{project_id}/assets",
+            headers=ui,
+            json={"grant_id": grant_id, "kind": "video"},
+        )
+        assert imported.status_code == 201, imported.text
+        original_asset = imported.json()
+        original_stat = target.stat()
+        replacement_staging = tmp_path / "replacement.mp4"
+        copyfile(replacement, replacement_staging)
+        replace(replacement_staging, target)
+        replacement_stat = target.stat()
+        assert replacement_stat.st_size != original_stat.st_size
+        refreshed = client.post(
+            f"/api/v1/assets/{original_asset['asset_id']}/refresh", headers=ui
+        )
+        assert refreshed.status_code == 200, refreshed.text
+        changed = refreshed.json()
+        assert changed["availability"] == "changed"
+        assert changed["fingerprint"] != original_asset["fingerprint"]
+        assert changed["size_bytes"] == replacement_stat.st_size
+        target.unlink()
+        missing = client.post(f"/api/v1/assets/{original_asset['asset_id']}/refresh", headers=ui)
+        assert missing.status_code == 200
+        assert missing.json()["availability"] == "missing"
+
+
+def test_sidecar_restart_auth_isolates_ui_tokens_and_allows_new_project(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.setenv("AIVS_ADMIN_TOKEN", "admin-auth-restart")
+    settings = Settings(data_dir=tmp_path, ffmpeg=Path("missing"), ffprobe=Path("missing"))
+    admin = {"Authorization": "Bearer admin-auth-restart"}
+    with TestClient(create_app(settings)) as first:
+        first_ui_token = first.post("/api/v1/internal/sessions", headers=admin).json()["token"]
+        first_ui = {"Authorization": f"Bearer {first_ui_token}"}
+        before = first.post("/api/v1/projects", headers=first_ui, json={"name": "before"})
+        wrong_scope = first.post(
+            "/api/v1/projects", headers=admin, json={"name": "wrong scope"}
+        )
+        assert before.status_code == 201
+        assert wrong_scope.status_code == 401
+    with TestClient(create_app(settings)) as restarted:
+        old_ui = {"Authorization": f"Bearer {first_ui_token}"}
+        stale = restarted.post("/api/v1/projects", headers=old_ui, json={"name": "stale"})
+        assert stale.status_code == 401
+        fresh_ui_token = restarted.post("/api/v1/internal/sessions", headers=admin).json()["token"]
+        fresh_ui = {"Authorization": f"Bearer {fresh_ui_token}"}
+        created = restarted.post("/api/v1/projects", headers=fresh_ui, json={"name": "after"})
+        assert created.status_code == 201, created.text

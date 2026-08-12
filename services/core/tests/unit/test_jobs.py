@@ -89,6 +89,40 @@ def test_job_serialization_hides_input_path(tmp_path):
     assert detail and "path" not in detail["input"]
 
 
+def test_candidate_generation_retry_is_rejected_and_restart_interrupts(tmp_path: Path) -> None:
+    db, service, _ = make_basic_service(tmp_path)
+    now = "2026-08-12T00:00:00.000Z"
+    with db.connection() as connection:
+        for job_id, status in (
+            ("candidate_failed", "failed"),
+            ("candidate_running", "running"),
+            ("candidate_cancelling", "cancelling"),
+        ):
+            connection.execute(
+                    "INSERT INTO jobs(id,kind,type,status,stage,progress,input_json,resource_class,attempt,created_at,updated_at) "  # noqa: E501
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    job_id,
+                    "candidate_generation",
+                    "candidate_generation",
+                    status,
+                    status,
+                    0,
+                    '{"candidate_generation_id":"g1","egress_payload_sha256":"sha256:x"}',
+                        "network",
+                    1,
+                    now,
+                    now,
+                ),
+            )
+    with pytest.raises(ValueError, match="CANDIDATE_GENERATION_RECONFIRM_REQUIRED"):
+        service.retry("candidate_failed")
+    assert db.recover_interrupted() == 2
+    for job_id in ("candidate_running", "candidate_cancelling"):
+        detail = service.get(job_id)
+        assert detail and detail["status"] == "interrupted"
+
+
 @pytest.mark.asyncio
 async def test_job_cancel_paths_and_lifecycle(tmp_path: Path):
     db, service, source = make_basic_service(tmp_path)

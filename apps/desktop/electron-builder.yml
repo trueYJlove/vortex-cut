@@ -29,6 +29,10 @@ extraResources:
     to: model-manifests
     filter:
       - '*.json'
+  - from: ../../resources/recipes
+    to: recipes
+    filter:
+      - '*.json'
   - from: ../../resources/fonts
     to: fonts
     filter:

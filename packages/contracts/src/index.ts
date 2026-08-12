@@ -1,6 +1,6 @@
 export const PROTOCOL_VERSION = 1 as const;
 export const API_PREFIX = "/api/v1" as const;
-export const CONTRACT_VERSION = "stage1c-v1" as const;
+export const CONTRACT_VERSION = "stage2a-v1" as const;
 
 export type GrantId = string & { readonly __brand: "grant_id" };
 export type ProjectId = string & { readonly __brand: "project_id" };
@@ -19,6 +19,13 @@ export type RenderArtifactId = string & { readonly __brand: "render_artifact_id"
 export type ExportRecordId = string & { readonly __brand: "export_record_id" };
 export type DestinationGrantId = string & { readonly __brand: "destination_grant_id" };
 export type PlaybackTicketId = string & { readonly __brand: "playback_ticket_id" };
+export type BriefId = string & { readonly __brand: "brief_id" };
+export type RecipeId = string & { readonly __brand: "recipe_id" };
+export type ProviderConfigId = string & { readonly __brand: "provider_config_id" };
+export type EgressPreviewId = string & { readonly __brand: "egress_preview_id" };
+export type CandidateGenerationId = string & { readonly __brand: "candidate_generation_id" };
+export type ProviderInvocationId = string & { readonly __brand: "provider_invocation_id" };
+export type CandidatePlanId = string & { readonly __brand: "candidate_plan_id" };
 
 export type ProjectStatus = "active" | "archived" | "missing";
 export type AssetKind = "video" | "audio" | "image" | "text";
@@ -40,6 +47,7 @@ export type JobKind =
   | "vertical_sample"
   | "model_download"
   | "transcription"
+  | "candidate_generation"
   | "authoritative_preview"
   | "final_export";
 export type JobStage =
@@ -53,6 +61,10 @@ export type JobStage =
   | "failed"
   | "cancelled"
   | "interrupted"
+  | "preparing"
+  | "awaiting_confirmation"
+  | "invoking_provider"
+  | "validating_candidate"
   | (string & {});
 export type ModelInstallStatus = "unavailable" | "queued" | "downloading" | "paused" | "verifying" | "ready" | "cancelled" | "failed";
 export type AsrProviderStatus = "unavailable" | "installed" | "corrupt" | "runtime_unavailable";
@@ -402,6 +414,51 @@ export interface Transcript {
   updated_at: string;
 }
 
+export type ProviderKind = "openai_compatible_text";
+export type CredentialStatus = "missing" | "configured" | "unavailable";
+export type OriginalAudioPolicy = "preserve" | "mute";
+export type CaptionPolicy = "auto_from_transcript" | "none";
+export type CandidateVariant = "balanced" | "compact" | "bold";
+export type CandidateGenerationStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
+export type ProviderInvocationStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
+
+export interface Brief {
+  schema_version: 1; brief_id: BriefId; project_id: ProjectId; topic: string; audience: string;
+  target_platform: "generic_vertical"; target_duration_us: number; narrative_goal: string; style_notes: string;
+  must_keep: string[]; forbidden: string[]; original_audio_policy: OriginalAudioPolicy; caption_policy: CaptionPolicy;
+  caption_preset_id: CaptionPresetId; default_layout: TimelineLayout; document_sha256: string;
+}
+export interface BriefInput extends Omit<Brief, "brief_id" | "project_id" | "document_sha256"> {}
+export interface Recipe {
+  schema_version: 1; recipe_id: RecipeId; name: string; summary: string; rules: { selection: string; pace: string; max_gap_us: number }; document_sha256: string;
+}
+export interface ProviderConfig {
+  provider_config_id: ProviderConfigId; kind: ProviderKind; display_name: string; base_url: string; model: string;
+  enabled: boolean; credential_status: CredentialStatus; input_price_per_million: number | null;
+  output_price_per_million: number | null; created_at: string; updated_at: string;
+}
+export interface EgressPreview {
+  egress_preview_id: EgressPreviewId; provider: { display_name: string; origin: string; model: string };
+  prompt_template_version: string; sent_fields: string[]; payload_sha256: string; expires_at: string;
+  payload: Record<string, unknown>; stats: { transcript_count: number; segment_count: number; character_count: number; estimated_tokens: number };
+}
+export interface CandidateClip {
+  clip_id: string; order_index: number; asset_id: AssetId; transcript_id: TranscriptId; segment_ids: TranscriptSegmentId[];
+  source_start_us: number; source_end_us: number; reason: string; model_score: number | null; caption_text: string;
+}
+export interface CandidatePlan {
+  candidate_plan_id: CandidatePlanId; project_id: ProjectId; candidate_generation_id: CandidateGenerationId; variant: CandidateVariant;
+  schema_version: 1; ordinal: number; title_suggestion: string; summary: string; duration_us: number; clips: CandidateClip[]; warnings: string[]; document_sha256: string;
+}
+export interface CandidateGeneration {
+  candidate_generation_id: CandidateGenerationId; project_id: ProjectId; status: CandidateGenerationStatus; payload_sha256: string;
+  created_at: string; updated_at: string; finished_at: string | null; candidate_plans?: CandidatePlan[];
+}
+export interface ProviderInvocation {
+  provider_config_id: ProviderConfigId; provider_invocation_id: ProviderInvocationId; status: ProviderInvocationStatus;
+}
+export interface CandidateAdoption { schema_version: 1; candidate_document_sha256: string; base_revision_id: TimelineRevisionId | null; }
+
 export type TimelineCreatedBy = "user" | "system" | "import";
 export type TimelineLayout = "blurred_background" | "crop_fill" | "fit";
 export type TimelineClipKind = "video" | "image";
@@ -560,7 +617,7 @@ export class ContractValidationError extends Error {
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const JOB_STATUSES: JobStatus[] = ["queued", "running", "succeeded", "failed", "cancelling", "cancelled", "interrupted"];
-const JOB_KINDS: JobKind[] = ["asset_probe", "asset_fingerprint", "proxy", "portrait_sample", "vertical_sample", "model_download", "transcription", "authoritative_preview", "final_export"];
+const JOB_KINDS: JobKind[] = ["asset_probe", "asset_fingerprint", "proxy", "portrait_sample", "vertical_sample", "model_download", "transcription", "candidate_generation", "authoritative_preview", "final_export"];
 const PROJECT_STATUSES: ProjectStatus[] = ["active", "archived", "missing"];
 const ASSET_KINDS: AssetKind[] = ["video", "audio", "image", "text"];
 const ASSET_AVAILABILITIES: AssetAvailability[] = ["available", "missing", "changed", "unsupported"];
@@ -592,7 +649,7 @@ function isLanguage(value: unknown): value is string { return isString(value) &&
 function hasSensitiveKey(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(hasSensitiveKey);
   if (!isRecord(value)) return false;
-  return Object.entries(value).some(([key, item]) => ["installed_path", "install_dir", "path", "uri", "token", "admin_token", "ui_token"].includes(key) || hasSensitiveKey(item));
+  return Object.entries(value).some(([key, item]) => ["installed_path", "install_dir", "path", "uri", "token", "admin_token", "ui_token", "api_key", "secret", "authorization", "prompt", "raw_response"].includes(key.toLowerCase()) || hasSensitiveKey(item));
 }
 
 export function isLicenseInfo(value: unknown): value is LicenseInfo {
@@ -682,8 +739,25 @@ export function isJob(value: unknown): value is Job {
     !(value.input_fingerprint === null || isString(value.input_fingerprint))) return false;
   if (value.progress !== null && !isRatio(value.progress)) return false;
   if (!isInteger(value.attempt, 1)) return false;
-  return value.error === null || (isString(value.error.code) && isString(value.error.message));
+  return !hasSensitiveKey(value) && (value.error === null || (isString(value.error.code) && isString(value.error.message)));
 }
+
+const BRIEF_INPUT_KEYS = ["schema_version", "topic", "audience", "target_platform", "target_duration_us", "narrative_goal", "style_notes", "must_keep", "forbidden", "original_audio_policy", "caption_policy", "caption_preset_id", "default_layout"] as const;
+const BRIEF_KEYS = ["brief_id", "project_id", "document_sha256", ...BRIEF_INPUT_KEYS] as const;
+const PROVIDER_KEYS = ["provider_config_id", "kind", "display_name", "base_url", "model", "enabled", "credential_status", "input_price_per_million", "output_price_per_million", "created_at", "updated_at"] as const;
+function isBriefText(value: unknown, maximum: number): value is string { return isString(value) && value.length <= maximum && value.trim().length > 0 && !/[\0-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(value); }
+export function isBriefInput(value: unknown): value is BriefInput {
+  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, BRIEF_INPUT_KEYS) && value.schema_version === 1 && isBriefText(value.topic, 200) && isBriefText(value.audience, 200) && value.target_platform === "generic_vertical" && isInteger(value.target_duration_us, 15_000_000) && Number(value.target_duration_us) <= 180_000_000 && isBriefText(value.narrative_goal, 500) && isString(value.style_notes) && value.style_notes.length <= 1000 && Array.isArray(value.must_keep) && value.must_keep.length <= 20 && value.must_keep.every(item => isBriefText(item, 100)) && Array.isArray(value.forbidden) && value.forbidden.length <= 20 && value.forbidden.every(item => isBriefText(item, 100)) && oneOf(["preserve", "mute"] as const, value.original_audio_policy) && oneOf(["auto_from_transcript", "none"] as const, value.caption_policy) && isCaptionPresetId(value.caption_preset_id) && isTimelineLayout(value.default_layout);
+}
+export function isBrief(value: unknown): value is Brief { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, BRIEF_KEYS) && isId(value.brief_id) && isId(value.project_id) && isSha256(value.document_sha256) && isBriefInput(Object.fromEntries(BRIEF_INPUT_KEYS.map(key => [key, value[key]]))); }
+export function isRecipe(value: unknown): value is Recipe { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["schema_version", "recipe_id", "name", "summary", "rules", "document_sha256"]) && isId(value.recipe_id) && value.schema_version === 1 && isBriefText(value.name, 200) && isBriefText(value.summary, 1000) && isRecord(value.rules) && onlyKeys(value.rules, ["selection", "pace", "max_gap_us"]) && isBriefText(value.rules.selection, 100) && isBriefText(value.rules.pace, 100) && isInteger(value.rules.max_gap_us, 0) && isSha256(value.document_sha256); }
+export function isProviderConfig(value: unknown): value is ProviderConfig { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, PROVIDER_KEYS) && isId(value.provider_config_id) && value.kind === "openai_compatible_text" && isBriefText(value.display_name, 100) && isString(value.base_url) && /^https?:\/\//.test(value.base_url) && isBriefText(value.model, 200) && typeof value.enabled === "boolean" && oneOf(["missing", "configured", "unavailable"] as const, value.credential_status) && (value.input_price_per_million === null || isFiniteNumber(value.input_price_per_million)) && (value.output_price_per_million === null || isFiniteNumber(value.output_price_per_million)) && isTime(value.created_at) && isTime(value.updated_at); }
+export function isEgressPreview(value: unknown): value is EgressPreview { return isRecord(value) && !hasSensitiveKey({ ...value, payload: undefined }) && onlyKeys(value, ["egress_preview_id", "provider", "prompt_template_version", "sent_fields", "payload_sha256", "expires_at", "payload", "stats"]) && isId(value.egress_preview_id) && isRecord(value.provider) && onlyKeys(value.provider, ["display_name", "origin", "model"]) && isBriefText(value.provider.display_name, 100) && isString(value.provider.origin) && /^https?:\/\//.test(value.provider.origin) && isBriefText(value.provider.model, 200) && isBriefText(value.prompt_template_version, 200) && Array.isArray(value.sent_fields) && value.sent_fields.every(item => isString(item) && item.length > 0) && isSha256(value.payload_sha256) && isTime(value.expires_at) && isRecord(value.payload) && isRecord(value.stats) && onlyKeys(value.stats, ["transcript_count", "segment_count", "character_count", "estimated_tokens"]) && [value.stats.transcript_count, value.stats.segment_count, value.stats.character_count, value.stats.estimated_tokens].every(item => isInteger(item, 0)); }
+export function isCandidateClip(value: unknown): value is CandidateClip { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["clip_id", "order_index", "asset_id", "transcript_id", "segment_ids", "source_start_us", "source_end_us", "reason", "model_score", "caption_text"]) && isId(value.clip_id) && isInteger(value.order_index, 0) && isId(value.asset_id) && isId(value.transcript_id) && Array.isArray(value.segment_ids) && value.segment_ids.length > 0 && value.segment_ids.every(isId) && isInteger(value.source_start_us) && isInteger(value.source_end_us, 1) && value.source_end_us > value.source_start_us && isBriefText(value.reason, 300) && (value.model_score === null || (isFiniteNumber(value.model_score) && value.model_score >= 0 && value.model_score <= 1)) && isBriefText(value.caption_text, 10_000); }
+export function isCandidatePlan(value: unknown): value is CandidatePlan { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["schema_version", "candidate_plan_id", "candidate_generation_id", "project_id", "ordinal", "variant", "title_suggestion", "summary", "duration_us", "clips", "warnings", "document_sha256"]) && value.schema_version === 1 && isId(value.candidate_plan_id) && isId(value.project_id) && isId(value.candidate_generation_id) && isInteger(value.ordinal, 0) && oneOf(["balanced", "compact", "bold"] as const, value.variant) && isBriefText(value.title_suggestion, 200) && isBriefText(value.summary, 500) && isInteger(value.duration_us, 15_000_000) && value.duration_us <= 180_000_000 && Array.isArray(value.clips) && value.clips.length > 0 && value.clips.every(isCandidateClip) && Array.isArray(value.warnings) && value.warnings.every(item => isString(item)) && isSha256(value.document_sha256); }
+export function isCandidateGeneration(value: unknown): value is CandidateGeneration { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["candidate_generation_id", "project_id", "status", "payload_sha256", "created_at", "updated_at", "finished_at", "candidate_plans"]) && isId(value.candidate_generation_id) && isId(value.project_id) && oneOf(["queued", "running", "succeeded", "failed", "cancelled", "interrupted"] as const, value.status) && isSha256(value.payload_sha256) && isTime(value.created_at) && isTime(value.updated_at) && (value.finished_at === null || isTime(value.finished_at)) && (value.candidate_plans === undefined || (Array.isArray(value.candidate_plans) && value.candidate_plans.every(isCandidatePlan))); }
+export function isProviderInvocation(value: unknown): value is ProviderInvocation { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["provider_config_id", "provider_invocation_id", "status"]) && isId(value.provider_config_id) && isId(value.provider_invocation_id) && oneOf(["queued", "running", "succeeded", "failed", "cancelled", "interrupted"] as const, value.status); }
+export function isCandidateAdoption(value: unknown): value is CandidateAdoption { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["schema_version", "candidate_document_sha256", "base_revision_id"]) && value.schema_version === 1 && isSha256(value.candidate_document_sha256) && (value.base_revision_id === null || isId(value.base_revision_id)); }
 
 function isTranscriptWord(value: unknown, segment?: TranscriptSegment): value is TranscriptWord {
   if (!isRecord(value) || !isId(value.word_id) || !isId(value.segment_id) || !isInteger(value.ordinal) || !isInteger(value.start_us) ||
@@ -775,6 +849,14 @@ export function parseApiError(value: unknown): ApiErrorResponse {
   if (!isApiErrorResponse(value)) throw new ContractValidationError("ApiError");
   return value;
 }
+export function parseBrief(value: unknown): Brief { if (!isBrief(value)) throw new ContractValidationError("Brief"); return value; }
+export function parseBriefInput(value: unknown): BriefInput { if (!isBriefInput(value)) throw new ContractValidationError("BriefInput"); return value; }
+export function parseRecipe(value: unknown): Recipe { if (!isRecipe(value)) throw new ContractValidationError("Recipe"); return value; }
+export function parseProviderConfig(value: unknown): ProviderConfig { if (!isProviderConfig(value)) throw new ContractValidationError("ProviderConfig"); return value; }
+export function parseEgressPreview(value: unknown): EgressPreview { if (!isEgressPreview(value)) throw new ContractValidationError("EgressPreview"); return value; }
+export function parseCandidateGeneration(value: unknown): CandidateGeneration { if (!isCandidateGeneration(value)) throw new ContractValidationError("CandidateGeneration"); return value; }
+export function parseCandidatePlan(value: unknown): CandidatePlan { if (!isCandidatePlan(value)) throw new ContractValidationError("CandidatePlan"); return value; }
+export function parseCandidateAdoption(value: unknown): CandidateAdoption { if (!isCandidateAdoption(value)) throw new ContractValidationError("CandidateAdoption"); return value; }
 
 export function isTimelineLayout(value: unknown): value is TimelineLayout { return oneOf(TIMELINE_LAYOUTS, value); }
 export function isCaptionPresetId(value: unknown): value is CaptionPresetId { return oneOf(CAPTION_PRESETS, value); }

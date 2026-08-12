@@ -13,8 +13,18 @@ const playwright = require(require.resolve("playwright", { paths: [dirname(requi
 const electron = playwright._electron;
 const modelRoot = process.env.AIVS_E2E_MODEL_DIR;
 const sourceVideo = process.env.AIVS_E2E_MIXED_VIDEO;
-if (!modelRoot || !existsSync(modelRoot)) throw new Error("package:verify:real requires an existing AIVS_E2E_MODEL_DIR");
-if (!sourceVideo || !existsSync(sourceVideo)) throw new Error("package:verify:real requires an existing AIVS_E2E_MIXED_VIDEO");
+const realPreflight = [
+  { name: "AIVS_E2E_MODEL_DIR", supplied: Boolean(modelRoot), exists: Boolean(modelRoot && existsSync(modelRoot)) },
+  { name: "AIVS_E2E_MIXED_VIDEO", supplied: Boolean(sourceVideo), exists: Boolean(sourceVideo && existsSync(sourceVideo)) }
+];
+const missingRealRequirements = realPreflight.filter(item => !item.exists).map(item => item.name);
+if (missingRealRequirements.length) {
+  const evidenceDir = join(root, "test-results", "package-verify-real");
+  const evidence = { schema_version: 1, status: "unverified", reason: "required real model or media fixture is unavailable", required_environment: realPreflight, missing_requirements: missingRealRequirements, paths_recorded: false };
+  await mkdir(evidenceDir, { recursive: true });
+  await writeFile(join(evidenceDir, "preflight.json"), `${JSON.stringify(evidence, null, 2)}\n`, "utf8");
+  throw new Error(`package:verify:real is unverified; missing usable ${missingRealRequirements.join(", ")}. Evidence: test-results/package-verify-real/preflight.json`);
+}
 
 const reportPath = process.env.AIVS_PACKAGE_REPORT ?? join(root, "build", "reports", "windows-package-latest.json");
 const report = JSON.parse(await readFile(reportPath, "utf8"));

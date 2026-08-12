@@ -70,6 +70,14 @@ export class CoreAdminClient {
     return this.request<{ path: string }>(`/api/v1/internal/assets/${encodeURIComponent(assetId)}/resolve`);
   }
 
+  setProviderSecret(providerConfigId: string, secret: string): Promise<{ provider_config_id: string; credential_status: string }> {
+    return this.request(`/api/v1/internal/provider-secrets/${encodeURIComponent(providerConfigId)}`, { method: "PUT", body: JSON.stringify({ secret }) });
+  }
+
+  async deleteProviderSecret(providerConfigId: string): Promise<void> {
+    await this.request(`/api/v1/internal/provider-secrets/${encodeURIComponent(providerConfigId)}`, { method: "DELETE" });
+  }
+
   async shutdown(): Promise<void> {
     await this.request("/api/v1/internal/shutdown", { method: "POST" });
   }

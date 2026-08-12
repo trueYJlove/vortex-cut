@@ -29,6 +29,21 @@ def _v2_database(path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(database_module, "MIGRATIONS", full)
 
 
+def _v3_database(path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    full = database_module.MIGRATIONS
+    monkeypatch.setattr(
+        database_module,
+        "MIGRATIONS",
+        {
+            "v1": database_module.V1_SQL,
+            "v2": database_module.V2_SQL,
+            "v3": database_module.V3_SQL,
+        },
+    )
+    Database(path).initialize()
+    monkeypatch.setattr(database_module, "MIGRATIONS", full)
+
+
 def test_v2_upgrade_creates_v3_backup_and_preserves_data(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -71,6 +86,56 @@ def test_v2_upgrade_creates_v3_backup_and_preserves_data(
     assert after - before
 
 
+def test_real_v3_copy_upgrades_to_v4_and_preserves_all_stage1_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "app.db"
+    _v3_database(path, monkeypatch)
+    with sqlite3.connect(path) as db:
+        db.execute(
+            "INSERT INTO projects(id,name,status,canvas_json,root_dir,root_dir_name,created_at,updated_at,last_opened_at) "  # noqa: E501
+            "VALUES ('p1','project','active','{}','root','root','now','now','now')"
+        )
+        db.execute(
+            "INSERT INTO assets(id,project_id,kind,storage_mode,display_name,fingerprint,size_bytes,availability,created_at,updated_at) "  # noqa: E501
+            "VALUES ('a1','p1','video','external','source.mp4','fp',1,'available','now','now')"
+        )
+        db.execute(
+            "INSERT INTO jobs(id,project_id,kind,type,status,input_json,created_at,updated_at) "
+            "VALUES ('j1','p1','proxy','proxy','succeeded','{}','now','now')"
+        )
+        db.execute(
+            "INSERT INTO model_installations VALUES ('m1','local','r1','ready','dir',1,1,'sha','license',NULL,'now')"  # noqa: E501
+        )
+        db.execute(
+            "INSERT INTO transcripts VALUES ('t1','a1','ready','zh','local','m1','r1','fp',1000000,'now','now')"  # noqa: E501
+        )
+        db.execute("INSERT INTO transcript_segments VALUES ('s1','t1',0,0,1000000,'保留片段',0.9)")
+    before = set((tmp_path / "backups").glob("app-*.db"))
+    Database(path).initialize()
+    with sqlite3.connect(path) as db:
+        assert [x[0] for x in db.execute("SELECT version FROM schema_migrations")] == [
+            "v1",
+            "v2",
+            "v3",
+            "v4",
+        ]
+        assert db.execute("SELECT name FROM projects WHERE id='p1'").fetchone() == ("project",)
+        assert db.execute("SELECT fingerprint FROM assets WHERE id='a1'").fetchone() == ("fp",)
+        assert db.execute("SELECT status FROM jobs WHERE id='j1'").fetchone() == ("succeeded",)
+        assert db.execute(
+            "SELECT status FROM model_installations WHERE model_id='m1'"
+        ).fetchone() == ("ready",)
+        assert db.execute("SELECT text FROM transcript_segments WHERE id='s1'").fetchone() == (
+            "保留片段",
+        )
+        assert {x[1] for x in db.execute("PRAGMA table_info(jobs)")} >= {
+            "provider_invocation_id",
+            "candidate_generation_id",
+        }
+    assert set((tmp_path / "backups").glob("app-*.db")) - before
+
+
 def test_v3_checksum_mismatch_is_rejected(tmp_path: Path) -> None:
     path = tmp_path / "app.db"
     Database(path).initialize()
@@ -94,9 +159,10 @@ def test_v3_failure_rolls_back_and_preserves_v2(
     with pytest.raises(MigrationError):
         Database(path).initialize()
     with sqlite3.connect(path) as db:
-        assert db.execute(
-            "SELECT name FROM sqlite_master WHERE name='timeline_revisions'"
-        ).fetchone() is None
+        assert (
+            db.execute("SELECT name FROM sqlite_master WHERE name='timeline_revisions'").fetchone()
+            is None
+        )
         versions = [row[0] for row in db.execute("SELECT version FROM schema_migrations")]
         assert versions == ["v1", "v2"]
 

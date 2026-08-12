@@ -1,4 +1,4 @@
-import { copyFile, mkdir, unlink, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, rename, unlink, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -34,6 +34,12 @@ async function createFixtures(): Promise<{ paths: Record<string, string>; reloca
   return { paths: { video, audio, image, text }, relocated, userData: join(dir, "user-data") };
 }
 
+async function atomicallyReplace(source: string, target: string): Promise<void> {
+  const temporary = join(dirname(target), `.replacement-${process.pid}-${Date.now()}.mp4`);
+  await copyFile(source, temporary);
+  await rename(temporary, target);
+}
+
 test("真实 Electron 覆盖 Stage 1A 项目、四类素材和 availability 流程", async () => {
   test.setTimeout(120_000);
   if (!existsSync(videoFixture) || !existsSync(ffmpeg)) throw new Error("真实 E2E 夹具或 bundled FFmpeg 不存在");
@@ -46,6 +52,7 @@ test("真实 Electron 覆盖 Stage 1A 项目、四类素材和 availability 流�
     AIVS_E2E_RELOCATE_PATH: fixtures.relocated,
     AIVS_SIDECAR_EXECUTABLE: join(root, ".venv", "Scripts", "python.exe"),
     AIVS_SIDECAR_EXECUTABLE_ARGS: JSON.stringify(["-m", "aivs_core.bootstrap"]),
+    AIVS_E2E_SIDECAR_ARGV_EVIDENCE: join(fixtures.userData, "sidecar-argv.json"),
     PYTHONPATH: [join(root, "services", "core", "src"), process.env.PYTHONPATH].filter(Boolean).join(";"),
     ELECTRON_RUN_AS_NODE: undefined,
     NODE_OPTIONS: undefined
@@ -109,7 +116,9 @@ test("真实 Electron 覆盖 Stage 1A 项目、四类素材和 availability 流�
     expect(databaseCheck.stdout.trim()).toBe(projectId);
 
     const videoRow = page.locator(".asset-row").filter({ hasText: "clip.mp4" });
-    await copyFile(join(root, "test-assets", "generated", "short-odd-size.mp4"), fixtures.paths.video);
+    // Use the same atomic-replacement operation as the Core availability
+    // contract: a copy-over can retain an opened file's observed metadata.
+    await atomicallyReplace(join(root, "test-assets", "generated", "short-odd-size.mp4"), fixtures.paths.video);
     await videoRow.getByRole("button", { name: "刷新" }).click();
     await expect(videoRow.getByText("已变更")).toBeVisible({ timeout: 30_000 });
     await unlink(fixtures.paths.video);
