@@ -1,12 +1,35 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import __version__
 
-DEFAULT_MANIFEST_DIR = Path(__file__).resolve().parents[4] / "resources" / "model-manifests"
+
+def _resource_path(name: str) -> Path:
+    configured_root = os.environ.get("AIVS_RESOURCE_ROOT")
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    executable_root = Path(sys.executable).resolve().parent
+    candidates = [
+        Path(configured_root).expanduser() if configured_root else None,
+        Path(bundle_root) if bundle_root else None,
+        executable_root / "_internal",
+        executable_root,
+        Path.cwd().resolve() / "resources",
+        Path.cwd().resolve(),
+    ]
+    roots = [candidate.resolve() for candidate in candidates if candidate is not None]
+    for root in roots:
+        path = root / name
+        if path.exists():
+            return path
+    return roots[0] / name
+
+
+DEFAULT_MANIFEST_DIR = _resource_path("model-manifests")
+DEFAULT_FONT_DIR = _resource_path("fonts")
 
 
 @dataclass(frozen=True)
@@ -21,7 +44,8 @@ class Settings:
     build_version: str = __version__
     log_level: str = "info"
     ready_file: Path | None = None
-    manifest_dir: Path = DEFAULT_MANIFEST_DIR
+    manifest_dir: Path = field(default_factory=lambda: _resource_path("model-manifests"))
+    font_dir: Path = field(default_factory=lambda: _resource_path("fonts"))
 
     def prepare(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -52,7 +76,9 @@ class Settings:
             ready_file=Path(getattr(args, "ready_file"))
             if getattr(args, "ready_file", None)
             else None,
-            manifest_dir=Path(manifest_dir) if manifest_dir else DEFAULT_MANIFEST_DIR,
+            manifest_dir=(
+                Path(manifest_dir) if manifest_dir else _resource_path("model-manifests")
+            ),
         )
 
 

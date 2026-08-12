@@ -278,6 +278,39 @@ class ProjectAssetService:
             self._update_asset(asset_id, "available")
         return self.get_asset(asset_id) or _asset_dto(row), path.as_uri(), fingerprint
 
+    def resolve_asset_path(self, asset_id: str) -> dict[str, str]:
+        row = self._require_asset_row(asset_id)
+        if row["availability"] == "missing":
+            raise DomainError("ASSET_MISSING", "素材文件缺失")
+        if row["availability"] != "available":
+            raise DomainError("ASSET_CHANGED", "素材文件已变化")
+        location = self._location(asset_id)
+        if location is None:
+            self._update_asset(asset_id, "missing")
+            raise DomainError("ASSET_MISSING", "素材文件缺失")
+        try:
+            path = _path_from_uri(location["uri"]).resolve(strict=True)
+            if not path.is_file():
+                raise OSError
+            stat = path.stat()
+        except OSError as exc:
+            self._update_asset(asset_id, "missing")
+            raise DomainError("ASSET_MISSING", "素材文件缺失") from exc
+        if stat.st_size != row["size_bytes"] or modified_iso(path) != row["modified_at"]:
+            self._update_asset(asset_id, "changed")
+            raise DomainError("ASSET_CHANGED", "素材文件已变化")
+        try:
+            fingerprint = sha256_file(path)
+        except OSError as exc:
+            self._update_asset(asset_id, "missing")
+            raise DomainError("ASSET_MISSING", "素材文件缺失") from exc
+        if fingerprint != row["fingerprint"]:
+            self._remember_previous_fingerprint(asset_id, row["fingerprint"])
+            self._update_asset(asset_id, "changed", fingerprint=fingerprint)
+            self._mark_transcripts_stale(asset_id, fingerprint)
+            raise DomainError("ASSET_CHANGED", "素材文件已变化")
+        return {"asset_id": asset_id, "path": str(path)}
+
     async def relocate_asset(self, asset_id: str, grant: dict[str, Any]) -> dict[str, Any]:
         row = self._require_asset_row(asset_id)
         path = _grant_path(grant)

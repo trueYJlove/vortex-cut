@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { isApiErrorResponse, isFileGrant, isInternalModelManifest, isJobStatus, isModelDetail, isProject, isSidecarReady, isTranscript, parseSidecarReadyLine } from "@aivideo/contracts";
+import { CONTRACT_VERSION, ERROR_CODES, isApiErrorResponse, isAuthoritativePreview, isCaptionPresetId, isDestinationGrant, isExportCreateInput, isExportRecord, isFileGrant, isInternalModelManifest, isJobKind, isJobStatus, isModelDetail, isPreviewCreateResponse, isProject, isRenderArtifact, isSidecarReady, isTimelineCreateInput, isTimelineDocument, isTimelineLayout, isTimelinePatch, isTimelinePatchOperation, isTimelineState, isTranscript, parseSidecarReadyLine } from "@aivideo/contracts";
+
+const now = "2026-08-11T00:00:00.000Z";
 
 describe("Stage 0 contract", () => {
   it("accepts exactly the AIVS_READY payload", () => {
@@ -49,5 +51,36 @@ describe("Stage 0 contract", () => {
     };
     expect(isTranscript(transcript)).toBe(true);
     expect(isTranscript({ ...transcript, segments: [{ ...transcript.segments[0], end_us: 3_000_000 }] })).toBe(false);
+  });
+  it("freezes Stage 1C enums, error codes and every patch operation", () => {
+    expect(CONTRACT_VERSION).toBe("stage1c-v1"); expect(isTimelineLayout("crop_fill")).toBe(true); expect(isTimelineLayout("smart_crop")).toBe(false); expect(isCaptionPresetId("high-contrast")).toBe(true); expect(isJobKind("authoritative_preview")).toBe(true); expect(ERROR_CODES).toContain("TIMELINE_CONFLICT"); expect(ERROR_CODES).toContain("PLAYBACK_TICKET_INVALID");
+    const operations = [
+      { op: "insert_asset_clip", asset_id: "asset_1", at_index: 0, duration_us: 3_000_000 },
+      { op: "insert_transcript_segments", transcript_id: "transcript_1", segment_ids: ["segment_1"], at_index: 0, padding_before_us: 0, padding_after_us: 300_000, create_captions: true },
+      { op: "remove_clip", clip_id: "clip_1" }, { op: "move_clip", clip_id: "clip_1", to_index: 0 }, { op: "trim_clip", clip_id: "clip_1", source_start_us: 0, source_end_us: 100_000 }, { op: "split_clip", clip_id: "clip_1", source_time_us: 100_000 }, { op: "set_layout", clip_id: "clip_1", layout: "fit" }, { op: "set_audio", clip_id: "clip_1", enabled: false, gain_db: -3 }, { op: "set_image_duration", clip_id: "clip_1", duration_us: 500_000 }, { op: "add_caption", start_us: 0, end_us: 200_000, text: "字幕", preset_id: "default-bottom", source_clip_id: null }, { op: "remove_caption", caption_id: "caption_1" }, { op: "update_caption", caption_id: "caption_1", text: "修改" }, { op: "set_caption_timing", caption_id: "caption_1", start_us: 0, end_us: 200_000 }, { op: "set_caption_preset", caption_id: "caption_1", preset_id: "game-safe-bottom" }
+    ];
+    expect(operations.every(isTimelinePatchOperation)).toBe(true);
+    expect(isTimelinePatch({ schema_version: 1, base_revision_id: "revision_1", operations, summary: "完整编辑" })).toBe(true);
+    expect(isTimelinePatchOperation({ op: "insert_asset_clip", asset_id: "asset_1", to_index: 0 })).toBe(false);
+    expect(isTimelinePatchOperation({ ...operations[1], padding_after_us: 300_001 })).toBe(false);
+  });
+  it("validates Timeline create/state DTOs and rejects renderer-sensitive fields", () => {
+    const document = { schema_version: 1, project_id: "project_1", canvas: { width: 1080, height: 1920, fps_num: 30, fps_den: 1, background_color: "#000000" }, tracks: [{ id: "V1", kind: "visual", locked: false }, { id: "C1", kind: "caption", locked: false }], clips: [{ clip_id: "clip_1", track_id: "V1", order_index: 0, asset_id: "asset_1", asset_kind: "video", source_start_us: 0, source_end_us: 1_000_000, timeline_start_us: 0, timeline_end_us: 1_000_000, layout: "fit", audio: { enabled: true, gain_db: 0 } }], captions: [], provenance: { created_by: "user", source_transcript_ids: [] } };
+    expect(isTimelineDocument(document)).toBe(true);
+    expect(isTimelineCreateInput({ schema_version: 1, source: { kind: "transcript_selection", transcript_id: "transcript_1", segment_ids: ["segment_1"], padding_before_us: 0, padding_after_us: 0, create_captions: true }, default_layout: "fit", caption_preset_id: "default-bottom" })).toBe(true);
+    const revision = { timeline_revision_id: "revision_1", project_id: "project_1", parent_revision_id: null, document_sha256: "a".repeat(64), summary: "创建", created_by: "user", created_at: "2026-08-11T00:00:00.000Z", schema_version: 1, document };
+    expect(isTimelineState({ project_id: "project_1", current_revision: revision, draft: null, can_undo: false, can_redo: false, current_preview: null })).toBe(true);
+    expect(isTimelineState({ project_id: "project_1", current_revision: { ...revision, path: "C:\\private\\timeline.json" }, draft: null, can_undo: false, can_redo: false, current_preview: null })).toBe(false);
+  });
+  it("validates frozen Render DTOs and rejects paths, URIs and tokens", () => {
+    const hash = "a".repeat(64); const mediaInfo = { duration_us: 1_000_000, format_name: "mp4", video: { codec: "h264", width: 1080, height: 1920, pixel_format: "yuv420p", fps_num: 30, fps_den: 1 }, audio: { codec: "aac", sample_rate: 48_000, channels: 2 } };
+    const preview = { render_artifact_id: "render_1", project_id: "project_1", timeline_revision_id: "revision_1", kind: "authoritative_preview", status: "ready", content_fingerprint: hash, profile_id: "preview-portrait-v1", display_name: "preview.mp4", size_bytes: 10, sha256: hash, media_info: mediaInfo, encoder: "libx264", fallback_reason: null, created_at: now };
+    const exportRecord = { export_record_id: "export_1", project_id: "project_1", timeline_revision_id: "revision_1", render_artifact_id: "render_2", status: "succeeded", profile_id: "export-portrait-v1", destination_display_name: "video.mp4", size_bytes: 10, sha256: hash, media_info: mediaInfo, encoder: "h264_nvenc", fallback_reason: null, created_at: now };
+    const queuedJob = { job_id: "job_1", project_id: "project_1", asset_id: null, kind: "authoritative_preview", status: "queued", stage: "queued", progress: 0, attempt: 1, model_id: null, model_revision: null, input_fingerprint: null, input: {}, error: null, created_at: now, updated_at: now, started_at: null, finished_at: null };
+    expect(isAuthoritativePreview(preview)).toBe(true); expect(isRenderArtifact(preview)).toBe(true); expect(isExportRecord(exportRecord)).toBe(true);
+    expect(isDestinationGrant({ destination_grant_id: "destination_1", display_name: "video.mp4", extension: ".mp4", overwrite_authorized: false, expires_at: now })).toBe(true);
+    expect(isPreviewCreateResponse({ job: null, preview, reused: true })).toBe(true); expect(isPreviewCreateResponse({ job: queuedJob, preview: null, reused: false })).toBe(true);
+    expect(isExportCreateInput({ timeline_revision_id: "revision_1", destination_grant_id: "destination_1", encoder_mode: "software" })).toBe(true);
+    expect(isAuthoritativePreview({ ...preview, path: "C:\\private\\preview.mp4" })).toBe(false); expect(isRenderArtifact({ ...preview, uri: "file:///private.mp4" })).toBe(false); expect(isExportRecord({ ...exportRecord, admin_token: "secret" })).toBe(false);
   });
 });

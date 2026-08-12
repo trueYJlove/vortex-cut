@@ -1,6 +1,6 @@
 export const PROTOCOL_VERSION = 1 as const;
 export const API_PREFIX = "/api/v1" as const;
-export const CONTRACT_VERSION = "stage1b-v1" as const;
+export const CONTRACT_VERSION = "stage1c-v1" as const;
 
 export type GrantId = string & { readonly __brand: "grant_id" };
 export type ProjectId = string & { readonly __brand: "project_id" };
@@ -12,6 +12,13 @@ export type ModelId = string & { readonly __brand: "model_id" };
 export type TranscriptId = string & { readonly __brand: "transcript_id" };
 export type TranscriptSegmentId = string & { readonly __brand: "transcript_segment_id" };
 export type TranscriptWordId = string & { readonly __brand: "transcript_word_id" };
+export type TimelineRevisionId = string & { readonly __brand: "timeline_revision_id" };
+export type TimelineClipId = string & { readonly __brand: "timeline_clip_id" };
+export type TimelineCaptionId = string & { readonly __brand: "timeline_caption_id" };
+export type RenderArtifactId = string & { readonly __brand: "render_artifact_id" };
+export type ExportRecordId = string & { readonly __brand: "export_record_id" };
+export type DestinationGrantId = string & { readonly __brand: "destination_grant_id" };
+export type PlaybackTicketId = string & { readonly __brand: "playback_ticket_id" };
 
 export type ProjectStatus = "active" | "archived" | "missing";
 export type AssetKind = "video" | "audio" | "image" | "text";
@@ -32,7 +39,9 @@ export type JobKind =
   | "portrait_sample"
   | "vertical_sample"
   | "model_download"
-  | "transcription";
+  | "transcription"
+  | "authoritative_preview"
+  | "final_export";
 export type JobStage =
   | "queued"
   | "downloading"
@@ -60,6 +69,14 @@ export const ERROR_CODES = [
   "MODEL_LICENSE_REQUIRED", "MODEL_DISK_SPACE_INSUFFICIENT", "MODEL_RUNTIME_UNAVAILABLE",
   "TRANSCRIPTION_NOT_READY", "TRANSCRIPTION_FAILED", "TRANSCRIPTION_CANCELLED",
   "TRANSCRIPTION_INPUT_CHANGED", "TRANSCRIPTION_UNSUPPORTED_LANGUAGE"
+  , "TIMELINE_NOT_FOUND", "TIMELINE_ALREADY_EXISTS", "TIMELINE_INVALID",
+  "TIMELINE_CONFLICT", "TIMELINE_EMPTY", "TIMELINE_DRAFT_CONFLICT",
+  "TIMELINE_CLIP_NOT_FOUND", "TIMELINE_CAPTION_NOT_FOUND", "TIMELINE_SOURCE_INVALID",
+  "TIMELINE_OPERATION_UNSUPPORTED", "RENDER_PLAN_INVALID", "RENDER_INPUT_CHANGED",
+  "RENDER_FONT_MISSING", "RENDER_FAILED", "RENDER_VALIDATION_FAILED", "PREVIEW_NOT_FOUND",
+  "EXPORT_NOT_FOUND", "EXPORT_DESTINATION_INVALID", "EXPORT_DESTINATION_EXISTS",
+  "EXPORT_DESTINATION_EXPIRED", "EXPORT_DISK_SPACE_INSUFFICIENT", "ARTIFACT_NOT_FOUND",
+  "PLAYBACK_TICKET_INVALID"
 ] as const;
 export type ErrorCode = typeof ERROR_CODES[number] | (string & {});
 
@@ -385,6 +402,155 @@ export interface Transcript {
   updated_at: string;
 }
 
+export type TimelineCreatedBy = "user" | "system" | "import";
+export type TimelineLayout = "blurred_background" | "crop_fill" | "fit";
+export type TimelineClipKind = "video" | "image";
+export type CaptionOrigin = "transcript" | "user";
+export type CaptionPresetId = "default-bottom" | "game-safe-bottom" | "high-contrast";
+export type RenderMode = "authoritative_preview" | "final_export";
+export type RenderArtifactStatus = "ready" | "stale";
+export type ExportStatus = "succeeded" | "missing";
+export type EncoderMode = "auto" | "software";
+export type RenderProfileId = "preview-portrait-v1" | "export-portrait-v1";
+
+export interface RenderedMediaInfo {
+  duration_us: number;
+  format_name: string;
+  video: { codec: string; width: number; height: number; pixel_format: string; fps_num: number; fps_den: number };
+  audio: { codec: string; sample_rate: number; channels: number } | null;
+}
+export interface RenderArtifact {
+  render_artifact_id: RenderArtifactId;
+  project_id: ProjectId;
+  timeline_revision_id: TimelineRevisionId;
+  kind: RenderMode;
+  status: RenderArtifactStatus;
+  content_fingerprint: string;
+  profile_id: RenderProfileId;
+  display_name: string;
+  size_bytes: number;
+  sha256: string;
+  media_info: RenderedMediaInfo;
+  encoder: string;
+  fallback_reason: string | null;
+  created_at: string;
+}
+export interface AuthoritativePreview extends RenderArtifact {
+  kind: "authoritative_preview";
+  profile_id: "preview-portrait-v1";
+}
+export interface ExportRecord {
+  export_record_id: ExportRecordId;
+  project_id: ProjectId;
+  timeline_revision_id: TimelineRevisionId;
+  render_artifact_id: RenderArtifactId;
+  status: ExportStatus;
+  profile_id: "export-portrait-v1";
+  destination_display_name: string;
+  size_bytes: number;
+  sha256: string;
+  media_info: RenderedMediaInfo;
+  encoder: string;
+  fallback_reason: string | null;
+  created_at: string;
+}
+export interface DestinationGrant {
+  destination_grant_id: DestinationGrantId;
+  display_name: string;
+  extension: ".mp4";
+  overwrite_authorized: boolean;
+  expires_at: string;
+}
+export interface PreviewCreateInput { timeline_revision_id?: TimelineRevisionId; encoder_mode?: EncoderMode; }
+export interface PreviewCreateResponse { job: Job | null; preview: AuthoritativePreview | null; reused: boolean; }
+export interface ExportCreateInput { timeline_revision_id?: TimelineRevisionId; destination_grant_id: DestinationGrantId; encoder_mode?: EncoderMode; }
+export interface ExportCreateResponse { job: Job; export_record: ExportRecord | null; }
+export type AuthoritativePreviewPage = Page<AuthoritativePreview>;
+export type ExportRecordPage = Page<ExportRecord>;
+
+export interface TimelineCanvas extends ProjectCanvas { background_color: string; }
+export interface TimelineTrack { id: "V1" | "C1"; kind: "visual" | "caption"; locked: boolean; }
+export interface TimelineClipAudio { enabled: boolean; gain_db: number; }
+export interface TimelineClip {
+  clip_id: TimelineClipId;
+  track_id: "V1";
+  order_index: number;
+  asset_id: AssetId;
+  asset_kind: TimelineClipKind;
+  source_start_us: number | null;
+  source_end_us: number | null;
+  timeline_start_us: number;
+  timeline_end_us: number;
+  layout: TimelineLayout;
+  audio: TimelineClipAudio;
+}
+export interface TimelineCaption {
+  caption_id: TimelineCaptionId;
+  track_id: "C1";
+  source_clip_id: TimelineClipId | null;
+  start_us: number;
+  end_us: number;
+  text: string;
+  preset_id: CaptionPresetId;
+  origin: CaptionOrigin;
+  edited: boolean;
+  source_segment_ids: TranscriptSegmentId[];
+}
+export interface TimelineDocument {
+  schema_version: 1;
+  project_id: ProjectId;
+  canvas: TimelineCanvas;
+  tracks: [TimelineTrack, TimelineTrack];
+  clips: TimelineClip[];
+  captions: TimelineCaption[];
+  provenance: { created_by: TimelineCreatedBy; source_transcript_ids: TranscriptId[] };
+}
+export interface TimelineRevisionSummary {
+  timeline_revision_id: TimelineRevisionId;
+  project_id: ProjectId;
+  parent_revision_id: TimelineRevisionId | null;
+  document_sha256: string;
+  summary: string;
+  created_by: TimelineCreatedBy;
+  created_at: string;
+}
+export interface TimelineRevision extends TimelineRevisionSummary { schema_version: 1; document: TimelineDocument; }
+export interface TimelineDraftInput { schema_version: 1; base_revision_id: TimelineRevisionId; document: TimelineDocument; }
+export interface TimelineDraft { project_id: ProjectId; base_revision_id: TimelineRevisionId; document: TimelineDocument; updated_at: string; conflict: boolean; }
+export interface TimelineState {
+  project_id: ProjectId;
+  current_revision: TimelineRevision;
+  draft: TimelineDraft | null;
+  can_undo: boolean;
+  can_redo: boolean;
+  current_preview: AuthoritativePreview | null;
+}
+export type TimelineRevisionPage = Page<TimelineRevisionSummary>;
+
+export type TimelineCreateSource =
+  | { kind: "empty" }
+  | { kind: "full_asset"; asset_id: AssetId }
+  | { kind: "transcript_selection"; transcript_id: TranscriptId; segment_ids: TranscriptSegmentId[]; padding_before_us: number; padding_after_us: number; create_captions: boolean };
+export interface TimelineCreateInput { schema_version: 1; source: TimelineCreateSource; default_layout: TimelineLayout; caption_preset_id: CaptionPresetId; }
+
+export type TimelinePatchOperation =
+  | { op: "insert_asset_clip"; asset_id: AssetId; at_index: number; source_start_us?: number; source_end_us?: number; duration_us?: number; layout?: TimelineLayout }
+  | { op: "insert_transcript_segments"; transcript_id: TranscriptId; segment_ids: TranscriptSegmentId[]; at_index: number; padding_before_us: number; padding_after_us: number; create_captions: boolean; layout?: TimelineLayout }
+  | { op: "remove_clip"; clip_id: TimelineClipId }
+  | { op: "move_clip"; clip_id: TimelineClipId; to_index: number }
+  | { op: "trim_clip"; clip_id: TimelineClipId; source_start_us: number; source_end_us: number }
+  | { op: "split_clip"; clip_id: TimelineClipId; source_time_us: number }
+  | { op: "set_layout"; clip_id: TimelineClipId; layout: TimelineLayout }
+  | { op: "set_audio"; clip_id: TimelineClipId; enabled: boolean; gain_db: number }
+  | { op: "set_image_duration"; clip_id: TimelineClipId; duration_us: number }
+  | { op: "add_caption"; start_us: number; end_us: number; text: string; preset_id: CaptionPresetId; source_clip_id: null }
+  | { op: "remove_caption"; caption_id: TimelineCaptionId }
+  | { op: "update_caption"; caption_id: TimelineCaptionId; text: string }
+  | { op: "set_caption_timing"; caption_id: TimelineCaptionId; start_us: number; end_us: number }
+  | { op: "set_caption_preset"; caption_id: TimelineCaptionId; preset_id: CaptionPresetId };
+export interface TimelinePatch { schema_version: 1; base_revision_id: TimelineRevisionId; operations: TimelinePatchOperation[]; summary: string; }
+export interface TimelineRevisionPointerInput { base_revision_id: TimelineRevisionId; }
+
 export class ContractValidationError extends Error {
   constructor(public readonly contract: string, message = "Invalid contract payload") {
     super(`${contract}: ${message}`);
@@ -394,13 +560,21 @@ export class ContractValidationError extends Error {
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const JOB_STATUSES: JobStatus[] = ["queued", "running", "succeeded", "failed", "cancelling", "cancelled", "interrupted"];
-const JOB_KINDS: JobKind[] = ["asset_probe", "asset_fingerprint", "proxy", "portrait_sample", "vertical_sample", "model_download", "transcription"];
+const JOB_KINDS: JobKind[] = ["asset_probe", "asset_fingerprint", "proxy", "portrait_sample", "vertical_sample", "model_download", "transcription", "authoritative_preview", "final_export"];
 const PROJECT_STATUSES: ProjectStatus[] = ["active", "archived", "missing"];
 const ASSET_KINDS: AssetKind[] = ["video", "audio", "image", "text"];
 const ASSET_AVAILABILITIES: AssetAvailability[] = ["available", "missing", "changed", "unsupported"];
 const MODEL_INSTALL_STATUSES: ModelInstallStatus[] = ["unavailable", "queued", "downloading", "paused", "verifying", "ready", "cancelled", "failed"];
 const PROVIDER_STATUSES: AsrProviderStatus[] = ["unavailable", "installed", "corrupt", "runtime_unavailable"];
 const TRANSCRIPT_STATUSES: TranscriptStatus[] = ["pending", "ready", "stale", "failed"];
+const TIMELINE_LAYOUTS: TimelineLayout[] = ["blurred_background", "crop_fill", "fit"];
+const CAPTION_PRESETS: CaptionPresetId[] = ["default-bottom", "game-safe-bottom", "high-contrast"];
+const TIMELINE_CREATED_BY: TimelineCreatedBy[] = ["user", "system", "import"];
+const RENDER_MODES: RenderMode[] = ["authoritative_preview", "final_export"];
+const RENDER_ARTIFACT_STATUSES: RenderArtifactStatus[] = ["ready", "stale"];
+const EXPORT_STATUSES: ExportStatus[] = ["succeeded", "missing"];
+const ENCODER_MODES: EncoderMode[] = ["auto", "software"];
+const RENDER_PROFILE_IDS: RenderProfileId[] = ["preview-portrait-v1", "export-portrait-v1"];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -571,7 +745,7 @@ export function parseSidecarReadyLine(line: string): SidecarReady {
   return value;
 }
 
-export function asEntityId<T extends GrantId | ProjectId | AssetId | MediaId | JobId | ArtifactId | ModelId | TranscriptId | TranscriptSegmentId | TranscriptWordId>(value: string): T {
+export function asEntityId<T extends GrantId | ProjectId | AssetId | MediaId | JobId | ArtifactId | ModelId | TranscriptId | TranscriptSegmentId | TranscriptWordId | TimelineRevisionId | TimelineClipId | TimelineCaptionId | RenderArtifactId | ExportRecordId | DestinationGrantId | PlaybackTicketId>(value: string): T {
   if (!ID_PATTERN.test(value)) throw new ContractValidationError("EntityId", "Invalid entity id");
   return value as T;
 }
@@ -601,3 +775,134 @@ export function parseApiError(value: unknown): ApiErrorResponse {
   if (!isApiErrorResponse(value)) throw new ContractValidationError("ApiError");
   return value;
 }
+
+export function isTimelineLayout(value: unknown): value is TimelineLayout { return oneOf(TIMELINE_LAYOUTS, value); }
+export function isCaptionPresetId(value: unknown): value is CaptionPresetId { return oneOf(CAPTION_PRESETS, value); }
+export function isTimelineCreatedBy(value: unknown): value is TimelineCreatedBy { return oneOf(TIMELINE_CREATED_BY, value); }
+export function isEncoderMode(value: unknown): value is EncoderMode { return oneOf(ENCODER_MODES, value); }
+export function isRenderProfileId(value: unknown): value is RenderProfileId { return oneOf(RENDER_PROFILE_IDS, value); }
+
+function onlyKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  return Object.keys(value).every(key => keys.includes(key));
+}
+export function isRenderedMediaInfo(value: unknown): value is RenderedMediaInfo {
+  if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["duration_us", "format_name", "video", "audio"]) || !isInteger(value.duration_us, 1) || !isString(value.format_name) || value.format_name.length === 0 || !isRecord(value.video) || !onlyKeys(value.video, ["codec", "width", "height", "pixel_format", "fps_num", "fps_den"])) return false;
+  if (!isString(value.video.codec) || value.video.codec.length === 0 || !isInteger(value.video.width, 1) || !isInteger(value.video.height, 1) || !isString(value.video.pixel_format) || value.video.pixel_format.length === 0 || !isInteger(value.video.fps_num, 1) || !isInteger(value.video.fps_den, 1)) return false;
+  return value.audio === null || (isRecord(value.audio) && onlyKeys(value.audio, ["codec", "sample_rate", "channels"]) && isString(value.audio.codec) && value.audio.codec.length > 0 && isInteger(value.audio.sample_rate, 1) && isInteger(value.audio.channels, 1));
+}
+export function isRenderArtifact(value: unknown): value is RenderArtifact {
+  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["render_artifact_id", "project_id", "timeline_revision_id", "kind", "status", "content_fingerprint", "profile_id", "display_name", "size_bytes", "sha256", "media_info", "encoder", "fallback_reason", "created_at"]) &&
+    isId(value.render_artifact_id) && isId(value.project_id) && isId(value.timeline_revision_id) && oneOf(RENDER_MODES, value.kind) && oneOf(RENDER_ARTIFACT_STATUSES, value.status) && isString(value.content_fingerprint) && value.content_fingerprint.length > 0 && isRenderProfileId(value.profile_id) &&
+    ((value.kind === "authoritative_preview" && value.profile_id === "preview-portrait-v1") || (value.kind === "final_export" && value.profile_id === "export-portrait-v1")) && isString(value.display_name) && value.display_name.length > 0 && isInteger(value.size_bytes, 1) && isSha256(value.sha256) && isRenderedMediaInfo(value.media_info) && isString(value.encoder) && value.encoder.length > 0 && isNullableString(value.fallback_reason) && isTime(value.created_at);
+}
+export function isAuthoritativePreview(value: unknown): value is AuthoritativePreview { return isRenderArtifact(value) && value.kind === "authoritative_preview" && value.profile_id === "preview-portrait-v1"; }
+export function isExportRecord(value: unknown): value is ExportRecord {
+  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["export_record_id", "project_id", "timeline_revision_id", "render_artifact_id", "status", "profile_id", "destination_display_name", "size_bytes", "sha256", "media_info", "encoder", "fallback_reason", "created_at"]) &&
+    isId(value.export_record_id) && isId(value.project_id) && isId(value.timeline_revision_id) && isId(value.render_artifact_id) && oneOf(EXPORT_STATUSES, value.status) && value.profile_id === "export-portrait-v1" && isString(value.destination_display_name) && value.destination_display_name.length > 0 && isInteger(value.size_bytes, 1) && isSha256(value.sha256) && isRenderedMediaInfo(value.media_info) && isString(value.encoder) && value.encoder.length > 0 && isNullableString(value.fallback_reason) && isTime(value.created_at);
+}
+export function isDestinationGrant(value: unknown): value is DestinationGrant {
+  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["destination_grant_id", "display_name", "extension", "overwrite_authorized", "expires_at"]) && isId(value.destination_grant_id) && isString(value.display_name) && value.display_name.length > 0 && value.extension === ".mp4" && typeof value.overwrite_authorized === "boolean" && isTime(value.expires_at);
+}
+export function isPreviewCreateInput(value: unknown): value is PreviewCreateInput {
+  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["timeline_revision_id", "encoder_mode"]) && (value.timeline_revision_id === undefined || isId(value.timeline_revision_id)) && (value.encoder_mode === undefined || isEncoderMode(value.encoder_mode));
+}
+export function isPreviewCreateResponse(value: unknown): value is PreviewCreateResponse {
+  if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["job", "preview", "reused"]) || !(value.job === null || isJob(value.job)) || !(value.preview === null || isAuthoritativePreview(value.preview)) || typeof value.reused !== "boolean") return false;
+  return value.reused ? value.job === null && value.preview !== null && value.preview.status === "ready" : value.job !== null && value.preview === null && value.job.kind === "authoritative_preview";
+}
+export function isExportCreateInput(value: unknown): value is ExportCreateInput {
+  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["timeline_revision_id", "destination_grant_id", "encoder_mode"]) && (value.timeline_revision_id === undefined || isId(value.timeline_revision_id)) && isId(value.destination_grant_id) && (value.encoder_mode === undefined || isEncoderMode(value.encoder_mode));
+}
+export function isExportCreateResponse(value: unknown): value is ExportCreateResponse {
+  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["job", "export_record"]) && isJob(value.job) && value.job.kind === "final_export" && (value.export_record === null || isExportRecord(value.export_record));
+}
+function isTimelineCanvas(value: unknown): value is TimelineCanvas {
+  return isRecord(value) && onlyKeys(value, ["width", "height", "fps_num", "fps_den", "background_color"]) &&
+    isInteger(value.width, 1) && isInteger(value.height, 1) && isInteger(value.fps_num, 1) && isInteger(value.fps_den, 1) &&
+    isString(value.background_color) && /^#[0-9A-Fa-f]{6}$/.test(value.background_color);
+}
+export function isTimelineClip(value: unknown): value is TimelineClip {
+  if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["clip_id", "track_id", "order_index", "asset_id", "asset_kind", "source_start_us", "source_end_us", "timeline_start_us", "timeline_end_us", "layout", "audio"])) return false;
+  if (!isId(value.clip_id) || value.track_id !== "V1" || !isInteger(value.order_index) || !isId(value.asset_id) || !oneOf(["video", "image"] as const, value.asset_kind) ||
+    !isInteger(value.timeline_start_us) || !isInteger(value.timeline_end_us, 1) || value.timeline_end_us <= value.timeline_start_us || !isTimelineLayout(value.layout) || !isRecord(value.audio) ||
+    !onlyKeys(value.audio, ["enabled", "gain_db"]) || typeof value.audio.enabled !== "boolean" || !isFiniteNumber(value.audio.gain_db) || value.audio.gain_db < -60 || value.audio.gain_db > 12) return false;
+  if (value.asset_kind === "image") return value.source_start_us === null && value.source_end_us === null && value.timeline_end_us - value.timeline_start_us >= 500_000 && value.timeline_end_us - value.timeline_start_us <= 30_000_000;
+  return isInteger(value.source_start_us) && isInteger(value.source_end_us, 1) && value.source_end_us - value.source_start_us >= 100_000 && value.timeline_end_us - value.timeline_start_us === value.source_end_us - value.source_start_us;
+}
+export function isTimelineCaption(value: unknown): value is TimelineCaption {
+  if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["caption_id", "track_id", "source_clip_id", "start_us", "end_us", "text", "preset_id", "origin", "edited", "source_segment_ids"])) return false;
+  if (!isId(value.caption_id) || value.track_id !== "C1" || !(value.source_clip_id === null || isId(value.source_clip_id)) || !isInteger(value.start_us) || !isInteger(value.end_us, 1) || value.end_us - value.start_us < 200_000 ||
+    !isString(value.text) || value.text.trim().length < 1 || [...value.text].length > 200 || /[\0-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(value.text) || !isCaptionPresetId(value.preset_id) || !oneOf(["transcript", "user"] as const, value.origin) || typeof value.edited !== "boolean" || !Array.isArray(value.source_segment_ids) || !value.source_segment_ids.every(isId)) return false;
+  return value.origin === "transcript" ? value.source_clip_id !== null && value.source_segment_ids.length > 0 : value.source_segment_ids.length === 0;
+}
+export function isTimelineDocument(value: unknown): value is TimelineDocument {
+  if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["schema_version", "project_id", "canvas", "tracks", "clips", "captions", "provenance"]) || value.schema_version !== 1 || !isId(value.project_id) || !isTimelineCanvas(value.canvas) || !Array.isArray(value.tracks) || value.tracks.length !== 2 || !Array.isArray(value.clips) || !value.clips.every(isTimelineClip) || !Array.isArray(value.captions) || !value.captions.every(isTimelineCaption) || !isRecord(value.provenance)) return false;
+  const [visual, caption] = value.tracks;
+  if (!isRecord(visual) || !isRecord(caption) || JSON.stringify(visual) !== JSON.stringify({ id: "V1", kind: "visual", locked: Boolean(visual.locked) }) || JSON.stringify(caption) !== JSON.stringify({ id: "C1", kind: "caption", locked: Boolean(caption.locked) })) return false;
+  if (!onlyKeys(value.provenance, ["created_by", "source_transcript_ids"]) || !isTimelineCreatedBy(value.provenance.created_by) || !Array.isArray(value.provenance.source_transcript_ids) || !value.provenance.source_transcript_ids.every(isId)) return false;
+  let end = 0;
+  for (let index = 0; index < value.clips.length; index += 1) { const clip = value.clips[index]; if (clip.order_index !== index || clip.timeline_start_us !== end) return false; end = clip.timeline_end_us; }
+  const captions = [...value.captions].sort((a, b) => a.start_us - b.start_us);
+  return captions.every((item, index) => item.end_us <= end && (index === 0 || captions[index - 1].end_us <= item.start_us));
+}
+export function isTimelineRevisionSummary(value: unknown): value is TimelineRevisionSummary {
+  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["timeline_revision_id", "project_id", "parent_revision_id", "document_sha256", "summary", "created_by", "created_at"]) && isId(value.timeline_revision_id) && isId(value.project_id) && (value.parent_revision_id === null || isId(value.parent_revision_id)) && isSha256(value.document_sha256) && isString(value.summary) && isTimelineCreatedBy(value.created_by) && isTime(value.created_at);
+}
+export function isTimelineRevision(value: unknown): value is TimelineRevision {
+  if (!isRecord(value) || value.schema_version !== 1 || !isTimelineDocument(value.document)) return false;
+  const summary = { ...value }; delete summary.schema_version; delete summary.document;
+  return isTimelineRevisionSummary(summary) && value.project_id === value.document.project_id;
+}
+export function isTimelineDraft(value: unknown): value is TimelineDraft {
+  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["project_id", "base_revision_id", "document", "updated_at", "conflict"]) && isId(value.project_id) && isId(value.base_revision_id) && isTimelineDocument(value.document) && value.document.project_id === value.project_id && isTime(value.updated_at) && typeof value.conflict === "boolean";
+}
+export function isTimelineState(value: unknown): value is TimelineState {
+  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["project_id", "current_revision", "draft", "can_undo", "can_redo", "current_preview"]) && isId(value.project_id) && isTimelineRevision(value.current_revision) && value.current_revision.project_id === value.project_id && (value.draft === null || isTimelineDraft(value.draft)) && typeof value.can_undo === "boolean" && typeof value.can_redo === "boolean" && (value.current_preview === null || (isAuthoritativePreview(value.current_preview) && value.current_preview.project_id === value.project_id));
+}
+export function isTimelineCreateInput(value: unknown): value is TimelineCreateInput {
+  if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["schema_version", "source", "default_layout", "caption_preset_id"]) || value.schema_version !== 1 || !isRecord(value.source) || !isTimelineLayout(value.default_layout) || !isCaptionPresetId(value.caption_preset_id)) return false;
+  if (value.source.kind === "empty") return onlyKeys(value.source, ["kind"]);
+  if (value.source.kind === "full_asset") return onlyKeys(value.source, ["kind", "asset_id"]) && isId(value.source.asset_id);
+  return value.source.kind === "transcript_selection" && onlyKeys(value.source, ["kind", "transcript_id", "segment_ids", "padding_before_us", "padding_after_us", "create_captions"]) && isId(value.source.transcript_id) && Array.isArray(value.source.segment_ids) && value.source.segment_ids.length > 0 && value.source.segment_ids.every(isId) && isInteger(value.source.padding_before_us) && value.source.padding_before_us <= 300_000 && isInteger(value.source.padding_after_us) && value.source.padding_after_us <= 300_000 && typeof value.source.create_captions === "boolean";
+}
+export function isTimelinePatchOperation(value: unknown): value is TimelinePatchOperation {
+  if (!isRecord(value) || hasSensitiveKey(value) || !isString(value.op)) return false;
+  const index = (key: string) => isInteger(value[key]); const id = (key: string) => isId(value[key]); const us = (key: string, minimum = 0) => isInteger(value[key], minimum);
+  switch (value.op) {
+    case "insert_asset_clip": return onlyKeys(value, ["op", "asset_id", "at_index", "source_start_us", "source_end_us", "duration_us", "layout"]) && id("asset_id") && index("at_index") && (value.source_start_us === undefined || us("source_start_us")) && (value.source_end_us === undefined || us("source_end_us", 1)) && (value.duration_us === undefined || us("duration_us", 500_000)) && (value.layout === undefined || isTimelineLayout(value.layout));
+    case "insert_transcript_segments": return onlyKeys(value, ["op", "transcript_id", "segment_ids", "at_index", "padding_before_us", "padding_after_us", "create_captions", "layout"]) && id("transcript_id") && Array.isArray(value.segment_ids) && value.segment_ids.length > 0 && value.segment_ids.every(isId) && index("at_index") && us("padding_before_us") && Number(value.padding_before_us) <= 300_000 && us("padding_after_us") && Number(value.padding_after_us) <= 300_000 && typeof value.create_captions === "boolean" && (value.layout === undefined || isTimelineLayout(value.layout));
+    case "remove_clip": return onlyKeys(value, ["op", "clip_id"]) && id("clip_id");
+    case "move_clip": return onlyKeys(value, ["op", "clip_id", "to_index"]) && id("clip_id") && index("to_index");
+    case "trim_clip": return onlyKeys(value, ["op", "clip_id", "source_start_us", "source_end_us"]) && id("clip_id") && us("source_start_us") && us("source_end_us", 1) && Number(value.source_end_us) - Number(value.source_start_us) >= 100_000;
+    case "split_clip": return onlyKeys(value, ["op", "clip_id", "source_time_us"]) && id("clip_id") && us("source_time_us", 1);
+    case "set_layout": return onlyKeys(value, ["op", "clip_id", "layout"]) && id("clip_id") && isTimelineLayout(value.layout);
+    case "set_audio": return onlyKeys(value, ["op", "clip_id", "enabled", "gain_db"]) && id("clip_id") && typeof value.enabled === "boolean" && isFiniteNumber(value.gain_db) && value.gain_db >= -60 && value.gain_db <= 12;
+    case "set_image_duration": return onlyKeys(value, ["op", "clip_id", "duration_us"]) && id("clip_id") && us("duration_us", 500_000) && Number(value.duration_us) <= 30_000_000;
+    case "add_caption": return onlyKeys(value, ["op", "start_us", "end_us", "text", "preset_id", "source_clip_id"]) && us("start_us") && us("end_us", 1) && Number(value.end_us) - Number(value.start_us) >= 200_000 && isString(value.text) && value.text.trim().length > 0 && [...value.text].length <= 200 && isCaptionPresetId(value.preset_id) && value.source_clip_id === null;
+    case "remove_caption": return onlyKeys(value, ["op", "caption_id"]) && id("caption_id");
+    case "update_caption": return onlyKeys(value, ["op", "caption_id", "text"]) && id("caption_id") && isString(value.text) && value.text.trim().length > 0 && [...value.text].length <= 200;
+    case "set_caption_timing": return onlyKeys(value, ["op", "caption_id", "start_us", "end_us"]) && id("caption_id") && us("start_us") && us("end_us", 1) && Number(value.end_us) - Number(value.start_us) >= 200_000;
+    case "set_caption_preset": return onlyKeys(value, ["op", "caption_id", "preset_id"]) && id("caption_id") && isCaptionPresetId(value.preset_id);
+    default: return false;
+  }
+}
+export function isTimelinePatch(value: unknown): value is TimelinePatch {
+  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["schema_version", "base_revision_id", "operations", "summary"]) && value.schema_version === 1 && isId(value.base_revision_id) && Array.isArray(value.operations) && value.operations.length > 0 && value.operations.length <= 100 && value.operations.every(isTimelinePatchOperation) && isString(value.summary) && value.summary.trim().length > 0;
+}
+export function isTimelineDraftInput(value: unknown): value is TimelineDraftInput {
+  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["schema_version", "base_revision_id", "document"]) && value.schema_version === 1 && isId(value.base_revision_id) && isTimelineDocument(value.document);
+}
+export function parseTimelineState(value: unknown): TimelineState { if (!isTimelineState(value)) throw new ContractValidationError("TimelineState"); return value; }
+export function parseTimelineRevision(value: unknown): TimelineRevision { if (!isTimelineRevision(value)) throw new ContractValidationError("TimelineRevision"); return value; }
+export function parseTimelineDraft(value: unknown): TimelineDraft { if (!isTimelineDraft(value)) throw new ContractValidationError("TimelineDraft"); return value; }
+export function parseTimelineCreateInput(value: unknown): TimelineCreateInput { if (!isTimelineCreateInput(value)) throw new ContractValidationError("TimelineCreateInput"); return value; }
+export function parseTimelinePatch(value: unknown): TimelinePatch { if (!isTimelinePatch(value)) throw new ContractValidationError("TimelinePatch"); return value; }
+export function parseRenderedMediaInfo(value: unknown): RenderedMediaInfo { if (!isRenderedMediaInfo(value)) throw new ContractValidationError("RenderedMediaInfo"); return value; }
+export function parseRenderArtifact(value: unknown): RenderArtifact { if (!isRenderArtifact(value)) throw new ContractValidationError("RenderArtifact"); return value; }
+export function parseAuthoritativePreview(value: unknown): AuthoritativePreview { if (!isAuthoritativePreview(value)) throw new ContractValidationError("AuthoritativePreview"); return value; }
+export function parseExportRecord(value: unknown): ExportRecord { if (!isExportRecord(value)) throw new ContractValidationError("ExportRecord"); return value; }
+export function parseDestinationGrant(value: unknown): DestinationGrant { if (!isDestinationGrant(value)) throw new ContractValidationError("DestinationGrant"); return value; }
+export function parsePreviewCreateInput(value: unknown): PreviewCreateInput { if (!isPreviewCreateInput(value)) throw new ContractValidationError("PreviewCreateInput"); return value; }
+export function parsePreviewCreateResponse(value: unknown): PreviewCreateResponse { if (!isPreviewCreateResponse(value)) throw new ContractValidationError("PreviewCreateResponse"); return value; }
+export function parseExportCreateInput(value: unknown): ExportCreateInput { if (!isExportCreateInput(value)) throw new ContractValidationError("ExportCreateInput"); return value; }
+export function parseExportCreateResponse(value: unknown): ExportCreateResponse { if (!isExportCreateResponse(value)) throw new ContractValidationError("ExportCreateResponse"); return value; }

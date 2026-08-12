@@ -17,6 +17,16 @@ AsrRunner = Callable[
     [Any, asyncio.Event, Callable[[float], None], Callable[[str], None]],
     Awaitable[dict[str, Any]],
 ]
+RenderRunner = Callable[
+    [
+        Any,
+        asyncio.Event,
+        Callable[[float], None],
+        Callable[[str], None],
+        Callable[[int | None], None],
+    ],
+    Awaitable[dict[str, Any]],
+]
 
 
 class JobService:
@@ -30,6 +40,7 @@ class JobService:
         emit: Callable[[dict[str, Any]], Awaitable[None]],
         asr_runner: AsrRunner | None = None,
         retry_validator: Callable[[Any], None] | None = None,
+        render_runner: RenderRunner | None = None,
     ) -> None:
         self.db = db
         self.data_dir = data_dir
@@ -39,6 +50,7 @@ class JobService:
         self.emit = emit
         self.asr_runner = asr_runner
         self.retry_validator = retry_validator
+        self.render_runner = render_runner
         self.tasks: dict[str, asyncio.Task[None]] = {}
         self.cancel_events: dict[str, asyncio.Event] = {}
         self.worker: asyncio.Task[None] | None = None
@@ -176,6 +188,49 @@ class JobService:
             )
         return self.get(job_id) or {"job_id": job_id, "status": "queued", "created_at": now}
 
+    def create_render(
+        self,
+        kind: str,
+        project_id: str,
+        timeline_revision_id: str,
+        encoder: str,
+        input_data: dict[str, Any],
+    ) -> dict[str, Any]:
+        if kind not in {"authoritative_preview", "final_export"}:
+            raise ValueError("RENDER_PLAN_INVALID")
+        job_id = new_id()
+        now = utc_now()
+        with self.db.connection() as db:
+            db.execute(
+                "INSERT INTO jobs(id,project_id,kind,type,status,stage,progress,input_json,"
+                "encoder_requested,encoder_used,fallback_reason,timeline_revision_id,"
+                "resource_class,attempt,created_at,updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    job_id,
+                    project_id,
+                    kind,
+                    kind,
+                    "queued",
+                    "queued",
+                    0,
+                    json_dumps(input_data),
+                    encoder,
+                    encoder,
+                    input_data.get("toolchain", {}).get("fallback_reason"),
+                    timeline_revision_id,
+                    "render",
+                    1,
+                    now,
+                    now,
+                ),
+            )
+        return self.get(job_id) or {"job_id": job_id, "status": "queued", "created_at": now}
+
+    def delete_queued(self, job_id: str) -> None:
+        with self.db.connection() as db:
+            db.execute("DELETE FROM jobs WHERE id=? AND status='queued'", (job_id,))
+
     def get(self, job_id: str) -> dict[str, Any] | None:
         with self.db.connection() as db:
             row = db.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
@@ -193,6 +248,7 @@ class JobService:
         result["input"] = json_loads(result.pop("input_json"))
         result["input"].pop("path", None)
         result["input"].pop("audio_uri", None)
+        result["input"].pop("destination_path", None)
         result["artifacts"] = [dict(artifact) for artifact in artifacts]
         for artifact in result["artifacts"]:
             artifact["media_info"] = json_loads(artifact.pop("media_info_json"))
@@ -374,6 +430,21 @@ class JobService:
                         "UPDATE jobs SET result_json=?,updated_at=? WHERE id=?",
                         (json_dumps(result), utc_now(), job_id),
                     )
+            elif row["kind"] in {"authoritative_preview", "final_export"}:
+                if self.render_runner is None:
+                    raise RuntimeError("RENDER_FAILED")
+                result = await self.render_runner(
+                    row,
+                    cancel_event,
+                    lambda value: self._set_progress(job_id, value),
+                    lambda value: self._set_stage(job_id, value),
+                    lambda value: self._set_worker_pid(job_id, value),
+                )
+                with self.db.connection() as db:
+                    db.execute(
+                        "UPDATE jobs SET result_json=?,updated_at=? WHERE id=?",
+                        (json_dumps(result), utc_now(), job_id),
+                    )
             elif row["kind"] in {"asset_probe", "asset_fingerprint"}:
                 pass
             else:
@@ -513,6 +584,14 @@ class JobService:
                 (stage, utc_now(), job_id),
             )
 
+    def _set_worker_pid(self, job_id: str, worker_pid: int | None) -> None:
+        with self.db.connection() as db:
+            db.execute(
+                "UPDATE jobs SET worker_pid=?,updated_at=? WHERE id=? AND status IN "
+                "('running','cancelling')",
+                (worker_pid, utc_now(), job_id),
+            )
+
     def _current_status(self, job_id: str) -> str | None:
         with self.db.connection() as db:
             row = db.execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
@@ -544,5 +623,13 @@ def _job_error_message(code: str) -> str:
         "TRANSCRIPTION_CANCELLED": "转录已取消",
         "MODEL_DOWNLOAD_CANCELLED": "模型下载已取消",
         "JOB_CANCELLED": "任务已取消",
+        "RENDER_PLAN_INVALID": "渲染计划不合法",
+        "RENDER_INPUT_CHANGED": "渲染输入已变化",
+        "RENDER_FONT_MISSING": "字幕字体资源缺失",
+        "RENDER_FAILED": "渲染失败",
+        "RENDER_VALIDATION_FAILED": "渲染产物校验失败",
+        "EXPORT_DESTINATION_INVALID": "导出目标无效",
+        "EXPORT_DESTINATION_EXISTS": "导出目标已存在",
+        "EXPORT_DESTINATION_EXPIRED": "导出授权已过期",
     }
     return messages.get(code, "任务执行失败")

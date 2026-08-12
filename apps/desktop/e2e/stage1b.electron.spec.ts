@@ -116,7 +116,9 @@ async function runLanguageSample(sample: typeof languageSamples[number], sourceP
   const app = await electron.launch({ args: [join(desktop, "out", "main", "index.js"), `--user-data-dir=${userData}`], cwd: desktop, env });
   try {
     const page = await app.firstWindow();
-    await expect(page.getByText("Core 已连接")).toBeVisible({ timeout: 30_000 });
+    await page.waitForFunction(() => Boolean(window.desktop?.getRuntime));
+    await page.evaluate(() => window.desktop.getRuntime());
+    await expect(page.getByText(/Core 已连接/)).toBeVisible({ timeout: 30_000 });
     const project = await page.evaluate((key: string) => window.desktop.createProject({ name: `Stage 1B language ${key} ${Date.now()}` }), sample.key);
     const imported = await page.evaluate(projectId => window.desktop.importAsset({ project_id: projectId, kind: "audio" }), project.project_id);
     if (!imported) throw new Error(`${sample.key} 真实音频导入被取消`);
@@ -199,8 +201,10 @@ test("Stage 1B 真实 Electron/Core 启动、模型契约和未验证证据", as
   const app = await electron.launch({ args: [join(desktop, "out", "main", "index.js"), `--user-data-dir=${userData}`], cwd: desktop, env });
   try {
     const page = await app.firstWindow();
+    await page.waitForFunction(() => Boolean(window.desktop?.getRuntime));
+    await page.evaluate(() => window.desktop.getRuntime());
     await expect(page.getByRole("heading", { name: "素材工作区" })).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText("Core 已连接")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/Core 已连接/)).toBeVisible({ timeout: 30_000 });
 
     const models = await page.evaluate(() => window.desktop.listModels({ limit: 100 }));
     expect(models.items.length).toBeGreaterThan(0);
@@ -257,7 +261,9 @@ test("Stage 1B 真实 Transcript/stale 链路，仅在真实模型权重可用�
   const app = await electron.launch({ args: [join(desktop, "out", "main", "index.js"), `--user-data-dir=${userData}`], cwd: desktop, env });
   try {
     const page = await app.firstWindow();
-    await expect(page.getByText("Core 已连接")).toBeVisible({ timeout: 30_000 });
+    await page.waitForFunction(() => Boolean(window.desktop?.getRuntime));
+    await page.evaluate(() => window.desktop.getRuntime());
+    await expect(page.getByText(/Core 已连接/)).toBeVisible({ timeout: 30_000 });
     const project = await page.evaluate(() => window.desktop.createProject({ name: `Stage 1B ASR ${Date.now()}` }));
     const imported = await page.evaluate(projectId => window.desktop.importAsset({ project_id: projectId, kind: "video" }), project.project_id);
     if (!imported) throw new Error("真实素材导入被取消");
@@ -272,6 +278,7 @@ test("Stage 1B 真实 Transcript/stale 链路，仅在真实模型权重可用�
     const transcript = await page.evaluate(id => window.desktop.getTranscript(id), transcriptPage.items[0].transcript_id);
     expect(transcript.status).toBe("ready");
     expect(transcript.segments.every((segment: any) => Number.isInteger(segment.start_us) && Number.isInteger(segment.end_us))).toBe(true);
+    await page.locator(".tabs button").filter({ hasText: "转录" }).click();
     await page.locator(".transcript-row button").last().click();
     await expect(page.locator(".transcript-viewer")).toBeVisible();
     await expect(page.getByText("原始 ASR 结果只读")).toBeVisible();

@@ -1,0 +1,35 @@
+{
+  "preset_version": 1,
+  "presets": {
+    "default-bottom": {
+      "font_size": 64,
+      "primary_color": "&H00FFFFFF",
+      "outline_color": "&H00000000",
+      "back_color": "&H80000000",
+      "outline": 4,
+      "shadow": 0,
+      "border_style": 1,
+      "margin_v": 150
+    },
+    "game-safe-bottom": {
+      "font_size": 64,
+      "primary_color": "&H00FFFFFF",
+      "outline_color": "&H00000000",
+      "back_color": "&H80000000",
+      "outline": 4,
+      "shadow": 0,
+      "border_style": 1,
+      "margin_v": 310
+    },
+    "high-contrast": {
+      "font_size": 62,
+      "primary_color": "&H00FFFFFF",
+      "outline_color": "&H00000000",
+      "back_color": "&H00101010",
+      "outline": 1,
+      "shadow": 0,
+      "border_style": 3,
+      "margin_v": 170
+    }
+  }
+}

@@ -21,6 +21,7 @@ class MigrationError(RuntimeError):
 
 V1_VERSION = "v1"
 V2_VERSION = "v2"
+V3_VERSION = "v3"
 V1_SQL = """
 CREATE TABLE IF NOT EXISTS media_inputs (
   id TEXT PRIMARY KEY, path TEXT NOT NULL, display_name TEXT NOT NULL,
@@ -150,7 +151,68 @@ CREATE INDEX IF NOT EXISTS idx_transcript_segments_transcript
 CREATE INDEX IF NOT EXISTS idx_transcript_words_segment
   ON transcript_words(segment_id, ordinal);
 """
-MIGRATIONS: dict[str, str] = {V1_VERSION: V1_SQL, V2_VERSION: V2_SQL}
+V3_SQL = """
+CREATE TABLE IF NOT EXISTS timeline_revisions (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  parent_revision_id TEXT NULL REFERENCES timeline_revisions(id),
+  schema_version INTEGER NOT NULL,
+  document_json TEXT NOT NULL,
+  document_sha256 TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS timeline_drafts (
+  project_id TEXT PRIMARY KEY REFERENCES projects(id),
+  base_revision_id TEXT NOT NULL REFERENCES timeline_revisions(id),
+  document_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS timeline_navigation (
+  project_id TEXT PRIMARY KEY REFERENCES projects(id),
+  redo_stack_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS render_artifacts (
+  artifact_id TEXT PRIMARY KEY REFERENCES artifacts(id),
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  timeline_revision_id TEXT NOT NULL REFERENCES timeline_revisions(id),
+  kind TEXT NOT NULL,
+  render_plan_json TEXT NOT NULL,
+  content_fingerprint TEXT NOT NULL,
+  profile_id TEXT NOT NULL,
+  toolchain_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS export_records (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  timeline_revision_id TEXT NOT NULL REFERENCES timeline_revisions(id),
+  artifact_id TEXT NOT NULL REFERENCES render_artifacts(artifact_id),
+  profile_id TEXT NOT NULL,
+  destination_uri TEXT NOT NULL,
+  destination_display_name TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_timeline_revisions_project
+  ON timeline_revisions(project_id, created_at DESC, id DESC);
+CREATE TRIGGER IF NOT EXISTS timeline_revisions_no_update
+BEFORE UPDATE ON timeline_revisions
+BEGIN
+  SELECT RAISE(ABORT, 'timeline revisions are immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS timeline_revisions_no_delete
+BEFORE DELETE ON timeline_revisions
+BEGIN
+  SELECT RAISE(ABORT, 'timeline revisions are immutable');
+END;
+"""
+MIGRATIONS: dict[str, str] = {
+    V1_VERSION: V1_SQL,
+    V2_VERSION: V2_SQL,
+    V3_VERSION: V3_SQL,
+}
 
 
 class Database:
@@ -196,6 +258,7 @@ class Database:
                     db.execute("BEGIN")
                     self._apply_v1_compatibility(db)
                     self._apply_v2_compatibility(db)
+                    self._apply_v3_compatibility(db)
                     for statement in _statements(sql):
                         db.execute(statement)
                     db.execute(
@@ -270,6 +333,20 @@ class Database:
             if name not in columns:
                 db.execute(f"ALTER TABLE jobs ADD COLUMN {name} {definition}")
 
+    @staticmethod
+    def _apply_v3_compatibility(db: sqlite3.Connection) -> None:
+        tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "jobs" not in tables:
+            return
+        columns = {row[1] for row in db.execute("PRAGMA table_info(jobs)")}
+        additions = {
+            "timeline_revision_id": "TEXT REFERENCES timeline_revisions(id)",
+            "idempotency_key": "TEXT",
+        }
+        for name, definition in additions.items():
+            if name not in columns:
+                db.execute(f"ALTER TABLE jobs ADD COLUMN {name} {definition}")
+
     def recover_interrupted(self) -> int:
         now = utc_now()
         with self.connection() as db:
@@ -285,7 +362,16 @@ class Database:
 
 
 def _statements(sql: str) -> list[str]:
-    return [statement.strip() for statement in sql.split(";") if statement.strip()]
+    statements: list[str] = []
+    buffer = ""
+    for line in sql.splitlines(keepends=True):
+        buffer += line
+        if sqlite3.complete_statement(buffer):
+            statements.append(buffer.strip())
+            buffer = ""
+    if buffer.strip():
+        raise sqlite3.OperationalError("incomplete migration statement")
+    return statements
 
 
 def json_dumps(value: Any) -> str:

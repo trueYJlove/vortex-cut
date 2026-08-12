@@ -13,10 +13,12 @@
     "test:watch": "vitest",
     "test:e2e": "pnpm build && playwright test --config=tests/playwright.config.ts",
     "package:win": "node scripts/package-win.mjs",
-    "package:verify": "powershell -NoProfile -ExecutionPolicy Bypass -File ../../tools/packaging/verify-windows.ps1"
+    "package:verify": "powershell -NoProfile -ExecutionPolicy Bypass -File ../../tools/packaging/verify-windows.ps1",
+    "package:verify:real": "pnpm package:verify && node scripts/verify-package-real.mjs"
   },
   "dependencies": {
     "@aivideo/contracts": "workspace:*",
+    "lucide-react": "^0.468.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

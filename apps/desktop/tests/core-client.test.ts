@@ -93,4 +93,40 @@ describe("CoreClient", () => {
     await expect(client.getTranscript("transcript_1")).resolves.toMatchObject({ transcript_id: "transcript_1" });
     expect(JSON.stringify(fetchImpl.mock.calls)).not.toContain("private\\model");
   });
+  it("covers every frozen Timeline endpoint with base revisions and no sensitive fields", async () => {
+    const now = "2026-08-11T00:00:00.000Z"; const hash = "a".repeat(64);
+    const document = { schema_version: 1, project_id: "project_1", canvas: { width: 1080, height: 1920, fps_num: 30, fps_den: 1, background_color: "#000000" }, tracks: [{ id: "V1", kind: "visual", locked: false }, { id: "C1", kind: "caption", locked: false }], clips: [], captions: [], provenance: { created_by: "user", source_transcript_ids: [] } };
+    const revision = { timeline_revision_id: "revision_1", project_id: "project_1", parent_revision_id: null, document_sha256: hash, summary: "创建空时间线", created_by: "user", created_at: now, schema_version: 1, document };
+    const state = { project_id: "project_1", current_revision: revision, draft: null, can_undo: false, can_redo: false, current_preview: null };
+    const draft = { project_id: "project_1", base_revision_id: "revision_1", document, updated_at: now, conflict: false };
+    const fetchImpl = vi.fn().mockResolvedValueOnce(response(state)).mockResolvedValueOnce(response(state)).mockResolvedValueOnce(response(state)).mockResolvedValueOnce(response(state)).mockResolvedValueOnce(response(state)).mockResolvedValueOnce(response(draft)).mockResolvedValueOnce(response(null)).mockResolvedValueOnce(response({ items: [{ ...revision, schema_version: undefined, document: undefined }], next_cursor: null })).mockResolvedValueOnce(response(revision));
+    const client = new CoreClient({ baseUrl: "http://127.0.0.1:4000", uiToken: "ui-secret", fetchImpl });
+    await client.createTimeline("project_1" as never, { schema_version: 1, source: { kind: "empty" }, default_layout: "fit", caption_preset_id: "default-bottom" }); await client.getTimeline("project_1" as never); await client.patchTimeline("project_1" as never, { schema_version: 1, base_revision_id: "revision_1" as never, operations: [{ op: "add_caption", start_us: 0, end_us: 200_000, text: "字幕", preset_id: "default-bottom", source_clip_id: null }], summary: "字幕" }); await client.undoTimeline("project_1" as never, "revision_1" as never); await client.redoTimeline("project_1" as never, "revision_1" as never); await client.saveTimelineDraft("project_1" as never, { schema_version: 1, base_revision_id: "revision_1" as never, document: document as never }); await client.deleteTimelineDraft("project_1" as never); await client.listTimelineRevisions("project_1" as never); await client.getTimelineRevision("revision_1" as never);
+    expect(fetchImpl.mock.calls.map(call => [String(call[0]), (call[1] as RequestInit).method ?? "GET"])).toEqual([
+      ["http://127.0.0.1:4000/api/v1/projects/project_1/timelines", "POST"], ["http://127.0.0.1:4000/api/v1/projects/project_1/timeline", "GET"], ["http://127.0.0.1:4000/api/v1/projects/project_1/timeline/patches", "POST"], ["http://127.0.0.1:4000/api/v1/projects/project_1/timeline/undo", "POST"], ["http://127.0.0.1:4000/api/v1/projects/project_1/timeline/redo", "POST"], ["http://127.0.0.1:4000/api/v1/projects/project_1/timeline/draft", "PUT"], ["http://127.0.0.1:4000/api/v1/projects/project_1/timeline/draft", "DELETE"], ["http://127.0.0.1:4000/api/v1/projects/project_1/timeline/revisions", "GET"], ["http://127.0.0.1:4000/api/v1/timeline-revisions/revision_1", "GET"]
+    ]);
+    expect(JSON.stringify(fetchImpl.mock.calls)).not.toContain("private");
+  });
+  it("covers every frozen Render endpoint and strips sensitive response fields", async () => {
+    const now = "2026-08-11T00:00:00.000Z"; const hash = "a".repeat(64);
+    const mediaInfo = { duration_us: 1_000_000, format_name: "mp4", video: { codec: "h264", width: 1080, height: 1920, pixel_format: "yuv420p", fps_num: 30, fps_den: 1 }, audio: null };
+    const preview = { render_artifact_id: "render_1", project_id: "project_1", timeline_revision_id: "revision_1", kind: "authoritative_preview", status: "ready", content_fingerprint: hash, profile_id: "preview-portrait-v1", display_name: "preview.mp4", size_bytes: 10, sha256: hash, media_info: mediaInfo, encoder: "libx264", fallback_reason: null, created_at: now };
+    const exportRecord = { export_record_id: "export_1", project_id: "project_1", timeline_revision_id: "revision_1", render_artifact_id: "render_2", status: "succeeded", profile_id: "export-portrait-v1", destination_display_name: "video.mp4", size_bytes: 10, sha256: hash, media_info: mediaInfo, encoder: "libx264", fallback_reason: "hardware unavailable", created_at: now };
+    const exportJob = { job_id: "job_1", project_id: "project_1", asset_id: null, kind: "final_export", status: "queued", stage: "queued", progress: 0, attempt: 1, model_id: null, model_revision: null, input_fingerprint: null, input: {}, error: null, created_at: now, updated_at: now, started_at: null, finished_at: null };
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(response({ job: null, preview: { ...preview, path: "C:\\private\\preview.mp4" }, reused: true }))
+      .mockResolvedValueOnce(response({ items: [{ ...preview, uri: "file:///private.mp4" }], next_cursor: null }))
+      .mockResolvedValueOnce(response({ job: exportJob, export_record: null }))
+      .mockResolvedValueOnce(response({ items: [{ ...exportRecord, path: "C:\\private\\video.mp4" }], next_cursor: null }))
+      .mockResolvedValueOnce(response({ ...preview, kind: "final_export", profile_id: "export-portrait-v1", path: "C:\\private\\export.mp4" }));
+    const client = new CoreClient({ baseUrl: "http://127.0.0.1:4000", uiToken: "ui-secret", fetchImpl });
+    await expect(client.createPreview("project_1" as never, { timeline_revision_id: "revision_1" as never, encoder_mode: "auto" })).resolves.toMatchObject({ reused: true, preview: { render_artifact_id: "render_1" } });
+    await expect(client.listPreviews("project_1" as never)).resolves.toMatchObject({ items: [{ display_name: "preview.mp4" }] });
+    await expect(client.createExport("project_1" as never, { timeline_revision_id: "revision_1" as never, destination_grant_id: "destination_1" as never, encoder_mode: "software" })).resolves.toMatchObject({ job: { kind: "final_export" }, export_record: null });
+    await expect(client.listExports("project_1" as never)).resolves.toMatchObject({ items: [{ destination_display_name: "video.mp4" }] });
+    await expect(client.getRenderArtifact("render_2" as never)).resolves.toMatchObject({ kind: "final_export" });
+    expect(fetchImpl.mock.calls.map(call => String(call[0]))).toEqual([
+      "http://127.0.0.1:4000/api/v1/projects/project_1/previews", "http://127.0.0.1:4000/api/v1/projects/project_1/previews", "http://127.0.0.1:4000/api/v1/projects/project_1/exports", "http://127.0.0.1:4000/api/v1/projects/project_1/exports", "http://127.0.0.1:4000/api/v1/render-artifacts/render_2"
+    ]);
+  });
 });

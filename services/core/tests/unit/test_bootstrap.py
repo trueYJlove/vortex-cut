@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from aivs_core import bootstrap
-from aivs_core.config import DEFAULT_MANIFEST_DIR, Settings
+from aivs_core.config import DEFAULT_MANIFEST_DIR, Settings, _resource_path
 
 
 def test_parser_defaults_and_arguments():
@@ -24,6 +24,56 @@ def test_settings_from_args_uses_default_or_explicit_manifest_dir(tmp_path: Path
 
     assert default_settings.manifest_dir == DEFAULT_MANIFEST_DIR
     assert explicit_settings.manifest_dir == explicit_manifest_dir
+
+
+def test_resource_path_uses_source_resource_root(tmp_path: Path, monkeypatch) -> None:
+    resources = tmp_path / "resources" / "model-manifests"
+    resources.mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("AIVS_RESOURCE_ROOT", raising=False)
+    monkeypatch.delattr("sys._MEIPASS", raising=False)
+
+    assert _resource_path("model-manifests") == resources.resolve()
+    assert Settings().manifest_dir == resources.resolve()
+
+
+def test_resource_path_prefers_pyinstaller_bundle(tmp_path: Path, monkeypatch) -> None:
+    bundle = tmp_path / "bundle"
+    manifests = bundle / "model-manifests"
+    fonts = bundle / "fonts"
+    manifests.mkdir(parents=True)
+    fonts.mkdir()
+    monkeypatch.setattr("sys._MEIPASS", str(bundle), raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    settings = Settings()
+    assert settings.manifest_dir == manifests.resolve()
+    assert settings.font_dir == fonts.resolve()
+
+
+def test_resource_path_prefers_explicit_resource_root(tmp_path: Path, monkeypatch) -> None:
+    resource_root = tmp_path / "packaged-resources"
+    manifests = resource_root / "model-manifests"
+    manifests.mkdir(parents=True)
+    monkeypatch.setenv("AIVS_RESOURCE_ROOT", str(resource_root))
+
+    assert _resource_path("model-manifests") == manifests.resolve()
+
+
+def test_pyinstaller_spec_collects_asr_runtime_and_resources() -> None:
+    spec = Path("services/core/aivs-core.spec").read_text(encoding="utf-8")
+    for package in (
+        "faster_whisper",
+        "ctranslate2",
+        "tokenizers",
+        "huggingface_hub",
+        "av",
+        "onnxruntime",
+    ):
+        assert f'"{package}"' in spec
+    assert "collect_all" in spec
+    assert '"model-manifests"' in spec
+    assert '"fonts"' in spec
 
 
 @pytest.mark.asyncio

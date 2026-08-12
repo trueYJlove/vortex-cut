@@ -1,0 +1,427 @@
+from __future__ import annotations
+
+import copy
+from pathlib import Path
+
+import pytest
+
+from aivs_core.database import Database, json_dumps
+from aivs_core.projects import DomainError
+from aivs_core.timeline import TimelineService
+
+
+def _service(tmp_path: Path) -> tuple[TimelineService, Database]:
+    database = Database(tmp_path / "app.db")
+    database.initialize()
+    with database.connection() as db:
+        for project_id in ("p1", "p2"):
+            db.execute(
+                "INSERT INTO projects(id,name,status,canvas_json,root_dir,root_dir_name,"
+                "created_at,updated_at,last_opened_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                (project_id, project_id, "active", "{}", "root", "root", "now", "now", "now"),
+            )
+        assets = [
+            ("v1", "p1", "video", "fp-v1", 5_000_000, True),
+            ("v2", "p1", "video", "fp-v2", 2_000_000, False),
+            ("i1", "p1", "image", "fp-i1", 0, False),
+            ("other", "p2", "video", "fp-other", 1_000_000, True),
+        ]
+        for asset_id, project_id, kind, fingerprint, duration, has_audio in assets:
+            media = {
+                "duration_us": duration,
+                "video_streams": [{}] if kind == "video" else [],
+                "audio_streams": [{}] if has_audio else [],
+            }
+            db.execute(
+                "INSERT INTO assets(id,project_id,kind,storage_mode,display_name,fingerprint,"
+                "size_bytes,availability,media_info_json,created_at,updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    asset_id,
+                    project_id,
+                    kind,
+                    "external",
+                    asset_id,
+                    fingerprint,
+                    1,
+                    "available",
+                    json_dumps(media),
+                    "now",
+                    "now",
+                ),
+            )
+        db.execute(
+            "INSERT INTO transcripts(id,asset_id,status,language,provider,model_id,"
+            "model_revision,source_fingerprint,duration_us,created_at,updated_at) "
+            "VALUES ('t1','v1','ready','zh','test','m','r','fp-v1',5000000,'now','now')"
+        )
+        for segment in (
+            ("s1", 0, 500_000, 1_500_000, "第一段"),
+            ("s2", 1, 2_000_000, 3_000_000, "第二段"),
+        ):
+            db.execute(
+                "INSERT INTO transcript_segments(id,transcript_id,ordinal,start_us,end_us,"
+                "text,confidence) VALUES (?,'t1',?,?,?,?,0.9)",
+                segment,
+            )
+    return TimelineService(database), database
+
+
+def _create(service: TimelineService, source: dict | None = None) -> dict:
+    return service.create(
+        "p1",
+        {
+            "schema_version": 1,
+            "source": source or {"kind": "empty"},
+            "default_layout": "blurred_background",
+            "caption_preset_id": "default-bottom",
+        },
+    )
+
+
+def _patch(
+    service: TimelineService,
+    state: dict,
+    operations: list[dict],
+    summary: str = "修改",
+) -> dict:
+    return service.patch(
+        "p1",
+        {
+            "schema_version": 1,
+            "base_revision_id": state["current_revision"]["timeline_revision_id"],
+            "operations": operations,
+            "summary": summary,
+        },
+    )
+
+
+def test_create_empty_full_video_image_and_source_validation(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    empty = _create(service)
+    assert empty["current_revision"]["document"]["clips"] == []
+    with pytest.raises(DomainError) as duplicate:
+        _create(service)
+    assert duplicate.value.code == "TIMELINE_ALREADY_EXISTS"
+
+    service2, _ = _service(tmp_path / "second")
+    video = _create(service2, {"kind": "full_asset", "asset_id": "v1"})
+    clip = video["current_revision"]["document"]["clips"][0]
+    assert (clip["timeline_start_us"], clip["timeline_end_us"]) == (0, 5_000_000)
+    assert clip["audio"]["enabled"] is True
+
+    service3, _ = _service(tmp_path / "third")
+    image = _create(service3, {"kind": "full_asset", "asset_id": "i1"})
+    image_clip = image["current_revision"]["document"]["clips"][0]
+    assert image_clip["asset_kind"] == "image"
+    assert image_clip["timeline_end_us"] == 3_000_000
+    assert image_clip["source_start_us"] is None
+
+    service4, _ = _service(tmp_path / "fourth")
+    with pytest.raises(DomainError) as cross_project:
+        _create(service4, {"kind": "full_asset", "asset_id": "other"})
+    assert cross_project.value.code == "TIMELINE_SOURCE_INVALID"
+
+
+def test_transcript_selection_creates_ordered_clips_and_captions(tmp_path: Path) -> None:
+    service, database = _service(tmp_path)
+    state = _create(
+        service,
+        {
+            "kind": "transcript_selection",
+            "transcript_id": "t1",
+            "segment_ids": ["s1", "s2"],
+            "padding_before_us": 100_000,
+            "padding_after_us": 200_000,
+            "create_captions": True,
+        },
+    )
+    document = state["current_revision"]["document"]
+    assert [clip["order_index"] for clip in document["clips"]] == [0, 1]
+    assert document["clips"][0]["source_start_us"] == 400_000
+    assert document["clips"][1]["timeline_start_us"] == 1_300_000
+    assert [caption["source_segment_ids"] for caption in document["captions"]] == [
+        ["s1"],
+        ["s2"],
+    ]
+    assert all(caption["origin"] == "transcript" for caption in document["captions"])
+    with database.connection() as db:
+        text = db.execute("SELECT text FROM transcript_segments WHERE id='s1'").fetchone()[0]
+        assert text == "第一段"
+
+
+def test_all_clip_patch_operations_and_normalization(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
+    first_id = state["current_revision"]["document"]["clips"][0]["clip_id"]
+    state = _patch(
+        service,
+        state,
+        [
+            {"op": "insert_asset_clip", "asset_id": "i1", "at_index": 1, "duration_us": 1_000_000},
+            {
+                "op": "insert_asset_clip",
+                "asset_id": "v2",
+                "at_index": 2,
+                "source_start_us": 0,
+                "source_end_us": 1_000_000,
+                "layout": "fit",
+            },
+        ],
+    )
+    clips = state["current_revision"]["document"]["clips"]
+    image_id, third_id = clips[1]["clip_id"], clips[2]["clip_id"]
+    state = _patch(
+        service,
+        state,
+        [
+            {"op": "move_clip", "clip_id": third_id, "to_index": 0},
+            {
+                "op": "trim_clip",
+                "clip_id": first_id,
+                "source_start_us": 500_000,
+                "source_end_us": 4_500_000,
+            },
+            {"op": "set_layout", "clip_id": first_id, "layout": "crop_fill"},
+            {"op": "set_audio", "clip_id": first_id, "enabled": True, "gain_db": -3},
+            {"op": "set_image_duration", "clip_id": image_id, "duration_us": 2_000_000},
+            {"op": "split_clip", "clip_id": first_id, "source_time_us": 2_500_000},
+        ],
+    )
+    clips = state["current_revision"]["document"]["clips"]
+    assert [clip["order_index"] for clip in clips] == list(range(4))
+    assert [clip["timeline_start_us"] for clip in clips] == [0, 1_000_000, 3_000_000, 5_000_000]
+    assert clips[1]["layout"] == "crop_fill"
+    assert clips[1]["audio"]["gain_db"] == -3.0
+    state = _patch(service, state, [{"op": "remove_clip", "clip_id": image_id}])
+    assert len(state["current_revision"]["document"]["clips"]) == 3
+
+
+def test_caption_operations_and_clip_linkage(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(
+        service,
+        {
+            "kind": "transcript_selection",
+            "transcript_id": "t1",
+            "segment_ids": ["s1"],
+            "padding_before_us": 0,
+            "padding_after_us": 0,
+            "create_captions": True,
+        },
+    )
+    document = state["current_revision"]["document"]
+    clip_id = document["clips"][0]["clip_id"]
+    caption_id = document["captions"][0]["caption_id"]
+    state = _patch(
+        service,
+        state,
+        [
+            {"op": "update_caption", "caption_id": caption_id, "text": "修正文本"},
+            {
+                "op": "set_caption_timing",
+                "caption_id": caption_id,
+                "start_us": 0,
+                "end_us": 800_000,
+            },
+            {"op": "set_caption_preset", "caption_id": caption_id, "preset_id": "high-contrast"},
+        ],
+    )
+    caption = state["current_revision"]["document"]["captions"][0]
+    assert (caption["text"], caption["edited"], caption["preset_id"]) == (
+        "修正文本",
+        True,
+        "high-contrast",
+    )
+    state = _patch(
+        service,
+        state,
+        [{"op": "split_clip", "clip_id": clip_id, "source_time_us": 900_000}],
+    )
+    assert len(state["current_revision"]["document"]["captions"]) == 2
+    left_id = state["current_revision"]["document"]["clips"][0]["clip_id"]
+    right_id = state["current_revision"]["document"]["clips"][1]["clip_id"]
+    state = _patch(
+        service,
+        state,
+        [{"op": "remove_clip", "clip_id": left_id}],
+    )
+    remaining = state["current_revision"]["document"]["captions"]
+    assert len(remaining) == 1
+    assert remaining[0]["source_clip_id"] == right_id
+    state = _patch(service, state, [{"op": "remove_clip", "clip_id": right_id}])
+    assert state["current_revision"]["document"]["captions"] == []
+    state = _patch(
+        service,
+        state,
+        [
+            {
+                "op": "insert_asset_clip",
+                "asset_id": "i1",
+                "at_index": 0,
+                "duration_us": 1_000_000,
+            }
+        ],
+    )
+    state = _patch(
+        service,
+        state,
+        [
+            {
+                "op": "add_caption",
+                "start_us": 0,
+                "end_us": 300_000,
+                "text": "手工字幕",
+                "preset_id": "game-safe-bottom",
+                "source_clip_id": None,
+            }
+        ],
+    )
+    manual_id = state["current_revision"]["document"]["captions"][0]["caption_id"]
+    state = _patch(service, state, [{"op": "remove_caption", "caption_id": manual_id}])
+    assert state["current_revision"]["document"]["captions"] == []
+
+
+def test_patch_is_atomic_conflict_navigation_branch_and_draft(tmp_path: Path) -> None:
+    service, database = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
+    base = state["current_revision"]["timeline_revision_id"]
+    document = copy.deepcopy(state["current_revision"]["document"])
+    draft = service.save_draft(
+        "p1", {"schema_version": 1, "base_revision_id": base, "document": document}
+    )
+    assert draft["conflict"] is False
+    with pytest.raises(DomainError) as failed:
+        _patch(
+            service,
+            state,
+            [
+                {"op": "set_layout", "clip_id": document["clips"][0]["clip_id"], "layout": "fit"},
+                {"op": "set_layout", "clip_id": "missing", "layout": "fit"},
+            ],
+        )
+    assert failed.value.code == "TIMELINE_CLIP_NOT_FOUND"
+    with database.connection() as db:
+        assert db.execute("SELECT COUNT(*) FROM timeline_revisions").fetchone()[0] == 1
+    state2 = _patch(
+        service,
+        state,
+        [{"op": "set_layout", "clip_id": document["clips"][0]["clip_id"], "layout": "fit"}],
+    )
+    assert service.get_state("p1")["draft"]["conflict"] is True
+    with pytest.raises(DomainError) as conflict:
+        _patch(service, state, [{"op": "remove_clip", "clip_id": document["clips"][0]["clip_id"]}])
+    assert conflict.value.code == "TIMELINE_CONFLICT"
+    state1 = service.undo("p1", state2["current_revision"]["timeline_revision_id"])
+    assert state1["current_revision"]["timeline_revision_id"] == base
+    assert state1["can_redo"] is True
+    redone = service.redo("p1", base)
+    assert redone["current_revision"]["timeline_revision_id"] == (
+        state2["current_revision"]["timeline_revision_id"]
+    )
+    back = service.undo("p1", redone["current_revision"]["timeline_revision_id"])
+    branch = _patch(
+        service,
+        back,
+        [{"op": "set_layout", "clip_id": document["clips"][0]["clip_id"], "layout": "crop_fill"}],
+    )
+    assert branch["can_redo"] is False
+    with pytest.raises(DomainError) as draft_conflict:
+        service.save_draft(
+            "p1", {"schema_version": 1, "base_revision_id": base, "document": document}
+        )
+    assert draft_conflict.value.code == "TIMELINE_DRAFT_CONFLICT"
+    service.delete_draft("p1")
+    assert service.get_state("p1")["draft"] is None
+
+
+def test_insert_transcript_patch_and_validation_limits(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service)
+    state = _patch(
+        service,
+        state,
+        [
+            {
+                "op": "insert_transcript_segments",
+                "transcript_id": "t1",
+                "segment_ids": ["s2"],
+                "at_index": 0,
+                "padding_before_us": 100_000,
+                "padding_after_us": 100_000,
+                "create_captions": True,
+                "layout": "fit",
+            }
+        ],
+    )
+    assert state["current_revision"]["document"]["clips"][0]["layout"] == "fit"
+    with pytest.raises(DomainError) as too_many:
+        _patch(service, state, [{"op": "remove_clip", "clip_id": "x"}] * 101)
+    assert too_many.value.code == "TIMELINE_INVALID"
+    with pytest.raises(DomainError) as bad_text:
+        _patch(
+            service,
+            state,
+            [
+                {
+                    "op": "add_caption",
+                    "start_us": 0,
+                    "end_us": 300_000,
+                    "text": "bad\x00text",
+                    "preset_id": "default-bottom",
+                    "source_clip_id": None,
+                }
+            ],
+        )
+    assert bad_text.value.code == "TIMELINE_INVALID"
+
+
+def test_revision_listing_trimmed_caption_and_invalid_draft_shape(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(
+        service,
+        {
+            "kind": "transcript_selection",
+            "transcript_id": "t1",
+            "segment_ids": ["s1"],
+            "padding_before_us": 200_000,
+            "padding_after_us": 200_000,
+            "create_captions": True,
+        },
+    )
+    revision_id = state["current_revision"]["timeline_revision_id"]
+    assert service.get_revision(revision_id)["timeline_revision_id"] == revision_id
+    items, cursor = service.list_revisions("p1", limit=1)
+    assert items[0]["timeline_revision_id"] == revision_id
+    assert "document_sha256" in items[0]
+    assert "schema_version" not in items[0]
+    assert cursor == "1"
+    clip = state["current_revision"]["document"]["clips"][0]
+    state = _patch(
+        service,
+        state,
+        [
+            {
+                "op": "trim_clip",
+                "clip_id": clip["clip_id"],
+                "source_start_us": 500_000,
+                "source_end_us": 1_300_000,
+            }
+        ],
+    )
+    caption = state["current_revision"]["document"]["captions"][0]
+    assert (caption["start_us"], caption["end_us"]) == (0, 800_000)
+    invalid = copy.deepcopy(state["current_revision"]["document"])
+    invalid["ui_x"] = 10
+    with pytest.raises(DomainError) as bad_draft:
+        service.save_draft(
+            "p1",
+            {
+                "schema_version": 1,
+                "base_revision_id": state["current_revision"]["timeline_revision_id"],
+                "document": invalid,
+            },
+        )
+    assert bad_draft.value.code == "TIMELINE_INVALID"
+    with pytest.raises(DomainError):
+        service.list_revisions("p1", cursor="bad")

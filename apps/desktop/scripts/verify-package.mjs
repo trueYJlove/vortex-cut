@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 
@@ -23,7 +24,11 @@ const required = [
   "ffmpeg/win-x64/ffprobe.exe",
   "licenses/THIRD_PARTY_NOTICES.txt",
   "manifests/components.json",
-  "model-manifests"
+  "model-manifests",
+  "fonts/bundle.json",
+  "fonts/caption-presets.json",
+  "fonts/noto-sans-sc/NotoSansCJKsc-VF.ttf",
+  "fonts/noto-sans-sc/OFL.txt"
 ];
 const missing = required.filter(relative => !existsSync(join(packageDir, relative)));
 if (missing.length) {
@@ -50,11 +55,31 @@ for (const component of manifest.components) {
 }
 console.log("package verify passed: Sidecar, FFmpeg, FFprobe, licenses and component manifest are present");
 
+const fontBundle = JSON.parse(readFileSync(join(packageDir, "fonts/bundle.json"), "utf8"));
+if (!Number.isInteger(fontBundle.font_bundle_version) || fontBundle.font_bundle_version < 1 || typeof fontBundle.file !== "string" || typeof fontBundle.license_file !== "string" || !isPinnedSha256(fontBundle.sha256)) {
+  throw new Error("字体 bundle manifest 缺少版本、字体、许可证或 SHA-256");
+}
+const fontPath = join(packageDir, "fonts", fontBundle.file);
+const fontLicensePath = join(packageDir, "fonts", fontBundle.license_file);
+if (!existsSync(fontPath) || !statSync(fontPath).isFile()) throw new Error("字体 bundle 指向的字体文件不存在");
+if (!existsSync(fontLicensePath) || !statSync(fontLicensePath).isFile()) throw new Error("字体 bundle 指向的许可证不存在");
+const fontHash = createHash("sha256").update(readFileSync(fontPath)).digest("hex");
+if (fontHash.toLowerCase() !== fontBundle.sha256.toLowerCase()) throw new Error("字体文件 SHA-256 与 bundle manifest 不一致");
+const captionPresets = JSON.parse(readFileSync(join(packageDir, "fonts/caption-presets.json"), "utf8"));
+if (!Number.isInteger(captionPresets.preset_version) || captionPresets.preset_version < 1 || !captionPresets.presets || typeof captionPresets.presets !== "object") throw new Error("字幕预设 manifest 无效");
+
+const ffmpegPath = join(packageDir, "ffmpeg/win-x64/ffmpeg.exe");
+const filterOutput = execFileSync(ffmpegPath, ["-hide_banner", "-filters"], { encoding: "utf8", windowsHide: true });
+if (!/^\s*\.\.\s+ass\s+/m.test(filterOutput)) throw new Error("打包 FFmpeg 缺少 ass filter");
+if (!/^\s*\.\.\s+subtitles\s+/m.test(filterOutput)) throw new Error("打包 FFmpeg 缺少 subtitles filter");
+console.log("package verify passed: font bundle, license, presets and FFmpeg subtitle filters are present");
+
 const modelManifestDir = join(packageDir, "model-manifests");
 const modelManifestFiles = readdirSync(modelManifestDir).filter(name => name.endsWith(".json"));
 if (!modelManifestFiles.length) throw new Error("model-manifests 目录必须包含版本化 JSON manifest");
 if (existsSync(join(packageDir, "models"))) throw new Error("模型权重目录不得进入安装包");
 const weightPattern = /\.(?:bin|onnx|pt|pth|safetensors|ckpt)$/i;
+const declaredModelWeights = new Set();
 const isSafeRelativePath = value => {
   if (typeof value !== "string" || !value || value.trim() !== value || value.includes("\0")) return false;
   if (/^(?:[A-Za-z]:|[\\/])/.test(value) || value.includes(":")) return false;
@@ -88,8 +113,14 @@ for (const name of modelManifestFiles) {
   })) {
     throw new Error("模型 manifest 的文件路径、大小或 SHA-256 无效: " + name);
   }
+  for (const file of value.files) declaredModelWeights.add(`${String(file.sha256).toLowerCase()}:${file.size_bytes}`);
 }
 
 const packagedWeightFiles = findPackagedWeightFiles(packageDir);
-if (packagedWeightFiles.length) throw new Error("安装包资源目录不得包含模型权重文件: " + packagedWeightFiles.join(", "));
+const embeddedDeclaredWeights = packagedWeightFiles.filter(path => {
+  const size = statSync(path).size;
+  const hash = createHash("sha256").update(readFileSync(path)).digest("hex");
+  return declaredModelWeights.has(`${hash}:${size}`);
+});
+if (embeddedDeclaredWeights.length) throw new Error("安装包资源目录不得包含 manifest 声明的 ASR 模型权重: " + embeddedDeclaredWeights.join(", "));
 console.log("package verify passed: ASR model manifests present and model weights excluded");

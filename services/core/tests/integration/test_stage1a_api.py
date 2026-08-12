@@ -159,8 +159,12 @@ def test_stage1a_project_asset_lifecycle_and_redaction(tmp_path: Path, monkeypat
         assert "admin-stage1a" not in serialized
 
     with sqlite3.connect(tmp_path / "app.db") as db:
-        # Stage 1B adds migration v2; the 1A lifecycle must still migrate cleanly.
-        assert db.execute("SELECT version FROM schema_migrations").fetchall() == [("v1",), ("v2",)]
+        # Later stages only append migrations; the 1A lifecycle must still migrate cleanly.
+        assert db.execute("SELECT version FROM schema_migrations").fetchall() == [
+            ("v1",),
+            ("v2",),
+            ("v3",),
+        ]
     assert list((tmp_path / "backups").glob("app-*.db"))
 
 

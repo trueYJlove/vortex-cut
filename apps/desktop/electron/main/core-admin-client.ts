@@ -1,4 +1,4 @@
-import { isApiErrorResponse, parseFileGrant, type ApiError, type CoreHealth, type FileGrant, type RendererSession } from "@aivideo/contracts";
+import { isApiErrorResponse, parseDestinationGrant, parseFileGrant, type ApiError, type CoreHealth, type DestinationGrant, type FileGrant, type RendererSession } from "@aivideo/contracts";
 import { request as httpRequest } from "node:http";
 
 export class CoreHttpError extends Error {
@@ -58,8 +58,16 @@ export class CoreAdminClient {
     return this.request<unknown>("/api/v1/internal/file-grants", { method: "POST", body: JSON.stringify({ path }) }).then(parseFileGrant);
   }
 
+  createDestinationGrant(path: string, overwriteAuthorized: boolean): Promise<DestinationGrant> {
+    return this.request<unknown>("/api/v1/internal/destination-grants", { method: "POST", body: JSON.stringify({ path, overwrite_authorized: overwriteAuthorized }) }).then(parseDestinationGrant);
+  }
+
   resolveArtifact(artifactId: string) {
     return this.request<{ path: string }>(`/api/v1/internal/artifacts/${encodeURIComponent(artifactId)}/resolve`);
+  }
+
+  resolveAsset(assetId: string) {
+    return this.request<{ path: string }>(`/api/v1/internal/assets/${encodeURIComponent(assetId)}/resolve`);
   }
 
   async shutdown(): Promise<void> {

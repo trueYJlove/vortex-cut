@@ -1,9 +1,9 @@
 import { randomBytes } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { unlink } from "node:fs/promises";
-import { mkdirSync, existsSync, readFileSync } from "node:fs";
+import { mkdirSync, existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import type { SidecarReady } from "@aivideo/contracts";
 import { appendLog } from "./logging.js";
@@ -16,11 +16,13 @@ export interface SidecarLaunchOptions {
   runtimeDir: string;
   ffmpegPath: string;
   ffprobePath: string;
+  manifestDir: string;
   buildVersion: string;
   adminToken?: string;
   timeoutMs?: number;
   spawnImpl?: typeof spawn;
   logPath?: string;
+  launchEvidencePath?: string;
 }
 
 export class SidecarStartupError extends Error {}
@@ -40,6 +42,7 @@ export class SidecarSupervisor {
 
   async start(): Promise<SidecarReady> {
     if (this.child) throw new Error("Sidecar already started");
+    this.assertManifestDirectory();
     const spawnImpl = this.options.spawnImpl ?? spawn;
     const readyFile = join(this.options.runtimeDir, "ready.json");
     await unlink(readyFile).catch(() => undefined);
@@ -48,10 +51,15 @@ export class SidecarSupervisor {
       "--host", "127.0.0.1", "--port", "0",
       "--parent-pid", String(process.pid), "--data-dir", this.options.dataDir,
       "--ffmpeg", this.options.ffmpegPath, "--ffprobe", this.options.ffprobePath,
+      "--manifest-dir", this.options.manifestDir,
       "--runtime-dir", this.options.runtimeDir, "--ready-file", readyFile, "--log-level", "info"
     ];
     const adminToken = this.options.adminToken ?? randomBytes(32).toString("hex");
     mkdirSync(this.options.runtimeDir, { recursive: true });
+    if (this.options.launchEvidencePath) {
+      mkdirSync(dirname(this.options.launchEvidencePath), { recursive: true });
+      writeFileSync(this.options.launchEvidencePath, `${JSON.stringify({ executable: this.options.executable, args, cwd: this.options.resourcesPath }, null, 2)}\n`, "utf8");
+    }
     const child = spawnImpl(this.options.executable, args, {
       cwd: this.options.resourcesPath,
       env: { ...process.env, AIVS_ADMIN_TOKEN: adminToken },
@@ -112,6 +120,16 @@ export class SidecarSupervisor {
       };
       fileTimer = setTimeout(pollReadyFile, 50);
     });
+  }
+
+  private assertManifestDirectory(): void {
+    const manifestDir = this.options.manifestDir;
+    try {
+      if (!existsSync(manifestDir) || !statSync(manifestDir).isDirectory()) throw new Error("directory does not exist");
+      if (!readdirSync(manifestDir, { withFileTypes: true }).some(entry => entry.isFile() && entry.name.toLowerCase().endsWith(".json"))) throw new Error("no JSON manifest found");
+    } catch (error) {
+      throw new SidecarStartupError(`Sidecar model manifest directory is invalid: ${manifestDir} (${(error as Error).message})`);
+    }
   }
 
   private async waitForHttpReady(ready: SidecarReady, timeoutMs = 20_000): Promise<void> {

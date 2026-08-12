@@ -10,6 +10,15 @@ import {
   parseProject,
   parseTranscript,
   parseTranscriptSummary,
+  parseTimelineRevision,
+  parseTimelineState,
+  parseTimelineDraft,
+  isPage,
+  isAuthoritativePreview,
+  isExportRecord,
+  parseRenderArtifact,
+  parsePreviewCreateResponse,
+  parseExportCreateResponse,
   type ApiError,
   type Asset,
   type AssetAvailability,
@@ -38,6 +47,22 @@ import {
   type TranscriptionCreateInput,
   type TranscriptPage,
   type TranscriptionCreateResponse
+  , type TimelineCreateInput
+  , type TimelineDraft
+  , type TimelineDraftInput
+  , type TimelinePatch
+  , type TimelineRevision
+  , type TimelineRevisionId
+  , type TimelineRevisionPage
+  , type TimelineState
+  , type AuthoritativePreviewPage
+  , type ExportRecordPage
+  , type PreviewCreateInput
+  , type PreviewCreateResponse
+  , type ExportCreateInput
+  , type ExportCreateResponse
+  , type RenderArtifact
+  , type RenderArtifactId
 } from "@aivideo/contracts";
 
 export class CoreApiError extends Error {
@@ -256,6 +281,60 @@ export class CoreClient {
   }
   getTranscript(transcriptId: string): Promise<Transcript> {
     return this.request<unknown>(`${API_PREFIX}/transcriptions/${encodeURIComponent(transcriptId)}`).then(value => parseTranscript(removeSensitiveFields(value)));
+  }
+
+  createTimeline(projectId: ProjectId, input: TimelineCreateInput): Promise<TimelineState> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/timelines`, { method: "POST", body: JSON.stringify(input) }).then(value => parseTimelineState(removeSensitiveFields(value)));
+  }
+  getTimeline(projectId: ProjectId): Promise<TimelineState> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/timeline`).then(value => parseTimelineState(removeSensitiveFields(value)));
+  }
+  patchTimeline(projectId: ProjectId, input: TimelinePatch): Promise<TimelineState> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/timeline/patches`, { method: "POST", body: JSON.stringify(input) }).then(value => parseTimelineState(removeSensitiveFields(value)));
+  }
+  undoTimeline(projectId: ProjectId, baseRevisionId: TimelineRevisionId): Promise<TimelineState> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/timeline/undo`, { method: "POST", body: JSON.stringify({ base_revision_id: baseRevisionId }) }).then(value => parseTimelineState(removeSensitiveFields(value)));
+  }
+  redoTimeline(projectId: ProjectId, baseRevisionId: TimelineRevisionId): Promise<TimelineState> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/timeline/redo`, { method: "POST", body: JSON.stringify({ base_revision_id: baseRevisionId }) }).then(value => parseTimelineState(removeSensitiveFields(value)));
+  }
+  saveTimelineDraft(projectId: ProjectId, input: TimelineDraftInput): Promise<TimelineDraft> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/timeline/draft`, { method: "PUT", body: JSON.stringify(input) }).then(value => parseTimelineDraft(removeSensitiveFields(value)));
+  }
+  async deleteTimelineDraft(projectId: ProjectId): Promise<void> {
+    await this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/timeline/draft`, { method: "DELETE" });
+  }
+  listTimelineRevisions(projectId: ProjectId, params: ListParams = {}): Promise<TimelineRevisionPage> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/timeline/revisions${query(params)}`).then(value => {
+      const page = removeSensitiveFields(value) as TimelineRevisionPage;
+      return page;
+    });
+  }
+  getTimelineRevision(revisionId: TimelineRevisionId): Promise<TimelineRevision> {
+    return this.request<unknown>(`${API_PREFIX}/timeline-revisions/${encodeURIComponent(revisionId)}`).then(value => parseTimelineRevision(removeSensitiveFields(value)));
+  }
+  createPreview(projectId: ProjectId, input: PreviewCreateInput): Promise<PreviewCreateResponse> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/previews`, { method: "POST", body: JSON.stringify(input) }).then(value => parsePreviewCreateResponse(removeSensitiveFields(value)));
+  }
+  listPreviews(projectId: ProjectId, params: ListParams = {}): Promise<AuthoritativePreviewPage> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/previews${query(params)}`).then(value => {
+      const cleaned = removeSensitiveFields(value);
+      if (!isPage(cleaned, isAuthoritativePreview)) throw new Error("Invalid AuthoritativePreviewPage");
+      return cleaned;
+    });
+  }
+  createExport(projectId: ProjectId, input: ExportCreateInput): Promise<ExportCreateResponse> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/exports`, { method: "POST", body: JSON.stringify(input) }).then(value => parseExportCreateResponse(removeSensitiveFields(value)));
+  }
+  listExports(projectId: ProjectId, params: ListParams = {}): Promise<ExportRecordPage> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/exports${query(params)}`).then(value => {
+      const cleaned = removeSensitiveFields(value);
+      if (!isPage(cleaned, isExportRecord)) throw new Error("Invalid ExportRecordPage");
+      return cleaned;
+    });
+  }
+  getRenderArtifact(artifactId: RenderArtifactId): Promise<RenderArtifact> {
+    return this.request<unknown>(`${API_PREFIX}/render-artifacts/${encodeURIComponent(artifactId)}`).then(value => parseRenderArtifact(removeSensitiveFields(value)));
   }
 
   subscribe(jobId: JobId, listener: JobListener): () => void {

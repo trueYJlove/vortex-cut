@@ -13,7 +13,7 @@ from typing import Any, cast
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from . import PROTOCOL_VERSION, __version__
 from .asr_jobs import AsrCoordinator
@@ -26,6 +26,14 @@ from .media.encoders import EncoderDetector
 from .media.ffprobe import FFprobe
 from .model_registry import ModelError, ModelManager, ModelRegistry
 from .projects import DomainError, ProjectAssetService
+from .rendering.ass import CaptionResources
+from .rendering.plan import RenderPlanCompiler
+from .rendering.service import (
+    DestinationGrantStore,
+    RenderCoordinator,
+    RenderService,
+)
+from .timeline import TimelineService
 from .transcription import TranscriptionError, TranscriptRepository
 
 
@@ -85,6 +93,60 @@ class VerticalRequest(JobRequest):
     layout: str = "blurred_background"
 
 
+class TimelineCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    schema_version: int
+    source: dict[str, Any]
+    default_layout: str
+    caption_preset_id: str
+
+
+class TimelinePatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    schema_version: int
+    base_revision_id: str
+    operations: list[dict[str, Any]]
+    summary: str
+
+
+class TimelineNavigationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    base_revision_id: str
+
+
+class TimelineDraftRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    schema_version: int
+    base_revision_id: str
+    document: dict[str, Any]
+
+
+class PreviewCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    timeline_revision_id: str | None = None
+    encoder_mode: str = "auto"
+
+
+class ExportCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    timeline_revision_id: str | None = None
+    destination_grant_id: str
+    encoder_mode: str = "auto"
+
+
+class DestinationGrantRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    path: str
+    overwrite_authorized: bool
+
+
 class CoreState:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -98,8 +160,30 @@ class CoreState:
         self.model_registry = ModelRegistry(settings.manifest_dir)
         self.model_manager = ModelManager(self.db, settings.data_dir, self.model_registry)
         self.transcripts = TranscriptRepository(self.db)
+        self.timelines = TimelineService(self.db)
+        self.destinations = DestinationGrantStore()
         self.asr = AsrCoordinator(
             self.db, self.model_registry, self.model_manager, self.transcripts
+        )
+        async def probe_asset(path: Path, **kwargs: Any) -> dict[str, Any]:
+            return await self.ffprobe.probe(path, **kwargs)
+
+        self.projects = ProjectAssetService(
+            self.db,
+            settings.data_dir,
+            probe_asset,
+            transcript_stale=self.transcripts.mark_asset_stale,
+        )
+        self.render_compiler = RenderPlanCompiler(self.db)
+        self.render_coordinator = RenderCoordinator(
+            self.db,
+            settings.data_dir,
+            settings.ffmpeg,
+            self.ffprobe,
+            self.projects,
+            self.render_compiler,
+            CaptionResources(settings.font_dir),
+            self.destinations,
         )
         self.jobs = JobService(
             self.db,
@@ -110,16 +194,15 @@ class CoreState:
             self.emit,
             asr_runner=self.asr.run,
             retry_validator=self.asr.validate_retry,
+            render_runner=self.render_coordinator.run,
         )
-
-        async def probe_asset(path: Path, **kwargs: Any) -> dict[str, Any]:
-            return await self.ffprobe.probe(path, **kwargs)
-
-        self.projects = ProjectAssetService(
+        self.renders = RenderService(
             self.db,
-            settings.data_dir,
-            probe_asset,
-            transcript_stale=self.transcripts.mark_asset_stale,
+            settings.ffmpeg,
+            self.encoders,
+            self.render_compiler,
+            self.jobs,
+            self.destinations,
         )
 
     async def emit(self, event: dict[str, Any]) -> None:
@@ -172,12 +255,33 @@ def _domain(exc: DomainError) -> HTTPException:
         in {
             "ASSET_DUPLICATE",
             "ASSET_CHANGED",
+            "ASSET_MISSING",
             "PROJECT_ARCHIVED",
             "CONFLICT",
+            "TIMELINE_ALREADY_EXISTS",
+            "TIMELINE_CONFLICT",
+            "TIMELINE_DRAFT_CONFLICT",
+            "RENDER_PLAN_INVALID",
+            "RENDER_INPUT_CHANGED",
+            "EXPORT_DESTINATION_INVALID",
+            "EXPORT_DESTINATION_EXISTS",
+            "EXPORT_DESTINATION_EXPIRED",
+            "EXPORT_DISK_SPACE_INSUFFICIENT",
         }
         else 400
     )
-    if exc.code in {"PROJECT_NOT_FOUND", "ASSET_NOT_FOUND", "GRANT_NOT_FOUND", "MEDIA_NOT_FOUND"}:
+    if exc.code in {
+        "PROJECT_NOT_FOUND",
+        "ASSET_NOT_FOUND",
+        "GRANT_NOT_FOUND",
+        "MEDIA_NOT_FOUND",
+        "TIMELINE_NOT_FOUND",
+        "TIMELINE_CLIP_NOT_FOUND",
+        "TIMELINE_CAPTION_NOT_FOUND",
+        "PREVIEW_NOT_FOUND",
+        "EXPORT_NOT_FOUND",
+        "ARTIFACT_NOT_FOUND",
+    }:
         status = 404
     return _error(exc.code, exc.message, status)
 
@@ -190,6 +294,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
     state = CoreState(settings)
 
+    def with_current_preview(timeline_state: dict[str, Any]) -> dict[str, Any]:
+        timeline_state["current_preview"] = state.renders.current_preview(
+            timeline_state["project_id"]
+        )
+        return timeline_state
+
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         settings.prepare()
@@ -198,6 +308,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except MigrationError:
             raise
         state.db.recover_interrupted()
+        state.render_coordinator.cleanup_orphans()
         seed_dir = os.environ.get("AIVS_E2E_MODEL_DIR")
         if seed_dir:
             state.model_manager.seed_external(Path(seed_dir))
@@ -337,11 +448,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def resolve_artifact(
         artifact_id: str, _: CoreState = Depends(require_admin)
     ) -> dict[str, str]:
-        with state.db.connection() as db:
-            row = db.execute("SELECT path FROM artifacts WHERE id=?", (artifact_id,)).fetchone()
-        if not row:
-            raise _error("NOT_FOUND", "工件不存在", 404)
-        return {"artifact_id": artifact_id, "path": row[0]}
+        try:
+            return state.renders.resolve_artifact(artifact_id)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/internal/assets/{asset_id}/resolve")
+    async def resolve_asset(
+        asset_id: str, _: CoreState = Depends(require_admin)
+    ) -> dict[str, str]:
+        try:
+            return state.projects.resolve_asset_path(asset_id)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/internal/destination-grants")
+    async def create_destination_grant(
+        request: DestinationGrantRequest, _: CoreState = Depends(require_admin)
+    ) -> dict[str, Any]:
+        try:
+            return state.destinations.create(request.path, request.overwrite_authorized)
+        except DomainError as exc:
+            raise _domain(exc) from exc
 
     @app.post("/api/v1/internal/shutdown")
     async def shutdown(_: CoreState = Depends(require_admin)) -> dict[str, str]:
@@ -521,6 +649,177 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> dict[str, Any]:
         try:
             return await state.projects.relocate_asset(asset_id, grant_for(request.grant_id))
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/timelines", status_code=201)
+    async def create_timeline(
+        project_id: str,
+        request: TimelineCreateRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return with_current_preview(
+                state.timelines.create(project_id, request.model_dump())
+            )
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/projects/{project_id}/timeline")
+    async def get_timeline(
+        project_id: str, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        try:
+            return with_current_preview(state.timelines.get_state(project_id))
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/timeline/patches")
+    async def patch_timeline(
+        project_id: str,
+        request: TimelinePatchRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return with_current_preview(
+                state.timelines.patch(project_id, request.model_dump())
+            )
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/timeline/undo")
+    async def undo_timeline(
+        project_id: str,
+        request: TimelineNavigationRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return with_current_preview(
+                state.timelines.undo(project_id, request.base_revision_id)
+            )
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/timeline/redo")
+    async def redo_timeline(
+        project_id: str,
+        request: TimelineNavigationRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return with_current_preview(
+                state.timelines.redo(project_id, request.base_revision_id)
+            )
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.put("/api/v1/projects/{project_id}/timeline/draft")
+    async def save_timeline_draft(
+        project_id: str,
+        request: TimelineDraftRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return state.timelines.save_draft(project_id, request.model_dump())
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.delete("/api/v1/projects/{project_id}/timeline/draft", status_code=204)
+    async def delete_timeline_draft(
+        project_id: str, _: CoreState = Depends(require_ui)
+    ) -> None:
+        try:
+            state.timelines.delete_draft(project_id)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/projects/{project_id}/timeline/revisions")
+    async def list_timeline_revisions(
+        project_id: str,
+        limit: int = 50,
+        cursor: str | None = None,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            items, next_cursor = state.timelines.list_revisions(project_id, limit, cursor)
+            return {"items": items, "next_cursor": next_cursor}
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/timeline-revisions/{revision_id}")
+    async def get_timeline_revision(
+        revision_id: str, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        try:
+            return state.timelines.get_revision(revision_id)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/previews")
+    async def create_preview(
+        project_id: str,
+        request: PreviewCreateRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return await state.renders.create_preview(
+                project_id, request.timeline_revision_id, request.encoder_mode
+            )
+        except DomainError as exc:
+            raise _domain(exc) from exc
+        except RuntimeError as exc:
+            raise _error(str(exc).split(":", 1)[0], "无法创建权威预览", 409) from exc
+
+    @app.get("/api/v1/projects/{project_id}/previews")
+    async def list_previews(
+        project_id: str,
+        limit: int = 50,
+        cursor: str | None = None,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            items, next_cursor = state.renders.list_previews(project_id, limit, cursor)
+            return {"items": items, "next_cursor": next_cursor}
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/exports")
+    async def create_export(
+        project_id: str,
+        request: ExportCreateRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return await state.renders.create_export(
+                project_id,
+                request.timeline_revision_id,
+                request.destination_grant_id,
+                request.encoder_mode,
+            )
+        except DomainError as exc:
+            raise _domain(exc) from exc
+        except RuntimeError as exc:
+            raise _error(str(exc).split(":", 1)[0], "无法创建最终导出", 409) from exc
+
+    @app.get("/api/v1/projects/{project_id}/exports")
+    async def list_exports(
+        project_id: str,
+        limit: int = 50,
+        cursor: str | None = None,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            items, next_cursor = state.renders.list_exports(project_id, limit, cursor)
+            return {"items": items, "next_cursor": next_cursor}
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/render-artifacts/{artifact_id}")
+    async def get_render_artifact(
+        artifact_id: str, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        try:
+            return state.renders.artifact_dto(artifact_id)
         except DomainError as exc:
             raise _domain(exc) from exc
 

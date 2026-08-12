@@ -1,13 +1,13 @@
-import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, protocol, shell } from "electron";
 import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 import { randomBytes } from "node:crypto";
 import { access, readdir } from "node:fs/promises";
 import { CoreAdminClient, CoreHttpError } from "./core-admin-client.js";
 import { registerFileGrant } from "./file-grants.js";
+import { exportFileName, normalizeExportPath } from "./export-destination.js";
 import { defaultLogPath, appendLog, redact } from "./logging.js";
 import { SidecarSupervisor } from "./sidecar-supervisor.js";
-import { assetIdFromRestrictedUrl, RESTRICTED_MEDIA_SCHEME, RestrictedMediaRegistry } from "./restricted-media.js";
+import { RESTRICTED_MEDIA_SCHEME, RestrictedMediaRegistry, serveRestrictedMedia } from "./restricted-media.js";
 import { normalizeJob } from "../../src/lib/core-client.js";
 import {
   isApiErrorResponse,
@@ -16,6 +16,14 @@ import {
   parseModelSummary,
   parseTranscript,
   parseTranscriptSummary,
+  isPage,
+  isAuthoritativePreview,
+  isExportRecord,
+  parsePreviewCreateInput,
+  parsePreviewCreateResponse,
+  parseExportCreateInput,
+  parseExportCreateResponse,
+  parseRenderArtifact,
   type Asset,
   type AssetKind,
   type ArtifactId,
@@ -27,6 +35,15 @@ import {
   type ModelSummary,
   type ProjectId,
   type TranscriptId
+  , type TimelineCreateInput
+  , type TimelineDraftInput
+  , type TimelinePatch
+  , type TimelineRevisionId
+  , type AuthoritativePreview
+  , type ExportRecord
+  , type PreviewCreateInput
+  , type ExportCreateInput
+  , type RenderArtifactId
 } from "@aivideo/contracts";
 
 protocol.registerSchemesAsPrivileged([{
@@ -74,12 +91,33 @@ function rendererRuntime(): { protocol_version: 1; status: "ready" } {
   return { protocol_version: 1, status: "ready" };
 }
 
-function restrictedMediaUrl(assetId: string): string {
-  return restrictedMedia.url(assetId);
+async function restrictedMediaUrl(assetId: string): Promise<string> {
+  if (!restrictedMedia.registeredPath(assetId)) {
+    const resolved = await requireCore().resolveAsset(assetId);
+    restrictedMedia.register(assetId, resolved.path, "asset");
+  }
+  return restrictedMedia.issue(assetId, "asset");
 }
 
-function assetPresentation(asset: Asset): { asset: Asset; media_url: string } {
-  return { asset, media_url: restrictedMediaUrl(asset.asset_id) };
+async function artifactMediaUrl(artifactId: string): Promise<string> {
+  if (!restrictedMedia.registeredPath(artifactId, "artifact")) {
+    const resolved = await requireCore().resolveArtifact(artifactId);
+    restrictedMedia.register(artifactId, resolved.path, "artifact");
+  }
+  return restrictedMedia.issue(artifactId, "artifact");
+}
+
+async function previewPresentation(preview: AuthoritativePreview) {
+  return { preview, media_url: await artifactMediaUrl(preview.render_artifact_id) };
+}
+
+async function exportPresentation(exportRecord: ExportRecord) {
+  return { export_record: exportRecord, media_url: await artifactMediaUrl(exportRecord.render_artifact_id) };
+}
+
+async function assetPresentation(asset: Asset): Promise<{ asset: Asset; media_url: string | null }> {
+  if (asset.availability !== "available" || (asset.kind !== "video" && asset.kind !== "image" && asset.kind !== "audio")) return { asset, media_url: null };
+  try { return { asset, media_url: await restrictedMediaUrl(asset.asset_id) }; } catch { return { asset, media_url: null }; }
 }
 
 const rendererSensitiveKeys = new Set([
@@ -209,7 +247,7 @@ function registerIpc(): void {
 
   ipcMain.handle("asset:list", async (_event, input: { project_id: ProjectId; availability?: string; limit?: number; cursor?: string }) => {
     const page = await fetchWithUi<{ items: Asset[]; next_cursor: string | null }>(`${API_PREFIX}/projects/${asId(input.project_id, "project_id")}/assets${buildQuery(input, ["project_id"])}`);
-    return { next_cursor: page.next_cursor, items: page.items.map(assetPresentation) };
+    return { next_cursor: page.next_cursor, items: await Promise.all(page.items.map(assetPresentation)) };
   });
   ipcMain.handle("asset:import", async (_event, input: { project_id: ProjectId; kind?: AssetKind }) => {
     const projectId = asId(input.project_id, "project_id") as ProjectId;
@@ -219,11 +257,11 @@ function registerIpc(): void {
     const grant = await registerFileGrant(requireCore(), selectedPath);
     const asset = await fetchWithUi<Asset>(`${API_PREFIX}/projects/${projectId}/assets`, { method: "POST", body: JSON.stringify({ grant_id: grant.grant_id, ...(input.kind ? { kind: input.kind } : {}) }) });
     restrictedMedia.register(asset.asset_id, selectedPath);
-    return { grant, asset, media_url: restrictedMediaUrl(asset.asset_id) };
+    return { grant, asset, media_url: await restrictedMediaUrl(asset.asset_id) };
   });
   ipcMain.handle("asset:refresh", async (_event, assetId: string) => {
     const asset = await fetchWithUi<Asset>(`${API_PREFIX}/assets/${asId(assetId, "asset_id")}/refresh`, { method: "POST" });
-    return assetPresentation(asset);
+    return await assetPresentation(asset);
   });
   ipcMain.handle("asset:relocate", async (_event, input: { asset_id: string }) => {
     const assetId = asId(input.asset_id, "asset_id");
@@ -232,7 +270,7 @@ function registerIpc(): void {
     const grant = await registerFileGrant(requireCore(), selectedPath);
     const asset = await fetchWithUi<Asset>(`${API_PREFIX}/assets/${assetId}/relocate`, { method: "POST", body: JSON.stringify({ grant_id: grant.grant_id }) });
     restrictedMedia.register(asset.asset_id, selectedPath);
-    return { grant, asset, media_url: restrictedMediaUrl(asset.asset_id) };
+    return { grant, asset, media_url: await restrictedMediaUrl(asset.asset_id) };
   });
 
   ipcMain.handle("job:list", async (_event, input: { project_id: ProjectId; status?: string; limit?: number; cursor?: string }) => {
@@ -287,7 +325,58 @@ function registerIpc(): void {
     return { next_cursor: page.next_cursor ?? null, items: page.items.map(transcriptSummary) };
   });
   ipcMain.handle("transcript:get", (_event, transcriptId: TranscriptId) => fetchWithUi<unknown>(`${API_PREFIX}/transcriptions/${encodeURIComponent(asId(transcriptId, "transcript_id"))}`).then(transcript));
-  ipcMain.handle("artifact:resolve", (_event, artifactId: ArtifactId) => requireCore().resolveArtifact(asId(artifactId, "artifact_id")));
+  ipcMain.handle("timeline:create", (_event, input: { project_id: ProjectId; timeline: TimelineCreateInput }) => fetchWithUi(`${API_PREFIX}/projects/${asId(input.project_id, "project_id")}/timelines`, { method: "POST", body: JSON.stringify(input.timeline) }).then(rendererSafe));
+  ipcMain.handle("timeline:get", (_event, projectId: ProjectId) => fetchWithUi(`${API_PREFIX}/projects/${asId(projectId, "project_id")}/timeline`).then(rendererSafe));
+  ipcMain.handle("timeline:patch", (_event, input: { project_id: ProjectId; patch: TimelinePatch }) => fetchWithUi(`${API_PREFIX}/projects/${asId(input.project_id, "project_id")}/timeline/patches`, { method: "POST", body: JSON.stringify(input.patch) }).then(rendererSafe));
+  ipcMain.handle("timeline:undo", (_event, input: { project_id: ProjectId; base_revision_id: TimelineRevisionId }) => fetchWithUi(`${API_PREFIX}/projects/${asId(input.project_id, "project_id")}/timeline/undo`, { method: "POST", body: JSON.stringify({ base_revision_id: asId(input.base_revision_id, "timeline_revision_id") }) }).then(rendererSafe));
+  ipcMain.handle("timeline:redo", (_event, input: { project_id: ProjectId; base_revision_id: TimelineRevisionId }) => fetchWithUi(`${API_PREFIX}/projects/${asId(input.project_id, "project_id")}/timeline/redo`, { method: "POST", body: JSON.stringify({ base_revision_id: asId(input.base_revision_id, "timeline_revision_id") }) }).then(rendererSafe));
+  ipcMain.handle("timeline:draft-save", (_event, input: { project_id: ProjectId; draft: TimelineDraftInput }) => fetchWithUi(`${API_PREFIX}/projects/${asId(input.project_id, "project_id")}/timeline/draft`, { method: "PUT", body: JSON.stringify(input.draft) }).then(rendererSafe));
+  ipcMain.handle("timeline:draft-delete", async (_event, projectId: ProjectId) => { await fetchWithUi(`${API_PREFIX}/projects/${asId(projectId, "project_id")}/timeline/draft`, { method: "DELETE" }); });
+  ipcMain.handle("timeline:revisions", (_event, input: { project_id: ProjectId; limit?: number; cursor?: string }) => fetchWithUi(`${API_PREFIX}/projects/${asId(input.project_id, "project_id")}/timeline/revisions${buildQuery(input, ["project_id"])}`).then(rendererSafe));
+  ipcMain.handle("timeline:revision", (_event, revisionId: TimelineRevisionId) => fetchWithUi(`${API_PREFIX}/timeline-revisions/${asId(revisionId, "timeline_revision_id")}`).then(rendererSafe));
+  ipcMain.handle("preview:create", async (_event, input: { project_id: ProjectId; preview: PreviewCreateInput }) => {
+    const projectId = asId(input.project_id, "project_id");
+    const request = parsePreviewCreateInput(input.preview);
+    const response = parsePreviewCreateResponse(rendererSafe(await fetchWithUi(`${API_PREFIX}/projects/${projectId}/previews`, { method: "POST", body: JSON.stringify(request) })));
+    return { ...response, preview: response.preview ? await previewPresentation(response.preview) : null };
+  });
+  ipcMain.handle("preview:list", async (_event, input: { project_id: ProjectId; limit?: number; cursor?: string }) => {
+    const page = rendererSafe(await fetchWithUi(`${API_PREFIX}/projects/${asId(input.project_id, "project_id")}/previews${buildQuery(input, ["project_id"])}`));
+    if (!isPage(page, isAuthoritativePreview)) throw new Error("Invalid AuthoritativePreviewPage");
+    return { next_cursor: page.next_cursor, items: await Promise.all(page.items.map(previewPresentation)) };
+  });
+  ipcMain.handle("export:choose-destination", async (_event, projectIdValue: ProjectId) => {
+    const projectId = asId(projectIdValue, "project_id");
+    const project = await fetchWithUi<{ name: string }>(`${API_PREFIX}/projects/${projectId}`);
+    const configured = process.env.AIVS_E2E_EXPORT_PATH;
+    const selected = configured ? { canceled: false, filePath: configured } : await dialog.showSaveDialog(windowRef!, {
+      title: "导出视频",
+      defaultPath: exportFileName(project.name),
+      filters: [{ name: "MP4 视频", extensions: ["mp4"] }],
+      properties: ["showOverwriteConfirmation"]
+    });
+    if (selected.canceled || !selected.filePath) return null;
+    const destinationPath = normalizeExportPath(selected.filePath);
+    let overwriteAuthorized = false;
+    try { await access(destinationPath); overwriteAuthorized = true; } catch { /* new destination */ }
+    return requireCore().createDestinationGrant(destinationPath, overwriteAuthorized);
+  });
+  ipcMain.handle("export:create", async (_event, input: { project_id: ProjectId; export: ExportCreateInput }) => {
+    const projectId = asId(input.project_id, "project_id");
+    const request = parseExportCreateInput(input.export);
+    const response = parseExportCreateResponse(rendererSafe(await fetchWithUi(`${API_PREFIX}/projects/${projectId}/exports`, { method: "POST", body: JSON.stringify(request) })));
+    return { ...response, export_record: response.export_record ? await exportPresentation(response.export_record) : null };
+  });
+  ipcMain.handle("export:list", async (_event, input: { project_id: ProjectId; limit?: number; cursor?: string }) => {
+    const page = rendererSafe(await fetchWithUi(`${API_PREFIX}/projects/${asId(input.project_id, "project_id")}/exports${buildQuery(input, ["project_id"])}`));
+    if (!isPage(page, isExportRecord)) throw new Error("Invalid ExportRecordPage");
+    return { next_cursor: page.next_cursor, items: await Promise.all(page.items.map(exportPresentation)) };
+  });
+  ipcMain.handle("render-artifact:get", async (_event, artifactIdValue: RenderArtifactId) => {
+    const artifactId = asId(artifactIdValue, "render_artifact_id");
+    const artifact = parseRenderArtifact(rendererSafe(await fetchWithUi(`${API_PREFIX}/render-artifacts/${artifactId}`)));
+    return { artifact, media_url: await artifactMediaUrl(artifact.render_artifact_id) };
+  });
   ipcMain.handle("artifact:open", async (_event, artifactId: ArtifactId) => {
     const result = await requireCore().resolveArtifact(asId(artifactId, "artifact_id"));
     await shell.openPath(result.path);
@@ -364,7 +453,9 @@ async function startRuntime(): Promise<void> {
     resourcesPath, dataDir, runtimeDir, logPath,
     ffmpegPath: join(resourcesPath, "ffmpeg", "win-x64", "ffmpeg.exe"),
     ffprobePath: join(resourcesPath, "ffmpeg", "win-x64", "ffprobe.exe"),
-    buildVersion: app.getVersion(), adminToken
+    manifestDir: join(resourcesPath, "model-manifests"),
+    buildVersion: app.getVersion(), adminToken,
+    launchEvidencePath: process.env.AIVS_E2E_SIDECAR_ARGV_EVIDENCE
   });
   await appendLog(logPath, `starting sidecar resources=${resourcesPath}`);
   const ready = await supervisor.start();
@@ -421,16 +512,7 @@ app.whenReady().then(async () => {
     app.quit();
     return;
   }
-  protocol.handle(RESTRICTED_MEDIA_SCHEME, async request => {
-    const assetId = assetIdFromRestrictedUrl(request.url);
-    const inputPath = assetId ? restrictedMedia.resolve(assetId) : undefined;
-    if (!inputPath || request.method !== "GET") return new Response(null, { status: 404 });
-    try {
-      return await net.fetch(pathToFileURL(inputPath).toString());
-    } catch {
-      return new Response(null, { status: 404 });
-    }
-  });
+  protocol.handle(RESTRICTED_MEDIA_SCHEME, request => serveRestrictedMedia(request, restrictedMedia));
   registerIpc();
   try {
     await createWindow();

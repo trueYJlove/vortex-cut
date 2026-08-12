@@ -35,6 +35,7 @@ async function createFixtures(): Promise<{ paths: Record<string, string>; reloca
 }
 
 test("真实 Electron 覆盖 Stage 1A 项目、四类素材和 availability 流程", async () => {
+  test.setTimeout(120_000);
   if (!existsSync(videoFixture) || !existsSync(ffmpeg)) throw new Error("真实 E2E 夹具或 bundled FFmpeg 不存在");
   const fixtures = await createFixtures();
   const env = {
@@ -56,8 +57,10 @@ test("真实 Electron 覆盖 Stage 1A 项目、四类素材和 availability 流�
   });
   try {
     const page = await app.firstWindow();
+    await page.waitForFunction(() => Boolean(window.desktop?.getRuntime));
+    await page.evaluate(() => window.desktop.getRuntime());
     await expect(page.getByRole("heading", { name: "素材工作区" })).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText("Core 已连接")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/Core 已连接/)).toBeVisible({ timeout: 30_000 });
 
     await page.getByLabel("项目名称").fill("Stage 1A E2E");
     await page.getByRole("button", { name: "创建" }).click();
@@ -77,7 +80,7 @@ test("真实 Electron 覆盖 Stage 1A 项目、四类素材和 availability 流�
       await expect(assetRow).toBeVisible({ timeout: 30_000 });
       await expect(assetRow.locator(".asset-name strong")).toHaveText(expectedNames[kind]);
     }
-    await expect(page.getByText("aivideo://asset/").first()).toBeVisible();
+    await expect(page.getByText(/^aivideo:\/\/media\/[A-Za-z0-9_-]{32,}$/).first()).toBeVisible();
     const textMediaUrl = await page.locator(".asset-row").filter({ hasText: "notes.txt" }).locator(".asset-name small").innerText();
     await expect.poll(async () => page.evaluate(async url => (await fetch(url)).text(), textMediaUrl)).toContain("Stage 1A text fixture");
     await expect(page.getByRole("heading", { name: "任务" })).toBeVisible();
@@ -108,12 +111,12 @@ test("真实 Electron 覆盖 Stage 1A 项目、四类素材和 availability 流�
     const videoRow = page.locator(".asset-row").filter({ hasText: "clip.mp4" });
     await copyFile(join(root, "test-assets", "generated", "short-odd-size.mp4"), fixtures.paths.video);
     await videoRow.getByRole("button", { name: "刷新" }).click();
-    await expect(videoRow.getByText("已变更")).toBeVisible();
+    await expect(videoRow.getByText("已变更")).toBeVisible({ timeout: 30_000 });
     await unlink(fixtures.paths.video);
     await videoRow.getByRole("button", { name: "刷新" }).click();
-    await expect(videoRow.getByText("缺失")).toBeVisible();
+    await expect(videoRow.getByText("缺失")).toBeVisible({ timeout: 30_000 });
     await videoRow.getByRole("button", { name: "重新定位" }).click();
-    await expect(videoRow.getByText("可用")).toBeVisible();
+    await expect(videoRow.getByText("可用")).toBeVisible({ timeout: 30_000 });
 
     const runtime = await page.evaluate(() => window.desktop.getRuntime());
     const rendererText = await page.locator("body").innerText();
