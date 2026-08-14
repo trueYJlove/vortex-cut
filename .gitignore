@@ -28,3 +28,10 @@ services/core/build/
 # Local desktop and integration test state
 test-results/
 apps/desktop/test-results/
+
+# Local dependency, coverage and verification helper outputs
+/.pnpm-store/
+/apps/desktop/coverage/
+/aivs-core.spec
+/%AIVS_VERIFY_REAL_STDOUT%
+/%AIVS_VERIFY_REAL_STDERR%
