@@ -7,6 +7,9 @@ import { describe, expect, it } from "vitest";
 
 const desktop = resolve(__dirname, "..");
 const packageWin = readFileSync(resolve(desktop, "scripts/package-win.mjs"), "utf8");
+const bootstrapWindows = readFileSync(resolve(desktop, "../../tools/packaging/bootstrap-windows.ps1"), "utf8");
+const buildSidecar = readFileSync(resolve(desktop, "../../tools/packaging/build-sidecar.ps1"), "utf8");
+const prepareFfmpeg = readFileSync(resolve(desktop, "../../tools/dependencies/prepare-ffmpeg.ps1"), "utf8");
 const realVerify = readFileSync(resolve(desktop, "scripts/verify-package-real.mjs"), "utf8");
 const verifyScript = resolve(desktop, "scripts/verify-package-real.mjs");
 const packageVerifyScript = resolve(desktop, "scripts/verify-package.mjs");
@@ -80,8 +83,9 @@ describe("Windows 安装包验收脚本安全边界", () => {
     expect(child.status).toBe(0);
     const captured = JSON.parse(readFileSync(capture, "utf8"));
     expect(captured.builder_config).toMatchObject({
-      appId: "com.aivideo.studio",
-      productName: "AIVideo Studio",
+      appId: "io.github.trueyjlove.vortexcut",
+      productName: "Vortex Cut",
+      win: { artifactName: "VortexCut-Setup-${version}-x64.exe" },
       files: ["out", "package.json"]
     });
     expect(captured.builder_config.extends).toBeUndefined();
@@ -91,8 +95,10 @@ describe("Windows 安装包验收脚本安全边界", () => {
     ]);
     for (const entry of captured.extra_resources as Array<{ from: string; to: string }>) {
       expect(entry.from).toMatch(/^[A-Za-z]:[\\/]/);
-      expect(entry.from).toContain(`${resolve(desktop, "../..", "resources")}`);
       expect(entry.from.startsWith(output)).toBe(false);
+    }
+    for (const entry of (captured.extra_resources as Array<{ from: string; to: string }>).slice(0, 4)) {
+      expect(entry.from).toContain("aivideo-package-resources-");
     }
   });
 
@@ -127,6 +133,46 @@ describe("Windows 安装包验收脚本安全边界", () => {
       expect(result.child.status).toBe(1);
       expect(JSON.parse(readFileSync(result.report, "utf8"))).toMatchObject({ status: "failed", failure_stage: stage, failure_code: code });
     }
+  });
+
+  it("bootstrap 预检失败不会改写源组件清单，并把资源根限制为每次运行的临时目录", () => {
+    const sourceManifest = resolve(desktop, "../../resources/manifests/components.json");
+    const before = readFileSync(sourceManifest, "utf8");
+    const root = temporaryRoot();
+    const result = runPackageWin(root, { AIVS_PACKAGE_TEST_STAGE_FAILURE: "bootstrap" });
+    expect(result.child.status).toBe(1);
+    expect(readFileSync(sourceManifest, "utf8")).toBe(before);
+    expect(packageWin).toContain('"-OutputRoot", packageResourcesRoot');
+    expect(packageWin).toContain('"-ResourceRoot", packageResourcesRoot');
+    expect(packageWin).toContain("aivideo-package-resources-");
+    expect(packageWin).not.toContain('join(workspaceRoot, "resources", "core", "aivs-core")');
+  });
+
+  it("新临时输出与报告会在受控预检成功后继续到 Builder 阶段", () => {
+    const root = temporaryRoot();
+    const sourceManifest = resolve(desktop, "../../resources/manifests/components.json");
+    const before = readFileSync(sourceManifest, "utf8");
+    const result = runPackageWin(root, {
+      AIVS_PACKAGE_TEST_SIMULATE_COMMANDS: "true",
+      AIVS_PACKAGE_TEST_STAGE_FAILURE: "builder_prepare"
+    });
+    expect(result.child.status).toBe(1);
+    expect(JSON.parse(readFileSync(result.report, "utf8"))).toMatchObject({
+      status: "failed", failure_stage: "builder_prepare", failure_code: "BUILDER_PREPARE_FAILED"
+    });
+    expect(readFileSync(sourceManifest, "utf8")).toBe(before);
+    expect(packageWin).toContain('"-PreflightOnly", "-ResourceRoot", packageResourcesRoot');
+  });
+
+  it("普通 bootstrap 将 ResourceRoot 传给所有资源自修复，唯读模式不会进入写入分支", () => {
+    expect(bootstrapWindows).toContain('build-sidecar.ps1") -OutputRoot $resourceRoot');
+    expect(bootstrapWindows).toContain('prepare-ffmpeg.ps1") -Destination (Join-Path $resourceRoot "ffmpeg/win-x64")');
+    expect(bootstrapWindows).toMatch(/if \(\$readOnly\) \{ throw "FFmpeg\/FFprobe[\s\S]*?prepare-ffmpeg\.ps1/);
+    expect(bootstrapWindows).toMatch(/if \(\$readOnly\) \{ throw "Sidecar, FFmpeg[\s\S]*?build-sidecar\.ps1/);
+    expect(buildSidecar).toContain('if ($OutputRoot -eq $repoRoot)');
+    expect(buildSidecar).not.toContain('Remove-Item -LiteralPath $OutputRoot');
+    expect(prepareFfmpeg).toContain('param([string]$Destination');
+    expect(prepareFfmpeg).toContain('$destination = [IO.Path]::GetFullPath($Destination)');
   });
 
   it("Builder 失败会写入离散安全类别、Electron Builder 阶段且不会写 built", () => {
@@ -192,6 +238,21 @@ describe("Windows 安装包验收脚本安全边界", () => {
     const { child, latest } = runVerifier(root, { ...realFixtures(root), AIVS_PACKAGE_REAL_TEST_DIRECT_VERIFY: "pass", AIVS_PACKAGE_REPORT: report, AIVS_PACKAGE_REAL_TEST_FAIL_STAGE: "electron_runtime" });
     expect(child.status).toBe(1); expect(child.stdout + child.stderr).toContain("ELECTRON_RUNTIME_FAILED");
     expect(latest).toMatchObject({ schema_version: 2, status: "failed", code: "ELECTRON_RUNTIME_FAILED", stage: "electron_runtime" });
+  });
+
+  it("窗口标题不匹配只写固定安全码和受限标题检查", () => {
+    const root = temporaryRoot(); const report = builtReport(root);
+    const { child, latest } = runVerifier(root, {
+      ...realFixtures(root), AIVS_PACKAGE_REAL_TEST_DIRECT_VERIFY: "pass", AIVS_PACKAGE_REPORT: report,
+      AIVS_PACKAGE_REAL_TEST_FAIL_STAGE: "electron_window_title"
+    });
+    expect(child.status).toBe(1);
+    expect(child.stdout + child.stderr).toContain("ELECTRON_WINDOW_TITLE_MISMATCH");
+    expect(latest).toMatchObject({
+      schema_version: 2, status: "failed", code: "ELECTRON_WINDOW_TITLE_MISMATCH", stage: "electron_window_title",
+      checks: { window_title: { expected: "Vortex Cut", matches_expected: false }, evidence_written: true }
+    });
+    expect(JSON.stringify(latest)).not.toContain("untrusted_window_title");
   });
 
   it("同一 package root 的直接静态校验通过后继续进入 Electron 阶段", () => {
@@ -277,6 +338,10 @@ describe("Windows 安装包验收脚本安全边界", () => {
     expect(realVerify).toContain("PACKAGE_COMPONENT_VERIFY_FAILED"); expect(realVerify).toContain("AIVS_PACKAGE_DIR: packageRoot"); expect(realVerify).toContain("scripts/verify-package.mjs");
     expect(realVerify).toContain("delete verifierEnv.AIVS_PACKAGE_REPORT"); expect(realVerify).not.toContain("[\"package:verify\"]");
     expect(realVerify).toContain("PREVIEW_UI_NOT_READY"); expect(realVerify).toContain("PREVIEW_JOB_NOT_CREATED");
+    expect(realVerify).toContain("ELECTRON_WINDOW_TITLE_MISMATCH");
+    expect(realVerify).toContain("({ BrowserWindow }, expectedTitle) => BrowserWindow.getAllWindows()[0]?.getTitle() === expectedTitle");
+    expect(realVerify).toContain("expectedWindowTitle\n      );");
+    expect(realVerify).toContain('window_title: { expected: expectedWindowTitle, matches_expected: true }');
     expect(realVerify).toContain("PREVIEW_PROJECT_SYNC_FAILED"); expect(realVerify).toContain("preview_project_synced");
     expect(realVerify).toContain("preview_project_reset"); expect(realVerify).toContain("preview_project_selected");
     const resetIndex = realVerify.indexOf('selectOption(""'); const selectIndex = realVerify.indexOf("selectOption(projectId");

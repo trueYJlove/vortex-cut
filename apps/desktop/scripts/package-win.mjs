@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -27,6 +27,7 @@ const packageOutputOverride = process.env.AIVS_PACKAGE_OUTPUT_ROOT;
 if (packageOutputOverride && !isAbsolute(packageOutputOverride)) throw new Error("AIVS_PACKAGE_OUTPUT_ROOT must be an absolute, new output directory");
 const packageOutputDir = packageOutputOverride ? resolve(packageOutputOverride) : join(releaseRoot, `win-${packageRunId}`);
 const packageRoot = join(packageOutputDir, "win-unpacked", "resources");
+const packageResourcesRoot = join(tmpdir(), `aivideo-package-resources-${packageRunId}`);
 const packageReportOverride = process.env.AIVS_PACKAGE_REPORT;
 if (packageReportOverride && !isAbsolute(packageReportOverride)) throw new Error("AIVS_PACKAGE_REPORT must be an absolute, new report file");
 // The legacy report location remains the default for existing callers.  To
@@ -34,10 +35,10 @@ if (packageReportOverride && !isAbsolute(packageReportOverride)) throw new Error
 // AIVS_PACKAGE_REPORT when that legacy report already exists.
 const packageReport = packageReportOverride ? resolve(packageReportOverride) : join(workspaceRoot, "build", "reports", "windows-package-latest.json");
 const resourceEntries = [
-  { from: join(workspaceRoot, "resources", "core", "aivs-core"), to: "core/aivs-core", filter: ["**/*"] },
-  { from: join(workspaceRoot, "resources", "ffmpeg", "win-x64"), to: "ffmpeg/win-x64", filter: ["ffmpeg.exe", "ffprobe.exe"] },
-  { from: join(workspaceRoot, "resources", "licenses"), to: "licenses", filter: ["**/*"] },
-  { from: join(workspaceRoot, "resources", "manifests"), to: "manifests", filter: ["components.json"] },
+  { from: join(packageResourcesRoot, "core", "aivs-core"), to: "core/aivs-core", filter: ["**/*"] },
+  { from: join(packageResourcesRoot, "ffmpeg", "win-x64"), to: "ffmpeg/win-x64", filter: ["ffmpeg.exe", "ffprobe.exe"] },
+  { from: join(packageResourcesRoot, "licenses"), to: "licenses", filter: ["**/*"] },
+  { from: join(packageResourcesRoot, "manifests"), to: "manifests", filter: ["components.json"] },
   { from: join(workspaceRoot, "resources", "model-manifests"), to: "model-manifests", filter: ["*.json"] },
   { from: join(workspaceRoot, "resources", "recipes"), to: "recipes", filter: ["*.json"] },
   { from: join(workspaceRoot, "resources", "fonts"), to: "fonts", filter: ["**/*"] }
@@ -55,8 +56,8 @@ const packageVerifyCodes = new Set([
 // resolves `extends` relative to the generated file, which is outside projectDir.
 const builderConfigPath = join(tmpdir(), `aivideo-electron-builder-${packageRunId}.json`);
 const builderConfig = {
-  appId: "com.aivideo.studio",
-  productName: "AIVideo Studio",
+  appId: "io.github.trueyjlove.vortexcut",
+  productName: "Vortex Cut",
   directories: {
     output: packageOutputDir,
     buildResources: join(desktopDir, "build")
@@ -66,7 +67,7 @@ const builderConfig = {
   extraResources: resourceEntries,
   win: {
     target: [{ target: "nsis", arch: ["x64"] }],
-    artifactName: "AIVideoStudio-Setup-${version}-x64.exe"
+    artifactName: "VortexCut-Setup-${version}-x64.exe"
   },
   nsis: {
     oneClick: false,
@@ -112,6 +113,14 @@ const run = (stage, command, args, commandEnv = env) => new Promise((resolveProm
   const simulatedFailureStage = process.env.AIVS_PACKAGE_TEST_STAGE_FAILURE;
   const simulatedFailureIndex = packageRunStages.indexOf(simulatedFailureStage);
   const stageIndex = packageRunStages.indexOf(stage);
+  if (process.env.AIVS_PACKAGE_TEST_SIMULATE_COMMANDS === "true") {
+    if (simulatedFailureStage === stage) {
+      const error = new Error(stageFailureCodes[stage] ?? "BUILDER_UNKNOWN_FAILED");
+      error.failureStage = stage;
+      reject(error);
+    } else resolvePromise();
+    return;
+  }
   if (simulatedFailureIndex >= 0 && stageIndex >= 0 && stageIndex < simulatedFailureIndex) {
     resolvePromise();
     return;
@@ -183,13 +192,13 @@ try {
     enterStage("electron_builder");
     // Test-only seam: creates no source-derived files and never runs in a real package.
     mkdirSync(packageRoot, { recursive: true });
-    writeFileSync(join(packageOutputDir, "AIVideo Studio Setup.exe"), "test installer", "utf8");
+    writeFileSync(join(packageOutputDir, "VortexCut-Setup-0.0.1-x64.exe"), "test installer", "utf8");
   } else {
     writeFileSync(builderConfigPath, `${JSON.stringify(builderConfig, null, 2)}\n`, "utf8");
     enterStage("sidecar_build");
-    await run("sidecar_build", "powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(workspaceRoot, "tools", "packaging", "build-sidecar.ps1")]);
+    await run("sidecar_build", "powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(workspaceRoot, "tools", "packaging", "build-sidecar.ps1"), "-OutputRoot", packageResourcesRoot]);
     enterStage("bootstrap");
-    await run("bootstrap", "powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(workspaceRoot, "tools", "packaging", "bootstrap-windows.ps1"), "-PreflightOnly"]);
+    await run("bootstrap", "powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(workspaceRoot, "tools", "packaging", "bootstrap-windows.ps1"), "-PreflightOnly", "-ResourceRoot", packageResourcesRoot]);
     enterStage("builder_prepare");
     await run("builder_prepare", process.execPath, ["scripts/prepare-electron-builder.mjs"]);
     enterStage("desktop_build");
@@ -200,7 +209,9 @@ try {
       `--config.directories.output=${packageOutputDir}`
     ]);
   }
-  const installer = readdirSync(packageOutputDir, { withFileTypes: true }).find(entry => entry.isFile() && entry.name.toLowerCase().endsWith(".exe"));
+  const installer = readdirSync(packageOutputDir, { withFileTypes: true }).find(entry => (
+    entry.isFile() && /^VortexCut-Setup-.+-x64\.exe$/i.test(entry.name)
+  ));
   if (!installer) throw new Error("PACKAGE_INSTALLER_MISSING");
   env.AIVS_PACKAGE_DIR = packageRoot;
   env.AIVS_PACKAGE_REPORT = packageReport;
@@ -231,4 +242,6 @@ try {
       : stageFailureCodes[stage] ?? "BUILDER_UNKNOWN_FAILED";
   writePackageReport("failed", code, null, stage);
   throw new Error(code);
+} finally {
+  rmSync(packageResourcesRoot, { recursive: true, force: true });
 }

@@ -1,13 +1,15 @@
 param(
   [switch]$PreflightOnly,
   [switch]$VerifyOnly,
-  [string]$ElectronRuntimePath
+  [string]$ElectronRuntimePath,
+  [string]$ResourceRoot
 )
 
 $ErrorActionPreference = "Stop"
 $root = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path
 $desktop = Join-Path $root "apps/desktop"
-$resourceRoot = Join-Path $root "resources"
+$resourceRoot = if ($ResourceRoot) { [IO.Path]::GetFullPath($ResourceRoot) } else { Join-Path $root "resources" }
+$readOnly = $VerifyOnly -or $PreflightOnly
 $reportPath = if ($env:AIVS_BOOTSTRAP_REPORT) { $env:AIVS_BOOTSTRAP_REPORT } else {
   Join-Path $root "build/reports/bootstrap-windows.json"
 }
@@ -68,7 +70,10 @@ function Get-JsonFile {
   if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
     throw "$Description file is missing: $Path"
   }
-  try { return (Get-Content -Raw -LiteralPath $Path | ConvertFrom-Json) }
+  try {
+    $encoding = [System.Text.UTF8Encoding]::new($false, $true)
+    return ([System.IO.File]::ReadAllText($Path, $encoding) | ConvertFrom-Json)
+  }
   catch { throw "$Description is not valid JSON: $Path; $($_.Exception.Message)" }
 }
 
@@ -266,7 +271,7 @@ function Ensure-ElectronRuntime {
     })
     return
   }
-  if ($VerifyOnly) {
+  if ($readOnly) {
     throw "Electron Windows runtime verification failed: $($current.reasons -join '; '); run pnpm bootstrap:windows with network access or a populated Electron cache."
   }
   if (-not $info.cache) {
@@ -390,15 +395,17 @@ try {
   $nodeModulesReady = (Test-Path -LiteralPath (Join-Path $desktop "node_modules/electron-builder/package.json") -PathType Leaf) -and
     (Test-Path -LiteralPath (Join-Path $desktop "node_modules/electron/package.json") -PathType Leaf)
   if (-not $nodeModulesReady) {
-    if ($VerifyOnly) { throw "Desktop Node dependencies are not installed; run pnpm ci or pnpm install --frozen-lockfile." }
+    if ($readOnly) { throw "Desktop Node dependencies are not installed; run pnpm ci or pnpm install --frozen-lockfile." }
     Invoke-Native $pnpm @("install", "--frozen-lockfile")
   }
   if (-not (Test-Path -LiteralPath (Join-Path $desktop "node_modules/electron-builder/package.json") -PathType Leaf)) {
     throw "electron-builder dependency is still missing; check pnpm install --frozen-lockfile and pnpm-lock.yaml."
   }
-  Push-Location $desktop
-  try { Invoke-Native $node @("scripts/prepare-electron-builder.mjs") }
-  finally { Pop-Location }
+  if (-not $readOnly) {
+    Push-Location $desktop
+    try { Invoke-Native $node @("scripts/prepare-electron-builder.mjs") }
+    finally { Pop-Location }
+  }
   $builderPackage = Get-JsonFile (Join-Path $desktop "node_modules/electron-builder/package.json") "electron-builder package.json"
   $electronPackage = Get-JsonFile (Join-Path $desktop "node_modules/electron/package.json") "electron package.json"
   if ([string]$builderPackage.version -ne "26.15.3") { throw "electron-builder version is not pinned to 26.15.3: $($builderPackage.version)" }
@@ -406,7 +413,7 @@ try {
   $runtimePath = if ($ElectronRuntimePath) { $ElectronRuntimePath } else { Join-Path $desktop "node_modules/electron/dist/electron.exe" }
   Ensure-ElectronRuntime $runtimePath
   $prepareArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $PSScriptRoot "../dependencies/prepare-electron-builder.ps1"))
-  if ($VerifyOnly) { $prepareArgs += "-VerifyOnly" }
+  if ($readOnly) { $prepareArgs += "-VerifyOnly" }
   & (Get-Command powershell.exe).Source @prepareArgs
   if ($LASTEXITCODE -ne 0) { throw "electron-builder 7-Zip preparation failed." }
   $builderState = Test-ElectronBuilderTools
@@ -421,13 +428,13 @@ try {
     "ffmpeg/win-x64/ffprobe.exe"
   )
   if (-not $ffmpegTrusted) {
-    if ($VerifyOnly) { throw "FFmpeg/FFprobe failed component manifest SHA-256 verification: $($state.reasons -join '; ')" }
+    if ($readOnly) { throw "FFmpeg/FFprobe failed component manifest SHA-256 verification: $($state.reasons -join '; ')" }
     $archive = Resolve-FfmpegArchive
     if (-not $archive) {
       throw "Approved FFmpeg archive is missing; set AIVS_FFMPEG_ARCHIVE or prepare .deps-download/ffmpeg-lgpl-8.0.zip. Expected archive SHA-256=$($ffmpegManifest.archive_sha256)."
     }
     $env:AIVS_FFMPEG_ARCHIVE = $archive
-    & (Get-Command powershell.exe).Source -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "../dependencies/prepare-ffmpeg.ps1")
+    & (Get-Command powershell.exe).Source -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "../dependencies/prepare-ffmpeg.ps1") -Destination (Join-Path $resourceRoot "ffmpeg/win-x64")
     if ($LASTEXITCODE -ne 0) { throw "FFmpeg preparation failed; check archive path and SHA-256." }
     Add-Step "ffmpeg" "passed" "FFmpeg/FFprobe prepared and verified from the approved archive." ([ordered]@{archive=$archive; archive_sha256=$ffmpegManifest.archive_sha256})
   } else {
@@ -436,8 +443,8 @@ try {
 
   $state = Get-ComponentState
   if (-not $state.valid) {
-    if ($VerifyOnly) { throw "Sidecar, FFmpeg, license or component manifest verification failed: $($state.reasons -join '; ')" }
-    & (Get-Command powershell.exe).Source -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "build-sidecar.ps1")
+    if ($readOnly) { throw "Sidecar, FFmpeg, license or component manifest verification failed: $($state.reasons -join '; ')" }
+    & (Get-Command powershell.exe).Source -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "build-sidecar.ps1") -OutputRoot $resourceRoot
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller Sidecar build failed." }
     Add-Step "sidecar" "passed" "PyInstaller Sidecar was built into the resources directory." $null
   } else {

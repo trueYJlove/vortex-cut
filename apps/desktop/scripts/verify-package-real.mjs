@@ -17,6 +17,7 @@ const evidenceRun = join(evidenceRoot, runId);
 let stage = "preflight";
 let handlingFailure = false;
 const progress = Object.create(null);
+const expectedWindowTitle = "Vortex Cut";
 
 const allowedCodes = new Set([
   "PACKAGE_REAL_EVIDENCE_ROOT_INVALID", "REAL_FIXTURE_UNAVAILABLE", "PACKAGE_COMPONENT_VERIFY_FAILED", "PACKAGE_REPORT_UNREADABLE", "PACKAGE_REPORT_INVALID",
@@ -27,7 +28,7 @@ const allowedCodes = new Set([
   "PACKAGE_FFMPEG_FILTER_INVALID", "PACKAGE_MODEL_MANIFEST_INVALID", "PACKAGE_MODEL_WEIGHTS_EMBEDDED",
   "PACKAGE_RECIPE_MANIFEST_INVALID", "PACKAGE_VERIFY_UNEXPECTED",
   "COMPONENT_MANIFEST_UNREADABLE", "SIDECAR_COMPONENT_MISSING", "SIDECAR_HASH_MISMATCH", "WORKSPACE_SETUP_FAILED",
-  "ELECTRON_LAUNCH_FAILED", "ELECTRON_RUNTIME_FAILED", "IMPORT_CANCELLED", "MODEL_MANIFEST_MISSING", "MODEL_RUNTIME_UNAVAILABLE",
+  "ELECTRON_LAUNCH_FAILED", "ELECTRON_RUNTIME_FAILED", "ELECTRON_WINDOW_TITLE_MISMATCH", "IMPORT_CANCELLED", "MODEL_MANIFEST_MISSING", "MODEL_RUNTIME_UNAVAILABLE",
   "TRANSCRIPTION_FAILED", "TRANSCRIPT_SEGMENT_OR_WORD_MISSING", "TIMELINE_OR_CAPTION_MISSING", "JOB_TIMEOUT", "JOB_NOT_CREATED",
   "PREVIEW_FAILED", "PREVIEW_PROJECT_SYNC_FAILED", "PREVIEW_UI_NOT_READY", "PREVIEW_JOB_NOT_CREATED", "PREVIEW_JOB_FAILED", "PREVIEW_RECORD_MISSING", "PREVIEW_RANGE_FAILED",
   "EXPORT_FAILED", "PREVIEW_NOT_STALE", "RESTART_TIMELINE_UNAVAILABLE", "RESTART_PREVIEWS_UNAVAILABLE",
@@ -62,6 +63,9 @@ const failureChecks = () => {
   if (progress.export_job_status !== undefined) checks.export_job_status = safeJobStatus(progress.export_job_status);
   if (typeof progress.preview_job_created === "boolean") checks.preview_job_created = progress.preview_job_created;
   if (progress.preview_job_status !== undefined) checks.preview_job_status = safeJobStatus(progress.preview_job_status);
+  if (typeof progress.window_title_matches_expected === "boolean") {
+    checks.window_title = { expected: expectedWindowTitle, matches_expected: progress.window_title_matches_expected };
+  }
   return checks;
 };
 
@@ -261,7 +265,7 @@ async function main() {
     electron = playwright._electron;
   } catch { fail("ELECTRON_LAUNCH_FAILED"); }
   const launch = () => electron.launch({
-    executablePath: join(report.unpacked_root, "AIVideo Studio.exe"), args: [`--user-data-dir=${userData}`], cwd: report.unpacked_root,
+    executablePath: join(report.unpacked_root, "Vortex Cut.exe"), args: [`--user-data-dir=${userData}`], cwd: report.unpacked_root,
     env: { ...process.env, AIVS_E2E_ASSET_PATHS: JSON.stringify({ video }), AIVS_E2E_EXPORT_PATH: destination, AIVS_E2E_MODEL_DIR: modelRoot, ELECTRON_RUN_AS_NODE: undefined, NODE_OPTIONS: undefined }
   });
   let first;
@@ -271,11 +275,27 @@ async function main() {
     stage = "electron_runtime";
     fail("ELECTRON_RUNTIME_FAILED");
   }
+  if (process.env.AIVS_PACKAGE_REAL_TEST_FAIL_STAGE === "electron_window_title") {
+    stage = "electron_window_title";
+    progress.window_title_matches_expected = false;
+    fail("ELECTRON_WINDOW_TITLE_MISMATCH");
+  }
   try { first = await launch(); } catch { fail("ELECTRON_LAUNCH_FAILED"); }
   let projectId; let finalState; let preview; let exportRecord; let transcript; let range; let models; let wordCount;
   try {
     stage = "electron_runtime";
     const page = await first.firstWindow();
+    stage = "electron_window_title";
+    try {
+      progress.window_title_matches_expected = await first.evaluate(
+        ({ BrowserWindow }, expectedTitle) => BrowserWindow.getAllWindows()[0]?.getTitle() === expectedTitle,
+        expectedWindowTitle
+      );
+    } catch {
+      progress.window_title_matches_expected = false;
+    }
+    if (!progress.window_title_matches_expected) fail("ELECTRON_WINDOW_TITLE_MISMATCH");
+    stage = "electron_runtime";
     try { await page.waitForFunction(() => Boolean(window.desktop?.getRuntime)); await page.evaluate(() => window.desktop.getRuntime()); } catch { fail("ELECTRON_RUNTIME_FAILED"); }
 
     stage = "import_model";
@@ -433,6 +453,7 @@ async function main() {
   const result = {
     schema_version: 2, status: "passed", checks: {
       sidecar_manifest: { component_path: sidecarComponent.path, hash_matches_manifest: true, sha256: `sha256:${sidecarHash}` },
+      window_title: { expected: expectedWindowTitle, matches_expected: true },
       model_runtime: { manifest_count: models.items.length, ready_installed_count: models.items.filter(item => item.status === "ready" && item.provider_status === "installed").length },
       transcription: { segment_count: transcript.segments.length, word_count: wordCount, duration_us: transcript.duration_us ?? null },
       timeline: { clip_count: finalState.current_revision.document.clips.length, caption_count: finalState.current_revision.document.captions.length },

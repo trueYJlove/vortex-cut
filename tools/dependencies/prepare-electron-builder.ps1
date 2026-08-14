@@ -37,7 +37,7 @@ if ($env:AIVS_ELECTRON_BUILDER_7ZIP_PATH) {
 if (-not (Test-Path -LiteralPath $packageJson -PathType Leaf)) {
   throw "7-Zip archive is missing package/package.json: $packageJson"
 }
-$package = Get-Content -Raw -LiteralPath $packageJson | ConvertFrom-Json
+$package = [System.IO.File]::ReadAllText($packageJson, [System.Text.UTF8Encoding]::new($false, $true)) | ConvertFrom-Json
 if ([string]$package.version -ne "5.2.0") {
   throw "Unsupported 7-Zip tool version: $($package.version); expected 5.2.0."
 }

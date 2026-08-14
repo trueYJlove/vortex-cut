@@ -1,5 +1,5 @@
-appId: com.aivideo.studio
-productName: AIVideo Studio
+appId: io.github.trueyjlove.vortexcut
+productName: Vortex Cut
 directories:
   output: release
   buildResources: build
@@ -42,7 +42,7 @@ win:
     - target: nsis
       arch:
         - x64
-  artifactName: AIVideoStudio-Setup-${version}-x64.exe
+  artifactName: VortexCut-Setup-${version}-x64.exe
 nsis:
   oneClick: false
   perMachine: false

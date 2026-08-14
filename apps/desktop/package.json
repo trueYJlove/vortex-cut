@@ -2,6 +2,7 @@
   "name": "@aivideo/desktop",
   "version": "0.0.1",
   "private": true,
+  "description": "Vortex Cut 桌面端：本地优先、AI 驱动的视频剪辑与多平台创作工具",
   "type": "module",
   "main": "out/main/index.js",
   "scripts": {

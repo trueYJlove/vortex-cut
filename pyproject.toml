@@ -1,7 +1,7 @@
 [project]
 name = "aivideo-core"
 version = "0.0.1"
-description = "AI Video Studio Stage 0 local Core sidecar"
+description = "Vortex Cut 本地优先视频剪辑工具的 Core sidecar"
 requires-python = ">=3.12,<3.14"
 dependencies = [
   "fastapi>=0.115,<1",

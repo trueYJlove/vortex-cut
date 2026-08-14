@@ -2,6 +2,7 @@
   "name": "aivideo-studio",
   "private": true,
   "version": "0.0.1",
+  "description": "Vortex Cut：本地优先、AI 驱动的视频剪辑与多平台创作工具",
   "packageManager": "pnpm@10.12.1",
   "engines": {
     "node": ">=24 <25"

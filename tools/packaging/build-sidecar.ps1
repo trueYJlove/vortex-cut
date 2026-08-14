@@ -2,6 +2,8 @@ param([string]$OutputRoot = (Join-Path $PSScriptRoot "../../dist/sidecar"))
 $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path
 $OutputRoot = [IO.Path]::GetFullPath($OutputRoot)
+$sourceResourceRoot = Join-Path $repoRoot "resources"
+if ($OutputRoot -eq $repoRoot) { throw "OutputRoot must not be the repository root." }
 $pyInstallerDist = Join-Path $repoRoot "dist/aivs-core"
 $pyInstallerWork = Join-Path $repoRoot "build/aivs-core"
 $specPath = Join-Path $repoRoot "services/core/aivs-core.spec"
@@ -24,22 +26,25 @@ if (Test-Path $core) { Remove-Item -LiteralPath $core -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $core | Out-Null
 Copy-Item -Recurse -Force (Join-Path $generatedCore "*") $core
 if ((Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $core "aivs-core.exe")).Hash.ToLowerInvariant() -ne $generatedHash) { throw "Sidecar staging hash does not match the current PyInstaller output" }
-$resourceCore = Join-Path $repoRoot "resources/core/aivs-core"
-if (Test-Path $resourceCore) { Remove-Item -LiteralPath $resourceCore -Recurse -Force }
-New-Item -ItemType Directory -Force -Path $resourceCore | Out-Null
-Copy-Item -Recurse -Force (Join-Path $generatedCore "*") $resourceCore
+$resourceCore = Join-Path $OutputRoot "core/aivs-core"
 if ((Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $resourceCore "aivs-core.exe")).Hash.ToLowerInvariant() -ne $generatedHash) { throw "Resource Sidecar hash does not match the current PyInstaller output" }
-Copy-Item -Recurse -Force (Join-Path $repoRoot "resources/ffmpeg") (Join-Path $OutputRoot "ffmpeg")
-Copy-Item -Recurse -Force (Join-Path $repoRoot "resources/licenses") (Join-Path $OutputRoot "licenses")
+if (-not (Test-Path -LiteralPath (Join-Path $OutputRoot "ffmpeg") -PathType Container)) {
+  Copy-Item -Recurse -Force (Join-Path $sourceResourceRoot "ffmpeg") (Join-Path $OutputRoot "ffmpeg")
+}
+if (-not (Test-Path -LiteralPath (Join-Path $OutputRoot "licenses") -PathType Container)) {
+  Copy-Item -Recurse -Force (Join-Path $sourceResourceRoot "licenses") (Join-Path $OutputRoot "licenses")
+}
 New-Item -ItemType Directory -Force -Path (Join-Path $OutputRoot "manifests") | Out-Null
-Copy-Item -LiteralPath (Join-Path $repoRoot "resources/manifests/components.json") -Destination (Join-Path $OutputRoot "manifests/components.json") -Force
-$manifestPath = Join-Path $repoRoot "resources/manifests/components.json"
-$manifest = Get-Content -Raw $manifestPath | ConvertFrom-Json
+$manifestPath = Join-Path $OutputRoot "manifests/components.json"
+if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+  Copy-Item -LiteralPath (Join-Path $sourceResourceRoot "manifests/components.json") -Destination $manifestPath -Force
+}
+$manifest = [System.IO.File]::ReadAllText($manifestPath, [System.Text.UTF8Encoding]::new($false, $true)) | ConvertFrom-Json
 $hashTargets = @{
   "core/aivs-core/aivs-core.exe" = (Join-Path $resourceCore "aivs-core.exe")
-  "ffmpeg/win-x64/ffmpeg.exe" = (Join-Path $PSScriptRoot "../../resources/ffmpeg/win-x64/ffmpeg.exe")
-  "ffmpeg/win-x64/ffprobe.exe" = (Join-Path $PSScriptRoot "../../resources/ffmpeg/win-x64/ffprobe.exe")
-  "licenses/THIRD_PARTY_NOTICES.txt" = (Join-Path $PSScriptRoot "../../resources/licenses/THIRD_PARTY_NOTICES.txt")
+  "ffmpeg/win-x64/ffmpeg.exe" = (Join-Path $OutputRoot "ffmpeg/win-x64/ffmpeg.exe")
+  "ffmpeg/win-x64/ffprobe.exe" = (Join-Path $OutputRoot "ffmpeg/win-x64/ffprobe.exe")
+  "licenses/THIRD_PARTY_NOTICES.txt" = (Join-Path $OutputRoot "licenses/THIRD_PARTY_NOTICES.txt")
 }
 foreach ($component in $manifest.components) {
   if ($hashTargets.ContainsKey($component.path)) {
@@ -49,5 +54,4 @@ foreach ($component in $manifest.components) {
 }
 $json = $manifest | ConvertTo-Json -Depth 5
 [System.IO.File]::WriteAllText($manifestPath, $json, [System.Text.UTF8Encoding]::new($false))
-Copy-Item -LiteralPath $manifestPath -Destination (Join-Path $OutputRoot "manifests/components.json") -Force
 Write-Output "Sidecar onedir built in $core from $generatedCore (sha256=$generatedHash, generated_at=$generatedAt)"

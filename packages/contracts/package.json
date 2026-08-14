@@ -2,6 +2,7 @@
   "name": "@aivideo/contracts",
   "version": "0.0.1",
   "private": true,
+  "description": "Vortex Cut 的共享契约与运行时校验",
   "type": "module",
   "exports": {
     ".": {

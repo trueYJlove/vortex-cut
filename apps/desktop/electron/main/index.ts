@@ -188,6 +188,7 @@ async function createWindow(): Promise<void> {
     height: 960,
     minWidth: 1024,
     minHeight: 720,
+    title: "Vortex Cut",
     show: true,
     webPreferences: {
       preload: join(__dirname, "../preload/index.mjs"),
@@ -559,14 +560,14 @@ app.whenReady().then(async () => {
   catch (error) {
     await appendLog(logPath || join(app.getPath("userData"), "logs", "desktop.log"), String(error)).catch(() => undefined);
     await shutdownRuntime().catch(() => undefined);
-    await dialog.showErrorBox("AIVideo Studio 启动失败", "本地核心服务未能启动，请查看日志目录。");
+    await dialog.showErrorBox("Vortex Cut 启动失败", "本地核心服务未能启动，请查看日志目录。");
     app.exit(1);
   }
 }).catch(error => {
   const message = error instanceof Error ? error.stack ?? error.message : String(error);
   void appendLog(logPath || join(app.getPath("userData"), "logs", "desktop.log"), `startup failure: ${message}`).catch(() => undefined);
   if (windowRef && !windowRef.isDestroyed()) {
-    dialog.showErrorBox("AIVideo Studio 启动失败", message);
+    dialog.showErrorBox("Vortex Cut 启动失败", message);
   }
   app.exit(1);
 });
