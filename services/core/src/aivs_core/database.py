@@ -26,6 +26,7 @@ V4_VERSION = "v4"
 V5_VERSION = "v5"
 V6_VERSION = "v6"
 V7_VERSION = "v7"
+V8_VERSION = "v8"
 V1_SQL = """
 CREATE TABLE IF NOT EXISTS media_inputs (
   id TEXT PRIMARY KEY, path TEXT NOT NULL, display_name TEXT NOT NULL,
@@ -492,6 +493,69 @@ WHEN (NEW.timeline_patch_capability_status='supported' AND (
   OR NEW.timeline_patch_capability_probe_sha256 IS NOT NULL
 )) BEGIN SELECT RAISE(ABORT,'invalid timeline patch capability state'); END;
 """
+V8_SQL = """
+ALTER TABLE provider_configs ADD COLUMN candidate_capability_status TEXT NOT NULL DEFAULT 'untested'
+  CHECK(candidate_capability_status IN ('untested','supported','unsupported'));
+ALTER TABLE provider_configs ADD COLUMN candidate_response_adapter_id TEXT NULL;
+ALTER TABLE provider_configs ADD COLUMN candidate_probe_protocol_version TEXT NULL;
+ALTER TABLE provider_configs ADD COLUMN candidate_capability_tested_at TEXT NULL;
+ALTER TABLE provider_configs ADD COLUMN candidate_capability_failure_code TEXT NULL;
+ALTER TABLE provider_configs ADD COLUMN candidate_capability_probe_sha256 TEXT NULL;
+ALTER TABLE egress_previews ADD COLUMN candidate_response_adapter_id TEXT NULL;
+ALTER TABLE egress_previews ADD COLUMN candidate_probe_protocol_version TEXT NULL;
+ALTER TABLE egress_previews ADD COLUMN candidate_capability_probe_sha256 TEXT NULL;
+ALTER TABLE candidate_generations ADD COLUMN candidate_response_adapter_id TEXT NULL;
+ALTER TABLE candidate_generations ADD COLUMN candidate_probe_protocol_version TEXT NULL;
+ALTER TABLE candidate_generations ADD COLUMN candidate_capability_probe_sha256 TEXT NULL;
+ALTER TABLE candidate_generations ADD COLUMN provider_config_sha256 TEXT NULL;
+CREATE TRIGGER provider_candidate_capability_valid_insert BEFORE INSERT ON provider_configs
+WHEN (NEW.candidate_capability_status='supported' AND (
+  NEW.candidate_response_adapter_id IS NULL OR NEW.candidate_response_adapter_id NOT IN (
+    'openai_responses_json_schema_v1','openai_responses_candidatescript_v1',
+    'openai_chat_completions_json_schema_v1','openai_chat_completions_candidatescript_v1')
+  OR NEW.candidate_probe_protocol_version IS NOT '1' OR NEW.candidate_capability_tested_at IS NULL
+  OR NEW.candidate_capability_failure_code IS NOT NULL
+  OR NEW.candidate_capability_probe_sha256 IS NULL
+)) OR (NEW.candidate_capability_status='unsupported' AND (
+  NEW.candidate_response_adapter_id IS NOT NULL OR NEW.candidate_probe_protocol_version IS NOT NULL
+  OR NEW.candidate_capability_tested_at IS NULL OR NEW.candidate_capability_failure_code IS NULL
+  OR NEW.candidate_capability_probe_sha256 IS NULL
+)) OR (NEW.candidate_capability_status='untested' AND (
+  NEW.candidate_response_adapter_id IS NOT NULL OR NEW.candidate_probe_protocol_version IS NOT NULL
+  OR NEW.candidate_capability_tested_at IS NOT NULL
+  OR NEW.candidate_capability_failure_code IS NOT NULL
+  OR NEW.candidate_capability_probe_sha256 IS NOT NULL
+)) BEGIN SELECT RAISE(ABORT,'invalid candidate capability state'); END;
+CREATE TRIGGER provider_candidate_capability_valid_update
+BEFORE UPDATE OF candidate_capability_status,
+  candidate_response_adapter_id,candidate_probe_protocol_version,
+  candidate_capability_tested_at,candidate_capability_failure_code,
+  candidate_capability_probe_sha256 ON provider_configs
+WHEN (NEW.candidate_capability_status='supported' AND (
+  NEW.candidate_response_adapter_id IS NULL OR NEW.candidate_response_adapter_id NOT IN (
+    'openai_responses_json_schema_v1','openai_responses_candidatescript_v1',
+    'openai_chat_completions_json_schema_v1','openai_chat_completions_candidatescript_v1')
+  OR NEW.candidate_probe_protocol_version IS NOT '1' OR NEW.candidate_capability_tested_at IS NULL
+  OR NEW.candidate_capability_failure_code IS NOT NULL
+  OR NEW.candidate_capability_probe_sha256 IS NULL
+)) OR (NEW.candidate_capability_status='unsupported' AND (
+  NEW.candidate_response_adapter_id IS NOT NULL OR NEW.candidate_probe_protocol_version IS NOT NULL
+  OR NEW.candidate_capability_tested_at IS NULL OR NEW.candidate_capability_failure_code IS NULL
+  OR NEW.candidate_capability_probe_sha256 IS NULL
+)) OR (NEW.candidate_capability_status='untested' AND (
+  NEW.candidate_response_adapter_id IS NOT NULL OR NEW.candidate_probe_protocol_version IS NOT NULL
+  OR NEW.candidate_capability_tested_at IS NOT NULL
+  OR NEW.candidate_capability_failure_code IS NOT NULL
+  OR NEW.candidate_capability_probe_sha256 IS NOT NULL
+)) BEGIN SELECT RAISE(ABORT,'invalid candidate capability state'); END;
+CREATE TRIGGER provider_candidate_capability_reset_on_config_change
+AFTER UPDATE OF base_url,model ON provider_configs
+WHEN OLD.candidate_capability_status!='untested'
+BEGIN UPDATE provider_configs SET candidate_capability_status='untested',
+  candidate_response_adapter_id=NULL,candidate_probe_protocol_version=NULL,
+  candidate_capability_tested_at=NULL,candidate_capability_failure_code=NULL,
+  candidate_capability_probe_sha256=NULL WHERE id=NEW.id; END;
+"""
 MIGRATIONS: dict[str, str] = {
     V1_VERSION: V1_SQL,
     V2_VERSION: V2_SQL,
@@ -500,6 +564,7 @@ MIGRATIONS: dict[str, str] = {
     V5_VERSION: V5_SQL,
     V6_VERSION: V6_SQL,
     V7_VERSION: V7_SQL,
+    V8_VERSION: V8_SQL,
 }
 
 
@@ -551,6 +616,7 @@ class Database:
                     self._apply_v5_compatibility(db)
                     self._apply_v6_compatibility(db)
                     self._apply_v7_compatibility(db)
+                    self._apply_v8_compatibility(db)
                     for statement in _statements(sql):
                         db.execute(statement)
                     db.execute(
@@ -680,6 +746,11 @@ class Database:
     @staticmethod
     def _apply_v7_compatibility(db: sqlite3.Connection) -> None:
         # v7 only replaces capability constraints; existing metadata is preserved.
+        del db
+
+    @staticmethod
+    def _apply_v8_compatibility(db: sqlite3.Connection) -> None:
+        # v8 is append-only: historical rows keep nullable snapshot columns.
         del db
 
     def recover_interrupted(self) -> int:

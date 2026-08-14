@@ -101,6 +101,16 @@ def _setup(
         ).status_code
         == 200
     )  # noqa: E501
+    with db.connection() as conn:
+        conn.execute(
+            "UPDATE provider_configs SET candidate_capability_status='supported',"
+            "candidate_response_adapter_id='openai_chat_completions_json_schema_v1',"
+            "candidate_probe_protocol_version='1',candidate_capability_tested_at='now',"
+            "candidate_capability_failure_code=NULL,"
+            "candidate_capability_probe_sha256='sha256:probe' "
+            "WHERE id=?",
+            (provider_id,),
+        )
     brief = {
         "schema_version": 1,
         "topic": "topic",
@@ -235,6 +245,13 @@ def test_candidate_generation_api_success_clip_lookup_and_restart(
         client.__exit__(None, None, None)
     restarted = TestClient(create_app(settings))
     with restarted:
+        admin = {"Authorization": "Bearer admin-stage2a"}
+        restart_ui = {
+            "Authorization": (
+                "Bearer "
+                + restarted.post("/api/v1/internal/sessions", headers=admin).json()["token"]
+            )
+        }
         with restarted.app.state.core.db.connection() as db:
             assert (
                 db.execute(
@@ -242,6 +259,19 @@ def test_candidate_generation_api_success_clip_lookup_and_restart(
                 ).fetchone()[0]
                 == "interrupted"
             )
+            assert (
+                db.execute(
+                    "SELECT status FROM candidate_generations WHERE id=?",
+                    (created["candidate_generation_id"],),
+                ).fetchone()[0]
+                == "succeeded"
+            )
+        retry = restarted.post(
+            f"/api/v1/jobs/{created['job']['job_id']}/retry",
+            headers=restart_ui,
+        )
+        assert retry.status_code == 409
+        assert retry.json()["error"]["code"] == "CANDIDATE_GENERATION_RECONFIRM_REQUIRED"
 
 
 def test_candidate_generation_api_cancel_archives_invocation(

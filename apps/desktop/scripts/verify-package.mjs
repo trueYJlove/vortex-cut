@@ -3,20 +3,34 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 
+const VERIFY_CODES = new Set([
+  "PACKAGE_REPORT_UNREADABLE", "PACKAGE_REPORT_INVALID", "PACKAGE_REQUIRED_SIDECAR_MISSING", "PACKAGE_REQUIRED_FFMPEG_MISSING",
+  "PACKAGE_REQUIRED_LICENSE_MISSING", "PACKAGE_REQUIRED_COMPONENT_MANIFEST_MISSING", "PACKAGE_REQUIRED_MODEL_MANIFEST_MISSING",
+  "PACKAGE_REQUIRED_RECIPE_MISSING", "PACKAGE_REQUIRED_FONT_MISSING", "PACKAGE_COMPONENT_MANIFEST_INVALID",
+  "PACKAGE_COMPONENT_LICENSE_INVALID", "PACKAGE_COMPONENT_PIN_INVALID", "PACKAGE_COMPONENT_HASH_MISMATCH", "PACKAGE_FONT_BUNDLE_INVALID",
+  "PACKAGE_FONT_BUNDLE_FILE_MISSING", "PACKAGE_FONT_BUNDLE_HASH_MISMATCH", "PACKAGE_CAPTION_PRESETS_INVALID",
+  "PACKAGE_FFMPEG_FILTER_INVALID", "PACKAGE_MODEL_MANIFEST_INVALID", "PACKAGE_MODEL_WEIGHTS_EMBEDDED",
+  "PACKAGE_RECIPE_MANIFEST_INVALID", "PACKAGE_VERIFY_UNEXPECTED"
+]);
+const fail = code => { throw new Error(code); };
+const safeCode = error => VERIFY_CODES.has(String(error?.message ?? "")) ? error.message : "PACKAGE_VERIFY_UNEXPECTED";
+process.on("uncaughtException", error => { console.error(safeCode(error)); process.exit(1); });
+
 const root = resolve(process.cwd());
 const defaultReport = join(root, "../../build/reports/windows-package-latest.json");
 const reportPath = process.env.AIVS_PACKAGE_REPORT ?? defaultReport;
 let reportedPackageDir;
 if (existsSync(reportPath)) {
-  const report = JSON.parse(readFileSync(reportPath, "utf8"));
+  let report;
+  try { report = JSON.parse(readFileSync(reportPath, "utf8")); } catch { fail("PACKAGE_REPORT_UNREADABLE"); }
   if (report.schema_version !== 1 || report.status !== "built" || typeof report.package_root !== "string") {
-    throw new Error(`安装包报告不是可验证的已完成本次产物: ${reportPath}`);
+    fail("PACKAGE_REPORT_INVALID");
   }
   reportedPackageDir = resolve(report.package_root);
 }
 const packageDir = resolve(reportedPackageDir ?? process.env.AIVS_PACKAGE_DIR ?? "");
 if (!packageDir || packageDir === root) {
-  throw new Error(`未找到本次 Windows 安装包产物报告或 AIVS_PACKAGE_DIR: ${reportPath}`);
+  fail("PACKAGE_REPORT_INVALID");
 }
 const required = [
   "core/aivs-core/aivs-core.exe",
@@ -33,52 +47,62 @@ const required = [
 ];
 const missing = required.filter(relative => !existsSync(join(packageDir, relative)));
 if (missing.length) {
-  console.error("缺少打包组件:\n" + missing.join("\n"));
-  process.exit(1);
+  const code = missing.some(item => item.startsWith("core/")) ? "PACKAGE_REQUIRED_SIDECAR_MISSING"
+    : missing.some(item => item.startsWith("ffmpeg/")) ? "PACKAGE_REQUIRED_FFMPEG_MISSING"
+      : missing.some(item => item.startsWith("licenses/")) ? "PACKAGE_REQUIRED_LICENSE_MISSING"
+        : missing.some(item => item.startsWith("manifests/")) ? "PACKAGE_REQUIRED_COMPONENT_MANIFEST_MISSING"
+          : missing.some(item => item.startsWith("model-manifests")) ? "PACKAGE_REQUIRED_MODEL_MANIFEST_MISSING"
+            : missing.some(item => item.startsWith("recipes/")) ? "PACKAGE_REQUIRED_RECIPE_MISSING"
+              : "PACKAGE_REQUIRED_FONT_MISSING";
+  fail(code);
 }
 
 const manifestPath = join(packageDir, "manifests/components.json");
-const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-if (!Array.isArray(manifest.components)) throw new Error("components.json 缺少 components 数组");
+let manifest;
+try { manifest = JSON.parse(readFileSync(manifestPath, "utf8")); } catch { fail("PACKAGE_COMPONENT_MANIFEST_INVALID"); }
+if (!Array.isArray(manifest.components)) fail("PACKAGE_COMPONENT_MANIFEST_INVALID");
 const releaseBlocked = manifest.release_blocked_until_pinned === true;
 const isPinnedSha256 = value => /^[0-9a-f]{64}$/i.test(String(value));
 for (const component of manifest.components) {
-  if (!component.path || !component.sha256) throw new Error("组件清单必须包含 path 和 sha256");
-  if (typeof component.license !== "string" || !component.license.trim()) throw new Error("组件清单必须包含许可证信息: " + component.path);
+  if (!component.path || !component.sha256) fail("PACKAGE_COMPONENT_MANIFEST_INVALID");
+  if (typeof component.license !== "string" || !component.license.trim()) fail("PACKAGE_COMPONENT_LICENSE_INVALID");
   const filePath = join(packageDir, component.path);
   if (!existsSync(filePath) || !statSync(filePath).isFile()) continue;
   if (!isPinnedSha256(component.sha256)) {
     if (releaseBlocked) continue;
-    throw new Error("release_blocked_until_pinned=false 时组件必须使用 64 位 SHA-256: " + component.path);
+    fail("PACKAGE_COMPONENT_PIN_INVALID");
   }
   const hash = createHash("sha256").update(readFileSync(filePath)).digest("hex");
-  if (hash.toLowerCase() !== String(component.sha256).toLowerCase()) throw new Error("组件哈希不匹配: " + component.path);
+  if (hash.toLowerCase() !== String(component.sha256).toLowerCase()) fail("PACKAGE_COMPONENT_HASH_MISMATCH");
 }
 console.log("package verify passed: Sidecar, FFmpeg, FFprobe, licenses and component manifest are present");
 
-const fontBundle = JSON.parse(readFileSync(join(packageDir, "fonts/bundle.json"), "utf8"));
+let fontBundle;
+try { fontBundle = JSON.parse(readFileSync(join(packageDir, "fonts/bundle.json"), "utf8")); } catch { fail("PACKAGE_FONT_BUNDLE_INVALID"); }
 if (!Number.isInteger(fontBundle.font_bundle_version) || fontBundle.font_bundle_version < 1 || typeof fontBundle.file !== "string" || typeof fontBundle.license_file !== "string" || !isPinnedSha256(fontBundle.sha256)) {
-  throw new Error("字体 bundle manifest 缺少版本、字体、许可证或 SHA-256");
+  fail("PACKAGE_FONT_BUNDLE_INVALID");
 }
 const fontPath = join(packageDir, "fonts", fontBundle.file);
 const fontLicensePath = join(packageDir, "fonts", fontBundle.license_file);
-if (!existsSync(fontPath) || !statSync(fontPath).isFile()) throw new Error("字体 bundle 指向的字体文件不存在");
-if (!existsSync(fontLicensePath) || !statSync(fontLicensePath).isFile()) throw new Error("字体 bundle 指向的许可证不存在");
+if (!existsSync(fontPath) || !statSync(fontPath).isFile()) fail("PACKAGE_FONT_BUNDLE_FILE_MISSING");
+if (!existsSync(fontLicensePath) || !statSync(fontLicensePath).isFile()) fail("PACKAGE_FONT_BUNDLE_FILE_MISSING");
 const fontHash = createHash("sha256").update(readFileSync(fontPath)).digest("hex");
-if (fontHash.toLowerCase() !== fontBundle.sha256.toLowerCase()) throw new Error("字体文件 SHA-256 与 bundle manifest 不一致");
-const captionPresets = JSON.parse(readFileSync(join(packageDir, "fonts/caption-presets.json"), "utf8"));
-if (!Number.isInteger(captionPresets.preset_version) || captionPresets.preset_version < 1 || !captionPresets.presets || typeof captionPresets.presets !== "object") throw new Error("字幕预设 manifest 无效");
+if (fontHash.toLowerCase() !== fontBundle.sha256.toLowerCase()) fail("PACKAGE_FONT_BUNDLE_HASH_MISMATCH");
+let captionPresets;
+try { captionPresets = JSON.parse(readFileSync(join(packageDir, "fonts/caption-presets.json"), "utf8")); } catch { fail("PACKAGE_CAPTION_PRESETS_INVALID"); }
+if (!Number.isInteger(captionPresets.preset_version) || captionPresets.preset_version < 1 || !captionPresets.presets || typeof captionPresets.presets !== "object") fail("PACKAGE_CAPTION_PRESETS_INVALID");
 
 const ffmpegPath = join(packageDir, "ffmpeg/win-x64/ffmpeg.exe");
-const filterOutput = execFileSync(ffmpegPath, ["-hide_banner", "-filters"], { encoding: "utf8", windowsHide: true });
-if (!/^\s*\.\.\s+ass\s+/m.test(filterOutput)) throw new Error("打包 FFmpeg 缺少 ass filter");
-if (!/^\s*\.\.\s+subtitles\s+/m.test(filterOutput)) throw new Error("打包 FFmpeg 缺少 subtitles filter");
+let filterOutput;
+try { filterOutput = execFileSync(ffmpegPath, ["-hide_banner", "-filters"], { encoding: "utf8", windowsHide: true }); } catch { fail("PACKAGE_FFMPEG_FILTER_INVALID"); }
+if (!/^\s*\.\.\s+ass\s+/m.test(filterOutput)) fail("PACKAGE_FFMPEG_FILTER_INVALID");
+if (!/^\s*\.\.\s+subtitles\s+/m.test(filterOutput)) fail("PACKAGE_FFMPEG_FILTER_INVALID");
 console.log("package verify passed: font bundle, license, presets and FFmpeg subtitle filters are present");
 
 const modelManifestDir = join(packageDir, "model-manifests");
 const modelManifestFiles = readdirSync(modelManifestDir).filter(name => name.endsWith(".json"));
-if (!modelManifestFiles.length) throw new Error("model-manifests 目录必须包含版本化 JSON manifest");
-if (existsSync(join(packageDir, "models"))) throw new Error("模型权重目录不得进入安装包");
+if (!modelManifestFiles.length) fail("PACKAGE_MODEL_MANIFEST_INVALID");
+if (existsSync(join(packageDir, "models"))) fail("PACKAGE_MODEL_WEIGHTS_EMBEDDED");
 const weightPattern = /\.(?:bin|onnx|pt|pth|safetensors|ckpt)$/i;
 const declaredModelWeights = new Set();
 const isSafeRelativePath = value => {
@@ -92,18 +116,19 @@ const findPackagedWeightFiles = directory => readdirSync(directory, { withFileTy
   return entry.isFile() && weightPattern.test(entry.name) ? [entryPath] : [];
 });
 for (const name of modelManifestFiles) {
-  const value = JSON.parse(readFileSync(join(modelManifestDir, name), "utf8"));
+  let value;
+  try { value = JSON.parse(readFileSync(join(modelManifestDir, name), "utf8")); } catch { fail("PACKAGE_MODEL_MANIFEST_INVALID"); }
   if (value.manifest_version === undefined || value.model_id === undefined || value.provider === undefined || value.revision === undefined) {
-    throw new Error("模型 manifest 缺少版本、模型 ID、provider 或 revision: " + name);
+    fail("PACKAGE_MODEL_MANIFEST_INVALID");
   }
   if (Object.prototype.hasOwnProperty.call(value, "installed_path") || Object.prototype.hasOwnProperty.call(value, "install_dir")) {
-    throw new Error("安装包 manifest 不得包含模型安装路径: " + name);
+    fail("PACKAGE_MODEL_MANIFEST_INVALID");
   }
   if (!value.license || typeof value.license.id !== "string" || typeof value.license.name !== "string") {
-    throw new Error("模型 manifest 缺少许可证信息: " + name);
+    fail("PACKAGE_MODEL_MANIFEST_INVALID");
   }
   if (!isPinnedSha256(value.sha256) || !Number.isInteger(value.size_bytes) || value.size_bytes <= 0 || !Number.isInteger(value.installed_size_bytes) || value.installed_size_bytes <= 0) {
-    throw new Error("模型 manifest 的大小或 SHA-256 无效: " + name);
+    fail("PACKAGE_MODEL_MANIFEST_INVALID");
   }
   if (!Array.isArray(value.files) || value.files.some(file => {
     const relativePath = file?.path ?? file?.relative_path;
@@ -112,7 +137,7 @@ for (const name of modelManifestFiles) {
       || !Number.isInteger(file?.size_bytes)
       || file.size_bytes <= 0;
   })) {
-    throw new Error("模型 manifest 的文件路径、大小或 SHA-256 无效: " + name);
+    fail("PACKAGE_MODEL_MANIFEST_INVALID");
   }
   for (const file of value.files) declaredModelWeights.add(`${String(file.sha256).toLowerCase()}:${file.size_bytes}`);
 }
@@ -123,9 +148,10 @@ const embeddedDeclaredWeights = packagedWeightFiles.filter(path => {
   const hash = createHash("sha256").update(readFileSync(path)).digest("hex");
   return declaredModelWeights.has(`${hash}:${size}`);
 });
-if (embeddedDeclaredWeights.length) throw new Error("安装包资源目录不得包含 manifest 声明的 ASR 模型权重: " + embeddedDeclaredWeights.join(", "));
+if (embeddedDeclaredWeights.length) fail("PACKAGE_MODEL_WEIGHTS_EMBEDDED");
 console.log("package verify passed: ASR model manifests present and model weights excluded");
 
-const recipeManifest = JSON.parse(readFileSync(join(packageDir, "recipes/manifest.json"), "utf8"));
-if (!Array.isArray(recipeManifest.recipes) || !recipeManifest.recipes.length || recipeManifest.recipes.some(id => typeof id !== "string" || !existsSync(join(packageDir, "recipes", `${id}.json`)))) throw new Error("AI recipe manifest 或配方文件无效");
+let recipeManifest;
+try { recipeManifest = JSON.parse(readFileSync(join(packageDir, "recipes/manifest.json"), "utf8")); } catch { fail("PACKAGE_RECIPE_MANIFEST_INVALID"); }
+if (!Array.isArray(recipeManifest.recipes) || !recipeManifest.recipes.length || recipeManifest.recipes.some(id => typeof id !== "string" || !existsSync(join(packageDir, "recipes", `${id}.json`)))) fail("PACKAGE_RECIPE_MANIFEST_INVALID");
 console.log("package verify passed: AI recipe manifest and recipe files are present");

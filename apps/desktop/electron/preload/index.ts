@@ -41,7 +41,7 @@ import type {
   , ExportRecord
   , RenderArtifact
   , RenderArtifactId
-  , Brief, BriefInput, Recipe, ProviderConfig, EgressPreview, CandidatePlan
+  , Brief, BriefInput, Recipe, ProviderConfig, EgressPreview, CandidatePlan, ProviderCapabilityTestResult
   , TimelineDiff, TimelinePatchEgressPreview, TimelinePatchGeneration, TimelinePatchGenerationCreateResponse, TimelinePatchProposal, TimelinePatchCapabilityTestResponse
 } from "@aivideo/contracts";
 
@@ -85,6 +85,7 @@ export interface DesktopApi {
   setProviderSecret?: (input: { provider_config_id: string; secret: string }) => Promise<{ provider_config_id: string; credential_status: "configured" }>;
   deleteProviderSecret?: (providerId: string) => Promise<{ provider_config_id: string; credential_status: "missing" }>;
   testProvider?: (providerId: string) => Promise<{ ok?: boolean; message?: string }>;
+  testCandidateProviderCapability: (providerId: string) => Promise<ProviderCapabilityTestResult>;
   preparePlanning?: (input: { project_id: ProjectId; provider_config_id: string; recipe_id: string; transcript_ids: string[] }) => Promise<EgressPreview>;
   createPlanning?: (input: { project_id: ProjectId; egress_preview_id: string; payload_sha256: string }) => Promise<{ job: Job }>;
   listCandidatePlans?: (projectId: ProjectId) => Promise<{ items: CandidatePlan[] }>;
@@ -153,6 +154,7 @@ const api: DesktopApi = {
   setProviderSecret: input => ipcRenderer.invoke("provider:set-secret", input),
   deleteProviderSecret: providerId => ipcRenderer.invoke("provider:delete-secret", providerId),
   testProvider: providerId => ipcRenderer.invoke("provider:test", providerId),
+  testCandidateProviderCapability: providerId => ipcRenderer.invoke("planning:test-provider-capability", providerId),
   preparePlanning: input => ipcRenderer.invoke("planning:prepare", input),
   createPlanning: input => ipcRenderer.invoke("planning:create", input),
   listCandidatePlans: projectId => ipcRenderer.invoke("planning:list", projectId),

@@ -1,6 +1,6 @@
 export const PROTOCOL_VERSION = 1 as const;
 export const API_PREFIX = "/api/v1" as const;
-export const CONTRACT_VERSION = "stage2b-v1" as const;
+export const CONTRACT_VERSION = "stage2c-v1" as const;
 
 export type GrantId = string & { readonly __brand: "grant_id" };
 export type ProjectId = string & { readonly __brand: "project_id" };
@@ -104,6 +104,9 @@ export const ERROR_CODES = [
   "EXPORT_NOT_FOUND", "EXPORT_DESTINATION_INVALID", "EXPORT_DESTINATION_EXISTS",
   "EXPORT_DESTINATION_EXPIRED", "EXPORT_DISK_SPACE_INSUFFICIENT", "ARTIFACT_NOT_FOUND",
   "PLAYBACK_TICKET_INVALID"
+  , "CANDIDATE_PROVIDER_UNTESTED", "CANDIDATE_PROVIDER_UNSUPPORTED",
+  "CANDIDATE_RESPONSE_ADAPTER_INVALID", "CANDIDATE_CAPABILITY_STALE",
+  "CANDIDATE_CANDIDATESCRIPT_INVALID", "CANDIDATE_EGRESS_PAYLOAD_UNAVAILABLE"
 ] as const;
 export type ErrorCode = typeof ERROR_CODES[number] | (string & {});
 
@@ -432,6 +435,7 @@ export interface Transcript {
 export type ProviderKind = "openai_compatible_text";
 export type CredentialStatus = "missing" | "configured" | "unavailable";
 export type TimelinePatchCapabilityStatus = "untested" | "supported" | "unsupported";
+export type CandidateCapabilityStatus = "untested" | "supported" | "unsupported";
 /**
  * 仅供 Core 持久化及进程内路由使用的固定认证适配器白名单。
  * Renderer 不得据此显示或选择 Provider 协议细节。
@@ -441,6 +445,11 @@ export type TimelinePatchResponseAdapterId =
   | "openai_responses_patchscript_v1"
   | "openai_chat_completions_json_schema_v1"
   | "openai_chat_completions_patchscript_v1";
+export type CandidateResponseAdapterId =
+  | "openai_responses_json_schema_v1"
+  | "openai_responses_candidatescript_v1"
+  | "openai_chat_completions_json_schema_v1"
+  | "openai_chat_completions_candidatescript_v1";
 export type OriginalAudioPolicy = "preserve" | "mute";
 export type CaptionPolicy = "auto_from_transcript" | "none";
 export type CandidateVariant = "balanced" | "compact" | "bold";
@@ -463,13 +472,23 @@ export interface ProviderConfig {
   output_price_per_million: number | null; timeline_patch_capability_status: TimelinePatchCapabilityStatus;
   timeline_patch_response_adapter_id: TimelinePatchResponseAdapterId | null; timeline_patch_probe_protocol_version: string | null;
   timeline_patch_capability_tested_at: string | null; timeline_patch_capability_failure_code: ErrorCode | null;
-  timeline_patch_capability_probe_sha256: string | null; created_at: string; updated_at: string;
+  timeline_patch_capability_probe_sha256: string | null;
+  candidate_capability_status: CandidateCapabilityStatus;
+  candidate_response_adapter_id: CandidateResponseAdapterId | null; candidate_probe_protocol_version: string | null;
+  candidate_capability_tested_at: string | null; candidate_capability_failure_code: ErrorCode | null;
+  candidate_capability_probe_sha256: string | null; created_at: string; updated_at: string;
 }
 export interface TimelinePatchCapabilityTestResponse {
   timeline_patch_capability_status: TimelinePatchCapabilityStatus;
   timeline_patch_response_adapter_id: TimelinePatchResponseAdapterId | null; timeline_patch_probe_protocol_version: string | null;
   timeline_patch_capability_tested_at: string | null; timeline_patch_capability_failure_code: ErrorCode | null;
   timeline_patch_capability_probe_sha256: string | null;
+}
+export interface ProviderCapabilityTestResult {
+  candidate_capability_status: CandidateCapabilityStatus;
+  candidate_response_adapter_id: CandidateResponseAdapterId | null; candidate_probe_protocol_version: string | null;
+  candidate_capability_tested_at: string | null; candidate_capability_failure_code: ErrorCode | null;
+  candidate_capability_probe_sha256: string | null;
 }
 export interface EgressPreview {
   egress_preview_id: EgressPreviewId; provider: { display_name: string; origin: string; model: string };
@@ -723,7 +742,7 @@ function isLanguage(value: unknown): value is string { return isString(value) &&
 function hasSensitiveKey(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(hasSensitiveKey);
   if (!isRecord(value)) return false;
-  return Object.entries(value).some(([key, item]) => ["installed_path", "install_dir", "path", "uri", "token", "admin_token", "ui_token", "api_key", "secret", "authorization", "prompt", "raw_response", "http_body", "request_body", "system_message"].includes(key.toLowerCase()) || hasSensitiveKey(item));
+  return Object.entries(value).some(([key, item]) => ["installed_path", "install_dir", "path", "uri", "token", "admin_token", "ui_token", "api_key", "secret", "authorization", "prompt", "raw_response", "http_body", "request_body", "response_body", "body", "request", "response", "system_message"].includes(key.toLowerCase()) || hasSensitiveKey(item));
 }
 
 export function isLicenseInfo(value: unknown): value is LicenseInfo {
@@ -819,13 +838,20 @@ export function isJob(value: unknown): value is Job {
 const BRIEF_INPUT_KEYS = ["schema_version", "topic", "audience", "target_platform", "target_duration_us", "narrative_goal", "style_notes", "must_keep", "forbidden", "original_audio_policy", "caption_policy", "caption_preset_id", "default_layout"] as const;
 const BRIEF_KEYS = ["brief_id", "project_id", "document_sha256", ...BRIEF_INPUT_KEYS] as const;
 const PROVIDER_CAPABILITY_KEYS = ["timeline_patch_capability_status", "timeline_patch_response_adapter_id", "timeline_patch_probe_protocol_version", "timeline_patch_capability_tested_at", "timeline_patch_capability_failure_code", "timeline_patch_capability_probe_sha256"] as const;
-const PROVIDER_KEYS = ["provider_config_id", "kind", "display_name", "base_url", "model", "enabled", "credential_status", "input_price_per_million", "output_price_per_million", ...PROVIDER_CAPABILITY_KEYS, "created_at", "updated_at"] as const;
+const CANDIDATE_CAPABILITY_KEYS = ["candidate_capability_status", "candidate_response_adapter_id", "candidate_probe_protocol_version", "candidate_capability_tested_at", "candidate_capability_failure_code", "candidate_capability_probe_sha256"] as const;
+const PROVIDER_KEYS = ["provider_config_id", "kind", "display_name", "base_url", "model", "enabled", "credential_status", "input_price_per_million", "output_price_per_million", ...PROVIDER_CAPABILITY_KEYS, ...CANDIDATE_CAPABILITY_KEYS, "created_at", "updated_at"] as const;
 const TIMELINE_PATCH_RESPONSE_ADAPTER_IDS: TimelinePatchResponseAdapterId[] = [
   "openai_responses_json_schema_v1",
   "openai_responses_patchscript_v1",
   "openai_chat_completions_json_schema_v1",
   "openai_chat_completions_patchscript_v1"
 ];
+export const CANDIDATE_RESPONSE_ADAPTER_IDS: readonly CandidateResponseAdapterId[] = [
+  "openai_responses_json_schema_v1",
+  "openai_responses_candidatescript_v1",
+  "openai_chat_completions_json_schema_v1",
+  "openai_chat_completions_candidatescript_v1"
+] as const;
 function isBriefText(value: unknown, maximum: number): value is string { return isString(value) && value.length <= maximum && value.trim().length > 0 && !/[\0-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(value); }
 export function isBriefInput(value: unknown): value is BriefInput {
   return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, BRIEF_INPUT_KEYS) && value.schema_version === 1 && isBriefText(value.topic, 200) && isBriefText(value.audience, 200) && value.target_platform === "generic_vertical" && isInteger(value.target_duration_us, 15_000_000) && Number(value.target_duration_us) <= 180_000_000 && isBriefText(value.narrative_goal, 500) && isString(value.style_notes) && value.style_notes.length <= 1000 && Array.isArray(value.must_keep) && value.must_keep.length <= 20 && value.must_keep.every(item => isBriefText(item, 100)) && Array.isArray(value.forbidden) && value.forbidden.length <= 20 && value.forbidden.every(item => isBriefText(item, 100)) && oneOf(["preserve", "mute"] as const, value.original_audio_policy) && oneOf(["auto_from_transcript", "none"] as const, value.caption_policy) && isCaptionPresetId(value.caption_preset_id) && isTimelineLayout(value.default_layout);
@@ -838,8 +864,16 @@ function isTimelinePatchCapabilityMetadata(value: Record<string, unknown>): bool
     ? oneOf(TIMELINE_PATCH_RESPONSE_ADAPTER_IDS, value.timeline_patch_response_adapter_id) && value.timeline_patch_probe_protocol_version === "1" && value.timeline_patch_capability_tested_at !== null && value.timeline_patch_capability_failure_code === null && value.timeline_patch_capability_probe_sha256 !== null
     : value.timeline_patch_response_adapter_id === null && value.timeline_patch_probe_protocol_version === null && (value.timeline_patch_capability_status === "untested" ? value.timeline_patch_capability_tested_at === null && value.timeline_patch_capability_failure_code === null && value.timeline_patch_capability_probe_sha256 === null : value.timeline_patch_capability_tested_at !== null && value.timeline_patch_capability_failure_code !== null && value.timeline_patch_capability_probe_sha256 !== null);
 }
-export function isProviderConfig(value: unknown): value is ProviderConfig { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, PROVIDER_KEYS) && isId(value.provider_config_id) && value.kind === "openai_compatible_text" && isBriefText(value.display_name, 100) && isString(value.base_url) && /^https?:\/\//.test(value.base_url) && isBriefText(value.model, 200) && typeof value.enabled === "boolean" && oneOf(["missing", "configured", "unavailable"] as const, value.credential_status) && (value.input_price_per_million === null || isFiniteNumber(value.input_price_per_million)) && (value.output_price_per_million === null || isFiniteNumber(value.output_price_per_million)) && isTimelinePatchCapabilityMetadata(value) && isTime(value.created_at) && isTime(value.updated_at); }
+function isCandidateCapabilityMetadata(value: Record<string, unknown>): boolean {
+  if (!oneOf(["untested", "supported", "unsupported"] as const, value.candidate_capability_status) || !(value.candidate_response_adapter_id === null || oneOf(CANDIDATE_RESPONSE_ADAPTER_IDS, value.candidate_response_adapter_id)) || !(value.candidate_probe_protocol_version === null || isBriefText(value.candidate_probe_protocol_version, 100)) || !(value.candidate_capability_tested_at === null || isTime(value.candidate_capability_tested_at)) || !(value.candidate_capability_failure_code === null || isBriefText(value.candidate_capability_failure_code, 200)) || !(value.candidate_capability_probe_sha256 === null || isSha256(value.candidate_capability_probe_sha256))) return false;
+  return value.candidate_capability_status === "supported"
+    ? oneOf(CANDIDATE_RESPONSE_ADAPTER_IDS, value.candidate_response_adapter_id) && value.candidate_probe_protocol_version === "1" && value.candidate_capability_tested_at !== null && value.candidate_capability_failure_code === null && value.candidate_capability_probe_sha256 !== null
+    : value.candidate_response_adapter_id === null && value.candidate_probe_protocol_version === null && (value.candidate_capability_status === "untested" ? value.candidate_capability_tested_at === null && value.candidate_capability_failure_code === null && value.candidate_capability_probe_sha256 === null : value.candidate_capability_tested_at !== null && value.candidate_capability_failure_code !== null && value.candidate_capability_probe_sha256 !== null);
+}
+export function isCandidateResponseAdapterId(value: unknown): value is CandidateResponseAdapterId { return oneOf(CANDIDATE_RESPONSE_ADAPTER_IDS, value); }
+export function isProviderConfig(value: unknown): value is ProviderConfig { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, PROVIDER_KEYS) && isId(value.provider_config_id) && value.kind === "openai_compatible_text" && isBriefText(value.display_name, 100) && isString(value.base_url) && /^https?:\/\//.test(value.base_url) && isBriefText(value.model, 200) && typeof value.enabled === "boolean" && oneOf(["missing", "configured", "unavailable"] as const, value.credential_status) && (value.input_price_per_million === null || isFiniteNumber(value.input_price_per_million)) && (value.output_price_per_million === null || isFiniteNumber(value.output_price_per_million)) && isTimelinePatchCapabilityMetadata(value) && isCandidateCapabilityMetadata(value) && isTime(value.created_at) && isTime(value.updated_at); }
 export function isTimelinePatchCapabilityTestResponse(value: unknown): value is TimelinePatchCapabilityTestResponse { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, PROVIDER_CAPABILITY_KEYS) && isTimelinePatchCapabilityMetadata(value); }
+export function isProviderCapabilityTestResult(value: unknown): value is ProviderCapabilityTestResult { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, CANDIDATE_CAPABILITY_KEYS) && isCandidateCapabilityMetadata(value); }
 export function isEgressPreview(value: unknown): value is EgressPreview { return isRecord(value) && !hasSensitiveKey({ ...value, payload: undefined }) && onlyKeys(value, ["egress_preview_id", "provider", "prompt_template_version", "sent_fields", "payload_sha256", "expires_at", "payload", "stats"]) && isId(value.egress_preview_id) && isRecord(value.provider) && onlyKeys(value.provider, ["display_name", "origin", "model"]) && isBriefText(value.provider.display_name, 100) && isString(value.provider.origin) && /^https?:\/\//.test(value.provider.origin) && isBriefText(value.provider.model, 200) && isBriefText(value.prompt_template_version, 200) && Array.isArray(value.sent_fields) && value.sent_fields.every(item => isString(item) && item.length > 0) && isSha256(value.payload_sha256) && isTime(value.expires_at) && isRecord(value.payload) && isRecord(value.stats) && onlyKeys(value.stats, ["transcript_count", "segment_count", "character_count", "estimated_tokens"]) && [value.stats.transcript_count, value.stats.segment_count, value.stats.character_count, value.stats.estimated_tokens].every(item => isInteger(item, 0)); }
 export function isCandidateClip(value: unknown): value is CandidateClip { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["clip_id", "order_index", "asset_id", "transcript_id", "segment_ids", "source_start_us", "source_end_us", "reason", "model_score", "caption_text"]) && isId(value.clip_id) && isInteger(value.order_index, 0) && isId(value.asset_id) && isId(value.transcript_id) && Array.isArray(value.segment_ids) && value.segment_ids.length > 0 && value.segment_ids.every(isId) && isInteger(value.source_start_us) && isInteger(value.source_end_us, 1) && value.source_end_us > value.source_start_us && isBriefText(value.reason, 300) && (value.model_score === null || (isFiniteNumber(value.model_score) && value.model_score >= 0 && value.model_score <= 1)) && isBriefText(value.caption_text, 10_000); }
 export function isCandidatePlan(value: unknown): value is CandidatePlan { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["schema_version", "candidate_plan_id", "candidate_generation_id", "project_id", "ordinal", "variant", "title_suggestion", "summary", "duration_us", "clips", "warnings", "document_sha256"]) && value.schema_version === 1 && isId(value.candidate_plan_id) && isId(value.project_id) && isId(value.candidate_generation_id) && isInteger(value.ordinal, 0) && oneOf(["balanced", "compact", "bold"] as const, value.variant) && isBriefText(value.title_suggestion, 200) && isBriefText(value.summary, 500) && isInteger(value.duration_us, 15_000_000) && value.duration_us <= 180_000_000 && Array.isArray(value.clips) && value.clips.length > 0 && value.clips.every(isCandidateClip) && Array.isArray(value.warnings) && value.warnings.every(item => isString(item)) && isSha256(value.document_sha256); }
@@ -942,6 +976,7 @@ export function parseBriefInput(value: unknown): BriefInput { if (!isBriefInput(
 export function parseRecipe(value: unknown): Recipe { if (!isRecipe(value)) throw new ContractValidationError("Recipe"); return value; }
 export function parseProviderConfig(value: unknown): ProviderConfig { if (!isProviderConfig(value)) throw new ContractValidationError("ProviderConfig"); return value; }
 export function parseTimelinePatchCapabilityTestResponse(value: unknown): TimelinePatchCapabilityTestResponse { if (!isTimelinePatchCapabilityTestResponse(value)) throw new ContractValidationError("TimelinePatchCapabilityTestResponse"); return value; }
+export function parseProviderCapabilityTestResult(value: unknown): ProviderCapabilityTestResult { if (!isProviderCapabilityTestResult(value)) throw new ContractValidationError("ProviderCapabilityTestResult"); return value; }
 export function parseEgressPreview(value: unknown): EgressPreview { if (!isEgressPreview(value)) throw new ContractValidationError("EgressPreview"); return value; }
 export function parseCandidateGeneration(value: unknown): CandidateGeneration { if (!isCandidateGeneration(value)) throw new ContractValidationError("CandidateGeneration"); return value; }
 export function parseCandidatePlan(value: unknown): CandidatePlan { if (!isCandidatePlan(value)) throw new ContractValidationError("CandidatePlan"); return value; }

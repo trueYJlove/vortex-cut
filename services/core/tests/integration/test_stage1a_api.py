@@ -167,10 +167,11 @@ def test_stage1a_project_asset_lifecycle_and_redaction(tmp_path: Path, monkeypat
             ("v2",),
             ("v3",),
             ("v4",),
-                ("v5",),
-                ("v6",),
-                ("v7",),
-            ]
+            ("v5",),
+            ("v6",),
+            ("v7",),
+            ("v8",),
+        ]
     assert list((tmp_path / "backups").glob("app-*.db"))
 
 
@@ -211,13 +212,9 @@ def test_core_restart_recovers_running_job(tmp_path: Path, monkeypatch):
         assert recovered.status_code == 200
         assert recovered.json()["status"] == "interrupted"
         assert recovered.json()["error"]["code"] == "JOB_INTERRUPTED"
-        project_jobs = second.get(
-            f"/api/v1/projects/{project['project_id']}/jobs", headers=ui
-        )
+        project_jobs = second.get(f"/api/v1/projects/{project['project_id']}/jobs", headers=ui)
         assert project_jobs.status_code == 200
-        assert any(
-            item["job_id"] == "job_restart" for item in project_jobs.json()["items"]
-        )
+        assert any(item["job_id"] == "job_restart" for item in project_jobs.json()["items"])
 
 
 def test_refresh_detects_real_video_replacement_and_missing_file(tmp_path: Path, monkeypatch):
@@ -259,9 +256,7 @@ def test_refresh_detects_real_video_replacement_and_missing_file(tmp_path: Path,
         replace(replacement_staging, target)
         replacement_stat = target.stat()
         assert replacement_stat.st_size != original_stat.st_size
-        refreshed = client.post(
-            f"/api/v1/assets/{original_asset['asset_id']}/refresh", headers=ui
-        )
+        refreshed = client.post(f"/api/v1/assets/{original_asset['asset_id']}/refresh", headers=ui)
         assert refreshed.status_code == 200, refreshed.text
         changed = refreshed.json()
         assert changed["availability"] == "changed"
@@ -283,9 +278,7 @@ def test_sidecar_restart_auth_isolates_ui_tokens_and_allows_new_project(
         first_ui_token = first.post("/api/v1/internal/sessions", headers=admin).json()["token"]
         first_ui = {"Authorization": f"Bearer {first_ui_token}"}
         before = first.post("/api/v1/projects", headers=first_ui, json={"name": "before"})
-        wrong_scope = first.post(
-            "/api/v1/projects", headers=admin, json={"name": "wrong scope"}
-        )
+        wrong_scope = first.post("/api/v1/projects", headers=admin, json={"name": "wrong scope"})
         assert before.status_code == 201
         assert wrong_scope.status_code == 401
     with TestClient(create_app(settings)) as restarted:

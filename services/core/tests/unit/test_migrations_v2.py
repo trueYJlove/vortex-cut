@@ -94,10 +94,9 @@ class TestMigrationV2:
         db_path = _init(tmp_path)
         with sqlite3.connect(db_path) as db:
             versions = [
-                row[0]
-                for row in db.execute("SELECT version FROM schema_migrations ORDER BY rowid")
+                row[0] for row in db.execute("SELECT version FROM schema_migrations ORDER BY rowid")
             ]
-        assert versions == ["v1", "v2", "v3", "v4", "v5", "v6", "v7"]
+        assert versions == ["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8"]
         # each migration writes a pre-flight backup
         assert len(list((tmp_path / "backups").glob("app-*.db"))) >= 2
 
@@ -121,10 +120,9 @@ class TestMigrationV2:
         Database(db_path).initialize()
         with sqlite3.connect(db_path) as db:
             versions = [
-                row[0]
-                for row in db.execute("SELECT version FROM schema_migrations ORDER BY rowid")
+                row[0] for row in db.execute("SELECT version FROM schema_migrations ORDER BY rowid")
             ]
-        assert versions == ["v1", "v2", "v3", "v4", "v5", "v6", "v7"]
+        assert versions == ["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8"]
 
     def test_transcript_foreign_keys_and_cascade_delete(self, tmp_path: Path):
         db_path = _init(tmp_path)

@@ -464,6 +464,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="AIVideo Core", version=__version__, lifespan=lifespan)
     app.state.core = state
 
+    def provider_public(provider: dict[str, Any]) -> dict[str, Any]:
+        return {
+            **state.timeline_patch_planning.provider_public(provider),
+            **state.planning.candidate_capability(provider["provider_config_id"]),
+        }
+
     @app.exception_handler(HTTPException)
     async def http_error(_: Request, exc: HTTPException) -> JSONResponse:
         detail = cast(dict[str, Any], exc.detail if isinstance(exc.detail, dict) else {})
@@ -587,7 +593,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def list_providers(_: CoreState = Depends(require_ui)) -> dict[str, Any]:
         return {
             "items": [
-                state.timeline_patch_planning.provider_public(item)
+                provider_public(item)
                 for item in state.providers.list()
             ]
         }
@@ -598,7 +604,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> dict[str, Any]:
         try:
             provider = state.providers.create(request.model_dump())
-            return state.timeline_patch_planning.provider_public(provider)
+            return provider_public(provider)
         except (DomainError, ProviderError) as exc:
             raise _error(exc.code, exc.message, 400) from exc
 
@@ -610,7 +616,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             provider = state.providers.patch(
                 provider_config_id, {k: v for k, v in request.model_dump().items() if v is not None}
             )
-            return state.timeline_patch_planning.provider_public(provider)
+            return provider_public(provider)
         except (DomainError, ProviderError) as exc:
             raise (
                 _domain(exc) if isinstance(exc, DomainError) else _error(exc.code, exc.message, 400)
@@ -633,6 +639,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> dict[str, Any]:
         try:
             return await state.timeline_patch_planning.test_provider_capability(provider_config_id)
+        except (DomainError, ProviderError) as exc:
+            raise (
+                _domain(exc)
+                if isinstance(exc, DomainError)
+                else _error(exc.code, exc.message, 503)
+            )
+
+    @app.post("/api/v1/providers/{provider_config_id}/candidate-planning-capability-test")
+    async def test_candidate_provider_capability(
+        provider_config_id: str, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        try:
+            return await state.planning.test_candidate_provider_capability(provider_config_id)
         except (DomainError, ProviderError) as exc:
             raise (
                 _domain(exc)

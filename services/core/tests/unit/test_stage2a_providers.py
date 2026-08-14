@@ -7,6 +7,8 @@ import httpx
 import pytest
 
 from aivs_core.providers import (
+    CANDIDATE_ADAPTER_IDS,
+    CANDIDATE_PROBE_PROTOCOL_VERSION,
     MAX_RESPONSE_BYTES,
     TIMELINE_PATCH_ADAPTER_ID,
     TIMELINE_PATCH_ADAPTER_IDS,
@@ -14,14 +16,153 @@ from aivs_core.providers import (
     OpenAICompatibleTextProvider,
     ProviderError,
     StructuredTextRequest,
+    candidate_adapter_supported,
     normalized_base_url,
+    parse_candidatescript,
     parse_patchscript,
     timeline_patch_adapter_supported,
 )
 
 
+def _candidate_script(
+    *,
+    newline: str = "\n",
+    clips_per_variant: int = 1,
+    score: object = None,
+) -> str:
+    records: list[str] = []
+    for variant in ("balanced", "compact", "bold"):
+        records.append(
+            json.dumps(
+                {
+                    "op": "candidate",
+                    "variant": variant,
+                    "title_suggestion": variant,
+                    "summary": "summary",
+                }
+            )
+        )
+        for index in range(clips_per_variant):
+            records.append(
+                json.dumps(
+                    {
+                        "op": "clip",
+                        "variant": variant,
+                        "segment_refs": [f"{variant}-{index}"],
+                        "reason": "reason",
+                        "model_score": score,
+                    }
+                )
+            )
+    return newline.join(["AIVS-CANDIDATE/1", *records, "AIVS-END"])
+
+
 def _request() -> StructuredTextRequest:
     return StructuredTextRequest("p1", "https://provider.example/v1", "model", "SENTINEL_KEY", {})
+
+
+def test_candidatescript_parser_enforces_closed_framing_and_variants() -> None:
+    records = []
+    for variant in ("balanced", "compact", "bold"):
+        records.append(
+            json.dumps(
+                {
+                    "op": "candidate",
+                    "variant": variant,
+                    "title_suggestion": variant,
+                    "summary": "summary",
+                }
+            )
+        )
+        records.append(
+            json.dumps(
+                {
+                    "op": "clip",
+                    "variant": variant,
+                    "segment_refs": ["s1"],
+                    "reason": "reason",
+                    "model_score": None,
+                }
+            )
+        )
+    raw = "AIVS-CANDIDATE/1\n" + "\n".join(records) + "\nAIVS-END\n"
+    assert [item["variant"] for item in parse_candidatescript(raw)["candidates"]] == [
+        "balanced",
+        "compact",
+        "bold",
+    ]
+    for invalid in (
+        raw.replace("\n", "\r\n", 1),
+        raw.replace('"s1"', '"s1","segment_refs":["s1"]', 1),
+        raw + "tail",
+    ):
+        with pytest.raises(ValueError):
+            parse_candidatescript(invalid)
+    assert len(CANDIDATE_ADAPTER_IDS) == 4
+    assert CANDIDATE_PROBE_PROTOCOL_VERSION == "1"
+    assert candidate_adapter_supported("openai_responses_candidatescript_v1")
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+@pytest.mark.parametrize("clips_per_variant", [1, 30])
+def test_candidatescript_parser_accepts_only_complete_line_protocol(
+    newline: str, clips_per_variant: int
+) -> None:
+    parsed = parse_candidatescript(
+        _candidate_script(newline=newline, clips_per_variant=clips_per_variant) + newline
+    )
+    assert [len(candidate["clips"]) for candidate in parsed["candidates"]] == [
+        clips_per_variant,
+        clips_per_variant,
+        clips_per_variant,
+    ]
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "\ufeff" + _candidate_script(),
+        _candidate_script().replace("\n", "\r\n", 1),
+        "```text\n" + _candidate_script() + "\n```",
+        "# comment\n" + _candidate_script(),
+        _candidate_script().replace("\n", "\n\n", 1),
+        "prefix\n" + _candidate_script(),
+        _candidate_script() + "\nsuffix",
+        _candidate_script().replace(
+            '"summary": "summary"',
+            '"summary":"a","summary":"b"',
+            1,
+        ),
+        _candidate_script().replace(
+            '"summary": "summary"',
+            '"extra":1,"summary":"summary"',
+            1,
+        ),
+        _candidate_script().replace(
+            '"summary": "summary"',
+            '"title_suggestion":true',
+            1,
+        ),
+        _candidate_script().replace('"model_score": null', '"model_score": NaN', 1),
+        _candidate_script().replace('"model_score": null', '"model_score": Infinity', 1),
+        _candidate_script().replace('"variant": "compact"', '"variant": "bold"', 1),
+        _candidate_script().replace('"segment_refs": ["balanced-0"]', '"segment_refs": []', 1),
+        _candidate_script().replace(
+            '"segment_refs": ["balanced-0"]',
+            '"segment_refs": ["balanced-0", "balanced-0"]',
+            1,
+        ),
+        _candidate_script(clips_per_variant=30).replace(
+            '"model_score": null}',
+            '"model_score": null}\n{"op":"clip","variant":"balanced",'
+            '"segment_refs":["extra"],"reason":"r","model_score":null}',
+            1,
+        ),
+    ],
+)
+def test_candidatescript_parser_rejects_untrusted_or_invalid_records(raw: str) -> None:
+    with pytest.raises(ValueError):
+        parse_candidatescript(raw)
 
 
 @pytest.mark.parametrize(
@@ -250,7 +391,7 @@ async def test_fixed_timeline_adapters_emit_exact_request_shape(
 ) -> None:
     captured: dict = {}
     patchscript = adapter.endswith("patchscript_v1")
-    raw = "AIVS-PATCH/1\n{\"op\":\"set_layout\",\"clip_id\":\"c\",\"layout\":\"fit\"}\nAIVS-END"
+    raw = 'AIVS-PATCH/1\n{"op":"set_layout","clip_id":"c","layout":"fit"}\nAIVS-END'
 
     patch = {
         "summary": "s",
@@ -276,9 +417,7 @@ async def test_fixed_timeline_adapters_emit_exact_request_shape(
             }
         else:
             response = {
-                "choices": [
-                    {"message": {"content": raw if patchscript else json.dumps(patch)}}
-                ]
+                "choices": [{"message": {"content": raw if patchscript else json.dumps(patch)}}]
             }
         return httpx.Response(200, json=response, request=request)
 
@@ -303,13 +442,147 @@ async def test_fixed_timeline_adapters_emit_exact_request_shape(
     assert result.value["operations"][0]["op"] == "set_layout"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("adapter", "endpoint"),
+    [
+        ("openai_responses_candidatescript_v1", "/responses"),
+        ("openai_chat_completions_candidatescript_v1", "/chat/completions"),
+    ],
+)
+async def test_candidate_script_adapters_use_fixed_endpoint_and_contract_instructions(
+    adapter: str, endpoint: str
+) -> None:
+    captured: list[dict] = []
+    records = []
+    for variant in ("balanced", "compact", "bold"):
+        records += [
+            {
+                "op": "candidate",
+                "variant": variant,
+                "title_suggestion": variant,
+                "summary": "summary",
+            },
+            {
+                "op": "clip",
+                "variant": variant,
+                "segment_refs": ["s1"],
+                "reason": "reason",
+                "model_score": None,
+            },
+        ]
+    raw = "AIVS-CANDIDATE/1\n" + "\n".join(json.dumps(item) for item in records) + "\nAIVS-END"
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(json.loads(request.content))
+        response = (
+            {"output": [{"type": "message", "content": [{"type": "output_text", "text": raw}]}]}
+            if adapter.startswith("openai_responses")
+            else {"choices": [{"message": {"content": raw}}]}
+        )
+        assert request.url.path == "/v1" + endpoint
+        return httpx.Response(200, json=response, request=request)
+
+    result = await _provider(httpx.MockTransport(handler)).generate(
+        StructuredTextRequest(
+            "p1",
+            "https://provider.example/v1",
+            "m",
+            "SENTINEL_KEY",
+            {"business": "data"},
+            capability="candidate_planning",
+            response_adapter_id=adapter,
+        ),
+        asyncio.Event(),
+    )
+    assert len(captured) == 1
+    body = captured[0]
+    instructions = (
+        body["instructions"] if "instructions" in body else body["messages"][0]["content"]
+    )
+    assert "AIVS-CANDIDATE/1" in instructions
+    assert "text" not in body and "response_format" not in body and "tools" not in body
+    assert [candidate["variant"] for candidate in result.value["candidates"]] == [
+        "balanced",
+        "compact",
+        "bold",
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("adapter", "endpoint", "script"),
+    [
+        ("openai_responses_json_schema_v1", "/responses", False),
+        ("openai_responses_candidatescript_v1", "/responses", True),
+        ("openai_chat_completions_json_schema_v1", "/chat/completions", False),
+        ("openai_chat_completions_candidatescript_v1", "/chat/completions", True),
+    ],
+)
+async def test_every_candidate_adapter_uses_its_single_fixed_request_shape(
+    adapter: str, endpoint: str, script: bool
+) -> None:
+    captured: list[dict] = []
+    candidate_value = parse_candidatescript(_candidate_script())
+    content = _candidate_script() if script else json.dumps(candidate_value)
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured.append({"path": request.url.path, "body": json.loads(request.content)})
+        envelope = (
+            {
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": content}],
+                    }
+                ]
+            }
+            if adapter.startswith("openai_responses")
+            else {"choices": [{"message": {"content": content}}]}
+        )
+        return httpx.Response(200, json=envelope, request=request)
+
+    result = await _provider(httpx.MockTransport(handler)).generate(
+        StructuredTextRequest(
+            "p1",
+            "https://provider.example/v1",
+            "m",
+            "SENTINEL_KEY",
+            {"opaque": "business-content"},
+            capability="candidate_planning",
+            response_adapter_id=adapter,
+        ),
+        asyncio.Event(),
+    )
+    assert len(captured) == 1
+    assert captured[0]["path"] == "/v1" + endpoint
+    body = captured[0]["body"]
+    if adapter == "openai_responses_json_schema_v1":
+        assert set(body) == {"model", "instructions", "input", "text"}
+        assert body["text"]["format"]["name"] == "candidate-plan-output-v1"
+        assert "response_format" not in body and "tools" not in body
+    elif adapter == "openai_responses_candidatescript_v1":
+        assert set(body) == {"model", "instructions", "input"}
+        assert "text" not in body and "response_format" not in body and "tools" not in body
+        assert "AIVS-CANDIDATE/1" in body["instructions"]
+    elif adapter == "openai_chat_completions_json_schema_v1":
+        assert set(body) == {"model", "messages", "response_format"}
+        assert "tools" not in body
+        assert body["response_format"]["json_schema"]["name"] == "candidate-plan-output-v1"
+    else:
+        assert set(body) == {"model", "messages"}
+        assert "response_format" not in body and "tools" not in body
+        assert "AIVS-CANDIDATE/1" in body["messages"][0]["content"]
+    assert result.value == candidate_value
+
+
 def test_patchscript_parser_rejects_bool_duplicate_and_unknown_fields() -> None:
-    valid = "AIVS-PATCH/1\n{\"op\":\"move_clip\",\"clip_id\":\"c\",\"to_index\":0}\nAIVS-END"
+    valid = 'AIVS-PATCH/1\n{"op":"move_clip","clip_id":"c","to_index":0}\nAIVS-END'
     assert parse_patchscript(valid)["operations"][0]["to_index"] == 0
     for raw in (
-        "AIVS-PATCH/1\n{\"op\":\"move_clip\",\"clip_id\":\"c\",\"to_index\":true}\nAIVS-END",
-        "AIVS-PATCH/1\n{\"op\":\"move_clip\",\"clip_id\":\"c\",\"clip_id\":\"d\",\"to_index\":0}\nAIVS-END",
-        "AIVS-PATCH/1\n{\"op\":\"move_clip\",\"clip_id\":\"c\",\"to_index\":0,\"extra\":1}\nAIVS-END",
+        'AIVS-PATCH/1\n{"op":"move_clip","clip_id":"c","to_index":true}\nAIVS-END',
+        'AIVS-PATCH/1\n{"op":"move_clip","clip_id":"c","clip_id":"d","to_index":0}\nAIVS-END',
+        'AIVS-PATCH/1\n{"op":"move_clip","clip_id":"c","to_index":0,"extra":1}\nAIVS-END',
     ):
         with pytest.raises(ValueError):
             parse_patchscript(raw)
@@ -319,10 +592,10 @@ def test_patchscript_parser_rejects_bool_duplicate_and_unknown_fields() -> None:
 @pytest.mark.parametrize(
     "raw",
     [
-        "```text\nAIVS-PATCH/1\n{\"op\":\"remove_clip\",\"clip_id\":\"c\"}\nAIVS-END\n```",
-        "AIVS-PATCH/1\n\n{\"op\":\"remove_clip\",\"clip_id\":\"c\"}\nAIVS-END",
-        "AIVS-PATCH/1\n{\"op\":\"set_clip_locked\",\"clip_id\":\"c\",\"locked\":false}\nAIVS-END",
-        "AIVS-PATCH/1\n{\"op\":\"remove_clip\",\"clip_id\":\"c\"}\nAIVS-END\ntrailing",
+        '```text\nAIVS-PATCH/1\n{"op":"remove_clip","clip_id":"c"}\nAIVS-END\n```',
+        'AIVS-PATCH/1\n\n{"op":"remove_clip","clip_id":"c"}\nAIVS-END',
+        'AIVS-PATCH/1\n{"op":"set_clip_locked","clip_id":"c","locked":false}\nAIVS-END',
+        'AIVS-PATCH/1\n{"op":"remove_clip","clip_id":"c"}\nAIVS-END\ntrailing',
     ],
 )
 def test_patchscript_parser_rejects_framing_and_forbidden_operations(raw: str) -> None:

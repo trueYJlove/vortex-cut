@@ -162,9 +162,7 @@ def test_candidate_adopt_undo_redo_authoritative_preview_and_export(tmp_path, mo
             "caption_preset_id": "default-bottom",
             "default_layout": "fit",
         }
-        brief_response = client.put(
-            f"/api/v1/projects/{project_id}/brief", headers=ui, json=brief
-        )
+        brief_response = client.put(f"/api/v1/projects/{project_id}/brief", headers=ui, json=brief)
         assert brief_response.status_code == 200
         provider = client.post(
             "/api/v1/providers",
@@ -177,11 +175,22 @@ def test_candidate_adopt_undo_redo_authoritative_preview_and_export(tmp_path, mo
             },
         ).json()
         provider_id = provider["provider_config_id"]
-        assert client.put(
-            f"/api/v1/internal/provider-secrets/{provider_id}",
-            headers=admin,
-            json={"secret": "fixture-secret"},
-        ).status_code == 200
+        assert (
+            client.put(
+                f"/api/v1/internal/provider-secrets/{provider_id}",
+                headers=admin,
+                json={"secret": "fixture-secret"},
+            ).status_code
+            == 200
+        )
+        with client.app.state.core.db.connection() as db:
+            db.execute(
+                "UPDATE provider_configs SET candidate_capability_status='supported',"
+                "candidate_response_adapter_id='openai_chat_completions_json_schema_v1',"
+                "candidate_probe_protocol_version='1',candidate_capability_tested_at='now',"
+                "candidate_capability_probe_sha256='sha256:fixture' WHERE id=?",
+                (provider_id,),
+            )
         client.app.state.core.planning.provider_factory = FixedProvider
         preview = client.post(
             f"/api/v1/projects/{project_id}/candidate-generations/prepare",
@@ -205,9 +214,7 @@ def test_candidate_adopt_undo_redo_authoritative_preview_and_export(tmp_path, mo
         assert created.status_code == 200, created.text
         generation_job = _wait(client, ui, created.json()["job"]["job_id"])
         assert generation_job["status"] == "succeeded", generation_job
-        plans_response = client.get(
-            f"/api/v1/projects/{project_id}/candidate-plans", headers=ui
-        )
+        plans_response = client.get(f"/api/v1/projects/{project_id}/candidate-plans", headers=ui)
         plans = plans_response.json()["items"]
         candidate = next(item for item in plans if item["variant"] == "balanced")
         adopted = client.post(

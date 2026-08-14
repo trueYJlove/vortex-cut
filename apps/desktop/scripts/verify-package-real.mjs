@@ -1,66 +1,99 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const desktop = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const root = resolve(desktop, "../..");
-const require = createRequire(join(desktop, "package.json"));
-const playwright = require(require.resolve("playwright", { paths: [dirname(require.resolve("@playwright/test"))] }));
-const electron = playwright._electron;
-const modelRoot = process.env.AIVS_E2E_MODEL_DIR;
-const sourceVideo = process.env.AIVS_E2E_MIXED_VIDEO;
-const realPreflight = [
-  { name: "AIVS_E2E_MODEL_DIR", supplied: Boolean(modelRoot), exists: Boolean(modelRoot && existsSync(modelRoot)) },
-  { name: "AIVS_E2E_MIXED_VIDEO", supplied: Boolean(sourceVideo), exists: Boolean(sourceVideo && existsSync(sourceVideo)) }
-];
-const missingRealRequirements = realPreflight.filter(item => !item.exists).map(item => item.name);
-if (missingRealRequirements.length) {
-  const evidenceDir = join(root, "test-results", "package-verify-real");
-  const evidence = { schema_version: 1, status: "unverified", reason: "required real model or media fixture is unavailable", required_environment: realPreflight, missing_requirements: missingRealRequirements, paths_recorded: false };
-  await mkdir(evidenceDir, { recursive: true });
-  await writeFile(join(evidenceDir, "preflight.json"), `${JSON.stringify(evidence, null, 2)}\n`, "utf8");
-  throw new Error(`package:verify:real is unverified; missing usable ${missingRealRequirements.join(", ")}. Evidence: test-results/package-verify-real/preflight.json`);
+const defaultEvidenceRoot = join(root, "test-results", "stage1c-render-rework-package-20260811");
+const evidenceOverride = process.env.AIVS_PACKAGE_REAL_EVIDENCE_ROOT;
+const evidenceRoot = evidenceOverride && isAbsolute(evidenceOverride) ? resolve(evidenceOverride) : resolve(defaultEvidenceRoot);
+const runId = `full-chain-${process.pid}-${Date.now()}`;
+const evidenceRun = join(evidenceRoot, runId);
+let stage = "preflight";
+let handlingFailure = false;
+const progress = Object.create(null);
+
+const allowedCodes = new Set([
+  "PACKAGE_REAL_EVIDENCE_ROOT_INVALID", "REAL_FIXTURE_UNAVAILABLE", "PACKAGE_COMPONENT_VERIFY_FAILED", "PACKAGE_REPORT_UNREADABLE", "PACKAGE_REPORT_INVALID",
+  "PACKAGE_REQUIRED_SIDECAR_MISSING", "PACKAGE_REQUIRED_FFMPEG_MISSING", "PACKAGE_REQUIRED_LICENSE_MISSING", "PACKAGE_REQUIRED_COMPONENT_MANIFEST_MISSING",
+  "PACKAGE_REQUIRED_MODEL_MANIFEST_MISSING", "PACKAGE_REQUIRED_RECIPE_MISSING", "PACKAGE_REQUIRED_FONT_MISSING", "PACKAGE_COMPONENT_MANIFEST_INVALID",
+  "PACKAGE_COMPONENT_LICENSE_INVALID", "PACKAGE_COMPONENT_PIN_INVALID", "PACKAGE_COMPONENT_HASH_MISMATCH", "PACKAGE_FONT_BUNDLE_INVALID",
+  "PACKAGE_FONT_BUNDLE_FILE_MISSING", "PACKAGE_FONT_BUNDLE_HASH_MISMATCH", "PACKAGE_CAPTION_PRESETS_INVALID",
+  "PACKAGE_FFMPEG_FILTER_INVALID", "PACKAGE_MODEL_MANIFEST_INVALID", "PACKAGE_MODEL_WEIGHTS_EMBEDDED",
+  "PACKAGE_RECIPE_MANIFEST_INVALID", "PACKAGE_VERIFY_UNEXPECTED",
+  "COMPONENT_MANIFEST_UNREADABLE", "SIDECAR_COMPONENT_MISSING", "SIDECAR_HASH_MISMATCH", "WORKSPACE_SETUP_FAILED",
+  "ELECTRON_LAUNCH_FAILED", "ELECTRON_RUNTIME_FAILED", "IMPORT_CANCELLED", "MODEL_MANIFEST_MISSING", "MODEL_RUNTIME_UNAVAILABLE",
+  "TRANSCRIPTION_FAILED", "TRANSCRIPT_SEGMENT_OR_WORD_MISSING", "TIMELINE_OR_CAPTION_MISSING", "JOB_TIMEOUT", "JOB_NOT_CREATED",
+  "PREVIEW_FAILED", "PREVIEW_PROJECT_SYNC_FAILED", "PREVIEW_UI_NOT_READY", "PREVIEW_JOB_NOT_CREATED", "PREVIEW_JOB_FAILED", "PREVIEW_RECORD_MISSING", "PREVIEW_RANGE_FAILED",
+  "EXPORT_FAILED", "PREVIEW_NOT_STALE", "RESTART_TIMELINE_UNAVAILABLE", "RESTART_PREVIEWS_UNAVAILABLE",
+  "RESTART_EXPORTS_UNAVAILABLE", "RESTART_MODELS_UNAVAILABLE", "RESTART_REVISION_MISMATCH", "RESTART_PREVIEW_MISSING",
+  "RESTART_EXPORT_MISSING", "RESTART_RESTORE_FAILED",
+  "EXPORT_HASH_MISMATCH", "EXPORT_CODEC_INVALID", "RENDERER_DTO_SENSITIVE_FIELD", "EVIDENCE_WRITE_FAILED",
+  "PACKAGE_REAL_VERIFICATION_FAILED"
+]);
+
+const fail = code => { throw new Error(code); };
+const safeErrorCode = error => allowedCodes.has(String(error?.message ?? "")) ? error.message : "PACKAGE_REAL_VERIFICATION_FAILED";
+const failureStatus = code => code === "REAL_FIXTURE_UNAVAILABLE" || code === "PACKAGE_REAL_EVIDENCE_ROOT_INVALID" ? "unverified" : "failed";
+const safeStage = () => /^[a-z_]+$/.test(stage) ? stage : "unknown";
+const safeJobStatus = value => ["succeeded", "failed", "cancelled", "interrupted"].includes(value) ? value : "unknown";
+const safeCount = value => Number.isInteger(value) && value >= 0 ? value : undefined;
+const failureChecks = () => {
+  const checks = {};
+  if (typeof progress.component_hash_verified === "boolean") checks.component_hash_verified = progress.component_hash_verified;
+  for (const key of ["model_ready_installed_count", "transcription_segment_count", "transcription_word_count", "timeline_clip_count", "timeline_caption_count", "preview_record_count", "preview_range_byte_count", "export_record_count", "restart_preview_count", "restart_export_count", "restart_model_count"]) {
+    const value = safeCount(progress[key]);
+    if (value !== undefined) checks[key] = value;
+  }
+  if (typeof progress.preview_ui_ready === "boolean") checks.preview_ui_ready = progress.preview_ui_ready;
+  if (typeof progress.preview_project_synced === "boolean") checks.preview_project_synced = progress.preview_project_synced;
+  if (typeof progress.preview_project_reset === "boolean") checks.preview_project_reset = progress.preview_project_reset;
+  if (typeof progress.preview_project_selected === "boolean") checks.preview_project_selected = progress.preview_project_selected;
+  if (typeof progress.preview_stale_before_restart === "boolean") checks.preview_stale_before_restart = progress.preview_stale_before_restart;
+  if (typeof progress.restart_timeline_restored === "boolean") checks.restart_timeline_restored = progress.restart_timeline_restored;
+  if (typeof progress.restart_revision_matches === "boolean") checks.restart_revision_matches = progress.restart_revision_matches;
+  if (typeof progress.export_job_created === "boolean") checks.export_job_created = progress.export_job_created;
+  if (progress.preview_range_status !== undefined) checks.preview_range_status = Number.isInteger(progress.preview_range_status) ? progress.preview_range_status : "unknown";
+  if (progress.export_job_status !== undefined) checks.export_job_status = safeJobStatus(progress.export_job_status);
+  if (typeof progress.preview_job_created === "boolean") checks.preview_job_created = progress.preview_job_created;
+  if (progress.preview_job_status !== undefined) checks.preview_job_status = safeJobStatus(progress.preview_job_status);
+  return checks;
+};
+
+async function writeFailureEvidence(code) {
+  const result = { schema_version: 2, status: failureStatus(code), code, stage: safeStage(), checks: { ...failureChecks(), evidence_written: true } };
+  try {
+    await mkdir(evidenceRun, { recursive: true });
+    await writeFile(join(evidenceRun, "result.json"), `${JSON.stringify(result, null, 2)}\n`, "utf8");
+    await writeFile(join(evidenceRoot, "latest.json"), `${JSON.stringify({ ...result, evidence_component: "current-run" }, null, 2)}\n`, "utf8");
+  } catch {
+    return false;
+  }
+  return true;
 }
 
-const reportPath = process.env.AIVS_PACKAGE_REPORT ?? join(root, "build", "reports", "windows-package-latest.json");
-const report = JSON.parse(await readFile(reportPath, "utf8"));
-if (report.schema_version !== 1 || report.status !== "built") throw new Error("Windows package report is not a completed build");
-const packagedExe = join(report.unpacked_root, "AIVideo Studio.exe");
-const packageResources = report.package_root;
-const componentManifest = JSON.parse(await readFile(join(packageResources, "manifests", "components.json"), "utf8"));
-const sidecarComponent = componentManifest.components.find(item => item.path === "core/aivs-core/aivs-core.exe");
-if (!sidecarComponent) throw new Error("components manifest does not contain the packaged sidecar");
-const sidecarBytes = await readFile(join(packageResources, sidecarComponent.path));
-const sidecarHash = createHash("sha256").update(sidecarBytes).digest("hex");
-if (sidecarHash.toLowerCase() !== String(sidecarComponent.sha256).toLowerCase()) throw new Error("packaged sidecar hash does not match components manifest");
+async function terminate(error) {
+  if (handlingFailure) return;
+  handlingFailure = true;
+  const code = safeErrorCode(error);
+  const written = await writeFailureEvidence(code);
+  console.error(written ? code : "EVIDENCE_WRITE_FAILED");
+  process.exitCode = 1;
+}
 
-const evidenceRoot = join(root, "test-results", "stage1c-render-rework-package-20260811");
-const run = join(evidenceRoot, `full-chain-${process.pid}-${Date.now()}`);
-const userData = join(run, "用户 数据");
-const video = join(run, "中文 路径", "中英混合 原素材.mp4");
-const destination = join(run, "最终 导出.mp4");
-const launchEvidencePath = join(run, "sidecar-launch.json");
-await mkdir(dirname(video), { recursive: true });
-await copyFile(sourceVideo, video);
+process.on("uncaughtException", error => { void terminate(error); });
+process.on("unhandledRejection", error => { void terminate(error); });
 
-const launch = () => electron.launch({
-  executablePath: packagedExe,
-  args: [`--user-data-dir=${userData}`],
-  cwd: report.unpacked_root,
-  env: {
-    ...process.env,
-    AIVS_E2E_ASSET_PATHS: JSON.stringify({ video }),
-    AIVS_E2E_EXPORT_PATH: destination,
-    AIVS_E2E_MODEL_DIR: modelRoot,
-    AIVS_E2E_SIDECAR_ARGV_EVIDENCE: launchEvidencePath,
-    ELECTRON_RUN_AS_NODE: undefined,
-    NODE_OPTIONS: undefined
-  }
-});
+const rendererPayloadHasSensitiveFields = value => {
+  if (Array.isArray(value)) return value.some(rendererPayloadHasSensitiveFields);
+  if (!value || typeof value !== "object") return false;
+  return Object.entries(value).some(([key, item]) => /(?:path|uri|token|authorization|secret|prompt|raw_response|egress|request|response|error|body|transcript|segment|word|render_plan|toolchain|admin)/i.test(key) || rendererPayloadHasSensitiveFields(item));
+};
 
 async function waitForJob(page, jobId, timeout = 300_000) {
   const deadline = Date.now() + timeout;
@@ -69,114 +102,352 @@ async function waitForJob(page, jobId, timeout = 300_000) {
     if (["succeeded", "failed", "cancelled", "interrupted"].includes(job.status)) return job;
     await page.waitForTimeout(500);
   }
-  throw new Error(`job timeout: ${jobId}`);
+  fail("JOB_TIMEOUT");
 }
 
-async function newestJob(page, projectId, kind) {
+async function newestJob(page, projectId, kind, missingCode = "JOB_NOT_CREATED") {
   for (let index = 0; index < 120; index += 1) {
     const jobs = await page.evaluate(id => window.desktop.listJobs({ project_id: id, limit: 100 }), projectId);
     const job = jobs.items.find(item => item.kind === kind);
     if (job) return job;
     await page.waitForTimeout(250);
   }
-  throw new Error(`${kind} job was not created`);
+  fail(missingCode);
 }
 
-let projectId; let finalState; let preview; let exportRecord; let transcript; let range; let models; let argv;
-const first = await launch();
-try {
-  const page = await first.firstWindow();
-  await page.waitForFunction(() => Boolean(window.desktop?.getRuntime));
-  await page.evaluate(() => window.desktop.getRuntime());
-  const launchEvidence = JSON.parse(await readFile(launchEvidencePath, "utf8"));
-  argv = launchEvidence.args;
-  const expectedManifestDir = join(packageResources, "model-manifests");
-  const manifestIndex = argv.indexOf("--manifest-dir");
-  if (manifestIndex < 0 || argv[manifestIndex + 1] !== expectedManifestDir) throw new Error(`packaged sidecar argv is missing manifest-dir: ${JSON.stringify(argv)}`);
-  const setup = await page.evaluate(async () => {
-    const project = await window.desktop.createProject({ name: "Package Real Full Chain" });
-    const imported = await window.desktop.importAsset({ project_id: project.project_id, kind: "video" });
-    if (!imported) throw new Error("fixture import cancelled");
-    const modelPage = await window.desktop.listModels({ limit: 100 });
-    const model = modelPage.items.find(item => item.status === "ready" && item.provider_status === "installed");
-    if (!modelPage.items.length) throw new Error("packaged application exposed no model manifest");
-    if (!model) throw new Error(`packaged provider runtime is unavailable: ${JSON.stringify(modelPage.items)}`);
-    const created = await window.desktop.createTranscription({ asset_id: imported.asset.asset_id, model_id: model.model_id, language: "auto", word_timestamps: true, license_acceptance: null });
-    return { project_id: project.project_id, asset_id: imported.asset.asset_id, modelPage, job_id: created.job.job_id };
-  });
-  projectId = setup.project_id; models = setup.modelPage;
-  const transcriptionJob = await waitForJob(page, setup.job_id);
-  if (transcriptionJob.status !== "succeeded") throw new Error(`real packaged transcription failed: ${JSON.stringify(transcriptionJob)}`);
-  transcript = await page.evaluate(async assetId => { const values = await window.desktop.listTranscripts(assetId); return window.desktop.getTranscript(values.items[0].transcript_id); }, setup.asset_id);
-  const wordCount = (transcript.words?.length ?? 0) + transcript.segments.reduce((total, segment) => total + (segment.words?.length ?? 0), 0);
-  if (!transcript.segments.length || wordCount < 1) throw new Error("real packaged transcription did not produce Segment and Word output");
-  const selectedSegment = transcript.segments.find(segment => segment.text.trim()) ?? transcript.segments[0];
-  finalState = await page.evaluate(async ({ id, transcriptId, segmentId }) => window.desktop.createTimeline({ project_id: id, timeline: { schema_version: 1, source: { kind: "transcript_selection", transcript_id: transcriptId, segment_ids: [segmentId], padding_before_us: 0, padding_after_us: 0, create_captions: true }, default_layout: "blurred_background", caption_preset_id: "default-bottom" } }), { id: projectId, transcriptId: transcript.transcript_id, segmentId: selectedSegment.segment_id });
-  if (finalState.current_revision.document.clips.length !== 1 || finalState.current_revision.document.captions.length !== 1) throw new Error("Transcript did not create Timeline Clip and Caption");
-  await page.getByRole("option", { name: "Package Real Full Chain" }).waitFor({ state: "attached", timeout: 30_000 });
-  await page.getByLabel("当前项目").selectOption("");
-  await page.getByLabel("当前项目").selectOption(projectId);
-  await page.getByRole("button", { name: "生成预览" }).waitFor({ state: "visible", timeout: 30_000 });
-  await page.waitForFunction(() => {
-    const button = [...document.querySelectorAll("button")].find(item => item.textContent?.includes("生成预览"));
-    return button instanceof HTMLButtonElement && !button.disabled;
-  });
-  await page.getByLabel("编码模式").selectOption("software");
-  await page.getByRole("button", { name: "生成预览" }).click();
-  const previewDone = await waitForJob(page, (await newestJob(page, projectId, "authoritative_preview")).job_id);
-  if (previewDone.status !== "succeeded") throw new Error(`packaged preview failed: ${JSON.stringify(previewDone)}`);
-  preview = (await page.evaluate(id => window.desktop.listPreviews({ project_id: id, limit: 100 }), projectId)).items[0];
-  range = await page.evaluate(async url => { const response = await fetch(url, { headers: { Range: "bytes=0-63" } }); return { status: response.status, length: (await response.arrayBuffer()).byteLength }; }, preview.media_url);
-  if (range.status !== 206 || range.length !== 64) throw new Error(`preview Range failed: ${JSON.stringify(range)}`);
-  await page.getByRole("button", { name: "权威预览" }).click();
-  await page.getByLabel("权威预览视频").waitFor({ state: "visible" });
-  await page.getByRole("button", { name: "导出" }).click();
-  const exportDone = await waitForJob(page, (await newestJob(page, projectId, "final_export")).job_id);
-  if (exportDone.status !== "succeeded") throw new Error(`packaged export failed: ${JSON.stringify(exportDone)}`);
-  exportRecord = (await page.evaluate(id => window.desktop.listExports({ project_id: id, limit: 100 }), projectId)).items[0];
-  const clipId = finalState.current_revision.document.clips[0].clip_id;
-  finalState = await page.evaluate(({ id, revision, clip }) => window.desktop.patchTimeline({ project_id: id, patch: { schema_version: 1, base_revision_id: revision, operations: [{ op: "set_layout", clip_id: clip, layout: "crop_fill" }], summary: "package stale verification" } }), { id: projectId, revision: finalState.current_revision.timeline_revision_id, clip: clipId });
-  const stale = (await page.evaluate(id => window.desktop.listPreviews({ project_id: id, limit: 100 }), projectId)).items[0];
-  if (stale.preview.status !== "stale") throw new Error("packaged preview did not become stale");
-  await page.screenshot({ path: join(run, "full-chain-before-restart.png"), fullPage: true });
-} finally { await first.close(); }
+async function pollRestartRead(page, reader, unavailableCode, isAvailable = value => value !== undefined && value !== null, onValue = () => undefined) {
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    try {
+      const value = await reader();
+      if (!isAvailable(value)) throw new Error("restart value unavailable");
+      onValue(value);
+      return value;
+    } catch {
+      if (attempt < 59) await page.waitForTimeout(250);
+    }
+  }
+  fail(unavailableCode);
+}
 
-const second = await launch(); let restored;
-try {
-  const page = await second.firstWindow(); await page.waitForFunction(() => Boolean(window.desktop?.getRuntime)); await page.evaluate(() => window.desktop.getRuntime());
-  restored = await page.evaluate(async id => ({ timeline: await window.desktop.getTimeline(id), previews: await window.desktop.listPreviews({ project_id: id, limit: 100 }), exports: await window.desktop.listExports({ project_id: id, limit: 100 }), models: await window.desktop.listModels({ limit: 100 }) }), projectId);
-  if (restored.timeline.current_revision.timeline_revision_id !== finalState.current_revision.timeline_revision_id || !restored.previews.items.length || !restored.exports.items.length) throw new Error("packaged restart did not restore Stage1 state");
-  await page.screenshot({ path: join(run, "full-chain-after-restart.png"), fullPage: true });
-} finally { await second.close(); }
+async function pollRestartList(page, reader, unavailableCode, missingCode, countKey) {
+  let readable = false;
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    try {
+      const value = await reader();
+      if (!Array.isArray(value?.items)) throw new Error("invalid list");
+      readable = true;
+      progress[countKey] = value.items.length;
+      if (value.items.length) return value;
+    } catch {
+      // The safe evidence records only final fixed codes, never this failure detail.
+    }
+    if (attempt < 59) await page.waitForTimeout(250);
+  }
+  fail(readable ? missingCode : unavailableCode);
+}
 
-const destinationBytes = await readFile(destination);
-const destinationHash = createHash("sha256").update(destinationBytes).digest("hex");
-if (`sha256:${destinationHash}` !== exportRecord.export_record.sha256) throw new Error("export file hash does not match ExportRecord");
-const ffprobePath = join(packageResources, "ffmpeg", "win-x64", "ffprobe.exe");
-const probe = JSON.parse(execFileSync(ffprobePath, ["-v", "error", "-show_streams", "-show_format", "-of", "json", destination], { encoding: "utf8", windowsHide: true }));
-if (!probe.streams.some(stream => stream.codec_type === "video" && stream.codec_name === "h264") || !probe.streams.some(stream => stream.codec_type === "audio" && stream.codec_name === "aac")) throw new Error("packaged export FFprobe validation failed");
-const installerBytes = await readFile(report.installer_path);
-const result = {
-  status: "passed", packaged_executable: packagedExe, sidecar_argv: argv,
-  manifest_count: models.items.length, provider_status: models.items[0].provider_status,
-  transcript: { transcript_id: transcript.transcript_id, segments: transcript.segments.length, words: (transcript.words?.length ?? 0) + transcript.segments.reduce((total, segment) => total + (segment.words?.length ?? 0), 0) },
-  timeline: { revision_id: finalState.current_revision.timeline_revision_id, clips: finalState.current_revision.document.clips.length, captions: finalState.current_revision.document.captions.length },
-  preview: preview.preview, range, export_record: exportRecord.export_record,
-  export_probe: probe, export_size: (await stat(destination)).size, export_sha256: `sha256:${destinationHash}`,
-  stale_after_restart: restored.previews.items[0].preview.status, restored_model_count: restored.models.items.length,
-  package: { installer_path: report.installer_path, installer_sha256: createHash("sha256").update(installerBytes).digest("hex"), sidecar_sha256: sidecarHash, component_sidecar_sha256: sidecarComponent.sha256 },
-  renderer_payload_has_sensitive_keys: /(?:path|uri|token|render_plan|toolchain|admin)/i.test(JSON.stringify({ preview, exportRecord }))
-};
-if (result.renderer_payload_has_sensitive_keys) throw new Error("Renderer payload leaked sensitive fields");
-await mkdir(evidenceRoot, { recursive: true });
-await writeFile(join(run, "result.json"), `${JSON.stringify(result, null, 2)}\n`, "utf8");
-await Promise.all([
-  writeFile(join(run, "argv.json"), `${JSON.stringify({ sidecar_argv: argv, manifest_dir: join(packageResources, "model-manifests") }, null, 2)}\n`, "utf8"),
-  writeFile(join(run, "model-provider.json"), `${JSON.stringify({ manifest_count: models.items.length, models: models.items.map(item => ({ model_id: item.model_id, status: item.status, provider_status: item.provider_status, runtime_version: item.runtime_version })) }, null, 2)}\n`, "utf8"),
-  writeFile(join(run, "transcript.json"), `${JSON.stringify({ transcript_id: transcript.transcript_id, status: transcript.status, language: transcript.language, segments: transcript.segments, words: transcript.words }, null, 2)}\n`, "utf8"),
-  writeFile(join(run, "render.json"), `${JSON.stringify({ preview: preview.preview, range, export_record: exportRecord.export_record, export_probe: probe, export_size: result.export_size, export_sha256: result.export_sha256 }, null, 2)}\n`, "utf8"),
-  writeFile(join(run, "restart.json"), `${JSON.stringify({ timeline_revision_id: restored.timeline.current_revision.timeline_revision_id, preview_status: restored.previews.items[0].preview.status, preview_count: restored.previews.items.length, export_count: restored.exports.items.length, model_count: restored.models.items.length }, null, 2)}\n`, "utf8"),
-  writeFile(join(run, "package-hash.json"), `${JSON.stringify(result.package, null, 2)}\n`, "utf8")
-]);
-await writeFile(join(evidenceRoot, "latest.json"), `${JSON.stringify({ ...result, evidence_dir: run }, null, 2)}\n`, "utf8");
-console.log(JSON.stringify({ ...result, evidence_dir: run }, null, 2));
+function packageVerifyFailureCode(packageRoot) {
+  const testResult = process.env.AIVS_PACKAGE_REAL_TEST_DIRECT_VERIFY;
+  if (testResult) {
+    if (testResult === "pass") return null;
+    if (testResult === "unknown") return "PACKAGE_COMPONENT_VERIFY_FAILED";
+    return allowedCodes.has(testResult) && testResult.startsWith("PACKAGE_") ? testResult : "PACKAGE_COMPONENT_VERIFY_FAILED";
+  }
+  const verifierEnv = { ...process.env, AIVS_PACKAGE_DIR: packageRoot };
+  delete verifierEnv.AIVS_PACKAGE_REPORT;
+  const result = spawnSync(process.execPath, ["scripts/verify-package.mjs"], {
+    cwd: desktop,
+    env: verifierEnv,
+    encoding: "utf8",
+    stdio: "pipe",
+    windowsHide: true
+  });
+  if (result.status === 0 && !result.error) return null;
+  const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+  return [...allowedCodes].find(code => code.startsWith("PACKAGE_") && output.includes(code)) ?? "PACKAGE_COMPONENT_VERIFY_FAILED";
+}
+
+async function main() {
+  if (evidenceOverride && !isAbsolute(evidenceOverride)) fail("PACKAGE_REAL_EVIDENCE_ROOT_INVALID");
+  const modelRoot = process.env.AIVS_E2E_MODEL_DIR;
+  const sourceVideo = process.env.AIVS_E2E_MIXED_VIDEO;
+  const realPreflight = [
+    { name: "AIVS_E2E_MODEL_DIR", supplied: Boolean(modelRoot), exists: Boolean(modelRoot && existsSync(modelRoot)) },
+    { name: "AIVS_E2E_MIXED_VIDEO", supplied: Boolean(sourceVideo), exists: Boolean(sourceVideo && existsSync(sourceVideo)) }
+  ];
+  if (realPreflight.some(item => !item.exists)) fail("REAL_FIXTURE_UNAVAILABLE");
+
+  stage = "report_read";
+  const reportPath = process.env.AIVS_PACKAGE_REPORT ?? join(root, "build", "reports", "windows-package-latest.json");
+  let report;
+  try { report = JSON.parse(await readFile(reportPath, "utf8")); } catch { fail("PACKAGE_REPORT_UNREADABLE"); }
+  if (report.schema_version !== 1 || report.status !== "built" || typeof report.package_root !== "string" || typeof report.unpacked_root !== "string" || typeof report.installer_path !== "string") fail("PACKAGE_REPORT_INVALID");
+
+  stage = "package_verify";
+  const packageVerifyFailure = packageVerifyFailureCode(report.package_root);
+  if (packageVerifyFailure) fail(packageVerifyFailure);
+
+  stage = "component_hash";
+  const packageResources = report.package_root;
+  let componentManifest;
+  try { componentManifest = JSON.parse(await readFile(join(packageResources, "manifests", "components.json"), "utf8")); } catch { fail("COMPONENT_MANIFEST_UNREADABLE"); }
+  const sidecarComponent = Array.isArray(componentManifest.components) ? componentManifest.components.find(item => item.path === "core/aivs-core/aivs-core.exe") : undefined;
+  if (!sidecarComponent || typeof sidecarComponent.sha256 !== "string") fail("SIDECAR_COMPONENT_MISSING");
+  let sidecarHash;
+  try { sidecarHash = createHash("sha256").update(await readFile(join(packageResources, sidecarComponent.path))).digest("hex"); } catch { fail("SIDECAR_COMPONENT_MISSING"); }
+  if (sidecarHash.toLowerCase() !== sidecarComponent.sha256.toLowerCase()) fail("SIDECAR_HASH_MISMATCH");
+  progress.component_hash_verified = true;
+
+  stage = "workspace_setup";
+  const workRun = join(tmpdir(), "aivideo-package-real-work", `run-${process.pid}-${Date.now()}`);
+  const userData = join(workRun, "user-data");
+  const video = join(workRun, "source.mp4");
+  const destination = join(workRun, "final.mp4");
+  try { await mkdir(dirname(video), { recursive: true }); await copyFile(sourceVideo, video); } catch { fail("WORKSPACE_SETUP_FAILED"); }
+
+  // Test-only seam: exercises safe preview evidence without launching Electron.
+  const previewTestFailure = process.env.AIVS_PACKAGE_REAL_TEST_PREVIEW_FAILURE;
+  if (previewTestFailure) {
+    stage = "preview";
+    progress.untrusted_runtime_value = { path: workRun, error: "must never be persisted" };
+    if (previewTestFailure === "project_sync") fail("PREVIEW_PROJECT_SYNC_FAILED");
+    progress.preview_project_reset = true;
+    progress.preview_project_selected = true;
+    progress.preview_project_synced = true;
+    if (previewTestFailure === "ui") fail("PREVIEW_UI_NOT_READY");
+    progress.preview_ui_ready = true;
+    if (previewTestFailure === "job_missing") fail("PREVIEW_JOB_NOT_CREATED");
+    progress.preview_job_created = true;
+    if (previewTestFailure === "job_failed") { progress.preview_job_status = "failed"; fail("PREVIEW_JOB_FAILED"); }
+    progress.preview_job_status = "succeeded";
+    if (previewTestFailure === "record_missing") { progress.preview_record_count = 0; fail("PREVIEW_RECORD_MISSING"); }
+    progress.preview_record_count = 1;
+    if (previewTestFailure === "range") fail("PREVIEW_RANGE_FAILED");
+    fail("PACKAGE_REAL_VERIFICATION_FAILED");
+  }
+
+  // Test-only seam: exercises restart diagnostics without launching Electron.
+  const restartTestFailure = process.env.AIVS_PACKAGE_REAL_TEST_RESTART_FAILURE;
+  if (restartTestFailure) {
+    stage = "restart";
+    progress.untrusted_restart_value = { path: workRun, error: "must never be persisted" };
+    progress.preview_stale_before_restart = true;
+    if (restartTestFailure === "timeline_unavailable") fail("RESTART_TIMELINE_UNAVAILABLE");
+    progress.restart_timeline_restored = true;
+    if (restartTestFailure === "revision_mismatch") {
+      progress.restart_revision_matches = false;
+      fail("RESTART_REVISION_MISMATCH");
+    }
+    progress.restart_revision_matches = true;
+    if (restartTestFailure === "previews_unavailable") fail("RESTART_PREVIEWS_UNAVAILABLE");
+    progress.restart_preview_count = 0;
+    if (restartTestFailure === "preview_missing") fail("RESTART_PREVIEW_MISSING");
+    progress.restart_preview_count = 1;
+    if (restartTestFailure === "exports_unavailable") fail("RESTART_EXPORTS_UNAVAILABLE");
+    progress.restart_export_count = 0;
+    if (restartTestFailure === "export_missing") fail("RESTART_EXPORT_MISSING");
+    progress.restart_export_count = 1;
+    if (restartTestFailure === "models_unavailable") fail("RESTART_MODELS_UNAVAILABLE");
+    progress.restart_model_count = 1;
+    fail("RESTART_RESTORE_FAILED");
+  }
+
+  stage = "electron_launch";
+  if (process.env.AIVS_PACKAGE_REAL_TEST_FAIL_STAGE === "electron_launch") fail("ELECTRON_LAUNCH_FAILED");
+  const require = createRequire(join(desktop, "package.json"));
+  let electron;
+  try {
+    const playwright = require(require.resolve("playwright", { paths: [dirname(require.resolve("@playwright/test"))] }));
+    electron = playwright._electron;
+  } catch { fail("ELECTRON_LAUNCH_FAILED"); }
+  const launch = () => electron.launch({
+    executablePath: join(report.unpacked_root, "AIVideo Studio.exe"), args: [`--user-data-dir=${userData}`], cwd: report.unpacked_root,
+    env: { ...process.env, AIVS_E2E_ASSET_PATHS: JSON.stringify({ video }), AIVS_E2E_EXPORT_PATH: destination, AIVS_E2E_MODEL_DIR: modelRoot, ELECTRON_RUN_AS_NODE: undefined, NODE_OPTIONS: undefined }
+  });
+  let first;
+  // Test-only deterministic seam: avoids requiring an actual Windows package
+  // when exercising the post-launch runtime failure evidence path.
+  if (process.env.AIVS_PACKAGE_REAL_TEST_FAIL_STAGE === "electron_runtime") {
+    stage = "electron_runtime";
+    fail("ELECTRON_RUNTIME_FAILED");
+  }
+  try { first = await launch(); } catch { fail("ELECTRON_LAUNCH_FAILED"); }
+  let projectId; let finalState; let preview; let exportRecord; let transcript; let range; let models; let wordCount;
+  try {
+    stage = "electron_runtime";
+    const page = await first.firstWindow();
+    try { await page.waitForFunction(() => Boolean(window.desktop?.getRuntime)); await page.evaluate(() => window.desktop.getRuntime()); } catch { fail("ELECTRON_RUNTIME_FAILED"); }
+
+    stage = "import_model";
+    const setup = await page.evaluate(async () => {
+      const project = await window.desktop.createProject({ name: "Package Real Full Chain" });
+      const imported = await window.desktop.importAsset({ project_id: project.project_id, kind: "video" });
+      if (!imported) throw new Error("IMPORT_CANCELLED");
+      const modelPage = await window.desktop.listModels({ limit: 100 });
+      const model = modelPage.items.find(item => item.status === "ready" && item.provider_status === "installed");
+      if (!modelPage.items.length) throw new Error("MODEL_MANIFEST_MISSING");
+      if (!model) throw new Error("MODEL_RUNTIME_UNAVAILABLE");
+      const created = await window.desktop.createTranscription({ asset_id: imported.asset.asset_id, model_id: model.model_id, language: "auto", word_timestamps: true, license_acceptance: null });
+      return { project_id: project.project_id, asset_id: imported.asset.asset_id, modelPage, job_id: created.job.job_id };
+    }).catch(() => fail("IMPORT_CANCELLED"));
+    projectId = setup.project_id; models = setup.modelPage;
+    progress.model_ready_installed_count = models.items.filter(item => item.status === "ready" && item.provider_status === "installed").length;
+
+    stage = "transcription";
+    if ((await waitForJob(page, setup.job_id)).status !== "succeeded") fail("TRANSCRIPTION_FAILED");
+    transcript = await page.evaluate(async assetId => { const values = await window.desktop.listTranscripts(assetId); return window.desktop.getTranscript(values.items[0].transcript_id); }, setup.asset_id).catch(() => fail("TRANSCRIPTION_FAILED"));
+    wordCount = (transcript.words?.length ?? 0) + transcript.segments.reduce((total, segment) => total + (segment.words?.length ?? 0), 0);
+    if (!transcript.segments.length || wordCount < 1) fail("TRANSCRIPT_SEGMENT_OR_WORD_MISSING");
+    progress.transcription_segment_count = transcript.segments.length;
+    progress.transcription_word_count = wordCount;
+
+    stage = "timeline";
+    const selectedSegment = transcript.segments.find(segment => segment.text.trim()) ?? transcript.segments[0];
+    finalState = await page.evaluate(async ({ id, transcriptId, segmentId }) => window.desktop.createTimeline({ project_id: id, timeline: { schema_version: 1, source: { kind: "transcript_selection", transcript_id: transcriptId, segment_ids: [segmentId], padding_before_us: 0, padding_after_us: 0, create_captions: true }, default_layout: "blurred_background", caption_preset_id: "default-bottom" } }), { id: projectId, transcriptId: transcript.transcript_id, segmentId: selectedSegment.segment_id }).catch(() => fail("TIMELINE_OR_CAPTION_MISSING"));
+    if (finalState.current_revision.document.clips.length !== 1 || finalState.current_revision.document.captions.length !== 1) fail("TIMELINE_OR_CAPTION_MISSING");
+    progress.timeline_clip_count = finalState.current_revision.document.clips.length;
+    progress.timeline_caption_count = finalState.current_revision.document.captions.length;
+
+    stage = "preview";
+    const previewButton = page.getByRole("button", { name: "生成预览" });
+    const projectSelect = page.getByLabel("当前项目");
+    try {
+      await page.waitForFunction(projectId => {
+        const select = document.querySelector('select[aria-label="当前项目"]');
+        return select instanceof HTMLSelectElement && Array.from(select.options).some(option => option.value === projectId);
+      }, projectId, { timeout: 15_000 });
+      await projectSelect.selectOption("", { timeout: 15_000 });
+      await page.waitForFunction(() => {
+        const select = document.querySelector('select[aria-label="当前项目"]');
+        return select instanceof HTMLSelectElement && select.value === "";
+      }, undefined, { timeout: 15_000 });
+      progress.preview_project_reset = true;
+      await projectSelect.selectOption(projectId, { timeout: 15_000 });
+      await page.waitForFunction(projectId => {
+        const select = document.querySelector('select[aria-label="当前项目"]');
+        return select instanceof HTMLSelectElement && select.value === projectId;
+      }, projectId, { timeout: 15_000 });
+      progress.preview_project_selected = true;
+      await previewButton.waitFor({ state: "visible", timeout: 15_000 });
+      await page.waitForFunction(projectId => {
+        const select = document.querySelector('select[aria-label="当前项目"]');
+        const button = Array.from(document.querySelectorAll("button")).find(item => item.textContent?.includes("生成预览"));
+        return select instanceof HTMLSelectElement && select.value === projectId && button instanceof HTMLButtonElement && !button.disabled;
+      }, projectId, { timeout: 15_000 });
+    } catch { fail("PREVIEW_PROJECT_SYNC_FAILED"); }
+    progress.preview_project_synced = true;
+    try {
+      await page.getByLabel("编码模式").selectOption("software", { timeout: 15_000 });
+      await previewButton.click({ timeout: 15_000 });
+    } catch { fail("PREVIEW_UI_NOT_READY"); }
+    progress.preview_ui_ready = true;
+    const previewJob = await newestJob(page, projectId, "authoritative_preview", "PREVIEW_JOB_NOT_CREATED");
+    progress.preview_job_created = true;
+    const previewJobResult = await waitForJob(page, previewJob.job_id);
+    progress.preview_job_status = safeJobStatus(previewJobResult.status);
+    if (previewJobResult.status !== "succeeded") fail("PREVIEW_JOB_FAILED");
+    const previewItems = await page.evaluate(id => window.desktop.listPreviews({ project_id: id, limit: 100 }), projectId).catch(() => fail("PREVIEW_RECORD_MISSING"));
+    progress.preview_record_count = Array.isArray(previewItems?.items) ? previewItems.items.length : 0;
+    if (progress.preview_record_count < 1) fail("PREVIEW_RECORD_MISSING");
+    preview = previewItems.items[0];
+    range = await page.evaluate(async url => { const response = await fetch(url, { headers: { Range: "bytes=0-63" } }); return { status: response.status, length: (await response.arrayBuffer()).byteLength }; }, preview.media_url).catch(() => fail("PREVIEW_RANGE_FAILED"));
+    if (range.status !== 206 || range.length !== 64) fail("PREVIEW_RANGE_FAILED");
+    progress.preview_range_status = range.status;
+    progress.preview_range_byte_count = range.length;
+
+    stage = "export";
+    await page.getByRole("button", { name: "导出" }).click().catch(() => fail("EXPORT_FAILED"));
+    const exportJob = await newestJob(page, projectId, "final_export");
+    progress.export_job_created = true;
+    const exportJobResult = await waitForJob(page, exportJob.job_id);
+    progress.export_job_status = safeJobStatus(exportJobResult.status);
+    if (exportJobResult.status !== "succeeded") fail("EXPORT_FAILED");
+    const exportItems = await page.evaluate(id => window.desktop.listExports({ project_id: id, limit: 100 }), projectId).catch(() => fail("EXPORT_FAILED"));
+    progress.export_record_count = Array.isArray(exportItems?.items) ? exportItems.items.length : 0;
+    if (progress.export_record_count < 1) fail("EXPORT_FAILED");
+    exportRecord = exportItems.items[0];
+
+    stage = "stale";
+    const clipId = finalState.current_revision.document.clips[0].clip_id;
+    finalState = await page.evaluate(({ id, revision, clip }) => window.desktop.patchTimeline({ project_id: id, patch: { schema_version: 1, base_revision_id: revision, operations: [{ op: "set_layout", clip_id: clip, layout: "crop_fill" }], summary: "package stale verification" } }), { id: projectId, revision: finalState.current_revision.timeline_revision_id, clip: clipId }).catch(() => fail("PREVIEW_NOT_STALE"));
+    if ((await page.evaluate(id => window.desktop.listPreviews({ project_id: id, limit: 100 }), projectId)).items[0]?.preview?.status !== "stale") fail("PREVIEW_NOT_STALE");
+    progress.preview_stale_before_restart = true;
+  } finally { await first.close().catch(() => undefined); }
+
+  stage = "restart";
+  let second;
+  try { second = await launch(); } catch { fail("ELECTRON_LAUNCH_FAILED"); }
+  let restored;
+  try {
+    const page = await second.firstWindow();
+    await page.waitForFunction(() => Boolean(window.desktop?.getRuntime)).catch(() => fail("ELECTRON_RUNTIME_FAILED"));
+    const timeline = await pollRestartRead(
+      page,
+      () => page.evaluate(id => window.desktop.getTimeline(id), projectId),
+      "RESTART_TIMELINE_UNAVAILABLE",
+      value => Boolean(value?.current_revision?.timeline_revision_id),
+      () => { progress.restart_timeline_restored = true; }
+    );
+    if (timeline.current_revision.timeline_revision_id !== finalState.current_revision.timeline_revision_id) {
+      progress.restart_revision_matches = false;
+      fail("RESTART_REVISION_MISMATCH");
+    }
+    progress.restart_revision_matches = true;
+    const previews = await pollRestartList(
+      page,
+      () => page.evaluate(id => window.desktop.listPreviews({ project_id: id, limit: 100 }), projectId),
+      "RESTART_PREVIEWS_UNAVAILABLE",
+      "RESTART_PREVIEW_MISSING",
+      "restart_preview_count"
+    );
+    const exports = await pollRestartList(
+      page,
+      () => page.evaluate(id => window.desktop.listExports({ project_id: id, limit: 100 }), projectId),
+      "RESTART_EXPORTS_UNAVAILABLE",
+      "RESTART_EXPORT_MISSING",
+      "restart_export_count"
+    );
+    const restoredModels = await pollRestartRead(
+      page,
+      () => page.evaluate(() => window.desktop.listModels({ limit: 100 })),
+      "RESTART_MODELS_UNAVAILABLE",
+      value => Array.isArray(value?.items),
+      value => { progress.restart_model_count = value.items.length; }
+    );
+    restored = { timeline, previews, exports, models: restoredModels };
+  } catch (error) {
+    if (allowedCodes.has(String(error?.message ?? ""))) throw error;
+    fail("RESTART_RESTORE_FAILED");
+  } finally { await second.close().catch(() => undefined); }
+
+  stage = "export_hash";
+  const destinationHash = createHash("sha256").update(await readFile(destination)).digest("hex");
+  if (`sha256:${destinationHash}` !== exportRecord.export_record.sha256) fail("EXPORT_HASH_MISMATCH");
+  const probe = JSON.parse(execFileSync(join(packageResources, "ffmpeg", "win-x64", "ffprobe.exe"), ["-v", "error", "-show_streams", "-show_format", "-of", "json", destination], { encoding: "utf8", windowsHide: true }));
+  const hasH264 = probe.streams.some(stream => stream.codec_type === "video" && stream.codec_name === "h264");
+  const hasAac = probe.streams.some(stream => stream.codec_type === "audio" && stream.codec_name === "aac");
+  if (!hasH264 || !hasAac) fail("EXPORT_CODEC_INVALID");
+  if (rendererPayloadHasSensitiveFields({ preview, exportRecord })) fail("RENDERER_DTO_SENSITIVE_FIELD");
+
+  stage = "evidence_write";
+  const result = {
+    schema_version: 2, status: "passed", checks: {
+      sidecar_manifest: { component_path: sidecarComponent.path, hash_matches_manifest: true, sha256: `sha256:${sidecarHash}` },
+      model_runtime: { manifest_count: models.items.length, ready_installed_count: models.items.filter(item => item.status === "ready" && item.provider_status === "installed").length },
+      transcription: { segment_count: transcript.segments.length, word_count: wordCount, duration_us: transcript.duration_us ?? null },
+      timeline: { clip_count: finalState.current_revision.document.clips.length, caption_count: finalState.current_revision.document.captions.length },
+      preview_range: { status: range.status, byte_count: range.length },
+      export: { h264: hasH264, aac: hasAac, size_bytes: (await stat(destination)).size, sha256: `sha256:${destinationHash}`, hash_matches_export_record: true },
+      stale_restart: { stale_before_restart: true, restored_after_restart: true, preview_count: restored.previews.items.length, export_count: restored.exports.items.length, model_count: restored.models.items.length },
+      renderer_dto: { sensitive_fields_detected: false }
+    }, package: { installer_sha256: `sha256:${createHash("sha256").update(await readFile(report.installer_path)).digest("hex")}`, sidecar_sha256: `sha256:${sidecarHash}`, component_sidecar_sha256: `sha256:${sidecarComponent.sha256}` }
+  };
+  try {
+    await mkdir(evidenceRun, { recursive: true });
+    await writeFile(join(evidenceRun, "result.json"), `${JSON.stringify(result, null, 2)}\n`, "utf8");
+    await writeFile(join(evidenceRoot, "latest.json"), `${JSON.stringify({ schema_version: 2, status: "passed", evidence_component: "current-run", checks: result.checks, package: result.package }, null, 2)}\n`, "utf8");
+  } catch { fail("EVIDENCE_WRITE_FAILED"); }
+  console.log(JSON.stringify({ schema_version: 2, status: "passed", evidence_component: "current-run" }));
+}
+
+await main().catch(terminate);

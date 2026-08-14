@@ -148,7 +148,7 @@ def test_v7_schema_and_immutable_records(tmp_path: Path) -> None:
     with database.connection() as db:
         assert (
             db.execute("SELECT version FROM schema_migrations ORDER BY version DESC").fetchone()[0]
-            == "v7"
+            == "v8"
         )
         assert {row[1] for row in db.execute("PRAGMA table_info(jobs)")} >= {
             "timeline_patch_generation_id"
@@ -210,9 +210,12 @@ def test_v5_provider_upgrades_to_untested_v6_and_v7_capability(tmp_path: Path) -
     with database.connection() as db:
         assert db.execute("SELECT version FROM schema_migrations WHERE version='v6'").fetchone()
         assert db.execute("SELECT version FROM schema_migrations WHERE version='v7'").fetchone()
-        assert db.execute(
-            "SELECT timeline_patch_capability_status FROM provider_configs WHERE id='p1'"
-        ).fetchone()[0] == "untested"
+        assert (
+            db.execute(
+                "SELECT timeline_patch_capability_status FROM provider_configs WHERE id='p1'"
+            ).fetchone()[0]
+            == "untested"
+        )
 
 
 def test_v7_capability_triggers_enforce_all_metadata_combinations(tmp_path: Path) -> None:
@@ -347,9 +350,7 @@ def test_real_v6_to_v7_preserves_chat_structured_supported_and_is_idempotent(
             "timeline_patch_capability_failure_code,timeline_patch_capability_probe_sha256) "
             "VALUES ('p6','openai_compatible_text','P','https://provider.example','m',1,"
             "'now','now','supported','openai_chat_completions_json_schema_v1','1',"
-            "'now',NULL,'sha256:"
-            + "a" * 64
-            + "')"
+            "'now',NULL,'sha256:" + "a" * 64 + "')"
         )
     database = Database(path)
     database.initialize()
@@ -366,16 +367,16 @@ def test_real_v6_to_v7_preserves_chat_structured_supported_and_is_idempotent(
             "1",
             None,
         )
-        count = db.execute(
-            "SELECT COUNT(*) FROM schema_migrations WHERE version='v7'"
-        ).fetchone()[0]
+        count = db.execute("SELECT COUNT(*) FROM schema_migrations WHERE version='v7'").fetchone()[
+            0
+        ]
         assert count == 1
 
 
 def test_v7_failure_rolls_back_to_v6(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = tmp_path / "app.db"
     full = database_module.MIGRATIONS
-    v6_only = dict(list(full.items())[:-1])
+    v6_only = dict(list(full.items())[:-2])
     monkeypatch.setattr(database_module, "MIGRATIONS", v6_only)
     Database(path).initialize()
     broken = {**v6_only, "v7": "CREATE TABLE broken ("}

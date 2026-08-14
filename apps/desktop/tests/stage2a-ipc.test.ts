@@ -7,7 +7,7 @@ const hash = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
 function setup() {
   const handlers = new Map<string, Handler>();
-  const fetchWithUi = vi.fn(async (path: string) => {
+  const fetchWithUi = vi.fn(async (path: string): Promise<unknown> => {
     if (path.endsWith("/timeline")) return { project_id: "project_1", current_revision: { timeline_revision_id: "revision_1" }, path: "C:\\hidden", token: "hidden" };
     if (path === "/api/v1/recipes") return { items: [{ recipe_id: "recipe_1", name: "Recipe", secret: "hidden" }] };
     return { provider_config_id: "provider_1", secret: "hidden", raw_response: "hidden" };
@@ -32,7 +32,7 @@ describe("Stage2A Main IPC 安全编排", () => {
     const { handlers } = setup();
     expect([...handlers.keys()].sort()).toEqual([
       "brief:get", "brief:put", "planning:adopt", "planning:clip-media", "planning:create", "planning:get", "planning:list", "planning:prepare",
-      "provider:create", "provider:delete-secret", "provider:list", "provider:set-secret", "provider:test", "provider:update", "recipe:get", "recipe:list"
+      "planning:test-provider-capability", "provider:create", "provider:delete-secret", "provider:list", "provider:set-secret", "provider:test", "provider:update", "recipe:get", "recipe:list"
     ]);
     expect(handlers.has("provider:get-secret")).toBe(false);
     expect(handlers.has("planning:clip-media-by-asset")).toBe(false);
@@ -67,6 +67,15 @@ describe("Stage2A Main IPC 安全编排", () => {
     await expect(handlers.get("provider:test")!({}, "provider_1")).rejects.toThrow("Core request failed");
   });
 
+  it("AI 粗剪能力测试只接受 Provider ID，固定调用候选能力端点并严格脱敏", async () => {
+    const { handlers, fetchWithUi } = setup();
+    fetchWithUi.mockClear();
+    fetchWithUi.mockResolvedValueOnce({ candidate_capability_status: "unsupported", candidate_response_adapter_id: null, candidate_probe_protocol_version: null, candidate_capability_tested_at: "2026-08-14T00:00:00.000Z", candidate_capability_failure_code: "PROVIDER_FAILED", candidate_capability_probe_sha256: hash, raw_response: "must-not-pass", response: "must-not-pass" });
+    await expect(handlers.get("planning:test-provider-capability")!({}, "provider_1")).resolves.toEqual({ candidate_capability_status: "unsupported", candidate_response_adapter_id: null, candidate_probe_protocol_version: null, candidate_capability_tested_at: "2026-08-14T00:00:00.000Z", candidate_capability_failure_code: "PROVIDER_FAILED", candidate_capability_probe_sha256: hash });
+    expect(fetchWithUi).toHaveBeenCalledWith("/api/v1/providers/provider_1/candidate-planning-capability-test", { method: "POST" });
+    expect(() => handlers.get("planning:test-provider-capability")!({}, { provider_config_id: "provider_1" })).toThrow("Invalid provider_config_id");
+  });
+
   it("candidate ticket 只由已验证 plan/clip 签发，adopt 成功后必重读权威 Timeline", async () => {
     const { handlers, fetchWithUi, issueCandidateClipMedia } = setup();
     await expect(handlers.get("planning:clip-media")!({}, { project_id: "project_1", candidate_plan_id: "candidate_1", candidate_clip_id: "candidate_clip_1", source_start_us: 0 })).rejects.toThrow("Core request failed");
@@ -78,6 +87,6 @@ describe("Stage2A Main IPC 安全编排", () => {
   });
 
   it("递归裁剪 Core 响应中的敏感键", () => {
-    expect(rendererSafe({ path: "C:\\a", nested: { Authorization: "Bearer x", ok: true }, rows: [{ raw_response: "body", value: 1 }] })).toEqual({ nested: { ok: true }, rows: [{ value: 1 }] });
+    expect(rendererSafe({ path: "C:\\a", nested: { Authorization: "Bearer x", request: "body", ok: true }, rows: [{ raw_response: "body", response: "body", value: 1 }] })).toEqual({ nested: { ok: true }, rows: [{ value: 1 }] });
   });
 });

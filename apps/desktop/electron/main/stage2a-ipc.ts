@@ -1,3 +1,4 @@
+import { parseProviderCapabilityTestResult } from "@aivideo/contracts";
 import { issueCandidateClipMedia } from "./candidate-media.js";
 
 type RequestInitLike = { method?: string; body?: string };
@@ -18,7 +19,7 @@ const SHA256 = /^sha256:[a-f0-9]{64}$/;
 const rendererSensitiveKeys = new Set([
   "path", "uri", "root_dir", "database", "database_path", "admin_token", "ui_token", "token", "authorization",
   "installed_path", "install_dir", "source_file", "model_path", "model_dir", "runtime_dir", "ready_file",
-  "api_key", "secret", "prompt", "raw_response"
+  "api_key", "secret", "prompt", "raw_response", "request", "response", "body", "request_body", "response_body"
 ]);
 
 export function rendererSafe(value: unknown): unknown {
@@ -82,6 +83,7 @@ export function registerStage2aIpc(deps: Stage2aIpcDependencies): void {
     return { provider_config_id: providerConfigId, credential_status: "missing" };
   });
   deps.handle("provider:test", (_event, providerId) => safeFetch(`${API_PREFIX}/providers/${encodeURIComponent(id(providerId, "provider_config_id"))}/test`, { method: "POST" }).then(rendererSafe));
+  deps.handle("planning:test-provider-capability", (_event, providerId) => safeFetch(`${API_PREFIX}/providers/${encodeURIComponent(id(providerId, "provider_config_id"))}/candidate-planning-capability-test`, { method: "POST" }).then(value => parseProviderCapabilityTestResult(rendererSafe(value))));
   deps.handle("planning:prepare", async (_event, input) => {
     const value = record(input, ["project_id", "provider_config_id", "recipe_id", "transcript_ids"], "planning prepare");
     if (!Array.isArray(value.transcript_ids) || value.transcript_ids.length < 1 || value.transcript_ids.length > 20) throw new Error("Invalid transcript_ids");

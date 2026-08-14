@@ -1,12 +1,14 @@
 """Opt-in real Provider verification; skipped unless all AIVS_REAL_PROVIDER_* variables are set.
 
 Run only in a controlled environment:
-  $env:AIVS_RUN_REAL_PROVIDER_TESTS='1'
+  $env:AIVS_REAL_PROVIDER_ENABLED='1'
   $env:AIVS_REAL_PROVIDER_BASE_URL='<provider-base-url>'
   $env:AIVS_REAL_PROVIDER_MODEL='...'
   $env:AIVS_REAL_PROVIDER_API_KEY='...'
   $env:AIVS_REAL_PROVIDER_INPUT_PRICE_PER_MILLION='...'
   $env:AIVS_REAL_PROVIDER_OUTPUT_PRICE_PER_MILLION='...'
+  $env:AIVS_REAL_PROVIDER_EXPECTED_ADAPTER='<frozen-candidate-adapter>'
+  $env:AIVS_REAL_PROVIDER_TIMEOUT='30-120'
   uv run pytest services/core/tests/integration/test_stage2a_real_provider_optin.py \
     -m real_provider -q
 
@@ -17,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
 import re
 import subprocess
@@ -33,18 +36,21 @@ from aivs_core.app import create_app
 from aivs_core.config import Settings
 from aivs_core.database import json_dumps
 from aivs_core.providers import (
+    CANDIDATE_ADAPTER_IDS,
     OpenAICompatibleTextProvider,
     ProviderError,
     StructuredTextResult,
 )
 
 REQUIRED_ENV = (
-    "AIVS_RUN_REAL_PROVIDER_TESTS",
+    "AIVS_REAL_PROVIDER_ENABLED",
     "AIVS_REAL_PROVIDER_BASE_URL",
     "AIVS_REAL_PROVIDER_MODEL",
     "AIVS_REAL_PROVIDER_API_KEY",
     "AIVS_REAL_PROVIDER_INPUT_PRICE_PER_MILLION",
     "AIVS_REAL_PROVIDER_OUTPUT_PRICE_PER_MILLION",
+    "AIVS_REAL_PROVIDER_EXPECTED_ADAPTER",
+    "AIVS_REAL_PROVIDER_TIMEOUT",
 )
 
 _AUTHORIZATION_HEADER = "".join(("Auth", "orization"))
@@ -102,6 +108,7 @@ ALLOWED_SAFE_ERROR_CODES = frozenset(
         "REAL_PROVIDER_REDACTION_TEST_CONTEXT_LEAKED",
         "REAL_PROVIDER_REDACTION_TEST_VARIABLE_COLLECTED",
         "REAL_PROVIDER_TEST_EXECUTION_FAILED",
+        "REAL_PROVIDER_ENVIRONMENT_INVALID",
     }
 )
 
@@ -185,24 +192,112 @@ def _classified_real_provider_test(func):
     return wrapper
 
 
-def _environment() -> dict[str, str]:
+def _environment() -> dict[str, Any]:
     values = {name: os.environ.get(name, "") for name in REQUIRED_ENV}
-    if values["AIVS_RUN_REAL_PROVIDER_TESTS"] != "1" or any(
+    if values["AIVS_REAL_PROVIDER_ENABLED"] != "1" or any(
         not values[name] for name in REQUIRED_ENV[1:]
     ):
         pytest.skip("real Provider opt-in environment is not configured")
     try:
         float(values["AIVS_REAL_PROVIDER_INPUT_PRICE_PER_MILLION"])
         float(values["AIVS_REAL_PROVIDER_OUTPUT_PRICE_PER_MILLION"])
+        timeout = float(values["AIVS_REAL_PROVIDER_TIMEOUT"])
     except ValueError:
         pytest.skip("real Provider price environment is invalid")
+    if (
+        values["AIVS_REAL_PROVIDER_EXPECTED_ADAPTER"] not in CANDIDATE_ADAPTER_IDS
+        or not math.isfinite(timeout)
+        or not 30 <= timeout <= 120
+    ):
+        pytest.skip("real Provider opt-in environment is invalid")
+    values["timeout"] = timeout
     return values
+
+
+def _client_kwargs_with_timeout(kwargs: dict[str, Any], timeout: float) -> dict[str, Any]:
+    return {**kwargs, "timeout": timeout}
+
+
+def _adapter_endpoint_kind(adapter: str) -> str:
+    return "responses" if adapter.startswith("openai_responses_") else "chat_completions"
+
+
+def _audit_schema_format(value: Any) -> None:
+    if not isinstance(value, dict):
+        _raise_safe("REAL_PROVIDER_AUDIT_RESPONSE_FORMAT_INVALID")
+    schema = value.get("json_schema")
+    if not isinstance(schema, dict):
+        _raise_safe("REAL_PROVIDER_AUDIT_JSON_SCHEMA_INVALID")
+    _safe_assert(value.get("type") == "json_schema", "REAL_PROVIDER_AUDIT_SCHEMA_TYPE_INVALID")
+    _safe_assert(
+        schema.get("name") == "candidate-plan-output-v1",
+        "REAL_PROVIDER_AUDIT_SCHEMA_NAME_INVALID",
+    )
+    _safe_assert(schema.get("strict") is True, "REAL_PROVIDER_AUDIT_SCHEMA_STRICT_INVALID")
+
+
+def _audit_candidate_request(method: str, path: str, body: dict[str, Any], adapter: str) -> None:
+    responses = adapter.startswith("openai_responses_")
+    script = adapter.endswith("candidatescript_v1")
+    expected_path = "/responses" if responses else "/chat/completions"
+    _safe_assert(
+        method == "POST" and path.endswith(expected_path), "REAL_PROVIDER_AUDIT_ENDPOINT_INVALID"
+    )
+    if responses:
+        expected = {"model", "instructions", "input"}
+        if not script:
+            expected.add("text")
+            _audit_schema_format(body.get("text", {}).get("format"))
+        _safe_assert(set(body) == expected, "REAL_PROVIDER_AUDIT_ENVELOPE_INVALID")
+        return
+    expected = {"model", "messages"}
+    if not script:
+        expected.add("response_format")
+        _audit_schema_format(body.get("response_format"))
+    _safe_assert(set(body) == expected, "REAL_PROVIDER_AUDIT_ENVELOPE_INVALID")
+    messages = body.get("messages")
+    _safe_assert(
+        isinstance(messages, list)
+        and len(messages) == 2
+        and all(isinstance(message, dict) for message in messages),
+        "REAL_PROVIDER_AUDIT_ENVELOPE_INVALID",
+    )
+
+
+def _audit_candidate_response(content: bytes, adapter: str) -> None:
+    try:
+        envelope = json.loads(content.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        _raise_safe("REAL_PROVIDER_AUDIT_HTTP_FAILURE")
+    if adapter.startswith("openai_responses_"):
+        valid = (
+            isinstance(envelope, dict)
+            and isinstance(envelope.get("output"), list)
+            and len(envelope["output"]) == 1
+            and isinstance(envelope["output"][0], dict)
+            and envelope["output"][0].get("type") == "message"
+            and isinstance(envelope["output"][0].get("content"), list)
+            and len(envelope["output"][0]["content"]) == 1
+            and isinstance(envelope["output"][0]["content"][0], dict)
+            and envelope["output"][0]["content"][0].get("type") == "output_text"
+            and isinstance(envelope["output"][0]["content"][0].get("text"), str)
+        )
+    else:
+        valid = (
+            isinstance(envelope, dict)
+            and isinstance(envelope.get("choices"), list)
+            and bool(envelope["choices"])
+            and isinstance(envelope["choices"][0], dict)
+            and isinstance(envelope["choices"][0].get("message"), dict)
+            and isinstance(envelope["choices"][0]["message"].get("content"), str)
+        )
+    _safe_assert(valid, "REAL_PROVIDER_AUDIT_ENVELOPE_INVALID")
 
 
 class AuditedOpenAICompatibleProvider:
     """Checks the outgoing HTTP request without persisting its body or headers."""
 
-    def __init__(self, forbidden: set[str]) -> None:
+    def __init__(self, forbidden: set[str], adapter: str, timeout: float) -> None:
         self.audit = {
             "calls": 0,
             "endpoint_kind": None,
@@ -211,10 +306,18 @@ class AuditedOpenAICompatibleProvider:
             "failure_code": None,
         }
         self.forbidden = forbidden
+        self.adapter = adapter
+        self.timeout = timeout
         self.delegate = OpenAICompatibleTextProvider(self._client_factory)
 
     def _client_factory(self, **kwargs):
-        return _AuditedAsyncClient(kwargs, self.audit, self.forbidden)
+        return _AuditedAsyncClient(
+            kwargs,
+            self.audit,
+            self.forbidden,
+            self.adapter,
+            self.timeout,
+        )
 
     async def generate(self, request, cancel_event) -> StructuredTextResult:
         try:
@@ -225,11 +328,19 @@ class AuditedOpenAICompatibleProvider:
 
 
 class _AuditedAsyncClient:
-    def __init__(self, kwargs: dict[str, Any], audit: dict[str, Any], forbidden: set[str]) -> None:
+    def __init__(
+        self,
+        kwargs: dict[str, Any],
+        audit: dict[str, Any],
+        forbidden: set[str],
+        adapter: str,
+        timeout: float,
+    ) -> None:
         import httpx
 
-        self.client = httpx.AsyncClient(**kwargs)
+        self.client = httpx.AsyncClient(**_client_kwargs_with_timeout(kwargs, timeout))
         self.audit, self.forbidden = audit, forbidden
+        self.adapter = adapter
 
     def _audit_fail(self, code: str) -> NoReturn:
         self.audit["failure_code"] = code
@@ -253,40 +364,15 @@ class _AuditedAsyncClient:
             self._audit_fail("REAL_PROVIDER_AUDIT_REQUEST_BUILD_FAILURE")
         if not isinstance(parsed, dict):
             self._audit_fail("REAL_PROVIDER_AUDIT_REQUEST_JSON_INVALID")
-        _safe_assert(
-            request.method == "POST" and request.url.path.endswith("/chat/completions"),
-            "REAL_PROVIDER_AUDIT_ENDPOINT_INVALID",
-        )
+        _audit_candidate_request(request.method, request.url.path, parsed, self.adapter)
         _safe_assert(_AUTHORIZATION_HEADER in request.headers, "REAL_PROVIDER_AUDIT_AUTH_MISSING")
-        response_format = parsed.get("response_format")
-        if not isinstance(response_format, dict):
-            _raise_safe("REAL_PROVIDER_AUDIT_RESPONSE_FORMAT_INVALID")
-        json_schema = response_format.get("json_schema")
-        if not isinstance(json_schema, dict):
-            _raise_safe("REAL_PROVIDER_AUDIT_JSON_SCHEMA_INVALID")
-        _safe_assert(
-            response_format["type"] == "json_schema",
-            "REAL_PROVIDER_AUDIT_SCHEMA_TYPE_INVALID",
-        )
-        _safe_assert(
-            json_schema.get("name") == "candidate-plan-output-v1",
-            "REAL_PROVIDER_AUDIT_SCHEMA_NAME_INVALID",
-        )
-        _safe_assert(
-            json_schema.get("strict") is True,
-            "REAL_PROVIDER_AUDIT_SCHEMA_STRICT_INVALID",
-        )
-        _safe_assert(
-            set(parsed) == {"model", "messages", "response_format"},
-            "REAL_PROVIDER_AUDIT_ENVELOPE_INVALID",
-        )
         for value in self.forbidden:
             _safe_assert_absent(value, body, "REAL_PROVIDER_AUDIT_SENSITIVE_EGRESS")
         self.audit.update(
             {
                 "calls": self.audit["calls"] + 1,
-                "endpoint_kind": "chat_completions",
-                "schema": True,
+                "endpoint_kind": _adapter_endpoint_kind(self.adapter),
+                "schema": self.adapter.endswith("json_schema_v1"),
                 "safe": True,
             }
         )
@@ -294,13 +380,17 @@ class _AuditedAsyncClient:
 
     async def send(self, request, **kwargs):
         try:
-            return await self.client.send(request, **kwargs)
+            response = await self.client.send(request, **kwargs)
+            _audit_candidate_response(response.content, self.adapter)
+            return response
+        except pytest.fail.Exception:
+            raise
         except Exception:
             self._audit_fail("REAL_PROVIDER_AUDIT_HTTP_FAILURE")
 
 
-def _wait(client: TestClient, ui: dict[str, str], job_id: str) -> dict[str, Any]:
-    deadline = time.monotonic() + 105
+def _wait(client: TestClient, ui: dict[str, str], job_id: str, timeout: float) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
             job = client.get(f"/api/v1/jobs/{job_id}", headers=ui).json()
@@ -328,7 +418,9 @@ def test_real_openai_compatible_candidate_generation_is_bounded_and_safe(
             "audit-fingerprint",
             full_transcript_sentinel,
             env["AIVS_REAL_PROVIDER_API_KEY"],
-        }
+        },
+        env["AIVS_REAL_PROVIDER_EXPECTED_ADAPTER"],
+        env["timeout"],
     )
     app.state.core.planning.provider_factory = lambda: audited_provider
     with TestClient(app) as client:
@@ -376,9 +468,7 @@ def test_real_openai_compatible_candidate_generation_is_bounded_and_safe(
             "caption_preset_id": "default-bottom",
             "default_layout": "fit",
         }
-        brief_response = client.put(
-            f"/api/v1/projects/{project_id}/brief", headers=ui, json=brief
-        )
+        brief_response = client.put(f"/api/v1/projects/{project_id}/brief", headers=ui, json=brief)
         _safe_assert(
             brief_response.status_code == 200,
             "REAL_PROVIDER_BRIEF_REQUEST_FAILED",
@@ -391,9 +481,7 @@ def test_real_openai_compatible_candidate_generation_is_bounded_and_safe(
                 "display_name": "controlled external provider",
                 "base_url": env["AIVS_REAL_PROVIDER_BASE_URL"],
                 "model": env["AIVS_REAL_PROVIDER_MODEL"],
-                "input_price_per_million": float(
-                    env["AIVS_REAL_PROVIDER_INPUT_PRICE_PER_MILLION"]
-                ),
+                "input_price_per_million": float(env["AIVS_REAL_PROVIDER_INPUT_PRICE_PER_MILLION"]),
                 "output_price_per_million": float(
                     env["AIVS_REAL_PROVIDER_OUTPUT_PRICE_PER_MILLION"]
                 ),
@@ -410,6 +498,14 @@ def test_real_openai_compatible_candidate_generation_is_bounded_and_safe(
             secret_response.status_code == 200,
             "REAL_PROVIDER_SECRET_INJECTION_FAILED",
         )
+        with client.app.state.core.db.connection() as db:
+            db.execute(
+                "UPDATE provider_configs SET candidate_capability_status='supported',"
+                "candidate_response_adapter_id=?,"
+                "candidate_probe_protocol_version='1',candidate_capability_tested_at='now',"
+                "candidate_capability_probe_sha256='sha256:external-fixture' WHERE id=?",
+                (env["AIVS_REAL_PROVIDER_EXPECTED_ADAPTER"], provider_id),
+            )
         prepared = client.post(
             f"/api/v1/projects/{project_id}/candidate-generations/prepare",
             headers=ui,
@@ -430,7 +526,7 @@ def test_real_openai_compatible_candidate_generation_is_bounded_and_safe(
             },
         )
         _safe_assert(created.status_code == 200, "REAL_PROVIDER_GENERATION_REQUEST_FAILED")
-        job = _wait(client, ui, created.json()["job"]["job_id"])
+        job = _wait(client, ui, created.json()["job"]["job_id"], env["timeout"])
         if job["status"] != "succeeded":
             failure_code = audited_provider.audit["failure_code"]
             _raise_safe(
@@ -444,11 +540,13 @@ def test_real_openai_compatible_candidate_generation_is_bounded_and_safe(
             "REAL_PROVIDER_AUDIT_CALL_COUNT_INVALID",
         )
         _safe_assert(
-            audited_provider.audit["endpoint_kind"] == "chat_completions",
+            audited_provider.audit["endpoint_kind"]
+            == _adapter_endpoint_kind(env["AIVS_REAL_PROVIDER_EXPECTED_ADAPTER"]),
             "REAL_PROVIDER_AUDIT_ENDPOINT_KIND_INVALID",
         )
         _safe_assert(
-            audited_provider.audit["schema"] is True,
+            audited_provider.audit["schema"]
+            is env["AIVS_REAL_PROVIDER_EXPECTED_ADAPTER"].endswith("json_schema_v1"),
             "REAL_PROVIDER_AUDIT_SCHEMA_NOT_VALIDATED",
         )
         _safe_assert(
@@ -563,6 +661,118 @@ def test_real_provider_audit_failures_are_redacted_without_network() -> None:
         "REAL_PROVIDER_BASE_URL" not in ALLOWED_SAFE_ERROR_CODES,
         "REAL_PROVIDER_REDACTION_TEST_VARIABLE_COLLECTED",
     )
+
+
+@pytest.mark.parametrize(
+    "name,value",
+    [
+        ("AIVS_REAL_PROVIDER_ENABLED", "0"),
+        ("AIVS_REAL_PROVIDER_EXPECTED_ADAPTER", "invalid"),
+        ("AIVS_REAL_PROVIDER_TIMEOUT", "NaN"),
+        ("AIVS_REAL_PROVIDER_TIMEOUT", "29"),
+        ("AIVS_REAL_PROVIDER_TIMEOUT", "121"),
+    ],
+)
+def test_real_provider_environment_gate_rejects_invalid_values_without_network(
+    monkeypatch: pytest.MonkeyPatch, name: str, value: str
+) -> None:
+    safe = {
+        "AIVS_REAL_PROVIDER_ENABLED": "1",
+        "AIVS_REAL_PROVIDER_BASE_URL": "https://provider.invalid/v1",
+        "AIVS_REAL_PROVIDER_MODEL": "model",
+        "AIVS_REAL_PROVIDER_API_KEY": "SENTINEL_KEY",
+        "AIVS_REAL_PROVIDER_INPUT_PRICE_PER_MILLION": "1",
+        "AIVS_REAL_PROVIDER_OUTPUT_PRICE_PER_MILLION": "1",
+        "AIVS_REAL_PROVIDER_EXPECTED_ADAPTER": "openai_responses_json_schema_v1",
+        "AIVS_REAL_PROVIDER_TIMEOUT": "30",
+    }
+    for key, current in safe.items():
+        monkeypatch.setenv(key, current)
+    monkeypatch.setenv(name, value)
+    with pytest.raises(pytest.skip.Exception):
+        _environment()
+
+
+@pytest.mark.parametrize("adapter", CANDIDATE_ADAPTER_IDS)
+def test_real_provider_adapter_auditor_enforces_all_frozen_shapes_without_network(
+    adapter: str,
+) -> None:
+    responses = adapter.startswith("openai_responses_")
+    script = adapter.endswith("candidatescript_v1")
+    if responses:
+        body: dict[str, Any] = {"model": "m", "instructions": "i", "input": "{}"}
+        if not script:
+            body["text"] = {
+                "format": {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "candidate-plan-output-v1",
+                        "strict": True,
+                    },
+                }
+            }
+        path = "/v1/responses"
+    else:
+        body = {
+            "model": "m",
+            "messages": [
+                {"role": "system", "content": "i"},
+                {"role": "user", "content": "{}"},
+            ],
+        }
+        if not script:
+            body["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": "candidate-plan-output-v1", "strict": True},
+            }
+        path = "/v1/chat/completions"
+    _audit_candidate_request("POST", path, body, adapter)
+
+
+@pytest.mark.parametrize("adapter", CANDIDATE_ADAPTER_IDS)
+def test_real_provider_adapter_auditor_enforces_all_frozen_envelopes_without_network(
+    adapter: str,
+) -> None:
+    if adapter.startswith("openai_responses_"):
+        response = {
+            "output": [
+                {
+                    "type": "message",
+                    "content": [{"type": "output_text", "text": "candidate output"}],
+                }
+            ]
+        }
+    else:
+        response = {"choices": [{"message": {"content": "candidate output"}}]}
+    _audit_candidate_response(json.dumps(response).encode("utf-8"), adapter)
+
+
+def test_real_provider_timeout_is_passed_and_bounds_wait_without_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+    ticks = iter((100.0, 100.0, 130.0))
+    monkeypatch.setattr(time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(time, "sleep", lambda _: None)
+
+    class FakeClient:
+        def get(self, *_: Any, **__: Any) -> Any:
+            captured["get_calls"] = captured.get("get_calls", 0) + 1
+            return type("Response", (), {"json": lambda self: {"status": "running"}})()
+
+    with pytest.raises(pytest.fail.Exception) as raised:
+        _wait(FakeClient(), {}, "job", 30.0)
+    _safe_assert(
+        str(raised.value) == "REAL_PROVIDER_CANDIDATE_JOB_TIMEOUT",
+        "REAL_PROVIDER_REDACTION_CODE_INVALID",
+    )
+    _safe_assert(captured["get_calls"] == 1, "REAL_PROVIDER_AUDIT_CALL_COUNT_INVALID")
+
+
+def test_real_provider_client_timeout_override_without_network() -> None:
+    kwargs = _client_kwargs_with_timeout({"timeout": 90.0, "verify": True}, 45.0)
+    _safe_assert(kwargs["timeout"] == 45.0, "REAL_PROVIDER_ENVIRONMENT_INVALID")
+    _safe_assert(kwargs["verify"] is True, "REAL_PROVIDER_ENVIRONMENT_INVALID")
 
 
 def test_real_provider_transport_failures_are_redacted_without_network() -> None:

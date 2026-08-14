@@ -92,6 +92,13 @@ def _service(tmp_path: Path) -> tuple[Database, PlanningService, Jobs]:
             "output_price_per_million": 4.0,
         }
     )
+    with db.connection() as conn:
+        conn.execute(
+            "UPDATE provider_configs SET candidate_capability_status='supported',"
+            "candidate_response_adapter_id='openai_chat_completions_json_schema_v1',"
+            "candidate_probe_protocol_version='1',candidate_capability_tested_at='now',"
+            "candidate_capability_probe_sha256='sha256:probe'"
+        )
     planning.put_brief(
         "p1",
         {
@@ -139,6 +146,184 @@ def test_prepare_is_local_canonical_and_keeps_actual_transcript_refs(
     assert {segment["transcript_ref"] for segment in first["payload"]["segments"]} == {"t1", "t2"}
     serialized = json_dumps(first)
     assert "hidden-" not in serialized and "fp1" not in serialized
+
+
+def test_v8_preview_snapshots_and_memory_payload_are_complete(tmp_path: Path) -> None:
+    db, planning, _ = _service(tmp_path)
+    preview = _prepare(planning)
+    with db.connection() as conn:
+        row = conn.execute(
+            "SELECT payload_json,candidate_response_adapter_id,candidate_probe_protocol_version,"
+            "candidate_capability_probe_sha256 FROM egress_previews WHERE id=?",
+            (preview["egress_preview_id"],),
+        ).fetchone()
+    assert tuple(row) == ("{}", "openai_chat_completions_json_schema_v1", "1", "sha256:probe")
+    stored = planning.pending_store.get(preview["egress_preview_id"])
+    assert stored and stored["payload"] == preview["payload"]
+
+
+@pytest.mark.parametrize("target", ["db", "memory", "current"])
+def test_candidate_capability_mismatch_stops_before_generation(tmp_path: Path, target: str) -> None:
+    db, planning, jobs = _service(tmp_path)
+    preview = _prepare(planning)
+    if target == "db":
+        with db.connection() as conn:
+            conn.execute("DROP TRIGGER egress_previews_no_update")
+            conn.execute(
+                "UPDATE egress_previews SET candidate_probe_protocol_version='other' WHERE id=?",
+                (preview["egress_preview_id"],),
+            )
+    elif target == "memory":
+        planning.pending_store.get(preview["egress_preview_id"])["probe_sha256"] = "sha256:other"  # type: ignore[index]
+    else:
+        with db.connection() as conn:
+            conn.execute(
+                "UPDATE provider_configs SET candidate_capability_probe_sha256='sha256:other'", ()
+            )
+    with pytest.raises(DomainError):
+        planning.create_generation(
+            "p1", preview["egress_preview_id"], preview["payload_sha256"], jobs
+        )
+    assert jobs.created == 0
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["wrong_order", "duplicate_ref", "unknown_ref", "short_duration"],
+)
+def test_candidate_probe_domain_rejects_invalid_synthetic_candidates(mutation: str) -> None:
+    from aivs_core.planning import PlanningService
+
+    payload = {
+        "segments": [
+            {"segment_ref": "s1", "start_us": 0, "end_us": 5_000_000},
+            {"segment_ref": "s2", "start_us": 5_000_000, "end_us": 10_000_000},
+            {"segment_ref": "s3", "start_us": 10_000_000, "end_us": 15_000_000},
+        ]
+    }
+    value = {
+        "candidates": [
+            {
+                "variant": variant,
+                "title_suggestion": variant,
+                "summary": "summary",
+                "clips": [
+                    {"segment_ids": ["s1", "s2", "s3"], "reason": "reason", "model_score": None}
+                ],
+            }
+            for variant in ("balanced", "compact", "bold")
+        ]
+    }
+    if mutation == "wrong_order":
+        value["candidates"][0]["variant"] = "compact"
+    elif mutation == "duplicate_ref":
+        value["candidates"][0]["clips"][0]["segment_ids"] = ["s1", "s1"]
+    elif mutation == "unknown_ref":
+        value["candidates"][0]["clips"][0]["segment_ids"] = ["nope"]
+    else:
+        value["candidates"][0]["clips"][0]["segment_ids"] = ["s1"]
+    with pytest.raises(Exception):
+        PlanningService._validate_candidate_probe(value, payload)
+
+
+@pytest.mark.asyncio
+async def test_candidate_probe_uses_fixed_order_and_stops_on_first_complete_success(
+    tmp_path: Path,
+) -> None:
+    _, planning, _ = _service(tmp_path)
+    provider_id = planning.providers.list()[0]["provider_config_id"]
+    planning.vault.set(provider_id, "SENTINEL_API_KEY")
+    requests: list[str] = []
+
+    class ProbeProvider:
+        async def generate(self, request, _cancel):
+            requests.append(request.response_adapter_id)
+            if len(requests) < 3:
+                from aivs_core.providers import ProviderError
+
+                raise ProviderError("PROVIDER_INVALID_RESPONSE", "invalid")
+            refs = [segment["segment_ref"] for segment in request.payload["segments"]]
+            value = {
+                "candidates": [
+                    {
+                        "variant": variant,
+                        "title_suggestion": variant,
+                        "summary": "summary",
+                        "clips": [{"segment_ids": refs, "reason": "reason", "model_score": None}],
+                    }
+                    for variant in ("balanced", "compact", "bold")
+                ]
+            }
+            return StructuredTextResult(value, None, None)
+
+    planning.provider_factory = ProbeProvider
+    result = await planning.test_candidate_provider_capability(provider_id)
+    assert requests == [
+        "openai_responses_json_schema_v1",
+        "openai_responses_candidatescript_v1",
+        "openai_chat_completions_json_schema_v1",
+    ]
+    assert result["candidate_capability_status"] == "supported"
+    assert result["candidate_response_adapter_id"] == requests[-1]
+
+
+@pytest.mark.asyncio
+async def test_candidate_probe_attempts_each_adapter_once_then_records_unsupported(
+    tmp_path: Path,
+) -> None:
+    _, planning, _ = _service(tmp_path)
+    provider_id = planning.providers.list()[0]["provider_config_id"]
+    planning.vault.set(provider_id, "SENTINEL_API_KEY")
+    requests: list[str] = []
+
+    class FailingProbeProvider:
+        async def generate(self, request, _cancel):
+            from aivs_core.providers import ProviderError
+
+            requests.append(request.response_adapter_id)
+            raise ProviderError("PROVIDER_INVALID_RESPONSE", "invalid")
+
+    planning.provider_factory = FailingProbeProvider
+    result = await planning.test_candidate_provider_capability(provider_id)
+    assert requests == [
+        "openai_responses_json_schema_v1",
+        "openai_responses_candidatescript_v1",
+        "openai_chat_completions_json_schema_v1",
+        "openai_chat_completions_candidatescript_v1",
+    ]
+    assert result["candidate_capability_status"] == "unsupported"
+    assert result["candidate_response_adapter_id"] is None
+    assert result["candidate_capability_failure_code"] == "PROVIDER_INVALID_RESPONSE"
+
+
+@pytest.mark.asyncio
+async def test_candidate_probe_cancellation_preserves_existing_capability(tmp_path: Path) -> None:
+    _, planning, _ = _service(tmp_path)
+    provider_id = planning.providers.list()[0]["provider_config_id"]
+    planning.vault.set(provider_id, "SENTINEL_API_KEY")
+    requests: list[str] = []
+
+    class CancelledProbeProvider:
+        async def generate(self, request, _cancel):
+            from aivs_core.providers import ProviderError
+
+            requests.append(request.response_adapter_id)
+            raise ProviderError("PROVIDER_CANCELLED", "cancelled")
+
+    planning.provider_factory = CancelledProbeProvider
+    with pytest.raises(Exception) as raised:
+        await planning.test_candidate_provider_capability(provider_id)
+    assert getattr(raised.value, "code") == "PROVIDER_CANCELLED"
+    assert requests == ["openai_responses_json_schema_v1"]
+    capability = planning.candidate_capability(provider_id)
+    assert capability == {
+        "candidate_capability_status": "supported",
+        "candidate_response_adapter_id": "openai_chat_completions_json_schema_v1",
+        "candidate_probe_protocol_version": "1",
+        "candidate_capability_tested_at": "now",
+        "candidate_capability_failure_code": None,
+        "candidate_capability_probe_sha256": "sha256:probe",
+    }
 
 
 @pytest.mark.parametrize("mutation", ["brief", "provider", "transcript", "asset"])
