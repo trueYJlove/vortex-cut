@@ -119,6 +119,9 @@ def test_real_v3_copy_upgrades_to_v4_and_preserves_all_stage1_data(
             "v2",
             "v3",
             "v4",
+            "v5",
+            "v6",
+            "v7",
         ]
         assert db.execute("SELECT name FROM projects WHERE id='p1'").fetchone() == ("project",)
         assert db.execute("SELECT fingerprint FROM assets WHERE id='a1'").fetchone() == ("fp",)

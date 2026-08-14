@@ -36,6 +36,7 @@ from .rendering.service import (
     RenderService,
 )
 from .timeline import TimelineService
+from .timeline_planning import TimelinePatchPlanningService
 from .transcription import TranscriptionError, TranscriptRepository
 
 
@@ -205,6 +206,31 @@ class CandidateAdoptRequest(BaseModel):
     base_revision_id: str | None = None
 
 
+class TimelinePatchPrepareRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    base_revision_id: str
+    provider_config_id: str
+    instruction: str
+
+
+class TimelinePatchGenerationCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    timeline_patch_egress_preview_id: str
+    payload_sha256: str
+
+
+class TimelinePatchProposalApplyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    base_revision_id: str
+    proposed_document_sha256: str
+
+
+class TimelineRevisionDiffRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    base_revision_id: str
+    target_revision_id: str
+
+
 class DestinationGrantRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -231,6 +257,9 @@ class CoreState:
         self.recipes = RecipeRegistry(settings.recipe_dir)
         self.planning = PlanningService(
             self.db, self.recipes, self.providers, self.provider_secrets, self.timelines
+        )
+        self.timeline_patch_planning = TimelinePatchPlanningService(
+            self.db, self.providers, self.provider_secrets, self.timelines
         )
         self.destinations = DestinationGrantStore()
         self.asr = AsrCoordinator(
@@ -268,6 +297,7 @@ class CoreState:
             retry_validator=self.asr.validate_retry,
             render_runner=self.render_coordinator.run,
             planning_runner=self.planning.run_generation,
+            timeline_patch_runner=self.timeline_patch_planning.run_generation,
         )
         self.renders = RenderService(
             self.db,
@@ -348,6 +378,15 @@ def _domain(exc: DomainError) -> HTTPException:
             "TIMELINE_ALREADY_EXISTS",
             "TIMELINE_CONFLICT",
             "TIMELINE_DRAFT_CONFLICT",
+            "TIMELINE_LOCKED",
+            "TIMELINE_PATCH_EGRESS_EXPIRED",
+            "TIMELINE_PATCH_EGRESS_MISMATCH",
+            "TIMELINE_PATCH_PROVIDER_UNTESTED",
+            "TIMELINE_PATCH_PROVIDER_UNSUPPORTED",
+            "TIMELINE_PATCH_GENERATION_INVALID",
+            "TIMELINE_PATCH_PROPOSAL_INVALID",
+            "TIMELINE_PATCH_PROPOSAL_CONFLICT",
+            "TIMELINE_PATCH_PROPOSAL_APPLIED",
             "RENDER_PLAN_INVALID",
             "RENDER_INPUT_CHANGED",
             "EXPORT_DESTINATION_INVALID",
@@ -371,6 +410,8 @@ def _domain(exc: DomainError) -> HTTPException:
         "CANDIDATE_PLAN_NOT_FOUND",
         "CANDIDATE_CLIP_NOT_FOUND",
         "CANDIDATE_GENERATION_NOT_FOUND",
+        "TIMELINE_PATCH_GENERATION_NOT_FOUND",
+        "TIMELINE_PATCH_PROPOSAL_NOT_FOUND",
     }:
         status = 404
     return _error(exc.code, exc.message, status)
@@ -544,14 +585,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/v1/providers")
     async def list_providers(_: CoreState = Depends(require_ui)) -> dict[str, Any]:
-        return {"items": state.providers.list()}
+        return {
+            "items": [
+                state.timeline_patch_planning.provider_public(item)
+                for item in state.providers.list()
+            ]
+        }
 
     @app.post("/api/v1/providers")
     async def create_provider(
         request: ProviderCreateRequest, _: CoreState = Depends(require_ui)
     ) -> dict[str, Any]:
         try:
-            return state.providers.create(request.model_dump())
+            provider = state.providers.create(request.model_dump())
+            return state.timeline_patch_planning.provider_public(provider)
         except (DomainError, ProviderError) as exc:
             raise _error(exc.code, exc.message, 400) from exc
 
@@ -560,9 +607,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         provider_config_id: str, request: ProviderPatchRequest, _: CoreState = Depends(require_ui)
     ) -> dict[str, Any]:
         try:
-            return state.providers.patch(
+            provider = state.providers.patch(
                 provider_config_id, {k: v for k, v in request.model_dump().items() if v is not None}
             )
+            return state.timeline_patch_planning.provider_public(provider)
         except (DomainError, ProviderError) as exc:
             raise (
                 _domain(exc) if isinstance(exc, DomainError) else _error(exc.code, exc.message, 400)
@@ -577,6 +625,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except (DomainError, ProviderError) as exc:
             raise (
                 _domain(exc) if isinstance(exc, DomainError) else _error(exc.code, exc.message, 503)
+            )
+
+    @app.post("/api/v1/providers/{provider_config_id}/timeline-patch-capability-test")
+    async def test_timeline_patch_provider_capability(
+        provider_config_id: str, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        try:
+            return await state.timeline_patch_planning.test_provider_capability(provider_config_id)
+        except (DomainError, ProviderError) as exc:
+            raise (
+                _domain(exc)
+                if isinstance(exc, DomainError)
+                else _error(exc.code, exc.message, 503)
             )
 
     @app.post("/api/v1/projects/{project_id}/candidate-generations/prepare")
@@ -632,7 +693,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise _domain(exc) from exc
 
     @app.get(
-        "/api/v1/projects/{project_id}/candidate-plans/{candidate_plan_id}/clips/{candidate_clip_id}"
+        "/api/v1/projects/{project_id}/candidate-plans/"
+        "{candidate_plan_id}/clips/{candidate_clip_id}"
     )
     async def get_candidate_clip(
         project_id: str,
@@ -656,6 +718,91 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> dict[str, Any]:
         try:
             return state.planning.adopt(project_id, candidate_plan_id, request.model_dump())
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/timeline-patch-generations/prepare")
+    async def prepare_timeline_patch_generation(
+        project_id: str,
+        request: TimelinePatchPrepareRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return state.timeline_patch_planning.prepare(project_id, request.model_dump())
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/timeline-patch-generations")
+    async def create_timeline_patch_generation(
+        project_id: str,
+        request: TimelinePatchGenerationCreateRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return state.timeline_patch_planning.create_generation(
+                project_id,
+                request.timeline_patch_egress_preview_id,
+                request.payload_sha256,
+                state.jobs,
+            )
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/projects/{project_id}/timeline-patch-generations")
+    async def list_timeline_patch_generations(
+        project_id: str, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        return {"items": state.timeline_patch_planning.list_generations(project_id)}
+
+    @app.get("/api/v1/timeline-patch-generations/{generation_id}")
+    async def get_timeline_patch_generation(
+        generation_id: str, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        try:
+            return state.timeline_patch_planning.get_generation(generation_id)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/projects/{project_id}/timeline-patch-proposals")
+    async def list_timeline_patch_proposals(
+        project_id: str, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        return {"items": state.timeline_patch_planning.list_proposals(project_id)}
+
+    @app.get("/api/v1/timeline-patch-proposals/{proposal_id}")
+    async def get_timeline_patch_proposal(
+        proposal_id: str, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        try:
+            return state.timeline_patch_planning.get_proposal(proposal_id)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/timeline-patch-proposals/{proposal_id}/apply")
+    async def apply_timeline_patch_proposal(
+        project_id: str,
+        proposal_id: str,
+        request: TimelinePatchProposalApplyRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            revision = state.timeline_patch_planning.apply(
+                project_id, proposal_id, request.model_dump()
+            )
+            return with_current_preview(state.timelines.get_state(revision["project_id"]))
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/timeline/revision-diffs")
+    async def compare_timeline_revisions(
+        project_id: str,
+        request: TimelineRevisionDiffRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return state.timelines.compare_revisions(
+                project_id, request.base_revision_id, request.target_revision_id
+            )
         except DomainError as exc:
             raise _domain(exc) from exc
 

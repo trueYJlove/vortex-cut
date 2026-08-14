@@ -19,10 +19,12 @@ describe("Desktop preload 白名单", () => {
     expect(Object.keys(api)).not.toContain("adminToken");
     await api.setProviderSecret({ provider_config_id: "provider_1", secret: "test-secret" });
     await api.deleteProviderSecret("provider_1");
+    await api.testTimelinePatchProviderCapability("provider_1");
     await api.getCandidateClipMedia({ project_id: "project_1", candidate_plan_id: "candidate_1", candidate_clip_id: "candidate_clip_1" });
     expect(invoke.mock.calls).toEqual([
       ["provider:set-secret", { provider_config_id: "provider_1", secret: "test-secret" }],
       ["provider:delete-secret", "provider_1"],
+      ["planning-patch:test-provider-capability", "provider_1"],
       ["planning:clip-media", { project_id: "project_1", candidate_plan_id: "candidate_1", candidate_clip_id: "candidate_clip_1" }]
     ]);
   });
@@ -39,12 +41,12 @@ describe("Desktop preload 白名单", () => {
       ["getRuntime", []], ["chooseMedia", []], ["probeMedia", ["grant_1"]], ["listProjects", [{}]], ["createProject", [{}]], ["getProject", ["project_1"]], ["renameProject", [{}]], ["archiveProject", ["project_1"]], ["reopenProject", ["project_1"]],
       ["listAssets", [{}]], ["importAsset", [{}]], ["refreshAsset", ["asset_1"]], ["relocateAsset", [{}]], ["listJobs", [{}]], ["createJob", [{}]], ["getJob", ["job_1"]], ["cancelJob", ["job_1"]],
       ["listModels", [{}]], ["getModel", ["model_1"]], ["downloadModel", [{}]], ["getModelDownload", ["model_1"]], ["cancelModelDownload", ["model_1"]], ["createTranscription", [{}]], ["listTranscripts", ["asset_1"]], ["getTranscript", ["transcript_1"]],
-      ["getBrief", ["project_1"]], ["putBrief", [{}]], ["listRecipes", []], ["listProviders", []], ["createProvider", [{}]], ["testProvider", ["provider_1"]], ["preparePlanning", [{}]], ["createPlanning", [{}]], ["listCandidatePlans", ["project_1"]], ["adoptCandidatePlan", [{}]],
+      ["getBrief", ["project_1"]], ["putBrief", [{}]], ["listRecipes", []], ["listProviders", []], ["createProvider", [{}]], ["testProvider", ["provider_1"]], ["preparePlanning", [{}]], ["createPlanning", [{}]], ["listCandidatePlans", ["project_1"]], ["adoptCandidatePlan", [{}]], ["prepareTimelinePatch", [{}]], ["testTimelinePatchProviderCapability", ["provider_1"]], ["createTimelinePatchGeneration", [{}]], ["getTimelinePatchGeneration", ["generation_1"]], ["listTimelinePatchProposals", ["project_1"]], ["getTimelinePatchProposal", ["proposal_1"]], ["applyTimelinePatchProposal", [{}]], ["compareTimelineRevisions", [{}]],
       ["createTimeline", [{}]], ["getTimeline", ["project_1"]], ["patchTimeline", [{}]], ["undoTimeline", [{}]], ["redoTimeline", [{}]], ["saveTimelineDraft", [{}]], ["deleteTimelineDraft", ["project_1"]], ["listTimelineRevisions", [{}]], ["getTimelineRevision", ["revision_1"]],
       ["createPreview", [{}]], ["listPreviews", [{}]], ["chooseExportDestination", ["project_1"]], ["createExport", [{}]], ["listExports", [{}]], ["getRenderArtifact", ["artifact_1"]], ["openArtifact", ["artifact_1"]], ["openArtifactFolder", ["artifact_1"]], ["diagnostics", []]
     ];
     for (const [name, args] of calls) await api[name](...args);
-    expect(invoke).toHaveBeenCalledTimes(3 + calls.length);
+    expect(invoke).toHaveBeenCalledTimes(4 + calls.length);
     expect(invoke.mock.calls.every(([channel]) => typeof channel === "string" && !channel.includes("secret:get") && !channel.includes("admin"))).toBe(true);
   });
 });

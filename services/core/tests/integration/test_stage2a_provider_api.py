@@ -198,9 +198,10 @@ def test_candidate_generation_api_success_clip_lookup_and_restart(
         ][0]
         clip = plan["clips"][0]
         lookup = client.get(
-            f"/api/v1/projects/{project_id}/candidate-plans/{plan['candidate_plan_id']}/clips/{clip['clip_id']}",
+            f"/api/v1/projects/{project_id}/candidate-plans/"
+            f"{plan['candidate_plan_id']}/clips/{clip['clip_id']}",
             headers=ui,
-        )  # noqa: E501
+        )
         assert lookup.status_code == 200
         assert set(lookup.json()) == {
             "candidate_plan_id",

@@ -19,6 +19,7 @@ export default defineConfig({
         "electron/main/candidate-media.ts",
         "electron/main/provider-secrets.ts",
         "electron/main/stage2a-ipc.ts",
+        "electron/main/stage2b-ipc.ts",
         "electron/main/restricted-media.ts",
         "electron/main/export-destination.ts",
         "electron/main/logging.ts",

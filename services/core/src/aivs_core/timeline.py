@@ -28,6 +28,13 @@ PATCH_OPERATIONS = {
     "update_caption",
     "set_caption_timing",
     "set_caption_preset",
+    "set_clip_locked",
+}
+AI_PATCH_OPERATIONS = PATCH_OPERATIONS - {
+    "insert_asset_clip",
+    "insert_transcript_segments",
+    "add_caption",
+    "set_clip_locked",
 }
 MIN_VIDEO_US = 100_000
 MIN_IMAGE_US = 500_000
@@ -250,6 +257,39 @@ class TimelineService:
                 raise
         return self.get_state(project_id)
 
+    def apply_in_memory(
+        self,
+        db: sqlite3.Connection,
+        project_id: str,
+        document: dict[str, Any],
+        operations: list[dict[str, Any]],
+        *,
+        ai: bool = False,
+    ) -> dict[str, Any]:
+        if not 1 <= len(operations) <= 100:
+            raise DomainError("TIMELINE_INVALID", "Patch 操作数量需为 1-100")
+        result = copy.deepcopy(document)
+        result.setdefault("locked_elements", [])
+        for raw_operation in operations:
+            operation = _mapping(raw_operation, "Patch 操作不合法")
+            if ai and operation.get("op") not in AI_PATCH_OPERATIONS:
+                raise DomainError("TIMELINE_PATCH_PROPOSAL_INVALID", "AI Patch 包含禁止操作")
+            self._apply_operation(db, project_id, result, operation)
+        self._normalize_and_validate(db, result)
+        if not result["clips"]:
+            raise DomainError("TIMELINE_PATCH_PROPOSAL_INVALID", "AI Patch 不得产生空时间线")
+        return result
+
+    def compare_revisions(
+        self, project_id: str, base_revision_id: str, target_revision_id: str
+    ) -> dict[str, Any]:
+        with self.db.connection() as db:
+            base = self._revision(db, base_revision_id)
+            target = self._revision(db, target_revision_id)
+        if base["project_id"] != project_id or target["project_id"] != project_id:
+            raise DomainError("TIMELINE_DIFF_INVALID", "Revision 不属于当前项目")
+        return timeline_diff(base, target)
+
     def undo(self, project_id: str, base_revision_id: str) -> dict[str, Any]:
         return self._navigate(project_id, base_revision_id, redo=False)
 
@@ -342,6 +382,9 @@ class TimelineService:
             raise DomainError("TIMELINE_OPERATION_UNSUPPORTED", "不支持的时间线操作")
         clips = document["clips"]
         captions = document["captions"]
+        document.setdefault("locked_elements", [])
+        if op != "set_clip_locked":
+            self._require_unlocked(document, operation)
         old_starts = {clip["clip_id"]: clip["timeline_start_us"] for clip in clips}
         if op == "insert_asset_clip":
             _exact_keys(
@@ -532,7 +575,30 @@ class TimelineService:
                 operation.get("preset_id"), CAPTION_PRESETS, "字幕预设不合法"
             )
             caption["edited"] = True
+        elif op == "set_clip_locked":
+            _exact_keys(operation, {"op", "clip_id", "locked"})
+            clip_id = _clip(document, operation.get("clip_id"))["clip_id"]
+            locked = operation.get("locked")
+            if not isinstance(locked, bool):
+                raise DomainError("TIMELINE_INVALID", "锁定状态不合法")
+            locked_ids = document["locked_elements"]
+            if locked and clip_id not in locked_ids:
+                locked_ids.append(clip_id)
+            elif not locked and clip_id in locked_ids:
+                locked_ids.remove(clip_id)
         self._normalize_timing(document, old_starts)
+
+    @staticmethod
+    def _require_unlocked(document: dict[str, Any], operation: dict[str, Any]) -> None:
+        locked = set(document.get("locked_elements", []))
+        clip_id = operation.get("clip_id")
+        if isinstance(clip_id, str) and clip_id in locked:
+            raise DomainError("TIMELINE_LOCKED", "Timeline Clip 已锁定")
+        caption_id = operation.get("caption_id")
+        if isinstance(caption_id, str):
+            caption = _caption(document, caption_id)
+            if caption.get("source_clip_id") in locked:
+                raise DomainError("TIMELINE_LOCKED", "关联 Caption 所属 Clip 已锁定")
 
     def _asset_clip(
         self,
@@ -679,8 +745,19 @@ class TimelineService:
     def _normalize_and_validate(self, db: sqlite3.Connection, document: dict[str, Any]) -> None:
         _exact_keys(
             document,
-            {"schema_version", "project_id", "canvas", "tracks", "clips", "captions", "provenance"},
+            {
+                "schema_version",
+                "project_id",
+                "canvas",
+                "tracks",
+                "clips",
+                "captions",
+                "provenance",
+                "locked_elements",
+            },
+            optional={"locked_elements"},
         )
+        document.setdefault("locked_elements", [])
         self._normalize_timing(document, {})
         if document.get("schema_version") != 1:
             raise DomainError("TIMELINE_INVALID", "Timeline schema_version 必须为 1")
@@ -822,6 +899,17 @@ class TimelineService:
         ):
             raise DomainError("TIMELINE_INVALID", "Timeline provenance 不合法")
         _exact_keys(provenance, {"created_by", "source_transcript_ids"})
+        locked_elements = document.get("locked_elements")
+        if (
+            not isinstance(locked_elements, list)
+            or any(not isinstance(value, str) for value in locked_elements)
+            or len(set(locked_elements)) != len(locked_elements)
+            or any(value not in clip_ids for value in locked_elements)
+        ):
+            raise DomainError("TIMELINE_INVALID", "Timeline 锁定集合不合法")
+        document["locked_elements"] = [
+            clip["clip_id"] for clip in clips if clip["clip_id"] in set(locked_elements)
+        ]
 
     def _normalize_timing(self, document: dict[str, Any], old_starts: dict[str, int]) -> None:
         clips = document.get("clips")
@@ -956,12 +1044,14 @@ class TimelineService:
         row = db.execute("SELECT * FROM timeline_revisions WHERE id=?", (revision_id,)).fetchone()
         if row is None:
             raise DomainError("TIMELINE_NOT_FOUND", "Timeline Revision 不存在")
+        document = json_loads(row["document_json"])
+        document.setdefault("locked_elements", [])
         return {
             "timeline_revision_id": row["id"],
             "project_id": row["project_id"],
             "parent_revision_id": row["parent_revision_id"],
             "schema_version": row["schema_version"],
-            "document": json_loads(row["document_json"]),
+            "document": document,
             "document_sha256": row["document_sha256"],
             "summary": row["summary"],
             "created_by": row["created_by"],
@@ -987,6 +1077,7 @@ class TimelineService:
             ],
             "clips": [],
             "captions": [],
+            "locked_elements": [],
             "provenance": {"created_by": "user", "source_transcript_ids": []},
         }
 
@@ -1130,3 +1221,130 @@ def _exact_keys(
     required = allowed - optional
     if set(value) - allowed or not required <= set(value):
         raise DomainError("TIMELINE_INVALID", "请求字段不符合 Timeline v1 契约")
+
+
+def timeline_diff(base: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
+    base_doc, target_doc = base["document"], target["document"]
+    base_clips = {item["clip_id"]: item for item in base_doc["clips"]}
+    target_clips = {item["clip_id"]: item for item in target_doc["clips"]}
+    clip_changes: list[dict[str, Any]] = []
+    removed = sorted(set(base_clips) - set(target_clips))
+    added = sorted(set(target_clips) - set(base_clips))
+    split_added: set[str] = set()
+    split_base: set[str] = set()
+    for clip_id in sorted(set(base_clips) & set(target_clips)):
+        old, left = base_clips[clip_id], target_clips[clip_id]
+        if (
+            old["asset_kind"] != "video"
+            or old["source_start_us"] != left["source_start_us"]
+            or old["source_end_us"] == left["source_end_us"]
+        ):
+            continue
+        matches = [
+            added_id
+            for added_id in added
+            if target_clips[added_id]["asset_id"] == old["asset_id"]
+            and target_clips[added_id]["source_start_us"] == left["source_end_us"]
+            and target_clips[added_id]["source_end_us"] == old["source_end_us"]
+            and target_clips[added_id]["order_index"] == left["order_index"] + 1
+        ]
+        if len(matches) == 1:
+            split_base.add(clip_id)
+            split_added.add(matches[0])
+            clip_changes.append({"type": "split", "clip_id": clip_id, "created_clip_ids": matches})
+    for clip_id in removed:
+        clip_changes.append({"type": "removed", "clip_id": clip_id})
+    for clip_id in added:
+        if clip_id not in split_added:
+            clip_changes.append({"type": "added", "clip_id": clip_id})
+    for clip_id in sorted(set(base_clips) & set(target_clips)):
+        old, new = base_clips[clip_id], target_clips[clip_id]
+        changes: list[str] = []
+        if old["order_index"] != new["order_index"]:
+            changes.append("moved")
+        if clip_id not in split_base and (old["source_start_us"], old["source_end_us"]) != (
+            new["source_start_us"],
+            new["source_end_us"],
+        ):
+            changes.append("trimmed")
+        if old["layout"] != new["layout"]:
+            changes.append("layout_changed")
+        if old["audio"] != new["audio"]:
+            changes.append("audio_changed")
+        old_duration = old["timeline_end_us"] - old["timeline_start_us"]
+        new_duration = new["timeline_end_us"] - new["timeline_start_us"]
+        if old_duration != new_duration and "trimmed" not in changes:
+            changes.append("duration_changed")
+        for change_type in changes:
+            clip_changes.append({"type": change_type, "clip_id": clip_id})
+
+    base_captions = {item["caption_id"]: item for item in base_doc["captions"]}
+    target_captions = {item["caption_id"]: item for item in target_doc["captions"]}
+    caption_changes: list[dict[str, Any]] = []
+    for caption_id in sorted(set(base_captions) - set(target_captions)):
+        caption_changes.append({"type": "removed", "caption_id": caption_id})
+    for caption_id in sorted(set(target_captions) - set(base_captions)):
+        caption_changes.append({"type": "added", "caption_id": caption_id})
+    for caption_id in sorted(set(base_captions) & set(target_captions)):
+        old, new = base_captions[caption_id], target_captions[caption_id]
+        for changed, change_type in (
+            (old["text"] != new["text"], "text_changed"),
+            (
+                (old["start_us"], old["end_us"]) != (new["start_us"], new["end_us"]),
+                "timing_changed",
+            ),
+            (old["preset_id"] != new["preset_id"], "preset_changed"),
+        ):
+            if changed:
+                caption_changes.append({"type": change_type, "caption_id": caption_id})
+
+    base_locked = set(base_doc.get("locked_elements", []))
+    target_locked = set(target_doc.get("locked_elements", []))
+    lock_changes = [
+        *({"type": "unlocked", "clip_id": value} for value in sorted(base_locked - target_locked)),
+        *({"type": "locked", "clip_id": value} for value in sorted(target_locked - base_locked)),
+    ]
+    indirect = []
+    for clip_id in sorted(base_locked & target_locked & set(base_clips) & set(target_clips)):
+        old, new = base_clips[clip_id], target_clips[clip_id]
+        content_keys = {
+            "asset_id",
+            "asset_kind",
+            "source_start_us",
+            "source_end_us",
+            "layout",
+            "audio",
+        }
+        if (old["timeline_start_us"], old["timeline_end_us"]) != (
+            new["timeline_start_us"],
+            new["timeline_end_us"],
+        ) and all(old[key] == new[key] for key in content_keys):
+            indirect.append(
+                {
+                    "clip_id": clip_id,
+                    "from_start_us": old["timeline_start_us"],
+                    "from_end_us": old["timeline_end_us"],
+                    "to_start_us": new["timeline_start_us"],
+                    "to_end_us": new["timeline_end_us"],
+                }
+            )
+    base_duration = base_doc["clips"][-1]["timeline_end_us"] if base_doc["clips"] else 0
+    target_duration = target_doc["clips"][-1]["timeline_end_us"] if target_doc["clips"] else 0
+    return {
+        "schema_version": 1,
+        "project_id": base["project_id"],
+        "base_revision_id": base["timeline_revision_id"],
+        "target_revision_id": target.get("timeline_revision_id"),
+        "base_document_sha256": base["document_sha256"],
+        "target_document_sha256": target["document_sha256"],
+        "summary": {
+            "clip_changes": len(clip_changes),
+            "caption_changes": len(caption_changes),
+            "lock_changes": len(lock_changes),
+        },
+        "duration_delta_us": target_duration - base_duration,
+        "clip_changes": clip_changes,
+        "caption_changes": caption_changes,
+        "lock_changes": lock_changes,
+        "indirect_locked_timing_shifts": indirect,
+    }

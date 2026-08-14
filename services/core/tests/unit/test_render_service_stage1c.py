@@ -124,7 +124,14 @@ def test_render_and_export_dtos_redact_private_fields_and_stale(tmp_path: Path) 
             "('e1','p1','r1','a1','export-portrait-v1',?,'结果.mp4','now')",
             (artifact_path.as_uri(),),
         )
-    service = RenderService(database, Path("ffmpeg"), _Unused(), _Unused(), _Unused(), _Unused())  # type: ignore[arg-type]
+    service = RenderService(  # type: ignore[arg-type]
+        database,
+        Path("ffmpeg"),
+        _Unused(),
+        _Unused(),
+        _Unused(),
+        _Unused(),
+    )
     assert service.current_preview("p1") is None
     artifact = service.artifact_dto("a1")
     assert artifact["status"] == "stale"

@@ -45,6 +45,7 @@ class JobService:
         retry_validator: Callable[[Any], None] | None = None,
         render_runner: RenderRunner | None = None,
         planning_runner: PlanningRunner | None = None,
+        timeline_patch_runner: PlanningRunner | None = None,
     ) -> None:
         self.db = db
         self.data_dir = data_dir
@@ -56,6 +57,7 @@ class JobService:
         self.retry_validator = retry_validator
         self.render_runner = render_runner
         self.planning_runner = planning_runner
+        self.timeline_patch_runner = timeline_patch_runner
         self.tasks: dict[str, asyncio.Task[None]] = {}
         self.cancel_events: dict[str, asyncio.Event] = {}
         self.worker: asyncio.Task[None] | None = None
@@ -265,6 +267,53 @@ class JobService:
             )
         return self.get(job_id) or {"job_id": job_id, "status": "queued", "created_at": now}
 
+    def create_timeline_patch_generation(
+        self, project_id: str, generation_id: str, invocation_id: str, payload_sha256: str
+    ) -> dict[str, Any]:
+        job_id, now = new_id(), utc_now()
+        with self.db.connection() as db:
+            self.insert_timeline_patch_job(
+                db, job_id, now, project_id, generation_id, invocation_id, payload_sha256
+            )
+        return self.get(job_id) or {"job_id": job_id, "status": "queued", "created_at": now}
+
+    @staticmethod
+    def insert_timeline_patch_job(
+        db: Any,
+        job_id: str,
+        now: str,
+        project_id: str,
+        generation_id: str,
+        invocation_id: str,
+        payload_sha256: str,
+    ) -> None:
+        db.execute(
+            "INSERT INTO jobs(id,project_id,kind,type,status,stage,progress,input_json,"
+            "timeline_patch_generation_id,provider_invocation_id,resource_class,attempt,"
+            "created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                job_id,
+                project_id,
+                "timeline_patch_generation",
+                "timeline_patch_generation",
+                "queued",
+                "queued",
+                0,
+                json_dumps(
+                    {
+                        "timeline_patch_generation_id": generation_id,
+                        "egress_payload_sha256": payload_sha256,
+                    }
+                ),
+                generation_id,
+                invocation_id,
+                "network",
+                1,
+                now,
+                now,
+            ),
+        )
+
     def delete_queued(self, job_id: str) -> None:
         with self.db.connection() as db:
             db.execute("DELETE FROM jobs WHERE id=? AND status='queued'", (job_id,))
@@ -345,7 +394,7 @@ class JobService:
                 return None
             if row["status"] not in {"interrupted", "failed"}:
                 raise ValueError("JOB_INVALID_STATE")
-            if row["kind"] == "candidate_generation":
+            if row["kind"] in {"candidate_generation", "timeline_patch_generation"}:
                 raise ValueError("CANDIDATE_GENERATION_RECONFIRM_REQUIRED")
             if self.retry_validator:
                 self.retry_validator(row)
@@ -402,7 +451,11 @@ class JobService:
             self._transition_job(job_id, status, "cancelling", cancel_requested=1)
             self.cancel_events.setdefault(job_id, asyncio.Event()).set()
             job = self.get(job_id)
-            if job_id in self.tasks and job and job["kind"] == "candidate_generation":
+            if (
+                job_id in self.tasks
+                and job
+                and job["kind"] in {"candidate_generation", "timeline_patch_generation"}
+            ):
                 self.tasks[job_id].cancel()
         elif status == "cancelling":
             self.cancel_events.setdefault(job_id, asyncio.Event()).set()
@@ -492,6 +545,20 @@ class JobService:
                 if self.planning_runner is None:
                     raise RuntimeError("PLANNING_UNAVAILABLE")
                 result = await self.planning_runner(
+                    row,
+                    cancel_event,
+                    lambda value: self._set_progress(job_id, value),
+                    lambda value: self._set_stage(job_id, value),
+                )
+                with self.db.connection() as db:
+                    db.execute(
+                        "UPDATE jobs SET result_json=?,updated_at=? WHERE id=?",
+                        (json_dumps(result), utc_now(), job_id),
+                    )
+            elif row["kind"] == "timeline_patch_generation":
+                if self.timeline_patch_runner is None:
+                    raise RuntimeError("PLANNING_UNAVAILABLE")
+                result = await self.timeline_patch_runner(
                     row,
                     cancel_event,
                     lambda value: self._set_progress(job_id, value),

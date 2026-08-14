@@ -6,6 +6,7 @@ import { CoreAdminClient, CoreHttpError } from "./core-admin-client.js";
 import { ProviderSecretStore, reinjectProviderSecrets, removeProviderSecret, saveProviderSecret } from "./provider-secrets.js";
 import { issueCandidateClipMedia } from "./candidate-media.js";
 import { registerStage2aIpc } from "./stage2a-ipc.js";
+import { registerStage2bIpc } from "./stage2b-ipc.js";
 import { registerFileGrant } from "./file-grants.js";
 import { exportFileName, normalizeExportPath } from "./export-destination.js";
 import { defaultLogPath, appendLog, redact } from "./logging.js";
@@ -347,6 +348,7 @@ function registerIpc(): void {
       issueAssetTicket: restrictedMediaUrl
     }
   });
+  registerStage2bIpc({ handle: (channel, listener) => ipcMain.handle(channel, listener), fetchWithUi });
   ipcMain.handle("timeline:create", (_event, input: { project_id: ProjectId; timeline: TimelineCreateInput }) => fetchWithUi(`${API_PREFIX}/projects/${asId(input.project_id, "project_id")}/timelines`, { method: "POST", body: JSON.stringify(input.timeline) }).then(rendererSafe));
   ipcMain.handle("timeline:get", (_event, projectId: ProjectId) => fetchWithUi(`${API_PREFIX}/projects/${asId(projectId, "project_id")}/timeline`).then(rendererSafe));
   ipcMain.handle("timeline:patch", (_event, input: { project_id: ProjectId; patch: TimelinePatch }) => fetchWithUi(`${API_PREFIX}/projects/${asId(input.project_id, "project_id")}/timeline/patches`, { method: "POST", body: JSON.stringify(input.patch) }).then(rendererSafe));

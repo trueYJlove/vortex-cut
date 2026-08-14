@@ -42,6 +42,7 @@ import type {
   , RenderArtifact
   , RenderArtifactId
   , Brief, BriefInput, Recipe, ProviderConfig, EgressPreview, CandidatePlan
+  , TimelineDiff, TimelinePatchEgressPreview, TimelinePatchGeneration, TimelinePatchGenerationCreateResponse, TimelinePatchProposal, TimelinePatchCapabilityTestResponse
 } from "@aivideo/contracts";
 
 export interface MediaSelection { grant: FileGrant; media: MediaInfo }
@@ -89,6 +90,14 @@ export interface DesktopApi {
   listCandidatePlans?: (projectId: ProjectId) => Promise<{ items: CandidatePlan[] }>;
   getCandidateClipMedia?: (input: { project_id: ProjectId; candidate_plan_id: string; candidate_clip_id: string }) => Promise<{ media_url: string; source_start_us: number; source_end_us: number }>;
   adoptCandidatePlan?: (input: { project_id: ProjectId; candidate_plan_id: string; adoption: { schema_version: 1; candidate_document_sha256: string; base_revision_id: TimelineRevisionId | null } }) => Promise<TimelineState>;
+  prepareTimelinePatch: (input: { project_id: ProjectId; base_revision_id: TimelineRevisionId; provider_config_id: string; instruction: string }) => Promise<TimelinePatchEgressPreview>;
+  testTimelinePatchProviderCapability: (providerId: string) => Promise<TimelinePatchCapabilityTestResponse>;
+  createTimelinePatchGeneration: (input: { project_id: ProjectId; timeline_patch_egress_preview_id: string; payload_sha256: string }) => Promise<TimelinePatchGenerationCreateResponse>;
+  getTimelinePatchGeneration: (generationId: string) => Promise<TimelinePatchGeneration>;
+  listTimelinePatchProposals: (projectId: ProjectId) => Promise<{ items: TimelinePatchProposal[] }>;
+  getTimelinePatchProposal: (proposalId: string) => Promise<TimelinePatchProposal>;
+  applyTimelinePatchProposal: (input: { project_id: ProjectId; proposal_id: string; base_revision_id: TimelineRevisionId; proposed_document_sha256: string }) => Promise<TimelineState>;
+  compareTimelineRevisions: (input: { project_id: ProjectId; base_revision_id: TimelineRevisionId; target_revision_id: TimelineRevisionId }) => Promise<TimelineDiff>;
   createTimeline: (input: { project_id: ProjectId; timeline: TimelineCreateInput }) => Promise<TimelineState>;
   getTimeline: (projectId: ProjectId) => Promise<TimelineState>;
   patchTimeline: (input: { project_id: ProjectId; patch: TimelinePatch }) => Promise<TimelineState>;
@@ -149,6 +158,14 @@ const api: DesktopApi = {
   listCandidatePlans: projectId => ipcRenderer.invoke("planning:list", projectId),
   getCandidateClipMedia: input => ipcRenderer.invoke("planning:clip-media", input),
   adoptCandidatePlan: input => ipcRenderer.invoke("planning:adopt", input),
+  prepareTimelinePatch: input => ipcRenderer.invoke("planning-patch:prepare", input),
+  testTimelinePatchProviderCapability: providerId => ipcRenderer.invoke("planning-patch:test-provider-capability", providerId),
+  createTimelinePatchGeneration: input => ipcRenderer.invoke("planning-patch:create", input),
+  getTimelinePatchGeneration: generationId => ipcRenderer.invoke("planning-patch:generation-get", generationId),
+  listTimelinePatchProposals: projectId => ipcRenderer.invoke("planning-patch:proposal-list", projectId),
+  getTimelinePatchProposal: proposalId => ipcRenderer.invoke("planning-patch:proposal-get", proposalId),
+  applyTimelinePatchProposal: input => ipcRenderer.invoke("planning-patch:proposal-apply", input),
+  compareTimelineRevisions: input => ipcRenderer.invoke("timeline:revision-diff", input),
   createTimeline: input => ipcRenderer.invoke("timeline:create", input),
   getTimeline: projectId => ipcRenderer.invoke("timeline:get", projectId),
   patchTimeline: input => ipcRenderer.invoke("timeline:patch", input),

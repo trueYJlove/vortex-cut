@@ -154,7 +154,8 @@ def _repo(tmp_path: Path) -> tuple[TranscriptRepository, Database]:
             "'available','now','now')"
         )
         conn.execute(
-            "INSERT INTO asset_locations (asset_id,uri,last_verified_at) VALUES ('asset_1','file:///a.mp4','now')"
+            "INSERT INTO asset_locations (asset_id,uri,last_verified_at) "
+            "VALUES ('asset_1','file:///a.mp4','now')"
         )
     return TranscriptRepository(db), db
 

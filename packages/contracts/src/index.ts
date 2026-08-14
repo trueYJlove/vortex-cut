@@ -1,6 +1,6 @@
 export const PROTOCOL_VERSION = 1 as const;
 export const API_PREFIX = "/api/v1" as const;
-export const CONTRACT_VERSION = "stage2a-v1" as const;
+export const CONTRACT_VERSION = "stage2b-v1" as const;
 
 export type GrantId = string & { readonly __brand: "grant_id" };
 export type ProjectId = string & { readonly __brand: "project_id" };
@@ -26,6 +26,9 @@ export type EgressPreviewId = string & { readonly __brand: "egress_preview_id" }
 export type CandidateGenerationId = string & { readonly __brand: "candidate_generation_id" };
 export type ProviderInvocationId = string & { readonly __brand: "provider_invocation_id" };
 export type CandidatePlanId = string & { readonly __brand: "candidate_plan_id" };
+export type TimelinePatchEgressPreviewId = string & { readonly __brand: "timeline_patch_egress_preview_id" };
+export type TimelinePatchGenerationId = string & { readonly __brand: "timeline_patch_generation_id" };
+export type TimelinePatchProposalId = string & { readonly __brand: "timeline_patch_proposal_id" };
 
 export type ProjectStatus = "active" | "archived" | "missing";
 export type AssetKind = "video" | "audio" | "image" | "text";
@@ -48,6 +51,7 @@ export type JobKind =
   | "model_download"
   | "transcription"
   | "candidate_generation"
+  | "timeline_patch_generation"
   | "authoritative_preview"
   | "final_export";
 export type JobStage =
@@ -65,6 +69,12 @@ export type JobStage =
   | "awaiting_confirmation"
   | "invoking_provider"
   | "validating_candidate"
+  | "loading_snapshot"
+  | "calling_provider"
+  | "validating_response"
+  | "applying_patch_in_memory"
+  | "computing_diff"
+  | "persisting_proposal"
   | (string & {});
 export type ModelInstallStatus = "unavailable" | "queued" | "downloading" | "paused" | "verifying" | "ready" | "cancelled" | "failed";
 export type AsrProviderStatus = "unavailable" | "installed" | "corrupt" | "runtime_unavailable";
@@ -84,6 +94,11 @@ export const ERROR_CODES = [
   , "TIMELINE_NOT_FOUND", "TIMELINE_ALREADY_EXISTS", "TIMELINE_INVALID",
   "TIMELINE_CONFLICT", "TIMELINE_EMPTY", "TIMELINE_DRAFT_CONFLICT",
   "TIMELINE_CLIP_NOT_FOUND", "TIMELINE_CAPTION_NOT_FOUND", "TIMELINE_SOURCE_INVALID",
+  "TIMELINE_LOCKED", "TIMELINE_DIFF_INVALID", "TIMELINE_PATCH_EGRESS_EXPIRED",
+  "TIMELINE_PATCH_EGRESS_MISMATCH", "TIMELINE_PATCH_GENERATION_NOT_FOUND",
+  "TIMELINE_PATCH_GENERATION_INVALID", "TIMELINE_PATCH_PROPOSAL_NOT_FOUND",
+  "TIMELINE_PATCH_PROPOSAL_INVALID", "TIMELINE_PATCH_PROPOSAL_CONFLICT",
+  "TIMELINE_PATCH_PROPOSAL_APPLIED", "TIMELINE_PATCH_PROVIDER_UNTESTED", "TIMELINE_PATCH_PROVIDER_UNSUPPORTED",
   "TIMELINE_OPERATION_UNSUPPORTED", "RENDER_PLAN_INVALID", "RENDER_INPUT_CHANGED",
   "RENDER_FONT_MISSING", "RENDER_FAILED", "RENDER_VALIDATION_FAILED", "PREVIEW_NOT_FOUND",
   "EXPORT_NOT_FOUND", "EXPORT_DESTINATION_INVALID", "EXPORT_DESTINATION_EXISTS",
@@ -416,6 +431,16 @@ export interface Transcript {
 
 export type ProviderKind = "openai_compatible_text";
 export type CredentialStatus = "missing" | "configured" | "unavailable";
+export type TimelinePatchCapabilityStatus = "untested" | "supported" | "unsupported";
+/**
+ * 仅供 Core 持久化及进程内路由使用的固定认证适配器白名单。
+ * Renderer 不得据此显示或选择 Provider 协议细节。
+ */
+export type TimelinePatchResponseAdapterId =
+  | "openai_responses_json_schema_v1"
+  | "openai_responses_patchscript_v1"
+  | "openai_chat_completions_json_schema_v1"
+  | "openai_chat_completions_patchscript_v1";
 export type OriginalAudioPolicy = "preserve" | "mute";
 export type CaptionPolicy = "auto_from_transcript" | "none";
 export type CandidateVariant = "balanced" | "compact" | "bold";
@@ -435,7 +460,16 @@ export interface Recipe {
 export interface ProviderConfig {
   provider_config_id: ProviderConfigId; kind: ProviderKind; display_name: string; base_url: string; model: string;
   enabled: boolean; credential_status: CredentialStatus; input_price_per_million: number | null;
-  output_price_per_million: number | null; created_at: string; updated_at: string;
+  output_price_per_million: number | null; timeline_patch_capability_status: TimelinePatchCapabilityStatus;
+  timeline_patch_response_adapter_id: TimelinePatchResponseAdapterId | null; timeline_patch_probe_protocol_version: string | null;
+  timeline_patch_capability_tested_at: string | null; timeline_patch_capability_failure_code: ErrorCode | null;
+  timeline_patch_capability_probe_sha256: string | null; created_at: string; updated_at: string;
+}
+export interface TimelinePatchCapabilityTestResponse {
+  timeline_patch_capability_status: TimelinePatchCapabilityStatus;
+  timeline_patch_response_adapter_id: TimelinePatchResponseAdapterId | null; timeline_patch_probe_protocol_version: string | null;
+  timeline_patch_capability_tested_at: string | null; timeline_patch_capability_failure_code: ErrorCode | null;
+  timeline_patch_capability_probe_sha256: string | null;
 }
 export interface EgressPreview {
   egress_preview_id: EgressPreviewId; provider: { display_name: string; origin: string; model: string };
@@ -560,6 +594,7 @@ export interface TimelineDocument {
   tracks: [TimelineTrack, TimelineTrack];
   clips: TimelineClip[];
   captions: TimelineCaption[];
+  locked_elements?: TimelineClipId[];
   provenance: { created_by: TimelineCreatedBy; source_transcript_ids: TranscriptId[] };
 }
 export interface TimelineRevisionSummary {
@@ -600,6 +635,7 @@ export type TimelinePatchOperation =
   | { op: "set_layout"; clip_id: TimelineClipId; layout: TimelineLayout }
   | { op: "set_audio"; clip_id: TimelineClipId; enabled: boolean; gain_db: number }
   | { op: "set_image_duration"; clip_id: TimelineClipId; duration_us: number }
+  | { op: "set_clip_locked"; clip_id: TimelineClipId; locked: boolean }
   | { op: "add_caption"; start_us: number; end_us: number; text: string; preset_id: CaptionPresetId; source_clip_id: null }
   | { op: "remove_caption"; caption_id: TimelineCaptionId }
   | { op: "update_caption"; caption_id: TimelineCaptionId; text: string }
@@ -607,6 +643,44 @@ export type TimelinePatchOperation =
   | { op: "set_caption_preset"; caption_id: TimelineCaptionId; preset_id: CaptionPresetId };
 export interface TimelinePatch { schema_version: 1; base_revision_id: TimelineRevisionId; operations: TimelinePatchOperation[]; summary: string; }
 export interface TimelineRevisionPointerInput { base_revision_id: TimelineRevisionId; }
+
+export type TimelinePatchGenerationStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
+export type TimelineClipChangeType = "added" | "removed" | "moved" | "trimmed" | "split" | "layout_changed" | "audio_changed" | "duration_changed";
+export type TimelineCaptionChangeType = "added" | "removed" | "text_changed" | "timing_changed" | "preset_changed";
+export interface TimelineClipChange { type: TimelineClipChangeType; clip_id: TimelineClipId; created_clip_ids?: TimelineClipId[]; }
+export interface TimelineCaptionChange { type: TimelineCaptionChangeType; caption_id: TimelineCaptionId; }
+export interface TimelineLockChange { type: "locked" | "unlocked"; clip_id: TimelineClipId; }
+export interface TimelineIndirectLockedTimingShift { clip_id: TimelineClipId; from_start_us: number; from_end_us: number; to_start_us: number; to_end_us: number; }
+export interface TimelineDiff {
+  schema_version: 1; project_id: ProjectId; base_revision_id: TimelineRevisionId; target_revision_id: TimelineRevisionId | null;
+  base_document_sha256: string; target_document_sha256: string;
+  summary: { clip_changes: number; caption_changes: number; lock_changes: number };
+  duration_delta_us: number; clip_changes: TimelineClipChange[]; caption_changes: TimelineCaptionChange[];
+  lock_changes: TimelineLockChange[]; indirect_locked_timing_shifts: TimelineIndirectLockedTimingShift[];
+}
+export interface TimelinePatchEgressPreview {
+  timeline_patch_egress_preview_id: TimelinePatchEgressPreviewId;
+  provider: { display_name: string; origin: string; model: string };
+  prompt_template_version: string; output_schema_version: string; sent_fields: string[]; payload_sha256: string;
+  character_count: number; estimated_tokens: number; clip_count: number; caption_count: number; locked_count: number; expires_at: string;
+}
+export interface TimelinePatchGeneration {
+  timeline_patch_generation_id: TimelinePatchGenerationId; project_id: ProjectId; base_revision_id: TimelineRevisionId;
+  base_document_sha256: string; status: TimelinePatchGenerationStatus; payload_sha256: string;
+  created_at: string; updated_at: string; finished_at: string | null;
+}
+export interface TimelinePatchProposal {
+  schema_version: 1; timeline_patch_proposal_id: TimelinePatchProposalId; timeline_patch_generation_id: TimelinePatchGenerationId;
+  project_id: ProjectId; base_revision_id: TimelineRevisionId; base_document_sha256: string; provider_config_id: ProviderConfigId;
+  provider_display_name: string; model: string; prompt_template_version: string; output_schema_version: string;
+  patch: TimelinePatch; patch_sha256: string; proposed_document_sha256: string; diff: TimelineDiff; created_at: string;
+  applied_revision_id: TimelineRevisionId | null; generation_status: TimelinePatchGenerationStatus;
+}
+export interface TimelinePatchPrepareRequest { base_revision_id: TimelineRevisionId; provider_config_id: ProviderConfigId; instruction: string; }
+export interface TimelinePatchGenerationCreateRequest { timeline_patch_egress_preview_id: TimelinePatchEgressPreviewId; payload_sha256: string; }
+export interface TimelinePatchGenerationCreateResponse { timeline_patch_generation_id: TimelinePatchGenerationId; job: Job; }
+export interface TimelinePatchProposalApplyRequest { base_revision_id: TimelineRevisionId; proposed_document_sha256: string; }
+export interface TimelineRevisionDiffRequest { base_revision_id: TimelineRevisionId; target_revision_id: TimelineRevisionId; }
 
 export class ContractValidationError extends Error {
   constructor(public readonly contract: string, message = "Invalid contract payload") {
@@ -617,7 +691,7 @@ export class ContractValidationError extends Error {
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const JOB_STATUSES: JobStatus[] = ["queued", "running", "succeeded", "failed", "cancelling", "cancelled", "interrupted"];
-const JOB_KINDS: JobKind[] = ["asset_probe", "asset_fingerprint", "proxy", "portrait_sample", "vertical_sample", "model_download", "transcription", "candidate_generation", "authoritative_preview", "final_export"];
+const JOB_KINDS: JobKind[] = ["asset_probe", "asset_fingerprint", "proxy", "portrait_sample", "vertical_sample", "model_download", "transcription", "candidate_generation", "timeline_patch_generation", "authoritative_preview", "final_export"];
 const PROJECT_STATUSES: ProjectStatus[] = ["active", "archived", "missing"];
 const ASSET_KINDS: AssetKind[] = ["video", "audio", "image", "text"];
 const ASSET_AVAILABILITIES: AssetAvailability[] = ["available", "missing", "changed", "unsupported"];
@@ -649,7 +723,7 @@ function isLanguage(value: unknown): value is string { return isString(value) &&
 function hasSensitiveKey(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(hasSensitiveKey);
   if (!isRecord(value)) return false;
-  return Object.entries(value).some(([key, item]) => ["installed_path", "install_dir", "path", "uri", "token", "admin_token", "ui_token", "api_key", "secret", "authorization", "prompt", "raw_response"].includes(key.toLowerCase()) || hasSensitiveKey(item));
+  return Object.entries(value).some(([key, item]) => ["installed_path", "install_dir", "path", "uri", "token", "admin_token", "ui_token", "api_key", "secret", "authorization", "prompt", "raw_response", "http_body", "request_body", "system_message"].includes(key.toLowerCase()) || hasSensitiveKey(item));
 }
 
 export function isLicenseInfo(value: unknown): value is LicenseInfo {
@@ -744,14 +818,28 @@ export function isJob(value: unknown): value is Job {
 
 const BRIEF_INPUT_KEYS = ["schema_version", "topic", "audience", "target_platform", "target_duration_us", "narrative_goal", "style_notes", "must_keep", "forbidden", "original_audio_policy", "caption_policy", "caption_preset_id", "default_layout"] as const;
 const BRIEF_KEYS = ["brief_id", "project_id", "document_sha256", ...BRIEF_INPUT_KEYS] as const;
-const PROVIDER_KEYS = ["provider_config_id", "kind", "display_name", "base_url", "model", "enabled", "credential_status", "input_price_per_million", "output_price_per_million", "created_at", "updated_at"] as const;
+const PROVIDER_CAPABILITY_KEYS = ["timeline_patch_capability_status", "timeline_patch_response_adapter_id", "timeline_patch_probe_protocol_version", "timeline_patch_capability_tested_at", "timeline_patch_capability_failure_code", "timeline_patch_capability_probe_sha256"] as const;
+const PROVIDER_KEYS = ["provider_config_id", "kind", "display_name", "base_url", "model", "enabled", "credential_status", "input_price_per_million", "output_price_per_million", ...PROVIDER_CAPABILITY_KEYS, "created_at", "updated_at"] as const;
+const TIMELINE_PATCH_RESPONSE_ADAPTER_IDS: TimelinePatchResponseAdapterId[] = [
+  "openai_responses_json_schema_v1",
+  "openai_responses_patchscript_v1",
+  "openai_chat_completions_json_schema_v1",
+  "openai_chat_completions_patchscript_v1"
+];
 function isBriefText(value: unknown, maximum: number): value is string { return isString(value) && value.length <= maximum && value.trim().length > 0 && !/[\0-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(value); }
 export function isBriefInput(value: unknown): value is BriefInput {
   return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, BRIEF_INPUT_KEYS) && value.schema_version === 1 && isBriefText(value.topic, 200) && isBriefText(value.audience, 200) && value.target_platform === "generic_vertical" && isInteger(value.target_duration_us, 15_000_000) && Number(value.target_duration_us) <= 180_000_000 && isBriefText(value.narrative_goal, 500) && isString(value.style_notes) && value.style_notes.length <= 1000 && Array.isArray(value.must_keep) && value.must_keep.length <= 20 && value.must_keep.every(item => isBriefText(item, 100)) && Array.isArray(value.forbidden) && value.forbidden.length <= 20 && value.forbidden.every(item => isBriefText(item, 100)) && oneOf(["preserve", "mute"] as const, value.original_audio_policy) && oneOf(["auto_from_transcript", "none"] as const, value.caption_policy) && isCaptionPresetId(value.caption_preset_id) && isTimelineLayout(value.default_layout);
 }
 export function isBrief(value: unknown): value is Brief { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, BRIEF_KEYS) && isId(value.brief_id) && isId(value.project_id) && isSha256(value.document_sha256) && isBriefInput(Object.fromEntries(BRIEF_INPUT_KEYS.map(key => [key, value[key]]))); }
 export function isRecipe(value: unknown): value is Recipe { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["schema_version", "recipe_id", "name", "summary", "rules", "document_sha256"]) && isId(value.recipe_id) && value.schema_version === 1 && isBriefText(value.name, 200) && isBriefText(value.summary, 1000) && isRecord(value.rules) && onlyKeys(value.rules, ["selection", "pace", "max_gap_us"]) && isBriefText(value.rules.selection, 100) && isBriefText(value.rules.pace, 100) && isInteger(value.rules.max_gap_us, 0) && isSha256(value.document_sha256); }
-export function isProviderConfig(value: unknown): value is ProviderConfig { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, PROVIDER_KEYS) && isId(value.provider_config_id) && value.kind === "openai_compatible_text" && isBriefText(value.display_name, 100) && isString(value.base_url) && /^https?:\/\//.test(value.base_url) && isBriefText(value.model, 200) && typeof value.enabled === "boolean" && oneOf(["missing", "configured", "unavailable"] as const, value.credential_status) && (value.input_price_per_million === null || isFiniteNumber(value.input_price_per_million)) && (value.output_price_per_million === null || isFiniteNumber(value.output_price_per_million)) && isTime(value.created_at) && isTime(value.updated_at); }
+function isTimelinePatchCapabilityMetadata(value: Record<string, unknown>): boolean {
+  if (!oneOf(["untested", "supported", "unsupported"] as const, value.timeline_patch_capability_status) || !(value.timeline_patch_response_adapter_id === null || oneOf(TIMELINE_PATCH_RESPONSE_ADAPTER_IDS, value.timeline_patch_response_adapter_id)) || !(value.timeline_patch_probe_protocol_version === null || isBriefText(value.timeline_patch_probe_protocol_version, 100)) || !(value.timeline_patch_capability_tested_at === null || isTime(value.timeline_patch_capability_tested_at)) || !(value.timeline_patch_capability_failure_code === null || isBriefText(value.timeline_patch_capability_failure_code, 200)) || !(value.timeline_patch_capability_probe_sha256 === null || isSha256(value.timeline_patch_capability_probe_sha256))) return false;
+  return value.timeline_patch_capability_status === "supported"
+    ? oneOf(TIMELINE_PATCH_RESPONSE_ADAPTER_IDS, value.timeline_patch_response_adapter_id) && value.timeline_patch_probe_protocol_version === "1" && value.timeline_patch_capability_tested_at !== null && value.timeline_patch_capability_failure_code === null && value.timeline_patch_capability_probe_sha256 !== null
+    : value.timeline_patch_response_adapter_id === null && value.timeline_patch_probe_protocol_version === null && (value.timeline_patch_capability_status === "untested" ? value.timeline_patch_capability_tested_at === null && value.timeline_patch_capability_failure_code === null && value.timeline_patch_capability_probe_sha256 === null : value.timeline_patch_capability_tested_at !== null && value.timeline_patch_capability_failure_code !== null && value.timeline_patch_capability_probe_sha256 !== null);
+}
+export function isProviderConfig(value: unknown): value is ProviderConfig { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, PROVIDER_KEYS) && isId(value.provider_config_id) && value.kind === "openai_compatible_text" && isBriefText(value.display_name, 100) && isString(value.base_url) && /^https?:\/\//.test(value.base_url) && isBriefText(value.model, 200) && typeof value.enabled === "boolean" && oneOf(["missing", "configured", "unavailable"] as const, value.credential_status) && (value.input_price_per_million === null || isFiniteNumber(value.input_price_per_million)) && (value.output_price_per_million === null || isFiniteNumber(value.output_price_per_million)) && isTimelinePatchCapabilityMetadata(value) && isTime(value.created_at) && isTime(value.updated_at); }
+export function isTimelinePatchCapabilityTestResponse(value: unknown): value is TimelinePatchCapabilityTestResponse { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, PROVIDER_CAPABILITY_KEYS) && isTimelinePatchCapabilityMetadata(value); }
 export function isEgressPreview(value: unknown): value is EgressPreview { return isRecord(value) && !hasSensitiveKey({ ...value, payload: undefined }) && onlyKeys(value, ["egress_preview_id", "provider", "prompt_template_version", "sent_fields", "payload_sha256", "expires_at", "payload", "stats"]) && isId(value.egress_preview_id) && isRecord(value.provider) && onlyKeys(value.provider, ["display_name", "origin", "model"]) && isBriefText(value.provider.display_name, 100) && isString(value.provider.origin) && /^https?:\/\//.test(value.provider.origin) && isBriefText(value.provider.model, 200) && isBriefText(value.prompt_template_version, 200) && Array.isArray(value.sent_fields) && value.sent_fields.every(item => isString(item) && item.length > 0) && isSha256(value.payload_sha256) && isTime(value.expires_at) && isRecord(value.payload) && isRecord(value.stats) && onlyKeys(value.stats, ["transcript_count", "segment_count", "character_count", "estimated_tokens"]) && [value.stats.transcript_count, value.stats.segment_count, value.stats.character_count, value.stats.estimated_tokens].every(item => isInteger(item, 0)); }
 export function isCandidateClip(value: unknown): value is CandidateClip { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["clip_id", "order_index", "asset_id", "transcript_id", "segment_ids", "source_start_us", "source_end_us", "reason", "model_score", "caption_text"]) && isId(value.clip_id) && isInteger(value.order_index, 0) && isId(value.asset_id) && isId(value.transcript_id) && Array.isArray(value.segment_ids) && value.segment_ids.length > 0 && value.segment_ids.every(isId) && isInteger(value.source_start_us) && isInteger(value.source_end_us, 1) && value.source_end_us > value.source_start_us && isBriefText(value.reason, 300) && (value.model_score === null || (isFiniteNumber(value.model_score) && value.model_score >= 0 && value.model_score <= 1)) && isBriefText(value.caption_text, 10_000); }
 export function isCandidatePlan(value: unknown): value is CandidatePlan { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["schema_version", "candidate_plan_id", "candidate_generation_id", "project_id", "ordinal", "variant", "title_suggestion", "summary", "duration_us", "clips", "warnings", "document_sha256"]) && value.schema_version === 1 && isId(value.candidate_plan_id) && isId(value.project_id) && isId(value.candidate_generation_id) && isInteger(value.ordinal, 0) && oneOf(["balanced", "compact", "bold"] as const, value.variant) && isBriefText(value.title_suggestion, 200) && isBriefText(value.summary, 500) && isInteger(value.duration_us, 15_000_000) && value.duration_us <= 180_000_000 && Array.isArray(value.clips) && value.clips.length > 0 && value.clips.every(isCandidateClip) && Array.isArray(value.warnings) && value.warnings.every(item => isString(item)) && isSha256(value.document_sha256); }
@@ -853,6 +941,7 @@ export function parseBrief(value: unknown): Brief { if (!isBrief(value)) throw n
 export function parseBriefInput(value: unknown): BriefInput { if (!isBriefInput(value)) throw new ContractValidationError("BriefInput"); return value; }
 export function parseRecipe(value: unknown): Recipe { if (!isRecipe(value)) throw new ContractValidationError("Recipe"); return value; }
 export function parseProviderConfig(value: unknown): ProviderConfig { if (!isProviderConfig(value)) throw new ContractValidationError("ProviderConfig"); return value; }
+export function parseTimelinePatchCapabilityTestResponse(value: unknown): TimelinePatchCapabilityTestResponse { if (!isTimelinePatchCapabilityTestResponse(value)) throw new ContractValidationError("TimelinePatchCapabilityTestResponse"); return value; }
 export function parseEgressPreview(value: unknown): EgressPreview { if (!isEgressPreview(value)) throw new ContractValidationError("EgressPreview"); return value; }
 export function parseCandidateGeneration(value: unknown): CandidateGeneration { if (!isCandidateGeneration(value)) throw new ContractValidationError("CandidateGeneration"); return value; }
 export function parseCandidatePlan(value: unknown): CandidatePlan { if (!isCandidatePlan(value)) throw new ContractValidationError("CandidatePlan"); return value; }
@@ -918,14 +1007,19 @@ export function isTimelineCaption(value: unknown): value is TimelineCaption {
   return value.origin === "transcript" ? value.source_clip_id !== null && value.source_segment_ids.length > 0 : value.source_segment_ids.length === 0;
 }
 export function isTimelineDocument(value: unknown): value is TimelineDocument {
-  if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["schema_version", "project_id", "canvas", "tracks", "clips", "captions", "provenance"]) || value.schema_version !== 1 || !isId(value.project_id) || !isTimelineCanvas(value.canvas) || !Array.isArray(value.tracks) || value.tracks.length !== 2 || !Array.isArray(value.clips) || !value.clips.every(isTimelineClip) || !Array.isArray(value.captions) || !value.captions.every(isTimelineCaption) || !isRecord(value.provenance)) return false;
+  if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["schema_version", "project_id", "canvas", "tracks", "clips", "captions", "locked_elements", "provenance"]) || value.schema_version !== 1 || !isId(value.project_id) || !isTimelineCanvas(value.canvas) || !Array.isArray(value.tracks) || value.tracks.length !== 2 || !Array.isArray(value.clips) || !value.clips.every(isTimelineClip) || !Array.isArray(value.captions) || !value.captions.every(isTimelineCaption) || !isRecord(value.provenance)) return false;
   const [visual, caption] = value.tracks;
-  if (!isRecord(visual) || !isRecord(caption) || JSON.stringify(visual) !== JSON.stringify({ id: "V1", kind: "visual", locked: Boolean(visual.locked) }) || JSON.stringify(caption) !== JSON.stringify({ id: "C1", kind: "caption", locked: Boolean(caption.locked) })) return false;
+  if (!isRecord(visual) || !onlyKeys(visual, ["id", "kind", "locked"]) || visual.id !== "V1" || visual.kind !== "visual" || visual.locked !== false) return false;
+  if (!isRecord(caption) || !onlyKeys(caption, ["id", "kind", "locked"]) || caption.id !== "C1" || caption.kind !== "caption" || caption.locked !== false) return false;
   if (!onlyKeys(value.provenance, ["created_by", "source_transcript_ids"]) || !isTimelineCreatedBy(value.provenance.created_by) || !Array.isArray(value.provenance.source_transcript_ids) || !value.provenance.source_transcript_ids.every(isId)) return false;
   let end = 0;
   for (let index = 0; index < value.clips.length; index += 1) { const clip = value.clips[index]; if (clip.order_index !== index || clip.timeline_start_us !== end) return false; end = clip.timeline_end_us; }
   const captions = [...value.captions].sort((a, b) => a.start_us - b.start_us);
-  return captions.every((item, index) => item.end_us <= end && (index === 0 || captions[index - 1].end_us <= item.start_us));
+  if (!captions.every((item, index) => item.end_us <= end && (index === 0 || captions[index - 1].end_us <= item.start_us))) return false;
+  if (value.locked_elements === undefined) return true;
+  if (!Array.isArray(value.locked_elements) || !value.locked_elements.every(isId) || new Set(value.locked_elements).size !== value.locked_elements.length) return false;
+  const clipIds = new Set<string>(value.clips.map(item => item.clip_id));
+  return value.locked_elements.every(item => clipIds.has(item));
 }
 export function isTimelineRevisionSummary(value: unknown): value is TimelineRevisionSummary {
   return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["timeline_revision_id", "project_id", "parent_revision_id", "document_sha256", "summary", "created_by", "created_at"]) && isId(value.timeline_revision_id) && isId(value.project_id) && (value.parent_revision_id === null || isId(value.parent_revision_id)) && isSha256(value.document_sha256) && isString(value.summary) && isTimelineCreatedBy(value.created_by) && isTime(value.created_at);
@@ -960,6 +1054,7 @@ export function isTimelinePatchOperation(value: unknown): value is TimelinePatch
     case "set_layout": return onlyKeys(value, ["op", "clip_id", "layout"]) && id("clip_id") && isTimelineLayout(value.layout);
     case "set_audio": return onlyKeys(value, ["op", "clip_id", "enabled", "gain_db"]) && id("clip_id") && typeof value.enabled === "boolean" && isFiniteNumber(value.gain_db) && value.gain_db >= -60 && value.gain_db <= 12;
     case "set_image_duration": return onlyKeys(value, ["op", "clip_id", "duration_us"]) && id("clip_id") && us("duration_us", 500_000) && Number(value.duration_us) <= 30_000_000;
+    case "set_clip_locked": return onlyKeys(value, ["op", "clip_id", "locked"]) && id("clip_id") && typeof value.locked === "boolean";
     case "add_caption": return onlyKeys(value, ["op", "start_us", "end_us", "text", "preset_id", "source_clip_id"]) && us("start_us") && us("end_us", 1) && Number(value.end_us) - Number(value.start_us) >= 200_000 && isString(value.text) && value.text.trim().length > 0 && [...value.text].length <= 200 && isCaptionPresetId(value.preset_id) && value.source_clip_id === null;
     case "remove_caption": return onlyKeys(value, ["op", "caption_id"]) && id("caption_id");
     case "update_caption": return onlyKeys(value, ["op", "caption_id", "text"]) && id("caption_id") && isString(value.text) && value.text.trim().length > 0 && [...value.text].length <= 200;
@@ -979,6 +1074,37 @@ export function parseTimelineRevision(value: unknown): TimelineRevision { if (!i
 export function parseTimelineDraft(value: unknown): TimelineDraft { if (!isTimelineDraft(value)) throw new ContractValidationError("TimelineDraft"); return value; }
 export function parseTimelineCreateInput(value: unknown): TimelineCreateInput { if (!isTimelineCreateInput(value)) throw new ContractValidationError("TimelineCreateInput"); return value; }
 export function parseTimelinePatch(value: unknown): TimelinePatch { if (!isTimelinePatch(value)) throw new ContractValidationError("TimelinePatch"); return value; }
+const TIMELINE_PATCH_GENERATION_STATUSES: TimelinePatchGenerationStatus[] = ["queued", "running", "succeeded", "failed", "cancelled", "interrupted"];
+const TIMELINE_CLIP_CHANGE_TYPES: TimelineClipChangeType[] = ["added", "removed", "moved", "trimmed", "split", "layout_changed", "audio_changed", "duration_changed"];
+const TIMELINE_CAPTION_CHANGE_TYPES: TimelineCaptionChangeType[] = ["added", "removed", "text_changed", "timing_changed", "preset_changed"];
+export function isTimelinePatchEgressPreview(value: unknown): value is TimelinePatchEgressPreview {
+  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["timeline_patch_egress_preview_id", "provider", "prompt_template_version", "output_schema_version", "sent_fields", "payload_sha256", "character_count", "estimated_tokens", "clip_count", "caption_count", "locked_count", "expires_at"]) && isId(value.timeline_patch_egress_preview_id) && isRecord(value.provider) && onlyKeys(value.provider, ["display_name", "origin", "model"]) && isBriefText(value.provider.display_name, 100) && isString(value.provider.origin) && /^https?:\/\//.test(value.provider.origin) && isBriefText(value.provider.model, 200) && isBriefText(value.prompt_template_version, 200) && isBriefText(value.output_schema_version, 200) && Array.isArray(value.sent_fields) && value.sent_fields.length > 0 && value.sent_fields.every(item => isBriefText(item, 100)) && isSha256(value.payload_sha256) && [value.character_count, value.estimated_tokens, value.clip_count, value.caption_count, value.locked_count].every(item => isInteger(item, 0)) && isTime(value.expires_at);
+}
+export function isTimelinePatchGeneration(value: unknown): value is TimelinePatchGeneration {
+  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["timeline_patch_generation_id", "project_id", "base_revision_id", "base_document_sha256", "status", "payload_sha256", "created_at", "updated_at", "finished_at"]) && isId(value.timeline_patch_generation_id) && isId(value.project_id) && isId(value.base_revision_id) && isSha256(value.base_document_sha256) && oneOf(TIMELINE_PATCH_GENERATION_STATUSES, value.status) && isSha256(value.payload_sha256) && isTime(value.created_at) && isTime(value.updated_at) && (value.finished_at === null || isTime(value.finished_at));
+}
+export function isTimelineClipChange(value: unknown): value is TimelineClipChange {
+  if (!isRecord(value) || hasSensitiveKey(value) || !oneOf(TIMELINE_CLIP_CHANGE_TYPES, value.type) || !isId(value.clip_id)) return false;
+  if (value.type === "split") return onlyKeys(value, ["type", "clip_id", "created_clip_ids"]) && Array.isArray(value.created_clip_ids) && value.created_clip_ids.length > 0 && value.created_clip_ids.every(isId);
+  return onlyKeys(value, ["type", "clip_id"]);
+}
+export function isTimelineCaptionChange(value: unknown): value is TimelineCaptionChange { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["type", "caption_id"]) && oneOf(TIMELINE_CAPTION_CHANGE_TYPES, value.type) && isId(value.caption_id); }
+export function isTimelineLockChange(value: unknown): value is TimelineLockChange { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["type", "clip_id"]) && oneOf(["locked", "unlocked"] as const, value.type) && isId(value.clip_id); }
+export function isTimelineIndirectLockedTimingShift(value: unknown): value is TimelineIndirectLockedTimingShift { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["clip_id", "from_start_us", "from_end_us", "to_start_us", "to_end_us"]) && isId(value.clip_id) && [value.from_start_us, value.from_end_us, value.to_start_us, value.to_end_us].every(item => isInteger(item, 0)) && Number(value.from_end_us) > Number(value.from_start_us) && Number(value.to_end_us) > Number(value.to_start_us); }
+export function isTimelineDiff(value: unknown): value is TimelineDiff {
+  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["schema_version", "project_id", "base_revision_id", "target_revision_id", "base_document_sha256", "target_document_sha256", "summary", "duration_delta_us", "clip_changes", "caption_changes", "lock_changes", "indirect_locked_timing_shifts"]) && value.schema_version === 1 && isId(value.project_id) && isId(value.base_revision_id) && (value.target_revision_id === null || isId(value.target_revision_id)) && isSha256(value.base_document_sha256) && isSha256(value.target_document_sha256) && isRecord(value.summary) && onlyKeys(value.summary, ["clip_changes", "caption_changes", "lock_changes"]) && [value.summary.clip_changes, value.summary.caption_changes, value.summary.lock_changes].every(item => isInteger(item, 0)) && typeof value.duration_delta_us === "number" && Number.isInteger(value.duration_delta_us) && Array.isArray(value.clip_changes) && value.clip_changes.every(isTimelineClipChange) && Array.isArray(value.caption_changes) && value.caption_changes.every(isTimelineCaptionChange) && Array.isArray(value.lock_changes) && value.lock_changes.every(isTimelineLockChange) && Array.isArray(value.indirect_locked_timing_shifts) && value.indirect_locked_timing_shifts.every(isTimelineIndirectLockedTimingShift) && value.summary.clip_changes === value.clip_changes.length && value.summary.caption_changes === value.caption_changes.length && value.summary.lock_changes === value.lock_changes.length;
+}
+export function isTimelinePatchProposal(value: unknown): value is TimelinePatchProposal { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["schema_version", "timeline_patch_proposal_id", "timeline_patch_generation_id", "project_id", "base_revision_id", "base_document_sha256", "provider_config_id", "provider_display_name", "model", "prompt_template_version", "output_schema_version", "patch", "patch_sha256", "proposed_document_sha256", "diff", "created_at", "applied_revision_id", "generation_status"]) && value.schema_version === 1 && isId(value.timeline_patch_proposal_id) && isId(value.timeline_patch_generation_id) && isId(value.project_id) && isId(value.base_revision_id) && isSha256(value.base_document_sha256) && isId(value.provider_config_id) && isBriefText(value.provider_display_name, 100) && isBriefText(value.model, 200) && isBriefText(value.prompt_template_version, 200) && isBriefText(value.output_schema_version, 200) && isTimelinePatch(value.patch) && value.patch.base_revision_id === value.base_revision_id && isSha256(value.patch_sha256) && isSha256(value.proposed_document_sha256) && isTimelineDiff(value.diff) && value.diff.project_id === value.project_id && value.diff.base_revision_id === value.base_revision_id && value.diff.target_revision_id === null && isTime(value.created_at) && (value.applied_revision_id === null || isId(value.applied_revision_id)) && oneOf(TIMELINE_PATCH_GENERATION_STATUSES, value.generation_status); }
+export function isTimelinePatchPrepareRequest(value: unknown): value is TimelinePatchPrepareRequest { return isRecord(value) && onlyKeys(value, ["base_revision_id", "provider_config_id", "instruction"]) && isId(value.base_revision_id) && isId(value.provider_config_id) && isString(value.instruction) && value.instruction.trim().length >= 1 && [...value.instruction].length <= 4000 && !/[\0-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(value.instruction); }
+export function isTimelinePatchGenerationCreateRequest(value: unknown): value is TimelinePatchGenerationCreateRequest { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["timeline_patch_egress_preview_id", "payload_sha256"]) && isId(value.timeline_patch_egress_preview_id) && isSha256(value.payload_sha256); }
+export function isTimelinePatchGenerationCreateResponse(value: unknown): value is TimelinePatchGenerationCreateResponse { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["timeline_patch_generation_id", "job"]) && isId(value.timeline_patch_generation_id) && isJob(value.job) && value.job.kind === "timeline_patch_generation"; }
+export function isTimelinePatchProposalApplyRequest(value: unknown): value is TimelinePatchProposalApplyRequest { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["base_revision_id", "proposed_document_sha256"]) && isId(value.base_revision_id) && isSha256(value.proposed_document_sha256); }
+export function isTimelineRevisionDiffRequest(value: unknown): value is TimelineRevisionDiffRequest { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["base_revision_id", "target_revision_id"]) && isId(value.base_revision_id) && isId(value.target_revision_id); }
+export function parseTimelinePatchEgressPreview(value: unknown): TimelinePatchEgressPreview { if (!isTimelinePatchEgressPreview(value)) throw new ContractValidationError("TimelinePatchEgressPreview"); return value; }
+export function parseTimelinePatchGeneration(value: unknown): TimelinePatchGeneration { if (!isTimelinePatchGeneration(value)) throw new ContractValidationError("TimelinePatchGeneration"); return value; }
+export function parseTimelineDiff(value: unknown): TimelineDiff { if (!isTimelineDiff(value)) throw new ContractValidationError("TimelineDiff"); return value; }
+export function parseTimelinePatchProposal(value: unknown): TimelinePatchProposal { if (!isTimelinePatchProposal(value)) throw new ContractValidationError("TimelinePatchProposal"); return value; }
+export function parseTimelinePatchGenerationCreateResponse(value: unknown): TimelinePatchGenerationCreateResponse { if (!isTimelinePatchGenerationCreateResponse(value)) throw new ContractValidationError("TimelinePatchGenerationCreateResponse"); return value; }
 export function parseRenderedMediaInfo(value: unknown): RenderedMediaInfo { if (!isRenderedMediaInfo(value)) throw new ContractValidationError("RenderedMediaInfo"); return value; }
 export function parseRenderArtifact(value: unknown): RenderArtifact { if (!isRenderArtifact(value)) throw new ContractValidationError("RenderArtifact"); return value; }
 export function parseAuthoritativePreview(value: unknown): AuthoritativePreview { if (!isAuthoritativePreview(value)) throw new ContractValidationError("AuthoritativePreview"); return value; }

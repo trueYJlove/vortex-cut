@@ -107,6 +107,30 @@ describe("CoreClient", () => {
     ]);
     expect(JSON.stringify(fetchImpl.mock.calls)).not.toContain("private");
   });
+  it("解析 Stage2B planning 接口并拒绝正文或多余字段", async () => {
+    const now = "2026-08-12T00:00:00.000Z"; const hash = `sha256:${"a".repeat(64)}`;
+    const preview = { timeline_patch_egress_preview_id: "preview_1", provider: { display_name: "Provider", origin: "https://provider.test", model: "model" }, prompt_template_version: "timeline-patch-v1", output_schema_version: "timeline-patch-output-v1", sent_fields: ["instruction"], payload_sha256: hash, character_count: 10, estimated_tokens: 3, clip_count: 1, caption_count: 0, locked_count: 0, expires_at: now, instruction: "must-strip" };
+    const job = { job_id: "job_1", project_id: "project_1", asset_id: null, kind: "timeline_patch_generation", status: "queued", stage: "queued", progress: 0, attempt: 1, model_id: null, model_revision: null, input_fingerprint: null, input: {}, error: null, created_at: now, updated_at: now, started_at: null, finished_at: null };
+    const generation = { timeline_patch_generation_id: "generation_1", project_id: "project_1", base_revision_id: "revision_1", base_document_sha256: hash, status: "succeeded", payload_sha256: hash, created_at: now, updated_at: now, finished_at: now };
+    const diff = { schema_version: 1, project_id: "project_1", base_revision_id: "revision_1", target_revision_id: "revision_2", base_document_sha256: hash, target_document_sha256: hash, summary: { clip_changes: 0, caption_changes: 0, lock_changes: 0 }, duration_delta_us: 0, clip_changes: [], caption_changes: [], lock_changes: [], indirect_locked_timing_shifts: [] };
+    const fetchImpl = vi.fn().mockResolvedValueOnce(response(preview)).mockResolvedValueOnce(response({ timeline_patch_generation_id: "generation_1", job })).mockResolvedValueOnce(response(generation)).mockResolvedValueOnce(response({ items: [] })).mockResolvedValueOnce(response(diff));
+    const client = new CoreClient({ baseUrl: "http://127.0.0.1:4000", uiToken: "ui-secret", fetchImpl });
+    await expect(client.prepareTimelinePatch("project_1" as never, { base_revision_id: "revision_1" as never, provider_config_id: "provider_1", instruction: "缩短" })).resolves.not.toHaveProperty("instruction");
+    await expect(client.createTimelinePatchGeneration("project_1" as never, { timeline_patch_egress_preview_id: "preview_1", payload_sha256: hash })).resolves.toMatchObject({ job: { kind: "timeline_patch_generation" } });
+    await expect(client.getTimelinePatchGeneration("generation_1")).resolves.toMatchObject({ status: "succeeded" });
+    await expect(client.listTimelinePatchProposals("project_1" as never)).resolves.toEqual({ items: [] });
+    await expect(client.compareTimelineRevisions("project_1" as never, { base_revision_id: "revision_1" as never, target_revision_id: "revision_2" as never })).resolves.toMatchObject({ target_revision_id: "revision_2" });
+    expect(JSON.stringify(fetchImpl.mock.calls)).not.toContain("must-strip");
+  });
+  it("调用固定的 AI 修改兼容性测试端点，并拒绝含正文的响应", async () => {
+    const now = "2026-08-12T00:00:00.000Z"; const hash = `sha256:${"a".repeat(64)}`;
+    const result = { timeline_patch_capability_status: "unsupported", timeline_patch_response_adapter_id: null, timeline_patch_probe_protocol_version: null, timeline_patch_capability_tested_at: now, timeline_patch_capability_failure_code: "PROVIDER_SCHEMA_MISMATCH", timeline_patch_capability_probe_sha256: hash, raw_response: "must-strip" };
+    const fetchImpl = vi.fn().mockResolvedValue(response(result));
+    const client = new CoreClient({ baseUrl: "http://127.0.0.1:4000", uiToken: "ui-secret", fetchImpl });
+    await expect(client.testTimelinePatchProviderCapability("provider_1")).resolves.toMatchObject({ timeline_patch_capability_status: "unsupported", timeline_patch_capability_failure_code: "PROVIDER_SCHEMA_MISMATCH" });
+    expect(String(fetchImpl.mock.calls[0][0])).toBe("http://127.0.0.1:4000/api/v1/providers/provider_1/timeline-patch-capability-test");
+    expect((fetchImpl.mock.calls[0][1] as RequestInit).method).toBe("POST"); expect(JSON.stringify(fetchImpl.mock.calls)).not.toContain("must-strip");
+  });
   it("covers every frozen Render endpoint and strips sensitive response fields", async () => {
     const now = "2026-08-11T00:00:00.000Z"; const hash = "a".repeat(64);
     const mediaInfo = { duration_us: 1_000_000, format_name: "mp4", video: { codec: "h264", width: 1080, height: 1920, pixel_format: "yuv420p", fps_num: 30, fps_den: 1 }, audio: null };

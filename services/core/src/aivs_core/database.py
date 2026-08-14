@@ -23,6 +23,9 @@ V1_VERSION = "v1"
 V2_VERSION = "v2"
 V3_VERSION = "v3"
 V4_VERSION = "v4"
+V5_VERSION = "v5"
+V6_VERSION = "v6"
+V7_VERSION = "v7"
 V1_SQL = """
 CREATE TABLE IF NOT EXISTS media_inputs (
   id TEXT PRIMARY KEY, path TEXT NOT NULL, display_name TEXT NOT NULL,
@@ -276,11 +279,227 @@ CREATE TRIGGER IF NOT EXISTS candidate_plans_no_delete BEFORE DELETE ON candidat
 CREATE TRIGGER IF NOT EXISTS candidate_adoptions_no_update BEFORE UPDATE ON candidate_adoptions BEGIN SELECT RAISE(ABORT,'candidate adoptions are immutable'); END;
 CREATE TRIGGER IF NOT EXISTS candidate_adoptions_no_delete BEFORE DELETE ON candidate_adoptions BEGIN SELECT RAISE(ABORT,'candidate adoptions are immutable'); END;
 """  # noqa: E501
+V5_SQL = """
+CREATE TABLE IF NOT EXISTS timeline_patch_egress_previews (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id),
+  provider_config_id TEXT NOT NULL REFERENCES provider_configs(id),
+  base_revision_id TEXT NOT NULL REFERENCES timeline_revisions(id), base_document_sha256 TEXT NOT NULL,
+  provider_snapshot_json TEXT NOT NULL, provider_config_sha256 TEXT NOT NULL,
+  payload_sha256 TEXT NOT NULL, stats_json TEXT NOT NULL,
+  expires_at TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS timeline_patch_egress_consents (
+  id TEXT PRIMARY KEY, egress_preview_id TEXT NOT NULL UNIQUE REFERENCES timeline_patch_egress_previews(id),
+  payload_sha256 TEXT NOT NULL, created_at TEXT NOT NULL, consumed_at TEXT NULL
+);
+CREATE TABLE IF NOT EXISTS timeline_patch_generations (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id),
+  egress_preview_id TEXT NOT NULL REFERENCES timeline_patch_egress_previews(id),
+  egress_consent_id TEXT NOT NULL REFERENCES timeline_patch_egress_consents(id),
+  provider_config_id TEXT NOT NULL REFERENCES provider_configs(id),
+  base_revision_id TEXT NOT NULL REFERENCES timeline_revisions(id), base_document_sha256 TEXT NOT NULL,
+  status TEXT NOT NULL, payload_sha256 TEXT NOT NULL, created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL, finished_at TEXT NULL
+);
+CREATE TABLE IF NOT EXISTS timeline_patch_proposals (
+  id TEXT PRIMARY KEY, generation_id TEXT NOT NULL UNIQUE REFERENCES timeline_patch_generations(id),
+  project_id TEXT NOT NULL REFERENCES projects(id), base_revision_id TEXT NOT NULL REFERENCES timeline_revisions(id),
+  base_document_sha256 TEXT NOT NULL, provider_config_id TEXT NOT NULL REFERENCES provider_configs(id),
+  patch_json TEXT NOT NULL, patch_sha256 TEXT NOT NULL, proposed_document_sha256 TEXT NOT NULL,
+  diff_json TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS timeline_patch_applications (
+  id TEXT PRIMARY KEY, proposal_id TEXT NOT NULL UNIQUE REFERENCES timeline_patch_proposals(id),
+  project_id TEXT NOT NULL REFERENCES projects(id), timeline_revision_id TEXT NOT NULL UNIQUE REFERENCES timeline_revisions(id),
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_timeline_patch_previews_expiry ON timeline_patch_egress_previews(expires_at);
+CREATE INDEX IF NOT EXISTS idx_timeline_patch_generations_project ON timeline_patch_generations(project_id,created_at DESC,id DESC);
+CREATE INDEX IF NOT EXISTS idx_timeline_patch_proposals_project ON timeline_patch_proposals(project_id,created_at DESC,id DESC);
+CREATE INDEX IF NOT EXISTS idx_invocations_timeline_patch_generation ON provider_invocations(timeline_patch_generation_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_jobs_timeline_patch_generation ON jobs(timeline_patch_generation_id,created_at DESC);
+CREATE TRIGGER IF NOT EXISTS timeline_patch_previews_no_update BEFORE UPDATE ON timeline_patch_egress_previews BEGIN SELECT RAISE(ABORT,'timeline patch previews are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS timeline_patch_previews_no_delete BEFORE DELETE ON timeline_patch_egress_previews BEGIN SELECT RAISE(ABORT,'timeline patch previews are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS timeline_patch_consents_no_delete BEFORE DELETE ON timeline_patch_egress_consents BEGIN SELECT RAISE(ABORT,'timeline patch consents are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS timeline_patch_consents_only_consume BEFORE UPDATE ON timeline_patch_egress_consents
+WHEN NOT (OLD.consumed_at IS NULL AND NEW.consumed_at IS NOT NULL AND NEW.id=OLD.id AND NEW.egress_preview_id=OLD.egress_preview_id AND NEW.payload_sha256=OLD.payload_sha256 AND NEW.created_at=OLD.created_at)
+BEGIN SELECT RAISE(ABORT,'timeline patch consents are immutable except first consumption'); END;
+CREATE TRIGGER IF NOT EXISTS timeline_patch_proposals_no_update BEFORE UPDATE ON timeline_patch_proposals BEGIN SELECT RAISE(ABORT,'timeline patch proposals are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS timeline_patch_proposals_no_delete BEFORE DELETE ON timeline_patch_proposals BEGIN SELECT RAISE(ABORT,'timeline patch proposals are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS timeline_patch_applications_no_update BEFORE UPDATE ON timeline_patch_applications BEGIN SELECT RAISE(ABORT,'timeline patch applications are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS timeline_patch_applications_no_delete BEFORE DELETE ON timeline_patch_applications BEGIN SELECT RAISE(ABORT,'timeline patch applications are immutable'); END;
+"""  # noqa: E501
+V6_SQL = """
+ALTER TABLE provider_configs
+ADD COLUMN timeline_patch_capability_status TEXT NOT NULL DEFAULT 'untested'
+  CHECK(timeline_patch_capability_status IN ('untested','supported','unsupported'));
+ALTER TABLE provider_configs
+ADD COLUMN timeline_patch_response_adapter_id TEXT NULL;
+ALTER TABLE provider_configs
+ADD COLUMN timeline_patch_probe_protocol_version TEXT NULL;
+ALTER TABLE provider_configs
+ADD COLUMN timeline_patch_capability_tested_at TEXT NULL;
+ALTER TABLE provider_configs
+ADD COLUMN timeline_patch_capability_failure_code TEXT NULL;
+ALTER TABLE provider_configs
+ADD COLUMN timeline_patch_capability_probe_sha256 TEXT NULL;
+CREATE TRIGGER IF NOT EXISTS provider_timeline_patch_capability_valid_insert
+BEFORE INSERT ON provider_configs
+WHEN (
+  NEW.timeline_patch_capability_status='untested'
+  AND (
+    NEW.timeline_patch_response_adapter_id IS NOT NULL
+    OR NEW.timeline_patch_probe_protocol_version IS NOT NULL
+    OR NEW.timeline_patch_capability_tested_at IS NOT NULL
+    OR NEW.timeline_patch_capability_failure_code IS NOT NULL
+    OR NEW.timeline_patch_capability_probe_sha256 IS NOT NULL
+  )
+) OR (
+  NEW.timeline_patch_capability_status='supported'
+  AND (
+    NEW.timeline_patch_response_adapter_id
+      IS NOT 'openai_chat_completions_json_schema_v1'
+    OR NEW.timeline_patch_probe_protocol_version IS NOT '1'
+    OR NEW.timeline_patch_capability_tested_at IS NULL
+    OR NEW.timeline_patch_capability_failure_code IS NOT NULL
+    OR NEW.timeline_patch_capability_probe_sha256 IS NULL
+  )
+) OR (
+  NEW.timeline_patch_capability_status='unsupported'
+  AND (
+    NEW.timeline_patch_response_adapter_id IS NOT NULL
+    OR NEW.timeline_patch_probe_protocol_version IS NOT NULL
+    OR NEW.timeline_patch_capability_tested_at IS NULL
+    OR NEW.timeline_patch_capability_failure_code IS NULL
+    OR NEW.timeline_patch_capability_probe_sha256 IS NULL
+  )
+)
+BEGIN SELECT RAISE(ABORT,'invalid timeline patch capability state'); END;
+CREATE TRIGGER IF NOT EXISTS provider_timeline_patch_capability_valid_update
+BEFORE UPDATE OF
+  timeline_patch_capability_status,
+  timeline_patch_response_adapter_id,
+  timeline_patch_probe_protocol_version,
+  timeline_patch_capability_tested_at,
+  timeline_patch_capability_failure_code,
+  timeline_patch_capability_probe_sha256
+ON provider_configs
+WHEN (
+  NEW.timeline_patch_capability_status='untested'
+  AND (
+    NEW.timeline_patch_response_adapter_id IS NOT NULL
+    OR NEW.timeline_patch_probe_protocol_version IS NOT NULL
+    OR NEW.timeline_patch_capability_tested_at IS NOT NULL
+    OR NEW.timeline_patch_capability_failure_code IS NOT NULL
+    OR NEW.timeline_patch_capability_probe_sha256 IS NOT NULL
+  )
+) OR (
+  NEW.timeline_patch_capability_status='supported'
+  AND (
+    NEW.timeline_patch_response_adapter_id
+      IS NOT 'openai_chat_completions_json_schema_v1'
+    OR NEW.timeline_patch_probe_protocol_version IS NOT '1'
+    OR NEW.timeline_patch_capability_tested_at IS NULL
+    OR NEW.timeline_patch_capability_failure_code IS NOT NULL
+    OR NEW.timeline_patch_capability_probe_sha256 IS NULL
+  )
+) OR (
+  NEW.timeline_patch_capability_status='unsupported'
+  AND (
+    NEW.timeline_patch_response_adapter_id IS NOT NULL
+    OR NEW.timeline_patch_probe_protocol_version IS NOT NULL
+    OR NEW.timeline_patch_capability_tested_at IS NULL
+    OR NEW.timeline_patch_capability_failure_code IS NULL
+    OR NEW.timeline_patch_capability_probe_sha256 IS NULL
+  )
+)
+BEGIN SELECT RAISE(ABORT,'invalid timeline patch capability state'); END;
+CREATE TRIGGER IF NOT EXISTS provider_timeline_patch_capability_reset_on_config_change
+AFTER UPDATE OF
+  kind,display_name,base_url,model,enabled,
+  input_price_per_million,output_price_per_million
+ON provider_configs
+WHEN OLD.timeline_patch_capability_status!='untested'
+BEGIN
+  UPDATE provider_configs SET timeline_patch_capability_status='untested',
+    timeline_patch_response_adapter_id=NULL,timeline_patch_probe_protocol_version=NULL,
+    timeline_patch_capability_tested_at=NULL,timeline_patch_capability_failure_code=NULL,
+    timeline_patch_capability_probe_sha256=NULL WHERE id=NEW.id;
+END;
+"""  # noqa: E501
+V7_SQL = """
+DROP TRIGGER IF EXISTS provider_timeline_patch_capability_valid_insert;
+DROP TRIGGER IF EXISTS provider_timeline_patch_capability_valid_update;
+CREATE TRIGGER provider_timeline_patch_capability_valid_insert
+BEFORE INSERT ON provider_configs
+WHEN (NEW.timeline_patch_capability_status='supported' AND (
+  NEW.timeline_patch_response_adapter_id IS NULL
+  OR NEW.timeline_patch_response_adapter_id NOT IN (
+    'openai_responses_json_schema_v1',
+    'openai_responses_patchscript_v1',
+    'openai_chat_completions_json_schema_v1',
+    'openai_chat_completions_patchscript_v1'
+  )
+  OR NEW.timeline_patch_probe_protocol_version IS NOT '1'
+  OR NEW.timeline_patch_capability_tested_at IS NULL
+  OR NEW.timeline_patch_capability_failure_code IS NOT NULL
+  OR NEW.timeline_patch_capability_probe_sha256 IS NULL
+)) OR (NEW.timeline_patch_capability_status='unsupported' AND (
+  NEW.timeline_patch_response_adapter_id IS NOT NULL
+  OR NEW.timeline_patch_probe_protocol_version IS NOT NULL
+  OR NEW.timeline_patch_capability_tested_at IS NULL
+  OR NEW.timeline_patch_capability_failure_code IS NULL
+  OR NEW.timeline_patch_capability_probe_sha256 IS NULL
+)) OR (NEW.timeline_patch_capability_status='untested' AND (
+  NEW.timeline_patch_response_adapter_id IS NOT NULL
+  OR NEW.timeline_patch_probe_protocol_version IS NOT NULL
+  OR NEW.timeline_patch_capability_tested_at IS NOT NULL
+  OR NEW.timeline_patch_capability_failure_code IS NOT NULL
+  OR NEW.timeline_patch_capability_probe_sha256 IS NOT NULL
+)) BEGIN SELECT RAISE(ABORT,'invalid timeline patch capability state'); END;
+CREATE TRIGGER provider_timeline_patch_capability_valid_update
+BEFORE UPDATE OF
+  timeline_patch_capability_status,
+  timeline_patch_response_adapter_id,
+  timeline_patch_probe_protocol_version,
+  timeline_patch_capability_tested_at,
+  timeline_patch_capability_failure_code,
+  timeline_patch_capability_probe_sha256
+ON provider_configs
+WHEN (NEW.timeline_patch_capability_status='supported' AND (
+  NEW.timeline_patch_response_adapter_id IS NULL
+  OR NEW.timeline_patch_response_adapter_id NOT IN (
+    'openai_responses_json_schema_v1',
+    'openai_responses_patchscript_v1',
+    'openai_chat_completions_json_schema_v1',
+    'openai_chat_completions_patchscript_v1'
+  )
+  OR NEW.timeline_patch_probe_protocol_version IS NOT '1'
+  OR NEW.timeline_patch_capability_tested_at IS NULL
+  OR NEW.timeline_patch_capability_failure_code IS NOT NULL
+  OR NEW.timeline_patch_capability_probe_sha256 IS NULL
+)) OR (NEW.timeline_patch_capability_status='unsupported' AND (
+  NEW.timeline_patch_response_adapter_id IS NOT NULL
+  OR NEW.timeline_patch_probe_protocol_version IS NOT NULL
+  OR NEW.timeline_patch_capability_tested_at IS NULL
+  OR NEW.timeline_patch_capability_failure_code IS NULL
+  OR NEW.timeline_patch_capability_probe_sha256 IS NULL
+)) OR (NEW.timeline_patch_capability_status='untested' AND (
+  NEW.timeline_patch_response_adapter_id IS NOT NULL
+  OR NEW.timeline_patch_probe_protocol_version IS NOT NULL
+  OR NEW.timeline_patch_capability_tested_at IS NOT NULL
+  OR NEW.timeline_patch_capability_failure_code IS NOT NULL
+  OR NEW.timeline_patch_capability_probe_sha256 IS NOT NULL
+)) BEGIN SELECT RAISE(ABORT,'invalid timeline patch capability state'); END;
+"""
 MIGRATIONS: dict[str, str] = {
     V1_VERSION: V1_SQL,
     V2_VERSION: V2_SQL,
     V3_VERSION: V3_SQL,
     V4_VERSION: V4_SQL,
+    V5_VERSION: V5_SQL,
+    V6_VERSION: V6_SQL,
+    V7_VERSION: V7_SQL,
 }
 
 
@@ -329,6 +548,9 @@ class Database:
                     self._apply_v2_compatibility(db)
                     self._apply_v3_compatibility(db)
                     self._apply_v4_compatibility(db)
+                    self._apply_v5_compatibility(db)
+                    self._apply_v6_compatibility(db)
+                    self._apply_v7_compatibility(db)
                     for statement in _statements(sql):
                         db.execute(statement)
                     db.execute(
@@ -430,6 +652,35 @@ class Database:
         for name, definition in additions.items():
             if name not in columns:
                 db.execute(f"ALTER TABLE jobs ADD COLUMN {name} {definition}")
+
+    @staticmethod
+    def _apply_v5_compatibility(db: sqlite3.Connection) -> None:
+        tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "provider_invocations" in tables:
+            columns = {row[1] for row in db.execute("PRAGMA table_info(provider_invocations)")}
+            if "timeline_patch_generation_id" not in columns:
+                db.execute(
+                    "ALTER TABLE provider_invocations ADD COLUMN timeline_patch_generation_id "
+                    "TEXT REFERENCES timeline_patch_generations(id)"
+                )
+        if "jobs" in tables:
+            columns = {row[1] for row in db.execute("PRAGMA table_info(jobs)")}
+            if "timeline_patch_generation_id" not in columns:
+                db.execute(
+                    "ALTER TABLE jobs ADD COLUMN timeline_patch_generation_id "
+                    "TEXT REFERENCES timeline_patch_generations(id)"
+                )
+
+    @staticmethod
+    def _apply_v6_compatibility(db: sqlite3.Connection) -> None:
+        # v6's SQL performs the only required additions. This helper deliberately
+        # has no data rewrite: every historical Provider must remain untested.
+        del db
+
+    @staticmethod
+    def _apply_v7_compatibility(db: sqlite3.Connection) -> None:
+        # v7 only replaces capability constraints; existing metadata is preserved.
+        del db
 
     def recover_interrupted(self) -> int:
         now = utc_now()

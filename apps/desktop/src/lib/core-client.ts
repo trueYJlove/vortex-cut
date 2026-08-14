@@ -63,6 +63,18 @@ import {
   , type ExportCreateResponse
   , type RenderArtifact
   , type RenderArtifactId
+  , parseTimelineDiff
+  , parseTimelinePatchEgressPreview
+  , parseTimelinePatchGeneration
+  , parseTimelinePatchGenerationCreateResponse
+  , parseTimelinePatchProposal
+  , type TimelineDiff
+  , type TimelinePatchEgressPreview
+  , type TimelinePatchGeneration
+  , type TimelinePatchGenerationCreateResponse
+  , type TimelinePatchProposal
+  , parseTimelinePatchCapabilityTestResponse
+  , type TimelinePatchCapabilityTestResponse
 } from "@aivideo/contracts";
 
 export class CoreApiError extends Error {
@@ -93,7 +105,7 @@ function removeSensitiveFields(value: unknown): unknown {
   if (!value || typeof value !== "object") return value;
   const result: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) {
-    if (["path", "uri", "root_dir", "database_path", "admin_token", "ui_token", "token", "installed_path", "install_dir", "source_file"].includes(key)) continue;
+    if (["path", "uri", "root_dir", "database_path", "admin_token", "ui_token", "token", "installed_path", "install_dir", "source_file", "authorization", "api_key", "secret", "prompt", "raw_response", "instruction", "payload", "http_body", "request_body", "system_message"].includes(key.toLowerCase())) continue;
     result[key] = removeSensitiveFields(item);
   }
   return result;
@@ -312,6 +324,34 @@ export class CoreClient {
   }
   getTimelineRevision(revisionId: TimelineRevisionId): Promise<TimelineRevision> {
     return this.request<unknown>(`${API_PREFIX}/timeline-revisions/${encodeURIComponent(revisionId)}`).then(value => parseTimelineRevision(removeSensitiveFields(value)));
+  }
+  prepareTimelinePatch(projectId: ProjectId, input: { base_revision_id: TimelineRevisionId; provider_config_id: string; instruction: string }): Promise<TimelinePatchEgressPreview> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/timeline-patch-generations/prepare`, { method: "POST", body: JSON.stringify(input) }).then(value => parseTimelinePatchEgressPreview(removeSensitiveFields(value)));
+  }
+  testTimelinePatchProviderCapability(providerId: string): Promise<TimelinePatchCapabilityTestResponse> {
+    return this.request<unknown>(`${API_PREFIX}/providers/${encodeURIComponent(providerId)}/timeline-patch-capability-test`, { method: "POST" }).then(value => parseTimelinePatchCapabilityTestResponse(removeSensitiveFields(value)));
+  }
+  createTimelinePatchGeneration(projectId: ProjectId, input: { timeline_patch_egress_preview_id: string; payload_sha256: string }): Promise<TimelinePatchGenerationCreateResponse> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/timeline-patch-generations`, { method: "POST", body: JSON.stringify(input) }).then(value => parseTimelinePatchGenerationCreateResponse(removeSensitiveFields(value)));
+  }
+  getTimelinePatchGeneration(generationId: string): Promise<TimelinePatchGeneration> {
+    return this.request<unknown>(`${API_PREFIX}/timeline-patch-generations/${encodeURIComponent(generationId)}`).then(value => parseTimelinePatchGeneration(removeSensitiveFields(value)));
+  }
+  listTimelinePatchProposals(projectId: ProjectId): Promise<{ items: TimelinePatchProposal[] }> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/timeline-patch-proposals`).then(value => {
+      const page = removeSensitiveFields(value) as { items?: unknown[] };
+      if (!Array.isArray(page.items)) throw new Error("Invalid TimelinePatchProposalPage");
+      return { items: page.items.map(parseTimelinePatchProposal) };
+    });
+  }
+  getTimelinePatchProposal(proposalId: string): Promise<TimelinePatchProposal> {
+    return this.request<unknown>(`${API_PREFIX}/timeline-patch-proposals/${encodeURIComponent(proposalId)}`).then(value => parseTimelinePatchProposal(removeSensitiveFields(value)));
+  }
+  applyTimelinePatchProposal(projectId: ProjectId, proposalId: string, input: { base_revision_id: TimelineRevisionId; proposed_document_sha256: string }): Promise<TimelineState> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/timeline-patch-proposals/${encodeURIComponent(proposalId)}/apply`, { method: "POST", body: JSON.stringify(input) }).then(value => parseTimelineState(removeSensitiveFields(value)));
+  }
+  compareTimelineRevisions(projectId: ProjectId, input: { base_revision_id: TimelineRevisionId; target_revision_id: TimelineRevisionId }): Promise<TimelineDiff> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/timeline/revision-diffs`, { method: "POST", body: JSON.stringify(input) }).then(value => parseTimelineDiff(removeSensitiveFields(value)));
   }
   createPreview(projectId: ProjectId, input: PreviewCreateInput): Promise<PreviewCreateResponse> {
     return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/previews`, { method: "POST", body: JSON.stringify(input) }).then(value => parsePreviewCreateResponse(removeSensitiveFields(value)));
