@@ -21,7 +21,7 @@ describe("SidecarSupervisor", () => {
     const supervisor = new SidecarSupervisor({ executable: "aivs-core.exe", resourcesPath: "C:\\resources", dataDir: "C:\\data", runtimeDir, ffmpegPath: "C:\\ffmpeg.exe", ffprobePath: "C:\\ffprobe.exe", manifestDir, buildVersion: "0.0.1", adminToken: "admin-secret", launchEvidencePath, spawnImpl });
     const ready = supervisor.start();
     await expect(ready).resolves.toMatchObject({ port: 43000 });
-    expect(spawnImpl).toHaveBeenCalledWith("aivs-core.exe", expect.arrayContaining(["--host", "127.0.0.1", "--port", "0"]), expect.objectContaining({ shell: false, windowsHide: true, env: expect.objectContaining({ AIVS_ADMIN_TOKEN: "admin-secret" }) }));
+    expect(spawnImpl).toHaveBeenCalledWith("aivs-core.exe", expect.arrayContaining(["--host", "127.0.0.1", "--port", "0"]), expect.objectContaining({ shell: false, windowsHide: true, env: expect.objectContaining({ AIVS_ADMIN_TOKEN: "admin-secret", AIVS_RESOURCE_ROOT: "C:\\resources" }) }));
     expect(JSON.stringify(spawnImpl.mock.calls[0][1])).not.toContain("admin-secret");
     const args = spawnImpl.mock.calls[0][1] as string[];
     expect(args[args.indexOf("--manifest-dir") + 1]).toBe(manifestDir);

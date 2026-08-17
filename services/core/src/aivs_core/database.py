@@ -27,6 +27,7 @@ V5_VERSION = "v5"
 V6_VERSION = "v6"
 V7_VERSION = "v7"
 V8_VERSION = "v8"
+V9_VERSION = "v9"
 V1_SQL = """
 CREATE TABLE IF NOT EXISTS media_inputs (
   id TEXT PRIMARY KEY, path TEXT NOT NULL, display_name TEXT NOT NULL,
@@ -556,6 +557,73 @@ BEGIN UPDATE provider_configs SET candidate_capability_status='untested',
   candidate_capability_tested_at=NULL,candidate_capability_failure_code=NULL,
   candidate_capability_probe_sha256=NULL WHERE id=NEW.id; END;
 """
+V9_SQL = """
+CREATE TABLE IF NOT EXISTS rendition_snapshots (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  timeline_revision_id TEXT NOT NULL REFERENCES timeline_revisions(id),
+  timeline_document_sha256 TEXT NOT NULL,
+  platform_preset_id TEXT NOT NULL,
+  platform_preset_version INTEGER NOT NULL,
+  platform_preset_sha256 TEXT NOT NULL,
+  rendition_preset_id TEXT NOT NULL,
+  rendition_preset_version INTEGER NOT NULL,
+  rendition_preset_sha256 TEXT NOT NULL,
+  layout_policy TEXT NOT NULL CHECK(layout_policy IN (
+    'preserve_timeline','fit_all','crop_fill_all','blurred_background_all')),
+  snapshot_json TEXT NOT NULL,
+  snapshot_sha256 TEXT NOT NULL,
+  warnings_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(project_id,timeline_revision_id,timeline_document_sha256,platform_preset_id,
+    platform_preset_sha256,rendition_preset_id,rendition_preset_sha256,layout_policy,snapshot_sha256)
+);
+CREATE TABLE IF NOT EXISTS export_batches (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  timeline_revision_id TEXT NOT NULL REFERENCES timeline_revisions(id),
+  timeline_document_sha256 TEXT NOT NULL,
+  directory_display_name TEXT NOT NULL,
+  retry_of_batch_id TEXT NULL REFERENCES export_batches(id),
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS export_batch_items (
+  id TEXT PRIMARY KEY,
+  export_batch_id TEXT NOT NULL REFERENCES export_batches(id),
+  ordinal INTEGER NOT NULL,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  timeline_revision_id TEXT NOT NULL REFERENCES timeline_revisions(id),
+  rendition_snapshot_id TEXT NOT NULL REFERENCES rendition_snapshots(id),
+  preview_artifact_id TEXT NOT NULL REFERENCES render_artifacts(artifact_id),
+  platform_preset_id TEXT NOT NULL,
+  rendition_preset_id TEXT NOT NULL,
+  destination_display_name TEXT NOT NULL,
+  retry_of_item_id TEXT NULL REFERENCES export_batch_items(id),
+  created_at TEXT NOT NULL,
+  UNIQUE(export_batch_id,ordinal),
+  UNIQUE(export_batch_id,platform_preset_id,rendition_preset_id)
+);
+ALTER TABLE jobs ADD COLUMN export_batch_item_id TEXT NULL REFERENCES export_batch_items(id);
+ALTER TABLE render_artifacts ADD COLUMN rendition_snapshot_id TEXT NULL REFERENCES rendition_snapshots(id);
+ALTER TABLE export_records ADD COLUMN export_batch_item_id TEXT NULL REFERENCES export_batch_items(id);
+CREATE INDEX IF NOT EXISTS idx_rendition_snapshots_project_revision
+  ON rendition_snapshots(project_id,timeline_revision_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_export_batches_project ON export_batches(project_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_export_batch_items_batch ON export_batch_items(export_batch_id,ordinal);
+CREATE INDEX IF NOT EXISTS idx_jobs_export_batch_item ON jobs(export_batch_item_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_export_records_batch_item_unique
+  ON export_records(export_batch_item_id) WHERE export_batch_item_id IS NOT NULL;
+CREATE TRIGGER IF NOT EXISTS rendition_snapshots_no_update
+BEFORE UPDATE ON rendition_snapshots BEGIN SELECT RAISE(ABORT,'rendition snapshots are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS rendition_snapshots_no_delete
+BEFORE DELETE ON rendition_snapshots BEGIN SELECT RAISE(ABORT,'rendition snapshots are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS export_batches_no_update
+BEFORE UPDATE ON export_batches BEGIN SELECT RAISE(ABORT,'export batches are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS export_batch_items_no_update
+BEFORE UPDATE ON export_batch_items BEGIN SELECT RAISE(ABORT,'export batch items are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS export_batch_items_no_delete
+BEFORE DELETE ON export_batch_items BEGIN SELECT RAISE(ABORT,'export batch items are immutable'); END;
+"""  # noqa: E501
 MIGRATIONS: dict[str, str] = {
     V1_VERSION: V1_SQL,
     V2_VERSION: V2_SQL,
@@ -565,6 +633,7 @@ MIGRATIONS: dict[str, str] = {
     V6_VERSION: V6_SQL,
     V7_VERSION: V7_SQL,
     V8_VERSION: V8_SQL,
+    V9_VERSION: V9_SQL,
 }
 
 
@@ -617,7 +686,11 @@ class Database:
                     self._apply_v6_compatibility(db)
                     self._apply_v7_compatibility(db)
                     self._apply_v8_compatibility(db)
-                    for statement in _statements(sql):
+                    self._apply_v9_compatibility(db)
+                    statements = _statements(sql)
+                    if version == V9_VERSION:
+                        statements = self._v9_statements(db, statements)
+                    for statement in statements:
                         db.execute(statement)
                     db.execute(
                         "INSERT INTO schema_migrations(version, applied_at, checksum) "
@@ -752,6 +825,38 @@ class Database:
     def _apply_v8_compatibility(db: sqlite3.Connection) -> None:
         # v8 is append-only: historical rows keep nullable snapshot columns.
         del db
+
+    @staticmethod
+    def _apply_v9_compatibility(db: sqlite3.Connection) -> None:
+        # v9 has no data rewrite. Existing partial columns are handled by
+        # _v9_statements while preserving the fixed migration checksum.
+        del db
+
+    @staticmethod
+    def _v9_statements(db: sqlite3.Connection, statements: list[str]) -> list[str]:
+        existing = {
+            table: {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+            for table in ("jobs", "render_artifacts", "export_records")
+        }
+        additions = {
+            "ALTER TABLE jobs ADD COLUMN export_batch_item_id": ("jobs", "export_batch_item_id"),
+            "ALTER TABLE render_artifacts ADD COLUMN rendition_snapshot_id": (
+                "render_artifacts",
+                "rendition_snapshot_id",
+            ),
+            "ALTER TABLE export_records ADD COLUMN export_batch_item_id": (
+                "export_records",
+                "export_batch_item_id",
+            ),
+        }
+        return [
+            statement
+            for statement in statements
+            if not any(
+                statement.startswith(prefix) and column in existing[table]
+                for prefix, (table, column) in additions.items()
+            )
+        ]
 
     def recover_interrupted(self) -> int:
         now = utc_now()

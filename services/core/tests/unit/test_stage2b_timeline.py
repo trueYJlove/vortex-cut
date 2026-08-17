@@ -148,7 +148,7 @@ def test_v7_schema_and_immutable_records(tmp_path: Path) -> None:
     with database.connection() as db:
         assert (
             db.execute("SELECT version FROM schema_migrations ORDER BY version DESC").fetchone()[0]
-            == "v8"
+            == "v9"
         )
         assert {row[1] for row in db.execute("PRAGMA table_info(jobs)")} >= {
             "timeline_patch_generation_id"
@@ -376,7 +376,19 @@ def test_real_v6_to_v7_preserves_chat_structured_supported_and_is_idempotent(
 def test_v7_failure_rolls_back_to_v6(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = tmp_path / "app.db"
     full = database_module.MIGRATIONS
-    v6_only = dict(list(full.items())[:-2])
+    v6_only = {
+        version: sql
+        for version, sql in full.items()
+        if version
+        in {
+            "v1",
+            "v2",
+            "v3",
+            "v4",
+            "v5",
+            "v6",
+        }
+    }
     monkeypatch.setattr(database_module, "MIGRATIONS", v6_only)
     Database(path).initialize()
     broken = {**v6_only, "v7": "CREATE TABLE broken ("}

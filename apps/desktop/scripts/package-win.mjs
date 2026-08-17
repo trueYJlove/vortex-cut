@@ -41,14 +41,17 @@ const resourceEntries = [
   { from: join(packageResourcesRoot, "manifests"), to: "manifests", filter: ["components.json"] },
   { from: join(workspaceRoot, "resources", "model-manifests"), to: "model-manifests", filter: ["*.json"] },
   { from: join(workspaceRoot, "resources", "recipes"), to: "recipes", filter: ["*.json"] },
+  { from: join(workspaceRoot, "resources", "platform-presets"), to: "platform-presets", filter: ["**/*.json"] },
+  { from: join(workspaceRoot, "resources", "renditions"), to: "renditions", filter: ["**/*.json"] },
   { from: join(workspaceRoot, "resources", "fonts"), to: "fonts", filter: ["**/*"] }
 ];
 const packageVerifyCodes = new Set([
   "PACKAGE_REPORT_UNREADABLE", "PACKAGE_REPORT_INVALID", "PACKAGE_REQUIRED_SIDECAR_MISSING", "PACKAGE_REQUIRED_FFMPEG_MISSING",
   "PACKAGE_REQUIRED_LICENSE_MISSING", "PACKAGE_REQUIRED_COMPONENT_MANIFEST_MISSING", "PACKAGE_REQUIRED_MODEL_MANIFEST_MISSING",
-  "PACKAGE_REQUIRED_RECIPE_MISSING", "PACKAGE_REQUIRED_FONT_MISSING", "PACKAGE_COMPONENT_MANIFEST_INVALID",
+  "PACKAGE_REQUIRED_RECIPE_MISSING", "PACKAGE_REQUIRED_PLATFORM_PRESET_MISSING", "PACKAGE_REQUIRED_RENDITION_PRESET_MISSING",
+  "PACKAGE_REQUIRED_FONT_MISSING", "PACKAGE_COMPONENT_MANIFEST_INVALID",
   "PACKAGE_COMPONENT_LICENSE_INVALID", "PACKAGE_COMPONENT_PIN_INVALID", "PACKAGE_COMPONENT_HASH_MISMATCH", "PACKAGE_FONT_BUNDLE_INVALID",
-  "PACKAGE_FONT_BUNDLE_FILE_MISSING", "PACKAGE_FONT_BUNDLE_HASH_MISMATCH", "PACKAGE_CAPTION_PRESETS_INVALID",
+  "PACKAGE_FONT_BUNDLE_FILE_MISSING", "PACKAGE_FONT_BUNDLE_HASH_MISMATCH", "PACKAGE_CAPTION_PRESETS_INVALID", "PACKAGE_CAPTION_STYLES_INVALID",
   "PACKAGE_FFMPEG_FILTER_INVALID", "PACKAGE_MODEL_MANIFEST_INVALID", "PACKAGE_MODEL_WEIGHTS_EMBEDDED",
   "PACKAGE_RECIPE_MANIFEST_INVALID", "PACKAGE_VERIFY_UNEXPECTED", "PACKAGE_COMPONENT_VERIFY_FAILED"
 ]);
@@ -99,6 +102,10 @@ const classifyBuilderFailure = (error, stdout = "", stderr = "") => {
   return "BUILDER_UNKNOWN_FAILED";
 };
 const env = { ...process.env };
+// The desktop process can inherit a host-specific PSModulePath.  Passing that
+// through Node to Windows PowerShell may hide built-in modules (for example
+// Get-FileHash), so let PowerShell reconstruct its native default module path.
+if (process.platform === "win32") delete env.PSModulePath;
 if (existsSync(join(nsisDir, "Bin", "makensis.exe"))) env.ELECTRON_BUILDER_NSIS_DIR = nsisDir;
 if (existsSync(join(nsisResourcesDir, "plugins"))) env.ELECTRON_BUILDER_NSIS_RESOURCES_DIR = nsisResourcesDir;
 if (existsSync(sevenZip)) env.ELECTRON_BUILDER_7ZIP_PATH = sevenZip;

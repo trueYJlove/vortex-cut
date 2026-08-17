@@ -62,7 +62,7 @@ export class SidecarSupervisor {
     }
     const child = spawnImpl(this.options.executable, args, {
       cwd: this.options.resourcesPath,
-      env: { ...process.env, AIVS_ADMIN_TOKEN: adminToken },
+      env: { ...process.env, AIVS_ADMIN_TOKEN: adminToken, AIVS_RESOURCE_ROOT: this.options.resourcesPath },
       shell: false,
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"]

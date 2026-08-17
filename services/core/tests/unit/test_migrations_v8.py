@@ -139,7 +139,7 @@ def test_v8_failure_rolls_back_to_v7(tmp_path: Path, monkeypatch: pytest.MonkeyP
         Database(path).initialize()
     with Database(path).connection() as db:
         versions = [row[0] for row in db.execute("SELECT version FROM schema_migrations")]
-        assert versions == ["v1", "v2", "v3", "v4", "v5", "v6", "v7"]
+        assert versions == ["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8"]
         assert db.execute("SELECT name FROM sqlite_master WHERE name='broken'").fetchone() is None
 
 
@@ -149,7 +149,7 @@ def test_v8_rejects_unknown_applied_version(tmp_path: Path) -> None:
     database.initialize()
     with database.connection() as db:
         db.execute(
-            "INSERT INTO schema_migrations(version,applied_at,checksum) VALUES ('v9','now','x')"
+            "INSERT INTO schema_migrations(version,applied_at,checksum) VALUES ('v10','now','x')"
         )
     with pytest.raises(MigrationError, match="未知数据库版本"):
         Database(path).initialize()

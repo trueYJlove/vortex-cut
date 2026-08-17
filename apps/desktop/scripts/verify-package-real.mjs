@@ -22,7 +22,7 @@ const expectedWindowTitle = "Vortex Cut";
 const allowedCodes = new Set([
   "PACKAGE_REAL_EVIDENCE_ROOT_INVALID", "REAL_FIXTURE_UNAVAILABLE", "PACKAGE_COMPONENT_VERIFY_FAILED", "PACKAGE_REPORT_UNREADABLE", "PACKAGE_REPORT_INVALID",
   "PACKAGE_REQUIRED_SIDECAR_MISSING", "PACKAGE_REQUIRED_FFMPEG_MISSING", "PACKAGE_REQUIRED_LICENSE_MISSING", "PACKAGE_REQUIRED_COMPONENT_MANIFEST_MISSING",
-  "PACKAGE_REQUIRED_MODEL_MANIFEST_MISSING", "PACKAGE_REQUIRED_RECIPE_MISSING", "PACKAGE_REQUIRED_FONT_MISSING", "PACKAGE_COMPONENT_MANIFEST_INVALID",
+  "PACKAGE_REQUIRED_MODEL_MANIFEST_MISSING", "PACKAGE_REQUIRED_RECIPE_MISSING", "PACKAGE_REQUIRED_PLATFORM_PRESET_MISSING", "PACKAGE_REQUIRED_RENDITION_PRESET_MISSING", "PACKAGE_REQUIRED_FONT_MISSING", "PACKAGE_COMPONENT_MANIFEST_INVALID",
   "PACKAGE_COMPONENT_LICENSE_INVALID", "PACKAGE_COMPONENT_PIN_INVALID", "PACKAGE_COMPONENT_HASH_MISMATCH", "PACKAGE_FONT_BUNDLE_INVALID",
   "PACKAGE_FONT_BUNDLE_FILE_MISSING", "PACKAGE_FONT_BUNDLE_HASH_MISMATCH", "PACKAGE_CAPTION_PRESETS_INVALID",
   "PACKAGE_FFMPEG_FILTER_INVALID", "PACKAGE_MODEL_MANIFEST_INVALID", "PACKAGE_MODEL_WEIGHTS_EMBEDDED",
@@ -31,7 +31,7 @@ const allowedCodes = new Set([
   "ELECTRON_LAUNCH_FAILED", "ELECTRON_RUNTIME_FAILED", "ELECTRON_WINDOW_TITLE_MISMATCH", "IMPORT_CANCELLED", "MODEL_MANIFEST_MISSING", "MODEL_RUNTIME_UNAVAILABLE",
   "TRANSCRIPTION_FAILED", "TRANSCRIPT_SEGMENT_OR_WORD_MISSING", "TIMELINE_OR_CAPTION_MISSING", "JOB_TIMEOUT", "JOB_NOT_CREATED",
   "PREVIEW_FAILED", "PREVIEW_PROJECT_SYNC_FAILED", "PREVIEW_UI_NOT_READY", "PREVIEW_JOB_NOT_CREATED", "PREVIEW_JOB_FAILED", "PREVIEW_RECORD_MISSING", "PREVIEW_RANGE_FAILED",
-  "EXPORT_FAILED", "PREVIEW_NOT_STALE", "RESTART_TIMELINE_UNAVAILABLE", "RESTART_PREVIEWS_UNAVAILABLE",
+  "EXPORT_FAILED", "RENDITION_PREVIEW_FAILED", "RENDITION_PREVIEW_MISSING", "EXPORT_BATCH_GRANT_FAILED", "EXPORT_BATCH_CREATE_FAILED", "EXPORT_BATCH_INVALID", "EXPORT_BATCH_FAILURE_INJECTION_FAILED", "EXPORT_BATCH_STATE_UNAVAILABLE", "EXPORT_BATCH_EXPORT_IDS_INVALID", "EXPORT_BATCH_RECORDS_UNAVAILABLE", "EXPORT_BATCH_ARTIFACTS_UNAVAILABLE", "EXPORT_BATCH_RECORDS_MISSING", "EXPORT_BATCH_ARTIFACT_MISSING", "EXPORT_BATCH_OUTPUT_INVALID", "EXPORT_BATCH_MEDIA_INVALID", "EXPORT_BATCH_TARGETS_INCOMPLETE", "EXPORT_BATCH_PARTIAL_FAILED", "EXPORT_BATCH_RETRY_FAILED", "PREVIEW_NOT_STALE", "RESTART_TIMELINE_UNAVAILABLE", "RESTART_PREVIEWS_UNAVAILABLE",
   "RESTART_EXPORTS_UNAVAILABLE", "RESTART_MODELS_UNAVAILABLE", "RESTART_REVISION_MISMATCH", "RESTART_PREVIEW_MISSING",
   "RESTART_EXPORT_MISSING", "RESTART_RESTORE_FAILED",
   "EXPORT_HASH_MISMATCH", "EXPORT_CODEC_INVALID", "RENDERER_DTO_SENSITIVE_FIELD", "EVIDENCE_WRITE_FAILED",
@@ -41,7 +41,7 @@ const allowedCodes = new Set([
 const fail = code => { throw new Error(code); };
 const safeErrorCode = error => allowedCodes.has(String(error?.message ?? "")) ? error.message : "PACKAGE_REAL_VERIFICATION_FAILED";
 const failureStatus = code => code === "REAL_FIXTURE_UNAVAILABLE" || code === "PACKAGE_REAL_EVIDENCE_ROOT_INVALID" ? "unverified" : "failed";
-const safeStage = () => /^[a-z_]+$/.test(stage) ? stage : "unknown";
+const safeStage = () => /^[a-z0-9_]+$/.test(stage) ? stage : "unknown";
 const safeJobStatus = value => ["succeeded", "failed", "cancelled", "interrupted"].includes(value) ? value : "unknown";
 const safeCount = value => Number.isInteger(value) && value >= 0 ? value : undefined;
 const failureChecks = () => {
@@ -266,7 +266,7 @@ async function main() {
   } catch { fail("ELECTRON_LAUNCH_FAILED"); }
   const launch = () => electron.launch({
     executablePath: join(report.unpacked_root, "Vortex Cut.exe"), args: [`--user-data-dir=${userData}`], cwd: report.unpacked_root,
-    env: { ...process.env, AIVS_E2E_ASSET_PATHS: JSON.stringify({ video }), AIVS_E2E_EXPORT_PATH: destination, AIVS_E2E_MODEL_DIR: modelRoot, ELECTRON_RUN_AS_NODE: undefined, NODE_OPTIONS: undefined }
+    env: { ...process.env, AIVS_E2E_ASSET_PATHS: JSON.stringify({ video }), AIVS_E2E_EXPORT_PATH: destination, AIVS_E2E_EXPORT_DIRECTORY: workRun, AIVS_E2E_MODEL_DIR: modelRoot, ELECTRON_RUN_AS_NODE: undefined, NODE_OPTIONS: undefined }
   });
   let first;
   // Test-only deterministic seam: avoids requiring an actual Windows package
@@ -281,7 +281,7 @@ async function main() {
     fail("ELECTRON_WINDOW_TITLE_MISMATCH");
   }
   try { first = await launch(); } catch { fail("ELECTRON_LAUNCH_FAILED"); }
-  let projectId; let finalState; let preview; let exportRecord; let transcript; let range; let models; let wordCount;
+  let projectId; let finalState; let preview; let exportRecord; let transcript; let range; let models; let wordCount; let stage3a; let stage3aPresentations = [];
   try {
     stage = "electron_runtime";
     const page = await first.firstWindow();
@@ -376,7 +376,7 @@ async function main() {
     progress.preview_range_byte_count = range.length;
 
     stage = "export";
-    await page.getByRole("button", { name: "导出" }).click().catch(() => fail("EXPORT_FAILED"));
+    await page.getByRole("button", { name: "导出", exact: true }).click().catch(() => fail("EXPORT_FAILED"));
     const exportJob = await newestJob(page, projectId, "final_export");
     progress.export_job_created = true;
     const exportJobResult = await waitForJob(page, exportJob.job_id);
@@ -386,6 +386,114 @@ async function main() {
     progress.export_record_count = Array.isArray(exportItems?.items) ? exportItems.items.length : 0;
     if (progress.export_record_count < 1) fail("EXPORT_FAILED");
     exportRecord = exportItems.items[0];
+
+    stage = "stage3a_renditions";
+    const targetDefinitions = await page.evaluate(async () => {
+      const [platforms, renditions] = await Promise.all([window.desktop.listPlatformPresets(), window.desktop.listRenditionPresets()]);
+      const renditionIds = ["portrait-9x16-v1", "landscape-16x9-v1"];
+      const platform = platforms.items.find(item => renditionIds.every(id => item.allowed_rendition_ids.includes(id)));
+      if (!platform || !renditionIds.every(id => renditions.items.some(item => item.rendition_preset_id === id))) return null;
+      return { platform_preset_id: platform.platform_preset_id, rendition_ids: renditionIds };
+    }).catch(() => fail("RENDITION_PREVIEW_FAILED"));
+    if (!targetDefinitions) fail("RENDITION_PREVIEW_FAILED");
+    const expectedPreviewTargetSizes = {
+      "portrait-9x16-v1": { width: 540, height: 960 },
+      "landscape-16x9-v1": { width: 960, height: 540 }
+    };
+    const expectedExportTargetSizes = {
+      "portrait-9x16-v1": { width: 1080, height: 1920 },
+      "landscape-16x9-v1": { width: 1920, height: 1080 }
+    };
+    const targetPreviews = [];
+    for (const renditionPresetId of targetDefinitions.rendition_ids) {
+      const created = await page.evaluate(({ id, revision, platform, rendition }) => window.desktop.createRenditionPreview({
+        project_id: id,
+        preview: { timeline_revision_id: revision, platform_preset_id: platform, rendition_preset_id: rendition, layout_policy: "preserve_timeline", encoder_mode: "software" }
+      }), { id: projectId, revision: finalState.current_revision.timeline_revision_id, platform: targetDefinitions.platform_preset_id, rendition: renditionPresetId }).catch(() => fail("RENDITION_PREVIEW_FAILED"));
+      if (created.job && (await waitForJob(page, created.job.job_id)).status !== "succeeded") fail("RENDITION_PREVIEW_FAILED");
+      const available = await page.evaluate(async ({ id, platform, rendition, revision }) => {
+        const values = await window.desktop.listRenditionPreviews({ project_id: id, limit: 100 });
+        return values.items.find(item => item.preview.timeline_revision_id === revision && item.preview.platform_preset_id === platform && item.preview.rendition_preset_id === rendition && item.preview.layout_policy === "preserve_timeline");
+      }, { id: projectId, platform: targetDefinitions.platform_preset_id, rendition: renditionPresetId, revision: finalState.current_revision.timeline_revision_id }).catch(() => fail("RENDITION_PREVIEW_FAILED"));
+      if (!available || available.preview.status !== "ready") fail("RENDITION_PREVIEW_MISSING");
+      const expected = expectedPreviewTargetSizes[renditionPresetId];
+      const media = available.preview.media_info;
+      if (!expected || media?.video?.width !== expected.width || media?.video?.height !== expected.height || media?.video?.codec !== "h264" || media?.audio?.codec !== "aac") fail("RENDITION_PREVIEW_FAILED");
+      targetPreviews.push(available);
+    }
+    stage3aPresentations = targetPreviews;
+
+    stage = "stage3a_batch";
+    stage = "stage3a_batch_grant";
+    const batchGrant = await page.evaluate(id => window.desktop.chooseExportDirectory(id), projectId).catch(() => fail("EXPORT_BATCH_GRANT_FAILED"));
+    if (!batchGrant) fail("EXPORT_BATCH_GRANT_FAILED");
+    stage = "stage3a_batch_create";
+    const batchCreated = await page.evaluate(({ id, revision, grant, previews }) => window.desktop.createExportBatch({
+      project_id: id,
+      batch: { timeline_revision_id: revision, directory_grant_id: grant, items: previews.map(preview => ({ rendition_snapshot_id: preview.preview.rendition_snapshot_id, preview_artifact_id: preview.preview.render_artifact_id, encoder_mode: "software" })) }
+    }), { id: projectId, revision: finalState.current_revision.timeline_revision_id, grant: batchGrant.directory_grant_id, previews: targetPreviews }).catch(() => fail("EXPORT_BATCH_CREATE_FAILED"));
+    if (!Array.isArray(batchCreated.jobs) || batchCreated.jobs.length !== 2 || batchCreated.batch.items.length !== 2) fail("EXPORT_BATCH_INVALID");
+    const blockedItem = batchCreated.batch.items[1];
+    if (typeof blockedItem.destination_display_name !== "string" || !/^[^<>:"/\\|?*\x00-\x1f]+\.mp4$/i.test(blockedItem.destination_display_name)) fail("EXPORT_BATCH_INVALID");
+    // A temporary directory occupying one post-preflight target is an actual filesystem
+    // failure injection. It verifies that one failed item does not suppress its sibling
+    // and that retry consumes a fresh directory grant and produces a new batch.
+    stage = "stage3a_batch_injection";
+    await mkdir(join(workRun, blockedItem.destination_display_name)).catch(() => fail("EXPORT_BATCH_FAILURE_INJECTION_FAILED"));
+    stage = "stage3a_batch_initial_jobs";
+    const initialJobs = await Promise.all(batchCreated.jobs.map(job => waitForJob(page, job.job_id)));
+    stage = "stage3a_batch_initial_state";
+    const initialBatch = await page.evaluate(id => window.desktop.getExportBatch(id), batchCreated.batch.export_batch_id).catch(() => fail("EXPORT_BATCH_STATE_UNAVAILABLE"));
+    const initialSucceeded = initialBatch.items.filter(item => item.status === "succeeded");
+    const initialFailed = initialBatch.items.filter(item => ["failed", "cancelled", "interrupted"].includes(item.status));
+    if (initialBatch.status !== "partial" || initialSucceeded.length !== 1 || initialFailed.length !== 1 || !initialJobs.some(job => job.status === "succeeded") || !initialJobs.some(job => ["failed", "cancelled", "interrupted"].includes(job.status))) fail("EXPORT_BATCH_PARTIAL_FAILED");
+    stage = "stage3a_batch_retry_grant";
+    const retryGrant = await page.evaluate(id => window.desktop.chooseExportDirectory(id), projectId).catch(() => fail("EXPORT_BATCH_RETRY_FAILED"));
+    if (!retryGrant) fail("EXPORT_BATCH_RETRY_FAILED");
+    stage = "stage3a_batch_retry_create";
+    const retried = await page.evaluate(({ id, grant, item }) => window.desktop.retryExportBatch({ batch_id: id, retry: { directory_grant_id: grant, export_batch_item_ids: [item] } }), { id: initialBatch.export_batch_id, grant: retryGrant.directory_grant_id, item: initialFailed[0].export_batch_item_id }).catch(() => fail("EXPORT_BATCH_RETRY_FAILED"));
+    if (retried.batch.retry_of_batch_id !== initialBatch.export_batch_id || retried.batch.items.length !== 1 || retried.batch.items[0].retry_of_item_id !== initialFailed[0].export_batch_item_id || retried.jobs.length !== 1) fail("EXPORT_BATCH_RETRY_FAILED");
+    stage = "stage3a_batch_retry_job";
+    if ((await waitForJob(page, retried.jobs[0].job_id)).status !== "succeeded") fail("EXPORT_BATCH_RETRY_FAILED");
+    stage = "stage3a_batch_retry_state";
+    const retryBatch = await page.evaluate(id => window.desktop.getExportBatch(id), retried.batch.export_batch_id).catch(() => fail("EXPORT_BATCH_RETRY_FAILED"));
+    if (retryBatch.status !== "succeeded" || retryBatch.items[0]?.status !== "succeeded") fail("EXPORT_BATCH_RETRY_FAILED");
+    const batchExportIds = [...initialSucceeded, ...retryBatch.items].map(item => item.export_record_id);
+    if (batchExportIds.some(id => typeof id !== "string")) fail("EXPORT_BATCH_EXPORT_IDS_INVALID");
+    stage = "stage3a_batch_records";
+    const batchExports = await page.evaluate(async ({ id, exportIds }) => {
+      const values = await window.desktop.listExports({ project_id: id, limit: 100 });
+      return exportIds.map(exportId => values.items.find(item => item.export_record.export_record_id === exportId)).filter(Boolean);
+    }, { id: projectId, exportIds: batchExportIds }).catch(() => fail("EXPORT_BATCH_RECORDS_UNAVAILABLE"));
+    if (batchExports.length !== 2) fail("EXPORT_BATCH_RECORDS_MISSING");
+    stage3aPresentations = [...stage3aPresentations, ...batchExports];
+    stage = "stage3a_batch_artifacts";
+    const batchArtifacts = await page.evaluate(async values => Promise.all(values.map(async value => ({
+      export_record_id: value.export_record.export_record_id,
+      artifact: (await window.desktop.getRenderArtifact(value.export_record.render_artifact_id)).artifact
+    }))), batchExports).catch(() => fail("EXPORT_BATCH_ARTIFACTS_UNAVAILABLE"));
+    const batchOutputChecks = [];
+    stage = "stage3a_batch_outputs";
+    for (const value of batchExports) {
+      const record = value.export_record;
+      const relatedItem = [...initialSucceeded, ...retryBatch.items].find(item => item.export_record_id === record.export_record_id);
+      const expected = expectedExportTargetSizes[relatedItem?.rendition_snapshot?.rendition_preset_id];
+      const artifact = batchArtifacts.find(item => item.export_record_id === record.export_record_id)?.artifact;
+      const name = record.destination_display_name;
+      if (!expected || !artifact || typeof name !== "string" || !/^[^<>:"/\\|?*\x00-\x1f]+\.mp4$/i.test(name)) fail("EXPORT_BATCH_ARTIFACT_MISSING");
+      const output = resolve(workRun, name);
+      if (dirname(output) !== resolve(workRun)) fail("EXPORT_BATCH_OUTPUT_INVALID");
+      const bytes = await readFile(output).catch(() => fail("EXPORT_BATCH_OUTPUT_INVALID"));
+      const hash = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+      const probeResult = JSON.parse(execFileSync(join(packageResources, "ffmpeg", "win-x64", "ffprobe.exe"), ["-v", "error", "-show_streams", "-of", "json", output], { encoding: "utf8", windowsHide: true }));
+      const h264 = probeResult.streams.some(stream => stream.codec_type === "video" && stream.codec_name === "h264");
+      const aac = probeResult.streams.some(stream => stream.codec_type === "audio" && stream.codec_name === "aac");
+      const media = artifact.media_info;
+      if (media?.video?.width !== expected.width || media?.video?.height !== expected.height || media?.video?.codec !== "h264" || media?.audio?.codec !== "aac" || !h264 || !aac || hash !== artifact.sha256 || artifact.sha256 !== record.sha256) fail("EXPORT_BATCH_MEDIA_INVALID");
+      batchOutputChecks.push({ rendition_preset_id: relatedItem.rendition_snapshot.rendition_preset_id, width: expected.width, height: expected.height, h264, aac, hash_matches_export_record: true });
+    }
+    if (new Set(batchOutputChecks.map(item => item.rendition_preset_id)).size !== 2) fail("EXPORT_BATCH_TARGETS_INCOMPLETE");
+    stage3a = { portrait_landscape_preview_count: targetPreviews.length, initial_batch_status: initialBatch.status, initial_succeeded_count: initialSucceeded.length, initial_failed_count: initialFailed.length, retry_batch_status: retryBatch.status, retry_of_batch_verified: true, exports: batchOutputChecks };
 
     stage = "stale";
     const clipId = finalState.current_revision.document.clips[0].clip_id;
@@ -447,7 +555,7 @@ async function main() {
   const hasH264 = probe.streams.some(stream => stream.codec_type === "video" && stream.codec_name === "h264");
   const hasAac = probe.streams.some(stream => stream.codec_type === "audio" && stream.codec_name === "aac");
   if (!hasH264 || !hasAac) fail("EXPORT_CODEC_INVALID");
-  if (rendererPayloadHasSensitiveFields({ preview, exportRecord })) fail("RENDERER_DTO_SENSITIVE_FIELD");
+  if (rendererPayloadHasSensitiveFields({ preview, exportRecord, stage3aPresentations })) fail("RENDERER_DTO_SENSITIVE_FIELD");
 
   stage = "evidence_write";
   const result = {
@@ -459,6 +567,7 @@ async function main() {
       timeline: { clip_count: finalState.current_revision.document.clips.length, caption_count: finalState.current_revision.document.captions.length },
       preview_range: { status: range.status, byte_count: range.length },
       export: { h264: hasH264, aac: hasAac, size_bytes: (await stat(destination)).size, sha256: `sha256:${destinationHash}`, hash_matches_export_record: true },
+      stage3a_batch: stage3a,
       stale_restart: { stale_before_restart: true, restored_after_restart: true, preview_count: restored.previews.items.length, export_count: restored.exports.items.length, model_count: restored.models.items.length },
       renderer_dto: { sensitive_fields_detected: false }
     }, package: { installer_sha256: `sha256:${createHash("sha256").update(await readFile(report.installer_path)).digest("hex")}`, sidecar_sha256: `sha256:${sidecarHash}`, component_sidecar_sha256: `sha256:${sidecarComponent.sha256}` }

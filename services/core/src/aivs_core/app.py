@@ -32,9 +32,13 @@ from .rendering.ass import CaptionResources
 from .rendering.plan import RenderPlanCompiler
 from .rendering.service import (
     DestinationGrantStore,
+    DirectoryGrantStore,
     RenderCoordinator,
     RenderService,
 )
+from .renditions.batch import ExportBatchService
+from .renditions.presets import RenditionPresetRegistry
+from .renditions.snapshot import RenditionSnapshotService
 from .timeline import TimelineService
 from .timeline_planning import TimelinePatchPlanningService
 from .transcription import TranscriptionError, TranscriptRepository
@@ -238,6 +242,37 @@ class DestinationGrantRequest(BaseModel):
     overwrite_authorized: bool
 
 
+class DirectoryGrantRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    path: str
+
+
+class RenditionPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    timeline_revision_id: str
+    platform_preset_id: str
+    rendition_preset_id: str
+    layout_policy: str
+    encoder_mode: str = "auto"
+
+
+class ExportBatchCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    timeline_revision_id: str
+    directory_grant_id: str
+    items: list[dict[str, Any]]
+
+
+class ExportBatchRetryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    directory_grant_id: str
+    export_batch_item_ids: list[str]
+
+
 class CoreState:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -262,6 +297,9 @@ class CoreState:
             self.db, self.providers, self.provider_secrets, self.timelines
         )
         self.destinations = DestinationGrantStore()
+        self.directory_grants = DirectoryGrantStore()
+        self.rendition_presets = RenditionPresetRegistry(settings.font_dir.parent)
+        self.rendition_snapshots = RenditionSnapshotService(self.db, self.rendition_presets)
         self.asr = AsrCoordinator(
             self.db, self.model_registry, self.model_manager, self.transcripts
         )
@@ -285,6 +323,8 @@ class CoreState:
             self.render_compiler,
             CaptionResources(settings.font_dir),
             self.destinations,
+            self.directory_grants,
+            self.rendition_presets,
         )
         self.jobs = JobService(
             self.db,
@@ -306,6 +346,14 @@ class CoreState:
             self.render_compiler,
             self.jobs,
             self.destinations,
+        )
+        self.export_batches = ExportBatchService(
+            self.db,
+            self.rendition_snapshots,
+            self.directory_grants,
+            self.jobs,
+            self.render_compiler,
+            self.renders,
         )
 
     async def emit(self, event: dict[str, Any]) -> None:
@@ -435,6 +483,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(_: FastAPI):
         settings.prepare()
         try:
+            state.rendition_presets.load()
             state.db.initialize()
         except MigrationError:
             raise
@@ -591,12 +640,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/v1/providers")
     async def list_providers(_: CoreState = Depends(require_ui)) -> dict[str, Any]:
-        return {
-            "items": [
-                provider_public(item)
-                for item in state.providers.list()
-            ]
-        }
+        return {"items": [provider_public(item) for item in state.providers.list()]}
 
     @app.post("/api/v1/providers")
     async def create_provider(
@@ -641,9 +685,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return await state.timeline_patch_planning.test_provider_capability(provider_config_id)
         except (DomainError, ProviderError) as exc:
             raise (
-                _domain(exc)
-                if isinstance(exc, DomainError)
-                else _error(exc.code, exc.message, 503)
+                _domain(exc) if isinstance(exc, DomainError) else _error(exc.code, exc.message, 503)
             )
 
     @app.post("/api/v1/providers/{provider_config_id}/candidate-planning-capability-test")
@@ -654,9 +696,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return await state.planning.test_candidate_provider_capability(provider_config_id)
         except (DomainError, ProviderError) as exc:
             raise (
-                _domain(exc)
-                if isinstance(exc, DomainError)
-                else _error(exc.code, exc.message, 503)
+                _domain(exc) if isinstance(exc, DomainError) else _error(exc.code, exc.message, 503)
             )
 
     @app.post("/api/v1/projects/{project_id}/candidate-generations/prepare")
@@ -883,6 +923,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> dict[str, Any]:
         try:
             return state.destinations.create(request.path, request.overwrite_authorized)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/internal/directory-grants")
+    async def create_directory_grant(
+        request: DirectoryGrantRequest, _: CoreState = Depends(require_admin)
+    ) -> dict[str, Any]:
+        try:
+            return state.directory_grants.create(request.path)
         except DomainError as exc:
             raise _domain(exc) from exc
 
@@ -1183,6 +1232,108 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             items, next_cursor = state.renders.list_previews(project_id, limit, cursor)
             return {"items": items, "next_cursor": next_cursor}
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/platform-presets")
+    async def list_platform_presets(_: CoreState = Depends(require_ui)) -> dict[str, Any]:
+        return {"items": state.rendition_presets.platform_dto()}
+
+    @app.get("/api/v1/rendition-presets")
+    async def list_rendition_presets(_: CoreState = Depends(require_ui)) -> dict[str, Any]:
+        return {"items": state.rendition_presets.rendition_dto()}
+
+    @app.post("/api/v1/projects/{project_id}/rendition-previews")
+    async def create_rendition_preview(
+        project_id: str, request: RenditionPreviewRequest, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        try:
+            snapshot = state.rendition_snapshots.create_or_reuse(
+                project_id,
+                request.timeline_revision_id,
+                request.platform_preset_id,
+                request.rendition_preset_id,
+                request.layout_policy,
+            )
+            return await state.renders.create_rendition_preview(
+                project_id,
+                request.timeline_revision_id,
+                snapshot["rendition_snapshot_id"],
+                request.encoder_mode,
+            )
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/projects/{project_id}/rendition-previews")
+    async def list_rendition_previews(
+        project_id: str,
+        limit: int = 50,
+        cursor: str | None = None,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            items, next_cursor = state.renders.list_rendition_previews(project_id, limit, cursor)
+            return {"items": items, "next_cursor": next_cursor}
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/export-batches")
+    async def create_export_batch(
+        project_id: str, request: ExportBatchCreateRequest, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        try:
+            return await state.export_batches.create(
+                project_id, request.timeline_revision_id, request.directory_grant_id, request.items
+            )
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/projects/{project_id}/export-batches")
+    async def list_export_batches(
+        project_id: str,
+        limit: int = 50,
+        cursor: str | None = None,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            items = state.export_batches.list(project_id)
+            if not 1 <= limit <= 100 or (
+                cursor is not None and (not cursor.isdigit() or int(cursor) < 0)
+            ):
+                raise DomainError("EXPORT_BATCH_INVALID", "分页参数不合法")
+            offset = int(cursor or 0)
+            page = items[offset : offset + limit]
+            return {
+                "items": page,
+                "next_cursor": str(offset + len(page)) if len(page) == limit else None,
+            }
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/export-batches/{batch_id}")
+    async def get_export_batch(batch_id: str, _: CoreState = Depends(require_ui)) -> dict[str, Any]:
+        try:
+            return state.export_batches.get(batch_id)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/export-batches/{batch_id}/cancel")
+    async def cancel_export_batch(
+        batch_id: str, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        try:
+            return await state.export_batches.cancel(batch_id)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/export-batches/{batch_id}/retry")
+    async def retry_export_batch(
+        batch_id: str, request: ExportBatchRetryRequest, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        try:
+            return await state.export_batches.retry(
+                batch_id, request.directory_grant_id, request.export_batch_item_ids
+            )
         except DomainError as exc:
             raise _domain(exc) from exc
 

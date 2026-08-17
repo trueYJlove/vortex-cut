@@ -115,13 +115,16 @@ def test_render_and_export_dtos_redact_private_fields_and_stale(tmp_path: Path) 
             ),
         )
         db.execute(
-            "INSERT INTO render_artifacts VALUES "
+            "INSERT INTO render_artifacts(artifact_id,project_id,timeline_revision_id,kind,"
+            "render_plan_json,content_fingerprint,profile_id,toolchain_json,rendition_snapshot_id,"
+            "created_at) VALUES "
             "('a1','p1','r1','authoritative_preview','{}','sha256:content',"
-            "'preview-portrait-v1','{}','now')"
+            "'preview-portrait-v1','{}',NULL,'now')"
         )
         db.execute(
-            "INSERT INTO export_records VALUES "
-            "('e1','p1','r1','a1','export-portrait-v1',?,'结果.mp4','now')",
+            "INSERT INTO export_records(id,project_id,timeline_revision_id,artifact_id,profile_id,"
+            "destination_uri,destination_display_name,export_batch_item_id,created_at) VALUES "
+            "('e1','p1','r1','a1','export-portrait-v1',?,'结果.mp4',NULL,'now')",
             (artifact_path.as_uri(),),
         )
     service = RenderService(  # type: ignore[arg-type]

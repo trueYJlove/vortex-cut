@@ -73,11 +73,12 @@ function runPackageWin(root: string, environment: Record<string, string>) {
 describe("Windows 安装包验收脚本安全边界", () => {
   it("支持隔离的输出与报告路径，并拒绝覆盖现有目标", () => {
     expect(packageWin).toContain("AIVS_PACKAGE_OUTPUT_ROOT"); expect(packageWin).toContain("AIVS_PACKAGE_REPORT");
+    expect(packageWin).toContain('if (process.platform === "win32") delete env.PSModulePath;');
     expect(packageWin).toContain("must be an absolute, new output directory"); expect(packageWin).toContain("must be an absolute, new report file");
     expect(packageWin).toContain("Package output directory already exists"); expect(packageWin).toContain("Package report already exists");
   });
 
-  it("为仓库外输出生成七组绝对资源来源，并保持固定安装包相对目标", () => {
+  it("为仓库外输出生成九组绝对资源来源，并保持固定安装包相对目标", () => {
     const root = temporaryRoot(); const capture = join(root, "builder-config.json");
     const { child, output } = runPackageWin(root, { AIVS_PACKAGE_TEST_CAPTURE_CONFIG: capture });
     expect(child.status).toBe(0);
@@ -89,10 +90,15 @@ describe("Windows 安装包验收脚本安全边界", () => {
       files: ["out", "package.json"]
     });
     expect(captured.builder_config.extends).toBeUndefined();
-    expect(captured.extra_resources).toHaveLength(7);
+    expect(captured.extra_resources).toHaveLength(9);
     expect(captured.extra_resources.map((entry: { to: string }) => entry.to)).toEqual([
-      "core/aivs-core", "ffmpeg/win-x64", "licenses", "manifests", "model-manifests", "recipes", "fonts"
+      "core/aivs-core", "ffmpeg/win-x64", "licenses", "manifests", "model-manifests", "recipes",
+      "platform-presets", "renditions", "fonts"
     ]);
+    expect(packageWin).toContain("PACKAGE_REQUIRED_PLATFORM_PRESET_MISSING");
+    expect(packageWin).toContain("PACKAGE_REQUIRED_RENDITION_PRESET_MISSING");
+    expect(captured.extra_resources.find((entry: { to: string }) => entry.to === "platform-presets").filter).toEqual(["**/*.json"]);
+    expect(captured.extra_resources.find((entry: { to: string }) => entry.to === "renditions").filter).toEqual(["**/*.json"]);
     for (const entry of captured.extra_resources as Array<{ from: string; to: string }>) {
       expect(entry.from).toMatch(/^[A-Za-z]:[\\/]/);
       expect(entry.from.startsWith(output)).toBe(false);
@@ -324,6 +330,18 @@ describe("Windows 安装包验收脚本安全边界", () => {
     }
   });
 
+  it("常规安装包验证会校验 Stage 3A 目标化字幕样式资源", () => {
+    const packageVerify = readFileSync(packageVerifyScript, "utf8");
+    expect(packageVerify).toContain("fonts/caption-styles-v2.json");
+    expect(packageVerify).toContain("PACKAGE_CAPTION_STYLES_INVALID");
+    expect(packageVerify).toContain("caption_style_version !== 2");
+    expect(packageVerify).toContain("portrait-9x16-v1");
+    expect(packageVerify).toContain("landscape-16x9-v1");
+    expect(packageWin).toContain("PACKAGE_CAPTION_STYLES_INVALID");
+  });
+  it("显式包目录优先于遗留默认报告", () => {
+    expect(readFileSync(packageVerifyScript, "utf8")).toContain("process.env.AIVS_PACKAGE_REPORT ?? (explicitPackageDir ? undefined : defaultReport)");
+  });
   it("package:verify 对基础资源缺失输出离散安全码", () => {
     const root = temporaryRoot(); const report = builtReport(root);
     const child = runPackageVerify(root, report);
@@ -336,17 +354,20 @@ describe("Windows 安装包验收脚本安全边界", () => {
     expect(realVerify).toContain("AIVS_PACKAGE_REAL_EVIDENCE_ROOT"); expect(realVerify).toContain("schema_version: 2");
     expect(realVerify).toContain("writeFailureEvidence"); expect(realVerify).toContain("await main().catch(terminate)");
     expect(realVerify).toContain("PACKAGE_COMPONENT_VERIFY_FAILED"); expect(realVerify).toContain("AIVS_PACKAGE_DIR: packageRoot"); expect(realVerify).toContain("scripts/verify-package.mjs");
+    expect(realVerify).toContain("AIVS_E2E_EXPORT_DIRECTORY: workRun");
+    expect(realVerify).toContain("EXPORT_BATCH_PARTIAL_FAILED"); expect(realVerify).toContain("EXPORT_BATCH_RETRY_FAILED");
     expect(realVerify).toContain("delete verifierEnv.AIVS_PACKAGE_REPORT"); expect(realVerify).not.toContain("[\"package:verify\"]");
     expect(realVerify).toContain("PREVIEW_UI_NOT_READY"); expect(realVerify).toContain("PREVIEW_JOB_NOT_CREATED");
     expect(realVerify).toContain("ELECTRON_WINDOW_TITLE_MISMATCH");
     expect(realVerify).toContain("({ BrowserWindow }, expectedTitle) => BrowserWindow.getAllWindows()[0]?.getTitle() === expectedTitle");
-    expect(realVerify).toContain("expectedWindowTitle\n      );");
+    expect(realVerify).toMatch(/expectedWindowTitle\r?\n\s+\);/);
     expect(realVerify).toContain('window_title: { expected: expectedWindowTitle, matches_expected: true }');
     expect(realVerify).toContain("PREVIEW_PROJECT_SYNC_FAILED"); expect(realVerify).toContain("preview_project_synced");
     expect(realVerify).toContain("preview_project_reset"); expect(realVerify).toContain("preview_project_selected");
     const resetIndex = realVerify.indexOf('selectOption(""'); const selectIndex = realVerify.indexOf("selectOption(projectId");
     expect(resetIndex).toBeGreaterThan(-1); expect(selectIndex).toBeGreaterThan(resetIndex);
     expect(realVerify).toContain("PREVIEW_JOB_FAILED"); expect(realVerify).toContain("PREVIEW_RECORD_MISSING");
+    expect(realVerify).toContain('getByRole("button", { name: "导出", exact: true })');
     expect(realVerify).toContain("pollRestartRead"); expect(realVerify).toContain("pollRestartList");
     expect(realVerify).toContain("RESTART_TIMELINE_UNAVAILABLE"); expect(realVerify).toContain("RESTART_MODELS_UNAVAILABLE");
     expect(realVerify).toContain("RESTART_REVISION_MISMATCH"); expect(realVerify).toContain("RESTART_PREVIEW_MISSING"); expect(realVerify).toContain("RESTART_EXPORT_MISSING");

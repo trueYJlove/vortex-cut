@@ -93,6 +93,63 @@ def build_ass(
     )
 
 
+def build_rendition_ass(
+    captions: list[dict[str, Any]], bundle: dict[str, Any], rendition_style: dict[str, Any]
+) -> str:
+    """Build ASS with the immutable style resolved into a rendition snapshot."""
+    try:
+        play_res = rendition_style["play_res"]
+        presets = rendition_style["presets"]
+        width, height = int(play_res["width"]), int(play_res["height"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise DomainError("RENDITION_SNAPSHOT_INVALID", "字幕样式不合法") from exc
+    family = str(bundle["family"])
+    styles: list[str] = []
+    for preset_id in ("default-bottom", "game-safe-bottom", "high-contrast"):
+        value = presets.get(preset_id)
+        if not isinstance(value, dict):
+            raise DomainError("RENDITION_SNAPSHOT_INVALID", "字幕样式不完整")
+        styles.append(
+            "Style: "
+            f"{preset_id},{family},{int(value['font_size'])},{value['primary_color']},&H000000FF,"
+            f"{value['outline_color']},{value['back_color']},0,0,0,0,100,100,0,0,"
+            f"{int(value['border_style'])},{int(value['outline'])},{int(value['shadow'])},2,"
+            f"{int(value['margin_l'])},{int(value['margin_r'])},{int(value['margin_v'])},1"
+        )
+    events = []
+    for caption in captions:
+        preset_id = caption.get("preset_id")
+        if preset_id not in presets:
+            raise DomainError("RENDITION_SNAPSHOT_INVALID", "字幕预设不合法")
+        events.append(
+            "Dialogue: 0,"
+            f"{_ass_time(caption['start_us'])},{_ass_time(caption['end_us'])},{preset_id},,0,0,0,,"
+            f"{escape_ass_text(caption['text'])}"
+        )
+    return "\n".join(
+        [
+            "[Script Info]",
+            "ScriptType: v4.00+",
+            f"PlayResX: {width}",
+            f"PlayResY: {height}",
+            "WrapStyle: 0",
+            "ScaledBorderAndShadow: yes",
+            "YCbCr Matrix: TV.709",
+            "",
+            "[V4+ Styles]",
+            "Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,"
+            "BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,"
+            "Shadow,Alignment,MarginL,MarginR,MarginV,Encoding",
+            *styles,
+            "",
+            "[Events]",
+            "Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text",
+            *events,
+            "",
+        ]
+    )
+
+
 def _ass_time(value_us: int) -> str:
     centiseconds = max(0, (int(value_us) + 5_000) // 10_000)
     hours, remainder = divmod(centiseconds, 360_000)

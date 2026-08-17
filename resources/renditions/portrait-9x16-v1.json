@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "rendition_preset_id": "portrait-9x16-v1",
+  "display_name": "竖屏 9:16",
+  "preset_version": 1,
+  "aspect_ratio": "9:16",
+  "preview_profile": {"profile_id":"preview-portrait-9x16-v1","width":540,"height":960,"fps_num":30,"fps_den":1,"video_codec":"h264","audio_codec":"aac","audio_sample_rate":48000,"pixel_format":"yuv420p","faststart":true},
+  "export_profile": {"profile_id":"export-portrait-9x16-v1","width":1080,"height":1920,"fps_num":30,"fps_den":1,"video_codec":"h264","audio_codec":"aac","audio_sample_rate":48000,"pixel_format":"yuv420p","faststart":true},
+  "allowed_layout_policies": ["preserve_timeline","fit_all","crop_fill_all","blurred_background_all"],
+  "caption_style_ref": "caption-styles-v2.json",
+  "filename_tag": "portrait",
+  "document_sha256": "2b666f670126c7e22743b3a3af02f2c0b653600e87c512d22086994453c80eb1"
+}

@@ -6,9 +6,10 @@ import { join, resolve } from "node:path";
 const VERIFY_CODES = new Set([
   "PACKAGE_REPORT_UNREADABLE", "PACKAGE_REPORT_INVALID", "PACKAGE_REQUIRED_SIDECAR_MISSING", "PACKAGE_REQUIRED_FFMPEG_MISSING",
   "PACKAGE_REQUIRED_LICENSE_MISSING", "PACKAGE_REQUIRED_COMPONENT_MANIFEST_MISSING", "PACKAGE_REQUIRED_MODEL_MANIFEST_MISSING",
-  "PACKAGE_REQUIRED_RECIPE_MISSING", "PACKAGE_REQUIRED_FONT_MISSING", "PACKAGE_COMPONENT_MANIFEST_INVALID",
+  "PACKAGE_REQUIRED_RECIPE_MISSING", "PACKAGE_REQUIRED_PLATFORM_PRESET_MISSING", "PACKAGE_REQUIRED_RENDITION_PRESET_MISSING",
+  "PACKAGE_REQUIRED_FONT_MISSING", "PACKAGE_COMPONENT_MANIFEST_INVALID",
   "PACKAGE_COMPONENT_LICENSE_INVALID", "PACKAGE_COMPONENT_PIN_INVALID", "PACKAGE_COMPONENT_HASH_MISMATCH", "PACKAGE_FONT_BUNDLE_INVALID",
-  "PACKAGE_FONT_BUNDLE_FILE_MISSING", "PACKAGE_FONT_BUNDLE_HASH_MISMATCH", "PACKAGE_CAPTION_PRESETS_INVALID",
+  "PACKAGE_FONT_BUNDLE_FILE_MISSING", "PACKAGE_FONT_BUNDLE_HASH_MISMATCH", "PACKAGE_CAPTION_PRESETS_INVALID", "PACKAGE_CAPTION_STYLES_INVALID",
   "PACKAGE_FFMPEG_FILTER_INVALID", "PACKAGE_MODEL_MANIFEST_INVALID", "PACKAGE_MODEL_WEIGHTS_EMBEDDED",
   "PACKAGE_RECIPE_MANIFEST_INVALID", "PACKAGE_VERIFY_UNEXPECTED"
 ]);
@@ -18,9 +19,12 @@ process.on("uncaughtException", error => { console.error(safeCode(error)); proce
 
 const root = resolve(process.cwd());
 const defaultReport = join(root, "../../build/reports/windows-package-latest.json");
-const reportPath = process.env.AIVS_PACKAGE_REPORT ?? defaultReport;
+const explicitPackageDir = process.env.AIVS_PACKAGE_DIR;
+// A caller that passes a concrete package directory must not be redirected to
+// an unrelated legacy report left by a previous packaging run.
+const reportPath = process.env.AIVS_PACKAGE_REPORT ?? (explicitPackageDir ? undefined : defaultReport);
 let reportedPackageDir;
-if (existsSync(reportPath)) {
+if (reportPath && existsSync(reportPath)) {
   let report;
   try { report = JSON.parse(readFileSync(reportPath, "utf8")); } catch { fail("PACKAGE_REPORT_UNREADABLE"); }
   if (report.schema_version !== 1 || report.status !== "built" || typeof report.package_root !== "string") {
@@ -40,8 +44,14 @@ const required = [
   "manifests/components.json",
   "model-manifests",
   "recipes/manifest.json",
+  "platform-presets/manifest.json",
+  "platform-presets/generic.json",
+  "renditions/manifest.json",
+  "renditions/portrait-9x16-v1.json",
+  "renditions/landscape-16x9-v1.json",
   "fonts/bundle.json",
   "fonts/caption-presets.json",
+  "fonts/caption-styles-v2.json",
   "fonts/noto-sans-sc/NotoSansCJKsc-VF.ttf",
   "fonts/noto-sans-sc/OFL.txt"
 ];
@@ -53,6 +63,8 @@ if (missing.length) {
         : missing.some(item => item.startsWith("manifests/")) ? "PACKAGE_REQUIRED_COMPONENT_MANIFEST_MISSING"
           : missing.some(item => item.startsWith("model-manifests")) ? "PACKAGE_REQUIRED_MODEL_MANIFEST_MISSING"
             : missing.some(item => item.startsWith("recipes/")) ? "PACKAGE_REQUIRED_RECIPE_MISSING"
+              : missing.some(item => item.startsWith("platform-presets/")) ? "PACKAGE_REQUIRED_PLATFORM_PRESET_MISSING"
+                : missing.some(item => item.startsWith("renditions/")) ? "PACKAGE_REQUIRED_RENDITION_PRESET_MISSING"
               : "PACKAGE_REQUIRED_FONT_MISSING";
   fail(code);
 }
@@ -91,6 +103,21 @@ if (fontHash.toLowerCase() !== fontBundle.sha256.toLowerCase()) fail("PACKAGE_FO
 let captionPresets;
 try { captionPresets = JSON.parse(readFileSync(join(packageDir, "fonts/caption-presets.json"), "utf8")); } catch { fail("PACKAGE_CAPTION_PRESETS_INVALID"); }
 if (!Number.isInteger(captionPresets.preset_version) || captionPresets.preset_version < 1 || !captionPresets.presets || typeof captionPresets.presets !== "object") fail("PACKAGE_CAPTION_PRESETS_INVALID");
+let captionStyles;
+try { captionStyles = JSON.parse(readFileSync(join(packageDir, "fonts/caption-styles-v2.json"), "utf8")); } catch { fail("PACKAGE_CAPTION_STYLES_INVALID"); }
+const expectedRenditions = ["portrait-9x16-v1", "landscape-16x9-v1"];
+const expectedCaptionPresets = ["default-bottom", "game-safe-bottom", "high-contrast"];
+if (captionStyles?.schema_version !== 1 || captionStyles?.caption_style_version !== 2
+  || !captionStyles.renditions || typeof captionStyles.renditions !== "object"
+  || Object.keys(captionStyles.renditions).length !== expectedRenditions.length
+  || expectedRenditions.some(id => {
+    const rendition = captionStyles.renditions[id];
+    return !rendition || typeof rendition !== "object" || !rendition.play_res || typeof rendition.play_res !== "object"
+      || !Number.isInteger(rendition.play_res.width) || !Number.isInteger(rendition.play_res.height)
+      || !rendition.presets || typeof rendition.presets !== "object"
+      || Object.keys(rendition.presets).length !== expectedCaptionPresets.length
+      || expectedCaptionPresets.some(presetId => !rendition.presets[presetId] || typeof rendition.presets[presetId] !== "object");
+  })) fail("PACKAGE_CAPTION_STYLES_INVALID");
 
 const ffmpegPath = join(packageDir, "ffmpeg/win-x64/ffmpeg.exe");
 let filterOutput;

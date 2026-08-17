@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Archive, ChevronLeft, ChevronRight, Download, Eye, FileAudio, FileText, FolderPlus, History, ImagePlus, Lock, LockOpen, MapPin, Pause, Play, Plus, Redo2, RefreshCw, RotateCcw, Save, Scissors, Sparkles, Square, Trash2, Undo2, Video, Volume2, VolumeX, X } from "lucide-react";
-import type { Asset, AssetKind, AssetPresentation, BriefInput, CaptionPresetId, EncoderMode, EgressPreview, Job, ModelDetail, ModelSummary, Project, ProviderConfig, TimelineCaption, TimelineClip, TimelineDiff, TimelineDocument, TimelineLayout, TimelinePatchEgressPreview, TimelinePatchOperation, TimelinePatchProposal, TimelineRevisionSummary, TimelineState, Transcript, TranscriptSegment, TranscriptSummary } from "@aivideo/contracts";
-import type { AuthoritativePreviewPresentation, ExportRecordPresentation } from "../../electron/preload/index.js";
+import type { Asset, AssetKind, AssetPresentation, BriefInput, CaptionPresetId, DirectoryGrant, EncoderMode, EgressPreview, ExportBatch, Job, LayoutPolicy, ModelDetail, ModelSummary, PlatformPreset, Project, ProviderConfig, RenditionPreset, TimelineCaption, TimelineClip, TimelineDiff, TimelineDocument, TimelineLayout, TimelinePatchEgressPreview, TimelinePatchOperation, TimelinePatchProposal, TimelineRevisionSummary, TimelineState, Transcript, TranscriptSegment, TranscriptSummary } from "@aivideo/contracts";
+import type { AuthoritativePreviewPresentation, ExportRecordPresentation, RenditionPreviewPresentation } from "../../electron/preload/index.js";
 import { CONTRACT_VERSION } from "@aivideo/contracts";
 
 type SaveState = "已保存" | "保存中" | "保存失败" | "草稿冲突";
@@ -16,6 +16,8 @@ const modelStatusLabels: Record<ModelSummary["status"], string> = { unavailable:
 const jobStatusLabels: Record<Job["status"], string> = { queued: "排队中", running: "运行中", succeeded: "已完成", failed: "失败", cancelling: "取消中", cancelled: "已取消", interrupted: "已中断" };
 const formatBytes = (bytes: number) => bytes < 1024 ? `${bytes} B` : bytes < 1024 ** 2 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 ** 2).toFixed(1)} MB`;
 const isTranscribable = (asset: Asset) => (asset.kind === "video" || asset.kind === "audio") && asset.availability === "available";
+type RenditionTarget = { key: string; platform_preset_id: string; rendition_preset_id: string; layout_policy: LayoutPolicy };
+const layoutPolicies: { value: LayoutPolicy; label: string }[] = [{ value: "preserve_timeline", label: "沿用时间线" }, { value: "fit_all", label: "完整适配" }, { value: "crop_fill_all", label: "裁切填满" }, { value: "blurred_background_all", label: "模糊背景" }];
 
 function IconButton({ label, disabled, onClick, children }: { label: string; disabled?: boolean; onClick: () => void; children: React.ReactNode }) {
   return <button className="icon-btn" title={label} aria-label={label} disabled={disabled} onClick={onClick}>{children}</button>;
@@ -74,6 +76,14 @@ export function App() {
   const [patchJob, setPatchJob] = useState<Job>();
   const [patchError, setPatchError] = useState("");
   const [patchCapabilityTesting, setPatchCapabilityTesting] = useState(false);
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [platformPresets, setPlatformPresets] = useState<PlatformPreset[]>([]);
+  const [renditionPresets, setRenditionPresets] = useState<RenditionPreset[]>([]);
+  const [renditionTargets, setRenditionTargets] = useState<RenditionTarget[]>([]);
+  const [renditionPreviews, setRenditionPreviews] = useState<RenditionPreviewPresentation[]>([]);
+  const [directoryGrant, setDirectoryGrant] = useState<DirectoryGrant>();
+  const [activeBatch, setActiveBatch] = useState<ExportBatch>();
+  const [batchError, setBatchError] = useState("");
   const [revisionOpen, setRevisionOpen] = useState(false);
   const [revisions, setRevisions] = useState<TimelineRevisionSummary[]>([]);
   const [revisionPair, setRevisionPair] = useState({ base: "", target: "" });
@@ -353,6 +363,46 @@ export function App() {
       trackRenderJob(result.job);
     } catch (error) { setNotice(String(error)); }
   };
+  const targetPreview = (target: RenditionTarget) => renditionPreviews.find(item => item.preview.platform_preset_id === target.platform_preset_id && item.preview.rendition_preset_id === target.rendition_preset_id && item.preview.layout_policy === target.layout_policy && item.preview.timeline_revision_id === timeline?.current_revision.timeline_revision_id && item.preview.status === "ready");
+  const openExportBatch = async () => {
+    if (!project || !timeline || timeline.draft) { setNotice("请先提交或丢弃草稿，再创建多平台导出。"); return; }
+    try {
+      setBatchError(""); setBatchOpen(true);
+      const [platforms, renditions, previews, batches] = await Promise.all([window.desktop.listPlatformPresets(), window.desktop.listRenditionPresets(), window.desktop.listRenditionPreviews({ project_id: project.project_id, limit: 100 }), window.desktop.listExportBatches({ project_id: project.project_id, limit: 20 })]);
+      setPlatformPresets(platforms.items); setRenditionPresets(renditions.items); setRenditionPreviews(previews.items); setActiveBatch(batches.items[0]);
+      if (!renditionTargets.length && platforms.items[0]) setRenditionTargets([{ key: `${platforms.items[0].platform_preset_id}:${platforms.items[0].default_rendition_id}`, platform_preset_id: platforms.items[0].platform_preset_id, rendition_preset_id: platforms.items[0].default_rendition_id, layout_policy: "preserve_timeline" }]);
+    } catch { setBatchError("无法加载平台预设或批次状态。"); }
+  };
+  const addTarget = () => {
+    const platform = platformPresets[0]; if (!platform || renditionTargets.length >= 8) return;
+    const available = platform.allowed_rendition_ids.find(id => !renditionTargets.some(target => target.platform_preset_id === platform.platform_preset_id && target.rendition_preset_id === id));
+    if (!available) return;
+    setRenditionTargets(items => [...items, { key: `${platform.platform_preset_id}:${available}`, platform_preset_id: platform.platform_preset_id, rendition_preset_id: available, layout_policy: "preserve_timeline" }]);
+  };
+  const updateTarget = (key: string, update: Partial<RenditionTarget>) => setRenditionTargets(items => items.map(item => item.key === key ? { ...item, ...update } : item));
+  const generateRenditionPreview = async (target: RenditionTarget) => {
+    if (!project || !timeline) return;
+    try {
+      const result = await window.desktop.createRenditionPreview({ project_id: project.project_id, preview: { timeline_revision_id: timeline.current_revision.timeline_revision_id, platform_preset_id: target.platform_preset_id as never, rendition_preset_id: target.rendition_preset_id as never, layout_policy: target.layout_policy, encoder_mode: encoderMode } });
+      if (result.preview) setRenditionPreviews(items => [result.preview!, ...items.filter(item => item.preview.render_artifact_id !== result.preview!.preview.render_artifact_id)]);
+      if (result.job) trackRenderJob(result.job);
+    } catch (error) { setBatchError(error instanceof Error ? error.message : "生成权威预览失败。"); }
+  };
+  const chooseBatchDirectory = async () => { if (!project) return; try { setDirectoryGrant((await window.desktop.chooseExportDirectory(project.project_id)) ?? undefined); } catch { setBatchError("选择导出目录失败。"); } };
+  const createBatch = async () => {
+    if (!project || !timeline || !directoryGrant || renditionTargets.some(target => !targetPreview(target))) return;
+    try {
+      const result = await window.desktop.createExportBatch({ project_id: project.project_id, batch: { timeline_revision_id: timeline.current_revision.timeline_revision_id, directory_grant_id: directoryGrant.directory_grant_id, items: renditionTargets.map(target => ({ rendition_snapshot_id: targetPreview(target)!.preview.rendition_snapshot_id, preview_artifact_id: targetPreview(target)!.preview.render_artifact_id, encoder_mode: encoderMode })) } });
+      setActiveBatch(result.batch); setDirectoryGrant(undefined); result.jobs.forEach(trackRenderJob);
+    } catch (error) { setBatchError(error instanceof Error ? error.message : "创建批次失败。"); }
+  };
+  const retryBatchItems = async () => {
+    if (!activeBatch || !project) return;
+    const retryable = activeBatch.items.filter(item => ["failed", "cancelled", "interrupted"].includes(item.status));
+    if (!retryable.length) return;
+    try { const grant = await window.desktop.chooseExportDirectory(project.project_id); if (!grant) return; const result = await window.desktop.retryExportBatch({ batch_id: activeBatch.export_batch_id, retry: { directory_grant_id: grant.directory_grant_id, export_batch_item_ids: retryable.map(item => item.export_batch_item_id) } }); setActiveBatch(result.batch); result.jobs.forEach(trackRenderJob); }
+    catch (error) { setBatchError(error instanceof Error ? error.message : "重试批次失败。"); }
+  };
 
   const previewClass = selectedClip?.layout ?? working?.clips[0]?.layout ?? "fit";
   const authoritativePreview = previews.find(item => item.preview.timeline_revision_id === timeline?.current_revision.timeline_revision_id) ?? previews[0];
@@ -393,7 +443,8 @@ export function App() {
       <aside className="properties-pane">{selectedClip ? <ClipProperties clip={selectedClip} locked={Boolean(working?.locked_elements?.includes(selectedClip.clip_id))} onPatch={patchTimeline} onDraft={queueDraft} working={working!} /> : selectedCaption ? <CaptionProperties caption={selectedCaption} locked={Boolean(selectedCaption.source_clip_id && working?.locked_elements?.includes(selectedCaption.source_clip_id))} onPatch={patchTimeline} onDraft={queueDraft} working={working!} /> : <div className="properties-empty"><strong>属性</strong><p>选择 V1 片段或 C1 字幕后编辑。</p></div>}</aside>
     </section>
     <TimelinePanel document={working} selection={selection} setSelection={setSelection} onPatch={patchTimeline} />
-    <footer><button className="ai-entry" disabled={!project} onClick={() => void openAi()}>AI 粗剪</button><button className="ai-entry" disabled={!timeline} onClick={() => void openPatch()}><Sparkles />AI 修改</button><button className="ai-entry" disabled={!timeline} onClick={() => void openRevisionCompare()}><History />版本比较</button><button className="ai-entry" disabled={!aiForm.provider_id} onClick={() => void deleteAiSecret()}>删除当前 Provider 密钥</button>{CONTRACT_VERSION} · 权威预览与最终导出均由冻结 Timeline Revision 生成。</footer>
+    <footer><button className="ai-entry" disabled={!project || !timeline} onClick={() => void openExportBatch()}><Download />多平台导出</button><button className="ai-entry" disabled={!project} onClick={() => void openAi()}>AI 粗剪</button><button className="ai-entry" disabled={!timeline} onClick={() => void openPatch()}><Sparkles />AI 修改</button><button className="ai-entry" disabled={!timeline} onClick={() => void openRevisionCompare()}><History />版本比较</button><button className="ai-entry" disabled={!aiForm.provider_id} onClick={() => void deleteAiSecret()}>删除当前 Provider 密钥</button>{CONTRACT_VERSION} · 权威预览与最终导出均由冻结 Timeline Revision 生成。</footer>
+    {batchOpen && <div className="modal-backdrop"><section className="modal export-batch-modal" role="dialog" aria-modal="true" aria-labelledby="export-batch-title"><div className="modal-heading"><div><h2 id="export-batch-title">多平台导出</h2><p>平台与画幅独立选择；仅同一 Revision 的权威预览可进入批次。</p></div><IconButton label="关闭多平台导出" onClick={() => setBatchOpen(false)}><X /></IconButton></div>{batchError && <p className="ai-status" role="status">{batchError}</p>}<div className="rendition-targets">{renditionTargets.map(target => { const platform = platformPresets.find(item => item.platform_preset_id === target.platform_preset_id); const rendition = renditionPresets.find(item => item.rendition_preset_id === target.rendition_preset_id); const preview = targetPreview(target); return <section key={target.key} className="rendition-target"><label>平台<select aria-label="导出平台" value={target.platform_preset_id} onChange={event => { const next = platformPresets.find(item => item.platform_preset_id === event.target.value); if (next) updateTarget(target.key, { platform_preset_id: next.platform_preset_id, rendition_preset_id: next.default_rendition_id, key: `${next.platform_preset_id}:${next.default_rendition_id}` }); }}><option value="">选择平台</option>{platformPresets.map(item => <option value={item.platform_preset_id} key={item.platform_preset_id}>{item.display_name}</option>)}</select></label><label>画幅<select aria-label="导出画幅" value={target.rendition_preset_id} onChange={event => updateTarget(target.key, { rendition_preset_id: event.target.value, key: `${target.platform_preset_id}:${event.target.value}` })}>{platform?.allowed_rendition_ids.map(id => <option value={id} key={id}>{renditionPresets.find(item => item.rendition_preset_id === id)?.display_name ?? id}</option>)}</select></label><label>布局<select aria-label="目标布局策略" value={target.layout_policy} onChange={event => updateTarget(target.key, { layout_policy: event.target.value as LayoutPolicy })}>{layoutPolicies.map(item => <option value={item.value} key={item.value}>{item.label}</option>)}</select></label><div className="target-summary"><small>{rendition ? `${rendition.export.width}×${rendition.export.height} · H.264/AAC · 30fps` : "预设加载中"}</small><small>{preview ? `权威预览已就绪${preview.preview.warnings.length ? ` · ${preview.preview.warnings.join("、")}` : ""}` : "需要本目标权威预览"}</small></div><div className="target-actions"><button onClick={() => void generateRenditionPreview(target)}>{preview ? "重新生成权威预览" : "生成权威预览"}</button><button disabled={renditionTargets.length === 1} onClick={() => setRenditionTargets(items => items.filter(item => item.key !== target.key))}>移除</button></div></section>; })}</div><div className="modal-actions"><button disabled={renditionTargets.length >= 8 || !platformPresets.length} onClick={addTarget}>添加目标</button><button onClick={() => void chooseBatchDirectory()}>{directoryGrant ? `输出目录：${directoryGrant.display_name}` : "选择输出目录"}</button><button disabled={!directoryGrant || !renditionTargets.length || renditionTargets.some(target => !targetPreview(target))} onClick={() => void createBatch()}>创建批次</button></div>{activeBatch && <section className="batch-status"><h3>批次 {activeBatch.status}</h3><p>目录：{activeBatch.directory_display_name}</p>{activeBatch.items.map(item => <div key={item.export_batch_item_id}><strong>{item.rendition_snapshot.platform_preset_id} · {item.rendition_snapshot.rendition_preset_id}</strong><small>{item.status} · {item.progress === null ? "--" : `${Math.round(item.progress * 100)}%`}{item.destination_display_name ? ` · ${item.destination_display_name}` : ""}{item.error_code ? ` · ${item.error_code}` : ""}</small></div>)}<div className="modal-actions">{["queued", "running"].includes(activeBatch.status) && <button onClick={() => void window.desktop.cancelExportBatch(activeBatch.export_batch_id).then(setActiveBatch).catch(() => setBatchError("取消批次失败。"))}>取消批次</button>}{activeBatch.items.some(item => ["failed", "cancelled", "interrupted"].includes(item.status)) && <button onClick={() => void retryBatchItems()}>重新授权并重试失败项</button>}</div></section>}</section></div>}
     {confirmModel && <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-labelledby="model-confirm-title"><div className="modal-heading"><h2 id="model-confirm-title">确认下载本地模型</h2><IconButton label="关闭" onClick={() => setConfirmModel(undefined)}><X /></IconButton></div><h3>{confirmModel.display_name}</h3><p>{confirmModel.purpose}</p><dl><dt>下载大小</dt><dd>{formatBytes(confirmModel.model_size_bytes)}</dd><dt>许可证</dt><dd>{confirmModel.license.name}</dd><dt>隐私</dt><dd>模型在本机运行，不上传媒体或转录正文。</dd></dl>{confirmModel.license.acceptance_required && <label className="check-line"><input type="checkbox" checked={licenseAccepted} onChange={event => setLicenseAccepted(event.target.checked)} />我已阅读并接受该许可证</label>}<div className="modal-actions"><button onClick={() => setConfirmModel(undefined)}>暂不下载</button><button disabled={confirmModel.license.acceptance_required && !licenseAccepted} onClick={() => void downloadModel()}>确认并下载</button></div></section></div>}
     {transcriptionAsset && <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-labelledby="transcription-title"><div className="modal-heading"><h2 id="transcription-title">创建本地转录</h2><IconButton label="关闭" onClick={() => setTranscriptionAsset(undefined)}><X /></IconButton></div><p title={transcriptionAsset.display_name}>{transcriptionAsset.display_name}</p><label>语言<select value={language} onChange={event => setLanguage(event.target.value)}><option value="auto">自动检测</option><option value="zh">中文</option><option value="en">English</option></select></label><label className="check-line"><input type="checkbox" checked={wordTimestamps} onChange={event => setWordTimestamps(event.target.checked)} />生成词级时间戳</label><div className="modal-actions"><button onClick={() => setTranscriptionAsset(undefined)}>取消</button><button onClick={() => void submitTranscription()}>开始转录</button></div></section></div>}
     {viewingTranscript && <div className="modal-backdrop"><section className="modal transcript-viewer" role="dialog" aria-modal="true" aria-labelledby="transcript-title"><div className="modal-heading"><div><h2 id="transcript-title">原始转录</h2><small>{viewingTranscript.language} · {viewingTranscript.provider} · {viewingTranscript.model_revision}</small></div><IconButton label="关闭" onClick={() => setViewingTranscript(undefined)}><X /></IconButton></div><div className="readonly-note">原始 ASR 结果只读。字幕修订不会覆盖这份记录。</div><div className="readonly-segments">{viewingTranscript.segments.map(segment => <div key={segment.segment_id}><span>{formatTime(segment.start_us)}-{formatTime(segment.end_us)}</span><p>{segment.text}</p></div>)}</div></section></div>}

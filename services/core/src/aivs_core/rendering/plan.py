@@ -77,6 +77,80 @@ class RenderPlanCompiler:
                 raise DomainError("TIMELINE_EMPTY", "空时间线不能渲染")
             return self._compile_document(db, revision_id, document, mode)
 
+    def compile_rendition(
+        self,
+        project_id: str,
+        timeline_revision_id: str,
+        rendition_snapshot_id: str,
+        mode: str,
+        *,
+        reject_draft: bool = False,
+    ) -> dict[str, Any]:
+        """Compile a target-specific plan from an immutable Stage 3A snapshot."""
+        if mode not in {"authoritative_preview", "final_export"}:
+            raise DomainError("RENDITION_SNAPSHOT_INVALID", "渲染模式不合法")
+        with self.database.connection() as db:
+            project = db.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
+            revision = db.execute(
+                "SELECT * FROM timeline_revisions WHERE id=?", (timeline_revision_id,)
+            ).fetchone()
+            snapshot_row = db.execute(
+                "SELECT * FROM rendition_snapshots WHERE id=?", (rendition_snapshot_id,)
+            ).fetchone()
+            if (
+                project is None
+                or revision is None
+                or snapshot_row is None
+                or project["status"] == "archived"
+            ):
+                raise DomainError("RENDITION_SNAPSHOT_INVALID", "输出快照引用不存在")
+            if (
+                revision["project_id"] != project_id
+                or snapshot_row["project_id"] != project_id
+                or snapshot_row["timeline_revision_id"] != timeline_revision_id
+                or snapshot_row["timeline_document_sha256"] != revision["document_sha256"]
+            ):
+                raise DomainError("RENDITION_SNAPSHOT_INVALID", "输出快照与 Timeline 不匹配")
+            if (
+                reject_draft
+                and db.execute(
+                    "SELECT 1 FROM timeline_drafts WHERE project_id=?", (project_id,)
+                ).fetchone()
+            ):
+                raise DomainError("RENDER_PLAN_INVALID", "存在未提交草稿，不能生成权威预览")
+            document = json_loads(revision["document_json"])
+            snapshot = json_loads(snapshot_row["snapshot_json"])
+            if (
+                not document.get("clips")
+                or snapshot.get("rendition_snapshot_id") != rendition_snapshot_id
+            ):
+                raise DomainError("RENDITION_SNAPSHOT_INVALID", "输出快照内容不合法")
+            plan = self._compile_document(db, timeline_revision_id, document, mode)
+            layouts = {
+                item["clip_id"]: item["layout"] for item in snapshot.get("resolved_segments", [])
+            }
+            if set(layouts) != {segment["clip_id"] for segment in plan["segments"]}:
+                raise DomainError("RENDITION_SNAPSHOT_INVALID", "输出快照片段不完整")
+            for segment in plan["segments"]:
+                segment["layout"] = layouts[segment["clip_id"]]
+            profile_key = "preview_profile" if mode == "authoritative_preview" else "export_profile"
+            profile = snapshot.get(profile_key)
+            if not isinstance(profile, dict):
+                raise DomainError("RENDITION_SNAPSHOT_INVALID", "输出 Profile 不合法")
+            plan["output"] = dict(profile)
+            plan["rendition_snapshot_id"] = rendition_snapshot_id
+            plan["rendition_snapshot_sha256"] = snapshot_row["snapshot_sha256"]
+            plan["timeline_document_sha256"] = revision["document_sha256"]
+            plan["captions"]["rendition_style"] = snapshot.get("caption_style_sha256")
+            semantics = content_semantics(plan) | {
+                "timeline_document_sha256": revision["document_sha256"],
+                "rendition_snapshot_sha256": snapshot_row["snapshot_sha256"],
+                "output": profile,
+            }
+            digest = hashlib.sha256(json_dumps(semantics).encode("utf-8")).hexdigest()
+            plan["content_fingerprint"] = f"sha256:{digest}"
+            return plan
+
     def _compile_document(
         self,
         db: sqlite3.Connection,

@@ -43,6 +43,7 @@ import type {
   , RenderArtifactId
   , Brief, BriefInput, Recipe, ProviderConfig, EgressPreview, CandidatePlan, ProviderCapabilityTestResult
   , TimelineDiff, TimelinePatchEgressPreview, TimelinePatchGeneration, TimelinePatchGenerationCreateResponse, TimelinePatchProposal, TimelinePatchCapabilityTestResponse
+  , PlatformPreset, RenditionPreset, RenditionPreview, RenditionPreviewCreateInput, DirectoryGrant, ExportBatch, ExportBatchCreateInput, ExportBatchRetryInput
 } from "@aivideo/contracts";
 
 export interface MediaSelection { grant: FileGrant; media: MediaInfo }
@@ -50,6 +51,7 @@ export interface DesktopRuntime { protocol_version: 1; status: "ready" }
 export interface AuthoritativePreviewPresentation { preview: AuthoritativePreview; media_url: string }
 export interface ExportRecordPresentation { export_record: ExportRecord; media_url: string }
 export interface RenderArtifactPresentation { artifact: RenderArtifact; media_url: string }
+export interface RenditionPreviewPresentation { preview: RenditionPreview; media_url: string }
 
 export interface DesktopApi {
   getRuntime: () => Promise<DesktopRuntime>;
@@ -113,6 +115,16 @@ export interface DesktopApi {
   chooseExportDestination: (projectId: ProjectId) => Promise<DestinationGrant | null>;
   createExport: (input: { project_id: ProjectId; export: { timeline_revision_id?: TimelineRevisionId; destination_grant_id: DestinationGrant["destination_grant_id"]; encoder_mode?: EncoderMode } }) => Promise<{ job: Job; export_record: ExportRecordPresentation | null }>;
   listExports: (input: { project_id: ProjectId; limit?: number; cursor?: string }) => Promise<{ items: ExportRecordPresentation[]; next_cursor: string | null }>;
+  listPlatformPresets: () => Promise<{ items: PlatformPreset[] }>;
+  listRenditionPresets: () => Promise<{ items: RenditionPreset[] }>;
+  createRenditionPreview: (input: { project_id: ProjectId; preview: RenditionPreviewCreateInput }) => Promise<{ job: Job | null; preview: RenditionPreviewPresentation | null; reused: boolean }>;
+  listRenditionPreviews: (input: { project_id: ProjectId; limit?: number; cursor?: string }) => Promise<{ items: RenditionPreviewPresentation[]; next_cursor: string | null }>;
+  chooseExportDirectory: (projectId: ProjectId) => Promise<DirectoryGrant | null>;
+  createExportBatch: (input: { project_id: ProjectId; batch: ExportBatchCreateInput }) => Promise<{ batch: ExportBatch; jobs: Job[] }>;
+  getExportBatch: (batchId: string) => Promise<ExportBatch>;
+  listExportBatches: (input: { project_id: ProjectId; limit?: number; cursor?: string }) => Promise<{ items: ExportBatch[]; next_cursor: string | null }>;
+  cancelExportBatch: (batchId: string) => Promise<ExportBatch>;
+  retryExportBatch: (input: { batch_id: string; retry: ExportBatchRetryInput }) => Promise<{ batch: ExportBatch; jobs: Job[] }>;
   getRenderArtifact: (artifactId: RenderArtifactId) => Promise<RenderArtifactPresentation>;
   openArtifact: (artifactId: string) => Promise<void>;
   openArtifactFolder: (artifactId: string) => Promise<void>;
@@ -182,6 +194,16 @@ const api: DesktopApi = {
   chooseExportDestination: projectId => ipcRenderer.invoke("export:choose-destination", projectId),
   createExport: input => ipcRenderer.invoke("export:create", input),
   listExports: input => ipcRenderer.invoke("export:list", input),
+  listPlatformPresets: () => ipcRenderer.invoke("preset:list-platforms"),
+  listRenditionPresets: () => ipcRenderer.invoke("preset:list-renditions"),
+  createRenditionPreview: input => ipcRenderer.invoke("rendition-preview:create", input),
+  listRenditionPreviews: input => ipcRenderer.invoke("rendition-preview:list", input),
+  chooseExportDirectory: projectId => ipcRenderer.invoke("export:choose-directory", projectId),
+  createExportBatch: input => ipcRenderer.invoke("export-batch:create", input),
+  getExportBatch: batchId => ipcRenderer.invoke("export-batch:get", batchId),
+  listExportBatches: input => ipcRenderer.invoke("export-batch:list", input),
+  cancelExportBatch: batchId => ipcRenderer.invoke("export-batch:cancel", batchId),
+  retryExportBatch: input => ipcRenderer.invoke("export-batch:retry", input),
   getRenderArtifact: artifactId => ipcRenderer.invoke("render-artifact:get", artifactId),
   openArtifact: artifactId => ipcRenderer.invoke("artifact:open", artifactId),
   openArtifactFolder: artifactId => ipcRenderer.invoke("artifact:folder", artifactId),

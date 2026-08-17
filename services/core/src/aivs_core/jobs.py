@@ -234,6 +234,43 @@ class JobService:
             )
         return self.get(job_id) or {"job_id": job_id, "status": "queued", "created_at": now}
 
+    def create_batch_render_in_transaction(
+        self,
+        db: Any,
+        project_id: str,
+        timeline_revision_id: str,
+        export_batch_item_id: str,
+        encoder: str,
+        input_data: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Insert a final-export job in the caller's batch preflight transaction."""
+        job_id, now = new_id(), utc_now()
+        db.execute(
+            "INSERT INTO jobs(id,project_id,kind,type,status,stage,progress,input_json,"
+            "encoder_requested,encoder_used,fallback_reason,timeline_revision_id,export_batch_item_id,"
+            "resource_class,attempt,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",  # noqa: E501
+            (
+                job_id,
+                project_id,
+                "final_export",
+                "final_export",
+                "queued",
+                "queued",
+                0,
+                json_dumps(input_data),
+                encoder,
+                encoder,
+                input_data.get("toolchain", {}).get("fallback_reason"),
+                timeline_revision_id,
+                export_batch_item_id,
+                "render",
+                1,
+                now,
+                now,
+            ),
+        )
+        return {"job_id": job_id, "status": "queued", "created_at": now}
+
     def create_candidate_generation(
         self, project_id: str, generation_id: str, invocation_id: str, payload_sha256: str
     ) -> dict[str, Any]:

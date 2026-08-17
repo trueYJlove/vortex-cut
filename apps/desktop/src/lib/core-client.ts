@@ -75,6 +75,10 @@ import {
   , type TimelinePatchProposal
   , parseTimelinePatchCapabilityTestResponse
   , type TimelinePatchCapabilityTestResponse
+  , isPlatformPreset, isRenditionPreset, isRenditionPreview, isExportBatch
+  , parseRenditionPreviewCreateResponse, parseExportBatchCreateResponse, parseExportBatchRetryResponse
+  , type PlatformPreset, type RenditionPreset, type RenditionPreviewPage, type RenditionPreviewCreateInput, type RenditionPreviewCreateResponse
+  , type ExportBatch, type ExportBatchPage, type ExportBatchCreateInput, type ExportBatchCreateResponse, type ExportBatchRetryInput, type ExportBatchRetryResponse
 } from "@aivideo/contracts";
 
 export class CoreApiError extends Error {
@@ -376,6 +380,39 @@ export class CoreClient {
   getRenderArtifact(artifactId: RenderArtifactId): Promise<RenderArtifact> {
     return this.request<unknown>(`${API_PREFIX}/render-artifacts/${encodeURIComponent(artifactId)}`).then(value => parseRenderArtifact(removeSensitiveFields(value)));
   }
+  listPlatformPresets(): Promise<{ items: PlatformPreset[] }> {
+    return this.request<unknown>(`${API_PREFIX}/platform-presets`).then(value => {
+      const cleaned = removeSensitiveFields(value) as { items?: unknown[] };
+      if (!Array.isArray(cleaned.items) || !cleaned.items.every(isPlatformPreset)) throw new Error("Invalid PlatformPresetPage");
+      return { items: cleaned.items };
+    });
+  }
+  listRenditionPresets(): Promise<{ items: RenditionPreset[] }> {
+    return this.request<unknown>(`${API_PREFIX}/rendition-presets`).then(value => {
+      const cleaned = removeSensitiveFields(value) as { items?: unknown[] };
+      if (!Array.isArray(cleaned.items) || !cleaned.items.every(isRenditionPreset)) throw new Error("Invalid RenditionPresetPage");
+      return { items: cleaned.items };
+    });
+  }
+  createRenditionPreview(projectId: ProjectId, input: RenditionPreviewCreateInput): Promise<RenditionPreviewCreateResponse> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/rendition-previews`, { method: "POST", body: JSON.stringify(input) }).then(value => parseRenditionPreviewCreateResponse(removeSensitiveFields(value)));
+  }
+  listRenditionPreviews(projectId: ProjectId, params: ListParams = {}): Promise<RenditionPreviewPage> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/rendition-previews${query(params)}`).then(value => {
+      const cleaned = removeSensitiveFields(value);
+      if (!isPage(cleaned, isRenditionPreview)) throw new Error("Invalid RenditionPreviewPage");
+      return cleaned;
+    });
+  }
+  createExportBatch(projectId: ProjectId, input: ExportBatchCreateInput): Promise<ExportBatchCreateResponse> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/export-batches`, { method: "POST", body: JSON.stringify(input) }).then(value => parseExportBatchCreateResponse(removeSensitiveFields(value)));
+  }
+  getExportBatch(batchId: string): Promise<ExportBatch> { return this.request<unknown>(`${API_PREFIX}/export-batches/${encodeURIComponent(batchId)}`).then(value => isExportBatch(removeSensitiveFields(value)) ? removeSensitiveFields(value) as ExportBatch : Promise.reject(new Error("Invalid ExportBatch"))); }
+  listExportBatches(projectId: ProjectId, params: ListParams = {}): Promise<ExportBatchPage> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/export-batches${query(params)}`).then(value => { const cleaned = removeSensitiveFields(value); if (!isPage(cleaned, isExportBatch)) throw new Error("Invalid ExportBatchPage"); return cleaned; });
+  }
+  cancelExportBatch(batchId: string): Promise<ExportBatch> { return this.request<unknown>(`${API_PREFIX}/export-batches/${encodeURIComponent(batchId)}/cancel`, { method: "POST" }).then(value => isExportBatch(removeSensitiveFields(value)) ? removeSensitiveFields(value) as ExportBatch : Promise.reject(new Error("Invalid ExportBatch"))); }
+  retryExportBatch(batchId: string, input: ExportBatchRetryInput): Promise<ExportBatchRetryResponse> { return this.request<unknown>(`${API_PREFIX}/export-batches/${encodeURIComponent(batchId)}/retry`, { method: "POST", body: JSON.stringify(input) }).then(value => parseExportBatchRetryResponse(removeSensitiveFields(value))); }
 
   subscribe(jobId: JobId, listener: JobListener): () => void {
     let set = this.listeners.get(jobId);

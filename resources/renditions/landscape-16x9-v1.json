@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "rendition_preset_id": "landscape-16x9-v1",
+  "display_name": "横屏 16:9",
+  "preset_version": 1,
+  "aspect_ratio": "16:9",
+  "preview_profile": {"profile_id":"preview-landscape-16x9-v1","width":960,"height":540,"fps_num":30,"fps_den":1,"video_codec":"h264","audio_codec":"aac","audio_sample_rate":48000,"pixel_format":"yuv420p","faststart":true},
+  "export_profile": {"profile_id":"export-landscape-16x9-v1","width":1920,"height":1080,"fps_num":30,"fps_den":1,"video_codec":"h264","audio_codec":"aac","audio_sample_rate":48000,"pixel_format":"yuv420p","faststart":true},
+  "allowed_layout_policies": ["preserve_timeline","fit_all","crop_fill_all","blurred_background_all"],
+  "caption_style_ref": "caption-styles-v2.json",
+  "filename_tag": "landscape",
+  "document_sha256": "0427be638e6a200d2e681258fb59465d2d5f05e9f4ae92c2b3a62e890dfe8f11"
+}

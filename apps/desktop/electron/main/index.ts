@@ -27,6 +27,17 @@ import {
   parsePreviewCreateResponse,
   parseExportCreateInput,
   parseExportCreateResponse,
+  parseRenditionPreviewCreateInput,
+  parseRenditionPreviewCreateResponse,
+  parseExportBatchCreateInput,
+  parseExportBatchCreateResponse,
+  parseExportBatch,
+  parseExportBatchRetryInput,
+  parseExportBatchRetryResponse,
+  isPlatformPreset,
+  isRenditionPreset,
+  isRenditionPreview,
+  isExportBatch,
   parseRenderArtifact,
   type Asset,
   type AssetKind,
@@ -48,6 +59,11 @@ import {
   , type PreviewCreateInput
   , type ExportCreateInput
   , type RenderArtifactId
+  , type RenditionPreview
+  , type RenditionPreviewCreateInput
+  , type ExportBatchCreateInput
+  , type ExportBatchRetryInput
+  , type ExportBatchId
 } from "@aivideo/contracts";
 
 protocol.registerSchemesAsPrivileged([{
@@ -118,6 +134,9 @@ async function previewPresentation(preview: AuthoritativePreview) {
 
 async function exportPresentation(exportRecord: ExportRecord) {
   return { export_record: exportRecord, media_url: await artifactMediaUrl(exportRecord.render_artifact_id) };
+}
+async function renditionPreviewPresentation(preview: RenditionPreview) {
+  return { preview, media_url: await artifactMediaUrl(preview.render_artifact_id) };
 }
 
 async function assetPresentation(asset: Asset): Promise<{ asset: Asset; media_url: string | null }> {
@@ -359,6 +378,48 @@ function registerIpc(): void {
   ipcMain.handle("timeline:draft-delete", async (_event, projectId: ProjectId) => { await fetchWithUi(`${API_PREFIX}/projects/${asId(projectId, "project_id")}/timeline/draft`, { method: "DELETE" }); });
   ipcMain.handle("timeline:revisions", (_event, input: { project_id: ProjectId; limit?: number; cursor?: string }) => fetchWithUi(`${API_PREFIX}/projects/${asId(input.project_id, "project_id")}/timeline/revisions${buildQuery(input, ["project_id"])}`).then(rendererSafe));
   ipcMain.handle("timeline:revision", (_event, revisionId: TimelineRevisionId) => fetchWithUi(`${API_PREFIX}/timeline-revisions/${asId(revisionId, "timeline_revision_id")}`).then(rendererSafe));
+  ipcMain.handle("preset:list-platforms", async () => {
+    const page = rendererSafe(await fetchWithUi<{ items: unknown[] }>(`${API_PREFIX}/platform-presets`));
+    if (!page || typeof page !== "object" || !Array.isArray((page as { items?: unknown[] }).items) || !(page as { items: unknown[] }).items.every(isPlatformPreset)) throw new Error("Invalid PlatformPresetPage");
+    return page;
+  });
+  ipcMain.handle("preset:list-renditions", async () => {
+    const page = rendererSafe(await fetchWithUi<{ items: unknown[] }>(`${API_PREFIX}/rendition-presets`));
+    if (!page || typeof page !== "object" || !Array.isArray((page as { items?: unknown[] }).items) || !(page as { items: unknown[] }).items.every(isRenditionPreset)) throw new Error("Invalid RenditionPresetPage");
+    return page;
+  });
+  ipcMain.handle("rendition-preview:create", async (_event, input: { project_id: ProjectId; preview: RenditionPreviewCreateInput }) => {
+    const projectId = asId(input.project_id, "project_id");
+    const request = parseRenditionPreviewCreateInput(input.preview);
+    const response = parseRenditionPreviewCreateResponse(rendererSafe(await fetchWithUi(`${API_PREFIX}/projects/${projectId}/rendition-previews`, { method: "POST", body: JSON.stringify(request) })));
+    return { ...response, preview: response.preview ? await renditionPreviewPresentation(response.preview) : null };
+  });
+  ipcMain.handle("rendition-preview:list", async (_event, input: { project_id: ProjectId; limit?: number; cursor?: string }) => {
+    const page = rendererSafe(await fetchWithUi<{ items: unknown[]; next_cursor: string | null }>(`${API_PREFIX}/projects/${asId(input.project_id, "project_id")}/rendition-previews${buildQuery(input, ["project_id"])}`));
+    if (!page || typeof page !== "object" || !Array.isArray((page as { items?: unknown[] }).items) || !(page as { items: unknown[] }).items.every(isRenditionPreview)) throw new Error("Invalid RenditionPreviewPage");
+    const typed = page as { items: RenditionPreview[]; next_cursor: string | null };
+    return { next_cursor: typed.next_cursor ?? null, items: await Promise.all(typed.items.map(renditionPreviewPresentation)) };
+  });
+  ipcMain.handle("export:choose-directory", async (_event, projectIdValue: ProjectId) => {
+    asId(projectIdValue, "project_id");
+    const configured = process.env.AIVS_E2E_EXPORT_DIRECTORY;
+    const selected = configured ? { canceled: false, filePaths: [configured] } : await dialog.showOpenDialog(windowRef!, { title: "选择导出目录", properties: ["openDirectory", "createDirectory"] });
+    if (selected.canceled || !selected.filePaths[0]) return null;
+    return requireCore().createDirectoryGrant(selected.filePaths[0]);
+  });
+  ipcMain.handle("export-batch:create", async (_event, input: { project_id: ProjectId; batch: ExportBatchCreateInput }) => {
+    const projectId = asId(input.project_id, "project_id");
+    const response = parseExportBatchCreateResponse(rendererSafe(await fetchWithUi(`${API_PREFIX}/projects/${projectId}/export-batches`, { method: "POST", body: JSON.stringify(parseExportBatchCreateInput(input.batch)) })));
+    return response;
+  });
+  ipcMain.handle("export-batch:get", async (_event, batchId: ExportBatchId) => parseExportBatch(rendererSafe(await fetchWithUi(`${API_PREFIX}/export-batches/${asId(batchId, "export_batch_id")}`))));
+  ipcMain.handle("export-batch:list", async (_event, input: { project_id: ProjectId; limit?: number; cursor?: string }) => {
+    const page = rendererSafe(await fetchWithUi<{ items: unknown[]; next_cursor: string | null }>(`${API_PREFIX}/projects/${asId(input.project_id, "project_id")}/export-batches${buildQuery(input, ["project_id"])}`));
+    if (!page || typeof page !== "object" || !Array.isArray((page as { items?: unknown[] }).items) || !(page as { items: unknown[] }).items.every(isExportBatch)) throw new Error("Invalid ExportBatchPage");
+    return page;
+  });
+  ipcMain.handle("export-batch:cancel", async (_event, batchId: ExportBatchId) => parseExportBatch(rendererSafe(await fetchWithUi(`${API_PREFIX}/export-batches/${asId(batchId, "export_batch_id")}/cancel`, { method: "POST" }))));
+  ipcMain.handle("export-batch:retry", async (_event, input: { batch_id: ExportBatchId; retry: ExportBatchRetryInput }) => parseExportBatchRetryResponse(rendererSafe(await fetchWithUi(`${API_PREFIX}/export-batches/${asId(input.batch_id, "export_batch_id")}/retry`, { method: "POST", body: JSON.stringify(parseExportBatchRetryInput(input.retry)) }))));
   ipcMain.handle("preview:create", async (_event, input: { project_id: ProjectId; preview: PreviewCreateInput }) => {
     const projectId = asId(input.project_id, "project_id");
     const request = parsePreviewCreateInput(input.preview);
@@ -509,7 +570,9 @@ async function assertRuntimeResources(resourcesPath: string): Promise<void> {
     join(resourcesPath, "ffmpeg", "win-x64", "ffprobe.exe"),
     join(resourcesPath, "licenses", "THIRD_PARTY_NOTICES.txt"),
     join(resourcesPath, "model-manifests"),
-    join(resourcesPath, "recipes")
+    join(resourcesPath, "recipes"),
+    join(resourcesPath, "platform-presets"),
+    join(resourcesPath, "renditions")
   ];
   await Promise.all(required.map(path => access(path)));
   const manifests = await readdir(join(resourcesPath, "model-manifests"), { withFileTypes: true });
@@ -518,6 +581,9 @@ async function assertRuntimeResources(resourcesPath: string): Promise<void> {
   }
   const recipes = await readdir(join(resourcesPath, "recipes"), { withFileTypes: true });
   if (!recipes.some(entry => entry.isFile() && entry.name === "manifest.json")) throw new Error("AI recipe manifest is missing from packaged resources");
+  const platformPresets = await readdir(join(resourcesPath, "platform-presets"), { withFileTypes: true });
+  const renditions = await readdir(join(resourcesPath, "renditions"), { withFileTypes: true });
+  if (!platformPresets.some(entry => entry.isFile() && entry.name === "manifest.json") || !renditions.some(entry => entry.isFile() && entry.name === "manifest.json")) throw new Error("Stage 3A preset manifest is missing from packaged resources");
 }
 
 function parseExecutableArgs(value: string | undefined): string[] | undefined {

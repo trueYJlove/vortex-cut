@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CONTRACT_VERSION, ERROR_CODES, isApiErrorResponse, isAuthoritativePreview, isCaptionPresetId, isCandidateGeneration, isCandidateResponseAdapterId, isDestinationGrant, isExportCreateInput, isExportRecord, isFileGrant, isInternalModelManifest, isJobKind, isJobStatus, isModelDetail, isPreviewCreateResponse, isProject, isProviderCapabilityTestResult, isProviderConfig, isRecipe, isRenderArtifact, isSidecarReady, isTimelineCreateInput, isTimelineDiff, isTimelineDocument, isTimelineLayout, isTimelinePatch, isTimelinePatchCapabilityTestResponse, isTimelinePatchEgressPreview, isTimelinePatchGeneration, isTimelinePatchOperation, isTimelinePatchPrepareRequest, isTimelinePatchProposal, isTimelineState, isTranscript, parseSidecarReadyLine } from "@aivideo/contracts";
+import { CONTRACT_VERSION, ERROR_CODES, isApiErrorResponse, isAuthoritativePreview, isCaptionPresetId, isCandidateGeneration, isCandidateResponseAdapterId, isDestinationGrant, isDirectoryGrant, isExportBatchCreateInput, isExportCreateInput, isExportRecord, isFileGrant, isInternalModelManifest, isJobKind, isJobStatus, isModelDetail, isPlatformPreset, isPreviewCreateResponse, isProject, isProviderCapabilityTestResult, isProviderConfig, isRecipe, isRenderArtifact, isRenditionPreviewCreateInput, isSidecarReady, isTimelineCreateInput, isTimelineDiff, isTimelineDocument, isTimelineLayout, isTimelinePatch, isTimelinePatchCapabilityTestResponse, isTimelinePatchEgressPreview, isTimelinePatchGeneration, isTimelinePatchOperation, isTimelinePatchPrepareRequest, isTimelinePatchProposal, isTimelineState, isTranscript, parseSidecarReadyLine } from "@aivideo/contracts";
 
 const now = "2026-08-11T00:00:00.000Z";
 
@@ -53,7 +53,7 @@ describe("Stage 0 contract", () => {
     expect(isTranscript({ ...transcript, segments: [{ ...transcript.segments[0], end_us: 3_000_000 }] })).toBe(false);
   });
   it("freezes Stage 1C enums, error codes and every patch operation", () => {
-    expect(CONTRACT_VERSION).toBe("stage2c-v1"); expect(isTimelineLayout("crop_fill")).toBe(true); expect(isTimelineLayout("smart_crop")).toBe(false); expect(isCaptionPresetId("high-contrast")).toBe(true); expect(isJobKind("authoritative_preview")).toBe(true); expect(isJobKind("timeline_patch_generation")).toBe(true); expect(ERROR_CODES).toContain("TIMELINE_CONFLICT"); expect(ERROR_CODES).toContain("TIMELINE_PATCH_PROPOSAL_CONFLICT"); expect(ERROR_CODES).toContain("CANDIDATE_PROVIDER_UNTESTED");
+    expect(CONTRACT_VERSION).toBe("stage3a-v1"); expect(isTimelineLayout("crop_fill")).toBe(true); expect(isTimelineLayout("smart_crop")).toBe(false); expect(isCaptionPresetId("high-contrast")).toBe(true); expect(isJobKind("authoritative_preview")).toBe(true); expect(isJobKind("timeline_patch_generation")).toBe(true); expect(ERROR_CODES).toContain("TIMELINE_CONFLICT"); expect(ERROR_CODES).toContain("TIMELINE_PATCH_PROPOSAL_CONFLICT"); expect(ERROR_CODES).toContain("CANDIDATE_PROVIDER_UNTESTED"); expect(ERROR_CODES).toContain("EXPORT_DIRECTORY_GRANT_EXPIRED");
     const operations = [
       { op: "insert_asset_clip", asset_id: "asset_1", at_index: 0, duration_us: 3_000_000 },
       { op: "insert_transcript_segments", transcript_id: "transcript_1", segment_ids: ["segment_1"], at_index: 0, padding_before_us: 0, padding_after_us: 300_000, create_captions: true },
@@ -63,6 +63,17 @@ describe("Stage 0 contract", () => {
     expect(isTimelinePatch({ schema_version: 1, base_revision_id: "revision_1", operations, summary: "完整编辑" })).toBe(true);
     expect(isTimelinePatchOperation({ op: "insert_asset_clip", asset_id: "asset_1", to_index: 0 })).toBe(false);
     expect(isTimelinePatchOperation({ ...operations[1], padding_after_us: 300_001 })).toBe(false);
+  });
+  it("严格校验 Stage3A 预设、目录授权与批次输入", () => {
+    const hash = `sha256:${"a".repeat(64)}`;
+    expect(isPlatformPreset({ schema_version: 1, platform_preset_id: "generic", display_name: "通用", preset_version: 1, allowed_rendition_ids: ["portrait-9x16-v1", "landscape-16x9-v1"], default_rendition_id: "portrait-9x16-v1", filename_tag: "generic", document_sha256: hash })).toBe(true);
+    expect(isPlatformPreset({ schema_version: 1, platform_preset_id: "generic", display_name: "通用", preset_version: 1, allowed_rendition_ids: ["portrait-9x16-v1"], default_rendition_id: "portrait-9x16-v1", filename_tag: "generic", document_sha256: hash, path: "C:\\private" })).toBe(false);
+    expect(isDirectoryGrant({ directory_grant_id: "directory_1", display_name: "导出", expires_at: now })).toBe(true);
+    expect(isDirectoryGrant({ directory_grant_id: "directory_1", display_name: "导出", expires_at: now, path: "C:\\private" })).toBe(false);
+    expect(isRenditionPreviewCreateInput({ timeline_revision_id: "revision_1", platform_preset_id: "douyin", rendition_preset_id: "landscape-16x9-v1", layout_policy: "fit_all" })).toBe(true);
+    expect(isExportBatchCreateInput({ timeline_revision_id: "revision_1", directory_grant_id: "directory_1", items: [{ rendition_snapshot_id: "rendition_snapshot_1", preview_artifact_id: "artifact_1" }] })).toBe(true);
+    expect(isExportBatchCreateInput({ timeline_revision_id: "revision_1", directory_grant_id: "directory_1", items: [] })).toBe(false);
+    expect(isExportBatchCreateInput({ timeline_revision_id: "revision_1", directory_grant_id: "directory_1", items: Array.from({ length: 9 }, (_, index) => ({ rendition_snapshot_id: `rendition_snapshot_${index}`, preview_artifact_id: `artifact_${index}` })) })).toBe(false);
   });
   it("严格接收 Core Stage2A 公开 DTO 并拒绝多余或敏感字段", () => {
     const hash = `sha256:${"a".repeat(64)}`;

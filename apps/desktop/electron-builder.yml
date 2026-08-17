@@ -33,6 +33,14 @@ extraResources:
     to: recipes
     filter:
       - '*.json'
+  - from: ../../resources/platform-presets
+    to: platform-presets
+    filter:
+      - '*.json'
+  - from: ../../resources/renditions
+    to: renditions
+    filter:
+      - '*.json'
   - from: ../../resources/fonts
     to: fonts
     filter:

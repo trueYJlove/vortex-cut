@@ -1,6 +1,6 @@
 export const PROTOCOL_VERSION = 1 as const;
 export const API_PREFIX = "/api/v1" as const;
-export const CONTRACT_VERSION = "stage2c-v1" as const;
+export const CONTRACT_VERSION = "stage3a-v1" as const;
 
 export type GrantId = string & { readonly __brand: "grant_id" };
 export type ProjectId = string & { readonly __brand: "project_id" };
@@ -29,6 +29,12 @@ export type CandidatePlanId = string & { readonly __brand: "candidate_plan_id" }
 export type TimelinePatchEgressPreviewId = string & { readonly __brand: "timeline_patch_egress_preview_id" };
 export type TimelinePatchGenerationId = string & { readonly __brand: "timeline_patch_generation_id" };
 export type TimelinePatchProposalId = string & { readonly __brand: "timeline_patch_proposal_id" };
+export type PlatformPresetId = string & { readonly __brand: "platform_preset_id" };
+export type RenditionPresetId = string & { readonly __brand: "rendition_preset_id" };
+export type RenditionSnapshotId = string & { readonly __brand: "rendition_snapshot_id" };
+export type DirectoryGrantId = string & { readonly __brand: "directory_grant_id" };
+export type ExportBatchId = string & { readonly __brand: "export_batch_id" };
+export type ExportBatchItemId = string & { readonly __brand: "export_batch_item_id" };
 
 export type ProjectStatus = "active" | "archived" | "missing";
 export type AssetKind = "video" | "audio" | "image" | "text";
@@ -104,6 +110,10 @@ export const ERROR_CODES = [
   "EXPORT_NOT_FOUND", "EXPORT_DESTINATION_INVALID", "EXPORT_DESTINATION_EXISTS",
   "EXPORT_DESTINATION_EXPIRED", "EXPORT_DISK_SPACE_INSUFFICIENT", "ARTIFACT_NOT_FOUND",
   "PLAYBACK_TICKET_INVALID"
+  , "PLATFORM_PRESET_INVALID", "RENDITION_PRESET_INVALID", "RENDITION_NOT_ALLOWED_FOR_PLATFORM",
+  "RENDITION_SNAPSHOT_INVALID", "RENDITION_PREVIEW_REQUIRED", "RENDITION_PREVIEW_STALE",
+  "EXPORT_BATCH_INVALID", "EXPORT_BATCH_ITEM_DUPLICATE", "EXPORT_DIRECTORY_GRANT_INVALID",
+  "EXPORT_DIRECTORY_GRANT_EXPIRED", "EXPORT_DIRECTORY_GRANT_CLAIMED", "EXPORT_RETRY_NOT_ALLOWED"
   , "CANDIDATE_PROVIDER_UNTESTED", "CANDIDATE_PROVIDER_UNSUPPORTED",
   "CANDIDATE_RESPONSE_ADAPTER_INVALID", "CANDIDATE_CAPABILITY_STALE",
   "CANDIDATE_CANDIDATESCRIPT_INVALID", "CANDIDATE_EGRESS_PAYLOAD_UNAVAILABLE"
@@ -521,7 +531,10 @@ export type RenderMode = "authoritative_preview" | "final_export";
 export type RenderArtifactStatus = "ready" | "stale";
 export type ExportStatus = "succeeded" | "missing";
 export type EncoderMode = "auto" | "software";
-export type RenderProfileId = "preview-portrait-v1" | "export-portrait-v1";
+export type LegacyRenderProfileId = "preview-portrait-v1" | "export-portrait-v1";
+export type TargetRenderProfileId = "preview-portrait-9x16-v1" | "export-portrait-9x16-v1" | "preview-landscape-16x9-v1" | "export-landscape-16x9-v1";
+export type RenderProfileId = LegacyRenderProfileId | TargetRenderProfileId;
+export type ExportRenderProfileId = "export-portrait-v1" | "export-portrait-9x16-v1" | "export-landscape-16x9-v1";
 
 export interface RenderedMediaInfo {
   duration_us: number;
@@ -555,7 +568,7 @@ export interface ExportRecord {
   timeline_revision_id: TimelineRevisionId;
   render_artifact_id: RenderArtifactId;
   status: ExportStatus;
-  profile_id: "export-portrait-v1";
+  profile_id: ExportRenderProfileId;
   destination_display_name: string;
   size_bytes: number;
   sha256: string;
@@ -577,6 +590,54 @@ export interface ExportCreateInput { timeline_revision_id?: TimelineRevisionId; 
 export interface ExportCreateResponse { job: Job; export_record: ExportRecord | null; }
 export type AuthoritativePreviewPage = Page<AuthoritativePreview>;
 export type ExportRecordPage = Page<ExportRecord>;
+
+/** Stage 3A targeted rendition contracts.  These DTOs intentionally contain no
+ * filesystem location, caption content, provider data, or unrestricted URL. */
+export type LayoutPolicy = "preserve_timeline" | "fit_all" | "crop_fill_all" | "blurred_background_all";
+export type RenditionWarningCode = "CENTER_CROP_MAY_HIDE_CONTENT" | "LETTERBOX_EXPECTED" | "PILLARBOX_EXPECTED";
+export type ExportBatchItemStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
+export type ExportBatchStatus = "queued" | "running" | "succeeded" | "partial" | "failed" | "cancelled" | "interrupted";
+export interface PlatformPreset {
+  schema_version: 1; platform_preset_id: PlatformPresetId; display_name: string; preset_version: 1;
+  allowed_rendition_ids: RenditionPresetId[]; default_rendition_id: RenditionPresetId; filename_tag: string; document_sha256: string;
+}
+export interface RenditionPreset {
+  schema_version: 1; rendition_preset_id: RenditionPresetId; display_name: string; preset_version: 1; document_sha256: string;
+  preview_profile_id: TargetRenderProfileId; export_profile_id: TargetRenderProfileId;
+  preview: { width: number; height: number }; export: { width: number; height: number };
+}
+export interface RenditionSnapshotSummary {
+  rendition_snapshot_id: RenditionSnapshotId; project_id: ProjectId; timeline_revision_id: TimelineRevisionId;
+  platform_preset_id: PlatformPresetId; rendition_preset_id: RenditionPresetId; layout_policy: LayoutPolicy;
+  snapshot_sha256: string; warnings: RenditionWarningCode[]; created_at: string;
+}
+export interface RenditionPreview extends RenditionSnapshotSummary {
+  render_artifact_id: RenderArtifactId; status: RenderArtifactStatus; profile_id: TargetRenderProfileId;
+  display_name: string; size_bytes: number; sha256: string; media_info: RenderedMediaInfo; encoder: string; fallback_reason: string | null;
+}
+export interface RenditionPreviewCreateInput {
+  timeline_revision_id: TimelineRevisionId; platform_preset_id: PlatformPresetId; rendition_preset_id: RenditionPresetId;
+  layout_policy: LayoutPolicy; encoder_mode?: EncoderMode;
+}
+export interface RenditionPreviewCreateResponse { job: Job | null; preview: RenditionPreview | null; reused: boolean; }
+export type RenditionPreviewPage = Page<RenditionPreview>;
+export interface DirectoryGrant { directory_grant_id: DirectoryGrantId; display_name: string; expires_at: string; }
+export interface ExportBatchCreateItem { rendition_snapshot_id: RenditionSnapshotId; preview_artifact_id: RenderArtifactId; encoder_mode?: EncoderMode; }
+export interface ExportBatchCreateInput { timeline_revision_id: TimelineRevisionId; directory_grant_id: DirectoryGrantId; items: ExportBatchCreateItem[]; }
+export interface ExportBatchItem {
+  export_batch_item_id: ExportBatchItemId; ordinal: number; rendition_snapshot: RenditionSnapshotSummary;
+  preview_artifact_id: RenderArtifactId; status: ExportBatchItemStatus; progress: number | null; job_id: JobId | null;
+  destination_display_name: string | null; error_code: ErrorCode | null; export_record_id: ExportRecordId | null;
+  retry_of_item_id: ExportBatchItemId | null;
+}
+export interface ExportBatch {
+  export_batch_id: ExportBatchId; project_id: ProjectId; timeline_revision_id: TimelineRevisionId; status: ExportBatchStatus;
+  directory_display_name: string; items: ExportBatchItem[]; retry_of_batch_id: ExportBatchId | null; created_at: string; updated_at: string;
+}
+export interface ExportBatchCreateResponse { batch: ExportBatch; jobs: Job[]; }
+export interface ExportBatchRetryInput { directory_grant_id: DirectoryGrantId; export_batch_item_ids: ExportBatchItemId[]; }
+export interface ExportBatchRetryResponse { batch: ExportBatch; jobs: Job[]; }
+export type ExportBatchPage = Page<ExportBatch>;
 
 export interface TimelineCanvas extends ProjectCanvas { background_color: string; }
 export interface TimelineTrack { id: "V1" | "C1"; kind: "visual" | "caption"; locked: boolean; }
@@ -724,7 +785,8 @@ const RENDER_MODES: RenderMode[] = ["authoritative_preview", "final_export"];
 const RENDER_ARTIFACT_STATUSES: RenderArtifactStatus[] = ["ready", "stale"];
 const EXPORT_STATUSES: ExportStatus[] = ["succeeded", "missing"];
 const ENCODER_MODES: EncoderMode[] = ["auto", "software"];
-const RENDER_PROFILE_IDS: RenderProfileId[] = ["preview-portrait-v1", "export-portrait-v1"];
+const RENDER_PROFILE_IDS: RenderProfileId[] = ["preview-portrait-v1", "export-portrait-v1", "preview-portrait-9x16-v1", "export-portrait-9x16-v1", "preview-landscape-16x9-v1", "export-landscape-16x9-v1"];
+const EXPORT_RENDER_PROFILE_IDS: ExportRenderProfileId[] = ["export-portrait-v1", "export-portrait-9x16-v1", "export-landscape-16x9-v1"];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -999,12 +1061,12 @@ export function isRenderedMediaInfo(value: unknown): value is RenderedMediaInfo 
 export function isRenderArtifact(value: unknown): value is RenderArtifact {
   return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["render_artifact_id", "project_id", "timeline_revision_id", "kind", "status", "content_fingerprint", "profile_id", "display_name", "size_bytes", "sha256", "media_info", "encoder", "fallback_reason", "created_at"]) &&
     isId(value.render_artifact_id) && isId(value.project_id) && isId(value.timeline_revision_id) && oneOf(RENDER_MODES, value.kind) && oneOf(RENDER_ARTIFACT_STATUSES, value.status) && isString(value.content_fingerprint) && value.content_fingerprint.length > 0 && isRenderProfileId(value.profile_id) &&
-    ((value.kind === "authoritative_preview" && value.profile_id === "preview-portrait-v1") || (value.kind === "final_export" && value.profile_id === "export-portrait-v1")) && isString(value.display_name) && value.display_name.length > 0 && isInteger(value.size_bytes, 1) && isSha256(value.sha256) && isRenderedMediaInfo(value.media_info) && isString(value.encoder) && value.encoder.length > 0 && isNullableString(value.fallback_reason) && isTime(value.created_at);
+    ((value.kind === "authoritative_preview" && ["preview-portrait-v1", "preview-portrait-9x16-v1", "preview-landscape-16x9-v1"].includes(value.profile_id)) || (value.kind === "final_export" && EXPORT_RENDER_PROFILE_IDS.includes(value.profile_id as ExportRenderProfileId))) && isString(value.display_name) && value.display_name.length > 0 && isInteger(value.size_bytes, 1) && isSha256(value.sha256) && isRenderedMediaInfo(value.media_info) && isString(value.encoder) && value.encoder.length > 0 && isNullableString(value.fallback_reason) && isTime(value.created_at);
 }
 export function isAuthoritativePreview(value: unknown): value is AuthoritativePreview { return isRenderArtifact(value) && value.kind === "authoritative_preview" && value.profile_id === "preview-portrait-v1"; }
 export function isExportRecord(value: unknown): value is ExportRecord {
   return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["export_record_id", "project_id", "timeline_revision_id", "render_artifact_id", "status", "profile_id", "destination_display_name", "size_bytes", "sha256", "media_info", "encoder", "fallback_reason", "created_at"]) &&
-    isId(value.export_record_id) && isId(value.project_id) && isId(value.timeline_revision_id) && isId(value.render_artifact_id) && oneOf(EXPORT_STATUSES, value.status) && value.profile_id === "export-portrait-v1" && isString(value.destination_display_name) && value.destination_display_name.length > 0 && isInteger(value.size_bytes, 1) && isSha256(value.sha256) && isRenderedMediaInfo(value.media_info) && isString(value.encoder) && value.encoder.length > 0 && isNullableString(value.fallback_reason) && isTime(value.created_at);
+    isId(value.export_record_id) && isId(value.project_id) && isId(value.timeline_revision_id) && isId(value.render_artifact_id) && oneOf(EXPORT_STATUSES, value.status) && EXPORT_RENDER_PROFILE_IDS.includes(value.profile_id as ExportRenderProfileId) && isString(value.destination_display_name) && value.destination_display_name.length > 0 && isInteger(value.size_bytes, 1) && isSha256(value.sha256) && isRenderedMediaInfo(value.media_info) && isString(value.encoder) && value.encoder.length > 0 && isNullableString(value.fallback_reason) && isTime(value.created_at);
 }
 export function isDestinationGrant(value: unknown): value is DestinationGrant {
   return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["destination_grant_id", "display_name", "extension", "overwrite_authorized", "expires_at"]) && isId(value.destination_grant_id) && isString(value.display_name) && value.display_name.length > 0 && value.extension === ".mp4" && typeof value.overwrite_authorized === "boolean" && isTime(value.expires_at);
@@ -1149,3 +1211,61 @@ export function parsePreviewCreateInput(value: unknown): PreviewCreateInput { if
 export function parsePreviewCreateResponse(value: unknown): PreviewCreateResponse { if (!isPreviewCreateResponse(value)) throw new ContractValidationError("PreviewCreateResponse"); return value; }
 export function parseExportCreateInput(value: unknown): ExportCreateInput { if (!isExportCreateInput(value)) throw new ContractValidationError("ExportCreateInput"); return value; }
 export function parseExportCreateResponse(value: unknown): ExportCreateResponse { if (!isExportCreateResponse(value)) throw new ContractValidationError("ExportCreateResponse"); return value; }
+
+const LAYOUT_POLICIES: LayoutPolicy[] = ["preserve_timeline", "fit_all", "crop_fill_all", "blurred_background_all"];
+const RENDITION_WARNINGS: RenditionWarningCode[] = ["CENTER_CROP_MAY_HIDE_CONTENT", "LETTERBOX_EXPECTED", "PILLARBOX_EXPECTED"];
+const EXPORT_BATCH_ITEM_STATUSES: ExportBatchItemStatus[] = ["queued", "running", "succeeded", "failed", "cancelled", "interrupted"];
+const EXPORT_BATCH_STATUSES: ExportBatchStatus[] = ["queued", "running", "succeeded", "partial", "failed", "cancelled", "interrupted"];
+const TARGET_RENDER_PROFILE_IDS: TargetRenderProfileId[] = ["preview-portrait-9x16-v1", "export-portrait-9x16-v1", "preview-landscape-16x9-v1", "export-landscape-16x9-v1"];
+const isPlatformPresetId = (value: unknown): value is PlatformPresetId => isId(value) && /^(generic|douyin|wechat-channels|xiaohongshu)$/.test(value);
+const isRenditionPresetId = (value: unknown): value is RenditionPresetId => isId(value) && /^(portrait-9x16-v1|landscape-16x9-v1)$/.test(value);
+const isDirectoryGrantId = (value: unknown): value is DirectoryGrantId => isId(value) && value.startsWith("directory_");
+const isRenditionSnapshotId = (value: unknown): value is RenditionSnapshotId => isId(value) && value.startsWith("rendition_snapshot_");
+const isExportBatchId = (value: unknown): value is ExportBatchId => isId(value) && value.startsWith("export_batch_");
+const isExportBatchItemId = (value: unknown): value is ExportBatchItemId => isId(value) && value.startsWith("export_batch_item_");
+const isTargetProfileId = (value: unknown): value is TargetRenderProfileId => oneOf(TARGET_RENDER_PROFILE_IDS, value);
+const isDimensions = (value: unknown): value is { width: number; height: number } => isRecord(value) && onlyKeys(value, ["width", "height"]) && isInteger(value.width, 1) && isInteger(value.height, 1);
+export function isLayoutPolicy(value: unknown): value is LayoutPolicy { return oneOf(LAYOUT_POLICIES, value); }
+export function isPlatformPreset(value: unknown): value is PlatformPreset {
+  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["schema_version", "platform_preset_id", "display_name", "preset_version", "allowed_rendition_ids", "default_rendition_id", "filename_tag", "document_sha256"])
+    && value.schema_version === 1 && isPlatformPresetId(value.platform_preset_id) && isBriefText(value.display_name, 40) && value.preset_version === 1
+    && Array.isArray(value.allowed_rendition_ids) && value.allowed_rendition_ids.length > 0 && value.allowed_rendition_ids.every(isRenditionPresetId) && new Set(value.allowed_rendition_ids).size === value.allowed_rendition_ids.length
+    && isRenditionPresetId(value.default_rendition_id) && value.allowed_rendition_ids.includes(value.default_rendition_id) && isString(value.filename_tag) && /^[a-z0-9-]{1,32}$/.test(value.filename_tag) && isSha256(value.document_sha256);
+}
+export function isRenditionPreset(value: unknown): value is RenditionPreset {
+  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["schema_version", "rendition_preset_id", "display_name", "preset_version", "document_sha256", "preview_profile_id", "export_profile_id", "preview", "export"])
+    && value.schema_version === 1 && isRenditionPresetId(value.rendition_preset_id) && isBriefText(value.display_name, 40) && value.preset_version === 1 && isSha256(value.document_sha256)
+    && isTargetProfileId(value.preview_profile_id) && isTargetProfileId(value.export_profile_id) && isDimensions(value.preview) && isDimensions(value.export);
+}
+export function isRenditionSnapshotSummary(value: unknown): value is RenditionSnapshotSummary {
+  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["rendition_snapshot_id", "project_id", "timeline_revision_id", "platform_preset_id", "rendition_preset_id", "layout_policy", "snapshot_sha256", "warnings", "created_at"])
+    && isRenditionSnapshotId(value.rendition_snapshot_id) && isId(value.project_id) && isId(value.timeline_revision_id) && isPlatformPresetId(value.platform_preset_id) && isRenditionPresetId(value.rendition_preset_id) && isLayoutPolicy(value.layout_policy) && isSha256(value.snapshot_sha256)
+    && Array.isArray(value.warnings) && value.warnings.every(item => oneOf(RENDITION_WARNINGS, item)) && new Set(value.warnings).size === value.warnings.length && isTime(value.created_at);
+}
+export function isRenditionPreview(value: unknown): value is RenditionPreview {
+  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["rendition_snapshot_id", "project_id", "timeline_revision_id", "platform_preset_id", "rendition_preset_id", "layout_policy", "snapshot_sha256", "warnings", "created_at", "render_artifact_id", "status", "profile_id", "display_name", "size_bytes", "sha256", "media_info", "encoder", "fallback_reason"])
+    && isRenditionSnapshotSummary(Object.fromEntries(["rendition_snapshot_id", "project_id", "timeline_revision_id", "platform_preset_id", "rendition_preset_id", "layout_policy", "snapshot_sha256", "warnings", "created_at"].map(key => [key, value[key]])))
+    && isId(value.render_artifact_id) && oneOf(RENDER_ARTIFACT_STATUSES, value.status) && isTargetProfileId(value.profile_id) && isBriefText(value.display_name, 200) && isInteger(value.size_bytes, 0) && isSha256(value.sha256) && isRenderedMediaInfo(value.media_info) && isBriefText(value.encoder, 100) && isNullableString(value.fallback_reason);
+}
+export function isRenditionPreviewCreateInput(value: unknown): value is RenditionPreviewCreateInput { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["timeline_revision_id", "platform_preset_id", "rendition_preset_id", "layout_policy", "encoder_mode"]) && isId(value.timeline_revision_id) && isPlatformPresetId(value.platform_preset_id) && isRenditionPresetId(value.rendition_preset_id) && isLayoutPolicy(value.layout_policy) && (value.encoder_mode === undefined || oneOf(ENCODER_MODES, value.encoder_mode)); }
+export function isRenditionPreviewCreateResponse(value: unknown): value is RenditionPreviewCreateResponse { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["job", "preview", "reused"]) && (value.job === null || isJob(value.job)) && (value.preview === null || isRenditionPreview(value.preview)) && typeof value.reused === "boolean"; }
+export function isDirectoryGrant(value: unknown): value is DirectoryGrant { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["directory_grant_id", "display_name", "expires_at"]) && isDirectoryGrantId(value.directory_grant_id) && isBriefText(value.display_name, 200) && isTime(value.expires_at); }
+export function isExportBatchCreateInput(value: unknown): value is ExportBatchCreateInput {
+  if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["timeline_revision_id", "directory_grant_id", "items"]) || !isId(value.timeline_revision_id) || !isDirectoryGrantId(value.directory_grant_id) || !Array.isArray(value.items) || value.items.length < 1 || value.items.length > 8) return false;
+  return value.items.every(item => isRecord(item) && !hasSensitiveKey(item) && onlyKeys(item, ["rendition_snapshot_id", "preview_artifact_id", "encoder_mode"]) && isRenditionSnapshotId(item.rendition_snapshot_id) && isId(item.preview_artifact_id) && (item.encoder_mode === undefined || oneOf(ENCODER_MODES, item.encoder_mode))) && new Set(value.items.map(item => `${String((item as Record<string, unknown>).rendition_snapshot_id)}:${String((item as Record<string, unknown>).preview_artifact_id)}`)).size === value.items.length;
+}
+export function isExportBatchItem(value: unknown): value is ExportBatchItem { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["export_batch_item_id", "ordinal", "rendition_snapshot", "preview_artifact_id", "status", "progress", "job_id", "destination_display_name", "error_code", "export_record_id", "retry_of_item_id"]) && isExportBatchItemId(value.export_batch_item_id) && isInteger(value.ordinal, 0) && isRenditionSnapshotSummary(value.rendition_snapshot) && isId(value.preview_artifact_id) && oneOf(EXPORT_BATCH_ITEM_STATUSES, value.status) && (value.progress === null || isRatio(value.progress)) && (value.job_id === null || isId(value.job_id)) && (value.destination_display_name === null || isBriefText(value.destination_display_name, 200)) && (value.error_code === null || isBriefText(value.error_code, 100)) && (value.export_record_id === null || isId(value.export_record_id)) && (value.retry_of_item_id === null || isExportBatchItemId(value.retry_of_item_id)); }
+export function isExportBatch(value: unknown): value is ExportBatch { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["export_batch_id", "project_id", "timeline_revision_id", "status", "directory_display_name", "items", "retry_of_batch_id", "created_at", "updated_at"]) && isExportBatchId(value.export_batch_id) && isId(value.project_id) && isId(value.timeline_revision_id) && oneOf(EXPORT_BATCH_STATUSES, value.status) && isBriefText(value.directory_display_name, 200) && Array.isArray(value.items) && value.items.length >= 1 && value.items.length <= 8 && value.items.every(isExportBatchItem) && (value.retry_of_batch_id === null || isExportBatchId(value.retry_of_batch_id)) && isTime(value.created_at) && isTime(value.updated_at); }
+export function isExportBatchCreateResponse(value: unknown): value is ExportBatchCreateResponse { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["batch", "jobs"]) && isExportBatch(value.batch) && Array.isArray(value.jobs) && value.jobs.every(isJob); }
+export function isExportBatchRetryInput(value: unknown): value is ExportBatchRetryInput { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["directory_grant_id", "export_batch_item_ids"]) && isDirectoryGrantId(value.directory_grant_id) && Array.isArray(value.export_batch_item_ids) && value.export_batch_item_ids.length >= 1 && value.export_batch_item_ids.length <= 8 && value.export_batch_item_ids.every(isExportBatchItemId) && new Set(value.export_batch_item_ids).size === value.export_batch_item_ids.length; }
+export const isExportBatchRetryResponse = isExportBatchCreateResponse;
+export function parsePlatformPreset(value: unknown): PlatformPreset { if (!isPlatformPreset(value)) throw new ContractValidationError("PlatformPreset"); return value; }
+export function parseRenditionPreset(value: unknown): RenditionPreset { if (!isRenditionPreset(value)) throw new ContractValidationError("RenditionPreset"); return value; }
+export function parseRenditionPreviewCreateInput(value: unknown): RenditionPreviewCreateInput { if (!isRenditionPreviewCreateInput(value)) throw new ContractValidationError("RenditionPreviewCreateInput"); return value; }
+export function parseRenditionPreviewCreateResponse(value: unknown): RenditionPreviewCreateResponse { if (!isRenditionPreviewCreateResponse(value)) throw new ContractValidationError("RenditionPreviewCreateResponse"); return value; }
+export function parseDirectoryGrant(value: unknown): DirectoryGrant { if (!isDirectoryGrant(value)) throw new ContractValidationError("DirectoryGrant"); return value; }
+export function parseExportBatchCreateInput(value: unknown): ExportBatchCreateInput { if (!isExportBatchCreateInput(value)) throw new ContractValidationError("ExportBatchCreateInput"); return value; }
+export function parseExportBatch(value: unknown): ExportBatch { if (!isExportBatch(value)) throw new ContractValidationError("ExportBatch"); return value; }
+export function parseExportBatchCreateResponse(value: unknown): ExportBatchCreateResponse { if (!isExportBatchCreateResponse(value)) throw new ContractValidationError("ExportBatchCreateResponse"); return value; }
+export function parseExportBatchRetryInput(value: unknown): ExportBatchRetryInput { if (!isExportBatchRetryInput(value)) throw new ContractValidationError("ExportBatchRetryInput"); return value; }
+export function parseExportBatchRetryResponse(value: unknown): ExportBatchRetryResponse { if (!isExportBatchRetryResponse(value)) throw new ContractValidationError("ExportBatchRetryResponse"); return value; }
