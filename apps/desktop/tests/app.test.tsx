@@ -418,3 +418,44 @@ describe("Stage 3B 静态焦点重构图", () => {
     expect(payload.batch).not.toHaveProperty("timeline_revision_id");
   });
 });
+
+describe("Stage 4B 生成验证正式入口", () => {
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+  it("未选择项目时禁用入口，选择项目后可打开模拟验证工作台", async () => {
+    const api = desktopApi();
+    api.listProjects = vi.fn().mockResolvedValue({ items: [], next_cursor: null });
+    window.desktop = api;
+    const view = render(<App />);
+    const entry = await screen.findByRole("button", { name: "打开生成任务模拟验证" });
+    expect(entry).toBeDisabled();
+    view.unmount();
+
+    const projectApi = desktopApi();
+    window.desktop = projectApi;
+    render(<App />);
+    const enabledEntry = await screen.findByRole("button", { name: "打开生成任务模拟验证" });
+    await waitFor(() => expect(enabledEntry).toBeEnabled());
+    fireEvent.click(enabledEntry);
+    expect(await screen.findByRole("dialog", { name: "生成验证（模拟）" })).toBeVisible();
+    expect(screen.getByText(/不会生成媒体，不会注册素材，也不会写入时间线/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "关闭生成验证" }));
+    expect(screen.queryByRole("dialog", { name: "生成验证（模拟）" })).not.toBeInTheDocument();
+  });
+
+  it("切换项目时卸载工作台并清除当前表单", async () => {
+    const other = { ...project, project_id: "project_other" as never, name: "第二项目" };
+    const api = desktopApi();
+    api.listProjects = vi.fn().mockResolvedValue({ items: [project, other], next_cursor: null });
+    window.desktop = api;
+    render(<App />);
+    const entry = await screen.findByRole("button", { name: "打开生成任务模拟验证" });
+    await waitFor(() => expect(entry).toBeEnabled());
+    fireEvent.click(entry);
+    fireEvent.change(await screen.findByLabelText("生成验证 Prompt"), { target: { value: "切换项目必须清除" } });
+    fireEvent.change(screen.getByLabelText("当前项目"), { target: { value: other.project_id } });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "生成验证（模拟）" })).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "打开生成任务模拟验证" }));
+    expect(await screen.findByLabelText("生成验证 Prompt")).toHaveValue("");
+  });
+});
