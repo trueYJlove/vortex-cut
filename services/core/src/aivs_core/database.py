@@ -30,6 +30,7 @@ V8_VERSION = "v8"
 V9_VERSION = "v9"
 V10_VERSION = "v10"
 V11_VERSION = "v11"
+V12_VERSION = "v12"
 V1_SQL = """
 CREATE TABLE IF NOT EXISTS media_inputs (
   id TEXT PRIMARY KEY, path TEXT NOT NULL, display_name TEXT NOT NULL,
@@ -778,6 +779,91 @@ CREATE TRIGGER IF NOT EXISTS media_generation_requests_no_delete
 BEFORE DELETE ON media_generation_requests
 BEGIN SELECT RAISE(ABORT,'media generation requests are immutable'); END;
 """
+V12_SQL = """
+CREATE TABLE shot_lists (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL UNIQUE REFERENCES projects(id),
+  current_revision_id TEXT NULL,
+  confirmed_revision_id TEXT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(id, project_id),
+  FOREIGN KEY(current_revision_id, id)
+    REFERENCES shot_list_revisions(id, shot_list_id),
+  FOREIGN KEY(confirmed_revision_id, id)
+    REFERENCES shot_list_revisions(id, shot_list_id)
+);
+CREATE TABLE shot_list_revisions (
+  id TEXT PRIMARY KEY,
+  shot_list_id TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  parent_revision_id TEXT NULL,
+  schema_version INTEGER NOT NULL CHECK(schema_version = 1),
+  title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 120),
+  summary TEXT NOT NULL CHECK(length(summary) <= 4000),
+  document_sha256 TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(id, shot_list_id),
+  UNIQUE(shot_list_id, document_sha256),
+  FOREIGN KEY(shot_list_id, project_id)
+    REFERENCES shot_lists(id, project_id),
+  FOREIGN KEY(parent_revision_id, shot_list_id)
+    REFERENCES shot_list_revisions(id, shot_list_id)
+);
+CREATE TABLE shot_requirements (
+  id TEXT PRIMARY KEY,
+  shot_list_revision_id TEXT NOT NULL REFERENCES shot_list_revisions(id),
+  ordinal INTEGER NOT NULL CHECK(ordinal BETWEEN 0 AND 23),
+  title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 120),
+  visual_direction TEXT NOT NULL CHECK(length(visual_direction) BETWEEN 1 AND 2000),
+  target_duration_us INTEGER NULL CHECK(
+    target_duration_us IS NULL OR target_duration_us BETWEEN 100000 AND 600000000
+  ),
+  visual_kind TEXT NOT NULL CHECK(visual_kind IN ('existing_media','image')),
+  visual_source_asset_id TEXT NULL REFERENCES assets(id),
+  narration_kind TEXT NULL CHECK(narration_kind IS NULL OR narration_kind='tts'),
+  narration_text TEXT NULL CHECK(
+    narration_text IS NULL OR length(narration_text) BETWEEN 1 AND 2000
+  ),
+  CHECK(
+    (visual_kind='existing_media' AND visual_source_asset_id IS NOT NULL) OR
+    (visual_kind='image' AND visual_source_asset_id IS NULL)
+  ),
+  CHECK(
+    (narration_kind IS NULL AND narration_text IS NULL) OR
+    (narration_kind='tts' AND narration_text IS NOT NULL)
+  ),
+  UNIQUE(shot_list_revision_id, ordinal)
+);
+CREATE INDEX shot_list_revisions_by_list_created
+  ON shot_list_revisions(shot_list_id, created_at DESC, id DESC);
+CREATE INDEX shot_requirements_by_visual_asset
+  ON shot_requirements(visual_source_asset_id);
+CREATE TRIGGER shot_list_revisions_no_update
+BEFORE UPDATE ON shot_list_revisions
+BEGIN SELECT RAISE(ABORT, 'shot list revisions immutable'); END;
+CREATE TRIGGER shot_list_revisions_no_delete
+BEFORE DELETE ON shot_list_revisions
+BEGIN SELECT RAISE(ABORT, 'shot list revisions immutable'); END;
+CREATE TRIGGER shot_requirements_no_update
+BEFORE UPDATE ON shot_requirements
+BEGIN SELECT RAISE(ABORT, 'shot requirements immutable'); END;
+CREATE TRIGGER shot_requirements_no_delete
+BEFORE DELETE ON shot_requirements
+BEGIN SELECT RAISE(ABORT, 'shot requirements immutable'); END;
+CREATE TRIGGER shot_lists_identity_no_update
+BEFORE UPDATE OF id, project_id, created_at ON shot_lists
+BEGIN SELECT RAISE(ABORT, 'shot list identity immutable'); END;
+CREATE TRIGGER shot_requirements_asset_owner
+BEFORE INSERT ON shot_requirements
+WHEN NEW.visual_kind='existing_media' AND NOT EXISTS (
+  SELECT 1
+  FROM assets a
+  JOIN shot_list_revisions r ON r.id=NEW.shot_list_revision_id
+  WHERE a.id=NEW.visual_source_asset_id AND a.project_id=r.project_id
+)
+BEGIN SELECT RAISE(ABORT, 'asset project mismatch'); END;
+"""
 MIGRATIONS: dict[str, str] = {
     V1_VERSION: V1_SQL,
     V2_VERSION: V2_SQL,
@@ -790,6 +876,7 @@ MIGRATIONS: dict[str, str] = {
     V9_VERSION: V9_SQL,
     V10_VERSION: V10_SQL,
     V11_VERSION: V11_SQL,
+    V12_VERSION: V12_SQL,
 }
 
 

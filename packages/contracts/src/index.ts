@@ -1,6 +1,6 @@
 export const PROTOCOL_VERSION = 1 as const;
 export const API_PREFIX = "/api/v1" as const;
-export const CONTRACT_VERSION = "stage3b-v1" as const;
+export const CONTRACT_VERSION = "stage4c-v1" as const;
 
 export type GrantId = string & { readonly __brand: "grant_id" };
 export type ProjectId = string & { readonly __brand: "project_id" };
@@ -40,6 +40,9 @@ export type ReframeExportBatchId = string & { readonly __brand: "reframe_export_
 export type ReframeExportBatchItemId = string & { readonly __brand: "reframe_export_batch_item_id" };
 export type MediaGenerationRequestId = string & { readonly __brand: "media_generation_request_id" };
 export type MediaGenerationTaskId = string & { readonly __brand: "media_generation_task_id" };
+export type ShotListId = string & { readonly __brand: "shot_list_id" };
+export type ShotListRevisionId = string & { readonly __brand: "shot_list_revision_id" };
+export type ShotRequirementId = string & { readonly __brand: "shot_requirement_id" };
 
 export type ProjectStatus = "active" | "archived" | "missing";
 export type AssetKind = "video" | "audio" | "image" | "text";
@@ -887,6 +890,70 @@ export type MediaGenerationRequestPage = Page<MediaGenerationRequest>;
 export type MediaGenerationTaskPage = Page<MediaGenerationTask>;
 export type MediaGenerationRetryInput = Record<string, never>;
 
+export interface ShotVisualRequirementInput {
+  requirement_kind: "existing_media" | "image";
+  source_asset_id: AssetId | null;
+}
+export interface ShotNarrationRequirementInput {
+  requirement_kind: "tts";
+  text: string;
+}
+export interface ShotRequirementInput {
+  title: string;
+  visual_direction: string;
+  target_duration_us: number | null;
+  visual: ShotVisualRequirementInput;
+  narration: ShotNarrationRequirementInput | null;
+}
+export interface ShotListRevisionCreateInput {
+  schema_version: 1;
+  base_revision_id: ShotListRevisionId | null;
+  title: string;
+  summary: string;
+  requirements: ShotRequirementInput[];
+}
+export interface ShotListConfirmInput {
+  revision_id: ShotListRevisionId;
+  expected_current_revision_id: ShotListRevisionId;
+}
+export interface ShotRequirement extends ShotRequirementInput {
+  shot_requirement_id: ShotRequirementId;
+  shot_list_revision_id: ShotListRevisionId;
+  ordinal: number;
+}
+export interface ShotListRevisionSummary {
+  schema_version: 1;
+  shot_list_revision_id: ShotListRevisionId;
+  shot_list_id: ShotListId;
+  project_id: ProjectId;
+  parent_revision_id: ShotListRevisionId | null;
+  title: string;
+  requirement_count: number;
+  document_sha256: string;
+  created_at: string;
+}
+export interface ShotListRevisionDetail extends ShotListRevisionSummary {
+  summary: string;
+  requirements: ShotRequirement[];
+}
+export interface ShotListState {
+  shot_list_id: ShotListId | null;
+  project_id: ProjectId;
+  lifecycle: "empty" | "drafted" | "confirmed";
+  current_revision: ShotListRevisionDetail | null;
+  confirmed_revision: ShotListRevisionSummary | null;
+}
+export interface ShotListRevisionCreateResponse {
+  revision: ShotListRevisionDetail;
+  state: ShotListState;
+  reused: boolean;
+}
+export interface ShotListConfirmResponse {
+  state: ShotListState;
+  reused: boolean;
+}
+export type ShotListRevisionPage = Page<ShotListRevisionSummary>;
+
 export class ContractValidationError extends Error {
   constructor(public readonly contract: string, message = "Invalid contract payload") {
     super(`${contract}: ${message}`);
@@ -1537,6 +1604,98 @@ export function isMediaGenerationCreateResponse(value: unknown): value is MediaG
 export function isMediaGenerationRequestPage(value: unknown): value is MediaGenerationRequestPage { return isPage(value, isMediaGenerationRequest); }
 export function isMediaGenerationTaskPage(value: unknown): value is MediaGenerationTaskPage { return isPage(value, isMediaGenerationTask); }
 export function isMediaGenerationRetryInput(value: unknown): value is MediaGenerationRetryInput { return isRecord(value) && Object.keys(value).length === 0; }
+const SHOT_SENSITIVE_KEYS = new Set([
+  "path", "uri", "absolute_path", "prompt", "transcript", "caption", "authorization",
+  "api_key", "secret", "payload", "raw_exception", "raw_response", "stderr", "command", "traceback"
+]);
+function hasShotSensitiveKey(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(hasShotSensitiveKey);
+  if (!isRecord(value)) return false;
+  return Object.entries(value).some(([key, item]) => SHOT_SENSITIVE_KEYS.has(key.toLowerCase()) || hasShotSensitiveKey(item));
+}
+function isShotText(value: unknown, minimum: number, maximum: number): value is string {
+  return isString(value) && value.length >= minimum && value.length <= maximum && !/[\0-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(value);
+}
+export function isShotVisualRequirementInput(value: unknown): value is ShotVisualRequirementInput {
+  if (!isRecord(value) || hasShotSensitiveKey(value) || !onlyKeys(value, ["requirement_kind", "source_asset_id"])) return false;
+  return (value.requirement_kind === "existing_media" && isId(value.source_asset_id))
+    || (value.requirement_kind === "image" && value.source_asset_id === null);
+}
+export function isShotNarrationRequirementInput(value: unknown): value is ShotNarrationRequirementInput {
+  return isRecord(value) && !hasShotSensitiveKey(value) && onlyKeys(value, ["requirement_kind", "text"])
+    && value.requirement_kind === "tts" && isShotText(value.text, 1, 2000);
+}
+export function isShotRequirementInput(value: unknown): value is ShotRequirementInput {
+  return isRecord(value) && !hasShotSensitiveKey(value)
+    && onlyKeys(value, ["title", "visual_direction", "target_duration_us", "visual", "narration"])
+    && isShotText(value.title, 1, 120) && isShotText(value.visual_direction, 1, 2000)
+    && (value.target_duration_us === null || (isInteger(value.target_duration_us, 100_000) && value.target_duration_us <= 600_000_000))
+    && isShotVisualRequirementInput(value.visual)
+    && (value.narration === null || isShotNarrationRequirementInput(value.narration));
+}
+export function isShotListRevisionCreateInput(value: unknown): value is ShotListRevisionCreateInput {
+  return isRecord(value) && !hasShotSensitiveKey(value)
+    && onlyKeys(value, ["schema_version", "base_revision_id", "title", "summary", "requirements"])
+    && value.schema_version === 1 && (value.base_revision_id === null || isId(value.base_revision_id))
+    && isShotText(value.title, 1, 120) && isShotText(value.summary, 0, 4000)
+    && Array.isArray(value.requirements) && value.requirements.length >= 1 && value.requirements.length <= 24
+    && value.requirements.every(isShotRequirementInput);
+}
+export function isShotListConfirmInput(value: unknown): value is ShotListConfirmInput {
+  return isRecord(value) && !hasShotSensitiveKey(value)
+    && onlyKeys(value, ["revision_id", "expected_current_revision_id"])
+    && isId(value.revision_id) && isId(value.expected_current_revision_id);
+}
+export function isShotRequirement(value: unknown): value is ShotRequirement {
+  return isRecord(value) && !hasShotSensitiveKey(value)
+    && onlyKeys(value, ["shot_requirement_id", "shot_list_revision_id", "ordinal", "title", "visual_direction", "target_duration_us", "visual", "narration"])
+    && isId(value.shot_requirement_id) && isId(value.shot_list_revision_id) && isInteger(value.ordinal, 0) && value.ordinal <= 23
+    && isShotRequirementInput({ title: value.title, visual_direction: value.visual_direction, target_duration_us: value.target_duration_us, visual: value.visual, narration: value.narration });
+}
+export function isShotListRevisionSummary(value: unknown): value is ShotListRevisionSummary {
+  return isRecord(value) && !hasShotSensitiveKey(value)
+    && onlyKeys(value, ["schema_version", "shot_list_revision_id", "shot_list_id", "project_id", "parent_revision_id", "title", "requirement_count", "document_sha256", "created_at"])
+    && value.schema_version === 1 && isId(value.shot_list_revision_id) && isId(value.shot_list_id) && isId(value.project_id)
+    && (value.parent_revision_id === null || isId(value.parent_revision_id)) && isShotText(value.title, 1, 120)
+    && isInteger(value.requirement_count, 1) && value.requirement_count <= 24 && isSha256(value.document_sha256) && isTime(value.created_at);
+}
+export function isShotListRevisionDetail(value: unknown): value is ShotListRevisionDetail {
+  if (!isRecord(value) || hasShotSensitiveKey(value)
+    || !onlyKeys(value, ["schema_version", "shot_list_revision_id", "shot_list_id", "project_id", "parent_revision_id", "title", "requirement_count", "document_sha256", "created_at", "summary", "requirements"])) return false;
+  const summary = { schema_version: value.schema_version, shot_list_revision_id: value.shot_list_revision_id, shot_list_id: value.shot_list_id, project_id: value.project_id, parent_revision_id: value.parent_revision_id, title: value.title, requirement_count: value.requirement_count, document_sha256: value.document_sha256, created_at: value.created_at };
+  return isShotListRevisionSummary(summary) && isShotText(value.summary, 0, 4000) && Array.isArray(value.requirements)
+    && value.requirements.length === value.requirement_count && value.requirements.every((item, ordinal) => isShotRequirement(item) && item.ordinal === ordinal && item.shot_list_revision_id === value.shot_list_revision_id);
+}
+export function isShotListState(value: unknown): value is ShotListState {
+  if (!isRecord(value) || hasShotSensitiveKey(value) || !onlyKeys(value, ["shot_list_id", "project_id", "lifecycle", "current_revision", "confirmed_revision"]) || !isId(value.project_id)) return false;
+  if (value.lifecycle === "empty") return value.shot_list_id === null && value.current_revision === null && value.confirmed_revision === null;
+  if (!isId(value.shot_list_id) || !isShotListRevisionDetail(value.current_revision) || value.current_revision.project_id !== value.project_id || value.current_revision.shot_list_id !== value.shot_list_id) return false;
+  const confirmed = value.confirmed_revision;
+  const confirmedValid = isShotListRevisionSummary(confirmed)
+    && confirmed.project_id === value.project_id && confirmed.shot_list_id === value.shot_list_id;
+  if (value.lifecycle === "drafted") return confirmed === null
+    || (confirmedValid && confirmed.shot_list_revision_id !== value.current_revision.shot_list_revision_id);
+  return value.lifecycle === "confirmed" && confirmedValid
+    && confirmed.shot_list_revision_id === value.current_revision.shot_list_revision_id;
+}
+export function isShotListRevisionCreateResponse(value: unknown): value is ShotListRevisionCreateResponse {
+  return isRecord(value) && !hasShotSensitiveKey(value) && onlyKeys(value, ["revision", "state", "reused"])
+    && isShotListRevisionDetail(value.revision) && isShotListState(value.state) && typeof value.reused === "boolean"
+    && value.state.current_revision?.shot_list_revision_id === value.revision.shot_list_revision_id;
+}
+export function isShotListConfirmResponse(value: unknown): value is ShotListConfirmResponse {
+  return isRecord(value) && !hasShotSensitiveKey(value) && onlyKeys(value, ["state", "reused"])
+    && isShotListState(value.state) && typeof value.reused === "boolean" && value.state.lifecycle === "confirmed";
+}
+export function isShotListRevisionPage(value: unknown): value is ShotListRevisionPage { return isPage(value, isShotListRevisionSummary); }
+export function parseShotListRevisionCreateInput(value: unknown): ShotListRevisionCreateInput { if (!isShotListRevisionCreateInput(value)) throw new ContractValidationError("ShotListRevisionCreateInput"); return value; }
+export function parseShotListConfirmInput(value: unknown): ShotListConfirmInput { if (!isShotListConfirmInput(value)) throw new ContractValidationError("ShotListConfirmInput"); return value; }
+export function parseShotListRevisionDetail(value: unknown): ShotListRevisionDetail { if (!isShotListRevisionDetail(value)) throw new ContractValidationError("ShotListRevisionDetail"); return value; }
+export function parseShotListState(value: unknown): ShotListState { if (!isShotListState(value)) throw new ContractValidationError("ShotListState"); return value; }
+export function parseShotListRevisionCreateResponse(value: unknown): ShotListRevisionCreateResponse { if (!isShotListRevisionCreateResponse(value)) throw new ContractValidationError("ShotListRevisionCreateResponse"); return value; }
+export function parseShotListConfirmResponse(value: unknown): ShotListConfirmResponse { if (!isShotListConfirmResponse(value)) throw new ContractValidationError("ShotListConfirmResponse"); return value; }
+export function parseShotListRevisionPage(value: unknown): ShotListRevisionPage { if (!isShotListRevisionPage(value)) throw new ContractValidationError("ShotListRevisionPage"); return value; }
+
 export function parseMediaGenerationPrepareInput(value: unknown): MediaGenerationPrepareInput { if (!isMediaGenerationPrepareInput(value)) throw new ContractValidationError("MediaGenerationPrepareInput"); return value; }
 export function parseMediaGenerationCreateInput(value: unknown): MediaGenerationCreateInput { if (!isMediaGenerationCreateInput(value)) throw new ContractValidationError("MediaGenerationCreateInput"); return value; }
 export function parseMediaGenerationPreparedRequest(value: unknown): MediaGenerationPreparedRequest { if (!isMediaGenerationPreparedRequest(value)) throw new ContractValidationError("MediaGenerationPreparedRequest"); return value; }

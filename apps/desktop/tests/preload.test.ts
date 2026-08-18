@@ -49,6 +49,7 @@ describe("Desktop preload 白名单", () => {
       ["listPlatformPresets", []], ["listRenditionPresets", []], ["createRenditionPreview", [{}]], ["listRenditionPreviews", [{}]], ["chooseExportDirectory", ["project_1"]], ["createExportBatch", [{}]], ["getExportBatch", ["batch_1"]], ["listExportBatches", [{}]], ["cancelExportBatch", ["batch_1"]], ["retryExportBatch", [{}]],
       ["createRenditionReframePreview", [{}]], ["listRenditionReframePreviews", [{}]], ["createReframeExportBatch", [{}]], ["getReframeExportBatch", ["reframe_batch_1"]], ["listReframeExportBatches", [{}]], ["cancelReframeExportBatch", ["reframe_batch_1"]], ["retryReframeExportBatch", [{}]],
       ["prepareMediaGeneration", [{}]], ["createMediaGeneration", [{}]], ["listMediaGenerationRequests", [{}]], ["getMediaGenerationRequest", ["generation_request_1"]], ["listMediaGenerationTasks", [{}]], ["retryMediaGenerationTask", ["generation_task_1"]], ["cancelMediaGenerationTask", ["generation_task_1"]],
+      ["getShotList", ["project_1"]], ["listShotListRevisions", [{}]], ["getShotListRevision", ["revision_1"]], ["createShotListRevision", [{}]], ["confirmShotListRevision", [{}]],
       ["getRenderArtifact", ["artifact_1"]], ["openArtifact", ["artifact_1"]], ["openArtifactFolder", ["artifact_1"]], ["diagnostics", []]
     ];
     for (const [name, args] of calls) await api[name](...args);

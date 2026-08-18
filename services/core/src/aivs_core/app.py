@@ -42,6 +42,7 @@ from .renditions.presets import RenditionPresetRegistry
 from .renditions.reframe import RenditionReframeSnapshotService
 from .renditions.reframe_batch import ReframeExportBatchService
 from .renditions.snapshot import RenditionSnapshotService
+from .shot_requirements import ShotRequirementService
 from .timeline import TimelineService
 from .timeline_planning import TimelinePatchPlanningService
 from .transcription import TranscriptionError, TranscriptRepository
@@ -331,6 +332,47 @@ class MediaGenerationEmptyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
 
+class ShotVisualRequirementRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    requirement_kind: str
+    source_asset_id: str | None
+
+
+class ShotNarrationRequirementRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    requirement_kind: str
+    text: str
+
+
+class ShotRequirementRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    title: str
+    visual_direction: str
+    target_duration_us: int | None
+    visual: ShotVisualRequirementRequest
+    narration: ShotNarrationRequirementRequest | None
+
+
+class ShotListRevisionCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    schema_version: int
+    base_revision_id: str | None
+    title: str
+    summary: str
+    requirements: list[ShotRequirementRequest] = Field(min_length=1, max_length=24)
+
+
+class ShotListConfirmRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    revision_id: str
+    expected_current_revision_id: str
+
+
 class CoreState:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -355,6 +397,7 @@ class CoreState:
             self.db, self.providers, self.provider_secrets, self.timelines
         )
         self.media_generation = MediaGenerationService(self.db)
+        self.shot_requirements = ShotRequirementService(self.db)
         self.destinations = DestinationGrantStore()
         self.directory_grants = DirectoryGrantStore()
         self.rendition_presets = RenditionPresetRegistry(settings.font_dir.parent)
@@ -524,6 +567,9 @@ def _domain(exc: DomainError) -> HTTPException:
             "GENERATION_HASH_MISMATCH",
             "GENERATION_RETRY_NOT_ALLOWED",
             "JOB_INVALID_STATE",
+            "SHOT_LIST_CONFLICT",
+            "SHOT_LIST_CONFIRMATION_CONFLICT",
+            "SHOT_REQUIREMENT_ASSET_PROJECT_MISMATCH",
         }
         else 400
     )
@@ -545,6 +591,9 @@ def _domain(exc: DomainError) -> HTTPException:
         "TIMELINE_PATCH_PROPOSAL_NOT_FOUND",
         "REFRAME_CLIP_NOT_FOUND",
         "GENERATION_TASK_NOT_FOUND",
+        "SHOT_LIST_NOT_FOUND",
+        "SHOT_LIST_REVISION_NOT_FOUND",
+        "SHOT_REQUIREMENT_ASSET_NOT_FOUND",
     }:
         status = 404
     return _error(exc.code, exc.message, status)
@@ -1829,6 +1878,57 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise _error(str(exc), "操作失败", 400) from exc
         next_cursor = str(int(cursor or 0) + len(items)) if len(items) == limit else None
         return {"items": items, "next_cursor": next_cursor}
+
+    @app.get("/api/v1/projects/{project_id}/shot-list")
+    async def get_shot_list(project_id: str, _: CoreState = Depends(require_ui)) -> dict[str, Any]:
+        try:
+            return state.shot_requirements.get_state(project_id)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/projects/{project_id}/shot-list/revisions")
+    async def list_shot_list_revisions(
+        project_id: str,
+        limit: int = 20,
+        cursor: str | None = None,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            items, next_cursor = state.shot_requirements.list_revisions(project_id, limit, cursor)
+            return {"items": items, "next_cursor": next_cursor}
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/shot-list-revisions/{revision_id}")
+    async def get_shot_list_revision(
+        revision_id: str, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        try:
+            return state.shot_requirements.get_revision(revision_id)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/shot-list/revisions")
+    async def create_shot_list_revision(
+        project_id: str,
+        request: ShotListRevisionCreateRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return state.shot_requirements.create_revision(project_id, request.model_dump())
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/shot-list/confirm")
+    async def confirm_shot_list_revision(
+        project_id: str,
+        request: ShotListConfirmRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return state.shot_requirements.confirm(project_id, request.model_dump())
+        except DomainError as exc:
+            raise _domain(exc) from exc
 
     @app.post("/api/v1/projects/{project_id}/media-generation-requests/prepare")
     async def prepare_media_generation_request(

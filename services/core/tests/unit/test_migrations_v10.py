@@ -50,14 +50,20 @@ def test_v10_new_schema_is_idempotent_append_only_and_frozen(tmp_path: Path) -> 
     } == _FROZEN_V1_V9
 
 
-def test_v10_upgrades_real_v9_without_backfill(tmp_path: Path) -> None:
+def test_v10_upgrades_real_v9_without_backfill(tmp_path: Path, monkeypatch) -> None:
+    import aivs_core.database as database_module
+
     path = tmp_path / "app.db"
     database = Database(path)
-    original_v10 = MIGRATIONS.pop("v10")
-    try:
-        database.initialize()
-    finally:
-        MIGRATIONS["v10"] = original_v10
+    full_migrations = database_module.MIGRATIONS
+    v1_v9 = {
+        version: sql
+        for version, sql in full_migrations.items()
+        if int(version.removeprefix("v")) <= 9
+    }
+    monkeypatch.setattr(database_module, "MIGRATIONS", v1_v9)
+    database.initialize()
+    monkeypatch.setattr(database_module, "MIGRATIONS", full_migrations)
     with database.connection() as db:
         db.execute(
             "INSERT INTO projects VALUES (?,?,?,?,?,?,?,?,?,?)",
@@ -144,11 +150,11 @@ def test_v10_rejects_unknown_version_and_checksum_damage(tmp_path: Path) -> None
     database = Database(tmp_path / "app.db")
     database.initialize()
     with database.connection() as db:
-        db.execute("INSERT INTO schema_migrations VALUES ('v12','now','x')")
+        db.execute("INSERT INTO schema_migrations VALUES ('v99','now','x')")
     with pytest.raises(MigrationError, match="未知数据库版本"):
         database.initialize()
     with database.connection() as db:
-        db.execute("DELETE FROM schema_migrations WHERE version='v12'")
+        db.execute("DELETE FROM schema_migrations WHERE version='v99'")
         db.execute("UPDATE schema_migrations SET checksum='x' WHERE version='v9'")
     with pytest.raises(MigrationError, match="迁移校验和不匹配: v9"):
         database.initialize()

@@ -59,14 +59,24 @@ def test_v11_is_append_only_idempotent_and_preserves_frozen_checksums(tmp_path: 
     } == _FROZEN_V1_V10
 
 
-def test_v11_upgrades_v10_and_enforces_request_immutability(tmp_path: Path) -> None:
+def test_v11_upgrades_v10_and_enforces_request_immutability(tmp_path: Path, monkeypatch) -> None:
+    import aivs_core.database as database_module
+
     path = tmp_path / "app.db"
     database = Database(path)
-    v11 = MIGRATIONS.pop("v11")
-    try:
-        database.initialize()
-    finally:
-        MIGRATIONS["v11"] = v11
+    full_migrations = database_module.MIGRATIONS
+    v1_v10 = {
+        version: sql
+        for version, sql in full_migrations.items()
+        if int(version.removeprefix("v")) <= 10
+    }
+    v1_v11 = {
+        version: sql
+        for version, sql in full_migrations.items()
+        if int(version.removeprefix("v")) <= 11
+    }
+    monkeypatch.setattr(database_module, "MIGRATIONS", v1_v10)
+    database.initialize()
     with database.connection() as db:
         _project(db)
         assert (
@@ -75,6 +85,7 @@ def test_v11_upgrades_v10_and_enforces_request_immutability(tmp_path: Path) -> N
             ).fetchone()
             is None
         )
+    monkeypatch.setattr(database_module, "MIGRATIONS", v1_v11)
     database.initialize()
     with database.connection() as db:
         db.execute(

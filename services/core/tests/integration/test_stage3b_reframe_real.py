@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from aivs_core.app import create_app
 from aivs_core.config import Settings
-from aivs_core.database import MIGRATIONS, Database
+from aivs_core.database import Database
 
 FFMPEG = Path("resources/ffmpeg/win-x64/ffmpeg.exe").resolve()
 FFPROBE = Path("resources/ffmpeg/win-x64/ffprobe.exe").resolve()
@@ -481,15 +481,21 @@ def _table_digest(connection: sqlite3.Connection, table: str) -> str:
     return hashlib.sha256(repr(rows).encode("utf-8")).hexdigest()
 
 
-def test_stage3b_real_v9_copy_upgrades_to_current_without_history_backfill(tmp_path: Path) -> None:
+def test_stage3b_real_v9_copy_upgrades_to_current_without_history_backfill(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import aivs_core.database as database_module
+
     source = tmp_path / "source-v9.db"
-    original_v10 = MIGRATIONS.pop("v10")
-    original_v11 = MIGRATIONS.pop("v11")
-    try:
-        Database(source).initialize()
-    finally:
-        MIGRATIONS["v10"] = original_v10
-        MIGRATIONS["v11"] = original_v11
+    full_migrations = database_module.MIGRATIONS
+    v1_v9 = {
+        version: sql
+        for version, sql in full_migrations.items()
+        if int(version.removeprefix("v")) <= 9
+    }
+    monkeypatch.setattr(database_module, "MIGRATIONS", v1_v9)
+    Database(source).initialize()
+    monkeypatch.setattr(database_module, "MIGRATIONS", full_migrations)
     with sqlite3.connect(source) as db:
         db.execute(
             "INSERT INTO projects VALUES (?,?,?,?,?,?,?,?,?,?)",
@@ -518,7 +524,7 @@ def test_stage3b_real_v9_copy_upgrades_to_current_without_history_backfill(tmp_p
         maximum = db.execute(
             "SELECT MAX(CAST(SUBSTR(version,2) AS INTEGER)) FROM schema_migrations"
         ).fetchone()[0]
-        assert maximum == 11
+        assert maximum == 12
         assert {
             table: _table_digest(db, table) for table in before
         } == before

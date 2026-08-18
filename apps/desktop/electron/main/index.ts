@@ -9,6 +9,7 @@ import { registerStage2aIpc } from "./stage2a-ipc.js";
 import { registerStage2bIpc } from "./stage2b-ipc.js";
 import { registerStage3bIpc } from "./stage3b-ipc.js";
 import { registerStage4Ipc } from "./stage4-ipc.js";
+import { registerStage4cIpc } from "./stage4c-ipc.js";
 import { registerFileGrant } from "./file-grants.js";
 import { exportFileName, normalizeExportPath } from "./export-destination.js";
 import { defaultLogPath, appendLog, redact } from "./logging.js";
@@ -427,6 +428,7 @@ function registerIpc(): void {
   ipcMain.handle("export-batch:retry", async (_event, input: { batch_id: ExportBatchId; retry: ExportBatchRetryInput }) => parseExportBatchRetryResponse(rendererSafe(await fetchWithUi(`${API_PREFIX}/export-batches/${asId(input.batch_id, "export_batch_id")}/retry`, { method: "POST", body: JSON.stringify(parseExportBatchRetryInput(input.retry)) }))));
   registerStage3bIpc({ ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) }, fetchWithUi, previewPresentation: renditionReframePreviewPresentation });
   registerStage4Ipc({ ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) }, fetchWithUi });
+  registerStage4cIpc({ ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) }, fetchWithUi });
   ipcMain.handle("preview:create", async (_event, input: { project_id: ProjectId; preview: PreviewCreateInput }) => {
     const projectId = asId(input.project_id, "project_id");
     const request = parsePreviewCreateInput(input.preview);

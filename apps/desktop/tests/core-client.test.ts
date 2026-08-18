@@ -229,4 +229,32 @@ describe("CoreClient", () => {
     expect(JSON.stringify(result)).not.toContain("private");
   });
 
+  it("实现 Stage 4C 五个固定 API，并在解析前清理路径但拒绝未知输出", async () => {
+    const now = "2026-08-18T00:00:00.000Z"; const hash = `sha256:${"c".repeat(64)}`;
+    const summary = { schema_version: 1, shot_list_revision_id: "revision_1", shot_list_id: "shot_list_1", project_id: "project_1", parent_revision_id: null, title: "清单", requirement_count: 1, document_sha256: hash, created_at: now };
+    const detail = { ...summary, summary: "人工摘要", requirements: [{ shot_requirement_id: "requirement_1", shot_list_revision_id: "revision_1", ordinal: 0, title: "镜头", visual_direction: "固定机位", target_duration_us: null, visual: { requirement_kind: "image", source_asset_id: null }, narration: null }] };
+    const state = { shot_list_id: "shot_list_1", project_id: "project_1", lifecycle: "drafted", current_revision: detail, confirmed_revision: null };
+    const input = { schema_version: 1 as const, base_revision_id: null, title: "清单", summary: "人工摘要", requirements: [{ title: "镜头", visual_direction: "固定机位", target_duration_us: null, visual: { requirement_kind: "image" as const, source_asset_id: null }, narration: null }] };
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(response({ ...state, absolute_path: "private" }))
+      .mockResolvedValueOnce(response({ items: [summary], next_cursor: null }))
+      .mockResolvedValueOnce(response(detail))
+      .mockResolvedValueOnce(response({ revision: detail, state, reused: false }))
+      .mockResolvedValueOnce(response({ state: { ...state, lifecycle: "confirmed", confirmed_revision: summary }, reused: false }));
+    const client = new CoreClient({ baseUrl: "http://127.0.0.1:4000", uiToken: "ui-secret", fetchImpl });
+    expect(JSON.stringify(await client.getShotList("project_1" as never))).not.toContain("private");
+    await client.listShotListRevisions("project_1" as never, { limit: 20, cursor: "0" });
+    await client.getShotListRevision("revision_1" as never);
+    await client.createShotListRevision("project_1" as never, input);
+    await client.confirmShotListRevision("project_1" as never, { revision_id: "revision_1" as never, expected_current_revision_id: "revision_1" as never });
+    expect(fetchImpl.mock.calls.map(call => String(call[0]))).toEqual([
+      "http://127.0.0.1:4000/api/v1/projects/project_1/shot-list",
+      "http://127.0.0.1:4000/api/v1/projects/project_1/shot-list/revisions?limit=20&cursor=0",
+      "http://127.0.0.1:4000/api/v1/shot-list-revisions/revision_1",
+      "http://127.0.0.1:4000/api/v1/projects/project_1/shot-list/revisions",
+      "http://127.0.0.1:4000/api/v1/projects/project_1/shot-list/confirm",
+    ]);
+    expect(JSON.parse(String(fetchImpl.mock.calls[3][1].body))).toEqual(input);
+  });
+
 });

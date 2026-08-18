@@ -108,3 +108,29 @@ footer .ai-entry { margin-right: 6px; min-height: 22px; padding: 0 7px; } footer
 .generation-task-actions { display: flex; justify-content: end; gap: 6px; }
 .generation-success, .generation-create-result { color: #8fc5aa; font-size: 12px; }
 @media (max-width: 760px) { .generation-history-grid, .generation-parameters { grid-template-columns: 1fr; } }
+
+/* Stage 4C structured shot requirement workbench */
+.shot-workbench { width: min(1040px, 100%); }
+.shot-zero-notice { padding: 9px 10px; border: 1px solid #456451; background: #18251e; color: #9ed0b4; font-size: 12px; }
+.shot-editor { display: grid; gap: 12px; }
+.shot-editor > .generation-field textarea { min-height: 70px; }
+.shot-toolbar, .shot-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.shot-list { display: grid; gap: 10px; max-height: 50vh; overflow: auto; padding-right: 4px; }
+.shot-card { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 9px; padding: 11px; border: 1px solid #3b474d; background: #151d20; }
+.shot-card-heading { grid-column: 1 / -1; padding-bottom: 6px; border-bottom: 1px solid #303b40; }
+.shot-card-heading span { display: flex; gap: 5px; }
+.shot-card > label { display: grid; gap: 5px; font-size: 12px; }
+.shot-card > label:nth-of-type(2) { grid-column: 1 / -1; }
+.shot-card textarea { min-height: 64px; }
+.shot-card fieldset { min-width: 0; margin: 0; padding: 8px; border: 1px solid #3b474d; }
+.shot-card fieldset > label { margin-right: 12px; font-size: 12px; }
+.shot-card fieldset select, .shot-card fieldset textarea { width: 100%; margin-top: 7px; }
+.shot-history { display: grid; grid-template-columns: minmax(240px, .8fr) minmax(360px, 1.2fr); gap: 10px; min-height: 320px; }
+.shot-history-list, .shot-history-detail { max-height: 52vh; overflow: auto; padding: 9px; border: 1px solid #3b474d; background: #11171a; }
+.shot-history-list { display: flex; flex-direction: column; gap: 7px; }
+.shot-history-list button { display: grid; gap: 4px; text-align: left; }
+.shot-history-list small, .shot-history-detail small { color: #9eabb1; }
+.shot-history-list em { color: #d1a453; font-size: 11px; }
+.shot-history-detail li { margin-bottom: 9px; padding-bottom: 8px; border-bottom: 1px solid #303b40; }
+.shot-history-detail p { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 760px) { .shot-card, .shot-history { grid-template-columns: 1fr; }.shot-card > label:nth-of-type(2), .shot-card-heading { grid-column: 1; } }

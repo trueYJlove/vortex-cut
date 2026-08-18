@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CONTRACT_VERSION, ERROR_CODES, isApiErrorResponse, isAuthoritativePreview, isCaptionPresetId, isCandidateGeneration, isCandidateResponseAdapterId, isDestinationGrant, isDirectoryGrant, isExportBatchCreateInput, isExportCreateInput, isExportRecord, isFileGrant, isInternalModelManifest, isJobKind, isJobStatus, isModelDetail, isPlatformPreset, isPreviewCreateResponse, isProject, isProviderCapabilityTestResult, isProviderConfig, isRecipe, isRenderArtifact, isRenditionPreviewCreateInput, isRenditionReframePreviewCreateInput, isRenditionReframeSnapshotSummary, isReframeExportBatchCreateInput, isReframeExportBatchRetryInput, isSidecarReady, isTimelineCreateInput, isTimelineDiff, isTimelineDocument, isTimelineLayout, isTimelinePatch, isTimelinePatchCapabilityTestResponse, isTimelinePatchEgressPreview, isTimelinePatchGeneration, isTimelinePatchOperation, isTimelinePatchPrepareRequest, isTimelinePatchProposal, isTimelineState, isTranscript, parseSidecarReadyLine, isMediaGenerationPrepareInput, isMediaGenerationCreateInput, isMediaGenerationPreparedRequest, isMediaGenerationRequest, isMediaGenerationTask, isMediaGenerationCreateResponse } from "@aivideo/contracts";
+import { CONTRACT_VERSION, ERROR_CODES, isApiErrorResponse, isAuthoritativePreview, isCaptionPresetId, isCandidateGeneration, isCandidateResponseAdapterId, isDestinationGrant, isDirectoryGrant, isExportBatchCreateInput, isExportCreateInput, isExportRecord, isFileGrant, isInternalModelManifest, isJobKind, isJobStatus, isModelDetail, isPlatformPreset, isPreviewCreateResponse, isProject, isProviderCapabilityTestResult, isProviderConfig, isRecipe, isRenderArtifact, isRenditionPreviewCreateInput, isRenditionReframePreviewCreateInput, isRenditionReframeSnapshotSummary, isReframeExportBatchCreateInput, isReframeExportBatchRetryInput, isSidecarReady, isTimelineCreateInput, isTimelineDiff, isTimelineDocument, isTimelineLayout, isTimelinePatch, isTimelinePatchCapabilityTestResponse, isTimelinePatchEgressPreview, isTimelinePatchGeneration, isTimelinePatchOperation, isTimelinePatchPrepareRequest, isTimelinePatchProposal, isTimelineState, isTranscript, parseSidecarReadyLine, isMediaGenerationPrepareInput, isMediaGenerationCreateInput, isMediaGenerationPreparedRequest, isMediaGenerationRequest, isMediaGenerationTask, isMediaGenerationCreateResponse, isShotListRevisionCreateInput, isShotListRevisionSummary, isShotListRevisionDetail, isShotListState } from "@aivideo/contracts";
 
 const now = "2026-08-11T00:00:00.000Z";
 
@@ -53,7 +53,7 @@ describe("Stage 0 contract", () => {
     expect(isTranscript({ ...transcript, segments: [{ ...transcript.segments[0], end_us: 3_000_000 }] })).toBe(false);
   });
   it("freezes Stage 1C enums, error codes and every patch operation", () => {
-    expect(CONTRACT_VERSION).toBe("stage3b-v1"); expect(isTimelineLayout("crop_fill")).toBe(true); expect(isTimelineLayout("smart_crop")).toBe(false); expect(isCaptionPresetId("high-contrast")).toBe(true); expect(isJobKind("authoritative_preview")).toBe(true); expect(isJobKind("timeline_patch_generation")).toBe(true); expect(ERROR_CODES).toContain("TIMELINE_CONFLICT"); expect(ERROR_CODES).toContain("TIMELINE_PATCH_PROPOSAL_CONFLICT"); expect(ERROR_CODES).toContain("CANDIDATE_PROVIDER_UNTESTED"); expect(ERROR_CODES).toContain("EXPORT_DIRECTORY_GRANT_EXPIRED");
+    expect(CONTRACT_VERSION).toBe("stage4c-v1"); expect(isTimelineLayout("crop_fill")).toBe(true); expect(isTimelineLayout("smart_crop")).toBe(false); expect(isCaptionPresetId("high-contrast")).toBe(true); expect(isJobKind("authoritative_preview")).toBe(true); expect(isJobKind("timeline_patch_generation")).toBe(true); expect(ERROR_CODES).toContain("TIMELINE_CONFLICT"); expect(ERROR_CODES).toContain("TIMELINE_PATCH_PROPOSAL_CONFLICT"); expect(ERROR_CODES).toContain("CANDIDATE_PROVIDER_UNTESTED"); expect(ERROR_CODES).toContain("EXPORT_DIRECTORY_GRANT_EXPIRED");
     const operations = [
       { op: "insert_asset_clip", asset_id: "asset_1", at_index: 0, duration_us: 3_000_000 },
       { op: "insert_transcript_segments", transcript_id: "transcript_1", segment_ids: ["segment_1"], at_index: 0, padding_before_us: 0, padding_after_us: 300_000, create_captions: true },
@@ -135,8 +135,8 @@ describe("Stage 3B reframe contracts", () => {
   const hash = "a".repeat(64);
   const adjustment = { clip_id: "clip_1", horizontal_anchor: "left", vertical_anchor: "center" } as const;
 
-  it("freezes stage3b-v1 and accepts only strict non-center 3x3 adjustments", () => {
-    expect(CONTRACT_VERSION).toBe("stage3b-v1");
+  it("retains the Stage 3B strict non-center 3x3 guards under stage4c-v1", () => {
+    expect(CONTRACT_VERSION).toBe("stage4c-v1");
     expect(ERROR_CODES).toContain("REFRAME_PREVIEW_REQUIRED");
     expect(isRenditionReframePreviewCreateInput({ base_rendition_snapshot_id: "rendition_snapshot_1", adjustments: [adjustment] })).toBe(true);
     expect(isRenditionReframePreviewCreateInput({ base_rendition_snapshot_id: "rendition_snapshot_1", adjustments: [{ ...adjustment, horizontal_anchor: "center", vertical_anchor: "center" }] })).toBe(false);
@@ -193,7 +193,7 @@ describe("Stage 4A media generation contract", () => {
   };
 
   it("保持版本不变并扩展独立 JobKind 与错误码", () => {
-    expect(CONTRACT_VERSION).toBe("stage3b-v1");
+    expect(CONTRACT_VERSION).toBe("stage4c-v1");
     expect(isJobKind("media_generation")).toBe(true);
     expect(ERROR_CODES).toEqual(expect.arrayContaining([
       "GENERATION_REQUEST_INVALID", "GENERATION_KIND_UNSUPPORTED", "GENERATION_INPUT_CHANGED",
@@ -222,5 +222,49 @@ describe("Stage 4A media generation contract", () => {
     }
     expect(isMediaGenerationTask({ ...task, result_summary: { execution_mode: "simulation_only", outcome: "validated_without_media", provider_call_count: 1 } })).toBe(false);
     expect(isMediaGenerationTask({ ...task, status: "succeeded", stage: "completed", finished_at: now, result_summary: { execution_mode: "simulation_only", outcome: "validated_without_media", provider_call_count: 0 } })).toBe(true);
+  });
+});
+
+
+describe("Stage 4C shot requirement contract", () => {
+  const hash = `sha256:${"b".repeat(64)}`;
+  const imageRequirement = { title: "镜头一", visual_direction: "固定机位", target_duration_us: 3_000_000, visual: { requirement_kind: "image", source_asset_id: null }, narration: null };
+  const mediaRequirement = { title: "镜头二", visual_direction: "沿用现有画面", target_duration_us: null, visual: { requirement_kind: "existing_media", source_asset_id: "asset_1" }, narration: { requirement_kind: "tts", text: "人工旁白正文" } };
+  const input = { schema_version: 1, base_revision_id: null, title: "镜头清单", summary: "人工摘要", requirements: [imageRequirement, mediaRequirement] };
+  const summary = { schema_version: 1, shot_list_revision_id: "revision_1", shot_list_id: "shot_list_1", project_id: "project_1", parent_revision_id: null, title: "镜头清单", requirement_count: 2, document_sha256: hash, created_at: now };
+  const detail = { ...summary, summary: "人工摘要", requirements: [
+    { shot_requirement_id: "requirement_1", shot_list_revision_id: "revision_1", ordinal: 0, ...imageRequirement },
+    { shot_requirement_id: "requirement_2", shot_list_revision_id: "revision_1", ordinal: 1, ...mediaRequirement },
+  ] };
+
+  it("升级为 stage4c-v1 并接受 1–24 条严格组合", () => {
+    expect(CONTRACT_VERSION).toBe("stage4c-v1");
+    expect(isShotListRevisionCreateInput(input)).toBe(true);
+    expect(isShotListRevisionCreateInput({ ...input, requirements: Array.from({ length: 24 }, (_, index) => ({ ...imageRequirement, title: `镜头${index + 1}` })) })).toBe(true);
+    expect(isShotListRevisionCreateInput({ ...input, requirements: [] })).toBe(false);
+    expect(isShotListRevisionCreateInput({ ...input, requirements: Array.from({ length: 25 }, () => imageRequirement) })).toBe(false);
+  });
+
+  it("拒绝 unknown/sensitive keys 和 visual/narration 非法组合", () => {
+    expect(isShotListRevisionCreateInput({ ...input, extra: true })).toBe(false);
+    expect(isShotListRevisionCreateInput({ ...input, requirements: [{ ...imageRequirement, payload: "private" }] })).toBe(false);
+    expect(isShotListRevisionCreateInput({ ...input, requirements: [{ ...imageRequirement, visual: { requirement_kind: "image", source_asset_id: "asset_1" } }] })).toBe(false);
+    expect(isShotListRevisionCreateInput({ ...input, requirements: [{ ...mediaRequirement, visual: { requirement_kind: "existing_media", source_asset_id: null } }] })).toBe(false);
+    expect(isShotListRevisionCreateInput({ ...input, requirements: [{ ...imageRequirement, narration: { requirement_kind: "tts", text: "" } }] })).toBe(false);
+    expect(isShotListRevisionCreateInput({ ...input, requirements: [{ ...imageRequirement, target_duration_us: 99_999 }] })).toBe(false);
+  });
+
+  it("Summary 不含正文，Detail 允许所属正文但拒绝路径/Provider 字段", () => {
+    expect(isShotListRevisionSummary(summary)).toBe(true);
+    expect(isShotListRevisionSummary({ ...summary, summary: "forbidden" })).toBe(false);
+    expect(isShotListRevisionDetail(detail)).toBe(true);
+    for (const forbidden of ["path", "uri", "provider", "payload", "raw_exception"]) {
+      expect(isShotListRevisionDetail({ ...detail, [forbidden]: "private" })).toBe(false);
+    }
+    expect(isShotListState({ shot_list_id: null, project_id: "project_1", lifecycle: "empty", current_revision: null, confirmed_revision: null })).toBe(true);
+    expect(isShotListState({ shot_list_id: "shot_list_1", project_id: "project_1", lifecycle: "drafted", current_revision: detail, confirmed_revision: null })).toBe(true);
+    expect(isShotListState({ shot_list_id: "shot_list_1", project_id: "project_1", lifecycle: "drafted", current_revision: { ...detail, shot_list_revision_id: "revision_2", parent_revision_id: "revision_1", requirements: detail.requirements.map(item => ({ ...item, shot_list_revision_id: "revision_2" })) }, confirmed_revision: summary })).toBe(true);
+    expect(isShotListState({ shot_list_id: "shot_list_1", project_id: "project_1", lifecycle: "confirmed", current_revision: detail, confirmed_revision: summary })).toBe(true);
+    expect(isShotListState({ shot_list_id: "shot_list_1", project_id: "project_1", lifecycle: "confirmed", current_revision: { ...detail, shot_list_revision_id: "revision_2", parent_revision_id: "revision_1", requirements: detail.requirements.map(item => ({ ...item, shot_list_revision_id: "revision_2" })) }, confirmed_revision: summary })).toBe(false);
   });
 });
