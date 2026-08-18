@@ -144,11 +144,11 @@ def test_v10_rejects_unknown_version_and_checksum_damage(tmp_path: Path) -> None
     database = Database(tmp_path / "app.db")
     database.initialize()
     with database.connection() as db:
-        db.execute("INSERT INTO schema_migrations VALUES ('v11','now','x')")
+        db.execute("INSERT INTO schema_migrations VALUES ('v12','now','x')")
     with pytest.raises(MigrationError, match="未知数据库版本"):
         database.initialize()
     with database.connection() as db:
-        db.execute("DELETE FROM schema_migrations WHERE version='v11'")
+        db.execute("DELETE FROM schema_migrations WHERE version='v12'")
         db.execute("UPDATE schema_migrations SET checksum='x' WHERE version='v9'")
     with pytest.raises(MigrationError, match="迁移校验和不匹配: v9"):
         database.initialize()

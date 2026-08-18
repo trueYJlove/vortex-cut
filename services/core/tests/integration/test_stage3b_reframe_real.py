@@ -481,13 +481,15 @@ def _table_digest(connection: sqlite3.Connection, table: str) -> str:
     return hashlib.sha256(repr(rows).encode("utf-8")).hexdigest()
 
 
-def test_stage3b_real_v9_copy_upgrades_to_v10_without_history_backfill(tmp_path: Path) -> None:
+def test_stage3b_real_v9_copy_upgrades_to_current_without_history_backfill(tmp_path: Path) -> None:
     source = tmp_path / "source-v9.db"
     original_v10 = MIGRATIONS.pop("v10")
+    original_v11 = MIGRATIONS.pop("v11")
     try:
         Database(source).initialize()
     finally:
         MIGRATIONS["v10"] = original_v10
+        MIGRATIONS["v11"] = original_v11
     with sqlite3.connect(source) as db:
         db.execute(
             "INSERT INTO projects VALUES (?,?,?,?,?,?,?,?,?,?)",
@@ -516,7 +518,7 @@ def test_stage3b_real_v9_copy_upgrades_to_v10_without_history_backfill(tmp_path:
         maximum = db.execute(
             "SELECT MAX(CAST(SUBSTR(version,2) AS INTEGER)) FROM schema_migrations"
         ).fetchone()[0]
-        assert maximum == 10
+        assert maximum == 11
         assert {
             table: _table_digest(db, table) for table in before
         } == before

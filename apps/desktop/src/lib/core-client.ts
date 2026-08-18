@@ -83,6 +83,11 @@ import {
   , type ExportBatch, type ExportBatchPage, type ExportBatchCreateInput, type ExportBatchCreateResponse, type ExportBatchRetryInput, type ExportBatchRetryResponse
   , type RenditionReframePreviewPage, type RenditionReframePreviewCreateInput, type RenditionReframePreviewCreateResponse
   , type ReframeExportBatch, type ReframeExportBatchPage, type ReframeExportBatchCreateInput, type ReframeExportBatchCreateResponse, type ReframeExportBatchRetryInput, type ReframeExportBatchRetryResponse
+  , parseMediaGenerationPreparedRequest, parseMediaGenerationCreateResponse, parseMediaGenerationRequest
+  , parseMediaGenerationRequestPage, parseMediaGenerationTaskPage, parseMediaGenerationTask
+  , type MediaGenerationPrepareInput, type MediaGenerationCreateInput, type MediaGenerationPreparedRequest
+  , type MediaGenerationCreateResponse, type MediaGenerationRequest, type MediaGenerationRequestPage
+  , type MediaGenerationRequestId, type MediaGenerationTask, type MediaGenerationTaskId, type MediaGenerationTaskPage
 } from "@aivideo/contracts";
 
 export class CoreApiError extends Error {
@@ -113,7 +118,7 @@ function removeSensitiveFields(value: unknown): unknown {
   if (!value || typeof value !== "object") return value;
   const result: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) {
-    if (["path", "uri", "root_dir", "database_path", "admin_token", "ui_token", "token", "installed_path", "install_dir", "source_file", "authorization", "api_key", "secret", "prompt", "raw_response", "instruction", "payload", "http_body", "request_body", "system_message"].includes(key.toLowerCase())) continue;
+    if (["path", "uri", "root_dir", "database_path", "admin_token", "ui_token", "token", "installed_path", "install_dir", "source_file", "authorization", "api_key", "secret", "prompt", "raw_response", "instruction", "payload", "http_body", "request_body", "system_message", "absolute_path", "transcript", "caption", "stderr", "command", "traceback"].includes(key.toLowerCase())) continue;
     result[key] = removeSensitiveFields(item);
   }
   return result;
@@ -446,6 +451,35 @@ export class CoreClient {
   }
   retryReframeExportBatch(batchId: string, input: ReframeExportBatchRetryInput): Promise<ReframeExportBatchRetryResponse> {
     return this.request<unknown>(`${API_PREFIX}/reframe-export-batches/${encodeURIComponent(batchId)}/retry`, { method: "POST", body: JSON.stringify(input) }).then(value => parseReframeExportBatchRetryResponse(removeSensitiveFields(value)));
+  }
+
+  prepareMediaGeneration(projectId: ProjectId, input: MediaGenerationPrepareInput): Promise<MediaGenerationPreparedRequest> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/media-generation-requests/prepare`, { method: "POST", body: JSON.stringify(input) })
+      .then(value => parseMediaGenerationPreparedRequest(removeSensitiveFields(value)));
+  }
+  createMediaGeneration(projectId: ProjectId, input: MediaGenerationCreateInput): Promise<MediaGenerationCreateResponse> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/media-generation-requests`, { method: "POST", body: JSON.stringify(input) })
+      .then(value => parseMediaGenerationCreateResponse(removeSensitiveFields(value)));
+  }
+  listMediaGenerationRequests(projectId: ProjectId, params: ListParams = {}): Promise<MediaGenerationRequestPage> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/media-generation-requests${query(params)}`)
+      .then(value => parseMediaGenerationRequestPage(removeSensitiveFields(value)));
+  }
+  getMediaGenerationRequest(requestId: MediaGenerationRequestId): Promise<MediaGenerationRequest> {
+    return this.request<unknown>(`${API_PREFIX}/media-generation-requests/${encodeURIComponent(requestId)}`)
+      .then(value => parseMediaGenerationRequest(removeSensitiveFields(value)));
+  }
+  listMediaGenerationTasks(requestId: MediaGenerationRequestId, params: ListParams = {}): Promise<MediaGenerationTaskPage> {
+    return this.request<unknown>(`${API_PREFIX}/media-generation-requests/${encodeURIComponent(requestId)}/tasks${query(params)}`)
+      .then(value => parseMediaGenerationTaskPage(removeSensitiveFields(value)));
+  }
+  retryMediaGenerationTask(taskId: MediaGenerationTaskId): Promise<MediaGenerationTask> {
+    return this.request<unknown>(`${API_PREFIX}/media-generation-tasks/${encodeURIComponent(taskId)}/retry`, { method: "POST", body: JSON.stringify({}) })
+      .then(value => parseMediaGenerationTask(removeSensitiveFields(value)));
+  }
+  cancelMediaGenerationTask(taskId: MediaGenerationTaskId): Promise<MediaGenerationTask> {
+    return this.request<unknown>(`${API_PREFIX}/media-generation-tasks/${encodeURIComponent(taskId)}/cancel`, { method: "POST", body: JSON.stringify({}) })
+      .then(value => parseMediaGenerationTask(removeSensitiveFields(value)));
   }
 
   subscribe(jobId: JobId, listener: JobListener): () => void {
