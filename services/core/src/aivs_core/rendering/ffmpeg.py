@@ -32,9 +32,7 @@ def build_timeline_args(
     height = int(plan["output"]["height"])
     filters: list[str] = []
     concat_inputs = []
-    for index, (segment, probe) in enumerate(
-        zip(segments, segment_probes, strict=True)
-    ):
+    for index, (segment, probe) in enumerate(zip(segments, segment_probes, strict=True)):
         duration_us = segment["timeline_end_us"] - segment["timeline_start_us"]
         duration = _seconds(duration_us)
         if segment["asset_kind"] == "video":
@@ -43,10 +41,14 @@ def build_timeline_args(
             source = f"[{index}:v:0]trim=start={start}:end={end},setpts=PTS-STARTPTS"
         else:
             source = f"[{index}:v:0]trim=duration={duration},setpts=PTS-STARTPTS"
-        visual = _visual_filter(segment["layout"], width, height, index)
+        reframe = segment.get("reframe")
+        visual = (
+            _reframe_crop_filter(width, height, reframe["crop_x"], reframe["crop_y"])
+            if isinstance(reframe, dict)
+            else _visual_filter(segment["layout"], width, height, index)
+        )
         filters.append(
-            f"{source},{_square_pixel_filter()},{visual},"
-            f"setsar=1,fps=30,format=yuv420p[v{index}]"
+            f"{source},{_square_pixel_filter()},{visual},setsar=1,fps=30,format=yuv420p[v{index}]"
         )
         has_audio = bool(probe.get("audio_streams"))
         if segment["asset_kind"] == "video" and has_audio and segment["audio_enabled"]:
@@ -64,9 +66,7 @@ def build_timeline_args(
                 f"atrim=duration={duration},asetpts=PTS-STARTPTS[a{index}]"
             )
         concat_inputs.append(f"[v{index}][a{index}]")
-    filters.append(
-        f"{''.join(concat_inputs)}concat=n={len(segments)}:v=1:a=1[vcat][aout]"
-    )
+    filters.append(f"{''.join(concat_inputs)}concat=n={len(segments)}:v=1:a=1[vcat][aout]")
     video_label = "vcat"
     if captions:
         filters.append("[vcat]ass=filename=captions.ass:fontsdir=fonts[vout]")
@@ -112,10 +112,7 @@ def build_timeline_args(
 
 def _visual_filter(layout: str, width: int, height: int, index: int) -> str:
     if layout == "crop_fill":
-        return (
-            f"scale={width}:{height}:force_original_aspect_ratio=increase,"
-            f"crop={width}:{height}"
-        )
+        return f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}"
     if layout == "fit":
         return (
             f"scale={width}:{height}:force_original_aspect_ratio=decrease:"
@@ -132,6 +129,23 @@ def _visual_filter(layout: str, width: int, height: int, index: int) -> str:
             f"[blur{index}][front{index}]overlay=(W-w)/2:(H-h)/2"
         )
     raise DomainError("RENDER_PLAN_INVALID", "不支持的布局")
+
+
+def _reframe_crop_filter(width: int, height: int, crop_x: int, crop_y: int) -> str:
+    values = (width, height, crop_x, crop_y)
+    if (
+        any(not isinstance(value, int) for value in values)
+        or width <= 0
+        or height <= 0
+        or crop_x < 0
+        or crop_y < 0
+        or any(value % 2 for value in values)
+    ):
+        raise DomainError("RENDER_PLAN_INVALID", "重构图裁切几何不合法")
+    return (
+        f"scale={width}:{height}:force_original_aspect_ratio=increase:force_divisible_by=2,"
+        f"crop={width}:{height}:{crop_x}:{crop_y}"
+    )
 
 
 def _square_pixel_filter() -> str:

@@ -9,10 +9,10 @@ from .process import run_process
 
 
 def parse_fraction(value: str | None) -> tuple[int, int]:
-    if not value or value in {"0/0", "N/A"}:
+    if not value or value in {"0/0", "0:0", "N/A"}:
         return 0, 1
     try:
-        fraction = Fraction(value)
+        fraction = Fraction(value.replace(":", "/"))
         return fraction.numerator, fraction.denominator
     except (ValueError, ZeroDivisionError):
         return 0, 1
@@ -43,12 +43,15 @@ def normalize_probe(payload: dict[str, Any], path: Path) -> dict[str, Any]:
     for stream in payload.get("streams") or []:
         if stream.get("codec_type") == "video":
             num, den = parse_fraction(stream.get("avg_frame_rate") or stream.get("r_frame_rate"))
+            sar_num, sar_den = parse_fraction(stream.get("sample_aspect_ratio") or "1/1")
             video.append(
                 {
                     "index": stream.get("index", 0),
                     "codec": stream.get("codec_name"),
                     "width": int(stream.get("width") or 0),
                     "height": int(stream.get("height") or 0),
+                    "sample_aspect_ratio_num": sar_num,
+                    "sample_aspect_ratio_den": sar_den,
                     "avg_frame_rate_num": num,
                     "avg_frame_rate_den": den,
                     "rotation": _rotation(stream),

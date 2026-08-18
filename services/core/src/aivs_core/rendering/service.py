@@ -18,7 +18,7 @@ from ..media.process import run_process
 from ..projects import DomainError, ProjectAssetService
 from .ass import CaptionResources, build_ass, build_rendition_ass
 from .ffmpeg import build_timeline_args, run_timeline_render
-from .plan import COMPILER_VERSION, RenderPlanCompiler
+from .plan import COMPILER_VERSION, REFRAME_COMPILER_VERSION, RenderPlanCompiler
 from .validation import validate_rendered_media
 
 logger = logging.getLogger(__name__)
@@ -244,7 +244,12 @@ class RenderCoordinator:
         job_id = row["id"]
         stage("compiling")
         rendition_snapshot_id = payload.get("rendition_snapshot_id")
-        if isinstance(rendition_snapshot_id, str):
+        reframe_snapshot_id = payload.get("rendition_reframe_snapshot_id")
+        if isinstance(reframe_snapshot_id, str):
+            plan = self.compiler.compile_reframe(
+                row["project_id"], row["timeline_revision_id"], reframe_snapshot_id, mode
+            )
+        elif isinstance(rendition_snapshot_id, str):
             plan = self.compiler.compile_rendition(
                 row["project_id"], row["timeline_revision_id"], rendition_snapshot_id, mode
             )
@@ -267,10 +272,12 @@ class RenderCoordinator:
         fonts = work / "fonts"
         fonts.mkdir(exist_ok=True)
         shutil.copy2(font_path, fonts / font_path.name)
-        if rendition_snapshot_id:
+        if rendition_snapshot_id or reframe_snapshot_id:
             if self.rendition_presets is None:
                 raise DomainError("RENDITION_SNAPSHOT_INVALID", "画幅预设未加载")
-            rendition_id = self._snapshot_rendition_id(rendition_snapshot_id)
+            rendition_id = self._snapshot_rendition_id(
+                rendition_snapshot_id or plan["base_rendition_snapshot_id"]
+            )
             (work / "captions.ass").write_text(
                 build_rendition_ass(
                     plan["captions"]["items"],
@@ -285,11 +292,12 @@ class RenderCoordinator:
             )
         destination_grant = None
         if mode == "final_export":
-            if rendition_snapshot_id:
+            if rendition_snapshot_id or reframe_snapshot_id:
                 if self.directory_grants is None:
                     raise DomainError("EXPORT_DIRECTORY_GRANT_INVALID", "导出目录授权不可用")
                 destination_grant = self.directory_grants.resolve(
-                    payload["directory_grant_id"], payload["export_batch_id"]
+                    payload["directory_grant_id"],
+                    payload.get("reframe_export_batch_id") or payload["export_batch_id"],
                 )
                 target = Path(destination_grant["path"]) / payload["destination_display_name"]
                 if (
@@ -391,7 +399,9 @@ class RenderCoordinator:
                     db.execute(
                         "INSERT INTO render_artifacts(artifact_id,project_id,"
                         "timeline_revision_id,kind,render_plan_json,content_fingerprint,"
-                        "profile_id,toolchain_json,rendition_snapshot_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",  # noqa: E501
+                        "profile_id,toolchain_json,rendition_snapshot_id,"
+                        "rendition_reframe_snapshot_id,created_at) "
+                        "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                         (
                             artifact_id,
                             row["project_id"],
@@ -402,14 +412,16 @@ class RenderCoordinator:
                             plan["output"]["profile_id"],
                             json_dumps(toolchain),
                             rendition_snapshot_id,
+                            reframe_snapshot_id,
                             now,
                         ),
                     )
                     if export_record_id is not None:
                         db.execute(
                             "INSERT INTO export_records(id,project_id,timeline_revision_id,"
-                            "artifact_id,profile_id,destination_uri,destination_display_name,export_batch_item_id,"
-                            "created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                            "artifact_id,profile_id,destination_uri,destination_display_name,"
+                            "export_batch_item_id,reframe_export_batch_item_id,created_at) "
+                            "VALUES (?,?,?,?,?,?,?,?,?,?)",
                             (
                                 export_record_id,
                                 row["project_id"],
@@ -417,12 +429,18 @@ class RenderCoordinator:
                                 artifact_id,
                                 plan["output"]["profile_id"],
                                 (
-                                    f"aivideo://export-batch/{payload['export_batch_id']}/{row['export_batch_item_id']}"
-                                    if rendition_snapshot_id
-                                    else final_path.as_uri()
-                                ),
+                                    f"aivideo://reframe-export-batch/"
+                                    f"{payload['reframe_export_batch_id']}/"
+                                    f"{row['reframe_export_batch_item_id']}"
+                                    if reframe_snapshot_id
+                                    else f"aivideo://export-batch/{payload['export_batch_id']}/"
+                                    f"{row['export_batch_item_id']}"
+                                )
+                                if (rendition_snapshot_id or reframe_snapshot_id)
+                                else final_path.as_uri(),
                                 display_name,
                                 row["export_batch_item_id"],
+                                row["reframe_export_batch_item_id"],
                                 now,
                             ),
                         )
@@ -531,6 +549,44 @@ class RenderService:
         )
         return {"job": job, "preview": None, "reused": False}
 
+    async def create_reframe_preview(
+        self,
+        project_id: str,
+        timeline_revision_id: str,
+        reframe_snapshot_id: str,
+        encoder_mode: str,
+    ) -> dict[str, Any]:
+        encoder_mode = _encoder_mode(encoder_mode)
+        plan = self.compiler.compile_reframe(
+            project_id,
+            timeline_revision_id,
+            reframe_snapshot_id,
+            "authoritative_preview",
+            reject_draft=True,
+        )
+        encoder, fallback = await self.encoders.choose(encoder_mode)
+        toolchain = await self._reframe_toolchain(encoder, fallback)
+        reused = self._reusable_reframe_preview(plan, reframe_snapshot_id, toolchain)
+        if reused is not None:
+            return {"job": None, "preview": reused, "reused": True}
+        job = self.jobs.create_render(
+            "authoritative_preview",
+            project_id,
+            timeline_revision_id,
+            encoder,
+            {
+                "content_fingerprint": plan["content_fingerprint"],
+                "toolchain": toolchain,
+                "rendition_reframe_snapshot_id": reframe_snapshot_id,
+                "rendition_reframe_snapshot_sha256": plan["rendition_reframe_snapshot_sha256"],
+            },
+        )
+        return {"job": job, "preview": None, "reused": False}
+
+    async def select_reframe_encoder(self, encoder_mode: str) -> tuple[str, dict[str, Any]]:
+        encoder, fallback = await self.encoders.choose(_encoder_mode(encoder_mode))
+        return encoder, await self._reframe_toolchain(encoder, fallback)
+
     async def select_encoder(self, encoder_mode: str) -> tuple[str, dict[str, Any]]:
         """Resolve a public mode into the concrete FFmpeg encoder and toolchain."""
         encoder, fallback = await self.encoders.choose(_encoder_mode(encoder_mode))
@@ -633,6 +689,64 @@ class RenderService:
         items = [self.rendition_preview_dto(row["artifact_id"]) for row in rows]
         return items, str(offset + len(items)) if len(items) == limit else None
 
+    def reframe_preview_dto(self, artifact_id: str) -> dict[str, Any]:
+        artifact = self.artifact_dto(artifact_id)
+        with self.database.connection() as db:
+            owner = db.execute(
+                "SELECT rendition_reframe_snapshot_id FROM render_artifacts WHERE artifact_id=?",
+                (artifact_id,),
+            ).fetchone()
+            if owner is None or owner["rendition_reframe_snapshot_id"] is None:
+                raise DomainError("REFRAME_PREVIEW_REQUIRED", "不是重构图权威预览")
+            snapshot = db.execute(
+                "SELECT * FROM rendition_reframe_snapshots WHERE id=?",
+                (owner["rendition_reframe_snapshot_id"],),
+            ).fetchone()
+        if snapshot is None:
+            raise DomainError("REFRAME_SNAPSHOT_INVALID", "重构图快照不存在")
+        return {
+            "rendition_reframe_snapshot_id": snapshot["id"],
+            "project_id": snapshot["project_id"],
+            "timeline_revision_id": snapshot["timeline_revision_id"],
+            "base_rendition_snapshot_id": snapshot["base_rendition_snapshot_id"],
+            "base_snapshot_sha256": snapshot["base_snapshot_sha256"],
+            "platform_preset_id": snapshot["platform_preset_id"],
+            "rendition_preset_id": snapshot["rendition_preset_id"],
+            "adjustment_count": snapshot["adjustment_count"],
+            "reframe_snapshot_sha256": snapshot["snapshot_sha256"],
+            "warnings": json_loads(snapshot["warnings_json"]),
+            "created_at": snapshot["created_at"],
+            **{
+                key: artifact[key]
+                for key in (
+                    "render_artifact_id",
+                    "status",
+                    "profile_id",
+                    "display_name",
+                    "size_bytes",
+                    "sha256",
+                    "media_info",
+                    "encoder",
+                    "fallback_reason",
+                )
+            },
+        }
+
+    def list_reframe_previews(
+        self, project_id: str, limit: int, cursor: str | None
+    ) -> tuple[list[dict[str, Any]], str | None]:
+        limit, offset = _page(limit, cursor)
+        with self.database.connection() as db:
+            rows = db.execute(
+                "SELECT artifact_id FROM render_artifacts WHERE project_id=? "
+                "AND kind='authoritative_preview' "
+                "AND rendition_reframe_snapshot_id IS NOT NULL "
+                "ORDER BY created_at DESC,artifact_id DESC LIMIT ? OFFSET ?",
+                (project_id, limit, offset),
+            ).fetchall()
+        items = [self.reframe_preview_dto(row["artifact_id"]) for row in rows]
+        return items, str(offset + len(items)) if len(items) == limit else None
+
     def current_preview(self, project_id: str) -> dict[str, Any] | None:
         with self.database.connection() as db:
             row = db.execute(
@@ -641,6 +755,7 @@ class RenderService:
                 "p.current_timeline_revision_id JOIN artifacts a "
                 "ON a.id=ra.artifact_id JOIN jobs j ON j.id=a.job_id "
                 "WHERE p.id=? AND ra.kind='authoritative_preview' "
+                "AND ra.rendition_reframe_snapshot_id IS NULL "
                 "AND j.status='succeeded' ORDER BY ra.created_at DESC,"
                 "ra.artifact_id DESC LIMIT 1",
                 (project_id,),
@@ -792,6 +907,34 @@ class RenderService:
             if path.is_file() and sha256_file(path) == row["sha256"]:
                 return self.rendition_preview_dto(row["artifact_id"])
         return None
+
+    def _reusable_reframe_preview(
+        self, plan: dict[str, Any], snapshot_id: str, toolchain: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        with self.database.connection() as db:
+            rows = db.execute(
+                "SELECT ra.artifact_id,a.path,a.sha256 FROM render_artifacts ra "
+                "JOIN artifacts a ON a.id=ra.artifact_id "
+                "WHERE ra.timeline_revision_id=? AND ra.kind='authoritative_preview' "
+                "AND ra.rendition_reframe_snapshot_id=? AND ra.content_fingerprint=? "
+                "AND ra.profile_id=? AND ra.toolchain_json=? ORDER BY ra.created_at DESC",
+                (
+                    plan["timeline_revision_id"],
+                    snapshot_id,
+                    plan["content_fingerprint"],
+                    plan["output"]["profile_id"],
+                    json_dumps(toolchain),
+                ),
+            ).fetchall()
+        for row in rows:
+            path = Path(row["path"])
+            if path.is_file() and sha256_file(path) == row["sha256"]:
+                return self.reframe_preview_dto(row["artifact_id"])
+        return None
+
+    async def _reframe_toolchain(self, encoder: str, fallback: str | None) -> dict[str, Any]:
+        toolchain = await self._toolchain(encoder, fallback)
+        return toolchain | {"compiler_version": REFRAME_COMPILER_VERSION}
 
     async def _toolchain(self, encoder: str, fallback: str | None) -> dict[str, Any]:
         result = await run_process(self.ffmpeg, ["-hide_banner", "-version"], 10)

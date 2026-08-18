@@ -99,6 +99,7 @@ class FakeAsrProvider:
 
 def _setup_client(tmp_path: Path, monkeypatch) -> TestClient:
     monkeypatch.setenv("AIVS_ADMIN_TOKEN", "admin-stage1b")
+    monkeypatch.delenv("AIVS_E2E_MODEL_DIR", raising=False)
     settings = Settings(
         data_dir=tmp_path,
         manifest_dir=_manifest_dir(tmp_path),

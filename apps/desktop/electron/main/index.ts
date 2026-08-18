@@ -7,6 +7,7 @@ import { ProviderSecretStore, reinjectProviderSecrets, removeProviderSecret, sav
 import { issueCandidateClipMedia } from "./candidate-media.js";
 import { registerStage2aIpc } from "./stage2a-ipc.js";
 import { registerStage2bIpc } from "./stage2b-ipc.js";
+import { registerStage3bIpc } from "./stage3b-ipc.js";
 import { registerFileGrant } from "./file-grants.js";
 import { exportFileName, normalizeExportPath } from "./export-destination.js";
 import { defaultLogPath, appendLog, redact } from "./logging.js";
@@ -64,6 +65,7 @@ import {
   , type ExportBatchCreateInput
   , type ExportBatchRetryInput
   , type ExportBatchId
+  , type RenditionReframePreview
 } from "@aivideo/contracts";
 
 protocol.registerSchemesAsPrivileged([{
@@ -138,6 +140,9 @@ async function exportPresentation(exportRecord: ExportRecord) {
 async function renditionPreviewPresentation(preview: RenditionPreview) {
   return { preview, media_url: await artifactMediaUrl(preview.render_artifact_id) };
 }
+async function renditionReframePreviewPresentation(preview: RenditionReframePreview) {
+  return { preview, media_url: await artifactMediaUrl(preview.render_artifact_id) };
+}
 
 async function assetPresentation(asset: Asset): Promise<{ asset: Asset; media_url: string | null }> {
   if (asset.availability !== "available" || (asset.kind !== "video" && asset.kind !== "image" && asset.kind !== "audio")) return { asset, media_url: null };
@@ -198,7 +203,6 @@ function asId(value: unknown, name: string): string {
   if (typeof value !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(value)) throw new Error(`Invalid ${name}`);
   return value;
 }
-
 async function createWindow(): Promise<void> {
   await appendLog(logPath, `createWindow renderer=${process.env.ELECTRON_RENDERER_URL ?? "file"}`);
   try {
@@ -420,6 +424,7 @@ function registerIpc(): void {
   });
   ipcMain.handle("export-batch:cancel", async (_event, batchId: ExportBatchId) => parseExportBatch(rendererSafe(await fetchWithUi(`${API_PREFIX}/export-batches/${asId(batchId, "export_batch_id")}/cancel`, { method: "POST" }))));
   ipcMain.handle("export-batch:retry", async (_event, input: { batch_id: ExportBatchId; retry: ExportBatchRetryInput }) => parseExportBatchRetryResponse(rendererSafe(await fetchWithUi(`${API_PREFIX}/export-batches/${asId(input.batch_id, "export_batch_id")}/retry`, { method: "POST", body: JSON.stringify(parseExportBatchRetryInput(input.retry)) }))));
+  registerStage3bIpc({ ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) }, fetchWithUi, previewPresentation: renditionReframePreviewPresentation });
   ipcMain.handle("preview:create", async (_event, input: { project_id: ProjectId; preview: PreviewCreateInput }) => {
     const projectId = asId(input.project_id, "project_id");
     const request = parsePreviewCreateInput(input.preview);

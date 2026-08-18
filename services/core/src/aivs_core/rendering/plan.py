@@ -6,8 +6,11 @@ from typing import Any
 
 from ..database import Database, json_dumps, json_loads
 from ..projects import DomainError
+from ..renditions.presets import canonical_sha256
+from ..renditions.reframe import crop_window, display_geometry
 
 COMPILER_VERSION = "render-plan-v1"
+REFRAME_COMPILER_VERSION = "render-plan-reframe-v1"
 PRESET_VERSION = 1
 FONT_BUNDLE_VERSION = 1
 PROFILES = {
@@ -150,6 +153,115 @@ class RenderPlanCompiler:
             digest = hashlib.sha256(json_dumps(semantics).encode("utf-8")).hexdigest()
             plan["content_fingerprint"] = f"sha256:{digest}"
             return plan
+
+    def compile_reframe(
+        self,
+        project_id: str,
+        timeline_revision_id: str,
+        rendition_reframe_snapshot_id: str,
+        mode: str,
+        *,
+        reject_draft: bool = False,
+    ) -> dict[str, Any]:
+        """Compile Stage 3B without changing the Stage 3A compiler path."""
+        with self.database.connection() as db:
+            row = db.execute(
+                "SELECT * FROM rendition_reframe_snapshots WHERE id=?",
+                (rendition_reframe_snapshot_id,),
+            ).fetchone()
+            if row is None:
+                raise DomainError("REFRAME_SNAPSHOT_INVALID", "重构图快照不存在")
+            try:
+                snapshot = json_loads(row["snapshot_json"])
+            except (TypeError, ValueError) as exc:
+                raise DomainError("REFRAME_SNAPSHOT_INVALID", "重构图快照损坏") from exc
+            if (
+                canonical_sha256(snapshot) != row["snapshot_sha256"]
+                or row["project_id"] != project_id
+                or row["timeline_revision_id"] != timeline_revision_id
+                or snapshot.get("project_id") != project_id
+                or snapshot.get("timeline_revision_id") != timeline_revision_id
+                or snapshot.get("base_rendition_snapshot_id") != row["base_rendition_snapshot_id"]
+                or snapshot.get("base_snapshot_sha256") != row["base_snapshot_sha256"]
+                or snapshot.get("geometry_contract_version") != 1
+            ):
+                raise DomainError("REFRAME_SNAPSHOT_INVALID", "重构图快照校验失败")
+            revision = db.execute(
+                "SELECT document_json,document_sha256 FROM timeline_revisions WHERE id=?",
+                (timeline_revision_id,),
+            ).fetchone()
+            if (
+                revision is None
+                or revision["document_sha256"] != row["timeline_document_sha256"]
+                or snapshot.get("timeline_document_sha256") != revision["document_sha256"]
+            ):
+                raise DomainError("REFRAME_SNAPSHOT_INVALID", "重构图与 Timeline 不匹配")
+            document = json_loads(revision["document_json"])
+            clip_assets = {
+                clip.get("clip_id"): clip.get("asset_id") for clip in document.get("clips", [])
+            }
+            media_by_clip: dict[str, dict[str, Any]] = {}
+            for clip_id, asset_id in clip_assets.items():
+                asset = db.execute(
+                    "SELECT media_info_json FROM assets WHERE id=?", (asset_id,)
+                ).fetchone()
+                if asset is None:
+                    raise DomainError("RENDER_INPUT_CHANGED", "重构图素材不可用")
+                media_by_clip[clip_id] = json_loads(asset["media_info_json"] or "{}")
+        plan = self.compile_rendition(
+            project_id,
+            timeline_revision_id,
+            snapshot["base_rendition_snapshot_id"],
+            mode,
+            reject_draft=reject_draft,
+        )
+        if plan["rendition_snapshot_sha256"] != snapshot["base_snapshot_sha256"]:
+            raise DomainError("REFRAME_SNAPSHOT_INVALID", "基础输出快照已变化")
+        adjustments = {item["clip_id"]: item for item in snapshot.get("resolved_adjustments", [])}
+        if not adjustments or len(adjustments) != row["adjustment_count"]:
+            raise DomainError("REFRAME_SNAPSHOT_INVALID", "重构图锚点不完整")
+        for segment in plan["segments"]:
+            adjustment = adjustments.get(segment["clip_id"])
+            if adjustment is None:
+                continue
+            if segment["layout"] != "crop_fill":
+                raise DomainError("REFRAME_NOT_APPLICABLE", "重构图仅适用于 crop_fill")
+            streams = media_by_clip[segment["clip_id"]].get("video_streams") or []
+            if not streams:
+                raise DomainError("REFRAME_NOT_APPLICABLE", "重构图素材几何不可用")
+            crop = crop_window(
+                display_geometry(streams[0]),
+                int(plan["output"]["width"]),
+                int(plan["output"]["height"]),
+                adjustment["horizontal_anchor"],
+                adjustment["vertical_anchor"],
+            )
+            segment["reframe"] = {
+                "horizontal_anchor": adjustment["horizontal_anchor"],
+                "vertical_anchor": adjustment["vertical_anchor"],
+                "geometry_contract_version": 1,
+                "crop_x": crop.x,
+                "crop_y": crop.y,
+            }
+        if set(adjustments) != {
+            segment["clip_id"] for segment in plan["segments"] if "reframe" in segment
+        }:
+            raise DomainError("REFRAME_SNAPSHOT_INVALID", "重构图引用未知 Clip")
+        plan["schema_version"] = 2
+        plan["compiler_version"] = REFRAME_COMPILER_VERSION
+        plan["rendition_reframe_snapshot_id"] = rendition_reframe_snapshot_id
+        plan["rendition_reframe_snapshot_sha256"] = row["snapshot_sha256"]
+        plan["base_rendition_snapshot_id"] = snapshot["base_rendition_snapshot_id"]
+        semantics = content_semantics(plan) | {
+            "timeline_document_sha256": plan["timeline_document_sha256"],
+            "base_rendition_snapshot_sha256": plan["rendition_snapshot_sha256"],
+            "rendition_reframe_snapshot_sha256": row["snapshot_sha256"],
+            "caption_style_sha256": plan["captions"].get("rendition_style"),
+            "output": plan["output"],
+        }
+        digest = hashlib.sha256(json_dumps(semantics).encode("utf-8")).hexdigest()
+        plan["content_fingerprint"] = f"sha256:{digest}"
+        return plan
 
     def _compile_document(
         self,

@@ -338,7 +338,10 @@ def test_real_v6_to_v7_preserves_chat_structured_supported_and_is_idempotent(
 ) -> None:
     path = tmp_path / "app.db"
     full = database_module.MIGRATIONS
-    monkeypatch.setattr(database_module, "MIGRATIONS", dict(list(full.items())[:-1]))
+    monkeypatch.setattr(
+        database_module, "MIGRATIONS",
+        {key: value for key, value in full.items() if key in {"v1", "v2", "v3", "v4", "v5", "v6"}},
+    )
     Database(path).initialize()
     monkeypatch.setattr(database_module, "MIGRATIONS", full)
     with Database(path).connection() as db:

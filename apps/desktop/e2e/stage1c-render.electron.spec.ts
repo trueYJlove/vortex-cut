@@ -66,7 +66,7 @@ test("1C-Render 真实 Electron 权威预览、Artifact Ticket 与最终导出",
     await page.getByRole("button", { name: "权威预览" }).click();
     await expect(page.getByLabel("权威预览视频")).toBeVisible();
 
-    await page.getByRole("button", { name: "导出" }).click();
+    await page.getByRole("button", { name: "导出", exact: true }).click();
     await expect.poll(async () => page.evaluate(async projectId => {
       const jobs = await window.desktop.listJobs({ project_id: projectId as never, limit: 100 });
       const job = jobs.items.find(item => item.kind === "final_export");

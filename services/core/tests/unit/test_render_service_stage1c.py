@@ -145,6 +145,47 @@ def test_render_and_export_dtos_redact_private_fields_and_stale(tmp_path: Path) 
     assert "destination_uri" not in exported
     with database.connection() as db:
         db.execute("UPDATE projects SET current_timeline_revision_id='r1' WHERE id='p1'")
+        db.execute(
+            "INSERT INTO rendition_snapshots("
+            "id,project_id,timeline_revision_id,timeline_document_sha256,platform_preset_id,"
+            "platform_preset_version,platform_preset_sha256,rendition_preset_id,"
+            "rendition_preset_version,rendition_preset_sha256,layout_policy,snapshot_json,"
+            "snapshot_sha256,warnings_json,created_at) VALUES "
+            "('s1','p1','r1','sha256:x','generic',1,'platform','portrait-9x16-v1',1,"
+            "'rendition','crop_fill_all','{}','base','[]','later')"
+        )
+        db.execute(
+            "INSERT INTO rendition_reframe_snapshots VALUES "
+            "('rs1','p1','r1','sha256:x','s1','base','generic','portrait-9x16-v1',1,"
+            "'{}','reframe',1,'[]','later')"
+        )
+        db.execute(
+            "INSERT INTO jobs(id,project_id,kind,type,status,stage,progress,input_json,"
+            "encoder_used,fallback_reason,attempt,created_at,updated_at) VALUES "
+            "('j2','p1','authoritative_preview','authoritative_preview','succeeded',"
+            "'completed',1,'{}','libopenh264',NULL,1,'later','later')"
+        )
+        db.execute(
+            "INSERT INTO artifacts VALUES (?,?,?,?,?,?,?,?)",
+            (
+                "a2",
+                "j2",
+                "authoritative_preview",
+                str(artifact_path),
+                artifact_path.stat().st_size,
+                sha256_file(artifact_path),
+                json_dumps(media),
+                "later",
+            ),
+        )
+        db.execute(
+            "INSERT INTO render_artifacts(artifact_id,project_id,timeline_revision_id,kind,"
+            "render_plan_json,content_fingerprint,profile_id,toolchain_json,"
+            "rendition_reframe_snapshot_id,created_at) VALUES "
+            "('a2','p1','r1','authoritative_preview','{}','sha256:reframe',"
+            "'preview-portrait-9x16-v1','{}','rs1','later')"
+        )
+    # The independent Stage 3B preview must not replace the frozen Timeline current_preview.
     assert service.current_preview("p1") == service.artifact_dto("a1")
     assert service.resolve_artifact("a1")["path"] == str(artifact_path.resolve())
     artifact_path.unlink()

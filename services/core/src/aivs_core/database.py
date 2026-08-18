@@ -28,6 +28,7 @@ V6_VERSION = "v6"
 V7_VERSION = "v7"
 V8_VERSION = "v8"
 V9_VERSION = "v9"
+V10_VERSION = "v10"
 V1_SQL = """
 CREATE TABLE IF NOT EXISTS media_inputs (
   id TEXT PRIMARY KEY, path TEXT NOT NULL, display_name TEXT NOT NULL,
@@ -624,6 +625,109 @@ BEFORE UPDATE ON export_batch_items BEGIN SELECT RAISE(ABORT,'export batch items
 CREATE TRIGGER IF NOT EXISTS export_batch_items_no_delete
 BEFORE DELETE ON export_batch_items BEGIN SELECT RAISE(ABORT,'export batch items are immutable'); END;
 """  # noqa: E501
+V10_SQL = """
+CREATE TABLE IF NOT EXISTS rendition_reframe_snapshots (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  timeline_revision_id TEXT NOT NULL REFERENCES timeline_revisions(id),
+  timeline_document_sha256 TEXT NOT NULL,
+  base_rendition_snapshot_id TEXT NOT NULL REFERENCES rendition_snapshots(id),
+  base_snapshot_sha256 TEXT NOT NULL,
+  platform_preset_id TEXT NOT NULL,
+  rendition_preset_id TEXT NOT NULL,
+  geometry_contract_version INTEGER NOT NULL CHECK(geometry_contract_version = 1),
+  snapshot_json TEXT NOT NULL,
+  snapshot_sha256 TEXT NOT NULL,
+  adjustment_count INTEGER NOT NULL CHECK(adjustment_count BETWEEN 1 AND 500),
+  warnings_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(project_id,base_rendition_snapshot_id,base_snapshot_sha256,snapshot_sha256)
+);
+CREATE TABLE IF NOT EXISTS reframe_export_batches (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  timeline_revision_id TEXT NOT NULL REFERENCES timeline_revisions(id),
+  timeline_document_sha256 TEXT NOT NULL,
+  directory_display_name TEXT NOT NULL,
+  retry_of_batch_id TEXT NULL REFERENCES reframe_export_batches(id),
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS reframe_export_batch_items (
+  id TEXT PRIMARY KEY,
+  reframe_export_batch_id TEXT NOT NULL REFERENCES reframe_export_batches(id),
+  ordinal INTEGER NOT NULL,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  timeline_revision_id TEXT NOT NULL REFERENCES timeline_revisions(id),
+  rendition_reframe_snapshot_id TEXT NOT NULL REFERENCES rendition_reframe_snapshots(id),
+  preview_artifact_id TEXT NOT NULL REFERENCES render_artifacts(artifact_id),
+  platform_preset_id TEXT NOT NULL,
+  rendition_preset_id TEXT NOT NULL,
+  destination_display_name TEXT NOT NULL,
+  retry_of_item_id TEXT NULL REFERENCES reframe_export_batch_items(id),
+  created_at TEXT NOT NULL,
+  UNIQUE(reframe_export_batch_id,ordinal),
+  UNIQUE(reframe_export_batch_id,platform_preset_id,rendition_preset_id)
+);
+ALTER TABLE jobs ADD COLUMN reframe_export_batch_item_id TEXT NULL
+  REFERENCES reframe_export_batch_items(id);
+ALTER TABLE render_artifacts ADD COLUMN rendition_reframe_snapshot_id TEXT NULL
+  REFERENCES rendition_reframe_snapshots(id);
+ALTER TABLE export_records ADD COLUMN reframe_export_batch_item_id TEXT NULL
+  REFERENCES reframe_export_batch_items(id);
+CREATE INDEX IF NOT EXISTS idx_rendition_reframe_snapshots_project_revision
+  ON rendition_reframe_snapshots(project_id,timeline_revision_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_reframe_export_batches_project
+  ON reframe_export_batches(project_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_reframe_export_batch_items_batch
+  ON reframe_export_batch_items(reframe_export_batch_id,ordinal);
+CREATE INDEX IF NOT EXISTS idx_jobs_reframe_export_batch_item
+  ON jobs(reframe_export_batch_item_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_export_records_reframe_batch_item_unique
+  ON export_records(reframe_export_batch_item_id)
+  WHERE reframe_export_batch_item_id IS NOT NULL;
+CREATE TRIGGER IF NOT EXISTS rendition_reframe_snapshots_no_update
+BEFORE UPDATE ON rendition_reframe_snapshots
+BEGIN SELECT RAISE(ABORT,'rendition reframe snapshots are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS rendition_reframe_snapshots_no_delete
+BEFORE DELETE ON rendition_reframe_snapshots
+BEGIN SELECT RAISE(ABORT,'rendition reframe snapshots are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS reframe_export_batches_no_update
+BEFORE UPDATE ON reframe_export_batches
+BEGIN SELECT RAISE(ABORT,'reframe export batches are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS reframe_export_batches_no_delete
+BEFORE DELETE ON reframe_export_batches
+BEGIN SELECT RAISE(ABORT,'reframe export batches are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS reframe_export_batch_items_no_update
+BEFORE UPDATE ON reframe_export_batch_items
+BEGIN SELECT RAISE(ABORT,'reframe export batch items are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS reframe_export_batch_items_no_delete
+BEFORE DELETE ON reframe_export_batch_items
+BEGIN SELECT RAISE(ABORT,'reframe export batch items are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS jobs_stage3_batch_owner_exclusive_insert
+BEFORE INSERT ON jobs
+WHEN NEW.export_batch_item_id IS NOT NULL AND NEW.reframe_export_batch_item_id IS NOT NULL
+BEGIN SELECT RAISE(ABORT,'stage3 batch owners are mutually exclusive'); END;
+CREATE TRIGGER IF NOT EXISTS jobs_stage3_batch_owner_exclusive_update
+BEFORE UPDATE OF export_batch_item_id,reframe_export_batch_item_id ON jobs
+WHEN NEW.export_batch_item_id IS NOT NULL AND NEW.reframe_export_batch_item_id IS NOT NULL
+BEGIN SELECT RAISE(ABORT,'stage3 batch owners are mutually exclusive'); END;
+CREATE TRIGGER IF NOT EXISTS render_artifacts_stage3_snapshot_owner_exclusive_insert
+BEFORE INSERT ON render_artifacts
+WHEN NEW.rendition_snapshot_id IS NOT NULL AND NEW.rendition_reframe_snapshot_id IS NOT NULL
+BEGIN SELECT RAISE(ABORT,'stage3 snapshot owners are mutually exclusive'); END;
+CREATE TRIGGER IF NOT EXISTS render_artifacts_stage3_snapshot_owner_exclusive_update
+BEFORE UPDATE OF rendition_snapshot_id,rendition_reframe_snapshot_id ON render_artifacts
+WHEN NEW.rendition_snapshot_id IS NOT NULL AND NEW.rendition_reframe_snapshot_id IS NOT NULL
+BEGIN SELECT RAISE(ABORT,'stage3 snapshot owners are mutually exclusive'); END;
+CREATE TRIGGER IF NOT EXISTS export_records_stage3_batch_owner_exclusive_insert
+BEFORE INSERT ON export_records
+WHEN NEW.export_batch_item_id IS NOT NULL AND NEW.reframe_export_batch_item_id IS NOT NULL
+BEGIN SELECT RAISE(ABORT,'stage3 batch owners are mutually exclusive'); END;
+CREATE TRIGGER IF NOT EXISTS export_records_stage3_batch_owner_exclusive_update
+BEFORE UPDATE OF export_batch_item_id,reframe_export_batch_item_id ON export_records
+WHEN NEW.export_batch_item_id IS NOT NULL AND NEW.reframe_export_batch_item_id IS NOT NULL
+BEGIN SELECT RAISE(ABORT,'stage3 batch owners are mutually exclusive'); END;
+"""  # noqa: E501
 MIGRATIONS: dict[str, str] = {
     V1_VERSION: V1_SQL,
     V2_VERSION: V2_SQL,
@@ -634,6 +738,7 @@ MIGRATIONS: dict[str, str] = {
     V7_VERSION: V7_SQL,
     V8_VERSION: V8_SQL,
     V9_VERSION: V9_SQL,
+    V10_VERSION: V10_SQL,
 }
 
 
@@ -687,9 +792,12 @@ class Database:
                     self._apply_v7_compatibility(db)
                     self._apply_v8_compatibility(db)
                     self._apply_v9_compatibility(db)
+                    self._apply_v10_compatibility(db)
                     statements = _statements(sql)
                     if version == V9_VERSION:
                         statements = self._v9_statements(db, statements)
+                    elif version == V10_VERSION:
+                        statements = self._v10_statements(db, statements)
                     for statement in statements:
                         db.execute(statement)
                     db.execute(
@@ -847,6 +955,41 @@ class Database:
             "ALTER TABLE export_records ADD COLUMN export_batch_item_id": (
                 "export_records",
                 "export_batch_item_id",
+            ),
+        }
+        return [
+            statement
+            for statement in statements
+            if not any(
+                statement.startswith(prefix) and column in existing[table]
+                for prefix, (table, column) in additions.items()
+            )
+        ]
+
+    @staticmethod
+    def _apply_v10_compatibility(db: sqlite3.Connection) -> None:
+        # v10 has no historical data rewrite. Partial ALTER additions are
+        # filtered while the frozen migration text retains a stable checksum.
+        del db
+
+    @staticmethod
+    def _v10_statements(db: sqlite3.Connection, statements: list[str]) -> list[str]:
+        existing = {
+            table: {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+            for table in ("jobs", "render_artifacts", "export_records")
+        }
+        additions = {
+            "ALTER TABLE jobs ADD COLUMN reframe_export_batch_item_id": (
+                "jobs",
+                "reframe_export_batch_item_id",
+            ),
+            "ALTER TABLE render_artifacts ADD COLUMN rendition_reframe_snapshot_id": (
+                "render_artifacts",
+                "rendition_reframe_snapshot_id",
+            ),
+            "ALTER TABLE export_records ADD COLUMN reframe_export_batch_item_id": (
+                "export_records",
+                "reframe_export_batch_item_id",
             ),
         }
         return [

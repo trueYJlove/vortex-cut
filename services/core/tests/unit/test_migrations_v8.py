@@ -11,7 +11,8 @@ from aivs_core.database import Database, MigrationError
 
 def _v7_database(path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
     full = database_module.MIGRATIONS
-    monkeypatch.setattr(database_module, "MIGRATIONS", dict(list(full.items())[:-1]))
+    v1_v7 = {key: value for key, value in full.items() if int(key[1:]) <= 7}
+    monkeypatch.setattr(database_module, "MIGRATIONS", v1_v7)
     Database(path).initialize()
     monkeypatch.setattr(database_module, "MIGRATIONS", full)
     return full
@@ -133,13 +134,16 @@ def test_v8_rejects_invalid_candidate_state_combination(
 def test_v8_failure_rolls_back_to_v7(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = tmp_path / "app.db"
     full = _v7_database(path, monkeypatch)
-    broken = {**dict(list(full.items())[:-1]), "v8": "CREATE TABLE broken ("}
+    broken = {
+        **{key: value for key, value in full.items() if int(key[1:]) <= 7},
+        "v8": "CREATE TABLE broken (",
+    }
     monkeypatch.setattr(database_module, "MIGRATIONS", broken)
     with pytest.raises(MigrationError, match="v8"):
         Database(path).initialize()
     with Database(path).connection() as db:
         versions = [row[0] for row in db.execute("SELECT version FROM schema_migrations")]
-        assert versions == ["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8"]
+        assert versions == ["v1", "v2", "v3", "v4", "v5", "v6", "v7"]
         assert db.execute("SELECT name FROM sqlite_master WHERE name='broken'").fetchone() is None
 
 
@@ -149,7 +153,7 @@ def test_v8_rejects_unknown_applied_version(tmp_path: Path) -> None:
     database.initialize()
     with database.connection() as db:
         db.execute(
-            "INSERT INTO schema_migrations(version,applied_at,checksum) VALUES ('v10','now','x')"
+            "INSERT INTO schema_migrations(version,applied_at,checksum) VALUES ('v11','now','x')"
         )
     with pytest.raises(MigrationError, match="未知数据库版本"):
         Database(path).initialize()

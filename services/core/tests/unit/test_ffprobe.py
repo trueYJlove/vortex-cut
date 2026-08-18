@@ -25,6 +25,7 @@ def test_probe_normalizes_video_audio_and_rotation(tmp_path: Path) -> None:
                 "width": 1920,
                 "height": 1080,
                 "avg_frame_rate": "60000/1001",
+                "sample_aspect_ratio": "4:3",
                 "pix_fmt": "yuv420p",
                 "tags": {"rotate": "90"},
             },
@@ -40,6 +41,8 @@ def test_probe_normalizes_video_audio_and_rotation(tmp_path: Path) -> None:
     result = normalize_probe(payload, path)
     assert result["duration_us"] == 2_500_000
     assert result["video_streams"][0]["rotation"] == 90
+    assert result["video_streams"][0]["sample_aspect_ratio_num"] == 4
+    assert result["video_streams"][0]["sample_aspect_ratio_den"] == 3
     assert result["audio_streams"][0]["sample_rate"] == 48000
 
 

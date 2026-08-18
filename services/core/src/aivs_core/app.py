@@ -8,7 +8,7 @@ import shutil
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
@@ -38,6 +38,8 @@ from .rendering.service import (
 )
 from .renditions.batch import ExportBatchService
 from .renditions.presets import RenditionPresetRegistry
+from .renditions.reframe import RenditionReframeSnapshotService
+from .renditions.reframe_batch import ReframeExportBatchService
 from .renditions.snapshot import RenditionSnapshotService
 from .timeline import TimelineService
 from .timeline_planning import TimelinePatchPlanningService
@@ -273,6 +275,44 @@ class ExportBatchRetryRequest(BaseModel):
     export_batch_item_ids: list[str]
 
 
+class ReframeAdjustmentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    clip_id: str
+    horizontal_anchor: Literal["left", "center", "right"]
+    vertical_anchor: Literal["top", "center", "bottom"]
+
+
+class ReframePreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    base_rendition_snapshot_id: str
+    adjustments: list[ReframeAdjustmentRequest] = Field(min_length=1, max_length=500)
+    encoder_mode: Literal["auto", "software"] = "auto"
+
+
+class ReframeExportBatchItemRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    rendition_reframe_snapshot_id: str
+    preview_artifact_id: str
+    encoder_mode: Literal["auto", "software"] = "auto"
+
+
+class ReframeExportBatchCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    directory_grant_id: str
+    items: list[ReframeExportBatchItemRequest] = Field(min_length=1, max_length=8)
+
+
+class ReframeExportBatchRetryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    directory_grant_id: str
+    reframe_export_batch_item_ids: list[str] = Field(min_length=1, max_length=8)
+
+
 class CoreState:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -300,6 +340,9 @@ class CoreState:
         self.directory_grants = DirectoryGrantStore()
         self.rendition_presets = RenditionPresetRegistry(settings.font_dir.parent)
         self.rendition_snapshots = RenditionSnapshotService(self.db, self.rendition_presets)
+        self.rendition_reframe_snapshots = RenditionReframeSnapshotService(
+            self.db, self.rendition_presets
+        )
         self.asr = AsrCoordinator(
             self.db, self.model_registry, self.model_manager, self.transcripts
         )
@@ -350,6 +393,14 @@ class CoreState:
         self.export_batches = ExportBatchService(
             self.db,
             self.rendition_snapshots,
+            self.directory_grants,
+            self.jobs,
+            self.render_compiler,
+            self.renders,
+        )
+        self.reframe_export_batches = ReframeExportBatchService(
+            self.db,
+            self.rendition_reframe_snapshots,
             self.directory_grants,
             self.jobs,
             self.render_compiler,
@@ -441,6 +492,11 @@ def _domain(exc: DomainError) -> HTTPException:
             "EXPORT_DESTINATION_EXISTS",
             "EXPORT_DESTINATION_EXPIRED",
             "EXPORT_DISK_SPACE_INSUFFICIENT",
+            "REFRAME_SNAPSHOT_INVALID",
+            "REFRAME_NOT_APPLICABLE",
+            "REFRAME_PREVIEW_REQUIRED",
+            "REFRAME_PREVIEW_STALE",
+            "REFRAME_RETRY_NOT_ALLOWED",
         }
         else 400
     )
@@ -460,6 +516,7 @@ def _domain(exc: DomainError) -> HTTPException:
         "CANDIDATE_GENERATION_NOT_FOUND",
         "TIMELINE_PATCH_GENERATION_NOT_FOUND",
         "TIMELINE_PATCH_PROPOSAL_NOT_FOUND",
+        "REFRAME_CLIP_NOT_FOUND",
     }:
         status = 404
     return _error(exc.code, exc.message, status)
@@ -1274,6 +1331,110 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             items, next_cursor = state.renders.list_rendition_previews(project_id, limit, cursor)
             return {"items": items, "next_cursor": next_cursor}
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/rendition-reframe-previews")
+    async def create_rendition_reframe_preview(
+        project_id: str,
+        request: ReframePreviewRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            snapshot = state.rendition_reframe_snapshots.create_or_reuse(
+                project_id,
+                request.base_rendition_snapshot_id,
+                [item.model_dump() for item in request.adjustments],
+            )
+            return await state.renders.create_reframe_preview(
+                project_id,
+                snapshot["timeline_revision_id"],
+                snapshot["rendition_reframe_snapshot_id"],
+                request.encoder_mode,
+            )
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/projects/{project_id}/rendition-reframe-previews")
+    async def list_rendition_reframe_previews(
+        project_id: str,
+        limit: int = 50,
+        cursor: str | None = None,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            items, next_cursor = state.renders.list_reframe_previews(project_id, limit, cursor)
+            return {"items": items, "next_cursor": next_cursor}
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/reframe-export-batches")
+    async def create_reframe_export_batch(
+        project_id: str,
+        request: ReframeExportBatchCreateRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return await state.reframe_export_batches.create(
+                project_id,
+                request.directory_grant_id,
+                [item.model_dump(exclude_none=True) for item in request.items],
+            )
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/projects/{project_id}/reframe-export-batches")
+    async def list_reframe_export_batches(
+        project_id: str,
+        limit: int = 50,
+        cursor: str | None = None,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            items = state.reframe_export_batches.list(project_id)
+            if not 1 <= limit <= 100 or (
+                cursor is not None and (not cursor.isdigit() or int(cursor) < 0)
+            ):
+                raise DomainError("REFRAME_BATCH_INVALID", "分页参数不合法")
+            offset = int(cursor or 0)
+            page = items[offset : offset + limit]
+            return {
+                "items": page,
+                "next_cursor": str(offset + len(page)) if len(page) == limit else None,
+            }
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/reframe-export-batches/{batch_id}")
+    async def get_reframe_export_batch(
+        batch_id: str, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        try:
+            return state.reframe_export_batches.get(batch_id)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/reframe-export-batches/{batch_id}/cancel")
+    async def cancel_reframe_export_batch(
+        batch_id: str, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        try:
+            return await state.reframe_export_batches.cancel(batch_id)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/reframe-export-batches/{batch_id}/retry")
+    async def retry_reframe_export_batch(
+        batch_id: str,
+        request: ReframeExportBatchRetryRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return await state.reframe_export_batches.retry(
+                batch_id,
+                request.directory_grant_id,
+                request.reframe_export_batch_item_ids,
+            )
         except DomainError as exc:
             raise _domain(exc) from exc
 

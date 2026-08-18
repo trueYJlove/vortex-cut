@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Job, ModelDetail, TimelineDocument, TimelineState } from "@aivideo/contracts";
 import type { DesktopApi } from "../electron/preload/index.js";
@@ -18,6 +18,15 @@ const runningJob = { ...job, job_id: "job_running" as never, status: "running" a
 const createdJob = { ...runningJob, job_id: "job_created" as never };
 const downloadJob = { ...runningJob, job_id: "job_download" as never, asset_id: null, kind: "model_download" as const };
 
+const stage3bHash = "b".repeat(64);
+const stage3bMediaInfo = { duration_us: 5_000_000, format_name: "mp4", video: { codec: "h264", width: 1080, height: 1920, pixel_format: "yuv420p", fps_num: 30, fps_den: 1 }, audio: { codec: "aac", sample_rate: 48_000, channels: 2 } };
+const stage3bPlatform = { schema_version: 1 as const, platform_preset_id: "douyin" as never, display_name: "抖音", preset_version: 1 as const, allowed_rendition_ids: ["portrait-9x16-v1" as never], default_rendition_id: "portrait-9x16-v1" as never, filename_tag: "douyin", document_sha256: stage3bHash };
+const stage3bRendition = { schema_version: 1 as const, rendition_preset_id: "portrait-9x16-v1" as never, display_name: "竖屏 9:16", preset_version: 1 as const, document_sha256: stage3bHash, preview_profile_id: "preview-portrait-9x16-v1" as never, export_profile_id: "export-portrait-9x16-v1" as never, preview: { width: 540, height: 960 }, export: { width: 1080, height: 1920 } };
+function stage3aPreview(layout_policy: "preserve_timeline" | "fit_all" | "crop_fill_all" | "blurred_background_all") {
+  return { preview: { rendition_snapshot_id: `rendition_snapshot_${layout_policy}` as never, project_id: project.project_id, timeline_revision_id: state.current_revision.timeline_revision_id, platform_preset_id: stage3bPlatform.platform_preset_id, rendition_preset_id: stage3bRendition.rendition_preset_id, layout_policy, snapshot_sha256: stage3bHash, warnings: [], created_at: now, render_artifact_id: `artifact_${layout_policy}` as never, status: "ready" as const, profile_id: stage3bRendition.preview_profile_id, display_name: "preview.mp4", size_bytes: 10, sha256: stage3bHash, media_info: stage3bMediaInfo, encoder: "libx264", fallback_reason: null }, media_url: `aivideo://media/${layout_policy}abcdefghijklmnopqrstuvwxyz` };
+}
+const stage3bReframePreview = { preview: { rendition_reframe_snapshot_id: "rendition_reframe_snapshot_1" as never, project_id: project.project_id, timeline_revision_id: state.current_revision.timeline_revision_id, base_rendition_snapshot_id: "rendition_snapshot_crop_fill_all" as never, base_snapshot_sha256: stage3bHash, platform_preset_id: stage3bPlatform.platform_preset_id, rendition_preset_id: stage3bRendition.rendition_preset_id, adjustment_count: 1, reframe_snapshot_sha256: stage3bHash, warnings: ["STATIC_REFRAME_APPLIED" as const], created_at: now, render_artifact_id: "reframe_artifact_1" as never, status: "ready" as const, profile_id: stage3bRendition.preview_profile_id, display_name: "reframe-preview.mp4", size_bytes: 10, sha256: stage3bHash, media_info: stage3bMediaInfo, encoder: "libx264", fallback_reason: null }, media_url: "aivideo://media/reframeabcdefghijklmnopqrstuvwxyz" };
+
 function desktopApi(options: { timeline?: TimelineState | null; models?: ModelDetail[]; jobs?: Job[] } = {}): DesktopApi {
   const timeline = options.timeline === undefined ? state : options.timeline;
   let transcriptionSequence = 0;
@@ -32,6 +41,7 @@ function desktopApi(options: { timeline?: TimelineState | null; models?: ModelDe
     createTimeline: vi.fn().mockResolvedValue(state), getTimeline: timeline ? vi.fn().mockResolvedValue(timeline) : vi.fn().mockRejectedValue(new Error("TIMELINE_NOT_FOUND 404")), patchTimeline: vi.fn().mockResolvedValue(state), undoTimeline: vi.fn().mockResolvedValue(state), redoTimeline: vi.fn().mockResolvedValue(state), saveTimelineDraft: vi.fn().mockResolvedValue({ project_id: project.project_id, base_revision_id: state.current_revision.timeline_revision_id, document: timelineDocument, updated_at: now, conflict: false }), deleteTimelineDraft: vi.fn().mockResolvedValue(undefined), listTimelineRevisions: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), getTimelineRevision: vi.fn(),
     createPreview: vi.fn().mockResolvedValue({ job: null, preview: null, reused: false }), listPreviews: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), chooseExportDestination: vi.fn().mockResolvedValue(null), createExport: vi.fn(), listExports: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), getRenderArtifact: vi.fn(),
     listPlatformPresets: vi.fn().mockResolvedValue({ items: [] }), listRenditionPresets: vi.fn().mockResolvedValue({ items: [] }), createRenditionPreview: vi.fn(), listRenditionPreviews: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), chooseExportDirectory: vi.fn().mockResolvedValue(null), createExportBatch: vi.fn(), getExportBatch: vi.fn(), listExportBatches: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), cancelExportBatch: vi.fn(), retryExportBatch: vi.fn(),
+    createRenditionReframePreview: vi.fn(), listRenditionReframePreviews: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), createReframeExportBatch: vi.fn(), getReframeExportBatch: vi.fn(), listReframeExportBatches: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), cancelReframeExportBatch: vi.fn(), retryReframeExportBatch: vi.fn(),
     openArtifact: vi.fn(), openArtifactFolder: vi.fn(), subscribeJob: vi.fn().mockReturnValue(() => undefined), diagnostics: vi.fn()
   } as DesktopApi;
 }
@@ -321,5 +331,89 @@ describe("Stage 1C Render", () => {
       expect(screen.getByText("检测到上次未恢复草稿")).toBeVisible();
       expect(screen.getByRole("button", { name: "生成预览" })).toHaveAttribute("title", "存在未提交草稿，请先形成正式 Revision");
     });
+  });
+});
+
+
+describe("Stage 3B 静态焦点重构图", () => {
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+  function setupStage3bApi(timeline: TimelineState = state) {
+    const api = desktopApi({ timeline });
+    vi.mocked(api.listPlatformPresets).mockResolvedValue({ items: [stage3bPlatform] });
+    vi.mocked(api.listRenditionPresets).mockResolvedValue({ items: [stage3bRendition] });
+    vi.mocked(api.listRenditionPreviews).mockResolvedValue({ items: [stage3aPreview("preserve_timeline"), stage3aPreview("fit_all"), stage3aPreview("crop_fill_all"), stage3aPreview("blurred_background_all")], next_cursor: null });
+    vi.mocked(api.createRenditionReframePreview).mockResolvedValue({ job: null, preview: stage3bReframePreview, reused: true });
+    return api;
+  }
+
+  async function openStage3b(api: DesktopApi) {
+    window.desktop = api;
+    render(<App />);
+    const entry = await screen.findByRole("button", { name: "多平台导出" });
+    await waitFor(() => expect(entry).toBeEnabled());
+    fireEvent.click(entry);
+    return await screen.findByRole("dialog", { name: "多平台导出" });
+  }
+
+  it("只为解析为 crop_fill 的 Clip 显示固定 3×3，并展示非 AI 与安全区边界", async () => {
+    const cropDocument = { ...timelineDocument, clips: timelineDocument.clips.map(clip => ({ ...clip, layout: "crop_fill" as const })) };
+    const cropState = { ...state, current_revision: { ...state.current_revision, document: cropDocument } };
+    const dialog = await openStage3b(setupStage3bApi(cropState));
+    const editor = within(dialog).getByRole("region", { name: "静态焦点重构图" });
+    expect(within(editor).getByRole("group", { name: "Clip 1 静态焦点" })).toBeVisible();
+    expect(within(editor).getAllByRole("button", { name: /^Clip 1 / })).toHaveLength(9);
+    expect(editor).toHaveTextContent("非自动识别"); expect(editor).toHaveTextContent("非动态跟踪"); expect(editor).toHaveTextContent("不保证平台审核安全区");
+    expect(within(editor).getByRole("button", { name: "生成重构图权威预览" })).toBeDisabled();
+
+    fireEvent.change(within(dialog).getByLabelText("目标布局策略"), { target: { value: "fit_all" } });
+    expect(within(dialog).getByText(/没有解析为 crop_fill/)).toBeVisible();
+    expect(within(dialog).queryByRole("group", { name: "Clip 1 静态焦点" })).not.toBeInTheDocument();
+  });
+
+  it("中心点只执行删除语义，非中心 adjustment 才发送且选择变化使旧预览失效", async () => {
+    const api = setupStage3bApi();
+    const dialog = await openStage3b(api);
+    fireEvent.change(within(dialog).getByLabelText("目标布局策略"), { target: { value: "crop_fill_all" } });
+    const editor = within(dialog).getByRole("region", { name: "静态焦点重构图" });
+    fireEvent.click(within(editor).getByRole("button", { name: "Clip 1 左上" }));
+    fireEvent.click(within(editor).getByRole("button", { name: "生成重构图权威预览" }));
+    await waitFor(() => expect(api.createRenditionReframePreview).toHaveBeenCalledWith({ project_id: project.project_id, preview: { base_rendition_snapshot_id: "rendition_snapshot_crop_fill_all", adjustments: [{ clip_id: "clip_1", horizontal_anchor: "left", vertical_anchor: "top" }], encoder_mode: "auto" } }));
+    expect(await within(editor).findByRole("button", { name: "播放重构图预览" })).toBeVisible();
+
+    fireEvent.click(within(editor).getByRole("button", { name: "Clip 1 中心" }));
+    expect(within(editor).getByRole("button", { name: "生成重构图权威预览" })).toBeDisabled();
+    expect(within(editor).queryByRole("button", { name: "播放重构图预览" })).not.toBeInTheDocument();
+    expect(api.createRenditionReframePreview).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(vi.mocked(api.createRenditionReframePreview).mock.calls)).not.toContain('"horizontal_anchor":"center","vertical_anchor":"center"');
+  });
+
+  it("任务成功后刷新独立 Reframe Preview，Batch payload 从 Snapshot 派生且不含 Revision", async () => {
+    const api = setupStage3bApi();
+    let listener: ((job: Job) => void) | undefined;
+    api.subscribeJob = vi.fn((_jobId, next) => { listener = next; return () => undefined; });
+    const reframeJob = { ...runningJob, job_id: "job_reframe" as never, asset_id: null, kind: "authoritative_preview" as const, input: { rendition_reframe_snapshot_id: "rendition_reframe_snapshot_1" } };
+    vi.mocked(api.createRenditionReframePreview).mockResolvedValue({ job: reframeJob, preview: null, reused: false });
+    vi.mocked(api.listRenditionReframePreviews).mockResolvedValue({ items: [stage3bReframePreview], next_cursor: null });
+    vi.mocked(api.chooseExportDirectory).mockResolvedValue({ directory_grant_id: "directory_reframe_1" as never, display_name: "Exports", expires_at: now });
+    vi.mocked(api.createReframeExportBatch).mockResolvedValue({ batch: { reframe_export_batch_id: "reframe_export_batch_1" as never, project_id: project.project_id, timeline_revision_id: state.current_revision.timeline_revision_id, status: "queued", directory_display_name: "Exports", items: [], retry_of_batch_id: null, created_at: now, updated_at: now }, jobs: [] });
+
+    const dialog = await openStage3b(api);
+    fireEvent.change(within(dialog).getByLabelText("目标布局策略"), { target: { value: "crop_fill_all" } });
+    const editor = within(dialog).getByRole("region", { name: "静态焦点重构图" });
+    fireEvent.click(within(editor).getByRole("button", { name: "Clip 1 右" }));
+    fireEvent.click(within(editor).getByRole("button", { name: "生成重构图权威预览" }));
+    await waitFor(() => expect(listener).toBeTypeOf("function"));
+    await act(async () => { listener?.({ ...reframeJob, status: "succeeded", stage: "completed", progress: 1 }); await Promise.resolve(); });
+    expect(await within(editor).findByRole("button", { name: "播放重构图预览" })).toBeVisible();
+
+    const choose = within(dialog).getByRole("button", { name: "选择重构图输出目录" });
+    expect(choose).toBeEnabled(); fireEvent.click(choose);
+    const create = await within(dialog).findByRole("button", { name: "创建重构图批次" });
+    await waitFor(() => expect(create).toBeEnabled()); fireEvent.click(create);
+    await waitFor(() => expect(api.createReframeExportBatch).toHaveBeenCalled());
+    const payload = vi.mocked(api.createReframeExportBatch).mock.calls[0][0];
+    expect(payload).toEqual({ project_id: project.project_id, batch: { directory_grant_id: "directory_reframe_1", items: [{ rendition_reframe_snapshot_id: "rendition_reframe_snapshot_1", preview_artifact_id: "reframe_artifact_1", encoder_mode: "auto" }] } });
+    expect(payload.batch).not.toHaveProperty("timeline_revision_id");
   });
 });

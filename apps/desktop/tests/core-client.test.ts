@@ -131,6 +131,35 @@ describe("CoreClient", () => {
     expect(String(fetchImpl.mock.calls[0][0])).toBe("http://127.0.0.1:4000/api/v1/providers/provider_1/timeline-patch-capability-test");
     expect((fetchImpl.mock.calls[0][1] as RequestInit).method).toBe("POST"); expect(JSON.stringify(fetchImpl.mock.calls)).not.toContain("must-strip");
   });
+  it("uses independent Stage 3B Reframe endpoints and strict sanitized parsers", async () => {
+    const now = "2026-08-18T00:00:00.000Z"; const hash = "a".repeat(64);
+    const mediaInfo = { duration_us: 1_000_000, format_name: "mp4", video: { codec: "h264", width: 1080, height: 1920, pixel_format: "yuv420p", fps_num: 30, fps_den: 1 }, audio: { codec: "aac", sample_rate: 48000, channels: 2 } };
+    const preview = { rendition_reframe_snapshot_id: "rendition_reframe_snapshot_1", project_id: "project_1", timeline_revision_id: "revision_1", base_rendition_snapshot_id: "rendition_snapshot_1", base_snapshot_sha256: hash, platform_preset_id: "douyin", rendition_preset_id: "portrait-9x16-v1", adjustment_count: 1, reframe_snapshot_sha256: hash, warnings: ["STATIC_REFRAME_APPLIED"], created_at: now, render_artifact_id: "artifact_1", status: "ready", profile_id: "preview-portrait-9x16-v1", display_name: "preview.mp4", size_bytes: 10, sha256: hash, media_info: mediaInfo, encoder: "libx264", fallback_reason: null };
+    const item = { reframe_export_batch_item_id: "reframe_export_batch_item_1", ordinal: 0, rendition_reframe_snapshot: Object.fromEntries(Object.entries(preview).filter(([key]) => !["render_artifact_id", "status", "profile_id", "display_name", "size_bytes", "sha256", "media_info", "encoder", "fallback_reason"].includes(key))), preview_artifact_id: "artifact_1", status: "queued", progress: 0, job_id: "job_1", destination_display_name: null, error_code: null, export_record_id: null, retry_of_item_id: null };
+    const batch = { reframe_export_batch_id: "reframe_export_batch_1", project_id: "project_1", timeline_revision_id: "revision_1", status: "queued", directory_display_name: "Exports", items: [item], retry_of_batch_id: null, created_at: now, updated_at: now };
+    const job = { job_id: "job_1", project_id: "project_1", asset_id: null, kind: "final_export", status: "queued", stage: "queued", progress: 0, attempt: 1, model_id: null, model_revision: null, input_fingerprint: null, input: {}, error: null, created_at: now, updated_at: now, started_at: null, finished_at: null };
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(response({ job: null, preview: { ...preview, path: "C:\\private\\preview.mp4" }, reused: true }))
+      .mockResolvedValueOnce(response({ items: [{ ...preview, uri: "file:///private.mp4" }], next_cursor: null }))
+      .mockResolvedValueOnce(response({ batch, jobs: [job] }))
+      .mockResolvedValueOnce(response(batch)).mockResolvedValueOnce(response({ items: [batch], next_cursor: null }))
+      .mockResolvedValueOnce(response(batch)).mockResolvedValueOnce(response({ batch, jobs: [job] }));
+    const client = new CoreClient({ baseUrl: "http://127.0.0.1:4000", uiToken: "ui-secret", fetchImpl });
+    const createdPreview = await client.createRenditionReframePreview("project_1" as never, { base_rendition_snapshot_id: "rendition_snapshot_1" as never, adjustments: [{ clip_id: "clip_1" as never, horizontal_anchor: "left", vertical_anchor: "top" }] });
+    expect(createdPreview).toMatchObject({ reused: true, preview: { rendition_reframe_snapshot_id: "rendition_reframe_snapshot_1" } });
+    expect(createdPreview.preview).not.toHaveProperty("path");
+    const listedPreviews = await client.listRenditionReframePreviews("project_1" as never);
+    expect(listedPreviews).toMatchObject({ items: [{ render_artifact_id: "artifact_1" }] });
+    expect(listedPreviews.items[0]).not.toHaveProperty("uri");
+    await expect(client.createReframeExportBatch("project_1" as never, { directory_grant_id: "directory_1" as never, items: [{ rendition_reframe_snapshot_id: "rendition_reframe_snapshot_1" as never, preview_artifact_id: "artifact_1" as never }] })).resolves.toMatchObject({ batch: { reframe_export_batch_id: "reframe_export_batch_1" } });
+    await expect(client.getReframeExportBatch("reframe_export_batch_1")).resolves.toMatchObject({ status: "queued" });
+    await expect(client.listReframeExportBatches("project_1" as never)).resolves.toMatchObject({ items: [{ reframe_export_batch_id: "reframe_export_batch_1" }] });
+    await expect(client.cancelReframeExportBatch("reframe_export_batch_1")).resolves.toMatchObject({ status: "queued" });
+    await expect(client.retryReframeExportBatch("reframe_export_batch_1", { directory_grant_id: "directory_2" as never, reframe_export_batch_item_ids: ["reframe_export_batch_item_1" as never] })).resolves.toMatchObject({ jobs: [{ kind: "final_export" }] });
+    expect(fetchImpl.mock.calls.map(call => String(call[0]))).toEqual([
+      "http://127.0.0.1:4000/api/v1/projects/project_1/rendition-reframe-previews", "http://127.0.0.1:4000/api/v1/projects/project_1/rendition-reframe-previews", "http://127.0.0.1:4000/api/v1/projects/project_1/reframe-export-batches", "http://127.0.0.1:4000/api/v1/reframe-export-batches/reframe_export_batch_1", "http://127.0.0.1:4000/api/v1/projects/project_1/reframe-export-batches", "http://127.0.0.1:4000/api/v1/reframe-export-batches/reframe_export_batch_1/cancel", "http://127.0.0.1:4000/api/v1/reframe-export-batches/reframe_export_batch_1/retry"
+    ]);
+  });
   it("covers every frozen Render endpoint and strips sensitive response fields", async () => {
     const now = "2026-08-11T00:00:00.000Z"; const hash = "a".repeat(64);
     const mediaInfo = { duration_us: 1_000_000, format_name: "mp4", video: { codec: "h264", width: 1080, height: 1920, pixel_format: "yuv420p", fps_num: 30, fps_den: 1 }, audio: null };

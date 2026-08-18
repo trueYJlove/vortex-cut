@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CONTRACT_VERSION, ERROR_CODES, isApiErrorResponse, isAuthoritativePreview, isCaptionPresetId, isCandidateGeneration, isCandidateResponseAdapterId, isDestinationGrant, isDirectoryGrant, isExportBatchCreateInput, isExportCreateInput, isExportRecord, isFileGrant, isInternalModelManifest, isJobKind, isJobStatus, isModelDetail, isPlatformPreset, isPreviewCreateResponse, isProject, isProviderCapabilityTestResult, isProviderConfig, isRecipe, isRenderArtifact, isRenditionPreviewCreateInput, isSidecarReady, isTimelineCreateInput, isTimelineDiff, isTimelineDocument, isTimelineLayout, isTimelinePatch, isTimelinePatchCapabilityTestResponse, isTimelinePatchEgressPreview, isTimelinePatchGeneration, isTimelinePatchOperation, isTimelinePatchPrepareRequest, isTimelinePatchProposal, isTimelineState, isTranscript, parseSidecarReadyLine } from "@aivideo/contracts";
+import { CONTRACT_VERSION, ERROR_CODES, isApiErrorResponse, isAuthoritativePreview, isCaptionPresetId, isCandidateGeneration, isCandidateResponseAdapterId, isDestinationGrant, isDirectoryGrant, isExportBatchCreateInput, isExportCreateInput, isExportRecord, isFileGrant, isInternalModelManifest, isJobKind, isJobStatus, isModelDetail, isPlatformPreset, isPreviewCreateResponse, isProject, isProviderCapabilityTestResult, isProviderConfig, isRecipe, isRenderArtifact, isRenditionPreviewCreateInput, isRenditionReframePreviewCreateInput, isRenditionReframeSnapshotSummary, isReframeExportBatchCreateInput, isReframeExportBatchRetryInput, isSidecarReady, isTimelineCreateInput, isTimelineDiff, isTimelineDocument, isTimelineLayout, isTimelinePatch, isTimelinePatchCapabilityTestResponse, isTimelinePatchEgressPreview, isTimelinePatchGeneration, isTimelinePatchOperation, isTimelinePatchPrepareRequest, isTimelinePatchProposal, isTimelineState, isTranscript, parseSidecarReadyLine } from "@aivideo/contracts";
 
 const now = "2026-08-11T00:00:00.000Z";
 
@@ -53,7 +53,7 @@ describe("Stage 0 contract", () => {
     expect(isTranscript({ ...transcript, segments: [{ ...transcript.segments[0], end_us: 3_000_000 }] })).toBe(false);
   });
   it("freezes Stage 1C enums, error codes and every patch operation", () => {
-    expect(CONTRACT_VERSION).toBe("stage3a-v1"); expect(isTimelineLayout("crop_fill")).toBe(true); expect(isTimelineLayout("smart_crop")).toBe(false); expect(isCaptionPresetId("high-contrast")).toBe(true); expect(isJobKind("authoritative_preview")).toBe(true); expect(isJobKind("timeline_patch_generation")).toBe(true); expect(ERROR_CODES).toContain("TIMELINE_CONFLICT"); expect(ERROR_CODES).toContain("TIMELINE_PATCH_PROPOSAL_CONFLICT"); expect(ERROR_CODES).toContain("CANDIDATE_PROVIDER_UNTESTED"); expect(ERROR_CODES).toContain("EXPORT_DIRECTORY_GRANT_EXPIRED");
+    expect(CONTRACT_VERSION).toBe("stage3b-v1"); expect(isTimelineLayout("crop_fill")).toBe(true); expect(isTimelineLayout("smart_crop")).toBe(false); expect(isCaptionPresetId("high-contrast")).toBe(true); expect(isJobKind("authoritative_preview")).toBe(true); expect(isJobKind("timeline_patch_generation")).toBe(true); expect(ERROR_CODES).toContain("TIMELINE_CONFLICT"); expect(ERROR_CODES).toContain("TIMELINE_PATCH_PROPOSAL_CONFLICT"); expect(ERROR_CODES).toContain("CANDIDATE_PROVIDER_UNTESTED"); expect(ERROR_CODES).toContain("EXPORT_DIRECTORY_GRANT_EXPIRED");
     const operations = [
       { op: "insert_asset_clip", asset_id: "asset_1", at_index: 0, duration_us: 3_000_000 },
       { op: "insert_transcript_segments", transcript_id: "transcript_1", segment_ids: ["segment_1"], at_index: 0, padding_before_us: 0, padding_after_us: 300_000, create_captions: true },
@@ -129,5 +129,49 @@ describe("Stage 0 contract", () => {
     expect(isPreviewCreateResponse({ job: null, preview, reused: true })).toBe(true); expect(isPreviewCreateResponse({ job: queuedJob, preview: null, reused: false })).toBe(true);
     expect(isExportCreateInput({ timeline_revision_id: "revision_1", destination_grant_id: "destination_1", encoder_mode: "software" })).toBe(true);
     expect(isAuthoritativePreview({ ...preview, path: "C:\\private\\preview.mp4" })).toBe(false); expect(isRenderArtifact({ ...preview, uri: "file:///private.mp4" })).toBe(false); expect(isExportRecord({ ...exportRecord, admin_token: "secret" })).toBe(false);
+  });
+});
+describe("Stage 3B reframe contracts", () => {
+  const hash = "a".repeat(64);
+  const adjustment = { clip_id: "clip_1", horizontal_anchor: "left", vertical_anchor: "center" } as const;
+
+  it("freezes stage3b-v1 and accepts only strict non-center 3x3 adjustments", () => {
+    expect(CONTRACT_VERSION).toBe("stage3b-v1");
+    expect(ERROR_CODES).toContain("REFRAME_PREVIEW_REQUIRED");
+    expect(isRenditionReframePreviewCreateInput({ base_rendition_snapshot_id: "rendition_snapshot_1", adjustments: [adjustment] })).toBe(true);
+    expect(isRenditionReframePreviewCreateInput({ base_rendition_snapshot_id: "rendition_snapshot_1", adjustments: [{ ...adjustment, horizontal_anchor: "center", vertical_anchor: "center" }] })).toBe(false);
+    expect(isRenditionReframePreviewCreateInput({ base_rendition_snapshot_id: "rendition_snapshot_1", adjustments: [{ ...adjustment, horizontal_anchor: "LEFT" }] })).toBe(false);
+    expect(isRenditionReframePreviewCreateInput({ base_rendition_snapshot_id: "rendition_snapshot_1", adjustments: [] })).toBe(false);
+    expect(isRenditionReframePreviewCreateInput({ base_rendition_snapshot_id: "rendition_snapshot_1", adjustments: Array.from({ length: 501 }, (_, index) => ({ ...adjustment, clip_id: `clip_${index}` })) })).toBe(false);
+    expect(isRenditionReframePreviewCreateInput({ base_rendition_snapshot_id: "rendition_snapshot_1", adjustments: [adjustment, adjustment] })).toBe(false);
+    expect(isRenditionReframePreviewCreateInput({ base_rendition_snapshot_id: "rendition_snapshot_1", adjustments: [{ ...adjustment, path: "private.mp4" }] })).toBe(false);
+    expect(isRenditionReframePreviewCreateInput({ base_rendition_snapshot_id: "rendition_snapshot_1", adjustments: [adjustment], timeline_revision_id: "revision_1" })).toBe(false);
+  });
+
+  it("keeps the public reframe snapshot summary redacted", () => {
+    const summary = {
+      rendition_reframe_snapshot_id: "rendition_reframe_snapshot_1", project_id: "project_1", timeline_revision_id: "revision_1",
+      base_rendition_snapshot_id: "rendition_snapshot_1", base_snapshot_sha256: hash, platform_preset_id: "douyin",
+      rendition_preset_id: "portrait-9x16-v1", adjustment_count: 1, reframe_snapshot_sha256: hash,
+      warnings: ["STATIC_REFRAME_APPLIED"], created_at: now
+    };
+    expect(isRenditionReframeSnapshotSummary(summary)).toBe(true);
+    expect(isRenditionReframeSnapshotSummary({ ...summary, adjustments: [adjustment] })).toBe(false);
+    expect(isRenditionReframeSnapshotSummary({ ...summary, transcript: "private body" })).toBe(false);
+  });
+
+  it("validates independent reframe batch and retry inputs", () => {
+    const item = { rendition_reframe_snapshot_id: "rendition_reframe_snapshot_1", preview_artifact_id: "artifact_1" };
+    expect(isReframeExportBatchCreateInput({ directory_grant_id: "directory_1", items: [item] })).toBe(true);
+    expect(isReframeExportBatchCreateInput({ timeline_revision_id: "revision_1", directory_grant_id: "directory_1", items: [item] })).toBe(false);
+    expect(isReframeExportBatchCreateInput({ directory_grant_id: "directory_1", items: [item, item] })).toBe(false);
+    expect(isReframeExportBatchCreateInput({ directory_grant_id: "directory_1", items: Array.from({ length: 9 }, (_, index) => ({ rendition_reframe_snapshot_id: `rendition_reframe_snapshot_${index}`, preview_artifact_id: `artifact_${index}` })) })).toBe(false);
+    expect(isReframeExportBatchRetryInput({ directory_grant_id: "directory_2", reframe_export_batch_item_ids: ["reframe_export_batch_item_1"] })).toBe(true);
+    expect(isReframeExportBatchRetryInput({ directory_grant_id: "directory_2", reframe_export_batch_item_ids: ["export_batch_item_1"] })).toBe(false);
+  });
+
+  it("does not widen frozen Stage 3A guards", () => {
+    expect(isRenditionPreviewCreateInput({ timeline_revision_id: "revision_1", platform_preset_id: "douyin", rendition_preset_id: "portrait-9x16-v1", layout_policy: "crop_fill_all", adjustments: [adjustment] })).toBe(false);
+    expect(isExportBatchCreateInput({ directory_grant_id: "directory_1", items: [{ rendition_reframe_snapshot_id: "rendition_reframe_snapshot_1", preview_artifact_id: "artifact_1" }] })).toBe(false);
   });
 });
