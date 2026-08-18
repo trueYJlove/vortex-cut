@@ -48,6 +48,8 @@ import type {
   , MediaGenerationPrepareInput, MediaGenerationCreateInput, MediaGenerationPreparedRequest
   , MediaGenerationCreateResponse, MediaGenerationRequest, MediaGenerationRequestId, MediaGenerationRequestPage
   , MediaGenerationTask, MediaGenerationTaskId, MediaGenerationTaskPage
+  , ShotListState, ShotListRevisionPage, ShotListRevisionDetail, ShotListRevisionId
+  , ShotListRevisionCreateInput, ShotListRevisionCreateResponse, ShotListConfirmInput, ShotListConfirmResponse
 } from "@aivideo/contracts";
 
 export interface MediaSelection { grant: FileGrant; media: MediaInfo }
@@ -144,6 +146,11 @@ export interface DesktopApi {
   listMediaGenerationTasks: (input: { request_id: MediaGenerationRequestId; limit?: number; cursor?: string }) => Promise<MediaGenerationTaskPage>;
   retryMediaGenerationTask: (taskId: MediaGenerationTaskId) => Promise<MediaGenerationTask>;
   cancelMediaGenerationTask: (taskId: MediaGenerationTaskId) => Promise<MediaGenerationTask>;
+  getShotList: (projectId: ProjectId) => Promise<ShotListState>;
+  listShotListRevisions: (input: { project_id: ProjectId; limit?: number; cursor?: string }) => Promise<ShotListRevisionPage>;
+  getShotListRevision: (revisionId: ShotListRevisionId) => Promise<ShotListRevisionDetail>;
+  createShotListRevision: (input: { project_id: ProjectId; revision: ShotListRevisionCreateInput }) => Promise<ShotListRevisionCreateResponse>;
+  confirmShotListRevision: (input: { project_id: ProjectId; confirmation: ShotListConfirmInput }) => Promise<ShotListConfirmResponse>;
   getRenderArtifact: (artifactId: RenderArtifactId) => Promise<RenderArtifactPresentation>;
   openArtifact: (artifactId: string) => Promise<void>;
   openArtifactFolder: (artifactId: string) => Promise<void>;
@@ -237,6 +244,11 @@ const api: DesktopApi = {
   listMediaGenerationTasks: input => ipcRenderer.invoke("media-generation:tasks", input),
   retryMediaGenerationTask: taskId => ipcRenderer.invoke("media-generation:retry", taskId),
   cancelMediaGenerationTask: taskId => ipcRenderer.invoke("media-generation:cancel", taskId),
+  getShotList: projectId => ipcRenderer.invoke("shot-list:get", projectId),
+  listShotListRevisions: input => ipcRenderer.invoke("shot-list:revisions", input),
+  getShotListRevision: revisionId => ipcRenderer.invoke("shot-list:revision:get", revisionId),
+  createShotListRevision: input => ipcRenderer.invoke("shot-list:revision:create", input),
+  confirmShotListRevision: input => ipcRenderer.invoke("shot-list:confirm", input),
   getRenderArtifact: artifactId => ipcRenderer.invoke("render-artifact:get", artifactId),
   openArtifact: artifactId => ipcRenderer.invoke("artifact:open", artifactId),
   openArtifactFolder: artifactId => ipcRenderer.invoke("artifact:folder", artifactId),

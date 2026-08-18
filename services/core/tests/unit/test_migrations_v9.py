@@ -29,7 +29,7 @@ def test_v9_rejects_unknown_applied_version(tmp_path) -> None:
     database.initialize()
     with database.connection() as db:
         db.execute(
-            "INSERT INTO schema_migrations(version,applied_at,checksum) VALUES ('v12','now','x')"
+            "INSERT INTO schema_migrations(version,applied_at,checksum) VALUES ('v99','now','x')"
         )
     with pytest.raises(MigrationError, match="未知数据库版本"):
         database.initialize()

@@ -88,6 +88,11 @@ import {
   , type MediaGenerationPrepareInput, type MediaGenerationCreateInput, type MediaGenerationPreparedRequest
   , type MediaGenerationCreateResponse, type MediaGenerationRequest, type MediaGenerationRequestPage
   , type MediaGenerationRequestId, type MediaGenerationTask, type MediaGenerationTaskId, type MediaGenerationTaskPage
+  , parseShotListState, parseShotListRevisionPage, parseShotListRevisionDetail
+  , parseShotListRevisionCreateInput, parseShotListRevisionCreateResponse, parseShotListConfirmInput, parseShotListConfirmResponse
+  , type ShotListState, type ShotListRevisionPage, type ShotListRevisionDetail
+  , type ShotListRevisionCreateInput, type ShotListRevisionCreateResponse, type ShotListConfirmInput, type ShotListConfirmResponse
+  , type ShotListRevisionId
 } from "@aivideo/contracts";
 
 export class CoreApiError extends Error {
@@ -480,6 +485,29 @@ export class CoreClient {
   cancelMediaGenerationTask(taskId: MediaGenerationTaskId): Promise<MediaGenerationTask> {
     return this.request<unknown>(`${API_PREFIX}/media-generation-tasks/${encodeURIComponent(taskId)}/cancel`, { method: "POST", body: JSON.stringify({}) })
       .then(value => parseMediaGenerationTask(removeSensitiveFields(value)));
+  }
+
+  getShotList(projectId: ProjectId): Promise<ShotListState> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/shot-list`)
+      .then(value => parseShotListState(removeSensitiveFields(value)));
+  }
+  listShotListRevisions(projectId: ProjectId, params: ListParams = {}): Promise<ShotListRevisionPage> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/shot-list/revisions${query(params)}`)
+      .then(value => parseShotListRevisionPage(removeSensitiveFields(value)));
+  }
+  getShotListRevision(revisionId: ShotListRevisionId): Promise<ShotListRevisionDetail> {
+    return this.request<unknown>(`${API_PREFIX}/shot-list-revisions/${encodeURIComponent(revisionId)}`)
+      .then(value => parseShotListRevisionDetail(removeSensitiveFields(value)));
+  }
+  createShotListRevision(projectId: ProjectId, input: ShotListRevisionCreateInput): Promise<ShotListRevisionCreateResponse> {
+    const request = parseShotListRevisionCreateInput(input);
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/shot-list/revisions`, { method: "POST", body: JSON.stringify(request) })
+      .then(value => parseShotListRevisionCreateResponse(removeSensitiveFields(value)));
+  }
+  confirmShotListRevision(projectId: ProjectId, input: ShotListConfirmInput): Promise<ShotListConfirmResponse> {
+    const request = parseShotListConfirmInput(input);
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/shot-list/confirm`, { method: "POST", body: JSON.stringify(request) })
+      .then(value => parseShotListConfirmResponse(removeSensitiveFields(value)));
   }
 
   subscribe(jobId: JobId, listener: JobListener): () => void {
