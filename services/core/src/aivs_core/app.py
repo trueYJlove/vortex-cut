@@ -24,6 +24,7 @@ from .ids import new_id
 from .jobs import JobService
 from .media.encoders import EncoderDetector
 from .media.ffprobe import FFprobe
+from .media_generation import MediaGenerationService
 from .model_registry import ModelError, ModelManager, ModelRegistry
 from .planning import PlanningService, ProviderRepository, RecipeRegistry
 from .projects import DomainError, ProjectAssetService
@@ -313,6 +314,23 @@ class ReframeExportBatchRetryRequest(BaseModel):
     reframe_export_batch_item_ids: list[str] = Field(min_length=1, max_length=8)
 
 
+class MediaGenerationPrepareRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    generation_kind: str
+    prompt: str
+    input_refs: list[str]
+    parameters: dict[str, Any]
+
+
+class MediaGenerationCreateRequest(MediaGenerationPrepareRequest):
+    request_sha256: str
+
+
+class MediaGenerationEmptyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
 class CoreState:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -336,6 +354,7 @@ class CoreState:
         self.timeline_patch_planning = TimelinePatchPlanningService(
             self.db, self.providers, self.provider_secrets, self.timelines
         )
+        self.media_generation = MediaGenerationService(self.db)
         self.destinations = DestinationGrantStore()
         self.directory_grants = DirectoryGrantStore()
         self.rendition_presets = RenditionPresetRegistry(settings.font_dir.parent)
@@ -381,6 +400,10 @@ class CoreState:
             render_runner=self.render_coordinator.run,
             planning_runner=self.planning.run_generation,
             timeline_patch_runner=self.timeline_patch_planning.run_generation,
+            media_generation_runner=self.media_generation.run_simulation,
+            media_generation_start=self.media_generation.start_job,
+            media_generation_finish=self.media_generation.finish_job,
+            media_generation_recover=self.media_generation.recover_interrupted_tasks,
         )
         self.renders = RenderService(
             self.db,
@@ -497,6 +520,10 @@ def _domain(exc: DomainError) -> HTTPException:
             "REFRAME_PREVIEW_REQUIRED",
             "REFRAME_PREVIEW_STALE",
             "REFRAME_RETRY_NOT_ALLOWED",
+            "GENERATION_INPUT_CHANGED",
+            "GENERATION_HASH_MISMATCH",
+            "GENERATION_RETRY_NOT_ALLOWED",
+            "JOB_INVALID_STATE",
         }
         else 400
     )
@@ -517,6 +544,7 @@ def _domain(exc: DomainError) -> HTTPException:
         "TIMELINE_PATCH_GENERATION_NOT_FOUND",
         "TIMELINE_PATCH_PROPOSAL_NOT_FOUND",
         "REFRAME_CLIP_NOT_FOUND",
+        "GENERATION_TASK_NOT_FOUND",
     }:
         status = 404
     return _error(exc.code, exc.message, status)
@@ -544,6 +572,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             state.db.initialize()
         except MigrationError:
             raise
+        state.media_generation.recover_interrupted_tasks()
         state.db.recover_interrupted()
         state.render_coordinator.cleanup_orphans()
         seed_dir = os.environ.get("AIVS_E2E_MODEL_DIR")
@@ -1801,6 +1830,100 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         next_cursor = str(int(cursor or 0) + len(items)) if len(items) == limit else None
         return {"items": items, "next_cursor": next_cursor}
 
+    @app.post("/api/v1/projects/{project_id}/media-generation-requests/prepare")
+    async def prepare_media_generation_request(
+        project_id: str,
+        request: MediaGenerationPrepareRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return state.media_generation.prepare(
+                project_id,
+                request.generation_kind,
+                request.prompt,
+                request.input_refs,
+                request.parameters,
+            )
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/media-generation-requests")
+    async def create_media_generation_request(
+        project_id: str,
+        request: MediaGenerationCreateRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return state.media_generation.create(
+                project_id,
+                request.generation_kind,
+                request.prompt,
+                request.input_refs,
+                request.parameters,
+                request.request_sha256,
+            )
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/projects/{project_id}/media-generation-requests")
+    async def list_media_generation_requests(
+        project_id: str,
+        limit: int = 50,
+        cursor: str | None = None,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            items = state.media_generation.list(project_id, limit, cursor)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+        next_cursor = str(int(cursor or 0) + len(items)) if len(items) == limit else None
+        return {"items": items, "next_cursor": next_cursor}
+
+    @app.get("/api/v1/media-generation-requests/{request_id}")
+    async def get_media_generation_request(
+        request_id: str, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        try:
+            return state.media_generation.get(request_id)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/media-generation-requests/{request_id}/tasks")
+    async def list_media_generation_tasks(
+        request_id: str,
+        limit: int = 50,
+        cursor: str | None = None,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            items = state.media_generation.list_tasks(request_id, limit, cursor)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+        next_cursor = str(int(cursor or 0) + len(items)) if len(items) == limit else None
+        return {"items": items, "next_cursor": next_cursor}
+
+    @app.post("/api/v1/media-generation-tasks/{task_id}/retry")
+    async def retry_media_generation_task(
+        task_id: str,
+        _: MediaGenerationEmptyRequest,
+        __: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return state.media_generation.retry(task_id)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/media-generation-tasks/{task_id}/cancel")
+    async def cancel_media_generation_task(
+        task_id: str,
+        _: MediaGenerationEmptyRequest,
+        __: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return state.media_generation.cancel(task_id)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
     @app.get("/api/v1/jobs")
     async def jobs(_: CoreState = Depends(require_ui)) -> list[dict[str, Any]]:
         return state.jobs.list()
@@ -1814,7 +1937,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/v1/jobs/{job_id}/cancel")
     async def cancel(job_id: str, _: CoreState = Depends(require_ui)) -> dict[str, Any]:
-        result = await state.jobs.cancel(job_id)
+        try:
+            result = await state.jobs.cancel(job_id)
+        except ValueError as exc:
+            raise _error(str(exc), "操作失败", 409) from exc
         if not result:
             raise _error("JOB_NOT_FOUND", "任务不存在", 404)
         return result

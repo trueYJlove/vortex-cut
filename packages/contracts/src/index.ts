@@ -38,6 +38,8 @@ export type ExportBatchItemId = string & { readonly __brand: "export_batch_item_
 export type RenditionReframeSnapshotId = string & { readonly __brand: "rendition_reframe_snapshot_id" };
 export type ReframeExportBatchId = string & { readonly __brand: "reframe_export_batch_id" };
 export type ReframeExportBatchItemId = string & { readonly __brand: "reframe_export_batch_item_id" };
+export type MediaGenerationRequestId = string & { readonly __brand: "media_generation_request_id" };
+export type MediaGenerationTaskId = string & { readonly __brand: "media_generation_task_id" };
 
 export type ProjectStatus = "active" | "archived" | "missing";
 export type AssetKind = "video" | "audio" | "image" | "text";
@@ -62,7 +64,8 @@ export type JobKind =
   | "candidate_generation"
   | "timeline_patch_generation"
   | "authoritative_preview"
-  | "final_export";
+  | "final_export"
+  | "media_generation";
 export type JobStage =
   | "queued"
   | "downloading"
@@ -124,6 +127,9 @@ export const ERROR_CODES = [
   , "CANDIDATE_PROVIDER_UNTESTED", "CANDIDATE_PROVIDER_UNSUPPORTED",
   "CANDIDATE_RESPONSE_ADAPTER_INVALID", "CANDIDATE_CAPABILITY_STALE",
   "CANDIDATE_CANDIDATESCRIPT_INVALID", "CANDIDATE_EGRESS_PAYLOAD_UNAVAILABLE"
+  , "GENERATION_REQUEST_INVALID", "GENERATION_KIND_UNSUPPORTED", "GENERATION_INPUT_CHANGED",
+  "GENERATION_HASH_MISMATCH", "GENERATION_OUTPUT_INVALID", "GENERATION_INTERRUPTED",
+  "GENERATION_RETRY_NOT_ALLOWED", "GENERATION_TASK_NOT_FOUND"
 ] as const;
 export type ErrorCode = typeof ERROR_CODES[number] | (string & {});
 
@@ -812,6 +818,75 @@ export interface TimelinePatchGenerationCreateResponse { timeline_patch_generati
 export interface TimelinePatchProposalApplyRequest { base_revision_id: TimelineRevisionId; proposed_document_sha256: string; }
 export interface TimelineRevisionDiffRequest { base_revision_id: TimelineRevisionId; target_revision_id: TimelineRevisionId; }
 
+export type GenerationKind = "image" | "tts";
+export type GenerationStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
+export type GenerationExecutionMode = "simulation_only";
+
+export interface ImageGenerationParameters {
+  width: number;
+  height: number;
+  style_preset_id?: string;
+  seed?: number;
+}
+export interface TtsGenerationParameters {
+  voice_preset_id: string;
+  language: "zh-CN" | "en-US";
+  speed_milli: number;
+}
+export type MediaGenerationParameters = ImageGenerationParameters | TtsGenerationParameters;
+export type MediaGenerationPrepareInput =
+  | { generation_kind: "image"; prompt: string; input_refs: string[]; parameters: ImageGenerationParameters }
+  | { generation_kind: "tts"; prompt: string; input_refs: string[]; parameters: TtsGenerationParameters };
+export type MediaGenerationCreateInput = MediaGenerationPrepareInput & { request_sha256: string };
+export interface MediaGenerationPreparedRequest {
+  schema_version: 1;
+  project_id: ProjectId;
+  generation_kind: GenerationKind;
+  execution_mode: GenerationExecutionMode;
+  prompt_sha256: string;
+  input_refs: string[];
+  parameters: MediaGenerationParameters;
+  request_sha256: string;
+}
+export interface MediaGenerationRequest {
+  request_id: MediaGenerationRequestId;
+  project_id: ProjectId;
+  generation_kind: GenerationKind;
+  execution_mode: GenerationExecutionMode;
+  prompt_sha256: string;
+  input_refs: string[];
+  parameters: MediaGenerationParameters;
+  request_sha256: string;
+  created_at: string;
+}
+export type MediaGenerationRequestSummary = MediaGenerationRequest;
+export interface MediaGenerationResultSummary {
+  execution_mode: GenerationExecutionMode;
+  outcome: "validated_without_media";
+  provider_call_count: 0;
+}
+export interface MediaGenerationTaskError { code: ErrorCode; message: string }
+export interface MediaGenerationTask {
+  task_id: MediaGenerationTaskId;
+  request_id: MediaGenerationRequestId;
+  job_id: JobId;
+  attempt: number;
+  status: GenerationStatus;
+  stage: "queued" | "running" | "completed" | "failed" | "cancelled" | "interrupted";
+  retry_of_task_id: MediaGenerationTaskId | null;
+  output_asset_id: AssetId | null;
+  output_sha256: string | null;
+  result_summary: MediaGenerationResultSummary | null;
+  error: MediaGenerationTaskError | null;
+  created_at: string;
+  updated_at: string;
+  finished_at: string | null;
+}
+export interface MediaGenerationCreateResponse { request: MediaGenerationRequest; task: MediaGenerationTask; reused: boolean }
+export type MediaGenerationRequestPage = Page<MediaGenerationRequest>;
+export type MediaGenerationTaskPage = Page<MediaGenerationTask>;
+export type MediaGenerationRetryInput = Record<string, never>;
+
 export class ContractValidationError extends Error {
   constructor(public readonly contract: string, message = "Invalid contract payload") {
     super(`${contract}: ${message}`);
@@ -821,7 +896,7 @@ export class ContractValidationError extends Error {
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const JOB_STATUSES: JobStatus[] = ["queued", "running", "succeeded", "failed", "cancelling", "cancelled", "interrupted"];
-const JOB_KINDS: JobKind[] = ["asset_probe", "asset_fingerprint", "proxy", "portrait_sample", "vertical_sample", "model_download", "transcription", "candidate_generation", "timeline_patch_generation", "authoritative_preview", "final_export"];
+const JOB_KINDS: JobKind[] = ["asset_probe", "asset_fingerprint", "proxy", "portrait_sample", "vertical_sample", "model_download", "transcription", "candidate_generation", "timeline_patch_generation", "authoritative_preview", "final_export", "media_generation"];
 const PROJECT_STATUSES: ProjectStatus[] = ["active", "archived", "missing"];
 const ASSET_KINDS: AssetKind[] = ["video", "audio", "image", "text"];
 const ASSET_AVAILABILITIES: AssetAvailability[] = ["available", "missing", "changed", "unsupported"];
@@ -854,7 +929,7 @@ function isLanguage(value: unknown): value is string { return isString(value) &&
 function hasSensitiveKey(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(hasSensitiveKey);
   if (!isRecord(value)) return false;
-  return Object.entries(value).some(([key, item]) => ["installed_path", "install_dir", "path", "uri", "token", "admin_token", "ui_token", "api_key", "secret", "authorization", "prompt", "raw_response", "http_body", "request_body", "response_body", "body", "request", "response", "system_message"].includes(key.toLowerCase()) || hasSensitiveKey(item));
+  return Object.entries(value).some(([key, item]) => ["installed_path", "install_dir", "path", "absolute_path", "uri", "token", "admin_token", "ui_token", "api_key", "secret", "authorization", "prompt", "raw_response", "http_body", "request_body", "response_body", "body", "request", "response", "system_message", "transcript", "caption", "payload", "stderr", "command", "traceback"].includes(key.toLowerCase()) || hasSensitiveKey(item));
 }
 
 export function isLicenseInfo(value: unknown): value is LicenseInfo {
@@ -1388,6 +1463,90 @@ export function isReframeExportBatchRetryInput(value: unknown): value is Reframe
     && new Set(value.reframe_export_batch_item_ids).size === value.reframe_export_batch_item_ids.length;
 }
 export const isReframeExportBatchRetryResponse = isReframeExportBatchCreateResponse;
+const GENERATION_STATUSES: GenerationStatus[] = ["queued", "running", "succeeded", "failed", "cancelled", "interrupted"];
+const GENERATION_STAGES = ["queued", "running", "completed", "failed", "cancelled", "interrupted"] as const;
+const GENERATION_RESPONSE_SENSITIVE_KEYS = new Set(["prompt", "absolute_path", "path", "uri", "transcript", "caption", "payload", "raw_response", "stderr", "command", "traceback", "api_key", "secret", "authorization", "token"]);
+function hasGenerationResponseSensitiveKey(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(hasGenerationResponseSensitiveKey);
+  if (!isRecord(value)) return false;
+  return Object.entries(value).some(([key, item]) => GENERATION_RESPONSE_SENSITIVE_KEYS.has(key.toLowerCase()) || hasGenerationResponseSensitiveKey(item));
+}
+function isGenerationPrompt(value: unknown): value is string {
+  return isString(value) && value.length >= 1 && value.length <= 4000 && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(value);
+}
+function isInputRefs(value: unknown, canonical = false): value is string[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 32 || !value.every(isId) || new Set(value).size !== value.length) return false;
+  return !canonical || value.every((item, index) => index === 0 || value[index - 1] <= item);
+}
+export function isImageGenerationParameters(value: unknown): value is ImageGenerationParameters {
+  return isRecord(value) && !hasGenerationResponseSensitiveKey(value) && onlyKeys(value, ["width", "height", "style_preset_id", "seed"])
+    && isInteger(value.width, 64) && value.width <= 4096 && isInteger(value.height, 64) && value.height <= 4096
+    && (value.style_preset_id === undefined || isId(value.style_preset_id))
+    && (value.seed === undefined || (isInteger(value.seed) && value.seed <= 2147483647));
+}
+export function isTtsGenerationParameters(value: unknown): value is TtsGenerationParameters {
+  return isRecord(value) && !hasGenerationResponseSensitiveKey(value) && onlyKeys(value, ["voice_preset_id", "language", "speed_milli"])
+    && isId(value.voice_preset_id) && oneOf(["zh-CN", "en-US"] as const, value.language)
+    && isInteger(value.speed_milli, 500) && value.speed_milli <= 2000;
+}
+function isGenerationParameters(kind: unknown, value: unknown): value is MediaGenerationParameters {
+  return kind === "image" ? isImageGenerationParameters(value) : kind === "tts" ? isTtsGenerationParameters(value) : false;
+}
+export function isMediaGenerationPrepareInput(value: unknown): value is MediaGenerationPrepareInput {
+  return isRecord(value) && onlyKeys(value, ["generation_kind", "prompt", "input_refs", "parameters"])
+    && oneOf(["image", "tts"] as const, value.generation_kind) && isGenerationPrompt(value.prompt)
+    && isInputRefs(value.input_refs) && isGenerationParameters(value.generation_kind, value.parameters);
+}
+export function isMediaGenerationCreateInput(value: unknown): value is MediaGenerationCreateInput {
+  if (!isRecord(value) || !onlyKeys(value, ["generation_kind", "prompt", "input_refs", "parameters", "request_sha256"]) || !isSha256(value.request_sha256)) return false;
+  const { request_sha256: _requestSha256, ...prepare } = value;
+  return isMediaGenerationPrepareInput(prepare);
+}
+export function isMediaGenerationPreparedRequest(value: unknown): value is MediaGenerationPreparedRequest {
+  return isRecord(value) && !hasGenerationResponseSensitiveKey(value) && onlyKeys(value, ["schema_version", "project_id", "generation_kind", "execution_mode", "prompt_sha256", "input_refs", "parameters", "request_sha256"])
+    && value.schema_version === 1 && isId(value.project_id) && oneOf(["image", "tts"] as const, value.generation_kind)
+    && value.execution_mode === "simulation_only" && isSha256(value.prompt_sha256) && isInputRefs(value.input_refs, true)
+    && isGenerationParameters(value.generation_kind, value.parameters) && isSha256(value.request_sha256);
+}
+export function isMediaGenerationRequest(value: unknown): value is MediaGenerationRequest {
+  return isRecord(value) && !hasGenerationResponseSensitiveKey(value) && onlyKeys(value, ["request_id", "project_id", "generation_kind", "execution_mode", "prompt_sha256", "input_refs", "parameters", "request_sha256", "created_at"])
+    && isId(value.request_id) && isId(value.project_id) && oneOf(["image", "tts"] as const, value.generation_kind)
+    && value.execution_mode === "simulation_only" && isSha256(value.prompt_sha256) && isInputRefs(value.input_refs, true)
+    && isGenerationParameters(value.generation_kind, value.parameters) && isSha256(value.request_sha256) && isTime(value.created_at);
+}
+export function isMediaGenerationResultSummary(value: unknown): value is MediaGenerationResultSummary {
+  return isRecord(value) && !hasGenerationResponseSensitiveKey(value) && onlyKeys(value, ["execution_mode", "outcome", "provider_call_count"])
+    && value.execution_mode === "simulation_only" && value.outcome === "validated_without_media" && value.provider_call_count === 0;
+}
+export function isMediaGenerationTask(value: unknown): value is MediaGenerationTask {
+  if (!isRecord(value) || hasGenerationResponseSensitiveKey(value) || !onlyKeys(value, ["task_id", "request_id", "job_id", "attempt", "status", "stage", "retry_of_task_id", "output_asset_id", "output_sha256", "result_summary", "error", "created_at", "updated_at", "finished_at"])) return false;
+  if (!isId(value.task_id) || !isId(value.request_id) || !isId(value.job_id) || !isInteger(value.attempt, 1) || !oneOf(GENERATION_STATUSES, value.status) || !oneOf(GENERATION_STAGES, value.stage)) return false;
+  if (!(value.retry_of_task_id === null || isId(value.retry_of_task_id)) || !(value.output_asset_id === null || isId(value.output_asset_id)) || !(value.output_sha256 === null || isSha256(value.output_sha256))) return false;
+  if (!(value.result_summary === null || isMediaGenerationResultSummary(value.result_summary)) || !(value.error === null || (isRecord(value.error) && onlyKeys(value.error, ["code", "message"]) && isString(value.error.code) && isString(value.error.message)))) return false;
+  if (!isTime(value.created_at) || !isTime(value.updated_at) || !(value.finished_at === null || isTime(value.finished_at))) return false;
+  if (value.status === "succeeded" && (value.stage !== "completed" || !isMediaGenerationResultSummary(value.result_summary) || value.error !== null)) return false;
+  if (value.status !== "succeeded" && value.result_summary !== null) return false;
+  if (["queued", "running"].includes(value.status) && value.finished_at !== null) return false;
+  return true;
+}
+export function isMediaGenerationCreateResponse(value: unknown): value is MediaGenerationCreateResponse {
+  return isRecord(value) && !hasGenerationResponseSensitiveKey(value) && onlyKeys(value, ["request", "task", "reused"])
+    && isMediaGenerationRequest(value.request) && isMediaGenerationTask(value.task) && typeof value.reused === "boolean"
+    && value.task.request_id === value.request.request_id;
+}
+export function isMediaGenerationRequestPage(value: unknown): value is MediaGenerationRequestPage { return isPage(value, isMediaGenerationRequest); }
+export function isMediaGenerationTaskPage(value: unknown): value is MediaGenerationTaskPage { return isPage(value, isMediaGenerationTask); }
+export function isMediaGenerationRetryInput(value: unknown): value is MediaGenerationRetryInput { return isRecord(value) && Object.keys(value).length === 0; }
+export function parseMediaGenerationPrepareInput(value: unknown): MediaGenerationPrepareInput { if (!isMediaGenerationPrepareInput(value)) throw new ContractValidationError("MediaGenerationPrepareInput"); return value; }
+export function parseMediaGenerationCreateInput(value: unknown): MediaGenerationCreateInput { if (!isMediaGenerationCreateInput(value)) throw new ContractValidationError("MediaGenerationCreateInput"); return value; }
+export function parseMediaGenerationPreparedRequest(value: unknown): MediaGenerationPreparedRequest { if (!isMediaGenerationPreparedRequest(value)) throw new ContractValidationError("MediaGenerationPreparedRequest"); return value; }
+export function parseMediaGenerationRequest(value: unknown): MediaGenerationRequest { if (!isMediaGenerationRequest(value)) throw new ContractValidationError("MediaGenerationRequest"); return value; }
+export function parseMediaGenerationTask(value: unknown): MediaGenerationTask { if (!isMediaGenerationTask(value)) throw new ContractValidationError("MediaGenerationTask"); return value; }
+export function parseMediaGenerationCreateResponse(value: unknown): MediaGenerationCreateResponse { if (!isMediaGenerationCreateResponse(value)) throw new ContractValidationError("MediaGenerationCreateResponse"); return value; }
+export function parseMediaGenerationRequestPage(value: unknown): MediaGenerationRequestPage { if (!isMediaGenerationRequestPage(value)) throw new ContractValidationError("MediaGenerationRequestPage"); return value; }
+export function parseMediaGenerationTaskPage(value: unknown): MediaGenerationTaskPage { if (!isMediaGenerationTaskPage(value)) throw new ContractValidationError("MediaGenerationTaskPage"); return value; }
+export function parseMediaGenerationRetryInput(value: unknown): MediaGenerationRetryInput { if (!isMediaGenerationRetryInput(value)) throw new ContractValidationError("MediaGenerationRetryInput"); return value; }
+
 export function parsePlatformPreset(value: unknown): PlatformPreset { if (!isPlatformPreset(value)) throw new ContractValidationError("PlatformPreset"); return value; }
 export function parseRenditionPreset(value: unknown): RenditionPreset { if (!isRenditionPreset(value)) throw new ContractValidationError("RenditionPreset"); return value; }
 export function parseRenditionPreviewCreateInput(value: unknown): RenditionPreviewCreateInput { if (!isRenditionPreviewCreateInput(value)) throw new ContractValidationError("RenditionPreviewCreateInput"); return value; }

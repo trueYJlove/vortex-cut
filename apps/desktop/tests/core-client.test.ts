@@ -182,4 +182,51 @@ describe("CoreClient", () => {
       "http://127.0.0.1:4000/api/v1/projects/project_1/previews", "http://127.0.0.1:4000/api/v1/projects/project_1/previews", "http://127.0.0.1:4000/api/v1/projects/project_1/exports", "http://127.0.0.1:4000/api/v1/projects/project_1/exports", "http://127.0.0.1:4000/api/v1/render-artifacts/render_2"
     ]);
   });
+  it("实现 Stage 4A 七个窄 API，Prompt 只存在于出站命令且终端动作发送空对象", async () => {
+    const now = "2026-08-18T00:00:00.000Z"; const hash = `sha256:${"a".repeat(64)}`;
+    const request = { request_id: "generation_request_1", project_id: "project_1", generation_kind: "image", execution_mode: "simulation_only", prompt_sha256: hash, input_refs: ["asset_1"], parameters: { width: 1024, height: 1024 }, request_sha256: hash, created_at: now };
+    const task = { task_id: "generation_task_1", request_id: "generation_request_1", job_id: "job_1", attempt: 1, status: "queued", stage: "queued", retry_of_task_id: null, output_asset_id: null, output_sha256: null, result_summary: null, error: null, created_at: now, updated_at: now, finished_at: null };
+    const prepared = { schema_version: 1, project_id: "project_1", generation_kind: "image", execution_mode: "simulation_only", prompt_sha256: hash, input_refs: ["asset_1"], parameters: { width: 1024, height: 1024 }, request_sha256: hash };
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(response(prepared))
+      .mockResolvedValueOnce(response({ request, task, reused: false }))
+      .mockResolvedValueOnce(response({ items: [request], next_cursor: null }))
+      .mockResolvedValueOnce(response(request))
+      .mockResolvedValueOnce(response({ items: [task], next_cursor: null }))
+      .mockResolvedValueOnce(response({ ...task, attempt: 2, task_id: "generation_task_2", job_id: "job_2", retry_of_task_id: "generation_task_1" }))
+      .mockResolvedValueOnce(response({ ...task, status: "cancelled", stage: "cancelled", finished_at: now }));
+    const client = new CoreClient({ baseUrl: "http://127.0.0.1:4000", uiToken: "ui-secret", fetchImpl });
+    const command = { generation_kind: "image" as const, prompt: "prompt-sentinel", input_refs: ["asset_1"], parameters: { width: 1024, height: 1024 } };
+    await client.prepareMediaGeneration("project_1" as never, command);
+    await client.createMediaGeneration("project_1" as never, { ...command, request_sha256: hash });
+    await client.listMediaGenerationRequests("project_1" as never, { limit: 20, cursor: "0" });
+    await client.getMediaGenerationRequest("generation_request_1" as never);
+    await client.listMediaGenerationTasks("generation_request_1" as never, { limit: 10 });
+    await client.retryMediaGenerationTask("generation_task_1" as never);
+    await client.cancelMediaGenerationTask("generation_task_1" as never);
+    expect(fetchImpl.mock.calls.map(call => String(call[0]))).toEqual([
+      "http://127.0.0.1:4000/api/v1/projects/project_1/media-generation-requests/prepare",
+      "http://127.0.0.1:4000/api/v1/projects/project_1/media-generation-requests",
+      "http://127.0.0.1:4000/api/v1/projects/project_1/media-generation-requests?limit=20&cursor=0",
+      "http://127.0.0.1:4000/api/v1/media-generation-requests/generation_request_1",
+      "http://127.0.0.1:4000/api/v1/media-generation-requests/generation_request_1/tasks?limit=10",
+      "http://127.0.0.1:4000/api/v1/media-generation-tasks/generation_task_1/retry",
+      "http://127.0.0.1:4000/api/v1/media-generation-tasks/generation_task_1/cancel"
+    ]);
+    expect(JSON.parse(String(fetchImpl.mock.calls[0][1].body))).toMatchObject({ prompt: "prompt-sentinel" });
+    expect(JSON.parse(String(fetchImpl.mock.calls[1][1].body))).toMatchObject({ prompt: "prompt-sentinel", request_sha256: hash });
+    expect(fetchImpl.mock.calls.slice(2).map(call => String(call[1]?.body ?? ""))).not.toContain("prompt-sentinel");
+    expect(fetchImpl.mock.calls.slice(5).map(call => call[1]?.body)).toEqual(["{}", "{}"]);
+  });
+
+  it("Stage 4A 响应先清理敏感字段再执行严格解析", async () => {
+    const hash = `sha256:${"a".repeat(64)}`;
+    const safe = { schema_version: 1, project_id: "project_1", generation_kind: "image", execution_mode: "simulation_only", prompt_sha256: hash, input_refs: ["asset_1"], parameters: { width: 1024, height: 1024 }, request_sha256: hash };
+    const fetchImpl = vi.fn().mockResolvedValue(response({ ...safe, prompt: "must-not-return", absolute_path: "private", traceback: "private" }));
+    const client = new CoreClient({ baseUrl: "http://127.0.0.1:4000", uiToken: "ui-secret", fetchImpl });
+    const result = await client.prepareMediaGeneration("project_1" as never, { generation_kind: "image", prompt: "input-only", input_refs: ["asset_1"], parameters: { width: 1024, height: 1024 } });
+    expect(JSON.stringify(result)).not.toContain("must-not-return");
+    expect(JSON.stringify(result)).not.toContain("private");
+  });
+
 });

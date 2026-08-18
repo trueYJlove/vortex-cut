@@ -29,6 +29,7 @@ V7_VERSION = "v7"
 V8_VERSION = "v8"
 V9_VERSION = "v9"
 V10_VERSION = "v10"
+V11_VERSION = "v11"
 V1_SQL = """
 CREATE TABLE IF NOT EXISTS media_inputs (
   id TEXT PRIMARY KEY, path TEXT NOT NULL, display_name TEXT NOT NULL,
@@ -728,6 +729,55 @@ BEFORE UPDATE OF export_batch_item_id,reframe_export_batch_item_id ON export_rec
 WHEN NEW.export_batch_item_id IS NOT NULL AND NEW.reframe_export_batch_item_id IS NOT NULL
 BEGIN SELECT RAISE(ABORT,'stage3 batch owners are mutually exclusive'); END;
 """  # noqa: E501
+V11_SQL = """
+CREATE TABLE IF NOT EXISTS media_generation_requests (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  generation_kind TEXT NOT NULL CHECK(generation_kind IN ('image','tts')),
+  execution_mode TEXT NOT NULL CHECK(execution_mode='simulation_only'),
+  prompt_sha256 TEXT NOT NULL,
+  input_refs_json TEXT NOT NULL,
+  parameters_json TEXT NOT NULL,
+  request_sha256 TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(project_id, request_sha256)
+);
+CREATE TABLE IF NOT EXISTS media_generation_tasks (
+  id TEXT PRIMARY KEY,
+  request_id TEXT NOT NULL REFERENCES media_generation_requests(id),
+  job_id TEXT NOT NULL UNIQUE REFERENCES jobs(id),
+  attempt INTEGER NOT NULL CHECK(attempt >= 1),
+  status TEXT NOT NULL CHECK(status IN (
+    'queued','running','succeeded','failed','cancelled','interrupted'
+  )),
+  stage TEXT NOT NULL,
+  retry_of_task_id TEXT NULL REFERENCES media_generation_tasks(id),
+  output_asset_id TEXT NULL REFERENCES assets(id),
+  output_sha256 TEXT NULL,
+  result_summary_json TEXT NULL,
+  error_code TEXT NULL,
+  error_message TEXT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  finished_at TEXT NULL,
+  UNIQUE(request_id, attempt)
+);
+CREATE INDEX IF NOT EXISTS idx_media_generation_requests_project
+  ON media_generation_requests(project_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_media_generation_tasks_request
+  ON media_generation_tasks(request_id, attempt, created_at);
+CREATE INDEX IF NOT EXISTS idx_media_generation_tasks_job
+  ON media_generation_tasks(job_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_media_generation_tasks_retry_of
+  ON media_generation_tasks(retry_of_task_id)
+  WHERE retry_of_task_id IS NOT NULL;
+CREATE TRIGGER IF NOT EXISTS media_generation_requests_no_update
+BEFORE UPDATE ON media_generation_requests
+BEGIN SELECT RAISE(ABORT,'media generation requests are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS media_generation_requests_no_delete
+BEFORE DELETE ON media_generation_requests
+BEGIN SELECT RAISE(ABORT,'media generation requests are immutable'); END;
+"""
 MIGRATIONS: dict[str, str] = {
     V1_VERSION: V1_SQL,
     V2_VERSION: V2_SQL,
@@ -739,6 +789,7 @@ MIGRATIONS: dict[str, str] = {
     V8_VERSION: V8_SQL,
     V9_VERSION: V9_SQL,
     V10_VERSION: V10_SQL,
+    V11_VERSION: V11_SQL,
 }
 
 

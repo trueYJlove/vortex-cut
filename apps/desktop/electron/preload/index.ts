@@ -45,6 +45,9 @@ import type {
   , TimelineDiff, TimelinePatchEgressPreview, TimelinePatchGeneration, TimelinePatchGenerationCreateResponse, TimelinePatchProposal, TimelinePatchCapabilityTestResponse
   , PlatformPreset, RenditionPreset, RenditionPreview, RenditionPreviewCreateInput, DirectoryGrant, ExportBatch, ExportBatchCreateInput, ExportBatchRetryInput
   , RenditionReframePreview, RenditionReframePreviewCreateInput, ReframeExportBatch, ReframeExportBatchCreateInput, ReframeExportBatchRetryInput
+  , MediaGenerationPrepareInput, MediaGenerationCreateInput, MediaGenerationPreparedRequest
+  , MediaGenerationCreateResponse, MediaGenerationRequest, MediaGenerationRequestId, MediaGenerationRequestPage
+  , MediaGenerationTask, MediaGenerationTaskId, MediaGenerationTaskPage
 } from "@aivideo/contracts";
 
 export interface MediaSelection { grant: FileGrant; media: MediaInfo }
@@ -134,6 +137,13 @@ export interface DesktopApi {
   listReframeExportBatches: (input: { project_id: ProjectId; limit?: number; cursor?: string }) => Promise<{ items: ReframeExportBatch[]; next_cursor: string | null }>;
   cancelReframeExportBatch: (batchId: string) => Promise<ReframeExportBatch>;
   retryReframeExportBatch: (input: { batch_id: string; retry: ReframeExportBatchRetryInput }) => Promise<{ batch: ReframeExportBatch; jobs: Job[] }>;
+  prepareMediaGeneration: (input: { project_id: ProjectId; request: MediaGenerationPrepareInput }) => Promise<MediaGenerationPreparedRequest>;
+  createMediaGeneration: (input: { project_id: ProjectId; request: MediaGenerationCreateInput }) => Promise<MediaGenerationCreateResponse>;
+  listMediaGenerationRequests: (input: { project_id: ProjectId; limit?: number; cursor?: string }) => Promise<MediaGenerationRequestPage>;
+  getMediaGenerationRequest: (requestId: MediaGenerationRequestId) => Promise<MediaGenerationRequest>;
+  listMediaGenerationTasks: (input: { request_id: MediaGenerationRequestId; limit?: number; cursor?: string }) => Promise<MediaGenerationTaskPage>;
+  retryMediaGenerationTask: (taskId: MediaGenerationTaskId) => Promise<MediaGenerationTask>;
+  cancelMediaGenerationTask: (taskId: MediaGenerationTaskId) => Promise<MediaGenerationTask>;
   getRenderArtifact: (artifactId: RenderArtifactId) => Promise<RenderArtifactPresentation>;
   openArtifact: (artifactId: string) => Promise<void>;
   openArtifactFolder: (artifactId: string) => Promise<void>;
@@ -220,6 +230,13 @@ const api: DesktopApi = {
   listReframeExportBatches: input => ipcRenderer.invoke("reframe-export-batch:list", input),
   cancelReframeExportBatch: batchId => ipcRenderer.invoke("reframe-export-batch:cancel", batchId),
   retryReframeExportBatch: input => ipcRenderer.invoke("reframe-export-batch:retry", input),
+  prepareMediaGeneration: input => ipcRenderer.invoke("media-generation:prepare", input),
+  createMediaGeneration: input => ipcRenderer.invoke("media-generation:create", input),
+  listMediaGenerationRequests: input => ipcRenderer.invoke("media-generation:list", input),
+  getMediaGenerationRequest: requestId => ipcRenderer.invoke("media-generation:get", requestId),
+  listMediaGenerationTasks: input => ipcRenderer.invoke("media-generation:tasks", input),
+  retryMediaGenerationTask: taskId => ipcRenderer.invoke("media-generation:retry", taskId),
+  cancelMediaGenerationTask: taskId => ipcRenderer.invoke("media-generation:cancel", taskId),
   getRenderArtifact: artifactId => ipcRenderer.invoke("render-artifact:get", artifactId),
   openArtifact: artifactId => ipcRenderer.invoke("artifact:open", artifactId),
   openArtifactFolder: artifactId => ipcRenderer.invoke("artifact:folder", artifactId),

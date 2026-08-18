@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CONTRACT_VERSION, ERROR_CODES, isApiErrorResponse, isAuthoritativePreview, isCaptionPresetId, isCandidateGeneration, isCandidateResponseAdapterId, isDestinationGrant, isDirectoryGrant, isExportBatchCreateInput, isExportCreateInput, isExportRecord, isFileGrant, isInternalModelManifest, isJobKind, isJobStatus, isModelDetail, isPlatformPreset, isPreviewCreateResponse, isProject, isProviderCapabilityTestResult, isProviderConfig, isRecipe, isRenderArtifact, isRenditionPreviewCreateInput, isRenditionReframePreviewCreateInput, isRenditionReframeSnapshotSummary, isReframeExportBatchCreateInput, isReframeExportBatchRetryInput, isSidecarReady, isTimelineCreateInput, isTimelineDiff, isTimelineDocument, isTimelineLayout, isTimelinePatch, isTimelinePatchCapabilityTestResponse, isTimelinePatchEgressPreview, isTimelinePatchGeneration, isTimelinePatchOperation, isTimelinePatchPrepareRequest, isTimelinePatchProposal, isTimelineState, isTranscript, parseSidecarReadyLine } from "@aivideo/contracts";
+import { CONTRACT_VERSION, ERROR_CODES, isApiErrorResponse, isAuthoritativePreview, isCaptionPresetId, isCandidateGeneration, isCandidateResponseAdapterId, isDestinationGrant, isDirectoryGrant, isExportBatchCreateInput, isExportCreateInput, isExportRecord, isFileGrant, isInternalModelManifest, isJobKind, isJobStatus, isModelDetail, isPlatformPreset, isPreviewCreateResponse, isProject, isProviderCapabilityTestResult, isProviderConfig, isRecipe, isRenderArtifact, isRenditionPreviewCreateInput, isRenditionReframePreviewCreateInput, isRenditionReframeSnapshotSummary, isReframeExportBatchCreateInput, isReframeExportBatchRetryInput, isSidecarReady, isTimelineCreateInput, isTimelineDiff, isTimelineDocument, isTimelineLayout, isTimelinePatch, isTimelinePatchCapabilityTestResponse, isTimelinePatchEgressPreview, isTimelinePatchGeneration, isTimelinePatchOperation, isTimelinePatchPrepareRequest, isTimelinePatchProposal, isTimelineState, isTranscript, parseSidecarReadyLine, isMediaGenerationPrepareInput, isMediaGenerationCreateInput, isMediaGenerationPreparedRequest, isMediaGenerationRequest, isMediaGenerationTask, isMediaGenerationCreateResponse } from "@aivideo/contracts";
 
 const now = "2026-08-11T00:00:00.000Z";
 
@@ -173,5 +173,54 @@ describe("Stage 3B reframe contracts", () => {
   it("does not widen frozen Stage 3A guards", () => {
     expect(isRenditionPreviewCreateInput({ timeline_revision_id: "revision_1", platform_preset_id: "douyin", rendition_preset_id: "portrait-9x16-v1", layout_policy: "crop_fill_all", adjustments: [adjustment] })).toBe(false);
     expect(isExportBatchCreateInput({ directory_grant_id: "directory_1", items: [{ rendition_reframe_snapshot_id: "rendition_reframe_snapshot_1", preview_artifact_id: "artifact_1" }] })).toBe(false);
+  });
+});
+
+
+describe("Stage 4A media generation contract", () => {
+  const hash = `sha256:${"a".repeat(64)}`;
+  const prepared = {
+    schema_version: 1 as const, project_id: "project_1", generation_kind: "image" as const,
+    execution_mode: "simulation_only" as const, prompt_sha256: hash, input_refs: ["asset_1"],
+    parameters: { width: 1024, height: 1024, style_preset_id: "photo", seed: 7 }, request_sha256: hash
+  };
+  const request = { request_id: "generation_request_1", ...prepared, schema_version: undefined, created_at: now } as Record<string, unknown>;
+  delete request.schema_version;
+  const task = {
+    task_id: "generation_task_1", request_id: "generation_request_1", job_id: "job_1", attempt: 1,
+    status: "queued", stage: "queued", retry_of_task_id: null, output_asset_id: null, output_sha256: null,
+    result_summary: null, error: null, created_at: now, updated_at: now, finished_at: null
+  };
+
+  it("保持版本不变并扩展独立 JobKind 与错误码", () => {
+    expect(CONTRACT_VERSION).toBe("stage3b-v1");
+    expect(isJobKind("media_generation")).toBe(true);
+    expect(ERROR_CODES).toEqual(expect.arrayContaining([
+      "GENERATION_REQUEST_INVALID", "GENERATION_KIND_UNSUPPORTED", "GENERATION_INPUT_CHANGED",
+      "GENERATION_HASH_MISMATCH", "GENERATION_OUTPUT_INVALID", "GENERATION_INTERRUPTED",
+      "GENERATION_RETRY_NOT_ALLOWED", "GENERATION_TASK_NOT_FOUND"
+    ]));
+  });
+
+  it("只接受 image/TTS 白名单命令且命令 Prompt 仅作为瞬时输入", () => {
+    expect(isMediaGenerationPrepareInput({ generation_kind: "image", prompt: "sentinel prompt", input_refs: ["asset_1"], parameters: { width: 64, height: 4096 } })).toBe(true);
+    expect(isMediaGenerationPrepareInput({ generation_kind: "tts", prompt: "测试语音", input_refs: ["asset_1"], parameters: { voice_preset_id: "voice_1", language: "zh-CN", speed_milli: 1000 } })).toBe(true);
+    expect(isMediaGenerationCreateInput({ generation_kind: "image", prompt: "p", input_refs: ["asset_1"], parameters: { width: 1024, height: 1024 }, request_sha256: hash })).toBe(true);
+    expect(isMediaGenerationPrepareInput({ generation_kind: "video", prompt: "p", input_refs: ["asset_1"], parameters: {} })).toBe(false);
+    expect(isMediaGenerationPrepareInput({ generation_kind: "image", prompt: "p", input_refs: ["asset_1"], parameters: { width: 63, height: 1024 } })).toBe(false);
+    expect(isMediaGenerationPrepareInput({ generation_kind: "tts", prompt: "p", input_refs: ["asset_1"], parameters: { voice_preset_id: "voice_1", language: "fr-FR", speed_milli: 1000 } })).toBe(false);
+    expect(isMediaGenerationPrepareInput({ generation_kind: "image", prompt: "p", input_refs: ["asset_1"], parameters: { width: 1024, height: 1024, absolute_path: "private" } })).toBe(false);
+  });
+
+  it("验证 Prepared/Request/Task/CreateResponse 并拒绝响应敏感字段", () => {
+    expect(isMediaGenerationPreparedRequest(prepared)).toBe(true);
+    expect(isMediaGenerationRequest(request)).toBe(true);
+    expect(isMediaGenerationTask(task)).toBe(true);
+    expect(isMediaGenerationCreateResponse({ request, task, reused: false })).toBe(true);
+    for (const forbidden of ["prompt", "absolute_path", "transcript", "caption", "payload", "stderr", "command", "traceback"]) {
+      expect(isMediaGenerationRequest({ ...request, [forbidden]: "sentinel" })).toBe(false);
+    }
+    expect(isMediaGenerationTask({ ...task, result_summary: { execution_mode: "simulation_only", outcome: "validated_without_media", provider_call_count: 1 } })).toBe(false);
+    expect(isMediaGenerationTask({ ...task, status: "succeeded", stage: "completed", finished_at: now, result_summary: { execution_mode: "simulation_only", outcome: "validated_without_media", provider_call_count: 0 } })).toBe(true);
   });
 });
