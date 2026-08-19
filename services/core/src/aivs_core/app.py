@@ -28,6 +28,11 @@ from .media_generation import MediaGenerationService
 from .model_registry import ModelError, ModelManager, ModelRegistry
 from .planning import PlanningService, ProviderRepository, RecipeRegistry
 from .projects import DomainError, ProjectAssetService
+from .provider_image_generation import (
+    ImageProviderConfigService,
+    ProviderImageGenerationService,
+)
+from .provider_images import ApiKeyFunImagesProvider
 from .providers import ProviderError, ProviderSecretVault
 from .rendering.ass import CaptionResources
 from .rendering.plan import RenderPlanCompiler
@@ -332,6 +337,53 @@ class MediaGenerationEmptyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
 
+class ImageProviderConfigCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    display_name: str
+    enabled: bool = True
+
+
+class ImageProviderSecretRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    secret: str
+
+
+class ProviderImageGenerationPrepareRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    provider_config_id: str
+    prompt: str
+    size: Literal["1024x1024", "1024x1536", "1536x1024"]
+
+
+class ProviderImageGenerationCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    preview_id: str
+    payload_sha256: str
+    confirmed: bool
+
+
+class ProviderImageGenerationRetryPrepareRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    prompt: str
+
+
+class ProviderImageGenerationRetryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    preview_id: str
+    payload_sha256: str
+    confirmed: bool
+
+
+class ProviderImageGenerationEmptyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
 class ShotVisualRequirementRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -418,6 +470,20 @@ class CoreState:
             probe_asset,
             transcript_stale=self.transcripts.mark_asset_stale,
         )
+        self.image_provider_secrets = ProviderSecretVault()
+        self.image_provider_configs = ImageProviderConfigService(
+            self.db, self.image_provider_secrets
+        )
+        image_provider = (
+            ApiKeyFunImagesProvider() if settings.image_provider_network_enabled else None
+        )
+        self.provider_image_generation = ProviderImageGenerationService(
+            self.db,
+            self.image_provider_configs,
+            self.image_provider_secrets,
+            self.projects,
+            provider=image_provider,
+        )
         self.render_compiler = RenderPlanCompiler(self.db)
         self.render_coordinator = RenderCoordinator(
             self.db,
@@ -447,6 +513,12 @@ class CoreState:
             media_generation_start=self.media_generation.start_job,
             media_generation_finish=self.media_generation.finish_job,
             media_generation_recover=self.media_generation.recover_interrupted_tasks,
+            provider_image_generation_runner=self.provider_image_generation.run,
+            provider_image_generation_start=self.provider_image_generation.start_job,
+            provider_image_generation_finish=self.provider_image_generation.finish_job,
+            provider_image_generation_recover=(
+                self.provider_image_generation.recover_interrupted_tasks
+            ),
         )
         self.renders = RenderService(
             self.db,
@@ -566,6 +638,9 @@ def _domain(exc: DomainError) -> HTTPException:
             "GENERATION_INPUT_CHANGED",
             "GENERATION_HASH_MISMATCH",
             "GENERATION_RETRY_NOT_ALLOWED",
+            "GENERATION_PROMPT_HASH_MISMATCH",
+            "IMAGE_GENERATION_CONFIRMATION_INVALID",
+            "IMAGE_GENERATION_PREVIEW_EXPIRED",
             "JOB_INVALID_STATE",
             "SHOT_LIST_CONFLICT",
             "SHOT_LIST_CONFIRMATION_CONFLICT",
@@ -622,6 +697,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except MigrationError:
             raise
         state.media_generation.recover_interrupted_tasks()
+        state.provider_image_generation.recover_interrupted_tasks()
+        state.provider_image_generation.cleanup_orphans()
         state.db.recover_interrupted()
         state.render_coordinator.cleanup_orphans()
         seed_dir = os.environ.get("AIVS_E2E_MODEL_DIR")
@@ -1927,6 +2004,154 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> dict[str, Any]:
         try:
             return state.shot_requirements.confirm(project_id, request.model_dump())
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/projects/{project_id}/image-provider-configs")
+    async def list_image_provider_configs(
+        project_id: str, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        try:
+            return {"items": state.image_provider_configs.list(project_id)}
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/image-provider-configs")
+    async def create_image_provider_config(
+        project_id: str,
+        request: ImageProviderConfigCreateRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return state.image_provider_configs.create(project_id, request.model_dump())
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.put("/api/v1/internal/image-provider-configs/{provider_config_id}/secret")
+    async def set_image_provider_secret(
+        provider_config_id: str,
+        request: ImageProviderSecretRequest,
+        _: CoreState = Depends(require_admin),
+    ) -> dict[str, Any]:
+        try:
+            return state.image_provider_configs.set_secret(provider_config_id, request.secret)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.delete("/api/v1/internal/image-provider-configs/{provider_config_id}/secret")
+    async def delete_image_provider_secret(
+        provider_config_id: str, _: CoreState = Depends(require_admin)
+    ) -> dict[str, Any]:
+        try:
+            state.image_provider_configs.delete_secret(provider_config_id)
+            return {
+                "provider_config_id": provider_config_id,
+                "credential_status": "missing",
+            }
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/provider-image-generations/prepare")
+    async def prepare_provider_image_generation(
+        project_id: str,
+        request: ProviderImageGenerationPrepareRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return state.provider_image_generation.prepare(
+                project_id, request.provider_config_id, request.prompt, request.size
+            )
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/provider-image-generations")
+    async def create_provider_image_generation(
+        project_id: str,
+        request: ProviderImageGenerationCreateRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return state.provider_image_generation.create(
+                project_id, request.preview_id, request.payload_sha256, request.confirmed
+            )
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/projects/{project_id}/provider-image-generations")
+    async def list_provider_image_generations(
+        project_id: str,
+        limit: int = 50,
+        cursor: str | None = None,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            items = state.provider_image_generation.list(project_id, limit, cursor)
+            offset = int(cursor or 0)
+        except (DomainError, ValueError) as exc:
+            if isinstance(exc, DomainError):
+                raise _domain(exc) from exc
+            raise _error("GENERATION_REQUEST_INVALID", "分页参数无效", 400) from exc
+        next_cursor = str(offset + len(items)) if len(items) == limit else None
+        return {"items": items, "next_cursor": next_cursor}
+
+    @app.get("/api/v1/provider-image-generations/{request_id}")
+    async def get_provider_image_generation(
+        request_id: str, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        try:
+            return state.provider_image_generation.get(request_id)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/provider-image-generations/{request_id}/tasks")
+    async def list_provider_image_generation_tasks(
+        request_id: str,
+        limit: int = 50,
+        cursor: str | None = None,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            items = state.provider_image_generation.list_tasks(request_id, limit, cursor)
+            offset = int(cursor or 0)
+        except (DomainError, ValueError) as exc:
+            if isinstance(exc, DomainError):
+                raise _domain(exc) from exc
+            raise _error("GENERATION_REQUEST_INVALID", "分页参数无效", 400) from exc
+        next_cursor = str(offset + len(items)) if len(items) == limit else None
+        return {"items": items, "next_cursor": next_cursor}
+
+    @app.post("/api/v1/provider-image-generation-tasks/{task_id}/retry/prepare")
+    async def prepare_provider_image_generation_retry(
+        task_id: str,
+        request: ProviderImageGenerationRetryPrepareRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return state.provider_image_generation.prepare_retry(task_id, request.prompt)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/provider-image-generation-tasks/{task_id}/retry")
+    async def retry_provider_image_generation(
+        task_id: str,
+        request: ProviderImageGenerationRetryRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return state.provider_image_generation.retry(
+                task_id, request.preview_id, request.payload_sha256, request.confirmed
+            )
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/provider-image-generation-tasks/{task_id}/cancel")
+    async def cancel_provider_image_generation(
+        task_id: str,
+        _: ProviderImageGenerationEmptyRequest,
+        __: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return state.provider_image_generation.cancel(task_id)
         except DomainError as exc:
             raise _domain(exc) from exc
 

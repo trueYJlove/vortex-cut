@@ -1,6 +1,6 @@
 export const PROTOCOL_VERSION = 1 as const;
 export const API_PREFIX = "/api/v1" as const;
-export const CONTRACT_VERSION = "stage4c-v1" as const;
+export const CONTRACT_VERSION = "stage4d-v2" as const;
 
 export type GrantId = string & { readonly __brand: "grant_id" };
 export type ProjectId = string & { readonly __brand: "project_id" };
@@ -43,6 +43,8 @@ export type MediaGenerationTaskId = string & { readonly __brand: "media_generati
 export type ShotListId = string & { readonly __brand: "shot_list_id" };
 export type ShotListRevisionId = string & { readonly __brand: "shot_list_revision_id" };
 export type ShotRequirementId = string & { readonly __brand: "shot_requirement_id" };
+export type ProviderImagePreviewId = string & { readonly __brand: "provider_image_preview_id" };
+export type ProviderImageProvenanceId = string & { readonly __brand: "provider_image_provenance_id" };
 
 export type ProjectStatus = "active" | "archived" | "missing";
 export type AssetKind = "video" | "audio" | "image" | "text";
@@ -890,6 +892,52 @@ export type MediaGenerationRequestPage = Page<MediaGenerationRequest>;
 export type MediaGenerationTaskPage = Page<MediaGenerationTask>;
 export type MediaGenerationRetryInput = Record<string, never>;
 
+
+export type ProviderImageExecutionMode = "provider_image_v1";
+export type ProviderImageSize = "1024x1024";
+export interface ImageProviderConfigCreateInput { display_name: string; enabled: boolean }
+export interface ImageProviderConfigSummary {
+  provider_config_id: ProviderConfigId; project_id: ProjectId; provider_kind: "apikey_fun_images";
+  adapter_id: "apikey_fun_images_sse_v1"; capability: "image_text_to_image"; protocol_version: "1";
+  display_name: string; model: "gpt-image-2"; enabled: boolean; price_per_image: 0.1; price_2k_per_image: 0.15; price_currency: "CNY";
+  credential_status: "missing" | "configured"; created_at: string; updated_at: string;
+}
+export interface ImageProviderConfigPage { items: ImageProviderConfigSummary[] }
+export interface ProviderImageGenerationPrepareInput { provider_config_id: ProviderConfigId; prompt: string; size: ProviderImageSize }
+export interface ProviderImageGenerationPreparedPreview {
+  preview_id: ProviderImagePreviewId; project_id: ProjectId; execution_mode: ProviderImageExecutionMode;
+  prompt_sha256: string; payload_sha256: string; size: ProviderImageSize; output_format: "png"; image_count: 1;
+  provider: { provider_config_id: ProviderConfigId; provider_kind: "apikey_fun_images"; adapter_id: "apikey_fun_images_sse_v1"; model: "gpt-image-2" };
+  estimated_cost: number | null; estimated_cost_currency: "CNY"; price_tier: "1K"; expires_at: string;
+}
+export interface ProviderImageGenerationCreateInput { preview_id: ProviderImagePreviewId; payload_sha256: string; confirmed: true }
+export interface ProviderImageGenerationRequest {
+  request_id: MediaGenerationRequestId; project_id: ProjectId; generation_kind: "image"; execution_mode: ProviderImageExecutionMode;
+  prompt_sha256: string; parameters: { size: ProviderImageSize }; request_sha256: string; created_at: string;
+}
+export interface ProviderImageAssetSummary {
+  asset_id: AssetId; display_name: string; kind: "image"; storage_mode: "managed"; availability: "available";
+}
+export interface ProviderImageGenerationResultSummary {
+  execution_mode: ProviderImageExecutionMode; provider_call_count: 1;
+  asset: ProviderImageAssetSummary; output: { format: "png"; width: number; height: number; size_bytes: number; sha256: string };
+  provider: { kind: "apikey_fun_images"; adapter_id: "apikey_fun_images_sse_v1"; model: "gpt-image-2" };
+  estimated_cost: number | null; estimated_cost_currency: "CNY"; price_tier: "1K"; provenance_id: ProviderImageProvenanceId;
+}
+export interface ProviderImageGenerationTask {
+  task_id: MediaGenerationTaskId; request_id: MediaGenerationRequestId; job_id: JobId; attempt: number;
+  status: GenerationStatus; stage: string; retry_of_task_id: MediaGenerationTaskId | null;
+  provider_call_count: 0 | 1; provider_may_have_processed: boolean; estimated_cost: number | null;
+  estimated_cost_currency: "CNY"; price_tier: "1K";
+  output_asset_id: AssetId | null; output_sha256: string | null; result_summary: ProviderImageGenerationResultSummary | null;
+  error: MediaGenerationTaskError | null; created_at: string; updated_at: string; finished_at: string | null;
+}
+export interface ProviderImageGenerationCreateResponse { request: ProviderImageGenerationRequest; task: ProviderImageGenerationTask; reused: boolean }
+export type ProviderImageGenerationRequestPage = Page<ProviderImageGenerationRequest>;
+export type ProviderImageGenerationTaskPage = Page<ProviderImageGenerationTask>;
+export interface ProviderImageGenerationRetryPrepareInput { prompt: string }
+export type ProviderImageGenerationRetryPreparedPreview = ProviderImageGenerationPreparedPreview;
+export type ProviderImageGenerationRetryInput = ProviderImageGenerationCreateInput;
 export interface ShotVisualRequirementInput {
   requirement_kind: "existing_media" | "image";
   source_asset_id: AssetId | null;
@@ -1604,6 +1652,31 @@ export function isMediaGenerationCreateResponse(value: unknown): value is MediaG
 export function isMediaGenerationRequestPage(value: unknown): value is MediaGenerationRequestPage { return isPage(value, isMediaGenerationRequest); }
 export function isMediaGenerationTaskPage(value: unknown): value is MediaGenerationTaskPage { return isPage(value, isMediaGenerationTask); }
 export function isMediaGenerationRetryInput(value: unknown): value is MediaGenerationRetryInput { return isRecord(value) && Object.keys(value).length === 0; }
+
+const PROVIDER_IMAGE_SIZES: ProviderImageSize[] = ["1024x1024"];
+function isProviderImageSafe(value: unknown): boolean { return !hasGenerationResponseSensitiveKey(value); }
+export function isImageProviderConfigCreateInput(value: unknown): value is ImageProviderConfigCreateInput {
+  return isRecord(value) && onlyKeys(value, ["display_name", "enabled"]) && isString(value.display_name) && value.display_name.trim().length >= 1 && value.display_name.trim().length <= 120 && typeof value.enabled === "boolean";
+}
+export function isImageProviderConfigSummary(value: unknown): value is ImageProviderConfigSummary {
+  return isRecord(value) && isProviderImageSafe(value) && onlyKeys(value, ["provider_config_id", "project_id", "provider_kind", "adapter_id", "capability", "protocol_version", "display_name", "model", "enabled", "price_per_image", "price_2k_per_image", "price_currency", "credential_status", "created_at", "updated_at"]) && isId(value.provider_config_id) && isId(value.project_id) && value.provider_kind === "apikey_fun_images" && value.adapter_id === "apikey_fun_images_sse_v1" && value.capability === "image_text_to_image" && value.protocol_version === "1" && isString(value.display_name) && value.model === "gpt-image-2" && typeof value.enabled === "boolean" && value.price_per_image === 0.1 && value.price_2k_per_image === 0.15 && value.price_currency === "CNY" && oneOf(["missing", "configured"] as const, value.credential_status) && isTime(value.created_at) && isTime(value.updated_at);
+}
+export function isImageProviderConfigPage(value: unknown): value is ImageProviderConfigPage { return isRecord(value) && onlyKeys(value, ["items"]) && Array.isArray(value.items) && value.items.every(isImageProviderConfigSummary); }
+export function isProviderImageGenerationPrepareInput(value: unknown): value is ProviderImageGenerationPrepareInput { return isRecord(value) && onlyKeys(value, ["provider_config_id", "prompt", "size"]) && isId(value.provider_config_id) && isGenerationPrompt(value.prompt) && oneOf(PROVIDER_IMAGE_SIZES, value.size); }
+export function isProviderImageGenerationPreparedPreview(value: unknown): value is ProviderImageGenerationPreparedPreview {
+  return isRecord(value) && isProviderImageSafe(value) && onlyKeys(value, ["preview_id", "project_id", "execution_mode", "prompt_sha256", "payload_sha256", "size", "output_format", "image_count", "provider", "estimated_cost", "estimated_cost_currency", "price_tier", "expires_at"]) && isId(value.preview_id) && isId(value.project_id) && value.execution_mode === "provider_image_v1" && isSha256(value.prompt_sha256) && isSha256(value.payload_sha256) && oneOf(PROVIDER_IMAGE_SIZES, value.size) && value.output_format === "png" && value.image_count === 1 && isRecord(value.provider) && onlyKeys(value.provider, ["provider_config_id", "provider_kind", "adapter_id", "model"]) && isId(value.provider.provider_config_id) && value.provider.provider_kind === "apikey_fun_images" && value.provider.adapter_id === "apikey_fun_images_sse_v1" && value.provider.model === "gpt-image-2" && (value.estimated_cost === null || (isFiniteNumber(value.estimated_cost) && value.estimated_cost >= 0)) && value.estimated_cost_currency === "CNY" && value.price_tier === "1K" && isTime(value.expires_at);
+}
+export function isProviderImageGenerationCreateInput(value: unknown): value is ProviderImageGenerationCreateInput { return isRecord(value) && onlyKeys(value, ["preview_id", "payload_sha256", "confirmed"]) && isId(value.preview_id) && isSha256(value.payload_sha256) && value.confirmed === true; }
+export function isProviderImageGenerationRequest(value: unknown): value is ProviderImageGenerationRequest { return isRecord(value) && isProviderImageSafe(value) && onlyKeys(value, ["request_id", "project_id", "generation_kind", "execution_mode", "prompt_sha256", "parameters", "request_sha256", "created_at"]) && isId(value.request_id) && isId(value.project_id) && value.generation_kind === "image" && value.execution_mode === "provider_image_v1" && isSha256(value.prompt_sha256) && isRecord(value.parameters) && onlyKeys(value.parameters, ["size"]) && oneOf(PROVIDER_IMAGE_SIZES, value.parameters.size) && isSha256(value.request_sha256) && isTime(value.created_at); }
+export function isProviderImageAssetSummary(value: unknown): value is ProviderImageAssetSummary { return isRecord(value) && isProviderImageSafe(value) && onlyKeys(value, ["asset_id", "display_name", "kind", "storage_mode", "availability"]) && isId(value.asset_id) && isString(value.display_name) && value.kind === "image" && value.storage_mode === "managed" && value.availability === "available"; }
+export function isProviderImageGenerationResultSummary(value: unknown): value is ProviderImageGenerationResultSummary { return isRecord(value) && isProviderImageSafe(value) && onlyKeys(value, ["execution_mode", "provider_call_count", "asset", "output", "provider", "estimated_cost", "estimated_cost_currency", "price_tier", "provenance_id"]) && value.execution_mode === "provider_image_v1" && value.provider_call_count === 1 && isProviderImageAssetSummary(value.asset) && isRecord(value.output) && onlyKeys(value.output, ["format", "width", "height", "size_bytes", "sha256"]) && value.output.format === "png" && isInteger(value.output.width, 1) && isInteger(value.output.height, 1) && isInteger(value.output.size_bytes, 1) && isSha256(value.output.sha256) && isRecord(value.provider) && onlyKeys(value.provider, ["kind", "adapter_id", "model"]) && value.provider.kind === "apikey_fun_images" && value.provider.adapter_id === "apikey_fun_images_sse_v1" && value.provider.model === "gpt-image-2" && (value.estimated_cost === null || (isFiniteNumber(value.estimated_cost) && value.estimated_cost >= 0)) && value.estimated_cost_currency === "CNY" && value.price_tier === "1K" && isId(value.provenance_id); }
+export function isProviderImageGenerationTask(value: unknown): value is ProviderImageGenerationTask { if (!isRecord(value) || !isProviderImageSafe(value) || !onlyKeys(value, ["task_id", "request_id", "job_id", "attempt", "status", "stage", "retry_of_task_id", "provider_call_count", "provider_may_have_processed", "estimated_cost", "estimated_cost_currency", "price_tier", "output_asset_id", "output_sha256", "result_summary", "error", "created_at", "updated_at", "finished_at"])) return false; return isId(value.task_id) && isId(value.request_id) && isId(value.job_id) && isInteger(value.attempt, 1) && oneOf(GENERATION_STATUSES, value.status) && isString(value.stage) && value.stage.length > 0 && (value.retry_of_task_id === null || isId(value.retry_of_task_id)) && (value.provider_call_count === 0 || value.provider_call_count === 1) && typeof value.provider_may_have_processed === "boolean" && (!value.provider_may_have_processed || value.provider_call_count === 1) && (value.estimated_cost === null || (isFiniteNumber(value.estimated_cost) && value.estimated_cost >= 0)) && value.estimated_cost_currency === "CNY" && value.price_tier === "1K" && (value.output_asset_id === null || isId(value.output_asset_id)) && (value.output_sha256 === null || isSha256(value.output_sha256)) && (value.result_summary === null || isProviderImageGenerationResultSummary(value.result_summary)) && (value.error === null || (isRecord(value.error) && onlyKeys(value.error, ["code", "message"]) && isString(value.error.code) && isString(value.error.message))) && isTime(value.created_at) && isTime(value.updated_at) && (value.finished_at === null || isTime(value.finished_at)) && (value.status !== "succeeded" || (value.result_summary !== null && value.error === null)); }
+export function isProviderImageGenerationCreateResponse(value: unknown): value is ProviderImageGenerationCreateResponse { return isRecord(value) && isProviderImageSafe(value) && onlyKeys(value, ["request", "task", "reused"]) && isProviderImageGenerationRequest(value.request) && isProviderImageGenerationTask(value.task) && typeof value.reused === "boolean" && value.task.request_id === value.request.request_id; }
+export function isProviderImageGenerationRequestPage(value: unknown): value is ProviderImageGenerationRequestPage { return isPage(value, isProviderImageGenerationRequest); }
+export function isProviderImageGenerationTaskPage(value: unknown): value is ProviderImageGenerationTaskPage { return isPage(value, isProviderImageGenerationTask); }
+export function isProviderImageGenerationRetryPrepareInput(value: unknown): value is ProviderImageGenerationRetryPrepareInput { return isRecord(value) && onlyKeys(value, ["prompt"]) && isGenerationPrompt(value.prompt); }
+export const isProviderImageGenerationRetryPreparedPreview = isProviderImageGenerationPreparedPreview;
+export const isProviderImageGenerationRetryInput = isProviderImageGenerationCreateInput;
 const SHOT_SENSITIVE_KEYS = new Set([
   "path", "uri", "absolute_path", "prompt", "transcript", "caption", "authorization",
   "api_key", "secret", "payload", "raw_exception", "raw_response", "stderr", "command", "traceback"
@@ -1724,3 +1797,16 @@ export function parseReframeExportBatch(value: unknown): ReframeExportBatch { if
 export function parseReframeExportBatchCreateResponse(value: unknown): ReframeExportBatchCreateResponse { if (!isReframeExportBatchCreateResponse(value)) throw new ContractValidationError("ReframeExportBatchCreateResponse"); return value; }
 export function parseReframeExportBatchRetryInput(value: unknown): ReframeExportBatchRetryInput { if (!isReframeExportBatchRetryInput(value)) throw new ContractValidationError("ReframeExportBatchRetryInput"); return value; }
 export function parseReframeExportBatchRetryResponse(value: unknown): ReframeExportBatchRetryResponse { if (!isReframeExportBatchRetryResponse(value)) throw new ContractValidationError("ReframeExportBatchRetryResponse"); return value; }
+
+export function parseImageProviderConfigCreateInput(value: unknown): ImageProviderConfigCreateInput { if (!isImageProviderConfigCreateInput(value)) throw new ContractValidationError("ImageProviderConfigCreateInput"); return value; }
+export function parseImageProviderConfigSummary(value: unknown): ImageProviderConfigSummary { if (!isImageProviderConfigSummary(value)) throw new ContractValidationError("ImageProviderConfigSummary"); return value; }
+export function parseImageProviderConfigPage(value: unknown): ImageProviderConfigPage { if (!isImageProviderConfigPage(value)) throw new ContractValidationError("ImageProviderConfigPage"); return value; }
+export function parseProviderImageGenerationPrepareInput(value: unknown): ProviderImageGenerationPrepareInput { if (!isProviderImageGenerationPrepareInput(value)) throw new ContractValidationError("ProviderImageGenerationPrepareInput"); return value; }
+export function parseProviderImageGenerationPreparedPreview(value: unknown): ProviderImageGenerationPreparedPreview { if (!isProviderImageGenerationPreparedPreview(value)) throw new ContractValidationError("ProviderImageGenerationPreparedPreview"); return value; }
+export function parseProviderImageGenerationCreateInput(value: unknown): ProviderImageGenerationCreateInput { if (!isProviderImageGenerationCreateInput(value)) throw new ContractValidationError("ProviderImageGenerationCreateInput"); return value; }
+export function parseProviderImageGenerationRequest(value: unknown): ProviderImageGenerationRequest { if (!isProviderImageGenerationRequest(value)) throw new ContractValidationError("ProviderImageGenerationRequest"); return value; }
+export function parseProviderImageGenerationTask(value: unknown): ProviderImageGenerationTask { if (!isProviderImageGenerationTask(value)) throw new ContractValidationError("ProviderImageGenerationTask"); return value; }
+export function parseProviderImageGenerationCreateResponse(value: unknown): ProviderImageGenerationCreateResponse { if (!isProviderImageGenerationCreateResponse(value)) throw new ContractValidationError("ProviderImageGenerationCreateResponse"); return value; }
+export function parseProviderImageGenerationRequestPage(value: unknown): ProviderImageGenerationRequestPage { if (!isProviderImageGenerationRequestPage(value)) throw new ContractValidationError("ProviderImageGenerationRequestPage"); return value; }
+export function parseProviderImageGenerationTaskPage(value: unknown): ProviderImageGenerationTaskPage { if (!isProviderImageGenerationTaskPage(value)) throw new ContractValidationError("ProviderImageGenerationTaskPage"); return value; }
+export function parseProviderImageGenerationRetryPrepareInput(value: unknown): ProviderImageGenerationRetryPrepareInput { if (!isProviderImageGenerationRetryPrepareInput(value)) throw new ContractValidationError("ProviderImageGenerationRetryPrepareInput"); return value; }

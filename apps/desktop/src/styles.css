@@ -134,3 +134,13 @@ footer .ai-entry { margin-right: 6px; min-height: 22px; padding: 0 7px; } footer
 .shot-history-detail li { margin-bottom: 9px; padding-bottom: 8px; border-bottom: 1px solid #303b40; }
 .shot-history-detail p { white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 760px) { .shot-card, .shot-history { grid-template-columns: 1fr; }.shot-card > label:nth-of-type(2), .shot-card-heading { grid-column: 1; } }
+/* Stage 4D controlled provider image generation */
+.provider-image-modal { width: min(980px, 100%); }
+.provider-cost-notice { padding: 10px; border: 1px solid #80603a; background: #2b2419; color: #e8c386; font-size: 12px; }
+.generation-create-form, .provider-image-configs { display: grid; gap: 12px; }
+.generation-create-form > label, .provider-image-configs label { display: grid; gap: 6px; font-size: 12px; }
+.generation-create-form textarea { resize: vertical; min-height: 150px; }
+.provider-image-configs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.provider-image-configs fieldset { min-width: 0; display: grid; gap: 9px; margin: 0; padding: 12px; border: 1px solid #3b474d; }
+.provider-image-preview { max-width: 100%; max-height: 260px; object-fit: contain; border: 1px solid #3b474d; background: #0d1214; }
+@media (max-width: 760px) { .provider-image-configs { grid-template-columns: 1fr; } }

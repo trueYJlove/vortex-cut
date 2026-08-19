@@ -15,6 +15,13 @@ def test_parser_defaults_and_arguments():
     assert args.data_dir == "data"
 
 
+def test_image_provider_network_is_explicit_and_fail_closed() -> None:
+    default = Settings.from_args(bootstrap.parser().parse_args([]))
+    enabled = Settings.from_args(bootstrap.parser().parse_args(["--enable-image-provider-network"]))
+    assert default.image_provider_network_enabled is False
+    assert enabled.image_provider_network_enabled is True
+
+
 def test_settings_from_args_uses_default_or_explicit_manifest_dir(tmp_path: Path):
     default_settings = Settings.from_args(bootstrap.parser().parse_args([]))
     explicit_manifest_dir = tmp_path / "manifests"

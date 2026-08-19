@@ -82,6 +82,13 @@ export class CoreAdminClient {
     await this.request(`/api/v1/internal/provider-secrets/${encodeURIComponent(providerConfigId)}`, { method: "DELETE" });
   }
 
+  setImageProviderSecret(providerConfigId: string, secret: string): Promise<{ provider_config_id: string; credential_status: string }> {
+    return this.request(`/api/v1/internal/image-provider-configs/${encodeURIComponent(providerConfigId)}/secret`, { method: "PUT", body: JSON.stringify({ secret }) });
+  }
+
+  async deleteImageProviderSecret(providerConfigId: string): Promise<void> {
+    await this.request(`/api/v1/internal/image-provider-configs/${encodeURIComponent(providerConfigId)}/secret`, { method: "DELETE" });
+  }
   async shutdown(): Promise<void> {
     await this.request("/api/v1/internal/shutdown", { method: "POST" });
   }

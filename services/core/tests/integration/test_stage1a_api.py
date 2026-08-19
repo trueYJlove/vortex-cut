@@ -163,8 +163,7 @@ def test_stage1a_project_asset_lifecycle_and_redaction(tmp_path: Path, monkeypat
     with sqlite3.connect(tmp_path / "app.db") as db:
         # Later stages only append migrations; the 1A lifecycle must still migrate cleanly.
         assert db.execute(
-            "SELECT version FROM schema_migrations "
-            "ORDER BY CAST(SUBSTR(version,2) AS INTEGER)"
+            "SELECT version FROM schema_migrations ORDER BY CAST(SUBSTR(version,2) AS INTEGER)"
         ).fetchall() == [
             ("v1",),
             ("v2",),
@@ -178,6 +177,8 @@ def test_stage1a_project_asset_lifecycle_and_redaction(tmp_path: Path, monkeypat
             ("v10",),
             ("v11",),
             ("v12",),
+            ("v13",),
+            ("v14",),
         ]
     assert list((tmp_path / "backups").glob("app-*.db"))
 

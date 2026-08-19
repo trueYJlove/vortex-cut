@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { CONTRACT_VERSION, ERROR_CODES, isApiErrorResponse, isAuthoritativePreview, isCaptionPresetId, isCandidateGeneration, isCandidateResponseAdapterId, isDestinationGrant, isDirectoryGrant, isExportBatchCreateInput, isExportCreateInput, isExportRecord, isFileGrant, isInternalModelManifest, isJobKind, isJobStatus, isModelDetail, isPlatformPreset, isPreviewCreateResponse, isProject, isProviderCapabilityTestResult, isProviderConfig, isRecipe, isRenderArtifact, isRenditionPreviewCreateInput, isRenditionReframePreviewCreateInput, isRenditionReframeSnapshotSummary, isReframeExportBatchCreateInput, isReframeExportBatchRetryInput, isSidecarReady, isTimelineCreateInput, isTimelineDiff, isTimelineDocument, isTimelineLayout, isTimelinePatch, isTimelinePatchCapabilityTestResponse, isTimelinePatchEgressPreview, isTimelinePatchGeneration, isTimelinePatchOperation, isTimelinePatchPrepareRequest, isTimelinePatchProposal, isTimelineState, isTranscript, parseSidecarReadyLine, isMediaGenerationPrepareInput, isMediaGenerationCreateInput, isMediaGenerationPreparedRequest, isMediaGenerationRequest, isMediaGenerationTask, isMediaGenerationCreateResponse, isShotListRevisionCreateInput, isShotListRevisionSummary, isShotListRevisionDetail, isShotListState } from "@aivideo/contracts";
+import { CONTRACT_VERSION, ERROR_CODES, isApiErrorResponse, isAuthoritativePreview, isCaptionPresetId, isCandidateGeneration, isCandidateResponseAdapterId, isDestinationGrant, isDirectoryGrant, isExportBatchCreateInput, isExportCreateInput, isExportRecord, isFileGrant, isInternalModelManifest, isJobKind, isJobStatus, isModelDetail, isPlatformPreset, isPreviewCreateResponse, isProject, isProviderCapabilityTestResult, isProviderConfig, isRecipe, isRenderArtifact, isRenditionPreviewCreateInput, isRenditionReframePreviewCreateInput, isRenditionReframeSnapshotSummary, isReframeExportBatchCreateInput, isReframeExportBatchRetryInput, isSidecarReady, isTimelineCreateInput, isTimelineDiff, isTimelineDocument, isTimelineLayout, isTimelinePatch, isTimelinePatchCapabilityTestResponse, isTimelinePatchEgressPreview, isTimelinePatchGeneration, isTimelinePatchOperation, isTimelinePatchPrepareRequest, isTimelinePatchProposal, isTimelineState, isTranscript, parseSidecarReadyLine, isMediaGenerationPrepareInput, isMediaGenerationCreateInput, isMediaGenerationPreparedRequest, isMediaGenerationRequest, isMediaGenerationTask, isMediaGenerationCreateResponse, isShotListRevisionCreateInput, isShotListRevisionSummary, isShotListRevisionDetail, isShotListState, isImageProviderConfigSummary,
+  isProviderImageGenerationPrepareInput,
+  isProviderImageGenerationPreparedPreview,
+  isProviderImageGenerationRequest,
+  isProviderImageGenerationTask
+} from "@aivideo/contracts";
 
 const now = "2026-08-11T00:00:00.000Z";
 
@@ -53,7 +58,7 @@ describe("Stage 0 contract", () => {
     expect(isTranscript({ ...transcript, segments: [{ ...transcript.segments[0], end_us: 3_000_000 }] })).toBe(false);
   });
   it("freezes Stage 1C enums, error codes and every patch operation", () => {
-    expect(CONTRACT_VERSION).toBe("stage4c-v1"); expect(isTimelineLayout("crop_fill")).toBe(true); expect(isTimelineLayout("smart_crop")).toBe(false); expect(isCaptionPresetId("high-contrast")).toBe(true); expect(isJobKind("authoritative_preview")).toBe(true); expect(isJobKind("timeline_patch_generation")).toBe(true); expect(ERROR_CODES).toContain("TIMELINE_CONFLICT"); expect(ERROR_CODES).toContain("TIMELINE_PATCH_PROPOSAL_CONFLICT"); expect(ERROR_CODES).toContain("CANDIDATE_PROVIDER_UNTESTED"); expect(ERROR_CODES).toContain("EXPORT_DIRECTORY_GRANT_EXPIRED");
+    expect(CONTRACT_VERSION).toBe("stage4d-v2"); expect(isTimelineLayout("crop_fill")).toBe(true); expect(isTimelineLayout("smart_crop")).toBe(false); expect(isCaptionPresetId("high-contrast")).toBe(true); expect(isJobKind("authoritative_preview")).toBe(true); expect(isJobKind("timeline_patch_generation")).toBe(true); expect(ERROR_CODES).toContain("TIMELINE_CONFLICT"); expect(ERROR_CODES).toContain("TIMELINE_PATCH_PROPOSAL_CONFLICT"); expect(ERROR_CODES).toContain("CANDIDATE_PROVIDER_UNTESTED"); expect(ERROR_CODES).toContain("EXPORT_DIRECTORY_GRANT_EXPIRED");
     const operations = [
       { op: "insert_asset_clip", asset_id: "asset_1", at_index: 0, duration_us: 3_000_000 },
       { op: "insert_transcript_segments", transcript_id: "transcript_1", segment_ids: ["segment_1"], at_index: 0, padding_before_us: 0, padding_after_us: 300_000, create_captions: true },
@@ -135,8 +140,8 @@ describe("Stage 3B reframe contracts", () => {
   const hash = "a".repeat(64);
   const adjustment = { clip_id: "clip_1", horizontal_anchor: "left", vertical_anchor: "center" } as const;
 
-  it("retains the Stage 3B strict non-center 3x3 guards under stage4c-v1", () => {
-    expect(CONTRACT_VERSION).toBe("stage4c-v1");
+  it("retains the Stage 3B strict non-center 3x3 guards under stage4d-v1", () => {
+    expect(CONTRACT_VERSION).toBe("stage4d-v2");
     expect(ERROR_CODES).toContain("REFRAME_PREVIEW_REQUIRED");
     expect(isRenditionReframePreviewCreateInput({ base_rendition_snapshot_id: "rendition_snapshot_1", adjustments: [adjustment] })).toBe(true);
     expect(isRenditionReframePreviewCreateInput({ base_rendition_snapshot_id: "rendition_snapshot_1", adjustments: [{ ...adjustment, horizontal_anchor: "center", vertical_anchor: "center" }] })).toBe(false);
@@ -193,7 +198,7 @@ describe("Stage 4A media generation contract", () => {
   };
 
   it("保持版本不变并扩展独立 JobKind 与错误码", () => {
-    expect(CONTRACT_VERSION).toBe("stage4c-v1");
+    expect(CONTRACT_VERSION).toBe("stage4d-v2");
     expect(isJobKind("media_generation")).toBe(true);
     expect(ERROR_CODES).toEqual(expect.arrayContaining([
       "GENERATION_REQUEST_INVALID", "GENERATION_KIND_UNSUPPORTED", "GENERATION_INPUT_CHANGED",
@@ -237,8 +242,8 @@ describe("Stage 4C shot requirement contract", () => {
     { shot_requirement_id: "requirement_2", shot_list_revision_id: "revision_1", ordinal: 1, ...mediaRequirement },
   ] };
 
-  it("升级为 stage4c-v1 并接受 1–24 条严格组合", () => {
-    expect(CONTRACT_VERSION).toBe("stage4c-v1");
+  it("升级为 stage4d-v1 并接受 1–24 条严格组合", () => {
+    expect(CONTRACT_VERSION).toBe("stage4d-v2");
     expect(isShotListRevisionCreateInput(input)).toBe(true);
     expect(isShotListRevisionCreateInput({ ...input, requirements: Array.from({ length: 24 }, (_, index) => ({ ...imageRequirement, title: `镜头${index + 1}` })) })).toBe(true);
     expect(isShotListRevisionCreateInput({ ...input, requirements: [] })).toBe(false);
@@ -266,5 +271,29 @@ describe("Stage 4C shot requirement contract", () => {
     expect(isShotListState({ shot_list_id: "shot_list_1", project_id: "project_1", lifecycle: "drafted", current_revision: { ...detail, shot_list_revision_id: "revision_2", parent_revision_id: "revision_1", requirements: detail.requirements.map(item => ({ ...item, shot_list_revision_id: "revision_2" })) }, confirmed_revision: summary })).toBe(true);
     expect(isShotListState({ shot_list_id: "shot_list_1", project_id: "project_1", lifecycle: "confirmed", current_revision: detail, confirmed_revision: summary })).toBe(true);
     expect(isShotListState({ shot_list_id: "shot_list_1", project_id: "project_1", lifecycle: "confirmed", current_revision: { ...detail, shot_list_revision_id: "revision_2", parent_revision_id: "revision_1", requirements: detail.requirements.map(item => ({ ...item, shot_list_revision_id: "revision_2" })) }, confirmed_revision: summary })).toBe(false);
+  });
+});
+
+
+
+describe("Stage 4D provider image contracts", () => {
+  const hash = `sha256:${"a".repeat(64)}`;
+  const now = "2026-08-19T00:00:00.000Z";
+  it("accepts exact frozen DTOs and rejects sensitive or unknown keys", () => {
+    expect(isProviderImageGenerationPrepareInput({ provider_config_id: "config_1", prompt: "private form only", size: "1024x1024" })).toBe(true);
+    expect(isProviderImageGenerationPrepareInput({ provider_config_id: "config_1", prompt: "p", size: "512x512" })).toBe(false);
+    const provider = { provider_config_id: "config_1", provider_kind: "apikey_fun_images", adapter_id: "apikey_fun_images_sse_v1", model: "gpt-image-2" };
+    const prepared = { preview_id: "preview_1", project_id: "project_1", execution_mode: "provider_image_v1", prompt_sha256: hash, payload_sha256: hash, size: "1024x1024", output_format: "png", image_count: 1, provider, estimated_cost: 0.1, estimated_cost_currency: "CNY", price_tier: "1K", expires_at: now };
+    expect(isProviderImageGenerationPreparedPreview(prepared)).toBe(true);
+    expect(isProviderImageGenerationPreparedPreview({ ...prepared, prompt: "leak" })).toBe(false);
+    expect(isProviderImageGenerationPreparedPreview({ ...prepared, provider: { ...provider, raw_response: "leak" } })).toBe(false);
+  });
+  it("keeps provider image records separate from simulation DTOs", () => {
+    const request = { request_id: "request_1", project_id: "project_1", generation_kind: "image", execution_mode: "provider_image_v1", prompt_sha256: hash, parameters: { size: "1024x1024" }, request_sha256: hash, created_at: now };
+    const task = { task_id: "task_1", request_id: "request_1", job_id: "job_1", attempt: 1, status: "failed", stage: "failed", retry_of_task_id: null, provider_call_count: 0, provider_may_have_processed: false, estimated_cost: 0.1, estimated_cost_currency: "CNY", price_tier: "1K", output_asset_id: null, output_sha256: null, result_summary: null, error: { code: "IMAGE_PROVIDER_CALL_DISABLED", message: "当前环境未启用真实图片调用" }, created_at: now, updated_at: now, finished_at: now };
+    expect(isProviderImageGenerationRequest(request)).toBe(true);
+    expect(isProviderImageGenerationTask(task)).toBe(true);
+    expect(isProviderImageGenerationTask({ ...task, absolute_path: "C:/private.png" })).toBe(false);
+    expect(isImageProviderConfigSummary({ provider_config_id: "config_1", project_id: "project_1", provider_kind: "apikey_fun_images", adapter_id: "apikey_fun_images_sse_v1", capability: "image_text_to_image", protocol_version: "1", display_name: "Images", model: "gpt-image-2", enabled: true, price_per_image: 0.1, price_2k_per_image: 0.15, price_currency: "CNY", credential_status: "missing", created_at: now, updated_at: now })).toBe(true);
   });
 });

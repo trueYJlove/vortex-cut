@@ -62,11 +62,32 @@ def _fixture(path: Path, *, portrait: bool) -> None:
             "[left][mid][right]hstack=inputs=3,format=yuv420p[v]"
         )
     _ffmpeg(
-        "-filter_complex", filters,
-        "-f", "lavfi", "-i", "sine=frequency=880:sample_rate=48000:duration=1",
-        "-map", "[v]", "-map", "0:a",
-        "-r", "30", "-c:v", "libopenh264", "-b:v", "2M", "-pix_fmt", "yuv420p",
-        "-c:a", "aac", "-ar", "48000", "-ac", "2", "-shortest", str(path),
+        "-filter_complex",
+        filters,
+        "-f",
+        "lavfi",
+        "-i",
+        "sine=frequency=880:sample_rate=48000:duration=1",
+        "-map",
+        "[v]",
+        "-map",
+        "0:a",
+        "-r",
+        "30",
+        "-c:v",
+        "libopenh264",
+        "-b:v",
+        "2M",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-ar",
+        "48000",
+        "-ac",
+        "2",
+        "-shortest",
+        str(path),
     )
     stream = next(item for item in _probe(path)["streams"] if item["codec_type"] == "video")
     expected = (540, 960) if portrait else (960, 540)
@@ -101,8 +122,19 @@ def _wait_batch(
 
 def _mean_rgb(path: Path, second: float) -> tuple[float, float, float]:
     frame = _ffmpeg(
-        "-ss", f"{second:.3f}", "-i", str(path), "-frames:v", "1",
-        "-vf", "scale=24:24", "-pix_fmt", "rgb24", "-f", "rawvideo", "-",
+        "-ss",
+        f"{second:.3f}",
+        "-i",
+        str(path),
+        "-frames:v",
+        "1",
+        "-vf",
+        "scale=24:24",
+        "-pix_fmt",
+        "rgb24",
+        "-f",
+        "rawvideo",
+        "-",
     )
     assert len(frame) == 24 * 24 * 3
     return tuple(sum(frame[index::3]) / (24 * 24) for index in range(3))  # type: ignore[return-value]
@@ -251,9 +283,7 @@ def test_stage3b_real_reframe_preview_batch_partial_retry_and_restart(
     with TestClient(create_app(settings)) as client:
         admin, ui = _auth(client, admin_token)
         with client.app.state.core.db.connection() as db:
-            provider_before = db.execute(
-                "SELECT COUNT(*) FROM provider_invocations"
-            ).fetchone()[0]
+            provider_before = db.execute("SELECT COUNT(*) FROM provider_invocations").fetchone()[0]
         project = client.post(
             "/api/v1/projects", headers=ui, json={"name": "Stage 3B real acceptance"}
         )
@@ -345,12 +375,14 @@ def test_stage3b_real_reframe_preview_batch_partial_retry_and_restart(
                 client, admin, landscape_bottom["render_artifact_id"]
             ),
         }
-        assert [_dominant(paths[name], 0.45) for name in (
-            "portrait_left", "portrait_center", "portrait_right"
-        )] == ["red", "green", "blue"]
-        assert [_dominant(paths[name], 1.45) for name in (
-            "landscape_top", "landscape_center", "landscape_bottom"
-        )] == ["red", "green", "blue"]
+        assert [
+            _dominant(paths[name], 0.45)
+            for name in ("portrait_left", "portrait_center", "portrait_right")
+        ] == ["red", "green", "blue"]
+        assert [
+            _dominant(paths[name], 1.45)
+            for name in ("landscape_top", "landscape_center", "landscape_bottom")
+        ] == ["red", "green", "blue"]
         for name in ("portrait_left", "portrait_center", "portrait_right"):
             _assert_output(paths[name], 540, 960)
         for name in ("landscape_top", "landscape_center", "landscape_bottom"):
@@ -434,9 +466,8 @@ def test_stage3b_real_reframe_preview_batch_partial_retry_and_restart(
         records = {
             item["export_record_id"]: item
             for item in all_exports
-            if item["export_record_id"] in {
-                succeeded["export_record_id"], retried["items"][0]["export_record_id"]
-            }
+            if item["export_record_id"]
+            in {succeeded["export_record_id"], retried["items"][0]["export_record_id"]}
         }
         assert len(records) == 2
         for item, expected_size, second, expected_color in (
@@ -469,9 +500,12 @@ def test_stage3b_real_reframe_preview_batch_partial_retry_and_restart(
         assert batches.status_code == 200 and original_batch_id in {
             item["reframe_export_batch_id"] for item in batches.json()["items"]
         }
-        assert restarted.get(
-            f"/api/v1/projects/{project_id}/timeline", headers=ui
-        ).json()["current_revision"]["timeline_revision_id"] == revision_id
+        assert (
+            restarted.get(f"/api/v1/projects/{project_id}/timeline", headers=ui).json()[
+                "current_revision"
+            ]["timeline_revision_id"]
+            == revision_id
+        )
         with restarted.app.state.core.db.connection() as db:
             assert db.execute("SELECT COUNT(*) FROM provider_invocations").fetchone()[0] == 0
 
@@ -502,18 +536,37 @@ def test_stage3b_real_v9_copy_upgrades_to_current_without_history_backfill(
             ("project_1", "Existing", "active", "{}", None, "root", "root", "now", "now", "now"),
         )
         db.execute(
+            "INSERT INTO provider_configs("
+            "id,kind,display_name,base_url,model,enabled,created_at,updated_at) "
+            "VALUES ('provider_1','openai_compatible_text','Provider',"
+            "'https://provider.invalid','none',1,'now','now')"
+        )
+        db.execute(
             "INSERT INTO provider_invocations(id,provider_config_id,capability,provider_name,model,"
             "prompt_template_version,output_schema_version,input_sha256,status,created_at) "
             "VALUES (?,?,?,?,?,?,?,?,?,?)",
             (
-                "invocation_1", "provider_1", "candidate_generation", "local-fixture",
-                "none", 1, 1, "hash", "failed", "now",
+                "invocation_1",
+                "provider_1",
+                "candidate_generation",
+                "local-fixture",
+                "none",
+                1,
+                1,
+                "hash",
+                "failed",
+                "now",
             ),
         )
         db.commit()
         before = {
             table: _table_digest(db, table)
-            for table in ("projects", "provider_invocations", "schema_migrations")
+            for table in (
+                "projects",
+                "provider_configs",
+                "provider_invocations",
+                "schema_migrations",
+            )
             if table != "schema_migrations"
         }
     upgraded = tmp_path / "upgraded.db"
@@ -524,15 +577,9 @@ def test_stage3b_real_v9_copy_upgrades_to_current_without_history_backfill(
         maximum = db.execute(
             "SELECT MAX(CAST(SUBSTR(version,2) AS INTEGER)) FROM schema_migrations"
         ).fetchone()[0]
-        assert maximum == 12
-        assert {
-            table: _table_digest(db, table) for table in before
-        } == before
+        assert maximum == 14
+        assert {table: _table_digest(db, table) for table in before} == before
         assert db.execute("SELECT COUNT(*) FROM rendition_reframe_snapshots").fetchone()[0] == 0
         assert db.execute("SELECT COUNT(*) FROM reframe_export_batches").fetchone()[0] == 0
         assert db.execute("SELECT COUNT(*) FROM reframe_export_batch_items").fetchone()[0] == 0
         assert db.execute("SELECT COUNT(*) FROM provider_invocations").fetchone()[0] == 1
-
-
-
-

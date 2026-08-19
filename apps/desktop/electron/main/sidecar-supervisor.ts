@@ -23,6 +23,7 @@ export interface SidecarLaunchOptions {
   spawnImpl?: typeof spawn;
   logPath?: string;
   launchEvidencePath?: string;
+  enableImageProviderNetwork?: boolean;
 }
 
 export class SidecarStartupError extends Error {}
@@ -54,6 +55,7 @@ export class SidecarSupervisor {
       "--manifest-dir", this.options.manifestDir,
       "--runtime-dir", this.options.runtimeDir, "--ready-file", readyFile, "--log-level", "info"
     ];
+    if (this.options.enableImageProviderNetwork) args.push("--enable-image-provider-network");
     const adminToken = this.options.adminToken ?? randomBytes(32).toString("hex");
     mkdirSync(this.options.runtimeDir, { recursive: true });
     if (this.options.launchEvidencePath) {

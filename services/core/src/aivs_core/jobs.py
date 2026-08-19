@@ -53,6 +53,10 @@ class JobService:
         media_generation_start: GenerationStart | None = None,
         media_generation_finish: GenerationFinish | None = None,
         media_generation_recover: GenerationRecover | None = None,
+        provider_image_generation_runner: PlanningRunner | None = None,
+        provider_image_generation_start: GenerationStart | None = None,
+        provider_image_generation_finish: GenerationFinish | None = None,
+        provider_image_generation_recover: GenerationRecover | None = None,
     ) -> None:
         self.db = db
         self.data_dir = data_dir
@@ -69,6 +73,10 @@ class JobService:
         self.media_generation_start = media_generation_start
         self.media_generation_finish = media_generation_finish
         self.media_generation_recover = media_generation_recover
+        self.provider_image_generation_runner = provider_image_generation_runner
+        self.provider_image_generation_start = provider_image_generation_start
+        self.provider_image_generation_finish = provider_image_generation_finish
+        self.provider_image_generation_recover = provider_image_generation_recover
         self.tasks: dict[str, asyncio.Task[None]] = {}
         self.cancel_events: dict[str, asyncio.Event] = {}
         self.worker: asyncio.Task[None] | None = None
@@ -88,6 +96,8 @@ class JobService:
         # the next explicit retry is the only way to resume it.
         if self.media_generation_recover:
             self.media_generation_recover()
+        if self.provider_image_generation_recover:
+            self.provider_image_generation_recover()
         self.db.recover_interrupted()
 
     def create(
@@ -597,16 +607,41 @@ class JobService:
         with self.db.connection() as db:
             db.execute(f"UPDATE jobs SET {','.join(assignments)} WHERE id=?", values)
 
+    def _generation_callbacks(
+        self, row: Any
+    ) -> tuple[PlanningRunner, GenerationStart, GenerationFinish]:
+        payload = json_loads(row["input_json"])
+        mode = payload.get("execution_mode")
+        if mode == "simulation_only":
+            callbacks = (
+                self.media_generation_runner,
+                self.media_generation_start,
+                self.media_generation_finish,
+            )
+        elif mode == "provider_image_v1":
+            callbacks = (
+                self.provider_image_generation_runner,
+                self.provider_image_generation_start,
+                self.provider_image_generation_finish,
+            )
+        else:
+            raise RuntimeError("GENERATION_EXECUTION_MODE_INVALID")
+        runner, start, finish = callbacks
+        if runner is None or start is None or finish is None:
+            raise RuntimeError("GENERATION_OUTPUT_INVALID")
+        return runner, start, finish
+
     async def _run(self, job_id: str) -> None:
         now = utc_now()
         with self.db.connection() as db:
             row = db.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
         if not row or row["status"] != "queued":
             return
+        generation_runner: PlanningRunner | None = None
+        generation_finish: GenerationFinish | None = None
         if row["kind"] == "media_generation":
-            if self.media_generation_start is None:
-                raise RuntimeError("GENERATION_OUTPUT_INVALID")
-            self.media_generation_start(job_id)
+            generation_runner, generation_start, generation_finish = self._generation_callbacks(row)
+            generation_start(job_id)
         else:
             self._transition_job(job_id, "queued", "running", stage="running", started_at=now)
         with self.db.connection() as db:
@@ -667,9 +702,9 @@ class JobService:
                         (json_dumps(result), utc_now(), job_id),
                     )
             elif row["kind"] == "media_generation":
-                if self.media_generation_runner is None:
+                if generation_runner is None:
                     raise RuntimeError("GENERATION_OUTPUT_INVALID")
-                result = await self.media_generation_runner(
+                result = await generation_runner(
                     row,
                     cancel_event,
                     lambda value: self._set_progress(job_id, value),
@@ -681,9 +716,9 @@ class JobService:
                 await self._run_media(row, job_id, cancel_event)
             current_status = self._current_status(job_id)
             if current_status == "running" and row["kind"] == "media_generation":
-                if self.media_generation_finish is None:
+                if generation_finish is None:
                     raise RuntimeError("GENERATION_OUTPUT_INVALID")
-                self.media_generation_finish(job_id, "succeeded", result, None, None)
+                generation_finish(job_id, "succeeded", result, None, None)
             elif current_status == "running":
                 self._transition_job(
                     job_id,
@@ -703,8 +738,8 @@ class JobService:
             current_status = self._current_status(job_id)
             if current_status in {"running", "cancelling"}:
                 target = _error_target(current_status, code)
-                if row["kind"] == "media_generation" and self.media_generation_finish:
-                    self.media_generation_finish(job_id, target, None, code, message)
+                if row["kind"] == "media_generation" and generation_finish:
+                    generation_finish(job_id, target, None, code, message)
                 else:
                     self._transition_job(
                         job_id,
@@ -722,8 +757,8 @@ class JobService:
                 target = "cancelled" if current_status == "cancelling" else "interrupted"
                 error_code = "JOB_CANCELLED" if target == "cancelled" else "JOB_INTERRUPTED"
                 message = _job_error_message(error_code)
-                if row["kind"] == "media_generation" and self.media_generation_finish:
-                    self.media_generation_finish(job_id, target, None, error_code, message)
+                if row["kind"] == "media_generation" and generation_finish:
+                    generation_finish(job_id, target, None, error_code, message)
                 else:
                     self._transition_job(
                         job_id,
@@ -740,10 +775,8 @@ class JobService:
             current_status = self._current_status(job_id)
             if current_status in {"running", "cancelling"}:
                 target = "cancelled" if current_status == "cancelling" else "failed"
-                if row["kind"] == "media_generation" and self.media_generation_finish:
-                    self.media_generation_finish(
-                        job_id, target, None, "INTERNAL_ERROR", "任务执行失败"
-                    )
+                if row["kind"] == "media_generation" and generation_finish:
+                    generation_finish(job_id, target, None, "INTERNAL_ERROR", "任务执行失败")
                 else:
                     self._transition_job(
                         job_id,

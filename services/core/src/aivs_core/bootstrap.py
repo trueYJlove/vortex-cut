@@ -27,6 +27,11 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--log-level", default="info")
     result.add_argument("--ready-file")
     result.add_argument("--manifest-dir")
+    result.add_argument(
+        "--enable-image-provider-network",
+        action="store_true",
+        help="Explicitly enable the fixed Stage 4D image Provider adapter",
+    )
     return result
 
 
