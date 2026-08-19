@@ -93,6 +93,15 @@ import {
   , type ShotListState, type ShotListRevisionPage, type ShotListRevisionDetail
   , type ShotListRevisionCreateInput, type ShotListRevisionCreateResponse, type ShotListConfirmInput, type ShotListConfirmResponse
   , type ShotListRevisionId
+  , parseImageProviderConfigPage, parseImageProviderConfigSummary
+  , parseProviderImageGenerationPreparedPreview, parseProviderImageGenerationCreateResponse
+  , parseProviderImageGenerationRequest, parseProviderImageGenerationRequestPage, parseProviderImageGenerationTaskPage, parseProviderImageGenerationTask
+  , parseProviderImageGenerationRetryPrepareInput
+  , type ImageProviderConfigCreateInput, type ImageProviderConfigPage, type ImageProviderConfigSummary
+  , type ProviderImageGenerationPrepareInput, type ProviderImageGenerationPreparedPreview
+  , type ProviderImageGenerationCreateInput, type ProviderImageGenerationCreateResponse
+  , type ProviderImageGenerationRequest, type ProviderImageGenerationRequestPage, type ProviderImageGenerationTaskPage, type ProviderImageGenerationTask
+  , type ProviderImageGenerationRetryPrepareInput
 } from "@aivideo/contracts";
 
 export class CoreApiError extends Error {
@@ -487,6 +496,47 @@ export class CoreClient {
       .then(value => parseMediaGenerationTask(removeSensitiveFields(value)));
   }
 
+  listImageProviderConfigs(projectId: ProjectId): Promise<ImageProviderConfigPage> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/image-provider-configs`)
+      .then(value => parseImageProviderConfigPage(removeSensitiveFields(value)));
+  }
+  createImageProviderConfig(projectId: ProjectId, input: ImageProviderConfigCreateInput): Promise<ImageProviderConfigSummary> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/image-provider-configs`, { method: "POST", body: JSON.stringify(input) })
+      .then(value => parseImageProviderConfigSummary(removeSensitiveFields(value)));
+  }
+  prepareProviderImageGeneration(projectId: ProjectId, input: ProviderImageGenerationPrepareInput): Promise<ProviderImageGenerationPreparedPreview> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/provider-image-generations/prepare`, { method: "POST", body: JSON.stringify(input) })
+      .then(value => parseProviderImageGenerationPreparedPreview(removeSensitiveFields(value)));
+  }
+  createProviderImageGeneration(projectId: ProjectId, input: ProviderImageGenerationCreateInput): Promise<ProviderImageGenerationCreateResponse> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/provider-image-generations`, { method: "POST", body: JSON.stringify(input) })
+      .then(value => parseProviderImageGenerationCreateResponse(removeSensitiveFields(value)));
+  }
+  listProviderImageGenerationRequests(projectId: ProjectId, params: ListParams = {}): Promise<ProviderImageGenerationRequestPage> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/provider-image-generations${query(params)}`)
+      .then(value => parseProviderImageGenerationRequestPage(removeSensitiveFields(value)));
+  }
+  getProviderImageGenerationRequest(requestId: string): Promise<ProviderImageGenerationRequest> {
+    return this.request<unknown>(`${API_PREFIX}/provider-image-generations/${encodeURIComponent(requestId)}`)
+      .then(value => parseProviderImageGenerationRequest(removeSensitiveFields(value)));
+  }
+  listProviderImageGenerationTasks(requestId: string, params: ListParams = {}): Promise<ProviderImageGenerationTaskPage> {
+    return this.request<unknown>(`${API_PREFIX}/provider-image-generations/${encodeURIComponent(requestId)}/tasks${query(params)}`)
+      .then(value => parseProviderImageGenerationTaskPage(removeSensitiveFields(value)));
+  }
+  prepareProviderImageGenerationRetry(taskId: string, input: ProviderImageGenerationRetryPrepareInput): Promise<ProviderImageGenerationPreparedPreview> {
+    const request = parseProviderImageGenerationRetryPrepareInput(input);
+    return this.request<unknown>(`${API_PREFIX}/provider-image-generation-tasks/${encodeURIComponent(taskId)}/retry/prepare`, { method: "POST", body: JSON.stringify(request) })
+      .then(value => parseProviderImageGenerationPreparedPreview(removeSensitiveFields(value)));
+  }
+  retryProviderImageGenerationTask(taskId: string, input: ProviderImageGenerationCreateInput): Promise<ProviderImageGenerationTask> {
+    return this.request<unknown>(`${API_PREFIX}/provider-image-generation-tasks/${encodeURIComponent(taskId)}/retry`, { method: "POST", body: JSON.stringify(input) })
+      .then(value => parseProviderImageGenerationTask(removeSensitiveFields(value)));
+  }
+  cancelProviderImageGenerationTask(taskId: string): Promise<ProviderImageGenerationTask> {
+    return this.request<unknown>(`${API_PREFIX}/provider-image-generation-tasks/${encodeURIComponent(taskId)}/cancel`, { method: "POST", body: JSON.stringify({}) })
+      .then(value => parseProviderImageGenerationTask(removeSensitiveFields(value)));
+  }
   getShotList(projectId: ProjectId): Promise<ShotListState> {
     return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/shot-list`)
       .then(value => parseShotListState(removeSensitiveFields(value)));

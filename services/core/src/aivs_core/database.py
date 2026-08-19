@@ -10,6 +10,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .database_v13 import V13_SQL
+from .database_v14 import V14_SQL
+
 
 def utc_now() -> str:
     return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
@@ -31,6 +34,8 @@ V9_VERSION = "v9"
 V10_VERSION = "v10"
 V11_VERSION = "v11"
 V12_VERSION = "v12"
+V13_VERSION = "v13"
+V14_VERSION = "v14"
 V1_SQL = """
 CREATE TABLE IF NOT EXISTS media_inputs (
   id TEXT PRIMARY KEY, path TEXT NOT NULL, display_name TEXT NOT NULL,
@@ -877,6 +882,8 @@ MIGRATIONS: dict[str, str] = {
     V10_VERSION: V10_SQL,
     V11_VERSION: V11_SQL,
     V12_VERSION: V12_SQL,
+    V13_VERSION: V13_SQL,
+    V14_VERSION: V14_SQL,
 }
 
 
@@ -920,6 +927,9 @@ class Database:
                     continue
                 self.last_backup = self._backup()
                 try:
+                    if version in {V13_VERSION, V14_VERSION}:
+                        self._apply_rebuild(db, version, sql, checksum)
+                        continue
                     db.execute("BEGIN")
                     self._apply_v1_compatibility(db)
                     self._apply_v2_compatibility(db)
@@ -945,10 +955,34 @@ class Database:
                     )
                     db.execute("COMMIT")
                 except Exception as exc:
-                    db.execute("ROLLBACK")
+                    if db.in_transaction:
+                        db.execute("ROLLBACK")
                     raise MigrationError(f"迁移 {version} 失败") from exc
 
             self._ensure_v1_columns(db)
+
+    @staticmethod
+    def _apply_rebuild(db: sqlite3.Connection, version: str, sql: str, checksum: str) -> None:
+        db.execute("PRAGMA foreign_keys=OFF")
+        try:
+            db.execute("BEGIN IMMEDIATE")
+            for statement in _statements(sql):
+                db.execute(statement)
+            if db.execute("PRAGMA foreign_key_check").fetchall():
+                raise MigrationError("重建迁移后外键检查失败")
+            if db.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                raise MigrationError("重建迁移后完整性检查失败")
+            db.execute(
+                "INSERT INTO schema_migrations(version,applied_at,checksum) VALUES (?,?,?)",
+                (version, utc_now(), checksum),
+            )
+            db.execute("COMMIT")
+        except Exception:
+            if db.in_transaction:
+                db.execute("ROLLBACK")
+            raise
+        finally:
+            db.execute("PRAGMA foreign_keys=ON")
 
     def _backup(self) -> Path:
         backup_dir = self.path.parent / "backups"

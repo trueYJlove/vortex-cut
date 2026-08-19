@@ -152,9 +152,9 @@ class MediaGenerationService:
                 row = sql.execute(
                     (
                         "SELECT * FROM media_generation_requests WHERE project_id=? "
-                        "AND request_sha256=?"
+                        "AND request_sha256=? AND execution_mode=?"
                     ),
-                    (project_id, request_sha256),
+                    (project_id, request_sha256, EXECUTION_MODE),
                 ).fetchone()
                 if row:
                     request_id, reused = row["id"], True
@@ -185,7 +185,9 @@ class MediaGenerationService:
                     task_id, job_id = new_id(), new_id()
                     self._insert_task(sql, request_id, task_id, job_id, 1, None, now)
                     task = sql.execute(
-                        "SELECT * FROM media_generation_tasks WHERE id=?", (task_id,)
+                        "SELECT t.* FROM media_generation_tasks t JOIN media_generation_requests r "
+                        "ON r.id=t.request_id WHERE t.id=? AND r.execution_mode=?",
+                        (task_id, EXECUTION_MODE),
                     ).fetchone()
                 sql.execute("COMMIT")
             except Exception:
@@ -213,9 +215,9 @@ class MediaGenerationService:
                 "INSERT INTO jobs(id,project_id,kind,type,status,stage,progress,input_json,"
                 "resource_class,attempt,created_at,updated_at) SELECT ?,project_id,"
                 "'media_generation','media_generation','queued','queued',0,?,'local',?,?,? "
-                "FROM media_generation_requests WHERE id=?"
+                "FROM media_generation_requests WHERE id=? AND execution_mode=?"
             ),
-            (job_id, json_dumps(safe_input), attempt, now, now, request_id),
+            (job_id, json_dumps(safe_input), attempt, now, now, request_id, EXECUTION_MODE),
         )
         if sql.execute("SELECT changes()").fetchone()[0] != 1:
             raise DomainError("GENERATION_REQUEST_INVALID", "生成请求不存在")
@@ -235,10 +237,10 @@ class MediaGenerationService:
         with self.db.connection() as sql:
             rows = sql.execute(
                 (
-                    "SELECT * FROM media_generation_requests WHERE project_id=? "
+                    "SELECT * FROM media_generation_requests WHERE project_id=? AND execution_mode=? "  # noqa: E501
                     "ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?"
                 ),
-                (project_id, limit, offset),
+                (project_id, EXECUTION_MODE, limit, offset),
             ).fetchall()
         return [self._request(row) for row in rows]
 
@@ -246,7 +248,8 @@ class MediaGenerationService:
         _id(request_id, "request_id")
         with self.db.connection() as sql:
             row = sql.execute(
-                "SELECT * FROM media_generation_requests WHERE id=?", (request_id,)
+                "SELECT * FROM media_generation_requests WHERE id=? AND execution_mode=?",
+                (request_id, EXECUTION_MODE),
             ).fetchone()
         if not row:
             raise DomainError("GENERATION_REQUEST_INVALID", "生成请求不存在")
@@ -274,7 +277,9 @@ class MediaGenerationService:
             sql.execute("BEGIN IMMEDIATE")
             try:
                 row = sql.execute(
-                    "SELECT * FROM media_generation_tasks WHERE id=?", (task_id,)
+                    "SELECT t.* FROM media_generation_tasks t JOIN media_generation_requests r "
+                    "ON r.id=t.request_id WHERE t.id=? AND r.execution_mode=?",
+                    (task_id, EXECUTION_MODE),
                 ).fetchone()
                 if not row:
                     raise DomainError("GENERATION_TASK_NOT_FOUND", "生成任务不存在")
@@ -303,7 +308,9 @@ class MediaGenerationService:
             sql.execute("BEGIN IMMEDIATE")
             try:
                 row = sql.execute(
-                    "SELECT * FROM media_generation_tasks WHERE id=?", (task_id,)
+                    "SELECT t.* FROM media_generation_tasks t JOIN media_generation_requests r "
+                    "ON r.id=t.request_id WHERE t.id=? AND r.execution_mode=?",
+                    (task_id, EXECUTION_MODE),
                 ).fetchone()
                 if not row:
                     raise DomainError("GENERATION_TASK_NOT_FOUND", "生成任务不存在")
@@ -326,7 +333,9 @@ class MediaGenerationService:
                     (now, now, task_id),
                 )
                 result = sql.execute(
-                    "SELECT * FROM media_generation_tasks WHERE id=?", (task_id,)
+                    "SELECT t.* FROM media_generation_tasks t JOIN media_generation_requests r "
+                    "ON r.id=t.request_id WHERE t.id=? AND r.execution_mode=?",
+                    (task_id, EXECUTION_MODE),
                 ).fetchone()
                 sql.execute("COMMIT")
             except Exception:
@@ -340,7 +349,10 @@ class MediaGenerationService:
             sql.execute("BEGIN IMMEDIATE")
             try:
                 task = sql.execute(
-                    "SELECT id,status FROM media_generation_tasks WHERE job_id=?", (job_id,)
+                    "SELECT t.id,t.status FROM media_generation_tasks t "
+                    "JOIN media_generation_requests r ON r.id=t.request_id "
+                    "WHERE t.job_id=? AND r.execution_mode=?",
+                    (job_id, EXECUTION_MODE),
                 ).fetchone()
                 if not task or task["status"] != "queued":
                     raise DomainError("GENERATION_REQUEST_INVALID", "生成任务状态无效")
@@ -388,7 +400,10 @@ class MediaGenerationService:
                 rows = sql.execute(
                     "SELECT t.id,t.job_id,t.status AS task_status,j.status AS job_status "
                     "FROM media_generation_tasks t JOIN jobs j ON j.id=t.job_id "
-                    "WHERE t.status='running' OR j.status IN ('running','cancelling')"
+                    "JOIN media_generation_requests r ON r.id=t.request_id "
+                    "WHERE r.execution_mode=? AND "
+                    "(t.status='running' OR j.status IN ('running','cancelling'))",
+                    (EXECUTION_MODE,),
                 ).fetchall()
                 for row in rows:
                     if row["task_status"] not in {"queued", "running"} or row["job_status"] not in {

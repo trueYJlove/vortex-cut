@@ -50,6 +50,11 @@ import type {
   , MediaGenerationTask, MediaGenerationTaskId, MediaGenerationTaskPage
   , ShotListState, ShotListRevisionPage, ShotListRevisionDetail, ShotListRevisionId
   , ShotListRevisionCreateInput, ShotListRevisionCreateResponse, ShotListConfirmInput, ShotListConfirmResponse
+  , ImageProviderConfigCreateInput, ImageProviderConfigPage, ImageProviderConfigSummary
+  , ProviderImageGenerationPrepareInput, ProviderImageGenerationPreparedPreview
+  , ProviderImageGenerationCreateInput, ProviderImageGenerationCreateResponse
+  , ProviderImageGenerationRequest, ProviderImageGenerationRequestPage
+  , ProviderImageGenerationTask, ProviderImageGenerationTaskPage, ProviderImageGenerationRetryPrepareInput
 } from "@aivideo/contracts";
 
 export interface MediaSelection { grant: FileGrant; media: MediaInfo }
@@ -146,7 +151,18 @@ export interface DesktopApi {
   listMediaGenerationTasks: (input: { request_id: MediaGenerationRequestId; limit?: number; cursor?: string }) => Promise<MediaGenerationTaskPage>;
   retryMediaGenerationTask: (taskId: MediaGenerationTaskId) => Promise<MediaGenerationTask>;
   cancelMediaGenerationTask: (taskId: MediaGenerationTaskId) => Promise<MediaGenerationTask>;
-  getShotList: (projectId: ProjectId) => Promise<ShotListState>;
+  listImageProviderConfigs: (projectId: ProjectId) => Promise<ImageProviderConfigPage>;
+  createImageProviderConfig: (input: { project_id: ProjectId; config: ImageProviderConfigCreateInput }) => Promise<ImageProviderConfigSummary>;
+  setImageProviderSecret: (input: { provider_config_id: string; secret: string }) => Promise<{ provider_config_id: string; credential_status: "configured" }>;
+  deleteImageProviderSecret: (providerConfigId: string) => Promise<{ provider_config_id: string; credential_status: "missing" }>;
+  prepareProviderImageGeneration: (input: { project_id: ProjectId; request: ProviderImageGenerationPrepareInput }) => Promise<ProviderImageGenerationPreparedPreview>;
+  createProviderImageGeneration: (input: { project_id: ProjectId; request: ProviderImageGenerationCreateInput }) => Promise<ProviderImageGenerationCreateResponse>;
+  listProviderImageGenerationRequests: (input: { project_id: ProjectId; limit?: number; cursor?: string }) => Promise<ProviderImageGenerationRequestPage>;
+  getProviderImageGenerationRequest: (requestId: MediaGenerationRequestId) => Promise<ProviderImageGenerationRequest>;
+  listProviderImageGenerationTasks: (input: { request_id: MediaGenerationRequestId; limit?: number; cursor?: string }) => Promise<ProviderImageGenerationTaskPage>;
+  prepareProviderImageGenerationRetry: (input: { task_id: MediaGenerationTaskId; request: ProviderImageGenerationRetryPrepareInput }) => Promise<ProviderImageGenerationPreparedPreview>;
+  retryProviderImageGenerationTask: (input: { task_id: MediaGenerationTaskId; request: ProviderImageGenerationCreateInput }) => Promise<ProviderImageGenerationTask>;
+  cancelProviderImageGenerationTask: (taskId: MediaGenerationTaskId) => Promise<ProviderImageGenerationTask>;  getShotList: (projectId: ProjectId) => Promise<ShotListState>;
   listShotListRevisions: (input: { project_id: ProjectId; limit?: number; cursor?: string }) => Promise<ShotListRevisionPage>;
   getShotListRevision: (revisionId: ShotListRevisionId) => Promise<ShotListRevisionDetail>;
   createShotListRevision: (input: { project_id: ProjectId; revision: ShotListRevisionCreateInput }) => Promise<ShotListRevisionCreateResponse>;
@@ -244,7 +260,18 @@ const api: DesktopApi = {
   listMediaGenerationTasks: input => ipcRenderer.invoke("media-generation:tasks", input),
   retryMediaGenerationTask: taskId => ipcRenderer.invoke("media-generation:retry", taskId),
   cancelMediaGenerationTask: taskId => ipcRenderer.invoke("media-generation:cancel", taskId),
-  getShotList: projectId => ipcRenderer.invoke("shot-list:get", projectId),
+  listImageProviderConfigs: projectId => ipcRenderer.invoke("provider-image-config:list", { project_id: projectId }),
+  createImageProviderConfig: input => ipcRenderer.invoke("provider-image-config:create", input),
+  setImageProviderSecret: input => ipcRenderer.invoke("provider-image-config:set-secret", input),
+  deleteImageProviderSecret: providerConfigId => ipcRenderer.invoke("provider-image-config:delete-secret", providerConfigId),
+  prepareProviderImageGeneration: input => ipcRenderer.invoke("provider-image-generation:prepare", input),
+  createProviderImageGeneration: input => ipcRenderer.invoke("provider-image-generation:create", input),
+  listProviderImageGenerationRequests: input => ipcRenderer.invoke("provider-image-generation:list", input),
+  getProviderImageGenerationRequest: requestId => ipcRenderer.invoke("provider-image-generation:get", requestId),
+  listProviderImageGenerationTasks: input => ipcRenderer.invoke("provider-image-generation:tasks", input),
+  prepareProviderImageGenerationRetry: input => ipcRenderer.invoke("provider-image-generation:retry-prepare", input),
+  retryProviderImageGenerationTask: input => ipcRenderer.invoke("provider-image-generation:retry", input),
+  cancelProviderImageGenerationTask: taskId => ipcRenderer.invoke("provider-image-generation:cancel", taskId),  getShotList: projectId => ipcRenderer.invoke("shot-list:get", projectId),
   listShotListRevisions: input => ipcRenderer.invoke("shot-list:revisions", input),
   getShotListRevision: revisionId => ipcRenderer.invoke("shot-list:revision:get", revisionId),
   createShotListRevision: input => ipcRenderer.invoke("shot-list:revision:create", input),

@@ -4,12 +4,14 @@ import { randomBytes } from "node:crypto";
 import { access, readdir } from "node:fs/promises";
 import { CoreAdminClient, CoreHttpError } from "./core-admin-client.js";
 import { ProviderSecretStore, reinjectProviderSecrets, removeProviderSecret, saveProviderSecret } from "./provider-secrets.js";
+import { ImageProviderSecretStore, reinjectImageProviderSecrets } from "./image-provider-secrets.js";
 import { issueCandidateClipMedia } from "./candidate-media.js";
 import { registerStage2aIpc } from "./stage2a-ipc.js";
 import { registerStage2bIpc } from "./stage2b-ipc.js";
 import { registerStage3bIpc } from "./stage3b-ipc.js";
 import { registerStage4Ipc } from "./stage4-ipc.js";
 import { registerStage4cIpc } from "./stage4c-ipc.js";
+import { registerStage4dIpc } from "./stage4d-ipc.js";
 import { registerFileGrant } from "./file-grants.js";
 import { exportFileName, normalizeExportPath } from "./export-destination.js";
 import { defaultLogPath, appendLog, redact } from "./logging.js";
@@ -82,6 +84,7 @@ let runtime: { base_url: string; ui_token: string; protocol_version: 1 } | undef
 const restrictedMedia = new RestrictedMediaRegistry();
 let logPath = "";
 let providerSecrets: ProviderSecretStore | undefined;
+let imageProviderSecrets: ImageProviderSecretStore | undefined;
 // Acquire the lock before startup work so duplicate launches cannot race with
 // window creation or sidecar startup.
 const hasSingleInstanceLock = !app.isPackaged || app.requestSingleInstanceLock();
@@ -429,6 +432,8 @@ function registerIpc(): void {
   registerStage3bIpc({ ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) }, fetchWithUi, previewPresentation: renditionReframePreviewPresentation });
   registerStage4Ipc({ ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) }, fetchWithUi });
   registerStage4cIpc({ ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) }, fetchWithUi });
+  imageProviderSecrets ??= new ImageProviderSecretStore(app.getPath("userData"));
+  registerStage4dIpc({ ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) }, fetchWithUi, getAdmin: requireCore, secrets: imageProviderSecrets });
   ipcMain.handle("preview:create", async (_event, input: { project_id: ProjectId; preview: PreviewCreateInput }) => {
     const projectId = asId(input.project_id, "project_id");
     const request = parsePreviewCreateInput(input.preview);
@@ -550,7 +555,8 @@ async function startRuntime(): Promise<void> {
     ffprobePath: join(resourcesPath, "ffmpeg", "win-x64", "ffprobe.exe"),
     manifestDir: join(resourcesPath, "model-manifests"),
     buildVersion: app.getVersion(), adminToken,
-    launchEvidencePath: process.env.AIVS_E2E_SIDECAR_ARGV_EVIDENCE
+    launchEvidencePath: process.env.AIVS_E2E_SIDECAR_ARGV_EVIDENCE,
+    enableImageProviderNetwork: process.env.AIVS_ENABLE_IMAGE_PROVIDER_NETWORK === "true"
   });
   await appendLog(logPath, `starting sidecar resources=${resourcesPath}`);
   const ready = await supervisor.start();
@@ -562,6 +568,8 @@ async function startRuntime(): Promise<void> {
   const session = await core.createSession();
   providerSecrets ??= new ProviderSecretStore(app.getPath("userData"));
   await reinjectProviderSecrets(providerSecrets, core);
+  imageProviderSecrets ??= new ImageProviderSecretStore(app.getPath("userData"));
+  await reinjectImageProviderSecrets(imageProviderSecrets, core);
   await appendLog(logPath, "Core session response received");
   // Do not publish a runtime until the per-sidecar UI session exists.  The
   // admin client remains Main-only; returning readiness while it was briefly

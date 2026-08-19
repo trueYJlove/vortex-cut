@@ -48,6 +48,7 @@ class Settings:
     manifest_dir: Path = field(default_factory=lambda: _resource_path("model-manifests"))
     font_dir: Path = field(default_factory=lambda: _resource_path("fonts"))
     recipe_dir: Path = field(default_factory=lambda: _resource_path("recipes"))
+    image_provider_network_enabled: bool = False
 
     def prepare(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -83,6 +84,9 @@ class Settings:
                 Path(manifest_dir) if manifest_dir else _resource_path("model-manifests")
             ),
             recipe_dir=Path(recipe_dir) if recipe_dir else _resource_path("recipes"),
+            image_provider_network_enabled=bool(
+                getattr(args, "enable_image_provider_network", False)
+            ),
         )
 
 

@@ -117,8 +117,7 @@ def test_real_v3_copy_upgrades_to_v4_and_preserves_all_stage1_data(
         assert [
             x[0]
             for x in db.execute(
-                "SELECT version FROM schema_migrations "
-                "ORDER BY CAST(SUBSTR(version,2) AS INTEGER)"
+                "SELECT version FROM schema_migrations ORDER BY CAST(SUBSTR(version,2) AS INTEGER)"
             )
         ] == [
             "v1",
@@ -133,6 +132,8 @@ def test_real_v3_copy_upgrades_to_v4_and_preserves_all_stage1_data(
             "v10",
             "v11",
             "v12",
+            "v13",
+            "v14",
         ]
         assert db.execute("SELECT name FROM projects WHERE id='p1'").fetchone() == ("project",)
         assert db.execute("SELECT fingerprint FROM assets WHERE id='a1'").fetchone() == ("fp",)

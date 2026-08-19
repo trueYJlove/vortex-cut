@@ -216,6 +216,57 @@ class ProjectAssetService:
             )
         return self.get_asset(asset_id)  # type: ignore[return-value]
 
+    def insert_generated_image_in_transaction(
+        self,
+        db: Any,
+        project_id: str,
+        asset_id: str,
+        path: Path,
+        fingerprint: str,
+        media_info: dict[str, Any],
+        display_name: str,
+        now: str,
+    ) -> dict[str, Any]:
+        """Narrow capability used only after Stage 4D validated and published an image."""
+        project = db.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
+        if not project:
+            raise DomainError("PROJECT_NOT_FOUND", "项目不存在")
+        if project["status"] != "active":
+            raise DomainError("PROJECT_ARCHIVED", "项目不可写入生成素材")
+        root = Path(project["root_dir"]).resolve()
+        resolved = path.resolve()
+        if resolved.parent != (root / "generated" / "image").resolve() or not resolved.is_file():
+            raise DomainError("GENERATED_ASSET_REGISTER_FAILED", "生成素材路径无效")
+        if db.execute(
+            "SELECT 1 FROM assets WHERE project_id=? AND fingerprint=?",
+            (project_id, fingerprint),
+        ).fetchone():
+            raise DomainError("GENERATED_ASSET_DUPLICATE", "生成图片与已有素材重复")
+        db.execute(
+            "INSERT INTO assets(id,project_id,kind,storage_mode,display_name,fingerprint,"
+            "size_bytes,modified_at,availability,media_info_json,created_at,updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                asset_id,
+                project_id,
+                "image",
+                "managed",
+                display_name,
+                fingerprint,
+                path.stat().st_size,
+                modified_iso(path),
+                "available",
+                json_dumps(media_info),
+                now,
+                now,
+            ),
+        )
+        db.execute(
+            "INSERT INTO asset_locations(asset_id,uri,last_verified_at) VALUES (?,?,?)",
+            (asset_id, path.as_uri(), now),
+        )
+        row = db.execute("SELECT * FROM assets WHERE id=?", (asset_id,)).fetchone()
+        return _asset_dto(row)
     async def refresh_asset(self, asset_id: str) -> dict[str, Any]:
         row = self._require_asset_row(asset_id)
         location = self._location(asset_id)

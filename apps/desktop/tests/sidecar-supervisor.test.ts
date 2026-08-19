@@ -25,12 +25,40 @@ describe("SidecarSupervisor", () => {
     expect(JSON.stringify(spawnImpl.mock.calls[0][1])).not.toContain("admin-secret");
     const args = spawnImpl.mock.calls[0][1] as string[];
     expect(args[args.indexOf("--manifest-dir") + 1]).toBe(manifestDir);
+    expect(args).not.toContain("--enable-image-provider-network");
     expect(JSON.parse(readFileSync(join(runtimeDir, "ready.json"), "utf8"))).toMatchObject({ pid: 321 });
     const launchEvidence = JSON.parse(readFileSync(launchEvidencePath, "utf8"));
     expect(launchEvidence.args).toContain("--manifest-dir");
     expect(JSON.stringify(launchEvidence)).not.toContain("admin-secret");
   });
 
+  it("passes the image Provider network flag only when explicitly enabled", async () => {
+    const runtimeDir = join(tmpdir(), `aivideo-sidecar-provider-${Date.now()}`);
+    const manifestDir = join(runtimeDir, "model-manifests");
+    mkdirSync(manifestDir, { recursive: true });
+    writeFileSync(join(manifestDir, "model.json"), "{}");
+    const child = Object.assign(new (require("node:events").EventEmitter)(), { stdout: undefined, stderr: undefined, pid: 323, exitCode: null, kill: vi.fn() });
+    const spawnImpl = vi.fn().mockImplementation((_executable: string, args: string[]) => {
+      writeFileSync(args[args.indexOf("--ready-file") + 1], JSON.stringify({ protocol_version: 1, port: 43002, pid: 323, build_version: "0.0.1" }));
+      return child;
+    });
+    await new SidecarSupervisor({
+      executable: "aivs-core.exe",
+      resourcesPath: "C:\\resources",
+      dataDir: "C:\\data",
+      runtimeDir,
+      ffmpegPath: "C:\\ffmpeg.exe",
+      ffprobePath: "C:\\ffprobe.exe",
+      manifestDir,
+      buildVersion: "0.0.1",
+      adminToken: "admin-secret",
+      enableImageProviderNetwork: true,
+      spawnImpl
+    }).start();
+    const args = spawnImpl.mock.calls[0][1] as string[];
+    expect(args).toContain("--enable-image-provider-network");
+    expect(JSON.stringify(args)).not.toContain("admin-secret");
+  });
   it("passes development and packaged manifest paths as one argv value", async () => {
     for (const label of ["开发 资源", "安装包 资源"] as const) {
       const root = join(tmpdir(), `aivideo-${label}-${Date.now()}`);
@@ -41,6 +69,7 @@ describe("SidecarSupervisor", () => {
       await new SidecarSupervisor({ executable: join(root, "core", "aivs-core.exe"), resourcesPath: root, dataDir: join(root, "data"), runtimeDir, ffmpegPath: join(root, "ffmpeg.exe"), ffprobePath: join(root, "ffprobe.exe"), manifestDir, buildVersion: "0.0.1", spawnImpl }).start();
       const args = spawnImpl.mock.calls[0][1] as string[];
       expect(args[args.indexOf("--manifest-dir") + 1]).toBe(manifestDir);
+    expect(args).not.toContain("--enable-image-provider-network");
     }
   });
 
