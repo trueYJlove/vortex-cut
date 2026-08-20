@@ -55,6 +55,15 @@ import type {
   , ProviderImageGenerationCreateInput, ProviderImageGenerationCreateResponse
   , ProviderImageGenerationRequest, ProviderImageGenerationRequestPage
   , ProviderImageGenerationTask, ProviderImageGenerationTaskPage, ProviderImageGenerationRetryPrepareInput
+  , ShotRequirementId, ShotRequirementImageFulfillmentPrepareInput
+  , ShotRequirementImageFulfillmentPreparedPreview, ShotRequirementImageFulfillmentCreateInput
+  , ShotRequirementImageFulfillmentCreateResponse, ShotRequirementImageFulfillmentState
+  , ShotRequirementImageGenerationLinkPage, ShotRequirementImageAdoptionPage
+  , ShotRequirementImageAdoptInput, ShotRequirementImageAdoptResponse
+  , ShotRequirementTimelineAssemblyPrepareInput, ShotRequirementTimelineAssemblyApplyInput
+  , ShotRequirementTimelineAssemblyPreview, ShotRequirementTimelineAssembly
+  , ShotRequirementTimelineAssemblyApplyResponse, ShotRequirementTimelineAssemblyPage
+  , ShotRequirementTimelineAssemblyPreviewId, ShotRequirementTimelineAssemblyId
 } from "@aivideo/contracts";
 
 export interface MediaSelection { grant: FileGrant; media: MediaInfo }
@@ -162,11 +171,23 @@ export interface DesktopApi {
   listProviderImageGenerationTasks: (input: { request_id: MediaGenerationRequestId; limit?: number; cursor?: string }) => Promise<ProviderImageGenerationTaskPage>;
   prepareProviderImageGenerationRetry: (input: { task_id: MediaGenerationTaskId; request: ProviderImageGenerationRetryPrepareInput }) => Promise<ProviderImageGenerationPreparedPreview>;
   retryProviderImageGenerationTask: (input: { task_id: MediaGenerationTaskId; request: ProviderImageGenerationCreateInput }) => Promise<ProviderImageGenerationTask>;
-  cancelProviderImageGenerationTask: (taskId: MediaGenerationTaskId) => Promise<ProviderImageGenerationTask>;  getShotList: (projectId: ProjectId) => Promise<ShotListState>;
+  cancelProviderImageGenerationTask: (taskId: MediaGenerationTaskId) => Promise<ProviderImageGenerationTask>;
+  getShotList: (projectId: ProjectId) => Promise<ShotListState>;
   listShotListRevisions: (input: { project_id: ProjectId; limit?: number; cursor?: string }) => Promise<ShotListRevisionPage>;
   getShotListRevision: (revisionId: ShotListRevisionId) => Promise<ShotListRevisionDetail>;
   createShotListRevision: (input: { project_id: ProjectId; revision: ShotListRevisionCreateInput }) => Promise<ShotListRevisionCreateResponse>;
   confirmShotListRevision: (input: { project_id: ProjectId; confirmation: ShotListConfirmInput }) => Promise<ShotListConfirmResponse>;
+  getShotRequirementImageFulfillment: (input: { project_id: ProjectId; requirement_id: ShotRequirementId }) => Promise<ShotRequirementImageFulfillmentState>;
+  listShotRequirementImageFulfillmentLinks: (input: { project_id: ProjectId; requirement_id: ShotRequirementId; limit?: number; cursor?: string }) => Promise<ShotRequirementImageGenerationLinkPage>;
+  listShotRequirementImageFulfillmentAdoptions: (input: { project_id: ProjectId; requirement_id: ShotRequirementId; limit?: number; cursor?: string }) => Promise<ShotRequirementImageAdoptionPage>;
+  prepareShotRequirementImageFulfillment: (input: { project_id: ProjectId; requirement_id: ShotRequirementId; request: ShotRequirementImageFulfillmentPrepareInput }) => Promise<ShotRequirementImageFulfillmentPreparedPreview>;
+  createShotRequirementImageFulfillment: (input: { project_id: ProjectId; requirement_id: ShotRequirementId; request: ShotRequirementImageFulfillmentCreateInput }) => Promise<ShotRequirementImageFulfillmentCreateResponse>;
+  adoptShotRequirementImageFulfillment: (input: { project_id: ProjectId; requirement_id: ShotRequirementId; request: ShotRequirementImageAdoptInput }) => Promise<ShotRequirementImageAdoptResponse>;
+  prepareShotRequirementTimelineAssembly: (input: { project_id: ProjectId; requirement_id: ShotRequirementId; request: ShotRequirementTimelineAssemblyPrepareInput }) => Promise<ShotRequirementTimelineAssemblyPreview>;
+  applyShotRequirementTimelineAssembly: (input: { project_id: ProjectId; requirement_id: ShotRequirementId; request: ShotRequirementTimelineAssemblyApplyInput }) => Promise<ShotRequirementTimelineAssemblyApplyResponse>;
+  getShotRequirementTimelineAssemblyPreview: (input: { preview_id: ShotRequirementTimelineAssemblyPreviewId }) => Promise<ShotRequirementTimelineAssemblyPreview>;
+  getShotRequirementTimelineAssembly: (input: { assembly_id: ShotRequirementTimelineAssemblyId }) => Promise<ShotRequirementTimelineAssembly>;
+  listShotRequirementTimelineAssemblies: (input: { project_id: ProjectId; requirement_id: ShotRequirementId; limit?: number; cursor?: string }) => Promise<ShotRequirementTimelineAssemblyPage>;
   getRenderArtifact: (artifactId: RenderArtifactId) => Promise<RenderArtifactPresentation>;
   openArtifact: (artifactId: string) => Promise<void>;
   openArtifactFolder: (artifactId: string) => Promise<void>;
@@ -271,11 +292,23 @@ const api: DesktopApi = {
   listProviderImageGenerationTasks: input => ipcRenderer.invoke("provider-image-generation:tasks", input),
   prepareProviderImageGenerationRetry: input => ipcRenderer.invoke("provider-image-generation:retry-prepare", input),
   retryProviderImageGenerationTask: input => ipcRenderer.invoke("provider-image-generation:retry", input),
-  cancelProviderImageGenerationTask: taskId => ipcRenderer.invoke("provider-image-generation:cancel", taskId),  getShotList: projectId => ipcRenderer.invoke("shot-list:get", projectId),
+  cancelProviderImageGenerationTask: taskId => ipcRenderer.invoke("provider-image-generation:cancel", taskId),
+  getShotList: projectId => ipcRenderer.invoke("shot-list:get", projectId),
   listShotListRevisions: input => ipcRenderer.invoke("shot-list:revisions", input),
   getShotListRevision: revisionId => ipcRenderer.invoke("shot-list:revision:get", revisionId),
   createShotListRevision: input => ipcRenderer.invoke("shot-list:revision:create", input),
   confirmShotListRevision: input => ipcRenderer.invoke("shot-list:confirm", input),
+  getShotRequirementImageFulfillment: input => ipcRenderer.invoke("shot-requirement-image-fulfillment:get", input),
+  listShotRequirementImageFulfillmentLinks: input => ipcRenderer.invoke("shot-requirement-image-fulfillment:list-links", input),
+  listShotRequirementImageFulfillmentAdoptions: input => ipcRenderer.invoke("shot-requirement-image-fulfillment:list-adoptions", input),
+  prepareShotRequirementImageFulfillment: input => ipcRenderer.invoke("shot-requirement-image-fulfillment:prepare", input),
+  createShotRequirementImageFulfillment: input => ipcRenderer.invoke("shot-requirement-image-fulfillment:create", input),
+  adoptShotRequirementImageFulfillment: input => ipcRenderer.invoke("shot-requirement-image-fulfillment:adopt", input),
+  prepareShotRequirementTimelineAssembly: input => ipcRenderer.invoke("stage5:assembly-prepare", input),
+  applyShotRequirementTimelineAssembly: input => ipcRenderer.invoke("stage5:assembly-apply", input),
+  getShotRequirementTimelineAssemblyPreview: input => ipcRenderer.invoke("stage5:assembly-preview-get", input),
+  getShotRequirementTimelineAssembly: input => ipcRenderer.invoke("stage5:assembly-get", input),
+  listShotRequirementTimelineAssemblies: input => ipcRenderer.invoke("stage5:assembly-list", input),
   getRenderArtifact: artifactId => ipcRenderer.invoke("render-artifact:get", artifactId),
   openArtifact: artifactId => ipcRenderer.invoke("artifact:open", artifactId),
   openArtifactFolder: artifactId => ipcRenderer.invoke("artifact:folder", artifactId),

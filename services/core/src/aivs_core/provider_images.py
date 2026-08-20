@@ -46,6 +46,197 @@ class ProviderImageError(RuntimeError):
         self.may_have_processed = may_have_processed
 
 
+_DIAGNOSTIC_LIMIT = 64
+
+
+def _new_protocol_diagnostic() -> dict[str, Any]:
+    return {
+        "schema_version": 2,
+        "outcome": "pending",
+        "failure_stage": "none",
+        "http_status_class": "not_observed",
+        "content_type_class": "not_observed",
+        "stream_started": False,
+        "stream_ended": False,
+        "chunk_count": 0,
+        "envelope_byte_count": 0,
+        "frame_count": 0,
+        "data_event_count": 0,
+        "completed_event_count": 0,
+        "other_event_count": 0,
+        "partial_image_event_count": 0,
+        "direct_image_shape_count": 0,
+        "nested_data_image_shape_count": 0,
+        "chat_delta_shape_count": 0,
+        "responses_image_shape_count": 0,
+        "url_only_shape_count": 0,
+        "unclassified_shape_count": 0,
+        "candidate_encoding_class": "not_observed",
+        "candidate_size_class": "not_observed",
+        "done_marker_count": 0,
+        "image_field_location": "not_observed",
+        "base64_state": "not_checked",
+    }
+
+
+def _string_size_class(value: str) -> str:
+    size = len(value)
+    if size < 4_096:
+        return "under_4k"
+    if size < 262_144:
+        return "4k_to_256k"
+    if size < 1_048_576:
+        return "256k_to_1m"
+    if size <= 36 * 1_048_576:
+        return "1m_to_36m"
+    return "over_36m"
+
+
+def _candidate_encoding_class(value: str) -> str:
+    stripped = value.strip()
+    lowered = stripped[:32].lower()
+    if lowered.startswith("data:image/"):
+        return "data_image_uri"
+    if lowered.startswith(("http://", "https://")):
+        return "remote_url"
+    if stripped and len(stripped) % 4 == 0:
+        allowed = frozenset(
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="
+        )
+        if all(char in allowed for char in stripped):
+            return "base64_like"
+    return "other"
+
+
+def _merge_observation(current: str, observed: str) -> str:
+    if current == "not_observed":
+        return observed
+    return current if current == observed else "mixed"
+
+
+def _observe_protocol_shape(event: dict[str, Any], diagnostic: dict[str, Any]) -> None:
+    """Record approved shape classes only; never retain event keys or values."""
+    classified = False
+    candidates: list[str] = []
+
+    direct = event.get("b64_json")
+    if isinstance(direct, str):
+        diagnostic["direct_image_shape_count"] += 1
+        candidates.append(direct)
+        classified = True
+
+    data = event.get("data")
+    if isinstance(data, list):
+        nested = [
+            item.get("b64_json")
+            for item in data
+            if isinstance(item, dict) and isinstance(item.get("b64_json"), str)
+        ]
+        if nested:
+            diagnostic["nested_data_image_shape_count"] += 1
+            candidates.extend(nested)
+            classified = True
+        if any(
+            isinstance(item, dict)
+            and isinstance(item.get("url"), str)
+            and not isinstance(item.get("b64_json"), str)
+            for item in data
+        ):
+            diagnostic["url_only_shape_count"] += 1
+            classified = True
+
+    choices = event.get("choices")
+    if isinstance(choices, list):
+        delta_candidates = []
+        for choice in choices:
+            if not isinstance(choice, dict):
+                continue
+            delta = choice.get("delta")
+            if isinstance(delta, dict) and isinstance(delta.get("content"), str):
+                delta_candidates.append(delta["content"])
+        if delta_candidates:
+            diagnostic["chat_delta_shape_count"] += 1
+            candidates.extend(delta_candidates)
+            classified = True
+
+    response = event.get("response")
+    if isinstance(response, dict):
+        output = response.get("output")
+        if isinstance(output, list):
+            response_candidates = []
+            for item in output:
+                if not isinstance(item, dict):
+                    continue
+                result = item.get("result")
+                if isinstance(result, str):
+                    response_candidates.append(result)
+            if response_candidates:
+                diagnostic["responses_image_shape_count"] += 1
+                candidates.extend(response_candidates)
+                classified = True
+
+    if event.get("type") == "image_generation.partial_image":
+        diagnostic["partial_image_event_count"] += 1
+        classified = True
+
+    if not classified:
+        diagnostic["unclassified_shape_count"] += 1
+    for candidate in candidates:
+        diagnostic["candidate_encoding_class"] = _merge_observation(
+            diagnostic["candidate_encoding_class"], _candidate_encoding_class(candidate)
+        )
+        diagnostic["candidate_size_class"] = _merge_observation(
+            diagnostic["candidate_size_class"], _string_size_class(candidate)
+        )
+
+
+def _status_class(status: int) -> str:
+    if 200 <= status < 300:
+        return "2xx"
+    if 400 <= status < 500:
+        return "4xx"
+    if 500 <= status < 600:
+        return "5xx"
+    return "other"
+
+
+def _content_type_class(value: str) -> str:
+    lowered = value.lower()
+    if "text/event-stream" in lowered:
+        return "event_stream"
+    if "json" in lowered:
+        return "json"
+    if not lowered.strip():
+        return "missing"
+    return "other"
+
+
+def _completed_image(event: dict[str, Any]) -> tuple[str, str]:
+    direct = event.get("b64_json")
+    if isinstance(direct, str):
+        return direct, "direct"
+    data = event.get("data")
+    if (
+        isinstance(data, list)
+        and len(data) == 1
+        and isinstance(data[0], dict)
+        and isinstance(data[0].get("b64_json"), str)
+    ):
+        return data[0]["b64_json"], "nested_data"
+    raise ValueError("missing completed image")
+
+
+def _is_completed_image_candidate(event: dict[str, Any]) -> bool:
+    if event.get("type") == "image_generation.completed":
+        return True
+    data = event.get("data")
+    return (
+        isinstance(data, list)
+        and len(data) == 1
+        and isinstance(data[0], dict)
+        and isinstance(data[0].get("b64_json"), str)
+    )
+
 @dataclass(frozen=True)
 class PromptReservation:
     preview_id: str
@@ -136,6 +327,7 @@ class ProviderImageRequest:
     prompt: str
     size: str
     api_key: str
+    diagnostic_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -169,12 +361,30 @@ class FailOnCallImageProvider:
 class ApiKeyFunImagesProvider:
     """Fixed third-party SSE endpoint; one dispatch, no redirects, retries, or env proxy."""
 
+    def __init__(self) -> None:
+        self._protocol_diagnostics: dict[str, dict[str, Any]] = {}
+
+    def take_protocol_diagnostic(self, diagnostic_id: str) -> dict[str, Any] | None:
+        """Return and remove a content-free diagnostic for an isolated acceptance task."""
+        value = self._protocol_diagnostics.pop(diagnostic_id, None)
+        return dict(value) if value is not None else None
+
+    def _store_protocol_diagnostic(
+        self, diagnostic_id: str | None, value: dict[str, Any]
+    ) -> None:
+        if not diagnostic_id:
+            return
+        while len(self._protocol_diagnostics) >= _DIAGNOSTIC_LIMIT:
+            self._protocol_diagnostics.pop(next(iter(self._protocol_diagnostics)))
+        self._protocol_diagnostics[diagnostic_id] = dict(value)
+
     async def generate(
         self,
         request: ProviderImageRequest,
         cancel_event: asyncio.Event,
         on_dispatch: Callable[[], None],
     ) -> ProviderImageResult:
+        diagnostic = _new_protocol_diagnostic()
         if request.size != "1024x1024":
             raise ProviderImageError("IMAGE_PROVIDER_UNSUPPORTED", "图片尺寸不受支持")
         if cancel_event.is_set():
@@ -205,29 +415,67 @@ class ApiKeyFunImagesProvider:
                     },
                 ) as response:
                     status = response.status_code
+                    diagnostic["http_status_class"] = _status_class(status)
                     request_id = response.headers.get("x-request-id")
                     if status != 200:
+                        diagnostic["failure_stage"] = "http_status"
                         await response.aread()
                         _raise_status(status)
-                    content_type = response.headers.get("content-type", "").lower()
-                    if "text/event-stream" not in content_type:
+                    content_type = response.headers.get("content-type", "")
+                    diagnostic["content_type_class"] = _content_type_class(content_type)
+                    if diagnostic["content_type_class"] != "event_stream":
+                        diagnostic["failure_stage"] = "unexpected_content_type"
                         await response.aread()
                         raise ProviderImageError(
                             "PROVIDER_INVALID_RESPONSE", "Provider 响应无效", True
                         )
                     response_hasher = hashlib.sha256()
-                    envelope_size = 0
                     buffer = bytearray()
                     completed_image: str | None = None
                     completed_usage: dict[str, int | float] | None = None
-                    completed_count = 0
+                    diagnostic["stream_started"] = True
+
+                    def process_frame(frame: bytes) -> None:
+                        nonlocal completed_image, completed_usage
+                        diagnostic["frame_count"] += 1
+                        if _is_done_sse_frame(frame):
+                            diagnostic["done_marker_count"] += 1
+                        try:
+                            event = _parse_sse_frame(frame)
+                        except (ValueError, json.JSONDecodeError, UnicodeDecodeError):
+                            diagnostic["failure_stage"] = "event_decode"
+                            raise
+                        if event is None:
+                            return
+                        diagnostic["data_event_count"] += 1
+                        _observe_protocol_shape(event, diagnostic)
+                        if not _is_completed_image_candidate(event):
+                            diagnostic["other_event_count"] += 1
+                            return
+                        diagnostic["completed_event_count"] += 1
+                        try:
+                            completed_image, location = _completed_image(event)
+                            diagnostic["image_field_location"] = location
+                        except ValueError:
+                            diagnostic["image_field_location"] = "missing"
+                            diagnostic["failure_stage"] = "completed_image_field"
+                            raise
+                        try:
+                            completed_usage = _safe_usage(event.get("usage"))
+                        except ValueError:
+                            diagnostic["failure_stage"] = "usage_shape"
+                            raise
+
                     async for chunk in response.aiter_bytes():
+                        diagnostic["chunk_count"] += 1
                         if cancel_event.is_set():
+                            diagnostic["failure_stage"] = "cancelled"
                             raise ProviderImageError("JOB_CANCELLED", "任务已取消", True)
                         response_hasher.update(chunk)
-                        envelope_size += len(chunk)
+                        diagnostic["envelope_byte_count"] += len(chunk)
                         buffer.extend(chunk)
-                        if envelope_size > MAX_ENVELOPE_BYTES:
+                        if diagnostic["envelope_byte_count"] > MAX_ENVELOPE_BYTES:
+                            diagnostic["failure_stage"] = "envelope_too_large"
                             raise ProviderImageError(
                                 "GENERATED_IMAGE_TOO_LARGE", "Provider 返回的图片过大", True
                             )
@@ -236,48 +484,72 @@ class ApiKeyFunImagesProvider:
                             if popped is None:
                                 break
                             frame, buffer = popped
-                            event = _parse_sse_frame(frame)
-                            if event is None:
-                                continue
-                            if event.get("type") == "image_generation.completed":
-                                completed_count += 1
-                                completed_image = _completed_b64_json(event)
-                                completed_usage = _safe_usage(event.get("usage"))
+                            process_frame(frame)
                     if buffer.strip():
-                        event = _parse_sse_frame(bytes(buffer))
-                        if event is not None and event.get("type") == "image_generation.completed":
-                            completed_count += 1
-                            completed_image = _completed_b64_json(event)
-                            completed_usage = _safe_usage(event.get("usage"))
+                        process_frame(bytes(buffer))
+                    diagnostic["stream_ended"] = True
         except ProviderImageError:
+            diagnostic["outcome"] = "failed"
+            self._store_protocol_diagnostic(request.diagnostic_id, diagnostic)
             raise
         except httpx.TimeoutException as exc:
+            diagnostic["outcome"] = "failed"
+            diagnostic["failure_stage"] = "timeout"
+            self._store_protocol_diagnostic(request.diagnostic_id, diagnostic)
             raise ProviderImageError("PROVIDER_TIMEOUT", "Provider 请求超时", True) from exc
         except httpx.ConnectError as exc:
+            diagnostic["outcome"] = "failed"
+            diagnostic["failure_stage"] = "connect"
+            self._store_protocol_diagnostic(request.diagnostic_id, diagnostic)
             raise ProviderImageError("PROVIDER_NETWORK_ERROR", "无法连接 Provider", True) from exc
         except httpx.TransportError as exc:
+            diagnostic["outcome"] = "failed"
+            diagnostic["failure_stage"] = "transport"
+            self._store_protocol_diagnostic(request.diagnostic_id, diagnostic)
             raise ProviderImageError(
                 "PROVIDER_NETWORK_ERROR", "Provider 网络请求失败", True
             ) from exc
         except (ValueError, TypeError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            diagnostic["outcome"] = "failed"
+            if diagnostic["failure_stage"] == "none":
+                diagnostic["failure_stage"] = "event_decode"
+            self._store_protocol_diagnostic(request.diagnostic_id, diagnostic)
             raise ProviderImageError(
                 "PROVIDER_INVALID_RESPONSE", "Provider 响应无效", True
             ) from exc
-        if completed_count != 1 or completed_image is None:
+        completed_count = diagnostic["completed_event_count"]
+        if completed_count == 0 or completed_image is None:
+            diagnostic["outcome"] = "failed"
+            diagnostic["failure_stage"] = "completed_event_missing"
+            self._store_protocol_diagnostic(request.diagnostic_id, diagnostic)
+            raise ProviderImageError("PROVIDER_INVALID_RESPONSE", "Provider 响应无效", True)
+        if completed_count != 1:
+            diagnostic["outcome"] = "failed"
+            diagnostic["failure_stage"] = "completed_event_duplicate"
+            self._store_protocol_diagnostic(request.diagnostic_id, diagnostic)
             raise ProviderImageError("PROVIDER_INVALID_RESPONSE", "Provider 响应无效", True)
         try:
             content = base64.b64decode(completed_image, validate=True)
         except (ValueError, binascii.Error) as exc:
+            diagnostic["outcome"] = "failed"
+            diagnostic["failure_stage"] = "base64_decode"
+            diagnostic["base64_state"] = "invalid"
+            self._store_protocol_diagnostic(request.diagnostic_id, diagnostic)
             raise ProviderImageError(
                 "PROVIDER_INVALID_RESPONSE", "Provider 响应无效", True
             ) from exc
+        diagnostic["base64_state"] = "valid"
         if len(content) > MAX_IMAGE_BYTES:
+            diagnostic["outcome"] = "failed"
+            diagnostic["failure_stage"] = "image_too_large"
+            self._store_protocol_diagnostic(request.diagnostic_id, diagnostic)
             raise ProviderImageError("GENERATED_IMAGE_TOO_LARGE", "Provider 返回的图片过大", True)
+        diagnostic["outcome"] = "succeeded"
+        diagnostic["failure_stage"] = "none"
+        self._store_protocol_diagnostic(request.diagnostic_id, diagnostic)
         return ProviderImageResult(
             content, request_id, completed_usage, "sha256:" + response_hasher.hexdigest()
         )
-
-
 def _raise_status(status: int) -> None:
     if status in {401, 403}:
         raise ProviderImageError("PROVIDER_AUTH_FAILED", "Provider 凭据无效", True)
@@ -315,6 +587,12 @@ def _parse_sse_frame(frame: bytes) -> dict[str, Any] | None:
         raise ValueError("invalid SSE event")
     return value
 
+
+def _is_done_sse_frame(frame: bytes) -> bool:
+    for raw_line in frame.replace(b"\r\n", b"\n").split(b"\n"):
+        if raw_line.startswith(b"data:") and raw_line[5:].lstrip().strip() == b"[DONE]":
+            return True
+    return False
 
 def _completed_b64_json(event: dict[str, Any]) -> str:
     direct = event.get("b64_json")

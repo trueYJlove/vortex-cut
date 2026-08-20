@@ -177,6 +177,54 @@ class TimelineService:
         )
         return revision
 
+    def build_asset_insert_document(
+        self,
+        db: sqlite3.Connection,
+        *,
+        project_id: str,
+        base_document: dict[str, Any],
+        asset_id: str,
+        proposed_clip_id: str,
+        at_index: int,
+        duration_us: int,
+        layout: str,
+    ) -> tuple[dict[str, Any], dict[str, int]]:
+        """Build one deterministic image insertion without writing to SQLite."""
+        document = copy.deepcopy(base_document)
+        clips = document.get("clips")
+        captions = document.get("captions")
+        if not isinstance(clips, list) or not isinstance(captions, list):
+            raise DomainError("TIMELINE_INVALID", "Timeline Document 不合法")
+        index = _insert_index(at_index, len(clips))
+        old_starts = {clip["clip_id"]: clip["timeline_start_us"] for clip in clips}
+        old_caption_starts = {caption["caption_id"]: caption["start_us"] for caption in captions}
+        clip = self._asset_clip(db, project_id, asset_id, layout, None, None, duration_us)
+        clip["clip_id"] = _identifier(proposed_clip_id, "Clip ID 不合法")
+        clips.insert(index, clip)
+        self._normalize_timing(document, old_starts)
+        self._normalize_and_validate(db, document)
+        shifted_clip_count = sum(
+            1
+            for item in clips
+            if item["clip_id"] in old_starts
+            and item["timeline_start_us"] != old_starts[item["clip_id"]]
+        )
+        shifted_caption_count = sum(
+            1
+            for item in captions
+            if item["caption_id"] in old_caption_starts
+            and item["start_us"] != old_caption_starts[item["caption_id"]]
+        )
+        before = base_document["clips"][-1]["timeline_end_us"] if base_document["clips"] else 0
+        after = document["clips"][-1]["timeline_end_us"] if document["clips"] else 0
+        return document, {
+            "clip_count_before": len(base_document["clips"]),
+            "shifted_clip_count": shifted_clip_count,
+            "shifted_caption_count": shifted_caption_count,
+            "duration_before_us": before,
+            "duration_after_us": after,
+        }
+
     def get_revision(self, revision_id: str) -> dict[str, Any]:
         with self.db.connection() as db:
             return self._revision(db, revision_id)
