@@ -58,7 +58,7 @@ describe("Stage 0 contract", () => {
     expect(isTranscript({ ...transcript, segments: [{ ...transcript.segments[0], end_us: 3_000_000 }] })).toBe(false);
   });
   it("freezes Stage 1C enums, error codes and every patch operation", () => {
-    expect(CONTRACT_VERSION).toBe("stage4e-v1"); expect(isTimelineLayout("crop_fill")).toBe(true); expect(isTimelineLayout("smart_crop")).toBe(false); expect(isCaptionPresetId("high-contrast")).toBe(true); expect(isJobKind("authoritative_preview")).toBe(true); expect(isJobKind("timeline_patch_generation")).toBe(true); expect(ERROR_CODES).toContain("TIMELINE_CONFLICT"); expect(ERROR_CODES).toContain("TIMELINE_PATCH_PROPOSAL_CONFLICT"); expect(ERROR_CODES).toContain("CANDIDATE_PROVIDER_UNTESTED"); expect(ERROR_CODES).toContain("EXPORT_DIRECTORY_GRANT_EXPIRED");
+    expect(CONTRACT_VERSION).toBe("stage5-v1"); expect(isTimelineLayout("crop_fill")).toBe(true); expect(isTimelineLayout("smart_crop")).toBe(false); expect(isCaptionPresetId("high-contrast")).toBe(true); expect(isJobKind("authoritative_preview")).toBe(true); expect(isJobKind("timeline_patch_generation")).toBe(true); expect(ERROR_CODES).toContain("TIMELINE_CONFLICT"); expect(ERROR_CODES).toContain("TIMELINE_PATCH_PROPOSAL_CONFLICT"); expect(ERROR_CODES).toContain("CANDIDATE_PROVIDER_UNTESTED"); expect(ERROR_CODES).toContain("EXPORT_DIRECTORY_GRANT_EXPIRED");
     const operations = [
       { op: "insert_asset_clip", asset_id: "asset_1", at_index: 0, duration_us: 3_000_000 },
       { op: "insert_transcript_segments", transcript_id: "transcript_1", segment_ids: ["segment_1"], at_index: 0, padding_before_us: 0, padding_after_us: 300_000, create_captions: true },
@@ -141,7 +141,7 @@ describe("Stage 3B reframe contracts", () => {
   const adjustment = { clip_id: "clip_1", horizontal_anchor: "left", vertical_anchor: "center" } as const;
 
   it("retains the Stage 3B strict non-center 3x3 guards under stage4d-v1", () => {
-    expect(CONTRACT_VERSION).toBe("stage4e-v1");
+    expect(CONTRACT_VERSION).toBe("stage5-v1");
     expect(ERROR_CODES).toContain("REFRAME_PREVIEW_REQUIRED");
     expect(isRenditionReframePreviewCreateInput({ base_rendition_snapshot_id: "rendition_snapshot_1", adjustments: [adjustment] })).toBe(true);
     expect(isRenditionReframePreviewCreateInput({ base_rendition_snapshot_id: "rendition_snapshot_1", adjustments: [{ ...adjustment, horizontal_anchor: "center", vertical_anchor: "center" }] })).toBe(false);
@@ -198,7 +198,7 @@ describe("Stage 4A media generation contract", () => {
   };
 
   it("保持版本不变并扩展独立 JobKind 与错误码", () => {
-    expect(CONTRACT_VERSION).toBe("stage4e-v1");
+    expect(CONTRACT_VERSION).toBe("stage5-v1");
     expect(isJobKind("media_generation")).toBe(true);
     expect(ERROR_CODES).toEqual(expect.arrayContaining([
       "GENERATION_REQUEST_INVALID", "GENERATION_KIND_UNSUPPORTED", "GENERATION_INPUT_CHANGED",
@@ -243,7 +243,7 @@ describe("Stage 4C shot requirement contract", () => {
   ] };
 
   it("升级为 stage4d-v1 并接受 1–24 条严格组合", () => {
-    expect(CONTRACT_VERSION).toBe("stage4e-v1");
+    expect(CONTRACT_VERSION).toBe("stage5-v1");
     expect(isShotListRevisionCreateInput(input)).toBe(true);
     expect(isShotListRevisionCreateInput({ ...input, requirements: Array.from({ length: 24 }, (_, index) => ({ ...imageRequirement, title: `镜头${index + 1}` })) })).toBe(true);
     expect(isShotListRevisionCreateInput({ ...input, requirements: [] })).toBe(false);

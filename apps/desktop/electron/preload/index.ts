@@ -60,6 +60,10 @@ import type {
   , ShotRequirementImageFulfillmentCreateResponse, ShotRequirementImageFulfillmentState
   , ShotRequirementImageGenerationLinkPage, ShotRequirementImageAdoptionPage
   , ShotRequirementImageAdoptInput, ShotRequirementImageAdoptResponse
+  , ShotRequirementTimelineAssemblyPrepareInput, ShotRequirementTimelineAssemblyApplyInput
+  , ShotRequirementTimelineAssemblyPreview, ShotRequirementTimelineAssembly
+  , ShotRequirementTimelineAssemblyApplyResponse, ShotRequirementTimelineAssemblyPage
+  , ShotRequirementTimelineAssemblyPreviewId, ShotRequirementTimelineAssemblyId
 } from "@aivideo/contracts";
 
 export interface MediaSelection { grant: FileGrant; media: MediaInfo }
@@ -179,6 +183,11 @@ export interface DesktopApi {
   prepareShotRequirementImageFulfillment: (input: { project_id: ProjectId; requirement_id: ShotRequirementId; request: ShotRequirementImageFulfillmentPrepareInput }) => Promise<ShotRequirementImageFulfillmentPreparedPreview>;
   createShotRequirementImageFulfillment: (input: { project_id: ProjectId; requirement_id: ShotRequirementId; request: ShotRequirementImageFulfillmentCreateInput }) => Promise<ShotRequirementImageFulfillmentCreateResponse>;
   adoptShotRequirementImageFulfillment: (input: { project_id: ProjectId; requirement_id: ShotRequirementId; request: ShotRequirementImageAdoptInput }) => Promise<ShotRequirementImageAdoptResponse>;
+  prepareShotRequirementTimelineAssembly: (input: { project_id: ProjectId; requirement_id: ShotRequirementId; request: ShotRequirementTimelineAssemblyPrepareInput }) => Promise<ShotRequirementTimelineAssemblyPreview>;
+  applyShotRequirementTimelineAssembly: (input: { project_id: ProjectId; requirement_id: ShotRequirementId; request: ShotRequirementTimelineAssemblyApplyInput }) => Promise<ShotRequirementTimelineAssemblyApplyResponse>;
+  getShotRequirementTimelineAssemblyPreview: (input: { preview_id: ShotRequirementTimelineAssemblyPreviewId }) => Promise<ShotRequirementTimelineAssemblyPreview>;
+  getShotRequirementTimelineAssembly: (input: { assembly_id: ShotRequirementTimelineAssemblyId }) => Promise<ShotRequirementTimelineAssembly>;
+  listShotRequirementTimelineAssemblies: (input: { project_id: ProjectId; requirement_id: ShotRequirementId; limit?: number; cursor?: string }) => Promise<ShotRequirementTimelineAssemblyPage>;
   getRenderArtifact: (artifactId: RenderArtifactId) => Promise<RenderArtifactPresentation>;
   openArtifact: (artifactId: string) => Promise<void>;
   openArtifactFolder: (artifactId: string) => Promise<void>;
@@ -295,6 +304,11 @@ const api: DesktopApi = {
   prepareShotRequirementImageFulfillment: input => ipcRenderer.invoke("shot-requirement-image-fulfillment:prepare", input),
   createShotRequirementImageFulfillment: input => ipcRenderer.invoke("shot-requirement-image-fulfillment:create", input),
   adoptShotRequirementImageFulfillment: input => ipcRenderer.invoke("shot-requirement-image-fulfillment:adopt", input),
+  prepareShotRequirementTimelineAssembly: input => ipcRenderer.invoke("stage5:assembly-prepare", input),
+  applyShotRequirementTimelineAssembly: input => ipcRenderer.invoke("stage5:assembly-apply", input),
+  getShotRequirementTimelineAssemblyPreview: input => ipcRenderer.invoke("stage5:assembly-preview-get", input),
+  getShotRequirementTimelineAssembly: input => ipcRenderer.invoke("stage5:assembly-get", input),
+  listShotRequirementTimelineAssemblies: input => ipcRenderer.invoke("stage5:assembly-list", input),
   getRenderArtifact: artifactId => ipcRenderer.invoke("render-artifact:get", artifactId),
   openArtifact: artifactId => ipcRenderer.invoke("artifact:open", artifactId),
   openArtifactFolder: artifactId => ipcRenderer.invoke("artifact:folder", artifactId),

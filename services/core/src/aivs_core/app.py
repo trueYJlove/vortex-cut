@@ -48,6 +48,7 @@ from .renditions.reframe import RenditionReframeSnapshotService
 from .renditions.reframe_batch import ReframeExportBatchService
 from .renditions.snapshot import RenditionSnapshotService
 from .shot_requirement_image_fulfillment import ShotRequirementImageFulfillmentService
+from .shot_requirement_timeline_assembly import ShotRequirementTimelineAssemblyService
 from .shot_requirements import ShotRequirementService
 from .timeline import TimelineService
 from .timeline_planning import TimelinePatchPlanningService
@@ -441,6 +442,22 @@ class ShotRequirementImageFulfillmentCreateRequest(BaseModel):
     confirmed: bool
 
 
+class ShotRequirementTimelineAssemblyPrepareRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    expected_adoption_id: str
+    base_timeline_revision_id: str
+    at_index: int
+    duration_us: int | None
+    layout: str
+
+
+class ShotRequirementTimelineAssemblyApplyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    assembly_preview_id: str
+    proposed_document_sha256: str
+    confirmed: bool
+
+
 class ShotRequirementImageAdoptRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     generation_link_id: str
@@ -511,6 +528,9 @@ class CoreState:
         )
         self.shot_requirement_image_fulfillment = ShotRequirementImageFulfillmentService(
             self.db, self.provider_image_generation
+        )
+        self.shot_requirement_timeline_assembly = ShotRequirementTimelineAssemblyService(
+            self.db, self.timelines
         )
         self.render_compiler = RenderPlanCompiler(self.db)
         self.render_coordinator = RenderCoordinator(
@@ -673,9 +693,26 @@ def _domain(exc: DomainError) -> HTTPException:
             "SHOT_LIST_CONFLICT",
             "SHOT_LIST_CONFIRMATION_CONFLICT",
             "SHOT_REQUIREMENT_ASSET_PROJECT_MISMATCH",
+            "STAGE5_REQUIREMENT_NOT_ELIGIBLE",
+            "STAGE5_ADOPTION_CONFLICT",
+            "STAGE5_ASSET_UNAVAILABLE",
+            "STAGE5_TIMELINE_REQUIRED",
+            "STAGE5_TIMELINE_CONFLICT",
+            "STAGE5_TIMELINE_DRAFT_EXISTS",
+            "STAGE5_DURATION_CONFIRMATION_REQUIRED",
+            "STAGE5_LOCKED_SHIFT",
+            "STAGE5_PREVIEW_EXPIRED",
+            "STAGE5_PREVIEW_MISMATCH",
+            "STAGE5_ALREADY_ASSEMBLED",
         }
         else 400
     )
+    if exc.code in {
+        "STAGE5_POSITION_INVALID",
+        "STAGE5_DURATION_INVALID",
+        "STAGE5_CONFIRMATION_REQUIRED",
+    }:
+        status = 422
     if exc.code in {
         "PROJECT_NOT_FOUND",
         "ASSET_NOT_FOUND",
@@ -697,6 +734,7 @@ def _domain(exc: DomainError) -> HTTPException:
         "SHOT_LIST_NOT_FOUND",
         "SHOT_LIST_REVISION_NOT_FOUND",
         "SHOT_REQUIREMENT_ASSET_NOT_FOUND",
+        "STAGE5_ASSEMBLY_NOT_FOUND",
     }:
         status = 404
     return _error(exc.code, exc.message, status)
@@ -2134,6 +2172,72 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return state.shot_requirement_image_fulfillment.adopt(
                 project_id, requirement_id, request.model_dump()
             )
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post(
+        "/api/v1/projects/{project_id}/shot-requirements/{requirement_id}/timeline-assemblies/prepare"
+    )
+    async def prepare_shot_requirement_timeline_assembly(
+        project_id: str,
+        requirement_id: str,
+        request: ShotRequirementTimelineAssemblyPrepareRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return state.shot_requirement_timeline_assembly.prepare(
+                project_id, requirement_id, request.model_dump()
+            )
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post(
+        "/api/v1/projects/{project_id}/shot-requirements/{requirement_id}/timeline-assemblies"
+    )
+    async def apply_shot_requirement_timeline_assembly(
+        project_id: str,
+        requirement_id: str,
+        request: ShotRequirementTimelineAssemblyApplyRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return state.shot_requirement_timeline_assembly.apply(
+                project_id, requirement_id, request.model_dump()
+            )
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/shot-requirement-timeline-assembly-previews/{preview_id}")
+    async def get_shot_requirement_timeline_assembly_preview(
+        preview_id: str, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        try:
+            return state.shot_requirement_timeline_assembly.get_preview(preview_id)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/shot-requirement-timeline-assemblies/{assembly_id}")
+    async def get_shot_requirement_timeline_assembly(
+        assembly_id: str, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        try:
+            return state.shot_requirement_timeline_assembly.get_assembly(assembly_id)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/projects/{project_id}/shot-requirements/{requirement_id}/timeline-assemblies")
+    async def list_shot_requirement_timeline_assemblies(
+        project_id: str,
+        requirement_id: str,
+        limit: int = 20,
+        cursor: str | None = None,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            items, next_cursor = state.shot_requirement_timeline_assembly.list(
+                project_id, requirement_id, limit, cursor
+            )
+            return {"items": items, "next_cursor": next_cursor}
         except DomainError as exc:
             raise _domain(exc) from exc
 

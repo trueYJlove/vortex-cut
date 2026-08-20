@@ -1,6 +1,6 @@
 export const PROTOCOL_VERSION = 1 as const;
 export const API_PREFIX = "/api/v1" as const;
-export const CONTRACT_VERSION = "stage4e-v1" as const;
+export const CONTRACT_VERSION = "stage5-v1" as const;
 
 export type GrantId = string & { readonly __brand: "grant_id" };
 export type ProjectId = string & { readonly __brand: "project_id" };
@@ -1812,3 +1812,4 @@ export function parseProviderImageGenerationTaskPage(value: unknown): ProviderIm
 export function parseProviderImageGenerationRetryPrepareInput(value: unknown): ProviderImageGenerationRetryPrepareInput { if (!isProviderImageGenerationRetryPrepareInput(value)) throw new ContractValidationError("ProviderImageGenerationRetryPrepareInput"); return value; }
 
 export * from "./stage4e.js";
+export * from "./stage5.js";

@@ -121,6 +121,12 @@ import {
   , type ShotRequirementImageAdoptionPage
   , type ShotRequirementImageAdoptInput
   , type ShotRequirementImageAdoptResponse
+  , parseShotRequirementTimelineAssemblyPrepareInput, parseShotRequirementTimelineAssemblyApplyInput
+  , parseShotRequirementTimelineAssemblyPreview, parseShotRequirementTimelineAssembly
+  , parseShotRequirementTimelineAssemblyApplyResponse, parseShotRequirementTimelineAssemblyPage
+  , type ShotRequirementTimelineAssemblyPrepareInput, type ShotRequirementTimelineAssemblyApplyInput
+  , type ShotRequirementTimelineAssemblyPreview, type ShotRequirementTimelineAssembly
+  , type ShotRequirementTimelineAssemblyApplyResponse, type ShotRequirementTimelineAssemblyPage
 } from "@aivideo/contracts";
 
 export class CoreApiError extends Error {
@@ -157,6 +163,20 @@ function removeSensitiveFields(value: unknown): unknown {
   return result;
 }
 
+const STAGE5_EXTRA_SENSITIVE_KEYS = new Set([
+  "document", "requirement", "visual_direction", "narration_text",
+]);
+function removeStage5SensitiveFields(value: unknown): unknown {
+  const cleaned = removeSensitiveFields(value);
+  if (Array.isArray(cleaned)) return cleaned.map(removeStage5SensitiveFields);
+  if (!cleaned || typeof cleaned !== "object") return cleaned;
+  const result: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(cleaned)) {
+    if (STAGE5_EXTRA_SENSITIVE_KEYS.has(key.toLowerCase())) continue;
+    result[key] = removeStage5SensitiveFields(item);
+  }
+  return result;
+}
 function normalizeProject(value: unknown): Project {
   return parseProject(value);
 }
@@ -607,6 +627,28 @@ export class CoreClient {
       .then(value => parseShotRequirementImageAdoptResponse(removeSensitiveFields(value)));
   }
 
+  prepareShotRequirementTimelineAssembly(projectId: ProjectId, requirementId: ShotRequirementId, input: ShotRequirementTimelineAssemblyPrepareInput): Promise<ShotRequirementTimelineAssemblyPreview> {
+    const request = parseShotRequirementTimelineAssemblyPrepareInput(input);
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/shot-requirements/${encodeURIComponent(requirementId)}/timeline-assemblies/prepare`, { method: "POST", body: JSON.stringify(request) })
+      .then(value => parseShotRequirementTimelineAssemblyPreview(removeStage5SensitiveFields(value)));
+  }
+  applyShotRequirementTimelineAssembly(projectId: ProjectId, requirementId: ShotRequirementId, input: ShotRequirementTimelineAssemblyApplyInput): Promise<ShotRequirementTimelineAssemblyApplyResponse> {
+    const request = parseShotRequirementTimelineAssemblyApplyInput(input);
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/shot-requirements/${encodeURIComponent(requirementId)}/timeline-assemblies`, { method: "POST", body: JSON.stringify(request) })
+      .then(value => parseShotRequirementTimelineAssemblyApplyResponse(removeStage5SensitiveFields(value)));
+  }
+  getShotRequirementTimelineAssemblyPreview(previewId: string): Promise<ShotRequirementTimelineAssemblyPreview> {
+    return this.request<unknown>(`${API_PREFIX}/shot-requirement-timeline-assembly-previews/${encodeURIComponent(previewId)}`)
+      .then(value => parseShotRequirementTimelineAssemblyPreview(removeStage5SensitiveFields(value)));
+  }
+  getShotRequirementTimelineAssembly(assemblyId: string): Promise<ShotRequirementTimelineAssembly> {
+    return this.request<unknown>(`${API_PREFIX}/shot-requirement-timeline-assemblies/${encodeURIComponent(assemblyId)}`)
+      .then(value => parseShotRequirementTimelineAssembly(removeStage5SensitiveFields(value)));
+  }
+  listShotRequirementTimelineAssemblies(projectId: ProjectId, requirementId: ShotRequirementId, params: ListParams = {}): Promise<ShotRequirementTimelineAssemblyPage> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/shot-requirements/${encodeURIComponent(requirementId)}/timeline-assemblies${query(params)}`)
+      .then(value => parseShotRequirementTimelineAssemblyPage(removeStage5SensitiveFields(value)));
+  }
   subscribe(jobId: JobId, listener: JobListener): () => void {
     let set = this.listeners.get(jobId);
     if (!set) { set = new Set(); this.listeners.set(jobId, set); }

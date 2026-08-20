@@ -13,6 +13,7 @@ import { registerStage4Ipc } from "./stage4-ipc.js";
 import { registerStage4cIpc } from "./stage4c-ipc.js";
 import { registerStage4dIpc } from "./stage4d-ipc.js";
 import { registerStage4eIpc } from "./stage4e-ipc.js";
+import { registerStage5Ipc } from "./stage5-ipc.js";
 import { registerFileGrant } from "./file-grants.js";
 import { exportFileName, normalizeExportPath } from "./export-destination.js";
 import { defaultLogPath, appendLog, redact } from "./logging.js";
@@ -436,6 +437,7 @@ function registerIpc(): void {
   imageProviderSecrets ??= new ImageProviderSecretStore(app.getPath("userData"));
   registerStage4dIpc({ ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) }, fetchWithUi, getAdmin: requireCore, secrets: imageProviderSecrets });
   registerStage4eIpc({ ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) }, fetchWithUi });
+  registerStage5Ipc({ ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) }, fetchWithUi });
   ipcMain.handle("preview:create", async (_event, input: { project_id: ProjectId; preview: PreviewCreateInput }) => {
     const projectId = asId(input.project_id, "project_id");
     const request = parsePreviewCreateInput(input.preview);

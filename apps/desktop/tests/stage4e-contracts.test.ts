@@ -44,7 +44,7 @@ const task = {
 
 describe("Stage 4E 契约", () => {
   it("冻结 stage4e-v1，并仅允许 Prepare 输入瞬时携带 Prompt", () => {
-    expect(CONTRACT_VERSION).toBe("stage4e-v1");
+    expect(CONTRACT_VERSION).toBe("stage5-v1");
     expect(isShotRequirementImageFulfillmentPrepareInput({
       expected_confirmed_revision_id: "revision_1", provider_config_id: "config_1",
       prompt: "private prompt",

@@ -19,7 +19,7 @@ def _seed_v12(path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str, str]:
         {
             key: value
             for key, value in original.items()
-            if key not in {"v13", "v14", "v15"}
+            if key not in {"v13", "v14", "v15", "v16"}
         },
     )
     Database(path).initialize()
@@ -68,7 +68,7 @@ def test_v13_rebuild_preserves_history_checksums_and_constraints(
         history = dict(
             sql.execute(
                 "SELECT version,checksum FROM schema_migrations "
-                "WHERE version NOT IN ('v13','v14','v15')"
+                "WHERE version NOT IN ('v13','v14','v15','v16')"
             )
         )
         assert history == old_checksums

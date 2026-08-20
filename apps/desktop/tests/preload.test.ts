@@ -51,6 +51,7 @@ describe("Desktop preload 白名单", () => {
       ["prepareMediaGeneration", [{}]], ["createMediaGeneration", [{}]], ["listMediaGenerationRequests", [{}]], ["getMediaGenerationRequest", ["generation_request_1"]], ["listMediaGenerationTasks", [{}]], ["retryMediaGenerationTask", ["generation_task_1"]], ["cancelMediaGenerationTask", ["generation_task_1"]],
       ["getShotList", ["project_1"]], ["listShotListRevisions", [{}]], ["getShotListRevision", ["revision_1"]], ["createShotListRevision", [{}]], ["confirmShotListRevision", [{}]],
       ["getShotRequirementImageFulfillment", [{}]], ["listShotRequirementImageFulfillmentLinks", [{}]], ["listShotRequirementImageFulfillmentAdoptions", [{}]], ["prepareShotRequirementImageFulfillment", [{}]], ["createShotRequirementImageFulfillment", [{}]], ["adoptShotRequirementImageFulfillment", [{}]],
+      ["prepareShotRequirementTimelineAssembly", [{}]], ["applyShotRequirementTimelineAssembly", [{}]], ["getShotRequirementTimelineAssemblyPreview", [{}]], ["getShotRequirementTimelineAssembly", [{}]], ["listShotRequirementTimelineAssemblies", [{}]],
       ["getRenderArtifact", ["artifact_1"]], ["openArtifact", ["artifact_1"]], ["openArtifactFolder", ["artifact_1"]], ["diagnostics", []]
     ];
     for (const [name, args] of calls) await api[name](...args);

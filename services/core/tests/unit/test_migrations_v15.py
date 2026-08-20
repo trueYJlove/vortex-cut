@@ -269,12 +269,12 @@ def _insert_link(
     )
 
 
-def test_v15_fresh_database_has_all_versions_schema_and_integrity(tmp_path: Path) -> None:
+def test_fresh_database_has_all_versions_schema_and_integrity(tmp_path: Path) -> None:
     database = Database(tmp_path / "app.db")
     database.initialize()
     with database.connection() as sql:
         assert {row[0] for row in sql.execute("SELECT version FROM schema_migrations")} == {
-            f"v{i}" for i in range(1, 16)
+            f"v{i}" for i in range(1, 17)
         }
         objects = {row[0] for row in sql.execute("SELECT name FROM sqlite_master")}
         assert {
@@ -298,7 +298,7 @@ def test_v15_fresh_database_has_all_versions_schema_and_integrity(tmp_path: Path
         )
         assert sql.execute("PRAGMA foreign_key_check").fetchall() == []
         assert sql.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-    assert set(MIGRATIONS) == {f"v{i}" for i in range(1, 16)}
+    assert set(MIGRATIONS) == {f"v{i}" for i in range(1, 17)}
 
 
 def test_v14_to_v15_is_append_only_and_preserves_checksums(
@@ -403,9 +403,7 @@ def test_v15_adoption_rejects_historical_revision(tmp_path: Path) -> None:
     with database.connection() as sql:
         domain = _domain(sql)
         _insert_link(sql, "link", "p", domain["revision"], "req", "request")
-        task_id, asset_id = _insert_succeeded_output(
-            sql, "p", "request", "config", "historical"
-        )
+        task_id, asset_id = _insert_succeeded_output(sql, "p", "request", "config", "historical")
         sql.execute(
             "UPDATE shot_lists SET confirmed_revision_id=? WHERE id='sl-current'",
             (domain["historical_revision"],),
@@ -416,7 +414,10 @@ def test_v15_adoption_rejects_historical_revision(tmp_path: Path) -> None:
                 "('bad-history','p',?,'req','link',?,?,1,NULL,'now')",
                 (domain["revision"], task_id, asset_id),
             )
-        assert sql.execute("SELECT COUNT(*) FROM shot_requirement_image_adoptions").fetchone()[0] == 0
+        assert (
+            sql.execute("SELECT COUNT(*) FROM shot_requirement_image_adoptions").fetchone()[0] == 0
+        )
+
 
 def test_v15_adoption_rejects_unavailable_or_cross_request_output(tmp_path: Path) -> None:
     database = Database(tmp_path / "app.db")

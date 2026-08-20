@@ -50,6 +50,9 @@ function panelApi(overrides: Partial<DesktopApi> = {}): DesktopApi {
     createShotRequirementImageFulfillment: vi.fn().mockResolvedValue({ link, request, task: task(), generation_reused: true, link_reused: false }),
     prepareProviderImageGenerationRetry: vi.fn(), retryProviderImageGenerationTask: vi.fn(), cancelProviderImageGenerationTask: vi.fn(),
     adoptShotRequirementImageFulfillment: vi.fn().mockResolvedValue({ adoption, reused: false }),
+    getTimeline: vi.fn().mockRejectedValue(new Error("TIMELINE_NOT_FOUND")),
+    listShotRequirementTimelineAssemblies: vi.fn().mockResolvedValue({ items: [], next_cursor: null }),
+    prepareShotRequirementTimelineAssembly: vi.fn(), applyShotRequirementTimelineAssembly: vi.fn(),
     ...overrides,
   } as unknown as DesktopApi;
 }
