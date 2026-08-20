@@ -227,10 +227,7 @@ def test_native_provider_dimensions_are_preserved_without_normalization(tmp_path
     assert '"width":1024' in asset["media_info_json"]
     assert '"height":1536' in asset["media_info_json"]
     managed_file = (
-        _project_root(database)
-        / "generated"
-        / "image"
-        / f"{completed['output_asset_id']}.png"
+        _project_root(database) / "generated" / "image" / f"{completed['output_asset_id']}.png"
     )
     assert managed_file.read_bytes() == native_png
 
@@ -254,6 +251,7 @@ def test_requested_size_remains_a_fixed_profile_not_an_output_equality_check() -
     with pytest.raises(ProviderImageError) as caught:
         validate_generated_image(native_png, "2048x2048")
     assert caught.value.code == "IMAGE_PROVIDER_UNSUPPORTED"
+
 
 def test_local_fake_success_registers_managed_asset_and_provenance(tmp_path: Path) -> None:
     fake = LocalFakeImageProvider(_png())
@@ -640,3 +638,76 @@ async def test_job_service_projects_provider_success_once_to_all_aggregates(
     assert tuple(invocation[:3]) == ("succeeded", 1, 1)
     assert invocation["output_sha256"] == completed["output_sha256"]
     assert provenance["asset_id"] == completed["output_asset_id"]
+
+
+def test_transaction_hook_runs_before_commit_for_fresh_and_reused(tmp_path: Path) -> None:
+    database, _, service, config_id = _service(tmp_path)
+    prepared = service.prepare("project_1", config_id, PROMPT_SENTINEL, "1024x1024")
+    calls: list[tuple[str, str, bool]] = []
+
+    def hook(sql: Any, request_id: str, task_id: str, reused: bool) -> None:
+        assert sql.in_transaction
+        assert sql.execute(
+            "SELECT 1 FROM media_generation_requests WHERE id=?", (request_id,)
+        ).fetchone()
+        assert sql.execute("SELECT 1 FROM media_generation_tasks WHERE id=?", (task_id,)).fetchone()
+        calls.append((request_id, task_id, reused))
+
+    fresh = service.create_from_reserved_preview(
+        "project_1", prepared["preview_id"], prepared["payload_sha256"], True, hook
+    )
+    prepared_again = service.prepare("project_1", config_id, PROMPT_SENTINEL, "1024x1024")
+    reused = service.create_from_reserved_preview(
+        "project_1",
+        prepared_again["preview_id"],
+        prepared_again["payload_sha256"],
+        True,
+        hook,
+    )
+    assert fresh["reused"] is False and reused["reused"] is True
+    assert calls == [
+        (fresh["request"]["request_id"], fresh["task"]["task_id"], False),
+        (fresh["request"]["request_id"], fresh["task"]["task_id"], True),
+    ]
+
+
+def test_transaction_hook_failure_rolls_back_fresh_and_restores_preview(tmp_path: Path) -> None:
+    database, _, service, config_id = _service(tmp_path)
+    prepared = service.prepare("project_1", config_id, PROMPT_SENTINEL, "1024x1024")
+
+    def fail(*_: Any) -> None:
+        raise RuntimeError("hook failed")
+
+    with pytest.raises(RuntimeError, match="hook failed"):
+        service.create_from_reserved_preview(
+            "project_1", prepared["preview_id"], prepared["payload_sha256"], True, fail
+        )
+    with database.connection() as sql:
+        assert sql.execute("SELECT COUNT(*) FROM media_generation_requests").fetchone()[0] == 0
+        assert sql.execute("SELECT COUNT(*) FROM media_generation_tasks").fetchone()[0] == 0
+        assert sql.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 0
+    recovered = service.create(
+        "project_1", prepared["preview_id"], prepared["payload_sha256"], True
+    )
+    assert recovered["reused"] is False
+
+
+def test_transaction_hook_failure_does_not_mutate_reused_generation(tmp_path: Path) -> None:
+    database, _, service, config_id = _service(tmp_path)
+    created = _create(service, config_id)
+    prepared = service.prepare("project_1", config_id, PROMPT_SENTINEL, "1024x1024")
+
+    def fail(*_: Any) -> None:
+        raise RuntimeError("hook failed")
+
+    with pytest.raises(RuntimeError, match="hook failed"):
+        service.create_from_reserved_preview(
+            "project_1", prepared["preview_id"], prepared["payload_sha256"], True, fail
+        )
+    with database.connection() as sql:
+        assert sql.execute("SELECT COUNT(*) FROM media_generation_requests").fetchone()[0] == 1
+        assert sql.execute("SELECT COUNT(*) FROM media_generation_tasks").fetchone()[0] == 1
+        assert sql.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 1
+    reused = service.create("project_1", prepared["preview_id"], prepared["payload_sha256"], True)
+    assert reused["reused"] is True
+    assert reused["task"]["task_id"] == created["task"]["task_id"]

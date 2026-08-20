@@ -7,6 +7,7 @@ import json
 import os
 import sqlite3
 import stat
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -34,6 +35,7 @@ CAPABILITY = "image_text_to_image"
 ENDPOINT_IDENTITY = "apikey_fun_images_generations"
 OUTPUT_FORMAT = "png"
 _ID_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
+ImageGenerationTransactionHook = Callable[[sqlite3.Connection, str, str, bool], None]
 
 
 def _canonical_json(value: Any) -> str:
@@ -89,7 +91,6 @@ class ImageProviderConfigService:
         if not isinstance(name, str) or not 1 <= len(name.strip()) <= 120:
             raise DomainError("IMAGE_PROVIDER_CONFIG_INVALID", "显示名称无效")
         if not isinstance(enabled, bool):
-
             raise DomainError("IMAGE_PROVIDER_CONFIG_INVALID", "图片 Provider 配置无效")
         config_id, now = new_id(), utc_now()
         with self.db.connection() as sql:
@@ -141,7 +142,7 @@ class ImageProviderConfigService:
         with self.db.connection() as sql:
             row = sql.execute(
                 "SELECT * FROM image_provider_configs WHERE id=? AND provider_kind=?",
-                (config, IMAGE_PROVIDER_KIND)
+                (config, IMAGE_PROVIDER_KIND),
             ).fetchone()
         if not row:
             raise DomainError("IMAGE_PROVIDER_CONFIG_INVALID", "图片 Provider 配置不存在")
@@ -260,6 +261,17 @@ class ProviderImageGenerationService:
     def create(
         self, project_id: Any, preview_id: Any, payload_sha256: Any, confirmed: Any
     ) -> dict[str, Any]:
+        return self.create_from_reserved_preview(project_id, preview_id, payload_sha256, confirmed)
+
+    def create_from_reserved_preview(
+        self,
+        project_id: Any,
+        preview_id: Any,
+        payload_sha256: Any,
+        confirmed: Any,
+        transaction_hook: ImageGenerationTransactionHook | None = None,
+    ) -> dict[str, Any]:
+        """Create/reuse Stage 4D facts and run a local-only hook before commit."""
         project, preview = _id(project_id, "project_id"), _id(preview_id, "preview_id")
         if confirmed is not True or not isinstance(payload_sha256, str):
             raise DomainError("IMAGE_GENERATION_CONFIRMATION_INVALID", "生成确认无效")
@@ -273,16 +285,23 @@ class ProviderImageGenerationService:
         task_id = new_id()
         self.vault.transfer(preview, task_id)
         try:
-            response = self._create_from_facts(facts, task_id)
+            response = self._create_from_facts(facts, task_id, transaction_hook)
         except Exception:
+            self.vault.reserve(task_id)
             self.vault.transfer(task_id, preview)
             raise
         if response["reused"]:
             self.vault.discard(task_id)
         return response
 
-    def _create_from_facts(self, facts: dict[str, Any], task_id: str) -> dict[str, Any]:
+    def _create_from_facts(
+        self,
+        facts: dict[str, Any],
+        task_id: str,
+        transaction_hook: ImageGenerationTransactionHook | None = None,
+    ) -> dict[str, Any]:
         request_id, job_id, invocation_id, now = new_id(), new_id(), new_id(), utc_now()
+        reused = False
         with self.db.connection() as sql:
             sql.execute("BEGIN IMMEDIATE")
             try:
@@ -297,13 +316,7 @@ class ProviderImageGenerationService:
                         "SELECT * FROM media_generation_tasks WHERE request_id=? AND attempt=1",
                         (request_id,),
                     ).fetchone()
-                    if task:
-                        sql.execute("COMMIT")
-                        return {
-                            "request": self.get(request_id),
-                            "task": self._task(task),
-                            "reused": True,
-                        }
+                    reused = task is not None
                 else:
                     sql.execute(
                         "INSERT INTO media_generation_requests(id,project_id,generation_kind,"
@@ -343,22 +356,26 @@ class ProviderImageGenerationService:
                             now,
                         ),
                     )
-                self._insert_task(sql, request_id, task_id, job_id, now)
-                sql.execute(
-                    "INSERT INTO provider_image_invocations(id,task_id,provider_config_id,status,"
-                    "provider_call_count,provider_may_have_processed,estimated_cost,"
-                    "estimated_cost_currency,price_tier,created_at,updated_at) "
-                    "VALUES (?,?,?,'prepared',0,0,0.10,'CNY','1K',?,?)",
-                    (invocation_id, task_id, facts["provider_config_id"], now, now),
-                )
-                task = sql.execute(
-                    "SELECT * FROM media_generation_tasks WHERE id=?", (task_id,)
-                ).fetchone()
+                if not reused:
+                    self._insert_task(sql, request_id, task_id, job_id, now)
+                    sql.execute(
+                        "INSERT INTO provider_image_invocations("
+                        "id,task_id,provider_config_id,status,"
+                        "provider_call_count,provider_may_have_processed,estimated_cost,"
+                        "estimated_cost_currency,price_tier,created_at,updated_at) "
+                        "VALUES (?,?,?,'prepared',0,0,0.10,'CNY','1K',?,?)",
+                        (invocation_id, task_id, facts["provider_config_id"], now, now),
+                    )
+                    task = sql.execute(
+                        "SELECT * FROM media_generation_tasks WHERE id=?", (task_id,)
+                    ).fetchone()
+                if transaction_hook is not None:
+                    transaction_hook(sql, request_id, task["id"], reused)
                 sql.execute("COMMIT")
             except Exception:
                 sql.execute("ROLLBACK")
                 raise
-        return {"request": self.get(request_id), "task": self._task(task), "reused": False}
+        return {"request": self.get(request_id), "task": self._task(task), "reused": reused}
 
     @staticmethod
     def _insert_task(
@@ -718,7 +735,9 @@ class ProviderImageGenerationService:
             self._set_task_stage(task_id, "calling_provider")
             stage("calling_provider")
             result = await self.provider.generate(
-                ProviderImageRequest(reservation.prompt, facts["parameters"]["size"], api_key),
+                ProviderImageRequest(
+                    reservation.prompt, facts["parameters"]["size"], api_key, task_id
+                ),
                 cancel_event,
                 lambda: self._mark_dispatched(task_id),
             )

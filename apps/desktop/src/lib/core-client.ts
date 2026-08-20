@@ -102,6 +102,25 @@ import {
   , type ProviderImageGenerationCreateInput, type ProviderImageGenerationCreateResponse
   , type ProviderImageGenerationRequest, type ProviderImageGenerationRequestPage, type ProviderImageGenerationTaskPage, type ProviderImageGenerationTask
   , type ProviderImageGenerationRetryPrepareInput
+  , parseShotRequirementImageFulfillmentPrepareInput
+  , parseShotRequirementImageFulfillmentPreparedPreview
+  , parseShotRequirementImageFulfillmentCreateInput
+  , parseShotRequirementImageFulfillmentCreateResponse
+  , parseShotRequirementImageFulfillmentState
+  , parseShotRequirementImageGenerationLinkPage
+  , parseShotRequirementImageAdoptionPage
+  , parseShotRequirementImageAdoptInput
+  , parseShotRequirementImageAdoptResponse
+  , type ShotRequirementId
+  , type ShotRequirementImageFulfillmentPrepareInput
+  , type ShotRequirementImageFulfillmentPreparedPreview
+  , type ShotRequirementImageFulfillmentCreateInput
+  , type ShotRequirementImageFulfillmentCreateResponse
+  , type ShotRequirementImageFulfillmentState
+  , type ShotRequirementImageGenerationLinkPage
+  , type ShotRequirementImageAdoptionPage
+  , type ShotRequirementImageAdoptInput
+  , type ShotRequirementImageAdoptResponse
 } from "@aivideo/contracts";
 
 export class CoreApiError extends Error {
@@ -132,7 +151,7 @@ function removeSensitiveFields(value: unknown): unknown {
   if (!value || typeof value !== "object") return value;
   const result: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) {
-    if (["path", "uri", "root_dir", "database_path", "admin_token", "ui_token", "token", "installed_path", "install_dir", "source_file", "authorization", "api_key", "secret", "prompt", "raw_response", "instruction", "payload", "http_body", "request_body", "system_message", "absolute_path", "transcript", "caption", "stderr", "command", "traceback"].includes(key.toLowerCase())) continue;
+    if (["path", "uri", "root_dir", "database_path", "admin_token", "ui_token", "token", "installed_path", "install_dir", "source_file", "authorization", "api_key", "secret", "prompt", "raw_exception", "raw_response", "sse", "base64", "instruction", "payload", "http_body", "request_body", "system_message", "absolute_path", "transcript", "caption", "stderr", "command", "traceback"].includes(key.toLowerCase())) continue;
     result[key] = removeSensitiveFields(item);
   }
   return result;
@@ -558,6 +577,34 @@ export class CoreClient {
     const request = parseShotListConfirmInput(input);
     return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/shot-list/confirm`, { method: "POST", body: JSON.stringify(request) })
       .then(value => parseShotListConfirmResponse(removeSensitiveFields(value)));
+  }
+
+  getShotRequirementImageFulfillment(projectId: ProjectId, requirementId: ShotRequirementId): Promise<ShotRequirementImageFulfillmentState> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/shot-requirements/${encodeURIComponent(requirementId)}/image-fulfillment`)
+      .then(value => parseShotRequirementImageFulfillmentState(removeSensitiveFields(value)));
+  }
+  listShotRequirementImageFulfillmentLinks(projectId: ProjectId, requirementId: ShotRequirementId, params: ListParams = {}): Promise<ShotRequirementImageGenerationLinkPage> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/shot-requirements/${encodeURIComponent(requirementId)}/image-fulfillment/links${query(params)}`)
+      .then(value => parseShotRequirementImageGenerationLinkPage(removeSensitiveFields(value)));
+  }
+  listShotRequirementImageFulfillmentAdoptions(projectId: ProjectId, requirementId: ShotRequirementId, params: ListParams = {}): Promise<ShotRequirementImageAdoptionPage> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/shot-requirements/${encodeURIComponent(requirementId)}/image-fulfillment/adoptions${query(params)}`)
+      .then(value => parseShotRequirementImageAdoptionPage(removeSensitiveFields(value)));
+  }
+  prepareShotRequirementImageFulfillment(projectId: ProjectId, requirementId: ShotRequirementId, input: ShotRequirementImageFulfillmentPrepareInput): Promise<ShotRequirementImageFulfillmentPreparedPreview> {
+    const request = parseShotRequirementImageFulfillmentPrepareInput(input);
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/shot-requirements/${encodeURIComponent(requirementId)}/image-fulfillment/prepare`, { method: "POST", body: JSON.stringify(request) })
+      .then(value => parseShotRequirementImageFulfillmentPreparedPreview(removeSensitiveFields(value)));
+  }
+  createShotRequirementImageFulfillment(projectId: ProjectId, requirementId: ShotRequirementId, input: ShotRequirementImageFulfillmentCreateInput): Promise<ShotRequirementImageFulfillmentCreateResponse> {
+    const request = parseShotRequirementImageFulfillmentCreateInput(input);
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/shot-requirements/${encodeURIComponent(requirementId)}/image-fulfillment/create`, { method: "POST", body: JSON.stringify(request) })
+      .then(value => parseShotRequirementImageFulfillmentCreateResponse(removeSensitiveFields(value)));
+  }
+  adoptShotRequirementImageFulfillment(projectId: ProjectId, requirementId: ShotRequirementId, input: ShotRequirementImageAdoptInput): Promise<ShotRequirementImageAdoptResponse> {
+    const request = parseShotRequirementImageAdoptInput(input);
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/shot-requirements/${encodeURIComponent(requirementId)}/image-fulfillment/adopt`, { method: "POST", body: JSON.stringify(request) })
+      .then(value => parseShotRequirementImageAdoptResponse(removeSensitiveFields(value)));
   }
 
   subscribe(jobId: JobId, listener: JobListener): () => void {

@@ -12,6 +12,7 @@ from typing import Any
 
 from .database_v13 import V13_SQL
 from .database_v14 import V14_SQL
+from .database_v15 import V15_SQL
 
 
 def utc_now() -> str:
@@ -36,6 +37,7 @@ V11_VERSION = "v11"
 V12_VERSION = "v12"
 V13_VERSION = "v13"
 V14_VERSION = "v14"
+V15_VERSION = "v15"
 V1_SQL = """
 CREATE TABLE IF NOT EXISTS media_inputs (
   id TEXT PRIMARY KEY, path TEXT NOT NULL, display_name TEXT NOT NULL,
@@ -884,6 +886,7 @@ MIGRATIONS: dict[str, str] = {
     V12_VERSION: V12_SQL,
     V13_VERSION: V13_SQL,
     V14_VERSION: V14_SQL,
+    V15_VERSION: V15_SQL,
 }
 
 

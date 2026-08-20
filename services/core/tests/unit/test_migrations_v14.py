@@ -16,7 +16,7 @@ def _seed_v13(path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
     monkeypatch.setattr(
         database_module,
         "MIGRATIONS",
-        {key: value for key, value in original.items() if key != "v14"},
+        {key: value for key, value in original.items() if key not in {"v14", "v15"}},
     )
     Database(path).initialize()
     with sqlite3.connect(path) as sql:
@@ -61,7 +61,7 @@ def test_v14_fresh_database_has_all_versions_and_integrity(tmp_path: Path) -> No
     database.initialize()
     with database.connection() as sql:
         versions = [row[0] for row in sql.execute("SELECT version FROM schema_migrations")]
-        assert set(versions) == {f"v{i}" for i in range(1, 15)}
+        assert set(versions) == {f"v{i}" for i in range(1, 16)}
         assert sql.execute("PRAGMA foreign_key_check").fetchall() == []
         assert sql.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         config_columns = {
@@ -72,7 +72,7 @@ def test_v14_fresh_database_has_all_versions_and_integrity(tmp_path: Path) -> No
         }
         assert {"price_2k_per_image", "price_currency"} <= config_columns
         assert {"estimated_cost_currency", "price_tier"} <= invocation_columns
-    assert set(MIGRATIONS) == {f"v{i}" for i in range(1, 15)}
+    assert set(MIGRATIONS) == {f"v{i}" for i in range(1, 16)}
 
 
 def test_v13_to_v14_preserves_official_history_checksums_and_adds_strict_third_party(
@@ -86,13 +86,16 @@ def test_v13_to_v14_preserves_official_history_checksums_and_adds_strict_third_p
 
     with upgraded.connection() as sql:
         history = dict(
-            sql.execute("SELECT version,checksum FROM schema_migrations WHERE version<>'v14'")
+            sql.execute(
+                "SELECT version,checksum FROM schema_migrations WHERE version NOT IN ('v14','v15')"
+            )
         )
         assert history == old_checksums
         assert history["v13"] == hashlib.sha256(V13_SQL.encode()).hexdigest()
-        assert sql.execute(
-            "SELECT checksum FROM schema_migrations WHERE version='v14'"
-        ).fetchone()[0] == hashlib.sha256(V14_SQL.encode()).hexdigest()
+        assert (
+            sql.execute("SELECT checksum FROM schema_migrations WHERE version='v14'").fetchone()[0]
+            == hashlib.sha256(V14_SQL.encode()).hexdigest()
+        )
         config = sql.execute("SELECT * FROM image_provider_configs WHERE id='c'").fetchone()
         assert (config["provider_kind"], config["model"], config["price_per_image"]) == (
             "openai_images",
@@ -149,9 +152,7 @@ def test_v14_failure_rolls_back_rebuild(tmp_path: Path, monkeypatch: pytest.Monk
     with pytest.raises(MigrationError):
         Database(path).initialize()
     with sqlite3.connect(path) as sql:
-        assert sql.execute(
-            "SELECT 1 FROM schema_migrations WHERE version='v14'"
-        ).fetchone() is None
+        assert sql.execute("SELECT 1 FROM schema_migrations WHERE version='v14'").fetchone() is None
         assert sql.execute("SELECT provider_kind FROM image_provider_configs").fetchone()[0] == (
             "openai_images"
         )

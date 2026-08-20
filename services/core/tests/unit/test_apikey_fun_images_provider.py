@@ -254,3 +254,249 @@ async def test_envelope_limit_is_streaming_and_fail_closed(
         await _generate()
     assert caught.value.code == "GENERATED_IMAGE_TOO_LARGE"
     assert caught.value.may_have_processed is True
+
+async def _generate_with_diagnostic(
+    monkeypatch: pytest.MonkeyPatch, response: FakeResponse, diagnostic_id: str
+) -> tuple[ApiKeyFunImagesProvider, Any | None, ProviderImageError | None]:
+    provider = ApiKeyFunImagesProvider()
+    _install_client(monkeypatch, response, {})
+    caught: ProviderImageError | None = None
+    result: Any | None = None
+    try:
+        result = await provider.generate(
+            ProviderImageRequest(
+                PROMPT_SENTINEL, "1024x1024", SECRET_SENTINEL, diagnostic_id
+            ),
+            asyncio.Event(),
+            lambda: None,
+        )
+    except ProviderImageError as exc:
+        caught = exc
+    return provider, result, caught
+
+
+@pytest.mark.asyncio
+async def test_protocol_diagnostic_is_content_free_and_one_shot_on_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider, result, error = await _generate_with_diagnostic(
+        monkeypatch, FakeResponse([_completed(nested=True)]), "task-safe"
+    )
+
+    assert error is None
+    assert result is not None
+    diagnostic = provider.take_protocol_diagnostic("task-safe")
+    assert diagnostic == {
+        "schema_version": 2,
+        "outcome": "succeeded",
+        "failure_stage": "none",
+        "http_status_class": "2xx",
+        "content_type_class": "event_stream",
+        "stream_started": True,
+        "stream_ended": True,
+        "chunk_count": 1,
+        "envelope_byte_count": len(_completed(nested=True)),
+        "frame_count": 2,
+        "data_event_count": 1,
+        "completed_event_count": 1,
+        "other_event_count": 0,
+        "partial_image_event_count": 0,
+        "direct_image_shape_count": 0,
+        "nested_data_image_shape_count": 1,
+        "chat_delta_shape_count": 0,
+        "responses_image_shape_count": 0,
+        "url_only_shape_count": 0,
+        "unclassified_shape_count": 0,
+        "candidate_encoding_class": "base64_like",
+        "candidate_size_class": "under_4k",
+        "done_marker_count": 1,
+        "image_field_location": "nested_data",
+        "base64_state": "valid",
+    }
+    serialized = json.dumps(diagnostic)
+    assert PROMPT_SENTINEL not in serialized
+    assert SECRET_SENTINEL not in serialized
+    assert base64.b64encode(IMAGE_BYTES).decode() not in serialized
+    assert provider.take_protocol_diagnostic("task-safe") is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("response", "stage", "content_type", "completed"),
+    [
+        (FakeResponse([_completed()], content_type="application/json"),
+         "unexpected_content_type", "json", 0),
+        (FakeResponse([b"data: {}\n\n"]),
+         "completed_event_missing", "event_stream", 0),
+        (FakeResponse([_completed() + _completed()]),
+         "completed_event_duplicate", "event_stream", 2),
+        (FakeResponse([b"data: {\"type\":\"image_generation.completed\"}\n\n"]),
+         "completed_image_field", "event_stream", 1),
+        (
+            FakeResponse([
+                b"data: {\"type\":\"image_generation.completed\","
+                b"\"b64_json\":\"%%%\"}\n\n"
+            ]),
+            "base64_decode",
+            "event_stream",
+            1,
+        ),
+    ],
+)
+async def test_protocol_diagnostic_classifies_invalid_responses_without_content(
+    monkeypatch: pytest.MonkeyPatch,
+    response: FakeResponse,
+    stage: str,
+    content_type: str,
+    completed: int,
+) -> None:
+    provider, result, error = await _generate_with_diagnostic(
+        monkeypatch, response, "task-failed"
+    )
+
+    assert result is None
+    assert error is not None and error.code == "PROVIDER_INVALID_RESPONSE"
+    diagnostic = provider.take_protocol_diagnostic("task-failed")
+    assert diagnostic is not None
+    assert diagnostic["outcome"] == "failed"
+    assert diagnostic["failure_stage"] == stage
+    assert diagnostic["http_status_class"] == "2xx"
+    assert diagnostic["content_type_class"] == content_type
+    assert diagnostic["completed_event_count"] == completed
+    serialized = json.dumps(diagnostic)
+    assert PROMPT_SENTINEL not in serialized
+    assert SECRET_SENTINEL not in serialized
+    assert "b64_json" not in serialized
+    assert "image_generation.completed" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_protocol_diagnostic_classifies_http_failure_without_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider, result, error = await _generate_with_diagnostic(
+        monkeypatch, FakeResponse([], status=429), "task-rate-limited"
+    )
+
+    assert result is None
+    assert error is not None and error.code == "PROVIDER_RATE_LIMITED"
+    diagnostic = provider.take_protocol_diagnostic("task-rate-limited")
+    assert diagnostic is not None
+    assert diagnostic["failure_stage"] == "http_status"
+    assert diagnostic["http_status_class"] == "4xx"
+    assert diagnostic["content_type_class"] == "not_observed"
+    assert diagnostic["envelope_byte_count"] == 0
+@pytest.mark.asyncio
+async def test_unique_nested_data_candidate_is_accepted_without_known_event_type(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    encoded = base64.b64encode(IMAGE_BYTES).decode()
+    event = {
+        "opaque_status": "not-retained",
+        "data": [{"b64_json": encoded}],
+        "usage": {"images": 1},
+    }
+    envelope = b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"
+    capture: dict[str, Any] = {}
+    _install_client(monkeypatch, FakeResponse([envelope]), capture)
+
+    result, dispatches = await _generate()
+
+    assert result.content == IMAGE_BYTES
+    assert result.usage == {"images": 1}
+    assert dispatches == 1
+
+
+@pytest.mark.asyncio
+async def test_multiple_nested_data_candidates_are_rejected_as_ambiguous(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    encoded = base64.b64encode(IMAGE_BYTES).decode()
+    first = {"data": [{"b64_json": encoded}]}
+    second = {"data": [{"b64_json": encoded}]}
+    envelope = (
+        b"data: " + json.dumps(first).encode() + b"\n\n"
+        b"data: " + json.dumps(second).encode() + b"\n\ndata: [DONE]\n\n"
+    )
+    provider, result, error = await _generate_with_diagnostic(
+        monkeypatch, FakeResponse([envelope]), "task-ambiguous"
+    )
+
+    assert result is None
+    assert error is not None and error.code == "PROVIDER_INVALID_RESPONSE"
+    diagnostic = provider.take_protocol_diagnostic("task-ambiguous")
+    assert diagnostic is not None
+    assert diagnostic["completed_event_count"] == 2
+    assert diagnostic["failure_stage"] == "completed_event_duplicate"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("event", "expected"),
+    [
+        (
+            {"type": "image_generation.partial_image", "b64_json": "QUJDRA=="},
+            {
+                "partial_image_event_count": 1,
+                "direct_image_shape_count": 1,
+                "candidate_encoding_class": "base64_like",
+                "candidate_size_class": "under_4k",
+            },
+        ),
+        (
+            {"choices": [{"delta": {"content": "data:image/png;base64,QUJDRA=="}}]},
+            {
+                "chat_delta_shape_count": 1,
+                "candidate_encoding_class": "data_image_uri",
+                "candidate_size_class": "under_4k",
+            },
+        ),
+        (
+            {"response": {"output": [{"result": "QUJDRA=="}]}},
+            {
+                "responses_image_shape_count": 1,
+                "candidate_encoding_class": "base64_like",
+                "candidate_size_class": "under_4k",
+            },
+        ),
+        (
+            {"data": [{"url": "https://safe.invalid/generated.png"}]},
+            {
+                "url_only_shape_count": 1,
+                "candidate_encoding_class": "not_observed",
+                "candidate_size_class": "not_observed",
+            },
+        ),
+        (
+            {"unknown": {"opaque": "PRIVATE_EVENT_TEXT"}},
+            {
+                "unclassified_shape_count": 1,
+                "candidate_encoding_class": "not_observed",
+                "candidate_size_class": "not_observed",
+            },
+        ),
+    ],
+)
+async def test_protocol_diagnostic_classifies_approved_shapes_without_values(
+    monkeypatch: pytest.MonkeyPatch,
+    event: dict[str, Any],
+    expected: dict[str, Any],
+) -> None:
+    envelope = b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"
+    provider, result, error = await _generate_with_diagnostic(
+        monkeypatch, FakeResponse([envelope]), "task-shape"
+    )
+
+    assert result is None
+    assert error is not None and error.code == "PROVIDER_INVALID_RESPONSE"
+    diagnostic = provider.take_protocol_diagnostic("task-shape")
+    assert diagnostic is not None
+    for key, value in expected.items():
+        assert diagnostic[key] == value
+    serialized = json.dumps(diagnostic)
+    assert PROMPT_SENTINEL not in serialized
+    assert SECRET_SENTINEL not in serialized
+    assert "PRIVATE_EVENT_TEXT" not in serialized
+    assert "safe.invalid" not in serialized
+    assert "data:image" not in serialized
+    assert "QUJDRA==" not in serialized

@@ -8,6 +8,7 @@ import type {
   ShotListState,
   ShotRequirementInput,
 } from "@aivideo/contracts";
+import { ShotRequirementImageFulfillmentPanel } from "./ShotRequirementImageFulfillmentPanel.js";
 
 const ZERO_SIDE_EFFECT_NOTICE = "人工规划素材需求；不会调用 Provider、不会生成媒体、不会写入时间线。";
 const SAFE_ERROR = "操作未完成，请重新载入后重试。";
@@ -61,7 +62,8 @@ export function ShotRequirementWorkbench({ project, assets, onClose }: Props) {
   const [history, setHistory] = useState<ShotListRevisionSummary[]>([]);
   const [selected, setSelected] = useState<ShotListRevisionDetail>();
   const [draft, setDraft] = useState<Draft>(() => emptyDraft());
-  const [tab, setTab] = useState<"edit" | "history">("edit");
+  const [tab, setTab] = useState<"edit" | "history" | "fulfillment">("edit");
+  const [fulfillmentRevision, setFulfillmentRevision] = useState<ShotListRevisionDetail>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -91,10 +93,26 @@ export function ShotRequirementWorkbench({ project, assets, onClose }: Props) {
   useEffect(() => {
     mountedRef.current = true;
     const epoch = ++epochRef.current;
-    setDraft(emptyDraft()); setState(undefined); setHistory([]); setSelected(undefined); setNotice(""); setError(""); setConfirming(false);
+    setDraft(emptyDraft()); setState(undefined); setHistory([]); setSelected(undefined); setFulfillmentRevision(undefined); setNotice(""); setError(""); setConfirming(false);
     void load(epoch);
     return () => { mountedRef.current = false; epochRef.current += 1; };
   }, [load]);
+
+  useEffect(() => {
+    if (tab !== "fulfillment") return;
+    const confirmedId = state?.confirmed_revision?.shot_list_revision_id;
+    if (!confirmedId) { setFulfillmentRevision(undefined); return; }
+    if (state?.current_revision?.shot_list_revision_id === confirmedId) {
+      setFulfillmentRevision(state.current_revision);
+      return;
+    }
+    const epoch = epochRef.current;
+    setBusy(true); setError("");
+    void window.desktop.getShotListRevision(confirmedId)
+      .then(detail => { if (isCurrent(epoch)) setFulfillmentRevision(detail); })
+      .catch(() => { if (isCurrent(epoch)) setError(SAFE_ERROR); })
+      .finally(() => { if (isCurrent(epoch)) setBusy(false); });
+  }, [isCurrent, state, tab]);
 
   const patchShot = (index: number, patch: Partial<DraftShot>) => setDraft(current => ({ ...current, requirements: current.requirements.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item) }));
   const move = (index: number, delta: number) => setDraft(current => {
@@ -145,7 +163,7 @@ export function ShotRequirementWorkbench({ project, assets, onClose }: Props) {
     <section className="modal shot-workbench" role="dialog" aria-modal="true" aria-labelledby="shot-workbench-title">
       <div className="modal-heading"><div><h2 id="shot-workbench-title">镜头与资产需求清单</h2><p>{project.name} · 每次保存形成不可变 Revision</p></div><button aria-label="关闭镜头需求工作台" onClick={onClose}>×</button></div>
       <p className="shot-zero-notice">{ZERO_SIDE_EFFECT_NOTICE}</p>
-      <div className="generation-tabs" role="tablist"><button role="tab" aria-selected={tab === "edit"} onClick={() => setTab("edit")}>编辑当前需求</button><button role="tab" aria-selected={tab === "history"} onClick={() => setTab("history")}>Revision 历史</button></div>
+      <div className="generation-tabs" role="tablist"><button role="tab" aria-selected={tab === "edit"} onClick={() => setTab("edit")}>编辑当前需求</button><button role="tab" aria-selected={tab === "history"} onClick={() => setTab("history")}>Revision 历史</button><button role="tab" aria-selected={tab === "fulfillment"} onClick={() => setTab("fulfillment")}>图片履约</button></div>
       {error && <p className="generation-safe-error" role="alert">{error}</p>}{notice && <p className="generation-success">{notice}</p>}
       {tab === "edit" ? <div className="shot-editor">
         <label className="generation-field">清单标题<input aria-label="清单标题" maxLength={120} value={draft.title} onChange={event => setDraft(current => ({ ...current, title: event.target.value }))} /></label>
@@ -160,9 +178,16 @@ export function ShotRequirementWorkbench({ project, assets, onClose }: Props) {
           <fieldset><legend>旁白需求</legend><label><input type="radio" name={`narration-${item.client_id}`} checked={item.narration === null} onChange={() => patchShot(index, { narration: null })} />无旁白</label><label><input type="radio" name={`narration-${item.client_id}`} checked={item.narration !== null} onChange={() => patchShot(index, { narration: { requirement_kind: "tts", text: "" } })} />TTS 人工正文</label>{item.narration && <textarea aria-label={`镜头 ${index + 1} 旁白正文`} maxLength={2000} value={item.narration.text} onChange={event => patchShot(index, { narration: { requirement_kind: "tts", text: event.target.value } })} />}</fieldset>
         </article>)}</div>
         <div className="modal-actions"><button disabled={busy} onClick={() => void load(epochRef.current)}>重新载入</button><button disabled={busy || !currentId} onClick={() => void confirm()}>{confirming ? "再次点击确认当前 Revision" : "确认当前 Revision"}</button><button disabled={busy || !validInput} onClick={() => void save()}>{busy ? "处理中…" : "保存新 Revision"}</button></div>
-      </div> : <div className="shot-history">
+      </div> : tab === "history" ? <div className="shot-history">
         <div className="shot-history-list">{history.length === 0 ? <p>尚无 Revision。</p> : history.map(item => <button key={item.shot_list_revision_id} onClick={() => void loadDetail(item.shot_list_revision_id)}><strong>{item.title}</strong><small>{item.requirement_count} 个镜头 · {item.created_at}</small>{state?.current_revision?.shot_list_revision_id === item.shot_list_revision_id && <em>当前</em>}{state?.confirmed_revision?.shot_list_revision_id === item.shot_list_revision_id && <em>已确认</em>}</button>)}</div>
-        <div className="shot-history-detail">{selected ? <><h3>{selected.title}</h3><p>{selected.summary || "（无摘要）"}</p><ol>{selected.requirements.map(item => <li key={item.shot_requirement_id}><strong>{item.title}</strong><p>{item.visual_direction}</p><small>{item.visual.requirement_kind === "existing_media" ? "现有素材" : "图片需求"}{item.narration ? " · TTS 旁白" : " · 无旁白"}</small></li>)}</ol><button onClick={() => { setDraft(draftFromRevision(selected)); setTab("edit"); setNotice("已复制历史内容；保存仍基于最新 current Revision。"); }}>复制到编辑表单</button></> : <p>选择一个 Revision 按需加载详情。</p>}</div>
+        <div className="shot-history-detail">{selected ? <><h3>{selected.title}</h3><p>{selected.summary || "（无摘要）"}</p><ol>{selected.requirements.map(item => <li key={item.shot_requirement_id}><strong>{item.title}</strong><p>{item.visual_direction}</p><small>{item.visual.requirement_kind === "existing_media" ? "现有素材" : "图片需求"}{item.narration ? " · TTS 旁白" : " · 无旁白"}</small></li>)}</ol><button onClick={() => { setDraft(draftFromRevision(selected)); setTab("edit"); setNotice("已复制历史内容；保存仍基于最新 current Revision。"); }}>复制到编辑表单</button><div className="shot-history-fulfillment"><h4>图片履约记录（只读）</h4>{selected.requirements.filter(item => item.visual.requirement_kind === "image" && item.visual.source_asset_id === null).length === 0 ? <p>此 Revision 没有新图片需求。</p> : selected.requirements.filter(item => item.visual.requirement_kind === "image" && item.visual.source_asset_id === null).map(item => <ShotRequirementImageFulfillmentPanel key={item.shot_requirement_id} projectId={project.project_id} revisionId={selected.shot_list_revision_id} requirement={item} readOnly={true} assets={assets} />)}</div></> : <p>选择一个 Revision 按需加载详情。</p>}</div>
+      </div> : <div className="shot-fulfillment-workbench">
+        {!state?.confirmed_revision ? <p>请先确认一个 Revision，再为其中的新图片需求创建履约任务。</p> : !fulfillmentRevision ? <p>正在载入已确认 Revision…</p> : <>
+          <p className="readonly-note">履约只关联已确认 Revision 中的真实 Requirement ID；生成与采用均不会修改 Timeline。</p>
+          {fulfillmentRevision.requirements.filter(item => item.visual.requirement_kind === "image" && item.visual.source_asset_id === null).length === 0
+            ? <p>已确认 Revision 中没有待履约的新图片需求。</p>
+            : fulfillmentRevision.requirements.filter(item => item.visual.requirement_kind === "image" && item.visual.source_asset_id === null).map(item => <ShotRequirementImageFulfillmentPanel key={item.shot_requirement_id} projectId={project.project_id} revisionId={fulfillmentRevision.shot_list_revision_id} requirement={item} readOnly={false} assets={assets} />)}
+        </>}
       </div>}
     </section>
   </div>;

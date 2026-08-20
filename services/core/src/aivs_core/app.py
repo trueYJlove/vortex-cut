@@ -47,6 +47,7 @@ from .renditions.presets import RenditionPresetRegistry
 from .renditions.reframe import RenditionReframeSnapshotService
 from .renditions.reframe_batch import ReframeExportBatchService
 from .renditions.snapshot import RenditionSnapshotService
+from .shot_requirement_image_fulfillment import ShotRequirementImageFulfillmentService
 from .shot_requirements import ShotRequirementService
 from .timeline import TimelineService
 from .timeline_planning import TimelinePatchPlanningService
@@ -425,6 +426,30 @@ class ShotListConfirmRequest(BaseModel):
     expected_current_revision_id: str
 
 
+class ShotRequirementImageFulfillmentPrepareRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    expected_confirmed_revision_id: str
+    provider_config_id: str
+    prompt: str
+
+
+class ShotRequirementImageFulfillmentCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    preview_id: str
+    fulfillment_payload_sha256: str
+    expected_confirmed_revision_id: str
+    confirmed: bool
+
+
+class ShotRequirementImageAdoptRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    generation_link_id: str
+    task_id: str
+    asset_id: str
+    expected_current_adoption_id: str | None
+    confirmed: bool
+
+
 class CoreState:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -483,6 +508,9 @@ class CoreState:
             self.image_provider_secrets,
             self.projects,
             provider=image_provider,
+        )
+        self.shot_requirement_image_fulfillment = ShotRequirementImageFulfillmentService(
+            self.db, self.provider_image_generation
         )
         self.render_compiler = RenderPlanCompiler(self.db)
         self.render_coordinator = RenderCoordinator(
@@ -2004,6 +2032,108 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> dict[str, Any]:
         try:
             return state.shot_requirements.confirm(project_id, request.model_dump())
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/projects/{project_id}/shot-requirements/{requirement_id}/image-fulfillment")
+    async def get_shot_requirement_image_fulfillment(
+        project_id: str, requirement_id: str, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        try:
+            return state.shot_requirement_image_fulfillment.get(project_id, requirement_id)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get(
+        "/api/v1/projects/{project_id}/shot-requirements/{requirement_id}/image-fulfillment/links"
+    )
+    async def list_shot_requirement_image_fulfillment_links(
+        project_id: str,
+        requirement_id: str,
+        limit: int = 20,
+        cursor: str | None = None,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            items, next_cursor = state.shot_requirement_image_fulfillment.list_links(
+                project_id, requirement_id, limit, cursor
+            )
+            return {"items": items, "next_cursor": next_cursor}
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get(
+        "/api/v1/projects/{project_id}/shot-requirements/{requirement_id}/image-fulfillment/adoptions"
+    )
+    async def list_shot_requirement_image_fulfillment_adoptions(
+        project_id: str,
+        requirement_id: str,
+        limit: int = 20,
+        cursor: str | None = None,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            items, next_cursor = state.shot_requirement_image_fulfillment.list_adoptions(
+                project_id, requirement_id, limit, cursor
+            )
+            return {"items": items, "next_cursor": next_cursor}
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post(
+        "/api/v1/projects/{project_id}/shot-requirements/{requirement_id}/image-fulfillment/prepare"
+    )
+    async def prepare_shot_requirement_image_fulfillment(
+        project_id: str,
+        requirement_id: str,
+        request: ShotRequirementImageFulfillmentPrepareRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return state.shot_requirement_image_fulfillment.prepare(
+                project_id,
+                requirement_id,
+                request.expected_confirmed_revision_id,
+                request.provider_config_id,
+                request.prompt,
+            )
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post(
+        "/api/v1/projects/{project_id}/shot-requirements/{requirement_id}/image-fulfillment/create"
+    )
+    async def create_shot_requirement_image_fulfillment(
+        project_id: str,
+        requirement_id: str,
+        request: ShotRequirementImageFulfillmentCreateRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return state.shot_requirement_image_fulfillment.create(
+                project_id,
+                requirement_id,
+                request.preview_id,
+                request.fulfillment_payload_sha256,
+                request.expected_confirmed_revision_id,
+                request.confirmed,
+            )
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post(
+        "/api/v1/projects/{project_id}/shot-requirements/{requirement_id}/image-fulfillment/adopt"
+    )
+    async def adopt_shot_requirement_image_fulfillment(
+        project_id: str,
+        requirement_id: str,
+        request: ShotRequirementImageAdoptRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return state.shot_requirement_image_fulfillment.adopt(
+                project_id, requirement_id, request.model_dump()
+            )
         except DomainError as exc:
             raise _domain(exc) from exc
 

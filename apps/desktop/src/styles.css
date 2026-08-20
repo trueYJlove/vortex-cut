@@ -144,3 +144,21 @@ footer .ai-entry { margin-right: 6px; min-height: 22px; padding: 0 7px; } footer
 .provider-image-configs fieldset { min-width: 0; display: grid; gap: 9px; margin: 0; padding: 12px; border: 1px solid #3b474d; }
 .provider-image-preview { max-width: 100%; max-height: 260px; object-fit: contain; border: 1px solid #3b474d; background: #0d1214; }
 @media (max-width: 760px) { .provider-image-configs { grid-template-columns: 1fr; } }
+
+/* Stage 4E confirmed image Requirement fulfillment */
+.shot-fulfillment-workbench { display: grid; gap: 12px; max-height: 58vh; overflow: auto; padding-right: 4px; }
+.shot-fulfillment { display: grid; gap: 10px; padding: 12px; border: 1px solid #3b474d; background: #11171a; }
+.shot-fulfillment > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.shot-fulfillment > header > div { display: grid; gap: 3px; }
+.shot-fulfillment > header small, .shot-fulfillment-history small { color: #9eabb1; overflow-wrap: anywhere; }
+.shot-fulfillment-create { display: grid; grid-template-columns: minmax(220px, .7fr) minmax(320px, 1.3fr); gap: 10px; }
+.shot-fulfillment-create > label { display: grid; gap: 6px; font-size: 12px; }
+.shot-fulfillment-create > p, .shot-fulfillment-create > button { grid-column: 1 / -1; }
+.shot-fulfillment-create textarea { min-height: 90px; resize: vertical; }
+.shot-fulfillment-confirmation, .shot-fulfillment-history > article, .shot-fulfillment [role="dialog"] { display: grid; gap: 8px; padding: 10px; border: 1px solid #4a555a; background: #182126; }
+.shot-fulfillment-confirmation dl, .shot-fulfillment [role="dialog"] dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 5px 10px; margin: 0; font-size: 12px; }
+.shot-fulfillment-confirmation dd, .shot-fulfillment [role="dialog"] dd { margin: 0; overflow-wrap: anywhere; }
+.shot-fulfillment-history { display: grid; gap: 8px; }
+.shot-fulfillment-history h4 { margin: 4px 0; }
+.shot-fulfillment-history > article > .generation-task { margin-top: 8px; }
+@media (max-width: 760px) { .shot-fulfillment-create { grid-template-columns: 1fr; } }

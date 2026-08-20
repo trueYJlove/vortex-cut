@@ -257,4 +257,41 @@ describe("CoreClient", () => {
     expect(JSON.parse(String(fetchImpl.mock.calls[3][1].body))).toEqual(input);
   });
 
+  it("实现 Stage 4E 六个固定 API，Prompt 只进入 Prepare 且响应先清敏", async () => {
+    const now = "2026-08-20T00:00:00.000Z";
+    const hashA = `sha256:${"a".repeat(64)}`; const hashB = `sha256:${"b".repeat(64)}`;
+    const provider = { provider_config_id: "image_provider_1", provider_kind: "apikey_fun_images", adapter_id: "apikey_fun_images_sse_v1", model: "gpt-image-2" };
+    const preview = { preview_id: "fulfillment_preview_1", project_id: "project_1", shot_list_revision_id: "revision_1", shot_requirement_id: "requirement_1", requirement_sha256: hashA, fulfillment_payload_sha256: hashB, execution_mode: "provider_image_v1", prompt_sha256: hashA, size: "1024x1024", output_format: "png", image_count: 1, provider, estimated_cost: 0.1, estimated_cost_currency: "CNY", price_tier: "1K", expires_at: now };
+    const link = { link_id: "link_1", project_id: "project_1", shot_list_revision_id: "revision_1", shot_requirement_id: "requirement_1", request_id: "request_1", requirement_sha256: hashA, created_at: now };
+    const adoption = { adoption_id: "adoption_1", project_id: "project_1", shot_list_revision_id: "revision_1", shot_requirement_id: "requirement_1", generation_link_id: "link_1", task_id: "task_1", asset_id: "asset_1", adoption_ordinal: 1, previous_adoption_id: null, created_at: now };
+    const state = { project_id: "project_1", shot_list_revision_id: "revision_1", shot_requirement_id: "requirement_1", requirement_sha256: hashA, currently_confirmed: true, lifecycle: "unstarted", link_count: 0, current_adoption: null, current_asset_availability: null };
+    const request = { request_id: "request_1", project_id: "project_1", generation_kind: "image", execution_mode: "provider_image_v1", prompt_sha256: hashA, parameters: { size: "1024x1024" }, request_sha256: hashB, created_at: now };
+    const task = { task_id: "task_1", request_id: "request_1", job_id: "job_1", attempt: 1, status: "queued", stage: "queued", retry_of_task_id: null, provider_call_count: 0, provider_may_have_processed: false, estimated_cost: 0.1, estimated_cost_currency: "CNY", price_tier: "1K", output_asset_id: null, output_sha256: null, result_summary: null, error: null, created_at: now, updated_at: now, finished_at: null };
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(response({ ...state, absolute_path: "private" }))
+      .mockResolvedValueOnce(response({ items: [link], next_cursor: null }))
+      .mockResolvedValueOnce(response({ items: [adoption], next_cursor: null }))
+      .mockResolvedValueOnce(response({ ...preview, prompt: "must-not-return", raw_exception: "private" }))
+      .mockResolvedValueOnce(response({ link, request, task, generation_reused: false, link_reused: false }))
+      .mockResolvedValueOnce(response({ adoption, reused: false }));
+    const client = new CoreClient({ baseUrl: "http://127.0.0.1:4000", uiToken: "ui-secret", fetchImpl });
+    const projectId = "project_1" as never; const requirementId = "requirement_1" as never;
+    expect(JSON.stringify(await client.getShotRequirementImageFulfillment(projectId, requirementId))).not.toContain("private");
+    await client.listShotRequirementImageFulfillmentLinks(projectId, requirementId, { limit: 20, cursor: "0" });
+    await client.listShotRequirementImageFulfillmentAdoptions(projectId, requirementId);
+    const prepared = await client.prepareShotRequirementImageFulfillment(projectId, requirementId, { expected_confirmed_revision_id: "revision_1" as never, provider_config_id: "image_provider_1" as never, prompt: "PROMPT_SENTINEL" });
+    expect(JSON.stringify(prepared)).not.toContain("must-not-return");
+    await client.createShotRequirementImageFulfillment(projectId, requirementId, { preview_id: "fulfillment_preview_1" as never, fulfillment_payload_sha256: hashB, expected_confirmed_revision_id: "revision_1" as never, confirmed: true });
+    await client.adoptShotRequirementImageFulfillment(projectId, requirementId, { generation_link_id: "link_1" as never, task_id: "task_1" as never, asset_id: "asset_1" as never, expected_current_adoption_id: null, confirmed: true });
+    expect(fetchImpl.mock.calls.map(call => String(call[0]))).toEqual([
+      "http://127.0.0.1:4000/api/v1/projects/project_1/shot-requirements/requirement_1/image-fulfillment",
+      "http://127.0.0.1:4000/api/v1/projects/project_1/shot-requirements/requirement_1/image-fulfillment/links?limit=20&cursor=0",
+      "http://127.0.0.1:4000/api/v1/projects/project_1/shot-requirements/requirement_1/image-fulfillment/adoptions",
+      "http://127.0.0.1:4000/api/v1/projects/project_1/shot-requirements/requirement_1/image-fulfillment/prepare",
+      "http://127.0.0.1:4000/api/v1/projects/project_1/shot-requirements/requirement_1/image-fulfillment/create",
+      "http://127.0.0.1:4000/api/v1/projects/project_1/shot-requirements/requirement_1/image-fulfillment/adopt",
+    ]);
+    expect(JSON.parse(String(fetchImpl.mock.calls[3][1].body))).toHaveProperty("prompt", "PROMPT_SENTINEL");
+    expect(fetchImpl.mock.calls.slice(4).map(call => String(call[1].body))).not.toContain("PROMPT_SENTINEL");
+  });
 });

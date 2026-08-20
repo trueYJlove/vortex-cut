@@ -1,6 +1,6 @@
 export const PROTOCOL_VERSION = 1 as const;
 export const API_PREFIX = "/api/v1" as const;
-export const CONTRACT_VERSION = "stage4d-v2" as const;
+export const CONTRACT_VERSION = "stage4e-v1" as const;
 
 export type GrantId = string & { readonly __brand: "grant_id" };
 export type ProjectId = string & { readonly __brand: "project_id" };
@@ -1810,3 +1810,5 @@ export function parseProviderImageGenerationCreateResponse(value: unknown): Prov
 export function parseProviderImageGenerationRequestPage(value: unknown): ProviderImageGenerationRequestPage { if (!isProviderImageGenerationRequestPage(value)) throw new ContractValidationError("ProviderImageGenerationRequestPage"); return value; }
 export function parseProviderImageGenerationTaskPage(value: unknown): ProviderImageGenerationTaskPage { if (!isProviderImageGenerationTaskPage(value)) throw new ContractValidationError("ProviderImageGenerationTaskPage"); return value; }
 export function parseProviderImageGenerationRetryPrepareInput(value: unknown): ProviderImageGenerationRetryPrepareInput { if (!isProviderImageGenerationRetryPrepareInput(value)) throw new ContractValidationError("ProviderImageGenerationRetryPrepareInput"); return value; }
+
+export * from "./stage4e.js";
