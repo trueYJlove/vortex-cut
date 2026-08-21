@@ -136,7 +136,7 @@
 - [x] Windows package verify 通过（复用 Gate 6-R4 已验证的 R1 包内组件与 bootstrap verify-only 证据）；
 - [x] 文档状态更新一致；
 - [x] README 未修改；
-- [ ] 工作区 clean；
+- [x] 工作区 clean；
 - [x] 无未授权 Provider 调用；
 - [x] 无敏感数据输出；
 - [ ] Git 提交、推送、PR 均获得用户明确授权后执行。
@@ -193,5 +193,3 @@ Stage 6-R 只有在以下条件全部满足时才可判定完成：
 6. 隐私扫描通过；
 7. 文档、测试与实现一致；
 8. 用户明确授权版本控制操作。
-
-
