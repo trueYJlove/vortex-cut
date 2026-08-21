@@ -16,11 +16,12 @@ import socket
 import sys
 import tempfile
 import threading
+from collections.abc import Callable
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -50,7 +51,7 @@ def _write_json(path: Path, value: object) -> None:
 
 
 def _checkpoint(report: dict[str, Any]) -> None:
-    report["updated_at"] = datetime.now(timezone.utc).isoformat()
+    report["updated_at"] = datetime.now(UTC).isoformat()
     _write_json(Path(report["report_path"]), report)
 
 
@@ -87,7 +88,9 @@ def _assert_model_error(action: Callable[[], Any], code: str) -> ModelError:
     raise AssertionError(f"expected ModelError({code})")
 
 
-def _download(manager: ModelManager, manifest: ModelManifest, cancel: asyncio.Event | None = None) -> Any:
+def _download(
+    manager: ModelManager, manifest: ModelManifest, cancel: asyncio.Event | None = None
+) -> Any:
     async def run() -> Any:
         return await manager.download(
             manifest,
@@ -113,7 +116,12 @@ def _case(root: Path) -> tuple[ModelManager, ModelManifest, dict[str, Path]]:
         path.write_bytes(content)
         paths[name] = path
         file_rows.append(
-            {"path": name, "size_bytes": len(content), "sha256": _sha256(content), "url": path.as_uri()}
+            {
+                "path": name,
+                "size_bytes": len(content),
+                "sha256": _sha256(content),
+                "url": path.as_uri(),
+            }
         )
     aggregate = hashlib.sha256()
     for name in contents:
@@ -160,7 +168,9 @@ def _cancel_case(root: Path) -> dict[str, Any]:
     manager, manifest, _paths = _case(root)
     cancel = asyncio.Event()
     cancel.set()
-    error = _assert_model_error(lambda: _download(manager, manifest, cancel), "MODEL_DOWNLOAD_CANCELLED")
+    error = _assert_model_error(
+        lambda: _download(manager, manifest, cancel), "MODEL_DOWNLOAD_CANCELLED"
+    )
     partial = manager.root / ".partial" / manifest.model_id / manifest.revision
     detail = _expect_status(manager, manifest.model_id, "cancelled")
     if not partial.is_dir():
@@ -219,8 +229,17 @@ def _network_case(root: Path) -> dict[str, Any]:
         thread.join(timeout=2)
     return {
         "harness_controlled": True,
-        "unreachable_localhost": {"url": unreachable, "error_code": unreachable_error.code, "status": unreachable_status},
-        "http_error_source": {"url": error_url, "http_status": 503, "error_code": source_error.code, "status": error_status},
+        "unreachable_localhost": {
+            "url": unreachable,
+            "error_code": unreachable_error.code,
+            "status": unreachable_status,
+        },
+        "http_error_source": {
+            "url": error_url,
+            "http_status": 503,
+            "error_code": source_error.code,
+            "status": error_status,
+        },
     }
 
 
@@ -229,9 +248,7 @@ def _retry_case(root: Path) -> dict[str, Any]:
     broken = paths["model.bin"]
     expected = broken.read_bytes()
     broken.write_bytes(b"broken-source\n")
-    first_error = _assert_model_error(
-        lambda: _download(manager, manifest), "MODEL_HASH_MISMATCH"
-    )
+    first_error = _assert_model_error(lambda: _download(manager, manifest), "MODEL_HASH_MISMATCH")
     failed = _expect_status(manager, manifest.model_id, "failed")
     manager.queue(manifest)
     queued = _expect_status(manager, manifest.model_id, "queued")
@@ -270,7 +287,11 @@ def _disk_space_case(root: Path) -> dict[str, Any]:
             lambda: _download(manager, manifest), "MODEL_DISK_SPACE_INSUFFICIENT"
         )
     detail = _expect_status(manager, manifest.model_id, "failed")
-    return {"monkeypatch": "shutil.disk_usage.free=0", "error_code": error.code, "status": detail["status"]}
+    return {
+        "monkeypatch": "shutil.disk_usage.free=0",
+        "error_code": error.code,
+        "status": detail["status"],
+    }
 
 
 def _resume_case(root: Path) -> dict[str, Any]:
@@ -301,7 +322,9 @@ def _ready_corruption_case(root: Path) -> dict[str, Any]:
     marker = ready / ".ready"
     marker.write_text("{ corrupted", encoding="utf-8")
     detail = _expect_status(manager, manifest.model_id, "corrupt")
-    error = _assert_model_error(lambda: manager.ready_path(manifest.model_id), "MODEL_NOT_INSTALLED")
+    error = _assert_model_error(
+        lambda: manager.ready_path(manifest.model_id), "MODEL_NOT_INSTALLED"
+    )
     if not ready.is_dir() or not marker.is_file():
         raise AssertionError("corrupt ready directory was unexpectedly removed")
     return {
@@ -323,9 +346,12 @@ def _run_one(report: dict[str, Any], name: str, function: Callable[[Path], dict[
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    default_report = ROOT / "test-results" / (
-        f"stage1b-resilience-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
-    ) / "report.json"
+    default_report = (
+        ROOT
+        / "test-results"
+        / (f"stage1b-resilience-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}")
+        / "report.json"
+    )
     parser.add_argument("--report", type=Path, default=default_report)
     args = parser.parse_args(argv)
     report_path = args.report.resolve()
@@ -358,7 +384,7 @@ def main(argv: list[str] | None = None) -> int:
     report["status"] = (
         "failed" if "failed" in statuses else "unverified" if "unverified" in statuses else "passed"
     )
-    report["finished_at"] = datetime.now(timezone.utc).isoformat()
+    report["finished_at"] = datetime.now(UTC).isoformat()
     _checkpoint(report)
     return 1 if report["status"] == "failed" else 2 if report["status"] == "unverified" else 0
 

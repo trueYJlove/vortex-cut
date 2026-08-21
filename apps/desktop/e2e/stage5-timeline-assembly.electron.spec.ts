@@ -51,6 +51,7 @@ original=v.database_module.MIGRATIONS
 try:
  if upgrade: v.database_module.MIGRATIONS={k:x for k,x in original.items() if int(k[1:])<=15}
  app=v.create_app(v.settings(data))
+ v.Database(data/'app.db').initialize()
  with TestClient(app) as client:
   _,ui=v.auth(client,'stage5-electron-offline-admin'); ids=v.create_domain(app,client,ui)
  with sqlite3.connect(data/'app.db') as c: checksums=dict(c.execute('select version,checksum from schema_migrations'))
@@ -193,7 +194,7 @@ function priorPreserved(seed: any, final: any) {
 test(`Stage 5 Electron offline assembly: ${mode}`, async () => {
   await mkdir(dataDir, { recursive: true });
   const seed = seedDatabase();
-  expect(seed.schema_count).toBe(upgrade ? 15 : 16);
+  expect(seed.schema_count).toBe(upgrade ? 15 : 17);
   const baseline = inspectDatabase();
   const first = await launch();
   let afterPrepare: any;
@@ -250,7 +251,7 @@ test(`Stage 5 Electron offline assembly: ${mode}`, async () => {
     await second.close().catch(() => undefined);
   }
   const final = inspectDatabase();
-  expect(final).toMatchObject({ schema_count: 16, foreign_key_ok: true, integrity_ok: true });
+  expect(final).toMatchObject({ schema_count: 17, foreign_key_ok: true, integrity_ok: true });
   expect(generationSnapshot(final)).toEqual(generationSnapshot(baseline));
   expect(final.timeline_revision_count).toBe(baseline.timeline_revision_count + 1);
   expect(final.assembly_preview_count).toBe(baseline.assembly_preview_count + 1);
@@ -271,7 +272,7 @@ test(`Stage 5 Electron offline assembly: ${mode}`, async () => {
       explicit_confirmation: true, timeline_revision_delta: 1,
       assembly_delta: 1, image_clip_delta: 1,
       automatic_render_delta: 0, automatic_artifact_delta: 0,
-      restart_restored: true, sqlite_v16: true,
+      restart_restored: true, sqlite_v17: true,
       v15_in_place_upgrade: upgrade,
       prior_checksums_preserved: priorPreserved(seed, final),
       migration_backup_created: upgrade ? final.backup_count > 0 : null,
