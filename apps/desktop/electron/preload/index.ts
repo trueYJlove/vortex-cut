@@ -64,6 +64,11 @@ import type {
   , ShotRequirementTimelineAssemblyPreview, ShotRequirementTimelineAssembly
   , ShotRequirementTimelineAssemblyApplyResponse, ShotRequirementTimelineAssemblyPage
   , ShotRequirementTimelineAssemblyPreviewId, ShotRequirementTimelineAssemblyId
+  , ShotRequirementTimelineBatchAssemblyPrepareInput, ShotRequirementTimelineBatchAssemblyApplyInput
+  , ShotRequirementTimelineBatchAssemblyPreview, ShotRequirementTimelineBatchAssembly
+  , ShotRequirementTimelineBatchAssemblyApplyResponse, ShotRequirementTimelineBatchAssemblyPage
+  , ShotRequirementTimelineBatchAssemblyPreviewId, ShotRequirementTimelineBatchAssemblyId
+  , ShotRequirementTimelineBatchAssemblyItemPage
 } from "@aivideo/contracts";
 
 export interface MediaSelection { grant: FileGrant; media: MediaInfo }
@@ -188,6 +193,12 @@ export interface DesktopApi {
   getShotRequirementTimelineAssemblyPreview: (input: { preview_id: ShotRequirementTimelineAssemblyPreviewId }) => Promise<ShotRequirementTimelineAssemblyPreview>;
   getShotRequirementTimelineAssembly: (input: { assembly_id: ShotRequirementTimelineAssemblyId }) => Promise<ShotRequirementTimelineAssembly>;
   listShotRequirementTimelineAssemblies: (input: { project_id: ProjectId; requirement_id: ShotRequirementId; limit?: number; cursor?: string }) => Promise<ShotRequirementTimelineAssemblyPage>;
+  prepareShotRequirementTimelineBatchAssembly: (input: { project_id: ProjectId; request: ShotRequirementTimelineBatchAssemblyPrepareInput }) => Promise<ShotRequirementTimelineBatchAssemblyPreview>;
+  applyShotRequirementTimelineBatchAssembly: (input: { project_id: ProjectId; request: ShotRequirementTimelineBatchAssemblyApplyInput }) => Promise<ShotRequirementTimelineBatchAssemblyApplyResponse>;
+  getShotRequirementTimelineBatchAssemblyPreview: (input: { preview_id: ShotRequirementTimelineBatchAssemblyPreviewId }) => Promise<ShotRequirementTimelineBatchAssemblyPreview>;
+  getShotRequirementTimelineBatchAssembly: (input: { batch_id: ShotRequirementTimelineBatchAssemblyId }) => Promise<ShotRequirementTimelineBatchAssembly>;
+  listShotRequirementTimelineBatches: (input: { project_id: ProjectId; limit?: number; cursor?: string }) => Promise<ShotRequirementTimelineBatchAssemblyPage>;
+  listShotRequirementTimelineBatchAssemblyItems: (input: { batch_id: ShotRequirementTimelineBatchAssemblyId; limit?: number; cursor?: string }) => Promise<ShotRequirementTimelineBatchAssemblyItemPage>;
   getRenderArtifact: (artifactId: RenderArtifactId) => Promise<RenderArtifactPresentation>;
   openArtifact: (artifactId: string) => Promise<void>;
   openArtifactFolder: (artifactId: string) => Promise<void>;
@@ -309,6 +320,12 @@ const api: DesktopApi = {
   getShotRequirementTimelineAssemblyPreview: input => ipcRenderer.invoke("stage5:assembly-preview-get", input),
   getShotRequirementTimelineAssembly: input => ipcRenderer.invoke("stage5:assembly-get", input),
   listShotRequirementTimelineAssemblies: input => ipcRenderer.invoke("stage5:assembly-list", input),
+  prepareShotRequirementTimelineBatchAssembly: input => ipcRenderer.invoke("stage6r:batch-assembly-prepare", input),
+  applyShotRequirementTimelineBatchAssembly: input => ipcRenderer.invoke("stage6r:batch-assembly-apply", input),
+  getShotRequirementTimelineBatchAssemblyPreview: input => ipcRenderer.invoke("stage6r:batch-assembly-preview-get", input),
+  getShotRequirementTimelineBatchAssembly: input => ipcRenderer.invoke("stage6r:batch-assembly-get", input),
+  listShotRequirementTimelineBatches: input => ipcRenderer.invoke("stage6r:batch-assembly-list", input),
+  listShotRequirementTimelineBatchAssemblyItems: input => ipcRenderer.invoke("stage6r:batch-assembly-item-list", input),
   getRenderArtifact: artifactId => ipcRenderer.invoke("render-artifact:get", artifactId),
   openArtifact: artifactId => ipcRenderer.invoke("artifact:open", artifactId),
   openArtifactFolder: artifactId => ipcRenderer.invoke("artifact:folder", artifactId),

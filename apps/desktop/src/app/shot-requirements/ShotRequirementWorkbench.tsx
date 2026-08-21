@@ -9,6 +9,7 @@ import type {
   ShotRequirementInput,
 } from "@aivideo/contracts";
 import { ShotRequirementImageFulfillmentPanel } from "./ShotRequirementImageFulfillmentPanel.js";
+import { ShotRequirementTimelineBatchAssemblyPanel } from "./ShotRequirementTimelineBatchAssemblyPanel.js";
 
 const ZERO_SIDE_EFFECT_NOTICE = "人工规划素材需求；不会调用 Provider、不会生成媒体、不会写入时间线。";
 const SAFE_ERROR = "操作未完成，请重新载入后重试。";
@@ -184,9 +185,12 @@ export function ShotRequirementWorkbench({ project, assets, onClose }: Props) {
       </div> : <div className="shot-fulfillment-workbench">
         {!state?.confirmed_revision ? <p>请先确认一个 Revision，再为其中的新图片需求创建履约任务。</p> : !fulfillmentRevision ? <p>正在载入已确认 Revision…</p> : <>
           <p className="readonly-note">履约只关联已确认 Revision 中的真实 Requirement ID；生成与采用均不会修改 Timeline。</p>
+          <ShotRequirementTimelineBatchAssemblyPanel projectId={project.project_id} revisionId={fulfillmentRevision.shot_list_revision_id} requirements={fulfillmentRevision.requirements.filter(item => item.visual.requirement_kind === "image" && item.visual.source_asset_id === null)} />
           {fulfillmentRevision.requirements.filter(item => item.visual.requirement_kind === "image" && item.visual.source_asset_id === null).length === 0
             ? <p>已确认 Revision 中没有待履约的新图片需求。</p>
-            : fulfillmentRevision.requirements.filter(item => item.visual.requirement_kind === "image" && item.visual.source_asset_id === null).map(item => <ShotRequirementImageFulfillmentPanel key={item.shot_requirement_id} projectId={project.project_id} revisionId={fulfillmentRevision.shot_list_revision_id} requirement={item} readOnly={false} assets={assets} />)}
+            : fulfillmentRevision.requirements.filter(item => item.visual.requirement_kind === "image" && item.visual.source_asset_id === null).map(item =>
+              <ShotRequirementImageFulfillmentPanel key={item.shot_requirement_id} projectId={project.project_id} revisionId={fulfillmentRevision.shot_list_revision_id} requirement={item} readOnly={false} assets={assets} />
+            )}
         </>}
       </div>}
     </section>

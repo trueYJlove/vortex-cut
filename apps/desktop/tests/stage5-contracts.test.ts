@@ -34,7 +34,7 @@ const assembly = {
 
 describe("Stage 5 契约", () => {
   it("冻结 stage5-v1 且严格校验 Prepare 与 Apply", () => {
-    expect(CONTRACT_VERSION).toBe("stage5-v1");
+    expect(CONTRACT_VERSION).toBe("stage6r-v1");
     expect(isShotRequirementTimelineAssemblyPrepareInput({
       expected_adoption_id: "adoption_1", base_timeline_revision_id: "timeline_1",
       at_index: 0, duration_us: null, layout: "fit",

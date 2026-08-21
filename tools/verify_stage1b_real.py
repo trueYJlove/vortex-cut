@@ -150,7 +150,11 @@ def make_manifest_and_seed() -> Path:
         target = MODEL_SEED / name
         target.write_bytes(content)
         manifest_files.append(
-            {"path": name, "size_bytes": len(content), "sha256": hashlib.sha256(content).hexdigest()}
+            {
+                "path": name,
+                "size_bytes": len(content),
+                "sha256": hashlib.sha256(content).hexdigest(),
+            }
         )
     aggregate = hashlib.sha256()
     for name in files:
@@ -194,7 +198,8 @@ def make_legacy_v1_database(audio: Path) -> dict[str, str]:
             if statement.strip():
                 db.execute(statement)
         db.execute(
-            "CREATE TABLE schema_migrations(version TEXT PRIMARY KEY, applied_at TEXT NOT NULL, checksum TEXT NOT NULL)"
+            "CREATE TABLE schema_migrations("
+            "version TEXT PRIMARY KEY, applied_at TEXT NOT NULL, checksum TEXT NOT NULL"
         )
         db.execute(
             "INSERT INTO schema_migrations VALUES (?,?,?)",
@@ -202,11 +207,35 @@ def make_legacy_v1_database(audio: Path) -> dict[str, str]:
         )
         db.execute(
             "INSERT INTO projects VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (project_id, "Legacy Stage1B", "active", "{}", None, str(DATA / "projects" / project_id), "legacy", now, now, now),
+            (
+                project_id,
+                "Legacy Stage1B",
+                "active",
+                "{}",
+                None,
+                str(DATA / "projects" / project_id),
+                "legacy",
+                now,
+                now,
+                now,
+            ),
         )
         db.execute(
             "INSERT INTO assets VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            (asset_id, project_id, "audio", "external", audio.name, fingerprint, audio.stat().st_size, now, "available", json.dumps({"duration_us": 1_000_000}), now, now),
+            (
+                asset_id,
+                project_id,
+                "audio",
+                "external",
+                audio.name,
+                fingerprint,
+                audio.stat().st_size,
+                now,
+                "available",
+                json.dumps({"duration_us": 1_000_000}),
+                now,
+                now,
+            ),
         )
         db.execute(
             "INSERT INTO asset_locations(asset_id,uri,last_verified_at) VALUES (?,?,?)",
@@ -225,12 +254,30 @@ def start_core(hold_seconds: float) -> tuple[subprocess.Popen[str], str, Path]:
     environment["AIVS_E2E_MODEL_DIR"] = str(MODEL_SEED)
     environment["AIVS_E2E_HOLD_ASR_SECONDS"] = str(hold_seconds)
     command = [
-        sys.executable, "-m", "aivs_core.bootstrap", "--host", "127.0.0.1", "--port", "0",
-        "--data-dir", str(DATA), "--runtime-dir", str(RUNTIME), "--ready-file", str(ready),
-        "--manifest-dir", str(MANIFESTS), "--ffmpeg", "ffmpeg", "--ffprobe", "ffprobe",
+        sys.executable,
+        "-m",
+        "aivs_core.bootstrap",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "0",
+        "--data-dir",
+        str(DATA),
+        "--runtime-dir",
+        str(RUNTIME),
+        "--ready-file",
+        str(ready),
+        "--manifest-dir",
+        str(MANIFESTS),
+        "--ffmpeg",
+        "ffmpeg",
+        "--ffprobe",
+        "ffprobe",
     ]
     log = log_path.open("w", encoding="utf-8")
-    process = subprocess.Popen(command, cwd=ROOT, env=environment, stdout=log, stderr=subprocess.STDOUT, text=True)
+    process = subprocess.Popen(
+        command, cwd=ROOT, env=environment, stdout=log, stderr=subprocess.STDOUT, text=True
+    )
     wait_for(lambda: {"done": ready.is_file()}, "Core ready file", 20)
     payload = json.loads(ready.read_text(encoding="utf-8"))
     return process, f"http://127.0.0.1:{payload['port']}", log_path
@@ -241,12 +288,18 @@ def sqlite_evidence(
 ) -> dict[str, Any]:
     with sqlite3.connect(path) as db:
         db.row_factory = sqlite3.Row
-        migration = [dict(row) for row in db.execute("SELECT * FROM schema_migrations ORDER BY rowid")]
+        migration = [
+            dict(row) for row in db.execute("SELECT * FROM schema_migrations ORDER BY rowid")
+        ]
         job = db.execute(
-            "SELECT id,kind,status,stage,attempt,error_code,input_fingerprint,model_revision FROM jobs WHERE id=?",
+            "SELECT id,kind,status,stage,attempt,error_code,input_fingerprint,model_revision "
+            "FROM jobs WHERE id=?",
             (job_id,),
         ).fetchone()
-        counts = {table: int(db.execute(f"SELECT count(*) FROM {table}").fetchone()[0]) for table in ("projects", "assets", "jobs", "transcripts")}
+        counts = {
+            table: int(db.execute(f"SELECT count(*) FROM {table}").fetchone()[0])
+            for table in ("projects", "assets", "jobs", "transcripts")
+        }
         transcript = None
         segments: list[dict[str, Any]] = []
         if transcript_id:
@@ -316,14 +369,32 @@ def main() -> int:
         admin = request(base, "/api/v1/internal/sessions", TOKEN, "POST")["token"]
         ui = admin
         legacy_project = request(base, f"/api/v1/projects/{legacy['project_id']}", ui)
-        schema_before = sqlite_evidence(DATA / "app.db", "missing", EVIDENCE / "migration-before.json")
+        schema_before = sqlite_evidence(
+            DATA / "app.db", "missing", EVIDENCE / "migration-before.json"
+        )
         if [row["version"] for row in schema_before["schema_migrations"]] != ["v1", "v2"]:
             raise RuntimeError("first Core start did not apply v2 migration")
-        add_check(report, "migration_v2_first_start", "passed", execution_kind="real_process", evidence={"core_log": str(first_log), "sqlite": str(EVIDENCE / "migration-before.json"), "legacy_project": legacy_project["project_id"]})
+        add_check(
+            report,
+            "migration_v2_first_start",
+            "passed",
+            execution_kind="real_process",
+            evidence={
+                "core_log": str(first_log),
+                "sqlite": str(EVIDENCE / "migration-before.json"),
+                "legacy_project": legacy_project["project_id"],
+            },
+        )
 
         project = request(base, "/api/v1/projects", ui, "POST", {"name": "New Stage1B"})
         grant = request(base, "/api/v1/internal/file-grants", TOKEN, "POST", {"path": str(audio)})
-        asset = request(base, f"/api/v1/projects/{project['project_id']}/assets", ui, "POST", {"grant_id": grant["grant_id"], "kind": "audio"})
+        asset = request(
+            base,
+            f"/api/v1/projects/{project['project_id']}/assets",
+            ui,
+            "POST",
+            {"grant_id": grant["grant_id"], "kind": "audio"},
+        )
         sys.path.insert(0, str(CORE_SRC))
         from aivs_core.database import Database  # noqa: PLC0415
         from aivs_core.transcription import (  # noqa: PLC0415
@@ -393,7 +464,10 @@ def main() -> int:
                         "stage": candidate.get("stage"),
                     }
                 )
-                if candidate.get("status") == "running" and candidate.get("stage") == "transcribing":
+                if (
+                    candidate.get("status") == "running"
+                    and candidate.get("stage") == "transcribing"
+                ):
                     job_id = candidate_job_id
                     running = candidate
                     break
@@ -413,29 +487,76 @@ def main() -> int:
         write_json(EVIDENCE / "transcription-job-attempts.json", transcription_attempts)
         if running is None or job_id is None:
             raise RuntimeError(
-                "未能在 3 次 transcription 创建尝试中取得 status=running 且 stage=transcribing 的任务；"
+                "未能在 3 次 transcription 创建尝试中取得 "
+                "status=running 且 stage=transcribing 的任务；"
                 f"证据: {EVIDENCE / 'transcription-job-attempts.json'}"
             )
         write_json(EVIDENCE / "running-job-api.json", running)
         finish_process(first, True)
         first = None
         second, base2, second_log = start_core(2)
-        ui2 = request(base2, '/api/v1/internal/sessions', TOKEN, 'POST')['token']
+        ui2 = request(base2, "/api/v1/internal/sessions", TOKEN, "POST")["token"]
         recovered = request(base2, f"/api/v1/jobs/{job_id}", ui2)
-        sqlite = sqlite_evidence(DATA / "app.db", job_id, EVIDENCE / "interrupted-job-sqlite.json", transcript_id)
-        required = ("status", "stage", "attempt", "error_code", "input_fingerprint", "model_revision")
-        if recovered["status"] != "interrupted" or recovered["stage"] != "interrupted" or recovered["error"]["code"] != "JOB_INTERRUPTED" or any(recovered.get(field) in (None, "") for field in ("attempt", "input_fingerprint", "model_revision")):
+        sqlite = sqlite_evidence(
+            DATA / "app.db", job_id, EVIDENCE / "interrupted-job-sqlite.json", transcript_id
+        )
+        required = (
+            "status",
+            "stage",
+            "attempt",
+            "error_code",
+            "input_fingerprint",
+            "model_revision",
+        )
+        if (
+            recovered["status"] != "interrupted"
+            or recovered["stage"] != "interrupted"
+            or recovered["error"]["code"] != "JOB_INTERRUPTED"
+            or any(
+                recovered.get(field) in (None, "")
+                for field in ("attempt", "input_fingerprint", "model_revision")
+            )
+        ):
             raise RuntimeError(f"API interrupted evidence incomplete: {recovered}")
-        if not sqlite["job"] or sqlite["job"]["status"] != "interrupted" or any(sqlite["job"].get(field) in (None, "") for field in required[1:]):
+        if (
+            not sqlite["job"]
+            or sqlite["job"]["status"] != "interrupted"
+            or any(sqlite["job"].get(field) in (None, "") for field in required[1:])
+        ):
             raise RuntimeError(f"SQLite interrupted evidence incomplete: {sqlite}")
         write_json(EVIDENCE / "interrupted-job-api.json", recovered)
-        add_check(report, "real_process_interrupt_recovery", "passed", execution_kind="real_process", evidence={"first_core_log": str(EVIDENCE / first_log.name) if first_log else None, "second_core_log": str(second_log), "api": str(EVIDENCE / "interrupted-job-api.json"), "sqlite": str(EVIDENCE / "interrupted-job-sqlite.json"), "job_id": job_id})
+        add_check(
+            report,
+            "real_process_interrupt_recovery",
+            "passed",
+            execution_kind="real_process",
+            evidence={
+                "first_core_log": str(EVIDENCE / first_log.name) if first_log else None,
+                "second_core_log": str(second_log),
+                "api": str(EVIDENCE / "interrupted-job-api.json"),
+                "sqlite": str(EVIDENCE / "interrupted-job-sqlite.json"),
+                "job_id": job_id,
+            },
+        )
 
         retry_status = request(base2, f"/api/v1/jobs/{job_id}/retry", ui2, "POST")
         if retry_status["status"] != "queued" or retry_status["attempt"] <= recovered["attempt"]:
             raise RuntimeError(f"explicit retry did not return queued: {retry_status}")
         write_json(EVIDENCE / "retry-api.json", retry_status)
-        add_check(report, "explicit_retry_revalidates_and_queues", "passed", execution_kind="real_process", evidence={"api": str(EVIDENCE / "retry-api.json"), "fingerprint": retry_status["input_fingerprint"], "model_revision": retry_status["model_revision"]}, limitation="重试后的 ASR 运行时 intentionally 未执行成功；本项只验收显式 retry 和前置校验。")
+        add_check(
+            report,
+            "explicit_retry_revalidates_and_queues",
+            "passed",
+            execution_kind="real_process",
+            evidence={
+                "api": str(EVIDENCE / "retry-api.json"),
+                "fingerprint": retry_status["input_fingerprint"],
+                "model_revision": retry_status["model_revision"],
+            },
+            limitation=(
+                "重试后的 ASR 运行时 intentionally 未执行成功；本项只验收显式 retry 和前置校验。"
+            ),
+        )
 
         projects = request(base2, "/api/v1/projects", ui2)
         assets = request(base2, f"/api/v1/projects/{project['project_id']}/assets", ui2)
@@ -448,15 +569,46 @@ def main() -> int:
             or post_restart_transcript["segments"][0].get("text")
             != "deterministic persistence probe"
         ):
-            raise RuntimeError(f"post-restart transcript evidence incomplete: {post_restart_transcript}")
-        final_sqlite = sqlite_evidence(DATA / "app.db", job_id, EVIDENCE / "migration-after-restart.json", transcript_id)
+            raise RuntimeError(
+                f"post-restart transcript evidence incomplete: {post_restart_transcript}"
+            )
+        final_sqlite = sqlite_evidence(
+            DATA / "app.db", job_id, EVIDENCE / "migration-after-restart.json", transcript_id
+        )
         versions = [row["version"] for row in final_sqlite["schema_migrations"]]
-        if versions != ["v1", "v2"] or not projects["items"] or not assets["items"] or final_sqlite["counts"]["jobs"] < 1 or final_sqlite["counts"]["transcripts"] < 1:
+        if (
+            versions != ["v1", "v2"]
+            or not projects["items"]
+            or not assets["items"]
+            or final_sqlite["counts"]["jobs"] < 1
+            or final_sqlite["counts"]["transcripts"] < 1
+        ):
             raise RuntimeError(f"post-restart migration data unreadable: {final_sqlite}")
         write_json(EVIDENCE / "post-restart-api.json", {"projects": projects, "assets": assets})
-        add_check(report, "migration_v2_same_db_restart_readable", "passed", execution_kind="real_process", evidence={"api": str(EVIDENCE / "post-restart-api.json"), "transcript": str(EVIDENCE / "post-restart-transcript.json"), "transcript_id": transcript_id, "sqlite": str(EVIDENCE / "migration-after-restart.json"), "schema": versions, "counts": final_sqlite["counts"]}, limitation="本检查验证仓储持久化数据可在 Core 重启后读取，不代表 ASR 推理成功。")
+        add_check(
+            report,
+            "migration_v2_same_db_restart_readable",
+            "passed",
+            execution_kind="real_process",
+            evidence={
+                "api": str(EVIDENCE / "post-restart-api.json"),
+                "transcript": str(EVIDENCE / "post-restart-transcript.json"),
+                "transcript_id": transcript_id,
+                "sqlite": str(EVIDENCE / "migration-after-restart.json"),
+                "schema": versions,
+                "counts": final_sqlite["counts"],
+            },
+            limitation="本检查验证仓储持久化数据可在 Core 重启后读取，不代表 ASR 推理成功。",
+        )
     except Exception as exc:
-        add_check(report, "stage1b_real_process_chain", "failed", execution_kind="real_process", error=repr(exc), limitation="真实进程链路中止，后续项未执行。")
+        add_check(
+            report,
+            "stage1b_real_process_chain",
+            "failed",
+            execution_kind="real_process",
+            error=repr(exc),
+            limitation="真实进程链路中止，后续项未执行。",
+        )
         exit_code = 1
     finally:
         if first is not None:

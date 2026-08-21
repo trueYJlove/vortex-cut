@@ -1,3 +1,5 @@
+> 状态：历史草稿；已被 docs/STAGE6R_* 取代，不再作为 Stage 6 实施依据。
+
 # STAGE6_DETAILED_DESIGN.md
 
 ## Stage 6: Timeline Assembly Enhancement

@@ -419,6 +419,7 @@ def _seed_v12(path: Path) -> dict[str, str]:
         MIGRATIONS.pop("v14", None)
         MIGRATIONS.pop("v15", None)
         MIGRATIONS.pop("v16", None)
+        MIGRATIONS.pop("v17", None)
         db.initialize()
     finally:
         MIGRATIONS.clear()
@@ -613,7 +614,7 @@ def _migration_report(root: Path) -> dict[str, Any]:
     frozen = {
         version: hashlib.sha256(sql.encode()).hexdigest()
         for version, sql in MIGRATIONS.items()
-        if version not in {"v13", "v14", "v15", "v16"}
+        if version not in {"v13", "v14", "v15", "v16", "v17"}
     }
     apply_r1(r1_path)
     sql = sqlite3.connect(r1_path)
