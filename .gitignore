@@ -35,3 +35,7 @@ apps/desktop/test-results/
 /aivs-core.spec
 /%AIVS_VERIFY_REAL_STDOUT%
 /%AIVS_VERIFY_REAL_STDERR%
+
+# Local runtime scratch and desktop build caches
+/.tmp/
+/apps/desktop/.cache/
