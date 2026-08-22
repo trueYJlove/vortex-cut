@@ -7,6 +7,8 @@ project_root = Path(SPECPATH).parents[1]
 datas = [
     (str(project_root / "resources/fonts"), "fonts"),
     (str(project_root / "resources/model-manifests"), "model-manifests"),
+    (str(project_root / "resources/renditions"), "renditions"),
+    (str(project_root / "resources/platform-presets"), "platform-presets"),
 ]
 binaries = []
 for package in (
