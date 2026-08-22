@@ -1,6 +1,6 @@
 # Stage 8：发布后收口与下一版规划
 
-> 状态：Gate 8-R1 已完成；Gate 8-R2 处置计划已冻结
+> 状态：Gate 8-R1 / R2 已完成；Gate 8-R3 `0.0.2` 维护版范围已冻结
 > 架构与 Gate 判定：LiuWei
 > 独立验收：LiuKeAi
 > 当前基线：`7a034f9`
@@ -130,13 +130,84 @@ Stage 7 证据继续保留：
 
 ## 4. Gate 8-R3：下一版范围冻结
 
-- [ ] 确认 `0.0.2` 维护版定位；
-- [ ] 冻结 `0.0.2` 变更清单；
-- [ ] 明确不改业务功能边界；
-- [ ] 明确回归范围；
-- [ ] 明确发布验证范围；
-- [ ] 记录版本号升级方案；
-- [ ] 记录不修改 README 的约束是否继续适用。
+- [x] 确认 `0.0.2` 维护版定位；
+- [x] 冻结 `0.0.2` 变更清单；
+- [x] 明确不改业务功能边界；
+- [x] 明确回归范围；
+- [x] 明确发布验证范围；
+- [x] 记录版本号升级方案；
+- [x] 记录不修改 README 的约束是否继续适用。
+
+### 4.1 `0.0.2` 维护版定位
+
+`0.0.2` 定位为发布后维护版，不新增用户可见业务能力，不改变阶段 0–4、Stage 5、Stage 6-R 的功能边界。
+
+### 4.2 变更清单
+
+仅允许以下范围：
+
+1. 将根 `package.json` 与 `apps/desktop/package.json` 的版本号从 `0.0.1` 升级到 `0.0.2`；
+2. 同步更新 Stage 8 / 发布状态文档；
+3. 如发现文档中明显的发布后状态错误，仅限文档修正；
+4. 如发现打包配置中的版本引用错误，仅限配置修正。
+
+不允许：
+
+- 修改 Core 业务逻辑；
+- 修改 Renderer / Electron 业务流程；
+- 修改数据库 schema；
+- 修改 Contracts API；
+- 修改 Timeline / Assembly 行为；
+- 新增 Provider 或网络能力；
+- 修改 README。
+
+### 4.3 回归范围
+
+`0.0.2` 必须至少复跑：
+
+- Core 全量测试；
+- Contracts build / typecheck；
+- Desktop typecheck / tests / build；
+- Stage 5 E2E；
+- Stage 6-R E2E；
+- Ruff 受管源码范围；
+- `git diff --check`。
+
+### 4.4 发布验证范围
+
+`0.0.2` 必须至少执行：
+
+- Windows package verify；
+- bootstrap verify-only；
+- development fresh / upgrade E2E；
+- installed fresh / upgrade E2E；
+- 静默安装验证；
+- 静默卸载验证；
+- 关键组件完整性校验；
+- 用户数据保留验证；
+- 隐私与安全专项测试；
+- 日志与公开证据隐私扫描。
+
+### 4.5 版本号升级方案
+
+版本号只允许升级：
+
+```text
+0.0.1 -> 0.0.2
+```
+
+同步位置：
+
+- `package.json`
+- `apps/desktop/package.json`
+
+不新增版本号配置文件，不引入自动版本生成流程。
+
+### 4.6 README 约束
+
+README 在 `0.0.2` 中继续保持不修改。若未来需要面向用户改写 README，必须在独立 Stage 中单独冻结范围并获得授权。
+
+> Gate 8-R3 记录：Stage 8 规划分支为 `codex/stage8-post-release-planning`，基于 `master` / `0194c44` 创建。`0.0.2` 维护版范围已冻结，只允许版本号、发布文档和必要的打包配置版本引用修正，不修改业务功能。
 
 ## 5. Gate 8-R4：独立验收与阶段收口
 
