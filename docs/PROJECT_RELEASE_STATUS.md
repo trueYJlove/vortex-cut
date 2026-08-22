@@ -1,55 +1,66 @@
 # 项目发布状态与下一阶段
 
-> 日期：2026-08-21
-> 统一基线：`d9bd1a3`
-> 当前分支：`liuwei-dev`
+> 日期：2026-08-22
+> 当前基线：`38bdcfd`
+> 当前分支：`master`
 > 当前版本：`0.0.1`
-> 当前阶段：Stage 7 发布加固与发布收口
+> 当前阶段：Stage 8 发布后收口与下一版规划
 
 ## 1. 当前结论
 
-Stage 5-R 与 Stage 6-R 已合并到 `origin/master`。主线已包含：
+Stage 7 发布加固与发布收口已完成。PR #13 已合并到 `master`，合并提交为 `4e2a7db`；发布后 `.gitignore` 收口提交为 `38bdcfd`，并已推送到 `origin/master`。
+
+当前主线包含：
 
 - 阶段 0–4 历史实现；
 - Stage 5：单条已采用图片的显式 Timeline 装配；
 - Stage 6-R：多条当前已采用图片的显式 Timeline 批量装配；
 - SQLite v17；
 - Desktop / Electron / Contracts / Core 对应实现；
-- Windows 打包与安装态验证证据。
+- Windows r9 安装包及安装态验证证据；
+- 发布加固后的 E2E 环境隔离与依赖修复。
 
-当前不进入新功能开发。下一阶段是 Stage 7 发布收口。
+当前不进入新功能开发。下一阶段是 Stage 8 发布后收口与下一版规划。
 
-## 2. 已完成的主线验证
+## 2. Stage 7 已完成的主线验证
 
-- Core 全量回归：478 passed / 1 deselected；
+- Core 全量回归：478 passed / 1 skipped；
 - Contracts build/typecheck 通过；
 - Desktop typecheck / 219 tests / build 通过；
 - Stage 5 E2E 通过；
 - Stage 6-R E2E 通过；
-- Ruff 全仓通过；
+- Ruff 受管源码范围通过；
 - `git diff --check` 通过；
-- Windows package verify 与 bootstrap verify-only 有通过证据；
+- Windows r9 package verify 通过；
+- bootstrap verify-only 通过；
+- development fresh / upgrade E2E 通过；
+- installed fresh / upgrade E2E 通过；
+- 静默安装、静默卸载、关键组件与用户数据保留验证通过；
+- 包内组件 SHA-256 校验通过；
+- 隐私与安全专项测试及扫描通过；
 - README 未修改；
 - Provider 调用、网络外传、费用增量均为 0。
 
-## 3. Stage 7 待完成项
+## 3. Stage 7 最终版本控制状态
 
-1. Gate 7-R1：发布收口文档冻结；
-2. Gate 7-R2：主线最终全量回归；
-3. Gate 7-R3：当前主线 Windows 发布验证；
-4. Gate 7-R4：隐私与安全终审；
-5. Gate 7-R5：版本控制与发布判定。
+- PR #13：已合并；
+- PR #13 合并提交：`4e2a7db`；
+- 发布验收提交：`8b0b3b4`；
+- 发布后 `.gitignore` 收口提交：`38bdcfd`；
+- 本地 `master`：`38bdcfd`；
+- `origin/master`：`38bdcfd`；
+- `liuwei-dev`：`8b0b3b4`；
+- `origin/liuwei-dev`：`8b0b3b4`；
+- `stash@{0}`：保留，未应用、未弹出、未删除；
+- 工作区：clean。
 
-## 4. 版本控制状态
+## 4. Stage 8 待完成项
 
-- 本地 `master`：`d9bd1a3`
-- 本地 `liuwei-dev`：`d9bd1a3`
-- `origin/master`：`d9bd1a3`
-- `origin/liuwei-dev`：`ce04bc4`
-- `stash@{0}`：未应用、未弹出、未删除
-
-远端 `liuwei-dev` 尚未同步到合并后的 `d9bd1a3`。若需要同步，必须由用户单独授权推送。
+1. Gate 8-R1：发布后收口审计与文档一致性修复；
+2. Gate 8-R2：遗留项处置计划；
+3. Gate 8-R3：下一版范围冻结；
+4. Gate 8-R4：独立验收与阶段收口。
 
 ## 5. 发布判断
 
-当前代码与文档已经具备进入 Stage 7 发布验证的基础，但尚不能判定发布完成。必须等待 Gate 7-R2–R5 全部通过后，才能形成最终发布结论。
+Stage 7 发布判定通过。当前代码基线 `38bdcfd` 可作为 Windows 桌面应用 `0.0.1` 的发布基线。下一阶段不新增业务功能，先完成发布后文档收口、遗留项处置和下一版范围规划。
