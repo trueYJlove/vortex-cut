@@ -1,7 +1,7 @@
-# Stage 6-R 独立验收草案：多条已采用图片的显式 Timeline 批量装配
+# Stage 6-R 独立验收：多条已采用图片的显式 Timeline 批量装配
 
-> 状态：Gate 6-R3 Contracts / Electron / Desktop 生产实现已通过定向独立验收  
-> 审查角色：LiuKeAi  
+> 状态：Gate 6-R5 总回归与收口通过；PR #12 已合并
+> 审查角色：LiuKeAi
 > 依据：`docs/STAGE6R_CONTRACT_FREEZE.md` 与 `docs/STAGE6R_DETAILED_DESIGN.md`
 
 ## 1. 独立验收范围
@@ -139,9 +139,9 @@
 - [x] 工作区 clean；
 - [x] 无未授权 Provider 调用；
 - [x] 无敏感数据输出；
-- [ ] Git 提交、推送、PR 均获得用户明确授权后执行。
+- [x] Git 提交、推送、PR 均获得用户明确授权后执行。
 
-> Gate 6-R5 独立验收记录：Core 全量回归 478 passed / 1 deselected；Contracts build/typecheck 通过且当前包无 test 脚本；Desktop typecheck、219 tests、build 通过；Stage 5 development fresh E2E 与 Stage 6-R development fresh E2E 通过；v17 迁移与 Stage 6-R Core 定向回归 11 passed；Ruff 全仓通过；`git diff --check` 通过；Windows package verify 复用 R1 通过证据。全程真实 Provider 与网络保持禁用，Provider 调用、网络外传、费用增量均为 0。工作区 clean 与版本控制操作项保持未勾选，待用户明确授权提交/推送/PR 后处理。
+> Gate 6-R5 独立验收记录：Core 全量回归 478 passed / 1 deselected；Contracts build/typecheck 通过且当前包无 test 脚本；Desktop typecheck、219 tests、build 通过；Stage 5 development fresh E2E 与 Stage 6-R development fresh E2E 通过；v17 迁移与 Stage 6-R Core 定向回归 11 passed；Ruff 全仓通过；`git diff --check` 通过；Windows package verify 复用 R1 通过证据。全程真实 Provider 与网络保持禁用，Provider 调用、网络外传、费用增量均为 0。版本控制操作已获用户授权并完成本地提交、远端推送与 PR #12；PR #12 已合并到 `master`。
 
 ## 8. 证据要求
 

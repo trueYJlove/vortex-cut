@@ -76,9 +76,10 @@ function generationSnapshot(value: any) {
   };
 }
 
+const gpuFallbackArgs = ["--disable-gpu", "--disable-gpu-compositing", "--use-gl=swiftshader", "--in-process-gpu"];
 const launch = () => electron.launch(installed ? {
   executablePath: executable,
-  args: [`--user-data-dir=${userData}`],
+  args: [`--user-data-dir=${userData}`, ...gpuFallbackArgs],
   cwd: installRoot,
   env: {
     ...process.env,
@@ -89,12 +90,13 @@ const launch = () => electron.launch(installed ? {
     AIVS_RESOURCES_PATH: undefined,
     AIVS_SIDECAR_EXECUTABLE: undefined,
     AIVS_SIDECAR_EXECUTABLE_ARGS: undefined,
+    AIVS_E2E_MODEL_DIR: undefined,
     PYTHONPATH: undefined,
     ELECTRON_RUN_AS_NODE: undefined,
     NODE_OPTIONS: undefined,
   },
 } : {
-  args: [join(desktop, "out", "main", "index.js"), `--user-data-dir=${userData}`],
+  args: [join(desktop, "out", "main", "index.js"), `--user-data-dir=${userData}`, ...gpuFallbackArgs],
   cwd: desktop,
   env: {
     ...process.env,
@@ -105,6 +107,7 @@ const launch = () => electron.launch(installed ? {
     AIVS_RESOURCES_PATH: resources,
     AIVS_SIDECAR_EXECUTABLE: python,
     AIVS_SIDECAR_EXECUTABLE_ARGS: JSON.stringify(["-m", "aivs_core.bootstrap"]),
+    AIVS_E2E_MODEL_DIR: undefined,
     PYTHONPATH: pythonPath,
     ELECTRON_RUN_AS_NODE: undefined,
     NODE_OPTIONS: undefined,
