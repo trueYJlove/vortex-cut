@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Dialog } from "../Dialog.js";
 import type {
   ProjectId,
   ShotListRevisionId,
@@ -300,7 +301,7 @@ export function ShotRequirementTimelineBatchAssemblyPanel({
               </button>
             )}
             {preview && (
-              <div role="dialog" aria-label="确认批量时间线装配">
+              <Dialog label="确认批量时间线装配" onClose={() => setPreview(undefined)}>
                 <p>
                   将以一个事务装配 {preview.item_count} 个图片 Clip；任一条失败则全部不装配。现有 Clip
                   {preview.clip_count_before} 个，装配后 {preview.clip_count_after} 个，位移
@@ -311,7 +312,7 @@ export function ShotRequirementTimelineBatchAssemblyPanel({
                   <button onClick={() => setPreview(undefined)}>返回修改</button>
                   <button disabled={busy} onClick={() => void apply()}>显式确认批量装配</button>
                 </div>
-              </div>
+              </Dialog>
             )}
           </>}
     </section>

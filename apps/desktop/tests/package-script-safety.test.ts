@@ -367,7 +367,7 @@ describe("Windows 安装包验收脚本安全边界", () => {
     const resetIndex = realVerify.indexOf('selectOption(""'); const selectIndex = realVerify.indexOf("selectOption(projectId");
     expect(resetIndex).toBeGreaterThan(-1); expect(selectIndex).toBeGreaterThan(resetIndex);
     expect(realVerify).toContain("PREVIEW_JOB_FAILED"); expect(realVerify).toContain("PREVIEW_RECORD_MISSING");
-    expect(realVerify).toContain('getByRole("button", { name: "导出", exact: true })');
+    expect(realVerify).toContain('getByRole("button", { name: "导出正式视频" })');
     expect(realVerify).toContain("pollRestartRead"); expect(realVerify).toContain("pollRestartList");
     expect(realVerify).toContain("RESTART_TIMELINE_UNAVAILABLE"); expect(realVerify).toContain("RESTART_MODELS_UNAVAILABLE");
     expect(realVerify).toContain("RESTART_REVISION_MISMATCH"); expect(realVerify).toContain("RESTART_PREVIEW_MISSING"); expect(realVerify).toContain("RESTART_EXPORT_MISSING");
