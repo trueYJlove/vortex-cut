@@ -320,7 +320,7 @@ describe("Stage 1C Render", () => {
     fireEvent.change(screen.getByLabelText("编码模式"), { target: { value: "software" } });
     fireEvent.click(previewButton);
     await waitFor(() => expect(api.createPreview).toHaveBeenCalledWith({ project_id: project.project_id, preview: { timeline_revision_id: state.current_revision.timeline_revision_id, encoder_mode: "software" } }));
-    fireEvent.click(screen.getByRole("button", { name: "导出" }));
+    fireEvent.click(screen.getByRole("button", { name: "导出视频" }));
     await waitFor(() => expect(api.chooseExportDestination).toHaveBeenCalledWith(project.project_id));
     expect(api.createExport).toHaveBeenCalledWith({ project_id: project.project_id, export: { timeline_revision_id: state.current_revision.timeline_revision_id, destination_grant_id: "destination_1", encoder_mode: "software" } });
   });
@@ -329,7 +329,7 @@ describe("Stage 1C Render", () => {
     const emptyDocument = { ...timelineDocument, clips: [], captions: [] };
     const emptyState = { ...state, current_revision: { ...state.current_revision, document: emptyDocument } };
     const emptyApi = desktopApi({ timeline: emptyState }); window.desktop = emptyApi; render(<App />);
-    expect(await screen.findByRole("button", { name: "生成预览" })).toBeDisabled(); expect(screen.getByRole("button", { name: "导出" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "生成预览" })).toBeDisabled(); expect(screen.getByRole("button", { name: "导出视频" })).toBeDisabled();
     cleanup();
     const draftState = { ...state, draft: { project_id: project.project_id, base_revision_id: state.current_revision.timeline_revision_id, document: timelineDocument, updated_at: now, conflict: false } };
     const draftApi = desktopApi({ timeline: draftState }); window.desktop = draftApi; render(<App />);

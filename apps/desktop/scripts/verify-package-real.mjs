@@ -329,7 +329,7 @@ async function main() {
     progress.timeline_caption_count = finalState.current_revision.document.captions.length;
 
     stage = "preview";
-    const previewButton = page.getByRole("button", { name: "生成预览" });
+    const previewButton = page.getByRole("button", { name: "生成权威预览" });
     const projectSelect = page.getByLabel("当前项目");
     try {
       await page.waitForFunction(projectId => {
@@ -351,7 +351,7 @@ async function main() {
       await previewButton.waitFor({ state: "visible", timeout: 15_000 });
       await page.waitForFunction(projectId => {
         const select = document.querySelector('select[aria-label="当前项目"]');
-        const button = Array.from(document.querySelectorAll("button")).find(item => item.textContent?.includes("生成预览"));
+        const button = Array.from(document.querySelectorAll("button")).find(item => item.textContent?.includes("生成权威预览"));
         return select instanceof HTMLSelectElement && select.value === projectId && button instanceof HTMLButtonElement && !button.disabled;
       }, projectId, { timeout: 15_000 });
     } catch { fail("PREVIEW_PROJECT_SYNC_FAILED"); }
@@ -376,7 +376,7 @@ async function main() {
     progress.preview_range_byte_count = range.length;
 
     stage = "export";
-    await page.getByRole("button", { name: "导出", exact: true }).click().catch(() => fail("EXPORT_FAILED"));
+    await page.getByRole("button", { name: "导出正式视频" }).click().catch(() => fail("EXPORT_FAILED"));
     const exportJob = await newestJob(page, projectId, "final_export");
     progress.export_job_created = true;
     const exportJobResult = await waitForJob(page, exportJob.job_id);

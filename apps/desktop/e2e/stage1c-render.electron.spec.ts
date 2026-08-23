@@ -50,9 +50,9 @@ test("1C-Render 真实 Electron 权威预览、Artifact Ticket 与最终导出",
     });
     await expect(page.getByRole("option", { name: "1C Render E2E" })).toHaveCount(1, { timeout: 30_000 });
     await page.getByLabel("当前项目").selectOption(setup.project_id);
-    await expect(page.getByRole("button", { name: "生成预览" })).toBeEnabled({ timeout: 30_000 });
+    await expect(page.getByRole("button", { name: "生成权威预览" })).toBeEnabled({ timeout: 30_000 });
     await page.getByLabel("编码模式").selectOption("software");
-    await page.getByRole("button", { name: "生成预览" }).click();
+    await page.getByRole("button", { name: "生成权威预览" }).click();
     const preview = await expect.poll(async () => page.evaluate(async projectId => {
       const jobs = await window.desktop.listJobs({ project_id: projectId as never, limit: 100 });
       const job = jobs.items.find(item => item.kind === "authoritative_preview");
@@ -63,10 +63,12 @@ test("1C-Render 真实 Electron 权威预览、Artifact Ticket 与最终导出",
     expect(previewResult.media_url).toMatch(/^aivideo:\/\/media\/[A-Za-z0-9_-]{32,}$/);
     const playback = await page.evaluate(async url => { const response = await fetch(url, { headers: { Range: "bytes=0-31" } }); return { status: response.status, length: (await response.arrayBuffer()).byteLength }; }, previewResult.media_url);
     expect(playback).toEqual({ status: 206, length: 32 });
-    await page.getByRole("button", { name: "权威预览" }).click();
+    const renderPanelClose = page.getByRole("button", { name: "关闭渲染与导出" });
+    if (await renderPanelClose.isVisible().catch(() => false)) { await renderPanelClose.click(); await expect(page.getByRole("button", { name: "关闭渲染与导出" })).toHaveCount(0, { timeout: 10_000 }); }
+    await page.getByRole("button", { name: "权威预览", exact: true }).click();
     await expect(page.getByLabel("权威预览视频")).toBeVisible();
 
-    await page.getByRole("button", { name: "导出", exact: true }).click();
+    await page.getByRole("button", { name: "导出正式视频" }).click();
     await expect.poll(async () => page.evaluate(async projectId => {
       const jobs = await window.desktop.listJobs({ project_id: projectId as never, limit: 100 });
       const job = jobs.items.find(item => item.kind === "final_export");

@@ -220,6 +220,9 @@ async function createWindow(): Promise<void> {
     minWidth: 1024,
     minHeight: 720,
     title: "Vortex Cut",
+    autoHideMenuBar: true,
+    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
+    titleBarOverlay: undefined,
     show: true,
     webPreferences: {
       preload: join(__dirname, "../preload/index.mjs"),
@@ -243,6 +246,8 @@ async function createWindow(): Promise<void> {
   });
   windowRef.webContents.on("did-finish-load", () => { void appendLog(logPath, "renderer did-finish-load"); });
   windowRef.once("ready-to-show", () => { void appendLog(logPath, "window ready-to-show"); });
+  windowRef.on("maximize", () => { windowRef?.webContents.send("window:maximize-changed", true); });
+  windowRef.on("unmaximize", () => { windowRef?.webContents.send("window:maximize-changed", false); });
   windowRef.webContents.on("did-fail-load", (_event, code, description, url) => {
     void appendLog(logPath, `renderer load failed code=${code} description=${description} url=${url}`);
   });
@@ -251,6 +256,17 @@ async function createWindow(): Promise<void> {
     ? windowRef.loadURL(process.env.ELECTRON_RENDERER_URL)
     : windowRef.loadFile(join(__dirname, "../renderer/index.html"));
   void load.then(() => appendLog(logPath, "window loaded")).catch(error => appendLog(logPath, `window load error: ${String(error)}`));
+}
+
+function registerWindowIpc(): void {
+  ipcMain.handle("window:minimize", () => { windowRef?.minimize(); });
+  ipcMain.handle("window:toggle-maximize", () => {
+    if (!windowRef) return false;
+    if (windowRef.isMaximized()) windowRef.unmaximize(); else windowRef.maximize();
+    return windowRef.isMaximized();
+  });
+  ipcMain.handle("window:is-maximized", () => windowRef?.isMaximized() ?? false);
+  ipcMain.handle("window:close", () => { windowRef?.close(); });
 }
 
 function registerIpc(): void {
@@ -635,7 +651,8 @@ app.whenReady().then(async () => {
     return;
   }
   protocol.handle(RESTRICTED_MEDIA_SCHEME, request => serveRestrictedMedia(request, restrictedMedia));
-  registerIpc();
+  registerWindowIpc();
+    registerIpc();
   try {
     await createWindow();
     void startRuntime().catch(async error => {

@@ -81,6 +81,11 @@ export interface RenditionReframePreviewPresentation { preview: RenditionReframe
 
 export interface DesktopApi {
   getRuntime: () => Promise<DesktopRuntime>;
+  minimizeWindow?: () => Promise<void>;
+  toggleMaximizeWindow?: () => Promise<boolean>;
+  closeWindow?: () => Promise<void>;
+  isWindowMaximized?: () => Promise<boolean>;
+  onWindowMaximizeChange?: (listener: (maximized: boolean) => void) => () => void;
   chooseMedia: () => Promise<MediaSelection | null>;
   probeMedia: (grantId: GrantId) => Promise<MediaInfo>;
   listProjects: (params?: { status?: ProjectStatus; limit?: number; cursor?: string }) => Promise<ProjectPage>;
@@ -208,6 +213,15 @@ export interface DesktopApi {
 
 const api: DesktopApi = {
   getRuntime: () => ipcRenderer.invoke("runtime:get"),
+  minimizeWindow: () => ipcRenderer.invoke("window:minimize"),
+  toggleMaximizeWindow: () => ipcRenderer.invoke("window:toggle-maximize"),
+  closeWindow: () => ipcRenderer.invoke("window:close"),
+  isWindowMaximized: () => ipcRenderer.invoke("window:is-maximized"),
+  onWindowMaximizeChange: listener => {
+    const handler = (_event: Electron.IpcRendererEvent, maximized: boolean) => listener(maximized);
+    ipcRenderer.on("window:maximize-changed", handler);
+    return () => ipcRenderer.removeListener("window:maximize-changed", handler);
+  },
   chooseMedia: () => ipcRenderer.invoke("media:choose"),
   probeMedia: grantId => ipcRenderer.invoke("media:probe", grantId),
   listProjects: params => ipcRenderer.invoke("project:list", params),

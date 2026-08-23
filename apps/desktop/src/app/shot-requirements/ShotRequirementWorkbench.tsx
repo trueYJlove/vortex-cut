@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Dialog } from "../Dialog.js";
 import type {
   AssetPresentation,
   Project,
@@ -160,8 +161,7 @@ export function ShotRequirementWorkbench({ project, assets, onClose }: Props) {
     } finally { if (isCurrent(epoch)) setBusy(false); }
   };
 
-  return <div className="modal-backdrop">
-    <section className="modal shot-workbench" role="dialog" aria-modal="true" aria-labelledby="shot-workbench-title">
+  return <Dialog titleId="shot-workbench-title" label="镜头与资产需求清单" onClose={onClose} className="shot-workbench">
       <div className="modal-heading"><div><h2 id="shot-workbench-title">镜头与资产需求清单</h2><p>{project.name} · 每次保存形成不可变 Revision</p></div><button aria-label="关闭镜头需求工作台" onClick={onClose}>×</button></div>
       <p className="shot-zero-notice">{ZERO_SIDE_EFFECT_NOTICE}</p>
       <div className="generation-tabs" role="tablist"><button role="tab" aria-selected={tab === "edit"} onClick={() => setTab("edit")}>编辑当前需求</button><button role="tab" aria-selected={tab === "history"} onClick={() => setTab("history")}>Revision 历史</button><button role="tab" aria-selected={tab === "fulfillment"} onClick={() => setTab("fulfillment")}>图片履约</button></div>
@@ -193,6 +193,5 @@ export function ShotRequirementWorkbench({ project, assets, onClose }: Props) {
             )}
         </>}
       </div>}
-    </section>
-  </div>;
+    </Dialog>;
 }

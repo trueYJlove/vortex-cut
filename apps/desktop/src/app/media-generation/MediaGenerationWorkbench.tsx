@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Dialog } from "../Dialog.js";
 import type {
   AssetPresentation,
   GenerationKind,
@@ -325,8 +326,7 @@ export function MediaGenerationWorkbench({ project, assets, onClose }: Props) {
 
   const selectedRequest = requests.find(item => item.request_id === selectedRequestId);
 
-  return <div className="modal-backdrop">
-    <section className="modal generation-workbench" role="dialog" aria-modal="true" aria-labelledby="generation-workbench-title">
+  return <Dialog titleId="generation-workbench-title" label="生成验证" onClose={onClose} className="generation-workbench">
       <div className="modal-heading">
         <div><h2 id="generation-workbench-title">生成验证（模拟）</h2><p>验证生成请求、任务状态和恢复链路，不执行真实生成。</p></div>
         <button className="icon-btn" aria-label="关闭生成验证" onClick={close}>×</button>
@@ -409,6 +409,5 @@ export function MediaGenerationWorkbench({ project, assets, onClose }: Props) {
         </div>
         <p className="simulation-notice">{SIMULATION_NOTICE}</p>
       </div>}
-    </section>
-  </div>;
+    </Dialog>;
 }
