@@ -106,7 +106,7 @@ describe("Stage 1A/1B 工作流", () => {
     await screen.findByRole("button", { name: "重新打开项目" });
     fireEvent.click(screen.getByRole("button", { name: "重新打开项目" })); await waitFor(() => expect(api.reopenProject).toHaveBeenCalledWith("project_1"));
     await screen.findByRole("button", { name: "归档项目" });
-    for (const kind of ["video", "audio", "image", "text"] as const) fireEvent.click(screen.getByRole("button", { name: `导入${kind}` }));
+    for (const label of ["视频", "音频", "图片", "文本"]) fireEvent.click(screen.getByRole("button", { name: `导入${label}` }));
     await waitFor(() => expect(api.importAsset).toHaveBeenCalledTimes(4));
     expect(api.importAsset).toHaveBeenNthCalledWith(1, { project_id: "project_1", kind: "video" }); expect(api.importAsset).toHaveBeenNthCalledWith(4, { project_id: "project_1", kind: "text" });
   });
