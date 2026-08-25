@@ -188,6 +188,35 @@ describe("Stage 1A/1B 工作流", () => {
   });
 });
 
+describe("素材箱交互", () => {
+  afterEach(() => cleanup());
+
+  it("支持列表/缩略图视图切换", async () => {
+    window.desktop = desktopApi(); render(<App />);
+    await screen.findByText(video.display_name);
+    expect(document.querySelector(".asset-list.asset-table")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "切换为缩略图视图" }));
+    expect(document.querySelector(".asset-list.asset-grid")).not.toBeNull();
+    expect(document.querySelectorAll(".asset-card").length).toBe(2);
+    expect(screen.getAllByRole("button", { name: "刷新" }).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "切换为列表视图" }));
+    expect(document.querySelector(".asset-list.asset-table")).not.toBeNull();
+  });
+
+  it("双击素材在预览播放且不修改时间线，回到时间线后退出素材预览", async () => {
+    const api = desktopApi(); window.desktop = api; render(<App />);
+    await screen.findByText(image.display_name);
+    const imageItem = screen.getByText(image.display_name).closest(".asset-item")!;
+    fireEvent.doubleClick(imageItem);
+    expect(await screen.findByAltText(image.display_name)).toBeInTheDocument();
+    expect(screen.queryByLabelText("交互预览视频")).not.toBeInTheDocument();
+    expect(api.patchTimeline).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText("时间线播放头"), { target: { value: 1000000 } });
+    expect(screen.queryByAltText(image.display_name)).not.toBeInTheDocument();
+    expect(screen.getByLabelText("交互预览视频")).toBeInTheDocument();
+  });
+});
+
 describe("Stage 1C Editor", () => {
   beforeEach(() => { window.desktop = desktopApi(); });
   afterEach(() => cleanup());
