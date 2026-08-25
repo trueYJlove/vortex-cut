@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
+import { openProjectManagement, selectProject } from "./project-switcher";
 
 const require = createRequire(import.meta.url);
 const playwright = require(require.resolve("playwright", { paths: [dirname(require.resolve("@playwright/test"))] })) as { _electron: { launch: (options: Record<string, unknown>) => Promise<any> } };
@@ -81,7 +82,8 @@ async function ready(app: any) {
 }
 
 async function openWorkbench(page: any) {
-  await page.getByRole("button", { name: "打开真实图片生成" }).click();
+  await page.getByRole("button", { name: "工具" }).click();
+  await page.getByRole("menuitem", { name: "真实图片生成" }).click();
   await expect(page.getByRole("heading", { name: "真实图片生成（受控）" })).toBeVisible();
   await expect(page.getByText(/一次确认对应每个 Task 最多一次调用/)).toBeVisible();
 }
@@ -219,10 +221,11 @@ test("Gate 4D-4 离线启动、v13→v14 与 safeStorage 恢复", async () => {
     const page = await ready(first);
     if (mode === "installed_offline_upgrade_v13") {
       projectId = "stage4d_legacy_project";
-      await page.getByLabel("当前项目").selectOption(projectId);
+      await selectProject(page, projectId);
     } else {
-      await page.getByLabel("项目名称").fill("Stage 4D Offline Fresh");
-      await page.getByRole("button", { name: "创建", exact: true }).click();
+      await openProjectManagement(page);
+      await page.getByLabel("新项目名称").fill("Stage 4D Offline Fresh");
+      await page.getByRole("button", { name: "创建项目" }).click();
       projectId = await page.evaluate(async () => {
         const projects = await window.desktop.listProjects({ limit: 100 });
         return projects.items.find(item => item.name === "Stage 4D Offline Fresh")!.project_id;
@@ -263,7 +266,7 @@ test("Gate 4D-4 离线启动、v13→v14 与 safeStorage 恢复", async () => {
   const second = await launch();
   try {
     const page = await ready(second);
-    await page.getByLabel("当前项目").selectOption(projectId);
+    await selectProject(page, projectId);
     await openWorkbench(page);
     await page.getByRole("button", { name: "Provider", exact: true }).click();
     await expect(page.getByLabel("凭据对应图片 Provider")).toContainText("已配置");
@@ -316,8 +319,9 @@ test("Gate 4D-4 正式 Electron/Core/SQLite/Asset 真实图片闭环与重启恢
   const first = await launch();
   try {
     const page = await ready(first);
-    await page.getByLabel("项目名称").fill(`Stage 4D ${mode}`);
-    await page.getByRole("button", { name: "创建", exact: true }).click();
+    await openProjectManagement(page);
+    await page.getByLabel("新项目名称").fill(`Stage 4D ${mode}`);
+    await page.getByRole("button", { name: "创建项目" }).click();
     const projectId = await page.evaluate(async name => {
       const projects = await window.desktop.listProjects({ limit: 100 });
       return projects.items.find(item => item.name === name)!.project_id;
@@ -404,7 +408,7 @@ test("Gate 4D-4 正式 Electron/Core/SQLite/Asset 真实图片闭环与重启恢
   const second = await launch();
   try {
     const page = await ready(second);
-    await page.getByLabel("当前项目").selectOption(saved.projectId);
+    await selectProject(page, saved.projectId);
     await openWorkbench(page);
     await page.getByRole("button", { name: "Provider", exact: true }).click();
     await expect(page.getByLabel("凭据对应图片 Provider")).toContainText("已配置");
@@ -469,7 +473,7 @@ test("Gate 4D-4A 既有成功 Task 无网络重启恢复", async () => {
       return { project, request: requests.items[0], task: tasks.items[0] };
     });
     expect(state.task).toMatchObject({ status: "succeeded", provider_call_count: 1 });
-    await page.getByLabel("当前项目").selectOption(state.project.project_id);
+    await selectProject(page, state.project.project_id);
     await openWorkbench(page);
     await page.getByRole("button", { name: "Provider", exact: true }).click();
     await expect(page.getByLabel("凭据对应图片 Provider")).toContainText("已配置");
@@ -532,7 +536,7 @@ test("Gate 4D-4 历史官方失败态只读兼容与新 Provider 隔离", async 
     expect(state?.request).toBeUndefined();
     expect(state?.task).toBeNull();
     assertRendererSafe(state, [userData, database]);
-    await page.getByLabel("当前项目").selectOption(state!.project.project_id);
+    await selectProject(page, state!.project.project_id);
     await openWorkbench(page);
     await page.getByRole("button", { name: "Provider", exact: true }).click();
     await expect(page.getByLabel("凭据对应图片 Provider").locator("option")).toHaveCount(1);

@@ -542,7 +542,7 @@ export interface CandidateAdoption { schema_version: 1; candidate_document_sha25
 
 export type TimelineCreatedBy = "user" | "system" | "import";
 export type TimelineLayout = "blurred_background" | "crop_fill" | "fit";
-export type TimelineClipKind = "video" | "image";
+export type TimelineClipKind = "video" | "image" | "audio";
 export type CaptionOrigin = "transcript" | "user";
 export type CaptionPresetId = "default-bottom" | "game-safe-bottom" | "high-contrast";
 export type RenderMode = "authoritative_preview" | "final_export";
@@ -701,11 +701,11 @@ export interface ReframeExportBatchRetryResponse { batch: ReframeExportBatch; jo
 export type ReframeExportBatchPage = Page<ReframeExportBatch>;
 
 export interface TimelineCanvas extends ProjectCanvas { background_color: string; }
-export interface TimelineTrack { id: "V1" | "C1"; kind: "visual" | "caption"; locked: boolean; }
+export interface TimelineTrack { id: "V1" | "C1" | "A1"; kind: "visual" | "caption" | "audio"; locked: boolean; }
 export interface TimelineClipAudio { enabled: boolean; gain_db: number; }
 export interface TimelineClip {
   clip_id: TimelineClipId;
-  track_id: "V1";
+  track_id: "V1" | "A1";
   order_index: number;
   asset_id: AssetId;
   asset_kind: TimelineClipKind;
@@ -732,7 +732,7 @@ export interface TimelineDocument {
   schema_version: 1;
   project_id: ProjectId;
   canvas: TimelineCanvas;
-  tracks: [TimelineTrack, TimelineTrack];
+  tracks: [TimelineTrack, TimelineTrack] | [TimelineTrack, TimelineTrack, TimelineTrack];
   clips: TimelineClip[];
   captions: TimelineCaption[];
   locked_elements?: TimelineClipId[];
@@ -1331,11 +1331,12 @@ function isTimelineCanvas(value: unknown): value is TimelineCanvas {
 }
 export function isTimelineClip(value: unknown): value is TimelineClip {
   if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["clip_id", "track_id", "order_index", "asset_id", "asset_kind", "source_start_us", "source_end_us", "timeline_start_us", "timeline_end_us", "layout", "audio"])) return false;
-  if (!isId(value.clip_id) || value.track_id !== "V1" || !isInteger(value.order_index) || !isId(value.asset_id) || !oneOf(["video", "image"] as const, value.asset_kind) ||
+  if (!isId(value.clip_id) || !oneOf(["V1", "A1"] as const, value.track_id) || !isInteger(value.order_index) || !isId(value.asset_id) || !oneOf(["video", "image", "audio"] as const, value.asset_kind) ||
     !isInteger(value.timeline_start_us) || !isInteger(value.timeline_end_us, 1) || value.timeline_end_us <= value.timeline_start_us || !isTimelineLayout(value.layout) || !isRecord(value.audio) ||
     !onlyKeys(value.audio, ["enabled", "gain_db"]) || typeof value.audio.enabled !== "boolean" || !isFiniteNumber(value.audio.gain_db) || value.audio.gain_db < -60 || value.audio.gain_db > 12) return false;
-  if (value.asset_kind === "image") return value.source_start_us === null && value.source_end_us === null && value.timeline_end_us - value.timeline_start_us >= 500_000 && value.timeline_end_us - value.timeline_start_us <= 30_000_000;
-  return isInteger(value.source_start_us) && isInteger(value.source_end_us, 1) && value.source_end_us - value.source_start_us >= 100_000 && value.timeline_end_us - value.timeline_start_us === value.source_end_us - value.source_start_us;
+  if (value.asset_kind === "image") return value.track_id === "V1" && value.source_start_us === null && value.source_end_us === null && value.timeline_end_us - value.timeline_start_us >= 500_000 && value.timeline_end_us - value.timeline_start_us <= 30_000_000;
+  if (value.asset_kind === "audio") return value.track_id === "A1" && isInteger(value.source_start_us) && isInteger(value.source_end_us, 1) && value.source_end_us - value.source_start_us >= 100_000 && value.timeline_end_us - value.timeline_start_us === value.source_end_us - value.source_start_us;
+  return value.track_id === "V1" && isInteger(value.source_start_us) && isInteger(value.source_end_us, 1) && value.source_end_us - value.source_start_us >= 100_000 && value.timeline_end_us - value.timeline_start_us === value.source_end_us - value.source_start_us;
 }
 export function isTimelineCaption(value: unknown): value is TimelineCaption {
   if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["caption_id", "track_id", "source_clip_id", "start_us", "end_us", "text", "preset_id", "origin", "edited", "source_segment_ids"])) return false;
@@ -1344,13 +1345,24 @@ export function isTimelineCaption(value: unknown): value is TimelineCaption {
   return value.origin === "transcript" ? value.source_clip_id !== null && value.source_segment_ids.length > 0 : value.source_segment_ids.length === 0;
 }
 export function isTimelineDocument(value: unknown): value is TimelineDocument {
-  if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["schema_version", "project_id", "canvas", "tracks", "clips", "captions", "locked_elements", "provenance"]) || value.schema_version !== 1 || !isId(value.project_id) || !isTimelineCanvas(value.canvas) || !Array.isArray(value.tracks) || value.tracks.length !== 2 || !Array.isArray(value.clips) || !value.clips.every(isTimelineClip) || !Array.isArray(value.captions) || !value.captions.every(isTimelineCaption) || !isRecord(value.provenance)) return false;
-  const [visual, caption] = value.tracks;
-  if (!isRecord(visual) || !onlyKeys(visual, ["id", "kind", "locked"]) || visual.id !== "V1" || visual.kind !== "visual" || visual.locked !== false) return false;
-  if (!isRecord(caption) || !onlyKeys(caption, ["id", "kind", "locked"]) || caption.id !== "C1" || caption.kind !== "caption" || caption.locked !== false) return false;
+  if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["schema_version", "project_id", "canvas", "tracks", "clips", "captions", "locked_elements", "provenance"]) || value.schema_version !== 1 || !isId(value.project_id) || !isTimelineCanvas(value.canvas) || !Array.isArray(value.tracks) || (value.tracks.length !== 2 && value.tracks.length !== 3) || !Array.isArray(value.clips) || !value.clips.every(isTimelineClip) || !Array.isArray(value.captions) || !value.captions.every(isTimelineCaption) || !isRecord(value.provenance)) return false;
+  const visual = value.tracks.find(t => isRecord(t) && t.id === "V1");
+  const caption = value.tracks.find(t => isRecord(t) && t.id === "C1");
+  const audioTrack = value.tracks.find(t => isRecord(t) && t.id === "A1");
+  if (!visual || !isRecord(visual) || !onlyKeys(visual, ["id", "kind", "locked"]) || visual.id !== "V1" || visual.kind !== "visual" || visual.locked !== false) return false;
+  if (!caption || !isRecord(caption) || !onlyKeys(caption, ["id", "kind", "locked"]) || caption.id !== "C1" || caption.kind !== "caption" || caption.locked !== false) return false;
+  if (audioTrack && (!isRecord(audioTrack) || !onlyKeys(audioTrack, ["id", "kind", "locked"]) || audioTrack.id !== "A1" || audioTrack.kind !== "audio" || audioTrack.locked !== false)) return false;
   if (!onlyKeys(value.provenance, ["created_by", "source_transcript_ids"]) || !isTimelineCreatedBy(value.provenance.created_by) || !Array.isArray(value.provenance.source_transcript_ids) || !value.provenance.source_transcript_ids.every(isId)) return false;
+  
+  // Validate V1 clips are sequential
+  const v1Clips = value.clips.filter(c => c.track_id === "V1").sort((a, b) => a.order_index - b.order_index);
   let end = 0;
-  for (let index = 0; index < value.clips.length; index += 1) { const clip = value.clips[index]; if (clip.order_index !== index || clip.timeline_start_us !== end) return false; end = clip.timeline_end_us; }
+  for (let index = 0; index < v1Clips.length; index += 1) { const clip = v1Clips[index]; if (clip.order_index !== index || clip.timeline_start_us !== end) return false; end = clip.timeline_end_us; }
+  
+  // Validate A1 clips (can be anywhere, just check valid ranges)
+  const a1Clips = value.clips.filter(c => c.track_id === "A1");
+  for (const clip of a1Clips) { if (clip.timeline_start_us < 0 || clip.timeline_end_us <= clip.timeline_start_us) return false; }
+
   const captions = [...value.captions].sort((a, b) => a.start_us - b.start_us);
   if (!captions.every((item, index) => item.end_us <= end && (index === 0 || captions[index - 1].end_us <= item.start_us))) return false;
   if (value.locked_elements === undefined) return true;

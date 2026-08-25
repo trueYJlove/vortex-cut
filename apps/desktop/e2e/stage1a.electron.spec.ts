@@ -5,6 +5,7 @@ import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
+import { expectCurrentProject, openProjectManagement } from "./project-switcher";
 
 const require = createRequire(import.meta.url);
 const playwright = require(require.resolve("playwright", { paths: [dirname(require.resolve("@playwright/test"))] })) as { _electron: { launch: (options: Record<string, unknown>) => Promise<any> } };
@@ -69,16 +70,19 @@ test("真实 Electron 覆盖 Stage 1A 项目、四类素材和 availability 流�
     await expect(page.getByRole("heading", { name: "素材工作区" })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText(/Core 已连接/)).toBeVisible({ timeout: 30_000 });
 
-    await page.getByLabel("项目名称").fill("Stage 1A E2E");
-    await page.getByRole("button", { name: "创建" }).click();
-    await expect(page.getByRole("heading", { name: "Stage 1A E2E" })).toBeVisible();
+    await openProjectManagement(page);
+    await page.getByLabel("新项目名称").fill("Stage 1A E2E");
+    await page.getByRole("button", { name: "创建项目" }).click();
+    await expectCurrentProject(page, "Stage 1A E2E");
+    await openProjectManagement(page);
     await page.getByLabel("重命名项目").fill("Stage 1A Renamed");
-    await page.getByRole("button", { name: "重命名" }).click();
-    await expect(page.getByRole("heading", { name: "Stage 1A Renamed" })).toBeVisible();
-    await page.getByRole("button", { name: "归档" }).click();
-    await expect(page.locator(".project-state.archived")).toBeVisible();
-    await page.getByRole("button", { name: "重新打开" }).click();
-    await expect(page.locator(".project-state.active")).toBeVisible();
+    await page.getByRole("button", { name: "保存名称" }).click();
+    await expect(page.locator(".project-current-name")).toContainText("Stage 1A Renamed");
+    await page.getByRole("button", { name: "归档项目" }).click();
+    await expect(page.locator(".project-current-name")).toContainText("已归档");
+    await page.getByRole("button", { name: "重新打开项目" }).click();
+    await expect(page.locator(".project-current-name")).toContainText("活动");
+    await page.getByRole("button", { name: "关闭项目管理" }).click();
 
     const expectedNames: Record<string, string> = { video: "clip.mp4", audio: "sound.wav", image: "still.png", text: "notes.txt" };
     for (const kind of ["video", "audio", "image", "text"]) {
@@ -87,9 +91,21 @@ test("真实 Electron 覆盖 Stage 1A 项目、四类素材和 availability 流�
       await expect(assetRow).toBeVisible({ timeout: 30_000 });
       await expect(assetRow.locator(".asset-name strong")).toHaveText(expectedNames[kind]);
     }
-    await expect(page.getByText(/^aivideo:\/\/media\/[A-Za-z0-9_-]{32,}$/).first()).toBeVisible();
-    const textMediaUrl = await page.locator(".asset-row").filter({ hasText: "notes.txt" }).locator(".asset-name small").innerText();
-    await expect.poll(async () => page.evaluate(async url => (await fetch(url)).text(), textMediaUrl)).toContain("Stage 1A text fixture");
+    let videoMediaUrl: string | null = null;
+    await expect.poll(async () => {
+      const assets = await page.evaluate(async () => {
+        const projects = await window.desktop.listProjects({ limit: 100 });
+        const project = projects.items.find(item => item.name === "Stage 1A Renamed");
+        if (!project) throw new Error("E2E project was not found");
+        const list = await window.desktop.listAssets({ project_id: project.project_id, limit: 100 });
+        return list.items.map(item => ({ name: item.asset.display_name, media_url: item.media_url }));
+      });
+      const url = assets.find(item => item.name === "clip.mp4")?.media_url ?? null;
+      videoMediaUrl = url;
+      return url;
+    }, { timeout: 15_000 }).toMatch(/^aivideo:\/\/media\/[A-Za-z0-9_-]{32,}$/);
+    const mediaBytes = await page.evaluate(async url => (await fetch(url)).arrayBuffer().then(buffer => buffer.byteLength), videoMediaUrl!);
+    expect(mediaBytes).toBeGreaterThan(0);
     await expect(page.getByRole("heading", { name: "任务" })).toBeVisible();
 
     const projectId = await page.evaluate(async () => {

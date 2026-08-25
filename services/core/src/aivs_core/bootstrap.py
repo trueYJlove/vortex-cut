@@ -10,9 +10,14 @@ import sys
 
 import uvicorn
 
-from . import PROTOCOL_VERSION, __version__
-from .app import create_app
-from .config import Settings, admin_token_from_environment
+try:
+    from . import PROTOCOL_VERSION, __version__
+    from .app import create_app
+    from .config import Settings, admin_token_from_environment
+except ImportError:
+    from aivs_core import PROTOCOL_VERSION, __version__
+    from aivs_core.app import create_app
+    from aivs_core.config import Settings, admin_token_from_environment
 
 
 def parser() -> argparse.ArgumentParser:

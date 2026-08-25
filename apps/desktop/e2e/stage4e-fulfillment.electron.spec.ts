@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
+import { openProjectManagement, selectProject } from "./project-switcher";
 
 const require = createRequire(import.meta.url);
 const playwright = require(require.resolve("playwright", { paths: [dirname(require.resolve("@playwright/test"))] })) as {
@@ -76,7 +77,8 @@ async function ready(app: any) {
 }
 
 async function openShotWorkbench(page: any) {
-  await page.getByRole("button", { name: "打开镜头与资产需求清单" }).click();
+  await page.getByRole("button", { name: "工具" }).click();
+  await page.getByRole("menuitem", { name: "镜头需求" }).click();
   await expect(page.getByRole("heading", { name: "镜头与资产需求清单" })).toBeVisible();
 }
 
@@ -186,10 +188,11 @@ test("Gate 4E-5 离线 Electron、v14→v15、Prepare 零副作用与重启恢�
     const page = await ready(first);
     if (mode === "installed_offline_upgrade_v14") {
       projectId = "stage4e_legacy_project";
-      await page.getByLabel("当前项目").selectOption(projectId);
+      await selectProject(page, projectId);
     } else {
-      await page.getByLabel("项目名称").fill(`Stage 4E ${mode}`);
-      await page.getByRole("button", { name: "创建", exact: true }).click();
+      await openProjectManagement(page);
+      await page.getByLabel("新项目名称").fill(`Stage 4E ${mode}`);
+      await page.getByRole("button", { name: "创建项目" }).click();
       projectId = await page.evaluate(async name => {
         const projects = await window.desktop.listProjects({ limit: 100 });
         return projects.items.find(item => item.name === name)!.project_id;
@@ -291,7 +294,7 @@ test("Gate 4E-5 离线 Electron、v14→v15、Prepare 零副作用与重启恢�
   const second = await launch();
   try {
     const page = await ready(second);
-    await page.getByLabel("当前项目").selectOption(projectId);
+    await selectProject(page, projectId);
     await openShotWorkbench(page);
     await page.getByRole("tab", { name: "图片履约" }).click();
     const panel = page.getByRole("region", { name: "Offline image shot 图片履约" });
