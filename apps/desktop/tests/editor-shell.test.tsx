@@ -174,22 +174,22 @@ describe("Editor shell 基线", () => {
     render(<App />);
     await screen.findByRole("button", { name: /Clip 1/ });
     const dataTransfer = { getData: (type: string) => (type === "application/x-vortex-cut-asset" ? video.asset_id : ""), setData: vi.fn(), dropEffect: "copy", effectAllowed: "copy" };
-    const trackContent = (await screen.findByText("V1")).closest(".track")!.querySelector(".track-content") as HTMLElement;
-    fireEvent.dragOver(trackContent, { dataTransfer });
-    expect(screen.getByText("释放后插入视频轨道")).toBeInTheDocument();
-    fireEvent.drop(trackContent, { dataTransfer });
-    expect(screen.queryByText("释放后插入视频轨道")).not.toBeInTheDocument();
+    const canvas = document.querySelector(".timeline-canvas-container canvas") as HTMLElement;
+    fireEvent.dragOver(canvas, { dataTransfer });
+    expect(screen.getByText("释放以追加到时间线")).toBeInTheDocument();
+    fireEvent.drop(canvas, { dataTransfer });
+    expect(screen.queryByText("释放以追加到时间线")).not.toBeInTheDocument();
   });
 
   it("clears the drop highlight when dragging away", async () => {
     render(<App />);
     await screen.findByRole("button", { name: /Clip 1/ });
     const dataTransfer = { getData: (type: string) => (type === "application/x-vortex-cut-asset" ? video.asset_id : ""), setData: vi.fn(), dropEffect: "copy", effectAllowed: "copy" };
-    const trackContent = (await screen.findByText("V1")).closest(".track")!.querySelector(".track-content") as HTMLElement;
-    fireEvent.dragOver(trackContent, { dataTransfer });
-    expect(screen.getByText("释放后插入视频轨道")).toBeInTheDocument();
-    fireEvent.dragLeave(trackContent, { dataTransfer });
-    expect(screen.queryByText("释放后插入视频轨道")).not.toBeInTheDocument();
+    const canvas = document.querySelector(".timeline-canvas-container canvas") as HTMLElement;
+    fireEvent.dragOver(canvas, { dataTransfer });
+    expect(screen.getByText("释放以追加到时间线")).toBeInTheDocument();
+    fireEvent.dragLeave(canvas, { dataTransfer });
+    expect(screen.queryByText("释放以追加到时间线")).not.toBeInTheDocument();
   });
 
   it("keeps the toolbar row compact with only status output", async () => {

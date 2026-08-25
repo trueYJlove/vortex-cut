@@ -1,10 +1,16 @@
 /**
- * Timeline Phase 1 — Canvas + DOM hybrid timeline component.
- * Replaces the inline TimelinePanel in App.tsx.
+ * Timeline — Canvas + DOM hybrid timeline component.
+ *
+ * Phase 1: basic Canvas rendering (ruler, clip blocks, caption blocks,
+ *          playhead, selection highlight)
+ * Phase 3: clip drag-reorder (V1 sequence)
+ * Phase 4: trim handles, snapping, marquee selection, playhead dragging,
+ *          and free positioning for A1 audio clips
  *
  * Architecture:
- * - DOM: toolbar, track headers, drop zones
- * - Canvas: ruler ticks, clip blocks, caption blocks, playhead, selection highlight
+ * - DOM: toolbar, track headers, drop zones, accessible clip list
+ * - Canvas: ruler ticks, clip blocks, caption blocks, playhead, selection
+ *           highlight, trim handles, snap guides, marquee, drag ghosts
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -36,9 +42,31 @@ import {
   type CaptionRenderRect,
   type ClipRenderRect,
   type TickMark,
+  type TimelineHover,
+  type TimelineInteraction,
   type TimelineSelection,
   type TimelineViewState,
+  type TrimEdge,
 } from "./types.js";
+import {
+  MIN_CLIP_US,
+  SNAP_PX,
+  TRIM_HANDLE_PX,
+  clipDuration,
+  clipsInRect,
+  computeClipRects,
+  computeV1TargetIndex,
+  ghostPosition,
+  hitTestClips,
+  hitTestTrimHandle,
+  marqueeRect,
+  packV1Clips,
+  snapCandidates,
+  snapValue,
+  timeToX,
+  v1ReorderToMixedIndex,
+  xToTime,
+} from "./geometry.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -120,24 +148,7 @@ function computeFrameUrls(
   return urls;
 }
 
-// ── Geometry computation ─────────────────────────────────────────────────────
-
-function computeClipRects(
-  clips: TimelineClip[],
-  view: TimelineViewState,
-): ClipRenderRect[] {
-  return clips.map((clip, index) => {
-    const trackIndex = clip.track_id === "A1" ? 1 : 0;
-    return {
-      x: view.headerWidth + (clip.timeline_start_us / 1_000_000) * view.pixelsPerSecond,
-      y: view.rulerHeight + trackIndex * view.trackHeight,
-      width: Math.max(2, ((clip.timeline_end_us - clip.timeline_start_us) / 1_000_000) * view.pixelsPerSecond),
-      height: view.trackHeight,
-      clip,
-      index,
-    };
-  });
-}
+// ── Caption geometry ─────────────────────────────────────────────────────────
 
 function computeCaptionRects(
   captions: TimelineCaption[],
@@ -177,17 +188,7 @@ function computeTicks(
   return ticks;
 }
 
-// ── Drag state ───────────────────────────────────────────────────────────────
-
-/** Active clip drag-reorder state (Timeline Phase 3). */
-interface DragState {
-  clipId: TimelineClipId;
-  startX: number;
-  originalIndex: number;
-  currentIndex: number;
-}
-
-// ── Audio waveform data (Timeline Phase 4) ──────────────────────────────────
+// ── Audio waveform data ──────────────────────────────────────────────────────
 
 /** Number of amplitude peaks kept per clip (visual resolution vs memory). */
 const WAVEFORM_PEAK_COUNT = 200;
@@ -272,8 +273,10 @@ function drawTimeline(
   ticks: TickMark[],
   playheadUs: number,
   selection: TimelineSelection,
-  dragState: DragState | null,
+  interaction: TimelineInteraction | null,
+  hover: TimelineHover,
   totalUs: number,
+  lockedElements: string[],
   thumbnailCache?: Map<string, HTMLImageElement>,
   waveformCache?: Map<string, Float32Array>,
 ) {
@@ -327,17 +330,33 @@ function drawTimeline(
     }
   }
 
+  const selectedIds =
+    selection?.kind === "clip"
+      ? [selection.id]
+      : selection?.kind === "clips"
+        ? selection.ids
+        : [];
+
+  const trimmable = (clip: TimelineClip) =>
+    clip.asset_kind === "video" || clip.asset_kind === "audio";
+
   // Clips
   for (const rect of clipRects) {
-    const isSelected = selection?.kind === "clip" && selection.id === rect.clip.clip_id;
-    const isLocked = false; // locked state comes from document.locked_elements, handled via prop
+    const isSelected = selectedIds.includes(rect.clip.clip_id);
+    const isLocked = lockedElements.includes(rect.clip.clip_id);
 
     // Clip body
-    ctx.fillStyle = isSelected ? "#4a90d9" : rect.clip.asset_kind === "audio" ? "#8a5a9a" : rect.clip.asset_kind === "video" ? "#3a6ea5" : "#5a8a5a";
+    ctx.fillStyle = isSelected
+      ? "#4a90d9"
+      : rect.clip.asset_kind === "audio"
+        ? "#8a5a9a"
+        : rect.clip.asset_kind === "video"
+          ? "#3a6ea5"
+          : "#5a8a5a";
     ctx.fillRect(rect.x, rect.y + 2, rect.width, rect.height - 4);
 
     // Draw thumbnail frames if available
-    if (thumbnailCache && rect.width > 10) {
+    if (thumbnailCache && rect.width > 10 && rect.clip.asset_kind === "video") {
       const frameCount = Math.max(1, Math.min(16, Math.round(rect.width / 56)));
       const frameWidth = rect.width / frameCount;
       for (let fi = 0; fi < frameCount; fi++) {
@@ -357,8 +376,8 @@ function drawTimeline(
       }
     }
 
-    // Waveform overlay (video clips only; semi-transparent over thumbnails)
-    if (waveformCache && rect.clip.asset_kind === "video" && rect.width > 20) {
+    // Waveform overlay (video clips carry audio; audio clips are pure audio)
+    if (waveformCache && rect.clip.asset_kind !== "image" && rect.width > 20) {
       const peaks = waveformCache.get(rect.clip.clip_id);
       if (peaks && peaks.length > 0) {
         const padding = 6;
@@ -368,13 +387,26 @@ function drawTimeline(
         const drawableWidth = Math.max(1, rect.width - 4);
         const count = Math.min(peaks.length, Math.floor(drawableWidth / barTotal));
         const centerY = rect.y + 2 + (rect.height - 4) / 2;
-        ctx.fillStyle = "rgba(100, 200, 255, 0.5)";
+        ctx.fillStyle =
+          rect.clip.asset_kind === "audio"
+            ? "rgba(255, 200, 120, 0.55)"
+            : "rgba(100, 200, 255, 0.5)";
         for (let i = 0; i < count; i++) {
           const amp = Math.min(1, peaks[i] * WAVEFORM_GAIN);
           const h = Math.max(1, maxHeight * amp);
           ctx.fillRect(rect.x + 2 + i * barTotal, centerY - h / 2, barWidth, h);
         }
       }
+    }
+
+    // Locked indicator
+    if (isLocked) {
+      ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
+      ctx.fillRect(rect.x, rect.y + 2, rect.width, rect.height - 4);
+      ctx.fillStyle = "#cccccc";
+      ctx.font = "9px sans-serif";
+      ctx.textBaseline = "middle";
+      ctx.fillText("🔒", rect.x + rect.width - 14, rect.y + rect.height / 2);
     }
 
     // Selection border
@@ -389,7 +421,10 @@ function drawTimeline(
       ctx.fillStyle = "#ffffff";
       ctx.font = "11px sans-serif";
       ctx.textBaseline = "middle";
-      const label = `Clip ${rect.index + 1}`;
+      const label =
+        rect.clip.asset_kind === "audio"
+          ? `Audio ${rect.clip.order_index + 1}`
+          : `Clip ${rect.clip.order_index + 1}`;
       ctx.save();
       ctx.beginPath();
       ctx.rect(rect.x + 4, rect.y + 2, rect.width - 8, rect.height - 4);
@@ -397,6 +432,28 @@ function drawTimeline(
       ctx.fillText(label, rect.x + 6, rect.y + rect.height / 2);
       ctx.restore();
     }
+  }
+
+  // Trim handles: single selected clip (Phase 4) or hovered clip
+  const handleTargets = new Map<TimelineClipId, ClipRenderRect>();
+  if (selection?.kind === "clip") {
+    const rect = clipRects.find((r) => r.clip.clip_id === selection.id);
+    if (rect && trimmable(rect.clip)) handleTargets.set(rect.clip.clip_id, rect);
+  }
+  if (hover.clipId && hover.edge) {
+    const rect = clipRects.find((r) => r.clip.clip_id === hover.clipId);
+    if (rect && trimmable(rect.clip)) handleTargets.set(rect.clip.clip_id, rect);
+  }
+  for (const rect of handleTargets.values()) {
+    const handleY = rect.y + 6;
+    const handleH = rect.height - 12;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(rect.x - 3, handleY, 6, handleH);
+    ctx.fillRect(rect.x + rect.width - 3, handleY, 6, handleH);
+    ctx.strokeStyle = "#7ab8ff";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(rect.x - 3, handleY, 6, handleH);
+    ctx.strokeRect(rect.x + rect.width - 3, handleY, 6, handleH);
   }
 
   // Captions (enhanced transcript style)
@@ -455,36 +512,87 @@ function drawTimeline(
     }
   }
 
-  // Drag reorder feedback: ghost clip + insertion indicator at the landing slot
-  if (dragState) {
-    const draggedRect = clipRects.find((r) => r.clip.clip_id === dragState.clipId);
-    const targetRect = clipRects[dragState.currentIndex];
-    if (draggedRect && targetRect) {
-      // Moving right inserts after the clip currently at currentIndex; moving
-      // left inserts before it. Clips are packed, so x positions reflect order.
-      const targetX =
-        dragState.currentIndex > dragState.originalIndex
-          ? targetRect.x + targetRect.width
-          : targetRect.x;
-
-      // Ghost of the dragged clip at its landing position
+  // Drag ghost (move / trim)
+  if (interaction?.kind === "move") {
+    const clip = clipRects.find((r) => r.clip.clip_id === interaction.clipId)?.clip;
+    if (clip) {
+      const ghost = ghostPosition(clipRects.map((r) => r.clip), clip, interaction.targetStartUs);
+      const gx = timeToX(ghost.startUs, view);
+      const gy = view.rulerHeight + (clip.track_id === "A1" ? 1 : 0) * view.trackHeight;
+      const gw = Math.max(2, ((ghost.endUs - ghost.startUs) / 1_000_000) * view.pixelsPerSecond);
       ctx.save();
       ctx.globalAlpha = 0.55;
-      ctx.fillStyle = draggedRect.clip.asset_kind === "video" ? "#3a6ea5" : "#5a8a5a";
-      ctx.fillRect(targetX, draggedRect.y + 2, draggedRect.width, draggedRect.height - 4);
+      ctx.fillStyle = clip.asset_kind === "audio" ? "#8a5a9a" : clip.asset_kind === "video" ? "#3a6ea5" : "#5a8a5a";
+      ctx.fillRect(gx, gy + 2, gw, view.trackHeight - 4);
       ctx.strokeStyle = "#7ab8ff";
       ctx.lineWidth = 1.5;
-      ctx.strokeRect(targetX, draggedRect.y + 2, draggedRect.width, draggedRect.height - 4);
+      ctx.strokeRect(gx, gy + 2, gw, view.trackHeight - 4);
       ctx.restore();
-
-      // Insertion indicator line
-      ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(targetX, draggedRect.y);
-      ctx.lineTo(targetX, draggedRect.y + draggedRect.height);
-      ctx.stroke();
     }
+  } else if (interaction?.kind === "trim") {
+    const clip = clipRects.find((r) => r.clip.clip_id === interaction.clipId)?.clip;
+    if (clip) {
+      const durationUs = clipDuration(clip);
+      let ghostStartUs = clip.timeline_start_us;
+      let ghostEndUs = clip.timeline_end_us;
+      if (interaction.edge === "left") {
+        const delta = interaction.targetStartUs - interaction.originalStartUs;
+        ghostStartUs = clip.timeline_start_us + delta;
+      } else {
+        const delta = interaction.targetEndUs - interaction.originalEndUs;
+        ghostEndUs = clip.timeline_end_us + delta;
+      }
+      if (ghostEndUs - ghostStartUs < MIN_CLIP_US) ghostEndUs = ghostStartUs + MIN_CLIP_US;
+      const gx = timeToX(ghostStartUs, view);
+      const gy = view.rulerHeight + (clip.track_id === "A1" ? 1 : 0) * view.trackHeight;
+      const gw = Math.max(2, ((ghostEndUs - ghostStartUs) / 1_000_000) * view.pixelsPerSecond);
+      ctx.save();
+      ctx.globalAlpha = 0.55;
+      ctx.fillStyle = clip.asset_kind === "audio" ? "#8a5a9a" : "#3a6ea5";
+      ctx.fillRect(gx, gy + 2, gw, view.trackHeight - 4);
+      ctx.strokeStyle = "#ffd76e";
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(gx, gy + 2, gw, view.trackHeight - 4);
+      ctx.restore();
+    }
+  }
+
+  // Snap guide (Phase 4)
+  const snapUs =
+    (interaction?.kind === "move" || interaction?.kind === "trim") ? interaction.snapUs : null;
+  if (snapUs !== null && snapUs !== undefined) {
+    const sx = timeToX(snapUs, view);
+    if (sx >= view.headerWidth && sx <= width) {
+      ctx.strokeStyle = "#ffd76e";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath();
+      ctx.moveTo(sx, 0);
+      ctx.lineTo(sx, height);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = "#ffd76e";
+      ctx.font = "10px monospace";
+      ctx.textBaseline = "top";
+      ctx.fillText(formatRulerTime(snapUs), sx + 4, view.rulerHeight + 4);
+    }
+  }
+
+  // Marquee selection rect (Phase 4)
+  if (interaction?.kind === "marquee") {
+    const rect = marqueeRect(
+      interaction.startX,
+      interaction.startY,
+      interaction.currentX,
+      interaction.currentY,
+    );
+    ctx.fillStyle = "rgba(74, 144, 217, 0.12)";
+    ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+    ctx.strokeStyle = "#7ab8ff";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 3]);
+    ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+    ctx.setLineDash([]);
   }
 
   // Playhead
@@ -506,34 +614,6 @@ function drawTimeline(
     ctx.closePath();
     ctx.fill();
   }
-}
-
-// ── Hit testing ──────────────────────────────────────────────────────────────
-
-function hitTestClips(
-  x: number,
-  y: number,
-  clipRects: ClipRenderRect[],
-): TimelineClipId | null {
-  for (const rect of clipRects) {
-    if (x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height) {
-      return rect.clip.clip_id;
-    }
-  }
-  return null;
-}
-
-function hitTestCaptions(
-  x: number,
-  y: number,
-  captionRects: CaptionRenderRect[],
-): string | null {
-  for (const rect of captionRects) {
-    if (x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height) {
-      return rect.caption.caption_id;
-    }
-  }
-  return null;
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
@@ -563,7 +643,7 @@ export function TimelinePanel({
   onRedo: () => void;
   assetMedia: AssetMediaEntry[];
   playheadUs: number;
-  /** Optional seek callback invoked when a caption is clicked (transcript overlay). */
+  /** Optional seek callback invoked when the playhead is dragged or a caption is clicked. */
   onSeek?: (timeUs: number) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -571,10 +651,12 @@ export function TimelinePanel({
   const [view, setView] = useState<TimelineViewState>(DEFAULT_VIEW_STATE);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 800, height: 200 });
-  // Drag reorder state (Phase 3): null when no drag is in progress.
-  const [dragState, setDragState] = useState<DragState | null>(null);
-  // Synchronous mirror of dragState so pointer handlers always read the latest value.
-  const dragStateRef = useRef<DragState | null>(null);
+  // Active pointer interaction (Phase 4): null when idle.
+  const [interaction, setInteraction] = useState<TimelineInteraction | null>(null);
+  // Synchronous mirror of interaction so pointer handlers always read the latest value.
+  const interactionRef = useRef<TimelineInteraction | null>(null);
+  // Hover state (trim handles + cursor).
+  const [hover, setHover] = useState<TimelineHover>({ clipId: null, edge: null });
 
   const clips = document?.clips ?? [];
   const captions = document?.captions ?? [];
@@ -605,9 +687,9 @@ export function TimelinePanel({
 
   // Thumbnail image cache: key = "clipId:frameIndex" -> loaded HTMLImageElement
   const thumbnailCache = useRef<Map<string, HTMLImageElement>>(new Map());
-  const [, setThumbnailVersion] = useState(0); // trigger re-render when images load
+  const [thumbnailVersion, setThumbnailVersion] = useState(0); // trigger re-render when images load
 
-  // Waveform peak cache (Phase 4): clip_id -> amplitude peaks (0..1).
+  // Waveform peak cache: clip_id -> amplitude peaks (0..1).
   const waveformCache = useRef<Map<string, Float32Array>>(new Map());
   const [waveformVersion, setWaveformVersion] = useState(0); // trigger re-render when peaks load
   // Clip ids with an in-flight decode, to avoid duplicate fetches per render.
@@ -642,8 +724,7 @@ export function TimelinePanel({
     }
   }, [clipRects, assetMedia, view.pixelsPerSecond]);
 
-  // Load waveform peaks for visible video clips (Phase 4).
-  // Only video clips carry audio — image clips are skipped. Decoding runs fully
+  // Load waveform peaks for visible video and audio clips. Decoding runs fully
   // async (fetch + OfflineAudioContext), so it never blocks rendering; failures
   // (e.g. media with no audio track) are skipped silently. Decoded peaks are
   // cached permanently for the lifetime of the component.
@@ -653,7 +734,7 @@ export function TimelinePanel({
 
     const documentClipIds = new Set<string>();
     for (const rect of clipRects) {
-      if (rect.clip.asset_kind === "video") documentClipIds.add(rect.clip.clip_id);
+      if (rect.clip.asset_kind !== "image") documentClipIds.add(rect.clip.clip_id);
     }
     // Prune entries for clips that no longer exist in the document.
     for (const key of cache.keys()) {
@@ -667,7 +748,7 @@ export function TimelinePanel({
 
     for (const rect of clipRects) {
       const clip = rect.clip;
-      if (clip.asset_kind !== "video") continue;
+      if (clip.asset_kind === "image") continue;
       if (cache.has(clip.clip_id) || pendingWaveforms.current.has(clip.clip_id)) continue;
       // Only start decoding clips currently on screen.
       if (rect.x + rect.width <= viewLeft || rect.x >= viewRight) continue;
@@ -716,12 +797,14 @@ export function TimelinePanel({
       ticks,
       playheadUs,
       selection,
-      dragState,
+      interaction,
+      hover,
       totalUs,
+      document?.locked_elements ?? [],
       thumbnailCache.current,
       waveformCache.current,
     );
-  }, [canvasSize, view, clipRects, captionRects, ticks, playheadUs, selection, dragState, totalUs, waveformVersion]);
+  }, [canvasSize, view, clipRects, captionRects, ticks, playheadUs, selection, interaction, hover, totalUs, thumbnailVersion, waveformVersion]);
 
   // Zoom via wheel
   const handleWheel = useCallback(
@@ -739,20 +822,84 @@ export function TimelinePanel({
     [],
   );
 
-  // Click to select
-  const handleCanvasClick = useCallback(
+  // ── Pointer interactions (Phase 4) ─────────────────────────────────────────
+
+  const canvasCoords = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+  };
+
+  const isClipLocked = (clipId: TimelineClipId) =>
+    Boolean(document?.locked_elements?.includes(clipId));
+
+  const handleCanvasMouseDown = useCallback(
     (event: React.MouseEvent<HTMLCanvasElement>) => {
+      if (event.button !== 0) return;
+      const coords = canvasCoords(event);
+      if (!coords) return;
+      const { x, y } = coords;
       const canvas = canvasRef.current;
       if (!canvas) return;
-      const rect = canvas.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
 
-      const clipId = hitTestClips(x, y, clipRects);
-      if (clipId) {
-        setSelection({ kind: "clip", id: clipId });
+      // Ruler area → playhead drag
+      if (y <= view.rulerHeight) {
+        const timeUs = xToTime(x, view);
+        onSeek?.(timeUs);
+        const next: TimelineInteraction = { kind: "playhead", startX: x };
+        interactionRef.current = next;
+        setInteraction(next);
+        canvas.style.cursor = "col-resize";
         return;
       }
+
+      // Trim handle → trim drag (must take priority over plain clip hit)
+      const handle = hitTestTrimHandle(x, y, clipRects);
+      if (handle && !isClipLocked(handle.clipId)) {
+        const clip = clips.find((c) => c.clip_id === handle.clipId);
+        if (clip) {
+          setSelection({ kind: "clip", id: handle.clipId });
+          const next: TimelineInteraction = {
+            kind: "trim",
+            clipId: handle.clipId,
+            edge: handle.edge,
+            startX: x,
+            originalStartUs: clip.source_start_us ?? 0,
+            originalEndUs: clip.source_end_us ?? 0,
+            targetStartUs: clip.source_start_us ?? 0,
+            targetEndUs: clip.source_end_us ?? 0,
+            snapUs: null,
+          };
+          interactionRef.current = next;
+          setInteraction(next);
+          canvas.style.cursor = "ew-resize";
+          return;
+        }
+      }
+
+      // Clip body → move drag
+      const clipId = hitTestClips(x, y, clipRects);
+      if (clipId) {
+        if (isClipLocked(clipId)) return;
+        const clip = clips.find((c) => c.clip_id === clipId);
+        if (!clip) return;
+        setSelection({ kind: "clip", id: clipId });
+        const next: TimelineInteraction = {
+          kind: "move",
+          clipId,
+          startX: x,
+          startUs: clip.timeline_start_us,
+          targetStartUs: clip.timeline_start_us,
+          snapUs: null,
+        };
+        interactionRef.current = next;
+        setInteraction(next);
+        canvas.style.cursor = "grabbing";
+        return;
+      }
+
+      // Caption → select + seek (click only; captions are not draggable yet)
       const captionId = hitTestCaptions(x, y, captionRects);
       if (captionId) {
         const caption = captions.find((c) => c.caption_id === captionId);
@@ -760,100 +907,201 @@ export function TimelinePanel({
         setSelection({ kind: "caption", id: captionId });
         return;
       }
-      setSelection(null);
-    },
-    [clipRects, captionRects, captions, onSeek, setSelection],
-  );
 
-  // Clip drag reorder (Phase 3)
-
-  const handleCanvasMouseDown = useCallback(
-    (event: React.MouseEvent<HTMLCanvasElement>) => {
-      if (event.button !== 0) return;
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const rect = canvas.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
-
-      const clipId = hitTestClips(x, y, clipRects);
-      if (!clipId || document?.locked_elements?.includes(clipId)) return;
-      const clip = clips.find((c) => c.clip_id === clipId);
-      if (!clip) return;
-
-      const next: DragState = {
-        clipId,
+      // Empty area → marquee selection
+      if (!event.shiftKey) setSelection(null);
+      const next: TimelineInteraction = {
+        kind: "marquee",
         startX: x,
-        originalIndex: clip.order_index,
-        currentIndex: clip.order_index,
+        startY: y,
+        currentX: x,
+        currentY: y,
       };
-      dragStateRef.current = next;
-      setDragState(next);
-      canvas.style.cursor = "grabbing";
+      interactionRef.current = next;
+      setInteraction(next);
+      canvas.style.cursor = "crosshair";
     },
-    [clipRects, clips, document?.locked_elements],
+    [view.rulerHeight, view, onSeek, clipRects, clips, captionRects, captions, setSelection],
   );
 
   const handleCanvasMouseMove = useCallback(
     (event: React.MouseEvent<HTMLCanvasElement>) => {
       const canvas = canvasRef.current;
       if (!canvas) return;
-      const rect = canvas.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
+      const coords = canvasCoords(event);
+      if (!coords) return;
+      const { x, y } = coords;
 
-      const active = dragStateRef.current;
+      const active = interactionRef.current;
       if (active) {
-        // One index position ≈ one average clip width on screen.
-        const avgWidth =
-          clipRects.length > 0
-            ? clipRects.reduce((sum, r) => sum + r.width, 0) / clipRects.length
-            : view.pixelsPerSecond * 2;
-        const indexOffset = avgWidth > 0 ? (x - active.startX) / avgWidth : 0;
-        const target = Math.max(
-          0,
-          Math.min(clips.length - 1, active.originalIndex + Math.round(indexOffset)),
-        );
-        if (target !== active.currentIndex) {
-          const next = { ...active, currentIndex: target };
-          dragStateRef.current = next;
-          setDragState(next);
+        const pps = view.pixelsPerSecond;
+        if (active.kind === "playhead") {
+          onSeek?.(xToTime(x, view));
+          canvas.style.cursor = "col-resize";
+          return;
         }
-        canvas.style.cursor = "grabbing";
+        if (active.kind === "marquee") {
+          const next: TimelineInteraction = { ...active, currentX: x, currentY: y };
+          interactionRef.current = next;
+          setInteraction(next);
+          canvas.style.cursor = "crosshair";
+          return;
+        }
+        if (active.kind === "move") {
+          const deltaUs = ((x - active.startX) / pps) * 1_000_000;
+          const raw = Math.max(0, active.startUs + deltaUs);
+          const candidates = snapCandidates(clipRects, playheadUs, active.clipId);
+          const threshold = (SNAP_PX / pps) * 1_000_000;
+          const snapped = snapValue(raw, candidates, threshold);
+          const next: TimelineInteraction = {
+            ...active,
+            targetStartUs: snapped,
+            snapUs: Math.abs(snapped - raw) > 1 ? snapped : null,
+          };
+          interactionRef.current = next;
+          setInteraction(next);
+          canvas.style.cursor = "grabbing";
+          return;
+        }
+        if (active.kind === "trim") {
+          const clip = clips.find((c) => c.clip_id === active.clipId);
+          if (clip) {
+            const deltaUs = ((x - active.startX) / pps) * 1_000_000;
+            const threshold = (SNAP_PX / pps) * 1_000_000;
+            const candidates = snapCandidates(clipRects, playheadUs, active.clipId);
+            let targetStartUs = active.targetStartUs;
+            let targetEndUs = active.targetEndUs;
+            let snapUs: number | null = null;
+            if (active.edge === "left") {
+              const rawStart = Math.max(
+                0,
+                Math.min(active.originalEndUs - MIN_CLIP_US, active.originalStartUs + deltaUs),
+              );
+              const visualEdge = clip.timeline_start_us + (rawStart - active.originalStartUs);
+              const snapped = snapValue(visualEdge, candidates, threshold);
+              targetStartUs = Math.max(
+                0,
+                Math.min(
+                  active.originalEndUs - MIN_CLIP_US,
+                  active.originalStartUs + (snapped - clip.timeline_start_us),
+                ),
+              );
+              snapUs = Math.abs(snapped - visualEdge) > 1 ? snapped : null;
+            } else {
+              const rawEnd = Math.max(active.originalStartUs + MIN_CLIP_US, active.originalEndUs + deltaUs);
+              const visualEdge = clip.timeline_end_us + (rawEnd - active.originalEndUs);
+              const snapped = snapValue(visualEdge, candidates, threshold);
+              targetEndUs = Math.max(
+                active.originalStartUs + MIN_CLIP_US,
+                active.originalEndUs + (snapped - clip.timeline_end_us),
+              );
+              snapUs = Math.abs(snapped - visualEdge) > 1 ? snapped : null;
+            }
+            const next: TimelineInteraction = {
+              ...active,
+              targetStartUs,
+              targetEndUs,
+              snapUs,
+            };
+            interactionRef.current = next;
+            setInteraction(next);
+            canvas.style.cursor = "ew-resize";
+            return;
+          }
+        }
+      }
+
+      // Hover cursor + trim handle detection
+      const handle = hitTestTrimHandle(x, y, clipRects);
+      const nextHover: TimelineHover = handle
+        ? { clipId: handle.clipId, edge: handle.edge }
+        : { clipId: hitTestClips(x, y, clipRects), edge: null };
+      setHover((prev) =>
+        prev.clipId === nextHover.clipId && prev.edge === nextHover.edge ? prev : nextHover,
+      );
+      if (handle) {
+        canvas.style.cursor = "ew-resize";
       } else {
-        // Hover cursor: "grab" over non-locked clips, "default" elsewhere.
         const clipId = hitTestClips(x, y, clipRects);
-        const locked = clipId ? document?.locked_elements?.includes(clipId) : false;
+        const locked = clipId ? isClipLocked(clipId) : false;
         canvas.style.cursor = clipId && !locked ? "grab" : "default";
       }
     },
-    [clipRects, clips.length, view.pixelsPerSecond, document?.locked_elements],
+    [view, onSeek, clipRects, clips, playheadUs],
   );
 
-  const finishDrag = useCallback(() => {
-    const active = dragStateRef.current;
-    if (active && active.currentIndex !== active.originalIndex) {
-      void onPatch(
-        [{ op: "move_clip", clip_id: active.clipId, to_index: active.currentIndex }],
-        "移动片段",
-      );
-    }
-    dragStateRef.current = null;
-    setDragState(null);
+  const finishInteraction = useCallback(() => {
+    const active = interactionRef.current;
     const canvas = canvasRef.current;
+    if (active) {
+      if (active.kind === "move") {
+        const clip = clips.find((c) => c.clip_id === active.clipId);
+        if (clip && !isClipLocked(clip.clip_id)) {
+          if (clip.track_id === "V1") {
+            const v1Clips = clips.filter((c) => c.track_id === "V1");
+            const targetIndex = computeV1TargetIndex(v1Clips, clip.clip_id, active.targetStartUs);
+            if (targetIndex !== clip.order_index) {
+              const toIndex = v1ReorderToMixedIndex(clips, clip.clip_id, targetIndex);
+              void onPatch(
+                [{ op: "move_clip", clip_id: clip.clip_id, to_index: toIndex }],
+                "移动片段",
+              );
+            }
+          } else {
+            const rounded = Math.round(active.targetStartUs);
+            if (Math.abs(rounded - clip.timeline_start_us) >= 1000) {
+              void onPatch(
+                [{ op: "position_clip", clip_id: clip.clip_id, timeline_start_us: rounded }],
+                "移动音频片段",
+              );
+            }
+          }
+        }
+      } else if (active.kind === "trim") {
+        const clip = clips.find((c) => c.clip_id === active.clipId);
+        const startChanged = Math.abs(active.targetStartUs - active.originalStartUs) >= 1000;
+        const endChanged = Math.abs(active.targetEndUs - active.originalEndUs) >= 1000;
+        if (clip && (startChanged || endChanged)) {
+          void onPatch(
+            [
+              {
+                op: "trim_clip",
+                clip_id: clip.clip_id,
+                source_start_us: Math.round(active.targetStartUs),
+                source_end_us: Math.round(active.targetEndUs),
+              },
+            ],
+            "修剪片段",
+          );
+        }
+      } else if (active.kind === "marquee") {
+        const rect = marqueeRect(active.startX, active.startY, active.currentX, active.currentY);
+        if (rect.width >= 4 && rect.height >= 4) {
+          const ids = clipsInRect(rect, clipRects);
+          setSelection(ids.length > 0 ? { kind: "clips", ids } : null);
+        }
+      }
+    }
+    interactionRef.current = null;
+    setInteraction(null);
     if (canvas) canvas.style.cursor = "default";
-  }, [onPatch]);
+  }, [clips, clipRects, onPatch, setSelection]);
 
-  // Finish the drag even when the pointer leaves the canvas mid-drag.
-  const isDragging = dragState !== null;
+  // Finish the interaction even when the pointer leaves the canvas mid-drag.
+  const hasInteraction = interaction !== null;
   useEffect(() => {
-    if (!isDragging) return;
-    const handleWindowMouseUp = () => finishDrag();
+    if (!hasInteraction) return;
+    const handleWindowMouseUp = () => finishInteraction();
     window.addEventListener("mouseup", handleWindowMouseUp);
     return () => window.removeEventListener("mouseup", handleWindowMouseUp);
-  }, [isDragging, finishDrag]);
+  }, [hasInteraction, finishInteraction]);
 
-  // Drag & drop
+  const handleCanvasMouseLeave = useCallback(() => {
+    if (!interactionRef.current) setHover({ clipId: null, edge: null });
+  }, []);
+
+  // ── Drag & drop (asset → timeline) ────────────────────────────────────────
+
   const readAssetId = (event: React.DragEvent<HTMLElement>) =>
     event.dataTransfer.getData("application/x-vortex-cut-asset");
   const allowDrop = (event: React.DragEvent<HTMLElement>, index: number) => {
@@ -869,18 +1117,47 @@ export function TimelinePanel({
     if (assetId) onDropAsset(assetId, index);
   };
 
+  // ── Caption hit testing ────────────────────────────────────────────────────
+
+  function hitTestCaptions(
+    x: number,
+    y: number,
+    rects: CaptionRenderRect[],
+  ): string | null {
+    for (const rect of rects) {
+      if (x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height) {
+        return rect.caption.caption_id;
+      }
+    }
+    return null;
+  }
+
+  // ── Selection helpers for the toolbar ──────────────────────────────────────
+
   const selectedClip =
     selection?.kind === "clip" ? clips.find((c) => c.clip_id === selection.id) : undefined;
   const selectedCaption =
     selection?.kind === "caption"
       ? captions.find((c) => c.caption_id === selection.id)
       : undefined;
+  const selectedIds =
+    selection?.kind === "clip"
+      ? [selection.id]
+      : selection?.kind === "clips"
+        ? selection.ids
+        : [];
+  const selectedClips = selectedIds
+    .map((id) => clips.find((c) => c.clip_id === id))
+    .filter((c): c is TimelineClip => Boolean(c));
+  const anySelectedLocked = selectedClips.some((c) => isClipLocked(c.clip_id));
+  const allSelectedLocked =
+    selectedClips.length > 0 && selectedClips.every((c) => isClipLocked(c.clip_id));
   const clipLocked = Boolean(
-    selectedClip && document?.locked_elements?.includes(selectedClip.clip_id),
+    selectedClip && isClipLocked(selectedClip.clip_id),
   );
   const captionLocked = Boolean(
     selectedCaption?.source_clip_id &&
-      document?.locked_elements?.includes(selectedCaption.source_clip_id),
+      isClipLocked(selectedCaption.source_clip_id),
   );
 
   const coverClip = clips.find((c) => c.asset_kind === "video" || c.asset_kind === "image");
@@ -900,17 +1177,22 @@ export function TimelinePanel({
         </IconButton>
         <span className="toolbar-sep" aria-hidden="true" />
         <IconButton
-          label={clipLocked ? "解锁片段" : "锁定片段"}
-          disabled={!selectedClip}
+          label={allSelectedLocked ? "解锁片段" : "锁定片段"}
+          disabled={selectedClips.length === 0}
           onClick={() =>
-            selectedClip &&
             void onPatch(
-              [{ op: "set_clip_locked", clip_id: selectedClip.clip_id, locked: !clipLocked }],
-              clipLocked ? "解锁片段" : "锁定片段",
+              selectedClips
+                .filter((c) => (allSelectedLocked ? isClipLocked(c.clip_id) : !isClipLocked(c.clip_id)))
+                .map((c) => ({
+                  op: "set_clip_locked" as const,
+                  clip_id: c.clip_id,
+                  locked: !allSelectedLocked,
+                })),
+              allSelectedLocked ? "解锁片段" : "锁定片段",
             )
           }
         >
-          {clipLocked ? <LockOpen /> : <Lock />}
+          {allSelectedLocked ? <LockOpen /> : <Lock />}
         </IconButton>
         <IconButton
           label="向前移动"
@@ -963,18 +1245,26 @@ export function TimelinePanel({
         </IconButton>
         <IconButton
           label="删除所选"
-          disabled={!selection || clipLocked || captionLocked}
-          onClick={() =>
-            selection &&
-            void onPatch(
-              [
-                selection.kind === "clip"
-                  ? { op: "remove_clip", clip_id: selection.id as never }
-                  : { op: "remove_caption", caption_id: selection.id as never },
-              ],
-              selection.kind === "clip" ? "删除片段" : "删除字幕",
-            )
-          }
+          disabled={!selection || (selectedClips.length === 0 && !selectedCaption)}
+          onClick={() => {
+            if (selectedCaption) {
+              void onPatch(
+                [{ op: "remove_caption", caption_id: selectedCaption.caption_id }],
+                "删除字幕",
+              );
+            } else if (selectedClips.length > 0) {
+              const deletable = selectedClips.filter((c) => !isClipLocked(c.clip_id));
+              if (deletable.length > 0) {
+                void onPatch(
+                  deletable.map((c) => ({
+                    op: "remove_clip" as const,
+                    clip_id: c.clip_id,
+                  })),
+                  "删除片段",
+                );
+              }
+            }
+          }}
         >
           <Trash2 />
         </IconButton>
@@ -1027,18 +1317,18 @@ export function TimelinePanel({
               {coverUrl ? <img src={coverUrl} alt="" /> : <Video />}
             </div>
             <div className="timeline-left-meta">
-              <strong>V1 视频</strong>
+              <strong><span className="timeline-track-id">V1</span> 视频</strong>
               <span>{clips.filter(c => c.track_id === "V1").length} 个片段</span>
             </div>
           </div>
           <div className="timeline-left-track" style={{ height: view.trackHeight, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <span style={{ fontSize: "12px", color: "#aaa", whiteSpace: "nowrap" }}>A1 音频</span>
+            <span style={{ fontSize: "12px", color: "#aaa", whiteSpace: "nowrap" }}><span className="timeline-track-id">A1</span> 音频</span>
           </div>
           <div
             className="timeline-left-track timeline-left-caption"
             style={{ height: view.trackHeight, display: "flex", alignItems: "center", justifyContent: "center" }}
           >
-            <span style={{ fontSize: "12px", color: "#aaa", whiteSpace: "nowrap" }}>C1 字幕</span>
+            <span style={{ fontSize: "12px", color: "#aaa", whiteSpace: "nowrap" }}><span className="timeline-track-id">C1</span> 字幕</span>
           </div>
         </div>
 
@@ -1051,16 +1341,62 @@ export function TimelinePanel({
         >
           <canvas
             ref={canvasRef}
-            onClick={handleCanvasClick}
+            aria-label="时间线画布"
             onMouseDown={handleCanvasMouseDown}
             onMouseMove={handleCanvasMouseMove}
-            onMouseUp={finishDrag}
+            onMouseUp={finishInteraction}
+            onMouseLeave={handleCanvasMouseLeave}
             onDragOver={(event) => { event.preventDefault(); allowDrop(event, clips.length); }}
             onDrop={(event) => handleDrop(event, dropIndex ?? clips.length)}
             onDragLeave={() => setDropIndex(null)}
             onDragEnd={() => setDropIndex(null)}
             style={{ display: "block", cursor: "default" }}
           />
+          {/* Accessible clip list (DOM): mirrors selection so keyboard /
+              screen-reader users and tests can select clips. */}
+          <div
+            className="timeline-a11y-clips"
+            style={{
+              position: "absolute",
+              width: 1,
+              height: 1,
+              padding: 0,
+              margin: -1,
+              overflow: "hidden",
+              clip: "rect(0 0 0 0)",
+              whiteSpace: "nowrap",
+              border: 0,
+            }}
+          >
+            {clips.map((clip, index) => {
+              const isSelected =
+                selection?.kind === "clip"
+                  ? selection.id === clip.clip_id
+                  : selection?.kind === "clips"
+                    ? selection.ids.includes(clip.clip_id)
+                    : false;
+              return (
+                <button
+                  key={clip.clip_id}
+                  aria-label={`Clip ${index + 1} ${clip.asset_kind} ${formatTime(clip.timeline_end_us - clip.timeline_start_us)}`}
+                  aria-pressed={isSelected}
+                  onClick={() => setSelection({ kind: "clip", id: clip.clip_id })}
+                />
+              );
+            })}
+            {captions.map((caption, index) => {
+              const isSelected =
+                selection?.kind === "caption" && selection.id === caption.caption_id;
+              return (
+                <button
+                  key={caption.caption_id}
+                  aria-label={caption.text || `字幕 ${index + 1}`}
+                  aria-pressed={isSelected}
+                  onClick={() => setSelection({ kind: "caption", id: caption.caption_id })}
+                />
+              );
+            })}
+          </div>
           {/* Drop zone overlay when dragging assets */}
           {dropIndex !== null && (
             <div

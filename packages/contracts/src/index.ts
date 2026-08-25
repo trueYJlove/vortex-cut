@@ -771,6 +771,7 @@ export type TimelinePatchOperation =
   | { op: "insert_transcript_segments"; transcript_id: TranscriptId; segment_ids: TranscriptSegmentId[]; at_index: number; padding_before_us: number; padding_after_us: number; create_captions: boolean; layout?: TimelineLayout }
   | { op: "remove_clip"; clip_id: TimelineClipId }
   | { op: "move_clip"; clip_id: TimelineClipId; to_index: number }
+  | { op: "position_clip"; clip_id: TimelineClipId; timeline_start_us: number }
   | { op: "trim_clip"; clip_id: TimelineClipId; source_start_us: number; source_end_us: number }
   | { op: "split_clip"; clip_id: TimelineClipId; source_time_us: number }
   | { op: "set_layout"; clip_id: TimelineClipId; layout: TimelineLayout }
@@ -1398,6 +1399,7 @@ export function isTimelinePatchOperation(value: unknown): value is TimelinePatch
     case "insert_transcript_segments": return onlyKeys(value, ["op", "transcript_id", "segment_ids", "at_index", "padding_before_us", "padding_after_us", "create_captions", "layout"]) && id("transcript_id") && Array.isArray(value.segment_ids) && value.segment_ids.length > 0 && value.segment_ids.every(isId) && index("at_index") && us("padding_before_us") && Number(value.padding_before_us) <= 300_000 && us("padding_after_us") && Number(value.padding_after_us) <= 300_000 && typeof value.create_captions === "boolean" && (value.layout === undefined || isTimelineLayout(value.layout));
     case "remove_clip": return onlyKeys(value, ["op", "clip_id"]) && id("clip_id");
     case "move_clip": return onlyKeys(value, ["op", "clip_id", "to_index"]) && id("clip_id") && index("to_index");
+    case "position_clip": return onlyKeys(value, ["op", "clip_id", "timeline_start_us"]) && id("clip_id") && us("timeline_start_us");
     case "trim_clip": return onlyKeys(value, ["op", "clip_id", "source_start_us", "source_end_us"]) && id("clip_id") && us("source_start_us") && us("source_end_us", 1) && Number(value.source_end_us) - Number(value.source_start_us) >= 100_000;
     case "split_clip": return onlyKeys(value, ["op", "clip_id", "source_time_us"]) && id("clip_id") && us("source_time_us", 1);
     case "set_layout": return onlyKeys(value, ["op", "clip_id", "layout"]) && id("clip_id") && isTimelineLayout(value.layout);

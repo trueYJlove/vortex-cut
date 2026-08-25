@@ -12,7 +12,7 @@ import { editorCommands, type EditorCommand } from "./editorCommands.js";
 import { TimelinePanel } from "./timeline/TimelineCanvas.js";
 
 type SaveState = "已保存" | "保存中" | "保存失败" | "草稿冲突";
-type Selection = { kind: "clip"; id: string } | { kind: "caption"; id: string } | null;
+type Selection = { kind: "clip"; id: string } | { kind: "clips"; ids: string[] } | { kind: "caption"; id: string } | null;
 const layouts: { value: TimelineLayout; label: string }[] = [{ value: "blurred_background", label: "模糊背景" }, { value: "crop_fill", label: "裁切填满" }, { value: "fit", label: "完整适配" }];
 const previewRatios: { value: string; label: string; ratio: number | null }[] = [{ value: "fit", label: "适应", ratio: null }, { value: "169", label: "16:9", ratio: 16 / 9 }, { value: "916", label: "9:16", ratio: 9 / 16 }, { value: "11", label: "1:1", ratio: 1 }, { value: "43", label: "4:3", ratio: 4 / 3 }, { value: "34", label: "3:4", ratio: 3 / 4 }];
 const presets: { value: CaptionPresetId; label: string }[] = [{ value: "default-bottom", label: "默认底部" }, { value: "game-safe-bottom", label: "游戏安全区" }, { value: "high-contrast", label: "高对比" }];
@@ -406,6 +406,15 @@ export function App() {
 
   const selectedClip = selection?.kind === "clip" ? working?.clips.find(item => item.clip_id === selection.id) : undefined;
   const selectedCaption = selection?.kind === "caption" ? working?.captions.find(item => item.caption_id === selection.id) : undefined;
+  const selectedClipIds =
+    selection?.kind === "clip"
+      ? [selection.id]
+      : selection?.kind === "clips"
+        ? selection.ids
+        : [];
+  const selectedClips = selectedClipIds
+    .map(id => working?.clips.find(item => item.clip_id === id))
+    .filter((item): item is TimelineClip => Boolean(item));
   const sortedClips = useMemo(() => [...(working?.clips ?? [])].sort((a, b) => a.order_index - b.order_index), [working?.clips]);
   const v1Clips = useMemo(() => sortedClips.filter(c => c.track_id === "V1"), [sortedClips]);
   const a1Clips = useMemo(() => sortedClips.filter(c => c.track_id === "A1"), [sortedClips]);
@@ -672,7 +681,7 @@ export function App() {
       case "timeline.undo": return timeline?.can_undo ? undefined : "没有可撤销的操作";
       case "timeline.redo": return timeline?.can_redo ? undefined : "没有可重做的操作";
       case "timeline.split": if (!timeline) return "需要时间线"; if (!selectedClip) return "请先选择时间线片段"; return undefined;
-      case "timeline.delete": if (!timeline) return "需要时间线"; if (!selectedClip && !selectedCaption) return "请先选择要删除的对象"; return undefined;
+      case "timeline.delete": if (!timeline) return "需要时间线"; if (selectedClips.length === 0 && !selectedCaption) return "请先选择要删除的对象"; return undefined;
       case "preview.generate": return renderDisabledReason ?? undefined;
       case "export.open": return undefined;
       case "ai.open": return project && timeline ? undefined : "需要项目和时间线";
@@ -692,7 +701,10 @@ export function App() {
         break;
       case "timeline.delete":
         if (selectedCaption) void patchTimeline([{ op: "remove_caption", caption_id: selectedCaption.caption_id }], "删除字幕");
-        else if (selectedClip) void patchTimeline([{ op: "remove_clip", clip_id: selectedClip.clip_id }], "删除片段");
+        else if (selectedClips.length > 0) {
+          const deletable = selectedClips.filter(item => !working?.locked_elements?.includes(item.clip_id));
+          if (deletable.length > 0) void patchTimeline(deletable.map(item => ({ op: "remove_clip", clip_id: item.clip_id })), "删除片段");
+        }
         break;
       case "preview.generate": void generatePreview(); break;
       case "export.open": setRenderPanelOpen(true); break;

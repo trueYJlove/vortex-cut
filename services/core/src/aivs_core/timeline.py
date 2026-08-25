@@ -18,6 +18,7 @@ PATCH_OPERATIONS = {
     "insert_transcript_segments",
     "remove_clip",
     "move_clip",
+    "position_clip",
     "trim_clip",
     "split_clip",
     "set_layout",
@@ -463,19 +464,25 @@ class TimelineService:
                 if not any(t.get("id") == "A1" for t in tracks):
                     # Insert A1 track between V1 and C1
                     a1_track = {"id": "A1", "kind": "audio", "locked": False}
-                    insert_idx = next((i for i, t in enumerate(tracks) if t.get("id") == "C1"), len(tracks))
+                    insert_idx = next(
+                        (i for i, t in enumerate(tracks) if t.get("id") == "C1"),
+                        len(tracks),
+                    )
                     tracks.insert(insert_idx, a1_track)
                     document["tracks"] = tracks
                 # Audio clips go to A1 track, appended at the end
                 a1_clips = [c for c in clips if c["track_id"] == "A1"]
                 last_end = max((c["timeline_end_us"] for c in a1_clips), default=0)
                 clip["timeline_start_us"] = last_end
-                clip["timeline_end_us"] = last_end + (clip["source_end_us"] - clip["source_start_us"])
+                clip["timeline_end_us"] = (
+                    last_end + (clip["source_end_us"] - clip["source_start_us"])
+                )
                 clip["order_index"] = len(a1_clips)
                 clips.append(clip)
             else:
                 # Video/image clips go to V1 track, inserted at index
-                at_index = _insert_index(operation.get("at_index"), len([c for c in clips if c["track_id"] == "V1"]))
+                v1_count_now = len([c for c in clips if c["track_id"] == "V1"])
+                at_index = _insert_index(operation.get("at_index"), v1_count_now)
                 # Find actual insertion position in mixed clips list
                 v1_count = 0
                 insert_pos = len(clips)
@@ -488,15 +495,20 @@ class TimelineService:
                 else:
                     insert_pos = len(clips)
                 clips.insert(insert_pos, clip)
-                # Reorder V1 clips
+                # Reorder V1 clips (images carry no source range; keep their
+                # configured duration when re-packing)
                 v1_clips = [c for c in clips if c["track_id"] == "V1"]
                 for idx, c in enumerate(v1_clips):
                     c["order_index"] = idx
+                    if c["asset_kind"] == "video":
+                        duration = c["source_end_us"] - c["source_start_us"]
+                    else:
+                        duration = c["timeline_end_us"] - c["timeline_start_us"]
                     if idx == 0:
                         c["timeline_start_us"] = 0
                     else:
-                        c["timeline_start_us"] = v1_clips[idx-1]["timeline_end_us"]
-                    c["timeline_end_us"] = c["timeline_start_us"] + (c["source_end_us"] - c["source_start_us"])
+                        c["timeline_start_us"] = v1_clips[idx - 1]["timeline_end_us"]
+                    c["timeline_end_us"] = c["timeline_start_us"] + duration
         elif op == "insert_transcript_segments":
             _exact_keys(
                 operation,
@@ -553,25 +565,52 @@ class TimelineService:
                 raise DomainError("TIMELINE_INVALID", "目标片段位置不合法")
             clips.remove(clip)
             clips.insert(to_index, clip)
+        elif op == "position_clip":
+            # Free positioning: A1 audio clips can be placed anywhere on the
+            # timeline. V1 clips stay sequential (use move_clip to reorder).
+            _exact_keys(operation, {"op", "clip_id", "timeline_start_us"})
+            clip = _clip(document, operation.get("clip_id"))
+            if clip["track_id"] != "A1":
+                raise DomainError("TIMELINE_INVALID", "只有音频片段可以自由定位")
+            new_start = _integer(operation.get("timeline_start_us"), "时间线开始时间不合法")
+            if new_start < 0:
+                raise DomainError("TIMELINE_INVALID", "时间线开始时间不合法")
+            duration = clip["timeline_end_us"] - clip["timeline_start_us"]
+            clip["timeline_start_us"] = new_start
+            clip["timeline_end_us"] = new_start + duration
         elif op == "trim_clip":
             _exact_keys(operation, {"op", "clip_id", "source_start_us", "source_end_us"})
             clip = _clip(document, operation.get("clip_id"))
-            if clip["asset_kind"] != "video":
-                raise DomainError("TIMELINE_INVALID", "只有视频片段可以修剪")
+            if clip["asset_kind"] not in ("video", "audio"):
+                raise DomainError("TIMELINE_INVALID", "只有视频/音频片段可以修剪")
             new_start = _integer(operation.get("source_start_us"), "源开始时间不合法")
             new_end = _integer(operation.get("source_end_us"), "源结束时间不合法")
             old_source_start = clip["source_start_us"]
             old_source_end = clip["source_end_us"]
             if new_start < old_source_start or new_end > old_source_end:
                 raise DomainError("TIMELINE_INVALID", "修剪范围必须位于当前片段内")
-            retained_start = clip["timeline_start_us"] + new_start - old_source_start
-            retained_end = clip["timeline_start_us"] + new_end - old_source_start
-            shift = new_start - old_source_start
-            clip["source_start_us"] = new_start
-            clip["source_end_us"] = new_end
-            self._trim_bound_captions(
-                document, clip["clip_id"], retained_start, retained_end, -shift
-            )
+            if clip["asset_kind"] == "audio":
+                # Audio clips are freely positioned: trimming the left edge
+                # keeps the right edge fixed (timeline_start shifts right by
+                # the trim amount); trimming the right edge keeps the left
+                # edge fixed (timeline_end shifts left).
+                old_timeline_start = clip["timeline_start_us"]
+                shift = new_start - old_source_start
+                clip["source_start_us"] = new_start
+                clip["source_end_us"] = new_end
+                clip["timeline_start_us"] = old_timeline_start + shift
+                clip["timeline_end_us"] = clip["timeline_start_us"] + (
+                    new_end - new_start
+                )
+            else:
+                retained_start = clip["timeline_start_us"] + new_start - old_source_start
+                retained_end = clip["timeline_start_us"] + new_end - old_source_start
+                shift = new_start - old_source_start
+                clip["source_start_us"] = new_start
+                clip["source_end_us"] = new_end
+                self._trim_bound_captions(
+                    document, clip["clip_id"], retained_start, retained_end, -shift
+                )
         elif op == "split_clip":
             _exact_keys(operation, {"op", "clip_id", "source_time_us"})
             clip = _clip(document, operation.get("clip_id"))
@@ -1428,6 +1467,11 @@ def timeline_diff(base: dict[str, Any], target: dict[str, Any]) -> dict[str, Any
             new["source_end_us"],
         ):
             changes.append("trimmed")
+        if (
+            old["track_id"] == "A1"
+            and old["timeline_start_us"] != new["timeline_start_us"]
+        ):
+            changes.append("moved")
         if old["layout"] != new["layout"]:
             changes.append("layout_changed")
         if old["audio"] != new["audio"]:
