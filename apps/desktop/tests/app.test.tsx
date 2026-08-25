@@ -215,6 +215,20 @@ describe("素材箱交互", () => {
     expect(screen.queryByAltText(image.display_name)).not.toBeInTheDocument();
     expect(screen.getByLabelText("交互预览视频")).toBeInTheDocument();
   });
+
+  it("点击预览画面选中播放头处的片段并显示选中边框", async () => {
+    const api = desktopApi(); window.desktop = api; render(<App />);
+    await screen.findByLabelText("交互预览视频");
+    const frame = screen.getByRole("button", { name: "选中播放头处的片段" });
+    expect(frame.className).not.toContain("selected");
+    fireEvent.click(frame);
+    await waitFor(() => expect(frame.className).toContain("selected"));
+    expect(api.patchTimeline).not.toHaveBeenCalled();
+    // 切到无片段的播放头位置再点击，选中态清除
+    fireEvent.change(screen.getByLabelText("时间线播放头"), { target: { value: 6000000 } });
+    fireEvent.click(frame);
+    await waitFor(() => expect(frame.className).not.toContain("selected"));
+  });
 });
 
 describe("Stage 1C Editor", () => {
