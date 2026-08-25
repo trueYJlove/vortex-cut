@@ -213,9 +213,10 @@ footer .ai-entry { margin-right: 6px; min-height: 22px; padding: 0 7px; } footer
 .menu-dropdown { position: absolute; z-index: 20; top: 54px; left: 0; min-width: 170px; padding: 5px; border: 1px solid #46545a; background: #1b2428; box-shadow: 0 10px 24px #0008; }
 .menu-dropdown button { display: block; width: 100%; min-height: 30px; padding: 0 10px; text-align: left; border-color: transparent; background: transparent; }
 .menu-dropdown button:hover:not(:disabled) { background: #303b40; }
-.window-controls { display: flex; align-self: stretch; align-items: center; gap: 2px; margin-left: auto; -webkit-app-region: no-drag; }
-.window-controls button { width: 40px; height: 32px; min-height: 32px; border-color: transparent; background: transparent; }
-.window-controls button:hover:not(:disabled) { background: #303b40; }.window-controls .window-close:hover { background: #a33f39; }
+.window-controls { display: flex; align-self: stretch; align-items: stretch; margin-left: auto; -webkit-app-region: no-drag; }
+.window-controls button { width: 46px; height: 100%; min-height: 0; border: 0; border-radius: 0; background: transparent; color: #c8d0d3; display: grid; place-items: center; padding: 0; }
+.window-controls button:hover:not(:disabled) { background: rgba(255, 255, 255, .08); }.window-controls button:active:not(:disabled) { background: rgba(255, 255, 255, .14); }.window-controls .window-close:hover { background: #c42b1c; color: #fff; }
+.window-controls button svg { width: 10px; height: 10px; }
 .resize-handle { z-index: 5; width: 7px; cursor: col-resize; background: transparent; }.resize-handle:hover { background: #d1a453; }.resize-handle-left { position: absolute; left: calc(var(--left-width) - 3px); top: 0; bottom: 0; }.resize-handle-right { position: absolute; right: calc(var(--right-width) - 3px); top: 0; bottom: 0; }
 .timeline-resize-handle { height: 7px; cursor: row-resize; background: #252f34; border-top: 1px solid #3b474d; }.timeline-resize-handle:hover { background: #d1a453; }
 body.is-resizing, body.is-resizing * { user-select: none; }.properties-pane { padding: 14px; }
@@ -275,9 +276,9 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--vc-accent); }
 .menu-item > button, .menu-dropdown button { cursor: default; }
 .menu-item-shortcut { flex: 0 0 auto; margin-left: 8px; padding: 2px 5px; border: 1px solid var(--vc-border-2); border-radius: 4px; background: #262633; color: #9a9aab; font-size: 10px; line-height: 1; font-family: inherit; letter-spacing: .2px; }
 
-/* Window controls */
-.window-controls button { width: 40px; height: 30px; min-height: 30px; align-self: center; border: 0; border-radius: 6px; background: transparent; color: #b9b9c6; display: grid; place-items: center; padding: 0; }
-.window-controls button:hover:not(:disabled) { background: #2b2b3a; border-color: transparent; }
+/* Window controls — native Windows look (46px full-height buttons, no gap/radius) */
+.window-controls button { width: 46px; height: 100%; min-height: 0; border: 0; border-radius: 0; background: transparent; color: #b9b9c6; display: grid; place-items: center; padding: 0; }
+.window-controls button:hover:not(:disabled) { background: rgba(255, 255, 255, .08); border-color: transparent; }
 .window-controls .window-close:hover { background: #c42b1c; color: #fff; }
 
 /* Project summary in topbar */
