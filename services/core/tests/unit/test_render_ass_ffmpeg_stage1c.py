@@ -115,3 +115,103 @@ def test_builder_rejects_unknown_layout() -> None:
             captions=False,
         )
     assert exc.value.code == "RENDER_PLAN_INVALID"
+
+
+def test_builder_applies_speed_and_reverse_filters() -> None:
+    plan = _plan()
+    # 三段：2x 视频（有声）、0.25x 视频（无声）、倒放视频（有声原速）。
+    plan["segments"] = plan["segments"][:1] * 0 + [
+        {
+            "clip_id": "fast",
+            "input_id": "I0",
+            "asset_kind": "video",
+            "source_start_us": 1_000_000,
+            "source_end_us": 5_000_000,
+            "timeline_start_us": 0,
+            "timeline_end_us": 2_000_000,
+            "layout": "fit",
+            "audio_enabled": True,
+            "gain_db": 0.0,
+            "speed_milli": 2000,
+        },
+        {
+            "clip_id": "slow",
+            "input_id": "I1",
+            "asset_kind": "video",
+            "source_start_us": 0,
+            "source_end_us": 4_000_000,
+            "timeline_start_us": 2_000_000,
+            "timeline_end_us": 18_000_000,
+            "layout": "fit",
+            "audio_enabled": False,
+            "gain_db": 0.0,
+            "speed_milli": 250,
+        },
+        {
+            "clip_id": "rev",
+            "input_id": "I2",
+            "asset_kind": "video",
+            "source_start_us": 0,
+            "source_end_us": 3_000_000,
+            "timeline_start_us": 18_000_000,
+            "timeline_end_us": 21_000_000,
+            "layout": "fit",
+            "audio_enabled": True,
+            "gain_db": -6.0,
+            "speed_milli": 1000,
+            "reverse_playback": True,
+        },
+    ]
+    paths = [Path("a.mp4"), Path("b.mp4"), Path("c.mp4")]
+    probes = [{"audio_streams": [{}]}, {"audio_streams": []}, {"audio_streams": [{}]}]
+    args = build_timeline_args(plan, paths, probes, "libopenh264", "out.mp4", captions=False)
+    graph = args[args.index("-filter_complex") + 1]
+
+    # 2x：视频 PTS 除以速度；音频链 atempo=2.0。
+    assert "[0:v:0]trim=start=1.000000:end=5.000000,setpts=PTS-STARTPTS,setpts=PTS/2.000000" in graph
+    assert "atempo=2.000000" in graph
+    # 0.25x：音频未启用 → 静音占位；视频需要两级减速。
+    assert "[1:v:0]trim=start=0.000000:end=4.000000,setpts=PTS-STARTPTS,setpts=PTS/0.250000" in graph
+    # 倒放：reverse 在变速 setpts 之前（原速无 setpts）；音频静音占位且不出现 atempo/reverse 混入。
+    assert "trim=start=0.000000:end=3.000000,setpts=PTS-STARTPTS,reverse,setpts=PTS-STARTPTS" in graph
+    assert graph.count("anullsrc") == 2
+    assert "atempo=0." not in graph.replace("atempo=0.500000", "")  # 无反向 0.25 误挂音频
+
+
+def test_builder_audio_tempo_chain_splits_beyond_single_atempo_range() -> None:
+    plan = _plan()
+    plan["segments"] = [
+        {
+            "clip_id": "quarter",
+            "input_id": "I0",
+            "asset_kind": "video",
+            "source_start_us": 0,
+            "source_end_us": 4_000_000,
+            "timeline_start_us": 0,
+            "timeline_end_us": 16_000_000,
+            "layout": "fit",
+            "audio_enabled": True,
+            "gain_db": 0.0,
+            "speed_milli": 250,
+        },
+        {
+            "clip_id": "quad",
+            "input_id": "I1",
+            "asset_kind": "video",
+            "source_start_us": 0,
+            "source_end_us": 8_000_000,
+            "timeline_start_us": 16_000_000,
+            "timeline_end_us": 18_000_000,
+            "layout": "fit",
+            "audio_enabled": True,
+            "gain_db": 0.0,
+            "speed_milli": 4000,
+        },
+    ]
+    paths = [Path("a.mp4"), Path("b.mp4")]
+    probes = [{"audio_streams": [{}]}, {"audio_streams": [{}]}]
+    args = build_timeline_args(plan, paths, probes, "libopenh264", "out.mp4", captions=False)
+    graph = args[args.index("-filter_complex") + 1]
+    # 0.25x = 0.5 × 0.5 两级；4x = 2.0 × 2.0 两级。
+    assert "atempo=0.500000,atempo=0.500000" in graph
+    assert "atempo=2.000000,atempo=2.000000" in graph

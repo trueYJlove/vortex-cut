@@ -655,3 +655,108 @@ def test_audio_and_video_tracks_coexist_with_independent_normalization(tmp_path:
         moved["current_revision"]["timeline_revision_id"],
     )
     assert {"type": "moved", "clip_id": audio_ids[1]} in diff["clip_changes"]
+
+
+def test_set_speed_rescales_v1_timeline_and_later_clips(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
+    first_id = state["current_revision"]["document"]["clips"][0]["clip_id"]
+    state = _patch(
+        service,
+        state,
+        [
+            {
+                "op": "insert_asset_clip",
+                "asset_id": "v2",
+                "at_index": 1,
+                "source_start_us": 0,
+                "source_end_us": 2_000_000,
+            },
+        ],
+    )
+    second_id = state["current_revision"]["document"]["clips"][1]["clip_id"]
+
+    # 0.5x：5s 视频变 10s，后续片段整体后移。
+    state = _patch(service, state, [{"op": "set_speed", "clip_id": first_id, "speed_milli": 500}])
+    clips = state["current_revision"]["document"]["clips"]
+    assert (clips[0]["timeline_start_us"], clips[0]["timeline_end_us"]) == (0, 10_000_000)
+    assert (clips[1]["timeline_start_us"], clips[1]["timeline_end_us"]) == (10_000_000, 12_000_000)
+    assert clips[0]["speed_milli"] == 500
+
+    # 恢复原速 + 加速：4x 时 5s 视频 → 1.25s。
+    state = _patch(service, state, [{"op": "set_speed", "clip_id": first_id, "speed_milli": 1000}])
+    clips = state["current_revision"]["document"]["clips"]
+    assert (clips[0]["timeline_start_us"], clips[0]["timeline_end_us"]) == (0, 5_000_000)
+    assert clips[1]["timeline_start_us"] == 5_000_000
+    state = _patch(service, state, [{"op": "set_speed", "clip_id": second_id, "speed_milli": 4000}])
+    clips = state["current_revision"]["document"]["clips"]
+    assert (clips[1]["timeline_start_us"], clips[1]["timeline_end_us"]) == (5_000_000, 5_500_000)
+
+    # 变速操作进入 diff。
+    base = _patch(
+        service,
+        state,
+        [{"op": "set_speed", "clip_id": second_id, "speed_milli": 1000}],
+    )
+    diff = service.compare_revisions(
+        "p1",
+        state["current_revision"]["timeline_revision_id"],
+        base["current_revision"]["timeline_revision_id"],
+    )
+    assert any(change["type"] == "speed_changed" for change in diff["clip_changes"])
+
+
+def test_set_speed_on_a1_clip_keeps_right_edge_fixed(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "a1"})
+    audio_id = state["current_revision"]["document"]["clips"][0]["clip_id"]
+    state = _patch(
+        service,
+        state,
+        [{"op": "position_clip", "clip_id": audio_id, "timeline_start_us": 2_000_000}],
+    )
+    base_end = state["current_revision"]["document"]["clips"][0]["timeline_end_us"]
+    assert base_end == 10_000_000
+
+    # 2x：时长减半，右缘不动、左缘平移。
+    state = _patch(service, state, [{"op": "set_speed", "clip_id": audio_id, "speed_milli": 2000}])
+    clip = state["current_revision"]["document"]["clips"][0]
+    assert (clip["timeline_start_us"], clip["timeline_end_us"]) == (6_000_000, 10_000_000)
+    assert clip["source_start_us"] == 0 and clip["source_end_us"] == 8_000_000
+
+
+def test_set_reverse_playback_only_applies_to_video_and_reports_diff(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
+    video_id = state["current_revision"]["document"]["clips"][0]["clip_id"]
+    base = state["current_revision"]
+    state = _patch(
+        service,
+        state,
+        [{"op": "set_reverse_playback", "clip_id": video_id, "reverse_playback": True}],
+    )
+    assert state["current_revision"]["document"]["clips"][0]["reverse_playback"] is True
+    diff = service.compare_revisions(
+        "p1",
+        base["timeline_revision_id"],
+        state["current_revision"]["timeline_revision_id"],
+    )
+    assert {"type": "reverse_toggled", "clip_id": video_id} in diff["clip_changes"]
+
+
+def test_set_speed_rejects_out_of_range_values_and_image_clips(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
+    video_id = state["current_revision"]["document"]["clips"][0]["clip_id"]
+    for bad in (100, 4001):
+        with pytest.raises(DomainError):
+            _patch(service, state, [{"op": "set_speed", "clip_id": video_id, "speed_milli": bad}])
+
+    image_state = _patch(
+        service,
+        state,
+        [{"op": "insert_asset_clip", "asset_id": "i1", "at_index": 0, "duration_us": 1_000_000}],
+    )
+    image_id = image_state["current_revision"]["document"]["clips"][0]["clip_id"]
+    with pytest.raises(DomainError):
+        _patch(service, image_state, [{"op": "set_speed", "clip_id": image_id, "speed_milli": 2000}])
