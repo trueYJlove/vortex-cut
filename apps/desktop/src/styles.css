@@ -430,3 +430,6 @@ input, select, textarea { font-size: 12.5px; }
 .speed-presets button:hover:not(:disabled) { color: var(--vc-text, #e6eaec); border-color: var(--vc-accent, #8aa2ff); }
 .speed-presets button.active { border-color: var(--vc-accent, #8aa2ff); background: rgba(138, 162, 255, .16); color: #cdd7ff; }
 .speed-custom { display: grid; grid-template-columns: auto 1fr !important; align-items: center; gap: 8px !important; }
+
+/* M2 C2: 任务剩余时间估计 */
+.job-eta { display: inline-block; margin-left: 6px; padding: 1px 6px; border: 1px solid var(--vc-border-2, #4b585e); border-radius: 4px; color: var(--vc-text-2, #aeb9bd); font-size: 11px; white-space: nowrap; }
