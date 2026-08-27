@@ -13,6 +13,7 @@ export const editorCommands: readonly EditorCommand[] = [
   { id: "timeline.redo", label: "重做", shortcut: "Ctrl+Shift+Z / Ctrl+Y", scopes: ["timeline"] },
   { id: "timeline.split", label: "拆分所选片段", shortcut: "Ctrl+B", scopes: ["timeline"] },
   { id: "timeline.copy", label: "复制所选片段", shortcut: "Ctrl+C", scopes: ["timeline"] },
+  { id: "timeline.cut", label: "剪切所选片段", shortcut: "Ctrl+X", scopes: ["timeline"] },
   { id: "timeline.paste", label: "粘贴片段", shortcut: "Ctrl+V", scopes: ["timeline"] },
   { id: "timeline.delete", label: "删除所选对象", shortcut: "Delete / Backspace", scopes: ["timeline"] },
   { id: "preview.generate", label: "生成权威预览", shortcut: "Ctrl+Enter", scopes: ["export", "global"] },

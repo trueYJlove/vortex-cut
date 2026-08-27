@@ -760,3 +760,52 @@ def test_set_speed_rejects_out_of_range_values_and_image_clips(tmp_path: Path) -
     image_id = image_state["current_revision"]["document"]["clips"][0]["clip_id"]
     with pytest.raises(DomainError):
         _patch(service, image_state, [{"op": "set_speed", "clip_id": image_id, "speed_milli": 2000}])
+
+
+def test_insert_asset_clip_carries_speed_and_reverse(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
+    first_id = state["current_revision"]["document"]["clips"][0]["clip_id"]
+    # 插入携带 4x + 倒放的视频；timeline 时长按插入时速度推导。
+    state = _patch(
+        service,
+        state,
+        [
+            {
+                "op": "insert_asset_clip",
+                "asset_id": "v2",
+                "at_index": 1,
+                "source_start_us": 0,
+                "source_end_us": 2_000_000,
+                "speed_milli": 4000,
+                "reverse_playback": True,
+            },
+        ],
+    )
+    clips = state["current_revision"]["document"]["clips"]
+    assert clips[0]["clip_id"] == first_id
+    assert (clips[0]["timeline_start_us"], clips[0]["timeline_end_us"]) == (0, 5_000_000)
+    assert clips[1]["speed_milli"] == 4000
+    assert clips[1]["reverse_playback"] is True
+    assert (clips[1]["timeline_start_us"], clips[1]["timeline_end_us"]) == (5_000_000, 5_500_000)
+
+    # 图片携带变速被拒；倒放非视频被拒。
+    with pytest.raises(DomainError):
+        _patch(
+            service,
+            state,
+            [{"op": "insert_asset_clip", "asset_id": "i1", "at_index": 0, "duration_us": 1_000_000, "speed_milli": 2000}],
+        )
+    with pytest.raises(DomainError):
+        _patch(
+            service,
+            state,
+            [{"op": "insert_asset_clip", "asset_id": "a1", "at_index": 0, "reverse_playback": True}],
+        )
+    # 越界速度被拒。
+    with pytest.raises(DomainError):
+        _patch(
+            service,
+            state,
+            [{"op": "insert_asset_clip", "asset_id": "v2", "at_index": 0, "source_start_us": 0, "source_end_us": 1_000_000, "speed_milli": 5000}],
+        )

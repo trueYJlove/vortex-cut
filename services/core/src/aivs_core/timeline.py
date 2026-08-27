@@ -466,9 +466,28 @@ class TimelineService:
                     "source_end_us",
                     "duration_us",
                     "layout",
+                    "speed_milli",
+                    "reverse_playback",
                 },
-                optional={"source_start_us", "source_end_us", "duration_us", "layout"},
+                optional={
+                    "source_start_us",
+                    "source_end_us",
+                    "duration_us",
+                    "layout",
+                    "speed_milli",
+                    "reverse_playback",
+                },
             )
+            speed_milli = operation.get("speed_milli")
+            if speed_milli is not None and (
+                isinstance(speed_milli, bool)
+                or not isinstance(speed_milli, int)
+                or not MIN_SPEED_MILLI <= speed_milli <= MAX_SPEED_MILLI
+            ):
+                raise DomainError("TIMELINE_INVALID", "速度需在 0.25x-4x 之间")
+            reverse_playback = operation.get("reverse_playback")
+            if reverse_playback is not None and not isinstance(reverse_playback, bool):
+                raise DomainError("TIMELINE_INVALID", "倒放状态不合法")
             clip = self._asset_clip(
                 db,
                 project_id,
@@ -478,6 +497,21 @@ class TimelineService:
                 operation.get("source_end_us"),
                 operation.get("duration_us"),
             )
+            if clip["asset_kind"] == "image":
+                if speed_milli is not None and speed_milli != 1000:
+                    raise DomainError("TIMELINE_INVALID", "图片片段不能变速")
+                if reverse_playback:
+                    raise DomainError("TIMELINE_INVALID", "图片片段不能倒放")
+            if speed_milli is not None:
+                clip["speed_milli"] = speed_milli
+            if reverse_playback:
+                if clip["asset_kind"] != "video":
+                    raise DomainError("TIMELINE_INVALID", "只有视频片段可以倒放")
+                clip["reverse_playback"] = True
+            if clip.get("speed_milli", 1000) != 1000 and clip["asset_kind"] in ("video", "audio"):
+                clip["timeline_end_us"] = clip["timeline_start_us"] + _clip_timeline_duration_us(
+                    clip["source_start_us"], clip["source_end_us"], clip["speed_milli"]
+                )
             if clip["track_id"] == "A1":
                 # Auto-upgrade tracks from 2-track to 3-track if needed
                 tracks = document.get("tracks", [])

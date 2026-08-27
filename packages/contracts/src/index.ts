@@ -773,7 +773,7 @@ export type TimelineCreateSource =
 export interface TimelineCreateInput { schema_version: 1; source: TimelineCreateSource; default_layout: TimelineLayout; caption_preset_id: CaptionPresetId; }
 
 export type TimelinePatchOperation =
-  | { op: "insert_asset_clip"; asset_id: AssetId; at_index: number; source_start_us?: number; source_end_us?: number; duration_us?: number; layout?: TimelineLayout }
+  | { op: "insert_asset_clip"; asset_id: AssetId; at_index: number; source_start_us?: number; source_end_us?: number; duration_us?: number; layout?: TimelineLayout; speed_milli?: number; reverse_playback?: boolean }
   | { op: "insert_transcript_segments"; transcript_id: TranscriptId; segment_ids: TranscriptSegmentId[]; at_index: number; padding_before_us: number; padding_after_us: number; create_captions: boolean; layout?: TimelineLayout }
   | { op: "remove_clip"; clip_id: TimelineClipId }
   | { op: "move_clip"; clip_id: TimelineClipId; to_index: number }
@@ -1409,7 +1409,7 @@ export function isTimelinePatchOperation(value: unknown): value is TimelinePatch
   if (!isRecord(value) || hasSensitiveKey(value) || !isString(value.op)) return false;
   const index = (key: string) => isInteger(value[key]); const id = (key: string) => isId(value[key]); const us = (key: string, minimum = 0) => isInteger(value[key], minimum);
   switch (value.op) {
-    case "insert_asset_clip": return onlyKeys(value, ["op", "asset_id", "at_index", "source_start_us", "source_end_us", "duration_us", "layout"]) && id("asset_id") && index("at_index") && (value.source_start_us === undefined || us("source_start_us")) && (value.source_end_us === undefined || us("source_end_us", 1)) && (value.duration_us === undefined || us("duration_us", 500_000)) && (value.layout === undefined || isTimelineLayout(value.layout));
+    case "insert_asset_clip": return onlyKeys(value, ["op", "asset_id", "at_index", "source_start_us", "source_end_us", "duration_us", "layout", "speed_milli", "reverse_playback"]) && id("asset_id") && index("at_index") && (value.source_start_us === undefined || us("source_start_us")) && (value.source_end_us === undefined || us("source_end_us", 1)) && (value.duration_us === undefined || us("duration_us", 500_000)) && (value.layout === undefined || isTimelineLayout(value.layout)) && (value.speed_milli === undefined || (isInteger(value.speed_milli, 250) && value.speed_milli <= 4000)) && (value.reverse_playback === undefined || typeof value.reverse_playback === "boolean");
     case "insert_transcript_segments": return onlyKeys(value, ["op", "transcript_id", "segment_ids", "at_index", "padding_before_us", "padding_after_us", "create_captions", "layout"]) && id("transcript_id") && Array.isArray(value.segment_ids) && value.segment_ids.length > 0 && value.segment_ids.every(isId) && index("at_index") && us("padding_before_us") && Number(value.padding_before_us) <= 300_000 && us("padding_after_us") && Number(value.padding_after_us) <= 300_000 && typeof value.create_captions === "boolean" && (value.layout === undefined || isTimelineLayout(value.layout));
     case "remove_clip": return onlyKeys(value, ["op", "clip_id"]) && id("clip_id");
     case "move_clip": return onlyKeys(value, ["op", "clip_id", "to_index"]) && id("clip_id") && index("to_index");
