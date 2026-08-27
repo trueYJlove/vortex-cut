@@ -432,6 +432,28 @@ function drawTimeline(
       ctx.fillText(label, rect.x + 6, rect.y + rect.height / 2);
       ctx.restore();
     }
+
+    // Speed / reverse badge (M2 B1)
+    const clipSpeed = rect.clip.speed_milli ?? 1000;
+    if (clipSpeed !== 1000 || rect.clip.reverse_playback) {
+      const badge = [
+        clipSpeed !== 1000 ? `${(clipSpeed / 1000).toFixed(clipSpeed % 1000 === 0 ? 1 : 2)}x` : "",
+        rect.clip.reverse_playback ? "◀◀" : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      ctx.font = "9px sans-serif";
+      const badgeWidth = ctx.measureText(badge).width + 8;
+      const badgeX = rect.x + rect.width - badgeWidth - 4;
+      const badgeY = rect.y + 6;
+      if (badgeX > rect.x + 4) {
+        ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+        ctx.fillRect(badgeX, badgeY, badgeWidth, 14);
+        ctx.fillStyle = "#ffd27a";
+        ctx.textBaseline = "middle";
+        ctx.fillText(badge, badgeX + 4, badgeY + 7);
+      }
+    }
   }
 
   // Trim handles: single selected clip (Phase 4) or hovered clip
@@ -1348,7 +1370,12 @@ export function TimelinePanel({
             onMouseLeave={handleCanvasMouseLeave}
             onDragOver={(event) => { event.preventDefault(); allowDrop(event, clips.length); }}
             onDrop={(event) => handleDrop(event, dropIndex ?? clips.length)}
-            onDragLeave={() => setDropIndex(null)}
+            // relatedTarget 仍在画布内说明只是子区域切换，不清除落区高亮，避免 overlay 抖动。
+            onDragLeave={(event) => {
+              if (!(event.relatedTarget instanceof Node && canvasRef.current?.contains(event.relatedTarget))) {
+                setDropIndex(null);
+              }
+            }}
             onDragEnd={() => setDropIndex(null)}
             style={{ display: "block", cursor: "default" }}
           />

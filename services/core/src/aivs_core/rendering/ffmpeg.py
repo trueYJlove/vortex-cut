@@ -35,10 +35,19 @@ def build_timeline_args(
     for index, (segment, probe) in enumerate(zip(segments, segment_probes, strict=True)):
         duration_us = segment["timeline_end_us"] - segment["timeline_start_us"]
         duration = _seconds(duration_us)
+        speed_milli = int(segment.get("speed_milli", 1000))
+        speed = speed_milli / 1000
+        reverse = bool(segment.get("reverse_playback", False))
         if segment["asset_kind"] == "video":
             start = _seconds(segment["source_start_us"])
             end = _seconds(segment["source_end_us"])
             source = f"[{index}:v:0]trim=start={start}:end={end},setpts=PTS-STARTPTS"
+            if reverse:
+                # 倒放：先反转帧序列；setpts 重置为从 0 起始的时间戳。
+                source += ",reverse,setpts=PTS-STARTPTS"
+            if speed != 1.0:
+                # 变速：PTS 除以速度倍率（>1 加速）。
+                source += f",setpts=PTS/{speed:.6f}"
         else:
             source = f"[{index}:v:0]trim=duration={duration},setpts=PTS-STARTPTS"
         reframe = segment.get("reframe")
@@ -51,14 +60,38 @@ def build_timeline_args(
             f"{source},{_square_pixel_filter()},{visual},setsar=1,fps=30,format=yuv420p[v{index}]"
         )
         has_audio = bool(probe.get("audio_streams"))
-        if segment["asset_kind"] == "video" and has_audio and segment["audio_enabled"]:
+        if (
+            segment["asset_kind"] == "video"
+            and has_audio
+            and segment["audio_enabled"]
+            and not reverse
+        ):
             start = _seconds(segment["source_start_us"])
             end = _seconds(segment["source_end_us"])
             gain = float(segment["gain_db"])
+            tempo_chain = ""
+            if speed != 1.0:
+                # atempo 单级支持 0.5-2.0；跨级拆分（如 0.25 → 0.5×0.5，4x → 2×2）。
+                factors: list[float] = []
+                remaining = speed
+                while remaining > 2.0:
+                    factors.append(2.0)
+                    remaining /= 2.0
+                while remaining < 0.5:
+                    factors.append(0.5)
+                    remaining /= 0.5
+                factors.append(remaining)
+                tempo_chain = ",".join(f"atempo={factor:.6f}" for factor in factors) + ","
             filters.append(
                 f"[{index}:a:0]atrim=start={start}:end={end},asetpts=PTS-STARTPTS,"
                 "aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
-                f"volume={gain:.3f}dB,apad,atrim=duration={duration}[a{index}]"
+                f"{tempo_chain}volume={gain:.3f}dB,apad,atrim=duration={duration}[a{index}]"
+            )
+        elif segment["asset_kind"] == "video" and has_audio and segment["audio_enabled"]:
+            # 倒放片段的音频暂不支持：以静音占位，保证轨长与混流正确。
+            filters.append(
+                "anullsrc=channel_layout=stereo:sample_rate=48000,"
+                f"atrim=duration={duration},asetpts=PTS-STARTPTS[a{index}]"
             )
         else:
             filters.append(

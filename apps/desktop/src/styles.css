@@ -419,3 +419,14 @@ input, select, textarea { font-size: 12.5px; }
 .preview-context.stale { border-color: #d1a453; color: #f0c979; }
 .timeline-drop-zone .drop-hint { white-space: nowrap; font-size: 11px; color: #d1a453; pointer-events: none; }
 .timeline-drop-zone.active { width: auto; flex-basis: auto; padding: 0 8px; }
+
+/* M2 B1: 片段变速编辑器 */
+.speed-editor { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--vc-border, #3b474d); border-radius: 8px; background: rgba(255, 255, 255, .02); }
+.speed-editor-title { display: flex; align-items: center; gap: 8px; color: var(--vc-text, #e6eaec); font-size: 12px; font-weight: 600; }
+.speed-editor-title .speed-reset { margin-left: auto; padding: 2px 8px; border: 1px solid var(--vc-border-2, #4b585e); border-radius: 5px; background: transparent; color: var(--vc-text-2, #aeb9bd); font-size: 11px; cursor: pointer; }
+.speed-editor-title .speed-reset:hover { color: var(--vc-text, #e6eaec); border-color: var(--vc-accent, #8aa2ff); }
+.speed-presets { display: flex; flex-wrap: wrap; gap: 5px; }
+.speed-presets button { min-width: 44px; padding: 3px 6px; border: 1px solid var(--vc-border-2, #4b585e); border-radius: 5px; background: transparent; color: var(--vc-text-2, #aeb9bd); font-size: 11px; cursor: pointer; }
+.speed-presets button:hover:not(:disabled) { color: var(--vc-text, #e6eaec); border-color: var(--vc-accent, #8aa2ff); }
+.speed-presets button.active { border-color: var(--vc-accent, #8aa2ff); background: rgba(138, 162, 255, .16); color: #cdd7ff; }
+.speed-custom { display: grid; grid-template-columns: auto 1fr !important; align-items: center; gap: 8px !important; }

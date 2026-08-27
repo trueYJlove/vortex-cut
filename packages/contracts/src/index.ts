@@ -703,6 +703,8 @@ export type ReframeExportBatchPage = Page<ReframeExportBatch>;
 export interface TimelineCanvas extends ProjectCanvas { background_color: string; }
 export interface TimelineTrack { id: "V1" | "C1" | "A1"; kind: "visual" | "caption" | "audio"; locked: boolean; }
 export interface TimelineClipAudio { enabled: boolean; gain_db: number; }
+/** 帧率分子*1000；1000 = 1x。 */
+export type TimelineClipSpeedMilli = number & { readonly __brand: "timeline_clip_speed_milli" };
 export interface TimelineClip {
   clip_id: TimelineClipId;
   track_id: "V1" | "A1";
@@ -715,6 +717,10 @@ export interface TimelineClip {
   timeline_end_us: number;
   layout: TimelineLayout;
   audio: TimelineClipAudio;
+  /** 可选字段：缺省按 1000（原速）处理。 */
+  speed_milli?: TimelineClipSpeedMilli;
+  /** 可选字段：缺省为 false（正放）。仅视频片段支持。 */
+  reverse_playback?: boolean;
 }
 export interface TimelineCaption {
   caption_id: TimelineCaptionId;
@@ -776,6 +782,8 @@ export type TimelinePatchOperation =
   | { op: "split_clip"; clip_id: TimelineClipId; source_time_us: number }
   | { op: "set_layout"; clip_id: TimelineClipId; layout: TimelineLayout }
   | { op: "set_audio"; clip_id: TimelineClipId; enabled: boolean; gain_db: number }
+  | { op: "set_speed"; clip_id: TimelineClipId; speed_milli: number }
+  | { op: "set_reverse_playback"; clip_id: TimelineClipId; reverse_playback: boolean }
   | { op: "set_image_duration"; clip_id: TimelineClipId; duration_us: number }
   | { op: "set_clip_locked"; clip_id: TimelineClipId; locked: boolean }
   | { op: "add_caption"; start_us: number; end_us: number; text: string; preset_id: CaptionPresetId; source_clip_id: null }
@@ -787,7 +795,7 @@ export interface TimelinePatch { schema_version: 1; base_revision_id: TimelineRe
 export interface TimelineRevisionPointerInput { base_revision_id: TimelineRevisionId; }
 
 export type TimelinePatchGenerationStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
-export type TimelineClipChangeType = "added" | "removed" | "moved" | "trimmed" | "split" | "layout_changed" | "audio_changed" | "duration_changed";
+export type TimelineClipChangeType = "added" | "removed" | "moved" | "trimmed" | "split" | "layout_changed" | "audio_changed" | "duration_changed" | "speed_changed" | "reverse_toggled";
 export type TimelineCaptionChangeType = "added" | "removed" | "text_changed" | "timing_changed" | "preset_changed";
 export interface TimelineClipChange { type: TimelineClipChangeType; clip_id: TimelineClipId; created_clip_ids?: TimelineClipId[]; }
 export interface TimelineCaptionChange { type: TimelineCaptionChangeType; caption_id: TimelineCaptionId; }
@@ -1331,13 +1339,19 @@ function isTimelineCanvas(value: unknown): value is TimelineCanvas {
     isString(value.background_color) && /^#[0-9A-Fa-f]{6}$/.test(value.background_color);
 }
 export function isTimelineClip(value: unknown): value is TimelineClip {
-  if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["clip_id", "track_id", "order_index", "asset_id", "asset_kind", "source_start_us", "source_end_us", "timeline_start_us", "timeline_end_us", "layout", "audio"])) return false;
+  if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["clip_id", "track_id", "order_index", "asset_id", "asset_kind", "source_start_us", "source_end_us", "timeline_start_us", "timeline_end_us", "layout", "audio", "speed_milli", "reverse_playback"])) return false;
   if (!isId(value.clip_id) || !oneOf(["V1", "A1"] as const, value.track_id) || !isInteger(value.order_index) || !isId(value.asset_id) || !oneOf(["video", "image", "audio"] as const, value.asset_kind) ||
     !isInteger(value.timeline_start_us) || !isInteger(value.timeline_end_us, 1) || value.timeline_end_us <= value.timeline_start_us || !isTimelineLayout(value.layout) || !isRecord(value.audio) ||
     !onlyKeys(value.audio, ["enabled", "gain_db"]) || typeof value.audio.enabled !== "boolean" || !isFiniteNumber(value.audio.gain_db) || value.audio.gain_db < -60 || value.audio.gain_db > 12) return false;
+  // 可选变速/倒放字段：出现时必须合法；speed 250–4000（0.25x–4x），倒放仅视频。
+  if (value.speed_milli !== undefined && (!isInteger(value.speed_milli, 250) || value.speed_milli > 4000)) return false;
+  if (value.reverse_playback !== undefined && (typeof value.reverse_playback !== "boolean" || (value.reverse_playback && value.asset_kind !== "video"))) return false;
   if (value.asset_kind === "image") return value.track_id === "V1" && value.source_start_us === null && value.source_end_us === null && value.timeline_end_us - value.timeline_start_us >= 500_000 && value.timeline_end_us - value.timeline_start_us <= 30_000_000;
-  if (value.asset_kind === "audio") return value.track_id === "A1" && isInteger(value.source_start_us) && isInteger(value.source_end_us, 1) && value.source_end_us - value.source_start_us >= 100_000 && value.timeline_end_us - value.timeline_start_us === value.source_end_us - value.source_start_us;
-  return value.track_id === "V1" && isInteger(value.source_start_us) && isInteger(value.source_end_us, 1) && value.source_end_us - value.source_start_us >= 100_000 && value.timeline_end_us - value.timeline_start_us === value.source_end_us - value.source_start_us;
+  // 视频/音频：timeline 时长 = 源范围时长 / 速度（四舍五入到微秒；原速时严格相等）。
+  const speed = typeof value.speed_milli === "number" ? value.speed_milli : 1000;
+  const sourceSpan = (value.source_end_us as number) - (value.source_start_us as number);
+  const expected = speed === 1000 ? sourceSpan : Math.round(sourceSpan / speed * 1000);
+  return value.source_end_us !== null && value.source_start_us !== null && sourceSpan >= 100_000 && value.timeline_end_us - value.timeline_start_us === expected;
 }
 export function isTimelineCaption(value: unknown): value is TimelineCaption {
   if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["caption_id", "track_id", "source_clip_id", "start_us", "end_us", "text", "preset_id", "origin", "edited", "source_segment_ids"])) return false;
@@ -1404,6 +1418,8 @@ export function isTimelinePatchOperation(value: unknown): value is TimelinePatch
     case "split_clip": return onlyKeys(value, ["op", "clip_id", "source_time_us"]) && id("clip_id") && us("source_time_us", 1);
     case "set_layout": return onlyKeys(value, ["op", "clip_id", "layout"]) && id("clip_id") && isTimelineLayout(value.layout);
     case "set_audio": return onlyKeys(value, ["op", "clip_id", "enabled", "gain_db"]) && id("clip_id") && typeof value.enabled === "boolean" && isFiniteNumber(value.gain_db) && value.gain_db >= -60 && value.gain_db <= 12;
+    case "set_speed": return onlyKeys(value, ["op", "clip_id", "speed_milli"]) && id("clip_id") && isInteger(value.speed_milli, 250) && value.speed_milli <= 4000;
+    case "set_reverse_playback": return onlyKeys(value, ["op", "clip_id", "reverse_playback"]) && id("clip_id") && typeof value.reverse_playback === "boolean";
     case "set_image_duration": return onlyKeys(value, ["op", "clip_id", "duration_us"]) && id("clip_id") && us("duration_us", 500_000) && Number(value.duration_us) <= 30_000_000;
     case "set_clip_locked": return onlyKeys(value, ["op", "clip_id", "locked"]) && id("clip_id") && typeof value.locked === "boolean";
     case "add_caption": return onlyKeys(value, ["op", "start_us", "end_us", "text", "preset_id", "source_clip_id"]) && us("start_us") && us("end_us", 1) && Number(value.end_us) - Number(value.start_us) >= 200_000 && isString(value.text) && value.text.trim().length > 0 && [...value.text].length <= 200 && isCaptionPresetId(value.preset_id) && value.source_clip_id === null;

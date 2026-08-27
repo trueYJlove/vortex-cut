@@ -309,6 +309,8 @@ class RenderPlanCompiler:
                     "layout": clip["layout"],
                     "audio_enabled": clip["audio"]["enabled"],
                     "gain_db": float(clip["audio"]["gain_db"]),
+                    "speed_milli": int(clip.get("speed_milli", 1000)),
+                    "reverse_playback": bool(clip.get("reverse_playback", False)),
                 }
             )
         caption_items = [
