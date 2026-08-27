@@ -39,3 +39,4 @@ apps/desktop/test-results/
 # Local runtime scratch and desktop build caches
 /.tmp/
 /apps/desktop/.cache/
+/test-tmp/

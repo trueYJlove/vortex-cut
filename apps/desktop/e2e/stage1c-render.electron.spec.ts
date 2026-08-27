@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { copyFile, mkdir, stat, writeFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
+import { expectCurrentProject, selectProject } from "./project-switcher";
 
 const require = createRequire(import.meta.url);
 const playwright = require(require.resolve("playwright", { paths: [dirname(require.resolve("@playwright/test"))] })) as { _electron: { launch: (options: Record<string, unknown>) => Promise<any> } };
@@ -48,8 +49,8 @@ test("1C-Render 真实 Electron 权威预览、Artifact Ticket 与最终导出",
       const timeline = await window.desktop.createTimeline({ project_id: project.project_id, timeline: { schema_version: 1, source: { kind: "full_asset", asset_id: imported.asset.asset_id }, default_layout: "blurred_background", caption_preset_id: "default-bottom" } });
       return { project_id: project.project_id, revision_id: timeline.current_revision.timeline_revision_id };
     });
-    await expect(page.getByRole("option", { name: "1C Render E2E" })).toHaveCount(1, { timeout: 30_000 });
-    await page.getByLabel("当前项目").selectOption(setup.project_id);
+    await expectCurrentProject(page, "1C Render E2E");
+    await selectProject(page, setup.project_id);
     await expect(page.getByRole("button", { name: "生成权威预览" })).toBeEnabled({ timeout: 30_000 });
     await page.getByLabel("编码模式").selectOption("software");
     await page.getByRole("button", { name: "生成权威预览" }).click();

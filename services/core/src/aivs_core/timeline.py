@@ -18,10 +18,13 @@ PATCH_OPERATIONS = {
     "insert_transcript_segments",
     "remove_clip",
     "move_clip",
+    "position_clip",
     "trim_clip",
     "split_clip",
     "set_layout",
     "set_audio",
+    "set_speed",
+    "set_reverse_playback",
     "set_image_duration",
     "add_caption",
     "remove_caption",
@@ -41,6 +44,24 @@ MIN_IMAGE_US = 500_000
 MAX_IMAGE_US = 30_000_000
 MIN_CAPTION_US = 200_000
 MAX_PADDING_US = 300_000
+MIN_SPEED_MILLI = 250
+MAX_SPEED_MILLI = 4000
+
+
+def _clip_speed(clip: dict[str, Any]) -> int:
+    speed = clip.get("speed_milli", 1000)
+    if isinstance(speed, bool) or not isinstance(speed, int):
+        raise DomainError("TIMELINE_INVALID", "片段速度不合法")
+    return speed
+
+
+def _clip_timeline_duration_us(source_start: int | None, source_end: int | None, speed_milli: int) -> int:
+    """时间线时长 = 源范围时长 / 速度（round-half-even 向下取整保护最小 1us）。"""
+    if source_start is None or source_end is None:
+        raise DomainError("TIMELINE_INVALID", "源范围缺失")
+    if speed_milli == 1000:
+        return source_end - source_start
+    return max(1, round((source_end - source_start) * 1000 / speed_milli))
 
 
 class TimelineService:
@@ -448,7 +469,6 @@ class TimelineService:
                 },
                 optional={"source_start_us", "source_end_us", "duration_us", "layout"},
             )
-            at_index = _insert_index(operation.get("at_index"), len(clips))
             clip = self._asset_clip(
                 db,
                 project_id,
@@ -458,7 +478,57 @@ class TimelineService:
                 operation.get("source_end_us"),
                 operation.get("duration_us"),
             )
-            clips.insert(at_index, clip)
+            if clip["track_id"] == "A1":
+                # Auto-upgrade tracks from 2-track to 3-track if needed
+                tracks = document.get("tracks", [])
+                if not any(t.get("id") == "A1" for t in tracks):
+                    # Insert A1 track between V1 and C1
+                    a1_track = {"id": "A1", "kind": "audio", "locked": False}
+                    insert_idx = next(
+                        (i for i, t in enumerate(tracks) if t.get("id") == "C1"),
+                        len(tracks),
+                    )
+                    tracks.insert(insert_idx, a1_track)
+                    document["tracks"] = tracks
+                # Audio clips go to A1 track, appended at the end
+                a1_clips = [c for c in clips if c["track_id"] == "A1"]
+                last_end = max((c["timeline_end_us"] for c in a1_clips), default=0)
+                clip["timeline_start_us"] = last_end
+                clip["timeline_end_us"] = (
+                    last_end + (clip["source_end_us"] - clip["source_start_us"])
+                )
+                clip["order_index"] = len(a1_clips)
+                clips.append(clip)
+            else:
+                # Video/image clips go to V1 track, inserted at index
+                v1_count_now = len([c for c in clips if c["track_id"] == "V1"])
+                at_index = _insert_index(operation.get("at_index"), v1_count_now)
+                # Find actual insertion position in mixed clips list
+                v1_count = 0
+                insert_pos = len(clips)
+                for i, c in enumerate(clips):
+                    if c["track_id"] == "V1":
+                        if v1_count == at_index:
+                            insert_pos = i
+                            break
+                        v1_count += 1
+                else:
+                    insert_pos = len(clips)
+                clips.insert(insert_pos, clip)
+                # Reorder V1 clips (images carry no source range; keep their
+                # configured duration when re-packing)
+                v1_clips = [c for c in clips if c["track_id"] == "V1"]
+                for idx, c in enumerate(v1_clips):
+                    c["order_index"] = idx
+                    if c["asset_kind"] == "video":
+                        duration = c["source_end_us"] - c["source_start_us"]
+                    else:
+                        duration = c["timeline_end_us"] - c["timeline_start_us"]
+                    if idx == 0:
+                        c["timeline_start_us"] = 0
+                    else:
+                        c["timeline_start_us"] = v1_clips[idx - 1]["timeline_end_us"]
+                    c["timeline_end_us"] = c["timeline_start_us"] + duration
         elif op == "insert_transcript_segments":
             _exact_keys(
                 operation,
@@ -515,25 +585,57 @@ class TimelineService:
                 raise DomainError("TIMELINE_INVALID", "目标片段位置不合法")
             clips.remove(clip)
             clips.insert(to_index, clip)
+        elif op == "position_clip":
+            # Free positioning: A1 audio clips can be placed anywhere on the
+            # timeline. V1 clips stay sequential (use move_clip to reorder).
+            _exact_keys(operation, {"op", "clip_id", "timeline_start_us"})
+            clip = _clip(document, operation.get("clip_id"))
+            if clip["track_id"] != "A1":
+                raise DomainError("TIMELINE_INVALID", "只有音频片段可以自由定位")
+            new_start = _integer(operation.get("timeline_start_us"), "时间线开始时间不合法")
+            if new_start < 0:
+                raise DomainError("TIMELINE_INVALID", "时间线开始时间不合法")
+            duration = clip["timeline_end_us"] - clip["timeline_start_us"]
+            clip["timeline_start_us"] = new_start
+            clip["timeline_end_us"] = new_start + duration
         elif op == "trim_clip":
             _exact_keys(operation, {"op", "clip_id", "source_start_us", "source_end_us"})
             clip = _clip(document, operation.get("clip_id"))
-            if clip["asset_kind"] != "video":
-                raise DomainError("TIMELINE_INVALID", "只有视频片段可以修剪")
+            if clip["asset_kind"] not in ("video", "audio"):
+                raise DomainError("TIMELINE_INVALID", "只有视频/音频片段可以修剪")
             new_start = _integer(operation.get("source_start_us"), "源开始时间不合法")
             new_end = _integer(operation.get("source_end_us"), "源结束时间不合法")
             old_source_start = clip["source_start_us"]
             old_source_end = clip["source_end_us"]
             if new_start < old_source_start or new_end > old_source_end:
                 raise DomainError("TIMELINE_INVALID", "修剪范围必须位于当前片段内")
-            retained_start = clip["timeline_start_us"] + new_start - old_source_start
-            retained_end = clip["timeline_start_us"] + new_end - old_source_start
-            shift = new_start - old_source_start
-            clip["source_start_us"] = new_start
-            clip["source_end_us"] = new_end
-            self._trim_bound_captions(
-                document, clip["clip_id"], retained_start, retained_end, -shift
-            )
+            if clip["asset_kind"] == "audio":
+                # Audio clips are freely positioned: trimming the left edge
+                # keeps the right edge fixed (timeline_start shifts right by
+                # the trim amount); trimming the right edge keeps the left
+                # edge fixed (timeline_end shifts left).
+                old_timeline_start = clip["timeline_start_us"]
+                shift = new_start - old_source_start
+                clip["source_start_us"] = new_start
+                clip["source_end_us"] = new_end
+                clip["timeline_start_us"] = old_timeline_start + shift
+                clip["timeline_end_us"] = clip["timeline_start_us"] + (
+                    new_end - new_start
+                )
+            else:
+                speed = _clip_speed(clip)
+                retained_start = clip["timeline_start_us"] + round(
+                    (new_start - old_source_start) * 1000 / speed
+                )
+                retained_end = clip["timeline_start_us"] + round(
+                    (new_end - old_source_start) * 1000 / speed
+                )
+                shift = round((new_start - old_source_start) * 1000 / speed)
+                clip["source_start_us"] = new_start
+                clip["source_end_us"] = new_end
+                self._trim_bound_captions(
+                    document, clip["clip_id"], retained_start, retained_end, -shift
+                )
         elif op == "split_clip":
             _exact_keys(operation, {"op", "clip_id", "source_time_us"})
             clip = _clip(document, operation.get("clip_id"))
@@ -547,7 +649,9 @@ class TimelineService:
                 or clip["source_end_us"] - split_source < MIN_VIDEO_US
             ):
                 raise DomainError("TIMELINE_INVALID", "拆分后的片段不得短于 100ms")
-            split_timeline = clip["timeline_start_us"] + split_source - clip["source_start_us"]
+            split_timeline = clip["timeline_start_us"] + round(
+                (split_source - clip["source_start_us"]) * 1000 / _clip_speed(clip)
+            )
             right = copy.deepcopy(clip)
             right["clip_id"] = f"clip_{new_id()}"
             right["source_start_us"] = split_source
@@ -570,6 +674,40 @@ class TimelineService:
             if clip["asset_kind"] == "image" and enabled:
                 raise DomainError("TIMELINE_INVALID", "图片片段不能启用音频")
             clip["audio"] = {"enabled": enabled, "gain_db": gain_db}
+        elif op == "set_speed":
+            _exact_keys(operation, {"op", "clip_id", "speed_milli"})
+            clip = _clip(document, operation.get("clip_id"))
+            if clip["asset_kind"] not in ("video", "audio"):
+                raise DomainError("TIMELINE_INVALID", "只有视频/音频片段可以变速")
+            speed = operation.get("speed_milli")
+            if (
+                isinstance(speed, bool)
+                or not isinstance(speed, int)
+                or not MIN_SPEED_MILLI <= speed <= MAX_SPEED_MILLI
+            ):
+                raise DomainError("TIMELINE_INVALID", "速度需在 0.25x-4x 之间")
+            clip["speed_milli"] = speed
+            if clip["asset_kind"] == "video":
+                # V1 连续轨道：直接改时长，由 _normalize_timing 重排后续片段。
+                new_duration = _clip_timeline_duration_us(
+                    clip["source_start_us"], clip["source_end_us"], speed
+                )
+                clip["timeline_end_us"] = clip["timeline_start_us"] + new_duration
+            else:
+                # A1 自由定位：右缘固定、左缘平移以保持终点。
+                new_duration = _clip_timeline_duration_us(
+                    clip["source_start_us"], clip["source_end_us"], speed
+                )
+                clip["timeline_start_us"] = clip["timeline_end_us"] - new_duration
+        elif op == "set_reverse_playback":
+            _exact_keys(operation, {"op", "clip_id", "reverse_playback"})
+            clip = _clip(document, operation.get("clip_id"))
+            reversed_flag = operation.get("reverse_playback")
+            if not isinstance(reversed_flag, bool):
+                raise DomainError("TIMELINE_INVALID", "倒放状态不合法")
+            if clip["asset_kind"] != "video":
+                raise DomainError("TIMELINE_INVALID", "只有视频片段可以倒放")
+            clip["reverse_playback"] = reversed_flag
         elif op == "set_image_duration":
             _exact_keys(operation, {"op", "clip_id", "duration_us"})
             clip = _clip(document, operation.get("clip_id"))
@@ -689,6 +827,37 @@ class TimelineService:
                 "timeline_end_us": end - start,
                 "layout": layout,
                 "audio": {"enabled": has_audio, "gain_db": 0.0},
+                "speed_milli": 1000,
+                "reverse_playback": False,
+            }
+        if asset["kind"] == "audio":
+            if duration_us is not None or (source_start_us is None) != (source_end_us is None):
+                raise DomainError("TIMELINE_SOURCE_INVALID", "音频源范围参数不合法")
+            media_info = json_loads(asset["media_info_json"]) if asset["media_info_json"] else {}
+            asset_duration = media_info.get("duration_us")
+            if not isinstance(asset_duration, int) or asset_duration < MIN_VIDEO_US:
+                raise DomainError("TIMELINE_SOURCE_INVALID", "音频素材时长无效")
+            start = 0 if source_start_us is None else _integer(source_start_us, "源开始时间不合法")
+            end = (
+                asset_duration
+                if source_end_us is None
+                else _integer(source_end_us, "源结束时间不合法")
+            )
+            if start < 0 or end > asset_duration or end - start < MIN_VIDEO_US:
+                raise DomainError("TIMELINE_SOURCE_INVALID", "音频源范围无效")
+            return {
+                "clip_id": f"clip_{new_id()}",
+                "track_id": "A1",
+                "order_index": 0,
+                "asset_id": asset_id,
+                "asset_kind": "audio",
+                "source_start_us": start,
+                "source_end_us": end,
+                "timeline_start_us": 0,
+                "timeline_end_us": end - start,
+                "layout": layout,
+                "audio": {"enabled": True, "gain_db": 0.0},
+                "speed_milli": 1000,
             }
         if source_start_us is not None or source_end_us is not None:
             raise DomainError("TIMELINE_SOURCE_INVALID", "图片不能包含源时间范围")
@@ -818,19 +987,27 @@ class TimelineService:
             "background_color": "#000000",
         }:
             raise DomainError("TIMELINE_INVALID", "Timeline 画布不符合 v1")
-        if document.get("tracks") != [
+        valid_tracks_2 = [
             {"id": "V1", "kind": "visual", "locked": False},
             {"id": "C1", "kind": "caption", "locked": False},
-        ]:
+        ]
+        valid_tracks_3 = [
+            {"id": "V1", "kind": "visual", "locked": False},
+            {"id": "A1", "kind": "audio", "locked": False},
+            {"id": "C1", "kind": "caption", "locked": False},
+        ]
+        if document.get("tracks") != valid_tracks_2 and document.get("tracks") != valid_tracks_3:
             raise DomainError("TIMELINE_INVALID", "Timeline v1 轨道不合法")
         clips = document.get("clips")
         captions = document.get("captions")
         if not isinstance(clips, list) or not isinstance(captions, list):
             raise DomainError("TIMELINE_INVALID", "Timeline clips/captions 不合法")
         clip_ids: set[str] = set()
+        v1_index = 0
+        a1_index = 0
         for index, clip in enumerate(clips):
-            if not isinstance(clip, dict) or clip.get("track_id") != "V1":
-                raise DomainError("TIMELINE_INVALID", "视频轨片段不合法")
+            if not isinstance(clip, dict) or clip.get("track_id") not in ("V1", "A1"):
+                raise DomainError("TIMELINE_INVALID", "视频/音频轨片段不合法")
             _exact_keys(
                 clip,
                 {
@@ -845,15 +1022,26 @@ class TimelineService:
                     "timeline_end_us",
                     "layout",
                     "audio",
+                    "speed_milli",
+                    "reverse_playback",
                 },
+                optional={"speed_milli", "reverse_playback"},
             )
             clip_id = _identifier(clip.get("clip_id"), "Clip ID 不合法")
-            if clip_id in clip_ids or clip.get("order_index") != index:
-                raise DomainError("TIMELINE_INVALID", "Clip 顺序或 ID 不合法")
+            if clip_id in clip_ids:
+                raise DomainError("TIMELINE_INVALID", "Clip ID 重复")
             clip_ids.add(clip_id)
             asset = self._asset(db, document["project_id"], clip.get("asset_id"))
             if asset["kind"] != clip.get("asset_kind"):
                 raise DomainError("TIMELINE_INVALID", "Clip 素材类型不一致")
+            if clip["track_id"] == "V1":
+                if clip.get("order_index") != v1_index:
+                    raise DomainError("TIMELINE_INVALID", "V1 Clip 顺序不合法")
+                v1_index += 1
+            elif clip["track_id"] == "A1":
+                if clip.get("order_index") != a1_index:
+                    raise DomainError("TIMELINE_INVALID", "A1 Clip 顺序不合法")
+                a1_index += 1
             _enum(clip.get("layout"), LAYOUTS, "布局不合法")
             audio = clip.get("audio")
             if not isinstance(audio, dict) or not isinstance(audio.get("enabled"), bool):
@@ -862,6 +1050,16 @@ class TimelineService:
             gain = _float_value(audio.get("gain_db"), "Clip 音频增益不合法")
             if not -60 <= gain <= 12:
                 raise DomainError("TIMELINE_INVALID", "Clip 音频增益不合法")
+            speed = clip.get("speed_milli", 1000)
+            if (
+                isinstance(speed, bool)
+                or not isinstance(speed, int)
+                or not MIN_SPEED_MILLI <= speed <= MAX_SPEED_MILLI
+            ):
+                raise DomainError("TIMELINE_INVALID", "Clip 速度不合法")
+            reversed_flag = clip.get("reverse_playback", False)
+            if not isinstance(reversed_flag, bool):
+                raise DomainError("TIMELINE_INVALID", "Clip 倒放状态不合法")
             duration = clip["timeline_end_us"] - clip["timeline_start_us"]
             if clip["asset_kind"] == "video":
                 media = json_loads(asset["media_info_json"]) if asset["media_info_json"] else {}
@@ -874,9 +1072,24 @@ class TimelineService:
                     or start < 0
                     or end > asset_duration
                     or end - start < MIN_VIDEO_US
-                    or duration != end - start
+                    or duration != _clip_timeline_duration_us(start, end, speed)
                 ):
                     raise DomainError("TIMELINE_INVALID", "视频 Clip 范围不合法")
+            elif clip["asset_kind"] == "audio":
+                media = json_loads(asset["media_info_json"]) if asset["media_info_json"] else {}
+                asset_duration = media.get("duration_us")
+                start, end = clip.get("source_start_us"), clip.get("source_end_us")
+                if (
+                    not isinstance(start, int)
+                    or not isinstance(end, int)
+                    or not isinstance(asset_duration, int)
+                    or start < 0
+                    or end > asset_duration
+                    or end - start < MIN_VIDEO_US
+                    or duration != _clip_timeline_duration_us(start, end, speed)
+                    or not audio["enabled"]
+                ):
+                    raise DomainError("TIMELINE_INVALID", "音频 Clip 范围不合法")
             elif (
                 clip["asset_kind"] != "image"
                 or clip.get("source_start_us") is not None
@@ -964,27 +1177,50 @@ class TimelineService:
         captions = document.get("captions")
         if not isinstance(clips, list) or not isinstance(captions, list):
             raise DomainError("TIMELINE_INVALID", "Timeline clips/captions 不合法")
-        offset = 0
+
+        # Separate clips by track
+        v1_clips = [c for c in clips if isinstance(c, dict) and c.get("track_id") == "V1"]
+        a1_clips = [c for c in clips if isinstance(c, dict) and c.get("track_id") == "A1"]
+
+        # Normalize V1 clips: sequential, contiguous from 0
+        v1_offset = 0
         deltas: dict[str, int] = {}
-        for index, clip in enumerate(clips):
-            if not isinstance(clip, dict):
-                raise DomainError("TIMELINE_INVALID", "Clip 不合法")
+        for index, clip in enumerate(v1_clips):
             raw_clip_id = clip.get("clip_id")
             old_start = old_starts.get(raw_clip_id) if isinstance(raw_clip_id, str) else None
             if clip.get("asset_kind") == "video":
                 start = clip.get("source_start_us")
                 end = clip.get("source_end_us")
-                duration = end - start if isinstance(start, int) and isinstance(end, int) else -1
-            else:
+                duration = (
+                    _clip_timeline_duration_us(start, end, _clip_speed(clip))
+                    if isinstance(start, int) and isinstance(end, int)
+                    else -1
+                )
+            elif clip.get("asset_kind") == "image":
                 start = clip.get("timeline_start_us")
                 end = clip.get("timeline_end_us")
                 duration = end - start if isinstance(start, int) and isinstance(end, int) else -1
+            else:
+                start = clip.get("source_start_us")
+                end = clip.get("source_end_us")
+                duration = (
+                    _clip_timeline_duration_us(start, end, _clip_speed(clip))
+                    if isinstance(start, int) and isinstance(end, int)
+                    else -1
+                )
             clip["order_index"] = index
-            clip["timeline_start_us"] = offset
-            clip["timeline_end_us"] = offset + duration
+            clip["timeline_start_us"] = v1_offset
+            clip["timeline_end_us"] = v1_offset + duration
             if old_start is not None:
-                deltas[clip["clip_id"]] = offset - old_start
-            offset += duration
+                deltas[clip["clip_id"]] = v1_offset - old_start
+            v1_offset += duration
+
+        # Normalize A1 clips: preserve timeline positions, just fix order_index
+        for index, clip in enumerate(a1_clips):
+            clip["order_index"] = index
+            # A1 clips keep their existing timeline_start_us / timeline_end_us
+            # (they can be freely positioned, not forced contiguous)
+
         if deltas:
             for caption in captions:
                 delta = deltas.get(caption.get("source_clip_id"), 0)
@@ -1121,6 +1357,7 @@ class TimelineService:
             },
             "tracks": [
                 {"id": "V1", "kind": "visual", "locked": False},
+                {"id": "A1", "kind": "audio", "locked": False},
                 {"id": "C1", "kind": "caption", "locked": False},
             ],
             "clips": [],
@@ -1168,7 +1405,7 @@ class TimelineService:
             raise DomainError("TIMELINE_SOURCE_INVALID", "素材不存在")
         if row["project_id"] != project_id:
             raise DomainError("TIMELINE_SOURCE_INVALID", "素材不属于当前项目")
-        if row["kind"] not in {"video", "image"} or row["availability"] != "available":
+        if row["kind"] not in {"video", "image", "audio"} or row["availability"] != "available":
             raise DomainError("TIMELINE_SOURCE_INVALID", "素材不可用于 Timeline")
         return row
 
@@ -1315,10 +1552,19 @@ def timeline_diff(base: dict[str, Any], target: dict[str, Any]) -> dict[str, Any
             new["source_end_us"],
         ):
             changes.append("trimmed")
+        if (
+            old["track_id"] == "A1"
+            and old["timeline_start_us"] != new["timeline_start_us"]
+        ):
+            changes.append("moved")
         if old["layout"] != new["layout"]:
             changes.append("layout_changed")
         if old["audio"] != new["audio"]:
             changes.append("audio_changed")
+        if old.get("speed_milli", 1000) != new.get("speed_milli", 1000):
+            changes.append("speed_changed")
+        if old.get("reverse_playback", False) != new.get("reverse_playback", False):
+            changes.append("reverse_toggled")
         old_duration = old["timeline_end_us"] - old["timeline_start_us"]
         new_duration = new["timeline_end_us"] - new["timeline_start_us"]
         if old_duration != new_duration and "trimmed" not in changes:

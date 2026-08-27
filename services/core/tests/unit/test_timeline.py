@@ -24,6 +24,7 @@ def _service(tmp_path: Path) -> tuple[TimelineService, Database]:
             ("v1", "p1", "video", "fp-v1", 5_000_000, True),
             ("v2", "p1", "video", "fp-v2", 2_000_000, False),
             ("i1", "p1", "image", "fp-i1", 0, False),
+            ("a1", "p1", "audio", "fp-a1", 8_000_000, True),
             ("other", "p2", "video", "fp-other", 1_000_000, True),
         ]
         for asset_id, project_id, kind, fingerprint, duration, has_audio in assets:
@@ -425,3 +426,337 @@ def test_revision_listing_trimmed_caption_and_invalid_draft_shape(tmp_path: Path
     assert bad_draft.value.code == "TIMELINE_INVALID"
     with pytest.raises(DomainError):
         service.list_revisions("p1", cursor="bad")
+
+
+def test_audio_clip_insert_upgrades_tracks_and_appends_to_a1(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
+    assert [track["id"] for track in state["current_revision"]["document"]["tracks"]] == [
+        "V1",
+        "A1",
+        "C1",
+    ]
+    state = _patch(
+        service,
+        state,
+        [{"op": "insert_asset_clip", "asset_id": "a1", "at_index": 0}],
+    )
+    document = state["current_revision"]["document"]
+    assert [track["id"] for track in document["tracks"]] == ["V1", "A1", "C1"]
+    assert any(track["id"] == "A1" and track["kind"] == "audio" for track in document["tracks"])
+    video_clips = [c for c in document["clips"] if c["track_id"] == "V1"]
+    audio_clips = [c for c in document["clips"] if c["track_id"] == "A1"]
+    assert len(video_clips) == 1
+    assert len(audio_clips) == 1
+    audio = audio_clips[0]
+    assert (audio["asset_kind"], audio["timeline_start_us"], audio["timeline_end_us"]) == (
+        "audio",
+        0,
+        8_000_000,
+    )
+    assert audio["order_index"] == 0
+    # A second audio clip appends after the first, keeping A1 positions free.
+    state = _patch(
+        service,
+        state,
+        [{"op": "insert_asset_clip", "asset_id": "a1", "at_index": 0}],
+    )
+    audio_clips = [
+        c
+        for c in state["current_revision"]["document"]["clips"]
+        if c["track_id"] == "A1"
+    ]
+    assert [c["timeline_start_us"] for c in audio_clips] == [0, 8_000_000]
+    assert [c["order_index"] for c in audio_clips] == [0, 1]
+    # V1 packing is untouched by audio inserts.
+    video_clips = [
+        c
+        for c in state["current_revision"]["document"]["clips"]
+        if c["track_id"] == "V1"
+    ]
+    assert [(c["timeline_start_us"], c["timeline_end_us"]) for c in video_clips] == [(0, 5_000_000)]
+
+
+def test_position_clip_moves_audio_freely_but_rejects_v1(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
+    state = _patch(
+        service,
+        state,
+        [{"op": "insert_asset_clip", "asset_id": "a1", "at_index": 0}],
+    )
+    document = state["current_revision"]["document"]
+    audio_id = next(c["clip_id"] for c in document["clips"] if c["track_id"] == "A1")
+    video_id = next(c["clip_id"] for c in document["clips"] if c["track_id"] == "V1")
+
+    state = _patch(
+        service,
+        state,
+        [{"op": "position_clip", "clip_id": audio_id, "timeline_start_us": 12_500_000}],
+    )
+    audio = next(c for c in state["current_revision"]["document"]["clips"] if c["track_id"] == "A1")
+    assert (audio["timeline_start_us"], audio["timeline_end_us"]) == (12_500_000, 20_500_000)
+    assert audio["order_index"] == 0
+    # Normalization preserves the free position.
+    state = _patch(
+        service,
+        state,
+        [{"op": "set_layout", "clip_id": video_id, "layout": "fit"}],
+    )
+    audio = next(
+        c for c in state["current_revision"]["document"]["clips"] if c["track_id"] == "A1"
+    )
+    assert (audio["timeline_start_us"], audio["timeline_end_us"]) == (12_500_000, 20_500_000)
+
+    with pytest.raises(DomainError) as video_position:
+        _patch(
+            service,
+            state,
+            [{"op": "position_clip", "clip_id": video_id, "timeline_start_us": 1_000_000}],
+        )
+    assert video_position.value.code == "TIMELINE_INVALID"
+    with pytest.raises(DomainError) as negative:
+        _patch(
+            service,
+            state,
+            [{"op": "position_clip", "clip_id": audio_id, "timeline_start_us": -1}],
+        )
+    assert negative.value.code == "TIMELINE_INVALID"
+
+
+def test_trim_audio_clip_keeps_opposite_edge_fixed(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service)
+    state = _patch(
+        service,
+        state,
+        [{"op": "insert_asset_clip", "asset_id": "a1", "at_index": 0}],
+    )
+    audio = state["current_revision"]["document"]["clips"][0]
+    assert audio["track_id"] == "A1"
+
+    # Left trim: right edge (timeline_end) stays fixed, timeline_start moves right.
+    state = _patch(
+        service,
+        state,
+        [
+            {
+                "op": "trim_clip",
+                "clip_id": audio["clip_id"],
+                "source_start_us": 2_000_000,
+                "source_end_us": 8_000_000,
+            }
+        ],
+    )
+    audio = state["current_revision"]["document"]["clips"][0]
+    assert (audio["source_start_us"], audio["source_end_us"]) == (2_000_000, 8_000_000)
+    assert (audio["timeline_start_us"], audio["timeline_end_us"]) == (2_000_000, 8_000_000)
+
+    # Right trim: left edge stays fixed, timeline_end moves left.
+    state = _patch(
+        service,
+        state,
+        [
+            {
+                "op": "trim_clip",
+                "clip_id": audio["clip_id"],
+                "source_start_us": 2_000_000,
+                "source_end_us": 5_000_000,
+            }
+        ],
+    )
+    audio = state["current_revision"]["document"]["clips"][0]
+    assert (audio["source_start_us"], audio["source_end_us"]) == (2_000_000, 5_000_000)
+    assert (audio["timeline_start_us"], audio["timeline_end_us"]) == (2_000_000, 5_000_000)
+
+    # Outward trims and sub-100ms trims are rejected.
+    with pytest.raises(DomainError) as outward:
+        _patch(
+            service,
+            state,
+            [
+                {
+                    "op": "trim_clip",
+                    "clip_id": audio["clip_id"],
+                    "source_start_us": 1_000_000,
+                    "source_end_us": 5_000_000,
+                }
+            ],
+        )
+    assert outward.value.code == "TIMELINE_INVALID"
+    with pytest.raises(DomainError) as too_short:
+        _patch(
+            service,
+            state,
+            [
+                {
+                    "op": "trim_clip",
+                    "clip_id": audio["clip_id"],
+                    "source_start_us": 2_000_000,
+                    "source_end_us": 2_050_000,
+                }
+            ],
+        )
+    assert too_short.value.code == "TIMELINE_INVALID"
+
+
+def test_audio_and_video_tracks_coexist_with_independent_normalization(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service)
+    state = _patch(
+        service,
+        state,
+        [
+            {"op": "insert_asset_clip", "asset_id": "v1", "at_index": 0},
+            {"op": "insert_asset_clip", "asset_id": "a1", "at_index": 0},
+            {"op": "insert_asset_clip", "asset_id": "a1", "at_index": 0},
+        ],
+    )
+    document = state["current_revision"]["document"]
+    audio_ids = [c["clip_id"] for c in document["clips"] if c["track_id"] == "A1"]
+    video_id = next(c["clip_id"] for c in document["clips"] if c["track_id"] == "V1")
+
+    state = _patch(
+        service,
+        state,
+        [
+            {"op": "position_clip", "clip_id": audio_ids[1], "timeline_start_us": 3_000_000},
+            {
+                "op": "trim_clip",
+                "clip_id": video_id,
+                "source_start_us": 500_000,
+                "source_end_us": 4_000_000,
+            },
+        ],
+    )
+    document = state["current_revision"]["document"]
+    video = next(c for c in document["clips"] if c["track_id"] == "V1")
+    assert (video["timeline_start_us"], video["timeline_end_us"]) == (0, 3_500_000)
+    audio_by_id = {c["clip_id"]: c for c in document["clips"] if c["track_id"] == "A1"}
+    assert (
+        audio_by_id[audio_ids[0]]["timeline_start_us"],
+        audio_by_id[audio_ids[0]]["timeline_end_us"],
+    ) == (0, 8_000_000)
+    assert (
+        audio_by_id[audio_ids[1]]["timeline_start_us"],
+        audio_by_id[audio_ids[1]]["timeline_end_us"],
+    ) == (3_000_000, 11_000_000)
+    assert [c["order_index"] for c in document["clips"] if c["track_id"] == "A1"] == [0, 1]
+    # Moving an audio clip reports a "moved" diff entry.
+    base = state["current_revision"]
+    moved = _patch(
+        service,
+        state,
+        [{"op": "position_clip", "clip_id": audio_ids[1], "timeline_start_us": 20_000_000}],
+    )
+    diff = service.compare_revisions(
+        "p1",
+        base["timeline_revision_id"],
+        moved["current_revision"]["timeline_revision_id"],
+    )
+    assert {"type": "moved", "clip_id": audio_ids[1]} in diff["clip_changes"]
+
+
+def test_set_speed_rescales_v1_timeline_and_later_clips(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
+    first_id = state["current_revision"]["document"]["clips"][0]["clip_id"]
+    state = _patch(
+        service,
+        state,
+        [
+            {
+                "op": "insert_asset_clip",
+                "asset_id": "v2",
+                "at_index": 1,
+                "source_start_us": 0,
+                "source_end_us": 2_000_000,
+            },
+        ],
+    )
+    second_id = state["current_revision"]["document"]["clips"][1]["clip_id"]
+
+    # 0.5x：5s 视频变 10s，后续片段整体后移。
+    state = _patch(service, state, [{"op": "set_speed", "clip_id": first_id, "speed_milli": 500}])
+    clips = state["current_revision"]["document"]["clips"]
+    assert (clips[0]["timeline_start_us"], clips[0]["timeline_end_us"]) == (0, 10_000_000)
+    assert (clips[1]["timeline_start_us"], clips[1]["timeline_end_us"]) == (10_000_000, 12_000_000)
+    assert clips[0]["speed_milli"] == 500
+
+    # 恢复原速 + 加速：4x 时 5s 视频 → 1.25s。
+    state = _patch(service, state, [{"op": "set_speed", "clip_id": first_id, "speed_milli": 1000}])
+    clips = state["current_revision"]["document"]["clips"]
+    assert (clips[0]["timeline_start_us"], clips[0]["timeline_end_us"]) == (0, 5_000_000)
+    assert clips[1]["timeline_start_us"] == 5_000_000
+    state = _patch(service, state, [{"op": "set_speed", "clip_id": second_id, "speed_milli": 4000}])
+    clips = state["current_revision"]["document"]["clips"]
+    assert (clips[1]["timeline_start_us"], clips[1]["timeline_end_us"]) == (5_000_000, 5_500_000)
+
+    # 变速操作进入 diff。
+    base = _patch(
+        service,
+        state,
+        [{"op": "set_speed", "clip_id": second_id, "speed_milli": 1000}],
+    )
+    diff = service.compare_revisions(
+        "p1",
+        state["current_revision"]["timeline_revision_id"],
+        base["current_revision"]["timeline_revision_id"],
+    )
+    assert any(change["type"] == "speed_changed" for change in diff["clip_changes"])
+
+
+def test_set_speed_on_a1_clip_keeps_right_edge_fixed(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "a1"})
+    audio_id = state["current_revision"]["document"]["clips"][0]["clip_id"]
+    state = _patch(
+        service,
+        state,
+        [{"op": "position_clip", "clip_id": audio_id, "timeline_start_us": 2_000_000}],
+    )
+    base_end = state["current_revision"]["document"]["clips"][0]["timeline_end_us"]
+    assert base_end == 10_000_000
+
+    # 2x：时长减半，右缘不动、左缘平移。
+    state = _patch(service, state, [{"op": "set_speed", "clip_id": audio_id, "speed_milli": 2000}])
+    clip = state["current_revision"]["document"]["clips"][0]
+    assert (clip["timeline_start_us"], clip["timeline_end_us"]) == (6_000_000, 10_000_000)
+    assert clip["source_start_us"] == 0 and clip["source_end_us"] == 8_000_000
+
+
+def test_set_reverse_playback_only_applies_to_video_and_reports_diff(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
+    video_id = state["current_revision"]["document"]["clips"][0]["clip_id"]
+    base = state["current_revision"]
+    state = _patch(
+        service,
+        state,
+        [{"op": "set_reverse_playback", "clip_id": video_id, "reverse_playback": True}],
+    )
+    assert state["current_revision"]["document"]["clips"][0]["reverse_playback"] is True
+    diff = service.compare_revisions(
+        "p1",
+        base["timeline_revision_id"],
+        state["current_revision"]["timeline_revision_id"],
+    )
+    assert {"type": "reverse_toggled", "clip_id": video_id} in diff["clip_changes"]
+
+
+def test_set_speed_rejects_out_of_range_values_and_image_clips(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
+    video_id = state["current_revision"]["document"]["clips"][0]["clip_id"]
+    for bad in (100, 4001):
+        with pytest.raises(DomainError):
+            _patch(service, state, [{"op": "set_speed", "clip_id": video_id, "speed_milli": bad}])
+
+    image_state = _patch(
+        service,
+        state,
+        [{"op": "insert_asset_clip", "asset_id": "i1", "at_index": 0, "duration_us": 1_000_000}],
+    )
+    image_id = image_state["current_revision"]["document"]["clips"][0]["clip_id"]
+    with pytest.raises(DomainError):
+        _patch(service, image_state, [{"op": "set_speed", "clip_id": image_id, "speed_milli": 2000}])

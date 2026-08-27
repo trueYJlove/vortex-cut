@@ -23,6 +23,8 @@ const statusLabels: Record<GenerationStatus, string> = {
   cancelled: "已取消",
   interrupted: "已中断",
 };
+const assetKindLabels: Record<string, string> = { video: "视频", audio: "音频", image: "图片", text: "文本" };
+const assetAvailabilityLabels: Record<string, string> = { available: "可用", missing: "缺失", changed: "已变更", unsupported: "不支持" };
 
 type Props = {
   project: Project;
@@ -352,7 +354,7 @@ export function MediaGenerationWorkbench({ project, assets, onClose }: Props) {
             <legend>输入素材引用（1–32 项，仅提交 Asset ID）</legend>
             {assets.length ? assets.map(item => <label key={item.asset.asset_id}>
               <input type="checkbox" aria-label={`引用素材 ${item.asset.display_name}`} checked={inputRefs.includes(item.asset.asset_id)} onChange={() => toggleAsset(item.asset.asset_id)} />
-              <span>{item.asset.display_name}</span><small>{item.asset.kind} · {item.asset.availability}</small>
+              <span>{item.asset.display_name}</span><small>{assetKindLabels[item.asset.kind] ?? item.asset.kind} · {assetAvailabilityLabels[item.asset.availability] ?? item.asset.availability}</small>
             </label>) : <p>当前项目没有可引用素材。</p>}
           </fieldset>
           {kind === "image" ? <div className="generation-parameters">

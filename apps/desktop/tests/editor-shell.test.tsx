@@ -72,7 +72,8 @@ describe("Editor shell 基线", () => {
     expect(screen.getByRole("region", { name: "项目预览" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "时间线" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "上下文属性" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "剪辑" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "切换项目" })).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "当前项目" })).not.toBeInTheDocument();
   });
 
   it("keeps save, preview, and job status separate", async () => {
@@ -101,7 +102,8 @@ describe("Editor shell 基线", () => {
     const failedJob: Job = { ...job, job_id: "job_failed" as never, kind: "authoritative_preview", status: "failed", stage: "failed", progress: 0, error: { code: "JOB_FAILED", message: "failed" } };
     window.desktop = desktopApi({ jobs: [failedJob] });
     render(<App />);
-    expect(await screen.findByText(/失败/)).toBeInTheDocument();
+    const jobsPanel = (await screen.findByText("任务")).closest(".jobs-panel") as HTMLElement;
+    expect(await within(jobsPanel).findByText(/失败/)).toBeInTheDocument();
   });
 
   it("shows the active render job count in the top-bar job status", async () => {
@@ -143,6 +145,23 @@ describe("Editor shell 基线", () => {
     expect(screen.getByRole("button", { name: "打开项目管理" })).toBeInTheDocument();
   });
 
+  it("formats long durations as HH:MM:SS and minutes", async () => {
+    const longClip = { ...timelineDocument, clips: [{ ...timelineDocument.clips[0], clip_id: "clip_long" as never, timeline_start_us: 0, timeline_end_us: 3_700_000_000, source_start_us: 0, source_end_us: 5_000_000 }] };
+    window.desktop = desktopApi({ timeline: { ...state, current_revision: { ...state.current_revision, document: longClip } } });
+    render(<App />);
+    expect(await screen.findByRole("button", { name: /video 1:01:40/ })).toBeInTheDocument();
+    expect(screen.getByText(/\/ 1:01:40/)).toBeInTheDocument();
+  });
+
+  it("exposes a preview ratio selector defaulting to fit", async () => {
+    render(<App />);
+    const ratio = await screen.findByRole("combobox", { name: "预览比例" });
+    expect(ratio).toHaveValue("fit");
+    fireEvent.change(ratio, { target: { value: "169" } });
+    expect(ratio).toHaveValue("169");
+    expect(document.querySelector(".preview-frame")).toHaveClass("ratio-169");
+  });
+
   it("marks the selected clip and exposes the playhead", async () => {
     render(<App />);
     const clip = await screen.findByRole("button", { name: /Clip 1/ });
@@ -155,54 +174,61 @@ describe("Editor shell 基线", () => {
     render(<App />);
     await screen.findByRole("button", { name: /Clip 1/ });
     const dataTransfer = { getData: (type: string) => (type === "application/x-vortex-cut-asset" ? video.asset_id : ""), setData: vi.fn(), dropEffect: "copy", effectAllowed: "copy" };
-    const trackContent = (await screen.findByText("V1")).closest(".track")!.querySelector(".track-content") as HTMLElement;
-    fireEvent.dragOver(trackContent, { dataTransfer });
-    expect(screen.getByText("释放后插入视频轨道")).toBeInTheDocument();
-    fireEvent.drop(trackContent, { dataTransfer });
-    expect(screen.queryByText("释放后插入视频轨道")).not.toBeInTheDocument();
+    const canvas = document.querySelector(".timeline-canvas-container canvas") as HTMLElement;
+    fireEvent.dragOver(canvas, { dataTransfer });
+    expect(screen.getByText("释放以追加到时间线")).toBeInTheDocument();
+    fireEvent.drop(canvas, { dataTransfer });
+    expect(screen.queryByText("释放以追加到时间线")).not.toBeInTheDocument();
   });
 
   it("clears the drop highlight when dragging away", async () => {
     render(<App />);
     await screen.findByRole("button", { name: /Clip 1/ });
     const dataTransfer = { getData: (type: string) => (type === "application/x-vortex-cut-asset" ? video.asset_id : ""), setData: vi.fn(), dropEffect: "copy", effectAllowed: "copy" };
-    const trackContent = (await screen.findByText("V1")).closest(".track")!.querySelector(".track-content") as HTMLElement;
-    fireEvent.dragOver(trackContent, { dataTransfer });
-    expect(screen.getByText("释放后插入视频轨道")).toBeInTheDocument();
-    fireEvent.dragLeave(trackContent, { dataTransfer });
-    expect(screen.queryByText("释放后插入视频轨道")).not.toBeInTheDocument();
+    const canvas = document.querySelector(".timeline-canvas-container canvas") as HTMLElement;
+    fireEvent.dragOver(canvas, { dataTransfer });
+    expect(screen.getByText("释放以追加到时间线")).toBeInTheDocument();
+    fireEvent.dragLeave(canvas, { dataTransfer });
+    expect(screen.queryByText("释放以追加到时间线")).not.toBeInTheDocument();
   });
 
-  it("switches modes without clearing the selected object", async () => {
+  it("keeps the toolbar row compact with only status output", async () => {
     render(<App />);
-    const clip = await screen.findByRole("button", { name: /Clip 1/ });
-    fireEvent.click(clip);
-    fireEvent.click(screen.getByRole("button", { name: "字幕" }));
-    expect(screen.getByRole("button", { name: "字幕" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("heading", { name: "片段属性" })).toBeInTheDocument();
+    await screen.findByRole("button", { name: "切换项目" });
+    expect(screen.queryByRole("button", { name: "剪辑" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "当前项目" })).not.toBeInTheDocument();
+    expect(document.querySelector(".mode-context")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "切换项目" })).toBeInTheDocument();
   });
 
-  it("shows mode-specific task goals in the mode context", async () => {
+  it("opens project management from the titlebar project switcher dropdown", async () => {
     render(<App />);
-    const editContext = () => screen.getByText("剪辑模式").closest(".mode-context") as HTMLElement;
-    expect(within(editContext()).getByRole("button", { name: "加入时间线" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "字幕" }));
-    const captionsContext = () => screen.getByText("字幕模式").closest(".mode-context") as HTMLElement;
-    expect(within(captionsContext()).getByRole("button", { name: "字幕校对" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "AI 工作台" }));
-    const aiContext = () => screen.getByText("AI 工作台模式").closest(".mode-context") as HTMLElement;
-    expect(within(aiContext()).getByRole("button", { name: "修改提案" })).toBeInTheDocument();
-    expect(within(aiContext()).getByRole("button", { name: "生成素材" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "导出" }));
-    const exportContext = () => screen.getByText("导出模式").closest(".mode-context") as HTMLElement;
-    expect(within(exportContext()).getByRole("button", { name: "导出任务" })).toBeInTheDocument();
+    await screen.findByRole("button", { name: "切换项目" });
+    fireEvent.click(screen.getByRole("button", { name: "切换项目" }));
+    await screen.findByRole("listbox", { name: "选择项目" });
+    fireEvent.click(within(screen.getByRole("listbox", { name: "选择项目" })).getByRole("menuitem", { name: /项目管理/ }));
+    expect(await screen.findByRole("dialog", { name: "项目管理" })).toBeInTheDocument();
   });
 
-  it("opens the render panel from the export mode action", async () => {
+  it("opens the render panel from the preview toolbar action", async () => {
     render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "导出" }));
-    fireEvent.click(within(screen.getByText("导出模式").closest(".mode-context") as HTMLElement).getByRole("button", { name: "导出任务" }));
+    await screen.findByRole("button", { name: "渲染与导出" });
+    fireEvent.click(screen.getByRole("button", { name: "渲染与导出" }));
     expect(await screen.findByRole("dialog", { name: "渲染与导出" })).toBeInTheDocument();
+  });
+
+  it("opens a dropdown with shortcut hints and supports arrow-key navigation", async () => {
+    render(<App />);
+    await screen.findByRole("button", { name: "切换项目" });
+    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+    const undoItem = await screen.findByRole("menuitem", { name: /撤销/ });
+    expect(undoItem).toBeInTheDocument();
+    expect(undoItem.querySelector(".menu-item-shortcut")).toHaveTextContent("Ctrl+Z");
+    const menu = screen.getByRole("menu", { name: "编辑" });
+    fireEvent.keyDown(menu, { key: "ArrowDown" });
+    expect(screen.getByRole("menuitem", { name: /重做/ })).toHaveClass("focused");
+    fireEvent.keyDown(menu, { key: "Escape" });
+    expect(screen.queryByRole("menu", { name: "编辑" })).not.toBeInTheDocument();
   });
 
   it("blocks timeline shortcuts while an input is focused", async () => {

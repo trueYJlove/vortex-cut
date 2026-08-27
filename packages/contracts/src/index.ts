@@ -542,7 +542,7 @@ export interface CandidateAdoption { schema_version: 1; candidate_document_sha25
 
 export type TimelineCreatedBy = "user" | "system" | "import";
 export type TimelineLayout = "blurred_background" | "crop_fill" | "fit";
-export type TimelineClipKind = "video" | "image";
+export type TimelineClipKind = "video" | "image" | "audio";
 export type CaptionOrigin = "transcript" | "user";
 export type CaptionPresetId = "default-bottom" | "game-safe-bottom" | "high-contrast";
 export type RenderMode = "authoritative_preview" | "final_export";
@@ -701,11 +701,13 @@ export interface ReframeExportBatchRetryResponse { batch: ReframeExportBatch; jo
 export type ReframeExportBatchPage = Page<ReframeExportBatch>;
 
 export interface TimelineCanvas extends ProjectCanvas { background_color: string; }
-export interface TimelineTrack { id: "V1" | "C1"; kind: "visual" | "caption"; locked: boolean; }
+export interface TimelineTrack { id: "V1" | "C1" | "A1"; kind: "visual" | "caption" | "audio"; locked: boolean; }
 export interface TimelineClipAudio { enabled: boolean; gain_db: number; }
+/** 帧率分子*1000；1000 = 1x。 */
+export type TimelineClipSpeedMilli = number & { readonly __brand: "timeline_clip_speed_milli" };
 export interface TimelineClip {
   clip_id: TimelineClipId;
-  track_id: "V1";
+  track_id: "V1" | "A1";
   order_index: number;
   asset_id: AssetId;
   asset_kind: TimelineClipKind;
@@ -715,6 +717,10 @@ export interface TimelineClip {
   timeline_end_us: number;
   layout: TimelineLayout;
   audio: TimelineClipAudio;
+  /** 可选字段：缺省按 1000（原速）处理。 */
+  speed_milli?: TimelineClipSpeedMilli;
+  /** 可选字段：缺省为 false（正放）。仅视频片段支持。 */
+  reverse_playback?: boolean;
 }
 export interface TimelineCaption {
   caption_id: TimelineCaptionId;
@@ -732,7 +738,7 @@ export interface TimelineDocument {
   schema_version: 1;
   project_id: ProjectId;
   canvas: TimelineCanvas;
-  tracks: [TimelineTrack, TimelineTrack];
+  tracks: [TimelineTrack, TimelineTrack] | [TimelineTrack, TimelineTrack, TimelineTrack];
   clips: TimelineClip[];
   captions: TimelineCaption[];
   locked_elements?: TimelineClipId[];
@@ -771,10 +777,13 @@ export type TimelinePatchOperation =
   | { op: "insert_transcript_segments"; transcript_id: TranscriptId; segment_ids: TranscriptSegmentId[]; at_index: number; padding_before_us: number; padding_after_us: number; create_captions: boolean; layout?: TimelineLayout }
   | { op: "remove_clip"; clip_id: TimelineClipId }
   | { op: "move_clip"; clip_id: TimelineClipId; to_index: number }
+  | { op: "position_clip"; clip_id: TimelineClipId; timeline_start_us: number }
   | { op: "trim_clip"; clip_id: TimelineClipId; source_start_us: number; source_end_us: number }
   | { op: "split_clip"; clip_id: TimelineClipId; source_time_us: number }
   | { op: "set_layout"; clip_id: TimelineClipId; layout: TimelineLayout }
   | { op: "set_audio"; clip_id: TimelineClipId; enabled: boolean; gain_db: number }
+  | { op: "set_speed"; clip_id: TimelineClipId; speed_milli: number }
+  | { op: "set_reverse_playback"; clip_id: TimelineClipId; reverse_playback: boolean }
   | { op: "set_image_duration"; clip_id: TimelineClipId; duration_us: number }
   | { op: "set_clip_locked"; clip_id: TimelineClipId; locked: boolean }
   | { op: "add_caption"; start_us: number; end_us: number; text: string; preset_id: CaptionPresetId; source_clip_id: null }
@@ -786,7 +795,7 @@ export interface TimelinePatch { schema_version: 1; base_revision_id: TimelineRe
 export interface TimelineRevisionPointerInput { base_revision_id: TimelineRevisionId; }
 
 export type TimelinePatchGenerationStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
-export type TimelineClipChangeType = "added" | "removed" | "moved" | "trimmed" | "split" | "layout_changed" | "audio_changed" | "duration_changed";
+export type TimelineClipChangeType = "added" | "removed" | "moved" | "trimmed" | "split" | "layout_changed" | "audio_changed" | "duration_changed" | "speed_changed" | "reverse_toggled";
 export type TimelineCaptionChangeType = "added" | "removed" | "text_changed" | "timing_changed" | "preset_changed";
 export interface TimelineClipChange { type: TimelineClipChangeType; clip_id: TimelineClipId; created_clip_ids?: TimelineClipId[]; }
 export interface TimelineCaptionChange { type: TimelineCaptionChangeType; caption_id: TimelineCaptionId; }
@@ -1330,12 +1339,19 @@ function isTimelineCanvas(value: unknown): value is TimelineCanvas {
     isString(value.background_color) && /^#[0-9A-Fa-f]{6}$/.test(value.background_color);
 }
 export function isTimelineClip(value: unknown): value is TimelineClip {
-  if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["clip_id", "track_id", "order_index", "asset_id", "asset_kind", "source_start_us", "source_end_us", "timeline_start_us", "timeline_end_us", "layout", "audio"])) return false;
-  if (!isId(value.clip_id) || value.track_id !== "V1" || !isInteger(value.order_index) || !isId(value.asset_id) || !oneOf(["video", "image"] as const, value.asset_kind) ||
+  if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["clip_id", "track_id", "order_index", "asset_id", "asset_kind", "source_start_us", "source_end_us", "timeline_start_us", "timeline_end_us", "layout", "audio", "speed_milli", "reverse_playback"])) return false;
+  if (!isId(value.clip_id) || !oneOf(["V1", "A1"] as const, value.track_id) || !isInteger(value.order_index) || !isId(value.asset_id) || !oneOf(["video", "image", "audio"] as const, value.asset_kind) ||
     !isInteger(value.timeline_start_us) || !isInteger(value.timeline_end_us, 1) || value.timeline_end_us <= value.timeline_start_us || !isTimelineLayout(value.layout) || !isRecord(value.audio) ||
     !onlyKeys(value.audio, ["enabled", "gain_db"]) || typeof value.audio.enabled !== "boolean" || !isFiniteNumber(value.audio.gain_db) || value.audio.gain_db < -60 || value.audio.gain_db > 12) return false;
-  if (value.asset_kind === "image") return value.source_start_us === null && value.source_end_us === null && value.timeline_end_us - value.timeline_start_us >= 500_000 && value.timeline_end_us - value.timeline_start_us <= 30_000_000;
-  return isInteger(value.source_start_us) && isInteger(value.source_end_us, 1) && value.source_end_us - value.source_start_us >= 100_000 && value.timeline_end_us - value.timeline_start_us === value.source_end_us - value.source_start_us;
+  // 可选变速/倒放字段：出现时必须合法；speed 250–4000（0.25x–4x），倒放仅视频。
+  if (value.speed_milli !== undefined && (!isInteger(value.speed_milli, 250) || value.speed_milli > 4000)) return false;
+  if (value.reverse_playback !== undefined && (typeof value.reverse_playback !== "boolean" || (value.reverse_playback && value.asset_kind !== "video"))) return false;
+  if (value.asset_kind === "image") return value.track_id === "V1" && value.source_start_us === null && value.source_end_us === null && value.timeline_end_us - value.timeline_start_us >= 500_000 && value.timeline_end_us - value.timeline_start_us <= 30_000_000;
+  // 视频/音频：timeline 时长 = 源范围时长 / 速度（四舍五入到微秒；原速时严格相等）。
+  const speed = typeof value.speed_milli === "number" ? value.speed_milli : 1000;
+  const sourceSpan = (value.source_end_us as number) - (value.source_start_us as number);
+  const expected = speed === 1000 ? sourceSpan : Math.round(sourceSpan / speed * 1000);
+  return value.source_end_us !== null && value.source_start_us !== null && sourceSpan >= 100_000 && value.timeline_end_us - value.timeline_start_us === expected;
 }
 export function isTimelineCaption(value: unknown): value is TimelineCaption {
   if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["caption_id", "track_id", "source_clip_id", "start_us", "end_us", "text", "preset_id", "origin", "edited", "source_segment_ids"])) return false;
@@ -1344,13 +1360,24 @@ export function isTimelineCaption(value: unknown): value is TimelineCaption {
   return value.origin === "transcript" ? value.source_clip_id !== null && value.source_segment_ids.length > 0 : value.source_segment_ids.length === 0;
 }
 export function isTimelineDocument(value: unknown): value is TimelineDocument {
-  if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["schema_version", "project_id", "canvas", "tracks", "clips", "captions", "locked_elements", "provenance"]) || value.schema_version !== 1 || !isId(value.project_id) || !isTimelineCanvas(value.canvas) || !Array.isArray(value.tracks) || value.tracks.length !== 2 || !Array.isArray(value.clips) || !value.clips.every(isTimelineClip) || !Array.isArray(value.captions) || !value.captions.every(isTimelineCaption) || !isRecord(value.provenance)) return false;
-  const [visual, caption] = value.tracks;
-  if (!isRecord(visual) || !onlyKeys(visual, ["id", "kind", "locked"]) || visual.id !== "V1" || visual.kind !== "visual" || visual.locked !== false) return false;
-  if (!isRecord(caption) || !onlyKeys(caption, ["id", "kind", "locked"]) || caption.id !== "C1" || caption.kind !== "caption" || caption.locked !== false) return false;
+  if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["schema_version", "project_id", "canvas", "tracks", "clips", "captions", "locked_elements", "provenance"]) || value.schema_version !== 1 || !isId(value.project_id) || !isTimelineCanvas(value.canvas) || !Array.isArray(value.tracks) || (value.tracks.length !== 2 && value.tracks.length !== 3) || !Array.isArray(value.clips) || !value.clips.every(isTimelineClip) || !Array.isArray(value.captions) || !value.captions.every(isTimelineCaption) || !isRecord(value.provenance)) return false;
+  const visual = value.tracks.find(t => isRecord(t) && t.id === "V1");
+  const caption = value.tracks.find(t => isRecord(t) && t.id === "C1");
+  const audioTrack = value.tracks.find(t => isRecord(t) && t.id === "A1");
+  if (!visual || !isRecord(visual) || !onlyKeys(visual, ["id", "kind", "locked"]) || visual.id !== "V1" || visual.kind !== "visual" || visual.locked !== false) return false;
+  if (!caption || !isRecord(caption) || !onlyKeys(caption, ["id", "kind", "locked"]) || caption.id !== "C1" || caption.kind !== "caption" || caption.locked !== false) return false;
+  if (audioTrack && (!isRecord(audioTrack) || !onlyKeys(audioTrack, ["id", "kind", "locked"]) || audioTrack.id !== "A1" || audioTrack.kind !== "audio" || audioTrack.locked !== false)) return false;
   if (!onlyKeys(value.provenance, ["created_by", "source_transcript_ids"]) || !isTimelineCreatedBy(value.provenance.created_by) || !Array.isArray(value.provenance.source_transcript_ids) || !value.provenance.source_transcript_ids.every(isId)) return false;
+  
+  // Validate V1 clips are sequential
+  const v1Clips = value.clips.filter(c => c.track_id === "V1").sort((a, b) => a.order_index - b.order_index);
   let end = 0;
-  for (let index = 0; index < value.clips.length; index += 1) { const clip = value.clips[index]; if (clip.order_index !== index || clip.timeline_start_us !== end) return false; end = clip.timeline_end_us; }
+  for (let index = 0; index < v1Clips.length; index += 1) { const clip = v1Clips[index]; if (clip.order_index !== index || clip.timeline_start_us !== end) return false; end = clip.timeline_end_us; }
+  
+  // Validate A1 clips (can be anywhere, just check valid ranges)
+  const a1Clips = value.clips.filter(c => c.track_id === "A1");
+  for (const clip of a1Clips) { if (clip.timeline_start_us < 0 || clip.timeline_end_us <= clip.timeline_start_us) return false; }
+
   const captions = [...value.captions].sort((a, b) => a.start_us - b.start_us);
   if (!captions.every((item, index) => item.end_us <= end && (index === 0 || captions[index - 1].end_us <= item.start_us))) return false;
   if (value.locked_elements === undefined) return true;
@@ -1386,10 +1413,13 @@ export function isTimelinePatchOperation(value: unknown): value is TimelinePatch
     case "insert_transcript_segments": return onlyKeys(value, ["op", "transcript_id", "segment_ids", "at_index", "padding_before_us", "padding_after_us", "create_captions", "layout"]) && id("transcript_id") && Array.isArray(value.segment_ids) && value.segment_ids.length > 0 && value.segment_ids.every(isId) && index("at_index") && us("padding_before_us") && Number(value.padding_before_us) <= 300_000 && us("padding_after_us") && Number(value.padding_after_us) <= 300_000 && typeof value.create_captions === "boolean" && (value.layout === undefined || isTimelineLayout(value.layout));
     case "remove_clip": return onlyKeys(value, ["op", "clip_id"]) && id("clip_id");
     case "move_clip": return onlyKeys(value, ["op", "clip_id", "to_index"]) && id("clip_id") && index("to_index");
+    case "position_clip": return onlyKeys(value, ["op", "clip_id", "timeline_start_us"]) && id("clip_id") && us("timeline_start_us");
     case "trim_clip": return onlyKeys(value, ["op", "clip_id", "source_start_us", "source_end_us"]) && id("clip_id") && us("source_start_us") && us("source_end_us", 1) && Number(value.source_end_us) - Number(value.source_start_us) >= 100_000;
     case "split_clip": return onlyKeys(value, ["op", "clip_id", "source_time_us"]) && id("clip_id") && us("source_time_us", 1);
     case "set_layout": return onlyKeys(value, ["op", "clip_id", "layout"]) && id("clip_id") && isTimelineLayout(value.layout);
     case "set_audio": return onlyKeys(value, ["op", "clip_id", "enabled", "gain_db"]) && id("clip_id") && typeof value.enabled === "boolean" && isFiniteNumber(value.gain_db) && value.gain_db >= -60 && value.gain_db <= 12;
+    case "set_speed": return onlyKeys(value, ["op", "clip_id", "speed_milli"]) && id("clip_id") && isInteger(value.speed_milli, 250) && value.speed_milli <= 4000;
+    case "set_reverse_playback": return onlyKeys(value, ["op", "clip_id", "reverse_playback"]) && id("clip_id") && typeof value.reverse_playback === "boolean";
     case "set_image_duration": return onlyKeys(value, ["op", "clip_id", "duration_us"]) && id("clip_id") && us("duration_us", 500_000) && Number(value.duration_us) <= 30_000_000;
     case "set_clip_locked": return onlyKeys(value, ["op", "clip_id", "locked"]) && id("clip_id") && typeof value.locked === "boolean";
     case "add_caption": return onlyKeys(value, ["op", "start_us", "end_us", "text", "preset_id", "source_clip_id"]) && us("start_us") && us("end_us", 1) && Number(value.end_us) - Number(value.start_us) >= 200_000 && isString(value.text) && value.text.trim().length > 0 && [...value.text].length <= 200 && isCaptionPresetId(value.preset_id) && value.source_clip_id === null;

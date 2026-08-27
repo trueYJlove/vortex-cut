@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { randomBytes } from "node:crypto";
 import { expect, test } from "@playwright/test";
+import { selectProject } from "./project-switcher";
 
 const require = createRequire(import.meta.url);
 const playwright = require(require.resolve("playwright", { paths: [dirname(require.resolve("@playwright/test"))] })) as { _electron: { launch: (options: Record<string, unknown>) => Promise<any> } };
@@ -139,7 +140,7 @@ test("Stage2C 受控 Electron Provider 先探测 Candidate capability 再生成�
     seedReadyTranscript(userData, setup.asset);
     await page.reload();
     await page.waitForFunction(() => Boolean(window.desktop?.getRuntime));
-    await page.getByLabel("当前项目").selectOption(setup.project.project_id);
+    await selectProject(page, setup.project.project_id);
     await page.locator(".tabs button").filter({ hasText: "转录" }).click();
     await expect.poll(async () => page.evaluate(id => window.desktop.listTranscripts(id as never), setup.asset.asset_id), { timeout: 10_000 }).toMatchObject({ items: [{ transcript_id: "transcript_e2e_primary" }] });
     await page.getByRole("button", { name: "AI 粗剪" }).click();

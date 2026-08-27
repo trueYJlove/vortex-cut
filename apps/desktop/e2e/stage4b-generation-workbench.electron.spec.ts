@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
+import { openProjectManagement, selectProject } from "./project-switcher";
 
 const require = createRequire(import.meta.url);
 const playwright = require(require.resolve("playwright", { paths: [dirname(require.resolve("@playwright/test"))] })) as { _electron: { launch: (options: Record<string, unknown>) => Promise<any> } };
@@ -64,7 +65,8 @@ async function ready(app: any) {
 }
 
 async function openWorkbench(page: any) {
-  await page.getByRole("button", { name: "打开生成任务模拟验证" }).click();
+  await page.getByRole("button", { name: "工具" }).click();
+  await page.getByRole("menuitem", { name: "生成验证（模拟）" }).click();
   await expect(page.getByRole("heading", { name: "生成验证（模拟）" })).toBeVisible();
   await expect(page.getByText("模拟验证：Provider 调用 0 次；不会生成媒体，不会注册素材，也不会写入时间线。").first()).toBeVisible();
 }
@@ -160,8 +162,9 @@ test("Gate 4B-4 真实 Electron/安装版本模拟工作台、取消重试与重
   const first = await launch();
   try {
     const page = await ready(first);
-    await page.getByLabel("项目名称").fill("Stage 4B Real Acceptance");
-    await page.getByRole("button", { name: "创建", exact: true }).click();
+    await openProjectManagement(page);
+    await page.getByLabel("新项目名称").fill("Stage 4B Real Acceptance");
+    await page.getByRole("button", { name: "创建项目" }).click();
     await page.getByRole("button", { name: "导入video" }).click();
     await expect(page.locator(".asset-row").filter({ hasText: assetName })).toBeVisible({ timeout: 30_000 });
     const setup = await page.evaluate(async () => {
@@ -192,11 +195,12 @@ test("Gate 4B-4 真实 Electron/安装版本模拟工作台、取消重试与重
     expect(retry.status).toBe("succeeded");
 
     await page.getByRole("button", { name: "关闭生成验证" }).click();
-    await page.getByLabel("项目名称").fill("Stage 4B Switch Target");
-    await page.getByRole("button", { name: "创建", exact: true }).click();
+    await openProjectManagement(page);
+    await page.getByLabel("新项目名称").fill("Stage 4B Switch Target");
+    await page.getByRole("button", { name: "创建项目" }).click();
     await openWorkbench(page);
     await page.getByLabel("生成验证 Prompt").fill(promptSwitch);
-    await page.getByLabel("当前项目").selectOption(setup.projectId);
+    await selectProject(page, setup.projectId);
     await expect(page.getByRole("heading", { name: "生成验证（模拟）" })).not.toBeVisible();
     expect(await page.locator("body").innerText()).not.toContain(promptSwitch);
 
@@ -221,7 +225,7 @@ test("Gate 4B-4 真实 Electron/安装版本模拟工作台、取消重试与重
   const second = await launch();
   try {
     const page = await ready(second);
-    await page.getByLabel("当前项目").selectOption(saved.projectId);
+    await selectProject(page, saved.projectId);
     await openWorkbench(page);
     await page.getByRole("tab", { name: "历史与任务" }).click();
     await expect(page.locator(".generation-request-list button")).toHaveCount(saved.requestIds.length, { timeout: 30_000 });

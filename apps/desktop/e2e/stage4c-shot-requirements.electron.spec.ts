@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
+import { openProjectManagement, selectProject } from "./project-switcher";
 
 const require = createRequire(import.meta.url);
 const playwright = require(require.resolve("playwright", { paths: [dirname(require.resolve("@playwright/test"))] })) as { _electron: { launch: (options: Record<string, unknown>) => Promise<any> } };
@@ -67,7 +68,8 @@ async function ready(app: any) {
 }
 
 async function openWorkbench(page: any) {
-  await page.getByRole("button", { name: "打开镜头与资产需求清单" }).click();
+  await page.getByRole("button", { name: "工具" }).click();
+  await page.getByRole("menuitem", { name: "镜头需求" }).click();
   await expect(page.getByRole("heading", { name: "镜头与资产需求清单" })).toBeVisible();
   await expect(page.getByText("人工规划素材需求；不会调用 Provider、不会生成媒体、不会写入时间线。")).toBeVisible();
 }
@@ -218,10 +220,11 @@ test("Gate 4C-4 真实 Electron/安装版本 Shot List、v11 升级与重启恢�
       const legacy = projects.items.find(item => item.project_id === "stage4c_legacy_project");
       expect(legacy?.name).toBe("Stage 4C Legacy Upgrade");
       projectId = legacy!.project_id;
-      await page.getByLabel("当前项目").selectOption(projectId);
+      await selectProject(page, projectId);
     } else {
-      await page.getByLabel("项目名称").fill(`Stage 4C ${mode}`);
-      await page.getByRole("button", { name: "创建", exact: true }).click();
+      await openProjectManagement(page);
+      await page.getByLabel("新项目名称").fill(`Stage 4C ${mode}`);
+      await page.getByRole("button", { name: "创建项目" }).click();
       projectId = await page.evaluate(async modeName => {
         const projects = await window.desktop.listProjects({ limit: 100 });
         return projects.items.find(item => item.name === `Stage 4C ${modeName}`)!.project_id;
@@ -307,8 +310,9 @@ test("Gate 4C-4 真实 Electron/安装版本 Shot List、v11 升级与重启恢�
     expectNoSensitiveShape(publicState);
 
     await page.getByRole("button", { name: "关闭镜头需求工作台" }).click();
-    await page.getByLabel("项目名称").fill(`Stage 4C Switch ${mode}`);
-    await page.getByRole("button", { name: "创建", exact: true }).click();
+    await openProjectManagement(page);
+    await page.getByLabel("新项目名称").fill(`Stage 4C Switch ${mode}`);
+    await page.getByRole("button", { name: "创建项目" }).click();
     const switchProjectName = `Stage 4C Switch ${mode}`;
     await expect.poll(async () => page.evaluate(async name => {
       const projects = await window.desktop.listProjects({ limit: 100 });
@@ -318,10 +322,10 @@ test("Gate 4C-4 真实 Electron/安装版本 Shot List、v11 升级与重启恢�
       const projects = await window.desktop.listProjects({ limit: 100 });
       return projects.items.find(item => item.name === name)!.project_id;
     }, switchProjectName);
-    await page.getByLabel("当前项目").selectOption(projectId);
+    await selectProject(page, projectId);
     await openWorkbench(page);
     await page.getByLabel("清单摘要").fill(content.switchDraft);
-    await page.getByLabel("当前项目").selectOption(switchProjectId);
+    await selectProject(page, switchProjectId);
     await expect(page.getByRole("heading", { name: "镜头与资产需求清单" })).not.toBeVisible();
     expect(await page.locator("body").innerText()).not.toContain(content.switchDraft);
   } finally {
@@ -331,7 +335,7 @@ test("Gate 4C-4 真实 Electron/安装版本 Shot List、v11 升级与重启恢�
   const second = await launch();
   try {
     const page = await ready(second);
-    await page.getByLabel("当前项目").selectOption(projectId);
+    await selectProject(page, projectId);
     await openWorkbench(page);
     await expect(page.getByLabel("清单标题")).toHaveValue("concurrent-revision");
     const restored = await page.evaluate(async id => window.desktop.getShotList(id as never), projectId);

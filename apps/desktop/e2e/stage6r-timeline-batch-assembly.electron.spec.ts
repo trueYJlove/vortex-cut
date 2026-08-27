@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
+import { selectProject } from "./project-switcher";
 
 const require = createRequire(import.meta.url);
 const playwright = require(require.resolve("playwright", { paths: [dirname(require.resolve("@playwright/test"))] })) as {
@@ -123,8 +124,9 @@ async function ready(app: any) {
 }
 
 async function openBatchPanel(page: any, projectId: string) {
-  await page.getByLabel("当前项目").selectOption(projectId);
-  await page.getByRole("button", { name: "打开镜头与资产需求清单" }).click();
+  await selectProject(page, projectId);
+  await page.getByRole("button", { name: "工具" }).click();
+  await page.getByRole("menuitem", { name: "镜头需求" }).click();
   await expect(page.getByRole("heading", { name: "镜头与资产需求清单" })).toBeVisible();
   await page.getByRole("tab", { name: "图片履约" }).click();
   const panel = page.getByRole("region", { name: "已采用图片批量时间线装配" });

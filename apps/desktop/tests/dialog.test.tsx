@@ -15,6 +15,21 @@ function DialogHarness({ empty = false }: { empty?: boolean }) {
   </>;
 }
 
+function NestedDialogHarness() {
+  const [firstOpen, setFirstOpen] = useState(false);
+  const [secondOpen, setSecondOpen] = useState(false);
+  return <>
+    <button onClick={() => setFirstOpen(true)}>打开</button>
+    {firstOpen && <Dialog label="第一层" onClose={() => setFirstOpen(false)}>
+      <button>一层按钮</button>
+      <button onClick={() => setSecondOpen(true)}>打开第二层</button>
+    </Dialog>}
+    {secondOpen && <Dialog label="第二层" onClose={() => setSecondOpen(false)}>
+      <button>二层按钮</button>
+    </Dialog>}
+  </>;
+}
+
 describe("共享 Dialog", () => {
   it("打开后将焦点移入，并在 Escape 后返回触发按钮", () => {
     render(<DialogHarness />);
@@ -53,5 +68,29 @@ describe("共享 Dialog", () => {
     trigger.focus();
     fireEvent.click(trigger);
     expect(screen.getByRole("dialog", { name: "测试对话框" })).toHaveFocus();
+  });
+
+  it("堆叠对话框时聚焦随关闭逐层返回，Escape 只关闭顶层", () => {
+    render(<NestedDialogHarness />);
+    const trigger = screen.getByRole("button", { name: "打开" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const firstDialog = screen.getByRole("dialog", { name: "第一层" });
+    expect(screen.getByRole("button", { name: "一层按钮" })).toHaveFocus();
+
+    const openSecond = screen.getByRole("button", { name: "打开第二层" });
+    openSecond.focus();
+    fireEvent.click(openSecond);
+    const secondDialog = screen.getByRole("dialog", { name: "第二层" });
+    expect(screen.getByRole("button", { name: "二层按钮" })).toHaveFocus();
+
+    fireEvent.keyDown(secondDialog, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "第二层" })).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "第一层" })).toBeInTheDocument();
+    expect(openSecond).toHaveFocus();
+
+    fireEvent.keyDown(firstDialog, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "第一层" })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
   });
 });
