@@ -9,6 +9,7 @@ import { ShotRequirementWorkbench } from "./shot-requirements/ShotRequirementWor
 import { Dialog } from "./Dialog.js";
 import { errorCode, safeErrorMessage, safeTaskErrorMessage } from "./safeErrors.js";
 import { editorCommands, type EditorCommand } from "./editorCommands.js";
+import { bindingLabel, findConflict, loadShortcuts, matchesBinding, normalizeRecordedBinding, saveShortcuts, DEFAULT_SHORTCUTS, type ShortcutCommandId, type ShortcutEntry } from "./shortcuts.js";
 import { TimelinePanel } from "./timeline/TimelineCanvas.js";
 import { ClipProperties, CaptionProperties, ProjectProperties, TimelineDiffView, TransitionProperties } from "./PropertyPanels.js";
 import { JobEta } from "./JobEta.js";
@@ -193,6 +194,24 @@ export function App() {
   const [rightWidth, setRightWidth] = useState(300);
   const [timelineHeight, setTimelineHeight] = useState(230);
   const resizeRef = useRef<{ kind: "left" | "right" | "timeline"; start: number; value: number } | undefined>(undefined);
+  // C3：快捷键自定义（注册表 + localStorage 持久化 + 面板录制状态）。
+  const [shortcuts, setShortcuts] = useState<Record<ShortcutCommandId, ShortcutEntry>>(() => loadShortcuts());
+  const shortcutsRef = useRef(shortcuts);
+  shortcutsRef.current = shortcuts;
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [recordingId, setRecordingId] = useState<ShortcutCommandId | null>(null);
+  const applyShortcuts = (next: Record<ShortcutCommandId, ShortcutEntry>) => { setShortcuts(next); saveShortcuts(next); };
+  const handleRecordKey = (event: React.KeyboardEvent, id: ShortcutCommandId) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.key === "Escape") { setRecordingId(null); return; }
+    const binding = normalizeRecordedBinding(event.nativeEvent);
+    if (!binding) { setNotice("该按键不可用：单字符键需配合 Ctrl 使用；可用的还有空格与 Delete。"); return; }
+    const conflict = findConflict(shortcuts, id, binding);
+    if (conflict) { setNotice(`按键与「${shortcuts[conflict].label}」冲突，请先改绑后者。`); return; }
+    applyShortcuts({ ...shortcuts, [id]: { ...shortcuts[id], binding } });
+    setRecordingId(null);
+  };
   const [revisionOpen, setRevisionOpen] = useState(false);
   const [revisions, setRevisions] = useState<TimelineRevisionSummary[]>([]);
   const [revisionPair, setRevisionPair] = useState({ base: "", target: "" });
@@ -851,22 +870,13 @@ export function App() {
     if (commandSearchOpen) return;
     // 按钮聚焦时保留原生激活语义：Space/Enter 触发按钮而非播放头。
     if (tag === "BUTTON" && (event.key === " " || event.key === "Enter")) return;
-    const ctrl = event.ctrlKey || event.metaKey;
     const key = (event.key ?? "").toLowerCase();
     const inTimeline = Boolean(target?.closest?.(".timeline-pane"));
-    if (ctrl && key === "k") { event.preventDefault(); runCommand("command.search"); return; }
-    if (ctrl && event.shiftKey && key === "z") { event.preventDefault(); runCommand("timeline.redo"); return; }
-    if (ctrl && !event.shiftKey && key === "y") { event.preventDefault(); runCommand("timeline.redo"); return; }
-    if (ctrl && !event.shiftKey && key === "z") { event.preventDefault(); runCommand("timeline.undo"); return; }
-    if (ctrl && !event.shiftKey && key === "c") { event.preventDefault(); runCommand("timeline.copy"); return; }
-    if (ctrl && !event.shiftKey && key === "x") { event.preventDefault(); runCommand("timeline.cut"); return; }
-    if (ctrl && !event.shiftKey && key === "v") { event.preventDefault(); runCommand("timeline.paste"); return; }
-    if (ctrl && key === "b") { event.preventDefault(); runCommand("timeline.split"); return; }
-    if (ctrl && key === "e") { event.preventDefault(); runCommand("export.open"); return; }
-    if (ctrl && key === "i") { event.preventDefault(); runCommand("ai.open"); return; }
-    if (ctrl && event.key === "Enter") { event.preventDefault(); runCommand("preview.generate"); return; }
+    // C3：固定别名（不进自定义表）——Ctrl+Shift+Z 重做、Backspace 删除。
+    if ((event.ctrlKey || event.metaKey) && event.shiftKey && key === "z") { event.preventDefault(); runCommand("timeline.redo"); return; }
+    if (!(event.ctrlKey || event.metaKey) && key === "backspace" && inTimeline) { event.preventDefault(); runCommand("timeline.delete"); return; }
     // 方向键逐帧步进（C1）：1 帧，Shift 加速 5 帧。
-    if (!ctrl && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+    if (!(event.ctrlKey || event.metaKey) && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
       if (inTimeline) {
         event.preventDefault();
         const frameUs = Math.round(1_000_000 / (working?.canvas.fps_num && working.canvas.fps_den ? working.canvas.fps_num / working.canvas.fps_den : 30));
@@ -876,8 +886,16 @@ export function App() {
       }
       return;
     }
-    if ((event.key === "Delete" || event.key === "Backspace") && inTimeline) { event.preventDefault(); runCommand("timeline.delete"); return; }
-    if (event.key === " " && inTimeline) { event.preventDefault(); runCommand("play.pause"); return; }
+    // C3：自定义快捷键注册表命中检测（顺序即注册表定义顺序）。
+    for (const [commandId, entry] of Object.entries(shortcutsRef.current) as Array<[ShortcutCommandId, ShortcutEntry]>) {
+      if (matchesBinding(event, entry.binding)) {
+        // Delete/播放暂停仅在时间线聚焦时生效（防全局误触）。
+        if ((commandId === "timeline.delete" || commandId === "play.pause") && !inTimeline) continue;
+        event.preventDefault();
+        runCommand(commandId);
+        return;
+      }
+    }
   };
   useEffect(() => {
     const listener = (event: KeyboardEvent) => keyHandlerRef.current?.(event);
@@ -900,7 +918,12 @@ export function App() {
     return () => window.removeEventListener("mousedown", listener);
   }, [projectSwitcherOpen]);
 
-  const menuShortcut = (label: string): string | undefined => editorCommands.find(command => command.label === label)?.shortcut;
+  const menuShortcut = (label: string): string | undefined => {
+      const command = editorCommands.find(item => item.label === label);
+      if (!command) return undefined;
+      const entry = (shortcutsRef.current as Record<string, ShortcutEntry>)[command.id as ShortcutCommandId];
+      return entry ? bindingLabel(entry.binding) : undefined;
+    };
 
   type MenuEntry = { label: string; action: () => void; disabled?: boolean } | { divider: true };
   const isMenuDivider = (entry: MenuEntry): entry is { divider: true } => "divider" in entry;
@@ -946,7 +969,7 @@ export function App() {
     项目: [{ label: "项目管理", action: () => setProjectDialogOpen(true) }, { label: "刷新项目", action: () => void refreshProjects() }],
     编辑: [{ label: "撤销", action: () => void undoRedo("undo"), disabled: !timeline?.can_undo }, { label: "重做", action: () => void undoRedo("redo"), disabled: !timeline?.can_redo }],
     时间线: [{ label: "创建空时间线", action: () => void createTimeline({ kind: "empty" }), disabled: !project || Boolean(timeline) }, { divider: true }, { label: "拆分所选片段", action: () => selectedClip && void patchTimeline([{ op: "split_clip", clip_id: selectedClip.clip_id, source_time_us: selectedClip.source_start_us! + Math.floor((selectedClip.source_end_us! - selectedClip.source_start_us!) / 2) }], "拆分片段"), disabled: !selectedClip }, { divider: true }, { label: "生成预览", action: () => void generatePreview(), disabled: Boolean(renderDisabledReason) }, { label: "导出", action: () => void createExport(), disabled: Boolean(renderDisabledReason) }],
-    界面: [{ label: "恢复默认布局", action: () => { setLeftWidth(280); setRightWidth(300); setTimelineHeight(230); } }, { label: "命令搜索", action: () => setCommandSearchOpen(true) }],
+    界面: [{ label: "恢复默认布局", action: () => { setLeftWidth(280); setRightWidth(300); setTimelineHeight(230); } }, { label: "命令搜索", action: () => setCommandSearchOpen(true) }, { label: "快捷键设置", action: () => setShortcutsOpen(true) }],
     工具: [{ label: "AI 粗剪", action: () => void openAi(), disabled: !project || !timeline }, { label: "AI 修改", action: () => void openPatch(), disabled: !timeline }, { label: "版本比较", action: () => void openRevisionCompare(), disabled: !project }, { divider: true }, { label: "镜头需求", action: () => setShotRequirementsOpen(true), disabled: !project || project.status !== "active" }, { label: "生成验证（模拟）", action: () => setGenerationOpen(true), disabled: !project || project.status !== "active" }, { label: "真实图片生成", action: () => setProviderImageGenerationOpen(true), disabled: !project || project.status !== "active" }],
     帮助: [{ label: "用户使用手册", action: () => setNotice("请查看 docs/VORTEX_CUT_USER_MANUAL.md") }]
   };
@@ -1000,9 +1023,24 @@ export function App() {
       <div className="modal-heading"><div><h2 id="command-search-title">命令搜索</h2><p>输入命令名过滤；↑↓ 选择 · Enter 执行 · Esc 关闭。</p></div></div>
       <input type="search" aria-label="命令搜索" aria-controls="command-list" aria-activedescendant={filteredCommands[commandIndex] ? `command-option-${filteredCommands[commandIndex].id}` : undefined} placeholder="输入命令名称…" value={commandQuery} onChange={event => { setCommandQuery(event.target.value); setCommandIndex(0); }} onKeyDown={handleCommandPaletteKeyDown} />
       <ul role="listbox" aria-label="命令列表" id="command-list" className="command-list">
-        {filteredCommands.map((command, index) => { const reason = commandDisabledReason(command.id); return <li key={command.id} id={`command-option-${command.id}`} role="option" aria-selected={index === commandIndex} className={index === commandIndex ? "active" : ""}><button disabled={Boolean(reason)} onClick={() => { if (!reason) { runCommand(command.id); closeCommandSearch(); } }}><span className="command-label">{command.label}</span>{command.shortcut ? <kbd className="command-shortcut">{command.shortcut}</kbd> : null}<span className={reason ? "command-reason" : "command-ok"}>{reason ?? "可用"}</span></button></li>; })}
+        {filteredCommands.map((command, index) => { const reason = commandDisabledReason(command.id); return <li key={command.id} id={`command-option-${command.id}`} role="option" aria-selected={index === commandIndex} className={index === commandIndex ? "active" : ""}><button disabled={Boolean(reason)} onClick={() => { if (!reason) { runCommand(command.id); closeCommandSearch(); } }}><span className="command-label">{command.label}</span>{(shortcutsRef.current as Record<string, ShortcutEntry> | undefined)?.[command.id as ShortcutCommandId] ? <kbd className="command-shortcut">{bindingLabel((shortcutsRef.current as Record<string, ShortcutEntry>)[command.id as ShortcutCommandId].binding)}</kbd> : null}<span className={reason ? "command-reason" : "command-ok"}>{reason ?? "可用"}</span></button></li>; })}
         {filteredCommands.length === 0 && <li className="command-empty">没有匹配的命令</li>}
       </ul>
+    </Dialog>}
+    {shortcutsOpen && <Dialog titleId="shortcuts-title" label="快捷键设置" onClose={() => { setShortcutsOpen(false); setRecordingId(null); }} className="shortcuts-dialog">
+      <div className="modal-heading"><div><h2 id="shortcuts-title">快捷键设置</h2><p>点击"录制"后按下新键位；Ctrl+Shift+Z（重做）与 Backspace（删除）为固定别名，不参与自定义。</p></div><IconButton label="关闭快捷键设置" onClick={() => { setShortcutsOpen(false); setRecordingId(null); }}><X /></IconButton></div>
+      <div className="shortcuts-list">
+        {(Object.entries(shortcuts) as Array<[ShortcutCommandId, ShortcutEntry]>).map(([id, entry]) => (
+          <div className="shortcut-row" key={id}>
+            <span className="shortcut-label">{entry.label}</span>
+            {recordingId === id
+              ? <kbd className="shortcut-recording" tabIndex={0} autoFocus onKeyDown={event => handleRecordKey(event, id)}>请按键…（Esc 取消）</kbd>
+              : <kbd className="shortcut-binding">{bindingLabel(entry.binding)}</kbd>}
+            <button className="compact-command" onClick={() => setRecordingId(id)}>录制</button>
+          </div>
+        ))}
+      </div>
+      <div className="modal-actions"><button onClick={() => { applyShortcuts(structuredClone(DEFAULT_SHORTCUTS)); setRecordingId(null); setNotice("已恢复默认快捷键。"); }}>恢复默认</button></div>
     </Dialog>}
 </main>;
 }
