@@ -722,6 +722,8 @@ export interface TimelineClip {
   speed_milli?: TimelineClipSpeedMilli;
   /** 可选字段：缺省为 false（正放）。仅视频片段支持。 */
   reverse_playback?: boolean;
+  /** 可选字段：关键帧动画（B3），缺省视为无动画。 */
+  keyframes?: TimelineClipKeyframes;
 }
 export interface TimelineCaption {
   caption_id: TimelineCaptionId;
@@ -745,6 +747,28 @@ export interface TimelineTransition {
   after_clip_id: TimelineClipId;
   kind: TransitionKind;
   duration_us: number;
+}
+
+/** B3 关键帧属性种类与数值范围（见 docs/M2_B3_KEYFRAMES_DESIGN.md §1）。 */
+export const KEYFRAME_PROPERTIES = ["position", "scale", "rotate", "opacity"] as const;
+export type KeyframeProperty = (typeof KEYFRAME_PROPERTIES)[number];
+/** 关键帧：t_us 为片段内时间线时间；position 含 x/y 比率，其余含标量 v。 */
+export interface TimelineKeyframe {
+  t_us: number;
+  x?: number;
+  y?: number;
+  v?: number;
+}
+/** 单属性关键帧轨道（每属性独立时间轴，帧按 t_us 升序唯一，≤32 帧）。 */
+export interface TimelineKeyframeTrack {
+  frames: TimelineKeyframe[];
+}
+/** 片段的关键帧集合：可选取四个属性，缺省视为无动画。 */
+export interface TimelineClipKeyframes {
+  position?: TimelineKeyframeTrack;
+  scale?: TimelineKeyframeTrack;
+  rotate?: TimelineKeyframeTrack;
+  opacity?: TimelineKeyframeTrack;
 }
 export interface TimelineDocument {
   schema_version: 1;
@@ -798,6 +822,10 @@ export type TimelinePatchOperation =
   | { op: "add_transition"; after_clip_id: TimelineClipId; kind: TransitionKind; duration_us: number }
   | { op: "update_transition"; transition_id: TimelineTransitionId; kind?: TransitionKind; duration_us?: number }
   | { op: "remove_transition"; transition_id: TimelineTransitionId }
+  | { op: "set_clip_keyframes"; clip_id: TimelineClipId; property: KeyframeProperty; frames: TimelineKeyframe[] }
+  | { op: "clear_clip_keyframes"; clip_id: TimelineClipId; property: KeyframeProperty }
+  | { op: "set_clip_keyframes"; clip_id: TimelineClipId; property: KeyframeProperty; frames: TimelineKeyframe[] }
+  | { op: "clear_clip_keyframes"; clip_id: TimelineClipId; property: KeyframeProperty }
   | { op: "set_speed"; clip_id: TimelineClipId; speed_milli: number }
   | { op: "set_reverse_playback"; clip_id: TimelineClipId; reverse_playback: boolean }
   | { op: "set_image_duration"; clip_id: TimelineClipId; duration_us: number }
@@ -811,7 +839,7 @@ export interface TimelinePatch { schema_version: 1; base_revision_id: TimelineRe
 export interface TimelineRevisionPointerInput { base_revision_id: TimelineRevisionId; }
 
 export type TimelinePatchGenerationStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
-export type TimelineClipChangeType = "added" | "removed" | "moved" | "trimmed" | "split" | "layout_changed" | "audio_changed" | "duration_changed" | "speed_changed" | "reverse_toggled";
+export type TimelineClipChangeType = "added" | "removed" | "moved" | "trimmed" | "split" | "layout_changed" | "audio_changed" | "duration_changed" | "speed_changed" | "reverse_toggled" | "keyframes_changed";
 export type TimelineCaptionChangeType = "added" | "removed" | "text_changed" | "timing_changed" | "preset_changed";
 export interface TimelineClipChange { type: TimelineClipChangeType; clip_id: TimelineClipId; created_clip_ids?: TimelineClipId[]; }
 export type TimelineTransitionChangeType = "added" | "removed" | "updated";
@@ -1357,13 +1385,15 @@ function isTimelineCanvas(value: unknown): value is TimelineCanvas {
     isString(value.background_color) && /^#[0-9A-Fa-f]{6}$/.test(value.background_color);
 }
 export function isTimelineClip(value: unknown): value is TimelineClip {
-  if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["clip_id", "track_id", "order_index", "asset_id", "asset_kind", "source_start_us", "source_end_us", "timeline_start_us", "timeline_end_us", "layout", "audio", "speed_milli", "reverse_playback"])) return false;
+  if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["clip_id", "track_id", "order_index", "asset_id", "asset_kind", "source_start_us", "source_end_us", "timeline_start_us", "timeline_end_us", "layout", "audio", "speed_milli", "reverse_playback", "keyframes"])) return false;
   if (!isId(value.clip_id) || !oneOf(["V1", "A1"] as const, value.track_id) || !isInteger(value.order_index) || !isId(value.asset_id) || !oneOf(["video", "image", "audio"] as const, value.asset_kind) ||
     !isInteger(value.timeline_start_us) || !isInteger(value.timeline_end_us, 1) || value.timeline_end_us <= value.timeline_start_us || !isTimelineLayout(value.layout) || !isRecord(value.audio) ||
     !onlyKeys(value.audio, ["enabled", "gain_db"]) || typeof value.audio.enabled !== "boolean" || !isFiniteNumber(value.audio.gain_db) || value.audio.gain_db < -60 || value.audio.gain_db > 12) return false;
   // 可选变速/倒放字段：出现时必须合法；speed 250–4000（0.25x–4x），倒放仅视频。
   if (value.speed_milli !== undefined && (!isInteger(value.speed_milli, 250) || value.speed_milli > 4000)) return false;
   if (value.reverse_playback !== undefined && (typeof value.reverse_playback !== "boolean" || (value.reverse_playback && value.asset_kind !== "video"))) return false;
+  // 可选关键帧：结构按属性校验；t_us 上界（片段时长）由 core 归一化时校验。
+  if (value.keyframes !== undefined && !isTimelineClipKeyframes(value.keyframes)) return false;
   if (value.asset_kind === "image") return value.track_id === "V1" && value.source_start_us === null && value.source_end_us === null && value.timeline_end_us - value.timeline_start_us >= 500_000 && value.timeline_end_us - value.timeline_start_us <= 30_000_000;
   // 视频/音频：timeline 时长 = 源范围时长 / 速度（四舍五入到微秒；原速时严格相等）。
   const speed = typeof value.speed_milli === "number" ? value.speed_milli : 1000;
@@ -1379,6 +1409,30 @@ export function isTimelineCaption(value: unknown): value is TimelineCaption {
 }
 export function isTimelineTransition(value: unknown): value is TimelineTransition {
   return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["transition_id", "after_clip_id", "kind", "duration_us"]) && isId(value.transition_id) && isId(value.after_clip_id) && oneOf(TRANSITION_IDS, value.kind) && isInteger(value.duration_us, 100_000) && value.duration_us <= 2_000_000;
+}
+/** B3：单属性关键帧轨道校验（范围按属性，帧升序唯一，1-32 帧）。 */
+export function isTimelineKeyframeTrack(value: unknown, property: KeyframeProperty): value is TimelineKeyframeTrack {
+  if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["frames"]) || !Array.isArray(value.frames) || value.frames.length < 1 || value.frames.length > 32) return false;
+  let previous = -1;
+  for (const frame of value.frames) {
+    if (!isRecord(frame) || !onlyKeys(frame, ["t_us", "x", "y", "v"]) || !isInteger(frame.t_us, 0) || frame.t_us <= previous) return false;
+    previous = frame.t_us;
+    if (property === "position") {
+      if (frame.x === undefined || frame.y === undefined || frame.v !== undefined) return false;
+      if (!isFiniteNumber(frame.x) || frame.x < -0.5 || frame.x > 0.5 || !isFiniteNumber(frame.y) || frame.y < -0.5 || frame.y > 0.5) return false;
+    } else {
+      if (frame.v === undefined || frame.x !== undefined || frame.y !== undefined) return false;
+      if (!isFiniteNumber(frame.v)) return false;
+      if (property === "scale" && (frame.v < 0.1 || frame.v > 5)) return false;
+      if (property === "rotate" && (frame.v < -180 || frame.v > 180)) return false;
+      if (property === "opacity" && (frame.v < 0 || frame.v > 1)) return false;
+    }
+  }
+  return true;
+}
+export function isTimelineClipKeyframes(value: unknown): value is TimelineClipKeyframes {
+  if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["position", "scale", "rotate", "opacity"]) || !Object.keys(value).length) return false;
+  return KEYFRAME_PROPERTIES.every(property => value[property] === undefined || isTimelineKeyframeTrack(value[property], property));
 }
 const TRANSITION_DOC_MAX = 50;
 export function isTimelineDocument(value: unknown): value is TimelineDocument {
@@ -1448,6 +1502,8 @@ export function isTimelinePatchOperation(value: unknown): value is TimelinePatch
     case "add_transition": return onlyKeys(value, ["op", "after_clip_id", "kind", "duration_us"]) && id("after_clip_id") && oneOf(TRANSITION_IDS, value.kind) && us("duration_us", 100_000) && Number(value.duration_us) <= 2_000_000;
     case "update_transition": return onlyKeys(value, ["op", "transition_id", "kind", "duration_us"]) && id("transition_id") && (value.kind === undefined || oneOf(TRANSITION_IDS, value.kind)) && (value.duration_us === undefined || (us("duration_us", 100_000) && Number(value.duration_us) <= 2_000_000)) && (value.kind !== undefined || value.duration_us !== undefined);
     case "remove_transition": return onlyKeys(value, ["op", "transition_id"]) && id("transition_id");
+    case "set_clip_keyframes": return onlyKeys(value, ["op", "clip_id", "property", "frames"]) && id("clip_id") && oneOf(KEYFRAME_PROPERTIES, value.property) && isTimelineKeyframeTrack({ frames: value.frames }, value.property);
+    case "clear_clip_keyframes": return onlyKeys(value, ["op", "clip_id", "property"]) && id("clip_id") && oneOf(KEYFRAME_PROPERTIES, value.property);
     case "set_speed": return onlyKeys(value, ["op", "clip_id", "speed_milli"]) && id("clip_id") && isInteger(value.speed_milli, 250) && value.speed_milli <= 4000;
     case "set_reverse_playback": return onlyKeys(value, ["op", "clip_id", "reverse_playback"]) && id("clip_id") && typeof value.reverse_playback === "boolean";
     case "set_image_duration": return onlyKeys(value, ["op", "clip_id", "duration_us"]) && id("clip_id") && us("duration_us", 500_000) && Number(value.duration_us) <= 30_000_000;

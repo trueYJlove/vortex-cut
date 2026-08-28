@@ -35,6 +35,8 @@ PATCH_OPERATIONS = {
     "add_transition",
     "update_transition",
     "remove_transition",
+    "set_clip_keyframes",
+    "clear_clip_keyframes",
 }
 AI_PATCH_OPERATIONS = PATCH_OPERATIONS - {
     "insert_asset_clip",
@@ -58,6 +60,15 @@ TRANSITION_KINDS = {
     "slideleft", "slideup", "zoomin",
 }
 MAX_TRANSITIONS = 50
+# B3 关键帧：属性白名单与取值范围。
+KEYFRAME_PROPERTIES = ("position", "scale", "rotate", "opacity")
+KEYFRAME_MAX_FRAMES = 32
+KEYFRAME_RANGES = {
+    "position": None,  # x/y 比率，-0.5..0.5
+    "scale": (0.1, 5.0),
+    "rotate": (-180.0, 180.0),
+    "opacity": (0.0, 1.0),
+}
 
 
 def _clip_speed(clip: dict[str, Any]) -> int:
@@ -741,6 +752,9 @@ class TimelineService:
             clip["source_end_us"] = split_source
             index = clips.index(clip)
             clips.insert(index + 1, right)
+            # B3：关键帧按拆分点切分归两侧。
+            split_t_us = split_timeline - clip["timeline_start_us"]
+            _split_clip_keyframes(clip, right, split_t_us)
             self._split_bound_captions(document, clip["clip_id"], right["clip_id"], split_timeline)
         elif op == "set_layout":
             _exact_keys(operation, {"op", "clip_id", "layout"})
@@ -769,6 +783,7 @@ class TimelineService:
                 or not MIN_SPEED_MILLI <= speed <= MAX_SPEED_MILLI
             ):
                 raise DomainError("TIMELINE_INVALID", "速度需在 0.25x-4x 之间")
+            old_duration = clip["timeline_end_us"] - clip["timeline_start_us"]
             clip["speed_milli"] = speed
             if clip["asset_kind"] == "video":
                 # V1 连续轨道：直接改时长，由 _normalize_timing 重排后续片段。
@@ -776,12 +791,15 @@ class TimelineService:
                     clip["source_start_us"], clip["source_end_us"], speed
                 )
                 clip["timeline_end_us"] = clip["timeline_start_us"] + new_duration
+                # B3：片段时长变化，关键帧时间等比重映射。
+                _remap_clip_keyframes(clip, old_duration, new_duration)
             else:
                 # A1 自由定位：右缘固定、左缘平移以保持终点。
                 new_duration = _clip_timeline_duration_us(
                     clip["source_start_us"], clip["source_end_us"], speed
                 )
                 clip["timeline_start_us"] = clip["timeline_end_us"] - new_duration
+                _remap_clip_keyframes(clip, old_duration, new_duration)
         elif op == "set_reverse_playback":
             _exact_keys(operation, {"op", "clip_id", "reverse_playback"})
             clip = _clip(document, operation.get("clip_id"))
@@ -799,7 +817,9 @@ class TimelineService:
             duration = _integer(operation.get("duration_us"), "图片时长不合法")
             if not MIN_IMAGE_US <= duration <= MAX_IMAGE_US:
                 raise DomainError("TIMELINE_INVALID", "图片时长需为 0.5-30 秒")
+            old_duration = clip["timeline_end_us"] - clip["timeline_start_us"]
             clip["timeline_end_us"] = clip["timeline_start_us"] + duration
+            _remap_clip_keyframes(clip, old_duration, duration)
         elif op == "add_caption":
             _exact_keys(
                 operation,
@@ -855,6 +875,31 @@ class TimelineService:
                 locked_ids.append(clip_id)
             elif not locked and clip_id in locked_ids:
                 locked_ids.remove(clip_id)
+        elif op == "set_clip_keyframes":
+            # B3：整属性覆盖（拖拽幂等提交，单 Revision 可撤销）。
+            _exact_keys(operation, {"op", "clip_id", "property", "frames"})
+            clip = _clip(document, operation.get("clip_id"))
+            property_name = operation.get("property")
+            if property_name not in KEYFRAME_PROPERTIES:
+                raise DomainError("TIMELINE_INVALID", "关键帧属性不合法")
+            frames = _validate_keyframe_track(
+                operation.get("frames"), property_name,
+                clip["timeline_end_us"] - clip["timeline_start_us"],
+            )
+            keyframes = clip.setdefault("keyframes", {})
+            keyframes[property_name] = {"frames": frames}
+        elif op == "clear_clip_keyframes":
+            _exact_keys(operation, {"op", "clip_id", "property"})
+            clip = _clip(document, operation.get("clip_id"))
+            property_name = operation.get("property")
+            if property_name not in KEYFRAME_PROPERTIES:
+                raise DomainError("TIMELINE_INVALID", "关键帧属性不合法")
+            keyframes = clip.get("keyframes")
+            if not keyframes or property_name not in keyframes:
+                raise DomainError("TIMELINE_INVALID", "该属性没有关键帧")
+            del keyframes[property_name]
+            if not keyframes:
+                del clip["keyframes"]
         elif op == "add_transition":
             _exact_keys(operation, {"op", "after_clip_id", "kind", "duration_us"})
             document.setdefault("transitions", [])
@@ -1171,8 +1216,9 @@ class TimelineService:
                     "audio",
                     "speed_milli",
                     "reverse_playback",
+                    "keyframes",
                 },
-                optional={"speed_milli", "reverse_playback"},
+                optional={"speed_milli", "reverse_playback", "keyframes"},
             )
             clip_id = _identifier(clip.get("clip_id"), "Clip ID 不合法")
             if clip_id in clip_ids:
@@ -1208,6 +1254,17 @@ class TimelineService:
             if not isinstance(reversed_flag, bool):
                 raise DomainError("TIMELINE_INVALID", "Clip 倒放状态不合法")
             duration = clip["timeline_end_us"] - clip["timeline_start_us"]
+            keyframes = clip.get("keyframes")
+            if keyframes is not None:
+                if (
+                    not isinstance(keyframes, dict)
+                    or not keyframes
+                    or set(keyframes) - set(KEYFRAME_PROPERTIES)
+                ):
+                    raise DomainError("TIMELINE_INVALID", "Clip 关键帧结构不合法")
+                for property_name, track in keyframes.items():
+                    frames = track.get("frames") if isinstance(track, dict) else None
+                    _validate_keyframe_track(frames, property_name, duration)
             if clip["asset_kind"] == "video":
                 media = json_loads(asset["media_info_json"]) if asset["media_info_json"] else {}
                 asset_duration = media.get("duration_us")
@@ -1681,6 +1738,101 @@ def _transition_successor(
     return v1[index + 1]
 
 
+def _validate_keyframe_track(
+    frames: Any, property_name: str, clip_duration_us: int
+) -> list[dict[str, Any]]:
+    """校验单属性关键帧帧列表并返回规范化副本（见设计 §1.1/§1.3）。"""
+    if not isinstance(frames, list) or not frames:
+        raise DomainError("TIMELINE_INVALID", "关键帧帧列表不能为空")
+    if len(frames) > KEYFRAME_MAX_FRAMES:
+        raise DomainError("TIMELINE_INVALID", f"关键帧最多 {KEYFRAME_MAX_FRAMES} 帧")
+    result: list[dict[str, Any]] = []
+    previous_t = -1
+    for frame in frames:
+        if not isinstance(frame, dict):
+            raise DomainError("TIMELINE_INVALID", "关键帧不合法")
+        allowed = {"t_us", "x", "y", "v"}
+        if set(frame) - allowed or not frame:
+            raise DomainError("TIMELINE_INVALID", "关键帧字段不合法")
+        t_us = frame.get("t_us")
+        if isinstance(t_us, bool) or not isinstance(t_us, int):
+            raise DomainError("TIMELINE_INVALID", "关键帧时间不合法")
+        if t_us <= previous_t:
+            raise DomainError("TIMELINE_INVALID", "关键帧时间必须严格递增")
+        if t_us > clip_duration_us:
+            raise DomainError("TIMELINE_INVALID", "关键帧时间超出片段时长")
+        previous_t = t_us
+        entry: dict[str, Any] = {"t_us": t_us}
+        if property_name == "position":
+            x_value, y_value = frame.get("x"), frame.get("y")
+            for value in (x_value, y_value):
+                if not isinstance(value, (int, float)) or isinstance(value, bool):
+                    raise DomainError("TIMELINE_INVALID", "位置关键帧坐标不合法")
+                if not -0.5 <= value <= 0.5:
+                    raise DomainError("TIMELINE_INVALID", "位置坐标需在画布半径 ±0.5 内")
+            entry["x"], entry["y"] = float(x_value), float(y_value)
+        else:
+            v_value = frame.get("v")
+            if not isinstance(v_value, (int, float)) or isinstance(v_value, bool):
+                raise DomainError("TIMELINE_INVALID", "关键帧数值不合法")
+            if "x" in frame or "y" in frame:
+                raise DomainError("TIMELINE_INVALID", "该属性关键帧不含坐标字段")
+            low, high = KEYFRAME_RANGES[property_name]
+            if not low <= v_value <= high:
+                raise DomainError("TIMELINE_INVALID", f"关键帧数值需在 {low}-{high} 内")
+            entry["v"] = float(v_value)
+        result.append(entry)
+    return result
+
+
+def _remap_clip_keyframes(
+    clip: dict[str, Any], old_duration_us: int, new_duration_us: int
+) -> None:
+    """片段时长变化时按比例重映射全部关键帧时间（保持相对位置）。"""
+    keyframes = clip.get("keyframes")
+    if not keyframes or old_duration_us <= 0:
+        return
+    for track in keyframes.values():
+        for frame in track["frames"]:
+            frame["t_us"] = round(frame["t_us"] * new_duration_us / old_duration_us)
+
+
+def _split_clip_keyframes(
+    clip: dict[str, Any], right: dict[str, Any], split_t_us: int
+) -> None:
+    """拆分时把关键帧按拆分点切分归两侧（边界帧克隆到右段归零时间轴）。"""
+    keyframes = clip.get("keyframes")
+    if not keyframes:
+        return
+    right_keyframes: dict[str, Any] = {}
+    for property_name, track in keyframes.items():
+        left_frames = []
+        right_frames = []
+        for frame in track["frames"]:
+            if frame["t_us"] <= split_t_us:
+                left_frames.append(frame)
+            else:
+                shifted = dict(frame)
+                shifted["t_us"] = frame["t_us"] - split_t_us
+                right_frames.append(shifted)
+        if not left_frames:
+            # 全部在右侧：整属性移到右段。
+            right_keyframes[property_name] = {"frames": right_frames}
+            track["frames"] = []
+        elif not right_frames:
+            left_frames = left_frames
+        else:
+            track["frames"] = left_frames
+            right_keyframes[property_name] = {"frames": right_frames}
+    # 清理空轨道。
+    for property_name in [name for name, track in keyframes.items() if not track["frames"]]:
+        del keyframes[property_name]
+    if right_keyframes:
+        right["keyframes"] = right_keyframes
+    if not keyframes:
+        del clip["keyframes"]
+
+
 def _caption(document: dict[str, Any], caption_id: Any) -> dict[str, Any]:
     caption_id = _identifier(caption_id, "Caption ID 不合法")
     for caption in document["captions"]:
@@ -1769,6 +1921,8 @@ def timeline_diff(base: dict[str, Any], target: dict[str, Any]) -> dict[str, Any
             changes.append("speed_changed")
         if old.get("reverse_playback", False) != new.get("reverse_playback", False):
             changes.append("reverse_toggled")
+        if old.get("keyframes") != new.get("keyframes"):
+            changes.append("keyframes_changed")
         old_duration = old["timeline_end_us"] - old["timeline_start_us"]
         new_duration = new["timeline_end_us"] - new["timeline_start_us"]
         if old_duration != new_duration and "trimmed" not in changes:
