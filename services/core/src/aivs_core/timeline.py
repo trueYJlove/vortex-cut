@@ -32,6 +32,9 @@ PATCH_OPERATIONS = {
     "set_caption_timing",
     "set_caption_preset",
     "set_clip_locked",
+    "add_transition",
+    "update_transition",
+    "remove_transition",
 }
 AI_PATCH_OPERATIONS = PATCH_OPERATIONS - {
     "insert_asset_clip",
@@ -46,6 +49,15 @@ MIN_CAPTION_US = 200_000
 MAX_PADDING_US = 300_000
 MIN_SPEED_MILLI = 250
 MAX_SPEED_MILLI = 4000
+MIN_TRANSITION_US = 100_000
+MAX_TRANSITION_US = 2_000_000
+# 转场只作用于 V1 相邻的这两类片段。
+TRANSITIONABLE_KINDS = ("video", "image")
+TRANSITION_KINDS = {
+    "fade", "fadeblack", "dissolve", "wipeleft", "wiperight",
+    "slideleft", "slideup", "zoomin",
+}
+MAX_TRANSITIONS = 50
 
 
 def _clip_speed(clip: dict[str, Any]) -> int:
@@ -607,6 +619,24 @@ class TimelineService:
             clip = _clip(document, operation.get("clip_id"))
             clips.remove(clip)
             captions[:] = [c for c in captions if c["source_clip_id"] != clip["clip_id"]]
+            # 级联删除涉及该片段的转场：作为锚点的转场直接删；
+            # 以"被删片段的后继"为锚的转场也删（该相邻关系已不存在）。
+            if document.get("transitions"):
+                v1_left = [c for c in clips if c.get("track_id") == "V1"]
+                successor_id = next(
+                    (
+                        c["clip_id"]
+                        for c in v1_left
+                        if c.get("order_index") == clip["order_index"] + 1
+                    ),
+                    None,
+                )
+                document["transitions"] = [
+                    item
+                    for item in document["transitions"]
+                    if item["after_clip_id"] != clip["clip_id"]
+                    and item["after_clip_id"] != successor_id
+                ]
         elif op == "move_clip":
             _exact_keys(operation, {"op", "clip_id", "to_index"})
             clip = _clip(document, operation.get("clip_id"))
@@ -683,6 +713,25 @@ class TimelineService:
                 or clip["source_end_us"] - split_source < MIN_VIDEO_US
             ):
                 raise DomainError("TIMELINE_INVALID", "拆分后的片段不得短于 100ms")
+            # 拆分点若落在锚定于该片段的转场区间内（距尾部 < T），拒绝。
+            transition_here = next(
+                (
+                    item
+                    for item in document.get("transitions", [])
+                    if item["after_clip_id"] == clip["clip_id"]
+                ),
+                None,
+            )
+            if transition_here is not None:
+                tail_timeline = clip["timeline_end_us"] - transition_here["duration_us"]
+                split_timeline_check = clip["timeline_start_us"] + round(
+                    (split_source - clip["source_start_us"]) * 1000 / _clip_speed(clip)
+                )
+                if split_timeline_check > tail_timeline:
+                    raise DomainError(
+                        "TIMELINE_TRANSITION_INVALID",
+                        "拆分点位于转场区间内；请先删除或缩短该转场",
+                    )
             split_timeline = clip["timeline_start_us"] + round(
                 (split_source - clip["source_start_us"]) * 1000 / _clip_speed(clip)
             )
@@ -806,6 +855,46 @@ class TimelineService:
                 locked_ids.append(clip_id)
             elif not locked and clip_id in locked_ids:
                 locked_ids.remove(clip_id)
+        elif op == "add_transition":
+            _exact_keys(operation, {"op", "after_clip_id", "kind", "duration_us"})
+            document.setdefault("transitions", [])
+            anchor, successor = self._transition_neighbors(clips, operation.get("after_clip_id"))
+            kind = _enum(operation.get("kind"), TRANSITION_KINDS, "转场类型不合法")
+            duration = _integer(operation.get("duration_us"), "转场时长不合法")
+            if not MIN_TRANSITION_US <= duration <= MAX_TRANSITION_US:
+                raise DomainError("TIMELINE_TRANSITION_INVALID", "转场时长需为 0.1-2 秒")
+            if any(item["after_clip_id"] == anchor["clip_id"] for item in document["transitions"]):
+                raise DomainError("TIMELINE_TRANSITION_EXISTS", "两片段之间已存在转场")
+            if len(document["transitions"]) >= MAX_TRANSITIONS:
+                raise DomainError("TIMELINE_TRANSITION_INVALID", "转场数量已达上限")
+            document["transitions"].append(
+                {
+                    "transition_id": f"transition_{new_id()}",
+                    "after_clip_id": anchor["clip_id"],
+                    "kind": kind,
+                    "duration_us": duration,
+                }
+            )
+        elif op == "update_transition":
+            _exact_keys(
+                operation,
+                {"op", "transition_id", "kind", "duration_us"},
+                optional={"kind", "duration_us"},
+            )
+            transition = _transition(document, operation.get("transition_id"))
+            kind = operation.get("kind")
+            if kind is not None:
+                transition["kind"] = _enum(kind, TRANSITION_KINDS, "转场类型不合法")
+            duration = operation.get("duration_us")
+            if duration is not None:
+                duration = _integer(duration, "转场时长不合法")
+                if not MIN_TRANSITION_US <= duration <= MAX_TRANSITION_US:
+                    raise DomainError("TIMELINE_TRANSITION_INVALID", "转场时长需为 0.1-2 秒")
+                transition["duration_us"] = duration
+        elif op == "remove_transition":
+            _exact_keys(operation, {"op", "transition_id"})
+            transition = _transition(document, operation.get("transition_id"))
+            document["transitions"].remove(transition)
         self._normalize_timing(document, old_starts)
 
     @staticmethod
@@ -819,6 +908,28 @@ class TimelineService:
             caption = _caption(document, caption_id)
             if caption.get("source_clip_id") in locked:
                 raise DomainError("TIMELINE_LOCKED", "关联 Caption 所属 Clip 已锁定")
+        # 转场操作：锚点或后继任一被锁定即拒绝。
+        after_clip_id = operation.get("after_clip_id")
+        if isinstance(after_clip_id, str) and after_clip_id in locked:
+            raise DomainError("TIMELINE_LOCKED", "转场锚点片段已锁定")
+        transition_id = operation.get("transition_id")
+        if isinstance(transition_id, str):
+            for transition in document.get("transitions", []):
+                if transition["transition_id"] == transition_id and (
+                    transition["after_clip_id"] in locked
+                ):
+                    raise DomainError("TIMELINE_LOCKED", "转场关联片段已锁定")
+
+    def _transition_neighbors(
+        self, clips: list[dict[str, Any]], after_clip_id: Any
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        anchor = _clip({"clips": clips}, after_clip_id)
+        if anchor.get("track_id") != "V1" or anchor.get("asset_kind") not in TRANSITIONABLE_KINDS:
+            raise DomainError("TIMELINE_TRANSITION_INVALID", "转场只能加在 V1 视频/图片片段之后")
+        successor = _transition_successor(clips, anchor)
+        if successor.get("asset_kind") not in TRANSITIONABLE_KINDS:
+            raise DomainError("TIMELINE_TRANSITION_INVALID", "转场后继必须是视频/图片片段")
+        return anchor, successor
 
     def _asset_clip(
         self,
@@ -1005,10 +1116,12 @@ class TimelineService:
                 "captions",
                 "provenance",
                 "locked_elements",
+                "transitions",
             },
-            optional={"locked_elements"},
+            optional={"locked_elements", "transitions"},
         )
         document.setdefault("locked_elements", [])
+        document.setdefault("transitions", [])
         self._normalize_timing(document, {})
         if document.get("schema_version") != 1:
             raise DomainError("TIMELINE_INVALID", "Timeline schema_version 必须为 1")
@@ -1205,6 +1318,43 @@ class TimelineService:
         document["locked_elements"] = [
             clip["clip_id"] for clip in clips if clip["clip_id"] in set(locked_elements)
         ]
+        transitions = document.get("transitions")
+        if not isinstance(transitions, list):
+            raise DomainError("TIMELINE_INVALID", "Timeline 转场列表不合法")
+        transition_ids: set[str] = set()
+        transition_anchors: set[str] = set()
+        for transition in transitions:
+            if not isinstance(transition, dict):
+                raise DomainError("TIMELINE_INVALID", "Timeline 转场不合法")
+            _exact_keys(
+                transition,
+                {"transition_id", "after_clip_id", "kind", "duration_us"},
+            )
+            transition_id = _identifier(transition.get("transition_id"), "转场 ID 不合法")
+            if transition_id in transition_ids:
+                raise DomainError("TIMELINE_INVALID", "转场 ID 重复")
+            transition_ids.add(transition_id)
+            anchor_id = transition.get("after_clip_id")
+            if (
+                not isinstance(anchor_id, str)
+                or anchor_id not in clip_ids
+                or anchor_id in transition_anchors
+            ):
+                raise DomainError("TIMELINE_INVALID", "转场锚点片段不合法或重复")
+            transition_anchors.add(anchor_id)
+            _enum(transition.get("kind"), TRANSITION_KINDS, "转场类型不合法")
+            duration = _integer(transition.get("duration_us"), "转场时长不合法")
+            if not MIN_TRANSITION_US <= duration <= MAX_TRANSITION_US:
+                raise DomainError("TIMELINE_INVALID", "转场时长需为 0.1-2 秒")
+        # 引用完整性：锚点必须是 V1 可转场片段且存在 V1 后继。
+        v1 = [c for c in clips if c["track_id"] == "V1"]
+        for transition in transitions:
+            anchor = next((c for c in v1 if c["clip_id"] == transition["after_clip_id"]), None)
+            if anchor is None or anchor["asset_kind"] not in TRANSITIONABLE_KINDS:
+                raise DomainError("TIMELINE_INVALID", "转场锚点必须是 V1 视频/图片片段")
+            index = v1.index(anchor)
+            if index + 1 >= len(v1) or v1[index + 1]["asset_kind"] not in TRANSITIONABLE_KINDS:
+                raise DomainError("TIMELINE_INVALID", "转场后继必须是 V1 视频/图片片段")
 
     def _normalize_timing(self, document: dict[str, Any], old_starts: dict[str, int]) -> None:
         clips = document.get("clips")
@@ -1397,6 +1547,7 @@ class TimelineService:
             "clips": [],
             "captions": [],
             "locked_elements": [],
+            "transitions": [],
             "provenance": {"created_by": "user", "source_transcript_ids": []},
         }
 
@@ -1509,6 +1660,25 @@ def _clip(document: dict[str, Any], clip_id: Any) -> dict[str, Any]:
         if clip["clip_id"] == clip_id:
             return clip
     raise DomainError("TIMELINE_CLIP_NOT_FOUND", "Timeline Clip 不存在")
+
+
+def _transition(document: dict[str, Any], transition_id: Any) -> dict[str, Any]:
+    transition_id = _identifier(transition_id, "转场 ID 不合法")
+    for transition in document.get("transitions", []):
+        if transition["transition_id"] == transition_id:
+            return transition
+    raise DomainError("TIMELINE_TRANSITION_INVALID", "转场不存在")
+
+
+def _transition_successor(
+    clips: list[dict[str, Any]], anchor: dict[str, Any]
+) -> dict[str, Any]:
+    """V1 序中 anchor 的直接后继；转场要求其为同轨可转场片段。"""
+    v1 = [c for c in clips if c.get("track_id") == "V1"]
+    index = v1.index(anchor)
+    if index + 1 >= len(v1):
+        raise DomainError("TIMELINE_TRANSITION_INVALID", "转场需要一个后继片段")
+    return v1[index + 1]
 
 
 def _caption(document: dict[str, Any], caption_id: Any) -> dict[str, Any]:
@@ -1658,6 +1828,36 @@ def timeline_diff(base: dict[str, Any], target: dict[str, Any]) -> dict[str, Any
             )
     base_duration = base_doc["clips"][-1]["timeline_end_us"] if base_doc["clips"] else 0
     target_duration = target_doc["clips"][-1]["timeline_end_us"] if target_doc["clips"] else 0
+    # 转场 diff：按 transition_id 对比增删改。
+    base_transitions = {item["transition_id"]: item for item in base_doc.get("transitions", [])}
+    target_transitions = {item["transition_id"]: item for item in target_doc.get("transitions", [])}
+    transition_changes: list[dict[str, Any]] = []
+    for transition_id in sorted(set(base_transitions) - set(target_transitions)):
+        transition_changes.append(
+            {
+                "type": "removed",
+                "transition_id": transition_id,
+                "after_clip_id": base_transitions[transition_id]["after_clip_id"],
+            }
+        )
+    for transition_id in sorted(set(target_transitions) - set(base_transitions)):
+        transition_changes.append(
+            {
+                "type": "added",
+                "transition_id": transition_id,
+                "after_clip_id": target_transitions[transition_id]["after_clip_id"],
+            }
+        )
+    for transition_id in sorted(set(base_transitions) & set(target_transitions)):
+        old_item, new_item = base_transitions[transition_id], target_transitions[transition_id]
+        if old_item != new_item:
+            transition_changes.append(
+                {
+                    "type": "updated",
+                    "transition_id": transition_id,
+                    "after_clip_id": new_item["after_clip_id"],
+                }
+            )
     return {
         "schema_version": 1,
         "project_id": base["project_id"],
@@ -1669,10 +1869,12 @@ def timeline_diff(base: dict[str, Any], target: dict[str, Any]) -> dict[str, Any
             "clip_changes": len(clip_changes),
             "caption_changes": len(caption_changes),
             "lock_changes": len(lock_changes),
+            "transition_changes": len(transition_changes),
         },
         "duration_delta_us": target_duration - base_duration,
         "clip_changes": clip_changes,
         "caption_changes": caption_changes,
         "lock_changes": lock_changes,
         "indirect_locked_timing_shifts": indirect,
+        "transition_changes": transition_changes,
     }

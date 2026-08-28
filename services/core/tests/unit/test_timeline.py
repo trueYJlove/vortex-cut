@@ -809,3 +809,140 @@ def test_insert_asset_clip_carries_speed_and_reverse(tmp_path: Path) -> None:
             state,
             [{"op": "insert_asset_clip", "asset_id": "v2", "at_index": 0, "source_start_us": 0, "source_end_us": 1_000_000, "speed_milli": 5000}],
         )
+
+
+def test_transitions_add_update_remove_and_diff(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
+    first_id = state["current_revision"]["document"]["clips"][0]["clip_id"]
+    state = _patch(
+        service,
+        state,
+        [{"op": "insert_asset_clip", "asset_id": "i1", "at_index": 1, "duration_us": 2_000_000}],
+    )
+    base = state["current_revision"]
+
+    # 添加：合法路径。
+    state = _patch(
+        service,
+        state,
+        [{"op": "add_transition", "after_clip_id": first_id, "kind": "fade", "duration_us": 500_000}],
+    )
+    transitions = state["current_revision"]["document"]["transitions"]
+    assert len(transitions) == 1
+    assert transitions[0]["after_clip_id"] == first_id
+    assert transitions[0]["kind"] == "fade"
+    assert transitions[0]["duration_us"] == 500_000
+    transition_id = transitions[0]["transition_id"]
+
+    # 重复添加同锚点被拒。
+    with pytest.raises(DomainError) as duplicate:
+        _patch(service, state, [{"op": "add_transition", "after_clip_id": first_id, "kind": "dissolve", "duration_us": 300_000}])
+    assert duplicate.value.code == "TIMELINE_TRANSITION_EXISTS"
+
+    # 时长越界被拒；非法类型被拒；A1 片段锚点被拒（无 A1 相邻视频后继场景，用不存在 id 更直接）。
+    with pytest.raises(DomainError):
+        _patch(service, state, [{"op": "add_transition", "after_clip_id": first_id, "kind": "fade", "duration_us": 50_000}])
+    with pytest.raises(DomainError):
+        _patch(service, state, [{"op": "add_transition", "after_clip_id": first_id, "kind": "fade", "duration_us": 3_000_000}])
+    with pytest.raises(DomainError):
+        _patch(service, state, [{"op": "add_transition", "after_clip_id": first_id, "kind": "circleopen", "duration_us": 500_000}])
+
+    # 更新：改类型与时长。
+    after_add = state["current_revision"]
+    state = _patch(
+        service,
+        state,
+        [{"op": "update_transition", "transition_id": transition_id, "kind": "zoomin", "duration_us": 1_000_000}],
+    )
+    updated = state["current_revision"]["document"]["transitions"][0]
+    assert (updated["kind"], updated["duration_us"]) == ("zoomin", 1_000_000)
+
+    # diff：base→add 后为 added；add 后→update 后为 updated；summary 计数一致。
+    diff = service.compare_revisions("p1", base["timeline_revision_id"], after_add["timeline_revision_id"])
+    assert [item["type"] for item in diff["transition_changes"]] == ["added"]
+    assert diff["summary"]["transition_changes"] == 1
+    diff_updated = service.compare_revisions("p1", after_add["timeline_revision_id"], state["current_revision"]["timeline_revision_id"])
+    assert [item["type"] for item in diff_updated["transition_changes"]] == ["updated"]
+    assert diff_updated["summary"]["transition_changes"] == 1
+
+    # 删除。
+    state = _patch(service, state, [{"op": "remove_transition", "transition_id": transition_id}])
+    assert state["current_revision"]["document"]["transitions"] == []
+    diff_removed = service.compare_revisions("p1", base["timeline_revision_id"], state["current_revision"]["timeline_revision_id"])
+    assert diff_removed["transition_changes"] == []
+
+
+def test_transition_requires_video_anchor_with_video_successor(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
+    only_id = state["current_revision"]["document"]["clips"][0]["clip_id"]
+
+    # 单片段无后继。
+    with pytest.raises(DomainError) as no_successor:
+        _patch(service, state, [{"op": "add_transition", "after_clip_id": only_id, "kind": "fade", "duration_us": 500_000}])
+    assert no_successor.value.code == "TIMELINE_TRANSITION_INVALID"
+
+    # 视频→图片：图片作为后继合法。
+    state = _patch(service, state, [{"op": "insert_asset_clip", "asset_id": "i1", "at_index": 1, "duration_us": 1_000_000}])
+    image_id = state["current_revision"]["document"]["clips"][1]["clip_id"]
+    state = _patch(service, state, [{"op": "add_transition", "after_clip_id": only_id, "kind": "fade", "duration_us": 400_000}])
+    transitions = state["current_revision"]["document"]["transitions"]
+    assert len(transitions) == 1 and transitions[0]["after_clip_id"] == only_id
+
+    # 音频素材进入 A1 轨，不影响 V1 转场；但 A1 片段作锚点非法。
+    state = _patch(service, state, [{"op": "insert_asset_clip", "asset_id": "a1", "at_index": 0}])
+    audio_id = next(c["clip_id"] for c in state["current_revision"]["document"]["clips"] if c["track_id"] == "A1")
+    with pytest.raises(DomainError) as audio_anchor:
+        _patch(service, state, [{"op": "add_transition", "after_clip_id": audio_id, "kind": "fade", "duration_us": 400_000}])
+    assert audio_anchor.value.code == "TIMELINE_TRANSITION_INVALID"
+
+
+def test_transition_locked_clip_rejected(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
+    first_id = state["current_revision"]["document"]["clips"][0]["clip_id"]
+    state = _patch(service, state, [{"op": "insert_asset_clip", "asset_id": "i1", "at_index": 1, "duration_us": 1_000_000}])
+    state = _patch(service, state, [{"op": "set_clip_locked", "clip_id": first_id, "locked": True}])
+    with pytest.raises(DomainError) as locked:
+        _patch(service, state, [{"op": "add_transition", "after_clip_id": first_id, "kind": "fade", "duration_us": 500_000}])
+    assert locked.value.code == "TIMELINE_LOCKED"
+
+
+def test_remove_clip_cascades_transitions_and_split_conflict(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
+    first_id = state["current_revision"]["document"]["clips"][0]["clip_id"]
+    state = _patch(service, state, [{"op": "insert_asset_clip", "asset_id": "v2", "at_index": 1, "source_start_us": 0, "source_end_us": 2_000_000}])
+    second_id = state["current_revision"]["document"]["clips"][1]["clip_id"]
+
+    # 拆分点落在转场区间内（5s 片段尾部 0.5s 内）被拒。
+    state = _patch(service, state, [{"op": "add_transition", "after_clip_id": first_id, "kind": "fade", "duration_us": 500_000}])
+    with pytest.raises(DomainError) as conflict:
+        _patch(service, state, [{"op": "split_clip", "clip_id": first_id, "source_time_us": 4_800_000}])
+    assert conflict.value.code == "TIMELINE_TRANSITION_INVALID"
+    # 区间外拆分正常，转场跟随前段。
+    state = _patch(service, state, [{"op": "split_clip", "clip_id": first_id, "source_time_us": 2_000_000}])
+    assert len(state["current_revision"]["document"]["transitions"]) == 1
+
+    # 删除锚点片段：其转场级联删除；相邻后继继承前后关系后转场仍指向正确片段。
+    state = _patch(service, state, [{"op": "remove_clip", "clip_id": first_id}])
+    assert state["current_revision"]["document"]["transitions"] == []
+
+    # 重建三段场景：删除锚点片段后 V1 序为 [v1右半, v2]；插入图片到中间成 [v1右半, i1, v2]。
+    left_id = state["current_revision"]["document"]["clips"][0]["clip_id"]  # v1 split 右半
+    state = _patch(service, state, [{"op": "insert_asset_clip", "asset_id": "i1", "at_index": 1, "duration_us": 1_000_000}])
+    middle_id = state["current_revision"]["document"]["clips"][1]["clip_id"]
+    state = _patch(
+        service,
+        state,
+        [
+            {"op": "add_transition", "after_clip_id": left_id, "kind": "fade", "duration_us": 300_000},
+            {"op": "add_transition", "after_clip_id": middle_id, "kind": "dissolve", "duration_us": 300_000},
+        ],
+    )
+    assert len(state["current_revision"]["document"]["transitions"]) == 2
+    state = _patch(service, state, [{"op": "remove_clip", "clip_id": middle_id}])
+    remaining = state["current_revision"]["document"]["transitions"]
+    assert len(remaining) == 1
+    assert remaining[0]["after_clip_id"] == left_id
