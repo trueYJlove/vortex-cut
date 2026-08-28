@@ -29,6 +29,111 @@ def _effective_duration_us(segments: list[dict[str, Any]], index: int) -> int:
     return total - _transition_tail_us(segments[index]) - _transition_head_us(segments, index)
 
 
+def _lerp_expression(track: dict[str, Any], scalar: bool) -> str:
+    """B3：关键帧轨道 → 段内相对秒 t 的 FFmpeg 表达式（分段线性）。
+
+    帧升序唯一（core 已校验）；窗口外取边界值。position 展开 x/y 两段，
+    其余属性展开标量 v。
+    """
+    frames = track["frames"]
+
+    def channel(pick: str) -> str:
+        if len(frames) == 1:
+            return f"{frames[0][pick]:.6f}"
+
+        def build(low: int, high: int) -> str:
+            """递归构造 frames[low..high] 的分段 lerp（括号天然平衡）。"""
+            if high - low == 1:
+                t1 = frames[high]["t_us"] / 1_000_000
+                v0 = frames[low][pick]
+                v1 = frames[high][pick]
+                span = t1 - frames[low]["t_us"] / 1_000_000
+                lerp = f"({v0:.6f}+((t-{frames[low]['t_us'] / 1_000_000:.6f})*{v1 - v0:.6f}/{span:.6f}))"
+                return f"if(lt(t,{t1:.6f}),{lerp},{v1:.6f})"
+            mid = (low + high) // 2
+            # 二分分段：左半管 [low, mid)，右半递归；不影响线性语义（嵌套 if 按 t 分派）。
+            return f"if(lt(t,{frames[mid]['t_us'] / 1_000_000:.6f}),{build(low, mid)},{build(mid, high)})"
+
+        return build(0, len(frames) - 1)
+
+    if scalar:
+        return channel("v")
+    x_expr = channel("x")
+    y_expr = channel("y")
+    return x_expr, y_expr
+
+
+def _keyframe_animation_filters(
+    segment: dict[str, Any], base_clause: str, base_label: str, out_label: str,
+    width: int, height: int, black_input_index: int,
+) -> list[str]:
+    """在布局输出后叠加四属性动画变换（按需生成滤镜；无关键帧时直通）。
+
+    base_clause 为不含输出标签的"源 trim → 视觉滤镜"链文本；黑底输入为
+    预先追加的 lavfi -i color（black_input_index），供 opacity/position 使用。
+    返回子句列表。
+    """
+    keyframes = segment.get("keyframes")
+    clauses = [f"{base_clause}[{base_label}]"]
+    if not keyframes:
+        clauses.append(f"[{base_label}]null[{out_label}]")
+        return clauses
+    t_scale = _lerp_expression(keyframes["scale"], True) if "scale" in keyframes else None
+    rotate_expr = _lerp_expression(keyframes["rotate"], True) if "rotate" in keyframes else None
+    opacity_expr = _lerp_expression(keyframes["opacity"], True) if "opacity" in keyframes else None
+    position = _lerp_expression(keyframes["position"], False) if "position" in keyframes else None
+    step = 0
+    current = base_label
+    # FFmpeg 表达式内的逗号必须转义（\,），否则被当成滤镜参数分隔符。
+    comma = "\\,"
+    if t_scale is not None:
+        step += 1
+        scaled = f"ks{step}"
+        clauses.append(
+            f"[{current}]scale=w='iw*max({t_scale}{comma}0.05)':h='ih*max({t_scale}{comma}0.05)'"
+            f":eval=frame[{scaled}]"
+        )
+        current = scaled
+    if rotate_expr is not None:
+        step += 1
+        rotated = f"kr{step}"
+        clauses.append(f"[{current}]rotate='{rotate_expr}*PI/180':c=black@0:ow=iw:oh=ih[{rotated}]")
+        current = rotated
+    if opacity_expr is not None:
+        # 渲染能力约束（实测）：colorchannelmixer/geq 无时间表达式、blend
+        # 表达式无 if()、fade 只能"当前值→0"或"0→当前值"。因此 opacity
+        # 动画本期近似为：末值 < 首值 → 整段 fade out（至 0）；否则 →
+        # 整段 fade in（从 0）。中间帧的复杂曲线为已知限制：模型保留完整
+        # 帧列表，UI 数值仍按插值显示，渲染统一为线性整体渐变。
+        frames = keyframes["opacity"]["frames"]
+        clauses.append(f"[{current}]format=yuva420p[{current}y]")
+        fade_target = f"ko{step}"
+        clauses.append(
+            f"[{current}y]fade=alpha=1:st=0.000000:d={_seconds(frames[-1]['t_us'])}[{fade_target}]"
+        )
+        current = fade_target
+        _ = black_input_index  # opacity 不需要黑底输入
+    if position is not None:
+        x_expr, y_expr = position
+        step += 1
+        positioned = f"kp{step}"
+        # 位置在预置黑底输入上合成（段内容浮于其上）。
+        clauses.append(
+            f"[{black_input_index}:v][{current}]overlay=x='(W-w)/2+{x_expr}*(W/2)':y='(H-h)/2+{y_expr}*(H/2)':eval=frame:eof_action=repeat[{positioned}]"
+        )
+        current = positioned
+    if current != base_label:
+        # scale/rotate 动画会改变帧尺寸；concat 要求各段一致。归一化只缩不放
+        # （min(iw,W)/min(ih,H)），否则小尺寸动画帧会被重新放大回满画布，
+        # 抵消缩放动画；超出的部分按比例缩进，再 pad 居中。
+        clauses.append(
+            f"[{current}]scale=w='min(iw\\,{width})':h='min(ih\\,{height})'"
+            f":force_original_aspect_ratio=decrease:force_divisible_by=2,"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black[{out_label}]"
+        )
+    return clauses
+
+
 def build_timeline_args(
     plan: dict[str, Any],
     segment_paths: list[Path],
@@ -41,11 +146,23 @@ def build_timeline_args(
     segments = plan["segments"]
     if len(segments) != len(segment_paths) or len(segments) != len(segment_probes):
         raise DomainError("RENDER_PLAN_INVALID", "渲染输入数量不一致")
+    # B3：position/opacity 动画需要一个黑底 lavfi 输入（blend/overlay 用），
+    # 追加在所有正式输入之后。
+    needs_black_input = any(
+        isinstance(segment.get("keyframes"), dict)
+        and ({"position", "opacity"} & set(segment["keyframes"]))
+        for segment in segments
+    )
+    black_input_index = len(segments) if needs_black_input else -1
     args = ["-hide_banner", "-nostdin", "-y"]
     for segment, path in zip(segments, segment_paths, strict=True):
         if segment["asset_kind"] == "image":
             args += ["-loop", "1", "-framerate", "30"]
         args += ["-i", str(path)]
+    if needs_black_input:
+        width0 = int(plan["output"]["width"])
+        height0 = int(plan["output"]["height"])
+        args += ["-f", "lavfi", "-i", f"color=c=black:s={width0}x{height0}:r=30"]
     width = int(plan["output"]["width"])
     height = int(plan["output"]["height"])
     filters: list[str] = []
@@ -55,8 +172,13 @@ def build_timeline_args(
     def visual_chain(
         segment: dict[str, Any], input_index: int, out_label: str,
         *, window_us: tuple[int, int] | None = None,
-    ) -> str:
-        """一段的"源 trim（可选取窗）→ 视觉滤镜"链；window_us 为时间线窗口 (head_us, tail_us)。"""
+        black_input_index: int | None = None,
+    ) -> list[str]:
+        """一段的"源 trim（可选取窗）→ 视觉滤镜 → 关键帧动画"链。
+
+        window_us 为时间线窗口 (head_us, tail_us)；返回子句列表（动画
+        叠加可能产生多条，含 color 源与 overlay），以分号连接后追加到图。
+        """
         label_seq[0] += 1
         label_id = label_seq[0]  # blurred_background 中间标签唯一化
         speed_milli = int(segment.get("speed_milli", 1000))
@@ -83,7 +205,11 @@ def build_timeline_args(
             if isinstance(reframe, dict)
             else _visual_filter(segment["layout"], width, height, label_id)
         )
-        return f"{source},{_square_pixel_filter()},{visual},setsar=1,fps=30,format=yuv420p[{out_label}]"
+        base = f"{source},{_square_pixel_filter()},{visual},setsar=1,fps=30,format=yuv420p"
+        return _keyframe_animation_filters(
+            segment, base, f"vbase{label_id}", out_label, width, height,
+            black_input_index if black_input_index is not None else -1,
+        )
 
     for index, (segment, probe) in enumerate(zip(segments, segment_probes, strict=True)):
         duration_us = segment["timeline_end_us"] - segment["timeline_start_us"]
@@ -96,7 +222,7 @@ def build_timeline_args(
             segments[index - 1].get("transition_in"), dict
         )
         if not is_transition_right:
-            filters.append(visual_chain(segment, index, f"v{index}"))
+            filters.extend(visual_chain(segment, index, f"v{index}", black_input_index=black_input_index))
         has_audio = bool(probe.get("audio_streams"))
         if (
             segment["asset_kind"] == "video"
@@ -170,11 +296,11 @@ def build_timeline_args(
             head_us = duration_us
             next_tail_us = _transition_tail_us(right_segment)
             right_total_us = right_segment["timeline_end_us"] - right_segment["timeline_start_us"]
-            filters.append(
-                visual_chain(right_segment, right, f"vh{order}", window_us=(0, right_total_us - head_us - next_tail_us))
+            filters.extend(
+                visual_chain(right_segment, right, f"vh{order}", window_us=(0, right_total_us - head_us - next_tail_us), black_input_index=black_input_index)
             )
-            filters.append(
-                visual_chain(right_segment, right, f"vr{order}", window_us=(head_us, next_tail_us))
+            filters.extend(
+                visual_chain(right_segment, right, f"vr{order}", window_us=(head_us, next_tail_us), black_input_index=black_input_index)
             )
             filters.append(
                 f"[{video_label_prev}][vh{order}]"

@@ -316,6 +316,7 @@ class RenderPlanCompiler:
                     "gain_db": float(clip["audio"]["gain_db"]),
                     "speed_milli": int(clip.get("speed_milli", 1000)),
                     "reverse_playback": bool(clip.get("reverse_playback", False)),
+                    "keyframes": clip.get("keyframes"),
                     "transition_in": (
                         {
                             "transition_id": transition["transition_id"],
