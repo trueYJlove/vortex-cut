@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import re
 import sqlite3
 import unicodedata
 from typing import Any
@@ -37,6 +38,8 @@ PATCH_OPERATIONS = {
     "remove_transition",
     "set_clip_keyframes",
     "clear_clip_keyframes",
+    "set_caption_style",
+    "clear_caption_style",
 }
 AI_PATCH_OPERATIONS = PATCH_OPERATIONS - {
     "insert_asset_clip",
@@ -69,6 +72,69 @@ KEYFRAME_RANGES = {
     "rotate": (-180.0, 180.0),
     "opacity": (0.0, 1.0),
 }
+# B4 字幕样式覆盖：字段白名单与取值范围。
+CAPTION_STYLE_FONT_RANGE = (24, 144)
+CAPTION_STYLE_OUTLINE_RANGE = (0, 10)
+CAPTION_STYLE_ALIGNMENT = {2, 5, 8}
+CAPTION_STYLE_MARGIN_RANGE = (0, 600)
+
+
+def _validate_caption_style(style: Any) -> dict[str, Any]:
+    """校验字幕样式覆盖并返回规范化副本（部分字段；见设计 §1.1）。"""
+    if not isinstance(style, dict) or not style:
+        raise DomainError("TIMELINE_INVALID", "字幕样式覆盖不能为空")
+    allowed = {"font_size", "primary_color", "outline_color", "outline", "alignment", "margin_v", "pos_x", "pos_y"}
+    if set(style) - allowed:
+        raise DomainError("TIMELINE_INVALID", "字幕样式字段不合法")
+    result: dict[str, Any] = {}
+    font_size = style.get("font_size")
+    if font_size is not None:
+        if isinstance(font_size, bool) or not isinstance(font_size, int):
+            raise DomainError("TIMELINE_INVALID", "字号不合法")
+        low, high = CAPTION_STYLE_FONT_RANGE
+        if not low <= font_size <= high:
+            raise DomainError("TIMELINE_INVALID", f"字号需在 {low}-{high} 之间")
+        result["font_size"] = font_size
+    for color_key in ("primary_color", "outline_color"):
+        color = style.get(color_key)
+        if color is not None:
+            if (
+                not isinstance(color, str)
+                or not re.fullmatch(r"&H[0-9A-Fa-f]{8}", color)
+            ):
+                raise DomainError("TIMELINE_INVALID", "字幕颜色需为 &Haabbggrr 格式")
+            result[color_key] = color
+    outline = style.get("outline")
+    if outline is not None:
+        if isinstance(outline, bool) or not isinstance(outline, int):
+            raise DomainError("TIMELINE_INVALID", "描边宽度不合法")
+        low, high = CAPTION_STYLE_OUTLINE_RANGE
+        if not low <= outline <= high:
+            raise DomainError("TIMELINE_INVALID", f"描边宽度需在 {low}-{high} 之间")
+        result["outline"] = outline
+    alignment = style.get("alignment")
+    if alignment is not None:
+        if isinstance(alignment, bool) or not isinstance(alignment, int) or alignment not in CAPTION_STYLE_ALIGNMENT:
+            raise DomainError("TIMELINE_INVALID", "字幕对齐仅支持 底部(2)/居中(5)/顶部(8)")
+        result["alignment"] = alignment
+    margin_v = style.get("margin_v")
+    if margin_v is not None:
+        if isinstance(margin_v, bool) or not isinstance(margin_v, int):
+            raise DomainError("TIMELINE_INVALID", "字幕边距不合法")
+        low, high = CAPTION_STYLE_MARGIN_RANGE
+        if not low <= margin_v <= high:
+            raise DomainError("TIMELINE_INVALID", f"字幕边距需在 {low}-{high} 之间")
+        result["margin_v"] = margin_v
+    for pos_key in ("pos_x", "pos_y"):
+        pos = style.get(pos_key)
+        if pos is None:
+            continue
+        if isinstance(pos, bool) or not isinstance(pos, (int, float)):
+            raise DomainError("TIMELINE_INVALID", "自定义坐标需为 0-1 比率或 null")
+        if not 0 <= pos <= 1:
+            raise DomainError("TIMELINE_INVALID", "自定义坐标需为 0-1 比率或 null")
+        result[pos_key] = float(pos)
+    return result
 
 
 def _clip_speed(clip: dict[str, Any]) -> int:
@@ -864,6 +930,22 @@ class TimelineService:
                 operation.get("preset_id"), CAPTION_PRESETS, "字幕预设不合法"
             )
             caption["edited"] = True
+        elif op == "set_caption_style":
+            # B4：部分覆盖合并（未提及字段保留预设或既有覆盖）。
+            _exact_keys(operation, {"op", "caption_id", "style"})
+            caption = _caption(document, operation.get("caption_id"))
+            style = _validate_caption_style(operation.get("style"))
+            override = dict(caption.get("style_override") or {})
+            override.update(style)
+            caption["style_override"] = override
+            caption["edited"] = True
+        elif op == "clear_caption_style":
+            _exact_keys(operation, {"op", "caption_id"})
+            caption = _caption(document, operation.get("caption_id"))
+            if "style_override" not in caption:
+                raise DomainError("TIMELINE_INVALID", "该字幕没有样式覆盖")
+            del caption["style_override"]
+            caption["edited"] = True
         elif op == "set_clip_locked":
             _exact_keys(operation, {"op", "clip_id", "locked"})
             clip_id = _clip(document, operation.get("clip_id"))["clip_id"]
@@ -1321,7 +1403,9 @@ class TimelineService:
                     "origin",
                     "edited",
                     "source_segment_ids",
+                    "style_override",
                 },
+                optional={"style_override"},
             )
             caption_id = _identifier(caption.get("caption_id"), "Caption ID 不合法")
             if caption_id in caption_ids:
@@ -1334,6 +1418,9 @@ class TimelineService:
             previous_end = end
             _caption_text(caption.get("text"))
             _enum(caption.get("preset_id"), CAPTION_PRESETS, "字幕预设不合法")
+            style_override = caption.get("style_override")
+            if style_override is not None:
+                _validate_caption_style(style_override)
             if caption.get("origin") not in {"transcript", "user"} or not isinstance(
                 caption.get("edited"), bool
             ):
@@ -1946,6 +2033,7 @@ def timeline_diff(base: dict[str, Any], target: dict[str, Any]) -> dict[str, Any
                 "timing_changed",
             ),
             (old["preset_id"] != new["preset_id"], "preset_changed"),
+            (old.get("style_override") != new.get("style_override"), "style_changed"),
         ):
             if changed:
                 caption_changes.append({"type": change_type, "caption_id": caption_id})
