@@ -324,3 +324,59 @@ def test_builder_rejects_transition_oversized_relative_to_clips() -> None:
             captions=False,
         )
     assert exc.value.code == "RENDER_PLAN_INVALID"
+
+
+def test_lerp_expression_two_frames_and_multi_frame_nesting() -> None:
+    from aivs_core.rendering.ffmpeg import _lerp_expression
+
+    track = {"frames": [{"t_us": 0, "v": 1.0}, {"t_us": 2_000_000, "v": 2.0}]}
+    expr = _lerp_expression(track, True)
+    # 单段：lt(t,2) 守护 + lerp。
+    assert expr == "if(lt(t,2.000000),(1.000000+((t-0.000000)*1.000000/2.000000)),2.000000)"
+
+    multi = {"frames": [{"t_us": 0, "v": 1.0}, {"t_us": 1_000_000, "v": 2.0}, {"t_us": 3_000_000, "v": 0.5}]}
+    expr3 = _lerp_expression(multi, True)
+    assert "if(lt(t,1.000000)" in expr3 and "if(lt(t,3.000000)" in expr3
+    # 括号平衡。
+    assert expr3.count("(") == expr3.count(")")
+
+
+def test_keyframe_animation_filters_generated_and_passthrough() -> None:
+    from aivs_core.rendering.ffmpeg import _keyframe_animation_filters
+
+    no_kf = {"clip_id": "c"}
+    assert _keyframe_animation_filters(no_kf, "srcchain", "vbase1", "out", 540, 960, -1) == ["srcchain[vbase1]", "[vbase1]null[out]"]
+
+    segment = {
+        "clip_id": "c",
+        "keyframes": {
+            "scale": {"frames": [{"t_us": 0, "v": 1.0}, {"t_us": 1_000_000, "v": 1.5}]},
+            "position": {"frames": [{"t_us": 0, "x": 0.0, "y": 0.0}, {"t_us": 1_000_000, "x": 0.25, "y": -0.25}]},
+        },
+    }
+    result = _keyframe_animation_filters(segment, "srcchain", "vbase1", "out", 540, 960, 2)
+    joined = ";".join(result)
+    assert "scale=w='iw*max(" in joined and ":eval=frame" in joined
+    assert "overlay=x='(W-w)/2+" in joined and "*(W/2)'" in joined
+    assert "[2:v][ks1]overlay=" in joined
+    assert result[-1].endswith("[out]")
+
+
+def test_builder_embeds_animation_chain_for_keyframed_segment() -> None:
+    plan = _two_segment_plan_with_transition()
+    del plan["segments"][0]["transition_in"]
+    plan["segments"][0]["keyframes"] = {
+        "opacity": {"frames": [{"t_us": 0, "v": 1.0}, {"t_us": 1_000_000, "v": 0.5}]},
+    }
+    args = build_timeline_args(
+        plan,
+        [Path("a.mp4"), Path("b.mp4")],
+        [{"audio_streams": [{}]}, {"audio_streams": [{}]}],
+        "libopenh264",
+        "out.mp4",
+        captions=False,
+    )
+    graph = args[args.index("-filter_complex") + 1]
+    assert "fade=alpha=1:st=0.000000" in graph
+    # concat 仍从各段 [vN] 消费（无转场场景）。
+    assert "concat=n=2:v=1:a=1" in graph
