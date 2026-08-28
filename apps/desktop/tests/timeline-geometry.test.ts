@@ -5,6 +5,9 @@ import {
   clipDuration,
   clipsInRect,
   computeClipRects,
+  computeTransitionRects,
+  hitTestTransitionGap,
+  hitTestTransitions,
   computeV1TargetIndex,
   ghostPosition,
   hitTestClips,
@@ -211,5 +214,52 @@ describe("marquee", () => {
 describe("constants", () => {
   it("keeps the minimum clip duration aligned with the contract", () => {
     expect(MIN_CLIP_US).toBe(100_000);
+  });
+});
+
+describe("B2 转场几何", () => {
+  const left = videoClip({ clip_id: "left" as never, order_index: 0, timeline_start_us: 0, timeline_end_us: 2_000_000, source_start_us: 0, source_end_us: 2_000_000 });
+  const right = videoClip({ clip_id: "right" as never, order_index: 1, timeline_start_us: 2_000_000, timeline_end_us: 5_000_000, source_start_us: 0, source_end_us: 3_000_000 });
+  const transition = { transition_id: "t1" as never, after_clip_id: "left" as never, kind: "fade" as const, duration_us: 500_000 };
+
+  it("computeTransitionRects 以锚点终点为中心，宽度受 6-80px 限幅", () => {
+    const rects = computeTransitionRects([left, right], [transition], view);
+    expect(rects).toHaveLength(1);
+    // 中心 = headerWidth + 2s × 100pps = 320；宽 0.5s × 100 = 50px。
+    expect(rects[0].x).toBe(320 - 25);
+    expect(rects[0].width).toBe(50);
+    const huge = computeTransitionRects([left, right], [{ ...transition, duration_us: 2_000_000 }], view);
+    expect(huge[0].width).toBe(80); // 200px 限到 80
+    const tiny = computeTransitionRects([left, right], [{ ...transition, duration_us: 50_000 }], view);
+    expect(tiny[0].width).toBe(6); // 5px 限到 6
+  });
+
+  it("computeTransitionRects 跳过锚点缺失的转场", () => {
+    const rects = computeTransitionRects([right], [transition], view);
+    expect(rects).toHaveLength(0);
+  });
+
+  it("hitTestTransitions 命中标记区域并优先于片段", () => {
+    const rects = computeTransitionRects([left, right], [transition], view);
+    expect(hitTestTransitions(320, view.rulerHeight + 10, rects)).toBe("t1");
+    expect(hitTestTransitions(10, view.rulerHeight + 10, rects)).toBeNull();
+  });
+
+  it("hitTestTransitionGap 在相邻可转场片段边界容差内返回左锚点", () => {
+    const rects = computeClipRects([left, right], view);
+    // 边界 x = 120 + 200 = 320。
+    expect(hitTestTransitionGap(320, view.rulerHeight + 10, rects)).toBe("left");
+    expect(hitTestTransitionGap(325, view.rulerHeight + 10, rects)).toBe("left");
+    expect(hitTestTransitionGap(340, view.rulerHeight + 10, rects)).toBeNull();
+  });
+
+  it("hitTestTransitionGap 拒绝图片→音频等不可转场组合", () => {
+    const imageRight: TimelineClip = { ...right, asset_kind: "image", source_start_us: null, source_end_us: null, audio: { enabled: false, gain_db: 0 } };
+    const rects = computeClipRects([left, imageRight], view);
+    // 视频→图片仍可转场。
+    expect(hitTestTransitionGap(320, view.rulerHeight + 10, rects)).toBe("left");
+    const audioLeft: TimelineClip = { ...left, asset_kind: "audio", track_id: "A1" };
+    const audioRects = computeClipRects([audioLeft, imageRight], view);
+    expect(hitTestTransitionGap(320, view.rulerHeight + 10, audioRects)).toBeNull();
   });
 });

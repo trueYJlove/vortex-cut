@@ -433,3 +433,8 @@ input, select, textarea { font-size: 12.5px; }
 
 /* M2 C2: 任务剩余时间估计 */
 .job-eta { display: inline-block; margin-left: 6px; padding: 1px 6px; border: 1px solid var(--vc-border-2, #4b585e); border-radius: 4px; color: var(--vc-text-2, #aeb9bd); font-size: 11px; white-space: nowrap; }
+
+/* M2 B2: 时间线转场标记 */
+.timeline-transition-marker { display: grid; place-items: center; border: 1px solid #b98fd6; border-radius: 4px; background: rgba(155, 108, 200, .35); color: #ecd9ff; font-size: 11px; line-height: 1; cursor: pointer; }
+.timeline-transition-marker:hover { background: rgba(155, 108, 200, .5); }
+.timeline-transition-marker.selected { border-color: #e0c2ff; background: rgba(155, 108, 200, .7); box-shadow: 0 0 0 1px #e0c2ff; }

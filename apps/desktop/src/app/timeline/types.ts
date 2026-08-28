@@ -2,7 +2,7 @@
  * Timeline Phase 1 — UI-specific rendering types.
  * Extends the canonical contract types with pixel-space computed values.
  */
-import type { TimelineClip, TimelineCaption, TimelineClipId, TimelineDocument, AssetKind } from "@aivideo/contracts";
+import type { TimelineClip, TimelineCaption, TimelineClipId, TimelineDocument, AssetKind, TimelineTransition, TimelineTransitionId } from "@aivideo/contracts";
 
 /** Viewport / view state for the timeline canvas. */
 export interface TimelineViewState {
@@ -37,6 +37,15 @@ export interface CaptionRenderRect {
   caption: TimelineCaption;
 }
 
+/** Computed pixel rect for a transition marker between two adjacent V1 clips. */
+export interface TransitionRenderRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  transition: TimelineTransition;
+}
+
 /** A single tick mark on the time ruler. */
 export interface TickMark {
   x: number;
@@ -56,6 +65,7 @@ export type TimelineSelection =
   | { kind: "clip"; id: string }
   | { kind: "clips"; ids: string[] }
   | { kind: "caption"; id: string }
+  | { kind: "transition"; id: string }
   | null;
 
 /** Edge of a clip that can be trimmed. */

@@ -65,7 +65,16 @@ test("B2 转场：add_transition 后权威预览时长 = 总时长 − 转场区
     const actualUs = readyPreview!.preview.media_info.duration_us;
     expect(Math.abs(actualUs - expectedUs)).toBeLessThanOrEqual(83_334);
 
-    // 3. 删除转场 → 预览过期；重新生成后时长恢复总长。
+    // 3. UI：转场标记渲染可见，点击选中后属性面板出现（kind/时长/删除）。
+    await page.reload(); await page.waitForFunction(() => Boolean(window.desktop?.getRuntime)); await page.evaluate(() => window.desktop.getRuntime()); await expect(page.getByText(/Core 已连接/)).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("button", { name: /Clip .* video/ }).first()).toBeVisible({ timeout: 30_000 });
+    const marker = page.locator(".timeline-transition-marker");
+    await expect(marker).toHaveCount(1, { timeout: 15_000 });
+    await marker.click();
+    await expect(page.locator(".property-form h2", { hasText: "转场属性" })).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator(".property-form select").first()).toHaveValue("fade");
+
+    // 4. 删除转场 → 预览过期；重新生成后时长恢复总长。
     await page.evaluate(async ({ projectId, transitionId }) => { const state = await window.desktop.getTimeline(projectId as never); await window.desktop.patchTimeline({ project_id: projectId as never, patch: { schema_version: 1, base_revision_id: state.current_revision.timeline_revision_id, operations: [{ op: "remove_transition", transition_id: transitionId as never }], summary: "删除转场" } }); }, { projectId: setup.project_id, transitionId: result.current_revision.document.transitions![0].transition_id });
     const preview2 = await page.evaluate(async projectId => { const state = await window.desktop.getTimeline(projectId as never); return window.desktop.createPreview({ project_id: projectId as never, preview: { timeline_revision_id: state.current_revision.timeline_revision_id, encoder_mode: "auto" } }); }, setup.project_id);
     if (preview2.job) { const job = await waitForJob(page, preview2.job.job_id); expect(job.status).toBe("succeeded"); }

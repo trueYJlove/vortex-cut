@@ -1,5 +1,5 @@
 import { Archive, FileText, Lock, RotateCcw, Save, Volume2, VolumeX } from "lucide-react";
-import type { CaptionPresetId, Project, TimelineCaption, TimelineClip, TimelineDiff, TimelineDocument, TimelineLayout, TimelinePatchOperation } from "@aivideo/contracts";
+import type { CaptionPresetId, Project, TimelineCaption, TimelineClip, TimelineDiff, TimelineDocument, TimelineLayout, TimelinePatchOperation, TimelineTransition } from "@aivideo/contracts";
 import type { AuthoritativePreviewPresentation } from "../../electron/preload/index.js";
 
 type SaveState = "已保存" | "保存中" | "保存失败" | "草稿冲突";
@@ -58,3 +58,10 @@ export function TimelineDiffView({ diff }: { diff: TimelineDiff }) {
 // 从 App.tsx 平移的通用小部件与常量。
 export const segmentPresets = captionPresets;
 export const panelIcons = { Archive, RotateCcw, Save, FileText };
+
+const transitionKinds = ["fade", "fadeblack", "dissolve", "wipeleft", "wiperight", "slideleft", "slideup", "zoomin"] as const;
+
+export function TransitionProperties({ transition, onPatch }: { transition: TimelineTransition; onPatch: (ops: TimelinePatchOperation[], summary: string) => Promise<void> }) {
+  const update = (ops: TimelinePatchOperation[], summary: string) => void onPatch(ops, summary);
+  return <fieldset className="property-form"><h2>转场属性</h2><label>类型<select value={transition.kind} onChange={event => update([{ op: "update_transition", transition_id: transition.transition_id, kind: event.target.value as typeof transition.kind }], `转场类型 ${event.target.value}`)}>{transitionKinds.map(kind => <option key={kind} value={kind}>{kind}</option>)}</select></label><label>时长（秒）<input type="number" min={0.1} max={2} step={0.1} value={transition.duration_us / 1_000_000} onChange={event => { const parsed = Number(event.target.value); if (Number.isFinite(parsed) && parsed >= 0.1 && parsed <= 2) update([{ op: "update_transition", transition_id: transition.transition_id, duration_us: Math.round(parsed * 1_000_000) }], `转场时长 ${parsed}s`); }} /></label><div className="properties-actions"><button onClick={() => update([{ op: "remove_transition", transition_id: transition.transition_id }], "删除转场")}>删除转场</button></div><p className="properties-muted">转场仅在权威预览与最终导出中渲染；交互预览直接切换片段。</p></fieldset>;
+}
