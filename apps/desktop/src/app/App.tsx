@@ -201,6 +201,7 @@ export function App() {
   const projectNameProjectId = useRef<Project["project_id"] | undefined>(undefined);
   const projectNameDirty = useRef(false);
   const timelineLoadEpoch = useRef(0);
+  const pollInstanceRef = useRef<symbol | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const pendingSeekRef = useRef<number | null>(null);
@@ -386,7 +387,13 @@ export function App() {
   }, [project?.project_id]);
   useEffect(() => {
     if (!runtimeReady) return;
+    // 轮询守卫：卸载/重挂载后，前一个实例仍在飞行的轮询响应不得覆盖新状态
+    // （React 18 测试中 unmount 后 Promise 才 resolve 会更新已卸载组件的
+    // 订阅闭包之外的全局 mock，污染下一个测试；见 editor-shell failed-job flaky）。
+    const instance = Symbol("app-poll-instance");
+    pollInstanceRef.current = instance;
     const timer = setInterval(() => {
+      if (pollInstanceRef.current !== instance) return;
       void refreshProjects().catch(() => undefined);
       if (project) void loadJobs(project).catch(() => undefined);
       void loadModels().catch(() => undefined);
