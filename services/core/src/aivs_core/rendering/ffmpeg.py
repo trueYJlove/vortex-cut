@@ -11,6 +11,24 @@ from ..media.windows_job import WindowsKillJob
 from ..projects import DomainError
 
 
+def _transition_tail_us(segment: dict[str, Any]) -> int:
+    """该段尾部被转场借用的时间（锚定于该段的转场）。"""
+    transition = segment.get("transition_in")
+    return int(transition["duration_us"]) if isinstance(transition, dict) else 0
+
+
+def _transition_head_us(segments: list[dict[str, Any]], index: int) -> int:
+    """该段头部被前一个转场借用的时间。"""
+    if index == 0:
+        return 0
+    return _transition_tail_us(segments[index - 1])
+
+
+def _effective_duration_us(segments: list[dict[str, Any]], index: int) -> int:
+    total = segments[index]["timeline_end_us"] - segments[index]["timeline_start_us"]
+    return total - _transition_tail_us(segments[index]) - _transition_head_us(segments, index)
+
+
 def build_timeline_args(
     plan: dict[str, Any],
     segment_paths: list[Path],
@@ -32,16 +50,25 @@ def build_timeline_args(
     height = int(plan["output"]["height"])
     filters: list[str] = []
     concat_inputs = []
-    for index, (segment, probe) in enumerate(zip(segments, segment_probes, strict=True)):
-        duration_us = segment["timeline_end_us"] - segment["timeline_start_us"]
-        duration = _seconds(duration_us)
+    label_seq = [0]
+
+    def visual_chain(
+        segment: dict[str, Any], input_index: int, out_label: str,
+        *, window_us: tuple[int, int] | None = None,
+    ) -> str:
+        """一段的"源 trim（可选取窗）→ 视觉滤镜"链；window_us 为时间线窗口 (head_us, tail_us)。"""
+        label_seq[0] += 1
+        label_id = label_seq[0]  # blurred_background 中间标签唯一化
         speed_milli = int(segment.get("speed_milli", 1000))
         speed = speed_milli / 1000
         reverse = bool(segment.get("reverse_playback", False))
+        duration_us = segment["timeline_end_us"] - segment["timeline_start_us"]
+        duration = _seconds(duration_us)
         if segment["asset_kind"] == "video":
-            start = _seconds(segment["source_start_us"])
-            end = _seconds(segment["source_end_us"])
-            source = f"[{index}:v:0]trim=start={start}:end={end},setpts=PTS-STARTPTS"
+            head_us, tail_us = window_us if window_us is not None else (0, 0)
+            start = _seconds(int(segment["source_start_us"]) + round(head_us * speed_milli / 1000))
+            end = _seconds(int(segment["source_end_us"]) - round(tail_us * speed_milli / 1000))
+            source = f"[{input_index}:v:0]trim=start={start}:end={end},setpts=PTS-STARTPTS"
             if reverse:
                 # 倒放：先反转帧序列；setpts 重置为从 0 起始的时间戳。
                 source += ",reverse,setpts=PTS-STARTPTS"
@@ -49,16 +76,27 @@ def build_timeline_args(
                 # 变速：PTS 除以速度倍率（>1 加速）。
                 source += f",setpts=PTS/{speed:.6f}"
         else:
-            source = f"[{index}:v:0]trim=duration={duration},setpts=PTS-STARTPTS"
+            source = f"[{input_index}:v:0]trim=duration={duration},setpts=PTS-STARTPTS"
         reframe = segment.get("reframe")
         visual = (
             _reframe_crop_filter(width, height, reframe["crop_x"], reframe["crop_y"])
             if isinstance(reframe, dict)
-            else _visual_filter(segment["layout"], width, height, index)
+            else _visual_filter(segment["layout"], width, height, label_id)
         )
-        filters.append(
-            f"{source},{_square_pixel_filter()},{visual},setsar=1,fps=30,format=yuv420p[v{index}]"
+        return f"{source},{_square_pixel_filter()},{visual},setsar=1,fps=30,format=yuv420p[{out_label}]"
+
+    for index, (segment, probe) in enumerate(zip(segments, segment_probes, strict=True)):
+        duration_us = segment["timeline_end_us"] - segment["timeline_start_us"]
+        duration = _seconds(duration_us)
+        speed_milli = int(segment.get("speed_milli", 1000))
+        speed = speed_milli / 1000
+        reverse = bool(segment.get("reverse_playback", False))
+        # 转场模式下，被 xfade 旁路的段的视频链在转场分支独立构建（其 [vN] 会悬空）。
+        is_transition_right = index > 0 and isinstance(
+            segments[index - 1].get("transition_in"), dict
         )
+        if not is_transition_right:
+            filters.append(visual_chain(segment, index, f"v{index}"))
         has_audio = bool(probe.get("audio_streams"))
         if (
             segment["asset_kind"] == "video"
@@ -99,7 +137,63 @@ def build_timeline_args(
                 f"atrim=duration={duration},asetpts=PTS-STARTPTS[a{index}]"
             )
         concat_inputs.append(f"[v{index}][a{index}]")
-    filters.append(f"{''.join(concat_inputs)}concat=n={len(segments)}:v=1:a=1[vcat][aout]")
+    transitions = [
+        (index, segments[index].get("transition_in"))
+        for index in range(len(segments))
+        if isinstance(segments[index].get("transition_in"), dict)
+    ]
+    if transitions:
+        # B2 借用式重叠（实测 FFmpeg xfade 语义：输出在 offset+duration 处结束，
+        # 右输入对齐到 offset 且超出 duration 的部分被丢弃）。因此：
+        # - 右段拆两路：头部借用区（恰 T 秒）进 xfade，剩余主体 concat 接回；
+        # - FFmpeg 图中输出标签只能消费一次，故两路各自从输入流独立重走
+        #   "源 trim → 视觉滤镜" 链（_segment_visual_chain），不引用 [vN]；
+        # - xfade 的 offset = 当前累积输出长度 − T；输出长度保持 = 累积长度；
+        # - 音频用 acrossfade（overlap 语义，输出 = 左 + 右 − T），无需拆分。
+        # 最终视频长度 = 时间线总长 − ΣT，与 _rendered_duration_us 一致。
+        video_label_prev = "v0"
+        audio_label_prev = "a0"
+        accumulated_us = segments[0]["timeline_end_us"] - segments[0]["timeline_start_us"]
+        for order, (anchor_index, transition) in enumerate(transitions, start=1):
+            if anchor_index + 1 >= len(segments):
+                raise DomainError("RENDER_PLAN_INVALID", "转场缺少后继片段")
+            duration_us = int(transition["duration_us"])
+            duration = duration_us / 1_000_000
+            offset_us = accumulated_us - duration_us
+            if offset_us <= 0:
+                raise DomainError("RENDER_PLAN_INVALID", "转场区间超出相邻片段有效时长")
+            out_v = f"vx{order}"
+            out_a = f"ax{order}"
+            right = anchor_index + 1
+            right_segment = segments[right]
+            # 右段头借用 = 本转场 T；剩余主体避开头部借用与其自身尾部借用。
+            head_us = duration_us
+            next_tail_us = _transition_tail_us(right_segment)
+            right_total_us = right_segment["timeline_end_us"] - right_segment["timeline_start_us"]
+            filters.append(
+                visual_chain(right_segment, right, f"vh{order}", window_us=(0, right_total_us - head_us - next_tail_us))
+            )
+            filters.append(
+                visual_chain(right_segment, right, f"vr{order}", window_us=(head_us, next_tail_us))
+            )
+            filters.append(
+                f"[{video_label_prev}][vh{order}]"
+                f"xfade=transition={transition['kind']}:duration={duration:.6f}:offset={offset_us / 1_000_000:.6f}[vx{order}]"
+            )
+            filters.append(f"[vx{order}][vr{order}]concat=n=2:v=1:a=0[vx{order}f]")
+            filters.append(
+                f"[{audio_label_prev}][a{right}]"
+                f"acrossfade=duration={duration:.6f}:curve1=tri:curve2=tri[{out_a}]"
+            )
+            video_label_prev = f"vx{order}f"
+            audio_label_prev = out_a
+            # 累积输出 = 已消耗段全长 − 已发生转场区间（concat 剩余主体后自动成立）。
+            accumulated_us = (
+                segments[right]["timeline_end_us"] - segments[right]["timeline_start_us"]
+            ) + (accumulated_us - duration_us)
+        filters.append(f"[{video_label_prev}]null[vcat];[{audio_label_prev}]anull[aout]")
+    else:
+        filters.append(f"{''.join(concat_inputs)}concat=n={len(segments)}:v=1:a=1[vcat][aout]")
     video_label = "vcat"
     if captions:
         filters.append("[vcat]ass=filename=captions.ass:fontsdir=fonts[vout]")
@@ -144,6 +238,9 @@ def build_timeline_args(
 
 
 def _visual_filter(layout: str, width: int, height: int, index: int) -> str:
+    # index 仅用于中间标签唯一化：转场分支会对同一输入建多个取窗链，
+    # 由调用方保证传入的 id 互不重复。
+    tag = str(index)
     if layout == "crop_fill":
         return f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}"
     if layout == "fit":
@@ -154,12 +251,12 @@ def _visual_filter(layout: str, width: int, height: int, index: int) -> str:
         )
     if layout == "blurred_background":
         return (
-            f"split=2[bg{index}][fg{index}];"
-            f"[bg{index}]scale={width}:{height}:force_original_aspect_ratio=increase,"
-            f"crop={width}:{height},gblur=sigma=20[blur{index}];"
-            f"[fg{index}]scale={width}:{height}:force_original_aspect_ratio=decrease:"
-            f"force_divisible_by=2[front{index}];"
-            f"[blur{index}][front{index}]overlay=(W-w)/2:(H-h)/2"
+            f"split=2[bg{tag}][fg{tag}];"
+            f"[bg{tag}]scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height},gblur=sigma=20[blur{tag}];"
+            f"[fg{tag}]scale={width}:{height}:force_original_aspect_ratio=decrease:"
+            f"force_divisible_by=2[front{tag}];"
+            f"[blur{tag}][front{tag}]overlay=(W-w)/2:(H-h)/2"
         )
     raise DomainError("RENDER_PLAN_INVALID", "不支持的布局")
 
