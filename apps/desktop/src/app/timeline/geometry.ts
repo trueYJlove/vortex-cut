@@ -6,11 +6,12 @@
  * canvas element (x already excludes the left header gutter only via the
  * view state's headerWidth).
  */
-import type { TimelineClip, TimelineClipId } from "@aivideo/contracts";
+import type { TimelineClip, TimelineClipId, TimelineTransition, TimelineTransitionId } from "@aivideo/contracts";
 import type {
   ClipRenderRect,
   MarqueeRect,
   TimelineViewState,
+  TransitionRenderRect,
   TrimEdge,
 } from "./types.js";
 
@@ -66,6 +67,72 @@ export function hitTestClips(
   for (const rect of clipRects) {
     if (x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height) {
       return rect.clip.clip_id;
+    }
+  }
+  return null;
+}
+
+/** V1 相邻两片段之间的转场标记矩形（居中于锚点片段的终点）。 */
+export function computeTransitionRects(
+  clips: TimelineClip[],
+  transitions: TimelineTransition[],
+  view: TimelineViewState,
+): TransitionRenderRect[] {
+  const endTimeById = new Map(clips.map((clip) => [clip.clip_id, clip.timeline_end_us]));
+  return transitions
+    .map((transition) => {
+      const anchorEndUs = endTimeById.get(transition.after_clip_id);
+      if (anchorEndUs === undefined) return null;
+      const centerX = timeToX(anchorEndUs, view);
+      const width = Math.max(
+        6,
+        Math.min(80, (transition.duration_us / 1_000_000) * view.pixelsPerSecond),
+      );
+      return {
+        x: centerX - width / 2,
+        y: view.rulerHeight,
+        width,
+        height: view.trackHeight,
+        transition,
+      };
+    })
+    .filter((rect): rect is TransitionRenderRect => rect !== null);
+}
+
+/** Top-most transition marker under (x, y), or null. Checked before clips. */
+export function hitTestTransitions(
+  x: number,
+  y: number,
+  transitionRects: TransitionRenderRect[],
+): TimelineTransitionId | null {
+  for (const rect of transitionRects) {
+    if (x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height) {
+      return rect.transition.transition_id;
+    }
+  }
+  return null;
+}
+
+/**
+ * (x, y) 落在两个相邻 V1 视频/图片片段的边界容差内时，返回左侧片段 id
+ * （转场锚点），否则 null。
+ */
+export function hitTestTransitionGap(
+  x: number,
+  y: number,
+  clipRects: ClipRenderRect[],
+  tolerancePx = 8,
+): TimelineClipId | null {
+  const v1 = clipRects.filter((rect) => rect.clip.track_id === "V1");
+  const transitionable = (clip: TimelineClip) =>
+    clip.asset_kind === "video" || clip.asset_kind === "image";
+  for (let index = 0; index < v1.length - 1; index += 1) {
+    const left = v1[index];
+    const right = v1[index + 1];
+    if (!transitionable(left.clip) || !transitionable(right.clip)) continue;
+    const boundary = left.x + left.width;
+    if (Math.abs(x - boundary) <= tolerancePx && y >= left.y && y <= left.y + left.height) {
+      return left.clip.clip_id;
     }
   }
   return null;

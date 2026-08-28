@@ -46,8 +46,13 @@ import {
   type TimelineInteraction,
   type TimelineSelection,
   type TimelineViewState,
+  type TransitionRenderRect,
   type TrimEdge,
 } from "./types.js";
+
+/** B2 转场种类（与 core TRANSITION_KINDS 对齐）。 */
+const TRANSITION_KINDS = ["fade", "fadeblack", "dissolve", "wipeleft", "wiperight", "slideleft", "slideup", "zoomin"] as const;
+
 import {
   MIN_CLIP_US,
   SNAP_PX,
@@ -55,9 +60,12 @@ import {
   clipDuration,
   clipsInRect,
   computeClipRects,
+  computeTransitionRects,
   computeV1TargetIndex,
   ghostPosition,
   hitTestClips,
+  hitTestTransitionGap,
+  hitTestTransitions,
   hitTestTrimHandle,
   marqueeRect,
   packV1Clips,
@@ -672,6 +680,8 @@ export function TimelinePanel({
   const containerRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<TimelineViewState>(DEFAULT_VIEW_STATE);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
+  // B2：点击两片段边界时记录转场锚点（左侧片段 id），弹出添加浮层。
+  const [addTransitionAnchor, setAddTransitionAnchor] = useState<string | null>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 800, height: 200 });
   // Active pointer interaction (Phase 4): null when idle.
   const [interaction, setInteraction] = useState<TimelineInteraction | null>(null);
@@ -682,6 +692,7 @@ export function TimelinePanel({
 
   const clips = document?.clips ?? [];
   const captions = document?.captions ?? [];
+  const transitions = document?.transitions ?? [];
   const totalUs = duration(document);
   const frameRate =
     document?.canvas?.fps_num && document?.canvas?.fps_den
@@ -691,6 +702,7 @@ export function TimelinePanel({
   // Compute geometry
   const clipRects = computeClipRects(clips, view);
   const captionRects = computeCaptionRects(captions, view);
+  const transitionRects = computeTransitionRects(clips, transitions, view);
   const ticks = computeTicks(totalUs, view.pixelsPerSecond, view.headerWidth, frameRate);
 
   // Resize observer
@@ -876,6 +888,13 @@ export function TimelinePanel({
         return;
       }
 
+      // Transition marker → select (checked before clips; markers overlap edges)
+      const transitionId = hitTestTransitions(x, y, transitionRects);
+      if (transitionId) {
+        setSelection({ kind: "transition", id: transitionId });
+        return;
+      }
+
       // Trim handle → trim drag (must take priority over plain clip hit)
       const handle = hitTestTrimHandle(x, y, clipRects);
       if (handle && !isClipLocked(handle.clipId)) {
@@ -927,6 +946,14 @@ export function TimelinePanel({
         const caption = captions.find((c) => c.caption_id === captionId);
         if (caption && onSeek) onSeek(caption.start_us);
         setSelection({ kind: "caption", id: captionId });
+        return;
+      }
+
+      // V1 boundary gap → offer adding a transition (B2)
+      const gapAnchor = hitTestTransitionGap(x, y, clipRects);
+      if (gapAnchor) {
+        setSelection(null);
+        setAddTransitionAnchor(gapAnchor);
         return;
       }
 
@@ -1424,6 +1451,35 @@ export function TimelinePanel({
               );
             })}
           </div>
+          {/* B2: transition markers (DOM overlay for hover/selection styles) */}
+          {transitionRects.map((rect) => {
+            const isSelected =
+              selection?.kind === "transition" &&
+              selection.id === rect.transition.transition_id;
+            return (
+              <button
+                key={rect.transition.transition_id}
+                className={`timeline-transition-marker${isSelected ? " selected" : ""}`}
+                style={{
+                  position: "absolute",
+                  left: rect.x,
+                  top: rect.y + 4,
+                  width: rect.width,
+                  height: Math.min(28, rect.height - 8),
+                  pointerEvents: "auto",
+                }}
+                title={`转场 ${rect.transition.kind} · ${(rect.transition.duration_us / 1_000_000).toFixed(1)}s`}
+                aria-label={`转场 ${rect.transition.kind} ${(rect.transition.duration_us / 1_000_000).toFixed(1)}秒`}
+                aria-pressed={isSelected}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setSelection({ kind: "transition", id: rect.transition.transition_id });
+                }}
+              >
+                ◈
+              </button>
+            );
+          })}
           {/* Drop zone overlay when dragging assets */}
           {dropIndex !== null && (
             <div
@@ -1463,6 +1519,42 @@ export function TimelinePanel({
             </div>
           )}
         </div>
+        {/* B2: 添加转场浮层——点击两片段边界后出现 */}
+        {addTransitionAnchor && (
+          <div
+            className="add-transition-popover"
+            role="dialog"
+            aria-label="添加转场"
+            style={{ position: "fixed", inset: 0, zIndex: 30, display: "grid", placeItems: "center", background: "rgba(4,7,8,.55)" }}
+            onClick={() => setAddTransitionAnchor(null)}
+          >
+            <div
+              className="add-transition-card"
+              style={{ padding: 16, border: "1px solid #4b585e", background: "#192126", display: "grid", gap: 10, maxWidth: 420 }}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <strong style={{ fontSize: 13 }}>在此处添加转场</strong>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {TRANSITION_KINDS.map((kind) => (
+                  <button
+                    key={kind}
+                    style={{ padding: "4px 10px", border: "1px solid #4b585e", background: "transparent", color: "#e6eaec", fontSize: 12, cursor: "pointer" }}
+                    onClick={() => {
+                      void onPatch(
+                        [{ op: "add_transition", after_clip_id: addTransitionAnchor as never, kind, duration_us: 500_000 }],
+                        `添加转场 ${kind}`,
+                      );
+                      setAddTransitionAnchor(null);
+                    }}
+                  >
+                    {kind}
+                  </button>
+                ))}
+              </div>
+              <small style={{ color: "#aeb9bd", fontSize: 11 }}>默认 0.5s，添加后可在属性面板调整时长；仅权威预览渲染转场效果。</small>
+            </div>
+          </div>
+        )}
       </div>
     </section>
   );
