@@ -946,3 +946,107 @@ def test_remove_clip_cascades_transitions_and_split_conflict(tmp_path: Path) -> 
     remaining = state["current_revision"]["document"]["transitions"]
     assert len(remaining) == 1
     assert remaining[0]["after_clip_id"] == left_id
+
+
+def test_keyframes_set_clear_and_diff(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
+    clip_id = state["current_revision"]["document"]["clips"][0]["clip_id"]
+    base = state["current_revision"]
+
+    # 设置 opacity 关键帧（合法路径）。
+    state = _patch(
+        service,
+        state,
+        [{"op": "set_clip_keyframes", "clip_id": clip_id, "property": "opacity",
+          "frames": [{"t_us": 0, "v": 1.0}, {"t_us": 2_000_000, "v": 0.5}]}],
+    )
+    keyframes = state["current_revision"]["document"]["clips"][0]["keyframes"]
+    assert keyframes["opacity"]["frames"] == [{"t_us": 0, "v": 1.0}, {"t_us": 2_000_000, "v": 0.5}]
+
+    # 设置 position 关键帧（x/y 比率）。
+    state = _patch(
+        service,
+        state,
+        [{"op": "set_clip_keyframes", "clip_id": clip_id, "property": "position",
+          "frames": [{"t_us": 0, "x": 0.0, "y": 0.0}, {"t_us": 1_000_000, "x": -0.25, "y": 0.3}]}],
+    )
+    keyframes = state["current_revision"]["document"]["clips"][0]["keyframes"]
+    assert keyframes["position"]["frames"][1] == {"t_us": 1_000_000, "x": -0.25, "y": 0.3}
+
+    # diff 记录 keyframes_changed（两次操作，相对 base）。
+    diff = service.compare_revisions("p1", base["timeline_revision_id"], state["current_revision"]["timeline_revision_id"])
+    assert sum(1 for c in diff["clip_changes"] if c["type"] == "keyframes_changed") == 1
+
+    # 非法路径：坐标越界、时间乱序、超片段时长、字段错误、超帧数。
+    with pytest.raises(DomainError):
+        _patch(service, state, [{"op": "set_clip_keyframes", "clip_id": clip_id, "property": "position",
+                                 "frames": [{"t_us": 0, "x": 0.8, "y": 0.0}]}])
+    with pytest.raises(DomainError):
+        _patch(service, state, [{"op": "set_clip_keyframes", "clip_id": clip_id, "property": "opacity",
+                                 "frames": [{"t_us": 2_000_000, "v": 1.0}, {"t_us": 1_000_000, "v": 0.5}]}])
+    with pytest.raises(DomainError):
+        _patch(service, state, [{"op": "set_clip_keyframes", "clip_id": clip_id, "property": "opacity",
+                                 "frames": [{"t_us": 9_000_000, "v": 1.0}]}])
+    with pytest.raises(DomainError):
+        _patch(service, state, [{"op": "set_clip_keyframes", "clip_id": clip_id, "property": "opacity",
+                                 "frames": [{"t_us": 0, "v": 1.0, "x": 0.1}]}])
+    with pytest.raises(DomainError):
+        _patch(service, state, [{"op": "set_clip_keyframes", "clip_id": clip_id, "property": "opacity",
+                                 "frames": [{"t_us": i * 10_000, "v": 0.5} for i in range(40)]}])
+    with pytest.raises(DomainError):
+        _patch(service, state, [{"op": "set_clip_keyframes", "clip_id": clip_id, "property": "scale",
+                                 "frames": [{"t_us": 0, "v": 9.0}]}])
+
+    # 清除存在的属性；清除不存在的属性被拒。
+    state = _patch(service, state, [{"op": "clear_clip_keyframes", "clip_id": clip_id, "property": "opacity"}])
+    assert "opacity" not in state["current_revision"]["document"]["clips"][0]["keyframes"]
+    assert "position" in state["current_revision"]["document"]["clips"][0]["keyframes"]
+    with pytest.raises(DomainError):
+        _patch(service, state, [{"op": "clear_clip_keyframes", "clip_id": clip_id, "property": "opacity"}])
+
+
+def test_keyframes_remap_on_speed_and_split_partition(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
+    clip_id = state["current_revision"]["document"]["clips"][0]["clip_id"]
+    state = _patch(
+        service,
+        state,
+        [{"op": "set_clip_keyframes", "clip_id": clip_id, "property": "scale",
+          "frames": [{"t_us": 0, "v": 1.0}, {"t_us": 4_000_000, "v": 2.0}]}],
+    )
+
+    # 0.5x 变速：时长 4s → 8s，关键帧等比重映射。
+    state = _patch(service, state, [{"op": "set_speed", "clip_id": clip_id, "speed_milli": 500}])
+    frames = state["current_revision"]["document"]["clips"][0]["keyframes"]["scale"]["frames"]
+    assert frames == [{"t_us": 0, "v": 1.0}, {"t_us": 8_000_000, "v": 2.0}]
+
+    # 拆分（源 2s 处 → 时间线 4s 处）：关键帧切分归两侧。
+    state = _patch(service, state, [{"op": "split_clip", "clip_id": clip_id, "source_time_us": 2_000_000}])
+    clips = state["current_revision"]["document"]["clips"]
+    left_frames = clips[0]["keyframes"]["scale"]["frames"]
+    right_frames = clips[1]["keyframes"]["scale"]["frames"]
+    assert left_frames == [{"t_us": 0, "v": 1.0}]
+    assert right_frames == [{"t_us": 4_000_000, "v": 2.0}]
+
+    # 拆分点之前无帧、之后全在右侧：整属性移到右段（右段时间轴 4s，帧设在 3s 处）。
+    right_id = clips[1]["clip_id"]
+    state = _patch(service, state, [{"op": "set_clip_keyframes", "clip_id": right_id, "property": "opacity",
+                                     "frames": [{"t_us": 3_000_000, "v": 0.3}]}])
+    # 再拆右段（源 3s 处 → 叧段时间线 2s 处）：opacity 帧在拆分点之后，整属性归新右段。
+    state = _patch(service, state, [{"op": "split_clip", "clip_id": right_id, "source_time_us": 3_000_000}])
+    clips = state["current_revision"]["document"]["clips"]
+    assert "keyframes" not in clips[1]
+    assert clips[2]["keyframes"]["opacity"]["frames"] == [{"t_us": 1_000_000, "v": 0.3}]
+
+
+def test_keyframes_locked_clip_rejected(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
+    clip_id = state["current_revision"]["document"]["clips"][0]["clip_id"]
+    state = _patch(service, state, [{"op": "set_clip_locked", "clip_id": clip_id, "locked": True}])
+    with pytest.raises(DomainError) as locked:
+        _patch(service, state, [{"op": "set_clip_keyframes", "clip_id": clip_id, "property": "opacity",
+                                 "frames": [{"t_us": 0, "v": 1.0}]}])
+    assert locked.value.code == "TIMELINE_LOCKED"
