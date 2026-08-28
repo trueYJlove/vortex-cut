@@ -58,7 +58,7 @@ textarea { min-height: 92px; padding: 8px; resize: vertical; }
 .playback { width: min(860px, 100%); }.playback input { flex: 1; }.playback span { width: 120px; color: #9aa8ad; font: 11px Consolas, monospace; }
 .layout-switch { width: min(620px, 100%); }.layout-switch button { flex: 1; font-size: 12px; }
 .export-records { width: min(620px, 100%); min-height: 0; overflow: auto; border-top: 1px solid #303b40; }.export-records > div:first-child, .export-record, .render-job { min-width: 0; padding: 6px 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; }.export-records small, .export-record strong, .render-job strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.export-records small { color: #89989f; font-size: 10px; }.export-record > div:first-child, .render-job > div:first-child { min-width: 0; }.export-record > div:last-child { display: flex; gap: 4px; }.export-record .icon-btn, .render-job .icon-btn { width: 28px; min-height: 28px; }
-.property-form { display: grid; gap: 13px; }.property-form h2, .properties-empty strong { font-size: 15px; }.property-form label { display: grid; gap: 6px; color: #aeb9bd; font-size: 12px; }.property-form label.check { grid-template-columns: 18px 18px 1fr; align-items: center; }.property-form .check input { width: 15px; height: 15px; }.property-form input[type=range] { padding: 0; }.properties-empty p { color: #7f8d93; font-size: 12px; line-height: 1.5; }
+.property-form { display: grid; gap: 13px; }.property-form h2, .properties-empty strong { font-size: 15px; }.property-form label { display: grid; gap: 6px; color: #aeb9bd; font-size: 12px; }.property-form label.check { grid-template-columns: 18px 18px 1fr; align-items: center; }.property-form label.check.two-part { grid-template-columns: 18px 1fr; grid-template-rows: none; }.property-form .check input { width: 15px; height: 15px; }.property-form input[type=range] { padding: 0; }.properties-empty p { color: #7f8d93; font-size: 12px; line-height: 1.5; }
 .properties-project { display: grid; gap: 13px; }.property-block { display: grid; gap: 7px; }.property-block h2 { margin: 0; font-size: 13px; color: #d1a453; }.property-line { display: flex; justify-content: space-between; gap: 8px; min-width: 0; font-size: 12px; }.property-line span { color: #7f8d93; }.property-line strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }.properties-actions { display: grid; gap: 6px; }.properties-actions button { min-height: 28px; }.properties-muted { margin: 0; color: #7f8d93; font-size: 12px; }.properties-status { font-size: 12px; color: #aeb9bd; }
 
 .timeline-zoom-slider { width: 140px; margin: 0; }
@@ -459,3 +459,19 @@ input, select, textarea { font-size: 12.5px; }
 .shortcut-row kbd { padding: 2px 8px; border: 1px solid var(--vc-border-2, #4b585e); border-radius: 4px; background: rgba(255,255,255,.04); color: var(--vc-text-2, #aeb9bd); font-size: 11px; white-space: nowrap; }
 .shortcut-row kbd.shortcut-recording { border-color: var(--vc-accent, #8aa2ff); color: #cdd7ff; animation: pulse 1s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: .55; } }
+
+/* UI 打磨：播放控制栏三段布局（参考剪映） */
+.playback { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; padding: 6px 14px; }
+.playback-left { display: flex; justify-content: flex-start; }
+.playback-center { display: flex; align-items: center; gap: 10px; }
+.playback-center input[type="range"] { width: min(52vw, 560px); }
+.playback-right { display: flex; justify-content: flex-end; align-items: center; gap: 5px; }
+.playback-timecode { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: var(--vc-text-2, #aeb9bd); white-space: nowrap; }
+.ratio-chip { padding: 2px 9px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--vc-text-2, #aeb9bd); font-size: 11px; cursor: pointer; }
+.ratio-chip:hover { color: var(--vc-text, #e6eaec); border-color: var(--vc-border-2, #4b585e); }
+.ratio-chip.active { border-color: var(--vc-accent, #8aa2ff); background: rgba(138, 162, 255, .12); color: #cdd7ff; }
+
+/* UI 打磨：标题栏导出主按钮（参考剪映右上角高饱和导出） */
+.titlebar-export-btn { margin-right: 14px; padding: 4px 22px; border: none; border-radius: 6px; background: linear-gradient(135deg, #4a8cff, #2f6ff0); color: #ffffff; font-size: 13px; font-weight: 600; cursor: pointer; -webkit-app-region: no-drag; }
+.titlebar-export-btn:hover:not(:disabled) { background: linear-gradient(135deg, #5b99ff, #3f7cf5); }
+.titlebar-export-btn:disabled { opacity: .45; cursor: not-allowed; }
