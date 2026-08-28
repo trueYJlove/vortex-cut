@@ -158,6 +158,9 @@ function computeFrameUrls(
 
 // ── Caption geometry ─────────────────────────────────────────────────────────
 
+/** Minimum caption duration (µs), mirroring core MIN_CAPTION_US. */
+const MIN_CAPTION_US = 200_000;
+
 function computeCaptionRects(
   captions: TimelineCaption[],
   view: TimelineViewState,
@@ -278,6 +281,7 @@ function drawTimeline(
   view: TimelineViewState,
   clipRects: ClipRenderRect[],
   captionRects: CaptionRenderRect[],
+  captions: TimelineCaption[],
   ticks: TickMark[],
   playheadUs: number,
   selection: TimelineSelection,
@@ -585,6 +589,28 @@ function drawTimeline(
       ctx.strokeRect(gx, gy + 2, gw, view.trackHeight - 4);
       ctx.restore();
     }
+  } else if (interaction?.kind === "caption-trim") {
+    const caption = captions.find((c: TimelineCaption) => c.caption_id === interaction.captionId);
+    if (caption) {
+      let ghostStartUs = caption.start_us;
+      let ghostEndUs = caption.end_us;
+      if (interaction.edge === "left") {
+        ghostStartUs = interaction.targetStartUs;
+      } else {
+        ghostEndUs = interaction.targetEndUs;
+      }
+      const gx = timeToX(ghostStartUs, view);
+      const gy = view.rulerHeight + 2 * view.trackHeight;
+      const gw = Math.max(2, ((ghostEndUs - ghostStartUs) / 1_000_000) * view.pixelsPerSecond);
+      ctx.save();
+      ctx.globalAlpha = 0.55;
+      ctx.fillStyle = "#7a6a3a";
+      ctx.fillRect(gx, gy + 2, gw, view.trackHeight - 4);
+      ctx.strokeStyle = "#ffd76e";
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(gx, gy + 2, gw, view.trackHeight - 4);
+      ctx.restore();
+    }
   }
 
   // Snap guide (Phase 4)
@@ -828,6 +854,7 @@ export function TimelinePanel({
       view,
       clipRects,
       captionRects,
+      captions,
       ticks,
       playheadUs,
       selection,
@@ -838,7 +865,7 @@ export function TimelinePanel({
       thumbnailCache.current,
       waveformCache.current,
     );
-  }, [canvasSize, view, clipRects, captionRects, ticks, playheadUs, selection, interaction, hover, totalUs, thumbnailVersion, waveformVersion]);
+  }, [canvasSize, view, clipRects, captionRects, captions, ticks, playheadUs, selection, interaction, hover, totalUs, thumbnailVersion, waveformVersion]);
 
   // Zoom via wheel
   const handleWheel = useCallback(
@@ -938,6 +965,35 @@ export function TimelinePanel({
         setInteraction(next);
         canvas.style.cursor = "grabbing";
         return;
+      }
+
+      // B4：字幕端点拖拽（C1 轨；±8px 边缘容差，复用 trim 交互）。
+      const CAPTION_EDGE_PX = 8;
+      const captionHit = hitTestCaptions(x, y, captionRects);
+      if (captionHit) {
+        const caption = captions.find((c) => c.caption_id === captionHit);
+        const rect = captionRects.find((r) => r.caption.caption_id === captionHit);
+        if (caption && rect) {
+          const fromLeft = x <= rect.x + CAPTION_EDGE_PX;
+          const fromRight = x >= rect.x + rect.width - CAPTION_EDGE_PX;
+          if (fromLeft || fromRight) {
+            setSelection({ kind: "caption", id: captionHit });
+            const next: TimelineInteraction = {
+              kind: "caption-trim",
+              captionId: captionHit,
+              edge: fromLeft ? "left" : "right",
+              startX: x,
+              originalStartUs: caption.start_us,
+              originalEndUs: caption.end_us,
+              targetStartUs: caption.start_us,
+              targetEndUs: caption.end_us,
+            };
+            interactionRef.current = next;
+            setInteraction(next);
+            canvas.style.cursor = "ew-resize";
+            return;
+          }
+        }
       }
 
       // Caption → select + seek (click only; captions are not draggable yet)
@@ -1058,6 +1114,34 @@ export function TimelinePanel({
             return;
           }
         }
+        if (active.kind === "caption-trim") {
+          // B4：字幕端点拖拽。约束：≥200ms（MIN_CAPTION_US）、
+          // 与相邻字幕不重叠（按时间排序取近邻边界）。
+          const caption = captions.find((c) => c.caption_id === active.captionId);
+          if (caption) {
+            const deltaUs = ((x - active.startX) / pps) * 1_000_000;
+            const sorted = [...captions].sort((a, b) => a.start_us - b.start_us);
+            const idx = sorted.findIndex((c) => c.caption_id === active.captionId);
+            const prev = idx > 0 ? sorted[idx - 1] : null;
+            const nextCap = idx >= 0 && idx < sorted.length - 1 ? sorted[idx + 1] : null;
+            let targetStartUs = active.targetStartUs;
+            let targetEndUs = active.targetEndUs;
+            if (active.edge === "left") {
+              const upper = active.originalEndUs - MIN_CAPTION_US;
+              const lower = Math.max(0, prev ? prev.end_us : 0);
+              targetStartUs = Math.max(lower, Math.min(upper, active.originalStartUs + deltaUs));
+            } else {
+              const lower = active.originalStartUs + MIN_CAPTION_US;
+              const upper = nextCap ? nextCap.start_us : Number.MAX_SAFE_INTEGER;
+              targetEndUs = Math.max(lower, Math.min(upper, active.originalEndUs + deltaUs));
+            }
+            const next: TimelineInteraction = { ...active, targetStartUs, targetEndUs };
+            interactionRef.current = next;
+            setInteraction(next);
+            canvas.style.cursor = "ew-resize";
+            return;
+          }
+        }
       }
 
       // Hover cursor + trim handle detection
@@ -1123,6 +1207,22 @@ export function TimelinePanel({
             "修剪片段",
           );
         }
+      } else if (active.kind === "caption-trim") {
+        const startChanged = Math.abs(active.targetStartUs - active.originalStartUs) >= 1000;
+        const endChanged = Math.abs(active.targetEndUs - active.originalEndUs) >= 1000;
+        if (startChanged || endChanged) {
+          void onPatch(
+            [
+              {
+                op: "set_caption_timing",
+                caption_id: active.captionId as never,
+                start_us: Math.round(active.targetStartUs),
+                end_us: Math.round(active.targetEndUs),
+              },
+            ],
+            "调整字幕时长",
+          );
+        }
       } else if (active.kind === "marquee") {
         const rect = marqueeRect(active.startX, active.startY, active.currentX, active.currentY);
         if (rect.width >= 4 && rect.height >= 4) {
@@ -1134,7 +1234,7 @@ export function TimelinePanel({
     interactionRef.current = null;
     setInteraction(null);
     if (canvas) canvas.style.cursor = "default";
-  }, [clips, clipRects, onPatch, setSelection]);
+  }, [clips, captions, clipRects, onPatch, setSelection]);
 
   // Finish the interaction even when the pointer leaves the canvas mid-drag.
   const hasInteraction = interaction !== null;
