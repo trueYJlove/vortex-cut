@@ -1480,6 +1480,48 @@ export function TimelinePanel({
               </button>
             );
           })}
+          {/* B3: keyframe dots on selected V1 clips (drag to retiming) */}
+          {clips.map((clip) => {
+            if (!clip.keyframes || selection?.kind !== "clip" || selection.id !== clip.clip_id) return null;
+            const rect = clipRects.find((item) => item.clip.clip_id === clip.clip_id);
+            if (!rect) return null;
+            const colors: Record<string, string> = { position: "#6fd3d3", scale: "#f0d264", rotate: "#f0a264", opacity: "#ffffff" };
+            return Object.entries(clip.keyframes).flatMap(([property, track]) =>
+              track.frames.map((frame: { t_us: number; x?: number; y?: number; v?: number }) => {
+                const x = timeToX(clip.timeline_start_us + frame.t_us, view);
+                if (x < rect.x || x > rect.x + rect.width) return null;
+                const commit = (newTUs: number) => {
+                  const frames = track.frames
+                    .map((f: { t_us: number; x?: number; y?: number; v?: number }) => (f.t_us === frame.t_us ? { ...f, t_us: Math.max(0, Math.min(clip.timeline_end_us - clip.timeline_start_us, newTUs)) } : f))
+                    .sort((a: { t_us: number }, b: { t_us: number }) => a.t_us - b.t_us);
+                  void onPatch(
+                    [{ op: "set_clip_keyframes", clip_id: clip.clip_id, property: property as never, frames }],
+                    `调整${property}关键帧时间`,
+                  );
+                };
+                return (
+                  <button
+                    key={`${clip.clip_id}-${property}-${frame.t_us}`}
+                    className="timeline-keyframe-dot"
+                    data-property={property}
+                    style={{ position: "absolute", left: x - 4, top: view.rulerHeight + view.trackHeight - 12, width: 8, height: 8, background: colors[property] ?? "#fff", pointerEvents: "auto" }}
+                    aria-label={`${property} 关键帧 ${formatTime(frame.t_us)}`}
+                    title={`${property} @ ${formatTime(frame.t_us)}（拖动改时间）`}
+                    draggable
+                    onDragEnd={(event) => {
+                      const canvas = canvasRef.current;
+                      if (!canvas) return;
+                      const bounds = canvas.getBoundingClientRect();
+                      const scale = canvas.width / bounds.width || 1;
+                      const newTUs = Math.max(0, Math.min(clip.timeline_end_us - clip.timeline_start_us, xToTime((event.clientX - bounds.left) * scale, view)));
+                      commit(newTUs);
+                    }}
+                    onClick={(event) => event.stopPropagation()}
+                  />
+                );
+              }),
+            );
+          })}
           {/* Drop zone overlay when dragging assets */}
           {dropIndex !== null && (
             <div
