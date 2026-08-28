@@ -100,6 +100,17 @@ export type TimelineInteraction =
       snapUs: number | null;
     }
   | {
+      /** B4：C1 轨字幕端点拖拽（松手提交 set_caption_timing）。 */
+      kind: "caption-trim";
+      captionId: string;
+      edge: TrimEdge;
+      startX: number;
+      originalStartUs: number;
+      originalEndUs: number;
+      targetStartUs: number;
+      targetEndUs: number;
+    }
+  | {
       kind: "marquee";
       startX: number;
       startY: number;
