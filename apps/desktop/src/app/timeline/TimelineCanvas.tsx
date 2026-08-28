@@ -421,27 +421,37 @@ function drawTimeline(
       ctx.fillText("🔒", rect.x + rect.width - 14, rect.y + rect.height / 2);
     }
 
-    // Selection border
+    // Selection border (white, JianYing-style)
     if (isSelected) {
-      ctx.strokeStyle = "#7ab8ff";
+      ctx.strokeStyle = "#ffffff";
       ctx.lineWidth = 2;
-      ctx.strokeRect(rect.x, rect.y + 2, rect.width, rect.height - 4);
+      ctx.strokeRect(rect.x + 1, rect.y + 3, rect.width - 2, rect.height - 6);
     }
 
-    // Clip label
+    // Clip header strip (JianYing-style): name + duration above the body.
     if (rect.width > 30) {
-      ctx.fillStyle = "#ffffff";
-      ctx.font = "11px sans-serif";
-      ctx.textBaseline = "middle";
-      const label =
+      const clipDurSec = (rect.clip.timeline_end_us - rect.clip.timeline_start_us) / 1_000_000;
+      const headerText =
         rect.clip.asset_kind === "audio"
           ? `Audio ${rect.clip.order_index + 1}`
           : `Clip ${rect.clip.order_index + 1}`;
+      const durText = `${clipDurSec.toFixed(1)}s`;
       ctx.save();
       ctx.beginPath();
-      ctx.rect(rect.x + 4, rect.y + 2, rect.width - 8, rect.height - 4);
+      ctx.rect(rect.x, rect.y + 2, rect.width, rect.height - 4);
       ctx.clip();
-      ctx.fillText(label, rect.x + 6, rect.y + rect.height / 2);
+      // 名称条（片段内顶部，半透明深底提高可读性）。
+      ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
+      ctx.fillRect(rect.x, rect.y + 2, rect.width, 15);
+      ctx.fillStyle = "#e8eef2";
+      ctx.font = "10px sans-serif";
+      ctx.textBaseline = "middle";
+      ctx.textAlign = "left";
+      ctx.fillText(headerText, rect.x + 5, rect.y + 10);
+      ctx.textAlign = "right";
+      ctx.fillStyle = "#9fb3bd";
+      ctx.fillText(durText, rect.x + rect.width - 5, rect.y + 10);
+      ctx.textAlign = "left";
       ctx.restore();
     }
 
