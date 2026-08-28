@@ -438,3 +438,16 @@ input, select, textarea { font-size: 12.5px; }
 .timeline-transition-marker { display: grid; place-items: center; border: 1px solid #b98fd6; border-radius: 4px; background: rgba(155, 108, 200, .35); color: #ecd9ff; font-size: 11px; line-height: 1; cursor: pointer; }
 .timeline-transition-marker:hover { background: rgba(155, 108, 200, .5); }
 .timeline-transition-marker.selected { border-color: #e0c2ff; background: rgba(155, 108, 200, .7); box-shadow: 0 0 0 1px #e0c2ff; }
+
+/* M2 B3: 关键帧编辑器 */
+.keyframe-editor { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--vc-border, #3b474d); border-radius: 8px; background: rgba(255, 255, 255, .02); }
+.keyframe-rows { display: grid; gap: 5px; }
+.keyframe-row { display: flex; align-items: center; gap: 6px; }
+.keyframe-row .keyframe-label { min-width: 42px; color: var(--vc-text-2, #aeb9bd); font-size: 12px; }
+.keyframe-row .keyframe-value { color: var(--vc-text-2, #aeb9bd); font-size: 11px; margin-left: auto; }
+.keyframe-row button { padding: 2px 8px; border: 1px solid var(--vc-border-2, #4b585e); border-radius: 5px; background: transparent; color: var(--vc-text-2, #aeb9bd); font-size: 11px; cursor: pointer; }
+.keyframe-row button:hover { color: var(--vc-text, #e6eaec); border-color: var(--vc-accent, #8aa2ff); }
+
+/* M2 B3: 时间线关键帧色点 */
+.timeline-keyframe-dot { border: 1px solid rgba(0, 0, 0, .7); border-radius: 50%; cursor: ew-resize; z-index: 3; }
+.timeline-keyframe-dot:hover { box-shadow: 0 0 0 2px rgba(255, 255, 255, .5); }
