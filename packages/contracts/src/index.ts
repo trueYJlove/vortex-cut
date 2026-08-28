@@ -112,6 +112,7 @@ export const ERROR_CODES = [
   "TIMELINE_CONFLICT", "TIMELINE_EMPTY", "TIMELINE_DRAFT_CONFLICT",
   "TIMELINE_CLIP_NOT_FOUND", "TIMELINE_CAPTION_NOT_FOUND", "TIMELINE_SOURCE_INVALID",
   "TIMELINE_LOCKED", "TIMELINE_DIFF_INVALID", "TIMELINE_PATCH_EGRESS_EXPIRED",
+  "TIMELINE_TRANSITION_EXISTS", "TIMELINE_TRANSITION_INVALID",
   "TIMELINE_PATCH_EGRESS_MISMATCH", "TIMELINE_PATCH_GENERATION_NOT_FOUND",
   "TIMELINE_PATCH_GENERATION_INVALID", "TIMELINE_PATCH_PROPOSAL_NOT_FOUND",
   "TIMELINE_PATCH_PROPOSAL_INVALID", "TIMELINE_PATCH_PROPOSAL_CONFLICT",
@@ -734,6 +735,17 @@ export interface TimelineCaption {
   edited: boolean;
   source_segment_ids: TranscriptSegmentId[];
 }
+/** B2 转场种类：值即 FFmpeg xfade 的 transition 参数。 */
+export const TRANSITION_IDS = ["fade", "fadeblack", "dissolve", "wipeleft", "wiperight", "slideleft", "slideup", "zoomin"] as const;
+export type TransitionKind = (typeof TRANSITION_IDS)[number];
+export type TimelineTransitionId = string & { readonly __brand: "timeline_transition_id" };
+export interface TimelineTransition {
+  transition_id: TimelineTransitionId;
+  /** 转场发生在该片段与其 V1 后继之间。 */
+  after_clip_id: TimelineClipId;
+  kind: TransitionKind;
+  duration_us: number;
+}
 export interface TimelineDocument {
   schema_version: 1;
   project_id: ProjectId;
@@ -742,6 +754,7 @@ export interface TimelineDocument {
   clips: TimelineClip[];
   captions: TimelineCaption[];
   locked_elements?: TimelineClipId[];
+  transitions?: TimelineTransition[];
   provenance: { created_by: TimelineCreatedBy; source_transcript_ids: TranscriptId[] };
 }
 export interface TimelineRevisionSummary {
@@ -782,6 +795,9 @@ export type TimelinePatchOperation =
   | { op: "split_clip"; clip_id: TimelineClipId; source_time_us: number }
   | { op: "set_layout"; clip_id: TimelineClipId; layout: TimelineLayout }
   | { op: "set_audio"; clip_id: TimelineClipId; enabled: boolean; gain_db: number }
+  | { op: "add_transition"; after_clip_id: TimelineClipId; kind: TransitionKind; duration_us: number }
+  | { op: "update_transition"; transition_id: TimelineTransitionId; kind?: TransitionKind; duration_us?: number }
+  | { op: "remove_transition"; transition_id: TimelineTransitionId }
   | { op: "set_speed"; clip_id: TimelineClipId; speed_milli: number }
   | { op: "set_reverse_playback"; clip_id: TimelineClipId; reverse_playback: boolean }
   | { op: "set_image_duration"; clip_id: TimelineClipId; duration_us: number }
@@ -798,15 +814,17 @@ export type TimelinePatchGenerationStatus = "queued" | "running" | "succeeded" |
 export type TimelineClipChangeType = "added" | "removed" | "moved" | "trimmed" | "split" | "layout_changed" | "audio_changed" | "duration_changed" | "speed_changed" | "reverse_toggled";
 export type TimelineCaptionChangeType = "added" | "removed" | "text_changed" | "timing_changed" | "preset_changed";
 export interface TimelineClipChange { type: TimelineClipChangeType; clip_id: TimelineClipId; created_clip_ids?: TimelineClipId[]; }
+export type TimelineTransitionChangeType = "added" | "removed" | "updated";
+export interface TimelineTransitionChange { type: TimelineTransitionChangeType; transition_id: TimelineTransitionId; after_clip_id: TimelineClipId; }
 export interface TimelineCaptionChange { type: TimelineCaptionChangeType; caption_id: TimelineCaptionId; }
 export interface TimelineLockChange { type: "locked" | "unlocked"; clip_id: TimelineClipId; }
 export interface TimelineIndirectLockedTimingShift { clip_id: TimelineClipId; from_start_us: number; from_end_us: number; to_start_us: number; to_end_us: number; }
 export interface TimelineDiff {
   schema_version: 1; project_id: ProjectId; base_revision_id: TimelineRevisionId; target_revision_id: TimelineRevisionId | null;
   base_document_sha256: string; target_document_sha256: string;
-  summary: { clip_changes: number; caption_changes: number; lock_changes: number };
+  summary: { clip_changes: number; caption_changes: number; lock_changes: number; transition_changes: number };
   duration_delta_us: number; clip_changes: TimelineClipChange[]; caption_changes: TimelineCaptionChange[];
-  lock_changes: TimelineLockChange[]; indirect_locked_timing_shifts: TimelineIndirectLockedTimingShift[];
+  lock_changes: TimelineLockChange[]; indirect_locked_timing_shifts: TimelineIndirectLockedTimingShift[]; transition_changes: TimelineTransitionChange[];
 }
 export interface TimelinePatchEgressPreview {
   timeline_patch_egress_preview_id: TimelinePatchEgressPreviewId;
@@ -1359,8 +1377,17 @@ export function isTimelineCaption(value: unknown): value is TimelineCaption {
     !isString(value.text) || value.text.trim().length < 1 || [...value.text].length > 200 || /[\0-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(value.text) || !isCaptionPresetId(value.preset_id) || !oneOf(["transcript", "user"] as const, value.origin) || typeof value.edited !== "boolean" || !Array.isArray(value.source_segment_ids) || !value.source_segment_ids.every(isId)) return false;
   return value.origin === "transcript" ? value.source_clip_id !== null && value.source_segment_ids.length > 0 : value.source_segment_ids.length === 0;
 }
+export function isTimelineTransition(value: unknown): value is TimelineTransition {
+  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["transition_id", "after_clip_id", "kind", "duration_us"]) && isId(value.transition_id) && isId(value.after_clip_id) && oneOf(TRANSITION_IDS, value.kind) && isInteger(value.duration_us, 100_000) && value.duration_us <= 2_000_000;
+}
+const TRANSITION_DOC_MAX = 50;
 export function isTimelineDocument(value: unknown): value is TimelineDocument {
-  if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["schema_version", "project_id", "canvas", "tracks", "clips", "captions", "locked_elements", "provenance"]) || value.schema_version !== 1 || !isId(value.project_id) || !isTimelineCanvas(value.canvas) || !Array.isArray(value.tracks) || (value.tracks.length !== 2 && value.tracks.length !== 3) || !Array.isArray(value.clips) || !value.clips.every(isTimelineClip) || !Array.isArray(value.captions) || !value.captions.every(isTimelineCaption) || !isRecord(value.provenance)) return false;
+  if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["schema_version", "project_id", "canvas", "tracks", "clips", "captions", "locked_elements", "transitions", "provenance"]) || value.schema_version !== 1 || !isId(value.project_id) || !isTimelineCanvas(value.canvas) || !Array.isArray(value.tracks) || (value.tracks.length !== 2 && value.tracks.length !== 3) || !Array.isArray(value.clips) || !value.clips.every(isTimelineClip) || !Array.isArray(value.captions) || !value.captions.every(isTimelineCaption) || !isRecord(value.provenance)) return false;
+  if (value.transitions !== undefined) {
+    if (!Array.isArray(value.transitions) || value.transitions.length > TRANSITION_DOC_MAX || !value.transitions.every(isTimelineTransition)) return false;
+    const seen = new Set<string>();
+    for (const item of value.transitions as TimelineTransition[]) { if (seen.has(item.after_clip_id)) return false; seen.add(item.after_clip_id); }
+  }
   const visual = value.tracks.find(t => isRecord(t) && t.id === "V1");
   const caption = value.tracks.find(t => isRecord(t) && t.id === "C1");
   const audioTrack = value.tracks.find(t => isRecord(t) && t.id === "A1");
@@ -1418,6 +1445,9 @@ export function isTimelinePatchOperation(value: unknown): value is TimelinePatch
     case "split_clip": return onlyKeys(value, ["op", "clip_id", "source_time_us"]) && id("clip_id") && us("source_time_us", 1);
     case "set_layout": return onlyKeys(value, ["op", "clip_id", "layout"]) && id("clip_id") && isTimelineLayout(value.layout);
     case "set_audio": return onlyKeys(value, ["op", "clip_id", "enabled", "gain_db"]) && id("clip_id") && typeof value.enabled === "boolean" && isFiniteNumber(value.gain_db) && value.gain_db >= -60 && value.gain_db <= 12;
+    case "add_transition": return onlyKeys(value, ["op", "after_clip_id", "kind", "duration_us"]) && id("after_clip_id") && oneOf(TRANSITION_IDS, value.kind) && us("duration_us", 100_000) && Number(value.duration_us) <= 2_000_000;
+    case "update_transition": return onlyKeys(value, ["op", "transition_id", "kind", "duration_us"]) && id("transition_id") && (value.kind === undefined || oneOf(TRANSITION_IDS, value.kind)) && (value.duration_us === undefined || (us("duration_us", 100_000) && Number(value.duration_us) <= 2_000_000)) && (value.kind !== undefined || value.duration_us !== undefined);
+    case "remove_transition": return onlyKeys(value, ["op", "transition_id"]) && id("transition_id");
     case "set_speed": return onlyKeys(value, ["op", "clip_id", "speed_milli"]) && id("clip_id") && isInteger(value.speed_milli, 250) && value.speed_milli <= 4000;
     case "set_reverse_playback": return onlyKeys(value, ["op", "clip_id", "reverse_playback"]) && id("clip_id") && typeof value.reverse_playback === "boolean";
     case "set_image_duration": return onlyKeys(value, ["op", "clip_id", "duration_us"]) && id("clip_id") && us("duration_us", 500_000) && Number(value.duration_us) <= 30_000_000;
@@ -1459,7 +1489,7 @@ export function isTimelineCaptionChange(value: unknown): value is TimelineCaptio
 export function isTimelineLockChange(value: unknown): value is TimelineLockChange { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["type", "clip_id"]) && oneOf(["locked", "unlocked"] as const, value.type) && isId(value.clip_id); }
 export function isTimelineIndirectLockedTimingShift(value: unknown): value is TimelineIndirectLockedTimingShift { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["clip_id", "from_start_us", "from_end_us", "to_start_us", "to_end_us"]) && isId(value.clip_id) && [value.from_start_us, value.from_end_us, value.to_start_us, value.to_end_us].every(item => isInteger(item, 0)) && Number(value.from_end_us) > Number(value.from_start_us) && Number(value.to_end_us) > Number(value.to_start_us); }
 export function isTimelineDiff(value: unknown): value is TimelineDiff {
-  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["schema_version", "project_id", "base_revision_id", "target_revision_id", "base_document_sha256", "target_document_sha256", "summary", "duration_delta_us", "clip_changes", "caption_changes", "lock_changes", "indirect_locked_timing_shifts"]) && value.schema_version === 1 && isId(value.project_id) && isId(value.base_revision_id) && (value.target_revision_id === null || isId(value.target_revision_id)) && isSha256(value.base_document_sha256) && isSha256(value.target_document_sha256) && isRecord(value.summary) && onlyKeys(value.summary, ["clip_changes", "caption_changes", "lock_changes"]) && [value.summary.clip_changes, value.summary.caption_changes, value.summary.lock_changes].every(item => isInteger(item, 0)) && typeof value.duration_delta_us === "number" && Number.isInteger(value.duration_delta_us) && Array.isArray(value.clip_changes) && value.clip_changes.every(isTimelineClipChange) && Array.isArray(value.caption_changes) && value.caption_changes.every(isTimelineCaptionChange) && Array.isArray(value.lock_changes) && value.lock_changes.every(isTimelineLockChange) && Array.isArray(value.indirect_locked_timing_shifts) && value.indirect_locked_timing_shifts.every(isTimelineIndirectLockedTimingShift) && value.summary.clip_changes === value.clip_changes.length && value.summary.caption_changes === value.caption_changes.length && value.summary.lock_changes === value.lock_changes.length;
+  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["schema_version", "project_id", "base_revision_id", "target_revision_id", "base_document_sha256", "target_document_sha256", "summary", "duration_delta_us", "clip_changes", "caption_changes", "lock_changes", "indirect_locked_timing_shifts", "transition_changes"]) && value.schema_version === 1 && isId(value.project_id) && isId(value.base_revision_id) && (value.target_revision_id === null || isId(value.target_revision_id)) && isSha256(value.base_document_sha256) && isSha256(value.target_document_sha256) && isRecord(value.summary) && onlyKeys(value.summary, ["clip_changes", "caption_changes", "lock_changes", "transition_changes"]) && [value.summary.clip_changes, value.summary.caption_changes, value.summary.lock_changes, value.summary.transition_changes].every(item => isInteger(item, 0)) && typeof value.duration_delta_us === "number" && Number.isInteger(value.duration_delta_us) && Array.isArray(value.clip_changes) && value.clip_changes.every(isTimelineClipChange) && Array.isArray(value.caption_changes) && value.caption_changes.every(isTimelineCaptionChange) && Array.isArray(value.lock_changes) && value.lock_changes.every(isTimelineLockChange) && Array.isArray(value.indirect_locked_timing_shifts) && value.indirect_locked_timing_shifts.every(isTimelineIndirectLockedTimingShift) && Array.isArray(value.transition_changes) && value.transition_changes.every((item): item is TimelineTransitionChange => isRecord(item) && onlyKeys(item, ["type", "transition_id", "after_clip_id"]) && oneOf(["added", "removed", "updated"] as const, item.type) && isId(item.transition_id) && isId(item.after_clip_id)) && value.summary.clip_changes === value.clip_changes.length && value.summary.caption_changes === value.caption_changes.length && value.summary.lock_changes === value.lock_changes.length && value.summary.transition_changes === value.transition_changes.length;
 }
 export function isTimelinePatchProposal(value: unknown): value is TimelinePatchProposal { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["schema_version", "timeline_patch_proposal_id", "timeline_patch_generation_id", "project_id", "base_revision_id", "base_document_sha256", "provider_config_id", "provider_display_name", "model", "prompt_template_version", "output_schema_version", "patch", "patch_sha256", "proposed_document_sha256", "diff", "created_at", "applied_revision_id", "generation_status"]) && value.schema_version === 1 && isId(value.timeline_patch_proposal_id) && isId(value.timeline_patch_generation_id) && isId(value.project_id) && isId(value.base_revision_id) && isSha256(value.base_document_sha256) && isId(value.provider_config_id) && isBriefText(value.provider_display_name, 100) && isBriefText(value.model, 200) && isBriefText(value.prompt_template_version, 200) && isBriefText(value.output_schema_version, 200) && isTimelinePatch(value.patch) && value.patch.base_revision_id === value.base_revision_id && isSha256(value.patch_sha256) && isSha256(value.proposed_document_sha256) && isTimelineDiff(value.diff) && value.diff.project_id === value.project_id && value.diff.base_revision_id === value.base_revision_id && value.diff.target_revision_id === null && isTime(value.created_at) && (value.applied_revision_id === null || isId(value.applied_revision_id)) && oneOf(TIMELINE_PATCH_GENERATION_STATUSES, value.generation_status); }
 export function isTimelinePatchPrepareRequest(value: unknown): value is TimelinePatchPrepareRequest { return isRecord(value) && onlyKeys(value, ["base_revision_id", "provider_config_id", "instruction"]) && isId(value.base_revision_id) && isId(value.provider_config_id) && isString(value.instruction) && value.instruction.trim().length >= 1 && [...value.instruction].length <= 4000 && !/[\0-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(value.instruction); }
