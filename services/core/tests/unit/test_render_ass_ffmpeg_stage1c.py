@@ -215,3 +215,112 @@ def test_builder_audio_tempo_chain_splits_beyond_single_atempo_range() -> None:
     # 0.25x = 0.5 × 0.5 两级；4x = 2.0 × 2.0 两级。
     assert "atempo=0.500000,atempo=0.500000" in graph
     assert "atempo=2.000000,atempo=2.000000" in graph
+
+
+def _two_segment_plan_with_transition() -> dict:
+    return {
+        "segments": [
+            {
+                "clip_id": "left",
+                "input_id": "I0",
+                "asset_kind": "video",
+                "source_start_us": 0,
+                "source_end_us": 4_000_000,
+                "timeline_start_us": 0,
+                "timeline_end_us": 4_000_000,
+                "layout": "fit",
+                "audio_enabled": True,
+                "gain_db": 0.0,
+                "speed_milli": 1000,
+                "transition_in": {"transition_id": "t1", "kind": "fade", "duration_us": 500_000},
+            },
+            {
+                "clip_id": "right",
+                "input_id": "I1",
+                "asset_kind": "video",
+                "source_start_us": 0,
+                "source_end_us": 3_000_000,
+                "timeline_start_us": 4_000_000,
+                "timeline_end_us": 7_000_000,
+                "layout": "fit",
+                "audio_enabled": True,
+                "gain_db": 0.0,
+                "speed_milli": 1000,
+                "transition_in": None,
+            },
+        ],
+        "captions": {"items": []},
+        "output": {"width": 540, "height": 960},
+    }
+
+
+def test_builder_uses_xfade_chain_with_window_trims_for_transitions() -> None:
+    plan = _two_segment_plan_with_transition()
+    args = build_timeline_args(
+        plan,
+        [Path("a.mp4"), Path("b.mp4")],
+        [{"audio_streams": [{}]}, {"audio_streams": [{}]}],
+        "libopenh264",
+        "out.mp4",
+        captions=False,
+    )
+    graph = args[args.index("-filter_complex") + 1]
+    # 右段拆两路独立链（FFmpeg 输出标签只能消费一次，不可复用主管线 [v1]）：
+    # 头部借用区 0–0.5s 进 xfade；剩余主体 0.5–3.0s（右段全长 3s，无尾借用）concat 接回。
+    assert "[vh1]" in graph and "[vr1]" in graph
+    assert "trim=start=0.000000:end=0.500000,setpts=PTS-STARTPTS" in graph
+    assert "trim=start=0.500000:end=3.000000,setpts=PTS-STARTPTS" in graph
+    # offset = 左段全长 4s − 0.5s = 3.5s。
+    assert "xfade=transition=fade:duration=0.500000:offset=3.500000" in graph
+    assert "acrossfade=duration=0.500000" in graph
+    assert "concat=n=2:v=1:a=0" in graph
+    # 有转场时不使用全段 concat。
+    assert "concat=n=" not in graph.replace("concat=n=2:v=1:a=0", "")
+
+
+def test_builder_transition_chain_offsets_accumulate() -> None:
+    plan = _two_segment_plan_with_transition()
+    # 链式：段 0 锚 t1（转场到段 1），段 1 锚 t2（转场到段 2）。
+    plan["segments"][1]["transition_in"] = {"transition_id": "t2", "kind": "dissolve", "duration_us": 1_000_000}
+    third = {
+        "clip_id": "third",
+        "input_id": "I2",
+        "asset_kind": "video",
+        "source_start_us": 0,
+        "source_end_us": 5_000_000,
+        "timeline_start_us": 7_000_000,
+        "timeline_end_us": 12_000_000,
+        "layout": "fit",
+        "audio_enabled": True,
+        "gain_db": 0.0,
+        "speed_milli": 1000,
+        "transition_in": None,
+    }
+    plan["segments"].append(third)
+    args = build_timeline_args(
+        plan,
+        [Path("a.mp4"), Path("b.mp4"), Path("c.mp4")],
+        [{"audio_streams": [{}]}, {"audio_streams": [{}]}, {"audio_streams": [{}]}],
+        "libopenh264",
+        "out.mp4",
+        captions=False,
+    )
+    graph = args[args.index("-filter_complex") + 1]
+    # 转场 1：offset = 4 − 0.5 = 3.5；转场 2：累积 = 4 + (3 − 0.5) = 6.5，offset = 6.5 − 1 = 5.5。
+    assert "xfade=transition=fade:duration=0.500000:offset=3.500000" in graph
+    assert "xfade=transition=dissolve:duration=1.000000:offset=5.500000" in graph
+
+
+def test_builder_rejects_transition_oversized_relative_to_clips() -> None:
+    plan = _two_segment_plan_with_transition()
+    plan["segments"][0]["transition_in"]["duration_us"] = 4_000_000  # 前段仅 4s，offset = 0
+    with pytest.raises(DomainError) as exc:
+        build_timeline_args(
+            plan,
+            [Path("a.mp4"), Path("b.mp4")],
+            [{"audio_streams": []}, {"audio_streams": []}],
+            "libopenh264",
+            "out.mp4",
+            captions=False,
+        )
+    assert exc.value.code == "RENDER_PLAN_INVALID"

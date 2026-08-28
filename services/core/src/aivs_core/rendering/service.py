@@ -325,7 +325,7 @@ class RenderCoordinator:
             str(output),
             captions=bool(plan["captions"]["items"]),
         )
-        expected_duration = plan["segments"][-1]["timeline_end_us"]
+        expected_duration = _rendered_duration_us(plan["segments"])
         attempts = 2 if mode == "authoritative_preview" else 1
         try:
             for attempt in range(1, attempts + 1):
@@ -606,7 +606,7 @@ class RenderService:
         grant = self.destinations.inspect(destination_grant_id)
         required_bytes = max(
             64 * 1024 * 1024,
-            (plan["segments"][-1]["timeline_end_us"] // 1_000_000 + 1) * 2 * 1024 * 1024,
+            (_rendered_duration_us(plan["segments"]) // 1_000_000 + 1) * 2 * 1024 * 1024,
         )
         if shutil.disk_usage(Path(grant["path"]).parent).free < required_bytes:
             raise DomainError("EXPORT_DISK_SPACE_INSUFFICIENT", "导出目标磁盘空间不足")
@@ -948,6 +948,19 @@ class RenderService:
             "encoder": encoder,
             "fallback_reason": fallback,
         }
+
+
+def _rendered_duration_us(segments: list[dict[str, Any]]) -> int:
+    """渲染产物时长 = 时间线总长 − 转场区间总和（B2 借用式重叠语义）。"""
+    if not segments:
+        return 0
+    total = segments[-1]["timeline_end_us"]
+    transition_total = sum(
+        int(segment["transition_in"]["duration_us"])
+        for segment in segments
+        if isinstance(segment.get("transition_in"), dict)
+    )
+    return max(1, total - transition_total)
 
 
 def _encoder_mode(value: str) -> str:

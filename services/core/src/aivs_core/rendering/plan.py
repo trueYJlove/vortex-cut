@@ -273,6 +273,10 @@ class RenderPlanCompiler:
         inputs: list[dict[str, Any]] = []
         input_by_asset: dict[str, str] = {}
         segments: list[dict[str, Any]] = []
+        # B2：转场锚定在片段尾部——按 after_clip_id 索引，编译段时挂到对应段。
+        transition_by_anchor: dict[str, dict[str, Any]] = {
+            item["after_clip_id"]: item for item in document.get("transitions", [])
+        }
         for clip in document["clips"]:
             asset = db.execute("SELECT * FROM assets WHERE id=?", (clip["asset_id"],)).fetchone()
             if (
@@ -297,6 +301,7 @@ class RenderPlanCompiler:
                         "has_audio": bool(media_info.get("audio_streams")),
                     }
                 )
+            transition = transition_by_anchor.get(clip["clip_id"])
             segments.append(
                 {
                     "clip_id": clip["clip_id"],
@@ -311,6 +316,15 @@ class RenderPlanCompiler:
                     "gain_db": float(clip["audio"]["gain_db"]),
                     "speed_milli": int(clip.get("speed_milli", 1000)),
                     "reverse_playback": bool(clip.get("reverse_playback", False)),
+                    "transition_in": (
+                        {
+                            "transition_id": transition["transition_id"],
+                            "kind": transition["kind"],
+                            "duration_us": int(transition["duration_us"]),
+                        }
+                        if transition is not None
+                        else None
+                    ),
                 }
             )
         caption_items = [
