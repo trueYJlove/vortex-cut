@@ -102,8 +102,15 @@ describe("Editor shell 基线", () => {
     const failedJob: Job = { ...job, job_id: "job_failed" as never, kind: "authoritative_preview", status: "failed", stage: "failed", progress: 0, error: { code: "JOB_FAILED", message: "failed" } };
     window.desktop = desktopApi({ jobs: [failedJob] });
     render(<App />);
-    const jobsPanel = (await screen.findByText("任务")).closest(".jobs-panel") as HTMLElement;
-    expect(await within(jobsPanel).findByText(/失败/)).toBeInTheDocument();
+    // 直接等待"包含 failed job 行的任务面板"出现。旧写法先抓"任务"标题再
+    // closest(".jobs-panel")，可能命中上一个实例尚未清理的面板；afterEach
+    // cleanup 把它移出 document 后 within 查询随之落空（历史 flaky 根因）。
+    const jobsPanel = await screen.findByText((_, element) =>
+      element?.classList.contains("jobs-panel") === true &&
+      element.querySelector(".job-row") !== null &&
+      element.textContent?.includes("失败") === true,
+    ) as HTMLElement;
+    expect(within(jobsPanel).getByText(/失败/)).toBeInTheDocument();
   });
 
   it("shows the active render job count in the top-bar job status", async () => {
