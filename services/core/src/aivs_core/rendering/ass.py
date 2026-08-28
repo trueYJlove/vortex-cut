@@ -31,6 +31,55 @@ class CaptionResources:
         return bundle, presets, font_path
 
 
+def _ass_rgb_to_bgr_tag(color: str) -> str:
+    """&Haabbggrr → 行内 \\c&Hbbggrr&（ASS 本就 BGR 序，直接转发去 alpha）。"""
+    body = color[2:]  # aabbggrr
+    return f"\\c&H{body[2:]}&"
+
+
+def caption_override_tags(
+    caption: dict[str, Any], preset_values: dict[str, Any], play_res: tuple[int, int]
+) -> str:
+    """B4：按 style_override 生成 ASS 行内覆盖标签前缀（无覆盖返回空串）。
+
+    标签值全部来自服务端校验的数值/颜色枚举（contracts+core 双重校验），
+    正文仍走 escape_ass_text——标签不参与正文转义，注入面不扩大（设计 §2）。
+    """
+    override = caption.get("style_override")
+    if not isinstance(override, dict) or not override:
+        return ""
+    preset_id = caption.get("preset_id")
+    preset = preset_values.get(preset_id, {})
+    tags = ""
+    font_size = override.get("font_size")
+    if font_size is not None:
+        tags += f"\\fs{int(font_size)}"
+    primary = override.get("primary_color")
+    if primary is not None:
+        tags += _ass_rgb_to_bgr_tag(primary)
+    outline_color = override.get("outline_color")
+    if outline_color is not None:
+        tags += _ass_rgb_to_bgr_tag(outline_color).replace("\\c", "\\3c", 1)
+    outline = override.get("outline")
+    if outline is not None:
+        tags += f"\\bord{int(outline)}"
+    alignment = override.get("alignment")
+    margin_v = override.get("margin_v")
+    pos_x = override.get("pos_x")
+    pos_y = override.get("pos_y")
+    if pos_x is not None and pos_y is not None:
+        # 自定义坐标：比率 × PlayRes（换算像素）。
+        width, height = play_res
+        tags += f"\\pos({round(pos_x * width)},{round(pos_y * height)})"
+    elif alignment is not None:
+        tags += f"\\an{int(alignment)}"
+        if margin_v is not None:
+            tags += f"\\marginv{int(margin_v)}"
+    elif margin_v is not None:
+        tags += f"\\marginv{int(margin_v)}"
+    return tags
+
+
 def escape_ass_text(value: str) -> str:
     if not isinstance(value, str) or not value.strip() or len(value) > 200:
         raise DomainError("RENDER_PLAN_INVALID", "字幕文本不合法")
@@ -64,10 +113,11 @@ def build_ass(
         preset_id = caption.get("preset_id")
         if preset_id not in preset_values:
             raise DomainError("RENDER_PLAN_INVALID", "字幕预设不合法")
+        override_tags = caption_override_tags(caption, preset_values, (1080, 1920))
         events.append(
             "Dialogue: 0,"
             f"{_ass_time(caption['start_us'])},{_ass_time(caption['end_us'])},"
-            f"{preset_id},,0,0,0,,{escape_ass_text(caption['text'])}"
+            f"{preset_id},,0,0,0,,{override_tags}{escape_ass_text(caption['text'])}"
         )
     return "\n".join(
         [
@@ -121,10 +171,11 @@ def build_rendition_ass(
         preset_id = caption.get("preset_id")
         if preset_id not in presets:
             raise DomainError("RENDITION_SNAPSHOT_INVALID", "字幕预设不合法")
+        override_tags = caption_override_tags(caption, presets, (width, height))
         events.append(
             "Dialogue: 0,"
             f"{_ass_time(caption['start_us'])},{_ass_time(caption['end_us'])},{preset_id},,0,0,0,,"
-            f"{escape_ass_text(caption['text'])}"
+            f"{override_tags}{escape_ass_text(caption['text'])}"
         )
     return "\n".join(
         [

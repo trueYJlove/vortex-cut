@@ -1050,3 +1050,62 @@ def test_keyframes_locked_clip_rejected(tmp_path: Path) -> None:
         _patch(service, state, [{"op": "set_clip_keyframes", "clip_id": clip_id, "property": "opacity",
                                  "frames": [{"t_us": 0, "v": 1.0}]}])
     assert locked.value.code == "TIMELINE_LOCKED"
+
+
+def test_caption_style_set_merge_clear_and_diff(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(
+        service,
+        {
+            "kind": "transcript_selection",
+            "transcript_id": "t1",
+            "segment_ids": ["s1"],
+            "padding_before_us": 0,
+            "padding_after_us": 0,
+            "create_captions": True,
+        },
+    )
+    caption_id = state["current_revision"]["document"]["captions"][0]["caption_id"]
+    base = state["current_revision"]
+
+    # 设置部分覆盖（合法路径）。
+    state = _patch(
+        service,
+        state,
+        [{"op": "set_caption_style", "caption_id": caption_id,
+          "style": {"font_size": 96, "primary_color": "&H0000FFFF"}}],
+    )
+    override = state["current_revision"]["document"]["captions"][0]["style_override"]
+    assert override == {"font_size": 96, "primary_color": "&H0000FFFF"}
+
+    # 部分合并：第二次只改描边，字号保留。
+    state = _patch(
+        service,
+        state,
+        [{"op": "set_caption_style", "caption_id": caption_id, "style": {"outline": 6}}],
+    )
+    override = state["current_revision"]["document"]["captions"][0]["style_override"]
+    assert override == {"font_size": 96, "primary_color": "&H0000FFFF", "outline": 6}
+
+    # diff 记录 style_changed（相对 base 一次计数——caption_changes 按字幕聚合）。
+    diff = service.compare_revisions("p1", base["timeline_revision_id"], state["current_revision"]["timeline_revision_id"])
+    assert any(c["type"] == "style_changed" for c in diff["caption_changes"])
+
+    # 非法路径：字段越界、颜色格式、对齐值、坐标越界、未知字段。
+    for bad_style in (
+        {"font_size": 200},
+        {"outline": 20},
+        {"alignment": 3},
+        {"margin_v": 900},
+        {"primary_color": "red"},
+        {"pos_x": 1.5},
+        {"unknown_field": 1},
+    ):
+        with pytest.raises(DomainError):
+            _patch(service, state, [{"op": "set_caption_style", "caption_id": caption_id, "style": bad_style}])
+
+    # 清除；清除不存在覆盖被拒。
+    state = _patch(service, state, [{"op": "clear_caption_style", "caption_id": caption_id}])
+    assert "style_override" not in state["current_revision"]["document"]["captions"][0]
+    with pytest.raises(DomainError):
+        _patch(service, state, [{"op": "clear_caption_style", "caption_id": caption_id}])

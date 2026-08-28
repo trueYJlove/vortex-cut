@@ -380,3 +380,36 @@ def test_builder_embeds_animation_chain_for_keyframed_segment() -> None:
     assert "fade=alpha=1:st=0.000000" in graph
     # concat 仍从各段 [vN] 消费（无转场场景）。
     assert "concat=n=2:v=1:a=1" in graph
+
+
+def test_ass_inline_override_tags_snapshot() -> None:
+    from aivs_core.rendering.ass import build_ass
+
+    resources = CaptionResources(Path("resources/fonts"))
+    bundle, presets, _font = resources.load()
+    captions = [
+        # 无覆盖：标签前缀为空，正文无前导 {。
+        {"caption_id": "a", "preset_id": "default-bottom", "start_us": 0, "end_us": 1_000_000, "text": "无覆盖正文"},
+        # 全字段覆盖：fs/c/3c/bord/an/marginv。
+        {"caption_id": "b", "preset_id": "default-bottom", "start_us": 0, "end_us": 1_000_000, "text": "全字段",
+         "style_override": {"font_size": 96, "primary_color": "&H0030FFFF", "outline_color": "&H00000000",
+                            "outline": 6, "alignment": 8, "margin_v": 200}},
+        # 自定义坐标：\pos 换算（0.25*1080=270, 0.75*1920=1440），不出现 an。
+        {"caption_id": "c", "preset_id": "default-bottom", "start_us": 0, "end_us": 1_000_000, "text": "自定义坐标",
+         "style_override": {"pos_x": 0.25, "pos_y": 0.75}},
+        # 特殊字符正文 + 覆盖组合：转义不失效、标签在正文之外。
+        {"caption_id": "d", "preset_id": "default-bottom", "start_us": 0, "end_us": 1_000_000, "text": "{\pos(1,1)}注入",
+         "style_override": {"font_size": 48}},
+    ]
+    result = build_ass(captions, bundle, presets)
+    lines = result.splitlines()
+    dialogue = [line for line in lines if line.startswith("Dialogue:")]
+    assert len(dialogue) == 4
+    assert "无覆盖正文" in dialogue[0] and not dialogue[0].split(",,")[-1].startswith("{\\")
+    assert r"\fs96" in dialogue[1] and r"\c&H30FFFF&" in dialogue[1] and r"\3c&H000000&" in dialogue[1] and r"\bord6" in dialogue[1] and r"\an8" in dialogue[1] and r"\marginv200" in dialogue[1]
+    assert "\pos(270,1440)" in dialogue[2] and "\an" not in dialogue[2].split(",,")[-1]
+    # 注入正文被转义：原始 {\pos(1,1)} 不出现在 Dialogue 正文（只允许我们的覆盖标签）。
+    assert "{\pos(1,1)}注入" not in dialogue[3]
+    assert "注入" in dialogue[3]
+    # 预设 Style 行仍按预设生成（不受覆盖影响）。
+    assert any("Style: default-bottom" in line for line in lines)
