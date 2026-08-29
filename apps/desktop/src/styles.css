@@ -44,12 +44,15 @@ textarea { min-height: 92px; padding: 8px; resize: vertical; }
 .preview-mode-switch { width: min(620px, 100%); display: flex; align-items: center; gap: 6px; }.preview-mode-switch button { flex: 1; min-height: 28px; font-size: 11px; }
 .preview-frame { position: relative; width: 100%; height: 100%; overflow: hidden; align-self: stretch; background: #050708; box-shadow: 0 0 0 1px #384349; }
 .preview-canvas { position: relative; }
+.preview-frame { display: grid; place-items: center; }
 .preview-frame.ratio-fit .preview-canvas { width: 100%; height: 100%; }
-.preview-frame.ratio-169 .preview-canvas { aspect-ratio: 16 / 9; width: 100%; max-height: 100%; }
-.preview-frame.ratio-916 .preview-canvas { aspect-ratio: 9 / 16; width: 100%; max-height: 100%; }
-.preview-frame.ratio-11 .preview-canvas { aspect-ratio: 1 / 1; width: 100%; max-height: 100%; }
-.preview-frame.ratio-43 .preview-canvas { aspect-ratio: 4 / 3; width: 100%; max-height: 100%; }
-.preview-frame.ratio-34 .preview-canvas { aspect-ratio: 3 / 4; width: 100%; max-height: 100%; }
+/* 非 fit 比例：高度铺满、宽度由 aspect-ratio 推导（width:auto 是关键，
+   显式 width:100% 会让 aspect-ratio 失效——此前比例切换无效的根因）。 */
+.preview-frame.ratio-169 .preview-canvas { aspect-ratio: 16 / 9; height: 100%; width: auto; max-width: 100%; }
+.preview-frame.ratio-916 .preview-canvas { aspect-ratio: 9 / 16; height: 100%; width: auto; max-width: 100%; }
+.preview-frame.ratio-11 .preview-canvas { aspect-ratio: 1 / 1; height: 100%; width: auto; max-width: 100%; }
+.preview-frame.ratio-43 .preview-canvas { aspect-ratio: 4 / 3; height: 100%; width: auto; max-width: 100%; }
+.preview-frame.ratio-34 .preview-canvas { aspect-ratio: 3 / 4; height: 100%; width: auto; max-width: 100%; }
 .preview-frame.selected .preview-canvas { outline: 2px solid #d1a453; outline-offset: -2px; }
 .preview-frame video, .preview-frame img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }.preview-background { display: none; }.preview-foreground { z-index: 2; }.preview-frame.fit .preview-foreground, .preview-frame.fit .preview-background { object-fit: contain; }.preview-frame.crop_fill .preview-foreground { object-fit: cover; }.preview-frame.blurred_background .preview-foreground { object-fit: contain; }.preview-frame.blurred_background .preview-background { display: block; z-index: 1; object-fit: cover; filter: blur(18px); transform: scale(1.08); opacity: .62; }.preview-empty { height: 100%; display: grid; place-items: center; padding: 30px; color: #6f7d83; text-align: center; }
 .interactive-label { position: absolute; z-index: 5; top: 8px; left: 8px; max-width: calc(100% - 16px); padding: 4px 6px; background: rgba(0,0,0,.78); color: #c8d0d3; font-size: 10px; white-space: nowrap; }
@@ -471,11 +474,7 @@ input, select, textarea { font-size: 12.5px; }
 .ratio-chip:hover { color: var(--vc-text, #e6eaec); border-color: var(--vc-border-2, #4b585e); }
 .ratio-chip.active { border-color: var(--vc-accent, #8aa2ff); background: rgba(138, 162, 255, .12); color: #cdd7ff; }
 
-/* UI 打磨：标题栏导出主按钮（参考剪映右上角高饱和导出） */
-.titlebar-export-btn { margin-right: 10px; margin-left: auto; padding: 5px 26px; border: none; border-radius: 999px; background: linear-gradient(90deg, #3d7bfd 0%, #2f6ff0 100%); color: #ffffff; font-size: 12.5px; font-weight: 600; letter-spacing: 2px; cursor: pointer; -webkit-app-region: no-drag; box-shadow: 0 1px 6px rgba(47, 111, 240, .4); }
-.titlebar-export-btn:hover:not(:disabled) { background: linear-gradient(90deg, #4d88ff, #3d7bfd); box-shadow: 0 2px 8px rgba(47, 111, 240, .55); }
-.titlebar-export-btn:active:not(:disabled) { transform: translateY(1px); }
-.titlebar-export-btn:disabled { opacity: .4; cursor: not-allowed; box-shadow: none; }
+
 
 /* UI 打磨二轮：比例弹出菜单 */
 .playback-right { position: relative; }
