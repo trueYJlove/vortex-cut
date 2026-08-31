@@ -146,25 +146,78 @@ def build_timeline_args(
     segments = plan["segments"]
     if len(segments) != len(segment_paths) or len(segments) != len(segment_probes):
         raise DomainError("RENDER_PLAN_INVALID", "渲染输入数量不一致")
-    # B3：position/opacity 动画需要一个黑底 lavfi 输入（blend/overlay 用），
-    # 追加在所有正式输入之后。
+    # 多轨道（剪映式）：当前渲染图为"主视频轨（V1）"单视觉轨语义——只消费
+    # V1 上可见的片段，按 timeline_start_us 排序；相邻段之间的空隙插入黑底
+    # 填充段（lavfi color），保证 concat 图的输出长度与时间线总长一致。
+    # 主轨被隐藏（或为空）时输出全程黑场。其他视频轨（覆盖轨）与 A1 音频
+    # 混音为后续工作（audio 段缺视频流，旧实现会让整图失败，这里显式跳过）。
+    timeline_total_us = max(
+        (int(segment["timeline_end_us"]) for segment in segments),
+        default=0,
+    )
+    visual_items = [
+        (index, segment)
+        for index, segment in enumerate(segments)
+        if (
+            segment["asset_kind"] != "audio"
+            and segment.get("track_id", "V1") == "V1"
+            and not segment.get("track_hidden", False)
+        )
+    ]
+    visual_items.sort(key=lambda item: int(item[1]["timeline_start_us"]))
+
+    # 图项序列：黑底填充（kind=black）与视觉段（kind=segment）交错；段的
+    # transition_in 仅在时间上与后继段首尾相接时生效（有空隙的转场休眠）。
+    graph_items: list[dict[str, Any]] = []
+    cursor_us = 0
+    for position, (input_index, segment) in enumerate(visual_items):
+        start_us = int(segment["timeline_start_us"])
+        if start_us > cursor_us:
+            graph_items.append({"kind": "black", "duration_us": start_us - cursor_us})
+        active_transition = None
+        transition = segment.get("transition_in")
+        if isinstance(transition, dict) and position + 1 < len(visual_items):
+            successor = visual_items[position + 1][1]
+            if int(successor["timeline_start_us"]) == int(segment["timeline_end_us"]):
+                active_transition = transition
+        graph_items.append(
+            {
+                "kind": "segment",
+                "input_index": input_index,
+                "segment": segment,
+                "transition_in": active_transition,
+            }
+        )
+        cursor_us = max(cursor_us, int(segment["timeline_end_us"]))
+    if not graph_items and timeline_total_us > 0:
+        # 主轨隐藏/为空但时间线有内容：输出全程黑场（音频保持各段静音占位）。
+        graph_items.append({"kind": "black", "duration_us": timeline_total_us})
+
+    # B3：position/opacity 动画需要一个黑底 lavfi 输入（blend/overlay 用）。
     needs_black_input = any(
-        isinstance(segment.get("keyframes"), dict)
-        and ({"position", "opacity"} & set(segment["keyframes"]))
-        for segment in segments
+        item["kind"] == "segment"
+        and isinstance(item["segment"].get("keyframes"), dict)
+        and ({"position", "opacity"} & set(item["segment"]["keyframes"]))
+        for item in graph_items
     )
     black_input_index = len(segments) if needs_black_input else -1
+    width = int(plan["output"]["width"])
+    height = int(plan["output"]["height"])
     args = ["-hide_banner", "-nostdin", "-y"]
     for segment, path in zip(segments, segment_paths, strict=True):
         if segment["asset_kind"] == "image":
             args += ["-loop", "1", "-framerate", "30"]
         args += ["-i", str(path)]
+    next_input_index = len(segments)
     if needs_black_input:
-        width0 = int(plan["output"]["width"])
-        height0 = int(plan["output"]["height"])
-        args += ["-f", "lavfi", "-i", f"color=c=black:s={width0}x{height0}:r=30"]
-    width = int(plan["output"]["width"])
-    height = int(plan["output"]["height"])
+        args += ["-f", "lavfi", "-i", f"color=c=black:s={width}x{height}:r=30"]
+        next_input_index += 1
+    for item in graph_items:
+        if item["kind"] == "black":
+            item["input_index"] = next_input_index
+            next_input_index += 1
+            args += ["-f", "lavfi", "-i", f"color=c=black:s={width}x{height}:r=30"]
+
     filters: list[str] = []
     concat_inputs = []
     label_seq = [0]
@@ -211,18 +264,39 @@ def build_timeline_args(
             black_input_index if black_input_index is not None else -1,
         )
 
-    for index, (segment, probe) in enumerate(zip(segments, segment_probes, strict=True)):
+    for position, item in enumerate(graph_items):
+        if item["kind"] == "black":
+            # 黑底填充段（时间线空隙）：lavfi color 输入裁出空隙时长。
+            fill_duration = _seconds(item["duration_us"])
+            filters.append(
+                f"[{item['input_index']}:v]trim=duration={fill_duration},"
+                "setpts=PTS-STARTPTS,fps=30,format=yuv420p"
+                f"[v{position}]"
+            )
+            filters.append(
+                "anullsrc=channel_layout=stereo:sample_rate=48000,"
+                f"atrim=duration={fill_duration},asetpts=PTS-STARTPTS[a{position}]"
+            )
+            concat_inputs.append(f"[v{position}][a{position}]")
+            continue
+        segment = item["segment"]
+        probe = segment_probes[item["input_index"]]
         duration_us = segment["timeline_end_us"] - segment["timeline_start_us"]
         duration = _seconds(duration_us)
         speed_milli = int(segment.get("speed_milli", 1000))
         speed = speed_milli / 1000
         reverse = bool(segment.get("reverse_playback", False))
         # 转场模式下，被 xfade 旁路的段的视频链在转场分支独立构建（其 [vN] 会悬空）。
-        is_transition_right = index > 0 and isinstance(
-            segments[index - 1].get("transition_in"), dict
+        is_transition_right = position > 0 and isinstance(
+            graph_items[position - 1].get("transition_in"), dict
         )
         if not is_transition_right:
-            filters.extend(visual_chain(segment, index, f"v{index}", black_input_index=black_input_index))
+            filters.extend(
+                visual_chain(
+                    segment, item["input_index"], f"v{position}",
+                    black_input_index=black_input_index,
+                )
+            )
         has_audio = bool(probe.get("audio_streams"))
         if (
             segment["asset_kind"] == "video"
@@ -247,79 +321,109 @@ def build_timeline_args(
                 factors.append(remaining)
                 tempo_chain = ",".join(f"atempo={factor:.6f}" for factor in factors) + ","
             filters.append(
-                f"[{index}:a:0]atrim=start={start}:end={end},asetpts=PTS-STARTPTS,"
+                f"[{item['input_index']}:a:0]atrim=start={start}:end={end},asetpts=PTS-STARTPTS,"
                 "aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
-                f"{tempo_chain}volume={gain:.3f}dB,apad,atrim=duration={duration}[a{index}]"
+                f"{tempo_chain}volume={gain:.3f}dB,apad,atrim=duration={duration}[a{position}]"
             )
         elif segment["asset_kind"] == "video" and has_audio and segment["audio_enabled"]:
             # 倒放片段的音频暂不支持：以静音占位，保证轨长与混流正确。
             filters.append(
                 "anullsrc=channel_layout=stereo:sample_rate=48000,"
-                f"atrim=duration={duration},asetpts=PTS-STARTPTS[a{index}]"
+                f"atrim=duration={duration},asetpts=PTS-STARTPTS[a{position}]"
             )
         else:
             filters.append(
                 "anullsrc=channel_layout=stereo:sample_rate=48000,"
-                f"atrim=duration={duration},asetpts=PTS-STARTPTS[a{index}]"
+                f"atrim=duration={duration},asetpts=PTS-STARTPTS[a{position}]"
             )
-        concat_inputs.append(f"[v{index}][a{index}]")
-    transitions = [
-        (index, segments[index].get("transition_in"))
-        for index in range(len(segments))
-        if isinstance(segments[index].get("transition_in"), dict)
-    ]
-    if transitions:
+        concat_inputs.append(f"[v{position}][a{position}]")
+    has_active_transitions = any(
+        item["kind"] == "segment" and isinstance(item.get("transition_in"), dict)
+        for item in graph_items
+    )
+
+    def _item_span_us(item: dict[str, Any]) -> int:
+        if item["kind"] == "black":
+            return int(item["duration_us"])
+        segment = item["segment"]
+        return int(segment["timeline_end_us"]) - int(segment["timeline_start_us"])
+
+    if not has_active_transitions:
+        filters.append(f"{''.join(concat_inputs)}concat=n={len(graph_items)}:v=1:a=1[vcat][aout]")
+    else:
         # B2 借用式重叠（实测 FFmpeg xfade 语义：输出在 offset+duration 处结束，
         # 右输入对齐到 offset 且超出 duration 的部分被丢弃）。因此：
         # - 右段拆两路：头部借用区（恰 T 秒）进 xfade，剩余主体 concat 接回；
         # - FFmpeg 图中输出标签只能消费一次，故两路各自从输入流独立重走
-        #   "源 trim → 视觉滤镜" 链（_segment_visual_chain），不引用 [vN]；
+        #   "源 trim → 视觉滤镜" 链（visual_chain），不引用 [vN]；
         # - xfade 的 offset = 当前累积输出长度 − T；输出长度保持 = 累积长度；
         # - 音频用 acrossfade（overlap 语义，输出 = 左 + 右 − T），无需拆分。
-        # 最终视频长度 = 时间线总长 − ΣT，与 _rendered_duration_us 一致。
+        # 从左到右逐项合并：普通相邻项 concat，锚点项与后继之间 xfade；
+        # 最终视频长度 = 时间线总长（含空隙填充）− ΣT，与 _rendered_duration_us 一致。
         video_label_prev = "v0"
         audio_label_prev = "a0"
-        accumulated_us = segments[0]["timeline_end_us"] - segments[0]["timeline_start_us"]
-        for order, (anchor_index, transition) in enumerate(transitions, start=1):
-            if anchor_index + 1 >= len(segments):
-                raise DomainError("RENDER_PLAN_INVALID", "转场缺少后继片段")
-            duration_us = int(transition["duration_us"])
-            duration = duration_us / 1_000_000
-            offset_us = accumulated_us - duration_us
-            if offset_us <= 0:
-                raise DomainError("RENDER_PLAN_INVALID", "转场区间超出相邻片段有效时长")
-            out_v = f"vx{order}"
-            out_a = f"ax{order}"
-            right = anchor_index + 1
-            right_segment = segments[right]
-            # 右段头借用 = 本转场 T；剩余主体避开头部借用与其自身尾部借用。
-            head_us = duration_us
-            next_tail_us = _transition_tail_us(right_segment)
-            right_total_us = right_segment["timeline_end_us"] - right_segment["timeline_start_us"]
-            filters.extend(
-                visual_chain(right_segment, right, f"vh{order}", window_us=(0, right_total_us - head_us - next_tail_us), black_input_index=black_input_index)
-            )
-            filters.extend(
-                visual_chain(right_segment, right, f"vr{order}", window_us=(head_us, next_tail_us), black_input_index=black_input_index)
-            )
-            filters.append(
-                f"[{video_label_prev}][vh{order}]"
-                f"xfade=transition={transition['kind']}:duration={duration:.6f}:offset={offset_us / 1_000_000:.6f}[vx{order}]"
-            )
-            filters.append(f"[vx{order}][vr{order}]concat=n=2:v=1:a=0[vx{order}f]")
-            filters.append(
-                f"[{audio_label_prev}][a{right}]"
-                f"acrossfade=duration={duration:.6f}:curve1=tri:curve2=tri[{out_a}]"
-            )
-            video_label_prev = f"vx{order}f"
-            audio_label_prev = out_a
-            # 累积输出 = 已消耗段全长 − 已发生转场区间（concat 剩余主体后自动成立）。
-            accumulated_us = (
-                segments[right]["timeline_end_us"] - segments[right]["timeline_start_us"]
-            ) + (accumulated_us - duration_us)
+        accumulated_us = _item_span_us(graph_items[0])
+        for position in range(1, len(graph_items)):
+            item = graph_items[position]
+            previous = graph_items[position - 1]
+            step = position
+            if previous["kind"] == "segment" and isinstance(previous.get("transition_in"), dict):
+                transition = previous["transition_in"]
+                duration_us = int(transition["duration_us"])
+                duration = duration_us / 1_000_000
+                offset_us = accumulated_us - duration_us
+                if offset_us <= 0:
+                    raise DomainError("RENDER_PLAN_INVALID", "转场区间超出相邻片段有效时长")
+                if item["kind"] != "segment":
+                    raise DomainError("RENDER_PLAN_INVALID", "转场后继片段缺失")
+                right_segment = item["segment"]
+                # 右段头借用 = 本转场 T；剩余主体避开头部借用与其自身尾部借用。
+                head_us = duration_us
+                next_tail_us = (
+                    int(item["transition_in"]["duration_us"])
+                    if isinstance(item.get("transition_in"), dict)
+                    else 0
+                )
+                right_total_us = _item_span_us(item)
+                filters.extend(
+                    visual_chain(
+                        right_segment, item["input_index"], f"vh{step}",
+                        window_us=(0, right_total_us - head_us - next_tail_us),
+                        black_input_index=black_input_index,
+                    )
+                )
+                filters.extend(
+                    visual_chain(
+                        right_segment, item["input_index"], f"vr{step}",
+                        window_us=(head_us, next_tail_us),
+                        black_input_index=black_input_index,
+                    )
+                )
+                filters.append(
+                    f"[{video_label_prev}][vh{step}]"
+                    f"xfade=transition={transition['kind']}:duration={duration:.6f}"
+                    f":offset={offset_us / 1_000_000:.6f}[vx{step}]"
+                )
+                filters.append(f"[vx{step}][vr{step}]concat=n=2:v=1:a=0[vx{step}f]")
+                filters.append(
+                    f"[{audio_label_prev}][a{position}]"
+                    f"acrossfade=duration={duration:.6f}:curve1=tri:curve2=tri[ax{step}]"
+                )
+                video_label_prev = f"vx{step}f"
+                audio_label_prev = f"ax{step}"
+                # 累积输出 = 已消耗段全长 − 已发生转场区间（concat 剩余主体后自动成立）。
+                accumulated_us = right_total_us + (accumulated_us - duration_us)
+            else:
+                filters.append(
+                    f"[{video_label_prev}][v{position}]concat=n=2:v=1:a=0[vx{step}]"
+                )
+                filters.append(
+                    f"[{audio_label_prev}][a{position}]concat=n=2:v=0:a=1[ax{step}]"
+                )
+                video_label_prev = f"vx{step}"
+                audio_label_prev = f"ax{step}"
+                accumulated_us += _item_span_us(item)
         filters.append(f"[{video_label_prev}]null[vcat];[{audio_label_prev}]anull[aout]")
-    else:
-        filters.append(f"{''.join(concat_inputs)}concat=n={len(segments)}:v=1:a=1[vcat][aout]")
     video_label = "vcat"
     if captions:
         filters.append("[vcat]ass=filename=captions.ass:fontsdir=fonts[vout]")

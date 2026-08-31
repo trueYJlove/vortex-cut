@@ -14,17 +14,28 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
+  Eye,
+  EyeOff,
   Lock,
   LockOpen,
+  Magnet,
   Minus,
+  MoreHorizontal,
+  Music,
   Plus,
   Redo2,
+  ScanSearch,
   Scissors,
   Trash2,
+  Type as TypeIcon,
   Undo2,
   Video,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 import type {
   AssetKind,
@@ -33,9 +44,13 @@ import type {
   TimelineClipId,
   TimelineDocument,
   TimelinePatchOperation,
+  TimelineTrack,
 } from "@aivideo/contracts";
+import type { EditorCommand } from "../editorCommands.js";
 import {
+  DEFAULT_RUNTIME_PREFS,
   DEFAULT_VIEW_STATE,
+  TIMELINE_PREFS_STORAGE_KEY,
   ZOOM_MAX_PPS,
   ZOOM_MIN_PPS,
   type AssetMediaEntry,
@@ -44,6 +59,8 @@ import {
   type TickMark,
   type TimelineHover,
   type TimelineInteraction,
+  type MoveInteraction,
+  type TimelineRuntimePrefs,
   type TimelineSelection,
   type TimelineViewState,
   type TransitionRenderRect,
@@ -55,26 +72,49 @@ const TRANSITION_KINDS = ["fade", "fadeblack", "dissolve", "wipeleft", "wiperigh
 
 import {
   MIN_CLIP_US,
+  SCROLLBAR_HEIGHT_PX,
   SNAP_PX,
   TRIM_HANDLE_PX,
+  CLIP_HEADER_H,
+  clampGroupDelta,
+  clampMoveStart,
+  clampScrollX,
+  clipAudioBand,
   clipDuration,
   clipsInRect,
   computeClipRects,
+  computeTrackRows,
   computeTransitionRects,
-  computeV1TargetIndex,
+  dragEdgeAutoScrollStep,
+  fitZoomPps,
   ghostPosition,
+  gridSnapCandidates,
   hitTestClips,
   hitTestTransitionGap,
   hitTestTransitions,
   hitTestTrimHandle,
+  hitTestVolumeLine,
   marqueeRect,
-  packV1Clips,
+  resolveGroupMove,
+  resolveMoveTarget,
+  scrollBounds,
   snapCandidates,
   snapValue,
   timeToX,
-  v1ReorderToMixedIndex,
+  trackRowAt,
+  trackRowOf,
+  trackRowsTotalHeight,
+  volumeToY,
   xToTime,
+  yToVolume,
+  zoomAtAnchor,
+  type TrackRowLayout,
 } from "./geometry.js";
+
+/** Keyframe lane order for the expanded panel (matches contracts' four properties). */
+const KEYFRAME_ORDER = ["position", "scale", "rotate", "opacity"] as const;
+const KEYFRAME_LANE_LABELS: Record<string, string> = { position: "位", scale: "缩", rotate: "旋", opacity: "透" };
+const KEYFRAME_LANE_HEIGHT = 14;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -99,8 +139,21 @@ const formatRulerTime = (us: number) => {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 };
 
+/** 剪映式片段时长码：HH:MM:SS:FF（FF = 帧号）。 */
+const formatTimecode = (us: number, frameRate: number) => {
+  const fps = Math.max(1, frameRate);
+  const totalFrames = Math.max(0, Math.round((us / 1_000_000) * fps));
+  const frames = Math.floor(totalFrames % fps);
+  const totalSeconds = Math.floor(totalFrames / fps);
+  const seconds = totalSeconds % 60;
+  const minutes = Math.floor(totalSeconds / 60) % 60;
+  const hours = Math.floor(totalSeconds / 3600);
+  return [hours, minutes, seconds, frames].map((part) => String(part).padStart(2, "0")).join(":");
+};
+
+/** 时间线总时长 = 所有片段最大终点（自由定位下允许空隙，列表末尾未必最晚）。 */
 const duration = (document?: TimelineDocument) =>
-  document?.clips.at(-1)?.timeline_end_us ?? 0;
+  document?.clips.reduce((max, clip) => Math.max(max, clip.timeline_end_us), 0) ?? 0;
 
 const zoomPctToPps = (zoom: number) =>
   ZOOM_MIN_PPS * Math.pow(ZOOM_MAX_PPS / ZOOM_MIN_PPS, zoom / 100);
@@ -109,20 +162,27 @@ const ppsToZoomPct = (pps: number) =>
 
 function IconButton({
   label,
+  title,
   disabled,
+  expanded,
   onClick,
   children,
 }: {
   label: string;
+  /** Optional tooltip text (defaults to the accessible label). */
+  title?: string;
   disabled?: boolean;
+  /** aria-expanded state for toggle buttons（如"添加轨道"菜单）。 */
+  expanded?: boolean;
   onClick: () => void;
   children: React.ReactNode;
 }) {
   return (
     <button
       className="icon-btn"
-      title={label}
+      title={title ?? label}
       aria-label={label}
+      aria-expanded={expanded}
       disabled={disabled}
       onClick={onClick}
     >
@@ -131,30 +191,133 @@ function IconButton({
   );
 }
 
-// ── Thumbnail frame URL computation ──────────────────────────────────────────
+// ── Thumbnail frame computation（剪映式：抽帧铺满片段） ──────────────────────
 
-/** Compute frame URLs for a clip, matching App.tsx buildClipFrames logic. */
-function computeFrameUrls(
+/** 帧数档位：缩放时量化到最近档，小幅缩放直接复用已抽帧（不重抽）。 */
+const FRAME_COUNT_STEPS = [1, 2, 3, 4, 6, 8, 11, 14, 18, 24, 32];
+export function quantizeFrameCount(raw: number): number {
+  const capped = Math.max(1, Math.min(32, raw));
+  let best = FRAME_COUNT_STEPS[0];
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const step of FRAME_COUNT_STEPS) {
+    const distance = Math.abs(step - capped);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = step;
+    }
+  }
+  return best;
+}
+
+/** Compute (mediaUrl, seek time) pairs for a clip's filmstrip frames. */
+function computeFrameRequests(
   mediaUrl: string | null,
   assetKind: AssetKind,
   sourceStartUs: number,
   sourceEndUs: number,
   pps: number,
-): string[] {
+): Array<{ url: string; timeSec: number }> {
   if (!mediaUrl) return [];
-  if (assetKind === "image") return [mediaUrl];
+  if (assetKind === "image") return [{ url: mediaUrl, timeSec: 0 }];
   if (assetKind !== "video") return [];
   const sourceDurationUs = sourceEndUs - sourceStartUs;
   if (sourceDurationUs <= 0) return [];
   const widthPx = (sourceDurationUs / 1_000_000) * pps;
-  const count = Math.max(1, Math.min(16, Math.round(widthPx / 56)));
-  const urls: string[] = [];
+  const count = quantizeFrameCount(Math.round(widthPx / 56));
+  const frames: Array<{ url: string; timeSec: number }> = [];
   for (let i = 0; i < count; i += 1) {
     const tUs = sourceStartUs + ((i + 0.5) * sourceDurationUs) / count;
-    urls.push(`${mediaUrl}#t=${tUs / 1_000_000}`);
+    frames.push({ url: mediaUrl, timeSec: tUs / 1_000_000 });
   }
-  return urls;
+  return frames;
 }
+
+/**
+ * 视频抽帧器：共享一个隐藏 <video> 元素，按队列 seek 到目标时刻，
+ * 把帧绘制进小画布（drawImage 兼容 HTMLCanvasElement）。抽帧完全异步，
+ * 失败（解码不了/没有画面）静默跳过。
+ */
+class VideoThumbnailExtractor {
+  private video: HTMLVideoElement | null = null;
+  private queue: Array<{ key: string; url: string; timeSec: number; onFrame: (frame: HTMLCanvasElement) => void }> = [];
+  private pendingKeys = new Set<string>();
+  private busy = false;
+  private currentUrl: string | null = null;
+
+  request(key: string, url: string, timeSec: number, onFrame: (frame: HTMLCanvasElement) => void): void {
+    if (this.pendingKeys.has(key)) return;
+    this.pendingKeys.add(key);
+    this.queue.push({ key, url, timeSec, onFrame });
+    void this.pump();
+  }
+
+  private ensureVideo(): HTMLVideoElement | null {
+    if (typeof document === "undefined") return null;
+    if (!this.video) {
+      const video = document.createElement("video");
+      video.muted = true;
+      video.preload = "auto";
+      video.playsInline = true;
+      this.video = video;
+    }
+    return this.video;
+  }
+
+  private async pump(): Promise<void> {
+    if (this.busy) return;
+    const job = this.queue.shift();
+    if (!job) return;
+    this.busy = true;
+    try {
+      const video = this.ensureVideo();
+      if (!video) return;
+      if (this.currentUrl !== job.url) {
+        video.src = job.url;
+        this.currentUrl = job.url;
+        await new Promise<void>((resolve, reject) => {
+          const done = () => { cleanup(); resolve(); };
+          const fail = () => { cleanup(); reject(new Error("media load failed")); };
+          const cleanup = () => {
+            video.removeEventListener("loadeddata", done);
+            video.removeEventListener("error", fail);
+          };
+          video.addEventListener("loadeddata", done);
+          video.addEventListener("error", fail);
+          video.load();
+        });
+      }
+      await new Promise<void>((resolve, reject) => {
+        const done = () => { cleanup(); resolve(); };
+        const fail = () => { cleanup(); reject(new Error("seek failed")); };
+        const cleanup = () => {
+          video.removeEventListener("seeked", done);
+          video.removeEventListener("error", fail);
+        };
+        video.addEventListener("seeked", done);
+        video.addEventListener("error", fail);
+        video.currentTime = job.timeSec;
+      });
+      const width = Math.max(2, Math.min(160, video.videoWidth || 96));
+      const height = Math.max(2, Math.round((width * (video.videoHeight || 54)) / (video.videoWidth || 96)));
+      const frame = document.createElement("canvas");
+      frame.width = width;
+      frame.height = height;
+      const ctx = frame.getContext("2d");
+      if (ctx) {
+        ctx.drawImage(video, 0, 0, width, height);
+        job.onFrame(frame);
+      }
+    } catch {
+      // 解码/寻址失败：静默跳过该帧。
+    } finally {
+      this.pendingKeys.delete(job.key);
+      this.busy = false;
+      void this.pump();
+    }
+  }
+}
+
+const videoThumbnailExtractor = new VideoThumbnailExtractor();
 
 // ── Caption geometry ─────────────────────────────────────────────────────────
 
@@ -163,38 +326,82 @@ const MIN_CAPTION_US = 200_000;
 
 function computeCaptionRects(
   captions: TimelineCaption[],
+  rows: TrackRowLayout[],
   view: TimelineViewState,
 ): CaptionRenderRect[] {
+  const captionRow = trackRowOf(rows, "C1");
+  const y = captionRow?.y ?? view.rulerHeight;
+  const height = captionRow?.height ?? Math.min(40, view.trackHeight);
   return captions.map((caption) => ({
-    x: view.headerWidth + (caption.start_us / 1_000_000) * view.pixelsPerSecond,
-    y: view.rulerHeight + 2 * view.trackHeight,
+    x: timeToX(caption.start_us, view),
+    y,
     width: Math.max(2, ((caption.end_us - caption.start_us) / 1_000_000) * view.pixelsPerSecond),
-    height: view.trackHeight,
+    height,
     caption,
   }));
 }
 
+/**
+ * 剪映式时间刻度：视口驱动——无论缩放大小，刻度始终布满整个时间线窗口
+ * （按当前 pps 计算合适的间隔，从可视时间范围向外取整覆盖）；素材范围之外
+ * 也照常绘制。帧级标签（2f/4f…）只在放大到足够大时出现（剪映式）。
+ */
 function computeTicks(
   totalUs: number,
   pps: number,
   headerWidth: number,
   frameRate: number,
+  scrollX: number,
+  viewportWidth = 800,
 ): TickMark[] {
-  const tickSpacingSecs =
-    pps >= 200 ? 2 / frameRate : pps >= 100 ? 0.5 : pps >= 50 ? 1 : pps >= 25 ? 2 : pps >= 10 ? 5 : 10;
+  const frameSecs = 1 / Math.max(1, frameRate);
+  // 目标：主刻度间隔 ≥ 90px。候选间隔（秒）：帧级 → 秒级 → 分钟级逐级放大，
+  // 取第一个满足的；f 标签只在帧级间隔（< 1s）时出现。
+  const candidates: Array<{ secs: number; majorEvery: number; frame?: boolean }> = [
+    { secs: frameSecs, majorEvery: 2, frame: true },
+    { secs: 2 * frameSecs, majorEvery: 5, frame: true },
+    { secs: 0.5, majorEvery: 5 },
+    { secs: 1, majorEvery: 5 },
+    { secs: 2, majorEvery: 5 },
+    { secs: 5, majorEvery: 4 },
+    { secs: 10, majorEvery: 5 },
+    { secs: 30, majorEvery: 6 },
+    { secs: 60, majorEvery: 5 },
+    { secs: 300, majorEvery: 5 },
+    { secs: 600, majorEvery: 6 },
+    { secs: 1800, majorEvery: 6 },
+    { secs: 3600, majorEvery: 5 },
+  ];
+  const minMajorPx = 90;
+  const pick =
+    candidates.find((c) => c.secs * pps * c.majorEvery >= minMajorPx) ??
+    candidates[candidates.length - 1];
+  const intervalUs = pick.secs * 1_000_000;
+  const majorUs = intervalUs * pick.majorEvery;
+  const pxToUs = 1_000_000 / pps;
+  // 可视时间范围（含左右余量），再对齐到主刻度边界。
+  const viewStartUs = Math.max(0, (scrollX - headerWidth) * pxToUs - majorUs);
+  const viewEndUs = (scrollX - headerWidth + viewportWidth) * pxToUs + majorUs;
+  const firstMajor = Math.floor(viewStartUs / majorUs);
+  const lastMajor = Math.ceil(Math.min(viewEndUs, Math.max(totalUs + majorUs, viewEndUs)) / majorUs);
   const ticks: TickMark[] = [];
-  if (totalUs <= 0) return ticks;
-  const intervalUs = tickSpacingSecs * 1_000_000;
-  const count = Math.min(400, Math.ceil(totalUs / intervalUs) + 1);
-  for (let i = 0; i < count; i += 1) {
-    const timeUs = i * intervalUs;
-    const x = headerWidth + (timeUs / 1_000_000) * pps;
-    const major = i % 5 === 0;
-    const label =
-      tickSpacingSecs < 1
-        ? `${Math.round((timeUs / 1_000_000) * frameRate)}f`
-        : formatRulerTime(timeUs);
-    ticks.push({ x, label, major });
+  for (let m = firstMajor; m <= lastMajor; m += 1) {
+    const majorUsValue = m * majorUs;
+    if (majorUsValue < 0) continue;
+    const majorX = headerWidth + (majorUsValue / 1_000_000) * pps - scrollX;
+    // 主刻度：竖线 + 剪映式 "|时间" 标签；t=0 显示 00:00，帧级显示 Nf。
+    const majorLabel = pick.frame
+      ? m === 0
+        ? formatRulerTime(0)
+        : `${m * pick.majorEvery}f`
+      : formatRulerTime(majorUsValue);
+    ticks.push({ x: majorX, label: majorLabel, major: true });
+    // 小刻度：主刻度之间均分，长度为主刻度的一半。
+    for (let s = 1; s < pick.majorEvery; s += 1) {
+      const minorUsValue = majorUsValue + s * intervalUs;
+      const minorX = headerWidth + (minorUsValue / 1_000_000) * pps - scrollX;
+      ticks.push({ x: minorX, label: "", major: false });
+    }
   }
   return ticks;
 }
@@ -205,6 +412,28 @@ function computeTicks(
 const WAVEFORM_PEAK_COUNT = 200;
 /** Amplitude gain applied at draw time so quiet audio stays visible. */
 const WAVEFORM_GAIN = 1.4;
+
+// ── 剪映式片段外观（1:1 复刻参考） ────────────────────────────────────────────
+/** 片段圆角半径（px）。 */
+const CLIP_RADIUS = 3;
+/** 片段在轨道行内的上下留白（px）——相邻轨道片段之间形成剪映式缝隙。 */
+const CLIP_ROW_INSET = 2;
+/** 片段配色（剪映取色）：名称条与原声带底色 rgb(0,77,82)，波形 rgb(0,119,126)。
+ *  选中不变色——只叠加白色描边 + 四角手柄。 */
+const CLIP_PALETTE = {
+  video: {
+    body: "#10161b",
+    header: "#004d52",
+    band: "#004d52",
+    wave: "#00777e",
+  },
+  audio: {
+    body: "#0e3058",
+    header: "#1d4d8f",
+    band: "#0e4888",
+    wave: "rgb(14, 129, 179)",
+  },
+} as const;
 
 /** Lazily created Web Audio context used only for decodeAudioData(). */
 let audioDecodeContext: AudioContext | OfflineAudioContext | null = null;
@@ -272,13 +501,98 @@ async function decodeAudioPeaks(
   }
 }
 
+// ── Runtime prefs (magnetic snapping) ────────────────────────────────────────
+
+function loadRuntimePrefs(): TimelineRuntimePrefs {
+  try {
+    const raw = window.localStorage.getItem(TIMELINE_PREFS_STORAGE_KEY);
+    if (raw) {
+      const parsed: unknown = JSON.parse(raw);
+      if (parsed && typeof parsed === "object" && typeof (parsed as TimelineRuntimePrefs).snappingEnabled === "boolean") {
+        const candidate = parsed as Partial<TimelineRuntimePrefs>;
+        const trackHeight =
+          typeof candidate.trackHeight === "number" && 40 <= candidate.trackHeight && candidate.trackHeight <= 128
+            ? candidate.trackHeight
+            : DEFAULT_RUNTIME_PREFS.trackHeight;
+        const waveformRatio =
+          typeof candidate.waveformRatio === "number" && [1, 0.6, 0.4].includes(candidate.waveformRatio)
+            ? candidate.waveformRatio
+            : DEFAULT_RUNTIME_PREFS.waveformRatio;        return {
+          snappingEnabled: candidate.snappingEnabled === true,
+          trackHeight,
+          waveformRatio,
+        };
+      }
+    }
+  } catch {
+    // Corrupted prefs — fall back to defaults.
+  }
+  return DEFAULT_RUNTIME_PREFS;
+}
+
 // ── Canvas drawing ───────────────────────────────────────────────────────────
+
+/** Small dark tooltip shown above a drag ghost (timecode + duration/delta). */
+function drawDragTooltip(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  lines: string[],
+  viewportWidth: number,
+) {
+  ctx.save();
+  ctx.font = "10px monospace";
+  const textWidth = Math.max(...lines.map((line) => ctx.measureText(line).width));
+  const boxWidth = textWidth + 12;
+  const boxHeight = lines.length * 13 + 7;
+  const boxX = Math.max(2, Math.min(viewportWidth - boxWidth - 2, x - boxWidth / 2));
+  const boxY = Math.max(2, y - boxHeight);
+  ctx.fillStyle = "rgba(10, 14, 20, 0.85)";
+  ctx.strokeStyle = "#5a6a72";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(boxX, boxY, boxWidth, boxHeight, 4);
+  ctx.fill();
+  ctx.stroke();
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  lines.forEach((line, index) => {
+    ctx.fillStyle = index === 0 ? "#ffd76e" : "#d7e2e8";
+    ctx.fillText(line, boxX + boxWidth / 2, boxY + 9 + index * 13);
+  });
+  ctx.restore();
+}
+
+/** Bottom scrollbar strip: track + thumb proportional to visible content. */
+function drawScrollbar(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  view: TimelineViewState,
+  totalUs: number,
+) {
+  const { maxScrollX } = scrollBounds(view, totalUs, width);
+  if (maxScrollX <= 0) return;
+  const trackWidth = width - view.headerWidth;
+  const visibleRatio = Math.min(1, trackWidth / (trackWidth + maxScrollX));
+  const thumbWidth = Math.max(30, trackWidth * visibleRatio);
+  const thumbX =
+    view.headerWidth + (view.scrollX / maxScrollX) * (trackWidth - thumbWidth);
+  const trackY = height - SCROLLBAR_HEIGHT_PX;
+  ctx.fillStyle = "rgba(255, 255, 255, 0.05)";
+  ctx.fillRect(view.headerWidth, trackY, trackWidth, SCROLLBAR_HEIGHT_PX - 1);
+  ctx.fillStyle = "rgba(255, 255, 255, 0.22)";
+  ctx.beginPath();
+  ctx.roundRect(thumbX, trackY, thumbWidth, SCROLLBAR_HEIGHT_PX - 1, 3);
+  ctx.fill();
+}
 
 function drawTimeline(
   ctx: CanvasRenderingContext2D,
   width: number,
   height: number,
   view: TimelineViewState,
+  trackRows: TrackRowLayout[],
   clipRects: ClipRenderRect[],
   captionRects: CaptionRenderRect[],
   captions: TimelineCaption[],
@@ -289,28 +603,46 @@ function drawTimeline(
   hover: TimelineHover,
   totalUs: number,
   lockedElements: string[],
-  thumbnailCache?: Map<string, HTMLImageElement>,
+  rulerHoverUs: number | null,
+  clipNames: Map<string, string>,
+  frameRate: number,
+  pendingKeep: {
+    clipId: TimelineClipId;
+    trackId: string;
+    startUs: number;
+    displaced?: { clipId: TimelineClipId; trackId: string; startUs: number };
+  } | null,
+  thumbnailCache?: Map<string, HTMLCanvasElement>,
   waveformCache?: Map<string, Float32Array>,
+  waveformRatio?: number,
+  /** 面板可视高度（画布可能高于面板——纵向滚动时滚动条仍钉在可视区底部）。 */
+  viewportHeight?: number,
 ) {
   const dpr = window.devicePixelRatio || 1;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, width, height);
 
   // Background
-  ctx.fillStyle = "#1a1a2e";
+  ctx.fillStyle = "#14141f";
   ctx.fillRect(0, 0, width, height);
 
   // Ruler background
   ctx.fillStyle = "#16213e";
   ctx.fillRect(view.headerWidth, 0, width - view.headerWidth, view.rulerHeight);
 
-  // Track backgrounds (3 tracks: V1, A1, C1)
-  ctx.fillStyle = "#1a1a2e";
-  ctx.fillRect(view.headerWidth, view.rulerHeight, width - view.headerWidth, view.trackHeight);
-  ctx.fillStyle = "#16213e";
-  ctx.fillRect(view.headerWidth, view.rulerHeight + view.trackHeight, width - view.headerWidth, view.trackHeight);
-  ctx.fillStyle = "#1a1a2e";
-  ctx.fillRect(view.headerWidth, view.rulerHeight + view.trackHeight * 2, width - view.headerWidth, view.trackHeight);
+  // Track backgrounds（按轨道类型着色：主视频轨更亮、音频轨偏蓝、文本轨偏暖）。
+  for (const row of trackRows) {
+    const fill =
+      row.track.id === "V1"
+        ? "#1d2036"
+        : row.track.kind === "audio"
+          ? "#131a2a"
+          : row.track.kind === "text"
+            ? "#191a2c"
+            : "#171728";
+    ctx.fillStyle = fill;
+    ctx.fillRect(view.headerWidth, row.y, width - view.headerWidth, row.height);
+  }
 
   // Grid lines between tracks
   ctx.strokeStyle = "#2a2a4a";
@@ -318,27 +650,61 @@ function drawTimeline(
   ctx.beginPath();
   ctx.moveTo(view.headerWidth, view.rulerHeight);
   ctx.lineTo(width, view.rulerHeight);
-  ctx.moveTo(view.headerWidth, view.rulerHeight + view.trackHeight);
-  ctx.lineTo(width, view.rulerHeight + view.trackHeight);
-  ctx.moveTo(view.headerWidth, view.rulerHeight + view.trackHeight * 2);
-  ctx.lineTo(width, view.rulerHeight + view.trackHeight * 2);
-  ctx.moveTo(view.headerWidth, view.rulerHeight + view.trackHeight * 3);
-  ctx.lineTo(width, view.rulerHeight + view.trackHeight * 3);
+  for (const row of trackRows) {
+    ctx.moveTo(view.headerWidth, row.y + row.height);
+    ctx.lineTo(width, row.y + row.height);
+  }
   ctx.stroke();
 
-  // Ticks
+  // Ruler hover guide (Round 5): faint full-height line + time label.
+  if (rulerHoverUs !== null && rulerHoverUs !== undefined) {
+    const hx = timeToX(rulerHoverUs, view);
+    if (hx >= view.headerWidth && hx <= width) {
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.18)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(hx, view.rulerHeight);
+      ctx.lineTo(hx, height);
+      ctx.stroke();
+      ctx.fillStyle = "#9fb3bd";
+      ctx.font = "10px monospace";
+      ctx.textBaseline = "bottom";
+      ctx.textAlign = hx > width - 70 ? "right" : "left";
+      ctx.fillText(formatTime(rulerHoverUs), hx + (hx > width - 70 ? -4 : 4), view.rulerHeight - 2);
+      ctx.textAlign = "left";
+    }
+  }
+
+  // Ticks（剪映式 1:1）：主刻度从标尺顶贯通到底（带 "|时间" 标签），小刻度
+  // 只有下半段短线——长短分明；数字 10px 无衬线浅灰。
   ctx.textBaseline = "bottom";
-  ctx.font = "10px monospace";
+  ctx.font = "10px sans-serif";
   for (const tick of ticks) {
-    ctx.strokeStyle = tick.major ? "#8888aa" : "#444466";
-    ctx.lineWidth = tick.major ? 1 : 0.5;
+    const tickX = Math.round(tick.x) + 0.5;
+    if (tickX < view.headerWidth - 1 || tickX > width + 1) continue;
+    ctx.strokeStyle = tick.major ? "#8a97a0" : "#5a666e";
+    ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(tick.x, tick.major ? 0 : view.rulerHeight * 0.5);
-    ctx.lineTo(tick.x, view.rulerHeight);
+    ctx.moveTo(tickX, tick.major ? 0 : Math.round(view.rulerHeight * 0.45) + 0.5);
+    ctx.lineTo(tickX, view.rulerHeight);
     ctx.stroke();
     if (tick.major) {
-      ctx.fillStyle = "#aaaacc";
-      ctx.fillText(tick.label, tick.x + 3, view.rulerHeight - 2);
+      ctx.fillStyle = "#c8d2d8";
+      ctx.fillText(`|${tick.label}`, tickX + 2, view.rulerHeight - 2);
+    }
+  }
+  // 内容范围线：标尺顶部一条 2px 横线（rgb(6,78,117)），以素材最左/最右片段
+  // 为边界（不从 0 开始），直观显示素材覆盖的时间范围（剪映式）。
+  if (clipRects.length > 0) {
+    const contentStartUs = Math.min(...clipRects.map((r) => r.clip.timeline_start_us));
+    const contentEndUs = Math.max(...clipRects.map((r) => r.clip.timeline_end_us));
+    const contentLeft = timeToX(contentStartUs, view);
+    const contentRight = timeToX(contentEndUs, view);
+    const barLeft = Math.max(view.headerWidth, contentLeft);
+    const barRight = Math.min(width, contentRight);
+    if (barRight > barLeft) {
+      ctx.fillStyle = "rgb(6, 78, 117)";
+      ctx.fillRect(barLeft, 0, barRight - barLeft, 2);
     }
   }
 
@@ -349,65 +715,209 @@ function drawTimeline(
         ? selection.ids
         : [];
 
-  const trimmable = (clip: TimelineClip) =>
-    clip.asset_kind === "video" || clip.asset_kind === "audio";
+  const hiddenTrackIds = new Set(
+    trackRows.filter((row) => row.track.hidden).map((row) => row.track.id),
+  );
 
-  // Clips
-  for (const rect of clipRects) {
+  // Clips（拖动中的片段最后绘制在顶层、按鼠标自由跟随——剪映式）
+  const movingId = interaction?.kind === "move" ? interaction.clipId : null;
+  const drawClipRect = (sourceRect: ClipRenderRect) => {
+    // 轨道行内上下留白：相邻轨道片段之间形成剪映式缝隙。
+    const baseRect: ClipRenderRect = {
+      ...sourceRect,
+      y: sourceRect.y + CLIP_ROW_INSET,
+      height: Math.max(4, sourceRect.height - CLIP_ROW_INSET * 2),
+    };
+    let rect = baseRect;
+    const isMovingClip =
+      movingId !== null && movingId === sourceRect.clip.clip_id && interaction?.kind === "move";
+    // 拖拽提交态（防回弹）：补丁在途时片段（与被交换片段）保持渲染在目标位置。
+    let keepOverride: { trackId: string; startUs: number } | null = null;
+    if (pendingKeep && interaction === null) {
+      if (pendingKeep.clipId === sourceRect.clip.clip_id) {
+        keepOverride = { trackId: pendingKeep.trackId, startUs: pendingKeep.startUs };
+      } else if (pendingKeep.displaced && pendingKeep.displaced.clipId === sourceRect.clip.clip_id) {
+        keepOverride = {
+          trackId: pendingKeep.displaced.trackId,
+          startUs: pendingKeep.displaced.startUs,
+        };
+      }
+    }
+    if (keepOverride) {
+      const keepRow = trackRowOf(trackRows, keepOverride.trackId);
+      rect = {
+        ...baseRect,
+        x: timeToX(keepOverride.startUs, view),
+        y: (keepRow ? keepRow.y : baseRect.y - CLIP_ROW_INSET) + CLIP_ROW_INSET,
+      };
+    }
+    if (isMovingClip && interaction?.kind === "move") {
+      const ghost = ghostPosition(
+        clipRects.map((item) => item.clip),
+        sourceRect.clip,
+        interaction.targetStartUs,
+        interaction.targetTrackId ?? undefined,
+      );
+      // 剪映式跟手：水平严格按时间增量、垂直自由浮动跟随光标（钳制在轨道区内）；
+      // 落点由 resolveMoveTarget 的预览剪影表达，松手按它吸附。
+      const floatY = baseRect.y + (interaction.currentY - interaction.startY);
+      const minY = view.rulerHeight + CLIP_ROW_INSET;
+      const maxY = Math.max(minY, height - baseRect.height);
+      rect = {
+        ...baseRect,
+        x: timeToX(ghost.startUs, view),
+        y: Math.min(maxY, Math.max(minY, floatY)),
+        width: Math.max(2, ((ghost.endUs - ghost.startUs) / 1_000_000) * view.pixelsPerSecond),
+      };
+    }
     const isSelected = selectedIds.includes(rect.clip.clip_id);
     const isLocked = lockedElements.includes(rect.clip.clip_id);
+    const isHiddenTrack = hiddenTrackIds.has(rect.clip.track_id);
+    // 隐藏轨道半透明；拖动中的片段再叠一层透明（"提起来"），落点由预览表达。
+    ctx.globalAlpha = (isHiddenTrack ? 0.35 : 1) * (isMovingClip ? 0.7 : 1);
 
-    // Clip body
-    ctx.fillStyle = isSelected
-      ? "#4a90d9"
-      : rect.clip.asset_kind === "audio"
-        ? "#8a5a9a"
-        : rect.clip.asset_kind === "video"
-          ? "#3a6ea5"
-          : "#5a8a5a";
-    ctx.fillRect(rect.x, rect.y + 2, rect.width, rect.height - 4);
+    const clipKind = rect.clip.asset_kind;
+    const isAudioClip = clipKind === "audio";
+    const isVisualClip = clipKind === "video" || clipKind === "image";
+    const palette = isAudioClip ? CLIP_PALETTE.audio : CLIP_PALETTE.video;
+    const headerH = rect.width > 36 ? CLIP_HEADER_H : 0;
+    // 音频区域（剪映式）：视频 = 底部原声带（高度 = 占比 × 名称条以下区域），
+    // 纯音频 = 名称条以下全部（占比只作用于波形振幅）。
+    const band = clipAudioBand(rect.clip, rect, waveformRatio);
+    const bodyTop = rect.y + headerH;
+    const bodyBottom = band?.top ?? rect.y + rect.height;
+    const bodyH = Math.max(4, bodyBottom - bodyTop);
 
-    // Draw thumbnail frames if available
-    if (thumbnailCache && rect.width > 10 && rect.clip.asset_kind === "video") {
-      const frameCount = Math.max(1, Math.min(16, Math.round(rect.width / 56)));
-      const frameWidth = rect.width / frameCount;
-      for (let fi = 0; fi < frameCount; fi++) {
-        const key = `${rect.clip.clip_id}:${fi}`;
-        const img = thumbnailCache.get(key);
-        if (img && img.complete && img.naturalWidth > 0) {
+    ctx.save();
+    // 圆角裁剪区域：名称条、缩略图、波形全部限制在片段圆角矩形内。
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.width, rect.height, CLIP_RADIUS);
+    ctx.clip();
+
+    // 1) 片段体底色（视频/图片：近黑；音频：剪映蓝）。
+    ctx.fillStyle = palette.body;
+    ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+
+    // 2) 缩略图带（视频/图片）：帧按原始宽高比平铺、铺满不留边缝、不拉伸；
+    //    缩放时档位变化重抽新帧——旧帧经 ":any:" 别名兜底，画面不消失。
+    if (thumbnailCache && isVisualClip && rect.width > 10) {
+      const frameCount = quantizeFrameCount(Math.round(rect.width / 56));
+      const clipRight = rect.x + rect.width;
+      let cursorX = rect.x;
+      for (let fi = 0; fi < frameCount && cursorX < clipRight; fi++) {
+        const frame =
+          thumbnailCache.get(`${rect.clip.clip_id}:${frameCount}:${fi}`) ??
+          thumbnailCache.get(`${rect.clip.clip_id}:any:${fi}`);
+        const tileW = frame && frame.height > 0
+          ? Math.max(4, bodyH * (frame.width / frame.height))
+          : Math.max(4, bodyH);
+        if (frame) {
           try {
-            ctx.drawImage(
-              img,
-              rect.x + fi * frameWidth,
-              rect.y + 2,
-              frameWidth,
-              rect.height - 4,
-            );
+            ctx.drawImage(frame, cursorX, bodyTop, tileW, bodyH);
           } catch { /* ignore draw errors */ }
         }
+        cursorX += tileW;
       }
     }
 
-    // Waveform overlay (video clips carry audio; audio clips are pure audio)
-    if (waveformCache && rect.clip.asset_kind !== "image" && rect.width > 20) {
+    // 3) 音频波形（剪映式 1:1）：连续实心轮廓——按相邻峰值画实心梯形，柱与
+    //    柱之间无缝衔接（图1 的"整块实心"质感），底部对齐；峰值采样点顶端
+    //    1px 橙色点亮；带底一条 1px 亮线（剪映基线）。
+    if (waveformCache && band && rect.width > 20) {
       const peaks = waveformCache.get(rect.clip.clip_id);
       if (peaks && peaks.length > 0) {
-        const padding = 6;
-        const maxHeight = Math.max(4, rect.height - 4 - padding * 2);
-        const barWidth = 1;
-        const barTotal = barWidth + 1; // bar + gap
-        const drawableWidth = Math.max(1, rect.width - 4);
-        const count = Math.min(peaks.length, Math.floor(drawableWidth / barTotal));
-        const centerY = rect.y + 2 + (rect.height - 4) / 2;
-        ctx.fillStyle =
-          rect.clip.asset_kind === "audio"
-            ? "rgba(255, 200, 120, 0.55)"
-            : "rgba(100, 200, 255, 0.5)";
-        for (let i = 0; i < count; i++) {
-          const amp = Math.min(1, peaks[i] * WAVEFORM_GAIN);
-          const h = Math.max(1, maxHeight * amp);
-          ctx.fillRect(rect.x + 2 + i * barTotal, centerY - h / 2, barWidth, h);
+        if (!isAudioClip) {
+          ctx.fillStyle = palette.band;
+          ctx.fillRect(rect.x, band.top, rect.width, band.height);
         }
+        const baseline = band.top + band.height;
+        // 纯音频片段固定 100% 高度（不随轨道高度/波形占比设置变化，剪映式）；
+        // 视频片段原声带按占比档位缩放。
+        const maxH = Math.max(2, band.height * (isAudioClip ? 1 : Math.max(0.1, Math.min(1, waveformRatio ?? 0.4))));
+        // 连续平滑轮廓：像素高度由相邻峰值线性插值——峰与峰之间是斜坡
+        // （剪映式自然衔接），而非直角跳变。先用滑动窗口(max)聚合成
+        // "包络"，再逐像素在包络采样点间插值。
+        const drawLeft = rect.x + 1;
+        const drawRight = rect.x + rect.width - 1;
+        const pxWidth = Math.max(1, Math.floor(drawRight - drawLeft));
+        // 峰值包络：每个像素列取其所覆盖的波形缓存区间的最大幅值。
+        const env: number[] = [];
+        for (let px = 0; px < pxWidth; px += 1) {
+          const from = Math.floor((px / pxWidth) * peaks.length);
+          const to = Math.max(from + 1, Math.floor(((px + 1) / pxWidth) * peaks.length));
+          let peak = 0;
+          for (let k = from; k < to && k < peaks.length; k += 1) {
+            const v = Math.min(1, peaks[k] * WAVEFORM_GAIN);
+            if (v > peak) peak = v;
+          }
+          env.push(peak);
+        }
+        // 三点滑动平均抹平毛刺（保峰：中心点取 max(原值, 邻均值)）。
+        const smooth: number[] = new Array(pxWidth);
+        for (let px = 0; px < pxWidth; px += 1) {
+          const prev = env[Math.max(0, px - 1)];
+          const next = env[Math.min(pxWidth - 1, px + 1)];
+          smooth[px] = Math.max(env[px], (prev + env[px] + next) / 3);
+        }
+        ctx.fillStyle = palette.wave;
+        let prevH = Math.max(1, Math.round(maxH * smooth[0]));
+        for (let px = 0; px < pxWidth; px += 1) {
+          const h = Math.max(1, Math.round(maxH * smooth[px]));
+          // 与前一像素取较低者先填（消除高度差 >1 的台阶），高差用逐像素
+          // 斜坡自然呈现：直接填充本列 [baseline-h, baseline) 即可，因为
+          // 相邻列高度已平滑。
+          const x = drawLeft + px;
+          const top = Math.min(prevH, h);
+          ctx.fillRect(x, baseline - h, 1.25, h);
+          // 峰值点顶端橙色亮（仅局部峰值处，剪映式）。
+          const isLocalPeak =
+            smooth[px] > 0.5 &&
+            (px === 0 || smooth[px] >= smooth[px - 1]) &&
+            (px === pxWidth - 1 || smooth[px] > smooth[px + 1]);
+          if (isLocalPeak) {
+            ctx.fillStyle = "rgb(233, 150, 68)";
+            ctx.fillRect(x, baseline - h, 1, Math.min(2, h));
+            ctx.fillStyle = palette.wave;
+          }
+          prevH = h;
+        }
+        // 基线：带底 1px 亮线。
+        ctx.fillStyle = "rgba(150, 224, 221, 0.45)";
+        ctx.fillRect(drawLeft, Math.round(baseline) + 0.5 - 1, pxWidth, 1);
+      }
+    }
+
+    // 4) 名称条（20px，剪映式）：素材文件名，时长码紧跟其后（左对齐、不靠右）。
+    if (headerH > 0) {
+      const headerText =
+        clipNames.get(rect.clip.clip_id) ??
+        (isAudioClip ? `音频 ${rect.clip.order_index + 1}` : `片段 ${rect.clip.order_index + 1}`);
+      const durText = formatTimecode(
+        rect.clip.timeline_end_us - rect.clip.timeline_start_us,
+        frameRate,
+      );
+      ctx.fillStyle = palette.header;
+      ctx.fillRect(rect.x, rect.y, rect.width, headerH);
+      ctx.font = "11px sans-serif";
+      ctx.textBaseline = "middle";
+      ctx.textAlign = "left";
+      const textY = rect.y + headerH / 2 + 0.5;
+      const durWidth = ctx.measureText(durText).width;
+      const showDur =
+        rect.width > 90 && 12 + ctx.measureText(headerText).width + 8 + durWidth <= rect.width - 4;
+      const maxNameWidth = rect.width - 12 - (showDur ? durWidth + 8 : 0);
+      let name = headerText;
+      if (ctx.measureText(name).width > maxNameWidth) {
+        while (name.length > 0 && ctx.measureText(`${name}…`).width > maxNameWidth) {
+          name = name.slice(0, -1);
+        }
+        name += "…";
+      }
+      ctx.fillStyle = "#eef4f6";
+      ctx.fillText(name, rect.x + 6, textY);
+      if (showDur) {
+        ctx.fillStyle = "rgba(238, 244, 246, 0.8)";
+        ctx.fillText(durText, rect.x + 6 + ctx.measureText(name).width + 8, textY);
       }
     }
 
@@ -419,39 +929,89 @@ function drawTimeline(
       ctx.font = "9px sans-serif";
       ctx.textBaseline = "middle";
       ctx.fillText("🔒", rect.x + rect.width - 14, rect.y + rect.height / 2);
+    } else if (hover.clipId === rect.clip.clip_id && !isSelected) {
+      // 悬停高亮（非边框）。
+      ctx.fillStyle = "rgba(255, 255, 255, 0.07)";
+      ctx.fillRect(rect.x, rect.y + 2, rect.width, rect.height - 4);
     }
+    ctx.restore();
 
-    // Selection border (white, JianYing-style)
-    if (isSelected) {
+    // 5) 选中效果（剪映式 1:1）：白色圆角描边包住整段片段 + 四角圆形手柄。
+    //    拖动途中不画（片段已"提起来"，落位意图由灰色预览剪影表达，
+    //    白框只属于"选中"语义）。
+    if (isSelected && !isMovingClip) {
+      const inset = 0.75;
       ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth = 2;
-      ctx.strokeRect(rect.x + 1, rect.y + 3, rect.width - 2, rect.height - 6);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.roundRect(
+        rect.x + inset,
+        rect.y + inset,
+        rect.width - inset * 2,
+        rect.height - inset * 2,
+        CLIP_RADIUS,
+      );
+      ctx.stroke();
+      const corners: Array<[number, number]> = [
+        [rect.x + inset, rect.y + inset],
+        [rect.x + rect.width - inset, rect.y + inset],
+        [rect.x + inset, rect.y + rect.height - inset],
+        [rect.x + rect.width - inset, rect.y + rect.height - inset],
+      ];
+      for (const [handleX, handleY] of corners) {
+        ctx.beginPath();
+        ctx.arc(handleX, handleY, 3.2, 0, Math.PI * 2);
+        ctx.fillStyle = "#ffffff";
+        ctx.fill();
+        ctx.strokeStyle = "rgba(0, 0, 0, 0.35)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
     }
 
-    // Clip header strip (JianYing-style): name + duration above the body.
-    if (rect.width > 30) {
-      const clipDurSec = (rect.clip.timeline_end_us - rect.clip.timeline_start_us) / 1_000_000;
-      const headerText =
-        rect.clip.asset_kind === "audio"
-          ? `Audio ${rect.clip.order_index + 1}`
-          : `Clip ${rect.clip.order_index + 1}`;
-      const durText = `${clipDurSec.toFixed(1)}s`;
+    // 6) 分贝线（剪映式）：1px 横线贯穿音频区域、左端圆点；常态 rgb(66,155,159)，
+    //    hover 到片段（非 hover 线本身）即变 rgb(222,237,238)；拖动时黄色高亮。
+    const volBand = clipAudioBand(rect.clip, rect, waveformRatio);
+    if (volBand && rect.width > 30) {
+      const draggingVolume =
+        interaction?.kind === "volume" && interaction.clipId === rect.clip.clip_id;
+      const hoveredClip = hover.clipId === rect.clip.clip_id;
+      const gainDb = draggingVolume
+        ? (interaction as { targetGainDb: number }).targetGainDb
+        : rect.clip.audio.gain_db;
+      const shownY = volumeToY(gainDb, volBand);
       ctx.save();
+      ctx.strokeStyle = draggingVolume
+        ? "#ffd76e"
+        : isLocked
+          ? "rgba(66, 155, 159, 0.4)"
+          : hoveredClip
+            ? "rgb(222, 237, 238)"
+            : "rgb(66, 155, 159)";
+      // 0.5 对齐：DPR 缩放下让 1px 线落在单设备像素上（避免被取整成 2px）。
+      const lineY = Math.round(shownY) + 0.5;
+      ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.rect(rect.x, rect.y + 2, rect.width, rect.height - 4);
-      ctx.clip();
-      // 名称条（片段内顶部，半透明深底提高可读性）。
-      ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
-      ctx.fillRect(rect.x, rect.y + 2, rect.width, 15);
-      ctx.fillStyle = "#e8eef2";
-      ctx.font = "10px sans-serif";
-      ctx.textBaseline = "middle";
-      ctx.textAlign = "left";
-      ctx.fillText(headerText, rect.x + 5, rect.y + 10);
-      ctx.textAlign = "right";
-      ctx.fillStyle = "#9fb3bd";
-      ctx.fillText(durText, rect.x + rect.width - 5, rect.y + 10);
-      ctx.textAlign = "left";
+      ctx.moveTo(rect.x + 6, lineY);
+      ctx.lineTo(rect.x + rect.width - 6, lineY);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(rect.x + 12, lineY, 3, 0, Math.PI * 2);
+      ctx.fillStyle = draggingVolume ? "#ffd76e" : hoveredClip ? "rgb(222, 237, 238)" : "rgb(66, 155, 159)";
+      ctx.fill();
+      if (draggingVolume || hoveredClip) {
+        const label = `${gainDb >= 0 ? "+" : ""}${gainDb.toFixed(1)}dB`;
+        ctx.font = "9px sans-serif";
+        const chipWidth = ctx.measureText(label).width + 10;
+        ctx.fillStyle = "rgba(8, 14, 16, 0.8)";
+        ctx.beginPath();
+        ctx.roundRect(rect.x + 19, lineY - 8, chipWidth, 16, 3);
+        ctx.fill();
+        ctx.fillStyle = "#eef4f6";
+        ctx.textBaseline = "middle";
+        ctx.textAlign = "left";
+        ctx.fillText(label, rect.x + 24, lineY + 0.5);
+      }
       ctx.restore();
     }
 
@@ -467,7 +1027,7 @@ function drawTimeline(
       ctx.font = "9px sans-serif";
       const badgeWidth = ctx.measureText(badge).width + 8;
       const badgeX = rect.x + rect.width - badgeWidth - 4;
-      const badgeY = rect.y + 6;
+      const badgeY = rect.y + headerH + 2;
       if (badgeX > rect.x + 4) {
         ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
         ctx.fillRect(badgeX, badgeY, badgeWidth, 14);
@@ -476,29 +1036,79 @@ function drawTimeline(
         ctx.fillText(badge, badgeX + 4, badgeY + 7);
       }
     }
+    ctx.globalAlpha = 1;
+  };
+  for (const sourceRect of clipRects) {
+    if (movingId !== null && sourceRect.clip.clip_id === movingId) continue;
+    drawClipRect(sourceRect);
   }
 
-  // Trim handles: single selected clip (Phase 4) or hovered clip
-  const handleTargets = new Map<TimelineClipId, ClipRenderRect>();
-  if (selection?.kind === "clip") {
-    const rect = clipRects.find((r) => r.clip.clip_id === selection.id);
-    if (rect && trimmable(rect.clip)) handleTargets.set(rect.clip.clip_id, rect);
+  // 剪映式放置预览：拖动中按 resolveMoveTarget 的解析结果画落点剪影
+  // （目标轨上将被放置的实体位置 + 交换片段的去向）；松手按同一结果提交，
+  // 预览即结果、自动吸附。同轨自由拖动时片段本身就是预览，不重复画。
+  if (interaction?.kind === "move" && interaction.resolution) {
+    const resolution = interaction.resolution;
+    const draggedRect = clipRects.find((r) => r.clip.clip_id === interaction.clipId);
+    const dragged = draggedRect?.clip;
+    if (dragged && draggedRect) {
+      const sameTrackFree = resolution.trackId === dragged.track_id && resolution.mode === "free";
+      if (!sameTrackFree) {
+        const targetRow = trackRowOf(trackRows, resolution.trackId);
+        if (targetRow) {
+          const gx = timeToX(resolution.startUs, view);
+          const gy = targetRow.y + CLIP_ROW_INSET;
+          const gw = Math.max(2, (clipDuration(dragged) / 1_000_000) * view.pixelsPerSecond);
+          const gh = targetRow.height - CLIP_ROW_INSET * 2;
+          ctx.save();
+          ctx.globalAlpha = 0.55;
+          ctx.fillStyle = "rgb(71, 71, 71)";
+          ctx.beginPath();
+          ctx.roundRect(gx, gy, gw, gh, CLIP_RADIUS);
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+      if (resolution.displaced) {
+        const displacedRect = clipRects.find(
+          (r) => r.clip.clip_id === resolution.displaced!.clipId,
+        );
+        const displacedRow = trackRowOf(trackRows, resolution.displaced.trackId);
+        if (displacedRect && displacedRow) {
+          const dx = timeToX(resolution.displaced.startUs, view);
+          const dw = Math.max(
+            2,
+            (clipDuration(displacedRect.clip) / 1_000_000) * view.pixelsPerSecond,
+          );
+          ctx.save();
+          ctx.globalAlpha = 0.3;
+          ctx.fillStyle = "#8fa8b8";
+          ctx.beginPath();
+          ctx.roundRect(
+            dx,
+            displacedRow.y + CLIP_ROW_INSET,
+            dw,
+            displacedRow.height - CLIP_ROW_INSET * 2,
+            CLIP_RADIUS,
+          );
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+    }
   }
-  if (hover.clipId && hover.edge) {
-    const rect = clipRects.find((r) => r.clip.clip_id === hover.clipId);
-    if (rect && trimmable(rect.clip)) handleTargets.set(rect.clip.clip_id, rect);
+
+  // 拖动中的片段最后绘制：半透明"提起来"、带投影，压过邻居。
+  const movingRect = movingId !== null ? clipRects.find((r) => r.clip.clip_id === movingId) : null;
+  if (movingRect) {
+    ctx.save();
+    ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
+    ctx.shadowBlur = 10;
+    drawClipRect(movingRect);
+    ctx.restore();
   }
-  for (const rect of handleTargets.values()) {
-    const handleY = rect.y + 6;
-    const handleH = rect.height - 12;
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(rect.x - 3, handleY, 6, handleH);
-    ctx.fillRect(rect.x + rect.width - 3, handleY, 6, handleH);
-    ctx.strokeStyle = "#7ab8ff";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(rect.x - 3, handleY, 6, handleH);
-    ctx.strokeRect(rect.x + rect.width - 3, handleY, 6, handleH);
-  }
+
+  // 修剪端点的可视反馈已并入片段绘制（底边两角圆形端点柄）；
+  // 命中区仍由 hitTestTrimHandle 的左右 ±6px 区域提供。
 
   // Captions (enhanced transcript style)
   for (const rect of captionRects) {
@@ -556,22 +1166,130 @@ function drawTimeline(
     }
   }
 
-  // Drag ghost (move / trim)
+  // Keyframe lanes (Round 5): expanded panel below the selected clip.
+  const laneColors: Record<string, string> = { position: "#6fd3d3", scale: "#f0d264", rotate: "#f0a264", opacity: "#ffffff" };
+  if (selection?.kind === "clip") {
+    const rect = clipRects.find((r) => r.clip.clip_id === selection.id);
+    const props = rect?.clip.keyframes
+      ? KEYFRAME_ORDER.filter((property) => rect.clip.keyframes?.[property])
+      : [];
+    if (rect && props.length > 0) {
+      const panelTop = rect.y + rect.height + 2;
+      const panelHeight = props.length * KEYFRAME_LANE_HEIGHT + 4;
+      ctx.save();
+      ctx.fillStyle = "rgba(10, 14, 20, 0.92)";
+      ctx.strokeStyle = "#5a6a72";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(rect.x, panelTop, rect.width, panelHeight, 4);
+      ctx.fill();
+      ctx.stroke();
+      ctx.font = "9px sans-serif";
+      ctx.textBaseline = "middle";
+      ctx.textAlign = "left";
+      props.forEach((property, laneIndex) => {
+        const laneY = panelTop + 4 + laneIndex * KEYFRAME_LANE_HEIGHT + KEYFRAME_LANE_HEIGHT / 2;
+        ctx.fillStyle = "#9fb3bd";
+        ctx.fillText(KEYFRAME_LANE_LABELS[property] ?? property, rect.x + 5, laneY);
+        const track = rect.clip.keyframes?.[property as keyof NonNullable<TimelineClip["keyframes"]>];
+        if (!track) return;
+        for (const frame of track.frames) {
+          const fx = timeToX(rect.clip.timeline_start_us + frame.t_us, view);
+          if (fx < rect.x + 14 || fx > rect.x + rect.width - 4) continue;
+          ctx.fillStyle = laneColors[property] ?? "#ffffff";
+          ctx.beginPath();
+          ctx.moveTo(fx, laneY - 4);
+          ctx.lineTo(fx + 4, laneY);
+          ctx.lineTo(fx, laneY + 4);
+          ctx.lineTo(fx - 4, laneY);
+          ctx.closePath();
+          ctx.fill();
+        }
+      });
+      ctx.restore();
+    }
+  }
+
+  // Drag feedback (move / group-move / trim)。
+  // 单片段移动：片段本体已在目标位置跟随鼠标（见片段绘制循环），这里只画时间提示。
   if (interaction?.kind === "move") {
     const clip = clipRects.find((r) => r.clip.clip_id === interaction.clipId)?.clip;
     if (clip) {
-      const ghost = ghostPosition(clipRects.map((r) => r.clip), clip, interaction.targetStartUs);
+      const ghost = ghostPosition(clipRects.map((r) => r.clip), clip, interaction.targetStartUs, interaction.targetTrackId ?? undefined);
+      const ghostRow = trackRowOf(trackRows, interaction.targetTrackId ?? clip.track_id) ?? trackRowOf(trackRows, clip.track_id);
       const gx = timeToX(ghost.startUs, view);
-      const gy = view.rulerHeight + (clip.track_id === "A1" ? 1 : 0) * view.trackHeight;
+      const gy = ghostRow?.y ?? view.rulerHeight;
       const gw = Math.max(2, ((ghost.endUs - ghost.startUs) / 1_000_000) * view.pixelsPerSecond);
+      drawDragTooltip(
+        ctx,
+        gx + gw / 2,
+        gy,
+        [
+          `${formatRulerTime(ghost.startUs)} · ${((ghost.endUs - ghost.startUs) / 1_000_000).toFixed(2)}s`,
+          `Δ${interaction.targetStartUs - interaction.startUs >= 0 ? "+" : ""}${((interaction.targetStartUs - interaction.startUs) / 1_000_000).toFixed(2)}s`,
+        ],
+        width,
+      );
+    }
+  } else if (interaction?.kind === "group-move") {
+    // 组移动 ghost：按平移后的目标位置绘制（V1 已钳制为合法位置）。
+    {
       ctx.save();
       ctx.globalAlpha = 0.55;
-      ctx.fillStyle = clip.asset_kind === "audio" ? "#8a5a9a" : clip.asset_kind === "video" ? "#3a6ea5" : "#5a8a5a";
-      ctx.fillRect(gx, gy + 2, gw, view.trackHeight - 4);
-      ctx.strokeStyle = "#7ab8ff";
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(gx, gy + 2, gw, view.trackHeight - 4);
+      let firstRect: { x: number; y: number; width: number } | null = null;
+      for (const clipId of interaction.clipIds) {
+        const rect = clipRects.find((r) => r.clip.clip_id === clipId);
+        const targetUs = interaction.targetStartUsByClip[clipId];
+        if (!rect || targetUs === undefined) continue;
+        const gw = Math.max(2, (clipDuration(rect.clip) / 1_000_000) * view.pixelsPerSecond);
+        const gx = timeToX(targetUs, view);
+        ctx.fillStyle = rect.clip.asset_kind === "audio" ? CLIP_PALETTE.audio.body : CLIP_PALETTE.video.band;
+        ctx.fillRect(gx, rect.y + 2, gw, view.trackHeight - 4);
+        ctx.strokeStyle = "#7ab8ff";
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(gx, rect.y + 2, gw, view.trackHeight - 4);
+        if (!firstRect) firstRect = { x: gx, y: rect.y, width: gw };
+      }
       ctx.restore();
+      if (firstRect) {
+        const anchorDelta =
+          Math.min(...interaction.clipIds.map((id) => interaction.targetStartUsByClip[id] ?? 0)) -
+          Math.min(...interaction.clipIds.map((id) => interaction.startUsByClip[id] ?? 0));
+        drawDragTooltip(
+          ctx,
+          firstRect.x + firstRect.width / 2,
+          firstRect.y,
+          [
+            `${interaction.clipIds.length} 个片段`,
+            `Δ${anchorDelta >= 0 ? "+" : ""}${(anchorDelta / 1_000_000).toFixed(2)}s`,
+          ],
+          width,
+        );
+      }
+    }
+  } else if (interaction?.kind === "volume") {
+    const rect = clipRects.find((r) => r.clip.clip_id === interaction.clipId);
+    const band = rect ? clipAudioBand(rect.clip, rect, waveformRatio) : null;
+    if (rect && band) {
+      const shownY = volumeToY(interaction.targetGainDb, band);
+      ctx.save();
+      ctx.strokeStyle = "#ffd76e";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(rect.x + 4, Math.round(shownY) + 0.5);
+      ctx.lineTo(rect.x + rect.width - 4, Math.round(shownY) + 0.5);
+      ctx.stroke();
+      ctx.restore();
+      drawDragTooltip(
+        ctx,
+        rect.x + rect.width / 2,
+        shownY - 4,
+        [
+          `${interaction.targetGainDb >= 0 ? "+" : ""}${interaction.targetGainDb.toFixed(1)}dB`,
+          `${interaction.startGainDb >= 0 ? "+" : ""}${interaction.startGainDb.toFixed(1)} → ${interaction.targetGainDb >= 0 ? "+" : ""}${interaction.targetGainDb.toFixed(1)}`,
+        ],
+        width,
+      );
     }
   } else if (interaction?.kind === "trim") {
     const clip = clipRects.find((r) => r.clip.clip_id === interaction.clipId)?.clip;
@@ -588,16 +1306,32 @@ function drawTimeline(
       }
       if (ghostEndUs - ghostStartUs < MIN_CLIP_US) ghostEndUs = ghostStartUs + MIN_CLIP_US;
       const gx = timeToX(ghostStartUs, view);
-      const gy = view.rulerHeight + (clip.track_id === "A1" ? 1 : 0) * view.trackHeight;
+      const trimRow = trackRowOf(trackRows, clip.track_id);
+      const gy = trimRow?.y ?? view.rulerHeight;
+      const gh = trimRow?.height ?? view.trackHeight;
       const gw = Math.max(2, ((ghostEndUs - ghostStartUs) / 1_000_000) * view.pixelsPerSecond);
       ctx.save();
       ctx.globalAlpha = 0.55;
-      ctx.fillStyle = clip.asset_kind === "audio" ? "#8a5a9a" : "#3a6ea5";
-      ctx.fillRect(gx, gy + 2, gw, view.trackHeight - 4);
+      ctx.fillStyle = clip.asset_kind === "audio" ? CLIP_PALETTE.audio.body : CLIP_PALETTE.video.band;
+      ctx.fillRect(gx, gy + 2, gw, gh - 4);
       ctx.strokeStyle = "#ffd76e";
       ctx.lineWidth = 1.5;
-      ctx.strokeRect(gx, gy + 2, gw, view.trackHeight - 4);
+      ctx.strokeRect(gx, gy + 2, gw, gh - 4);
       ctx.restore();
+      const edgeDelta =
+        interaction.edge === "left"
+          ? interaction.targetStartUs - interaction.originalStartUs
+          : interaction.targetEndUs - interaction.originalEndUs;
+      drawDragTooltip(
+        ctx,
+        interaction.edge === "left" ? gx : gx + gw,
+        gy,
+        [
+          `${((ghostEndUs - ghostStartUs) / 1_000_000).toFixed(2)}s`,
+          `Δ${edgeDelta >= 0 ? "+" : ""}${(edgeDelta / 1_000_000).toFixed(2)}s`,
+        ],
+        width,
+      );
     }
   } else if (interaction?.kind === "caption-trim") {
     const caption = captions.find((c: TimelineCaption) => c.caption_id === interaction.captionId);
@@ -620,12 +1354,30 @@ function drawTimeline(
       ctx.lineWidth = 1.5;
       ctx.strokeRect(gx, gy + 2, gw, view.trackHeight - 4);
       ctx.restore();
+      const edgeDelta =
+        interaction.edge === "left"
+          ? interaction.targetStartUs - interaction.originalStartUs
+          : interaction.targetEndUs - interaction.originalEndUs;
+      drawDragTooltip(
+        ctx,
+        interaction.edge === "left" ? gx : gx + gw,
+        gy,
+        [
+          `${((ghostEndUs - ghostStartUs) / 1_000_000).toFixed(2)}s`,
+          `Δ${edgeDelta >= 0 ? "+" : ""}${(edgeDelta / 1_000_000).toFixed(2)}s`,
+        ],
+        width,
+      );
     }
   }
 
-  // Snap guide (Phase 4)
+  // Snap guide (Phase 4; group-move included since Round 4)
   const snapUs =
-    (interaction?.kind === "move" || interaction?.kind === "trim") ? interaction.snapUs : null;
+    (interaction?.kind === "move" ||
+      interaction?.kind === "trim" ||
+      interaction?.kind === "group-move")
+      ? interaction.snapUs
+      : null;
   if (snapUs !== null && snapUs !== undefined) {
     const sx = timeToX(snapUs, view);
     if (sx >= view.headerWidth && sx <= width) {
@@ -644,7 +1396,7 @@ function drawTimeline(
     }
   }
 
-  // Marquee selection rect (Phase 4)
+  // Marquee selection rect (Phase 4) — coords are content-space, scroll applied
   if (interaction?.kind === "marquee") {
     const rect = marqueeRect(
       interaction.startX,
@@ -653,33 +1405,35 @@ function drawTimeline(
       interaction.currentY,
     );
     ctx.fillStyle = "rgba(74, 144, 217, 0.12)";
-    ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+    ctx.fillRect(rect.x - view.scrollX, rect.y, rect.width, rect.height);
     ctx.strokeStyle = "#7ab8ff";
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 3]);
-    ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+    ctx.strokeRect(rect.x - view.scrollX, rect.y, rect.width, rect.height);
     ctx.setLineDash([]);
   }
 
-  // Playhead
-  const playheadX = view.headerWidth + (playheadUs / 1_000_000) * view.pixelsPerSecond;
-  if (playheadX >= view.headerWidth && playheadX <= width) {
-    ctx.strokeStyle = "#ff4444";
-    ctx.lineWidth = 2;
+  // Playhead（剪映式：全高白色细线 + 顶部圆角手柄）
+  const playheadX = timeToX(playheadUs, view);
+  if (playheadX >= view.headerWidth - 3 && playheadX <= width + 3) {
+    ctx.strokeStyle = "#f2f5f8";
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.moveTo(playheadX, 0);
     ctx.lineTo(playheadX, height);
     ctx.stroke();
 
-    // Playhead triangle at top
-    ctx.fillStyle = "#ff4444";
+    // 顶部手柄：圆角竖条（可拖拽区域由标尺与空白区命中共同提供）。
+    ctx.fillStyle = "#f2f5f8";
     ctx.beginPath();
-    ctx.moveTo(playheadX - 5, 0);
-    ctx.lineTo(playheadX + 5, 0);
-    ctx.lineTo(playheadX, 8);
-    ctx.closePath();
+    ctx.roundRect(playheadX - 3, 3, 6, 18, 3);
     ctx.fill();
   }
+
+  // Bottom scrollbar strip (Round 4)：绘制在可视区底部（而非画布内容底部），
+  // 内容高于面板时滚动条始终可见、可拖。
+  const viewportBottom = Math.min(height, viewportHeight ?? height);
+  drawScrollbar(ctx, width, viewportBottom, view, totalUs);
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
@@ -697,12 +1451,13 @@ export function TimelinePanel({
   assetMedia,
   playheadUs,
   onSeek,
+  onCommand,
 }: {
   document?: TimelineDocument;
   selection: TimelineSelection;
   setSelection: (selection: TimelineSelection) => void;
   onPatch: (ops: TimelinePatchOperation[], summary: string) => Promise<void>;
-  onDropAsset: (assetId: string, atIndex: number) => void;
+  onDropAsset: (assetId: string, atIndex: number, trackId?: string | "new") => void;
   canUndo: boolean;
   canRedo: boolean;
   onUndo: () => void;
@@ -711,35 +1466,125 @@ export function TimelinePanel({
   playheadUs: number;
   /** Optional seek callback invoked when the playhead is dragged or a caption is clicked. */
   onSeek?: (timeUs: number) => void;
+  /** Optional editor command runner (copy/paste context-menu actions). */
+  onCommand?: (id: EditorCommand["id"]) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<TimelineViewState>(DEFAULT_VIEW_STATE);
+  // Synchronous view mirror so the auto-scroll rAF loop reads fresh values.
+  const viewRef = useRef<TimelineViewState>(view);
+  viewRef.current = view;
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   // B2：点击两片段边界时记录转场锚点（左侧片段 id），弹出添加浮层。
   const [addTransitionAnchor, setAddTransitionAnchor] = useState<string | null>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 800, height: 200 });
   // Active pointer interaction (Phase 4): null when idle.
   const [interaction, setInteraction] = useState<TimelineInteraction | null>(null);
+  // 拖拽松手后的"提交态"：补丁在途期间片段继续渲染在目标位置（剪映式无回弹），
+  // 文档更新后清除。moved = 主片段去向，displaced = 被交换片段去向（可选）。
+  const [pendingKeep, setPendingKeep] = useState<{
+    clipId: TimelineClipId;
+    trackId: string;
+    startUs: number;
+    displaced?: { clipId: TimelineClipId; trackId: string; startUs: number };
+  } | null>(null);
   // Synchronous mirror of interaction so pointer handlers always read the latest value.
   const interactionRef = useRef<TimelineInteraction | null>(null);
   // Hover state (trim handles + cursor).
   const [hover, setHover] = useState<TimelineHover>({ clipId: null, edge: null });
+  // Round 5: hovered time on the ruler (faint guide + label), null when idle.
+  const [rulerHoverUs, setRulerHoverUs] = useState<number | null>(null);
+  // Round 4: persisted runtime prefs (magnetic snapping / 轨道高度 / 波形占比)。
+  const [prefs, setPrefs] = useState<TimelineRuntimePrefs>(loadRuntimePrefs);
+  // 轨道高度偏好同步到视图（行高固定，不随窗口压缩）。
+  useEffect(() => {
+    setView((value) => (value.trackHeight === prefs.trackHeight ? value : { ...value, trackHeight: prefs.trackHeight }));
+  }, [prefs.trackHeight]);
+  // 时间线显示设置（… 菜单）开关。
+  const [displayMenuOpen, setDisplayMenuOpen] = useState(false);
+  const displayMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!displayMenuOpen) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!displayMenuRef.current?.contains(event.target as Node)) setDisplayMenuOpen(false);
+    };
+    window.addEventListener("mousedown", handlePointerDown);
+    return () => window.removeEventListener("mousedown", handlePointerDown);
+  }, [displayMenuOpen]);
+  // Round 4: last pointer position (canvas coords) for edge auto-scroll.
+  const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
+  // Round 4: whether the in-flight marquee mousedown used Shift (keep selection).
+  const shiftClickRef = useRef(false);
+  // Round 4: context menu state (null = closed).
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    target:
+      | { kind: "clip"; clipId: TimelineClipId }
+      | { kind: "caption"; captionId: string }
+      | { kind: "transition"; transitionId: string }
+      | { kind: "empty" };
+    timeUs: number;
+  } | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
 
   const clips = document?.clips ?? [];
   const captions = document?.captions ?? [];
   const transitions = document?.transitions ?? [];
+  const tracks: TimelineTrack[] = document?.tracks ?? [];
   const totalUs = duration(document);
   const frameRate =
     document?.canvas?.fps_num && document?.canvas?.fps_den
       ? document.canvas.fps_num / document.canvas.fps_den
       : 30;
 
-  // Compute geometry
-  const clipRects = computeClipRects(clips, view);
-  const captionRects = computeCaptionRects(captions, view);
-  const transitionRects = computeTransitionRects(clips, transitions, view);
-  const ticks = computeTicks(totalUs, view.pixelsPerSecond, view.headerWidth, frameRate);
+  // Compute geometry：轨道行自上而下排列，行高固定（不随窗口大小压缩）；
+  // 轨道过多时时间线区域纵向滚动。
+  const trackRows = useMemo(
+    () => computeTrackRows(tracks, view.rulerHeight, view.trackHeight),
+    [tracks, view.rulerHeight, view.trackHeight],
+  );
+  // 内容总高（标尺 + 全部固定行 + 横向滚动条条带）；画布与左栏同步按此伸展。
+  const contentHeight = view.rulerHeight + trackRowsTotalHeight(trackRows) + SCROLLBAR_HEIGHT_PX;
+  const clipRects = computeClipRects(clips, trackRows, view);
+  // 拖拽提交态：文档仍与目标不一致时保持渲染在目标位置（防松手回弹）；
+  // 文档更新到位后自动清除。2s 超时兜底（补丁失败时不残留幻影位置）。
+  const keepValid =
+    pendingKeep !== null &&
+    (() => {
+      const moved = clips.find((c) => c.clip_id === pendingKeep.clipId);
+      return Boolean(
+        moved &&
+          (moved.timeline_start_us !== pendingKeep.startUs || moved.track_id !== pendingKeep.trackId),
+      );
+    })();
+  useEffect(() => {
+    if (pendingKeep === null) return;
+    if (!keepValid) {
+      setPendingKeep(null);
+      return;
+    }
+    const timer = window.setTimeout(() => setPendingKeep(null), 2000);
+    return () => window.clearTimeout(timer);
+  }, [pendingKeep, keepValid]);
+  // 剪映式名称条：clip_id -> 素材文件名。
+  const clipNames = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const clip of clips) {
+      const name = assetMedia.find((media) => media.asset_id === clip.asset_id)?.display_name;
+      if (name) map.set(clip.clip_id, name);
+    }
+    return map;
+  }, [clips, assetMedia]);
+  const captionRects = computeCaptionRects(captions, trackRows, view);
+  const transitionRects = computeTransitionRects(clips, transitions, trackRows, view);
+  const ticks = computeTicks(totalUs, view.pixelsPerSecond, view.headerWidth, frameRate, view.scrollX, canvasSize.width);
+  // Content-space clip rects (scrollX=0) for marquee selection hit testing.
+  const contentClipRects = useMemo(
+    () => computeClipRects(clips, trackRows, { ...view, scrollX: 0 }),
+    [clips, trackRows, view.pixelsPerSecond, view.headerWidth, view.rulerHeight],
+  );
 
   // Resize observer
   useEffect(() => {
@@ -755,9 +1600,10 @@ export function TimelinePanel({
     return () => observer.disconnect();
   }, []);
 
-  // Thumbnail image cache: key = "clipId:frameIndex" -> loaded HTMLImageElement
-  const thumbnailCache = useRef<Map<string, HTMLImageElement>>(new Map());
-  const [thumbnailVersion, setThumbnailVersion] = useState(0); // trigger re-render when images load
+  // Thumbnail frame cache: key = "clipId:frameIndex" -> captured frame canvas.
+  const thumbnailCache = useRef<Map<string, HTMLCanvasElement>>(new Map());
+  const pendingImageKeys = useRef<Set<string>>(new Set());
+  const [thumbnailVersion, setThumbnailVersion] = useState(0); // trigger re-render when frames load
 
   // Waveform peak cache: clip_id -> amplitude peaks (0..1).
   const waveformCache = useRef<Map<string, Float32Array>>(new Map());
@@ -765,34 +1611,64 @@ export function TimelinePanel({
   // Clip ids with an in-flight decode, to avoid duplicate fetches per render.
   const pendingWaveforms = useRef<Set<string>>(new Set());
 
-  // Load thumbnail images for visible clips
+  // 抽帧：可见视频片段按帧时间请求（共享隐藏 video 池 seek 抽帧）；
+  // 图片素材直接用 <img> 加载。缩放只改变帧数档位（量化），旧帧保留兜底
+  // （别名键 ":any:"），新帧就绪后逐格替换——缩放时画面不消失。请求防抖
+  // 200ms，连续缩放不触发重抽风暴。
   useEffect(() => {
-    const cache = thumbnailCache.current;
-    const activeKeys = new Set<string>();
-    for (const rect of clipRects) {
-      const mediaUrl = assetMedia.find((m) => m.asset_id === rect.clip.asset_id)?.media_url ?? null;
-      const urls = computeFrameUrls(
-        mediaUrl,
-        rect.clip.asset_kind,
-        rect.clip.source_start_us ?? 0,
-        rect.clip.source_end_us ?? 0,
-        view.pixelsPerSecond,
-      );
-      for (let fi = 0; fi < urls.length; fi++) {
-        const key = `${rect.clip.clip_id}:${fi}`;
-        activeKeys.add(key);
-        if (!cache.has(key)) {
-          const img = new Image();
-          img.src = urls[fi];
-          img.onload = () => setThumbnailVersion((v) => v + 1);
-          cache.set(key, img);
+    const timer = window.setTimeout(() => {
+      const cache = thumbnailCache.current;
+      const clipIds = new Set(clips.map((clip) => clip.clip_id));
+      for (const rect of clipRects) {
+        const mediaUrl = assetMedia.find((m) => m.asset_id === rect.clip.asset_id)?.media_url ?? null;
+        const frames = computeFrameRequests(
+          mediaUrl,
+          rect.clip.asset_kind,
+          rect.clip.source_start_us ?? 0,
+          rect.clip.source_end_us ?? 0,
+          view.pixelsPerSecond,
+        );
+        for (let fi = 0; fi < frames.length; fi++) {
+          // 键含档位帧数：档位变化 → 重新抽帧（时间点不同）；旧帧保留兜底。
+          const key = `${rect.clip.clip_id}:${frames.length}:${fi}`;
+          if (cache.has(key) || pendingImageKeys.current.has(`${key}:img`)) continue;
+          if (rect.clip.asset_kind === "image") {
+            pendingImageKeys.current.add(`${key}:img`);
+            const img = new Image();
+            img.src = frames[fi].url;
+            img.onload = () => {
+              const captured = window.document.createElement("canvas");
+              captured.width = Math.max(2, img.naturalWidth || 96);
+              captured.height = Math.max(2, img.naturalHeight || 54);
+              captured.getContext("2d")?.drawImage(img, 0, 0, captured.width, captured.height);
+              cache.set(key, captured);
+              cache.set(`${rect.clip.clip_id}:any:${fi}`, captured);
+              pendingImageKeys.current.delete(`${key}:img`);
+              setThumbnailVersion((v) => v + 1);
+            };
+            img.onerror = () => pendingImageKeys.current.delete(`${key}:img`);
+            continue;
+          }
+          videoThumbnailExtractor.request(key, frames[fi].url, frames[fi].timeSec, (frame) => {
+            cache.set(key, frame);
+            cache.set(`${rect.clip.clip_id}:any:${fi}`, frame);
+            setThumbnailVersion((v) => v + 1);
+          });
         }
       }
-    }
-    for (const key of cache.keys()) {
-      if (!activeKeys.has(key)) cache.delete(key);
-    }
-  }, [clipRects, assetMedia, view.pixelsPerSecond]);
+      // 仅清理已不存在片段的帧；档位旧帧保留作兜底（上限防膨胀）。
+      for (const key of [...cache.keys()]) {
+        const clipId = key.split(":")[0] as TimelineClipId;
+        if (!clipIds.has(clipId)) cache.delete(key);
+      }
+      while (cache.size > 600) {
+        const oldest = cache.keys().next().value;
+        if (oldest === undefined) break;
+        cache.delete(oldest);
+      }
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [clipRects, assetMedia, view.pixelsPerSecond, clips]);
 
   // Load waveform peaks for visible video and audio clips. Decoding runs fully
   // async (fetch + OfflineAudioContext), so it never blocks rendering; failures
@@ -811,10 +1687,10 @@ export function TimelinePanel({
       if (!documentClipIds.has(key)) cache.delete(key);
     }
 
-    // Visible viewport in content coordinates (scrollX is 0 until scrolling is
-    // wired up, so this also gates future horizontal panning).
-    const viewLeft = view.scrollX;
-    const viewRight = view.scrollX + canvasSize.width;
+    // Visible viewport in canvas coords: clip rects are viewport-space, so
+    // anything left of the header gutter or right of the canvas is offscreen.
+    const viewLeft = view.headerWidth - 400;
+    const viewRight = canvasSize.width + 400;
 
     for (const rect of clipRects) {
       const clip = rect.clip;
@@ -851,17 +1727,21 @@ export function TimelinePanel({
     const canvas = canvasRef.current;
     if (!canvas) return;
     const dpr = window.devicePixelRatio || 1;
+    // 画布始终按内容实际高度伸展（不随面板拖拽压缩轨道）；
+    // 面板高度不足时由 .timeline-body 的 overflow-y 滚动查看。
+    const canvasHeight = contentHeight;
     canvas.width = canvasSize.width * dpr;
-    canvas.height = canvasSize.height * dpr;
+    canvas.height = canvasHeight * dpr;
     canvas.style.width = `${canvasSize.width}px`;
-    canvas.style.height = `${canvasSize.height}px`;
+    canvas.style.height = `${canvasHeight}px`;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     drawTimeline(
       ctx,
       canvasSize.width,
-      canvasSize.height,
+      canvasHeight,
       view,
+      trackRows,
       clipRects,
       captionRects,
       captions,
@@ -872,47 +1752,183 @@ export function TimelinePanel({
       hover,
       totalUs,
       document?.locked_elements ?? [],
+      rulerHoverUs,
+      clipNames,
+      frameRate,
+      pendingKeep,
       thumbnailCache.current,
       waveformCache.current,
+      prefs.waveformRatio,
+      canvasSize.height,
     );
-  }, [canvasSize, view, clipRects, captionRects, captions, ticks, playheadUs, selection, interaction, hover, totalUs, thumbnailVersion, waveformVersion]);
+  }, [canvasSize, view, trackRows, tracks.length, contentHeight, clipRects, captionRects, captions, ticks, playheadUs, selection, interaction, hover, totalUs, thumbnailVersion, waveformVersion, rulerHoverUs, clipNames, frameRate, pendingKeep]);
 
-  // Zoom via wheel
+  // 滚轮策略：Ctrl+滚轮 = 以光标为锚缩放；Shift/触摸板横向 = 横向平移；
+  // 普通滚轮 = 滚动时间线区域（内容纵向溢出时交给原生滚动，否则横向平移）。
   const handleWheel = useCallback(
     (event: React.WheelEvent) => {
-      if (event.deltaY === 0) return;
-      event.preventDefault();
-      setView((v) => ({
-        ...v,
-        pixelsPerSecond: Math.max(
-          ZOOM_MIN_PPS,
-          Math.min(ZOOM_MAX_PPS, v.pixelsPerSecond * (event.deltaY < 0 ? 1.15 : 1 / 1.15)),
-        ),
-      }));
+      if (event.deltaY === 0 && event.deltaX === 0) return;
+      const width = canvasSize.width;
+      // Ctrl/⌘ + 滚轮：以光标为锚缩放。
+      if (event.ctrlKey || event.metaKey) {
+        event.preventDefault();
+        const coords = canvasCoords(event);
+        const anchorX = coords ? coords.x : width / 2;
+        setView((v) => zoomAtAnchor(v, anchorX, width, event.deltaY < 0 ? 1.15 : 1 / 1.15, totalUs));
+        return;
+      }
+      // Shift/Alt + 滚轮，或触摸板横向滑动：横向平移时间线。
+      if (event.shiftKey || event.altKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
+        event.preventDefault();
+        const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+        setView((v) => {
+          const { maxScrollX } = scrollBounds(v, totalUs, width);
+          return { ...v, scrollX: clampScrollX(v.scrollX + delta, maxScrollX) };
+        });
+        return;
+      }
+      // 普通滚轮：只做时间线区域的纵向滚动（横向一律用底部滚动条拖拽）。
     },
-    [],
+    [canvasSize.width, totalUs],
   );
+
+  /** Zoom to an absolute pps keeping the viewport center time anchored. */
+  const setPpsAnchored = useCallback(
+    (ppsTarget: number) => {
+      setView((v) =>
+        zoomAtAnchor(
+          v,
+          canvasSize.width / 2,
+          canvasSize.width,
+          ppsTarget / v.pixelsPerSecond,
+          totalUs,
+        ),
+      );
+    },
+    [canvasSize.width, totalUs],
+  );
+
+  const toggleSnapping = useCallback(() => {
+    setPrefs((prev) => {
+      const next = { ...prev, snappingEnabled: !prev.snappingEnabled };
+      try {
+        window.localStorage.setItem(TIMELINE_PREFS_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // Storage unavailable — prefs stay session-only.
+      }
+      return next;
+    });
+  }, []);
 
   // ── Pointer interactions (Phase 4) ─────────────────────────────────────────
 
-  const canvasCoords = (event: React.MouseEvent<HTMLCanvasElement>) => {
+  const canvasCoords = (event: { clientX: number; clientY: number }) => {
     const canvas = canvasRef.current;
     if (!canvas) return null;
     const rect = canvas.getBoundingClientRect();
     return { x: event.clientX - rect.left, y: event.clientY - rect.top };
   };
 
-  const isClipLocked = (clipId: TimelineClipId) =>
-    Boolean(document?.locked_elements?.includes(clipId));
+  const isClipLocked = (clipId: TimelineClipId) => {
+    if (document?.locked_elements?.includes(clipId)) return true;
+    const clip = clips.find((c) => c.clip_id === clipId);
+    if (!clip) return false;
+    return Boolean(tracks.find((track) => track.id === clip.track_id)?.locked);
+  };
+
+  /**
+   * 剪映式拖放目标解析：按片段中心判定目标轨；光标压住目标轨片段时按
+   * 左/右半边决定"放它前方/后方"的偏好（pointerRatio）。mousemove 实时
+   * 调用画预览，边缘自动滚动与松手提交也调用同一函数——预览即结果。
+   */
+  const resolveDragTargeting = useCallback(
+    (active: MoveInteraction): { targetTrackId: string | null; pointerRatio: number } => {
+      const draggedClip = clips.find((c) => c.clip_id === active.clipId);
+      if (!draggedClip) return { targetTrackId: null, pointerRatio: 0 };
+      const compatibleKind = draggedClip.asset_kind === "audio" ? "audio" : "video";
+      const originRow = trackRowOf(trackRows, draggedClip.track_id);
+      const originCenterY = originRow ? originRow.y + originRow.height / 2 : active.startY;
+      const clipCenterY = originCenterY + (active.currentY - active.startY);
+      const hoveredRow = trackRowAt(trackRows, active.currentX, clipCenterY);
+      const targetTrackId =
+        hoveredRow && hoveredRow.track.kind === compatibleKind ? hoveredRow.track.id : null;
+      let pointerRatio = 0;
+      const effTrackId = targetTrackId ?? draggedClip.track_id;
+      if (effTrackId !== draggedClip.track_id) {
+        const overlapped = clips.find(
+          (c) =>
+            c.track_id === effTrackId &&
+            c.clip_id !== draggedClip.clip_id &&
+            active.targetStartUs < c.timeline_end_us &&
+            c.timeline_start_us < active.targetStartUs + clipDuration(draggedClip),
+        );
+        if (overlapped) {
+          const overlappedRect = clipRects.find((r) => r.clip.clip_id === overlapped.clip_id);
+          if (overlappedRect && overlappedRect.width > 0) {
+            pointerRatio = (active.currentX - overlappedRect.x) / overlappedRect.width;
+          }
+        }
+      }
+      return { targetTrackId, pointerRatio };
+    },
+    [clips, trackRows, clipRects],
+  );
+
+  // ── 轨道管理（剪映式）：新增/删除/换位/属性开关 ────────────────────────────
+  const [addTrackMenuOpen, setAddTrackMenuOpen] = useState(false);
+  const addTrack = (kind: "video" | "text") => {
+    void onPatch(
+      [{ op: "add_track", kind }],
+      kind === "video" ? "添加视频轨道" : "添加文本轨道",
+    );
+  };
+  const moveTrack = (trackId: string, toIndex: number) => {
+    void onPatch([{ op: "move_track", track_id: trackId, to_index: toIndex }], "调整轨道顺序");
+  };
+  const patchTrackFlags = (
+    trackId: string,
+    flags: { locked?: boolean; hidden?: boolean; muted?: boolean; solo?: boolean },
+  ) => {
+    void onPatch([{ op: "set_track_flags", track_id: trackId, ...flags }], "调整轨道属性");
+  };
+  // 点击菜单外部时关闭“添加轨道”菜单。
+  const addTrackMenuOpenRef = useRef(addTrackMenuOpen);
+  addTrackMenuOpenRef.current = addTrackMenuOpen;
+  useEffect(() => {
+    if (!addTrackMenuOpen) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target?.closest(".timeline-add-track-menu, .timeline-add-track-wrap")) {
+        setAddTrackMenuOpen(false);
+      }
+    };
+    window.addEventListener("mousedown", handlePointerDown);
+    return () => window.removeEventListener("mousedown", handlePointerDown);
+  }, [addTrackMenuOpen]);
 
   const handleCanvasMouseDown = useCallback(
     (event: React.MouseEvent<HTMLCanvasElement>) => {
       if (event.button !== 0) return;
+      setContextMenu(null);
       const coords = canvasCoords(event);
       if (!coords) return;
       const { x, y } = coords;
       const canvas = canvasRef.current;
       if (!canvas) return;
+
+      // Bottom scrollbar strip → scrollbar drag (Round 4)
+      const { maxScrollX } = scrollBounds(view, totalUs, canvasSize.width);
+      if (maxScrollX > 0 && y >= canvasSize.height - SCROLLBAR_HEIGHT_PX) {
+        const next: TimelineInteraction = {
+          kind: "scrollbar",
+          startX: x,
+          startScrollX: view.scrollX,
+        };
+        interactionRef.current = next;
+        setInteraction(next);
+        canvas.style.cursor = "col-resize";
+        return;
+      }
 
       // Ruler area → playhead drag
       if (y <= view.rulerHeight) {
@@ -956,19 +1972,93 @@ export function TimelinePanel({
         }
       }
 
-      // Clip body → move drag
+      // Volume line → gain drag (checked after trim handles; Round 5)
+      const volumeId = hitTestVolumeLine(x, y, clipRects, isClipLocked, prefs.waveformRatio);
+      if (volumeId) {
+        const clip = clips.find((c) => c.clip_id === volumeId);
+        if (clip) {
+          setSelection({ kind: "clip", id: volumeId });
+          const next: TimelineInteraction = {
+            kind: "volume",
+            clipId: volumeId,
+            startY: y,
+            startGainDb: clip.audio.gain_db,
+            targetGainDb: clip.audio.gain_db,
+          };
+          interactionRef.current = next;
+          setInteraction(next);
+          canvas.style.cursor = "ns-resize";
+          return;
+        }
+      }
+
+      // Clip body → move drag (single) or group move (multi-selection of A1)
       const clipId = hitTestClips(x, y, clipRects);
       if (clipId) {
         if (isClipLocked(clipId)) return;
         const clip = clips.find((c) => c.clip_id === clipId);
         if (!clip) return;
+        // Round 5: Shift+click toggles the clip in/out of a multi-selection
+        // without starting a drag (standard NLE behaviour).
+        if (event.shiftKey) {
+          const currentIds =
+            selection?.kind === "clip"
+              ? [selection.id]
+              : selection?.kind === "clips"
+                ? selection.ids
+                : [];
+          const nextIds = currentIds.includes(clipId)
+            ? currentIds.filter((id) => id !== clipId)
+            : [...currentIds, clipId];
+          setSelection(
+            nextIds.length === 0
+              ? null
+              : nextIds.length === 1
+                ? { kind: "clip", id: nextIds[0] }
+                : { kind: "clips", ids: nextIds },
+          );
+          return;
+        }
+        const multiIds = selection?.kind === "clips" ? selection.ids : null;
+        const members = multiIds
+          ? multiIds
+              .map((id) => clips.find((c) => c.clip_id === id))
+              .filter((c): c is TimelineClip => Boolean(c))
+          : [];
+        const groupEligible =
+          multiIds &&
+          multiIds.includes(clipId) &&
+          members.length > 1 &&
+          members.every((c) => !isClipLocked(c.clip_id)) &&
+          (members.every((c) => c.track_id === "A1") || members.every((c) => c.track_id === "V1"));
+        if (groupEligible) {
+          const startUsByClip: Record<string, number> = {};
+          for (const member of members) startUsByClip[member.clip_id] = member.timeline_start_us;
+          const next: TimelineInteraction = {
+            kind: "group-move",
+            clipIds: members.map((c) => c.clip_id),
+            startX: x,
+            startUsByClip,
+            targetStartUsByClip: { ...startUsByClip },
+            snapUs: null,
+          };
+          interactionRef.current = next;
+          setInteraction(next);
+          canvas.style.cursor = "grabbing";
+          return;
+        }
         setSelection({ kind: "clip", id: clipId });
         const next: TimelineInteraction = {
           kind: "move",
           clipId,
           startX: x,
+          startY: y,
+          currentX: x,
+          currentY: y,
           startUs: clip.timeline_start_us,
           targetStartUs: clip.timeline_start_us,
+          targetTrackId: null,
+          resolution: null,
           snapUs: null,
         };
         interactionRef.current = next;
@@ -1023,20 +2113,32 @@ export function TimelinePanel({
         return;
       }
 
-      // Empty area → marquee selection
-      if (!event.shiftKey) setSelection(null);
+      // 空白区域（鼠标未在素材上）：默认拖动播放头（剪映式）；
+      // Shift + 拖拽保留框选。
+      if (!event.shiftKey) {
+        setSelection(null);
+        const timeUs = xToTime(x, view);
+        onSeek?.(timeUs);
+        const scrub: TimelineInteraction = { kind: "playhead", startX: x };
+        interactionRef.current = scrub;
+        setInteraction(scrub);
+        canvas.style.cursor = "col-resize";
+        return;
+      }
+      setSelection(null);
+      shiftClickRef.current = true;
       const next: TimelineInteraction = {
         kind: "marquee",
-        startX: x,
+        startX: x + view.scrollX,
         startY: y,
-        currentX: x,
+        currentX: x + view.scrollX,
         currentY: y,
       };
       interactionRef.current = next;
       setInteraction(next);
       canvas.style.cursor = "crosshair";
     },
-    [view.rulerHeight, view, onSeek, clipRects, clips, captionRects, captions, setSelection],
+    [view.rulerHeight, view, onSeek, clipRects, clips, captionRects, captions, setSelection, selection, totalUs, canvasSize.width, canvasSize.height, trackRows],
   );
 
   const handleCanvasMouseMove = useCallback(
@@ -1049,29 +2151,111 @@ export function TimelinePanel({
 
       const active = interactionRef.current;
       if (active) {
+        lastPointerRef.current = { x, y };
         const pps = view.pixelsPerSecond;
         if (active.kind === "playhead") {
           onSeek?.(xToTime(x, view));
           canvas.style.cursor = "col-resize";
           return;
         }
+        if (active.kind === "volume") {
+          const rect = clipRects.find((r) => r.clip.clip_id === active.clipId);
+          const band = rect ? clipAudioBand(rect.clip, rect, prefs.waveformRatio) : null;
+          if (rect && band) {
+            const next: TimelineInteraction = {
+              ...active,
+              targetGainDb: Math.round(yToVolume(y, band) * 10) / 10,
+            };
+            interactionRef.current = next;
+            setInteraction(next);
+            canvas.style.cursor = "ns-resize";
+            return;
+          }
+        }
+        if (active.kind === "scrollbar") {
+          const { maxScrollX } = scrollBounds(view, totalUs, canvasSize.width);
+          const nextScrollX = clampScrollX(active.startScrollX + (x - active.startX), maxScrollX);
+          setView((v) => ({ ...v, scrollX: nextScrollX }));
+          canvas.style.cursor = "col-resize";
+          return;
+        }
         if (active.kind === "marquee") {
-          const next: TimelineInteraction = { ...active, currentX: x, currentY: y };
+          // Marquee coords are content-space so auto-scroll keeps the rect anchored.
+          const next: TimelineInteraction = {
+            ...active,
+            currentX: x + view.scrollX,
+            currentY: y,
+          };
           interactionRef.current = next;
           setInteraction(next);
           canvas.style.cursor = "crosshair";
           return;
         }
         if (active.kind === "move") {
+          // 剪映式拖拽：片段 1:1 跟随鼠标，拖动途中无吸附、无钳制、不跳格；
+          // 同步解析落点（预览 + 松手提交共用 resolveMoveTarget）。
           const deltaUs = ((x - active.startX) / pps) * 1_000_000;
-          const raw = Math.max(0, active.startUs + deltaUs);
-          const candidates = snapCandidates(clipRects, playheadUs, active.clipId);
+          const targetStartUs = Math.max(0, active.startUs + deltaUs);
+          const step: MoveInteraction = { ...active, currentX: x, currentY: y, targetStartUs };
+          const { targetTrackId, pointerRatio } = resolveDragTargeting(step);
+          const resolution = clips.find((c) => c.clip_id === active.clipId)
+            ? resolveMoveTarget(
+                clips,
+                clips.find((c) => c.clip_id === active.clipId)!,
+                targetStartUs,
+                targetTrackId ?? undefined,
+                pointerRatio,
+              )
+            : null;
+          const next: TimelineInteraction = {
+            ...step,
+            targetTrackId,
+            resolution,
+            snapUs: null,
+          };
+          interactionRef.current = next;
+          setInteraction(next);
+          canvas.style.cursor = "grabbing";
+          return;
+        }
+        if (active.kind === "group-move") {
+          const deltaUs = ((x - active.startX) / pps) * 1_000_000;
+          const starts = active.clipIds.map((id) => active.startUsByClip[id] ?? 0);
+          const anchorStart = Math.min(...starts);
+          const rawAnchor = Math.max(0, anchorStart + deltaUs);
           const threshold = (SNAP_PX / pps) * 1_000_000;
-          const snapped = snapValue(raw, candidates, threshold);
+          const excluded = new Set(active.clipIds);
+          const candidates = prefs.snappingEnabled
+            ? [
+                ...snapCandidates(clipRects, playheadUs, excluded),
+                ...gridSnapCandidates(view, totalUs, frameRate),
+              ]
+            : [];
+          const snappedAnchor = snapValue(rawAnchor, candidates, threshold);
+          const rawDelta = snappedAnchor - anchorStart;
+          const members = active.clipIds
+            .map((id) => clips.find((c) => c.clip_id === id))
+            .filter((c): c is TimelineClip => Boolean(c));
+          // 视频组：刚体平移 + 同轨无重叠钳制；音频组：自由平移（原点钳制）。
+          const groupTrackId = members[0]?.track_id ?? null;
+          const finalDelta =
+            members.length > 0 && members[0].asset_kind !== "audio"
+              ? clampGroupDelta(
+                  members,
+                  clips.filter(
+                    (c) => c.track_id === groupTrackId && !excluded.has(c.clip_id),
+                  ),
+                  rawDelta,
+                )
+              : resolveGroupMove(starts, rawDelta).actualDeltaUs;
+          const targetStartUsByClip: Record<string, number> = {};
+          for (const id of active.clipIds) {
+            targetStartUsByClip[id] = Math.max(0, (active.startUsByClip[id] ?? 0) + finalDelta);
+          }
           const next: TimelineInteraction = {
             ...active,
-            targetStartUs: snapped,
-            snapUs: Math.abs(snapped - raw) > 1 ? snapped : null,
+            targetStartUsByClip,
+            snapUs: Math.abs(snappedAnchor - rawAnchor) > 1 ? snappedAnchor : null,
           };
           interactionRef.current = next;
           setInteraction(next);
@@ -1083,19 +2267,26 @@ export function TimelinePanel({
           if (clip) {
             const deltaUs = ((x - active.startX) / pps) * 1_000_000;
             const threshold = (SNAP_PX / pps) * 1_000_000;
-            const candidates = snapCandidates(clipRects, playheadUs, active.clipId);
+            const candidates = prefs.snappingEnabled
+              ? [
+                  ...snapCandidates(clipRects, playheadUs, active.clipId),
+                  ...gridSnapCandidates(view, totalUs, frameRate),
+                ]
+              : [];
             let targetStartUs = active.targetStartUs;
             let targetEndUs = active.targetEndUs;
             let snapUs: number | null = null;
+            // 后端约束：修剪范围必须 ⊆ 当前片段源区间（只许收缩，不允许向外扩），
+            // 因此两端都钳制回 [originalStartUs, originalEndUs]。
             if (active.edge === "left") {
               const rawStart = Math.max(
-                0,
+                active.originalStartUs,
                 Math.min(active.originalEndUs - MIN_CLIP_US, active.originalStartUs + deltaUs),
               );
               const visualEdge = clip.timeline_start_us + (rawStart - active.originalStartUs);
               const snapped = snapValue(visualEdge, candidates, threshold);
               targetStartUs = Math.max(
-                0,
+                active.originalStartUs,
                 Math.min(
                   active.originalEndUs - MIN_CLIP_US,
                   active.originalStartUs + (snapped - clip.timeline_start_us),
@@ -1103,12 +2294,18 @@ export function TimelinePanel({
               );
               snapUs = Math.abs(snapped - visualEdge) > 1 ? snapped : null;
             } else {
-              const rawEnd = Math.max(active.originalStartUs + MIN_CLIP_US, active.originalEndUs + deltaUs);
+              const rawEnd = Math.min(
+                active.originalEndUs,
+                Math.max(active.originalStartUs + MIN_CLIP_US, active.originalEndUs + deltaUs),
+              );
               const visualEdge = clip.timeline_end_us + (rawEnd - active.originalEndUs);
               const snapped = snapValue(visualEdge, candidates, threshold);
-              targetEndUs = Math.max(
-                active.originalStartUs + MIN_CLIP_US,
-                active.originalEndUs + (snapped - clip.timeline_end_us),
+              targetEndUs = Math.min(
+                active.originalEndUs,
+                Math.max(
+                  active.originalStartUs + MIN_CLIP_US,
+                  active.originalEndUs + (snapped - clip.timeline_end_us),
+                ),
               );
               snapUs = Math.abs(snapped - visualEdge) > 1 ? snapped : null;
             }
@@ -1156,21 +2353,61 @@ export function TimelinePanel({
 
       // Hover cursor + trim handle detection
       const handle = hitTestTrimHandle(x, y, clipRects);
+      const volumeHoverId = handle ? null : hitTestVolumeLine(x, y, clipRects, isClipLocked, prefs.waveformRatio);
       const nextHover: TimelineHover = handle
         ? { clipId: handle.clipId, edge: handle.edge }
-        : { clipId: hitTestClips(x, y, clipRects), edge: null };
+        : { clipId: volumeHoverId ?? hitTestClips(x, y, clipRects), edge: null };
       setHover((prev) =>
         prev.clipId === nextHover.clipId && prev.edge === nextHover.edge ? prev : nextHover,
       );
+      setRulerHoverUs((prev) => {
+        const next = y <= view.rulerHeight ? xToTime(x, view) : null;
+        return prev === next ? prev : next;
+      });
       if (handle) {
         canvas.style.cursor = "ew-resize";
+      } else if (volumeHoverId) {
+        canvas.style.cursor = "ns-resize";
       } else {
         const clipId = hitTestClips(x, y, clipRects);
         const locked = clipId ? isClipLocked(clipId) : false;
         canvas.style.cursor = clipId && !locked ? "grab" : "default";
       }
     },
-    [view, onSeek, clipRects, clips, playheadUs],
+    [view, onSeek, clipRects, clips, playheadUs, prefs.snappingEnabled, totalUs, frameRate, canvasSize.width, canvasSize.height, trackRows, resolveDragTargeting],
+  );
+
+  // Double-click the ruler → fit the whole timeline into the viewport (Round 5).
+  const fitToContent = useCallback(() => {
+    setView((v) => ({
+      ...v,
+      pixelsPerSecond: fitZoomPps(totalUs, canvasSize.width, v.headerWidth),
+      scrollX: 0,
+    }));
+  }, [totalUs, canvasSize.width]);
+
+  // 全局预览缩放快捷键（剪映式 Shift+Z）：输入框聚焦时不抢键。
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== "z") return;
+      const target = event.target as HTMLElement | null;
+      if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
+      if (event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        event.preventDefault();
+        fitToContent();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [fitToContent]);
+
+  const handleCanvasDoubleClick = useCallback(
+    (event: React.MouseEvent<HTMLCanvasElement>) => {
+      const coords = canvasCoords(event);
+      if (!coords) return;
+      if (coords.y <= view.rulerHeight) fitToContent();
+    },
+    [view.rulerHeight, fitToContent],
   );
 
   const finishInteraction = useCallback(() => {
@@ -1180,25 +2417,98 @@ export function TimelinePanel({
       if (active.kind === "move") {
         const clip = clips.find((c) => c.clip_id === active.clipId);
         if (clip && !isClipLocked(clip.clip_id)) {
-          if (clip.track_id === "V1") {
-            const v1Clips = clips.filter((c) => c.track_id === "V1");
-            const targetIndex = computeV1TargetIndex(v1Clips, clip.clip_id, active.targetStartUs);
-            if (targetIndex !== clip.order_index) {
-              const toIndex = v1ReorderToMixedIndex(clips, clip.clip_id, targetIndex);
-              void onPatch(
-                [{ op: "move_clip", clip_id: clip.clip_id, to_index: toIndex }],
-                "移动片段",
-              );
-            }
-          } else {
-            const rounded = Math.round(active.targetStartUs);
-            if (Math.abs(rounded - clip.timeline_start_us) >= 1000) {
-              void onPatch(
-                [{ op: "position_clip", clip_id: clip.clip_id, timeline_start_us: rounded }],
-                "移动音频片段",
-              );
-            }
+          // 剪映式落位：直接采用拖动预览的解析结果（预览即结果，自动吸附）。
+          // 预览缺失（如指针未移动过）时按松手位置补算一次。
+          const dragged = clipRects.find((r) => r.clip.clip_id === clip.clip_id);
+          const pointerRatio =
+            dragged && dragged.width > 0
+              ? Math.max(0, Math.min(1, (lastPointerRef.current?.x ?? dragged.x) - dragged.x) / dragged.width)
+              : 0;
+          const step: MoveInteraction = {
+            ...active,
+            currentX: lastPointerRef.current?.x ?? active.currentX,
+            currentY: lastPointerRef.current?.y ?? active.currentY,
+          };
+          const { targetTrackId, pointerRatio: ratio } = resolveDragTargeting(step);
+          const resolution =
+            active.resolution ??
+            resolveMoveTarget(clips, clip, active.targetStartUs, targetTrackId ?? undefined, pointerRatio || ratio);
+          const ops: TimelinePatchOperation[] = [
+            ...(resolution.displaced
+              ? [
+                  {
+                    op: "position_clip" as const,
+                    clip_id: resolution.displaced.clipId,
+                    timeline_start_us: Math.round(resolution.displaced.startUs),
+                    track_id: resolution.displaced.trackId,
+                  },
+                ]
+              : []),
+            {
+              op: "position_clip" as const,
+              clip_id: clip.clip_id,
+              timeline_start_us: Math.round(resolution.startUs),
+              ...(resolution.trackId !== clip.track_id ? { track_id: resolution.trackId } : {}),
+            },
+          ];
+          const moved = resolution.startUs !== clip.timeline_start_us || resolution.trackId !== clip.track_id;
+          if (moved || resolution.displaced) {
+            // 提交态：片段保持渲染在目标位置，直到文档更新（消除松手回弹）。
+            setPendingKeep({
+              clipId: clip.clip_id,
+              trackId: resolution.trackId,
+              startUs: Math.round(resolution.startUs),
+              displaced: resolution.displaced
+                ? {
+                    clipId: resolution.displaced.clipId,
+                    trackId: resolution.displaced.trackId,
+                    startUs: Math.round(resolution.displaced.startUs),
+                  }
+                : undefined,
+            });
+            void onPatch(
+              ops,
+              resolution.mode === "swap"
+                ? "交换片段位置"
+                : resolution.trackId !== clip.track_id
+                  ? "移动片段"
+                  : clip.asset_kind === "audio"
+                    ? "移动音频片段"
+                    : "移动片段",
+            );
           }
+        }
+      } else if (active.kind === "group-move") {
+        const ops: TimelinePatchOperation[] = active.clipIds
+          .map((id) => ({
+            clip: clips.find((c) => c.clip_id === id),
+            targetUs: Math.round(active.targetStartUsByClip[id] ?? 0),
+          }))
+          .filter(
+            (item): item is { clip: TimelineClip; targetUs: number } =>
+              Boolean(item.clip) &&
+              Math.abs(item.targetUs - item.clip!.timeline_start_us) >= 1000,
+          )
+          .map((item) => ({
+            op: "position_clip" as const,
+            clip_id: item.clip.clip_id,
+            timeline_start_us: item.targetUs,
+          }));
+        if (ops.length > 0) void onPatch(ops, "移动音频片段");
+      } else if (active.kind === "volume") {
+        const clip = clips.find((c) => c.clip_id === active.clipId);
+        if (clip && Math.abs(active.targetGainDb - active.startGainDb) >= 0.1) {
+          void onPatch(
+            [
+              {
+                op: "set_audio",
+                clip_id: clip.clip_id,
+                enabled: clip.audio.enabled,
+                gain_db: Math.round(active.targetGainDb * 10) / 10,
+              },
+            ],
+            "调整片段音量",
+          );
         }
       } else if (active.kind === "trim") {
         const clip = clips.find((c) => c.clip_id === active.clipId);
@@ -1236,15 +2546,24 @@ export function TimelinePanel({
       } else if (active.kind === "marquee") {
         const rect = marqueeRect(active.startX, active.startY, active.currentX, active.currentY);
         if (rect.width >= 4 && rect.height >= 4) {
-          const ids = clipsInRect(rect, clipRects);
+          // Marquee rect is content-space; compare against content-space rects.
+          const ids = clipsInRect(rect, contentClipRects);
           setSelection(ids.length > 0 ? { kind: "clips", ids } : null);
+        } else {
+          // Plain click on empty area → move the playhead there (Round 4).
+          const viewportX = active.currentX - view.scrollX;
+          onSeek?.(xToTime(viewportX, view));
+          if (!shiftClickRef.current) setSelection(null);
         }
       }
     }
     interactionRef.current = null;
     setInteraction(null);
+    lastPointerRef.current = null;
     if (canvas) canvas.style.cursor = "default";
-  }, [clips, captions, clipRects, onPatch, setSelection]);
+    // 依赖里含 clips：文档更新（补丁生效）后本回调重建，但 pendingKeep 已在
+    // 下面的 effect 中消费完毕，不会残留。
+  }, [clips, captions, clipRects, contentClipRects, onPatch, setSelection, onSeek, view.scrollX, resolveDragTargeting]);
 
   // Finish the interaction even when the pointer leaves the canvas mid-drag.
   const hasInteraction = interaction !== null;
@@ -1255,9 +2574,161 @@ export function TimelinePanel({
     return () => window.removeEventListener("mouseup", handleWindowMouseUp);
   }, [hasInteraction, finishInteraction]);
 
+  // 拖拽期间把 mousemove 提升到 window：指针扫过左栏/滚出画布边缘时跟随不中断。
+  useEffect(() => {
+    if (!hasInteraction) return;
+    const handleWindowMove = (event: MouseEvent) => {
+      handleCanvasMouseMove(event as unknown as React.MouseEvent<HTMLCanvasElement>);
+    };
+    window.addEventListener("mousemove", handleWindowMove);
+    return () => window.removeEventListener("mousemove", handleWindowMove);
+  }, [hasInteraction, handleCanvasMouseMove]);
+
+  // Round 4: edge auto-scroll while dragging (ported from OpenCut classic's
+  // use-edge-auto-scroll pattern). Each frame, if the pointer sits within the
+  // edge zone, advance scrollX and shift the drag targets by the same delta so
+  // the ghost follows the content point under the cursor.
+  useEffect(() => {
+    if (!interaction) return;
+    if (!["move", "group-move", "trim", "caption-trim", "marquee"].includes(interaction.kind)) return;
+    let raf = 0;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- resolveDragTargeting 由 move 分支单独依赖
+    const resolveTargetingRef = { current: resolveDragTargeting };
+    resolveTargetingRef.current = resolveDragTargeting;
+    const tick = () => {
+      const pointer = lastPointerRef.current;
+      const step = pointer ? dragEdgeAutoScrollStep(pointer.x, canvasSize.width) : 0;
+      if (step !== 0) {
+        const current = viewRef.current;
+        const { maxScrollX } = scrollBounds(current, totalUs, canvasSize.width);
+        const nextScrollX = clampScrollX(current.scrollX + step, maxScrollX);
+        const deltaPx = nextScrollX - current.scrollX;
+        if (deltaPx !== 0) {
+          const nextView = { ...current, scrollX: nextScrollX };
+          viewRef.current = nextView;
+          setView(nextView);
+          const deltaUs = (deltaPx / current.pixelsPerSecond) * 1_000_000;
+          const active = interactionRef.current;
+          if (active) {
+            let adjusted: TimelineInteraction = active;
+            if (active.kind === "move") {
+              adjusted = {
+                ...active,
+                targetStartUs: Math.max(0, active.targetStartUs + deltaUs),
+                startUs: active.startUs + deltaUs,
+              };
+              // 滚动改变了片段在视口中的位置：按平移后的 targetStartUs
+              // 重算落点预览，保证预览与内容点始终对齐。
+              const draggedClip = clips.find((c) => c.clip_id === active.clipId);
+              if (draggedClip) {
+                const { targetTrackId, pointerRatio } = resolveTargetingRef.current(
+                  adjusted as MoveInteraction,
+                );
+                adjusted = {
+                  ...(adjusted as MoveInteraction),
+                  targetTrackId,
+                  resolution: resolveMoveTarget(
+                    clips,
+                    draggedClip,
+                    adjusted.targetStartUs,
+                    targetTrackId ?? undefined,
+                    pointerRatio,
+                  ),
+                };
+              }
+            } else if (active.kind === "group-move") {
+              const startUsByClip: Record<string, number> = {};
+              const targetStartUsByClip: Record<string, number> = {};
+              for (const id of active.clipIds) {
+                startUsByClip[id] = (active.startUsByClip[id] ?? 0) + deltaUs;
+                targetStartUsByClip[id] = Math.max(0, (active.targetStartUsByClip[id] ?? 0) + deltaUs);
+              }
+              adjusted = { ...active, startUsByClip, targetStartUsByClip };
+            } else if (active.kind === "trim") {
+              adjusted = {
+                ...active,
+                originalStartUs: active.originalStartUs + deltaUs,
+                originalEndUs: active.originalEndUs + deltaUs,
+                targetStartUs: active.targetStartUs + deltaUs,
+                targetEndUs: active.targetEndUs + deltaUs,
+              };
+            } else if (active.kind === "caption-trim") {
+              adjusted = {
+                ...active,
+                originalStartUs: active.originalStartUs + deltaUs,
+                originalEndUs: active.originalEndUs + deltaUs,
+                targetStartUs: active.targetStartUs + deltaUs,
+                targetEndUs: active.targetEndUs + deltaUs,
+              };
+            } else if (active.kind === "marquee") {
+              adjusted = { ...active, currentX: active.currentX + deltaPx };
+            }
+            interactionRef.current = adjusted;
+            setInteraction(adjusted);
+          }
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [interaction, canvasSize.width, totalUs]);
+
   const handleCanvasMouseLeave = useCallback(() => {
     if (!interactionRef.current) setHover({ clipId: null, edge: null });
+    setRulerHoverUs(null);
   }, []);
+
+  // ── Context menu (Round 4) ─────────────────────────────────────────────────
+
+  const handleCanvasContextMenu = useCallback(
+    (event: React.MouseEvent<HTMLCanvasElement>) => {
+      event.preventDefault();
+      const coords = canvasCoords(event);
+      if (!coords) return;
+      const { x, y } = coords;
+      const timeUs = xToTime(x, view);
+      const transitionId = hitTestTransitions(x, y, transitionRects);
+      const clipId = hitTestClips(x, y, clipRects);
+      const captionId = hitTestCaptions(x, y, captionRects);
+      if (transitionId) {
+        setSelection({ kind: "transition", id: transitionId });
+        setContextMenu({ x, y, target: { kind: "transition", transitionId }, timeUs });
+      } else if (clipId) {
+        setSelection({ kind: "clip", id: clipId });
+        setContextMenu({ x, y, target: { kind: "clip", clipId }, timeUs });
+      } else if (captionId) {
+        setSelection({ kind: "caption", id: captionId });
+        setContextMenu({ x, y, target: { kind: "caption", captionId }, timeUs });
+      } else {
+        setContextMenu({ x, y, target: { kind: "empty" }, timeUs });
+      }
+    },
+    [view, transitionRects, clipRects, captionRects, setSelection],
+  );
+
+  // Close the context menu on outside mousedown / Escape / scroll.
+  const hasContextMenu = contextMenu !== null;
+  useEffect(() => {
+    if (!hasContextMenu) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(event.target as Node)) {
+        setContextMenu(null);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setContextMenu(null);
+    };
+    const handleWheelClose = () => setContextMenu(null);
+    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("wheel", handleWheelClose, { passive: true });
+    return () => {
+      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("wheel", handleWheelClose);
+    };
+  }, [hasContextMenu]);
 
   // ── Drag & drop (asset → timeline) ────────────────────────────────────────
 
@@ -1273,7 +2744,20 @@ export function TimelinePanel({
     event.preventDefault();
     const assetId = readAssetId(event);
     setDropIndex(null);
-    if (assetId) onDropAsset(assetId, index);
+    if (!assetId) return;
+    // 落点意图：轨道行 id（App 校验类型兼容）；上部空白区 = "new"（自动建
+    // 视频轨）；其余空白 = undefined（追加主轨）。
+    const coords = canvasCoords(event);
+    const row = coords ? trackRowAt(trackRows, coords.x, coords.y) : null;
+    let intent: string | "new" | undefined;
+    if (row) {
+      intent = row.track.id;
+    } else if (coords) {
+      const captionRow = trackRowOf(trackRows, "C1");
+      const upperBound = captionRow?.y ?? view.rulerHeight;
+      intent = coords.y < upperBound ? "new" : undefined;
+    }
+    onDropAsset(assetId, index, intent);
   };
 
   // ── Caption hit testing ────────────────────────────────────────────────────
@@ -1319,15 +2803,56 @@ export function TimelinePanel({
       isClipLocked(selectedCaption.source_clip_id),
   );
 
-  const coverClip = clips.find((c) => c.asset_kind === "video" || c.asset_kind === "image");
-  const coverUrl = coverClip
-    ? assetMedia.find((m) => m.asset_id === coverClip.asset_id)?.media_url ?? null
-    : null;
+  // ── 自由定位：向前/向后移动 = 逐帧微调（同轨无重叠钳制） ──────────────────
+  const frameUs = Math.max(1, Math.round(1_000_000 / (frameRate || 30)));
+  const nudgeTarget = (clip: TimelineClip, deltaUs: number): number | null => {
+    const raw = Math.max(0, clip.timeline_start_us + deltaUs);
+    const target =
+      clip.asset_kind !== "audio"
+        ? clampMoveStart(
+            clips.filter((c) => c.track_id === clip.track_id && c.clip_id !== clip.clip_id),
+            clipDuration(clip),
+            raw,
+          )
+        : raw;
+    const rounded = Math.round(target);
+    return Math.abs(rounded - clip.timeline_start_us) >= 1000 ? rounded : null;
+  };
+  const canNudge = (deltaUs: number) =>
+    Boolean(selectedClip) && !clipLocked && nudgeTarget(selectedClip!, deltaUs) !== null;
+  const nudge = (deltaUs: number) => {
+    if (!selectedClip) return;
+    const target = nudgeTarget(selectedClip, deltaUs);
+    if (target === null) return;
+    void onPatch(
+      [{ op: "position_clip", clip_id: selectedClip.clip_id, timeline_start_us: target }],
+      selectedClip.track_id === "V1" ? "移动片段" : "移动音频片段",
+    );
+  };
 
   return (
     <section className="timeline-pane" aria-label="时间线">
       {/* Toolbar (DOM) */}
       <div className="timeline-toolbar">
+        <div className="timeline-add-track-wrap">
+          <IconButton
+            label="添加轨道"
+            expanded={addTrackMenuOpen}
+            onClick={() => setAddTrackMenuOpen((value) => !value)}
+          >
+            <Plus />
+          </IconButton>
+          {addTrackMenuOpen && (
+            <div className="timeline-add-track-menu" role="menu" aria-label="新增轨道">
+              <button role="menuitem" onClick={() => { addTrack("video"); setAddTrackMenuOpen(false); }}>
+                视频轨道
+              </button>
+              <button role="menuitem" onClick={() => { addTrack("text"); setAddTrackMenuOpen(false); }}>
+                文本轨道
+              </button>
+            </div>
+          )}
+        </div>
         <IconButton label="撤销" disabled={!canUndo} onClick={onUndo}>
           <Undo2 />
         </IconButton>
@@ -1355,29 +2880,17 @@ export function TimelinePanel({
         </IconButton>
         <IconButton
           label="向前移动"
-          disabled={!selectedClip || clipLocked || selectedClip.order_index === 0}
-          onClick={() =>
-            selectedClip &&
-            void onPatch(
-              [{ op: "move_clip", clip_id: selectedClip.clip_id, to_index: selectedClip.order_index - 1 }],
-              "移动片段",
-            )
-          }
+          title="向前移动一帧（自由定位，拖动片段可留空隙）"
+          disabled={!canNudge(-frameUs)}
+          onClick={() => nudge(-frameUs)}
         >
           <ChevronLeft />
         </IconButton>
         <IconButton
           label="向后移动"
-          disabled={
-            !selectedClip || clipLocked || selectedClip.order_index === clips.length - 1
-          }
-          onClick={() =>
-            selectedClip &&
-            void onPatch(
-              [{ op: "move_clip", clip_id: selectedClip.clip_id, to_index: selectedClip.order_index + 1 }],
-              "移动片段",
-            )
-          }
+          title="向后移动一帧（自由定位，拖动片段可留空隙）"
+          disabled={!canNudge(frameUs)}
+          onClick={() => nudge(frameUs)}
         >
           <ChevronRight />
         </IconButton>
@@ -1428,14 +2941,31 @@ export function TimelinePanel({
           <Trash2 />
         </IconButton>
         <span className="toolbar-sep" aria-hidden="true" />
+        <button
+          className="icon-btn"
+          title="磁吸吸附：拖动时对齐片段边缘、播放头与网格"
+          aria-label="磁吸吸附"
+          aria-pressed={prefs.snappingEnabled}
+          onClick={toggleSnapping}
+        >
+          <Magnet />
+        </button>
         <div className="timeline-zoom">
+          {/* 全局预览缩放（剪映 Shift+Z）：无论当前放大/缩小到什么程度，
+              一键把所有轨道素材缩放到最合适的大小。 */}
+          <button
+            className="icon-btn"
+            title="全局预览缩放（Shift+Z）：缩放到最合适的大小"
+            aria-label="全局预览缩放"
+            aria-keyshortcuts="Shift+Z"
+            onClick={fitToContent}
+          >
+            <ScanSearch />
+          </button>
           <button
             aria-label="缩小时间线"
             onClick={() =>
-              setView((v) => ({
-                ...v,
-                pixelsPerSecond: Math.max(ZOOM_MIN_PPS, v.pixelsPerSecond / 1.2),
-              }))
+              setPpsAnchored(Math.max(ZOOM_MIN_PPS, view.pixelsPerSecond / 1.2))
             }
           >
             <Minus />
@@ -1449,46 +2979,182 @@ export function TimelinePanel({
             step={1}
             value={Math.round(ppsToZoomPct(view.pixelsPerSecond))}
             onChange={(event) =>
-              setView((v) => ({ ...v, pixelsPerSecond: zoomPctToPps(Number(event.target.value)) }))
+              setPpsAnchored(zoomPctToPps(Number(event.target.value)))
             }
           />
           <button
             aria-label="放大时间线"
             onClick={() =>
-              setView((v) => ({
-                ...v,
-                pixelsPerSecond: Math.min(ZOOM_MAX_PPS, v.pixelsPerSecond * 1.2),
-              }))
+              setPpsAnchored(Math.min(ZOOM_MAX_PPS, view.pixelsPerSecond * 1.2))
             }
           >
             <Plus />
           </button>
         </div>
+        {/* 显示设置（剪映"…"菜单）：轨道高度 + 波形占比 */}
+        <div className="timeline-display-wrap" ref={displayMenuRef}>
+          <IconButton
+            label="时间线显示设置"
+            expanded={displayMenuOpen}
+            onClick={() => setDisplayMenuOpen((value) => !value)}
+          >
+            <MoreHorizontal />
+          </IconButton>
+          {displayMenuOpen && (
+            <div className="timeline-display-menu" role="menu" aria-label="时间线显示设置">
+              <label className="display-row">
+                <span>轨道高度</span>
+                <input
+                  className="track-height-slider display-slider"
+                  type="range"
+                  aria-label="轨道高度"
+                  min={40}
+                  max={128}
+                  step={4}
+                  value={prefs.trackHeight}
+                  onChange={(event) =>
+                    setPrefs((value) => ({ ...value, trackHeight: Number(event.target.value) }))
+                  }
+                />
+              </label>
+              <div className="display-row">
+                <span>波形占比</span>
+                <div className="ratio-group" role="group" aria-label="波形占比">
+                  {([1, 0.6, 0.4] as const).map((ratio) => {
+                    // 图标（剪映式）：小示波卡。选中 = 亮青实底卡 + 深色柱；
+                    // 未选中 = 深色底 + 白描边小白卡 + 白色柱。柱高按档位比例。
+                    const label = ratio === 1 ? "100%" : ratio === 0.6 ? "60%" : "40%";
+                    const barHs = [5, 8, 6.5].map((h) => Math.max(1.5, h * ratio));
+                    return (
+                      <button
+                        key={ratio}
+                        className={`ratio-icon${prefs.waveformRatio === ratio ? " active" : ""}`}
+                        title={`波形占比 ${label}`}
+                        aria-label={`波形占比 ${label}`}
+                        aria-pressed={prefs.waveformRatio === ratio}
+                        onClick={() => setPrefs((value) => ({ ...value, waveformRatio: ratio }))}
+                      >
+                        <span className="ratio-icon-card" aria-hidden="true">
+                          <i style={{ height: `${barHs[0]}px` }} />
+                          <i style={{ height: `${barHs[1]}px` }} />
+                          <i style={{ height: `${barHs[2]}px` }} />
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Body: left headers (DOM) + canvas area */}
       <div className="timeline-body">
-        {/* Left gutter (DOM) */}
-        <div className="timeline-left" style={{ width: view.headerWidth }}>
+        {/* Left gutter (DOM)：每条轨道一个属性头
+            [类型标识] [锁定] [隐藏(视频/文本)] [静音(视频/音频)] [独奏(视频/音频)] */}
+        <div className="timeline-left" style={{ width: view.headerWidth, height: contentHeight, position: "relative" }}>
           <div className="timeline-left-corner" style={{ height: view.rulerHeight }} />
-          <div className="timeline-left-track" style={{ height: view.trackHeight }}>
-            <div className="timeline-left-cover">
-              {coverUrl ? <img src={coverUrl} alt="" /> : <Video />}
-            </div>
-            <div className="timeline-left-meta">
-              <strong><span className="timeline-track-id">V1</span> 视频</strong>
-              <span>{clips.filter(c => c.track_id === "V1").length} 个片段</span>
-            </div>
-          </div>
-          <div className="timeline-left-track" style={{ height: view.trackHeight, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <span style={{ fontSize: "12px", color: "#aaa", whiteSpace: "nowrap" }}><span className="timeline-track-id">A1</span> 音频</span>
-          </div>
-          <div
-            className="timeline-left-track timeline-left-caption"
-            style={{ height: view.trackHeight, display: "flex", alignItems: "center", justifyContent: "center" }}
-          >
-            <span style={{ fontSize: "12px", color: "#aaa", whiteSpace: "nowrap" }}><span className="timeline-track-id">C1</span> 字幕</span>
-          </div>
+          {trackRows.map((row) => {
+            // 兼容旧文档/旧 core 的轨道 kind（visual→video、caption→text）。
+            const rawKind: string = row.track.kind;
+            const kind = rawKind === "visual" ? "video" : rawKind === "caption" ? "text" : rawKind;
+            // 动态轨道：可上移/下移/删除。仅主视频轨 V1 与音频轨 A1 位置、
+            // 数量固定；文本轨 C1 与其他轨一样动态（剪映式）。
+            const isDynamic = row.track.id !== "V1" && row.track.id !== "A1";
+            const dynamicTracks = trackRows.filter((item) => item.track.id !== "V1" && item.track.id !== "A1");
+            const dynamicIndex = dynamicTracks.findIndex((item) => item.track.id === row.track.id);
+            const dynamicCount = dynamicTracks.length;
+            // 剪映式：轨道上没有素材时不显示属性开关（仅保留类型标识）。
+            const hasClips = clips.some((clip) => clip.track_id === row.track.id);
+            return (
+              <div
+                key={row.track.id}
+                className="timeline-track-head"
+                data-track-kind={kind}
+                data-track-id={row.track.id}
+                style={{ top: row.y, height: row.height }}
+              >
+                <span className="timeline-track-badge" title={`${row.track.id} ${kind === "video" ? "视频" : kind === "text" ? "文本" : "音频"}轨道`}>
+                  {kind === "video" ? <Video size={11} /> : kind === "text" ? <TypeIcon size={11} /> : <Music size={11} />}
+                  <small>{row.track.id}</small>
+                </span>
+                {hasClips && (
+                  <>
+                    <button
+                      className="track-flag"
+                      aria-label={`锁定轨道 ${row.track.id}`}
+                      aria-pressed={row.track.locked}
+                      title="锁定轨道"
+                      onClick={() => patchTrackFlags(row.track.id, { locked: !row.track.locked })}
+                    >
+                      {row.track.locked ? <Lock size={11} /> : <LockOpen size={11} />}
+                    </button>
+                    {kind !== "audio" && (
+                      <button
+                        className="track-flag"
+                        aria-label={`隐藏轨道 ${row.track.id}`}
+                        aria-pressed={row.track.hidden}
+                        title="隐藏轨道（预览不渲染该轨内容）"
+                        onClick={() => patchTrackFlags(row.track.id, { hidden: !row.track.hidden })}
+                      >
+                        {row.track.hidden ? <EyeOff size={11} /> : <Eye size={11} />}
+                      </button>
+                    )}
+                    {kind !== "text" && (
+                      <button
+                        className="track-flag"
+                        aria-label={`静音轨道 ${row.track.id}`}
+                        aria-pressed={row.track.muted}
+                        title="关闭原声"
+                        onClick={() => patchTrackFlags(row.track.id, { muted: !row.track.muted })}
+                      >
+                        {row.track.muted ? <VolumeX size={11} /> : <Volume2 size={11} />}
+                      </button>
+                    )}
+                    {kind !== "text" && (
+                      <button
+                        className={`track-flag track-solo${row.track.solo ? " active" : ""}`}
+                        aria-label={`独奏轨道 ${row.track.id}`}
+                        aria-pressed={row.track.solo}
+                        title="独奏（仅播放该轨声音）"
+                        onClick={() => patchTrackFlags(row.track.id, { solo: !row.track.solo })}
+                      >
+                        S
+                      </button>
+                    )}
+                  </>
+                )}
+                {isDynamic && (
+                  <span className="track-row-actions">
+                    <button
+                      aria-label={`上移轨道 ${row.track.id}`}
+                      title="上移轨道"
+                      disabled={dynamicIndex === 0}
+                      onClick={() => moveTrack(row.track.id, dynamicIndex - 1)}
+                    >
+                      <ChevronUp size={12} />
+                    </button>
+                    <button
+                      aria-label={`下移轨道 ${row.track.id}`}
+                      title="下移轨道"
+                      disabled={dynamicIndex >= dynamicCount - 1}
+                      onClick={() => moveTrack(row.track.id, dynamicIndex + 1)}
+                    >
+                      <ChevronDown size={12} />
+                    </button>
+                    <button
+                      aria-label={`删除轨道 ${row.track.id}`}
+                      title="删除轨道（其上片段一并删除，可撤销）"
+                      onClick={() => void onPatch([{ op: "remove_track", track_id: row.track.id }], "删除轨道")}
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </span>
+                )}
+              </div>
+            );
+          })}
         </div>
 
         {/* Canvas area */}
@@ -1501,10 +3167,15 @@ export function TimelinePanel({
           <canvas
             ref={canvasRef}
             aria-label="时间线画布"
+            // 可聚焦：点击时间线后键盘焦点落在画布上，Del/方向键等
+            // 时间线快捷键（以事件目标判定作用域）才能生效。
+            tabIndex={0}
             onMouseDown={handleCanvasMouseDown}
             onMouseMove={handleCanvasMouseMove}
             onMouseUp={finishInteraction}
             onMouseLeave={handleCanvasMouseLeave}
+            onDoubleClick={handleCanvasDoubleClick}
+            onContextMenu={handleCanvasContextMenu}
             onDragOver={(event) => { event.preventDefault(); allowDrop(event, clips.length); }}
             onDrop={(event) => handleDrop(event, dropIndex ?? clips.length)}
             // relatedTarget 仍在画布内说明只是子区域切换，不清除落区高亮，避免 overlay 抖动。
@@ -1514,7 +3185,7 @@ export function TimelinePanel({
               }
             }}
             onDragEnd={() => setDropIndex(null)}
-            style={{ display: "block", cursor: "default" }}
+            style={{ display: "block", cursor: "default", outline: "none" }}
           />
           {/* Accessible clip list (DOM): mirrors selection so keyboard /
               screen-reader users and tests can select clips. */}
@@ -1590,14 +3261,20 @@ export function TimelinePanel({
               </button>
             );
           })}
-          {/* B3: keyframe dots on selected V1 clips (drag to retiming) */}
+          {/* B3/Round5: keyframe dots on selected clips, laid out in the expanded lanes */}
           {clips.map((clip) => {
             if (!clip.keyframes || selection?.kind !== "clip" || selection.id !== clip.clip_id) return null;
             const rect = clipRects.find((item) => item.clip.clip_id === clip.clip_id);
             if (!rect) return null;
             const colors: Record<string, string> = { position: "#6fd3d3", scale: "#f0d264", rotate: "#f0a264", opacity: "#ffffff" };
-            return Object.entries(clip.keyframes).flatMap(([property, track]) =>
-              track.frames.map((frame: { t_us: number; x?: number; y?: number; v?: number }) => {
+            const props = KEYFRAME_ORDER.filter((property) => clip.keyframes?.[property]);
+            return props.flatMap((property) => {
+              const track = clip.keyframes?.[property as keyof NonNullable<TimelineClip["keyframes"]>];
+              if (!track) return [];
+              const laneIndex = props.indexOf(property);
+              const laneCenterY =
+                rect.y + rect.height + 2 + 4 + laneIndex * KEYFRAME_LANE_HEIGHT + KEYFRAME_LANE_HEIGHT / 2;
+              return track.frames.map((frame: { t_us: number; x?: number; y?: number; v?: number }) => {
                 const x = timeToX(clip.timeline_start_us + frame.t_us, view);
                 if (x < rect.x || x > rect.x + rect.width) return null;
                 const commit = (newTUs: number) => {
@@ -1614,7 +3291,7 @@ export function TimelinePanel({
                     key={`${clip.clip_id}-${property}-${frame.t_us}`}
                     className="timeline-keyframe-dot"
                     data-property={property}
-                    style={{ position: "absolute", left: x - 4, top: view.rulerHeight + view.trackHeight - 12, width: 8, height: 8, background: colors[property] ?? "#fff", pointerEvents: "auto" }}
+                    style={{ position: "absolute", left: x - 4, top: laneCenterY - 4, width: 8, height: 8, background: colors[property] ?? "#fff", pointerEvents: "auto" }}
                     aria-label={`${property} 关键帧 ${formatTime(frame.t_us)}`}
                     title={`${property} @ ${formatTime(frame.t_us)}（拖动改时间）`}
                     draggable
@@ -1629,8 +3306,8 @@ export function TimelinePanel({
                     onClick={(event) => event.stopPropagation()}
                   />
                 );
-              }),
-            );
+              });
+            });
           })}
           {/* Drop zone overlay when dragging assets */}
           {dropIndex !== null && (
@@ -1670,6 +3347,126 @@ export function TimelinePanel({
               将视频或图片拖到这里开始剪辑
             </div>
           )}
+          {/* Round 4: canvas context menu (flips up near the bottom edge) */}
+          {contextMenu && (() => {
+            const menuHeight = contextMenu.target.kind === "clip" ? 175 : contextMenu.target.kind === "empty" ? 115 : 80;
+            const menuTop =
+              contextMenu.y + menuHeight > canvasSize.height
+                ? Math.max(2, contextMenu.y - menuHeight)
+                : contextMenu.y;
+            return (
+            <div
+              ref={contextMenuRef}
+              role="menu"
+              aria-label="时间线右键菜单"
+              className="timeline-context-menu"
+              style={{
+                left: Math.max(2, Math.min(contextMenu.x, canvasSize.width - 170)),
+                top: Math.max(2, Math.min(menuTop, Math.max(2, canvasSize.height - menuHeight))),
+              }}
+            >
+              {(() => {
+                const close = (action: () => void) => () => {
+                  action();
+                  setContextMenu(null);
+                };
+                const target = contextMenu.target;
+                if (target.kind === "clip") {
+                  const clip = clips.find((c) => c.clip_id === target.clipId);
+                  if (!clip) return null;
+                  const locked = isClipLocked(clip.clip_id);
+                  const speedFactor = (clip.speed_milli ?? 1000) / 1000;
+                  const playheadSourceUs =
+                    (clip.source_start_us ?? 0) +
+                    (playheadUs - clip.timeline_start_us) * speedFactor;
+                  const canSplitAtPlayhead =
+                    clip.asset_kind === "video" &&
+                    !locked &&
+                    playheadUs > clip.timeline_start_us + 1000 &&
+                    playheadUs < clip.timeline_end_us - 1000 &&
+                    playheadSourceUs > (clip.source_start_us ?? 0) + 1000 &&
+                    playheadSourceUs < (clip.source_end_us ?? 0) - 1000;
+                  return [
+                    <button key="split" role="menuitem" disabled={!canSplitAtPlayhead}
+                      onClick={close(() => void onPatch(
+                        [{
+                          op: "split_clip",
+                          clip_id: clip.clip_id,
+                          source_time_us: Math.round(playheadSourceUs),
+                        }],
+                        "拆分片段",
+                      ))}
+                    >
+                      在播放头处拆分
+                    </button>,
+                    <button key="copy" role="menuitem" disabled={locked}
+                      onClick={close(() => onCommand?.("timeline.copy"))}
+                    >
+                      复制
+                    </button>,
+                    <button key="lock" role="menuitem"
+                      onClick={close(() => void onPatch(
+                        [{ op: "set_clip_locked", clip_id: clip.clip_id, locked: !locked }],
+                        locked ? "解锁片段" : "锁定片段",
+                      ))}
+                    >
+                      {locked ? "解锁片段" : "锁定片段"}
+                    </button>,
+                    <button key="del" role="menuitem" disabled={locked}
+                      onClick={close(() => void onPatch(
+                        [{ op: "remove_clip", clip_id: clip.clip_id }],
+                        "删除片段",
+                      ))}
+                    >
+                      删除片段
+                    </button>,
+                    <div key="sep" role="separator" className="menu-sep" />,
+                    <button key="seek" role="menuitem" onClick={close(() => onSeek?.(contextMenu.timeUs))}>
+                      定位播放头
+                    </button>,
+                  ];
+                }
+                if (target.kind === "caption") {
+                  return [
+                    <button key="del" role="menuitem" onClick={close(() => void onPatch(
+                      [{ op: "remove_caption", caption_id: target.captionId as never }],
+                      "删除字幕",
+                    ))}
+                    >
+                      删除字幕
+                    </button>,
+                    <div key="sep" role="separator" className="menu-sep" />,
+                    <button key="seek" role="menuitem" onClick={close(() => onSeek?.(contextMenu.timeUs))}>
+                      定位播放头
+                    </button>,
+                  ];
+                }
+                if (target.kind === "transition") {
+                  return [
+                    <button key="del" role="menuitem" onClick={close(() => void onPatch(
+                      [{ op: "remove_transition", transition_id: target.transitionId as never }],
+                      "删除转场",
+                    ))}
+                    >
+                      删除转场
+                    </button>,
+                  ];
+                }
+                return [
+                  <button key="paste" role="menuitem" onClick={close(() => onCommand?.("timeline.paste"))}>
+                    粘贴到播放头
+                  </button>,
+                  <button key="seek" role="menuitem" onClick={close(() => onSeek?.(contextMenu.timeUs))}>
+                    定位播放头
+                  </button>,
+                  <button key="clear" role="menuitem" onClick={close(() => setSelection(null))}>
+                    取消选择
+                  </button>,
+                ];
+              })()}
+            </div>
+            );
+          })()}
         </div>
         {/* B2: 添加转场浮层——点击两片段边界后出现 */}
         {addTransitionAnchor && (

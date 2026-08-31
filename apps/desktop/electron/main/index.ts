@@ -225,7 +225,7 @@ async function createWindow(): Promise<void> {
     titleBarOverlay: undefined,
     show: true,
     webPreferences: {
-      preload: join(__dirname, "../preload/index.mjs"),
+      preload: join(__dirname, "../preload/index.cjs"),
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: false
@@ -239,6 +239,7 @@ async function createWindow(): Promise<void> {
   windowRef.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   windowRef.webContents.on("will-navigate", event => event.preventDefault());
   windowRef.webContents.on("preload-error", (_event, preloadPath, error) => {
+    console.error("[preload-error RAW]", preloadPath, error);
     void appendLog(logPath, `preload error path=${preloadPath} error=${error.stack ?? error.message}`);
   });
   windowRef.webContents.on("render-process-gone", (_event, details) => {

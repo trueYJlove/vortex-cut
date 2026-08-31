@@ -40,12 +40,20 @@ PATCH_OPERATIONS = {
     "clear_clip_keyframes",
     "set_caption_style",
     "clear_caption_style",
+    "add_track",
+    "remove_track",
+    "move_track",
+    "set_track_flags",
 }
 AI_PATCH_OPERATIONS = PATCH_OPERATIONS - {
     "insert_asset_clip",
     "insert_transcript_segments",
     "add_caption",
     "set_clip_locked",
+    "add_track",
+    "remove_track",
+    "move_track",
+    "set_track_flags",
 }
 MIN_VIDEO_US = 100_000
 MIN_IMAGE_US = 500_000
@@ -63,6 +71,25 @@ TRANSITION_KINDS = {
     "slideleft", "slideup", "zoomin",
 }
 MAX_TRANSITIONS = 50
+# 多轨道结构（剪映式）：tracks 数组顺序 = 自上而下
+# [动态视频/文本轨道...] → C1(字幕轨) → V1(主视频轨) → A1(音频轨)。
+# C1/V1/A1 恒存在且相对位置固定；动态轨道（V2+ 视频轨 / T1+ 文本轨）只能在
+# C1 之上的区域自由添加、删除与交换位置。
+MAIN_TRACK_ID = "V1"
+CAPTION_TRACK_ID = "C1"
+AUDIO_TRACK_ID = "A1"
+TRACK_KINDS = ("video", "text", "audio")
+
+
+def _empty_track(track_id: str, kind: str) -> dict[str, Any]:
+    return {
+        "id": track_id,
+        "kind": kind,
+        "locked": False,
+        "hidden": False,
+        "muted": False,
+        "solo": False,
+    }
 # B3 关键帧：属性白名单与取值范围。
 KEYFRAME_PROPERTIES = ("position", "scale", "rotate", "opacity")
 KEYFRAME_MAX_FRAMES = 32
@@ -305,13 +332,11 @@ class TimelineService:
         captions = document.get("captions")
         if not isinstance(clips, list) or not isinstance(captions, list):
             raise DomainError("TIMELINE_INVALID", "Timeline Document 不合法")
-        index = _insert_index(at_index, len(clips))
         old_starts = {clip["clip_id"]: clip["timeline_start_us"] for clip in clips}
         old_caption_starts = {caption["caption_id"]: caption["start_us"] for caption in captions}
         clip = self._asset_clip(db, project_id, asset_id, layout, None, None, duration_us)
         clip["clip_id"] = _identifier(proposed_clip_id, "Clip ID 不合法")
-        clips.insert(index, clip)
-        self._normalize_timing(document, old_starts)
+        self._place_clip_on_track(clips, captions, clip, at_index, MAIN_TRACK_ID)
         self._normalize_and_validate(db, document)
         shifted_clip_count = sum(
             1
@@ -325,8 +350,8 @@ class TimelineService:
             if item["caption_id"] in old_caption_starts
             and item["start_us"] != old_caption_starts[item["caption_id"]]
         )
-        before = base_document["clips"][-1]["timeline_end_us"] if base_document["clips"] else 0
-        after = document["clips"][-1]["timeline_end_us"] if document["clips"] else 0
+        before = max((c["timeline_end_us"] for c in base_document["clips"]), default=0)
+        after = max((c["timeline_end_us"] for c in document["clips"]), default=0)
         return document, {
             "clip_count_before": len(base_document["clips"]),
             "shifted_clip_count": shifted_clip_count,
@@ -541,7 +566,7 @@ class TimelineService:
         clips = document["clips"]
         captions = document["captions"]
         document.setdefault("locked_elements", [])
-        if op != "set_clip_locked":
+        if op != "set_clip_locked" and op != "set_track_flags":
             self._require_unlocked(document, operation)
         old_starts = {clip["clip_id"]: clip["timeline_start_us"] for clip in clips}
         if op == "insert_asset_clip":
@@ -557,6 +582,7 @@ class TimelineService:
                     "layout",
                     "speed_milli",
                     "reverse_playback",
+                    "track_id",
                 },
                 optional={
                     "source_start_us",
@@ -565,6 +591,7 @@ class TimelineService:
                     "layout",
                     "speed_milli",
                     "reverse_playback",
+                    "track_id",
                 },
             )
             speed_milli = operation.get("speed_milli")
@@ -601,20 +628,15 @@ class TimelineService:
                 clip["timeline_end_us"] = clip["timeline_start_us"] + _clip_timeline_duration_us(
                     clip["source_start_us"], clip["source_end_us"], clip["speed_milli"]
                 )
-            if clip["track_id"] == "A1":
-                # Auto-upgrade tracks from 2-track to 3-track if needed
-                tracks = document.get("tracks", [])
-                if not any(t.get("id") == "A1" for t in tracks):
-                    # Insert A1 track between V1 and C1
-                    a1_track = {"id": "A1", "kind": "audio", "locked": False}
-                    insert_idx = next(
-                        (i for i, t in enumerate(tracks) if t.get("id") == "C1"),
-                        len(tracks),
-                    )
-                    tracks.insert(insert_idx, a1_track)
-                    document["tracks"] = tracks
-                # Audio clips go to A1 track, appended at the end
-                a1_clips = [c for c in clips if c["track_id"] == "A1"]
+            op_track_id = operation.get("track_id")
+            if op_track_id is not None:
+                if not isinstance(op_track_id, str) or not op_track_id:
+                    raise DomainError("TIMELINE_INVALID", "目标轨道不合法")
+            if clip["track_id"] == AUDIO_TRACK_ID:
+                # 音频片段固定落到 A1 轨道末尾（不支持音频覆盖轨）。
+                if op_track_id is not None and op_track_id != AUDIO_TRACK_ID:
+                    raise DomainError("TIMELINE_INVALID", "音频片段只能放到音频轨道")
+                a1_clips = [c for c in clips if c["track_id"] == AUDIO_TRACK_ID]
                 last_end = max((c["timeline_end_us"] for c in a1_clips), default=0)
                 clip["timeline_start_us"] = last_end
                 clip["timeline_end_us"] = (
@@ -623,35 +645,23 @@ class TimelineService:
                 clip["order_index"] = len(a1_clips)
                 clips.append(clip)
             else:
-                # Video/image clips go to V1 track, inserted at index
-                v1_count_now = len([c for c in clips if c["track_id"] == "V1"])
-                at_index = _insert_index(operation.get("at_index"), v1_count_now)
-                # Find actual insertion position in mixed clips list
-                v1_count = 0
-                insert_pos = len(clips)
-                for i, c in enumerate(clips):
-                    if c["track_id"] == "V1":
-                        if v1_count == at_index:
-                            insert_pos = i
-                            break
-                        v1_count += 1
-                else:
-                    insert_pos = len(clips)
-                clips.insert(insert_pos, clip)
-                # Reorder V1 clips (images carry no source range; keep their
-                # configured duration when re-packing)
-                v1_clips = [c for c in clips if c["track_id"] == "V1"]
-                for idx, c in enumerate(v1_clips):
-                    c["order_index"] = idx
-                    if c["asset_kind"] == "video":
-                        duration = c["source_end_us"] - c["source_start_us"]
-                    else:
-                        duration = c["timeline_end_us"] - c["timeline_start_us"]
-                    if idx == 0:
-                        c["timeline_start_us"] = 0
-                    else:
-                        c["timeline_start_us"] = v1_clips[idx - 1]["timeline_end_us"]
-                    c["timeline_end_us"] = c["timeline_start_us"] + duration
+                # 视频/图片片段：默认落主视频轨（V1），可用 track_id 指定任意
+                # 视频轨道；落到时间槽 `at_index`，冲突片段在该轨内涟漪右推。
+                target_track_id = op_track_id or clip["track_id"]
+                target_track = next(
+                    (
+                        track
+                        for track in document.get("tracks", [])
+                        if track.get("id") == target_track_id
+                    ),
+                    None,
+                )
+                if target_track is None or target_track.get("kind") != "video":
+                    raise DomainError("TIMELINE_INVALID", "目标轨道不是视频轨道")
+                clip["track_id"] = target_track_id
+                self._place_clip_on_track(
+                    clips, captions, clip, operation.get("at_index"), target_track_id
+                )
         elif op == "insert_transcript_segments":
             _exact_keys(
                 operation,
@@ -681,13 +691,32 @@ class TimelineService:
             insertion_time = (
                 clips[at_index]["timeline_start_us"]
                 if at_index < len(clips)
-                else (clips[-1]["timeline_end_us"] if clips else 0)
+                else max(
+                    (
+                        c["timeline_end_us"]
+                        for c in clips
+                        if c.get("track_id") == "V1"
+                    ),
+                    default=0,
+                )
             )
             for caption in new_captions:
                 caption["start_us"] += insertion_time
                 caption["end_us"] += insertion_time
             clips[at_index:at_index] = new_clips
             captions.extend(new_captions)
+            # 自由定位模型：显式把新片段落到 insertion_time 起的连续区间，
+            # 再把撞上的既有片段涟漪右推（保持其相对顺序与空隙）。
+            cursor = insertion_time
+            for new_clip in new_clips:
+                new_duration = (
+                    new_clip["timeline_end_us"] - new_clip["timeline_start_us"]
+                )
+                new_clip["timeline_start_us"] = cursor
+                new_clip["timeline_end_us"] = cursor + new_duration
+                cursor += new_duration
+            for new_clip in new_clips:
+                self._ripple_track_right(clips, captions, new_clip)
             provenance = document["provenance"]["source_transcript_ids"]
             if transcript_id not in provenance:
                 provenance.append(transcript_id)
@@ -696,15 +725,22 @@ class TimelineService:
             clip = _clip(document, operation.get("clip_id"))
             clips.remove(clip)
             captions[:] = [c for c in captions if c["source_clip_id"] != clip["clip_id"]]
-            # 级联删除涉及该片段的转场：作为锚点的转场直接删；
-            # 以"被删片段的后继"为锚的转场也删（该相邻关系已不存在）。
+            # 级联删除涉及该片段的转场：作为锚点的转场直接删；时间序中
+            # "被删片段的直接后继"为锚的转场也删（该相邻关系已不存在）。
             if document.get("transitions"):
-                v1_left = [c for c in clips if c.get("track_id") == "V1"]
+                v1_left = sorted(
+                    (
+                        c
+                        for c in clips
+                        if c.get("track_id") == "V1" and c is not clip
+                    ),
+                    key=lambda c: c["timeline_start_us"],
+                )
                 successor_id = next(
                     (
                         c["clip_id"]
                         for c in v1_left
-                        if c.get("order_index") == clip["order_index"] + 1
+                        if c["timeline_start_us"] >= clip["timeline_start_us"]
                     ),
                     None,
                 )
@@ -727,16 +763,50 @@ class TimelineService:
             clips.remove(clip)
             clips.insert(to_index, clip)
         elif op == "position_clip":
-            # Free positioning: A1 audio clips can be placed anywhere on the
-            # timeline. V1 clips stay sequential (use move_clip to reorder).
-            _exact_keys(operation, {"op", "clip_id", "timeline_start_us"})
+            # 自由定位：视频与音频片段都可以放在任意时间位置（同轨允许空隙）。
+            # 可选 track_id：跨轨道移动（仅限同类型轨道；视频片段在视频轨之间
+            # 移动，音频片段固定 A1）。同轨禁止重叠——前端负责钳制，这里兜底拒绝。
+            _exact_keys(
+                operation,
+                {"op", "clip_id", "timeline_start_us", "track_id"},
+                optional={"track_id"},
+            )
             clip = _clip(document, operation.get("clip_id"))
-            if clip["track_id"] != "A1":
-                raise DomainError("TIMELINE_INVALID", "只有音频片段可以自由定位")
             new_start = _integer(operation.get("timeline_start_us"), "时间线开始时间不合法")
             if new_start < 0:
                 raise DomainError("TIMELINE_INVALID", "时间线开始时间不合法")
+            op_track_id = operation.get("track_id")
+            if op_track_id is not None and op_track_id != clip["track_id"]:
+                target_track = next(
+                    (
+                        track
+                        for track in document.get("tracks", [])
+                        if track.get("id") == op_track_id
+                    ),
+                    None,
+                )
+                if target_track is None:
+                    raise DomainError("TIMELINE_INVALID", "目标轨道不存在")
+                expected_kind = "audio" if clip["asset_kind"] == "audio" else "video"
+                if target_track.get("kind") != expected_kind:
+                    raise DomainError("TIMELINE_INVALID", "片段与目标轨道类型不匹配")
+                clip["track_id"] = op_track_id
             duration = clip["timeline_end_us"] - clip["timeline_start_us"]
+            if clip["asset_kind"] != "audio":
+                for other in document["clips"]:
+                    if (
+                        other is not clip
+                        and other.get("track_id") == clip["track_id"]
+                        and new_start < other["timeline_end_us"]
+                        and other["timeline_start_us"] < new_start + duration
+                    ):
+                        raise DomainError("TIMELINE_INVALID", "视频片段不能与其他片段重叠")
+                delta = new_start - clip["timeline_start_us"]
+                if delta:
+                    for caption in document.get("captions", []):
+                        if caption.get("source_clip_id") == clip["clip_id"]:
+                            caption["start_us"] += delta
+                            caption["end_us"] += delta
             clip["timeline_start_us"] = new_start
             clip["timeline_end_us"] = new_start + duration
         elif op == "trim_clip":
@@ -771,11 +841,15 @@ class TimelineService:
                 retained_end = clip["timeline_start_us"] + round(
                     (new_end - old_source_start) * 1000 / speed
                 )
-                shift = round((new_start - old_source_start) * 1000 / speed)
                 clip["source_start_us"] = new_start
                 clip["source_end_us"] = new_end
+                # 自由定位：显式落位——左缘随内容右移、右缘收缩
+                # （normalize 不再重排 V1 时间）。
+                clip["timeline_start_us"] = retained_start
+                clip["timeline_end_us"] = retained_end
+                # 绑定字幕直接钳制进新窗口（不再按"重打包回零"的位移回移）。
                 self._trim_bound_captions(
-                    document, clip["clip_id"], retained_start, retained_end, -shift
+                    document, clip["clip_id"], retained_start, retained_end, 0
                 )
         elif op == "split_clip":
             _exact_keys(operation, {"op", "clip_id", "source_time_us"})
@@ -818,6 +892,12 @@ class TimelineService:
             clip["source_end_us"] = split_source
             index = clips.index(clip)
             clips.insert(index + 1, right)
+            # 自由定位模型：显式落位（左段止于拆分点、右段从拆分点起），
+            # normalize 不再重排 V1 时间。
+            old_timeline_end = clip["timeline_end_us"]
+            clip["timeline_end_us"] = split_timeline
+            right["timeline_start_us"] = split_timeline
+            right["timeline_end_us"] = old_timeline_end
             # B3：关键帧按拆分点切分归两侧。
             split_t_us = split_timeline - clip["timeline_start_us"]
             _split_clip_keyframes(clip, right, split_t_us)
@@ -852,11 +932,13 @@ class TimelineService:
             old_duration = clip["timeline_end_us"] - clip["timeline_start_us"]
             clip["speed_milli"] = speed
             if clip["asset_kind"] == "video":
-                # V1 连续轨道：直接改时长，由 _normalize_timing 重排后续片段。
+                # V1 自由定位：起点不动、终点随速度变化；变长时把撞上的
+                # 后续片段涟漪右推（变短则留出空隙）。
                 new_duration = _clip_timeline_duration_us(
                     clip["source_start_us"], clip["source_end_us"], speed
                 )
                 clip["timeline_end_us"] = clip["timeline_start_us"] + new_duration
+                self._ripple_track_right(clips, captions, clip)
                 # B3：片段时长变化，关键帧时间等比重映射。
                 _remap_clip_keyframes(clip, old_duration, new_duration)
             else:
@@ -885,6 +967,8 @@ class TimelineService:
                 raise DomainError("TIMELINE_INVALID", "图片时长需为 0.5-30 秒")
             old_duration = clip["timeline_end_us"] - clip["timeline_start_us"]
             clip["timeline_end_us"] = clip["timeline_start_us"] + duration
+            if clip["track_id"] == "V1":
+                self._ripple_track_right(clips, captions, clip)
             _remap_clip_keyframes(clip, old_duration, duration)
         elif op == "add_caption":
             _exact_keys(
@@ -957,6 +1041,107 @@ class TimelineService:
                 locked_ids.append(clip_id)
             elif not locked and clip_id in locked_ids:
                 locked_ids.remove(clip_id)
+        elif op == "add_track":
+            # 新增动态轨道：视频轨（V2+）或文本轨（T1+），插入到 C1 之上
+            # （动态区域底部，紧贴字幕轨）。
+            _exact_keys(operation, {"op", "kind"})
+            kind = _enum(operation.get("kind"), ("video", "text"), "轨道类型不合法")
+            tracks_list = document["tracks"]
+            prefix = "V" if kind == "video" else "T"
+            existing_ids = {track.get("id") for track in tracks_list}
+            number = 2 if kind == "video" else 1
+            while f"{prefix}{number}" in existing_ids:
+                number += 1
+            caption_index = next(
+                (
+                    index
+                    for index, track in enumerate(tracks_list)
+                    if track.get("id") == CAPTION_TRACK_ID
+                ),
+                len(tracks_list),
+            )
+            tracks_list.insert(caption_index, _empty_track(f"{prefix}{number}", kind))
+        elif op == "remove_track":
+            # 删除动态轨道：其上的片段与绑定字幕一并级联删除。
+            # 仅主视频轨与音频轨位置、数量固定；文本轨与其他动态轨一致可删除。
+            _exact_keys(operation, {"op", "track_id"})
+            track_id = operation.get("track_id")
+            if track_id in {MAIN_TRACK_ID, AUDIO_TRACK_ID}:
+                raise DomainError("TIMELINE_INVALID", "固定轨道不能删除")
+            tracks_list = document["tracks"]
+            track = next((t for t in tracks_list if t.get("id") == track_id), None)
+            if track is None:
+                raise DomainError("TIMELINE_INVALID", "轨道不存在")
+            removed_clip_ids = {
+                clip["clip_id"] for clip in clips if clip.get("track_id") == track_id
+            }
+            clips[:] = [clip for clip in clips if clip.get("track_id") != track_id]
+            captions[:] = [
+                caption
+                for caption in captions
+                if caption.get("source_clip_id") not in removed_clip_ids
+            ]
+            document["locked_elements"] = [
+                item
+                for item in document.get("locked_elements", [])
+                if item not in removed_clip_ids
+            ]
+            tracks_list.remove(track)
+        elif op == "move_track":
+            # 动态轨道换位：to_index 为动态区域内自上而下 0 起的目标位置。
+            # 仅主视频轨与音频轨固定；文本轨与其他动态轨一致可移动。
+            _exact_keys(operation, {"op", "track_id", "to_index"})
+            track_id = operation.get("track_id")
+            to_index = operation.get("to_index")
+            if track_id in {MAIN_TRACK_ID, AUDIO_TRACK_ID}:
+                raise DomainError("TIMELINE_INVALID", "固定轨道不能移动")
+            tracks_list = document["tracks"]
+            track = next((t for t in tracks_list if t.get("id") == track_id), None)
+            if track is None:
+                raise DomainError("TIMELINE_INVALID", "轨道不存在")
+            dynamic_count = sum(
+                1
+                for item in tracks_list
+                if item.get("id") not in {MAIN_TRACK_ID, AUDIO_TRACK_ID}
+            )
+            if (
+                not isinstance(to_index, int)
+                or isinstance(to_index, bool)
+                or not 0 <= to_index < dynamic_count
+            ):
+                raise DomainError("TIMELINE_INVALID", "目标轨道位置不合法")
+            tracks_list.remove(track)
+            tracks_list.insert(to_index, track)
+        elif op == "set_track_flags":
+            # 轨道属性（部分覆盖）：锁定全类型；隐藏仅视频/文本；
+            # 静音/独奏仅视频/音频。
+            _exact_keys(
+                operation,
+                {"op", "track_id", "locked", "hidden", "muted", "solo"},
+                optional={"locked", "hidden", "muted", "solo"},
+            )
+            track = next(
+                (
+                    item
+                    for item in document.get("tracks", [])
+                    if item.get("id") == operation.get("track_id")
+                ),
+                None,
+            )
+            if track is None:
+                raise DomainError("TIMELINE_INVALID", "轨道不存在")
+            kind = track.get("kind")
+            for flag in ("locked", "hidden", "muted", "solo"):
+                value = operation.get(flag)
+                if value is None:
+                    continue
+                if not isinstance(value, bool):
+                    raise DomainError("TIMELINE_INVALID", "轨道标志不合法")
+                if flag == "hidden" and kind not in ("video", "text"):
+                    raise DomainError("TIMELINE_INVALID", "音频轨道不支持隐藏")
+                if flag in ("muted", "solo") and kind not in ("video", "audio"):
+                    raise DomainError("TIMELINE_INVALID", "文本轨道不支持静音/独奏")
+                track[flag] = value
         elif op == "set_clip_keyframes":
             # B3：整属性覆盖（拖拽幂等提交，单 Revision 可撤销）。
             _exact_keys(operation, {"op", "clip_id", "property", "frames"})
@@ -1030,6 +1215,25 @@ class TimelineService:
         clip_id = operation.get("clip_id")
         if isinstance(clip_id, str) and clip_id in locked:
             raise DomainError("TIMELINE_LOCKED", "Timeline Clip 已锁定")
+        # 轨道锁定：操作目标片段所在轨道被锁定即拒绝（set_track_flags 自身
+        # 负责解锁，不在此检查）。
+        track_locks = {
+            track["id"]: track.get("locked", False)
+            for track in document.get("tracks", [])
+            if isinstance(track, dict)
+        }
+        if isinstance(clip_id, str) and track_locks:
+            clip = next((c for c in document.get("clips", []) if c.get("clip_id") == clip_id), None)
+            if clip is not None and track_locks.get(clip.get("track_id"), False):
+                raise DomainError("TIMELINE_LOCKED", "片段所在轨道已锁定")
+        target_track_id = operation.get("track_id")
+        if (
+            operation.get("op") not in {"set_track_flags", "move_track"}
+            and isinstance(target_track_id, str)
+            and track_locks.get(target_track_id, False)
+        ):
+            # 锁定保护片段内容：换位是结构性操作不受限；删除/投放到锁定轨仍被拒。
+            raise DomainError("TIMELINE_LOCKED", "目标轨道已锁定")
         caption_id = operation.get("caption_id")
         if isinstance(caption_id, str):
             caption = _caption(document, caption_id)
@@ -1056,6 +1260,11 @@ class TimelineService:
         successor = _transition_successor(clips, anchor)
         if successor.get("asset_kind") not in TRANSITIONABLE_KINDS:
             raise DomainError("TIMELINE_TRANSITION_INVALID", "转场后继必须是视频/图片片段")
+        if successor["timeline_start_us"] != anchor["timeline_end_us"]:
+            raise DomainError(
+                "TIMELINE_TRANSITION_INVALID",
+                "转场要求两个片段首尾相接（中间不能有空隙）",
+            )
         return anchor, successor
 
     def _asset_clip(
@@ -1231,6 +1440,156 @@ class TimelineService:
             timeline_offset += end - start
         return clips, captions, transcript_id
 
+    def _place_clip_on_track(
+        self,
+        clips: list[dict[str, Any]],
+        captions: list[dict[str, Any]],
+        clip: dict[str, Any],
+        at_index: Any,
+        track_id: str,
+    ) -> None:
+        """把新片段安置到指定轨道的时间槽 `at_index`（或该轨内容末尾）。
+
+        落点 = 目标轨道时间序第 at_index 个片段的起点（追加时为该轨内容最大
+        终点）；混合列表按该锚点片段的位置插入，保持列表顺序可读。冲突片段
+        在目标轨道内涟漪右推。
+        """
+        track_clips = sorted(
+            (c for c in clips if c["track_id"] == track_id),
+            key=lambda c: c["timeline_start_us"],
+        )
+        track_count = len(track_clips)
+        # at_index 来自混合列表序号（可能含 A1 片段），钳制到目标轨范围。
+        clamped_index = max(0, min(int(at_index) if isinstance(at_index, int) and not isinstance(at_index, bool) else track_count, track_count))
+        slot = clamped_index
+        if slot < track_count:
+            target_start = track_clips[slot]["timeline_start_us"]
+        else:
+            target_start = max((c["timeline_end_us"] for c in track_clips), default=0)
+        duration = clip["timeline_end_us"] - clip["timeline_start_us"]
+        clip["timeline_start_us"] = target_start
+        clip["timeline_end_us"] = target_start + duration
+        insert_pos = clips.index(track_clips[slot]) if slot < track_count else len(clips)
+        clips.insert(insert_pos, clip)
+        self._ripple_track_right(clips, captions, clip)
+
+    def _ripple_track_right(
+        self,
+        clips: list[dict[str, Any]],
+        captions: list[dict[str, Any]],
+        changed: dict[str, Any],
+    ) -> None:
+        """把与 changed 片段当前占用区间冲突的**同轨**片段向右顺延（涟漪推移）。
+
+        前置不变量：操作前该轨道内片段互不重叠。从变更片段的终点开始向右走，
+        依次把撞上屏障的片段推到屏障处，直到某片段起点不再早于屏障。
+        被推移片段绑定的字幕随片段平移；保持相对顺序与既有空隙。
+        """
+        start = changed["timeline_start_us"]
+        barrier = changed["timeline_end_us"]
+        track_id = changed["track_id"]
+        track_others = sorted(
+            (c for c in clips if c.get("track_id") == track_id and c is not changed),
+            key=lambda c: c["timeline_start_us"],
+        )
+        for other in track_others:
+            if other["timeline_start_us"] >= barrier:
+                break  # 已按起点排序：之后不会再撞屏障
+            if other["timeline_start_us"] < start:
+                continue  # 位于变更片段左侧，不受影响
+            delta = barrier - other["timeline_start_us"]
+            other["timeline_start_us"] += delta
+            other["timeline_end_us"] += delta
+            barrier = other["timeline_end_us"]
+            for caption in captions:
+                if caption.get("source_clip_id") == other["clip_id"]:
+                    caption["start_us"] += delta
+                    caption["end_us"] += delta
+
+    def _normalize_tracks(self, document: dict[str, Any]) -> None:
+        """迁移并规范化轨道数组到剪映式结构（就地修改）。
+
+        - 旧 kind 映射：visual→video、caption→text；
+        - 补齐缺失的标志位（locked/hidden/muted/solo）与缺失的 A1 轨道；
+        - 顺序规范化为 [动态轨道...] + [C1, V1, A1]，动态轨道保持相对顺序。
+        """
+        tracks = document.get("tracks")
+        normalized: list[dict[str, Any]] = []
+        if isinstance(tracks, list):
+            for track in tracks:
+                if not isinstance(track, dict):
+                    continue
+                kind = track.get("kind")
+                if kind == "visual":
+                    kind = "video"
+                elif kind == "caption":
+                    kind = "text"
+                normalized.append(
+                    {
+                        "id": track.get("id"),
+                        "kind": kind,
+                        "locked": bool(track.get("locked", False)),
+                        "hidden": bool(track.get("hidden", False)),
+                        "muted": bool(track.get("muted", False)),
+                        "solo": bool(track.get("solo", False)),
+                    }
+                )
+        fixed: dict[str, dict[str, Any]] = {}
+        defaults = {
+            CAPTION_TRACK_ID: "text",
+            MAIN_TRACK_ID: "video",
+            AUDIO_TRACK_ID: "audio",
+        }
+        for track_id, kind in defaults.items():
+            existing = next((t for t in normalized if t.get("id") == track_id), None)
+            if existing is None:
+                existing = _empty_track(track_id, kind)
+            existing["kind"] = kind
+            fixed[track_id] = existing
+        dynamic = [
+            track
+            for track in normalized
+            if track.get("id") not in defaults
+        ]
+        document["tracks"] = [
+            *dynamic,
+            fixed[CAPTION_TRACK_ID],
+            fixed[MAIN_TRACK_ID],
+            fixed[AUDIO_TRACK_ID],
+        ]
+
+    def _gc_unreachable_transitions(self, document: dict[str, Any]) -> None:
+        """清理失去时间序后继的转场。
+
+        自由定位下片段可以被移动/删除：锚点不再是 V1 可转场片段、或在 V1
+        时间序中不再存在后继的转场会被移除。仅留有空隙的转场保留（休眠，
+        不参与渲染与 UI，片段重新相接后自动恢复）。
+        """
+        transitions = document.get("transitions")
+        clips = document.get("clips")
+        if not transitions or not isinstance(clips, list):
+            return
+        v1 = sorted(
+            (
+                clip
+                for clip in clips
+                if isinstance(clip, dict) and clip.get("track_id") == "V1"
+            ),
+            key=lambda clip: clip.get("timeline_start_us") or 0,
+        )
+        valid_anchors = {
+            clip["clip_id"]
+            for index, clip in enumerate(v1)
+            if clip.get("asset_kind") in TRANSITIONABLE_KINDS
+            and index + 1 < len(v1)
+            and v1[index + 1].get("asset_kind") in TRANSITIONABLE_KINDS
+        }
+        document["transitions"] = [
+            item
+            for item in transitions
+            if isinstance(item, dict) and item.get("after_clip_id") in valid_anchors
+        ]
+
     def _normalize_and_validate(self, db: sqlite3.Connection, document: dict[str, Any]) -> None:
         _exact_keys(
             document,
@@ -1249,7 +1608,9 @@ class TimelineService:
         )
         document.setdefault("locked_elements", [])
         document.setdefault("transitions", [])
+        self._normalize_tracks(document)
         self._normalize_timing(document, {})
+        self._gc_unreachable_transitions(document)
         if document.get("schema_version") != 1:
             raise DomainError("TIMELINE_INVALID", "Timeline schema_version 必须为 1")
         _identifier(document.get("project_id"), "项目 ID 不合法")
@@ -1261,26 +1622,51 @@ class TimelineService:
             "background_color": "#000000",
         }:
             raise DomainError("TIMELINE_INVALID", "Timeline 画布不符合 v1")
-        valid_tracks_2 = [
-            {"id": "V1", "kind": "visual", "locked": False},
-            {"id": "C1", "kind": "caption", "locked": False},
-        ]
-        valid_tracks_3 = [
-            {"id": "V1", "kind": "visual", "locked": False},
-            {"id": "A1", "kind": "audio", "locked": False},
-            {"id": "C1", "kind": "caption", "locked": False},
-        ]
-        if document.get("tracks") != valid_tracks_2 and document.get("tracks") != valid_tracks_3:
-            raise DomainError("TIMELINE_INVALID", "Timeline v1 轨道不合法")
+        tracks = document.get("tracks")
+        if (
+            not isinstance(tracks, list)
+            or len(tracks) < 3
+            or [track.get("id") for track in tracks[-3:]]
+            != [CAPTION_TRACK_ID, MAIN_TRACK_ID, AUDIO_TRACK_ID]
+            or [track.get("kind") for track in tracks[-3:]] != ["text", "video", "audio"]
+        ):
+            raise DomainError("TIMELINE_INVALID", "Timeline 轨道结构不合法")
+        track_ids = [track.get("id") for track in tracks]
+        if (
+            len(set(track_ids)) != len(track_ids)
+            or any(not isinstance(track_id, str) or not track_id for track_id in track_ids)
+            or any(
+                track_id in {CAPTION_TRACK_ID, MAIN_TRACK_ID, AUDIO_TRACK_ID}
+                for track_id in track_ids[:-3]
+            )
+        ):
+            raise DomainError("TIMELINE_INVALID", "Timeline 轨道结构不合法")
+        for track in tracks:
+            if not isinstance(track, dict):
+                raise DomainError("TIMELINE_INVALID", "Timeline 轨道结构不合法")
+            for flag in ("locked", "hidden", "muted", "solo"):
+                if not isinstance(track.get(flag), bool):
+                    raise DomainError("TIMELINE_INVALID", "Timeline 轨道标志不合法")
+        for track in tracks[:-3]:
+            track_id = track.get("id")
+            expected_kind = (
+                "video"
+                if isinstance(track_id, str) and track_id.startswith("V")
+                else "text"
+                if isinstance(track_id, str) and track_id.startswith("T")
+                else None
+            )
+            if expected_kind is None or track.get("kind") != expected_kind:
+                raise DomainError("TIMELINE_INVALID", "Timeline 轨道结构不合法")
+        tracks_by_id = {track["id"]: track for track in tracks}
         clips = document.get("clips")
         captions = document.get("captions")
         if not isinstance(clips, list) or not isinstance(captions, list):
             raise DomainError("TIMELINE_INVALID", "Timeline clips/captions 不合法")
         clip_ids: set[str] = set()
-        v1_index = 0
-        a1_index = 0
+        order_counters: dict[str, int] = {}
         for index, clip in enumerate(clips):
-            if not isinstance(clip, dict) or clip.get("track_id") not in ("V1", "A1"):
+            if not isinstance(clip, dict) or clip.get("track_id") not in tracks_by_id:
                 raise DomainError("TIMELINE_INVALID", "视频/音频轨片段不合法")
             _exact_keys(
                 clip,
@@ -1309,14 +1695,14 @@ class TimelineService:
             asset = self._asset(db, document["project_id"], clip.get("asset_id"))
             if asset["kind"] != clip.get("asset_kind"):
                 raise DomainError("TIMELINE_INVALID", "Clip 素材类型不一致")
-            if clip["track_id"] == "V1":
-                if clip.get("order_index") != v1_index:
-                    raise DomainError("TIMELINE_INVALID", "V1 Clip 顺序不合法")
-                v1_index += 1
-            elif clip["track_id"] == "A1":
-                if clip.get("order_index") != a1_index:
-                    raise DomainError("TIMELINE_INVALID", "A1 Clip 顺序不合法")
-                a1_index += 1
+            track = tracks_by_id[clip["track_id"]]
+            expected_track_kind = "audio" if clip.get("asset_kind") == "audio" else "video"
+            if track.get("kind") != expected_track_kind:
+                raise DomainError("TIMELINE_INVALID", "Clip 与轨道类型不匹配")
+            counter = order_counters.setdefault(clip["track_id"], 0)
+            if clip.get("order_index") != counter:
+                raise DomainError("TIMELINE_INVALID", "Clip 顺序不合法")
+            order_counters[clip["track_id"]] = counter + 1
             _enum(clip.get("layout"), LAYOUTS, "布局不合法")
             audio = clip.get("audio")
             if not isinstance(audio, dict) or not isinstance(audio.get("enabled"), bool):
@@ -1384,7 +1770,18 @@ class TimelineService:
                 or audio["enabled"]
             ):
                 raise DomainError("TIMELINE_INVALID", "图片 Clip 不合法")
-        total_duration = clips[-1]["timeline_end_us"] if clips else 0
+        # 每条视频轨道内，片段时间区间不得重叠（允许同轨空隙；跨轨叠加允许）。
+        for track in tracks:
+            if track.get("kind") != "video":
+                continue
+            track_clips_sorted = sorted(
+                (c for c in clips if c["track_id"] == track["id"]),
+                key=lambda c: c["timeline_start_us"],
+            )
+            for left, right in zip(track_clips_sorted, track_clips_sorted[1:]):
+                if right["timeline_start_us"] < left["timeline_end_us"]:
+                    raise DomainError("TIMELINE_INVALID", "视频片段时间区间重叠")
+        total_duration = max((c["timeline_end_us"] for c in clips), default=0)
         previous_end = 0
         caption_ids: set[str] = set()
         for caption in captions:
@@ -1490,8 +1887,12 @@ class TimelineService:
             duration = _integer(transition.get("duration_us"), "转场时长不合法")
             if not MIN_TRANSITION_US <= duration <= MAX_TRANSITION_US:
                 raise DomainError("TIMELINE_INVALID", "转场时长需为 0.1-2 秒")
-        # 引用完整性：锚点必须是 V1 可转场片段且存在 V1 后继。
-        v1 = [c for c in clips if c["track_id"] == "V1"]
+        # 引用完整性：锚点必须是 V1 可转场片段且时间序中存在 V1 后继。
+        # 不要求首尾相接：留有空隙的转场休眠（渲染/UI 跳过），重新相接后恢复。
+        v1 = sorted(
+            (c for c in clips if c["track_id"] == "V1"),
+            key=lambda c: c["timeline_start_us"],
+        )
         for transition in transitions:
             anchor = next((c for c in v1 if c["clip_id"] == transition["after_clip_id"]), None)
             if anchor is None or anchor["asset_kind"] not in TRANSITIONABLE_KINDS:
@@ -1506,54 +1907,55 @@ class TimelineService:
         if not isinstance(clips, list) or not isinstance(captions, list):
             raise DomainError("TIMELINE_INVALID", "Timeline clips/captions 不合法")
 
-        # Separate clips by track
-        v1_clips = [c for c in clips if isinstance(c, dict) and c.get("track_id") == "V1"]
-        a1_clips = [c for c in clips if isinstance(c, dict) and c.get("track_id") == "A1"]
-
-        # Normalize V1 clips: sequential, contiguous from 0
-        v1_offset = 0
-        deltas: dict[str, int] = {}
-        for index, clip in enumerate(v1_clips):
-            raw_clip_id = clip.get("clip_id")
-            old_start = old_starts.get(raw_clip_id) if isinstance(raw_clip_id, str) else None
-            if clip.get("asset_kind") == "video":
-                start = clip.get("source_start_us")
-                end = clip.get("source_end_us")
-                duration = (
-                    _clip_timeline_duration_us(start, end, _clip_speed(clip))
-                    if isinstance(start, int) and isinstance(end, int)
-                    else -1
-                )
-            elif clip.get("asset_kind") == "image":
+        valid_clips = [
+            c
+            for c in clips
+            if isinstance(c, dict) and isinstance(c.get("track_id"), str)
+        ]
+        # 按轨道分组：时间位置是权威数据（自由定位：允许空隙、不允许重叠）。
+        # normalize 只按列表顺序重排 order_index；仅当片段缺少合法时间
+        # （例如外部构造的文档）时，把它安置到**所在轨道**当前内容最大终点之后。
+        track_clips: dict[str, list[dict[str, Any]]] = {}
+        for clip in valid_clips:
+            track_clips.setdefault(clip["track_id"], []).append(clip)
+        fill_starts: dict[str, int] = {}
+        for track_id, group in track_clips.items():
+            fill_starts[track_id] = max(
+                (
+                    clip["timeline_end_us"]
+                    for clip in group
+                    if isinstance(clip.get("timeline_start_us"), int)
+                    and isinstance(clip.get("timeline_end_us"), int)
+                    and clip["timeline_end_us"] > clip["timeline_start_us"]
+                ),
+                default=0,
+            )
+        for track_id, group in track_clips.items():
+            for index, clip in enumerate(group):
+                clip["order_index"] = index
                 start = clip.get("timeline_start_us")
                 end = clip.get("timeline_end_us")
-                duration = end - start if isinstance(start, int) and isinstance(end, int) else -1
-            else:
-                start = clip.get("source_start_us")
-                end = clip.get("source_end_us")
-                duration = (
-                    _clip_timeline_duration_us(start, end, _clip_speed(clip))
-                    if isinstance(start, int) and isinstance(end, int)
-                    else -1
-                )
-            clip["order_index"] = index
-            clip["timeline_start_us"] = v1_offset
-            clip["timeline_end_us"] = v1_offset + duration
-            if old_start is not None:
-                deltas[clip["clip_id"]] = v1_offset - old_start
-            v1_offset += duration
+                if isinstance(start, int) and isinstance(end, int) and end > start:
+                    continue
+                if clip.get("asset_kind") == "image":
+                    duration = (
+                        end - start if isinstance(start, int) and isinstance(end, int) else -1
+                    )
+                else:
+                    src_start = clip.get("source_start_us")
+                    src_end = clip.get("source_end_us")
+                    duration = (
+                        _clip_timeline_duration_us(src_start, src_end, _clip_speed(clip))
+                        if isinstance(src_start, int) and isinstance(src_end, int)
+                        else -1
+                    )
+                clip["timeline_start_us"] = fill_starts[track_id]
+                clip["timeline_end_us"] = fill_starts[track_id] + duration
+                fill_starts[track_id] = clip["timeline_end_us"]
 
-        # Normalize A1 clips: preserve timeline positions, just fix order_index
-        for index, clip in enumerate(a1_clips):
-            clip["order_index"] = index
-            # A1 clips keep their existing timeline_start_us / timeline_end_us
-            # (they can be freely positioned, not forced contiguous)
+        # A1 clips keep their existing timeline_start_us / timeline_end_us
+        # (they can be freely positioned, not forced contiguous)
 
-        if deltas:
-            for caption in captions:
-                delta = deltas.get(caption.get("source_clip_id"), 0)
-                caption["start_us"] += delta
-                caption["end_us"] += delta
         captions.sort(
             key=lambda item: (
                 item.get("start_us", -1),
@@ -1684,9 +2086,9 @@ class TimelineService:
                 "background_color": canvas.get("background_color", "#000000"),
             },
             "tracks": [
-                {"id": "V1", "kind": "visual", "locked": False},
-                {"id": "A1", "kind": "audio", "locked": False},
-                {"id": "C1", "kind": "caption", "locked": False},
+                _empty_track(CAPTION_TRACK_ID, "text"),
+                _empty_track(MAIN_TRACK_ID, "video"),
+                _empty_track(AUDIO_TRACK_ID, "audio"),
             ],
             "clips": [],
             "captions": [],
@@ -1817,8 +2219,14 @@ def _transition(document: dict[str, Any], transition_id: Any) -> dict[str, Any]:
 def _transition_successor(
     clips: list[dict[str, Any]], anchor: dict[str, Any]
 ) -> dict[str, Any]:
-    """V1 序中 anchor 的直接后继；转场要求其为同轨可转场片段。"""
-    v1 = [c for c in clips if c.get("track_id") == "V1"]
+    """V1 时间序中 anchor 的直接后继；转场要求其为同轨可转场片段。
+
+    自由定位下列表顺序不再等于时间顺序，后继按 timeline_start_us 排序取。
+    """
+    v1 = sorted(
+        (c for c in clips if c.get("track_id") == "V1"),
+        key=lambda c: c["timeline_start_us"],
+    )
     index = v1.index(anchor)
     if index + 1 >= len(v1):
         raise DomainError("TIMELINE_TRANSITION_INVALID", "转场需要一个后继片段")

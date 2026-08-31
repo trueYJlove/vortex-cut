@@ -273,6 +273,14 @@ class RenderPlanCompiler:
         inputs: list[dict[str, Any]] = []
         input_by_asset: dict[str, str] = {}
         segments: list[dict[str, Any]] = []
+        # 多轨道：段落记录来源轨道与轨道标志；轨道静音/独奏直接合并进
+        # audio_enabled（当前渲染图为单视觉轨 + 随段音频语义）。
+        tracks_by_id: dict[str, dict[str, Any]] = {
+            track["id"]: track
+            for track in document.get("tracks", [])
+            if isinstance(track, dict) and track.get("id")
+        }
+        any_solo = any(bool(track.get("solo")) for track in tracks_by_id.values())
         # B2：转场锚定在片段尾部——按 after_clip_id 索引，编译段时挂到对应段。
         transition_by_anchor: dict[str, dict[str, Any]] = {
             item["after_clip_id"]: item for item in document.get("transitions", [])
@@ -302,9 +310,19 @@ class RenderPlanCompiler:
                     }
                 )
             transition = transition_by_anchor.get(clip["clip_id"])
+            track = tracks_by_id.get(clip.get("track_id", "V1"))
+            track_muted = bool(track.get("muted")) if track else False
+            track_solo = bool(track.get("solo")) if track else False
+            audio_effective = (
+                bool(clip["audio"]["enabled"])
+                and not track_muted
+                and not (any_solo and not track_solo)
+            )
             segments.append(
                 {
                     "clip_id": clip["clip_id"],
+                    "track_id": clip.get("track_id", "V1"),
+                    "track_hidden": bool(track.get("hidden")) if track else False,
                     "input_id": input_id,
                     "asset_kind": clip["asset_kind"],
                     "source_start_us": clip["source_start_us"],
@@ -312,7 +330,7 @@ class RenderPlanCompiler:
                     "timeline_start_us": clip["timeline_start_us"],
                     "timeline_end_us": clip["timeline_end_us"],
                     "layout": clip["layout"],
-                    "audio_enabled": clip["audio"]["enabled"],
+                    "audio_enabled": audio_effective,
                     "gain_db": float(clip["audio"]["gain_db"]),
                     "speed_milli": int(clip.get("speed_milli", 1000)),
                     "reverse_playback": bool(clip.get("reverse_playback", False)),

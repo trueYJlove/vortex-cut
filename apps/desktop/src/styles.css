@@ -318,12 +318,18 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--vc-accent); }
 .timeline-zoom { display: flex; align-items: center; gap: 6px; margin-left: auto; }
 .timeline-zoom button { background: transparent; border: none; color: var(--vc-text-2); cursor: pointer; padding: 2px 4px; border-radius: 3px; display: flex; align-items: center; }
 .timeline-zoom button:hover { background: rgba(255,255,255,0.08); color: var(--vc-text); }
-.timeline-zoom-slider { width: 80px; height: 4px; accent-color: var(--vc-accent); cursor: pointer; }
+.timeline-zoom-slider { width: 80px; height: 12px; appearance: none; -webkit-appearance: none; background: transparent; cursor: pointer; margin: 0; }
+.timeline-zoom-slider::-webkit-slider-runnable-track { height: 2px; border-radius: 1px; background: #4a565e; }
+.timeline-zoom-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 12px; height: 12px; margin-top: -5px; border-radius: 50%; background: #eef4f6; border: none; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5); }
+.timeline-zoom-slider::-moz-range-track { height: 2px; border-radius: 1px; background: #4a565e; }
+.timeline-zoom-slider::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: #eef4f6; border: none; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5); }
 .timeline-zoom-value { font-size: 11px; color: var(--vc-text-2); min-width: 48px; text-align: right; font-family: monospace; }
 
-.timeline-body { flex: 1; min-height: 0; display: flex; overflow: hidden; }
+/* 面板高度由用户拖拽决定；内容（轨道行）始终按自身高度渲染，
+   面板装不下时纵向滚动——拖拽只改变"视野"，不压缩轨道。 */
+.timeline-body { flex: 1; min-height: 0; display: flex; overflow-y: auto; overflow-x: hidden; align-items: flex-start; }
 .timeline-left { flex-shrink: 0; display: flex; flex-direction: column; border-right: 1px solid #293238; background: #12181c; overflow: hidden; }
-.timeline-left-corner { background: #12181c; border-bottom: 1px solid #293238; flex-shrink: 0; }
+.timeline-left-corner { background: #12181c; border-bottom: 1px solid #293238; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
 .timeline-left-track { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-bottom: 1px solid #293238; overflow: hidden; flex-shrink: 0; }
 .timeline-left-caption { color: var(--vc-text-2); font-size: 12px; }
 .timeline-left-cover { width: 48px; height: 28px; flex: 0 0 auto; border-radius: 3px; overflow: hidden; background: #0c1216; display: grid; place-items: center; color: #5c6a72; }
@@ -332,7 +338,56 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--vc-accent); }
 .timeline-left-meta strong { font-size: 11px; color: var(--vc-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .timeline-left-meta span { font-size: 10px; color: var(--vc-text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.timeline-canvas-container { flex: 1; min-width: 0; position: relative; overflow: hidden; }
+/* ── 剪映式轨道属性头：[类型标识] [锁定] [隐藏] [静音] [独奏] ───────────── */
+.timeline-add-track-wrap { position: relative; display: inline-flex; }
+.timeline-add-track-menu { position: absolute; top: 34px; left: 0; z-index: 40; display: flex; flex-direction: column; min-width: 108px; padding: 4px; gap: 2px; background: #1a2228; border: 1px solid #3a464e; border-radius: 7px; box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45); }
+.timeline-add-track-menu button { padding: 5px 10px; border: 0; border-radius: 4px; background: transparent; color: #d7e2e8; font-size: 12px; text-align: left; cursor: pointer; }
+.timeline-add-track-menu button:hover { background: #27333b; }
+/* 显示设置（…菜单）：轨道高度滑杆 + 波形占比三档 */
+.timeline-display-wrap { position: relative; display: inline-flex; margin-left: 6px; }
+.timeline-display-menu { position: absolute; top: 36px; right: 0; z-index: 40; display: flex; flex-direction: column; gap: 12px; min-width: 240px; padding: 14px 12px; background: #1a2228; border: 1px solid #3a464e; border-radius: 8px; box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45); }
+/* 两行共用同一栅格：56px 标签 + 150px 内容列；滑条与图标组都铺满内容列，
+   图标组 justify-content: space-between → 首尾图标与滑条两端对齐、等距。 */
+.timeline-display-menu .display-row { display: grid; grid-template-columns: 56px 150px; align-items: center; gap: 10px; }
+.timeline-display-menu .display-row > span { font-size: 12px; color: var(--vc-text-2, #aeb9bd); }
+.timeline-display-menu .display-slider { width: 150px; }
+/* 剪映式细滑条（2px 轨道 + 12px 圆形滑块）：轨道高度与时间线缩放共用。 */
+.track-height-slider { height: 12px; appearance: none; -webkit-appearance: none; background: transparent; cursor: pointer; }
+.track-height-slider::-webkit-slider-runnable-track { height: 2px; border-radius: 1px; background: #4a565e; }
+.track-height-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 12px; height: 12px; margin-top: -5px; border-radius: 50%; background: #eef4f6; border: none; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5); }
+.track-height-slider::-moz-range-track { height: 2px; border-radius: 1px; background: #4a565e; }
+.track-height-slider::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: #eef4f6; border: none; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5); }
+/* 波形占比图标（剪映式）：深色示波卡 + 波形柱；选中 = 青色描边 + 微亮底
+   （不用实底吞掉图标，保持可读）。hover 提示具体比例。 */
+.timeline-display-menu .ratio-group { display: inline-flex; align-items: center; justify-content: space-between; width: 150px; }
+.ratio-icon { min-width: 0; min-height: 0; width: 32px; height: 24px; display: grid; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 6px; background: transparent; cursor: pointer; }
+.ratio-icon:hover { background: rgba(255, 255, 255, 0.08); }
+.ratio-icon.active { border-color: #12b5a6; background: rgba(18, 181, 166, 0.16); }
+.ratio-icon-card { display: flex; align-items: flex-end; justify-content: center; gap: 1.5px; width: 18px; height: 13px; padding: 2px 2.5px; box-sizing: border-box; border: 1px solid #cfd8dd; border-radius: 2px; overflow: hidden; }
+.ratio-icon-card i { width: 2px; background: #e6edef; }
+.ratio-icon.active .ratio-icon-card { border-color: #7fe8dd; }
+.ratio-icon.active .ratio-icon-card i { background: #7fe8dd; }
+.timeline-track-head { position: absolute; left: 0; right: 0; display: flex; align-items: center; gap: 2px; padding: 0 6px; border-bottom: 1px solid #293238; background: #12181c; overflow: hidden; }
+.timeline-track-head[data-track-kind="video"] .timeline-track-badge { color: #9cc4e8; }
+.timeline-track-head[data-track-kind="text"] .timeline-track-badge { color: #e0b878; }
+.timeline-track-head[data-track-kind="audio"] .timeline-track-badge { color: #8fd0a8; }
+.timeline-track-badge { display: inline-flex; align-items: center; gap: 3px; flex: 0 0 auto; min-width: 30px; }
+.timeline-track-badge small { font-size: 10px; color: var(--vc-text-2, #9fb3bd); }
+/* 锁定/隐藏/静音/独奏：与最左侧轨道类型标识同级的紧凑小图标；
+   hover 是刚好包住图标的正圆（剪映式）。显式覆盖全局 button 的 min-height，
+   否则 16×32 的按钮会让 border-radius:50% 呈现椭圆。 */
+.track-flag { width: 18px; height: 18px; min-height: 0; flex: 0 0 auto; display: grid; place-items: center; border: 0; border-radius: 50%; background: transparent; color: #93a3ac; cursor: pointer; font-size: 10px; font-weight: 700; padding: 0; line-height: 1; }
+.track-flag svg { width: 11px; height: 11px; }
+.track-flag:hover { background: #27333b; color: #fff; }
+.track-flag[aria-pressed="true"] { color: var(--vc-accent, #8aa2ff); background: #20293a; }
+.track-flag.track-solo[aria-pressed="true"] { color: #ffd76e; background: #3a3220; }
+.track-row-actions { margin-left: auto; display: none; align-items: center; gap: 1px; background: #12181c; }
+.timeline-track-head:hover .track-row-actions { display: inline-flex; }
+.track-row-actions button { width: 20px; height: 18px; display: grid; place-items: center; border: 0; border-radius: 3px; background: transparent; color: #93a3ac; cursor: pointer; }
+.track-row-actions button:hover { background: #27333b; color: #fff; }
+.track-row-actions button:disabled { opacity: 0.35; cursor: default; }
+
+.timeline-canvas-container { flex: 1; min-width: 0; position: relative; overflow: hidden; flex-shrink: 0; }
 .timeline-canvas-container canvas { display: block; }
 .timeline-empty-drop { color: var(--vc-text-2); font-size: 13px; }
 .drop-hint { color: var(--vc-accent); font-size: 12px; font-weight: 500; }
@@ -484,3 +539,12 @@ input, select, textarea { font-size: 12.5px; }
 .ratio-menu button { padding: 5px 12px; border: none; border-radius: 5px; background: transparent; color: var(--vc-text-2, #aeb9bd); font-size: 12px; text-align: left; cursor: pointer; }
 .ratio-menu button:hover { background: #2b2b3c; color: var(--vc-text, #e6eaec); }
 .ratio-menu button.active { background: rgba(138, 162, 255, .16); color: #cdd7ff; }
+
+
+/* Timeline Round 4 — 滚动/磁吸/右键菜单（参考 OpenCut classic 交互） */
+.timeline-toolbar button[aria-pressed="true"] { color: var(--vc-accent, #8aa2ff); background: rgba(90, 125, 255, .16); }
+.timeline-context-menu { position: absolute; z-index: 50; min-width: 160px; padding: 4px; border: 1px solid var(--vc-border-2, #4b585e); border-radius: 8px; background: #1e1e29; box-shadow: 0 12px 32px rgba(0, 0, 0, .55); display: grid; gap: 1px; }
+.timeline-context-menu button { padding: 6px 10px; border: none; border-radius: 5px; background: transparent; color: var(--vc-text, #e6eaec); font-size: 12px; text-align: left; cursor: pointer; }
+.timeline-context-menu button:hover:not(:disabled) { background: #2b2b3c; }
+.timeline-context-menu button:disabled { color: #6b7a82; cursor: default; }
+.timeline-context-menu .menu-sep { height: 1px; margin: 3px 6px; background: #303b40; }

@@ -3,6 +3,7 @@
  * Extends the canonical contract types with pixel-space computed values.
  */
 import type { TimelineClip, TimelineCaption, TimelineClipId, TimelineDocument, AssetKind, TimelineTransition, TimelineTransitionId } from "@aivideo/contracts";
+import type { MoveTargetResolution } from "./geometry.js";
 
 /** Viewport / view state for the timeline canvas. */
 export interface TimelineViewState {
@@ -58,6 +59,8 @@ export interface AssetMediaEntry {
   asset_id: string;
   media_url: string | null;
   kind: AssetKind;
+  /** 素材文件名（剪映式片段名称条显示用）。 */
+  display_name: string;
 }
 
 /** Selection state (mirrors App.tsx Selection type). */
@@ -81,12 +84,41 @@ export type TimelineInteraction =
       clipId: TimelineClipId;
       /** Pointer x at mousedown (canvas pixels). */
       startX: number;
+      /** Pointer y at mousedown (canvas pixels)——用于按片段中心判定目标轨。 */
+      startY: number;
+      /** Pointer 当前位置（canvas 像素）——拖拽中片段 1:1 浮动跟随。 */
+      currentX: number;
+      currentY: number;
+      /** 当前落点解析结果（剪映式放置预览；松手按它提交，预览即结果）。 */
+      resolution: MoveTargetResolution | null;
       /** Timeline start of the clip at mousedown (µs). */
       startUs: number;
       /** Current target timeline start (µs), after snapping/clamping. */
       targetStartUs: number;
+      /** 跨轨拖动的目标轨道 id；null 表示保持原轨道。 */
+      targetTrackId: string | null;
       /** Snap guide position (µs) when currently snapped, else null. */
       snapUs: number | null;
+    }
+  | {
+      /** Timeline Round 4: multi-selection group move (rigid translate).
+       * 视频组平移受同轨无重叠钳制；音频组自由平移。 */
+      kind: "group-move";
+      clipIds: TimelineClipId[];
+      startX: number;
+      /** Timeline start of each member at mousedown (µs). */
+      startUsByClip: Record<string, number>;
+      /** Current target start of each member (µs). */
+      targetStartUsByClip: Record<string, number>;
+      snapUs: number | null;
+    }
+  | {
+      /** Timeline Round 5: dragging a clip's volume line. */
+      kind: "volume";
+      clipId: TimelineClipId;
+      startY: number;
+      startGainDb: number;
+      targetGainDb: number;
     }
   | {
       kind: "trim";
@@ -117,9 +149,19 @@ export type TimelineInteraction =
       currentX: number;
       currentY: number;
     }
-  | { kind: "playhead"; startX: number };
+  | { kind: "playhead"; startX: number }
+  | {
+      /** Timeline Round 4: dragging the bottom scrollbar strip. */
+      kind: "scrollbar";
+      startX: number;
+      startScrollX: number;
+    };
 
-/** Marquee selection rect in canvas pixel space. */
+/** 单片段移动交互（剪映式 1:1 跟手 + 落点预览）。 */
+export type MoveInteraction = Extract<TimelineInteraction, { kind: "move" }>;
+
+/** Marquee coords are in content space (viewport x + scrollX) so that an
+ * auto-scrolling viewport keeps the selection rect anchored to content. */
 export interface MarqueeRect {
   x: number;
   y: number;
@@ -136,10 +178,30 @@ export interface TimelineHover {
 export const DEFAULT_VIEW_STATE: TimelineViewState = {
   pixelsPerSecond: 60,
   scrollX: 0,
-  trackHeight: 64,
+  trackHeight: 80,
   headerWidth: 120,
-  rulerHeight: 28,
+  rulerHeight: 16,
 };
 
-export const ZOOM_MIN_PPS = 4;
-export const ZOOM_MAX_PPS = 400;
+/** 最小缩放：10s 一格（剪映最小档的刻度密度，图1）。 */
+export const ZOOM_MIN_PPS = 10;
+/** 最大缩放：约 66px/帧（30fps 下 2f ≈ 133px，帧级剪辑，图2）。 */
+export const ZOOM_MAX_PPS = 2000;
+
+/** Editor-level timeline preferences persisted across sessions. */
+export interface TimelineRuntimePrefs {
+  /** Magnetic snapping to clip edges / playhead / grid. */
+  snappingEnabled: boolean;
+  /** 轨道行高（px），固定不随窗口压缩；40-96。 */
+  trackHeight: number;
+  /** 音频波形占片段高度的比例（1 = 100%，0.6 = 60%，0.3 = 30%）。 */
+  waveformRatio: number;
+}
+
+export const DEFAULT_RUNTIME_PREFS: TimelineRuntimePrefs = {
+  snappingEnabled: true,
+  trackHeight: 80,
+  /** 剪映默认 40% 波形占比。 */
+  waveformRatio: 0.4,
+};
+export const TIMELINE_PREFS_STORAGE_KEY = "vortex-cut.timeline.prefs.v1";

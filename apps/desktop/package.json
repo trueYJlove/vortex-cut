@@ -4,9 +4,9 @@
   "private": true,
   "description": "Vortex Cut 桌面端：本地优先、AI 驱动的视频剪辑与多平台创作工具",
   "type": "module",
-  "main": "out/main/index.js",
+  "main": "out/main/index.cjs",
   "scripts": {
-    "dev": "electron-vite dev",
+    "dev": "node scripts/dev.mjs",
     "build": "electron-vite build",
     "lint": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",

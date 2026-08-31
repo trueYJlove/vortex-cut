@@ -191,7 +191,14 @@ def test_all_clip_patch_operations_and_normalization(tmp_path: Path) -> None:
     )
     clips = state["current_revision"]["document"]["clips"]
     assert [clip["order_index"] for clip in clips] == list(range(4))
-    assert [clip["timeline_start_us"] for clip in clips] == [0, 1_000_000, 3_000_000, 5_000_000]
+    # 自由定位：move_clip 只改列表顺序不重排时间；变速/裁剪在原位发生，
+    # 变长时把后续片段涟漪右推，缩短后留下空隙。
+    assert [clip["timeline_start_us"] for clip in clips] == [
+        7_000_000,
+        500_000,
+        2_500_000,
+        5_000_000,
+    ]
     assert clips[1]["layout"] == "crop_fill"
     assert clips[1]["audio"]["gain_db"] == -3.0
     state = _patch(service, state, [{"op": "remove_clip", "clip_id": image_id}])
@@ -411,7 +418,8 @@ def test_revision_listing_trimmed_caption_and_invalid_draft_shape(tmp_path: Path
         ],
     )
     caption = state["current_revision"]["document"]["captions"][0]
-    assert (caption["start_us"], caption["end_us"]) == (0, 800_000)
+    # 自由定位：裁剪后片段窗口为 [200ms, 1s)，绑定字幕钳制进该窗口。
+    assert (caption["start_us"], caption["end_us"]) == (200_000, 1_000_000)
     invalid = copy.deepcopy(state["current_revision"]["document"])
     invalid["ui_x"] = 10
     with pytest.raises(DomainError) as bad_draft:
@@ -428,25 +436,95 @@ def test_revision_listing_trimmed_caption_and_invalid_draft_shape(tmp_path: Path
         service.list_revisions("p1", cursor="bad")
 
 
-def test_audio_clip_insert_upgrades_tracks_and_appends_to_a1(tmp_path: Path) -> None:
+def test_audio_clip_insert_appends_to_a1(tmp_path: Path) -> None:
     service, _ = _service(tmp_path)
     state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
+    # 多轨道规范序（自上而下）：动态轨区 + C1 + V1 + A1；A1 恒存在。
     assert [track["id"] for track in state["current_revision"]["document"]["tracks"]] == [
+        "C1",
         "V1",
         "A1",
-        "C1",
     ]
+
+
+def test_track_management_add_remove_move_and_flags(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
+    video_id = state["current_revision"]["document"]["clips"][0]["clip_id"]
+
+    # 新增轨道插入到 C1 之上（动态区域底部）；视频轨 V2、文本轨 T1。
+    state = _patch(
+        service,
+        state,
+        [{"op": "add_track", "kind": "video"}, {"op": "add_track", "kind": "text"}],
+    )
+    tracks = state["current_revision"]["document"]["tracks"]
+    assert [track["id"] for track in tracks] == ["V2", "T1", "C1", "V1", "A1"]
+    assert [track["kind"] for track in tracks[:2]] == ["video", "text"]
+
+    # 跨轨移动：V1 → V2（同类型轨道）。
+    state = _patch(
+        service,
+        state,
+        [{"op": "position_clip", "clip_id": video_id, "timeline_start_us": 0, "track_id": "V2"}],
+    )
+    moved = next(
+        clip for clip in state["current_revision"]["document"]["clips"] if clip["clip_id"] == video_id
+    )
+    assert moved["track_id"] == "V2"
+
+    # 换位：T1 移到动态区域顶部。
+    state = _patch(service, state, [{"op": "move_track", "track_id": "T1", "to_index": 0}])
+    assert [track["id"] for track in state["current_revision"]["document"]["tracks"]][:2] == ["T1", "V2"]
+
+    # 轨道标志：隐藏/静音/独奏/锁定一次设置。
+    state = _patch(
+        service,
+        state,
+        [{"op": "set_track_flags", "track_id": "V2", "hidden": True, "muted": True, "solo": True, "locked": True}],
+    )
+    v2 = next(track for track in state["current_revision"]["document"]["tracks"] if track["id"] == "V2")
+    assert (v2["hidden"], v2["muted"], v2["solo"], v2["locked"]) == (True, True, True, True)
+
+    # 锁定轨道上的片段不可再操作；解锁由 set_track_flags 自身完成。
+    with pytest.raises(DomainError) as locked_track:
+        _patch(
+            service,
+            state,
+            [{"op": "position_clip", "clip_id": video_id, "timeline_start_us": 1_000_000}],
+        )
+    assert locked_track.value.code == "TIMELINE_LOCKED"
+    state = _patch(service, state, [{"op": "set_track_flags", "track_id": "V2", "locked": False}])
+
+    # 类型约束：文本轨不支持静音；音频轨不可新增；音频片段不可上视频轨。
+    with pytest.raises(DomainError):
+        _patch(service, state, [{"op": "set_track_flags", "track_id": "T1", "muted": True}])
+    with pytest.raises(DomainError):
+        _patch(service, state, [{"op": "add_track", "kind": "audio"}])
+    with pytest.raises(DomainError):
+        _patch(service, state, [{"op": "position_clip", "clip_id": video_id, "timeline_start_us": 0, "track_id": "T1"}])
+
+    # 删除动态轨道：其上片段级联删除；固定轨道不可删。
+    state = _patch(service, state, [{"op": "remove_track", "track_id": "V2"}])
+    assert all(clip["clip_id"] != video_id for clip in state["current_revision"]["document"]["clips"])
+    assert all(track["id"] != "V2" for track in state["current_revision"]["document"]["tracks"])
+    with pytest.raises(DomainError):
+        _patch(service, state, [{"op": "remove_track", "track_id": "V1"}])
+    with pytest.raises(DomainError):
+        _patch(service, state, [{"op": "move_track", "track_id": "A1", "to_index": 0}])
+
+
+def test_audio_insert_appends_to_a1_with_free_positions(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
     state = _patch(
         service,
         state,
         [{"op": "insert_asset_clip", "asset_id": "a1", "at_index": 0}],
     )
     document = state["current_revision"]["document"]
-    assert [track["id"] for track in document["tracks"]] == ["V1", "A1", "C1"]
     assert any(track["id"] == "A1" and track["kind"] == "audio" for track in document["tracks"])
-    video_clips = [c for c in document["clips"] if c["track_id"] == "V1"]
     audio_clips = [c for c in document["clips"] if c["track_id"] == "A1"]
-    assert len(video_clips) == 1
     assert len(audio_clips) == 1
     audio = audio_clips[0]
     assert (audio["asset_kind"], audio["timeline_start_us"], audio["timeline_end_us"]) == (
@@ -477,7 +555,7 @@ def test_audio_clip_insert_upgrades_tracks_and_appends_to_a1(tmp_path: Path) -> 
     assert [(c["timeline_start_us"], c["timeline_end_us"]) for c in video_clips] == [(0, 5_000_000)]
 
 
-def test_position_clip_moves_audio_freely_but_rejects_v1(tmp_path: Path) -> None:
+def test_position_clip_moves_audio_and_video_freely_but_rejects_overlaps(tmp_path: Path) -> None:
     service, _ = _service(tmp_path)
     state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
     state = _patch(
@@ -508,13 +586,58 @@ def test_position_clip_moves_audio_freely_but_rejects_v1(tmp_path: Path) -> None
     )
     assert (audio["timeline_start_us"], audio["timeline_end_us"]) == (12_500_000, 20_500_000)
 
-    with pytest.raises(DomainError) as video_position:
+    # V1 视频片段同样可以自由定位（可留空隙），时长保持不变。
+    state = _patch(
+        service,
+        state,
+        [{"op": "position_clip", "clip_id": video_id, "timeline_start_us": 1_000_000}],
+    )
+    video = next(c for c in state["current_revision"]["document"]["clips"] if c["track_id"] == "V1")
+    assert (video["timeline_start_us"], video["timeline_end_us"]) == (1_000_000, 6_000_000)
+    state = _patch(
+        service,
+        state,
+        [{"op": "position_clip", "clip_id": video_id, "timeline_start_us": 0}],
+    )
+    video = next(c for c in state["current_revision"]["document"]["clips"] if c["track_id"] == "V1")
+    assert (video["timeline_start_us"], video["timeline_end_us"]) == (0, 5_000_000)
+
+    # 与同轨其他片段重叠被拒绝。
+    state = _patch(
+        service,
+        state,
+        [
+            {
+                "op": "insert_asset_clip",
+                "asset_id": "v2",
+                "at_index": 1,
+                "source_start_us": 0,
+                "source_end_us": 1_000_000,
+            }
+        ],
+    )
+    second_video_id = next(
+        c["clip_id"]
+        for c in state["current_revision"]["document"]["clips"]
+        if c["track_id"] == "V1" and c["clip_id"] != video_id
+    )
+    with pytest.raises(DomainError) as overlap:
         _patch(
             service,
             state,
-            [{"op": "position_clip", "clip_id": video_id, "timeline_start_us": 1_000_000}],
+            [{"op": "position_clip", "clip_id": second_video_id, "timeline_start_us": 1_000_000}],
         )
-    assert video_position.value.code == "TIMELINE_INVALID"
+    assert overlap.value.code == "TIMELINE_INVALID"
+    # 紧贴（首尾相接）是允许的。
+    state = _patch(
+        service,
+        state,
+        [{"op": "position_clip", "clip_id": second_video_id, "timeline_start_us": 5_000_000}],
+    )
+    moved = next(
+        c for c in state["current_revision"]["document"]["clips"] if c["clip_id"] == second_video_id
+    )
+    assert (moved["timeline_start_us"], moved["timeline_end_us"]) == (5_000_000, 6_000_000)
     with pytest.raises(DomainError) as negative:
         _patch(
             service,
@@ -631,7 +754,8 @@ def test_audio_and_video_tracks_coexist_with_independent_normalization(tmp_path:
     )
     document = state["current_revision"]["document"]
     video = next(c for c in document["clips"] if c["track_id"] == "V1")
-    assert (video["timeline_start_us"], video["timeline_end_us"]) == (0, 3_500_000)
+    # 自由定位：V1 裁剪原位发生（左缘右移、右缘固定），不再重打包回零。
+    assert (video["timeline_start_us"], video["timeline_end_us"]) == (500_000, 4_000_000)
     audio_by_id = {c["clip_id"]: c for c in document["clips"] if c["track_id"] == "A1"}
     assert (
         audio_by_id[audio_ids[0]]["timeline_start_us"],
@@ -684,11 +808,21 @@ def test_set_speed_rescales_v1_timeline_and_later_clips(tmp_path: Path) -> None:
     assert clips[0]["speed_milli"] == 500
 
     # 恢复原速 + 加速：4x 时 5s 视频 → 1.25s。
+    # 自由定位：缩短后不再自动合拢，v2 保持在被推开的 10s 位置。
     state = _patch(service, state, [{"op": "set_speed", "clip_id": first_id, "speed_milli": 1000}])
     clips = state["current_revision"]["document"]["clips"]
     assert (clips[0]["timeline_start_us"], clips[0]["timeline_end_us"]) == (0, 5_000_000)
-    assert clips[1]["timeline_start_us"] == 5_000_000
+    assert clips[1]["timeline_start_us"] == 10_000_000
     state = _patch(service, state, [{"op": "set_speed", "clip_id": second_id, "speed_milli": 4000}])
+    clips = state["current_revision"]["document"]["clips"]
+    assert (clips[1]["timeline_start_us"], clips[1]["timeline_end_us"]) == (10_000_000, 10_500_000)
+
+    # 变短后的空隙可以通过 position_clip 重新贴回（自由定位语义）。
+    state = _patch(
+        service,
+        state,
+        [{"op": "position_clip", "clip_id": second_id, "timeline_start_us": 5_000_000}],
+    )
     clips = state["current_revision"]["document"]["clips"]
     assert (clips[1]["timeline_start_us"], clips[1]["timeline_end_us"]) == (5_000_000, 5_500_000)
 

@@ -951,15 +951,36 @@ class RenderService:
 
 
 def _rendered_duration_us(segments: list[dict[str, Any]]) -> int:
-    """渲染产物时长 = 时间线总长 − 转场区间总和（B2 借用式重叠语义）。"""
+    """渲染产物时长 = 主视频轨时间线总长（含空隙黑底填充）− 生效转场区间总和。
+
+    多轨道语义：只统计主视频轨（V1）上可见的片段；主轨隐藏/为空时输出为
+    全程黑场，时长取全部片段的最大终点。转场只在锚点与其时间序后继首尾
+    相接时生效（B2 借用式重叠语义）。
+    """
     if not segments:
         return 0
-    total = segments[-1]["timeline_end_us"]
-    transition_total = sum(
-        int(segment["transition_in"]["duration_us"])
-        for segment in segments
-        if isinstance(segment.get("transition_in"), dict)
+    visual = sorted(
+        (
+            segment
+            for segment in segments
+            if (
+                segment.get("asset_kind") != "audio"
+                and segment.get("track_id", "V1") == "V1"
+                and not segment.get("track_hidden", False)
+            )
+        ),
+        key=lambda segment: int(segment["timeline_start_us"]),
     )
+    if not visual:
+        return max(int(segment["timeline_end_us"]) for segment in segments)
+    total = max(int(segment["timeline_end_us"]) for segment in visual)
+    transition_total = 0
+    for index in range(len(visual) - 1):
+        transition = visual[index].get("transition_in")
+        if not isinstance(transition, dict):
+            continue
+        if int(visual[index + 1]["timeline_start_us"]) == int(visual[index]["timeline_end_us"]):
+            transition_total += int(transition["duration_us"])
     return max(1, total - transition_total)
 
 
