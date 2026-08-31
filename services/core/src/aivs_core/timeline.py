@@ -28,6 +28,7 @@ PATCH_OPERATIONS = {
     "set_reverse_playback",
     "set_image_duration",
     "add_caption",
+    "import_captions",
     "remove_caption",
     "update_caption",
     "set_caption_timing",
@@ -49,6 +50,7 @@ AI_PATCH_OPERATIONS = PATCH_OPERATIONS - {
     "insert_asset_clip",
     "insert_transcript_segments",
     "add_caption",
+    "import_captions",
     "set_clip_locked",
     "add_track",
     "remove_track",
@@ -102,7 +104,7 @@ KEYFRAME_RANGES = {
 # B4 字幕样式覆盖：字段白名单与取值范围。
 CAPTION_STYLE_FONT_RANGE = (24, 144)
 CAPTION_STYLE_OUTLINE_RANGE = (0, 10)
-CAPTION_STYLE_ALIGNMENT = {2, 5, 8}
+CAPTION_STYLE_ALIGNMENT = {1, 2, 3, 4, 5, 6, 7, 8, 9}
 CAPTION_STYLE_MARGIN_RANGE = (0, 600)
 
 
@@ -110,10 +112,19 @@ def _validate_caption_style(style: Any) -> dict[str, Any]:
     """校验字幕样式覆盖并返回规范化副本（部分字段；见设计 §1.1）。"""
     if not isinstance(style, dict) or not style:
         raise DomainError("TIMELINE_INVALID", "字幕样式覆盖不能为空")
-    allowed = {"font_size", "primary_color", "outline_color", "outline", "alignment", "margin_v", "pos_x", "pos_y"}
+    allowed = {
+        "font_name", "font_size", "primary_color", "outline_color", "outline",
+        "alignment", "margin_v", "letter_spacing", "bold", "italic", "underline",
+        "pos_x", "pos_y",
+    }
     if set(style) - allowed:
         raise DomainError("TIMELINE_INVALID", "字幕样式字段不合法")
     result: dict[str, Any] = {}
+    font_name = style.get("font_name")
+    if font_name is not None:
+        if not isinstance(font_name, str) or not 0 < len(font_name) <= 60:
+            raise DomainError("TIMELINE_INVALID", "字体名称不合法")
+        result["font_name"] = font_name
     font_size = style.get("font_size")
     if font_size is not None:
         if isinstance(font_size, bool) or not isinstance(font_size, int):
@@ -142,8 +153,20 @@ def _validate_caption_style(style: Any) -> dict[str, Any]:
     alignment = style.get("alignment")
     if alignment is not None:
         if isinstance(alignment, bool) or not isinstance(alignment, int) or alignment not in CAPTION_STYLE_ALIGNMENT:
-            raise DomainError("TIMELINE_INVALID", "字幕对齐仅支持 底部(2)/居中(5)/顶部(8)")
+            raise DomainError("TIMELINE_INVALID", "字幕对齐需为 ASS numpad 1-9")
         result["alignment"] = alignment
+    letter_spacing = style.get("letter_spacing")
+    if letter_spacing is not None:
+        if isinstance(letter_spacing, bool) or not isinstance(letter_spacing, (int, float)) or not 0 <= letter_spacing <= 50:
+            raise DomainError("TIMELINE_INVALID", "字间距需在 0-50 之间")
+        result["letter_spacing"] = float(letter_spacing)
+    for flag_key in ("bold", "italic", "underline"):
+        flag = style.get(flag_key)
+        if flag is None:
+            continue
+        if not isinstance(flag, bool):
+            raise DomainError("TIMELINE_INVALID", "样式开关需为布尔值")
+        result[flag_key] = flag
     margin_v = style.get("margin_v")
     if margin_v is not None:
         if isinstance(margin_v, bool) or not isinstance(margin_v, int):
@@ -993,6 +1016,50 @@ class TimelineService:
                     "source_segment_ids": [],
                 }
             )
+        elif op == "import_captions":
+            # 批量导入字幕（SRT/ASS/LRC 在 desktop 端解析为结构化条目）。
+            # replace_existing=true 时先清空手工字幕（origin=user）再导入；
+            # 条目按时间排序、校验不重叠，逐条走 add_caption 相同的落库路径。
+            _exact_keys(
+                operation,
+                {"op", "entries", "preset_id", "replace_existing"},
+            )
+            entries = operation.get("entries")
+            if not isinstance(entries, list) or not entries:
+                raise DomainError("TIMELINE_INVALID", "字幕条目不合法")
+            if len(entries) > 2000:
+                raise DomainError("TIMELINE_INVALID", "单次最多导入 2000 条字幕")
+            preset = _enum(operation.get("preset_id"), CAPTION_PRESETS, "字幕预设不合法")
+            parsed: list[tuple[int, int, str]] = []
+            for entry in entries:
+                if not isinstance(entry, dict) or set(entry.keys()) != {"start_us", "end_us", "text"}:
+                    raise DomainError("TIMELINE_INVALID", "字幕条目不合法")
+                start = _integer(entry.get("start_us"), "字幕开始时间不合法")
+                end = _integer(entry.get("end_us"), "字幕结束时间不合法")
+                if start < 0 or end - start < 200_000:
+                    raise DomainError("TIMELINE_INVALID", "字幕条目时长不足 0.2s")
+                parsed.append((start, end, _caption_text(entry.get("text"))))
+            parsed.sort(key=lambda item: item[0])
+            for index in range(1, len(parsed)):
+                if parsed[index][0] < parsed[index - 1][1]:
+                    raise DomainError("TIMELINE_INVALID", "字幕条目时间重叠")
+            if operation.get("replace_existing") is True:
+                captions[:] = [c for c in captions if c.get("origin") != "user"]
+            for start, end, text in parsed:
+                captions.append(
+                    {
+                        "caption_id": f"caption_{new_id()}",
+                        "track_id": "C1",
+                        "source_clip_id": None,
+                        "start_us": start,
+                        "end_us": end,
+                        "text": text,
+                        "preset_id": preset,
+                        "origin": "user",
+                        "edited": True,
+                        "source_segment_ids": [],
+                    }
+                )
         elif op == "remove_caption":
             _exact_keys(operation, {"op", "caption_id"})
             captions.remove(_caption(document, operation.get("caption_id")))
@@ -1534,26 +1601,29 @@ class TimelineService:
                         "solo": bool(track.get("solo", False)),
                     }
                 )
-        fixed: dict[str, dict[str, Any]] = {}
+        # 固定轨道：V1(主视频)/A1(音频) 始终存在于尾部；C1(字幕) 可被删除，
+        # 删除后不再自动补回（动态视频/文本轨在前，C1 若存在紧随其后）。
         defaults = {
-            CAPTION_TRACK_ID: "text",
             MAIN_TRACK_ID: "video",
             AUDIO_TRACK_ID: "audio",
         }
+        fixed: dict[str, dict[str, Any]] = {}
         for track_id, kind in defaults.items():
             existing = next((t for t in normalized if t.get("id") == track_id), None)
             if existing is None:
                 existing = _empty_track(track_id, kind)
             existing["kind"] = kind
             fixed[track_id] = existing
+        caption = next((t for t in normalized if t.get("id") == CAPTION_TRACK_ID), None)
         dynamic = [
             track
             for track in normalized
-            if track.get("id") not in defaults
+            if track.get("id") not in defaults and track.get("id") != CAPTION_TRACK_ID
         ]
+        caption_part = [caption] if caption is not None else []
         document["tracks"] = [
             *dynamic,
-            fixed[CAPTION_TRACK_ID],
+            *caption_part,
             fixed[MAIN_TRACK_ID],
             fixed[AUDIO_TRACK_ID],
         ]
@@ -1623,12 +1693,12 @@ class TimelineService:
         }:
             raise DomainError("TIMELINE_INVALID", "Timeline 画布不符合 v1")
         tracks = document.get("tracks")
+        # 尾部固定：V1(主视频) → A1(音频)；C1(字幕) 可删，存在时位于 V1 之前。
         if (
             not isinstance(tracks, list)
-            or len(tracks) < 3
-            or [track.get("id") for track in tracks[-3:]]
-            != [CAPTION_TRACK_ID, MAIN_TRACK_ID, AUDIO_TRACK_ID]
-            or [track.get("kind") for track in tracks[-3:]] != ["text", "video", "audio"]
+            or len(tracks) < 2
+            or [track.get("id") for track in tracks[-2:]] != [MAIN_TRACK_ID, AUDIO_TRACK_ID]
+            or [track.get("kind") for track in tracks[-2:]] != ["video", "audio"]
         ):
             raise DomainError("TIMELINE_INVALID", "Timeline 轨道结构不合法")
         track_ids = [track.get("id") for track in tracks]
@@ -1636,8 +1706,8 @@ class TimelineService:
             len(set(track_ids)) != len(track_ids)
             or any(not isinstance(track_id, str) or not track_id for track_id in track_ids)
             or any(
-                track_id in {CAPTION_TRACK_ID, MAIN_TRACK_ID, AUDIO_TRACK_ID}
-                for track_id in track_ids[:-3]
+                track_id in {MAIN_TRACK_ID, AUDIO_TRACK_ID}
+                for track_id in track_ids[:-2]
             )
         ):
             raise DomainError("TIMELINE_INVALID", "Timeline 轨道结构不合法")
@@ -1810,7 +1880,12 @@ class TimelineService:
             caption_ids.add(caption_id)
             start = _integer(caption.get("start_us"), "字幕开始时间不合法")
             end = _integer(caption.get("end_us"), "字幕结束时间不合法")
-            if start < previous_end or end - start < MIN_CAPTION_US or end > total_duration:
+            # 手工/导入字幕（origin=user）允许超出素材总时长（剪映式：文本可
+            # 先于素材存在，靠预览画布显示）；转录字幕仍约束在素材范围内。
+            duration_limit = total_duration if caption.get("origin") == "transcript" else None
+            if start < previous_end or end - start < MIN_CAPTION_US or (
+                duration_limit is not None and end > duration_limit
+            ):
                 raise DomainError("TIMELINE_INVALID", "字幕时间范围重叠或越界")
             previous_end = end
             _caption_text(caption.get("text"))

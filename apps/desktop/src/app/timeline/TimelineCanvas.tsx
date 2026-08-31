@@ -1119,10 +1119,17 @@ function drawTimeline(
     // Skip if too narrow
     if (rect.width < 10) continue;
 
-    // Background with rounded corners
+    // Background with rounded corners（剪映式：手工/导入文本 = 橘色条）。
     const bgY = rect.y + 2;
     const bgH = rect.height - 4;
-    ctx.fillStyle = isSelected ? "#d9a04a" : isActive ? "#b8863a" : "#8a6a3a";
+    const manualText = rect.caption.origin === "user";
+    ctx.fillStyle = isSelected
+      ? manualText ? "#e8622a" : "#d9a04a"
+      : isActive
+        ? manualText ? "#d95b24" : "#b8863a"
+        : manualText
+          ? "#c6511e"
+          : "#8a6a3a";
     ctx.beginPath();
     ctx.roundRect(rect.x, bgY, rect.width, bgH, 4);
     ctx.fill();

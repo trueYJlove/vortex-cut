@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import unicodedata
 from pathlib import Path
 from typing import Any
@@ -51,9 +52,22 @@ def caption_override_tags(
     preset_id = caption.get("preset_id")
     preset = preset_values.get(preset_id, {})
     tags = ""
+    font_name = override.get("font_name")
+    if font_name is not None:
+        # 字体名仅允许安全字符（渲染端二次校验，防线与 core 一致）。
+        if not isinstance(font_name, str) or not re.fullmatch(r"[\w @\-]{1,60}", font_name):
+            raise DomainError("TIMELINE_INVALID", "字幕字体名称不合法")
+        tags += f"\\fn{font_name}"
     font_size = override.get("font_size")
     if font_size is not None:
         tags += f"\\fs{int(font_size)}"
+    letter_spacing = override.get("letter_spacing")
+    if letter_spacing is not None:
+        tags += f"\\spc{round(float(letter_spacing))}"
+    for flag_key, tag_name in (("bold", "b"), ("italic", "i"), ("underline", "u")):
+        flag = override.get(flag_key)
+        if flag is not None:
+            tags += f"\\{tag_name}{1 if flag else 0}"
     primary = override.get("primary_color")
     if primary is not None:
         tags += _ass_rgb_to_bgr_tag(primary)

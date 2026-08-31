@@ -98,6 +98,8 @@ export interface DesktopApi {
   importAsset: (input: { project_id: ProjectId; kind?: AssetKind }) => Promise<ImportedAsset | null>;
   refreshAsset: (assetId: string) => Promise<AssetPresentation>;
   relocateAsset: (input: { asset_id: string }) => Promise<ImportedAsset | null>;
+  /** 弹出字幕文件选择框（SRT/ASS/SSA/LRC），返回文本内容；取消返回 null。 */
+  importSubtitle: () => Promise<{ file_name: string; content: string } | null>;
   listJobs: (input: { project_id: ProjectId; status?: Job["status"]; limit?: number; cursor?: string }) => Promise<JobPage>;
   createJob: (input: { project_id: ProjectId; media_id: MediaInfo["media_id"]; kind: "proxy" | "portrait_sample"; encoder_mode?: "auto" | "software"; start_us?: number; duration_us?: number; layout?: "blurred_background" }) => Promise<Job>;
   getJob: (jobId: JobId) => Promise<Job>;
@@ -234,6 +236,7 @@ const api: DesktopApi = {
   importAsset: input => ipcRenderer.invoke("asset:import", input),
   refreshAsset: assetId => ipcRenderer.invoke("asset:refresh", assetId),
   relocateAsset: input => ipcRenderer.invoke("asset:relocate", input),
+  importSubtitle: () => ipcRenderer.invoke("subtitle:import"),
   listJobs: input => ipcRenderer.invoke("job:list", input),
   createJob: input => ipcRenderer.invoke("job:create", input),
   getJob: jobId => ipcRenderer.invoke("job:get", jobId),

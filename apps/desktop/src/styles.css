@@ -387,6 +387,22 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--vc-accent); }
 .track-row-actions button:hover { background: #27333b; color: #fff; }
 .track-row-actions button:disabled { opacity: 0.35; cursor: default; }
 
+/* 文本素材面板（剪映式）：T 图标卡片网格。 */
+.text-materials { margin: 8px 10px 4px; padding: 10px; border: 1px solid #303b40; border-radius: 8px; background: #182026; }
+.text-materials-head { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; color: #9cc4e8; font-size: 12px; font-weight: 600; }
+.text-materials-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.text-materials-grid button { display: grid; justify-items: center; gap: 6px; padding: 12px 6px; font-size: 12px; background: #222b30; border-radius: 6px; }
+.text-materials-grid button:hover:not(:disabled) { background: #2b3740; }
+.text-material-icon { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 5px; background: #2f3d46; color: #e6edef; font-weight: 700; }
+/* 文本样式开关（B/I/U）与对齐宫格。 */
+.text-style-flags { display: inline-flex; gap: 4px; }
+.text-style-flags button { min-width: 26px; min-height: 26px; padding: 0; font-size: 12px; }
+.text-style-flags button.active { border-color: #12b5a6; color: #12b5a6; }
+.alignment-grid { display: inline-flex; flex-direction: column; gap: 2px; }
+.alignment-row { display: inline-flex; gap: 2px; }
+.alignment-row button { min-width: 26px; min-height: 20px; padding: 0; font-size: 9px; color: #93a3ac; }
+.alignment-row button.active { border-color: #12b5a6; color: #12b5a6; }
+
 .timeline-canvas-container { flex: 1; min-width: 0; position: relative; overflow: hidden; flex-shrink: 0; }
 .timeline-canvas-container canvas { display: block; }
 .timeline-empty-drop { color: var(--vc-text-2); font-size: 13px; }

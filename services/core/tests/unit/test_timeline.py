@@ -290,6 +290,69 @@ def test_caption_operations_and_clip_linkage(tmp_path: Path) -> None:
     assert state["current_revision"]["document"]["captions"] == []
 
 
+def test_import_captions_batch_replaces_and_validates(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "empty"})
+    # 批量导入：乱序条目自动排序；replace_existing 清掉旧手工字幕。
+    state = _patch(
+        service,
+        state,
+        [
+            {
+                "op": "add_caption",
+                "start_us": 0,
+                "end_us": 300_000,
+                "text": "旧字幕",
+                "preset_id": "default-bottom",
+                "source_clip_id": None,
+            },
+            {
+                "op": "import_captions",
+                "entries": [
+                    {"start_us": 1_000_000, "end_us": 1_500_000, "text": "第二句"},
+                    {"start_us": 0, "end_us": 800_000, "text": "第一句"},
+                ],
+                "preset_id": "default-bottom",
+                "replace_existing": True,
+            },
+        ],
+    )
+    captions = state["current_revision"]["document"]["captions"]
+    assert [c["text"] for c in captions] == ["第一句", "第二句"]
+    assert all(c["origin"] == "user" and c["track_id"] == "C1" for c in captions)
+    # 时间重叠拒绝（原子回滚，上一状态不变）。
+    with pytest.raises(DomainError):
+        _patch(
+            service,
+            state,
+            [
+                {
+                    "op": "import_captions",
+                    "entries": [
+                        {"start_us": 0, "end_us": 1_000_000, "text": "a"},
+                        {"start_us": 500_000, "end_us": 1_200_000, "text": "b"},
+                    ],
+                    "preset_id": "default-bottom",
+                    "replace_existing": False,
+                }
+            ],
+        )
+    # 条目时长不足 0.2s 拒绝。
+    with pytest.raises(DomainError):
+        _patch(
+            service,
+            state,
+            [
+                {
+                    "op": "import_captions",
+                    "entries": [{"start_us": 0, "end_us": 100_000, "text": "短"}],
+                    "preset_id": "default-bottom",
+                    "replace_existing": False,
+                }
+            ],
+        )
+
+
 def test_patch_is_atomic_conflict_navigation_branch_and_draft(tmp_path: Path) -> None:
     service, database = _service(tmp_path)
     state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
@@ -512,6 +575,16 @@ def test_track_management_add_remove_move_and_flags(tmp_path: Path) -> None:
         _patch(service, state, [{"op": "remove_track", "track_id": "V1"}])
     with pytest.raises(DomainError):
         _patch(service, state, [{"op": "move_track", "track_id": "A1", "to_index": 0}])
+
+    # 文本轨与动态轨一致：可删除（删后 V1/A1 尾部结构仍合法），可重建。
+    state = _patch(service, state, [{"op": "remove_track", "track_id": "C1"}])
+    remaining_ids = [track["id"] for track in state["current_revision"]["document"]["tracks"]]
+    assert remaining_ids[-2:] == ["V1", "A1"]
+    assert "C1" not in remaining_ids
+    state = _patch(service, state, [{"op": "add_track", "kind": "text"}])
+    rebuilt_ids = [track["id"] for track in state["current_revision"]["document"]["tracks"]]
+    # 新文本轨编号递增（不复用已删 id），插入到 V1 之前。
+    assert rebuilt_ids[-3].startswith("T") and rebuilt_ids[-2:] == ["V1", "A1"]
 
 
 def test_audio_insert_appends_to_a1_with_free_positions(tmp_path: Path) -> None:
@@ -1226,13 +1299,17 @@ def test_caption_style_set_merge_clear_and_diff(tmp_path: Path) -> None:
     assert any(c["type"] == "style_changed" for c in diff["caption_changes"])
 
     # 非法路径：字段越界、颜色格式、对齐值、坐标越界、未知字段。
+    # （对齐已扩展为 ASS numpad 1-9；0 越界、10 越界仍拒绝。）
     for bad_style in (
         {"font_size": 200},
         {"outline": 20},
-        {"alignment": 3},
+        {"alignment": 0},
+        {"alignment": 10},
         {"margin_v": 900},
         {"primary_color": "red"},
         {"pos_x": 1.5},
+        {"letter_spacing": -1},
+        {"bold": "yes"},
         {"unknown_field": 1},
     ):
         with pytest.raises(DomainError):

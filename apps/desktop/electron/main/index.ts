@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, protocol, shell } from "electron";
 import { join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
-import { access, readdir } from "node:fs/promises";
+import { access, readdir, readFile } from "node:fs/promises";
 import { CoreAdminClient, CoreHttpError } from "./core-admin-client.js";
 import { ProviderSecretStore, reinjectProviderSecrets, removeProviderSecret, saveProviderSecret } from "./provider-secrets.js";
 import { ImageProviderSecretStore, reinjectImageProviderSecrets } from "./image-provider-secrets.js";
@@ -325,6 +325,21 @@ function registerIpc(): void {
     const asset = await fetchWithUi<Asset>(`${API_PREFIX}/assets/${assetId}/relocate`, { method: "POST", body: JSON.stringify({ grant_id: grant.grant_id }) });
     restrictedMedia.register(asset.asset_id, selectedPath);
     return { grant, asset, media_url: await restrictedMediaUrl(asset.asset_id) };
+  });
+
+  // 本地字幕导入：弹文件框（SRT/ASS/SSA/LRC）读取文本内容返回给渲染进程
+  // 解析（不走 Core 资产库——字幕文件不作为媒体素材管理）。
+  ipcMain.handle("subtitle:import", async () => {
+    const result = await dialog.showOpenDialog(windowRef!, {
+      title: "导入本地字幕",
+      properties: ["openFile"],
+      filters: [{ name: "Subtitle files", extensions: ["srt", "ass", "ssa", "lrc"] }],
+    });
+    if (result.canceled || !result.filePaths[0]) return null;
+    const filePath = result.filePaths[0];
+    const fileName = filePath.split(/[\\/]/).pop() ?? "subtitle";
+    const content = await readFile(filePath, "utf8");
+    return { file_name: fileName, content };
   });
 
   ipcMain.handle("job:list", async (_event, input: { project_id: ProjectId; status?: string; limit?: number; cursor?: string }) => {
