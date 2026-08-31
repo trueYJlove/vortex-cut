@@ -171,10 +171,11 @@ describe("Stage 1A/1B 工作流", () => {
     intervalSpy.mockRestore();
   });
 
-  it("支持素材刷新、重新定位和只读 Transcript 查看", async () => {
+  it("支持素材重新定位和只读 Transcript 查看", async () => {
     const api = desktopApi(); window.desktop = api; render(<App />); await screen.findByText(video.display_name);
-    fireEvent.click(screen.getAllByRole("button", { name: "刷新" })[0]); fireEvent.click(screen.getAllByRole("button", { name: "重新定位" })[0]);
-    await waitFor(() => expect(api.refreshAsset).toHaveBeenCalledWith(video.asset_id)); await waitFor(() => expect(api.relocateAsset).toHaveBeenCalledWith({ asset_id: video.asset_id }));
+    // 刷新按钮已移除（导入/重定位时自动重扫）；重新定位是断链自愈入口，保留。
+    fireEvent.click(screen.getAllByRole("button", { name: "重新定位" })[0]);
+    await waitFor(() => expect(api.relocateAsset).toHaveBeenCalledWith({ asset_id: video.asset_id }));
     fireEvent.click(screen.getByTitle("转录")); expect(await screen.findByText("当前没有可用的本地 ASR 模型")).toBeVisible();
     fireEvent.click(screen.getAllByRole("button", { name: /^转录$/ })[0]);
     // 转录结果在"转录"子标签下：切换后查看。
@@ -205,7 +206,8 @@ describe("素材箱交互", () => {
     fireEvent.click(screen.getByRole("button", { name: "切换为缩略图视图" }));
     expect(document.querySelector(".asset-list.asset-grid")).not.toBeNull();
     expect(document.querySelectorAll(".asset-card").length).toBe(2);
-    expect(screen.getAllByRole("button", { name: "刷新" }).length).toBeGreaterThan(0);
+    // 刷新按钮已移除；缩略图卡片仍保留重新定位操作。
+    expect(screen.getAllByRole("button", { name: "重新定位" }).length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: "切换为列表视图" }));
     expect(document.querySelector(".asset-list.asset-table")).not.toBeNull();
   });
