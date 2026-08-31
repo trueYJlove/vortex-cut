@@ -106,9 +106,10 @@ describe("Stage 1A/1B 工作流", () => {
     await screen.findByRole("button", { name: "重新打开项目" });
     fireEvent.click(screen.getByRole("button", { name: "重新打开项目" })); await waitFor(() => expect(api.reopenProject).toHaveBeenCalledWith("project_1"));
     await screen.findByRole("button", { name: "归档项目" });
-    for (const label of ["视频", "音频", "图片", "文本"]) fireEvent.click(screen.getByRole("button", { name: `导入${label}` }));
-    await waitFor(() => expect(api.importAsset).toHaveBeenCalledTimes(4));
-    expect(api.importAsset).toHaveBeenNthCalledWith(1, { project_id: "project_1", kind: "video" }); expect(api.importAsset).toHaveBeenNthCalledWith(4, { project_id: "project_1", kind: "text" });
+    // txt 不再提供导入入口（文本创作走默认文本/导入字幕）。
+    for (const label of ["视频", "音频", "图片"]) fireEvent.click(screen.getByRole("button", { name: `导入${label}` }));
+    await waitFor(() => expect(api.importAsset).toHaveBeenCalledTimes(3));
+    expect(api.importAsset).toHaveBeenNthCalledWith(1, { project_id: "project_1", kind: "video" }); expect(api.importAsset).toHaveBeenNthCalledWith(3, { project_id: "project_1", kind: "image" });
   });
 
   it("卸载后的启动请求不会穿透到后来挂载的 Desktop bridge", async () => {
@@ -176,14 +177,20 @@ describe("Stage 1A/1B 工作流", () => {
     await waitFor(() => expect(api.refreshAsset).toHaveBeenCalledWith(video.asset_id)); await waitFor(() => expect(api.relocateAsset).toHaveBeenCalledWith({ asset_id: video.asset_id }));
     fireEvent.click(screen.getByTitle("转录")); expect(await screen.findByText("当前没有可用的本地 ASR 模型")).toBeVisible();
     fireEvent.click(screen.getAllByRole("button", { name: /^转录$/ })[0]);
+    // 转录结果在"转录"子标签下：切换后查看。
+    fireEvent.click(screen.getByRole("tab", { name: /^转录/ }));
     fireEvent.click(await screen.findByRole("button", { name: /查看转录/ })); expect(await screen.findByText("原始 ASR 结果只读。字幕修订不会覆盖这份记录。")).toBeVisible(); expect(screen.getAllByText("第一句")).toHaveLength(2);
   });
 
   it("支持模型确认下载、取消下载、发起转录及任务取消重试", async () => {
-    const api = desktopApi({ models: [model] }); window.desktop = api; render(<App />); await screen.findByText("本地测试模型");
+    const api = desktopApi({ models: [model] }); window.desktop = api; render(<App />); fireEvent.click(screen.getByRole("tab", { name: /^模型/ })); await screen.findByText("本地测试模型");
     fireEvent.click(screen.getByRole("button", { name: "下载模型" })); expect(await screen.findByRole("heading", { name: "确认下载本地模型" })).toBeVisible(); const confirm = screen.getByRole("button", { name: "确认并下载" }); expect(confirm).toBeDisabled(); fireEvent.click(screen.getByRole("checkbox", { name: /接受/ })); fireEvent.click(confirm); await waitFor(() => expect(api.downloadModel).toHaveBeenCalledWith({ model_id: model.model_id, license_acceptance: "license_1" }));
     fireEvent.click(await screen.findByTitle("取消模型下载")); await waitFor(() => expect(api.cancelModelDownload).toHaveBeenCalledWith(model.model_id));
-    const readyApi = desktopApi({ models: [readyModel], jobs: [job] }); window.desktop = readyApi; cleanup(); render(<App />); await screen.findByText("本地测试模型"); fireEvent.click(await screen.findByTitle("转录")); expect(await screen.findByRole("heading", { name: "创建本地转录" })).toBeVisible(); fireEvent.click(screen.getByRole("button", { name: "开始转录" })); await waitFor(() => expect(readyApi.createTranscription).toHaveBeenCalledWith(expect.objectContaining({ asset_id: video.asset_id, model_id: model.model_id })));
+    const readyApi = desktopApi({ models: [readyModel], jobs: [job] }); window.desktop = readyApi; cleanup(); render(<App />); fireEvent.click(screen.getByRole("tab", { name: /^模型/ })); await screen.findByText("本地测试模型");
+    // 发起转录的按钮在素材行操作区：切回"素材"标签再点。
+    fireEvent.click(screen.getByRole("tab", { name: /^素材/ })); fireEvent.click(await screen.findByTitle("转录")); expect(await screen.findByRole("heading", { name: "创建本地转录" })).toBeVisible(); fireEvent.click(screen.getByRole("button", { name: "开始转录" })); await waitFor(() => expect(readyApi.createTranscription).toHaveBeenCalledWith(expect.objectContaining({ asset_id: video.asset_id, model_id: model.model_id })));
+    // 任务在"任务"子标签下：切换后重试/取消。
+    fireEvent.click(screen.getByRole("tab", { name: /^任务/ }));
     fireEvent.click(screen.getByRole("button", { name: "重试转录" })); await waitFor(() => expect(readyApi.createTranscription).toHaveBeenCalledTimes(2)); fireEvent.click(screen.getAllByRole("button", { name: "取消任务" })[0]); await waitFor(() => expect(readyApi.cancelJob).toHaveBeenCalledWith("job_created_2"));
   });
 });
@@ -246,7 +253,9 @@ describe("Stage 1C Editor", () => {
   it("创建空时间线后忽略迟到的 404，并以冻结契约追加素材与转录", async () => {
     let rejectTimeline!: (reason: unknown) => void; const pendingTimeline = new Promise<TimelineState>((_, reject) => { rejectTimeline = reject; }); const api = desktopApi({ timeline: null }); api.getTimeline = vi.fn().mockReturnValue(pendingTimeline); window.desktop = api; render(<App />); fireEvent.click(await screen.findByRole("button", { name: "创建空时间线" })); await screen.findByRole("button", { name: /video 5.00s/ }); rejectTimeline(new Error("TIMELINE_NOT_FOUND 404"));
     fireEvent.click(screen.getByRole("button", { name: /追加 很长的中文素材/ })); await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledWith(expect.objectContaining({ patch: expect.objectContaining({ operations: [expect.objectContaining({ op: "insert_asset_clip" })] }) })));
-    fireEvent.click(screen.getAllByRole("button", { name: /^转录$/ })[0]); fireEvent.click(await screen.findByRole("checkbox")); fireEvent.click(screen.getByRole("button", { name: "追加所选片段" }));
+    fireEvent.click(screen.getAllByRole("button", { name: /^转录$/ })[0]);
+    // 勾选转录片段的界面在"转录"子标签下：切换后操作。
+    fireEvent.click(screen.getByRole("tab", { name: /^转录/ })); fireEvent.click(await screen.findByRole("checkbox")); fireEvent.click(screen.getByRole("button", { name: "追加所选片段" }));
     await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledTimes(2)); const operation = vi.mocked(api.patchTimeline).mock.calls[1][0].patch.operations[0]; expect(operation).toEqual({ op: "insert_transcript_segments", transcript_id: transcript.transcript_id, segment_ids: [transcript.segments[0].segment_id], at_index: timelineDocument.clips.length, padding_before_us: 150_000, padding_after_us: 150_000, create_captions: true, layout: "blurred_background" }); expect(operation).not.toHaveProperty("kind");
   });
 

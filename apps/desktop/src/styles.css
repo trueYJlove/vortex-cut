@@ -387,6 +387,14 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--vc-accent); }
 .track-row-actions button:hover { background: #27333b; color: #fff; }
 .track-row-actions button:disabled { opacity: 0.35; cursor: default; }
 
+/* 左栏方案 A：四子标签段控件（素材/转录/模型/任务）。 */
+.left-seg { display: flex; gap: 4px; padding: 8px 10px 10px; }
+.left-seg button { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 6px 0; border-radius: 6px; color: var(--vc-text-2, #aeb9bd); font-size: 12px; border: 1px solid transparent; }
+.left-seg button:hover { background: #222b30; }
+.left-seg button.active { background: #222b30; color: var(--vc-text, #e6edef); border-color: #3b474d; font-weight: 600; }
+.seg-badge { min-width: 15px; height: 15px; border-radius: 8px; background: var(--vc-accent, #d1a453); color: #14181b; font-size: 10px; font-weight: 700; display: inline-grid; place-items: center; padding: 0 4px; }
+.seg-badge.run { background: #12b5a6; }
+
 /* 文本素材面板（剪映式）：T 图标卡片网格。 */
 .text-materials { margin: 8px 10px 4px; padding: 10px; border: 1px solid #303b40; border-radius: 8px; background: #182026; }
 .text-materials-head { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; color: #9cc4e8; font-size: 12px; font-weight: 600; }
