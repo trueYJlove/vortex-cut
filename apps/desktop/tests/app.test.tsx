@@ -199,17 +199,14 @@ describe("Stage 1A/1B 工作流", () => {
 describe("素材箱交互", () => {
   afterEach(() => cleanup());
 
-  it("支持列表/缩略图视图切换", async () => {
+  it("素材列表固定为列表视图（视图切换已移除）", async () => {
     window.desktop = desktopApi(); render(<App />);
     await screen.findByText(video.display_name);
     expect(document.querySelector(".asset-list.asset-table")).not.toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "切换为缩略图视图" }));
-    expect(document.querySelector(".asset-list.asset-grid")).not.toBeNull();
-    expect(document.querySelectorAll(".asset-card").length).toBe(2);
-    // 刷新按钮已移除；缩略图卡片仍保留重新定位操作。
+    expect(screen.queryByRole("button", { name: "切换为缩略图视图" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "切换为列表视图" })).toBeNull();
+    // 重新定位操作仍保留（断链自愈入口）。
     expect(screen.getAllByRole("button", { name: "重新定位" }).length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole("button", { name: "切换为列表视图" }));
-    expect(document.querySelector(".asset-list.asset-table")).not.toBeNull();
   });
 
   it("双击素材在预览播放且不修改时间线，回到时间线后退出素材预览", async () => {
