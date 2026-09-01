@@ -132,16 +132,16 @@ test("真实 Electron 覆盖 Stage 1A 项目、四类素材和 availability 流�
     expect(databaseCheck.stdout.trim()).toBe(projectId);
 
     const videoRow = page.locator(".asset-row").filter({ hasText: "clip.mp4" });
+    const refreshButton = page.getByRole("button", { name: "刷新素材库" });
     // Use the same atomic-replacement operation as the Core availability
     // contract: a copy-over can retain an opened file's observed metadata.
     await atomicallyReplace(join(root, "test-assets", "generated", "short-odd-size.mp4"), fixtures.paths.video);
-    await videoRow.getByRole("button", { name: "刷新" }).click();
+    await refreshButton.click();
     await expect(videoRow.getByText("已变更")).toBeVisible({ timeout: 30_000 });
     await unlink(fixtures.paths.video);
-    await videoRow.getByRole("button", { name: "刷新" }).click();
-    await expect(videoRow.getByText("缺失")).toBeVisible({ timeout: 30_000 });
-    await videoRow.getByRole("button", { name: "重新定位" }).click();
-    await expect(videoRow.getByText("可用")).toBeVisible({ timeout: 30_000 });
+    // 素材未被时间线引用时，刷新会把本地文件已删除的素材清理出列表。
+    await refreshButton.click();
+    await expect(videoRow).toHaveCount(0, { timeout: 30_000 });
 
     const runtime = await page.evaluate(() => window.desktop.getRuntime());
     const rendererText = await page.locator("body").innerText();

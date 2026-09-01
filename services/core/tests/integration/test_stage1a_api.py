@@ -152,9 +152,10 @@ def test_stage1a_project_asset_lifecycle_and_redaction(tmp_path: Path, monkeypat
         assert relocated_asset.status_code == 200
         assert relocated_asset.json()["fingerprint"] == original_fingerprint
 
-        # 素材删除：被时间线 Clip 引用时拒绝；无引用时可删（列表减少）。
-        # Timeline Clip 存于 document_json（无外键），直接插入一行带引用的
-        # revision 模拟"素材在时间线中使用"。
+        # 素材删除：被时间线 Clip 引用时默认拒绝（ASSET_IN_USE）；
+        # remove_timeline_clips=true 时级联删除片段并返回清理计数；
+        # 无引用时直接删除（列表减少）。Timeline Clip 存于 document_json
+        # （无外键），直接插入一行带引用的 revision 模拟"素材在时间线中使用"。
         asset_list_before = client.get(f"/api/v1/projects/{project_id}/assets", headers=ui).json()
         deletable = next(
             item["asset_id"] for item in asset_list_before["items"] if item["asset_id"] != assets[0][0]
@@ -188,15 +189,32 @@ def test_stage1a_project_asset_lifecycle_and_redaction(tmp_path: Path, monkeypat
         in_use = client.delete(f"/api/v1/assets/{assets[0][0]}", headers=ui)
         assert in_use.status_code == 409
         assert in_use.json()["error"]["code"] == "ASSET_IN_USE"
+        cascade = client.delete(f"/api/v1/assets/{assets[0][0]}?remove_timeline_clips=true", headers=ui)
+        assert cascade.status_code == 200
+        assert cascade.json()["removed_clips"] == 1
+        assert cascade.json()["removed_captions"] == 0
+        with _sqlite3.connect(tmp_path / "app.db") as raw_db:
+            row = raw_db.execute(
+                "SELECT document_json, document_sha256 FROM timeline_revisions WHERE id='revision_inuse'"
+            ).fetchone()
+            assert assets[0][0] not in row[0]
+            assert raw_db.execute(
+                "SELECT COUNT(*) FROM timeline_revisions tr, json_each(tr.document_json, '$.clips') "
+                "WHERE json_extract(json_each.value, '$.asset_id')=?",
+                (assets[0][0],),
+            ).fetchone()[0] == 0
+            assert row[1].startswith("sha256:") and row[1] != "sha256:" + "0" * 64
+            assert raw_db.execute("SELECT COUNT(*) FROM assets WHERE id=?", (assets[0][0],)).fetchone()[0] == 0
         deleted = client.delete(f"/api/v1/assets/{deletable}", headers=ui)
-        assert deleted.status_code == 204
+        assert deleted.status_code == 200
+        assert deleted.json() == {"removed_clips": 0, "removed_captions": 0}
         asset_list = client.get(f"/api/v1/projects/{project_id}/assets", headers=ui).json()
-        assert len(asset_list["items"]) == len(asset_list_before["items"]) - 1
+        assert len(asset_list["items"]) == len(asset_list_before["items"]) - 2
 
         project_list = client.get("/api/v1/projects", headers=ui).json()
         asset_list = client.get(f"/api/v1/projects/{project_id}/assets", headers=ui).json()
         assert len(project_list["items"]) == 1
-        assert len(asset_list["items"]) == 3  # 4 项 - 已删除 1 项
+        assert len(asset_list["items"]) == 2  # 4 项 - 级联删除 1 项 - 无引用删除 1 项
         serialized = json.dumps({"project": project_list, "assets": asset_list})
         assert str(tmp_path) not in serialized
         assert "admin-stage1a" not in serialized

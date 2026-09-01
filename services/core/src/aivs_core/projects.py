@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 
+import sqlite3
+
 from .database import Database, json_dumps, json_loads, sha256_file, utc_now
 from .ids import new_id
 
@@ -42,11 +44,13 @@ class ProjectAssetService:
         data_dir: Path,
         probe: Callable[..., Awaitable[dict[str, Any]]],
         transcript_stale: Callable[[str, str | None], None] | None = None,
+        purge_asset_clips: Callable[[sqlite3.Connection, str], dict[str, int]] | None = None,
     ) -> None:
         self.db = db
         self.data_dir = data_dir
         self.probe = probe
         self.transcript_stale = transcript_stale
+        self.purge_asset_clips = purge_asset_clips
 
     def create_project(self, name: str, root_dir_name: str | None = None) -> dict[str, Any]:
         project_name = _project_name(name)
@@ -305,29 +309,71 @@ class ProjectAssetService:
             )
         return self.get_asset(asset_id)  # type: ignore[return-value]
 
-    def delete_asset(self, asset_id: str) -> None:
+    def delete_asset(self, asset_id: str, *, remove_timeline_clips: bool = False) -> dict[str, int]:
         """删除素材（硬删 assets 行，级联清理 locations/transcripts 等从表）。
 
-        时间线 Clip 以 document_json 形式存于 timeline_revisions（无外键），
-        因此先扫描所有 revision 文档：任一 Clip 仍引用该素材时拒绝删除，
-        提示先从时间线移除相关片段。
+        时间线 Clip 以 document_json 形式存于 timeline_revisions（无外键）：
+        - remove_timeline_clips=False：任一 Revision 仍引用该素材时拒绝删除
+          （ASSET_IN_USE），提示先从时间线移除相关片段；
+        - remove_timeline_clips=True：级联删除所有 Revision/草稿中的相关片段
+          （字幕、转场一并清理），随后删除素材行，返回清理计数。
+
+        transcripts 表对 assets 无级联外键，删除前先手工清理转录数据；
+        其余从表（asset_locations 等）由 ON DELETE CASCADE 处理。
         """
         self._require_asset_row(asset_id)
         with self.db.connection() as db:
-            used = db.execute(
-                """
-                SELECT COUNT(*) AS n
-                FROM timeline_revisions tr, json_each(tr.document_json, '$.clips')
-                WHERE json_extract(json_each.value, '$.asset_id') = ?
-                """,
-                (asset_id,),
-            ).fetchone()
-            if used and used["n"]:
-                raise DomainError(
-                    "ASSET_IN_USE",
-                    "素材仍被时间线片段引用，请先移除相关片段后再删除",
+            db.execute("BEGIN")
+            try:
+                used = db.execute(
+                    """
+                    SELECT COUNT(*) AS n
+                    FROM timeline_revisions tr, json_each(tr.document_json, '$.clips')
+                    WHERE json_extract(json_each.value, '$.asset_id') = ?
+                    """,
+                    (asset_id,),
+                ).fetchone()
+                clip_count = used["n"] if used else 0
+                if clip_count and not remove_timeline_clips:
+                    raise DomainError(
+                        "ASSET_IN_USE",
+                        "素材仍被时间线片段引用，请先移除相关片段后再删除",
+                    )
+                counts = {"removed_clips": 0, "removed_captions": 0}
+                if clip_count and self.purge_asset_clips:
+                    counts = dict(self.purge_asset_clips(db, asset_id))
+                # transcripts/segments/words 无级联外键，先手工清理。
+                db.execute(
+                    "DELETE FROM transcript_words WHERE segment_id IN ("
+                    "SELECT s.id FROM transcript_segments s JOIN transcripts t ON t.id=s.transcript_id WHERE t.asset_id=?)",
+                    (asset_id,),
                 )
-            db.execute("DELETE FROM assets WHERE id=?", (asset_id,))
+                db.execute(
+                    "DELETE FROM transcript_segments WHERE transcript_id IN ("
+                    "SELECT id FROM transcripts WHERE asset_id=?)",
+                    (asset_id,),
+                )
+                db.execute("DELETE FROM transcripts WHERE asset_id=?", (asset_id,))
+                try:
+                    db.execute("DELETE FROM assets WHERE id=?", (asset_id,))
+                except sqlite3.IntegrityError as exc:
+                    # 被 shot requirements / 生成记录等业务表引用时拒绝硬删，
+                    # 保护 AI 流程的引用完整性（比级联破坏历史记录更安全）。
+                    db.execute("ROLLBACK")
+                    raise DomainError(
+                        "ASSET_IN_USE",
+                        "素材被镜头需求或生成记录引用，无法删除",
+                    ) from exc
+                db.execute("COMMIT")
+                return counts
+            except DomainError:
+                if db.in_transaction:
+                    db.execute("ROLLBACK")
+                raise
+            except Exception:
+                if db.in_transaction:
+                    db.execute("ROLLBACK")
+                raise
 
     def current_source(self, asset_id: str) -> tuple[dict[str, Any], str | None, str | None]:
         row = self._require_asset_row(asset_id)

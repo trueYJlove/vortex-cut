@@ -98,8 +98,8 @@ export interface DesktopApi {
   importAsset: (input: { project_id: ProjectId; kind?: AssetKind }) => Promise<ImportedAsset | null>;
   refreshAsset: (assetId: string) => Promise<AssetPresentation>;
   relocateAsset: (input: { asset_id: string }) => Promise<ImportedAsset | null>;
-  /** 删除素材；被时间线片段引用时抛出 Core 错误（ASSET_IN_USE）。 */
-  deleteAsset: (input: { asset_id: string }) => Promise<void>;
+  /** 删除素材；remove_timeline_clips=true 时级联删除时间线相关片段，返回清理计数。 */
+  deleteAsset: (input: { asset_id: string; remove_timeline_clips?: boolean }) => Promise<{ removed_clips: number; removed_captions: number }>;
   /** 弹出字幕文件选择框（SRT/ASS/SSA/LRC），返回文本内容；取消返回 null。 */
   importSubtitle: () => Promise<{ file_name: string; content: string } | null>;
   listJobs: (input: { project_id: ProjectId; status?: Job["status"]; limit?: number; cursor?: string }) => Promise<JobPage>;

@@ -536,6 +536,140 @@ class TimelineService:
                 raise DomainError("TIMELINE_NOT_FOUND", "项目尚未创建时间线")
             db.execute("DELETE FROM timeline_drafts WHERE project_id=?", (project_id,))
 
+    def purge_asset_clips(self, db: sqlite3.Connection, asset_id: str) -> dict[str, int]:
+        """删除所有时间线 Revision 与草稿中引用某素材的片段（含级联）。
+
+        素材删除的级联入口：Clip 以 document_json 存于 timeline_revisions /
+        timeline_drafts（无外键），且 revisions 不可变（触发器禁止 UPDATE），
+        因此在调用方事务内临时移除不可变触发器，重写全部文档后原样重建。
+
+        每个 document 的处理镜像 remove_clip 语义：
+        - 移除引用该素材的片段（保持其余片段的 timeline_start_us，自由定位
+          模型下不推移、留空隙）；
+        - 移除其 source_clip_id 指向被删片段的字幕；
+        - 移除以被删片段为锚点、或以其“被删后 V1 时间序直接后继”为锚点的转场；
+        - 按轨道顺序重排 order_index，并执行失去时间序后继的转场 GC；
+        - 重算 document_sha256（文档内容已变化）。
+
+        不调用 _normalize_and_validate：文档可能包含其它缺失/不可用素材，
+        且历史 Revision 仅需一致清理，不做完整校验。
+
+        调用方持有事务并负责 BEGIN/COMMIT；调用前应已确认素材确有引用。
+        """
+        removed_clips = 0
+        removed_captions = 0
+        rows = db.execute(
+            "SELECT id, project_id, document_json FROM timeline_revisions "
+            "WHERE document_json LIKE ?",
+            (f'%"{asset_id}"%',),
+        ).fetchall()
+        drafts = db.execute(
+            "SELECT project_id, document_json FROM timeline_drafts WHERE document_json LIKE ?",
+            (f'%"{asset_id}"%',),
+        ).fetchall()
+        if not rows and not drafts:
+            return {"removed_clips": 0, "removed_captions": 0}
+        db.execute("DROP TRIGGER IF EXISTS timeline_revisions_no_update")
+        try:
+            for row in rows:
+                document = json_loads(row["document_json"])
+                removed = self._remove_asset_clips_from_document(document, asset_id)
+                document_json = json_dumps(document)
+                digest = f"sha256:{hashlib.sha256(document_json.encode('utf-8')).hexdigest()}"
+                db.execute(
+                    "UPDATE timeline_revisions SET document_json=?,document_sha256=? WHERE id=?",
+                    (document_json, digest, row["id"]),
+                )
+                removed_clips += removed["clips"]
+                removed_captions += removed["captions"]
+            for row in drafts:
+                document = json_loads(row["document_json"])
+                removed = self._remove_asset_clips_from_document(document, asset_id)
+                db.execute(
+                    "UPDATE timeline_drafts SET document_json=? WHERE project_id=?",
+                    (json_dumps(document), row["project_id"]),
+                )
+                removed_clips += removed["clips"]
+                removed_captions += removed["captions"]
+        finally:
+            db.execute(
+                "CREATE TRIGGER IF NOT EXISTS timeline_revisions_no_update "
+                "BEFORE UPDATE ON timeline_revisions "
+                "BEGIN SELECT RAISE(ABORT, 'timeline revisions are immutable'); END;"
+            )
+        # 被清理片段的重做已无意义：清空各项目重做栈，避免恢复出幽灵片段。
+        affected = {row["project_id"] for row in rows} | {row["project_id"] for row in drafts}
+        now = utc_now()
+        for project_id in affected:
+            db.execute(
+                "INSERT INTO timeline_navigation(project_id,redo_stack_json,updated_at) "
+                "VALUES (?,?,?) ON CONFLICT(project_id) DO UPDATE SET "
+                "redo_stack_json='[]',updated_at=excluded.updated_at",
+                (project_id, "[]", now),
+            )
+        return {"removed_clips": removed_clips, "removed_captions": removed_captions}
+
+    def _remove_asset_clips_from_document(
+        self, document: dict[str, Any], asset_id: str
+    ) -> dict[str, int]:
+        """按 remove_clip 语义从单个文档中移除引用某素材的片段。"""
+        clips = document.get("clips")
+        captions = document.get("captions")
+        if not isinstance(clips, list) or not isinstance(captions, list):
+            return {"clips": 0, "captions": 0}
+        removed_ids = {
+            clip["clip_id"]
+            for clip in clips
+            if isinstance(clip, dict) and clip.get("asset_id") == asset_id and "clip_id" in clip
+        }
+        if not removed_ids:
+            return {"clips": 0, "captions": 0}
+        removed_starts = {
+            clip["clip_id"]: clip.get("timeline_start_us")
+            for clip in clips
+            if isinstance(clip, dict) and clip.get("clip_id") in removed_ids
+        }
+        document["clips"] = [clip for clip in clips if not (isinstance(clip, dict) and clip.get("clip_id") in removed_ids)]
+        removed_captions = len([caption for caption in captions if isinstance(caption, dict) and caption.get("source_clip_id") in removed_ids])
+        document["captions"] = [
+            caption
+            for caption in captions
+            if not (isinstance(caption, dict) and caption.get("source_clip_id") in removed_ids)
+        ]
+        transitions = document.get("transitions")
+        if isinstance(transitions, list) and transitions:
+            # 被删片段的“直接后继”锚点转场一并移除（相邻关系已不存在）。
+            successors: set[str] = set()
+            for clip_id, start in removed_starts.items():
+                successor = next(
+                    (
+                        clip["clip_id"]
+                        for clip in sorted(
+                            (c for c in document["clips"] if isinstance(c, dict) and c.get("track_id") == "V1" and isinstance(c.get("timeline_start_us"), int)),
+                            key=lambda c: c["timeline_start_us"],
+                        )
+                        if isinstance(start, int) and clip_id is not None and c["timeline_start_us"] >= start
+                    ),
+                    None,
+                )
+                if successor:
+                    successors.add(successor)
+            document["transitions"] = [
+                item
+                for item in transitions
+                if not (isinstance(item, dict) and item.get("after_clip_id") in removed_ids | successors)
+            ]
+        # 按轨道重排 order_index（与 _normalize_timing 一致：只重排，不动时间）。
+        track_clips: dict[str, list[dict[str, Any]]] = {}
+        for clip in document["clips"]:
+            if isinstance(clip, dict) and isinstance(clip.get("track_id"), str):
+                track_clips.setdefault(clip["track_id"], []).append(clip)
+        for group in track_clips.values():
+            for index, clip in enumerate(group):
+                clip["order_index"] = index
+        self._gc_unreachable_transitions(document)
+        return {"clips": len(removed_ids), "captions": removed_captions}
+
     def _navigate(self, project_id: str, base_revision_id: str, *, redo: bool) -> dict[str, Any]:
         base_revision_id = _identifier(base_revision_id, "Revision ID 不合法")
         with self.db.connection() as db:

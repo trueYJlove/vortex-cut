@@ -327,10 +327,12 @@ function registerIpc(): void {
     return { grant, asset, media_url: await restrictedMediaUrl(asset.asset_id) };
   });
 
-  // 素材删除：被时间线片段引用时 Core 返回 409，错误信息透传给渲染进程提示。
-  ipcMain.handle("asset:delete", async (_event, input: { asset_id: string }) => {
+  // 素材删除：remove_timeline_clips=true 时 Core 级联删除时间线相关片段，
+  // 返回清理计数；默认模式下仍引用时返回 409（ASSET_IN_USE）。
+  ipcMain.handle("asset:delete", async (_event, input: { asset_id: string; remove_timeline_clips?: boolean }) => {
     const assetId = asId(input.asset_id, "asset_id");
-    await fetchWithUi<void>(`${API_PREFIX}/assets/${assetId}`, { method: "DELETE" });
+    const query = input.remove_timeline_clips ? "?remove_timeline_clips=true" : "";
+    return await fetchWithUi<{ removed_clips: number; removed_captions: number }>(`${API_PREFIX}/assets/${assetId}${query}`, { method: "DELETE" });
   });
 
   // 本地字幕导入：弹文件框（SRT/ASS/SSA/LRC）读取文本内容返回给渲染进程

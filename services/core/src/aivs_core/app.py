@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, cast
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
@@ -534,6 +534,7 @@ class CoreState:
             settings.data_dir,
             probe_asset,
             transcript_stale=self.transcripts.mark_asset_stale,
+            purge_asset_clips=self.timelines.purge_asset_clips,
         )
         self.image_provider_secrets = ProviderSecretVault()
         self.image_provider_configs = ImageProviderConfigService(
@@ -1437,13 +1438,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except DomainError as exc:
             raise _domain(exc) from exc
 
-    @app.delete("/api/v1/assets/{asset_id}", status_code=204)
-    async def delete_asset(asset_id: str, _: CoreState = Depends(require_ui)) -> Response:
+    @app.delete("/api/v1/assets/{asset_id}")
+    async def delete_asset(
+        asset_id: str, remove_timeline_clips: bool = False, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        """删除素材；remove_timeline_clips=true 时级联删除时间线相关片段。"""
         try:
-            state.projects.delete_asset(asset_id)
+            counts = state.projects.delete_asset(
+                asset_id, remove_timeline_clips=remove_timeline_clips
+            )
         except DomainError as exc:
             raise _domain(exc) from exc
-        return Response(status_code=204)
+        return {"removed_clips": counts.get("removed_clips", 0), "removed_captions": counts.get("removed_captions", 0)}
 
     @app.post("/api/v1/projects/{project_id}/timelines", status_code=201)
     async def create_timeline(
