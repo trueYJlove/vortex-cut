@@ -98,6 +98,8 @@ export interface DesktopApi {
   importAsset: (input: { project_id: ProjectId; kind?: AssetKind }) => Promise<ImportedAsset | null>;
   refreshAsset: (assetId: string) => Promise<AssetPresentation>;
   relocateAsset: (input: { asset_id: string }) => Promise<ImportedAsset | null>;
+  /** 删除素材；被时间线片段引用时抛出 Core 错误（ASSET_IN_USE）。 */
+  deleteAsset: (input: { asset_id: string }) => Promise<void>;
   /** 弹出字幕文件选择框（SRT/ASS/SSA/LRC），返回文本内容；取消返回 null。 */
   importSubtitle: () => Promise<{ file_name: string; content: string } | null>;
   listJobs: (input: { project_id: ProjectId; status?: Job["status"]; limit?: number; cursor?: string }) => Promise<JobPage>;
@@ -236,6 +238,7 @@ const api: DesktopApi = {
   importAsset: input => ipcRenderer.invoke("asset:import", input),
   refreshAsset: assetId => ipcRenderer.invoke("asset:refresh", assetId),
   relocateAsset: input => ipcRenderer.invoke("asset:relocate", input),
+  deleteAsset: input => ipcRenderer.invoke("asset:delete", input),
   importSubtitle: () => ipcRenderer.invoke("subtitle:import"),
   listJobs: input => ipcRenderer.invoke("job:list", input),
   createJob: input => ipcRenderer.invoke("job:create", input),

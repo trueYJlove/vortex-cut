@@ -152,10 +152,51 @@ def test_stage1a_project_asset_lifecycle_and_redaction(tmp_path: Path, monkeypat
         assert relocated_asset.status_code == 200
         assert relocated_asset.json()["fingerprint"] == original_fingerprint
 
+        # 素材删除：被时间线 Clip 引用时拒绝；无引用时可删（列表减少）。
+        # Timeline Clip 存于 document_json（无外键），直接插入一行带引用的
+        # revision 模拟"素材在时间线中使用"。
+        asset_list_before = client.get(f"/api/v1/projects/{project_id}/assets", headers=ui).json()
+        deletable = next(
+            item["asset_id"] for item in asset_list_before["items"] if item["asset_id"] != assets[0][0]
+        )
+        import json as _json
+        referenced_doc = {
+            "schema_version": 1,
+            "project_id": project_id,
+            "canvas": {"width": 1080, "height": 1920, "fps_num": 30, "fps_den": 1, "background_color": "#000000"},
+            "tracks": [
+                {"id": "V1", "kind": "video", "locked": False, "hidden": False, "muted": False, "solo": False},
+                {"id": "A1", "kind": "audio", "locked": False, "hidden": False, "muted": False, "solo": False},
+            ],
+            "clips": [{
+                "clip_id": "clip_ref", "track_id": "V1", "order_index": 0,
+                "asset_id": assets[0][0], "asset_kind": "video",
+                "source_start_us": 0, "source_end_us": 1_000_000,
+                "timeline_start_us": 0, "timeline_end_us": 1_000_000,
+                "layout": "fit", "audio": {"enabled": False, "gain_db": 0},
+            }],
+            "captions": [],
+            "locked_elements": [],
+        }
+        import sqlite3 as _sqlite3
+        with _sqlite3.connect(tmp_path / "app.db") as raw_db:
+            raw_db.execute(
+                "INSERT INTO timeline_revisions(id,project_id,parent_revision_id,schema_version,"
+                "document_json,document_sha256,summary,created_by,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                ("revision_inuse", project_id, None, 1, _json.dumps(referenced_doc), "sha256:" + "0" * 64, "in-use fixture", "user", "2026-01-01T00:00:00Z"),
+            )
+        in_use = client.delete(f"/api/v1/assets/{assets[0][0]}", headers=ui)
+        assert in_use.status_code == 409
+        assert in_use.json()["error"]["code"] == "ASSET_IN_USE"
+        deleted = client.delete(f"/api/v1/assets/{deletable}", headers=ui)
+        assert deleted.status_code == 204
+        asset_list = client.get(f"/api/v1/projects/{project_id}/assets", headers=ui).json()
+        assert len(asset_list["items"]) == len(asset_list_before["items"]) - 1
+
         project_list = client.get("/api/v1/projects", headers=ui).json()
         asset_list = client.get(f"/api/v1/projects/{project_id}/assets", headers=ui).json()
         assert len(project_list["items"]) == 1
-        assert len(asset_list["items"]) == 4
+        assert len(asset_list["items"]) == 3  # 4 项 - 已删除 1 项
         serialized = json.dumps({"project": project_list, "assets": asset_list})
         assert str(tmp_path) not in serialized
         assert "admin-stage1a" not in serialized

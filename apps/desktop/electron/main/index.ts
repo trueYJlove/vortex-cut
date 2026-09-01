@@ -327,6 +327,12 @@ function registerIpc(): void {
     return { grant, asset, media_url: await restrictedMediaUrl(asset.asset_id) };
   });
 
+  // 素材删除：被时间线片段引用时 Core 返回 409，错误信息透传给渲染进程提示。
+  ipcMain.handle("asset:delete", async (_event, input: { asset_id: string }) => {
+    const assetId = asId(input.asset_id, "asset_id");
+    await fetchWithUi<void>(`${API_PREFIX}/assets/${assetId}`, { method: "DELETE" });
+  });
+
   // 本地字幕导入：弹文件框（SRT/ASS/SSA/LRC）读取文本内容返回给渲染进程
   // 解析（不走 Core 资产库——字幕文件不作为媒体素材管理）。
   ipcMain.handle("subtitle:import", async () => {

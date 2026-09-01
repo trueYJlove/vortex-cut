@@ -305,6 +305,30 @@ class ProjectAssetService:
             )
         return self.get_asset(asset_id)  # type: ignore[return-value]
 
+    def delete_asset(self, asset_id: str) -> None:
+        """删除素材（硬删 assets 行，级联清理 locations/transcripts 等从表）。
+
+        时间线 Clip 以 document_json 形式存于 timeline_revisions（无外键），
+        因此先扫描所有 revision 文档：任一 Clip 仍引用该素材时拒绝删除，
+        提示先从时间线移除相关片段。
+        """
+        self._require_asset_row(asset_id)
+        with self.db.connection() as db:
+            used = db.execute(
+                """
+                SELECT COUNT(*) AS n
+                FROM timeline_revisions tr, json_each(tr.document_json, '$.clips')
+                WHERE json_extract(json_each.value, '$.asset_id') = ?
+                """,
+                (asset_id,),
+            ).fetchone()
+            if used and used["n"]:
+                raise DomainError(
+                    "ASSET_IN_USE",
+                    "素材仍被时间线片段引用，请先移除相关片段后再删除",
+                )
+            db.execute("DELETE FROM assets WHERE id=?", (asset_id,))
+
     def current_source(self, asset_id: str) -> tuple[dict[str, Any], str | None, str | None]:
         row = self._require_asset_row(asset_id)
         location = self._location(asset_id)

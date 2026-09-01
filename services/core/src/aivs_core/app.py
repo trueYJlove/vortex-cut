@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, cast
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
@@ -684,6 +684,7 @@ def _domain(exc: DomainError) -> HTTPException:
             "ASSET_DUPLICATE",
             "ASSET_CHANGED",
             "ASSET_MISSING",
+            "ASSET_IN_USE",
             "PROJECT_ARCHIVED",
             "CONFLICT",
             "TIMELINE_ALREADY_EXISTS",
@@ -1435,6 +1436,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return await state.projects.relocate_asset(asset_id, grant_for(request.grant_id))
         except DomainError as exc:
             raise _domain(exc) from exc
+
+    @app.delete("/api/v1/assets/{asset_id}", status_code=204)
+    async def delete_asset(asset_id: str, _: CoreState = Depends(require_ui)) -> Response:
+        try:
+            state.projects.delete_asset(asset_id)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+        return Response(status_code=204)
 
     @app.post("/api/v1/projects/{project_id}/timelines", status_code=201)
     async def create_timeline(
