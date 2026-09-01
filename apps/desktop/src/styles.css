@@ -30,7 +30,7 @@ textarea { min-height: 92px; padding: 8px; resize: vertical; }
 .library-pane, .properties-pane { min-width: 0; max-width: 100%; overflow-x: hidden; overflow-y: auto; background: #171d21; }
 .library-pane { border-right: 1px solid #303b40; }.properties-pane { border-left: 1px solid #303b40; padding: 14px; }
 .tabs { height: 42px; padding: 6px 10px 0; display: flex; border-bottom: 1px solid #303b40; }.tabs button { flex: 1; border-width: 0 0 2px; background: transparent; }
-.pane-title { margin: 10px 10px 0; font-size: 14px; }.library-toolbar { padding: 10px; display: grid; grid-template-columns: 1fr 1fr; }.library-toolbar button { min-width: 0; display: flex; justify-content: center; align-items: center; gap: 5px; font-size: 11px; }
+.pane-title { margin: 10px 10px 0; font-size: 14px; }.library-toolbar { padding: 8px 10px 0; display: grid; grid-template-columns: repeat(3, 1fr); }.library-toolbar button { min-width: 0; display: flex; justify-content: center; align-items: center; gap: 5px; font-size: 11px; }.library-toolbar button svg { width: 13px; height: 13px; }
 .library-filter-toolbar { position: sticky; top: 0; z-index: 5; padding: 6px 10px; display: grid; grid-template-columns: minmax(0, 1fr) 88px auto; gap: 6px; align-items: center; background: #171d21; border-bottom: 1px solid #293238; }.library-filter-toolbar input, .library-filter-toolbar select { width: 100%; min-width: 0; }.asset-count { color: #7f8d93; font-size: 11px; white-space: nowrap; }
 .asset-list, .transcript-list { padding: 0 10px 14px; display: grid; gap: 6px; }
 .asset-item { width: 100%; min-width: 0; min-height: 68px; padding: 8px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; border: 1px solid #303b40; background: #1d2529; }
@@ -411,13 +411,10 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--vc-accent); }
 .seg-badge.run { background: #12b5a6; }
 
 /* 文本素材面板（剪映式）：T 图标卡片网格。 */
-/* 文本素材区（紧凑版）：置于素材列表之后，弱化视觉权重。 */
-.text-materials { margin: 6px 10px 12px; padding: 7px 9px; border: 1px solid #2a343a; border-radius: 8px; background: #151c21; }
-.text-materials-head { display: flex; align-items: center; gap: 5px; margin-bottom: 6px; color: #6f7f88; font-size: 11px; font-weight: 600; }
-.text-materials-head svg { width: 12px; height: 12px; }
-.text-materials-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-.text-materials-grid button { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 6px; font-size: 11px; background: #1d262c; border-radius: 5px; }
-.text-materials-grid button:hover:not(:disabled) { background: #27323a; }
+/* 文本素材区（紧凑版）：紧贴导入行下方，两按钮一行。 */
+.text-materials { margin: 6px 10px 0; padding: 6px; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; border: 0; border-radius: 0; background: transparent; }
+.text-materials button { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 6px; font-size: 11px; background: #1d262c; border-radius: 5px; }
+.text-materials button:hover:not(:disabled) { background: #27323a; }
 .text-material-icon { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 4px; background: #2b3a44; color: #cfd8dd; font-size: 11px; font-weight: 700; }
 /* 文本样式开关（B/I/U）与对齐宫格。 */
 .text-style-flags { display: inline-flex; gap: 4px; }
