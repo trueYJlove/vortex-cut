@@ -30,7 +30,7 @@ textarea { min-height: 92px; padding: 8px; resize: vertical; }
 .library-pane, .properties-pane { min-width: 0; max-width: 100%; overflow-x: hidden; overflow-y: auto; background: #171d21; }
 .library-pane { border-right: 1px solid #303b40; }.properties-pane { border-left: 1px solid #303b40; padding: 14px; }
 .tabs { height: 42px; padding: 6px 10px 0; display: flex; border-bottom: 1px solid #303b40; }.tabs button { flex: 1; border-width: 0 0 2px; background: transparent; }
-.pane-title { margin: 10px 10px 0; font-size: 14px; }.library-toolbar { padding: 8px 10px 0; display: grid; grid-template-columns: repeat(3, 1fr); }.library-toolbar button { min-width: 0; display: flex; justify-content: center; align-items: center; gap: 5px; font-size: 11px; }.library-toolbar button svg { width: 13px; height: 13px; }
+.pane-title { margin: 10px 10px 0; font-size: 14px; }
 .library-filter-toolbar { position: sticky; top: 0; z-index: 5; padding: 6px 10px; display: grid; grid-template-columns: minmax(0, 1fr) 88px; gap: 6px; align-items: center; background: #171d21; border-bottom: 1px solid #293238; }.library-filter-toolbar input, .library-filter-toolbar select { width: 100%; min-width: 0; }
 .asset-list, .transcript-list { padding: 0 10px 14px; display: grid; gap: 6px; }
 .asset-item { width: 100%; min-width: 0; min-height: 68px; padding: 8px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; border: 1px solid #303b40; background: #1d2529; }
@@ -402,20 +402,27 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--vc-accent); }
 .track-row-actions button:hover { background: #27333b; color: #fff; }
 .track-row-actions button:disabled { opacity: 0.35; cursor: default; }
 
-/* 左栏方案 A：四子标签段控件（素材/转录/模型/任务）。 */
-.left-seg { display: flex; gap: 4px; padding: 8px 10px 10px; }
-.left-seg button { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 6px 0; border-radius: 6px; color: var(--vc-text-2, #aeb9bd); font-size: 12px; border: 1px solid transparent; }
-.left-seg button:hover { background: #222b30; }
-.left-seg button.active { background: #222b30; color: var(--vc-text, #e6edef); border-color: #3b474d; font-weight: 600; }
-.seg-badge { min-width: 15px; height: 15px; border-radius: 8px; background: var(--vc-accent, #d1a453); color: #14181b; font-size: 10px; font-weight: 700; display: inline-grid; place-items: center; padding: 0 4px; }
+/* 左栏顶部（方案二·剪映式）：深色分区底 + 下划线页签 + 大图标导入卡。 */
+.left-seg { display: flex; gap: 14px; padding: 8px 12px 0; background: #12181c; border-bottom: 1px solid #303b40; }
+.left-seg button { position: relative; padding: 6px 2px 9px; color: var(--vc-text-3, #7f8d93); font-size: 13px; border: 0; background: transparent; }
+.left-seg button:hover { color: var(--vc-text-2, #aeb9bd); }
+.left-seg button.active { color: #12b5a6; font-weight: 700; }
+.left-seg button.active::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: #12b5a6; border-radius: 1px; }
+.seg-badge { min-width: 15px; height: 15px; border-radius: 8px; background: var(--vc-accent, #d1a453); color: #14181b; font-size: 10px; font-weight: 700; display: inline-grid; place-items: center; padding: 0 4px; margin-left: 4px; }
 .seg-badge.run { background: #12b5a6; }
 
-/* 文本素材面板（剪映式）：T 图标卡片网格。 */
-/* 文本素材区（紧凑版）：紧贴导入行下方，两按钮一行。 */
-.text-materials { margin: 6px 10px 0; padding: 6px; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; border: 0; border-radius: 0; background: transparent; }
-.text-materials button { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 6px; font-size: 11px; background: #1d262c; border-radius: 5px; }
-.text-materials button:hover:not(:disabled) { background: #27323a; }
-.text-material-icon { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 4px; background: #2b3a44; color: #cfd8dd; font-size: 11px; font-weight: 700; }
+/* 媒体导入大图标卡（剪映素材入口式）：图标在上、文字在下。 */
+.library-toolbar { padding: 10px 10px 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; background: #12181c; }
+.library-toolbar button { min-width: 0; display: grid; justify-items: center; gap: 5px; padding: 9px 4px 8px; font-size: 11px; color: var(--vc-text-2, #aeb9bd); background: var(--vc-panel-2, #182026); border: 1px solid #303b40; border-radius: 8px; }
+.library-toolbar button:hover:not(:disabled) { border-color: var(--vc-accent, #d1a453); color: var(--vc-text, #e6edef); }
+.library-toolbar .lib-card-ico { display: grid; place-items: center; font-size: 16px; }
+.library-toolbar .lib-card-ico svg { width: 17px; height: 17px; }
+
+/* 文本按钮：青色文字链（剪映文本入口式）。 */
+.text-materials { display: flex; gap: 8px; padding: 8px 10px 10px; background: #12181c; }
+.text-materials button { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; padding: 6px 4px; font-size: 11px; color: #12b5a6; background: transparent; border: 0; border-radius: 6px; }
+.text-materials button:hover:not(:disabled) { background: rgba(18, 181, 166, .08); }
+
 /* 文本样式开关（B/I/U）与对齐宫格。 */
 .text-style-flags { display: inline-flex; gap: 4px; }
 .text-style-flags button { min-width: 26px; min-height: 26px; padding: 0; font-size: 12px; }
