@@ -40,3 +40,6 @@ apps/desktop/test-results/
 /.tmp/
 /apps/desktop/.cache/
 /test-tmp/
+
+# Local secrets
+.env

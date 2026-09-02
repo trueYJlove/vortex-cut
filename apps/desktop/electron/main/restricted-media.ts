@@ -76,7 +76,7 @@ export async function serveRestrictedMedia(request: Request, registry: Restricte
       if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || start >= info.size) return new Response(null, { status: 416, headers: { "Content-Range": `bytes */${info.size}` } });
       end = Math.min(end, info.size - 1); status = 206;
     }
-    const headers = new Headers({ "Accept-Ranges": "bytes", "Content-Length": String(Math.max(0, end - start + 1)), "Cache-Control": "no-store" });
+    const headers = new Headers({ "Accept-Ranges": "bytes", "Content-Length": String(Math.max(0, end - start + 1)), "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" });
     if (status === 206) headers.set("Content-Range", `bytes ${start}-${end}/${info.size}`);
     if (request.method === "HEAD") return new Response(null, { status, headers });
     return new Response(Readable.toWeb(createReadStream(item.path, { start, end })) as ReadableStream, { status, headers });

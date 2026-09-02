@@ -150,12 +150,12 @@ describe("Editor shell 基线", () => {
     expect(screen.getByRole("button", { name: "打开项目管理" })).toBeInTheDocument();
   });
 
-  it("formats long durations as HH:MM:SS and minutes", async () => {
+  it("formats long durations as SMPTE HH:MM:SS:FF timecode", async () => {
     const longClip = { ...timelineDocument, clips: [{ ...timelineDocument.clips[0], clip_id: "clip_long" as never, timeline_start_us: 0, timeline_end_us: 3_700_000_000, source_start_us: 0, source_end_us: 5_000_000 }] };
     window.desktop = desktopApi({ timeline: { ...state, current_revision: { ...state.current_revision, document: longClip } } });
     render(<App />);
     expect(await screen.findByRole("button", { name: /video 1:01:40/ })).toBeInTheDocument();
-    expect(screen.getByText(/\/ 1:01:40/)).toBeInTheDocument();
+    expect(screen.getByText(/\/ 01:01:40:00/)).toBeInTheDocument();
   });
 
   it("exposes a preview ratio selector defaulting to fit", async () => {

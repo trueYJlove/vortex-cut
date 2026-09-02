@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Archive, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, FileAudio, FileText, FolderPlus, History, ImagePlus, Lock, LockOpen, MapPin, Pause, Play, Plus, Redo2, RefreshCw, RotateCcw, Save, Scissors, Sparkles, Square, Trash2, Type as TypeIcon2, Undo2, Video, Volume2, VolumeX, X, Minus, Maximize2 } from "lucide-react";
-import type { Asset, AssetId, AssetKind, AssetPresentation, BriefInput, CaptionPresetId, DirectoryGrant, EncoderMode, EgressPreview, ExportBatch, HorizontalAnchor, Job, LayoutPolicy, MediaInfo, ModelDetail, ModelSummary, PlatformPreset, Project, ProviderConfig, ReframeExportBatch, RenditionPreset, RenditionReframeAdjustment, TimelineCaption, TimelineClip, TimelineDiff, TimelineDocument, TimelineLayout, TimelinePatchEgressPreview, TimelinePatchOperation, TimelinePatchProposal, TimelineRevisionSummary, TimelineState, Transcript, TranscriptSegment, TranscriptSummary, VerticalAnchor } from "@aivideo/contracts";
+import { Archive, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, FileAudio, FileText, FolderPlus, History, ImagePlus, Lock, LockOpen, MapPin, Maximize, Minimize, Pause, Play, Plus, Redo2, RefreshCw, RotateCcw, Save, Scissors, Sparkles, Square, Trash2, Type as TypeIcon2, Undo2, Video, Volume2, VolumeX, X, Minus, ZoomIn } from "lucide-react";
+import type { Asset, AssetId, AssetKind, AssetPresentation, BriefInput, CaptionPresetId, DirectoryGrant, EncoderMode, EgressPreview, ExportBatch, HorizontalAnchor, Job, LayoutPolicy, MediaInfo, ModelDetail, ModelSummary, OutputRatio, PlatformPreset, Project, ProviderConfig, ReframeExportBatch, RenditionPreset, RenditionReframeAdjustment, TimelineCaption, TimelineClip, TimelineDiff, TimelineDocument, TimelineLayout, TimelinePatchEgressPreview, TimelinePatchOperation, TimelinePatchProposal, TimelineRevisionSummary, TimelineState, Transcript, TranscriptSegment, TranscriptSummary, VerticalAnchor } from "@aivideo/contracts";
 import type { AuthoritativePreviewPresentation, ExportRecordPresentation, RenditionPreviewPresentation, RenditionReframePreviewPresentation } from "../../electron/preload/index.js";
 import { CONTRACT_VERSION } from "@aivideo/contracts";
 import { MediaGenerationWorkbench } from "./media-generation/MediaGenerationWorkbench.js";
@@ -30,6 +30,16 @@ const formatTime = (us: number) => {
   if (hours > 0) return `${hours}:${String(minutes).padStart(2, "0")}:${String(Math.floor(seconds)).padStart(2, "0")}`;
   if (minutes > 0) return `${minutes}:${String(Math.floor(seconds)).padStart(2, "0")}`;
   return `${seconds.toFixed(2)}s`;
+};
+// 剪映式 SMPTE 时间码：HH:MM:SS:FF（FF 为帧号，按画布帧率取整）。
+const formatSmpteTimecode = (us: number, fps: number) => {
+  const safeFps = fps > 0 ? fps : 30;
+  const totalSeconds = Math.max(0, us) / 1_000_000;
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = Math.floor(totalSeconds % 60);
+  const frames = Math.min(Math.round(safeFps) - 1, Math.floor((totalSeconds - Math.floor(totalSeconds)) * safeFps));
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}:${String(frames).padStart(2, "0")}`;
 };
 const duration = (document?: TimelineDocument) => document?.clips.reduce((max, clip) => Math.max(max, clip.timeline_end_us), 0) ?? 0;
 const formatRulerTime = (us: number) => {
@@ -205,8 +215,27 @@ export function App() {
   shortcutsRef.current = shortcuts;
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [recordingId, setRecordingId] = useState<ShortcutCommandId | null>(null);
-  const [ratioMenuOpen, setRatioMenuOpen] = useState(false);
-  const ratioMenuRef = useRef<HTMLDivElement | null>(null);
+  // 剪映式播放器控件状态：画布缩放（点击弹滑条）、音量（点击弹竖向滑条）、全屏、电平表。
+  const [zoomPopOpen, setZoomPopOpen] = useState(false);
+  const zoomPopRef = useRef<HTMLDivElement | null>(null);
+  const [volPopOpen, setVolPopOpen] = useState(false);
+  const volPopRef = useRef<HTMLDivElement | null>(null);
+  const [volume, setVolume] = useState(80);
+  const volumeRef = useRef(volume);
+  const [progressDragging, setProgressDragging] = useState(false);
+  const [previewZoom, setPreviewZoom] = useState<number | "fit">("fit");
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const stagePaneRef = useRef<HTMLElement | null>(null);
+  const stageColumnRef = useRef<HTMLDivElement | null>(null);
+  const progressRef = useRef<HTMLDivElement | null>(null);
+  const volRailRef = useRef<HTMLDivElement | null>(null);
+  // 画面选中框：白色边框 + 8 向拖拽手柄（角等比 / 边单轴），缩放时随画面一起缩放。
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const selBoxRef = useRef<HTMLDivElement | null>(null);
+  const [canvasSize, setCanvasSize] = useState<{ w: number; h: number } | null>(null);
+  const [selDimsText, setSelDimsText] = useState("");
+  const selDragRef = useRef<{ dir: string; startX: number; startY: number; w: number; h: number; ratio: number } | null>(null);
+  const [vuEpoch, setVuEpoch] = useState(0);
   const applyShortcuts = (next: Record<ShortcutCommandId, ShortcutEntry>) => { setShortcuts(next); saveShortcuts(next); };
   const handleRecordKey = (event: React.KeyboardEvent, id: ShortcutCommandId) => {
     event.preventDefault();
@@ -501,6 +530,98 @@ export function App() {
       }
     }
   }, [playing, previewAsset?.media_url, audioAsset?.media_url, playhead, previewSpeedMilli, previewReverse, audioClipAtPlayhead, isClipAudible]);
+  // 音量动画（电平表）：挂接预览视频的实时输出电平，左右声道各一根跳动条。
+  // MediaElementAudioSourceNode 对同一元素只能创建一次且会接管出声路由，
+  // 因此音频图为按元素缓存的持久结构：暂停只停轮询，不销毁图（销毁会让元素永久失声）。
+  // 电平值直接写 DOM 高度，避免 60fps 触发整棵组件树重渲。
+  type VuGraph = { ctx: AudioContext; analyserL: AnalyserNode; analyserR: AnalyserNode; dataL: Uint8Array<ArrayBuffer>; dataR: Uint8Array<ArrayBuffer>; raf: number };
+  const vuGraphRef = useRef<{ el: HTMLMediaElement; graph: VuGraph } | null>(null);
+  const vuBarLRef = useRef<HTMLElement | null>(null);
+  const vuBarRRef = useRef<HTMLElement | null>(null);
+  const stopVuPolling = useCallback(() => {
+    const entry = vuGraphRef.current;
+    if (entry) cancelAnimationFrame(entry.graph.raf);
+    if (vuBarLRef.current) vuBarLRef.current.style.height = "30%";
+    if (vuBarRRef.current) vuBarRRef.current.style.height = "30%";
+  }, []);
+  useEffect(() => {
+    if (!playing) { stopVuPolling(); return; }
+    const media = videoRef.current;
+    if (!media || media.readyState === 0) {
+      // 元素尚未加载出元数据（刚切素材就按播放）：等 canplay 后重试一次挂接。
+      if (media) {
+        const retry = () => setVuEpoch(epoch => epoch + 1);
+        media.addEventListener("canplay", retry, { once: true });
+        return () => media.removeEventListener("canplay", retry);
+      }
+      return;
+    }
+    const AudioCtx = window.AudioContext;
+    if (!AudioCtx) return;
+    const attach = (): VuGraph | null => {
+      if (vuGraphRef.current?.el === media) return vuGraphRef.current.graph;
+      const graph = vuGraphRef.current?.graph;
+      if (graph) cancelAnimationFrame(graph.raf);
+      try {
+        const ctx = new AudioCtx();
+        const source = ctx.createMediaElementSource(media);
+        const splitter = ctx.createChannelSplitter(2);
+        const analyserL = ctx.createAnalyser();
+        const analyserR = ctx.createAnalyser();
+        analyserL.fftSize = 256;
+        analyserR.fftSize = 256;
+        source.connect(splitter);
+        splitter.connect(analyserL, 0);
+        splitter.connect(analyserR, 1);
+        source.connect(ctx.destination);
+        const entry = { el: media, graph: { ctx, analyserL, analyserR, dataL: new Uint8Array(analyserL.frequencyBinCount), dataR: new Uint8Array(analyserR.frequencyBinCount), raf: 0 } };
+        vuGraphRef.current = entry;
+        return entry.graph;
+      } catch {
+        // 元素已被其他图接管（理论不可达：图按元素缓存复用）时静默降级，改用模拟电平。
+        return null;
+      }
+    };
+    const entryGraph = attach();
+    // 模拟电平：无真实音频图（AudioContext 不可用 / 挂接失败 / 媒体无声音轨）时，
+    // 用当前音量值驱动两条跳动，保证播放中每帧都有动画 —— 杜绝"点了播放却一动不动"。
+    const paintVu = (levelL: number, levelR: number) => {
+      if (vuBarLRef.current) vuBarLRef.current.style.height = `${(30 + levelL * 70).toFixed(1)}%`;
+      if (vuBarRRef.current) vuBarRRef.current.style.height = `${(30 + levelR * 70).toFixed(1)}%`;
+    };
+    if (!entryGraph) {
+      let simL = 0.3, simR = 0.3, tL = 0.3, tR = 0.3, raf = 0;
+      const tick = () => {
+        simL += (tL - simL) * 0.3; simR += (tR - simR) * 0.3;
+        if (Math.random() < 0.35) { tL = 0.3 + Math.random() * 0.7; tR = 0.3 + Math.random() * 0.7; }
+        const amp = Math.max(0.2, volumeRef.current / 100);
+        paintVu(simL * amp, simR * amp);
+        raf = requestAnimationFrame(tick);
+      };
+      raf = requestAnimationFrame(tick);
+      return () => cancelAnimationFrame(raf);
+    }
+    void entryGraph.ctx.resume().catch(() => undefined);
+    const avg = (data: Uint8Array<ArrayBuffer>) => data.reduce((sum, value) => sum + value, 0) / (data.length * 255);
+    const tick = () => {
+      const entry = vuGraphRef.current;
+      if (!entry || entry.graph !== entryGraph) return;
+      entry.graph.analyserL.getByteFrequencyData(entry.graph.dataL);
+      entry.graph.analyserR.getByteFrequencyData(entry.graph.dataR);
+      const levelL = Math.min(1, avg(entry.graph.dataL) * 1.6);
+      const levelR = Math.min(1, avg(entry.graph.dataR) * 1.6);
+      // 真实音频无声（电平均为 0）时也退化为音量模拟，保证有可见动画。
+      if (levelL + levelR < 0.02) {
+        const amp = Math.max(0.2, volumeRef.current / 100);
+        paintVu((0.3 + Math.random() * 0.5) * amp, (0.3 + Math.random() * 0.5) * amp);
+      } else {
+        paintVu(levelL, levelR);
+      }
+      entry.graph.raf = requestAnimationFrame(tick);
+    };
+    entryGraph.raf = requestAnimationFrame(tick);
+    return stopVuPolling;
+  }, [playing, previewAsset?.media_url, previewMode, vuEpoch, stopVuPolling]);
   const visibleCaption = working?.captions.find(item => playhead >= item.start_us && playhead < item.end_us) ?? selectedCaption;
   const totalUs = duration(working);
   const handleVideoEnded = () => {
@@ -765,7 +886,7 @@ export function App() {
     if (!project || !timeline || !working?.clips.length) return;
     if (timeline.draft) { showNotice("请先提交或丢弃草稿，再生成权威预览。", "warning"); return; }
     try {
-      const result = await window.desktop.createPreview({ project_id: project.project_id, preview: { timeline_revision_id: timeline.current_revision.timeline_revision_id, encoder_mode: encoderMode } });
+      const result = await window.desktop.createPreview({ project_id: project.project_id, preview: { timeline_revision_id: timeline.current_revision.timeline_revision_id, encoder_mode: encoderMode, output_ratio: effectiveRatio } });
       if (result.preview) {
         setPreviews(items => [result.preview!, ...items.filter(item => item.preview.render_artifact_id !== result.preview!.preview.render_artifact_id)]);
         setPreviewMode("authoritative");
@@ -779,7 +900,7 @@ export function App() {
     try {
       const grant = await window.desktop.chooseExportDestination(project.project_id);
       if (!grant) return;
-      const result = await window.desktop.createExport({ project_id: project.project_id, export: { timeline_revision_id: timeline.current_revision.timeline_revision_id, destination_grant_id: grant.destination_grant_id, encoder_mode: encoderMode } });
+      const result = await window.desktop.createExport({ project_id: project.project_id, export: { timeline_revision_id: timeline.current_revision.timeline_revision_id, destination_grant_id: grant.destination_grant_id, encoder_mode: encoderMode, output_ratio: effectiveRatio } });
       if (result.export_record) setExports(items => [result.export_record!, ...items.filter(item => item.export_record.export_record_id !== result.export_record!.export_record.export_record_id)]);
       trackRenderJob(result.job);
       setRenderPanelOpen(true);
@@ -897,8 +1018,48 @@ export function App() {
   const nativeStream = nativeInfo && "video_streams" in nativeInfo ? nativeInfo.video_streams[0] : undefined;
   const nativeRatio = nativeStream?.width && nativeStream?.height && nativeStream.width > 0 && nativeStream.height > 0 ? nativeStream.width / nativeStream.height : null;
   const autoRatio = nativeRatio ? (Math.abs(nativeRatio - 16 / 9) < 0.05 ? "169" : Math.abs(nativeRatio - 9 / 16) < 0.05 ? "916" : Math.abs(nativeRatio - 1) < 0.05 ? "11" : Math.abs(nativeRatio - 4 / 3) < 0.05 ? "43" : Math.abs(nativeRatio - 3 / 4) < 0.05 ? "34" : "fit") : "fit";
-  const effectiveRatio = previewRatioTouched ? previewRatio : autoRatio;
+  const effectiveRatio: OutputRatio = (previewRatioTouched ? previewRatio : autoRatio) as OutputRatio;
   const previewClass = `${previewLayout} ratio-${effectiveRatio}`;
+  // 时间码帧率：优先画布帧率，缺省 30fps。
+  const previewFps = working?.canvas.fps_num && working.canvas.fps_den ? working.canvas.fps_num / working.canvas.fps_den : 30;
+  // 预览缩放（剪映式）：点击缩放按钮弹出滑条，对数刻度 25%–500%，缩小时以画面中心整体缩小。
+  const zoomT = (z: number) => Math.round(Math.log(z / 0.25) / Math.log(20) * 1000);
+  const zoomZ = (t: number) => 0.25 * Math.exp(Math.log(20) * t / 1000);
+  // 悬浮进度条：以比例换算播放头（与剪映进度条一致）。
+  const progressPct = Math.max(0, Math.min(100, (playhead / Math.max(totalUs, 1)) * 100));
+  const seekFromProgressRatio = (ratio: number) => {
+    exitLibraryPreview();
+    const value = Math.round(ratio * Math.max(totalUs, 1));
+    setPlayhead(value);
+    const clip = sortedClips.find(c => value >= c.timeline_start_us && value < c.timeline_end_us);
+    if (clip && videoRef.current) {
+      const sourceStart = (clip.source_start_us ?? 0) / 1_000_000;
+      const elapsed = (value - clip.timeline_start_us) / 1_000_000 * ((clip.speed_milli ?? 1000) / 1000);
+      videoRef.current.currentTime = sourceStart + elapsed;
+    } else if (videoRef.current) {
+      videoRef.current.currentTime = value / 1_000_000;
+    }
+  };
+  const seekFromProgress = (clientX: number) => {
+    const el = progressRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    seekFromProgressRatio((clientX - rect.left) / rect.width);
+  };
+  const seekVolumeFrom = (clientY: number) => {
+    const rail = volRailRef.current;
+    if (!rail) return;
+    const rect = rail.getBoundingClientRect();
+    if (rect.height <= 0) return;
+    setVolume(Math.round(Math.max(0, Math.min(1, 1 - (clientY - rect.top) / rect.height)) * 100));
+  };
+  const toggleFullscreen = async () => {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await stagePaneRef.current?.requestFullscreen();
+    } catch { showNotice("进入全屏失败。", "warning"); }
+  };
   const authoritativePreview = previews.find(item => item.preview.timeline_revision_id === timeline?.current_revision.timeline_revision_id) ?? previews[0];
   const previewIsStale = Boolean(authoritativePreview && (authoritativePreview.preview.status === "stale" || authoritativePreview.preview.timeline_revision_id !== timeline?.current_revision.timeline_revision_id));
   const firstMediaAsset = assets.find(item => (item.asset.kind === "video" || item.asset.kind === "image") && item.asset.availability === "available");
@@ -1073,13 +1234,106 @@ export function App() {
   }, [activeMenu, dropdownIndex]);
 
   useEffect(() => {
-    if (!ratioMenuOpen) return;
+    if (!zoomPopOpen && !volPopOpen) return;
     const listener = (event: MouseEvent) => {
-      if (ratioMenuRef.current && !ratioMenuRef.current.contains(event.target as Node)) setRatioMenuOpen(false);
+      if (zoomPopRef.current && !zoomPopRef.current.contains(event.target as Node)) setZoomPopOpen(false);
+      if (volPopRef.current && !volPopRef.current.contains(event.target as Node)) setVolPopOpen(false);
     };
     window.addEventListener("mousedown", listener);
     return () => window.removeEventListener("mousedown", listener);
-  }, [ratioMenuOpen]);
+  }, [zoomPopOpen, volPopOpen]);
+  // 全屏：跟随浏览器全屏状态（Esc 退出时按钮图标同步复原）。
+  useEffect(() => {
+    const listener = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", listener);
+    return () => document.removeEventListener("fullscreenchange", listener);
+  }, []);
+  // 基准宽：工具栏 / 舞台 / 进度条 / 播放条共享 16:9 适应宽度（剪映同款），其余比例在该列内居中。
+  useEffect(() => {
+    const pane = stagePaneRef.current;
+    const col = stageColumnRef.current;
+    if (!pane || !col) return;
+    const layout = () => {
+      const el = stageColumnRef.current;
+      const host = stagePaneRef.current;
+      if (!el || !host) return;
+      const isFs = document.fullscreenElement === host;
+      const availW = isFs ? window.innerWidth - 24 : host.clientWidth - 24;
+      const availH = isFs ? window.innerHeight - 24 - 40 - 40 - 16 : host.clientHeight - 24 - 40 - 40 - 16;
+      const w = Math.max(320, Math.min(availW, availH * 16 / 9));
+      el.style.width = `${w}px`;
+    };
+    layout();
+    const ro = new ResizeObserver(layout);
+    ro.observe(pane);
+    window.addEventListener("resize", layout);
+    document.addEventListener("fullscreenchange", layout);
+    return () => { ro.disconnect(); window.removeEventListener("resize", layout); document.removeEventListener("fullscreenchange", layout); };
+  }, []);
+  // 音量：应用到当前播放的媒体元素（0-100 → 0-1）；同时同步给 VU 模拟电平使用。
+  useEffect(() => {
+    volumeRef.current = volume;
+    const vol = Math.max(0, Math.min(1, volume / 100));
+    if (videoRef.current) videoRef.current.volume = vol;
+    if (audioRef.current) audioRef.current.volume = vol;
+  }, [volume, previewAsset?.media_url, audioAsset?.media_url]);
+  // 画面选中框：8 向手柄拖拽改画面大小（角 = 等比保持比例，边 = 单轴）；缩放时随 frame 一起缩放。
+  const selZoomFactor = previewZoom === "fit" ? 1 : previewZoom;
+  const beginSelDrag = (dir: string) => (event: React.PointerEvent<HTMLElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    selDragRef.current = { dir, startX: event.clientX, startY: event.clientY, w: canvas.offsetWidth, h: canvas.offsetHeight, ratio: canvas.offsetWidth / Math.max(1, canvas.offsetHeight) };
+    setSelDimsText(`${Math.round(canvas.offsetWidth)} × ${Math.round(canvas.offsetHeight)}`);
+  };
+  const moveSelDrag = (event: React.PointerEvent<HTMLElement>) => {
+    const drag = selDragRef.current;
+    const canvas = canvasRef.current;
+    if (!drag || !canvas) return;
+    const dx = (event.clientX - drag.startX) / selZoomFactor;
+    const dy = (event.clientY - drag.startY) / selZoomFactor;
+    let w = drag.w, h = drag.h;
+    const d = drag.dir;
+    if (d.includes("e")) w = drag.w + dx;
+    if (d.includes("s")) h = drag.h + dy;
+    if (d.includes("w")) w = drag.w - dx;
+    if (d.includes("n")) h = drag.h - dy;
+    if (d === "nw" || d === "ne" || d === "sw" || d === "se") {
+      const byW = Math.abs(w - drag.w), byH = Math.abs(h - drag.h);
+      if (byW >= byH) h = w / drag.ratio; else w = h * drag.ratio;
+    }
+    w = Math.max(80, Math.min(2400, w));
+    h = Math.max(45, Math.min(1350, h));
+    canvas.style.width = `${w}px`;
+    canvas.style.height = `${h}px`;
+    setCanvasSize({ w: Math.round(w), h: Math.round(h) });
+    setSelDimsText(`${Math.round(w)} × ${Math.round(h)}`);
+  };
+  const endSelDrag = (event: React.PointerEvent<HTMLElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    selDragRef.current = null;
+  };
+  // 选中框同步：框贴合画面（canvas）的布局矩形；frame 的 transform 缩放会同时作用于 canvas 与框。
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const box = selBoxRef.current;
+    if (!canvas || !box) return;
+    const sync = () => {
+      box.style.left = `${canvas.offsetLeft}px`;
+      box.style.top = `${canvas.offsetTop}px`;
+      box.style.width = `${canvas.offsetWidth}px`;
+      box.style.height = `${canvas.offsetHeight}px`;
+      setSelDimsText(`${Math.round(canvas.offsetWidth)} × ${Math.round(canvas.offsetHeight)}`);
+    };
+    sync();
+    const ro = new ResizeObserver(sync);
+    ro.observe(canvas);
+    if (canvas.parentElement) ro.observe(canvas.parentElement);
+    window.addEventListener("resize", sync);
+    return () => { ro.disconnect(); window.removeEventListener("resize", sync); };
+  }, [previewClass, canvasSize]);
   useEffect(() => {
     if (!projectSwitcherOpen) return;
     const listener = (event: MouseEvent) => {
@@ -1160,10 +1414,20 @@ export function App() {
         {!timeline && project && <div className="empty-timeline"><button onClick={() => void createTimeline({ kind: "empty" })}>创建空时间线</button></div>}
       </section>
       <div className="resize-handle resize-handle-left" role="separator" aria-label="调整左侧面板宽度" onPointerDown={event => beginResize("left", event)} />
-      <section className="stage-pane" aria-label="项目预览">
-        <div className="preview-toolbar"><div className="preview-mode-switch" aria-label="预览模式"><button className={previewMode === "interactive" ? "active" : ""} onClick={() => { setPreviewMode("interactive"); setExportPlayback(undefined); }}>交互预览</button><button className={previewMode === "authoritative" ? "active" : ""} disabled={!authoritativePreview && !exportPlayback} onClick={() => { setPreviewMode("authoritative"); setExportPlayback(undefined); }}>权威预览</button></div><label className="ratio-select">比例<select aria-label="预览比例" value={effectiveRatio} onChange={event => { setPreviewRatio(event.target.value); setPreviewRatioTouched(true); }}>{previewRatios.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label><label className="encoder-select">编码模式<select aria-label="编码模式" value={encoderMode} onChange={event => setEncoderMode(event.target.value as EncoderMode)}><option value="auto">自动</option><option value="software">软件</option><option value="hardware">硬件</option></select></label><button className="render-panel-toggle" onClick={() => setRenderPanelOpen(true)}>渲染与导出{renderActivity ? <span className="render-badge" aria-hidden="true">{renderActivity}</span> : null}</button></div>
-        <div className={`preview-frame ${previewClass}${previewSelected ? " selected" : ""}`} role="button" tabIndex={0} aria-label="选中播放头处的片段" title="点击选中播放头处的片段" onClick={selectClipAtPlayhead} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectClipAtPlayhead(); } }}>
-          <div className="preview-canvas">
+      <section ref={stagePaneRef} className={`stage-pane${isFullscreen ? " fullscreen" : ""}`} aria-label="项目预览">
+        <div className="stage-column" ref={stageColumnRef}>
+          <div className="preview-toolbar">
+            <div className="preview-mode-switch" aria-label="预览模式"><button className={previewMode === "interactive" ? "active" : ""} onClick={() => { setPreviewMode("interactive"); setExportPlayback(undefined); }}>交互预览</button><button className={previewMode === "authoritative" ? "active" : ""} disabled={!authoritativePreview && !exportPlayback} onClick={() => { setPreviewMode("authoritative"); setExportPlayback(undefined); }}>权威预览</button></div>
+            <div className="tb-right">
+              <label className="tb-field">比例<select aria-label="预览比例" value={effectiveRatio} onChange={event => { setPreviewRatio(event.target.value); setPreviewRatioTouched(true); setCanvasSize(null); if (canvasRef.current) { canvasRef.current.style.width = ""; canvasRef.current.style.height = ""; } }}>{previewRatios.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label>
+              <span className="tb-sep" aria-hidden="true" />
+              <label className="tb-field">编码<select aria-label="编码模式" value={encoderMode} onChange={event => setEncoderMode(event.target.value as EncoderMode)}><option value="auto">自动</option><option value="software">软件</option></select></label>
+              <button className="render-panel-toggle" onClick={() => setRenderPanelOpen(true)}>渲染与导出{renderActivity ? <span className="render-badge" aria-hidden="true">{renderActivity}</span> : null}</button>
+            </div>
+          </div>
+          <div className="stage-view">
+            <div className={`preview-frame ${previewClass}${previewSelected ? " selected" : ""}`} style={previewZoom === "fit" ? undefined : { transform: `scale(${previewZoom})` }} role="button" tabIndex={0} aria-label="选中播放头处的片段" title="点击选中播放头处的片段" onClick={selectClipAtPlayhead} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectClipAtPlayhead(); } }}>
+          <div className="preview-canvas" ref={canvasRef}>
             {previewMode === "authoritative" && authoritativeMediaUrl && <video ref={videoRef} className="preview-foreground authoritative-video" src={authoritativeMediaUrl} aria-label={reframePlayback ? "重构图权威预览视频" : exportPlayback ? "导出视频" : "权威预览视频"} controls onEnded={() => setPlaying(false)} />}
             {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "video" && <><video className="preview-background" src={previewAsset.media_url} muted aria-hidden="true" /><video ref={videoRef} className="preview-foreground" src={previewAsset.media_url} muted={!selectedClip?.audio.enabled || previewReverse || (clipAtPlayhead ? !isClipAudible(clipAtPlayhead) : false)} aria-label="交互预览视频" onTimeUpdate={event => { const clip = clipAtPlayhead; if (clip) { const sourceStart = (clip.source_start_us ?? 0) / 1_000_000; const elapsed = (event.currentTarget.currentTime - sourceStart) * ((clip.speed_milli ?? 1000) / 1000); setPlayhead(Math.round(clip.timeline_start_us + elapsed * 1_000_000)); } else if (!libraryPreviewId) { setPlayhead(Math.round(event.currentTarget.currentTime * 1_000_000)); } }} onEnded={handleVideoEnded} /></>}
             {previewMode === "interactive" && audioAsset?.media_url && <audio ref={audioRef} src={audioAsset.media_url} style={{ display: "none" }} />}
@@ -1171,30 +1435,40 @@ export function App() {
             {previewMode === "interactive" && !previewAsset?.media_url && <div className="preview-empty">选择或追加素材以开始编辑</div>}
             {previewMode === "interactive" && visibleCaption && <div className={`caption-overlay ${visibleCaption.preset_id}`}>{visibleCaption.text}</div>}
           </div>
-          <span className={`interactive-label ${previewIsStale && previewMode === "authoritative" && !exportPlayback ? "stale" : ""}`}>{previewMode === "interactive" ? "交互预览 · 非权威" : reframePlayback ? "静态焦点重构图 · 权威预览" : exportPlayback ? `导出 · ${exportPlayback.export_record.destination_display_name}` : previewIsStale ? "权威预览 · 已过期" : "权威预览 · 当前 Revision"}</span><span role="status" aria-label="预览状态" className={`preview-context ${previewMode === "authoritative" ? "authoritative" : "interactive"}${previewIsStale ? " stale" : ""}`}>{previewMode === "authoritative" ? (previewIsStale ? "权威预览已过期" : authoritativePreview ? "权威预览" : "尚未生成权威预览") : "交互预览"}</span>
+          {/* 选中框：白色边框 + 8 向拖拽手柄，缩放时随画面一起缩放；仅选中片段时可见。 */}
+          <div className="sel-box" ref={selBoxRef} onClick={event => event.stopPropagation()} aria-hidden="true"><i className="sel-border" /><span className="sel-dims">{selDimsText || `${Math.round((canvasRef.current?.offsetWidth ?? 0))} × ${Math.round((canvasRef.current?.offsetHeight ?? 0))}`}</span><span className="h h-nw" data-dir="nw" title="等比缩放（左上）" onPointerDown={beginSelDrag("nw")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-n" data-dir="n" title="单轴缩放（上）" onPointerDown={beginSelDrag("n")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-ne" data-dir="ne" title="等比缩放（右上）" onPointerDown={beginSelDrag("ne")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-e" data-dir="e" title="单轴缩放（右）" onPointerDown={beginSelDrag("e")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-se" data-dir="se" title="等比缩放（右下）" onPointerDown={beginSelDrag("se")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-s" data-dir="s" title="单轴缩放（下）" onPointerDown={beginSelDrag("s")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-sw" data-dir="sw" title="等比缩放（左下）" onPointerDown={beginSelDrag("sw")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-w" data-dir="w" title="单轴缩放（左）" onPointerDown={beginSelDrag("w")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /></div>
         </div>
-        <div className="playback">
-          <div className="playback-left"><span className="playback-timecode">{formatTime(playhead)} / {formatTime(totalUs)}</span></div>
-          <div className="playback-center"><IconButton label={playing ? "暂停" : "播放"} onClick={() => setPlaying(value => !value)}>{playing ? <Pause /> : <Play />}</IconButton><input aria-label="时间线播放头" type="range" min={0} max={Math.max(totalUs, 1)} value={Math.min(playhead, totalUs)} onChange={event => { exitLibraryPreview(); const value = Number(event.target.value); setPlayhead(value); const clip = sortedClips.find(c => value >= c.timeline_start_us && value < c.timeline_end_us); if (clip && videoRef.current) { const sourceStart = (clip.source_start_us ?? 0) / 1_000_000; const elapsed = (value - clip.timeline_start_us) / 1_000_000 * ((clip.speed_milli ?? 1000) / 1000); videoRef.current.currentTime = sourceStart + elapsed; } else if (videoRef.current) { videoRef.current.currentTime = value / 1_000_000; } }} /></div>
-          <div className="playback-right" role="group" aria-label="画布比例" ref={ratioMenuRef}>
-            <button
-              className="ratio-current-btn"
-              aria-haspopup="menu"
-              aria-expanded={ratioMenuOpen}
-              title="画布比例"
-              onClick={() => setRatioMenuOpen((value) => !value)}
-            >
-              {previewRatioTouched ? (previewRatios.find((item) => item.value === previewRatio)?.label ?? "比例") : "适应"}
-            </button>
-            {ratioMenuOpen && (
-              <div className="ratio-menu" role="menu" aria-label="选择画布比例">
-                <button role="menuitem" className={!previewRatioTouched ? "active" : ""} onClick={() => { setPreviewRatio("fit"); setPreviewRatioTouched(false); setRatioMenuOpen(false); }}>适应</button>
-                {previewRatios.filter((item) => item.value !== "fit").map((item) => (
-                  <button key={item.value} role="menuitem" className={previewRatioTouched && previewRatio === item.value ? "active" : ""} onClick={() => { setPreviewRatio(item.value); setPreviewRatioTouched(true); setRatioMenuOpen(false); }}>{item.label}</button>
-                ))}
-              </div>
-            )}
+          <span className={`interactive-label ${previewIsStale && previewMode === "authoritative" && !exportPlayback ? "stale" : ""}`}>{previewMode === "interactive" ? "交互预览 · 非权威" : reframePlayback ? "静态焦点重构图 · 权威预览" : exportPlayback ? `导出 · ${exportPlayback.export_record.destination_display_name}` : previewIsStale ? "权威预览 · 已过期" : "权威预览 · 当前 Revision"}</span><span role="status" aria-label="预览状态" className={`preview-context ${previewMode === "authoritative" ? "authoritative" : "interactive"}${previewIsStale ? " stale" : ""}`}>{previewMode === "authoritative" ? (previewIsStale ? "权威预览已过期" : authoritativePreview ? "权威预览" : "尚未生成权威预览") : "交互预览"}</span>
+          <div className={`progress${progressDragging ? " dragging" : ""}`} ref={progressRef} role="slider" tabIndex={0} aria-label="时间线播放头" aria-valuemin={0} aria-valuemax={Math.max(totalUs, 1)} aria-valuenow={Math.min(playhead, totalUs)} onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); setProgressDragging(true); seekFromProgress(event.clientX); }} onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) seekFromProgress(event.clientX); }} onPointerUp={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); setProgressDragging(false); }} onKeyDown={event => { if (event.key === "ArrowLeft") { event.preventDefault(); seekFromProgressRatio(Math.max(0, playhead / Math.max(totalUs, 1) - 1 / 300)); } else if (event.key === "ArrowRight") { event.preventDefault(); seekFromProgressRatio(Math.min(1, playhead / Math.max(totalUs, 1) + 1 / 300)); } }}>
+            <div className="pg-bubble" style={{ left: `${progressPct}%` }}>{formatSmpteTimecode(playhead, previewFps)}</div>
+            <div className="pg-rail"><div className="pg-fill" style={{ width: `${progressPct}%` }}><i className="pg-dot" /></div></div>
           </div>
+        </div>
+        <div className="playback-bar">
+          <div className="pb-left"><span className="tc"><b>{formatSmpteTimecode(playhead, previewFps)}</b><i> / </i><span className="tot">{formatSmpteTimecode(totalUs, previewFps)}</span></span><span className={`vu${playing ? " active" : ""}`} aria-hidden="true"><i ref={vuBarLRef} /><i ref={vuBarRRef} /></span></div>
+          <div className="pb-center"><button className="pb-play" aria-label={playing ? "暂停" : "播放"} title={playing ? "暂停" : "播放"} onClick={() => setPlaying(value => !value)}>{playing ? <Pause /> : <Play />}</button></div>
+          <div className="pb-right" role="group" aria-label="播放器控制">
+            <span className="vol-anchor">
+              <button className="pb-icon" aria-haspopup="dialog" aria-expanded={volPopOpen} title={`音量 ${volume}%`} aria-label="音量" onClick={event => { event.stopPropagation(); setVolPopOpen(value => !value); setZoomPopOpen(false); }}>{volume === 0 ? <VolumeX /> : <Volume2 />}</button>
+              <div className={`vol-pop${volPopOpen ? " open" : ""}`} ref={volPopRef} onClick={event => event.stopPropagation()}>
+                <div className="vol-rail" ref={volRailRef} onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); seekVolumeFrom(event.clientY); }} onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) seekVolumeFrom(event.clientY); }} onPointerUp={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }}>
+                  <div className="vol-fill" style={{ height: `${volume}%` }} />
+                  <div className="vol-thumb" style={{ bottom: `${volume}%` }} />
+                </div>
+              </div>
+            </span>
+            <button className="pb-icon zoom-btn" aria-haspopup="dialog" aria-expanded={zoomPopOpen} title="预览缩放" onClick={event => { event.stopPropagation(); setZoomPopOpen(value => !value); setVolPopOpen(false); }}><ZoomIn /><span className="zoom-label">{previewZoom === "fit" ? "适应" : `${Math.round(previewZoom * 100)}%`}</span></button>
+            <div className={`zoom-pop${zoomPopOpen ? " open" : ""}`} ref={zoomPopRef} onClick={event => event.stopPropagation()}>
+              <div className="zp-head">
+                <button className={`zp-fit${previewZoom === "fit" ? " on" : ""}`} onClick={() => setPreviewZoom("fit")}>{previewZoom === "fit" ? "✓ 适应画布" : "适应画布"}</button>
+                <span className="zp-val">{previewZoom === "fit" ? "适应" : `${Math.round(previewZoom * 100)}%`}</span>
+              </div>
+              <input type="range" min={0} max={1000} value={previewZoom === "fit" ? zoomT(1) : zoomT(previewZoom)} onChange={event => setPreviewZoom(Math.round(zoomZ(Number(event.target.value)) * 100) / 100)} aria-label="预览缩放百分比" />
+              <div className="zp-scale"><span>25%</span><span>100%</span><span>500%</span></div>
+            </div>
+            <button className="pb-icon" aria-label={isFullscreen ? "退出全屏" : "全屏"} title={isFullscreen ? "退出全屏" : "全屏"} onClick={() => void toggleFullscreen()}>{isFullscreen ? <Minimize /> : <Maximize />}</button>
+          </div>
+        </div>
         </div>
       </section>
       <div className="resize-handle resize-handle-right" role="separator" aria-label="调整右侧面板宽度" onPointerDown={event => beginResize("right", event)} />
