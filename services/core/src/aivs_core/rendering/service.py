@@ -254,7 +254,12 @@ class RenderCoordinator:
                 row["project_id"], row["timeline_revision_id"], rendition_snapshot_id, mode
             )
         else:
-            plan = self.compiler.compile(row["project_id"], row["timeline_revision_id"], mode)
+            plan = self.compiler.compile(
+                row["project_id"],
+                row["timeline_revision_id"],
+                mode,
+                output_ratio=payload.get("output_ratio") or "fit",
+            )
         if plan["content_fingerprint"] != payload["content_fingerprint"]:
             raise DomainError("RENDER_INPUT_CHANGED", "渲染输入在排队后已变化")
         stage("preparing")
@@ -288,7 +293,13 @@ class RenderCoordinator:
             )
         else:
             (work / "captions.ass").write_text(
-                build_ass(plan["captions"]["items"], bundle, presets), encoding="utf-8-sig"
+                build_ass(
+                    plan["captions"]["items"],
+                    bundle,
+                    presets,
+                    (int(plan["output"]["width"]), int(plan["output"]["height"])),
+                ),
+                encoding="utf-8-sig",
             )
         destination_grant = None
         if mode == "final_export":
@@ -317,21 +328,38 @@ class RenderCoordinator:
             output = target.parent / f".{target.stem}.{job_id}.aivs-tmp.mp4"
         else:
             output = work / "authoritative-preview.mp4"
-        args = build_timeline_args(
-            plan,
-            segment_paths,
-            segment_probes,
-            row["encoder_requested"],
-            str(output),
-            captions=bool(plan["captions"]["items"]),
-        )
         expected_duration = _rendered_duration_us(plan["segments"])
-        attempts = 2 if mode == "authoritative_preview" else 1
+        # 编码器候选：先用请求的编码器；若它是硬件编码器（本机 QSV/AMF/NVENC 可能
+        # 间歇性失败），渲染失败后自动降级到软件编码 libopenh264 重试一次。
+        requested_encoder = row["encoder_requested"]
+        encoders_to_try = [requested_encoder]
+        if requested_encoder not in {"libopenh264", "libx264"}:
+            encoders_to_try.append("libopenh264")
+        last_error_detail: str | None = None
         try:
-            for attempt in range(1, attempts + 1):
+            for attempt_index, encoder in enumerate(encoders_to_try, start=1):
                 try:
-                    if attempt > 1:
-                        self._set_attempt(job_id, attempt)
+                    if attempt_index > 1:
+                        self._set_attempt(job_id, attempt_index)
+                        with self.database.connection() as db:
+                            db.execute(
+                                "UPDATE jobs SET encoder_used=?,fallback_reason=?,updated_at=? "
+                                "WHERE id=?",
+                                (
+                                    encoder,
+                                    f"渲染失败后自动降级自 {requested_encoder}",
+                                    utc_now(),
+                                    job_id,
+                                ),
+                            )
+                    args = build_timeline_args(
+                        plan,
+                        segment_paths,
+                        segment_probes,
+                        encoder,
+                        str(output),
+                        captions=bool(plan["captions"]["items"]),
+                    )
                     stage("rendering")
                     await run_timeline_render(
                         self.ffmpeg,
@@ -352,16 +380,24 @@ class RenderCoordinator:
                     )
                     break
                 except DomainError as exc:
-                    if attempt == attempts or exc.code not in {
-                        "RENDER_FAILED",
-                        "RENDER_VALIDATION_FAILED",
-                    }:
-                        raise
-                    output.unlink(missing_ok=True)
+                    if exc.code in {"RENDER_FAILED", "RENDER_VALIDATION_FAILED"}:
+                        last_error_detail = str(getattr(exc, "message", "") or exc)
+                        if attempt_index < len(encoders_to_try):
+                            output.unlink(missing_ok=True)
+                            continue
+                    raise
                 except RuntimeError as exc:
-                    if attempt == attempts or str(exc).startswith("JOB_CANCELLED"):
+                    if str(exc).startswith("JOB_CANCELLED"):
                         raise
-                    output.unlink(missing_ok=True)
+                    last_error_detail = str(exc)
+                    if attempt_index < len(encoders_to_try):
+                        output.unlink(missing_ok=True)
+                        continue
+                    # 所有编码器候选均失败：用 DomainError 携带 stderr 细节，
+                    # jobs 层会把 message 原样写入 error_message。
+                    raise DomainError(
+                        "RENDER_FAILED", f"渲染失败：{last_error_detail[-500:]}"
+                    ) from exc
             if cancel_event.is_set():
                 raise RuntimeError("JOB_CANCELLED")
             stage("finalizing")
@@ -490,7 +526,11 @@ class RenderService:
         self.destinations = destinations
 
     async def create_preview(
-        self, project_id: str, timeline_revision_id: str | None, encoder_mode: str
+        self,
+        project_id: str,
+        timeline_revision_id: str | None,
+        encoder_mode: str,
+        output_ratio: str = "fit",
     ) -> dict[str, Any]:
         encoder_mode = _encoder_mode(encoder_mode)
         plan = self.compiler.compile(
@@ -498,6 +538,7 @@ class RenderService:
             timeline_revision_id,
             "authoritative_preview",
             reject_draft=True,
+            output_ratio=output_ratio,
         )
         encoder, fallback = await self.encoders.choose(encoder_mode)
         toolchain = await self._toolchain(encoder, fallback)
@@ -512,6 +553,7 @@ class RenderService:
             {
                 "content_fingerprint": plan["content_fingerprint"],
                 "toolchain": toolchain,
+                "output_ratio": output_ratio,
             },
         )
         return {"job": job, "preview": None, "reused": False}
@@ -598,9 +640,12 @@ class RenderService:
         timeline_revision_id: str | None,
         destination_grant_id: str,
         encoder_mode: str,
+        output_ratio: str = "fit",
     ) -> dict[str, Any]:
         encoder_mode = _encoder_mode(encoder_mode)
-        plan = self.compiler.compile(project_id, timeline_revision_id, "final_export")
+        plan = self.compiler.compile(
+            project_id, timeline_revision_id, "final_export", output_ratio=output_ratio
+        )
         encoder, fallback = await self.encoders.choose(encoder_mode)
         toolchain = await self._toolchain(encoder, fallback)
         grant = self.destinations.inspect(destination_grant_id)
@@ -620,6 +665,7 @@ class RenderService:
                 "toolchain": toolchain,
                 "destination_grant_id": destination_grant_id,
                 "destination_path": str(grant["path"]),
+                "output_ratio": output_ratio,
             },
         )
         try:

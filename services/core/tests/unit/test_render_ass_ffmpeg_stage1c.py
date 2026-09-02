@@ -468,7 +468,8 @@ def test_builder_inserts_black_filler_for_timeline_gaps() -> None:
 
     # 空隙 → 追加一个 lavfi 黑底输入（2 个文件输入 + 1 个填充输入 = 3 个 -i）。
     assert args.count("-i") == 3
-    assert args.count("color=c=black:s=540x960:r=30") == 1
+    # 填充色源带显式时长（d=2s），避免 concat 图 EOF 死锁。
+    assert args.count("color=c=black:s=540x960:r=30:d=2.000000") == 1
     # 填充段按空隙时长裁剪（2s），且位于段 A 之后、段 B 之前。
     assert "trim=duration=2.000000,setpts=PTS-STARTPTS,fps=30,format=yuv420p[v1]" in graph
     # 按时间排序后三段 concat（A → 填充 → B）。
@@ -512,7 +513,8 @@ def test_builder_fills_leading_gap_before_first_segment() -> None:
         captions=False,
     )
     graph = args[args.index("-filter_complex") + 1]
-    assert args.count("color=c=black:s=540x960:r=30") == 2
+    # 两段填充（1s 引导 + 1s 段间）各带显式时长。
+    assert args.count("color=c=black:s=540x960:r=30:d=1.000000") == 2
     assert "trim=duration=1.000000,setpts=PTS-STARTPTS,fps=30,format=yuv420p[v0]" in graph
     assert "trim=duration=1.000000,setpts=PTS-STARTPTS,fps=30,format=yuv420p[v2]" in graph
     assert "concat=n=4:v=1:a=1" in graph

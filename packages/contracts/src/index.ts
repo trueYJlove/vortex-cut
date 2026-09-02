@@ -550,10 +550,17 @@ export type RenderMode = "authoritative_preview" | "final_export";
 export type RenderArtifactStatus = "ready" | "stale";
 export type ExportStatus = "succeeded" | "missing";
 export type EncoderMode = "auto" | "software";
+/** 工具栏"比例"下拉可选值；"fit" 表示跟随时间线默认画幅。 */
+export type OutputRatio = "fit" | "169" | "916" | "11" | "43" | "34";
+export const OUTPUT_RATIOS: OutputRatio[] = ["fit", "169", "916", "11", "43", "34"];
+export function isOutputRatio(value: unknown): value is OutputRatio { return oneOf(OUTPUT_RATIOS, value); }
 export type LegacyRenderProfileId = "preview-portrait-v1" | "export-portrait-v1";
 export type TargetRenderProfileId = "preview-portrait-9x16-v1" | "export-portrait-9x16-v1" | "preview-landscape-16x9-v1" | "export-landscape-16x9-v1";
-export type RenderProfileId = LegacyRenderProfileId | TargetRenderProfileId;
-export type ExportRenderProfileId = "export-portrait-v1" | "export-portrait-9x16-v1" | "export-landscape-16x9-v1";
+// 前端"比例"下拉 → 权威预览/导出渲染档位（与 aivs_core.rendering.plan 保持一致）。
+export type RatioRenderProfileId = "preview-169-v1" | "preview-916-v1" | "preview-11-v1" | "preview-43-v1" | "preview-34-v1" | "export-169-v1" | "export-916-v1" | "export-11-v1" | "export-43-v1" | "export-34-v1";
+export type PreviewRenderProfileId = "preview-portrait-v1" | "preview-portrait-9x16-v1" | "preview-landscape-16x9-v1" | "preview-169-v1" | "preview-916-v1" | "preview-11-v1" | "preview-43-v1" | "preview-34-v1";
+export type RenderProfileId = LegacyRenderProfileId | TargetRenderProfileId | RatioRenderProfileId;
+export type ExportRenderProfileId = "export-portrait-v1" | "export-portrait-9x16-v1" | "export-landscape-16x9-v1" | "export-169-v1" | "export-916-v1" | "export-11-v1" | "export-43-v1" | "export-34-v1";
 
 export interface RenderedMediaInfo {
   duration_us: number;
@@ -579,7 +586,7 @@ export interface RenderArtifact {
 }
 export interface AuthoritativePreview extends RenderArtifact {
   kind: "authoritative_preview";
-  profile_id: "preview-portrait-v1";
+  profile_id: PreviewRenderProfileId;
 }
 export interface ExportRecord {
   export_record_id: ExportRecordId;
@@ -603,9 +610,9 @@ export interface DestinationGrant {
   overwrite_authorized: boolean;
   expires_at: string;
 }
-export interface PreviewCreateInput { timeline_revision_id?: TimelineRevisionId; encoder_mode?: EncoderMode; }
+export interface PreviewCreateInput { timeline_revision_id?: TimelineRevisionId; encoder_mode?: EncoderMode; output_ratio?: OutputRatio; }
 export interface PreviewCreateResponse { job: Job | null; preview: AuthoritativePreview | null; reused: boolean; }
-export interface ExportCreateInput { timeline_revision_id?: TimelineRevisionId; destination_grant_id: DestinationGrantId; encoder_mode?: EncoderMode; }
+export interface ExportCreateInput { timeline_revision_id?: TimelineRevisionId; destination_grant_id: DestinationGrantId; encoder_mode?: EncoderMode; output_ratio?: OutputRatio; }
 export interface ExportCreateResponse { job: Job; export_record: ExportRecord | null; }
 export type AuthoritativePreviewPage = Page<AuthoritativePreview>;
 export type ExportRecordPage = Page<ExportRecord>;
@@ -1115,8 +1122,9 @@ const RENDER_MODES: RenderMode[] = ["authoritative_preview", "final_export"];
 const RENDER_ARTIFACT_STATUSES: RenderArtifactStatus[] = ["ready", "stale"];
 const EXPORT_STATUSES: ExportStatus[] = ["succeeded", "missing"];
 const ENCODER_MODES: EncoderMode[] = ["auto", "software"];
-const RENDER_PROFILE_IDS: RenderProfileId[] = ["preview-portrait-v1", "export-portrait-v1", "preview-portrait-9x16-v1", "export-portrait-9x16-v1", "preview-landscape-16x9-v1", "export-landscape-16x9-v1"];
-const EXPORT_RENDER_PROFILE_IDS: ExportRenderProfileId[] = ["export-portrait-v1", "export-portrait-9x16-v1", "export-landscape-16x9-v1"];
+const RENDER_PROFILE_IDS: RenderProfileId[] = ["preview-portrait-v1", "export-portrait-v1", "preview-portrait-9x16-v1", "export-portrait-9x16-v1", "preview-landscape-16x9-v1", "export-landscape-16x9-v1", "preview-169-v1", "preview-916-v1", "preview-11-v1", "preview-43-v1", "preview-34-v1", "export-169-v1", "export-916-v1", "export-11-v1", "export-43-v1", "export-34-v1"];
+const PREVIEW_RENDER_PROFILE_IDS: PreviewRenderProfileId[] = ["preview-portrait-v1", "preview-portrait-9x16-v1", "preview-landscape-16x9-v1", "preview-169-v1", "preview-916-v1", "preview-11-v1", "preview-43-v1", "preview-34-v1"];
+const EXPORT_RENDER_PROFILE_IDS: ExportRenderProfileId[] = ["export-portrait-v1", "export-portrait-9x16-v1", "export-landscape-16x9-v1", "export-169-v1", "export-916-v1", "export-11-v1", "export-43-v1", "export-34-v1"];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -1391,9 +1399,9 @@ export function isRenderedMediaInfo(value: unknown): value is RenderedMediaInfo 
 export function isRenderArtifact(value: unknown): value is RenderArtifact {
   return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["render_artifact_id", "project_id", "timeline_revision_id", "kind", "status", "content_fingerprint", "profile_id", "display_name", "size_bytes", "sha256", "media_info", "encoder", "fallback_reason", "created_at"]) &&
     isId(value.render_artifact_id) && isId(value.project_id) && isId(value.timeline_revision_id) && oneOf(RENDER_MODES, value.kind) && oneOf(RENDER_ARTIFACT_STATUSES, value.status) && isString(value.content_fingerprint) && value.content_fingerprint.length > 0 && isRenderProfileId(value.profile_id) &&
-    ((value.kind === "authoritative_preview" && ["preview-portrait-v1", "preview-portrait-9x16-v1", "preview-landscape-16x9-v1"].includes(value.profile_id)) || (value.kind === "final_export" && EXPORT_RENDER_PROFILE_IDS.includes(value.profile_id as ExportRenderProfileId))) && isString(value.display_name) && value.display_name.length > 0 && isInteger(value.size_bytes, 1) && isSha256(value.sha256) && isRenderedMediaInfo(value.media_info) && isString(value.encoder) && value.encoder.length > 0 && isNullableString(value.fallback_reason) && isTime(value.created_at);
+    ((value.kind === "authoritative_preview" && PREVIEW_RENDER_PROFILE_IDS.includes(value.profile_id as PreviewRenderProfileId)) || (value.kind === "final_export" && EXPORT_RENDER_PROFILE_IDS.includes(value.profile_id as ExportRenderProfileId))) && isString(value.display_name) && value.display_name.length > 0 && isInteger(value.size_bytes, 1) && isSha256(value.sha256) && isRenderedMediaInfo(value.media_info) && isString(value.encoder) && value.encoder.length > 0 && isNullableString(value.fallback_reason) && isTime(value.created_at);
 }
-export function isAuthoritativePreview(value: unknown): value is AuthoritativePreview { return isRenderArtifact(value) && value.kind === "authoritative_preview" && value.profile_id === "preview-portrait-v1"; }
+export function isAuthoritativePreview(value: unknown): value is AuthoritativePreview { return isRenderArtifact(value) && value.kind === "authoritative_preview"; }
 export function isExportRecord(value: unknown): value is ExportRecord {
   return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["export_record_id", "project_id", "timeline_revision_id", "render_artifact_id", "status", "profile_id", "destination_display_name", "size_bytes", "sha256", "media_info", "encoder", "fallback_reason", "created_at"]) &&
     isId(value.export_record_id) && isId(value.project_id) && isId(value.timeline_revision_id) && isId(value.render_artifact_id) && oneOf(EXPORT_STATUSES, value.status) && EXPORT_RENDER_PROFILE_IDS.includes(value.profile_id as ExportRenderProfileId) && isString(value.destination_display_name) && value.destination_display_name.length > 0 && isInteger(value.size_bytes, 1) && isSha256(value.sha256) && isRenderedMediaInfo(value.media_info) && isString(value.encoder) && value.encoder.length > 0 && isNullableString(value.fallback_reason) && isTime(value.created_at);
@@ -1402,14 +1410,14 @@ export function isDestinationGrant(value: unknown): value is DestinationGrant {
   return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["destination_grant_id", "display_name", "extension", "overwrite_authorized", "expires_at"]) && isId(value.destination_grant_id) && isString(value.display_name) && value.display_name.length > 0 && value.extension === ".mp4" && typeof value.overwrite_authorized === "boolean" && isTime(value.expires_at);
 }
 export function isPreviewCreateInput(value: unknown): value is PreviewCreateInput {
-  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["timeline_revision_id", "encoder_mode"]) && (value.timeline_revision_id === undefined || isId(value.timeline_revision_id)) && (value.encoder_mode === undefined || isEncoderMode(value.encoder_mode));
+  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["timeline_revision_id", "encoder_mode", "output_ratio"]) && (value.timeline_revision_id === undefined || isId(value.timeline_revision_id)) && (value.encoder_mode === undefined || isEncoderMode(value.encoder_mode)) && (value.output_ratio === undefined || isOutputRatio(value.output_ratio));
 }
 export function isPreviewCreateResponse(value: unknown): value is PreviewCreateResponse {
   if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["job", "preview", "reused"]) || !(value.job === null || isJob(value.job)) || !(value.preview === null || isAuthoritativePreview(value.preview)) || typeof value.reused !== "boolean") return false;
   return value.reused ? value.job === null && value.preview !== null && value.preview.status === "ready" : value.job !== null && value.preview === null && value.job.kind === "authoritative_preview";
 }
 export function isExportCreateInput(value: unknown): value is ExportCreateInput {
-  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["timeline_revision_id", "destination_grant_id", "encoder_mode"]) && (value.timeline_revision_id === undefined || isId(value.timeline_revision_id)) && isId(value.destination_grant_id) && (value.encoder_mode === undefined || isEncoderMode(value.encoder_mode));
+  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["timeline_revision_id", "destination_grant_id", "encoder_mode", "output_ratio"]) && (value.timeline_revision_id === undefined || isId(value.timeline_revision_id)) && isId(value.destination_grant_id) && (value.encoder_mode === undefined || isEncoderMode(value.encoder_mode)) && (value.output_ratio === undefined || isOutputRatio(value.output_ratio));
 }
 export function isExportCreateResponse(value: unknown): value is ExportCreateResponse {
   return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["job", "export_record"]) && isJob(value.job) && value.job.kind === "final_export" && (value.export_record === null || isExportRecord(value.export_record));

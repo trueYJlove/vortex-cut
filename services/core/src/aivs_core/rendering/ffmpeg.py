@@ -210,13 +210,24 @@ def build_timeline_args(
         args += ["-i", str(path)]
     next_input_index = len(segments)
     if needs_black_input:
-        args += ["-f", "lavfi", "-i", f"color=c=black:s={width}x{height}:r=30"]
+        # 与黑底填充段一致：给无限 color 源显式时长，避免 concat 图 EOF 死锁。
+        black_duration = _seconds(max(timeline_total_us, 1))
+        args += [
+            "-f", "lavfi", "-i",
+            f"color=c=black:s={width}x{height}:r=30:d={black_duration}",
+        ]
         next_input_index += 1
     for item in graph_items:
         if item["kind"] == "black":
             item["input_index"] = next_input_index
             next_input_index += 1
-            args += ["-f", "lavfi", "-i", f"color=c=black:s={width}x{height}:r=30"]
+            # color 源默认无限持续，concat 在部分 ffmpeg 构建下会因 EOF 异常
+            # 死锁；显式 d= 时长让该输入在填充段结束时正常 EOF。
+            fill_duration = _seconds(item["duration_us"])
+            args += [
+                "-f", "lavfi", "-i",
+                f"color=c=black:s={width}x{height}:r=30:d={fill_duration}",
+            ]
 
     filters: list[str] = []
     concat_inputs = []

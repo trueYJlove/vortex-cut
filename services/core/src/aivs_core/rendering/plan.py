@@ -38,6 +38,21 @@ PROFILES = {
     },
 }
 
+# 前端"比例"下拉 → 渲染输出尺寸（权威预览 / 最终导出）。
+# "fit" 表示跟随时间线默认（竖屏），由 PROFILES 兜底。
+OUTPUT_RATIO_DIMENSIONS: dict[str, dict[str, tuple[int, int]]] = {
+    "169": {"authoritative_preview": (960, 540), "final_export": (1920, 1080)},
+    "916": {"authoritative_preview": (540, 960), "final_export": (1080, 1920)},
+    "11": {"authoritative_preview": (720, 720), "final_export": (1440, 1440)},
+    "43": {"authoritative_preview": (832, 624), "final_export": (1664, 1248)},
+    "34": {"authoritative_preview": (624, 832), "final_export": (1248, 1664)},
+}
+
+RATIO_PROFILE_ID = {
+    "authoritative_preview": "preview-{ratio}-v1",
+    "final_export": "export-{ratio}-v1",
+}
+
 
 class RenderPlanCompiler:
     def __init__(self, database: Database) -> None:
@@ -50,9 +65,12 @@ class RenderPlanCompiler:
         mode: str,
         *,
         reject_draft: bool = False,
+        output_ratio: str | None = None,
     ) -> dict[str, Any]:
         if mode not in PROFILES:
             raise DomainError("RENDER_PLAN_INVALID", "渲染模式不合法")
+        if output_ratio not in (None, "fit") and output_ratio not in OUTPUT_RATIO_DIMENSIONS:
+            raise DomainError("RENDER_PLAN_INVALID", "输出比例不合法")
         with self.database.connection() as db:
             project = db.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
             if project is None:
@@ -78,7 +96,7 @@ class RenderPlanCompiler:
             document = json_loads(revision["document_json"])
             if not document.get("clips"):
                 raise DomainError("TIMELINE_EMPTY", "空时间线不能渲染")
-            return self._compile_document(db, revision_id, document, mode)
+            return self._compile_document(db, revision_id, document, mode, output_ratio)
 
     def compile_rendition(
         self,
@@ -269,6 +287,7 @@ class RenderPlanCompiler:
         revision_id: str,
         document: dict[str, Any],
         mode: str,
+        output_ratio: str | None = None,
     ) -> dict[str, Any]:
         inputs: list[dict[str, Any]] = []
         input_by_asset: dict[str, str] = {}
@@ -360,6 +379,12 @@ class RenderPlanCompiler:
             }
             for item in document["captions"]
         ]
+        output = dict(PROFILES[mode])
+        if output_ratio in OUTPUT_RATIO_DIMENSIONS:
+            width, height = OUTPUT_RATIO_DIMENSIONS[output_ratio][mode]
+            output["width"] = width
+            output["height"] = height
+            output["profile_id"] = RATIO_PROFILE_ID[mode].format(ratio=output_ratio)
         semantics = {
             "inputs": inputs,
             "segments": segments,
@@ -367,6 +392,13 @@ class RenderPlanCompiler:
             "canvas_background_color": document["canvas"]["background_color"],
             "preset_version": PRESET_VERSION,
             "font_bundle_version": FONT_BUNDLE_VERSION,
+            # 输出规格参与指纹：同一时间线不同比例视为不同渲染产物，
+            # 避免跨比例误复用，也让排队后比例变更可被 run() 检出。
+            "output": {
+                "profile_id": output["profile_id"],
+                "width": output["width"],
+                "height": output["height"],
+            },
         }
         digest = hashlib.sha256(json_dumps(semantics).encode("utf-8")).hexdigest()
         return {
@@ -383,7 +415,7 @@ class RenderPlanCompiler:
                 "font_bundle_version": FONT_BUNDLE_VERSION,
                 "items": caption_items,
             },
-            "output": dict(PROFILES[mode]),
+            "output": output,
         }
 
 

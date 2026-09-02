@@ -149,6 +149,7 @@ class PreviewCreateRequest(BaseModel):
 
     timeline_revision_id: str | None = None
     encoder_mode: str = "auto"
+    output_ratio: str = "fit"
 
 
 class ExportCreateRequest(BaseModel):
@@ -157,6 +158,7 @@ class ExportCreateRequest(BaseModel):
     timeline_revision_id: str | None = None
     destination_grant_id: str
     encoder_mode: str = "auto"
+    output_ratio: str = "fit"
 
 
 class BriefPutRequest(BaseModel):
@@ -1550,7 +1552,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> dict[str, Any]:
         try:
             return await state.renders.create_preview(
-                project_id, request.timeline_revision_id, request.encoder_mode
+                project_id,
+                request.timeline_revision_id,
+                request.encoder_mode,
+                request.output_ratio,
             )
         except DomainError as exc:
             raise _domain(exc) from exc
@@ -1788,6 +1793,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 request.timeline_revision_id,
                 request.destination_grant_id,
                 request.encoder_mode,
+                request.output_ratio,
             )
         except DomainError as exc:
             raise _domain(exc) from exc

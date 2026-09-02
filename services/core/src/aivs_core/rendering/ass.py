@@ -103,7 +103,10 @@ def escape_ass_text(value: str) -> str:
 
 
 def build_ass(
-    captions: list[dict[str, Any]], bundle: dict[str, Any], presets: dict[str, Any]
+    captions: list[dict[str, Any]],
+    bundle: dict[str, Any],
+    presets: dict[str, Any],
+    play_res: tuple[int, int] = (1080, 1920),
 ) -> str:
     family = str(bundle["family"])
     preset_values = presets.get("presets")
@@ -122,12 +125,13 @@ def build_ass(
             f"{int(value['outline'])},{int(value['shadow'])},2,80,80,"
             f"{int(value['margin_v'])},1"
         )
+    width, height = play_res
     events = []
     for caption in captions:
         preset_id = caption.get("preset_id")
         if preset_id not in preset_values:
             raise DomainError("RENDER_PLAN_INVALID", "字幕预设不合法")
-        override_tags = caption_override_tags(caption, preset_values, (1080, 1920))
+        override_tags = caption_override_tags(caption, preset_values, play_res)
         events.append(
             "Dialogue: 0,"
             f"{_ass_time(caption['start_us'])},{_ass_time(caption['end_us'])},"
@@ -137,8 +141,8 @@ def build_ass(
         [
             "[Script Info]",
             "ScriptType: v4.00+",
-            "PlayResX: 1080",
-            "PlayResY: 1920",
+            f"PlayResX: {width}",
+            f"PlayResY: {height}",
             "WrapStyle: 0",
             "ScaledBorderAndShadow: yes",
             "YCbCr Matrix: TV.709",
