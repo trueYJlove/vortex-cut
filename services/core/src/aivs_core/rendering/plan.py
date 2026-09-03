@@ -354,6 +354,9 @@ class RenderPlanCompiler:
                     "speed_milli": int(clip.get("speed_milli", 1000)),
                     "reverse_playback": bool(clip.get("reverse_playback", False)),
                     "keyframes": clip.get("keyframes"),
+                    "transform": clip.get("transform"),
+                    "mask": clip.get("mask"),
+                    "keying": clip.get("keying"),
                     "transition_in": (
                         {
                             "transition_id": transition["transition_id"],

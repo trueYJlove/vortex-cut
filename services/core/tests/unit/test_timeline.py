@@ -1213,6 +1213,133 @@ def test_keyframes_set_clear_and_diff(tmp_path: Path) -> None:
         _patch(service, state, [{"op": "clear_clip_keyframes", "clip_id": clip_id, "property": "opacity"}])
 
 
+def test_transform_set_clear_and_diff(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
+    clip_id = state["current_revision"]["document"]["clips"][0]["clip_id"]
+    base = state["current_revision"]
+
+    # 设置静态变换（完整字段）。
+    state = _patch(
+        service, state,
+        [{"op": "set_clip_transform", "clip_id": clip_id,
+          "transform": {"x": 0.7, "y": 0.2, "scale": 0.4, "rotate": 15.0, "opacity": 0.85}}],
+    )
+    transform = state["current_revision"]["document"]["clips"][0]["transform"]
+    assert transform == {"x": 0.7, "y": 0.2, "scale": 0.4, "rotate": 15.0, "opacity": 0.85}
+
+    # 部分字段覆盖（只改归一侧，其余保留）。
+    state = _patch(
+        service, state,
+        [{"op": "set_clip_transform", "clip_id": clip_id,
+          "transform": {"scale": 0.6}}],
+    )
+    transform = state["current_revision"]["document"]["clips"][0]["transform"]
+    assert transform == {"scale": 0.6}
+
+    # diff 记录 transform_changed（相对 base，一次覆盖）。
+    diff = service.compare_revisions("p1", base["timeline_revision_id"], state["current_revision"]["timeline_revision_id"])
+    assert sum(1 for c in diff["clip_changes"] if c["type"] == "transform_changed") == 1
+
+    # 空 transform = 清除字段（回到缺省）。
+    state = _patch(service, state, [{"op": "set_clip_transform", "clip_id": clip_id, "transform": {}}])
+    assert "transform" not in state["current_revision"]["document"]["clips"][0]
+
+    # 非法路径：越界值 / 字段不合法。
+    for bad in (
+        {"x": 1.2},
+        {"y": -0.1},
+        {"scale": 6.0},
+        {"scale": 0.01},
+        {"rotate": 200.0},
+        {"opacity": 1.5},
+        {"unknown": 1.0},
+    ):
+        with pytest.raises(DomainError):
+            _patch(service, state, [{"op": "set_clip_transform", "clip_id": clip_id, "transform": bad}])
+
+
+def test_mask_set_clear_and_diff(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
+    clip_id = state["current_revision"]["document"]["clips"][0]["clip_id"]
+    base = state["current_revision"]
+
+    # 设置椭圆蒙版。
+    state = _patch(
+        service, state,
+        [{"op": "set_clip_mask", "clip_id": clip_id,
+          "mask": {"kind": "ellipse", "x": 0.5, "y": 0.5, "width": 0.6, "height": 0.8, "feather": 0.1, "rotation": 0.0, "invert": False}}],
+    )
+    mask = state["current_revision"]["document"]["clips"][0]["mask"]
+    assert mask["kind"] == "ellipse" and mask["width"] == 0.6 and mask["feather"] == 0.1
+
+    # 线性蒙版 + 反选。
+    state = _patch(service, state, [{"op": "set_clip_mask", "clip_id": clip_id, "mask": {"kind": "linear", "rotation": 90.0, "invert": True}}])
+    mask = state["current_revision"]["document"]["clips"][0]["mask"]
+    assert mask == {"kind": "linear", "rotation": 90.0, "invert": True}
+
+    # diff 记录 mask_changed（相对 base）。
+    diff = service.compare_revisions("p1", base["timeline_revision_id"], state["current_revision"]["timeline_revision_id"])
+    assert sum(1 for c in diff["clip_changes"] if c["type"] == "mask_changed") == 1
+
+    # 空 mask = 清除字段（回到无蒙版）。
+    state = _patch(service, state, [{"op": "set_clip_mask", "clip_id": clip_id, "mask": {}}])
+    assert "mask" not in state["current_revision"]["document"]["clips"][0]
+
+    # 非法路径：越界 / 非法类型 / 未知字段。
+    for bad in (
+        {"kind": "star"},
+        {"kind": "rect", "width": 0.0},
+        {"kind": "rect", "height": 1.5},
+        {"kind": "ellipse", "x": 1.2},
+        {"kind": "ellipse", "feather": -0.1},
+        {"kind": "linear", "rotation": 190.0},
+        {"kind": "rect", "unknown": 1.0},
+        {"kind": "ellipse", "invert": "yes"},
+    ):
+        with pytest.raises(DomainError):
+            _patch(service, state, [{"op": "set_clip_mask", "clip_id": clip_id, "mask": bad}])
+
+
+def test_keying_set_clear_and_diff(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
+    clip_id = state["current_revision"]["document"]["clips"][0]["clip_id"]
+    base = state["current_revision"]
+
+    # 设置绿幕抠像。
+    state = _patch(service, state, [{"op": "set_clip_keying", "clip_id": clip_id,
+                                     "keying": {"color": "00FF00", "similarity": 0.4, "blend": 0.1, "invert": False}}])
+    keying = state["current_revision"]["document"]["clips"][0]["keying"]
+    assert keying == {"color": "00FF00", "similarity": 0.4, "blend": 0.1, "invert": False}
+
+    # 部分更新 + 反选（整块替换，语义同 set_clip_mask）。
+    state = _patch(service, state, [{"op": "set_clip_keying", "clip_id": clip_id, "keying": {"similarity": 0.2, "invert": True}}])
+    keying = state["current_revision"]["document"]["clips"][0]["keying"]
+    assert keying == {"similarity": 0.2, "invert": True}
+
+    # diff 记录 keying_changed（相对 base）。
+    diff = service.compare_revisions("p1", base["timeline_revision_id"], state["current_revision"]["timeline_revision_id"])
+    assert sum(1 for c in diff["clip_changes"] if c["type"] == "keying_changed") == 1
+
+    # 空 keying = 清除字段。
+    state = _patch(service, state, [{"op": "set_clip_keying", "clip_id": clip_id, "keying": {}}])
+    assert "keying" not in state["current_revision"]["document"]["clips"][0]
+
+    # 非法路径。
+    for bad in (
+        {"color": "green"},
+        {"color": "GGGGGG"},
+        {"color": "00FF00", "similarity": 1.5},
+        {"color": "00FF00", "blend": -0.1},
+        {"color": "00FF00", "unknown": 1},
+        {"color": "00FF00", "invert": "yes"},
+    ):
+        with pytest.raises(DomainError):
+            _patch(service, state, [{"op": "set_clip_keying", "clip_id": clip_id, "keying": bad}])
+
+
 def test_keyframes_remap_on_speed_and_split_partition(tmp_path: Path) -> None:
     service, _ = _service(tmp_path)
     state = _create(service, {"kind": "full_asset", "asset_id": "v1"})

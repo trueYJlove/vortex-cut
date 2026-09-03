@@ -39,6 +39,9 @@ PATCH_OPERATIONS = {
     "remove_transition",
     "set_clip_keyframes",
     "clear_clip_keyframes",
+    "set_clip_transform",
+    "set_clip_mask",
+    "set_clip_keying",
     "set_caption_style",
     "clear_caption_style",
     "add_track",
@@ -1368,6 +1371,108 @@ class TimelineService:
             del keyframes[property_name]
             if not keyframes:
                 del clip["keyframes"]
+        elif op == "set_clip_transform":
+            # P1：整块替换片段静态变换（ful自可撤销）；字段必须合法。
+            _exact_keys(operation, {"op", "clip_id", "transform"})
+            clip = _clip(document, operation.get("clip_id"))
+            transform = operation.get("transform")
+            if not isinstance(transform, dict):
+                raise DomainError("TIMELINE_INVALID", "静态变换不合法")
+            _exact_keys(
+                transform,
+                {"x", "y", "scale", "rotate", "opacity"},
+                optional={"x", "y", "scale", "rotate", "opacity"},
+            )
+            cleaned: dict[str, Any] = {}
+            for field, value in transform.items():
+                if field == "opacity" or field == "scale" or field == "rotate":
+                    if isinstance(value, bool) or not isinstance(value, (int, float)):
+                        raise DomainError("TIMELINE_INVALID", f"静态 {field} 不合法")
+                if field == "x" or field == "y":
+                    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
+                        raise DomainError("TIMELINE_INVALID", f"静态 {field} 不合法")
+                cleaned[field] = value
+            if not cleaned:
+                clip.pop("transform", None)
+            else:
+                clip["transform"] = cleaned
+        elif op == "set_clip_mask":
+            # P2：整块替换片段蒙版（线性/矩形/椭圆）；字段必须合法，空 dict 清除。
+            _exact_keys(operation, {"op", "clip_id", "mask"})
+            clip = _clip(document, operation.get("clip_id"))
+            mask = operation.get("mask")
+            if not isinstance(mask, dict):
+                raise DomainError("TIMELINE_INVALID", "蒙版不合法")
+            if not mask:
+                clip.pop("mask", None)
+                return
+            _exact_keys(
+                mask,
+                {"kind", "x", "y", "width", "height", "rotation", "feather", "invert"},
+                optional={"x", "y", "width", "height", "rotation", "feather", "invert"},
+            )
+            if mask.get("kind") not in ("linear", "rect", "ellipse"):
+                raise DomainError("TIMELINE_INVALID", "蒙版类型不合法")
+            cleaned_mask: dict[str, Any] = {}
+            for field, value in mask.items():
+                if field == "invert":
+                    if value is not None and not isinstance(value, bool):
+                        raise DomainError("TIMELINE_INVALID", "蒙版反选不合法")
+                    cleaned_mask[field] = value
+                    continue
+                if field == "kind":
+                    cleaned_mask[field] = value
+                    continue
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    raise DomainError("TIMELINE_INVALID", f"蒙版 {field} 不合法")
+                if field == "width" or field == "height":
+                    if value <= 0 or value > 1:
+                        raise DomainError("TIMELINE_INVALID", f"蒙版 {field} 不合法")
+                elif field in ("x", "y", "feather"):
+                    if not 0 <= value <= 1:
+                        raise DomainError("TIMELINE_INVALID", f"蒙版 {field} 不合法")
+                elif field == "rotation":
+                    if not -180 <= value <= 180:
+                        raise DomainError("TIMELINE_INVALID", f"蒙版 {field} 不合法")
+                cleaned_mask[field] = value
+            if not cleaned_mask:
+                clip.pop("mask", None)
+            else:
+                if cleaned_mask.get("kind") is None:
+                    raise DomainError("TIMELINE_INVALID", "蒙版类型必填")
+                clip["mask"] = cleaned_mask
+        elif op == "set_clip_keying":
+            # P3：整块替换片段抠像（纯色/绿幕）。空 dict 清除；字段必须合法。
+            _exact_keys(operation, {"op", "clip_id", "keying"})
+            clip = _clip(document, operation.get("clip_id"))
+            keying = operation.get("keying")
+            if not isinstance(keying, dict):
+                raise DomainError("TIMELINE_INVALID", "抠像不合法")
+            if not keying:
+                clip.pop("keying", None)
+                return
+            _exact_keys(keying, {"color", "similarity", "blend", "invert"}, optional={"color", "similarity", "blend", "invert"})
+            if "color" in keying and not (
+                isinstance(keying["color"], str)
+                and len(keying["color"]) == 6
+                and all(ch in "0123456789abcdefABCDEF" for ch in keying["color"])
+            ):
+                raise DomainError("TIMELINE_INVALID", "抠像颜色需为 6 位十六进制")
+            cleaned_keying: dict[str, Any] = {}
+            for field in ("similarity", "blend"):
+                value = keying.get(field)
+                if value is None:
+                    continue
+                if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
+                    raise DomainError("TIMELINE_INVALID", f"抠像 {field} 不合法")
+                cleaned_keying[field] = value
+            if "color" in keying:
+                cleaned_keying["color"] = keying["color"]
+            if "invert" in keying:
+                if not isinstance(keying["invert"], bool):
+                    raise DomainError("TIMELINE_INVALID", "抠像反选不合法")
+                cleaned_keying["invert"] = keying["invert"]
+            clip["keying"] = cleaned_keying
         elif op == "add_transition":
             _exact_keys(operation, {"op", "after_clip_id", "kind", "duration_us"})
             document.setdefault("transitions", [])
@@ -1889,8 +1994,11 @@ class TimelineService:
                     "speed_milli",
                     "reverse_playback",
                     "keyframes",
+                    "transform",
+                    "mask",
+                    "keying",
                 },
-                optional={"speed_milli", "reverse_playback", "keyframes"},
+                optional={"speed_milli", "reverse_playback", "keyframes", "transform", "mask", "keying"},
             )
             clip_id = _identifier(clip.get("clip_id"), "Clip ID 不合法")
             if clip_id in clip_ids:
@@ -1937,6 +2045,60 @@ class TimelineService:
                 for property_name, track in keyframes.items():
                     frames = track.get("frames") if isinstance(track, dict) else None
                     _validate_keyframe_track(frames, property_name, duration)
+            transform = clip.get("transform")
+            if transform is not None:
+                _exact_keys(
+                    transform,
+                    {"x", "y", "scale", "rotate", "opacity"},
+                    optional={"x", "y", "scale", "rotate", "opacity"},
+                )
+                tx = transform.get("x")
+                ty = transform.get("y")
+                if tx is not None and not (isinstance(tx, (int, float)) and not isinstance(tx, bool) and 0 <= tx <= 1):
+                    raise DomainError("TIMELINE_INVALID", "Clip 静态 X 位置不合法")
+                if ty is not None and not (isinstance(ty, (int, float)) and not isinstance(ty, bool) and 0 <= ty <= 1):
+                    raise DomainError("TIMELINE_INVALID", "Clip 静态 Y 位置不合法")
+                for field_name, low, high in (("scale", 0.05, 5.0), ("rotate", -180.0, 180.0), ("opacity", 0.0, 1.0)):
+                    value = transform.get(field_name)
+                    if value is not None and not (isinstance(value, (int, float)) and not isinstance(value, bool) and low <= value <= high):
+                        raise DomainError("TIMELINE_INVALID", f"Clip 静态 {field_name} 不合法")
+            mask = clip.get("mask")
+            if mask is not None:
+                _exact_keys(
+                    mask,
+                    {"kind", "x", "y", "width", "height", "rotation", "feather", "invert"},
+                    optional={"x", "y", "width", "height", "rotation", "feather", "invert"},
+                )
+                if mask.get("kind") not in ("linear", "rect", "ellipse"):
+                    raise DomainError("TIMELINE_INVALID", "Clip 蒙版类型不合法")
+                if "invert" in mask and not isinstance(mask.get("invert"), bool):
+                    raise DomainError("TIMELINE_INVALID", "Clip 蒙版反选不合法")
+                for field_name in ("x", "y", "feather"):
+                    value = mask.get(field_name)
+                    if value is not None and not (isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 1):
+                        raise DomainError("TIMELINE_INVALID", f"Clip 蒙版 {field_name} 不合法")
+                for field_name in ("width", "height"):
+                    value = mask.get(field_name)
+                    if value is not None and not (isinstance(value, (int, float)) and not isinstance(value, bool) and 0 < value <= 1):
+                        raise DomainError("TIMELINE_INVALID", f"Clip 蒙版 {field_name} 不合法")
+                value = mask.get("rotation")
+                if value is not None and not (isinstance(value, (int, float)) and not isinstance(value, bool) and -180 <= value <= 180):
+                    raise DomainError("TIMELINE_INVALID", "Clip 蒙版旋转不合法")
+            keying = clip.get("keying")
+            if keying is not None:
+                _exact_keys(keying, {"color", "similarity", "blend", "invert"}, optional={"color", "similarity", "blend", "invert"})
+                if "color" in keying and not (
+                    isinstance(keying.get("color"), str)
+                    and len(keying["color"]) == 6
+                    and all(ch in "0123456789abcdefABCDEF" for ch in keying["color"])
+                ):
+                    raise DomainError("TIMELINE_INVALID", "Clip 抠像颜色需为 6 位十六进制")
+                for field_name in ("similarity", "blend"):
+                    value = keying.get(field_name)
+                    if value is not None and not (isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 1):
+                        raise DomainError("TIMELINE_INVALID", f"Clip 抠像 {field_name} 不合法")
+                if "invert" in keying and not isinstance(keying.get("invert"), bool):
+                    raise DomainError("TIMELINE_INVALID", "Clip 抠像反选不合法")
             if clip["asset_kind"] == "video":
                 media = json_loads(asset["media_info_json"]) if asset["media_info_json"] else {}
                 asset_duration = media.get("duration_us")
@@ -2627,6 +2789,12 @@ def timeline_diff(base: dict[str, Any], target: dict[str, Any]) -> dict[str, Any
             changes.append("reverse_toggled")
         if old.get("keyframes") != new.get("keyframes"):
             changes.append("keyframes_changed")
+        if old.get("transform") != new.get("transform"):
+            changes.append("transform_changed")
+        if old.get("mask") != new.get("mask"):
+            changes.append("mask_changed")
+        if old.get("keying") != new.get("keying"):
+            changes.append("keying_changed")
         old_duration = old["timeline_end_us"] - old["timeline_start_us"]
         new_duration = new["timeline_end_us"] - new["timeline_start_us"]
         if old_duration != new_duration and "trimmed" not in changes:

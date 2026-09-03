@@ -733,6 +733,12 @@ export interface TimelineClip {
   reverse_playback?: boolean;
   /** 可选字段：关键帧动画（B3），缺省视为无动画。 */
   keyframes?: TimelineClipKeyframes;
+  /** P1 可选字段：静态默认变换（含画布位置/缩放/旋转/透明度）。关键帧存在时动画覆盖。 */
+  transform?: TimelineClipStaticTransform;
+  /** P2 可选字段：蒙版（线性/矩形/椭圆，羽化+反选）。缺省无蒙版即全可见。 */
+  mask?: TimelineClipMask;
+  /** P3 可选字段：抠像（纯色/绿幕 keying）。缺省无抠像即不透明。 */
+  keying?: TimelineClipKeying;
 }
 /** B4：字幕样式覆盖（部分字段，渲染时与预设合并；见 docs/M2_B4_CAPTIONS_DESIGN.md §1.1）。 */
 export interface CaptionStyleOverride {
@@ -805,6 +811,46 @@ export interface TimelineClipKeyframes {
   rotate?: TimelineKeyframeTrack;
   opacity?: TimelineKeyframeTrack;
 }
+/** P1 静态位置：片段的默认画面变换（归一化坐标/比值）。关键帧存在时动画覆盖。 */
+export interface TimelineClipStaticTransform {
+  /** 中心点归一化位置 x（0..1），缺省 0.5（水平居中）。 */
+  x?: number;
+  /** 中心点归一化位置 y（0..1），缺省 0.5（垂直居中）。 */
+  y?: number;
+  /** 缩放（0.05..5.0），缺省 1.0（原始布局尺寸）。 */
+  scale?: number;
+  /** 旋转（度，-180..180），缺省 0。 */
+  rotate?: number;
+  /** 不透明度（0..1），缺省 1.0。 */
+  opacity?: number;
+}
+/**
+ * P2 蒙版：线性/矩形/椭圆选型 + 羽化 + 反选。几何参数均归一化 0..1（相对画面），
+ * 旋转以度计（-180..180）、羽化 0..1。缺省字段由渲染按 type 取合理默认。
+ * - linear：以 (x,y) 处的方向线（rotation）为分界，width=软边过渡带宽；invert 反转保留侧。
+ * - rect：中心 (x,y)，宽 height，rotation 旋转，feather 羽化。
+ * - ellipse：中心 (x,y)，半轴 (width/2, height/2)，rotation 旋转，feather 羽化。
+ */
+export interface TimelineClipMask {
+  kind: "linear" | "rect" | "ellipse";
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  rotation?: number;
+  feather?: number;
+  invert?: boolean;
+}
+export interface TimelineClipKeying {
+  /** 抠除的纯色（0-255 各通道）：绿幕基准色。缺省 "00FF00"。 */
+  color?: string;
+  /** 色距相似度阈值 0-1（colorkey similarity），越大抠得越狠。缺省 0.3。 */
+  similarity?: number;
+  /** 边缘混合/blend(平滑过渡)或 color blend。缺省 0.1。 */
+  blend?: number;
+  /** 是否反选 (invert keying → 保留基准色、透明其余)。缺省 false。 */
+  invert?: boolean;
+}
 export interface TimelineDocument {
   schema_version: 1;
   project_id: ProjectId;
@@ -863,8 +909,9 @@ export type TimelinePatchOperation =
   | { op: "remove_transition"; transition_id: TimelineTransitionId }
   | { op: "set_clip_keyframes"; clip_id: TimelineClipId; property: KeyframeProperty; frames: TimelineKeyframe[] }
   | { op: "clear_clip_keyframes"; clip_id: TimelineClipId; property: KeyframeProperty }
-  | { op: "set_clip_keyframes"; clip_id: TimelineClipId; property: KeyframeProperty; frames: TimelineKeyframe[] }
-  | { op: "clear_clip_keyframes"; clip_id: TimelineClipId; property: KeyframeProperty }
+  | { op: "set_clip_transform"; clip_id: TimelineClipId; transform: TimelineClipStaticTransform }
+  | { op: "set_clip_mask"; clip_id: TimelineClipId; mask: TimelineClipMask | Record<string, never> }
+  | { op: "set_clip_keying"; clip_id: TimelineClipId; keying: TimelineClipKeying | Record<string, never> }
   | { op: "set_speed"; clip_id: TimelineClipId; speed_milli: number }
   | { op: "set_reverse_playback"; clip_id: TimelineClipId; reverse_playback: boolean }
   | { op: "set_image_duration"; clip_id: TimelineClipId; duration_us: number }
@@ -881,7 +928,7 @@ export interface TimelinePatch { schema_version: 1; base_revision_id: TimelineRe
 export interface TimelineRevisionPointerInput { base_revision_id: TimelineRevisionId; }
 
 export type TimelinePatchGenerationStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
-export type TimelineClipChangeType = "added" | "removed" | "moved" | "trimmed" | "split" | "layout_changed" | "audio_changed" | "duration_changed" | "speed_changed" | "reverse_toggled" | "keyframes_changed";
+export type TimelineClipChangeType = "added" | "removed" | "moved" | "trimmed" | "split" | "layout_changed" | "audio_changed" | "duration_changed" | "speed_changed" | "reverse_toggled" | "keyframes_changed" | "transform_changed" | "mask_changed" | "keying_changed";
 export type TimelineCaptionChangeType = "added" | "removed" | "text_changed" | "timing_changed" | "preset_changed" | "style_changed";
 export interface TimelineClipChange { type: TimelineClipChangeType; clip_id: TimelineClipId; created_clip_ids?: TimelineClipId[]; }
 export type TimelineTransitionChangeType = "added" | "removed" | "updated";
@@ -1428,7 +1475,7 @@ function isTimelineCanvas(value: unknown): value is TimelineCanvas {
     isString(value.background_color) && /^#[0-9A-Fa-f]{6}$/.test(value.background_color);
 }
 export function isTimelineClip(value: unknown): value is TimelineClip {
-  if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["clip_id", "track_id", "order_index", "asset_id", "asset_kind", "source_start_us", "source_end_us", "timeline_start_us", "timeline_end_us", "layout", "audio", "speed_milli", "reverse_playback", "keyframes"])) return false;
+  if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["clip_id", "track_id", "order_index", "asset_id", "asset_kind", "source_start_us", "source_end_us", "timeline_start_us", "timeline_end_us", "layout", "audio", "speed_milli", "reverse_playback", "keyframes", "transform", "mask", "keying"])) return false;
   if (!isId(value.clip_id) || !oneOf(["V1", "A1"] as const, value.track_id) || !isInteger(value.order_index) || !isId(value.asset_id) || !oneOf(["video", "image", "audio"] as const, value.asset_kind) ||
     !isInteger(value.timeline_start_us) || !isInteger(value.timeline_end_us, 1) || value.timeline_end_us <= value.timeline_start_us || !isTimelineLayout(value.layout) || !isRecord(value.audio) ||
     !onlyKeys(value.audio, ["enabled", "gain_db"]) || typeof value.audio.enabled !== "boolean" || !isFiniteNumber(value.audio.gain_db) || value.audio.gain_db < -60 || value.audio.gain_db > 12) return false;
@@ -1437,6 +1484,20 @@ export function isTimelineClip(value: unknown): value is TimelineClip {
   if (value.reverse_playback !== undefined && (typeof value.reverse_playback !== "boolean" || (value.reverse_playback && value.asset_kind !== "video"))) return false;
   // 可选关键帧：结构按属性校验；t_us 上界（片段时长）由 core 归一化时校验。
   if (value.keyframes !== undefined && !isTimelineClipKeyframes(value.keyframes)) return false;
+  // P1 可选静态变换：只接受合法子集字段（画布位置/缩放/旋转/透明度）。
+  if (value.transform !== undefined) {
+    if (!isRecord(value.transform) || hasSensitiveKey(value.transform) || !onlyKeys(value.transform, ["x", "y", "scale", "rotate", "opacity"])) return false;
+    const inRange = (v: unknown, lo: number, hi: number) => isFiniteNumber(v) && v >= lo && v <= hi;
+    if (value.transform.x !== undefined && !inRange(value.transform.x, 0, 1)) return false;
+    if (value.transform.y !== undefined && !inRange(value.transform.y, 0, 1)) return false;
+    if (value.transform.scale !== undefined && !inRange(value.transform.scale, 0.05, 5)) return false;
+    if (value.transform.rotate !== undefined && !inRange(value.transform.rotate, -180, 180)) return false;
+    if (value.transform.opacity !== undefined && !inRange(value.transform.opacity, 0, 1)) return false;
+  }
+  // P2 可选蒙版：只接受合法子集字段；几何范围校验见 isTimelineClipMask。
+  if (value.mask !== undefined && !isTimelineClipMask(value.mask)) return false;
+  // P3 可选抠像：只接受合法子集字段；颜色与阈值范围见 isTimelineClipKeying。
+  if (value.keying !== undefined && !isTimelineClipKeying(value.keying)) return false;
   if (value.asset_kind === "image") return value.track_id === "V1" && value.source_start_us === null && value.source_end_us === null && value.timeline_end_us - value.timeline_start_us >= 500_000 && value.timeline_end_us - value.timeline_start_us <= 30_000_000;
   // 视频/音频：timeline 时长 = 源范围时长 / 速度（四舍五入到微秒；原速时严格相等）。
   const speed = typeof value.speed_milli === "number" ? value.speed_milli : 1000;
@@ -1499,6 +1560,42 @@ export function isTimelineKeyframeTrack(value: unknown, property: KeyframeProper
 export function isTimelineClipKeyframes(value: unknown): value is TimelineClipKeyframes {
   if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["position", "scale", "rotate", "opacity"]) || !Object.keys(value).length) return false;
   return KEYFRAME_PROPERTIES.every(property => value[property] === undefined || isTimelineKeyframeTrack(value[property], property));
+}
+/** P1：片段静态变换守卫（字段子集 + 数值范围）。 */
+export function isTimelineClipStaticTransform(value: unknown): value is TimelineClipStaticTransform {
+  if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["x", "y", "scale", "rotate", "opacity"])) return false;
+  const inRange = (v: unknown, lo: number, hi: number) => isFiniteNumber(v) && v >= lo && v <= hi;
+  if (value.x !== undefined && !inRange(value.x, 0, 1)) return false;
+  if (value.y !== undefined && !inRange(value.y, 0, 1)) return false;
+  if (value.scale !== undefined && !inRange(value.scale, 0.05, 5)) return false;
+  if (value.rotate !== undefined && !inRange(value.rotate, -180, 180)) return false;
+  if (value.opacity !== undefined && !inRange(value.opacity, 0, 1)) return false;
+  return true;
+}
+/** P2：片段蒙版守卫（字段子集 + 数值范围 + kind 合法）。 */
+export function isTimelineClipMask(value: unknown): value is TimelineClipMask {
+  if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["kind", "x", "y", "width", "height", "rotation", "feather", "invert"])) return false;
+  // 空对象表示「清除蒙版」。
+  if (Object.keys(value).length === 0) return true;
+  if (!oneOf(["linear", "rect", "ellipse"] as const, value.kind)) return false;
+  const in01 = (v: unknown) => v === undefined || (isFiniteNumber(v) && v >= 0 && v <= 1);
+  if (!in01(value.x) || !in01(value.y)) return false;
+  if (value.width !== undefined && !(isFiniteNumber(value.width) && value.width > 0 && value.width <= 1)) return false;
+  if (value.height !== undefined && !(isFiniteNumber(value.height) && value.height > 0 && value.height <= 1)) return false;
+  if (value.rotation !== undefined && !(isFiniteNumber(value.rotation) && value.rotation >= -180 && value.rotation <= 180)) return false;
+  if (value.feather !== undefined && !(isFiniteNumber(value.feather) && value.feather >= 0 && value.feather <= 1)) return false;
+  if (value.invert !== undefined && typeof value.invert !== "boolean") return false;
+  return true;
+}
+/** P3：片段抠像守卫（字段子集 + 数值范围 + 颜色格式）。空对象表示「清除抠像」。 */
+export function isTimelineClipKeying(value: unknown): value is TimelineClipKeying {
+  if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["color", "similarity", "blend", "invert"])) return false;
+  if (Object.keys(value).length === 0) return true;
+  if (value.color !== undefined && !(isString(value.color) && /^[0-9A-Fa-f]{6}$/.test(value.color))) return false;
+  if (value.similarity !== undefined && !(isFiniteNumber(value.similarity) && value.similarity >= 0 && value.similarity <= 1)) return false;
+  if (value.blend !== undefined && !(isFiniteNumber(value.blend) && value.blend >= 0 && value.blend <= 1)) return false;
+  if (value.invert !== undefined && typeof value.invert !== "boolean") return false;
+  return true;
 }
 const TRANSITION_DOC_MAX = 50;
 export function isTimelineTrack(value: unknown): value is TimelineTrack {
@@ -1592,6 +1689,9 @@ export function isTimelinePatchOperation(value: unknown): value is TimelinePatch
     case "remove_transition": return onlyKeys(value, ["op", "transition_id"]) && id("transition_id");
     case "set_clip_keyframes": return onlyKeys(value, ["op", "clip_id", "property", "frames"]) && id("clip_id") && oneOf(KEYFRAME_PROPERTIES, value.property) && isTimelineKeyframeTrack({ frames: value.frames }, value.property);
     case "clear_clip_keyframes": return onlyKeys(value, ["op", "clip_id", "property"]) && id("clip_id") && oneOf(KEYFRAME_PROPERTIES, value.property);
+    case "set_clip_transform": return onlyKeys(value, ["op", "clip_id", "transform"]) && id("clip_id") && isTimelineClipStaticTransform(value.transform);
+    case "set_clip_mask": return onlyKeys(value, ["op", "clip_id", "mask"]) && id("clip_id") && isTimelineClipMask(value.mask);
+    case "set_clip_keying": return onlyKeys(value, ["op", "clip_id", "keying"]) && id("clip_id") && isTimelineClipKeying(value.keying);
     case "set_speed": return onlyKeys(value, ["op", "clip_id", "speed_milli"]) && id("clip_id") && isInteger(value.speed_milli, 250) && value.speed_milli <= 4000;
     case "set_reverse_playback": return onlyKeys(value, ["op", "clip_id", "reverse_playback"]) && id("clip_id") && typeof value.reverse_playback === "boolean";
     case "set_image_duration": return onlyKeys(value, ["op", "clip_id", "duration_us"]) && id("clip_id") && us("duration_us", 500_000) && Number(value.duration_us) <= 30_000_000;
@@ -1619,7 +1719,7 @@ export function parseTimelineDraft(value: unknown): TimelineDraft { if (!isTimel
 export function parseTimelineCreateInput(value: unknown): TimelineCreateInput { if (!isTimelineCreateInput(value)) throw new ContractValidationError("TimelineCreateInput"); return value; }
 export function parseTimelinePatch(value: unknown): TimelinePatch { if (!isTimelinePatch(value)) throw new ContractValidationError("TimelinePatch"); return value; }
 const TIMELINE_PATCH_GENERATION_STATUSES: TimelinePatchGenerationStatus[] = ["queued", "running", "succeeded", "failed", "cancelled", "interrupted"];
-const TIMELINE_CLIP_CHANGE_TYPES: TimelineClipChangeType[] = ["added", "removed", "moved", "trimmed", "split", "layout_changed", "audio_changed", "duration_changed"];
+const TIMELINE_CLIP_CHANGE_TYPES: TimelineClipChangeType[] = ["added", "removed", "moved", "trimmed", "split", "layout_changed", "audio_changed", "duration_changed", "speed_changed", "reverse_toggled", "keyframes_changed", "transform_changed"];
 const TIMELINE_CAPTION_CHANGE_TYPES: TimelineCaptionChangeType[] = ["added", "removed", "text_changed", "timing_changed", "preset_changed", "style_changed"];
 export function isTimelinePatchEgressPreview(value: unknown): value is TimelinePatchEgressPreview {
   return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["timeline_patch_egress_preview_id", "provider", "prompt_template_version", "output_schema_version", "sent_fields", "payload_sha256", "character_count", "estimated_tokens", "clip_count", "caption_count", "locked_count", "expires_at"]) && isId(value.timeline_patch_egress_preview_id) && isRecord(value.provider) && onlyKeys(value.provider, ["display_name", "origin", "model"]) && isBriefText(value.provider.display_name, 100) && isString(value.provider.origin) && /^https?:\/\//.test(value.provider.origin) && isBriefText(value.provider.model, 200) && isBriefText(value.prompt_template_version, 200) && isBriefText(value.output_schema_version, 200) && Array.isArray(value.sent_fields) && value.sent_fields.length > 0 && value.sent_fields.every(item => isBriefText(item, 100)) && isSha256(value.payload_sha256) && [value.character_count, value.estimated_tokens, value.clip_count, value.caption_count, value.locked_count].every(item => isInteger(item, 0)) && isTime(value.expires_at);

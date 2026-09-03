@@ -140,7 +140,7 @@ describe("Editor shell 基线", () => {
   it("shows contextual properties for the selected timeline object", async () => {
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /video 5.00s/ }));
-    expect(screen.getByRole("heading", { name: "片段属性" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "片段属性" })).toBeInTheDocument();
   });
 
   it("shows project-level properties when nothing is selected", async () => {

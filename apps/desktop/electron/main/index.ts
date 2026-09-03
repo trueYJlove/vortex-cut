@@ -143,7 +143,9 @@ async function previewPresentation(preview: AuthoritativePreview) {
 }
 
 async function exportPresentation(exportRecord: ExportRecord) {
-  return { export_record: exportRecord, media_url: await artifactMediaUrl(exportRecord.render_artifact_id) };
+  // 单个导出的产物文件若已缺失/损坏，不应让整个导出列表失败：降级为 media_url=null。
+  try { return { export_record: exportRecord, media_url: await artifactMediaUrl(exportRecord.render_artifact_id) }; }
+  catch { return { export_record: exportRecord, media_url: null }; }
 }
 async function renditionPreviewPresentation(preview: RenditionPreview) {
   return { preview, media_url: await artifactMediaUrl(preview.render_artifact_id) };

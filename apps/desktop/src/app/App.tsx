@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Archive, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, FileAudio, FileText, FolderPlus, History, ImagePlus, Lock, LockOpen, MapPin, Maximize, Minimize, Pause, Play, Plus, Redo2, RefreshCw, RotateCcw, Save, Scissors, Sparkles, Square, Trash2, Type as TypeIcon2, Undo2, Video, Volume2, VolumeX, X, Minus, ZoomIn } from "lucide-react";
-import type { Asset, AssetId, AssetKind, AssetPresentation, BriefInput, CaptionPresetId, DirectoryGrant, EncoderMode, EgressPreview, ExportBatch, HorizontalAnchor, Job, LayoutPolicy, MediaInfo, ModelDetail, ModelSummary, OutputRatio, PlatformPreset, Project, ProviderConfig, ReframeExportBatch, RenditionPreset, RenditionReframeAdjustment, TimelineCaption, TimelineClip, TimelineDiff, TimelineDocument, TimelineLayout, TimelinePatchEgressPreview, TimelinePatchOperation, TimelinePatchProposal, TimelineRevisionSummary, TimelineState, Transcript, TranscriptSegment, TranscriptSummary, VerticalAnchor } from "@aivideo/contracts";
+import type { Asset, AssetId, AssetKind, AssetPresentation, BriefInput, CaptionPresetId, DirectoryGrant, EncoderMode, EgressPreview, ExportBatch, HorizontalAnchor, Job, LayoutPolicy, MediaInfo, ModelDetail, ModelSummary, OutputRatio, PlatformPreset, Project, ProviderConfig, ReframeExportBatch, RenditionPreset, RenditionReframeAdjustment, TimelineCaption, TimelineClip, TimelineDiff, TimelineDocument, TimelineLayout, TimelinePatchEgressPreview, TimelinePatchOperation, TimelinePatchProposal, TimelineRevisionId, TimelineRevisionSummary, TimelineState, Transcript, TranscriptSegment, TranscriptSummary, VerticalAnchor } from "@aivideo/contracts";
 import type { AuthoritativePreviewPresentation, ExportRecordPresentation, RenditionPreviewPresentation, RenditionReframePreviewPresentation } from "../../electron/preload/index.js";
 import { CONTRACT_VERSION } from "@aivideo/contracts";
 import { MediaGenerationWorkbench } from "./media-generation/MediaGenerationWorkbench.js";
@@ -8,6 +8,7 @@ import { ProviderImageGenerationWorkbench } from "./provider-image-generation/Pr
 import { ShotRequirementWorkbench } from "./shot-requirements/ShotRequirementWorkbench.js";
 import { Dialog } from "./Dialog.js";
 import { errorCode, safeErrorMessage, safeTaskErrorMessage } from "./safeErrors.js";
+import { PreviewPipOverlays, type PipOverlay, type PipTransform } from "./PreviewPipOverlays.js";
 import { editorCommands, type EditorCommand } from "./editorCommands.js";
 import { bindingLabel, findConflict, loadShortcuts, matchesBinding, normalizeRecordedBinding, saveShortcuts, DEFAULT_SHORTCUTS, type ShortcutCommandId, type ShortcutEntry } from "./shortcuts.js";
 import { TimelinePanel } from "./timeline/TimelineCanvas.js";
@@ -206,7 +207,7 @@ export function App() {
   const menuButtonRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const menuActionRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [leftWidth, setLeftWidth] = useState(280);
-  const [rightWidth, setRightWidth] = useState(300);
+  const [rightWidth, setRightWidth] = useState(336);
   const [timelineHeight, setTimelineHeight] = useState(230);
   const resizeRef = useRef<{ kind: "left" | "right" | "timeline"; start: number; value: number } | undefined>(undefined);
   // C3：快捷键自定义（注册表 + localStorage 持久化 + 面板录制状态）。
@@ -253,6 +254,12 @@ export function App() {
   const [revisionPair, setRevisionPair] = useState({ base: "", target: "" });
   const [revisionDiff, setRevisionDiff] = useState<TimelineDiff>();
   const draftTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // 草稿/revision 镜像 ref：定时器触发时读取最新事实，避免闭包捕获过期 base。
+  const timelineRef = useRef(timeline);
+  const projectRef = useRef(project);
+  const pendingDraftRef = useRef<{ base: TimelineRevisionId; epoch: number; document: TimelineDocument } | null>(null);
+  timelineRef.current = timeline;
+  projectRef.current = project;
   const projectNameProjectId = useRef<Project["project_id"] | undefined>(undefined);
   const projectNameDirty = useRef(false);
   const timelineLoadEpoch = useRef(0);
@@ -484,6 +491,8 @@ export function App() {
     .map(id => working?.clips.find(item => item.clip_id === id))
     .filter((item): item is TimelineClip => Boolean(item));
   const sortedClips = useMemo(() => [...(working?.clips ?? [])].sort((a, b) => a.order_index - b.order_index), [working?.clips]);
+  // 时间线终点（所有片段最大 timeline_end）：播放到达即停，标尺停在末尾。
+  const timelineEndUs = useMemo(() => sortedClips.reduce((max, c) => Math.max(max, c.timeline_end_us), 0), [sortedClips]);
   const v1Clips = useMemo(() => sortedClips.filter(c => c.track_id === "V1"), [sortedClips]);
   const a1Clips = useMemo(() => sortedClips.filter(c => c.track_id === "A1"), [sortedClips]);
   const tracksAtPlayhead = working?.tracks ?? [];
@@ -495,19 +504,23 @@ export function App() {
     if (!track) return clip.audio.enabled;
     return clip.audio.enabled && !track.muted && (!anySoloTrack || track.solo);
   }, [trackById, anySoloTrack]);
-  // 预览取播放头所在的**最上层可见**视频轨片段（多轨叠加时优先上层）。
+  // 预览背景 = 主轨（V1）片段（画中画合成语义：V2+ 一律以浮层叠加）。
+  // V1 空档 → 背景留黑（浮层悬浮于黑底之上，对齐剪映）；**禁止回退到上层片段
+  // 当全幅背景**——否则覆盖轨内容既当背景又当浮层，拖拽时"满屏不动 + 盒子飘"。
   const clipAtPlayhead = useMemo(() => {
-    for (const track of tracksAtPlayhead) {
-      if (track.kind !== "video" || track.hidden) continue;
-      const found = sortedClips.find(c => c.track_id === track.id && playhead >= c.timeline_start_us && playhead < c.timeline_end_us);
-      if (found) return found;
-    }
-    return undefined;
-  }, [tracksAtPlayhead, sortedClips, playhead]);
+    return sortedClips.find(c => c.track_id === "V1" && playhead >= c.timeline_start_us && playhead < c.timeline_end_us);
+  }, [sortedClips, playhead]);
   const audioClipAtPlayhead = a1Clips.length > 0 ? a1Clips.find(c => playhead >= c.timeline_start_us && playhead < c.timeline_end_us) : undefined;
   const previewSpeedMilli = clipAtPlayhead?.speed_milli ?? (libraryPreviewId ? undefined : 1000);
   const previewReverse = Boolean(clipAtPlayhead?.reverse_playback);
-  const previewAsset = (libraryPreviewId ? assets.find(item => item.asset.asset_id === libraryPreviewId) : undefined) ?? (clipAtPlayhead ? assets.find(item => item.asset.asset_id === clipAtPlayhead.asset_id) : undefined) ?? assets.find(item => item.asset.asset_id === selectedClip?.asset_id) ?? assets.find(item => item.asset.asset_id === working?.clips[0]?.asset_id);
+  // 预览素材：素材箱预览优先；时间线交互预览只认播放头处的 V1 背景——
+  // 不回退到选中片段/首片段（否则 V1 空档时覆盖轨内容被错误地满屏铺底）。
+  const previewAsset = (libraryPreviewId ? assets.find(item => item.asset.asset_id === libraryPreviewId) : undefined) ?? (clipAtPlayhead ? assets.find(item => item.asset.asset_id === clipAtPlayhead.asset_id) : undefined);
+  // P1 扩展：主轨片段静态变换同样作用于交互预览（中心点语义，与渲染一致）。
+  const mainTransform = clipAtPlayhead?.transform;
+  const mainTransformStyle = mainTransform
+    ? { transform: `translate(${((mainTransform.x ?? 0.5) - 0.5) * 100}%, ${((mainTransform.y ?? 0.5) - 0.5) * 100}%) scale(${mainTransform.scale ?? 1}) rotate(${mainTransform.rotate ?? 0}deg)`, opacity: mainTransform.opacity ?? 1 }
+    : undefined;
   const audioAsset = audioClipAtPlayhead ? assets.find(item => item.asset.asset_id === audioClipAtPlayhead.asset_id) : undefined;
   useEffect(() => {
     const media = videoRef.current;
@@ -515,7 +528,15 @@ export function App() {
       if (pendingSeekRef.current !== null) { media.currentTime = pendingSeekRef.current; pendingSeekRef.current = null; }
       // 交互预览跟随片段变速（倒放无法反向播放，仅回退原速）。
       media.playbackRate = previewReverse ? 1 : Math.max(0.25, Math.min(4, (previewSpeedMilli ?? 1000) / 1000));
-      if (playing) void media.play().catch(() => setPlaying(false)); else media.pause();
+      if (!libraryPreviewId && clipAtPlayhead) {
+        // 标尺跟随校正：播放头是唯一时钟，媒体时间与标尺偏差 >0.18s 时对齐——
+        // 防止内容错位（标尺在 A 片段却播着 B 片段内容）。
+        const sourceStart = (clipAtPlayhead.source_start_us ?? 0) / 1_000_000;
+        const speed = previewReverse ? 1 : Math.max(0.25, Math.min(4, (previewSpeedMilli ?? 1000) / 1000));
+        const expected = sourceStart + ((playhead - clipAtPlayhead.timeline_start_us) / 1_000_000) * speed;
+        if (Math.abs(media.currentTime - expected) > 0.18) media.currentTime = Math.max(0, expected);
+      }
+      if (playing && (libraryPreviewId || clipAtPlayhead)) void media.play().catch(() => setPlaying(false)); else media.pause();
     }
     const audio = audioRef.current;
     if (audio) {
@@ -624,17 +645,30 @@ export function App() {
   }, [playing, previewAsset?.media_url, previewMode, vuEpoch, stopVuPolling]);
   const visibleCaption = working?.captions.find(item => playhead >= item.start_us && playhead < item.end_us) ?? selectedCaption;
   const totalUs = duration(working);
+  // 播放/暂停统一入口：播放头停在时间线末尾时，再次播放从头开始。
+  const togglePlayback = () => {
+    if (!playing && timelineEndUs > 0 && playhead >= timelineEndUs) setPlayhead(0);
+    setPlaying(value => !value);
+  };
+  // 时间线驱动播放：播放头是唯一时钟（100ms 步进推进，媒体元素跟随标尺——
+  // 所见即所得：标尺在哪个片段，播放的就是那个片段的内容）。
+  // 到达时间线末尾：停在末尾（不回跳、不自动续播），再次播放从头开始。
+  useEffect(() => {
+    if (!playing || previewMode !== "interactive" || libraryPreviewId) return;
+    const timer = window.setInterval(() => {
+      setPlayhead(ph => {
+        if (gestureHoldRef.current) return ph; // 画中画手势期间冻结播放头时钟
+        const next = ph + 100_000;
+        if (timelineEndUs > 0 && next >= timelineEndUs) { setPlaying(false); return timelineEndUs; }
+        return next;
+      });
+    }, 100);
+    return () => window.clearInterval(timer);
+  }, [playing, previewMode, libraryPreviewId, timelineEndUs]);
   const handleVideoEnded = () => {
-    if (libraryPreviewId) { setPlaying(false); return; } // 素材箱预览播放结束即停，不跳到时间线片段
-    const currentIdx = sortedClips.findIndex(c => playhead >= c.timeline_start_us && playhead < c.timeline_end_us);
-    const nextIdx = currentIdx >= 0 ? currentIdx + 1 : 0;
-    if (nextIdx < sortedClips.length) {
-      const nextClip = sortedClips[nextIdx];
-      pendingSeekRef.current = (nextClip.source_start_us ?? 0) / 1_000_000;
-      setPlayhead(nextClip.timeline_start_us);
-    } else {
-      setPlaying(false);
-    }
+    // 素材播完（视频元素 ended）：时间线播放由播放头时钟驱动，这里只停播——
+    // 播放头保持当前位置（不回跳、不自动续播下一段）。
+    setPlaying(false);
   };
 
   const acceptState = (next: TimelineState) => { timelineLoadEpoch.current += 1; setTimeline(next); setWorking(next.current_revision.document); setSaveState("已保存"); setNotice(""); };
@@ -655,7 +689,13 @@ export function App() {
   const patchTimeline = async (operations: TimelinePatchOperation[], summary: string) => {
     if (!project || !timeline) return;
     setSaveState("保存中");
-    try { acceptState(await window.desktop.patchTimeline({ project_id: project.project_id, patch: { schema_version: 1, base_revision_id: timeline.current_revision.timeline_revision_id, operations, summary } })); }
+    try {
+      const next = await window.desktop.patchTimeline({ project_id: project.project_id, patch: { schema_version: 1, base_revision_id: timeline.current_revision.timeline_revision_id, operations, summary } });
+      // patch 已包含草稿内容：作废挂起草稿，防止用过期 base 触发 409。
+      pendingDraftRef.current = null;
+      if (draftTimer.current) clearTimeout(draftTimer.current);
+      acceptState(next);
+    }
     catch (error) { await handleConflict(error); }
   };
   // 文本素材（剪映式）：默认文本 = 在播放头处插入 3s 手工字幕；
@@ -687,10 +727,35 @@ export function App() {
   };
   const queueDraft = (document: TimelineDocument) => {
     setWorking(document); setSaveState("保存中");
+    // 记录排队时的草稿基线 + revision epoch；触发时比对——
+    // patch 已前进 revision（epoch 变化）→ 草稿内容已被 patch 涵盖，直接丢弃，
+    // 避免用过期 base 打 draft-save 造成 409 风暴。
+    const queuedBase = timelineRef.current?.current_revision.timeline_revision_id;
+    if (!queuedBase) return;
+    pendingDraftRef.current = {
+      base: queuedBase,
+      epoch: timelineLoadEpoch.current,
+      document,
+    };
     if (draftTimer.current) clearTimeout(draftTimer.current);
     draftTimer.current = setTimeout(() => {
-      if (!project || !timeline) return;
-      void window.desktop.saveTimelineDraft({ project_id: project.project_id, draft: { schema_version: 1, base_revision_id: timeline.current_revision.timeline_revision_id, document } }).then(() => setSaveState("已保存")).catch(handleConflict);
+      const pending = pendingDraftRef.current;
+      pendingDraftRef.current = null;
+      const projectNow = projectRef.current;
+      const timelineNow = timelineRef.current;
+      if (!pending || !projectNow || !timelineNow) return;
+      if (timelineLoadEpoch.current !== pending.epoch || timelineNow.current_revision.timeline_revision_id !== pending.base) {
+        // 已被 patch 取代：丢弃草稿，不落库。
+        setSaveState("已保存");
+        return;
+      }
+      void window.desktop.saveTimelineDraft({ project_id: projectNow.project_id, draft: { schema_version: 1, base_revision_id: pending.base, document: pending.document } }).then(() => setSaveState("已保存")).catch(error => {
+        // 草稿是临时态：409（基线过期）说明已被更新事实取代，静默丢弃，避免错误风暴。
+        const text = errorCode(error);
+        if (text.includes("DRAFT_CONFLICT") || text.includes("409")) { setSaveState("已保存"); return; }
+        setSaveState("保存失败");
+        showNotice(safeErrorMessage(error, "时间线保存失败，请刷新后重试。"));
+      });
     }, 400);
   };
   const createTimeline = async (source: Parameters<typeof window.desktop.createTimeline>[0]["timeline"]["source"]) => {
@@ -705,6 +770,69 @@ export function App() {
     while (used.has(`V${number}`)) number += 1;
     return `V${number}`;
   }, [working?.tracks]);
+  // P1 画中画：交互预览画布上展示覆盖轨片段（V2+，轨道未隐藏）。
+  // 播放头区间内的片段常驻；**被选中的覆盖轨片段无论播放头在哪都显示**——
+  // 否则在时间线上选中片段调属性时，画布上没有盒子可看（"调了没效果"）。
+  // 盒子尺寸 = 内容实际大小（素材等比适配进画布；剪映式选中框紧贴真实内容）。
+  const overlayPips = useMemo<PipOverlay[]>(() => {
+    if (previewMode !== "interactive" || !working) return [];
+    const result: PipOverlay[] = [];
+    const selectedOverlay = selectedClip && selectedClip.track_id !== "V1" && selectedClip.track_id !== "A1" && selectedClip.asset_kind !== "audio" ? selectedClip : undefined;
+    const canvasW = canvasSize?.w || canvasRef.current?.clientWidth || 540;
+    const canvasH = canvasSize?.h || canvasRef.current?.clientHeight || 960;
+    // 内容适配尺寸：等比适配进画布（未知尺寸回退满画布）。
+    const fitted = (assetId: string) => {
+      const asset = assets.find(item => item.asset.asset_id === assetId);
+      const info = asset?.asset.media_info;
+      const stream = info && "video_streams" in info && Array.isArray(info.video_streams) ? info.video_streams[0] : undefined;
+      const codedW = stream?.width ?? 0;
+      const codedH = stream?.height ?? 0;
+      if (!codedW || !codedH) return { w: canvasW, h: canvasH };
+      const fit = Math.min(canvasW / codedW, canvasH / codedH);
+      return { w: Math.max(2, Math.round(codedW * fit)), h: Math.max(2, Math.round(codedH * fit)) };
+    };
+    for (const track of tracksAtPlayhead) {
+      if (track.kind !== "video" || track.hidden || track.id === "V1" || track.id === "A1") continue;
+      const clip = selectedOverlay?.track_id === track.id
+        ? (sortedClips.find(c => c.clip_id === selectedOverlay.clip_id) ?? selectedOverlay)
+        : sortedClips.find(c => c.track_id === track.id && playhead >= c.timeline_start_us && playhead < c.timeline_end_us);
+      if (!clip) continue;
+      const asset = assets.find(item => item.asset.asset_id === clip.asset_id);
+      if (!asset?.media_url) continue;
+      const fit = fitted(clip.asset_id);
+      result.push({
+        clip,
+        media_url: asset.media_url,
+        fit_w: clip.layout === "crop_fill" ? canvasW : fit.w,
+        fit_h: clip.layout === "crop_fill" ? canvasH : fit.h,
+      });
+    }
+    return result;
+  }, [previewMode, working, tracksAtPlayhead, sortedClips, playhead, assets, selectedClip, canvasSize]);
+  const draftPipTransform = (clipId: TimelineClip["clip_id"], transform: PipTransform) => {
+    setWorking(doc => doc ? { ...doc, clips: doc.clips.map(c => c.clip_id === clipId ? { ...c, transform: { ...c.transform, ...transform } } : c) } : doc);
+  };
+  const commitPipTransform = (clipId: TimelineClip["clip_id"], transform: PipTransform) => {
+    void patchTimeline([{ op: "set_clip_transform", clip_id: clipId, transform }], "画中画画布局");
+  };
+  // P2 画布蒙版边界：draft 走本地文档，pointerup 提交 set_clip_mask（与属性面板同一 op）。
+  const draftPipMask = (clipId: TimelineClip["clip_id"], mask: NonNullable<TimelineClip["mask"]>) => {
+    setWorking(doc => doc ? { ...doc, clips: doc.clips.map(c => c.clip_id === clipId ? { ...c, mask } : c) } : doc);
+  };
+  const commitPipMask = (clipId: TimelineClip["clip_id"], mask: NonNullable<TimelineClip["mask"]>) => {
+    void patchTimeline([{ op: "set_clip_mask", clip_id: clipId, mask }], "画中画蒙版");
+  };
+  // 画中画手势期间暂停预览播放：播放头前进会越出片段区间，浮层会被移除（"弹出去"）。
+  // 注意必须冻结播放头时钟本身（interval 检查该标记），只暂停视频元素是不够的。
+  const gestureHoldRef = useRef(false);
+  const pausePreviewPlayback = () => { gestureHoldRef.current = true; const video = videoRef.current; if (video && !video.paused) { video.pause(); return true; } return false; };
+  const resumePreviewPlayback = (wasPlaying: boolean) => { gestureHoldRef.current = false; if (wasPlaying) void videoRef.current?.play().catch(() => {}); };
+  const pipSelectedId = selectedClip?.clip_id ?? null;
+  // 覆盖轨片段选中时隐藏「画布尺寸框」（白框贴合整个画布，会盖过浮层自己的
+  // 内容选中框）；浮层的选中框 + 8 向手柄由 PreviewPipOverlays 提供。
+  const overlayClipSelected = Boolean(selectedClip && selectedClip.track_id !== "V1" && selectedClip.track_id !== "A1");
+  const showSelBox = !overlayClipSelected;
+  const pipLocked = pipSelectedId ? Boolean(working?.locked_elements?.includes(pipSelectedId)) : false;
   const insertAsset = (item: AssetPresentation, atIndex = working?.clips.length ?? 0, trackId?: string | "new") => {
     if (!timeline) return void createTimeline({ kind: "full_asset", asset_id: item.asset.asset_id });
     const isVisual = item.asset.kind === "video" || item.asset.kind === "image";
@@ -1097,7 +1225,7 @@ export function App() {
   const runCommand = (id: EditorCommand["id"]) => {
     if (commandDisabledReason(id)) return;
     switch (id) {
-      case "play.pause": setPlaying(value => !value); break;
+      case "play.pause": togglePlayback(); break;
       case "timeline.undo": void undoRedo("undo"); break;
       case "timeline.redo": void undoRedo("redo"); break;
       case "timeline.split":
@@ -1316,6 +1444,8 @@ export function App() {
     selDragRef.current = null;
   };
   // 选中框同步：框贴合画面（canvas）的布局矩形；frame 的 transform 缩放会同时作用于 canvas 与框。
+  // 依赖含 showSelBox：盒子随选中切换被卸载/重挂载（V2 选中隐藏、V1 恢复显示）时
+  // 必须重新同步尺寸——否则重挂载的盒子没有写入样式，8 向手柄全部堆积在左上角（0×0）。
   useEffect(() => {
     const canvas = canvasRef.current;
     const box = selBoxRef.current;
@@ -1333,7 +1463,7 @@ export function App() {
     if (canvas.parentElement) ro.observe(canvas.parentElement);
     window.addEventListener("resize", sync);
     return () => { ro.disconnect(); window.removeEventListener("resize", sync); };
-  }, [previewClass, canvasSize]);
+  }, [previewClass, canvasSize, showSelBox]);
   useEffect(() => {
     if (!projectSwitcherOpen) return;
     const listener = (event: MouseEvent) => {
@@ -1429,14 +1559,15 @@ export function App() {
             <div className={`preview-frame ${previewClass}${previewSelected ? " selected" : ""}`} style={previewZoom === "fit" ? undefined : { transform: `scale(${previewZoom})` }} role="button" tabIndex={0} aria-label="选中播放头处的片段" title="点击选中播放头处的片段" onClick={selectClipAtPlayhead} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectClipAtPlayhead(); } }}>
           <div className="preview-canvas" ref={canvasRef}>
             {previewMode === "authoritative" && authoritativeMediaUrl && <video ref={videoRef} className="preview-foreground authoritative-video" src={authoritativeMediaUrl} aria-label={reframePlayback ? "重构图权威预览视频" : exportPlayback ? "导出视频" : "权威预览视频"} controls onEnded={() => setPlaying(false)} />}
-            {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "video" && <><video className="preview-background" src={previewAsset.media_url} muted aria-hidden="true" /><video ref={videoRef} className="preview-foreground" src={previewAsset.media_url} muted={!selectedClip?.audio.enabled || previewReverse || (clipAtPlayhead ? !isClipAudible(clipAtPlayhead) : false)} aria-label="交互预览视频" onTimeUpdate={event => { const clip = clipAtPlayhead; if (clip) { const sourceStart = (clip.source_start_us ?? 0) / 1_000_000; const elapsed = (event.currentTarget.currentTime - sourceStart) * ((clip.speed_milli ?? 1000) / 1000); setPlayhead(Math.round(clip.timeline_start_us + elapsed * 1_000_000)); } else if (!libraryPreviewId) { setPlayhead(Math.round(event.currentTarget.currentTime * 1_000_000)); } }} onEnded={handleVideoEnded} /></>}
+            {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "video" && <div className="preview-transform" style={mainTransformStyle}><video className="preview-background" src={previewAsset.media_url} muted aria-hidden="true" /><video ref={videoRef} className="preview-foreground" src={previewAsset.media_url} muted={!selectedClip?.audio.enabled || previewReverse || (clipAtPlayhead ? !isClipAudible(clipAtPlayhead) : false)} aria-label="交互预览视频" onTimeUpdate={event => { if (libraryPreviewId) setPlayhead(Math.round(event.currentTarget.currentTime * 1_000_000)); }} onEnded={handleVideoEnded} /></div>}
             {previewMode === "interactive" && audioAsset?.media_url && <audio ref={audioRef} src={audioAsset.media_url} style={{ display: "none" }} />}
-            {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "image" && <><img className="preview-background" src={previewAsset.media_url} alt="" aria-hidden="true" /><img className="preview-foreground" src={previewAsset.media_url} alt={previewAsset.asset.display_name} /></>}
-            {previewMode === "interactive" && !previewAsset?.media_url && <div className="preview-empty">选择或追加素材以开始编辑</div>}
+            {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "image" && <div className="preview-transform" style={mainTransformStyle}><img className="preview-background" src={previewAsset.media_url} alt="" aria-hidden="true" /><img className="preview-foreground" src={previewAsset.media_url} alt={previewAsset.asset.display_name} /></div>}
+            {previewMode === "interactive" && !previewAsset?.media_url && overlayPips.length === 0 && <div className="preview-empty">选择或追加素材以开始编辑</div>}
             {previewMode === "interactive" && visibleCaption && <div className={`caption-overlay ${visibleCaption.preset_id}`}>{visibleCaption.text}</div>}
+            {previewMode === "interactive" && overlayPips.length > 0 && <PreviewPipOverlays items={overlayPips} selectedClipId={pipSelectedId} locked={pipLocked} onSelect={clipId => setSelection({ kind: "clip", id: clipId })} onDraftTransform={draftPipTransform} onCommitTransform={commitPipTransform} onDraftMask={draftPipMask} onCommitMask={commitPipMask} onGesturePause={pausePreviewPlayback} onGestureResume={resumePreviewPlayback} playheadUs={playhead} playing={playing} />}
           </div>
           {/* 选中框：白色边框 + 8 向拖拽手柄，缩放时随画面一起缩放；仅选中片段时可见。 */}
-          <div className="sel-box" ref={selBoxRef} onClick={event => event.stopPropagation()} aria-hidden="true"><i className="sel-border" /><span className="sel-dims">{selDimsText || `${Math.round((canvasRef.current?.offsetWidth ?? 0))} × ${Math.round((canvasRef.current?.offsetHeight ?? 0))}`}</span><span className="h h-nw" data-dir="nw" title="等比缩放（左上）" onPointerDown={beginSelDrag("nw")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-n" data-dir="n" title="单轴缩放（上）" onPointerDown={beginSelDrag("n")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-ne" data-dir="ne" title="等比缩放（右上）" onPointerDown={beginSelDrag("ne")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-e" data-dir="e" title="单轴缩放（右）" onPointerDown={beginSelDrag("e")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-se" data-dir="se" title="等比缩放（右下）" onPointerDown={beginSelDrag("se")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-s" data-dir="s" title="单轴缩放（下）" onPointerDown={beginSelDrag("s")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-sw" data-dir="sw" title="等比缩放（左下）" onPointerDown={beginSelDrag("sw")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-w" data-dir="w" title="单轴缩放（左）" onPointerDown={beginSelDrag("w")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /></div>
+          {!overlayClipSelected && <div className="sel-box" ref={selBoxRef} onClick={event => event.stopPropagation()} aria-hidden="true"><i className="sel-border" /><span className="sel-dims">{selDimsText || `${Math.round((canvasRef.current?.offsetWidth ?? 0))} × ${Math.round((canvasRef.current?.offsetHeight ?? 0))}`}</span><span className="h h-nw" data-dir="nw" title="等比缩放（左上）" onPointerDown={beginSelDrag("nw")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-n" data-dir="n" title="单轴缩放（上）" onPointerDown={beginSelDrag("n")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-ne" data-dir="ne" title="等比缩放（右上）" onPointerDown={beginSelDrag("ne")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-e" data-dir="e" title="单轴缩放（右）" onPointerDown={beginSelDrag("e")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-se" data-dir="se" title="等比缩放（右下）" onPointerDown={beginSelDrag("se")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-s" data-dir="s" title="单轴缩放（下）" onPointerDown={beginSelDrag("s")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-sw" data-dir="sw" title="等比缩放（左下）" onPointerDown={beginSelDrag("sw")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-w" data-dir="w" title="单轴缩放（左）" onPointerDown={beginSelDrag("w")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /></div>}
         </div>
           <span className={`interactive-label ${previewIsStale && previewMode === "authoritative" && !exportPlayback ? "stale" : ""}`}>{previewMode === "interactive" ? "交互预览 · 非权威" : reframePlayback ? "静态焦点重构图 · 权威预览" : exportPlayback ? `导出 · ${exportPlayback.export_record.destination_display_name}` : previewIsStale ? "权威预览 · 已过期" : "权威预览 · 当前 Revision"}</span><span role="status" aria-label="预览状态" className={`preview-context ${previewMode === "authoritative" ? "authoritative" : "interactive"}${previewIsStale ? " stale" : ""}`}>{previewMode === "authoritative" ? (previewIsStale ? "权威预览已过期" : authoritativePreview ? "权威预览" : "尚未生成权威预览") : "交互预览"}</span>
           <div className={`progress${progressDragging ? " dragging" : ""}`} ref={progressRef} role="slider" tabIndex={0} aria-label="时间线播放头" aria-valuemin={0} aria-valuemax={Math.max(totalUs, 1)} aria-valuenow={Math.min(playhead, totalUs)} onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); setProgressDragging(true); seekFromProgress(event.clientX); }} onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) seekFromProgress(event.clientX); }} onPointerUp={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); setProgressDragging(false); }} onKeyDown={event => { if (event.key === "ArrowLeft") { event.preventDefault(); seekFromProgressRatio(Math.max(0, playhead / Math.max(totalUs, 1) - 1 / 300)); } else if (event.key === "ArrowRight") { event.preventDefault(); seekFromProgressRatio(Math.min(1, playhead / Math.max(totalUs, 1) + 1 / 300)); } }}>
@@ -1446,7 +1577,7 @@ export function App() {
         </div>
         <div className="playback-bar">
           <div className="pb-left"><span className="tc"><b>{formatSmpteTimecode(playhead, previewFps)}</b><i> / </i><span className="tot">{formatSmpteTimecode(totalUs, previewFps)}</span></span><span className={`vu${playing ? " active" : ""}`} aria-hidden="true"><i ref={vuBarLRef} /><i ref={vuBarRRef} /></span></div>
-          <div className="pb-center"><button className="pb-play" aria-label={playing ? "暂停" : "播放"} title={playing ? "暂停" : "播放"} onClick={() => setPlaying(value => !value)}>{playing ? <Pause /> : <Play />}</button></div>
+          <div className="pb-center"><button className="pb-play" aria-label={playing ? "暂停" : "播放"} title={playing ? "暂停" : "播放"} onClick={togglePlayback}>{playing ? <Pause /> : <Play />}</button></div>
           <div className="pb-right" role="group" aria-label="播放器控制">
             <span className="vol-anchor">
               <button className="pb-icon" aria-haspopup="dialog" aria-expanded={volPopOpen} title={`音量 ${volume}%`} aria-label="音量" onClick={event => { event.stopPropagation(); setVolPopOpen(value => !value); setZoomPopOpen(false); }}>{volume === 0 ? <VolumeX /> : <Volume2 />}</button>

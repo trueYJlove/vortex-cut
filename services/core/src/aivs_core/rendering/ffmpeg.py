@@ -270,6 +270,52 @@ def build_timeline_args(
             else _visual_filter(segment["layout"], width, height, label_id)
         )
         base = f"{source},{_square_pixel_filter()},{visual},setsar=1,fps=30,format=yuv420p"
+        # P1 扩展：静态画面变换（transform，中心点语义）对主轨（V1）与所有视觉
+        # 片段生效——缩放至目标尺寸（可选旋转）后叠到全幅黑底；透明度 <1 时走
+        # rgba + colorchannelmixer。变换先后：关键帧动画在前，静态变换在后
+        # （关键帧末尾已归一化回全幅）。无变换时直通原关键帧路径。
+        transform = segment.get("transform")
+        if isinstance(transform, dict) and transform:
+            cx = min(max(float(transform.get("x", 0.5)), 0.0), 1.0)
+            cy = min(max(float(transform.get("y", 0.5)), 0.0), 1.0)
+            scale_val = min(max(float(transform.get("scale", 1.0)), 0.05), 5.0)
+            rotate_val = float(transform.get("rotate", 0.0))
+            opacity = min(max(float(transform.get("opacity", 1.0)), 0.0), 1.0)
+            if (
+                abs(scale_val - 1.0) > 1e-9
+                or abs(cx - 0.5) > 1e-9
+                or abs(cy - 0.5) > 1e-9
+                or abs(rotate_val) > 1e-9
+                or opacity < 1.0
+            ):
+                pip_w = max(2, int(round(width * scale_val / 2) * 2))
+                pip_h = max(2, int(round(height * scale_val / 2) * 2))
+                needs_alpha = abs(rotate_val) > 1e-9 or opacity < 1.0
+                window_len_us = duration_us if window_us is None else duration_us - int(window_us[0]) - int(window_us[1])
+                bg_duration = max(window_len_us / 1_000_000, 0.04)
+                clauses = _keyframe_animation_filters(
+                    segment, base, f"vbase{label_id}", f"vkf{label_id}",
+                    width, height,
+                    black_input_index if black_input_index is not None else -1,
+                )
+                static = f"[vkf{label_id}]"
+                if needs_alpha:
+                    static += "format=rgba,"
+                static += f"scale={pip_w}:{pip_h}:force_divisible_by=2"
+                if abs(rotate_val) > 1e-9:
+                    static += f",rotate={rotate_val:.4f}:fillcolor=black@0:ow=iw:oh=ih"
+                if opacity < 1.0:
+                    static += f",colorchannelmixer=aa={opacity:.3f}"
+                static += f"[vpre{label_id}]"
+                clauses.append(static)
+                clauses.append(
+                    f"color=c=black:s={width}x{height}:r=30:d={bg_duration:.6f},setsar=1[ppbg{label_id}]"
+                )
+                clauses.append(
+                    f"[ppbg{label_id}][vpre{label_id}]overlay=x={cx * width - pip_w / 2:.1f}"
+                    f":y={cy * height - pip_h / 2:.1f},format=yuv420p[{out_label}]"
+                )
+                return clauses
         return _keyframe_animation_filters(
             segment, base, f"vbase{label_id}", out_label, width, height,
             black_input_index if black_input_index is not None else -1,
@@ -436,8 +482,36 @@ def build_timeline_args(
                 accumulated_us += _item_span_us(item)
         filters.append(f"[{video_label_prev}]null[vcat];[{audio_label_prev}]anull[aout]")
     video_label = "vcat"
+    # P1 覆盖轨（画中画）合成：V1 之外的视频/图片覆盖帧，按时间窗以不透明
+    # 实心浮层叠到主画面上（PIP 语义），并持久复用 [MAINPIP] 标签供逐段叠加。
+    overlay_segments = [
+        (index, segment)
+        for index, segment in enumerate(segments)
+        if (
+            segment["asset_kind"] != "audio"
+            and segment.get("track_id", "V1") != "V1"
+            and not segment.get("track_hidden", False)
+        )
+    ]
+    if overlay_segments:
+        main_label = "MAINPIP"
+        filters.append(f"[vcat]null[{main_label}]")
+        for index, segment in overlay_segments:
+            filters.extend(
+                _pip_overlay_chain(
+                    segment,
+                    index,
+                    width,
+                    height,
+                    probe=segment_probes[index],
+                    enable_start_us=segment["timeline_start_us"],
+                    enable_end_us=segment["timeline_end_us"],
+                    main_label=main_label,
+                )
+            )
+        video_label = main_label
     if captions:
-        filters.append("[vcat]ass=filename=captions.ass:fontsdir=fonts[vout]")
+        filters.append(f"[{video_label}]ass=filename=captions.ass:fontsdir=fonts[vout]")
         video_label = "vout"
     args += [
         "-filter_complex",
@@ -521,6 +595,214 @@ def _reframe_crop_filter(width: int, height: int, crop_x: int, crop_y: int) -> s
 
 def _square_pixel_filter() -> str:
     return "scale=w='max(2,trunc(iw*sar/2)*2)':h=ih,setsar=1"
+
+
+def _mask_alpha_expr(mask, pw, ph):
+    """把线性/矩形/椭圆蒙版转成 FFmpeg geq 的 alpha 表达式（值 0..255）。
+
+    匹配 apply 到 pip 尺寸 pw x ph 的帧（X,Y 为该帧坐标）。几何项归一化 0..1；
+    rotation 角度制；invert 为真则保留外部（alpha 反转）。返回供 `a='...'` 使用。
+    """
+    if not isinstance(mask, dict):
+        return None
+    kind = mask.get("kind")
+    if kind not in ("linear", "rect", "ellipse"):
+        return None
+    cx = _mask_num(mask, "x", 0.5) * pw
+    cy = _mask_num(mask, "y", 0.5) * ph
+    feather = max(0.0, min(1.0, _mask_num(mask, "feather", 0.02)))
+    import math as _m
+    rot = _mask_num(mask, "rotation", 0.0) * _m.pi / 180.0
+    cs = f"{_m.cos(rot):.4f}"
+    sn = f"{_m.sin(rot):.4f}"
+    invert = bool(mask.get("invert"))
+    if kind == "ellipse":
+        ax = max(1.0, _mask_num(mask, "width", 0.5) * pw / 2.0)
+        ay = max(1.0, _mask_num(mask, "height", 0.5) * ph / 2.0)
+        ux = f"{cs}*(X-{cx:.1f})+{sn}*(Y-{cy:.1f})"
+        uy = f"-{sn}*(X-{cx:.1f})+{cs}*(Y-{cy:.1f})"
+        d = f"sqrt(pow({ux},2)/pow({ax:.1f},2)+pow({uy},2)/pow({ay:.1f},2))"
+        inside = f"max(0,min(255,255*(1-{d})))"
+    elif kind == "rect":
+        hal_w = max(1.0, _mask_num(mask, "width", 0.5) * pw / 2.0)
+        hal_h = max(1.0, _mask_num(mask, "height", 0.5) * ph / 2.0)
+        ux = f"{cs}*(X-{cx:.1f})+{sn}*(Y-{cy:.1f})"
+        uy = f"-{sn}*(X-{cx:.1f})+{cs}*(Y-{cy:.1f})"
+        norm = f"max(abs({ux})/{hal_w:.1f},abs({uy})/{hal_h:.1f})"
+        inside = f"255*max(0,1-min(1,{norm}))"
+    else:  # linear 硬边分界
+        ux = f"{cs}*(X-{cx:.1f})+{sn}*(Y-{cy:.1f})"
+        inside = f"min(255,max(0,255*(0.5+({ux})/{max(1.0, feather*pw):.2f})))"
+    expr = _mask_invert(inside, invert)
+    return f"clip({expr},0,255)"
+
+
+def _mask_num(mask, key, default):
+    v = mask.get(key) if isinstance(mask, dict) else default
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def _mask_invert(expr, invert):
+    return f"(255-({expr}))" if invert else expr
+
+
+def _pip_overlay_chain(
+    segment, input_index, width, height, *, probe=None, enable_start_us, enable_end_us, main_label="MAINPIP",
+):
+    """覆盖轨（画中画）片段子句：源取帧 -> 内容盒 -> transform(缩放/旋转) -> PTS 对齐
+    -> overlay 时间窗叠加。
+
+    剪映式语义：fit / blurred_background 的浮层元素 = **内容实际大小**（等比适配进
+    画布、无黑边），位置/缩放/蒙版均相对内容盒，区域外透明露出下层；crop_fill
+    （裁切填满）与重构图仍为满画布盒。旋转/透明度走 rgba（角落透明，不遮挡下层）。
+
+    返回子句列表；外层以分号连接并持久复用 [MAINPIP] 标签。enable 的 t 是主输出
+    时间，故用 setpts=PTS+start 把覆盖流对齐到主时间轴。
+    """
+    transform = segment.get("transform") or {}
+    try:
+        cx = float(transform.get("x", 0.5))
+    except (TypeError, ValueError):
+        cx = 0.5
+    try:
+        cy = float(transform.get("y", 0.5))
+    except (TypeError, ValueError):
+        cy = 0.5
+    try:
+        scale_val = float(transform.get("scale", 1.0))
+    except (TypeError, ValueError):
+        scale_val = 1.0
+    try:
+        rotate_val = float(transform.get("rotate", 0.0))
+    except (TypeError, ValueError):
+        rotate_val = 0.0
+    cx = min(max(cx, 0.0), 1.0)
+    cy = min(max(cy, 0.0), 1.0)
+    scale_val = min(max(scale_val, 0.05), 5.0)
+    # 内容盒尺寸：fit / blurred_background 按素材宽高比等比适配进画布（SAR 归一）；
+    # crop_fill 与未知尺寸回退满画布。
+    streams = (probe or {}).get("video_streams") or []
+    content_only = segment["layout"] in ("fit", "blurred_background") and bool(streams) and "reframe" not in segment
+    if content_only:
+        coded_w = int(streams[0].get("width") or width)
+        coded_h = int(streams[0].get("height") or height)
+        sar_text = str(streams[0].get("sample_aspect_ratio") or "1:1")
+        try:
+            sar_num, sar_den = sar_text.split(":")
+            sar = float(sar_num) / float(sar_den) if float(sar_den) > 0 else 1.0
+        except ValueError:
+            sar = 1.0
+        disp_w = max(2.0, coded_w * (sar if sar > 0 else 1.0))
+        fit_scale = min(width / disp_w, height / coded_h)
+        content_w = max(2, int(round(disp_w * fit_scale / 2) * 2))
+        content_h = max(2, int(round(coded_h * fit_scale / 2) * 2))
+    else:
+        content_w, content_h = width, height
+    pip_w = max(2, int(round(content_w * scale_val / 2) * 2))
+    pip_h = max(2, int(round(content_h * scale_val / 2) * 2))
+    duration_us = segment["timeline_end_us"] - segment["timeline_start_us"]
+    speed_milli = int(segment.get("speed_milli", 1000))
+    speed = speed_milli / 1000
+    reverse = bool(segment.get("reverse_playback", False))
+    if segment["asset_kind"] == "video":
+        start = _seconds(int(segment["source_start_us"]))
+        end = _seconds(int(segment["source_end_us"]))
+        source = f"[{input_index}:v:0]trim=start={start}:end={end},setpts=PTS-STARTPTS"
+        if reverse:
+            source += ",reverse,setpts=PTS-STARTPTS"
+        if speed != 1.0:
+            source += f",setpts=PTS/{speed:.6f}"
+    else:
+        source = f"[{input_index}:v:0]trim=duration={_seconds(duration_us)},setpts=PTS-STARTPTS"
+    reframe = segment.get("reframe")
+    if content_only:
+        # 内容即元素：等比缩放到内容盒（无底、无黑边），区域外透明。
+        visual = f"scale={content_w}:{content_h}:force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1"
+    else:
+        visual = (
+            _reframe_crop_filter(width, height, reframe["crop_x"], reframe["crop_y"])
+            if isinstance(reframe, dict)
+            else _visual_filter(segment["layout"], width, height, 901 + input_index)
+        )
+    label = f"pip{input_index}"
+    head = f"{source},{_square_pixel_filter()},{visual},scale={pip_w}:{pip_h}:force_divisible_by=2"
+    if rotate_val != 0.0:
+        # 浮层旋转的角落必须透明（露出下层），走 rgba + 黑透明填充。
+        head += ",format=rgba,rotate={}:fillcolor=black@0:ow=iw:oh=ih".format(f"{rotate_val:.4f}")
+    head += f"[{label}]"
+    # 生成「灰阶 alpha（0..255）」贡献：蒙版 geq 灰 + 抠像 colorkey alphaextract。
+    # 最终 RGB 帧 + 每个 alpha 来源各一条 split 分支（避免 [label] 被多处消费）。
+    gray_sources: list[str] = []
+    alpha_clause: list[str] = []
+    mask_obj = segment.get("mask")
+    keying_obj = segment.get("keying")
+    want_mask = isinstance(mask_obj, dict) and bool(_mask_alpha_expr(mask_obj, pip_w, pip_h))
+    want_key = isinstance(keying_obj, dict) and bool(keying_obj)
+    n_branches = 1 + (1 if want_mask else 0) + (1 if want_key else 0)
+    if n_branches > 1:
+        split_spec = "".join(f"[{label}_b{i}]" for i in range(n_branches))
+        alpha_clause.append(f"[{label}]split={n_branches}{split_spec}")
+        rgb_branch = f"{label}_b0"
+        next_branch = 1
+        if want_mask:
+            expr = _mask_alpha_expr(mask_obj, pip_w, pip_h)
+            alpha_clause.append(
+                f"[{label}_b{next_branch}]format=gray,geq='{expr}'[{label}_mask_a]"
+            )
+            gray_sources.append(f"{label}_mask_a")
+            next_branch += 1
+        if want_key:
+            key_color = str(keying_obj.get("color", "00FF00"))
+            try:
+                key_sim = float(keying_obj.get("similarity", 0.3))
+            except (TypeError, ValueError):
+                key_sim = 0.3
+            try:
+                key_blend = float(keying_obj.get("blend", 0.1))
+            except (TypeError, ValueError):
+                key_blend = 0.1
+            key_sim = min(max(key_sim, 0.0), 1.0)
+            key_blend = min(max(key_blend, 0.0), 1.0)
+            if key_sim <= 0.0:
+                key_sim = 0.3
+            if key_blend <= 0.0:
+                key_blend = 0.1
+            alpha_clause.append(
+                f"[{label}_b{next_branch}]colorkey=color=0x{key_color}:similarity={key_sim:.3f}:blend={key_blend:.3f},"
+                f"format=rgba,alphaextract[{label}_key_a]"
+            )
+            gray_sources.append(f"{label}_key_a")
+            next_branch += 1
+        # 合并 alpha（多来源 multiply 求交）。
+        if len(gray_sources) == 1:
+            final_gray = gray_sources[0]
+        else:
+            g0, g1 = gray_sources[0], gray_sources[1]
+            alpha_clause.append(f"[{g0}][{g1}]blend=all_mode=multiply[{label}_cmb_a]")
+            final_gray = f"{label}_cmb_a"
+        align_label = f"{label}vis"
+        alpha_clause.append(
+            f"[{rgb_branch}]format=rgba[{label}_rgb_b];[{label}_rgb_b][{final_gray}]alphamerge[{align_label}]"
+        )
+    else:
+        align_label = label
+    align = f"[{align_label}]setpts=PTS+{enable_start_us / 1_000_000:.6f}[{label}a]"
+    # transform.x/y 为「中心点归一化位置」（0..1，与 contracts 注释及交互预览
+    # translate(-50%,-50%) 语义一致）：overlay 左上角 = 中心点像素 − PIP 尺寸一半。
+    # 负值表示 PIP 部分出画（overlay 自动裁剪），与预览画布 overflow 裁剪行为对齐。
+    x_expr = f"{cx * width - pip_w / 2:.1f}"
+    y_expr = f"{cy * height - pip_h / 2:.1f}"
+    overlay = (
+        f"[{main_label}][{label}a]overlay=x='{x_expr}':y='{y_expr}':"
+        f"enable='between(t,{_seconds(enable_start_us)},{_seconds(enable_end_us)})':"
+        f"eval=frame:repeatlast=1:format=auto[{main_label}]"
+    )
+    return [head] + alpha_clause + [align, overlay]
+
+
 
 
 async def run_timeline_render(

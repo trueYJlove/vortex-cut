@@ -3286,7 +3286,7 @@ export function TimelinePanel({
                 if (x < rect.x || x > rect.x + rect.width) return null;
                 const commit = (newTUs: number) => {
                   const frames = track.frames
-                    .map((f: { t_us: number; x?: number; y?: number; v?: number }) => (f.t_us === frame.t_us ? { ...f, t_us: Math.max(0, Math.min(clip.timeline_end_us - clip.timeline_start_us, newTUs)) } : f))
+                    .map((f: { t_us: number; x?: number; y?: number; v?: number }) => (f.t_us === frame.t_us ? { ...f, t_us: Math.max(0, Math.min(clip.timeline_end_us - clip.timeline_start_us, Math.round(newTUs))) } : { ...f, t_us: Math.round(f.t_us) }))
                     .sort((a: { t_us: number }, b: { t_us: number }) => a.t_us - b.t_us);
                   void onPatch(
                     [{ op: "set_clip_keyframes", clip_id: clip.clip_id, property: property as never, frames }],
@@ -3307,7 +3307,7 @@ export function TimelinePanel({
                       if (!canvas) return;
                       const bounds = canvas.getBoundingClientRect();
                       const scale = canvas.width / bounds.width || 1;
-                      const newTUs = Math.max(0, Math.min(clip.timeline_end_us - clip.timeline_start_us, xToTime((event.clientX - bounds.left) * scale, view)));
+                      const newTUs = Math.max(0, Math.min(clip.timeline_end_us - clip.timeline_start_us, Math.round(xToTime((event.clientX - bounds.left) * scale, view))));
                       commit(newTUs);
                     }}
                     onClick={(event) => event.stopPropagation()}

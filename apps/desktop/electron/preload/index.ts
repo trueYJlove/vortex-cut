@@ -75,7 +75,7 @@ import type {
 export interface MediaSelection { grant: FileGrant; media: MediaInfo }
 export interface DesktopRuntime { protocol_version: 1; status: "ready" }
 export interface AuthoritativePreviewPresentation { preview: AuthoritativePreview; media_url: string }
-export interface ExportRecordPresentation { export_record: ExportRecord; media_url: string }
+export interface ExportRecordPresentation { export_record: ExportRecord; media_url: string | null }
 export interface RenderArtifactPresentation { artifact: RenderArtifact; media_url: string }
 export interface RenditionPreviewPresentation { preview: RenditionPreview; media_url: string }
 export interface RenditionReframePreviewPresentation { preview: RenditionReframePreview; media_url: string }
