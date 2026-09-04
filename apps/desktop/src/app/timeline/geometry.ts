@@ -22,8 +22,6 @@ export const MIN_CLIP_US = 100_000;
 export const SNAP_PX = 8;
 /** Width of the hoverable trim handle zone in pixels. */
 export const TRIM_HANDLE_PX = 6;
-/** Right-side dead space kept reachable past the last clip, in pixels. */
-export const RIGHT_PADDING_PX = 240;
 /** Height of the bottom scrollbar strip drawn on the canvas. */
 export const SCROLLBAR_HEIGHT_PX = 8;
 /** Pointer distance from the canvas edge that triggers drag auto-scroll. */
@@ -384,9 +382,10 @@ export function ghostPosition(
 
 // ── Timeline Round 4 — scrolling, anchored zoom, grid snap, group move ──────
 
-/** Total scrollable content width in pixels (gutter + timeline + right padding). */
+/** Total scrollable content width in pixels (gutter + timeline; ends at the
+ *  last clip's end — 标尺/滚动不超过素材片段的长度，到终点即不能再往后拖). */
 export function contentWidthPx(view: TimelineViewState, totalUs: number): number {
-  return view.headerWidth + (totalUs / 1_000_000) * view.pixelsPerSecond + RIGHT_PADDING_PX;
+  return view.headerWidth + (totalUs / 1_000_000) * view.pixelsPerSecond;
 }
 
 /** Scrollable range for the current view. */

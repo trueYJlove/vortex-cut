@@ -223,8 +223,15 @@ async function createWindow(): Promise<void> {
     minHeight: 720,
     title: "Vortex Cut",
     autoHideMenuBar: true,
-    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
-    titleBarOverlay: undefined,
+    // 参考 dsh-desktop 的原生外框处理（Window Controls Overlay）：
+    // 系统绘制右上角原生最小化/最大化/关闭按钮，网页内容仍填充标题栏区域。
+    // overlay 高度与 .editor-titlebar 的 36px 对齐。
+    titleBarStyle: process.platform === "darwin"
+      ? "hiddenInset"
+      : process.platform === "win32" ? "hidden" : "default",
+    titleBarOverlay: process.platform === "win32"
+      ? { color: "#00000000", symbolColor: "#e6eaec", height: 36 }
+      : undefined,
     show: true,
     webPreferences: {
       preload: join(__dirname, "../preload/index.cjs"),
@@ -249,8 +256,9 @@ async function createWindow(): Promise<void> {
   });
   windowRef.webContents.on("did-finish-load", () => { void appendLog(logPath, "renderer did-finish-load"); });
   windowRef.once("ready-to-show", () => { void appendLog(logPath, "window ready-to-show"); });
-  windowRef.on("maximize", () => { windowRef?.webContents.send("window:maximize-changed", true); });
-  windowRef.on("unmaximize", () => { windowRef?.webContents.send("window:maximize-changed", false); });
+  // 最小化/最大化/关闭改由系统 caption 按钮处理（titleBarOverlay），
+  // 不再向渲染进程转发 maximize 状态；菜单栏整体隐藏（参考 dsh-desktop）。
+  if (process.platform === "win32") windowRef.setMenuBarVisibility(false);
   windowRef.webContents.on("did-fail-load", (_event, code, description, url) => {
     void appendLog(logPath, `renderer load failed code=${code} description=${description} url=${url}`);
   });
@@ -259,17 +267,6 @@ async function createWindow(): Promise<void> {
     ? windowRef.loadURL(process.env.ELECTRON_RENDERER_URL)
     : windowRef.loadFile(join(__dirname, "../renderer/index.html"));
   void load.then(() => appendLog(logPath, "window loaded")).catch(error => appendLog(logPath, `window load error: ${String(error)}`));
-}
-
-function registerWindowIpc(): void {
-  ipcMain.handle("window:minimize", () => { windowRef?.minimize(); });
-  ipcMain.handle("window:toggle-maximize", () => {
-    if (!windowRef) return false;
-    if (windowRef.isMaximized()) windowRef.unmaximize(); else windowRef.maximize();
-    return windowRef.isMaximized();
-  });
-  ipcMain.handle("window:is-maximized", () => windowRef?.isMaximized() ?? false);
-  ipcMain.handle("window:close", () => { windowRef?.close(); });
 }
 
 function registerIpc(): void {
@@ -327,6 +324,52 @@ function registerIpc(): void {
     const asset = await fetchWithUi<Asset>(`${API_PREFIX}/assets/${assetId}/relocate`, { method: "POST", body: JSON.stringify({ grant_id: grant.grant_id }) });
     restrictedMedia.register(asset.asset_id, selectedPath);
     return { grant, asset, media_url: await restrictedMediaUrl(asset.asset_id) };
+  });
+
+  // 打开素材所在文件夹；文件缺失时弹框提供 重新定位 / 移除 的恢复路径。
+  ipcMain.handle("asset:reveal", async (_event, assetIdValue: string) => {
+    const assetId = asId(assetIdValue, "asset_id");
+    const resolved = await requireCore().resolveAsset(assetId);
+    try {
+      await access(resolved.path);
+    } catch {
+      const box = await dialog.showMessageBox(windowRef!, {
+        type: "warning",
+        title: "素材文件不存在",
+        message: "素材文件不存在，可能已被移动或删除。",
+        detail: resolved.path,
+        buttons: ["重新定位", "移除素材", "取消"],
+        defaultId: 0,
+        cancelId: 2,
+        noLink: true
+      });
+      if (box.response === 0) {
+        const selectedPath = await chooseAssetPath(undefined, "重新定位素材", true);
+        if (!selectedPath) return { status: "cancelled" as const };
+        const grant = await registerFileGrant(requireCore(), selectedPath);
+        const asset = await fetchWithUi<Asset>(`${API_PREFIX}/assets/${assetId}/relocate`, { method: "POST", body: JSON.stringify({ grant_id: grant.grant_id }) });
+        restrictedMedia.register(asset.asset_id, selectedPath);
+        return { status: "relocated" as const };
+      }
+      if (box.response === 1) {
+        try {
+          await fetchWithUi(`${API_PREFIX}/assets/${assetId}`, { method: "DELETE" });
+          return { status: "deleted" as const };
+        } catch {
+          await dialog.showMessageBox(windowRef!, {
+            type: "warning",
+            title: "无法移除素材",
+            message: "素材仍被时间线引用，无法直接移除。请先在时间线中删除相关片段。",
+            buttons: ["确定"],
+            noLink: true
+          });
+          return { status: "cancelled" as const };
+        }
+      }
+      return { status: "cancelled" as const };
+    }
+    shell.showItemInFolder(resolved.path);
+    return { status: "opened" as const };
   });
 
   // 素材删除：remove_timeline_clips=true 时 Core 级联删除时间线相关片段，
@@ -677,8 +720,7 @@ app.whenReady().then(async () => {
     return;
   }
   protocol.handle(RESTRICTED_MEDIA_SCHEME, request => serveRestrictedMedia(request, restrictedMedia));
-  registerWindowIpc();
-    registerIpc();
+  registerIpc();
   try {
     await createWindow();
     void startRuntime().catch(async error => {

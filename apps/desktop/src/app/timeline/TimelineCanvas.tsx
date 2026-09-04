@@ -26,6 +26,7 @@ import {
   Minus,
   MoreHorizontal,
   Music,
+  ImagePlus,
   Plus,
   Redo2,
   ScanSearch,
@@ -38,7 +39,6 @@ import {
   VolumeX,
 } from "lucide-react";
 import type {
-  AssetKind,
   TimelineCaption,
   TimelineClip,
   TimelineClipId,
@@ -193,10 +193,12 @@ function IconButton({
 
 // ── Thumbnail frame computation（剪映式：抽帧铺满片段） ──────────────────────
 
-/** 帧数档位：缩放时量化到最近档，小幅缩放直接复用已抽帧（不重抽）。 */
-const FRAME_COUNT_STEPS = [1, 2, 3, 4, 6, 8, 11, 14, 18, 24, 32];
+/** 帧数档位：缩放时量化到最近档，小幅缩放直接复用已抽帧（不重抽）。
+ *  上限 64（配合"只抽可视区格子"的按需请求，seek 负载仍有界）——
+ *  长片段放大后格宽能继续变小，帧与时间对位随之更准。 */
+const FRAME_COUNT_STEPS = [1, 2, 3, 4, 6, 8, 11, 14, 18, 24, 32, 40, 48, 56, 64];
 export function quantizeFrameCount(raw: number): number {
-  const capped = Math.max(1, Math.min(32, raw));
+  const capped = Math.max(1, Math.min(64, raw));
   let best = FRAME_COUNT_STEPS[0];
   let bestDistance = Number.POSITIVE_INFINITY;
   for (const step of FRAME_COUNT_STEPS) {
@@ -209,25 +211,36 @@ export function quantizeFrameCount(raw: number): number {
   return best;
 }
 
-/** Compute (mediaUrl, seek time) pairs for a clip's filmstrip frames. */
-function computeFrameRequests(
+/** Compute (mediaUrl, seek time) pairs for a clip's filmstrip frames.
+ *  所见即所得：格位由片段的【时间线】时长均匀切分（格宽≈56px 量化档位），
+ *  每帧 seek 该格中心的源时刻（含变速/倒放映射：源时刻 = source_start +
+ *  时间线偏移 × speed，倒放从 source_end 反向）；绘制端按 fromUs/toUs 精确
+ *  落位——片段放得越大、格越小，帧与时间的对位误差越小。
+ *  （导出仅供单元测试断言时间对位。） */
+export function computeFrameRequests(
   mediaUrl: string | null,
-  assetKind: AssetKind,
-  sourceStartUs: number,
-  sourceEndUs: number,
+  clip: TimelineClip,
   pps: number,
-): Array<{ url: string; timeSec: number }> {
+): Array<{ url: string; timeSec: number; fromUs: number; toUs: number }> {
   if (!mediaUrl) return [];
-  if (assetKind === "image") return [{ url: mediaUrl, timeSec: 0 }];
-  if (assetKind !== "video") return [];
-  const sourceDurationUs = sourceEndUs - sourceStartUs;
-  if (sourceDurationUs <= 0) return [];
-  const widthPx = (sourceDurationUs / 1_000_000) * pps;
-  const count = quantizeFrameCount(Math.round(widthPx / 56));
-  const frames: Array<{ url: string; timeSec: number }> = [];
+  const isVisual = clip.asset_kind === "video" || clip.asset_kind === "image";
+  if (!isVisual) return [];
+  const timelineDurUs = clip.timeline_end_us - clip.timeline_start_us;
+  if (timelineDurUs <= 0) return [];
+  const count = quantizeFrameCount(Math.round(((timelineDurUs / 1_000_000) * pps) / 56));
+  const sourceStartUs = clip.source_start_us ?? 0;
+  const sourceEndUs = clip.source_end_us ?? 0;
+  const speed = (clip.speed_milli ?? 1000) / 1000;
+  const frames: Array<{ url: string; timeSec: number; fromUs: number; toUs: number }> = [];
   for (let i = 0; i < count; i += 1) {
-    const tUs = sourceStartUs + ((i + 0.5) * sourceDurationUs) / count;
-    frames.push({ url: mediaUrl, timeSec: tUs / 1_000_000 });
+    const fromUs = clip.timeline_start_us + (i * timelineDurUs) / count;
+    const toUs = clip.timeline_start_us + ((i + 1) * timelineDurUs) / count;
+    const centerUs = (fromUs + toUs) / 2;
+    const offsetUs = centerUs - clip.timeline_start_us;
+    const srcUs = clip.reverse_playback
+      ? sourceEndUs - offsetUs * speed
+      : sourceStartUs + offsetUs * speed;
+    frames.push({ url: mediaUrl, timeSec: Math.max(0, srcUs) / 1_000_000, fromUs, toUs });
   }
   return frames;
 }
@@ -382,8 +395,11 @@ function computeTicks(
   // 可视时间范围（含左右余量），再对齐到主刻度边界。
   const viewStartUs = Math.max(0, (scrollX - headerWidth) * pxToUs - majorUs);
   const viewEndUs = (scrollX - headerWidth + viewportWidth) * pxToUs + majorUs;
+  // 标尺不越过素材终点：有素材时主刻度只生成到 totalUs；
+  // 空时间线（totalUs=0）保持整宽标尺，便于首次拖入素材。
+  const rulerEndUs = totalUs > 0 ? Math.min(viewEndUs, totalUs) : viewEndUs;
   const firstMajor = Math.floor(viewStartUs / majorUs);
-  const lastMajor = Math.ceil(Math.min(viewEndUs, Math.max(totalUs + majorUs, viewEndUs)) / majorUs);
+  const lastMajor = Math.floor(rulerEndUs / majorUs);
   const ticks: TickMark[] = [];
   for (let m = firstMajor; m <= lastMajor; m += 1) {
     const majorUsValue = m * majorUs;
@@ -563,6 +579,155 @@ function drawDragTooltip(
   ctx.restore();
 }
 
+// ── 标尺外观常量（drawTimeline 与固定标尺覆盖层 drawRulerStrip 共享，
+//    保证两条绘制路径像素级一致）──────────────────────────────────────────
+const RULER_DEAD_BG = "#14141f"; // 素材终点外的死区底色
+const RULER_BG_TOP = "#1d2440"; // 标尺带渐变顶
+const RULER_BG_BOTTOM = "#151a2e"; // 标尺带渐变底
+const RULER_END_EDGE = "#3d4a5c"; // 素材终点竖标线
+const RULER_TICK_MAJOR = "#8a95a5";
+const RULER_TICK_MINOR = "#596372";
+const RULER_LABEL_COLOR = "#b9c4d1";
+const RULER_LABEL_FONT = "10px sans-serif";
+const RANGE_BAR_TOP = "#4f6ef7"; // 素材范围条渐变
+const RANGE_BAR_BOTTOM = "#7c9bff";
+const HOVER_CHIP_BG = "rgba(9, 12, 24, 0.88)";
+const HOVER_CHIP_EDGE = "rgba(134, 160, 255, 0.45)";
+const HOVER_CHIP_TEXT = "#d6e1ff";
+const PLAYHEAD_HANDLE_TOP = "#ffffff";
+const PLAYHEAD_HANDLE_BOTTOM = "#c2cedd";
+const PLAYHEAD_HANDLE_EDGE = "rgba(10, 14, 20, 0.55)";
+
+/** 播放头顶部手柄（主画布与固定标尺覆盖层共享）：白色渐变圆角竖条，
+ *  高度限制在标尺带内——外露会形成衔接处的"小白点"。 */
+function drawPlayheadHandle(ctx: CanvasRenderingContext2D, x: number, bandHeight: number) {
+  const h = Math.min(18, Math.max(6, bandHeight - 6));
+  const grad = ctx.createLinearGradient(0, 3, 0, 3 + h);
+  grad.addColorStop(0, PLAYHEAD_HANDLE_TOP);
+  grad.addColorStop(1, PLAYHEAD_HANDLE_BOTTOM);
+  ctx.fillStyle = grad;
+  ctx.strokeStyle = PLAYHEAD_HANDLE_EDGE;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(x - 3, 3, 6, h, 3);
+  ctx.fill();
+  ctx.stroke();
+}
+
+/** 标尺面（两条绘制路径共享的标尺带外观）：渐变底 + 悬停竖线/时间胶囊 +
+ *  刻度 + 素材范围条 + 素材终点标线 + 终点外死区。
+ *  bandX/width/height 为目标画布坐标系；xOffset 把刻度 x 映射到本画布；
+ *  xAt 把时间映射到本画布 x；endX 为素材终点 x（自动收敛到 width 内）。 */
+function drawRulerFace(
+  ctx: CanvasRenderingContext2D,
+  opts: {
+    bandX: number;
+    width: number;
+    height: number;
+    endX: number;
+    xOffset: number;
+    ticks: TickMark[];
+    hoverUs: number | null | undefined;
+    hoverText: string;
+    contentRange: { fromUs: number; toUs: number } | null;
+    xAt: (us: number) => number;
+  },
+) {
+  const { bandX, width, height, xOffset, ticks, hoverUs, hoverText, contentRange, xAt } = opts;
+  const endX = Math.max(bandX, Math.min(width, opts.endX));
+
+  // 带底：纵向微渐变；素材终点外压平为死区，并以竖标线收尾。
+  const grad = ctx.createLinearGradient(0, 0, 0, height);
+  grad.addColorStop(0, RULER_BG_TOP);
+  grad.addColorStop(1, RULER_BG_BOTTOM);
+  ctx.fillStyle = grad;
+  ctx.fillRect(bandX, 0, Math.max(0, endX - bandX), height);
+  if (endX < width) {
+    ctx.fillStyle = RULER_DEAD_BG;
+    ctx.fillRect(endX, 0, width - endX, height);
+    ctx.strokeStyle = RULER_END_EDGE;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(Math.round(endX) + 0.5, 0);
+    ctx.lineTo(Math.round(endX) + 0.5, height);
+    ctx.stroke();
+  }
+
+  // 悬停竖线（带内部分；整高引导线由主画布另绘）。
+  if (hoverUs !== null && hoverUs !== undefined) {
+    const hx = xAt(hoverUs);
+    if (hx >= bandX && hx <= endX) {
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.22)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(hx, 0);
+      ctx.lineTo(hx, height);
+      ctx.stroke();
+    }
+  }
+
+  // 刻度：主刻度贯通、小刻度下半段短线；一律不越过素材终点。
+  ctx.textBaseline = "bottom";
+  ctx.font = RULER_LABEL_FONT;
+  for (const tick of ticks) {
+    const tickX = Math.round(tick.x + xOffset) + 0.5;
+    if (tickX < bandX - 1 || tickX > endX + 1) continue;
+    ctx.strokeStyle = tick.major ? RULER_TICK_MAJOR : RULER_TICK_MINOR;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(tickX, tick.major ? 0 : Math.round(height * 0.45) + 0.5);
+    ctx.lineTo(tickX, height);
+    ctx.stroke();
+  }
+  // 主刻度时间标签（紧贴刻度右侧，后画避免被刻度线压住）。
+  ctx.fillStyle = RULER_LABEL_COLOR;
+  for (const tick of ticks) {
+    if (!tick.major) continue;
+    const tickX = Math.round(tick.x + xOffset) + 0.5;
+    if (tickX < bandX - 1 || tickX > endX + 1) continue;
+    ctx.fillText(tick.label, tickX + 5, height - 2);
+  }
+
+  // 内容范围条：标尺顶 3px 圆角渐变条（素材最左/最右为界，剪映式）。
+  if (contentRange) {
+    const barLeft = Math.max(bandX, xAt(contentRange.fromUs));
+    const barRight = Math.min(endX, xAt(contentRange.toUs));
+    if (barRight - barLeft > 2) {
+      const barGrad = ctx.createLinearGradient(0, 0, 0, 3);
+      barGrad.addColorStop(0, RANGE_BAR_TOP);
+      barGrad.addColorStop(1, RANGE_BAR_BOTTOM);
+      ctx.fillStyle = barGrad;
+      ctx.beginPath();
+      ctx.roundRect(barLeft, 0, barRight - barLeft, 3, 1.5);
+      ctx.fill();
+    }
+  }
+
+  // 悬停时间胶囊（圆角底 + 描边，保证任何刻度上都可读）。
+  if (hoverUs !== null && hoverUs !== undefined) {
+    const hx = xAt(hoverUs);
+    if (hx >= bandX && hx <= endX) {
+      ctx.font = "10px Consolas, monospace";
+      const chipW = ctx.measureText(hoverText).width + 10;
+      const chipH = Math.min(14, Math.max(10, height - 2));
+      const cx = hx > width - chipW - 10 ? hx - chipW - 4 : hx + 4;
+      const cy = Math.max(1, height - chipH - 1);
+      ctx.fillStyle = HOVER_CHIP_BG;
+      ctx.strokeStyle = HOVER_CHIP_EDGE;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(cx, cy, chipW, chipH, 4);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = HOVER_CHIP_TEXT;
+      ctx.textBaseline = "middle";
+      ctx.textAlign = "left";
+      ctx.fillText(hoverText, cx + 5, cy + chipH / 2 + 0.5);
+      ctx.textAlign = "left";
+    }
+  }
+}
+
 /** Bottom scrollbar strip: track + thumb proportional to visible content. */
 function drawScrollbar(
   ctx: CanvasRenderingContext2D,
@@ -626,9 +791,29 @@ function drawTimeline(
   ctx.fillStyle = "#14141f";
   ctx.fillRect(0, 0, width, height);
 
-  // Ruler background
-  ctx.fillStyle = "#16213e";
-  ctx.fillRect(view.headerWidth, 0, width - view.headerWidth, view.rulerHeight);
+  // 素材终点（多条片段取最靠后的结束点）：标尺/行背景/网格一律到此为止，
+  // 终点之外是死区——时间线不会超过素材长度。空时间线不设终点（整宽标尺）。
+  const contentEndX = clipRects.length > 0 ? timeToX(totalUs, view) : width;
+
+  // 标尺面：渐变底 + 刻度 + 素材范围条 + 终点标线/死区 + 悬停时间胶囊。
+  drawRulerFace(ctx, {
+    bandX: view.headerWidth,
+    width,
+    height: view.rulerHeight,
+    endX: contentEndX,
+    xOffset: 0,
+    ticks,
+    hoverUs: rulerHoverUs,
+    hoverText: rulerHoverUs !== null && rulerHoverUs !== undefined ? formatTime(rulerHoverUs) : "",
+    contentRange:
+      clipRects.length > 0
+        ? {
+            fromUs: Math.min(...clipRects.map((r) => r.clip.timeline_start_us)),
+            toUs: Math.max(...clipRects.map((r) => r.clip.timeline_end_us)),
+          }
+        : null,
+    xAt: (us) => timeToX(us, view),
+  });
 
   // Track backgrounds（按轨道类型着色：主视频轨更亮、音频轨偏蓝、文本轨偏暖）。
   for (const row of trackRows) {
@@ -641,70 +826,31 @@ function drawTimeline(
             ? "#191a2c"
             : "#171728";
     ctx.fillStyle = fill;
-    ctx.fillRect(view.headerWidth, row.y, width - view.headerWidth, row.height);
+    ctx.fillRect(view.headerWidth, row.y, Math.max(0, contentEndX - view.headerWidth), row.height);
   }
 
-  // Grid lines between tracks
+  // Grid lines between tracks（同样截断在素材终点）。
   ctx.strokeStyle = "#2a2a4a";
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(view.headerWidth, view.rulerHeight);
-  ctx.lineTo(width, view.rulerHeight);
+  ctx.lineTo(contentEndX, view.rulerHeight);
   for (const row of trackRows) {
     ctx.moveTo(view.headerWidth, row.y + row.height);
-    ctx.lineTo(width, row.y + row.height);
+    ctx.lineTo(contentEndX, row.y + row.height);
   }
   ctx.stroke();
 
-  // Ruler hover guide (Round 5): faint full-height line + time label.
+  // Ruler hover guide (Round 5)：标尺带下方的整高淡引导线（时间胶囊在标尺面内）。
   if (rulerHoverUs !== null && rulerHoverUs !== undefined) {
     const hx = timeToX(rulerHoverUs, view);
-    if (hx >= view.headerWidth && hx <= width) {
+    if (hx >= view.headerWidth && hx <= Math.min(width, contentEndX)) {
       ctx.strokeStyle = "rgba(255, 255, 255, 0.18)";
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(hx, view.rulerHeight);
       ctx.lineTo(hx, height);
       ctx.stroke();
-      ctx.fillStyle = "#9fb3bd";
-      ctx.font = "10px monospace";
-      ctx.textBaseline = "bottom";
-      ctx.textAlign = hx > width - 70 ? "right" : "left";
-      ctx.fillText(formatTime(rulerHoverUs), hx + (hx > width - 70 ? -4 : 4), view.rulerHeight - 2);
-      ctx.textAlign = "left";
-    }
-  }
-
-  // Ticks（剪映式 1:1）：主刻度从标尺顶贯通到底（带 "|时间" 标签），小刻度
-  // 只有下半段短线——长短分明；数字 10px 无衬线浅灰。
-  ctx.textBaseline = "bottom";
-  ctx.font = "10px sans-serif";
-  for (const tick of ticks) {
-    const tickX = Math.round(tick.x) + 0.5;
-    if (tickX < view.headerWidth - 1 || tickX > width + 1) continue;
-    ctx.strokeStyle = tick.major ? "#8a97a0" : "#5a666e";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(tickX, tick.major ? 0 : Math.round(view.rulerHeight * 0.45) + 0.5);
-    ctx.lineTo(tickX, view.rulerHeight);
-    ctx.stroke();
-    if (tick.major) {
-      ctx.fillStyle = "#c8d2d8";
-      ctx.fillText(`|${tick.label}`, tickX + 2, view.rulerHeight - 2);
-    }
-  }
-  // 内容范围线：标尺顶部一条 2px 横线（rgb(6,78,117)），以素材最左/最右片段
-  // 为边界（不从 0 开始），直观显示素材覆盖的时间范围（剪映式）。
-  if (clipRects.length > 0) {
-    const contentStartUs = Math.min(...clipRects.map((r) => r.clip.timeline_start_us));
-    const contentEndUs = Math.max(...clipRects.map((r) => r.clip.timeline_end_us));
-    const contentLeft = timeToX(contentStartUs, view);
-    const contentRight = timeToX(contentEndUs, view);
-    const barLeft = Math.max(view.headerWidth, contentLeft);
-    const barRight = Math.min(width, contentRight);
-    if (barRight > barLeft) {
-      ctx.fillStyle = "rgb(6, 78, 117)";
-      ctx.fillRect(barLeft, 0, barRight - barLeft, 2);
     }
   }
 
@@ -798,25 +944,45 @@ function drawTimeline(
     ctx.fillStyle = palette.body;
     ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
 
-    // 2) 缩略图带（视频/图片）：帧按原始宽高比平铺、铺满不留边缝、不拉伸；
-    //    缩放时档位变化重抽新帧——旧帧经 ":any:" 别名兜底，画面不消失。
+    // 2) 缩略图带（视频/图片）：所见即所得——片段【时间线】时长均匀切格
+    //    （格宽≈56px 档位），每格 seek 该格中心的源时刻，绘制按格位精确落位
+    //    并等比 cover 裁切（不拉伸、不留缝）。播放头压在哪一格，看到的就是
+    //    那一刻的内容；片段放得越大格越小、对位越准。缩放换档后旧帧经
+    //    ":any:" 别名兜底，新档位帧到达即逐格替换。
     if (thumbnailCache && isVisualClip && rect.width > 10) {
-      const frameCount = quantizeFrameCount(Math.round(rect.width / 56));
-      const clipRight = rect.x + rect.width;
-      let cursorX = rect.x;
-      for (let fi = 0; fi < frameCount && cursorX < clipRight; fi++) {
-        const frame =
-          thumbnailCache.get(`${rect.clip.clip_id}:${frameCount}:${fi}`) ??
-          thumbnailCache.get(`${rect.clip.clip_id}:any:${fi}`);
-        const tileW = frame && frame.height > 0
-          ? Math.max(4, bodyH * (frame.width / frame.height))
-          : Math.max(4, bodyH);
-        if (frame) {
+      const clipDurUs = rect.clip.timeline_end_us - rect.clip.timeline_start_us;
+      if (clipDurUs > 0) {
+        const frameCount = quantizeFrameCount(Math.round(((clipDurUs / 1_000_000) * view.pixelsPerSecond) / 56));
+        const clipRight = rect.x + rect.width;
+        // 帧只画在名称条以下的体内；cover 的垂直溢出由该矩形裁掉。
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(rect.x, bodyTop, rect.width, bodyH);
+        ctx.clip();
+        for (let fi = 0; fi < frameCount; fi++) {
+          const cellFromUs = rect.clip.timeline_start_us + (fi * clipDurUs) / frameCount;
+          const cellToUs = rect.clip.timeline_start_us + ((fi + 1) * clipDurUs) / frameCount;
+          const cellX = timeToX(cellFromUs, view);
+          if (cellX >= clipRight) break;
+          const cellW = Math.max(1, timeToX(cellToUs, view) - cellX);
+          const frame =
+            thumbnailCache.get(`${rect.clip.clip_id}:${frameCount}:${fi}`) ??
+            thumbnailCache.get(`${rect.clip.clip_id}:any:${fi}`);
+          if (!frame || frame.height <= 0 || frame.width <= 0) continue; // 未抽好，到达后补上
+          const scale = Math.max(cellW / frame.width, bodyH / frame.height);
+          const drawW = frame.width * scale;
+          const drawH = frame.height * scale;
           try {
-            ctx.drawImage(frame, cursorX, bodyTop, tileW, bodyH);
+            ctx.drawImage(
+              frame,
+              cellX - (drawW - cellW) / 2,
+              bodyTop - (drawH - bodyH) / 2,
+              drawW,
+              drawH,
+            );
           } catch { /* ignore draw errors */ }
         }
-        cursorX += tileW;
+        ctx.restore();
       }
     }
 
@@ -1420,8 +1586,8 @@ function drawTimeline(
     ctx.setLineDash([]);
   }
 
-  // Playhead（剪映式：全高白色细线 + 顶部圆角手柄）
-  const playheadX = timeToX(playheadUs, view);
+  // Playhead（剪映式：全高白色细线 + 顶部圆角手柄）；显示位置钳制在素材终点内。
+  const playheadX = timeToX(clipRects.length > 0 ? Math.min(playheadUs, totalUs) : playheadUs, view);
   if (playheadX >= view.headerWidth - 3 && playheadX <= width + 3) {
     ctx.strokeStyle = "#f2f5f8";
     ctx.lineWidth = 1.5;
@@ -1431,16 +1597,86 @@ function drawTimeline(
     ctx.stroke();
 
     // 顶部手柄：圆角竖条（可拖拽区域由标尺与空白区命中共同提供）。
-    ctx.fillStyle = "#f2f5f8";
-    ctx.beginPath();
-    ctx.roundRect(playheadX - 3, 3, 6, 18, 3);
-    ctx.fill();
+    drawPlayheadHandle(ctx, playheadX, view.rulerHeight);
   }
 
   // Bottom scrollbar strip (Round 4)：绘制在可视区底部（而非画布内容底部），
   // 内容高于面板时滚动条始终可见、可拖。
   const viewportBottom = Math.min(height, viewportHeight ?? height);
   drawScrollbar(ctx, width, viewportBottom, view, totalUs);
+}
+
+/** 固定标尺条带：多轨道纵向滚动时钉在可视区顶部，轨道内容从其下方滚过。
+ *  绘制内容与 drawTimeline 的标尺带一致（角区 + 底色 + 刻度 + 内容范围条 +
+ *  播放头 + 悬停时间标签），由独立覆盖层 Canvas 调用。 */
+function drawRulerStrip(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  view: TimelineViewState,
+  ticks: TickMark[],
+  rulerHoverUs: number | null | undefined,
+  playheadUs: number,
+  clipRects: ClipRenderRect[],
+) {
+  const dpr = window.devicePixelRatio || 1;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+  // 三段几何：[0, headW) 角区（轨道头列上方）· [headW, rulerX) 封面条带（主画布
+  // 在头列右侧同样留了 headW 宽的死区条带）· [rulerX, width) 标尺/片段区。
+  // 注意 tick.x / timeToX 均已含 headerWidth（画布内坐标，内容自 x=headW 起），
+  // 而覆盖层横跨整个 .timeline-body（主画布在头列右侧 headW 处开始），
+  // 因此屏幕对齐 = tick.x + headW，刻度 0 落在 rulerX = 2*headW = 片段区起点。
+  const headW = view.headerWidth;
+  const stripW = headW;
+  const rulerX = headW + stripW;
+  ctx.fillStyle = "#12181c";
+  ctx.fillRect(0, 0, headW, height);
+  ctx.fillStyle = "#14141f";
+  ctx.fillRect(headW, 0, stripW, height);
+  ctx.strokeStyle = "#2a2a4a";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(rulerX - 0.5, 0);
+  ctx.lineTo(rulerX - 0.5, height);
+  ctx.moveTo(0, height - 0.5);
+  ctx.lineTo(width, height - 0.5);
+  ctx.stroke();
+
+  // 标尺面（与主绘制完全同源）：渐变底 + 刻度 + 素材范围条 + 终点标线/死区 +
+  // 悬停时间胶囊。终点外同样压平——固定标尺不会长过素材。
+  const totalEndUs =
+    clipRects.length > 0 ? Math.max(...clipRects.map((r) => r.clip.timeline_end_us)) : null;
+  drawRulerFace(ctx, {
+    bandX: rulerX,
+    width,
+    height,
+    endX: totalEndUs !== null ? timeToX(totalEndUs, view) + headW : width,
+    xOffset: headW,
+    ticks,
+    hoverUs: rulerHoverUs,
+    hoverText: rulerHoverUs !== null && rulerHoverUs !== undefined ? formatTime(rulerHoverUs) : "",
+    contentRange:
+      clipRects.length > 0
+        ? {
+            fromUs: Math.min(...clipRects.map((r) => r.clip.timeline_start_us)),
+            toUs: totalEndUs as number,
+          }
+        : null,
+    xAt: (us) => timeToX(us, view) + headW,
+  });
+
+  // 播放头（条带内线段 + 圆角手柄，同主绘制）；显示位置钳制在素材终点内。
+  const playheadX = timeToX(totalEndUs !== null ? Math.min(playheadUs, totalEndUs) : playheadUs, view) + headW;
+  if (playheadX >= rulerX - 3 && playheadX <= width + 3) {
+    ctx.strokeStyle = "#f2f5f8";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(playheadX, 0);
+    ctx.lineTo(playheadX, height);
+    ctx.stroke();
+    drawPlayheadHandle(ctx, playheadX, height);
+  }
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
@@ -1459,6 +1695,8 @@ export function TimelinePanel({
   playheadUs,
   onSeek,
   onCommand,
+  coverUrl,
+  onCaptureCover,
 }: {
   document?: TimelineDocument;
   selection: TimelineSelection;
@@ -1475,6 +1713,10 @@ export function TimelinePanel({
   onSeek?: (timeUs: number) => void;
   /** Optional editor command runner (copy/paste context-menu actions). */
   onCommand?: (id: EditorCommand["id"]) => void;
+  /** 项目封面（本地截帧持久化），有值时封面入口显示缩略图。 */
+  coverUrl?: string | null;
+  /** 截取当前播放头画面设为项目封面（由 App 层从预览画布取帧）。 */
+  onCaptureCover?: () => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1628,14 +1870,13 @@ export function TimelinePanel({
       const clipIds = new Set(clips.map((clip) => clip.clip_id));
       for (const rect of clipRects) {
         const mediaUrl = assetMedia.find((m) => m.asset_id === rect.clip.asset_id)?.media_url ?? null;
-        const frames = computeFrameRequests(
-          mediaUrl,
-          rect.clip.asset_kind,
-          rect.clip.source_start_us ?? 0,
-          rect.clip.source_end_us ?? 0,
-          view.pixelsPerSecond,
-        );
+        const frames = computeFrameRequests(mediaUrl, rect.clip, view.pixelsPerSecond);
         for (let fi = 0; fi < frames.length; fi++) {
+          // 可视区优先：只抽当前视口（±160px 余量）覆盖的格；平移/缩放后
+          // effect 重跑，新进入视野的格按需补抽——seek 负载不随片段总长膨胀。
+          const cellLeft = timeToX(frames[fi].fromUs, view);
+          const cellRight = timeToX(frames[fi].toUs, view);
+          if (cellRight < -160 || cellLeft > canvasSize.width + 160) continue;
           // 键含档位帧数：档位变化 → 重新抽帧（时间点不同）；旧帧保留兜底。
           const key = `${rect.clip.clip_id}:${frames.length}:${fi}`;
           if (cache.has(key) || pendingImageKeys.current.has(`${key}:img`)) continue;
@@ -1735,7 +1976,7 @@ export function TimelinePanel({
     if (!canvas) return;
     const dpr = window.devicePixelRatio || 1;
     // 画布始终按内容实际高度伸展（不随面板拖拽压缩轨道）；
-    // 面板高度不足时由 .timeline-body 的 overflow-y 滚动查看。
+    // 面板高度不足时由 .timeline-scroll 的 overflow-y 滚动查看。
     const canvasHeight = contentHeight;
     canvas.width = canvasSize.width * dpr;
     canvas.height = canvasHeight * dpr;
@@ -1769,6 +2010,52 @@ export function TimelinePanel({
       canvasSize.height,
     );
   }, [canvasSize, view, trackRows, tracks.length, contentHeight, clipRects, captionRects, captions, ticks, playheadUs, selection, interaction, hover, totalUs, thumbnailVersion, waveformVersion, rulerHoverUs, clipNames, frameRate, pendingKeep]);
+
+  // 固定标尺条带：绘制到覆盖层 Canvas（随纵向滚动钉在可视区顶部）。
+  const rulerCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const rulerScrubbingRef = useRef(false);
+  useEffect(() => {
+    const canvas = rulerCanvasRef.current;
+    if (!canvas) return;
+    const dpr = window.devicePixelRatio || 1;
+    const width = view.headerWidth * 2 + canvasSize.width;
+    canvas.width = width * dpr;
+    canvas.height = view.rulerHeight * dpr;
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${view.rulerHeight}px`;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    drawRulerStrip(ctx, width, view.rulerHeight, view, ticks, rulerHoverUs, playheadUs, clipRects);
+  }, [view, canvasSize, ticks, rulerHoverUs, playheadUs, clipRects]);
+
+  // 纵向滚动时把覆盖层钉在滚动容器可视区顶部（直接写样式，避免重渲染）。
+  const rulerPinTimeAt = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return xToTime(event.clientX - rect.left - view.headerWidth, view);
+  };
+  // 标尺寻址不越过素材终点（标尺本身也画到终点为止）。
+  const clampRulerTime = (us: number) => (totalUs > 0 ? Math.min(us, totalUs) : us);
+  const handleRulerPinMove = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    const timeUs = clampRulerTime(rulerPinTimeAt(event));
+    setRulerHoverUs(timeUs);
+    if (rulerScrubbingRef.current) onSeek?.(timeUs);
+  };
+  const handleRulerPinDown = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    if (event.button !== 0) return;
+    rulerScrubbingRef.current = true;
+    event.currentTarget.style.cursor = "col-resize";
+    onSeek?.(clampRulerTime(rulerPinTimeAt(event)));
+  };
+  const handleRulerPinUp = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    rulerScrubbingRef.current = false;
+    event.currentTarget.style.cursor = "default";
+  };
+  const handleRulerPinLeave = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    rulerScrubbingRef.current = false;
+    event.currentTarget.style.cursor = "default";
+    setRulerHoverUs(null);
+  };
+  const handleRulerPinDoubleClick = () => fitToContent();
 
   // 滚轮策略：Ctrl+滚轮 = 以光标为锚缩放；Shift/触摸板横向 = 横向平移；
   // 普通滚轮 = 滚动时间线区域（内容纵向溢出时交给原生滚动，否则横向平移）。
@@ -1937,9 +2224,9 @@ export function TimelinePanel({
         return;
       }
 
-      // Ruler area → playhead drag
+      // Ruler area → playhead drag（寻址钳制在素材终点内）
       if (y <= view.rulerHeight) {
-        const timeUs = xToTime(x, view);
+        const timeUs = clampRulerTime(xToTime(x, view));
         onSeek?.(timeUs);
         const next: TimelineInteraction = { kind: "playhead", startX: x };
         interactionRef.current = next;
@@ -2124,7 +2411,7 @@ export function TimelinePanel({
       // Shift + 拖拽保留框选。
       if (!event.shiftKey) {
         setSelection(null);
-        const timeUs = xToTime(x, view);
+        const timeUs = clampRulerTime(xToTime(x, view));
         onSeek?.(timeUs);
         const scrub: TimelineInteraction = { kind: "playhead", startX: x };
         interactionRef.current = scrub;
@@ -2161,7 +2448,7 @@ export function TimelinePanel({
         lastPointerRef.current = { x, y };
         const pps = view.pixelsPerSecond;
         if (active.kind === "playhead") {
-          onSeek?.(xToTime(x, view));
+          onSeek?.(clampRulerTime(xToTime(x, view)));
           canvas.style.cursor = "col-resize";
           return;
         }
@@ -2368,7 +2655,7 @@ export function TimelinePanel({
         prev.clipId === nextHover.clipId && prev.edge === nextHover.edge ? prev : nextHover,
       );
       setRulerHoverUs((prev) => {
-        const next = y <= view.rulerHeight ? xToTime(x, view) : null;
+        const next = y <= view.rulerHeight ? clampRulerTime(xToTime(x, view)) : null;
         return prev === next ? prev : next;
       });
       if (handle) {
@@ -2557,9 +2844,10 @@ export function TimelinePanel({
           const ids = clipsInRect(rect, contentClipRects);
           setSelection(ids.length > 0 ? { kind: "clips", ids } : null);
         } else {
-          // Plain click on empty area → move the playhead there (Round 4).
+          // Plain click on empty area → move the playhead there (Round 4)，
+          // 寻址同样钳制在素材终点内。
           const viewportX = active.currentX - view.scrollX;
-          onSeek?.(xToTime(viewportX, view));
+          onSeek?.(clampRulerTime(xToTime(viewportX, view)));
           if (!shiftClickRef.current) setSelection(null);
         }
       }
@@ -3056,8 +3344,10 @@ export function TimelinePanel({
         </div>
       </div>
 
-      {/* Body: left headers (DOM) + canvas area */}
+      {/* Body: 冻结标尺（滚动区外，零抖动）+ 滚动区（轨道头列/封面条带/片段区）。
+          标尺画布绝对定位覆盖滚动视口顶部（见 .timeline-ruler-pin），主画布仍是第一个 canvas。 */}
       <div className="timeline-body">
+        <div className="timeline-scroll">
         {/* Left gutter (DOM)：每条轨道一个属性头
             [类型标识] [锁定] [隐藏(视频/文本)] [静音(视频/音频)] [独奏(视频/音频)] */}
         <div className="timeline-left" style={{ width: view.headerWidth, height: contentHeight, position: "relative" }}>
@@ -3194,6 +3484,17 @@ export function TimelinePanel({
             onDragEnd={() => setDropIndex(null)}
             style={{ display: "block", cursor: "default", outline: "none" }}
           />
+          {/* 主轨封面入口（剪映式）：仅主轨一处，位于轨道头列与片段区之间的竖条；
+              点击截取当前播放头画面设为项目封面。 */}
+          <button
+            className="timeline-cover-entry"
+            style={{ top: view.rulerHeight + 2, height: view.trackHeight - 4, width: view.headerWidth - 8 }}
+            title={coverUrl ? "点击更换项目封面（截取当前播放头画面）" : "截取当前播放头画面设为项目封面"}
+            onClick={() => onCaptureCover?.()}
+          >
+            {coverUrl ? <img src={coverUrl} alt="" /> : <ImagePlus size={13} />}
+            <span>封面</span>
+          </button>
           {/* Accessible clip list (DOM): mirrors selection so keyboard /
               screen-reader users and tests can select clips. */}
           <div
@@ -3511,6 +3812,19 @@ export function TimelinePanel({
             </div>
           </div>
         )}
+        </div>
+        {/* 固定标尺条带：.timeline-body 直属（滚动区外，Excel 冻结表头式，零抖动）；
+            绝对定位覆盖滚动视口顶部 rulerHeight 像素——主画布自带的标尺带正好被
+            盖住，纵向滚动时轨道从固定标尺下穿过。 */}
+        <canvas
+          ref={rulerCanvasRef}
+          className="timeline-ruler-pin"
+          onMouseMove={handleRulerPinMove}
+          onMouseDown={handleRulerPinDown}
+          onMouseUp={handleRulerPinUp}
+          onMouseLeave={handleRulerPinLeave}
+          onDoubleClick={handleRulerPinDoubleClick}
+        />
       </div>
     </section>
   );

@@ -12,6 +12,17 @@ export type ShortcutCommandId =
   | "preview.generate"
   | "export.open"
   | "ai.open"
+  | "ai.revise"
+  | "project.manage"
+  | "project.refresh"
+  | "timeline.create"
+  | "ui.resetLayout"
+  | "ui.shortcuts"
+  | "tools.compare"
+  | "tools.shots"
+  | "tools.verify"
+  | "tools.imageGen"
+  | "help.manual"
   | "command.search";
 
 /** 单个键位的规范化表示：主键 + 修饰符集合。 */
@@ -19,6 +30,7 @@ export interface ShortcutBinding {
   key: string;
   ctrl: boolean;
   shift: boolean;
+  alt?: boolean;
 }
 
 export interface ShortcutEntry {
@@ -28,7 +40,7 @@ export interface ShortcutEntry {
 
 const STORAGE_KEY = "vortex-cut.shortcuts.v1";
 
-/** 路线图 §C3 默认键位。 */
+/** 路线图 §C3 默认键位 + 主菜单快捷键（与 docs/ui-mockups/titlebar-library-unify.html 绑定表一致）。 */
 export const DEFAULT_SHORTCUTS: Record<ShortcutCommandId, ShortcutEntry> = {
   "timeline.split": { label: "拆分所选片段", binding: { key: "b", ctrl: true, shift: false } },
   "timeline.delete": { label: "删除所选对象", binding: { key: "delete", ctrl: false, shift: false } },
@@ -38,9 +50,20 @@ export const DEFAULT_SHORTCUTS: Record<ShortcutCommandId, ShortcutEntry> = {
   "timeline.undo": { label: "撤销", binding: { key: "z", ctrl: true, shift: false } },
   "timeline.redo": { label: "重做", binding: { key: "y", ctrl: true, shift: false } },
   "play.pause": { label: "播放/暂停", binding: { key: " ", ctrl: false, shift: false } },
-  "preview.generate": { label: "生成权威预览", binding: { key: "enter", ctrl: true, shift: false } },
-  "export.open": { label: "打开渲染与导出", binding: { key: "e", ctrl: true, shift: false } },
-  "ai.open": { label: "打开 AI 粗剪", binding: { key: "i", ctrl: true, shift: false } },
+  "preview.generate": { label: "生成预览", binding: { key: "enter", ctrl: true, shift: false } },
+  "export.open": { label: "导出", binding: { key: "e", ctrl: true, shift: false } },
+  "ai.open": { label: "AI 粗剪", binding: { key: "i", ctrl: true, shift: false } },
+  "ai.revise": { label: "AI 修改", binding: { key: "i", ctrl: true, shift: true } },
+  "project.manage": { label: "项目管理", binding: { key: "p", ctrl: true, shift: false, alt: true } },
+  "project.refresh": { label: "刷新项目", binding: { key: "f5", ctrl: false, shift: false } },
+  "timeline.create": { label: "创建空时间线", binding: { key: "n", ctrl: true, shift: false } },
+  "ui.resetLayout": { label: "恢复默认布局", binding: { key: "l", ctrl: true, shift: false, alt: true } },
+  "ui.shortcuts": { label: "快捷键设置", binding: { key: "k", ctrl: true, shift: false, alt: true } },
+  "tools.compare": { label: "版本比较", binding: { key: "v", ctrl: true, shift: false, alt: true } },
+  "tools.shots": { label: "镜头需求", binding: { key: "s", ctrl: true, shift: false, alt: true } },
+  "tools.verify": { label: "生成验证（模拟）", binding: { key: "g", ctrl: true, shift: false, alt: true } },
+  "tools.imageGen": { label: "真实图片生成", binding: { key: "i", ctrl: true, shift: false, alt: true } },
+  "help.manual": { label: "用户使用手册", binding: { key: "f1", ctrl: false, shift: false } },
   "command.search": { label: "命令搜索", binding: { key: "k", ctrl: true, shift: false } },
 };
 
@@ -56,7 +79,7 @@ export function loadShortcuts(): Record<ShortcutCommandId, ShortcutEntry> {
     for (const id of MUTABLE_IDS) {
       const binding = saved[id];
       if (binding && typeof binding.key === "string" && binding.key.length > 0) {
-        merged[id].binding = { key: binding.key.toLowerCase(), ctrl: Boolean(binding.ctrl), shift: Boolean(binding.shift) };
+        merged[id].binding = { key: binding.key.toLowerCase(), ctrl: Boolean(binding.ctrl), shift: Boolean(binding.shift), alt: Boolean(binding.alt) };
       }
     }
     return merged;
@@ -89,6 +112,7 @@ export function matchesBinding(event: KeyboardEvent, binding: ShortcutBinding): 
   if (binding.ctrl && !ctrl) return false;
   if (!binding.ctrl && ctrl) return false;
   if (binding.shift !== event.shiftKey) return false;
+  if (Boolean(binding.alt) !== event.altKey) return false;
   return eventKey(event) === binding.key;
 }
 
@@ -97,6 +121,7 @@ export function bindingLabel(binding: ShortcutBinding): string {
   const parts: string[] = [];
   if (binding.ctrl) parts.push("Ctrl");
   if (binding.shift) parts.push("Shift");
+  if (binding.alt) parts.push("Alt");
   const key = binding.key;
   parts.push(key === " " ? "空格" : key === "delete" ? "Delete" : key.toUpperCase());
   return parts.join("+");
@@ -110,7 +135,7 @@ export function normalizeRecordedBinding(event: KeyboardEvent): ShortcutBinding 
   const ctrl = event.ctrlKey || event.metaKey;
   // 无修饰符的单字符键保留给文本输入；仅允许空格/Delete/功能键裸按。
   if (!ctrl && key !== " " && key !== "delete") return null;
-  return { key, ctrl, shift: event.shiftKey };
+  return { key, ctrl, shift: event.shiftKey, alt: event.altKey };
 }
 
 /** 检查新绑定是否与其他命令冲突，返回被占用的命令 id。 */
@@ -118,7 +143,7 @@ export function findConflict(shortcuts: Record<ShortcutCommandId, ShortcutEntry>
   for (const other of MUTABLE_IDS) {
     if (other === id) continue;
     const otherBinding = shortcuts[other].binding;
-    if (otherBinding.key === binding.key && otherBinding.ctrl === binding.ctrl && otherBinding.shift === binding.shift) {
+    if (otherBinding.key === binding.key && otherBinding.ctrl === binding.ctrl && otherBinding.shift === binding.shift && Boolean(otherBinding.alt) === Boolean(binding.alt)) {
       return other;
     }
   }

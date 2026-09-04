@@ -82,11 +82,6 @@ export interface RenditionReframePreviewPresentation { preview: RenditionReframe
 
 export interface DesktopApi {
   getRuntime: () => Promise<DesktopRuntime>;
-  minimizeWindow?: () => Promise<void>;
-  toggleMaximizeWindow?: () => Promise<boolean>;
-  closeWindow?: () => Promise<void>;
-  isWindowMaximized?: () => Promise<boolean>;
-  onWindowMaximizeChange?: (listener: (maximized: boolean) => void) => () => void;
   chooseMedia: () => Promise<MediaSelection | null>;
   probeMedia: (grantId: GrantId) => Promise<MediaInfo>;
   listProjects: (params?: { status?: ProjectStatus; limit?: number; cursor?: string }) => Promise<ProjectPage>;
@@ -101,6 +96,8 @@ export interface DesktopApi {
   relocateAsset: (input: { asset_id: string }) => Promise<ImportedAsset | null>;
   /** 删除素材；remove_timeline_clips=true 时级联删除时间线相关片段，返回清理计数。 */
   deleteAsset: (input: { asset_id: string; remove_timeline_clips?: boolean }) => Promise<{ removed_clips: number; removed_captions: number }>;
+  /** 打开素材所在文件夹；文件缺失时弹框提供 重新定位 / 移除 恢复路径。 */
+  revealAsset: (assetId: string) => Promise<{ status: "opened" | "relocated" | "deleted" | "cancelled" }>;
   /** 弹出字幕文件选择框（SRT/ASS/SSA/LRC），返回文本内容；取消返回 null。 */
   importSubtitle: () => Promise<{ file_name: string; content: string } | null>;
   listJobs: (input: { project_id: ProjectId; status?: Job["status"]; limit?: number; cursor?: string }) => Promise<JobPage>;
@@ -218,15 +215,6 @@ export interface DesktopApi {
 
 const api: DesktopApi = {
   getRuntime: () => ipcRenderer.invoke("runtime:get"),
-  minimizeWindow: () => ipcRenderer.invoke("window:minimize"),
-  toggleMaximizeWindow: () => ipcRenderer.invoke("window:toggle-maximize"),
-  closeWindow: () => ipcRenderer.invoke("window:close"),
-  isWindowMaximized: () => ipcRenderer.invoke("window:is-maximized"),
-  onWindowMaximizeChange: listener => {
-    const handler = (_event: Electron.IpcRendererEvent, maximized: boolean) => listener(maximized);
-    ipcRenderer.on("window:maximize-changed", handler);
-    return () => ipcRenderer.removeListener("window:maximize-changed", handler);
-  },
   chooseMedia: () => ipcRenderer.invoke("media:choose"),
   probeMedia: grantId => ipcRenderer.invoke("media:probe", grantId),
   listProjects: params => ipcRenderer.invoke("project:list", params),
@@ -240,6 +228,7 @@ const api: DesktopApi = {
   refreshAsset: assetId => ipcRenderer.invoke("asset:refresh", assetId),
   relocateAsset: input => ipcRenderer.invoke("asset:relocate", input),
   deleteAsset: input => ipcRenderer.invoke("asset:delete", input),
+  revealAsset: assetId => ipcRenderer.invoke("asset:reveal", assetId),
   importSubtitle: () => ipcRenderer.invoke("subtitle:import"),
   listJobs: input => ipcRenderer.invoke("job:list", input),
   createJob: input => ipcRenderer.invoke("job:create", input),

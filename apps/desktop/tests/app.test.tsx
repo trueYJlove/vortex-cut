@@ -50,7 +50,7 @@ function desktopApi(options: { timeline?: TimelineState | null; models?: ModelDe
   return {
     getRuntime: vi.fn().mockResolvedValue({ protocol_version: 1, status: "ready" }), chooseMedia: vi.fn(), probeMedia: vi.fn(),
     listProjects: vi.fn().mockResolvedValue({ items: [project], next_cursor: null }), createProject: vi.fn().mockResolvedValue({ ...project, project_id: "project_2", name: "新项目" }), getProject: vi.fn().mockResolvedValue(project), renameProject: vi.fn().mockResolvedValue({ ...project, name: "已重命名" }), archiveProject: vi.fn().mockResolvedValue({ ...project, status: "archived" }), reopenProject: vi.fn().mockResolvedValue(project),
-    listAssets: vi.fn().mockResolvedValue({ items: [{ asset: video, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGH" }, { asset: image, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGHI" }], next_cursor: null }), importAsset: vi.fn().mockImplementation(async ({ kind }: { kind?: string }) => ({ grant: {}, asset: { ...image, asset_id: `import_${kind}` as never, kind: kind ?? "video", display_name: `import-${kind}` }, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGHI" })), refreshAsset: vi.fn().mockImplementation(async (assetId: string) => ({ asset: assetId === image.asset_id ? image : video, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGH" })), relocateAsset: vi.fn().mockResolvedValue({ grant: {}, asset: video, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGH" }), importSubtitle: vi.fn().mockResolvedValue(null), deleteAsset: vi.fn().mockResolvedValue({ removed_clips: 1, removed_captions: 0 }),
+    listAssets: vi.fn().mockResolvedValue({ items: [{ asset: video, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGH" }, { asset: image, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGHI" }], next_cursor: null }), importAsset: vi.fn().mockImplementation(async ({ kind }: { kind?: string }) => ({ grant: {}, asset: { ...image, asset_id: `import_${kind}` as never, kind: kind ?? "video", display_name: `import-${kind}` }, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGHI" })), refreshAsset: vi.fn().mockImplementation(async (assetId: string) => ({ asset: assetId === image.asset_id ? image : video, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGH" })), relocateAsset: vi.fn().mockResolvedValue({ grant: {}, asset: video, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGH" }), importSubtitle: vi.fn().mockResolvedValue(null), deleteAsset: vi.fn().mockResolvedValue({ removed_clips: 1, removed_captions: 0 }), revealAsset: vi.fn().mockResolvedValue({ status: "opened" }),
     listJobs: vi.fn().mockResolvedValue({ items: options.jobs ?? [], next_cursor: null }), createJob: vi.fn(), getJob: vi.fn(), cancelJob: vi.fn().mockImplementation(async (jobId: string) => ({ ...createdJob, job_id: jobId, status: "cancelled" })), listModels: vi.fn().mockResolvedValue({ items: options.models ?? [], next_cursor: null }), getModel: vi.fn().mockResolvedValue(model), downloadModel: vi.fn().mockResolvedValue({ model: { ...model, status: "queued" }, job: downloadJob }), getModelDownload: vi.fn(), cancelModelDownload: vi.fn().mockResolvedValue({ model: { ...model, status: "cancelled" }, job: { ...downloadJob, status: "cancelled" } }), createTranscription: vi.fn().mockImplementation(async () => ({ job: { ...createdJob, job_id: `job_created_${++transcriptionSequence}` as never }, transcript: null })),
     listTranscripts: vi.fn().mockResolvedValue({ items: [{ ...transcript, segments: undefined, words: undefined }], next_cursor: null }), getTranscript: vi.fn().mockResolvedValue(transcript),
     getBrief: vi.fn().mockRejectedValue(new Error("BRIEF_NOT_FOUND")), putBrief: vi.fn().mockResolvedValue({}), listRecipes: vi.fn().mockResolvedValue({ items: [{ schema_version: 1, recipe_id: "balanced-narrative-v1", name: "Balanced", summary: "测试", rules: { selection: "keyword", pace: "balanced", max_gap_us: 1 }, document_sha256: `sha256:${"a".repeat(64)}` }] }), listProviders: vi.fn().mockResolvedValue({ items: [{ provider_config_id: "provider_1", kind: "openai_compatible_text", display_name: "测试 Provider", base_url: "https://provider.test", model: "model", enabled: true, credential_status: "configured", input_price_per_million: null, output_price_per_million: null, timeline_patch_capability_status: "supported", timeline_patch_response_adapter_id: "openai_chat_completions_json_schema_v1", timeline_patch_probe_protocol_version: "1", timeline_patch_capability_tested_at: now, timeline_patch_capability_failure_code: null, timeline_patch_capability_probe_sha256: `sha256:${"d".repeat(64)}`, candidate_capability_status: "supported", candidate_response_adapter_id: "openai_chat_completions_json_schema_v1", candidate_probe_protocol_version: "1", candidate_capability_tested_at: now, candidate_capability_failure_code: null, candidate_capability_probe_sha256: `sha256:${"e".repeat(64)}`, created_at: now, updated_at: now }] }), createProvider: vi.fn(), setProviderSecret: vi.fn(), deleteProviderSecret: vi.fn().mockResolvedValue({ provider_config_id: "provider_1", credential_status: "missing" }), testProvider: vi.fn().mockResolvedValue({ status: "succeeded" }), testCandidateProviderCapability: vi.fn().mockResolvedValue({ candidate_capability_status: "supported", candidate_response_adapter_id: "openai_chat_completions_json_schema_v1", candidate_probe_protocol_version: "1", candidate_capability_tested_at: now, candidate_capability_failure_code: null, candidate_capability_probe_sha256: `sha256:${"e".repeat(64)}` }), preparePlanning: vi.fn().mockResolvedValue({ egress_preview_id: "preview_1", provider: { display_name: "测试", origin: "https://provider.test", model: "model" }, prompt_template_version: "candidate-plan-v1", sent_fields: ["segments.text"], payload_sha256: `sha256:${"b".repeat(64)}`, expires_at: now, payload: { segments: [{ segment_ref: "s1", text: "第一句" }] }, stats: { transcript_count: 1, segment_count: 1, character_count: 3, estimated_tokens: 1 } }), createPlanning: vi.fn().mockResolvedValue({ job: { ...createdJob, kind: "candidate_generation" } }), listCandidatePlans: vi.fn().mockResolvedValue({ items: [] }), getCandidateClipMedia: vi.fn(), adoptCandidatePlan: vi.fn().mockResolvedValue(state),
@@ -97,7 +97,7 @@ describe("Stage 1A/1B 工作流", () => {
     // to continue the remaining workflow on project_1.  API invocation alone
     // is not completion: createProject still refreshes and selects its result.
     await expectSwitcherName("新项目");
-    selectProject(/^演示项目 活动$/);
+    selectProject(/^演示项目 活跃$/);
     await expectSwitcherName("演示项目");
     openProjectManagement();
     fireEvent.change(await screen.findByLabelText("重命名项目"), { target: { value: "已重命名" } }); fireEvent.click(screen.getByRole("button", { name: "保存名称" })); await waitFor(() => expect(api.renameProject).toHaveBeenCalledWith({ project_id: "project_1", name: "已重命名" }));
@@ -162,7 +162,7 @@ describe("Stage 1A/1B 工作流", () => {
     await waitFor(() => expect(renameInput).toHaveValue("服务端确认名"));
 
     const refreshForProjectP = refreshProjects;
-    selectProject(/^服务端项目 Q 活动$/);
+    selectProject(/^服务端项目 Q 活跃$/);
     await waitFor(() => expect(renameInput).toHaveValue("服务端项目 Q"));
     await waitFor(() => expect(refreshProjects).not.toBe(refreshForProjectP));
     await act(async () => { refreshProjects(); });
@@ -208,7 +208,7 @@ describe("Stage 1A/1B 工作流", () => {
     fireEvent.click(screen.getByRole("tab", { name: /^素材/ })); fireEvent.click(await screen.findByTitle("转录")); expect(await screen.findByRole("heading", { name: "创建本地转录" })).toBeVisible(); fireEvent.click(screen.getByRole("button", { name: "开始转录" })); await waitFor(() => expect(readyApi.createTranscription).toHaveBeenCalledWith(expect.objectContaining({ asset_id: video.asset_id, model_id: model.model_id })));
     // 任务在"任务"子标签下：切换后重试/取消。
     fireEvent.click(screen.getByRole("tab", { name: /^任务/ }));
-    fireEvent.click(screen.getByRole("button", { name: "重试转录" })); await waitFor(() => expect(readyApi.createTranscription).toHaveBeenCalledTimes(2)); fireEvent.click(screen.getAllByRole("button", { name: "取消任务" })[0]); await waitFor(() => expect(readyApi.cancelJob).toHaveBeenCalledWith("job_created_2"));
+    fireEvent.click(screen.getByRole("button", { name: "重试转录" })); await waitFor(() => expect(readyApi.createTranscription).toHaveBeenCalledTimes(2)); fireEvent.click(screen.getAllByRole("button", { name: "取消" })[0]); await waitFor(() => expect(readyApi.cancelJob).toHaveBeenCalledWith("job_created_2"));
   });
 });
 
@@ -281,7 +281,7 @@ describe("Stage 1C Editor", () => {
 
   it("创建空时间线后忽略迟到的 404，并以冻结契约追加素材与转录", async () => {
     let rejectTimeline!: (reason: unknown) => void; const pendingTimeline = new Promise<TimelineState>((_, reject) => { rejectTimeline = reject; }); const api = desktopApi({ timeline: null }); api.getTimeline = vi.fn().mockReturnValue(pendingTimeline); window.desktop = api; render(<App />); fireEvent.click(await screen.findByRole("button", { name: "创建空时间线" })); await screen.findByRole("button", { name: /video 5.00s/ }); rejectTimeline(new Error("TIMELINE_NOT_FOUND 404"));
-    fireEvent.click(screen.getByRole("button", { name: /追加 很长的中文素材/ })); await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledWith(expect.objectContaining({ patch: expect.objectContaining({ operations: [expect.objectContaining({ op: "insert_asset_clip" })] }) })));
+    fireEvent.dragOver(screen.getByLabelText("时间线画布"), { dataTransfer: { getData: () => video.asset_id, dropEffect: "copy" } }); fireEvent.drop(screen.getByLabelText("时间线画布"), { dataTransfer: { getData: () => video.asset_id, dropEffect: "copy" } }); await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledWith(expect.objectContaining({ patch: expect.objectContaining({ operations: [expect.objectContaining({ op: "insert_asset_clip" })] }) })));
     fireEvent.click(screen.getAllByRole("button", { name: /^转录$/ })[0]);
     // 勾选转录片段的界面在"转录"子标签下：切换后操作。
     fireEvent.click(screen.getByRole("tab", { name: /^转录/ })); fireEvent.click(await screen.findByRole("checkbox")); fireEvent.click(screen.getByRole("button", { name: "追加所选片段" }));
@@ -331,7 +331,7 @@ describe("Stage 2A AI 粗剪", () => {
   it("删除密钥使用白名单桥接且不回显", async () => {
     const api = desktopApi(); window.desktop = api; render(<App />); await expectSwitcherName("演示项目");
     fireEvent.click(screen.getByRole("button", { name: "AI 粗剪" })); fireEvent.change(await screen.findByLabelText("Provider"), { target: { value: "provider_1" } });
-    fireEvent.click(screen.getByRole("button", { name: "删除当前 Provider 密钥" })); await waitFor(() => expect(api.deleteProviderSecret).toHaveBeenCalledWith("provider_1"));
+    fireEvent.click(screen.getByRole("button", { name: "删除密钥" })); await waitFor(() => expect(api.deleteProviderSecret).toHaveBeenCalledWith("provider_1"));
     expect(document.body.textContent).not.toContain("SENTINEL-KEY-NEVER-LOG");
   });
   it.each(["failed", "cancelled", "interrupted"] as const)("任务 %s 会清除旧外传预览，取消按钮调用任务取消并强制重新准备", async status => {
@@ -530,7 +530,7 @@ describe("Stage 4B 生成验证正式入口", () => {
 
   async function generationEntry(): Promise<HTMLElement> {
     fireEvent.click(screen.getByRole("button", { name: "工具" }));
-    return await screen.findByRole("menuitem", { name: "生成验证（模拟）" });
+    return await screen.findByRole("menuitem", { name: /生成验证（模拟）/ });
   }
 
   it("未选择项目时禁用入口，选择项目后可打开模拟验证工作台", async () => {
@@ -564,7 +564,7 @@ describe("Stage 4B 生成验证正式入口", () => {
     await waitFor(() => expect(entry).toBeEnabled());
     fireEvent.click(entry);
     fireEvent.change(await screen.findByLabelText("生成验证 Prompt"), { target: { value: "切换项目必须清除" } });
-    selectProject(/^第二项目 活动$/);
+    selectProject(/^第二项目 活跃$/);
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "生成验证（模拟）" })).not.toBeInTheDocument());
     fireEvent.click(await generationEntry());
     expect(await screen.findByLabelText("生成验证 Prompt")).toHaveValue("");

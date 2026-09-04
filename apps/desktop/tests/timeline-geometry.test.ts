@@ -335,13 +335,13 @@ describe("Round 4 — scroll-aware coordinates", () => {
 });
 
 describe("Round 4 — scroll bounds", () => {
-  it("computes content width as gutter + timeline + right padding", () => {
-    expect(contentWidthPx(view, 2_000_000)).toBe(120 + 200 + 240);
+  it("computes content width as gutter + timeline（终点即最后片段结束，无额外余量）", () => {
+    expect(contentWidthPx(view, 2_000_000)).toBe(120 + 200);
   });
 
-  it("maxScrollX is content minus viewport, floored at 0", () => {
-    expect(scrollBounds(view, 2_000_000, 800).maxScrollX).toBe(0); // 560 < 800
-    expect(scrollBounds(view, 20_000_000, 800).maxScrollX).toBe(120 + 2000 + 240 - 800);
+  it("maxScrollX is content minus viewport, floored at 0（到素材终点不能再往后拖）", () => {
+    expect(scrollBounds(view, 2_000_000, 800).maxScrollX).toBe(0); // 320 < 800
+    expect(scrollBounds(view, 20_000_000, 800).maxScrollX).toBe(120 + 2000 - 800);
     expect(clampScrollX(-5, 100)).toBe(0);
     expect(clampScrollX(150, 100)).toBe(100);
     expect(clampScrollX(50, 100)).toBe(50);
@@ -370,8 +370,9 @@ describe("Round 4 — anchored zoom", () => {
     const totalUs = 2_000_000;
     const next = zoomAtAnchor(view, 320, 800, 1000, totalUs);
     expect(next.pixelsPerSecond).toBe(ZOOM_MAX_PPS);
-    // anchor keeps 2s at x 320 → scrollX 3200, clamped to maxScroll 120+2000·2+240-800 = 3560.
-    expect(next.scrollX).toBe(3560);
+    // anchor keeps 2s at x 320 → scrollX 3200, clamped to maxScroll 120+2000·2-800 = 3320
+    // （无右侧余量：滚动终点即素材终点）。
+    expect(next.scrollX).toBe(3320);
     const out = zoomAtAnchor(view, 320, 800, 0.0001, totalUs);
     expect(out.pixelsPerSecond).toBe(ZOOM_MIN_PPS);
   });

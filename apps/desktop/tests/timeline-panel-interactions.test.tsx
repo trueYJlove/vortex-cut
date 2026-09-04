@@ -127,13 +127,14 @@ describe("Timeline Round 4 — 右键菜单", () => {
 });
 
 describe("Timeline Round 4 — 空区单击定位播放头", () => {
-  it("空区单击（无拖动）移动播放头并清除选择", () => {
+  it("空区单击（无拖动）移动播放头并清除选择；超过素材终点时钳制到终点", () => {
     const props = baseProps();
     render(<TimelinePanel document={doc()} {...props} />);
     const canvas = document.querySelector("canvas") as HTMLCanvasElement;
+    // 点击 500px → 6.33s，超出 2s 素材终点 → 钳制到 2s（标尺不超过素材长度）。
     fireEvent.mouseDown(canvas, { clientX: 500, clientY: 124, button: 0 });
     fireEvent.mouseUp(canvas, { clientX: 500, clientY: 124 });
-    expect(props.onSeek).toHaveBeenCalledWith(expect.closeTo(6_333_333, 0));
+    expect(props.onSeek).toHaveBeenCalledWith(expect.closeTo(2_000_000, 0));
     expect(props.setSelection).toHaveBeenCalledWith(null);
   });
 
