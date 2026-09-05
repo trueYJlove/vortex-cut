@@ -239,10 +239,10 @@
 
 ---
 
-## 4. 权威端已知近似与缺陷清单（探针发现，未改动生产代码）
+## 4. 权威端已知近似与缺陷清单（探针发现；缺陷①②已于 456c89a 修复，见 §8）
 
-1. **[缺陷·高] V1 主轨 position 关键帧链超长**：`_keyframe_animation_filters` 的 position overlay 以 `d=timeline_total` 的黑底 lavfi 输入为**主输入**（`eof_action=repeat`），段链输出被撑到时间线总长 → concat 输出超长（实测 61s 时间线渲染 106s：内容 [45,60s)，其后 [60,106s) 为冻结帧，相对时间线末超长 45s），超出 `validate_rendered_media` 容差（±83ms）→ **生产路径上含 V1 position 关键帧的时间线渲染必失败**（单段满长时间线除外）。生产单测仅断言滤镜图文本、未断言渲染时长，故未被发现。证据：`p2/baseline/baseline.mkv`（3180 帧）+ 本报告 §2.3。
-2. **[缺陷·中] transform.rotate 单位错位**：数值被原样传给 ffmpeg `rotate` 滤镜（参数单位为**弧度**），UI 度数语义在权威端被按弧度解释（实测 8 度输入渲染为 ≈98° 旋转）。证据：`p2/baseline/` 下 PiP 采样帧对比。
+1. **[缺陷·高→已修复 456c89a] V1 主轨 position 关键帧链超长**：`_keyframe_animation_filters` 的 position overlay 以 `d=timeline_total` 的黑底 lavfi 输入为**主输入**（`eof_action=repeat`），段链输出被撑到时间线总长 → concat 输出超长（实测 61s 时间线渲染 106s：内容 [45,60s)，其后 [60,106s) 为冻结帧，相对时间线末超长 45s），超出 `validate_rendered_media` 容差（±83ms）→ **生产路径上含 V1 position 关键帧的时间线渲染必失败**（单段满长时间线除外）。生产单测仅断言滤镜图文本、未断言渲染时长，故未被发现。证据：`p2/baseline/baseline.mkv`（3180 帧）+ 本报告 §2.3。
+2. **[缺陷·中→已修复 456c89a] transform.rotate 单位错位**：数值被原样传给 ffmpeg `rotate` 滤镜（参数单位为**弧度**），UI 度数语义在权威端被按弧度解释（实测 8 度输入渲染为 ≈98° 旋转）。证据：`p2/baseline/` 下 PiP 采样帧对比。
 3. **[近似·已冻结] opacity 关键帧 = 整体 fade 渐入近似**（`fade=alpha=1:st=0:d=末关键帧t`）：本探针实证其可见且按预期合成（46.5s 帧 mean=12.8 ≈ 黑底+8% 内容 ✓）。
 4. **[近似] PiP overlay 忽略 transform.opacity**（`_pip_overlay_chain` 未消费）。
 5. **[已知系统差] 字幕光栅化 libass vs 浏览器**：IoU 0.38–0.45、文本中心偏移 ~4.5px（Canvas2D 基线估算 vs libass 度量），单独口径记录。
@@ -279,3 +279,20 @@
 - **架构方向证实（R4）**：Core 生成 IR（逐帧数值表）+ Renderer 只消费 的实现全程无插值/借位二义性，几何 0px 对齐——"预览=导出"的语义层可行性已证；
 - **带约束立项**：①解码路径建议 WebCodecs+帧缓存、scrub 需多路并行寻址编排设计，②权威端缺陷 1、2 修复排期（position 关键帧/rotate 修复复测后方可入冻结子集）；逐帧一致性 ADR 已决（ADR-1）；
 - 探针代码按 §8 保留至 M3-0-3 结束，处置决定记入放行记录。
+
+
+---
+
+## 8. 缺陷修复与重基线化记录（Gate 后追加，2026-09-05）
+
+按 [ADR-1](./STAGE_M3_0_ADR_1_P2_GATE.md) §3-5 重基线化条款执行（修复 commit `456c89a`）：
+
+| 项 | 修复前 | 修复后 |
+|---|---|---|
+| 缺陷① position 关键帧链超长 | 61s 时间线渲染 106s（校验必失败） | overlay `shortest=1`，渲染 1800 帧整；新增渲染时长集成测试 |
+| 缺陷② rotate 弧度错位 | 8° 输入渲染 ≈98° | `'{val}*PI/180'`（两处静态路径与关键帧路径对齐）；新增度数语义像素三角验证（0/15/360°） |
+| 非字幕帧 PSNR 最低 | 19.10dB（n=510） | **20.19dB（n=570）**，旋转受影响帧 +2~3.2dB |
+| 回归门（ADR-1 §3-3） | ≥19dB | **≥20dB**（重基线化） |
+| IR 输出时长模型 | 1830 帧（时间线口径） | 1800 帧（借用压缩口径，与修复后渲染一致） |
+
+诚实记录：ADR 预测"PiP 帧恢复至 ≥28dB 档"**未实现**——旋转重采样滤波残差（GL mip/双线性 vs swscale）仍在，属 ADR-2 北极星路径范围；几何错位保持 0px（1 帧 1px 量化位移，门内）。IR 契约冻结草案随之升级 **v0.2**（position 关键帧与 rotate 按重入条件纳入，[见契约 §4](./STAGE_M3_0_IR_CONTRACT_DRAFT.md)）。比对工具复算数据：`p2/baseline/comparison.json`（重基线化后）。

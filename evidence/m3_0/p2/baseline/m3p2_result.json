@@ -10,8 +10,8 @@
   "width": 960,
   "height": 540,
   "fps": 30,
-  "duration_frames": 1830,
-  "duration_us": 61000000,
+  "duration_frames": 1800,
+  "duration_us": 60000000,
   "background": "#000000"
  },
  "adapter": {
@@ -37,31 +37,31 @@
    "kind": "segment",
    "overlays": 0,
    "caption": false,
-   "decode_upload_ms": 123.9,
-   "compose_ms": 0.7
+   "decode_upload_ms": 135.4,
+   "compose_ms": 0.6
   },
   {
    "n": 30,
    "kind": "segment",
    "overlays": 0,
    "caption": false,
-   "decode_upload_ms": 34.6,
-   "compose_ms": 0.1
+   "decode_upload_ms": 43,
+   "compose_ms": 0.2
   },
   {
    "n": 120,
    "kind": "segment",
    "overlays": 0,
    "caption": true,
-   "decode_upload_ms": 31.8,
-   "compose_ms": 12.6
+   "decode_upload_ms": 40.8,
+   "compose_ms": 11.9
   },
   {
    "n": 240,
    "kind": "segment",
    "overlays": 0,
    "caption": false,
-   "decode_upload_ms": 43.3,
+   "decode_upload_ms": 32.3,
    "compose_ms": 0.1
   },
   {
@@ -69,31 +69,31 @@
    "kind": "segment",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 63.7,
-   "compose_ms": 0.1
+   "decode_upload_ms": 60,
+   "compose_ms": 0
   },
   {
    "n": 420,
    "kind": "segment",
    "overlays": 1,
    "caption": true,
-   "decode_upload_ms": 60.8,
-   "compose_ms": 4.7
+   "decode_upload_ms": 59.3,
+   "compose_ms": 7.2
   },
   {
    "n": 450,
    "kind": "segment",
    "overlays": 1,
    "caption": true,
-   "decode_upload_ms": 65.5,
-   "compose_ms": 0.7
+   "decode_upload_ms": 62.8,
+   "compose_ms": 0.1
   },
   {
    "n": 510,
    "kind": "segment",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 74.6,
+   "decode_upload_ms": 62.7,
    "compose_ms": 0.1
   },
   {
@@ -101,23 +101,23 @@
    "kind": "segment",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 124.6,
-   "compose_ms": 0.1
+   "decode_upload_ms": 130.6,
+   "compose_ms": 0.2
   },
   {
    "n": 570,
    "kind": "transition",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 98,
-   "compose_ms": 0.2
+   "decode_upload_ms": 91.8,
+   "compose_ms": 0.4
   },
   {
    "n": 571,
    "kind": "transition",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 93.7,
+   "decode_upload_ms": 109.1,
    "compose_ms": 0.4
   },
   {
@@ -125,39 +125,39 @@
    "kind": "transition",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 146,
-   "compose_ms": 0.1
+   "decode_upload_ms": 140.6,
+   "compose_ms": 0.3
   },
   {
    "n": 599,
    "kind": "transition",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 186.6,
-   "compose_ms": 0.1
+   "decode_upload_ms": 201.7,
+   "compose_ms": 0.2
   },
   {
    "n": 600,
    "kind": "segment",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 97.4,
-   "compose_ms": 0.1
+   "decode_upload_ms": 93,
+   "compose_ms": 0.2
   },
   {
    "n": 601,
    "kind": "segment",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 105.8,
-   "compose_ms": 0.1
+   "decode_upload_ms": 92.5,
+   "compose_ms": 0.2
   },
   {
    "n": 660,
    "kind": "segment",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 88.6,
+   "decode_upload_ms": 81.5,
    "compose_ms": 0.1
   },
   {
@@ -165,15 +165,15 @@
    "kind": "segment",
    "overlays": 1,
    "caption": true,
-   "decode_upload_ms": 99.3,
-   "compose_ms": 3.5
+   "decode_upload_ms": 92.7,
+   "compose_ms": 4
   },
   {
    "n": 810,
    "kind": "segment",
    "overlays": 1,
    "caption": true,
-   "decode_upload_ms": 86,
+   "decode_upload_ms": 74.2,
    "compose_ms": 0.1
   },
   {
@@ -181,23 +181,23 @@
    "kind": "segment",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 119.6,
-   "compose_ms": 0.1
+   "decode_upload_ms": 115,
+   "compose_ms": 0
   },
   {
    "n": 900,
    "kind": "segment",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 130.4,
-   "compose_ms": 0.2
+   "decode_upload_ms": 115.5,
+   "compose_ms": 0.1
   },
   {
    "n": 1000,
    "kind": "segment",
    "overlays": 0,
    "caption": false,
-   "decode_upload_ms": 55.1,
+   "decode_upload_ms": 50.8,
    "compose_ms": 0.1
   },
   {
@@ -205,7 +205,7 @@
    "kind": "segment",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 76.4,
+   "decode_upload_ms": 76.2,
    "compose_ms": 0.1
   },
   {
@@ -213,7 +213,7 @@
    "kind": "segment",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 78.3,
+   "decode_upload_ms": 79.5,
    "compose_ms": 0.2
   },
   {
@@ -221,31 +221,31 @@
    "kind": "segment",
    "overlays": 1,
    "caption": true,
-   "decode_upload_ms": 84.3,
-   "compose_ms": 3.1
+   "decode_upload_ms": 86.4,
+   "compose_ms": 4.4
   },
   {
    "n": 1260,
    "kind": "segment",
    "overlays": 1,
    "caption": true,
-   "decode_upload_ms": 62.1,
-   "compose_ms": 0.3
+   "decode_upload_ms": 66,
+   "compose_ms": 0.1
   },
   {
    "n": 1353,
    "kind": "segment",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 55.9,
-   "compose_ms": 0.1
+   "decode_upload_ms": 54.9,
+   "compose_ms": 0
   },
   {
    "n": 1365,
    "kind": "segment",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 86.9,
+   "decode_upload_ms": 88.5,
    "compose_ms": 0.1
   },
   {
@@ -253,15 +253,15 @@
    "kind": "segment",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 49.4,
-   "compose_ms": 0.1
+   "decode_upload_ms": 61.4,
+   "compose_ms": 0.2
   },
   {
    "n": 1395,
    "kind": "segment",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 80.9,
+   "decode_upload_ms": 85.1,
    "compose_ms": 0.1
   },
   {
@@ -269,7 +269,7 @@
    "kind": "segment",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 57.7,
+   "decode_upload_ms": 56,
    "compose_ms": 0.1
   },
   {
@@ -277,39 +277,39 @@
    "kind": "segment",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 44.6,
-   "compose_ms": 0
+   "decode_upload_ms": 47.5,
+   "compose_ms": 0.2
   },
   {
    "n": 1500,
    "kind": "segment",
    "overlays": 1,
    "caption": true,
-   "decode_upload_ms": 49.8,
-   "compose_ms": 4
+   "decode_upload_ms": 48.7,
+   "compose_ms": 5.2
   },
   {
    "n": 1560,
    "kind": "segment",
    "overlays": 1,
    "caption": true,
-   "decode_upload_ms": 49,
-   "compose_ms": 0
+   "decode_upload_ms": 51.5,
+   "compose_ms": 0.1
   },
   {
    "n": 1590,
    "kind": "segment",
    "overlays": 1,
    "caption": true,
-   "decode_upload_ms": 46.9,
-   "compose_ms": 0.3
+   "decode_upload_ms": 49.4,
+   "compose_ms": 0.1
   },
   {
    "n": 1649,
    "kind": "segment",
    "overlays": 1,
    "caption": true,
-   "decode_upload_ms": 116.1,
+   "decode_upload_ms": 111.9,
    "compose_ms": 0.1
   },
   {
@@ -317,7 +317,7 @@
    "kind": "segment",
    "overlays": 0,
    "caption": false,
-   "decode_upload_ms": 26.3,
+   "decode_upload_ms": 27.3,
    "compose_ms": 0.1
   },
   {
@@ -325,8 +325,8 @@
    "kind": "segment",
    "overlays": 0,
    "caption": false,
-   "decode_upload_ms": 54.1,
-   "compose_ms": 0.1
+   "decode_upload_ms": 58.1,
+   "compose_ms": 0
   }
  ],
  "environment": {
@@ -336,71 +336,71 @@
   "metrics": [
    {
     "cpu": {
-     "cumulativeCPUUsage": 1.792263,
+     "cumulativeCPUUsage": 1.844605,
      "percentCPUUsage": 0,
      "idleWakeupsPerSecond": 0
     },
-    "pid": 16572,
+    "pid": 25236,
     "type": "Browser",
-    "creationTime": 1788589791314.803,
+    "creationTime": 1788605645929.865,
     "memory": {
-     "workingSetSize": 117956,
-     "peakWorkingSetSize": 175672,
-     "privateBytes": 85448
+     "workingSetSize": 116192,
+     "peakWorkingSetSize": 177068,
+     "privateBytes": 84460
     },
     "integrityLevel": "medium",
     "sandboxed": false
    },
    {
     "cpu": {
-     "cumulativeCPUUsage": 5.366098,
+     "cumulativeCPUUsage": 5.250584,
      "percentCPUUsage": 0,
      "idleWakeupsPerSecond": 0
     },
-    "pid": 18428,
+    "pid": 26952,
     "type": "GPU",
-    "creationTime": 1788589791571.855,
+    "creationTime": 1788605646192.047,
     "serviceName": "GPU",
     "memory": {
-     "workingSetSize": 733956,
-     "peakWorkingSetSize": 735992,
-     "privateBytes": 692696
+     "workingSetSize": 728332,
+     "peakWorkingSetSize": 730368,
+     "privateBytes": 681972
     },
     "integrityLevel": "low",
     "sandboxed": true
    },
    {
     "cpu": {
-     "cumulativeCPUUsage": 0.193002,
+     "cumulativeCPUUsage": 0.186943,
      "percentCPUUsage": 0,
      "idleWakeupsPerSecond": 0
     },
-    "pid": 18448,
+    "pid": 24384,
     "type": "Utility",
-    "creationTime": 1788589791583.064,
+    "creationTime": 1788605646202.544,
     "serviceName": "network.mojom.NetworkService",
     "name": "Network Service",
     "memory": {
-     "workingSetSize": 54388,
-     "peakWorkingSetSize": 54548,
-     "privateBytes": 14376
+     "workingSetSize": 54660,
+     "peakWorkingSetSize": 54832,
+     "privateBytes": 14588
     },
     "integrityLevel": "medium",
     "sandboxed": false
    },
    {
     "cpu": {
-     "cumulativeCPUUsage": 3.110556,
+     "cumulativeCPUUsage": 3.059076,
      "percentCPUUsage": 0,
      "idleWakeupsPerSecond": 0
     },
-    "pid": 23176,
+    "pid": 22564,
     "type": "Tab",
-    "creationTime": 1788589791682.889,
+    "creationTime": 1788605646284.382,
     "memory": {
-     "workingSetSize": 353340,
-     "peakWorkingSetSize": 357980,
-     "privateBytes": 289436
+     "workingSetSize": 350780,
+     "peakWorkingSetSize": 355384,
+     "privateBytes": 287308
     },
     "integrityLevel": "medium",
     "sandboxed": false
@@ -441,7 +441,7 @@
     "glWsVersion": "1.5 (ANGLE 2.1.25160 git hash: ecc378cc6110)",
     "hardwareSupportsVulkan": false,
     "inProcessGpu": false,
-    "initializationTime": 282.226,
+    "initializationTime": 312.843,
     "isAsan": false,
     "isClangCoverage": false,
     "jpegDecodeAcceleratorSupported": false,

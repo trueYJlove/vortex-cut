@@ -1,16 +1,16 @@
 {
   "baseline_mkv": {
     "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\p2\\baseline\\baseline.mkv",
-    "sha256": "687225a4e8a24428b53d8d6582f01ef9ddcb1edc14ac223b1111f016ef675a12",
-    "size_bytes": 283562978
+    "sha256": "4e4db8feb6915cbf1b07500869b2def4ba98f232ae8b1b07b63c5cbf208a4dd3",
+    "size_bytes": 139281722
   },
   "baseline_nocap_mkv": {
     "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\p2\\baseline\\baseline_nocap.mkv",
-    "sha256": "c07ff23228d66a36fbad08ecf12043c11187639c98730cec7517f519abdc36a5"
+    "sha256": "4720eca14f3a44f9bbbc0e9187a51da87236681b0ed7588db7debce7f7f4bf82"
   },
   "second_ref_h264_mp4": {
     "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\p2\\baseline\\second_ref_h264.mp4",
-    "sha256": "2e2b7c5b4cc5e0bdb6a77ba210115d5ad22bc528391035ff09e06830b89bee4e"
+    "sha256": "2d6f3a2acd7ba3b3a203f2a5fc9ec2bb4886fe26026fbd3a386cd6ec71fb8c52"
   },
   "plan_content_fingerprint": "sha256:9f435d11806cf8c881af07ba10085a725ebd17987c0d6724dacac52d4610c311",
   "expected_duration_us": 55000000,
@@ -71,14 +71,14 @@
     "avg_frame_rate": null,
     "width": 960,
     "height": 540,
-    "duration_us": 106000000
+    "duration_us": 60021000
   },
   "baseline_nocap_media": {
     "nb_frames": null,
     "avg_frame_rate": null,
     "width": 960,
     "height": 540,
-    "duration_us": 106000000
+    "duration_us": 60021000
   },
   "extraction_command": "ffmpeg -i baseline.mkv -vf \"select='eq(n,<n>)+…',scale=in_color_matrix=bt709\" -fps_mode passthrough frame_%04d.png",
   "ffmpeg_version": "ffmpeg version n8.0.1-66-g27b8d1a017-20260228 Copyright (c) 2000-2025 the FFmpeg developers"

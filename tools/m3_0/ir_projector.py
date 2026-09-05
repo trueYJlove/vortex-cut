@@ -276,8 +276,10 @@ def project(plan: dict, probes: dict[str, dict], caption_styles: dict | None = N
             else:
                 regions.append({"t0": acc, "t1": acc + _span_us(item), "item": item, "phase": "full"})
                 acc += _span_us(item)
-    total_us = max((int(segment["timeline_end_us"]) for segment in segments), default=0)
-    total_frames = -(-total_us * FPS // 1_000_000)
+    # 输出时长 = 区段模型累加值（转场借用压缩后），≠ 时间线最大终点；
+    # 渲染输出帧数以此为准（position overlay 缺陷修复后两者差 = Σ借用）。
+    total_us = regions[-1]["t1"] if regions else max((int(segment["timeline_end_us"]) for segment in segments), default=0)
+    total_frames = -(-int(total_us) * FPS // 1_000_000)
 
     # 段 → 内容输出起点（full/body 区段 t0）。转场借用压缩输出时间轴：
     # 后继段内容时间 = t − 区段t0（≠ t − timeline_start），与权威端链内 t 一致。
@@ -406,9 +408,8 @@ def project(plan: dict, probes: dict[str, dict], caption_styles: dict | None = N
         "known_approximations": [
             "opacity 关键帧 = fade=alpha=1:st=0:d=末关键帧t 整体渐入近似（ffmpeg.py 实际行为，非 lerp）",
             "PiP overlay 忽略 transform.opacity（_pip_overlay_chain 未消费）",
-            "transform.rotate 单位错位：数值被原样传给 ffmpeg rotate 滤镜（弧度参数），UI 度数语义在权威端被按弧度解释（P2 实证：8 度输入渲染为 8 弧度 ≈ 98° 旋转）——IR/GL 端复刻该实际行为",
-            "V1 主轨 position 关键帧链缺陷：overlay 主输入为 d=timeline_total 黑底源（eof_action=repeat），段链被撑至时间线总长，concat 输出超长并冻结尾部（生产校验必失败；IR 按其实际输出语义投影）",
             "字幕帧文本光栅化 libass vs 浏览器（单独口径：bbox IoU + diff 比率）",
+            "变更记录：transform.rotate 度数语义（456c89a 修复）与 V1 position 关键帧链超长（shortest=1 修复）两项权威端缺陷已修复，IR 按修复后行为投影",
         ],
         "frames": frames,
     }

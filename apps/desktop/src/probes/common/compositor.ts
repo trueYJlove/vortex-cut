@@ -328,11 +328,9 @@ export class Compositor {
     gl.uniform4f(this.uniforms.u_rect, rect.x, rect.y, rect.w, rect.h);
     gl.uniform2f(this.uniforms.u_canvas, this.ir.canvas.width, this.ir.canvas.height);
     gl.uniform1f(this.uniforms.u_alpha, alpha);
-    // 权威端实际行为（P2 实证）：transform.rotate 的数值被原样传给 ffmpeg
-    // rotate 滤镜，而该滤镜参数单位是【弧度】——UI 度数语义在权威端被按
-    // 弧度解释（已记入"权威端已知缺陷"清单）。GL 端复刻实际行为：
-    // 数值直传（弧度），正角 = 顺时针（ffmpeg rotate 方向，实证校准）。
-    gl.uniform1f(this.uniforms.u_rotation, -rotationDeg);
+    // 权威端 rotate 单位缺陷已修复（456c89a：度→弧度换算入滤镜）——
+    // GL 端同步度数语义；负号为采样方向对齐（ffmpeg rotate 正角方向，P2 实证校准）。
+    gl.uniform1f(this.uniforms.u_rotation, -(rotationDeg * Math.PI) / 180);
     gl.uniform1f(this.uniforms.u_premultiplied, premultiplied ? 1 : 0);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
