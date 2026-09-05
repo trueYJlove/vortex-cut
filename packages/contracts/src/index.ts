@@ -93,7 +93,7 @@ export type JobStage =
   | "computing_diff"
   | "persisting_proposal"
   | (string & {});
-export type ModelInstallStatus = "unavailable" | "queued" | "downloading" | "paused" | "verifying" | "ready" | "cancelled" | "failed";
+export type ModelInstallStatus = "unavailable" | "queued" | "downloading" | "paused" | "verifying" | "ready" | "cancelled" | "failed" | "corrupt";
 export type AsrProviderStatus = "unavailable" | "installed" | "corrupt" | "runtime_unavailable";
 export type TranscriptStatus = "pending" | "ready" | "stale" | "failed";
 
@@ -1159,7 +1159,7 @@ const JOB_KINDS: JobKind[] = ["asset_probe", "asset_fingerprint", "proxy", "port
 const PROJECT_STATUSES: ProjectStatus[] = ["active", "archived", "missing"];
 const ASSET_KINDS: AssetKind[] = ["video", "audio", "image", "text"];
 const ASSET_AVAILABILITIES: AssetAvailability[] = ["available", "missing", "changed", "unsupported"];
-const MODEL_INSTALL_STATUSES: ModelInstallStatus[] = ["unavailable", "queued", "downloading", "paused", "verifying", "ready", "cancelled", "failed"];
+const MODEL_INSTALL_STATUSES: ModelInstallStatus[] = ["unavailable", "queued", "downloading", "paused", "verifying", "ready", "cancelled", "failed", "corrupt"];
 const PROVIDER_STATUSES: AsrProviderStatus[] = ["unavailable", "installed", "corrupt", "runtime_unavailable"];
 const TRANSCRIPT_STATUSES: TranscriptStatus[] = ["pending", "ready", "stale", "failed"];
 const TIMELINE_LAYOUTS: TimelineLayout[] = ["blurred_background", "crop_fill", "fit"];
