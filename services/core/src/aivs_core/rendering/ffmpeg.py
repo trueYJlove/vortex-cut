@@ -118,8 +118,10 @@ def _keyframe_animation_filters(
         step += 1
         positioned = f"kp{step}"
         # 位置在预置黑底输入上合成（段内容浮于其上）。
+        # shortest=1：黑底主输入时长为 timeline_total（远超本段），不终止输出会把
+        # 段链撑到时间线总长（concat 超长、渲染校验失败），必须止于内容长度。
         clauses.append(
-            f"[{black_input_index}:v][{current}]overlay=x='(W-w)/2+{x_expr}*(W/2)':y='(H-h)/2+{y_expr}*(H/2)':eval=frame:eof_action=repeat[{positioned}]"
+            f"[{black_input_index}:v][{current}]overlay=x='(W-w)/2+{x_expr}*(W/2)':y='(H-h)/2+{y_expr}*(H/2)':eval=frame:eof_action=repeat:shortest=1[{positioned}]"
         )
         current = positioned
     if current != base_label:
@@ -303,7 +305,8 @@ def build_timeline_args(
                     static += "format=rgba,"
                 static += f"scale={pip_w}:{pip_h}:force_divisible_by=2"
                 if abs(rotate_val) > 1e-9:
-                    static += f",rotate={rotate_val:.4f}:fillcolor=black@0:ow=iw:oh=ih"
+                    # 度数语义（contracts -180..180°）→ rotate 滤镜弧度参数，与关键帧 rotate 路径一致
+                    static += f",rotate='{rotate_val:.4f}*PI/180':fillcolor=black@0:ow=iw:oh=ih"
                 if opacity < 1.0:
                     static += f",colorchannelmixer=aa={opacity:.3f}"
                 static += f"[vpre{label_id}]"
@@ -731,7 +734,8 @@ def _pip_overlay_chain(
     head = f"{source},{_square_pixel_filter()},{visual},scale={pip_w}:{pip_h}:force_divisible_by=2"
     if rotate_val != 0.0:
         # 浮层旋转的角落必须透明（露出下层），走 rgba + 黑透明填充。
-        head += ",format=rgba,rotate={}:fillcolor=black@0:ow=iw:oh=ih".format(f"{rotate_val:.4f}")
+        # 度数语义（contracts -180..180°）→ rotate 滤镜弧度参数，与关键帧 rotate 路径一致。
+        head += ",format=rgba,rotate='{}*PI/180':fillcolor=black@0:ow=iw:oh=ih".format(f"{rotate_val:.4f}")
     head += f"[{label}]"
     # 生成「灰阶 alpha（0..255）」贡献：蒙版 geq 灰 + 抠像 colorkey alphaextract。
     # 最终 RGB 帧 + 每个 alpha 来源各一条 split 分支（避免 [label] 被多处消费）。

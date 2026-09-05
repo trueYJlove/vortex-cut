@@ -603,7 +603,7 @@ def test_builder_composes_pip_overlay_for_track_v2() -> None:
     # 覆盖段子句：源取帧 → PIP 缩放 → 旋转 → PTS 平移 → overlay 时间窗。
     assert "[1:v:0]" in graph
     assert "scale=216:384" in graph            # 540*0.4=216, 960*0.4=384
-    assert "rotate=15.0000" in graph
+    assert "rotate='15.0000*PI/180'" in graph  # 度数语义：rotate 滤镜参数为弧度
     assert "setpts=PTS+0.500000" in graph
     assert "enable='between(t,0.500000,1.500000)'" in graph
     # overlay 复用 [MAINPIP] 作为输入与输出（多覆盖段可继续叠加）。
