@@ -19,7 +19,7 @@ import type { RestrictedMediaRegistry } from "./restricted-media.js";
  * - AIVS_M3_PROBE_EVIDENCE 证据输出目录
  */
 
-export const PROBE_NAME_PATTERN = /^m3p[123]$/;
+export const PROBE_NAME_PATTERN = /^m3p[1-4]$/;
 
 export function probeActive(): string | null {
   if (app.isPackaged || !process.env.AIVS_M3_PROBE) return null;

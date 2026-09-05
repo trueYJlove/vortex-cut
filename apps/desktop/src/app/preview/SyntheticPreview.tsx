@@ -86,11 +86,15 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
   }, [playing, load.status]);
 
   // 外部播放头跳转（暂停态）：偏差 >0.5s 视为外部 seek；播放中自身上报的时间不回环。
+  // 连续快速跳转走拖拽快速档（主轨优先），停止 250ms 后全量精修（M3-2）。
+  const settleTimer = useRef<number>(0);
   useEffect(() => {
     const session = sessionRef.current;
     if (!session || load.status !== "ready" || playing) return;
     if (Math.abs(playheadUs - lastReportedUs.current) > 500_000) {
       void session.seekToFrame(Math.max(0, Math.floor((playheadUs / 1e6) * session.ir.canvas.fps)));
+      window.clearTimeout(settleTimer.current);
+      settleTimer.current = window.setTimeout(() => void session.refineAfterDrag(), 250);
     }
   }, [playheadUs, playing, load.status]);
 

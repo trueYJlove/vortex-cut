@@ -14,8 +14,8 @@ const outDir = join(desktopRoot, "out");
 // out/renderer：全净（冻结方案 §7.1 原文要求——生产构建不打包探针代码）。
 // out/preload / out/main：探针名禁止；env 变量串与桥标记属第 1/1.5 层
 // dev-only 门控壳（运行时双门控），允许存在并写入报告说明。
-const MARKERS_RENDERER = ["m3p1", "m3p2", "m3p3", "probeDesktop", "AIVS_M3_PROBE"];
-const MARKERS_INFRA = ["m3p1", "m3p2", "m3p3"];
+const MARKERS_RENDERER = ["m3p1", "m3p2", "m3p3", "m3p4", "probeDesktop", "AIVS_M3_PROBE"];
+const MARKERS_INFRA = ["m3p1", "m3p2", "m3p3", "m3p4"];
 
 function walk(dir) {
   let entries;

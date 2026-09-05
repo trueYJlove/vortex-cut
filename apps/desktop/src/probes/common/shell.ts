@@ -12,7 +12,7 @@ export interface ProbeShell {
   fail: (error: unknown) => Promise<never>;
 }
 
-export async function setupProbe(expectedProbe: "m3p1" | "m3p2" | "m3p3"): Promise<ProbeShell> {
+export async function setupProbe(expectedProbe: "m3p1" | "m3p2" | "m3p3" | "m3p4"): Promise<ProbeShell> {
   document.title = `M3-0 probe ${expectedProbe}`;
   document.body.style.cssText = "margin:0;background:#000;color:#9aa4ad;font:12px monospace;";
   const canvas = document.createElement("canvas");

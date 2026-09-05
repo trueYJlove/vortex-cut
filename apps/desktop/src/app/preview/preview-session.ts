@@ -54,6 +54,10 @@ export class PreviewSession {
   private taskTimes: number[] = [];
   private dropped = 0;
   private disposed = false;
+  private seekEpoch = 0;
+  private lastSeekWall = 0;
+  private lastSeekMs = 0;
+  private dragMode = false;
   onTimeUs: ((us: number) => void) | null = null;
 
   private constructor(readonly ir: Ir, canvas: HTMLCanvasElement) {
@@ -157,9 +161,19 @@ export class PreviewSession {
     this.compositor.endFrame();
   }
 
-  /** seek（暂停态/播放头跳转）：解码目标帧 → 合成。 */
-  async seekToFrame(target: number): Promise<void> {
-    if (this.disposed) return;
+  /**
+   * seek（暂停态/播放头跳转）：并行解码目标帧 → 合成。
+   * - latest-wins（epoch）：新 seek 到来时旧结果的合成被跳过（解码仍完成，
+   *   上传结果无害保留）；连续快速 seek 进入拖拽快速档——仅解码主轨输入、
+   *   跳过 PiP/转场影子槽，停止 250ms 后由调用方触发全量精修。
+   * - 返回实际渲染的帧号（被更新的 seek 取代时为 -1）。
+   */
+  async seekToFrame(target: number): Promise<number> {
+    if (this.disposed) return -1;
+    const epoch = ++this.seekEpoch;
+    const now = performance.now();
+    this.dragMode = now - this.lastSeekWall < 250;
+    this.lastSeekWall = now;
     const index = Math.max(0, Math.min(target, this.ir.frames.length - 1));
     const frame = this.ir.frames[index]!;
     this.currentFrame = index;
@@ -174,12 +188,29 @@ export class PreviewSession {
       requests.push(this.upload(main.left.input_id, main.left.src_n, shared));
       requests.push(this.upload(main.right.input_id, main.right.src_n, false));
     }
-    for (const overlay of frame.overlays) {
-      requests.push(this.upload(overlay.input_id, overlay.src_n, false));
+    if (!this.dragMode) {
+      for (const overlay of frame.overlays) {
+        requests.push(this.upload(overlay.input_id, overlay.src_n, false));
+      }
     }
     await Promise.all(requests);
+    if (epoch !== this.seekEpoch) return -1; // 已被更新的 seek 取代
+    this.lastSeekMs = performance.now() - now;
     this.compose(frame);
     this.onTimeUs?.(frame.t_us);
+    return frame.n;
+  }
+
+  /** 拖拽结束后的全量精修（覆盖 PiP/转场槽位），快速档期间跳过的内容由此补齐。 */
+  async refineAfterDrag(): Promise<void> {
+    this.dragMode = false;
+    await this.seekToFrame(this.currentFrame);
+    // seekToFrame 内部的 epoch 自增会置 dragMode=false，二次确认状态
+    this.dragMode = false;
+  }
+
+  get seekMetrics(): { last_seek_ms: number; drag_mode: boolean } {
+    return { last_seek_ms: Math.round(this.lastSeekMs * 1000) / 1000, drag_mode: this.dragMode };
   }
 
   play(): void {
