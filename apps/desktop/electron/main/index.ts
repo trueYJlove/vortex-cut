@@ -20,6 +20,7 @@ import { exportFileName, normalizeExportPath } from "./export-destination.js";
 import { defaultLogPath, appendLog, redact } from "./logging.js";
 import { SidecarSupervisor } from "./sidecar-supervisor.js";
 import { RESTRICTED_MEDIA_SCHEME, RestrictedMediaRegistry, serveRestrictedMedia } from "./restricted-media.js";
+import { probeActive, probeLoadQuery, registerProbeIpc, type ProbeIpcHandle } from "./probe-ipc.js";
 import { normalizeJob } from "../../src/lib/core-client.js";
 import {
   isApiErrorResponse,
@@ -85,6 +86,7 @@ let supervisor: SidecarSupervisor | undefined;
 let core: CoreAdminClient | undefined;
 let runtime: { base_url: string; ui_token: string; protocol_version: 1 } | undefined;
 const restrictedMedia = new RestrictedMediaRegistry();
+let probeIpc: ProbeIpcHandle | null = null;
 let logPath = "";
 let providerSecrets: ProviderSecretStore | undefined;
 let imageProviderSecrets: ImageProviderSecretStore | undefined;
@@ -252,6 +254,7 @@ async function createWindow(): Promise<void> {
     void appendLog(logPath, `preload error path=${preloadPath} error=${error.stack ?? error.message}`);
   });
   windowRef.webContents.on("render-process-gone", (_event, details) => {
+    probeIpc?.noteRenderGone();
     void appendLog(logPath, `render process gone reason=${details.reason} exit=${details.exitCode}`);
   });
   windowRef.webContents.on("did-finish-load", () => { void appendLog(logPath, "renderer did-finish-load"); });
@@ -262,9 +265,17 @@ async function createWindow(): Promise<void> {
   windowRef.webContents.on("did-fail-load", (_event, code, description, url) => {
     void appendLog(logPath, `renderer load failed code=${code} description=${description} url=${url}`);
   });
+  // M3-0 探针：dev-only 采集渲染进程 console（探针无 stdout，错误经此落日志）。
+  if (probeActive()) {
+    windowRef.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+      void appendLog(logPath, `renderer console[level=${level}] ${message} @${sourceId}:${line}`);
+    });
+  }
   windowRef.on("closed", () => { void appendLog(logPath, "window closed"); windowRef = undefined; });
+  // M3-0 探针：仅 dev + AIVS_M3_PROBE 时向加载 URL 追加 ?probe=<名>（§7.1 第 1 层）。
+  const probeQuery = probeLoadQuery();
   const load = process.env.ELECTRON_RENDERER_URL
-    ? windowRef.loadURL(process.env.ELECTRON_RENDERER_URL)
+    ? windowRef.loadURL(process.env.ELECTRON_RENDERER_URL + probeQuery)
     : windowRef.loadFile(join(__dirname, "../renderer/index.html"));
   void load.then(() => appendLog(logPath, "window loaded")).catch(error => appendLog(logPath, `window load error: ${String(error)}`));
 }
@@ -720,6 +731,7 @@ app.whenReady().then(async () => {
     return;
   }
   protocol.handle(RESTRICTED_MEDIA_SCHEME, request => serveRestrictedMedia(request, restrictedMedia));
+  probeIpc = registerProbeIpc({ registry: restrictedMedia });
   registerIpc();
   try {
     await createWindow();

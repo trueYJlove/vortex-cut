@@ -1,0 +1,1193 @@
+{
+  "verdict": {
+    "gate": "非字幕采样帧全部 PSNR ≥ 40.0dB 且几何错位 ≤ 1.0px（§7.2）",
+    "non_caption_frames": 26,
+    "psnr_min_db": Infinity,
+    "psnr_all_pass": true,
+    "misalign_max_px": 0,
+    "misalign_all_pass": true,
+    "caption_frames": 11,
+    "caption_note": "字幕帧不计入硬门（文本光栅化系统差），IoU/bbox/diff 比率单列",
+    "pass": true
+  },
+  "frames": [
+    {
+      "n": 0,
+      "t_s": 0.0,
+      "kind": "segment",
+      "overlays": 0,
+      "caption": false,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 30,
+      "t_s": 1.0,
+      "kind": "segment",
+      "overlays": 0,
+      "caption": false,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 120,
+      "t_s": 4.0,
+      "kind": "segment",
+      "overlays": 0,
+      "caption": true,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 240,
+      "t_s": 8.0,
+      "kind": "segment",
+      "overlays": 0,
+      "caption": false,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 330,
+      "t_s": 11.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 420,
+      "t_s": 14.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": true,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 450,
+      "t_s": 15.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": true,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 510,
+      "t_s": 17.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 569,
+      "t_s": 18.9667,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.8
+      }
+    },
+    {
+      "n": 570,
+      "t_s": 19.0,
+      "kind": "transition",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 571,
+      "t_s": 19.0333,
+      "kind": "transition",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 585,
+      "t_s": 19.5,
+      "kind": "transition",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 599,
+      "t_s": 19.9667,
+      "kind": "transition",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 600,
+      "t_s": 20.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 601,
+      "t_s": 20.0333,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 660,
+      "t_s": 22.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 750,
+      "t_s": 25.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": true,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 810,
+      "t_s": 27.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": true,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 899,
+      "t_s": 29.9667,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 900,
+      "t_s": 30.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 1000,
+      "t_s": 33.3333,
+      "kind": "segment",
+      "overlays": 0,
+      "caption": false,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 1050,
+      "t_s": 35.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 1080,
+      "t_s": 36.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 1200,
+      "t_s": 40.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": true,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 1260,
+      "t_s": 42.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": true,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 1353,
+      "t_s": 45.1,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 1365,
+      "t_s": 45.5,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 1380,
+      "t_s": 46.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 1395,
+      "t_s": 46.5,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 1440,
+      "t_s": 48.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 1470,
+      "t_s": 49.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 1500,
+      "t_s": 50.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": true,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 1560,
+      "t_s": 52.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": true,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 1590,
+      "t_s": 53.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": true,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 1649,
+      "t_s": 54.9667,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": true,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 1740,
+      "t_s": 58.0,
+      "kind": "segment",
+      "overlays": 0,
+      "caption": false,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 1799,
+      "t_s": 59.9667,
+      "kind": "segment",
+      "overlays": 0,
+      "caption": false,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    }
+  ],
+  "worst5_by_psnr": [
+    {
+      "n": 0,
+      "t_s": 0.0,
+      "kind": "segment",
+      "overlays": 0,
+      "caption": false,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 30,
+      "t_s": 1.0,
+      "kind": "segment",
+      "overlays": 0,
+      "caption": false,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 120,
+      "t_s": 4.0,
+      "kind": "segment",
+      "overlays": 0,
+      "caption": true,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 240,
+      "t_s": 8.0,
+      "kind": "segment",
+      "overlays": 0,
+      "caption": false,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    },
+    {
+      "n": 330,
+      "t_s": 11.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": Infinity,
+      "psnr_raw": {
+        "r": Infinity,
+        "g": Infinity,
+        "b": Infinity,
+        "average": Infinity,
+        "min": Infinity,
+        "max": Infinity
+      },
+      "ssim": {
+        "r": 1.0,
+        "g": 1.0,
+        "b": 1.0,
+        "all": 1.0
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.999998,
+        "confidence": 999998070987.7
+      }
+    }
+  ]
+}

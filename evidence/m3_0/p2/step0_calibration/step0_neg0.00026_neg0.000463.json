@@ -1,0 +1,61 @@
+{
+  "ffv1_extraction_deterministic": true,
+  "ffv1_extraction_psnr_db": Infinity,
+  "color_matrix_mismatch_601_vs_709_psnr_db": 27.820313,
+  "gl_vs_ffmpeg_calibration": [
+    {
+      "frame": 1,
+      "psnr_db": 37.517231
+    },
+    {
+      "frame": 2,
+      "psnr_db": 33.296876
+    },
+    {
+      "frame": 3,
+      "psnr_db": 33.400123
+    },
+    {
+      "frame": 4,
+      "psnr_db": 32.398154
+    },
+    {
+      "frame": 5,
+      "psnr_db": 32.446046
+    },
+    {
+      "frame": 6,
+      "psnr_db": 32.948209
+    },
+    {
+      "frame": 7,
+      "psnr_db": 31.426859
+    },
+    {
+      "frame": 8,
+      "psnr_db": 32.048234
+    },
+    {
+      "frame": 9,
+      "psnr_db": 31.420556
+    },
+    {
+      "frame": 10,
+      "psnr_db": 32.017304
+    },
+    {
+      "frame": 11,
+      "psnr_db": 34.963645
+    },
+    {
+      "frame": 12,
+      "psnr_db": 34.604794
+    },
+    {
+      "frame": 13,
+      "psnr_db": 38.586136
+    }
+  ],
+  "gl_floor_min_db": 31.420556,
+  "note": "40dB 硬门在 gl_floor_min 之上套用（R10 免疫）；矩阵失配量化说明钉死 bt709 的必要性"
+}

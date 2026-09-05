@@ -43,3 +43,14 @@ apps/desktop/test-results/
 
 # Local secrets
 .env
+
+# M3-0 探针证据（批量二进制不入库；清单与结果 JSON 入库）
+evidence/m3_0/**/*.mkv
+evidence/m3_0/**/*.mp4
+evidence/m3_0/**/*.png
+evidence/m3_0/**/frames/
+evidence/m3_0/**/fonts/
+evidence/m3_0/**/gl/
+evidence/m3_0/**/gl_nocap/
+evidence/m3_0/**/step0/
+evidence/m3_0/**/assets.manifest*.json

@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "compiler_version": "render-plan-v1",
+  "timeline_revision_id": "m3rev0",
+  "mode": "authoritative_preview",
+  "content_fingerprint": "sha256:756d1859febbb7d25d1a013081734bd9e2b8899e2bec5c874c10a02d7250a14d",
+  "inputs": [
+    {
+      "input_id": "I0",
+      "asset_id": "asset_card",
+      "asset_kind": "video",
+      "fingerprint": "706e3b39193ab6bba4adbeee9c7a5170baf7035f4d6053024ab7ac8792bc69ab",
+      "duration_us": 0,
+      "has_audio": false
+    }
+  ],
+  "segments": [
+    {
+      "clip_id": "cal_a",
+      "track_id": "V1",
+      "track_hidden": false,
+      "input_id": "I0",
+      "asset_kind": "video",
+      "source_start_us": 0,
+      "source_end_us": 5000000,
+      "timeline_start_us": 0,
+      "timeline_end_us": 5000000,
+      "layout": "fit",
+      "audio_enabled": false,
+      "gain_db": 0.0,
+      "speed_milli": 1000,
+      "reverse_playback": false,
+      "keyframes": null,
+      "transform": null,
+      "mask": null,
+      "keying": null,
+      "transition_in": {
+        "transition_id": "cal_tr",
+        "kind": "fade",
+        "duration_us": 500000
+      }
+    },
+    {
+      "clip_id": "cal_b",
+      "track_id": "V1",
+      "track_hidden": false,
+      "input_id": "I0",
+      "asset_kind": "video",
+      "source_start_us": 5000000,
+      "source_end_us": 10000000,
+      "timeline_start_us": 5000000,
+      "timeline_end_us": 10000000,
+      "layout": "fit",
+      "audio_enabled": false,
+      "gain_db": 0.0,
+      "speed_milli": 1000,
+      "reverse_playback": false,
+      "keyframes": null,
+      "transform": null,
+      "mask": null,
+      "keying": null,
+      "transition_in": null
+    }
+  ],
+  "captions": {
+    "format": "ass",
+    "preset_version": 1,
+    "font_bundle_version": 1,
+    "items": []
+  },
+  "output": {
+    "profile_id": "preview-169-v1",
+    "width": 960,
+    "height": 540,
+    "fps_num": 30,
+    "fps_den": 1,
+    "video_codec": "h264",
+    "audio_codec": "aac",
+    "audio_sample_rate": 48000,
+    "pixel_format": "yuv420p"
+  }
+}

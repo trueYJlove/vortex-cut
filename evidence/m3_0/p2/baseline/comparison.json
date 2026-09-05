@@ -1,0 +1,1651 @@
+{
+  "verdict": {
+    "gate": "非字幕采样帧全部 PSNR ≥ 40.0dB 且几何错位 ≤ 1.0px（§7.2）",
+    "non_caption_frames": 26,
+    "psnr_min_db": 19.103156,
+    "psnr_all_pass": false,
+    "misalign_max_px": 0,
+    "misalign_all_pass": true,
+    "caption_frames": 11,
+    "caption_note": "字幕帧不计入硬门（文本光栅化系统差），IoU/bbox/diff 比率单列",
+    "pass": false
+  },
+  "frames": [
+    {
+      "n": 0,
+      "t_s": 0.0,
+      "kind": "segment",
+      "overlays": 0,
+      "caption": false,
+      "psnr_db": 35.362022,
+      "psnr_raw": {
+        "r": 34.030235,
+        "g": 34.539738,
+        "b": 39.000371,
+        "average": 35.362022,
+        "min": 35.362022,
+        "max": 35.362022
+      },
+      "ssim": {
+        "r": 0.982377,
+        "g": 0.993152,
+        "b": 0.986366,
+        "all": 0.987298
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.827269,
+        "confidence": 827269254905.0
+      },
+      "psnr_vs_second_ref_db": 34.777389
+    },
+    {
+      "n": 30,
+      "t_s": 1.0,
+      "kind": "segment",
+      "overlays": 0,
+      "caption": false,
+      "psnr_db": 34.876938,
+      "psnr_raw": {
+        "r": 34.328652,
+        "g": 33.404301,
+        "b": 38.232668,
+        "average": 34.876938,
+        "min": 34.876938,
+        "max": 34.876938
+      },
+      "ssim": {
+        "r": 0.978395,
+        "g": 0.992236,
+        "b": 0.986027,
+        "all": 0.985553
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.84255,
+        "confidence": 842550359712.7
+      },
+      "psnr_vs_second_ref_db": 33.252243
+    },
+    {
+      "n": 120,
+      "t_s": 4.0,
+      "kind": "segment",
+      "overlays": 0,
+      "caption": true,
+      "psnr_db": 16.461968,
+      "psnr_raw": {
+        "r": 16.233553,
+        "g": 16.352525,
+        "b": 16.821838,
+        "average": 16.461968,
+        "min": 16.461968,
+        "max": 16.461968
+      },
+      "ssim": {
+        "r": 0.87547,
+        "g": 0.899309,
+        "b": 0.887081,
+        "all": 0.887287
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.090009,
+        "confidence": 90008676932.2
+      },
+      "psnr_vs_second_ref_db": 16.467432,
+      "caption_metric": {
+        "text_mask_iou": 0.4303,
+        "bbox_gl": {
+          "x0": 93,
+          "y0": 321,
+          "x1": 865,
+          "y1": 389,
+          "cx": 479.0,
+          "cy": 355.0,
+          "area": 37563
+        },
+        "bbox_ffmpeg": {
+          "x0": 210,
+          "y0": 334,
+          "x1": 748,
+          "y1": 385,
+          "cx": 479.0,
+          "cy": 359.5,
+          "area": 20614
+        },
+        "center_offset_px": [
+          0.0,
+          -4.5
+        ],
+        "fullframe_diff_ratio_gt10": 0.14667
+      }
+    },
+    {
+      "n": 240,
+      "t_s": 8.0,
+      "kind": "segment",
+      "overlays": 0,
+      "caption": false,
+      "psnr_db": 32.384337,
+      "psnr_raw": {
+        "r": 31.057667,
+        "g": 30.676677,
+        "b": 40.315853,
+        "average": 32.384337,
+        "min": 32.384337,
+        "max": 32.384337
+      },
+      "ssim": {
+        "r": 0.946158,
+        "g": 0.990082,
+        "b": 0.984583,
+        "all": 0.973608
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.868241,
+        "confidence": 868241179054.3
+      },
+      "psnr_vs_second_ref_db": 32.242872
+    },
+    {
+      "n": 330,
+      "t_s": 11.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": 20.328326,
+      "psnr_raw": {
+        "r": 21.192794,
+        "g": 19.61789,
+        "b": 20.316323,
+        "average": 20.328326,
+        "min": 20.328326,
+        "max": 20.328326
+      },
+      "ssim": {
+        "r": 0.93511,
+        "g": 0.938884,
+        "b": 0.912482,
+        "all": 0.928825
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.432113,
+        "confidence": 432112873540.9
+      },
+      "psnr_vs_second_ref_db": 20.291791
+    },
+    {
+      "n": 420,
+      "t_s": 14.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": true,
+      "psnr_db": 14.874911,
+      "psnr_raw": {
+        "r": 15.168866,
+        "g": 15.376792,
+        "b": 14.176082,
+        "average": 14.874911,
+        "min": 14.874911,
+        "max": 14.874911
+      },
+      "ssim": {
+        "r": 0.838181,
+        "g": 0.857117,
+        "b": 0.809501,
+        "all": 0.834933
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.086306,
+        "confidence": 86306028041.6
+      },
+      "psnr_vs_second_ref_db": 14.879271,
+      "caption_metric": {
+        "text_mask_iou": 0.4166,
+        "bbox_gl": {
+          "x0": 94,
+          "y0": 321,
+          "x1": 865,
+          "y1": 389,
+          "cx": 479.5,
+          "cy": 355.0,
+          "area": 38129
+        },
+        "bbox_ffmpeg": {
+          "x0": 212,
+          "y0": 334,
+          "x1": 749,
+          "y1": 385,
+          "cx": 480.5,
+          "cy": 359.5,
+          "area": 21234
+        },
+        "center_offset_px": [
+          -1.0,
+          -4.5
+        ],
+        "fullframe_diff_ratio_gt10": 0.21507
+      }
+    },
+    {
+      "n": 450,
+      "t_s": 15.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": true,
+      "psnr_db": 14.803284,
+      "psnr_raw": {
+        "r": 15.022711,
+        "g": 15.521884,
+        "b": 14.005073,
+        "average": 14.803284,
+        "min": 14.803284,
+        "max": 14.803284
+      },
+      "ssim": {
+        "r": 0.838655,
+        "g": 0.859566,
+        "b": 0.80849,
+        "all": 0.83557
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.082628,
+        "confidence": 82627793780.0
+      },
+      "psnr_vs_second_ref_db": 14.827831,
+      "caption_metric": {
+        "text_mask_iou": 0.4171,
+        "bbox_gl": {
+          "x0": 94,
+          "y0": 321,
+          "x1": 865,
+          "y1": 389,
+          "cx": 479.5,
+          "cy": 355.0,
+          "area": 38180
+        },
+        "bbox_ffmpeg": {
+          "x0": 212,
+          "y0": 334,
+          "x1": 749,
+          "y1": 385,
+          "cx": 480.5,
+          "cy": 359.5,
+          "area": 21268
+        },
+        "center_offset_px": [
+          -1.0,
+          -4.5
+        ],
+        "fullframe_diff_ratio_gt10": 0.21299
+      }
+    },
+    {
+      "n": 510,
+      "t_s": 17.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": 19.103156,
+      "psnr_raw": {
+        "r": 20.107772,
+        "g": 20.64795,
+        "b": 17.325384,
+        "average": 19.103156,
+        "min": 19.103156,
+        "max": 19.103156
+      },
+      "ssim": {
+        "r": 0.941111,
+        "g": 0.946483,
+        "b": 0.911126,
+        "all": 0.932906
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.485743,
+        "confidence": 485742903985.1
+      },
+      "psnr_vs_second_ref_db": 19.029706
+    },
+    {
+      "n": 569,
+      "t_s": 18.9667,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": 19.409583,
+      "psnr_raw": {
+        "r": 19.970513,
+        "g": 19.748383,
+        "b": 18.631501,
+        "average": 19.409583,
+        "min": 19.409583,
+        "max": 19.409583
+      },
+      "ssim": {
+        "r": 0.885694,
+        "g": 0.884503,
+        "b": 0.854671,
+        "all": 0.874956
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.429284,
+        "confidence": 429283613794.8
+      },
+      "psnr_vs_second_ref_db": 19.343065
+    },
+    {
+      "n": 570,
+      "t_s": 19.0,
+      "kind": "transition",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": 20.694818,
+      "psnr_raw": {
+        "r": 21.767015,
+        "g": 21.531202,
+        "b": 19.252368,
+        "average": 20.694818,
+        "min": 20.694818,
+        "max": 20.694818
+      },
+      "ssim": {
+        "r": 0.931377,
+        "g": 0.945321,
+        "b": 0.909295,
+        "all": 0.928664
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.479237,
+        "confidence": 479237051271.0
+      },
+      "psnr_vs_second_ref_db": 20.630438
+    },
+    {
+      "n": 571,
+      "t_s": 19.0333,
+      "kind": "transition",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": 19.421262,
+      "psnr_raw": {
+        "r": 19.740725,
+        "g": 19.720779,
+        "b": 18.861516,
+        "average": 19.421262,
+        "min": 19.421262,
+        "max": 19.421262
+      },
+      "ssim": {
+        "r": 0.883721,
+        "g": 0.893312,
+        "b": 0.864873,
+        "all": 0.880635
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.387716,
+        "confidence": 387716208814.1
+      },
+      "psnr_vs_second_ref_db": 19.40793
+    },
+    {
+      "n": 585,
+      "t_s": 19.5,
+      "kind": "transition",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": 20.993289,
+      "psnr_raw": {
+        "r": 19.892394,
+        "g": 20.856809,
+        "b": 22.671008,
+        "average": 20.993289,
+        "min": 20.993289,
+        "max": 20.993289
+      },
+      "ssim": {
+        "r": 0.866485,
+        "g": 0.864117,
+        "b": 0.834805,
+        "all": 0.855136
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.334973,
+        "confidence": 334973190792.3
+      },
+      "psnr_vs_second_ref_db": 20.983341
+    },
+    {
+      "n": 599,
+      "t_s": 19.9667,
+      "kind": "transition",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": 20.201351,
+      "psnr_raw": {
+        "r": 17.273717,
+        "g": 20.85697,
+        "b": 27.701332,
+        "average": 20.201351,
+        "min": 20.201351,
+        "max": 20.201351
+      },
+      "ssim": {
+        "r": 0.886767,
+        "g": 0.907347,
+        "b": 0.85917,
+        "all": 0.884428
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.399552,
+        "confidence": 399552464340.3
+      },
+      "psnr_vs_second_ref_db": 20.216009
+    },
+    {
+      "n": 600,
+      "t_s": 20.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": 19.931131,
+      "psnr_raw": {
+        "r": 16.958898,
+        "g": 20.644079,
+        "b": 27.656132,
+        "average": 19.931131,
+        "min": 19.931131,
+        "max": 19.931131
+      },
+      "ssim": {
+        "r": 0.888883,
+        "g": 0.910611,
+        "b": 0.851972,
+        "all": 0.883822
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.396965,
+        "confidence": 396965100483.6
+      },
+      "psnr_vs_second_ref_db": 19.947921
+    },
+    {
+      "n": 601,
+      "t_s": 20.0333,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": 19.836034,
+      "psnr_raw": {
+        "r": 16.804687,
+        "g": 20.612819,
+        "b": 27.959069,
+        "average": 19.836034,
+        "min": 19.836034,
+        "max": 19.836034
+      },
+      "ssim": {
+        "r": 0.853516,
+        "g": 0.875531,
+        "b": 0.82156,
+        "all": 0.850203
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.413287,
+        "confidence": 413286797593.7
+      },
+      "psnr_vs_second_ref_db": 19.855569
+    },
+    {
+      "n": 660,
+      "t_s": 22.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": 20.644262,
+      "psnr_raw": {
+        "r": 17.802199,
+        "g": 21.237742,
+        "b": 27.553866,
+        "average": 20.644262,
+        "min": 20.644262,
+        "max": 20.644262
+      },
+      "ssim": {
+        "r": 0.900155,
+        "g": 0.916709,
+        "b": 0.858535,
+        "all": 0.8918
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.326758,
+        "confidence": 326757771914.0
+      },
+      "psnr_vs_second_ref_db": 20.656655
+    },
+    {
+      "n": 750,
+      "t_s": 25.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": true,
+      "psnr_db": 16.019306,
+      "psnr_raw": {
+        "r": 14.759609,
+        "g": 16.381851,
+        "b": 17.305984,
+        "average": 16.019306,
+        "min": 16.019306,
+        "max": 16.019306
+      },
+      "ssim": {
+        "r": 0.833243,
+        "g": 0.851333,
+        "b": 0.790809,
+        "all": 0.825128
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.099578,
+        "confidence": 99578162980.0
+      },
+      "psnr_vs_second_ref_db": 16.028003,
+      "caption_metric": {
+        "text_mask_iou": 0.3784,
+        "bbox_gl": {
+          "x0": 187,
+          "y0": 321,
+          "x1": 771,
+          "y1": 389,
+          "cx": 479.0,
+          "cy": 355.0,
+          "area": 26669
+        },
+        "bbox_ffmpeg": {
+          "x0": 276,
+          "y0": 334,
+          "x1": 682,
+          "y1": 385,
+          "cx": 479.0,
+          "cy": 359.5,
+          "area": 14870
+        },
+        "center_offset_px": [
+          0.0,
+          -4.5
+        ],
+        "fullframe_diff_ratio_gt10": 0.17575
+      }
+    },
+    {
+      "n": 810,
+      "t_s": 27.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": true,
+      "psnr_db": 16.080504,
+      "psnr_raw": {
+        "r": 14.9853,
+        "g": 16.343146,
+        "b": 17.205143,
+        "average": 16.080504,
+        "min": 16.080504,
+        "max": 16.080504
+      },
+      "ssim": {
+        "r": 0.836785,
+        "g": 0.852104,
+        "b": 0.790912,
+        "all": 0.8266
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.093852,
+        "confidence": 93852443713.0
+      },
+      "psnr_vs_second_ref_db": 16.088573,
+      "caption_metric": {
+        "text_mask_iou": 0.3756,
+        "bbox_gl": {
+          "x0": 187,
+          "y0": 321,
+          "x1": 770,
+          "y1": 389,
+          "cx": 478.5,
+          "cy": 355.0,
+          "area": 26690
+        },
+        "bbox_ffmpeg": {
+          "x0": 276,
+          "y0": 334,
+          "x1": 682,
+          "y1": 385,
+          "cx": 479.0,
+          "cy": 359.5,
+          "area": 14848
+        },
+        "center_offset_px": [
+          -0.5,
+          -4.5
+        ],
+        "fullframe_diff_ratio_gt10": 0.17632
+      }
+    },
+    {
+      "n": 899,
+      "t_s": 29.9667,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": 20.128452,
+      "psnr_raw": {
+        "r": 17.087797,
+        "g": 20.893581,
+        "b": 28.440443,
+        "average": 20.128452,
+        "min": 20.128452,
+        "max": 20.128452
+      },
+      "ssim": {
+        "r": 0.892897,
+        "g": 0.909373,
+        "b": 0.865598,
+        "all": 0.889289
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.415371,
+        "confidence": 415370793209.2
+      },
+      "psnr_vs_second_ref_db": 20.135827
+    },
+    {
+      "n": 900,
+      "t_s": 30.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": 20.043142,
+      "psnr_raw": {
+        "r": 17.047785,
+        "g": 20.792817,
+        "b": 27.857489,
+        "average": 20.043142,
+        "min": 20.043142,
+        "max": 20.043142
+      },
+      "ssim": {
+        "r": 0.892852,
+        "g": 0.913178,
+        "b": 0.855901,
+        "all": 0.88731
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.401018,
+        "confidence": 401018003560.4
+      },
+      "psnr_vs_second_ref_db": 20.049522
+    },
+    {
+      "n": 1000,
+      "t_s": 33.3333,
+      "kind": "segment",
+      "overlays": 0,
+      "caption": false,
+      "psnr_db": 31.245861,
+      "psnr_raw": {
+        "r": 30.155349,
+        "g": 32.226464,
+        "b": 31.623694,
+        "average": 31.245861,
+        "min": 31.245861,
+        "max": 31.245861
+      },
+      "ssim": {
+        "r": 0.945003,
+        "g": 0.954183,
+        "b": 0.91081,
+        "all": 0.936666
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.61491,
+        "confidence": 614909827971.4
+      },
+      "psnr_vs_second_ref_db": 31.177252
+    },
+    {
+      "n": 1050,
+      "t_s": 35.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": 24.628479,
+      "psnr_raw": {
+        "r": 23.747823,
+        "g": 28.638163,
+        "b": 23.236056,
+        "average": 24.628479,
+        "min": 24.628479,
+        "max": 24.628479
+      },
+      "ssim": {
+        "r": 0.905387,
+        "g": 0.915245,
+        "b": 0.867364,
+        "all": 0.895999
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.573816,
+        "confidence": 573816385051.4
+      },
+      "psnr_vs_second_ref_db": 24.620992
+    },
+    {
+      "n": 1080,
+      "t_s": 36.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": 23.961208,
+      "psnr_raw": {
+        "r": 22.889667,
+        "g": 27.974191,
+        "b": 22.744802,
+        "average": 23.961208,
+        "min": 23.961208,
+        "max": 23.961208
+      },
+      "ssim": {
+        "r": 0.903661,
+        "g": 0.913608,
+        "b": 0.866565,
+        "all": 0.894611
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.539274,
+        "confidence": 539273563415.0
+      },
+      "psnr_vs_second_ref_db": 23.955531
+    },
+    {
+      "n": 1200,
+      "t_s": 40.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": true,
+      "psnr_db": 16.008809,
+      "psnr_raw": {
+        "r": 15.847887,
+        "g": 16.25347,
+        "b": 15.935476,
+        "average": 16.008809,
+        "min": 16.008809,
+        "max": 16.008809
+      },
+      "ssim": {
+        "r": 0.842947,
+        "g": 0.851881,
+        "b": 0.807194,
+        "all": 0.834007
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.142714,
+        "confidence": 142713966672.2
+      },
+      "psnr_vs_second_ref_db": 16.013311,
+      "caption_metric": {
+        "text_mask_iou": 0.4151,
+        "bbox_gl": {
+          "x0": 129,
+          "y0": 322,
+          "x1": 830,
+          "y1": 389,
+          "cx": 479.5,
+          "cy": 355.5,
+          "area": 35555
+        },
+        "bbox_ffmpeg": {
+          "x0": 236,
+          "y0": 334,
+          "x1": 723,
+          "y1": 385,
+          "cx": 479.5,
+          "cy": 359.5,
+          "area": 19279
+        },
+        "center_offset_px": [
+          0.0,
+          -4.0
+        ],
+        "fullframe_diff_ratio_gt10": 0.14075
+      }
+    },
+    {
+      "n": 1260,
+      "t_s": 42.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": true,
+      "psnr_db": 16.025679,
+      "psnr_raw": {
+        "r": 15.940865,
+        "g": 16.217948,
+        "b": 15.924441,
+        "average": 16.025679,
+        "min": 16.025679,
+        "max": 16.025679
+      },
+      "ssim": {
+        "r": 0.843455,
+        "g": 0.84989,
+        "b": 0.804373,
+        "all": 0.832573
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.133235,
+        "confidence": 133234957701.9
+      },
+      "psnr_vs_second_ref_db": 16.032141,
+      "caption_metric": {
+        "text_mask_iou": 0.4148,
+        "bbox_gl": {
+          "x0": 129,
+          "y0": 322,
+          "x1": 830,
+          "y1": 389,
+          "cx": 479.5,
+          "cy": 355.5,
+          "area": 35418
+        },
+        "bbox_ffmpeg": {
+          "x0": 236,
+          "y0": 335,
+          "x1": 723,
+          "y1": 385,
+          "cx": 479.5,
+          "cy": 360.0,
+          "area": 19197
+        },
+        "center_offset_px": [
+          0.0,
+          -4.5
+        ],
+        "fullframe_diff_ratio_gt10": 0.13942
+      }
+    },
+    {
+      "n": 1353,
+      "t_s": 45.1,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": 25.673624,
+      "psnr_raw": {
+        "r": 24.835024,
+        "g": 30.724953,
+        "b": 23.987206,
+        "average": 25.673624,
+        "min": 25.673624,
+        "max": 25.673624
+      },
+      "ssim": {
+        "r": 0.815533,
+        "g": 0.765931,
+        "b": 0.851485,
+        "all": 0.810983
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.395264,
+        "confidence": 395264263807.9
+      },
+      "psnr_vs_second_ref_db": 25.689658
+    },
+    {
+      "n": 1365,
+      "t_s": 45.5,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": 25.366714,
+      "psnr_raw": {
+        "r": 24.490944,
+        "g": 30.067909,
+        "b": 23.789653,
+        "average": 25.366714,
+        "min": 25.366714,
+        "max": 25.366714
+      },
+      "ssim": {
+        "r": 0.591645,
+        "g": 0.899246,
+        "b": 0.924257,
+        "all": 0.805049
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.311131,
+        "confidence": 311131052287.9
+      },
+      "psnr_vs_second_ref_db": 25.38479
+    },
+    {
+      "n": 1380,
+      "t_s": 46.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": 24.914814,
+      "psnr_raw": {
+        "r": 23.893446,
+        "g": 29.61913,
+        "b": 23.464847,
+        "average": 24.914814,
+        "min": 24.914814,
+        "max": 24.914814
+      },
+      "ssim": {
+        "r": 0.637479,
+        "g": 0.925499,
+        "b": 0.933383,
+        "all": 0.83212
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.318153,
+        "confidence": 318153129378.0
+      },
+      "psnr_vs_second_ref_db": 24.929859
+    },
+    {
+      "n": 1395,
+      "t_s": 46.5,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": 25.025278,
+      "psnr_raw": {
+        "r": 24.055784,
+        "g": 29.586317,
+        "b": 23.56392,
+        "average": 25.025278,
+        "min": 25.025278,
+        "max": 25.025278
+      },
+      "ssim": {
+        "r": 0.651175,
+        "g": 0.933159,
+        "b": 0.935505,
+        "all": 0.839946
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.32296,
+        "confidence": 322960274666.9
+      },
+      "psnr_vs_second_ref_db": 25.042478
+    },
+    {
+      "n": 1440,
+      "t_s": 48.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": 27.926663,
+      "psnr_raw": {
+        "r": 26.713424,
+        "g": 30.666553,
+        "b": 27.336345,
+        "average": 27.926663,
+        "min": 27.926663,
+        "max": 27.926663
+      },
+      "ssim": {
+        "r": 0.752073,
+        "g": 0.949617,
+        "b": 0.949193,
+        "all": 0.883627
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.326033,
+        "confidence": 326033111761.4
+      },
+      "psnr_vs_second_ref_db": 27.907015
+    },
+    {
+      "n": 1470,
+      "t_s": 49.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": false,
+      "psnr_db": 25.455967,
+      "psnr_raw": {
+        "r": 24.549973,
+        "g": 29.393407,
+        "b": 24.10735,
+        "average": 25.455967,
+        "min": 25.455967,
+        "max": 25.455967
+      },
+      "ssim": {
+        "r": 0.74973,
+        "g": 0.943662,
+        "b": 0.938376,
+        "all": 0.877256
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.351278,
+        "confidence": 351277789911.7
+      },
+      "psnr_vs_second_ref_db": 25.444015
+    },
+    {
+      "n": 1500,
+      "t_s": 50.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": true,
+      "psnr_db": 15.333381,
+      "psnr_raw": {
+        "r": 14.895486,
+        "g": 15.643763,
+        "b": 15.497631,
+        "average": 15.333381,
+        "min": 15.333381,
+        "max": 15.333381
+      },
+      "ssim": {
+        "r": 0.686483,
+        "g": 0.859198,
+        "b": 0.848444,
+        "all": 0.798041
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.022866,
+        "confidence": 22866375751.0
+      },
+      "psnr_vs_second_ref_db": 15.339056,
+      "caption_metric": {
+        "text_mask_iou": 0.4164,
+        "bbox_gl": {
+          "x0": 63,
+          "y0": 321,
+          "x1": 896,
+          "y1": 389,
+          "cx": 479.5,
+          "cy": 355.0,
+          "area": 42248
+        },
+        "bbox_ffmpeg": {
+          "x0": 190,
+          "y0": 334,
+          "x1": 769,
+          "y1": 385,
+          "cx": 479.5,
+          "cy": 359.5,
+          "area": 22961
+        },
+        "center_offset_px": [
+          0.0,
+          -4.5
+        ],
+        "fullframe_diff_ratio_gt10": 0.21969
+      }
+    },
+    {
+      "n": 1560,
+      "t_s": 52.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": true,
+      "psnr_db": 15.168926,
+      "psnr_raw": {
+        "r": 14.837502,
+        "g": 15.452077,
+        "b": 15.23978,
+        "average": 15.168926,
+        "min": 15.168926,
+        "max": 15.168926
+      },
+      "ssim": {
+        "r": 0.673175,
+        "g": 0.84006,
+        "b": 0.832487,
+        "all": 0.781907
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.018844,
+        "confidence": 18844110427.8
+      },
+      "psnr_vs_second_ref_db": 15.176792,
+      "caption_metric": {
+        "text_mask_iou": 0.4337,
+        "bbox_gl": {
+          "x0": 66,
+          "y0": 322,
+          "x1": 896,
+          "y1": 389,
+          "cx": 481.0,
+          "cy": 355.5,
+          "area": 41060
+        },
+        "bbox_ffmpeg": {
+          "x0": 190,
+          "y0": 335,
+          "x1": 769,
+          "y1": 385,
+          "cx": 479.5,
+          "cy": 360.0,
+          "area": 23088
+        },
+        "center_offset_px": [
+          1.5,
+          -4.5
+        ],
+        "fullframe_diff_ratio_gt10": 0.34385
+      }
+    },
+    {
+      "n": 1590,
+      "t_s": 53.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": true,
+      "psnr_db": 15.125801,
+      "psnr_raw": {
+        "r": 14.849622,
+        "g": 15.374707,
+        "b": 15.169259,
+        "average": 15.125801,
+        "min": 15.125801,
+        "max": 15.125801
+      },
+      "ssim": {
+        "r": 0.687117,
+        "g": 0.837116,
+        "b": 0.833202,
+        "all": 0.785812
+      },
+      "shift": {
+        "dx": 1,
+        "dy": 1,
+        "peak": 0.0333,
+        "confidence": 33299620520.9
+      },
+      "psnr_vs_second_ref_db": 15.131278,
+      "caption_metric": {
+        "text_mask_iou": 0.4534,
+        "bbox_gl": {
+          "x0": 66,
+          "y0": 321,
+          "x1": 896,
+          "y1": 389,
+          "cx": 481.0,
+          "cy": 355.0,
+          "area": 40127
+        },
+        "bbox_ffmpeg": {
+          "x0": 190,
+          "y0": 334,
+          "x1": 769,
+          "y1": 385,
+          "cx": 479.5,
+          "cy": 359.5,
+          "area": 23471
+        },
+        "center_offset_px": [
+          1.5,
+          -4.5
+        ],
+        "fullframe_diff_ratio_gt10": 0.3183
+      }
+    },
+    {
+      "n": 1649,
+      "t_s": 54.9667,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": true,
+      "psnr_db": 15.4005,
+      "psnr_raw": {
+        "r": 15.090816,
+        "g": 15.514268,
+        "b": 15.614383,
+        "average": 15.4005,
+        "min": 15.4005,
+        "max": 15.4005
+      },
+      "ssim": {
+        "r": 0.725718,
+        "g": 0.874199,
+        "b": 0.869585,
+        "all": 0.823168
+      },
+      "shift": {
+        "dx": 0,
+        "dy": -1,
+        "peak": 0.075001,
+        "confidence": 75001034512.8
+      },
+      "psnr_vs_second_ref_db": 15.408062,
+      "caption_metric": {
+        "text_mask_iou": 0.4501,
+        "bbox_gl": {
+          "x0": 66,
+          "y0": 321,
+          "x1": 896,
+          "y1": 389,
+          "cx": 481.0,
+          "cy": 355.0,
+          "area": 40025
+        },
+        "bbox_ffmpeg": {
+          "x0": 190,
+          "y0": 334,
+          "x1": 769,
+          "y1": 385,
+          "cx": 479.5,
+          "cy": 359.5,
+          "area": 23371
+        },
+        "center_offset_px": [
+          1.5,
+          -4.5
+        ],
+        "fullframe_diff_ratio_gt10": 0.34027
+      }
+    },
+    {
+      "n": 1740,
+      "t_s": 58.0,
+      "kind": "segment",
+      "overlays": 0,
+      "caption": false,
+      "psnr_db": 32.684221,
+      "psnr_raw": {
+        "r": 30.586285,
+        "g": 31.889924,
+        "b": 40.173355,
+        "average": 32.684221,
+        "min": 32.684221,
+        "max": 32.684221
+      },
+      "ssim": {
+        "r": 0.811807,
+        "g": 0.986501,
+        "b": 0.983699,
+        "all": 0.927336
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.760765,
+        "confidence": 760764748275.9
+      },
+      "psnr_vs_second_ref_db": 32.584602
+    },
+    {
+      "n": 1799,
+      "t_s": 59.9667,
+      "kind": "segment",
+      "overlays": 0,
+      "caption": false,
+      "psnr_db": 30.992568,
+      "psnr_raw": {
+        "r": 29.516054,
+        "g": 30.513201,
+        "b": 34.194835,
+        "average": 30.992568,
+        "min": 30.992568,
+        "max": 30.992568
+      },
+      "ssim": {
+        "r": 0.797315,
+        "g": 0.980162,
+        "b": 0.974483,
+        "all": 0.91732
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.605174,
+        "confidence": 605173787358.9
+      },
+      "psnr_vs_second_ref_db": 30.985122
+    }
+  ],
+  "worst5_by_psnr": [
+    {
+      "n": 450,
+      "t_s": 15.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": true,
+      "psnr_db": 14.803284,
+      "psnr_raw": {
+        "r": 15.022711,
+        "g": 15.521884,
+        "b": 14.005073,
+        "average": 14.803284,
+        "min": 14.803284,
+        "max": 14.803284
+      },
+      "ssim": {
+        "r": 0.838655,
+        "g": 0.859566,
+        "b": 0.80849,
+        "all": 0.83557
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.082628,
+        "confidence": 82627793780.0
+      },
+      "psnr_vs_second_ref_db": 14.827831,
+      "caption_metric": {
+        "text_mask_iou": 0.4171,
+        "bbox_gl": {
+          "x0": 94,
+          "y0": 321,
+          "x1": 865,
+          "y1": 389,
+          "cx": 479.5,
+          "cy": 355.0,
+          "area": 38180
+        },
+        "bbox_ffmpeg": {
+          "x0": 212,
+          "y0": 334,
+          "x1": 749,
+          "y1": 385,
+          "cx": 480.5,
+          "cy": 359.5,
+          "area": 21268
+        },
+        "center_offset_px": [
+          -1.0,
+          -4.5
+        ],
+        "fullframe_diff_ratio_gt10": 0.21299
+      }
+    },
+    {
+      "n": 420,
+      "t_s": 14.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": true,
+      "psnr_db": 14.874911,
+      "psnr_raw": {
+        "r": 15.168866,
+        "g": 15.376792,
+        "b": 14.176082,
+        "average": 14.874911,
+        "min": 14.874911,
+        "max": 14.874911
+      },
+      "ssim": {
+        "r": 0.838181,
+        "g": 0.857117,
+        "b": 0.809501,
+        "all": 0.834933
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.086306,
+        "confidence": 86306028041.6
+      },
+      "psnr_vs_second_ref_db": 14.879271,
+      "caption_metric": {
+        "text_mask_iou": 0.4166,
+        "bbox_gl": {
+          "x0": 94,
+          "y0": 321,
+          "x1": 865,
+          "y1": 389,
+          "cx": 479.5,
+          "cy": 355.0,
+          "area": 38129
+        },
+        "bbox_ffmpeg": {
+          "x0": 212,
+          "y0": 334,
+          "x1": 749,
+          "y1": 385,
+          "cx": 480.5,
+          "cy": 359.5,
+          "area": 21234
+        },
+        "center_offset_px": [
+          -1.0,
+          -4.5
+        ],
+        "fullframe_diff_ratio_gt10": 0.21507
+      }
+    },
+    {
+      "n": 1590,
+      "t_s": 53.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": true,
+      "psnr_db": 15.125801,
+      "psnr_raw": {
+        "r": 14.849622,
+        "g": 15.374707,
+        "b": 15.169259,
+        "average": 15.125801,
+        "min": 15.125801,
+        "max": 15.125801
+      },
+      "ssim": {
+        "r": 0.687117,
+        "g": 0.837116,
+        "b": 0.833202,
+        "all": 0.785812
+      },
+      "shift": {
+        "dx": 1,
+        "dy": 1,
+        "peak": 0.0333,
+        "confidence": 33299620520.9
+      },
+      "psnr_vs_second_ref_db": 15.131278,
+      "caption_metric": {
+        "text_mask_iou": 0.4534,
+        "bbox_gl": {
+          "x0": 66,
+          "y0": 321,
+          "x1": 896,
+          "y1": 389,
+          "cx": 481.0,
+          "cy": 355.0,
+          "area": 40127
+        },
+        "bbox_ffmpeg": {
+          "x0": 190,
+          "y0": 334,
+          "x1": 769,
+          "y1": 385,
+          "cx": 479.5,
+          "cy": 359.5,
+          "area": 23471
+        },
+        "center_offset_px": [
+          1.5,
+          -4.5
+        ],
+        "fullframe_diff_ratio_gt10": 0.3183
+      }
+    },
+    {
+      "n": 1560,
+      "t_s": 52.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": true,
+      "psnr_db": 15.168926,
+      "psnr_raw": {
+        "r": 14.837502,
+        "g": 15.452077,
+        "b": 15.23978,
+        "average": 15.168926,
+        "min": 15.168926,
+        "max": 15.168926
+      },
+      "ssim": {
+        "r": 0.673175,
+        "g": 0.84006,
+        "b": 0.832487,
+        "all": 0.781907
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.018844,
+        "confidence": 18844110427.8
+      },
+      "psnr_vs_second_ref_db": 15.176792,
+      "caption_metric": {
+        "text_mask_iou": 0.4337,
+        "bbox_gl": {
+          "x0": 66,
+          "y0": 322,
+          "x1": 896,
+          "y1": 389,
+          "cx": 481.0,
+          "cy": 355.5,
+          "area": 41060
+        },
+        "bbox_ffmpeg": {
+          "x0": 190,
+          "y0": 335,
+          "x1": 769,
+          "y1": 385,
+          "cx": 479.5,
+          "cy": 360.0,
+          "area": 23088
+        },
+        "center_offset_px": [
+          1.5,
+          -4.5
+        ],
+        "fullframe_diff_ratio_gt10": 0.34385
+      }
+    },
+    {
+      "n": 1500,
+      "t_s": 50.0,
+      "kind": "segment",
+      "overlays": 1,
+      "caption": true,
+      "psnr_db": 15.333381,
+      "psnr_raw": {
+        "r": 14.895486,
+        "g": 15.643763,
+        "b": 15.497631,
+        "average": 15.333381,
+        "min": 15.333381,
+        "max": 15.333381
+      },
+      "ssim": {
+        "r": 0.686483,
+        "g": 0.859198,
+        "b": 0.848444,
+        "all": 0.798041
+      },
+      "shift": {
+        "dx": 0,
+        "dy": 0,
+        "peak": 0.022866,
+        "confidence": 22866375751.0
+      },
+      "psnr_vs_second_ref_db": 15.339056,
+      "caption_metric": {
+        "text_mask_iou": 0.4164,
+        "bbox_gl": {
+          "x0": 63,
+          "y0": 321,
+          "x1": 896,
+          "y1": 389,
+          "cx": 479.5,
+          "cy": 355.0,
+          "area": 42248
+        },
+        "bbox_ffmpeg": {
+          "x0": 190,
+          "y0": 334,
+          "x1": 769,
+          "y1": 385,
+          "cx": 479.5,
+          "cy": 359.5,
+          "area": 22961
+        },
+        "center_offset_px": [
+          0.0,
+          -4.5
+        ],
+        "fullframe_diff_ratio_gt10": 0.21969
+      }
+    }
+  ]
+}

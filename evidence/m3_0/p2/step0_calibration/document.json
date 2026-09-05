@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "project_id": "m3probe0calib",
+  "canvas": {
+    "width": 1920,
+    "height": 1080,
+    "fps_num": 30,
+    "fps_den": 1,
+    "background_color": "#000000"
+  },
+  "tracks": [
+    {
+      "id": "C1",
+      "kind": "text",
+      "locked": false,
+      "hidden": false,
+      "muted": false,
+      "solo": false
+    },
+    {
+      "id": "V1",
+      "kind": "video",
+      "locked": false,
+      "hidden": false,
+      "muted": false,
+      "solo": false
+    },
+    {
+      "id": "A1",
+      "kind": "audio",
+      "locked": false,
+      "hidden": false,
+      "muted": false,
+      "solo": false
+    }
+  ],
+  "clips": [
+    {
+      "clip_id": "cal_a",
+      "track_id": "V1",
+      "order_index": 0,
+      "asset_id": "asset_card",
+      "asset_kind": "video",
+      "source_start_us": 0,
+      "source_end_us": 5000000,
+      "timeline_start_us": 0,
+      "timeline_end_us": 5000000,
+      "layout": "fit",
+      "audio": {
+        "enabled": false,
+        "gain_db": 0.0
+      }
+    },
+    {
+      "clip_id": "cal_b",
+      "track_id": "V1",
+      "order_index": 1,
+      "asset_id": "asset_card",
+      "asset_kind": "video",
+      "source_start_us": 5000000,
+      "source_end_us": 10000000,
+      "timeline_start_us": 5000000,
+      "timeline_end_us": 10000000,
+      "layout": "fit",
+      "audio": {
+        "enabled": false,
+        "gain_db": 0.0
+      }
+    }
+  ],
+  "captions": [],
+  "transitions": [
+    {
+      "transition_id": "cal_tr",
+      "after_clip_id": "cal_a",
+      "kind": "fade",
+      "duration_us": 500000
+    }
+  ],
+  "provenance": {
+    "created_by": "user",
+    "source_transcript_ids": []
+  }
+}

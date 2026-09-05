@@ -1,0 +1,49 @@
+{
+  "baseline_mkv": {
+    "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\p2\\step0_calibration\\baseline.mkv",
+    "sha256": "61201cc142e4ae756b64c3ca031d5da2afadf2795c2d247404c15e2443889e92",
+    "size_bytes": 1831481
+  },
+  "baseline_nocap_mkv": {
+    "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\p2\\step0_calibration\\baseline_nocap.mkv",
+    "sha256": "d352667979ac5d0b9489ff5d5eeaeda2d816471a714b7697fd3c151c11214725"
+  },
+  "second_ref_h264_mp4": {
+    "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\p2\\step0_calibration\\second_ref_h264.mp4",
+    "sha256": "ec5b36df8e1ee4a9a5e9e030a94d702d99855482330abe3c85c8bc130b21ed5d"
+  },
+  "plan_content_fingerprint": "sha256:756d1859febbb7d25d1a013081734bd9e2b8899e2bec5c874c10a02d7250a14d",
+  "expected_duration_us": 10000000,
+  "sample_frames": [
+    0,
+    30,
+    75,
+    134,
+    135,
+    136,
+    142,
+    143,
+    149,
+    150,
+    151,
+    210,
+    284
+  ],
+  "caption_frames": [],
+  "baseline_media": {
+    "nb_frames": null,
+    "avg_frame_rate": null,
+    "width": 960,
+    "height": 540,
+    "duration_us": 9521000
+  },
+  "baseline_nocap_media": {
+    "nb_frames": null,
+    "avg_frame_rate": null,
+    "width": 960,
+    "height": 540,
+    "duration_us": 9521000
+  },
+  "extraction_command": "ffmpeg -i baseline.mkv -vf \"select='eq(n,<n>)+…',scale=in_color_matrix=bt709\" -fps_mode passthrough frame_%04d.png",
+  "ffmpeg_version": "ffmpeg version n8.0.1-66-g27b8d1a017-20260228 Copyright (c) 2000-2025 the FFmpeg developers"
+}

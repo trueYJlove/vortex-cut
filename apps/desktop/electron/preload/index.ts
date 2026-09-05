@@ -72,6 +72,11 @@ import type {
   , ShotRequirementTimelineBatchAssemblyItemPage
 } from "@aivideo/contracts";
 
+// M3-0 探针 dev-only 桥：生产构建 NODE_ENV 静态替换 → 死代码消除（见 probe-bridge.ts 注释）。
+if (process.env.NODE_ENV !== "production" && process.env.AIVS_M3_PROBE) {
+  void import("./probe-bridge.js").then(module => module.registerProbeBridge()).catch(() => undefined);
+}
+
 export interface MediaSelection { grant: FileGrant; media: MediaInfo }
 export interface DesktopRuntime { protocol_version: 1; status: "ready" }
 export interface AuthoritativePreviewPresentation { preview: AuthoritativePreview; media_url: string }
