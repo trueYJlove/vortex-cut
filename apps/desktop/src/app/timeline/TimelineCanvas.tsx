@@ -581,21 +581,21 @@ function drawDragTooltip(
 
 // ── 标尺外观常量（drawTimeline 与固定标尺覆盖层 drawRulerStrip 共享，
 //    保证两条绘制路径像素级一致）──────────────────────────────────────────
-const RULER_DEAD_BG = "#14141f"; // 素材终点外的死区底色
-const RULER_BG_TOP = "#1d2440"; // 标尺带渐变顶
-const RULER_BG_BOTTOM = "#151a2e"; // 标尺带渐变底
+const RULER_DEAD_BG = "#181c1f"; // 素材终点外的死区底色（= 没有轨道的地方）
+const RULER_BG_TOP = "#222629"; // 标尺带渐变顶（中性灰，衔接工具栏 #181c1f 与轨道 #202427）
+const RULER_BG_BOTTOM = "#1a1e21"; // 标尺带渐变底
 const RULER_END_EDGE = "#3d4a5c"; // 素材终点竖标线
 const RULER_TICK_MAJOR = "#8a95a5";
 const RULER_TICK_MINOR = "#596372";
 const RULER_LABEL_COLOR = "#b9c4d1";
 const RULER_LABEL_FONT = "10px sans-serif";
-const RANGE_BAR_TOP = "#4f6ef7"; // 素材范围条渐变
-const RANGE_BAR_BOTTOM = "#7c9bff";
+const RANGE_BAR_TOP = "#14b58f"; // 素材范围条渐变
+const RANGE_BAR_BOTTOM = "#3fe0bd";
 const HOVER_CHIP_BG = "rgba(9, 12, 24, 0.88)";
-const HOVER_CHIP_EDGE = "rgba(134, 160, 255, 0.45)";
+const HOVER_CHIP_EDGE = "rgba(37, 211, 172, 0.45)";
 const HOVER_CHIP_TEXT = "#d6e1ff";
-const PLAYHEAD_HANDLE_TOP = "#ffffff";
-const PLAYHEAD_HANDLE_BOTTOM = "#c2cedd";
+const PLAYHEAD_HANDLE_TOP = "#ff9c94";
+const PLAYHEAD_HANDLE_BOTTOM = "#f65d55";
 const PLAYHEAD_HANDLE_EDGE = "rgba(10, 14, 20, 0.55)";
 
 /** 播放头顶部手柄（主画布与固定标尺覆盖层共享）：白色渐变圆角竖条，
@@ -787,8 +787,8 @@ function drawTimeline(
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, width, height);
 
-  // Background
-  ctx.fillStyle = "#14141f";
+  // Background（没有轨道的地方）
+  ctx.fillStyle = "#181c1f";
   ctx.fillRect(0, 0, width, height);
 
   // 素材终点（多条片段取最靠后的结束点）：标尺/行背景/网格一律到此为止，
@@ -815,22 +815,18 @@ function drawTimeline(
     xAt: (us) => timeToX(us, view),
   });
 
-  // Track backgrounds（按轨道类型着色：主视频轨更亮、音频轨偏蓝、文本轨偏暖）。
+  // Track backgrounds（素材未覆盖部分：视频/文本轨 #202427、音频轨 #24272b）。
   for (const row of trackRows) {
     const fill =
-      row.track.id === "V1"
-        ? "#1d2036"
-        : row.track.kind === "audio"
-          ? "#131a2a"
-          : row.track.kind === "text"
-            ? "#191a2c"
-            : "#171728";
+      row.track.kind === "audio"
+        ? "#24272b"
+        : "#202427";
     ctx.fillStyle = fill;
     ctx.fillRect(view.headerWidth, row.y, Math.max(0, contentEndX - view.headerWidth), row.height);
   }
 
   // Grid lines between tracks（同样截断在素材终点）。
-  ctx.strokeStyle = "#2a2a4a";
+  ctx.strokeStyle = "#14171a";
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(view.headerWidth, view.rulerHeight);
@@ -1418,7 +1414,7 @@ function drawTimeline(
         const gx = timeToX(targetUs, view);
         ctx.fillStyle = rect.clip.asset_kind === "audio" ? CLIP_PALETTE.audio.body : CLIP_PALETTE.video.band;
         ctx.fillRect(gx, rect.y + 2, gw, view.trackHeight - 4);
-        ctx.strokeStyle = "#7ab8ff";
+        ctx.strokeStyle = "#2fc9a5";
         ctx.lineWidth = 1.5;
         ctx.strokeRect(gx, rect.y + 2, gw, view.trackHeight - 4);
         if (!firstRect) firstRect = { x: gx, y: rect.y, width: gw };
@@ -1577,9 +1573,9 @@ function drawTimeline(
       interaction.currentX,
       interaction.currentY,
     );
-    ctx.fillStyle = "rgba(74, 144, 217, 0.12)";
+    ctx.fillStyle = "rgba(37, 211, 172, 0.10)";
     ctx.fillRect(rect.x - view.scrollX, rect.y, rect.width, rect.height);
-    ctx.strokeStyle = "#7ab8ff";
+    ctx.strokeStyle = "#2fc9a5";
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 3]);
     ctx.strokeRect(rect.x - view.scrollX, rect.y, rect.width, rect.height);
@@ -1589,7 +1585,7 @@ function drawTimeline(
   // Playhead（剪映式：全高白色细线 + 顶部圆角手柄）；显示位置钳制在素材终点内。
   const playheadX = timeToX(clipRects.length > 0 ? Math.min(playheadUs, totalUs) : playheadUs, view);
   if (playheadX >= view.headerWidth - 3 && playheadX <= width + 3) {
-    ctx.strokeStyle = "#f2f5f8";
+    ctx.strokeStyle = "#f65d55";
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.moveTo(playheadX, 0);
@@ -1632,9 +1628,9 @@ function drawRulerStrip(
   const rulerX = headW + stripW;
   ctx.fillStyle = "#12181c";
   ctx.fillRect(0, 0, headW, height);
-  ctx.fillStyle = "#14141f";
+  ctx.fillStyle = "#181c1f";
   ctx.fillRect(headW, 0, stripW, height);
-  ctx.strokeStyle = "#2a2a4a";
+  ctx.strokeStyle = "#14171a";
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(rulerX - 0.5, 0);
@@ -1669,7 +1665,7 @@ function drawRulerStrip(
   // 播放头（条带内线段 + 圆角手柄，同主绘制）；显示位置钳制在素材终点内。
   const playheadX = timeToX(totalEndUs !== null ? Math.min(playheadUs, totalEndUs) : playheadUs, view) + headW;
   if (playheadX >= rulerX - 3 && playheadX <= width + 3) {
-    ctx.strokeStyle = "#f2f5f8";
+    ctx.strokeStyle = "#f65d55";
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.moveTo(playheadX, 0);
@@ -3627,7 +3623,7 @@ export function TimelinePanel({
                 top: view.rulerHeight,
                 right: 0,
                 bottom: 0,
-                background: "rgba(74, 144, 217, 0.15)",
+                background: "rgba(37, 211, 172, 0.12)",
                 pointerEvents: "none",
                 display: "flex",
                 alignItems: "center",
@@ -3787,7 +3783,7 @@ export function TimelinePanel({
           >
             <div
               className="add-transition-card"
-              style={{ padding: 16, border: "1px solid #4b585e", background: "#192126", display: "grid", gap: 10, maxWidth: 420 }}
+              style={{ padding: 16, border: "1px solid #4b585e", background: "#2c2c2c", display: "grid", gap: 10, maxWidth: 420 }}
               onClick={(event) => event.stopPropagation()}
             >
               <strong style={{ fontSize: 13 }}>在此处添加转场</strong>

@@ -248,7 +248,7 @@ export function RangeRow({ label, value, min, max, step = 1, unit = "", decimals
       <label>{label}</label>
       <input type="range" className="pp-range" min={min} max={max} step={step} value={value} disabled={disabled}
         aria-label={ariaLabel ?? label}
-        style={{ background: `linear-gradient(90deg, var(--pp-accent-2, #5b78f0) ${pct}%, #2b353d ${pct}%)` }}
+        style={{ background: `linear-gradient(90deg, var(--pp-accent-2, #12b998) ${pct}%, #2b353d ${pct}%)` }}
         onChange={e => onDraft(Number(e.target.value))}
         onPointerUp={e => onCommit(Number((e.target as HTMLInputElement).value))}
         onKeyUp={e => onCommit(Number((e.target as HTMLInputElement).value))} />
