@@ -1,0 +1,317 @@
+{
+ "total": 31,
+ "ok": 31,
+ "failures": [],
+ "results": [
+  {
+   "group": "materials",
+   "key": "m3mat_a_1080",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\materials\\m3mat_a_1080.mp4",
+   "actual_sha256": "a10867ef65a31dbf6e76483cd5bd3fc18a3ee0cc01699cd863db83c06b290472",
+   "expected_sha256": "a10867ef65a31dbf6e76483cd5bd3fc18a3ee0cc01699cd863db83c06b290472",
+   "actual_bytes": 11732680,
+   "expected_bytes": 11732680,
+   "status": "OK"
+  },
+  {
+   "group": "materials",
+   "key": "m3mat_b_1080",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\materials\\m3mat_b_1080.mp4",
+   "actual_sha256": "21aca9e8dafbdf5a03130f87320f0e4ef646b68287b0dc7108800d947ecd6c3c",
+   "expected_sha256": "21aca9e8dafbdf5a03130f87320f0e4ef646b68287b0dc7108800d947ecd6c3c",
+   "actual_bytes": 18654027,
+   "expected_bytes": 18654027,
+   "status": "OK"
+  },
+  {
+   "group": "materials",
+   "key": "m3mat_c_1080",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\materials\\m3mat_c_1080.mp4",
+   "actual_sha256": "d3180ba3ff98066c170460f6ae4878310c0c3e1e2d7f1b499648b8eda91f4af3",
+   "expected_sha256": "d3180ba3ff98066c170460f6ae4878310c0c3e1e2d7f1b499648b8eda91f4af3",
+   "actual_bytes": 17850438,
+   "expected_bytes": 17850438,
+   "status": "OK"
+  },
+  {
+   "group": "materials",
+   "key": "m3mat_p1_1080",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\materials\\m3mat_p1_1080.mp4",
+   "actual_sha256": "e94118748ba672f30b36d440cb480460650c254a75899a69c0874c3459af7f86",
+   "expected_sha256": "e94118748ba672f30b36d440cb480460650c254a75899a69c0874c3459af7f86",
+   "actual_bytes": 3861799,
+   "expected_bytes": 3861799,
+   "status": "OK"
+  },
+  {
+   "group": "materials",
+   "key": "m3mat_p2_1080",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\materials\\m3mat_p2_1080.mp4",
+   "actual_sha256": "873f91a275a9c37d3727abe2674730ebe1768fe5669f689a11489b77e056d35e",
+   "expected_sha256": "873f91a275a9c37d3727abe2674730ebe1768fe5669f689a11489b77e056d35e",
+   "actual_bytes": 3737339,
+   "expected_bytes": 3737339,
+   "status": "OK"
+  },
+  {
+   "group": "materials",
+   "key": "m3card_1080",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\materials\\m3card_1080.mp4",
+   "actual_sha256": "706e3b39193ab6bba4adbeee9c7a5170baf7035f4d6053024ab7ac8792bc69ab",
+   "expected_sha256": "706e3b39193ab6bba4adbeee9c7a5170baf7035f4d6053024ab7ac8792bc69ab",
+   "actual_bytes": 1909902,
+   "expected_bytes": 1909902,
+   "status": "OK"
+  },
+  {
+   "group": "materials",
+   "key": "m3mat_a_540",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\materials\\m3mat_a_540.mp4",
+   "actual_sha256": "52b16ba024d9098e9c2bb896495065b5113e72d952a8c8fec36a9445fa69c8ab",
+   "expected_sha256": "52b16ba024d9098e9c2bb896495065b5113e72d952a8c8fec36a9445fa69c8ab",
+   "actual_bytes": 7031098,
+   "expected_bytes": 7031098,
+   "status": "OK"
+  },
+  {
+   "group": "materials",
+   "key": "m3mat_b_540",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\materials\\m3mat_b_540.mp4",
+   "actual_sha256": "dae045f8ec90a0871f00e558f8ec7c79e0726195d5736c0e0b56044083fc9ea9",
+   "expected_sha256": "dae045f8ec90a0871f00e558f8ec7c79e0726195d5736c0e0b56044083fc9ea9",
+   "actual_bytes": 16048524,
+   "expected_bytes": 16048524,
+   "status": "OK"
+  },
+  {
+   "group": "materials",
+   "key": "m3mat_c_540",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\materials\\m3mat_c_540.mp4",
+   "actual_sha256": "3321867ba29c3eccfb1eb18411b8bdebf10f8e0bdeb04d49230bae54f7ee61ec",
+   "expected_sha256": "3321867ba29c3eccfb1eb18411b8bdebf10f8e0bdeb04d49230bae54f7ee61ec",
+   "actual_bytes": 9644367,
+   "expected_bytes": 9644367,
+   "status": "OK"
+  },
+  {
+   "group": "materials",
+   "key": "m3mat_p1_540",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\materials\\m3mat_p1_540.mp4",
+   "actual_sha256": "3bf7ab0e717a4fad4aa0c4a045a04e24d656be57942e0e10cf4779758aadb9bc",
+   "expected_sha256": "3bf7ab0e717a4fad4aa0c4a045a04e24d656be57942e0e10cf4779758aadb9bc",
+   "actual_bytes": 2393313,
+   "expected_bytes": 2393313,
+   "status": "OK"
+  },
+  {
+   "group": "materials",
+   "key": "m3mat_p2_540",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\materials\\m3mat_p2_540.mp4",
+   "actual_sha256": "b306d6f3c13005b0ed43343af54f5567af99822506fd1ba03086ef2d76c502ab",
+   "expected_sha256": "b306d6f3c13005b0ed43343af54f5567af99822506fd1ba03086ef2d76c502ab",
+   "actual_bytes": 3147491,
+   "expected_bytes": 3147491,
+   "status": "OK"
+  },
+  {
+   "group": "materials",
+   "key": "m3card_540",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\materials\\m3card_540.mp4",
+   "actual_sha256": "02952e824192675b99a2819e94337e7e184b9d1ccfb16bc8372ee809003b8602",
+   "expected_sha256": "02952e824192675b99a2819e94337e7e184b9d1ccfb16bc8372ee809003b8602",
+   "actual_bytes": 821078,
+   "expected_bytes": 821078,
+   "status": "OK"
+  },
+  {
+   "group": "materials",
+   "key": "m3proxy_ref_vfr-landscape-av",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\materials\\m3proxy_ref_vfr-landscape-av.mp4",
+   "actual_sha256": "d42fbda2ccdeb2405420ea5e577bca1ec1c596918f45191cbe78d2dcf4726dd4",
+   "expected_sha256": "d42fbda2ccdeb2405420ea5e577bca1ec1c596918f45191cbe78d2dcf4726dd4",
+   "actual_bytes": 1278438,
+   "expected_bytes": 1278438,
+   "status": "OK"
+  },
+  {
+   "group": "materials",
+   "key": "m3proxy_ref_cfr-landscape-av",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\materials\\m3proxy_ref_cfr-landscape-av.mp4",
+   "actual_sha256": "5998b3afbacff4922c39f8f37cebdbe15dbcd20493b035601205fd36877f527a",
+   "expected_sha256": "5998b3afbacff4922c39f8f37cebdbe15dbcd20493b035601205fd36877f527a",
+   "actual_bytes": 1499547,
+   "expected_bytes": 1499547,
+   "status": "OK"
+  },
+  {
+   "group": "documents",
+   "key": "p2/document.json",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\p2\\document.json",
+   "actual_sha256": "d09930d891c9334ba267f1cdac1466a305f6c12547b3aba8ff61b76cede13c08",
+   "expected_sha256": "d09930d891c9334ba267f1cdac1466a305f6c12547b3aba8ff61b76cede13c08",
+   "actual_bytes": 5825,
+   "expected_bytes": 5825,
+   "status": "OK"
+  },
+  {
+   "group": "documents",
+   "key": "p2/plan.json",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\p2\\plan.json",
+   "actual_sha256": "df853f508f329a2f53c2635a4b42fc59ca817de96936ca528c13f7f4fce6ae89",
+   "expected_sha256": "df853f508f329a2f53c2635a4b42fc59ca817de96936ca528c13f7f4fce6ae89",
+   "actual_bytes": 7229,
+   "expected_bytes": 7229,
+   "status": "OK"
+  },
+  {
+   "group": "documents",
+   "key": "p2/ir.json",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\p2\\ir.json",
+   "actual_sha256": "9506d74c59c05e3712e334f3c4af2d56a9108d7ee2dabfe6f0dbdd303d2f4a18",
+   "expected_sha256": "9506d74c59c05e3712e334f3c4af2d56a9108d7ee2dabfe6f0dbdd303d2f4a18",
+   "actual_bytes": 690872,
+   "expected_bytes": 690872,
+   "status": "OK"
+  },
+  {
+   "group": "documents",
+   "key": "p2/sample_frames.json",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\p2\\sample_frames.json",
+   "actual_sha256": "2ef1d2fb36dc96e3b90ab44c4fa951f75a2afc4d55f9cc5ecae8d71f5ef0c9ab",
+   "expected_sha256": "2ef1d2fb36dc96e3b90ab44c4fa951f75a2afc4d55f9cc5ecae8d71f5ef0c9ab",
+   "actual_bytes": 406,
+   "expected_bytes": 406,
+   "status": "OK"
+  },
+  {
+   "group": "documents",
+   "key": "p2/baseline/baseline_manifest.json",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\p2\\baseline\\baseline_manifest.json",
+   "actual_sha256": "fe88553436a1817f2b4d7510111c3028444efb86f14714ee7c1fc9f6a4da8a46",
+   "expected_sha256": "fe88553436a1817f2b4d7510111c3028444efb86f14714ee7c1fc9f6a4da8a46",
+   "actual_bytes": 1931,
+   "expected_bytes": 1931,
+   "status": "OK"
+  },
+  {
+   "group": "documents",
+   "key": "p2/baseline/comparison.json",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\p2\\baseline\\comparison.json",
+   "actual_sha256": "3b0236faa3f91e893699f34d92b4b57d8e53a1e1b87ec9ede037e4fc35c4cf3a",
+   "expected_sha256": "3b0236faa3f91e893699f34d92b4b57d8e53a1e1b87ec9ede037e4fc35c4cf3a",
+   "actual_bytes": 36648,
+   "expected_bytes": 36648,
+   "status": "OK"
+  },
+  {
+   "group": "documents",
+   "key": "p2/step0_calibration/step0.json",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\p2\\step0_calibration\\step0.json",
+   "actual_sha256": "4555bb02a70468b41110c4167a34a7ffb3c2ae99bfd5fc89cb04c5f81c4bc7ba",
+   "expected_sha256": "4555bb02a70468b41110c4167a34a7ffb3c2ae99bfd5fc89cb04c5f81c4bc7ba",
+   "actual_bytes": 1147,
+   "expected_bytes": 1147,
+   "status": "OK"
+  },
+  {
+   "group": "documents",
+   "key": "p1/m3p1_result.json",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\p1\\m3p1_result.json",
+   "actual_sha256": "933710e6a865e0d5acec914d4184ac2e9124e158a5683477d4f642b595fb0f7d",
+   "expected_sha256": "933710e6a865e0d5acec914d4184ac2e9124e158a5683477d4f642b595fb0f7d",
+   "actual_bytes": 115009,
+   "expected_bytes": 115009,
+   "status": "OK"
+  },
+  {
+   "group": "documents",
+   "key": "p1_nomipmap/m3p1_result.json",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\p1_nomipmap\\m3p1_result.json",
+   "actual_sha256": "795e3507ea99d994a859ea170931337123348fa71fc906933d0a3273c83285b9",
+   "expected_sha256": "795e3507ea99d994a859ea170931337123348fa71fc906933d0a3273c83285b9",
+   "actual_bytes": 114961,
+   "expected_bytes": 114961,
+   "status": "OK"
+  },
+  {
+   "group": "documents",
+   "key": "p3/m3p3_result.json",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\p3\\m3p3_result.json",
+   "actual_sha256": "0f3354ab8b5475f716a1eeb6b0f80a2271fc612f0526c996e1407d95a2c14e49",
+   "expected_sha256": "0f3354ab8b5475f716a1eeb6b0f80a2271fc612f0526c996e1407d95a2c14e49",
+   "actual_bytes": 172214,
+   "expected_bytes": 172214,
+   "status": "OK"
+  },
+  {
+   "group": "documents",
+   "key": "p1_60hz/m3p1_result.json",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\p1_60hz\\m3p1_result.json",
+   "actual_sha256": "4eff688cff8fa4511e748b39fb6b9e4287fc721d7830beccc32b9350951e3699",
+   "expected_sha256": "4eff688cff8fa4511e748b39fb6b9e4287fc721d7830beccc32b9350951e3699",
+   "actual_bytes": 221089,
+   "expected_bytes": 221089,
+   "status": "OK"
+  },
+  {
+   "group": "documents",
+   "key": "p1_75hz_new/m3p1_result.json",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\p1_75hz_new\\m3p1_result.json",
+   "actual_sha256": "d01182bff0e6acca7d34e683c0c6eb7ade9ef2c08412ef7e00ad8fda92c5d27b",
+   "expected_sha256": "d01182bff0e6acca7d34e683c0c6eb7ade9ef2c08412ef7e00ad8fda92c5d27b",
+   "actual_bytes": 270048,
+   "expected_bytes": 270048,
+   "status": "OK"
+  },
+  {
+   "group": "documents",
+   "key": "p1_100hz/m3p1_result.json",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\p1_100hz\\m3p1_result.json",
+   "actual_sha256": "4413e4928d1a6d9fe1a79cc60905596ba57265ad7a56e1b119152a53b312122d",
+   "expected_sha256": "4413e4928d1a6d9fe1a79cc60905596ba57265ad7a56e1b119152a53b312122d",
+   "actual_bytes": 339684,
+   "expected_bytes": 339684,
+   "status": "OK"
+  },
+  {
+   "group": "baselines",
+   "key": "p2/baseline/baseline.mkv",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\p2\\baseline\\baseline.mkv",
+   "actual_sha256": "687225a4e8a24428b53d8d6582f01ef9ddcb1edc14ac223b1111f016ef675a12",
+   "expected_sha256": "687225a4e8a24428b53d8d6582f01ef9ddcb1edc14ac223b1111f016ef675a12",
+   "actual_bytes": 283562978,
+   "expected_bytes": 283562978,
+   "status": "OK"
+  },
+  {
+   "group": "baselines",
+   "key": "p2/baseline/baseline_nocap.mkv",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\p2\\baseline\\baseline_nocap.mkv",
+   "actual_sha256": "c07ff23228d66a36fbad08ecf12043c11187639c98730cec7517f519abdc36a5",
+   "expected_sha256": "c07ff23228d66a36fbad08ecf12043c11187639c98730cec7517f519abdc36a5",
+   "actual_bytes": 276917452,
+   "expected_bytes": 276917452,
+   "status": "OK"
+  },
+  {
+   "group": "baselines",
+   "key": "p2/baseline/second_ref_h264.mp4",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\p2\\baseline\\second_ref_h264.mp4",
+   "actual_sha256": "2e2b7c5b4cc5e0bdb6a77ba210115d5ad22bc528391035ff09e06830b89bee4e",
+   "expected_sha256": "2e2b7c5b4cc5e0bdb6a77ba210115d5ad22bc528391035ff09e06830b89bee4e",
+   "actual_bytes": 25165641,
+   "expected_bytes": 25165641,
+   "status": "OK"
+  },
+  {
+   "group": "baselines",
+   "key": "p2/step0_calibration/baseline.mkv",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\p2\\step0_calibration\\baseline.mkv",
+   "actual_sha256": "61201cc142e4ae756b64c3ca031d5da2afadf2795c2d247404c15e2443889e92",
+   "expected_sha256": "61201cc142e4ae756b64c3ca031d5da2afadf2795c2d247404c15e2443889e92",
+   "actual_bytes": 1831481,
+   "expected_bytes": 1831481,
+   "status": "OK"
+  }
+ ]
+}
