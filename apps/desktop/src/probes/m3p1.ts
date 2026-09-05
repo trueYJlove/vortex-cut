@@ -174,29 +174,33 @@ export async function runProbe(): Promise<void> {
       }
       const taskMs: number[] = [];
       const intervalMs: number[] = [];
+      const contentIntervalMs: number[] = [];
       const rows: Array<Record<string, number>> = [];
       let lastProcessed = -1;
-      let lastTaskStart = 0;
+      let lastTaskStart = -1;
+      let lastContentStart = -1;
       let skippedFrames = 0;
       let driftEvents = 0;
       let contextLostEvents = 0;
       compositor.contextLostResolvers.push(() => { contextLostEvents += 1; });
+      // vsync 锁定合成器语义（测量语义修正，见报告 §1.2 注）：每个 rAF 提交一个
+      // 合成任务（内容帧到期即换帧，未到期重绘最新帧），"相邻合成任务起始间隔"
+      // 因此度量渲染循环节拍本身；内容帧间隔序列另存以与 75Hz 旧口径可比。
       await new Promise<void>(resolve => {
         const state = { startTime: 0 };
         const tick = () => {
           if (state.startTime === 0) state.startTime = performance.now();
           const now = performance.now();
-          const target = Math.floor(((now - state.startTime) * ir.canvas.fps) / 1000);
-          if (target >= ROUND_FRAMES) { resolve(); return; }
-          if (target <= lastProcessed) { requestAnimationFrame(tick); return; }
-          void now;
+          const target = Math.min(ROUND_FRAMES - 1, Math.floor(((now - state.startTime) * ir.canvas.fps) / 1000));
+          if (target >= ROUND_FRAMES - 1 && lastProcessed >= ROUND_FRAMES - 1) { resolve(); return; }
+          const isNewContentFrame = target > lastProcessed;
           for (const window of windows) {
             const handle = compositor.videos.get(window.inputId)!;
             if (!handle.video) continue;
-            if (target === window.startFrame) {
+            if (lastProcessed < window.startFrame && target >= window.startFrame) {
               handle.video.playbackRate = window.rate;
               void handle.video.play().catch(() => undefined);
-            } else if (target === window.endFrame + 1) {
+            } else if (lastProcessed <= window.endFrame && target > window.endFrame) {
               handle.video.pause();
             }
           }
@@ -206,30 +210,33 @@ export async function runProbe(): Promise<void> {
             if (!handle) continue;
             compositor.uploadVideo(handle, false);
             const expected = sourceFrameAt(frame, inputId);
-            if (expected !== null && Math.abs(handle.presentedMediaTimeS * ir.canvas.fps - expected) > 1.02) driftEvents += 1;
+            if (isNewContentFrame && expected !== null && Math.abs(handle.presentedMediaTimeS * ir.canvas.fps - expected) > 1.02) driftEvents += 1;
           }
           const taskStart = performance.now();
           compositor.composeFrame(frame, { drawCaptions: true });
           const taskEnd = performance.now();
-          if (lastProcessed >= 0) intervalMs.push(taskStart - lastTaskStart);
+          if (lastTaskStart >= 0) intervalMs.push(taskStart - lastTaskStart);
+          if (isNewContentFrame && lastContentStart >= 0) contentIntervalMs.push(taskStart - lastContentStart);
           taskMs.push(taskEnd - taskStart);
-          skippedFrames += Math.max(0, target - lastProcessed - 1);
-          rows.push({ f: target, task_ms: Math.round((taskEnd - taskStart) * 1000) / 1000 });
+          if (isNewContentFrame) {
+            skippedFrames += Math.max(0, target - lastProcessed - 1);
+            rows.push({ f: target, task_ms: Math.round((taskEnd - taskStart) * 1000) / 1000 });
+          }
           lastProcessed = target;
           lastTaskStart = taskStart;
-          if (target % 150 === 0) {
-            void (async () => {
-              try {
-                const gpu = await bridge.gpu();
-                const gpuProcess = gpu.metrics.find(entry => entry.type === "GPU Process");
-                gpuMemorySamples.push({ t_s: Math.round(target / ir.canvas.fps), gpu_process_ws_mb: gpuProcess?.memory?.workingSetSize ?? -1 });
-              } catch { /* ignore */ }
-            })();
-          }
+          if (isNewContentFrame) lastContentStart = taskStart;
+          // 注意：GPU 指标采样不得在渲染循环内进行 —— getGPUInfo('complete')
+          // 实测会造成 ~1s 级停顿污染节拍测量（60Hz 首轮实证），已移至轮次边界。
           requestAnimationFrame(tick);
         };
         requestAnimationFrame(tick);
       });
+
+      try {
+        const gpu = await bridge.gpu();
+        const gpuProcess = gpu.metrics.find(entry => entry.type === "GPU Process");
+        gpuMemorySamples.push({ t_s: Math.round(round * 60), gpu_process_ws_mb: gpuProcess?.memory?.workingSetSize ?? -1 });
+      } catch { /* ignore */ }
 
       const dropped = taskMs.filter(value => value > FRAME_BUDGET_MS).length + skippedFrames;
       roundResults.push({
@@ -240,6 +247,7 @@ export async function runProbe(): Promise<void> {
         drop_rate: Math.round((dropped / ROUND_FRAMES) * 100000) / 100000,
         task_ms: summarize(taskMs),
         task_interval_ms: summarize(intervalMs),
+        content_interval_ms: summarize(contentIntervalMs),
         skipped_frames: skippedFrames,
         drift_events: driftEvents,
         context_lost_events: contextLostEvents,

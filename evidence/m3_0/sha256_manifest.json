@@ -97,6 +97,18 @@
   "p3/m3p3_result.json": {
    "sha256": "0f3354ab8b5475f716a1eeb6b0f80a2271fc612f0526c996e1407d95a2c14e49",
    "bytes": 172214
+  },
+  "p1_60hz/m3p1_result.json": {
+   "sha256": "4eff688cff8fa4511e748b39fb6b9e4287fc721d7830beccc32b9350951e3699",
+   "bytes": 221089
+  },
+  "p1_75hz_new/m3p1_result.json": {
+   "sha256": "d01182bff0e6acca7d34e683c0c6eb7ade9ef2c08412ef7e00ad8fda92c5d27b",
+   "bytes": 270048
+  },
+  "p1_100hz/m3p1_result.json": {
+   "sha256": "4413e4928d1a6d9fe1a79cc60905596ba57265ad7a56e1b119152a53b312122d",
+   "bytes": 339684
   }
  },
  "baselines": {
