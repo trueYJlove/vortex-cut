@@ -10,6 +10,7 @@ import { ShotRequirementWorkbench } from "./shot-requirements/ShotRequirementWor
 import { Dialog } from "./Dialog.js";
 import { errorCode, safeErrorMessage, safeTaskErrorMessage } from "./safeErrors.js";
 import { PreviewPipOverlays, type PipOverlay, type PipTransform } from "./PreviewPipOverlays.js";
+import { SyntheticPreview } from "./preview/SyntheticPreview.js";
 import { editorCommands, type EditorCommand } from "./editorCommands.js";
 import { bindingLabel, findConflict, loadShortcuts, matchesBinding, normalizeRecordedBinding, saveShortcuts, DEFAULT_SHORTCUTS, type ShortcutCommandId, type ShortcutEntry } from "./shortcuts.js";
 import { TimelinePanel } from "./timeline/TimelineCanvas.js";
@@ -153,7 +154,8 @@ export function App() {
   const [runtimeReady, setRuntimeReady] = useState(false);
   const [playhead, setPlayhead] = useState(0);
   const [encoderMode, setEncoderMode] = useState<EncoderMode>("auto");
-  const [previewMode, setPreviewMode] = useState<"interactive" | "authoritative">("interactive");
+  const [previewMode, setPreviewMode] = useState<"interactive" | "authoritative" | "synthetic">("interactive");
+  const [syntheticNotice, setSyntheticNotice] = useState<string | null>(null);
   const [previewRatio, setPreviewRatio] = useState("fit");
   const [previewRatioTouched, setPreviewRatioTouched] = useState(false);
   const [previews, setPreviews] = useState<AuthoritativePreviewPresentation[]>([]);
@@ -1662,7 +1664,7 @@ export function App() {
       <section ref={stagePaneRef} className={`stage-pane${isFullscreen ? " fullscreen" : ""}`} aria-label="项目预览">
         <div className="stage-column" ref={stageColumnRef}>
           <div className="preview-toolbar">
-            <div className="preview-mode-switch" aria-label="预览模式"><button className={previewMode === "interactive" ? "active" : ""} onClick={() => { setPreviewMode("interactive"); setExportPlayback(undefined); }}>交互预览</button><button className={previewMode === "authoritative" ? "active" : ""} disabled={!authoritativePreview && !exportPlayback} onClick={() => { setPreviewMode("authoritative"); setExportPlayback(undefined); }}>权威预览</button></div>
+            <div className="preview-mode-switch" aria-label="预览模式"><button className={previewMode === "interactive" ? "active" : ""} onClick={() => { setPreviewMode("interactive"); setExportPlayback(undefined); }}>交互预览</button><button className={previewMode === "synthetic" ? "active" : ""} disabled={!project || !timeline} onClick={() => { setSyntheticNotice(null); setPreviewMode("synthetic"); }} title="实时合成预览（转场 / 关键帧 / 画中画实时可见）">合成预览</button><button className={previewMode === "authoritative" ? "active" : ""} disabled={!authoritativePreview && !exportPlayback} onClick={() => { setPreviewMode("authoritative"); setExportPlayback(undefined); }}>权威预览</button></div>
             <div className="tb-right">
               <label className="tb-field">比例<select aria-label="预览比例" value={effectiveRatio} onChange={event => { setPreviewRatio(event.target.value); setPreviewRatioTouched(true); setCanvasSize(null); if (canvasRef.current) { canvasRef.current.style.width = ""; canvasRef.current.style.height = ""; } }}>{previewRatios.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label>
               <span className="tb-sep" aria-hidden="true" />
@@ -1674,6 +1676,7 @@ export function App() {
             <div className={`preview-frame ${previewClass}${previewSelected ? " selected" : ""}`} style={previewZoom === "fit" ? undefined : { transform: `scale(${previewZoom})` }} role="button" tabIndex={0} aria-label="选中播放头处的片段" title="点击选中播放头处的片段" onClick={selectClipAtPlayhead} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectClipAtPlayhead(); } }}>
           <div className="preview-canvas" ref={canvasRef}>
             {previewMode === "authoritative" && authoritativeMediaUrl && <video ref={videoRef} className="preview-foreground authoritative-video" src={authoritativeMediaUrl} aria-label={reframePlayback ? "重构图权威预览视频" : exportPlayback ? "导出视频" : "权威预览视频"} controls onEnded={() => setPlaying(false)} />}
+            {previewMode === "synthetic" && project && <SyntheticPreview projectId={project.project_id} revisionId={timeline?.current_revision.timeline_revision_id ?? null} mediaUrls={new Map(assets.flatMap(item => item.media_url ? [[item.asset.asset_id, item.media_url] as const] : []))} playing={playing && !gestureHoldRef.current} playheadUs={playhead} onTimeUs={us => setPlayhead(us)} onFallback={(reason, code) => { setPreviewMode("interactive"); showNotice(code === "PREVIEW_IR_UNSUPPORTED" ? "当前时间线包含实时合成暂不支持的效果，已回退交互预览。" : `合成预览不可用：${reason}`, "warning"); }} />}
             {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "video" && <div className="preview-transform" style={mainTransformStyle}><video className="preview-background" src={previewAsset.media_url} muted aria-hidden="true" /><video ref={videoRef} className="preview-foreground" src={previewAsset.media_url} muted={!selectedClip?.audio.enabled || previewReverse || (clipAtPlayhead ? !isClipAudible(clipAtPlayhead) : false)} aria-label="交互预览视频" onTimeUpdate={event => { if (libraryPreviewId) setPlayhead(Math.round(event.currentTarget.currentTime * 1_000_000)); }} onEnded={handleVideoEnded} /></div>}
             {previewMode === "interactive" && audioAsset?.media_url && <audio ref={audioRef} src={audioAsset.media_url} style={{ display: "none" }} />}
             {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "image" && <div className="preview-transform" style={mainTransformStyle}><img className="preview-background" src={previewAsset.media_url} alt="" aria-hidden="true" /><img className="preview-foreground" src={previewAsset.media_url} alt={previewAsset.asset.display_name} /></div>}

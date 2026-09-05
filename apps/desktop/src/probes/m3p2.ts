@@ -14,8 +14,8 @@
  */
 import { probeBridge } from "./common/bridge.js";
 import { setupProbe, collectEnvironment } from "./common/shell.js";
-import { Compositor, assertHardwareRenderer } from "./common/compositor.js";
-import type { IrFrame } from "./common/ir.js";
+import { Compositor, assertHardwareRenderer } from "../app/preview/compositor.js";
+import type { IrFrame } from "../app/preview/ir.js";
 
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = "";
@@ -55,7 +55,7 @@ class DecodeWorker {
   height = 0;
 
   private constructor() {
-    this.worker = new Worker(new URL("./p3-worker.ts", import.meta.url), { type: "module" });
+    this.worker = new Worker(new URL("../app/preview/decode-worker.worker.ts", import.meta.url), { type: "module" });
     this.worker.addEventListener("message", (event: MessageEvent<WorkerMessage>) => {
       const data = event.data;
       if (data.type === "frame" && data.id !== undefined) {

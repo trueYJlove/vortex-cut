@@ -37,7 +37,7 @@
    "kind": "segment",
    "overlays": 0,
    "caption": false,
-   "decode_upload_ms": 135.4,
+   "decode_upload_ms": 144.1,
    "compose_ms": 0.6
   },
   {
@@ -45,47 +45,47 @@
    "kind": "segment",
    "overlays": 0,
    "caption": false,
-   "decode_upload_ms": 43,
-   "compose_ms": 0.2
+   "decode_upload_ms": 57.5,
+   "compose_ms": 0.1
   },
   {
    "n": 120,
    "kind": "segment",
    "overlays": 0,
    "caption": true,
-   "decode_upload_ms": 40.8,
-   "compose_ms": 11.9
+   "decode_upload_ms": 44.7,
+   "compose_ms": 24.8
   },
   {
    "n": 240,
    "kind": "segment",
    "overlays": 0,
    "caption": false,
-   "decode_upload_ms": 32.3,
-   "compose_ms": 0.1
+   "decode_upload_ms": 45.6,
+   "compose_ms": 0.2
   },
   {
    "n": 330,
    "kind": "segment",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 60,
-   "compose_ms": 0
+   "decode_upload_ms": 90.2,
+   "compose_ms": 0.1
   },
   {
    "n": 420,
    "kind": "segment",
    "overlays": 1,
    "caption": true,
-   "decode_upload_ms": 59.3,
-   "compose_ms": 7.2
+   "decode_upload_ms": 83,
+   "compose_ms": 7.4
   },
   {
    "n": 450,
    "kind": "segment",
    "overlays": 1,
    "caption": true,
-   "decode_upload_ms": 62.8,
+   "decode_upload_ms": 71.9,
    "compose_ms": 0.1
   },
   {
@@ -93,7 +93,7 @@
    "kind": "segment",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 62.7,
+   "decode_upload_ms": 80.9,
    "compose_ms": 0.1
   },
   {
@@ -101,47 +101,47 @@
    "kind": "segment",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 130.6,
-   "compose_ms": 0.2
+   "decode_upload_ms": 148.1,
+   "compose_ms": 0.1
   },
   {
    "n": 570,
    "kind": "transition",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 91.8,
-   "compose_ms": 0.4
+   "decode_upload_ms": 122.2,
+   "compose_ms": 1
   },
   {
    "n": 571,
    "kind": "transition",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 109.1,
-   "compose_ms": 0.4
+   "decode_upload_ms": 114.6,
+   "compose_ms": 0.2
   },
   {
    "n": 585,
    "kind": "transition",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 140.6,
-   "compose_ms": 0.3
+   "decode_upload_ms": 181.9,
+   "compose_ms": 0.1
   },
   {
    "n": 599,
    "kind": "transition",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 201.7,
-   "compose_ms": 0.2
+   "decode_upload_ms": 280.3,
+   "compose_ms": 0.1
   },
   {
    "n": 600,
    "kind": "segment",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 93,
+   "decode_upload_ms": 118.6,
    "compose_ms": 0.2
   },
   {
@@ -149,15 +149,15 @@
    "kind": "segment",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 92.5,
-   "compose_ms": 0.2
+   "decode_upload_ms": 114.9,
+   "compose_ms": 0.1
   },
   {
    "n": 660,
    "kind": "segment",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 81.5,
+   "decode_upload_ms": 99.2,
    "compose_ms": 0.1
   },
   {
@@ -165,31 +165,31 @@
    "kind": "segment",
    "overlays": 1,
    "caption": true,
-   "decode_upload_ms": 92.7,
-   "compose_ms": 4
+   "decode_upload_ms": 104.6,
+   "compose_ms": 4.3
   },
   {
    "n": 810,
    "kind": "segment",
    "overlays": 1,
    "caption": true,
-   "decode_upload_ms": 74.2,
-   "compose_ms": 0.1
+   "decode_upload_ms": 89,
+   "compose_ms": 0.2
   },
   {
    "n": 899,
    "kind": "segment",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 115,
-   "compose_ms": 0
+   "decode_upload_ms": 131.7,
+   "compose_ms": 0.1
   },
   {
    "n": 900,
    "kind": "segment",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 115.5,
+   "decode_upload_ms": 135,
    "compose_ms": 0.1
   },
   {
@@ -197,7 +197,7 @@
    "kind": "segment",
    "overlays": 0,
    "caption": false,
-   "decode_upload_ms": 50.8,
+   "decode_upload_ms": 60.1,
    "compose_ms": 0.1
   },
   {
@@ -205,7 +205,7 @@
    "kind": "segment",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 76.2,
+   "decode_upload_ms": 93.6,
    "compose_ms": 0.1
   },
   {
@@ -213,120 +213,120 @@
    "kind": "segment",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 79.5,
-   "compose_ms": 0.2
+   "decode_upload_ms": 81.5,
+   "compose_ms": 0
   },
   {
    "n": 1200,
    "kind": "segment",
    "overlays": 1,
    "caption": true,
-   "decode_upload_ms": 86.4,
-   "compose_ms": 4.4
+   "decode_upload_ms": 119.4,
+   "compose_ms": 3.7
   },
   {
    "n": 1260,
    "kind": "segment",
    "overlays": 1,
    "caption": true,
-   "decode_upload_ms": 66,
-   "compose_ms": 0.1
+   "decode_upload_ms": 78.2,
+   "compose_ms": 0.4
   },
   {
    "n": 1353,
    "kind": "segment",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 54.9,
-   "compose_ms": 0
+   "decode_upload_ms": 78.4,
+   "compose_ms": 0.1
   },
   {
    "n": 1365,
    "kind": "segment",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 88.5,
-   "compose_ms": 0.1
+   "decode_upload_ms": 111.3,
+   "compose_ms": 0
   },
   {
    "n": 1380,
    "kind": "segment",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 61.4,
-   "compose_ms": 0.2
+   "decode_upload_ms": 63.4,
+   "compose_ms": 0.1
   },
   {
    "n": 1395,
    "kind": "segment",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 85.1,
-   "compose_ms": 0.1
+   "decode_upload_ms": 137.9,
+   "compose_ms": 0.3
   },
   {
    "n": 1440,
    "kind": "segment",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 56,
-   "compose_ms": 0.1
+   "decode_upload_ms": 60.8,
+   "compose_ms": 0
   },
   {
    "n": 1470,
    "kind": "segment",
    "overlays": 1,
    "caption": false,
-   "decode_upload_ms": 47.5,
-   "compose_ms": 0.2
+   "decode_upload_ms": 82.3,
+   "compose_ms": 0.1
   },
   {
    "n": 1500,
    "kind": "segment",
    "overlays": 1,
    "caption": true,
-   "decode_upload_ms": 48.7,
-   "compose_ms": 5.2
+   "decode_upload_ms": 58.2,
+   "compose_ms": 4.7
   },
   {
    "n": 1560,
    "kind": "segment",
    "overlays": 1,
    "caption": true,
-   "decode_upload_ms": 51.5,
-   "compose_ms": 0.1
+   "decode_upload_ms": 64.5,
+   "compose_ms": 0.3
   },
   {
    "n": 1590,
    "kind": "segment",
    "overlays": 1,
    "caption": true,
-   "decode_upload_ms": 49.4,
-   "compose_ms": 0.1
+   "decode_upload_ms": 68.4,
+   "compose_ms": 0.2
   },
   {
    "n": 1649,
    "kind": "segment",
    "overlays": 1,
    "caption": true,
-   "decode_upload_ms": 111.9,
-   "compose_ms": 0.1
+   "decode_upload_ms": 150.2,
+   "compose_ms": 0.2
   },
   {
    "n": 1740,
    "kind": "segment",
    "overlays": 0,
    "caption": false,
-   "decode_upload_ms": 27.3,
-   "compose_ms": 0.1
+   "decode_upload_ms": 36.5,
+   "compose_ms": 0.4
   },
   {
    "n": 1799,
    "kind": "segment",
    "overlays": 0,
    "caption": false,
-   "decode_upload_ms": 58.1,
-   "compose_ms": 0
+   "decode_upload_ms": 75,
+   "compose_ms": 0.1
   }
  ],
  "environment": {
@@ -336,71 +336,71 @@
   "metrics": [
    {
     "cpu": {
-     "cumulativeCPUUsage": 1.844605,
+     "cumulativeCPUUsage": 2.140098,
      "percentCPUUsage": 0,
      "idleWakeupsPerSecond": 0
     },
-    "pid": 25236,
+    "pid": 17856,
     "type": "Browser",
-    "creationTime": 1788605645929.865,
+    "creationTime": 1788612925328.313,
     "memory": {
-     "workingSetSize": 116192,
-     "peakWorkingSetSize": 177068,
-     "privateBytes": 84460
+     "workingSetSize": 117152,
+     "peakWorkingSetSize": 177032,
+     "privateBytes": 86672
     },
     "integrityLevel": "medium",
     "sandboxed": false
    },
    {
     "cpu": {
-     "cumulativeCPUUsage": 5.250584,
+     "cumulativeCPUUsage": 6.414485,
      "percentCPUUsage": 0,
      "idleWakeupsPerSecond": 0
     },
-    "pid": 26952,
+    "pid": 13808,
     "type": "GPU",
-    "creationTime": 1788605646192.047,
+    "creationTime": 1788612925668.238,
     "serviceName": "GPU",
     "memory": {
-     "workingSetSize": 728332,
-     "peakWorkingSetSize": 730368,
-     "privateBytes": 681972
+     "workingSetSize": 715496,
+     "peakWorkingSetSize": 717532,
+     "privateBytes": 649088
     },
     "integrityLevel": "low",
     "sandboxed": true
    },
    {
     "cpu": {
-     "cumulativeCPUUsage": 0.186943,
+     "cumulativeCPUUsage": 0.204517,
      "percentCPUUsage": 0,
      "idleWakeupsPerSecond": 0
     },
-    "pid": 24384,
+    "pid": 15692,
     "type": "Utility",
-    "creationTime": 1788605646202.544,
+    "creationTime": 1788612925682.324,
     "serviceName": "network.mojom.NetworkService",
     "name": "Network Service",
     "memory": {
-     "workingSetSize": 54660,
-     "peakWorkingSetSize": 54832,
-     "privateBytes": 14588
+     "workingSetSize": 54484,
+     "peakWorkingSetSize": 54620,
+     "privateBytes": 14524
     },
     "integrityLevel": "medium",
     "sandboxed": false
    },
    {
     "cpu": {
-     "cumulativeCPUUsage": 3.059076,
+     "cumulativeCPUUsage": 3.586374,
      "percentCPUUsage": 0,
      "idleWakeupsPerSecond": 0
     },
-    "pid": 22564,
+    "pid": 26092,
     "type": "Tab",
-    "creationTime": 1788605646284.382,
+    "creationTime": 1788612925784.505,
     "memory": {
-     "workingSetSize": 350780,
-     "peakWorkingSetSize": 355384,
-     "privateBytes": 287308
+     "workingSetSize": 319956,
+     "peakWorkingSetSize": 362208,
+     "privateBytes": 256400
     },
     "integrityLevel": "medium",
     "sandboxed": false
@@ -441,7 +441,7 @@
     "glWsVersion": "1.5 (ANGLE 2.1.25160 git hash: ecc378cc6110)",
     "hardwareSupportsVulkan": false,
     "inProcessGpu": false,
-    "initializationTime": 312.843,
+    "initializationTime": 334.466,
     "isAsan": false,
     "isClangCoverage": false,
     "jpegDecodeAcceleratorSupported": false,

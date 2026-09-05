@@ -692,6 +692,7 @@ def _domain(exc: DomainError) -> HTTPException:
             "CONFLICT",
             "TIMELINE_ALREADY_EXISTS",
             "TIMELINE_CONFLICT",
+            "PREVIEW_IR_UNSUPPORTED",
             "TIMELINE_DRAFT_CONFLICT",
             "TIMELINE_LOCKED",
             "TIMELINE_PATCH_EGRESS_EXPIRED",
@@ -1572,6 +1573,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             items, next_cursor = state.renders.list_previews(project_id, limit, cursor)
             return {"items": items, "next_cursor": next_cursor}
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/projects/{project_id}/preview-ir")
+    async def get_preview_ir(
+        project_id: str,
+        timeline_revision_id: str | None = None,
+        output_ratio: str = "169",
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        if output_ratio != "169":
+            raise _error("PREVIEW_IR_RATIO_UNSUPPORTED", "合成预览当前仅支持 16:9 画布", 400)
+        try:
+            return await state.render_coordinator.preview_ir(project_id, timeline_revision_id, output_ratio)
         except DomainError as exc:
             raise _domain(exc) from exc
 

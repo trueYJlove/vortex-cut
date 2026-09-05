@@ -8,8 +8,8 @@
  */
 import { probeBridge } from "./common/bridge.js";
 import { setupProbe, createVideo, waitVideoReady, collectEnvironment, videoDecoderSupportEvidence } from "./common/shell.js";
-import { Compositor, assertHardwareRenderer } from "./common/compositor.js";
-import { activeInputIds, sourceFrameAt, type Ir } from "./common/ir.js";
+import { Compositor, assertHardwareRenderer } from "../app/preview/compositor.js";
+import { activeInputIds, sourceFrameAt, type Ir } from "../app/preview/ir.js";
 import { mulberry32, summarize, P1_SCRUB_SEED } from "./common/stats.js";
 
 const FRAME_BUDGET_MS = 1000 / 30;

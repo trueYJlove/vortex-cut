@@ -542,6 +542,23 @@ function registerIpc(): void {
     const response = parsePreviewCreateResponse(rendererSafe(await fetchWithUi(`${API_PREFIX}/projects/${projectId}/previews`, { method: "POST", body: JSON.stringify(request) })));
     return { ...response, preview: response.preview ? await previewPresentation(response.preview) : null };
   });
+  ipcMain.handle("media:caption-font-url", async () => {
+    const fontPath = resolve(
+      app.isPackaged ? process.resourcesPath : resolve(__dirname, "../../../../resources"),
+      "fonts", "noto-sans-sc", "NotoSansCJKsc-VF.ttf",
+    );
+    if (!restrictedMedia.registeredPath("caption-font")) {
+      restrictedMedia.register("caption-font", fontPath, "asset");
+    }
+    return restrictedMedia.issue("caption-font", "asset");
+  });
+  ipcMain.handle("preview-ir:get", async (_event, input: { project_id: string; timeline_revision_id?: string | null; output_ratio?: string }) => {
+    const params = new URLSearchParams();
+    if (input?.timeline_revision_id) params.set("timeline_revision_id", input.timeline_revision_id);
+    if (input?.output_ratio) params.set("output_ratio", input.output_ratio);
+    const query = params.toString();
+    return fetchWithUi(`${API_PREFIX}/projects/${asId(input?.project_id ?? "", "project_id")}/preview-ir${query ? `?${query}` : ""}`);
+  });
   ipcMain.handle("preview:list", async (_event, input: { project_id: ProjectId; limit?: number; cursor?: string }) => {
     const page = rendererSafe(await fetchWithUi(`${API_PREFIX}/projects/${asId(input.project_id, "project_id")}/previews${buildQuery(input, ["project_id"])}`));
     if (!isPage(page, isAuthoritativePreview)) throw new Error("Invalid AuthoritativePreviewPage");

@@ -37,8 +37,7 @@
         "dy": 0,
         "peak": 0.827269,
         "confidence": 827269254905.0
-      },
-      "psnr_vs_second_ref_db": 34.777389
+      }
     },
     {
       "n": 30,
@@ -66,8 +65,7 @@
         "dy": 0,
         "peak": 0.84255,
         "confidence": 842550359712.7
-      },
-      "psnr_vs_second_ref_db": 33.252243
+      }
     },
     {
       "n": 120,
@@ -96,7 +94,6 @@
         "peak": 0.090009,
         "confidence": 90008676932.2
       },
-      "psnr_vs_second_ref_db": 16.467432,
       "caption_metric": {
         "text_mask_iou": 0.4303,
         "bbox_gl": {
@@ -150,8 +147,7 @@
         "dy": 0,
         "peak": 0.868241,
         "confidence": 868241179054.3
-      },
-      "psnr_vs_second_ref_db": 32.242872
+      }
     },
     {
       "n": 330,
@@ -179,8 +175,7 @@
         "dy": 0,
         "peak": 0.407308,
         "confidence": 407307596104.8
-      },
-      "psnr_vs_second_ref_db": 22.224975
+      }
     },
     {
       "n": 420,
@@ -209,7 +204,6 @@
         "peak": 0.084975,
         "confidence": 84974992780.4
       },
-      "psnr_vs_second_ref_db": 15.49591,
       "caption_metric": {
         "text_mask_iou": 0.4166,
         "bbox_gl": {
@@ -264,7 +258,6 @@
         "peak": 0.081212,
         "confidence": 81211953189.2
       },
-      "psnr_vs_second_ref_db": 15.37376,
       "caption_metric": {
         "text_mask_iou": 0.4171,
         "bbox_gl": {
@@ -318,8 +311,7 @@
         "dy": 0,
         "peak": 0.443201,
         "confidence": 443200759033.0
-      },
-      "psnr_vs_second_ref_db": 22.232585
+      }
     },
     {
       "n": 569,
@@ -347,8 +339,7 @@
         "dy": 0,
         "peak": 0.395488,
         "confidence": 395488430253.1
-      },
-      "psnr_vs_second_ref_db": 20.282352
+      }
     },
     {
       "n": 570,
@@ -376,8 +367,7 @@
         "dy": 0,
         "peak": 0.444593,
         "confidence": 444593089274.6
-      },
-      "psnr_vs_second_ref_db": 21.908965
+      }
     },
     {
       "n": 571,
@@ -405,8 +395,7 @@
         "dy": 0,
         "peak": 0.357762,
         "confidence": 357761549410.7
-      },
-      "psnr_vs_second_ref_db": 20.18832
+      }
     },
     {
       "n": 585,
@@ -434,8 +423,7 @@
         "dy": 0,
         "peak": 0.314349,
         "confidence": 314348626282.6
-      },
-      "psnr_vs_second_ref_db": 21.41053
+      }
     },
     {
       "n": 599,
@@ -463,8 +451,7 @@
         "dy": 0,
         "peak": 0.379702,
         "confidence": 379701724878.8
-      },
-      "psnr_vs_second_ref_db": 22.155107
+      }
     },
     {
       "n": 600,
@@ -492,8 +479,7 @@
         "dy": 0,
         "peak": 0.384448,
         "confidence": 384447603488.3
-      },
-      "psnr_vs_second_ref_db": 21.987592
+      }
     },
     {
       "n": 601,
@@ -521,8 +507,7 @@
         "dy": 0,
         "peak": 0.400281,
         "confidence": 400280749065.8
-      },
-      "psnr_vs_second_ref_db": 21.849915
+      }
     },
     {
       "n": 660,
@@ -550,8 +535,7 @@
         "dy": 0,
         "peak": 0.312611,
         "confidence": 312611271655.3
-      },
-      "psnr_vs_second_ref_db": 22.744966
+      }
     },
     {
       "n": 750,
@@ -580,7 +564,6 @@
         "peak": 0.097723,
         "confidence": 97722678789.6
       },
-      "psnr_vs_second_ref_db": 16.45958,
       "caption_metric": {
         "text_mask_iou": 0.3784,
         "bbox_gl": {
@@ -635,7 +618,6 @@
         "peak": 0.092088,
         "confidence": 92088292008.1
       },
-      "psnr_vs_second_ref_db": 16.368805,
       "caption_metric": {
         "text_mask_iou": 0.3756,
         "bbox_gl": {
@@ -689,8 +671,7 @@
         "dy": 0,
         "peak": 0.396505,
         "confidence": 396504563640.1
-      },
-      "psnr_vs_second_ref_db": 23.175545
+      }
     },
     {
       "n": 900,
@@ -718,8 +699,7 @@
         "dy": 0,
         "peak": 0.385326,
         "confidence": 385326324378.4
-      },
-      "psnr_vs_second_ref_db": 23.022686
+      }
     },
     {
       "n": 1000,
@@ -747,8 +727,7 @@
         "dy": 0,
         "peak": 0.61491,
         "confidence": 614909827971.4
-      },
-      "psnr_vs_second_ref_db": 31.180524
+      }
     },
     {
       "n": 1050,
@@ -776,8 +755,7 @@
         "dy": 0,
         "peak": 0.573816,
         "confidence": 573816385051.4
-      },
-      "psnr_vs_second_ref_db": 24.616005
+      }
     },
     {
       "n": 1080,
@@ -805,8 +783,7 @@
         "dy": 0,
         "peak": 0.539274,
         "confidence": 539273563415.0
-      },
-      "psnr_vs_second_ref_db": 23.953314
+      }
     },
     {
       "n": 1200,
@@ -835,7 +812,6 @@
         "peak": 0.142714,
         "confidence": 142713966672.2
       },
-      "psnr_vs_second_ref_db": 16.012942,
       "caption_metric": {
         "text_mask_iou": 0.4151,
         "bbox_gl": {
@@ -890,7 +866,6 @@
         "peak": 0.133235,
         "confidence": 133234957701.9
       },
-      "psnr_vs_second_ref_db": 16.030809,
       "caption_metric": {
         "text_mask_iou": 0.4148,
         "bbox_gl": {
@@ -944,8 +919,7 @@
         "dy": 0,
         "peak": 0.395264,
         "confidence": 395264263807.9
-      },
-      "psnr_vs_second_ref_db": 25.689658
+      }
     },
     {
       "n": 1365,
@@ -973,8 +947,7 @@
         "dy": 0,
         "peak": 0.311131,
         "confidence": 311131052287.9
-      },
-      "psnr_vs_second_ref_db": 25.38479
+      }
     },
     {
       "n": 1380,
@@ -1002,8 +975,7 @@
         "dy": 0,
         "peak": 0.318153,
         "confidence": 318153129378.0
-      },
-      "psnr_vs_second_ref_db": 24.929859
+      }
     },
     {
       "n": 1395,
@@ -1031,8 +1003,7 @@
         "dy": 0,
         "peak": 0.32296,
         "confidence": 322960274666.9
-      },
-      "psnr_vs_second_ref_db": 25.042478
+      }
     },
     {
       "n": 1440,
@@ -1060,8 +1031,7 @@
         "dy": 0,
         "peak": 0.326033,
         "confidence": 326033111761.4
-      },
-      "psnr_vs_second_ref_db": 27.907015
+      }
     },
     {
       "n": 1470,
@@ -1089,8 +1059,7 @@
         "dy": 0,
         "peak": 0.351278,
         "confidence": 351277789911.7
-      },
-      "psnr_vs_second_ref_db": 25.444015
+      }
     },
     {
       "n": 1500,
@@ -1119,7 +1088,6 @@
         "peak": 0.022866,
         "confidence": 22866375751.0
       },
-      "psnr_vs_second_ref_db": 15.339056,
       "caption_metric": {
         "text_mask_iou": 0.4164,
         "bbox_gl": {
@@ -1174,7 +1142,6 @@
         "peak": 0.018844,
         "confidence": 18844110427.8
       },
-      "psnr_vs_second_ref_db": 15.176792,
       "caption_metric": {
         "text_mask_iou": 0.4337,
         "bbox_gl": {
@@ -1229,7 +1196,6 @@
         "peak": 0.0333,
         "confidence": 33299620520.9
       },
-      "psnr_vs_second_ref_db": 15.131278,
       "caption_metric": {
         "text_mask_iou": 0.4534,
         "bbox_gl": {
@@ -1284,7 +1250,6 @@
         "peak": 0.075001,
         "confidence": 75001034512.8
       },
-      "psnr_vs_second_ref_db": 15.408062,
       "caption_metric": {
         "text_mask_iou": 0.4501,
         "bbox_gl": {
@@ -1338,8 +1303,7 @@
         "dy": 0,
         "peak": 0.760765,
         "confidence": 760764748275.9
-      },
-      "psnr_vs_second_ref_db": 32.584602
+      }
     },
     {
       "n": 1799,
@@ -1367,8 +1331,7 @@
         "dy": 0,
         "peak": 0.605174,
         "confidence": 605173787358.9
-      },
-      "psnr_vs_second_ref_db": 30.985122
+      }
     }
   ],
   "worst5_by_psnr": [
@@ -1399,7 +1362,6 @@
         "peak": 0.0333,
         "confidence": 33299620520.9
       },
-      "psnr_vs_second_ref_db": 15.131278,
       "caption_metric": {
         "text_mask_iou": 0.4534,
         "bbox_gl": {
@@ -1454,7 +1416,6 @@
         "peak": 0.018844,
         "confidence": 18844110427.8
       },
-      "psnr_vs_second_ref_db": 15.176792,
       "caption_metric": {
         "text_mask_iou": 0.4337,
         "bbox_gl": {
@@ -1509,7 +1470,6 @@
         "peak": 0.022866,
         "confidence": 22866375751.0
       },
-      "psnr_vs_second_ref_db": 15.339056,
       "caption_metric": {
         "text_mask_iou": 0.4164,
         "bbox_gl": {
@@ -1564,7 +1524,6 @@
         "peak": 0.081212,
         "confidence": 81211953189.2
       },
-      "psnr_vs_second_ref_db": 15.37376,
       "caption_metric": {
         "text_mask_iou": 0.4171,
         "bbox_gl": {
@@ -1619,7 +1578,6 @@
         "peak": 0.075001,
         "confidence": 75001034512.8
       },
-      "psnr_vs_second_ref_db": 15.408062,
       "caption_metric": {
         "text_mask_iou": 0.4501,
         "bbox_gl": {

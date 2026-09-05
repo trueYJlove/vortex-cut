@@ -18,6 +18,7 @@ from ..media.process import run_process
 from ..projects import DomainError, ProjectAssetService
 from .ass import CaptionResources, build_ass, build_rendition_ass
 from .ffmpeg import build_timeline_args, run_timeline_render
+from .ir import project_preview_ir, resolved_caption_styles
 from .plan import COMPILER_VERSION, REFRAME_COMPILER_VERSION, RenderPlanCompiler
 from .validation import validate_rendered_media
 
@@ -194,6 +195,40 @@ class RenderCoordinator:
         self.destinations = destinations
         self.directory_grants = directory_grants
         self.rendition_presets = rendition_presets
+        # 合成预览 IR 缓存：键 = content_fingerprint（plan 语义 + 输出规格），
+        # 命中则跳过投影与 ffprobe；体量 ~1-3MB/条，保留最近 4 条。
+        self.preview_ir_cache: dict[str, dict[str, Any]] = {}
+        self.preview_probe_cache: dict[str, dict[str, Any]] = {}
+
+    async def preview_ir(self, project_id: str, timeline_revision_id: str | None,
+                         output_ratio: str) -> dict[str, Any]:
+        """合成预览 IR（preview-ir-v1）：compile → ffprobe → 投影（纯函数）。"""
+        plan = self.compiler.compile(project_id, timeline_revision_id,
+                                     "authoritative_preview", output_ratio=output_ratio)
+        fingerprint = plan["content_fingerprint"]
+        cached = self.preview_ir_cache.get(fingerprint)
+        if cached is not None:
+            return cached
+        probe_by_asset: dict[str, dict[str, Any]] = {}
+        for item in plan["inputs"]:
+            key = str(item["fingerprint"])
+            if key not in self.preview_probe_cache:
+                path = Path(self.projects.resolve_asset_path(item["asset_id"])["path"])
+                self.preview_probe_cache[key] = await self.ffprobe.probe(path)
+            probe_by_asset[item["asset_id"]] = self.preview_probe_cache[key]
+        _bundle, presets, _font = self.caption_resources.load()
+        ir = project_preview_ir(plan, probe_by_asset, resolved_caption_styles(presets))
+        payload = {
+            "schema_version": 1,
+            "content_fingerprint": fingerprint,
+            "timeline_revision_id": plan["timeline_revision_id"],
+            "output_ratio": output_ratio,
+            "ir": ir,
+        }
+        self.preview_ir_cache[fingerprint] = payload
+        while len(self.preview_ir_cache) > 4:
+            self.preview_ir_cache.pop(next(iter(self.preview_ir_cache)))
+        return payload
 
     def cleanup_orphans(self) -> None:
         with self.database.connection() as db:

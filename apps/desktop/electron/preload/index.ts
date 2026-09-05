@@ -82,6 +82,13 @@ export interface DesktopRuntime { protocol_version: 1; status: "ready" }
 export interface AuthoritativePreviewPresentation { preview: AuthoritativePreview; media_url: string }
 export interface ExportRecordPresentation { export_record: ExportRecord; media_url: string | null }
 export interface RenderArtifactPresentation { artifact: RenderArtifact; media_url: string }
+export interface PreviewIrPresentation {
+  schema_version: number;
+  content_fingerprint: string;
+  timeline_revision_id: string;
+  output_ratio: string;
+  ir: Record<string, unknown>;
+}
 export interface RenditionPreviewPresentation { preview: RenditionPreview; media_url: string }
 export interface RenditionReframePreviewPresentation { preview: RenditionReframePreview; media_url: string }
 
@@ -212,6 +219,8 @@ export interface DesktopApi {
   listShotRequirementTimelineBatches: (input: { project_id: ProjectId; limit?: number; cursor?: string }) => Promise<ShotRequirementTimelineBatchAssemblyPage>;
   listShotRequirementTimelineBatchAssemblyItems: (input: { batch_id: ShotRequirementTimelineBatchAssemblyId; limit?: number; cursor?: string }) => Promise<ShotRequirementTimelineBatchAssemblyItemPage>;
   getRenderArtifact: (artifactId: RenderArtifactId) => Promise<RenderArtifactPresentation>;
+  getPreviewIr: (input: { project_id: ProjectId; timeline_revision_id?: string | null; output_ratio?: string }) => Promise<PreviewIrPresentation>;
+  captionFontUrl: () => Promise<string>;
   openArtifact: (artifactId: string) => Promise<void>;
   openArtifactFolder: (artifactId: string) => Promise<void>;
   subscribeJob: (jobId: JobId, listener: (job: Job) => void) => () => void;
@@ -342,6 +351,8 @@ const api: DesktopApi = {
   listShotRequirementTimelineBatches: input => ipcRenderer.invoke("stage6r:batch-assembly-list", input),
   listShotRequirementTimelineBatchAssemblyItems: input => ipcRenderer.invoke("stage6r:batch-assembly-item-list", input),
   getRenderArtifact: artifactId => ipcRenderer.invoke("render-artifact:get", artifactId),
+  getPreviewIr: input => ipcRenderer.invoke("preview-ir:get", input),
+  captionFontUrl: () => ipcRenderer.invoke("media:caption-font-url"),
   openArtifact: artifactId => ipcRenderer.invoke("artifact:open", artifactId),
   openArtifactFolder: artifactId => ipcRenderer.invoke("artifact:folder", artifactId),
   subscribeJob: (jobId, listener) => {

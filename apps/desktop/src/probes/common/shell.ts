@@ -1,6 +1,6 @@
 /** M3-0 探针公共：页面壳、环境取证、视频元素与就绪辅助。 */
 import { probeBridge, fetchAssetBlobUrl, type ProbeSession } from "./bridge.js";
-import { parseIr, type Ir } from "./ir.js";
+import { parseIr, type Ir } from "../../app/preview/ir.js";
 
 export interface ProbeShell {
   session: ProbeSession;

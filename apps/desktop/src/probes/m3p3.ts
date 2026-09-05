@@ -124,7 +124,7 @@ interface WorkerMessage {
 async function runWebCodecsPath(
   ticket: string, cacheFrames: number, presentCanvas: HTMLCanvasElement, targets: Target[],
 ): Promise<{ result: PathResult; keyframes: number[]; durationFrames: number; hardware: string | null; codedWidth: number; codedHeight: number }> {
-  const worker = new Worker(new URL("./p3-worker.ts", import.meta.url), { type: "module" });
+  const worker = new Worker(new URL("../app/preview/decode-worker.worker.ts", import.meta.url), { type: "module" });
   const ctx = presentCanvas.getContext("2d", { willReadFrequently: true })!;
   const samples: Array<Record<string, number>> = [];
   const stepLatencies: number[] = [];
