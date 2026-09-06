@@ -165,6 +165,8 @@ export function App() {
   const [previews, setPreviews] = useState<AuthoritativePreviewPresentation[]>([]);
   const [exports, setExports] = useState<ExportRecordPresentation[]>([]);
   const [exportPlayback, setExportPlayback] = useState<ExportRecordPresentation>();
+  /** 导出前核验：generatePreview 请求后等待当前 Revision 的权威预览就绪。 */
+  const [pendingVerify, setPendingVerify] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const [aiStep, setAiStep] = useState<"form" | "confirm" | "running" | "candidates">("form");
   const [aiError, setAiError] = useState("");
@@ -966,7 +968,12 @@ export function App() {
     setExportPlayback(undefined);
     setPlaying(true);
   };
-  const exitLibraryPreview = () => { if (libraryPreviewId) setLibraryPreviewId(null); };
+  const exitLibraryPreview = () => {
+    if (!libraryPreviewId) return;
+    setLibraryPreviewId(null);
+    // 素材预览结束回合成预览（回退过的环境保持交互预览，避免再次触发回退）。
+    if (previewMode === "interactive" && !syntheticNotice) setPreviewMode("synthetic");
+  };
   const isDraggableAsset = (kind: AssetKind) => kind === "video" || kind === "image" || kind === "audio";
   // 素材类型图标（列表行的类型标识，替代文字标签——剪映式）。
   const assetKindIcon = (kind: AssetKind) =>
@@ -1082,6 +1089,7 @@ export function App() {
     if (timeline.draft) { showNotice("请先提交或丢弃草稿，再生成权威预览。", "warning"); return; }
     try {
       const result = await window.desktop.createPreview({ project_id: project.project_id, preview: { timeline_revision_id: timeline.current_revision.timeline_revision_id, encoder_mode: encoderMode, output_ratio: effectiveRatio } });
+      setPendingVerify(true);
       if (result.preview) {
         setPreviews(items => [result.preview!, ...items.filter(item => item.preview.render_artifact_id !== result.preview!.preview.render_artifact_id)]);
         setPreviewMode("authoritative");
@@ -1089,6 +1097,16 @@ export function App() {
       if (result.job) { trackRenderJob(result.job); setRenderPanelOpen(true); }
     } catch (error) { showNotice(safeErrorMessage(error, "操作未完成，请刷新后重试。")); }
   };
+  // 导出前核验（Phase 2：权威预览不再是一个常驻模式，收敛为"生成后观看核验"）：
+  // 异步任务完成路径——当前 Revision 的权威预览一旦就绪即自动切换观看；
+  // 立即返回 preview 的复用路径已在 generatePreview 内直接切换。
+  useEffect(() => {
+    if (!pendingVerify) return;
+    const ready = previews.find(item => item.preview.timeline_revision_id === timeline?.current_revision.timeline_revision_id && item.preview.status === "ready");
+    if (!ready) return;
+    setPendingVerify(false);
+    setPreviewMode("authoritative");
+  }, [pendingVerify, previews, timeline?.current_revision.timeline_revision_id]);
   const createExport = async () => {
     if (!project || !timeline || !working?.clips.length) return;
     if (timeline.draft) { showNotice("请先提交或丢弃草稿，再导出正式 Revision。", "warning"); return; }
@@ -1690,7 +1708,6 @@ export function App() {
       <section ref={stagePaneRef} className={`stage-pane${isFullscreen ? " fullscreen" : ""}`} aria-label="项目预览">
         <div className="stage-column" ref={stageColumnRef}>
           <div className="preview-toolbar">
-            <div className="preview-mode-switch" aria-label="预览模式"><button className={previewMode === "interactive" ? "active" : ""} onClick={() => { setPreviewMode("interactive"); setExportPlayback(undefined); }}>交互预览</button><button className={previewMode === "synthetic" ? "active" : ""} disabled={!project || !timeline} onClick={() => { setSyntheticNotice(null); setPreviewMode("synthetic"); }} title="实时合成预览（转场 / 关键帧 / 画中画实时可见）">合成预览</button><button className={previewMode === "authoritative" ? "active" : ""} disabled={!authoritativePreview && !exportPlayback} onClick={() => { setPreviewMode("authoritative"); setExportPlayback(undefined); }}>权威预览</button></div>
             <div className="tb-right">
               <label className="tb-field">比例<select aria-label="预览比例" value={effectiveRatio} onChange={event => { setPreviewRatio(event.target.value); setPreviewRatioTouched(true); setCanvasSize(null); if (canvasRef.current) { canvasRef.current.style.width = ""; canvasRef.current.style.height = ""; } }}>{previewRatios.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label>
               <span className="tb-sep" aria-hidden="true" />
@@ -1701,7 +1718,7 @@ export function App() {
           <div className="stage-view">
             <div className={`preview-frame ${previewClass}${previewSelected ? " selected" : ""}`} style={previewZoom === "fit" ? undefined : { transform: `scale(${previewZoom})` }} role="button" tabIndex={0} aria-label="选中播放头处的片段" title="点击选中播放头处的片段" onClick={selectClipAtPlayhead} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectClipAtPlayhead(); } }}>
           <div className="preview-canvas" ref={canvasRef}>
-            {previewMode === "authoritative" && authoritativeMediaUrl && <video ref={videoRef} className="preview-foreground authoritative-video" src={authoritativeMediaUrl} aria-label={reframePlayback ? "重构图权威预览视频" : exportPlayback ? "导出视频" : "权威预览视频"} controls onEnded={() => setPlaying(false)} />}
+            {previewMode === "authoritative" && authoritativeMediaUrl && <video ref={videoRef} className="preview-foreground authoritative-video" src={authoritativeMediaUrl} aria-label={reframePlayback ? "重构图权威预览视频" : exportPlayback ? "导出视频" : "权威预览视频"} controls onEnded={() => { setPlaying(false); setExportPlayback(undefined); setReframePlayback(undefined); setPreviewMode("synthetic"); }} />}
             {previewMode === "synthetic" && project && working && timeline && <SyntheticPreview outputRatio={syntheticRatio} projectId={project.project_id} revisionId={timeline?.current_revision.timeline_revision_id ?? null} mediaUrls={new Map(assets.flatMap(item => item.media_url ? [[item.asset.asset_id, item.media_url] as const] : []))} audioByClip={new Map((working?.clips ?? []).flatMap(clip => clip.audio ? [[clip.clip_id, { enabled: clip.audio.enabled, gainDb: clip.audio.gain_db }] as const] : []))} pipClips={(working?.clips ?? []).filter(clip => clip.track_id !== "V1" && clip.track_id !== "A1" && clip.asset_kind !== "audio").map(clip => ({ clipId: clip.clip_id, transform: { x: clip.transform?.x, y: clip.transform?.y, scale: clip.transform?.scale, rotate: clip.transform?.rotate, opacity: clip.transform?.opacity }, mask: clip.mask ?? undefined }))} selectedClipId={pipSelectedId} onSelectClip={clipId => setSelection({ kind: "clip", id: clipId as never })} onCommitPipTransform={(clipId, transform) => { const clip = (working?.clips ?? []).find(item => item.clip_id === clipId); commitPipTransform(clipId as never, { ...(clip?.transform ?? {}), ...transform }); }} onDraftPipMask={(clipId, mask) => draftPipMask(clipId as never, mask)} onCommitPipMask={(clipId, mask) => commitPipMask(clipId as never, mask)} onGesturePause={pausePreviewPlayback} onGestureResume={resumePreviewPlayback} playing={playing && !gestureHoldRef.current} playheadUs={playhead} onTimeUs={us => setPlayhead(us)} onEnded={() => setPlaying(false)} onFallback={(reason, code) => { setPreviewMode("interactive"); setSyntheticNotice(code === "PREVIEW_IR_UNSUPPORTED" ? "当前时间线包含实时合成暂不支持的效果，已回退交互预览。" : `合成预览不可用：${reason}，已回退交互预览。`); }} />}
             {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "video" && <div className="preview-transform" style={mainTransformStyle}><video className="preview-background" src={previewAsset.media_url} muted aria-hidden="true" /><video ref={videoRef} className="preview-foreground" src={previewAsset.media_url} muted={!selectedClip?.audio.enabled || previewReverse || (clipAtPlayhead ? !isClipAudible(clipAtPlayhead) : false)} aria-label="交互预览视频" onTimeUpdate={event => { if (libraryPreviewId) setPlayhead(Math.round(event.currentTarget.currentTime * 1_000_000)); }} onEnded={handleVideoEnded} /></div>}
             {previewMode === "interactive" && audioAsset?.media_url && <audio ref={audioRef} src={audioAsset.media_url} style={{ display: "none" }} />}
@@ -1713,7 +1730,7 @@ export function App() {
           {/* 选中框：白色边框 + 8 向拖拽手柄，缩放时随画面一起缩放；仅选中片段时可见。 */}
           {!overlayClipSelected && <div className="sel-box" ref={selBoxRef} onClick={event => event.stopPropagation()} aria-hidden="true"><i className="sel-border" /><span className="sel-dims">{selDimsText || `${Math.round((canvasRef.current?.offsetWidth ?? 0))} × ${Math.round((canvasRef.current?.offsetHeight ?? 0))}`}</span><span className="h h-nw" data-dir="nw" title="等比缩放（左上）" onPointerDown={beginSelDrag("nw")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-n" data-dir="n" title="单轴缩放（上）" onPointerDown={beginSelDrag("n")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-ne" data-dir="ne" title="等比缩放（右上）" onPointerDown={beginSelDrag("ne")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-e" data-dir="e" title="单轴缩放（右）" onPointerDown={beginSelDrag("e")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-se" data-dir="se" title="等比缩放（右下）" onPointerDown={beginSelDrag("se")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-s" data-dir="s" title="单轴缩放（下）" onPointerDown={beginSelDrag("s")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-sw" data-dir="sw" title="等比缩放（左下）" onPointerDown={beginSelDrag("sw")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-w" data-dir="w" title="单轴缩放（左）" onPointerDown={beginSelDrag("w")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /></div>}
         </div>
-          <span className={`interactive-label ${previewIsStale && previewMode === "authoritative" && !exportPlayback ? "stale" : ""}`}>{previewMode === "interactive" ? "交互预览 · 非权威" : previewMode === "synthetic" ? "合成预览 · 实时（非权威）" : reframePlayback ? "静态焦点重构图 · 权威预览" : exportPlayback ? `导出 · ${exportPlayback.export_record.destination_display_name}` : previewIsStale ? "权威预览 · 已过期" : "权威预览 · 当前 Revision"}</span><span role="status" aria-label="预览状态" className={`preview-context ${previewMode === "authoritative" ? "authoritative" : previewMode === "synthetic" ? "synthetic" : "interactive"}${previewIsStale ? " stale" : ""}`}>{previewMode === "authoritative" ? (previewIsStale ? "权威预览已过期" : authoritativePreview ? "权威预览" : "尚未生成权威预览") : previewMode === "synthetic" ? "合成预览" : "交互预览"}</span>{syntheticNotice && <span role="note" aria-label="合成预览回退提示" className="synthetic-note">{syntheticNotice}</span>}
+          <span className={`interactive-label ${previewIsStale && previewMode === "authoritative" && !exportPlayback ? "stale" : ""}`}>{previewMode === "interactive" ? "交互预览 · 非权威" : previewMode === "synthetic" ? "合成预览 · 实时（非权威）" : reframePlayback ? "静态焦点重构图 · 权威预览" : exportPlayback ? `导出 · ${exportPlayback.export_record.destination_display_name}` : previewIsStale ? "权威预览 · 已过期" : "权威预览 · 当前 Revision"}</span><span role="status" aria-label="预览状态" className={`preview-context ${previewMode === "authoritative" ? "authoritative" : previewMode === "synthetic" ? "synthetic" : "interactive"}${previewIsStale ? " stale" : ""}`}>{previewMode === "authoritative" ? (previewIsStale ? "权威预览已过期" : authoritativePreview ? "权威预览" : "尚未生成权威预览") : previewMode === "synthetic" ? "合成预览" : "交互预览"}</span>{syntheticNotice && <span role="note" aria-label="合成预览回退提示" className="synthetic-note">{syntheticNotice}<button className="synthetic-note-retry" onClick={() => { setSyntheticNotice(null); setPreviewMode("synthetic"); }}>重试合成预览</button></span>}
           <div className={`progress${progressDragging ? " dragging" : ""}`} ref={progressRef} role="slider" tabIndex={0} aria-label="时间线播放头" aria-valuemin={0} aria-valuemax={Math.max(totalUs, 1)} aria-valuenow={Math.min(playhead, totalUs)} onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); setProgressDragging(true); seekFromProgress(event.clientX); }} onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) seekFromProgress(event.clientX); }} onPointerUp={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); setProgressDragging(false); }} onKeyDown={event => { if (event.key === "ArrowLeft") { event.preventDefault(); seekFromProgressRatio(Math.max(0, playhead / Math.max(totalUs, 1) - 1 / 300)); } else if (event.key === "ArrowRight") { event.preventDefault(); seekFromProgressRatio(Math.min(1, playhead / Math.max(totalUs, 1) + 1 / 300)); } else if (event.key === "Home") { event.preventDefault(); seekFromProgressRatio(0); } else if (event.key === "End") { event.preventDefault(); seekFromProgressRatio(1); } }}>
             <div className="pg-bubble" style={{ left: `${progressPct}%` }}>{formatSmpteTimecode(playhead, previewFps)}</div>
             <div className="pg-rail"><div className="pg-fill" style={{ width: `${progressPct}%` }}><i className="pg-dot" /></div></div>

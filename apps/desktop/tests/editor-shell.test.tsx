@@ -86,6 +86,10 @@ describe("Editor shell 基线", () => {
     expect(screen.getByRole("status", { name: "保存状态" })).toHaveTextContent("已保存");
     expect(screen.getByRole("status", { name: "预览状态" })).toHaveTextContent("交互预览");
     expect(screen.getByRole("status", { name: "Core 连接状态" })).toBeInTheDocument();
+    // 重试合成预览：提示清除 → 再次尝试 → 环境不变则再次回退并重新提示。
+    fireEvent.click(screen.getByRole("button", { name: "重试合成预览" }));
+    expect(screen.queryByRole("note", { name: "合成预览回退提示" })).not.toBeInTheDocument();
+    await screen.findByRole("note", { name: "合成预览回退提示" }, { timeout: 10_000 });
   });
 
   it("shows 保存中 while a timeline mutation is in flight", async () => {
@@ -126,8 +130,11 @@ describe("Editor shell 基线", () => {
     window.desktop = desktopApi({ previews: [stalePreview] });
     render(<App />);
     expect(await screen.findByText("权威预览已过期")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "权威预览" }));
-    expect(screen.getByText("权威预览已过期", { selector: ".preview-context" })).toBeInTheDocument();
+    // 模式切换已移除：生成权威预览（复用既有产物）后自动进入核验观看，
+    // 状态徽标随 stale 语义显示"权威预览已过期"。
+    vi.mocked(window.desktop.createPreview!).mockResolvedValue({ job: null, preview: stalePreview, reused: true });
+    fireEvent.click(screen.getByRole("button", { name: "生成权威预览" }));
+    await waitFor(() => expect(screen.getByText("权威预览已过期", { selector: ".preview-context" })).toBeInTheDocument());
   });
 
   it("filters visible assets without changing project data", async () => {

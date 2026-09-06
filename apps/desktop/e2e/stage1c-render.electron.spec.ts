@@ -66,8 +66,8 @@ test("1C-Render 真实 Electron 权威预览、Artifact Ticket 与最终导出",
     expect(playback).toEqual({ status: 206, length: 32 });
     const renderPanelClose = page.getByRole("button", { name: "关闭渲染与导出" });
     if (await renderPanelClose.isVisible().catch(() => false)) { await renderPanelClose.click(); await expect(page.getByRole("button", { name: "关闭渲染与导出" })).toHaveCount(0, { timeout: 10_000 }); }
-    await page.getByRole("button", { name: "权威预览", exact: true }).click();
-    await expect(page.getByLabel("权威预览视频")).toBeVisible();
+    // 模式切换已移除（Phase 2）：生成请求后当前 Revision 的权威预览就绪即自动进入核验观看。
+    await expect(page.getByLabel("权威预览视频")).toBeVisible({ timeout: 30_000 });
 
     await page.getByRole("button", { name: "导出正式视频" }).click();
     await expect.poll(async () => page.evaluate(async projectId => {

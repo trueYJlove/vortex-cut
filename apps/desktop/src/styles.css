@@ -102,7 +102,6 @@ textarea { min-height: 92px; padding: 8px; resize: vertical; }
 .append-btn:hover:not(:disabled) { background: rgba(37, 211, 172, .18); }
 .segment-row { padding: 7px 0; display: grid; grid-template-columns: 18px 78px 1fr; gap: 5px; border-top: 1px solid #1f2931; font-size: 11.5px; color: #a3aeb5; line-height: 1.55; }.segment-row input { width: 13px; height: 13px; accent-color: #12b998; }.segment-row span { color: #25d3ac; font-family: Consolas, monospace; font-size: 10px; }.segment-row p { margin: 0; overflow-wrap: anywhere; }
 .empty-timeline { padding: 10px; }.empty-timeline button { width: 100%; }
-.preview-mode-switch { width: min(620px, 100%); display: flex; align-items: center; gap: 6px; }.preview-mode-switch button { flex: 1; min-height: 28px; font-size: 11px; }
 .preview-frame { position: relative; width: 100%; height: 100%; overflow: visible; background: #181c1f; }
 .synthetic-preview { background: transparent; }
 .synthetic-metrics { position: absolute; left: 8px; bottom: 8px; padding: 3px 8px; border-radius: 5px; background: rgba(10, 14, 17, .72); color: #8fa0a8; font-size: 11px; font-family: Consolas, monospace; pointer-events: none; z-index: 4; white-space: nowrap; }
@@ -330,7 +329,7 @@ footer .ai-entry { min-height: 22px; padding: 0 7px; border: 1px solid #263038; 
 .resize-handle { z-index: 5; width: 7px; cursor: col-resize; background: transparent; }.resize-handle:hover { background: #d1a453; }.resize-handle-left { position: absolute; left: calc(var(--left-width) - 3px); top: 0; bottom: 0; }.resize-handle-right { position: absolute; right: calc(var(--right-width) - 3px); top: 0; bottom: 0; }
 .timeline-resize-handle { height: 7px; cursor: row-resize; background: #252f34; border-top: 1px solid #3b474d; }.timeline-resize-handle:hover { background: #d1a453; }
 body.is-resizing, body.is-resizing * { user-select: none; }.properties-pane { padding: 14px; }
-.preview-toolbar { height: 40px; flex: 0 0 auto; width: 100%; display: flex; align-items: center; gap: 10px; }.preview-toolbar .preview-mode-switch { flex: 0 0 auto; }.tb-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }.tb-field { display: flex; align-items: center; gap: 6px; color: #9eabb1; font-size: 11.5px; white-space: nowrap; }.tb-field select { appearance: none; -webkit-appearance: none; width: 68px; height: 26px; padding: 0 22px 0 9px; font-size: 11.5px; color: var(--vc-text, #e8e8ef); background: var(--vc-raised, #22222e) url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="8" height="5"><path d="M0 0l4 5 4-5z" fill="%239a9aab"/></svg>') no-repeat right 8px center; border: 1px solid var(--vc-border-2, #32323f); border-radius: 6px; cursor: pointer; }
+.preview-toolbar { height: 40px; flex: 0 0 auto; width: 100%; display: flex; align-items: center; gap: 10px; }.tb-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }.tb-field { display: flex; align-items: center; gap: 6px; color: #9eabb1; font-size: 11.5px; white-space: nowrap; }.tb-field select { appearance: none; -webkit-appearance: none; width: 68px; height: 26px; padding: 0 22px 0 9px; font-size: 11.5px; color: var(--vc-text, #e8e8ef); background: var(--vc-raised, #22222e) url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="8" height="5"><path d="M0 0l4 5 4-5z" fill="%239a9aab"/></svg>') no-repeat right 8px center; border: 1px solid var(--vc-border-2, #32323f); border-radius: 6px; cursor: pointer; }
 .tb-field select:hover { border-color: var(--vc-accent, #25d3ac); }.tb-sep { width: 1px; height: 16px; background: #2b2b3a; }
 
 /* ============================================================
@@ -630,8 +629,6 @@ input, select, textarea { font-size: 12.5px; }
 
 /* Stage 9D CapCut-style stage, preview and timeline toolbar */
 .preview-toolbar { width: 100%; }
-.preview-toolbar .preview-mode-switch { width: auto; flex: 0 0 auto; }
-.preview-toolbar .preview-mode-switch button { flex: 0 0 auto; padding: 0 12px; }
 .render-panel-toggle { height: 26px; padding: 0 11px; font-size: 11.5px; color: var(--vc-text, #e8e8ef); background: var(--vc-raised, #22222e); border: 1px solid var(--vc-border-2, #32323f); border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .render-panel-toggle:hover { border-color: var(--vc-accent, #25d3ac); }
 .render-badge { min-width: 16px; height: 16px; padding: 0 4px; display: inline-grid; place-items: center; border-radius: 8px; background: var(--vc-accent); color: #0b0b12; font-size: 10px; line-height: 1; }
@@ -653,6 +650,8 @@ input, select, textarea { font-size: 12.5px; }
 .preview-context.synthetic { border: 1px solid rgba(37, 211, 172, .55); color: #7fe6cc; }
 /* 合成预览回退提示：内联于左上标签下方（不打全局 alert——回退是常规降级而非错误）。 */
 .synthetic-note { position: absolute; z-index: 5; top: 44px; left: 18px; max-width: calc(100% - 36px); padding: 4px 6px; background: rgba(0, 0, 0, .78); border: 1px solid #d1a453; color: #f0c979; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.synthetic-note-retry { margin-left: 6px; padding: 1px 6px; font-size: 10px; color: var(--vc-text, #e8e8ef); background: rgba(37, 211, 172, .16); border: 1px solid rgba(37, 211, 172, .5); border-radius: 4px; cursor: pointer; }
+.synthetic-note-retry:hover { background: rgba(37, 211, 172, .28); }
 .preview-context.stale { border-color: #d1a453; color: #f0c979; }
 .timeline-drop-zone .drop-hint { white-space: nowrap; font-size: 11px; color: #d1a453; pointer-events: none; }
 .timeline-drop-zone.active { width: auto; flex-basis: auto; padding: 0 8px; }
