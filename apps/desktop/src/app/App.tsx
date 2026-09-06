@@ -154,9 +154,9 @@ export function App() {
   const [runtimeReady, setRuntimeReady] = useState(false);
   const [playhead, setPlayhead] = useState(0);
   const [encoderMode, setEncoderMode] = useState<EncoderMode>("auto");
-  // 默认合成预览（Phase 2 第一步）：所见即所得是主预览；IR 不支持/不可用时
-  // 自动回退交互预览（onFallback）。
-  const [previewMode, setPreviewMode] = useState<"interactive" | "authoritative" | "synthetic">("synthetic");
+  // 默认交互预览；合成预览经工具栏切换（Phase 2：手势层迁移完成 + 测试基建
+  // 更新后再设为默认——默认翻转需同步更新大量假设交互默认的测试）。
+  const [previewMode, setPreviewMode] = useState<"interactive" | "authoritative" | "synthetic">("interactive");
   const [syntheticNotice, setSyntheticNotice] = useState<string | null>(null);
   const [previewRatio, setPreviewRatio] = useState("fit");
   const [previewRatioTouched, setPreviewRatioTouched] = useState(false);
@@ -1218,8 +1218,8 @@ export function App() {
       : Math.abs(canvasInfo.width / canvasInfo.height - 1) < 0.02 ? "11"
       : Math.abs(canvasInfo.width / canvasInfo.height - 4 / 3) < 0.02 ? "43"
       : Math.abs(canvasInfo.width / canvasInfo.height - 3 / 4) < 0.02 ? "34"
-      : "169")
-    : "fit";
+      : "fit")
+    : "fit"; // 挂载由 working/timeline 门控，此分支仅理论可达
   const effectiveRatio: OutputRatio = (previewRatioTouched ? previewRatio : autoRatio) as OutputRatio;
   // 合成预览比例：与预览比例选择器/权威预览/导出同源（此前独立按项目画布解析，
   // 与下拉框显示不一致——素材 16:9 + 项目画布 9:16 时下拉显示 16:9 而合成渲染 9:16）。
@@ -1700,7 +1700,7 @@ export function App() {
             <div className={`preview-frame ${previewClass}${previewSelected ? " selected" : ""}`} style={previewZoom === "fit" ? undefined : { transform: `scale(${previewZoom})` }} role="button" tabIndex={0} aria-label="选中播放头处的片段" title="点击选中播放头处的片段" onClick={selectClipAtPlayhead} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectClipAtPlayhead(); } }}>
           <div className="preview-canvas" ref={canvasRef}>
             {previewMode === "authoritative" && authoritativeMediaUrl && <video ref={videoRef} className="preview-foreground authoritative-video" src={authoritativeMediaUrl} aria-label={reframePlayback ? "重构图权威预览视频" : exportPlayback ? "导出视频" : "权威预览视频"} controls onEnded={() => setPlaying(false)} />}
-            {previewMode === "synthetic" && project && <SyntheticPreview outputRatio={syntheticRatio} projectId={project.project_id} revisionId={timeline?.current_revision.timeline_revision_id ?? null} mediaUrls={new Map(assets.flatMap(item => item.media_url ? [[item.asset.asset_id, item.media_url] as const] : []))} audioByClip={new Map((working?.clips ?? []).flatMap(clip => clip.audio ? [[clip.clip_id, { enabled: clip.audio.enabled, gainDb: clip.audio.gain_db }] as const] : []))} pipClips={(working?.clips ?? []).filter(clip => clip.track_id !== "V1" && clip.track_id !== "A1" && clip.transform).map(clip => ({ clipId: clip.clip_id, transform: { x: clip.transform?.x, y: clip.transform?.y, scale: clip.transform?.scale, rotate: clip.transform?.rotate, opacity: clip.transform?.opacity } }))} selectedClipId={pipSelectedId} onSelectClip={clipId => setSelection({ kind: "clip", id: clipId as never })} onDraftPipMove={(clipId, x, y) => draftPipTransform(clipId as never, { x, y })} onCommitPipMove={(clipId, x, y) => { const clip = (working?.clips ?? []).find(item => item.clip_id === clipId); commitPipTransform(clipId as never, { ...(clip?.transform ?? {}), x, y }); }} onGesturePause={pausePreviewPlayback} onGestureResume={resumePreviewPlayback} playing={playing && !gestureHoldRef.current} playheadUs={playhead} onTimeUs={us => setPlayhead(us)} onEnded={() => setPlaying(false)} onFallback={(reason, code) => { setPreviewMode("interactive"); showNotice(code === "PREVIEW_IR_UNSUPPORTED" ? "当前时间线包含实时合成暂不支持的效果，已切换到交互预览。" : `合成预览不可用：${reason}，已切换到交互预览。`, "warning"); }} />}
+            {previewMode === "synthetic" && project && working && timeline && <SyntheticPreview outputRatio={syntheticRatio} projectId={project.project_id} revisionId={timeline?.current_revision.timeline_revision_id ?? null} mediaUrls={new Map(assets.flatMap(item => item.media_url ? [[item.asset.asset_id, item.media_url] as const] : []))} audioByClip={new Map((working?.clips ?? []).flatMap(clip => clip.audio ? [[clip.clip_id, { enabled: clip.audio.enabled, gainDb: clip.audio.gain_db }] as const] : []))} pipClips={(working?.clips ?? []).filter(clip => clip.track_id !== "V1" && clip.track_id !== "A1" && clip.transform).map(clip => ({ clipId: clip.clip_id, transform: { x: clip.transform?.x, y: clip.transform?.y, scale: clip.transform?.scale, rotate: clip.transform?.rotate, opacity: clip.transform?.opacity } }))} selectedClipId={pipSelectedId} onSelectClip={clipId => setSelection({ kind: "clip", id: clipId as never })} onLivePipMove={(clipId, x, y) => { /* 会话已就地补丁；working 文档由提交统一落库 */ }} onCommitPipMove={(clipId, x, y) => { const clip = (working?.clips ?? []).find(item => item.clip_id === clipId); commitPipTransform(clipId as never, { ...(clip?.transform ?? {}), x, y }); }} onGesturePause={pausePreviewPlayback} onGestureResume={resumePreviewPlayback} playing={playing && !gestureHoldRef.current} playheadUs={playhead} onTimeUs={us => setPlayhead(us)} onEnded={() => setPlaying(false)} onFallback={(reason, code) => { setPreviewMode("interactive"); showNotice(code === "PREVIEW_IR_UNSUPPORTED" ? "当前时间线包含实时合成暂不支持的效果，已切换到交互预览。" : `合成预览不可用：${reason}，已切换到交互预览。`, "warning"); }} />}
             {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "video" && <div className="preview-transform" style={mainTransformStyle}><video className="preview-background" src={previewAsset.media_url} muted aria-hidden="true" /><video ref={videoRef} className="preview-foreground" src={previewAsset.media_url} muted={!selectedClip?.audio.enabled || previewReverse || (clipAtPlayhead ? !isClipAudible(clipAtPlayhead) : false)} aria-label="交互预览视频" onTimeUpdate={event => { if (libraryPreviewId) setPlayhead(Math.round(event.currentTarget.currentTime * 1_000_000)); }} onEnded={handleVideoEnded} /></div>}
             {previewMode === "interactive" && audioAsset?.media_url && <audio ref={audioRef} src={audioAsset.media_url} style={{ display: "none" }} />}
             {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "image" && <div className="preview-transform" style={mainTransformStyle}><img className="preview-background" src={previewAsset.media_url} alt="" aria-hidden="true" /><img className="preview-foreground" src={previewAsset.media_url} alt={previewAsset.asset.display_name} /></div>}

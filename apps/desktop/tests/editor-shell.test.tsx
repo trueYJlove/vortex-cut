@@ -159,10 +159,10 @@ describe("Editor shell 基线", () => {
     expect(document.querySelector(".pb-left .tot")?.textContent).toBe("01:01:40:00");
   });
 
-  it("exposes a preview ratio selector defaulting to fit", async () => {
+  it("exposes a preview ratio selector defaulting to the project canvas", async () => {
     render(<App />);
     const ratio = await screen.findByRole("combobox", { name: "预览比例" });
-    expect(ratio).toHaveValue("fit");
+    await waitFor(() => expect(ratio).toHaveValue("916")); // 项目画布 1080x1920 → 比例真源（异步加载后生效）
     fireEvent.change(ratio, { target: { value: "169" } });
     expect(ratio).toHaveValue("169");
     expect(document.querySelector(".preview-frame")).toHaveClass("ratio-169");

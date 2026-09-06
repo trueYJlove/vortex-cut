@@ -21,7 +21,7 @@ export interface SyntheticPreviewProps {
   pipClips?: SyntheticPipClip[];
   selectedClipId?: string | null;
   onSelectClip?: (clipId: string) => void;
-  onDraftPipMove?: (clipId: string, x: number, y: number) => void;
+  onLivePipMove?: (clipId: string, x: number, y: number) => void;
   onCommitPipMove?: (clipId: string, x: number, y: number) => void;
   onGesturePause?: () => boolean;
   onGestureResume?: (wasPlaying: boolean) => void;
@@ -39,11 +39,14 @@ interface LoadState {
 }
 
 export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactElement {
-  const { projectId, revisionId, mediaUrls, audioByClip, pipClips, selectedClipId, onSelectClip, onDraftPipMove, onCommitPipMove, onGesturePause, onGestureResume, playing, playheadUs, onTimeUs, onEnded, onFallback, outputRatio } = props;
+  const { projectId, revisionId, mediaUrls, audioByClip, pipClips, selectedClipId, onSelectClip, onLivePipMove, onCommitPipMove, onGesturePause, onGestureResume, playing, playheadUs, onTimeUs, onEnded, onFallback, outputRatio } = props;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const sessionRef = useRef<PreviewSession | null>(null);
   const lastReportedUs = useRef<number>(playheadUs);
   const lastReportWall = useRef<number>(0);
+  // 手势提交后的 revision 变更（几何已就地补丁）短暂吸收，避免整会话重建黑屏
+  const absorbRef = useRef(0);
+  const seenRevisionRef = useRef<string | null>(null);
   const [load, setLoad] = useState<LoadState>({ status: "loading", message: "正在加载合成预览" });
   const [metrics, setMetrics] = useState<PreviewSessionMetrics | null>(null);
 
@@ -60,6 +63,12 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
       const { width, height } = entry.contentRect;
       if (width > 2 && height > 2) session.resize(width, height);
     });
+    // 手势提交的就地补丁已使几何一致：吸收仅由提交触发的 revision 变更（1.5s 窗口）
+    if (revisionId && seenRevisionRef.current && revisionId !== seenRevisionRef.current && Date.now() < absorbRef.current) {
+      seenRevisionRef.current = revisionId;
+      return;
+    }
+    seenRevisionRef.current = revisionId;
     setLoad({ status: "loading", message: "正在加载合成预览" });
     sessionRefLocal.current?.dispose();
     sessionRefLocal.current = null;
@@ -170,12 +179,8 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
             selectedClipId={selectedClipId ?? null}
             locked={false}
             onSelect={clipId => onSelectClip?.(clipId)}
-            onDraftMove={(clipId, x, y) => onDraftPipMove?.(clipId, x, y)}
-            onCommitMove={(clipId, x, y) => {
-              const base = pipClips.find(item => item.clipId === clipId)?.transform ?? {};
-              onCommitPipMove?.(clipId, x, y);
-              void base;
-            }}
+            onLiveMove={(clipId, x, y) => { live.setPipCenter(clipId, x, y); onLivePipMove?.(clipId, x, y); }}
+            onCommitMove={(clipId, x, y) => { onCommitPipMove?.(clipId, x, y); absorbRef.current = Date.now(); }}
             onGestureStart={() => onGesturePause?.() ?? false}
             onGestureEnd={wasPlaying => onGestureResume?.(wasPlaying)}
           />

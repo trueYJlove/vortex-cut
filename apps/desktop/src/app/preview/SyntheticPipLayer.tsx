@@ -22,8 +22,8 @@ export interface SyntheticPipLayerProps {
   selectedClipId: string | null;
   locked: boolean;
   onSelect: (clipId: string) => void;
-  /** 拖拽中持续回调（画布归一化中心点）；调用方走 draft（本地文档）。 */
-  onDraftMove: (clipId: string, x: number, y: number) => void;
+  /** 拖拽中持续回调（画布归一化中心点）：会话就地补丁 IR + 画布实时跟随。 */
+  onLiveMove: (clipId: string, x: number, y: number) => void;
   /** 拖拽结束提交（调用方走 patchTimeline）。 */
   onCommitMove: (clipId: string, x: number, y: number) => void;
   /** 拖拽开始冻结播放（返回是否曾处于播放态，结束时可恢复）。 */
@@ -32,17 +32,21 @@ export interface SyntheticPipLayerProps {
 }
 
 export function SyntheticPipLayer(props: SyntheticPipLayerProps): React.ReactElement {
-  const { boxes, view, selectedClipId, locked, onSelect, onDraftMove, onCommitMove, onGestureStart, onGestureEnd } = props;
+  const { boxes, view, selectedClipId, locked, onSelect, onLiveMove, onCommitMove, onGestureStart, onGestureEnd } = props;
   const dragRef = useRef<{ clipId: string; startX: number; startY: number; cx: number; cy: number; wasPlaying: boolean } | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragOffset, setDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
-  const toCss = (box: PipBoxItem): React.CSSProperties => ({
-    position: "absolute",
-    left: view.offsetX + box.x * view.scale,
-    top: view.offsetY + box.y * view.scale,
-    width: box.w * view.scale,
-    height: box.h * view.scale,
-  });
+  const toCss = (box: PipBoxItem): React.CSSProperties => {
+    const offset = dragRef.current?.clipId === box.clipId || draggingId === box.clipId ? dragOffset : { x: 0, y: 0 };
+    return {
+      position: "absolute",
+      left: view.offsetX + box.x * view.scale + offset.x,
+      top: view.offsetY + box.y * view.scale + offset.y,
+      width: box.w * view.scale,
+      height: box.h * view.scale,
+    };
+  };
 
   const beginDrag = (event: React.PointerEvent, box: PipBoxItem): void => {
     if (locked) return;
@@ -66,9 +70,10 @@ export function SyntheticPipLayer(props: SyntheticPipLayerProps): React.ReactEle
     if (!drag) return;
     const box = boxes.find(item => item.clipId === drag.clipId);
     if (!box) return;
-    const nx = drag.cx + (event.clientX - drag.startX) / (box.canvasW * view.scale);
-    const ny = drag.cy + (event.clientY - drag.startY) / (box.canvasH * view.scale);
-    onDraftMove(drag.clipId, Math.max(0, Math.min(1, nx)), Math.max(0, Math.min(1, ny)));
+    const nx = Math.max(0, Math.min(1, drag.cx + (event.clientX - drag.startX) / (box.canvasW * view.scale)));
+    const ny = Math.max(0, Math.min(1, drag.cy + (event.clientY - drag.startY) / (box.canvasH * view.scale)));
+    onLiveMove(drag.clipId, nx, ny);
+    setDragOffset({ x: event.clientX - drag.startX, y: event.clientY - drag.startY });
   };
 
   const endDrag = (event: React.PointerEvent): void => {

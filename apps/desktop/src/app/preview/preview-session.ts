@@ -230,6 +230,20 @@ export class PreviewSession {
     this.pause();
   }
 
+  /** 画中画中心点就地补丁：直改 IR 帧几何并重呈现（免会话重建，拖拽实时跟随）。
+   *  静态 transform 作用于片段全区间——范围内所有含该 overlay 的帧一并更新。 */
+  setPipCenter(clipId: string, x: number, y: number): void {
+    const w = this.ir.canvas.width;
+    const h = this.ir.canvas.height;
+    for (const frame of this.ir.frames) {
+      for (const overlay of frame.overlays) {
+        if (overlay.clip_id !== clipId) continue;
+        overlay.box = { x: x * w - overlay.box.w / 2, y: y * h - overlay.box.h / 2, w: overlay.box.w, h: overlay.box.h };
+      }
+    }
+    this.compositor.onRecompose?.();
+  }
+
   /** 诊断快照：各输入解码链游标/在途/环形内容 + 最近解码回执（m3p5 探针）。 */
   chainState(): Record<string, unknown> {
     const state: Record<string, unknown> = {};
