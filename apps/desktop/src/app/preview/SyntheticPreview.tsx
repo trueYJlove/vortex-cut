@@ -6,7 +6,7 @@ import { PreviewSession, type PreviewSessionMetrics, type SegmentAudioConfig } f
 import { SyntheticPipLayer } from "./SyntheticPipLayer.js";
 
 /** 画中画片段编辑态（App 从时间线文档透传；transform 中心点语义）。 */
-export interface SyntheticPipClip { clipId: string; transform: { x?: number; y?: number; scale?: number; rotate?: number; opacity?: number } }
+export interface SyntheticPipClip { clipId: string; transform: { x?: number; y?: number; scale?: number; rotate?: number; opacity?: number }; mask?: import("@aivideo/contracts").TimelineClipMask }
 
 /** 手势提交的 transform 负载（opacity 等未涉及字段由调用方合并既有 transform）。 */
 export interface PipTransformCommit { x: number; y: number; scale: number; rotate: number }
@@ -25,6 +25,9 @@ export interface SyntheticPreviewProps {
   selectedClipId?: string | null;
   onSelectClip?: (clipId: string) => void;
   onCommitPipTransform?: (clipId: string, transform: PipTransformCommit) => void;
+  /** 蒙版手势（合成器不渲染蒙版：实时仅边界示意，提交走 set_clip_mask）。 */
+  onDraftPipMask?: (clipId: string, mask: import("@aivideo/contracts").TimelineClipMask) => void;
+  onCommitPipMask?: (clipId: string, mask: import("@aivideo/contracts").TimelineClipMask) => void;
   onGesturePause?: () => boolean;
   onGestureResume?: (wasPlaying: boolean) => void;
   playing: boolean;
@@ -41,7 +44,7 @@ interface LoadState {
 }
 
 export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactElement {
-  const { projectId, revisionId, mediaUrls, audioByClip, pipClips, selectedClipId, onSelectClip, onCommitPipTransform, onGesturePause, onGestureResume, playing, playheadUs, onTimeUs, onEnded, onFallback, outputRatio } = props;
+  const { projectId, revisionId, mediaUrls, audioByClip, pipClips, selectedClipId, onSelectClip, onCommitPipTransform, onDraftPipMask, onCommitPipMask, onGesturePause, onGestureResume, playing, playheadUs, onTimeUs, onEnded, onFallback, outputRatio } = props;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const sessionRef = useRef<PreviewSession | null>(null);
   const lastReportedUs = useRef<number>(playheadUs);
@@ -190,13 +193,15 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
         const transformOf = (clipId: string) => pipClips.find(item => item.clipId === clipId)?.transform;
         return (
           <SyntheticPipLayer
-            boxes={live.pipBoxes().map(box => ({ ...box, canvasW: cw, canvasH: ch, scale: transformOf(box.clipId)?.scale ?? 1, rotate: transformOf(box.clipId)?.rotate ?? 0 }))}
+            boxes={live.pipBoxes().map(box => ({ ...box, canvasW: cw, canvasH: ch, scale: transformOf(box.clipId)?.scale ?? 1, rotate: transformOf(box.clipId)?.rotate ?? 0, mask: pipClips.find(item => item.clipId === box.clipId)?.mask }))}
             view={live.pipView()}
             selectedClipId={selectedClipId ?? null}
             locked={false}
             onSelect={clipId => onSelectClip?.(clipId)}
             onLiveGeometry={(clipId, geometry) => { live.setPipBox(clipId, geometry.cx, geometry.cy, geometry.w, geometry.h); live.setPipRotation(clipId, geometry.rotate); }}
             onCommitTransform={(clipId, transform) => onCommitPipTransform?.(clipId, transform)}
+            onDraftMask={(clipId, mask) => onDraftPipMask?.(clipId, mask)}
+            onCommitMask={(clipId, mask) => onCommitPipMask?.(clipId, mask)}
             onGestureStart={() => onGesturePause?.() ?? false}
             onGestureEnd={wasPlaying => onGestureResume?.(wasPlaying)}
           />

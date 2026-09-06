@@ -99,4 +99,42 @@ describe("SyntheticPipLayer", () => {
     expect(h.onGestureStart).not.toHaveBeenCalled();
     expect(h.onSelect).not.toHaveBeenCalled();
   });
+
+  it("蒙版边界：拖动平移 x/y（片段画面归一化）", () => {
+    const onDraftMask = vi.fn();
+    const onCommitMask = vi.fn();
+    setup({ boxes: [{ ...BOX, mask: { kind: "rect", x: 0.5, y: 0.5, width: 0.5, height: 0.5 } }], onDraftMask, onCommitMask });
+    const boundary = document.querySelector(".sp-mask")! as HTMLElement;
+    // 盒子 200×100（画布 px），view.scale=1：蒙版中心 (300,200)。拖 20px → dx=0.1。
+    firePointer(boundary, "pointerdown", { clientX: 300, clientY: 200 });
+    firePointer(boundary, "pointermove", { clientX: 320, clientY: 180 });
+    firePointer(boundary, "pointerup", { clientX: 320, clientY: 180 });
+    expect(onDraftMask).toHaveBeenCalledWith("clip_pip", { kind: "rect", x: 0.6, y: 0.3, width: 0.5, height: 0.5 });
+    expect(onCommitMask).toHaveBeenCalledWith("clip_pip", { kind: "rect", x: 0.6, y: 0.3, width: 0.5, height: 0.5 });
+  });
+
+  it("蒙版角点缩放：以蒙版中心为锚换算 width/height，保留其他字段", () => {
+    const onDraftMask = vi.fn();
+    const onCommitMask = vi.fn();
+    setup({ boxes: [{ ...BOX, mask: { kind: "ellipse", x: 0.5, y: 0.5, width: 0.5, height: 0.5, feather: 0.2 } }], onDraftMask, onCommitMask });
+    const knob = document.querySelector(".sp-mask-knob")! as HTMLElement;
+    // 蒙版中心 (300,200)，角点初始在其右下；拖到 (350,200)：width = 2×50/200 = 0.5→…取 50/200×2=0.5？
+    // width = |350−300|×2/200 = 0.5，height = |200−200|×2/100 = 0 → 钳到 0.02。
+    firePointer(knob, "pointerdown", { clientX: 350, clientY: 250 });
+    firePointer(knob, "pointermove", { clientX: 400, clientY: 200 });
+    firePointer(knob, "pointerup", { clientX: 400, clientY: 200 });
+    expect(onCommitMask).toHaveBeenCalledWith("clip_pip", { kind: "ellipse", x: 0.5, y: 0.5, width: 1, height: 0.02, feather: 0.2 });
+  });
+
+  it("蒙版提交走 mask 回调而非 transform 提交", () => {
+    const onDraftMask = vi.fn();
+    const onCommitMask = vi.fn();
+    const h = setup({ boxes: [{ ...BOX, mask: { kind: "linear", y: 0.5 } }], onDraftMask, onCommitMask });
+    const boundary = document.querySelector(".sp-mask")! as HTMLElement;
+    firePointer(boundary, "pointerdown", { clientX: 300, clientY: 200 });
+    firePointer(boundary, "pointermove", { clientX: 300, clientY: 220 });
+    firePointer(boundary, "pointerup", { clientX: 300, clientY: 220 });
+    expect(h.onCommitTransform).not.toHaveBeenCalled();
+    expect(onCommitMask).toHaveBeenCalledWith("clip_pip", expect.objectContaining({ kind: "linear", y: 0.7 }));
+  });
 });
