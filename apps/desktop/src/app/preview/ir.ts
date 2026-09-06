@@ -85,6 +85,9 @@ export interface Ir {
     source_end_us: number;
     timeline_start_us: number;
     timeline_end_us: number;
+    /** 转场借用重映射后的输出时间轴窗口（IR v0.3+；缺省回退 timeline_*）。 */
+    output_start_us?: number;
+    output_end_us?: number;
     layout: string;
     speed_milli: number;
   }>;

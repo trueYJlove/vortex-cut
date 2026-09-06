@@ -163,6 +163,8 @@ export class PreviewSession {
     for (const input of ir.inputs) {
       const ticket = tickets.get(input.asset_id);
       if (!ticket) throw new Error(`no ticket for ${input.asset_id}`);
+      // 纯音频输入（A1）：无视觉纹理装配，音频走 WebAudio（syncAudio/ensureAudioBuffer）。
+      if (input.asset_kind === "audio") continue;
       const rig: InputRig = {
         kind: input.asset_kind === "image" ? "image" : "video",
         worker: null,
@@ -549,23 +551,26 @@ export class PreviewSession {
 
   /** 片段音频跟随时钟（WebAudio 调度）：音源运行在音频线程时钟上，本函数只做
    *  节拍管理——进段启动、出段停止、漂移超阈值（时钟重锚）才硬校正。播放中
-   *  由合成 tick 以**墙钟目标时间**驱动（合成滞后不影响音频推进）。
-   * 仅视频片段自带音轨（IR 白名单当前不含纯音频段）；速度经 playbackRate；
-   * gainDb → 线性增益（WebAudio 无 1.0 上限，>0dB 提升真实生效）。 */
+   *  由合成 tick 以**墙钟目标时间**驱动节拍（合成滞后不影响音频推进）。
+   * 段窗口用 IR 的 output_*（转场借用重映射后的输出时间轴）；仅视频片段自带
+   * 音轨 + A1 纯音频轨（IR 白名单 v0.3+）；速度经 playbackRate；gainDb →
+   * 线性增益（WebAudio 无 1.0 上限，>0dB 提升真实生效）。 */
   private syncAudio(tUs: number): void {
     if (!this.audioByClip || !this.audioCtx) return;
     const active = new Set<string>();
     for (const segment of this.ir.segments) {
       const cfg = this.audioByClip.get(segment.clip_id);
       if (!cfg || !cfg.enabled) continue;
-      if (tUs < segment.timeline_start_us || tUs > segment.timeline_end_us) continue;
+      const startUs = segment.output_start_us ?? segment.timeline_start_us;
+      const endUs = segment.output_end_us ?? segment.timeline_end_us;
+      if (tUs < startUs || tUs > endUs) continue;
       active.add(segment.clip_id);
       const speed = Math.max(0.25, Math.min(4, segment.speed_milli / 1000));
       let rig = this.audioRigs.get(segment.clip_id);
       if (!rig) { rig = { buffer: null, source: null, gain: null, startedAt: 0, startOffset: 0, speed }; this.audioRigs.set(segment.clip_id, rig); }
       if (!rig.buffer) { void this.ensureAudioBuffer(segment.clip_id, segment.input_id); continue; }
       if (!this.playing) { this.stopAudioSource(rig); continue; }
-      const expected = clamp(segment.source_start_us / 1e6 + ((tUs - segment.timeline_start_us) / 1e6) * speed, segment.source_start_us / 1e6, segment.source_end_us / 1e6);
+      const expected = clamp(segment.source_start_us / 1e6 + ((tUs - startUs) / 1e6) * speed, segment.source_start_us / 1e6, segment.source_end_us / 1e6);
       const position = rig.source ? rig.startOffset + (this.audioCtx.currentTime - rig.startedAt) * rig.speed : null;
       const drift = position === null ? Infinity : position - expected;
       if (rig.source && Math.abs(drift) <= PreviewSession.AUDIO_REANCHOR_S) {

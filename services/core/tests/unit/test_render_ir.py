@@ -270,3 +270,77 @@ def test_pip_blurred_background_content_box() -> None:
     # 682x686 → fit 540x542 × 0.2725 → 148x148，中心 (0.7288*540, 0.4173*960)
     assert ov["box"]["w"] == 148 and ov["box"]["h"] == 148
     assert abs(ov["box"]["x"] - (0.7288 * 540 - 74)) < 1
+
+
+def _audio_segment(clip_id: str, tl0: int, tl1: int, *, asset_idx: int = 0, **extra) -> dict:
+    base = {"clip_id": clip_id, "track_id": "A1", "asset_kind": "audio",
+            "asset_id": f"asset{asset_idx}", "input_id": f"I{asset_idx}",
+            "source_start_us": 0, "source_end_us": tl1 - tl0,
+            "timeline_start_us": tl0, "timeline_end_us": tl1,
+            "layout": "fit", "audio_enabled": True, "gain_db": 0.0}
+    base.update(extra)
+    return base
+
+
+def _plan_with_audio(segments: list[dict]) -> dict:
+    plan = _plan([_segment("v", 0, 2 * US, 0, 2 * US)])
+    plan["segments"] = segments
+    plan["inputs"] = [
+        {"input_id": f"I{i}", "asset_id": f"asset{i}",
+         "asset_kind": "audio" if i == 1 else "video",
+         "fingerprint": f"fp{i}", "duration_us": 30_000_000, "has_audio": i == 1}
+        for i in sorted({int(segment["input_id"][1:]) for segment in segments})
+    ]
+    return plan
+
+
+def test_audio_only_timeline_black_frames() -> None:
+    # A1 纯音频轨（无任何视觉段）：黑场帧表覆盖音频窗口，段表携带输出窗口
+    plan = _plan_with_audio([_audio_segment("a1", 0, 3 * US, asset_idx=1)])
+    ir = project_preview_ir(plan, _probe(plan))
+    assert ir["canvas"]["duration_frames"] == 90
+    assert all(frame["main"] == {"kind": "black"} for frame in ir["frames"])
+    segment = ir["segments"][0]
+    assert segment["output_start_us"] == 0 and segment["output_end_us"] == 3 * US
+    # 音频输入几何占位（合成器不消费）
+    assert ir["inputs"][0]["asset_kind"] == "audio"
+    assert ir["inputs"][0]["geometry"] == {"width": 0, "height": 0, "sar": 1.0}
+
+
+def test_audio_tail_extends_output_duration() -> None:
+    # 视觉 0..2s，A1 音频 0..3.5s → 输出延长到 3.5s（尾部黑场 + 音频照常调度）
+    plan = _plan_with_audio([
+        _segment("v", 0, 2 * US, 0, 2 * US),
+        _audio_segment("a1", 0, 3500000, asset_idx=1),
+    ])
+    ir = project_preview_ir(plan, _probe(plan))
+    assert ir["canvas"]["duration_frames"] == 105
+    assert ir["frames"][60]["main"] == {"kind": "black"}  # 2s 后黑场
+    assert ir["segments"][1]["output_end_us"] == 3500000
+
+
+def test_audio_output_window_shifted_by_transition_borrow() -> None:
+    # 主轨转场借用 1s：借用点（20s）及之后开始的 A1 音频段整体前移 1s
+    plan = _plan_with_audio([
+        _segment("a", 0, 20 * US, 0, 20 * US,
+                 transition_in={"transition_id": "t", "kind": "fade", "duration_us": 1 * US}),
+        _segment("b", 0, 25 * US, 20 * US, 45 * US),
+        _audio_segment("a1", 20 * US, 40 * US, asset_idx=1),
+    ])
+    plan["transitions"] = [{"transition_id": "t", "after_clip_id": "a", "kind": "fade", "duration_us": 1 * US}]
+    ir = project_preview_ir(plan, _probe(plan))
+    by_id = {segment["clip_id"]: segment for segment in ir["segments"]}
+    # a 起点在借用点之前：不前移（结束端因借用不连续，起点语义优先）
+    assert by_id["a"]["output_start_us"] == 0
+    # b 与 a1 起点都在借用点上：前移 1s
+    assert by_id["b"]["output_start_us"] == 19 * US
+    assert by_id["a1"]["output_start_us"] == 19 * US
+    assert by_id["a1"]["output_end_us"] == 39 * US
+
+
+def test_whitelist_still_rejects_image_assets() -> None:
+    plan = _plan([_segment("img", 0, 2 * US, 0, 2 * US, asset_kind="image")])
+    plan["inputs"][0]["asset_kind"] = "image"
+    with pytest.raises(DomainError) as exc:
+        project_preview_ir(plan, _probe(plan))
+    assert exc.value.code == "PREVIEW_IR_UNSUPPORTED"

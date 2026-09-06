@@ -251,13 +251,13 @@ describe("素材箱交互", () => {
     expect(await screen.findByAltText(image.display_name)).toBeInTheDocument();
     expect(screen.queryByLabelText("交互预览视频")).not.toBeInTheDocument();
     expect(api.patchTimeline).not.toHaveBeenCalled();
-    // 播放头 slider 是 role=slider 的 div（无 input value setter），走键盘可访问路径：
-    // 时间线 5s，ArrowRight 每次 +1/300 → 60 次 = 1s。
-    const slider = screen.getByLabelText("时间线播放头");
-    for (let i = 0; i < 60; i += 1) fireEvent.keyDown(slider, { key: "ArrowRight" });
+    // 播放头 slider 是 role=slider 的 div（无 input value setter），走键盘可访问路径。
+    // 任意 seek 即退出素材预览（seekFromProgressRatio → exitLibraryPreview）；
+    // ArrowRight 一次 = 5s/300 ≈ 16.7ms，仍在 clip_1 区间内（交互预览视频存在）。
+    fireEvent.keyDown(screen.getByLabelText("时间线播放头"), { key: "ArrowRight" });
     expect(screen.queryByAltText(image.display_name)).not.toBeInTheDocument();
     expect(screen.getByLabelText("交互预览视频")).toBeInTheDocument();
-  });
+  }, 15_000);
 
   it("点击预览画面选中播放头处的片段并显示选中边框", async () => {
     const api = desktopApi(); window.desktop = api; render(<App />);

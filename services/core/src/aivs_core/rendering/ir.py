@@ -49,8 +49,8 @@ def _validate_whitelist(plan: dict[str, Any]) -> None:
             raise _fail(clip_id, "reverse_playback（倒放）")
         if segment.get("track_hidden"):
             raise _fail(clip_id, "track_hidden（隐藏轨）")
-        if segment["asset_kind"] != "video":
-            raise _fail(clip_id, f"asset_kind={segment['asset_kind']}（图片/音频素材暂不支持实时合成预览）")
+        if segment["asset_kind"] not in ("video", "audio"):
+            raise _fail(clip_id, f"asset_kind={segment['asset_kind']}（图片素材暂不支持实时合成预览）")
         keyframes = segment.get("keyframes")
         if isinstance(keyframes, dict) and keyframes:
             if segment["track_id"] != "V1":
@@ -190,16 +190,20 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
     inputs: list[dict[str, Any]] = []
     geometry_by_input: dict[str, dict[str, Any]] = {}
     for item in plan["inputs"]:
-        stream = ((probes.get(item["asset_id"]) or {}).get("video_streams") or [None])[0] if item["asset_kind"] != "audio" else None
-        if stream is None:
-            raise _unsupported(f"input {item['asset_id']} 缺少输入流几何（ffprobe）")
-        sar_text = str(stream.get("sample_aspect_ratio") or "1:1")
-        try:
-            num, den = sar_text.replace("/", ":").split(":")
-            sar = float(num) / float(den) if float(den) > 0 else 1.0
-        except ValueError:
-            sar = 1.0
-        geometry = {"width": int(stream.get("width") or 0), "height": int(stream.get("height") or 0), "sar": sar}
+        # 纯音频输入（A1）：无视频流，几何占位（合成器不消费；音频走前端 WebAudio）。
+        if item["asset_kind"] == "audio":
+            geometry = {"width": 0, "height": 0, "sar": 1.0}
+        else:
+            stream = ((probes.get(item["asset_id"]) or {}).get("video_streams") or [None])[0]
+            if stream is None:
+                raise _unsupported(f"input {item['asset_id']} 缺少输入流几何（ffprobe）")
+            sar_text = str(stream.get("sample_aspect_ratio") or "1:1")
+            try:
+                num, den = sar_text.replace("/", ":").split(":")
+                sar = float(num) / float(den) if float(den) > 0 else 1.0
+            except ValueError:
+                sar = 1.0
+            geometry = {"width": int(stream.get("width") or 0), "height": int(stream.get("height") or 0), "sar": sar}
         inputs.append({
             "input_id": item["input_id"], "asset_id": item["asset_id"],
             "asset_kind": item["asset_kind"], "duration_us": item["duration_us"],
@@ -222,6 +226,7 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
 
     # 图项序列：黑底填充 + 段；转场仅在时间序后继首尾相接时激活（休眠转场 = 无转场）
     graph_items: list[dict[str, Any]] = []
+    borrow_points: list[tuple[int, int]] = []  # (输入时间轴借用点 = 左段终点, 借用量)
     cursor_us = 0
     for position, (input_index, segment) in enumerate(visual):
         start_us = int(segment["timeline_start_us"])
@@ -233,11 +238,20 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
             successor = visual[position + 1][1]
             if int(successor["timeline_start_us"]) == int(segment["timeline_end_us"]):
                 active_transition = transition
+                borrow_points.append((int(segment["timeline_end_us"]), int(transition["duration_us"])))
         graph_items.append({
             "kind": "segment", "input_index": input_index, "segment": segment,
             "transition_in": active_transition,
         })
         cursor_us = max(cursor_us, int(segment["timeline_end_us"]))
+
+    def _output_window(segment: dict[str, Any]) -> tuple[int, int]:
+        """段在**输出时间轴**上的窗口：转场借用在输入时间轴上是阶跃前移——
+        借用点（左段终点）及之后开始的段整体前移借用量。前端音频调度消费
+        本窗口（帧表 t_us 亦为输出时间轴，原 timeline_* 是输入时间轴）。
+        跨越借用点的段按整体不前移近似（音频跨越主轨转场的已知近似）。"""
+        shift = sum(borrow for point, borrow in borrow_points if int(segment["timeline_start_us"]) >= point)
+        return (int(segment["timeline_start_us"]) - shift, int(segment["timeline_end_us"]) - shift)
 
     def _span_us(item: dict[str, Any]) -> int:
         if item["kind"] == "black":
@@ -345,7 +359,14 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
             "rotation_deg": round(rotation_deg, 4),
         }
 
-    total_us = regions[-1]["t1"] if regions else max((int(segment["timeline_end_us"]) for segment in segments), default=0)
+    # 输出时长：可视化区段终点与 A1 纯音频窗口终点取大——音频长于画面时以
+    # 黑场延长输出（前端合成器对越界帧渲染黑场，音频照常调度）。
+    audio_tail_end = max(
+        (_output_window(segment)[1] for segment in segments
+         if segment["asset_kind"] == "audio" and not segment.get("track_hidden")),
+        default=0,
+    )
+    total_us = max(regions[-1]["t1"] if regions else 0, audio_tail_end)
     total_frames = -(-int(total_us) * FPS // 1_000_000)
     # O2 体量护栏（M3-2）：全量逐帧数值表按帧数线性增长，超长时间线先拒绝，
     # 分页/按需投影留待后续增量（设计 §7-O2）。
@@ -428,6 +449,7 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
                 "input_id": segment["input_id"],
                 "source_start_us": segment["source_start_us"], "source_end_us": segment["source_end_us"],
                 "timeline_start_us": segment["timeline_start_us"], "timeline_end_us": segment["timeline_end_us"],
+                "output_start_us": _output_window(segment)[0], "output_end_us": _output_window(segment)[1],
                 "layout": segment["layout"], "speed_milli": segment.get("speed_milli", 1000),
             }
             for segment in segments
@@ -443,6 +465,7 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
             "scale 关键帧 = 无视觉效果（逐帧 scale 被静态归一化 scale=min(iw,W)+pad 完全抵消；M3-0 实证 bbox 恒全画布）——IR 与合成器一致忽略",
             "PiP overlay 忽略 transform.opacity（_pip_overlay_chain 未消费）",
             "字幕帧文本光栅化 libass vs 浏览器（单独口径：bbox IoU + diff 比率）",
+            "A1 音频窗口按段起点取借用位移；跨越主轨转场借用点的音频段不做分段重映射",
         ],
         "frames": frames,
     }
