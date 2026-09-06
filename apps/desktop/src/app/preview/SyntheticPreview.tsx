@@ -44,9 +44,6 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
   const sessionRef = useRef<PreviewSession | null>(null);
   const lastReportedUs = useRef<number>(playheadUs);
   const lastReportWall = useRef<number>(0);
-  // 手势提交后的 revision 变更（几何已就地补丁）短暂吸收，避免整会话重建黑屏
-  const absorbRef = useRef(0);
-  const seenRevisionRef = useRef<string | null>(null);
   // 预览框观察器：组件级单例（吸收路径早退不销毁，避免观察器泄漏）
   const boxObserverRef = useRef<ResizeObserver | null>(null);
   if (!boxObserverRef.current) {
@@ -70,17 +67,10 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
     let cancelled = false;
     const sessionRefLocal = sessionRef;
     boxObserverRef.current?.observe(canvasRef.current?.parentElement ?? canvasRef.current ?? document.body);
-    // 手势提交的就地补丁已使几何一致：吸收仅由提交触发的 revision 变更（1.5s 窗口）。
-    // 注意：此处不能依赖 cleanup——React 在新 body 之前必然先执行旧 cleanup
-    // （无条件 dispose 会黑屏），因此旧会话的销毁放在下方非吸收路径的 body 内。
-    if (revisionId && seenRevisionRef.current && revisionId !== seenRevisionRef.current && Date.now() < absorbRef.current) {
-      seenRevisionRef.current = revisionId;
-      return;
-    }
-    seenRevisionRef.current = revisionId;
+    // 同输入 revision 变更（transform/关键帧/时间编辑）→ 会话就地换 IR：
+    // worker/GL 全保留，零黑屏。输入变化或无会话 → 走完整重建。
+    const existing = sessionRefLocal.current;
     setLoad({ status: "loading", message: "正在加载合成预览" });
-    sessionRefLocal.current?.dispose();
-    sessionRefLocal.current = null;
     (async () => {
       try {
         const payload = await window.desktop.getPreviewIr({
@@ -91,6 +81,13 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
         const ir: Ir = parseIr(payload.ir as unknown as string);
         const canvas = canvasRef.current;
         if (!canvas || cancelled) return;
+        if (existing && existing.replaceIr(ir)) {
+          // 就地换表成功：无需触碰 worker/GL/音频，重呈现由 replaceIr 驱动
+          setLoad({ status: "ready", message: "" });
+          return;
+        }
+        existing?.dispose();
+        sessionRefLocal.current = null;
         // 画布后备缓冲随预览框（contain 居中，见 session.resize）；初始以 IR 画布尺寸起底
         canvas.width = ir.canvas.width;
         canvas.height = ir.canvas.height;
@@ -196,7 +193,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
             locked={false}
             onSelect={clipId => onSelectClip?.(clipId)}
             onLiveMove={(clipId, x, y) => { live.setPipCenter(clipId, x, y); onLivePipMove?.(clipId, x, y); }}
-            onCommitMove={(clipId, x, y) => { onCommitPipMove?.(clipId, x, y); absorbRef.current = Date.now(); }}
+            onCommitMove={(clipId, x, y) => onCommitPipMove?.(clipId, x, y)}
             onGestureStart={() => onGesturePause?.() ?? false}
             onGestureEnd={wasPlaying => onGestureResume?.(wasPlaying)}
           />

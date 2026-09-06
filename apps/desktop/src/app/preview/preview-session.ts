@@ -122,7 +122,9 @@ export class PreviewSession {
   /** 合成时向历史回溯的最大帧数（starving 后取最近就绪帧）。 */
   private static readonly BACKSCAN = 15;
 
-  private constructor(readonly ir: Ir, canvas: HTMLCanvasElement) {
+  ir: Ir;
+  private constructor(ir: Ir, canvas: HTMLCanvasElement) {
+    this.ir = ir;
     this.compositor = new Compositor(canvas, ir);
     // 预览框尺寸变化（含 rAF 合帧）后重呈现当前帧
     this.compositor.onRecompose = () => {
@@ -228,6 +230,18 @@ export class PreviewSession {
   /** 手势期间冻结合成时钟（画中画拖拽时播放头前进会越出片段区间）。 */
   freezeForGesture(): void {
     this.pause();
+  }
+
+  /** revision 变更的就地 IR 换表：输入集合未变（transform/关键帧/时间编辑）时
+   * 保留 worker 与 GL 纹理，仅替换帧表/段表并重呈现（零黑屏，~50ms）。
+   * 输入集合变化（加删素材）返回 false，调用方走整会话重建。 */
+  replaceIr(nextIr: Ir): boolean {
+    const sig = (ir: Ir) => JSON.stringify(ir.inputs.map(item => [item.input_id, item.asset_id, item.asset_kind, item.geometry]));
+    if (sig(this.ir) !== sig(nextIr)) return false;
+    this.ir = nextIr;
+    this.resetChains();
+    this.compositor.onRecompose?.();
+    return true;
   }
 
   /** 画中画中心点就地补丁：直改 IR 帧几何并重呈现（免会话重建，拖拽实时跟随）。
