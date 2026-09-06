@@ -534,6 +534,17 @@ export class Compositor {
     this.gl.flush();
   }
 
+  /** 静图输入上传（Image/ImageBitmap → RGBA 纹理；静态图一次上传全程复用）。 */
+  uploadImageFrame(handle: VideoHandle, source: ImageBitmap | HTMLImageElement): void {
+    const gl = this.gl;
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, handle.textureY);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+  }
+
   /** 按 IR 帧数值表合成一帧（不做任何插值/借位计算 —— 全部已由 Core 解析）。 */
   composeFrame(frame: IrFrame, options: { drawCaptions: boolean }): void {
     this.beginFrame();

@@ -10,12 +10,14 @@ export interface PreviewSessionMetrics {
   task_ms_p95: number;
   dropped_frames: number;
   composed_frames: number;
+  last_error: string | null;
 }
 
 interface SlotState { uploaded: number; pending: number | null }
 
 interface InputRig {
-  worker: DecodeWorker;
+  kind: "video" | "image";
+  worker: DecodeWorker | null;
   handle: import("./compositor.js").VideoHandle;
   main: SlotState;
   shadow: SlotState;
@@ -58,6 +60,7 @@ export class PreviewSession {
   private lastSeekWall = 0;
   private lastSeekMs = 0;
   private dragMode = false;
+  lastError: string | null = null;
   onTimeUs: ((us: number) => void) | null = null;
 
   private constructor(readonly ir: Ir, canvas: HTMLCanvasElement) {
@@ -71,11 +74,26 @@ export class PreviewSession {
       const ticket = tickets.get(input.asset_id);
       if (!ticket) throw new Error(`no ticket for ${input.asset_id}`);
       const rig: InputRig = {
-        worker: await DecodeWorker.create(ticket),
+        kind: input.asset_kind === "image" ? "image" : "video",
+        worker: null,
         handle: session.compositor.registerTextureOnly(input.input_id),
         main: { uploaded: -1, pending: null },
         shadow: { uploaded: -1, pending: null },
       };
+      if (rig.kind === "image") {
+        // 静图：Image 元素解码 → RGBA 纹理一次上传，src_n 恒 0 全程复用
+        const image = new Image();
+        image.crossOrigin = "anonymous";
+        await new Promise<void>((resolve, reject) => {
+          image.onload = () => resolve();
+          image.onerror = () => reject(new Error(`image load failed: ${input.asset_id}`));
+          image.src = ticket;
+        });
+        session.compositor.uploadImageFrame(rig.handle, image);
+        rig.main.uploaded = 0;
+      } else {
+        rig.worker = await DecodeWorker.create(ticket);
+      }
       session.rigs.set(input.input_id, rig);
     }
     const adapter = session.compositor.gpuRendererInfo();
@@ -100,8 +118,16 @@ export class PreviewSession {
   /** 解码并上传一个（输入, 源帧）到指定槽位；frame 在上传后由 compositor 关闭。 */
   private async upload(inputId: string, srcN: number, shadow: boolean): Promise<void> {
     const rig = this.rigs.get(inputId)!;
-    const decoded = await rig.worker.decode(srcN, this.ir.canvas.fps);
-    this.compositor.uploadVideoFrame(rig.handle, decoded, shadow);
+    if (rig.kind === "image") { rig.main.uploaded = 0; return; } // 静图已上传
+    if (!rig.worker) throw new Error(`no worker for ${inputId}`);
+    try {
+      const decoded = await rig.worker.decode(srcN, this.ir.canvas.fps);
+      this.compositor.uploadVideoFrame(rig.handle, decoded, shadow);
+    } catch (error) {
+      // 可观测性（M3-2）：解码失败不再静默——记录最近错误供 UI 呈现
+      this.lastError = `解码失败 ${inputId}#${srcN}: ${error instanceof Error ? error.message : String(error)}`;
+      throw error;
+    }
     const slot = shadow ? rig.shadow : rig.main;
     slot.uploaded = srcN;
   }
@@ -257,13 +283,14 @@ export class PreviewSession {
       task_ms_p95: p(0.95),
       dropped_frames: this.dropped,
       composed_frames: this.taskTimes.length,
+      last_error: this.lastError,
     };
   }
 
   dispose(): void {
     this.disposed = true;
     this.pause();
-    for (const [, rig] of this.rigs) rig.worker.terminate();
+    for (const [, rig] of this.rigs) rig.worker?.terminate();
     this.rigs.clear();
   }
 }
