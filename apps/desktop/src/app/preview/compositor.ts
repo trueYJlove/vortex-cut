@@ -347,13 +347,15 @@ export class Compositor {
     gl.clear(gl.COLOR_BUFFER_BIT);
   }
 
-  /** 主轨段条目绘制（alphaScale 供转场两遍绘制使用；shadow 取影子纹理对）。 */
-  drawMainSegment(entry: IrMainSegment, alphaScale = 1, shadow = false): void {
+  /** 主轨段条目绘制（alphaScale 供转场两遍绘制使用；shadow 取影子纹理对）。
+   * rotationDeg：rotate 关键帧逐帧值（绕画布中心旋转，角落为黑，与权威端一致）。 */
+  drawMainSegment(entry: IrMainSegment & { rotation_deg?: number }, alphaScale = 1, shadow = false): void {
     const handle = this.videos.get(entry.input_id);
     if (!handle) return;
     const y = shadow ? this.shadowY(entry.input_id) : handle.textureY;
     const uv = shadow ? this.shadowTextureUV(entry.input_id) : handle.textureUV;
-    this.drawRectYuv(y, uv, null, Compositor.shifted(entry.content, entry.shift), entry.alpha * alphaScale, 0, false,
+    const rotation = (entry as { rotation_deg?: number }).rotation_deg ?? 0;
+    this.drawRectYuv(y, uv, null, Compositor.shifted(entry.content, entry.shift), entry.alpha * alphaScale, rotation, false,
       this.sourceWidthScale.get(entry.input_id) ?? 1920);
   }
 

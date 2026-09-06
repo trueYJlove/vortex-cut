@@ -58,7 +58,7 @@ def test_simple_timeline_frame_table() -> None:
     assert ir["frames"][0]["main"] == {
         "kind": "segment", "clip_id": "a", "input_id": "I0", "src_n": 0, "src_t_us": 0,
         "content": {"x": 0, "y": 0, "w": 960, "h": 540},
-        "shift": {"dx": 0.0, "dy": 0.0}, "alpha": 1.0}
+        "shift": {"dx": 0.0, "dy": 0.0}, "alpha": 1.0, "rotation_deg": 0.0}
     # 1920x1080 fit 960x540：恰为 2:1，无黑边
     assert ir["frames"][30]["main"]["src_n"] == 30
     assert ir["frames"][60]["main"]["clip_id"] == "b"
@@ -185,8 +185,8 @@ def test_resolved_caption_styles() -> None:
     ({"mask": {"kind": "rect"}}, "mask（蒙版）"),
     ({"keying": {"color": "00FF00"}}, "keying（抠像）"),
     ({"reverse_playback": True}, "reverse_playback（倒放）"),
-    ({"keyframes": {"scale": {"frames": [{"t_us": 0, "v": 1.0}]}}}, "关键帧属性"),
-    ({"keyframes": {"position": {"frames": [{"t_us": 0, "x": 0.0, "y": 0.0}]}}, "track_id": "V2"}, "非 V1 轨关键帧"),
+    ({"keyframes": {"blink": {"frames": [{"t_us": 0, "v": 1.0}]}}}, "关键帧属性"),
+    ({"keyframes": {"rotate": {"frames": [{"t_us": 0, "v": 30.0}]}}, "track_id": "V2"}, "非 V1 轨关键帧"),
     ({"transition_in": {"transition_id": "t", "kind": "dissolve", "duration_us": US}}, "转场 dissolve"),
 ])
 def test_whitelist_hard_fail(mutation: dict, fragment: str) -> None:
@@ -222,3 +222,18 @@ def test_whitelist_rejects_oversized_timeline() -> None:
     with pytest.raises(DomainError) as exc:
         project_preview_ir(long_segments and _plan(long_segments), _probe(_plan(long_segments)))
     assert exc.value.code == "PREVIEW_IR_TOO_LARGE"
+
+
+def test_scale_keyframes_are_noop_and_rotate_visible() -> None:
+    plan = _plan([_segment("c", 0, 15 * US, 0, 15 * US, keyframes={
+        "scale": {"frames": [{"t_us": 0, "v": 1.0}, {"t_us": 5 * US, "v": 0.5}]},
+        "rotate": {"frames": [{"t_us": 0, "v": 0.0}, {"t_us": 5 * US, "v": 30.0}]}})])
+    frames = _frames(plan)
+    # scale：权威端归一化抵消为无视觉效果 → IR 不携带、shift/content 不变
+    f = frames[75]["main"]
+    assert f["content"] == {"x": 0, "y": 0, "w": 960, "h": 540}
+    assert f["shift"] == {"dx": 0.0, "dy": 0.0}
+    # rotate：绕画布中心逐帧旋转（t=2.5s → v=15°）
+    assert f["rotation_deg"] == 15.0
+    # 白名单：scale/rotate 关键帧不再拒绝（v0.3 重入）
+    assert frames[0]["main"]["rotation_deg"] == 0.0

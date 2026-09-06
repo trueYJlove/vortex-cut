@@ -23,7 +23,7 @@ IR_SCHEMA = "preview-ir-v1"
 IR_PROJECTOR_VERSION = 1
 MAX_IR_FRAMES = 27_000  # 15 分钟 @30fps（O2 体量护栏）
 
-ALLOWED_KEYFRAME_PROPS = {"position", "opacity"}
+ALLOWED_KEYFRAME_PROPS = {"position", "opacity", "scale", "rotate"}
 ALLOWED_TRANSITIONS = {"fade", "fadeblack"}
 ALLOWED_MAIN_LAYOUTS = {"fit"}
 
@@ -299,12 +299,19 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
         else:
             src_n = _source_frame_n(segment, int(segment["timeline_start_us"]) + t_seg_us, 0)
         shift_dx = shift_dy = 0.0
+        rotation_deg = 0.0
         if keyframes and "position" in keyframes:
             x = _lerp_channel(keyframes["position"]["frames"], t_seg_us, "x")
             y = _lerp_channel(keyframes["position"]["frames"], t_seg_us, "y")
             # 权威端：overlay x='(W-w)/2 + x*(W/2)'；段内容已全画布 → 等价整体平移
             shift_dx = x * (width / 2)
             shift_dy = y * (height / 2)
+        if keyframes and "rotate" in keyframes:
+            # rotate 关键帧真实可见：绕画布中心旋转，角落为黑（透明→yuv 黑）
+            rotation_deg = _lerp_channel(keyframes["rotate"]["frames"], t_seg_us, "v")
+        # scale 关键帧：权威端逐帧 scale 后被静态归一化（scale=min(iw,W)+pad，为 concat
+        # 段一致）完全抵消——渲染为无视觉效果（M3-0 实证：f=0.5/1.5 内容边界恒全画布）。
+        # IR 不携带 scale，合成器一致忽略；UI 数值语义与渲染不一致属权威端已知限制。
         content_x, content_y, content_w, content_h = _fit_content_box(geometry, width, height)
         return {
             "clip_id": segment["clip_id"], "input_id": input_id,
@@ -313,6 +320,7 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
             "content": {"x": content_x, "y": content_y, "w": content_w, "h": content_h},
             "shift": {"dx": round(shift_dx, 3), "dy": round(shift_dy, 3)},
             "alpha": round(_opacity_alpha(keyframes, t_seg_us), 6),
+            "rotation_deg": round(rotation_deg, 4),
         }
 
     total_us = regions[-1]["t1"] if regions else max((int(segment["timeline_end_us"]) for segment in segments), default=0)
@@ -410,6 +418,7 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
         ],
         "known_approximations": [
             "opacity 关键帧 = fade=alpha=1:st=0:d=末关键帧t 整体渐入近似（权威端实际行为，非 lerp）",
+            "scale 关键帧 = 无视觉效果（逐帧 scale 被静态归一化 scale=min(iw,W)+pad 完全抵消；M3-0 实证 bbox 恒全画布）——IR 与合成器一致忽略",
             "PiP overlay 忽略 transform.opacity（_pip_overlay_chain 未消费）",
             "字幕帧文本光栅化 libass vs 浏览器（单独口径：bbox IoU + diff 比率）",
         ],
