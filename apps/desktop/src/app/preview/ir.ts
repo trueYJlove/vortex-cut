@@ -77,7 +77,17 @@ export interface Ir {
   projector_version: string;
   canvas: { width: number; height: number; fps: number; duration_frames: number; duration_us: number; background: string };
   inputs: IrInput[];
-  segments: Array<{ clip_id: string; input_id: string; speed_milli: number }>;
+  segments: Array<{
+    clip_id: string;
+    track_id: string;
+    input_id: string;
+    source_start_us: number;
+    source_end_us: number;
+    timeline_start_us: number;
+    timeline_end_us: number;
+    layout: string;
+    speed_milli: number;
+  }>;
   captions: IrCaptionItem[];
   caption_styles: Record<string, IrCaptionStyle>;
   transition_windows: Array<{ clip_id: string; kind: string; offset_us: number; duration_us: number }>;

@@ -16,6 +16,9 @@ import { Compositor, assertHardwareRenderer } from "./compositor.js";
 import type { Ir, IrContent, IrFrame } from "./ir.js";
 import { DecodeWorker } from "./decode-worker.js";
 
+/** 片段音频配置（编辑态：App 从时间线文档透传；Phase 1 未入 IR 契约）。 */
+export interface SegmentAudioConfig { enabled: boolean; gainDb: number }
+
 export interface PreviewSessionMetrics {
   task_ms_p50: number;
   task_ms_p95: number;
@@ -95,6 +98,9 @@ export class PreviewSession {
   private dragMode = false;
   lastError: string | null = null;
   onTimeUs: ((us: number) => void) | null = null;
+  private tickets: Map<string, string> | null = null;
+  private audioByClip: Map<string, SegmentAudioConfig> | null = null;
+  private readonly audio = new Map<string, HTMLAudioElement>(); // clip_id → 音频元素
   /** 自然播放到片尾时回调（UI 复位播放按钮；会话已内部 pause）。 */
   onEnded: (() => void) | null = null;
 
@@ -115,8 +121,11 @@ export class PreviewSession {
   }
 
   static async create(canvas: HTMLCanvasElement, ir: Ir,
-                      tickets: Map<string, string>): Promise<PreviewSession> {
+                      tickets: Map<string, string>,
+                      audioByClip?: Map<string, SegmentAudioConfig>): Promise<PreviewSession> {
     const session = new PreviewSession(ir, canvas);
+    session.tickets = tickets;
+    session.audioByClip = audioByClip ?? null;
     const sourceWidth = new Map<string, number>();
     for (const input of ir.inputs) {
       const ticket = tickets.get(input.asset_id);
@@ -168,6 +177,11 @@ export class PreviewSession {
 
   get isPlaying(): boolean {
     return this.playing;
+  }
+
+  /** 编辑态音频配置更新（静音/增益实时生效，无需重建会话）。 */
+  setAudioByClip(audioByClip: Map<string, SegmentAudioConfig> | null): void {
+    this.audioByClip = audioByClip;
   }
 
   /** 诊断快照：各输入解码链游标/在途/环形内容 + 最近解码回执（m3p5 探针）。 */
@@ -370,6 +384,42 @@ export class PreviewSession {
     this.lastError = `解码失败 ${inputId}#${srcN}: ${error instanceof Error ? error.message : String(error)}`;
   }
 
+  /** 片段音频跟随时钟（交互预览同款语义：媒体元素跟随标尺，偏差 >0.18s 对齐）。
+   * 仅视频片段自带音轨（IR 白名单当前不含纯音频段）；速度经 playbackRate；
+   * gainDb → 线性音量（HTMLAudio 上限 1.0，>0dB 提升被钳制——已知近似）。 */
+  private syncAudio(tUs: number): void {
+    if (!this.audioByClip) return;
+    const active = new Set<string>();
+    for (const segment of this.ir.segments) {
+      const cfg = this.audioByClip.get(segment.clip_id);
+      if (!cfg || !cfg.enabled) continue;
+      if (tUs < segment.timeline_start_us || tUs > segment.timeline_end_us) continue;
+      active.add(segment.clip_id);
+      let el = this.audio.get(segment.clip_id);
+      if (!el) {
+        const input = this.ir.inputs.find(item => item.input_id === segment.input_id);
+        const ticket = input ? this.tickets?.get(input.asset_id) : undefined;
+        if (!ticket) continue;
+        el = new Audio(ticket);
+        el.preload = "auto";
+        this.audio.set(segment.clip_id, el);
+      }
+      const speed = Math.max(0.25, Math.min(4, segment.speed_milli / 1000));
+      el.playbackRate = speed;
+      el.volume = Math.max(0, Math.min(1, Math.pow(10, cfg.gainDb / 20)));
+      const expected = segment.source_start_us / 1e6 + ((tUs - segment.timeline_start_us) / 1e6) * speed;
+      if (Math.abs(el.currentTime - expected) > 0.18) el.currentTime = Math.max(0, expected);
+      if (this.playing) void el.play().catch(() => undefined); else el.pause();
+    }
+    for (const [clipId, el] of this.audio) {
+      if (!active.has(clipId) && !el.paused) el.pause();
+    }
+  }
+
+  private pauseAudio(): void {
+    for (const [, el] of this.audio) el.pause();
+  }
+
   /** 同步合成一帧（纹理必须已就绪）。 */
   private compose(frame: IrFrame): void {
     const main = frame.main;
@@ -466,27 +516,32 @@ export class PreviewSession {
       const target = Math.min(last, Math.floor(this.anchorFrame + (now - this.anchorWall) / frameDur));
       this.latestTarget = target;
       this.pump(target);
-      // 合成 ≤ 目标的最新就绪帧：已就绪帧绝不丢弃；starving 时保持最后画面
+      // 合成 ≤ 目标的最新就绪帧：已就绪帧绝不丢弃；starving 时保持最后画面。
+      // 同帧不重复合成（GL 绘制缓冲持久，60Hz tick 对 30fps 内容时减半主线程
+      // 负载——重复 onTimeUs 会以 60Hz 触发 App 整树重渲）。
       let composed = -1;
       const floor = Math.max(0, Math.max(this.currentFrame - 1, target - PreviewSession.BACKSCAN));
       for (let n = target; n >= floor; n--) {
         if (this.frameReady(this.ir.frames[n]!)) { composed = n; break; }
       }
-      if (composed >= 0 && composed >= this.currentFrame) {
+      if (composed >= 0 && composed > this.currentFrame) {
         const taskStart = performance.now();
         this.compose(this.ir.frames[composed]!);
         this.taskTimes.push(performance.now() - taskStart);
         if (this.taskTimes.length > 1200) this.taskTimes.splice(0, this.taskTimes.length - 1200);
         this.currentFrame = composed;
         this.onTimeUs?.(this.ir.frames[composed]!.t_us);
+        this.syncAudio(this.ir.frames[composed]!.t_us);
       }
       // 饥饿护栏：落后过多 → 重锚时钟（播放按解码吞吐放慢），而不是让目标
       // 无限狂奔、丢帧按 tick 线性堆积（旧实现冻结+丢帧 404 的直接根源）。
       if (target - this.currentFrame > PreviewSession.LAG_REANCHOR) {
         this.anchorFrame = this.currentFrame;
         this.anchorWall = now;
-      } else if (composed < target && target > this.currentFrame) {
-        this.dropped += 1; // 目标帧未按时就绪：诚实计一次丢帧
+      } else if (target - this.currentFrame > 1 && target > this.currentFrame) {
+        // 丢帧口径 = 展示落后时钟 ≥2 帧（持续 1 帧滞后是 60Hz 时钟对 30fps
+        // 内容的正常管线延迟，观感无损——此前按 tick 计成 303"丢帧"）。
+        this.dropped += 1;
         this.droppedLifetime += 1;
       }
       if (target >= last) {
@@ -503,6 +558,7 @@ export class PreviewSession {
     this.playing = false;
     if (this.rafId) cancelAnimationFrame(this.rafId);
     this.rafId = 0;
+    this.pauseAudio();
   }
 
   metrics(): PreviewSessionMetrics {
@@ -524,6 +580,8 @@ export class PreviewSession {
   dispose(): void {
     this.disposed = true;
     this.pause();
+    for (const [, el] of this.audio) { el.pause(); el.removeAttribute("src"); }
+    this.audio.clear();
     for (const [, rig] of this.rigs) rig.worker?.terminate();
     this.rigs.clear();
   }

@@ -2,7 +2,7 @@
  * WebGL2 合成的权威级实时预览。子集外语义自动降级回交互预览（PREVIEW_IR_UNSUPPORTED）。 */
 import { useEffect, useRef, useState } from "react";
 import { parseIr, type Ir } from "./ir.js";
-import { PreviewSession, type PreviewSessionMetrics } from "./preview-session.js";
+import { PreviewSession, type PreviewSessionMetrics, type SegmentAudioConfig } from "./preview-session.js";
 
 export interface SyntheticPreviewProps {
   projectId: string;
@@ -11,6 +11,8 @@ export interface SyntheticPreviewProps {
   outputRatio: string;
   /** asset_id → aivideo:// 票据 URL（App 既有素材通道）。 */
   mediaUrls: Map<string, string>;
+  /** clip_id → 片段音频配置（编辑态透传；未提供则合成预览静音）。 */
+  audioByClip?: Map<string, SegmentAudioConfig>;
   playing: boolean;
   playheadUs: number;
   onTimeUs: (us: number) => void;
@@ -25,7 +27,7 @@ interface LoadState {
 }
 
 export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactElement {
-  const { projectId, revisionId, mediaUrls, playing, playheadUs, onTimeUs, onEnded, onFallback, outputRatio } = props;
+  const { projectId, revisionId, mediaUrls, audioByClip, playing, playheadUs, onTimeUs, onEnded, onFallback, outputRatio } = props;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const sessionRef = useRef<PreviewSession | null>(null);
   const lastReportedUs = useRef<number>(playheadUs);
@@ -61,7 +63,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
         // 画布后备缓冲随预览框（contain 居中，见 session.resize）；初始以 IR 画布尺寸起底
         canvas.width = ir.canvas.width;
         canvas.height = ir.canvas.height;
-        const session = await PreviewSession.create(canvas, ir, mediaUrls);
+        const session = await PreviewSession.create(canvas, ir, mediaUrls, audioByClip);
         if (cancelled) { session.dispose(); return; }
         session.onTimeUs = (us: number) => {
           lastReportedUs.current = us;
@@ -101,6 +103,13 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
     if (playing) session.play();
     else session.pause();
   }, [playing, load.status]);
+
+  // 片段音频配置（静音/增益编辑实时生效）。
+  const audioByClipRef = useRef(audioByClip);
+  useEffect(() => {
+    audioByClipRef.current = audioByClip;
+    sessionRef.current?.setAudioByClip(audioByClip ?? null);
+  }, [audioByClip, load.status]);
 
   // 外部播放头跳转（暂停态）：偏差 >0.5s 视为外部 seek；播放中自身上报的时间不回环。
   // 连续快速跳转走拖拽快速档（主轨优先），停止 250ms 后全量精修（M3-2）。
