@@ -83,8 +83,8 @@ export interface Ir {
   frames: IrFrame[];
 }
 
-export function parseIr(json: string): Ir {
-  const ir = JSON.parse(json) as Ir;
+export function parseIr(value: string | Record<string, unknown>): Ir {
+  const ir = (typeof value === "string" ? JSON.parse(value) : value) as Ir;
   if (!ir || !["preview-ir-v1", "m3-0-probe-ir-draft/1"].includes(ir.schema) || !Array.isArray(ir.frames)) {
     throw new Error("Unsupported probe IR schema");
   }
