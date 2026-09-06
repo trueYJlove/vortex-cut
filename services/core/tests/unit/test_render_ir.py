@@ -237,3 +237,36 @@ def test_scale_keyframes_are_noop_and_rotate_visible() -> None:
     assert f["rotation_deg"] == 15.0
     # 白名单：scale/rotate 关键帧不再拒绝（v0.3 重入）
     assert frames[0]["main"]["rotation_deg"] == 0.0
+
+
+def test_v1_static_transform_content_box() -> None:
+    # 用户真实数据形态：V1 clip transform {scale: 0.63}，无关键帧
+    plan = _plan([_segment("a", 0, 2 * US, 0, 2 * US,
+                           transform={"scale": 0.63, "x": 0.5, "y": 0.5})])
+    frames = _frames(plan)
+    f = frames[30]["main"]
+    # 内容盒 = fit 盒 960x540 × 0.63 → 604x340，居中 (178, 100)
+    assert f["content"] == {"x": 178, "y": 100, "w": 604, "h": 340}, f["content"]
+    assert f["alpha"] == 1.0
+    # opacity 乘入
+    plan2 = _plan([_segment("a", 0, 2 * US, 0, 2 * US,
+                            transform={"scale": 0.63, "opacity": 0.5})])
+    assert project_preview_ir(plan2, _probe(plan2))["frames"][0]["main"]["alpha"] == 0.5
+
+
+def test_pip_blurred_background_content_box() -> None:
+    # 用户真实数据形态：V2 pip layout=blurred_background（内容盒语义与 fit 相同），
+    # 源几何 682x686（近方形生成图）
+    plan = _plan([
+        _segment("a", 0, 30 * US, 0, 30 * US),
+        _segment("p", 0, 20 * US, 10 * US, 30 * US, asset_idx=1, track_id="V2",
+                 layout="blurred_background",
+                 transform={"x": 0.7288, "y": 0.4173, "scale": 0.2725, "rotate": 0.0}),
+    ])
+    plan["output"]["width"], plan["output"]["height"] = 540, 960  # 用户真实项目为竖版画布
+    probes = {**_probe(plan), "asset1": _geometry(682, 686)}
+    frames = project_preview_ir(plan, probes)["frames"]
+    ov = frames[450]["overlays"][0]
+    # 682x686 → fit 540x542 × 0.2725 → 148x148，中心 (0.7288*540, 0.4173*960)
+    assert ov["box"]["w"] == 148 and ov["box"]["h"] == 148
+    assert abs(ov["box"]["x"] - (0.7288 * 540 - 74)) < 1

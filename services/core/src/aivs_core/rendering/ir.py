@@ -288,6 +288,22 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
         keyframes = segment.get("keyframes") if isinstance(segment.get("keyframes"), dict) else None
         origin_us = region_t0_by_id.get(segment["clip_id"], float(segment["timeline_start_us"])) if content_origin_us is None else content_origin_us
         t_seg_us = max(0, t_exact_us - origin_us)
+        # 静态 transform（V1 主轨，与权威端 visual_chain 静态变换对齐）：
+        # 内容盒 × scale，中心点 (cx·W, cy·H)；rotate 度数；opacity 乘入 alpha。
+        static_scale = 1.0
+        static_cx, static_cy = 0.5, 0.5
+        static_rotate = 0.0
+        static_alpha = 1.0
+        transform = segment.get("transform")
+        if isinstance(transform, dict) and transform:
+            try:
+                static_scale = min(max(float(transform.get("scale", 1.0)), 0.05), 5.0)
+                static_cx = min(max(float(transform.get("x", 0.5)), 0.0), 1.0)
+                static_cy = min(max(float(transform.get("y", 0.5)), 0.0), 1.0)
+                static_rotate = float(transform.get("rotate", 0.0))
+                static_alpha = min(max(float(transform.get("opacity", 1.0)), 0.0), 1.0)
+            except (TypeError, ValueError):
+                pass
         if phase == "blend":
             # 头部借用路径（窗口 (0, …)）：源从 source_start 起播，blend 相对时间 = t − offset。
             speed_milli = int(segment.get("speed_milli", 1000))
@@ -299,27 +315,33 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
         else:
             src_n = _source_frame_n(segment, int(segment["timeline_start_us"]) + t_seg_us, 0)
         shift_dx = shift_dy = 0.0
-        rotation_deg = 0.0
+        rotation_deg = static_rotate
         if keyframes and "position" in keyframes:
             x = _lerp_channel(keyframes["position"]["frames"], t_seg_us, "x")
             y = _lerp_channel(keyframes["position"]["frames"], t_seg_us, "y")
-            # 权威端：overlay x='(W-w)/2 + x*(W/2)'；段内容已全画布 → 等价整体平移
-            shift_dx = x * (width / 2)
-            shift_dy = y * (height / 2)
+            # 权威端：关键帧平移作用于静态变换前的全画布内容，
+            # 静态 scale 缩放整个画面 → 平移量随静态缩放同比例收缩（近似，组合场景文档已记）
+            shift_dx = x * (width / 2) * static_scale
+            shift_dy = y * (height / 2) * static_scale
         if keyframes and "rotate" in keyframes:
             # rotate 关键帧真实可见：绕画布中心旋转，角落为黑（透明→yuv 黑）
-            rotation_deg = _lerp_channel(keyframes["rotate"]["frames"], t_seg_us, "v")
+            rotation_deg += _lerp_channel(keyframes["rotate"]["frames"], t_seg_us, "v")
         # scale 关键帧：权威端逐帧 scale 后被静态归一化（scale=min(iw,W)+pad，为 concat
         # 段一致）完全抵消——渲染为无视觉效果（M3-0 实证：f=0.5/1.5 内容边界恒全画布）。
         # IR 不携带 scale，合成器一致忽略；UI 数值语义与渲染不一致属权威端已知限制。
         content_x, content_y, content_w, content_h = _fit_content_box(geometry, width, height)
+        if static_scale != 1.0 or static_cx != 0.5 or static_cy != 0.5:
+            content_w = max(2, int(round(content_w * static_scale / 2) * 2))
+            content_h = max(2, int(round(content_h * static_scale / 2) * 2))
+            content_x = int(static_cx * width - content_w / 2)
+            content_y = int(static_cy * height - content_h / 2)
         return {
             "clip_id": segment["clip_id"], "input_id": input_id,
             "src_n": src_n,
             "src_t_us": int(src_n * 1_000_000 / FPS),
             "content": {"x": content_x, "y": content_y, "w": content_w, "h": content_h},
             "shift": {"dx": round(shift_dx, 3), "dy": round(shift_dy, 3)},
-            "alpha": round(_opacity_alpha(keyframes, t_seg_us), 6),
+            "alpha": round(_opacity_alpha(keyframes, t_seg_us) * static_alpha, 6),
             "rotation_deg": round(rotation_deg, 4),
         }
 
