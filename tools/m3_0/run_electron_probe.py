@@ -36,7 +36,7 @@ def build_manifest(path: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("probe", choices=["m3p1", "m3p2", "m3p3"])
+    parser.add_argument("probe", choices=["m3p1", "m3p2", "m3p3", "m3p4"])
     parser.add_argument("--ir", default=None)
     parser.add_argument("--sample", default=None)
     parser.add_argument("--evidence", required=True)

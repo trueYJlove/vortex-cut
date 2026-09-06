@@ -111,8 +111,8 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
   }, [load.status]);
 
   return (
-    <div className="synthetic-preview" aria-label="合成预览">
-      <canvas ref={canvasRef} className="synthetic-canvas" style={{ display: load.status === "ready" ? "block" : "none" }} />
+    <div className="synthetic-preview" aria-label="合成预览" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "100%", height: "100%" }}>
+      <canvas ref={canvasRef} className="synthetic-canvas" style={{ display: load.status === "ready" ? "block" : "none", maxWidth: "100%", maxHeight: "100%" }} />
       {load.status !== "ready" && <div className="synthetic-loading">{load.message || "…"}</div>}
       {load.status === "ready" && metrics && (
         <div className={`synthetic-metrics${metrics.last_error ? " err" : ""}`}>
