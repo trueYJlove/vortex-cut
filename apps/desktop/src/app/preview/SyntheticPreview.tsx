@@ -8,6 +8,9 @@ import { SyntheticPipLayer } from "./SyntheticPipLayer.js";
 /** 画中画片段编辑态（App 从时间线文档透传；transform 中心点语义）。 */
 export interface SyntheticPipClip { clipId: string; transform: { x?: number; y?: number; scale?: number; rotate?: number; opacity?: number } }
 
+/** 手势提交的 transform 负载（opacity 等未涉及字段由调用方合并既有 transform）。 */
+export interface PipTransformCommit { x: number; y: number; scale: number; rotate: number }
+
 export interface SyntheticPreviewProps {
   projectId: string;
   revisionId: string | null;
@@ -21,8 +24,7 @@ export interface SyntheticPreviewProps {
   pipClips?: SyntheticPipClip[];
   selectedClipId?: string | null;
   onSelectClip?: (clipId: string) => void;
-  onLivePipMove?: (clipId: string, x: number, y: number) => void;
-  onCommitPipMove?: (clipId: string, x: number, y: number) => void;
+  onCommitPipTransform?: (clipId: string, transform: PipTransformCommit) => void;
   onGesturePause?: () => boolean;
   onGestureResume?: (wasPlaying: boolean) => void;
   playing: boolean;
@@ -39,7 +41,7 @@ interface LoadState {
 }
 
 export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactElement {
-  const { projectId, revisionId, mediaUrls, audioByClip, pipClips, selectedClipId, onSelectClip, onLivePipMove, onCommitPipMove, onGesturePause, onGestureResume, playing, playheadUs, onTimeUs, onEnded, onFallback, outputRatio } = props;
+  const { projectId, revisionId, mediaUrls, audioByClip, pipClips, selectedClipId, onSelectClip, onCommitPipTransform, onGesturePause, onGestureResume, playing, playheadUs, onTimeUs, onEnded, onFallback, outputRatio } = props;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const sessionRef = useRef<PreviewSession | null>(null);
   const lastReportedUs = useRef<number>(playheadUs);
@@ -185,15 +187,16 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
         const live = sessionRef.current;
         const cw = live.ir.canvas.width;
         const ch = live.ir.canvas.height;
+        const transformOf = (clipId: string) => pipClips.find(item => item.clipId === clipId)?.transform;
         return (
           <SyntheticPipLayer
-            boxes={live.pipBoxes().map(box => ({ ...box, canvasW: cw, canvasH: ch }))}
+            boxes={live.pipBoxes().map(box => ({ ...box, canvasW: cw, canvasH: ch, scale: transformOf(box.clipId)?.scale ?? 1, rotate: transformOf(box.clipId)?.rotate ?? 0 }))}
             view={live.pipView()}
             selectedClipId={selectedClipId ?? null}
             locked={false}
             onSelect={clipId => onSelectClip?.(clipId)}
-            onLiveMove={(clipId, x, y) => { live.setPipCenter(clipId, x, y); onLivePipMove?.(clipId, x, y); }}
-            onCommitMove={(clipId, x, y) => onCommitPipMove?.(clipId, x, y)}
+            onLiveGeometry={(clipId, geometry) => { live.setPipBox(clipId, geometry.cx, geometry.cy, geometry.w, geometry.h); live.setPipRotation(clipId, geometry.rotate); }}
+            onCommitTransform={(clipId, transform) => onCommitPipTransform?.(clipId, transform)}
             onGestureStart={() => onGesturePause?.() ?? false}
             onGestureEnd={wasPlaying => onGestureResume?.(wasPlaying)}
           />

@@ -149,6 +149,21 @@ textarea { min-height: 92px; padding: 8px; resize: vertical; }
 .pip-handle.h-s { left:50%; bottom:-6px; margin-left:-6px; cursor:ns-resize; }
 .pip-handle.h-sw { left:-6px; bottom:-6px; cursor:nesw-resize; }
 .pip-handle.h-w { left:-6px; top:50%; margin-top:-6px; cursor:ew-resize; }
+/* 合成预览画中画手势层（SyntheticPipLayer）：盒子贴 IR 几何，手柄语义与
+ * 交互层 .pip-handle 一致（白底青边圆点），旋转手柄在顶边中点上方。 */
+.sp-box { position: absolute; border: 1px dashed rgba(37, 211, 172, .35); touch-action: none; user-select: none; }
+.sp-box.selected { border: 1px solid #25d3ac; }
+.sp-handle { position: absolute; width: 11px; height: 11px; background: #fff; border: 1.5px solid #25d3ac; border-radius: 50%; z-index: 3; }
+.sp-handle.sp-nw { left: -6px; top: -6px; cursor: nwse-resize; }
+.sp-handle.sp-n { left: 50%; top: -6px; margin-left: -6px; cursor: ns-resize; }
+.sp-handle.sp-ne { right: -6px; top: -6px; cursor: nesw-resize; }
+.sp-handle.sp-e { right: -6px; top: 50%; margin-top: -6px; cursor: ew-resize; }
+.sp-handle.sp-se { right: -6px; bottom: -6px; cursor: nwse-resize; }
+.sp-handle.sp-s { left: 50%; bottom: -6px; margin-left: -6px; cursor: ns-resize; }
+.sp-handle.sp-sw { left: -6px; bottom: -6px; cursor: nesw-resize; }
+.sp-handle.sp-w { left: -6px; top: 50%; margin-top: -6px; cursor: ew-resize; }
+.sp-rotate { position: absolute; left: 50%; top: -26px; margin-left: -7px; width: 14px; height: 14px; border-radius: 50%; background: #25d3ac; box-shadow: 0 0 4px rgba(0, 0, 0, .6); cursor: grab; z-index: 3; }
+.sp-rotate::after { content: ""; position: absolute; left: 50%; top: 14px; width: 1px; height: 12px; background: rgba(37, 211, 172, .8); }
 .playback-bar { width: 100%; }
 .layout-switch { width: min(620px, 100%); }.layout-switch button { flex: 1; font-size: 12px; }
 .export-records { width: min(620px, 100%); min-height: 0; overflow: auto; border-top: 1px solid #303b40; }.export-records > div:first-child, .export-record, .render-job { min-width: 0; padding: 6px 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; }.export-records small, .export-record strong, .render-job strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.export-records small { color: #89989f; font-size: 10px; }.export-record > div:first-child, .render-job > div:first-child { min-width: 0; }.export-record > div:last-child { display: flex; gap: 4px; }.export-record .icon-btn, .render-job .icon-btn { width: 28px; min-height: 28px; }

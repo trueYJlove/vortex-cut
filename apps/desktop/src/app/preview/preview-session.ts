@@ -247,12 +247,31 @@ export class PreviewSession {
   /** 画中画中心点就地补丁：直改 IR 帧几何并重呈现（免会话重建，拖拽实时跟随）。
    *  静态 transform 作用于片段全区间——范围内所有含该 overlay 的帧一并更新。 */
   setPipCenter(clipId: string, x: number, y: number): void {
+    const overlay = this.ir.frames.flatMap(frame => frame.overlays).find(item => item.clip_id === clipId);
+    if (!overlay) return;
     const w = this.ir.canvas.width;
     const h = this.ir.canvas.height;
+    this.setPipBox(clipId, x * w, y * h, overlay.box.w, overlay.box.h);
+  }
+
+  /** 画中画几何就地补丁（缩放手势）：中心点 + 尺寸均为画布像素，作用于片段
+   *  全区间帧。move 手势可复用（仅改中心、尺寸取当前值）。 */
+  setPipBox(clipId: string, cx: number, cy: number, w: number, h: number): void {
     for (const frame of this.ir.frames) {
       for (const overlay of frame.overlays) {
         if (overlay.clip_id !== clipId) continue;
-        overlay.box = { x: x * w - overlay.box.w / 2, y: y * h - overlay.box.h / 2, w: overlay.box.w, h: overlay.box.h };
+        overlay.box = { x: cx - w / 2, y: cy - h / 2, w, h };
+      }
+    }
+    this.compositor.onRecompose?.();
+  }
+
+  /** 画中画旋转就地补丁（旋转手势）：度数作用于片段全区间帧。 */
+  setPipRotation(clipId: string, deg: number): void {
+    for (const frame of this.ir.frames) {
+      for (const overlay of frame.overlays) {
+        if (overlay.clip_id !== clipId) continue;
+        overlay.rotation_deg = deg;
       }
     }
     this.compositor.onRecompose?.();

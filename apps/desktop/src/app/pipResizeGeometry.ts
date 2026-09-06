@@ -80,3 +80,53 @@ export function pipResizeFromHandle(
   const cy = anchorY !== null ? anchorY + (sideY * h1) / 2 : start.y * ch;
   return { x: clamp(cx / cw, 0, 1), y: clamp(cy / ch, 0, 1), scale };
 }
+
+export type PipRectPx = { cx: number; cy: number; w: number; h: number };
+
+/**
+ * 画布手柄缩放（合成层变体）：作用于**任意宽高比**的像素盒（IR 覆盖段几何，
+ * 画布像素空间、中心点语义），而非 pipResizeFromHandle 假定的「scale × 画布」
+ * 等比盒。锚定语义相同：被拖方向的对边/对角保持不动，内拉缩小、外拉放大，
+ * 越过锚点镜像翻转到另一侧；角/边手柄均输出**统一缩放**（宽高比锁定，与
+ * transform.scale 语义一致——单轴手柄取该轴距离换算比例）。
+ *
+ * @param dir           被拖拽的手柄方向
+ * @param pointer       指针位置（画布像素，与 start 同一空间）
+ * @param start         手势起点时的盒子（画布像素，中心点语义）
+ * @param minRatio/maxRatio 统一缩放比界限（调用方由 PIP_SCALE_MIN/MAX ÷ 起始 scale 换算）
+ * @returns 新盒子（画布像素）+ 相对起始盒的统一缩放比 ratio（提交时 scale1 = scale0 × ratio）
+ */
+export function boxResizeFromHandle(
+  dir: HandleDir,
+  pointer: { x: number; y: number },
+  start: PipRectPx,
+  minRatio: number,
+  maxRatio: number,
+): { cx: number; cy: number; w: number; h: number; ratio: number } {
+  const w0 = Math.max(1, start.w);
+  const h0 = Math.max(1, start.h);
+  const left0 = start.cx - w0 / 2;
+  const top0 = start.cy - h0 / 2;
+  const geom = RESIZE_GEOM[dir];
+  const anchorX = geom.ax === "left" ? left0 : geom.ax === "right" ? left0 + w0 : null;
+  const anchorY = geom.ay === "top" ? top0 : geom.ay === "bottom" ? top0 + h0 : null;
+  let ratio: number;
+  if (anchorX !== null && anchorY !== null) {
+    // 角手柄：两轴各自「指针到锚点 / 初始边长」，取更远（拖动量更大）的轴。
+    ratio = Math.max(Math.abs(pointer.x - anchorX) / w0, Math.abs(pointer.y - anchorY) / h0);
+  } else if (anchorX !== null) {
+    ratio = Math.abs(pointer.x - anchorX) / w0;
+  } else if (anchorY !== null) {
+    ratio = Math.abs(pointer.y - anchorY) / h0;
+  } else {
+    ratio = 1;
+  }
+  ratio = clamp(ratio, minRatio, maxRatio);
+  const w1 = w0 * ratio;
+  const h1 = h0 * ratio;
+  const sideX = anchorX !== null ? (pointer.x >= anchorX ? 1 : -1) : 0;
+  const sideY = anchorY !== null ? (pointer.y >= anchorY ? 1 : -1) : 0;
+  const cx = anchorX !== null ? anchorX + (sideX * w1) / 2 : start.cx;
+  const cy = anchorY !== null ? anchorY + (sideY * h1) / 2 : start.cy;
+  return { cx, cy, w: w1, h: h1, ratio };
+}
