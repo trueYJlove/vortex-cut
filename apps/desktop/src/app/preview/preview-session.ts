@@ -19,6 +19,21 @@ import { DecodeWorker } from "./decode-worker.js";
 /** 片段音频配置（编辑态：App 从时间线文档透传；Phase 1 未入 IR 契约）。 */
 export interface SegmentAudioConfig { enabled: boolean; gainDb: number }
 
+/** WebAudio 片段音频装配（每含音轨片段一个）：AudioBufferSourceNode 在音频
+ *  线程时钟上调度，与主线程/解码抖动物理隔离——根治"深 GOP 解码尖峰 →
+ *  合成时钟抖 → currentTime 硬校正"的段音频抖动（1.25x 变速段尤甚）；
+ *  gainDb 经 GainNode 线性增益，无 HTMLAudio 1.0 上限钳制。 */
+interface AudioRig {
+  /** 解码好的整段素材音频（clip 复用同一 buffer，起点按 source_start 换算）。 */
+  buffer: AudioBuffer | null;
+  source: AudioBufferSourceNode | null;
+  gain: GainNode | null;
+  /** 源启动锚点：当前位置 = startOffset + (ctx.currentTime - startedAt) × speed。 */
+  startedAt: number;
+  startOffset: number;
+  speed: number;
+}
+
 export interface PreviewSessionMetrics {
   task_ms_p50: number;
   task_ms_p95: number;
@@ -80,6 +95,8 @@ function shiftedRect(rect: IrContent, shift: { dx: number; dy: number }): IrCont
   return { x: rect.x + shift.dx, y: rect.y + shift.dy, w: rect.w, h: rect.h };
 }
 
+const clamp = (value: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, value));
+
 export class PreviewSession {
   private readonly compositor: Compositor;
   private readonly rigs = new Map<string, InputRig>();
@@ -106,7 +123,10 @@ export class PreviewSession {
   onTimeUs: ((us: number) => void) | null = null;
   private tickets: Map<string, string> | null = null;
   private audioByClip: Map<string, SegmentAudioConfig> | null = null;
-  private readonly audio = new Map<string, HTMLAudioElement>(); // clip_id → 音频元素
+  private audioCtx: AudioContext | null = null;
+  private readonly audioRigs = new Map<string, AudioRig>(); // clip_id → 音频装配
+  /** 音频漂移硬校正阈值（秒）：WebAudio 自身不漂，只有时钟重锚才触达。 */
+  private static readonly AUDIO_REANCHOR_S = 0.08;
   /** 自然播放到片尾时回调（UI 复位播放按钮；会话已内部 pause）。 */
   onEnded: (() => void) | null = null;
 
@@ -172,17 +192,13 @@ export class PreviewSession {
       }
       session.rigs.set(input.input_id, rig);
     }
-    // 音频元素预热：入场即创建并缓冲（运行中才建会因缓冲不足而卡顿）
-    if (audioByClip) {
+    // 片段音频：AudioContext + 整段解码（eager 预热，运行中才解码会缺席整段）。
+    if (audioByClip && audioByClip.size && typeof window !== "undefined" && "AudioContext" in window) {
+      session.audioCtx = new AudioContext();
       for (const segment of ir.segments) {
-        const cfg = audioByClip.get(segment.clip_id);
-        if (!cfg || !cfg.enabled) continue;
-        const input = ir.inputs.find(item => item.input_id === segment.input_id);
-        const ticket = input ? tickets.get(input.asset_id) : undefined;
-        if (!ticket) continue;
-        const el = new Audio(ticket);
-        el.preload = "auto";
-        session.audio.set(segment.clip_id, el);
+        if (!audioByClip.get(segment.clip_id)?.enabled) continue;
+        session.audioRigs.set(segment.clip_id, { buffer: null, source: null, gain: null, startedAt: 0, startOffset: 0, speed: Math.max(0.25, Math.min(4, segment.speed_milli / 1000)) });
+        void session.ensureAudioBuffer(segment.clip_id, segment.input_id);
       }
     }
     // LOD 依据真实源宽（此前恒 1920：682 宽画中画被过度降采样模糊）
@@ -206,9 +222,15 @@ export class PreviewSession {
     return this.playing;
   }
 
-  /** 编辑态音频配置更新（静音/增益实时生效，无需重建会话）。 */
+  /** 编辑态音频配置更新（静音/增益实时生效；增益直接写 GainNode，无重建）。 */
   setAudioByClip(audioByClip: Map<string, SegmentAudioConfig> | null): void {
     this.audioByClip = audioByClip;
+    if (!this.audioCtx) return;
+    for (const [clipId, rig] of this.audioRigs) {
+      const cfg = audioByClip?.get(clipId);
+      if (rig.gain && cfg) rig.gain.gain.value = Math.pow(10, cfg.gainDb / 20);
+      if (rig.source && (!cfg || !cfg.enabled)) this.stopAudioSource(rig);
+    }
   }
 
   /** 当前帧画中画几何（IR 画布坐标）——合成画布手势层消费。 */
@@ -480,41 +502,88 @@ export class PreviewSession {
     this.lastError = `解码失败 ${inputId}#${srcN}: ${error instanceof Error ? error.message : String(error)}`;
   }
 
-  /** 片段音频跟随时钟（交互预览同款语义：媒体元素跟随标尺）。
+  /** 解码片段素材的整段音频（aivideo:// 票据 → fetch → decodeAudioData）。 */
+  private async ensureAudioBuffer(clipId: string, inputId: string): Promise<void> {
+    if (!this.audioCtx || this.disposed) return;
+    const rig = this.audioRigs.get(clipId);
+    if (!rig || rig.buffer) return;
+    const input = this.ir.inputs.find(item => item.input_id === inputId);
+    const ticket = input ? this.tickets?.get(input.asset_id) : undefined;
+    if (!ticket) return;
+    try {
+      const data = await (await fetch(ticket)).arrayBuffer();
+      if (this.disposed || !this.audioCtx) return;
+      rig.buffer = await this.audioCtx.decodeAudioData(data);
+      this.compositor.onRecompose?.(); // 解码完成：若片段正活跃，下次 tick 启动音源
+    } catch (error) {
+      if (!this.disposed) this.lastError = `音频解码失败 ${clipId}: ${error instanceof Error ? error.message : String(error)}`;
+    }
+  }
+
+  /** 启动/重启一个片段音源：从缓冲 offset 起以 speed 播放（ctx 时间锚定）。 */
+  private startAudioSource(rig: AudioRig, clipId: string, gainDb: number, offset: number, speed: number): void {
+    if (!this.audioCtx || !rig.buffer) return;
+    this.stopAudioSource(rig);
+    const source = this.audioCtx.createBufferSource();
+    source.buffer = rig.buffer;
+    source.playbackRate.value = speed;
+    rig.gain ??= this.audioCtx.createGain();
+    rig.gain.gain.value = Math.pow(10, gainDb / 20);
+    source.connect(rig.gain);
+    rig.gain.connect(this.audioCtx.destination);
+    source.start(0, Math.max(0, offset));
+    rig.source = source;
+    rig.startedAt = this.audioCtx.currentTime;
+    rig.startOffset = offset;
+    rig.speed = speed;
+    source.onended = () => { if (rig.source === source) rig.source = null; };
+  }
+
+  private stopAudioSource(rig: AudioRig): void {
+    const source = rig.source;
+    rig.source = null;
+    if (!source) return;
+    try { source.stop(); } catch { /* 已停止 */ }
+    source.disconnect();
+  }
+
+  /** 片段音频跟随时钟（WebAudio 调度）：音源运行在音频线程时钟上，本函数只做
+   *  节拍管理——进段启动、出段停止、漂移超阈值（时钟重锚）才硬校正。播放中
+   *  由合成 tick 以**墙钟目标时间**驱动（合成滞后不影响音频推进）。
    * 仅视频片段自带音轨（IR 白名单当前不含纯音频段）；速度经 playbackRate；
-   * gainDb → 线性音量（HTMLAudio 上限 1.0，>0dB 提升被钳制——已知近似）。 */
+   * gainDb → 线性增益（WebAudio 无 1.0 上限，>0dB 提升真实生效）。 */
   private syncAudio(tUs: number): void {
-    if (!this.audioByClip) return;
+    if (!this.audioByClip || !this.audioCtx) return;
     const active = new Set<string>();
     for (const segment of this.ir.segments) {
       const cfg = this.audioByClip.get(segment.clip_id);
       if (!cfg || !cfg.enabled) continue;
       if (tUs < segment.timeline_start_us || tUs > segment.timeline_end_us) continue;
       active.add(segment.clip_id);
-      let el = this.audio.get(segment.clip_id);
-      if (!el) {
-        const input = this.ir.inputs.find(item => item.input_id === segment.input_id);
-        const ticket = input ? this.tickets?.get(input.asset_id) : undefined;
-        if (!ticket) continue;
-        el = new Audio(ticket);
-        el.preload = "auto";
-        this.audio.set(segment.clip_id, el);
-      }
       const speed = Math.max(0.25, Math.min(4, segment.speed_milli / 1000));
-      if (el.playbackRate !== speed) el.playbackRate = speed; // 重复赋值会扰动媒体栈重采样
-      el.volume = Math.max(0, Math.min(1, Math.pow(10, cfg.gainDb / 20)));
-      const expected = segment.source_start_us / 1e6 + ((tUs - segment.timeline_start_us) / 1e6) * speed;
-      // 阈值 0.25s：currentTime 硬跳变本身可闻，只校正实质漂移
-      if (Math.abs(el.currentTime - expected) > 0.25) el.currentTime = Math.max(0, expected);
-      if (this.playing) { if (el.paused) void el.play().catch(() => undefined); } else el.pause();
+      let rig = this.audioRigs.get(segment.clip_id);
+      if (!rig) { rig = { buffer: null, source: null, gain: null, startedAt: 0, startOffset: 0, speed }; this.audioRigs.set(segment.clip_id, rig); }
+      if (!rig.buffer) { void this.ensureAudioBuffer(segment.clip_id, segment.input_id); continue; }
+      if (!this.playing) { this.stopAudioSource(rig); continue; }
+      const expected = clamp(segment.source_start_us / 1e6 + ((tUs - segment.timeline_start_us) / 1e6) * speed, segment.source_start_us / 1e6, segment.source_end_us / 1e6);
+      const position = rig.source ? rig.startOffset + (this.audioCtx.currentTime - rig.startedAt) * rig.speed : null;
+      const drift = position === null ? Infinity : position - expected;
+      if (rig.source && Math.abs(drift) <= PreviewSession.AUDIO_REANCHOR_S) {
+        if (rig.speed !== speed) { rig.speed = speed; rig.source.playbackRate.value = speed; }
+        rig.gain!.gain.value = Math.pow(10, cfg.gainDb / 20);
+        continue;
+      }
+      // 无音源（入场/解码完成/出段后重入）或实质漂移（时钟重锚）→ 对齐重启。
+      this.startAudioSource(rig, segment.clip_id, cfg.gainDb, expected, speed);
     }
-    for (const [clipId, el] of this.audio) {
-      if (!active.has(clipId) && !el.paused) el.pause();
+    for (const [clipId, rig] of this.audioRigs) {
+      if (!active.has(clipId) && rig.source) this.stopAudioSource(rig);
     }
   }
 
   private pauseAudio(): void {
-    for (const [, el] of this.audio) el.pause();
+    if (!this.audioCtx) return;
+    for (const [, rig] of this.audioRigs) this.stopAudioSource(rig);
   }
 
   /** 同步合成一帧（纹理必须已就绪）。 */
@@ -610,6 +679,7 @@ export class PreviewSession {
     this.anchorWall = performance.now();
     this.anchorFrame = this.currentFrame;
     this.lastAdvanceWall = this.anchorWall;
+    void this.audioCtx?.resume().catch(() => undefined); // 自动播放策略：用户手势链内恢复
     const frameDur = 1000 / this.ir.canvas.fps;
     const tick = () => {
       if (!this.playing || this.disposed) return;
@@ -617,6 +687,9 @@ export class PreviewSession {
       const target = Math.min(last, Math.floor(this.anchorFrame + (now - this.anchorWall) / frameDur));
       this.latestTarget = target;
       this.pump(target);
+      // 音频以**墙钟目标**驱动（音频线程自行推进，合成滞后不拖累音频）：
+      // 时钟目标 µs = anchorFrame × 1e6/fps + 墙钟增量。
+      this.syncAudio(Math.round(this.anchorFrame * (1e6 / this.ir.canvas.fps) + (now - this.anchorWall) * 1000));
       // 合成 ≤ 目标的最新就绪帧：已就绪帧绝不丢弃；starving 时保持最后画面。
       // 同帧不重复合成（GL 绘制缓冲持久，60Hz tick 对 30fps 内容时减半主线程
       // 负载——重复 onTimeUs 会以 60Hz 触发 App 整树重渲）。
@@ -633,7 +706,6 @@ export class PreviewSession {
         this.currentFrame = composed;
         this.lastAdvanceWall = now;
         this.onTimeUs?.(this.ir.frames[composed]!.t_us);
-        this.syncAudio(this.ir.frames[composed]!.t_us);
       }
       // 饥饿护栏：落后过多 → 重锚时钟（播放按解码吞吐放慢），而不是让目标
       // 无限狂奔、丢帧按 tick 线性堆积（旧实现冻结+丢帧 404 的直接根源）。
@@ -686,8 +758,10 @@ export class PreviewSession {
   dispose(): void {
     this.disposed = true;
     this.pause();
-    for (const [, el] of this.audio) { el.pause(); el.removeAttribute("src"); }
-    this.audio.clear();
+    for (const [, rig] of this.audioRigs) this.stopAudioSource(rig);
+    this.audioRigs.clear();
+    void this.audioCtx?.close().catch(() => undefined);
+    this.audioCtx = null;
     for (const [, rig] of this.rigs) rig.worker?.terminate();
     this.rigs.clear();
   }
