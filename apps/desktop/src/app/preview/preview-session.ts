@@ -209,6 +209,27 @@ export class PreviewSession {
     this.audioByClip = audioByClip;
   }
 
+  /** 当前帧画中画几何（IR 画布坐标）——合成画布手势层消费。 */
+  pipBoxes(): Array<{ clipId: string; x: number; y: number; w: number; h: number }> {
+    const frame = this.ir.frames[Math.min(this.currentFrame, this.ir.frames.length - 1)];
+    if (!frame) return [];
+    return frame.overlays.map(overlay => ({ clipId: overlay.clip_id, ...overlay.box }));
+  }
+
+  /** IR 画布坐标 → 合成画布 CSS 坐标的映射（contain + 后备缓冲换算）。 */
+  pipView(): { scale: number; offsetX: number; offsetY: number; width: number; height: number } {
+    const cw = this.compositor.canvas.clientWidth || this.compositor.canvas.width;
+    const ch = this.compositor.canvas.clientHeight || this.compositor.canvas.height;
+    const kx = cw / this.compositor.canvas.width;
+    const ky = ch / this.compositor.canvas.height;
+    return { scale: this.compositor.fitScale * kx, offsetX: this.compositor.fitX * kx, offsetY: this.compositor.fitY * ky, width: cw, height: ch };
+  }
+
+  /** 手势期间冻结合成时钟（画中画拖拽时播放头前进会越出片段区间）。 */
+  freezeForGesture(): void {
+    this.pause();
+  }
+
   /** 诊断快照：各输入解码链游标/在途/环形内容 + 最近解码回执（m3p5 探针）。 */
   chainState(): Record<string, unknown> {
     const state: Record<string, unknown> = {};

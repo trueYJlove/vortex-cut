@@ -103,9 +103,9 @@ export class Compositor {
   chromaPhaseY = 0;
   mipmapEnabled = true;
   /** 视口适配（等比 contain）：IR 画布 → 后备缓冲。默认恒等。 */
-  private fitX = 0;
-  private fitY = 0;
-  private fitScale = 1;
+  fitX = 0;
+  fitY = 0;
+  fitScale = 1;
   private captionCanvas: OffscreenCanvas | HTMLCanvasElement | null = null;
   private captionCtx: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D | null = null;
   private captionTexture: WebGLTexture | null = null;

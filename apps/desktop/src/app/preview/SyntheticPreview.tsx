@@ -3,6 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import { parseIr, type Ir } from "./ir.js";
 import { PreviewSession, type PreviewSessionMetrics, type SegmentAudioConfig } from "./preview-session.js";
+import { SyntheticPipLayer } from "./SyntheticPipLayer.js";
+
+/** 画中画片段编辑态（App 从时间线文档透传；transform 中心点语义）。 */
+export interface SyntheticPipClip { clipId: string; transform: { x?: number; y?: number; scale?: number; rotate?: number; opacity?: number } }
 
 export interface SyntheticPreviewProps {
   projectId: string;
@@ -13,6 +17,14 @@ export interface SyntheticPreviewProps {
   mediaUrls: Map<string, string>;
   /** clip_id → 片段音频配置（编辑态透传；未提供则合成预览静音）。 */
   audioByClip?: Map<string, SegmentAudioConfig>;
+  /** 画中画片段（编辑态：合成画布手势层的数据源与提交负载）。 */
+  pipClips?: SyntheticPipClip[];
+  selectedClipId?: string | null;
+  onSelectClip?: (clipId: string) => void;
+  onDraftPipMove?: (clipId: string, x: number, y: number) => void;
+  onCommitPipMove?: (clipId: string, x: number, y: number) => void;
+  onGesturePause?: () => boolean;
+  onGestureResume?: (wasPlaying: boolean) => void;
   playing: boolean;
   playheadUs: number;
   onTimeUs: (us: number) => void;
@@ -27,7 +39,7 @@ interface LoadState {
 }
 
 export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactElement {
-  const { projectId, revisionId, mediaUrls, audioByClip, playing, playheadUs, onTimeUs, onEnded, onFallback, outputRatio } = props;
+  const { projectId, revisionId, mediaUrls, audioByClip, pipClips, selectedClipId, onSelectClip, onDraftPipMove, onCommitPipMove, onGesturePause, onGestureResume, playing, playheadUs, onTimeUs, onEnded, onFallback, outputRatio } = props;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const sessionRef = useRef<PreviewSession | null>(null);
   const lastReportedUs = useRef<number>(playheadUs);
@@ -147,6 +159,28 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
   return (
     <div className="synthetic-preview" aria-label="合成预览" style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", width: "100%", height: "100%" }}>
       <canvas ref={canvasRef} className="synthetic-canvas" style={{ display: load.status === "ready" ? "block" : "none", width: "100%", height: "100%" }} />
+      {load.status === "ready" && sessionRef.current && pipClips && pipClips.length > 0 && (() => {
+        const live = sessionRef.current;
+        const cw = live.ir.canvas.width;
+        const ch = live.ir.canvas.height;
+        return (
+          <SyntheticPipLayer
+            boxes={live.pipBoxes().map(box => ({ ...box, canvasW: cw, canvasH: ch }))}
+            view={live.pipView()}
+            selectedClipId={selectedClipId ?? null}
+            locked={false}
+            onSelect={clipId => onSelectClip?.(clipId)}
+            onDraftMove={(clipId, x, y) => onDraftPipMove?.(clipId, x, y)}
+            onCommitMove={(clipId, x, y) => {
+              const base = pipClips.find(item => item.clipId === clipId)?.transform ?? {};
+              onCommitPipMove?.(clipId, x, y);
+              void base;
+            }}
+            onGestureStart={() => onGesturePause?.() ?? false}
+            onGestureEnd={wasPlaying => onGestureResume?.(wasPlaying)}
+          />
+        );
+      })()}
       {load.status !== "ready" && <div className="synthetic-loading">{load.message || "…"}</div>}
       {load.status === "ready" && metrics && (
         <div className={`synthetic-metrics${metrics.last_error ? " err" : ""}`}>
