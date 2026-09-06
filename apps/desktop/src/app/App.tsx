@@ -157,19 +157,6 @@ export function App() {
   const [previewMode, setPreviewMode] = useState<"interactive" | "authoritative" | "synthetic">("interactive");
   const [syntheticNotice, setSyntheticNotice] = useState<string | null>(null);
   const [previewRatio, setPreviewRatio] = useState("fit");
-  // 合成预览画布比例：预览比例选择器为 fit 时按项目画布宽高比解析（169/916/11/43/34）。
-  const syntheticRatio = (() => {
-    if (previewRatio !== "fit") return previewRatio;
-    const canvas = working?.canvas;
-    if (!canvas) return "169";
-    const ratio = canvas.width / canvas.height;
-    if (Math.abs(ratio - 16 / 9) < 0.02) return "169";
-    if (Math.abs(ratio - 9 / 16) < 0.02) return "916";
-    if (Math.abs(ratio - 1) < 0.02) return "11";
-    if (Math.abs(ratio - 4 / 3) < 0.02) return "43";
-    if (Math.abs(ratio - 3 / 4) < 0.02) return "34";
-    return "169";
-  })();
   const [previewRatioTouched, setPreviewRatioTouched] = useState(false);
   const [previews, setPreviews] = useState<AuthoritativePreviewPresentation[]>([]);
   const [exports, setExports] = useState<ExportRecordPresentation[]>([]);
@@ -1223,6 +1210,9 @@ export function App() {
   const nativeRatio = nativeStream?.width && nativeStream?.height && nativeStream.width > 0 && nativeStream.height > 0 ? nativeStream.width / nativeStream.height : null;
   const autoRatio = nativeRatio ? (Math.abs(nativeRatio - 16 / 9) < 0.05 ? "169" : Math.abs(nativeRatio - 9 / 16) < 0.05 ? "916" : Math.abs(nativeRatio - 1) < 0.05 ? "11" : Math.abs(nativeRatio - 4 / 3) < 0.05 ? "43" : Math.abs(nativeRatio - 3 / 4) < 0.05 ? "34" : "fit") : "fit";
   const effectiveRatio: OutputRatio = (previewRatioTouched ? previewRatio : autoRatio) as OutputRatio;
+  // 合成预览比例：与预览比例选择器/权威预览/导出同源（此前独立按项目画布解析，
+  // 与下拉框显示不一致——素材 16:9 + 项目画布 9:16 时下拉显示 16:9 而合成渲染 9:16）。
+  const syntheticRatio = effectiveRatio;
   const previewClass = `${previewLayout} ratio-${effectiveRatio}`;
   // 时间码帧率：优先画布帧率，缺省 30fps。
   const previewFps = working?.canvas.fps_num && working.canvas.fps_den ? working.canvas.fps_num / working.canvas.fps_den : 30;
