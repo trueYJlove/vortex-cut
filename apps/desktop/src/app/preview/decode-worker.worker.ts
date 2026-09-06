@@ -220,6 +220,7 @@ let dataBytes: Uint8Array | null = null;
 let decoder: VideoDecoder | null = null;
 let decoderConfig: VideoDecoderConfig | null = null;
 let hardware: string | null = null;
+
 let cacheEnabled = false;
 let cacheCap = 0;
 const cache = new Map<number, VideoFrame>(); // LRU：key = sample index
@@ -228,6 +229,7 @@ let cacheMisses = 0;
 let cacheEvictions = 0;
 let cacheBytes = 0;
 let pendingResolve: ((frame: VideoFrame) => void) | null = null;
+let fedIndex = -1; // 解码器已馈送的最后一个采样索引（热态顺序解码游标）
 let targetTimestampUs = 0;
 let samplesFed = 0;
 let fromKeyframe = -1;
@@ -317,6 +319,7 @@ function decodeFrame(id: number, frameN: number, fps: number): void {
     if (ptsUs > targetUs + 100_000) break;
   }
   if (target < 0 || bestDiff > 33_334) throw new Error(`no sample for frame ${frameN} (best diff ${bestDiff}us)`);
+  // 缓存命中先行（不触碰解码器状态）
   if (cacheEnabled && cache.has(target)) {
     cacheHits += 1;
     const cached = cache.get(target)!.clone();
@@ -324,17 +327,27 @@ function decodeFrame(id: number, frameN: number, fps: number): void {
     return;
   }
   cacheMisses += cacheEnabled ? 1 : 0;
-  // 回退到最近关键帧
-  let keyframe = target;
-  while (keyframe > 0 && !samples[keyframe]!.sync) keyframe -= 1;
-  decoder.reset(); // reset 会清空配置（per spec）—— 立即恢复
-  decoder.configure(decoderConfig as VideoDecoderConfig);
+  // 热态顺序解码（M3-2 播放架构）：目标 == 已馈送位置 + 1 时不 reset——每帧只喂
+  // 下一个样本（无 B 帧，解码序 = 显示序，~2-5ms/帧）；跳转才 reset + 关键帧重解。
+  // reset 会清空配置且可能长时间阻塞硬件解码器——scrub 逐帧 reset 是 M3-0 后期
+  // "decode timeout" 的根因，播放路径严禁。
+  const sequential = fedIndex >= 0 && target === fedIndex + 1;
+  let startSample = sequential ? fedIndex + 1 : target;
+  if (!sequential) {
+    startSample = target;
+    while (startSample > 0 && !samples[startSample]!.sync) startSample -= 1; // 回退最近关键帧
+  }
+  if (!sequential) {
+    decoder.reset(); // reset 清空配置且可能长时间阻塞硬件解码器——播放路径严禁逐帧 reset
+    decoder.configure(decoderConfig as VideoDecoderConfig);
+    fedIndex = -1;
+  }
   pendingResolve = null;
   const promise = new Promise<VideoFrame>(resolve => { pendingResolve = resolve; });
   targetTimestampUs = targetUs;
   samplesFed = 0;
-  fromKeyframe = keyframe;
-  for (let index = keyframe; index <= target; index++) {
+  fromKeyframe = sequential ? fedIndex + 1 : startSample;
+  for (let index = startSample; index <= target; index++) {
     const sample = samples[index]!;
     const chunkData = dataBytes.subarray(sample.offset, sample.offset + sample.size);
     const chunk = new EncodedVideoChunk({
@@ -344,6 +357,7 @@ function decodeFrame(id: number, frameN: number, fps: number): void {
     });
     decoder.decode(chunk);
     samplesFed += 1;
+    fedIndex = index;
   }
   void promise.then(frame => {
     if (!frame) {
@@ -352,7 +366,7 @@ function decodeFrame(id: number, frameN: number, fps: number): void {
     }
     cachePut(target, frame);
     const clone = frame.clone();
-    post({ type: "frame", id, frameN, timestampUs: clone.timestamp, fromCache: false, samplesFed, fromKeyframe: keyframe, allocationSize: clone.allocationSize(), frame: clone }, [clone]);
+    post({ type: "frame", id, frameN, timestampUs: clone.timestamp, fromCache: false, samplesFed, fromKeyframe: fromKeyframe, allocationSize: clone.allocationSize(), frame: clone }, [clone]);
   });
 }
 
