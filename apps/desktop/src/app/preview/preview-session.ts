@@ -30,6 +30,8 @@ export interface PreviewSessionMetrics {
   decode_ms_p95: number;
   /** 当前在途解码请求数（全部输入合计，含影子槽）。 */
   decode_in_flight: number;
+  /** 纹理上传（copyTo+texImage2D+mipmap）耗时 p95：主线程负载诊断。 */
+  upload_ms_p95: number;
 }
 
 type TexPair = { y: WebGLTexture; uv: WebGLTexture | null };
@@ -53,6 +55,8 @@ interface InputRig {
   shadowInFlight: number | null;
   /** 同一输入的纹理上传串行尾（杜绝同槽 copyTo/texImage2D 交错）。 */
   uploadTail: Promise<void>;
+  /** copyTo 复用缓冲（每帧 ~3MB 的重复分配是 GC 抖动源，串行尾保证独占）。 */
+  scratch: ArrayBuffer | null;
 }
 
 /** 主轨（段或转场左右）所需的 (输入, 源帧, 是否影子槽)。 */
@@ -87,6 +91,7 @@ export class PreviewSession {
   private latestTarget = 0;
   private taskTimes: number[] = [];
   private decodeTimes: number[] = [];
+  private uploadTimes: number[] = [];
   private decodeInFlight = 0;
   private dropped = 0;
   /** 会话累计丢帧（诊断/探针用；UI 指标行展示的是本次播放段口径）。 */
@@ -142,6 +147,7 @@ export class PreviewSession {
         shadowUploaded: -1,
         shadowInFlight: null,
         uploadTail: Promise.resolve(),
+        scratch: null,
       };
       if (rig.kind === "image") {
         // 静图：Image 元素解码 → RGBA 纹理一次上传，src_n 恒 0 全程复用
@@ -158,6 +164,19 @@ export class PreviewSession {
         sourceWidth.set(input.input_id, input.geometry.width);
       }
       session.rigs.set(input.input_id, rig);
+    }
+    // 音频元素预热：入场即创建并缓冲（运行中才建会因缓冲不足而卡顿）
+    if (audioByClip) {
+      for (const segment of ir.segments) {
+        const cfg = audioByClip.get(segment.clip_id);
+        if (!cfg || !cfg.enabled) continue;
+        const input = ir.inputs.find(item => item.input_id === segment.input_id);
+        const ticket = input ? tickets.get(input.asset_id) : undefined;
+        if (!ticket) continue;
+        const el = new Audio(ticket);
+        el.preload = "auto";
+        session.audio.set(segment.clip_id, el);
+      }
     }
     // LOD 依据真实源宽（此前恒 1920：682 宽画中画被过度降采样模糊）
     session.compositor.setSourceWidthScale(sourceWidth);
@@ -238,7 +257,12 @@ export class PreviewSession {
       const slot = rig.ring[slotIndex] ??= {
         y: this.compositor.createYuvTexture(), uv: this.compositor.createYuvTexture(), srcN: -1,
       };
-      await this.compositor.uploadVideoFrameToTextures(decoded, slot.y, slot.uv);
+      const size = decoded.allocationSize();
+      if (!rig.scratch || rig.scratch.byteLength < size) rig.scratch = new ArrayBuffer(size);
+      const uploadStart = performance.now();
+      await this.compositor.uploadVideoFrameToTextures(decoded, slot.y, slot.uv, rig.scratch);
+      this.uploadTimes.push(performance.now() - uploadStart);
+      if (this.uploadTimes.length > 600) this.uploadTimes.splice(0, this.uploadTimes.length - 600);
       slot.srcN = srcN; // Y+UV 上传全部完成后才可被合成/就绪判定看见
       rig.fed = srcN; // 与 worker 热态游标同步（回退 seek/冷启后 worker 游标亦回退）
     };
@@ -385,7 +409,7 @@ export class PreviewSession {
     this.lastError = `解码失败 ${inputId}#${srcN}: ${error instanceof Error ? error.message : String(error)}`;
   }
 
-  /** 片段音频跟随时钟（交互预览同款语义：媒体元素跟随标尺，偏差 >0.18s 对齐）。
+  /** 片段音频跟随时钟（交互预览同款语义：媒体元素跟随标尺）。
    * 仅视频片段自带音轨（IR 白名单当前不含纯音频段）；速度经 playbackRate；
    * gainDb → 线性音量（HTMLAudio 上限 1.0，>0dB 提升被钳制——已知近似）。 */
   private syncAudio(tUs: number): void {
@@ -409,8 +433,9 @@ export class PreviewSession {
       el.playbackRate = speed;
       el.volume = Math.max(0, Math.min(1, Math.pow(10, cfg.gainDb / 20)));
       const expected = segment.source_start_us / 1e6 + ((tUs - segment.timeline_start_us) / 1e6) * speed;
-      if (Math.abs(el.currentTime - expected) > 0.18) el.currentTime = Math.max(0, expected);
-      if (this.playing) void el.play().catch(() => undefined); else el.pause();
+      // 阈值 0.25s：currentTime 硬跳变本身可闻，只校正实质漂移
+      if (Math.abs(el.currentTime - expected) > 0.25) el.currentTime = Math.max(0, expected);
+      if (this.playing) { if (el.paused) void el.play().catch(() => undefined); } else el.pause();
     }
     for (const [clipId, el] of this.audio) {
       if (!active.has(clipId) && !el.paused) el.pause();
@@ -580,6 +605,7 @@ export class PreviewSession {
       decode_ms_p50: p(decodes, 0.5),
       decode_ms_p95: p(decodes, 0.95),
       decode_in_flight: this.decodeInFlight,
+      upload_ms_p95: p(this.uploadTimes, 0.95),
     };
   }
 

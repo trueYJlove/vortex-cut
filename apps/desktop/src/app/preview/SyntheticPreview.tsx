@@ -152,7 +152,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
         <div className={`synthetic-metrics${metrics.last_error ? " err" : ""}`}>
           {metrics.last_error
             ? `最近错误：${metrics.last_error}`
-            : `合成预览 · 任务 p95 ${metrics.task_ms_p95}ms · 解码 p95 ${metrics.decode_ms_p95}ms · 丢帧 ${metrics.dropped_frames}`}
+            : `合成预览 · 任务 p95 ${metrics.task_ms_p95}ms · 解码 p95 ${metrics.decode_ms_p95}ms · 上传 p95 ${metrics.upload_ms_p95}ms · 丢帧 ${metrics.dropped_frames}`}
         </div>
       )}
     </div>

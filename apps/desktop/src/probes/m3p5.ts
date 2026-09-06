@@ -19,6 +19,7 @@ interface Sample {
   task_ms_p95: number;
   decode_ms_p50: number;
   decode_ms_p95: number;
+  upload_ms_p95: number;
   decode_in_flight: number;
   last_error: string | null;
   chain?: Record<string, unknown>;
@@ -47,6 +48,7 @@ function sampleOf(tMs: number, contentUs: number, metrics: PreviewSessionMetrics
     task_ms_p95: metrics.task_ms_p95,
     decode_ms_p50: metrics.decode_ms_p50,
     decode_ms_p95: metrics.decode_ms_p95,
+    upload_ms_p95: metrics.upload_ms_p95,
     decode_in_flight: metrics.decode_in_flight,
     last_error: metrics.last_error,
   };

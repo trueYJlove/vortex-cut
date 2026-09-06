@@ -248,13 +248,14 @@ function createDecoder(): VideoDecoder {
         // 半帧容差（旧实现 33_334 会把相邻帧错配 → 系统性早一帧）
         activeRequest = null;
         pendingAnchorPts = -1;
-        const clone = frame.clone();
         if (cacheEnabled) {
+          const clone = frame.clone();
           cachePut(request.sampleIndex, frame); // 缓存接管原始帧（保持开启）
+          post({ type: "frame", id: request.id, frameN: request.frameN, timestampUs: clone.timestamp, fromCache: false, samplesFed, fromKeyframe, allocationSize: clone.allocationSize(), frame: clone }, [clone]);
         } else {
-          frame.close();
+          // 直传原始帧（免 clone：每帧减一次 GPU 内存搬运；所有权随转移交出）
+          post({ type: "frame", id: request.id, frameN: request.frameN, timestampUs: frame.timestamp, fromCache: false, samplesFed, fromKeyframe, allocationSize: frame.allocationSize(), frame }, [frame]);
         }
-        post({ type: "frame", id: request.id, frameN: request.frameN, timestampUs: clone.timestamp, fromCache: false, samplesFed, fromKeyframe, allocationSize: clone.allocationSize(), frame: clone }, [clone]);
         pumpQueue();
       } else if (frame.timestamp === pendingAnchorPts) {
         pendingAnchorPts = -1;

@@ -437,15 +437,19 @@ export class Compositor {
   }
 
   /** 核心上传：解码帧 → 指定纹理对。NV12 走零拷贝快路径（UNPACK_ROW_LENGTH
-   * 直接上传平面视图，省去 1080p 约 3MB 的 JS 逐行重打包）；I420 回退重打包。 */
-  async uploadVideoFrameToTextures(frame: VideoFrame, targetY: WebGLTexture, targetUV: WebGLTexture): Promise<void> {
+   * 直接上传平面视图，省去 1080p 约 3MB 的 JS 逐行重打包）；I420 回退重打包。
+   * scratch 可选：复用 copyTo 目标缓冲（消除每帧 ~3MB 分配的 GC 抖动；
+   * 由调用方保证 ≥ allocationSize 且无并发使用）。 */
+  async uploadVideoFrameToTextures(frame: VideoFrame, targetY: WebGLTexture, targetUV: WebGLTexture, scratch?: ArrayBuffer): Promise<void> {
     const gl = this.gl;
     const width = frame.displayWidth;
     const height = frame.displayHeight;
     const cw = width >> 1;
     const ch = height >> 1;
     // copyTo 返回真实平面布局（解码器 stride 对齐不可假设 == width）
-    const buffer = new ArrayBuffer(frame.allocationSize());
+    const buffer = scratch && scratch.byteLength >= frame.allocationSize()
+      ? scratch
+      : new ArrayBuffer(frame.allocationSize());
     const layout = await frame.copyTo(buffer);
     const raw = new Uint8Array(buffer);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
