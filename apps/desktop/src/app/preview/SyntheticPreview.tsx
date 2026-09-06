@@ -47,23 +47,32 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
   // 手势提交后的 revision 变更（几何已就地补丁）短暂吸收，避免整会话重建黑屏
   const absorbRef = useRef(0);
   const seenRevisionRef = useRef<string | null>(null);
+  // 预览框观察器：组件级单例（吸收路径早退不销毁，避免观察器泄漏）
+  const boxObserverRef = useRef<ResizeObserver | null>(null);
+  if (!boxObserverRef.current) {
+    boxObserverRef.current = new ResizeObserver(entries => {
+      const entry = entries[entries.length - 1];
+      if (!entry) return;
+      const session = sessionRef.current;
+      const canvas = canvasRef.current;
+      if (!session || !canvas) return;
+      const rect = canvas.parentElement?.getBoundingClientRect();
+      const width = rect?.width ?? 0;
+      const height = rect?.height ?? 0;
+      if (width > 2 && height > 2) session.resize(width, height);
+    });
+  }
   const [load, setLoad] = useState<LoadState>({ status: "loading", message: "正在加载合成预览" });
   const [metrics, setMetrics] = useState<PreviewSessionMetrics | null>(null);
 
-  // IR 加载 + 会话创建（revision 变更时重建）。
+  // IR 加载 + 会话创建（revision 变更时重建；手势提交的变更被吸收、会话保活）。
   useEffect(() => {
     let cancelled = false;
     const sessionRefLocal = sessionRef;
-    // 预览框尺寸跟踪：合成画布填满预览框、IR 画布 contain 居中（与交互预览同观感）
-    const boxObserver = new ResizeObserver(entries => {
-      const entry = entries[entries.length - 1];
-      if (!entry) return;
-      const session = sessionRefLocal.current;
-      if (!session) return;
-      const { width, height } = entry.contentRect;
-      if (width > 2 && height > 2) session.resize(width, height);
-    });
-    // 手势提交的就地补丁已使几何一致：吸收仅由提交触发的 revision 变更（1.5s 窗口）
+    boxObserverRef.current?.observe(canvasRef.current?.parentElement ?? canvasRef.current ?? document.body);
+    // 手势提交的就地补丁已使几何一致：吸收仅由提交触发的 revision 变更（1.5s 窗口）。
+    // 注意：此处不能依赖 cleanup——React 在新 body 之前必然先执行旧 cleanup
+    // （无条件 dispose 会黑屏），因此旧会话的销毁放在下方非吸收路径的 body 内。
     if (revisionId && seenRevisionRef.current && revisionId !== seenRevisionRef.current && Date.now() < absorbRef.current) {
       seenRevisionRef.current = revisionId;
       return;
@@ -102,7 +111,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
           onEnded?.();
         };
         sessionRefLocal.current = session;
-        boxObserver.observe(canvas.parentElement ?? canvas);
+        boxObserverRef.current?.observe(canvas.parentElement ?? canvas);
         const fontUrl = await window.desktop.captionFontUrl();
         const fontBuffer = await (await fetch(fontUrl)).arrayBuffer();
         await session.loadCaptionFont(fontBuffer);
@@ -118,14 +127,21 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
       }
     })();
     return () => {
+      // 仅标记失效：会话销毁由卸载 effect 或下一次非吸收重建的 body 负责
+      //（React 在新 body 前必然先跑本 cleanup——在此 dispose 会使"吸收保活"
+      // 失效，拖拽提交即黑屏）。
       cancelled = true;
-      boxObserver.disconnect();
-      sessionRefLocal.current?.dispose();
-      sessionRefLocal.current = null;
     };
     // mediaUrls 以内容为准（票据变更即重建）；playhead 仅挂载时取初值。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, revisionId, outputRatio]);
+
+  // 卸载：销毁会话 + 断开观察器（StrictMode 双挂载各自动一次，安全）。
+  useEffect(() => () => {
+    boxObserverRef.current?.disconnect();
+    sessionRef.current?.dispose();
+    sessionRef.current = null;
+  }, []);
 
   // 播放/暂停。
   useEffect(() => {
