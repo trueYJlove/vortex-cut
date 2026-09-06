@@ -93,6 +93,8 @@ export class PreviewSession {
   private dragMode = false;
   lastError: string | null = null;
   onTimeUs: ((us: number) => void) | null = null;
+  /** 自然播放到片尾时回调（UI 复位播放按钮；会话已内部 pause）。 */
+  onEnded: (() => void) | null = null;
 
   /** 环形纹理池深度：LEAD 超前 + 当前合成 + 在途 1，取 6 留余量。 */
   private static readonly RING = 6;
@@ -178,6 +180,16 @@ export class PreviewSession {
     return state;
   }
 
+  /** 用户驱动的向后跳转（回卷重播/回退 seek）后重置解码链：游标回 -1，
+   * pump 冷启重建（worker 冷启路径实证干净）。 */
+  private resetChains(): void {
+    for (const [, rig] of this.rigs) {
+      rig.fed = -1;
+      rig.inFlightN = null;
+      rig.shadowInFlight = null;
+    }
+  }
+
   /** 预览框尺寸变化（CSS px）：后备缓冲随盒子、IR 画布 contain 居中。 */
   resize(cssWidth: number, cssHeight: number): void {
     const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
@@ -208,7 +220,7 @@ export class PreviewSession {
       };
       await this.compositor.uploadVideoFrameToTextures(decoded, slot.y, slot.uv);
       slot.srcN = srcN; // Y+UV 上传全部完成后才可被合成/就绪判定看见
-      rig.fed = Math.max(rig.fed, srcN); // 与 worker 热态游标保持同步
+      rig.fed = srcN; // 与 worker 热态游标同步（回退 seek/冷启后 worker 游标亦回退）
     };
     const run = rig.uploadTail.then(task, task);
     rig.uploadTail = run.then(() => undefined, () => undefined);
@@ -228,30 +240,7 @@ export class PreviewSession {
         await this.compositor.uploadVideoFrameToTextures(decoded,
           this.compositor.shadowYTexture(rig.handle.inputId), this.compositor.shadowUVTexture(rig.handle.inputId));
         rig.shadowUploaded = srcN;
-        rig.fed = Math.max(rig.fed, srcN);
-      } finally {
-        this.decodeInFlight -= 1;
-      }
-    };
-    const run = rig.uploadTail.then(task, task);
-    rig.uploadTail = run.then(() => undefined, () => undefined);
-    return run;
-  }
-
-  /** 顺序采样解码（不展示、不上传）：speed≠1 时被跳过的源采样也要喂入解码器
-   * （热态连续性），但其输出直接关闭——表面释放在独立任务边界（postMessage
-   * 往返之后），与解码调用 temporal 分离。 */
-  private decodeOnly(rig: InputRig, srcN: number): Promise<void> {
-    if (!rig.worker) return Promise.reject(new Error(`no worker for input`));
-    const task = async (): Promise<void> => {
-      const decodeStart = performance.now();
-      this.decodeInFlight += 1;
-      try {
-        const decoded = await rig.worker!.decode(srcN, this.ir.canvas.fps);
-        this.decodeTimes.push(performance.now() - decodeStart);
-        if (this.decodeTimes.length > 600) this.decodeTimes.splice(0, this.decodeTimes.length - 600);
-        decoded.close();
-        rig.fed = Math.max(rig.fed, srcN);
+        rig.fed = srcN;
       } finally {
         this.decodeInFlight -= 1;
       }
@@ -294,48 +283,48 @@ export class PreviewSession {
   }
 
   /**
-   * 顺序预读链（连续采样版）：对每个输入把解码游标单调推进到
-   * [target-BACKSCAN, target+LEAD] 窗口内的最大展示需求 src_n，**逐采样连续**
-   * 请求（speed≠1 的跳帧采样以 decode-only 喂入解码器、不上传不展示）。
-   * 这保证 worker 始终看到 target = fed+1 的纯顺序流——跳帧喂入 + 中间输出
-   * 关闭的组合在部分硬件解码器上会破坏 GOP 参考链（确定性花屏，实证
-   * evidence/m3_2/playback-repro fixed3/11/12/13），连续采样喂入（与 ffmpeg
-   * 同构）完全干净。链深度 1，完成即续（不等 rAF tick）。
+   * 顺序预读链：对每个输入把解码游标单调推进到 [前沿, target+LEAD] 窗口内的
+   * 展示需求 src_n；展示需求之间的跳帧采样由 worker 热态连续喂入内部消化
+   * （输出延迟关闭），链深度 1、完成即续（不等 rAF tick）。
+   * - 冷启动（fed=-1，输入首次入窗）直接请求首个展示需求（worker 回退最近
+   *   关键帧，一个请求直达）；
+   * - 展示前沿回跳：回卷重播/回头后前沿帧所需采样已被消费且不在环内
+   *   → 向后跳（worker 冷启承接）。常规播放前沿贴合目标，不触发。
+   * 跳帧喂入 + 中间输出关闭的组合在部分硬件解码器上会破坏 GOP 参考链——
+   * 已用中间帧延迟关闭环 + GOP 锚持有抑制（evidence/m3_2/playback-repro）。
    */
   private pump(target: number): void {
-    const from = Math.max(0, target - PreviewSession.BACKSCAN);
+    const from = Math.max(0, this.currentFrame, target - PreviewSession.BACKSCAN);
     const to = Math.min(target + PreviewSession.LEAD, this.ir.frames.length - 1);
-    // 窗口内各输入的最大展示需求 + 展示 src 集合
-    const maxNeeded = new Map<string, number>();
-    const displaySrcs = new Map<string, Set<number>>();
+    const needsByInput = new Map<string, Set<number>>();
     for (let n = from; n <= to; n++) {
       const frame = this.ir.frames[n]!;
       const needs: Array<[string, number, boolean]> = [...mainNeeds(frame)];
       for (const [inputId, srcN] of overlayNeeds(frame)) needs.push([inputId, srcN, false]);
       for (const [inputId, srcN, shadow] of needs) {
-        if (shadow) continue; // 影子槽由专用直发路径处理
-        const current = maxNeeded.get(inputId);
-        if (current === undefined || srcN > current) maxNeeded.set(inputId, srcN);
-        let set = displaySrcs.get(inputId);
-        if (!set) { set = new Set<number>(); displaySrcs.set(inputId, set); }
+        if (shadow) continue;
+        let set = needsByInput.get(inputId);
+        if (!set) { set = new Set<number>(); needsByInput.set(inputId, set); }
         set.add(srcN);
       }
     }
-    for (const [inputId, needed] of maxNeeded) {
+    for (const [inputId, needs] of needsByInput) {
       const rig = this.rigs.get(inputId);
       if (!rig || rig.kind !== "video") continue;
-      // 逐采样推进：下一请求 = fed+1（连续）；若已成环内展示需求则跳过该步
-      let next = rig.fed + 1;
-      while (next <= needed && this.ringSlot(rig, next)) {
+      const sorted = [...needs].sort((a, b) => a - b);
+      const max = sorted[sorted.length - 1]!;
+      // 正向单调推进（fed=-1 冷启动：从首个展示需求起，worker 回退最近关键帧）。
+      // 向后跳转只发生在用户动作（回卷重播/回退 seek）——由 resetChains() 显式
+      // 重置链游标，pump 本身不做启发式回跳（避免深窗口陈旧需求引发震荡）。
+      let next = rig.fed < 0 ? sorted[0]! : rig.fed + 1;
+      while (next <= max && this.ringSlot(rig, next)) {
         rig.fed = next;
         next += 1;
       }
-      if (next > needed || rig.inFlightN !== null || rig.shadowInFlight !== null) continue;
+      if (next > max || rig.inFlightN !== null || rig.shadowInFlight !== null) continue;
       rig.fed = next;
       rig.inFlightN = next;
-      const isDisplay = displaySrcs.get(inputId)!.has(next);
-      const task = isDisplay ? this.uploadRing(rig, next) : this.decodeOnly(rig, next);
-      void task
+      void this.uploadRing(rig, next)
         .catch(error => this.noteDecodeError(inputId, next, error))
         .finally(() => {
           if (rig.inFlightN === next) rig.inFlightN = null;
@@ -397,6 +386,9 @@ export class PreviewSession {
   async seekToFrame(target: number): Promise<number> {
     if (this.disposed) return -1;
     const epoch = ++this.seekEpoch;
+    // seek 是用户驱动的位置跳变：重置解码链游标（后续 pump/播放冷启重建；环内
+    // 已就绪采样仍可直接复用，±1 步进零解码路径保持不变）。
+    this.resetChains();
     const now = performance.now();
     this.dragMode = now - this.lastSeekWall < 250;
     this.lastSeekWall = now;
@@ -441,11 +433,14 @@ export class PreviewSession {
 
   play(): void {
     if (this.playing || this.disposed) return;
+    const last = this.ir.frames.length - 1;
+    // 播放头已在片尾：回卷从头再播（标准播放器行为；此前第二次播放立即"到尾"暂停）。
+    // 回卷是用户驱动的向后跳转：显式重置各输入解码链（游标回 -1，pump 冷启重建）。
+    if (this.currentFrame >= last) { this.currentFrame = 0; this.resetChains(); }
     this.playing = true;
     this.anchorWall = performance.now();
     this.anchorFrame = this.currentFrame;
     const frameDur = 1000 / this.ir.canvas.fps;
-    const last = this.ir.frames.length - 1;
     const tick = () => {
       if (!this.playing || this.disposed) return;
       const now = performance.now();
@@ -476,6 +471,7 @@ export class PreviewSession {
       }
       if (target >= last) {
         this.pause();
+        this.onEnded?.();
         return;
       }
       this.rafId = requestAnimationFrame(tick);

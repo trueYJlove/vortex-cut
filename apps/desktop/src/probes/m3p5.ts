@@ -113,8 +113,13 @@ export async function runProbe(): Promise<void> {
     // 片尾——区分"解码器历史状态依赖"与"该流本身在此解码路径必然花屏"。
     session.dispose();
     const freshSession = await PreviewSession.create(canvas, ir, tickets);
-    await freshSession.seekToFrame(ir.canvas.duration_frames - 2);
+    await freshSession.seekToFrame(ir.canvas.duration_frames - 1);
     await snapshot(canvas, "fresh_session_seek_end");
+    // 复播回归：播放头已在片尾时再按播放，应回卷从头继续（"只能播一次"回归门）
+    freshSession.play();
+    await new Promise<void>(resolve => setTimeout(resolve, 1200));
+    const replayOk = freshSession.isPlaying && freshSession.metrics().composed_frames > 10;
+    freshSession.pause();
     freshSession.dispose();
     const finalMetrics = session.metrics();
 
@@ -139,6 +144,7 @@ export async function runProbe(): Promise<void> {
       decode_ms: { p50: finalMetrics.decode_ms_p50, p95: finalMetrics.decode_ms_p95 },
       compose_interval_ms: { p50: pick(0.5), p95: pick(0.95), max: sorted.length ? sorted[sorted.length - 1]! : 0 },
       last_error: finalMetrics.last_error,
+      replay_after_end_ok: replayOk,
       samples,
       post_mortem: postMortem,
       materials: [...tickets.keys()],

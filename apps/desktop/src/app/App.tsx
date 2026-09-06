@@ -549,9 +549,19 @@ export function App() {
         const sourceStart = (clipAtPlayhead.source_start_us ?? 0) / 1_000_000;
         const speed = previewReverse ? 1 : Math.max(0.25, Math.min(4, (previewSpeedMilli ?? 1000) / 1000));
         const expected = sourceStart + ((playhead - clipAtPlayhead.timeline_start_us) / 1_000_000) * speed;
-        if (Math.abs(media.currentTime - expected) > 0.18) media.currentTime = Math.max(0, expected);
+        if (media.readyState >= 1 && Math.abs(media.currentTime - expected) > 0.18) media.currentTime = Math.max(0, expected);
       }
-      if (playing && (libraryPreviewId || clipAtPlayhead)) void media.play().catch(() => setPlaying(false)); else media.pause();
+      if (playing && (libraryPreviewId || clipAtPlayhead)) {
+        media.play().catch(() => {
+          // 预览模式切换后元素为全新挂载、媒体仍在加载：play 以 AbortError
+          // （interrupted by a new load request）被打断属瞬态——播放头时钟每
+          // 100ms 会重入本 effect 自动重试；仅真实解码错误（media.error）才停播。
+          // 此前无条件 setPlaying(false) → 权威预览切回交互后"无法播放"。
+          if (media.error) setPlaying(false);
+        });
+      } else {
+        media.pause();
+      }
     }
     const audio = audioRef.current;
     if (audio) {
@@ -565,7 +575,7 @@ export function App() {
         audio.pause();
       }
     }
-  }, [playing, previewAsset?.media_url, audioAsset?.media_url, playhead, previewSpeedMilli, previewReverse, audioClipAtPlayhead, isClipAudible]);
+  }, [playing, previewMode, previewAsset?.media_url, audioAsset?.media_url, playhead, previewSpeedMilli, previewReverse, audioClipAtPlayhead, isClipAudible]);
   // 音量动画（电平表）：挂接预览视频的实时输出电平，左右声道各一根跳动条。
   // MediaElementAudioSourceNode 对同一元素只能创建一次且会接管出声路由，
   // 因此音频图为按元素缓存的持久结构：暂停只停轮询，不销毁图（销毁会让元素永久失声）。
@@ -1689,7 +1699,7 @@ export function App() {
             <div className={`preview-frame ${previewClass}${previewSelected ? " selected" : ""}`} style={previewZoom === "fit" ? undefined : { transform: `scale(${previewZoom})` }} role="button" tabIndex={0} aria-label="选中播放头处的片段" title="点击选中播放头处的片段" onClick={selectClipAtPlayhead} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectClipAtPlayhead(); } }}>
           <div className="preview-canvas" ref={canvasRef}>
             {previewMode === "authoritative" && authoritativeMediaUrl && <video ref={videoRef} className="preview-foreground authoritative-video" src={authoritativeMediaUrl} aria-label={reframePlayback ? "重构图权威预览视频" : exportPlayback ? "导出视频" : "权威预览视频"} controls onEnded={() => setPlaying(false)} />}
-            {previewMode === "synthetic" && project && <SyntheticPreview outputRatio={syntheticRatio} projectId={project.project_id} revisionId={timeline?.current_revision.timeline_revision_id ?? null} mediaUrls={new Map(assets.flatMap(item => item.media_url ? [[item.asset.asset_id, item.media_url] as const] : []))} playing={playing && !gestureHoldRef.current} playheadUs={playhead} onTimeUs={us => setPlayhead(us)} onFallback={(reason, code) => { setPreviewMode("interactive"); showNotice(code === "PREVIEW_IR_UNSUPPORTED" ? "当前时间线包含实时合成暂不支持的效果，已回退交互预览。" : `合成预览不可用：${reason}`, "warning"); }} />}
+            {previewMode === "synthetic" && project && <SyntheticPreview outputRatio={syntheticRatio} projectId={project.project_id} revisionId={timeline?.current_revision.timeline_revision_id ?? null} mediaUrls={new Map(assets.flatMap(item => item.media_url ? [[item.asset.asset_id, item.media_url] as const] : []))} playing={playing && !gestureHoldRef.current} playheadUs={playhead} onTimeUs={us => setPlayhead(us)} onEnded={() => setPlaying(false)} onFallback={(reason, code) => { setPreviewMode("interactive"); showNotice(code === "PREVIEW_IR_UNSUPPORTED" ? "当前时间线包含实时合成暂不支持的效果，已回退交互预览。" : `合成预览不可用：${reason}`, "warning"); }} />}
             {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "video" && <div className="preview-transform" style={mainTransformStyle}><video className="preview-background" src={previewAsset.media_url} muted aria-hidden="true" /><video ref={videoRef} className="preview-foreground" src={previewAsset.media_url} muted={!selectedClip?.audio.enabled || previewReverse || (clipAtPlayhead ? !isClipAudible(clipAtPlayhead) : false)} aria-label="交互预览视频" onTimeUpdate={event => { if (libraryPreviewId) setPlayhead(Math.round(event.currentTarget.currentTime * 1_000_000)); }} onEnded={handleVideoEnded} /></div>}
             {previewMode === "interactive" && audioAsset?.media_url && <audio ref={audioRef} src={audioAsset.media_url} style={{ display: "none" }} />}
             {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "image" && <div className="preview-transform" style={mainTransformStyle}><img className="preview-background" src={previewAsset.media_url} alt="" aria-hidden="true" /><img className="preview-foreground" src={previewAsset.media_url} alt={previewAsset.asset.display_name} /></div>}

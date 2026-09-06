@@ -14,6 +14,8 @@ export interface SyntheticPreviewProps {
   playing: boolean;
   playheadUs: number;
   onTimeUs: (us: number) => void;
+  /** 自然播放到片尾（会话内部已 pause；UI 复位播放按钮）。 */
+  onEnded?: () => void;
   onFallback: (reason: string, code: string | null) => void;
 }
 
@@ -23,7 +25,7 @@ interface LoadState {
 }
 
 export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactElement {
-  const { projectId, revisionId, mediaUrls, playing, playheadUs, onTimeUs, onFallback, outputRatio } = props;
+  const { projectId, revisionId, mediaUrls, playing, playheadUs, onTimeUs, onEnded, onFallback, outputRatio } = props;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const sessionRef = useRef<PreviewSession | null>(null);
   const lastReportedUs = useRef<number>(playheadUs);
@@ -65,6 +67,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
           lastReportedUs.current = us;
           onTimeUs(us);
         };
+        session.onEnded = () => onEnded?.();
         sessionRefLocal.current = session;
         boxObserver.observe(canvas.parentElement ?? canvas);
         const fontUrl = await window.desktop.captionFontUrl();

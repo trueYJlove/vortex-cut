@@ -110,6 +110,35 @@ IR 由离线脚本按用户 DB（`RenderPlanCompiler` → `project_preview_ir`�
 | PiP | 纯绿块 | 真实内容（屏幕录制帧） |
 | 片尾帧 | 冻结在 12 帧 | 正确（"ok! bye."，scale 0.87 内容盒） |
 
+## 复播回归与修复（用户实测"只能播放一次"）
+
+播放到片尾后 `currentFrame = 末帧`，再次播放立即"到达结尾"暂停（回归）。修复：
+
+- `play()` 播放头在片尾时**回卷从头**，并显式 `resetChains()`（各输入解码游标
+  回 -1，pump 冷启重建——向后跳转只由用户动作显式触发，pump 不做启发式回跳，
+  避免回扫窗口陈旧需求引发游标震荡）；
+- 会话新增 `onEnded` 回调（自然播完时 UI 复位播放按钮）；
+- `seekToFrame` 入口同样 `resetChains()`（seek 是位置跳变；环内已就绪采样仍可
+  直接复用，±1 步进零解码路径不变），seek 上传完成后 `fed = srcN`（赋值而非取
+  max，正确反映 worker 游标回退）。
+
+m3p5 回归门：`replay_after_end_ok = true`（evidence/.../fixed23），主播放丢帧 0，
+片尾/PiP/新会话三帧 PNG 与干净基线逐字节一致。
+
+## 交互预览模式切换停播修复（用户实测"权威预览后交互预览无法播放"）
+
+交互预览的媒体跟随 effect 中 `media.play()` 失败无条件 `setPlaying(false)`：
+从权威预览切回交互时 `<video>` 全新挂载、媒体仍在加载，`play()` 被加载中断
+（AbortError，瞬态）→ 立即停播。修复：AbortError（无 `media.error`）视为瞬态，
+播放头时钟每 100ms 重入 effect 自动重试；仅真实解码错误停播。同时对齐校正加
+`readyState` 守卫、跟随 effect 补 `previewMode` 依赖。
+
+## 终端 GPU disk cache 报错说明
+
+`Unable to move the cache (0x5)` / `Gpu Cache Creation failed` 为同一用户数据目录
+被第二个实例占用（另开的打包版/旧 dev 会话）导致，Chromium 自动退化为内存缓存，
+不影响功能；关掉重复实例即消失。
+
 ## 已知限制（本机驱动级，非编排缺陷）
 
 - **暂停态 seek 进入深 GOP（keyframe@300 之后）时，本机 Intel D3D11 WebCodecs 路径
