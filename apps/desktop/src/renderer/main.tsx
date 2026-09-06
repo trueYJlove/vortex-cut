@@ -13,13 +13,14 @@ const probeName = import.meta.env.DEV
   ? new URLSearchParams(window.location.search).get("probe")
   : null;
 
-if (import.meta.env.DEV && (probeName === "m3p1" || probeName === "m3p2" || probeName === "m3p3" || probeName === "m3p4")) {
+if (import.meta.env.DEV && (probeName === "m3p1" || probeName === "m3p2" || probeName === "m3p3" || probeName === "m3p4" || probeName === "m3p5")) {
   // 探针早期异常不能静默：落 console（dev 主进程采集）并展示在页面上。
   try {
     if (probeName === "m3p1") await import("../probes/m3p1.js").then(module => module.runProbe());
     else if (probeName === "m3p2") await import("../probes/m3p2.js").then(module => module.runProbe());
     else if (probeName === "m3p3") await import("../probes/m3p3.js").then(module => module.runProbe());
-    else await import("../probes/m3p4.js").then(module => module.runProbe());
+    else if (probeName === "m3p4") await import("../probes/m3p4.js").then(module => module.runProbe());
+    else await import("../probes/m3p5.js").then(module => module.runProbe());
   } catch (error) {
     console.error(`[m3-probe] ${probeName} crashed:`, error);
     document.title = `probe ${probeName} CRASHED`;

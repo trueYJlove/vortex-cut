@@ -228,11 +228,93 @@ let cacheHits = 0;
 let cacheMisses = 0;
 let cacheEvictions = 0;
 let cacheBytes = 0;
-let pendingResolve: ((frame: VideoFrame) => void) | null = null;
+/** 解码请求队列（M3-2.2）：旧实现单 pendingResolve——新请求到达即置空旧引用，
+ * 旧 promise 永不落定（客户端 15s 超时 → "decode timeout"），且允许后发请求被
+ * 前一帧的输出按容差错配解决（系统性早一帧）。现改为严格串行队列：一次只
+ * 处理一个请求，输出按其目标 PTS 匹配，完成后自动续队。 */
+interface DecodeRequest { id: number; frameN: number; targetUs: number; sampleIndex: number }
+const decodeQueue: DecodeRequest[] = [];
+let activeRequest: DecodeRequest | null = null;
 let fedIndex = -1; // 解码器已馈送的最后一个采样索引（热态顺序解码游标）
-let targetTimestampUs = 0;
 let samplesFed = 0;
 let fromKeyframe = -1;
+
+/** 解码器工厂：output 按当前请求的目标 PTS 匹配（半帧容差），其余输出关闭。 */
+function createDecoder(): VideoDecoder {
+  return new VideoDecoder({
+    output: (frame: VideoFrame) => {
+      const request = activeRequest;
+      if (request && Math.abs(frame.timestamp - request.targetUs) <= 16_667) {
+        // 半帧容差（旧实现 33_334 会把相邻帧错配 → 系统性早一帧）
+        activeRequest = null;
+        pendingAnchorPts = -1;
+        const clone = frame.clone();
+        if (cacheEnabled) {
+          cachePut(request.sampleIndex, frame); // 缓存接管原始帧（保持开启）
+        } else {
+          frame.close();
+        }
+        post({ type: "frame", id: request.id, frameN: request.frameN, timestampUs: clone.timestamp, fromCache: false, samplesFed, fromKeyframe, allocationSize: clone.allocationSize(), frame: clone }, [clone]);
+        pumpQueue();
+      } else if (frame.timestamp === pendingAnchorPts) {
+        pendingAnchorPts = -1;
+        holdGopAnchor(frame); // GOP 锚 IDR：持有到下个关键帧冷启（绝不中途关闭）
+      } else {
+        holdOrCloseIntermediate(frame); // 非当前目标（顺序喂入的中间帧/速度变换跳过帧）
+      }
+    },
+    error: (error: DOMException) => {
+      const request = activeRequest;
+      activeRequest = null;
+      // 解码器进入错误态后必须 reset 才可复用：重建配置、清热态游标
+      try {
+        decoder!.reset();
+        decoder!.configure(decoderConfig as VideoDecoderConfig);
+      } catch { /* reset 失败则后续请求自行暴露 */ }
+      intermediateRing.length = 0;
+      fedIndex = -1;
+      if (request) post({ type: "error", id: request.id, message: `decoder error: ${error.message}` });
+      else post({ type: "error", id: null, message: `decoder error: ${error.message}` });
+      pumpQueue();
+    },
+  });
+}
+
+/** 立即关闭的解码输出会与 D3D11 解码器内部表面池的引用复用竞态：速度变换
+ * 跳帧的中间输出若在输出回调里同步 close()，后续 GOP 实证出现确定性花屏
+ * （fixed3/fixed11，evidence/m3_2/playback-repro）。改为延迟关闭——保留最近
+ * K 个中间输出，新输出到来再关最旧；reset/回退时清空。 */
+const intermediateRing: VideoFrame[] = [];
+const INTERMEDIATE_RING = 3; // 环过大会耗尽 D3D11 输出表面池（实测 8 层 → 解码停摆）
+
+function holdOrCloseIntermediate(frame: VideoFrame): void {
+  if (intermediateRing.length >= INTERMEDIATE_RING) {
+    const oldest = intermediateRing.shift();
+    oldest?.close();
+  }
+  intermediateRing.push(frame);
+}
+
+function drainIntermediateRing(): void {
+  for (const frame of intermediateRing.splice(0)) frame.close();
+}
+
+/** GOP 锚帧：冷启回退所喂 IDR 的输出绝不在 GOP 中途关闭（其表面是整个 GOP
+ * 的参考锚，关闭后 D3D11 表面池复用会破坏参考链 → 后续确定性花屏）。持有到
+ * 下一个关键帧冷启时再释放。 */
+let gopAnchor: VideoFrame | null = null;
+let pendingAnchorPts = -1;
+
+function holdGopAnchor(frame: VideoFrame): void {
+  try { gopAnchor?.close(); } catch { /* 已关闭 */ }
+  gopAnchor = frame;
+}
+
+function releaseGopAnchor(): void {
+  try { gopAnchor?.close(); } catch { /* 已关闭 */ }
+  gopAnchor = null;
+  pendingAnchorPts = -1;
+}
 
 async function init(url: string, cacheFrames: number): Promise<void> {
   const response = await fetch(url);
@@ -250,23 +332,6 @@ async function init(url: string, cacheFrames: number): Promise<void> {
     // 色彩矩阵钉死 BT.709（冻结方案 §7.2 比对口径；texImage2D(VideoFrame) 转换依此）
     colorSpace: { primaries: "bt709", transfer: "bt709", matrix: "bt709", fullRange: false },
   };
-  decoder = new VideoDecoder({
-    output: (frame: VideoFrame) => {
-      if (pendingResolve && Math.abs(frame.timestamp - targetTimestampUs) <= 33_334) {
-        const resolve = pendingResolve;
-        pendingResolve = null;
-        resolve(frame);
-      } else {
-        frame.close();
-      }
-    },
-    error: (error: DOMException) => {
-      const resolve = pendingResolve;
-      pendingResolve = null;
-      post({ type: "error", id: null, message: `decoder error: ${error.message}` });
-      resolve?.(null as unknown as VideoFrame);
-    },
-  });
   const support = await VideoDecoder.isConfigSupported({ ...config, hardwareAcceleration: "prefer-hardware" });
   if (support.supported) {
     decoderConfig = { ...config, hardwareAcceleration: "prefer-hardware" };
@@ -275,6 +340,7 @@ async function init(url: string, cacheFrames: number): Promise<void> {
     decoderConfig = config;
     hardware = "no-preference";
   }
+  decoder = createDecoder();
   decoder.configure(decoderConfig);
   const last = demuxResult.samples.at(-1)!;
   post({
@@ -304,6 +370,70 @@ function cachePut(sampleIndex: number, frame: VideoFrame): void {
   cacheBytes += frame.allocationSize();
 }
 
+function pumpQueue(): void {
+  while (!activeRequest && decodeQueue.length) {
+    const request = decodeQueue.shift()!;
+    activeRequest = request;
+    try {
+      decodeSamples(request);
+    } catch (error) {
+      activeRequest = null;
+      post({ type: "error", id: request.id, message: error instanceof Error ? error.message : String(error) });
+    }
+  }
+}
+
+function decodeSamples(request: DecodeRequest): void {
+  if (!demuxResult || !decoder || !dataBytes) throw new Error("worker not initialized");
+  const { samples, timescale } = demuxResult;
+  const target = request.sampleIndex;
+  // 热态顺序解码（M3-2 播放架构）：目标在已馈送位置之前（含跨采样跳帧，如
+  // speed≠1 的 1.25x 每 4 帧跳 1 采样）一律不 reset——顺序喂入中间采样即可
+  // （中间输出按时间戳不匹配自动关闭）。仅回退（seek/换段回头）才 reset +
+  // 关键帧重解。此前 sequential 条件是 target === fedIndex+1：任何跳帧都触发
+  // 冷启 reset+关键帧重解，代价随 GOP 深度线性增长（1.25x 项目实测后半段
+  // 每帧 50-60ms → 播放放慢 + 丢帧，evidence/m3_2/playback-repro 实证）。
+  // 例外——热态跳帧跨关键帧时仍走冷启：该关键帧作为中间采样输出后被即刻
+  // 关闭，实证会在部分硬件解码器上破坏后续参考链（src300 关键帧被跨跳后
+  // src~303 起确定性花屏，两次运行 PNG 逐字节一致；冷启路径同位置干净）。
+  let sequential = fedIndex >= 0 && target > fedIndex;
+  if (sequential) {
+    for (let index = fedIndex + 1; index <= target; index++) {
+      if (samples[index]!.sync) { sequential = false; break; }
+    }
+  }
+  let startSample = target;
+  if (!sequential) {
+    startSample = target;
+    while (startSample > 0 && !samples[startSample]!.sync) startSample -= 1; // 回退最近关键帧
+    releaseGopAnchor();
+    drainIntermediateRing();
+    // 整例重建：reset() 无法清零长解码历史在 D3D11 会话内的残留状态
+    //（实证：连续解码整片后 reset+关键帧重解仍产出花屏，新 Worker 实例则干净；
+    // evidence/m3_2/playback-repro fixed10 vs fixed14/15 postmortem）。
+    try { decoder.close(); } catch { /* 已关闭 */ }
+    decoder = createDecoder();
+    decoder.configure(decoderConfig as VideoDecoderConfig);
+    fedIndex = -1;
+    // 冷启首个输出 = 关键帧 IDR：持有为 GOP 锚（见 gopAnchor 注释）
+    pendingAnchorPts = ((samples[startSample]!.dts + samples[startSample]!.ctsOffset) / timescale) * 1e6;
+  }
+  samplesFed = 0;
+  fromKeyframe = sequential ? fedIndex + 1 : startSample;
+  for (let index = startSample; index <= target; index++) {
+    const sample = samples[index]!;
+    const chunkData = dataBytes.subarray(sample.offset, sample.offset + sample.size);
+    const chunk = new EncodedVideoChunk({
+      type: sample.sync ? "key" : "delta",
+      timestamp: ((sample.dts + sample.ctsOffset) / timescale) * 1e6,
+      data: chunkData,
+    });
+    decoder.decode(chunk);
+    samplesFed += 1;
+    fedIndex = index;
+  }
+}
+
 function decodeFrame(id: number, frameN: number, fps: number): void {
   if (!demuxResult || !decoder || !dataBytes) throw new Error("worker not initialized");
   const { samples, timescale } = demuxResult;
@@ -327,47 +457,8 @@ function decodeFrame(id: number, frameN: number, fps: number): void {
     return;
   }
   cacheMisses += cacheEnabled ? 1 : 0;
-  // 热态顺序解码（M3-2 播放架构）：目标 == 已馈送位置 + 1 时不 reset——每帧只喂
-  // 下一个样本（无 B 帧，解码序 = 显示序，~2-5ms/帧）；跳转才 reset + 关键帧重解。
-  // reset 会清空配置且可能长时间阻塞硬件解码器——scrub 逐帧 reset 是 M3-0 后期
-  // "decode timeout" 的根因，播放路径严禁。
-  const sequential = fedIndex >= 0 && target === fedIndex + 1;
-  let startSample = sequential ? fedIndex + 1 : target;
-  if (!sequential) {
-    startSample = target;
-    while (startSample > 0 && !samples[startSample]!.sync) startSample -= 1; // 回退最近关键帧
-  }
-  if (!sequential) {
-    decoder.reset(); // reset 清空配置且可能长时间阻塞硬件解码器——播放路径严禁逐帧 reset
-    decoder.configure(decoderConfig as VideoDecoderConfig);
-    fedIndex = -1;
-  }
-  pendingResolve = null;
-  const promise = new Promise<VideoFrame>(resolve => { pendingResolve = resolve; });
-  targetTimestampUs = targetUs;
-  samplesFed = 0;
-  fromKeyframe = sequential ? fedIndex + 1 : startSample;
-  for (let index = startSample; index <= target; index++) {
-    const sample = samples[index]!;
-    const chunkData = dataBytes.subarray(sample.offset, sample.offset + sample.size);
-    const chunk = new EncodedVideoChunk({
-      type: sample.sync ? "key" : "delta",
-      timestamp: ((sample.dts + sample.ctsOffset) / timescale) * 1e6,
-      data: chunkData,
-    });
-    decoder.decode(chunk);
-    samplesFed += 1;
-    fedIndex = index;
-  }
-  void promise.then(frame => {
-    if (!frame) {
-      post({ type: "error", id, message: "decode timeout/no matching frame" });
-      return;
-    }
-    cachePut(target, frame);
-    const clone = frame.clone();
-    post({ type: "frame", id, frameN, timestampUs: clone.timestamp, fromCache: false, samplesFed, fromKeyframe: fromKeyframe, allocationSize: clone.allocationSize(), frame: clone }, [clone]);
-  });
+  decodeQueue.push({ id, frameN, targetUs, sampleIndex: target });
+  pumpQueue();
 }
 
 self.onmessage = (event: MessageEvent) => {

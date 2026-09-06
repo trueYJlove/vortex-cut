@@ -1,0 +1,2442 @@
+{
+ "probe": "m3p5",
+ "session": "PreviewSession（生产合成预览编排，与 SyntheticPreview 同代码）",
+ "canvas": {
+  "width": 540,
+  "height": 960,
+  "fps": 30,
+  "duration_frames": 320,
+  "duration_us": 10653769,
+  "background": "#000000"
+ },
+ "inputs": [
+  {
+   "input_id": "I0",
+   "asset_kind": "video",
+   "geometry": {
+    "width": 1920,
+    "height": 1080,
+    "sar": 1
+   }
+  },
+  {
+   "input_id": "I1",
+   "asset_kind": "video",
+   "geometry": {
+    "width": 682,
+    "height": 686,
+    "sar": 1
+   }
+  }
+ ],
+ "duration_ms": 10667,
+ "wall_ms": 11133,
+ "composed_frames": 640,
+ "dropped_frames": 0,
+ "task_ms": {
+  "p50": 0.1,
+  "p95": 0.3
+ },
+ "decode_ms": {
+  "p50": 1.9,
+  "p95": 14.6
+ },
+ "compose_interval_ms": {
+  "p50": 16.7,
+  "p95": 22.9,
+  "max": 80.4
+ },
+ "last_error": null,
+ "samples": [
+  {
+   "t_ms": 56,
+   "content_us": 33333,
+   "composed": 4,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.1,
+   "decode_ms_p50": 1.2,
+   "decode_ms_p95": 29.7,
+   "decode_in_flight": 1,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 4,
+     "inFlight": 4,
+     "ring": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 3,
+      "timestampUs": 100000,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 3
+     }
+    },
+    "I1": {
+     "fed": -1,
+     "inFlight": null,
+     "ring": [],
+     "shadow": -1,
+     "last_decode": null
+    }
+   }
+  },
+  {
+   "t_ms": 294,
+   "content_us": 266666,
+   "composed": 18,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.1,
+   "decode_ms_p50": 1.9,
+   "decode_ms_p95": 29.7,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 13,
+     "inFlight": null,
+     "ring": [
+      12,
+      13,
+      8,
+      9,
+      10,
+      11
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 13,
+      "timestampUs": 433333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 13
+     }
+    },
+    "I1": {
+     "fed": -1,
+     "inFlight": null,
+     "ring": [],
+     "shadow": -1,
+     "last_decode": null
+    }
+   }
+  },
+  {
+   "t_ms": 509,
+   "content_us": 500000,
+   "composed": 33,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.1,
+   "decode_ms_p50": 1.9,
+   "decode_ms_p95": 5,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 20,
+     "inFlight": null,
+     "ring": [
+      18,
+      19,
+      20,
+      15,
+      16,
+      17
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 20,
+      "timestampUs": 666666,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 20
+     }
+    },
+    "I1": {
+     "fed": -1,
+     "inFlight": null,
+     "ring": [],
+     "shadow": -1,
+     "last_decode": null
+    }
+   }
+  },
+  {
+   "t_ms": 793,
+   "content_us": 766666,
+   "composed": 49,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.2,
+   "decode_ms_p50": 1.8,
+   "decode_ms_p95": 5,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 28,
+     "inFlight": null,
+     "ring": [
+      24,
+      25,
+      26,
+      27,
+      28,
+      23
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 28,
+      "timestampUs": 933333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 28
+     }
+    },
+    "I1": {
+     "fed": -1,
+     "inFlight": null,
+     "ring": [],
+     "shadow": -1,
+     "last_decode": null
+    }
+   }
+  },
+  {
+   "t_ms": 1006,
+   "content_us": 966666,
+   "composed": 61,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.3,
+   "decode_ms_p50": 1.9,
+   "decode_ms_p95": 5,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 34,
+     "inFlight": null,
+     "ring": [
+      30,
+      31,
+      32,
+      33,
+      34,
+      29
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 34,
+      "timestampUs": 1133333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 34
+     }
+    },
+    "I1": {
+     "fed": -1,
+     "inFlight": null,
+     "ring": [],
+     "shadow": -1,
+     "last_decode": null
+    }
+   }
+  },
+  {
+   "t_ms": 1273,
+   "content_us": 1233333,
+   "composed": 77,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.4,
+   "decode_ms_p50": 1.8,
+   "decode_ms_p95": 3.7,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 42,
+     "inFlight": null,
+     "ring": [
+      42,
+      37,
+      38,
+      39,
+      40,
+      41
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 42,
+      "timestampUs": 1400000,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 42
+     }
+    },
+    "I1": {
+     "fed": -1,
+     "inFlight": null,
+     "ring": [],
+     "shadow": -1,
+     "last_decode": null
+    }
+   }
+  },
+  {
+   "t_ms": 1538,
+   "content_us": 1500000,
+   "composed": 93,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.4,
+   "decode_ms_p50": 1.8,
+   "decode_ms_p95": 3.7,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 50,
+     "inFlight": null,
+     "ring": [
+      48,
+      49,
+      50,
+      45,
+      46,
+      47
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 50,
+      "timestampUs": 1666666,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 50
+     }
+    },
+    "I1": {
+     "fed": -1,
+     "inFlight": null,
+     "ring": [],
+     "shadow": -1,
+     "last_decode": null
+    }
+   }
+  },
+  {
+   "t_ms": 1792,
+   "content_us": 1766666,
+   "composed": 109,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.4,
+   "decode_ms_p50": 1.9,
+   "decode_ms_p95": 3.7,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 58,
+     "inFlight": null,
+     "ring": [
+      54,
+      55,
+      56,
+      57,
+      58,
+      53
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 58,
+      "timestampUs": 1933333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 58
+     }
+    },
+    "I1": {
+     "fed": -1,
+     "inFlight": null,
+     "ring": [],
+     "shadow": -1,
+     "last_decode": null
+    }
+   }
+  },
+  {
+   "t_ms": 2007,
+   "content_us": 1966666,
+   "composed": 121,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.3,
+   "decode_ms_p50": 2,
+   "decode_ms_p95": 3,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 64,
+     "inFlight": null,
+     "ring": [
+      60,
+      61,
+      62,
+      63,
+      64,
+      59
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 64,
+      "timestampUs": 2133333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 64
+     }
+    },
+    "I1": {
+     "fed": -1,
+     "inFlight": null,
+     "ring": [],
+     "shadow": -1,
+     "last_decode": null
+    }
+   }
+  },
+  {
+   "t_ms": 2276,
+   "content_us": 2266666,
+   "composed": 138,
+   "dropped": 0,
+   "task_ms_p50": 0.2,
+   "task_ms_p95": 0.4,
+   "decode_ms_p50": 1.9,
+   "decode_ms_p95": 3,
+   "decode_in_flight": 1,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 73,
+     "inFlight": 73,
+     "ring": [
+      72,
+      67,
+      68,
+      69,
+      70,
+      71
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 72,
+      "timestampUs": 2400000,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 72
+     }
+    },
+    "I1": {
+     "fed": -1,
+     "inFlight": null,
+     "ring": [],
+     "shadow": -1,
+     "last_decode": null
+    }
+   }
+  },
+  {
+   "t_ms": 2542,
+   "content_us": 2533333,
+   "composed": 154,
+   "dropped": 0,
+   "task_ms_p50": 0.2,
+   "task_ms_p95": 0.4,
+   "decode_ms_p50": 1.9,
+   "decode_ms_p95": 2.8,
+   "decode_in_flight": 2,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 81,
+     "inFlight": 81,
+     "ring": [
+      78,
+      79,
+      80,
+      75,
+      76,
+      77
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 80,
+      "timestampUs": 2666666,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 80
+     }
+    },
+    "I1": {
+     "fed": 0,
+     "inFlight": 0,
+     "ring": [],
+     "shadow": -1,
+     "last_decode": null
+    }
+   }
+  },
+  {
+   "t_ms": 2775,
+   "content_us": 2766666,
+   "composed": 168,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.4,
+   "decode_ms_p50": 1.2,
+   "decode_ms_p95": 5.8,
+   "decode_in_flight": 2,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 88,
+     "inFlight": 88,
+     "ring": [
+      84,
+      85,
+      86,
+      87,
+      82,
+      83
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 87,
+      "timestampUs": 2900000,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 87
+     }
+    },
+    "I1": {
+     "fed": 87,
+     "inFlight": 87,
+     "ring": [
+      86,
+      81,
+      82,
+      83,
+      84,
+      85
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 86,
+      "timestampUs": 2866666,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 86
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 3029,
+   "content_us": 3000000,
+   "composed": 182,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.3,
+   "decode_ms_p50": 1.6,
+   "decode_ms_p95": 13.7,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 95,
+     "inFlight": null,
+     "ring": [
+      90,
+      91,
+      92,
+      93,
+      94,
+      95
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 95,
+      "timestampUs": 3166666,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 95
+     }
+    },
+    "I1": {
+     "fed": 94,
+     "inFlight": null,
+     "ring": [
+      92,
+      93,
+      94,
+      89,
+      90,
+      91
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 94,
+      "timestampUs": 3133333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 94
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 3288,
+   "content_us": 3266666,
+   "composed": 198,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.4,
+   "decode_ms_p50": 1.7,
+   "decode_ms_p95": 13.9,
+   "decode_in_flight": 1,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 103,
+     "inFlight": null,
+     "ring": [
+      102,
+      103,
+      98,
+      99,
+      100,
+      101
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 103,
+      "timestampUs": 3433333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 103
+     }
+    },
+    "I1": {
+     "fed": 102,
+     "inFlight": 102,
+     "ring": [
+      98,
+      99,
+      100,
+      101,
+      96,
+      97
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 101,
+      "timestampUs": 3366666,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 101
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 3534,
+   "content_us": 3533333,
+   "composed": 215,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.3,
+   "decode_ms_p50": 1.7,
+   "decode_ms_p95": 14.1,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 111,
+     "inFlight": null,
+     "ring": [
+      108,
+      109,
+      110,
+      111,
+      106,
+      107
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 111,
+      "timestampUs": 3700000,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 111
+     }
+    },
+    "I1": {
+     "fed": 110,
+     "inFlight": null,
+     "ring": [
+      110,
+      105,
+      106,
+      107,
+      108,
+      109
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 110,
+      "timestampUs": 3666666,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 110
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 3788,
+   "content_us": 3766666,
+   "composed": 228,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.3,
+   "decode_ms_p50": 1.7,
+   "decode_ms_p95": 14.6,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 118,
+     "inFlight": null,
+     "ring": [
+      114,
+      115,
+      116,
+      117,
+      118,
+      113
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 118,
+      "timestampUs": 3933333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 118
+     }
+    },
+    "I1": {
+     "fed": 117,
+     "inFlight": null,
+     "ring": [
+      116,
+      117,
+      112,
+      113,
+      114,
+      115
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 117,
+      "timestampUs": 3900000,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 117
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 4029,
+   "content_us": 4000000,
+   "composed": 242,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.3,
+   "decode_ms_p50": 1.7,
+   "decode_ms_p95": 14.6,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 125,
+     "inFlight": null,
+     "ring": [
+      120,
+      121,
+      122,
+      123,
+      124,
+      125
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 125,
+      "timestampUs": 4166666,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 125
+     }
+    },
+    "I1": {
+     "fed": 124,
+     "inFlight": null,
+     "ring": [
+      122,
+      123,
+      124,
+      119,
+      120,
+      121
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 124,
+      "timestampUs": 4133333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 124
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 4296,
+   "content_us": 4266666,
+   "composed": 258,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.3,
+   "decode_ms_p50": 1.7,
+   "decode_ms_p95": 14.7,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 133,
+     "inFlight": null,
+     "ring": [
+      132,
+      133,
+      128,
+      129,
+      130,
+      131
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 133,
+      "timestampUs": 4433333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 133
+     }
+    },
+    "I1": {
+     "fed": 132,
+     "inFlight": null,
+     "ring": [
+      128,
+      129,
+      130,
+      131,
+      132,
+      127
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 132,
+      "timestampUs": 4400000,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 132
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 4562,
+   "content_us": 4533333,
+   "composed": 274,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.3,
+   "decode_ms_p50": 1.7,
+   "decode_ms_p95": 14.8,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 141,
+     "inFlight": null,
+     "ring": [
+      138,
+      139,
+      140,
+      141,
+      136,
+      137
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 141,
+      "timestampUs": 4700000,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 141
+     }
+    },
+    "I1": {
+     "fed": 140,
+     "inFlight": null,
+     "ring": [
+      140,
+      135,
+      136,
+      137,
+      138,
+      139
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 140,
+      "timestampUs": 4666666,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 140
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 4762,
+   "content_us": 4733333,
+   "composed": 286,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.3,
+   "decode_ms_p50": 1.8,
+   "decode_ms_p95": 14.8,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 147,
+     "inFlight": null,
+     "ring": [
+      144,
+      145,
+      146,
+      147,
+      142,
+      143
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 147,
+      "timestampUs": 4900000,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 147
+     }
+    },
+    "I1": {
+     "fed": 146,
+     "inFlight": null,
+     "ring": [
+      146,
+      141,
+      142,
+      143,
+      144,
+      145
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 146,
+      "timestampUs": 4866666,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 146
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 5006,
+   "content_us": 4966666,
+   "composed": 301,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.3,
+   "decode_ms_p50": 1.8,
+   "decode_ms_p95": 14.8,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 154,
+     "inFlight": null,
+     "ring": [
+      150,
+      151,
+      152,
+      153,
+      154,
+      149
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 154,
+      "timestampUs": 5133333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 154
+     }
+    },
+    "I1": {
+     "fed": 153,
+     "inFlight": null,
+     "ring": [
+      152,
+      153,
+      148,
+      149,
+      150,
+      151
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 153,
+      "timestampUs": 5100000,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 153
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 5261,
+   "content_us": 5233333,
+   "composed": 316,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.3,
+   "decode_ms_p50": 1.8,
+   "decode_ms_p95": 14.8,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 162,
+     "inFlight": null,
+     "ring": [
+      162,
+      157,
+      158,
+      159,
+      160,
+      161
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 162,
+      "timestampUs": 5400000,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 162
+     }
+    },
+    "I1": {
+     "fed": 161,
+     "inFlight": null,
+     "ring": [
+      158,
+      159,
+      160,
+      161,
+      156,
+      157
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 161,
+      "timestampUs": 5366666,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 161
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 5528,
+   "content_us": 5500000,
+   "composed": 332,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.3,
+   "decode_ms_p50": 1.8,
+   "decode_ms_p95": 14.7,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 170,
+     "inFlight": null,
+     "ring": [
+      168,
+      169,
+      170,
+      165,
+      166,
+      167
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 170,
+      "timestampUs": 5666666,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 170
+     }
+    },
+    "I1": {
+     "fed": 169,
+     "inFlight": null,
+     "ring": [
+      164,
+      165,
+      166,
+      167,
+      168,
+      169
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 169,
+      "timestampUs": 5633333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 169
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 5795,
+   "content_us": 5766666,
+   "composed": 348,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.3,
+   "decode_ms_p50": 1.9,
+   "decode_ms_p95": 14.7,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 177,
+     "inFlight": null,
+     "ring": [
+      174,
+      175,
+      176,
+      177,
+      172,
+      173
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 177,
+      "timestampUs": 5900000,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 177
+     }
+    },
+    "I1": {
+     "fed": 177,
+     "inFlight": null,
+     "ring": [
+      176,
+      177,
+      172,
+      173,
+      174,
+      175
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 177,
+      "timestampUs": 5900000,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 177
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 6061,
+   "content_us": 6033333,
+   "composed": 365,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.3,
+   "decode_ms_p50": 1.9,
+   "decode_ms_p95": 14.7,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 187,
+     "inFlight": null,
+     "ring": [
+      181,
+      182,
+      183,
+      185,
+      186,
+      187
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 187,
+      "timestampUs": 6233333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 187
+     }
+    },
+    "I1": {
+     "fed": 185,
+     "inFlight": null,
+     "ring": [
+      182,
+      183,
+      184,
+      185,
+      180,
+      181
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 185,
+      "timestampUs": 6166666,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 185
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 6301,
+   "content_us": 6266666,
+   "composed": 379,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.3,
+   "decode_ms_p50": 1.9,
+   "decode_ms_p95": 14.7,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 196,
+     "inFlight": null,
+     "ring": [
+      196,
+      190,
+      191,
+      192,
+      193,
+      195
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 196,
+      "timestampUs": 6533333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 196
+     }
+    },
+    "I1": {
+     "fed": 192,
+     "inFlight": null,
+     "ring": [
+      188,
+      189,
+      190,
+      191,
+      192,
+      187
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 192,
+      "timestampUs": 6400000,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 192
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 6561,
+   "content_us": 6533333,
+   "composed": 394,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.3,
+   "decode_ms_p50": 1.9,
+   "decode_ms_p95": 14.7,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 206,
+     "inFlight": null,
+     "ring": [
+      203,
+      205,
+      206,
+      200,
+      201,
+      202
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 206,
+      "timestampUs": 6866666,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 206
+     }
+    },
+    "I1": {
+     "fed": 200,
+     "inFlight": null,
+     "ring": [
+      200,
+      195,
+      196,
+      197,
+      198,
+      199
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 200,
+      "timestampUs": 6666666,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 200
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 6793,
+   "content_us": 6766666,
+   "composed": 409,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.3,
+   "decode_ms_p50": 1.9,
+   "decode_ms_p95": 14.7,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 215,
+     "inFlight": null,
+     "ring": [
+      211,
+      212,
+      213,
+      215,
+      208,
+      210
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 215,
+      "timestampUs": 7166666,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 215
+     }
+    },
+    "I1": {
+     "fed": 202,
+     "inFlight": null,
+     "ring": [
+      200,
+      201,
+      202,
+      197,
+      198,
+      199
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 202,
+      "timestampUs": 6733333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 202
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 7024,
+   "content_us": 7000000,
+   "composed": 423,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.3,
+   "decode_ms_p50": 1.9,
+   "decode_ms_p95": 14.6,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 223,
+     "inFlight": null,
+     "ring": [
+      218,
+      220,
+      221,
+      222,
+      223,
+      217
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 223,
+      "timestampUs": 7433333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 223
+     }
+    },
+    "I1": {
+     "fed": 202,
+     "inFlight": null,
+     "ring": [
+      200,
+      201,
+      202,
+      197,
+      198,
+      199
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 202,
+      "timestampUs": 6733333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 202
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 7291,
+   "content_us": 7266666,
+   "composed": 439,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.3,
+   "decode_ms_p50": 1.9,
+   "decode_ms_p95": 14.6,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 233,
+     "inFlight": null,
+     "ring": [
+      233,
+      227,
+      228,
+      230,
+      231,
+      232
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 233,
+      "timestampUs": 7766666,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 233
+     }
+    },
+    "I1": {
+     "fed": 202,
+     "inFlight": null,
+     "ring": [
+      200,
+      201,
+      202,
+      197,
+      198,
+      199
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 202,
+      "timestampUs": 6733333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 202
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 7503,
+   "content_us": 7466666,
+   "composed": 451,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.3,
+   "decode_ms_p50": 1.9,
+   "decode_ms_p95": 14.6,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 241,
+     "inFlight": null,
+     "ring": [
+      241,
+      235,
+      236,
+      237,
+      238,
+      240
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 241,
+      "timestampUs": 8033333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 241
+     }
+    },
+    "I1": {
+     "fed": 202,
+     "inFlight": null,
+     "ring": [
+      200,
+      201,
+      202,
+      197,
+      198,
+      199
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 202,
+      "timestampUs": 6733333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 202
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 7788,
+   "content_us": 7766666,
+   "composed": 468,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.3,
+   "decode_ms_p50": 1.9,
+   "decode_ms_p95": 14.6,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 252,
+     "inFlight": null,
+     "ring": [
+      248,
+      250,
+      251,
+      252,
+      246,
+      247
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 252,
+      "timestampUs": 8400000,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 252
+     }
+    },
+    "I1": {
+     "fed": 202,
+     "inFlight": null,
+     "ring": [
+      200,
+      201,
+      202,
+      197,
+      198,
+      199
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 202,
+      "timestampUs": 6733333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 202
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 8008,
+   "content_us": 8000000,
+   "composed": 482,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.3,
+   "decode_ms_p50": 1.9,
+   "decode_ms_p95": 14.6,
+   "decode_in_flight": 1,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 261,
+     "inFlight": 261,
+     "ring": [
+      256,
+      257,
+      258,
+      260,
+      253,
+      255
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 260,
+      "timestampUs": 8666666,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 260
+     }
+    },
+    "I1": {
+     "fed": 202,
+     "inFlight": null,
+     "ring": [
+      200,
+      201,
+      202,
+      197,
+      198,
+      199
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 202,
+      "timestampUs": 6733333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 202
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 8294,
+   "content_us": 8266666,
+   "composed": 499,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.3,
+   "decode_ms_p50": 1.9,
+   "decode_ms_p95": 14.6,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 271,
+     "inFlight": null,
+     "ring": [
+      271,
+      265,
+      266,
+      267,
+      268,
+      270
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 271,
+      "timestampUs": 9033333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 271
+     }
+    },
+    "I1": {
+     "fed": 202,
+     "inFlight": null,
+     "ring": [
+      200,
+      201,
+      202,
+      197,
+      198,
+      199
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 202,
+      "timestampUs": 6733333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 202
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 8510,
+   "content_us": 8500000,
+   "composed": 512,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.3,
+   "decode_ms_p50": 1.9,
+   "decode_ms_p95": 14.6,
+   "decode_in_flight": 1,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 280,
+     "inFlight": 280,
+     "ring": [
+      278,
+      272,
+      273,
+      275,
+      276,
+      277
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 279,
+      "timestampUs": 9300000,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 279
+     }
+    },
+    "I1": {
+     "fed": 202,
+     "inFlight": null,
+     "ring": [
+      200,
+      201,
+      202,
+      197,
+      198,
+      199
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 202,
+      "timestampUs": 6733333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 202
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 8790,
+   "content_us": 8766666,
+   "composed": 528,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.3,
+   "decode_ms_p50": 1.9,
+   "decode_ms_p95": 14.6,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 290,
+     "inFlight": null,
+     "ring": [
+      286,
+      287,
+      288,
+      290,
+      283,
+      285
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 290,
+      "timestampUs": 9666666,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 290
+     }
+    },
+    "I1": {
+     "fed": 202,
+     "inFlight": null,
+     "ring": [
+      200,
+      201,
+      202,
+      197,
+      198,
+      199
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 202,
+      "timestampUs": 6733333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 202
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 9006,
+   "content_us": 8966666,
+   "composed": 541,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.3,
+   "decode_ms_p50": 1.9,
+   "decode_ms_p95": 14.6,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 297,
+     "inFlight": null,
+     "ring": [
+      293,
+      295,
+      296,
+      297,
+      291,
+      292
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 297,
+      "timestampUs": 9900000,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 297
+     }
+    },
+    "I1": {
+     "fed": 202,
+     "inFlight": null,
+     "ring": [
+      200,
+      201,
+      202,
+      197,
+      198,
+      199
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 202,
+      "timestampUs": 6733333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 202
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 9274,
+   "content_us": 9233333,
+   "composed": 557,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.3,
+   "decode_ms_p50": 1.9,
+   "decode_ms_p95": 14.6,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 307,
+     "inFlight": null,
+     "ring": [
+      301,
+      302,
+      303,
+      305,
+      306,
+      307
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 307,
+      "timestampUs": 10233333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 307
+     }
+    },
+    "I1": {
+     "fed": 202,
+     "inFlight": null,
+     "ring": [
+      200,
+      201,
+      202,
+      197,
+      198,
+      199
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 202,
+      "timestampUs": 6733333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 202
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 9539,
+   "content_us": 9533333,
+   "composed": 575,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.3,
+   "decode_ms_p50": 1.9,
+   "decode_ms_p95": 14.6,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 318,
+     "inFlight": null,
+     "ring": [
+      316,
+      317,
+      318,
+      312,
+      313,
+      315
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 318,
+      "timestampUs": 10600000,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 318
+     }
+    },
+    "I1": {
+     "fed": 202,
+     "inFlight": null,
+     "ring": [
+      200,
+      201,
+      202,
+      197,
+      198,
+      199
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 202,
+      "timestampUs": 6733333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 202
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 9793,
+   "content_us": 9766666,
+   "composed": 589,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.3,
+   "decode_ms_p50": 1.9,
+   "decode_ms_p95": 14.6,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 327,
+     "inFlight": null,
+     "ring": [
+      323,
+      325,
+      326,
+      327,
+      321,
+      322
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 327,
+      "timestampUs": 10900000,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 327
+     }
+    },
+    "I1": {
+     "fed": 202,
+     "inFlight": null,
+     "ring": [
+      200,
+      201,
+      202,
+      197,
+      198,
+      199
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 202,
+      "timestampUs": 6733333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 202
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 10031,
+   "content_us": 10000000,
+   "composed": 602,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.3,
+   "decode_ms_p50": 1.9,
+   "decode_ms_p95": 14.6,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 336,
+     "inFlight": null,
+     "ring": [
+      331,
+      332,
+      333,
+      335,
+      336,
+      330
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 336,
+      "timestampUs": 11200000,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 336
+     }
+    },
+    "I1": {
+     "fed": 202,
+     "inFlight": null,
+     "ring": [
+      200,
+      201,
+      202,
+      197,
+      198,
+      199
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 202,
+      "timestampUs": 6733333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 202
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 10276,
+   "content_us": 10266666,
+   "composed": 618,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.3,
+   "decode_ms_p50": 1.9,
+   "decode_ms_p95": 14.6,
+   "decode_in_flight": 1,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 346,
+     "inFlight": 346,
+     "ring": [
+      338,
+      340,
+      341,
+      342,
+      343,
+      345
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 345,
+      "timestampUs": 11500000,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 345
+     }
+    },
+    "I1": {
+     "fed": 202,
+     "inFlight": null,
+     "ring": [
+      200,
+      201,
+      202,
+      197,
+      198,
+      199
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 202,
+      "timestampUs": 6733333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 202
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 10519,
+   "content_us": 10500000,
+   "composed": 632,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.3,
+   "decode_ms_p50": 1.9,
+   "decode_ms_p95": 14.6,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 353,
+     "inFlight": null,
+     "ring": [
+      353,
+      347,
+      348,
+      350,
+      351,
+      352
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 353,
+      "timestampUs": 11766666,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 353
+     }
+    },
+    "I1": {
+     "fed": 202,
+     "inFlight": null,
+     "ring": [
+      200,
+      201,
+      202,
+      197,
+      198,
+      199
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 202,
+      "timestampUs": 6733333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 202
+     }
+    }
+   }
+  }
+ ],
+ "materials": [
+  "asset_61d6f9fcf4c84599921ad6cfd7ee99a6",
+  "asset_6b09d7b87bfd4d40b650f0da70ef9ba9"
+ ],
+ "environment": {
+  "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) @aivideo/desktop/0.0.1 Chrome/136.0.7103.93 Electron/36.2.1 Safari/537.36",
+  "device_pixel_ratio": 1,
+  "hardware_concurrency": 8,
+  "metrics": [
+   {
+    "cpu": {
+     "cumulativeCPUUsage": 1.359375,
+     "percentCPUUsage": 0,
+     "idleWakeupsPerSecond": 0
+    },
+    "pid": 15120,
+    "type": "Browser",
+    "creationTime": 1788667762878.167,
+    "memory": {
+     "workingSetSize": 117260,
+     "peakWorkingSetSize": 117288,
+     "privateBytes": 84912
+    },
+    "integrityLevel": "medium",
+    "sandboxed": false
+   },
+   {
+    "cpu": {
+     "cumulativeCPUUsage": 7.140625,
+     "percentCPUUsage": 0,
+     "idleWakeupsPerSecond": 0
+    },
+    "pid": 11164,
+    "type": "GPU",
+    "creationTime": 1788667763129.837,
+    "serviceName": "GPU",
+    "memory": {
+     "workingSetSize": 518088,
+     "peakWorkingSetSize": 520124,
+     "privateBytes": 460464
+    },
+    "integrityLevel": "low",
+    "sandboxed": true
+   },
+   {
+    "cpu": {
+     "cumulativeCPUUsage": 0.234375,
+     "percentCPUUsage": 0,
+     "idleWakeupsPerSecond": 0
+    },
+    "pid": 11512,
+    "type": "Utility",
+    "creationTime": 1788667763141.766,
+    "serviceName": "network.mojom.NetworkService",
+    "name": "Network Service",
+    "memory": {
+     "workingSetSize": 54268,
+     "peakWorkingSetSize": 54600,
+     "privateBytes": 14348
+    },
+    "integrityLevel": "medium",
+    "sandboxed": false
+   },
+   {
+    "cpu": {
+     "cumulativeCPUUsage": 3.265625,
+     "percentCPUUsage": 0,
+     "idleWakeupsPerSecond": 0
+    },
+    "pid": 13040,
+    "type": "Tab",
+    "creationTime": 1788667763275.253,
+    "memory": {
+     "workingSetSize": 142048,
+     "peakWorkingSetSize": 209104,
+     "privateBytes": 80104
+    },
+    "integrityLevel": "medium",
+    "sandboxed": false
+   }
+  ],
+  "feature_status": {
+   "2d_canvas": "enabled",
+   "direct_rendering_display_compositor": "disabled_off_ok",
+   "gpu_compositing": "enabled",
+   "multiple_raster_threads": "enabled_on",
+   "opengl": "enabled_on",
+   "rasterization": "enabled",
+   "raw_draw": "disabled_off_ok",
+   "skia_graphite": "disabled_off",
+   "video_decode": "enabled",
+   "video_encode": "enabled",
+   "vulkan": "disabled_off",
+   "webgl": "enabled",
+   "webgl2": "enabled",
+   "webgpu": "enabled",
+   "webnn": "disabled_off"
+  },
+  "gpu_info": {
+   "auxAttributes": {
+    "amdSwitchable": false,
+    "canSupportThreadedTextureMailbox": false,
+    "directMLFeatureLevel": "Not supported",
+    "displayType": "ANGLE_D3D11",
+    "dx12FeatureLevel": "Not supported",
+    "glExtensions": "GL_AMD_performance_monitor GL_ANGLE_base_vertex_base_instance_shader_builtin GL_ANGLE_blob_cache GL_ANGLE_client_arrays GL_ANGLE_depth_texture GL_ANGLE_framebuffer_blit GL_ANGLE_framebuffer_multisample GL_ANGLE_get_serialized_context_string GL_ANGLE_get_tex_level_parameter GL_ANGLE_instanced_arrays GL_ANGLE_lossy_etc_decode GL_ANGLE_memory_size GL_ANGLE_pack_reverse_row_order GL_ANGLE_polygon_mode GL_ANGLE_program_binary_readiness_query GL_ANGLE_program_cache_control GL_ANGLE_provoking_vertex GL_ANGLE_request_extension GL_ANGLE_robust_client_memory GL_ANGLE_texture_compression_dxt3 GL_ANGLE_texture_compression_dxt5 GL_ANGLE_texture_usage GL_ANGLE_translated_shader_source GL_APPLE_clip_distance GL_ARM_rgba8 GL_CHROMIUM_bind_generates_resource GL_CHROMIUM_bind_uniform_location GL_CHROMIUM_color_buffer_float_rgb GL_CHROMIUM_color_buffer_float_rgba GL_CHROMIUM_copy_compressed_texture GL_CHROMIUM_copy_texture GL_CHROMIUM_lose_context GL_CHROMIUM_sync_query GL_EXT_EGL_image_external_wrap_modes GL_EXT_blend_func_extended GL_EXT_blend_minmax GL_EXT_clip_control GL_EXT_color_buffer_half_float GL_EXT_debug_label GL_EXT_debug_marker GL_EXT_depth_clamp GL_EXT_discard_framebuffer GL_EXT_disjoint_timer_query GL_EXT_draw_buffers GL_EXT_draw_elements_base_vertex GL_EXT_float_blend GL_EXT_frag_depth GL_EXT_instanced_arrays GL_EXT_map_buffer_range GL_EXT_multisampled_render_to_texture GL_EXT_occlusion_query_boolean GL_EXT_polygon_offset_clamp GL_EXT_read_format_bgra GL_EXT_robustness GL_EXT_sRGB GL_EXT_shader_texture_lod GL_EXT_texture_border_clamp GL_EXT_texture_compression_bptc GL_EXT_texture_compression_dxt1 GL_EXT_texture_compression_rgtc GL_EXT_texture_compression_s3tc_srgb GL_EXT_texture_filter_anisotropic GL_EXT_texture_format_BGRA8888 GL_EXT_texture_mirror_clamp_to_edge GL_EXT_texture_norm16 GL_EXT_texture_rg GL_EXT_texture_storage GL_EXT_texture_type_2_10_10_10_REV GL_EXT_unpack_subimage GL_KHR_debug GL_KHR_parallel_shader_compile GL_KHR_robustness GL_NV_EGL_stream_consumer_external GL_NV_fence GL_NV_framebuffer_blit GL_NV_pack_subimage GL_NV_pixel_buffer_object GL_OES_EGL_image GL_OES_EGL_image_external GL_OES_compressed_EAC_R11_signed_texture GL_OES_compressed_EAC_R11_unsigned_texture GL_OES_compressed_EAC_RG11_signed_texture GL_OES_compressed_EAC_RG11_unsigned_texture GL_OES_compressed_ETC2_RGB8_texture GL_OES_compressed_ETC2_RGBA8_texture GL_OES_compressed_ETC2_punchthroughA_RGBA8_texture GL_OES_compressed_ETC2_punchthroughA_sRGB8_alpha_texture GL_OES_compressed_ETC2_sRGB8_alpha8_texture GL_OES_compressed_ETC2_sRGB8_texture GL_OES_depth24 GL_OES_depth32 GL_OES_draw_elements_base_vertex GL_OES_element_index_uint GL_OES_fbo_render_mipmap GL_OES_get_program_binary GL_OES_mapbuffer GL_OES_packed_depth_stencil GL_OES_required_internalformat GL_OES_rgb8_rgba8 GL_OES_standard_derivatives GL_OES_surfaceless_context GL_OES_texture_border_clamp GL_OES_texture_float GL_OES_texture_float_linear GL_OES_texture_half_float GL_OES_texture_half_float_linear GL_OES_texture_npot GL_OES_vertex_array_object GL_WEBGL_video_texture ",
+    "glImplementationParts": "(gl=egl-angle,angle=d3d11)",
+    "glRenderer": "ANGLE (Intel, Intel(R) Iris(R) Xe Graphics (0x00009A49) Direct3D11 vs_5_0 ps_5_0, D3D11-31.0.101.3222)",
+    "glResetNotificationStrategy": 33362,
+    "glVendor": "Google Inc. (Intel)",
+    "glVersion": "OpenGL ES 2.0.0 (ANGLE 2.1.25160 git hash: ecc378cc6110)",
+    "glWsExtensions": "EGL_EXT_create_context_robustness EGL_ANGLE_d3d_share_handle_client_buffer EGL_ANGLE_d3d_texture_client_buffer EGL_ANGLE_surface_d3d_texture_2d_share_handle EGL_ANGLE_query_surface_pointer EGL_ANGLE_window_fixed_size EGL_ANGLE_keyed_mutex EGL_ANGLE_surface_orientation EGL_ANGLE_direct_composition EGL_NV_post_sub_buffer EGL_KHR_create_context EGL_KHR_image EGL_KHR_image_base EGL_KHR_gl_texture_2D_image EGL_KHR_gl_texture_cubemap_image EGL_KHR_gl_renderbuffer_image EGL_KHR_get_all_proc_addresses EGL_KHR_stream EGL_KHR_stream_consumer_gltexture EGL_NV_stream_consumer_gltexture_yuv EGL_ANGLE_stream_producer_d3d_texture EGL_ANGLE_create_context_webgl_compatibility EGL_CHROMIUM_create_context_bind_generates_resource EGL_CHROMIUM_sync_control EGL_EXT_pixel_format_float EGL_KHR_surfaceless_context EGL_ANGLE_display_texture_share_group EGL_ANGLE_display_semaphore_share_group EGL_ANGLE_create_context_client_arrays EGL_ANGLE_program_cache_control EGL_ANGLE_robust_resource_initialization EGL_ANGLE_create_context_extensions_enabled EGL_ANDROID_blob_cache EGL_ANDROID_recordable EGL_ANGLE_image_d3d11_texture EGL_ANGLE_create_context_backwards_compatible EGL_KHR_no_config_context EGL_KHR_create_context_no_error EGL_KHR_reusable_sync EGL_ANGLE_memory_usage_report ",
+    "glWsVendor": "Google Inc. (Intel)",
+    "glWsVersion": "1.5 (ANGLE 2.1.25160 git hash: ecc378cc6110)",
+    "hardwareSupportsVulkan": false,
+    "inProcessGpu": false,
+    "initializationTime": 287.158,
+    "isAsan": false,
+    "isClangCoverage": false,
+    "jpegDecodeAcceleratorSupported": false,
+    "maxMsaaSamples": "16",
+    "optimus": false,
+    "overlayInfo": {
+     "bgra8OverlaySupport": "SCALING",
+     "directComposition": true,
+     "nv12OverlaySupport": "SCALING",
+     "p010OverlaySupport": "SOFTWARE",
+     "rgb10a2OverlaySupport": "SCALING",
+     "supportsOverlays": true,
+     "yuy2OverlaySupport": "SCALING"
+    },
+    "passthroughCmdDecoder": true,
+    "pixelShaderVersion": "5.0",
+    "sandboxed": true,
+    "skiaBackendType": "GaneshGL",
+    "subpixelFontRendering": true,
+    "supportsD3dSharedImages": true,
+    "supportsDirectML": false,
+    "supportsDx12": false,
+    "supportsVulkan": false,
+    "targetCpuBits": 64,
+    "vertexShaderVersion": "5.0",
+    "videoEncodeAcceleratorSupportedProfile": {
+     "maxFramerateDenominator": 1,
+     "maxFramerateNumerator": 30,
+     "maxResolutionHeight": 1920,
+     "maxResolutionWidth": 1080,
+     "minResolutionHeight": 114,
+     "minResolutionWidth": 66,
+     "profile": 16
+    },
+    "visibilityCallbackCallCount": 0,
+    "vulkanVersion": "Not supported"
+   },
+   "gpuDevice": [
+    {
+     "active": true,
+     "deviceId": 39497,
+     "deviceString": "Intel(R) Iris(R) Xe Graphics",
+     "driverVendor": "Intel",
+     "driverVersion": "31.0.101.3222",
+     "gpuPreference": 2,
+     "revision": 1,
+     "subSysId": 805601414,
+     "vendorId": 32902
+    },
+    {
+     "active": false,
+     "deviceId": 39497,
+     "deviceString": "Intel(R) Iris(R) Xe Graphics",
+     "driverVersion": "31.0.101.3222",
+     "gpuPreference": 0,
+     "revision": 1,
+     "subSysId": 805601414,
+     "vendorId": 32902
+    },
+    {
+     "active": false,
+     "deviceId": 140,
+     "deviceString": "Microsoft Basic Render Driver",
+     "driverVersion": "10.0.26100.8972",
+     "gpuPreference": 0,
+     "revision": 0,
+     "subSysId": 0,
+     "vendorId": 5140
+    }
+   ]
+  },
+  "render_process_gone_count": 0,
+  "primary_display": {
+   "bounds": {
+    "x": 0,
+    "y": 0,
+    "width": 3440,
+    "height": 1440
+   },
+   "work_area_size": {
+    "width": 3440,
+    "height": 1392
+   },
+   "scale_factor": 1,
+   "display_frequency": 60,
+   "color_depth": 24,
+   "color_space": "{primaries:BT709, transfer:SRGB, matrix:RGB, range:FULL}"
+  },
+  "device_pixel_ratio_note": "renderer reports window.devicePixelRatio separately"
+ },
+ "versions": {
+  "electron": "36.2.1",
+  "chrome": "136.0.7103.93",
+  "node": "22.15.0"
+ },
+ "criteria": "播放态：全片合成帧数 ≈ duration_frames（±2），丢帧 ≈ 0，合成间隔 p95 ≤ 40ms"
+}

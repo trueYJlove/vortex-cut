@@ -13,11 +13,13 @@ import type { Ir, IrContent, IrMainSegment, IrFrame } from "./ir.js";
 
 const VERT = `#version 300 es
 in vec2 a_pos;
-uniform vec4 u_rect;     // x,y(左上,y向下),w,h（画布像素）
-uniform vec2 u_canvas;
+uniform vec4 u_rect;     // x,y(左上,y向下),w,h（IR 画布像素）
+uniform vec2 u_canvas;   // 实际后备缓冲尺寸（= IR 画布时为恒等视图）
+uniform vec4 u_fit;      // 视口适配 (offsetX, offsetY, scaleX, scaleY)：IR 画布 → 后备缓冲
 out vec2 v_box;          // 0..1 盒内坐标（x 右，y 下）
 void main() {
   vec2 px = u_rect.xy + a_pos * u_rect.zw;
+  px = px * u_fit.zw + u_fit.xy;
   vec2 clip = vec2(px.x / u_canvas.x * 2.0 - 1.0, 1.0 - px.y / u_canvas.y * 2.0);
   gl_Position = vec4(clip, 0.0, 1.0);
   v_box = a_pos;
@@ -100,6 +102,10 @@ export class Compositor {
   chromaPhaseX = 0;
   chromaPhaseY = 0;
   mipmapEnabled = true;
+  /** 视口适配（等比 contain）：IR 画布 → 后备缓冲。默认恒等。 */
+  private fitX = 0;
+  private fitY = 0;
+  private fitScale = 1;
   private captionCanvas: OffscreenCanvas | HTMLCanvasElement | null = null;
   private captionCtx: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D | null = null;
   private captionTexture: WebGLTexture | null = null;
@@ -132,6 +138,7 @@ export class Compositor {
     this.uniforms = {
       u_rect: gl.getUniformLocation(this.program, "u_rect"),
       u_canvas: gl.getUniformLocation(this.program, "u_canvas"),
+      u_fit: gl.getUniformLocation(this.program, "u_fit"),
       u_tex: gl.getUniformLocation(this.program, "u_tex"),
       u_tex_y: gl.getUniformLocation(this.program, "u_tex_y"),
       u_tex_uv: gl.getUniformLocation(this.program, "u_tex_uv"),
@@ -171,7 +178,8 @@ export class Compositor {
     return program;
   }
 
-  private createYuvTexture(): WebGLTexture {
+  /** 新建一个 YUV 兼容纹理（R8/RG8/RGBA 皆可重指定）——环形槽位与影子槽位工厂。 */
+  createYuvTexture(): WebGLTexture {
     const gl = this.gl;
     const texture = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -326,7 +334,8 @@ export class Compositor {
       gl.uniform1f(this.uniforms.u_yuv_mode, 0);
     }
     gl.uniform4f(this.uniforms.u_rect, rect.x, rect.y, rect.w, rect.h);
-    gl.uniform2f(this.uniforms.u_canvas, this.ir.canvas.width, this.ir.canvas.height);
+    gl.uniform2f(this.uniforms.u_canvas, this.canvas.width, this.canvas.height);
+    gl.uniform4f(this.uniforms.u_fit, this.fitX, this.fitY, this.fitScale, this.fitScale);
     gl.uniform1f(this.uniforms.u_alpha, alpha);
     // 权威端 rotate 单位缺陷已修复（456c89a：度→弧度换算入滤镜）——
     // GL 端同步度数语义；负号为采样方向对齐（ffmpeg rotate 正角方向，P2 实证校准）。
@@ -345,6 +354,20 @@ export class Compositor {
     if (this.contextLost) throw new Error("webglcontextlost");
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     gl.clear(gl.COLOR_BUFFER_BIT);
+  }
+
+  /** 预览框适配：后备缓冲设为盒子像素尺寸，IR 画布等比 contain 居中（黑边）。
+   *  使合成预览与交互预览共享同一预览框观感（内容几何仍为权威 IR 画布）。 */
+  setViewportBacking(backingWidth: number, backingHeight: number): void {
+    const width = Math.max(2, Math.round(backingWidth));
+    const height = Math.max(2, Math.round(backingHeight));
+    if (this.canvas.width === width && this.canvas.height === height) return;
+    this.canvas.width = width;
+    this.canvas.height = height;
+    const scale = Math.min(width / this.ir.canvas.width, height / this.ir.canvas.height);
+    this.fitScale = scale;
+    this.fitX = (width - this.ir.canvas.width * scale) / 2;
+    this.fitY = (height - this.ir.canvas.height * scale) / 2;
   }
 
   /** 主轨段条目绘制（alphaScale 供转场两遍绘制使用；shadow 取影子纹理对）。
@@ -377,6 +400,15 @@ export class Compositor {
     return this.shadowY(inputId);
   }
 
+  /** 影子槽位公共访问（会话侧影子上传/绘制解析用）。 */
+  shadowYTexture(inputId: string): WebGLTexture {
+    return this.shadowY(inputId);
+  }
+
+  shadowUVTexture(inputId: string): WebGLTexture {
+    return this.shadowTextureUV(inputId);
+  }
+
   private shadowY(inputId: string): WebGLTexture {
     let texture = this.shadowTextures.get(inputId);
     if (!texture) {
@@ -395,39 +427,60 @@ export class Compositor {
     return texture;
   }
 
-  /** WebCodecs 帧上传（P2 步进帧源）：VideoFrame → 纹理，上传后立即 close()。 */
-  /**
-   * WebCodecs 帧上传（P2 步进帧源）：VideoFrame.copyTo 取 NV12 平面，Y/UV
-   * 分别上传为 R8/RG8 平面纹理，着色器内 BT.709 limited→full 转换。不经
-   * ANGLE 的视频→RGB 转换（其色度相位/滤波与 libswscale 不一致，实测在第
-   * 0 步自校准中表现为水平色度渐变帧 B 通道 +5~10 系统偏置）。
+  /** WebCodecs 帧上传（P2 步进帧源）：VideoFrame → 纹理，上传后立即 close()。
    * shadow=true 时上传到影子纹理对（共享输入转场的第二帧）。
-   */
+   * 完成前不得把该纹理对外标记为就绪（否则合成读到 Y 新/UV 旧 → 绿块）。 */
   async uploadVideoFrame(handle: VideoHandle, frame: VideoFrame, shadow = false): Promise<void> {
+    const targetY = shadow ? this.shadowY(handle.inputId) : handle.textureY;
+    const targetUV = shadow ? this.shadowTextureUV(handle.inputId) : handle.textureUV;
+    await this.uploadVideoFrameToTextures(frame, targetY, targetUV);
+  }
+
+  /** 核心上传：解码帧 → 指定纹理对。NV12 走零拷贝快路径（UNPACK_ROW_LENGTH
+   * 直接上传平面视图，省去 1080p 约 3MB 的 JS 逐行重打包）；I420 回退重打包。 */
+  async uploadVideoFrameToTextures(frame: VideoFrame, targetY: WebGLTexture, targetUV: WebGLTexture): Promise<void> {
     const gl = this.gl;
     const width = frame.displayWidth;
     const height = frame.displayHeight;
     const cw = width >> 1;
     const ch = height >> 1;
-    // copyTo 返回真实平面布局（解码器 stride 对齐不可假设 == width）；
-    // CPU 重打包为紧致 Y + 交错 UV（NV12 直取；I420 由 U/V 平面合成）。
+    // copyTo 返回真实平面布局（解码器 stride 对齐不可假设 == width）
     const buffer = new ArrayBuffer(frame.allocationSize());
     const layout = await frame.copyTo(buffer);
     const raw = new Uint8Array(buffer);
-    const yPacked = new Uint8Array(width * height);
-    for (let row = 0; row < height; row++) {
-      yPacked.set(raw.subarray(layout[0]!.offset + row * layout[0]!.stride, layout[0]!.offset + row * layout[0]!.stride + width), row * width);
-    }
-    const uvPacked = new Uint8Array(cw * ch * 2);
-    const ySize = layout[0]!.stride * height;
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    // 平面行紧致排布：行起点未必 4 字节对齐（如 682 宽 → Y stride 682）。
+    // 默认 UNPACK_ALIGNMENT=4 会让 texImage2D 以 INVALID_OPERATION 静默失败
+    // （GL 错误不抛 JS 异常 → 纹理全空 → YUV 路径绘制出纯绿 (0,77,0) 块，
+    // 实证见 evidence/m3_2/playback-repro）。
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
     if (frame.format === "NV12") {
+      const yLayout = layout[0]!;
       const uvLayout = layout[1]!;
-      for (let row = 0; row < ch; row++) {
-        uvPacked.set(raw.subarray(uvLayout.offset + row * uvLayout.stride, uvLayout.offset + row * uvLayout.stride + cw * 2), row * cw * 2);
-      }
+      // 快路径：平面视图直接上传（行距经 UNPACK_ROW_LENGTH 告知 GL）
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, targetY);
+      gl.pixelStorei(gl.UNPACK_ROW_LENGTH, yLayout.stride);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, width, height, 0, gl.RED, gl.UNSIGNED_BYTE,
+        new Uint8Array(buffer, yLayout.offset, yLayout.stride * (height - 1) + width));
+      if (this.mipmapEnabled) gl.generateMipmap(gl.TEXTURE_2D);
+      gl.bindTexture(gl.TEXTURE_2D, targetUV);
+      gl.pixelStorei(gl.UNPACK_ROW_LENGTH, uvLayout.stride >> 1); // RG 双字节像素：行长按像素计
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG8, cw, ch, 0, gl.RG, gl.UNSIGNED_BYTE,
+        new Uint8Array(buffer, uvLayout.offset, uvLayout.stride * (ch - 1) + cw * 2));
+      if (this.mipmapEnabled) gl.generateMipmap(gl.TEXTURE_2D);
+      gl.pixelStorei(gl.UNPACK_ROW_LENGTH, 0);
     } else if (frame.format === "I420") {
+      // 回退：Y 重打包 + U/V 平面交错打包为 RG（非对齐宽常见此格式）
+      const yLayout = layout[0]!;
       const uLayout = layout[1]!;
       const vLayout = layout[2]!;
+      const yPacked = new Uint8Array(width * height);
+      for (let row = 0; row < height; row++) {
+        yPacked.set(raw.subarray(yLayout.offset + row * yLayout.stride, yLayout.offset + row * yLayout.stride + width), row * width);
+      }
+      const uvPacked = new Uint8Array(cw * ch * 2);
       for (let row = 0; row < ch; row++) {
         const uRow = raw.subarray(uLayout.offset + row * uLayout.stride, uLayout.offset + row * uLayout.stride + cw);
         const vRow = raw.subarray(vLayout.offset + row * vLayout.stride, vLayout.offset + row * vLayout.stride + cw);
@@ -436,20 +489,25 @@ export class Compositor {
           uvPacked[(row * cw + col) * 2 + 1] = vRow[col]!;
         }
       }
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, targetY);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, width, height, 0, gl.RED, gl.UNSIGNED_BYTE, yPacked);
+      if (this.mipmapEnabled) gl.generateMipmap(gl.TEXTURE_2D);
+      gl.bindTexture(gl.TEXTURE_2D, targetUV);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG8, cw, ch, 0, gl.RG, gl.UNSIGNED_BYTE, uvPacked);
+      if (this.mipmapEnabled) gl.generateMipmap(gl.TEXTURE_2D);
     } else {
-      throw new Error(`unsupported decoded frame format: ${frame.format} (ySize=${ySize})`);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+      frame.close();
+      throw new Error(`unsupported decoded frame format: ${frame.format}`);
     }
-    const targetY = shadow ? this.shadowY(handle.inputId) : handle.textureY;
-    const targetUV = shadow ? this.shadowTextureUV(handle.inputId) : handle.textureUV;
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, targetY);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, width, height, 0, gl.RED, gl.UNSIGNED_BYTE, yPacked);
-    if (this.mipmapEnabled) gl.generateMipmap(gl.TEXTURE_2D);
-    gl.bindTexture(gl.TEXTURE_2D, targetUV);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG8, cw, ch, 0, gl.RG, gl.UNSIGNED_BYTE, uvPacked);
-    if (this.mipmapEnabled) gl.generateMipmap(gl.TEXTURE_2D);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    // 显式轮询 GL 错误：纹理上传失败绝不允许静默（否则下游合成出空纹理绿块）
+    const glError = gl.getError();
+    if (glError !== gl.NO_ERROR) {
+      frame.close();
+      throw new Error(`texture upload GL error 0x${glError.toString(16)} (${width}x${height} ${frame.format})`);
+    }
     frame.close();
   }
 
@@ -527,6 +585,30 @@ export class Compositor {
       const handle = this.videos.get(overlay.input_id);
       if (handle) this.drawRectYuv(handle.textureY, handle.textureUV, null, overlay.box, overlay.alpha, overlay.rotation_deg, false,
         this.sourceWidthScale.get(overlay.input_id) ?? 1920);
+    }
+  }
+
+  /** 会话侧显式纹理绘制（环形槽位/静图；uv=null 走 RGBA 模式——静图修复绿块）。 */
+  drawTextures(inputId: string, y: WebGLTexture, uv: WebGLTexture | null,
+               rect: IrContent, alpha: number, rotationDeg: number): void {
+    this.drawRectYuv(y, uv, null, rect, alpha, rotationDeg, false,
+      this.sourceWidthScale.get(inputId) ?? 1920);
+  }
+
+  /** 转场绘制（左右纹理对由会话环形/影子槽位解析；LOD 按各自输入源宽）。 */
+  drawTransitionWithPairs(
+    left: { y: WebGLTexture; uv: WebGLTexture | null },
+    right: { y: WebGLTexture; uv: WebGLTexture | null },
+    main: Extract<IrFrame["main"], { kind: "transition" }>,
+  ): void {
+    const lw = this.sourceWidthScale.get(main.left.input_id) ?? 1920;
+    const rw = this.sourceWidthScale.get(main.right.input_id) ?? 1920;
+    if (main.transition === "fadeblack") {
+      this.drawRectYuv(left.y, left.uv, null, Compositor.shifted(main.left.content, main.left.shift), main.left.alpha * Math.max(0, 1 - 2 * main.p), 0, false, lw);
+      if (main.p >= 0.5) this.drawRectYuv(right.y, right.uv, null, Compositor.shifted(main.right.content, main.right.shift), main.right.alpha * (2 * main.p - 1), 0, false, rw);
+    } else {
+      this.drawRectYuv(left.y, left.uv, null, Compositor.shifted(main.left.content, main.left.shift), main.left.alpha, 0, false, lw);
+      this.drawRectYuv(right.y, right.uv, null, Compositor.shifted(main.right.content, main.right.shift), main.right.alpha * main.p, 0, false, rw);
     }
   }
 

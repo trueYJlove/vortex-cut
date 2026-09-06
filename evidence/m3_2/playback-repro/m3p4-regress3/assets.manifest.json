@@ -1,0 +1,54 @@
+{
+ "assets": [
+  {
+   "entity_id": "asset_m3_a",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\materials\\m3mat_a_1080.mp4",
+   "display_name": "m3mat_a_1080.mp4"
+  },
+  {
+   "entity_id": "asset_m3_b",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\materials\\m3mat_b_1080.mp4",
+   "display_name": "m3mat_b_1080.mp4"
+  },
+  {
+   "entity_id": "asset_m3_c",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\materials\\m3mat_c_1080.mp4",
+   "display_name": "m3mat_c_1080.mp4"
+  },
+  {
+   "entity_id": "asset_m3_p1",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\materials\\m3mat_p1_1080.mp4",
+   "display_name": "m3mat_p1_1080.mp4"
+  },
+  {
+   "entity_id": "asset_m3_p2",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\materials\\m3mat_p2_1080.mp4",
+   "display_name": "m3mat_p2_1080.mp4"
+  },
+  {
+   "entity_id": "m3font",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\resources\\fonts\\noto-sans-sc\\NotoSansCJKsc-VF.ttf",
+   "display_name": "Noto Sans CJK SC"
+  },
+  {
+   "entity_id": "m3mat_a_540",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\materials\\m3mat_a_540.mp4",
+   "display_name": "m3mat_a_540"
+  },
+  {
+   "entity_id": "m3mat_a_1080",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\materials\\m3mat_a_1080.mp4",
+   "display_name": "m3mat_a_1080"
+  },
+  {
+   "entity_id": "m3proxy_ref_vfr",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\materials\\m3proxy_ref_vfr-landscape-av.mp4",
+   "display_name": "m3proxy_ref_vfr"
+  },
+  {
+   "entity_id": "m3proxy_ref_cfr",
+   "path": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\m3_0\\materials\\m3proxy_ref_cfr-landscape-av.mp4",
+   "display_name": "m3proxy_ref_cfr"
+  }
+ ]
+}

@@ -1,8 +1,19 @@
 /** 合成预览会话：持有解码 worker、纹理状态与 WebGL2 合成器，对外提供
- * play/pause/seek 与时间/指标回调。vsync 锁定合成循环（rAF）；播放时解码
- * 流水线深度 1（目标帧未就绪保持最新帧并计丢帧）；seek 为同步解码后合成。 */
+ * play/pause/seek 与时间/指标回调。
+ *
+ * 播放架构（M3-2.2 重构，修复"每 tick 反应式请求 + 单 pendingResolve 覆盖 +
+ * 只合成精确目标帧"导致的冻结/丢帧/僵尸解码）：
+ * - 每输入一条顺序解码链（prefetch chain）：按 IR 帧序单调推进 src_n，深度 1
+ *   在途、完成后立刻续链（不等 rAF tick），解码器保持热态（每帧喂下个采样）；
+ * - 每输入一个环形纹理池（RING）：解码帧上传到独立槽位，链超前 LEAD 帧也不
+ *   覆盖当前合成所需内容；上传 await 完成后才标记就绪（修复"Y 已传/UV 未传
+ *   → 合成出绿块"的竞态）；
+ * - 合成取 ≤ 墙钟目标的最新就绪帧（不丢已就绪帧）；落后超过 LAG_REANCHOR 帧
+ *   时重锚时钟（播放放慢而非画面冻结 + 丢帧暴涨）；
+ * - seek（暂停态）仍走并行解码后合成，但同样经环形/影子槽位（await 后就绪），
+ *   并同步链游标（回播放不触发无谓冷启）。 */
 import { Compositor, assertHardwareRenderer } from "./compositor.js";
-import type { Ir, IrFrame } from "./ir.js";
+import type { Ir, IrContent, IrFrame } from "./ir.js";
 import { DecodeWorker } from "./decode-worker.js";
 
 export interface PreviewSessionMetrics {
@@ -11,38 +22,55 @@ export interface PreviewSessionMetrics {
   dropped_frames: number;
   composed_frames: number;
   last_error: string | null;
+  /** 解码往返（请求→VideoFrame 回传）耗时分布；m3p5 播放探针与指标行消费。 */
+  decode_ms_p50: number;
+  decode_ms_p95: number;
+  /** 当前在途解码请求数（全部输入合计，含影子槽）。 */
+  decode_in_flight: number;
 }
 
-interface SlotState { uploaded: number; pending: number | null }
+type TexPair = { y: WebGLTexture; uv: WebGLTexture | null };
+
+interface RingSlot { y: WebGLTexture; uv: WebGLTexture; srcN: number }
 
 interface InputRig {
   kind: "video" | "image";
   worker: DecodeWorker | null;
   handle: import("./compositor.js").VideoHandle;
-  main: SlotState;
-  shadow: SlotState;
+  /** 播放/seek 共用的环形纹理池：解码帧按序占用槽位，srcN=-1 表示空。 */
+  ring: RingSlot[];
+  ringSeq: number;
+  /** 顺序解码链游标：已向 worker 请求的最大 src_n（seek 上传后同步）。 */
+  fed: number;
+  /** 在途链请求的 src_n（深度 1）。 */
+  inFlightN: number | null;
+  /** 转场共享输入第二帧槽位（单槽，await 完成后才置值）。 */
+  shadowUploaded: number;
+  /** 影子槽在途请求 src_n。 */
+  shadowInFlight: number | null;
+  /** 同一输入的纹理上传串行尾（杜绝同槽 copyTo/texImage2D 交错）。 */
+  uploadTail: Promise<void>;
 }
 
-function neededInputs(frame: IrFrame): string[] {
-  const ids = new Set<string>();
+/** 主轨（段或转场左右）所需的 (输入, 源帧, 是否影子槽)。 */
+function mainNeeds(frame: IrFrame): Array<[string, number, boolean]> {
   const main = frame.main;
-  if (main.kind === "segment") ids.add(main.input_id);
-  if (main.kind === "transition") { ids.add(main.left.input_id); ids.add(main.right.input_id); }
-  for (const overlay of frame.overlays) ids.add(overlay.input_id);
-  return [...ids];
+  if (main.kind === "segment") return [[main.input_id, main.src_n, false]];
+  if (main.kind !== "transition") return []; // black
+  const shared = main.left.input_id === main.right.input_id;
+  return [
+    [main.left.input_id, main.left.src_n, shared],
+    [main.right.input_id, main.right.src_n, false],
+  ];
 }
 
-function sourceFrameAt(frame: IrFrame, inputId: string): number | null {
-  const main = frame.main;
-  if (main.kind === "segment" && main.input_id === inputId) return main.src_n;
-  if (main.kind === "transition") {
-    if (main.left.input_id === inputId) return main.left.src_n;
-    if (main.right.input_id === inputId) return main.right.src_n;
-  }
-  for (const overlay of frame.overlays) {
-    if (overlay.input_id === inputId) return overlay.src_n;
-  }
-  return null;
+/** overlay 所需的 (输入, 源帧)。 */
+function overlayNeeds(frame: IrFrame): Array<[string, number]> {
+  return frame.overlays.map(overlay => [overlay.input_id, overlay.src_n] as [string, number]);
+}
+
+function shiftedRect(rect: IrContent, shift: { dx: number; dy: number }): IrContent {
+  return { x: rect.x + shift.dx, y: rect.y + shift.dy, w: rect.w, h: rect.h };
 }
 
 export class PreviewSession {
@@ -50,10 +78,13 @@ export class PreviewSession {
   private readonly rigs = new Map<string, InputRig>();
   private rafId = 0;
   private playing = false;
-  private clockStartWall = 0;
-  private clockStartFrame = 0;
+  private anchorWall = 0;
+  private anchorFrame = 0;
   private currentFrame = 0;
+  private latestTarget = 0;
   private taskTimes: number[] = [];
+  private decodeTimes: number[] = [];
+  private decodeInFlight = 0;
   private dropped = 0;
   private disposed = false;
   private seekEpoch = 0;
@@ -63,6 +94,15 @@ export class PreviewSession {
   lastError: string | null = null;
   onTimeUs: ((us: number) => void) | null = null;
 
+  /** 环形纹理池深度：LEAD 超前 + 当前合成 + 在途 1，取 6 留余量。 */
+  private static readonly RING = 6;
+  /** 预读超前帧数（吸收转场/换段冷启路径的解码尖峰）。 */
+  private static readonly LEAD = 5;
+  /** 合成落后目标超过该帧数 → 重锚时钟（放慢播放，禁止目标无限狂奔）。 */
+  private static readonly LAG_REANCHOR = 10;
+  /** 合成时向历史回溯的最大帧数（starving 后取最近就绪帧）。 */
+  private static readonly BACKSCAN = 15;
+
   private constructor(readonly ir: Ir, canvas: HTMLCanvasElement) {
     this.compositor = new Compositor(canvas, ir);
   }
@@ -70,6 +110,7 @@ export class PreviewSession {
   static async create(canvas: HTMLCanvasElement, ir: Ir,
                       tickets: Map<string, string>): Promise<PreviewSession> {
     const session = new PreviewSession(ir, canvas);
+    const sourceWidth = new Map<string, number>();
     for (const input of ir.inputs) {
       const ticket = tickets.get(input.asset_id);
       if (!ticket) throw new Error(`no ticket for ${input.asset_id}`);
@@ -77,8 +118,13 @@ export class PreviewSession {
         kind: input.asset_kind === "image" ? "image" : "video",
         worker: null,
         handle: session.compositor.registerTextureOnly(input.input_id),
-        main: { uploaded: -1, pending: null },
-        shadow: { uploaded: -1, pending: null },
+        ring: [],
+        ringSeq: 0,
+        fed: -1,
+        inFlightN: null,
+        shadowUploaded: -1,
+        shadowInFlight: null,
+        uploadTail: Promise.resolve(),
       };
       if (rig.kind === "image") {
         // 静图：Image 元素解码 → RGBA 纹理一次上传，src_n 恒 0 全程复用
@@ -90,12 +136,14 @@ export class PreviewSession {
           image.src = ticket;
         });
         session.compositor.uploadImageFrame(rig.handle, image);
-        rig.main.uploaded = 0;
       } else {
         rig.worker = await DecodeWorker.create(ticket);
+        sourceWidth.set(input.input_id, input.geometry.width);
       }
       session.rigs.set(input.input_id, rig);
     }
+    // LOD 依据真实源宽（此前恒 1920：682 宽画中画被过度降采样模糊）
+    session.compositor.setSourceWidthScale(sourceWidth);
     const adapter = session.compositor.gpuRendererInfo();
     if (assertHardwareRenderer(adapter.adapter).software) {
       throw new Error(`software rendering detected: ${adapter.adapter}`);
@@ -115,83 +163,235 @@ export class PreviewSession {
     return this.playing;
   }
 
-  /** 解码并上传一个（输入, 源帧）到指定槽位；frame 在上传后由 compositor 关闭。 */
-  private async upload(inputId: string, srcN: number, shadow: boolean): Promise<void> {
-    const rig = this.rigs.get(inputId)!;
-    if (rig.kind === "image") { rig.main.uploaded = 0; return; } // 静图已上传
-    if (!rig.worker) throw new Error(`no worker for ${inputId}`);
-    try {
-      const decoded = await rig.worker.decode(srcN, this.ir.canvas.fps);
-      this.compositor.uploadVideoFrame(rig.handle, decoded, shadow);
-    } catch (error) {
-      // 可观测性（M3-2）：解码失败不再静默——记录最近错误供 UI 呈现
-      this.lastError = `解码失败 ${inputId}#${srcN}: ${error instanceof Error ? error.message : String(error)}`;
-      throw error;
+  /** 诊断快照：各输入解码链游标/在途/环形内容 + 最近解码回执（m3p5 探针）。 */
+  chainState(): Record<string, unknown> {
+    const state: Record<string, unknown> = {};
+    for (const [inputId, rig] of this.rigs) {
+      state[inputId] = {
+        fed: rig.fed,
+        inFlight: rig.inFlightN,
+        ring: rig.ring.filter(slot => slot).map(slot => slot.srcN),
+        shadow: rig.shadowUploaded,
+        last_decode: rig.worker?.lastFrameInfo ?? null,
+      };
     }
-    const slot = shadow ? rig.shadow : rig.main;
-    slot.uploaded = srcN;
+    return state;
   }
 
-  /** 目标帧的全部输入纹理是否已就绪（主/影子槽位按需）。 */
+  /** 预览框尺寸变化（CSS px）：后备缓冲随盒子、IR 画布 contain 居中。 */
+  resize(cssWidth: number, cssHeight: number): void {
+    const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+    this.compositor.setViewportBacking(cssWidth * dpr, cssHeight * dpr);
+    // 画布尺寸变化会清空绘制缓冲：立即重呈现当前帧（纹理已在环形槽内，零解码）
+    const frame = this.ir.frames[Math.min(this.currentFrame, this.ir.frames.length - 1)];
+    if (frame && this.frameReady(frame)) this.compose(frame);
+  }
+
+  /** 环形槽位上传（经每输入串行尾；await 完成后才标记 srcN 就绪）。 */
+  private uploadRing(rig: InputRig, srcN: number): Promise<void> {
+    if (!rig.worker) return Promise.reject(new Error(`no worker for input`));
+    const slotIndex = rig.ringSeq % PreviewSession.RING;
+    rig.ringSeq += 1;
+    const task = async (): Promise<void> => {
+      const decodeStart = performance.now();
+      this.decodeInFlight += 1;
+      let decoded: VideoFrame;
+      try {
+        decoded = await rig.worker!.decode(srcN, this.ir.canvas.fps);
+        this.decodeTimes.push(performance.now() - decodeStart);
+        if (this.decodeTimes.length > 600) this.decodeTimes.splice(0, this.decodeTimes.length - 600);
+      } finally {
+        this.decodeInFlight -= 1;
+      }
+      const slot = rig.ring[slotIndex] ??= {
+        y: this.compositor.createYuvTexture(), uv: this.compositor.createYuvTexture(), srcN: -1,
+      };
+      await this.compositor.uploadVideoFrameToTextures(decoded, slot.y, slot.uv);
+      slot.srcN = srcN; // Y+UV 上传全部完成后才可被合成/就绪判定看见
+      rig.fed = Math.max(rig.fed, srcN); // 与 worker 热态游标保持同步
+    };
+    const run = rig.uploadTail.then(task, task);
+    rig.uploadTail = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  /** 影子槽上传（转场共享输入第二帧；单槽，同样 await 后就绪）。 */
+  private uploadShadow(rig: InputRig, srcN: number): Promise<void> {
+    if (!rig.worker) return Promise.reject(new Error(`no worker for input`));
+    const task = async (): Promise<void> => {
+      const decodeStart = performance.now();
+      this.decodeInFlight += 1;
+      try {
+        const decoded = await rig.worker!.decode(srcN, this.ir.canvas.fps);
+        this.decodeTimes.push(performance.now() - decodeStart);
+        if (this.decodeTimes.length > 600) this.decodeTimes.splice(0, this.decodeTimes.length - 600);
+        await this.compositor.uploadVideoFrameToTextures(decoded,
+          this.compositor.shadowYTexture(rig.handle.inputId), this.compositor.shadowUVTexture(rig.handle.inputId));
+        rig.shadowUploaded = srcN;
+        rig.fed = Math.max(rig.fed, srcN);
+      } finally {
+        this.decodeInFlight -= 1;
+      }
+    };
+    const run = rig.uploadTail.then(task, task);
+    rig.uploadTail = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  /** 顺序采样解码（不展示、不上传）：speed≠1 时被跳过的源采样也要喂入解码器
+   * （热态连续性），但其输出直接关闭——表面释放在独立任务边界（postMessage
+   * 往返之后），与解码调用 temporal 分离。 */
+  private decodeOnly(rig: InputRig, srcN: number): Promise<void> {
+    if (!rig.worker) return Promise.reject(new Error(`no worker for input`));
+    const task = async (): Promise<void> => {
+      const decodeStart = performance.now();
+      this.decodeInFlight += 1;
+      try {
+        const decoded = await rig.worker!.decode(srcN, this.ir.canvas.fps);
+        this.decodeTimes.push(performance.now() - decodeStart);
+        if (this.decodeTimes.length > 600) this.decodeTimes.splice(0, this.decodeTimes.length - 600);
+        decoded.close();
+        rig.fed = Math.max(rig.fed, srcN);
+      } finally {
+        this.decodeInFlight -= 1;
+      }
+    };
+    const run = rig.uploadTail.then(task, task);
+    rig.uploadTail = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  /** 环形池中查找已就绪槽位。 */
+  private ringSlot(rig: InputRig, srcN: number): RingSlot | null {
+    for (const slot of rig.ring) if (slot && slot.srcN === srcN) return slot;
+    return null;
+  }
+
+  /** 目标帧全部输入是否就绪（环形槽/影子槽/静图）。 */
   private frameReady(frame: IrFrame): boolean {
-    const main = frame.main;
-    const checks: Array<[string, number, boolean]> = [];
-    if (main.kind === "segment") checks.push([main.input_id, main.src_n, false]);
-    if (main.kind === "transition") {
-      const shared = main.left.input_id === main.right.input_id;
-      checks.push([main.left.input_id, main.left.src_n, shared]);
-      checks.push([main.right.input_id, main.right.src_n, false]);
-    }
-    for (const overlay of frame.overlays) checks.push([overlay.input_id, overlay.src_n, false]);
-    return checks.every(([inputId, srcN, shadow]) => {
+    const needs: Array<[string, number, boolean]> = [...mainNeeds(frame)];
+    for (const [inputId, srcN] of overlayNeeds(frame)) needs.push([inputId, srcN, false]);
+    return needs.every(([inputId, srcN, shadow]) => {
       const rig = this.rigs.get(inputId);
       if (!rig) return false;
-      const slot = shadow ? rig.shadow : rig.main;
-      return slot.uploaded === srcN;
+      if (rig.kind === "image") return true;
+      return shadow ? rig.shadowUploaded === srcN : this.ringSlot(rig, srcN) !== null;
     });
   }
 
-  /** 为目标帧发起全部缺失解码（深度 1：同一槽位不重复在途请求）。 */
-  private requestMissing(frame: IrFrame): void {
-    const main = frame.main;
-    const requests: Array<Promise<void>> = [];
-    const issue = (inputId: string, srcN: number, shadow: boolean) => {
-      const rig = this.rigs.get(inputId)!;
-      const slot = shadow ? rig.shadow : rig.main;
-      if (slot.uploaded === srcN || slot.pending === srcN) return;
-      slot.pending = srcN;
-      requests.push(this.upload(inputId, srcN, shadow).finally(() => {
-        if (slot.pending === srcN) slot.pending = null;
-      }));
-    };
-    if (main.kind === "segment") issue(main.input_id, main.src_n, false);
-    if (main.kind === "transition") {
-      const shared = main.left.input_id === main.right.input_id;
-      issue(main.left.input_id, main.left.src_n, shared);
-      issue(main.right.input_id, main.right.src_n, false);
+  /** 为帧解析可绘制纹理对；静图返回 RGBA 主纹理（uv=null 走 RGBA 模式）。 */
+  private texturesFor(inputId: string, srcN: number, shadow: boolean): TexPair | null {
+    const rig = this.rigs.get(inputId);
+    if (!rig) return null;
+    if (rig.kind === "image") return { y: rig.handle.textureY, uv: null };
+    if (shadow) {
+      return rig.shadowUploaded === srcN
+        ? { y: this.compositor.shadowYTexture(inputId), uv: this.compositor.shadowUVTexture(inputId) }
+        : null;
     }
-    for (const overlay of frame.overlays) issue(overlay.input_id, overlay.src_n, false);
-    void Promise.all(requests);
+    const slot = this.ringSlot(rig, srcN);
+    return slot ? { y: slot.y, uv: slot.uv } : null;
+  }
+
+  /**
+   * 顺序预读链（连续采样版）：对每个输入把解码游标单调推进到
+   * [target-BACKSCAN, target+LEAD] 窗口内的最大展示需求 src_n，**逐采样连续**
+   * 请求（speed≠1 的跳帧采样以 decode-only 喂入解码器、不上传不展示）。
+   * 这保证 worker 始终看到 target = fed+1 的纯顺序流——跳帧喂入 + 中间输出
+   * 关闭的组合在部分硬件解码器上会破坏 GOP 参考链（确定性花屏，实证
+   * evidence/m3_2/playback-repro fixed3/11/12/13），连续采样喂入（与 ffmpeg
+   * 同构）完全干净。链深度 1，完成即续（不等 rAF tick）。
+   */
+  private pump(target: number): void {
+    const from = Math.max(0, target - PreviewSession.BACKSCAN);
+    const to = Math.min(target + PreviewSession.LEAD, this.ir.frames.length - 1);
+    // 窗口内各输入的最大展示需求 + 展示 src 集合
+    const maxNeeded = new Map<string, number>();
+    const displaySrcs = new Map<string, Set<number>>();
+    for (let n = from; n <= to; n++) {
+      const frame = this.ir.frames[n]!;
+      const needs: Array<[string, number, boolean]> = [...mainNeeds(frame)];
+      for (const [inputId, srcN] of overlayNeeds(frame)) needs.push([inputId, srcN, false]);
+      for (const [inputId, srcN, shadow] of needs) {
+        if (shadow) continue; // 影子槽由专用直发路径处理
+        const current = maxNeeded.get(inputId);
+        if (current === undefined || srcN > current) maxNeeded.set(inputId, srcN);
+        let set = displaySrcs.get(inputId);
+        if (!set) { set = new Set<number>(); displaySrcs.set(inputId, set); }
+        set.add(srcN);
+      }
+    }
+    for (const [inputId, needed] of maxNeeded) {
+      const rig = this.rigs.get(inputId);
+      if (!rig || rig.kind !== "video") continue;
+      // 逐采样推进：下一请求 = fed+1（连续）；若已成环内展示需求则跳过该步
+      let next = rig.fed + 1;
+      while (next <= needed && this.ringSlot(rig, next)) {
+        rig.fed = next;
+        next += 1;
+      }
+      if (next > needed || rig.inFlightN !== null || rig.shadowInFlight !== null) continue;
+      rig.fed = next;
+      rig.inFlightN = next;
+      const isDisplay = displaySrcs.get(inputId)!.has(next);
+      const task = isDisplay ? this.uploadRing(rig, next) : this.decodeOnly(rig, next);
+      void task
+        .catch(error => this.noteDecodeError(inputId, next, error))
+        .finally(() => {
+          if (rig.inFlightN === next) rig.inFlightN = null;
+          if (!this.disposed && this.playing) this.pump(this.latestTarget);
+        });
+    }
+    // 转场影子槽（共享输入第二帧）：直发（await 后就绪；窗口内单帧）
+    for (let n = target; n <= to; n++) {
+      for (const [inputId, srcN, shadow] of mainNeeds(this.ir.frames[n]!)) {
+        if (!shadow) continue;
+        const rig = this.rigs.get(inputId);
+        if (!rig || rig.kind !== "video" || rig.shadowUploaded === srcN || rig.shadowInFlight !== null) continue;
+        rig.shadowInFlight = srcN;
+        void this.uploadShadow(rig, srcN)
+          .catch(error => this.noteDecodeError(inputId, srcN, error))
+          .finally(() => {
+            if (rig.shadowInFlight === srcN) rig.shadowInFlight = null;
+          });
+      }
+    }
+  }
+
+  private noteDecodeError(inputId: string, srcN: number, error: unknown): void {
+    if (this.disposed) return;
+    this.lastError = `解码失败 ${inputId}#${srcN}: ${error instanceof Error ? error.message : String(error)}`;
   }
 
   /** 同步合成一帧（纹理必须已就绪）。 */
   private compose(frame: IrFrame): void {
     const main = frame.main;
     this.compositor.beginFrame();
-    if (main.kind === "segment") this.compositor.drawMainSegment(main);
-    else if (main.kind === "transition") {
-      this.compositor.drawTransitionTextures(main, main.left.input_id === main.right.input_id, false);
+    if (main.kind === "segment") {
+      const pair = this.texturesFor(main.input_id, main.src_n, false);
+      if (pair) {
+        this.compositor.drawTextures(main.input_id, pair.y, pair.uv,
+          shiftedRect(main.content, main.shift), main.alpha, main.rotation_deg ?? 0);
+      }
+    } else if (main.kind === "transition") {
+      const shared = main.left.input_id === main.right.input_id;
+      const left = this.texturesFor(main.left.input_id, main.left.src_n, shared);
+      const right = this.texturesFor(main.right.input_id, main.right.src_n, false);
+      if (left && right) this.compositor.drawTransitionWithPairs(left, right, main);
     }
-    this.compositor.drawOverlays(frame);
+    for (const overlay of frame.overlays) {
+      const pair = this.texturesFor(overlay.input_id, overlay.src_n, false);
+      if (pair) this.compositor.drawTextures(overlay.input_id, pair.y, pair.uv, overlay.box, overlay.alpha, overlay.rotation_deg);
+    }
     this.compositor.drawCaptionsOf(frame);
     this.compositor.endFrame();
   }
 
   /**
    * seek（暂停态/播放头跳转）：并行解码目标帧 → 合成。
-   * - latest-wins（epoch）：新 seek 到来时旧结果的合成被跳过（解码仍完成，
-   *   上传结果无害保留）；连续快速 seek 进入拖拽快速档——仅解码主轨输入、
-   *   跳过 PiP/转场影子槽，停止 250ms 后由调用方触发全量精修。
+   * - latest-wins（epoch）：新 seek 到来时旧结果的合成被跳过；连续快速 seek 进
+   *   入拖拽快速档——仅解码主轨输入、跳过 PiP，停止 250ms 后由调用方触发全量
+   *   精修。
    * - 返回实际渲染的帧号（被更新的 seek 取代时为 -1）。
    */
   async seekToFrame(target: number): Promise<number> {
@@ -203,26 +403,26 @@ export class PreviewSession {
     const index = Math.max(0, Math.min(target, this.ir.frames.length - 1));
     const frame = this.ir.frames[index]!;
     this.currentFrame = index;
-    const main = frame.main;
+    this.latestTarget = index;
     const requests: Array<Promise<void>> = [];
-    if (main.kind === "segment") {
-      if (this.rigs.get(main.input_id)!.main.uploaded !== main.src_n) {
-        requests.push(this.upload(main.input_id, main.src_n, false));
-      }
-    } else if (main.kind === "transition") {
-      const shared = main.left.input_id === main.right.input_id;
-      requests.push(this.upload(main.left.input_id, main.left.src_n, shared));
-      requests.push(this.upload(main.right.input_id, main.right.src_n, false));
+    for (const [inputId, srcN, shadow] of mainNeeds(frame)) {
+      const rig = this.rigs.get(inputId);
+      if (!rig || rig.kind === "image") continue;
+      const ready = shadow ? rig.shadowUploaded === srcN : this.ringSlot(rig, srcN) !== null;
+      if (!ready) requests.push(shadow ? this.uploadShadow(rig, srcN) : this.uploadRing(rig, srcN));
     }
     if (!this.dragMode) {
-      for (const overlay of frame.overlays) {
-        requests.push(this.upload(overlay.input_id, overlay.src_n, false));
+      for (const [inputId, srcN] of overlayNeeds(frame)) {
+        const rig = this.rigs.get(inputId);
+        if (!rig || rig.kind === "image") continue;
+        if (this.ringSlot(rig, srcN)) continue;
+        requests.push(this.uploadRing(rig, srcN));
       }
     }
     await Promise.all(requests);
     if (epoch !== this.seekEpoch) return -1; // 已被更新的 seek 取代
     this.lastSeekMs = performance.now() - now;
-    this.compose(frame);
+    if (this.frameReady(frame)) this.compose(frame);
     this.onTimeUs?.(frame.t_us);
     return frame.n;
   }
@@ -242,25 +442,39 @@ export class PreviewSession {
   play(): void {
     if (this.playing || this.disposed) return;
     this.playing = true;
-    this.clockStartWall = performance.now();
-    this.clockStartFrame = this.currentFrame;
+    this.anchorWall = performance.now();
+    this.anchorFrame = this.currentFrame;
+    const frameDur = 1000 / this.ir.canvas.fps;
+    const last = this.ir.frames.length - 1;
     const tick = () => {
       if (!this.playing || this.disposed) return;
       const now = performance.now();
-      const target = Math.min(this.ir.canvas.duration_frames - 1,
-        Math.floor(this.clockStartFrame + (now - this.clockStartWall) / (1000 / this.ir.canvas.fps)));
-      const frame = this.ir.frames[target]!;
-      this.requestMissing(frame);
-      if (this.frameReady(frame)) {
-        const taskStart = now;
-        this.compose(frame);
-        this.taskTimes.push(performance.now() - taskStart);
-        this.currentFrame = target;
-        this.onTimeUs?.(frame.t_us);
-      } else if (target > this.currentFrame + 1) {
-        this.dropped += 1; // 目标帧未就绪且已落后超过 1 帧：计丢帧，保持最新画面
+      const target = Math.min(last, Math.floor(this.anchorFrame + (now - this.anchorWall) / frameDur));
+      this.latestTarget = target;
+      this.pump(target);
+      // 合成 ≤ 目标的最新就绪帧：已就绪帧绝不丢弃；starving 时保持最后画面
+      let composed = -1;
+      const floor = Math.max(0, Math.max(this.currentFrame - 1, target - PreviewSession.BACKSCAN));
+      for (let n = target; n >= floor; n--) {
+        if (this.frameReady(this.ir.frames[n]!)) { composed = n; break; }
       }
-      if (target >= this.ir.canvas.duration_frames - 1) {
+      if (composed >= 0 && composed >= this.currentFrame) {
+        const taskStart = performance.now();
+        this.compose(this.ir.frames[composed]!);
+        this.taskTimes.push(performance.now() - taskStart);
+        if (this.taskTimes.length > 1200) this.taskTimes.splice(0, this.taskTimes.length - 1200);
+        this.currentFrame = composed;
+        this.onTimeUs?.(this.ir.frames[composed]!.t_us);
+      }
+      // 饥饿护栏：落后过多 → 重锚时钟（播放按解码吞吐放慢），而不是让目标
+      // 无限狂奔、丢帧按 tick 线性堆积（旧实现冻结+丢帧 404 的直接根源）。
+      if (target - this.currentFrame > PreviewSession.LAG_REANCHOR) {
+        this.anchorFrame = this.currentFrame;
+        this.anchorWall = now;
+      } else if (composed < target && target > this.currentFrame) {
+        this.dropped += 1; // 目标帧未按时就绪：诚实计一次丢帧
+      }
+      if (target >= last) {
         this.pause();
         return;
       }
@@ -277,13 +491,17 @@ export class PreviewSession {
 
   metrics(): PreviewSessionMetrics {
     const times = [...this.taskTimes].sort((a, b) => a - b);
-    const p = (q: number) => times.length ? Math.round(times[Math.min(times.length - 1, Math.floor(q * times.length))] * 1000) / 1000 : 0;
+    const decodes = [...this.decodeTimes].sort((a, b) => a - b);
+    const p = (list: number[], q: number) => list.length ? Math.round(list[Math.min(list.length - 1, Math.floor(q * list.length))] * 1000) / 1000 : 0;
     return {
-      task_ms_p50: p(0.5),
-      task_ms_p95: p(0.95),
+      task_ms_p50: p(times, 0.5),
+      task_ms_p95: p(times, 0.95),
       dropped_frames: this.dropped,
       composed_frames: this.taskTimes.length,
       last_error: this.lastError,
+      decode_ms_p50: p(decodes, 0.5),
+      decode_ms_p95: p(decodes, 0.95),
+      decode_in_flight: this.decodeInFlight,
     };
   }
 

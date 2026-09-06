@@ -19,7 +19,7 @@ import type { RestrictedMediaRegistry } from "./restricted-media.js";
  * - AIVS_M3_PROBE_EVIDENCE 证据输出目录
  */
 
-export const PROBE_NAME_PATTERN = /^m3p[1-4]$/;
+export const PROBE_NAME_PATTERN = /^m3p[1-5]$/;
 
 export function probeActive(): string | null {
   if (app.isPackaged || !process.env.AIVS_M3_PROBE) return null;
@@ -46,7 +46,7 @@ export function registerProbeIpc(deps: { registry: RestrictedMediaRegistry }): P
     ? resolve(process.env.AIVS_M3_PROBE_ASSETS)
     : null;
   if (!manifestPath) throw new Error("AIVS_M3_PROBE requires AIVS_M3_PROBE_ASSETS");
-  const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8").replace(/^\uFEFF/, "")) as {
     assets: Array<{ entity_id: string; path: string; display_name?: string }>;
   };
   const evidenceDir = resolve(

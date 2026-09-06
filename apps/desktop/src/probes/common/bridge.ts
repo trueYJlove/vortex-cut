@@ -1,7 +1,7 @@
 /** M3-0 探针公共：dev-only 桥接类型（window.probeDesktop 由 preload/probe-bridge.ts 注入）。 */
 
 export interface ProbeSession {
-  probe: "m3p1" | "m3p2" | "m3p3" | "m3p4";
+  probe: "m3p1" | "m3p2" | "m3p3" | "m3p4" | "m3p5";
   chroma_phase: string;
   evidence_dir: string;
   assets: Array<{ entity_id: string; display_name: string }>;

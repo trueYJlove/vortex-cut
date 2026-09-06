@@ -4,6 +4,7 @@
 export interface DecodeWorkerMessage {
   type: "ready" | "frame" | "done" | "error";
   id?: number;
+  frameN?: number;
   frame?: VideoFrame;
   timestampUs?: number;
   fromCache?: boolean;
@@ -17,6 +18,15 @@ export interface DecodeWorkerMessage {
   note?: string;
 }
 
+/** 最近一次解码回执的取证信息（worker 附带；播放诊断用）。 */
+export interface DecodeFrameInfo {
+  frameN: number;
+  timestampUs: number;
+  fromCache: boolean;
+  samplesFed: number;
+  fromKeyframe: number;
+}
+
 export class DecodeWorker {
   private readonly worker: Worker;
   private nextId = 0;
@@ -24,6 +34,7 @@ export class DecodeWorker {
   hardware: string | null = null;
   width = 0;
   height = 0;
+  lastFrameInfo: DecodeFrameInfo | null = null;
 
   private constructor() {
     this.worker = new Worker(new URL("./decode-worker.worker.ts", import.meta.url), { type: "module" });
@@ -32,8 +43,17 @@ export class DecodeWorker {
       if (data.type === "frame" && data.id !== undefined) {
         const pending = this.pending.get(data.id);
         this.pending.delete(data.id);
-        if (data.frame) pending?.resolve(data.frame);
-        else pending?.reject(new Error("worker returned no frame"));
+        this.lastFrameInfo = {
+          frameN: data.frameN ?? -1,
+          timestampUs: data.timestampUs ?? -1,
+          fromCache: data.fromCache ?? false,
+          samplesFed: data.samplesFed ?? 0,
+          fromKeyframe: data.fromKeyframe ?? -1,
+        };
+        if (data.frame) {
+          if (pending) pending.resolve(data.frame);
+          else data.frame.close(); // 迟到的结果（客户端已超时放弃）：关闭防泄漏
+        } else pending?.reject(new Error("worker returned no frame"));
       } else if (data.type === "error" && data.id !== undefined) {
         const pending = this.pending.get(data.id);
         this.pending.delete(data.id);

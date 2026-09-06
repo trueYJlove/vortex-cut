@@ -22,6 +22,8 @@ export interface IrMainSegment {
   content: IrContent;
   shift: { dx: number; dy: number };
   alpha: number;
+  /** V1 静态/关键帧 rotate（度）。IR v0.2+ 携带；旧 IR 缺省 0。 */
+  rotation_deg?: number;
 }
 
 export interface IrMainTransition {

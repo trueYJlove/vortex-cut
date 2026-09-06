@@ -34,6 +34,15 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
   useEffect(() => {
     let cancelled = false;
     const sessionRefLocal = sessionRef;
+    // 预览框尺寸跟踪：合成画布填满预览框、IR 画布 contain 居中（与交互预览同观感）
+    const boxObserver = new ResizeObserver(entries => {
+      const entry = entries[entries.length - 1];
+      if (!entry) return;
+      const session = sessionRefLocal.current;
+      if (!session) return;
+      const { width, height } = entry.contentRect;
+      if (width > 2 && height > 2) session.resize(width, height);
+    });
     setLoad({ status: "loading", message: "正在加载合成预览" });
     sessionRefLocal.current?.dispose();
     sessionRefLocal.current = null;
@@ -47,6 +56,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
         const ir: Ir = parseIr(payload.ir as unknown as string);
         const canvas = canvasRef.current;
         if (!canvas || cancelled) return;
+        // 画布后备缓冲随预览框（contain 居中，见 session.resize）；初始以 IR 画布尺寸起底
         canvas.width = ir.canvas.width;
         canvas.height = ir.canvas.height;
         const session = await PreviewSession.create(canvas, ir, mediaUrls);
@@ -56,6 +66,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
           onTimeUs(us);
         };
         sessionRefLocal.current = session;
+        boxObserver.observe(canvas.parentElement ?? canvas);
         const fontUrl = await window.desktop.captionFontUrl();
         const fontBuffer = await (await fetch(fontUrl)).arrayBuffer();
         await session.loadCaptionFont(fontBuffer);
@@ -72,6 +83,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
     })();
     return () => {
       cancelled = true;
+      boxObserver.disconnect();
       sessionRefLocal.current?.dispose();
       sessionRefLocal.current = null;
     };
@@ -111,14 +123,14 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
   }, [load.status]);
 
   return (
-    <div className="synthetic-preview" aria-label="合成预览" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "100%", height: "100%" }}>
-      <canvas ref={canvasRef} className="synthetic-canvas" style={{ display: load.status === "ready" ? "block" : "none", maxWidth: "100%", maxHeight: "100%" }} />
+    <div className="synthetic-preview" aria-label="合成预览" style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", width: "100%", height: "100%" }}>
+      <canvas ref={canvasRef} className="synthetic-canvas" style={{ display: load.status === "ready" ? "block" : "none", width: "100%", height: "100%" }} />
       {load.status !== "ready" && <div className="synthetic-loading">{load.message || "…"}</div>}
       {load.status === "ready" && metrics && (
         <div className={`synthetic-metrics${metrics.last_error ? " err" : ""}`}>
           {metrics.last_error
             ? `最近错误：${metrics.last_error}`
-            : `合成预览 · 任务 p95 ${metrics.task_ms_p95}ms · 丢帧 ${metrics.dropped_frames}`}
+            : `合成预览 · 任务 p95 ${metrics.task_ms_p95}ms · 解码 p95 ${metrics.decode_ms_p95}ms · 丢帧 ${metrics.dropped_frames}`}
         </div>
       )}
     </div>
