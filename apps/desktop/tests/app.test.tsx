@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Job, ModelDetail, TimelineDocument, TimelineState } from "@aivideo/contracts";
 import type { DesktopApi } from "../electron/preload/index.js";
 import { App } from "../src/app/App.js";
+import { fixturePreviewIrPresentation } from "./fixtures/preview-ir.js";
 
 const now = "2026-08-11T00:00:00.000Z";
 const project = { project_id: "project_1" as never, name: "演示项目", status: "active" as const, canvas: { width: 1080, height: 1920, fps_num: 30, fps_den: 1 }, root_dir_name: "Demo", current_timeline_revision_id: "revision_1", created_at: now, updated_at: now, last_opened_at: now };
@@ -56,7 +57,7 @@ function desktopApi(options: { timeline?: TimelineState | null; models?: ModelDe
     getBrief: vi.fn().mockRejectedValue(new Error("BRIEF_NOT_FOUND")), putBrief: vi.fn().mockResolvedValue({}), listRecipes: vi.fn().mockResolvedValue({ items: [{ schema_version: 1, recipe_id: "balanced-narrative-v1", name: "Balanced", summary: "测试", rules: { selection: "keyword", pace: "balanced", max_gap_us: 1 }, document_sha256: `sha256:${"a".repeat(64)}` }] }), listProviders: vi.fn().mockResolvedValue({ items: [{ provider_config_id: "provider_1", kind: "openai_compatible_text", display_name: "测试 Provider", base_url: "https://provider.test", model: "model", enabled: true, credential_status: "configured", input_price_per_million: null, output_price_per_million: null, timeline_patch_capability_status: "supported", timeline_patch_response_adapter_id: "openai_chat_completions_json_schema_v1", timeline_patch_probe_protocol_version: "1", timeline_patch_capability_tested_at: now, timeline_patch_capability_failure_code: null, timeline_patch_capability_probe_sha256: `sha256:${"d".repeat(64)}`, candidate_capability_status: "supported", candidate_response_adapter_id: "openai_chat_completions_json_schema_v1", candidate_probe_protocol_version: "1", candidate_capability_tested_at: now, candidate_capability_failure_code: null, candidate_capability_probe_sha256: `sha256:${"e".repeat(64)}`, created_at: now, updated_at: now }] }), createProvider: vi.fn(), setProviderSecret: vi.fn(), deleteProviderSecret: vi.fn().mockResolvedValue({ provider_config_id: "provider_1", credential_status: "missing" }), testProvider: vi.fn().mockResolvedValue({ status: "succeeded" }), testCandidateProviderCapability: vi.fn().mockResolvedValue({ candidate_capability_status: "supported", candidate_response_adapter_id: "openai_chat_completions_json_schema_v1", candidate_probe_protocol_version: "1", candidate_capability_tested_at: now, candidate_capability_failure_code: null, candidate_capability_probe_sha256: `sha256:${"e".repeat(64)}` }), preparePlanning: vi.fn().mockResolvedValue({ egress_preview_id: "preview_1", provider: { display_name: "测试", origin: "https://provider.test", model: "model" }, prompt_template_version: "candidate-plan-v1", sent_fields: ["segments.text"], payload_sha256: `sha256:${"b".repeat(64)}`, expires_at: now, payload: { segments: [{ segment_ref: "s1", text: "第一句" }] }, stats: { transcript_count: 1, segment_count: 1, character_count: 3, estimated_tokens: 1 } }), createPlanning: vi.fn().mockResolvedValue({ job: { ...createdJob, kind: "candidate_generation" } }), listCandidatePlans: vi.fn().mockResolvedValue({ items: [] }), getCandidateClipMedia: vi.fn(), adoptCandidatePlan: vi.fn().mockResolvedValue(state),
     prepareTimelinePatch: vi.fn().mockResolvedValue({ timeline_patch_egress_preview_id: "patch_preview_1", provider: { display_name: "测试 Provider", origin: "https://provider.test", model: "model" }, prompt_template_version: "timeline-patch-v1", output_schema_version: "timeline-patch-output-v1", sent_fields: ["instruction", "timeline"], payload_sha256: `sha256:${"c".repeat(64)}`, character_count: 100, estimated_tokens: 30, clip_count: 1, caption_count: 1, locked_count: 0, expires_at: now }), testTimelinePatchProviderCapability: vi.fn().mockResolvedValue({ timeline_patch_capability_status: "supported", timeline_patch_response_adapter_id: "openai_chat_completions_json_schema_v1", timeline_patch_probe_protocol_version: "1", timeline_patch_capability_tested_at: now, timeline_patch_capability_failure_code: null, timeline_patch_probe_sha256: `sha256:${"d".repeat(64)}` }), createTimelinePatchGeneration: vi.fn().mockResolvedValue({ timeline_patch_generation_id: "patch_generation_1", job: { ...createdJob, kind: "timeline_patch_generation" } }), getTimelinePatchGeneration: vi.fn(), listTimelinePatchProposals: vi.fn().mockResolvedValue({ items: [] }), getTimelinePatchProposal: vi.fn(), applyTimelinePatchProposal: vi.fn().mockResolvedValue(state), compareTimelineRevisions: vi.fn(),
     createTimeline: vi.fn().mockResolvedValue(state), getTimeline: timeline ? vi.fn().mockResolvedValue(timeline) : vi.fn().mockRejectedValue(new Error("TIMELINE_NOT_FOUND 404")), patchTimeline: vi.fn().mockResolvedValue(state), undoTimeline: vi.fn().mockResolvedValue(state), redoTimeline: vi.fn().mockResolvedValue(state), saveTimelineDraft: vi.fn().mockResolvedValue({ project_id: project.project_id, base_revision_id: state.current_revision.timeline_revision_id, document: timelineDocument, updated_at: now, conflict: false }), deleteTimelineDraft: vi.fn().mockResolvedValue(undefined), listTimelineRevisions: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), getTimelineRevision: vi.fn(),
-    createPreview: vi.fn().mockResolvedValue({ job: null, preview: null, reused: false }), listPreviews: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), chooseExportDestination: vi.fn().mockResolvedValue(null), createExport: vi.fn(), listExports: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), getRenderArtifact: vi.fn(), getPreviewIr: vi.fn().mockRejectedValue(new Error("PREVIEW_IR_UNSUPPORTED")), captionFontUrl: vi.fn().mockResolvedValue(""),
+    createPreview: vi.fn().mockResolvedValue({ job: null, preview: null, reused: false }), listPreviews: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), chooseExportDestination: vi.fn().mockResolvedValue(null), createExport: vi.fn(), listExports: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), getRenderArtifact: vi.fn(), getPreviewIr: vi.fn().mockResolvedValue(fixturePreviewIrPresentation()), captionFontUrl: vi.fn().mockResolvedValue(""),
     listPlatformPresets: vi.fn().mockResolvedValue({ items: [] }), listRenditionPresets: vi.fn().mockResolvedValue({ items: [] }), createRenditionPreview: vi.fn(), listRenditionPreviews: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), chooseExportDirectory: vi.fn().mockResolvedValue(null), createExportBatch: vi.fn(), getExportBatch: vi.fn(), listExportBatches: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), cancelExportBatch: vi.fn(), retryExportBatch: vi.fn(),
     createRenditionReframePreview: vi.fn(), listRenditionReframePreviews: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), createReframeExportBatch: vi.fn(), getReframeExportBatch: vi.fn(), listReframeExportBatches: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), cancelReframeExportBatch: vi.fn(), retryReframeExportBatch: vi.fn(),
     prepareMediaGeneration: vi.fn(), createMediaGeneration: vi.fn(), listMediaGenerationRequests: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), getMediaGenerationRequest: vi.fn(), listMediaGenerationTasks: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), retryMediaGenerationTask: vi.fn(), cancelMediaGenerationTask: vi.fn(),
@@ -242,26 +243,32 @@ describe("素材箱交互", () => {
   it("双击素材在预览播放且不修改时间线，回到时间线后退出素材预览", async () => {
     const api = desktopApi(); window.desktop = api; render(<App />);
     await screen.findByText(image.display_name);
+    // 等合成预览回退（jsdom 无 WebGL2）落定，交互预览就绪后再操作；套件并发
+    // 负载下回退可能超过默认 1s 超时，放宽。
+    await screen.findByLabelText("交互预览视频", {}, { timeout: 10_000 });
     const imageItem = screen.getByText(image.display_name).closest(".asset-item")!;
     fireEvent.doubleClick(imageItem);
     expect(await screen.findByAltText(image.display_name)).toBeInTheDocument();
     expect(screen.queryByLabelText("交互预览视频")).not.toBeInTheDocument();
     expect(api.patchTimeline).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText("时间线播放头"), { target: { value: 1000000 } });
+    // 播放头 slider 是 role=slider 的 div（无 input value setter），走键盘可访问路径：
+    // 时间线 5s，ArrowRight 每次 +1/300 → 60 次 = 1s。
+    const slider = screen.getByLabelText("时间线播放头");
+    for (let i = 0; i < 60; i += 1) fireEvent.keyDown(slider, { key: "ArrowRight" });
     expect(screen.queryByAltText(image.display_name)).not.toBeInTheDocument();
     expect(screen.getByLabelText("交互预览视频")).toBeInTheDocument();
   });
 
   it("点击预览画面选中播放头处的片段并显示选中边框", async () => {
     const api = desktopApi(); window.desktop = api; render(<App />);
-    await screen.findByLabelText("交互预览视频");
+    await screen.findByLabelText("交互预览视频", {}, { timeout: 10_000 });
     const frame = screen.getByRole("button", { name: "选中播放头处的片段" });
     expect(frame.className).not.toContain("selected");
     fireEvent.click(frame);
     await waitFor(() => expect(frame.className).toContain("selected"));
     expect(api.patchTimeline).not.toHaveBeenCalled();
-    // 切到无片段的播放头位置再点击，选中态清除
-    fireEvent.change(screen.getByLabelText("时间线播放头"), { target: { value: 6000000 } });
+    // 切到无片段的播放头位置（End 键跳到片尾）再点击，选中态清除
+    fireEvent.keyDown(screen.getByLabelText("时间线播放头"), { key: "End" });
     fireEvent.click(frame);
     await waitFor(() => expect(frame.className).not.toContain("selected"));
   });
@@ -309,6 +316,9 @@ describe("Stage 2A AI 粗剪", () => {
   it("必须先 prepare 再经明确确认创建，且不渲染密钥", async () => {
     const api = desktopApi(); api.listCandidatePlans = vi.fn().mockResolvedValue({ items: [{} as never] }); window.desktop = api; render(<App />);
     await expectSwitcherName("演示项目");
+    // 等合成预览回退（jsdom 无 WebGL2）落定：回退触发的重渲若撞上 RTL 模拟的
+    // change 事件会触发 React change 去重、丢掉第一次模拟输入——先 settle 再交互。
+    await screen.findByRole("note", { name: "合成预览回退提示" }, { timeout: 10_000 });
     fireEvent.click(screen.getByRole("button", { name: "AI 粗剪" }));
     fireEvent.change(await screen.findByLabelText("主题"), { target: { value: "游戏高光" } });
     fireEvent.change(screen.getByLabelText("受众"), { target: { value: "玩家" } });
@@ -330,6 +340,7 @@ describe("Stage 2A AI 粗剪", () => {
   });
   it("删除密钥使用白名单桥接且不回显", async () => {
     const api = desktopApi(); window.desktop = api; render(<App />); await expectSwitcherName("演示项目");
+    await screen.findByRole("note", { name: "合成预览回退提示" }, { timeout: 10_000 }); // 等回退落定再交互（见"必须先 prepare"用例注释）
     fireEvent.click(screen.getByRole("button", { name: "AI 粗剪" })); fireEvent.change(await screen.findByLabelText("Provider"), { target: { value: "provider_1" } });
     fireEvent.click(screen.getByRole("button", { name: "删除密钥" })); await waitFor(() => expect(api.deleteProviderSecret).toHaveBeenCalledWith("provider_1"));
     expect(document.body.textContent).not.toContain("SENTINEL-KEY-NEVER-LOG");
@@ -338,6 +349,7 @@ describe("Stage 2A AI 粗剪", () => {
     const api = desktopApi(); api.listCandidatePlans = vi.fn().mockImplementation(() => new Promise(() => undefined)); let listener: ((value: Job) => void) | undefined;
     api.subscribeJob = vi.fn((_id, next) => { listener = next; return () => undefined; });
     window.desktop = api; render(<App />); await expectSwitcherName("演示项目");
+    await screen.findByRole("note", { name: "合成预览回退提示" }, { timeout: 10_000 }); // 等回退落定再交互（见"必须先 prepare"用例注释）
     fireEvent.click(screen.getByRole("button", { name: "AI 粗剪" }));
     fireEvent.change(await screen.findByLabelText("主题"), { target: { value: "游戏高光" } }); fireEvent.change(screen.getByLabelText("受众"), { target: { value: "玩家" } }); fireEvent.change(screen.getByLabelText("叙事目标"), { target: { value: "展示操作" } }); fireEvent.change(screen.getByLabelText("制作配方"), { target: { value: "balanced-narrative-v1" } }); fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "provider_1" } }); fireEvent.change(screen.getByLabelText("就绪转录"), { target: { value: "transcript_1" } });
     fireEvent.click(screen.getByRole("button", { name: "准备外传确认" })); await screen.findByText("确认发送的精确内容"); fireEvent.click(screen.getByRole("button", { name: "我确认发送以上内容" }));

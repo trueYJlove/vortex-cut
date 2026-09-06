@@ -630,6 +630,9 @@ input, select, textarea { font-size: 12.5px; }
 .preview-context { position: absolute; z-index: 5; top: 18px; right: 18px; max-width: calc(100% - 36px); padding: 4px 6px; background: rgba(0, 0, 0, .78); color: var(--vc-text); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .preview-context.authoritative { border: 1px solid var(--vc-accent); color: #8ce8cf; }
 .preview-context.interactive { border: 1px solid #3b474d; color: var(--vc-text-2); }
+.preview-context.synthetic { border: 1px solid rgba(37, 211, 172, .55); color: #7fe6cc; }
+/* 合成预览回退提示：内联于左上标签下方（不打全局 alert——回退是常规降级而非错误）。 */
+.synthetic-note { position: absolute; z-index: 5; top: 44px; left: 18px; max-width: calc(100% - 36px); padding: 4px 6px; background: rgba(0, 0, 0, .78); border: 1px solid #d1a453; color: #f0c979; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .preview-context.stale { border-color: #d1a453; color: #f0c979; }
 .timeline-drop-zone .drop-hint { white-space: nowrap; font-size: 11px; color: #d1a453; pointer-events: none; }
 .timeline-drop-zone.active { width: auto; flex-basis: auto; padding: 0 8px; }
