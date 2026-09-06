@@ -433,7 +433,7 @@ export class PreviewSession {
         this.audio.set(segment.clip_id, el);
       }
       const speed = Math.max(0.25, Math.min(4, segment.speed_milli / 1000));
-      el.playbackRate = speed;
+      if (el.playbackRate !== speed) el.playbackRate = speed; // 重复赋值会扰动媒体栈重采样
       el.volume = Math.max(0, Math.min(1, Math.pow(10, cfg.gainDb / 20)));
       const expected = segment.source_start_us / 1e6 + ((tUs - segment.timeline_start_us) / 1e6) * speed;
       // 阈值 0.25s：currentTime 硬跳变本身可闻，只校正实质漂移
