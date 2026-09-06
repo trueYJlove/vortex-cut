@@ -31,6 +31,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const sessionRef = useRef<PreviewSession | null>(null);
   const lastReportedUs = useRef<number>(playheadUs);
+  const lastReportWall = useRef<number>(0);
   const [load, setLoad] = useState<LoadState>({ status: "loading", message: "正在加载合成预览" });
   const [metrics, setMetrics] = useState<PreviewSessionMetrics | null>(null);
 
@@ -67,9 +68,18 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
         if (cancelled) { session.dispose(); return; }
         session.onTimeUs = (us: number) => {
           lastReportedUs.current = us;
-          onTimeUs(us);
+          // 播放头上报节流至 10Hz（与交互预览时钟同频）：App 组件树重渲是主线程
+          // 大头，30-60Hz 上报会挤压合成管线（实测丢帧 292 + 音频卡顿）。
+          const now = performance.now();
+          if (now - lastReportWall.current >= 100 || !session.isPlaying) {
+            lastReportWall.current = now;
+            onTimeUs(us);
+          }
         };
-        session.onEnded = () => onEnded?.();
+        session.onEnded = () => {
+          onTimeUs(lastReportedUs.current); // 结束时冲齐最终播放头
+          onEnded?.();
+        };
         sessionRefLocal.current = session;
         boxObserver.observe(canvas.parentElement ?? canvas);
         const fontUrl = await window.desktop.captionFontUrl();

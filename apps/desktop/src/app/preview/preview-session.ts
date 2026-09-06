@@ -96,6 +96,7 @@ export class PreviewSession {
   private lastSeekWall = 0;
   private lastSeekMs = 0;
   private dragMode = false;
+  private lastAdvanceWall = 0;
   lastError: string | null = null;
   onTimeUs: ((us: number) => void) | null = null;
   private tickets: Map<string, string> | null = null;
@@ -509,6 +510,7 @@ export class PreviewSession {
     this.dropped = 0; // 丢帧口径 = 本次播放段（拖拽/seek 冷启尖峰不跨段累计）
     this.anchorWall = performance.now();
     this.anchorFrame = this.currentFrame;
+    this.lastAdvanceWall = this.anchorWall;
     const frameDur = 1000 / this.ir.canvas.fps;
     const tick = () => {
       if (!this.playing || this.disposed) return;
@@ -530,6 +532,7 @@ export class PreviewSession {
         this.taskTimes.push(performance.now() - taskStart);
         if (this.taskTimes.length > 1200) this.taskTimes.splice(0, this.taskTimes.length - 1200);
         this.currentFrame = composed;
+        this.lastAdvanceWall = now;
         this.onTimeUs?.(this.ir.frames[composed]!.t_us);
         this.syncAudio(this.ir.frames[composed]!.t_us);
       }
@@ -544,7 +547,10 @@ export class PreviewSession {
         this.dropped += 1;
         this.droppedLifetime += 1;
       }
-      if (target >= last) {
+      // 结束判定 = 合成推进到片尾（而非时钟到达）：时钟先到时等待合成追平，
+      // 否则会提前停在片尾、且每次续播止点渐近（用户实测 10.12→10.17→10.19）。
+      // 片尾解码长期不可达的兜底：2s 无推进则结束（已知驱动限制场景）。
+      if (this.currentFrame >= last || (target >= last && now - this.lastAdvanceWall > 2000)) {
         this.pause();
         this.onEnded?.();
         return;
