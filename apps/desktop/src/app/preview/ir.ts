@@ -24,6 +24,8 @@ export interface IrMainSegment {
   alpha: number;
   /** V1 静态/关键帧 rotate（度）。IR v0.2+ 携带；旧 IR 缺省 0。 */
   rotation_deg?: number;
+  /** 主轨布局（IR v0.3+）：blurred_background = 先画模糊垫底再画 fit 内容。 */
+  layout?: string;
 }
 
 export interface IrMainTransition {

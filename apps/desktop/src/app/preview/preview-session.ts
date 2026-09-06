@@ -598,6 +598,10 @@ export class PreviewSession {
     if (main.kind === "segment") {
       const pair = this.texturesFor(main.input_id, main.src_n, false);
       if (pair) {
+        // blurred_background：先画模糊垫底再画 fit 内容（与权威端 gblur 语义对齐）
+        if (main.layout === "blurred_background") {
+          this.compositor.drawBlurredFill(main.input_id, pair.y, pair.uv, main.alpha);
+        }
         this.compositor.drawTextures(main.input_id, pair.y, pair.uv,
           shiftedRect(main.content, main.shift), main.alpha, main.rotation_deg ?? 0);
       }
@@ -605,7 +609,23 @@ export class PreviewSession {
       const shared = main.left.input_id === main.right.input_id;
       const left = this.texturesFor(main.left.input_id, main.left.src_n, shared);
       const right = this.texturesFor(main.right.input_id, main.right.src_n, false);
-      if (left && right) this.compositor.drawTransitionWithPairs(left, right, main);
+      if (left && right) {
+        // 转场两侧的模糊垫底：与 drawTransitionWithPairs 相同的 alpha 口径，
+        // 垫底先画（下层），内容后画——fade/fadeblack 观感与内容一致
+        if (main.left.layout === "blurred_background") {
+          const alphaL = main.transition === "fadeblack"
+            ? main.left.alpha * Math.max(0, 1 - 2 * main.p)
+            : main.left.alpha;
+          this.compositor.drawBlurredFill(main.left.input_id, left.y, left.uv, alphaL);
+        }
+        if (main.right.layout === "blurred_background") {
+          const alphaR = main.transition === "fadeblack"
+            ? main.right.alpha * Math.max(0, 2 * main.p - 1)
+            : main.right.alpha * main.p;
+          this.compositor.drawBlurredFill(main.right.input_id, right.y, right.uv, alphaR);
+        }
+        this.compositor.drawTransitionWithPairs(left, right, main);
+      }
     }
     for (const overlay of frame.overlays) {
       const pair = this.texturesFor(overlay.input_id, overlay.src_n, false);

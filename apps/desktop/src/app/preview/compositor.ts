@@ -316,6 +316,7 @@ export class Compositor {
     sourceWidth = 1920,
   ): void {
     const gl = this.gl;
+    const target = this.targetOverride ?? { width: this.canvas.width, height: this.canvas.height, fitX: this.fitX, fitY: this.fitY, fitScale: this.fitScale };
     gl.activeTexture(gl.TEXTURE0);
     if (textureUV !== null) {
       gl.bindTexture(gl.TEXTURE_2D, textureY);
@@ -334,8 +335,8 @@ export class Compositor {
       gl.uniform1f(this.uniforms.u_yuv_mode, 0);
     }
     gl.uniform4f(this.uniforms.u_rect, rect.x, rect.y, rect.w, rect.h);
-    gl.uniform2f(this.uniforms.u_canvas, this.canvas.width, this.canvas.height);
-    gl.uniform4f(this.uniforms.u_fit, this.fitX, this.fitY, this.fitScale, this.fitScale);
+    gl.uniform2f(this.uniforms.u_canvas, target.width, target.height);
+    gl.uniform4f(this.uniforms.u_fit, target.fitX, target.fitY, target.fitScale, target.fitScale);
     gl.uniform1f(this.uniforms.u_alpha, alpha);
     // 权威端 rotate 单位缺陷已修复（456c89a：度→弧度换算入滤镜）——
     // GL 端同步度数语义；负号为采样方向对齐（ffmpeg rotate 正角方向，P2 实证校准）。
@@ -615,6 +616,83 @@ export class Compositor {
                rect: IrContent, alpha: number, rotationDeg: number): void {
     this.drawRectYuv(y, uv, null, rect, alpha, rotationDeg, false,
       this.sourceWidthScale.get(inputId) ?? 1920);
+  }
+
+  /** 模糊垫底 FBO 目标：IR 画布 ÷4 与 ÷16 两级（懒创建，LINEAR + CLAMP）。 */
+  private blurTargets = new Map<string, { fbo: WebGLFramebuffer; tex: WebGLTexture; w: number; h: number }>();
+  private targetOverride: { width: number; height: number; fitX: number; fitY: number; fitScale: number } | null = null;
+
+  private ensureBlurTarget(key: string, divisor: number): { fbo: WebGLFramebuffer; tex: WebGLTexture; w: number; h: number } {
+    const w = Math.max(2, Math.round(this.ir.canvas.width / divisor));
+    const h = Math.max(2, Math.round(this.ir.canvas.height / divisor));
+    const existing = this.blurTargets.get(key);
+    if (existing && existing.w === w && existing.h === h) return existing;
+    if (existing) { this.gl.deleteFramebuffer(existing.fbo); this.gl.deleteTexture(existing.tex); }
+    const gl = this.gl;
+    const tex = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const fbo = gl.createFramebuffer()!;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    const target = { fbo, tex, w, h };
+    this.blurTargets.set(key, target);
+    return target;
+  }
+
+  /**
+   * 模糊垫底（blurred_background）：权威端语义 = 源 scale-to-increase 覆盖画布
+   * + crop + gblur sigma=20，其上再叠 fit 内容。实时端用两级降采样近似
+   * （÷4 → ÷16，线性放大还原）——宽范围低频模糊观感与 gblur 相当，
+   * 成本 2 个小目标 quad，known_approximation。
+   * 由会话在内容绘制**之前**调用（垫底在下层）；转场两侧按各自 alpha 调用。
+   */
+  drawBlurredFill(inputId: string, y: WebGLTexture, uv: WebGLTexture | null, alpha: number): void {
+    if (this.contextLost || alpha <= 0) return;
+    const input = this.ir.inputs.find(item => item.input_id === inputId);
+    const srcW = Math.max(2, input?.geometry.width || 16);
+    const srcH = Math.max(2, input?.geometry.height || 9);
+    const canvasW = this.ir.canvas.width;
+    const canvasH = this.ir.canvas.height;
+    const aspect = srcW / srcH;
+    let rectW = canvasW;
+    let rectH = Math.round(rectW / aspect);
+    if (rectH < canvasH) { rectH = canvasH; rectW = Math.round(canvasH * aspect); }
+    // cover 盒（超出画布部分被视口裁掉 = crop 语义）
+    const rect: IrContent = { x: Math.round((canvasW - rectW) / 2), y: Math.round((canvasH - rectH) / 2), w: rectW, h: rectH };
+    const gl = this.gl;
+    const small = this.ensureBlurTarget("small", 4);
+    const tiny = this.ensureBlurTarget("tiny", 16);
+    const restoreViewport = [this.canvas.width, this.canvas.height] as const;
+    gl.clearColor(0, 0, 0, 0); // FBO 目标清为透明黑（垫底 alpha<1 时与下层正确混合）
+    // pass 1：源 → ÷4（YUV 直绘 cover，minification 4× 计入 LOD）
+    gl.bindFramebuffer(gl.FRAMEBUFFER, small.fbo);
+    gl.viewport(0, 0, small.w, small.h);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    // u_canvas 必须是 **IR 画布尺寸**（rect 在 IR 像素空间）：clip [-1,1] 铺满
+    // 当前视口 → 整幅画布图像（cover 裁切后）以 ÷4 分辨率落入 FBO。若把
+    // u_canvas 设为 FBO 尺寸，quad 只会把画布左上角一小块映射进视口（首版
+    // 实测黑底的根因）。
+    this.targetOverride = { width: canvasW, height: canvasH, fitX: 0, fitY: 0, fitScale: 1 };
+    // alpha=1：真实 alpha 只在最终 pass 应用，否则与 FBO 混合会双重乘法变暗
+    this.drawRectYuv(y, uv, null, rect, 1, 0, false, srcW * 4);
+    // pass 2：÷4 → ÷16（rect 在 small 纹理空间：u_canvas=small，全图映射进 tiny）
+    gl.bindFramebuffer(gl.FRAMEBUFFER, tiny.fbo);
+    gl.viewport(0, 0, tiny.w, tiny.h);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    this.targetOverride = { width: small.w, height: small.h, fitX: 0, fitY: 0, fitScale: 1 };
+    this.drawRectYuv(small.tex, null, small.tex, { x: 0, y: 0, w: small.w, h: small.h }, 1, 0, false, small.w * 4);
+    this.targetOverride = null;
+    // pass 3：÷16 → 默认帧缓冲全画布（线性放大 = 模糊），此处应用垫底 alpha
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, restoreViewport[0], restoreViewport[1]);
+    gl.clearColor(0, 0, 0, 1);
+    this.drawRectYuv(tiny.tex, null, tiny.tex, { x: 0, y: 0, w: canvasW, h: canvasH }, alpha, 0, false, tiny.w);
   }
 
   /** 转场绘制（左右纹理对由会话环形/影子槽位解析；LOD 按各自输入源宽）。 */

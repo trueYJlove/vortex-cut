@@ -58,7 +58,8 @@ def test_simple_timeline_frame_table() -> None:
     assert ir["frames"][0]["main"] == {
         "kind": "segment", "clip_id": "a", "input_id": "I0", "src_n": 0, "src_t_us": 0,
         "content": {"x": 0, "y": 0, "w": 960, "h": 540},
-        "shift": {"dx": 0.0, "dy": 0.0}, "alpha": 1.0, "rotation_deg": 0.0}
+        "shift": {"dx": 0.0, "dy": 0.0}, "alpha": 1.0, "rotation_deg": 0.0,
+        "layout": "fit"}
     # 1920x1080 fit 960x540：恰为 2:1，无黑边
     assert ir["frames"][30]["main"]["src_n"] == 30
     assert ir["frames"][60]["main"]["clip_id"] == "b"
@@ -237,6 +238,15 @@ def test_scale_keyframes_are_noop_and_rotate_visible() -> None:
     assert f["rotation_deg"] == 15.0
     # 白名单：scale/rotate 关键帧不再拒绝（v0.3 重入）
     assert frames[0]["main"]["rotation_deg"] == 0.0
+
+
+def test_v1_blurred_background_layout_passes_through() -> None:
+    # V1 主轨 blurred_background：白名单放行，main 条目携带 layout（合成器垫底）
+    plan = _plan([_segment("a", 0, 2 * US, 0, 2 * US, layout="blurred_background")])
+    ir = project_preview_ir(plan, _probe(plan))
+    assert ir["frames"][0]["main"]["layout"] == "blurred_background"
+    # 内容盒语义与 fit 相同（权威端 blurred_background 前景 = fit 缩放）
+    assert ir["frames"][0]["main"]["content"] == {"x": 0, "y": 0, "w": 960, "h": 540}
 
 
 def test_v1_static_transform_content_box() -> None:

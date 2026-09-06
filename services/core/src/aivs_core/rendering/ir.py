@@ -25,7 +25,7 @@ MAX_IR_FRAMES = 27_000  # 15 分钟 @30fps（O2 体量护栏）
 
 ALLOWED_KEYFRAME_PROPS = {"position", "opacity", "scale", "rotate"}
 ALLOWED_TRANSITIONS = {"fade", "fadeblack"}
-ALLOWED_MAIN_LAYOUTS = {"fit"}
+ALLOWED_MAIN_LAYOUTS = {"fit", "blurred_background"}
 
 
 def _fail(clip_id: str, what: str) -> DomainError:
@@ -357,6 +357,8 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
             "shift": {"dx": round(shift_dx, 3), "dy": round(shift_dy, 3)},
             "alpha": round(_opacity_alpha(keyframes, t_seg_us) * static_alpha, 6),
             "rotation_deg": round(rotation_deg, 4),
+            # 主轨布局（blurred_background = 模糊垫底 + fit 内容；合成器消费）。
+            "layout": segment.get("layout", "fit"),
         }
 
     # 输出时长：可视化区段终点与 A1 纯音频窗口终点取大——音频长于画面时以
@@ -466,6 +468,7 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
             "PiP overlay 忽略 transform.opacity（_pip_overlay_chain 未消费）",
             "字幕帧文本光栅化 libass vs 浏览器（单独口径：bbox IoU + diff 比率）",
             "A1 音频窗口按段起点取借用位移；跨越主轨转场借用点的音频段不做分段重映射",
+            "blurred_background 垫底 = 两级降采样(÷4→÷16)线性放大近似 gblur sigma=20",
         ],
         "frames": frames,
     }
