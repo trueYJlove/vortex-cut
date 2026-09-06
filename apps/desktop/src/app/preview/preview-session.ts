@@ -510,6 +510,9 @@ export class PreviewSession {
     this.lastSeekMs = performance.now() - now;
     if (this.frameReady(frame)) this.compose(frame);
     this.onTimeUs?.(frame.t_us);
+    // 暂停态预热预读链：预解码后续 LEAD 帧——再按播放即有热跑道
+    //（消除 seek 后播放头几百毫秒的冷启丢帧）。
+    if (!this.playing) this.pump(index);
     return frame.n;
   }
 
