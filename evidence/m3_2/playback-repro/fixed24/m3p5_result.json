@@ -30,7 +30,7 @@
   }
  ],
  "duration_ms": 10667,
- "wall_ms": 11180,
+ "wall_ms": 12341,
  "composed_frames": 640,
  "dropped_frames": 0,
  "task_ms": {
@@ -39,24 +39,25 @@
  },
  "decode_ms": {
   "p50": 1.9,
-  "p95": 14.4
+  "p95": 14.2
  },
  "compose_interval_ms": {
   "p50": 16.7,
-  "p95": 23.2,
-  "max": 98
+  "p95": 28,
+  "max": 95.4
  },
  "last_error": null,
+ "replay_after_end_ok": true,
  "samples": [
   {
-   "t_ms": 61,
+   "t_ms": 52,
    "content_us": 33333,
-   "composed": 5,
+   "composed": 4,
    "dropped": 0,
-   "task_ms_p50": 0,
-   "task_ms_p95": 0.2,
-   "decode_ms_p50": 1.3,
-   "decode_ms_p95": 24.3,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.1,
+   "decode_ms_p50": 1.1,
+   "decode_ms_p95": 24.6,
    "decode_in_flight": 1,
    "last_error": null,
    "chain": {
@@ -93,9 +94,9 @@
    "composed": 18,
    "dropped": 0,
    "task_ms_p50": 0.1,
-   "task_ms_p95": 0.2,
+   "task_ms_p95": 0.1,
    "decode_ms_p50": 1.1,
-   "decode_ms_p95": 24.3,
+   "decode_ms_p95": 24.6,
    "decode_in_flight": 0,
    "last_error": null,
    "chain": {
@@ -103,12 +104,14 @@
      "fed": 13,
      "inFlight": null,
      "ring": [
-      12,
-      13,
       8,
       9,
       10,
-      11
+      11,
+      12,
+      13,
+      6,
+      7
      ],
      "shadow": -1,
      "last_decode": {
@@ -129,14 +132,14 @@
    }
   },
   {
-   "t_ms": 503,
+   "t_ms": 506,
    "content_us": 500000,
    "composed": 33,
    "dropped": 0,
    "task_ms_p50": 0.1,
-   "task_ms_p95": 0.2,
-   "decode_ms_p50": 1.3,
-   "decode_ms_p95": 4.9,
+   "task_ms_p95": 0.1,
+   "decode_ms_p50": 1.6,
+   "decode_ms_p95": 4.8,
    "decode_in_flight": 0,
    "last_error": null,
    "chain": {
@@ -144,12 +147,14 @@
      "fed": 20,
      "inFlight": null,
      "ring": [
+      16,
+      17,
       18,
       19,
       20,
-      15,
-      16,
-      17
+      13,
+      14,
+      15
      ],
      "shadow": -1,
      "last_decode": {
@@ -170,14 +175,14 @@
    }
   },
   {
-   "t_ms": 790,
+   "t_ms": 795,
    "content_us": 766666,
    "composed": 49,
    "dropped": 0,
    "task_ms_p50": 0.1,
-   "task_ms_p95": 0.2,
-   "decode_ms_p50": 1.4,
-   "decode_ms_p95": 4.9,
+   "task_ms_p95": 0.1,
+   "decode_ms_p50": 1.6,
+   "decode_ms_p95": 4.8,
    "decode_in_flight": 0,
    "last_error": null,
    "chain": {
@@ -190,6 +195,8 @@
       26,
       27,
       28,
+      21,
+      22,
       23
      ],
      "shadow": -1,
@@ -211,14 +218,14 @@
    }
   },
   {
-   "t_ms": 1005,
+   "t_ms": 1008,
    "content_us": 1000000,
    "composed": 62,
    "dropped": 0,
    "task_ms_p50": 0.1,
-   "task_ms_p95": 0.2,
-   "decode_ms_p50": 1.6,
-   "decode_ms_p95": 4.9,
+   "task_ms_p95": 0.3,
+   "decode_ms_p50": 1.8,
+   "decode_ms_p95": 4.8,
    "decode_in_flight": 1,
    "last_error": null,
    "chain": {
@@ -226,12 +233,14 @@
      "fed": 35,
      "inFlight": 35,
      "ring": [
-      30,
-      31,
       32,
       33,
       34,
-      29
+      27,
+      28,
+      29,
+      30,
+      31
      ],
      "shadow": -1,
      "last_decode": {
@@ -252,14 +261,14 @@
    }
   },
   {
-   "t_ms": 1285,
+   "t_ms": 1301,
    "content_us": 1266666,
-   "composed": 78,
+   "composed": 79,
    "dropped": 0,
    "task_ms_p50": 0.1,
-   "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.7,
-   "decode_ms_p95": 3.2,
+   "task_ms_p95": 0.4,
+   "decode_ms_p50": 2,
+   "decode_ms_p95": 3.6,
    "decode_in_flight": 0,
    "last_error": null,
    "chain": {
@@ -267,12 +276,14 @@
      "fed": 43,
      "inFlight": null,
      "ring": [
+      40,
+      41,
       42,
       43,
+      36,
+      37,
       38,
-      39,
-      40,
-      41
+      39
      ],
      "shadow": -1,
      "last_decode": {
@@ -293,24 +304,26 @@
    }
   },
   {
-   "t_ms": 1540,
-   "content_us": 1533333,
-   "composed": 94,
+   "t_ms": 1524,
+   "content_us": 1500000,
+   "composed": 92,
    "dropped": 0,
    "task_ms_p50": 0.1,
-   "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.7,
-   "decode_ms_p95": 3.2,
-   "decode_in_flight": 1,
+   "task_ms_p95": 0.4,
+   "decode_ms_p50": 2,
+   "decode_ms_p95": 3.6,
+   "decode_in_flight": 0,
    "last_error": null,
    "chain": {
     "I0": {
-     "fed": 51,
-     "inFlight": 51,
+     "fed": 50,
+     "inFlight": null,
      "ring": [
       48,
       49,
       50,
+      43,
+      44,
       45,
       46,
       47
@@ -334,35 +347,37 @@
    }
   },
   {
-   "t_ms": 1755,
-   "content_us": 1733333,
-   "composed": 107,
+   "t_ms": 1792,
+   "content_us": 1766666,
+   "composed": 109,
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.8,
-   "decode_ms_p95": 3.2,
+   "decode_ms_p50": 2,
+   "decode_ms_p95": 3.6,
    "decode_in_flight": 0,
    "last_error": null,
    "chain": {
     "I0": {
-     "fed": 57,
+     "fed": 58,
      "inFlight": null,
      "ring": [
-      54,
-      55,
       56,
       57,
+      58,
+      51,
       52,
-      53
+      53,
+      54,
+      55
      ],
      "shadow": -1,
      "last_decode": {
-      "frameN": 57,
-      "timestampUs": 1900000,
+      "frameN": 58,
+      "timestampUs": 1933333,
       "fromCache": false,
       "samplesFed": 1,
-      "fromKeyframe": 57
+      "fromKeyframe": 58
      }
     },
     "I1": {
@@ -375,27 +390,29 @@
    }
   },
   {
-   "t_ms": 2038,
-   "content_us": 2033333,
-   "composed": 124,
+   "t_ms": 2021,
+   "content_us": 2000000,
+   "composed": 122,
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.8,
-   "decode_ms_p95": 2.8,
-   "decode_in_flight": 1,
+   "decode_ms_p50": 2,
+   "decode_ms_p95": 3,
+   "decode_in_flight": 0,
    "last_error": null,
    "chain": {
     "I0": {
-     "fed": 66,
-     "inFlight": 66,
+     "fed": 65,
+     "inFlight": null,
      "ring": [
+      64,
+      65,
+      58,
+      59,
       60,
       61,
       62,
-      63,
-      64,
-      65
+      63
      ],
      "shadow": -1,
      "last_decode": {
@@ -416,22 +433,24 @@
    }
   },
   {
-   "t_ms": 2259,
-   "content_us": 2233333,
-   "composed": 137,
+   "t_ms": 2290,
+   "content_us": 2266666,
+   "composed": 139,
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.9,
+   "decode_ms_p50": 2,
    "decode_ms_p95": 3,
    "decode_in_flight": 0,
    "last_error": null,
    "chain": {
     "I0": {
-     "fed": 72,
+     "fed": 73,
      "inFlight": null,
      "ring": [
       72,
+      73,
+      66,
       67,
       68,
       69,
@@ -440,11 +459,11 @@
      ],
      "shadow": -1,
      "last_decode": {
-      "frameN": 72,
-      "timestampUs": 2400000,
+      "frameN": 73,
+      "timestampUs": 2433333,
       "fromCache": false,
       "samplesFed": 1,
-      "fromKeyframe": 72
+      "fromKeyframe": 73
      }
     },
     "I1": {
@@ -457,40 +476,42 @@
    }
   },
   {
-   "t_ms": 2539,
-   "content_us": 2533333,
-   "composed": 154,
+   "t_ms": 2506,
+   "content_us": 2500000,
+   "composed": 152,
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
    "decode_ms_p50": 1.9,
-   "decode_ms_p95": 2.8,
-   "decode_in_flight": 2,
+   "decode_ms_p95": 3,
+   "decode_in_flight": 1,
    "last_error": null,
    "chain": {
     "I0": {
-     "fed": 81,
-     "inFlight": 81,
+     "fed": 80,
+     "inFlight": 80,
      "ring": [
-      78,
-      79,
-      80,
+      72,
+      73,
+      74,
       75,
       76,
-      77
+      77,
+      78,
+      79
      ],
      "shadow": -1,
      "last_decode": {
-      "frameN": 80,
-      "timestampUs": 2666666,
+      "frameN": 79,
+      "timestampUs": 2633333,
       "fromCache": false,
       "samplesFed": 1,
-      "fromKeyframe": 80
+      "fromKeyframe": 79
      }
     },
     "I1": {
-     "fed": 0,
-     "inFlight": 0,
+     "fed": -1,
+     "inFlight": null,
      "ring": [],
      "shadow": -1,
      "last_decode": null
@@ -498,14 +519,14 @@
    }
   },
   {
-   "t_ms": 2759,
+   "t_ms": 2754,
    "content_us": 2733333,
-   "composed": 167,
+   "composed": 166,
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.3,
-   "decode_ms_p95": 6.5,
+   "decode_ms_p50": 2,
+   "decode_ms_p95": 17.8,
    "decode_in_flight": 0,
    "last_error": null,
    "chain": {
@@ -513,12 +534,14 @@
      "fed": 87,
      "inFlight": null,
      "ring": [
+      80,
+      81,
+      82,
+      83,
       84,
       85,
       86,
-      87,
-      82,
-      83
+      87
      ],
      "shadow": -1,
      "last_decode": {
@@ -533,12 +556,13 @@
      "fed": 86,
      "inFlight": null,
      "ring": [
-      86,
+      80,
       81,
       82,
       83,
       84,
-      85
+      85,
+      86
      ],
      "shadow": -1,
      "last_decode": {
@@ -552,21 +576,45 @@
    }
   },
   {
-   "t_ms": 3025,
-   "content_us": 3000000,
-   "composed": 182,
+   "t_ms": 3059,
+   "content_us": 3033333,
+   "composed": 184,
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.5,
-   "decode_ms_p95": 13.1,
+   "decode_ms_p50": 2,
+   "decode_ms_p95": 17.3,
    "decode_in_flight": 0,
    "last_error": null,
    "chain": {
     "I0": {
+     "fed": 96,
+     "inFlight": null,
+     "ring": [
+      96,
+      89,
+      90,
+      91,
+      92,
+      93,
+      94,
+      95
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 96,
+      "timestampUs": 3200000,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 96
+     }
+    },
+    "I1": {
      "fed": 95,
      "inFlight": null,
      "ring": [
+      88,
+      89,
       90,
       91,
       92,
@@ -582,71 +630,33 @@
       "samplesFed": 1,
       "fromKeyframe": 95
      }
-    },
-    "I1": {
-     "fed": 94,
-     "inFlight": null,
-     "ring": [
-      92,
-      93,
-      94,
-      89,
-      90,
-      91
-     ],
-     "shadow": -1,
-     "last_decode": {
-      "frameN": 94,
-      "timestampUs": 3133333,
-      "fromCache": false,
-      "samplesFed": 1,
-      "fromKeyframe": 94
-     }
     }
    }
   },
   {
-   "t_ms": 3292,
-   "content_us": 3266666,
-   "composed": 198,
+   "t_ms": 3260,
+   "content_us": 3233333,
+   "composed": 196,
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.7,
-   "decode_ms_p95": 13.5,
+   "decode_ms_p50": 2,
+   "decode_ms_p95": 16.5,
    "decode_in_flight": 0,
    "last_error": null,
    "chain": {
     "I0": {
-     "fed": 103,
-     "inFlight": null,
-     "ring": [
-      102,
-      103,
-      98,
-      99,
-      100,
-      101
-     ],
-     "shadow": -1,
-     "last_decode": {
-      "frameN": 103,
-      "timestampUs": 3433333,
-      "fromCache": false,
-      "samplesFed": 1,
-      "fromKeyframe": 103
-     }
-    },
-    "I1": {
      "fed": 102,
      "inFlight": null,
      "ring": [
+      96,
+      97,
       98,
       99,
       100,
       101,
       102,
-      97
+      95
      ],
      "shadow": -1,
      "last_decode": {
@@ -656,105 +666,113 @@
       "samplesFed": 1,
       "fromKeyframe": 102
      }
+    },
+    "I1": {
+     "fed": 101,
+     "inFlight": null,
+     "ring": [
+      96,
+      97,
+      98,
+      99,
+      100,
+      101,
+      94,
+      95
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 101,
+      "timestampUs": 3366666,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 101
+     }
     }
    }
   },
   {
-   "t_ms": 3561,
-   "content_us": 3566666,
-   "composed": 216,
+   "t_ms": 3526,
+   "content_us": 3500000,
+   "composed": 213,
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.7,
-   "decode_ms_p95": 13.9,
+   "decode_ms_p50": 2,
+   "decode_ms_p95": 14.9,
    "decode_in_flight": 0,
    "last_error": null,
    "chain": {
     "I0": {
-     "fed": 112,
+     "fed": 110,
      "inFlight": null,
      "ring": [
-      108,
-      109,
-      110,
-      111,
-      112,
-      107
-     ],
-     "shadow": -1,
-     "last_decode": {
-      "frameN": 112,
-      "timestampUs": 3733333,
-      "fromCache": false,
-      "samplesFed": 1,
-      "fromKeyframe": 112
-     }
-    },
-    "I1": {
-     "fed": 111,
-     "inFlight": null,
-     "ring": [
-      110,
-      111,
+      104,
+      105,
       106,
       107,
       108,
-      109
+      109,
+      110,
+      103
      ],
      "shadow": -1,
      "last_decode": {
-      "frameN": 111,
-      "timestampUs": 3700000,
+      "frameN": 110,
+      "timestampUs": 3666666,
       "fromCache": false,
       "samplesFed": 1,
-      "fromKeyframe": 111
+      "fromKeyframe": 110
+     }
+    },
+    "I1": {
+     "fed": 109,
+     "inFlight": null,
+     "ring": [
+      104,
+      105,
+      106,
+      107,
+      108,
+      109,
+      102,
+      103
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 109,
+      "timestampUs": 3633333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 109
      }
     }
    }
   },
   {
-   "t_ms": 3793,
-   "content_us": 3766666,
-   "composed": 228,
+   "t_ms": 3760,
+   "content_us": 3733333,
+   "composed": 227,
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.7,
-   "decode_ms_p95": 14.1,
+   "decode_ms_p50": 2.1,
+   "decode_ms_p95": 16.5,
    "decode_in_flight": 0,
    "last_error": null,
    "chain": {
     "I0": {
-     "fed": 118,
+     "fed": 117,
      "inFlight": null,
      "ring": [
+      112,
+      113,
       114,
       115,
       116,
       117,
-      118,
-      113
-     ],
-     "shadow": -1,
-     "last_decode": {
-      "frameN": 118,
-      "timestampUs": 3933333,
-      "fromCache": false,
-      "samplesFed": 1,
-      "fromKeyframe": 118
-     }
-    },
-    "I1": {
-     "fed": 117,
-     "inFlight": null,
-     "ring": [
-      116,
-      117,
-      112,
-      113,
-      114,
-      115
+      110,
+      111
      ],
      "shadow": -1,
      "last_decode": {
@@ -764,51 +782,55 @@
       "samplesFed": 1,
       "fromKeyframe": 117
      }
+    },
+    "I1": {
+     "fed": 116,
+     "inFlight": null,
+     "ring": [
+      112,
+      113,
+      114,
+      115,
+      116,
+      109,
+      110,
+      111
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 116,
+      "timestampUs": 3866666,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 116
+     }
     }
    }
   },
   {
-   "t_ms": 4059,
-   "content_us": 4033333,
-   "composed": 244,
+   "t_ms": 4027,
+   "content_us": 4000000,
+   "composed": 242,
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.7,
-   "decode_ms_p95": 14.1,
+   "decode_ms_p50": 2.1,
+   "decode_ms_p95": 14.9,
    "decode_in_flight": 0,
    "last_error": null,
    "chain": {
     "I0": {
-     "fed": 126,
+     "fed": 125,
      "inFlight": null,
      "ring": [
-      126,
+      120,
       121,
       122,
       123,
       124,
-      125
-     ],
-     "shadow": -1,
-     "last_decode": {
-      "frameN": 126,
-      "timestampUs": 4200000,
-      "fromCache": false,
-      "samplesFed": 1,
-      "fromKeyframe": 126
-     }
-    },
-    "I1": {
-     "fed": 125,
-     "inFlight": null,
-     "ring": [
-      122,
-      123,
-      124,
       125,
-      120,
-      121
+      118,
+      119
      ],
      "shadow": -1,
      "last_decode": {
@@ -818,31 +840,77 @@
       "samplesFed": 1,
       "fromKeyframe": 125
      }
+    },
+    "I1": {
+     "fed": 124,
+     "inFlight": null,
+     "ring": [
+      120,
+      121,
+      122,
+      123,
+      124,
+      117,
+      118,
+      119
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 124,
+      "timestampUs": 4133333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 124
+     }
     }
    }
   },
   {
-   "t_ms": 4260,
-   "content_us": 4233333,
-   "composed": 256,
+   "t_ms": 4296,
+   "content_us": 4266666,
+   "composed": 258,
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.7,
-   "decode_ms_p95": 14.1,
+   "decode_ms_p50": 2.1,
+   "decode_ms_p95": 15,
    "decode_in_flight": 0,
    "last_error": null,
    "chain": {
     "I0": {
-     "fed": 132,
+     "fed": 133,
      "inFlight": null,
      "ring": [
-      132,
-      127,
       128,
       129,
       130,
-      131
+      131,
+      132,
+      133,
+      126,
+      127
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 133,
+      "timestampUs": 4433333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 133
+     }
+    },
+    "I1": {
+     "fed": 132,
+     "inFlight": null,
+     "ring": [
+      128,
+      129,
+      130,
+      131,
+      132,
+      125,
+      126,
+      127
      ],
      "shadow": -1,
      "last_decode": {
@@ -852,51 +920,55 @@
       "samplesFed": 1,
       "fromKeyframe": 132
      }
-    },
-    "I1": {
-     "fed": 131,
-     "inFlight": null,
-     "ring": [
-      128,
-      129,
-      130,
-      131,
-      126,
-      127
-     ],
-     "shadow": -1,
-     "last_decode": {
-      "frameN": 131,
-      "timestampUs": 4366666,
-      "fromCache": false,
-      "samplesFed": 1,
-      "fromKeyframe": 131
-     }
     }
    }
   },
   {
-   "t_ms": 4526,
-   "content_us": 4500000,
-   "composed": 272,
+   "t_ms": 4564,
+   "content_us": 4533333,
+   "composed": 274,
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.7,
-   "decode_ms_p95": 14.2,
+   "decode_ms_p50": 2.1,
+   "decode_ms_p95": 14.9,
    "decode_in_flight": 0,
    "last_error": null,
    "chain": {
     "I0": {
-     "fed": 140,
+     "fed": 141,
      "inFlight": null,
      "ring": [
+      136,
+      137,
       138,
       139,
       140,
-      135,
+      141,
+      134,
+      135
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 141,
+      "timestampUs": 4700000,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 141
+     }
+    },
+    "I1": {
+     "fed": 140,
+     "inFlight": null,
+     "ring": [
       136,
-      137
+      137,
+      138,
+      139,
+      140,
+      133,
+      134,
+      135
      ],
      "shadow": -1,
      "last_decode": {
@@ -906,71 +978,33 @@
       "samplesFed": 1,
       "fromKeyframe": 140
      }
-    },
-    "I1": {
-     "fed": 139,
-     "inFlight": null,
-     "ring": [
-      134,
-      135,
-      136,
-      137,
-      138,
-      139
-     ],
-     "shadow": -1,
-     "last_decode": {
-      "frameN": 139,
-      "timestampUs": 4633333,
-      "fromCache": false,
-      "samplesFed": 1,
-      "fromKeyframe": 139
-     }
     }
    }
   },
   {
-   "t_ms": 4796,
-   "content_us": 4766666,
-   "composed": 289,
+   "t_ms": 4761,
+   "content_us": 4733333,
+   "composed": 286,
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.8,
-   "decode_ms_p95": 14.5,
+   "decode_ms_p50": 2.1,
+   "decode_ms_p95": 14.9,
    "decode_in_flight": 0,
    "last_error": null,
    "chain": {
     "I0": {
-     "fed": 148,
+     "fed": 147,
      "inFlight": null,
      "ring": [
       144,
       145,
       146,
       147,
-      148,
-      143
-     ],
-     "shadow": -1,
-     "last_decode": {
-      "frameN": 148,
-      "timestampUs": 4933333,
-      "fromCache": false,
-      "samplesFed": 1,
-      "fromKeyframe": 148
-     }
-    },
-    "I1": {
-     "fed": 147,
-     "inFlight": null,
-     "ring": [
-      146,
-      147,
+      140,
+      141,
       142,
-      143,
-      144,
-      145
+      143
      ],
      "shadow": -1,
      "last_decode": {
@@ -980,42 +1014,44 @@
       "samplesFed": 1,
       "fromKeyframe": 147
      }
+    },
+    "I1": {
+     "fed": 146,
+     "inFlight": null,
+     "ring": [
+      144,
+      145,
+      146,
+      139,
+      140,
+      141,
+      142,
+      143
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 146,
+      "timestampUs": 4866666,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 146
+     }
     }
    }
   },
   {
-   "t_ms": 5058,
-   "content_us": 5033333,
-   "composed": 304,
+   "t_ms": 5026,
+   "content_us": 5000000,
+   "composed": 302,
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.8,
-   "decode_ms_p95": 14.7,
+   "decode_ms_p50": 2.1,
+   "decode_ms_p95": 15,
    "decode_in_flight": 0,
    "last_error": null,
    "chain": {
     "I0": {
-     "fed": 156,
-     "inFlight": null,
-     "ring": [
-      156,
-      151,
-      152,
-      153,
-      154,
-      155
-     ],
-     "shadow": -1,
-     "last_decode": {
-      "frameN": 156,
-      "timestampUs": 5200000,
-      "fromCache": false,
-      "samplesFed": 1,
-      "fromKeyframe": 156
-     }
-    },
-    "I1": {
      "fed": 155,
      "inFlight": null,
      "ring": [
@@ -1023,6 +1059,8 @@
       153,
       154,
       155,
+      148,
+      149,
       150,
       151
      ],
@@ -1034,31 +1072,77 @@
       "samplesFed": 1,
       "fromKeyframe": 155
      }
+    },
+    "I1": {
+     "fed": 154,
+     "inFlight": null,
+     "ring": [
+      152,
+      153,
+      154,
+      147,
+      148,
+      149,
+      150,
+      151
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 154,
+      "timestampUs": 5133333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 154
+     }
     }
    }
   },
   {
-   "t_ms": 5259,
-   "content_us": 5233333,
-   "composed": 316,
+   "t_ms": 5294,
+   "content_us": 5266666,
+   "composed": 318,
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.8,
-   "decode_ms_p95": 14.7,
+   "decode_ms_p50": 2.1,
+   "decode_ms_p95": 14.9,
    "decode_in_flight": 0,
    "last_error": null,
    "chain": {
     "I0": {
+     "fed": 163,
+     "inFlight": null,
+     "ring": [
+      160,
+      161,
+      162,
+      163,
+      156,
+      157,
+      158,
+      159
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 163,
+      "timestampUs": 5433333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 163
+     }
+    },
+    "I1": {
      "fed": 162,
      "inFlight": null,
      "ring": [
+      160,
+      161,
       162,
+      155,
+      156,
       157,
       158,
-      159,
-      160,
-      161
+      159
      ],
      "shadow": -1,
      "last_decode": {
@@ -1068,48 +1152,52 @@
       "samplesFed": 1,
       "fromKeyframe": 162
      }
-    },
-    "I1": {
-     "fed": 161,
-     "inFlight": null,
-     "ring": [
-      158,
-      159,
-      160,
-      161,
-      156,
-      157
-     ],
-     "shadow": -1,
-     "last_decode": {
-      "frameN": 161,
-      "timestampUs": 5366666,
-      "fromCache": false,
-      "samplesFed": 1,
-      "fromKeyframe": 161
-     }
     }
    }
   },
   {
-   "t_ms": 5527,
-   "content_us": 5500000,
-   "composed": 332,
+   "t_ms": 5560,
+   "content_us": 5533333,
+   "composed": 334,
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.8,
-   "decode_ms_p95": 14.7,
+   "decode_ms_p50": 2.1,
+   "decode_ms_p95": 14.9,
    "decode_in_flight": 0,
    "last_error": null,
    "chain": {
     "I0": {
+     "fed": 171,
+     "inFlight": null,
+     "ring": [
+      168,
+      169,
+      170,
+      171,
+      164,
+      165,
+      166,
+      167
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 171,
+      "timestampUs": 5700000,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 171
+     }
+    },
+    "I1": {
      "fed": 170,
      "inFlight": null,
      "ring": [
       168,
       169,
       170,
+      163,
+      164,
       165,
       166,
       167
@@ -1122,38 +1210,18 @@
       "samplesFed": 1,
       "fromKeyframe": 170
      }
-    },
-    "I1": {
-     "fed": 169,
-     "inFlight": null,
-     "ring": [
-      164,
-      165,
-      166,
-      167,
-      168,
-      169
-     ],
-     "shadow": -1,
-     "last_decode": {
-      "frameN": 169,
-      "timestampUs": 5633333,
-      "fromCache": false,
-      "samplesFed": 1,
-      "fromKeyframe": 169
-     }
     }
    }
   },
   {
-   "t_ms": 5793,
+   "t_ms": 5796,
    "content_us": 5766666,
-   "composed": 348,
+   "composed": 349,
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.9,
-   "decode_ms_p95": 14.7,
+   "decode_ms_p50": 2.1,
+   "decode_ms_p95": 14.9,
    "decode_in_flight": 0,
    "last_error": null,
    "chain": {
@@ -1161,12 +1229,14 @@
      "fed": 177,
      "inFlight": null,
      "ring": [
-      174,
-      175,
       176,
       177,
+      170,
+      171,
       172,
-      173
+      173,
+      174,
+      175
      ],
      "shadow": -1,
      "last_decode": {
@@ -1183,6 +1253,8 @@
      "ring": [
       176,
       177,
+      170,
+      171,
       172,
       173,
       174,
@@ -1200,150 +1272,162 @@
    }
   },
   {
-   "t_ms": 6024,
-   "content_us": 6000000,
-   "composed": 363,
+   "t_ms": 6053,
+   "content_us": 6033333,
+   "composed": 365,
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.9,
-   "decode_ms_p95": 14.7,
+   "decode_ms_p50": 2.1,
+   "decode_ms_p95": 15,
    "decode_in_flight": 0,
    "last_error": null,
    "chain": {
     "I0": {
-     "fed": 186,
+     "fed": 187,
      "inFlight": null,
      "ring": [
-      181,
-      182,
-      183,
+      184,
       185,
       186,
-      180
+      187,
+      180,
+      181,
+      182,
+      183
      ],
      "shadow": -1,
      "last_decode": {
-      "frameN": 186,
-      "timestampUs": 6200000,
+      "frameN": 187,
+      "timestampUs": 6233333,
       "fromCache": false,
       "samplesFed": 1,
-      "fromKeyframe": 186
+      "fromKeyframe": 187
      }
     },
     "I1": {
-     "fed": 184,
+     "fed": 185,
      "inFlight": null,
      "ring": [
-      182,
-      183,
       184,
+      185,
+      178,
       179,
       180,
-      181
+      181,
+      182,
+      183
      ],
      "shadow": -1,
      "last_decode": {
-      "frameN": 184,
-      "timestampUs": 6133333,
+      "frameN": 185,
+      "timestampUs": 6166666,
       "fromCache": false,
       "samplesFed": 1,
-      "fromKeyframe": 184
+      "fromKeyframe": 185
      }
     }
    }
   },
   {
-   "t_ms": 6293,
-   "content_us": 6266666,
-   "composed": 378,
+   "t_ms": 6258,
+   "content_us": 6233333,
+   "composed": 376,
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.9,
-   "decode_ms_p95": 14.7,
-   "decode_in_flight": 0,
+   "decode_ms_p50": 2.1,
+   "decode_ms_p95": 14.9,
+   "decode_in_flight": 1,
    "last_error": null,
    "chain": {
     "I0": {
-     "fed": 196,
-     "inFlight": null,
+     "fed": 195,
+     "inFlight": 195,
      "ring": [
-      196,
-      190,
-      191,
       192,
       193,
-      195
-     ],
-     "shadow": -1,
-     "last_decode": {
-      "frameN": 196,
-      "timestampUs": 6533333,
-      "fromCache": false,
-      "samplesFed": 1,
-      "fromKeyframe": 196
-     }
-    },
-    "I1": {
-     "fed": 192,
-     "inFlight": null,
-     "ring": [
+      194,
+      187,
       188,
       189,
       190,
-      191,
-      192,
-      187
+      191
      ],
      "shadow": -1,
      "last_decode": {
-      "frameN": 192,
-      "timestampUs": 6400000,
+      "frameN": 194,
+      "timestampUs": 6466666,
       "fromCache": false,
       "samplesFed": 1,
-      "fromKeyframe": 192
+      "fromKeyframe": 194
+     }
+    },
+    "I1": {
+     "fed": 191,
+     "inFlight": null,
+     "ring": [
+      184,
+      185,
+      186,
+      187,
+      188,
+      189,
+      190,
+      191
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 191,
+      "timestampUs": 6366666,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 191
      }
     }
    }
   },
   {
-   "t_ms": 6558,
-   "content_us": 6533333,
-   "composed": 394,
+   "t_ms": 6528,
+   "content_us": 6500000,
+   "composed": 392,
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.9,
-   "decode_ms_p95": 14.7,
-   "decode_in_flight": 0,
+   "decode_ms_p50": 2.1,
+   "decode_ms_p95": 14.8,
+   "decode_in_flight": 1,
    "last_error": null,
    "chain": {
     "I0": {
-     "fed": 206,
-     "inFlight": null,
+     "fed": 205,
+     "inFlight": 205,
      "ring": [
-      203,
-      205,
-      206,
       200,
       201,
-      202
+      202,
+      203,
+      204,
+      197,
+      198,
+      199
      ],
      "shadow": -1,
      "last_decode": {
-      "frameN": 206,
-      "timestampUs": 6866666,
+      "frameN": 204,
+      "timestampUs": 6800000,
       "fromCache": false,
       "samplesFed": 1,
-      "fromKeyframe": 206
+      "fromKeyframe": 204
      }
     },
     "I1": {
-     "fed": 200,
+     "fed": 199,
      "inFlight": null,
      "ring": [
-      200,
+      192,
+      193,
+      194,
       195,
       196,
       197,
@@ -1352,45 +1436,47 @@
      ],
      "shadow": -1,
      "last_decode": {
-      "frameN": 200,
-      "timestampUs": 6666666,
+      "frameN": 199,
+      "timestampUs": 6633333,
       "fromCache": false,
       "samplesFed": 1,
-      "fromKeyframe": 200
+      "fromKeyframe": 199
      }
     }
    }
   },
   {
-   "t_ms": 6791,
-   "content_us": 6766666,
-   "composed": 409,
+   "t_ms": 6757,
+   "content_us": 6733333,
+   "composed": 407,
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.9,
-   "decode_ms_p95": 14.7,
+   "decode_ms_p50": 2.1,
+   "decode_ms_p95": 14.8,
    "decode_in_flight": 0,
    "last_error": null,
    "chain": {
     "I0": {
-     "fed": 215,
+     "fed": 213,
      "inFlight": null,
      "ring": [
+      208,
+      209,
+      210,
       211,
       212,
       213,
-      215,
-      208,
-      210
+      206,
+      207
      ],
      "shadow": -1,
      "last_decode": {
-      "frameN": 215,
-      "timestampUs": 7166666,
+      "frameN": 213,
+      "timestampUs": 7100000,
       "fromCache": false,
       "samplesFed": 1,
-      "fromKeyframe": 215
+      "fromKeyframe": 213
      }
     },
     "I1": {
@@ -1400,6 +1486,8 @@
       200,
       201,
       202,
+      195,
+      196,
       197,
       198,
       199
@@ -1416,89 +1504,95 @@
    }
   },
   {
-   "t_ms": 7018,
+   "t_ms": 7007,
    "content_us": 7000000,
    "composed": 422,
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.9,
-   "decode_ms_p95": 14.6,
-   "decode_in_flight": 0,
-   "last_error": null,
-   "chain": {
-    "I0": {
-     "fed": 223,
-     "inFlight": null,
-     "ring": [
-      218,
-      220,
-      221,
-      222,
-      223,
-      217
-     ],
-     "shadow": -1,
-     "last_decode": {
-      "frameN": 223,
-      "timestampUs": 7433333,
-      "fromCache": false,
-      "samplesFed": 1,
-      "fromKeyframe": 223
-     }
-    },
-    "I1": {
-     "fed": 202,
-     "inFlight": null,
-     "ring": [
-      200,
-      201,
-      202,
-      197,
-      198,
-      199
-     ],
-     "shadow": -1,
-     "last_decode": {
-      "frameN": 202,
-      "timestampUs": 6733333,
-      "fromCache": false,
-      "samplesFed": 1,
-      "fromKeyframe": 202
-     }
-    }
-   }
-  },
-  {
-   "t_ms": 7273,
-   "content_us": 7266666,
-   "composed": 438,
-   "dropped": 0,
-   "task_ms_p50": 0.1,
-   "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.9,
+   "decode_ms_p50": 2.1,
    "decode_ms_p95": 14.6,
    "decode_in_flight": 1,
    "last_error": null,
    "chain": {
     "I0": {
-     "fed": 233,
-     "inFlight": 233,
+     "fed": 223,
+     "inFlight": 223,
      "ring": [
+      216,
+      217,
+      218,
+      219,
+      220,
+      221,
+      222,
+      215
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 222,
+      "timestampUs": 7400000,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 222
+     }
+    },
+    "I1": {
+     "fed": 202,
+     "inFlight": null,
+     "ring": [
+      200,
+      201,
+      202,
+      195,
+      196,
+      197,
+      198,
+      199
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 202,
+      "timestampUs": 6733333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 202
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 7293,
+   "content_us": 7266666,
+   "composed": 439,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.3,
+   "decode_ms_p50": 2,
+   "decode_ms_p95": 14.6,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 233,
+     "inFlight": null,
+     "ring": [
+      232,
+      233,
       226,
       227,
       228,
+      229,
       230,
-      231,
-      232
+      231
      ],
      "shadow": -1,
      "last_decode": {
-      "frameN": 232,
-      "timestampUs": 7733333,
+      "frameN": 233,
+      "timestampUs": 7766666,
       "fromCache": false,
       "samplesFed": 1,
-      "fromKeyframe": 232
+      "fromKeyframe": 233
      }
     },
     "I1": {
@@ -1508,6 +1602,8 @@
       200,
       201,
       202,
+      195,
+      196,
       197,
       198,
       199
@@ -1524,35 +1620,37 @@
    }
   },
   {
-   "t_ms": 7554,
-   "content_us": 7533333,
-   "composed": 454,
+   "t_ms": 7504,
+   "content_us": 7466666,
+   "composed": 451,
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.9,
+   "decode_ms_p50": 2,
    "decode_ms_p95": 14.5,
    "decode_in_flight": 0,
    "last_error": null,
    "chain": {
     "I0": {
-     "fed": 243,
+     "fed": 241,
      "inFlight": null,
      "ring": [
+      240,
       241,
-      242,
-      243,
+      234,
+      235,
+      236,
       237,
       238,
-      240
+      239
      ],
      "shadow": -1,
      "last_decode": {
-      "frameN": 243,
-      "timestampUs": 8100000,
+      "frameN": 241,
+      "timestampUs": 8033333,
       "fromCache": false,
       "samplesFed": 1,
-      "fromKeyframe": 243
+      "fromKeyframe": 241
      }
     },
     "I1": {
@@ -1562,6 +1660,8 @@
       200,
       201,
       202,
+      195,
+      196,
       197,
       198,
       199
@@ -1578,24 +1678,26 @@
    }
   },
   {
-   "t_ms": 7757,
-   "content_us": 7733333,
-   "composed": 467,
+   "t_ms": 7774,
+   "content_us": 7766666,
+   "composed": 468,
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.9,
+   "decode_ms_p50": 2,
    "decode_ms_p95": 14.5,
-   "decode_in_flight": 0,
+   "decode_in_flight": 1,
    "last_error": null,
    "chain": {
     "I0": {
-     "fed": 251,
-     "inFlight": null,
+     "fed": 252,
+     "inFlight": 252,
      "ring": [
       248,
+      249,
       250,
       251,
+      244,
       245,
       246,
       247
@@ -1616,6 +1718,8 @@
       200,
       201,
       202,
+      195,
+      196,
       197,
       198,
       199
@@ -1632,35 +1736,37 @@
    }
   },
   {
-   "t_ms": 8052,
-   "content_us": 8033333,
-   "composed": 484,
+   "t_ms": 8037,
+   "content_us": 8000000,
+   "composed": 483,
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.9,
-   "decode_ms_p95": 14.5,
+   "decode_ms_p50": 2,
+   "decode_ms_p95": 14.4,
    "decode_in_flight": 0,
    "last_error": null,
    "chain": {
     "I0": {
-     "fed": 262,
+     "fed": 261,
      "inFlight": null,
      "ring": [
       256,
       257,
       258,
+      259,
       260,
       261,
-      262
+      254,
+      255
      ],
      "shadow": -1,
      "last_decode": {
-      "frameN": 262,
-      "timestampUs": 8733333,
+      "frameN": 261,
+      "timestampUs": 8700000,
       "fromCache": false,
       "samplesFed": 1,
-      "fromKeyframe": 262
+      "fromKeyframe": 261
      }
     },
     "I1": {
@@ -1670,6 +1776,8 @@
       200,
       201,
       202,
+      195,
+      196,
       197,
       198,
       199
@@ -1686,35 +1794,37 @@
    }
   },
   {
-   "t_ms": 8257,
+   "t_ms": 8254,
    "content_us": 8233333,
-   "composed": 497,
+   "composed": 496,
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.9,
-   "decode_ms_p95": 14.5,
-   "decode_in_flight": 0,
+   "decode_ms_p50": 2,
+   "decode_ms_p95": 14.4,
+   "decode_in_flight": 1,
    "last_error": null,
    "chain": {
     "I0": {
      "fed": 270,
-     "inFlight": null,
+     "inFlight": 270,
      "ring": [
-      263,
+      264,
       265,
       266,
       267,
       268,
-      270
+      269,
+      262,
+      263
      ],
      "shadow": -1,
      "last_decode": {
-      "frameN": 270,
-      "timestampUs": 9000000,
+      "frameN": 269,
+      "timestampUs": 8966666,
       "fromCache": false,
       "samplesFed": 1,
-      "fromKeyframe": 270
+      "fromKeyframe": 269
      }
     },
     "I1": {
@@ -1724,6 +1834,8 @@
       200,
       201,
       202,
+      195,
+      196,
       197,
       198,
       199
@@ -1740,35 +1852,37 @@
    }
   },
   {
-   "t_ms": 8539,
-   "content_us": 8533333,
-   "composed": 514,
+   "t_ms": 8520,
+   "content_us": 8500000,
+   "composed": 512,
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.9,
-   "decode_ms_p95": 14.5,
+   "decode_ms_p50": 2,
+   "decode_ms_p95": 14.3,
    "decode_in_flight": 1,
    "last_error": null,
    "chain": {
     "I0": {
-     "fed": 281,
-     "inFlight": 281,
+     "fed": 280,
+     "inFlight": 280,
      "ring": [
-      278,
-      280,
+      272,
       273,
+      274,
       275,
       276,
-      277
+      277,
+      278,
+      279
      ],
      "shadow": -1,
      "last_decode": {
-      "frameN": 280,
-      "timestampUs": 9333333,
+      "frameN": 279,
+      "timestampUs": 9300000,
       "fromCache": false,
       "samplesFed": 1,
-      "fromKeyframe": 280
+      "fromKeyframe": 279
      }
     },
     "I1": {
@@ -1778,6 +1892,8 @@
       200,
       201,
       202,
+      195,
+      196,
       197,
       198,
       199
@@ -1794,27 +1910,29 @@
    }
   },
   {
-   "t_ms": 8772,
-   "content_us": 8766666,
-   "composed": 528,
+   "t_ms": 8754,
+   "content_us": 8733333,
+   "composed": 526,
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.9,
-   "decode_ms_p95": 14.5,
-   "decode_in_flight": 1,
+   "decode_ms_p50": 2,
+   "decode_ms_p95": 14.3,
+   "decode_in_flight": 0,
    "last_error": null,
    "chain": {
     "I0": {
-     "fed": 289,
-     "inFlight": 289,
+     "fed": 288,
+     "inFlight": null,
      "ring": [
-      286,
-      287,
       288,
+      281,
       282,
       283,
-      285
+      284,
+      285,
+      286,
+      287
      ],
      "shadow": -1,
      "last_decode": {
@@ -1832,6 +1950,8 @@
       200,
       201,
       202,
+      195,
+      196,
       197,
       198,
       199
@@ -1848,14 +1968,14 @@
    }
   },
   {
-   "t_ms": 9035,
+   "t_ms": 9038,
    "content_us": 9000000,
    "composed": 543,
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.9,
-   "decode_ms_p95": 14.5,
+   "decode_ms_p50": 2,
+   "decode_ms_p95": 14.2,
    "decode_in_flight": 0,
    "last_error": null,
    "chain": {
@@ -1863,12 +1983,14 @@
      "fed": 298,
      "inFlight": null,
      "ring": [
-      293,
-      295,
       296,
       297,
       298,
-      292
+      291,
+      292,
+      293,
+      294,
+      295
      ],
      "shadow": -1,
      "last_decode": {
@@ -1886,6 +2008,8 @@
       200,
       201,
       202,
+      195,
+      196,
       197,
       198,
       199
@@ -1902,14 +2026,14 @@
    }
   },
   {
-   "t_ms": 9253,
+   "t_ms": 9263,
    "content_us": 9233333,
-   "composed": 556,
+   "composed": 557,
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.9,
-   "decode_ms_p95": 14.5,
+   "decode_ms_p50": 2,
+   "decode_ms_p95": 14.3,
    "decode_in_flight": 0,
    "last_error": null,
    "chain": {
@@ -1917,12 +2041,14 @@
      "fed": 307,
      "inFlight": null,
      "ring": [
-      301,
-      302,
-      303,
+      304,
       305,
       306,
-      307
+      307,
+      300,
+      301,
+      302,
+      303
      ],
      "shadow": -1,
      "last_decode": {
@@ -1940,6 +2066,8 @@
       200,
       201,
       202,
+      195,
+      196,
       197,
       198,
       199
@@ -1962,8 +2090,8 @@
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.9,
-   "decode_ms_p95": 14.5,
+   "decode_ms_p50": 2,
+   "decode_ms_p95": 14.2,
    "decode_in_flight": 0,
    "last_error": null,
    "chain": {
@@ -1971,12 +2099,14 @@
      "fed": 318,
      "inFlight": null,
      "ring": [
+      312,
+      313,
+      314,
+      315,
       316,
       317,
       318,
-      312,
-      313,
-      315
+      311
      ],
      "shadow": -1,
      "last_decode": {
@@ -1994,6 +2124,8 @@
       200,
       201,
       202,
+      195,
+      196,
       197,
       198,
       199
@@ -2011,26 +2143,28 @@
   },
   {
    "t_ms": 9772,
-   "content_us": 9766666,
-   "composed": 588,
+   "content_us": 9733333,
+   "composed": 587,
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.9,
-   "decode_ms_p95": 14.5,
-   "decode_in_flight": 1,
+   "decode_ms_p50": 2,
+   "decode_ms_p95": 14.2,
+   "decode_in_flight": 0,
    "last_error": null,
    "chain": {
     "I0": {
-     "fed": 327,
-     "inFlight": 327,
+     "fed": 326,
+     "inFlight": null,
      "ring": [
-      323,
-      325,
-      326,
       320,
       321,
-      322
+      322,
+      323,
+      324,
+      325,
+      326,
+      319
      ],
      "shadow": -1,
      "last_decode": {
@@ -2048,6 +2182,8 @@
       200,
       201,
       202,
+      195,
+      196,
       197,
       198,
       199
@@ -2064,35 +2200,37 @@
    }
   },
   {
-   "t_ms": 10006,
+   "t_ms": 10038,
    "content_us": 10000000,
-   "composed": 602,
+   "composed": 603,
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.9,
-   "decode_ms_p95": 14.5,
-   "decode_in_flight": 1,
+   "decode_ms_p50": 2,
+   "decode_ms_p95": 14.2,
+   "decode_in_flight": 0,
    "last_error": null,
    "chain": {
     "I0": {
      "fed": 336,
-     "inFlight": 336,
+     "inFlight": null,
      "ring": [
+      336,
+      329,
+      330,
       331,
       332,
       333,
-      335,
-      328,
-      330
+      334,
+      335
      ],
      "shadow": -1,
      "last_decode": {
-      "frameN": 335,
-      "timestampUs": 11166666,
+      "frameN": 336,
+      "timestampUs": 11200000,
       "fromCache": false,
       "samplesFed": 1,
-      "fromKeyframe": 335
+      "fromKeyframe": 336
      }
     },
     "I1": {
@@ -2102,6 +2240,8 @@
       200,
       201,
       202,
+      195,
+      196,
       197,
       198,
       199
@@ -2118,14 +2258,14 @@
    }
   },
   {
-   "t_ms": 10297,
+   "t_ms": 10284,
    "content_us": 10266666,
-   "composed": 619,
+   "composed": 618,
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.9,
-   "decode_ms_p95": 14.4,
+   "decode_ms_p50": 2,
+   "decode_ms_p95": 14.2,
    "decode_in_flight": 0,
    "last_error": null,
    "chain": {
@@ -2133,12 +2273,14 @@
      "fed": 346,
      "inFlight": null,
      "ring": [
+      344,
+      345,
       346,
+      339,
       340,
       341,
       342,
-      343,
-      345
+      343
      ],
      "shadow": -1,
      "last_decode": {
@@ -2156,6 +2298,8 @@
       200,
       201,
       202,
+      195,
+      196,
       197,
       198,
       199
@@ -2172,14 +2316,14 @@
    }
   },
   {
-   "t_ms": 10536,
-   "content_us": 10500000,
-   "composed": 633,
+   "t_ms": 10540,
+   "content_us": 10533333,
+   "composed": 634,
    "dropped": 0,
    "task_ms_p50": 0.1,
    "task_ms_p95": 0.3,
-   "decode_ms_p50": 1.9,
-   "decode_ms_p95": 14.4,
+   "decode_ms_p50": 2,
+   "decode_ms_p95": 14.2,
    "decode_in_flight": 0,
    "last_error": null,
    "chain": {
@@ -2187,12 +2331,14 @@
      "fed": 353,
      "inFlight": null,
      "ring": [
+      352,
       353,
+      346,
       347,
       348,
+      349,
       350,
-      351,
-      352
+      351
      ],
      "shadow": -1,
      "last_decode": {
@@ -2210,6 +2356,8 @@
       200,
       201,
       202,
+      195,
+      196,
       197,
       198,
       199
@@ -2226,6 +2374,44 @@
    }
   }
  ],
+ "post_mortem": [
+  {
+   "n": 294,
+   "rendered": 294
+  },
+  {
+   "n": 297,
+   "rendered": 297
+  },
+  {
+   "n": 300,
+   "rendered": 300
+  },
+  {
+   "n": 303,
+   "rendered": 303
+  },
+  {
+   "n": 306,
+   "rendered": 306
+  },
+  {
+   "n": 309,
+   "rendered": 309
+  },
+  {
+   "n": 312,
+   "rendered": 312
+  },
+  {
+   "n": 315,
+   "rendered": 315
+  },
+  {
+   "n": 318,
+   "rendered": 318
+  }
+ ],
  "materials": [
   "asset_61d6f9fcf4c84599921ad6cfd7ee99a6",
   "asset_6b09d7b87bfd4d40b650f0da70ef9ba9"
@@ -2237,71 +2423,71 @@
   "metrics": [
    {
     "cpu": {
-     "cumulativeCPUUsage": 1.194859,
+     "cumulativeCPUUsage": 1.170029,
      "percentCPUUsage": 0,
      "idleWakeupsPerSecond": 0
     },
-    "pid": 15216,
+    "pid": 23480,
     "type": "Browser",
-    "creationTime": 1788667867688.049,
+    "creationTime": 1788672439871.273,
     "memory": {
-     "workingSetSize": 117084,
-     "peakWorkingSetSize": 117084,
-     "privateBytes": 84756
+     "workingSetSize": 119736,
+     "peakWorkingSetSize": 120508,
+     "privateBytes": 87712
     },
     "integrityLevel": "medium",
     "sandboxed": false
    },
    {
     "cpu": {
-     "cumulativeCPUUsage": 6.879801,
+     "cumulativeCPUUsage": 7.533288,
      "percentCPUUsage": 0,
      "idleWakeupsPerSecond": 0
     },
-    "pid": 22420,
+    "pid": 21404,
     "type": "GPU",
-    "creationTime": 1788667867959.667,
+    "creationTime": 1788672440103.342,
     "serviceName": "GPU",
     "memory": {
-     "workingSetSize": 515936,
-     "peakWorkingSetSize": 517876,
-     "privateBytes": 458884
+     "workingSetSize": 559940,
+     "peakWorkingSetSize": 563956,
+     "privateBytes": 503568
     },
     "integrityLevel": "low",
     "sandboxed": true
    },
    {
     "cpu": {
-     "cumulativeCPUUsage": 0.185263,
+     "cumulativeCPUUsage": 0.191417,
      "percentCPUUsage": 0,
      "idleWakeupsPerSecond": 0
     },
-    "pid": 1472,
+    "pid": 22144,
     "type": "Utility",
-    "creationTime": 1788667867968.783,
+    "creationTime": 1788672440111.813,
     "serviceName": "network.mojom.NetworkService",
     "name": "Network Service",
     "memory": {
-     "workingSetSize": 54276,
-     "peakWorkingSetSize": 54536,
-     "privateBytes": 14300
+     "workingSetSize": 54292,
+     "peakWorkingSetSize": 54548,
+     "privateBytes": 14324
     },
     "integrityLevel": "medium",
     "sandboxed": false
    },
    {
     "cpu": {
-     "cumulativeCPUUsage": 3.328165,
+     "cumulativeCPUUsage": 3.651459,
      "percentCPUUsage": 0,
      "idleWakeupsPerSecond": 0
     },
-    "pid": 11512,
+    "pid": 16696,
     "type": "Tab",
-    "creationTime": 1788667868055.585,
+    "creationTime": 1788672440202.653,
     "memory": {
-     "workingSetSize": 138276,
-     "peakWorkingSetSize": 210244,
-     "privateBytes": 76060
+     "workingSetSize": 161060,
+     "peakWorkingSetSize": 208288,
+     "privateBytes": 101196
     },
     "integrityLevel": "medium",
     "sandboxed": false
@@ -2342,7 +2528,7 @@
     "glWsVersion": "1.5 (ANGLE 2.1.25160 git hash: ecc378cc6110)",
     "hardwareSupportsVulkan": false,
     "inProcessGpu": false,
-    "initializationTime": 260.505,
+    "initializationTime": 272.172,
     "isAsan": false,
     "isClangCoverage": false,
     "jpegDecodeAcceleratorSupported": false,

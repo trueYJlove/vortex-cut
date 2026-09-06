@@ -86,6 +86,8 @@ export class PreviewSession {
   private decodeTimes: number[] = [];
   private decodeInFlight = 0;
   private dropped = 0;
+  /** 会话累计丢帧（诊断/探针用；UI 指标行展示的是本次播放段口径）。 */
+  private droppedLifetime = 0;
   private disposed = false;
   private seekEpoch = 0;
   private lastSeekWall = 0;
@@ -96,10 +98,13 @@ export class PreviewSession {
   /** 自然播放到片尾时回调（UI 复位播放按钮；会话已内部 pause）。 */
   onEnded: (() => void) | null = null;
 
-  /** 环形纹理池深度：LEAD 超前 + 当前合成 + 在途 1，取 6 留余量。 */
-  private static readonly RING = 6;
+  /** 环形纹理池深度：LEAD 超前 + 当前合成 + 在途 1 + 提前入场 1，取 8 留余量。 */
+  private static readonly RING = 8;
   /** 预读超前帧数（吸收转场/换段冷启路径的解码尖峰）。 */
   private static readonly LEAD = 5;
+  /** 新输入入场提前量：首次入窗的输入提前 ~1.5s 冷启（回退关键帧 + 顺序喂入），
+   * 避免画中画窗口开启时因解码尖峰丢帧。 */
+  private static readonly LEAD_ENTER = 45;
   /** 合成落后目标超过该帧数 → 重锚时钟（放慢播放，禁止目标无限狂奔）。 */
   private static readonly LAG_REANCHOR = 10;
   /** 合成时向历史回溯的最大帧数（starving 后取最近就绪帧）。 */
@@ -296,24 +301,37 @@ export class PreviewSession {
   private pump(target: number): void {
     const from = Math.max(0, this.currentFrame, target - PreviewSession.BACKSCAN);
     const to = Math.min(target + PreviewSession.LEAD, this.ir.frames.length - 1);
+    const toEnter = Math.min(target + PreviewSession.LEAD_ENTER, this.ir.frames.length - 1);
     const needsByInput = new Map<string, Set<number>>();
-    for (let n = from; n <= to; n++) {
-      const frame = this.ir.frames[n]!;
-      const needs: Array<[string, number, boolean]> = [...mainNeeds(frame)];
-      for (const [inputId, srcN] of overlayNeeds(frame)) needs.push([inputId, srcN, false]);
-      for (const [inputId, srcN, shadow] of needs) {
-        if (shadow) continue;
-        let set = needsByInput.get(inputId);
-        if (!set) { set = new Set<number>(); needsByInput.set(inputId, set); }
-        set.add(srcN);
+    const enterNeeds = new Map<string, Set<number>>();
+    const collectNeeds = (fromN: number, toN: number, into: Map<string, Set<number>>) => {
+      for (let n = fromN; n <= toN; n++) {
+        const frame = this.ir.frames[n]!;
+        const needs: Array<[string, number, boolean]> = [...mainNeeds(frame)];
+        for (const [inputId, srcN] of overlayNeeds(frame)) needs.push([inputId, srcN, false]);
+        for (const [inputId, srcN, shadow] of needs) {
+          if (shadow) continue;
+          let set = into.get(inputId);
+          if (!set) { set = new Set<number>(); into.set(inputId, set); }
+          set.add(srcN);
+        }
       }
-    }
+    };
+    collectNeeds(from, to, needsByInput);
+    if (toEnter > to) collectNeeds(from, toEnter, enterNeeds);
     for (const [inputId, needs] of needsByInput) {
       const rig = this.rigs.get(inputId);
       if (!rig || rig.kind !== "video") continue;
-      const sorted = [...needs].sort((a, b) => a - b);
+      // 冷启动（fed=-1，输入首次入窗）用宽窗需求：首个展示需求提前 ~1.5s 请求
+      // （worker 回退最近关键帧 + 顺序喂入，一个请求直达），后续推进仍限窄窗。
+      let sorted: number[];
+      if (rig.fed < 0) {
+        sorted = [...(enterNeeds.get(inputId) ?? needs)].sort((a, b) => a - b);
+      } else {
+        sorted = [...needs].sort((a, b) => a - b);
+      }
       const max = sorted[sorted.length - 1]!;
-      // 正向单调推进（fed=-1 冷启动：从首个展示需求起，worker 回退最近关键帧）。
+      // 正向单调推进（冷启动首个请求直达入场点）。
       // 向后跳转只发生在用户动作（回卷重播/回退 seek）——由 resetChains() 显式
       // 重置链游标，pump 本身不做启发式回跳（避免深窗口陈旧需求引发震荡）。
       let next = rig.fed < 0 ? sorted[0]! : rig.fed + 1;
@@ -438,6 +456,7 @@ export class PreviewSession {
     // 回卷是用户驱动的向后跳转：显式重置各输入解码链（游标回 -1，pump 冷启重建）。
     if (this.currentFrame >= last) { this.currentFrame = 0; this.resetChains(); }
     this.playing = true;
+    this.dropped = 0; // 丢帧口径 = 本次播放段（拖拽/seek 冷启尖峰不跨段累计）
     this.anchorWall = performance.now();
     this.anchorFrame = this.currentFrame;
     const frameDur = 1000 / this.ir.canvas.fps;
@@ -468,6 +487,7 @@ export class PreviewSession {
         this.anchorWall = now;
       } else if (composed < target && target > this.currentFrame) {
         this.dropped += 1; // 目标帧未按时就绪：诚实计一次丢帧
+        this.droppedLifetime += 1;
       }
       if (target >= last) {
         this.pause();
