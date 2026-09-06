@@ -124,6 +124,11 @@ export class PreviewSession {
 
   private constructor(readonly ir: Ir, canvas: HTMLCanvasElement) {
     this.compositor = new Compositor(canvas, ir);
+    // 预览框尺寸变化（含 rAF 合帧）后重呈现当前帧
+    this.compositor.onRecompose = () => {
+      const frame = this.ir.frames[Math.min(this.currentFrame, this.ir.frames.length - 1)];
+      if (frame && this.frameReady(frame)) this.compose(frame);
+    };
   }
 
   static async create(canvas: HTMLCanvasElement, ir: Ir,
@@ -229,13 +234,11 @@ export class PreviewSession {
     }
   }
 
-  /** 预览框尺寸变化（CSS px）：后备缓冲随盒子、IR 画布 contain 居中。 */
+  /** 预览框尺寸变化（CSS px）：后备缓冲随盒子（≤2048 上限）、IR 画布 contain
+   * 居中；重呈现由 compositor 的 rAF 合帧回调驱动（连续拖拽窗口不逐帧重建）。 */
   resize(cssWidth: number, cssHeight: number): void {
     const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
     this.compositor.setViewportBacking(cssWidth * dpr, cssHeight * dpr);
-    // 画布尺寸变化会清空绘制缓冲：立即重呈现当前帧（纹理已在环形槽内，零解码）
-    const frame = this.ir.frames[Math.min(this.currentFrame, this.ir.frames.length - 1)];
-    if (frame && this.frameReady(frame)) this.compose(frame);
   }
 
   /** 环形槽位上传（经每输入串行尾；await 完成后才标记 srcN 就绪）。 */

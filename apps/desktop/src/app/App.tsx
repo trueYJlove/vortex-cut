@@ -1205,10 +1205,19 @@ export function App() {
   };
 
   const previewLayout = selectedClip?.layout ?? working?.clips[0]?.layout ?? "fit";
-  const nativeInfo = previewAsset?.asset.media_info as MediaInfo | null | undefined;
-  const nativeStream = nativeInfo && "video_streams" in nativeInfo ? nativeInfo.video_streams[0] : undefined;
-  const nativeRatio = nativeStream?.width && nativeStream?.height && nativeStream.width > 0 && nativeStream.height > 0 ? nativeStream.width / nativeStream.height : null;
-  const autoRatio = nativeRatio ? (Math.abs(nativeRatio - 16 / 9) < 0.05 ? "169" : Math.abs(nativeRatio - 9 / 16) < 0.05 ? "916" : Math.abs(nativeRatio - 1) < 0.05 ? "11" : Math.abs(nativeRatio - 4 / 3) < 0.05 ? "43" : Math.abs(nativeRatio - 3 / 4) < 0.05 ? "34" : "fit") : "fit";
+  // 预览/导出比例真源 = 项目画布（所见即所得；素材比例不再反客为主）。
+  // 旧实现按素材原生分辨率解析：横版素材 + 竖版项目时下拉显示 16:9、导出/预览
+  // 却与项目画布相悖，且播放头进入无片段区间时退化为 "fit"（合成预览拉取 IR
+  // 被核心以"画布比例不合法"拒绝）。项目画布恒为五档之一，恒稳定。
+  const canvasInfo = working?.canvas;
+  const autoRatio = canvasInfo
+    ? (Math.abs(canvasInfo.width / canvasInfo.height - 16 / 9) < 0.02 ? "169"
+      : Math.abs(canvasInfo.width / canvasInfo.height - 9 / 16) < 0.02 ? "916"
+      : Math.abs(canvasInfo.width / canvasInfo.height - 1) < 0.02 ? "11"
+      : Math.abs(canvasInfo.width / canvasInfo.height - 4 / 3) < 0.02 ? "43"
+      : Math.abs(canvasInfo.width / canvasInfo.height - 3 / 4) < 0.02 ? "34"
+      : "169")
+    : "fit";
   const effectiveRatio: OutputRatio = (previewRatioTouched ? previewRatio : autoRatio) as OutputRatio;
   // 合成预览比例：与预览比例选择器/权威预览/导出同源（此前独立按项目画布解析，
   // 与下拉框显示不一致——素材 16:9 + 项目画布 9:16 时下拉显示 16:9 而合成渲染 9:16）。

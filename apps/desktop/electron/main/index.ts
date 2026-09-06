@@ -239,7 +239,11 @@ async function createWindow(): Promise<void> {
       preload: join(__dirname, "../preload/index.cjs"),
       nodeIntegration: false,
       contextIsolation: true,
-      sandbox: false
+      sandbox: false,
+      // 编辑器预览不被遮挡节流：截图工具遮罩/半覆盖窗口时 Occlusion 追踪会把
+      // rAF 节流到 ~0——合成画面冻结而音频照播，恢复后时钟狂奔（丢帧风暴 +
+      // 音频硬校正）。预览应用必须持续渲染。
+      backgroundThrottling: false
     }
     });
     await appendLog(logPath, "BrowserWindow created");

@@ -357,18 +357,36 @@ export class Compositor {
   }
 
   /** 预览框适配：后备缓冲设为盒子像素尺寸，IR 画布等比 contain 居中（黑边）。
-   *  使合成预览与交互预览共享同一预览框观感（内容几何仍为权威 IR 画布）。 */
+   *  使合成预览与交互预览共享同一预览框观感（内容几何仍为权威 IR 画布）。
+   *  后备缓冲上限 2048：源内容只有 960x540/1080x1920，全屏时超采样纯属浪费
+   *  （5M+ 像素/帧的填充率 + 浏览器全屏画布合成），且是全屏卡顿的主要来源。 */
   setViewportBacking(backingWidth: number, backingHeight: number): void {
-    const width = Math.max(2, Math.round(backingWidth));
-    const height = Math.max(2, Math.round(backingHeight));
-    if (this.canvas.width === width && this.canvas.height === height) return;
+    const scaleFit = Math.min(backingWidth / this.ir.canvas.width, backingHeight / this.ir.canvas.height);
+    const capped = Math.min(scaleFit, 2048 / Math.max(this.ir.canvas.width, this.ir.canvas.height));
+    const width = Math.max(2, Math.round(this.ir.canvas.width * capped));
+    const height = Math.max(2, Math.round(this.ir.canvas.height * capped));
+    if (this.canvas.width === width && this.canvas.height === height) {
+      this.recomposeSoon();
+      return;
+    }
     this.canvas.width = width;
     this.canvas.height = height;
-    const scale = Math.min(width / this.ir.canvas.width, height / this.ir.canvas.height);
-    this.fitScale = scale;
-    this.fitX = (width - this.ir.canvas.width * scale) / 2;
-    this.fitY = (height - this.ir.canvas.height * scale) / 2;
+    this.fitX = (width - this.ir.canvas.width * capped) / 2;
+    this.fitY = (height - this.ir.canvas.height * capped) / 2;
+    this.fitScale = capped;
+    this.recomposeSoon();
   }
+
+  /** 尺寸变化会清空绘制缓冲：rAF 合帧重呈现（连续拖拽窗口时避免每帧重建）。 */
+  private recomposeRaf = 0;
+  private recomposeSoon(): void {
+    if (this.recomposeRaf || this.contextLost) return;
+    this.recomposeRaf = requestAnimationFrame(() => {
+      this.recomposeRaf = 0;
+      this.onRecompose?.();
+    });
+  }
+  onRecompose: (() => void) | null = null;
 
   /** 主轨段条目绘制（alphaScale 供转场两遍绘制使用；shadow 取影子纹理对）。
    * rotationDeg：rotate 关键帧逐帧值（绕画布中心旋转，角落为黑，与权威端一致）。 */
