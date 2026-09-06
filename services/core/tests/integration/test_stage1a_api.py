@@ -4,10 +4,47 @@ from os import replace
 from pathlib import Path
 from shutil import copyfile
 
+import pytest
 from fastapi.testclient import TestClient
 
 from aivs_core.app import create_app
 from aivs_core.config import Settings
+
+
+@pytest.mark.parametrize(
+    "canvas,expected",
+    [
+        ({"width": 1920, "height": 1080}, {"width": 1920, "height": 1080, "fps_num": 30, "fps_den": 1}),
+        ({"width": 1080, "height": 1920, "fps_num": 25, "fps_den": 1}, {"width": 1080, "height": 1920, "fps_num": 25, "fps_den": 1}),
+        (None, {"width": 1080, "height": 1920, "fps_num": 30, "fps_den": 1}),
+    ],
+)
+def test_create_project_canvas_presets(tmp_path: Path, monkeypatch, canvas, expected):
+    monkeypatch.setenv("AIVS_ADMIN_TOKEN", "admin-canvas")
+    app = create_app(Settings(data_dir=tmp_path, ffmpeg=Path("missing"), ffprobe=Path("missing")))
+    with TestClient(app) as client:
+        admin = {"Authorization": "Bearer admin-canvas"}
+        session = client.post("/api/v1/internal/sessions", headers=admin)
+        ui = {"Authorization": f"Bearer {session.json()['token']}"}
+        body = {"name": "Canvas Project"}
+        if canvas is not None:
+            body["canvas"] = canvas
+        created = client.post("/api/v1/projects", headers=ui, json=body)
+        assert created.status_code == 201
+        assert created.json()["canvas"] == expected
+
+
+def test_create_project_rejects_invalid_canvas(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("AIVS_ADMIN_TOKEN", "admin-canvas-bad")
+    app = create_app(Settings(data_dir=tmp_path, ffmpeg=Path("missing"), ffprobe=Path("missing")))
+    with TestClient(app) as client:
+        admin = {"Authorization": "Bearer admin-canvas-bad"}
+        session = client.post("/api/v1/internal/sessions", headers=admin)
+        ui = {"Authorization": f"Bearer {session.json()['token']}"}
+        for canvas in ({"width": 1001, "height": 1080}, {"height": 1080}, {"width": 2000, "height": 1080, "fps_num": 0}):
+            response = client.post("/api/v1/projects", headers=ui, json={"name": "Bad Canvas", "canvas": canvas})
+            assert response.status_code == 400
+            assert response.json()["error"]["code"] == "PROJECT_CANVAS_INVALID"
 
 
 def test_stage1a_project_asset_lifecycle_and_redaction(tmp_path: Path, monkeypatch):

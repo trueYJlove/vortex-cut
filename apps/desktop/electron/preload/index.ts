@@ -97,7 +97,7 @@ export interface DesktopApi {
   chooseMedia: () => Promise<MediaSelection | null>;
   probeMedia: (grantId: GrantId) => Promise<MediaInfo>;
   listProjects: (params?: { status?: ProjectStatus; limit?: number; cursor?: string }) => Promise<ProjectPage>;
-  createProject: (input: { name: string; root_dir_name?: string }) => Promise<Project>;
+  createProject: (input: { name: string; root_dir_name?: string; canvas?: { width: number; height: number; fps_num?: number; fps_den?: number } }) => Promise<Project>;
   getProject: (projectId: ProjectId) => Promise<Project>;
   renameProject: (input: { project_id: ProjectId; name: string }) => Promise<Project>;
   archiveProject: (projectId: ProjectId) => Promise<Project>;

@@ -52,9 +52,38 @@ class ProjectAssetService:
         self.transcript_stale = transcript_stale
         self.purge_asset_clips = purge_asset_clips
 
-    def create_project(self, name: str, root_dir_name: str | None = None) -> dict[str, Any]:
+    _DEFAULT_CANVAS = {"width": 1080, "height": 1920, "fps_num": 30, "fps_den": 1}
+
+    @staticmethod
+    def _validate_canvas(canvas: dict[str, Any] | None) -> dict[str, Any]:
+        """新建项目画布（可选）：宽高为偶数且在合理范围，帧率 1..120。
+        未提供时回退默认竖屏 1080x1920@30（历史项目同款）。"""
+        if not canvas:
+            return dict(ProjectAssetService._DEFAULT_CANVAS)
+        if not isinstance(canvas, dict):
+            raise DomainError("PROJECT_CANVAS_INVALID", "画布参数无效")
+        try:
+            width = int(canvas["width"])
+            height = int(canvas["height"])
+        except (KeyError, TypeError, ValueError):
+            raise DomainError("PROJECT_CANVAS_INVALID", "画布宽高无效") from None
+        try:
+            fps_num = int(canvas.get("fps_num", 30))
+            fps_den = int(canvas.get("fps_den", 1))
+        except (TypeError, ValueError):
+            raise DomainError("PROJECT_CANVAS_INVALID", "画布帧率无效") from None
+        if not (64 <= width <= 7680 and width % 2 == 0 and 64 <= height <= 7680 and height % 2 == 0):
+            raise DomainError("PROJECT_CANVAS_INVALID", "画布宽高需为 64..7680 的偶数")
+        fps = fps_num / fps_den if fps_den > 0 else 0
+        if fps_den <= 0 or not (1 <= fps <= 120):
+            raise DomainError("PROJECT_CANVAS_INVALID", "画布帧率需在 1..120")
+        return {"width": width, "height": height, "fps_num": fps_num, "fps_den": fps_den}
+
+    def create_project(self, name: str, root_dir_name: str | None = None,
+                       canvas: dict[str, Any] | None = None) -> dict[str, Any]:
         project_name = _project_name(name)
         root_name = _project_name(root_dir_name or project_name)
+        canvas_value = self._validate_canvas(canvas)
         project_id = f"project_{new_id()}"
         now = utc_now()
         root_dir = self.data_dir / "projects" / project_id
@@ -68,7 +97,7 @@ class ProjectAssetService:
                     project_id,
                     project_name,
                     "active",
-                    json_dumps({"width": 1080, "height": 1920, "fps_num": 30, "fps_den": 1}),
+                    json_dumps(canvas_value),
                     None,
                     str(root_dir),
                     root_name,

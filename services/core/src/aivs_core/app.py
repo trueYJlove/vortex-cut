@@ -73,6 +73,7 @@ class ProbeRequest(BaseModel):
 class ProjectCreateRequest(BaseModel):
     name: str
     root_dir_name: str | None = None
+    canvas: dict | None = None
 
 
 class ProjectPatchRequest(BaseModel):
@@ -1343,7 +1344,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: ProjectCreateRequest, _: CoreState = Depends(require_ui)
     ) -> dict[str, Any]:
         try:
-            return state.projects.create_project(request.name, request.root_dir_name)
+            return state.projects.create_project(request.name, request.root_dir_name, request.canvas)
         except DomainError as exc:
             raise _domain(exc) from exc
 

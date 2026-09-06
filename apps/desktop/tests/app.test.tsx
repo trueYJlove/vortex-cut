@@ -93,7 +93,7 @@ describe("Stage 1A/1B 工作流", () => {
     window.desktop = api; render(<App />);
     await expectSwitcherName("演示项目");
     openProjectManagement();
-    fireEvent.change(await screen.findByLabelText("新项目名称"), { target: { value: "新项目" } }); fireEvent.click(screen.getByRole("button", { name: "创建项目" })); await waitFor(() => expect(api.createProject).toHaveBeenCalledWith({ name: "新项目" }));
+    fireEvent.change(await screen.findByLabelText("新项目名称"), { target: { value: "新项目" } }); fireEvent.click(screen.getByRole("button", { name: "创建项目" })); await waitFor(() => expect(api.createProject).toHaveBeenCalledWith({ name: "新项目", canvas: { width: 1080, height: 1920, fps_num: 30, fps_den: 1 } }));
     // Wait for the finished create mutation, then use the real project switcher
     // to continue the remaining workflow on project_1.  API invocation alone
     // is not completion: createProject still refreshes and selects its result.
@@ -111,6 +111,16 @@ describe("Stage 1A/1B 工作流", () => {
     for (const label of ["视频", "音频", "图片"]) fireEvent.click(screen.getByRole("button", { name: `导入${label}` }));
     await waitFor(() => expect(api.importAsset).toHaveBeenCalledTimes(3));
     expect(api.importAsset).toHaveBeenNthCalledWith(1, { project_id: "project_1", kind: "video" }); expect(api.importAsset).toHaveBeenNthCalledWith(3, { project_id: "project_1", kind: "image" });
+  });
+
+  it("新建项目可选画布比例，创建请求携带对应画布", async () => {
+    const api = desktopApi(); window.desktop = api; render(<App />);
+    await expectSwitcherName("演示项目");
+    openProjectManagement();
+    fireEvent.change(await screen.findByLabelText("新项目名称"), { target: { value: "横屏项目" } });
+    fireEvent.change(screen.getByLabelText("新建项目画布比例"), { target: { value: "169" } });
+    fireEvent.click(screen.getByRole("button", { name: "创建项目" }));
+    await waitFor(() => expect(api.createProject).toHaveBeenCalledWith({ name: "横屏项目", canvas: { width: 1920, height: 1080, fps_num: 30, fps_den: 1 } }));
   });
 
   it("卸载后的启动请求不会穿透到后来挂载的 Desktop bridge", async () => {
