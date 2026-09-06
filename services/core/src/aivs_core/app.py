@@ -693,6 +693,7 @@ def _domain(exc: DomainError) -> HTTPException:
             "TIMELINE_ALREADY_EXISTS",
             "TIMELINE_CONFLICT",
             "PREVIEW_IR_UNSUPPORTED",
+            "PREVIEW_IR_TOO_LARGE",
             "TIMELINE_DRAFT_CONFLICT",
             "TIMELINE_LOCKED",
             "TIMELINE_PATCH_EGRESS_EXPIRED",
@@ -1583,8 +1584,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         output_ratio: str = "169",
         _: CoreState = Depends(require_ui),
     ) -> dict[str, Any]:
-        if output_ratio != "169":
-            raise _error("PREVIEW_IR_RATIO_UNSUPPORTED", "合成预览当前仅支持 16:9 画布", 400)
+        if output_ratio not in {"169", "916", "11", "43", "34"}:
+            raise _error("PREVIEW_IR_RATIO_UNSUPPORTED", "合成预览画布比例不合法", 400)
         try:
             return await state.render_coordinator.preview_ir(project_id, timeline_revision_id, output_ratio)
         except DomainError as exc:

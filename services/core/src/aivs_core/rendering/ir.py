@@ -21,6 +21,7 @@ from ..projects import DomainError
 FPS = 30
 IR_SCHEMA = "preview-ir-v1"
 IR_PROJECTOR_VERSION = 1
+MAX_IR_FRAMES = 27_000  # 15 分钟 @30fps（O2 体量护栏）
 
 ALLOWED_KEYFRAME_PROPS = {"position", "opacity"}
 ALLOWED_TRANSITIONS = {"fade", "fadeblack"}
@@ -48,6 +49,8 @@ def _validate_whitelist(plan: dict[str, Any]) -> None:
             raise _fail(clip_id, "reverse_playback（倒放）")
         if segment.get("track_hidden"):
             raise _fail(clip_id, "track_hidden（隐藏轨）")
+        if segment["asset_kind"] != "video":
+            raise _fail(clip_id, f"asset_kind={segment['asset_kind']}（图片/音频素材暂不支持实时合成预览）")
         keyframes = segment.get("keyframes")
         if isinstance(keyframes, dict) and keyframes:
             if segment["track_id"] != "V1":
@@ -314,6 +317,13 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
 
     total_us = regions[-1]["t1"] if regions else max((int(segment["timeline_end_us"]) for segment in segments), default=0)
     total_frames = -(-int(total_us) * FPS // 1_000_000)
+    # O2 体量护栏（M3-2）：全量逐帧数值表按帧数线性增长，超长时间线先拒绝，
+    # 分页/按需投影留待后续增量（设计 §7-O2）。
+    if total_frames > MAX_IR_FRAMES:
+        raise DomainError(
+            "PREVIEW_IR_TOO_LARGE",
+            f"时间线输出 {total_frames} 帧超出实时合成预览上限 {MAX_IR_FRAMES} 帧",
+        )
 
     frames = []
     for n in range(total_frames):

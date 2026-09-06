@@ -211,3 +211,14 @@ def test_whitelist_rejects_missing_geometry() -> None:
     with pytest.raises(DomainError) as exc:
         project_preview_ir(plan, {**_probe(plan), "asset0": {"video_streams": []}})
     assert exc.value.code == "PREVIEW_IR_UNSUPPORTED"
+
+
+def test_whitelist_rejects_oversized_timeline() -> None:
+    long_segments = [_segment(f"c{i}", 0, 2 * US, i * 2 * US, (i + 1) * 2 * US,
+                              asset_idx=i % 2)
+                     for i in range(8)]  # 16s < 15min，需直接构造超长
+    long_segments = [_segment("a", 0, 920 * US, 0, 920 * US)]
+    # 920s ≈ 27600 帧 > 27000
+    with pytest.raises(DomainError) as exc:
+        project_preview_ir(long_segments and _plan(long_segments), _probe(_plan(long_segments)))
+    assert exc.value.code == "PREVIEW_IR_TOO_LARGE"

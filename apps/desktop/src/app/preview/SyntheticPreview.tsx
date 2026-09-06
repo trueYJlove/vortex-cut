@@ -7,6 +7,8 @@ import { PreviewSession, type PreviewSessionMetrics } from "./preview-session.js
 export interface SyntheticPreviewProps {
   projectId: string;
   revisionId: string | null;
+  /** 画布比例（169/916/11/43/34），App 按项目画布解析。 */
+  outputRatio: string;
   /** asset_id → aivideo:// 票据 URL（App 既有素材通道）。 */
   mediaUrls: Map<string, string>;
   playing: boolean;
@@ -21,7 +23,7 @@ interface LoadState {
 }
 
 export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactElement {
-  const { projectId, revisionId, mediaUrls, playing, playheadUs, onTimeUs, onFallback } = props;
+  const { projectId, revisionId, mediaUrls, playing, playheadUs, onTimeUs, onFallback, outputRatio } = props;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const sessionRef = useRef<PreviewSession | null>(null);
   const lastReportedUs = useRef<number>(playheadUs);
@@ -40,7 +42,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
         const payload = await window.desktop.getPreviewIr({
           project_id: projectId as never,
           timeline_revision_id: revisionId,
-          output_ratio: "169",
+          output_ratio: outputRatio,
         });
         const ir: Ir = parseIr(payload.ir as unknown as string);
         const canvas = canvasRef.current;
@@ -75,7 +77,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
     };
     // mediaUrls 以内容为准（票据变更即重建）；playhead 仅挂载时取初值。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, revisionId]);
+  }, [projectId, revisionId, outputRatio]);
 
   // 播放/暂停。
   useEffect(() => {

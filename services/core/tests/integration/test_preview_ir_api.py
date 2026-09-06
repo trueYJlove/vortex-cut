@@ -137,8 +137,12 @@ def test_preview_ir_endpoint(tmp_path: Path, monkeypatch) -> None:
         again = client.get("/api/v1/projects/proj-ir/preview-ir", headers=ui).json()
         assert again["ir"]["frames"] == ir["frames"]
 
-        # output_ratio 白名单：增量一仅 16:9
-        bad = client.get("/api/v1/projects/proj-ir/preview-ir", params={"output_ratio": "916"}, headers=ui)
+        # output_ratio：支持 169/916/11/43/34；非法值 400
+        portrait = client.get("/api/v1/projects/proj-ir/preview-ir", params={"output_ratio": "916"}, headers=ui)
+        assert portrait.status_code == 200
+        assert portrait.json()["ir"]["canvas"]["width"] == 540
+        assert portrait.json()["ir"]["canvas"]["height"] == 960
+        bad = client.get("/api/v1/projects/proj-ir/preview-ir", params={"output_ratio": "abc"}, headers=ui)
         assert bad.status_code == 400
 
 

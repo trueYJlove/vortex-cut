@@ -157,6 +157,19 @@ export function App() {
   const [previewMode, setPreviewMode] = useState<"interactive" | "authoritative" | "synthetic">("interactive");
   const [syntheticNotice, setSyntheticNotice] = useState<string | null>(null);
   const [previewRatio, setPreviewRatio] = useState("fit");
+  // 合成预览画布比例：预览比例选择器为 fit 时按项目画布宽高比解析（169/916/11/43/34）。
+  const syntheticRatio = (() => {
+    if (previewRatio !== "fit") return previewRatio;
+    const canvas = working?.canvas;
+    if (!canvas) return "169";
+    const ratio = canvas.width / canvas.height;
+    if (Math.abs(ratio - 16 / 9) < 0.02) return "169";
+    if (Math.abs(ratio - 9 / 16) < 0.02) return "916";
+    if (Math.abs(ratio - 1) < 0.02) return "11";
+    if (Math.abs(ratio - 4 / 3) < 0.02) return "43";
+    if (Math.abs(ratio - 3 / 4) < 0.02) return "34";
+    return "169";
+  })();
   const [previewRatioTouched, setPreviewRatioTouched] = useState(false);
   const [previews, setPreviews] = useState<AuthoritativePreviewPresentation[]>([]);
   const [exports, setExports] = useState<ExportRecordPresentation[]>([]);
@@ -1676,7 +1689,7 @@ export function App() {
             <div className={`preview-frame ${previewClass}${previewSelected ? " selected" : ""}`} style={previewZoom === "fit" ? undefined : { transform: `scale(${previewZoom})` }} role="button" tabIndex={0} aria-label="选中播放头处的片段" title="点击选中播放头处的片段" onClick={selectClipAtPlayhead} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectClipAtPlayhead(); } }}>
           <div className="preview-canvas" ref={canvasRef}>
             {previewMode === "authoritative" && authoritativeMediaUrl && <video ref={videoRef} className="preview-foreground authoritative-video" src={authoritativeMediaUrl} aria-label={reframePlayback ? "重构图权威预览视频" : exportPlayback ? "导出视频" : "权威预览视频"} controls onEnded={() => setPlaying(false)} />}
-            {previewMode === "synthetic" && project && <SyntheticPreview projectId={project.project_id} revisionId={timeline?.current_revision.timeline_revision_id ?? null} mediaUrls={new Map(assets.flatMap(item => item.media_url ? [[item.asset.asset_id, item.media_url] as const] : []))} playing={playing && !gestureHoldRef.current} playheadUs={playhead} onTimeUs={us => setPlayhead(us)} onFallback={(reason, code) => { setPreviewMode("interactive"); showNotice(code === "PREVIEW_IR_UNSUPPORTED" ? "当前时间线包含实时合成暂不支持的效果，已回退交互预览。" : `合成预览不可用：${reason}`, "warning"); }} />}
+            {previewMode === "synthetic" && project && <SyntheticPreview outputRatio={syntheticRatio} projectId={project.project_id} revisionId={timeline?.current_revision.timeline_revision_id ?? null} mediaUrls={new Map(assets.flatMap(item => item.media_url ? [[item.asset.asset_id, item.media_url] as const] : []))} playing={playing && !gestureHoldRef.current} playheadUs={playhead} onTimeUs={us => setPlayhead(us)} onFallback={(reason, code) => { setPreviewMode("interactive"); showNotice(code === "PREVIEW_IR_UNSUPPORTED" ? "当前时间线包含实时合成暂不支持的效果，已回退交互预览。" : `合成预览不可用：${reason}`, "warning"); }} />}
             {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "video" && <div className="preview-transform" style={mainTransformStyle}><video className="preview-background" src={previewAsset.media_url} muted aria-hidden="true" /><video ref={videoRef} className="preview-foreground" src={previewAsset.media_url} muted={!selectedClip?.audio.enabled || previewReverse || (clipAtPlayhead ? !isClipAudible(clipAtPlayhead) : false)} aria-label="交互预览视频" onTimeUpdate={event => { if (libraryPreviewId) setPlayhead(Math.round(event.currentTarget.currentTime * 1_000_000)); }} onEnded={handleVideoEnded} /></div>}
             {previewMode === "interactive" && audioAsset?.media_url && <audio ref={audioRef} src={audioAsset.media_url} style={{ display: "none" }} />}
             {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "image" && <div className="preview-transform" style={mainTransformStyle}><img className="preview-background" src={previewAsset.media_url} alt="" aria-hidden="true" /><img className="preview-foreground" src={previewAsset.media_url} alt={previewAsset.asset.display_name} /></div>}
