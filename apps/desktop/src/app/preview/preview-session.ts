@@ -1,38 +1,23 @@
-/** 合成预览会话：持有解码 worker、纹理状态与 WebGL2 合成器，对外提供
- * play/pause/seek 与时间/指标回调。
+/** 合成预览会话：持有解码 worker、GL 执行器 worker（OffscreenCanvas）、纹理簿记
+ * 与 WebAudio，对外提供 play/pause/seek 与时间/指标回调。
  *
- * 播放架构（M3-2.2 重构，修复"每 tick 反应式请求 + 单 pendingResolve 覆盖 +
- * 只合成精确目标帧"导致的冻结/丢帧/僵尸解码）：
+ * 播放架构（M3-2.2 重构 + Phase 2 完全体 worker 化）：
  * - 每输入一条顺序解码链（prefetch chain）：按 IR 帧序单调推进 src_n，深度 1
  *   在途、完成后立刻续链（不等 rAF tick），解码器保持热态（每帧喂下个采样）；
- * - 每输入一个环形纹理池（RING）：解码帧上传到独立槽位，链超前 LEAD 帧也不
- *   覆盖当前合成所需内容；上传 await 完成后才标记就绪（修复"Y 已传/UV 未传
- *   → 合成出绿块"的竞态）；
- * - 合成取 ≤ 墙钟目标的最新就绪帧（不丢已就绪帧）；落后超过 LAG_REANCHOR 帧
- *   时重锚时钟（播放放慢而非画面冻结 + 丢帧暴涨）；
- * - seek（暂停态）仍走并行解码后合成，但同样经环形/影子槽位（await 后就绪），
- *   并同步链游标（回播放不触发无谓冷启）。 */
-import { Compositor, assertHardwareRenderer } from "./compositor.js";
+ * - 每输入一个环形纹理池（RING）：解码帧 transfer 到 **GL 执行器 worker**
+ *   （OffscreenCanvas，upload p95 14~25ms 的 copyTo/texImage2D/mipmap 不再占
+ *   主线程），worker 上传完成 ack 后标记槽位就绪；
+ * - 合成取 ≤ 墙钟目标的最新就绪帧；落后超过 LAG_REANCHOR 帧时重锚时钟；
+ * - 会话保留全部时间轴编排（IR/时钟/pump/就绪判定），向 worker 下发**绘制
+ *   命令列表**（fill=模糊垫底 / draw / captions）——worker 无时间轴语义；
+ * - seek（暂停态）仍走并行解码后合成，同样经环形/影子槽位 ack，并同步链游标。 */
+import type { CompositorWorkerClient } from "./compositor-worker.js";
+import type { DrawCommand } from "./compositor-worker.worker.js";
 import type { Ir, IrContent, IrFrame } from "./ir.js";
 import { DecodeWorker } from "./decode-worker.js";
 
-/** 片段音频配置（编辑态：App 从时间线文档透传；Phase 1 未入 IR 契约）。 */
+/** 片段音频配置（编辑态：App 从时间线文档透传）。 */
 export interface SegmentAudioConfig { enabled: boolean; gainDb: number }
-
-/** WebAudio 片段音频装配（每含音轨片段一个）：AudioBufferSourceNode 在音频
- *  线程时钟上调度，与主线程/解码抖动物理隔离——根治"深 GOP 解码尖峰 →
- *  合成时钟抖 → currentTime 硬校正"的段音频抖动（1.25x 变速段尤甚）；
- *  gainDb 经 GainNode 线性增益，无 HTMLAudio 1.0 上限钳制。 */
-interface AudioRig {
-  /** 解码好的整段素材音频（clip 复用同一 buffer，起点按 source_start 换算）。 */
-  buffer: AudioBuffer | null;
-  source: AudioBufferSourceNode | null;
-  gain: GainNode | null;
-  /** 源启动锚点：当前位置 = startOffset + (ctx.currentTime - startedAt) × speed。 */
-  startedAt: number;
-  startOffset: number;
-  speed: number;
-}
 
 export interface PreviewSessionMetrics {
   task_ms_p50: number;
@@ -45,33 +30,28 @@ export interface PreviewSessionMetrics {
   decode_ms_p95: number;
   /** 当前在途解码请求数（全部输入合计，含影子槽）。 */
   decode_in_flight: number;
-  /** 纹理上传（copyTo+texImage2D+mipmap）耗时 p95：主线程负载诊断。 */
+  /** 纹理上传往返（postMessage+GL+ack）耗时 p95：worker 化后的负载口径。 */
   upload_ms_p95: number;
 }
 
-type TexPair = { y: WebGLTexture; uv: WebGLTexture | null };
-
-interface RingSlot { y: WebGLTexture; uv: WebGLTexture; srcN: number }
+interface RingSlot { srcN: number }
 
 interface InputRig {
   kind: "video" | "image";
   worker: DecodeWorker | null;
-  handle: import("./compositor.js").VideoHandle;
-  /** 播放/seek 共用的环形纹理池：解码帧按序占用槽位，srcN=-1 表示空。 */
-  ring: RingSlot[];
+  /** 播放/seek 共用的环形簿记：槽位按 ringSeq 轮转，srcN=-1 表示空。 */
+  ring: Array<RingSlot | null>;
   ringSeq: number;
   /** 顺序解码链游标：已向 worker 请求的最大 src_n（seek 上传后同步）。 */
   fed: number;
   /** 在途链请求的 src_n（深度 1）。 */
   inFlightN: number | null;
-  /** 转场共享输入第二帧槽位（单槽，await 完成后才置值）。 */
+  /** 转场共享输入第二帧槽位（影子槽，ack 后置值）。 */
   shadowUploaded: number;
   /** 影子槽在途请求 src_n。 */
   shadowInFlight: number | null;
-  /** 同一输入的纹理上传串行尾（杜绝同槽 copyTo/texImage2D 交错）。 */
+  /** 同一输入的上传串行尾（ack 顺序保证槽位标记不被乱序覆盖）。 */
   uploadTail: Promise<void>;
-  /** copyTo 复用缓冲（每帧 ~3MB 的重复分配是 GC 抖动源，串行尾保证独占）。 */
-  scratch: ArrayBuffer | null;
 }
 
 /** 主轨（段或转场左右）所需的 (输入, 源帧, 是否影子槽)。 */
@@ -97,8 +77,18 @@ function shiftedRect(rect: IrContent, shift: { dx: number; dy: number }): IrCont
 
 const clamp = (value: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, value));
 
+export function assertHardwareRenderer(adapter: string): { hardware: boolean; software: boolean } {
+  const lowered = adapter.toLowerCase();
+  const software = lowered.includes("swiftshader") || lowered.includes("llvmpipe")
+    || lowered.includes("software") || lowered.includes("basic render");
+  const hardware = !software && lowered.length > 0;
+  return { hardware, software };
+}
+
 export class PreviewSession {
-  private readonly compositor: Compositor;
+  private container: HTMLElement | null = null;
+  private canvasEl: HTMLCanvasElement | null = null;
+  private compositor: CompositorWorkerClient | null = null;
   private readonly rigs = new Map<string, InputRig>();
   private rafId = 0;
   private playing = false;
@@ -120,66 +110,99 @@ export class PreviewSession {
   private dragMode = false;
   private lastAdvanceWall = 0;
   lastError: string | null = null;
+  /** 诊断：seek 纪元作废的上传任务数（scrub 开销定位用）。 */
+  skippedUploads = 0;
+  /** 诊断：worker 上传分步采样（copyTo/tex 毫秒）。 */
+  get uploadSplitDebug(): Array<{ copyToMs: number; texMs: number }> {
+    return this.compositor?.uploadSplit ?? [];
+  }
   onTimeUs: ((us: number) => void) | null = null;
   private tickets: Map<string, string> | null = null;
   private audioByClip: Map<string, SegmentAudioConfig> | null = null;
   private audioCtx: AudioContext | null = null;
-  private readonly audioRigs = new Map<string, AudioRig>(); // clip_id → 音频装配
+  private readonly audioRigs = new Map<string, { buffer: AudioBuffer | null; source: AudioBufferSourceNode | null; gain: GainNode | null; startedAt: number; startOffset: number; speed: number }>();
   /** 音频漂移硬校正阈值（秒）：WebAudio 自身不漂，只有时钟重锚才触达。 */
   private static readonly AUDIO_REANCHOR_S = 0.08;
   /** 自然播放到片尾时回调（UI 复位播放按钮；会话已内部 pause）。 */
   onEnded: (() => void) | null = null;
 
+  /** 视口适配（等比 contain）：IR 画布 → 后备缓冲（会话侧权威，resize 下发 worker）。 */
+  private fitX = 0;
+  private fitY = 0;
+  private fitScale = 1;
+  private backing = { width: 2, height: 2 };
+  /** 尺寸变化 rAF 合帧重呈现（连续拖拽窗口不逐帧重建）。 */
+  private recomposeRaf = 0;
+
   /** 环形纹理池深度：LEAD 超前 + 当前合成 + 在途 1 + 提前入场 1，取 8 留余量。 */
   private static readonly RING = 8;
   /** 预读超前帧数（吸收转场/换段冷启路径的解码尖峰）。 */
   private static readonly LEAD = 5;
-  /** 新输入入场提前量：首次入窗的输入提前 ~1.5s 冷启（回退关键帧 + 顺序喂入），
-   * 避免画中画窗口开启时因解码尖峰丢帧。 */
+  /** 新输入入场提前量：首次入窗的输入提前 ~1.5s 冷启。 */
   private static readonly LEAD_ENTER = 45;
-  /** 合成落后目标超过该帧数 → 重锚时钟（放慢播放，禁止目标无限狂奔）。 */
+  /** 合成落后目标超过该帧数 → 重锚时钟。 */
   private static readonly LAG_REANCHOR = 10;
   /** 合成时向历史回溯的最大帧数（starving 后取最近就绪帧）。 */
   private static readonly BACKSCAN = 15;
 
   ir: Ir;
-  private constructor(ir: Ir, canvas: HTMLCanvasElement) {
+  private constructor(ir: Ir) {
     this.ir = ir;
-    this.compositor = new Compositor(canvas, ir);
-    // 预览框尺寸变化（含 rAF 合帧）后重呈现当前帧
-    this.compositor.onRecompose = () => {
-      const frame = this.ir.frames[Math.min(this.currentFrame, this.ir.frames.length - 1)];
-      if (frame && this.frameReady(frame)) this.compose(frame);
-    };
   }
 
-  static async create(canvas: HTMLCanvasElement, ir: Ir,
+  static async create(container: HTMLElement, ir: Ir,
                       tickets: Map<string, string>,
                       audioByClip?: Map<string, SegmentAudioConfig>): Promise<PreviewSession> {
-    const session = new PreviewSession(ir, canvas);
+    const session = new PreviewSession(ir);
+    session.container = container;
     session.tickets = tickets;
     session.audioByClip = audioByClip ?? null;
-    const sourceWidth = new Map<string, number>();
+    const canvas = document.createElement("canvas");
+    canvas.className = "synthetic-canvas";
+    canvas.style.width = "100%";
+    canvas.style.height = "100%";
+    canvas.style.display = "block";
+    container.textContent = "";
+    container.appendChild(canvas);
+    session.canvasEl = canvas;
+    const { CompositorWorkerClient } = await import("./compositor-worker.js");
+    const client = await CompositorWorkerClient.create(canvas, {
+      inputs: ir.inputs.filter(input => input.asset_kind !== "audio").map(input => ({
+        inputId: input.input_id,
+        sourceWidth: input.geometry.width || 1920,
+        width: input.geometry.width || 16,
+        height: input.geometry.height || 9,
+      })),
+      ringDepth: PreviewSession.RING,
+      canvasWidth: ir.canvas.width,
+      canvasHeight: ir.canvas.height,
+      captionStyles: ir.caption_styles,
+    });
+    session.compositor = client;
+    client.onContextLost = () => {
+      for (const resolve of session.contextLostResolvers.splice(0)) resolve();
+    };
+    const adapter = client.gpuInfo.adapter;
+    if (assertHardwareRenderer(adapter).software) {
+      throw new Error(`software rendering detected: ${adapter}`);
+    }
     for (const input of ir.inputs) {
       const ticket = tickets.get(input.asset_id);
       if (!ticket) throw new Error(`no ticket for ${input.asset_id}`);
-      // 纯音频输入（A1）：无视觉纹理装配，音频走 WebAudio（syncAudio/ensureAudioBuffer）。
-      if (input.asset_kind === "audio") continue;
+      if (input.asset_kind === "audio") continue; // 纯音频输入：无视觉装配，音频走 WebAudio
       const rig: InputRig = {
         kind: input.asset_kind === "image" ? "image" : "video",
         worker: null,
-        handle: session.compositor.registerTextureOnly(input.input_id),
-        ring: [],
+        ring: Array.from({ length: PreviewSession.RING }, () => null),
         ringSeq: 0,
         fed: -1,
         inFlightN: null,
         shadowUploaded: -1,
         shadowInFlight: null,
         uploadTail: Promise.resolve(),
-        scratch: null,
       };
       if (rig.kind === "image") {
-        // 静图：Image 元素解码 → RGBA 纹理一次上传，src_n 恒 0 全程复用
+        // 静图：解码为 ImageBitmap → transfer 到 worker 一次上传，src_n 恒 0 全程复用
         const image = new Image();
         image.crossOrigin = "anonymous";
         await new Promise<void>((resolve, reject) => {
@@ -187,10 +210,10 @@ export class PreviewSession {
           image.onerror = () => reject(new Error(`image load failed: ${input.asset_id}`));
           image.src = ticket;
         });
-        session.compositor.uploadImageFrame(rig.handle, image);
+        const bitmap = await createImageBitmap(image);
+        client.uploadImage(input.input_id, bitmap);
       } else {
         rig.worker = await DecodeWorker.create(ticket);
-        sourceWidth.set(input.input_id, input.geometry.width);
       }
       session.rigs.set(input.input_id, rig);
     }
@@ -203,21 +226,18 @@ export class PreviewSession {
         void session.ensureAudioBuffer(segment.clip_id, segment.input_id);
       }
     }
-    // LOD 依据真实源宽（此前恒 1920：682 宽画中画被过度降采样模糊）
-    session.compositor.setSourceWidthScale(sourceWidth);
-    const adapter = session.compositor.gpuRendererInfo();
-    if (assertHardwareRenderer(adapter.adapter).software) {
-      throw new Error(`software rendering detected: ${adapter.adapter}`);
-    }
     return session;
   }
 
-  get adapterDescription(): string {
-    return this.compositor.gpuRendererInfo().adapter;
+  get canvas(): HTMLCanvasElement | null {
+    return this.canvasEl;
   }
 
+  private readonly contextLostResolvers: Array<() => void> = [];
+
+  /** 字幕字体（transfer 到 worker 的 FontFaceSet；worker 侧字体就绪后强制重绘字幕层）。 */
   async loadCaptionFont(buffer: ArrayBuffer): Promise<void> {
-    await this.compositor.ensureCaptionFont(buffer, "AppCaptionCJK");
+    this.compositor?.setFont(buffer, "AppCaptionCJK");
   }
 
   get isPlaying(): boolean {
@@ -244,11 +264,12 @@ export class PreviewSession {
 
   /** IR 画布坐标 → 合成画布 CSS 坐标的映射（contain + 后备缓冲换算）。 */
   pipView(): { scale: number; offsetX: number; offsetY: number; width: number; height: number } {
-    const cw = this.compositor.canvas.clientWidth || this.compositor.canvas.width;
-    const ch = this.compositor.canvas.clientHeight || this.compositor.canvas.height;
-    const kx = cw / this.compositor.canvas.width;
-    const ky = ch / this.compositor.canvas.height;
-    return { scale: this.compositor.fitScale * kx, offsetX: this.compositor.fitX * kx, offsetY: this.compositor.fitY * ky, width: cw, height: ch };
+    const el = this.canvasEl;
+    const cw = el?.clientWidth || this.backing.width;
+    const ch = el?.clientHeight || this.backing.height;
+    const kx = cw / this.backing.width;
+    const ky = ch / this.backing.height;
+    return { scale: this.fitScale * kx, offsetX: this.fitX * kx, offsetY: this.fitY * ky, width: cw, height: ch };
   }
 
   /** 手势期间冻结合成时钟（画中画拖拽时播放头前进会越出片段区间）。 */
@@ -257,14 +278,14 @@ export class PreviewSession {
   }
 
   /** revision 变更的就地 IR 换表：输入集合未变（transform/关键帧/时间编辑）时
-   * 保留 worker 与 GL 纹理，仅替换帧表/段表并重呈现（零黑屏，~50ms）。
-   * 输入集合变化（加删素材）返回 false，调用方走整会话重建。 */
+   *  保留 worker 与 GL 纹理，仅替换帧表/段表并重呈现（零黑屏，~50ms）。
+   *  输入集合变化（加删素材）返回 false，调用方走整会话重建。 */
   replaceIr(nextIr: Ir): boolean {
     const sig = (ir: Ir) => JSON.stringify(ir.inputs.map(item => [item.input_id, item.asset_id, item.asset_kind, item.geometry]));
     if (sig(this.ir) !== sig(nextIr)) return false;
     this.ir = nextIr;
     this.resetChains();
-    this.compositor.onRecompose?.();
+    this.recomposeSoon();
     return true;
   }
 
@@ -287,7 +308,7 @@ export class PreviewSession {
         overlay.box = { x: cx - w / 2, y: cy - h / 2, w, h };
       }
     }
-    this.compositor.onRecompose?.();
+    this.recomposeSoon();
   }
 
   /** 画中画旋转就地补丁（旋转手势）：度数作用于片段全区间帧。 */
@@ -298,7 +319,7 @@ export class PreviewSession {
         overlay.rotation_deg = deg;
       }
     }
-    this.compositor.onRecompose?.();
+    this.recomposeSoon();
   }
 
   /** 诊断快照：各输入解码链游标/在途/环形内容 + 最近解码回执（m3p5 探针）。 */
@@ -308,7 +329,7 @@ export class PreviewSession {
       state[inputId] = {
         fed: rig.fed,
         inFlight: rig.inFlightN,
-        ring: rig.ring.filter(slot => slot).map(slot => slot.srcN),
+        ring: rig.ring.filter(slot => slot).map(slot => slot!.srcN),
         shadow: rig.shadowUploaded,
         last_decode: rig.worker?.lastFrameInfo ?? null,
       };
@@ -317,7 +338,7 @@ export class PreviewSession {
   }
 
   /** 用户驱动的向后跳转（回卷重播/回退 seek）后重置解码链：游标回 -1，
-   * pump 冷启重建（worker 冷启路径实证干净）。 */
+   *  pump 冷启重建（worker 冷启路径实证干净）。 */
   private resetChains(): void {
     for (const [, rig] of this.rigs) {
       rig.fed = -1;
@@ -326,19 +347,49 @@ export class PreviewSession {
     }
   }
 
-  /** 预览框尺寸变化（CSS px）：后备缓冲随盒子（≤2048 上限）、IR 画布 contain
-   * 居中；重呈现由 compositor 的 rAF 合帧回调驱动（连续拖拽窗口不逐帧重建）。 */
+  /** 尺寸变化（CSS px）：后备缓冲随盒子（≤2048 上限）、IR 画布 contain 居中；
+   *  fit 在会话侧计算（pipView 同源）并下发 worker 应用；rAF 合帧重呈现。 */
   resize(cssWidth: number, cssHeight: number): void {
     const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
-    this.compositor.setViewportBacking(cssWidth * dpr, cssHeight * dpr);
+    const backingWidth = Math.round(cssWidth * dpr);
+    const backingHeight = Math.round(cssHeight * dpr);
+    const capped = Math.min(backingWidth / this.ir.canvas.width, backingHeight / this.ir.canvas.height,
+      2048 / Math.max(this.ir.canvas.width, this.ir.canvas.height));
+    const width = Math.max(2, Math.round(this.ir.canvas.width * capped));
+    const height = Math.max(2, Math.round(this.ir.canvas.height * capped));
+    if (this.backing.width === width && this.backing.height === height) {
+      this.recomposeSoon();
+      return;
+    }
+    this.backing = { width, height };
+    this.fitScale = capped;
+    this.fitX = (width - this.ir.canvas.width * capped) / 2;
+    this.fitY = (height - this.ir.canvas.height * capped) / 2;
+    this.compositor?.resize(width, height, this.fitX, this.fitY, this.fitScale);
+    this.recomposeSoon();
   }
 
-  /** 环形槽位上传（经每输入串行尾；await 完成后才标记 srcN 就绪）。 */
-  private uploadRing(rig: InputRig, srcN: number): Promise<void> {
+  private recomposeSoon(): void {
+    if (this.recomposeRaf || this.disposed) return;
+    this.recomposeRaf = requestAnimationFrame(() => {
+      this.recomposeRaf = 0;
+      const frame = this.ir.frames[Math.min(this.currentFrame, this.ir.frames.length - 1)];
+      if (frame && this.frameReady(frame)) this.compose(frame);
+    });
+  }
+
+  /** 环形槽位上传（经每输入串行尾；worker 上传 ack 后才标记 srcN 就绪）。
+   *  过期作废：任务排队期间到来新 seek（seekEpoch 变化）→ 预取目标已失效，
+   *  直接作废（解码前后双重检查；作废帧 close 释放）——否则 scrub 时新 seek
+   *  的上传会排在整条过期预取队尾（worker 化后每任务含双跳 RTT，实测 seek
+   *  p95 翻倍的根因）。 */
+  private uploadRing(rig: InputRig, inputId: string, srcN: number): Promise<void> {
     if (!rig.worker) return Promise.reject(new Error(`no worker for input`));
     const slotIndex = rig.ringSeq % PreviewSession.RING;
     rig.ringSeq += 1;
+    const epoch = this.seekEpoch;
     const task = async (): Promise<void> => {
+      if (epoch !== this.seekEpoch) { this.skippedUploads += 1; return; }
       const decodeStart = performance.now();
       this.decodeInFlight += 1;
       let decoded: VideoFrame;
@@ -349,16 +400,13 @@ export class PreviewSession {
       } finally {
         this.decodeInFlight -= 1;
       }
-      const slot = rig.ring[slotIndex] ??= {
-        y: this.compositor.createYuvTexture(), uv: this.compositor.createYuvTexture(), srcN: -1,
-      };
-      const size = decoded.allocationSize();
-      if (!rig.scratch || rig.scratch.byteLength < size) rig.scratch = new ArrayBuffer(size);
+      if (epoch !== this.seekEpoch) { this.skippedUploads += 1; decoded.close(); return; }
       const uploadStart = performance.now();
-      await this.compositor.uploadVideoFrameToTextures(decoded, slot.y, slot.uv, rig.scratch);
+      await this.compositor!.upload(inputId, slotIndex, srcN, decoded);
       this.uploadTimes.push(performance.now() - uploadStart);
       if (this.uploadTimes.length > 600) this.uploadTimes.splice(0, this.uploadTimes.length - 600);
-      slot.srcN = srcN; // Y+UV 上传全部完成后才可被合成/就绪判定看见
+      const slot = rig.ring[slotIndex] ??= { srcN: -1 };
+      slot.srcN = srcN; // worker 上传 ack 后才可被合成/就绪判定看见
       rig.fed = srcN; // 与 worker 热态游标同步（回退 seek/冷启后 worker 游标亦回退）
     };
     const run = rig.uploadTail.then(task, task);
@@ -366,18 +414,20 @@ export class PreviewSession {
     return run;
   }
 
-  /** 影子槽上传（转场共享输入第二帧；单槽，同样 await 后就绪）。 */
-  private uploadShadow(rig: InputRig, srcN: number): Promise<void> {
+  /** 影子槽上传（转场共享输入第二帧；单槽，同样 ack 后就绪）。过期作废同上。 */
+  private uploadShadow(rig: InputRig, inputId: string, srcN: number): Promise<void> {
     if (!rig.worker) return Promise.reject(new Error(`no worker for input`));
+    const epoch = this.seekEpoch;
     const task = async (): Promise<void> => {
+      if (epoch !== this.seekEpoch) return;
       const decodeStart = performance.now();
       this.decodeInFlight += 1;
       try {
         const decoded = await rig.worker!.decode(srcN, this.ir.canvas.fps);
         this.decodeTimes.push(performance.now() - decodeStart);
         if (this.decodeTimes.length > 600) this.decodeTimes.splice(0, this.decodeTimes.length - 600);
-        await this.compositor.uploadVideoFrameToTextures(decoded,
-          this.compositor.shadowYTexture(rig.handle.inputId), this.compositor.shadowUVTexture(rig.handle.inputId));
+        if (epoch !== this.seekEpoch) { decoded.close(); return; }
+        await this.compositor!.uploadShadow(inputId, srcN, decoded);
         rig.shadowUploaded = srcN;
         rig.fed = srcN;
       } finally {
@@ -389,10 +439,12 @@ export class PreviewSession {
     return run;
   }
 
-  /** 环形池中查找已就绪槽位。 */
-  private ringSlot(rig: InputRig, srcN: number): RingSlot | null {
-    for (const slot of rig.ring) if (slot && slot.srcN === srcN) return slot;
-    return null;
+  /** 环形簿记中查找已就绪槽位的索引（-1 = 未就绪）。 */
+  private ringSlotIndex(rig: InputRig, srcN: number): number {
+    for (let index = 0; index < rig.ring.length; index++) {
+      if (rig.ring[index]?.srcN === srcN) return index;
+    }
+    return -1;
   }
 
   /** 目标帧全部输入是否就绪（环形槽/影子槽/静图）。 */
@@ -403,22 +455,8 @@ export class PreviewSession {
       const rig = this.rigs.get(inputId);
       if (!rig) return false;
       if (rig.kind === "image") return true;
-      return shadow ? rig.shadowUploaded === srcN : this.ringSlot(rig, srcN) !== null;
+      return shadow ? rig.shadowUploaded === srcN : this.ringSlotIndex(rig, srcN) >= 0;
     });
-  }
-
-  /** 为帧解析可绘制纹理对；静图返回 RGBA 主纹理（uv=null 走 RGBA 模式）。 */
-  private texturesFor(inputId: string, srcN: number, shadow: boolean): TexPair | null {
-    const rig = this.rigs.get(inputId);
-    if (!rig) return null;
-    if (rig.kind === "image") return { y: rig.handle.textureY, uv: null };
-    if (shadow) {
-      return rig.shadowUploaded === srcN
-        ? { y: this.compositor.shadowYTexture(inputId), uv: this.compositor.shadowUVTexture(inputId) }
-        : null;
-    }
-    const slot = this.ringSlot(rig, srcN);
-    return slot ? { y: slot.y, uv: slot.uv } : null;
   }
 
   /**
@@ -429,8 +467,6 @@ export class PreviewSession {
    *   关键帧，一个请求直达）；
    * - 展示前沿回跳：回卷重播/回头后前沿帧所需采样已被消费且不在环内
    *   → 向后跳（worker 冷启承接）。常规播放前沿贴合目标，不触发。
-   * 跳帧喂入 + 中间输出关闭的组合在部分硬件解码器上会破坏 GOP 参考链——
-   * 已用中间帧延迟关闭环 + GOP 锚持有抑制（evidence/m3_2/playback-repro）。
    */
   private pump(target: number): void {
     const from = Math.max(0, this.currentFrame, target - PreviewSession.BACKSCAN);
@@ -456,8 +492,6 @@ export class PreviewSession {
     for (const [inputId, needs] of needsByInput) {
       const rig = this.rigs.get(inputId);
       if (!rig || rig.kind !== "video") continue;
-      // 冷启动（fed=-1，输入首次入窗）用宽窗需求：首个展示需求提前 ~1.5s 请求
-      // （worker 回退最近关键帧 + 顺序喂入，一个请求直达），后续推进仍限窄窗。
       let sorted: number[];
       if (rig.fed < 0) {
         sorted = [...(enterNeeds.get(inputId) ?? needs)].sort((a, b) => a - b);
@@ -469,28 +503,28 @@ export class PreviewSession {
       // 向后跳转只发生在用户动作（回卷重播/回退 seek）——由 resetChains() 显式
       // 重置链游标，pump 本身不做启发式回跳（避免深窗口陈旧需求引发震荡）。
       let next = rig.fed < 0 ? sorted[0]! : rig.fed + 1;
-      while (next <= max && this.ringSlot(rig, next)) {
+      while (next <= max && this.ringSlotIndex(rig, next) >= 0) {
         rig.fed = next;
         next += 1;
       }
       if (next > max || rig.inFlightN !== null || rig.shadowInFlight !== null) continue;
       rig.fed = next;
       rig.inFlightN = next;
-      void this.uploadRing(rig, next)
+      void this.uploadRing(rig, inputId, next)
         .catch(error => this.noteDecodeError(inputId, next, error))
         .finally(() => {
           if (rig.inFlightN === next) rig.inFlightN = null;
           if (!this.disposed && this.playing) this.pump(this.latestTarget);
         });
     }
-    // 转场影子槽（共享输入第二帧）：直发（await 后就绪；窗口内单帧）
+    // 转场影子槽（共享输入第二帧）：直发（ack 后就绪；窗口内单帧）
     for (let n = target; n <= to; n++) {
       for (const [inputId, srcN, shadow] of mainNeeds(this.ir.frames[n]!)) {
         if (!shadow) continue;
         const rig = this.rigs.get(inputId);
         if (!rig || rig.kind !== "video" || rig.shadowUploaded === srcN || rig.shadowInFlight !== null) continue;
         rig.shadowInFlight = srcN;
-        void this.uploadShadow(rig, srcN)
+        void this.uploadShadow(rig, inputId, srcN)
           .catch(error => this.noteDecodeError(inputId, srcN, error))
           .finally(() => {
             if (rig.shadowInFlight === srcN) rig.shadowInFlight = null;
@@ -516,14 +550,14 @@ export class PreviewSession {
       const data = await (await fetch(ticket)).arrayBuffer();
       if (this.disposed || !this.audioCtx) return;
       rig.buffer = await this.audioCtx.decodeAudioData(data);
-      this.compositor.onRecompose?.(); // 解码完成：若片段正活跃，下次 tick 启动音源
+      this.recomposeSoon(); // 解码完成：若片段正活跃，下次 tick 启动音源
     } catch (error) {
       if (!this.disposed) this.lastError = `音频解码失败 ${clipId}: ${error instanceof Error ? error.message : String(error)}`;
     }
   }
 
   /** 启动/重启一个片段音源：从缓冲 offset 起以 speed 播放（ctx 时间锚定）。 */
-  private startAudioSource(rig: AudioRig, clipId: string, gainDb: number, offset: number, speed: number): void {
+  private startAudioSource(rig: { buffer: AudioBuffer | null; source: AudioBufferSourceNode | null; gain: GainNode | null; startedAt: number; startOffset: number; speed: number }, gainDb: number, offset: number, speed: number): void {
     if (!this.audioCtx || !rig.buffer) return;
     this.stopAudioSource(rig);
     const source = this.audioCtx.createBufferSource();
@@ -541,7 +575,7 @@ export class PreviewSession {
     source.onended = () => { if (rig.source === source) rig.source = null; };
   }
 
-  private stopAudioSource(rig: AudioRig): void {
+  private stopAudioSource(rig: { source: AudioBufferSourceNode | null }): void {
     const source = rig.source;
     rig.source = null;
     if (!source) return;
@@ -552,9 +586,8 @@ export class PreviewSession {
   /** 片段音频跟随时钟（WebAudio 调度）：音源运行在音频线程时钟上，本函数只做
    *  节拍管理——进段启动、出段停止、漂移超阈值（时钟重锚）才硬校正。播放中
    *  由合成 tick 以**墙钟目标时间**驱动节拍（合成滞后不影响音频推进）。
-   * 段窗口用 IR 的 output_*（转场借用重映射后的输出时间轴）；仅视频片段自带
-   * 音轨 + A1 纯音频轨（IR 白名单 v0.3+）；速度经 playbackRate；gainDb →
-   * 线性增益（WebAudio 无 1.0 上限，>0dB 提升真实生效）。 */
+   * 段窗口用 IR 的 output_*（转场借用重映射后的输出时间轴）；速度经
+   * playbackRate；gainDb → 线性增益（无 1.0 上限）。 */
   private syncAudio(tUs: number): void {
     if (!this.audioByClip || !this.audioCtx) return;
     const active = new Set<string>();
@@ -579,7 +612,7 @@ export class PreviewSession {
         continue;
       }
       // 无音源（入场/解码完成/出段后重入）或实质漂移（时钟重锚）→ 对齐重启。
-      this.startAudioSource(rig, segment.clip_id, cfg.gainDb, expected, speed);
+      this.startAudioSource(rig, cfg.gainDb, expected, speed);
     }
     for (const [clipId, rig] of this.audioRigs) {
       if (!active.has(clipId) && rig.source) this.stopAudioSource(rig);
@@ -591,48 +624,70 @@ export class PreviewSession {
     for (const [, rig] of this.audioRigs) this.stopAudioSource(rig);
   }
 
-  /** 同步合成一帧（纹理必须已就绪）。 */
+  /** 同步下发一帧的绘制命令（纹理簿记必须已就绪；GL 执行在 worker）。
+   *  blurred_background：先画模糊垫底再画 fit 内容（与权威端 gblur 语义对齐，
+   *  转场两侧按各自 alpha 口径垫底）。 */
   private compose(frame: IrFrame): void {
+    const compositor = this.compositor;
+    if (!compositor || this.disposed) return;
+    const cmds: DrawCommand[] = [];
     const main = frame.main;
-    this.compositor.beginFrame();
+    /** 纹理来源解析：ring 槽位 / 影子槽 / 静图；未就绪返回 null（跳过绘制）。 */
+    const sourceOf = (inputId: string, srcN: number, shadow: boolean): DrawCommand | null => {
+      const rig = this.rigs.get(inputId);
+      if (!rig) return null;
+      if (rig.kind === "image") return { op: "draw", inputId, image: true };
+      if (shadow) {
+        return rig.shadowUploaded === srcN ? { op: "draw", inputId, shadow: true } : null;
+      }
+      const index = this.ringSlotIndex(rig, srcN);
+      return index >= 0 ? { op: "draw", inputId, slot: index } : null;
+    };
     if (main.kind === "segment") {
-      const pair = this.texturesFor(main.input_id, main.src_n, false);
-      if (pair) {
-        // blurred_background：先画模糊垫底再画 fit 内容（与权威端 gblur 语义对齐）
+      const source = sourceOf(main.input_id, main.src_n, false);
+      if (source) {
         if (main.layout === "blurred_background") {
-          this.compositor.drawBlurredFill(main.input_id, pair.y, pair.uv, main.alpha);
+          cmds.push({ ...source, op: "fill", alpha: main.alpha });
         }
-        this.compositor.drawTextures(main.input_id, pair.y, pair.uv,
-          shiftedRect(main.content, main.shift), main.alpha, main.rotation_deg ?? 0);
+        cmds.push({ ...source, rect: shiftedRect(main.content, main.shift), alpha: main.alpha, rotationDeg: main.rotation_deg ?? 0 });
       }
     } else if (main.kind === "transition") {
       const shared = main.left.input_id === main.right.input_id;
-      const left = this.texturesFor(main.left.input_id, main.left.src_n, shared);
-      const right = this.texturesFor(main.right.input_id, main.right.src_n, false);
+      const left = sourceOf(main.left.input_id, main.left.src_n, shared);
+      const right = sourceOf(main.right.input_id, main.right.src_n, false);
       if (left && right) {
-        // 转场两侧的模糊垫底：与 drawTransitionWithPairs 相同的 alpha 口径，
-        // 垫底先画（下层），内容后画——fade/fadeblack 观感与内容一致
+        const alphaL = main.transition === "fadeblack"
+          ? main.left.alpha * Math.max(0, 1 - 2 * main.p)
+          : main.left.alpha;
+        const alphaR = main.transition === "fadeblack"
+          ? main.right.alpha * Math.max(0, 2 * main.p - 1)
+          : main.right.alpha * main.p;
         if (main.left.layout === "blurred_background") {
-          const alphaL = main.transition === "fadeblack"
-            ? main.left.alpha * Math.max(0, 1 - 2 * main.p)
-            : main.left.alpha;
-          this.compositor.drawBlurredFill(main.left.input_id, left.y, left.uv, alphaL);
+          cmds.push({ ...left, op: "fill", alpha: alphaL });
         }
         if (main.right.layout === "blurred_background") {
-          const alphaR = main.transition === "fadeblack"
-            ? main.right.alpha * Math.max(0, 2 * main.p - 1)
-            : main.right.alpha * main.p;
-          this.compositor.drawBlurredFill(main.right.input_id, right.y, right.uv, alphaR);
+          cmds.push({ ...right, op: "fill", alpha: alphaR });
         }
-        this.compositor.drawTransitionWithPairs(left, right, main);
+        cmds.push({ ...left, rect: shiftedRect(main.left.content, main.left.shift), alpha: alphaL, rotationDeg: main.left.rotation_deg ?? 0 });
+        if (!(main.transition === "fadeblack" && main.p < 0.5)) {
+          cmds.push({ ...right, rect: shiftedRect(main.right.content, main.right.shift), alpha: alphaR, rotationDeg: main.right.rotation_deg ?? 0 });
+        }
       }
     }
     for (const overlay of frame.overlays) {
-      const pair = this.texturesFor(overlay.input_id, overlay.src_n, false);
-      if (pair) this.compositor.drawTextures(overlay.input_id, pair.y, pair.uv, overlay.box, overlay.alpha, overlay.rotation_deg);
+      const source = sourceOf(overlay.input_id, overlay.src_n, false);
+      if (source) {
+        cmds.push({ ...source, rect: overlay.box, alpha: overlay.alpha, rotationDeg: overlay.rotation_deg });
+      }
     }
-    this.compositor.drawCaptionsOf(frame);
-    this.compositor.endFrame();
+    if (frame.captions.length > 0) {
+      const items = frame.captions.map(captionId => {
+        const entry = this.ir.captions.find(item => item.caption_id === captionId);
+        return entry ? { caption_id: entry.caption_id, text: entry.text, preset_id: entry.preset_id } : null;
+      }).filter((item): item is { caption_id: string; text: string; preset_id: string } => item !== null);
+      cmds.push({ op: "captions", items });
+    }
+    compositor.compose(cmds);
   }
 
   /**
@@ -659,15 +714,15 @@ export class PreviewSession {
     for (const [inputId, srcN, shadow] of mainNeeds(frame)) {
       const rig = this.rigs.get(inputId);
       if (!rig || rig.kind === "image") continue;
-      const ready = shadow ? rig.shadowUploaded === srcN : this.ringSlot(rig, srcN) !== null;
-      if (!ready) requests.push(shadow ? this.uploadShadow(rig, srcN) : this.uploadRing(rig, srcN));
+      const ready = shadow ? rig.shadowUploaded === srcN : this.ringSlotIndex(rig, srcN) >= 0;
+      if (!ready) requests.push(shadow ? this.uploadShadow(rig, inputId, srcN) : this.uploadRing(rig, inputId, srcN));
     }
     if (!this.dragMode) {
       for (const [inputId, srcN] of overlayNeeds(frame)) {
         const rig = this.rigs.get(inputId);
         if (!rig || rig.kind === "image") continue;
-        if (this.ringSlot(rig, srcN)) continue;
-        requests.push(this.uploadRing(rig, srcN));
+        if (this.ringSlotIndex(rig, srcN) >= 0) continue;
+        requests.push(this.uploadRing(rig, inputId, srcN));
       }
     }
     await Promise.all(requests);
@@ -676,8 +731,10 @@ export class PreviewSession {
     if (this.frameReady(frame)) this.compose(frame);
     this.onTimeUs?.(frame.t_us);
     // 暂停态预热预读链：预解码后续 LEAD 帧——再按播放即有热跑道
-    //（消除 seek 后播放头几百毫秒的冷启丢帧）。
-    if (!this.playing) this.pump(index);
+    //（消除 seek 后播放头几百毫秒的冷启丢帧）。**拖拽快速档跳过预热**：
+    // scrub 风暴中预热解码与下一 seek 的目标解码争抢解码器（实测 seek p95
+    // 翻倍）；最终落定（refineAfterDrag，dragMode=false）才预热。
+    if (!this.playing && !this.dragMode) this.pump(index);
     return frame.n;
   }
 
@@ -716,8 +773,7 @@ export class PreviewSession {
       // 时钟目标 µs = anchorFrame × 1e6/fps + 墙钟增量。
       this.syncAudio(Math.round(this.anchorFrame * (1e6 / this.ir.canvas.fps) + (now - this.anchorWall) * 1000));
       // 合成 ≤ 目标的最新就绪帧：已就绪帧绝不丢弃；starving 时保持最后画面。
-      // 同帧不重复合成（GL 绘制缓冲持久，60Hz tick 对 30fps 内容时减半主线程
-      // 负载——重复 onTimeUs 会以 60Hz 触发 App 整树重渲）。
+      // 同帧不重复合成（命令下发幂等，60Hz tick 对 30fps 内容时减半主线程负载）。
       let composed = -1;
       const floor = Math.max(0, Math.max(this.currentFrame - 1, target - PreviewSession.BACKSCAN));
       for (let n = target; n >= floor; n--) {
@@ -766,6 +822,7 @@ export class PreviewSession {
   metrics(): PreviewSessionMetrics {
     const times = [...this.taskTimes].sort((a, b) => a - b);
     const decodes = [...this.decodeTimes].sort((a, b) => a - b);
+    const uploads = [...this.uploadTimes].sort((a, b) => a - b);
     const p = (list: number[], q: number) => list.length ? Math.round(list[Math.min(list.length - 1, Math.floor(q * list.length))] * 1000) / 1000 : 0;
     return {
       task_ms_p50: p(times, 0.5),
@@ -776,8 +833,15 @@ export class PreviewSession {
       decode_ms_p50: p(decodes, 0.5),
       decode_ms_p95: p(decodes, 0.95),
       decode_in_flight: this.decodeInFlight,
-      upload_ms_p95: p(this.uploadTimes, 0.95),
+      upload_ms_p95: p(uploads, 0.95),
     };
+  }
+
+  /** 全画布 PNG 回读（worker convertToBlob → ArrayBuffer transfer；探针取证用
+   *  ——transfer 后主线程 canvas.toBlob 不可用）。 */
+  async readbackPng(): Promise<ArrayBuffer> {
+    if (!this.compositor) throw new Error("compositor unavailable");
+    return await this.compositor.readback();
   }
 
   dispose(): void {
@@ -787,7 +851,13 @@ export class PreviewSession {
     this.audioRigs.clear();
     void this.audioCtx?.close().catch(() => undefined);
     this.audioCtx = null;
+    if (this.recomposeRaf) cancelAnimationFrame(this.recomposeRaf);
+    this.recomposeRaf = 0;
+    this.compositor?.terminate();
+    this.compositor = null;
     for (const [, rig] of this.rigs) rig.worker?.terminate();
     this.rigs.clear();
+    this.canvasEl?.remove();
+    this.canvasEl = null;
   }
 }

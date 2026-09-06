@@ -25,16 +25,15 @@ interface Sample {
   chain?: Record<string, unknown>;
 }
 
-async function snapshot(canvas: HTMLCanvasElement, name: string): Promise<void> {
-  const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, "image/png"));
-  if (!blob) throw new Error(`toBlob failed for ${name}`);
-  const buffer = await blob.arrayBuffer();
+/** 画布 PNG 取证（会话侧 readback：OffscreenCanvas worker convertToBlob →
+ *  ArrayBuffer transfer 回主线程）。 */
+async function snapshot(session: PreviewSession, bridge: ReturnType<typeof probeBridge>, name: string): Promise<void> {
+  const buffer = await session.readbackPng();
   let binary = "";
   const bytes = new Uint8Array(buffer);
   for (let index = 0; index < bytes.length; index += 0x8000) {
     binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
   }
-  const bridge = probeBridge();
   await bridge.writeArtifact(`${name}.png`, { base64: btoa(binary) });
 }
 
@@ -60,11 +59,10 @@ export async function runProbe(): Promise<void> {
     const { ir, session: sessionMeta } = shell;
     const bridge = probeBridge();
 
-    const canvas = document.createElement("canvas");
-    canvas.width = ir.canvas.width;
-    canvas.height = ir.canvas.height;
-    canvas.style.cssText = "display:block;width:auto;margin:0 auto;";
-    document.body.append(canvas);
+    // 画布元素由会话自建（transferControlToOffscreen 每元素仅一次）
+    const container = document.createElement("div");
+    container.style.cssText = "width:540px;";
+    document.body.append(container);
 
     shell.status("m3p5: creating PreviewSession");
     const tickets = new Map<string, string>();
@@ -73,13 +71,13 @@ export async function runProbe(): Promise<void> {
       if (!ticket) throw new Error(`no ticket for ${input.asset_id}`);
       tickets.set(input.asset_id, await bridge.mediaTicket(input.asset_id));
     }
-    const session = await PreviewSession.create(canvas, ir, tickets);
+    const session = await PreviewSession.create(container, ir, tickets);
     const composeWallMs: number[] = [];
     let lastContentUs = -1;
     session.onTimeUs = (us: number) => { composeWallMs.push(performance.now()); lastContentUs = us; };
 
     await session.seekToFrame(0);
-    await snapshot(canvas, "frame_000_seek0");
+    await snapshot(session, bridge, "frame_000_seek0");
 
     const durationMs = ir.canvas.duration_frames * (1000 / ir.canvas.fps);
     const samples: Sample[] = [];
@@ -92,7 +90,7 @@ export async function runProbe(): Promise<void> {
       const now = performance.now();
       const elapsedS = (now - t0) / 1000;
       while (readbackIndex < READBACK_AT_S.length && elapsedS >= READBACK_AT_S[readbackIndex]!) {
-        await snapshot(canvas, `frame_play_${Math.round(READBACK_AT_S[readbackIndex]! * 10)}`);
+        await snapshot(session, bridge, `frame_play_${Math.round(READBACK_AT_S[readbackIndex]! * 10)}`);
         readbackIndex += 1;
       }
       if (now - t0 >= nextSampleAt) {
@@ -103,20 +101,20 @@ export async function runProbe(): Promise<void> {
       }
     }
     session.pause();
-    await snapshot(canvas, "frame_999_end");
+    await snapshot(session, bridge, "frame_999_end");
     // 事后取证：暂停态逐帧重解码+合成片尾区段（区分"解码坏帧"与"播放链路坏帧"）
     const postMortem: Array<Record<string, number>> = [];
     for (let n = Math.max(0, ir.canvas.duration_frames - 26); n < ir.canvas.duration_frames; n += 3) {
       const rendered = await session.seekToFrame(n);
-      await snapshot(canvas, `postmortem_${String(n).padStart(3, "0")}`);
+      await snapshot(session, bridge, `postmortem_${String(n).padStart(3, "0")}`);
       postMortem.push({ n, rendered });
     }
     // 新会话对照：同一画布重建 PreviewSession（全新解码器/环形池）后直接 seek
     // 片尾——区分"解码器历史状态依赖"与"该流本身在此解码路径必然花屏"。
     session.dispose();
-    const freshSession = await PreviewSession.create(canvas, ir, tickets);
+    const freshSession = await PreviewSession.create(container, ir, tickets);
     await freshSession.seekToFrame(ir.canvas.duration_frames - 1);
-    await snapshot(canvas, "fresh_session_seek_end");
+    await snapshot(freshSession, bridge, "fresh_session_seek_end");
     // 复播回归：播放头已在片尾时再按播放，应回卷从头继续（"只能播一次"回归门）
     freshSession.play();
     await new Promise<void>(resolve => setTimeout(resolve, 1200));

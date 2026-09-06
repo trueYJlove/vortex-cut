@@ -20,11 +20,10 @@ export async function runProbe(): Promise<void> {
     const { ir, session: sessionMeta } = shell;
     const bridge = probeBridge();
 
-    const canvas = document.createElement("canvas");
-    canvas.width = ir.canvas.width;
-    canvas.height = ir.canvas.height;
-    canvas.style.cssText = "display:block;width:auto;margin:0 auto;";
-    document.body.append(canvas);
+    // 画布元素由会话自建（transferControlToOffscreen 每元素仅一次）
+    const container = document.createElement("div");
+    container.style.cssText = "width:540px;";
+    document.body.append(container);
 
     shell.status("m3p4: creating PreviewSession");
     const tickets = new Map<string, string>();
@@ -33,7 +32,7 @@ export async function runProbe(): Promise<void> {
       if (!ticket) throw new Error(`no ticket for ${input.asset_id}`);
       tickets.set(input.asset_id, await bridge.mediaTicket(input.asset_id));
     }
-    const session = await PreviewSession.create(canvas, ir, tickets);
+    const session = await PreviewSession.create(container, ir, tickets);
     await session.seekToFrame(0);
 
     // 种子化目标集（mulberry32，与 P3 同实现）
@@ -88,6 +87,16 @@ export async function runProbe(): Promise<void> {
       seek_samples: samples,
       drag_coalesce: { seeks: DRAG_SEEKS, superseded: dragDropped, latency_ms: summarize(dragLatencies) },
       step_ms: summarize(stepSamples.filter(value => value >= 0)),
+      session_metrics: session.metrics(),
+      skipped_uploads: session.skippedUploads,
+      upload_split: (() => {
+        const split = session.uploadSplitDebug;
+        const pick = (key: "copyToMs" | "texMs") => {
+          const values = split.map(item => item[key]).sort((a, b) => a - b);
+          return { p50: values.length ? values[Math.floor(values.length * 0.5)] : 0, p95: values.length ? values[Math.floor(values.length * 0.95)] : 0 };
+        };
+        return { copyTo: pick("copyToMs"), tex: pick("texMs"), samples: split.length };
+      })(),
       materials: [...tickets.keys()],
       environment: await collectEnvironment(),
       versions: sessionMeta.versions,

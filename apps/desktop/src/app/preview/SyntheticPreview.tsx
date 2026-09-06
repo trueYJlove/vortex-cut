@@ -1,5 +1,7 @@
 /** 合成预览（M3-1）：消费 Core 投影的 preview-ir-v1 逐帧数值表，WebCodecs 解码 +
- * WebGL2 合成的权威级实时预览。子集外语义自动降级回交互预览（PREVIEW_IR_UNSUPPORTED）。 */
+ * WebGL2 合成（OffscreenCanvas worker）的权威级实时预览。子集外语义自动降级
+ * 回交互预览（PREVIEW_IR_UNSUPPORTED）。画布元素由会话自建（transferControl-
+ * ToOffscreen 每元素仅可一次——会话生命周期 = 画布生命周期）。 */
 import { useEffect, useRef, useState } from "react";
 import { parseIr, type Ir } from "./ir.js";
 import { PreviewSession, type PreviewSessionMetrics, type SegmentAudioConfig } from "./preview-session.js";
@@ -45,7 +47,7 @@ interface LoadState {
 
 export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactElement {
   const { projectId, revisionId, mediaUrls, audioByClip, pipClips, selectedClipId, onSelectClip, onCommitPipTransform, onDraftPipMask, onCommitPipMask, onGesturePause, onGestureResume, playing, playheadUs, onTimeUs, onEnded, onFallback, outputRatio } = props;
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const sessionRef = useRef<PreviewSession | null>(null);
   const lastReportedUs = useRef<number>(playheadUs);
   const lastReportWall = useRef<number>(0);
@@ -56,9 +58,9 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
       const entry = entries[entries.length - 1];
       if (!entry) return;
       const session = sessionRef.current;
-      const canvas = canvasRef.current;
-      if (!session || !canvas) return;
-      const rect = canvas.parentElement?.getBoundingClientRect();
+      const container = containerRef.current;
+      if (!session || !container) return;
+      const rect = container.getBoundingClientRect();
       const width = rect?.width ?? 0;
       const height = rect?.height ?? 0;
       if (width > 2 && height > 2) session.resize(width, height);
@@ -71,7 +73,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
   useEffect(() => {
     let cancelled = false;
     const sessionRefLocal = sessionRef;
-    boxObserverRef.current?.observe(canvasRef.current?.parentElement ?? canvasRef.current ?? document.body);
+    boxObserverRef.current?.observe(containerRef.current ?? document.body);
     // 同输入 revision 变更（transform/关键帧/时间编辑）→ 会话就地换 IR：
     // worker/GL 全保留，零黑屏。输入变化或无会话 → 走完整重建。
     const existing = sessionRefLocal.current;
@@ -84,8 +86,8 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
           output_ratio: outputRatio,
         });
         const ir: Ir = parseIr(payload.ir as unknown as string);
-        const canvas = canvasRef.current;
-        if (!canvas || cancelled) return;
+        const container = containerRef.current;
+        if (!container || cancelled) return;
         if (existing && existing.replaceIr(ir)) {
           // 就地换表成功：无需触碰 worker/GL/音频，重呈现由 replaceIr 驱动
           setLoad({ status: "ready", message: "" });
@@ -93,10 +95,9 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
         }
         existing?.dispose();
         sessionRefLocal.current = null;
-        // 画布后备缓冲随预览框（contain 居中，见 session.resize）；初始以 IR 画布尺寸起底
-        canvas.width = ir.canvas.width;
-        canvas.height = ir.canvas.height;
-        const session = await PreviewSession.create(canvas, ir, mediaUrls, audioByClip);
+        // 画布元素由会话自建（transferControlToOffscreen 每元素仅一次），
+        // 后备缓冲随预览框（contain 居中，见 session.resize）；初始以 IR 画布尺寸起底
+        const session = await PreviewSession.create(container, ir, mediaUrls, audioByClip);
         if (cancelled) { session.dispose(); return; }
         session.onTimeUs = (us: number) => {
           lastReportedUs.current = us;
@@ -113,7 +114,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
           onEnded?.();
         };
         sessionRefLocal.current = session;
-        boxObserverRef.current?.observe(canvas.parentElement ?? canvas);
+        boxObserverRef.current?.observe(container);
         const fontUrl = await window.desktop.captionFontUrl();
         const fontBuffer = await (await fetch(fontUrl)).arrayBuffer();
         await session.loadCaptionFont(fontBuffer);
@@ -138,7 +139,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, revisionId, outputRatio]);
 
-  // 卸载：销毁会话 + 断开观察器（StrictMode 双挂载各自动一次，安全）。
+  // 卸载：销毁会话（含画布元素）+ 断开观察器（StrictMode 双挂载各自动一次，安全）。
   useEffect(() => () => {
     boxObserverRef.current?.disconnect();
     sessionRef.current?.dispose();
@@ -185,7 +186,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
 
   return (
     <div className="synthetic-preview" aria-label="合成预览" style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", width: "100%", height: "100%" }}>
-      <canvas ref={canvasRef} className="synthetic-canvas" style={{ display: load.status === "ready" ? "block" : "none", width: "100%", height: "100%" }} />
+      <div ref={containerRef} style={{ display: load.status === "ready" ? "block" : "none", width: "100%", height: "100%" }} />
       {load.status === "ready" && sessionRef.current && pipClips && pipClips.length > 0 && (() => {
         const live = sessionRef.current;
         const cw = live.ir.canvas.width;
