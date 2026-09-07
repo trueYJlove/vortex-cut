@@ -100,6 +100,22 @@ describe("SyntheticPipLayer", () => {
     expect(h.onSelect).not.toHaveBeenCalled();
   });
 
+  it("盒子上的 click 不冒泡（拖拽松手后选中保持画中画，不被 preview-frame 切回主轨）", () => {
+    const onFrameClick = vi.fn();
+    // React 在其 root container 上代理事件；祖先元素上的原生监听只有在该原生
+    // 事件继续冒泡时才会触发——组件内 stopPropagation 应将其拦截。
+    const wrapper = document.createElement("div");
+    wrapper.addEventListener("click", onFrameClick);
+    const container = document.createElement("div");
+    wrapper.append(container);
+    document.body.append(wrapper);
+    render(<SyntheticPipLayer {...{ boxes: [BOX], view: VIEW, selectedClipId: "clip_pip", locked: false, onSelect: vi.fn(), onLiveGeometry: vi.fn(), onCommitTransform: vi.fn(), onGestureStart: vi.fn(() => false), onGestureEnd: vi.fn() }} />, { container });
+    const box = screen.getByRole("button", { name: "画中画 clip_pip" });
+    fireEvent.click(box);
+    expect(onFrameClick).not.toHaveBeenCalled();
+    wrapper.remove();
+  });
+
   it("蒙版边界：拖动平移 x/y（片段画面归一化）", () => {
     const onDraftMask = vi.fn();
     const onCommitMask = vi.fn();

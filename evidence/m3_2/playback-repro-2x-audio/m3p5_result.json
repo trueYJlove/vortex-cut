@@ -1,0 +1,776 @@
+{
+ "probe": "m3p5",
+ "session": "PreviewSession（生产合成预览编排，与 SyntheticPreview 同代码）",
+ "canvas": {
+  "width": 540,
+  "height": 960,
+  "fps": 30,
+  "duration_frames": 89,
+  "duration_us": 2954750,
+  "background": "#000000"
+ },
+ "inputs": [
+  {
+   "input_id": "I0",
+   "asset_kind": "video",
+   "geometry": {
+    "width": 1920,
+    "height": 1080,
+    "sar": 1
+   }
+  }
+ ],
+ "duration_ms": 2967,
+ "wall_ms": 4622,
+ "composed_frames": 88,
+ "dropped_frames": 0,
+ "task_ms": {
+  "p50": 0,
+  "p95": 0.1
+ },
+ "decode_ms": {
+  "p50": 1,
+  "p95": 2.8
+ },
+ "compose_interval_ms": {
+  "p50": 33.3,
+  "p95": 45,
+  "max": 149.6
+ },
+ "last_error": null,
+ "replay_after_end_ok": true,
+ "audio": {
+  "varispeed_offline": {
+   "input_freq_hz": 440,
+   "speed": 2,
+   "chipmunk_freq_hz": 880,
+   "output_freq_hz": 441.4,
+   "pitch_ok": true,
+   "output_end_sample": 24650,
+   "duration_ok": true
+  },
+  "session": {
+   "workletLoaded": true,
+   "clips": [
+    {
+     "clipId": "clip_406f738c089b4d24b2f2dd27de105fa8",
+     "mode": "worklet",
+     "bufferReady": true
+    }
+   ]
+  }
+ },
+ "samples": [
+  {
+   "t_ms": 51,
+   "content_us": 33333,
+   "composed": 1,
+   "dropped": 0,
+   "task_ms_p50": 0,
+   "task_ms_p95": 0,
+   "decode_ms_p50": 1.3,
+   "decode_ms_p95": 19.1,
+   "upload_ms_p95": 18.3,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 6,
+     "inFlight": 6,
+     "ring": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 6,
+      "timestampUs": 200000,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 6
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 266,
+   "content_us": 233333,
+   "composed": 7,
+   "dropped": 0,
+   "task_ms_p50": 0.1,
+   "task_ms_p95": 0.2,
+   "decode_ms_p50": 1.3,
+   "decode_ms_p95": 19.1,
+   "upload_ms_p95": 18.3,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 19,
+     "inFlight": null,
+     "ring": [
+      16,
+      17,
+      18,
+      19,
+      12,
+      13,
+      14,
+      15
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 19,
+      "timestampUs": 633333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 19
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 525,
+   "content_us": 500000,
+   "composed": 15,
+   "dropped": 0,
+   "task_ms_p50": 0,
+   "task_ms_p95": 0.2,
+   "decode_ms_p50": 1.3,
+   "decode_ms_p95": 4.1,
+   "upload_ms_p95": 8,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 35,
+     "inFlight": null,
+     "ring": [
+      32,
+      33,
+      34,
+      35,
+      28,
+      29,
+      30,
+      31
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 35,
+      "timestampUs": 1166666,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 35
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 765,
+   "content_us": 733333,
+   "composed": 22,
+   "dropped": 0,
+   "task_ms_p50": 0,
+   "task_ms_p95": 0.2,
+   "decode_ms_p50": 1.3,
+   "decode_ms_p95": 2.8,
+   "upload_ms_p95": 2,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 49,
+     "inFlight": null,
+     "ring": [
+      48,
+      49,
+      42,
+      43,
+      44,
+      45,
+      46,
+      47
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 49,
+      "timestampUs": 1633333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 49
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 1031,
+   "content_us": 1000000,
+   "composed": 30,
+   "dropped": 0,
+   "task_ms_p50": 0,
+   "task_ms_p95": 0.2,
+   "decode_ms_p50": 1.3,
+   "decode_ms_p95": 2.8,
+   "upload_ms_p95": 2,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 65,
+     "inFlight": null,
+     "ring": [
+      64,
+      65,
+      58,
+      59,
+      60,
+      61,
+      62,
+      63
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 65,
+      "timestampUs": 2166666,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 65
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 1300,
+   "content_us": 1266666,
+   "composed": 38,
+   "dropped": 0,
+   "task_ms_p50": 0,
+   "task_ms_p95": 0.2,
+   "decode_ms_p50": 1.3,
+   "decode_ms_p95": 2.7,
+   "upload_ms_p95": 2,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 81,
+     "inFlight": null,
+     "ring": [
+      80,
+      81,
+      74,
+      75,
+      76,
+      77,
+      78,
+      79
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 81,
+      "timestampUs": 2700000,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 81
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 1503,
+   "content_us": 1500000,
+   "composed": 45,
+   "dropped": 0,
+   "task_ms_p50": 0,
+   "task_ms_p95": 0.1,
+   "decode_ms_p50": 1.3,
+   "decode_ms_p95": 2.8,
+   "upload_ms_p95": 2,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 94,
+     "inFlight": 94,
+     "ring": [
+      88,
+      89,
+      90,
+      91,
+      92,
+      93,
+      86,
+      87
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 94,
+      "timestampUs": 3133333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 94
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 1779,
+   "content_us": 1733333,
+   "composed": 52,
+   "dropped": 0,
+   "task_ms_p50": 0,
+   "task_ms_p95": 0.1,
+   "decode_ms_p50": 1.3,
+   "decode_ms_p95": 2.7,
+   "upload_ms_p95": 1.9,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 109,
+     "inFlight": null,
+     "ring": [
+      104,
+      105,
+      106,
+      107,
+      108,
+      109,
+      102,
+      103
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 109,
+      "timestampUs": 3633333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 109
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 2034,
+   "content_us": 2000000,
+   "composed": 60,
+   "dropped": 0,
+   "task_ms_p50": 0,
+   "task_ms_p95": 0.1,
+   "decode_ms_p50": 1,
+   "decode_ms_p95": 2.7,
+   "upload_ms_p95": 1.9,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 125,
+     "inFlight": null,
+     "ring": [
+      120,
+      121,
+      122,
+      123,
+      124,
+      125,
+      118,
+      119
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 125,
+      "timestampUs": 4166666,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 125
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 2292,
+   "content_us": 2266666,
+   "composed": 68,
+   "dropped": 0,
+   "task_ms_p50": 0,
+   "task_ms_p95": 0.1,
+   "decode_ms_p50": 1,
+   "decode_ms_p95": 2.6,
+   "upload_ms_p95": 1.9,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 141,
+     "inFlight": null,
+     "ring": [
+      136,
+      137,
+      138,
+      139,
+      140,
+      141,
+      134,
+      135
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 141,
+      "timestampUs": 4700000,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 141
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 2501,
+   "content_us": 2466666,
+   "composed": 74,
+   "dropped": 0,
+   "task_ms_p50": 0,
+   "task_ms_p95": 0.1,
+   "decode_ms_p50": 1,
+   "decode_ms_p95": 2.7,
+   "upload_ms_p95": 1.9,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 153,
+     "inFlight": null,
+     "ring": [
+      152,
+      153,
+      146,
+      147,
+      148,
+      149,
+      150,
+      151
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 153,
+      "timestampUs": 5100000,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 153
+     }
+    }
+   }
+  },
+  {
+   "t_ms": 2766,
+   "content_us": 2733333,
+   "composed": 82,
+   "dropped": 0,
+   "task_ms_p50": 0,
+   "task_ms_p95": 0.1,
+   "decode_ms_p50": 1,
+   "decode_ms_p95": 2.7,
+   "upload_ms_p95": 1.9,
+   "decode_in_flight": 0,
+   "last_error": null,
+   "chain": {
+    "I0": {
+     "fed": 169,
+     "inFlight": null,
+     "ring": [
+      168,
+      169,
+      162,
+      163,
+      164,
+      165,
+      166,
+      167
+     ],
+     "shadow": -1,
+     "last_decode": {
+      "frameN": 169,
+      "timestampUs": 5633333,
+      "fromCache": false,
+      "samplesFed": 1,
+      "fromKeyframe": 169
+     }
+    }
+   }
+  }
+ ],
+ "post_mortem": [
+  {
+   "n": 63,
+   "rendered": 63
+  },
+  {
+   "n": 66,
+   "rendered": 66
+  },
+  {
+   "n": 69,
+   "rendered": 69
+  },
+  {
+   "n": 72,
+   "rendered": 72
+  },
+  {
+   "n": 75,
+   "rendered": 75
+  },
+  {
+   "n": 78,
+   "rendered": 78
+  },
+  {
+   "n": 81,
+   "rendered": 81
+  },
+  {
+   "n": 84,
+   "rendered": 84
+  },
+  {
+   "n": 87,
+   "rendered": 87
+  }
+ ],
+ "materials": [
+  "asset_61d6f9fcf4c84599921ad6cfd7ee99a6"
+ ],
+ "environment": {
+  "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) @aivideo/desktop/0.0.1 Chrome/136.0.7103.93 Electron/36.2.1 Safari/537.36",
+  "device_pixel_ratio": 1,
+  "hardware_concurrency": 8,
+  "metrics": [
+   {
+    "cpu": {
+     "cumulativeCPUUsage": 1.04836,
+     "percentCPUUsage": 0,
+     "idleWakeupsPerSecond": 0
+    },
+    "pid": 20944,
+    "type": "Browser",
+    "creationTime": 1788739463716.274,
+    "memory": {
+     "workingSetSize": 117460,
+     "peakWorkingSetSize": 121328,
+     "privateBytes": 85100
+    },
+    "integrityLevel": "medium",
+    "sandboxed": false
+   },
+   {
+    "cpu": {
+     "cumulativeCPUUsage": 3.004111,
+     "percentCPUUsage": 0,
+     "idleWakeupsPerSecond": 0
+    },
+    "pid": 20204,
+    "type": "GPU",
+    "creationTime": 1788739463905.328,
+    "serviceName": "GPU",
+    "memory": {
+     "workingSetSize": 467820,
+     "peakWorkingSetSize": 478100,
+     "privateBytes": 443232
+    },
+    "integrityLevel": "low",
+    "sandboxed": true
+   },
+   {
+    "cpu": {
+     "cumulativeCPUUsage": 0.173815,
+     "percentCPUUsage": 0,
+     "idleWakeupsPerSecond": 0
+    },
+    "pid": 4876,
+    "type": "Utility",
+    "creationTime": 1788739463912.866,
+    "serviceName": "network.mojom.NetworkService",
+    "name": "Network Service",
+    "memory": {
+     "workingSetSize": 54364,
+     "peakWorkingSetSize": 54632,
+     "privateBytes": 14444
+    },
+    "integrityLevel": "medium",
+    "sandboxed": false
+   },
+   {
+    "cpu": {
+     "cumulativeCPUUsage": 1.213952,
+     "percentCPUUsage": 0,
+     "idleWakeupsPerSecond": 0
+    },
+    "pid": 3784,
+    "type": "Tab",
+    "creationTime": 1788739463983.21,
+    "memory": {
+     "workingSetSize": 126684,
+     "peakWorkingSetSize": 141004,
+     "privateBytes": 74748
+    },
+    "integrityLevel": "medium",
+    "sandboxed": false
+   },
+   {
+    "cpu": {
+     "cumulativeCPUUsage": 0.071093,
+     "percentCPUUsage": 0,
+     "idleWakeupsPerSecond": 0
+    },
+    "pid": 1148,
+    "type": "Utility",
+    "creationTime": 1788739464630.577,
+    "serviceName": "audio.mojom.AudioService",
+    "name": "Audio Service",
+    "memory": {
+     "workingSetSize": 83188,
+     "peakWorkingSetSize": 83204,
+     "privateBytes": 11968
+    },
+    "integrityLevel": "low",
+    "sandboxed": true
+   }
+  ],
+  "feature_status": {
+   "2d_canvas": "enabled",
+   "direct_rendering_display_compositor": "disabled_off_ok",
+   "gpu_compositing": "enabled",
+   "multiple_raster_threads": "enabled_on",
+   "opengl": "enabled_on",
+   "rasterization": "enabled",
+   "raw_draw": "disabled_off_ok",
+   "skia_graphite": "disabled_off",
+   "video_decode": "enabled",
+   "video_encode": "enabled",
+   "vulkan": "disabled_off",
+   "webgl": "enabled",
+   "webgl2": "enabled",
+   "webgpu": "enabled",
+   "webnn": "disabled_off"
+  },
+  "gpu_info": {
+   "auxAttributes": {
+    "amdSwitchable": false,
+    "canSupportThreadedTextureMailbox": false,
+    "directMLFeatureLevel": "Not supported",
+    "displayType": "ANGLE_D3D11",
+    "dx12FeatureLevel": "Not supported",
+    "glExtensions": "GL_AMD_performance_monitor GL_ANGLE_base_vertex_base_instance_shader_builtin GL_ANGLE_blob_cache GL_ANGLE_client_arrays GL_ANGLE_depth_texture GL_ANGLE_framebuffer_blit GL_ANGLE_framebuffer_multisample GL_ANGLE_get_serialized_context_string GL_ANGLE_get_tex_level_parameter GL_ANGLE_instanced_arrays GL_ANGLE_lossy_etc_decode GL_ANGLE_memory_size GL_ANGLE_pack_reverse_row_order GL_ANGLE_polygon_mode GL_ANGLE_program_binary_readiness_query GL_ANGLE_program_cache_control GL_ANGLE_provoking_vertex GL_ANGLE_request_extension GL_ANGLE_robust_client_memory GL_ANGLE_texture_compression_dxt3 GL_ANGLE_texture_compression_dxt5 GL_ANGLE_texture_usage GL_ANGLE_translated_shader_source GL_APPLE_clip_distance GL_ARM_rgba8 GL_CHROMIUM_bind_generates_resource GL_CHROMIUM_bind_uniform_location GL_CHROMIUM_color_buffer_float_rgb GL_CHROMIUM_color_buffer_float_rgba GL_CHROMIUM_copy_compressed_texture GL_CHROMIUM_copy_texture GL_CHROMIUM_lose_context GL_CHROMIUM_sync_query GL_EXT_EGL_image_external_wrap_modes GL_EXT_blend_func_extended GL_EXT_blend_minmax GL_EXT_clip_control GL_EXT_color_buffer_half_float GL_EXT_debug_label GL_EXT_debug_marker GL_EXT_depth_clamp GL_EXT_discard_framebuffer GL_EXT_disjoint_timer_query GL_EXT_draw_buffers GL_EXT_draw_elements_base_vertex GL_EXT_float_blend GL_EXT_frag_depth GL_EXT_instanced_arrays GL_EXT_map_buffer_range GL_EXT_multisampled_render_to_texture GL_EXT_occlusion_query_boolean GL_EXT_polygon_offset_clamp GL_EXT_read_format_bgra GL_EXT_robustness GL_EXT_sRGB GL_EXT_shader_texture_lod GL_EXT_texture_border_clamp GL_EXT_texture_compression_bptc GL_EXT_texture_compression_dxt1 GL_EXT_texture_compression_rgtc GL_EXT_texture_compression_s3tc_srgb GL_EXT_texture_filter_anisotropic GL_EXT_texture_format_BGRA8888 GL_EXT_texture_mirror_clamp_to_edge GL_EXT_texture_norm16 GL_EXT_texture_rg GL_EXT_texture_storage GL_EXT_texture_type_2_10_10_10_REV GL_EXT_unpack_subimage GL_KHR_debug GL_KHR_parallel_shader_compile GL_KHR_robustness GL_NV_EGL_stream_consumer_external GL_NV_fence GL_NV_framebuffer_blit GL_NV_pack_subimage GL_NV_pixel_buffer_object GL_OES_EGL_image GL_OES_EGL_image_external GL_OES_compressed_EAC_R11_signed_texture GL_OES_compressed_EAC_R11_unsigned_texture GL_OES_compressed_EAC_RG11_signed_texture GL_OES_compressed_EAC_RG11_unsigned_texture GL_OES_compressed_ETC2_RGB8_texture GL_OES_compressed_ETC2_RGBA8_texture GL_OES_compressed_ETC2_punchthroughA_RGBA8_texture GL_OES_compressed_ETC2_punchthroughA_sRGB8_alpha_texture GL_OES_compressed_ETC2_sRGB8_alpha8_texture GL_OES_compressed_ETC2_sRGB8_texture GL_OES_depth24 GL_OES_depth32 GL_OES_draw_elements_base_vertex GL_OES_element_index_uint GL_OES_fbo_render_mipmap GL_OES_get_program_binary GL_OES_mapbuffer GL_OES_packed_depth_stencil GL_OES_required_internalformat GL_OES_rgb8_rgba8 GL_OES_standard_derivatives GL_OES_surfaceless_context GL_OES_texture_border_clamp GL_OES_texture_float GL_OES_texture_float_linear GL_OES_texture_half_float GL_OES_texture_half_float_linear GL_OES_texture_npot GL_OES_vertex_array_object GL_WEBGL_video_texture ",
+    "glImplementationParts": "(gl=egl-angle,angle=d3d11)",
+    "glRenderer": "ANGLE (Intel, Intel(R) Iris(R) Xe Graphics (0x00009A49) Direct3D11 vs_5_0 ps_5_0, D3D11-31.0.101.3222)",
+    "glResetNotificationStrategy": 33362,
+    "glVendor": "Google Inc. (Intel)",
+    "glVersion": "OpenGL ES 2.0.0 (ANGLE 2.1.25160 git hash: ecc378cc6110)",
+    "glWsExtensions": "EGL_EXT_create_context_robustness EGL_ANGLE_d3d_share_handle_client_buffer EGL_ANGLE_d3d_texture_client_buffer EGL_ANGLE_surface_d3d_texture_2d_share_handle EGL_ANGLE_query_surface_pointer EGL_ANGLE_window_fixed_size EGL_ANGLE_keyed_mutex EGL_ANGLE_surface_orientation EGL_ANGLE_direct_composition EGL_NV_post_sub_buffer EGL_KHR_create_context EGL_KHR_image EGL_KHR_image_base EGL_KHR_gl_texture_2D_image EGL_KHR_gl_texture_cubemap_image EGL_KHR_gl_renderbuffer_image EGL_KHR_get_all_proc_addresses EGL_KHR_stream EGL_KHR_stream_consumer_gltexture EGL_NV_stream_consumer_gltexture_yuv EGL_ANGLE_stream_producer_d3d_texture EGL_ANGLE_create_context_webgl_compatibility EGL_CHROMIUM_create_context_bind_generates_resource EGL_CHROMIUM_sync_control EGL_EXT_pixel_format_float EGL_KHR_surfaceless_context EGL_ANGLE_display_texture_share_group EGL_ANGLE_display_semaphore_share_group EGL_ANGLE_create_context_client_arrays EGL_ANGLE_program_cache_control EGL_ANGLE_robust_resource_initialization EGL_ANGLE_create_context_extensions_enabled EGL_ANDROID_blob_cache EGL_ANDROID_recordable EGL_ANGLE_image_d3d11_texture EGL_ANGLE_create_context_backwards_compatible EGL_KHR_no_config_context EGL_KHR_create_context_no_error EGL_KHR_reusable_sync EGL_ANGLE_memory_usage_report ",
+    "glWsVendor": "Google Inc. (Intel)",
+    "glWsVersion": "1.5 (ANGLE 2.1.25160 git hash: ecc378cc6110)",
+    "hardwareSupportsVulkan": false,
+    "inProcessGpu": false,
+    "initializationTime": 259.231,
+    "isAsan": false,
+    "isClangCoverage": false,
+    "jpegDecodeAcceleratorSupported": false,
+    "maxMsaaSamples": "16",
+    "optimus": false,
+    "overlayInfo": {
+     "bgra8OverlaySupport": "SCALING",
+     "directComposition": true,
+     "nv12OverlaySupport": "SCALING",
+     "p010OverlaySupport": "SOFTWARE",
+     "rgb10a2OverlaySupport": "SCALING",
+     "supportsOverlays": true,
+     "yuy2OverlaySupport": "SCALING"
+    },
+    "passthroughCmdDecoder": true,
+    "pixelShaderVersion": "5.0",
+    "sandboxed": true,
+    "skiaBackendType": "GaneshGL",
+    "subpixelFontRendering": true,
+    "supportsD3dSharedImages": true,
+    "supportsDirectML": false,
+    "supportsDx12": false,
+    "supportsVulkan": false,
+    "targetCpuBits": 64,
+    "vertexShaderVersion": "5.0",
+    "videoEncodeAcceleratorSupportedProfile": {
+     "maxFramerateDenominator": 1,
+     "maxFramerateNumerator": 30,
+     "maxResolutionHeight": 1920,
+     "maxResolutionWidth": 1080,
+     "minResolutionHeight": 114,
+     "minResolutionWidth": 66,
+     "profile": 16
+    },
+    "visibilityCallbackCallCount": 0,
+    "vulkanVersion": "Not supported"
+   },
+   "gpuDevice": [
+    {
+     "active": true,
+     "deviceId": 39497,
+     "deviceString": "Intel(R) Iris(R) Xe Graphics",
+     "driverVendor": "Intel",
+     "driverVersion": "31.0.101.3222",
+     "gpuPreference": 2,
+     "revision": 1,
+     "subSysId": 805601414,
+     "vendorId": 32902
+    },
+    {
+     "active": false,
+     "deviceId": 39497,
+     "deviceString": "Intel(R) Iris(R) Xe Graphics",
+     "driverVersion": "31.0.101.3222",
+     "gpuPreference": 0,
+     "revision": 1,
+     "subSysId": 805601414,
+     "vendorId": 32902
+    },
+    {
+     "active": false,
+     "deviceId": 140,
+     "deviceString": "Microsoft Basic Render Driver",
+     "driverVersion": "10.0.26100.8972",
+     "gpuPreference": 0,
+     "revision": 0,
+     "subSysId": 0,
+     "vendorId": 5140
+    }
+   ]
+  },
+  "render_process_gone_count": 0,
+  "primary_display": {
+   "bounds": {
+    "x": 0,
+    "y": 0,
+    "width": 3440,
+    "height": 1440
+   },
+   "work_area_size": {
+    "width": 3440,
+    "height": 1392
+   },
+   "scale_factor": 1,
+   "display_frequency": 60,
+   "color_depth": 24,
+   "color_space": "{primaries:BT709, transfer:SRGB, matrix:RGB, range:FULL}"
+  },
+  "device_pixel_ratio_note": "renderer reports window.devicePixelRatio separately"
+ },
+ "versions": {
+  "electron": "36.2.1",
+  "chrome": "136.0.7103.93",
+  "node": "22.15.0"
+ },
+ "criteria": "播放态：全片合成帧数 ≈ duration_frames（±2），丢帧 ≈ 0，合成间隔 p95 ≤ 40ms；音频：变速不变调 pitch_ok/duration_ok"
+}

@@ -15,9 +15,33 @@ import type { CompositorWorkerClient } from "./compositor-worker.js";
 import type { DrawCommand } from "./compositor-worker.worker.js";
 import type { Ir, IrContent, IrFrame } from "./ir.js";
 import { DecodeWorker } from "./decode-worker.js";
+import { VARISPEED_WORKLET_NAME, createVarispeedWorkletUrl } from "./varispeed-worklet.js";
 
 /** 片段音频配置（编辑态：App 从时间线文档透传）。 */
 export interface SegmentAudioConfig { enabled: boolean; gainDb: number }
+
+/** 片段音频装备：worklet = 变速不变调（OLA 时域拉伸，M3-2.2 验收"声音变了"
+ *  对齐项——交互预览 HTMLMediaElement preservesPitch 默认 true，合成预览
+ *  playbackRate 直调变调）；legacy = playbackRate 直调（AudioWorklet 不可用
+ *  时的回退，变调）。两路径共用 startedAt/startOffset/speed 位置模型：
+ *  position = startOffset + 墙钟增量×speed（worklet 输出域消耗速率相同）。 */
+interface AudioRig {
+  /** 解码完成的整段音频（worklet 路径 transfer 后置 null 释放主线程内存）。 */
+  buffer: AudioBuffer | null;
+  /** 懒创建的变速不变调节点（buffer 所有权随后迁入音频线程；失败回退 legacy）。 */
+  worklet: AudioWorkletNode | null;
+  /** 音频对 worklet 就绪（workletBuffer 或 !workletFailed&&buffer = 可出声）。 */
+  workletBuffer: boolean;
+  /** worklet 路径播放中（stopAudioSource 按此分支）。 */
+  workletActive: boolean;
+  /** worklet 节点创建/传输失败 → 本会话内该片段固定 legacy。 */
+  workletFailed: boolean;
+  source: AudioBufferSourceNode | null;
+  gain: GainNode | null;
+  startedAt: number;
+  startOffset: number;
+  speed: number;
+}
 
 export interface PreviewSessionMetrics {
   task_ms_p50: number;
@@ -120,7 +144,9 @@ export class PreviewSession {
   private tickets: Map<string, string> | null = null;
   private audioByClip: Map<string, SegmentAudioConfig> | null = null;
   private audioCtx: AudioContext | null = null;
-  private readonly audioRigs = new Map<string, { buffer: AudioBuffer | null; source: AudioBufferSourceNode | null; gain: GainNode | null; startedAt: number; startOffset: number; speed: number }>();
+  /** 变速不变调 worklet 模块是否已装入本 AudioContext（失败 → 全片段 legacy 回退）。 */
+  private audioWorkletReady = false;
+  private readonly audioRigs = new Map<string, AudioRig>();
   /** 音频漂移硬校正阈值（秒）：WebAudio 自身不漂，只有时钟重锚才触达。 */
   private static readonly AUDIO_REANCHOR_S = 0.08;
   /** 自然播放到片尾时回调（UI 复位播放按钮；会话已内部 pause）。 */
@@ -220,9 +246,14 @@ export class PreviewSession {
     // 片段音频：AudioContext + 整段解码（eager 预热，运行中才解码会缺席整段）。
     if (audioByClip && audioByClip.size && typeof window !== "undefined" && "AudioContext" in window) {
       session.audioCtx = new AudioContext();
+      // 变速不变调 worklet 装载（Blob URL；失败静默回退 playbackRate 直调路径）。
+      try {
+        await session.audioCtx.audioWorklet.addModule(createVarispeedWorkletUrl());
+        session.audioWorkletReady = true;
+      } catch { session.audioWorkletReady = false; }
       for (const segment of ir.segments) {
         if (!audioByClip.get(segment.clip_id)?.enabled) continue;
-        session.audioRigs.set(segment.clip_id, { buffer: null, source: null, gain: null, startedAt: 0, startOffset: 0, speed: Math.max(0.25, Math.min(4, segment.speed_milli / 1000)) });
+        session.audioRigs.set(segment.clip_id, { buffer: null, worklet: null, workletBuffer: false, workletActive: false, workletFailed: false, source: null, gain: null, startedAt: 0, startOffset: 0, speed: Math.max(0.25, Math.min(4, segment.speed_milli / 1000)) });
         void session.ensureAudioBuffer(segment.clip_id, segment.input_id);
       }
     }
@@ -251,7 +282,7 @@ export class PreviewSession {
     for (const [clipId, rig] of this.audioRigs) {
       const cfg = audioByClip?.get(clipId);
       if (rig.gain && cfg) rig.gain.gain.value = Math.pow(10, cfg.gainDb / 20);
-      if (rig.source && (!cfg || !cfg.enabled)) this.stopAudioSource(rig);
+      if ((rig.source || rig.workletActive) && (!cfg || !cfg.enabled)) this.stopAudioSource(rig);
     }
   }
 
@@ -474,7 +505,9 @@ export class PreviewSession {
     const toEnter = Math.min(target + PreviewSession.LEAD_ENTER, this.ir.frames.length - 1);
     const needsByInput = new Map<string, Set<number>>();
     const enterNeeds = new Map<string, Set<number>>();
-    const collectNeeds = (fromN: number, toN: number, into: Map<string, Set<number>>) => {
+    /** 每输入在 ≤target 帧的最大展示需求 src_n（升序遍历末次写入即最大；链游标封顶锚点）。 */
+    const displayMaxByInput = new Map<string, number>();
+    const collectNeeds = (fromN: number, toN: number, into: Map<string, Set<number>>, recordDisplayMax = false) => {
       for (let n = fromN; n <= toN; n++) {
         const frame = this.ir.frames[n]!;
         const needs: Array<[string, number, boolean]> = [...mainNeeds(frame)];
@@ -484,10 +517,11 @@ export class PreviewSession {
           let set = into.get(inputId);
           if (!set) { set = new Set<number>(); into.set(inputId, set); }
           set.add(srcN);
+          if (recordDisplayMax && n <= target) displayMaxByInput.set(inputId, srcN);
         }
       }
     };
-    collectNeeds(from, to, needsByInput);
+    collectNeeds(from, to, needsByInput, true);
     if (toEnter > to) collectNeeds(from, toEnter, enterNeeds);
     for (const [inputId, needs] of needsByInput) {
       const rig = this.rigs.get(inputId);
@@ -498,7 +532,19 @@ export class PreviewSession {
       } else {
         sorted = [...needs].sort((a, b) => a - b);
       }
-      const max = sorted[sorted.length - 1]!;
+      // 变速防卡顶（2x 播放冻结根修）：链游标超前「展示需求」的 src 距离受环形
+      // 池深度硬约束（RING=8，槽位先进先出覆盖）。speed>1 时 src 每输出帧前进
+      // speed 帧，旧 max = src(target+LEAD) 允许游标超前当前展示需求
+      // LEAD×speed 帧——2x 时超前 10 帧 > 8 槽，链追平钟点后展示帧纹理**必然**
+      // 已被淘汰：合成永远找不到 ≤ target 的就绪帧 → 画面冻结 + 时钟重锚风暴
+      // （重锚后游标不可回退，冻结固化）→ 播放卡死不前进。以 ≤target 帧的最大
+      // 展示需求（无则窗口内最小需求，即将入场的输入）+ RING-3 封顶游标：
+      // speed=1 时 anchor+5 ≡ 旧 max（1x 行为逐位不变）；speed=2 时游标最多
+      // 超前展示需求 5 帧，展示帧就绪后在环内保有 ≥3 槽余量，合成始终能在
+      // ≤ target 找到就绪帧。代价仅是 speed>1 时的预读跑道收窄（仍有
+      // (RING-3)/speed 个输出帧），换段冷启尖峰由链完成即续吸收。
+      const anchor = displayMaxByInput.get(inputId) ?? sorted[0]!;
+      const max = Math.min(sorted[sorted.length - 1]!, anchor + PreviewSession.RING - 3);
       // 正向单调推进（冷启动首个请求直达入场点）。
       // 向后跳转只发生在用户动作（回卷重播/回退 seek）——由 resetChains() 显式
       // 重置链游标，pump 本身不做启发式回跳（避免深窗口陈旧需求引发震荡）。
@@ -542,7 +588,7 @@ export class PreviewSession {
   private async ensureAudioBuffer(clipId: string, inputId: string): Promise<void> {
     if (!this.audioCtx || this.disposed) return;
     const rig = this.audioRigs.get(clipId);
-    if (!rig || rig.buffer) return;
+    if (!rig || rig.buffer || rig.workletBuffer) return;
     const input = this.ir.inputs.find(item => item.input_id === inputId);
     const ticket = input ? this.tickets?.get(input.asset_id) : undefined;
     if (!ticket) return;
@@ -556,26 +602,74 @@ export class PreviewSession {
     }
   }
 
-  /** 启动/重启一个片段音源：从缓冲 offset 起以 speed 播放（ctx 时间锚定）。 */
-  private startAudioSource(rig: { buffer: AudioBuffer | null; source: AudioBufferSourceNode | null; gain: GainNode | null; startedAt: number; startOffset: number; speed: number }, gainDb: number, offset: number, speed: number): void {
-    if (!this.audioCtx || !rig.buffer) return;
+  /** 懒创建片段的变速不变调节点并把解码音频迁入音频线程（成功后 buffer 释放）。
+   *  任何失败（节点创建/传输）→ workletFailed 固定回退 legacy，不重复尝试。 */
+  private ensureWorkletNode(rig: AudioRig): boolean {
+    if (!this.audioCtx || !this.audioWorkletReady || rig.workletFailed) return false;
+    if (rig.workletBuffer) return true;
+    if (!rig.buffer) return false;
+    try {
+      const node = new AudioWorkletNode(this.audioCtx, VARISPEED_WORKLET_NAME, {
+        numberOfInputs: 0,
+        outputChannelCount: [2],
+      });
+      const channels: Float32Array[] = [];
+      for (let ch = 0; ch < rig.buffer.numberOfChannels; ch++) {
+        channels.push(rig.buffer.getChannelData(ch).slice());
+      }
+      // 单声道：一份频道数据，worklet 侧双输出复用同引用（只读）。
+      node.port.postMessage({ type: "set-buffer", channels }, channels.map(data => data.buffer));
+      node.connect(rig.gain ??= this.audioCtx.createGain());
+      rig.gain.connect(this.audioCtx.destination);
+      rig.worklet = node;
+      rig.workletBuffer = true;
+      rig.buffer = null; // PCM 已迁入 worklet（slice 副本 transfer），释放主线程持有
+      return true;
+    } catch {
+      rig.workletFailed = true;
+      rig.workletBuffer = false;
+      return false;
+    }
+  }
+
+  /** 启动/重启一个片段音源：从缓冲 offset 起以 speed 播放（ctx 时间锚定）。
+   *  worklet 路径 = 变速不变调（play 消息重定位，OLA 累加器清零 → ~W/2 静音
+   *  过渡，仅入场/时钟重锚触达）；legacy 路径 = AudioBufferSourceNode
+   *  playbackRate 直调（变调，AudioWorklet 不可用时的回退）。 */
+  private startAudioSource(rig: AudioRig, gainDb: number, offset: number, speed: number): void {
+    if (!this.audioCtx) return;
     this.stopAudioSource(rig);
-    const source = this.audioCtx.createBufferSource();
-    source.buffer = rig.buffer;
-    source.playbackRate.value = speed;
-    rig.gain ??= this.audioCtx.createGain();
-    rig.gain.gain.value = Math.pow(10, gainDb / 20);
-    source.connect(rig.gain);
-    rig.gain.connect(this.audioCtx.destination);
-    source.start(0, Math.max(0, offset));
-    rig.source = source;
+    const useWorklet = rig.workletBuffer || this.ensureWorkletNode(rig);
+    if (useWorklet && rig.worklet) {
+      rig.gain!.gain.value = Math.pow(10, gainDb / 20);
+      rig.worklet.port.postMessage({ type: "play", position: Math.max(0, offset), speed });
+      rig.workletActive = true;
+      rig.source = null;
+    } else {
+      if (!rig.buffer) return;
+      const source = this.audioCtx.createBufferSource();
+      source.buffer = rig.buffer;
+      source.playbackRate.value = speed;
+      rig.gain ??= this.audioCtx.createGain();
+      rig.gain.gain.value = Math.pow(10, gainDb / 20);
+      source.connect(rig.gain);
+      rig.gain.connect(this.audioCtx.destination);
+      source.start(0, Math.max(0, offset));
+      rig.source = source;
+      rig.workletActive = false;
+      source.onended = () => { if (rig.source === source) rig.source = null; };
+    }
     rig.startedAt = this.audioCtx.currentTime;
     rig.startOffset = offset;
     rig.speed = speed;
-    source.onended = () => { if (rig.source === source) rig.source = null; };
   }
 
-  private stopAudioSource(rig: { source: AudioBufferSourceNode | null }): void {
+  private stopAudioSource(rig: AudioRig): void {
+    if (rig.workletActive && rig.worklet) {
+      rig.workletActive = false;
+      rig.worklet.port.postMessage({ type: "stop" });
+      return;
+    }
     const source = rig.source;
     rig.source = null;
     if (!source) return;
@@ -586,8 +680,9 @@ export class PreviewSession {
   /** 片段音频跟随时钟（WebAudio 调度）：音源运行在音频线程时钟上，本函数只做
    *  节拍管理——进段启动、出段停止、漂移超阈值（时钟重锚）才硬校正。播放中
    *  由合成 tick 以**墙钟目标时间**驱动节拍（合成滞后不影响音频推进）。
-   * 段窗口用 IR 的 output_*（转场借用重映射后的输出时间轴）；速度经
-   * playbackRate；gainDb → 线性增益（无 1.0 上限）。 */
+   * 段窗口用 IR 的 output_*（转场借用重映射后的输出时间轴）；速度：worklet
+   * 路径下发 speed 消息（下一颗粒生效，输入位置连续不变调）；legacy 路径直接
+   * 写 playbackRate；gainDb → 线性增益（无 1.0 上限）。 */
   private syncAudio(tUs: number): void {
     if (!this.audioByClip || !this.audioCtx) return;
     const active = new Set<string>();
@@ -600,14 +695,19 @@ export class PreviewSession {
       active.add(segment.clip_id);
       const speed = Math.max(0.25, Math.min(4, segment.speed_milli / 1000));
       let rig = this.audioRigs.get(segment.clip_id);
-      if (!rig) { rig = { buffer: null, source: null, gain: null, startedAt: 0, startOffset: 0, speed }; this.audioRigs.set(segment.clip_id, rig); }
-      if (!rig.buffer) { void this.ensureAudioBuffer(segment.clip_id, segment.input_id); continue; }
+      if (!rig) { rig = { buffer: null, worklet: null, workletBuffer: false, workletActive: false, workletFailed: false, source: null, gain: null, startedAt: 0, startOffset: 0, speed }; this.audioRigs.set(segment.clip_id, rig); }
+      if (!rig.buffer && !rig.workletBuffer) { void this.ensureAudioBuffer(segment.clip_id, segment.input_id); continue; }
       if (!this.playing) { this.stopAudioSource(rig); continue; }
       const expected = clamp(segment.source_start_us / 1e6 + ((tUs - startUs) / 1e6) * speed, segment.source_start_us / 1e6, segment.source_end_us / 1e6);
-      const position = rig.source ? rig.startOffset + (this.audioCtx.currentTime - rig.startedAt) * rig.speed : null;
+      const activeSource = rig.workletActive || rig.source !== null;
+      const position = activeSource ? rig.startOffset + (this.audioCtx.currentTime - rig.startedAt) * rig.speed : null;
       const drift = position === null ? Infinity : position - expected;
-      if (rig.source && Math.abs(drift) <= PreviewSession.AUDIO_REANCHOR_S) {
-        if (rig.speed !== speed) { rig.speed = speed; rig.source.playbackRate.value = speed; }
+      if (activeSource && Math.abs(drift) <= PreviewSession.AUDIO_REANCHOR_S) {
+        if (rig.speed !== speed) {
+          rig.speed = speed;
+          if (rig.workletActive) rig.worklet!.port.postMessage({ type: "speed", value: speed });
+          else rig.source!.playbackRate.value = speed;
+        }
         rig.gain!.gain.value = Math.pow(10, cfg.gainDb / 20);
         continue;
       }
@@ -615,7 +715,7 @@ export class PreviewSession {
       this.startAudioSource(rig, cfg.gainDb, expected, speed);
     }
     for (const [clipId, rig] of this.audioRigs) {
-      if (!active.has(clipId) && rig.source) this.stopAudioSource(rig);
+      if (!active.has(clipId) && (rig.source || rig.workletActive)) this.stopAudioSource(rig);
     }
   }
 
@@ -844,10 +944,23 @@ export class PreviewSession {
     return await this.compositor.readback();
   }
 
+  /** 音频路径诊断（m3p5 探针取证）：worklet 装载与每片段走的是哪条路径。 */
+  audioDebug(): { workletLoaded: boolean; clips: Array<{ clipId: string; mode: "worklet" | "legacy" | "pending"; bufferReady: boolean }> } {
+    const clips: Array<{ clipId: string; mode: "worklet" | "legacy" | "pending"; bufferReady: boolean }> = [];
+    for (const [clipId, rig] of this.audioRigs) {
+      const mode = rig.workletBuffer ? "worklet" : rig.buffer ? "legacy" : "pending";
+      clips.push({ clipId, mode, bufferReady: Boolean(rig.buffer || rig.workletBuffer) });
+    }
+    return { workletLoaded: this.audioWorkletReady, clips };
+  }
+
   dispose(): void {
     this.disposed = true;
     this.pause();
-    for (const [, rig] of this.audioRigs) this.stopAudioSource(rig);
+    for (const [, rig] of this.audioRigs) {
+      this.stopAudioSource(rig);
+      try { rig.worklet?.disconnect(); } catch { /* 已断开 */ }
+    }
     this.audioRigs.clear();
     void this.audioCtx?.close().catch(() => undefined);
     this.audioCtx = null;

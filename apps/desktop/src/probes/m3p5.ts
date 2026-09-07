@@ -1,14 +1,18 @@
 /** M3-2.2 播放探针：生产 PreviewSession（合成预览同一编排代码）在真实项目 IR 上
  * 播放全片，周期采样丢帧/合成帧/解码 RTT/解码链状态，并在关键时间点回读画布
  * PNG 取证（画中画内容、主轨几何、片尾逐帧对照）。与 m3p4（seek 基准）互补：
- * m3p4 测暂停态寻址，本探针测播放态吞吐——合成预览"卡顿/丢帧"的复现载体。 */
+ * m3p4 测暂停态寻址，本探针测播放态吞吐——合成预览"卡顿/丢帧"的复现载体。
+ * 附：变速不变调（WSOLA AudioWorklet）在真实 Chromium 音频线程的
+ * OfflineAudioContext 复验（同一份线上源码），以及会话音频路径取证（audioDebug）。 */
 import { parseIr } from "../app/preview/ir.js";
-import { PreviewSession, type PreviewSessionMetrics } from "../app/preview/preview-session.js";
+import { PreviewSession, type PreviewSessionMetrics, type SegmentAudioConfig } from "../app/preview/preview-session.js";
+import { VARISPEED_WORKLET_NAME, createVarispeedWorkletUrl } from "../app/preview/varispeed-worklet.js";
 import { setupProbe, collectEnvironment } from "./common/shell.js";
 import { probeBridge } from "./common/bridge.js";
 
 const SAMPLE_INTERVAL_MS = 250;
 const READBACK_AT_S = [0.5, 3.5, 6.0, 9.5, 10.1, 10.4, 10.62];
+const VARISPEED_WINDOW = 2048;
 
 interface Sample {
   t_ms: number;
@@ -53,6 +57,45 @@ function sampleOf(tMs: number, contentUs: number, metrics: PreviewSessionMetrics
   };
 }
 
+/** 变速不变调复验（真实音频线程）：OfflineAudioContext 渲染线上同源码 worklet，
+ *  440Hz 正弦 @2x → 输出过零率应 ≈440（变调路径会是 880），时长压缩一半。
+ *  初始状态走 processorOptions（同步构造——离线渲染批处理可能先于端口消息）。 */
+async function verifyVarispeedWorklet(): Promise<Record<string, unknown> | null> {
+  if (typeof OfflineAudioContext === "undefined") return null;
+  try {
+    const ctx = new OfflineAudioContext(2, 48000, 48000);
+    await ctx.audioWorklet.addModule(createVarispeedWorkletUrl());
+    const source = new Float32Array(48000);
+    for (let i = 0; i < source.length; i++) source[i] = 0.5 * Math.sin((2 * Math.PI * 440 * i) / 48000);
+    const node = new AudioWorkletNode(ctx, VARISPEED_WORKLET_NAME, {
+      numberOfInputs: 0,
+      outputChannelCount: [2],
+      processorOptions: { channels: [source], play: true, position: 0, speed: 2 },
+    });
+    node.connect(ctx.destination);
+    const rendered = await ctx.startRendering();
+    const channel = rendered.getChannelData(0);
+    let crossings = 0;
+    for (let i = 2400; i < 19200; i++) {
+      if ((channel[i]! >= 0) !== (channel[i - 1]! >= 0)) crossings += 1;
+    }
+    const freq = crossings / 2 / ((19200 - 2400) / 48000);
+    let last = -1;
+    for (let i = channel.length - 1; i >= 0; i--) {
+      if (Math.abs(channel[i]!) > 1e-3) { last = i; break; }
+    }
+    return {
+      input_freq_hz: 440, speed: 2, chipmunk_freq_hz: 880,
+      output_freq_hz: Math.round(freq * 10) / 10,
+      pitch_ok: Math.abs(freq - 440) < 440 * 0.03,
+      output_end_sample: last,
+      duration_ok: Math.abs(last - 24000) <= VARISPEED_WINDOW + 256,
+    };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 export async function runProbe(): Promise<void> {
   const shell = await setupProbe("m3p5");
   try {
@@ -71,7 +114,8 @@ export async function runProbe(): Promise<void> {
       if (!ticket) throw new Error(`no ticket for ${input.asset_id}`);
       tickets.set(input.asset_id, await bridge.mediaTicket(input.asset_id));
     }
-    const session = await PreviewSession.create(container, ir, tickets);
+    const session = await PreviewSession.create(container, ir, tickets,
+      new Map([...ir.segments].map(segment => [segment.clip_id, { enabled: true, gainDb: 0 }] as [string, SegmentAudioConfig])));
     const composeWallMs: number[] = [];
     let lastContentUs = -1;
     session.onTimeUs = (us: number) => { composeWallMs.push(performance.now()); lastContentUs = us; };
@@ -111,6 +155,7 @@ export async function runProbe(): Promise<void> {
     }
     // 新会话对照：同一画布重建 PreviewSession（全新解码器/环形池）后直接 seek
     // 片尾——区分"解码器历史状态依赖"与"该流本身在此解码路径必然花屏"。
+    const audioDebugSnapshot = session.audioDebug(); // dispose 清空 audioRigs，先取证
     session.dispose();
     const freshSession = await PreviewSession.create(container, ir, tickets);
     await freshSession.seekToFrame(ir.canvas.duration_frames - 1);
@@ -145,12 +190,16 @@ export async function runProbe(): Promise<void> {
       compose_interval_ms: { p50: pick(0.5), p95: pick(0.95), max: sorted.length ? sorted[sorted.length - 1]! : 0 },
       last_error: finalMetrics.last_error,
       replay_after_end_ok: replayOk,
+      audio: {
+        varispeed_offline: await verifyVarispeedWorklet(),
+        session: audioDebugSnapshot,
+      },
       samples,
       post_mortem: postMortem,
       materials: [...tickets.keys()],
       environment: await collectEnvironment(),
       versions: sessionMeta.versions,
-      criteria: "播放态：全片合成帧数 ≈ duration_frames（±2），丢帧 ≈ 0，合成间隔 p95 ≤ 40ms",
+      criteria: "播放态：全片合成帧数 ≈ duration_frames（±2），丢帧 ≈ 0，合成间隔 p95 ≤ 40ms；音频：变速不变调 pitch_ok/duration_ok",
     };
     await (window as unknown as { probeDesktop: { writeArtifact: (name: string, content: unknown) => Promise<string> } }).probeDesktop
       .writeArtifact("m3p5_result.json", JSON.stringify(result, null, 1));

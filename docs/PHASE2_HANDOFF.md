@@ -33,8 +33,52 @@
    会话侧 seek 纪元作废过期预取上传 + 拖拽快速档跳过预热。
    画布元素由会话自建/随会话销毁（transferControlToOffscreen 每元素仅一次，
    StrictMode 双挂载安全）；探针回读走 worker convertToBlob→ArrayBuffer transfer。
+9. **变速播放卡死根修 + 合成画布画中画选中保持（用户验收回归）**：
+   - **2x 卡死根修**（preview-session pump）：链游标超前展示需求的 src 距离
+     受环形池深度硬约束——旧 `max = src(target+LEAD)` 在 speed>1 时允许游标
+     超前展示需求 LEAD×speed 帧（2x = 10 帧 > RING 8 槽），链追平钟点后展示
+     帧纹理必被淘汰，合成永远找不到 ≤target 的就绪帧 → 画面冻结 + 重锚风暴
+     固化（游标单调不可回退）→ 播放卡死不前进、音频照墙钟播完提前静音
+     （验收原话"声音变了 + 选 2x 卡住不往后播放"）。现以 ≤target 帧的最大
+     展示需求 + RING-3 封顶游标；speed=1 时 anchor+5 ≡ 旧 max（1x 逐位不变）。
+     复现/验证：`tools/m3_0/make_ir_2x.py` 生成 2x 夹具 IR，
+     `evidence/m3_2/playback-repro-2x-before`（修复前 composed 0/89、丢帧 523、
+     永久冻结）vs `playback-repro-2x-fixed`（修复后 composed 88/89、丢帧 0、
+     复播 ✓）；1x/1.25x 回归 `playback-repro-2x-regression` = 原基线
+     （319/320、丢帧 0、p95 34ms）逐项持平。
+   - **画中画选中保持**（SyntheticPipLayer）：盒子补 `onClick stopPropagation`
+     ——松手 click 曾冒泡到 preview-frame 的 selectClipAtPlayhead，把手势开始
+     时选中的画中画切回主轨播放头片段（交互层 PreviewPipOverlays 同坑先修，
+     本次补齐合成层）；组件回归测试
+     `tests/synthetic-pip-layer.test.tsx`（9/9，含 click 不冒泡断言）。
+10. **变速不变调（剪映默认对齐，验收"声音变了"第二根因）**：段音频从
+    playbackRate 直调（变调；交互预览 HTMLMediaElement preservesPitch 默认
+    true，听感不一致）升级为 **WSOLA 颗粒时域拉伸 AudioWorklet**
+    （`varispeed-worklet.ts`，单一真源字符串经 Blob URL addModule）：
+    合成跳步 W/2 固定、分析跳步 speed×W/2、周期 Hann 50% 重叠 COLA=1
+    （speed=1 逐样本透明 + 免搜索直通）；每颗粒 ±240 采样（5ms）两阶段
+    SSD 搜索对齐上一颗粒未加窗尾段 → 交叉淡化区相位连续（纯 OLA 的周期性
+    相位台阶会让 440Hz 过零率漂到 ±4~10%、听感发毛）；speed 消息从下一颗粒
+    生效（无重启毛刺）；AudioWorklet 不可用自动回退 playbackRate 路径。
+    会话集成（preview-session）：懒建节点 + `set-buffer/play/stop/speed`
+    消息协议 + processorOptions 同步初始化；漂移校正、增益链、轨道静音
+    语义、位置模型（position = startOffset + 墙钟增量×speed）全部复用；
+    解码 PCM transfer 进音频线程后主线程 AudioBuffer 释放。验证：单测 8/8
+    （同源码求值）；m3p5 探针真实音频线程 OfflineAudioContext 复验 +
+    会话 audioDebug 路径取证（evidence/m3_2/playback-repro-2x-audio）。
 
-### 验证证据（evidence/m3_2/playback-repro/，均为 worker 架构）
+### 验证证据（evidence/m3_2/，均为 worker 架构）
+- `playback-repro-2x-before/-fixed`（2x 变速夹具，`ir_2x.json` +
+  `tools/m3_0/make_ir_2x.py` 生成）：修复前 composed **0/89**、丢帧 523、
+  wall 12.5s 永久冻结、复播失败；修复后 composed **88/89**、丢帧 0、合成间隔
+  p95 34.6ms、复播 ✓——用户验收"2x 卡住不往后播放"根修闭环。
+- `playback-repro-2x-audio`（同 2x 夹具 + 会话音频全开）：composed 88/89、
+  丢帧 0、无错误；**变速不变调真实音频线程复验**——OfflineAudioContext 渲染
+  线上同源码 worklet：440Hz @2x → 输出 **441.4Hz**（pitch_ok ✓，变调路径为
+  880Hz）、止点 24650 采样（duration_ok ✓）；会话 audioDebug：worklet 已装载、
+  片段走 worklet 模式。
+- `playback-repro-2x-regression`（原 1x+1.25x 用户项目 IR）：composed 319/320、
+  丢帧 0、p95 34ms、复播 ✓——与原 m3p5-worker 基线逐项持平（1x 无回归）。
 - `m3p5-worker`（fit）：composed 319/320、丢帧 0、复播 ✓、**合成间隔 p95
   34ms（主线程版 44.5）**；回读帧与主线程版逐字节一致（sha256 同）。
 - `m3p5-worker-blur`（blurred）：同上全绿，回读帧确认垫底+前景。
@@ -42,11 +86,14 @@
   （基线 35.6——±1 步进 50 倍提升）；**p95 ~103-110ms（基线 67.4，门限
   100）——尾部为深 GOP 解码固有成本+单跳开销，scrub 观感仍即时的已知
   回退项**（见下"已知限制"）。
-- vitest 369/369；typecheck ✓。
+- vitest 378/378（含 varispeed-worklet 8 项同源码求值）；typecheck ✓。
 
-### 待用户 dev 视觉验证
+### 待用户 dev 视觉/听感验证
 - 画中画拖拽松手无黑屏（replaceIr）、缩放/旋转/蒙版手感、模糊垫底观感、
-  1.25x 段音频是否仍有可闻抖动、worker 化后 scrub 手感（p50 快 34%）。
+  worker 化后 scrub 手感（p50 快 34%）。
+- **变速听感**：2x/0.5x 段音频应不变调（WSOLA 对齐）；重点听人声变速后的
+  自然度（WSOLA 对瞬态的颗粒感属算法已知特性，如需更高品质再评估相位
+  声码器方案）。
 
 ## 关键设计决定（不要回退）
 - **`replaceIr` 就地换表**：revision 变更且 IR inputs 签名一致时原地换帧表
@@ -68,6 +115,9 @@
   后备缓冲 ≤2048；比例真源 = 项目画布（新建项目可选）。
 
 ## 已知限制
+- **变速不变调 = WSOLA 颗粒拉伸（近似算法）**：瞬态密集内容（鼓点/快速语音）
+  有可闻颗粒感，属 WSOLA 已知特性；对齐剪映级品质需相位声码器（另立方案）。
+  AudioWorklet 不可用环境自动回退 playbackRate 直调（变调）。
 - **seek p95 ~103-110ms（门限 100，主线程基线 67）**：尾部=深 GOP 解码
   （驱动级，播放路径已规避但 scrub 无法规避）+ worker 单跳。p50/step 大幅
   优于基线；若要进一步压尾部：解码 worker 内嵌进 GL worker（消 transfer，

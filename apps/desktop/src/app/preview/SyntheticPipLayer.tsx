@@ -241,6 +241,12 @@ export function SyntheticPipLayer(props: SyntheticPipLayerProps): React.ReactEle
               cursor: locked ? "default" : dragging ? "grabbing" : "grab",
             }}
             onPointerDown={event => beginGesture(event, box, "move")}
+            // 拦截 click 冒泡：pointerup 后浏览器派发的 click 会命中盒子并冒泡到
+            // preview-frame 的 onClick（selectClipAtPlayhead），把手势开始时选中的
+            // 画中画切回主轨道播放头片段（与交互层 PreviewPipOverlays 同一坑，
+            // 该层以盒级 onClick stopPropagation 拦截）。画布空白处的 click 不经过
+            // 盒子，仍正常冒泡选中主轨片段。
+            onClick={event => event.stopPropagation()}
             {...gestureHandlers}
           >
             {mask && md && onDraftMask && onCommitMask && (
