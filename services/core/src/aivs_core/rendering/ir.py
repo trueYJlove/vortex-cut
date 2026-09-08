@@ -18,6 +18,7 @@ from typing import Any
 
 from ..performance import measured
 from ..projects import DomainError
+from .interval_index import IntervalLookup, RegionSweep
 
 FPS = 30
 IR_SCHEMA = "preview-ir-v1"
@@ -174,7 +175,9 @@ def resolved_caption_styles(presets: dict[str, Any]) -> dict[str, dict[str, Any]
 
 
 def _anchor_of(regions: list[dict[str, Any]], blend_region: dict[str, Any]) -> dict[str, Any]:
-    """转场锚点段 = blend 区段之前、时间上覆盖 blend 窗口的段区段。"""
+    """转场锚点段 = blend 区段之前、时间上覆盖 blend 窗口的段区段。
+    （A04 后生产路径走 RegionSweep.anchor_region 的构造期预映射；本函数
+    保留为扫线语义的测试 oracle——见 test_render_ir_index。）"""
     index = regions.index(blend_region)
     for candidate in reversed(regions[:index]):
         if candidate["item"]["kind"] == "segment" and candidate["t0"] <= blend_region["t0"]:
@@ -381,14 +384,21 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
         )
 
     frames = []
+    # A04 扫线索引（投影开始时建一次）：主轨 region 扫线（半开 + 倒序命中
+    # 语义 + 锚点预映射）；overlays/captions 含端 lookup（输出保持原顺序）。
+    region_sweep = RegionSweep(regions)
+    overlay_lookup = IntervalLookup([
+        (int(segment["timeline_start_us"]), int(segment["timeline_end_us"]), (order, segment))
+        for order, segment in enumerate(overlays)
+    ])
+    caption_lookup = IntervalLookup([
+        (int(caption["start_us"]), int(caption["end_us"]), (order, caption))
+        for order, caption in enumerate(plan["captions"]["items"])
+    ])
     for n in range(total_frames):
         t_us = n * 1_000_000 // FPS
         t_exact_us = n * 1_000_000 / FPS
-        region = None
-        for candidate in reversed(regions):
-            if candidate["t0"] <= t_exact_us < candidate["t1"]:
-                region = candidate
-                break
+        region = region_sweep.next_region(t_exact_us)
         if region is None or region["item"]["kind"] == "black":
             main_entry: dict[str, Any] = {"kind": "black"}
         else:
@@ -397,11 +407,12 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
             if region["phase"] == "blend":
                 blend = region["blend"]
                 p = (t_exact_us - blend["offset_us"]) / blend["duration_us"]
+                anchor_segment = region_sweep.anchor_region(region)["item"]["segment"]
                 main_entry = {
                     "kind": "transition",
                     "transition": blend["kind"],
                     "p": round(min(max(p, 0.0), 1.0), 6),
-                    "left": segment_frame(_anchor_of(regions, region), t_exact_us, "full"),
+                    "left": segment_frame(anchor_segment, t_exact_us, "full"),
                     "right": segment_frame(segment, t_exact_us, "blend", head_us=blend["duration_us"],
                                            content_origin_us=blend["offset_us"]),
                 }
@@ -409,11 +420,7 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
                 main_entry = {"kind": "segment", **segment_frame(segment, t_exact_us, region["phase"], head_us=region.get("head_us", 0),
                                                                  content_origin_us=region["t0"])}
         overlay_entries = []
-        for segment in overlays:
-            start_us = int(segment["timeline_start_us"])
-            end_us = int(segment["timeline_end_us"])
-            if t_exact_us < start_us or t_exact_us > end_us:
-                continue  # enable=between(t, start, end) 含边界
+        for segment in overlay_lookup.next_batch(t_exact_us):
             box_x, box_y, pip_w, pip_h, rotation = _pip_box(
                 segment, geometry_by_input[segment_input[segment["clip_id"]]], width, height)
             overlay_entries.append({
@@ -427,8 +434,7 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
                 "alpha": 1.0,
             })
         active_captions = [
-            caption["caption_id"] for caption in plan["captions"]["items"]
-            if int(caption["start_us"]) <= t_exact_us <= int(caption["end_us"])
+            caption["caption_id"] for caption in caption_lookup.next_batch(t_exact_us)
         ]
         frames.append({"n": n, "t_us": t_us, "main": main_entry,
                        "overlays": overlay_entries, "captions": active_captions})
