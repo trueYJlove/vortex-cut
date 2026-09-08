@@ -47,7 +47,15 @@ function sha256(value: unknown, name: string): string {
 
 function safeError(): Error { return new Error("Core request failed"); }
 async function safeInvoke<T>(operation: () => Promise<T>): Promise<T> {
-  try { return await operation(); } catch { throw safeError(); }
+  try {
+    return await operation();
+  } catch (error) {
+    // 真实原因仅打印到主进程终端（dev 可见），便于区分「404 无 Brief」与「Core 未启动」；
+    // 对 Renderer 仍抛通用错误，维持 IPC 错误契约不变。
+    const reason = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    console.error(`[core] request failed — ${reason}`);
+    throw safeError();
+  }
 }
 
 /** Stage2A's complete Renderer-facing IPC allowlist. It deliberately accepts no free-form secrets, paths, tokens, or media ranges. */

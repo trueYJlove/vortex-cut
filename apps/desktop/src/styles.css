@@ -892,3 +892,470 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 .pip-mask-knob { position: absolute; width: 12px; height: 12px; border-radius: 50%; background: #fff; border: 2px solid var(--vc-accent, #25d3ac); box-shadow: 0 1px 5px rgba(0, 0, 0, .45); transform: translate(-50%, -50%); cursor: nwse-resize; z-index: 6; }
 .pip-key-hint { position: absolute; left: 0; right: 0; bottom: 0; height: 12px; background: repeating-conic-gradient(rgba(255, 255, 255, .5) 0% 25%, rgba(0, 0, 0, .55) 0% 50%) 50% / 8px 8px; pointer-events: none; z-index: 4; }
 .pip-badge.key { left: auto; right: 0; border-radius: 0 0 0 6px; color: #aef0cd; }
+
+/* ═══════════════════════════════════════════════════════════════════
+   万兴喵影风格弹窗层（docs/ui-mockups/dialogs-filmora-style.html 落地）
+   令牌：弹窗面板 #121417 · 容器 #1b2024 · 控件 #23282c · 主按钮 #2bd8b0
+   圆角：弹窗12 / 容器8 / 控件6 · 控件高 30(sm 26) · 页签居中胶囊 28
+   本段置于文件末尾，按级联覆盖上方历史弹窗规则；class 名全部不变。
+   ═══════════════════════════════════════════════════════════════════ */
+:root {
+  --dlg-bg: #121417;
+  --dlg-raise: #1b2024;
+  --dlg-border: rgba(255, 255, 255, .13);
+  --dlg-line: rgba(255, 255, 255, .07);
+  --ctl-bg: #23282c;
+  --ctl-bg-hover: #2c3338;
+  --btn-bg: #3a4145;
+  --btn-bg-hover: #464e53;
+  --tab-active: #3a4144;
+  --dlg-text: #e9ecec;
+  --dlg-text-2: #c3c9c9;
+  --dlg-text-3: #8b9396;
+  --dlg-text-4: #667074;
+  --dlg-primary: #2bd8b0;
+  --dlg-primary-hover: #46e2c1;
+  --dlg-primary-text: #05271f;
+  --dlg-danger: #e5484d;
+  --dlg-danger-dim: rgba(229, 72, 77, .14);
+  --dlg-warn: #e8b45a;
+  --dlg-warn-dim: rgba(232, 180, 90, .12);
+  --dlg-accent-dim: rgba(37, 211, 172, .12);
+  --r-dlg: 12px;
+  --r-box: 8px;
+  --r-ctl: 6px;
+}
+
+/* ── 背幕与框架 ─────────────────────────────────────────────── */
+.modal-backdrop { background: rgba(0, 0, 0, .55); }
+.modal, .stage5-assembly [role="dialog"].modal, .shot-fulfillment [role="dialog"].modal {
+  width: min(560px, 100%);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  row-gap: 12px;
+  background: var(--dlg-bg);
+  color: var(--dlg-text);
+  font-size: 12.5px;
+  border: 1px solid var(--dlg-border);
+  border-radius: var(--r-dlg);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, .65), 0 4px 18px rgba(0, 0, 0, .5);
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #34393c transparent;
+}
+.modal::-webkit-scrollbar { width: 8px; }
+.modal::-webkit-scrollbar-thumb { background: #34393c; border-radius: 4px; border: 2px solid var(--dlg-bg); }
+.modal::-webkit-scrollbar-track { background: transparent; }
+.modal > * { margin: 0; }
+.modal > *:not(.modal-heading):not(.modal-actions) { padding-left: 18px; padding-right: 18px; }
+.modal > .modal-heading { position: sticky; top: 0; z-index: 3; flex: none; padding: 15px 18px 0; background: var(--dlg-bg); }
+.modal > .modal-actions { position: sticky; bottom: 0; z-index: 3; flex: none; padding: 13px 18px 15px; background: var(--dlg-bg); }
+.modal > .project-steps { padding-left: 18px; padding-right: 18px; }
+
+/* 弹窗宽度档位（设计稿 §04-§19） */
+.modal.ai-roughcut { width: min(720px, 100%); }
+.modal.planning-patch { width: min(680px, 100%); }
+.modal.revision-compare { width: min(720px, 100%); }
+.modal.generation-workbench { width: min(860px, 100%); }
+.modal.shot-workbench { width: min(860px, 100%); }
+.modal.provider-image-modal { width: min(860px, 100%); }
+.modal.export-batch-modal { width: min(860px, 100%); }
+.modal.transcript-viewer { width: min(620px, 100%); }
+.modal.command-palette { width: min(600px, 100%); }
+.modal.shortcuts-dialog { width: min(620px, 100%); }
+.modal.render-panel-dialog { width: min(780px, 100%); }
+.modal.asset-delete-modal { width: min(440px, 100%); }
+.modal.compact-dialog { width: min(420px, 100%); }
+
+/* ── 标题区 ─────────────────────────────────────────────────── */
+.modal h2 { margin: 0; font-size: 13.5px; font-weight: 600; letter-spacing: .2px; color: var(--dlg-text); }
+.modal h3 { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--dlg-text); }
+.modal h4 { margin: 4px 0; font-size: 11px; font-weight: 600; letter-spacing: 1px; color: var(--dlg-text-3); }
+.modal p { font-size: 12.5px; color: var(--dlg-text-2); line-height: 1.7; overflow-wrap: anywhere; }
+.modal small { font-size: 11px; color: var(--dlg-text-3); line-height: 1.6; }
+.modal strong { color: var(--dlg-text); font-weight: 600; }
+.modal-heading { gap: 12px; }
+.modal-heading p { margin: 3px 0 0; font-size: 11.5px; color: var(--dlg-text-3); }
+.modal-heading small { font-size: 11.5px; }
+.modal-heading .icon-btn, .modal-heading > button {
+  width: 26px; min-width: 26px; height: 26px; min-height: 26px; padding: 0;
+  display: inline-grid; place-items: center;
+  border: 0; border-radius: var(--r-ctl); background: transparent; color: var(--dlg-text-3);
+  font-size: 15px; line-height: 1;
+}
+.modal-heading .icon-btn svg { width: 14px; height: 14px; }
+.modal-heading > button { width: auto; min-width: 26px; padding: 0 10px; }
+.modal-heading .icon-btn:hover:not(:disabled), .modal-heading > button:hover:not(:disabled) { background: var(--ctl-bg); color: var(--dlg-text); }
+
+/* ── 表单节奏：标签在上、控件在下 ──────────────────────────── */
+.modal label { display: grid; gap: 6px; align-content: start; font-size: 12.5px; color: var(--dlg-text-2); }
+.modal label:has(> input[type="checkbox"]:first-child), .modal label:has(> input[type="radio"]:first-child) { display: inline-flex; align-items: center; gap: 8px; }
+.modal label.tb-field { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--dlg-text-2); }
+.modal .check-line { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--dlg-text-2); }
+.modal input[type="checkbox"], .modal input[type="radio"] { accent-color: var(--dlg-primary); }
+
+.modal input, .modal select, .modal textarea {
+  height: 30px; min-height: 30px; padding: 0 10px;
+  background: var(--ctl-bg); border: 1px solid transparent; border-radius: var(--r-ctl);
+  color: var(--dlg-text); font-size: 12.5px; outline: none;
+}
+.modal textarea { height: auto; min-height: 90px; padding: 8px 10px; line-height: 1.6; resize: vertical; }
+.modal .generation-create-form textarea { min-height: 150px; }
+.modal .shot-editor > .generation-field textarea { min-height: 70px; }
+.modal input::placeholder, .modal textarea::placeholder { color: var(--dlg-text-4); }
+.modal input:hover:not(:focus), .modal select:hover:not(:focus), .modal textarea:hover:not(:focus) { background: var(--ctl-bg-hover); }
+.modal input:focus, .modal select:focus, .modal textarea:focus {
+  border-color: var(--vc-accent, #25d3ac);
+  box-shadow: 0 0 0 2px rgba(37, 211, 172, .18);
+  background: var(--ctl-bg);
+}
+.modal > input[type="search"] { margin: 0; height: 32px; }
+
+/* ── 按钮：次级 / 主(薄荷青) / 危险 / 幽灵 ─────────────────── */
+.modal button {
+  height: 30px; min-height: 30px; padding: 0 18px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  border: 0; border-radius: var(--r-ctl); background: var(--btn-bg);
+  color: var(--dlg-text); font-size: 12.5px; font-weight: 500;
+  cursor: pointer; white-space: nowrap;
+}
+.modal button svg { width: 15px; height: 15px; }
+.modal button:hover:not(:disabled), .modal button.active { background: var(--btn-bg-hover); border: 0; }
+.modal button:disabled { opacity: .4; cursor: not-allowed; }
+.modal button:focus-visible { outline: 2px solid var(--vc-accent, #25d3ac); outline-offset: 2px; }
+.modal-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 10px; }
+.modal .modal-actions button { padding: 0 22px; }
+.modal .modal-actions button:last-child:not(.danger) { background: var(--dlg-primary); color: var(--dlg-primary-text); font-weight: 650; }
+.modal .modal-actions button:last-child:not(.danger):hover:not(:disabled) { background: var(--dlg-primary-hover); }
+.modal .modal-actions button:first-child:nth-last-child(2):not(.danger) { background: transparent; color: var(--dlg-text-2); }
+.modal .modal-actions button:first-child:nth-last-child(2):not(.danger):hover:not(:disabled) { background: var(--ctl-bg); color: var(--dlg-text); }
+.modal button.danger, .modal .modal-actions .danger { background: var(--dlg-danger); border: 0; color: #fff; font-weight: 600; }
+.modal button.danger:hover:not(:disabled), .modal .modal-actions .danger:hover:not(:disabled) { background: #f05a5f; color: #fff; }
+/* 例外：归档项目 / 恢复默认 / 删除凭据 保持次级灰（specificity 需压过 last-child 主按钮规则） */
+.modal .project-management-modal .modal-actions button:only-child,
+.modal .shortcuts-dialog .modal-actions button:only-child,
+.modal .provider-image-modal .modal-actions button:last-child:nth-child(2) { background: var(--btn-bg); color: var(--dlg-text); font-weight: 500; }
+.modal .project-management-modal .modal-actions button:only-child:hover:not(:disabled),
+.modal .shortcuts-dialog .modal-actions button:only-child:hover:not(:disabled),
+.modal .provider-image-modal .modal-actions button:last-child:nth-child(2):hover:not(:disabled) { background: var(--btn-bg-hover); }
+/* 行内小按钮 */
+.modal .compact-command, .modal .icon-btn { height: 26px; min-height: 26px; padding: 0 10px; font-size: 12px; }
+.modal .icon-btn { width: 26px; min-width: 26px; padding: 0; background: transparent; color: var(--dlg-text-3); }
+.modal .icon-btn:hover:not(:disabled) { background: var(--ctl-bg); color: var(--dlg-text); }
+.modal .provider-capability-list button, .modal .target-actions button, .modal .generation-task-actions button,
+.modal .shot-card-heading button, .modal .shot-toolbar button, .modal .generation-history-toolbar button,
+.modal .ai-inline button, .modal details > button, .modal .shot-history-detail button,
+.modal .stage5-assembly > header button, .modal .shot-fulfillment button, .modal .generation-create fieldset button,
+.modal .provider-image-configs button {
+  height: 26px; min-height: 26px; padding: 0 12px; font-size: 12px;
+}
+.modal .provider-capability-list button, .modal .generation-task-actions button,
+.modal .target-actions button:last-child, .modal .shot-card-heading button {
+  background: transparent; color: var(--dlg-text-2);
+}
+.modal .provider-capability-list button:hover:not(:disabled), .modal .generation-task-actions button:hover:not(:disabled),
+.modal .target-actions button:last-child:hover:not(:disabled), .modal .shot-card-heading button:hover:not(:disabled) { background: var(--ctl-bg); color: var(--dlg-text); }
+
+/* ── 信息网格（确认页 dl） ──────────────────────────────────── */
+.modal dl, .modal [role="dialog"] dl, .modal .shot-fulfillment-confirmation dl {
+  display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 7px 14px;
+  padding: 12px 14px; background: var(--dlg-raise);
+  border: 1px solid var(--dlg-line); border-radius: var(--r-box);
+  font-size: 12px;
+}
+.modal dt { color: var(--dlg-text-3); }
+.modal dd, .modal .shot-fulfillment-confirmation dd { margin: 0; color: var(--dlg-text); overflow-wrap: anywhere; }
+.modal dd code { color: var(--vc-accent, #25d3ac); font-family: Consolas, monospace; font-size: 11px; }
+
+/* ── 提示条四语义 ───────────────────────────────────────────── */
+.modal .delete-warning { padding: 10px 12px; border: 1px solid rgba(229, 72, 77, .35); background: var(--dlg-danger-dim); color: #f2b8b5; font-size: 12px; line-height: 1.7; border-radius: var(--r-ctl); }
+.modal .readonly-note, .modal .simulation-notice, .modal .shot-zero-notice, .modal .generation-parameters .readonly-note {
+  padding: 9px 12px; border: 1px solid rgba(37, 211, 172, .25); background: var(--dlg-accent-dim);
+  color: var(--dlg-text-2); font-size: 12px; line-height: 1.7; border-radius: var(--r-ctl);
+}
+.modal .provider-cost-notice, .modal .locked-note { padding: 9px 12px; border: 1px solid rgba(232, 180, 90, .3); background: var(--dlg-warn-dim); color: var(--dlg-text-2); font-size: 12px; line-height: 1.7; border-radius: var(--r-ctl); }
+.modal .provider-cost-notice strong { color: var(--dlg-warn); }
+.modal .ai-status { padding: 9px 12px; border: 1px solid rgba(232, 180, 90, .3); background: var(--dlg-warn-dim); color: var(--dlg-text-2); font-size: 12px; line-height: 1.7; border-radius: var(--r-ctl); }
+.modal .generation-safe-error { padding: 9px 12px; border: 1px solid rgba(229, 72, 77, .35); background: var(--dlg-danger-dim); color: #f2b8b5; font-size: 12px; line-height: 1.7; border-radius: var(--r-ctl); }
+.modal .generation-success, .modal .generation-create-result { color: var(--vc-accent, #25d3ac); font-size: 12px; }
+.modal .stage5-assembly [role="alert"] { color: #f2797d; }
+.modal .stage5-assembly [role="status"] { color: var(--vc-accent, #25d3ac); }
+
+/* ── 页签（居中胶囊） ───────────────────────────────────────── */
+.modal .generation-tabs { display: flex; justify-content: center; gap: 8px; margin: 0; padding: 2px 0; border-bottom: 0; }
+.modal .generation-tabs button { height: 28px; min-height: 28px; padding: 0 15px; border: 0; border-radius: var(--r-ctl); background: transparent; color: var(--dlg-text-2); font-size: 12.5px; }
+.modal .generation-tabs button:hover:not(:disabled) { background: rgba(255, 255, 255, .05); color: var(--dlg-text); }
+.modal .generation-tabs button.active { background: var(--tab-active); color: var(--dlg-text); }
+
+/* ── 步骤条 ─────────────────────────────────────────────────── */
+.modal .project-steps { display: flex; gap: 8px; margin: 0; }
+.modal .project-steps span {
+  flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
+  height: 30px; padding: 0; border: 0; border-radius: var(--r-ctl);
+  background: var(--ctl-bg); color: var(--dlg-text-3); font-size: 12px; text-align: center; white-space: nowrap;
+}
+.modal .project-steps span i { font-style: normal; width: 16px; height: 16px; border-radius: 50%; background: rgba(255, 255, 255, .1); font-size: 10.5px; display: inline-grid; place-items: center; flex: none; }
+.modal .project-steps span.active { background: var(--dlg-accent-dim); color: var(--vc-accent, #25d3ac); font-weight: 600; }
+.modal .project-steps span.active i { background: var(--dlg-primary); color: var(--dlg-primary-text); }
+
+/* ── 分组容器卡 ─────────────────────────────────────────────── */
+.modal .rendition-target, .modal .project-management-section, .modal .shot-card, .modal .generation-task,
+.modal .shot-fulfillment, .modal .instruction-preview, .modal .egress-text, .modal .diff-groups section,
+.modal .candidate-columns > section, .modal .provider-capability-list > div, .modal .stage5-assembly {
+  background: var(--dlg-raise);
+  border: 1px solid var(--dlg-line);
+  border-radius: var(--r-box);
+}
+.modal .project-management-section { padding: 14px; }
+.modal .project-management-section h3 { margin: 0 0 10px; color: var(--dlg-text-2); font-size: 12.5px; font-weight: 600; }
+.modal .project-form-row { display: flex; gap: 8px; }
+.modal .project-current-name { margin: 0 0 9px; color: var(--dlg-text); font-size: 12.5px; }
+.modal section.project-management-section:first-of-type .project-form-row .compact-command { background: var(--dlg-primary); color: var(--dlg-primary-text); font-weight: 650; }
+.modal section.project-management-section:first-of-type .project-form-row .compact-command:hover:not(:disabled) { background: var(--dlg-primary-hover); }
+.modal .rendition-targets { display: grid; gap: 12px; margin-top: 0; }
+.modal .rendition-target { padding: 14px; }
+.modal .rendition-target label { gap: 6px; font-size: 12px; color: var(--dlg-text-2); }
+.modal .target-summary small { color: var(--dlg-text-3); font-size: 11px; line-height: 1.7; }
+
+/* ── fieldset ───────────────────────────────────────────────── */
+.modal fieldset { min-width: 0; margin: 0; padding: 12px 14px; display: grid; gap: 10px; border: 1px solid var(--dlg-line); border-radius: var(--r-box); background: var(--dlg-raise); }
+.modal legend { padding-right: 8px; font-size: 11px; letter-spacing: .5px; color: var(--dlg-text-3); }
+.modal .generation-create fieldset > label { display: inline-flex; align-items: center; gap: 8px; margin: 0; }
+.modal .shot-card fieldset { padding: 10px 12px; }
+
+/* ── 进度条 ─────────────────────────────────────────────────── */
+.modal progress, .ai-job-progress progress {
+  -webkit-appearance: none; appearance: none;
+  width: 100%; height: 4px; border: 0; border-radius: 2px;
+  background: rgba(255, 255, 255, .09); overflow: hidden;
+}
+.modal progress::-webkit-progress-bar, .ai-job-progress progress::-webkit-progress-bar { background: rgba(255, 255, 255, .09); }
+.modal progress::-webkit-progress-value, .ai-job-progress progress::-webkit-progress-value { background: var(--dlg-primary); border-radius: 2px; }
+.modal progress::-moz-progress-bar, .ai-job-progress progress::-moz-progress-bar { background: var(--dlg-primary); }
+
+/* ── kbd 键位 ───────────────────────────────────────────────── */
+.modal kbd, .modal .command-shortcut {
+  font-family: Consolas, monospace; font-size: 11px; color: var(--dlg-text-2);
+  background: var(--ctl-bg); border: 1px solid var(--dlg-border); border-bottom-width: 2px;
+  border-radius: 5px; padding: 2px 7px; line-height: 1.3;
+}
+.modal kbd.shortcut-recording { color: var(--vc-accent, #25d3ac); border-color: rgba(37, 211, 172, .5); background: var(--dlg-accent-dim); animation: pulse 1.2s ease-in-out infinite; }
+
+/* ── 渲染与导出：任务与产物列表 ─────────────────────────────── */
+.modal .export-records { width: 100%; padding: 2px; background: transparent; border: 0; }
+.modal .export-records > div:first-child { padding: 9px 12px 7px; color: var(--dlg-text-2); }
+.modal .export-records > div:first-child strong { font-size: 12.5px; }
+.modal .export-records > div:first-child small { font-size: 11px; }
+.modal .export-record, .modal .render-job { padding: 9px 12px; border-top: 1px solid var(--dlg-line); background: transparent; border-radius: 0; }
+.modal .export-record strong, .modal .render-job strong { font-size: 12.5px; font-weight: 500; }
+.modal .export-records small, .modal .render-job small { color: var(--dlg-text-3); font-size: 11px; }
+.modal .export-record .icon-btn, .modal .render-job .icon-btn { width: 26px; min-width: 26px; height: 26px; min-height: 26px; }
+.modal .render-panel-dialog .export-records { max-height: 46vh; background: var(--dlg-raise); border: 1px solid var(--dlg-line); border-radius: var(--r-box); }
+
+/* ── 批次状态 ───────────────────────────────────────────────── */
+.modal .batch-status { margin-top: 0; padding: 14px; background: var(--dlg-raise); border: 1px solid var(--dlg-line); border-radius: var(--r-box); }
+.modal .batch-status h3 { margin: 0 0 6px; font-size: 12.5px; color: var(--dlg-text-2); }
+.modal .batch-status p { margin: 0 0 8px; color: var(--dlg-text-3); font-size: 12px; }
+.modal .batch-status > div { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--dlg-line); }
+.modal .batch-status strong { font-size: 12px; }
+.modal .batch-status small { color: var(--dlg-text-3); overflow-wrap: anywhere; }
+
+/* ── 差异视图（fdiff） ──────────────────────────────────────── */
+.modal .diff-groups { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 0; }
+.modal .diff-groups section { padding: 10px 12px; }
+.modal .diff-groups h4 { margin: 0 0 6px; color: var(--dlg-text-3); }
+.modal .diff-groups p { margin: 4px 0; font-family: Consolas, monospace; font-size: 11.5px; color: var(--dlg-text-2); }
+.modal .diff-groups .diff-added { color: var(--dlg-primary); }
+.modal .diff-groups .diff-removed { color: #f2797d; }
+.modal .diff-groups .diff-moved, .modal .diff-groups .diff-updated, .modal .diff-groups .diff-trimmed { color: var(--dlg-warn); }
+
+/* ── 命令搜索 ───────────────────────────────────────────────── */
+.modal .command-palette { max-width: none; }
+.modal .command-list { max-height: 320px; padding: 2px; background: var(--dlg-raise); border: 1px solid var(--dlg-line); border-radius: var(--r-box); overflow-y: auto; scrollbar-width: thin; scrollbar-color: #34393c transparent; }
+.modal .command-list li + li { border-top: 1px solid var(--dlg-line); }
+.modal .command-list li.active { background: var(--dlg-accent-dim); }
+.modal .command-list button { width: 100%; display: flex; align-items: center; gap: 10px; padding: 9px 12px; text-align: left; background: transparent; border: 0; border-radius: 0; }
+.modal .command-label { flex: 1; font-size: 12.5px; color: var(--dlg-text); }
+.modal .command-shortcut { margin-left: auto; }
+.modal .command-ok { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px; border-radius: 999px; background: var(--dlg-accent-dim); color: var(--vc-accent, #25d3ac); font-size: 10.5px; font-weight: 600; }
+.modal .command-ok::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.modal .command-reason { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px; border-radius: 999px; background: var(--dlg-warn-dim); color: var(--dlg-warn); font-size: 10.5px; font-weight: 600; }
+.modal .command-reason::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.modal .command-empty { padding: 12px; color: var(--dlg-text-3); text-align: center; font-size: 12px; }
+
+/* ── 快捷键设置 ─────────────────────────────────────────────── */
+.modal .shortcuts-list { gap: 0; padding: 2px; background: var(--dlg-raise); border: 1px solid var(--dlg-line); border-radius: var(--r-box); overflow: hidden; }
+.modal .shortcut-row { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: 0; border-radius: 0; background: transparent; }
+.modal .shortcut-row + .shortcut-row { border-top: 1px solid var(--dlg-line); }
+.modal .shortcut-row .shortcut-label { flex: 1; color: var(--dlg-text); font-size: 12.5px; }
+
+/* ── 原始转录（只读段落） ───────────────────────────────────── */
+.modal .readonly-segments { padding: 2px; background: var(--dlg-raise); border: 1px solid var(--dlg-line); border-radius: var(--r-box); overflow: hidden; }
+.modal .readonly-segments > div { padding: 10px 12px; grid-template-columns: 108px 1fr; border-bottom: 1px solid var(--dlg-line); align-items: start; }
+.modal .readonly-segments > div:last-child { border-bottom: 0; }
+.modal .readonly-segments span { font-family: Consolas, monospace; color: var(--dlg-text-3); font-size: 10.5px; }
+.modal .readonly-segments p { margin: 0; font-size: 12.5px; color: var(--dlg-text); line-height: 1.7; }
+
+/* ── 生成验证 / 真实图片生成：历史与任务 ────────────────────── */
+.modal .generation-history-grid { gap: 12px; }
+.modal .generation-request-list, .modal .generation-task-list { padding: 2px; background: var(--dlg-raise); border: 1px solid var(--dlg-line); border-radius: var(--r-box); scrollbar-width: thin; scrollbar-color: #34393c transparent; }
+.modal .generation-request-list { gap: 2px; }
+.modal .generation-request-list > button { display: grid; gap: 4px; padding: 9px 12px; border: 0; border-radius: var(--r-ctl); background: transparent; text-align: left; }
+.modal .generation-request-list > button:hover:not(:disabled) { background: var(--ctl-bg-hover); border: 0; }
+.modal .generation-request-list > button.active { background: var(--dlg-accent-dim); }
+.modal .generation-request-list small, .modal .generation-task small { color: var(--dlg-text-3); }
+.modal .generation-task { gap: 6px; padding: 10px 12px; }
+.modal .generation-task.status-succeeded { border-color: rgba(37, 211, 172, .35); }
+.modal .generation-task.status-failed, .modal .generation-task.status-interrupted { border-color: rgba(229, 72, 77, .35); }
+.modal .generation-request-summary { padding-bottom: 8px; border-bottom: 1px solid var(--dlg-line); }
+.modal .generation-assets > label { padding: 7px 8px; background: transparent; border-bottom: 1px solid var(--dlg-line); }
+.modal .generation-assets small { color: var(--dlg-text-3); }
+.modal .provider-image-preview { border: 1px solid var(--dlg-line); border-radius: var(--r-ctl); background: #0d1214; }
+
+/* ── 能力测试 / 指令预览 ────────────────────────────────────── */
+.modal .provider-capability-list { gap: 0; margin-top: 0; padding: 2px; background: var(--dlg-raise); border: 1px solid var(--dlg-line); border-radius: var(--r-box); overflow: hidden; }
+.modal .provider-capability-list > div { padding: 8px 12px; border: 0; }
+.modal .provider-capability-list > div + div { border-top: 1px solid var(--dlg-line); }
+.modal .provider-capability-list span { font-size: 12px; color: var(--dlg-text-2); }
+.modal .instruction-preview { max-height: 150px; padding: 10px 12px; }
+.modal .instruction-preview strong { font-size: 12px; color: var(--dlg-text-2); }
+.modal .egress-text { padding: 10px 12px; }
+.modal .candidate-columns h4 { color: var(--dlg-text-3); }
+.modal .candidate-clip span { color: var(--vc-accent, #25d3ac); }
+
+/* ── 镜头需求工作台 ─────────────────────────────────────────── */
+.modal .shot-toolbar strong { font-size: 12.5px; color: var(--dlg-text-2); }
+.modal .shot-list { padding-right: 4px; }
+.modal .shot-card { gap: 10px; padding: 14px; }
+.modal .shot-card-heading { padding-bottom: 8px; border-bottom: 1px solid var(--dlg-line); }
+.modal .shot-card-heading strong { font-size: 12.5px; }
+.modal .shot-card > label { gap: 6px; font-size: 12.5px; }
+.modal .shot-history { gap: 12px; }
+.modal .shot-history-list, .modal .shot-history-detail { padding: 2px; background: var(--dlg-raise); border: 1px solid var(--dlg-line); border-radius: var(--r-box); scrollbar-width: thin; scrollbar-color: #34393c transparent; }
+.modal .shot-history-list { gap: 2px; }
+.modal .shot-history-list button { display: grid; gap: 4px; padding: 9px 12px; border: 0; border-radius: var(--r-ctl); background: transparent; text-align: left; }
+.modal .shot-history-list button:hover:not(:disabled) { background: var(--ctl-bg-hover); border: 0; }
+.modal .shot-history-list small, .modal .shot-history-detail small { color: var(--dlg-text-3); }
+.modal .shot-history-list em { display: inline-flex; align-items: center; gap: 5px; width: max-content; height: 18px; padding: 0 7px; border-radius: 999px; background: var(--dlg-accent-dim); color: var(--vc-accent, #25d3ac); font-size: 10px; font-style: normal; font-weight: 600; }
+.modal .shot-history-detail { padding: 10px 12px; }
+.modal .shot-history-detail li { border-bottom: 1px solid var(--dlg-line); }
+.modal .shot-fulfillment { gap: 10px; padding: 14px; }
+.modal .shot-fulfillment small, .modal .shot-fulfillment-history small { color: var(--dlg-text-3); }
+
+/* ── 履约确认 / 装配确认弹窗（嵌套 dialog 兜底） ─────────────── */
+.modal .shot-fulfillment-confirmation { padding: 12px 14px; background: var(--dlg-raise); border: 1px solid var(--dlg-line); border-radius: var(--r-box); }
+.modal .stage5-assembly { padding: 12px 14px; }
+.modal .stage5-assembly > header strong { font-size: 12.5px; }
+
+/* ── AI 进度浮卡 ────────────────────────────────────────────── */
+.ai-job-progress {
+  padding: 14px; background: var(--dlg-bg); border: 1px solid var(--dlg-border);
+  border-radius: var(--r-dlg); box-shadow: 0 18px 50px rgba(0, 0, 0, .6);
+  color: var(--dlg-text);
+}
+.ai-job-progress strong { font-size: 12.5px; color: var(--dlg-text); }
+.ai-job-progress span { color: var(--dlg-text-3); font-size: 12px; }
+
+/* ── 转场浮层（原内联样式迁出） ─────────────────────────────── */
+.add-transition-popover { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; background: rgba(0, 0, 0, .55); }
+.add-transition-card {
+  width: min(440px, calc(100vw - 48px));
+  padding: 0;
+  display: grid;
+  background: var(--dlg-bg); color: var(--dlg-text);
+  border: 1px solid var(--dlg-border); border-radius: var(--r-dlg);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, .65), 0 4px 18px rgba(0, 0, 0, .5);
+  overflow: hidden;
+}
+.add-transition-hd { display: flex; align-items: center; gap: 8px; padding: 15px 18px 0; font-size: 13.5px; font-weight: 600; letter-spacing: .2px; }
+.add-transition-hd button {
+  margin-left: auto; width: 26px; min-width: 26px; height: 26px; min-height: 26px; padding: 0;
+  display: inline-grid; place-items: center; border: 0; border-radius: var(--r-ctl);
+  background: transparent; color: var(--dlg-text-3); font-size: 14px; line-height: 1; cursor: pointer;
+}
+.add-transition-hd button:hover { background: var(--ctl-bg); color: var(--dlg-text); }
+.add-transition-body { display: grid; gap: 12px; padding: 14px 18px 18px; }
+.add-transition-body .add-transition-kinds { display: flex; flex-wrap: wrap; gap: 8px; }
+.add-transition-body button.add-transition-kind {
+  height: 28px; min-height: 28px; padding: 0 14px;
+  border: 1px solid transparent; border-radius: var(--r-ctl);
+  background: var(--ctl-bg); color: var(--dlg-text-2); font-size: 12px; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.add-transition-body button.add-transition-kind:hover { background: var(--ctl-bg-hover); color: var(--dlg-text); }
+.add-transition-body small { color: var(--dlg-text-3); font-size: 11px; line-height: 1.7; }
+
+/* ── details 折叠（新建 Provider 等） ───────────────────────── */
+.modal summary { cursor: pointer; color: var(--vc-accent, #25d3ac); font-size: 12.5px; font-weight: 600; user-select: none; }
+.modal summary:hover { color: var(--dlg-primary-hover); }
+
+/* ── 焦点可达性（弹窗内统一青色环） ─────────────────────────── */
+.modal button:focus-visible, .modal input:focus-visible, .modal select:focus-visible,
+.modal textarea:focus-visible, .add-transition-card button:focus-visible {
+  outline: 2px solid var(--vc-accent, #25d3ac); outline-offset: 2px;
+}
+/* 输入类控件有自身焦点态（青边 + 弱环），不再叠加 outline，避免出现双层高亮；
+   键盘焦点仍由 :focus 边框/光晕指示，可达性不受影响。 */
+.modal input:focus-visible, .modal select:focus-visible, .modal textarea:focus-visible { outline: none; }
+
+/* ── 主窗口焦点去重：存在 :focus/:focus-within 边框焦点态的控件关闭 outline ── */
+.tb-field select:focus, .tb-field select:focus-visible { outline: none; border-color: var(--vc-accent); }
+.library-filter-toolbar input:focus, .library-filter-toolbar input:focus-visible { outline: none; }
+.project-switcher-search input:focus, .project-switcher-search input:focus-visible { outline: none; }
+.pp-panel .pp-input:focus, .pp-panel .pp-input:focus-visible,
+.pp-panel .pp-ta textarea:focus, .pp-panel .pp-ta textarea:focus-visible { outline: none; }
+
+@media (max-width: 760px) {
+  .modal > *:not(.modal-heading):not(.modal-actions) { padding-left: 14px; padding-right: 14px; }
+  .modal > .modal-heading { padding: 13px 14px 0; }
+  .modal > .modal-actions { padding: 11px 14px 13px; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   主窗口金色残留清理（对齐喵影令牌：强调=薄荷青 #25d3ac · 警示=#e8b45a
+   · 分组标题=中性灰 #c3c9c9 · 正文=#e9ecec / 说明=#8b9396）
+   按级联覆盖上方历史规则；语义不变，仅统一色值与控件形态。
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── 属性面板 · 项目概览 / 保存预览检查 / 下一步动作 ─────────── */
+.property-block h2 { margin: 0; font-size: 12.5px; font-weight: 600; color: #c3c9c9; }
+.property-line span { color: #8b9396; }
+.property-line strong { color: #e9ecec; }
+.properties-status { color: #c3c9c9; }
+.properties-muted { color: #667074; }
+.properties-actions { gap: 8px; }
+.properties-actions button {
+  height: 30px; min-height: 30px; padding: 0 14px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  border: 1px solid transparent; border-radius: 6px; background: #3a4145;
+  color: #e9ecec; font-size: 12.5px; font-weight: 500; cursor: pointer; white-space: nowrap;
+}
+.properties-actions button:hover:not(:disabled) { background: #464e53; border-color: transparent; }
+.properties-actions button:first-child { background: #2bd8b0; color: #05271f; font-weight: 650; }
+.properties-actions button:first-child:hover:not(:disabled) { background: #46e2c1; }
+.properties-actions button:disabled { opacity: .4; cursor: not-allowed; }
+.properties-actions button:focus-visible { outline: 2px solid var(--vc-accent, #25d3ac); outline-offset: 2px; }
+
+/* ── 预览区状态标 · 过期/回退提示（警示语义统一 #e8b45a） ────── */
+.interactive-label.stale { border-color: #e8b45a; color: #e8b45a; }
+.preview-context.stale { border-color: #e8b45a; color: #e8b45a; }
+.synthetic-note { border-color: rgba(232, 180, 90, .55); color: #e8b45a; }
+.status-chip.stale { color: #e8b45a; }
+.status-chip.stale::before { background: #e8b45a; }
+.badge.warn { color: #e8b45a; border-color: rgba(232, 180, 90, .4); }
+.pdot.missing { background: #e8b45a; }
+
+/* ── 顶部横幅（警示语义统一 #e8b45a） ───────────────────────── */
+.notice-warning { border-bottom-color: rgba(232, 180, 90, .45); background: rgba(232, 180, 90, .1); color: #e8b45a; }
+.draft-banner { border-bottom: 1px solid rgba(232, 180, 90, .45); background: rgba(232, 180, 90, .1); color: #e8b45a; }
+
+/* ── 时间线 · 拖放提示与分隔条 hover（强调语义 → 薄荷青） ────── */
+.timeline-drop-zone .drop-hint { color: var(--vc-accent, #25d3ac); }
+.resize-handle:hover { background: var(--vc-accent, #25d3ac); }
+.timeline-resize-handle:hover { background: var(--vc-accent, #25d3ac); }
+
+/* ── 多平台导出弹窗 · reframe 分组标题（原金色 → 中性灰） ────── */
+.modal .reframe-heading strong { color: var(--dlg-text-2, #c3c9c9); }
+.modal .reframe-batch-actions h3 { margin: 0 0 5px; color: var(--dlg-text-2, #c3c9c9); }
+.modal .reframe-batch-actions { border-top-color: var(--dlg-line, rgba(255, 255, 255, .07)); }

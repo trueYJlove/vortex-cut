@@ -3772,39 +3772,42 @@ export function TimelinePanel({
             );
           })()}
         </div>
-        {/* B2: 添加转场浮层——点击两片段边界后出现 */}
+        {/* B2: 添加转场浮层——点击两片段边界后出现；样式见 styles.css 万兴喵影弹窗层 */}
         {addTransitionAnchor && (
           <div
             className="add-transition-popover"
             role="dialog"
             aria-label="添加转场"
-            style={{ position: "fixed", inset: 0, zIndex: 30, display: "grid", placeItems: "center", background: "rgba(4,7,8,.55)" }}
             onClick={() => setAddTransitionAnchor(null)}
           >
             <div
               className="add-transition-card"
-              style={{ padding: 16, border: "1px solid #4b585e", background: "#2c2c2c", display: "grid", gap: 10, maxWidth: 420 }}
               onClick={(event) => event.stopPropagation()}
             >
-              <strong style={{ fontSize: 13 }}>在此处添加转场</strong>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {TRANSITION_KINDS.map((kind) => (
-                  <button
-                    key={kind}
-                    style={{ padding: "4px 10px", border: "1px solid #4b585e", background: "transparent", color: "#e6eaec", fontSize: 12, cursor: "pointer" }}
-                    onClick={() => {
-                      void onPatch(
-                        [{ op: "add_transition", after_clip_id: addTransitionAnchor as never, kind, duration_us: 500_000 }],
-                        `添加转场 ${kind}`,
-                      );
-                      setAddTransitionAnchor(null);
-                    }}
-                  >
-                    {kind}
-                  </button>
-                ))}
+              <div className="add-transition-hd">
+                在此处添加转场
+                <button aria-label="关闭添加转场" onClick={() => setAddTransitionAnchor(null)}>✕</button>
               </div>
-              <small style={{ color: "#aeb9bd", fontSize: 11 }}>默认 0.5s，添加后可在属性面板调整时长；仅权威预览渲染转场效果。</small>
+              <div className="add-transition-body">
+                <div className="add-transition-kinds">
+                  {TRANSITION_KINDS.map((kind) => (
+                    <button
+                      key={kind}
+                      className="add-transition-kind"
+                      onClick={() => {
+                        void onPatch(
+                          [{ op: "add_transition", after_clip_id: addTransitionAnchor as never, kind, duration_us: 500_000 }],
+                          `添加转场 ${kind}`,
+                        );
+                        setAddTransitionAnchor(null);
+                      }}
+                    >
+                      {kind}
+                    </button>
+                  ))}
+                </div>
+                <small>默认 0.5s，添加后可在属性面板调整时长；仅权威预览渲染转场效果。</small>
+              </div>
             </div>
           </div>
         )}

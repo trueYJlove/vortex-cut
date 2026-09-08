@@ -561,6 +561,8 @@ function registerIpc(): void {
     if (input?.timeline_revision_id) params.set("timeline_revision_id", input.timeline_revision_id);
     if (input?.output_ratio) params.set("output_ratio", input.output_ratio);
     const query = params.toString();
+    // fetchWithUi 已把业务码以 "[CODE] message" 传入 message；渲染端
+    // SyntheticPreview 据此匹配 PREVIEW_IR_UNSUPPORTED 走友好回退提示。
     return fetchWithUi(`${API_PREFIX}/projects/${asId(input?.project_id ?? "", "project_id")}/preview-ir${query ? `?${query}` : ""}`);
   });
   ipcMain.handle("preview:list", async (_event, input: { project_id: ProjectId; limit?: number; cursor?: string }) => {
@@ -617,7 +619,11 @@ async function fetchWithUi<T = unknown>(path: string, init: RequestInit = {}): P
   try { data = await response.json(); } catch { /* preserve HTTP status for empty responses */ }
   if (!response.ok) {
     const error = isApiErrorResponse(data) ? data.error : undefined;
-    throw new CoreHttpError(response.status, redact(error?.message ?? `Core request failed: ${response.status}`), error?.code ?? statusCode(response.status), error?.trace_id);
+    const code = error?.code ?? statusCode(response.status);
+    // Electron IPC 只把 message 传给渲染端（自定义 .code 属性会被剥离）；
+    // 这里把业务码前缀进 message，渲染端 errorCode() 提取后才能识别
+    // TIMELINE_NOT_FOUND / PREVIEW_IR_UNSUPPORTED 等业务错误。
+    throw new CoreHttpError(response.status, `[${code}] ${redact(error?.message ?? "Core request failed")}`, code, error?.trace_id);
   }
   return data as T;
 }
