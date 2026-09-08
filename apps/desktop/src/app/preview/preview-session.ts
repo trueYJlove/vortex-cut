@@ -1,4 +1,5 @@
 import { throwIfAborted } from "./worker-lifecycle.js";
+import { AudioSourceCache } from "./audio-source-cache.js";
 /** 合成预览会话：持有解码 worker、GL 执行器 worker（OffscreenCanvas）、纹理簿记
  * 与 WebAudio，对外提供 play/pause/seek 与时间/指标回调。
  *
@@ -103,6 +104,11 @@ function shiftedRect(rect: IrContent, shift: { dx: number; dy: number }): IrCont
 
 const clamp = (value: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, value));
 
+/** A02：音频 rig 工厂（create 与 syncAudio 入段共用同一形状）。 */
+function makeAudioRig(speed: number): AudioRig {
+  return { buffer: null, worklet: null, workletBuffer: false, workletActive: false, workletFailed: false, source: null, gain: null, startedAt: 0, startOffset: 0, speed };
+}
+
 export function assertHardwareRenderer(adapter: string): { hardware: boolean; software: boolean } {
   const lowered = adapter.toLowerCase();
   const software = lowered.includes("swiftshader") || lowered.includes("llvmpipe")
@@ -149,8 +155,14 @@ export class PreviewSession {
   /** 变速不变调 worklet 模块是否已装入本 AudioContext（失败 → 全片段 legacy 回退）。 */
   private audioWorkletReady = false;
   private readonly audioRigs = new Map<string, AudioRig>();
+  /** A02 音频源缓存（session 作用域；audioCtx 存在时创建）。 */
+  private audioCache: AudioSourceCache | null = null;
+  /** A02：音频绑定代（replaceIr 换表时 +1；缓存 key 组件之一）。 */
+  private audioCacheBindingGeneration = 1;
   /** 音频漂移硬校正阈值（秒）：WebAudio 自身不漂，只有时钟重锚才触达。 */
   private static readonly AUDIO_REANCHOR_S = 0.08;
+  /** A02 音频预热窗口（微秒）：播放态预取未来 2s 内入窗段；暂停态为 0。 */
+  private static readonly AUDIO_WARMUP_US = 2_000_000;
   /** 自然播放到片尾时回调（UI 复位播放按钮；会话已内部 pause）。 */
   onEnded: (() => void) | null = null;
 
@@ -254,7 +266,9 @@ export class PreviewSession {
       }
       session.rigs.set(input.input_id, rig);
     }
-    // 片段音频：AudioContext + 整段解码（eager 预热，运行中才解码会缺席整段）。
+    // 片段音频：AudioContext + A02 音频源缓存（同素材 single-flight、并发≤2）。
+    // 旧 eager 全段预热已移除：运行中由 syncAudio 有限预热（当前段 + 未来 2s
+    // 入窗段），暂停态仅当前段（A02 止血语义，整段解码仍会发生——见已知限制）。
     if (audioByClip && audioByClip.size && typeof window !== "undefined" && "AudioContext" in window) {
       session.audioCtx = new AudioContext();
       // 变速不变调 worklet 装载（Blob URL；失败静默回退 playbackRate 直调路径）。
@@ -264,10 +278,19 @@ export class PreviewSession {
       } catch { session.audioWorkletReady = false; }
       throwIfAborted(signal);
       if (session.disposed) throw new DOMException("Session disposed", "AbortError");
+      session.audioCache = new AudioSourceCache(
+        (data, cacheSignal) => session.audioCtx!.decodeAudioData(data).finally(() => { void cacheSignal; }),
+        async (ticket, cacheSignal) => {
+          const response = await fetch(ticket, { signal: cacheSignal });
+          if (!response.ok) throw new Error(`audio fetch failed: ${response.status}`);
+          return await response.arrayBuffer();
+        },
+        session.lifetime.signal,
+        1,
+      );
       for (const segment of ir.segments) {
         if (!audioByClip.get(segment.clip_id)?.enabled) continue;
-        session.audioRigs.set(segment.clip_id, { buffer: null, worklet: null, workletBuffer: false, workletActive: false, workletFailed: false, source: null, gain: null, startedAt: 0, startOffset: 0, speed: Math.max(0.25, Math.min(4, segment.speed_milli / 1000)) });
-        void session.ensureAudioBuffer(segment.clip_id, segment.input_id);
+        session.audioRigs.set(segment.clip_id, makeAudioRig(Math.max(0.25, Math.min(4, segment.speed_milli / 1000))));
       }
     }
     throwIfAborted(signal);
@@ -326,11 +349,40 @@ export class PreviewSession {
 
   /** revision 变更的就地 IR 换表：输入集合未变（transform/关键帧/时间编辑）时
    *  保留 worker 与 GL 纹理，仅替换帧表/段表并重呈现（零黑屏，~50ms）。
-   *  输入集合变化（加删素材）返回 false，调用方走整会话重建。 */
+   *  输入集合变化（加删素材）返回 false，调用方走整会话重建。
+   *  A02 音频 rigs 同步：删除移除的 clip；输入/源窗口变化的 clip 重置播放
+   *  位置；未变 clip 保留（worklet 已迁移的 buffer 不回退）。 */
   replaceIr(nextIr: Ir): boolean {
     const sig = (ir: Ir) => JSON.stringify(ir.inputs.map(item => [item.input_id, item.asset_id, item.asset_kind, item.geometry]));
     if (sig(this.ir) !== sig(nextIr)) return false;
+    const segOf = (ir: Ir) => new Map(ir.segments.map(segment => [segment.clip_id, segment] as const));
+    const oldSegs = segOf(this.ir);
     this.ir = nextIr;
+    this.audioCacheBindingGeneration += 1;
+    for (const [clipId, rig] of [...this.audioRigs]) {
+      const next = nextIr.segments.find(segment => segment.clip_id === clipId);
+      if (!next) { // clip 已删除：停声、断开、清理 rig
+        this.stopAudioSource(rig);
+        try { rig.worklet?.disconnect(); } catch { /* 已断开 */ }
+        this.audioRigs.delete(clipId);
+        continue;
+      }
+      const prev = oldSegs.get(clipId);
+      const windowChanged = !prev
+        || prev.input_id !== next.input_id
+        || prev.source_start_us !== next.source_start_us
+        || prev.source_end_us !== next.source_end_us
+        || prev.speed_milli !== next.speed_milli;
+      if (windowChanged) {
+        // 源窗口/输入/变速变化：重置播放位置（buffer 保留可复用，位置模型重建）
+        this.stopAudioSource(rig);
+        rig.startedAt = 0;
+        rig.startOffset = 0;
+        rig.speed = Math.max(0.25, Math.min(4, next.speed_milli / 1000));
+        // buffer 可能来自旧窗口：worklet 路径需重定位（play 消息按新窗口下发），
+        // legacy 路径 buffer 引用不变（解码内容与窗口无关，按 expected 起播）。
+      }
+    }
     this.resetChains();
     this.recomposeSoon();
     return true;
@@ -609,19 +661,25 @@ export class PreviewSession {
     this.lastError = `解码失败 ${inputId}#${srcN}: ${error instanceof Error ? error.message : String(error)}`;
   }
 
-  /** 解码片段素材的整段音频（aivideo:// 票据 → fetch → decodeAudioData）。 */
+  /** 解码片段素材音频（A02：经 session 缓存 single-flight，同素材多 clip 共享
+   *  一次 fetch/decode；失败保留 error 状态，仅显式 retry/票据刷新后重试）。 */
   private async ensureAudioBuffer(clipId: string, inputId: string): Promise<void> {
-    if (!this.audioCtx || this.disposed) return;
+    if (!this.audioCtx || !this.audioCache || this.disposed) return;
     const rig = this.audioRigs.get(clipId);
     if (!rig || rig.buffer || rig.workletBuffer) return;
     const input = this.ir.inputs.find(item => item.input_id === inputId);
-    const ticket = input ? this.tickets?.get(input.asset_id) : undefined;
+    if (!input?.has_audio) return;
+    const ticket = this.tickets?.get(input.asset_id);
     if (!ticket) return;
+    // 缓存 key：素材 + 绑定代 + 采样率（票据字符串不作内容标识）
+    const key = `${input.asset_id}|${this.audioCacheBindingGeneration}|${this.audioCtx.sampleRate}`;
     try {
-      const data = await (await fetch(ticket, { signal: this.lifetime.signal })).arrayBuffer();
-      if (this.disposed || !this.audioCtx) return;
-      const buffer = await this.audioCtx.decodeAudioData(data);
-      if (this.disposed || this.audioRigs.get(clipId) !== rig) return;
+      const buffer = await this.audioCache.acquire(key, ticket, clipId);
+      if (this.disposed || this.audioRigs.get(clipId) !== rig) {
+        this.audioCache?.release(key, clipId);
+        return;
+      }
+      if (rig.workletBuffer) return; // 已被 worklet 路径迁移（同源另一 clip 先行）
       rig.buffer = buffer;
       this.recomposeSoon(); // 解码完成：若片段正活跃，下次 tick 启动音源
     } catch (error) {
@@ -713,16 +771,31 @@ export class PreviewSession {
   private syncAudio(tUs: number): void {
     if (!this.audioByClip || !this.audioCtx) return;
     const active = new Set<string>();
+    /** A02 有限预热窗口：播放态 = 当前段 + 未来 2s 内入窗的段；暂停态仅当前段。 */
+    const warmupHorizonUs = this.playing ? PreviewSession.AUDIO_WARMUP_US : 0;
+    const warmups = new Set<string>();
+    if (warmupHorizonUs > 0) {
+      for (const segment of this.ir.segments) {
+        const cfg = this.audioByClip.get(segment.clip_id);
+        if (!cfg || !cfg.enabled) continue;
+        const startUs = segment.output_start_us ?? segment.timeline_start_us;
+        if (startUs > tUs && startUs <= tUs + warmupHorizonUs) warmups.add(segment.clip_id);
+      }
+    }
     for (const segment of this.ir.segments) {
       const cfg = this.audioByClip.get(segment.clip_id);
       if (!cfg || !cfg.enabled) continue;
       const startUs = segment.output_start_us ?? segment.timeline_start_us;
       const endUs = segment.output_end_us ?? segment.timeline_end_us;
-      if (tUs < startUs || tUs > endUs) continue;
+      if (tUs < startUs || tUs > endUs) {
+        // 未活跃但在预热窗口内：触发一次解码请求（single-flight 去重）
+        if (warmups.has(segment.clip_id)) void this.ensureAudioBuffer(segment.clip_id, segment.input_id);
+        continue;
+      }
       active.add(segment.clip_id);
       const speed = Math.max(0.25, Math.min(4, segment.speed_milli / 1000));
       let rig = this.audioRigs.get(segment.clip_id);
-      if (!rig) { rig = { buffer: null, worklet: null, workletBuffer: false, workletActive: false, workletFailed: false, source: null, gain: null, startedAt: 0, startOffset: 0, speed }; this.audioRigs.set(segment.clip_id, rig); }
+      if (!rig) { rig = makeAudioRig(speed); this.audioRigs.set(segment.clip_id, rig); }
       if (!rig.buffer && !rig.workletBuffer) { void this.ensureAudioBuffer(segment.clip_id, segment.input_id); continue; }
       if (!this.playing) { this.stopAudioSource(rig); continue; }
       const expected = clamp(segment.source_start_us / 1e6 + ((tUs - startUs) / 1e6) * speed, segment.source_start_us / 1e6, segment.source_end_us / 1e6);
@@ -999,6 +1072,8 @@ export class PreviewSession {
     this.audioRigs.clear();
     void this.audioCtx?.close().catch(() => undefined);
     this.audioCtx = null;
+    this.audioCache?.dispose();
+    this.audioCache = null;
     if (this.recomposeRaf) cancelAnimationFrame(this.recomposeRaf);
     this.recomposeRaf = 0;
     for (const rig of [...this.rigs.values()].reverse()) rig.worker?.terminate();
