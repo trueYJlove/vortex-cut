@@ -15,7 +15,7 @@ import { AudioSourceCache } from "./audio-source-cache.js";
  * - seek（暂停态）仍走并行解码后合成，同样经环形/影子槽位 ack，并同步链游标。 */
 import type { CompositorWorkerClient } from "./compositor-worker.js";
 import type { DrawCommand } from "./compositor-worker.worker.js";
-import type { Ir, IrContent, IrFrame } from "./ir.js";
+import type { Ir, IrContent, IrFrame, IrOverlay } from "./ir.js";
 import { editorPerf, allocatePerfSession } from "./perf-metrics.js";
 import { DecodeWorker } from "./decode-worker.js";
 import { VARISPEED_WORKLET_NAME, createVarispeedWorkletUrl } from "./varispeed-worklet.js";
@@ -294,6 +294,7 @@ export class PreviewSession {
       }
     }
     throwIfAborted(signal);
+    session.rebuildPipOverlayIndex(); // A04：手势路径免全帧扫描
     return session;
     } catch (error) { session.dispose(); throw error; }
     finally { signal?.removeEventListener("abort", abort); }
@@ -384,14 +385,31 @@ export class PreviewSession {
       }
     }
     this.resetChains();
+    this.rebuildPipOverlayIndex(); // A04：换表后原子重建索引（不保留旧帧引用）
     this.recomposeSoon();
     return true;
+  }
+
+  /** A04 clipId→overlay 引用表（create/replaceIr 后重建；手势路径免全帧扫描）。
+   *  一次遍历 O(总 overlay)；手势期每 move 只遍历该 clip 的 overlay 列表。 */
+  private pipOverlayIndex: Map<string, IrOverlay[]> = new Map();
+
+  private rebuildPipOverlayIndex(): void {
+    const index = new Map<string, IrOverlay[]>();
+    for (const frame of this.ir.frames) {
+      for (const overlay of frame.overlays) {
+        let list = index.get(overlay.clip_id);
+        if (!list) { list = []; index.set(overlay.clip_id, list); }
+        list.push(overlay);
+      }
+    }
+    this.pipOverlayIndex = index;
   }
 
   /** 画中画中心点就地补丁：直改 IR 帧几何并重呈现（免会话重建，拖拽实时跟随）。
    *  静态 transform 作用于片段全区间——范围内所有含该 overlay 的帧一并更新。 */
   setPipCenter(clipId: string, x: number, y: number): void {
-    const overlay = this.ir.frames.flatMap(frame => frame.overlays).find(item => item.clip_id === clipId);
+    const overlay = this.pipOverlayIndex.get(clipId)?.[0];
     if (!overlay) return;
     const w = this.ir.canvas.width;
     const h = this.ir.canvas.height;
@@ -401,22 +419,29 @@ export class PreviewSession {
   /** 画中画几何就地补丁（缩放手势）：中心点 + 尺寸均为画布像素，作用于片段
    *  全区间帧。move 手势可复用（仅改中心、尺寸取当前值）。 */
   setPipBox(clipId: string, cx: number, cy: number, w: number, h: number): void {
-    for (const frame of this.ir.frames) {
-      for (const overlay of frame.overlays) {
-        if (overlay.clip_id !== clipId) continue;
-        overlay.box = { x: cx - w / 2, y: cy - h / 2, w, h };
-      }
+    for (const overlay of this.pipOverlayIndex.get(clipId) ?? []) {
+      overlay.box = { x: cx - w / 2, y: cy - h / 2, w, h };
     }
     this.recomposeSoon();
   }
 
   /** 画中画旋转就地补丁（旋转手势）：度数作用于片段全区间帧。 */
   setPipRotation(clipId: string, deg: number): void {
-    for (const frame of this.ir.frames) {
-      for (const overlay of frame.overlays) {
-        if (overlay.clip_id !== clipId) continue;
-        overlay.rotation_deg = deg;
-      }
+    for (const overlay of this.pipOverlayIndex.get(clipId) ?? []) {
+      overlay.rotation_deg = deg;
+    }
+    this.recomposeSoon();
+  }
+
+  /** A04 手势几何合并补丁：一次调用同时更新中心/尺寸/旋转（move+rotate 手势
+   *  不再分别走 setPipBox + setPipRotation 两次遍历与两次重呈现调度）。 */
+  setPipGeometry(clipId: string, geometry: { cx: number; cy: number; w: number; h: number; rotation?: number }): void {
+    const overlays = this.pipOverlayIndex.get(clipId);
+    if (!overlays?.length) return;
+    const { cx, cy, w, h, rotation } = geometry;
+    for (const overlay of overlays) {
+      overlay.box = { x: cx - w / 2, y: cy - h / 2, w, h };
+      if (rotation !== undefined) overlay.rotation_deg = rotation;
     }
     this.recomposeSoon();
   }

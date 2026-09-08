@@ -223,7 +223,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
             selectedClipId={selectedClipId ?? null}
             locked={false}
             onSelect={clipId => onSelectClip?.(clipId)}
-            onLiveGeometry={(clipId, geometry) => { live.setPipBox(clipId, geometry.cx, geometry.cy, geometry.w, geometry.h); live.setPipRotation(clipId, geometry.rotate); }}
+            onLiveGeometry={(clipId, geometry) => { live.setPipGeometry(clipId, { cx: geometry.cx, cy: geometry.cy, w: geometry.w, h: geometry.h, rotation: geometry.rotate }); }}
             onCommitTransform={(clipId, transform) => onCommitPipTransform?.(clipId, transform)}
             onDraftMask={(clipId, mask) => onDraftPipMask?.(clipId, mask)}
             onCommitMask={(clipId, mask) => onCommitPipMask?.(clipId, mask)}
