@@ -1,3 +1,4 @@
+import { throwIfAborted, workerReady } from "./worker-lifecycle.js";
 /** 合成预览 GL 执行器客户端：持有 transferControlToOffscreen 后的 worker 生命周期，
  * 提供类型化 RPC（upload 带 ack、compose 顺序投递、resize/readback 往返）。
  * 会话侧只与本类对话；GL 状态全部在 compositor-worker.worker.ts。 */
@@ -34,7 +35,13 @@ export class CompositorWorkerClient {
     // jsdom 无此 API → 抛错（合成预览回退路径，测试环境确定性）。
     this.canvas = canvas;
     this.worker = new Worker(new URL("./compositor-worker.worker.ts", import.meta.url), { type: "module" });
-    this.worker.addEventListener("message", (event: MessageEvent<WorkerResponse>) => {
+    this.worker.addEventListener("message", this.onMessage);
+    this.worker.addEventListener("error", this.onError);
+    this.worker.addEventListener("messageerror", this.onMessageError);
+  }
+
+  private readonly onMessage = (event: MessageEvent<WorkerResponse>): void => {
+      if (this.disposed) return;
       const data = event.data;
       switch (data.type) {
         case "submitted": {
@@ -83,31 +90,20 @@ export class CompositorWorkerClient {
           break;
         }
       }
-    });
-    this.worker.addEventListener("error", event => {
-      const pending = this.pending.get(0);
-      this.pending.delete(0);
-      pending?.reject(new Error(event.message || "compositor worker error"));
-    });
-  }
+  };
+  private readonly onError = (event: ErrorEvent): void => { this.terminate(new Error(event.message || "compositor worker error")); };
+  private readonly onMessageError = (): void => { this.terminate(new Error("compositor worker message error")); };
 
   /** 创建 worker 并完成 init 握手；worker 侧 WebGL2 不可用/初始化失败 → 抛错。
    *  transferControlToOffscreen 每元素仅可一次：canvas 由会话新建并随会话销毁。 */
-  static async create(canvas: HTMLCanvasElement, init: CompositorClientInit): Promise<CompositorWorkerClient> {
+  static async create(canvas: HTMLCanvasElement, init: CompositorClientInit, signal?: AbortSignal): Promise<CompositorWorkerClient> {
+    throwIfAborted(signal);
     const client = new CompositorWorkerClient(canvas);
-    const ready = new Promise<GpuInfo>((resolve, reject) => {
-      const onMessage = (event: MessageEvent<WorkerResponse>): void => {
-        if (event.data.type === "ready") { resolve({ adapter: event.data.adapter, vendor: event.data.vendor }); cleanup(); }
-        else if (event.data.type === "initError") { reject(new Error(event.data.message)); cleanup(); }
-      };
-      const onError = (event: ErrorEvent): void => { reject(new Error(event.message || "compositor worker error")); cleanup(); };
-      const cleanup = (): void => {
-        client.worker.removeEventListener("message", onMessage);
-        client.worker.removeEventListener("error", onError);
-      };
-      client.worker.addEventListener("message", onMessage);
-      client.worker.addEventListener("error", onError);
-    });
+    try {
+      const info = await workerReady<GpuInfo>(client.worker, data => {
+        if (data.type === "initError") throw new Error(data.message);
+        return data.type === "ready" ? { adapter: data.adapter, vendor: data.vendor } : undefined;
+      }, () => {
     const offscreen = canvas.transferControlToOffscreen();
     const request: WorkerRequest = {
       type: "init",
@@ -119,35 +115,43 @@ export class CompositorWorkerClient {
       captionStyles: init.captionStyles,
     };
     client.worker.postMessage(request, [offscreen]);
-    client.gpuInfo = await ready;
-    return client;
+      }, signal);
+      throwIfAborted(signal);
+      client.gpuInfo = info;
+      return client;
+    } catch (error) { client.terminate(); throw error; }
   }
 
   /** 上传解码帧到输入的环形槽位（frame transfer，零拷贝）；解析 = worker 完成上传。 */
   upload(inputId: string, slot: number, srcN: number, frame: VideoFrame): Promise<void> {
+    if (this.disposed) { frame.close(); return Promise.reject(new Error("compositor worker disposed")); }
     const seq = this.nextSeq++;
     const request: WorkerRequest = { type: "upload", inputId, slot, srcN, frame, seq };
     return new Promise<void>((resolve, reject) => {
       this.pending.set(seq, { resolve: resolve as never, reject });
-      this.worker.postMessage(request, [frame]);
+      try { this.worker.postMessage(request, [frame]); }
+      catch (error) { this.pending.delete(seq); frame.close(); reject(error); }
     });
   }
 
   /** 上传转场共享输入的第二帧（影子槽）。 */
   uploadShadow(inputId: string, srcN: number, frame: VideoFrame): Promise<void> {
+    if (this.disposed) { frame.close(); return Promise.reject(new Error("compositor worker disposed")); }
     const seq = this.nextSeq++;
     const request: WorkerRequest = { type: "uploadShadow", inputId, srcN, frame, seq };
     return new Promise<void>((resolve, reject) => {
       this.pending.set(seq, { resolve: resolve as never, reject });
-      this.worker.postMessage(request, [frame]);
+      try { this.worker.postMessage(request, [frame]); }
+      catch (error) { this.pending.delete(seq); frame.close(); reject(error); }
     });
   }
 
   /** 静图一次上传（ImageBitmap transfer；worker 侧 RGBA 纹理全程复用）。 */
   uploadImage(inputId: string, bitmap: ImageBitmap): void {
-    if (this.disposed) return;
+    if (this.disposed) { bitmap.close(); return; }
     const request: WorkerRequest = { type: "uploadImage", inputId, bitmap };
-    this.worker.postMessage(request, [bitmap]);
+    try { this.worker.postMessage(request, [bitmap]); }
+    catch (error) { bitmap.close(); throw error; }
   }
 
   /** 下发绘制命令列表（顺序投递；worker 内同步执行，呈现按消息序保证）。 */
@@ -179,19 +183,26 @@ export class CompositorWorkerClient {
 
   /** 全画布 PNG 回读（worker convertToBlob → ArrayBuffer transfer 回主线程）。 */
   readback(): Promise<ArrayBuffer> {
+    if (this.disposed) return Promise.reject(new Error("compositor worker disposed"));
     const seq = this.nextSeq++;
     const request: WorkerRequest = { type: "readback", seq };
     return new Promise<ArrayBuffer>((resolve, reject) => {
       this.pending.set(seq, { resolve: resolve as never, reject });
-      this.worker.postMessage(request);
+      try { this.worker.postMessage(request); }
+      catch (error) { this.pending.delete(seq); reject(error); }
     });
   }
 
-  terminate(): void {
+  terminate(reason = new Error("compositor worker disposed")): void {
+    if (this.disposed) return;
     this.disposed = true;
-    for (const [, pending] of this.pending) pending.reject(new Error("compositor worker disposed"));
+    for (const [, pending] of this.pending) pending.reject(reason);
     this.pending.clear();
     this.submissions.clear();
+    this.onContextLost = null;
+    this.worker.removeEventListener("message", this.onMessage);
+    this.worker.removeEventListener("error", this.onError);
+    this.worker.removeEventListener("messageerror", this.onMessageError);
     this.worker.terminate();
   }
 }

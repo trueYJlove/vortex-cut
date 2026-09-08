@@ -49,6 +49,8 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
   const { projectId, revisionId, mediaUrls, audioByClip, pipClips, selectedClipId, onSelectClip, onCommitPipTransform, onDraftPipMask, onCommitPipMask, onGesturePause, onGestureResume, playing, playheadUs, onTimeUs, onEnded, onFallback, outputRatio } = props;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const sessionRef = useRef<PreviewSession | null>(null);
+  const generationRef = useRef(0);
+  const sessionProjectRef = useRef<string | null>(null);
   const lastReportedUs = useRef<number>(playheadUs);
   const lastReportWall = useRef<number>(0);
   // 预览框观察器：组件级单例（吸收路径早退不销毁，避免观察器泄漏）
@@ -71,12 +73,19 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
 
   // IR 加载 + 会话创建（revision 变更时重建；手势提交的变更被吸收、会话保活）。
   useEffect(() => {
-    let cancelled = false;
+    const generation = ++generationRef.current;
+    const controller = new AbortController();
+    const stale = () => controller.signal.aborted || generation !== generationRef.current;
+    let creating: PreviewSession | null = null;
+    let ready = false;
     const sessionRefLocal = sessionRef;
     boxObserverRef.current?.observe(containerRef.current ?? document.body);
     // 同输入 revision 变更（transform/关键帧/时间编辑）→ 会话就地换 IR：
     // worker/GL 全保留，零黑屏。输入变化或无会话 → 走完整重建。
-    const existing = sessionRefLocal.current;
+    let existing = sessionRefLocal.current;
+    if (sessionProjectRef.current !== projectId) {
+      existing?.dispose(); existing = null; sessionRefLocal.current = null;
+    }
     setLoad({ status: "loading", message: "正在加载合成预览" });
     (async () => {
       try {
@@ -87,7 +96,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
         });
         const ir: Ir = parseIr(payload.ir as unknown as string);
         const container = containerRef.current;
-        if (!container || cancelled) return;
+        if (!container || stale()) return;
         if (existing && existing.replaceIr(ir)) {
           // 就地换表成功：无需触碰 worker/GL/音频，重呈现由 replaceIr 驱动
           setLoad({ status: "ready", message: "" });
@@ -97,8 +106,9 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
         sessionRefLocal.current = null;
         // 画布元素由会话自建（transferControlToOffscreen 每元素仅一次），
         // 后备缓冲随预览框（contain 居中，见 session.resize）；初始以 IR 画布尺寸起底
-        const session = await PreviewSession.create(container, ir, mediaUrls, audioByClip);
-        if (cancelled) { session.dispose(); return; }
+        const session = await PreviewSession.create(container, ir, mediaUrls, audioByClip, controller.signal);
+        creating = session;
+        if (stale()) { session.dispose(); return; }
         session.onTimeUs = (us: number) => {
           lastReportedUs.current = us;
           // 播放头上报节流至 10Hz（与交互预览时钟同频）：App 组件树重渲是主线程
@@ -114,15 +124,25 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
           onEnded?.();
         };
         sessionRefLocal.current = session;
+        sessionProjectRef.current = projectId;
         boxObserverRef.current?.observe(container);
         const fontUrl = await window.desktop.captionFontUrl();
-        const fontBuffer = await (await fetch(fontUrl)).arrayBuffer();
+        if (stale()) return;
+        const fontResponse = await fetch(fontUrl, { signal: controller.signal });
+        if (!fontResponse.ok) throw new Error("caption font fetch failed");
+        const fontBuffer = await fontResponse.arrayBuffer();
+        if (stale()) return;
         await session.loadCaptionFont(fontBuffer);
+        if (stale()) return;
         await session.seekToFrame(Math.max(0, Math.floor((playheadUs / 1e6) * ir.canvas.fps)));
+        if (stale()) return;
+        ready = true;
         setLoad({ status: "ready", message: "" });
         if (playing) session.play();
       } catch (error) {
-        if (cancelled) return;
+        creating?.dispose();
+        if (sessionRefLocal.current === creating) sessionRefLocal.current = null;
+        if (stale()) return;
         const message = error instanceof Error ? error.message : String(error);
         const code = /PREVIEW_IR_UNSUPPORTED/.test(message) ? "PREVIEW_IR_UNSUPPORTED" : null;
         setLoad({ status: "error", message });
@@ -133,7 +153,11 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
       // 仅标记失效：会话销毁由卸载 effect 或下一次非吸收重建的 body 负责
       //（React 在新 body 前必然先跑本 cleanup——在此 dispose 会使"吸收保活"
       // 失效，拖拽提交即黑屏）。
-      cancelled = true;
+      controller.abort();
+      if (!ready && creating) {
+        creating.dispose();
+        if (sessionRefLocal.current === creating) sessionRefLocal.current = null;
+      }
     };
     // mediaUrls 以内容为准（票据变更即重建）；playhead 仅挂载时取初值。
     // eslint-disable-next-line react-hooks/exhaustive-deps

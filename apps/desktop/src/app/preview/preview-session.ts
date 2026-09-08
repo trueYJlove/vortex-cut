@@ -1,3 +1,4 @@
+import { throwIfAborted } from "./worker-lifecycle.js";
 /** 合成预览会话：持有解码 worker、GL 执行器 worker（OffscreenCanvas）、纹理簿记
  * 与 WebAudio，对外提供 play/pause/seek 与时间/指标回调。
  *
@@ -175,6 +176,7 @@ export class PreviewSession {
   ir: Ir;
   private readonly perfId = allocatePerfSession();
   private perfRequest = 0;
+  private readonly lifetime = new AbortController();
   private constructor(ir: Ir) {
     editorPerf.record("session_open", 0, this.perfId);
     this.ir = ir;
@@ -182,8 +184,12 @@ export class PreviewSession {
 
   static async create(container: HTMLElement, ir: Ir,
                       tickets: Map<string, string>,
-                      audioByClip?: Map<string, SegmentAudioConfig>): Promise<PreviewSession> {
+                      audioByClip?: Map<string, SegmentAudioConfig>, signal?: AbortSignal): Promise<PreviewSession> {
+    throwIfAborted(signal);
     const session = new PreviewSession(ir);
+    const abort = () => session.dispose();
+    signal?.addEventListener("abort", abort, { once: true });
+    try {
     session.container = container;
     session.tickets = tickets;
     session.audioByClip = audioByClip ?? null;
@@ -196,6 +202,7 @@ export class PreviewSession {
     container.appendChild(canvas);
     session.canvasEl = canvas;
     const { CompositorWorkerClient } = await import("./compositor-worker.js");
+    throwIfAborted(signal);
     const client = await CompositorWorkerClient.create(canvas, {
       inputs: ir.inputs.filter(input => input.asset_kind !== "audio").map(input => ({
         inputId: input.input_id,
@@ -207,7 +214,8 @@ export class PreviewSession {
       canvasWidth: ir.canvas.width,
       canvasHeight: ir.canvas.height,
       captionStyles: ir.caption_styles,
-    });
+    }, signal);
+    if (session.disposed || signal?.aborted) { client.terminate(); throwIfAborted(signal); throw new Error("session disposed"); }
     session.compositor = client;
     client.perfSession = session.perfId;
     client.onContextLost = () => {
@@ -234,17 +242,15 @@ export class PreviewSession {
       };
       if (rig.kind === "image") {
         // 静图：解码为 ImageBitmap → transfer 到 worker 一次上传，src_n 恒 0 全程复用
-        const image = new Image();
-        image.crossOrigin = "anonymous";
-        await new Promise<void>((resolve, reject) => {
-          image.onload = () => resolve();
-          image.onerror = () => reject(new Error(`image load failed: ${input.asset_id}`));
-          image.src = ticket;
-        });
-        const bitmap = await createImageBitmap(image);
+        const response = await fetch(ticket, { signal: session.lifetime.signal });
+        if (!response.ok) throw new Error("image load failed");
+        const bitmap = await createImageBitmap(await response.blob());
+        if (session.disposed) { bitmap.close(); throw new DOMException("Session disposed", "AbortError"); }
         client.uploadImage(input.input_id, bitmap);
       } else {
-        rig.worker = await DecodeWorker.create(ticket);
+        const worker = await DecodeWorker.create(ticket, signal);
+        if (session.disposed || signal?.aborted) { worker.terminate(); throw new DOMException("Session disposed", "AbortError"); }
+        rig.worker = worker;
       }
       session.rigs.set(input.input_id, rig);
     }
@@ -256,13 +262,18 @@ export class PreviewSession {
         await session.audioCtx.audioWorklet.addModule(createVarispeedWorkletUrl());
         session.audioWorkletReady = true;
       } catch { session.audioWorkletReady = false; }
+      throwIfAborted(signal);
+      if (session.disposed) throw new DOMException("Session disposed", "AbortError");
       for (const segment of ir.segments) {
         if (!audioByClip.get(segment.clip_id)?.enabled) continue;
         session.audioRigs.set(segment.clip_id, { buffer: null, worklet: null, workletBuffer: false, workletActive: false, workletFailed: false, source: null, gain: null, startedAt: 0, startOffset: 0, speed: Math.max(0.25, Math.min(4, segment.speed_milli / 1000)) });
         void session.ensureAudioBuffer(segment.clip_id, segment.input_id);
       }
     }
+    throwIfAborted(signal);
     return session;
+    } catch (error) { session.dispose(); throw error; }
+    finally { signal?.removeEventListener("abort", abort); }
   }
 
   get canvas(): HTMLCanvasElement | null {
@@ -425,7 +436,7 @@ export class PreviewSession {
     rig.ringSeq += 1;
     const epoch = this.seekEpoch;
     const task = async (): Promise<void> => {
-      if (epoch !== this.seekEpoch) { this.skippedUploads += 1; return; }
+      if (this.disposed || epoch !== this.seekEpoch) { this.skippedUploads += 1; return; }
       const decodeStart = performance.now();
       const perfRequest = ++this.perfRequest;
       const perfInput = editorPerf.enabled ? this.ir.inputs.findIndex(item => item.input_id === inputId) : -1;
@@ -442,6 +453,7 @@ export class PreviewSession {
       if (epoch !== this.seekEpoch) { this.skippedUploads += 1; decoded.close(); return; }
       const uploadStart = performance.now();
       await this.compositor!.upload(inputId, slotIndex, srcN, decoded);
+      if (this.disposed || epoch !== this.seekEpoch) return;
       this.uploadTimes.push(performance.now() - uploadStart);
       editorPerf.record("upload", performance.now() - uploadStart, this.perfId, perfRequest, epoch, srcN, perfInput);
       if (this.uploadTimes.length > 600) this.uploadTimes.splice(0, this.uploadTimes.length - 600);
@@ -471,6 +483,7 @@ export class PreviewSession {
         if (this.decodeTimes.length > 600) this.decodeTimes.splice(0, this.decodeTimes.length - 600);
         if (epoch !== this.seekEpoch) { decoded.close(); return; }
         await this.compositor!.uploadShadow(inputId, srcN, decoded);
+        if (this.disposed || epoch !== this.seekEpoch) return;
         rig.shadowUploaded = srcN;
         rig.fed = srcN;
       } finally {
@@ -605,9 +618,11 @@ export class PreviewSession {
     const ticket = input ? this.tickets?.get(input.asset_id) : undefined;
     if (!ticket) return;
     try {
-      const data = await (await fetch(ticket)).arrayBuffer();
+      const data = await (await fetch(ticket, { signal: this.lifetime.signal })).arrayBuffer();
       if (this.disposed || !this.audioCtx) return;
-      rig.buffer = await this.audioCtx.decodeAudioData(data);
+      const buffer = await this.audioCtx.decodeAudioData(data);
+      if (this.disposed || this.audioRigs.get(clipId) !== rig) return;
+      rig.buffer = buffer;
       this.recomposeSoon(); // 解码完成：若片段正活跃，下次 tick 启动音源
     } catch (error) {
       if (!this.disposed) this.lastError = `音频解码失败 ${clipId}: ${error instanceof Error ? error.message : String(error)}`;
@@ -969,8 +984,13 @@ export class PreviewSession {
   }
 
   dispose(): void {
-    if (!this.disposed) editorPerf.record("session_close", 0, this.perfId);
+    if (this.disposed) return;
+    editorPerf.record("session_close", 0, this.perfId);
     this.disposed = true;
+    this.seekEpoch++;
+    this.lifetime.abort();
+    this.onTimeUs = null;
+    this.onEnded = null;
     this.pause();
     for (const [, rig] of this.audioRigs) {
       this.stopAudioSource(rig);
@@ -981,10 +1001,11 @@ export class PreviewSession {
     this.audioCtx = null;
     if (this.recomposeRaf) cancelAnimationFrame(this.recomposeRaf);
     this.recomposeRaf = 0;
+    for (const rig of [...this.rigs.values()].reverse()) rig.worker?.terminate();
+    this.rigs.clear();
     this.compositor?.terminate();
     this.compositor = null;
-    for (const [, rig] of this.rigs) rig.worker?.terminate();
-    this.rigs.clear();
+    for (const resolve of this.contextLostResolvers.splice(0)) resolve();
     this.canvasEl?.remove();
     this.canvasEl = null;
   }
