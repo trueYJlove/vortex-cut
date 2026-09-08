@@ -6,7 +6,11 @@
  * openh264），仅需 stsd/stts/stss/stsc/stsz/stco/co64/ctts 八张表；
  * ctts 仍按规范解析以兼容生产 proxy 产物。
  * 长帧缓存模式：LRU 缓存已解码 VideoFrame（close() 纪律 + 内存记账）。
+ * A03：demux 后构建 sample-index（PTS 排序索引 + 关键帧二分），seek 定位
+ * 从 O(N) 线性扫描改二分——解码喂包顺序不变（索引只改查找）。
  */
+
+import { buildSampleIndex, keyframeAtOrBefore, locateByPts, type SampleIndex } from "./sample-index.js";
 
 interface Sample {
   offset: number;
@@ -216,6 +220,7 @@ function demux(bytes: ArrayBuffer): DemuxResult {
 }
 
 let demuxResult: DemuxResult | null = null;
+let sampleIndex: SampleIndex | null = null;
 let dataBytes: Uint8Array | null = null;
 let decoder: VideoDecoder | null = null;
 let decoderConfig: VideoDecoderConfig | null = null;
@@ -236,6 +241,8 @@ interface DecodeRequest { id: number; frameN: number; targetUs: number; sampleIn
 const decodeQueue: DecodeRequest[] = [];
 let activeRequest: DecodeRequest | null = null;
 let fedIndex = -1; // 解码器已馈送的最后一个采样索引（热态顺序解码游标）
+/** A03 顺播定位游标：上次 locateByPts 命中的排序位置（目标单调时局部推进）。 */
+let ptsCursor = -1;
 let samplesFed = 0;
 let fromKeyframe = -1;
 
@@ -322,6 +329,8 @@ async function init(url: string, cacheFrames: number): Promise<void> {
   if (!response.ok) throw new Error(`fetch failed: ${response.status}`);
   dataBytes = new Uint8Array(await response.arrayBuffer());
   demuxResult = demux(dataBytes.buffer);
+  sampleIndex = buildSampleIndex(demuxResult.samples, demuxResult.timescale); // A03：一次性索引
+  ptsCursor = -1;
   cacheEnabled = cacheFrames > 0;
   cacheCap = cacheFrames;
   const config: VideoDecoderConfig = {
@@ -385,7 +394,7 @@ function pumpQueue(): void {
 }
 
 function decodeSamples(request: DecodeRequest): void {
-  if (!demuxResult || !decoder || !dataBytes) throw new Error("worker not initialized");
+  if (!demuxResult || !decoder || !dataBytes || !sampleIndex) throw new Error("worker not initialized");
   const { samples, timescale } = demuxResult;
   const target = request.sampleIndex;
   // 热态顺序解码（M3-2 播放架构）：目标在已馈送位置之前（含跨采样跳帧，如
@@ -399,14 +408,16 @@ function decodeSamples(request: DecodeRequest): void {
   // src~303 起确定性花屏，两次运行 PNG 逐字节一致；冷启路径同位置干净）。
   let sequential = fedIndex >= 0 && target > fedIndex;
   if (sequential) {
-    for (let index = fedIndex + 1; index <= target; index++) {
-      if (samples[index]!.sync) { sequential = false; break; }
-    }
+    // 跨关键帧检查：目标之后的首个关键帧位置二分（≤ target 的最大关键帧
+    // 与 ≤ fedIndex 的最大关键帧相同 → 区间无关键帧）
+    const keyBeforeFed = keyframeAtOrBefore(sampleIndex, fedIndex);
+    const keyBeforeTarget = keyframeAtOrBefore(sampleIndex, target);
+    sequential = keyBeforeTarget === keyBeforeFed;
   }
   let startSample = target;
   if (!sequential) {
-    startSample = target;
-    while (startSample > 0 && !samples[startSample]!.sync) startSample -= 1; // 回退最近关键帧
+    // A03：关键帧回退二分（原逐样本线性回退，长 GOP 深 seek O(GOP)）
+    startSample = keyframeAtOrBefore(sampleIndex, target);
     releaseGopAnchor();
     drainIntermediateRing();
     // 整例重建：reset() 无法清零长解码历史在 D3D11 会话内的残留状态
@@ -436,20 +447,19 @@ function decodeSamples(request: DecodeRequest): void {
 }
 
 function decodeFrame(id: number, frameN: number, fps: number): void {
-  if (!demuxResult || !decoder || !dataBytes) throw new Error("worker not initialized");
-  const { samples, timescale } = demuxResult;
+  if (!demuxResult || !decoder || !dataBytes || !sampleIndex) throw new Error("worker not initialized");
   const targetUs = (frameN / fps) * 1e6;
-  // 找 PTS 最接近目标的采样（PTS = dts + ctsOffset）：取最小 |pts−target|，
-  // 避免容差窗口命中前一帧（实测曾致合成内容系统性早一帧）。
-  let target = -1;
-  let bestDiff = Number.POSITIVE_INFINITY;
-  for (let index = 0; index < samples.length; index++) {
-    const ptsUs = ((samples[index]!.dts + samples[index]!.ctsOffset) / timescale) * 1e6;
-    const diff = Math.abs(ptsUs - targetUs);
-    if (diff < bestDiff) { bestDiff = diff; target = index; }
-    if (ptsUs > targetUs + 100_000) break;
-  }
+  // A03：PTS 定位走排序索引（二分/游标推进），替代 O(N) 线性扫描——
+  // 旧实现在 ptsUs > targetUs + 100ms 处提前 break，B 帧非单调 CTS 流会
+  // 漏掉更优解；索引路径与完整扫描 oracle 逐点一致（见 sample-index 测试）。
+  const located = locateByPts(sampleIndex, targetUs, ptsCursor);
+  const target = located.sample;
+  const bestDiff = located.diffUs;
   if (target < 0 || bestDiff > 33_334) throw new Error(`no sample for frame ${frameN} (best diff ${bestDiff}us)`);
+  // 游标推进：命中后记录其排序位置（单调目标走 O(1) 局部推进）
+  ptsCursor = sampleIndex.sortedPtsUs.length > 0
+    ? binarySearchPos(sampleIndex, sampleIndex.ptsUs[target]!)
+    : -1;
   // 缓存命中先行（不触碰解码器状态）
   if (cacheEnabled && cache.has(target)) {
     cacheHits += 1;
@@ -460,6 +470,19 @@ function decodeFrame(id: number, frameN: number, fps: number): void {
   cacheMisses += cacheEnabled ? 1 : 0;
   decodeQueue.push({ id, frameN, targetUs, sampleIndex: target });
   pumpQueue();
+}
+
+/** 原始 PTS → 排序位置（游标更新用；二分）。 */
+function binarySearchPos(index: SampleIndex, ptsUs: number): number {
+  const sorted = index.sortedPtsUs;
+  let lo = 0;
+  let hi = sorted.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (sorted[mid]! < ptsUs) lo = mid + 1;
+    else hi = mid;
+  }
+  return Math.min(lo, sorted.length - 1);
 }
 
 self.onmessage = (event: MessageEvent) => {
