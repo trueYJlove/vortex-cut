@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .performance import measured
 from .database_v13 import V13_SQL
 from .database_v14 import V14_SQL
 from .database_v15 import V15_SQL
@@ -1217,6 +1218,7 @@ def json_loads(value: str) -> Any:
     return json.loads(value)
 
 
+@measured("hash")
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as source:

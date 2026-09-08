@@ -14,6 +14,7 @@
 import type { CompositorWorkerClient } from "./compositor-worker.js";
 import type { DrawCommand } from "./compositor-worker.worker.js";
 import type { Ir, IrContent, IrFrame } from "./ir.js";
+import { editorPerf, allocatePerfSession } from "./perf-metrics.js";
 import { DecodeWorker } from "./decode-worker.js";
 import { VARISPEED_WORKLET_NAME, createVarispeedWorkletUrl } from "./varispeed-worklet.js";
 
@@ -172,7 +173,10 @@ export class PreviewSession {
   private static readonly BACKSCAN = 15;
 
   ir: Ir;
+  private readonly perfId = allocatePerfSession();
+  private perfRequest = 0;
   private constructor(ir: Ir) {
+    editorPerf.record("session_open", 0, this.perfId);
     this.ir = ir;
   }
 
@@ -205,6 +209,7 @@ export class PreviewSession {
       captionStyles: ir.caption_styles,
     });
     session.compositor = client;
+    client.perfSession = session.perfId;
     client.onContextLost = () => {
       for (const resolve of session.contextLostResolvers.splice(0)) resolve();
     };
@@ -422,11 +427,14 @@ export class PreviewSession {
     const task = async (): Promise<void> => {
       if (epoch !== this.seekEpoch) { this.skippedUploads += 1; return; }
       const decodeStart = performance.now();
+      const perfRequest = ++this.perfRequest;
+      const perfInput = editorPerf.enabled ? this.ir.inputs.findIndex(item => item.input_id === inputId) : -1;
       this.decodeInFlight += 1;
       let decoded: VideoFrame;
       try {
         decoded = await rig.worker!.decode(srcN, this.ir.canvas.fps);
         this.decodeTimes.push(performance.now() - decodeStart);
+        editorPerf.record("decode", performance.now() - decodeStart, this.perfId, perfRequest, epoch, srcN, perfInput);
         if (this.decodeTimes.length > 600) this.decodeTimes.splice(0, this.decodeTimes.length - 600);
       } finally {
         this.decodeInFlight -= 1;
@@ -435,6 +443,7 @@ export class PreviewSession {
       const uploadStart = performance.now();
       await this.compositor!.upload(inputId, slotIndex, srcN, decoded);
       this.uploadTimes.push(performance.now() - uploadStart);
+      editorPerf.record("upload", performance.now() - uploadStart, this.perfId, perfRequest, epoch, srcN, perfInput);
       if (this.uploadTimes.length > 600) this.uploadTimes.splice(0, this.uploadTimes.length - 600);
       const slot = rig.ring[slotIndex] ??= { srcN: -1 };
       slot.srcN = srcN; // worker 上传 ack 后才可被合成/就绪判定看见
@@ -452,10 +461,13 @@ export class PreviewSession {
     const task = async (): Promise<void> => {
       if (epoch !== this.seekEpoch) return;
       const decodeStart = performance.now();
+      const perfRequest = ++this.perfRequest;
+      const perfInput = editorPerf.enabled ? this.ir.inputs.findIndex(item => item.input_id === inputId) : -1;
       this.decodeInFlight += 1;
       try {
         const decoded = await rig.worker!.decode(srcN, this.ir.canvas.fps);
         this.decodeTimes.push(performance.now() - decodeStart);
+        editorPerf.record("decode", performance.now() - decodeStart, this.perfId, perfRequest, epoch, srcN, perfInput);
         if (this.decodeTimes.length > 600) this.decodeTimes.splice(0, this.decodeTimes.length - 600);
         if (epoch !== this.seekEpoch) { decoded.close(); return; }
         await this.compositor!.uploadShadow(inputId, srcN, decoded);
@@ -787,7 +799,7 @@ export class PreviewSession {
       }).filter((item): item is { caption_id: string; text: string; preset_id: string } => item !== null);
       cmds.push({ op: "captions", items });
     }
-    compositor.compose(cmds);
+    compositor.compose(cmds, this.seekEpoch, frame.n);
   }
 
   /**
@@ -828,6 +840,7 @@ export class PreviewSession {
     await Promise.all(requests);
     if (epoch !== this.seekEpoch) return -1; // 已被更新的 seek 取代
     this.lastSeekMs = performance.now() - now;
+    editorPerf.record("seek", this.lastSeekMs, this.perfId, epoch, epoch, index);
     if (this.frameReady(frame)) this.compose(frame);
     this.onTimeUs?.(frame.t_us);
     // 暂停态预热预读链：预解码后续 LEAD 帧——再按播放即有热跑道
@@ -891,6 +904,7 @@ export class PreviewSession {
       // 饥饿护栏：落后过多 → 重锚时钟（播放按解码吞吐放慢），而不是让目标
       // 无限狂奔、丢帧按 tick 线性堆积（旧实现冻结+丢帧 404 的直接根源）。
       if (target - this.currentFrame > PreviewSession.LAG_REANCHOR) {
+        editorPerf.record("reanchor", 0, this.perfId, 0, this.seekEpoch, this.currentFrame);
         this.anchorFrame = this.currentFrame;
         this.anchorWall = now;
       } else if (target - this.currentFrame > 1 && target > this.currentFrame) {
@@ -955,6 +969,7 @@ export class PreviewSession {
   }
 
   dispose(): void {
+    if (!this.disposed) editorPerf.record("session_close", 0, this.perfId);
     this.disposed = true;
     this.pause();
     for (const [, rig] of this.audioRigs) {

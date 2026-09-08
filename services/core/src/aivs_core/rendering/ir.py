@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..performance import measured
 from ..projects import DomainError
 
 FPS = 30
@@ -181,6 +182,7 @@ def _anchor_of(regions: list[dict[str, Any]], blend_region: dict[str, Any]) -> d
     raise _unsupported("转场锚点段缺失")
 
 
+@measured("ir_project")
 def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
                        caption_styles: dict[str, Any] | None = None) -> dict[str, Any]:
     _validate_whitelist(plan)

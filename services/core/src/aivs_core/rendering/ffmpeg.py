@@ -6,6 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from ..performance import measured
 from ..media.process import run_process
 from ..media.windows_job import WindowsKillJob
 from ..projects import DomainError
@@ -809,6 +810,7 @@ def _pip_overlay_chain(
 
 
 
+@measured("encode")
 async def run_timeline_render(
     ffmpeg: Path,
     args: list[str],
@@ -899,6 +901,7 @@ async def terminate_process_tree(process: asyncio.subprocess.Process) -> None:
         await process.wait()
 
 
+@measured("validate_decode")
 async def decode_validate(ffmpeg: Path, path: Path) -> None:
     result = await run_process(
         ffmpeg,

@@ -1,3 +1,4 @@
+import { editorPerf } from "../preview/perf-metrics.js";
 /**
  * Timeline — Canvas + DOM hybrid timeline component.
  *
@@ -1980,6 +1981,7 @@ export function TimelinePanel({
     canvas.style.height = `${canvasHeight}px`;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+    editorPerf.record("timeline_draw");
     drawTimeline(
       ctx,
       canvasSize.width,

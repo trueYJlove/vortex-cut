@@ -1,6 +1,7 @@
 /** 合成预览 GL 执行器客户端：持有 transferControlToOffscreen 后的 worker 生命周期，
  * 提供类型化 RPC（upload 带 ack、compose 顺序投递、resize/readback 往返）。
  * 会话侧只与本类对话；GL 状态全部在 compositor-worker.worker.ts。 */
+import { editorPerf } from "./perf-metrics.js";
 import type { DrawCommand, WorkerRequest, WorkerResponse } from "./compositor-worker.worker.js";
 
 export interface CompositorClientInit {
@@ -16,6 +17,8 @@ export interface GpuInfo { adapter: string; vendor: string }
 export class CompositorWorkerClient {
   private readonly worker: Worker;
   private nextSeq = 1;
+  perfSession = 0;
+  private readonly submissions = new Map<number, { at: number; generation: number; epoch: number; frame: number }>();
   private readonly pending = new Map<number, { resolve: (value: never) => void; reject: (error: Error) => void }>();
   private disposed = false;
   readonly canvas: HTMLCanvasElement;
@@ -34,6 +37,12 @@ export class CompositorWorkerClient {
     this.worker.addEventListener("message", (event: MessageEvent<WorkerResponse>) => {
       const data = event.data;
       switch (data.type) {
+        case "submitted": {
+          const sent = this.submissions.get(data.seq);
+          this.submissions.delete(data.seq);
+          if (sent && sent.generation === editorPerf.generation) editorPerf.record("submitted", performance.now() - sent.at, this.perfSession, data.seq, sent.epoch, sent.frame);
+          break;
+        }
         case "uploaded":
         case "uploadedShadow": {
           const pending = this.pending.get(data.seq);
@@ -142,9 +151,15 @@ export class CompositorWorkerClient {
   }
 
   /** 下发绘制命令列表（顺序投递；worker 内同步执行，呈现按消息序保证）。 */
-  compose(cmds: DrawCommand[]): void {
+  compose(cmds: DrawCommand[], epoch = 0, frame = -1): void {
     if (this.disposed) return;
-    const request: WorkerRequest = { type: "compose", payload: { cmds } };
+    const seq = editorPerf.enabled ? this.nextSeq++ : undefined;
+    if (seq !== undefined) {
+      if (this.submissions.size >= 512) this.submissions.delete(this.submissions.keys().next().value!);
+      this.submissions.set(seq, { at: performance.now(), generation: editorPerf.generation, epoch, frame });
+      editorPerf.record("compose", 0, this.perfSession, seq, epoch, frame);
+    }
+    const request: WorkerRequest = { type: "compose", payload: { cmds }, ...(seq === undefined ? {} : { seq }) };
     this.worker.postMessage(request);
   }
 
@@ -176,6 +191,7 @@ export class CompositorWorkerClient {
     this.disposed = true;
     for (const [, pending] of this.pending) pending.reject(new Error("compositor worker disposed"));
     this.pending.clear();
+    this.submissions.clear();
     this.worker.terminate();
   }
 }

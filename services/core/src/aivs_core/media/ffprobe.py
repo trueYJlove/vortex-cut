@@ -5,6 +5,7 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
+from ..performance import measured
 from .process import run_process
 
 
@@ -84,6 +85,7 @@ class FFprobe:
         self.executable = executable
         self.timeout = timeout
 
+    @measured("probe")
     async def probe(self, path: Path, require_video: bool = True) -> dict[str, Any]:
         try:
             result = await run_process(

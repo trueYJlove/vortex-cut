@@ -15,6 +15,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from . import performance as perf_diagnostics
 from . import PROTOCOL_VERSION, __version__
 from .asr_jobs import AsrCoordinator
 from .auth import AuthStore
@@ -833,7 +834,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 ),
                 encoding="utf-8",
             )
-        yield
+        perf_task = asyncio.create_task(perf_diagnostics.sample_loop_lag()) if perf_diagnostics.ENABLED else None
+        try:
+            yield
+        finally:
+            if perf_task is not None:
+                perf_task.cancel()
+                await asyncio.gather(perf_task, return_exceptions=True)
+            perf_diagnostics.flush()
         await state.jobs.stop()
         state.auth.clear()
 

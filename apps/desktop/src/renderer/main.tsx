@@ -1,6 +1,8 @@
-import { StrictMode } from "react";
+import { Profiler, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "../styles.css";
+import { editorPerf, installEditorDiagnostics } from "../app/preview/perf-metrics.js";
+installEditorDiagnostics();
 
 /**
  * 渲染入口（§7.1 四层隔离 · 第 2 层）：
@@ -28,5 +30,5 @@ if (import.meta.env.DEV && (probeName === "m3p1" || probeName === "m3p2" || prob
   }
 } else {
   const { App } = await import("../app/App.js");
-  createRoot(document.getElementById("root")!).render(<StrictMode><App /></StrictMode>);
+  createRoot(document.getElementById("root")!).render(<StrictMode>{import.meta.env.VITE_AIVS_PERF === "1" ? <Profiler id="editor" onRender={(_id, _phase, duration) => editorPerf.record("react_commit", duration)}><App /></Profiler> : <App />}</StrictMode>);
 }

@@ -116,13 +116,14 @@ export type WorkerRequest =
   | { type: "upload"; inputId: string; slot: number; srcN: number; frame: VideoFrame; seq: number }
   | { type: "uploadShadow"; inputId: string; srcN: number; frame: VideoFrame; seq: number }
   | { type: "uploadImage"; inputId: string; bitmap: ImageBitmap }
-  | { type: "compose"; payload: ComposePayload }
+  | { type: "compose"; payload: ComposePayload; seq?: number }
   | { type: "resize"; backingWidth: number; backingHeight: number; fitX: number; fitY: number; fitScale: number }
   | { type: "font"; buffer: ArrayBuffer; family: string }
   | { type: "readback"; seq: number }
   | { type: "dispose" };
 
 export type WorkerResponse =
+  | { type: "submitted"; seq: number }
   | { type: "ready"; adapter: string; vendor: string }
   | { type: "initError"; message: string }
   | { type: "uploaded"; seq: number; ms: number; copyToMs: number; texMs: number }
@@ -643,7 +644,7 @@ self.addEventListener("message", async (event: MessageEvent<WorkerRequest>) => {
       return;
     }
     if (message.type === "uploadImage") { uploadImage(message.inputId, message.bitmap); return; }
-    if (message.type === "compose") { executeCompose(message.payload); return; }
+    if (message.type === "compose") { executeCompose(message.payload); if (message.seq !== undefined) post({ type: "submitted", seq: message.seq }); return; }
     if (message.type === "resize") {
       state.backing = { width: Math.max(2, message.backingWidth), height: Math.max(2, message.backingHeight) };
       state.fit = { x: message.fitX, y: message.fitY, scale: message.fitScale };

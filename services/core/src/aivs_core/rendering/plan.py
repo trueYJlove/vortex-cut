@@ -4,6 +4,7 @@ import hashlib
 import sqlite3
 from typing import Any
 
+from ..performance import measured
 from ..database import Database, json_dumps, json_loads
 from ..projects import DomainError
 from ..renditions.presets import canonical_sha256
@@ -58,6 +59,7 @@ class RenderPlanCompiler:
     def __init__(self, database: Database) -> None:
         self.database = database
 
+    @measured("compile")
     def compile(
         self,
         project_id: str,

@@ -54,3 +54,8 @@ evidence/m3_0/**/gl/
 evidence/m3_0/**/gl_nocap/
 evidence/m3_0/**/step0/
 evidence/m3_0/**/assets.manifest*.json
+
+# B00 performance evidence: retain JSON/text, not media or isolated user state.
+evidence/performance/**/*.mp4
+evidence/performance/**/*.png
+evidence/performance/**/user-data/
