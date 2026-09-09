@@ -71,17 +71,17 @@ export class AudioStreamLoader {
     return this.generation;
   }
 
-  /** 驱动一轮窗口：返回本轮需要喂给 worklet 的 ready 块（升序）。
+  /** 驱动一轮窗口：返回本轮需要喂给 worklet 的 ready 块（升序，带起点）。
    *  未就绪块触发 ensure（并发 ≤2，超出顺延下轮 tick）。 */
-  drive(assetId: string, positionSample: number, speed: number): PcmChunk[] {
+  drive(assetId: string, positionSample: number, speed: number): Array<{ startSample: number; chunk: PcmChunk }> {
     if (this.disposed) return [];
     const generation = this.generation;
     const wanted = windowChunks(positionSample, speed, this.sampleRate);
-    const ready: PcmChunk[] = [];
+    const ready: Array<{ startSample: number; chunk: PcmChunk }> = [];
     for (const startSample of wanted) {
       const chunk = this.cache.readyChunk(assetId, generation, startSample);
       if (chunk) {
-        ready.push(chunk);
+        ready.push({ startSample, chunk });
         continue;
       }
       const dedupeKey = `${assetId}|${generation}|${startSample}`;

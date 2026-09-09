@@ -1,5 +1,7 @@
 import { throwIfAborted } from "./worker-lifecycle.js";
 import { AudioSourceCache } from "./audio-source-cache.js";
+import { AudioStreamLoader } from "./audio-stream.js";
+import { PcmChunkCache, PCM_CHUNK_SAMPLES } from "./pcm-chunk-cache.js";
 import { activeInputIds } from "./ir.js";
 /** 合成预览会话：持有解码 worker、GL 执行器 worker（OffscreenCanvas）、纹理簿记
  * 与 WebAudio，对外提供 play/pause/seek 与时间/指标回调。
@@ -48,6 +50,12 @@ interface AudioRig {
   startedAt: number;
   startOffset: number;
   speed: number;
+  /** B15 流式模式：长素材走分块 PCM（rig 的 worklet 配置为 stream）。 */
+  streaming: boolean;
+  /** 流式已 configure 的世代（seek 递增；喂块按世代隔离）。 */
+  streamGeneration: number;
+  /** 流式已喂入 worklet 的块（start_sample 集合，避免重复 append）。 */
+  streamFed: Set<number>;
 }
 
 export interface PreviewSessionMetrics {
@@ -110,8 +118,16 @@ const clamp = (value: number, lo: number, hi: number) => Math.min(hi, Math.max(l
 
 /** A02：音频 rig 工厂（create 与 syncAudio 入段共用同一形状）。 */
 function makeAudioRig(speed: number): AudioRig {
-  return { buffer: null, worklet: null, workletBuffer: false, workletActive: false, workletFailed: false, source: null, gain: null, startedAt: 0, startOffset: 0, speed };
+  return {
+    buffer: null, worklet: null, workletBuffer: false, workletActive: false,
+    workletFailed: false, source: null, gain: null, startedAt: 0, startOffset: 0, speed,
+    streaming: false, streamGeneration: 0, streamFed: new Set<number>(),
+  };
 }
+
+/** B15 流式阈值：素材时长 ≥30 秒走分块 PCM（A02 整段模式保留为小素材
+ *  回退——计划"30 秒且预计 PCM ≤32MiB"；48k 双声道 30 秒 ≈ 11MiB 在限内）。 */
+const STREAMING_THRESHOLD_US = 30_000_000;
 
 export function assertHardwareRenderer(adapter: string): { hardware: boolean; software: boolean } {
   const lowered = adapter.toLowerCase();
@@ -163,6 +179,11 @@ export class PreviewSession {
   private audioCache: AudioSourceCache | null = null;
   /** A02：音频绑定代（replaceIr 换表时 +1；缓存 key 组件之一）。 */
   private audioCacheBindingGeneration = 1;
+  /** B15 分块 PCM 缓存 + 流加载器（长素材流式；Electron IPC 可用时创建）。 */
+  private pcmChunkCache: PcmChunkCache | null = null;
+  private streamLoader: AudioStreamLoader | null = null;
+  /** B15 流式 underrun 观测计数（诊断/测试断言；不驱动时钟——计划硬约束）。 */
+  private streamUnderruns = 0;
   /** 音频漂移硬校正阈值（秒）：WebAudio 自身不漂，只有时钟重锚才触达。 */
   private static readonly AUDIO_REANCHOR_S = 0.08;
   /** A02 音频预热窗口（微秒）：播放态预取未来 2s 内入窗段；暂停态为 0。 */
@@ -213,7 +234,8 @@ export class PreviewSession {
                       tickets: Map<string, string>,
                       audioByClip?: Map<string, SegmentAudioConfig>, signal?: AbortSignal,
                       sourceResolver?: PreviewSourceResolver | null,
-                      resourceTier?: "conservative" | "balanced" | "high"): Promise<PreviewSession> {
+                      resourceTier?: "conservative" | "balanced" | "high",
+                      pcmProjectId?: string | null): Promise<PreviewSession> {
     throwIfAborted(signal);
     const session = new PreviewSession(ir);
     // B13：档位 → 环深决策（保守档多输入收 5；LEAD 联动防写深覆盖）
@@ -336,6 +358,17 @@ export class PreviewSession {
         // 用户的 ready 条目，超限如实暴露 overBudget——不静默漏音）
         (resourceTier ? BUDGET_TABLES[resourceTier].pcmCacheMiB : 128) * 1024 * 1024,
       );
+      // B15：分块 PCM 流式（长素材 ≥30s 走块；Electron IPC 通道可用且调用方
+      // 提供 project 时创建。非 Electron/测试环境回退 A02 整段模式）。
+      const desktop = typeof window !== "undefined" ? (window as { desktop?: { ensurePcmChunk?: unknown; pcmChunkMediaUrl?: unknown } }).desktop : undefined;
+      if (pcmProjectId && desktop && typeof desktop.ensurePcmChunk === "function" && typeof desktop.pcmChunkMediaUrl === "function") {
+        const api = desktop as { ensurePcmChunk: (input: { project_id: string; asset_id: string; start_sample: number }) => Promise<import("@aivideo/contracts").PcmChunkDescription>; pcmChunkMediaUrl: (input: { project_id: string; asset_id: string; start_sample: number }) => Promise<{ media_url: string; cache_key: string; size_bytes: number }> };
+        session.pcmChunkCache = new PcmChunkCache({
+          ensurePcmChunk: api.ensurePcmChunk,
+          pcmChunkMediaUrl: api.pcmChunkMediaUrl,
+        }, pcmProjectId, (resourceTier ? BUDGET_TABLES[resourceTier].pcmCacheMiB : 128) * 1024 * 1024);
+        session.streamLoader = new AudioStreamLoader(session.pcmChunkCache, pcmProjectId, session.audioCtx.sampleRate);
+      }
       for (const segment of ir.segments) {
         if (!audioByClip.get(segment.clip_id)?.enabled) continue;
         session.audioRigs.set(segment.clip_id, makeAudioRig(Math.max(0.25, Math.min(4, segment.speed_milli / 1000))));
@@ -877,6 +910,98 @@ export class PreviewSession {
     }
   }
 
+  // ---- B15：流式音频（长素材分块 PCM → worklet stream 模式） ----
+
+  /** 素材是否走流式（≥30s 阈值；loader/IPC 可用）。 */
+  private useStreamingFor(input: { duration_us?: number } | undefined): boolean {
+    if (!this.streamLoader || !this.pcmChunkCache || !this.audioWorkletReady) return false;
+    return (input?.duration_us ?? 0) >= STREAMING_THRESHOLD_US;
+  }
+
+  /** 懒创建流式 rig 的 worklet 节点（configure stream + needRange 回喂）。
+   *  节点端口事件：need-range → 窗口内块请求；underrun → 计数观测（不驱动
+   *  时钟——计划"音频线程不私自倒退时钟"）；drained → 无操作（段末语义由
+   *  syncAudio 的出段停声管理）。 */
+  private ensureStreamingWorklet(rig: AudioRig, assetId: string): boolean {
+    if (!this.audioCtx || !this.streamLoader || rig.workletFailed) return false;
+    if (rig.streaming && rig.worklet) return true;
+    try {
+      const node = new AudioWorkletNode(this.audioCtx, VARISPEED_WORKLET_NAME, {
+        numberOfInputs: 0,
+        outputChannelCount: [2],
+      });
+      const generation = this.streamLoader.currentGeneration;
+      node.port.postMessage({ type: "configure", generation });
+      node.port.onmessage = (event: MessageEvent) => {
+        const data = event.data as { type?: string; from?: number; to?: number; count?: number; generation?: number };
+        if (!data || typeof data.type !== "string") return;
+        if (data.type === "need-range" && typeof data.from === "number" && typeof data.to === "number") {
+          // 缺口区间 → 立即请求覆盖块（loader 并发闸门内联排队）
+          const first = Math.floor(data.from / PCM_CHUNK_SAMPLES) * PCM_CHUNK_SAMPLES;
+          for (let start = first; start <= data.to; start += PCM_CHUNK_SAMPLES) {
+            if (start < 0) continue;
+            void this.streamLoader?.requestChunk(assetId, start).then(() => this.feedStreamingChunks(rig, assetId));
+          }
+        } else if (data.type === "underrun" && typeof data.count === "number") {
+          this.streamUnderruns = Math.max(this.streamUnderruns, data.count);
+        }
+        // drained：段末/EOF——syncAudio 出段停声已覆盖，无需额外动作
+      };
+      node.connect(rig.gain ??= this.audioCtx.createGain());
+      rig.gain.connect(this.audioCtx.destination);
+      rig.worklet = node;
+      rig.streaming = true;
+      rig.workletBuffer = true; // 流式 rig：worklet 就绪（buffer 语义复用出声判定）
+      rig.streamGeneration = generation;
+      rig.streamFed.clear();
+      return true;
+    } catch {
+      rig.workletFailed = true;
+      rig.streaming = false;
+      rig.workletBuffer = false;
+      return false;
+    }
+  }
+
+  /** 把 loader 已 ready 且未喂过的块 transfer 给 rig 的 worklet。 */
+  private feedStreamingChunks(rig: AudioRig, assetId: string): void {
+    const loader = this.streamLoader;
+    if (!loader || !rig.worklet || !rig.streaming || !this.audioCtx) return;
+    // 播放推进位置（源域）：startOffset + 播放时长 × speed（源秒）
+    const elapsedS = Math.max(0, this.audioCtx.currentTime - rig.startedAt);
+    const positionSample = Math.round((rig.startOffset + elapsedS * rig.speed) * this.audioCtx.sampleRate);
+    const ready = loader.drive(assetId, positionSample, rig.speed);
+    for (const { startSample, chunk } of ready) {
+      if (rig.streamFed.has(startSample)) continue;
+      // 块 PCM 拷贝成两声道独立副本（缓存本体只读；transfer 独占所有权）
+      const samples = chunk.validSamples;
+      const left = new Float32Array(samples);
+      const right = new Float32Array(samples);
+      for (let i = 0; i < samples; i++) {
+        left[i] = chunk.pcm[i * 2] ?? 0;
+        right[i] = chunk.pcm[i * 2 + 1] ?? 0;
+      }
+      rig.worklet.port.postMessage(
+        { type: "append-chunk", generation: rig.streamGeneration, start: startSample, valid: samples, channels: [left, right] },
+        [left.buffer, right.buffer],
+      );
+      rig.streamFed.add(startSample);
+      this.pcmChunkCache?.pin(assetId, rig.streamGeneration, startSample);
+    }
+  }
+
+  /** seek/重锚：流式世代递增（旧块不接入新位置），重置喂块簿记。 */
+  private reseekStreaming(): void {
+    if (!this.streamLoader) return;
+    const generation = this.streamLoader.reseek();
+    for (const rig of this.audioRigs.values()) {
+      if (!rig.streaming) continue;
+      rig.streamGeneration = generation;
+      rig.streamFed.clear();
+      rig.worklet?.port.postMessage({ type: "configure", generation });
+    }
+  }
+
   /** 启动/重启一个片段音源：从缓冲 offset 起以 speed 播放（ctx 时间锚定）。
    *  worklet 路径 = 变速不变调（play 消息重定位，OLA 累加器清零 → ~W/2 静音
    *  过渡，仅入场/时钟重锚触达）；legacy 路径 = AudioBufferSourceNode
@@ -884,6 +1009,21 @@ export class PreviewSession {
   private startAudioSource(rig: AudioRig, gainDb: number, offset: number, speed: number): void {
     if (!this.audioCtx) return;
     this.stopAudioSource(rig);
+    // B15 流式路径：worklet stream 模式（块按需喂入；缺口静默+underrun 观测）
+    if (rig.streaming) {
+      if (!rig.worklet && !this.ensureStreamingWorklet(rig, this.assetOfRig(rig))) return;
+      if (!rig.worklet) return;
+      rig.gain ??= this.audioCtx.createGain();
+      rig.gain.gain.value = Math.pow(10, gainDb / 20);
+      rig.worklet.port.postMessage({ type: "play", position: Math.max(0, offset), speed });
+      rig.workletActive = true;
+      rig.source = null;
+      rig.startedAt = this.audioCtx.currentTime;
+      rig.startOffset = offset;
+      rig.speed = speed;
+      this.feedStreamingChunks(rig, this.assetOfRig(rig));
+      return;
+    }
     const useWorklet = rig.workletBuffer || this.ensureWorkletNode(rig);
     if (useWorklet && rig.worklet) {
       rig.gain!.gain.value = Math.pow(10, gainDb / 20);
@@ -907,6 +1047,13 @@ export class PreviewSession {
     rig.startedAt = this.audioCtx.currentTime;
     rig.startOffset = offset;
     rig.speed = speed;
+  }
+
+  /** rig → asset_id（IR 段表反查；流式喂块用）。 */
+  private assetOfRig(rig: AudioRig): string {
+    const segment = this.ir.segments.find(item => this.audioRigs.get(item.clip_id) === rig);
+    const input = this.ir.inputs.find(item => item.input_id === segment?.input_id);
+    return input?.asset_id ?? "";
   }
 
   private stopAudioSource(rig: AudioRig): void {
@@ -956,8 +1103,23 @@ export class PreviewSession {
       const speed = Math.max(0.25, Math.min(4, segment.speed_milli / 1000));
       let rig = this.audioRigs.get(segment.clip_id);
       if (!rig) { rig = makeAudioRig(speed); this.audioRigs.set(segment.clip_id, rig); }
+      // B15 流式分派：长素材走块（不触发整段解码；loader 窗口请求）
+      if (!rig.buffer && !rig.workletBuffer && this.useStreamingFor(
+          this.ir.inputs.find(item => item.input_id === segment.input_id))) {
+        if (this.ensureStreamingWorklet(rig, this.assetOfRig(rig))) {
+          const assetId = this.assetOfRig(rig);
+          if (assetId) void this.streamLoader!.requestChunk(
+            assetId, Math.floor(segment.source_start_us / 1e6 * this.audioCtx.sampleRate / PCM_CHUNK_SAMPLES) * PCM_CHUNK_SAMPLES,
+          ).then(() => { if (!this.disposed) this.feedStreamingChunks(rig, assetId); });
+        }
+        // 流式 rig 无需 buffer（workletBuffer=true 已在 ensure 内置位）
+      }
       if (!rig.buffer && !rig.workletBuffer) { void this.ensureAudioBuffer(segment.clip_id, segment.input_id); continue; }
       if (!this.playing) { this.stopAudioSource(rig); continue; }
+      // B15：流式播放中——每 tick 喂窗口新就绪块（缺口由 worklet 静默+underrun）
+      if (rig.streaming && rig.workletActive) {
+        this.feedStreamingChunks(rig, this.assetOfRig(rig));
+      }
       const expected = clamp(segment.source_start_us / 1e6 + ((tUs - startUs) / 1e6) * speed, segment.source_start_us / 1e6, segment.source_end_us / 1e6);
       const activeSource = rig.workletActive || rig.source !== null;
       const position = activeSource ? rig.startOffset + (this.audioCtx.currentTime - rig.startedAt) * rig.speed : null;
@@ -1063,6 +1225,8 @@ export class PreviewSession {
     // seek 是用户驱动的位置跳变：重置解码链游标（后续 pump/播放冷启重建；环内
     // 已就绪采样仍可直接复用，±1 步进零解码路径保持不变）。
     this.resetChains();
+    // B15：流式世代递增（旧块不接入新位置；播放重锚时按新窗口重喂）
+    this.reseekStreaming();
     const now = performance.now();
     this.dragMode = now - this.lastSeekWall < 250;
     this.lastSeekWall = now;
@@ -1237,6 +1401,10 @@ export class PreviewSession {
     this.audioCtx = null;
     this.audioCache?.dispose();
     this.audioCache = null;
+    // B15：流加载器 + 块缓存释放（dispose 清空在途引用与端口监听）
+    this.streamLoader?.dispose();
+    this.streamLoader = null;
+    this.pcmChunkCache = null;
     if (this.recomposeRaf) cancelAnimationFrame(this.recomposeRaf);
     this.recomposeRaf = 0;
     for (const rig of [...this.rigs.values()].reverse()) rig.worker?.terminate();

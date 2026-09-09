@@ -15,6 +15,15 @@ interface Core {
   play(positionSec: number, speed: number): void;
   stop(): void;
   process(out: Float32Array[]): boolean;
+  // B15 流式模式
+  configureStream(generation: number): void;
+  appendChunk(generation: number, start: number, valid: number, channels: Float32Array[]): void;
+  releaseBefore(sample: number): void;
+  mode: string;
+  underruns: number;
+  streamEnd: number;
+  chunks: Array<{ start: number; valid: number; data: Float32Array[] }>;
+  reporter: { needRange(from: number, to: number): void; underrun(count: number): void; drained(generation: number): void } | null;
 }
 
 function makeCore(channels = 1): Core {
@@ -193,5 +202,147 @@ describe("VarispeedStretch（线上同源码求值）", () => {
     let maxDiffMono = 0;
     for (let i = W; i < SR - W; i++) maxDiffMono = Math.max(maxDiffMono, Math.abs(m0![i]! - m1![i]!));
     expect(maxDiffMono).toBeLessThan(1e-9);
+  });
+});
+
+
+describe("VarispeedStretch B15 流式模式（线上同源码求值）", () => {
+  const CHUNK = 96_000;
+
+  function makeStreamCore(): Core {
+    return makeCore(2);
+  }
+
+  function sineChunk(startSample: number, samples: number, freqHz = 440): Float32Array[] {
+    // 连续正弦：跨块相位连续（k 从绝对样本起算）
+    const data = new Float32Array(samples);
+    for (let i = 0; i < samples; i++) {
+      const k = startSample + i;
+      data[i] = 0.5 * Math.sin((2 * Math.PI * freqHz * k) / SR);
+    }
+    return [data, data];
+  }
+
+  it("流式 1x：两块拼接输出 ≈ 同数据整段 buffer 模式（跨块无缝等价）", () => {
+    // 金标准 = 同一份 PCM 走旧 set-buffer 路径（已验收语义）
+    const whole = sineChunk(0, CHUNK * 2)[0]!;
+    const reference = makeStreamCore();
+    reference.setBuffer([whole, whole]);
+    reference.play(0, 1);
+    const [refOut] = render(reference, CHUNK + 4096);
+    // 流式：同样 PCM 切两块喂入
+    const core = makeStreamCore();
+    core.configureStream(1);
+    core.appendChunk(1, 0, CHUNK, sineChunk(0, CHUNK));
+    core.appendChunk(1, CHUNK, CHUNK, sineChunk(CHUNK, CHUNK));
+    core.play(0, 1);
+    const [out] = render(core, CHUNK + 4096);
+    // 逐样本对拍（中段 + 跨块边界邻域；差异上界 = 块边界颗粒过渡）
+    let maxDelta = 0;
+    for (let i = W; i < CHUNK + W; i++) {
+      maxDelta = Math.max(maxDelta, Math.abs(out![i]! - refOut![i]!));
+    }
+    expect(maxDelta).toBeLessThan(0.05);
+    expect(core.underruns).toBe(0); // 数据齐 → 无缺口
+  });
+
+  it("流式 2x：音高不变（过零率 ≈440Hz）且推进速率翻倍", () => {
+    const core = makeStreamCore();
+    core.configureStream(1);
+    const span = 480_000; // 10 秒输入 → 5 秒输出
+    for (let c = 0; c < span / CHUNK; c++) {
+      core.appendChunk(1, c * CHUNK, CHUNK, sineChunk(c * CHUNK, CHUNK));
+    }
+    core.play(0, 2);
+    const [out] = render(core, span / 2);
+    // 2x：1 秒输出消耗 2 秒输入——中段频率仍 ≈440Hz（不变调）
+    const freq = zeroCrossFreq(out!, W, SR);
+    expect(Math.abs(freq - 440)).toBeLessThan(30);
+  });
+
+  it("缺口：块未到 → 静默 + underrun 一次 + needRange 上抛；数据到达后恢复", () => {
+    const core = makeStreamCore();
+    const events: Array<{ type: string; from?: number; to?: number; count?: number; generation?: number }> = [];
+    core.configureStream(1);
+    core.reporter = {
+      needRange: (from, to) => events.push({ type: "need-range", from, to }),
+      underrun: count => events.push({ type: "underrun", count }),
+      drained: generation => events.push({ type: "drained", generation }),
+    };
+    // 只有块 1（96k..192k）在场：起点 0 无块 → 缺口
+    core.appendChunk(1, CHUNK, CHUNK, sineChunk(CHUNK, CHUNK));
+    core.play(0, 1);
+    const [gapOut] = render(core, 8192);
+    expect(core.underruns).toBe(1); // 缺口去重（一次）
+    const need = events.filter(e => e.type === "need-range");
+    expect(need.length).toBe(1);
+    expect((need[0] as { from: number }).from).toBe(0); // 从窗口起点要起
+    let maxAbs = 0;
+    for (let i = 0; i < gapOut!.length; i++) maxAbs = Math.max(maxAbs, Math.abs(gapOut![i]!));
+    expect(maxAbs).toBe(0); // 缺口静默
+    // 数据补到 → 恢复出声
+    core.appendChunk(1, 0, CHUNK, sineChunk(0, CHUNK));
+    const [okOut] = render(core, SR);
+    let recovered = 0;
+    for (let i = 0; i < okOut!.length; i++) recovered = Math.max(recovered, Math.abs(okOut![i]!));
+    expect(recovered).toBeGreaterThan(0.3);
+  });
+
+  it("世代隔离：旧代 appendChunk 丢弃；drained 在越过流末端上报", () => {
+    const core = makeStreamCore();
+    const events: Array<{ type: string; generation?: number }> = [];
+    core.configureStream(2); // 当代 = 2
+    core.reporter = {
+      needRange: () => undefined,
+      underrun: () => undefined,
+      drained: generation => events.push({ type: "drained", generation }),
+    };
+    core.appendChunk(1, 0, CHUNK, sineChunk(0, CHUNK)); // 旧代 → 丢弃
+    core.appendChunk(2, 0, 1000, sineChunk(0, 1000)); // 当代短块（EOF 尾块）
+    core.play(0, 1);
+    // 当代块覆盖 0..1000：出声；越过 1000（streamEnd）→ drained 上报
+    render(core, 8192);
+    expect(core.underruns).toBe(0); // 当代块在 → 无缺口
+    const drained = events.filter(e => e.type === "drained");
+    expect(drained.length).toBeGreaterThanOrEqual(1);
+    expect(drained[0]!.generation).toBe(2);
+    // 旧代块确实被丢弃（chunks 只有当代一块）
+    expect(core.chunks.length).toBe(1);
+    expect(core.chunks[0].start).toBe(0);
+  });
+
+  it("releaseBefore：旧块丢弃后正确继续（位置前进不受影响）", () => {
+    const core = makeStreamCore();
+    core.configureStream(1);
+    for (let c = 0; c < 6; c++) {
+      core.appendChunk(1, c * CHUNK, CHUNK, sineChunk(c * CHUNK, CHUNK));
+    }
+    core.play(0, 1);
+    render(core, CHUNK * 2); // 推进 ~2 秒
+    core.releaseBefore(CHUNK); // 丢弃块 0（保留 WSOLA 回读余量）
+    const [out] = render(core, CHUNK);
+    // 位置已越过块 0 区间：继续出声（不因块 0 缺失而退化为静默缺口）
+    let maxAbs = 0;
+    for (let i = 0; i < out!.length; i++) maxAbs = Math.max(maxAbs, Math.abs(out![i]!));
+    expect(maxAbs).toBeGreaterThan(0.3);
+  });
+
+  it("配置后 mode 切换；set-buffer 模式不受影响（A02 回退共存）", () => {
+    const core = makeStreamCore();
+    core.setBuffer([sine(440, SR)]);
+    core.play(0, 1);
+    expect(core.mode).toBe("buffer");
+    const [bufOut] = render(core, 4096);
+    let bufMax = 0;
+    for (let i = 0; i < bufOut!.length; i++) bufMax = Math.max(bufMax, Math.abs(bufOut![i]!));
+    expect(bufMax).toBeGreaterThan(0.3);
+    // 切流式（sources 清空）
+    core.configureStream(1);
+    expect(core.mode).toBe("stream");
+    core.play(0, 1);
+    const [streamOut] = render(core, 4096);
+    let streamMax = 0;
+    for (let i = 0; i < streamOut!.length; i++) streamMax = Math.max(streamMax, Math.abs(streamOut![i]!));
+    expect(streamMax).toBe(0); // 无块 → 静默（等待喂块）
   });
 });

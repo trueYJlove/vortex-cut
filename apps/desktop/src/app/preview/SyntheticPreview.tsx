@@ -115,7 +115,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
         sessionRefLocal.current = null;
         // 画布元素由会话自建（transferControlToOffscreen 每元素仅一次），
         // 后备缓冲随预览框（contain 居中，见 session.resize）；初始以 IR 画布尺寸起底
-        const session = await PreviewSession.create(container, ir, mediaUrls, audioByClip, controller.signal, sourceResolver ?? null, resourceTier);
+        const session = await PreviewSession.create(container, ir, mediaUrls, audioByClip, controller.signal, sourceResolver ?? null, resourceTier, typeof projectId === "string" ? projectId : null);
         creating = session;
         if (stale()) { session.dispose(); return; }
         session.onTimeUs = (us: number) => {
