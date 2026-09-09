@@ -90,6 +90,14 @@ export class CoreAdminClient {
     );
   }
 
+  /** B14：波形文件 Main 内部解析（admin 通道；参数服务端固定，无请求体）。 */
+  resolveWaveformMedia(input: { project_id: string; asset_id: string }) {
+    return this.request<{ cache_key: string; status: string; path: string; size_bytes: number }>(
+      `/api/v1/internal/projects/${encodeURIComponent(input.project_id)}/assets/${encodeURIComponent(input.asset_id)}/waveform/media`,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+  }
+
   setProviderSecret(providerConfigId: string, secret: string): Promise<{ provider_config_id: string; credential_status: string }> {
     return this.request(`/api/v1/internal/provider-secrets/${encodeURIComponent(providerConfigId)}`, { method: "PUT", body: JSON.stringify({ secret }) });
   }

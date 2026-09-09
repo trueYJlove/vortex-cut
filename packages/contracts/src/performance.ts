@@ -284,3 +284,84 @@ export const parsePreviewSourceMediaInput = (value: unknown): PreviewSourceMedia
   parse(value, isPreviewSourceMediaInput, "PreviewSourceMediaInput");
 export const parsePreviewSourceMediaResponse = (value: unknown): PreviewSourceMediaResponse =>
   parse(value, isPreviewSourceMediaResponse, "PreviewSourceMediaResponse");
+
+// ---- B14：素材级持久化波形（waveform） ----
+
+/** 波形算法常量（与 Core media/waveform.py 一致；参数由服务端固定）。 */
+export const WAVEFORM_SAMPLE_RATE = 8000 as const;
+export const WAVEFORM_CHANNELS = 1 as const;
+export const WAVEFORM_BUCKET = 256 as const;
+
+export type WaveformStatus =
+  | "ready" | "building" | "queued" | "running" | "failed" | null;
+
+export interface WaveformRequestInput {
+  project_id: ProjectId;
+  asset_id: AssetId;
+  /** true 时无条目则登记生成作业（Renderer 侧显式触发）。 */
+  generate?: boolean;
+}
+
+export interface WaveformDescription {
+  cache_key: string;
+  status: WaveformStatus;
+  job_id: string | null;
+  size_bytes: number | null;
+  sample_rate: number;
+  channels: number;
+  bucket: number;
+}
+
+export interface WaveformMediaInput {
+  project_id: ProjectId;
+  asset_id: AssetId;
+}
+
+export interface WaveformMediaResponse {
+  /** aivideo:// 票据 URL（Main 换发；Renderer 永远接触不到 path）。 */
+  media_url: string;
+  cache_key: string;
+  status: "ready";
+  size_bytes: number;
+}
+
+export function isWaveformRequestInput(value: unknown): value is WaveformRequestInput {
+  if (!record(value) || !optionalOnly(value, ["project_id", "asset_id"], ["generate"])) return false;
+  if (!id(value.project_id) || !id(value.asset_id)) return false;
+  if (value.generate !== undefined && typeof value.generate !== "boolean") return false;
+  return true;
+}
+
+export function isWaveformDescription(value: unknown): value is WaveformDescription {
+  if (!record(value) || !only(value, [
+    "cache_key", "status", "job_id", "size_bytes", "sample_rate", "channels", "bucket",
+  ])) return false;
+  return sha(value.cache_key)
+    && (value.status === null || value.status === "ready" || value.status === "building"
+      || value.status === "queued" || value.status === "running" || value.status === "failed")
+    && (value.job_id === null || id(value.job_id))
+    && (value.size_bytes === null || nonnegative(value.size_bytes))
+    && value.sample_rate === WAVEFORM_SAMPLE_RATE
+    && value.channels === WAVEFORM_CHANNELS
+    && value.bucket === WAVEFORM_BUCKET;
+}
+
+export function isWaveformMediaInput(value: unknown): value is WaveformMediaInput {
+  if (!record(value) || !only(value, ["project_id", "asset_id"])) return false;
+  return id(value.project_id) && id(value.asset_id);
+}
+
+export function isWaveformMediaResponse(value: unknown): value is WaveformMediaResponse {
+  if (!record(value) || !only(value, ["media_url", "cache_key", "status", "size_bytes"])) return false;
+  return typeof value.media_url === "string" && value.media_url.startsWith("aivideo://media/")
+    && sha(value.cache_key) && value.status === "ready" && nonnegative(value.size_bytes);
+}
+
+export const parseWaveformRequestInput = (value: unknown): WaveformRequestInput =>
+  parse(value, isWaveformRequestInput, "WaveformRequestInput");
+export const parseWaveformDescription = (value: unknown): WaveformDescription =>
+  parse(value, isWaveformDescription, "WaveformDescription");
+export const parseWaveformMediaInput = (value: unknown): WaveformMediaInput =>
+  parse(value, isWaveformMediaInput, "WaveformMediaInput");
+export const parseWaveformMediaResponse = (value: unknown): WaveformMediaResponse =>
+  parse(value, isWaveformMediaResponse, "WaveformMediaResponse");

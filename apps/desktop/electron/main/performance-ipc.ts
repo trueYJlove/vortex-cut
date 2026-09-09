@@ -7,6 +7,9 @@ import {
   parsePreviewSourceJobResponse,
   parsePreviewSourceMediaResponse,
   parsePreviewSourceRequestInput,
+  parseWaveformDescription,
+  parseWaveformMediaResponse,
+  parseWaveformRequestInput,
   type DerivedMediaEntry,
   type DerivedMediaStats,
 } from "@aivideo/contracts";
@@ -76,6 +79,9 @@ export interface DerivedMediaIpcDeps {
   resolveDerived: (input: { project_id: string; asset_id: string; kind: string; params: Record<string, string> }) => Promise<{ cache_key: string; status: string; path: string; size_bytes: number }>;
   /** B11：admin 通道解析代理文件（preview-source/media 端点）。 */
   resolvePreviewSourceMedia: (input: { project_id: string; asset_id: string; profile_id: string }) => Promise<{ cache_key: string; status: string; path: string; size_bytes: number }>;
+  /** B14：admin 通道解析波形文件（waveform/media 端点；无请求体——
+   * 波形参数由服务端算法常量唯一决定）。 */
+  resolveWaveformMedia: (input: { project_id: string; asset_id: string }) => Promise<{ cache_key: string; status: string; path: string; size_bytes: number }>;
   /** restricted-media 注册（purpose="proxy"）+ 票据签发。 */
   registerDerivedMedia: (cacheKey: string, path: string) => string;
 }
@@ -87,13 +93,13 @@ async function safeInvoke<T>(operation: () => Promise<T>): Promise<T> {
     const code = error && typeof error === "object"
       ? (error as { code?: unknown }).code
       : undefined;
-    const derivedCodes = new Set(["DERIVED_NOT_FOUND", "DERIVED_KIND_INVALID", "DERIVED_PARAMS_INVALID", "ASSET_NOT_FOUND", "ASSET_CHANGED", "ASSET_MISSING", "DERIVED_CACHE_UNSAFE", "PREVIEW_PROFILE_INVALID", "PREVIEW_SOURCE_MODE_INVALID", "ASSET_NO_VIDEO_STREAM"]);
+    const derivedCodes = new Set(["DERIVED_NOT_FOUND", "DERIVED_KIND_INVALID", "DERIVED_PARAMS_INVALID", "ASSET_NOT_FOUND", "ASSET_CHANGED", "ASSET_MISSING", "DERIVED_CACHE_UNSAFE", "PREVIEW_PROFILE_INVALID", "PREVIEW_SOURCE_MODE_INVALID", "ASSET_NO_VIDEO_STREAM", "MEDIA_NO_AUDIO"]);
     if (typeof code === "string" && derivedCodes.has(code)) throw new Error(code);
     throw new Error("Core request failed");
   }
 }
 
-export function registerPerformanceIpc({ ipc, fetchWithUi, resolveDerived, resolvePreviewSourceMedia, registerDerivedMedia }: DerivedMediaIpcDeps & { ipc: Registrar }): void {
+export function registerPerformanceIpc({ ipc, fetchWithUi, resolveDerived, resolvePreviewSourceMedia, resolveWaveformMedia, registerDerivedMedia }: DerivedMediaIpcDeps & { ipc: Registrar }): void {
   const fetchSafe = (path: string, init?: RequestInit) =>
     safeInvoke(() => fetchWithUi(path, init));
 
@@ -195,6 +201,46 @@ export function registerPerformanceIpc({ ipc, fetchWithUi, resolveDerived, resol
     }
     // path 只存在于 Main 进程内存；Renderer 只收票据 URL（契约校验兜底）。
     return parsePreviewSourceMediaResponse({
+      media_url: registerDerivedMedia(resolved.cache_key, resolved.path),
+      cache_key: resolved.cache_key,
+      status: "ready",
+      size_bytes: resolved.size_bytes,
+    });
+  });
+
+  // ---- B14：素材级持久化波形 ----
+
+  ipc.handle("waveform:get", async (_event, value) => {
+    const input = asRecord(value, ["project_id", "asset_id", "generate"], "waveform");
+    const request = parseWaveformRequestInput({
+      project_id: asId(input.project_id, "project_id"),
+      asset_id: asId(input.asset_id, "asset_id"),
+      generate: input.generate,
+    });
+    const body = request.generate === undefined ? {} : { generate: request.generate };
+    const description = rendererSafe(await fetchSafe(
+      `/api/v1/projects/${request.project_id}/assets/${request.asset_id}/waveform`,
+      { method: "POST", body: JSON.stringify(body) },
+    ));
+    if (JSON.stringify(description).includes("path")) throw new Error("Invalid WaveformDescription");
+    return parseWaveformDescription(description);
+  });
+
+  ipc.handle("waveform:media", async (_event, value) => {
+    const input = asRecord(value, ["project_id", "asset_id"], "waveform media");
+    const request = parseWaveformRequestInput({
+      project_id: asId(input.project_id, "project_id"),
+      asset_id: asId(input.asset_id, "asset_id"),
+    });
+    const resolved = await safeInvoke(() => resolveWaveformMedia({
+      project_id: request.project_id,
+      asset_id: request.asset_id,
+    }));
+    if (resolved.status !== "ready" || typeof resolved.path !== "string") {
+      throw new Error("DERIVED_NOT_FOUND");
+    }
+    // path 只存在于 Main 进程内存；Renderer 只收票据 URL（契约校验兜底）。
+    return parseWaveformMediaResponse({
       media_url: registerDerivedMedia(resolved.cache_key, resolved.path),
       cache_key: resolved.cache_key,
       status: "ready",

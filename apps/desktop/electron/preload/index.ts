@@ -72,6 +72,7 @@ import type {
   , ShotRequirementTimelineBatchAssemblyItemPage
   , DerivedMediaEntry, DerivedMediaStats
   , PreviewSourceDescription, PreviewSourceJobResponse, PreviewSourceMediaResponse, PreviewSourceProfileId, PreviewSourceMode
+  , WaveformDescription, WaveformMediaResponse
 } from "@aivideo/contracts";
 
 // M3-0 探针 dev-only 桥：生产构建 NODE_ENV 静态替换 → 死代码消除（见 probe-bridge.ts 注释）。
@@ -235,6 +236,9 @@ export interface DesktopApi {
   getPreviewSource: (input: { project_id: ProjectId; asset_id: string; profile_id?: PreviewSourceProfileId; mode?: PreviewSourceMode; generate?: boolean }) => Promise<PreviewSourceDescription>;
   createPreviewSourceJob: (input: { project_id: ProjectId; asset_id: string; profile_id?: PreviewSourceProfileId }) => Promise<PreviewSourceJobResponse>;
   previewSourceMediaUrl: (input: { project_id: ProjectId; asset_id: string; profile_id: PreviewSourceProfileId }) => Promise<PreviewSourceMediaResponse>;
+  // B14 素材级持久化波形：描述（generate 登记作业）+ 票据化文件 URL
+  getWaveform: (input: { project_id: ProjectId; asset_id: string; generate?: boolean }) => Promise<WaveformDescription>;
+  waveformMediaUrl: (input: { project_id: ProjectId; asset_id: string }) => Promise<WaveformMediaResponse>;
   captionFontUrl: () => Promise<string>;
   openArtifact: (artifactId: string) => Promise<void>;
   openArtifactFolder: (artifactId: string) => Promise<void>;
@@ -373,6 +377,8 @@ const api: DesktopApi = {
   getPreviewSource: input => ipcRenderer.invoke("preview-source:get", input),
   createPreviewSourceJob: input => ipcRenderer.invoke("preview-source:jobs", input),
   previewSourceMediaUrl: input => ipcRenderer.invoke("preview-source:media", input),
+  getWaveform: input => ipcRenderer.invoke("waveform:get", input),
+  waveformMediaUrl: input => ipcRenderer.invoke("waveform:media", input),
   captionFontUrl: () => ipcRenderer.invoke("media:caption-font-url"),
   openArtifact: artifactId => ipcRenderer.invoke("artifact:open", artifactId),
   openArtifactFolder: artifactId => ipcRenderer.invoke("artifact:folder", artifactId),

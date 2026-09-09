@@ -15,19 +15,21 @@ function setup() {
   const fetchWithUi = vi.fn();
   const resolveDerived = vi.fn();
   const resolvePreviewSourceMedia = vi.fn();
+  const resolveWaveformMedia = vi.fn();
   const registerDerivedMedia = vi.fn(() => "aivideo://media/ticket-url-value");
   registerPerformanceIpc({
     ipc: { handle: (channel, listener) => handlers.set(channel, listener) },
     fetchWithUi,
     resolveDerived,
     resolvePreviewSourceMedia,
+    resolveWaveformMedia,
     registerDerivedMedia,
   });
-  return { handlers, fetchWithUi, resolveDerived, resolvePreviewSourceMedia, registerDerivedMedia };
+  return { handlers, fetchWithUi, resolveDerived, resolvePreviewSourceMedia, resolveWaveformMedia, registerDerivedMedia };
 }
 
 describe("B10 derived media IPC", () => {
-  it("只注册六个白名单 channel（B10 三个 + B11 三个）", () => {
+  it("只注册八个白名单 channel（B10 三个 + B11 三个 + B14 两个）", () => {
     const { handlers } = setup();
     expect([...handlers.keys()]).toEqual([
       "derived-media:lookup",
@@ -36,6 +38,8 @@ describe("B10 derived media IPC", () => {
       "preview-source:get",
       "preview-source:jobs",
       "preview-source:media",
+      "waveform:get",
+      "waveform:media",
     ]);
   });
 
@@ -223,6 +227,87 @@ describe("B11 preview-source IPC", () => {
     // 缺档位拒绝
     await expect(handlers.get("preview-source:media")?.({}, {
       project_id: "project_1", asset_id: "asset_1",
+    })).rejects.toThrow();
+    expect(registerDerivedMedia).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("B14 waveform IPC", () => {
+  const wfDescription = {
+    cache_key: hashA, status: "queued", job_id: "job_wf", size_bytes: null,
+    sample_rate: 8000, channels: 1, bucket: 256,
+  };
+
+  it("get 走 UI 通道并返回契约校验后的描述（无路径字段）", async () => {
+    const { handlers, fetchWithUi } = setup();
+    fetchWithUi.mockResolvedValueOnce(wfDescription);
+    const result = await handlers.get("waveform:get")?.({}, {
+      project_id: "project_1", asset_id: "asset_1", generate: true,
+    });
+    expect(fetchWithUi).toHaveBeenCalledWith(
+      "/api/v1/projects/project_1/assets/asset_1/waveform",
+      { method: "POST", body: JSON.stringify({ generate: true }) },
+    );
+    expect(result).toEqual(wfDescription);
+  });
+
+  it("get 请求体严格白名单，非法值拒绝且不触发 fetch", async () => {
+    const { handlers, fetchWithUi } = setup();
+    await expect(handlers.get("waveform:get")?.({}, {
+      project_id: "project_1", asset_id: "asset_1", extra: 1,
+    })).rejects.toThrow();
+    await expect(handlers.get("waveform:get")?.({}, {
+      project_id: "../private", asset_id: "asset_1",
+    })).rejects.toThrow("Invalid project_id");
+    await expect(handlers.get("waveform:get")?.({}, {
+      project_id: "project_1", asset_id: "asset_1", generate: "yes",
+    })).rejects.toThrow();
+    expect(fetchWithUi).not.toHaveBeenCalled();
+  });
+
+  it("get 响应剥离路径形态字段后经契约校验", async () => {
+    const { handlers, fetchWithUi } = setup();
+    fetchWithUi.mockResolvedValueOnce({ ...wfDescription, path: "C:\private\wf.bin", uri: "file:///private" });
+    const result = await handlers.get("waveform:get")?.({}, {
+      project_id: "project_1", asset_id: "asset_1",
+    }) as Record<string, unknown>;
+    expect(result.path).toBeUndefined();
+    expect(result.uri).toBeUndefined();
+    expect(result.cache_key).toBe(hashA);
+  });
+
+  it("media 经 admin resolve 换票据：Renderer 只拿 URL，不拿路径", async () => {
+    const { handlers, fetchWithUi, resolveWaveformMedia, registerDerivedMedia } = setup();
+    const path = "C:\data\cache\derived\waveforma\key\waveform.bin";
+    resolveWaveformMedia.mockResolvedValueOnce({ cache_key: hashA, status: "ready", path, size_bytes: 4096 });
+    const result = await handlers.get("waveform:media")?.({}, {
+      project_id: "project_1", asset_id: "asset_1",
+    }) as { media_url: string; cache_key: string; status: string; size_bytes: number };
+    expect(fetchWithUi).not.toHaveBeenCalled(); // 不走 UI 通道
+    expect(resolveWaveformMedia).toHaveBeenCalledWith({
+      project_id: "project_1", asset_id: "asset_1",
+    });
+    expect(registerDerivedMedia).toHaveBeenCalledWith(hashA, path);
+    expect(result.media_url).toBe("aivideo://media/ticket-url-value");
+    expect(result.status).toBe("ready");
+    expect(JSON.stringify(result)).not.toContain("C:");
+  });
+
+  it("media 未 ready / 无音频 / 非法请求被拒，不泄路径", async () => {
+    const { handlers, resolveWaveformMedia, registerDerivedMedia } = setup();
+    resolveWaveformMedia.mockResolvedValueOnce({ cache_key: hashA, status: "building", path: "C:/private", size_bytes: 0 });
+    await expect(handlers.get("waveform:media")?.({}, {
+      project_id: "project_1", asset_id: "asset_1",
+    })).rejects.toThrow("DERIVED_NOT_FOUND");
+    registerDerivedMedia.mockClear();
+    resolveWaveformMedia.mockRejectedValueOnce(Object.assign(new Error("private"), { code: "MEDIA_NO_AUDIO" }));
+    await expect(handlers.get("waveform:media")?.({}, {
+      project_id: "project_1", asset_id: "asset_1",
+    })).rejects.toThrow("MEDIA_NO_AUDIO");
+    // 未知键拒绝
+    await expect(handlers.get("waveform:media")?.({}, {
+      project_id: "project_1", asset_id: "asset_1", kind: "waveform",
     })).rejects.toThrow();
     expect(registerDerivedMedia).not.toHaveBeenCalled();
   });
