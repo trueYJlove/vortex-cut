@@ -8,10 +8,25 @@ from typing import Any
 
 from .database import Database, json_dumps, json_loads, utc_now
 from .ids import new_id
+from .job_scheduler import JobScheduler, policy_for
 from .media.encoders import EncoderDetector
 from .media.ffprobe import FFprobe
 from .media.render import build_render_args, render_media
 from .state import transition_sql
+
+# B16：同时在途 job 上限（重任务经调度器仍单槽；网络/轻量并行——此上限
+# 是总闸（防 jobs 表风暴下任务字典无界）；与调度器资源表共同生效）
+_MAX_CONCURRENT_JOBS = 4
+
+
+def _iso_to_epoch(value: str) -> float:
+    """ISO 时间串 → epoch 秒（aging 计算用；解析失败退 0 = 保守不 aging）。"""
+    from datetime import datetime
+
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except (ValueError, TypeError):
+        return 0.0
 
 AsrRunner = Callable[
     [Any, asyncio.Event, Callable[[float], None], Callable[[str], None]],
@@ -70,6 +85,7 @@ class JobService:
         provider_image_generation_start: GenerationStart | None = None,
         provider_image_generation_finish: GenerationFinish | None = None,
         provider_image_generation_recover: GenerationRecover | None = None,
+        scheduler: JobScheduler | None = None,
     ) -> None:
         self.db = db
         self.data_dir = data_dir
@@ -92,6 +108,8 @@ class JobService:
         self.provider_image_generation_start = provider_image_generation_start
         self.provider_image_generation_finish = provider_image_generation_finish
         self.provider_image_generation_recover = provider_image_generation_recover
+        # B16：资源配额调度器（None = 旧单槽行为——兼容既有测试/旧构造）
+        self.scheduler = scheduler
         self.tasks: dict[str, asyncio.Task[None]] = {}
         self.cancel_events: dict[str, asyncio.Event] = {}
         self.worker: asyncio.Task[None] | None = None
@@ -581,20 +599,73 @@ class JobService:
         return result
 
     async def _loop(self) -> None:
+        """B16 调度循环：分级 FIFO + 资源令牌准入（重任务单槽、network/light
+        有界并行）；无调度器时回退旧单槽行为（兼容测试/旧构造）。"""
         while True:
             if not self.tasks:
-                with self.db.connection() as db:
-                    row = db.execute(
-                        "SELECT id FROM jobs WHERE status='queued' ORDER BY created_at LIMIT 1"
-                    ).fetchone()
-                if row:
-                    job_id = row[0]
-                    task = asyncio.create_task(self._run(job_id))
-                    self.tasks[job_id] = task
-                    task.add_done_callback(
-                        lambda _, current_id=job_id: self.tasks.pop(current_id, None)
+                if self.scheduler is None:
+                    # 旧路径：一次一个（行为与 B16 前完全一致）
+                    with self.db.connection() as db:
+                        row = db.execute(
+                            "SELECT id FROM jobs WHERE status='queued' ORDER BY created_at LIMIT 1"
+                        ).fetchone()
+                    if row:
+                        self._spawn(row[0])
+                else:
+                    # B16：全部 queued 候选 → 优先级排序 → 逐个 admit 尝试
+                    # （高优先级资源不足不阻塞低优先级可运行任务）
+                    with self.db.connection() as db:
+                        rows = db.execute(
+                            "SELECT id, kind, created_at FROM jobs WHERE status='queued' "
+                            "ORDER BY created_at LIMIT 128"
+                        ).fetchall()
+                    candidates = [
+                        {
+                            "job_id": row["id"],
+                            "kind": row["kind"],
+                            # created_at 为 ISO 串——排序稳定即可（同批内比较）；
+                            # aging 用 ts_epoch 转换（失败退 0 = 不 aging，保守）
+                            "created_ts": _iso_to_epoch(str(row["created_at"])),
+                        }
+                        for row in rows
+                    ]
+                    ranked = sorted(
+                        candidates,
+                        key=lambda item: (
+                            self.scheduler.effective_priority(
+                                policy_for(str(item["kind"])), float(item["created_ts"])),
+                            float(item["created_ts"]),
+                            str(item["job_id"]),
+                        ),
                     )
+                    for candidate in ranked:
+                        if len(self.tasks) >= _MAX_CONCURRENT_JOBS:
+                            break
+                        admission = await self.scheduler.admit(
+                            str(candidate["kind"]), str(candidate["job_id"]))
+                        if admission is None:
+                            continue  # 资源不足/lease 暂缓：试下一候选（防头阻塞）
+                        self._spawn(str(candidate["job_id"]), admission)
+                        break  # 本轮只启动一个（0.05s 轮询逐个放行）
             await asyncio.sleep(0.05)
+
+    def _spawn(self, job_id: str, admission: Any = None) -> None:
+        """启动 job task；持有调度准入时 finally 归还令牌（恰好一次）。"""
+        release = (
+            self.scheduler.release(job_id) if self.scheduler and admission else None
+        )
+
+        async def run_with_release() -> None:
+            try:
+                await self._run(job_id)
+            finally:
+                if release is not None:
+                    await release
+        task = asyncio.create_task(run_with_release())
+        self.tasks[job_id] = task
+        task.add_done_callback(
+            lambda _, current_id=job_id: self.tasks.pop(current_id, None)
+        )
 
     async def _emit_update(self, job: dict[str, Any] | None) -> None:
         if job:

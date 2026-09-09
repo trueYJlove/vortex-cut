@@ -123,6 +123,14 @@ class PcmChunkMediaRequest(BaseModel):
     start_sample: int
 
 
+class EditorLoadLeaseRequest(BaseModel):
+    """B16b 编辑器负载心跳（Main → Core admin；Renderer 永不直调）。"""
+    model_config = ConfigDict(extra="forbid")
+
+    window_id: str
+    mode: str
+
+
 class ProjectCreateRequest(BaseModel):
     name: str
     root_dir_name: str | None = None
@@ -693,6 +701,10 @@ class CoreState:
 
     def _build_render_stack(self, settings: Settings) -> None:
         """A07 抽取仅为 __init__ 可读性；语义与原内联构建完全一致。"""
+        # B16：资源配额调度器（jobs._loop 消费；编辑器 lease 经内部端点心跳）
+        from .job_scheduler import JobScheduler
+
+        self.job_scheduler = JobScheduler()
         self.image_provider_secrets = ProviderSecretVault()
         self.image_provider_configs = ImageProviderConfigService(
             self.db, self.image_provider_secrets
@@ -754,6 +766,9 @@ class CoreState:
             provider_image_generation_recover=(
                 self.provider_image_generation.recover_interrupted_tasks
             ),
+            # B16：资源配额调度（重任务单槽 + network/light 有界并行 +
+            # 编辑器 lease 暂缓低优先级重任务）
+            scheduler=self.job_scheduler,
         )
         self.renders = RenderService(
             self.db,
@@ -2083,6 +2098,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise _domain(exc) from exc
         except PcmChunkError as exc:
             raise _domain(DomainError(exc.code, exc.message)) from exc
+
+    # ---- B16：编辑器负载 lease + 调度观测（admin 内部通道） ----
+
+    @app.post("/api/v1/internal/editor-load-lease")
+    async def editor_load_lease(
+        request: EditorLoadLeaseRequest,
+        _: CoreState = Depends(require_admin),
+    ) -> dict[str, Any]:
+        """B16b：编辑器负载心跳（Main 注入 window owner；TTL 3s）。
+
+        mode ∈ playing/scrubbing/idle；无心跳/过期 = idle（Renderer 崩溃
+        不永久饿死任务）。播放/拖动中：新的低优先级（≥4 级）重任务暂缓
+        入队执行；已运行任务不受影响（不可抢占语义）。
+        """
+        import time as _time
+
+        try:
+            state.job_scheduler.lease.heartbeat(
+                request.window_id, request.mode, _time.monotonic())
+        except ValueError as exc:
+            raise _error("LEASE_MODE_INVALID", str(exc), 400) from exc
+        return {"status": "ok", "mode": request.mode, "ttl_s": 3.0}
+
+    @app.get("/api/v1/internal/job-scheduler/stats")
+    async def job_scheduler_stats(
+        _: CoreState = Depends(require_admin),
+    ) -> dict[str, Any]:
+        """B16 调度器观测（admin 诊断：容量/持有/lease 快照）。"""
+        return state.job_scheduler.snapshot()
 
     @app.get("/api/v1/platform-presets")
     async def list_platform_presets(_: CoreState = Depends(require_ui)) -> dict[str, Any]:
