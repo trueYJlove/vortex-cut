@@ -113,6 +113,8 @@ export interface WorkerInit {
 
 export type WorkerRequest =
   | WorkerInit
+  | { type: "registerInput"; inputId: string; generation: number; geometry: { width: number; height: number }; ringDepth: number; shadow: boolean; seq: number }
+  | { type: "releaseInput"; inputId: string; generation: number; seq: number }
   | { type: "upload"; inputId: string; slot: number; srcN: number; frame: VideoFrame; seq: number }
   | { type: "uploadShadow"; inputId: string; srcN: number; frame: VideoFrame; seq: number }
   | { type: "uploadImage"; inputId: string; bitmap: ImageBitmap }
@@ -126,6 +128,8 @@ export type WorkerResponse =
   | { type: "submitted"; seq: number }
   | { type: "ready"; adapter: string; vendor: string }
   | { type: "initError"; message: string }
+  | { type: "inputRegistered"; seq: number; textureBytes: number }
+  | { type: "inputReleased"; seq: number; textureBytes: number }
   | { type: "uploaded"; seq: number; ms: number; copyToMs: number; texMs: number }
   | { type: "uploadedShadow"; seq: number; ms: number }
   | { type: "uploadError"; seq: number; message: string }
@@ -164,6 +168,10 @@ const state = {
   /** mipmap 可用性（首次 generateMipmap 失败即降级 LINEAR-only，会话级）。 */
   mipSupported: true,
   allYuvTextures: [] as WebGLTexture[],
+  /** B13：输入代（releaseInput(generation) 作废旧代引用/上传）。 */
+  inputGenerations: new Map<string, number>(),
+  /** B13：纹理字节记账（上传/删除同步更新——防悬挂引用/超预算后统计）。 */
+  textureBytes: 0,
   /** 帧上传模式：probe（首帧尝试 direct）/ direct（GPU-GPU）/ copyTo（回退）。 */
   frameUploadMode: "probe" as "probe" | "direct" | "copyTo",
 };
@@ -244,7 +252,9 @@ function handleInit(message: WorkerInit): void {
   for (const input of message.inputs) {
     state.sourceWidth.set(input.inputId, input.sourceWidth);
     state.geometry.set(input.inputId, { width: input.width, height: input.height });
+    state.inputGenerations.set(input.inputId, 1); // B13：init 输入 = 第 1 代
     state.ring.set(input.inputId, Array.from({ length: state.ringDepth }, () => ({ y: createYuvTexture(gl), uv: createYuvTexture(gl) })));
+    state.textureBytes += textureBytesOf(input.width, input.height, state.ringDepth, false);
   }
   state.backing = { width: message.canvasWidth, height: message.canvasHeight };
   message.canvas.width = Math.max(2, message.canvasWidth);
@@ -496,6 +506,90 @@ function ringSlot(inputId: string, slot: number): RingSlot | null {
   return slots ? slots[slot % slots.length] ?? null : null;
 }
 
+/** B13：纹理字节记账（创建记正/删除记负；估算口径 resource-budget）。 */
+function textureBytesOf(width: number, height: number, ringDepth: number, shadow: boolean): number {
+  return Math.round(width * height * 1.5 * (4 / 3)) * (ringDepth + (shadow ? 1 : 0));
+}
+
+/** B13：输入代校验（未注册或已换代 → false：上传作废）。 */
+function generationMatches(inputId: string): boolean {
+  return state.inputGenerations.has(inputId);
+}
+
+/** B13：注册输入（环池纹理创建 + 代记录 + 字节记账）。
+ *
+ * 重复注册（generation 递增）= 换表：先释放旧环池再建新深度的池。
+ * ack = inputRegistered（携带 textureBytes 供会话预算统计）。 */
+function handleRegisterInput(message: Extract<WorkerRequest, { type: "registerInput" }>): void {
+  const gl = state.gl!;
+  releaseInputTextures(message.inputId, message.generation - 1);
+  state.inputGenerations.set(message.inputId, message.generation);
+  state.geometry.set(message.inputId, { width: message.geometry.width, height: message.geometry.height });
+  state.sourceWidth.set(message.inputId, message.geometry.width);
+  state.ring.set(message.inputId, Array.from({ length: message.ringDepth }, () => ({ y: createYuvTexture(gl), uv: createYuvTexture(gl) })));
+  if (message.shadow) {
+    // 影子槽按需在 shadowPair 惰性创建——此处显式预建以纳入记账
+    shadowPair(message.inputId);
+  }
+  const bytes = textureBytesOf(message.geometry.width, message.geometry.height, message.ringDepth, message.shadow);
+  state.textureBytes += bytes;
+  post({ type: "inputRegistered", seq: message.seq, textureBytes: state.textureBytes });
+}
+
+/** B13：释放输入（纹理删除 + 字节记账 + 代校验——旧代请求作废）。 */
+function handleReleaseInput(message: Extract<WorkerRequest, { type: "releaseInput" }>): void {
+  const removed = releaseInputTextures(message.inputId, message.generation);
+  post({ type: "inputReleased", seq: message.seq, textureBytes: state.textureBytes });
+  void removed;
+}
+
+/** 删除输入的全部纹理（ring + 影子 + 静图 + 模糊垫底），记负字节。
+ *  generation 匹配才删（旧代作废不删新代纹理）；返回是否实际删除。 */
+function releaseInputTextures(inputId: string, generation: number): boolean {
+  const gl = state.gl!;
+  const current = state.inputGenerations.get(inputId);
+  if (current !== undefined && generation !== undefined && generation !== current) {
+    return false; // 旧代引用：作废（不删新代纹理）
+  }
+  const entry = state.ring.get(inputId);
+  if (!entry && !state.shadowY.has(inputId) && !state.imageTex.has(inputId)) return false;
+  const geometry = state.geometry.get(inputId) ?? { width: 16, height: 9 };
+  const shadow = state.shadowY.has(inputId);
+  // allYuvTextures 簿记同步移除（防悬挂引用累积）
+  for (const slot of entry ?? []) {
+    for (const tex of [slot.y, slot.uv]) {
+      gl.deleteTexture(tex);
+      const index = state.allYuvTextures.indexOf(tex);
+      if (index >= 0) state.allYuvTextures.splice(index, 1);
+    }
+  }
+  state.ring.delete(inputId);
+  const shadowY = state.shadowY.get(inputId);
+  const shadowUV = state.shadowUV.get(inputId);
+  for (const tex of [shadowY, shadowUV]) {
+    if (tex) {
+      gl.deleteTexture(tex);
+      const index = state.allYuvTextures.indexOf(tex);
+      if (index >= 0) state.allYuvTextures.splice(index, 1);
+    }
+  }
+  state.shadowY.delete(inputId);
+  state.shadowUV.delete(inputId);
+  const imageTexture = state.imageTex.get(inputId);
+  if (imageTexture) {
+    gl.deleteTexture(imageTexture);
+    state.imageTex.delete(inputId);
+    state.textureBytes -= Math.round(geometry.width * geometry.height * 4); // RGBA
+  }
+  // 注：模糊垫底目标是共享资源（"small"/"tiny" 键），不随输入释放。
+  state.geometry.delete(inputId);
+  state.sourceWidth.delete(inputId);
+  state.inputGenerations.delete(inputId);
+  const ringDepth = entry?.length ?? 0;
+  state.textureBytes -= textureBytesOf(geometry.width, geometry.height, ringDepth, shadow);
+  return true;
+}
+
 function shadowPair(inputId: string): RingSlot {
   const gl = state.gl!;
   let y = state.shadowY.get(inputId);
@@ -623,7 +717,11 @@ self.addEventListener("message", async (event: MessageEvent<WorkerRequest>) => {
     if (message.type === "init") { handleInit(message); return; }
     if (message.type === "dispose") { (self as unknown as { close?: () => void }).close?.(); return; }
     if (!state.gl) return;
+    if (message.type === "registerInput") { handleRegisterInput(message); return; }
+    if (message.type === "releaseInput") { handleReleaseInput(message); return; }
     if (message.type === "upload") {
+      // B13：代校验——输入已释放/换代时作废上传（帧关闭防泄漏）
+      if (!generationMatches(message.inputId)) { message.frame.close(); post({ type: "uploadError", seq: message.seq, message: "input generation stale" }); return; }
       const slot = ringSlot(message.inputId, message.slot)!;
       const start = performance.now();
       void uploadToTextures(message.frame, slot.y, slot.uv).then((split) => {
@@ -634,6 +732,7 @@ self.addEventListener("message", async (event: MessageEvent<WorkerRequest>) => {
       return;
     }
     if (message.type === "uploadShadow") {
+      if (!generationMatches(message.inputId)) { message.frame.close(); post({ type: "uploadError", seq: message.seq, message: "input generation stale" }); return; }
       const pair = shadowPair(message.inputId);
       const start = performance.now();
       void uploadToTextures(message.frame, pair.y, pair.uv).then(() => {

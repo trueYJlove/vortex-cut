@@ -62,6 +62,14 @@ export class CompositorWorkerClient {
           pending?.resolve(data as never);
           break;
         }
+        case "inputRegistered":
+        case "inputReleased": {
+          // B13 ack：纹理字节总量随响应携带（预算统计）
+          const pending = this.pending.get(data.seq);
+          this.pending.delete(data.seq);
+          pending?.resolve(data as never);
+          break;
+        }
         case "readback": {
           const pending = this.pending.get(data.seq);
           this.pending.delete(data.seq);
@@ -152,6 +160,31 @@ export class CompositorWorkerClient {
     const request: WorkerRequest = { type: "uploadImage", inputId, bitmap };
     try { this.worker.postMessage(request, [bitmap]); }
     catch (error) { bitmap.close(); throw error; }
+  }
+
+  /** B13：注册/换代表输入（generation 递增；环池按 ringDepth 重建 + 字节
+   *  记账）。resolve = worker ack（inputRegistered）。 */
+  registerInput(inputId: string, generation: number, geometry: { width: number; height: number }, ringDepth: number, shadow: boolean): Promise<void> {
+    if (this.disposed) return Promise.reject(new Error("compositor worker disposed"));
+    const seq = this.nextSeq++;
+    const request: WorkerRequest = { type: "registerInput", inputId, generation, geometry, ringDepth, shadow, seq };
+    return new Promise<void>((resolve, reject) => {
+      this.pending.set(seq, { resolve: resolve as never, reject });
+      try { this.worker.postMessage(request); }
+      catch (error) { this.pending.delete(seq); reject(error); }
+    });
+  }
+
+  /** B13：释放输入（纹理删除 + 字节记账；generation 不匹配时作废）。 */
+  releaseInput(inputId: string, generation: number): Promise<void> {
+    if (this.disposed) return Promise.reject(new Error("compositor worker disposed"));
+    const seq = this.nextSeq++;
+    const request: WorkerRequest = { type: "releaseInput", inputId, generation, seq };
+    return new Promise<void>((resolve, reject) => {
+      this.pending.set(seq, { resolve: resolve as never, reject });
+      try { this.worker.postMessage(request); }
+      catch (error) { this.pending.delete(seq); reject(error); }
+    });
   }
 
   /** 下发绘制命令列表（顺序投递；worker 内同步执行，呈现按消息序保证）。 */
