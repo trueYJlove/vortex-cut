@@ -15,6 +15,7 @@ import { registerStage4dIpc } from "./stage4d-ipc.js";
 import { registerStage4eIpc } from "./stage4e-ipc.js";
 import { registerStage5Ipc } from "./stage5-ipc.js";
 import { registerStage6rIpc } from "./stage6r-ipc.js";
+import { registerPerformanceIpc } from "./performance-ipc.js";
 import { registerFileGrant } from "./file-grants.js";
 import { exportFileName, normalizeExportPath } from "./export-destination.js";
 import { defaultLogPath, appendLog, redact } from "./logging.js";
@@ -540,6 +541,18 @@ function registerIpc(): void {
   registerStage4eIpc({ ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) }, fetchWithUi });
   registerStage5Ipc({ ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) }, fetchWithUi });
   registerStage6rIpc({ ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) }, fetchWithUi });
+  // B10：派生媒体 IPC——lookup/stats(Renderer 可见) + media(admin resolve→票据)
+  registerPerformanceIpc({
+    ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) },
+    fetchWithUi,
+    resolveDerived: input => requireCore().resolveDerivedMedia(input),
+    registerDerivedMedia: (cacheKey, path) => {
+      if (!restrictedMedia.registeredPath(cacheKey, "proxy")) {
+        restrictedMedia.register(cacheKey, path, "proxy");
+      }
+      return restrictedMedia.issue(cacheKey, "proxy");
+    },
+  });
   ipcMain.handle("preview:create", async (_event, input: { project_id: ProjectId; preview: PreviewCreateInput }) => {
     const projectId = asId(input.project_id, "project_id");
     const request = parsePreviewCreateInput(input.preview);

@@ -70,6 +70,7 @@ import type {
   , ShotRequirementTimelineBatchAssemblyApplyResponse, ShotRequirementTimelineBatchAssemblyPage
   , ShotRequirementTimelineBatchAssemblyPreviewId, ShotRequirementTimelineBatchAssemblyId
   , ShotRequirementTimelineBatchAssemblyItemPage
+  , DerivedMediaEntry, DerivedMediaStats
 } from "@aivideo/contracts";
 
 // M3-0 探针 dev-only 桥：生产构建 NODE_ENV 静态替换 → 死代码消除（见 probe-bridge.ts 注释）。
@@ -220,6 +221,10 @@ export interface DesktopApi {
   listShotRequirementTimelineBatchAssemblyItems: (input: { batch_id: ShotRequirementTimelineBatchAssemblyId; limit?: number; cursor?: string }) => Promise<ShotRequirementTimelineBatchAssemblyItemPage>;
   getRenderArtifact: (artifactId: RenderArtifactId) => Promise<RenderArtifactPresentation>;
   getPreviewIr: (input: { project_id: ProjectId; timeline_revision_id?: string | null; output_ratio?: string }) => Promise<PreviewIrPresentation>;
+  // B10 派生媒体缓存（performance-v1）：查询/用量 + 票据化媒体 URL
+  lookupDerivedMedia: (input: { project_id: ProjectId; asset_id: string; kind: string; params: Record<string, string> }) => Promise<DerivedMediaEntry>;
+  derivedMediaStats: (projectId: ProjectId) => Promise<DerivedMediaStats>;
+  derivedMediaUrl: (input: { project_id: ProjectId; asset_id: string; kind: string; params: Record<string, string> }) => Promise<{ media_url: string; cache_key: string; status: "ready"; size_bytes: number }>;
   captionFontUrl: () => Promise<string>;
   openArtifact: (artifactId: string) => Promise<void>;
   openArtifactFolder: (artifactId: string) => Promise<void>;
@@ -352,6 +357,9 @@ const api: DesktopApi = {
   listShotRequirementTimelineBatchAssemblyItems: input => ipcRenderer.invoke("stage6r:batch-assembly-item-list", input),
   getRenderArtifact: artifactId => ipcRenderer.invoke("render-artifact:get", artifactId),
   getPreviewIr: input => ipcRenderer.invoke("preview-ir:get", input),
+  lookupDerivedMedia: input => ipcRenderer.invoke("derived-media:lookup", input),
+  derivedMediaStats: projectId => ipcRenderer.invoke("derived-media:stats", { project_id: projectId }),
+  derivedMediaUrl: input => ipcRenderer.invoke("derived-media:media", input),
   captionFontUrl: () => ipcRenderer.invoke("media:caption-font-url"),
   openArtifact: artifactId => ipcRenderer.invoke("artifact:open", artifactId),
   openArtifactFolder: artifactId => ipcRenderer.invoke("artifact:folder", artifactId),
