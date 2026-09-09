@@ -140,7 +140,7 @@ function releaseGopAnchor(): void {
   pendingAnchorPts = -1;
 }
 
-async function init(url: string, cacheFrames: number, refreshTicket?: () => Promise<string>): Promise<void> {
+async function init(url: string, cacheFrames: number, refreshTicket?: () => Promise<string>, cacheCapBytes?: number): Promise<void> {
   // B12：Range 源初始化（bytes=0-65535 探测 + moov-only 解析）——整文件
   // arrayBuffer 下载已移除。票据 TTL 到期由 HttpRangeSource 受控续票
   //（有限一次，相同 range 重发）；续票回调经 init 消息注入（会话持有
@@ -148,7 +148,7 @@ async function init(url: string, cacheFrames: number, refreshTicket?: () => Prom
   // 由 DecodeWorker 客户端回退代理（不冒充已支持）。
   rangeSource = await HttpRangeSource.create(
     url, (input, init2) => fetch(input, init2), refreshTicket ?? null,
-    undefined, undefined,
+    { cacheCapBytes: cacheCapBytes ?? undefined }, undefined,
   );
   demuxResult = await demuxRange(rangeSource);
   const demuxed = demuxResult;
@@ -324,10 +324,10 @@ function binarySearchPos(index: SampleIndex, ptsUs: number): number {
 }
 
 self.onmessage = (event: MessageEvent) => {
-  const data = event.data as { type: string; url?: string; cacheFrames?: number; id?: number; frameN?: number; fps?: number; refreshTicket?: () => Promise<string> };
+  const data = event.data as { type: string; url?: string; cacheFrames?: number; id?: number; frameN?: number; fps?: number; refreshTicket?: () => Promise<string>; cacheCapBytes?: number };
   try {
     if (data.type === "init" && data.url) {
-      void init(data.url, data.cacheFrames ?? 0, data.refreshTicket);
+      void init(data.url, data.cacheFrames ?? 0, data.refreshTicket, data.cacheCapBytes);
     } else if (data.type === "decode" && typeof data.id === "number" && typeof data.frameN === "number") {
       decodeFrame(data.id, data.frameN, data.fps ?? 30);
     } else if (data.type === "close") {

@@ -1,5 +1,6 @@
 import { throwIfAborted } from "./worker-lifecycle.js";
 import { AudioSourceCache } from "./audio-source-cache.js";
+import { activeInputIds } from "./ir.js";
 /** 合成预览会话：持有解码 worker、GL 执行器 worker（OffscreenCanvas）、纹理簿记
  * 与 WebAudio，对外提供 play/pause/seek 与时间/指标回调。
  *
@@ -17,7 +18,8 @@ import type { CompositorWorkerClient } from "./compositor-worker.js";
 import type { DrawCommand } from "./compositor-worker.worker.js";
 import type { Ir, IrContent, IrFrame, IrOverlay } from "./ir.js";
 import type { PreviewSourceResolver } from "./source-resolver.js";
-import { ringDepthFor } from "./resource-budget.js";
+import { BUDGET_TABLES, ringDepthFor } from "./resource-budget.js";
+import { InputPool } from "./input-pool.js";
 import { editorPerf, allocatePerfSession } from "./perf-metrics.js";
 import { DecodeWorker } from "./decode-worker.js";
 import { VARISPEED_WORKLET_NAME, createVarispeedWorkletUrl } from "./varispeed-worklet.js";
@@ -192,6 +194,13 @@ export class PreviewSession {
   ir: Ir;
   /** B13：本会话环深/预读（档位决策；压力收 5 时 LEAD 联动）。 */
   private ringDepth = PreviewSession.RING;
+  /** B13：输入池（状态机 + 压力降级决策；播放 tick 驱动活跃集合）。 */
+  private pool: InputPool | null = null;
+  private poolTier: "conservative" | "balanced" | "high" | null = null;
+  /** B13：输入最近活跃墙钟（idle 判定 = 不活跃超时）。 */
+  private readonly inputLastActive = new Map<string, number>();
+  private static readonly IDLE_AFTER_MS = 1_500;
+  private poolWarned = false;
   private readonly perfId = allocatePerfSession();
   private perfRequest = 0;
   private readonly lifetime = new AbortController();
@@ -293,8 +302,10 @@ export class PreviewSession {
           if (!refreshed?.media_url) throw new Error("ticket refresh failed");
           return refreshed.media_url;
         };
+        // B13：Range 字节缓存预算随档位（64/128/256MiB）
+        const rangeCacheBytes = (resourceTier ? BUDGET_TABLES[resourceTier].rangeCacheMiB : 128) * 1024 * 1024;
         const worker = await DecodeWorker.create(
-          ticket, signal, refreshTicket(input.asset_id));
+          ticket, signal, refreshTicket(input.asset_id), rangeCacheBytes);
         if (session.disposed || signal?.aborted) { worker.terminate(); throw new DOMException("Session disposed", "AbortError"); }
         rig.worker = worker;
       }
@@ -328,6 +339,9 @@ export class PreviewSession {
       }
     }
     throwIfAborted(signal);
+    // B13：输入池注册（视频输入；后续 tick 驱动活跃/idle/压力降级）
+    session.poolTier = resourceTier ?? null;
+    session.poolRegister(ir);
     session.rebuildPipOverlayIndex(); // A04：手势路径免全帧扫描
     return session;
     } catch (error) { session.dispose(); throw error; }
@@ -393,6 +407,8 @@ export class PreviewSession {
     const segOf = (ir: Ir) => new Map(ir.segments.map(segment => [segment.clip_id, segment] as const));
     const oldSegs = segOf(this.ir);
     this.ir = nextIr;
+    // B13：换表输入集合不变（sig 已校验）——池注册保持；时间窗重置活跃
+    this.inputLastActive.forEach((_at, inputId) => this.inputLastActive.set(inputId, performance.now()));
     this.audioCacheBindingGeneration += 1;
     for (const [clipId, rig] of [...this.audioRigs]) {
       const next = nextIr.segments.find(segment => segment.clip_id === clipId);
@@ -493,6 +509,86 @@ export class PreviewSession {
       };
     }
     return state;
+  }
+
+  // ---- B13 输入池驱动 ----
+
+  /** 会话输入注册（create/replaceIr 调用；池 + 世代记录）。 */
+  private poolRegister(ir: Ir): void {
+    if (!this.pool) this.pool = new InputPool(this.poolTier ?? "balanced");
+    for (const input of ir.inputs) {
+      if (input.asset_kind !== "video") continue; // 静图/纯音频不占解码保温
+      this.pool.register({
+        inputId: input.input_id,
+        width: input.geometry.width || 1920,
+        height: input.geometry.height || 1080,
+        shadow: false, // 影子槽由转场共享输入按需启用（记账粗粒度可接受）
+      });
+      this.inputLastActive.set(input.input_id, performance.now());
+    }
+  }
+
+  /** 播放/seek tick 驱动：活跃集合标记 + idle 识别 + 压力降级执行。
+   *
+   * - active = 当前帧 + LEAD 窗口的输入（activeInputIds 已按帧算好，
+   *   此处取 current/next 两帧并集 + pump 目标帧）。
+   * - idle = 1.5s 不活跃且非 pin。
+   * - pressure 降级：evict-idle → releaseInput（worker 纹理删除）；
+   *   shrink-ring（环深 8→5）→ 会话侧 ringDepth 收缩（下一会话生效，
+   *   换档语义与计划"pause/seek 边界原子切换"一致——运行中环池不撕裂）；
+   *   over-budget → 一次性提示（lastError），不静默删层。
+   */
+  private poolDrive(frame: IrFrame): void {
+    const pool = this.pool;
+    if (!pool) return;
+    const now = performance.now();
+    const active = new Set<string>(activeInputIds(frame));
+    const nextFrame = this.ir.frames[frame.n + 1];
+    if (nextFrame) for (const id of activeInputIds(nextFrame)) active.add(id);
+    for (const inputId of active) {
+      this.inputLastActive.set(inputId, now);
+      if (pool.stateOf(inputId) !== "active") pool.mark(inputId, "active");
+    }
+    for (const inputId of pool.activeIds()) {
+      if (!active.has(inputId)) {
+        pool.mark(inputId, this.inputLastActive.has(inputId)
+          && now - (this.inputLastActive.get(inputId) ?? 0) > PreviewSession.IDLE_AFTER_MS
+          ? "idle" : "warm");
+      }
+    }
+    const decision = pool.pressure([...active]);
+    if (decision.kind === "evict-idle") {
+      for (const inputId of decision.inputIds) {
+        const entry = pool.entryOf(inputId);
+        if (!entry) continue;
+        pool.mark(inputId, "evicting");
+        const rig = this.rigs.get(inputId);
+        void rig?.worker?.terminate(); // 解码器保温让位（重入时 pump 冷启重建）
+        void this.compositor?.releaseInput(inputId, entry.generation)
+          .then(() => pool.release(inputId, entry.generation))
+          .catch(() => pool.mark(inputId, "failed"));
+      }
+    } else if (decision.kind === "shrink-ring") {
+      // 环深收缩下一会话生效（换源原子性；本会话 LEAD 联动立即生效）
+      this.ringDepth = decision.ringDepth;
+    } else if (decision.kind === "over-budget" && !this.poolWarned) {
+      this.poolWarned = true;
+      this.lastError = `活跃输入纹理预算超限（${decision.activeIds.length} 个输入）——已按保守策略运行`;
+    }
+  }
+
+  /** dispose/换表：释放全部池输入（worker 纹理删除 + 簿记清零）。 */
+  private poolDispose(): void {
+    const pool = this.pool;
+    if (!pool) return;
+    // 释放全部注册输入（idle/active/warm 一视同仁——会话结束）
+    for (const inputId of [...this.inputLastActive.keys()]) {
+      const entry = pool.entryOf(inputId);
+      if (!entry) continue;
+      void this.compositor?.releaseInput(inputId, entry.generation).catch(() => undefined);
+    }
+    this.pool = null;
+    this.inputLastActive.clear();
   }
 
   /** 用户驱动的向后跳转（回卷重播/回退 seek）后重置解码链：游标回 -1，
@@ -992,6 +1088,7 @@ export class PreviewSession {
     editorPerf.record("seek", this.lastSeekMs, this.perfId, epoch, epoch, index);
     if (this.frameReady(frame)) this.compose(frame);
     this.onTimeUs?.(frame.t_us);
+    this.poolDrive(frame); // B13：seek 后立即驱动（pin/换源语义）
     // 暂停态预热预读链：预解码后续 LEAD 帧——再按播放即有热跑道
     //（消除 seek 后播放头几百毫秒的冷启丢帧）。**拖拽快速档跳过预热**：
     // scrub 风暴中预热解码与下一 seek 的目标解码争抢解码器（实测 seek p95
@@ -1049,6 +1146,7 @@ export class PreviewSession {
         this.currentFrame = composed;
         this.lastAdvanceWall = now;
         this.onTimeUs?.(this.ir.frames[composed]!.t_us);
+        this.poolDrive(this.ir.frames[composed]!); // B13：活跃/idle/压力驱动
       }
       // 饥饿护栏：落后过多 → 重锚时钟（播放按解码吞吐放慢），而不是让目标
       // 无限狂奔、丢帧按 tick 线性堆积（旧实现冻结+丢帧 404 的直接根源）。
@@ -1123,6 +1221,7 @@ export class PreviewSession {
     this.disposed = true;
     this.seekEpoch++;
     this.lifetime.abort();
+    this.poolDispose(); // B13：池输入释放（worker 纹理删除 + 簿记清零）
     this.onTimeUs = null;
     this.onEnded = null;
     this.pause();

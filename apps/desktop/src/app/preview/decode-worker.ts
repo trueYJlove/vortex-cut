@@ -76,14 +76,14 @@ export class DecodeWorker {
   private readonly onError = (event: ErrorEvent): void => { this.terminate(new Error(event.message || "decode worker error")); };
   private readonly onMessageError = (): void => { this.terminate(new Error("decode worker message error")); };
 
-  static async create(ticket: string, signal?: AbortSignal, refreshTicket?: () => Promise<string>): Promise<DecodeWorker> {
+  static async create(ticket: string, signal?: AbortSignal, refreshTicket?: () => Promise<string>, cacheCapBytes?: number): Promise<DecodeWorker> {
     throwIfAborted(signal);
     const instance = new DecodeWorker();
     try {
       const data = await workerReady<DecodeWorkerMessage>(instance.worker, data => {
         if (data.type === "error") throw new Error(data.message ?? "worker init error");
         return data.type === "ready" ? data : undefined;
-      }, () => instance.worker.postMessage({ type: "init", url: ticket, cacheFrames: 0, ...(refreshTicket ? { refreshTicket } : {}) }), signal);
+      }, () => instance.worker.postMessage({ type: "init", url: ticket, cacheFrames: 0, ...(refreshTicket ? { refreshTicket } : {}), ...(cacheCapBytes !== undefined ? { cacheCapBytes } : {}) }), signal);
       throwIfAborted(signal);
       instance.hardware = data.hardware ?? null;
       instance.width = data.width ?? 0;

@@ -243,6 +243,32 @@ describe("A01 PreviewSession.create 资源栈", () => {
     session.dispose();
   });
 
+  it("B13 输入池驱动：create 注册视频输入；dispose 释放（compositor 收 releaseInput）", async () => {
+    installWorkers();
+    stubOffscreenCanvas();
+    const container = document.createElement("div");
+    const session = await PreviewSession.create(container, freshIr(), TICKETS, undefined, undefined, null, "balanced");
+    const compositor = ScriptedWorker.instances[0]!;
+    // dispose：全部注册输入走 releaseInput（worker 纹理删除 + 记账）
+    session.dispose();
+    const releases = compositor.messages.filter(m => m.type === "releaseInput");
+    expect(releases.length).toBeGreaterThanOrEqual(1);
+    const inputIds = releases.map(m => m.inputId);
+    expect(inputIds).toContain("in_1");
+  });
+
+  it("B13 Range 缓存预算：档位值传入 decode worker init（conservative = 64MiB）", async () => {
+    installWorkers();
+    stubOffscreenCanvas();
+    const container = document.createElement("div");
+    const session = await PreviewSession.create(container, freshIr(), TICKETS, undefined, undefined, null, "conservative");
+    // decode worker = 第 1 个实例（compositor 之后）
+    const decode = ScriptedWorker.instances[1]!;
+    const init = decode.messages.find(m => m.type === "init");
+    expect(init.cacheCapBytes).toBe(64 * 1024 * 1024);
+    session.dispose();
+  });
+
   it("create 成功后 dispose：全部 worker terminate、canvas 移除、二次 dispose 幂等", async () => {
     stubOffscreenCanvas();
     const container = document.createElement("div");
