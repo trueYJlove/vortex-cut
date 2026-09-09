@@ -1,0 +1,22 @@
+{
+  "runs": "1",
+  "seeks": "100",
+  "playback-seconds": "30",
+  "scenarios": "F01",
+  "smoke": false,
+  "baseline_status": "partial-B00-not-G0",
+  "commit": "059a77c9310aaad3bded33ee8d228abd82dc5bfa",
+  "code_fingerprint": "5c54b271f4e6d79a74779734415d4c8ac511b5b362ae692169405390d8bd5c12",
+  "dirty_files": "M services/core/src/aivs_core/projects.py\n?? evidence/performance/g1-20260909/\n?? services/core/tests/unit/test_projects_sync_paths.py\n?? tools/performance/benchmark_ir.py",
+  "node": "v24.19.0",
+  "fixture": {
+    "file": "F01.mp4",
+    "sha256": "4e51be3e3a70ba5192f2b682ed50545cfe111ec22857366f8b54876ee1c8d5b0",
+    "duration_s": 12,
+    "size": "640x360",
+    "fps": 30,
+    "recipe": "testsrc2-av-cfr-v1",
+    "bytes": 3123032,
+    "coverage_note": "Media only; not historical PiP, VFR/B-frame, multilayer or audio-failure coverage."
+  }
+}

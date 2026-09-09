@@ -8,7 +8,7 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 
 from .background_work import AssetChangedError, hashed_fingerprint
-from .database import Database, json_dumps, json_loads, utc_now
+from .database import Database, json_dumps, json_loads, sha256_file, utc_now
 from .ids import new_id
 
 PROJECT_STATUSES = {"active", "archived", "missing"}
