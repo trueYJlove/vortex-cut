@@ -305,6 +305,20 @@ export function App() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const pendingSeekRef = useRef<number | null>(null);
+  // B16b：编辑器负载上报（playing/scrubbing/idle）——状态转换即时推送 +
+  // 1s 保活（Main 侧 lease 心跳消费；Renderer 崩溃 = 无推送 = Core TTL
+  // 过期回 idle，不永久饿死后台任务）。推送失败静默（辅助通道）。
+  useEffect(() => {
+    const mode = progressDragging ? "scrubbing" : playing ? "playing" : "idle";
+    const push = () => {
+      window.desktop.updateEditorLoad(mode).catch(() => undefined);
+    };
+    push();
+    const keepAlive = window.setInterval(push, 1_000);
+    return () => {
+      window.clearInterval(keepAlive);
+    };
+  }, [playing, progressDragging]);
   useEffect(() => {
     const move = (event: PointerEvent) => {
       const resize = resizeRef.current;

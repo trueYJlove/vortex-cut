@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import { access, readdir, readFile } from "node:fs/promises";
 import { totalmem } from "node:os";
 import { CoreAdminClient, CoreHttpError } from "./core-admin-client.js";
+import { EditorLoadLeaseHeartbeat, makeWindowOwnerId, type EditorLoadMode } from "./editor-load-lease.js";
 import { ProviderSecretStore, reinjectProviderSecrets, removeProviderSecret, saveProviderSecret } from "./provider-secrets.js";
 import { ImageProviderSecretStore, reinjectImageProviderSecrets } from "./image-provider-secrets.js";
 import { issueCandidateClipMedia } from "./candidate-media.js";
@@ -87,6 +88,9 @@ let windowRef: BrowserWindow | undefined;
 let supervisor: SidecarSupervisor | undefined;
 let core: CoreAdminClient | undefined;
 let runtime: { base_url: string; ui_token: string; protocol_version: 1 } | undefined;
+// B16b：编辑器负载 lease 心跳（Core 就绪后 1s 自重调度；停止即 TTL 过期）
+let editorLease: EditorLoadLeaseHeartbeat | undefined;
+let editorLeaseIpc: { handle(channel: string, listener: (_event: unknown, mode?: unknown) => unknown): void } | null = null;
 const restrictedMedia = new RestrictedMediaRegistry();
 let probeIpc: ProbeIpcHandle | null = null;
 let logPath = "";
@@ -304,6 +308,17 @@ function registerIpc(): void {
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Core UI session startup timed out")), 30_000))
     ]);
     return rendererRuntime();
+  });
+  // B16b：Renderer 推送编辑器负载（playing/scrubbing/idle；转换即时 +
+  // 1s 保活——Main 侧 lease 心跳消费）。Renderer 崩溃 = 无推送 = 心跳
+  // 维持最后值（Core TTL 兜底过期回 idle）。
+  editorLeaseIpc = { handle: (channel, listener) => ipcMain.handle(channel, listener) };
+  ipcMain.handle("editor-load:update", (_event, mode: unknown) => {
+    if (mode !== "playing" && mode !== "scrubbing" && mode !== "idle") {
+      throw new Error("Invalid editor load mode");
+    }
+    editorLease?.updateMode(mode as EditorLoadMode);
+    return { status: "ok" };
   });
   ipcMain.handle("diagnostics:get", async () => rendererHealth(await requireCore().health()));
   ipcMain.handle("media:choose", async () => {
@@ -734,6 +749,18 @@ async function startRuntime(): Promise<void> {
   // Core correctly rejects after session isolation is enabled.
   runtime = { base_url: `http://127.0.0.1:${ready.port}`, ui_token: session.token, protocol_version: 1 };
   resolveRuntime?.(runtime);
+  // B16b：编辑器负载 lease 心跳（1s 自重调度；停止/崩溃 = Core TTL 过期
+  // 回 idle——Renderer 崩溃不永久饿死后台任务）
+  editorLease?.stop();
+  editorLease = new EditorLoadLeaseHeartbeat({
+    windowId: makeWindowOwnerId(),
+    report: input => core!.reportEditorLoadLease(input),
+    schedule: (delayMs, callback) => {
+      const timer = setTimeout(() => callback(), delayMs);
+      return () => clearTimeout(timer);
+    },
+  });
+  editorLease.start();
   await appendLog(logPath, "Core UI session ready");
 }
 
@@ -771,6 +798,9 @@ function parseExecutableArgs(value: string | undefined): string[] | undefined {
 }
 
 async function shutdownRuntime(): Promise<void> {
+  // B16b：心跳停止 → Core TTL 3s 过期回 idle（不显式上报）
+  editorLease?.stop();
+  editorLease = undefined;
   try { await core?.shutdown(); } catch { /* Core may already be down. */ }
   await supervisor?.stop();
   runtime = undefined;

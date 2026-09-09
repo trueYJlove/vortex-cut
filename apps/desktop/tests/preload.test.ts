@@ -56,7 +56,8 @@ describe("Desktop preload 白名单", () => {
       ["lookupDerivedMedia", [{}]], ["derivedMediaStats", ["project_1"]], ["derivedMediaUrl", [{}]],
       ["getPreviewSource", [{}]], ["createPreviewSourceJob", [{}]], ["previewSourceMediaUrl", [{}]],
       ["getWaveform", [{}]], ["waveformMediaUrl", [{}]],
-      ["ensurePcmChunk", [{}]], ["pcmChunkMediaUrl", [{}]], ["diagnostics", []]
+      ["ensurePcmChunk", [{}]], ["pcmChunkMediaUrl", [{}]],
+      ["updateEditorLoad", ["playing"]], ["diagnostics", []]
     ];
     for (const [name, args] of calls) await api[name](...args);
     expect(invoke).toHaveBeenCalledTimes(5 + calls.length);

@@ -243,6 +243,8 @@ export interface DesktopApi {
   // B15 分块 PCM：块确保（网格对齐）+ 票据化块文件 URL
   ensurePcmChunk: (input: { project_id: ProjectId; asset_id: string; start_sample: number }) => Promise<PcmChunkDescription>;
   pcmChunkMediaUrl: (input: { project_id: ProjectId; asset_id: string; start_sample: number }) => Promise<PcmChunkMediaResponse>;
+  // B16b 编辑器负载：playing/scrubbing/idle 推送（Main 侧 lease 心跳消费）
+  updateEditorLoad: (mode: "playing" | "scrubbing" | "idle") => Promise<{ status: string }>;
   captionFontUrl: () => Promise<string>;
   openArtifact: (artifactId: string) => Promise<void>;
   openArtifactFolder: (artifactId: string) => Promise<void>;
@@ -385,6 +387,7 @@ const api: DesktopApi = {
   waveformMediaUrl: input => ipcRenderer.invoke("waveform:media", input),
   ensurePcmChunk: input => ipcRenderer.invoke("pcm-chunk:ensure", input),
   pcmChunkMediaUrl: input => ipcRenderer.invoke("pcm-chunk:media", input),
+  updateEditorLoad: (mode: "playing" | "scrubbing" | "idle") => ipcRenderer.invoke("editor-load:update", mode),
   captionFontUrl: () => ipcRenderer.invoke("media:caption-font-url"),
   openArtifact: artifactId => ipcRenderer.invoke("artifact:open", artifactId),
   openArtifactFolder: artifactId => ipcRenderer.invoke("artifact:folder", artifactId),

@@ -106,6 +106,14 @@ export class CoreAdminClient {
     );
   }
 
+  /** B16b：编辑器负载心跳（admin 通道；TTL 3s——无心跳即 idle）。 */
+  reportEditorLoadLease(input: { window_id: string; mode: "playing" | "scrubbing" | "idle" }) {
+    return this.request<{ status: string; mode: string; ttl_s: number }>(
+      "/api/v1/internal/editor-load-lease",
+      { method: "POST", body: JSON.stringify(input) },
+    );
+  }
+
   setProviderSecret(providerConfigId: string, secret: string): Promise<{ provider_config_id: string; credential_status: string }> {
     return this.request(`/api/v1/internal/provider-secrets/${encodeURIComponent(providerConfigId)}`, { method: "PUT", body: JSON.stringify({ secret }) });
   }
