@@ -11,6 +11,7 @@ from typing import Any, Protocol
 
 from ..database import Database, json_dumps, json_loads, sha256_file, utc_now
 from ..ids import new_id
+from ..ir_process import ir_project_executor
 from ..jobs import JobService
 from ..media.encoders import EncoderDetector
 from ..media.ffprobe import FFprobe
@@ -18,7 +19,7 @@ from ..media.process import run_process
 from ..projects import DomainError, ProjectAssetService
 from .ass import CaptionResources, build_ass, build_rendition_ass
 from .ffmpeg import build_timeline_args, run_timeline_render
-from .ir import project_preview_ir, resolved_caption_styles
+from .ir import resolved_caption_styles
 from .plan import COMPILER_VERSION, REFRAME_COMPILER_VERSION, RenderPlanCompiler
 from .validation import validate_rendered_media
 
@@ -202,7 +203,9 @@ class RenderCoordinator:
 
     async def preview_ir(self, project_id: str, timeline_revision_id: str | None,
                          output_ratio: str) -> dict[str, Any]:
-        """合成预览 IR（preview-ir-v1）：compile → ffprobe → 投影（纯函数）。"""
+        """合成预览 IR（preview-ir-v1）：compile → ffprobe → 投影（后台执行）。
+        A05b：投影段经 IrProjectExecutor（single-flight + 默认后台线程；
+        AIVS_IR_PROCESS_POOL=1 时 spawn 进程池——冻结构建未验证即拒绝）。"""
         plan = self.compiler.compile(project_id, timeline_revision_id,
                                      "authoritative_preview", output_ratio=output_ratio)
         fingerprint = plan["content_fingerprint"]
@@ -217,7 +220,8 @@ class RenderCoordinator:
                 self.preview_probe_cache[key] = await self.ffprobe.probe(path)
             probe_by_asset[item["asset_id"]] = self.preview_probe_cache[key]
         _bundle, presets, _font = self.caption_resources.load()
-        ir = project_preview_ir(plan, probe_by_asset, resolved_caption_styles(presets))
+        ir = await ir_project_executor().project(plan, probe_by_asset,
+                                                 resolved_caption_styles(presets))
         payload = {
             "schema_version": 1,
             "content_fingerprint": fingerprint,
