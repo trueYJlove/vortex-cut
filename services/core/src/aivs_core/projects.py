@@ -1,14 +1,14 @@
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 
-import sqlite3
-
-from .database import Database, json_dumps, json_loads, sha256_file, utc_now
+from .background_work import AssetChangedError, hashed_fingerprint
+from .database import Database, json_dumps, json_loads, utc_now
 from .ids import new_id
 
 PROJECT_STATUSES = {"active", "archived", "missing"}
@@ -199,7 +199,8 @@ class ProjectAssetService:
             raise DomainError("PROJECT_ARCHIVED", "项目已归档，无法导入素材")
         path = _grant_path(grant)
         kind = _asset_kind(path, requested_kind)
-        fingerprint = sha256_file(path)
+        # A05a：大文件哈希走后台线程池（事件循环不阻塞；stat 前后比对）
+        fingerprint = await self._hash(path)
         with self.db.connection() as db:
             duplicate = db.execute(
                 "SELECT * FROM assets WHERE project_id=? AND fingerprint=?",
@@ -312,7 +313,7 @@ class ProjectAssetService:
             self._mark_transcripts_stale(asset_id, None)
             return self.get_asset(asset_id)  # type: ignore[return-value]
         try:
-            fingerprint = sha256_file(path)
+            fingerprint = await self._hash(path)
             if fingerprint != row["fingerprint"]:
                 self._remember_previous_fingerprint(asset_id, row["fingerprint"])
                 self._mark_transcripts_stale(asset_id, fingerprint)
@@ -417,6 +418,9 @@ class ProjectAssetService:
             self._mark_transcripts_stale(asset_id, None)
             return self.get_asset(asset_id) or _asset_dto(row), None, None
         try:
+            # 同步方法（sync 调用方 plan.py + async 端点混用）：保留同步哈希。
+            # A05a 的后台化覆盖 async 入口（import/refresh/relocate）；此快速
+            # 校验路径的阻塞搬移列入后续 API 层改造，不在本单强改签名。
             fingerprint = sha256_file(path)
         except OSError as exc:
             raise DomainError("ASSET_MISSING", "素材文件缺失") from exc
@@ -450,6 +454,7 @@ class ProjectAssetService:
             self._update_asset(asset_id, "changed")
             raise DomainError("ASSET_CHANGED", "素材文件已变化")
         try:
+            # 同步方法（rendering/service 预检路径）：保留同步哈希（同 current_source 注记）
             fingerprint = sha256_file(path)
         except OSError as exc:
             self._update_asset(asset_id, "missing")
@@ -464,7 +469,7 @@ class ProjectAssetService:
     async def relocate_asset(self, asset_id: str, grant: dict[str, Any]) -> dict[str, Any]:
         row = self._require_asset_row(asset_id)
         path = _grant_path(grant)
-        fingerprint = sha256_file(path)
+        fingerprint = await self._hash(path)
         location = self._location(asset_id)
         previous_fingerprint = location["previous_fingerprint"] if location else None
         if fingerprint not in {row["fingerprint"], previous_fingerprint}:
@@ -506,6 +511,14 @@ class ProjectAssetService:
             now=now,
         )
         return self.get_asset(asset_id)  # type: ignore[return-value]
+
+    async def _hash(self, path: Path) -> str:
+        """A05a：素材哈希走后台线程池（受限队列 + stat 前后比对）。
+        哈希期间 stat 变化 → ASSET_CHANGED（沿既有域错误语义）。"""
+        try:
+            return await hashed_fingerprint(path)
+        except AssetChangedError as exc:
+            raise DomainError("ASSET_CHANGED", "素材文件在哈希期间发生变化") from exc
 
     async def _media_info(self, path: Path, kind: str) -> dict[str, Any] | None:
         if kind == "text":
