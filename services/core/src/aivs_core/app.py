@@ -73,6 +73,15 @@ class ProbeRequest(BaseModel):
     grant_id: str
 
 
+class DerivedMediaRequest(BaseModel):
+    """B10 派生媒体查询/解析请求（kind/params 枚举白名单在服务层再强制）。"""
+    model_config = ConfigDict(extra="forbid")
+
+    asset_id: str
+    kind: str
+    params: dict[str, str] = Field(default_factory=dict)
+
+
 class ProjectCreateRequest(BaseModel):
     name: str
     root_dir_name: str | None = None
@@ -537,6 +546,16 @@ class CoreState:
         )
         self._wire_projects()
         self._build_render_stack(settings)
+        # B10：派生媒体缓存（video_proxy/waveform/pcm/reverse）——内容寻址
+        # 键 + project/asset 引用授权；生成作业由 B11+ 接入，本层先提供
+        # 查询/解析/统计。cache 根 = data_dir/cache（计划目录约定的根）。
+        from .media.derived_cache import DerivedMediaCache
+        from .media.derived_service import DerivedMediaService
+
+        self.derived_cache = DerivedMediaCache(self.db, settings.data_dir / "cache")
+        self.derived_media = DerivedMediaService(
+            self.db, self.derived_cache, toolchain_fingerprint=f"aivs-core-derived-v{__version__}"
+        )
 
     async def cached_probe(
         self,
@@ -562,9 +581,20 @@ class CoreState:
         return await self.probe_cache.get_or_probe(key, run_probe)
 
     async def ffprobe_build(self) -> str:
-        """ffprobe build 标识（缓存键成分；读取一次后复用）。"""
+        """ffprobe build 标识（缓存键成分；读取一次后复用）。
+
+        可执行文件缺失（测试/未安装环境）返回空串退化为 stat-only 键，
+        不让 import 路径在 ffprobe 不可用时空抛——探测本身的失败仍由
+        FFprobe.probe 按既有错误码报告。
+        """
         if self._ffprobe_build is None:
-            result = await run_process(self.ffprobe.executable, ["-hide_banner", "-version"], 10)
+            try:
+                result = await run_process(
+                    self.ffprobe.executable, ["-hide_banner", "-version"], 10
+                )
+            except (OSError, FileNotFoundError):
+                self._ffprobe_build = ""
+                return ""
             self._ffprobe_build = (
                 result.stdout.splitlines()[0] if result.stdout and result.returncode == 0 else ""
             )
@@ -833,6 +863,7 @@ def _domain(exc: DomainError) -> HTTPException:
         "SHOT_REQUIREMENT_ASSET_NOT_FOUND",
         "STAGE5_ASSEMBLY_NOT_FOUND",
         "STAGE6_BATCH_NOT_FOUND",
+        "DERIVED_NOT_FOUND",
     }:
         status = 404
     return _error(exc.code, exc.message, status)
@@ -865,6 +896,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         state.provider_image_generation.cleanup_orphans()
         state.db.recover_interrupted()
         state.render_coordinator.cleanup_orphans()
+        # B10：启动恢复 building 残留（无在途认领的半产物不作命中）
+        state.derived_cache.recover_orphaned_builds()
         seed_dir = os.environ.get("AIVS_E2E_MODEL_DIR")
         if seed_dir:
             state.model_manager.seed_external(Path(seed_dir))
@@ -1645,6 +1678,41 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise _error("PREVIEW_IR_RATIO_UNSUPPORTED", "合成预览画布比例不合法", 400)
         try:
             return await state.render_coordinator.preview_ir(project_id, timeline_revision_id, output_ratio)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/derived-media/lookup")
+    async def lookup_derived_media(
+        project_id: str, request: DerivedMediaRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """B10：派生条目状态查询（Renderer 可见，无路径字段）。"""
+        try:
+            return state.derived_media.lookup(
+                project_id, request.asset_id, request.kind, request.params)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/projects/{project_id}/derived-media/stats")
+    async def derived_media_stats(
+        project_id: str, _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """B10：派生缓存用量统计（预算可见性；无素材路径）。"""
+        project = state.projects._require_project_row(project_id)  # noqa: SLF001 归属校验
+        if project["status"] == "archived":
+            raise _error("PROJECT_ARCHIVED", "项目已归档", 409)
+        return state.derived_media.stats()
+
+    @app.post("/api/v1/internal/projects/{project_id}/derived-media/resolve")
+    async def resolve_derived_media(
+        project_id: str, request: DerivedMediaRequest,
+        _: CoreState = Depends(require_admin),
+    ) -> dict[str, Any]:
+        """B10：Main 内部解析（admin 通道）；返回绝对路径供 Main 换票据——
+        Renderer 永远拿不到 path，只有票据 media_url。"""
+        try:
+            return state.derived_media.resolve_internal(
+                project_id, request.asset_id, request.kind, request.params)
         except DomainError as exc:
             raise _domain(exc) from exc
 
