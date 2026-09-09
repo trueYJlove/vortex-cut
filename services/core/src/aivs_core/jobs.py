@@ -39,6 +39,8 @@ PreviewSourceRunner = Callable[
     ],
     Awaitable[dict[str, Any]],
 ]
+# B14 波形作业执行体（与 PreviewSourceRunner 同形；waveform.run_waveform_job）
+WaveformRunner = PreviewSourceRunner
 GenerationStart = Callable[[str], None]
 GenerationRecover = Callable[[], int]
 GenerationFinish = Callable[[str, str, dict[str, Any] | None, str | None, str | None], None]
@@ -56,6 +58,7 @@ class JobService:
         asr_runner: AsrRunner | None = None,
         retry_validator: Callable[[Any], None] | None = None,
         preview_source_runner: PreviewSourceRunner | None = None,
+        waveform_runner: WaveformRunner | None = None,
         render_runner: RenderRunner | None = None,
         planning_runner: PlanningRunner | None = None,
         timeline_patch_runner: PlanningRunner | None = None,
@@ -77,6 +80,7 @@ class JobService:
         self.asr_runner = asr_runner
         self.retry_validator = retry_validator
         self.preview_source_runner = preview_source_runner
+        self.waveform_runner = waveform_runner
         self.render_runner = render_runner
         self.planning_runner = planning_runner
         self.timeline_patch_runner = timeline_patch_runner
@@ -818,6 +822,21 @@ class JobService:
 
     async def _run_media(self, row: Any, job_id: str, cancel_event: asyncio.Event) -> None:
         payload = json_loads(row["input_json"])
+        if row["kind"] == "waveform":
+            # B14 波形：流式 PCM 聚合 → 金字塔，产物进 B10 派生缓存
+            if self.waveform_runner is None:
+                raise RuntimeError("RENDER_FAILED")
+            result = await self.waveform_runner(
+                row, cancel_event,
+                lambda value: self._set_progress(job_id, value),
+                lambda value: self._set_stage(job_id, value),
+            )
+            with self.db.connection() as db:
+                db.execute(
+                    "UPDATE jobs SET result_json=?,updated_at=? WHERE id=?",
+                    (json_dumps(result), utc_now(), job_id),
+                )
+            return
         if "cache_key" in payload:
             # B11 全源代理：产物进 B10 派生缓存（不做 artifacts 行）
             result = await self.preview_source_runner(

@@ -101,6 +101,13 @@ class PreviewSourceMediaRequest(BaseModel):
     profile_id: str
 
 
+class WaveformRequest(BaseModel):
+    """B14 波形描述请求（generate=True 登记生成作业；参数服务端固定）。"""
+    model_config = ConfigDict(extra="forbid")
+
+    generate: bool = False
+
+
 class ProjectCreateRequest(BaseModel):
     name: str
     root_dir_name: str | None = None
@@ -590,6 +597,18 @@ class CoreState:
         )
         # jobs 在 preview_source 之前构建（render 栈顺序）；此处回填 B11 runner。
         self.jobs.preview_source_runner = self.preview_source.run_proxy_job
+        # B14：素材级持久化波形（流式 PCM → min/max 金字塔，kind=waveform
+        # 复用 B10 派生缓存；FFmpeg build 同键策略——换工具链即键换代）。
+        from .media.waveform import WaveformService
+
+        self.waveform = WaveformService(
+            self.db,
+            self.derived_cache,
+            settings.ffmpeg,
+            self.ffprobe,
+            ffmpeg_build=_sync_tool_build(settings.ffmpeg),
+        )
+        self.jobs.waveform_runner = self.waveform.run_waveform_job
 
     async def cached_probe(
         self,
@@ -1881,6 +1900,78 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             entry = state.derived_cache.lookup(key)
             if entry is None:
                 raise _error("DERIVED_NOT_FOUND", "代理条目不存在或未就绪", 404)
+            state.derived_cache.add_reference(key, project_id, asset_id)
+            from .media.derived_cache import DerivedCacheError
+
+            try:
+                path = state.derived_cache.resolved_path(entry)
+            except DerivedCacheError as exc:
+                raise _domain(DomainError("DERIVED_CACHE_UNSAFE", exc.message)) from exc
+            return {
+                "cache_key": key,
+                "status": "ready",
+                "path": str(path),
+                "size_bytes": entry.size_bytes,
+            }
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    # ---- B14：素材级持久化波形（waveform） ----
+
+    @app.post("/api/v1/projects/{project_id}/assets/{asset_id}/waveform")
+    async def get_asset_waveform(
+        project_id: str, asset_id: str, request: WaveformRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """B14：素材波形描述（Renderer 可见；无路径字段）。
+
+        generate=True 且无 ready/building 条目时登记生成作业（流式 PCM
+        聚合 → 金字塔，B10 派生缓存）；pending 期间调用方显示占位/无波形。
+        """
+        asset_row = _preview_source_asset_row(state, project_id, asset_id)
+        try:
+            if not (json_loads(asset_row["media_info_json"] or "{}").get("audio_streams") or []):
+                raise _domain(DomainError(
+                    "MEDIA_NO_AUDIO", "素材无音轨，不生成波形"))
+            entry = state.waveform.waveform_entry(asset_row)
+            job_id: str | None = None
+            status = (entry or {}).get("status")
+            if (
+                request.generate
+                and status not in {"ready", "building", "queued", "failed"}
+            ):
+                resolved_path = state.projects.resolve_asset_path(asset_id)
+                job_id = state.waveform.create_waveform_job(
+                    project_id, asset_row, resolved_path["path"])
+                status = "queued"
+            return {
+                "cache_key": state.waveform.waveform_cache_key(asset_row["fingerprint"]),
+                "status": status,
+                "job_id": job_id,
+                "size_bytes": (entry or {}).get("size_bytes"),
+                "sample_rate": 8000,
+                "channels": 1,
+                "bucket": 256,
+            }
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/internal/projects/{project_id}/assets/{asset_id}/waveform/media")
+    async def resolve_asset_waveform_media(
+        project_id: str, asset_id: str,
+        _: CoreState = Depends(require_admin),
+    ) -> dict[str, Any]:
+        """B14：Main 内部解析波形文件（admin 通道）——绝对路径供 Main 换
+        restricted-media 票据；Renderer 永远拿不到 path。
+
+        无请求体（params 由服务端算法常量唯一决定——不收 Renderer 参数）。
+        """
+        asset_row = _preview_source_asset_row(state, project_id, asset_id)
+        try:
+            key = state.waveform.waveform_cache_key(asset_row["fingerprint"])
+            entry = state.derived_cache.lookup(key)
+            if entry is None:
+                raise _error("DERIVED_NOT_FOUND", "波形条目不存在或未就绪", 404)
             state.derived_cache.add_reference(key, project_id, asset_id)
             from .media.derived_cache import DerivedCacheError
 
