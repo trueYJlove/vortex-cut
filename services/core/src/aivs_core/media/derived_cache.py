@@ -233,17 +233,20 @@ class DerivedMediaCache:
     def mark_failed(self, cache_key: str, kind: str) -> None:
         """失败：清目录内残留临时文件，行标 failed（不删他人 ready 文件）。
 
-        UPDATE 带 status='building' 守卫：迟到的失败（他进程/迟会话已把
-        同 key 发布为 ready）不得覆盖 ready——single-flight 语义下失败只
-        能由当前持有 build 的执行者落（building→failed）。
+        迟到的失败（他进程/迟会话已把同 key 发布为 ready）不得删 ready
+        产物或覆盖行状态——先原子认领（building→failed 的条件 UPDATE），
+        认领成功者才清目录；single-flight 语义下失败只能由当前持有 build
+        的执行者落。
         """
-        root = self._validated_entry_root(cache_key, kind)
-        shutil.rmtree(root, ignore_errors=True)
         with self.db.connection() as db:
-            db.execute(
+            claimed = db.execute(
                 "UPDATE derived_media_cache SET status='failed', last_accessed_at=? "
-                "WHERE cache_key=? AND status='building'", (utc_now(), cache_key),
-            )
+                "WHERE cache_key=? AND status='building'",
+                (utc_now(), cache_key),
+            ).rowcount
+        if claimed:
+            root = self._validated_entry_root(cache_key, kind)
+            shutil.rmtree(root, ignore_errors=True)
 
     # ---- 启动恢复与清理 ----
 
