@@ -16,6 +16,7 @@ function setup() {
   const resolveDerived = vi.fn();
   const resolvePreviewSourceMedia = vi.fn();
   const resolveWaveformMedia = vi.fn();
+  const resolvePcmChunkMedia = vi.fn();
   const registerDerivedMedia = vi.fn(() => "aivideo://media/ticket-url-value");
   registerPerformanceIpc({
     ipc: { handle: (channel, listener) => handlers.set(channel, listener) },
@@ -23,13 +24,14 @@ function setup() {
     resolveDerived,
     resolvePreviewSourceMedia,
     resolveWaveformMedia,
+    resolvePcmChunkMedia,
     registerDerivedMedia,
   });
-  return { handlers, fetchWithUi, resolveDerived, resolvePreviewSourceMedia, resolveWaveformMedia, registerDerivedMedia };
+  return { handlers, fetchWithUi, resolveDerived, resolvePreviewSourceMedia, resolveWaveformMedia, resolvePcmChunkMedia, registerDerivedMedia };
 }
 
 describe("B10 derived media IPC", () => {
-  it("只注册八个白名单 channel（B10 三个 + B11 三个 + B14 两个）", () => {
+  it("只注册十个白名单 channel（B10 三个 + B11 三个 + B14 两个 + B15 两个）", () => {
     const { handlers } = setup();
     expect([...handlers.keys()]).toEqual([
       "derived-media:lookup",
@@ -40,6 +42,8 @@ describe("B10 derived media IPC", () => {
       "preview-source:media",
       "waveform:get",
       "waveform:media",
+      "pcm-chunk:ensure",
+      "pcm-chunk:media",
     ]);
   });
 
@@ -309,6 +313,92 @@ describe("B14 waveform IPC", () => {
     await expect(handlers.get("waveform:media")?.({}, {
       project_id: "project_1", asset_id: "asset_1", kind: "waveform",
     })).rejects.toThrow();
+    expect(registerDerivedMedia).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("B15 pcm-chunk IPC", () => {
+  const chunkDescription = {
+    cache_key: hashA, status: "ready" as const, start_sample: 96_000,
+    valid_samples: 96_000, sample_rate: 48000, channels: 2,
+    chunk_samples: 96_000, size_bytes: 768_012,
+  };
+
+  it("ensure 走 UI 通道并返回契约校验后的描述（无路径字段）", async () => {
+    const { handlers, fetchWithUi } = setup();
+    fetchWithUi.mockResolvedValueOnce(chunkDescription);
+    const result = await handlers.get("pcm-chunk:ensure")?.({}, {
+      project_id: "project_1", asset_id: "asset_1", start_sample: 96_000,
+    });
+    expect(fetchWithUi).toHaveBeenCalledWith(
+      "/api/v1/projects/project_1/assets/asset_1/pcm-chunks",
+      { method: "POST", body: JSON.stringify({ start_sample: 96_000 }) },
+    );
+    expect(result).toEqual(chunkDescription);
+  });
+
+  it("ensure 严格拒绝未对齐/非法 start_sample 与未知键", async () => {
+    const { handlers, fetchWithUi } = setup();
+    await expect(handlers.get("pcm-chunk:ensure")?.({}, {
+      project_id: "project_1", asset_id: "asset_1", start_sample: 12345,
+    })).rejects.toThrow("Invalid start_sample");
+    await expect(handlers.get("pcm-chunk:ensure")?.({}, {
+      project_id: "project_1", asset_id: "asset_1", start_sample: -96_000,
+    })).rejects.toThrow("Invalid start_sample");
+    await expect(handlers.get("pcm-chunk:ensure")?.({}, {
+      project_id: "project_1", asset_id: "asset_1", start_sample: 1.5,
+    })).rejects.toThrow("Invalid start_sample");
+    await expect(handlers.get("pcm-chunk:ensure")?.({}, {
+      project_id: "project_1", asset_id: "asset_1", start_sample: 96_000, extra: 1,
+    })).rejects.toThrow();
+    await expect(handlers.get("pcm-chunk:ensure")?.({}, {
+      project_id: "../private", asset_id: "asset_1", start_sample: 96_000,
+    })).rejects.toThrow("Invalid project_id");
+    expect(fetchWithUi).not.toHaveBeenCalled();
+  });
+
+  it("ensure 响应剥离路径形态字段后经契约校验", async () => {
+    const { handlers, fetchWithUi } = setup();
+    fetchWithUi.mockResolvedValueOnce({ ...chunkDescription, path: "C:\private\chunk.pcm" });
+    const result = await handlers.get("pcm-chunk:ensure")?.({}, {
+      project_id: "project_1", asset_id: "asset_1", start_sample: 96_000,
+    }) as Record<string, unknown>;
+    expect(result.path).toBeUndefined();
+    expect(result.cache_key).toBe(hashA);
+  });
+
+  it("media 经 admin resolve 换票据：Renderer 只拿 URL，不拿路径", async () => {
+    const { handlers, fetchWithUi, resolvePcmChunkMedia, registerDerivedMedia } = setup();
+    const path = "C:\data\cache\derived\audio_pcm_chunk\aa\key\chunk.pcm";
+    resolvePcmChunkMedia.mockResolvedValueOnce({ cache_key: hashA, status: "ready", path, size_bytes: 768_012 });
+    const result = await handlers.get("pcm-chunk:media")?.({}, {
+      project_id: "project_1", asset_id: "asset_1", start_sample: 96_000,
+    }) as { media_url: string; cache_key: string; status: string; size_bytes: number };
+    expect(fetchWithUi).not.toHaveBeenCalled(); // 不走 UI 通道
+    expect(resolvePcmChunkMedia).toHaveBeenCalledWith({
+      project_id: "project_1", asset_id: "asset_1", start_sample: 96_000,
+    });
+    expect(registerDerivedMedia).toHaveBeenCalledWith(hashA, path);
+    expect(result.media_url).toBe("aivideo://media/ticket-url-value");
+    expect(result.status).toBe("ready");
+    expect(JSON.stringify(result)).not.toContain("C:");
+  });
+
+  it("media 未 ready / 网格非法被拒，不泄路径", async () => {
+    const { handlers, resolvePcmChunkMedia, registerDerivedMedia } = setup();
+    resolvePcmChunkMedia.mockResolvedValueOnce({ cache_key: hashA, status: "building", path: "C:/private", size_bytes: 0 });
+    await expect(handlers.get("pcm-chunk:media")?.({}, {
+      project_id: "project_1", asset_id: "asset_1", start_sample: 96_000,
+    })).rejects.toThrow("DERIVED_NOT_FOUND");
+    registerDerivedMedia.mockClear();
+    resolvePcmChunkMedia.mockRejectedValueOnce(Object.assign(new Error("private"), { code: "PCM_CHUNK_OFFSET_INVALID" }));
+    await expect(handlers.get("pcm-chunk:media")?.({}, {
+      project_id: "project_1", asset_id: "asset_1", start_sample: 96_000,
+    })).rejects.toThrow("PCM_CHUNK_OFFSET_INVALID");
+    await expect(handlers.get("pcm-chunk:media")?.({}, {
+      project_id: "project_1", asset_id: "asset_1", start_sample: 42,
+    })).rejects.toThrow("Invalid start_sample");
     expect(registerDerivedMedia).not.toHaveBeenCalled();
   });
 });

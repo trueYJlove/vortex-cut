@@ -365,3 +365,89 @@ export const parseWaveformMediaInput = (value: unknown): WaveformMediaInput =>
   parse(value, isWaveformMediaInput, "WaveformMediaInput");
 export const parseWaveformMediaResponse = (value: unknown): WaveformMediaResponse =>
   parse(value, isWaveformMediaResponse, "WaveformMediaResponse");
+
+// ---- B15：分块 PCM（audio_pcm_chunk） ----
+
+/** PCM 块算法常量（与 Core media/audio_chunks.py 一致；参数服务端固定）。 */
+export const PCM_CHUNK_SAMPLE_RATE = 48000 as const;
+export const PCM_CHUNK_CHANNELS = 2 as const;
+export const PCM_CHUNK_SAMPLES = 96000 as const;
+
+export interface PcmChunkRequestInput {
+  project_id: ProjectId;
+  asset_id: AssetId;
+  /** 块起点（每声道采样偏移；必须对齐 96000 样本网格）。 */
+  start_sample: number;
+}
+
+export interface PcmChunkDescription {
+  cache_key: string;
+  status: "ready";
+  start_sample: number;
+  /** 每声道有效样本数；< 96000 = 尾块/EOF；null = 缓存命中路径未解析头。 */
+  valid_samples: number | null;
+  sample_rate: number;
+  channels: number;
+  chunk_samples: number;
+  size_bytes: number;
+}
+
+export interface PcmChunkMediaInput {
+  project_id: ProjectId;
+  asset_id: AssetId;
+  start_sample: number;
+}
+
+export interface PcmChunkMediaResponse {
+  /** aivideo:// 票据 URL（Main 换发；Renderer 永远接触不到 path）。 */
+  media_url: string;
+  cache_key: string;
+  status: "ready";
+  size_bytes: number;
+}
+
+const CHUNK_GRID = PCM_CHUNK_SAMPLES;
+
+export function isPcmChunkRequestInput(value: unknown): value is PcmChunkRequestInput {
+  if (!record(value) || !only(value, ["project_id", "asset_id", "start_sample"])) return false;
+  return id(value.project_id) && id(value.asset_id)
+    && integer(value.start_sample, 0, Number.MAX_SAFE_INTEGER)
+    && value.start_sample % CHUNK_GRID === 0;
+}
+
+export function isPcmChunkDescription(value: unknown): value is PcmChunkDescription {
+  if (!record(value) || !only(value, [
+    "cache_key", "status", "start_sample", "valid_samples", "sample_rate",
+    "channels", "chunk_samples", "size_bytes",
+  ])) return false;
+  return sha(value.cache_key)
+    && value.status === "ready"
+    && integer(value.start_sample, 0, Number.MAX_SAFE_INTEGER)
+    && (value.valid_samples === null || integer(value.valid_samples, 0, CHUNK_GRID))
+    && value.sample_rate === PCM_CHUNK_SAMPLE_RATE
+    && value.channels === PCM_CHUNK_CHANNELS
+    && value.chunk_samples === CHUNK_GRID
+    && nonnegative(value.size_bytes);
+}
+
+export function isPcmChunkMediaInput(value: unknown): value is PcmChunkMediaInput {
+  if (!record(value) || !only(value, ["project_id", "asset_id", "start_sample"])) return false;
+  return id(value.project_id) && id(value.asset_id)
+    && integer(value.start_sample, 0, Number.MAX_SAFE_INTEGER)
+    && value.start_sample % CHUNK_GRID === 0;
+}
+
+export function isPcmChunkMediaResponse(value: unknown): value is PcmChunkMediaResponse {
+  if (!record(value) || !only(value, ["media_url", "cache_key", "status", "size_bytes"])) return false;
+  return typeof value.media_url === "string" && value.media_url.startsWith("aivideo://media/")
+    && sha(value.cache_key) && value.status === "ready" && nonnegative(value.size_bytes);
+}
+
+export const parsePcmChunkRequestInput = (value: unknown): PcmChunkRequestInput =>
+  parse(value, isPcmChunkRequestInput, "PcmChunkRequestInput");
+export const parsePcmChunkDescription = (value: unknown): PcmChunkDescription =>
+  parse(value, isPcmChunkDescription, "PcmChunkDescription");
+export const parsePcmChunkMediaInput = (value: unknown): PcmChunkMediaInput =>
+  parse(value, isPcmChunkMediaInput, "PcmChunkMediaInput");
+export const parsePcmChunkMediaResponse = (value: unknown): PcmChunkMediaResponse =>
+  parse(value, isPcmChunkMediaResponse, "PcmChunkMediaResponse");

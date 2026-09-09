@@ -98,6 +98,14 @@ export class CoreAdminClient {
     );
   }
 
+  /** B15：PCM 块文件 Main 内部解析（admin 通道）。 */
+  resolvePcmChunkMedia(input: { project_id: string; asset_id: string; start_sample: number }) {
+    return this.request<{ cache_key: string; status: string; path: string; size_bytes: number }>(
+      `/api/v1/internal/projects/${encodeURIComponent(input.project_id)}/assets/${encodeURIComponent(input.asset_id)}/pcm-chunks/media`,
+      { method: "POST", body: JSON.stringify({ start_sample: input.start_sample }) },
+    );
+  }
+
   setProviderSecret(providerConfigId: string, secret: string): Promise<{ provider_config_id: string; credential_status: string }> {
     return this.request(`/api/v1/internal/provider-secrets/${encodeURIComponent(providerConfigId)}`, { method: "PUT", body: JSON.stringify({ secret }) });
   }
