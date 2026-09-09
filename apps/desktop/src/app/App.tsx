@@ -12,6 +12,7 @@ import { errorCode, safeErrorMessage, safeTaskErrorMessage } from "./safeErrors.
 import { PreviewPipOverlays, type PipOverlay, type PipTransform } from "./PreviewPipOverlays.js";
 import { SyntheticPreview } from "./preview/SyntheticPreview.js";
 import { PreviewSourceResolver } from "./preview/source-resolver.js";
+import { WaveformCache } from "./timeline/waveform-cache.js";
 import { editorCommands, type EditorCommand } from "./editorCommands.js";
 import { bindingLabel, findConflict, loadShortcuts, matchesBinding, normalizeRecordedBinding, saveShortcuts, DEFAULT_SHORTCUTS, type ShortcutCommandId, type ShortcutEntry } from "./shortcuts.js";
 import { TimelinePanel } from "./timeline/TimelineCanvas.js";
@@ -816,6 +817,15 @@ export function App() {
     () => project ? new PreviewSourceResolver({
       getPreviewSource: input => window.desktop.getPreviewSource({ ...input, project_id: project.project_id }),
       previewSourceMediaUrl: input => window.desktop.previewSourceMediaUrl({ ...input, project_id: project.project_id }),
+    }, project.project_id) : null,
+    [project],
+  );
+  // B14：素材级持久化波形缓存（时间轴峰值来源；会话内 LRU 字节上限，
+  // 切项目换实例）。Renderer 不再 fetch 整媒体 + decodeAudioData 生成波形。
+  const waveformCache = useMemo(
+    () => project ? new WaveformCache({
+      getWaveform: input => window.desktop.getWaveform({ ...input, project_id: project.project_id }),
+      waveformMediaUrl: input => window.desktop.waveformMediaUrl({ ...input, project_id: project.project_id }),
     }, project.project_id) : null,
     [project],
   );
@@ -1923,7 +1933,7 @@ export function App() {
       <aside className="properties-pane" aria-label="上下文属性" role="region">{selectedClip ? <ClipProperties clip={selectedClip} locked={Boolean(working?.locked_elements?.includes(selectedClip.clip_id))} onPatch={patchTimeline} onDraft={queueDraft} working={working!} playheadUs={playhead} /> : selectedCaption ? <CaptionProperties caption={selectedCaption} locked={Boolean(selectedCaption.source_clip_id && working?.locked_elements?.includes(selectedCaption.source_clip_id))} onPatch={patchTimeline} onDraft={queueDraft} working={working!} /> : selectedTransition ? <TransitionProperties transition={selectedTransition} onPatch={patchTimeline} /> : <ProjectProperties project={project} saveState={saveState} authoritativePreview={authoritativePreview} previewIsStale={previewIsStale} renderDisabledReason={renderDisabledReason} onGeneratePreview={() => void generatePreview()} onCreateExport={() => void createExport()} onOpenProjectDialog={() => setProjectDialogOpen(true)} />}</aside>
     </section>
     <div className="timeline-resize-handle" role="separator" aria-label="调整时间线高度" onPointerDown={event => beginResize("timeline", event)} />
-    <TimelinePanel document={working} selection={selection} setSelection={(sel) => { setSelection(sel); exitLibraryPreview(); }} onPatch={patchTimeline} onDropAsset={dropAsset} coverUrl={coverUrl} onCaptureCover={captureCover} canUndo={Boolean(timeline?.can_undo)} canRedo={Boolean(timeline?.can_redo)} onUndo={() => void undoRedo("undo")} onRedo={() => void undoRedo("redo")} assetMedia={timelineAssetMedia} playheadStore={playheadStore} onSeek={(timeUs) => { exitLibraryPreview(); seekFromUser(timeUs); const clip = sortedClips.find(c => timeUs >= c.timeline_start_us && timeUs < c.timeline_end_us); if (clip && videoRef.current) { const sourceStart = (clip.source_start_us ?? 0) / 1_000_000; const elapsed = (timeUs - clip.timeline_start_us) / 1_000_000 * ((clip.speed_milli ?? 1000) / 1000); pendingSeekRef.current = sourceStart + elapsed; videoRef.current.currentTime = pendingSeekRef.current; } else if (videoRef.current) { videoRef.current.currentTime = timeUs / 1_000_000; } }} onCommand={(id) => runCommand(id)} />
+    <TimelinePanel document={working} selection={selection} setSelection={(sel) => { setSelection(sel); exitLibraryPreview(); }} onPatch={patchTimeline} onDropAsset={dropAsset} coverUrl={coverUrl} onCaptureCover={captureCover} canUndo={Boolean(timeline?.can_undo)} canRedo={Boolean(timeline?.can_redo)} onUndo={() => void undoRedo("undo")} onRedo={() => void undoRedo("redo")} assetMedia={timelineAssetMedia} waveformCache={waveformCache} playheadStore={playheadStore} onSeek={(timeUs) => { exitLibraryPreview(); seekFromUser(timeUs); const clip = sortedClips.find(c => timeUs >= c.timeline_start_us && timeUs < c.timeline_end_us); if (clip && videoRef.current) { const sourceStart = (clip.source_start_us ?? 0) / 1_000_000; const elapsed = (timeUs - clip.timeline_start_us) / 1_000_000 * ((clip.speed_milli ?? 1000) / 1000); pendingSeekRef.current = sourceStart + elapsed; videoRef.current.currentTime = pendingSeekRef.current; } else if (videoRef.current) { videoRef.current.currentTime = timeUs / 1_000_000; } }} onCommand={(id) => runCommand(id)} />
     <footer>
       <div className="footer-status">
         <div role="status" aria-label="保存状态" className={`save-state ${saveState === "保存失败" || saveState === "草稿冲突" ? "error" : ""}`} title={saveState === "草稿冲突" ? "检测到冲突草稿，请在顶部提示中处理" : undefined}><Save />{saveState}</div>

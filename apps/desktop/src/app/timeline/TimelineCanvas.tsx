@@ -76,6 +76,7 @@ import {
 import { TimelinePlayheadLayer } from "./TimelinePlayheadLayer.js";
 import { createPlayheadStore, type PlayheadStore } from "./playhead-store.js";
 import { ThumbnailLoader } from "./thumbnail-loader.js";
+import type { WaveformCache } from "./waveform-cache.js";
 
 /** B2 转场种类（与 core TRANSITION_KINDS 对齐）。 */
 const TRANSITION_KINDS = ["fade", "fadeblack", "dissolve", "wipeleft", "wiperight", "slideleft", "slideup", "zoomin"] as const;
@@ -347,10 +348,14 @@ function computeTicks(
 
 // ── Audio waveform data ──────────────────────────────────────────────────────
 
-/** Number of amplitude peaks kept per clip (visual resolution vs memory). */
-const WAVEFORM_PEAK_COUNT = 200;
+// B14：波形峰值来自 timeline/waveform-cache.ts（Core 派生缓存金字塔产物，
+// 按 clip 源区间/速度/倒放取窗）。Renderer 不再保留整媒体 decodeAudioData
+// 链路（旧 getAudioDecodeContext/extractPeaks/decodeAudioPeaks 已移除）。
+
 /** Amplitude gain applied at draw time so quiet audio stays visible. */
 const WAVEFORM_GAIN = 1.4;
+/** 绘制路径每 clip 峰值数上限（clip 像素宽封顶——更细无显示增益）。 */
+const WAVEFORM_PEAK_COUNT_MAX = 200;
 
 // ── 剪映式片段外观（1:1 复刻参考） ────────────────────────────────────────────
 /** 片段圆角半径（px）。 */
@@ -373,72 +378,6 @@ const CLIP_PALETTE = {
     wave: "rgb(14, 129, 179)",
   },
 } as const;
-
-/** Lazily created Web Audio context used only for decodeAudioData(). */
-let audioDecodeContext: AudioContext | OfflineAudioContext | null = null;
-
-/** Create (once) a decoding context; returns null when Web Audio is unavailable. */
-function getAudioDecodeContext(): AudioContext | OfflineAudioContext | null {
-  if (audioDecodeContext) return audioDecodeContext;
-  try {
-    if (typeof OfflineAudioContext !== "undefined") {
-      // Offline context never touches the audio output device, so no user
-      // gesture is required and nothing audible is produced.
-      audioDecodeContext = new OfflineAudioContext(1, 1, 44100);
-    } else if (typeof AudioContext !== "undefined") {
-      // Fallback for renderers without OfflineAudioContext.
-      audioDecodeContext = new AudioContext();
-      void audioDecodeContext.resume().catch(() => undefined);
-    }
-  } catch {
-    audioDecodeContext = null;
-  }
-  return audioDecodeContext;
-}
-
-/** Reduce an AudioBuffer to per-peak amplitudes (mono / left channel). */
-function extractPeaks(buffer: AudioBuffer, numPeaks: number): Float32Array {
-  if (numPeaks <= 0) return new Float32Array(0);
-  const channel = buffer.getChannelData(0);
-  if (channel.length === 0) return new Float32Array(numPeaks);
-  const peaks = new Float32Array(numPeaks);
-  const samplesPerPeak = Math.floor(channel.length / numPeaks);
-  if (samplesPerPeak <= 0) {
-    // Fewer audio samples than requested peaks: mirror the samples we have.
-    for (let i = 0; i < numPeaks; i++) {
-      peaks[i] = Math.abs(channel[Math.min(i, channel.length - 1)]);
-    }
-    return peaks;
-  }
-  for (let i = 0; i < numPeaks; i++) {
-    let max = 0;
-    const start = i * samplesPerPeak;
-    const end = Math.min(start + samplesPerPeak, channel.length);
-    for (let j = start; j < end; j++) {
-      const abs = Math.abs(channel[j]);
-      if (abs > max) max = abs;
-    }
-    peaks[i] = max;
-  }
-  return peaks;
-}
-
-/** Decode an ArrayBuffer into peaks; resolves null on any failure. */
-async function decodeAudioPeaks(
-  arrayBuffer: ArrayBuffer,
-  numPeaks: number,
-): Promise<Float32Array | null> {
-  const ctx = getAudioDecodeContext();
-  if (!ctx) return null;
-  try {
-    // decodeAudioData() detaches the buffer; pass a copy so callers stay safe.
-    const audioBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0));
-    return extractPeaks(audioBuffer, numPeaks);
-  } catch {
-    // No audio track, unsupported codec, etc. — skip silently.
-    return null;
-  }
-}
 
 // ── Runtime prefs (magnetic snapping) ────────────────────────────────────────
 
@@ -683,7 +622,7 @@ function drawTimeline(
     displaced?: { clipId: TimelineClipId; trackId: string; startUs: number };
   } | null,
   thumbnailCache?: Map<string, HTMLCanvasElement>,
-  waveformCache?: Map<string, Float32Array>,
+  waveformCache?: WaveformCache | null,
   waveformRatio?: number,
   /** 面板可视高度（画布可能高于面板——纵向滚动时滚动条仍钉在可视区底部）。 */
   viewportHeight?: number,
@@ -890,8 +829,18 @@ function drawTimeline(
     // 3) 音频波形（剪映式 1:1）：连续实心轮廓——按相邻峰值画实心梯形，柱与
     //    柱之间无缝衔接（图1 的"整块实心"质感），底部对齐；峰值采样点顶端
     //    1px 橙色点亮；带底一条 1px 亮线（剪映基线）。
+    //    B14：峰值按 clip 源区间/速度/倒放从素材金字塔取窗（同源不同 trim
+    //    各自正确；不再把整素材波形挤进 clip 矩形）。
     if (waveformCache && band && rect.width > 20) {
-      const peaks = waveformCache.get(rect.clip.clip_id);
+      const pxWidthForPeaks = Math.max(1, Math.floor(rect.width) - 2);
+      const peaks = waveformCache.peaksFor({
+        clipId: rect.clip.clip_id,
+        assetId: rect.clip.asset_id,
+        sourceStartUs: rect.clip.source_start_us ?? 0,
+        sourceEndUs: rect.clip.source_end_us ?? 0,
+        speedMilli: rect.clip.speed_milli ?? 1000,
+        reverse: rect.clip.reverse_playback ?? false,
+      }, Math.min(WAVEFORM_PEAK_COUNT_MAX, pxWidthForPeaks));
       if (peaks && peaks.length > 0) {
         if (!isAudioClip) {
           ctx.fillStyle = palette.band;
@@ -1574,6 +1523,7 @@ export function TimelinePanel({
   onUndo,
   onRedo,
   assetMedia,
+  waveformCache,
   playheadStore,
   onSeek,
   onCommand,
@@ -1590,6 +1540,9 @@ export function TimelinePanel({
   onUndo: () => void;
   onRedo: () => void;
   assetMedia: AssetMediaEntry[];
+  /** B14 波形缓存（App 注入；素材级持久化峰值，Renderer 不再整媒体解码）。
+   *  缺省（测试/独立使用）= 不显示波形——与旧链路 fetch 失败时行为一致。 */
+  waveformCache?: WaveformCache | null;
   /** 播放头存储（A06，可选——App 拥有跨组件 store 时传入；测试/旧调用方
    *  不传则组件内部自建，行为自洽）。预览每帧写入 store，播放头绘制走
    *  独立 DOM 覆盖层，播放期间不再触发主画布全量重绘。 */
@@ -1790,11 +1743,9 @@ export function TimelinePanel({
   // 卸载/滚动视口代次推进：旧任务出队即丢；卸载释放 video/缓存。
   useEffect(() => () => thumbnailLoader.dispose(), [thumbnailLoader]);
 
-  // Waveform peak cache: clip_id -> amplitude peaks (0..1).
-  const waveformCache = useRef<Map<string, Float32Array>>(new Map());
+  // B14 波形：素材级金字塔缓存（App 注入；绘制路径按 clip 取窗）。
+  // 版本号 = 金字塔 ready/失效信号——驱动主画布重绘（不随播放头变化）。
   const [waveformVersion, setWaveformVersion] = useState(0); // trigger re-render when peaks load
-  // Clip ids with an in-flight decode, to avoid duplicate fetches per render.
-  const pendingWaveforms = useRef<Set<string>>(new Set());
 
   // 抽帧：可见视频片段按帧时间请求（组件作用域 loader 串行 seek 抽帧）；
   // 图片素材直接用 <img> 加载。缩放只改变帧数档位（量化），旧帧保留兜底
@@ -1862,57 +1813,23 @@ export function TimelinePanel({
     return () => window.clearTimeout(timer);
   }, [clipRects, assetMedia, view.pixelsPerSecond, clips, view, canvasSize.width, thumbnailLoader]);
 
-  // Load waveform peaks for visible video and audio clips. Decoding runs fully
-  // async (fetch + OfflineAudioContext), so it never blocks rendering; failures
-  // (e.g. media with no audio track) are skipped silently. Decoded peaks are
-  // cached permanently for the lifetime of the component.
+  // B14：素材级持久化波形。Renderer 不再 fetch 整媒体 + decodeAudioData——
+  // 峰值来自 Core 派生缓存（kind=waveform 金字塔产物，票据 URL 取件）。
+  // 每素材 single-flight（waveformCache 内部）；ready 后 bump 触发重绘，
+  // 绘制路径按 clip 源区间/速度/倒放从金字塔取窗（peaksFor 同步取）。
   useEffect(() => {
-    if (!getAudioDecodeContext()) return;
-    const cache = waveformCache.current;
-
-    const documentClipIds = new Set<string>();
-    for (const rect of clipRects) {
-      if (rect.clip.asset_kind !== "image") documentClipIds.add(rect.clip.clip_id);
-    }
-    // Prune entries for clips that no longer exist in the document.
-    for (const key of cache.keys()) {
-      if (!documentClipIds.has(key)) cache.delete(key);
-    }
-
-    // Visible viewport in canvas coords: clip rects are viewport-space, so
-    // anything left of the header gutter or right of the canvas is offscreen.
+    if (!waveformCache) return;
     const viewLeft = view.headerWidth - 400;
     const viewRight = canvasSize.width + 400;
-
     for (const rect of clipRects) {
       const clip = rect.clip;
       if (clip.asset_kind === "image") continue;
-      if (cache.has(clip.clip_id) || pendingWaveforms.current.has(clip.clip_id)) continue;
-      // Only start decoding clips currently on screen.
       if (rect.x + rect.width <= viewLeft || rect.x >= viewRight) continue;
-
-      const mediaUrl = assetMedia.find((m) => m.asset_id === clip.asset_id)?.media_url ?? null;
-      if (!mediaUrl) continue;
-
-      pendingWaveforms.current.add(clip.clip_id);
-      fetch(mediaUrl)
-        .then((res) => {
-          if (!res.ok) throw new Error(`waveform fetch failed: ${res.status}`);
-          return res.arrayBuffer();
-        })
-        .then((buf) => decodeAudioPeaks(buf, WAVEFORM_PEAK_COUNT))
-        .then((peaks) => {
-          if (peaks) {
-            cache.set(clip.clip_id, peaks);
-            setWaveformVersion((v) => v + 1);
-          }
-        })
-        .catch(() => { /* fetch/decode failure — skip silently */ })
-        .finally(() => {
-          pendingWaveforms.current.delete(clip.clip_id);
-        });
+      void waveformCache.pyramidFor(clip.asset_id).then(pyramid => {
+        if (pyramid) setWaveformVersion(v => v + 1);
+      });
     }
-  }, [clipRects, assetMedia, view.scrollX, view.pixelsPerSecond, canvasSize.width]);
+  }, [clipRects, view.scrollX, view.pixelsPerSecond, view.headerWidth, canvasSize.width, waveformCache]);
 
   // Canvas rendering
   useEffect(() => {
@@ -1953,7 +1870,7 @@ export function TimelinePanel({
       frameRate,
       pendingKeep,
       thumbnailCache.current,
-      waveformCache.current,
+      waveformCache ?? null,
       prefs.waveformRatio,
       canvasSize.height,
     );
