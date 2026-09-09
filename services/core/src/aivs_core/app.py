@@ -23,6 +23,7 @@ from .config import Settings
 from .database import Database, MigrationError, json_dumps, json_loads, utc_now
 from .ids import new_id
 from .jobs import JobService
+from .media.audio_chunks import PcmChunkError, PcmChunkService
 from .media.encoders import EncoderDetector
 from .media.ffprobe import FFprobe
 from .media.probe_cache import ProbeCache, probe_cache_key
@@ -106,6 +107,20 @@ class WaveformRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     generate: bool = False
+
+
+class PcmChunkRequest(BaseModel):
+    """B15 PCM 块确保请求（网格对齐在服务层强制）。"""
+    model_config = ConfigDict(extra="forbid")
+
+    start_sample: int
+
+
+class PcmChunkMediaRequest(BaseModel):
+    """B15 PCM 块票据请求（Main → Core admin；Renderer 永不直调）。"""
+    model_config = ConfigDict(extra="forbid")
+
+    start_sample: int
 
 
 class ProjectCreateRequest(BaseModel):
@@ -609,6 +624,15 @@ class CoreState:
             ffmpeg_build=_sync_tool_build(settings.ffmpeg),
         )
         self.jobs.waveform_runner = self.waveform.run_waveform_job
+        # B15：分块 PCM（48000Hz 双声道 f32le、2 秒/块；同步内联生成——
+        # 低延迟任务不排 jobs 队列，begin_build single-flight 防并发重复）。
+        self.pcm_chunks = PcmChunkService(
+            self.db,
+            self.derived_cache,
+            settings.ffmpeg,
+            self.ffprobe,
+            ffmpeg_build=_sync_tool_build(settings.ffmpeg),
+        )
 
     async def cached_probe(
         self,
@@ -1987,6 +2011,78 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             }
         except DomainError as exc:
             raise _domain(exc) from exc
+
+    # ---- B15：分块 PCM（audio_pcm_chunk） ----
+
+    @app.post("/api/v1/projects/{project_id}/assets/{asset_id}/pcm-chunks")
+    async def ensure_pcm_chunk(
+        project_id: str, asset_id: str, request: PcmChunkRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """B15：确保一个 PCM 块 ready（Renderer 可见；无路径字段）。
+
+        同步内联生成（2 秒块小任务，不排 jobs 队列——低延迟 PCM 不能等
+        长导出；begin_build single-flight 防并发同 key 重复生成）。
+        start_sample 必须对齐 96000 样本网格；尾块 valid_samples < 96000。
+        """
+        asset_row = _preview_source_asset_row(state, project_id, asset_id)
+        try:
+            if not (json_loads(asset_row["media_info_json"] or "{}").get("audio_streams") or []):
+                raise _domain(DomainError(
+                    "MEDIA_NO_AUDIO", "素材无音轨，不生成分块 PCM"))
+            resolved_path = state.projects.resolve_asset_path(asset_id)
+            result = await state.pcm_chunks.ensure_chunk(
+                asset_row, request.start_sample, resolved_path["path"])
+            return {
+                "cache_key": result["cache_key"],
+                "status": result["status"],
+                "start_sample": result["start_sample"],
+                "valid_samples": result["valid_samples"],
+                "sample_rate": 48000,
+                "channels": 2,
+                "chunk_samples": 96000,
+                "size_bytes": result["size_bytes"],
+            }
+        except DomainError as exc:
+            raise _domain(exc) from exc
+        except PcmChunkError as exc:
+            # 服务层网格/媒体约束 → 400（代码语义与波形端点一致）
+            raise _domain(DomainError(exc.code, exc.message)) from exc
+
+    @app.post("/api/v1/internal/projects/{project_id}/assets/{asset_id}/pcm-chunks/media")
+    async def resolve_pcm_chunk_media(
+        project_id: str, asset_id: str, request: PcmChunkMediaRequest,
+        _: CoreState = Depends(require_admin),
+    ) -> dict[str, Any]:
+        """B15：Main 内部解析 PCM 块文件（admin 通道）——路径仅供 Main 换票据。
+
+        start_sample 与 ensure 相同网格校验（Renderer 不能任意偏移——
+        请求伪造的偏移无法命中任何条目）。
+        """
+        asset_row = _preview_source_asset_row(state, project_id, asset_id)
+        try:
+            key = state.pcm_chunks.chunk_cache_key(
+                asset_row["fingerprint"], request.start_sample)
+            entry = state.derived_cache.lookup(key)
+            if entry is None:
+                raise _error("DERIVED_NOT_FOUND", "PCM 块不存在或未就绪", 404)
+            state.derived_cache.add_reference(key, project_id, asset_id)
+            from .media.derived_cache import DerivedCacheError
+
+            try:
+                path = state.derived_cache.resolved_path(entry)
+            except DerivedCacheError as exc:
+                raise _domain(DomainError("DERIVED_CACHE_UNSAFE", exc.message)) from exc
+            return {
+                "cache_key": key,
+                "status": "ready",
+                "path": str(path),
+                "size_bytes": entry.size_bytes,
+            }
+        except DomainError as exc:
+            raise _domain(exc) from exc
+        except PcmChunkError as exc:
+            raise _domain(DomainError(exc.code, exc.message)) from exc
 
     @app.get("/api/v1/platform-presets")
     async def list_platform_presets(_: CoreState = Depends(require_ui)) -> dict[str, Any]:
