@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, protocol, shell } from "electron";
 import { join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { access, readdir, readFile } from "node:fs/promises";
+import { totalmem } from "node:os";
 import { CoreAdminClient, CoreHttpError } from "./core-admin-client.js";
 import { ProviderSecretStore, reinjectProviderSecrets, removeProviderSecret, saveProviderSecret } from "./provider-secrets.js";
 import { ImageProviderSecretStore, reinjectImageProviderSecrets } from "./image-provider-secrets.js";
@@ -121,8 +122,18 @@ function requireCore(): CoreAdminClient {
   return core;
 }
 
-function rendererRuntime(): { protocol_version: 1; status: "ready" } {
-  return { protocol_version: 1, status: "ready" };
+/** B13：Renderer 资源档位（离散——不暴露 totalmem 等主机信息；
+ *  8GiB/未知 → conservative，>16GiB → high，其余 balanced）。 */
+function resourceTier(): "conservative" | "balanced" | "high" {
+  const totalMiB = totalmem() / (1024 * 1024);
+  if (!Number.isFinite(totalMiB) || totalMiB <= 0) return "conservative";
+  if (totalMiB <= 8 * 1024) return "conservative";
+  if (totalMiB > 16 * 1024) return "high";
+  return "balanced";
+}
+
+function rendererRuntime(): { protocol_version: 1; status: "ready"; resource_tier: "conservative" | "balanced" | "high" } {
+  return { protocol_version: 1, status: "ready", resource_tier: resourceTier() };
 }
 
 async function restrictedMediaUrl(assetId: string): Promise<string> {

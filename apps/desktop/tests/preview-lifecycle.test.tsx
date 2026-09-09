@@ -211,6 +211,38 @@ describe("A01 PreviewSession.create 资源栈", () => {
     expect(container.childElementCount).toBe(0);
   });
 
+  it("B13 档位注入：conservative 4+ 视频输入环深收 5，compositor init 收到 ringDepth=5", async () => {
+    installWorkers();
+    stubOffscreenCanvas();
+    const container = document.createElement("div");
+    // 4 视频输入 IR（twoInputIr ×2 扩展）
+    const ir = twoInputIr();
+    for (let i = 3; i <= 4; i++) {
+      ir.inputs.push({ ...ir.inputs[0]!, input_id: `in_${i}`, asset_id: `asset_video_${i}` });
+      ir.segments.push({ ...ir.segments[0]!, clip_id: `clip_${i}`, input_id: `in_${i}` });
+    }
+    const session = await PreviewSession.create(container, ir, new Map([
+      ["asset_video", "aivideo://media/one"], ["asset_video_2", "aivideo://media/two"],
+      ["asset_video_3", "aivideo://media/three"], ["asset_video_4", "aivideo://media/four"],
+    ]), undefined, undefined, null, "conservative");
+    // compositor = 第 0 个 worker：init 消息的 ringDepth 已按档位收缩
+    const compositor = ScriptedWorker.instances[0]!;
+    const init = compositor.messages.find(m => m.type === "init");
+    expect(init.ringDepth).toBe(5);
+    session.dispose();
+  });
+
+  it("B13 档位注入：balanced 档环深保持 8（默认行为不变）", async () => {
+    installWorkers();
+    stubOffscreenCanvas();
+    const container = document.createElement("div");
+    const session = await PreviewSession.create(container, freshIr(), TICKETS, undefined, undefined, null, "balanced");
+    const compositor = ScriptedWorker.instances[0]!;
+    const init = compositor.messages.find(m => m.type === "init");
+    expect(init.ringDepth).toBe(8);
+    session.dispose();
+  });
+
   it("create 成功后 dispose：全部 worker terminate、canvas 移除、二次 dispose 幂等", async () => {
     stubOffscreenCanvas();
     const container = document.createElement("div");

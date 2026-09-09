@@ -17,6 +17,7 @@ import type { CompositorWorkerClient } from "./compositor-worker.js";
 import type { DrawCommand } from "./compositor-worker.worker.js";
 import type { Ir, IrContent, IrFrame, IrOverlay } from "./ir.js";
 import type { PreviewSourceResolver } from "./source-resolver.js";
+import { ringDepthFor } from "./resource-budget.js";
 import { editorPerf, allocatePerfSession } from "./perf-metrics.js";
 import { DecodeWorker } from "./decode-worker.js";
 import { VARISPEED_WORKLET_NAME, createVarispeedWorkletUrl } from "./varispeed-worklet.js";
@@ -175,7 +176,9 @@ export class PreviewSession {
   /** 尺寸变化 rAF 合帧重呈现（连续拖拽窗口不逐帧重建）。 */
   private recomposeRaf = 0;
 
-  /** 环形纹理池深度：LEAD 超前 + 当前合成 + 在途 1 + 提前入场 1，取 8 留余量。 */
+  /** 环形纹理池深度：LEAD 超前 + 当前合成 + 在途 1 + 提前入场 1，取 8 留余量。
+   *  B13：档位/压力可收 5（LEAD 联动 = min(LEAD, ringDepth-3)——写深不覆盖
+   *  未展示槽位；实例字段经 create(tier) 决策。 */
   private static readonly RING = 8;
   /** 预读超前帧数（吸收转场/换段冷启路径的解码尖峰）。 */
   private static readonly LEAD = 5;
@@ -187,6 +190,8 @@ export class PreviewSession {
   private static readonly BACKSCAN = 15;
 
   ir: Ir;
+  /** B13：本会话环深/预读（档位决策；压力收 5 时 LEAD 联动）。 */
+  private ringDepth = PreviewSession.RING;
   private readonly perfId = allocatePerfSession();
   private perfRequest = 0;
   private readonly lifetime = new AbortController();
@@ -198,9 +203,14 @@ export class PreviewSession {
   static async create(container: HTMLElement, ir: Ir,
                       tickets: Map<string, string>,
                       audioByClip?: Map<string, SegmentAudioConfig>, signal?: AbortSignal,
-                      sourceResolver?: PreviewSourceResolver | null): Promise<PreviewSession> {
+                      sourceResolver?: PreviewSourceResolver | null,
+                      resourceTier?: "conservative" | "balanced" | "high"): Promise<PreviewSession> {
     throwIfAborted(signal);
     const session = new PreviewSession(ir);
+    // B13：档位 → 环深决策（保守档多输入收 5；LEAD 联动防写深覆盖）
+    if (resourceTier) {
+      session.ringDepth = ringDepthFor(resourceTier, ir.inputs.filter(input => input.asset_kind === "video").length);
+    }
     const abort = () => session.dispose();
     signal?.addEventListener("abort", abort, { once: true });
     try {
@@ -238,7 +248,7 @@ export class PreviewSession {
         width: input.geometry.width || 16,
         height: input.geometry.height || 9,
       })),
-      ringDepth: PreviewSession.RING,
+      ringDepth: session.ringDepth,
       canvasWidth: ir.canvas.width,
       canvasHeight: ir.canvas.height,
       captionStyles: ir.caption_styles,
@@ -260,7 +270,7 @@ export class PreviewSession {
       const rig: InputRig = {
         kind: input.asset_kind === "image" ? "image" : "video",
         worker: null,
-        ring: Array.from({ length: PreviewSession.RING }, () => null),
+        ring: Array.from({ length: session.ringDepth }, () => null),
         ringSeq: 0,
         fed: -1,
         inFlightN: null,
@@ -533,7 +543,7 @@ export class PreviewSession {
    *  p95 翻倍的根因）。 */
   private uploadRing(rig: InputRig, inputId: string, srcN: number): Promise<void> {
     if (!rig.worker) return Promise.reject(new Error(`no worker for input`));
-    const slotIndex = rig.ringSeq % PreviewSession.RING;
+    const slotIndex = rig.ringSeq % this.ringDepth;
     rig.ringSeq += 1;
     const epoch = this.seekEpoch;
     const task = async (): Promise<void> => {
@@ -627,7 +637,9 @@ export class PreviewSession {
    */
   private pump(target: number): void {
     const from = Math.max(0, this.currentFrame, target - PreviewSession.BACKSCAN);
-    const to = Math.min(target + PreviewSession.LEAD, this.ir.frames.length - 1);
+    // B13：LEAD 联动环深（环深收 5 时 LEAD=2——写深不覆盖未展示槽位）
+    const lead = Math.min(PreviewSession.LEAD, this.ringDepth - 3);
+    const to = Math.min(target + lead, this.ir.frames.length - 1);
     const toEnter = Math.min(target + PreviewSession.LEAD_ENTER, this.ir.frames.length - 1);
     const needsByInput = new Map<string, Set<number>>();
     const enterNeeds = new Map<string, Set<number>>();
@@ -670,7 +682,7 @@ export class PreviewSession {
       // ≤ target 找到就绪帧。代价仅是 speed>1 时的预读跑道收窄（仍有
       // (RING-3)/speed 个输出帧），换段冷启尖峰由链完成即续吸收。
       const anchor = displayMaxByInput.get(inputId) ?? sorted[0]!;
-      const max = Math.min(sorted[sorted.length - 1]!, anchor + PreviewSession.RING - 3);
+      const max = Math.min(sorted[sorted.length - 1]!, anchor + this.ringDepth - 3);
       // 正向单调推进（冷启动首个请求直达入场点）。
       // 向后跳转只发生在用户动作（回卷重播/回退 seek）——由 resetChains() 显式
       // 重置链游标，pump 本身不做启发式回跳（避免深窗口陈旧需求引发震荡）。

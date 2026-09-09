@@ -45,6 +45,8 @@ export interface SyntheticPreviewProps {
   onFallback: (reason: string, code: string | null) => void;
   /** B11：预览源解析（视频输入优先代理票据；不提供 = 原源行为不变）。 */
   sourceResolver?: PreviewSourceResolver | null;
+  /** B13：资源预算档位（Main 离散注入；不提供 = 默认 balanced 行为）。 */
+  resourceTier?: "conservative" | "balanced" | "high";
 }
 
 interface LoadState {
@@ -53,7 +55,7 @@ interface LoadState {
 }
 
 export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactElement {
-  const { projectId, revisionId, mediaUrls, audioByClip, pipClips, selectedClipId, onSelectClip, onCommitPipTransform, onDraftPipMask, onCommitPipMask, onGesturePause, onGestureResume, playing, playheadUs, onTimeUs, onEnded, onFallback, outputRatio, playheadStore, sourceResolver } = props;
+  const { projectId, revisionId, mediaUrls, audioByClip, pipClips, selectedClipId, onSelectClip, onCommitPipTransform, onDraftPipMask, onCommitPipMask, onGesturePause, onGestureResume, playing, playheadUs, onTimeUs, onEnded, onFallback, outputRatio, playheadStore, sourceResolver, resourceTier } = props;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const sessionRef = useRef<PreviewSession | null>(null);
   const generationRef = useRef(0);
@@ -113,7 +115,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
         sessionRefLocal.current = null;
         // 画布元素由会话自建（transferControlToOffscreen 每元素仅一次），
         // 后备缓冲随预览框（contain 居中，见 session.resize）；初始以 IR 画布尺寸起底
-        const session = await PreviewSession.create(container, ir, mediaUrls, audioByClip, controller.signal, sourceResolver ?? null);
+        const session = await PreviewSession.create(container, ir, mediaUrls, audioByClip, controller.signal, sourceResolver ?? null, resourceTier);
         creating = session;
         if (stale()) { session.dispose(); return; }
         session.onTimeUs = (us: number) => {
