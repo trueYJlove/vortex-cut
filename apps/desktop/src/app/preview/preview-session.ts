@@ -332,6 +332,9 @@ export class PreviewSession {
         },
         session.lifetime.signal,
         1,
+        // B13/B14：PCM 缓存字节预算随档位（64/128/256MiB；LRU 逐出无活跃
+        // 用户的 ready 条目，超限如实暴露 overBudget——不静默漏音）
+        (resourceTier ? BUDGET_TABLES[resourceTier].pcmCacheMiB : 128) * 1024 * 1024,
       );
       for (const segment of ir.segments) {
         if (!audioByClip.get(segment.clip_id)?.enabled) continue;

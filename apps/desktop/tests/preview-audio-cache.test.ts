@@ -187,3 +187,54 @@ describe("AudioSourceCache release / dispose", () => {
     expect(cache.queuedCount).toBe(0);
   });
 });
+
+
+describe("AudioSourceCache PCM 字节预算（B13/B14 接线）", () => {
+  function makeBudgetHarness(bufferSamples: number, maxBytes: number) {
+    const lifetime = new AbortController();
+    const fetchLog: string[] = [];
+    const cache = new AudioSourceCache(
+      async () => ({ length: bufferSamples, numberOfChannels: 2 } as AudioBuffer),
+      async (ticket) => { fetchLog.push(ticket); return new Uint8Array([1]).buffer; },
+      lifetime.signal, 1, maxBytes,
+    );
+    return { cache, lifetime, fetchLog };
+  }
+
+  it("ready 记账：cachedByteCount = decodedBytes 之和", async () => {
+    const bytesPerEntry = 48000 * 2 * 4; // harness buffer 固定尺寸
+    const { cache } = makeBudgetHarness(48000, null as unknown as number);
+    await cache.acquire("asset_a|1|48000", "t-a", "clip_0").catch(() => undefined);
+    expect(cache.cachedByteCount).toBe(bytesPerEntry);
+  });
+
+  it("超限 LRU：逐出最旧无用户 ready 条目，新条目保留", async () => {
+    // 预算只装得下 1 条（1 条 = 384000B；预算 384001B < 2 条）
+    const { cache, fetchLog } = makeBudgetHarness(48000, 48000 * 2 * 4 + 1);
+    await cache.acquire("asset_a|1|48000", "t-a", "clip_0").catch(() => undefined);
+    // 旧条目消费者离场（release 后 ready 条目仍缓存，但可被预算逐出）
+    cache.release("asset_a|1|48000", "clip_0");
+    await cache.acquire("asset_b|1|48000", "t-b", "clip_1").catch(() => undefined);
+    expect(cache.cachedByteCount).toBe(48000 * 2 * 4); // 只剩 1 条
+    expect(cache.snapshot().map(e => e.key)).toEqual(["asset_b|1|48000"]); // 旧 a 被逐出
+    expect(cache.overBudget).toBe(false);
+    expect(fetchLog).toHaveLength(2); // 逐出不改写 fetch 历史（重取走 acquire）
+  });
+
+  it("活跃条目不逐出：超限如实暴露 overBudget", async () => {
+    // 条目 2 倍于预算且都有用户：正确性优先——不清、不静默漏音
+    const { cache } = makeBudgetHarness(48000, 48000 * 2 * 4);
+    const keepA = cache.acquire("asset_a|1|48000", "t-a", "clip_0").catch(() => undefined);
+    const keepB = cache.acquire("asset_b|1|48000", "t-b", "clip_1").catch(() => undefined);
+    await Promise.all([keepA, keepB]);
+    expect(cache.snapshot()).toHaveLength(2);
+    expect(cache.overBudget).toBe(true);
+  });
+
+  it("dispose 清零记账", async () => {
+    const { cache, lifetime } = makeBudgetHarness(48000, null as unknown as number);
+    await cache.acquire("asset_a|1|48000", "t-a", "clip_0").catch(() => undefined);
+    lifetime.abort();
+    expect(cache.cachedByteCount).toBe(0);
+  });
+});

@@ -1,7 +1,7 @@
 /** A02 音频源缓存（session 作用域）：同素材多 clip 的 fetch/decodeAudioData
  *  single-flight + 并发上限 + 有限预热 + 失败重试门。
  *
- * 约束（PERFORMANCE_IMPLEMENTATION_PLAN A02）：
+ * 约束（PERFORMANCE_IMPLEMENTATION_PLAN A02 + B13/B14 预算接线）：
  * - 缓存 key = asset_id + input binding generation + AudioContext.sampleRate；
  *   不用临时票据字符串当稳定内容标识（票据 TTL 内 URL 可变但内容不变）。
  * - 首次调用同步登记 pending Promise，之后才 await fetch/decode；同 key 请求
@@ -13,6 +13,10 @@
  *   解码；解码完成前并发位不归还（防止"取消后新任务"突破上限）。
  * - 缓存 AudioBuffer 可被多个 clip 读取；transfer 给 worklet 由消费方自行
  *   slice 副本（ensureWorkletNode 已按此语义），缓存本体不 transfer。
+ * - B13 pcmCacheMiB 预算接线（B14 清偿）：ready 条目按 decodedBytes 记账，
+ *   超限 LRU 逐出"无活跃用户"的最旧 ready 条目（活跃条目绝不清——正确性
+ *   优先于预算；超限后 totalBytes 仍如实超，overBudget 计数暴露给调用方，
+ *   不静默漏音）。B15 流式分块落地前这是尽力而为的会话级回收。
  * - 会话 dispose → abort 在途 fetch、拒绝排队、条目清空；共享已 ready 的
  *   buffer 引用只做登记归还（第一轮不跨 session 复用）。 */
 import { throwIfAborted } from "./worker-lifecycle.js";
@@ -46,12 +50,16 @@ export class AudioSourceCache {
   private disposed = false;
   /** 失败条目的重试门：false 期间同 key 只命中 error 状态，不重发。 */
   private readonly retryable = new Set<string>();
+  /** PCM 缓存字节记账（ready 条目 decodedBytes 之和）。 */
+  private readyBytes = 0;
 
   constructor(
     private readonly decode: (data: ArrayBuffer, signal: AbortSignal) => Promise<AudioBuffer>,
     private readonly fetchBytes: (ticket: string, signal: AbortSignal) => Promise<ArrayBuffer>,
     private readonly lifetime: AbortSignal,
     private readonly generation = 0,
+    /** B13 预算表 pcmCacheMiB（字节；默认不限——未注入档位时行为不变）。 */
+    private readonly maxCacheBytes: number | null = null,
   ) {
     this.lifetime.addEventListener("abort", () => this.dispose(), { once: true });
   }
@@ -67,6 +75,15 @@ export class AudioSourceCache {
 
   get queuedCount(): number {
     return this.queue.length;
+  }
+
+  /** ready 条目总字节（预算观测；不隐藏超限——overBudget 另计）。 */
+  get cachedByteCount(): number {
+    return this.readyBytes;
+  }
+
+  get overBudget(): boolean {
+    return this.maxCacheBytes !== null && this.readyBytes > this.maxCacheBytes;
   }
 
   /** 同步登记/获取条目：同 key 返回同一 Promise（single-flight）。
@@ -122,6 +139,9 @@ export class AudioSourceCache {
       if (entry.buffer) {
         entry.state = "ready";
         entry.decodedBytes = entry.buffer.length * entry.buffer.numberOfChannels * 4;
+        this.readyBytes += entry.decodedBytes;
+        // B13 预算：超限 LRU 逐出无活跃用户的旧 ready 条目（活跃条目不动）
+        this.evictOverBudget();
         return entry.buffer;
       }
       throw new Error("audio load produced no buffer");
@@ -131,6 +151,24 @@ export class AudioSourceCache {
       throw error;
     } finally {
       this.lifetime.removeEventListener("abort", lifetimeAbort);
+    }
+  }
+
+  /** 预算逐出：最旧（Map 插入序）无用户的 ready 条目，直至回到预算内或
+   *  无可逐条目（单源超预算：如实超限，overBudget 暴露给调用方）。 */
+  private evictOverBudget(): void {
+    if (this.maxCacheBytes === null) return;
+    while (this.readyBytes > this.maxCacheBytes) {
+      let victim: { key: string; entry: AudioSourceEntry } | null = null;
+      for (const [key, candidate] of this.entries) {
+        if (candidate.state !== "ready") continue;
+        if (candidate.users.size > 0) continue; // 活跃消费者：正确性优先
+        victim = { key, entry: candidate };
+        break; // Map 迭代序 = 插入序（最旧在前）
+      }
+      if (!victim) return;
+      this.readyBytes -= victim.entry.decodedBytes;
+      this.entries.delete(victim.key);
     }
   }
 
@@ -175,5 +213,6 @@ export class AudioSourceCache {
     for (const [, entry] of this.entries) entry.controller.abort();
     for (const task of this.queue.splice(0)) task.resolve();
     this.entries.clear();
+    this.readyBytes = 0;
   }
 }
