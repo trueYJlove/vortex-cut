@@ -141,13 +141,23 @@ describe("Stage 1A/1B 工作流", () => {
     const refreshedProjectQ = { ...projectQ, name: "服务端项目 Q（刷新）" };
     const staleProject = { ...project, name: "服务端迟到名称" };
     const confirmedProject = { ...project, name: "服务端确认名" };
-    let refreshProjects!: () => void;
     let resolveStaleRefresh!: (value: { items: (typeof project)[]; next_cursor: null }) => void;
     const staleRefresh = new Promise<{ items: (typeof project)[]; next_cursor: null }>(resolve => { resolveStaleRefresh = resolve; });
-    const intervalSpy = vi.spyOn(globalThis, "setInterval").mockImplementation((callback, delay) => {
-      if (delay === 1500) refreshProjects = callback as () => void;
-      return 1 as never;
-    });
+    // A08：轮询改 RequestScheduler（结束后再 setTimeout + 同端点 single-flight）。
+    // 受控注入点从 setInterval 回调改为 scheduler 的延迟 setTimeout：首轮
+    // 调度立即执行（runCycle），后续由这里手动触发。
+    const originalSetTimeout = globalThis.setTimeout.bind(globalThis);
+    let refreshProjects!: () => void;
+    const timeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(((callback: TimerHandler, delay?: number) => {
+      // 调度器内部排程（数字 delay ≥1s）挂起为可手动触发的刷新钩子（只
+      // 记最新一次——手动触发即模拟"间隔到达"，不重放历史周期）；其他
+      // setTimeout（React/库内部）照常真实触发。
+      if (typeof delay === "number" && delay >= 1000 && typeof callback === "function") {
+        refreshProjects = () => { void (callback as () => void)(); };
+        return 1 as never;
+      }
+      return originalSetTimeout(callback, delay ?? 0) as never;
+    }) as unknown as typeof setTimeout);
     const api = desktopApi();
     api.listProjects = vi.fn()
       .mockResolvedValueOnce({ items: [project], next_cursor: null })
@@ -179,7 +189,7 @@ describe("Stage 1A/1B 工作流", () => {
     await act(async () => { refreshProjects(); });
     await waitFor(() => expect(api.listProjects).toHaveBeenCalledTimes(3));
     await waitFor(() => expect(renameInput).toHaveValue("服务端项目 Q（刷新）"));
-    intervalSpy.mockRestore();
+    timeoutSpy.mockRestore();
   });
 
   it("支持素材库刷新、删除确认弹窗和只读 Transcript 查看", async () => {
@@ -300,8 +310,9 @@ describe("Stage 1C Editor", () => {
     let rejectTimeline!: (reason: unknown) => void; const pendingTimeline = new Promise<TimelineState>((_, reject) => { rejectTimeline = reject; }); const api = desktopApi({ timeline: null }); api.getTimeline = vi.fn().mockReturnValue(pendingTimeline); window.desktop = api; render(<App />); fireEvent.click(await screen.findByRole("button", { name: "创建空时间线" })); await screen.findByRole("button", { name: /video 5.00s/ }); rejectTimeline(new Error("TIMELINE_NOT_FOUND 404"));
     fireEvent.dragOver(screen.getByLabelText("时间线画布"), { dataTransfer: { getData: () => video.asset_id, dropEffect: "copy" } }); fireEvent.drop(screen.getByLabelText("时间线画布"), { dataTransfer: { getData: () => video.asset_id, dropEffect: "copy" } }); await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledWith(expect.objectContaining({ patch: expect.objectContaining({ operations: [expect.objectContaining({ op: "insert_asset_clip" })] }) })));
     fireEvent.click(screen.getAllByRole("button", { name: /^转录$/ })[0]);
-    // 勾选转录片段的界面在"转录"子标签下：切换后操作。
-    fireEvent.click(screen.getByRole("tab", { name: /^转录/ })); fireEvent.click(await screen.findByRole("checkbox")); fireEvent.click(screen.getByRole("button", { name: "追加所选片段" }));
+    // 勾选转录片段的界面在"转录"子标签下：切换后操作。A08：转录正文不再
+    // 全量预取——先点"查看转录"按需加载（并发队列 + 代次作废），再勾选。
+    fireEvent.click(screen.getByRole("tab", { name: /^转录/ })); fireEvent.click(await screen.findByRole("button", { name: /查看转录/ })); fireEvent.click(await screen.findByRole("checkbox")); fireEvent.click(screen.getByRole("button", { name: "追加所选片段" }));
     await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledTimes(2)); const operation = vi.mocked(api.patchTimeline).mock.calls[1][0].patch.operations[0]; expect(operation).toEqual({ op: "insert_transcript_segments", transcript_id: transcript.transcript_id, segment_ids: [transcript.segments[0].segment_id], at_index: timelineDocument.clips.length, padding_before_us: 150_000, padding_after_us: 150_000, create_captions: true, layout: "blurred_background" }); expect(operation).not.toHaveProperty("kind");
   });
 

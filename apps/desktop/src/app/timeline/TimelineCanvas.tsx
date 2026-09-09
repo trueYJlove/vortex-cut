@@ -75,6 +75,7 @@ import {
 } from "./types.js";
 import { TimelinePlayheadLayer } from "./TimelinePlayheadLayer.js";
 import { createPlayheadStore, type PlayheadStore } from "./playhead-store.js";
+import { ThumbnailLoader } from "./thumbnail-loader.js";
 
 /** B2 转场种类（与 core TRANSITION_KINDS 对齐）。 */
 const TRANSITION_KINDS = ["fade", "fadeblack", "dissolve", "wipeleft", "wiperight", "slideleft", "slideup", "zoomin"] as const;
@@ -253,93 +254,6 @@ export function computeFrameRequests(
   }
   return frames;
 }
-
-/**
- * 视频抽帧器：共享一个隐藏 <video> 元素，按队列 seek 到目标时刻，
- * 把帧绘制进小画布（drawImage 兼容 HTMLCanvasElement）。抽帧完全异步，
- * 失败（解码不了/没有画面）静默跳过。
- */
-class VideoThumbnailExtractor {
-  private video: HTMLVideoElement | null = null;
-  private queue: Array<{ key: string; url: string; timeSec: number; onFrame: (frame: HTMLCanvasElement) => void }> = [];
-  private pendingKeys = new Set<string>();
-  private busy = false;
-  private currentUrl: string | null = null;
-
-  request(key: string, url: string, timeSec: number, onFrame: (frame: HTMLCanvasElement) => void): void {
-    if (this.pendingKeys.has(key)) return;
-    this.pendingKeys.add(key);
-    this.queue.push({ key, url, timeSec, onFrame });
-    void this.pump();
-  }
-
-  private ensureVideo(): HTMLVideoElement | null {
-    if (typeof document === "undefined") return null;
-    if (!this.video) {
-      const video = document.createElement("video");
-      video.muted = true;
-      video.preload = "auto";
-      video.playsInline = true;
-      this.video = video;
-    }
-    return this.video;
-  }
-
-  private async pump(): Promise<void> {
-    if (this.busy) return;
-    const job = this.queue.shift();
-    if (!job) return;
-    this.busy = true;
-    try {
-      const video = this.ensureVideo();
-      if (!video) return;
-      if (this.currentUrl !== job.url) {
-        video.src = job.url;
-        this.currentUrl = job.url;
-        await new Promise<void>((resolve, reject) => {
-          const done = () => { cleanup(); resolve(); };
-          const fail = () => { cleanup(); reject(new Error("media load failed")); };
-          const cleanup = () => {
-            video.removeEventListener("loadeddata", done);
-            video.removeEventListener("error", fail);
-          };
-          video.addEventListener("loadeddata", done);
-          video.addEventListener("error", fail);
-          video.load();
-        });
-      }
-      await new Promise<void>((resolve, reject) => {
-        const done = () => { cleanup(); resolve(); };
-        const fail = () => { cleanup(); reject(new Error("seek failed")); };
-        const cleanup = () => {
-          video.removeEventListener("seeked", done);
-          video.removeEventListener("error", fail);
-        };
-        video.addEventListener("seeked", done);
-        video.addEventListener("error", fail);
-        video.currentTime = job.timeSec;
-      });
-      const width = Math.max(2, Math.min(160, video.videoWidth || 96));
-      const height = Math.max(2, Math.round((width * (video.videoHeight || 54)) / (video.videoWidth || 96)));
-      const frame = document.createElement("canvas");
-      frame.width = width;
-      frame.height = height;
-      const ctx = frame.getContext("2d");
-      if (ctx) {
-        ctx.drawImage(video, 0, 0, width, height);
-        job.onFrame(frame);
-      }
-    } catch {
-      // 解码/寻址失败：静默跳过该帧。
-    } finally {
-      this.pendingKeys.delete(job.key);
-      this.busy = false;
-      void this.pump();
-    }
-  }
-}
-
-const videoThumbnailExtractor = new VideoThumbnailExtractor();
 
 // ── Caption geometry ─────────────────────────────────────────────────────────
 
@@ -1849,13 +1763,40 @@ export function TimelinePanel({
   const pendingImageKeys = useRef<Set<string>>(new Set());
   const [thumbnailVersion, setThumbnailVersion] = useState(0); // trigger re-render when frames load
 
+  // A08：缩略图加载器——组件作用域 owner（非全局单例），请求带 viewport
+  // epoch/priority；旧视口未开始的任务取消、超时 5s 不堵队列、完成回调
+  // rAF 批量通知（详见 timeline/thumbnail-loader.ts）。
+  const thumbnailLoaderRef = useRef<ThumbnailLoader | null>(null);
+  if (!thumbnailLoaderRef.current) {
+    thumbnailLoaderRef.current = new ThumbnailLoader({
+      onBatchLoaded: keys => {
+        const cache = thumbnailCache.current;
+        const loader = thumbnailLoaderRef.current;
+        if (!loader) return;
+        let changed = false;
+        for (const key of keys) {
+          const frame = loader.peek(key);
+          if (!frame) continue;
+          const [clipId, , frameIndex] = key.split(":");
+          cache.set(key, frame.canvas);
+          cache.set(`${clipId}:any:${frameIndex}`, frame.canvas);
+          changed = true;
+        }
+        if (changed) setThumbnailVersion(v => v + 1);
+      },
+    });
+  }
+  const thumbnailLoader = thumbnailLoaderRef.current;
+  // 卸载/滚动视口代次推进：旧任务出队即丢；卸载释放 video/缓存。
+  useEffect(() => () => thumbnailLoader.dispose(), [thumbnailLoader]);
+
   // Waveform peak cache: clip_id -> amplitude peaks (0..1).
   const waveformCache = useRef<Map<string, Float32Array>>(new Map());
   const [waveformVersion, setWaveformVersion] = useState(0); // trigger re-render when peaks load
   // Clip ids with an in-flight decode, to avoid duplicate fetches per render.
   const pendingWaveforms = useRef<Set<string>>(new Set());
 
-  // 抽帧：可见视频片段按帧时间请求（共享隐藏 video 池 seek 抽帧）；
+  // 抽帧：可见视频片段按帧时间请求（组件作用域 loader 串行 seek 抽帧）；
   // 图片素材直接用 <img> 加载。缩放只改变帧数档位（量化），旧帧保留兜底
   // （别名键 ":any:"），新帧就绪后逐格替换——缩放时画面不消失。请求防抖
   // 200ms，连续缩放不触发重抽风暴。
@@ -1863,6 +1804,7 @@ export function TimelinePanel({
     const timer = window.setTimeout(() => {
       const cache = thumbnailCache.current;
       const clipIds = new Set(clips.map((clip) => clip.clip_id));
+      thumbnailLoader.advanceViewport(); // 旧视口未开始的任务取消
       for (const rect of clipRects) {
         const mediaUrl = assetMedia.find((m) => m.asset_id === rect.clip.asset_id)?.media_url ?? null;
         const frames = computeFrameRequests(mediaUrl, rect.clip, view.pixelsPerSecond);
@@ -1892,17 +1834,24 @@ export function TimelinePanel({
             img.onerror = () => pendingImageKeys.current.delete(`${key}:img`);
             continue;
           }
-          videoThumbnailExtractor.request(key, frames[fi].url, frames[fi].timeSec, (frame) => {
-            cache.set(key, frame);
-            cache.set(`${rect.clip.clip_id}:any:${fi}`, frame);
-            setThumbnailVersion((v) => v + 1);
+          // 视口内（priority 0）优先，预读余量内（±160px）为 1。
+          const inCoreViewport = cellLeft >= 0 && cellRight <= canvasSize.width;
+          void thumbnailLoader.request({
+            key,
+            url: frames[fi].url,
+            timeSec: frames[fi].timeSec,
+            priority: inCoreViewport ? 0 : 1,
+            viewportEpoch: thumbnailLoader.viewportEpoch,
           });
         }
       }
       // 仅清理已不存在片段的帧；档位旧帧保留作兜底（上限防膨胀）。
+      thumbnailLoader.prune(clipIds);
       for (const key of [...cache.keys()]) {
-        const clipId = key.split(":")[0] as TimelineClipId;
-        if (!clipIds.has(clipId)) cache.delete(key);
+        if (!thumbnailLoader.peek(key) && !key.includes(":any:")) {
+          const clipId = key.split(":")[0] as TimelineClipId;
+          if (!clipIds.has(clipId)) cache.delete(key);
+        }
       }
       while (cache.size > 600) {
         const oldest = cache.keys().next().value;
@@ -1911,7 +1860,7 @@ export function TimelinePanel({
       }
     }, 200);
     return () => window.clearTimeout(timer);
-  }, [clipRects, assetMedia, view.pixelsPerSecond, clips]);
+  }, [clipRects, assetMedia, view.pixelsPerSecond, clips, view, canvasSize.width, thumbnailLoader]);
 
   // Load waveform peaks for visible video and audio clips. Decoding runs fully
   // async (fetch + OfflineAudioContext), so it never blocks rendering; failures
