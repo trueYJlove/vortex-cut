@@ -15,8 +15,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import performance as perf_diagnostics
 from . import PROTOCOL_VERSION, __version__
+from . import performance as perf_diagnostics
 from .asr_jobs import AsrCoordinator
 from .auth import AuthStore
 from .config import Settings
@@ -25,6 +25,8 @@ from .ids import new_id
 from .jobs import JobService
 from .media.encoders import EncoderDetector
 from .media.ffprobe import FFprobe
+from .media.probe_cache import ProbeCache, probe_cache_key
+from .media.process import run_process
 from .media_generation import MediaGenerationService
 from .model_registry import ModelError, ModelManager, ModelRegistry
 from .planning import PlanningService, ProviderRepository, RecipeRegistry
@@ -503,6 +505,10 @@ class CoreState:
         self.connections: set[WebSocket] = set()
         self.shutdown_event = asyncio.Event()
         self.ffprobe = FFprobe(settings.ffprobe)
+        # A07：probe 结果会话缓存（键 = fingerprint + stat + ffprobe build；
+        # 成功 LRU≤256、失败 TTL 5s、并发同键 single-flight）。装饰层包住
+        # FFprobe——app 内统一经 cached_probe 走缓存，FFprobe 本体语义不变。
+        self.probe_cache = ProbeCache()
         self.encoders = EncoderDetector(settings.ffmpeg)
         self.model_registry = ModelRegistry(settings.manifest_dir)
         self.model_manager = ModelManager(self.db, settings.data_dir, self.model_registry)
@@ -529,17 +535,57 @@ class CoreState:
         self.asr = AsrCoordinator(
             self.db, self.model_registry, self.model_manager, self.transcripts
         )
+        self._wire_projects()
+        self._build_render_stack(settings)
 
+    async def cached_probe(
+        self,
+        path: Path,
+        fingerprint: str | None = None,
+        require_video: bool = True,
+    ) -> dict[str, Any]:
+        """A07：经会话缓存的 ffprobe 探测。
+
+        - 提供 fingerprint 时与 stat(size, mtime_ns) 共同构成缓存键（文件
+          变化即键变化，自动失效）；未提供时退化为 stat+build 键。
+        - 缓存键含 ffprobe build（版本变化自动全失效）。
+        - 未命中（或失败 TTL 过期）走真实 FFprobe.probe；语义（错误码、
+          require_video 检查、normalize）与直调完全一致。
+        """
+
+        async def run_probe() -> dict[str, Any]:
+            return await self.ffprobe.probe(path, require_video=require_video)
+
+        key = probe_cache_key(path, fingerprint, await self.ffprobe_build())
+        if key is None:
+            return await run_probe()
+        return await self.probe_cache.get_or_probe(key, run_probe)
+
+    async def ffprobe_build(self) -> str:
+        """ffprobe build 标识（缓存键成分；读取一次后复用）。"""
+        if self._ffprobe_build is None:
+            result = await run_process(self.ffprobe.executable, ["-hide_banner", "-version"], 10)
+            self._ffprobe_build = (
+                result.stdout.splitlines()[0] if result.stdout and result.returncode == 0 else ""
+            )
+        return self._ffprobe_build
+
+    _ffprobe_build: str | None = None
+
+    def _wire_projects(self) -> None:
         async def probe_asset(path: Path, **kwargs: Any) -> dict[str, Any]:
-            return await self.ffprobe.probe(path, **kwargs)
+            return await self.cached_probe(path, require_video=kwargs.get("require_video", True))
 
         self.projects = ProjectAssetService(
             self.db,
-            settings.data_dir,
+            self.settings.data_dir,
             probe_asset,
             transcript_stale=self.transcripts.mark_asset_stale,
             purge_asset_clips=self.timelines.purge_asset_clips,
         )
+
+    def _build_render_stack(self, settings: Settings) -> None:
+        """A07 抽取仅为 __init__ 可读性；语义与原内联构建完全一致。"""
         self.image_provider_secrets = ProviderSecretVault()
         self.image_provider_configs = ImageProviderConfigService(
             self.db, self.image_provider_secrets
@@ -575,6 +621,8 @@ class CoreState:
             self.destinations,
             self.directory_grants,
             self.rendition_presets,
+            probe=self.cached_probe,
+            encoders=self.encoders,
         )
         self.jobs = JobService(
             self.db,

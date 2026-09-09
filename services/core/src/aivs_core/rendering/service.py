@@ -185,6 +185,8 @@ class RenderCoordinator:
         destinations: DestinationGrantStore,
         directory_grants: DirectoryGrantStore | None = None,
         rendition_presets: Any | None = None,
+        probe: Any | None = None,
+        encoders: EncoderDetector | None = None,
     ) -> None:
         self.database = database
         self.data_dir = data_dir
@@ -196,10 +198,32 @@ class RenderCoordinator:
         self.destinations = destinations
         self.directory_grants = directory_grants
         self.rendition_presets = rendition_presets
+        # A07：probe 经会话缓存（键 = fingerprint + stat + build）；未注入时
+        # 回退直调 ffprobe.probe（语义等价，仅无缓存）。
+        self.probe_fn = probe
+        # A07：渲染中编码失败 → invalidate_smoke 清除该 encoder 的成功缓存
+        #（下次 choose 重新真实 smoke；不因缓存跳过实际渲染错误判断）。
+        self.encoders = encoders
         # 合成预览 IR 缓存：键 = content_fingerprint（plan 语义 + 输出规格），
         # 命中则跳过投影与 ffprobe；体量 ~1-3MB/条，保留最近 4 条。
         self.preview_ir_cache: dict[str, dict[str, Any]] = {}
         self.preview_probe_cache: dict[str, dict[str, Any]] = {}
+
+    async def _probe(self, path: Path, fingerprint: str | None = None) -> dict[str, Any]:
+        """A07：优先走注入的缓存探测通道。
+
+        fingerprint 语义见 app.cached_probe（素材内容指纹，非 asset_id）；
+        调用方用 projects.asset_cache_identity 取真实指纹。
+        """
+        if self.probe_fn is not None:
+            return await self.probe_fn(path, fingerprint)
+        return await self.ffprobe.probe(path)
+
+    def _asset_probe_fingerprint(self, asset_id: str) -> str | None:
+        """素材的 probe 缓存键指纹（数据库 fingerprint；素材不可用返回 None
+        —— resolve_asset_path 随后按既有域错误路径失败）。"""
+        identity = self.projects.asset_cache_identity(asset_id)
+        return identity[0] if identity else None
 
     async def preview_ir(self, project_id: str, timeline_revision_id: str | None,
                          output_ratio: str) -> dict[str, Any]:
@@ -217,7 +241,11 @@ class RenderCoordinator:
             key = str(item["fingerprint"])
             if key not in self.preview_probe_cache:
                 path = Path(self.projects.resolve_asset_path(item["asset_id"])["path"])
-                self.preview_probe_cache[key] = await self.ffprobe.probe(path)
+                # A07：经会话缓存的 probe（键含 fingerprint+stat+build）；
+                # 同素材跨 revision 的 IR 重建复用同一次探测结果。
+                self.preview_probe_cache[key] = await self._probe(
+                    path, self._asset_probe_fingerprint(item["asset_id"])
+                )
             probe_by_asset[item["asset_id"]] = self.preview_probe_cache[key]
         _bundle, presets, _font = self.caption_resources.load()
         ir = await ir_project_executor().project(plan, probe_by_asset,
@@ -306,8 +334,18 @@ class RenderCoordinator:
             item["input_id"]: Path(self.projects.resolve_asset_path(item["asset_id"])["path"])
             for item in plan["inputs"]
         }
+        # A07：segment probes 按唯一 input 去重（900 同源切段 = 1 个 input →
+        # 1 次 ffprobe），再映射回 segment 顺序；探测走会话缓存通道。
+        probe_by_input: dict[str, dict[str, Any]] = {}
+        for item in plan["inputs"]:
+            input_id = item["input_id"]
+            if input_id in probe_by_input:
+                continue
+            probe_by_input[input_id] = await self._probe(
+                input_paths[input_id], self._asset_probe_fingerprint(item["asset_id"])
+            )
         segment_paths = [input_paths[item["input_id"]] for item in plan["segments"]]
-        segment_probes = [await self.ffprobe.probe(path) for path in segment_paths]
+        segment_probes = [probe_by_input[item["input_id"]] for item in plan["segments"]]
         bundle, presets, font_path = self.caption_resources.load()
         work = self.data_dir / "jobs" / job_id / "work"
         artifact_dir = self.data_dir / "jobs" / job_id / "artifacts"
@@ -422,6 +460,9 @@ class RenderCoordinator:
                     if exc.code in {"RENDER_FAILED", "RENDER_VALIDATION_FAILED"}:
                         last_error_detail = str(getattr(exc, "message", "") or exc)
                         if attempt_index < len(encoders_to_try):
+                            # A07：实际渲染失败 → 清除该 encoder 的 smoke 成功
+                            # 缓存（缓存说它可用但渲染说不行——下次重新探测）。
+                            self._invalidate_encoder_smoke(encoder)
                             output.unlink(missing_ok=True)
                             continue
                     raise
@@ -430,6 +471,7 @@ class RenderCoordinator:
                         raise
                     last_error_detail = str(exc)
                     if attempt_index < len(encoders_to_try):
+                        self._invalidate_encoder_smoke(encoder)
                         output.unlink(missing_ok=True)
                         continue
                     # 所有编码器候选均失败：用 DomainError 携带 stderr 细节，
@@ -537,6 +579,12 @@ class RenderCoordinator:
                 (attempt, utc_now(), job_id),
             )
 
+    def _invalidate_encoder_smoke(self, encoder: str) -> None:
+        """A07：渲染失败清除该 encoder 的 smoke 成功缓存；未注入 encoders
+        （测试桩）时为空操作。"""
+        if self.encoders is not None:
+            self.encoders.invalidate_smoke(encoder)
+
     def _snapshot_rendition_id(self, snapshot_id: str) -> str:
         with self.database.connection() as db:
             row = db.execute(
@@ -563,6 +611,8 @@ class RenderService:
         self.compiler = compiler
         self.jobs = jobs
         self.destinations = destinations
+        # A07：ffmpeg version 同 build 只读一次（进程内会话缓存）。
+        self._ffmpeg_version: str | None = None
 
     async def create_preview(
         self,
@@ -1022,14 +1072,18 @@ class RenderService:
         return toolchain | {"compiler_version": REFRAME_COMPILER_VERSION}
 
     async def _toolchain(self, encoder: str, fallback: str | None) -> dict[str, Any]:
-        result = await run_process(self.ffmpeg, ["-hide_banner", "-version"], 10)
-        if result.returncode != 0 or not result.stdout:
-            raise DomainError("RENDER_FAILED", "无法读取 FFmpeg 版本")
+        # A07：ffmpeg version 同 build 只读一次（后续 choose/预览复用路径
+        # 不再各跑一遍 -version 子进程）。
+        if self._ffmpeg_version is None:
+            result = await run_process(self.ffmpeg, ["-hide_banner", "-version"], 10)
+            if result.returncode != 0 or not result.stdout:
+                raise DomainError("RENDER_FAILED", "无法读取 FFmpeg 版本")
+            self._ffmpeg_version = result.stdout.splitlines()[0]
         return {
             "compiler_version": COMPILER_VERSION,
             "preset_version": 1,
             "font_bundle_version": 1,
-            "ffmpeg_version": result.stdout.splitlines()[0],
+            "ffmpeg_version": self._ffmpeg_version,
             "encoder": encoder,
             "fallback_reason": fallback,
         }

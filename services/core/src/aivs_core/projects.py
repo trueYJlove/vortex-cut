@@ -405,6 +405,32 @@ class ProjectAssetService:
                     db.execute("ROLLBACK")
                 raise
 
+    def asset_cache_identity(self, asset_id: str) -> tuple[str, str, int, int] | None:
+        """A07：素材的缓存身份元组（fingerprint, path, size_bytes, mtime_ns）。
+
+        只读数据库与轻量 stat——不哈希、不探测；供渲染/预览侧构造 probe 缓存键
+        （fingerprint + stat 三元）。素材不可用（缺行/缺位置/文件不在）返回 None，
+        调用方自行走真实探测与既有域错误路径。
+        """
+        try:
+            row = self._require_asset_row(asset_id)
+        except DomainError:
+            return None
+        location = self._location(asset_id)
+        if not location:
+            return None
+        path = _path_from_uri(location["uri"])
+        try:
+            stat = path.stat()
+        except OSError:
+            return None
+        return (
+            str(row["fingerprint"] or ""),
+            str(path),
+            stat.st_size,
+            stat.st_mtime_ns,
+        )
+
     def current_source(self, asset_id: str) -> tuple[dict[str, Any], str | None, str | None]:
         row = self._require_asset_row(asset_id)
         location = self._location(asset_id)
