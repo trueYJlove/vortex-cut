@@ -1,6 +1,8 @@
 import { throwIfAborted, workerReady } from "./worker-lifecycle.js";
-/** 合成预览解码客户端：每输入一个 worker（decode-worker.worker.ts，手写 BMFF +
- * VideoDecoder），decode(frameN) 返回解码帧，由 compositor 上传后关闭。 */
+/** 合成预览解码客户端：每输入一个 worker（decode-worker.worker.ts，Range
+ * 源 moov 解析 + VideoDecoder），decode(frameN) 返回解码帧，由 compositor
+ * 上传后关闭。B12：初始化只读 moov 元数据（整文件下载已移除）；媒体票据
+ * TTL 由 RangeSource 受控续票（refreshTicket 注入，有限一次）。 */
 
 export interface DecodeWorkerMessage {
   type: "ready" | "frame" | "done" | "error";
@@ -74,14 +76,14 @@ export class DecodeWorker {
   private readonly onError = (event: ErrorEvent): void => { this.terminate(new Error(event.message || "decode worker error")); };
   private readonly onMessageError = (): void => { this.terminate(new Error("decode worker message error")); };
 
-  static async create(ticket: string, signal?: AbortSignal): Promise<DecodeWorker> {
+  static async create(ticket: string, signal?: AbortSignal, refreshTicket?: () => Promise<string>): Promise<DecodeWorker> {
     throwIfAborted(signal);
     const instance = new DecodeWorker();
     try {
       const data = await workerReady<DecodeWorkerMessage>(instance.worker, data => {
         if (data.type === "error") throw new Error(data.message ?? "worker init error");
         return data.type === "ready" ? data : undefined;
-      }, () => instance.worker.postMessage({ type: "init", url: ticket, cacheFrames: 0 }), signal);
+      }, () => instance.worker.postMessage({ type: "init", url: ticket, cacheFrames: 0, ...(refreshTicket ? { refreshTicket } : {}) }), signal);
       throwIfAborted(signal);
       instance.hardware = data.hardware ?? null;
       instance.width = data.width ?? 0;
@@ -113,6 +115,8 @@ export class DecodeWorker {
   terminate(reason = new Error("decode worker disposed")): void {
     if (this.disposed) return;
     this.disposed = true;
+    // B12：先关 Range 源（释放字节缓存/在途请求），再终结 worker
+    try { this.worker.postMessage({ type: "close" }); } catch { /* 已终止 */ }
     for (const pending of this.pending.values()) pending.reject(reason);
     this.pending.clear();
     this.worker.removeEventListener("message", this.onMessage);

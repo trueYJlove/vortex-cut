@@ -276,7 +276,15 @@ export class PreviewSession {
         if (session.disposed) { bitmap.close(); throw new DOMException("Session disposed", "AbortError"); }
         client.uploadImage(input.input_id, bitmap);
       } else {
-        const worker = await DecodeWorker.create(ticket, signal);
+        // B12：媒体票据续票回调（5min TTL 到期时 Range 源受控刷新——
+        // refreshAsset 重发同资产新票据；失败由会话错误路径处理）。
+        const refreshTicket = (assetId: string) => async (): Promise<string> => {
+          const refreshed = await window.desktop.refreshAsset(assetId);
+          if (!refreshed?.media_url) throw new Error("ticket refresh failed");
+          return refreshed.media_url;
+        };
+        const worker = await DecodeWorker.create(
+          ticket, signal, refreshTicket(input.asset_id));
         if (session.disposed || signal?.aborted) { worker.terminate(); throw new DOMException("Session disposed", "AbortError"); }
         rig.worker = worker;
       }

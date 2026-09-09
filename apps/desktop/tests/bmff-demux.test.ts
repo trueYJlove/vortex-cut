@@ -295,3 +295,30 @@ function indexOfBytesInRange(haystack: Uint8Array, needle: number[], from: numbe
   }
   return -1;
 }
+
+describe("组合路径：HttpRangeSource + demuxRange", () => {
+  it("真实夹具经 fetch 206 模拟与 MemoryRangeSource 结果一致", async () => {
+    const data = await loadFixture("test-faststart.mp4");
+    const memory = new MemoryRangeSource(data);
+    const expected = await demuxRange(memory);
+    // fetch 206 模拟（真实协议行为由 restricted-media.test.ts 覆盖）
+    const fetchLike = async (_url: string, init?: RequestInit): Promise<Response> => {
+      const range = (init?.headers as Record<string, string> | undefined)?.Range ?? "";
+      const match = /^bytes=(\d+)-(\d+)$/.exec(range);
+      const start = Number(match?.[1] ?? 0);
+      const end = Math.min(Number(match?.[2] ?? data.length - 1), data.length - 1);
+      return new Response(data.subarray(start, end + 1) as unknown as BodyInit, {
+        status: 206,
+        headers: { "Content-Range": `bytes ${start}-${end}/${data.length}` },
+      });
+    };
+    const source = await (await import("../src/app/preview/range-source.js")).HttpRangeSource.create(
+      "aivideo://media/t", fetchLike);
+    const result = await demuxRange(source);
+    expect(result.codec).toBe(expected.codec);
+    expect(result.width).toBe(expected.width);
+    expect(result.height).toBe(expected.height);
+    expect(result.timescale).toBe(expected.timescale);
+    expect(result.samples).toEqual(expected.samples);
+  });
+});

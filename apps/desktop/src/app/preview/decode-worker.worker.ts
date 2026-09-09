@@ -11,6 +11,8 @@
  */
 
 import { buildSampleIndex, keyframeAtOrBefore, locateByPts, type SampleIndex } from "./sample-index.js";
+import { demuxRange, type DemuxResult } from "./bmff-demux.js";
+import { HttpRangeSource, type RangeSource } from "./range-source.js";
 
 interface Sample {
   offset: number;
@@ -20,14 +22,6 @@ interface Sample {
   sync: boolean;
 }
 
-interface DemuxResult {
-  samples: Sample[];
-  timescale: number;
-  width: number;
-  height: number;
-  avcC: Uint8Array;
-  codec: string;
-}
 
 type Outbound =
   | { type: "ready"; sampleCount: number; durationUs: number; timescale: number; keyframes: number[]; width: number; height: number; hardware: string | null; cacheEnabled: boolean; cacheCap: number }
@@ -39,189 +33,11 @@ const post = (message: Outbound, transfer: Transferable[] = []): void => {
   (self as unknown as Worker).postMessage(message, transfer);
 };
 
-function findBox(buffer: DataView, start: number, end: number, path: string[]): Array<{ start: number; end: number }> {
-  // 返回 path 全部命中（取最后一个用于 stsd 单例、stss 等可能多处者取各自语义）
-  let results: Array<{ start: number; end: number }> = [{ start, end }];
-  for (const name of path) {
-    const next: Array<{ start: number; end: number }> = [];
-    for (const span of results) {
-      let offset = span.start;
-      while (offset + 8 <= span.end) {
-        let size = buffer.getUint32(offset);
-        const type = String.fromCharCode(buffer.getUint8(offset + 4), buffer.getUint8(offset + 5), buffer.getUint8(offset + 6), buffer.getUint8(offset + 7));
-        let headerSize = 8;
-        if (size === 1) {
-          size = Number(buffer.getBigUint64(offset + 8));
-          headerSize = 16;
-        } else if (size === 0) {
-          size = span.end - offset;
-        }
-        if (size < headerSize) break;
-        if (type === name) next.push({ start: offset + headerSize, end: Math.min(offset + size, span.end) });
-        offset += size;
-      }
-    }
-    results = next;
-    if (results.length === 0) return [];
-  }
-  return results;
-}
-
-function findU32Tag(u8: Uint8Array, start: number, end: number, tag: number): number {
-  for (let offset = start; offset + 4 <= end; offset++) {
-    if (u8[offset] === (tag >>> 24) && u8[offset + 1] === ((tag >>> 16) & 0xff)
-      && u8[offset + 2] === ((tag >>> 8) & 0xff) && u8[offset + 3] === (tag & 0xff)) {
-      return offset - 4; // 盒起始（size 字段）
-    }
-  }
-  return -1;
-}
-
-function demux(bytes: ArrayBuffer): DemuxResult {
-  const view = new DataView(bytes);
-  const u8 = new Uint8Array(bytes);
-  const moov = findBox(view, 0, bytes.byteLength, ["moov"]);
-  if (!moov.length) throw new Error("moov not found");
-  const trak = findBox(view, moov[0].start, moov[0].end, ["trak"]);
-  let chosen: { start: number; end: number } | null = null;
-  for (const candidate of trak) {
-    const hdlr = findBox(view, candidate.start, candidate.end, ["mdia", "hdlr"]);
-    if (hdlr.length) {
-      const handler = String.fromCharCode(view.getUint8(hdlr[0].start + 8), view.getUint8(hdlr[0].start + 9), view.getUint8(hdlr[0].start + 10), view.getUint8(hdlr[0].start + 11));
-      if (handler === "vide") { chosen = candidate; break; }
-    }
-  }
-  if (!chosen) throw new Error("video trak not found");
-  const mdhd = findBox(view, chosen.start, chosen.end, ["mdia", "mdhd"])[0];
-  const timescale = view.getUint32(mdhd.start + (view.getUint8(mdhd.start) === 1 ? 20 : 12));
-  const stblStart = findBox(view, chosen.start, chosen.end, ["mdia", "minf", "stbl"])[0];
-  if (!stblStart) throw new Error("stbl not found");
-
-  const stsd = findBox(view, stblStart.start, stblStart.end, ["stsd"])[0];
-  // stsd payload: [0..4) version+flags, [4..8) entry_count, [8..) sample entry。
-  // 不同 muxer 的 VisualSampleEntry 固定区宽度有差异（qt 风格 dpi/compressorname），
-  // 故子盒（avcC）用字节扫描定位并校验盒长。
-  const entrySize = view.getUint32(stsd.start + 8);
-  const entryType = String.fromCharCode(
-    view.getUint8(stsd.start + 12), view.getUint8(stsd.start + 13),
-    view.getUint8(stsd.start + 14), view.getUint8(stsd.start + 15));
-  if (entryType !== "avc1") throw new Error(`unsupported sample entry ${entryType} (only AVC supported in probe)`);
-  const entryStart = stsd.start + 16; // avc1 payload（width/height 在 +24/+26）
-  const entryEndAbs = stsd.start + 8 + entrySize;
-  const avcCStart = findU32Tag(u8, entryStart + 60, entryEndAbs, 0x61766343); // "avcC"
-  if (avcCStart < 0) throw new Error("avcC not found (only AVC supported in probe)");
-  const avcCSize = view.getUint32(avcCStart);
-  if (avcCSize < 8 || avcCStart + avcCSize > entryEndAbs) throw new Error("avcC box size invalid");
-  const avcC = { start: avcCStart + 8, end: avcCStart + avcCSize };
-  const avcCBytes = u8.slice(avcC.start, avcC.end);
-  const profile = avcCBytes[1];
-  const compat = avcCBytes[2];
-  const level = avcCBytes[3];
-  const codec = `avc1.${profile.toString(16).padStart(2, "0")}${compat.toString(16).padStart(2, "0")}${level.toString(16).padStart(2, "0")}`;
-  const width = view.getUint16(entryStart + 24);
-  const height = view.getUint16(entryStart + 26);
-
-  const stts = findBox(view, stblStart.start, stblStart.end, ["stts"])[0];
-  const stssList = findBox(view, stblStart.start, stblStart.end, ["stss"]);
-  const stsc = findBox(view, stblStart.start, stblStart.end, ["stsc"])[0];
-  const stsz = findBox(view, stblStart.start, stblStart.end, ["stsz"])[0];
-  const stco = findBox(view, stblStart.start, stblStart.end, ["stco"]);
-  const co64 = findBox(view, stblStart.start, stblStart.end, ["co64"]);
-  const cttsList = findBox(view, stblStart.start, stblStart.end, ["ctts"]);
-
-  // stsz payload: [0..4) version+flags, [4..8) default sample_size, [8..12) sample_count
-  const defaultSize = view.getUint32(stsz.start + 4);
-  const sampleCount = view.getUint32(stsz.start + 8);
-  const sizes: number[] = [];
-  let sizesOffset = stsz.start + 12;
-  for (let index = 0; index < sampleCount; index++) {
-    sizes.push(defaultSize > 0 ? defaultSize : view.getUint32(sizesOffset + index * 4));
-  }
-  // stts → 解码时间戳
-  const dts: number[] = new Array(sampleCount);
-  let time = 0;
-  let sampleIndex = 0;
-  let entryCount = view.getUint32(stts.start + 4);
-  let cursor = stts.start + 8;
-  for (let entry = 0; entry < entryCount && sampleIndex < sampleCount; entry++) {
-    const runCount = view.getUint32(cursor);
-    const delta = view.getUint32(cursor + 4);
-    cursor += 8;
-    for (let run = 0; run < runCount && sampleIndex < sampleCount; run++) {
-      dts[sampleIndex++] = time;
-      time += delta;
-    }
-  }
-  // stco/stsc → 采样偏移
-  const chunkOffsets: number[] = [];
-  if (co64.length) {
-    const count = view.getUint32(co64[0].start + 4);
-    for (let index = 0; index < count; index++) chunkOffsets.push(Number(view.getBigUint64(co64[0].start + 8 + index * 8)));
-  } else if (stco.length) {
-    const count = view.getUint32(stco[0].start + 4);
-    for (let index = 0; index < count; index++) chunkOffsets.push(view.getUint32(stco[0].start + 8 + index * 4));
-  } else {
-    throw new Error("no chunk offset box");
-  }
-  const offsets = new Array<number>(sampleCount);
-  entryCount = view.getUint32(stsc.start + 4);
-  cursor = stsc.start + 8;
-  let chunkIndex = 0;
-  let sampleInChunk = 0;
-  let samplesSoFar = 0;
-  let nextEntry = 0;
-  const entries: Array<{ firstChunk: number; perChunk: number; }> = [];
-  for (let entry = 0; entry < entryCount; entry++) {
-    entries.push({ firstChunk: view.getUint32(cursor), perChunk: view.getUint32(cursor + 4) });
-    cursor += 12;
-  }
-  while (samplesSoFar < sampleCount && chunkIndex < chunkOffsets.length) {
-    while (nextEntry + 1 < entries.length && entries[nextEntry + 1]!.firstChunk === chunkIndex + 1) nextEntry += 1;
-    const perChunk = entries[nextEntry]!.perChunk;
-    let offset = chunkOffsets[chunkIndex]!;
-    for (let run = 0; run < perChunk && samplesSoFar < sampleCount; run++) {
-      offsets[samplesSoFar] = offset;
-      offset += sizes[samplesSoFar]!;
-      samplesSoFar += 1;
-      sampleInChunk += 1;
-    }
-    chunkIndex += 1;
-  }
-  if (samplesSoFar !== sampleCount) throw new Error(`stsc expansion short: ${samplesSoFar}/${sampleCount}`);
-  // stss → 关键帧集合
-  const syncSet = new Set<number>();
-  if (stssList.length) {
-    const count = view.getUint32(stssList[0]!.start + 4);
-    for (let index = 0; index < count; index++) syncSet.add(view.getUint32(stssList[0]!.start + 8 + index * 4) - 1);
-  } else {
-    for (let index = 0; index < sampleCount; index++) syncSet.add(index); // 全关键帧
-  }
-  // ctts → 合成偏移（version 0 unsigned / version 1 signed）
-  const ctsOffsets = new Array<number>(sampleCount).fill(0);
-  for (const ctts of cttsList) {
-    const version = view.getUint8(ctts.start);
-    entryCount = view.getUint32(ctts.start + 4);
-    cursor = ctts.start + 8;
-    let index = 0;
-    for (let entry = 0; entry < entryCount && index < sampleCount; entry++) {
-      const runCount = view.getUint32(cursor);
-      const raw = view.getInt32(cursor + 4);
-      cursor += 8;
-      for (let run = 0; run < runCount && index < sampleCount; run++) {
-        ctsOffsets[index++] = version === 0 ? raw >>> 0 : raw;
-      }
-    }
-  }
-  const samples: Sample[] = [];
-  for (let index = 0; index < sampleCount; index++) {
-    samples.push({ offset: offsets[index]!, size: sizes[index]!, dts: dts[index]!, ctsOffset: ctsOffsets[index]!, sync: syncSet.has(index) });
-  }
-  return { samples, timescale, width, height, avcC: avcCBytes, codec };
-}
 
 let demuxResult: DemuxResult | null = null;
 let sampleIndex: SampleIndex | null = null;
-let dataBytes: Uint8Array | null = null;
+/** B12：Range 源（moov-only 解析 + 按需字节读取）。整文件 dataBytes 已移除。 */
+let rangeSource: RangeSource | null = null;
 let decoder: VideoDecoder | null = null;
 let decoderConfig: VideoDecoderConfig | null = null;
 let hardware: string | null = null;
@@ -324,20 +140,27 @@ function releaseGopAnchor(): void {
   pendingAnchorPts = -1;
 }
 
-async function init(url: string, cacheFrames: number): Promise<void> {
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`fetch failed: ${response.status}`);
-  dataBytes = new Uint8Array(await response.arrayBuffer());
-  demuxResult = demux(dataBytes.buffer);
-  sampleIndex = buildSampleIndex(demuxResult.samples, demuxResult.timescale); // A03：一次性索引
+async function init(url: string, cacheFrames: number, refreshTicket?: () => Promise<string>): Promise<void> {
+  // B12：Range 源初始化（bytes=0-65535 探测 + moov-only 解析）——整文件
+  // arrayBuffer 下载已移除。票据 TTL 到期由 HttpRangeSource 受控续票
+  //（有限一次，相同 range 重发）；续票回调经 init 消息注入（会话持有
+  // Main IPC 通道）。失败路径：Range/BMFF 不支持 → 上抛结构化错误，
+  // 由 DecodeWorker 客户端回退代理（不冒充已支持）。
+  rangeSource = await HttpRangeSource.create(
+    url, (input, init2) => fetch(input, init2), refreshTicket ?? null,
+    undefined, undefined,
+  );
+  demuxResult = await demuxRange(rangeSource);
+  const demuxed = demuxResult;
+  sampleIndex = buildSampleIndex(demuxed.samples, demuxed.timescale); // A03：一次性索引
   ptsCursor = -1;
   cacheEnabled = cacheFrames > 0;
   cacheCap = cacheFrames;
   const config: VideoDecoderConfig = {
-    codec: demuxResult.codec,
-    codedWidth: demuxResult.width,
-    codedHeight: demuxResult.height,
-    description: demuxResult.avcC,
+    codec: demuxed.codec,
+    codedWidth: demuxed.width,
+    codedHeight: demuxed.height,
+    description: demuxed.avcC,
     optimizeForLatency: true,
     // 色彩矩阵钉死 BT.709（冻结方案 §7.2 比对口径；texImage2D(VideoFrame) 转换依此）
     colorSpace: { primaries: "bt709", transfer: "bt709", matrix: "bt709", fullRange: false },
@@ -352,14 +175,14 @@ async function init(url: string, cacheFrames: number): Promise<void> {
   }
   decoder = createDecoder();
   decoder.configure(decoderConfig);
-  const last = demuxResult.samples.at(-1)!;
+  const last = demuxed.samples.at(-1)!;
   post({
     type: "ready",
-    sampleCount: demuxResult.samples.length,
-    durationUs: Math.round(((last.dts + last.ctsOffset) / demuxResult.timescale) * 1e6),
-    timescale: demuxResult.timescale,
-    keyframes: demuxResult.samples.map((sample, index) => (sample.sync ? index : -1)).filter(index => index >= 0),
-    width: demuxResult.width, height: demuxResult.height,
+    sampleCount: demuxed.samples.length,
+    durationUs: Math.round(((last.dts + last.ctsOffset) / demuxed.timescale) * 1e6),
+    timescale: demuxed.timescale,
+    keyframes: demuxed.samples.map((sample, index) => (sample.sync ? index : -1)).filter(index => index >= 0),
+    width: demuxed.width, height: demuxed.height,
     hardware, cacheEnabled, cacheCap,
   });
 }
@@ -394,7 +217,7 @@ function pumpQueue(): void {
 }
 
 function decodeSamples(request: DecodeRequest): void {
-  if (!demuxResult || !decoder || !dataBytes || !sampleIndex) throw new Error("worker not initialized");
+  if (!demuxResult || !decoder || !rangeSource || !sampleIndex) throw new Error("worker not initialized");
   const { samples, timescale } = demuxResult;
   const target = request.sampleIndex;
   // 热态顺序解码（M3-2 播放架构）：目标在已馈送位置之前（含跨采样跳帧，如
@@ -432,22 +255,37 @@ function decodeSamples(request: DecodeRequest): void {
   }
   samplesFed = 0;
   fromKeyframe = sequential ? fedIndex + 1 : startSample;
-  for (let index = startSample; index <= target; index++) {
-    const sample = samples[index]!;
-    const chunkData = dataBytes.subarray(sample.offset, sample.offset + sample.size);
-    const chunk = new EncodedVideoChunk({
-      type: sample.sync ? "key" : "delta",
-      timestamp: ((sample.dts + sample.ctsOffset) / timescale) * 1e6,
-      data: chunkData,
-    });
-    decoder.decode(chunk);
-    samplesFed += 1;
-    fedIndex = index;
+  void feedSamples(samples, startSample, target, timescale, request);
+}
+
+/** B12：按需读取采样区间并喂包（Range 源字节缓存合并连续读）。 */
+async function feedSamples(
+  samples: Array<{ offset: number; size: number; dts: number; ctsOffset: number; sync: boolean }>,
+  startSample: number,
+  target: number,
+  timescale: number,
+  request: DecodeRequest,
+): Promise<void> {
+  try {
+    for (let index = startSample; index <= target; index++) {
+      const sample = samples[index]!;
+      const chunkData = await rangeSource!.read(sample.offset, sample.size);
+      const chunk = new EncodedVideoChunk({
+        type: sample.sync ? "key" : "delta",
+        timestamp: ((sample.dts + sample.ctsOffset) / timescale) * 1e6,
+        data: chunkData,
+      });
+      decoder!.decode(chunk);
+      samplesFed += 1;
+      fedIndex = index;
+    }
+  } catch (error) {
+    post({ type: "error", id: request.id, message: error instanceof Error ? error.message : String(error) });
   }
 }
 
 function decodeFrame(id: number, frameN: number, fps: number): void {
-  if (!demuxResult || !decoder || !dataBytes || !sampleIndex) throw new Error("worker not initialized");
+  if (!demuxResult || !decoder || !rangeSource || !sampleIndex) throw new Error("worker not initialized");
   const targetUs = (frameN / fps) * 1e6;
   // A03：PTS 定位走排序索引（二分/游标推进），替代 O(N) 线性扫描——
   // 旧实现在 ptsUs > targetUs + 100ms 处提前 break，B 帧非单调 CTS 流会
@@ -486,12 +324,16 @@ function binarySearchPos(index: SampleIndex, ptsUs: number): number {
 }
 
 self.onmessage = (event: MessageEvent) => {
-  const data = event.data as { type: string; url?: string; cacheFrames?: number; id?: number; frameN?: number; fps?: number };
+  const data = event.data as { type: string; url?: string; cacheFrames?: number; id?: number; frameN?: number; fps?: number; refreshTicket?: () => Promise<string> };
   try {
     if (data.type === "init" && data.url) {
-      void init(data.url, data.cacheFrames ?? 0);
+      void init(data.url, data.cacheFrames ?? 0, data.refreshTicket);
     } else if (data.type === "decode" && typeof data.id === "number" && typeof data.frameN === "number") {
       decodeFrame(data.id, data.frameN, data.fps ?? 30);
+    } else if (data.type === "close") {
+      // B12：源关闭（seek 替换/会话销毁）——释放字节缓存与解码器状态
+      rangeSource?.close();
+      rangeSource = null;
     } else if (data.type === "stats") {
       post({ type: "done", id: null, note: JSON.stringify({ hits: cacheHits, misses: cacheMisses, evictions: cacheEvictions, size: cache.size, bytes: cacheBytes }) });
     }
