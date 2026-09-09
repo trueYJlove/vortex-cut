@@ -10,12 +10,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .performance import measured
 from .database_v13 import V13_SQL
 from .database_v14 import V14_SQL
 from .database_v15 import V15_SQL
 from .database_v16 import V16_SQL
 from .database_v17 import V17_SQL
+from .database_v18 import V18_SQL
+from .performance import measured
 
 
 def utc_now() -> str:
@@ -43,6 +44,7 @@ V14_VERSION = "v14"
 V15_VERSION = "v15"
 V16_VERSION = "v16"
 V17_VERSION = "v17"
+V18_VERSION = "v18"
 V1_SQL = """
 CREATE TABLE IF NOT EXISTS media_inputs (
   id TEXT PRIMARY KEY, path TEXT NOT NULL, display_name TEXT NOT NULL,
@@ -894,6 +896,7 @@ MIGRATIONS: dict[str, str] = {
     V15_VERSION: V15_SQL,
     V16_VERSION: V16_SQL,
     V17_VERSION: V17_SQL,
+    V18_VERSION: V18_SQL,
 }
 
 
