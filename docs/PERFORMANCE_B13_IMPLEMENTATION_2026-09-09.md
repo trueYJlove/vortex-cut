@@ -92,21 +92,23 @@ before / after / 同机环境:
   - input-pool 为独立模块:会话尚未全量接线(见已知限制)——协议与
     决策层已就绪。
 已知限制、未解决问题:
-  - 会话只接线了档位→环深路径;InputPool 状态机/pressure 决策尚未在
-    播放循环驱动(idle 识别需要活跃输入时间窗统计,与 B13 的输入池
-    深度调节一起在下一单接线);协议层(releaseInput)已可用。
-  - 显式解码器保温(decoderKeepWarm)未实现 terminate 管理:现状环池
-    保活 = 会话内隐式保温;显式保温回收在 input-pool 接线单落。
-  - PCM/Range 缓存预算值已入表,接线(Range 8MiB 默认改档位值)留
-    B13 接线单。
+  - (已清偿,342175a)InputPool 状态机/pressure 的播放循环驱动、
+    dispose 释放、Range 缓存档位接线均已落地——见 4.1 补录。
+  - 显式解码器保温(decoderKeepWarm)的周期性 terminate 管理未实现:
+    压力降级路径已实现 evict-idle → terminate(保温让位),常规态环池
+    保活 = 会话内隐式保温;周期性保温回收留实机调优(行为不劣于现状)。
+  - PCM 缓存预算表值已定未接线(A02 AudioSourceCache 的容量参数语义
+    与 MiB 预算不同——需 A02 改造,归 B14 波形单一起做)。
+  - idle 识别用固定 1.5s 时间窗(不含 active 输入的未来入窗预测);
+    LEAD_ENTER 预读会先于 1.5s 触发 warm——预测式 idle 留实机调优。
   - slotToken(每上传引用 generation+slot)简化为 generation 校验:
     ring 槽位复用语义下 token 冗余,generation 已作废旧代(计划原意
     为防"释放等待当前引用完成"——worker 内上传为同步队列,generation
     校验即等待语义)。
 开发者自测:通过(见上)。
 独立Reviewer结论:待验收
-Gate决策与下一步:B13 接线单(input-pool 驱动 + 显式保温 + 缓存预算
-  接线)或 F 场景复测轮(B10-B13 能力就绪,F01-F04 量化验收)。
+Gate决策与下一步:F 场景复测轮(B10-B13 能力就绪,F01-F04 量化
+  验收);或 B14(波形移出 Renderer 整音频解码——PCM 预算接线一并做)。
 ```
 
 ## 3. 测试证据摘要
@@ -125,18 +127,37 @@ Gate决策与下一步:B13 接线单(input-pool 驱动 + 显式保温 + 缓存�
 - 计划 Worker 协议 `registerInput(inputId,generation,geometry,ringDepth)`
   + "每个上传/compose 引用 generation+slot token":实现为 generation
   校验(上传前置检查+帧关闭);slot token 简化(理由见已知限制)。
-- 计划"未激活解码器保温数"(1/2/2):表值已定;显式 terminate 保温
-  管理留接线单(现状环池=隐式保温,行为不劣于现状)。
-- 计划状态机六态全量驱动:状态机模块已实现并测试;会话播放循环的
-  idle/evict 驱动未接线(独立接线单,见已知限制)——本单交付协议、
-  决策与档位链路。
+- 计划"未激活解码器保温数"(1/2/2):表值已定;压力降级路径已实现
+  evict-idle → worker terminate(保温让位),常规保温为环池隐式保活
+  (行为不劣于现状;显式周期性 terminate 留实机调优)。
+- 计划状态机六态全量驱动:已接线(`342175a` 接线收尾)——create 注册、
+  播放/seek tick 驱动活跃集合与 idle 判定(1.5s 不活跃)、pressure 决策
+  执行(evict-idle → releaseInput + terminate;shrink-ring → 下一会话
+  生效;over-budget → lastError 一次性提示)、dispose 全量释放、
+  replaceIr 活跃时间窗重置;Range 缓存预算按档位贯通
+  (64/128/256MiB → DecodeWorker init → HttpRangeSource)。
 - Main 注入经 getRuntime 扩展(resource_tier 字段):计划未指定通道,
   该通道为既有 Renderer↔Main 握手,离散值语义符合"不暴露主机信息"。
+
+## 4.1 接线收尾(2026-09-09 补录,提交 342175a)
+
+- 会话池驱动:poolRegister(create)/poolDrive(compose 推进 + seek 完成
+  时,活跃 = 当前帧 + 下一帧输入并集)/poolDispose(dispose 全量释放,
+  compositor releaseInput + generation)。
+- 压力降级执行:evict-idle 时 rig.worker.terminate(解码器保温让位,
+  重入时 pump 冷启重建) + compositor.releaseInput(纹理删除 + 记账);
+  shrink-ring 降会话环深(下一会话生效——运行中环池不撕裂,与计划
+  "pause/seek 边界原子切换"换源语义一致);over-budget 一次性
+  lastError 提示,不静默删层。
+- Range 缓存预算:session(resourceTier) → DecodeWorker.create(cacheCapBytes)
+  → worker init → HttpRangeSource cacheCapBytes(档位 64/128/256MiB)。
+- 测试:preview-lifecycle +2(池注册/dispose 释放断言 + conservative
+  64MiB init 断言)→ 25 项;全量 62 文件 / 534 项全绿。
 
 ## 5. 复现命令
 
 ```powershell
-pnpm --filter @aivideo/desktop test     # 62 文件 532 项
+pnpm --filter @aivideo/desktop test     # 62 文件 534 项
 npx vitest run tests/resource-budget.test.ts tests/input-pool-protocol.test.ts
 pnpm --filter @aivideo/desktop lint
 ```
