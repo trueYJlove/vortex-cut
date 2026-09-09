@@ -71,6 +71,7 @@ import type {
   , ShotRequirementTimelineBatchAssemblyPreviewId, ShotRequirementTimelineBatchAssemblyId
   , ShotRequirementTimelineBatchAssemblyItemPage
   , DerivedMediaEntry, DerivedMediaStats
+  , PreviewSourceDescription, PreviewSourceJobResponse, PreviewSourceMediaResponse, PreviewSourceProfileId, PreviewSourceMode
 } from "@aivideo/contracts";
 
 // M3-0 探针 dev-only 桥：生产构建 NODE_ENV 静态替换 → 死代码消除（见 probe-bridge.ts 注释）。
@@ -225,6 +226,10 @@ export interface DesktopApi {
   lookupDerivedMedia: (input: { project_id: ProjectId; asset_id: string; kind: string; params: Record<string, string> }) => Promise<DerivedMediaEntry>;
   derivedMediaStats: (projectId: ProjectId) => Promise<DerivedMediaStats>;
   derivedMediaUrl: (input: { project_id: ProjectId; asset_id: string; kind: string; params: Record<string, string> }) => Promise<{ media_url: string; cache_key: string; status: "ready"; size_bytes: number }>;
+  // B11 preview-source（全源代理与预览源选择）：描述/作业/代理票据
+  getPreviewSource: (input: { project_id: ProjectId; asset_id: string; profile_id?: PreviewSourceProfileId; mode?: PreviewSourceMode; generate?: boolean }) => Promise<PreviewSourceDescription>;
+  createPreviewSourceJob: (input: { project_id: ProjectId; asset_id: string; profile_id?: PreviewSourceProfileId }) => Promise<PreviewSourceJobResponse>;
+  previewSourceMediaUrl: (input: { project_id: ProjectId; asset_id: string; profile_id: PreviewSourceProfileId }) => Promise<PreviewSourceMediaResponse>;
   captionFontUrl: () => Promise<string>;
   openArtifact: (artifactId: string) => Promise<void>;
   openArtifactFolder: (artifactId: string) => Promise<void>;
@@ -360,6 +365,9 @@ const api: DesktopApi = {
   lookupDerivedMedia: input => ipcRenderer.invoke("derived-media:lookup", input),
   derivedMediaStats: projectId => ipcRenderer.invoke("derived-media:stats", { project_id: projectId }),
   derivedMediaUrl: input => ipcRenderer.invoke("derived-media:media", input),
+  getPreviewSource: input => ipcRenderer.invoke("preview-source:get", input),
+  createPreviewSourceJob: input => ipcRenderer.invoke("preview-source:jobs", input),
+  previewSourceMediaUrl: input => ipcRenderer.invoke("preview-source:media", input),
   captionFontUrl: () => ipcRenderer.invoke("media:caption-font-url"),
   openArtifact: artifactId => ipcRenderer.invoke("artifact:open", artifactId),
   openArtifactFolder: artifactId => ipcRenderer.invoke("artifact:folder", artifactId),

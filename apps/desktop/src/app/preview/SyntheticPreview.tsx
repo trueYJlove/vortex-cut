@@ -2,9 +2,10 @@
  * WebGL2 合成（OffscreenCanvas worker）的权威级实时预览。子集外语义自动降级
  * 回交互预览（PREVIEW_IR_UNSUPPORTED）。画布元素由会话自建（transferControl-
  * ToOffscreen 每元素仅可一次——会话生命周期 = 画布生命周期）。 */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { parseIr, type Ir } from "./ir.js";
 import { PreviewSession, type PreviewSessionMetrics, type SegmentAudioConfig } from "./preview-session.js";
+import { PreviewSourceResolver } from "./source-resolver.js";
 import { SyntheticPipLayer } from "./SyntheticPipLayer.js";
 
 /** 画中画片段编辑态（App 从时间线文档透传；transform 中心点语义）。 */
@@ -42,6 +43,8 @@ export interface SyntheticPreviewProps {
   /** 自然播放到片尾（会话内部已 pause；UI 复位播放按钮）。 */
   onEnded?: () => void;
   onFallback: (reason: string, code: string | null) => void;
+  /** B11：预览源解析（视频输入优先代理票据；不提供 = 原源行为不变）。 */
+  sourceResolver?: PreviewSourceResolver | null;
 }
 
 interface LoadState {
@@ -50,7 +53,7 @@ interface LoadState {
 }
 
 export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactElement {
-  const { projectId, revisionId, mediaUrls, audioByClip, pipClips, selectedClipId, onSelectClip, onCommitPipTransform, onDraftPipMask, onCommitPipMask, onGesturePause, onGestureResume, playing, playheadUs, onTimeUs, onEnded, onFallback, outputRatio, playheadStore } = props;
+  const { projectId, revisionId, mediaUrls, audioByClip, pipClips, selectedClipId, onSelectClip, onCommitPipTransform, onDraftPipMask, onCommitPipMask, onGesturePause, onGestureResume, playing, playheadUs, onTimeUs, onEnded, onFallback, outputRatio, playheadStore, sourceResolver } = props;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const sessionRef = useRef<PreviewSession | null>(null);
   const generationRef = useRef(0);
@@ -110,7 +113,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
         sessionRefLocal.current = null;
         // 画布元素由会话自建（transferControlToOffscreen 每元素仅一次），
         // 后备缓冲随预览框（contain 居中，见 session.resize）；初始以 IR 画布尺寸起底
-        const session = await PreviewSession.create(container, ir, mediaUrls, audioByClip, controller.signal);
+        const session = await PreviewSession.create(container, ir, mediaUrls, audioByClip, controller.signal, sourceResolver ?? null);
         creating = session;
         if (stale()) { session.dispose(); return; }
         session.onTimeUs = (us: number) => {

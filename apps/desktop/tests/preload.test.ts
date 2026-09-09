@@ -53,7 +53,8 @@ describe("Desktop preload 白名单", () => {
       ["getShotRequirementImageFulfillment", [{}]], ["listShotRequirementImageFulfillmentLinks", [{}]], ["listShotRequirementImageFulfillmentAdoptions", [{}]], ["prepareShotRequirementImageFulfillment", [{}]], ["createShotRequirementImageFulfillment", [{}]], ["adoptShotRequirementImageFulfillment", [{}]],
       ["prepareShotRequirementTimelineAssembly", [{}]], ["applyShotRequirementTimelineAssembly", [{}]], ["getShotRequirementTimelineAssemblyPreview", [{}]], ["getShotRequirementTimelineAssembly", [{}]], ["listShotRequirementTimelineAssemblies", [{}]],
       ["getRenderArtifact", ["artifact_1"]], ["openArtifact", ["artifact_1"]], ["openArtifactFolder", ["artifact_1"]],
-      ["lookupDerivedMedia", [{}]], ["derivedMediaStats", ["project_1"]], ["derivedMediaUrl", [{}]], ["diagnostics", []]
+      ["lookupDerivedMedia", [{}]], ["derivedMediaStats", ["project_1"]], ["derivedMediaUrl", [{}]],
+      ["getPreviewSource", [{}]], ["createPreviewSourceJob", [{}]], ["previewSourceMediaUrl", [{}]], ["diagnostics", []]
     ];
     for (const [name, args] of calls) await api[name](...args);
     expect(invoke).toHaveBeenCalledTimes(5 + calls.length);

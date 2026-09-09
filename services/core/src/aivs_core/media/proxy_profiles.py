@@ -108,14 +108,19 @@ def proxy_args(
     尺寸计算失败（无视频流）抛 ValueError，调用方拒绝生成。
     """
     w, h = coded_size(profile_id, width, height, sar, rotation)
+    scale_filter = (
+        f"scale={w}:{h}:force_original_aspect_ratio=disable:"
+        f"force_divisible_by=2,fps={OUTPUT_FPS}"
+    )
     args: list[str] = [
         "-hide_banner", "-nostdin", "-y",
         # 全源（不限制时长）：pts 归零 = rewrite；-ss 0 丢弃源首帧偏移
         "-ss", "0",
         "-i", str(input_path),
         "-map", "0:v:0",
-        "-an",  # 音频仍走原素材（B15 服务）；代理 AAC 延迟不混入播放时间基
-        "-vf", f"scale={w}:{h}:force_original_aspect_ratio=disable:force_divisible_by=2,fps={OUTPUT_FPS}",
+        # 音频仍走原素材（B15 服务）；代理 AAC 延迟不混入播放时间基
+        "-an",
+        "-vf", scale_filter,
         "-c:v", encoder,
         *_rate_args(profile_id, encoder),
         "-pix_fmt", "yuv420p",

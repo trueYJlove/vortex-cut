@@ -16,6 +16,7 @@ import { AudioSourceCache } from "./audio-source-cache.js";
 import type { CompositorWorkerClient } from "./compositor-worker.js";
 import type { DrawCommand } from "./compositor-worker.worker.js";
 import type { Ir, IrContent, IrFrame, IrOverlay } from "./ir.js";
+import type { PreviewSourceResolver } from "./source-resolver.js";
 import { editorPerf, allocatePerfSession } from "./perf-metrics.js";
 import { DecodeWorker } from "./decode-worker.js";
 import { VARISPEED_WORKLET_NAME, createVarispeedWorkletUrl } from "./varispeed-worklet.js";
@@ -196,7 +197,8 @@ export class PreviewSession {
 
   static async create(container: HTMLElement, ir: Ir,
                       tickets: Map<string, string>,
-                      audioByClip?: Map<string, SegmentAudioConfig>, signal?: AbortSignal): Promise<PreviewSession> {
+                      audioByClip?: Map<string, SegmentAudioConfig>, signal?: AbortSignal,
+                      sourceResolver?: PreviewSourceResolver | null): Promise<PreviewSession> {
     throwIfAborted(signal);
     const session = new PreviewSession(ir);
     const abort = () => session.dispose();
@@ -205,6 +207,20 @@ export class PreviewSession {
     session.container = container;
     session.tickets = tickets;
     session.audioByClip = audioByClip ?? null;
+    // B11：预览源解析（视频输入优先代理票据；失败/未 ready 回退原源票据。
+    // 源描述与 IR geometry 分离——代理只替换解码输入，逻辑坐标不变）。
+    if (sourceResolver) {
+      for (const input of ir.inputs) {
+        if (input.asset_kind !== "video") continue;
+        const original = tickets.get(input.asset_id);
+        if (!original) continue;
+        const resolved = await sourceResolver.resolve(input.asset_id, original);
+        if (resolved && resolved.isProxy) {
+          tickets = new Map(tickets);
+          tickets.set(input.asset_id, resolved.url);
+        }
+      }
+    }
     const canvas = document.createElement("canvas");
     canvas.className = "synthetic-canvas";
     canvas.style.width = "100%";

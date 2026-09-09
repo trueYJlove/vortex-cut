@@ -541,11 +541,13 @@ function registerIpc(): void {
   registerStage4eIpc({ ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) }, fetchWithUi });
   registerStage5Ipc({ ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) }, fetchWithUi });
   registerStage6rIpc({ ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) }, fetchWithUi });
-  // B10：派生媒体 IPC——lookup/stats(Renderer 可见) + media(admin resolve→票据)
+  // B10：派生媒体 IPC + B11 preview-source IPC——lookup/stats/描述/作业
+  // (Renderer 可见) + media(admin resolve→票据)
   registerPerformanceIpc({
     ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) },
     fetchWithUi,
     resolveDerived: input => requireCore().resolveDerivedMedia(input),
+    resolvePreviewSourceMedia: input => requireCore().resolvePreviewSourceMedia(input),
     registerDerivedMedia: (cacheKey, path) => {
       if (!restrictedMedia.registeredPath(cacheKey, "proxy")) {
         restrictedMedia.register(cacheKey, path, "proxy");

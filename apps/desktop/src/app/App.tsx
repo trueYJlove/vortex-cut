@@ -11,6 +11,7 @@ import { Dialog } from "./Dialog.js";
 import { errorCode, safeErrorMessage, safeTaskErrorMessage } from "./safeErrors.js";
 import { PreviewPipOverlays, type PipOverlay, type PipTransform } from "./PreviewPipOverlays.js";
 import { SyntheticPreview } from "./preview/SyntheticPreview.js";
+import { PreviewSourceResolver } from "./preview/source-resolver.js";
 import { editorCommands, type EditorCommand } from "./editorCommands.js";
 import { bindingLabel, findConflict, loadShortcuts, matchesBinding, normalizeRecordedBinding, saveShortcuts, DEFAULT_SHORTCUTS, type ShortcutCommandId, type ShortcutEntry } from "./shortcuts.js";
 import { TimelinePanel } from "./timeline/TimelineCanvas.js";
@@ -805,6 +806,15 @@ export function App() {
   const syntheticMediaUrls = useMemo(
     () => new Map(assets.flatMap(item => item.media_url ? [[item.asset.asset_id, item.media_url] as const] : [])),
     [assets],
+  );
+  // B11：预览源解析器（视频输入优先代理票据；失败/未 ready 静默回退原源，
+  // 预览永不因代理缺失阻塞）。项目切换即换实例（resolver 绑定项目授权域）。
+  const previewSourceResolver = useMemo(
+    () => project ? new PreviewSourceResolver({
+      getPreviewSource: input => window.desktop.getPreviewSource({ ...input, project_id: project.project_id }),
+      previewSourceMediaUrl: input => window.desktop.previewSourceMediaUrl({ ...input, project_id: project.project_id }),
+    }, project.project_id) : null,
+    [project],
   );
   const syntheticAudioByClip = useMemo(
     () => new Map((working?.clips ?? []).flatMap(clip => clip.audio ? [[clip.clip_id, { enabled: isClipAudible(clip), gainDb: clip.audio.gain_db }] as const] : [])),
@@ -1862,7 +1872,7 @@ export function App() {
             {previewMode === "authoritative" && authoritativeMediaUrl && <video ref={videoRef} className="preview-foreground authoritative-video" src={authoritativeMediaUrl} aria-label={reframePlayback ? "重构图权威预览视频" : exportPlayback ? "导出视频" : "权威预览视频"} controls onEnded={() => { setPlaying(false); setExportPlayback(undefined); setReframePlayback(undefined); setPreviewMode("synthetic"); }} />}
             {/* 合成预览仅在时间线有可见片段时挂载；空时间线显示引导文案（剪映式），
                 避免对空时间线请求 preview-ir 被 Core 以 TIMELINE_EMPTY 拒绝而回退。 */}
-            {previewMode === "synthetic" && project && working && timeline && working.clips.length > 0 && <SyntheticPreview outputRatio={syntheticRatio} projectId={project.project_id} revisionId={timeline?.current_revision.timeline_revision_id ?? null} mediaUrls={syntheticMediaUrls} audioByClip={syntheticAudioByClip} pipClips={syntheticPipClips} selectedClipId={pipSelectedId} onSelectClip={clipId => setSelection({ kind: "clip", id: clipId as never })} onCommitPipTransform={(clipId, transform) => { const clip = (working?.clips ?? []).find(item => item.clip_id === clipId); commitPipTransform(clipId as never, { ...(clip?.transform ?? {}), ...transform }); }} onDraftPipMask={(clipId, mask) => draftPipMask(clipId as never, mask)} onCommitPipMask={(clipId, mask) => commitPipMask(clipId as never, mask)} onGesturePause={pausePreviewPlayback} onGestureResume={resumePreviewPlayback} playing={playing && !gestureHoldRef.current} playheadUs={playhead} playheadStore={playheadStore} onTimeUs={us => seekFromPlayback(us)} onEnded={() => setPlaying(false)} onFallback={(reason, code) => { setPreviewMode("interactive"); setSyntheticNotice(code === "PREVIEW_IR_UNSUPPORTED" ? "当前时间线包含实时合成暂不支持的效果，已回退交互预览。" : `合成预览不可用：${reason}，已回退交互预览。`); }} />}
+            {previewMode === "synthetic" && project && working && timeline && working.clips.length > 0 && <SyntheticPreview outputRatio={syntheticRatio} projectId={project.project_id} revisionId={timeline?.current_revision.timeline_revision_id ?? null} mediaUrls={syntheticMediaUrls} audioByClip={syntheticAudioByClip} pipClips={syntheticPipClips} selectedClipId={pipSelectedId} onSelectClip={clipId => setSelection({ kind: "clip", id: clipId as never })} onCommitPipTransform={(clipId, transform) => { const clip = (working?.clips ?? []).find(item => item.clip_id === clipId); commitPipTransform(clipId as never, { ...(clip?.transform ?? {}), ...transform }); }} onDraftPipMask={(clipId, mask) => draftPipMask(clipId as never, mask)} onCommitPipMask={(clipId, mask) => commitPipMask(clipId as never, mask)} onGesturePause={pausePreviewPlayback} onGestureResume={resumePreviewPlayback} playing={playing && !gestureHoldRef.current} playheadUs={playhead} playheadStore={playheadStore} onTimeUs={us => seekFromPlayback(us)} onEnded={() => setPlaying(false)} onFallback={(reason, code) => { setPreviewMode("interactive"); setSyntheticNotice(code === "PREVIEW_IR_UNSUPPORTED" ? "当前时间线包含实时合成暂不支持的效果，已回退交互预览。" : `合成预览不可用：${reason}，已回退交互预览。`); }} sourceResolver={previewSourceResolver} />}
             {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "video" && <div className="preview-transform" style={mainTransformStyle}><video className="preview-background" src={previewAsset.media_url} muted aria-hidden="true" /><video ref={videoRef} className="preview-foreground" src={previewAsset.media_url} muted={!selectedClip?.audio.enabled || previewReverse || (clipAtPlayhead ? !isClipAudible(clipAtPlayhead) : false)} aria-label="交互预览视频" onTimeUpdate={event => { if (libraryPreviewId) dispatchPlayhead("external", Math.round(event.currentTarget.currentTime * 1_000_000), true); }} onEnded={handleVideoEnded} /></div>}
             {previewMode === "interactive" && audioAsset?.media_url && <audio ref={audioRef} src={audioAsset.media_url} style={{ display: "none" }} />}
             {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "image" && <div className="preview-transform" style={mainTransformStyle}><img className="preview-background" src={previewAsset.media_url} alt="" aria-hidden="true" /><img className="preview-foreground" src={previewAsset.media_url} alt={previewAsset.asset.display_name} /></div>}

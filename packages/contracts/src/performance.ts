@@ -125,3 +125,162 @@ export const parseDerivedMediaEntry = (value: unknown) =>
   parse(value, isDerivedMediaEntry, "DerivedMediaEntry");
 export const parseDerivedMediaStats = (value: unknown) =>
   parse(value, isDerivedMediaStats, "DerivedMediaStats");
+
+// ---- B11：preview-source（全源代理与预览源选择） ----
+
+export const PREVIEW_SOURCE_PROFILES = ["preview-540-v1", "preview-720-v1", "preview-1080-v1"] as const;
+export type PreviewSourceProfileId = (typeof PREVIEW_SOURCE_PROFILES)[number];
+export type PreviewSourceMode = "auto" | "original" | "proxy";
+
+export interface PreviewSourceDescription {
+  source_id: string;
+  /** 生效模式（auto 请求在代理 ready 时生效为 proxy）。 */
+  mode: PreviewSourceMode;
+  status: "ready" | "pending" | "unavailable";
+  job_id: string | null;
+  cache_key: string | null;
+  asset_fingerprint: string;
+  profile_id: PreviewSourceProfileId;
+  duration_us: number;
+  /** 原源微秒为权威：proxyTimeUs = sourceTimeUs - source_origin_us。 */
+  source_origin_us: number;
+  fps_num: number;
+  fps_den: number;
+  coded_width: number;
+  coded_height: number;
+  display_width: number;
+  display_height: number;
+  rotation: number;
+  codec: string | null;
+  size_bytes: number | null;
+}
+
+export interface PreviewSourceRequestInput {
+  project_id: ProjectId;
+  asset_id: AssetId;
+  profile_id?: PreviewSourceProfileId;
+  mode?: PreviewSourceMode;
+  generate?: boolean;
+}
+
+export interface PreviewSourceJobRequestInput {
+  project_id: ProjectId;
+  asset_id: AssetId;
+  profile_id?: PreviewSourceProfileId;
+}
+
+export interface PreviewSourceJobResponse {
+  job_id: string | null;
+  cache_key: string | null;
+  status: "queued" | "ready" | "building" | "failed" | null;
+}
+
+export interface PreviewSourceMediaInput {
+  project_id: ProjectId;
+  asset_id: AssetId;
+  profile_id: PreviewSourceProfileId;
+}
+
+export interface PreviewSourceMediaResponse {
+  /** aivideo:// 票据 URL（Main 换发；Renderer 永远接触不到 path）。 */
+  media_url: string;
+  cache_key: string;
+  status: "ready";
+  size_bytes: number;
+}
+
+const PROFILE = /^preview-(540|720|1080)-v1$/;
+const MODES: readonly PreviewSourceMode[] = ["auto", "original", "proxy"];
+const SOURCE_ID = /^src_[A-Za-z0-9_-]+_(preview-(540|720|1080)-v1)_(original|proxy)$/;
+
+function profile(value: unknown): value is PreviewSourceProfileId {
+  return typeof value === "string" && PROFILE.test(value);
+}
+
+function mode(value: unknown): value is PreviewSourceMode {
+  return typeof value === "string" && (MODES as readonly string[]).includes(value);
+}
+
+function integer(value: unknown, min: number, max: number): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= min && value <= max;
+}
+
+export function isPreviewSourceDescription(value: unknown): value is PreviewSourceDescription {
+  if (!record(value) || !only(value, [
+    "source_id", "mode", "status", "job_id", "cache_key", "asset_fingerprint",
+    "profile_id", "duration_us", "source_origin_us", "fps_num", "fps_den",
+    "coded_width", "coded_height", "display_width", "display_height", "rotation",
+    "codec", "size_bytes",
+  ])) return false;
+  return typeof value.source_id === "string" && SOURCE_ID.test(value.source_id)
+    && mode(value.mode)
+    && (value.status === "ready" || value.status === "pending" || value.status === "unavailable")
+    && (value.job_id === null || typeof value.job_id === "string")
+    && (value.cache_key === null || sha(value.cache_key))
+    && sha(value.asset_fingerprint)
+    && profile(value.profile_id)
+    && integer(value.duration_us, 0, Number.MAX_SAFE_INTEGER)
+    && integer(value.source_origin_us, 0, Number.MAX_SAFE_INTEGER)
+    && integer(value.fps_num, 0, Number.MAX_SAFE_INTEGER)
+    && integer(value.fps_den, 1, Number.MAX_SAFE_INTEGER)
+    && integer(value.coded_width, 0, Number.MAX_SAFE_INTEGER)
+    && integer(value.coded_height, 0, Number.MAX_SAFE_INTEGER)
+    && integer(value.display_width, 0, Number.MAX_SAFE_INTEGER)
+    && integer(value.display_height, 0, Number.MAX_SAFE_INTEGER)
+    && integer(value.rotation, -360, 360)
+    && (value.codec === null || typeof value.codec === "string")
+    && (value.size_bytes === null || nonnegative(value.size_bytes));
+}
+
+function optionalOnly(value: Record<string, unknown>, required: readonly string[], optional: readonly string[]): boolean {
+  const keys = Object.keys(value);
+  return keys.every(key => required.includes(key) || optional.includes(key))
+    && required.every(key => keys.includes(key));
+}
+
+export function isPreviewSourceRequestInput(value: unknown): value is PreviewSourceRequestInput {
+  if (!record(value) || !optionalOnly(value, ["project_id", "asset_id"], ["profile_id", "mode", "generate"])) return false;
+  if (!id(value.project_id) || !id(value.asset_id)) return false;
+  if (value.profile_id !== undefined && !profile(value.profile_id)) return false;
+  if (value.mode !== undefined && !mode(value.mode)) return false;
+  if (value.generate !== undefined && typeof value.generate !== "boolean") return false;
+  return true;
+}
+
+export function isPreviewSourceJobRequestInput(value: unknown): value is PreviewSourceJobRequestInput {
+  if (!record(value) || !optionalOnly(value, ["project_id", "asset_id"], ["profile_id"])) return false;
+  return id(value.project_id) && id(value.asset_id)
+    && (value.profile_id === undefined || profile(value.profile_id));
+}
+
+export function isPreviewSourceJobResponse(value: unknown): value is PreviewSourceJobResponse {
+  if (!record(value) || !only(value, ["job_id", "cache_key", "status"])) return false;
+  return (value.job_id === null || id(value.job_id))
+    && (value.cache_key === null || sha(value.cache_key))
+    && (value.status === null || value.status === "queued" || value.status === "ready"
+      || value.status === "building" || value.status === "failed");
+}
+
+export function isPreviewSourceMediaInput(value: unknown): value is PreviewSourceMediaInput {
+  if (!record(value) || !only(value, ["project_id", "asset_id", "profile_id"])) return false;
+  return id(value.project_id) && id(value.asset_id) && profile(value.profile_id);
+}
+
+export function isPreviewSourceMediaResponse(value: unknown): value is PreviewSourceMediaResponse {
+  if (!record(value) || !only(value, ["media_url", "cache_key", "status", "size_bytes"])) return false;
+  return typeof value.media_url === "string" && value.media_url.startsWith("aivideo://media/")
+    && sha(value.cache_key) && value.status === "ready" && nonnegative(value.size_bytes);
+}
+
+export const parsePreviewSourceDescription = (value: unknown): PreviewSourceDescription =>
+  parse(value, isPreviewSourceDescription, "PreviewSourceDescription");
+export const parsePreviewSourceRequestInput = (value: unknown): PreviewSourceRequestInput =>
+  parse(value, isPreviewSourceRequestInput, "PreviewSourceRequestInput");
+export const parsePreviewSourceJobRequestInput = (value: unknown): PreviewSourceJobRequestInput =>
+  parse(value, isPreviewSourceJobRequestInput, "PreviewSourceJobRequestInput");
+export const parsePreviewSourceJobResponse = (value: unknown): PreviewSourceJobResponse =>
+  parse(value, isPreviewSourceJobResponse, "PreviewSourceJobResponse");
+export const parsePreviewSourceMediaInput = (value: unknown): PreviewSourceMediaInput =>
+  parse(value, isPreviewSourceMediaInput, "PreviewSourceMediaInput");
+export const parsePreviewSourceMediaResponse = (value: unknown): PreviewSourceMediaResponse =>
+  parse(value, isPreviewSourceMediaResponse, "PreviewSourceMediaResponse");
