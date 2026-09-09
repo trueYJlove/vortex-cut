@@ -37,13 +37,13 @@ describe("轨道属性头", () => {
   afterEach(() => cleanup());
   it("下移轨道按钮提交 move_track patch", () => {
     const onPatch = vi.fn().mockResolvedValue(undefined);
-    render(<TimelinePanel document={doc()} selection={null} setSelection={vi.fn()} onPatch={onPatch} onDropAsset={vi.fn()} canUndo={false} canRedo={false} onUndo={vi.fn()} onRedo={vi.fn()} assetMedia={[]} playheadUs={0} onSeek={vi.fn()} onCommand={vi.fn()} />);
+    render(<TimelinePanel document={doc()} selection={null} setSelection={vi.fn()} onPatch={onPatch} onDropAsset={vi.fn()} canUndo={false} canRedo={false} onUndo={vi.fn()} onRedo={vi.fn()} assetMedia={[]} onSeek={vi.fn()} onCommand={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "下移轨道 V2" }));
     expect(onPatch).toHaveBeenCalledWith([{ op: "move_track", track_id: "V2", to_index: 1 }], "调整轨道顺序");
   });
   it("锁定/隐藏按钮提交 set_track_flags patch；文本轨无静音按钮", () => {
     const onPatch = vi.fn().mockResolvedValue(undefined);
-    render(<TimelinePanel document={doc()} selection={null} setSelection={vi.fn()} onPatch={onPatch} onDropAsset={vi.fn()} canUndo={false} canRedo={false} onUndo={vi.fn()} onRedo={vi.fn()} assetMedia={[]} playheadUs={0} onSeek={vi.fn()} onCommand={vi.fn()} />);
+    render(<TimelinePanel document={doc()} selection={null} setSelection={vi.fn()} onPatch={onPatch} onDropAsset={vi.fn()} canUndo={false} canRedo={false} onUndo={vi.fn()} onRedo={vi.fn()} assetMedia={[]} onSeek={vi.fn()} onCommand={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "隐藏轨道 V2" }));
     expect(onPatch).toHaveBeenCalledWith([{ op: "set_track_flags", track_id: "V2", hidden: true }], "调整轨道属性");
     expect(screen.queryByRole("button", { name: "静音轨道 T1" })).toBeNull();

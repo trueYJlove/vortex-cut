@@ -14,6 +14,7 @@ import { SyntheticPreview } from "./preview/SyntheticPreview.js";
 import { editorCommands, type EditorCommand } from "./editorCommands.js";
 import { bindingLabel, findConflict, loadShortcuts, matchesBinding, normalizeRecordedBinding, saveShortcuts, DEFAULT_SHORTCUTS, type ShortcutCommandId, type ShortcutEntry } from "./shortcuts.js";
 import { TimelinePanel } from "./timeline/TimelineCanvas.js";
+import { createPlayheadStore, type PlayheadStore } from "./timeline/playhead-store.js";
 import { parseSubtitleFile } from "./subtitleImport.js";
 import { ClipProperties, CaptionProperties, ProjectProperties, TimelineDiffView, TransitionProperties } from "./PropertyPanels.js";
 import { JobEta } from "./JobEta.js";
@@ -162,6 +163,12 @@ export function App() {
   const [playing, setPlaying] = useState(false);
   const [runtimeReady, setRuntimeReady] = useState(false);
   const [playhead, setPlayhead] = useState(0);
+  // 播放头命令存储（A06）：预览每帧写入（高频、不驱动 React 全树重渲染）；
+  // `playhead` 10Hz 状态只喂 App 自身的时间显示/属性面板。用户 seek 统一走
+  // seekFromUser（递增 requestId，旧回传按 ID 作废），播放回传走 seekFromPlayback。
+  const playheadStoreRef = useRef<PlayheadStore | null>(null);
+  if (!playheadStoreRef.current) playheadStoreRef.current = createPlayheadStore();
+  const playheadStore = playheadStoreRef.current;
   const [encoderMode, setEncoderMode] = useState<EncoderMode>("auto");
   // 默认交互预览；合成预览经工具栏切换（Phase 2：手势层迁移完成 + 测试基建
   // 更新后再设为默认——默认翻转需同步更新大量假设交互默认的测试）。
@@ -692,26 +699,74 @@ export function App() {
     if (!playing && timelineEndUs > 0 && playhead >= timelineEndUs) setPlayhead(0);
     setPlaying(value => !value);
   };
+  // ── 播放头命令通道（A06）──────────────────────────────────────────────────
+  // source 语义（计划 A06 第 4 条）：user = 用户主动 seek（拖动标尺/点字幕/
+  // 方向键），playback = 预览播放回传，external = 库预览等其余路径。
+  // 用户命令递增 requestId；播放回传按「当前请求 ID 是否仍等于发出时 ID」
+  // 判定是否作废——连续快速拖动时旧回传不再回写 UI。
+  // 两条通道都写 playheadStore（覆盖层高频跟随），React `playhead` 状态仍保持
+  // 10Hz 节流更新（App commit 频率不随 rAF 提升——A06 验收指标）。
+  const dispatchPlayhead = useCallback((source: "user" | "playback" | "external", timeUs: number, commitReact: boolean) => {
+    playheadStore.dispatch({ source, timeUs });
+    if (commitReact) setPlayhead(timeUs);
+  }, [playheadStore]);
+  /** 用户主动 seek：立即同步 React 状态（交互跟手），后续 playback 回传在
+   *  新的用户命令到达前被 10Hz 节流合并。 */
+  const seekFromUser = useCallback((timeUs: number) => {
+    dispatchPlayhead("user", timeUs, true);
+  }, [dispatchPlayhead]);
+  /** 预览播放回传：只写 store + 10Hz 节流 React——覆盖层每帧跟随，
+   *  App 组件树不随 rAF 频率提交。 */
+  const lastReactTimeReport = useRef(0);
+  const seekFromPlayback = useCallback((timeUs: number) => {
+    const now = performance.now();
+    dispatchPlayhead("playback", timeUs, now - lastReactTimeReport.current >= 100);
+    if (now - lastReactTimeReport.current >= 100) lastReactTimeReport.current = now;
+  }, [dispatchPlayhead]);
   // 时间线驱动播放：播放头是唯一时钟（100ms 步进推进，媒体元素跟随标尺——
   // 所见即所得：标尺在哪个片段，播放的就是那个片段的内容）。
   // 到达时间线末尾：停在末尾（不回跳、不自动续播），再次播放从头开始。
   useEffect(() => {
     if (!playing || previewMode !== "interactive" || libraryPreviewId) return;
     const timer = window.setInterval(() => {
-      setPlayhead(ph => {
-        if (gestureHoldRef.current) return ph; // 画中画手势期间冻结播放头时钟
-        const next = ph + 100_000;
-        if (timelineEndUs > 0 && next >= timelineEndUs) { setPlaying(false); return timelineEndUs; }
-        return next;
-      });
+      // 交互预览的 100ms 时钟：直接派发 playback 源（store + React 同步——
+      // 本 interval 本身就是 10Hz，节流层不再叠加延迟）。
+      const ph = playheadStore.get();
+      const next = ph + 100_000;
+      if (timelineEndUs > 0 && next >= timelineEndUs) {
+        dispatchPlayhead("playback", timelineEndUs, true);
+        setPlaying(false);
+        return;
+      }
+      dispatchPlayhead("playback", next, true);
     }, 100);
     return () => window.clearInterval(timer);
-  }, [playing, previewMode, libraryPreviewId, timelineEndUs]);
+  }, [playing, previewMode, libraryPreviewId, timelineEndUs, playheadStore, dispatchPlayhead]);
   const handleVideoEnded = () => {
     // 素材播完（视频元素 ended）：时间线播放由播放头时钟驱动，这里只停播——
     // 播放头保持当前位置（不回跳、不自动续播下一段）。
     setPlaying(false);
   };
+
+  // ── 稳定依赖（A06 第 5 条）：传给 TimelinePanel / SyntheticPreview 的数组与
+  // Map 改为 useMemo——播放头 10Hz 更新不再重建这些 props，下游 memo 化的
+  // 子组件不再整树重渲（此前每次 App 渲染都 new Map/new array）。
+  const timelineAssetMedia = useMemo(
+    () => assets.map(item => ({ asset_id: item.asset.asset_id, media_url: item.media_url, kind: item.asset.kind, display_name: item.asset.display_name })),
+    [assets],
+  );
+  const syntheticMediaUrls = useMemo(
+    () => new Map(assets.flatMap(item => item.media_url ? [[item.asset.asset_id, item.media_url] as const] : [])),
+    [assets],
+  );
+  const syntheticAudioByClip = useMemo(
+    () => new Map((working?.clips ?? []).flatMap(clip => clip.audio ? [[clip.clip_id, { enabled: isClipAudible(clip), gainDb: clip.audio.gain_db }] as const] : [])),
+    [working, isClipAudible],
+  );
+  const syntheticPipClips = useMemo(
+    () => (working?.clips ?? []).filter(clip => clip.track_id !== "V1" && clip.track_id !== "A1" && clip.asset_kind !== "audio").map(clip => ({ clipId: clip.clip_id, transform: { x: clip.transform?.x, y: clip.transform?.y, scale: clip.transform?.scale, rotate: clip.transform?.rotate, opacity: clip.transform?.opacity }, mask: clip.mask ?? undefined })),
+    [working],
+  );
 
   const acceptState = (next: TimelineState) => { timelineLoadEpoch.current += 1; setTimeline(next); setWorking(next.current_revision.document); setSaveState("已保存"); setNotice(""); };
   // 提示条统一入口：显式分级（默认错误红色），并在数秒后自动消失；连续提示会重置计时。
@@ -1282,7 +1337,7 @@ export function App() {
   const seekFromProgressRatio = (ratio: number) => {
     exitLibraryPreview();
     const value = Math.round(ratio * Math.max(totalUs, 1));
-    setPlayhead(value);
+    seekFromUser(value);
     const clip = sortedClips.find(c => value >= c.timeline_start_us && value < c.timeline_end_us);
     if (clip && videoRef.current) {
       const sourceStart = (clip.source_start_us ?? 0) / 1_000_000;
@@ -1483,7 +1538,7 @@ export function App() {
         const frameUs = Math.round(1_000_000 / (working?.canvas.fps_num && working.canvas.fps_den ? working.canvas.fps_num / working.canvas.fps_den : 30));
         const step = frameUs * (event.shiftKey ? 5 : 1);
         exitLibraryPreview();
-        setPlayhead(value => Math.max(0, Math.min(duration(working), value + (event.key === "ArrowRight" ? step : -step))));
+        seekFromUser(Math.max(0, Math.min(duration(working), playheadStore.get() + (event.key === "ArrowRight" ? step : -step))));
       }
       return;
     }
@@ -1748,8 +1803,8 @@ export function App() {
             {previewMode === "authoritative" && authoritativeMediaUrl && <video ref={videoRef} className="preview-foreground authoritative-video" src={authoritativeMediaUrl} aria-label={reframePlayback ? "重构图权威预览视频" : exportPlayback ? "导出视频" : "权威预览视频"} controls onEnded={() => { setPlaying(false); setExportPlayback(undefined); setReframePlayback(undefined); setPreviewMode("synthetic"); }} />}
             {/* 合成预览仅在时间线有可见片段时挂载；空时间线显示引导文案（剪映式），
                 避免对空时间线请求 preview-ir 被 Core 以 TIMELINE_EMPTY 拒绝而回退。 */}
-            {previewMode === "synthetic" && project && working && timeline && working.clips.length > 0 && <SyntheticPreview outputRatio={syntheticRatio} projectId={project.project_id} revisionId={timeline?.current_revision.timeline_revision_id ?? null} mediaUrls={new Map(assets.flatMap(item => item.media_url ? [[item.asset.asset_id, item.media_url] as const] : []))} audioByClip={new Map((working?.clips ?? []).flatMap(clip => clip.audio ? [[clip.clip_id, { enabled: isClipAudible(clip), gainDb: clip.audio.gain_db }] as const] : []))} pipClips={(working?.clips ?? []).filter(clip => clip.track_id !== "V1" && clip.track_id !== "A1" && clip.asset_kind !== "audio").map(clip => ({ clipId: clip.clip_id, transform: { x: clip.transform?.x, y: clip.transform?.y, scale: clip.transform?.scale, rotate: clip.transform?.rotate, opacity: clip.transform?.opacity }, mask: clip.mask ?? undefined }))} selectedClipId={pipSelectedId} onSelectClip={clipId => setSelection({ kind: "clip", id: clipId as never })} onCommitPipTransform={(clipId, transform) => { const clip = (working?.clips ?? []).find(item => item.clip_id === clipId); commitPipTransform(clipId as never, { ...(clip?.transform ?? {}), ...transform }); }} onDraftPipMask={(clipId, mask) => draftPipMask(clipId as never, mask)} onCommitPipMask={(clipId, mask) => commitPipMask(clipId as never, mask)} onGesturePause={pausePreviewPlayback} onGestureResume={resumePreviewPlayback} playing={playing && !gestureHoldRef.current} playheadUs={playhead} onTimeUs={us => setPlayhead(us)} onEnded={() => setPlaying(false)} onFallback={(reason, code) => { setPreviewMode("interactive"); setSyntheticNotice(code === "PREVIEW_IR_UNSUPPORTED" ? "当前时间线包含实时合成暂不支持的效果，已回退交互预览。" : `合成预览不可用：${reason}，已回退交互预览。`); }} />}
-            {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "video" && <div className="preview-transform" style={mainTransformStyle}><video className="preview-background" src={previewAsset.media_url} muted aria-hidden="true" /><video ref={videoRef} className="preview-foreground" src={previewAsset.media_url} muted={!selectedClip?.audio.enabled || previewReverse || (clipAtPlayhead ? !isClipAudible(clipAtPlayhead) : false)} aria-label="交互预览视频" onTimeUpdate={event => { if (libraryPreviewId) setPlayhead(Math.round(event.currentTarget.currentTime * 1_000_000)); }} onEnded={handleVideoEnded} /></div>}
+            {previewMode === "synthetic" && project && working && timeline && working.clips.length > 0 && <SyntheticPreview outputRatio={syntheticRatio} projectId={project.project_id} revisionId={timeline?.current_revision.timeline_revision_id ?? null} mediaUrls={syntheticMediaUrls} audioByClip={syntheticAudioByClip} pipClips={syntheticPipClips} selectedClipId={pipSelectedId} onSelectClip={clipId => setSelection({ kind: "clip", id: clipId as never })} onCommitPipTransform={(clipId, transform) => { const clip = (working?.clips ?? []).find(item => item.clip_id === clipId); commitPipTransform(clipId as never, { ...(clip?.transform ?? {}), ...transform }); }} onDraftPipMask={(clipId, mask) => draftPipMask(clipId as never, mask)} onCommitPipMask={(clipId, mask) => commitPipMask(clipId as never, mask)} onGesturePause={pausePreviewPlayback} onGestureResume={resumePreviewPlayback} playing={playing && !gestureHoldRef.current} playheadUs={playhead} playheadStore={playheadStore} onTimeUs={us => seekFromPlayback(us)} onEnded={() => setPlaying(false)} onFallback={(reason, code) => { setPreviewMode("interactive"); setSyntheticNotice(code === "PREVIEW_IR_UNSUPPORTED" ? "当前时间线包含实时合成暂不支持的效果，已回退交互预览。" : `合成预览不可用：${reason}，已回退交互预览。`); }} />}
+            {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "video" && <div className="preview-transform" style={mainTransformStyle}><video className="preview-background" src={previewAsset.media_url} muted aria-hidden="true" /><video ref={videoRef} className="preview-foreground" src={previewAsset.media_url} muted={!selectedClip?.audio.enabled || previewReverse || (clipAtPlayhead ? !isClipAudible(clipAtPlayhead) : false)} aria-label="交互预览视频" onTimeUpdate={event => { if (libraryPreviewId) dispatchPlayhead("external", Math.round(event.currentTarget.currentTime * 1_000_000), true); }} onEnded={handleVideoEnded} /></div>}
             {previewMode === "interactive" && audioAsset?.media_url && <audio ref={audioRef} src={audioAsset.media_url} style={{ display: "none" }} />}
             {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "image" && <div className="preview-transform" style={mainTransformStyle}><img className="preview-background" src={previewAsset.media_url} alt="" aria-hidden="true" /><img className="preview-foreground" src={previewAsset.media_url} alt={previewAsset.asset.display_name} /></div>}
             {(previewMode === "interactive" || (previewMode === "synthetic" && (!working || working.clips.length === 0))) && !previewAsset?.media_url && overlayPips.length === 0 && <div className="preview-empty">选择或追加素材以开始编辑</div>}
@@ -1796,7 +1851,7 @@ export function App() {
       <aside className="properties-pane" aria-label="上下文属性" role="region">{selectedClip ? <ClipProperties clip={selectedClip} locked={Boolean(working?.locked_elements?.includes(selectedClip.clip_id))} onPatch={patchTimeline} onDraft={queueDraft} working={working!} playheadUs={playhead} /> : selectedCaption ? <CaptionProperties caption={selectedCaption} locked={Boolean(selectedCaption.source_clip_id && working?.locked_elements?.includes(selectedCaption.source_clip_id))} onPatch={patchTimeline} onDraft={queueDraft} working={working!} /> : selectedTransition ? <TransitionProperties transition={selectedTransition} onPatch={patchTimeline} /> : <ProjectProperties project={project} saveState={saveState} authoritativePreview={authoritativePreview} previewIsStale={previewIsStale} renderDisabledReason={renderDisabledReason} onGeneratePreview={() => void generatePreview()} onCreateExport={() => void createExport()} onOpenProjectDialog={() => setProjectDialogOpen(true)} />}</aside>
     </section>
     <div className="timeline-resize-handle" role="separator" aria-label="调整时间线高度" onPointerDown={event => beginResize("timeline", event)} />
-    <TimelinePanel document={working} selection={selection} setSelection={(sel) => { setSelection(sel); exitLibraryPreview(); }} onPatch={patchTimeline} onDropAsset={dropAsset} coverUrl={coverUrl} onCaptureCover={captureCover} canUndo={Boolean(timeline?.can_undo)} canRedo={Boolean(timeline?.can_redo)} onUndo={() => void undoRedo("undo")} onRedo={() => void undoRedo("redo")} assetMedia={assets.map(item => ({ asset_id: item.asset.asset_id, media_url: item.media_url, kind: item.asset.kind, display_name: item.asset.display_name }))} playheadUs={playhead} onSeek={(timeUs) => { exitLibraryPreview(); setPlayhead(timeUs); const clip = sortedClips.find(c => timeUs >= c.timeline_start_us && timeUs < c.timeline_end_us); if (clip && videoRef.current) { const sourceStart = (clip.source_start_us ?? 0) / 1_000_000; const elapsed = (timeUs - clip.timeline_start_us) / 1_000_000 * ((clip.speed_milli ?? 1000) / 1000); pendingSeekRef.current = sourceStart + elapsed; videoRef.current.currentTime = pendingSeekRef.current; } else if (videoRef.current) { videoRef.current.currentTime = timeUs / 1_000_000; } }} onCommand={(id) => runCommand(id)} />
+    <TimelinePanel document={working} selection={selection} setSelection={(sel) => { setSelection(sel); exitLibraryPreview(); }} onPatch={patchTimeline} onDropAsset={dropAsset} coverUrl={coverUrl} onCaptureCover={captureCover} canUndo={Boolean(timeline?.can_undo)} canRedo={Boolean(timeline?.can_redo)} onUndo={() => void undoRedo("undo")} onRedo={() => void undoRedo("redo")} assetMedia={timelineAssetMedia} playheadStore={playheadStore} onSeek={(timeUs) => { exitLibraryPreview(); seekFromUser(timeUs); const clip = sortedClips.find(c => timeUs >= c.timeline_start_us && timeUs < c.timeline_end_us); if (clip && videoRef.current) { const sourceStart = (clip.source_start_us ?? 0) / 1_000_000; const elapsed = (timeUs - clip.timeline_start_us) / 1_000_000 * ((clip.speed_milli ?? 1000) / 1000); pendingSeekRef.current = sourceStart + elapsed; videoRef.current.currentTime = pendingSeekRef.current; } else if (videoRef.current) { videoRef.current.currentTime = timeUs / 1_000_000; } }} onCommand={(id) => runCommand(id)} />
     <footer>
       <div className="footer-status">
         <div role="status" aria-label="保存状态" className={`save-state ${saveState === "保存失败" || saveState === "草稿冲突" ? "error" : ""}`} title={saveState === "草稿冲突" ? "检测到冲突草稿，请在顶部提示中处理" : undefined}><Save />{saveState}</div>

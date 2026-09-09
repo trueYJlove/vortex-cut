@@ -13,7 +13,13 @@ import { editorPerf } from "../preview/perf-metrics.js";
  * - Canvas: ruler ticks, clip blocks, caption blocks, playhead, selection
  *           highlight, trim handles, snap guides, marquee, drag ghosts
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ChevronDown,
   ChevronLeft,
@@ -67,6 +73,8 @@ import {
   type TransitionRenderRect,
   type TrimEdge,
 } from "./types.js";
+import { TimelinePlayheadLayer } from "./TimelinePlayheadLayer.js";
+import { createPlayheadStore, type PlayheadStore } from "./playhead-store.js";
 
 /** B2 转场种类（与 core TRANSITION_KINDS 对齐）。 */
 const TRANSITION_KINDS = ["fade", "fadeblack", "dissolve", "wipeleft", "wiperight", "slideleft", "slideup", "zoomin"] as const;
@@ -595,25 +603,8 @@ const RANGE_BAR_BOTTOM = "#3fe0bd";
 const HOVER_CHIP_BG = "rgba(9, 12, 24, 0.88)";
 const HOVER_CHIP_EDGE = "rgba(37, 211, 172, 0.45)";
 const HOVER_CHIP_TEXT = "#d6e1ff";
-const PLAYHEAD_HANDLE_TOP = "#ff9c94";
-const PLAYHEAD_HANDLE_BOTTOM = "#f65d55";
-const PLAYHEAD_HANDLE_EDGE = "rgba(10, 14, 20, 0.55)";
-
-/** 播放头顶部手柄（主画布与固定标尺覆盖层共享）：白色渐变圆角竖条，
- *  高度限制在标尺带内——外露会形成衔接处的"小白点"。 */
-function drawPlayheadHandle(ctx: CanvasRenderingContext2D, x: number, bandHeight: number) {
-  const h = Math.min(18, Math.max(6, bandHeight - 6));
-  const grad = ctx.createLinearGradient(0, 3, 0, 3 + h);
-  grad.addColorStop(0, PLAYHEAD_HANDLE_TOP);
-  grad.addColorStop(1, PLAYHEAD_HANDLE_BOTTOM);
-  ctx.fillStyle = grad;
-  ctx.strokeStyle = PLAYHEAD_HANDLE_EDGE;
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.roundRect(x - 3, 3, 6, h, 3);
-  ctx.fill();
-  ctx.stroke();
-}
+// 播放头线/手柄已拆为独立 DOM 覆盖层（A06，TimelinePlayheadLayer），
+// 外观常量与绘制函数不再在 Canvas 路径保留。
 
 /** 标尺面（两条绘制路径共享的标尺带外观）：渐变底 + 悬停竖线/时间胶囊 +
  *  刻度 + 素材范围条 + 素材终点标线 + 终点外死区。
@@ -763,7 +754,6 @@ function drawTimeline(
   captionRects: CaptionRenderRect[],
   captions: TimelineCaption[],
   ticks: TickMark[],
-  playheadUs: number,
   selection: TimelineSelection,
   interaction: TimelineInteraction | null,
   hover: TimelineHover,
@@ -1274,9 +1264,11 @@ function drawTimeline(
   // 命中区仍由 hitTestTrimHandle 的左右 ±6px 区域提供。
 
   // Captions (enhanced transcript style)
+  // 播放头驻留高亮（A06 语义调整）：主画布不再跟随播放头逐帧重绘，驻留态
+  // 改由命中测试选中/悬停通道驱动——选中字幕仍保留其较强的激活外观。
   for (const rect of captionRects) {
     const isSelected = selection?.kind === "caption" && selection.id === rect.caption.caption_id;
-    const isActive = playheadUs >= rect.caption.start_us && playheadUs < rect.caption.end_us;
+    const isActive = isSelected;
     const isEdited = rect.caption.edited;
 
     // Skip if too narrow
@@ -1583,19 +1575,8 @@ function drawTimeline(
     ctx.setLineDash([]);
   }
 
-  // Playhead（剪映式：全高白色细线 + 顶部圆角手柄）；显示位置钳制在素材终点内。
-  const playheadX = timeToX(clipRects.length > 0 ? Math.min(playheadUs, totalUs) : playheadUs, view);
-  if (playheadX >= view.headerWidth - 3 && playheadX <= width + 3) {
-    ctx.strokeStyle = "#f65d55";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(playheadX, 0);
-    ctx.lineTo(playheadX, height);
-    ctx.stroke();
-
-    // 顶部手柄：圆角竖条（可拖拽区域由标尺与空白区命中共同提供）。
-    drawPlayheadHandle(ctx, playheadX, view.rulerHeight);
-  }
+  // 播放头已拆为独立 DOM 覆盖层（A06：TimelinePlayheadLayer + playhead-store），
+  // 主画布/固定标尺不再绘制播放头线与手柄——播放期间不再触发全量重绘。
 
   // Bottom scrollbar strip (Round 4)：绘制在可视区底部（而非画布内容底部），
   // 内容高于面板时滚动条始终可见、可拖。
@@ -1605,7 +1586,8 @@ function drawTimeline(
 
 /** 固定标尺条带：多轨道纵向滚动时钉在可视区顶部，轨道内容从其下方滚过。
  *  绘制内容与 drawTimeline 的标尺带一致（角区 + 底色 + 刻度 + 内容范围条 +
- *  播放头 + 悬停时间标签），由独立覆盖层 Canvas 调用。 */
+ *  悬停时间标签；播放头由 TimelinePlayheadLayer DOM 覆盖层绘制），
+ *  由独立覆盖层 Canvas 调用。 */
 function drawRulerStrip(
   ctx: CanvasRenderingContext2D,
   width: number,
@@ -1613,7 +1595,6 @@ function drawRulerStrip(
   view: TimelineViewState,
   ticks: TickMark[],
   rulerHoverUs: number | null | undefined,
-  playheadUs: number,
   clipRects: ClipRenderRect[],
 ) {
   const dpr = window.devicePixelRatio || 1;
@@ -1663,17 +1644,7 @@ function drawRulerStrip(
     xAt: (us) => timeToX(us, view) + headW,
   });
 
-  // 播放头（条带内线段 + 圆角手柄，同主绘制）；显示位置钳制在素材终点内。
-  const playheadX = timeToX(totalEndUs !== null ? Math.min(playheadUs, totalEndUs) : playheadUs, view) + headW;
-  if (playheadX >= rulerX - 3 && playheadX <= width + 3) {
-    ctx.strokeStyle = "#f65d55";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(playheadX, 0);
-    ctx.lineTo(playheadX, height);
-    ctx.stroke();
-    drawPlayheadHandle(ctx, playheadX, height);
-  }
+  // 播放头（含手柄）由独立 DOM 覆盖层 TimelinePlayheadLayer 绘制（A06）。
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
@@ -1689,7 +1660,7 @@ export function TimelinePanel({
   onUndo,
   onRedo,
   assetMedia,
-  playheadUs,
+  playheadStore,
   onSeek,
   onCommand,
   coverUrl,
@@ -1705,7 +1676,10 @@ export function TimelinePanel({
   onUndo: () => void;
   onRedo: () => void;
   assetMedia: AssetMediaEntry[];
-  playheadUs: number;
+  /** 播放头存储（A06，可选——App 拥有跨组件 store 时传入；测试/旧调用方
+   *  不传则组件内部自建，行为自洽）。预览每帧写入 store，播放头绘制走
+   *  独立 DOM 覆盖层，播放期间不再触发主画布全量重绘。 */
+  playheadStore?: PlayheadStore;
   /** Optional seek callback invoked when the playhead is dragged or a caption is clicked. */
   onSeek?: (timeUs: number) => void;
   /** Optional editor command runner (copy/paste context-menu actions). */
@@ -1717,11 +1691,16 @@ export function TimelinePanel({
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  // 播放头 store：外部拥有（App 跨组件写入）或组件自建（测试/独立使用）。
+  const localPlayheadStoreRef = useRef<PlayheadStore | null>(null);
+  if (!localPlayheadStoreRef.current && !playheadStore) {
+    localPlayheadStoreRef.current = createPlayheadStore();
+  }
+  const activePlayheadStore = playheadStore ?? localPlayheadStoreRef.current!;
   const [view, setView] = useState<TimelineViewState>(DEFAULT_VIEW_STATE);
   // Synchronous view mirror so the auto-scroll rAF loop reads fresh values.
   const viewRef = useRef<TimelineViewState>(view);
-  viewRef.current = view;
-  const [dropIndex, setDropIndex] = useState<number | null>(null);
+  viewRef.current = view;  const [dropIndex, setDropIndex] = useState<number | null>(null);
   // B2：点击两片段边界时记录转场锚点（左侧片段 id），弹出添加浮层。
   const [addTransitionAnchor, setAddTransitionAnchor] = useState<string | null>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 800, height: 200 });
@@ -1784,6 +1763,11 @@ export function TimelinePanel({
     document?.canvas?.fps_num && document?.canvas?.fps_den
       ? document.canvas.fps_num / document.canvas.fps_den
       : 30;
+  // 播放头即时值（不触发 React 重渲染）：交互几何在事件发生的那一刻读取
+  // store——播放期间组件完全静止，播放头推进只走覆盖层 useSyncExternalStore
+  // 通道（不进入本组件的渲染/绘制路径）。
+  const playheadUs = activePlayheadStore.get();
+  void playheadUs; // 调试镜像值；交互路径一律 activePlayheadStore.get() 即时读取
 
   // Compute geometry：轨道行自上而下排列，行高固定（不随窗口大小压缩）；
   // 轨道过多时时间线区域纵向滚动。
@@ -1793,7 +1777,12 @@ export function TimelinePanel({
   );
   // 内容总高（标尺 + 全部固定行 + 横向滚动条条带）；画布与左栏同步按此伸展。
   const contentHeight = view.rulerHeight + trackRowsTotalHeight(trackRows) + SCROLLBAR_HEIGHT_PX;
-  const clipRects = computeClipRects(clips, trackRows, view);
+  // 几何输出改为 useMemo 稳定引用（A06）：hover/播放头等无关状态更新不再
+  // 重算 clipRects/captionRects/ticks，绘制 effect 依赖也随之稳定。
+  const clipRects = useMemo(
+    () => computeClipRects(clips, trackRows, view),
+    [clips, trackRows, view],
+  );
   // 拖拽提交态：文档仍与目标不一致时保持渲染在目标位置（防松手回弹）；
   // 文档更新到位后自动清除。2s 超时兜底（补丁失败时不残留幻影位置）。
   const keepValid =
@@ -1823,9 +1812,18 @@ export function TimelinePanel({
     }
     return map;
   }, [clips, assetMedia]);
-  const captionRects = computeCaptionRects(captions, trackRows, view);
-  const transitionRects = computeTransitionRects(clips, transitions, trackRows, view);
-  const ticks = computeTicks(totalUs, view.pixelsPerSecond, view.headerWidth, frameRate, view.scrollX, canvasSize.width);
+  const captionRects = useMemo(
+    () => computeCaptionRects(captions, trackRows, view),
+    [captions, trackRows, view],
+  );
+  const transitionRects = useMemo(
+    () => computeTransitionRects(clips, transitions, trackRows, view),
+    [clips, transitions, trackRows, view],
+  );
+  const ticks = useMemo(
+    () => computeTicks(totalUs, view.pixelsPerSecond, view.headerWidth, frameRate, view.scrollX, canvasSize.width),
+    [totalUs, view.pixelsPerSecond, view.headerWidth, frameRate, view.scrollX, canvasSize.width],
+  );
   // Content-space clip rects (scrollX=0) for marquee selection hit testing.
   const contentClipRects = useMemo(
     () => computeClipRects(clips, trackRows, { ...view, scrollX: 0 }),
@@ -1975,10 +1973,14 @@ export function TimelinePanel({
     // 画布始终按内容实际高度伸展（不随面板拖拽压缩轨道）；
     // 面板高度不足时由 .timeline-scroll 的 overflow-y 滚动查看。
     const canvasHeight = contentHeight;
-    canvas.width = canvasSize.width * dpr;
-    canvas.height = canvasHeight * dpr;
-    canvas.style.width = `${canvasSize.width}px`;
-    canvas.style.height = `${canvasHeight}px`;
+    // 尺寸赋值前先比较 backing 大小（A06）：赋相同值会整幅清空画布状态并
+    // 触发完整重置——播放头悬停等无关更新不再无谓清屏。
+    const targetWidth = Math.max(1, Math.round(canvasSize.width * dpr));
+    const targetHeight = Math.max(1, Math.round(canvasHeight * dpr));
+    if (canvas.width !== targetWidth) canvas.width = targetWidth;
+    if (canvas.height !== targetHeight) canvas.height = targetHeight;
+    if (canvas.style.width !== `${canvasSize.width}px`) canvas.style.width = `${canvasSize.width}px`;
+    if (canvas.style.height !== `${canvasHeight}px`) canvas.style.height = `${canvasHeight}px`;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     editorPerf.record("timeline_draw");
@@ -1992,7 +1994,6 @@ export function TimelinePanel({
       captionRects,
       captions,
       ticks,
-      playheadUs,
       selection,
       interaction,
       hover,
@@ -2007,7 +2008,10 @@ export function TimelinePanel({
       prefs.waveformRatio,
       canvasSize.height,
     );
-  }, [canvasSize, view, trackRows, tracks.length, contentHeight, clipRects, captionRects, captions, ticks, playheadUs, selection, interaction, hover, totalUs, thumbnailVersion, waveformVersion, rulerHoverUs, clipNames, frameRate, pendingKeep]);
+    // playheadUs 刻意不在依赖里：播放头绘制已拆到独立覆盖层，caption
+    // 高亮按交互语义改由 selection/hover 驱动；播放期间主画布零重绘。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvasSize, view, trackRows, contentHeight, clipRects, captionRects, captions, ticks, selection, interaction, hover, totalUs, thumbnailVersion, waveformVersion, rulerHoverUs, clipNames, frameRate, pendingKeep]);
 
   // 固定标尺条带：绘制到覆盖层 Canvas（随纵向滚动钉在可视区顶部）。
   const rulerCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -2017,14 +2021,16 @@ export function TimelinePanel({
     if (!canvas) return;
     const dpr = window.devicePixelRatio || 1;
     const width = view.headerWidth * 2 + canvasSize.width;
-    canvas.width = width * dpr;
-    canvas.height = view.rulerHeight * dpr;
-    canvas.style.width = `${width}px`;
-    canvas.style.height = `${view.rulerHeight}px`;
+    const targetWidth = Math.max(1, Math.round(width * dpr));
+    const targetHeight = Math.max(1, Math.round(view.rulerHeight * dpr));
+    if (canvas.width !== targetWidth) canvas.width = targetWidth;
+    if (canvas.height !== targetHeight) canvas.height = targetHeight;
+    if (canvas.style.width !== `${width}px`) canvas.style.width = `${width}px`;
+    if (canvas.style.height !== `${view.rulerHeight}px`) canvas.style.height = `${view.rulerHeight}px`;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    drawRulerStrip(ctx, width, view.rulerHeight, view, ticks, rulerHoverUs, playheadUs, clipRects);
-  }, [view, canvasSize, ticks, rulerHoverUs, playheadUs, clipRects]);
+    drawRulerStrip(ctx, width, view.rulerHeight, view, ticks, rulerHoverUs, clipRects);
+  }, [view, canvasSize, ticks, rulerHoverUs, clipRects]);
 
   // 纵向滚动时把覆盖层钉在滚动容器可视区顶部（直接写样式，避免重渲染）。
   const rulerPinTimeAt = (event: React.MouseEvent<HTMLCanvasElement>) => {
@@ -2519,7 +2525,7 @@ export function TimelinePanel({
           const excluded = new Set(active.clipIds);
           const candidates = prefs.snappingEnabled
             ? [
-                ...snapCandidates(clipRects, playheadUs, excluded),
+                ...snapCandidates(clipRects, activePlayheadStore.get(), excluded),
                 ...gridSnapCandidates(view, totalUs, frameRate),
               ]
             : [];
@@ -2559,12 +2565,12 @@ export function TimelinePanel({
           if (clip) {
             const deltaUs = ((x - active.startX) / pps) * 1_000_000;
             const threshold = (SNAP_PX / pps) * 1_000_000;
-            const candidates = prefs.snappingEnabled
-              ? [
-                  ...snapCandidates(clipRects, playheadUs, active.clipId),
-                  ...gridSnapCandidates(view, totalUs, frameRate),
-                ]
-              : [];
+                const candidates = prefs.snappingEnabled
+                  ? [
+                      ...snapCandidates(clipRects, activePlayheadStore.get(), active.clipId),
+                      ...gridSnapCandidates(view, totalUs, frameRate),
+                    ]
+                  : [];
             let targetStartUs = active.targetStartUs;
             let targetEndUs = active.targetEndUs;
             let snapUs: number | null = null;
@@ -2666,7 +2672,7 @@ export function TimelinePanel({
         canvas.style.cursor = clipId && !locked ? "grab" : "default";
       }
     },
-    [view, onSeek, clipRects, clips, playheadUs, prefs.snappingEnabled, totalUs, frameRate, canvasSize.width, canvasSize.height, trackRows, resolveDragTargeting],
+    [view, onSeek, clipRects, clips, activePlayheadStore, prefs.snappingEnabled, totalUs, frameRate, canvasSize.width, canvasSize.height, trackRows, resolveDragTargeting],
   );
 
   // Double-click the ruler → fit the whole timeline into the viewport (Round 5).
@@ -3682,14 +3688,16 @@ export function TimelinePanel({
                   if (!clip) return null;
                   const locked = isClipLocked(clip.clip_id);
                   const speedFactor = (clip.speed_milli ?? 1000) / 1000;
+                  // 右键菜单打开瞬间读取播放头即时值（store 直读，不触发重渲染）。
+                  const playheadNowUs = activePlayheadStore.get();
                   const playheadSourceUs =
                     (clip.source_start_us ?? 0) +
-                    (playheadUs - clip.timeline_start_us) * speedFactor;
+                    (playheadNowUs - clip.timeline_start_us) * speedFactor;
                   const canSplitAtPlayhead =
                     clip.asset_kind === "video" &&
                     !locked &&
-                    playheadUs > clip.timeline_start_us + 1000 &&
-                    playheadUs < clip.timeline_end_us - 1000 &&
+                    playheadNowUs > clip.timeline_start_us + 1000 &&
+                    playheadNowUs < clip.timeline_end_us - 1000 &&
                     playheadSourceUs > (clip.source_start_us ?? 0) + 1000 &&
                     playheadSourceUs < (clip.source_end_us ?? 0) - 1000;
                   return [
@@ -3825,6 +3833,14 @@ export function TimelinePanel({
           onMouseUp={handleRulerPinUp}
           onMouseLeave={handleRulerPinLeave}
           onDoubleClick={handleRulerPinDoubleClick}
+        />
+        {/* 播放头覆盖层（A06）：与固定标尺同坐标系（timeline-body 原点 +
+            2*headerWidth 偏移），预览每帧直写 store——播放期间零主画布重绘。 */}
+        <TimelinePlayheadLayer
+          store={activePlayheadStore}
+          view={{ ...view, headerWidth: view.headerWidth * 2 }}
+          totalUs={totalUs}
+          contentHeight={contentHeight}
         />
       </div>
     </section>

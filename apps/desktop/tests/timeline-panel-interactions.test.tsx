@@ -43,7 +43,6 @@ function baseProps() {
     onUndo: vi.fn(),
     onRedo: vi.fn(),
     assetMedia: [],
-    playheadUs: 0,
     onSeek: vi.fn(),
     onCommand: vi.fn(),
   };

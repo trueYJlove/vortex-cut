@@ -447,6 +447,12 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--vc-accent); }
    .timeline-scroll 为纵向滚动区（头列 + 画布区两列）。 */
 .timeline-body { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; overflow: hidden; }
 .timeline-ruler-pin { position: absolute; top: 0; left: 0; z-index: 6; display: block; }
+/* 播放头独立覆盖层（A06）：与固定标尺同坐标系（timeline-body 顶部原点，
+   主画布内容自 2*headW 起——与 drawRulerStrip 的屏幕对齐规则一致）；
+   线 + 手柄只做 translateX，不参与命中测试（拖拽由标尺/空白区提供）。 */
+.timeline-playhead-layer { position: absolute; inset: 0; z-index: 7; pointer-events: none; }
+.timeline-playhead-line { position: absolute; left: 0; top: 0; width: 1.5px; margin-left: -0.75px; background: #f65d55; will-change: transform; }
+.timeline-playhead-handle { position: absolute; left: 0; width: 6px; margin-left: -3px; height: 18px; border-radius: 3px; border: 1px solid rgba(10, 14, 20, 0.55); background: linear-gradient(#ff9c94, #f65d55); will-change: transform; }
 .timeline-scroll { flex: 1; min-height: 0; display: flex; overflow-y: auto; overflow-x: hidden; align-items: flex-start; position: relative; }
 .timeline-scroll::-webkit-scrollbar { width: 8px; }
 .timeline-scroll::-webkit-scrollbar-thumb { background: #2a343c; border-radius: 4px; }

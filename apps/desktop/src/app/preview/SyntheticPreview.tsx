@@ -35,6 +35,10 @@ export interface SyntheticPreviewProps {
   playing: boolean;
   playheadUs: number;
   onTimeUs: (us: number) => void;
+  /** 播放头存储（A06，可选）：提供时预览会话的逐帧时间上报直写 store，
+   *  React 组件树的 10Hz 节流更新由 App 层的 onTimeUs 通道保留——
+   *  时间线播放头覆盖层按帧率跟随而不再等待 App 提交。 */
+  playheadStore?: import("../timeline/playhead-store.js").PlayheadStore;
   /** 自然播放到片尾（会话内部已 pause；UI 复位播放按钮）。 */
   onEnded?: () => void;
   onFallback: (reason: string, code: string | null) => void;
@@ -46,7 +50,7 @@ interface LoadState {
 }
 
 export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactElement {
-  const { projectId, revisionId, mediaUrls, audioByClip, pipClips, selectedClipId, onSelectClip, onCommitPipTransform, onDraftPipMask, onCommitPipMask, onGesturePause, onGestureResume, playing, playheadUs, onTimeUs, onEnded, onFallback, outputRatio } = props;
+  const { projectId, revisionId, mediaUrls, audioByClip, pipClips, selectedClipId, onSelectClip, onCommitPipTransform, onDraftPipMask, onCommitPipMask, onGesturePause, onGestureResume, playing, playheadUs, onTimeUs, onEnded, onFallback, outputRatio, playheadStore } = props;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const sessionRef = useRef<PreviewSession | null>(null);
   const generationRef = useRef(0);
@@ -111,8 +115,10 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
         if (stale()) { session.dispose(); return; }
         session.onTimeUs = (us: number) => {
           lastReportedUs.current = us;
-          // 播放头上报节流至 10Hz（与交互预览时钟同频）：App 组件树重渲是主线程
-          // 大头，30-60Hz 上报会挤压合成管线（实测丢帧 292 + 音频卡顿）。
+          // A06：预览会话每帧直写播放头 store——时间线覆盖层按帧率跟随；
+          // App React 状态仍 10Hz 节流上报（App 组件树重渲是主线程大头，
+          // 30-60Hz 上报会挤压合成管线——实测丢帧 292 + 音频卡顿）。
+          playheadStore?.set(us);
           const now = performance.now();
           if (now - lastReportWall.current >= 100 || !session.isPlaying) {
             lastReportWall.current = now;
@@ -160,6 +166,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
       }
     };
     // mediaUrls 以内容为准（票据变更即重建）；playhead 仅挂载时取初值。
+    // playheadStore 稳定（App useRef 持有），不参与会话重建——只影响上报通道。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, revisionId, outputRatio]);
 
