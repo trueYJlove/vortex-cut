@@ -30,6 +30,15 @@ RenderRunner = Callable[
 PlanningRunner = Callable[
     [Any, asyncio.Event, Callable[[float], None], Callable[[str], None]], Awaitable[dict[str, Any]]
 ]
+PreviewSourceRunner = Callable[
+    [
+        Any,
+        asyncio.Event,
+        Callable[[float], None],
+        Callable[[str], None],
+    ],
+    Awaitable[dict[str, Any]],
+]
 GenerationStart = Callable[[str], None]
 GenerationRecover = Callable[[], int]
 GenerationFinish = Callable[[str, str, dict[str, Any] | None, str | None, str | None], None]
@@ -46,6 +55,7 @@ class JobService:
         emit: Callable[[dict[str, Any]], Awaitable[None]],
         asr_runner: AsrRunner | None = None,
         retry_validator: Callable[[Any], None] | None = None,
+        preview_source_runner: PreviewSourceRunner | None = None,
         render_runner: RenderRunner | None = None,
         planning_runner: PlanningRunner | None = None,
         timeline_patch_runner: PlanningRunner | None = None,
@@ -66,6 +76,7 @@ class JobService:
         self.emit = emit
         self.asr_runner = asr_runner
         self.retry_validator = retry_validator
+        self.preview_source_runner = preview_source_runner
         self.render_runner = render_runner
         self.planning_runner = planning_runner
         self.timeline_patch_runner = timeline_patch_runner
@@ -807,6 +818,19 @@ class JobService:
 
     async def _run_media(self, row: Any, job_id: str, cancel_event: asyncio.Event) -> None:
         payload = json_loads(row["input_json"])
+        if "cache_key" in payload:
+            # B11 全源代理：产物进 B10 派生缓存（不做 artifacts 行）
+            result = await self.preview_source_runner(
+                row, cancel_event,
+                lambda value: self._set_progress(job_id, value),
+                lambda value: self._set_stage(job_id, value),
+            )
+            with self.db.connection() as db:
+                db.execute(
+                    "UPDATE jobs SET result_json=?,updated_at=? WHERE id=?",
+                    (json_dumps(result), utc_now(), job_id),
+                )
+            return
         work = self.data_dir / "jobs" / job_id / "work"
         artifacts = self.data_dir / "jobs" / job_id / "artifacts"
         work.mkdir(parents=True, exist_ok=True)
@@ -913,6 +937,7 @@ def _job_error_message(code: str) -> str:
         "TRANSCRIPTION_CANCELLED": "转录已取消",
         "MODEL_DOWNLOAD_CANCELLED": "模型下载已取消",
         "JOB_CANCELLED": "任务已取消",
+        "PROXY_JOB_INVALID": "代理生成作业载荷不合法",
         "RENDER_PLAN_INVALID": "渲染计划不合法",
         "RENDER_INPUT_CHANGED": "渲染输入已变化",
         "RENDER_FONT_MISSING": "字幕字体资源缺失",

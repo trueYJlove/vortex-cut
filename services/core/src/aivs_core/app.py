@@ -82,6 +82,25 @@ class DerivedMediaRequest(BaseModel):
     params: dict[str, str] = Field(default_factory=dict)
 
 
+class PreviewSourceRequest(BaseModel):
+    """B11 预览源请求（profile/mode 枚举在服务层再强制）。"""
+    model_config = ConfigDict(extra="forbid")
+
+    profile_id: str | None = None
+    mode: str = "auto"
+    encoder_mode: str = "auto"
+    # 无 ready 条目时是否登记生成作业（默认 False：纯查询）
+    generate: bool = False
+
+
+class PreviewSourceMediaRequest(BaseModel):
+    """B11 代理票据请求（Main → Core admin；Renderer 永不直调）。"""
+    model_config = ConfigDict(extra="forbid")
+
+    asset_id: str
+    profile_id: str
+
+
 class ProjectCreateRequest(BaseModel):
     name: str
     root_dir_name: str | None = None
@@ -556,6 +575,21 @@ class CoreState:
         self.derived_media = DerivedMediaService(
             self.db, self.derived_cache, toolchain_fingerprint=f"aivs-core-derived-v{__version__}"
         )
+        # B11：preview-source（全源代理 + 预览源选择）。FFmpeg build 同步探测
+        # 一次（失败退化为占位——缓存键随 build 换代，不可用时明确进入
+        # no-ffmpeg-build 分支，不静默跨工具链复用）。
+        from .media.preview_source import PreviewSourceService
+
+        self.preview_source = PreviewSourceService(
+            self.db,
+            self.derived_cache,
+            settings.ffmpeg,
+            self.ffprobe,
+            self.encoders,
+            ffmpeg_build=_sync_tool_build(settings.ffmpeg),
+        )
+        # jobs 在 preview_source 之前构建（render 栈顺序）；此处回填 B11 runner。
+        self.jobs.preview_source_runner = self.preview_source.run_proxy_job
 
     async def cached_probe(
         self,
@@ -663,6 +697,7 @@ class CoreState:
             self.emit,
             asr_runner=self.asr.run,
             retry_validator=self.asr.validate_retry,
+            preview_source_runner=None,  # derived_cache 段构建后回填（B11）
             render_runner=self.render_coordinator.run,
             planning_runner=self.planning.run_generation,
             timeline_patch_runner=self.timeline_patch_planning.run_generation,
@@ -722,6 +757,38 @@ class CoreState:
 
 def _error(code: str, message: str, status: int) -> HTTPException:
     return HTTPException(status, detail={"code": code, "message": message})
+
+
+def _preview_source_asset_row(state: Any, project_id: str, asset_id: str) -> dict[str, Any]:
+    """B11 端点共用：素材行 + 归属校验（跨项目/缺素材走既有域错误）。"""
+    row = state.derived_media._asset_row(asset_id)  # noqa: SLF001 同表同语义
+    if row is None or row["project_id"] != project_id:
+        raise _domain(DomainError("ASSET_NOT_FOUND", "素材不存在"))
+    project = state.projects._require_project_row(project_id)  # noqa: SLF001 归属校验
+    if project["status"] == "archived":
+        raise _error("PROJECT_ARCHIVED", "项目已归档", 409)
+    return row
+
+
+def _sync_tool_build(executable: Path) -> str:
+    """同步读取工具 build 标识（-version 首行；不可用返回空串占位）。
+
+    构造期一次性（B11 代理缓存键成分）；ffprobe_build 是 async 版本，
+    这里避免在 CoreState.__init__ 里跑事件循环。
+    """
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            [str(executable), "-hide_banner", "-version"],
+            capture_output=True, text=True, timeout=10,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, ValueError):
+        return ""
+    if result.returncode != 0 or not result.stdout:
+        return ""
+    return result.stdout.splitlines()[0]
 
 
 def _model_error(exc: ModelError, model: dict[str, Any] | None = None) -> HTTPException:
@@ -1713,6 +1780,120 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             return state.derived_media.resolve_internal(
                 project_id, request.asset_id, request.kind, request.params)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    # ---- B11：preview-source（全源代理与预览源选择） ----
+
+    @app.post("/api/v1/projects/{project_id}/assets/{asset_id}/preview-source")
+    async def get_preview_source(
+        project_id: str, asset_id: str, request: PreviewSourceRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """B11：预览源描述/选择（Renderer 可见；无路径字段）。
+
+        mode=auto：代理 ready 时返回代理描述；否则返回原源 ready（pending
+        期间调用方回退原源，不阻塞 UI）。generate=true 且 mode=proxy 时才
+        登记生成作业（禁止导入即整段转码）。
+        """
+        asset_row = _preview_source_asset_row(state, project_id, asset_id)
+        try:
+            profile = request.profile_id
+            if profile is not None:
+                state.preview_source.proxy_params(profile)  # 档位白名单
+            else:
+                # 未指定档位：按源几何自动选择（与 describe 一致）
+                profile = state.preview_source.describe(asset_row, "auto")["profile_id"]
+            proxy = state.preview_source.proxy_entry(asset_row, profile) if (
+                request.mode == "proxy" or request.mode == "auto"
+            ) else None
+            description = state.preview_source.describe(
+                asset_row, request.mode, profile_id=profile, proxy=proxy,
+            )
+            job_id: str | None = None
+            proxy_status = (proxy or {}).get("status")
+            generate_allowed = (
+                request.generate
+                and request.mode == "proxy"
+                and proxy_status not in {"ready", "building", "queued", "failed"}
+            )
+            if generate_allowed:
+                resolved_path = state.projects.resolve_asset_path(asset_id)
+                job_id = state.preview_source.create_proxy_job(
+                    project_id, asset_row, description["profile_id"],
+                    resolved_path["path"], request.encoder_mode,
+                )
+                # 回显 pending 状态（调用方立即知道作业在途）
+                description = state.preview_source.describe(
+                    asset_row, request.mode, profile_id=profile,
+                    proxy={"cache_key": state.preview_source.proxy_cache_key(
+                        asset_row["fingerprint"], description["profile_id"]),
+                        "status": "building", "size_bytes": 0},
+                )
+            if "job_id" not in description:
+                description["job_id"] = job_id
+            return description
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/assets/{asset_id}/preview-source/jobs")
+    async def create_preview_source_job(
+        project_id: str, asset_id: str, request: PreviewSourceRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """B11：显式登记代理生成作业（全源转码；作业状态经既有 jobs 查询流）。"""
+        asset_row = _preview_source_asset_row(state, project_id, asset_id)
+        try:
+            profile = request.profile_id or state.preview_source.describe(
+                asset_row, "auto")["profile_id"]
+            state.preview_source.proxy_params(profile)
+            entry = state.preview_source.proxy_entry(asset_row, profile)
+            entry_status = (entry or {}).get("status")
+            if entry_status in {"ready", "building", "failed"}:
+                return {"job_id": None, "cache_key": (entry or {}).get("cache_key"),
+                        "status": entry_status}
+            resolved_path = state.projects.resolve_asset_path(asset_id)
+            job_id = state.preview_source.create_proxy_job(
+                project_id, asset_row, profile, resolved_path["path"],
+                request.encoder_mode,
+            )
+            return {
+                "job_id": job_id,
+                "cache_key": state.preview_source.proxy_cache_key(
+                    asset_row["fingerprint"], profile),
+                "status": "queued",
+            }
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/internal/projects/{project_id}/assets/{asset_id}/preview-source/media")
+    async def resolve_preview_source_media(
+        project_id: str, asset_id: str, request: PreviewSourceMediaRequest,
+        _: CoreState = Depends(require_admin),
+    ) -> dict[str, Any]:
+        """B11：Main 内部解析代理文件（admin 通道）——绝对路径供 Main 换
+        restricted-media 票据；Renderer 永远拿不到 path。"""
+        asset_row = _preview_source_asset_row(state, project_id, asset_id)
+        try:
+            state.preview_source.proxy_params(request.profile_id)
+            key = state.preview_source.proxy_cache_key(
+                asset_row["fingerprint"], request.profile_id)
+            entry = state.derived_cache.lookup(key)
+            if entry is None:
+                raise _error("DERIVED_NOT_FOUND", "代理条目不存在或未就绪", 404)
+            state.derived_cache.add_reference(key, project_id, asset_id)
+            from .media.derived_cache import DerivedCacheError
+
+            try:
+                path = state.derived_cache.resolved_path(entry)
+            except DerivedCacheError as exc:
+                raise _domain(DomainError("DERIVED_CACHE_UNSAFE", exc.message)) from exc
+            return {
+                "cache_key": key,
+                "status": "ready",
+                "path": str(path),
+                "size_bytes": entry.size_bytes,
+            }
         except DomainError as exc:
             raise _domain(exc) from exc
 
