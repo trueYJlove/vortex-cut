@@ -145,7 +145,16 @@ def build_timeline_args(
     output_name: str,
     *,
     captions: bool,
+    input_windows: list[Any] | None = None,
 ) -> list[str]:
+    """组装 FFmpeg 参数图。
+
+    C21a：input_windows（rendering/input_window.plan_input_windows 的输出）
+    非 None 时为**深定位图**——eligible 段的输入前插 -ss（准确 seek），
+    其 visual_chain/atrim 的精裁坐标回移 seek 量（实证与旧图输出帧一致，
+    见 test_render_input_window 的对拍）；legacy 段（None 窗口或不合格）
+    保持旧参数。None = 完整旧图（测试 oracle 与回退路径）。
+    """
     segments = plan["segments"]
     if len(segments) != len(segment_paths) or len(segments) != len(segment_probes):
         raise DomainError("RENDER_PLAN_INVALID", "渲染输入数量不一致")
@@ -207,9 +216,15 @@ def build_timeline_args(
     width = int(plan["output"]["width"])
     height = int(plan["output"]["height"])
     args = ["-hide_banner", "-nostdin", "-y"]
-    for segment, path in zip(segments, segment_paths, strict=True):
+    for position, (segment, path) in enumerate(zip(segments, segment_paths, strict=True)):
+        # C21a：深定位图——eligible 输入前插 -ss（-i 前为准确 seek）；
+        # legacy 输入零改动。图像输入不定位（loop 无 seek 语义）。
         if segment["asset_kind"] == "image":
             args += ["-loop", "1", "-framerate", "30"]
+        else:
+            window = input_windows[position] if input_windows is not None and position < len(input_windows) else None
+            if window is not None and getattr(window, "eligible", False):
+                args += ["-ss", _seconds(int(window.seek_us))]
         args += ["-i", str(path)]
     next_input_index = len(segments)
     if needs_black_input:
@@ -240,11 +255,15 @@ def build_timeline_args(
         segment: dict[str, Any], input_index: int, out_label: str,
         *, window_us: tuple[int, int] | None = None,
         black_input_index: int | None = None,
+        seek_shift_us: int = 0,
     ) -> list[str]:
         """一段的"源 trim（可选取窗）→ 视觉滤镜 → 关键帧动画"链。
 
-        window_us 为时间线窗口 (head_us, tail_us)；返回子句列表（动画
-        叠加可能产生多条，含 color 源与 overlay），以分号连接后追加到图。
+        window_us 为时间线窗口 (head_us, tail_us)；seek_shift_us 为 C21a
+        深定位的坐标回移量（输入 -ss 已前移源起点——trim 的绝对源坐标
+        必须减去该量才是 -ss 后流上的相对坐标；0 = 旧图不变）。返回
+        子句列表（动画叠加可能产生多条，含 color 源与 overlay），以
+        分号连接后追加到图。
         """
         label_seq[0] += 1
         label_id = label_seq[0]  # blurred_background 中间标签唯一化
@@ -255,8 +274,10 @@ def build_timeline_args(
         duration = _seconds(duration_us)
         if segment["asset_kind"] == "video":
             head_us, tail_us = window_us if window_us is not None else (0, 0)
-            start = _seconds(int(segment["source_start_us"]) + round(head_us * speed_milli / 1000))
-            end = _seconds(int(segment["source_end_us"]) - round(tail_us * speed_milli / 1000))
+            # C21a：精裁坐标回移——源绝对坐标减 seek 偏移（-ss 后流上的
+            # 相对坐标；0 时与旧图逐字符一致）。
+            start = _seconds(max(int(segment["source_start_us"]) + round(head_us * speed_milli / 1000) - seek_shift_us, 0))
+            end = _seconds(max(int(segment["source_end_us"]) - round(tail_us * speed_milli / 1000) - seek_shift_us, 0))
             source = f"[{input_index}:v:0]trim=start={start}:end={end},setpts=PTS-STARTPTS"
             if reverse:
                 # 倒放：先反转帧序列；setpts 重置为从 0 起始的时间戳。
@@ -347,6 +368,11 @@ def build_timeline_args(
         speed_milli = int(segment.get("speed_milli", 1000))
         speed = speed_milli / 1000
         reverse = bool(segment.get("reverse_playback", False))
+        # C21a：本段输入的深定位窗口（eligible → -ss 已前移，精裁坐标回移）。
+        window = (input_windows[item["input_index"]]
+                  if input_windows is not None and item["input_index"] < len(input_windows)
+                  else None)
+        seek_shift_us = int(window.shift_us) if window is not None and getattr(window, "eligible", False) else 0
         # 转场模式下，被 xfade 旁路的段的视频链在转场分支独立构建（其 [vN] 会悬空）。
         is_transition_right = position > 0 and isinstance(
             graph_items[position - 1].get("transition_in"), dict
@@ -356,6 +382,7 @@ def build_timeline_args(
                 visual_chain(
                     segment, item["input_index"], f"v{position}",
                     black_input_index=black_input_index,
+                    seek_shift_us=seek_shift_us,
                 )
             )
         has_audio = bool(probe.get("audio_streams"))
@@ -365,8 +392,9 @@ def build_timeline_args(
             and segment["audio_enabled"]
             and not reverse
         ):
-            start = _seconds(segment["source_start_us"])
-            end = _seconds(segment["source_end_us"])
+            # C21a：音频精裁坐标与视频同一窗口回移（实证对拍：A/V 偏差不变）。
+            start = _seconds(max(int(segment["source_start_us"]) - seek_shift_us, 0))
+            end = _seconds(max(int(segment["source_end_us"]) - seek_shift_us, 0))
             gain = float(segment["gain_db"])
             tempo_chain = ""
             if speed != 1.0:
@@ -451,6 +479,7 @@ def build_timeline_args(
                         right_segment, item["input_index"], f"vh{step}",
                         window_us=(0, right_total_us - head_us - next_tail_us),
                         black_input_index=black_input_index,
+                        seek_shift_us=seek_shift_us,
                     )
                 )
                 filters.extend(
@@ -458,6 +487,7 @@ def build_timeline_args(
                         right_segment, item["input_index"], f"vr{step}",
                         window_us=(head_us, next_tail_us),
                         black_input_index=black_input_index,
+                        seek_shift_us=seek_shift_us,
                     )
                 )
                 filters.append(

@@ -412,6 +412,12 @@ class RenderCoordinator:
             )
         segment_paths = [input_paths[item["input_id"]] for item in plan["segments"]]
         segment_probes = [probe_by_input[item["input_id"]] for item in plan["segments"]]
+        # C21a：输入深定位窗口（保守放行集；不改变输出语义——见
+        # test_render_input_window 的 legacy/深定位对拍）。不合格段自动
+        # legacy（与旧参数图完全一致）。
+        from .input_window import plan_input_windows
+
+        input_windows = plan_input_windows(plan, segment_probes)
         bundle, presets, font_path = self.caption_resources.load()
         work = self.data_dir / "jobs" / job_id / "work"
         artifact_dir = self.data_dir / "jobs" / job_id / "artifacts"
@@ -502,6 +508,7 @@ class RenderCoordinator:
                         encoder,
                         str(output),
                         captions=bool(plan["captions"]["items"]),
+                        input_windows=input_windows,
                     )
                     stage("rendering")
                     await run_timeline_render(
