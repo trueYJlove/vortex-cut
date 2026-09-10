@@ -1,0 +1,28 @@
+{
+  "scenarios": [
+    "F03"
+  ],
+  "runs": "1",
+  "seeks": "3",
+  "playback-seconds": "5",
+  "smoke": true,
+  "seed": "20260908",
+  "export_base": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\performance\\b00b-smoke-f03-01\\exports",
+  "baseline_status": "smoke-only-not-G0",
+  "commit": "a087ced3004b4910fa381812e1cca08c944a41bf",
+  "code_fingerprint": "6523218cc14a62ffd4b0bca2e31fc3b0a89f6e911c2c199193af9bf50f54f45a",
+  "dirty_files": "M apps/desktop/e2e/performance-editor.spec.ts\n M tools/performance/run_editor_benchmark.mjs\n?? evidence/performance/b00b-fixtures-f03/\n?? evidence/performance/b00b-fixtures-f05/\n?? evidence/performance/b00b-smoke-f05-01/\n?? evidence/performance/b00b-smoke-f05-02/",
+  "node": "v24.19.0",
+  "fixtures_used": [
+    {
+      "file": "F03.mp4",
+      "sha256": "f0ede458a66b534e84fb0363fb598fabc339bc093f5fc4d19f9ec211cc347126",
+      "duration_s": 3600,
+      "size": "640x360",
+      "fps": 30,
+      "recipe": "testsrc2-av-cfr-v1",
+      "bytes": 935625926,
+      "coverage_note": "Media only; not historical PiP, VFR/B-frame, multilayer or audio-failure coverage."
+    }
+  ]
+}

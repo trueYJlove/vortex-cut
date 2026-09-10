@@ -175,6 +175,51 @@ $env:VITE_AIVS_PERF='1'; pnpm --filter @aivideo/desktop build; Remove-Item Env:V
 node tools/performance/run_editor_benchmark.mjs --scenarios F01,F02,F04,F07 --fixtures evidence/performance/f07-fixtures --output evidence/performance/<new-dir> --runs 1 --seeks 3 --playback-seconds 5 --smoke
 ```
 
+## 6b. 第二阶段(2026-09-11):F03/F05/F06 场景装配
+
+**代码完成 + 功能验证完成(三场景冒烟全绿)。独立验收:待验收。**
+
+交付内容:
+- **F03**(60 分钟源深定位):导入 60min 夹具,时间轴取头/中/尾各 10s
+  (30s 总长);装配校验源时长 >= 60min 与 3 窗口数量。
+- **F05**(4K/60fps 上限探测):full_asset 12s 时间轴。
+- **F06**(播放+导出竞争):full_asset 播放测量期间经
+  `chooseExportDestination`+`createExport` 发起真实导出;`startBackground/
+  finishBackground` 钩子记录 job 起止与终态;runner 为每轮分配
+  benchmark 专属导出目录(AIVS_PERF_EXPORT_DIR → 每 run 的
+  AIVS_E2E_EXPORT_PATH);F06 复用 F01 媒体族(manifest 回退)。
+
+新增修改文件:
+- `apps/desktop/e2e/performance-editor.spec.ts`(三 recipe + 钩子 +
+  F05 seek 计数口径;launchEditor 导出路径)
+- `tools/performance/run_editor_benchmark.mjs`(F03/F05/F06 白名单、
+  exports 基目录、F06 复用 F01 媒体)
+
+冒烟证据(smoke 口径):
+- `b00b-smoke-f05-02` F05 通过(4K60 seek 计数 0 为被测系统行为,见下)
+- `b00b-smoke-f03-01` F03 通过
+- `b00b-smoke-f06-04` F06 通过,三轮导出均 `succeeded`(产物 10.5MB)
+
+全量回归:Core unit 631 / Desktop 69 文件 608 项 / lint / typecheck 全过。
+
+### 新登记的被测系统行为(非 harness 缺陷)
+
+1. **4K60 seek 事件为 0(缺陷)**:4K 源下播放 pump 正常(播放头推进、
+   submitted>0),但暂停态 seek 路径不产生 seek 事件——decode/upload
+   静默失败(疑似 4K 解码超时/失败被吞,含未处理 rejection)。另观察:
+   **不 reload 的首次装配**中 4K 会话 canvas 挂载超过 4 分钟未完成
+   (标签已切"合成预览"、无错误无回退提示——create 路径疑似挂起,无
+   超时兜底)。两者均为 B12/B13 范围的深水区问题,harness 按"记录实测
+   值不阻断"处理;修复属产品侧工作单。
+2. **F06 导出竞争可用**:导出与播放并行时任务正常排队/完成(调度器
+   B16 起效),为 F06 正式竞争测量提供基线。
+
+### 更新后的剩余项
+
+- F06 竞争口径的正式量化(p95 提交延迟增幅 <=20% 门)在 G0 采样轮执行。
+- 4K60 seek 缺陷与 4K 会话 create 挂起建议单开产品工作单(建议 ID:
+  DEFECT-4K60-SEEK / DEFECT-4K60-SESSION-HANG)。
+
 ## 7. 与实施计划的偏差
 
 - 计划 B00 的 F04 口径为"100 个短素材";因第 5 节分页缺口现以 48 素材

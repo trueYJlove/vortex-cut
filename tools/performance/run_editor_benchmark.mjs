@@ -15,10 +15,10 @@ function fail(message) { console.error(message); process.exit(2); }
 if (!values.fixtures || !values.output) fail("--fixtures and --output are required");
 // Scene recipes are declared by the spec (per-scenario test); the runner refuses
 // labels it does not know instead of measuring something else under an Fxx name.
-const KNOWN_SCENES = ["F01", "F02", "F04", "F07"];
+const KNOWN_SCENES = ["F01", "F02", "F03", "F04", "F05", "F06", "F07"];
 const scenes = values.scenarios.split(",").map(scene => scene.trim()).filter(Boolean);
 if (!scenes.length || scenes.some(scene => !KNOWN_SCENES.includes(scene))) {
-  fail(`Implemented complete-App scenes: ${KNOWN_SCENES.join(", ")}. F03/F05/F06 scene assembly is pending; do not substitute another scene.`);
+  fail(`Implemented complete-App scenes: ${KNOWN_SCENES.join(", ")}. Do not substitute another scene.`);
 }
 for (const key of ["runs", "seeks", "playback-seconds"]) {
   const value = Number(values[key]); if (!Number.isSafeInteger(value) || value < 1 || value > 3600) fail(`invalid --${key}`);
@@ -36,7 +36,10 @@ if (manifestVersion < 2 && scenes.some(scene => scene !== "F01")) {
   fail("Multi-scene runs require a schema_version 2 fixture manifest (regenerate with make_fixtures.py)");
 }
 for (const scene of scenes) {
-  if (!manifest.fixtures[scene]) fail(`Fixture manifest missing ${scene} media`);
+  // F06 reuses the F01 media family (12s CFR source) as its playback workload.
+  if (!manifest.fixtures[scene] && !(scene === "F06" && manifest.fixtures.F01)) {
+    fail(`Fixture manifest missing ${scene} media`);
+  }
 }
 if (!existsSync(resolve(root, "apps/desktop/out/main/index.cjs"))) fail("Build missing. Build explicitly with VITE_AIVS_PERF=1 first.");
 mkdirSync(output, { recursive: true });
@@ -52,9 +55,16 @@ for (const file of git(["ls-files", "--cached", "--others", "--exclude-standard"
   hash.update(existsSync(resolve(root, file)) ? readFileSync(resolve(root, file)) : "<deleted>");
 }
 const codeFingerprint = hash.digest("hex");
+// F06 launches a real final export per run; the runner only allocates a base
+// directory (launchEditor maps it to AIVS_E2E_EXPORT_PATH per run). It is
+// benchmark-owned scratch, never user data, and never overwritten evidence.
+const exportBase = resolve(output, "exports");
+mkdirSync(exportBase, { recursive: true });
 writeFileSync(resolve(output, "run-config.json"), JSON.stringify({ ...values, scenarios: scenes, fixtures: undefined, output: undefined,
+  export_base: exportBase,
   baseline_status: values.smoke ? "smoke-only-not-G0" : "partial-B00-not-G0", commit: git(["rev-parse", "HEAD"]),
-  code_fingerprint: codeFingerprint, dirty_files: git(["status", "--short"]), node: process.version, fixtures_used: scenes.map(scene => manifest.fixtures[scene]) }, null, 2));
+  code_fingerprint: codeFingerprint, dirty_files: git(["status", "--short"]), node: process.version,
+  fixtures_used: scenes.map(scene => manifest.fixtures[scene] ?? manifest.fixtures.F01) }, null, 2));
 const cli = resolve(root, "apps/desktop/node_modules/@playwright/test/cli.js");
 const result = spawnSync(process.execPath, [cli, "test", "--config=tests/playwright.config.ts", "performance-editor.spec.ts", "--workers=1", `-g`, scenes.map(scene => `B00 complete editor ${scene}`).join("|")], {
   cwd: resolve(root, "apps/desktop"), stdio: "inherit", env: { ...process.env,
@@ -62,6 +72,7 @@ const result = spawnSync(process.execPath, [cli, "test", "--config=tests/playwri
     AIVS_PERF_RUNS: values.runs, AIVS_PERF_SEEKS: values.seeks,
     AIVS_PERF_PLAY_SECONDS: values["playback-seconds"], AIVS_PERF_SMOKE: String(values.smoke),
     AIVS_PERF_SEED: String(values.seed), AIVS_PERF_SCENES: scenes.join(","),
+    AIVS_PERF_EXPORT_DIR: exportBase,
   }, timeout: (scenes.length * (2 * Number(values.runs) + 1) * (Number(values["playback-seconds"]) + Number(values.seeks) * 10 + 150) + 300) * 1000,
 });
 if (result.error) console.error(result.error.message);
