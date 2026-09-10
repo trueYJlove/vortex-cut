@@ -10,6 +10,11 @@ from ..media.windows_job import WindowsKillJob
 from ..performance import measured
 from ..projects import DomainError
 
+# C23：单段倒放的 FFmpeg reverse 滤镜内存预算（字节）。实测 60s 1080p
+# 段 RSS ≈ 4.9GiB（未压缩帧驻留）；预算取 2GiB——1080p 下约 22s 段长，
+# 540p 预览下约 89s。超出即显式失败（RENDER_REVERSE_TOO_LONG）。
+REVERSE_MEMORY_BUDGET_BYTES = 2 * (1 << 30)
+
 
 def _transition_tail_us(segment: dict[str, Any]) -> int:
     """该段尾部被转场借用的时间（锚定于该段的转场）。"""
@@ -214,6 +219,25 @@ def build_timeline_args(
     black_input_index = len(segments) if needs_black_input else -1
     width = int(plan["output"]["width"])
     height = int(plan["output"]["height"])
+    # C23 结项护栏：reverse 滤镜在单段全部解码帧驻留内存（实测 60s 1080p
+    # ≈ 4.9GiB——FFmpeg 滤镜缓存未压缩帧）。超出预算的倒放段显式失败
+    # （RENDER_REVERSE_TOO_LONG），不伪装成可完成的长任务；分块倒放
+    # （C23 实验项）未实施,见 docs/PERFORMANCE_G3_CLOSEOUT_2026-09-10.md。
+    for segment in segments:
+        if (
+            segment["asset_kind"] == "video"
+            and segment.get("reverse_playback")
+            and not segment.get("track_hidden", False)
+        ):
+            source_us = max(int(segment["source_end_us"]) - int(segment["source_start_us"]), 0)
+            frames = source_us / 1_000_000 * 30  # 合成时间域固定 30fps（导出规格）
+            est_bytes = frames * width * height * 1.5  # yuv420p 未压缩帧
+            if est_bytes > REVERSE_MEMORY_BUDGET_BYTES:
+                raise DomainError(
+                    "RENDER_REVERSE_TOO_LONG",
+                    f"段 {segment['clip_id']}: 倒放段超出内存预算"
+                    f"（{est_bytes / (1 << 30):.1f}GiB > 预算），请缩短片段或拆分倒放",
+                )
     args = ["-hide_banner", "-nostdin", "-y"]
     for position, (segment, path) in enumerate(zip(segments, segment_paths, strict=True)):
         # C21a：深定位图——eligible 输入前插 -ss（-i 前为准确 seek）；

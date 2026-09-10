@@ -784,3 +784,84 @@ def test_builder_composes_chroma_keying_for_track_v2(tmp_path: Path) -> None:
                               "libopenh264", "out.mp4", captions=False)
     graph3 = args3[args3.index("-filter_complex") + 1]
     assert "colorkey=" not in graph3
+
+
+def test_builder_rejects_reverse_segment_beyond_memory_budget() -> None:
+    """C23 结项护栏：reverse 滤镜未压缩帧驻留（实测 60s 1080p ≈ 4.9GiB）。
+
+    超预算倒放段显式失败（RENDER_REVERSE_TOO_LONG），不伪装成可完成的
+    长任务；预算内（如 3s 540p）照常构建。
+    """
+    from aivs_core.projects import DomainError
+
+    plan = _plan()
+    plan["output"] = {"width": 1920, "height": 1080}
+    plan["segments"] = [
+        {
+            "clip_id": "rev-long",
+            "input_id": "I0",
+            "asset_kind": "video",
+            "source_start_us": 0,
+            "source_end_us": 60_000_000,  # 60s @30fps = 1800 帧 ≈ 5.3GiB
+            "timeline_start_us": 0,
+            "timeline_end_us": 60_000_000,
+            "layout": "fit",
+            "audio_enabled": False,
+            "gain_db": 0.0,
+            "reverse_playback": True,
+        },
+    ]
+    with pytest.raises(DomainError) as exc_info:
+        build_timeline_args(
+            plan, [Path("a.mp4")], [{"audio_streams": [{}]}],
+            "libopenh264", "out.mp4", captions=False)
+    assert exc_info.value.code == "RENDER_REVERSE_TOO_LONG"
+
+    # 预算内（3s）：照常构建（既有行为不变）。
+    plan["segments"][0]["clip_id"] = "rev-short"
+    plan["segments"][0]["source_end_us"] = 3_000_000
+    plan["segments"][0]["timeline_end_us"] = 3_000_000
+    args = build_timeline_args(
+        plan, [Path("a.mp4")], [{"audio_streams": [{}]}],
+        "libopenh264", "out.mp4", captions=False)
+    graph = args[args.index("-filter_complex") + 1]
+    assert "reverse" in graph
+
+
+def test_builder_reverse_budget_ignores_hidden_track_and_forward_segments() -> None:
+    """预算护栏只作用于可见视频倒放段；隐藏轨/正向段不受影响。"""
+    plan = _plan()
+    plan["output"] = {"width": 1920, "height": 1080}
+    plan["segments"] = [
+        {
+            "clip_id": "hidden-rev",
+            "input_id": "I0",
+            "asset_kind": "video",
+            "source_start_us": 0,
+            "source_end_us": 600_000_000,
+            "timeline_start_us": 0,
+            "timeline_end_us": 10_000_000,
+            "layout": "fit",
+            "audio_enabled": False,
+            "gain_db": 0.0,
+            "reverse_playback": True,
+            "track_hidden": True,
+        },
+        {
+            "clip_id": "forward-long",
+            "input_id": "I1",
+            "asset_kind": "video",
+            "source_start_us": 0,
+            "source_end_us": 600_000_000,
+            "timeline_start_us": 10_000_000,
+            "timeline_end_us": 610_000_000,
+            "layout": "fit",
+            "audio_enabled": False,
+            "gain_db": 0.0,
+        },
+    ]
+    args = build_timeline_args(
+        plan, [Path("a.mp4"), Path("b.mp4")],
+        [{"audio_streams": [{}]}, {"audio_streams": [{}]}],
+        "libopenh264", "out.mp4", captions=False)
+    assert "-filter_complex" in args

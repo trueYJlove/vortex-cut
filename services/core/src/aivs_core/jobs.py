@@ -1053,6 +1053,7 @@ def _job_error_message(code: str) -> str:
         "RENDER_FAILED": "渲染失败",
         "RENDER_VALIDATION_FAILED": "渲染产物校验失败",
         "RENDER_VALIDATION_TIMEOUT": "渲染产物校验超时（解码无推进或超出绝对上限）",
+        "RENDER_REVERSE_TOO_LONG": "倒放段超出内存预算，请缩短片段或拆分倒放",
         "EXPORT_DESTINATION_INVALID": "导出目标无效",
         "EXPORT_DESTINATION_EXISTS": "导出目标已存在",
         "EXPORT_DESTINATION_EXPIRED": "导出授权已过期",
