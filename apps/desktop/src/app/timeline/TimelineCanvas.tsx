@@ -76,6 +76,7 @@ import {
 import { TimelinePlayheadLayer } from "./TimelinePlayheadLayer.js";
 import { createPlayheadStore, type PlayheadStore } from "./playhead-store.js";
 import { ThumbnailLoader } from "./thumbnail-loader.js";
+import { OVERSCAN_ROWS, filterVisibleRects } from "./viewport-index.js";
 import type { WaveformCache } from "./waveform-cache.js";
 
 /** B2 转场种类（与 core TRANSITION_KINDS 对齐）。 */
@@ -626,14 +627,24 @@ function drawTimeline(
   waveformRatio?: number,
   /** 面板可视高度（画布可能高于面板——纵向滚动时滚动条仍钉在可视区底部）。 */
   viewportHeight?: number,
+  /** B17：画布顶的内容 y（viewport 化画布在内容空间中覆盖
+   *  [contentTopY, contentTopY + height)——内容坐标绘制照常，ctx 统一
+   *  平移 -contentTopY；底部滚动条带除外（画布底部固定）。 */
+  contentTopY?: number,
+  /** B17：当前纵向滚动位置（滚动条带定位用）。 */
+  contentScrollTop?: number,
 ) {
   const dpr = window.devicePixelRatio || 1;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, width, height);
+  const topY = contentTopY ?? 0;
+  const scrollTopRaw = contentScrollTop ?? 0;
+  // 内容坐标统一平移：内容 y → 画布 y = 内容 y - topY（矩阵一步到位，
+  // 不用 ctx.translate——测试桩只实现常用 API 面）。
+  ctx.setTransform(dpr, 0, 0, dpr, 0, -topY * dpr);
+  ctx.clearRect(0, topY, width, height);
 
-  // Background（没有轨道的地方）
+  // Background（没有轨道的地方；内容空间全画布）
   ctx.fillStyle = "#181c1f";
-  ctx.fillRect(0, 0, width, height);
+  ctx.fillRect(0, topY, width, height);
 
   // 素材终点（多条片段取最靠后的结束点）：标尺/行背景/网格一律到此为止，
   // 终点之外是死区——时间线不会超过素材长度。空时间线不设终点（整宽标尺）。
@@ -688,11 +699,27 @@ function drawTimeline(
       ctx.strokeStyle = "rgba(255, 255, 255, 0.18)";
       ctx.lineWidth = 1;
       ctx.beginPath();
+      // B17：画布 viewport 化——引导线画到画布覆盖的内容底（topY+height），
+      // 不再用旧的全内容 height（viewport 化后那是视口+overscan 高）。
       ctx.moveTo(hx, view.rulerHeight);
-      ctx.lineTo(hx, height);
+      ctx.lineTo(hx, topY + height);
       ctx.stroke();
     }
   }
+
+  // B17：可见区裁剪窗口（文档坐标）——画布只覆盖视口+overscan，clip/
+  // caption 循环先过滤，draw 访问量随可见元素而非文档总量增长。命中/
+  // 框选仍走全量 clipRects（不因不画丢文档元素——drawClipRects 变量名
+  // 只指绘制输入，交互几何一律用未裁剪的 clipRects）。
+  const viewport = height > 0
+    ? { left: 0, right: width, top: topY, bottom: topY + height }
+    : null;
+  const drawClipRects = viewport
+    ? filterVisibleRects(clipRects, viewport, OVERSCAN_ROWS * view.trackHeight)
+    : [];
+  const drawCaptionRects = viewport
+    ? filterVisibleRects(captionRects, viewport, OVERSCAN_ROWS * view.trackHeight)
+    : [];
 
   const selectedIds =
     selection?.kind === "clip"
@@ -739,6 +766,8 @@ function drawTimeline(
     }
     if (isMovingClip && interaction?.kind === "move") {
       const ghost = ghostPosition(
+        // ghostPosition 需要同轨邻居算无重叠钳制——拖动中一律喂全量
+        //（被拖片段可能被拖出可见区，邻居裁掉会导致 ghost 错位）。
         clipRects.map((item) => item.clip),
         sourceRect.clip,
         interaction.targetStartUs,
@@ -1054,7 +1083,7 @@ function drawTimeline(
     }
     ctx.globalAlpha = 1;
   };
-  for (const sourceRect of clipRects) {
+  for (const sourceRect of drawClipRects) {
     if (movingId !== null && sourceRect.clip.clip_id === movingId) continue;
     drawClipRect(sourceRect);
   }
@@ -1129,7 +1158,9 @@ function drawTimeline(
   // Captions (enhanced transcript style)
   // 播放头驻留高亮（A06 语义调整）：主画布不再跟随播放头逐帧重绘，驻留态
   // 改由命中测试选中/悬停通道驱动——选中字幕仍保留其较强的激活外观。
-  for (const rect of captionRects) {
+  // B17：只画可见区字幕（选中字幕即使不可见也保留在过滤结果外——canvas
+  // 交互反馈由选中描边表达，不因裁剪丢语义）。
+  for (const rect of drawCaptionRects) {
     const isSelected = selection?.kind === "caption" && selection.id === rect.caption.caption_id;
     const isActive = isSelected;
     const isEdited = rect.caption.edited;
@@ -1443,7 +1474,11 @@ function drawTimeline(
 
   // Bottom scrollbar strip (Round 4)：绘制在可视区底部（而非画布内容底部），
   // 内容高于面板时滚动条始终可见、可拖。
-  const viewportBottom = Math.min(height, viewportHeight ?? height);
+  // B17：画布 viewport 化后画布顶 = scrollTop - overscan——可视区底部在
+  // 画布坐标 = scrollTop + 面板高 - topY。滚动条是画布固定 UI（不随内容
+  // 平移）：先复位变换再画。
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const viewportBottom = Math.min(height, scrollTopRaw + (viewportHeight ?? height) - topY);
   drawScrollbar(ctx, width, viewportBottom, view, totalUs);
 }
 
@@ -1571,6 +1606,17 @@ export function TimelinePanel({
   // B2：点击两片段边界时记录转场锚点（左侧片段 id），弹出添加浮层。
   const [addTransitionAnchor, setAddTransitionAnchor] = useState<string | null>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 800, height: 200 });
+  // B17：纵向滚动位置（.timeline-scroll 的 scrollTop——画布 viewport 化后
+  // 绘制与命中的 y 坐标基准）。同步 ref 供指针路径读即时值（拖拽自动滚动
+  // 期间 DOM scrollTop 先变、React 状态后到——ref 为准避免一帧错位）。
+  const [scrollTop, setScrollTop] = useState(0);
+  const scrollTopRef = useRef(0);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const onTimelineScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
+    const value = event.currentTarget.scrollTop;
+    scrollTopRef.current = value;
+    setScrollTop(value);
+  }, []);
   // Active pointer interaction (Phase 4): null when idle.
   const [interaction, setInteraction] = useState<TimelineInteraction | null>(null);
   // 拖拽松手后的"提交态"：补丁在途期间片段继续渲染在目标位置（剪映式无回弹），
@@ -1697,14 +1743,17 @@ export function TimelinePanel({
     [clips, trackRows, view.pixelsPerSecond, view.headerWidth, view.rulerHeight],
   );
 
-  // Resize observer
+  // Resize observer（B17：宽度取画布容器（flex 剩余宽），高度取滚动容器
+  // 可视高（视口高——容器自身已是全内容高度，不再作高度来源））。
   useEffect(() => {
     const container = containerRef.current;
+    const scroll = scrollRef.current;
     if (!container) return;
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        const { width, height } = entry.contentRect;
-        setCanvasSize({ width: Math.floor(width), height: Math.floor(height) });
+        const width = Math.floor(entry.contentRect.width);
+        const height = Math.floor(scroll?.clientHeight ?? entry.contentRect.height);
+        setCanvasSize({ width, height });
       }
     });
     observer.observe(container);
@@ -1832,13 +1881,21 @@ export function TimelinePanel({
   }, [clipRects, view.scrollX, view.pixelsPerSecond, view.headerWidth, canvasSize.width, waveformCache]);
 
   // Canvas rendering
+  // B17：画布 viewport 化——DOM 滚动空间保持全内容尺寸（.timeline-left 与
+  // 容器高度=contentHeight），Canvas backing 仅覆盖 viewport+overscan
+  // （纵向 2 轨），不分配等于所有轨道高度的大位图。画布在容器内绝对定位
+  // （top 跟随 scrollTop），绘制时 ctx 平移 -canvasTopY 使内容坐标照常。
+  const OVERSCAN_Y_PX = 160; // 2 轨 × ~80px
+  const canvasTopY = Math.max(0, scrollTop - OVERSCAN_Y_PX);
+  const canvasViewportHeight = Math.min(
+    contentHeight - canvasTopY,
+    canvasSize.height + 2 * OVERSCAN_Y_PX,
+  );
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const dpr = window.devicePixelRatio || 1;
-    // 画布始终按内容实际高度伸展（不随面板拖拽压缩轨道）；
-    // 面板高度不足时由 .timeline-scroll 的 overflow-y 滚动查看。
-    const canvasHeight = contentHeight;
+    const canvasHeight = Math.max(1, Math.round(canvasViewportHeight));
     // 尺寸赋值前先比较 backing 大小（A06）：赋相同值会整幅清空画布状态并
     // 触发完整重置——播放头悬停等无关更新不再无谓清屏。
     const targetWidth = Math.max(1, Math.round(canvasSize.width * dpr));
@@ -1847,6 +1904,8 @@ export function TimelinePanel({
     if (canvas.height !== targetHeight) canvas.height = targetHeight;
     if (canvas.style.width !== `${canvasSize.width}px`) canvas.style.width = `${canvasSize.width}px`;
     if (canvas.style.height !== `${canvasHeight}px`) canvas.style.height = `${canvasHeight}px`;
+    if (canvas.style.position !== "absolute") canvas.style.position = "absolute";
+    if (canvas.style.left !== "0px") canvas.style.left = "0px";
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     editorPerf.record("timeline_draw");
@@ -1873,11 +1932,14 @@ export function TimelinePanel({
       waveformCache ?? null,
       prefs.waveformRatio,
       canvasSize.height,
+      // B17：内容 y → 画布 y 平移（画布顶=canvasTopY 内容坐标）
+      canvasTopY,
+      scrollTop,
     );
     // playheadUs 刻意不在依赖里：播放头绘制已拆到独立覆盖层，caption
     // 高亮按交互语义改由 selection/hover 驱动；播放期间主画布零重绘。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canvasSize, view, trackRows, contentHeight, clipRects, captionRects, captions, ticks, selection, interaction, hover, totalUs, thumbnailVersion, waveformVersion, rulerHoverUs, clipNames, frameRate, pendingKeep]);
+  }, [canvasSize, view, trackRows, contentHeight, clipRects, captionRects, captions, ticks, selection, interaction, hover, totalUs, thumbnailVersion, waveformVersion, rulerHoverUs, clipNames, frameRate, pendingKeep, scrollTop, canvasTopY, canvasViewportHeight]);
 
   // 固定标尺条带：绘制到覆盖层 Canvas（随纵向滚动钉在可视区顶部）。
   const rulerCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1928,7 +1990,7 @@ export function TimelinePanel({
   const handleRulerPinDoubleClick = () => fitToContent();
 
   // 滚轮策略：Ctrl+滚轮 = 以光标为锚缩放；Shift/触摸板横向 = 横向平移；
-  // 普通滚轮 = 滚动时间线区域（内容纵向溢出时交给原生滚动，否则横向平移）。
+  // 普通滚轮 = 原生纵向滚动（.timeline-scroll，画布 viewport 随动）。
   const handleWheel = useCallback(
     (event: React.WheelEvent) => {
       if (event.deltaY === 0 && event.deltaX === 0) return;
@@ -1951,7 +2013,10 @@ export function TimelinePanel({
         });
         return;
       }
-      // 普通滚轮：只做时间线区域的纵向滚动（横向一律用底部滚动条拖拽）。
+      // 普通滚轮：交给 .timeline-scroll 原生纵向滚动（画布 viewport 化后
+      // 滚动即视口推进——画布重定位/重绘由 onScroll 链路驱动）；内容不
+      // 溢出时原生滚动无事发生，用户无感知。横向平移一律用 Shift/触摸板
+      // 或底部滚动条拖拽。
     },
     [canvasSize.width, totalUs],
   );
@@ -1990,7 +2055,10 @@ export function TimelinePanel({
     const canvas = canvasRef.current;
     if (!canvas) return null;
     const rect = canvas.getBoundingClientRect();
-    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    // B17：指针 y 以画布内容空间顶（canvasTopY，闭包捕获——与 render 写入
+    // style.top 的值同一来源，逐事件取最新渲染的闭包）回加得内容空间 y，
+    // 命中/交互几何与 viewport 化之前完全一致。
+    return { x: event.clientX - rect.left, y: event.clientY - rect.top + canvasTopY };
   };
 
   const isClipLocked = (clipId: TimelineClipId) => {
@@ -2081,8 +2149,10 @@ export function TimelinePanel({
       if (!canvas) return;
 
       // Bottom scrollbar strip → scrollbar drag (Round 4)
+      // B17：滚动条钉在可视区底部——内容空间 y 带 = scrollTop + 视口高。
       const { maxScrollX } = scrollBounds(view, totalUs, canvasSize.width);
-      if (maxScrollX > 0 && y >= canvasSize.height - SCROLLBAR_HEIGHT_PX) {
+      const scrollbarBandTop = scrollTopRef.current + canvasSize.height - SCROLLBAR_HEIGHT_PX;
+      if (maxScrollX > 0 && y >= scrollbarBandTop) {
         const next: TimelineInteraction = {
           kind: "scrollbar",
           startX: x,
@@ -3217,7 +3287,7 @@ export function TimelinePanel({
       {/* Body: 冻结标尺（滚动区外，零抖动）+ 滚动区（轨道头列/封面条带/片段区）。
           标尺画布绝对定位覆盖滚动视口顶部（见 .timeline-ruler-pin），主画布仍是第一个 canvas。 */}
       <div className="timeline-body">
-        <div className="timeline-scroll">
+        <div ref={scrollRef} className="timeline-scroll" onScroll={onTimelineScroll}>
         {/* Left gutter (DOM)：每条轨道一个属性头
             [类型标识] [锁定] [隐藏(视频/文本)] [静音(视频/音频)] [独奏(视频/音频)] */}
         <div className="timeline-left" style={{ width: view.headerWidth, height: contentHeight, position: "relative" }}>
@@ -3328,7 +3398,7 @@ export function TimelinePanel({
         <div
           ref={containerRef}
           className="timeline-canvas-container"
-          style={{ flex: 1, position: "relative", overflow: "hidden" }}
+          style={{ flex: 1, position: "relative", height: contentHeight }}
           onWheel={handleWheel}
         >
           <canvas
@@ -3352,7 +3422,19 @@ export function TimelinePanel({
               }
             }}
             onDragEnd={() => setDropIndex(null)}
-            style={{ display: "block", cursor: "default", outline: "none" }}
+            style={{
+              display: "block",
+              cursor: "default",
+              outline: "none",
+              // B17：画布 viewport 化——DOM 滚动空间保持全内容尺寸
+              //（容器高=contentHeight），Canvas backing 仅覆盖视口+overscan
+              //（纵向 2 轨），不分配等于所有轨道高度的大位图。画布随
+              // scrollTop 同步摆位（render 内联写 top，无 effect 一帧滞后），
+              // 绘制时 ctx 平移 -canvasTopY 使内容坐标照常。
+              position: "absolute",
+              left: 0,
+              top: canvasTopY,
+            }}
           />
           {/* 主轨封面入口（剪映式）：仅主轨一处，位于轨道头列与片段区之间的竖条；
               点击截取当前播放头画面设为项目封面。 */}
@@ -3528,8 +3610,10 @@ export function TimelinePanel({
           {/* Round 4: canvas context menu (flips up near the bottom edge) */}
           {contextMenu && (() => {
             const menuHeight = contextMenu.target.kind === "clip" ? 175 : contextMenu.target.kind === "empty" ? 115 : 80;
+            // B17：可视区底（内容空间）= scrollTop + 视口高——菜单上翻判定。
+            const viewportBottomY = scrollTopRef.current + canvasSize.height;
             const menuTop =
-              contextMenu.y + menuHeight > canvasSize.height
+              contextMenu.y + menuHeight > viewportBottomY
                 ? Math.max(2, contextMenu.y - menuHeight)
                 : contextMenu.y;
             return (
@@ -3540,7 +3624,7 @@ export function TimelinePanel({
               className="timeline-context-menu"
               style={{
                 left: Math.max(2, Math.min(contextMenu.x, canvasSize.width - 170)),
-                top: Math.max(2, Math.min(menuTop, Math.max(2, canvasSize.height - menuHeight))),
+                top: Math.max(2, Math.min(menuTop, Math.max(2, viewportBottomY - menuHeight))),
               }}
             >
               {(() => {
