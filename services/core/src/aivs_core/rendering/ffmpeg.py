@@ -473,12 +473,24 @@ def build_timeline_args(
                     else 0
                 )
                 right_total_us = _item_span_us(item)
+                # C21b：右段深定位窗口取右段自己的（左锚点段的 seek_shift
+                # 只对其自身 trim 生效——stale shift 会把右段坐标错移）。
+                right_window = (
+                    input_windows[item["input_index"]]
+                    if input_windows is not None and item["input_index"] < len(input_windows)
+                    else None
+                )
+                right_shift_us = (
+                    int(right_window.shift_us)
+                    if right_window is not None and getattr(right_window, "eligible", False)
+                    else 0
+                )
                 filters.extend(
                     visual_chain(
                         right_segment, item["input_index"], f"vh{step}",
                         window_us=(0, right_total_us - head_us - next_tail_us),
                         black_input_index=black_input_index,
-                        seek_shift_us=seek_shift_us,
+                        seek_shift_us=right_shift_us,
                     )
                 )
                 filters.extend(
@@ -486,7 +498,7 @@ def build_timeline_args(
                         right_segment, item["input_index"], f"vr{step}",
                         window_us=(head_us, next_tail_us),
                         black_input_index=black_input_index,
-                        seek_shift_us=seek_shift_us,
+                        seek_shift_us=right_shift_us,
                     )
                 )
                 filters.append(
@@ -530,6 +542,11 @@ def build_timeline_args(
         main_label = "MAINPIP"
         filters.append(f"[vcat]null[{main_label}]")
         for index, segment in overlay_segments:
+            pip_window = (
+                input_windows[index]
+                if input_windows is not None and index < len(input_windows)
+                else None
+            )
             filters.extend(
                 _pip_overlay_chain(
                     segment,
@@ -540,6 +557,11 @@ def build_timeline_args(
                     enable_start_us=segment["timeline_start_us"],
                     enable_end_us=segment["timeline_end_us"],
                     main_label=main_label,
+                    seek_shift_us=(
+                        int(pip_window.shift_us)
+                        if pip_window is not None and getattr(pip_window, "eligible", False)
+                        else 0
+                    ),
                 )
             )
         video_label = main_label
@@ -684,6 +706,7 @@ def _mask_invert(expr, invert):
 
 def _pip_overlay_chain(
     segment, input_index, width, height, *, probe=None, enable_start_us, enable_end_us, main_label="MAINPIP",
+    seek_shift_us: int = 0,
 ):
     """覆盖轨（画中画）片段子句：源取帧 -> 内容盒 -> transform(缩放/旋转) -> PTS 对齐
     -> overlay 时间窗叠加。
@@ -741,8 +764,9 @@ def _pip_overlay_chain(
     speed = speed_milli / 1000
     reverse = bool(segment.get("reverse_playback", False))
     if segment["asset_kind"] == "video":
-        start = _seconds(int(segment["source_start_us"]))
-        end = _seconds(int(segment["source_end_us"]))
+        # C21b：PiP 源精裁坐标同主轨语义回移（-ss 后流上的相对坐标；0 = 旧图）。
+        start = _seconds(max(int(segment["source_start_us"]) - seek_shift_us, 0))
+        end = _seconds(max(int(segment["source_end_us"]) - seek_shift_us, 0))
         source = f"[{input_index}:v:0]trim=start={start}:end={end},setpts=PTS-STARTPTS"
         if reverse:
             source += ",reverse,setpts=PTS-STARTPTS"

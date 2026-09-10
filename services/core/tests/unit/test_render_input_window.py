@@ -8,11 +8,9 @@
 """
 from __future__ import annotations
 
-import pytest
-
 from aivs_core.rendering.input_window import (
-    InputWindow,
     MIN_SEEK_US,
+    InputWindow,
     append_input_seek_args,
     plan_input_windows,
 )
@@ -61,11 +59,12 @@ class TestEligibility:
         assert windows[0].shift_us == 30 * US
         assert windows[0].reason == ""
 
-    def test_speed_not_1x_legacy(self) -> None:
+    def test_forward_speed_eligible(self) -> None:
+        """C21b：正向变速放行（trim 坐标回移语义见 seek_parity 对拍）。"""
         plan = _plan([_segment("a", speed_milli=2000)])
         windows = plan_input_windows(plan, [_probe()])
-        assert windows[0].eligible is False
-        assert "变速" in windows[0].reason
+        assert windows[0].eligible is True
+        assert windows[0].seek_us == 30 * US
 
     def test_reverse_legacy(self) -> None:
         plan = _plan([_segment("a", reverse_playback=True)])
@@ -73,14 +72,15 @@ class TestEligibility:
         assert windows[0].eligible is False
         assert "倒放" in windows[0].reason
 
-    def test_transition_in_legacy(self) -> None:
+    def test_transition_in_eligible(self) -> None:
+        """C21b：转场借用放行（xfade 双路取窗 trim 回移，见对拍）。"""
         plan = _plan([_segment("a", transition_in={"kind": "fade", "duration_us": 500_000})])
         windows = plan_input_windows(plan, [_probe()])
-        assert windows[0].eligible is False
-        assert "转场" in windows[0].reason
+        assert windows[0].eligible is True
 
     def test_keyframes_legacy(self) -> None:
-        plan = _plan([_segment("a", keyframes={"position": {"frames": [{"t_us": 0, "x": 0.1, "y": 0}]}})])
+        keyframes = {"position": {"frames": [{"t_us": 0, "x": 0.1, "y": 0}]}}
+        plan = _plan([_segment("a", keyframes=keyframes)])
         windows = plan_input_windows(plan, [_probe()])
         assert windows[0].eligible is False
         assert "关键帧" in windows[0].reason
@@ -91,11 +91,11 @@ class TestEligibility:
         assert windows[0].eligible is False
         assert "变换" in windows[0].reason
 
-    def test_pip_track_legacy(self) -> None:
+    def test_pip_track_eligible(self) -> None:
+        """C21b：覆盖轨（PiP）段放行——独立 -i 独立定位（对拍锁定）。"""
         plan = _plan([_segment("a", track_id="V2")])
         windows = plan_input_windows(plan, [_probe()])
-        assert windows[0].eligible is False
-        assert "覆盖轨" in windows[0].reason
+        assert windows[0].eligible is True
 
     def test_image_and_audio_legacy(self) -> None:
         plan = _plan([_segment("a", asset_kind="image"), _segment("b", asset_kind="audio")])
@@ -125,24 +125,32 @@ class TestEligibility:
         assert windows[0].eligible is False
         assert "时长" in windows[0].reason
 
+    def test_hidden_track_legacy(self) -> None:
+        plan = _plan([_segment("a", track_hidden=True)])
+        windows = plan_input_windows(plan, [_probe()])
+        assert windows[0].eligible is False
+        assert "隐藏" in windows[0].reason
+
     def test_mixed_plan_windows_per_segment(self) -> None:
         """混合时间线：放行/legacy 并存，各自独立判定。"""
         plan = _plan([
             _segment("plain"),                                # eligible
-            _segment("fast", speed_milli=1500),               # legacy（变速）
-            _segment("pip", track_id="V2"),                   # legacy（PiP）
+            _segment("fast", speed_milli=1500),               # eligible（C21b）
+            _segment("pip", track_id="V2"),                   # eligible（C21b）
+            _segment("kf", keyframes={"position": {"frames": [
+                {"t_us": 0, "x": 0.1, "y": 0}]}}),  # legacy
             _segment("deep2", source_start_us=20 * US),       # eligible
         ])
-        windows = plan_input_windows(plan, [_probe() for _ in range(4)])
-        assert [w.eligible for w in windows] == [True, False, False, True]
-        assert windows[3].seek_us == 20 * US
+        windows = plan_input_windows(plan, [_probe() for _ in range(5)])
+        assert [w.eligible for w in windows] == [True, True, True, False, True]
+        assert windows[4].seek_us == 20 * US
 
 
 class TestSeekArgs:
     def test_append_input_seek_args_only_eligible(self) -> None:
         windows = [
             InputWindow(input_index=0, eligible=True, reason="", seek_us=30 * US, shift_us=30 * US),
-            InputWindow(input_index=1, eligible=False, reason="变速段（C21b 扩展）"),
+            InputWindow(input_index=1, eligible=False, reason="倒放段"),
         ]
         args: list[str] = []
         append_input_seek_args(args, windows, ["a.mp4", "b.mp4"])
