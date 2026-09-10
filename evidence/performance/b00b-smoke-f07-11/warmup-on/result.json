@@ -1,0 +1,6914 @@
+{
+  "schema_version": 2,
+  "scenario": "F07/speed-matrix-overlap",
+  "run": -1,
+  "enabled": true,
+  "ready_ms": 3193,
+  "setup_recovery_count": 0,
+  "workload": {
+    "seeks": 3,
+    "seed": 20260908,
+    "build_mode": "production-diagnostics",
+    "code_fingerprint": "497469f0c5799ade7930c2a6d8b09ab7f71a9df0bf9d96659e7a49a6d4e9a057"
+  },
+  "seek_action_wall_ms_including_300ms_wait": [
+    346,
+    326,
+    361
+  ],
+  "seek": {
+    "schema_version": 1,
+    "enabled": true,
+    "capacity": 4096,
+    "overwritten": 0,
+    "counts": {
+      "decode": 7,
+      "upload": 7,
+      "seek": 6,
+      "compose": 6,
+      "submitted": 6
+    },
+    "durations": {
+      "decode": {
+        "total_ms": 101.40000001341105,
+        "max_ms": 35.600000001490116
+      },
+      "upload": {
+        "total_ms": 7.599999986588955,
+        "max_ms": 3
+      },
+      "seek": {
+        "total_ms": 99.29999999701977,
+        "max_ms": 36.399999998509884
+      },
+      "compose": {
+        "total_ms": 0,
+        "max_ms": 0
+      },
+      "submitted": {
+        "total_ms": 9.399999991059303,
+        "max_ms": 3.8000000044703484
+      }
+    },
+    "events": [
+      {
+        "kind": "decode",
+        "at": 2724.6999999955297,
+        "duration": 35.600000001490116,
+        "session": 1,
+        "request": 108,
+        "epoch": 2,
+        "frame": 270,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 2725.39999999851,
+        "duration": 0.6000000014901161,
+        "session": 1,
+        "request": 108,
+        "epoch": 2,
+        "frame": 270,
+        "input": 0
+      },
+      {
+        "kind": "seek",
+        "at": 2725.39999999851,
+        "duration": 36.399999998509884,
+        "session": 1,
+        "request": 2,
+        "epoch": 2,
+        "frame": 159,
+        "input": -1
+      },
+      {
+        "kind": "compose",
+        "at": 2725.39999999851,
+        "duration": 0,
+        "session": 1,
+        "request": 140,
+        "epoch": 2,
+        "frame": 159,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 2726.5999999940395,
+        "duration": 1.1999999955296516,
+        "session": 1,
+        "request": 140,
+        "epoch": 2,
+        "frame": 159,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 2727,
+        "duration": 0.5,
+        "session": 1,
+        "request": 109,
+        "epoch": 2,
+        "frame": 271,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 2727.5999999940395,
+        "duration": 0.5999999940395355,
+        "session": 1,
+        "request": 109,
+        "epoch": 2,
+        "frame": 271,
+        "input": 0
+      },
+      {
+        "kind": "seek",
+        "at": 2952.5,
+        "duration": 0.10000000149011612,
+        "session": 1,
+        "request": 3,
+        "epoch": 3,
+        "frame": 159,
+        "input": -1
+      },
+      {
+        "kind": "compose",
+        "at": 2952.5,
+        "duration": 0,
+        "session": 1,
+        "request": 142,
+        "epoch": 3,
+        "frame": 159,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 2953.1999999955297,
+        "duration": 0.6999999955296516,
+        "session": 1,
+        "request": 142,
+        "epoch": 3,
+        "frame": 159,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 2953.7999999970198,
+        "duration": 1.1000000014901161,
+        "session": 1,
+        "request": 110,
+        "epoch": 3,
+        "frame": 272,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 2954.7999999970198,
+        "duration": 1,
+        "session": 1,
+        "request": 110,
+        "epoch": 3,
+        "frame": 272,
+        "input": 0
+      },
+      {
+        "kind": "decode",
+        "at": 3040.89999999851,
+        "duration": 29.399999998509884,
+        "session": 1,
+        "request": 111,
+        "epoch": 4,
+        "frame": 27,
+        "input": 1
+      },
+      {
+        "kind": "upload",
+        "at": 3041.5999999940395,
+        "duration": 0.6999999955296516,
+        "session": 1,
+        "request": 111,
+        "epoch": 4,
+        "frame": 27,
+        "input": 1
+      },
+      {
+        "kind": "seek",
+        "at": 3041.5999999940395,
+        "duration": 30.19999999552965,
+        "session": 1,
+        "request": 4,
+        "epoch": 4,
+        "frame": 365,
+        "input": -1
+      },
+      {
+        "kind": "compose",
+        "at": 3041.5999999940395,
+        "duration": 0,
+        "session": 1,
+        "request": 145,
+        "epoch": 4,
+        "frame": 365,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 3042.5999999940395,
+        "duration": 1,
+        "session": 1,
+        "request": 145,
+        "epoch": 4,
+        "frame": 365,
+        "input": -1
+      },
+      {
+        "kind": "seek",
+        "at": 3276.39999999851,
+        "duration": 0.10000000149011612,
+        "session": 1,
+        "request": 5,
+        "epoch": 5,
+        "frame": 365,
+        "input": -1
+      },
+      {
+        "kind": "compose",
+        "at": 3276.39999999851,
+        "duration": 0,
+        "session": 1,
+        "request": 146,
+        "epoch": 5,
+        "frame": 365,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 3278.39999999851,
+        "duration": 2,
+        "session": 1,
+        "request": 146,
+        "epoch": 5,
+        "frame": 365,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 3278.5,
+        "duration": 1.9000000059604645,
+        "session": 1,
+        "request": 112,
+        "epoch": 5,
+        "frame": 28,
+        "input": 1
+      },
+      {
+        "kind": "upload",
+        "at": 3281.5,
+        "duration": 3,
+        "session": 1,
+        "request": 112,
+        "epoch": 5,
+        "frame": 28,
+        "input": 1
+      },
+      {
+        "kind": "decode",
+        "at": 3400.39999999851,
+        "duration": 31.700000002980232,
+        "session": 1,
+        "request": 113,
+        "epoch": 6,
+        "frame": 151,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 3401.0999999940395,
+        "duration": 0.6999999955296516,
+        "session": 1,
+        "request": 113,
+        "epoch": 6,
+        "frame": 151,
+        "input": 0
+      },
+      {
+        "kind": "seek",
+        "at": 3401.0999999940395,
+        "duration": 32.399999998509884,
+        "session": 1,
+        "request": 6,
+        "epoch": 6,
+        "frame": 53,
+        "input": -1
+      },
+      {
+        "kind": "compose",
+        "at": 3401.0999999940395,
+        "duration": 0,
+        "session": 1,
+        "request": 149,
+        "epoch": 6,
+        "frame": 53,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 3404.89999999851,
+        "duration": 3.8000000044703484,
+        "session": 1,
+        "request": 149,
+        "epoch": 6,
+        "frame": 53,
+        "input": -1
+      },
+      {
+        "kind": "seek",
+        "at": 3623.39999999851,
+        "duration": 0.10000000149011612,
+        "session": 1,
+        "request": 7,
+        "epoch": 7,
+        "frame": 53,
+        "input": -1
+      },
+      {
+        "kind": "compose",
+        "at": 3623.39999999851,
+        "duration": 0,
+        "session": 1,
+        "request": 150,
+        "epoch": 7,
+        "frame": 53,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 3624.0999999940395,
+        "duration": 0.6999999955296516,
+        "session": 1,
+        "request": 150,
+        "epoch": 7,
+        "frame": 53,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 3624.7999999970198,
+        "duration": 1.2000000029802322,
+        "session": 1,
+        "request": 114,
+        "epoch": 7,
+        "frame": 152,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 3625.7999999970198,
+        "duration": 1,
+        "session": 1,
+        "request": 114,
+        "epoch": 7,
+        "frame": 152,
+        "input": 0
+      }
+    ],
+    "timing_semantics": "submitted = worker GL commands returned, NOT GPU completion or presentation"
+  },
+  "playback": {
+    "schema_version": 1,
+    "enabled": true,
+    "capacity": 4096,
+    "overwritten": 0,
+    "counts": {
+      "decode": 145,
+      "upload": 145,
+      "compose": 155,
+      "submitted": 155
+    },
+    "durations": {
+      "decode": {
+        "total_ms": 337.80000000447035,
+        "max_ms": 14.700000002980232
+      },
+      "upload": {
+        "total_ms": 165.69999998807907,
+        "max_ms": 2
+      },
+      "compose": {
+        "total_ms": 0,
+        "max_ms": 0
+      },
+      "submitted": {
+        "total_ms": 353.40000001341105,
+        "max_ms": 6.399999998509884
+      }
+    },
+    "events": [
+      {
+        "kind": "decode",
+        "at": 3737.6999999955297,
+        "duration": 1.3999999985098839,
+        "session": 1,
+        "request": 115,
+        "epoch": 7,
+        "frame": 153,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 3739.2999999970198,
+        "duration": 1.5,
+        "session": 1,
+        "request": 115,
+        "epoch": 7,
+        "frame": 153,
+        "input": 0
+      },
+      {
+        "kind": "decode",
+        "at": 3740.5,
+        "duration": 1.2000000029802322,
+        "session": 1,
+        "request": 116,
+        "epoch": 7,
+        "frame": 154,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 3741.39999999851,
+        "duration": 0.8999999985098839,
+        "session": 1,
+        "request": 116,
+        "epoch": 7,
+        "frame": 154,
+        "input": 0
+      },
+      {
+        "kind": "decode",
+        "at": 3742.89999999851,
+        "duration": 1.3999999985098839,
+        "session": 1,
+        "request": 117,
+        "epoch": 7,
+        "frame": 155,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 3743.5999999940395,
+        "duration": 0.6999999955296516,
+        "session": 1,
+        "request": 117,
+        "epoch": 7,
+        "frame": 155,
+        "input": 0
+      },
+      {
+        "kind": "decode",
+        "at": 3744.2999999970198,
+        "duration": 0.7000000029802322,
+        "session": 1,
+        "request": 118,
+        "epoch": 7,
+        "frame": 156,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 3745.5999999940395,
+        "duration": 1.2999999970197678,
+        "session": 1,
+        "request": 118,
+        "epoch": 7,
+        "frame": 156,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 3770.5999999940395,
+        "duration": 0,
+        "session": 1,
+        "request": 156,
+        "epoch": 7,
+        "frame": 54,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 3773.6999999955297,
+        "duration": 3.100000001490116,
+        "session": 1,
+        "request": 156,
+        "epoch": 7,
+        "frame": 54,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 3773.7999999970198,
+        "duration": 3.100000001490116,
+        "session": 1,
+        "request": 119,
+        "epoch": 7,
+        "frame": 157,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 3774.89999999851,
+        "duration": 1.1000000014901161,
+        "session": 1,
+        "request": 119,
+        "epoch": 7,
+        "frame": 157,
+        "input": 0
+      },
+      {
+        "kind": "decode",
+        "at": 3776.5,
+        "duration": 1.6000000014901161,
+        "session": 1,
+        "request": 120,
+        "epoch": 7,
+        "frame": 158,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 3777.39999999851,
+        "duration": 0.8999999985098839,
+        "session": 1,
+        "request": 120,
+        "epoch": 7,
+        "frame": 158,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 3805.1999999955297,
+        "duration": 0,
+        "session": 1,
+        "request": 159,
+        "epoch": 7,
+        "frame": 55,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 3807.0999999940395,
+        "duration": 1.8999999985098839,
+        "session": 1,
+        "request": 159,
+        "epoch": 7,
+        "frame": 55,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 3807.0999999940395,
+        "duration": 1.7999999970197678,
+        "session": 1,
+        "request": 121,
+        "epoch": 7,
+        "frame": 159,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 3808.2999999970198,
+        "duration": 1.2000000029802322,
+        "session": 1,
+        "request": 121,
+        "epoch": 7,
+        "frame": 159,
+        "input": 0
+      },
+      {
+        "kind": "decode",
+        "at": 3810.0999999940395,
+        "duration": 1.7999999970197678,
+        "session": 1,
+        "request": 122,
+        "epoch": 7,
+        "frame": 160,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 3811.2999999970198,
+        "duration": 1.2000000029802322,
+        "session": 1,
+        "request": 122,
+        "epoch": 7,
+        "frame": 160,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 3839.6999999955297,
+        "duration": 0,
+        "session": 1,
+        "request": 162,
+        "epoch": 7,
+        "frame": 56,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 3841.39999999851,
+        "duration": 1.7000000029802322,
+        "session": 1,
+        "request": 162,
+        "epoch": 7,
+        "frame": 56,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 3841.5,
+        "duration": 1.8000000044703484,
+        "session": 1,
+        "request": 123,
+        "epoch": 7,
+        "frame": 161,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 3842.39999999851,
+        "duration": 0.8999999985098839,
+        "session": 1,
+        "request": 123,
+        "epoch": 7,
+        "frame": 161,
+        "input": 0
+      },
+      {
+        "kind": "decode",
+        "at": 3843.89999999851,
+        "duration": 1.5,
+        "session": 1,
+        "request": 124,
+        "epoch": 7,
+        "frame": 162,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 3844.6999999955297,
+        "duration": 0.7999999970197678,
+        "session": 1,
+        "request": 124,
+        "epoch": 7,
+        "frame": 162,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 3874.1999999955297,
+        "duration": 0,
+        "session": 1,
+        "request": 165,
+        "epoch": 7,
+        "frame": 57,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 3878.39999999851,
+        "duration": 4.200000002980232,
+        "session": 1,
+        "request": 165,
+        "epoch": 7,
+        "frame": 57,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 3878.5,
+        "duration": 4.200000002980232,
+        "session": 1,
+        "request": 125,
+        "epoch": 7,
+        "frame": 163,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 3879.5,
+        "duration": 0.9000000059604645,
+        "session": 1,
+        "request": 125,
+        "epoch": 7,
+        "frame": 163,
+        "input": 0
+      },
+      {
+        "kind": "decode",
+        "at": 3881.5999999940395,
+        "duration": 2.0999999940395355,
+        "session": 1,
+        "request": 126,
+        "epoch": 7,
+        "frame": 164,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 3882.5999999940395,
+        "duration": 1,
+        "session": 1,
+        "request": 126,
+        "epoch": 7,
+        "frame": 164,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 3908.39999999851,
+        "duration": 0,
+        "session": 1,
+        "request": 168,
+        "epoch": 7,
+        "frame": 58,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 3910.7999999970198,
+        "duration": 2.399999998509884,
+        "session": 1,
+        "request": 168,
+        "epoch": 7,
+        "frame": 58,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 3910.89999999851,
+        "duration": 2.399999998509884,
+        "session": 1,
+        "request": 127,
+        "epoch": 7,
+        "frame": 165,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 3912.0999999940395,
+        "duration": 1.1999999955296516,
+        "session": 1,
+        "request": 127,
+        "epoch": 7,
+        "frame": 165,
+        "input": 0
+      },
+      {
+        "kind": "decode",
+        "at": 3913.2999999970198,
+        "duration": 1.2000000029802322,
+        "session": 1,
+        "request": 128,
+        "epoch": 7,
+        "frame": 166,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 3914.0999999940395,
+        "duration": 0.7999999970197678,
+        "session": 1,
+        "request": 128,
+        "epoch": 7,
+        "frame": 166,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 3925.6999999955297,
+        "duration": 0,
+        "session": 1,
+        "request": 171,
+        "epoch": 7,
+        "frame": 59,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 3927.5999999940395,
+        "duration": 1.8999999985098839,
+        "session": 1,
+        "request": 171,
+        "epoch": 7,
+        "frame": 59,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 3927.6999999955297,
+        "duration": 1.8999999985098839,
+        "session": 1,
+        "request": 129,
+        "epoch": 7,
+        "frame": 167,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 3928.5,
+        "duration": 0.8000000044703484,
+        "session": 1,
+        "request": 129,
+        "epoch": 7,
+        "frame": 167,
+        "input": 0
+      },
+      {
+        "kind": "decode",
+        "at": 3929.6999999955297,
+        "duration": 1.1999999955296516,
+        "session": 1,
+        "request": 130,
+        "epoch": 7,
+        "frame": 168,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 3930.39999999851,
+        "duration": 0.7000000029802322,
+        "session": 1,
+        "request": 130,
+        "epoch": 7,
+        "frame": 168,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 3960.39999999851,
+        "duration": 0,
+        "session": 1,
+        "request": 174,
+        "epoch": 7,
+        "frame": 60,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 3961.5999999940395,
+        "duration": 1.1999999955296516,
+        "session": 1,
+        "request": 174,
+        "epoch": 7,
+        "frame": 60,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 3961.5999999940395,
+        "duration": 1.0999999940395355,
+        "session": 1,
+        "request": 131,
+        "epoch": 7,
+        "frame": 169,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 3962.39999999851,
+        "duration": 0.8000000044703484,
+        "session": 1,
+        "request": 131,
+        "epoch": 7,
+        "frame": 169,
+        "input": 0
+      },
+      {
+        "kind": "decode",
+        "at": 3963.5,
+        "duration": 1,
+        "session": 1,
+        "request": 132,
+        "epoch": 7,
+        "frame": 170,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 3964.1999999955297,
+        "duration": 0.6999999955296516,
+        "session": 1,
+        "request": 132,
+        "epoch": 7,
+        "frame": 170,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 3995.0999999940395,
+        "duration": 0,
+        "session": 1,
+        "request": 177,
+        "epoch": 7,
+        "frame": 61,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 3998,
+        "duration": 2.9000000059604645,
+        "session": 1,
+        "request": 177,
+        "epoch": 7,
+        "frame": 61,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 3998,
+        "duration": 2.8000000044703484,
+        "session": 1,
+        "request": 133,
+        "epoch": 7,
+        "frame": 171,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 3998.7999999970198,
+        "duration": 0.7999999970197678,
+        "session": 1,
+        "request": 133,
+        "epoch": 7,
+        "frame": 171,
+        "input": 0
+      },
+      {
+        "kind": "decode",
+        "at": 4000.0999999940395,
+        "duration": 1.1999999955296516,
+        "session": 1,
+        "request": 134,
+        "epoch": 7,
+        "frame": 172,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4000.6999999955297,
+        "duration": 0.6000000014901161,
+        "session": 1,
+        "request": 134,
+        "epoch": 7,
+        "frame": 172,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 4029.7999999970198,
+        "duration": 0,
+        "session": 1,
+        "request": 180,
+        "epoch": 7,
+        "frame": 62,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 4031.0999999940395,
+        "duration": 1.2999999970197678,
+        "session": 1,
+        "request": 180,
+        "epoch": 7,
+        "frame": 62,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 4031.0999999940395,
+        "duration": 1.2999999970197678,
+        "session": 1,
+        "request": 135,
+        "epoch": 7,
+        "frame": 173,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4031.89999999851,
+        "duration": 0.8000000044703484,
+        "session": 1,
+        "request": 135,
+        "epoch": 7,
+        "frame": 173,
+        "input": 0
+      },
+      {
+        "kind": "decode",
+        "at": 4032.89999999851,
+        "duration": 1,
+        "session": 1,
+        "request": 136,
+        "epoch": 7,
+        "frame": 174,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4033.6999999955297,
+        "duration": 0.7999999970197678,
+        "session": 1,
+        "request": 136,
+        "epoch": 7,
+        "frame": 174,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 4064.1999999955297,
+        "duration": 0,
+        "session": 1,
+        "request": 183,
+        "epoch": 7,
+        "frame": 63,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 4065.2999999970198,
+        "duration": 1.1000000014901161,
+        "session": 1,
+        "request": 183,
+        "epoch": 7,
+        "frame": 63,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 4065.2999999970198,
+        "duration": 0.8999999985098839,
+        "session": 1,
+        "request": 137,
+        "epoch": 7,
+        "frame": 175,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4066.1999999955297,
+        "duration": 0.8999999985098839,
+        "session": 1,
+        "request": 137,
+        "epoch": 7,
+        "frame": 175,
+        "input": 0
+      },
+      {
+        "kind": "decode",
+        "at": 4067,
+        "duration": 0.8000000044703484,
+        "session": 1,
+        "request": 138,
+        "epoch": 7,
+        "frame": 176,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4067.6999999955297,
+        "duration": 0.6000000014901161,
+        "session": 1,
+        "request": 138,
+        "epoch": 7,
+        "frame": 176,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 4098.89999999851,
+        "duration": 0,
+        "session": 1,
+        "request": 186,
+        "epoch": 7,
+        "frame": 64,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 4102,
+        "duration": 3.100000001490116,
+        "session": 1,
+        "request": 186,
+        "epoch": 7,
+        "frame": 64,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 4102.0999999940395,
+        "duration": 3.0999999940395355,
+        "session": 1,
+        "request": 139,
+        "epoch": 7,
+        "frame": 177,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4103,
+        "duration": 0.9000000059604645,
+        "session": 1,
+        "request": 139,
+        "epoch": 7,
+        "frame": 177,
+        "input": 0
+      },
+      {
+        "kind": "decode",
+        "at": 4104.39999999851,
+        "duration": 1.3999999985098839,
+        "session": 1,
+        "request": 140,
+        "epoch": 7,
+        "frame": 178,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4105.19999999553,
+        "duration": 0.7999999970197678,
+        "session": 1,
+        "request": 140,
+        "epoch": 7,
+        "frame": 178,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 4133.5999999940395,
+        "duration": 0,
+        "session": 1,
+        "request": 189,
+        "epoch": 7,
+        "frame": 65,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 4134.79999999702,
+        "duration": 1.2000000029802322,
+        "session": 1,
+        "request": 189,
+        "epoch": 7,
+        "frame": 65,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 4134.89999999851,
+        "duration": 1.2000000029802322,
+        "session": 1,
+        "request": 141,
+        "epoch": 7,
+        "frame": 179,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4135.5999999940395,
+        "duration": 0.6999999955296516,
+        "session": 1,
+        "request": 141,
+        "epoch": 7,
+        "frame": 179,
+        "input": 0
+      },
+      {
+        "kind": "decode",
+        "at": 4150.39999999851,
+        "duration": 14.700000002980232,
+        "session": 1,
+        "request": 142,
+        "epoch": 7,
+        "frame": 180,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4151.19999999553,
+        "duration": 0.7999999970197678,
+        "session": 1,
+        "request": 142,
+        "epoch": 7,
+        "frame": 180,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 4168.29999999702,
+        "duration": 0,
+        "session": 1,
+        "request": 192,
+        "epoch": 7,
+        "frame": 66,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 4169.39999999851,
+        "duration": 1.1000000014901161,
+        "session": 1,
+        "request": 192,
+        "epoch": 7,
+        "frame": 66,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 4169.5,
+        "duration": 1.1000000014901161,
+        "session": 1,
+        "request": 143,
+        "epoch": 7,
+        "frame": 181,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4170.29999999702,
+        "duration": 0.7999999970197678,
+        "session": 1,
+        "request": 143,
+        "epoch": 7,
+        "frame": 181,
+        "input": 0
+      },
+      {
+        "kind": "decode",
+        "at": 4171,
+        "duration": 0.7000000029802322,
+        "session": 1,
+        "request": 144,
+        "epoch": 7,
+        "frame": 182,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4171.69999999553,
+        "duration": 0.6999999955296516,
+        "session": 1,
+        "request": 144,
+        "epoch": 7,
+        "frame": 182,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 4203.19999999553,
+        "duration": 0,
+        "session": 1,
+        "request": 195,
+        "epoch": 7,
+        "frame": 67,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 4206.5,
+        "duration": 3.3000000044703484,
+        "session": 1,
+        "request": 195,
+        "epoch": 7,
+        "frame": 67,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 4206.5999999940395,
+        "duration": 3.1999999955296516,
+        "session": 1,
+        "request": 145,
+        "epoch": 7,
+        "frame": 183,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4207.5999999940395,
+        "duration": 0.8999999985098839,
+        "session": 1,
+        "request": 145,
+        "epoch": 7,
+        "frame": 183,
+        "input": 0
+      },
+      {
+        "kind": "decode",
+        "at": 4209.39999999851,
+        "duration": 1.7000000029802322,
+        "session": 1,
+        "request": 146,
+        "epoch": 7,
+        "frame": 184,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4210.19999999553,
+        "duration": 0.7999999970197678,
+        "session": 1,
+        "request": 146,
+        "epoch": 7,
+        "frame": 184,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 4237.39999999851,
+        "duration": 0,
+        "session": 1,
+        "request": 198,
+        "epoch": 7,
+        "frame": 68,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 4238.5,
+        "duration": 1.1000000014901161,
+        "session": 1,
+        "request": 198,
+        "epoch": 7,
+        "frame": 68,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 4238.5,
+        "duration": 1.1000000014901161,
+        "session": 1,
+        "request": 147,
+        "epoch": 7,
+        "frame": 185,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4239.29999999702,
+        "duration": 0.7999999970197678,
+        "session": 1,
+        "request": 147,
+        "epoch": 7,
+        "frame": 185,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 4271.79999999702,
+        "duration": 0,
+        "session": 1,
+        "request": 200,
+        "epoch": 7,
+        "frame": 69,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 4273.0999999940395,
+        "duration": 1.2999999970197678,
+        "session": 1,
+        "request": 200,
+        "epoch": 7,
+        "frame": 69,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 4273.0999999940395,
+        "duration": 1.2999999970197678,
+        "session": 1,
+        "request": 148,
+        "epoch": 7,
+        "frame": 186,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4273.89999999851,
+        "duration": 0.8000000044703484,
+        "session": 1,
+        "request": 148,
+        "epoch": 7,
+        "frame": 186,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 4306.69999999553,
+        "duration": 0,
+        "session": 1,
+        "request": 202,
+        "epoch": 7,
+        "frame": 70,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 4309.39999999851,
+        "duration": 2.7000000029802322,
+        "session": 1,
+        "request": 202,
+        "epoch": 7,
+        "frame": 70,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 4309.5,
+        "duration": 2.7000000029802322,
+        "session": 1,
+        "request": 149,
+        "epoch": 7,
+        "frame": 187,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4310.29999999702,
+        "duration": 0.7999999970197678,
+        "session": 1,
+        "request": 149,
+        "epoch": 7,
+        "frame": 187,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 4341.69999999553,
+        "duration": 0,
+        "session": 1,
+        "request": 204,
+        "epoch": 7,
+        "frame": 71,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 4342.69999999553,
+        "duration": 1,
+        "session": 1,
+        "request": 204,
+        "epoch": 7,
+        "frame": 71,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 4342.69999999553,
+        "duration": 1,
+        "session": 1,
+        "request": 150,
+        "epoch": 7,
+        "frame": 188,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4343.5,
+        "duration": 0.8000000044703484,
+        "session": 1,
+        "request": 150,
+        "epoch": 7,
+        "frame": 188,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 4358.79999999702,
+        "duration": 0,
+        "session": 1,
+        "request": 206,
+        "epoch": 7,
+        "frame": 72,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 4359.79999999702,
+        "duration": 1.1000000014901161,
+        "session": 1,
+        "request": 206,
+        "epoch": 7,
+        "frame": 72,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 4359.89999999851,
+        "duration": 1,
+        "session": 1,
+        "request": 151,
+        "epoch": 7,
+        "frame": 189,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4360.69999999553,
+        "duration": 0.7999999970197678,
+        "session": 1,
+        "request": 151,
+        "epoch": 7,
+        "frame": 189,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 4393.19999999553,
+        "duration": 0,
+        "session": 1,
+        "request": 208,
+        "epoch": 7,
+        "frame": 73,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 4394.29999999702,
+        "duration": 1.1000000014901161,
+        "session": 1,
+        "request": 208,
+        "epoch": 7,
+        "frame": 73,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 4394.29999999702,
+        "duration": 1.1000000014901161,
+        "session": 1,
+        "request": 152,
+        "epoch": 7,
+        "frame": 190,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4395.0999999940395,
+        "duration": 0.7999999970197678,
+        "session": 1,
+        "request": 152,
+        "epoch": 7,
+        "frame": 190,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 4427.89999999851,
+        "duration": 0,
+        "session": 1,
+        "request": 210,
+        "epoch": 7,
+        "frame": 74,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 4432.39999999851,
+        "duration": 4.399999998509884,
+        "session": 1,
+        "request": 210,
+        "epoch": 7,
+        "frame": 74,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 4432.5,
+        "duration": 4.5,
+        "session": 1,
+        "request": 153,
+        "epoch": 7,
+        "frame": 191,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4433.69999999553,
+        "duration": 1.1999999955296516,
+        "session": 1,
+        "request": 153,
+        "epoch": 7,
+        "frame": 191,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 4462.5999999940395,
+        "duration": 0,
+        "session": 1,
+        "request": 212,
+        "epoch": 7,
+        "frame": 75,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 4464.5,
+        "duration": 1.9000000059604645,
+        "session": 1,
+        "request": 212,
+        "epoch": 7,
+        "frame": 75,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 4464.5,
+        "duration": 1.8000000044703484,
+        "session": 1,
+        "request": 154,
+        "epoch": 7,
+        "frame": 192,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4465.79999999702,
+        "duration": 1.2999999970197678,
+        "session": 1,
+        "request": 154,
+        "epoch": 7,
+        "frame": 192,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 4497.29999999702,
+        "duration": 0,
+        "session": 1,
+        "request": 214,
+        "epoch": 7,
+        "frame": 76,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 4499.0999999940395,
+        "duration": 1.7999999970197678,
+        "session": 1,
+        "request": 214,
+        "epoch": 7,
+        "frame": 76,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 4499.19999999553,
+        "duration": 1.8999999985098839,
+        "session": 1,
+        "request": 155,
+        "epoch": 7,
+        "frame": 193,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4501,
+        "duration": 1.8000000044703484,
+        "session": 1,
+        "request": 155,
+        "epoch": 7,
+        "frame": 193,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 4531.69999999553,
+        "duration": 0,
+        "session": 1,
+        "request": 216,
+        "epoch": 7,
+        "frame": 77,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 4535.69999999553,
+        "duration": 4,
+        "session": 1,
+        "request": 216,
+        "epoch": 7,
+        "frame": 77,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 4535.89999999851,
+        "duration": 4.200000002980232,
+        "session": 1,
+        "request": 156,
+        "epoch": 7,
+        "frame": 194,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4537,
+        "duration": 1.1000000014901161,
+        "session": 1,
+        "request": 156,
+        "epoch": 7,
+        "frame": 194,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 4566.19999999553,
+        "duration": 0,
+        "session": 1,
+        "request": 218,
+        "epoch": 7,
+        "frame": 78,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 4568.0999999940395,
+        "duration": 1.8999999985098839,
+        "session": 1,
+        "request": 218,
+        "epoch": 7,
+        "frame": 78,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 4568.19999999553,
+        "duration": 1.8999999985098839,
+        "session": 1,
+        "request": 157,
+        "epoch": 7,
+        "frame": 195,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4569.79999999702,
+        "duration": 1.6000000014901161,
+        "session": 1,
+        "request": 157,
+        "epoch": 7,
+        "frame": 195,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 4600.5999999940395,
+        "duration": 0,
+        "session": 1,
+        "request": 220,
+        "epoch": 7,
+        "frame": 79,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 4602.29999999702,
+        "duration": 1.7000000029802322,
+        "session": 1,
+        "request": 220,
+        "epoch": 7,
+        "frame": 79,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 4602.39999999851,
+        "duration": 1.7000000029802322,
+        "session": 1,
+        "request": 158,
+        "epoch": 7,
+        "frame": 196,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4603.5999999940395,
+        "duration": 1.1999999955296516,
+        "session": 1,
+        "request": 158,
+        "epoch": 7,
+        "frame": 196,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 4635.19999999553,
+        "duration": 0,
+        "session": 1,
+        "request": 222,
+        "epoch": 7,
+        "frame": 80,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 4639.5999999940395,
+        "duration": 4.399999998509884,
+        "session": 1,
+        "request": 222,
+        "epoch": 7,
+        "frame": 80,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 4639.69999999553,
+        "duration": 4.199999995529652,
+        "session": 1,
+        "request": 159,
+        "epoch": 7,
+        "frame": 197,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4641.0999999940395,
+        "duration": 1.3000000044703484,
+        "session": 1,
+        "request": 159,
+        "epoch": 7,
+        "frame": 197,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 4669.39999999851,
+        "duration": 0,
+        "session": 1,
+        "request": 224,
+        "epoch": 7,
+        "frame": 81,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 4671.19999999553,
+        "duration": 1.7999999970197678,
+        "session": 1,
+        "request": 224,
+        "epoch": 7,
+        "frame": 81,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 4671.39999999851,
+        "duration": 1.8000000044703484,
+        "session": 1,
+        "request": 160,
+        "epoch": 7,
+        "frame": 198,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4672.5,
+        "duration": 1.1000000014901161,
+        "session": 1,
+        "request": 160,
+        "epoch": 7,
+        "frame": 198,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 4703.5,
+        "duration": 0,
+        "session": 1,
+        "request": 226,
+        "epoch": 7,
+        "frame": 82,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 4706.19999999553,
+        "duration": 2.6999999955296516,
+        "session": 1,
+        "request": 226,
+        "epoch": 7,
+        "frame": 82,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 4706.29999999702,
+        "duration": 2.7000000029802322,
+        "session": 1,
+        "request": 161,
+        "epoch": 7,
+        "frame": 199,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4708.0999999940395,
+        "duration": 1.7999999970197678,
+        "session": 1,
+        "request": 161,
+        "epoch": 7,
+        "frame": 199,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 4737.69999999553,
+        "duration": 0,
+        "session": 1,
+        "request": 228,
+        "epoch": 7,
+        "frame": 83,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 4743.0999999940395,
+        "duration": 5.399999998509884,
+        "session": 1,
+        "request": 228,
+        "epoch": 7,
+        "frame": 83,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 4743.19999999553,
+        "duration": 5.399999998509884,
+        "session": 1,
+        "request": 162,
+        "epoch": 7,
+        "frame": 200,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4744.29999999702,
+        "duration": 1.1000000014901161,
+        "session": 1,
+        "request": 162,
+        "epoch": 7,
+        "frame": 200,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 4771.89999999851,
+        "duration": 0,
+        "session": 1,
+        "request": 230,
+        "epoch": 7,
+        "frame": 84,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 4774.0999999940395,
+        "duration": 2.1999999955296516,
+        "session": 1,
+        "request": 230,
+        "epoch": 7,
+        "frame": 84,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 4774.79999999702,
+        "duration": 2.7999999970197678,
+        "session": 1,
+        "request": 163,
+        "epoch": 7,
+        "frame": 201,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4776.69999999553,
+        "duration": 1.8999999985098839,
+        "session": 1,
+        "request": 163,
+        "epoch": 7,
+        "frame": 201,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 4806.39999999851,
+        "duration": 0,
+        "session": 1,
+        "request": 232,
+        "epoch": 7,
+        "frame": 85,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 4807.39999999851,
+        "duration": 1.1000000014901161,
+        "session": 1,
+        "request": 232,
+        "epoch": 7,
+        "frame": 85,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 4807.5999999940395,
+        "duration": 1.1999999955296516,
+        "session": 1,
+        "request": 164,
+        "epoch": 7,
+        "frame": 202,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4809.0999999940395,
+        "duration": 1.5,
+        "session": 1,
+        "request": 164,
+        "epoch": 7,
+        "frame": 202,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 4841,
+        "duration": 0,
+        "session": 1,
+        "request": 234,
+        "epoch": 7,
+        "frame": 86,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 4846.29999999702,
+        "duration": 5.299999997019768,
+        "session": 1,
+        "request": 234,
+        "epoch": 7,
+        "frame": 86,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 4846.29999999702,
+        "duration": 4.899999998509884,
+        "session": 1,
+        "request": 165,
+        "epoch": 7,
+        "frame": 203,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4847.5,
+        "duration": 1.2000000029802322,
+        "session": 1,
+        "request": 165,
+        "epoch": 7,
+        "frame": 203,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 4875.0999999940395,
+        "duration": 0,
+        "session": 1,
+        "request": 236,
+        "epoch": 7,
+        "frame": 87,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 4876.69999999553,
+        "duration": 1.6000000014901161,
+        "session": 1,
+        "request": 236,
+        "epoch": 7,
+        "frame": 87,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 4876.69999999553,
+        "duration": 1.5,
+        "session": 1,
+        "request": 166,
+        "epoch": 7,
+        "frame": 204,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4877.89999999851,
+        "duration": 1.2000000029802322,
+        "session": 1,
+        "request": 166,
+        "epoch": 7,
+        "frame": 204,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 4892.5,
+        "duration": 0,
+        "session": 1,
+        "request": 238,
+        "epoch": 7,
+        "frame": 88,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 4893.79999999702,
+        "duration": 1.2999999970197678,
+        "session": 1,
+        "request": 238,
+        "epoch": 7,
+        "frame": 88,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 4893.89999999851,
+        "duration": 1.3999999985098839,
+        "session": 1,
+        "request": 167,
+        "epoch": 7,
+        "frame": 205,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4895.29999999702,
+        "duration": 1.3999999985098839,
+        "session": 1,
+        "request": 167,
+        "epoch": 7,
+        "frame": 205,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 4927.19999999553,
+        "duration": 0,
+        "session": 1,
+        "request": 240,
+        "epoch": 7,
+        "frame": 89,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 4928.79999999702,
+        "duration": 1.6000000014901161,
+        "session": 1,
+        "request": 240,
+        "epoch": 7,
+        "frame": 89,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 4928.89999999851,
+        "duration": 1.7000000029802322,
+        "session": 1,
+        "request": 168,
+        "epoch": 7,
+        "frame": 206,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4930.19999999553,
+        "duration": 1.2999999970197678,
+        "session": 1,
+        "request": 168,
+        "epoch": 7,
+        "frame": 206,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 4961.89999999851,
+        "duration": 0,
+        "session": 1,
+        "request": 242,
+        "epoch": 7,
+        "frame": 90,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 4966.5999999940395,
+        "duration": 4.699999995529652,
+        "session": 1,
+        "request": 242,
+        "epoch": 7,
+        "frame": 90,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 4966.69999999553,
+        "duration": 4.699999995529652,
+        "session": 1,
+        "request": 169,
+        "epoch": 7,
+        "frame": 207,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4967.79999999702,
+        "duration": 1.1000000014901161,
+        "session": 1,
+        "request": 169,
+        "epoch": 7,
+        "frame": 207,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 4996.29999999702,
+        "duration": 0,
+        "session": 1,
+        "request": 244,
+        "epoch": 7,
+        "frame": 91,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 4998.19999999553,
+        "duration": 1.7999999970197678,
+        "session": 1,
+        "request": 244,
+        "epoch": 7,
+        "frame": 91,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 4998.5,
+        "duration": 2.100000001490116,
+        "session": 1,
+        "request": 170,
+        "epoch": 7,
+        "frame": 208,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 4999.89999999851,
+        "duration": 1.3999999985098839,
+        "session": 1,
+        "request": 170,
+        "epoch": 7,
+        "frame": 208,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 5030.5999999940395,
+        "duration": 0,
+        "session": 1,
+        "request": 246,
+        "epoch": 7,
+        "frame": 92,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 5031.89999999851,
+        "duration": 1.3000000044703484,
+        "session": 1,
+        "request": 246,
+        "epoch": 7,
+        "frame": 92,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 5032,
+        "duration": 1.4000000059604645,
+        "session": 1,
+        "request": 171,
+        "epoch": 7,
+        "frame": 209,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 5033.5,
+        "duration": 1.5,
+        "session": 1,
+        "request": 171,
+        "epoch": 7,
+        "frame": 209,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 5065.19999999553,
+        "duration": 0,
+        "session": 1,
+        "request": 248,
+        "epoch": 7,
+        "frame": 93,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 5069.69999999553,
+        "duration": 4.5,
+        "session": 1,
+        "request": 248,
+        "epoch": 7,
+        "frame": 93,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 5069.79999999702,
+        "duration": 4.600000001490116,
+        "session": 1,
+        "request": 172,
+        "epoch": 7,
+        "frame": 210,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 5070.69999999553,
+        "duration": 0.8999999985098839,
+        "session": 1,
+        "request": 172,
+        "epoch": 7,
+        "frame": 210,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 5099.5999999940395,
+        "duration": 0,
+        "session": 1,
+        "request": 250,
+        "epoch": 7,
+        "frame": 94,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 5101.0999999940395,
+        "duration": 1.5,
+        "session": 1,
+        "request": 250,
+        "epoch": 7,
+        "frame": 94,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 5101.19999999553,
+        "duration": 1.5,
+        "session": 1,
+        "request": 173,
+        "epoch": 7,
+        "frame": 211,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 5102.89999999851,
+        "duration": 1.7000000029802322,
+        "session": 1,
+        "request": 173,
+        "epoch": 7,
+        "frame": 211,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 5134.0999999940395,
+        "duration": 0,
+        "session": 1,
+        "request": 252,
+        "epoch": 7,
+        "frame": 95,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 5135.5,
+        "duration": 1.4000000059604645,
+        "session": 1,
+        "request": 252,
+        "epoch": 7,
+        "frame": 95,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 5135.89999999851,
+        "duration": 1.7000000029802322,
+        "session": 1,
+        "request": 174,
+        "epoch": 7,
+        "frame": 212,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 5137.19999999553,
+        "duration": 1.2999999970197678,
+        "session": 1,
+        "request": 174,
+        "epoch": 7,
+        "frame": 212,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 5168.79999999702,
+        "duration": 0,
+        "session": 1,
+        "request": 254,
+        "epoch": 7,
+        "frame": 96,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 5172.5,
+        "duration": 3.600000001490116,
+        "session": 1,
+        "request": 254,
+        "epoch": 7,
+        "frame": 96,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 5172.5,
+        "duration": 3.600000001490116,
+        "session": 1,
+        "request": 175,
+        "epoch": 7,
+        "frame": 213,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 5173.69999999553,
+        "duration": 1.1999999955296516,
+        "session": 1,
+        "request": 175,
+        "epoch": 7,
+        "frame": 213,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 5203.5,
+        "duration": 0,
+        "session": 1,
+        "request": 256,
+        "epoch": 7,
+        "frame": 97,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 5205.29999999702,
+        "duration": 1.7999999970197678,
+        "session": 1,
+        "request": 256,
+        "epoch": 7,
+        "frame": 97,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 5205.5,
+        "duration": 1.9000000059604645,
+        "session": 1,
+        "request": 176,
+        "epoch": 7,
+        "frame": 214,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 5206.5999999940395,
+        "duration": 1.0999999940395355,
+        "session": 1,
+        "request": 176,
+        "epoch": 7,
+        "frame": 214,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 5237.69999999553,
+        "duration": 0,
+        "session": 1,
+        "request": 258,
+        "epoch": 7,
+        "frame": 98,
+        "input": -1
+      },
+      {
+        "kind": "compose",
+        "at": 5238,
+        "duration": 0,
+        "session": 1,
+        "request": 259,
+        "epoch": 7,
+        "frame": 98,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 5239.19999999553,
+        "duration": 1.5,
+        "session": 1,
+        "request": 258,
+        "epoch": 7,
+        "frame": 98,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 5239.29999999702,
+        "duration": 1.2999999970197678,
+        "session": 1,
+        "request": 259,
+        "epoch": 7,
+        "frame": 98,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 5239.5,
+        "duration": 1.7000000029802322,
+        "session": 1,
+        "request": 177,
+        "epoch": 7,
+        "frame": 215,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 5240.79999999702,
+        "duration": 1.2999999970197678,
+        "session": 1,
+        "request": 177,
+        "epoch": 7,
+        "frame": 215,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 5272.19999999553,
+        "duration": 0,
+        "session": 1,
+        "request": 261,
+        "epoch": 7,
+        "frame": 99,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 5276.5999999940395,
+        "duration": 4.399999998509884,
+        "session": 1,
+        "request": 261,
+        "epoch": 7,
+        "frame": 99,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 5276.5999999940395,
+        "duration": 4.299999997019768,
+        "session": 1,
+        "request": 178,
+        "epoch": 7,
+        "frame": 216,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 5277.5,
+        "duration": 0.9000000059604645,
+        "session": 1,
+        "request": 178,
+        "epoch": 7,
+        "frame": 216,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 5306.79999999702,
+        "duration": 0,
+        "session": 1,
+        "request": 263,
+        "epoch": 7,
+        "frame": 100,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 5308.29999999702,
+        "duration": 1.5,
+        "session": 1,
+        "request": 263,
+        "epoch": 7,
+        "frame": 100,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 5308.5,
+        "duration": 1.6000000014901161,
+        "session": 1,
+        "request": 179,
+        "epoch": 7,
+        "frame": 217,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 5310.39999999851,
+        "duration": 1.8999999985098839,
+        "session": 1,
+        "request": 179,
+        "epoch": 7,
+        "frame": 217,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 5341.19999999553,
+        "duration": 0,
+        "session": 1,
+        "request": 265,
+        "epoch": 7,
+        "frame": 101,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 5342.79999999702,
+        "duration": 1.6000000014901161,
+        "session": 1,
+        "request": 265,
+        "epoch": 7,
+        "frame": 101,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 5342.79999999702,
+        "duration": 1.5,
+        "session": 1,
+        "request": 180,
+        "epoch": 7,
+        "frame": 218,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 5344.19999999553,
+        "duration": 1.3999999985098839,
+        "session": 1,
+        "request": 180,
+        "epoch": 7,
+        "frame": 218,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 5375.5,
+        "duration": 0,
+        "session": 1,
+        "request": 267,
+        "epoch": 7,
+        "frame": 102,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 5379.19999999553,
+        "duration": 3.6999999955296516,
+        "session": 1,
+        "request": 267,
+        "epoch": 7,
+        "frame": 102,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 5379.29999999702,
+        "duration": 3.7999999970197678,
+        "session": 1,
+        "request": 181,
+        "epoch": 7,
+        "frame": 219,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 5380.39999999851,
+        "duration": 1.1000000014901161,
+        "session": 1,
+        "request": 181,
+        "epoch": 7,
+        "frame": 219,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 5393.5,
+        "duration": 0,
+        "session": 1,
+        "request": 269,
+        "epoch": 7,
+        "frame": 103,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 5395.29999999702,
+        "duration": 1.6999999955296516,
+        "session": 1,
+        "request": 269,
+        "epoch": 7,
+        "frame": 103,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 5395.29999999702,
+        "duration": 1.7000000029802322,
+        "session": 1,
+        "request": 182,
+        "epoch": 7,
+        "frame": 220,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 5396.79999999702,
+        "duration": 1.5,
+        "session": 1,
+        "request": 182,
+        "epoch": 7,
+        "frame": 220,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 5427.19999999553,
+        "duration": 0,
+        "session": 1,
+        "request": 271,
+        "epoch": 7,
+        "frame": 104,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 5429,
+        "duration": 1.8000000044703484,
+        "session": 1,
+        "request": 271,
+        "epoch": 7,
+        "frame": 104,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 5429,
+        "duration": 1.6000000014901161,
+        "session": 1,
+        "request": 183,
+        "epoch": 7,
+        "frame": 221,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 5430.29999999702,
+        "duration": 1.2999999970197678,
+        "session": 1,
+        "request": 183,
+        "epoch": 7,
+        "frame": 221,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 5462,
+        "duration": 0,
+        "session": 1,
+        "request": 273,
+        "epoch": 7,
+        "frame": 105,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 5464,
+        "duration": 2,
+        "session": 1,
+        "request": 273,
+        "epoch": 7,
+        "frame": 105,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 5464.0999999940395,
+        "duration": 2.0999999940395355,
+        "session": 1,
+        "request": 184,
+        "epoch": 7,
+        "frame": 222,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 5465.69999999553,
+        "duration": 1.6000000014901161,
+        "session": 1,
+        "request": 184,
+        "epoch": 7,
+        "frame": 222,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 5496.5,
+        "duration": 0,
+        "session": 1,
+        "request": 275,
+        "epoch": 7,
+        "frame": 106,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 5500.5999999940395,
+        "duration": 4.0999999940395355,
+        "session": 1,
+        "request": 275,
+        "epoch": 7,
+        "frame": 106,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 5500.69999999553,
+        "duration": 4.100000001490116,
+        "session": 1,
+        "request": 185,
+        "epoch": 7,
+        "frame": 223,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 5502,
+        "duration": 1.3000000044703484,
+        "session": 1,
+        "request": 185,
+        "epoch": 7,
+        "frame": 223,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 5531.0999999940395,
+        "duration": 0,
+        "session": 1,
+        "request": 277,
+        "epoch": 7,
+        "frame": 107,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 5533,
+        "duration": 1.9000000059604645,
+        "session": 1,
+        "request": 277,
+        "epoch": 7,
+        "frame": 107,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 5533.29999999702,
+        "duration": 2,
+        "session": 1,
+        "request": 186,
+        "epoch": 7,
+        "frame": 224,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 5534.79999999702,
+        "duration": 1.5,
+        "session": 1,
+        "request": 186,
+        "epoch": 7,
+        "frame": 224,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 5565.19999999553,
+        "duration": 0,
+        "session": 1,
+        "request": 279,
+        "epoch": 7,
+        "frame": 108,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 5566.69999999553,
+        "duration": 1.5,
+        "session": 1,
+        "request": 279,
+        "epoch": 7,
+        "frame": 108,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 5566.79999999702,
+        "duration": 1.5,
+        "session": 1,
+        "request": 187,
+        "epoch": 7,
+        "frame": 225,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 5568,
+        "duration": 1.2000000029802322,
+        "session": 1,
+        "request": 187,
+        "epoch": 7,
+        "frame": 225,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 5600.0999999940395,
+        "duration": 0,
+        "session": 1,
+        "request": 281,
+        "epoch": 7,
+        "frame": 109,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 5604.0999999940395,
+        "duration": 4,
+        "session": 1,
+        "request": 281,
+        "epoch": 7,
+        "frame": 109,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 5604.0999999940395,
+        "duration": 3.899999998509884,
+        "session": 1,
+        "request": 188,
+        "epoch": 7,
+        "frame": 226,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 5605.29999999702,
+        "duration": 1.2000000029802322,
+        "session": 1,
+        "request": 188,
+        "epoch": 7,
+        "frame": 226,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 5634.5,
+        "duration": 0,
+        "session": 1,
+        "request": 283,
+        "epoch": 7,
+        "frame": 110,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 5635.5999999940395,
+        "duration": 1.0999999940395355,
+        "session": 1,
+        "request": 283,
+        "epoch": 7,
+        "frame": 110,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 5635.69999999553,
+        "duration": 1.1999999955296516,
+        "session": 1,
+        "request": 189,
+        "epoch": 7,
+        "frame": 227,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 5637.5,
+        "duration": 1.8000000044703484,
+        "session": 1,
+        "request": 189,
+        "epoch": 7,
+        "frame": 227,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 5669.39999999851,
+        "duration": 0,
+        "session": 1,
+        "request": 285,
+        "epoch": 7,
+        "frame": 111,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 5670.79999999702,
+        "duration": 1.3999999985098839,
+        "session": 1,
+        "request": 285,
+        "epoch": 7,
+        "frame": 111,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 5670.89999999851,
+        "duration": 1.2000000029802322,
+        "session": 1,
+        "request": 190,
+        "epoch": 7,
+        "frame": 228,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 5672.29999999702,
+        "duration": 1.3999999985098839,
+        "session": 1,
+        "request": 190,
+        "epoch": 7,
+        "frame": 228,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 5704.0999999940395,
+        "duration": 0,
+        "session": 1,
+        "request": 287,
+        "epoch": 7,
+        "frame": 112,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 5708.39999999851,
+        "duration": 4.300000004470348,
+        "session": 1,
+        "request": 287,
+        "epoch": 7,
+        "frame": 112,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 5708.39999999851,
+        "duration": 4.200000002980232,
+        "session": 1,
+        "request": 191,
+        "epoch": 7,
+        "frame": 229,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 5709.5999999940395,
+        "duration": 1.0999999940395355,
+        "session": 1,
+        "request": 191,
+        "epoch": 7,
+        "frame": 229,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 5738.5999999940395,
+        "duration": 0,
+        "session": 1,
+        "request": 289,
+        "epoch": 7,
+        "frame": 113,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 5739.79999999702,
+        "duration": 1.1000000014901161,
+        "session": 1,
+        "request": 289,
+        "epoch": 7,
+        "frame": 113,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 5739.89999999851,
+        "duration": 1.2000000029802322,
+        "session": 1,
+        "request": 192,
+        "epoch": 7,
+        "frame": 230,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 5741.89999999851,
+        "duration": 2,
+        "session": 1,
+        "request": 192,
+        "epoch": 7,
+        "frame": 230,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 5772.79999999702,
+        "duration": 0,
+        "session": 1,
+        "request": 291,
+        "epoch": 7,
+        "frame": 114,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 5775,
+        "duration": 2.2000000029802322,
+        "session": 1,
+        "request": 291,
+        "epoch": 7,
+        "frame": 114,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 5776.5,
+        "duration": 3.600000001490116,
+        "session": 1,
+        "request": 193,
+        "epoch": 7,
+        "frame": 231,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 5777.69999999553,
+        "duration": 1.1999999955296516,
+        "session": 1,
+        "request": 193,
+        "epoch": 7,
+        "frame": 231,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 5807.19999999553,
+        "duration": 0,
+        "session": 1,
+        "request": 293,
+        "epoch": 7,
+        "frame": 115,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 5810.69999999553,
+        "duration": 3.5,
+        "session": 1,
+        "request": 293,
+        "epoch": 7,
+        "frame": 115,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 5810.79999999702,
+        "duration": 3.5,
+        "session": 1,
+        "request": 194,
+        "epoch": 7,
+        "frame": 232,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 5811.89999999851,
+        "duration": 1.1000000014901161,
+        "session": 1,
+        "request": 194,
+        "epoch": 7,
+        "frame": 232,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 5842,
+        "duration": 0,
+        "session": 1,
+        "request": 295,
+        "epoch": 7,
+        "frame": 116,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 5842.89999999851,
+        "duration": 0.8999999985098839,
+        "session": 1,
+        "request": 295,
+        "epoch": 7,
+        "frame": 116,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 5843.0999999940395,
+        "duration": 1.0999999940395355,
+        "session": 1,
+        "request": 195,
+        "epoch": 7,
+        "frame": 233,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 5843.89999999851,
+        "duration": 0.8000000044703484,
+        "session": 1,
+        "request": 195,
+        "epoch": 7,
+        "frame": 233,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 5859.0999999940395,
+        "duration": 0,
+        "session": 1,
+        "request": 297,
+        "epoch": 7,
+        "frame": 117,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 5860.29999999702,
+        "duration": 1.2000000029802322,
+        "session": 1,
+        "request": 297,
+        "epoch": 7,
+        "frame": 117,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 5860.39999999851,
+        "duration": 1.3000000044703484,
+        "session": 1,
+        "request": 196,
+        "epoch": 7,
+        "frame": 234,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 5861.19999999553,
+        "duration": 0.7999999970197678,
+        "session": 1,
+        "request": 196,
+        "epoch": 7,
+        "frame": 234,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 5893.29999999702,
+        "duration": 0,
+        "session": 1,
+        "request": 299,
+        "epoch": 7,
+        "frame": 118,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 5894.79999999702,
+        "duration": 1.3999999985098839,
+        "session": 1,
+        "request": 299,
+        "epoch": 7,
+        "frame": 118,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 5894.79999999702,
+        "duration": 1.3999999985098839,
+        "session": 1,
+        "request": 197,
+        "epoch": 7,
+        "frame": 235,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 5895.69999999553,
+        "duration": 0.8999999985098839,
+        "session": 1,
+        "request": 197,
+        "epoch": 7,
+        "frame": 235,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 5927.39999999851,
+        "duration": 0,
+        "session": 1,
+        "request": 301,
+        "epoch": 7,
+        "frame": 119,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 5930.29999999702,
+        "duration": 2.899999998509884,
+        "session": 1,
+        "request": 301,
+        "epoch": 7,
+        "frame": 119,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 5930.39999999851,
+        "duration": 2.899999998509884,
+        "session": 1,
+        "request": 198,
+        "epoch": 7,
+        "frame": 236,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 5931.5,
+        "duration": 1.1000000014901161,
+        "session": 1,
+        "request": 198,
+        "epoch": 7,
+        "frame": 236,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 5961.5,
+        "duration": 0,
+        "session": 1,
+        "request": 303,
+        "epoch": 7,
+        "frame": 120,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 5962.5999999940395,
+        "duration": 1.0999999940395355,
+        "session": 1,
+        "request": 303,
+        "epoch": 7,
+        "frame": 120,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 5962.69999999553,
+        "duration": 1,
+        "session": 1,
+        "request": 199,
+        "epoch": 7,
+        "frame": 237,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 5963.29999999702,
+        "duration": 0.6000000014901161,
+        "session": 1,
+        "request": 199,
+        "epoch": 7,
+        "frame": 237,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 5996,
+        "duration": 0,
+        "session": 1,
+        "request": 305,
+        "epoch": 7,
+        "frame": 121,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 5997.39999999851,
+        "duration": 1.3999999985098839,
+        "session": 1,
+        "request": 305,
+        "epoch": 7,
+        "frame": 121,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 5997.39999999851,
+        "duration": 1.3000000044703484,
+        "session": 1,
+        "request": 200,
+        "epoch": 7,
+        "frame": 238,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 5998.0999999940395,
+        "duration": 0.6999999955296516,
+        "session": 1,
+        "request": 200,
+        "epoch": 7,
+        "frame": 238,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 6030.39999999851,
+        "duration": 0,
+        "session": 1,
+        "request": 307,
+        "epoch": 7,
+        "frame": 122,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 6033.29999999702,
+        "duration": 2.899999998509884,
+        "session": 1,
+        "request": 307,
+        "epoch": 7,
+        "frame": 122,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 6033.39999999851,
+        "duration": 3,
+        "session": 1,
+        "request": 201,
+        "epoch": 7,
+        "frame": 239,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 6034.39999999851,
+        "duration": 1,
+        "session": 1,
+        "request": 201,
+        "epoch": 7,
+        "frame": 239,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 6064.79999999702,
+        "duration": 0,
+        "session": 1,
+        "request": 309,
+        "epoch": 7,
+        "frame": 123,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 6065.69999999553,
+        "duration": 1,
+        "session": 1,
+        "request": 309,
+        "epoch": 7,
+        "frame": 123,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 6078.79999999702,
+        "duration": 14,
+        "session": 1,
+        "request": 202,
+        "epoch": 7,
+        "frame": 240,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 6079.5,
+        "duration": 0.7000000029802322,
+        "session": 1,
+        "request": 202,
+        "epoch": 7,
+        "frame": 240,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 6099,
+        "duration": 0,
+        "session": 1,
+        "request": 311,
+        "epoch": 7,
+        "frame": 124,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 6100.69999999553,
+        "duration": 1.6999999955296516,
+        "session": 1,
+        "request": 311,
+        "epoch": 7,
+        "frame": 124,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 6100.79999999702,
+        "duration": 1.7000000029802322,
+        "session": 1,
+        "request": 203,
+        "epoch": 7,
+        "frame": 241,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 6101.5999999940395,
+        "duration": 0.7999999970197678,
+        "session": 1,
+        "request": 203,
+        "epoch": 7,
+        "frame": 241,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 6133.89999999851,
+        "duration": 0,
+        "session": 1,
+        "request": 313,
+        "epoch": 7,
+        "frame": 125,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 6136.5999999940395,
+        "duration": 2.6999999955296516,
+        "session": 1,
+        "request": 313,
+        "epoch": 7,
+        "frame": 125,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 6136.69999999553,
+        "duration": 2.7999999970197678,
+        "session": 1,
+        "request": 204,
+        "epoch": 7,
+        "frame": 242,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 6137.5999999940395,
+        "duration": 0.8999999985098839,
+        "session": 1,
+        "request": 204,
+        "epoch": 7,
+        "frame": 242,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 6168.29999999702,
+        "duration": 0,
+        "session": 1,
+        "request": 315,
+        "epoch": 7,
+        "frame": 126,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 6169.5,
+        "duration": 1.2000000029802322,
+        "session": 1,
+        "request": 315,
+        "epoch": 7,
+        "frame": 126,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 6169.5999999940395,
+        "duration": 1.1999999955296516,
+        "session": 1,
+        "request": 205,
+        "epoch": 7,
+        "frame": 243,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 6170.39999999851,
+        "duration": 0.8000000044703484,
+        "session": 1,
+        "request": 205,
+        "epoch": 7,
+        "frame": 243,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 6203.29999999702,
+        "duration": 0,
+        "session": 1,
+        "request": 317,
+        "epoch": 7,
+        "frame": 127,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 6204.39999999851,
+        "duration": 1.1000000014901161,
+        "session": 1,
+        "request": 317,
+        "epoch": 7,
+        "frame": 127,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 6204.39999999851,
+        "duration": 1.1000000014901161,
+        "session": 1,
+        "request": 206,
+        "epoch": 7,
+        "frame": 244,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 6205.0999999940395,
+        "duration": 0.6999999955296516,
+        "session": 1,
+        "request": 206,
+        "epoch": 7,
+        "frame": 244,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 6237.5,
+        "duration": 0,
+        "session": 1,
+        "request": 319,
+        "epoch": 7,
+        "frame": 128,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 6240.29999999702,
+        "duration": 2.7999999970197678,
+        "session": 1,
+        "request": 319,
+        "epoch": 7,
+        "frame": 128,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 6240.29999999702,
+        "duration": 2.7000000029802322,
+        "session": 1,
+        "request": 207,
+        "epoch": 7,
+        "frame": 245,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 6241.29999999702,
+        "duration": 1,
+        "session": 1,
+        "request": 207,
+        "epoch": 7,
+        "frame": 245,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 6272.19999999553,
+        "duration": 0,
+        "session": 1,
+        "request": 321,
+        "epoch": 7,
+        "frame": 129,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 6273.29999999702,
+        "duration": 1.1000000014901161,
+        "session": 1,
+        "request": 321,
+        "epoch": 7,
+        "frame": 129,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 6273.39999999851,
+        "duration": 1.2000000029802322,
+        "session": 1,
+        "request": 208,
+        "epoch": 7,
+        "frame": 246,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 6274.0999999940395,
+        "duration": 0.6999999955296516,
+        "session": 1,
+        "request": 208,
+        "epoch": 7,
+        "frame": 246,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 6306.79999999702,
+        "duration": 0,
+        "session": 1,
+        "request": 323,
+        "epoch": 7,
+        "frame": 130,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 6308.19999999553,
+        "duration": 1.3999999985098839,
+        "session": 1,
+        "request": 323,
+        "epoch": 7,
+        "frame": 130,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 6308.19999999553,
+        "duration": 1.2999999970197678,
+        "session": 1,
+        "request": 209,
+        "epoch": 7,
+        "frame": 247,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 6309,
+        "duration": 0.8000000044703484,
+        "session": 1,
+        "request": 209,
+        "epoch": 7,
+        "frame": 247,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 6341.19999999553,
+        "duration": 0,
+        "session": 1,
+        "request": 325,
+        "epoch": 7,
+        "frame": 131,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 6344.5999999940395,
+        "duration": 3.399999998509884,
+        "session": 1,
+        "request": 325,
+        "epoch": 7,
+        "frame": 131,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 6344.5999999940395,
+        "duration": 3.1999999955296516,
+        "session": 1,
+        "request": 210,
+        "epoch": 7,
+        "frame": 248,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 6345.5999999940395,
+        "duration": 1,
+        "session": 1,
+        "request": 210,
+        "epoch": 7,
+        "frame": 248,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 6358.5999999940395,
+        "duration": 0,
+        "session": 1,
+        "request": 327,
+        "epoch": 7,
+        "frame": 132,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 6359.69999999553,
+        "duration": 1.1000000014901161,
+        "session": 1,
+        "request": 327,
+        "epoch": 7,
+        "frame": 132,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 6359.69999999553,
+        "duration": 1,
+        "session": 1,
+        "request": 211,
+        "epoch": 7,
+        "frame": 249,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 6360.5,
+        "duration": 0.8000000044703484,
+        "session": 1,
+        "request": 211,
+        "epoch": 7,
+        "frame": 249,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 6393.29999999702,
+        "duration": 0,
+        "session": 1,
+        "request": 329,
+        "epoch": 7,
+        "frame": 133,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 6394.5999999940395,
+        "duration": 1.2999999970197678,
+        "session": 1,
+        "request": 329,
+        "epoch": 7,
+        "frame": 133,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 6394.5999999940395,
+        "duration": 1.1999999955296516,
+        "session": 1,
+        "request": 212,
+        "epoch": 7,
+        "frame": 250,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 6395.29999999702,
+        "duration": 0.7000000029802322,
+        "session": 1,
+        "request": 212,
+        "epoch": 7,
+        "frame": 250,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 6428.0999999940395,
+        "duration": 0,
+        "session": 1,
+        "request": 331,
+        "epoch": 7,
+        "frame": 134,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 6429.5,
+        "duration": 1.4000000059604645,
+        "session": 1,
+        "request": 331,
+        "epoch": 7,
+        "frame": 134,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 6429.79999999702,
+        "duration": 1.7000000029802322,
+        "session": 1,
+        "request": 213,
+        "epoch": 7,
+        "frame": 251,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 6430.69999999553,
+        "duration": 0.8999999985098839,
+        "session": 1,
+        "request": 213,
+        "epoch": 7,
+        "frame": 251,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 6462.69999999553,
+        "duration": 0,
+        "session": 1,
+        "request": 333,
+        "epoch": 7,
+        "frame": 135,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 6467.19999999553,
+        "duration": 4.5,
+        "session": 1,
+        "request": 333,
+        "epoch": 7,
+        "frame": 135,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 6467.29999999702,
+        "duration": 4.600000001490116,
+        "session": 1,
+        "request": 214,
+        "epoch": 7,
+        "frame": 252,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 6468.79999999702,
+        "duration": 1.5,
+        "session": 1,
+        "request": 214,
+        "epoch": 7,
+        "frame": 252,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 6497.0999999940395,
+        "duration": 0,
+        "session": 1,
+        "request": 335,
+        "epoch": 7,
+        "frame": 136,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 6499.29999999702,
+        "duration": 2.2000000029802322,
+        "session": 1,
+        "request": 335,
+        "epoch": 7,
+        "frame": 136,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 6499.39999999851,
+        "duration": 2.2000000029802322,
+        "session": 1,
+        "request": 215,
+        "epoch": 7,
+        "frame": 253,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 6500.69999999553,
+        "duration": 1.2999999970197678,
+        "session": 1,
+        "request": 215,
+        "epoch": 7,
+        "frame": 253,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 6531.79999999702,
+        "duration": 0,
+        "session": 1,
+        "request": 337,
+        "epoch": 7,
+        "frame": 137,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 6533.5,
+        "duration": 1.7000000029802322,
+        "session": 1,
+        "request": 337,
+        "epoch": 7,
+        "frame": 137,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 6533.5,
+        "duration": 1.6000000014901161,
+        "session": 1,
+        "request": 216,
+        "epoch": 7,
+        "frame": 254,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 6534.79999999702,
+        "duration": 1.2999999970197678,
+        "session": 1,
+        "request": 216,
+        "epoch": 7,
+        "frame": 254,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 6567,
+        "duration": 0,
+        "session": 1,
+        "request": 339,
+        "epoch": 7,
+        "frame": 138,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 6570.5999999940395,
+        "duration": 3.5,
+        "session": 1,
+        "request": 339,
+        "epoch": 7,
+        "frame": 138,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 6570.5999999940395,
+        "duration": 3.5999999940395355,
+        "session": 1,
+        "request": 217,
+        "epoch": 7,
+        "frame": 255,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 6571.89999999851,
+        "duration": 1.3000000044703484,
+        "session": 1,
+        "request": 217,
+        "epoch": 7,
+        "frame": 255,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 6601.0999999940395,
+        "duration": 0,
+        "session": 1,
+        "request": 341,
+        "epoch": 7,
+        "frame": 139,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 6602.29999999702,
+        "duration": 1.2000000029802322,
+        "session": 1,
+        "request": 341,
+        "epoch": 7,
+        "frame": 139,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 6602.39999999851,
+        "duration": 1.3000000044703484,
+        "session": 1,
+        "request": 218,
+        "epoch": 7,
+        "frame": 256,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 6603.89999999851,
+        "duration": 1.5,
+        "session": 1,
+        "request": 218,
+        "epoch": 7,
+        "frame": 256,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 6635.89999999851,
+        "duration": 0,
+        "session": 1,
+        "request": 343,
+        "epoch": 7,
+        "frame": 140,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 6637.39999999851,
+        "duration": 1.5,
+        "session": 1,
+        "request": 343,
+        "epoch": 7,
+        "frame": 140,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 6637.69999999553,
+        "duration": 1.5,
+        "session": 1,
+        "request": 219,
+        "epoch": 7,
+        "frame": 257,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 6639.19999999553,
+        "duration": 1.5,
+        "session": 1,
+        "request": 219,
+        "epoch": 7,
+        "frame": 257,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 6670.69999999553,
+        "duration": 0,
+        "session": 1,
+        "request": 345,
+        "epoch": 7,
+        "frame": 141,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 6674.39999999851,
+        "duration": 3.7000000029802322,
+        "session": 1,
+        "request": 345,
+        "epoch": 7,
+        "frame": 141,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 6674.5999999940395,
+        "duration": 3.7999999970197678,
+        "session": 1,
+        "request": 220,
+        "epoch": 7,
+        "frame": 258,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 6675.69999999553,
+        "duration": 1.1000000014901161,
+        "session": 1,
+        "request": 220,
+        "epoch": 7,
+        "frame": 258,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 6705.5,
+        "duration": 0,
+        "session": 1,
+        "request": 347,
+        "epoch": 7,
+        "frame": 142,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 6707.0999999940395,
+        "duration": 1.5999999940395355,
+        "session": 1,
+        "request": 347,
+        "epoch": 7,
+        "frame": 142,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 6707.19999999553,
+        "duration": 1.5,
+        "session": 1,
+        "request": 221,
+        "epoch": 7,
+        "frame": 259,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 6708.5999999940395,
+        "duration": 1.3000000044703484,
+        "session": 1,
+        "request": 221,
+        "epoch": 7,
+        "frame": 259,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 6740.0999999940395,
+        "duration": 0,
+        "session": 1,
+        "request": 349,
+        "epoch": 7,
+        "frame": 143,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 6741.5999999940395,
+        "duration": 1.5,
+        "session": 1,
+        "request": 349,
+        "epoch": 7,
+        "frame": 143,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 6741.5999999940395,
+        "duration": 1.5,
+        "session": 1,
+        "request": 222,
+        "epoch": 7,
+        "frame": 260,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 6742.89999999851,
+        "duration": 1.3000000044703484,
+        "session": 1,
+        "request": 222,
+        "epoch": 7,
+        "frame": 260,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 6774.89999999851,
+        "duration": 0,
+        "session": 1,
+        "request": 351,
+        "epoch": 7,
+        "frame": 144,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 6780.89999999851,
+        "duration": 6,
+        "session": 1,
+        "request": 351,
+        "epoch": 7,
+        "frame": 144,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 6781,
+        "duration": 6,
+        "session": 1,
+        "request": 223,
+        "epoch": 7,
+        "frame": 261,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 6782.39999999851,
+        "duration": 1.3999999985098839,
+        "session": 1,
+        "request": 223,
+        "epoch": 7,
+        "frame": 261,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 6792.5999999940395,
+        "duration": 0,
+        "session": 1,
+        "request": 353,
+        "epoch": 7,
+        "frame": 145,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 6794.79999999702,
+        "duration": 2.2000000029802322,
+        "session": 1,
+        "request": 353,
+        "epoch": 7,
+        "frame": 145,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 6794.89999999851,
+        "duration": 2.2000000029802322,
+        "session": 1,
+        "request": 224,
+        "epoch": 7,
+        "frame": 262,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 6795.79999999702,
+        "duration": 0.8999999985098839,
+        "session": 1,
+        "request": 224,
+        "epoch": 7,
+        "frame": 262,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 6827.29999999702,
+        "duration": 0,
+        "session": 1,
+        "request": 355,
+        "epoch": 7,
+        "frame": 146,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 6828.39999999851,
+        "duration": 1.1000000014901161,
+        "session": 1,
+        "request": 355,
+        "epoch": 7,
+        "frame": 146,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 6828.69999999553,
+        "duration": 1.2999999970197678,
+        "session": 1,
+        "request": 225,
+        "epoch": 7,
+        "frame": 263,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 6830.19999999553,
+        "duration": 1.3999999985098839,
+        "session": 1,
+        "request": 225,
+        "epoch": 7,
+        "frame": 263,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 6861.89999999851,
+        "duration": 0,
+        "session": 1,
+        "request": 357,
+        "epoch": 7,
+        "frame": 147,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 6863.39999999851,
+        "duration": 1.5,
+        "session": 1,
+        "request": 357,
+        "epoch": 7,
+        "frame": 147,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 6863.5999999940395,
+        "duration": 1.6999999955296516,
+        "session": 1,
+        "request": 226,
+        "epoch": 7,
+        "frame": 264,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 6864.79999999702,
+        "duration": 1.2000000029802322,
+        "session": 1,
+        "request": 226,
+        "epoch": 7,
+        "frame": 264,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 6896.89999999851,
+        "duration": 0,
+        "session": 1,
+        "request": 359,
+        "epoch": 7,
+        "frame": 148,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 6900.5,
+        "duration": 3.7000000029802322,
+        "session": 1,
+        "request": 359,
+        "epoch": 7,
+        "frame": 148,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 6900.5999999940395,
+        "duration": 3.5999999940395355,
+        "session": 1,
+        "request": 227,
+        "epoch": 7,
+        "frame": 265,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 6901.79999999702,
+        "duration": 1.2000000029802322,
+        "session": 1,
+        "request": 227,
+        "epoch": 7,
+        "frame": 265,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 6931.5,
+        "duration": 0,
+        "session": 1,
+        "request": 361,
+        "epoch": 7,
+        "frame": 149,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 6932.5999999940395,
+        "duration": 1.0999999940395355,
+        "session": 1,
+        "request": 361,
+        "epoch": 7,
+        "frame": 149,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 6933.0999999940395,
+        "duration": 1.5,
+        "session": 1,
+        "request": 228,
+        "epoch": 7,
+        "frame": 266,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 6934.19999999553,
+        "duration": 1.1000000014901161,
+        "session": 1,
+        "request": 228,
+        "epoch": 7,
+        "frame": 266,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 6966,
+        "duration": 0,
+        "session": 1,
+        "request": 363,
+        "epoch": 7,
+        "frame": 150,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 6967.89999999851,
+        "duration": 1.8999999985098839,
+        "session": 1,
+        "request": 363,
+        "epoch": 7,
+        "frame": 150,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 6967.89999999851,
+        "duration": 1.8999999985098839,
+        "session": 1,
+        "request": 229,
+        "epoch": 7,
+        "frame": 267,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 6969.19999999553,
+        "duration": 1.2999999970197678,
+        "session": 1,
+        "request": 229,
+        "epoch": 7,
+        "frame": 267,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 7000.79999999702,
+        "duration": 0,
+        "session": 1,
+        "request": 365,
+        "epoch": 7,
+        "frame": 151,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 7004.39999999851,
+        "duration": 3.600000001490116,
+        "session": 1,
+        "request": 365,
+        "epoch": 7,
+        "frame": 151,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 7004.39999999851,
+        "duration": 3.600000001490116,
+        "session": 1,
+        "request": 230,
+        "epoch": 7,
+        "frame": 268,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 7005.39999999851,
+        "duration": 1,
+        "session": 1,
+        "request": 230,
+        "epoch": 7,
+        "frame": 268,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 7035.5999999940395,
+        "duration": 0,
+        "session": 1,
+        "request": 367,
+        "epoch": 7,
+        "frame": 152,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 7037.0999999940395,
+        "duration": 1.5,
+        "session": 1,
+        "request": 367,
+        "epoch": 7,
+        "frame": 152,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 7037.19999999553,
+        "duration": 1.3999999985098839,
+        "session": 1,
+        "request": 231,
+        "epoch": 7,
+        "frame": 269,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 7038.5,
+        "duration": 1.3000000044703484,
+        "session": 1,
+        "request": 231,
+        "epoch": 7,
+        "frame": 269,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 7070.39999999851,
+        "duration": 0,
+        "session": 1,
+        "request": 369,
+        "epoch": 7,
+        "frame": 153,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 7072,
+        "duration": 1.6000000014901161,
+        "session": 1,
+        "request": 369,
+        "epoch": 7,
+        "frame": 153,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 7072,
+        "duration": 1.5,
+        "session": 1,
+        "request": 232,
+        "epoch": 7,
+        "frame": 270,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 7073.39999999851,
+        "duration": 1.3999999985098839,
+        "session": 1,
+        "request": 232,
+        "epoch": 7,
+        "frame": 270,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 7104.89999999851,
+        "duration": 0,
+        "session": 1,
+        "request": 371,
+        "epoch": 7,
+        "frame": 154,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 7108.29999999702,
+        "duration": 3.399999998509884,
+        "session": 1,
+        "request": 371,
+        "epoch": 7,
+        "frame": 154,
+        "input": -1
+      },
+      {
+        "kind": "compose",
+        "at": 7139.79999999702,
+        "duration": 0,
+        "session": 1,
+        "request": 372,
+        "epoch": 7,
+        "frame": 155,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 7141.19999999553,
+        "duration": 1.3999999985098839,
+        "session": 1,
+        "request": 372,
+        "epoch": 7,
+        "frame": 155,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 7141.5999999940395,
+        "duration": 1.6999999955296516,
+        "session": 1,
+        "request": 233,
+        "epoch": 7,
+        "frame": 271,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 7143.19999999553,
+        "duration": 1.6000000014901161,
+        "session": 1,
+        "request": 233,
+        "epoch": 7,
+        "frame": 271,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 7174.5999999940395,
+        "duration": 0,
+        "session": 1,
+        "request": 374,
+        "epoch": 7,
+        "frame": 156,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 7176.69999999553,
+        "duration": 2.100000001490116,
+        "session": 1,
+        "request": 374,
+        "epoch": 7,
+        "frame": 156,
+        "input": -1
+      },
+      {
+        "kind": "compose",
+        "at": 7192.39999999851,
+        "duration": 0,
+        "session": 1,
+        "request": 375,
+        "epoch": 7,
+        "frame": 157,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 7194.0999999940395,
+        "duration": 1.6999999955296516,
+        "session": 1,
+        "request": 375,
+        "epoch": 7,
+        "frame": 157,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 7194.0999999940395,
+        "duration": 1.6999999955296516,
+        "session": 1,
+        "request": 234,
+        "epoch": 7,
+        "frame": 272,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 7195.29999999702,
+        "duration": 1.2000000029802322,
+        "session": 1,
+        "request": 234,
+        "epoch": 7,
+        "frame": 272,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 7225.79999999702,
+        "duration": 0,
+        "session": 1,
+        "request": 377,
+        "epoch": 7,
+        "frame": 158,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 7229.39999999851,
+        "duration": 3.600000001490116,
+        "session": 1,
+        "request": 377,
+        "epoch": 7,
+        "frame": 158,
+        "input": -1
+      },
+      {
+        "kind": "compose",
+        "at": 7260.69999999553,
+        "duration": 0,
+        "session": 1,
+        "request": 378,
+        "epoch": 7,
+        "frame": 159,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 7262.39999999851,
+        "duration": 1.6000000014901161,
+        "session": 1,
+        "request": 378,
+        "epoch": 7,
+        "frame": 159,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 7262.5,
+        "duration": 1.5,
+        "session": 1,
+        "request": 235,
+        "epoch": 7,
+        "frame": 273,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 7264,
+        "duration": 1.5,
+        "session": 1,
+        "request": 235,
+        "epoch": 7,
+        "frame": 273,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 7295.29999999702,
+        "duration": 0,
+        "session": 1,
+        "request": 380,
+        "epoch": 7,
+        "frame": 160,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 7296.5,
+        "duration": 1.2000000029802322,
+        "session": 1,
+        "request": 380,
+        "epoch": 7,
+        "frame": 160,
+        "input": -1
+      },
+      {
+        "kind": "compose",
+        "at": 7329.69999999553,
+        "duration": 0,
+        "session": 1,
+        "request": 381,
+        "epoch": 7,
+        "frame": 161,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 7334.5,
+        "duration": 4.800000004470348,
+        "session": 1,
+        "request": 381,
+        "epoch": 7,
+        "frame": 161,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 7334.5999999940395,
+        "duration": 4.799999997019768,
+        "session": 1,
+        "request": 236,
+        "epoch": 7,
+        "frame": 274,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 7336,
+        "duration": 1.3000000044703484,
+        "session": 1,
+        "request": 236,
+        "epoch": 7,
+        "frame": 274,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 7363.69999999553,
+        "duration": 0,
+        "session": 1,
+        "request": 383,
+        "epoch": 7,
+        "frame": 162,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 7364.89999999851,
+        "duration": 1.2000000029802322,
+        "session": 1,
+        "request": 383,
+        "epoch": 7,
+        "frame": 162,
+        "input": -1
+      },
+      {
+        "kind": "compose",
+        "at": 7397.89999999851,
+        "duration": 0,
+        "session": 1,
+        "request": 384,
+        "epoch": 7,
+        "frame": 163,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 7399.5,
+        "duration": 1.6000000014901161,
+        "session": 1,
+        "request": 384,
+        "epoch": 7,
+        "frame": 163,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 7399.69999999553,
+        "duration": 1.7999999970197678,
+        "session": 1,
+        "request": 237,
+        "epoch": 7,
+        "frame": 275,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 7401.39999999851,
+        "duration": 1.6000000014901161,
+        "session": 1,
+        "request": 237,
+        "epoch": 7,
+        "frame": 275,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 7432.39999999851,
+        "duration": 0,
+        "session": 1,
+        "request": 386,
+        "epoch": 7,
+        "frame": 164,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 7436.79999999702,
+        "duration": 4.399999998509884,
+        "session": 1,
+        "request": 386,
+        "epoch": 7,
+        "frame": 164,
+        "input": -1
+      },
+      {
+        "kind": "compose",
+        "at": 7466.79999999702,
+        "duration": 0,
+        "session": 1,
+        "request": 387,
+        "epoch": 7,
+        "frame": 165,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 7468.5,
+        "duration": 1.7000000029802322,
+        "session": 1,
+        "request": 387,
+        "epoch": 7,
+        "frame": 165,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 7468.5,
+        "duration": 1.6000000014901161,
+        "session": 1,
+        "request": 238,
+        "epoch": 7,
+        "frame": 276,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 7470.19999999553,
+        "duration": 1.6999999955296516,
+        "session": 1,
+        "request": 238,
+        "epoch": 7,
+        "frame": 276,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 7501.19999999553,
+        "duration": 0,
+        "session": 1,
+        "request": 389,
+        "epoch": 7,
+        "frame": 166,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 7502.19999999553,
+        "duration": 1,
+        "session": 1,
+        "request": 389,
+        "epoch": 7,
+        "frame": 166,
+        "input": -1
+      },
+      {
+        "kind": "compose",
+        "at": 7535.79999999702,
+        "duration": 0,
+        "session": 1,
+        "request": 390,
+        "epoch": 7,
+        "frame": 167,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 7540.5,
+        "duration": 4.700000002980232,
+        "session": 1,
+        "request": 390,
+        "epoch": 7,
+        "frame": 167,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 7540.5999999940395,
+        "duration": 4.799999997019768,
+        "session": 1,
+        "request": 239,
+        "epoch": 7,
+        "frame": 277,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 7541.79999999702,
+        "duration": 1.2000000029802322,
+        "session": 1,
+        "request": 239,
+        "epoch": 7,
+        "frame": 277,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 7569.79999999702,
+        "duration": 0,
+        "session": 1,
+        "request": 392,
+        "epoch": 7,
+        "frame": 168,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 7571.5999999940395,
+        "duration": 1.7999999970197678,
+        "session": 1,
+        "request": 392,
+        "epoch": 7,
+        "frame": 168,
+        "input": -1
+      },
+      {
+        "kind": "compose",
+        "at": 7604.79999999702,
+        "duration": 0,
+        "session": 1,
+        "request": 393,
+        "epoch": 7,
+        "frame": 169,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 7607,
+        "duration": 2.2000000029802322,
+        "session": 1,
+        "request": 393,
+        "epoch": 7,
+        "frame": 169,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 7607,
+        "duration": 2.100000001490116,
+        "session": 1,
+        "request": 240,
+        "epoch": 7,
+        "frame": 278,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 7608.39999999851,
+        "duration": 1.3999999985098839,
+        "session": 1,
+        "request": 240,
+        "epoch": 7,
+        "frame": 278,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 7639.5,
+        "duration": 0,
+        "session": 1,
+        "request": 395,
+        "epoch": 7,
+        "frame": 170,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 7642.89999999851,
+        "duration": 3.399999998509884,
+        "session": 1,
+        "request": 395,
+        "epoch": 7,
+        "frame": 170,
+        "input": -1
+      },
+      {
+        "kind": "compose",
+        "at": 7673.79999999702,
+        "duration": 0,
+        "session": 1,
+        "request": 396,
+        "epoch": 7,
+        "frame": 171,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 7675.5999999940395,
+        "duration": 1.7999999970197678,
+        "session": 1,
+        "request": 396,
+        "epoch": 7,
+        "frame": 171,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 7675.69999999553,
+        "duration": 1.8999999985098839,
+        "session": 1,
+        "request": 241,
+        "epoch": 7,
+        "frame": 279,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 7677.39999999851,
+        "duration": 1.7000000029802322,
+        "session": 1,
+        "request": 241,
+        "epoch": 7,
+        "frame": 279,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 7708.39999999851,
+        "duration": 0,
+        "session": 1,
+        "request": 398,
+        "epoch": 7,
+        "frame": 172,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 7709.89999999851,
+        "duration": 1.5,
+        "session": 1,
+        "request": 398,
+        "epoch": 7,
+        "frame": 172,
+        "input": -1
+      },
+      {
+        "kind": "compose",
+        "at": 7725.69999999553,
+        "duration": 0,
+        "session": 1,
+        "request": 399,
+        "epoch": 7,
+        "frame": 173,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 7727.5,
+        "duration": 1.9000000059604645,
+        "session": 1,
+        "request": 399,
+        "epoch": 7,
+        "frame": 173,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 7727.5999999940395,
+        "duration": 1.8999999985098839,
+        "session": 1,
+        "request": 242,
+        "epoch": 7,
+        "frame": 280,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 7729,
+        "duration": 1.4000000059604645,
+        "session": 1,
+        "request": 242,
+        "epoch": 7,
+        "frame": 280,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 7760.29999999702,
+        "duration": 0,
+        "session": 1,
+        "request": 401,
+        "epoch": 7,
+        "frame": 174,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 7764,
+        "duration": 3.7000000029802322,
+        "session": 1,
+        "request": 401,
+        "epoch": 7,
+        "frame": 174,
+        "input": -1
+      },
+      {
+        "kind": "compose",
+        "at": 7794.5,
+        "duration": 0,
+        "session": 1,
+        "request": 402,
+        "epoch": 7,
+        "frame": 175,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 7796.29999999702,
+        "duration": 1.7999999970197678,
+        "session": 1,
+        "request": 402,
+        "epoch": 7,
+        "frame": 175,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 7796.39999999851,
+        "duration": 1.8000000044703484,
+        "session": 1,
+        "request": 243,
+        "epoch": 7,
+        "frame": 281,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 7797.69999999553,
+        "duration": 1.2999999970197678,
+        "session": 1,
+        "request": 243,
+        "epoch": 7,
+        "frame": 281,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 7829.0999999940395,
+        "duration": 0,
+        "session": 1,
+        "request": 404,
+        "epoch": 7,
+        "frame": 176,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 7830.29999999702,
+        "duration": 1.2000000029802322,
+        "session": 1,
+        "request": 404,
+        "epoch": 7,
+        "frame": 176,
+        "input": -1
+      },
+      {
+        "kind": "compose",
+        "at": 7863.69999999553,
+        "duration": 0,
+        "session": 1,
+        "request": 405,
+        "epoch": 7,
+        "frame": 177,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 7867.5,
+        "duration": 3.9000000059604645,
+        "session": 1,
+        "request": 405,
+        "epoch": 7,
+        "frame": 177,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 7867.5,
+        "duration": 3.8000000044703484,
+        "session": 1,
+        "request": 244,
+        "epoch": 7,
+        "frame": 282,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 7868.69999999553,
+        "duration": 1.1999999955296516,
+        "session": 1,
+        "request": 244,
+        "epoch": 7,
+        "frame": 282,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 7897.79999999702,
+        "duration": 0,
+        "session": 1,
+        "request": 407,
+        "epoch": 7,
+        "frame": 178,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 7900.0999999940395,
+        "duration": 2.2999999970197678,
+        "session": 1,
+        "request": 407,
+        "epoch": 7,
+        "frame": 178,
+        "input": -1
+      },
+      {
+        "kind": "compose",
+        "at": 7932,
+        "duration": 0,
+        "session": 1,
+        "request": 408,
+        "epoch": 7,
+        "frame": 179,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 7933.89999999851,
+        "duration": 1.8999999985098839,
+        "session": 1,
+        "request": 408,
+        "epoch": 7,
+        "frame": 179,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 7933.89999999851,
+        "duration": 1.7000000029802322,
+        "session": 1,
+        "request": 245,
+        "epoch": 7,
+        "frame": 283,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 7935.19999999553,
+        "duration": 1.2999999970197678,
+        "session": 1,
+        "request": 245,
+        "epoch": 7,
+        "frame": 283,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 7966.5,
+        "duration": 0,
+        "session": 1,
+        "request": 410,
+        "epoch": 7,
+        "frame": 180,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 7970.39999999851,
+        "duration": 3.899999998509884,
+        "session": 1,
+        "request": 410,
+        "epoch": 7,
+        "frame": 180,
+        "input": -1
+      },
+      {
+        "kind": "compose",
+        "at": 8001.5,
+        "duration": 0,
+        "session": 1,
+        "request": 411,
+        "epoch": 7,
+        "frame": 181,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 8003.19999999553,
+        "duration": 1.6999999955296516,
+        "session": 1,
+        "request": 411,
+        "epoch": 7,
+        "frame": 181,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 8003.29999999702,
+        "duration": 1.7000000029802322,
+        "session": 1,
+        "request": 246,
+        "epoch": 7,
+        "frame": 284,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 8004.5999999940395,
+        "duration": 1.2999999970197678,
+        "session": 1,
+        "request": 246,
+        "epoch": 7,
+        "frame": 284,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 8036.0999999940395,
+        "duration": 0,
+        "session": 1,
+        "request": 413,
+        "epoch": 7,
+        "frame": 182,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 8037.29999999702,
+        "duration": 1.2000000029802322,
+        "session": 1,
+        "request": 413,
+        "epoch": 7,
+        "frame": 182,
+        "input": -1
+      },
+      {
+        "kind": "compose",
+        "at": 8070.69999999553,
+        "duration": 0,
+        "session": 1,
+        "request": 414,
+        "epoch": 7,
+        "frame": 183,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 8074.39999999851,
+        "duration": 3.7000000029802322,
+        "session": 1,
+        "request": 414,
+        "epoch": 7,
+        "frame": 183,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 8074.39999999851,
+        "duration": 3.600000001490116,
+        "session": 1,
+        "request": 247,
+        "epoch": 7,
+        "frame": 285,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 8075.39999999851,
+        "duration": 1,
+        "session": 1,
+        "request": 247,
+        "epoch": 7,
+        "frame": 285,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 8105.5,
+        "duration": 0,
+        "session": 1,
+        "request": 416,
+        "epoch": 7,
+        "frame": 184,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 8106.89999999851,
+        "duration": 1.3999999985098839,
+        "session": 1,
+        "request": 416,
+        "epoch": 7,
+        "frame": 184,
+        "input": -1
+      },
+      {
+        "kind": "compose",
+        "at": 8140.0999999940395,
+        "duration": 0,
+        "session": 1,
+        "request": 417,
+        "epoch": 7,
+        "frame": 185,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 8141.39999999851,
+        "duration": 1.3000000044703484,
+        "session": 1,
+        "request": 417,
+        "epoch": 7,
+        "frame": 185,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 8141.5,
+        "duration": 1.2000000029802322,
+        "session": 1,
+        "request": 248,
+        "epoch": 7,
+        "frame": 286,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 8143.0999999940395,
+        "duration": 1.5,
+        "session": 1,
+        "request": 248,
+        "epoch": 7,
+        "frame": 286,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 8174.79999999702,
+        "duration": 0,
+        "session": 1,
+        "request": 419,
+        "epoch": 7,
+        "frame": 186,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 8178.0999999940395,
+        "duration": 3.2999999970197678,
+        "session": 1,
+        "request": 419,
+        "epoch": 7,
+        "frame": 186,
+        "input": -1
+      },
+      {
+        "kind": "compose",
+        "at": 8192.19999999553,
+        "duration": 0,
+        "session": 1,
+        "request": 420,
+        "epoch": 7,
+        "frame": 187,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 8193.59999999404,
+        "duration": 1.3999999985098839,
+        "session": 1,
+        "request": 420,
+        "epoch": 7,
+        "frame": 187,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 8193.69999999553,
+        "duration": 1.3999999985098839,
+        "session": 1,
+        "request": 249,
+        "epoch": 7,
+        "frame": 287,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 8195,
+        "duration": 1.3000000044703484,
+        "session": 1,
+        "request": 249,
+        "epoch": 7,
+        "frame": 287,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 8226.29999999702,
+        "duration": 0,
+        "session": 1,
+        "request": 422,
+        "epoch": 7,
+        "frame": 188,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 8227.69999999553,
+        "duration": 1.3999999985098839,
+        "session": 1,
+        "request": 422,
+        "epoch": 7,
+        "frame": 188,
+        "input": -1
+      },
+      {
+        "kind": "compose",
+        "at": 8260.79999999702,
+        "duration": 0,
+        "session": 1,
+        "request": 423,
+        "epoch": 7,
+        "frame": 189,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 8262,
+        "duration": 1.2000000029802322,
+        "session": 1,
+        "request": 423,
+        "epoch": 7,
+        "frame": 189,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 8262,
+        "duration": 1.1000000014901161,
+        "session": 1,
+        "request": 250,
+        "epoch": 7,
+        "frame": 288,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 8263.59999999404,
+        "duration": 1.5999999940395355,
+        "session": 1,
+        "request": 250,
+        "epoch": 7,
+        "frame": 288,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 8295.5,
+        "duration": 0,
+        "session": 1,
+        "request": 425,
+        "epoch": 7,
+        "frame": 190,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 8299.79999999702,
+        "duration": 4.299999997019768,
+        "session": 1,
+        "request": 425,
+        "epoch": 7,
+        "frame": 190,
+        "input": -1
+      },
+      {
+        "kind": "compose",
+        "at": 8330.19999999553,
+        "duration": 0,
+        "session": 1,
+        "request": 426,
+        "epoch": 7,
+        "frame": 191,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 8331.89999999851,
+        "duration": 1.7000000029802322,
+        "session": 1,
+        "request": 426,
+        "epoch": 7,
+        "frame": 191,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 8332,
+        "duration": 1.7000000029802322,
+        "session": 1,
+        "request": 251,
+        "epoch": 7,
+        "frame": 289,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 8333.19999999553,
+        "duration": 1.1999999955296516,
+        "session": 1,
+        "request": 251,
+        "epoch": 7,
+        "frame": 289,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 8365.09999999404,
+        "duration": 0,
+        "session": 1,
+        "request": 428,
+        "epoch": 7,
+        "frame": 192,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 8366.59999999404,
+        "duration": 1.5,
+        "session": 1,
+        "request": 428,
+        "epoch": 7,
+        "frame": 192,
+        "input": -1
+      },
+      {
+        "kind": "compose",
+        "at": 8399.59999999404,
+        "duration": 0,
+        "session": 1,
+        "request": 429,
+        "epoch": 7,
+        "frame": 193,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 8403.19999999553,
+        "duration": 3.600000001490116,
+        "session": 1,
+        "request": 429,
+        "epoch": 7,
+        "frame": 193,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 8403.19999999553,
+        "duration": 3.5,
+        "session": 1,
+        "request": 252,
+        "epoch": 7,
+        "frame": 290,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 8404.39999999851,
+        "duration": 1.2000000029802322,
+        "session": 1,
+        "request": 252,
+        "epoch": 7,
+        "frame": 290,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 8434.69999999553,
+        "duration": 0,
+        "session": 1,
+        "request": 431,
+        "epoch": 7,
+        "frame": 194,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 8436.39999999851,
+        "duration": 1.7000000029802322,
+        "session": 1,
+        "request": 431,
+        "epoch": 7,
+        "frame": 194,
+        "input": -1
+      },
+      {
+        "kind": "compose",
+        "at": 8468.89999999851,
+        "duration": 0,
+        "session": 1,
+        "request": 432,
+        "epoch": 7,
+        "frame": 195,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 8470.29999999702,
+        "duration": 1.3999999985098839,
+        "session": 1,
+        "request": 432,
+        "epoch": 7,
+        "frame": 195,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 8470.5,
+        "duration": 1.6000000014901161,
+        "session": 1,
+        "request": 253,
+        "epoch": 7,
+        "frame": 291,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 8471.59999999404,
+        "duration": 1.0999999940395355,
+        "session": 1,
+        "request": 253,
+        "epoch": 7,
+        "frame": 291,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 8503.29999999702,
+        "duration": 0,
+        "session": 1,
+        "request": 434,
+        "epoch": 7,
+        "frame": 196,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 8507.89999999851,
+        "duration": 4.600000001490116,
+        "session": 1,
+        "request": 434,
+        "epoch": 7,
+        "frame": 196,
+        "input": -1
+      },
+      {
+        "kind": "compose",
+        "at": 8537.5,
+        "duration": 0,
+        "session": 1,
+        "request": 435,
+        "epoch": 7,
+        "frame": 197,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 8539.09999999404,
+        "duration": 1.5999999940395355,
+        "session": 1,
+        "request": 435,
+        "epoch": 7,
+        "frame": 197,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 8539.29999999702,
+        "duration": 1.7000000029802322,
+        "session": 1,
+        "request": 254,
+        "epoch": 7,
+        "frame": 292,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 8540.39999999851,
+        "duration": 1.1000000014901161,
+        "session": 1,
+        "request": 254,
+        "epoch": 7,
+        "frame": 292,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 8571.79999999702,
+        "duration": 0,
+        "session": 1,
+        "request": 437,
+        "epoch": 7,
+        "frame": 198,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 8573.79999999702,
+        "duration": 2,
+        "session": 1,
+        "request": 437,
+        "epoch": 7,
+        "frame": 198,
+        "input": -1
+      },
+      {
+        "kind": "compose",
+        "at": 8606.69999999553,
+        "duration": 0,
+        "session": 1,
+        "request": 438,
+        "epoch": 7,
+        "frame": 199,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 8610.69999999553,
+        "duration": 4,
+        "session": 1,
+        "request": 438,
+        "epoch": 7,
+        "frame": 199,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 8610.79999999702,
+        "duration": 4.100000001490116,
+        "session": 1,
+        "request": 255,
+        "epoch": 7,
+        "frame": 293,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 8611.89999999851,
+        "duration": 1.1000000014901161,
+        "session": 1,
+        "request": 255,
+        "epoch": 7,
+        "frame": 293,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 8641.09999999404,
+        "duration": 0,
+        "session": 1,
+        "request": 440,
+        "epoch": 7,
+        "frame": 200,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 8643,
+        "duration": 1.9000000059604645,
+        "session": 1,
+        "request": 440,
+        "epoch": 7,
+        "frame": 200,
+        "input": -1
+      },
+      {
+        "kind": "compose",
+        "at": 8675.69999999553,
+        "duration": 0,
+        "session": 1,
+        "request": 441,
+        "epoch": 7,
+        "frame": 201,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 8677.19999999553,
+        "duration": 1.5,
+        "session": 1,
+        "request": 441,
+        "epoch": 7,
+        "frame": 201,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 8677.39999999851,
+        "duration": 1.6000000014901161,
+        "session": 1,
+        "request": 256,
+        "epoch": 7,
+        "frame": 294,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 8678.69999999553,
+        "duration": 1.2999999970197678,
+        "session": 1,
+        "request": 256,
+        "epoch": 7,
+        "frame": 294,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 8693,
+        "duration": 0,
+        "session": 1,
+        "request": 443,
+        "epoch": 7,
+        "frame": 202,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 8694.29999999702,
+        "duration": 1.2999999970197678,
+        "session": 1,
+        "request": 443,
+        "epoch": 7,
+        "frame": 202,
+        "input": -1
+      },
+      {
+        "kind": "compose",
+        "at": 8727.79999999702,
+        "duration": 0,
+        "session": 1,
+        "request": 444,
+        "epoch": 7,
+        "frame": 203,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 8731.69999999553,
+        "duration": 3.899999998509884,
+        "session": 1,
+        "request": 444,
+        "epoch": 7,
+        "frame": 203,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 8731.79999999702,
+        "duration": 4,
+        "session": 1,
+        "request": 257,
+        "epoch": 7,
+        "frame": 295,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 8733,
+        "duration": 1.2000000029802322,
+        "session": 1,
+        "request": 257,
+        "epoch": 7,
+        "frame": 295,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 8762,
+        "duration": 0,
+        "session": 1,
+        "request": 446,
+        "epoch": 7,
+        "frame": 204,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 8763.39999999851,
+        "duration": 1.3999999985098839,
+        "session": 1,
+        "request": 446,
+        "epoch": 7,
+        "frame": 204,
+        "input": -1
+      },
+      {
+        "kind": "compose",
+        "at": 8796.79999999702,
+        "duration": 0,
+        "session": 1,
+        "request": 447,
+        "epoch": 7,
+        "frame": 205,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 8798.59999999404,
+        "duration": 1.7999999970197678,
+        "session": 1,
+        "request": 447,
+        "epoch": 7,
+        "frame": 205,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 8798.59999999404,
+        "duration": 1.6999999955296516,
+        "session": 1,
+        "request": 258,
+        "epoch": 7,
+        "frame": 296,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 8799.79999999702,
+        "duration": 1.2000000029802322,
+        "session": 1,
+        "request": 258,
+        "epoch": 7,
+        "frame": 296,
+        "input": 0
+      },
+      {
+        "kind": "compose",
+        "at": 8831.39999999851,
+        "duration": 0,
+        "session": 1,
+        "request": 449,
+        "epoch": 7,
+        "frame": 206,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 8837.79999999702,
+        "duration": 6.399999998509884,
+        "session": 1,
+        "request": 449,
+        "epoch": 7,
+        "frame": 206,
+        "input": -1
+      },
+      {
+        "kind": "compose",
+        "at": 8866.09999999404,
+        "duration": 0,
+        "session": 1,
+        "request": 450,
+        "epoch": 7,
+        "frame": 207,
+        "input": -1
+      },
+      {
+        "kind": "submitted",
+        "at": 8868,
+        "duration": 1.9000000059604645,
+        "session": 1,
+        "request": 450,
+        "epoch": 7,
+        "frame": 207,
+        "input": -1
+      },
+      {
+        "kind": "decode",
+        "at": 8868.09999999404,
+        "duration": 1.8999999985098839,
+        "session": 1,
+        "request": 259,
+        "epoch": 7,
+        "frame": 297,
+        "input": 0
+      },
+      {
+        "kind": "upload",
+        "at": 8869.19999999553,
+        "duration": 1.1000000014901161,
+        "session": 1,
+        "request": 259,
+        "epoch": 7,
+        "frame": 297,
+        "input": 0
+      }
+    ],
+    "timing_semantics": "submitted = worker GL commands returned, NOT GPU completion or presentation"
+  },
+  "process_samples": [
+    [
+      {
+        "pid": 18588,
+        "type": "Browser",
+        "cpu": {
+          "cumulativeCPUUsage": 1.860219,
+          "percentCPUUsage": 0,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 128904,
+          "peakWorkingSetSize": 161340,
+          "privateBytes": 97808
+        }
+      },
+      {
+        "pid": 22076,
+        "type": "GPU",
+        "cpu": {
+          "cumulativeCPUUsage": 4.284817,
+          "percentCPUUsage": 0,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 405048,
+          "peakWorkingSetSize": 405384,
+          "privateBytes": 404072
+        }
+      },
+      {
+        "pid": 19260,
+        "type": "Utility",
+        "cpu": {
+          "cumulativeCPUUsage": 0.135905,
+          "percentCPUUsage": 0,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 52488,
+          "peakWorkingSetSize": 52576,
+          "privateBytes": 13968
+        }
+      },
+      {
+        "pid": 8280,
+        "type": "Tab",
+        "cpu": {
+          "cumulativeCPUUsage": 2.412602,
+          "percentCPUUsage": 0,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 251180,
+          "peakWorkingSetSize": 313360,
+          "privateBytes": 203272
+        }
+      },
+      {
+        "pid": 22772,
+        "type": "Utility",
+        "cpu": {
+          "cumulativeCPUUsage": 0.101669,
+          "percentCPUUsage": 0,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 85992,
+          "peakWorkingSetSize": 85992,
+          "privateBytes": 11824
+        }
+      }
+    ],
+    [
+      {
+        "pid": 18588,
+        "type": "Browser",
+        "cpu": {
+          "cumulativeCPUUsage": 1.870478,
+          "percentCPUUsage": 0.1255748116928645,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 128980,
+          "peakWorkingSetSize": 161340,
+          "privateBytes": 97852
+        }
+      },
+      {
+        "pid": 22076,
+        "type": "GPU",
+        "cpu": {
+          "cumulativeCPUUsage": 4.470092,
+          "percentCPUUsage": 2.267987703962818,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 402948,
+          "peakWorkingSetSize": 405384,
+          "privateBytes": 369080
+        }
+      },
+      {
+        "pid": 19260,
+        "type": "Utility",
+        "cpu": {
+          "cumulativeCPUUsage": 0.135905,
+          "percentCPUUsage": 0,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 52488,
+          "peakWorkingSetSize": 52576,
+          "privateBytes": 13968
+        }
+      },
+      {
+        "pid": 8280,
+        "type": "Tab",
+        "cpu": {
+          "cumulativeCPUUsage": 2.674684,
+          "percentCPUUsage": 3.2086403441328657,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 254884,
+          "peakWorkingSetSize": 313360,
+          "privateBytes": 204320
+        }
+      },
+      {
+        "pid": 22772,
+        "type": "Utility",
+        "cpu": {
+          "cumulativeCPUUsage": 0.108788,
+          "percentCPUUsage": 0.08716368701294122,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 85992,
+          "peakWorkingSetSize": 85992,
+          "privateBytes": 11824
+        }
+      }
+    ],
+    [
+      {
+        "pid": 18588,
+        "type": "Browser",
+        "cpu": {
+          "cumulativeCPUUsage": 1.883725,
+          "percentCPUUsage": 0.16132717204074792,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 128996,
+          "peakWorkingSetSize": 161340,
+          "privateBytes": 97856
+        }
+      },
+      {
+        "pid": 22076,
+        "type": "GPU",
+        "cpu": {
+          "cumulativeCPUUsage": 4.641703,
+          "percentCPUUsage": 2.0899258391805287,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 402108,
+          "peakWorkingSetSize": 405384,
+          "privateBytes": 368356
+        }
+      },
+      {
+        "pid": 19260,
+        "type": "Utility",
+        "cpu": {
+          "cumulativeCPUUsage": 0.143055,
+          "percentCPUUsage": 0.08707304978288974,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 52500,
+          "peakWorkingSetSize": 52588,
+          "privateBytes": 13988
+        }
+      },
+      {
+        "pid": 8280,
+        "type": "Tab",
+        "cpu": {
+          "cumulativeCPUUsage": 2.878464,
+          "percentCPUUsage": 2.4816379736155776,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 254772,
+          "peakWorkingSetSize": 313360,
+          "privateBytes": 204276
+        }
+      },
+      {
+        "pid": 22772,
+        "type": "Utility",
+        "cpu": {
+          "cumulativeCPUUsage": 0.116773,
+          "percentCPUUsage": 0.09724096274033192,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 85992,
+          "peakWorkingSetSize": 85992,
+          "privateBytes": 11824
+        }
+      }
+    ],
+    [
+      {
+        "pid": 18588,
+        "type": "Browser",
+        "cpu": {
+          "cumulativeCPUUsage": 1.897963,
+          "percentCPUUsage": 0.17617501982247377,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 129016,
+          "peakWorkingSetSize": 161340,
+          "privateBytes": 97856
+        }
+      },
+      {
+        "pid": 22076,
+        "type": "GPU",
+        "cpu": {
+          "cumulativeCPUUsage": 4.808404,
+          "percentCPUUsage": 2.0627063931388387,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 402288,
+          "peakWorkingSetSize": 405384,
+          "privateBytes": 368356
+        }
+      },
+      {
+        "pid": 19260,
+        "type": "Utility",
+        "cpu": {
+          "cumulativeCPUUsage": 0.146788,
+          "percentCPUUsage": 0.046191531148410805,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 52516,
+          "peakWorkingSetSize": 52588,
+          "privateBytes": 13992
+        }
+      },
+      {
+        "pid": 8280,
+        "type": "Tab",
+        "cpu": {
+          "cumulativeCPUUsage": 3.10782,
+          "percentCPUUsage": 2.838005185116992,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 257844,
+          "peakWorkingSetSize": 313360,
+          "privateBytes": 206860
+        }
+      },
+      {
+        "pid": 22772,
+        "type": "Utility",
+        "cpu": {
+          "cumulativeCPUUsage": 0.124174,
+          "percentCPUUsage": 0.09157849097059094,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 85992,
+          "peakWorkingSetSize": 85992,
+          "privateBytes": 11824
+        }
+      }
+    ],
+    [
+      {
+        "pid": 18588,
+        "type": "Browser",
+        "cpu": {
+          "cumulativeCPUUsage": 1.928548,
+          "percentCPUUsage": 0.37410208161479996,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 118116,
+          "peakWorkingSetSize": 161340,
+          "privateBytes": 86844
+        }
+      },
+      {
+        "pid": 22076,
+        "type": "GPU",
+        "cpu": {
+          "cumulativeCPUUsage": 4.964517,
+          "percentCPUUsage": 1.9094952600513526,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 395736,
+          "peakWorkingSetSize": 405384,
+          "privateBytes": 360812
+        }
+      },
+      {
+        "pid": 19260,
+        "type": "Utility",
+        "cpu": {
+          "cumulativeCPUUsage": 0.146788,
+          "percentCPUUsage": 0,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 52516,
+          "peakWorkingSetSize": 52588,
+          "privateBytes": 13992
+        }
+      },
+      {
+        "pid": 8280,
+        "type": "Tab",
+        "cpu": {
+          "cumulativeCPUUsage": 3.29667,
+          "percentCPUUsage": 2.3099380298118386,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 260440,
+          "peakWorkingSetSize": 313360,
+          "privateBytes": 208172
+        }
+      },
+      {
+        "pid": 22772,
+        "type": "Utility",
+        "cpu": {
+          "cumulativeCPUUsage": 0.131664,
+          "percentCPUUsage": 0.09161514690715092,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 85992,
+          "peakWorkingSetSize": 85992,
+          "privateBytes": 11824
+        }
+      }
+    ]
+  ],
+  "environment": {
+    "versions": {
+      "node": "22.15.0",
+      "acorn": "8.14.1",
+      "ada": "2.9.2",
+      "amaro": "0.4.1",
+      "ares": "1.34.5",
+      "brotli": "1.0.9",
+      "cjs_module_lexer": "2.1.0",
+      "cldr": "44.1",
+      "icu": "74.2",
+      "llhttp": "9.2.1",
+      "modules": "135",
+      "napi": "10",
+      "nbytes": "0.1.1",
+      "ncrypto": "0.0.1",
+      "nghttp2": "1.64.0",
+      "openssl": "0.0.0",
+      "simdjson": "3.12.2",
+      "simdutf": "6.4.0",
+      "sqlite": "3.49.1",
+      "tz": "2025a",
+      "undici": "6.21.2",
+      "unicode": "15.1",
+      "uv": "1.49.2",
+      "uvwasi": "0.0.21",
+      "v8": "13.6.233.8-electron.0",
+      "zlib": "1.3.0.1-motley",
+      "zstd": "1.5.7",
+      "electron": "36.2.1",
+      "chrome": "136.0.7103.93"
+    },
+    "platform": "win32",
+    "arch": "x64",
+    "gpu": {
+      "auxAttributes": {
+        "amdSwitchable": false,
+        "canSupportThreadedTextureMailbox": false,
+        "directMLFeatureLevel": "Not supported",
+        "dx12FeatureLevel": "Not supported",
+        "glImplementationParts": "(gl=none,angle=none)",
+        "glResetNotificationStrategy": 0,
+        "hardwareSupportsVulkan": false,
+        "inProcessGpu": true,
+        "initializationTime": 0,
+        "isAsan": false,
+        "isClangCoverage": false,
+        "jpegDecodeAcceleratorSupported": false,
+        "optimus": false,
+        "overlayInfo": {
+          "bgra8OverlaySupport": "NONE",
+          "directComposition": false,
+          "nv12OverlaySupport": "NONE",
+          "p010OverlaySupport": "NONE",
+          "rgb10a2OverlaySupport": "NONE",
+          "supportsOverlays": false,
+          "yuy2OverlaySupport": "NONE"
+        },
+        "passthroughCmdDecoder": false,
+        "sandboxed": false,
+        "skiaBackendType": "None",
+        "subpixelFontRendering": true,
+        "supportsD3dSharedImages": false,
+        "supportsDirectML": false,
+        "supportsDx12": false,
+        "supportsVulkan": false,
+        "targetCpuBits": 64,
+        "visibilityCallbackCallCount": 0,
+        "vulkanVersion": "Not supported"
+      },
+      "gpuDevice": [
+        {
+          "active": false,
+          "deviceId": 39497,
+          "deviceString": "Intel(R) Iris(R) Xe Graphics",
+          "driverVersion": "31.0.101.3222",
+          "gpuPreference": 2,
+          "revision": 1,
+          "subSysId": 805601414,
+          "vendorId": 32902
+        },
+        {
+          "active": false,
+          "deviceId": 39497,
+          "deviceString": "Intel(R) Iris(R) Xe Graphics",
+          "driverVersion": "31.0.101.3222",
+          "gpuPreference": 0,
+          "revision": 1,
+          "subSysId": 805601414,
+          "vendorId": 32902
+        },
+        {
+          "active": false,
+          "deviceId": 140,
+          "deviceString": "Microsoft Basic Render Driver",
+          "driverVersion": "10.0.26100.9278",
+          "gpuPreference": 0,
+          "revision": 0,
+          "subSysId": 0,
+          "vendorId": 5140
+        }
+      ]
+    },
+    "refresh_hz": 60,
+    "cpu_model": "11th Gen Intel(R) Core(TM) i7-1165G7 @ 2.80GHz",
+    "logical_cpus": 8,
+    "ram_bytes": 33965559808,
+    "os_release": "10.0.26200"
+  },
+  "viewport": {
+    "width": 1344,
+    "height": 792,
+    "dpr": 1.25,
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.7103.93 Electron/36.2.1 Safari/537.36"
+  },
+  "fixture_sha256": "4e51be3e3a70ba5192f2b682ed50545cfe111ec22857366f8b54876ee1c8d5b0",
+  "fixture_files": [
+    {
+      "file": "F07.mp4",
+      "sha256": "4e51be3e3a70ba5192f2b682ed50545cfe111ec22857366f8b54876ee1c8d5b0"
+    },
+    {
+      "file": "F07-mute.mp4",
+      "sha256": "ee4d4de30d74f182f23bc5c675bfe8cdd7aeaefd3a2180e95c85c48873d5bfe0"
+    }
+  ],
+  "playback_seconds": 5,
+  "scope": "complete App, speed matrix 0.5x/1x/2x/4x + video-only segment + same-source A1 overlap (dual position mix); app cold launch + warm seeks; OS cache uncontrolled",
+  "scene_extra": {
+    "speed_clips": 4,
+    "video_only_clips": 1,
+    "audio_toggled": 1
+  },
+  "unavailable": [
+    "actual presentation",
+    "React commits in non-profiling production React",
+    "audio underrun",
+    "video-frame lifetime",
+    "GPU actual VRAM",
+    "Core RSS",
+    "30–60min memory"
+  ]
+}

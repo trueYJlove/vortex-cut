@@ -1,0 +1,27 @@
+{
+  "scenarios": [
+    "F02"
+  ],
+  "runs": "1",
+  "seeks": "3",
+  "playback-seconds": "5",
+  "smoke": true,
+  "seed": "20260908",
+  "baseline_status": "smoke-only-not-G0",
+  "commit": "ffa33ad2c796e7581b5d04dbd63243fd05437a1d",
+  "code_fingerprint": "497469f0c5799ade7930c2a6d8b09ab7f71a9df0bf9d96659e7a49a6d4e9a057",
+  "dirty_files": "M apps/desktop/e2e/performance-editor.spec.ts\n M apps/desktop/electron/main/index.ts\n M apps/desktop/electron/preload/index.ts\n M apps/desktop/src/app/preview/decode-worker.ts\n M apps/desktop/src/app/preview/decode-worker.worker.ts\n M apps/desktop/tests/app.test.tsx\n M apps/desktop/tests/editor-commands.test.tsx\n M apps/desktop/tests/editor-shell.test.tsx\n M apps/desktop/tests/preview-lifecycle.test.tsx\n M tools/performance/make_fixtures.py\n M tools/performance/run_editor_benchmark.mjs\n?? evidence/performance/b00b-fixtures-smoke-f02/\n?? evidence/performance/b00b-fixtures-smoke-f04-48/\n?? evidence/performance/b00b-fixtures-smoke-f04/\n?? evidence/performance/b00b-fixtures-smoke-f07/\n?? evidence/performance/b00b-smoke-f01-01/\n?? evidence/performance/b00b-smoke-f01-regression-check/\n?? evidence/performance/b00b-smoke-f04-02/\n?? evidence/performance/b00b-smoke-f04-03/\n?? evidence/performance/b00b-smoke-f04-04/\n?? evidence/performance/b00b-smoke-f04-05/\n?? evidence/performance/b00b-smoke-f04-06/\n?? evidence/performance/b00b-smoke-f07-01/\n?? evidence/performance/b00b-smoke-f07-02/\n?? evidence/performance/b00b-smoke-f07-03/\n?? evidence/performance/b00b-smoke-f07-04/\n?? evidence/performance/b00b-smoke-f07-05/\n?? evidence/performance/b00b-smoke-f07-06/\n?? evidence/performance/b00b-smoke-f07-07/\n?? evidence/performance/b00b-smoke-f07-08/\n?? evidence/performance/b00b-smoke-f07-09/\n?? evidence/performance/b00b-smoke-f07-10/\n?? evidence/performance/b00b-smoke-f07-11/",
+  "node": "v24.19.0",
+  "fixtures_used": [
+    {
+      "file": "F02.mp4",
+      "sha256": "bd34e2a32b6e9b3d2cb9945610678e2daab79f9ea3b0ee371003bd8c0064f464",
+      "duration_s": 900,
+      "size": "640x360",
+      "fps": 30,
+      "recipe": "testsrc2-av-cfr-v1",
+      "bytes": 233918530,
+      "coverage_note": "Media only; not historical PiP, VFR/B-frame, multilayer or audio-failure coverage."
+    }
+  ]
+}

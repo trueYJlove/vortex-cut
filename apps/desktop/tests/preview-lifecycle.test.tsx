@@ -196,6 +196,29 @@ describe("A01 worker 创建失败清理", () => {
     const worker = ScriptedWorker.instances[0]!;
     expect(() => worker.reply({ type: "frame", id: 999, frame })).not.toThrow();
   });
+
+  it("B12 回归锁：init/decode 消息不得包含函数值（postMessage 无法克隆闭包）；续票走消息往返", async () => {
+    installWorkers();
+    let refreshCount = 0;
+    const instance = await DecodeWorker.create("aivideo://media/one", undefined, async () => { refreshCount++; return "aivideo://media/two"; });
+    const worker = ScriptedWorker.instances[0]!;
+    // init 消息只带布尔标志，不带任何函数值——结构化克隆可序列化。
+    const initMessage = worker.messages.find(message => message.type === "init");
+    expect(initMessage).toBeTruthy();
+    expect(initMessage.refreshTicket).toBe(true);
+    const containsFunction = (value: unknown): boolean => {
+      if (typeof value === "function") return true;
+      if (value && typeof value === "object") return Object.values(value).some(containsFunction);
+      return false;
+    };
+    expect(containsFunction(worker.messages)).toBe(false);
+    // Worker 发 ticket-refresh-request → 客户端调主线程回调 → 回发新 URL。
+    worker.reply({ type: "ticket-refresh-request", id: 7 });
+    await vi.waitFor(() => expect(refreshCount).toBe(1));
+    const response = worker.messages.find(message => message.type === "ticket-refresh-response");
+    expect(response).toMatchObject({ type: "ticket-refresh-response", id: 7, refreshUrl: "aivideo://media/two" });
+    instance.terminate();
+  });
 });
 
 describe("A01 PreviewSession.create 资源栈", () => {

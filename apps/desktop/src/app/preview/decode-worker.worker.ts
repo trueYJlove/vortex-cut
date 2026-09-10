@@ -27,7 +27,8 @@ type Outbound =
   | { type: "ready"; sampleCount: number; durationUs: number; timescale: number; keyframes: number[]; width: number; height: number; hardware: string | null; cacheEnabled: boolean; cacheCap: number }
   | { type: "frame"; id: number; frameN: number; timestampUs: number; fromCache: boolean; samplesFed: number; fromKeyframe: number; allocationSize: number; frame: VideoFrame }
   | { type: "done"; id: number | null; note: string }
-  | { type: "error"; id: number | null; message: string };
+  | { type: "error"; id: number | null; message: string }
+  | { type: "ticket-refresh-request"; id: number };
 
 const post = (message: Outbound, transfer: Transferable[] = []): void => {
   (self as unknown as Worker).postMessage(message, transfer);
@@ -140,14 +141,29 @@ function releaseGopAnchor(): void {
   pendingAnchorPts = -1;
 }
 
-async function init(url: string, cacheFrames: number, refreshTicket?: () => Promise<string>, cacheCapBytes?: number): Promise<void> {
+// B12 续票桥（bug 修复）：闭包/函数无法经 postMessage 结构化克隆，此前把
+// 主线程的 refreshTicket 回调随 init 消息传入会直接抛 "could not be cloned"
+// ——完整 App 合成预览不可用（B00 冒烟暴露）。改为消息往返：Worker 在
+// 401/403 时发 ticket-refresh-request,客户端调主线程回调后回发
+// ticket-refresh-response;Worker 侧以 pending map 挂起/恢复。
+const ticketRefreshPending = new Map<number, { resolve: (url: string) => void; reject: (error: Error) => void }>();
+let ticketRefreshSeq = 0;
+function requestTicketRefresh(): Promise<string> {
+  const id = ++ticketRefreshSeq;
+  return new Promise<string>((resolve, reject) => {
+    ticketRefreshPending.set(id, { resolve, reject });
+    post({ type: "ticket-refresh-request", id });
+  });
+}
+
+async function init(url: string, cacheFrames: number, hasTicketRefresh: boolean, cacheCapBytes?: number): Promise<void> {
   // B12：Range 源初始化（bytes=0-65535 探测 + moov-only 解析）——整文件
   // arrayBuffer 下载已移除。票据 TTL 到期由 HttpRangeSource 受控续票
-  //（有限一次，相同 range 重发）；续票回调经 init 消息注入（会话持有
-  // Main IPC 通道）。失败路径：Range/BMFF 不支持 → 上抛结构化错误，
-  // 由 DecodeWorker 客户端回退代理（不冒充已支持）。
+  //（有限一次，相同 range 重发）；续票经 ticket-refresh 消息往返桥接到
+  // 主线程（会话持有 Main IPC 通道）。失败路径：Range/BMFF 不支持 →
+  // 上抛结构化错误，由 DecodeWorker 客户端回退代理（不冒充已支持）。
   rangeSource = await HttpRangeSource.create(
-    url, (input, init2) => fetch(input, init2), refreshTicket ?? null,
+    url, (input, init2) => fetch(input, init2), hasTicketRefresh ? requestTicketRefresh : null,
     { cacheCapBytes: cacheCapBytes ?? undefined }, undefined,
   );
   demuxResult = await demuxRange(rangeSource);
@@ -324,10 +340,16 @@ function binarySearchPos(index: SampleIndex, ptsUs: number): number {
 }
 
 self.onmessage = (event: MessageEvent) => {
-  const data = event.data as { type: string; url?: string; cacheFrames?: number; id?: number; frameN?: number; fps?: number; refreshTicket?: () => Promise<string>; cacheCapBytes?: number };
+  const data = event.data as { type: string; url?: string; cacheFrames?: number; id?: number; frameN?: number; fps?: number; refreshTicket?: boolean; refreshUrl?: string; refreshError?: string; cacheCapBytes?: number };
   try {
     if (data.type === "init" && data.url) {
-      void init(data.url, data.cacheFrames ?? 0, data.refreshTicket, data.cacheCapBytes);
+      void init(data.url, data.cacheFrames ?? 0, data.refreshTicket === true, data.cacheCapBytes);
+    } else if (data.type === "ticket-refresh-response" && typeof data.id === "number") {
+      const pending = ticketRefreshPending.get(data.id);
+      if (!pending) return;
+      ticketRefreshPending.delete(data.id);
+      if (typeof data.refreshUrl === "string") pending.resolve(data.refreshUrl);
+      else pending.reject(new Error(data.refreshError ?? "ticket refresh failed"));
     } else if (data.type === "decode" && typeof data.id === "number" && typeof data.frameN === "number") {
       decodeFrame(data.id, data.frameN, data.fps ?? 30);
     } else if (data.type === "close") {

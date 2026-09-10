@@ -5,7 +5,7 @@ import { throwIfAborted, workerReady } from "./worker-lifecycle.js";
  * TTL 由 RangeSource 受控续票（refreshTicket 注入，有限一次）。 */
 
 export interface DecodeWorkerMessage {
-  type: "ready" | "frame" | "done" | "error";
+  type: "ready" | "frame" | "done" | "error" | "ticket-refresh-request";
   id?: number;
   frameN?: number;
   frame?: VideoFrame;
@@ -34,6 +34,7 @@ export class DecodeWorker {
   private readonly worker: Worker;
   private nextId = 0;
   private disposed = false;
+  private refreshTicket: (() => Promise<string>) | null = null;
   private readonly pending = new Map<number, { resolve: (frame: VideoFrame) => void; reject: (error: Error) => void }>();
   hardware: string | null = null;
   width = 0;
@@ -50,6 +51,20 @@ export class DecodeWorker {
   private readonly onMessage = (event: MessageEvent<DecodeWorkerMessage>): void => {
       const data = event.data;
       if (this.disposed) { data.frame?.close(); return; }
+      if (data.type === "ticket-refresh-request" && data.id !== undefined) {
+        // B12 续票桥：Worker 不能持有主线程闭包（postMessage 无法克隆函数），
+        // 401/403 时经此往返——客户端执行主线程 refreshTicket 并回发新 URL。
+        const requestId = data.id;
+        if (!this.refreshTicket) {
+          this.worker.postMessage({ type: "ticket-refresh-response", id: requestId, refreshError: "no refresh callback" });
+          return;
+        }
+        this.refreshTicket().then(
+          url => this.worker.postMessage({ type: "ticket-refresh-response", id: requestId, refreshUrl: url }),
+          error => this.worker.postMessage({ type: "ticket-refresh-response", id: requestId, refreshError: error instanceof Error ? error.message : String(error) }),
+        );
+        return;
+      }
       if (data.type === "frame" && data.id !== undefined) {
         const pending = this.pending.get(data.id);
         this.pending.delete(data.id);
@@ -79,11 +94,12 @@ export class DecodeWorker {
   static async create(ticket: string, signal?: AbortSignal, refreshTicket?: () => Promise<string>, cacheCapBytes?: number): Promise<DecodeWorker> {
     throwIfAborted(signal);
     const instance = new DecodeWorker();
+    instance.refreshTicket = refreshTicket ?? null;
     try {
       const data = await workerReady<DecodeWorkerMessage>(instance.worker, data => {
         if (data.type === "error") throw new Error(data.message ?? "worker init error");
         return data.type === "ready" ? data : undefined;
-      }, () => instance.worker.postMessage({ type: "init", url: ticket, cacheFrames: 0, ...(refreshTicket ? { refreshTicket } : {}), ...(cacheCapBytes !== undefined ? { cacheCapBytes } : {}) }), signal);
+      }, () => instance.worker.postMessage({ type: "init", url: ticket, cacheFrames: 0, refreshTicket: Boolean(refreshTicket), ...(cacheCapBytes !== undefined ? { cacheCapBytes } : {}) }), signal);
       throwIfAborted(signal);
       instance.hardware = data.hardware ?? null;
       instance.width = data.width ?? 0;
@@ -115,6 +131,7 @@ export class DecodeWorker {
   terminate(reason = new Error("decode worker disposed")): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.refreshTicket = null;
     // B12：先关 Range 源（释放字节缓存/在途请求），再终结 worker
     try { this.worker.postMessage({ type: "close" }); } catch { /* 已终止 */ }
     for (const pending of this.pending.values()) pending.reject(reason);

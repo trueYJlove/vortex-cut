@@ -1,0 +1,39 @@
+{
+  "scenarios": [
+    "F07"
+  ],
+  "runs": "1",
+  "seeks": "3",
+  "playback-seconds": "5",
+  "smoke": true,
+  "seed": "20260908",
+  "baseline_status": "smoke-only-not-G0",
+  "commit": "ffa33ad2c796e7581b5d04dbd63243fd05437a1d",
+  "code_fingerprint": "55a07143eb9acf31841ec418bebeca43b6b55a5361f7963c37f2450db5eeb6c3",
+  "dirty_files": "M apps/desktop/e2e/performance-editor.spec.ts\n M apps/desktop/electron/main/index.ts\n M apps/desktop/electron/preload/index.ts\n M apps/desktop/tests/app.test.tsx\n M apps/desktop/tests/editor-commands.test.tsx\n M apps/desktop/tests/editor-shell.test.tsx\n M tools/performance/make_fixtures.py\n M tools/performance/run_editor_benchmark.mjs\n?? evidence/performance/b00b-fixtures-smoke-f07/",
+  "node": "v24.19.0",
+  "fixtures_used": [
+    {
+      "files": [
+        {
+          "file": "F07.mp4",
+          "sha256": "4e51be3e3a70ba5192f2b682ed50545cfe111ec22857366f8b54876ee1c8d5b0",
+          "duration_s": 12,
+          "bytes": 3123032
+        },
+        {
+          "file": "F07-mute.mp4",
+          "sha256": "ee4d4de30d74f182f23bc5c675bfe8cdd7aeaefd3a2180e95c85c48873d5bfe0",
+          "duration_s": 12,
+          "bytes": 3009426,
+          "audio": "none"
+        }
+      ],
+      "size": "640x360",
+      "fps": 30,
+      "recipe": "testsrc2-av-cfr-multiv1",
+      "bytes": 6132458,
+      "coverage_note": "Distinct short media family; scene assembly (tracks/transforms/captions) is declared by the benchmark spec, not by media generation."
+    }
+  ]
+}

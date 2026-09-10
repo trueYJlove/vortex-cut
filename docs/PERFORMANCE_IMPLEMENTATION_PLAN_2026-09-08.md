@@ -5,16 +5,20 @@
 - 工作区：`C:\DataFolder\codes\AI-Vidio`。下文文件路径均相对此根目录。
 - 依据：`docs/PERFORMANCE_ASSESSMENT_2026-09-08.md`。
 - 状态：**待设计评审的执行方案；没有修改业务代码，没有宣称 Gate 已批准。**
-- **执行状态（2026-09-10 更新）**：B00-A、A01–A08（G1 达成）、B10–B17
-  （G2 达成）、C20a+b、C21a+b、C22 已交付；C23/C24 按
+- **执行状态（2026-09-10 更新·二）**：B00-A、A01–A08（G1 达成）、
+  B10–B17（G2 达成）、C20a+b、C21a+b、C22 已交付；C23/C24 按
   `docs/PERFORMANCE_G3_CLOSEOUT_2026-09-10.md` 结项（C23 不实施+内存
   预算护栏，C24 进入条件不满足不实施）。F03 深定位收益已实测（编码
   阶段 wall time 降 29.2%/31.1%，见
-  `docs/PERFORMANCE_F03_DEEP_SEEK_MEASUREMENT_2026-09-10.md`）。剩余：
-  B00-B 完整 G0 基线（F01–F07 场景装配）、F 夹具完整轮（60 分钟源/
-  硬件编码矩阵/取消延迟端到端）、各修改单独立验收（"待验收"未变）、
-  C20c 与 C20 Renderer v2 数据面（实测驱动）。各轮细节见同目录
-  `PERFORMANCE_*_IMPLEMENTATION_*.md`。
+  `docs/PERFORMANCE_F03_DEEP_SEEK_MEASUREMENT_2026-09-10.md`）。
+  **B00-B 第一阶段已交付**（F01 保留 + F02/F04/F07 完整 App 场景装配 +
+  runner 多场景调度，四场景冒烟全绿）；过程中发现并修复 B12 完整 App
+  回归（refreshTicket 闭包经 postMessage 不可克隆 → 合成预览自 B12 起
+  不可用；消息往返桥修复 + 回归锁单测），详见
+  `docs/PERFORMANCE_B00B_SCENE_ASSEMBLY_2026-09-10.md`。剩余：F03/F05/F06
+  场景装配、F04 升回 100 素材口径（依赖 list_assets 分页修复）、正式
+  G0 采样（重复采样/长测/探针开销/独立评审）、各修改单独立验收
+  （"待验收"未变）、C20c 与 C20 Renderer v2 数据面（实测驱动）。
 - 新增模块/协议/脚本均是本方案拟新增，不代表仓库已经存在。
 
 

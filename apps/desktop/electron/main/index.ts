@@ -358,6 +358,27 @@ function registerIpc(): void {
     const asset = await fetchWithUi<Asset>(`${API_PREFIX}/assets/${asId(assetId, "asset_id")}/refresh`, { method: "POST" });
     return await assetPresentation(asset);
   });
+  // E2E-only multi-asset import: selects from an explicit benchmark fixture map
+  // (AIVS_E2E_ASSET_PATHS_LIST = {"F07.mp4": "...", ...}) instead of a dialog.
+  // Outside benchmark runs the env is unset and every call fails closed — the
+  // requested name must be a plain fixture file name, no paths/wildcards.
+  ipcMain.handle("asset:import-fixture", async (_event, input: { project_id: ProjectId; fixture_file: string }) => {
+    const projectId = asId(input.project_id, "project_id") as ProjectId;
+    const raw = process.env.AIVS_E2E_ASSET_PATHS_LIST;
+    let selectedPath: string | undefined;
+    if (raw) {
+      try {
+        const paths = JSON.parse(raw) as Record<string, unknown>;
+        const candidate = paths[input.fixture_file];
+        if (typeof candidate === "string") selectedPath = candidate;
+      } catch { /* fall through: invalid env selects nothing */ }
+    }
+    if (!selectedPath || !/^[A-Za-z0-9._-]+\.mp4$/.test(input.fixture_file)) throw new Error("Unknown fixture file");
+    const grant = await registerFileGrant(requireCore(), selectedPath);
+    const asset = await fetchWithUi<Asset>(`${API_PREFIX}/projects/${projectId}/assets`, { method: "POST", body: JSON.stringify({ grant_id: grant.grant_id, kind: "video" }) });
+    restrictedMedia.register(asset.asset_id, selectedPath);
+    return { grant, asset, media_url: await restrictedMediaUrl(asset.asset_id) };
+  });
   ipcMain.handle("asset:relocate", async (_event, input: { asset_id: string }) => {
     const assetId = asId(input.asset_id, "asset_id");
     const selectedPath = await chooseAssetPath(undefined, "重新定位素材", true);
