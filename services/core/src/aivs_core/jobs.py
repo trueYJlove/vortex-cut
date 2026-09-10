@@ -39,6 +39,7 @@ RenderRunner = Callable[
         Callable[[float], None],
         Callable[[str], None],
         Callable[[int | None], None],
+        Callable[[str, float | None], None],
     ],
     Awaitable[dict[str, Any]],
 ]
@@ -485,6 +486,9 @@ class JobService:
         result.pop("fallback_reason", None)
         result.pop("worker_pid", None)
         result["stage"] = result.get("stage") or result["status"]
+        # C22：细分阶段扩展（可选字段；未知 phase 的旧 UI 忽略即可）。
+        result["phase"] = result.pop("phase", None)
+        result["phase_progress"] = result.pop("phase_progress", None)
         result["attempt"] = int(result.get("attempt") or 1)
         result["progress"] = float(result["progress"])
         result["result"] = (
@@ -687,6 +691,9 @@ class JobService:
         for key, value in fields.items():
             assignments.append(f"{key}=?")
             values.append(value)
+        # C22：状态离开 running 即清细分阶段（终态行不残留过期的 phase）。
+        assignments.append("phase=NULL")
+        assignments.append("phase_progress=NULL")
         assignments.append("updated_at=?")
         values.append(utc_now())
         values.append(job_id)
@@ -753,6 +760,7 @@ class JobService:
                     lambda value: self._set_progress(job_id, value),
                     lambda value: self._set_stage(job_id, value),
                     lambda value: self._set_worker_pid(job_id, value),
+                    lambda name, value: self._set_phase(job_id, name, value),
                 )
                 with self.db.connection() as db:
                     db.execute(
@@ -996,6 +1004,17 @@ class JobService:
                 (worker_pid, utc_now(), job_id),
             )
 
+    def _set_phase(self, job_id: str, phase: str, phase_progress: float | None) -> None:
+        """C22 细分阶段：phase 必到、phase_progress 可空（None = 不定进度）。
+        发布临界区（publishing）后任务可能已提交完成——只写 running 行，
+        完成时的状态迁移会在下一步覆盖 phase。"""
+        with self.db.connection() as db:
+            db.execute(
+                "UPDATE jobs SET phase=?,phase_progress=?,updated_at=? WHERE id=? "
+                "AND status IN ('running','cancelling')",
+                (phase, phase_progress, utc_now(), job_id),
+            )
+
     def _current_status(self, job_id: str) -> str | None:
         with self.db.connection() as db:
             row = db.execute("SELECT status,kind FROM jobs WHERE id=?", (job_id,)).fetchone()
@@ -1033,6 +1052,7 @@ def _job_error_message(code: str) -> str:
         "RENDER_FONT_MISSING": "字幕字体资源缺失",
         "RENDER_FAILED": "渲染失败",
         "RENDER_VALIDATION_FAILED": "渲染产物校验失败",
+        "RENDER_VALIDATION_TIMEOUT": "渲染产物校验超时（解码无推进或超出绝对上限）",
         "EXPORT_DESTINATION_INVALID": "导出目标无效",
         "EXPORT_DESTINATION_EXISTS": "导出目标已存在",
         "EXPORT_DESTINATION_EXPIRED": "导出授权已过期",

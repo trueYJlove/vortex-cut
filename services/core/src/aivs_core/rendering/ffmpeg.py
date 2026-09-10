@@ -6,9 +6,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from ..performance import measured
-from ..media.process import run_process
 from ..media.windows_job import WindowsKillJob
+from ..performance import measured
 from ..projects import DomainError
 
 
@@ -932,14 +931,130 @@ async def terminate_process_tree(process: asyncio.subprocess.Process) -> None:
 
 
 @measured("validate_decode")
-async def decode_validate(ffmpeg: Path, path: Path) -> None:
-    result = await run_process(
-        ffmpeg,
-        ["-hide_banner", "-v", "error", "-i", str(path), "-f", "null", "-"],
-        120,
+async def decode_validate(
+    ffmpeg: Path,
+    path: Path,
+    *,
+    cancel_event: asyncio.Event | None = None,
+    on_progress: Callable[[float], None] | None = None,
+    media_duration_us: int | None = None,
+) -> None:
+    """C22：可取消的完整解码校验（-f null 全量解码，非抽帧冒充）。
+
+    超时拆分（计划 C22-4）：
+    - stall 120s：无 out_time/帧推进（定期日志不算媒体进度）；
+    - 绝对上限 max(300s, 5×媒体时长)：慢盘/长尾有兜底。
+    取消走进程树终止；stderr 有界 ring（末 32KiB），不再整段读入。
+    """
+    args = [
+        "-hide_banner",
+        "-nostdin",
+        "-v",
+        "error",
+        "-progress",
+        "pipe:1",
+        "-nostats",
+        "-i",
+        str(path),
+        "-f",
+        "null",
+        "-",
+    ]
+    creationflags = getattr(asyncio.subprocess, "CREATE_NO_WINDOW", 0)
+    creationflags |= getattr(asyncio.subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    process = await asyncio.create_subprocess_exec(
+        str(ffmpeg),
+        *args,
+        stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        creationflags=creationflags,
     )
-    if result.returncode != 0:
-        raise DomainError("RENDER_VALIDATION_FAILED", "渲染产物无法完整解码")
+    try:
+        kill_job = WindowsKillJob.attach(process.pid)
+    except OSError as exc:
+        await terminate_process_tree(process)
+        raise RuntimeError(f"RENDER_VALIDATION_FAILED: unable to isolate FFmpeg: {exc}") from exc
+
+    absolute_limit = max(300.0, 5.0 * (media_duration_us or 0) / 1_000_000)
+    stall_limit = 120.0
+    stderr_ring = _StderrRing(32 * 1024)
+    last_progress = asyncio.get_running_loop().time()
+    started = last_progress
+    cancelled = False
+    try:
+        assert process.stdout is not None
+        assert process.stderr is not None
+
+        async def read_progress() -> None:
+            nonlocal last_progress
+            async for raw in process.stdout:
+                last_progress = asyncio.get_running_loop().time()
+                line = raw.decode("utf-8", errors="replace").strip()
+                if line.startswith("out_time_us=") and on_progress is not None:
+                    try:
+                        value = int(line.split("=", 1)[1])
+                    except ValueError:
+                        continue
+                    on_progress(min(max(value, 0), 1) if not media_duration_us
+                                else min(max(value / media_duration_us, 0), 0.99))
+
+        async def read_stderr() -> None:
+            async for raw in process.stderr:
+                stderr_ring.append(raw)
+
+        progress_task = asyncio.create_task(read_progress())
+        stderr_task = asyncio.create_task(read_stderr())
+        try:
+            while process.returncode is None:
+                if cancel_event is not None and cancel_event.is_set():
+                    cancelled = True
+                    await terminate_process_tree(process)
+                    break
+                now = asyncio.get_running_loop().time()
+                if now - last_progress > stall_limit or now - started > absolute_limit:
+                    await terminate_process_tree(process)
+                    raise RuntimeError(
+                        "RENDER_VALIDATION_TIMEOUT: "
+                        + ("no decode progress" if now - last_progress > stall_limit
+                           else "absolute validation limit exceeded")
+                    )
+                try:
+                    await asyncio.wait_for(asyncio.shield(process.wait()), timeout=0.05)
+                except TimeoutError:
+                    pass
+            await progress_task
+            await stderr_task
+        finally:
+            if not progress_task.done():
+                progress_task.cancel()
+            if not stderr_task.done():
+                stderr_task.cancel()
+    finally:
+        if kill_job is not None:
+            kill_job.close()
+    if cancelled or (cancel_event is not None and cancel_event.is_set()):
+        raise RuntimeError("JOB_CANCELLED")
+    if process.returncode != 0:
+        raise RuntimeError(f"RENDER_VALIDATION_FAILED: {stderr_ring.tail(1000)}")
+
+
+class _StderrRing:
+    """有界 stderr 保留（末 N 字节）——decode_validate/长任务统一模式，
+    替换"先整段 read() 再切片"的洪泛内存放大。线程安全不需要：全部访问
+    在事件循环协程内。"""
+
+    def __init__(self, capacity: int) -> None:
+        self._capacity = capacity
+        self._buffer = bytearray()
+
+    def append(self, raw: bytes) -> None:
+        self._buffer.extend(raw)
+        if len(self._buffer) > self._capacity:
+            del self._buffer[:-self._capacity]
+
+    def tail(self, limit: int) -> str:
+        return self._buffer[-limit:].decode("utf-8", errors="replace")
 
 
 def _seconds(value_us: int) -> str:

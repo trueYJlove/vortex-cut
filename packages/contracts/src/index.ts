@@ -118,7 +118,7 @@ export const ERROR_CODES = [
   "TIMELINE_PATCH_PROPOSAL_INVALID", "TIMELINE_PATCH_PROPOSAL_CONFLICT",
   "TIMELINE_PATCH_PROPOSAL_APPLIED", "TIMELINE_PATCH_PROVIDER_UNTESTED", "TIMELINE_PATCH_PROVIDER_UNSUPPORTED",
   "TIMELINE_OPERATION_UNSUPPORTED", "RENDER_PLAN_INVALID", "RENDER_INPUT_CHANGED",
-  "RENDER_FONT_MISSING", "RENDER_FAILED", "RENDER_VALIDATION_FAILED", "PREVIEW_NOT_FOUND",
+  "RENDER_FONT_MISSING", "RENDER_FAILED", "RENDER_VALIDATION_FAILED", "RENDER_VALIDATION_TIMEOUT", "PREVIEW_NOT_FOUND",
   "EXPORT_NOT_FOUND", "EXPORT_DESTINATION_INVALID", "EXPORT_DESTINATION_EXISTS",
   "EXPORT_DESTINATION_EXPIRED", "EXPORT_DISK_SPACE_INSUFFICIENT", "ARTIFACT_NOT_FOUND",
   "PLAYBACK_TICKET_INVALID"
@@ -271,6 +271,10 @@ export interface Job {
   fallback_reason?: string | null;
   artifact_id?: ArtifactId | null;
   artifacts?: Artifact[];
+  /** C22 渲染校验细分阶段：preparing/encoding/validating_probe/validating_decode/hashing/publishing；旧 UI 忽略即可。 */
+  phase?: string | null;
+  /** 细分阶段进度 0..1；null = 该阶段无可靠进度（不定进度，UI 显示活动态）。 */
+  phase_progress?: number | null;
 }
 
 export interface Artifact {
@@ -1279,6 +1283,9 @@ export function isJob(value: unknown): value is Job {
     !(value.input_fingerprint === null || isString(value.input_fingerprint))) return false;
   if (value.progress !== null && !isRatio(value.progress)) return false;
   if (!isInteger(value.attempt, 1)) return false;
+  // C22 可选细分阶段：出现时 phase 为非空字符串、phase_progress 为空或 0..1。
+  if (value.phase !== undefined && value.phase !== null && !(typeof value.phase === "string" && value.phase.length > 0)) return false;
+  if (value.phase_progress !== undefined && value.phase_progress !== null && !isRatio(value.phase_progress)) return false;
   return !hasSensitiveKey(value) && (value.error === null || (isString(value.error.code) && isString(value.error.message)));
 }
 

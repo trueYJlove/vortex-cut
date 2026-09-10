@@ -371,7 +371,11 @@ class RenderCoordinator:
         progress: Any,
         stage: Any,
         worker_pid: Any,
+        phase: Any = None,
     ) -> dict[str, Any]:
+        """phase（C22，可选）：`phase(name, progress|None)` 细分阶段回调，
+        与粗粒度 stage 并行上报（preparing/rendering→encoding/validating_
+        probe/validating_decode/hashing/publishing）。None = 旧调用方语义。"""
         payload = json_loads(row["input_json"])
         mode = row["kind"]
         job_id = row["id"]
@@ -396,6 +400,8 @@ class RenderCoordinator:
         if plan["content_fingerprint"] != payload["content_fingerprint"]:
             raise DomainError("RENDER_INPUT_CHANGED", "渲染输入在排队后已变化")
         stage("preparing")
+        if phase is not None:
+            phase("preparing", None)  # 准备耗时组成复杂，诚实显示不定进度
         input_paths = {
             item["input_id"]: Path(self.projects.resolve_asset_path(item["asset_id"])["path"])
             for item in plan["inputs"]
@@ -520,6 +526,9 @@ class RenderCoordinator:
                         progress,
                         worker_pid,
                     )
+                    # C22：校验细分阶段（validating_probe/validating_decode/
+                    # hashing）通过 phase 回调上报；stage("validating") 保持
+                    # 兼容（未注入 phase 的调用方仍只看到粗粒度文本）。
                     stage("validating")
                     media_info, size_bytes, digest = await validate_rendered_media(
                         self.ffmpeg,
@@ -527,6 +536,8 @@ class RenderCoordinator:
                         output,
                         plan["output"],
                         expected_duration,
+                        cancel_event=cancel_event,
+                        on_phase=phase,
                     )
                     break
                 except DomainError as exc:
@@ -542,6 +553,12 @@ class RenderCoordinator:
                 except RuntimeError as exc:
                     if str(exc).startswith("JOB_CANCELLED"):
                         raise
+                    # C22：校验超时（RENDER_VALIDATION_TIMEOUT）不触发换编码
+                    # 器重跑——产物编码可能已正确，问题在校验环节或环境；
+                    # 重跑只会重复同样的超时（计划 C22-10：cancel/timeout
+                    # 区分错误码、不进入重试乘法）。
+                    if str(exc).startswith("RENDER_VALIDATION_TIMEOUT"):
+                        raise DomainError("RENDER_VALIDATION_TIMEOUT", str(exc)) from exc
                     last_error_detail = str(exc)
                     if attempt_index < len(encoders_to_try):
                         self._invalidate_encoder_smoke(encoder)
@@ -554,6 +571,13 @@ class RenderCoordinator:
                     ) from exc
             if cancel_event.is_set():
                 raise RuntimeError("JOB_CANCELLED")
+            # C22 发布临界区：rename + DB 事务提交点之后成品才存在；进入后
+            # 不再响应取消（cancel/timeout 语义由 jobs 层区分——到达提交点
+            # 后完成即成功，不把成功文件标成已取消）。rename 与 DB 事务不是
+            # 一个原子事务：rename 成功 + DB 失败时 orphans 残留由
+            # cleanup_orphans 恢复（既有机制）。
+            if phase is not None:
+                phase("publishing", None)
             stage("finalizing")
             artifact_id = f"artifact_{new_id()}"
             export_record_id = None

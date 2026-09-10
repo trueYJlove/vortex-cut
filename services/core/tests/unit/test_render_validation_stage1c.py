@@ -40,7 +40,7 @@ async def test_validator_returns_normalized_media_and_hash(tmp_path: Path, monke
     output = tmp_path / "out.mp4"
     output.write_bytes(b"valid")
 
-    async def decoded(ffmpeg, path):
+    async def decoded(ffmpeg, path, **_kwargs):
         assert path == output
 
     monkeypatch.setattr(validation_module, "decode_validate", decoded)
