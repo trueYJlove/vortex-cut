@@ -208,6 +208,8 @@ class RenderCoordinator:
         # 命中则跳过投影与 ffprobe；体量 ~1-3MB/条，保留最近 4 条。
         self.preview_ir_cache: dict[str, dict[str, Any]] = {}
         self.preview_probe_cache: dict[str, dict[str, Any]] = {}
+        # C20b：v2 manifest/全量帧 bundle 缓存（帧表体量大，LRU 2 条）。
+        self.preview_ir_v2_cache: dict[str, dict[str, Any]] = {}
 
     async def _probe(self, path: Path, fingerprint: str | None = None) -> dict[str, Any]:
         """A07：优先走注入的缓存探测通道。
@@ -236,6 +238,21 @@ class RenderCoordinator:
         cached = self.preview_ir_cache.get(fingerprint)
         if cached is not None:
             return cached
+        ir = await self._project_plan(plan)
+        payload = {
+            "schema_version": 1,
+            "content_fingerprint": fingerprint,
+            "timeline_revision_id": plan["timeline_revision_id"],
+            "output_ratio": output_ratio,
+            "ir": ir,
+        }
+        self.preview_ir_cache[fingerprint] = payload
+        while len(self.preview_ir_cache) > 4:
+            self.preview_ir_cache.pop(next(iter(self.preview_ir_cache)))
+        return payload
+
+    async def _project_plan(self, plan: dict[str, Any]) -> dict[str, Any]:
+        """compile 后的公共投影段：ffprobe（A07 会话缓存）→ 后台投影。"""
         probe_by_asset: dict[str, dict[str, Any]] = {}
         for item in plan["inputs"]:
             key = str(item["fingerprint"])
@@ -248,19 +265,68 @@ class RenderCoordinator:
                 )
             probe_by_asset[item["asset_id"]] = self.preview_probe_cache[key]
         _bundle, presets, _font = self.caption_resources.load()
-        ir = await ir_project_executor().project(plan, probe_by_asset,
-                                                 resolved_caption_styles(presets))
-        payload = {
-            "schema_version": 1,
-            "content_fingerprint": fingerprint,
-            "timeline_revision_id": plan["timeline_revision_id"],
-            "output_ratio": output_ratio,
-            "ir": ir,
+        return await ir_project_executor().project(plan, probe_by_asset,
+                                                   resolved_caption_styles(presets))
+
+    # ---- C20b：窗口化 IR v2（manifest/window） ----
+
+    async def preview_ir_manifest(self, project_id: str, timeline_revision_id: str | None,
+                                  output_ratio: str) -> dict[str, Any]:
+        """v2 manifest：非帧字段的显式 DTO（canvas/inputs/segments/captions 等）。
+
+        首次调用做一次全量投影并缓存（manifest 字段 + 全量帧表——窗口请求
+        从同一缓存切片，manifest_id 与窗口数据同源一致）；后续窗口请求不再
+        触发投影（C20"首窗不扫描全部时间帧"的缓存层实现——重复采样后同一
+        revision 的窗口请求零投影）。"""
+        bundle = await self._ir_v2_bundle(project_id, timeline_revision_id, output_ratio)
+        return bundle["manifest"]
+
+    async def preview_ir_window(self, project_id: str, timeline_revision_id: str | None,
+                                output_ratio: str, start_frame: int,
+                                frame_count: int) -> dict[str, Any]:
+        """v2 窗口：[start_frame, start_frame+count) 的帧表切片。
+
+        frame_count 1..300（计划硬上限）；越界/非法参数 ValueError 由
+        endpoint 转 400。窗口帧与 v1 全量投影逐帧深度相等（同一投影缓存
+        切片——构造性保证）。
+        """
+        from .ir_window import MAX_WINDOW_FRAMES
+
+        if start_frame < 0 or frame_count < 1 or frame_count > MAX_WINDOW_FRAMES:
+            raise ValueError(
+                f"frame_count 必须在 1..{MAX_WINDOW_FRAMES}，start_frame >= 0")
+        bundle = await self._ir_v2_bundle(project_id, timeline_revision_id, output_ratio)
+        total = bundle["manifest"]["total_frames"]
+        if start_frame >= total:
+            raise ValueError(f"start_frame {start_frame} 超出总帧数 {total}")
+        count = min(frame_count, total - start_frame)
+        return {
+            "schema": bundle["manifest"]["schema"],
+            "manifest_id": bundle["manifest"]["manifest_id"],
+            "start_frame": start_frame,
+            "frame_count": count,
+            "frames": bundle["frames"][start_frame:start_frame + count],
         }
-        self.preview_ir_cache[fingerprint] = payload
-        while len(self.preview_ir_cache) > 4:
-            self.preview_ir_cache.pop(next(iter(self.preview_ir_cache)))
-        return payload
+
+    async def _ir_v2_bundle(self, project_id: str, timeline_revision_id: str | None,
+                            output_ratio: str) -> dict[str, Any]:
+        """manifest+全量帧的会话缓存（键 = content_fingerprint；LRU 2 条——
+        帧表体量大，与 v1 缓存（4 条）分池）。"""
+        plan = self.compiler.compile(project_id, timeline_revision_id,
+                                     "authoritative_preview", output_ratio=output_ratio)
+        fingerprint = plan["content_fingerprint"]
+        cached = self.preview_ir_v2_cache.get(fingerprint)
+        if cached is not None:
+            return cached
+        from .ir_window import build_manifest
+
+        ir = await self._project_plan(plan)
+        bundle = {"manifest": build_manifest(plan, {}, None, ir=ir), "frames": ir["frames"]}
+        # build_manifest 的 caption_styles 来自 ir（投影已解析）——不走二次解析
+        self.preview_ir_v2_cache[fingerprint] = bundle
+        while len(self.preview_ir_v2_cache) > 2:
+            self.preview_ir_v2_cache.pop(next(iter(self.preview_ir_v2_cache)))
+        return bundle
 
     def cleanup_orphans(self) -> None:
         with self.database.connection() as db:

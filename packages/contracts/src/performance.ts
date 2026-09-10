@@ -451,3 +451,127 @@ export const parsePcmChunkMediaInput = (value: unknown): PcmChunkMediaInput =>
   parse(value, isPcmChunkMediaInput, "PcmChunkMediaInput");
 export const parsePcmChunkMediaResponse = (value: unknown): PcmChunkMediaResponse =>
   parse(value, isPcmChunkMediaResponse, "PcmChunkMediaResponse");
+
+// ---- C20：窗口化 IR v2（preview-ir-v2 manifest/window） ----
+
+/** v2 schema 常量（与 Core rendering/ir_window.py 一致）。 */
+export const PREVIEW_IR_V2_SCHEMA = "preview-ir-v2" as const;
+/** 每窗帧数硬上限（计划 C20：1..300）。 */
+export const PREVIEW_IR_V2_MAX_WINDOW_FRAMES = 300 as const;
+
+/** v2 manifest 请求输入。 */
+export interface PreviewIrV2ManifestInput {
+  project_id: ProjectId;
+  timeline_revision_id?: string | null;
+  output_ratio?: string;
+}
+
+/** v2 窗口请求输入（start_frame 含、frame_count 1..300）。 */
+export interface PreviewIrV2WindowInput {
+  project_id: ProjectId;
+  start_frame: number;
+  frame_count: number;
+  timeline_revision_id?: string | null;
+  output_ratio?: string;
+}
+
+/** v2 manifest：非帧字段的显式 DTO（frames 不在 manifest 中）。 */
+export interface PreviewIrV2Manifest {
+  schema: typeof PREVIEW_IR_V2_SCHEMA;
+  projector_version: number;
+  /** 绑定 project/revision/output profile/toolchain（内容指纹 + 模式 + 规格）。 */
+  manifest_id: string;
+  timeline_revision_id: string;
+  content_fingerprint: string;
+  fps_num: number;
+  fps_den: number;
+  total_frames: number;
+  duration_us: number;
+  canvas: Record<string, unknown>;
+  inputs: Array<Record<string, unknown>>;
+  segments: Array<Record<string, unknown>>;
+  captions: Array<Record<string, unknown>>;
+  caption_styles: Record<string, unknown>;
+  transition_windows: Array<Record<string, unknown>>;
+  known_approximations: string[];
+}
+
+/** v2 窗口响应：帧表切片（帧结构与 v1 PreviewFrame 同语义）。 */
+export interface PreviewIrV2Window {
+  schema: typeof PREVIEW_IR_V2_SCHEMA;
+  manifest_id: string;
+  start_frame: number;
+  frame_count: number;
+  frames: Array<Record<string, unknown>>;
+}
+
+const V2_SCHEMA = PREVIEW_IR_V2_SCHEMA;
+const MANIFEST_ID = /^sha256:[a-f0-9]{64}@.+@.+$/;
+const RATIO = /^(169|916|11|43|34)$/;
+
+function frameRows(value: unknown): value is Array<Record<string, unknown>> {
+  return Array.isArray(value) && value.every(item => record(item) && !("path" in item));
+}
+
+function recordRows(value: unknown): value is Array<Record<string, unknown>> {
+  return Array.isArray(value) && value.every(item => record(item));
+}
+
+export function isPreviewIrV2ManifestInput(value: unknown): value is PreviewIrV2ManifestInput {
+  if (!record(value) || !only(value, ["project_id", "timeline_revision_id", "output_ratio"])) return false;
+  return id(value.project_id)
+    && (value.timeline_revision_id === undefined || value.timeline_revision_id === null || id(value.timeline_revision_id))
+    && (value.output_ratio === undefined || (typeof value.output_ratio === "string" && RATIO.test(value.output_ratio)));
+}
+
+export function isPreviewIrV2WindowInput(value: unknown): value is PreviewIrV2WindowInput {
+  if (!record(value) || !only(value, ["project_id", "start_frame", "frame_count", "timeline_revision_id", "output_ratio"])) return false;
+  return id(value.project_id)
+    && integer(value.start_frame, 0, Number.MAX_SAFE_INTEGER)
+    && integer(value.frame_count, 1, PREVIEW_IR_V2_MAX_WINDOW_FRAMES)
+    && (value.timeline_revision_id === undefined || value.timeline_revision_id === null || id(value.timeline_revision_id))
+    && (value.output_ratio === undefined || (typeof value.output_ratio === "string" && RATIO.test(value.output_ratio)));
+}
+
+export function isPreviewIrV2Manifest(value: unknown): value is PreviewIrV2Manifest {
+  if (!record(value) || !only(value, [
+    "schema", "projector_version", "manifest_id", "timeline_revision_id",
+    "content_fingerprint", "fps_num", "fps_den", "total_frames", "duration_us",
+    "canvas", "inputs", "segments", "captions", "caption_styles",
+    "transition_windows", "known_approximations",
+  ])) return false;
+  return value.schema === V2_SCHEMA
+    && nonnegative(value.projector_version)
+    && typeof value.manifest_id === "string" && MANIFEST_ID.test(value.manifest_id)
+    && id(value.timeline_revision_id)
+    && sha(value.content_fingerprint)
+    && integer(value.fps_num, 1, 1000)
+    && integer(value.fps_den, 1, 1000)
+    && integer(value.total_frames, 0, Number.MAX_SAFE_INTEGER)
+    && integer(value.duration_us, 0, Number.MAX_SAFE_INTEGER)
+    && record(value.canvas)
+    && recordRows(value.inputs) && recordRows(value.segments)
+    && recordRows(value.captions) && record(value.caption_styles)
+    && recordRows(value.transition_windows)
+    && Array.isArray(value.known_approximations)
+    && value.known_approximations.every((item: unknown) => typeof item === "string");
+}
+
+export function isPreviewIrV2Window(value: unknown): value is PreviewIrV2Window {
+  if (!record(value) || !only(value, ["schema", "manifest_id", "start_frame", "frame_count", "frames"])) return false;
+  return value.schema === V2_SCHEMA
+    && typeof value.manifest_id === "string" && MANIFEST_ID.test(value.manifest_id)
+    && integer(value.start_frame, 0, Number.MAX_SAFE_INTEGER)
+    && integer(value.frame_count, 1, PREVIEW_IR_V2_MAX_WINDOW_FRAMES)
+    && frameRows(value.frames)
+    && value.frames.length === value.frame_count;
+}
+
+export const parsePreviewIrV2ManifestInput = (value: unknown): PreviewIrV2ManifestInput =>
+  parse(value, isPreviewIrV2ManifestInput, "PreviewIrV2ManifestInput");
+export const parsePreviewIrV2WindowInput = (value: unknown): PreviewIrV2WindowInput =>
+  parse(value, isPreviewIrV2WindowInput, "PreviewIrV2WindowInput");
+export const parsePreviewIrV2Manifest = (value: unknown): PreviewIrV2Manifest =>
+  parse(value, isPreviewIrV2Manifest, "PreviewIrV2Manifest");
+export const parsePreviewIrV2Window = (value: unknown): PreviewIrV2Window =>
+  parse(value, isPreviewIrV2Window, "PreviewIrV2Window");

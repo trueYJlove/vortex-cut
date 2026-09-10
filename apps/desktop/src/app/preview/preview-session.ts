@@ -3,6 +3,7 @@ import { AudioSourceCache } from "./audio-source-cache.js";
 import { AudioStreamLoader } from "./audio-stream.js";
 import { PcmChunkCache, PCM_CHUNK_SAMPLES } from "./pcm-chunk-cache.js";
 import { activeInputIds } from "./ir.js";
+import { arrayFrameSource, type FrameSource } from "./frame-source.js";
 /** 合成预览会话：持有解码 worker、GL 执行器 worker（OffscreenCanvas）、纹理簿记
  * 与 WebAudio，对外提供 play/pause/seek 与时间/指标回调。
  *
@@ -213,6 +214,8 @@ export class PreviewSession {
   private static readonly BACKSCAN = 15;
 
   ir: Ir;
+  /** C20a：帧数据访问层（v1 = 全量数组零拷贝适配；v2 窗口化接入点）。 */
+  private frames: FrameSource;
   /** B13：本会话环深/预读（档位决策；压力收 5 时 LEAD 联动）。 */
   private ringDepth = PreviewSession.RING;
   /** B13：输入池（状态机 + 压力降级决策；播放 tick 驱动活跃集合）。 */
@@ -228,6 +231,7 @@ export class PreviewSession {
   private constructor(ir: Ir) {
     editorPerf.record("session_open", 0, this.perfId);
     this.ir = ir;
+    this.frames = arrayFrameSource(ir);
   }
 
   static async create(container: HTMLElement, ir: Ir,
@@ -412,7 +416,7 @@ export class PreviewSession {
 
   /** 当前帧画中画几何（IR 画布坐标）——合成画布手势层消费。 */
   pipBoxes(): Array<{ clipId: string; x: number; y: number; w: number; h: number }> {
-    const frame = this.ir.frames[Math.min(this.currentFrame, this.ir.frames.length - 1)];
+    const frame = this.frames.getFrame(Math.min(this.currentFrame, this.frames.frameCount - 1));
     if (!frame) return [];
     return frame.overlays.map(overlay => ({ clipId: overlay.clip_id, ...overlay.box }));
   }
@@ -443,6 +447,7 @@ export class PreviewSession {
     const segOf = (ir: Ir) => new Map(ir.segments.map(segment => [segment.clip_id, segment] as const));
     const oldSegs = segOf(this.ir);
     this.ir = nextIr;
+    this.frames = arrayFrameSource(nextIr); // C20a：换表同步换帧源（引用一致性保持）
     // B13：换表输入集合不变（sig 已校验）——池注册保持；时间窗重置活跃
     this.inputLastActive.forEach((_at, inputId) => this.inputLastActive.set(inputId, performance.now()));
     this.audioCacheBindingGeneration += 1;
@@ -482,7 +487,9 @@ export class PreviewSession {
 
   private rebuildPipOverlayIndex(): void {
     const index = new Map<string, IrOverlay[]>();
-    for (const frame of this.ir.frames) {
+    for (let n = 0; n < this.frames.frameCount; n++) {
+      const frame = this.frames.getFrame(n);
+      if (!frame) continue;
       for (const overlay of frame.overlays) {
         let list = index.get(overlay.clip_id);
         if (!list) { list = []; index.set(overlay.clip_id, list); }
@@ -579,7 +586,7 @@ export class PreviewSession {
     if (!pool) return;
     const now = performance.now();
     const active = new Set<string>(activeInputIds(frame));
-    const nextFrame = this.ir.frames[frame.n + 1];
+    const nextFrame = this.frames.getFrame(frame.n + 1);
     if (nextFrame) for (const id of activeInputIds(nextFrame)) active.add(id);
     for (const inputId of active) {
       this.inputLastActive.set(inputId, now);
@@ -663,7 +670,7 @@ export class PreviewSession {
     if (this.recomposeRaf || this.disposed) return;
     this.recomposeRaf = requestAnimationFrame(() => {
       this.recomposeRaf = 0;
-      const frame = this.ir.frames[Math.min(this.currentFrame, this.ir.frames.length - 1)];
+      const frame = this.frames.getFrame(Math.min(this.currentFrame, this.frames.frameCount - 1));
       if (frame && this.frameReady(frame)) this.compose(frame);
     });
   }
@@ -771,15 +778,16 @@ export class PreviewSession {
     const from = Math.max(0, this.currentFrame, target - PreviewSession.BACKSCAN);
     // B13：LEAD 联动环深（环深收 5 时 LEAD=2——写深不覆盖未展示槽位）
     const lead = Math.min(PreviewSession.LEAD, this.ringDepth - 3);
-    const to = Math.min(target + lead, this.ir.frames.length - 1);
-    const toEnter = Math.min(target + PreviewSession.LEAD_ENTER, this.ir.frames.length - 1);
+    const to = Math.min(target + lead, this.frames.frameCount - 1);
+    const toEnter = Math.min(target + PreviewSession.LEAD_ENTER, this.frames.frameCount - 1);
     const needsByInput = new Map<string, Set<number>>();
     const enterNeeds = new Map<string, Set<number>>();
     /** 每输入在 ≤target 帧的最大展示需求 src_n（升序遍历末次写入即最大；链游标封顶锚点）。 */
     const displayMaxByInput = new Map<string, number>();
     const collectNeeds = (fromN: number, toN: number, into: Map<string, Set<number>>, recordDisplayMax = false) => {
       for (let n = fromN; n <= toN; n++) {
-        const frame = this.ir.frames[n]!;
+        const frame = this.frames.getFrame(n);
+        if (!frame) continue;
         const needs: Array<[string, number, boolean]> = [...mainNeeds(frame)];
         for (const [inputId, srcN] of overlayNeeds(frame)) needs.push([inputId, srcN, false]);
         for (const [inputId, srcN, shadow] of needs) {
@@ -835,7 +843,9 @@ export class PreviewSession {
     }
     // 转场影子槽（共享输入第二帧）：直发（ack 后就绪；窗口内单帧）
     for (let n = target; n <= to; n++) {
-      for (const [inputId, srcN, shadow] of mainNeeds(this.ir.frames[n]!)) {
+      const frame = this.frames.getFrame(n);
+      if (!frame) continue;
+      for (const [inputId, srcN, shadow] of mainNeeds(frame)) {
         if (!shadow) continue;
         const rig = this.rigs.get(inputId);
         if (!rig || rig.kind !== "video" || rig.shadowUploaded === srcN || rig.shadowInFlight !== null) continue;
@@ -1230,8 +1240,9 @@ export class PreviewSession {
     const now = performance.now();
     this.dragMode = now - this.lastSeekWall < 250;
     this.lastSeekWall = now;
-    const index = Math.max(0, Math.min(target, this.ir.frames.length - 1));
-    const frame = this.ir.frames[index]!;
+    const index = Math.max(0, Math.min(target, this.frames.frameCount - 1));
+    const frame = this.frames.getFrame(index);
+    if (!frame) return -1;
     this.currentFrame = index;
     this.latestTarget = index;
     const requests: Array<Promise<void>> = [];
@@ -1278,7 +1289,7 @@ export class PreviewSession {
 
   play(): void {
     if (this.playing || this.disposed) return;
-    const last = this.ir.frames.length - 1;
+    const last = this.frames.frameCount - 1;
     // 播放头已在片尾：回卷从头再播（标准播放器行为；此前第二次播放立即"到尾"暂停）。
     // 回卷是用户驱动的向后跳转：显式重置各输入解码链（游标回 -1，pump 冷启重建）。
     if (this.currentFrame >= last) { this.currentFrame = 0; this.resetChains(); }
@@ -1303,17 +1314,19 @@ export class PreviewSession {
       let composed = -1;
       const floor = Math.max(0, Math.max(this.currentFrame - 1, target - PreviewSession.BACKSCAN));
       for (let n = target; n >= floor; n--) {
-        if (this.frameReady(this.ir.frames[n]!)) { composed = n; break; }
+        const frame = this.frames.getFrame(n);
+        if (frame && this.frameReady(frame)) { composed = n; break; }
       }
       if (composed >= 0 && composed > this.currentFrame) {
         const taskStart = performance.now();
-        this.compose(this.ir.frames[composed]!);
+        const composedFrame = this.frames.getFrame(composed)!;
+        this.compose(composedFrame);
         this.taskTimes.push(performance.now() - taskStart);
         if (this.taskTimes.length > 1200) this.taskTimes.splice(0, this.taskTimes.length - 1200);
         this.currentFrame = composed;
         this.lastAdvanceWall = now;
-        this.onTimeUs?.(this.ir.frames[composed]!.t_us);
-        this.poolDrive(this.ir.frames[composed]!); // B13：活跃/idle/压力驱动
+        this.onTimeUs?.(composedFrame.t_us);
+        this.poolDrive(composedFrame); // B13：活跃/idle/压力驱动
       }
       // 饥饿护栏：落后过多 → 重锚时钟（播放按解码吞吐放慢），而不是让目标
       // 无限狂奔、丢帧按 tick 线性堆积（旧实现冻结+丢帧 404 的直接根源）。

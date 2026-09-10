@@ -31,7 +31,7 @@ function setup() {
 }
 
 describe("B10 derived media IPC", () => {
-  it("只注册十个白名单 channel（B10 三个 + B11 三个 + B14 两个 + B15 两个）", () => {
+  it("只注册十二个白名单 channel（B10×3 + B11×3 + B14×2 + B15×2 + C20×2）", () => {
     const { handlers } = setup();
     expect([...handlers.keys()]).toEqual([
       "derived-media:lookup",
@@ -44,6 +44,8 @@ describe("B10 derived media IPC", () => {
       "waveform:media",
       "pcm-chunk:ensure",
       "pcm-chunk:media",
+      "preview-ir-v2:manifest",
+      "preview-ir-v2:window",
     ]);
   });
 
@@ -400,5 +402,92 @@ describe("B15 pcm-chunk IPC", () => {
       project_id: "project_1", asset_id: "asset_1", start_sample: 42,
     })).rejects.toThrow("Invalid start_sample");
     expect(registerDerivedMedia).not.toHaveBeenCalled();
+  });
+});
+
+describe("C20 窗口化 IR v2 IPC", () => {
+  const manifestId = `${hashA}@authoritative_preview@preview-169-v1`;
+  const manifest = {
+    schema: "preview-ir-v2", projector_version: 1, manifest_id: manifestId,
+    timeline_revision_id: "rev_1", content_fingerprint: hashA,
+    fps_num: 30, fps_den: 1, total_frames: 90, duration_us: 3_000_000,
+    canvas: { width: 960, height: 540, fps: 30 },
+    inputs: [{ input_id: "I0", asset_id: "asset_1", asset_kind: "video" }],
+    segments: [], captions: [], caption_styles: {},
+    transition_windows: [], known_approximations: [],
+  };
+
+  it("manifest 走 UI 通道并返回契约校验后的 DTO（无路径字段）", async () => {
+    const { handlers, fetchWithUi } = setup();
+    fetchWithUi.mockResolvedValueOnce(manifest);
+    const result = await handlers.get("preview-ir-v2:manifest")?.({}, {
+      project_id: "project_1", timeline_revision_id: "rev_1", output_ratio: "169",
+    });
+    expect(fetchWithUi).toHaveBeenCalledWith(
+      "/api/v1/projects/project_1/preview-ir-v2/manifest?timeline_revision_id=rev_1&output_ratio=169",
+      undefined,
+    );
+    expect(result).toEqual(manifest);
+  });
+
+  it("window 走 UI 通道（start/frame_count query）并校验响应", async () => {
+    const { handlers, fetchWithUi } = setup();
+    const window = {
+      schema: "preview-ir-v2", manifest_id: manifestId,
+      start_frame: 30, frame_count: 2,
+      frames: [{ n: 30, t_us: 1_000_000, main: { kind: "black" }, overlays: [], captions: [] },
+               { n: 31, t_us: 1_033_333, main: { kind: "black" }, overlays: [], captions: [] }],
+    };
+    fetchWithUi.mockResolvedValueOnce(window);
+    const result = await handlers.get("preview-ir-v2:window")?.({}, {
+      project_id: "project_1", start_frame: 30, frame_count: 2,
+    });
+    expect(fetchWithUi).toHaveBeenCalledWith(
+      "/api/v1/projects/project_1/preview-ir-v2/window?start_frame=30&frame_count=2",
+      undefined,
+    );
+    expect(result).toEqual(window);
+  });
+
+  it("manifest/window 严格拒绝未知键/非法参数/越界 frame_count", async () => {
+    const { handlers, fetchWithUi } = setup();
+    await expect(handlers.get("preview-ir-v2:manifest")?.({}, {
+      project_id: "project_1", extra: 1,
+    })).rejects.toThrow();
+    await expect(handlers.get("preview-ir-v2:manifest")?.({}, {
+      project_id: "../private",
+    })).rejects.toThrow("Invalid project_id");
+    await expect(handlers.get("preview-ir-v2:window")?.({}, {
+      project_id: "project_1", start_frame: -1, frame_count: 10,
+    })).rejects.toThrow();
+    await expect(handlers.get("preview-ir-v2:window")?.({}, {
+      project_id: "project_1", start_frame: 0, frame_count: 301,
+    })).rejects.toThrow();
+    await expect(handlers.get("preview-ir-v2:window")?.({}, {
+      project_id: "project_1", start_frame: 0, frame_count: 0,
+    })).rejects.toThrow();
+    await expect(handlers.get("preview-ir-v2:window")?.({}, {
+      project_id: "project_1", start_frame: 0,
+    })).rejects.toThrow("Invalid window parameters");
+    expect(fetchWithUi).not.toHaveBeenCalled();
+  });
+
+  it("响应含路径形态字段被剥离（Renderer 不收路径）；非法形状被拒", async () => {
+    const { handlers, fetchWithUi } = setup();
+    // path 字段被 rendererSafe 剥离后通过契约校验（与 B10/B14/B15 通道同语义）
+    fetchWithUi.mockResolvedValueOnce({ ...manifest, path: "C:\\private\\ir.json" });
+    const result = await handlers.get("preview-ir-v2:manifest")?.({}, { project_id: "project_1" }) as Record<string, unknown>;
+    expect(result.path).toBeUndefined();
+    expect(result).toEqual(manifest);
+    fetchWithUi.mockReset();
+    // frames.length !== frame_count → 拒绝
+    fetchWithUi.mockResolvedValueOnce({ schema: "preview-ir-v2", manifest_id: manifestId, start_frame: 0, frame_count: 2, frames: [] });
+    await expect(handlers.get("preview-ir-v2:window")?.({}, {
+      project_id: "project_1", start_frame: 0, frame_count: 2,
+    })).rejects.toThrow();
+    fetchWithUi.mockReset();
+    // schema 不匹配（v1 形状冒充 v2）→ 拒绝
+    fetchWithUi.mockResolvedValueOnce({ ...manifest, schema: "preview-ir-v1" });
+    await expect(handlers.get("preview-ir-v2:manifest")?.({}, { project_id: "project_1" })).rejects.toThrow();
   });
 });

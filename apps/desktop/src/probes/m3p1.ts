@@ -10,6 +10,7 @@ import { probeBridge } from "./common/bridge.js";
 import { setupProbe, createVideo, waitVideoReady, collectEnvironment, videoDecoderSupportEvidence } from "./common/shell.js";
 import { Compositor, assertHardwareRenderer } from "../app/preview/compositor.js";
 import { activeInputIds, sourceFrameAt, type Ir } from "../app/preview/ir.js";
+import { arrayFrameSource, type FrameSource } from "../app/preview/frame-source.js";
 import { mulberry32, summarize, P1_SCRUB_SEED } from "./common/stats.js";
 
 const FRAME_BUDGET_MS = 1000 / 30;
@@ -18,7 +19,7 @@ const ROUNDS = 3;
 
 interface InputWindow { inputId: string; startFrame: number; endFrame: number; startSrcFrame: number; rate: number }
 
-function computeInputWindows(ir: Ir): InputWindow[] {
+function computeInputWindows(ir: Ir, frames: FrameSource): InputWindow[] {
   const windows: InputWindow[] = [];
   const rateByInput = new Map<string, number>();
   for (const segment of ir.segments) {
@@ -28,7 +29,9 @@ function computeInputWindows(ir: Ir): InputWindow[] {
     let start = -1;
     let startSrc = 0;
     let end = -1;
-    for (const frame of ir.frames) {
+    for (let n = 0; n < frames.frameCount; n++) {
+      const frame = frames.getFrame(n);
+      if (!frame) continue;
       const src = sourceFrameAt(frame, input.input_id);
       if (src !== null) {
         if (start < 0) { start = frame.n; startSrc = src; }
@@ -141,6 +144,8 @@ export async function runProbe(): Promise<void> {
   try {
     const { ir } = shell;
     const bridge = probeBridge();
+    // C20a：帧数据走 FrameSource（v1 数组适配；探针与预览会话同一访问层）
+    const frameSource = arrayFrameSource(ir);
     const compositor = new Compositor(shell.canvas, ir);
     shell.status("P1: loading videos");
     const videosByInput = new Map<string, HTMLVideoElement>();
@@ -152,7 +157,7 @@ export async function runProbe(): Promise<void> {
       compositor.registerVideo(input.input_id, video);
       videosByInput.set(input.input_id, video);
     }
-    const windows = computeInputWindows(ir);
+    const windows = computeInputWindows(ir, arrayFrameSource(ir));
     const adapterInfo = compositor.gpuRendererInfo();
     const hardwareCheck = assertHardwareRenderer(adapterInfo.adapter);
     if (hardwareCheck.software) throw new Error(`software rendering detected (R7): ${adapterInfo.adapter}`);
@@ -204,7 +209,8 @@ export async function runProbe(): Promise<void> {
               handle.video.pause();
             }
           }
-          const frame = ir.frames[target]!;
+          const frame = frameSource.getFrame(target);
+          if (!frame) { requestAnimationFrame(tick); return; }
           for (const inputId of activeInputIds(frame)) {
             const handle = compositor.videos.get(inputId);
             if (!handle) continue;
@@ -263,7 +269,8 @@ export async function runProbe(): Promise<void> {
     const scrubSamples: Array<Record<string, number>> = [];
     for (let index = 0; index < 100; index++) {
       const target = Math.min(durationFrames - 1, Math.floor(scrubRng() * durationFrames));
-      const frame = ir.frames[target]!;
+      const frame = frameSource.getFrame(target);
+      if (!frame) continue;
       const t0 = performance.now();
       let maxDev = 0;
       for (const inputId of activeInputIds(frame)) {

@@ -16,6 +16,7 @@ import { probeBridge } from "./common/bridge.js";
 import { setupProbe, collectEnvironment } from "./common/shell.js";
 import { Compositor, assertHardwareRenderer } from "../app/preview/compositor.js";
 import type { IrFrame } from "../app/preview/ir.js";
+import { arrayFrameSource } from "../app/preview/frame-source.js";
 
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = "";
@@ -119,10 +120,12 @@ export async function runProbe(): Promise<void> {
     const { ir, session } = shell;
     const bridge = probeBridge();
     const compositor = new Compositor(shell.canvas, ir);
+    // C20a：帧数据走 FrameSource（v1 数组适配；探针与预览会话同一访问层）
+    const frameSource = arrayFrameSource(ir);
     const sampleFrames = session.sample?.sample_frames;
     // 字幕采样集由 IR 逐帧推导（任何字幕激活的采样帧都出无字幕对照帧）
     const captionFrames = new Set(
-      (session.sample?.sample_frames ?? []).filter(n => (ir.frames[n]?.captions.length ?? 0) > 0));
+      (session.sample?.sample_frames ?? []).filter(n => (frameSource.getFrame(n)?.captions.length ?? 0) > 0));
     if (!sampleFrames?.length) throw new Error("missing sample frame list (AIVS_M3_PROBE_SAMPLE)");
 
     // 字幕字体经 aivideo:// 票据加载（与权威端 libass 同一字体文件）
@@ -178,7 +181,7 @@ export async function runProbe(): Promise<void> {
     const rows: Array<Record<string, unknown>> = [];
     let index = 0;
     for (const n of sampleFrames) {
-      const frame: IrFrame | undefined = ir.frames[n];
+      const frame: IrFrame | undefined = frameSource.getFrame(n);
       if (!frame) throw new Error(`sample frame ${n} outside IR duration`);
       const t0 = performance.now();
       const main = frame.main;

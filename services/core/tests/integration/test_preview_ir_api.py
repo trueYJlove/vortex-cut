@@ -167,3 +167,79 @@ def test_preview_ir_unknown_revision(tmp_path: Path, monkeypatch) -> None:
         response = client.get("/api/v1/projects/proj-ir/preview-ir",
                               params={"timeline_revision_id": "rev-missing"}, headers=ui)
     assert response.status_code == 404
+
+
+# ---- C20b：窗口化 IR v2（manifest/window；v1 响应形状不变） ----
+
+
+def test_preview_ir_v2_manifest_and_window(tmp_path: Path, monkeypatch) -> None:
+    client, _settings = _app(tmp_path, monkeypatch)
+    with client:
+        ui = _ui(client)
+        video = _fixture_video(tmp_path)
+        _seed(client, video)
+
+        manifest = client.get("/api/v1/projects/proj-ir/preview-ir-v2/manifest", headers=ui)
+        assert manifest.status_code == 200, manifest.text
+        body = manifest.json()
+        assert body["schema"] == "preview-ir-v2"
+        assert body["total_frames"] == 90
+        assert "frames" not in body  # manifest 不含帧表
+        assert body["fps_num"] == 30 and body["fps_den"] == 1
+        assert body["timeline_revision_id"] == "rev-ir"
+
+        # 窗口帧表与 v1 逐帧深相等（同源投影切片）
+        v1 = client.get("/api/v1/projects/proj-ir/preview-ir", headers=ui).json()["ir"]
+        window = client.get("/api/v1/projects/proj-ir/preview-ir-v2/window",
+                            params={"start_frame": 30, "frame_count": 30}, headers=ui)
+        assert window.status_code == 200, window.text
+        payload = window.json()
+        assert payload["manifest_id"] == body["manifest_id"]
+        assert payload["start_frame"] == 30 and payload["frame_count"] == 30
+        assert payload["frames"] == v1["frames"][30:60]  # v1 深相等
+        # 帧内容抽查：clipB 段（帧 60+）与含关键帧数值
+        tail = client.get("/api/v1/projects/proj-ir/preview-ir-v2/window",
+                          params={"start_frame": 60, "frame_count": 30}, headers=ui).json()
+        assert tail["frame_count"] == 30
+        assert tail["frames"] == v1["frames"][60:90]
+        assert tail["frames"][0]["main"]["clip_id"] == "clipB"
+
+
+def test_preview_ir_v2_window_validation(tmp_path: Path, monkeypatch) -> None:
+    client, _settings = _app(tmp_path, monkeypatch)
+    with client:
+        ui = _ui(client)
+        video = _fixture_video(tmp_path)
+        _seed(client, video)
+        base = "/api/v1/projects/proj-ir/preview-ir-v2/window"
+        # 参数闸门：count 0 / >300 / start<0 / start 越界 → 400
+        assert client.get(base, params={"start_frame": 0, "frame_count": 0}, headers=ui).status_code == 400
+        assert client.get(base, params={"start_frame": 0, "frame_count": 301}, headers=ui).status_code == 400
+        assert client.get(base, params={"start_frame": -1, "frame_count": 30}, headers=ui).status_code == 400
+        out_of_range = client.get(base, params={"start_frame": 90, "frame_count": 10}, headers=ui)
+        assert out_of_range.status_code == 400
+        assert out_of_range.json()["error"]["code"] == "PREVIEW_IR_WINDOW_INVALID"
+        # 非法 ratio → 400（与 v1 同枚举）
+        bad_ratio = client.get(base, params={"start_frame": 0, "frame_count": 30, "output_ratio": "abc"}, headers=ui)
+        assert bad_ratio.status_code == 400
+
+
+def test_preview_ir_v2_manifest_ratio_and_auth(tmp_path: Path, monkeypatch) -> None:
+    client, _settings = _app(tmp_path, monkeypatch)
+    with client:
+        video = _fixture_video(tmp_path)
+        _seed(client, video)
+        ui = _ui(client)
+        # 竖屏 manifest：canvas 与 manifest_id 换档
+        portrait = client.get("/api/v1/projects/proj-ir/preview-ir-v2/manifest",
+                              params={"output_ratio": "916"}, headers=ui)
+        assert portrait.status_code == 200
+        assert portrait.json()["canvas"]["width"] == 540
+        landscape = client.get("/api/v1/projects/proj-ir/preview-ir-v2/manifest", headers=ui)
+        assert portrait.json()["manifest_id"] != landscape.json()["manifest_id"]
+        # 未授权（无 token）→ 401（同 client/同数据）
+        anonymous = client.get("/api/v1/projects/proj-ir/preview-ir-v2/manifest")
+        assert anonymous.status_code == 401
+        anonymous_window = client.get("/api/v1/projects/proj-ir/preview-ir-v2/window",
+                                      params={"start_frame": 0, "frame_count": 10})
+        assert anonymous_window.status_code == 401

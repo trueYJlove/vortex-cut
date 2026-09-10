@@ -5,6 +5,10 @@ import {
   parsePcmChunkDescription,
   parsePcmChunkMediaResponse,
   parsePcmChunkRequestInput,
+  parsePreviewIrV2Manifest,
+  parsePreviewIrV2ManifestInput,
+  parsePreviewIrV2Window,
+  parsePreviewIrV2WindowInput,
   parsePreviewSourceDescription,
   parsePreviewSourceJobRequestInput,
   parsePreviewSourceJobResponse,
@@ -300,6 +304,59 @@ export function registerPerformanceIpc({ ipc, fetchWithUi, resolveDerived, resol
       status: "ready",
       size_bytes: resolved.size_bytes,
     });
+  });
+
+  // ---- C20：窗口化 IR v2（manifest/window；UI 通道直通 Core 端点） ----
+
+  const previewIrV2Query = (input: {
+    timeline_revision_id?: string | null; output_ratio?: string;
+  }): string => {
+    const params = new URLSearchParams();
+    if (input.timeline_revision_id) params.set("timeline_revision_id", input.timeline_revision_id);
+    if (input.output_ratio) params.set("output_ratio", input.output_ratio);
+    return params.toString();
+  };
+
+  ipc.handle("preview-ir-v2:manifest", async (_event, value) => {
+    const input = asRecord(value, ["project_id", "timeline_revision_id", "output_ratio"], "preview ir v2 manifest");
+    const request = parsePreviewIrV2ManifestInput({
+      project_id: asId(input.project_id, "project_id"),
+      timeline_revision_id: input.timeline_revision_id ?? undefined,
+      output_ratio: input.output_ratio ?? undefined,
+    });
+    const query = previewIrV2Query(request);
+    const manifest = rendererSafe(await fetchSafe(
+      `/api/v1/projects/${request.project_id}/preview-ir-v2/manifest${query ? `?${query}` : ""}`,
+    ));
+    if (JSON.stringify(manifest).includes("path")) throw new Error("Invalid PreviewIrV2Manifest");
+    return parsePreviewIrV2Manifest(manifest);
+  });
+
+  ipc.handle("preview-ir-v2:window", async (_event, value) => {
+    const input = asRecord(
+      value,
+      ["project_id", "start_frame", "frame_count", "timeline_revision_id", "output_ratio"],
+      "preview ir v2 window",
+    );
+    if (typeof input.start_frame !== "number" || typeof input.frame_count !== "number") {
+      throw new Error("Invalid window parameters");
+    }
+    const request = parsePreviewIrV2WindowInput({
+      project_id: asId(input.project_id, "project_id"),
+      start_frame: input.start_frame,
+      frame_count: input.frame_count,
+      timeline_revision_id: input.timeline_revision_id ?? undefined,
+      output_ratio: input.output_ratio ?? undefined,
+    });
+    const params = new URLSearchParams();
+    params.set("start_frame", String(request.start_frame));
+    params.set("frame_count", String(request.frame_count));
+    const query = previewIrV2Query(request);
+    const window = rendererSafe(await fetchSafe(
+      `/api/v1/projects/${request.project_id}/preview-ir-v2/window?${params.toString()}${query ? `&${query}` : ""}`,
+    ));
+    if (JSON.stringify(window).includes("path")) throw new Error("Invalid PreviewIrV2Window");
+    return parsePreviewIrV2Window(window);
   });
 }
 

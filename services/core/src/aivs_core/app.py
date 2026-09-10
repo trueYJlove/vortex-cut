@@ -1806,6 +1806,55 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except DomainError as exc:
             raise _domain(exc) from exc
 
+    # ---- C20b：窗口化 IR v2（独立 endpoint；v1 响应形状不变） ----
+
+    @app.get("/api/v1/projects/{project_id}/preview-ir-v2/manifest")
+    async def get_preview_ir_v2_manifest(
+        project_id: str,
+        timeline_revision_id: str | None = None,
+        output_ratio: str = "169",
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """C20 manifest：非帧字段显式 DTO（canvas/inputs/segments/captions 等）。
+
+        与 v1 同鉴权（UI token）；manifest_id 绑定 revision/输出规格。"""
+        if output_ratio not in {"169", "916", "11", "43", "34"}:
+            raise _error("PREVIEW_IR_RATIO_UNSUPPORTED", "合成预览画布比例不合法", 400)
+        try:
+            return await state.render_coordinator.preview_ir_manifest(
+                project_id, timeline_revision_id, output_ratio)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/projects/{project_id}/preview-ir-v2/window")
+    async def get_preview_ir_v2_window(
+        project_id: str,
+        start_frame: int,
+        frame_count: int,
+        timeline_revision_id: str | None = None,
+        output_ratio: str = "169",
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """C20 窗口帧表：[start_frame, start_frame+frame_count) 的 v1 同语义帧。
+
+        frame_count 1..300（计划硬上限）；越界/非法 400（PREVIEW_IR_WINDOW_INVALID）。
+        同 revision 的窗口请求走服务端缓存切片（manifest 与窗口同源投影）。"""
+        from .rendering.ir_window import MAX_WINDOW_FRAMES
+
+        if output_ratio not in {"169", "916", "11", "43", "34"}:
+            raise _error("PREVIEW_IR_RATIO_UNSUPPORTED", "合成预览画布比例不合法", 400)
+        if start_frame < 0 or frame_count < 1 or frame_count > MAX_WINDOW_FRAMES:
+            raise _error(
+                "PREVIEW_IR_WINDOW_INVALID",
+                f"窗口参数不合法（frame_count 1..{MAX_WINDOW_FRAMES}，start_frame >= 0）", 400)
+        try:
+            return await state.render_coordinator.preview_ir_window(
+                project_id, timeline_revision_id, output_ratio, start_frame, frame_count)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+        except ValueError as exc:
+            raise _error("PREVIEW_IR_WINDOW_INVALID", str(exc), 400) from exc
+
     @app.post("/api/v1/projects/{project_id}/derived-media/lookup")
     async def lookup_derived_media(
         project_id: str, request: DerivedMediaRequest,

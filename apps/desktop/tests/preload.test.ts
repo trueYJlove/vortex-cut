@@ -57,6 +57,7 @@ describe("Desktop preload 白名单", () => {
       ["getPreviewSource", [{}]], ["createPreviewSourceJob", [{}]], ["previewSourceMediaUrl", [{}]],
       ["getWaveform", [{}]], ["waveformMediaUrl", [{}]],
       ["ensurePcmChunk", [{}]], ["pcmChunkMediaUrl", [{}]],
+      ["getPreviewIrV2Manifest", [{}]], ["getPreviewIrV2Window", [{}]],
       ["updateEditorLoad", ["playing"]], ["diagnostics", []]
     ];
     for (const [name, args] of calls) await api[name](...args);
