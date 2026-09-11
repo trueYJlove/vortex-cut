@@ -1,0 +1,28 @@
+{
+  "scenarios": [
+    "F02"
+  ],
+  "runs": "1",
+  "seeks": "100",
+  "playback-seconds": "300",
+  "seed": "20260908",
+  "smoke": false,
+  "export_base": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\performance\\c20v2-f02-retry-01\\exports",
+  "baseline_status": "partial-B00-not-G0",
+  "commit": "93563bdab09614d2077594857d79b1b606e885a4",
+  "code_fingerprint": "1d43ced0955c3ca3a4472773da87db73334e5c742e24e4286c71be0eaf156452",
+  "dirty_files": "?? 1\n?? evidence/performance/c20v2-ab-20260911-v2/\n?? evidence/performance/c20v2-ab-20260911/\n?? evidence/performance/c20v2-diag-01/\n?? evidence/performance/c20v2-diag-02/\n?? evidence/performance/c20v2-diag-03/\n?? evidence/performance/c20v2-diag-04/\n?? evidence/performance/c20v2-smoke-01/",
+  "node": "v24.19.0",
+  "fixtures_used": [
+    {
+      "file": "F02.mp4",
+      "sha256": "bd34e2a32b6e9b3d2cb9945610678e2daab79f9ea3b0ee371003bd8c0064f464",
+      "duration_s": 900,
+      "size": "640x360",
+      "fps": 30,
+      "recipe": "testsrc2-av-cfr-v1",
+      "bytes": 233918530,
+      "coverage_note": "Media only; not historical PiP, VFR/B-frame, multilayer or audio-failure coverage."
+    }
+  ]
+}
