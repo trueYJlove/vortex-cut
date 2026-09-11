@@ -1,5 +1,5 @@
 /** Opt-in diagnostics for the complete editor. No media identifiers or payloads. */
-export type PerfKind = "compose" | "submitted" | "decode" | "upload" | "seek" | "reanchor" | "session_open" | "session_close" | "long_task" | "react_commit" | "timeline_draw";
+export type PerfKind = "compose" | "submitted" | "decode" | "upload" | "seek" | "reanchor" | "session_open" | "session_close" | "long_task" | "react_commit" | "timeline_draw" | "window_fetch";
 export interface PerfEvent { kind: PerfKind; at: number; duration: number; session: number; request: number; epoch: number; frame: number; input: number }
 export class PerfRecorder {
   enabled = false;

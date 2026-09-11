@@ -1277,6 +1277,14 @@ export class PreviewSession {
     this.dragMode = now - this.lastSeekWall < 250;
     this.lastSeekWall = now;
     const index = Math.max(0, Math.min(target, this.frames.frameCount - 1));
+    // C20 v2：目标帧所在窗口可能未就绪——先取窗（abort 语义 = 会话生命周期；
+    // 单窗 IPC ~50-70ms，拖拽快速档由 epoch latest-wins 兜住）。
+    const ensure = this.frames.ensureRange?.(index, index + 1, this.lifetime.signal);
+    if (ensure) {
+      await ensure.catch(() => undefined); // 取窗失败按缺帧处理（-1），不再向上抛
+      // dispose 后抵达：与作废的上传任务同语义（rejected），不产出 compose
+      if (this.disposed) throw new Error("session disposed");
+    }
     const frame = this.frames.getFrame(index);
     if (!frame) return -1;
     this.currentFrame = index;

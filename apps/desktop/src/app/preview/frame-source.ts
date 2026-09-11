@@ -15,6 +15,7 @@
 
 import type { Ir, IrFrame } from "./ir.js";
 import { PREVIEW_IR_V2_MAX_WINDOW_FRAMES } from "@aivideo/contracts";
+import { editorPerf } from "./perf-metrics.js";
 
 export interface FrameSource {
   /** 帧数（v1 = ir.frames.length；v2 = manifest.total_frames）。 */
@@ -113,15 +114,21 @@ export function windowedFrameSource(
     }
     if (signal?.aborted) return Promise.resolve();
     if (inFlight.size >= maxInFlight) {
-      // 在途已满：不为该窗口排队（seek 优先当前目标；调用方下次 ensureRange 重试）
+      // 在途已满：不为该窗口排队（seek 优先当前目标；调用方下次 ensureRange 重试）。
+      // 遥测 request=-1 标记"拒绝在途"（回放分析用：停滞窗口是否因在途满载未发起）。
+      editorPerf.record("window_fetch", 0, 0, -1, 0, startFrame);
       return Promise.resolve();
     }
     const count = Math.min(windowFrames, totalFrames - startFrame);
     if (count < 1) return Promise.resolve();
+    const fetchStart = performance.now();
     const promise = options.fetchWindow(startFrame, count, signal ?? new AbortController().signal)
       .then(response => {
         if (disposed) return;
-        if (response.manifest_id !== manifestId) return; // 失配丢弃
+        if (response.manifest_id !== manifestId) {
+          editorPerf.record("window_fetch", performance.now() - fetchStart, 1, startFrame, 0, startFrame);
+          return; // 失配丢弃
+        }
         if (abortedStarts.has(startFrame)) { abortedStarts.delete(startFrame); return; }
         const frames = new Map<number, IrFrame>();
         let bytes = 0;
@@ -135,8 +142,12 @@ export function windowedFrameSource(
         cache.set(startFrame, { startFrame, frames, estimatedBytes: bytes });
         totalBytes += bytes;
         evictIfNeeded();
+        // duration = 端到端窗口取数耗时;frame = 窗口起始帧
+        editorPerf.record("window_fetch", performance.now() - fetchStart, 2, startFrame, 0, startFrame);
       })
-      .catch(() => undefined) // 失败窗口保持未就绪；下次 ensureRange 重试
+      .catch(() => {
+        editorPerf.record("window_fetch", performance.now() - fetchStart, 3, startFrame, 0, startFrame);
+      }) // 3 = fetch 失败（网络/契约）
       .finally(() => { inFlight.delete(startFrame); });
     inFlight.set(startFrame, promise);
     return promise;
@@ -160,7 +171,12 @@ export function windowedFrameSource(
       const last = Math.min(totalFrames - 1, endFrameExclusive - 1);
       if (last < first) return Promise.resolve();
       const starts = new Set<number>();
-      for (let n = first; n <= last; n += windowFrames) starts.add(windowStartOf(n));
+      // 从 first 所在窗口的起点开始枚举（按 300 对齐）；从 first 原值起跳会
+      // 跳过 first 所在窗口之后的下一个窗口（mid-window 起点 + 步长 300 的
+      // 错位——G0 A/B F02 播放停滞的根因）。
+      for (let start = windowStartOf(first); start <= last; start += windowFrames) {
+        starts.add(start);
+      }
       const pending = [...starts]
         .filter(start => !cache.has(start))
         .sort((a, b) => Math.abs(a - first) - Math.abs(b - first)); // 目标优先
