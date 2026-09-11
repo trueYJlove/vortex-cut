@@ -228,10 +228,11 @@ export class PreviewSession {
   private readonly perfId = allocatePerfSession();
   private perfRequest = 0;
   private readonly lifetime = new AbortController();
-  private constructor(ir: Ir) {
+  private constructor(ir: Ir, frames?: FrameSource) {
     editorPerf.record("session_open", 0, this.perfId);
     this.ir = ir;
-    this.frames = arrayFrameSource(ir);
+    // C20 第二阶段：frames 可由调用方注入（v2 窗口帧源）；缺省 = v1 全量数组
+    this.frames = frames ?? arrayFrameSource(ir);
   }
 
   static async create(container: HTMLElement, ir: Ir,
@@ -239,9 +240,10 @@ export class PreviewSession {
                       audioByClip?: Map<string, SegmentAudioConfig>, signal?: AbortSignal,
                       sourceResolver?: PreviewSourceResolver | null,
                       resourceTier?: "conservative" | "balanced" | "high",
-                      pcmProjectId?: string | null): Promise<PreviewSession> {
+                      pcmProjectId?: string | null,
+                      frames?: FrameSource): Promise<PreviewSession> {
     throwIfAborted(signal);
-    const session = new PreviewSession(ir);
+    const session = new PreviewSession(ir, frames);
     // B13：档位 → 环深决策（保守档多输入收 5；LEAD 联动防写深覆盖）
     if (resourceTier) {
       session.ringDepth = ringDepthFor(resourceTier, ir.inputs.filter(input => input.asset_kind === "video").length);
@@ -441,13 +443,14 @@ export class PreviewSession {
    *  输入集合变化（加删素材）返回 false，调用方走整会话重建。
    *  A02 音频 rigs 同步：删除移除的 clip；输入/源窗口变化的 clip 重置播放
    *  位置；未变 clip 保留（worklet 已迁移的 buffer 不回退）。 */
-  replaceIr(nextIr: Ir): boolean {
+  replaceIr(nextIr: Ir, nextFrames?: FrameSource): boolean {
     const sig = (ir: Ir) => JSON.stringify(ir.inputs.map(item => [item.input_id, item.asset_id, item.asset_kind, item.geometry]));
     if (sig(this.ir) !== sig(nextIr)) return false;
     const segOf = (ir: Ir) => new Map(ir.segments.map(segment => [segment.clip_id, segment] as const));
     const oldSegs = segOf(this.ir);
     this.ir = nextIr;
-    this.frames = arrayFrameSource(nextIr); // C20a：换表同步换帧源（引用一致性保持）
+    // C20a：换表同步换帧源（引用一致性保持）；v2 注入帧源由调用方重建后传入
+    this.frames = nextFrames ?? arrayFrameSource(nextIr);
     // B13：换表输入集合不变（sig 已校验）——池注册保持；时间窗重置活跃
     this.inputLastActive.forEach((_at, inputId) => this.inputLastActive.set(inputId, performance.now()));
     this.audioCacheBindingGeneration += 1;
@@ -482,8 +485,14 @@ export class PreviewSession {
   }
 
   /** A04 clipId→overlay 引用表（create/replaceIr 后重建；手势路径免全帧扫描）。
-   *  一次遍历 O(总 overlay)；手势期每 move 只遍历该 clip 的 overlay 列表。 */
+   *  一次遍历 O(总 overlay)；手势期每 move 只遍历该 clip 的 overlay 列表。
+   *  v2 窗口帧源下"总 overlay"以已就绪帧为准（全帧表不在 Renderer）——
+   *  ensureRange 装配新窗口后由 markFramesAvailable 增量并入。 */
   private pipOverlayIndex: Map<string, IrOverlay[]> = new Map();
+  /** pip 索引已覆盖的最大帧号（v2 增量构建游标；v1 全量后与 frameCount-1 相等）。 */
+  private pipIndexCoveredUpTo = -1;
+  /** v2 外部帧源标记（replaceIr 时决定帧源重建责任方）。 */
+  private externalFrames = false;
 
   private rebuildPipOverlayIndex(): void {
     const index = new Map<string, IrOverlay[]>();
@@ -497,6 +506,26 @@ export class PreviewSession {
       }
     }
     this.pipOverlayIndex = index;
+    this.pipIndexCoveredUpTo = this.frames.frameCount - 1;
+  }
+
+  /** C20 v2：窗口装配完成后增量并入 pip 索引（只扫新就绪帧区间，免全帧重扫）。 */
+  private extendPipOverlayIndex(fromFrame: number, toFrameExclusive: number): void {
+    if (this.externalFrames) {
+      for (let n = Math.max(this.pipIndexCoveredUpTo + 1, fromFrame); n < toFrameExclusive; n++) {
+        const frame = this.frames.getFrame(n);
+        if (!frame) continue;
+        for (const overlay of frame.overlays) {
+          let list = this.pipOverlayIndex.get(overlay.clip_id);
+          if (!list) { list = []; this.pipOverlayIndex.set(overlay.clip_id, list); }
+          list.push(overlay);
+        }
+      }
+      this.pipIndexCoveredUpTo = Math.max(this.pipIndexCoveredUpTo, toFrameExclusive - 1);
+    } else if (toFrameExclusive - 1 > this.pipIndexCoveredUpTo) {
+      // v1：一次性全量重建语义保持
+      this.rebuildPipOverlayIndex();
+    }
   }
 
   /** 画中画中心点就地补丁：直改 IR 帧几何并重呈现（免会话重建，拖拽实时跟随）。
@@ -775,6 +804,11 @@ export class PreviewSession {
    *   → 向后跳（worker 冷启承接）。常规播放前沿贴合目标，不触发。
    */
   private pump(target: number): void {
+    // C20 v2：播放/预热触达新帧前，确保窗口已装配（v1 全量在场 = 无操作）。
+    // 预取范围 = 目标窗 + 下一窗（计划次序 4"当前窗口必需、下一窗口预取"）。
+    const ensure = this.frames.ensureRange?.(Math.max(0, target - PreviewSession.BACKSCAN),
+      Math.min(target + this.ringDepth, this.frames.frameCount - 1) + 1, this.lifetime.signal);
+    if (ensure) void ensure.then(() => this.extendPipOverlayIndex(0, this.frames.frameCount));
     const from = Math.max(0, this.currentFrame, target - PreviewSession.BACKSCAN);
     // B13：LEAD 联动环深（环深收 5 时 LEAD=2——写深不覆盖未展示槽位）
     const lead = Math.min(PreviewSession.LEAD, this.ringDepth - 3);

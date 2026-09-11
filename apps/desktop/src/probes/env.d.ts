@@ -2,6 +2,7 @@
 interface ImportMetaEnvProbe {
   readonly DEV: boolean;
   readonly VITE_AIVS_PERF?: string;
+  readonly VITE_AIVS_PREVIEW_IR_V2?: string;
   readonly PROD: boolean;
   readonly MODE: string;
 }

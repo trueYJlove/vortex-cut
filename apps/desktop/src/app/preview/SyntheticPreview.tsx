@@ -1,12 +1,20 @@
 /** 合成预览（M3-1）：消费 Core 投影的 preview-ir-v1 逐帧数值表，WebCodecs 解码 +
  * WebGL2 合成（OffscreenCanvas worker）的权威级实时预览。子集外语义自动降级
  * 回交互预览（PREVIEW_IR_UNSUPPORTED）。画布元素由会话自建（transferControl-
- * ToOffscreen 每元素仅可一次——会话生命周期 = 画布生命周期）。 */
+ * ToOffscreen 每元素仅可一次——会话生命周期 = 画布生命周期）。
+ * C20 第二阶段：VITE_AIVS_PREVIEW_IR_V2=1 时走 v2 manifest+窗口帧源
+ * （Renderer 不再驻留全量帧表）；默认 off = v1 路径逐字节不变。 */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { parseIr, type Ir } from "./ir.js";
 import { PreviewSession, type PreviewSessionMetrics, type SegmentAudioConfig } from "./preview-session.js";
 import { PreviewSourceResolver } from "./source-resolver.js";
 import { SyntheticPipLayer } from "./SyntheticPipLayer.js";
+import { windowedFrameSource } from "./frame-source.js";
+import { parsePreviewIrV2Manifest } from "@aivideo/contracts";
+
+const previewIrV2Enabled = (): boolean => {
+  try { return import.meta.env.VITE_AIVS_PREVIEW_IR_V2 === "1"; } catch { return false; }
+};
 
 /** 画中画片段编辑态（App 从时间线文档透传；transform 中心点语义）。 */
 export interface SyntheticPipClip { clipId: string; transform: { x?: number; y?: number; scale?: number; rotate?: number; opacity?: number }; mask?: import("@aivideo/contracts").TimelineClipMask }
@@ -98,6 +106,75 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
     setLoad({ status: "loading", message: "正在加载合成预览" });
     (async () => {
       try {
+        // C20 v2 数据面：manifest（无帧）→ 窗口帧源 → 会话（注入 frames）。
+        // 就地换表路径在 v2 下不适用（manifest_id 变化 = 新帧源），revision
+        // 变更走既有"输入变化 → 整会话重建"判定（sig 含输入集合）。
+        if (previewIrV2Enabled()) {
+          const manifest = parsePreviewIrV2Manifest(await window.desktop.getPreviewIrV2Manifest({
+            project_id: projectId as never,
+            timeline_revision_id: revisionId,
+            output_ratio: outputRatio,
+          }));
+          const container = containerRef.current;
+          if (!container || stale()) return;
+          const frameSource = windowedFrameSource(manifest.manifest_id, manifest.total_frames, {
+            fetchWindow: (startFrame, frameCount, signal) => {
+              if (signal.aborted) return Promise.reject(new Error("aborted"));
+              return window.desktop.getPreviewIrV2Window({
+                project_id: projectId as never, start_frame: startFrame, frame_count: frameCount,
+                timeline_revision_id: revisionId, output_ratio: outputRatio,
+              }).then(payload => payload);
+            },
+          });
+          // 首屏：只取首窗 + 预取窗（不等待全量——v2 的核心收益点）
+          await frameSource.ensureRange?.(0, Math.min(manifest.total_frames, 600), controller.signal);
+          if (stale()) { frameSource.dispose?.(); return; }
+          const ir: Ir = {
+            schema: "preview-ir-v1", // 会话消费 v1 形状的元数据 + v2 窗口帧源供帧
+            projector_version: String(manifest.projector_version),
+            canvas: manifest.canvas as unknown as Ir["canvas"],
+            inputs: manifest.inputs as unknown as Ir["inputs"],
+            segments: manifest.segments as unknown as Ir["segments"],
+            captions: manifest.captions as unknown as Ir["captions"],
+            caption_styles: manifest.caption_styles as unknown as Ir["caption_styles"],
+            transition_windows: manifest.transition_windows as unknown as Ir["transition_windows"],
+            known_approximations: manifest.known_approximations,
+            frames: [],
+          };
+          const session = await PreviewSession.create(container, ir, mediaUrls, audioByClip, controller.signal, sourceResolver ?? null, resourceTier, typeof projectId === "string" ? projectId : null, frameSource);
+          creating = session;
+          if (stale()) { session.dispose(); return; }
+          session.onTimeUs = (us: number) => {
+            lastReportedUs.current = us;
+            playheadStore?.set(us);
+            const now = performance.now();
+            if (now - lastReportWall.current >= 100 || !session.isPlaying) {
+              lastReportWall.current = now;
+              onTimeUs(us);
+            }
+          };
+          session.onEnded = () => {
+            onTimeUs(lastReportedUs.current);
+            onEnded?.();
+          };
+          sessionRefLocal.current = session;
+          sessionProjectRef.current = projectId;
+          boxObserverRef.current?.observe(container);
+          const fontUrl = await window.desktop.captionFontUrl();
+          if (stale()) return;
+          const fontResponse = await fetch(fontUrl, { signal: controller.signal });
+          if (!fontResponse.ok) throw new Error("caption font fetch failed");
+          const fontBuffer = await fontResponse.arrayBuffer();
+          if (stale()) return;
+          await session.loadCaptionFont(fontBuffer);
+          if (stale()) return;
+          await session.seekToFrame(Math.max(0, Math.floor((playheadUs / 1e6) * ir.canvas.fps)));
+          if (stale()) return;
+          ready = true;
+          setLoad({ status: "ready", message: "" });
+          if (playing) session.play();
+          return;
+        }
         const payload = await window.desktop.getPreviewIr({
           project_id: projectId as never,
           timeline_revision_id: revisionId,
