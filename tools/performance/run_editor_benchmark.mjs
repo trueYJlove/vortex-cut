@@ -60,9 +60,14 @@ const codeFingerprint = hash.digest("hex");
 // benchmark-owned scratch, never user data, and never overwritten evidence.
 const exportBase = resolve(output, "exports");
 mkdirSync(exportBase, { recursive: true });
+// "G0" here only describes the sample shape (all 7 scenes, >=5 measured runs,
+// >=100 seeks, >=5min playback, off/on pairs, no --smoke). Independent review
+// is a separate, human step and is never claimed by this label.
+const g0Shape = !values.smoke && scenes.length === KNOWN_SCENES.length
+  && Number(values.runs) >= 5 && Number(values.seeks) >= 100 && Number(values["playback-seconds"]) >= 300;
 writeFileSync(resolve(output, "run-config.json"), JSON.stringify({ ...values, scenarios: scenes, fixtures: undefined, output: undefined,
   export_base: exportBase,
-  baseline_status: values.smoke ? "smoke-only-not-G0" : "partial-B00-not-G0", commit: git(["rev-parse", "HEAD"]),
+  baseline_status: values.smoke ? "smoke-only-not-G0" : g0Shape ? "B00-G0-baseline-sample" : "partial-B00-not-G0", commit: git(["rev-parse", "HEAD"]),
   code_fingerprint: codeFingerprint, dirty_files: git(["status", "--short"]), node: process.version,
   fixtures_used: scenes.map(scene => manifest.fixtures[scene] ?? manifest.fixtures.F01) }, null, 2));
 const cli = resolve(root, "apps/desktop/node_modules/@playwright/test/cli.js");

@@ -365,7 +365,7 @@ for (const [sceneKey, recipe] of Object.entries(RECIPES)) {
     // Separate launches permit opt-in diagnostics overhead A/B. First run is warmup only.
     for (let runIndex = -1; runIndex < runs; runIndex++) {
       for (const enabled of runIndex < 0 ? [true] : [false, true]) {
-        const runDir = join(output, `${runIndex < 0 ? "warmup" : `run-${runIndex}`}-${enabled ? "on" : "off"}`);
+        const runDir = join(output, recipe.scenario, `${runIndex < 0 ? "warmup" : `run-${runIndex}`}-${enabled ? "on" : "off"}`);
         await mkdir(runDir, { recursive: true });
         const app = await launchEditor(mediaFiles, fixtures, runDir);
         let sample: unknown;
@@ -496,8 +496,10 @@ async function launchEditor(mediaFiles: FixtureEntry[], fixturesDir: string, run
     mkdirSync(exportDir, { recursive: true });
     // Use only the run directory's own name (e.g. "warmup-on") for the file —
     // the full runDir path contains separators that would create phantom
-    // subdirectories and make Core reject the destination parent.
-    exportPath = join(exportDir, `export-${basename(runDir)}.mp4`);
+    // subdirectories and make Core reject the destination parent. The runDir
+    // itself is per-scenario (output/<Fxx>/<run>-<on|off>), so the file name is
+    // unique across scenes running in one invocation.
+    exportPath = join(exportDir, `export-${basename(dirname(runDir))}-${basename(runDir)}.mp4`);
   }
   return electron.launch({ args: [join(root, "apps/desktop/out/main/index.cjs"), `--user-data-dir=${join(runDir, "user-data")}`],
     cwd: join(root, "apps/desktop"), env: { ...process.env,

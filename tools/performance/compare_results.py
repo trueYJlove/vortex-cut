@@ -80,14 +80,25 @@ def main():
     parser.add_argument("--baseline", required=True, type=Path)
     parser.add_argument("--candidate", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument(
+        "--scenario", default=None,
+        help="compare results-<Fxx>.json instead of the legacy single-scene results.json")
     args = parser.parse_args()
     if args.output.exists():
         parser.error("refusing to overwrite existing evidence")
     try:
-        report = compare(
-            json.loads((args.baseline / "results.json").read_text(encoding="utf-8")),
-            json.loads((args.candidate / "results.json").read_text(encoding="utf-8")),
-        )
+        if args.scenario:
+            baseline_name = f"results-{args.scenario}.json"
+            candidate_name = baseline_name
+        else:
+            baseline_name = candidate_name = "results.json"
+        baseline = json.loads((args.baseline / baseline_name).read_text(encoding="utf-8"))
+        candidate = json.loads((args.candidate / candidate_name).read_text(encoding="utf-8"))
+        report = compare(baseline, candidate)
+        if args.scenario:
+            report = report.replace(
+                "# Complete-editor comparison",
+                f"# Complete-editor comparison: {args.scenario}")
     except (ValueError, KeyError, OSError) as exc:
         parser.error(str(exc))
     args.output.parent.mkdir(parents=True, exist_ok=True)

@@ -220,6 +220,18 @@ node tools/performance/run_editor_benchmark.mjs --scenarios F01,F02,F04,F07 --fi
 - 4K60 seek 缺陷与 4K 会话 create 挂起建议单开产品工作单(建议 ID:
   DEFECT-4K60-SEEK / DEFECT-4K60-SESSION-HANG)。
 
+### G0 采样轮(2026-09-11,第三阶段)
+
+正式 G0 采样完成:七场景 × 5 轮 × off/on × 100 seek × 300s 播放
+(`evidence/performance/g0-baseline-20260911-v2/`),F06 十轮导出全部
+`succeeded`、竞争门 +0.0%(播放 submitted p95 中位 vs F01),探针
+off/on 墙钟差 ≤0.1%。期间修复多场景单次调用的 runDir 冲突(F02–F07
+复用前场景 user-data 导致项目名断言链式失败;runDir 按场景分目录修复,
+首轮失败目录 `g0-baseline-20260911/` 留证)。F05 五轮观察使 4K60 seek
+缺陷描述更新为"部分样本 86–96/100 有事件"(冒烟期"全 0"为个别轮)。
+数据面事实与门口径对照详见 `docs/PERFORMANCE_B00_G0_BASELINE_2026-09-11.md`;
+独立验收仍待验收(独立评审未执行)。
+
 ## 7. 与实施计划的偏差
 
 - 计划 B00 的 F04 口径为"100 个短素材";因第 5 节分页缺口现以 48 素材
