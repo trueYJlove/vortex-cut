@@ -30,6 +30,27 @@ type Outbound =
   | { type: "error"; id: number | null; message: string }
   | { type: "ticket-refresh-request"; id: number };
 
+/** B13-R 驻留遥测（decode worker 侧）：输出帧去向计数。decoded = 解码器输出
+ *  总数;posted = transfer 给客户端;cached = 转入 LRU（禁用时为 0）;closed =
+ *  worker 内关闭（中间环/GOP 锚置换）;live = held - closed —— 持续增长即
+ *  泄漏信号（含禁用缓存路径下被 close 的原始帧）。 */
+interface DecodeResidency {
+  decoded: number;
+  posted: number;
+  cached: number;
+  closed: number;
+  live: number;
+  cacheBytes: number;
+  cacheSize: number;
+}
+let resDecoded = 0;
+let resPosted = 0;
+let resCached = 0;
+let resClosed = 0;
+function decodeResidency(): DecodeResidency {
+  return { decoded: resDecoded, posted: resPosted, cached: resCached, closed: resClosed, live: resDecoded - resPosted - resCached - resClosed, cacheBytes, cacheSize: cache.size };
+}
+
 const post = (message: Outbound, transfer: Transferable[] = []): void => {
   (self as unknown as Worker).postMessage(message, transfer);
 };
@@ -67,6 +88,7 @@ let fromKeyframe = -1;
 function createDecoder(): VideoDecoder {
   return new VideoDecoder({
     output: (frame: VideoFrame) => {
+      resDecoded += 1;
       const request = activeRequest;
       if (request && Math.abs(frame.timestamp - request.targetUs) <= 16_667) {
         // 半帧容差（旧实现 33_334 会把相邻帧错配 → 系统性早一帧）
@@ -75,9 +97,12 @@ function createDecoder(): VideoDecoder {
         if (cacheEnabled) {
           const clone = frame.clone();
           cachePut(request.sampleIndex, frame); // 缓存接管原始帧（保持开启）
+          resCached += 1;
+          resPosted += 1;
           post({ type: "frame", id: request.id, frameN: request.frameN, timestampUs: clone.timestamp, fromCache: false, samplesFed, fromKeyframe, allocationSize: clone.allocationSize(), frame: clone }, [clone]);
         } else {
           // 直传原始帧（免 clone：每帧减一次 GPU 内存搬运；所有权随转移交出）
+          resPosted += 1;
           post({ type: "frame", id: request.id, frameN: request.frameN, timestampUs: frame.timestamp, fromCache: false, samplesFed, fromKeyframe, allocationSize: frame.allocationSize(), frame }, [frame]);
         }
         pumpQueue();
@@ -115,13 +140,13 @@ const INTERMEDIATE_RING = 3; // 环过大会耗尽 D3D11 输出表面池（实�
 function holdOrCloseIntermediate(frame: VideoFrame): void {
   if (intermediateRing.length >= INTERMEDIATE_RING) {
     const oldest = intermediateRing.shift();
-    oldest?.close();
+    if (oldest) { oldest.close(); resClosed += 1; }
   }
   intermediateRing.push(frame);
 }
 
 function drainIntermediateRing(): void {
-  for (const frame of intermediateRing.splice(0)) frame.close();
+  for (const frame of intermediateRing.splice(0)) { frame.close(); resClosed += 1; }
 }
 
 /** GOP 锚帧：冷启回退所喂 IDR 的输出绝不在 GOP 中途关闭（其表面是整个 GOP
@@ -131,12 +156,12 @@ let gopAnchor: VideoFrame | null = null;
 let pendingAnchorPts = -1;
 
 function holdGopAnchor(frame: VideoFrame): void {
-  try { gopAnchor?.close(); } catch { /* 已关闭 */ }
+  try { gopAnchor?.close(); if (gopAnchor) resClosed += 1; } catch { /* 已关闭 */ }
   gopAnchor = frame;
 }
 
 function releaseGopAnchor(): void {
-  try { gopAnchor?.close(); } catch { /* 已关闭 */ }
+  try { gopAnchor?.close(); if (gopAnchor) resClosed += 1; } catch { /* 已关闭 */ }
   gopAnchor = null;
   pendingAnchorPts = -1;
 }
@@ -212,6 +237,7 @@ function cachePut(sampleIndex: number, frame: VideoFrame): void {
     const evicted = cache.get(oldest)!;
     cacheBytes -= evicted.allocationSize();
     evicted.close();
+    resClosed += 1;
     cache.delete(oldest);
     cacheEvictions += 1;
   }
@@ -357,7 +383,7 @@ self.onmessage = (event: MessageEvent) => {
       rangeSource?.close();
       rangeSource = null;
     } else if (data.type === "stats") {
-      post({ type: "done", id: null, note: JSON.stringify({ hits: cacheHits, misses: cacheMisses, evictions: cacheEvictions, size: cache.size, bytes: cacheBytes }) });
+      post({ type: "done", id: null, note: JSON.stringify({ hits: cacheHits, misses: cacheMisses, evictions: cacheEvictions, size: cache.size, bytes: cacheBytes, residency: decodeResidency() }) });
     }
   } catch (error) {
     post({ type: "error", id: (data as { id?: number }).id ?? null, message: error instanceof Error ? error.message : String(error) });

@@ -122,6 +122,7 @@ export type WorkerRequest =
   | { type: "resize"; backingWidth: number; backingHeight: number; fitX: number; fitY: number; fitScale: number }
   | { type: "font"; buffer: ArrayBuffer; family: string }
   | { type: "readback"; seq: number }
+  | { type: "residencyQuery"; seq: number }
   | { type: "dispose" };
 
 export type WorkerResponse =
@@ -130,11 +131,27 @@ export type WorkerResponse =
   | { type: "initError"; message: string }
   | { type: "inputRegistered"; seq: number; textureBytes: number }
   | { type: "inputReleased"; seq: number; textureBytes: number }
-  | { type: "uploaded"; seq: number; ms: number; copyToMs: number; texMs: number }
-  | { type: "uploadedShadow"; seq: number; ms: number }
-  | { type: "uploadError"; seq: number; message: string }
+  | { type: "uploaded"; seq: number; ms: number; copyToMs: number; texMs: number; residency?: FrameResidency }
+  | { type: "uploadedShadow"; seq: number; ms: number; residency?: FrameResidency }
+  | { type: "uploadError"; seq: number; message: string; residency?: FrameResidency }
   | { type: "readback"; seq: number; buffer: ArrayBuffer }
+  | { type: "residency"; seq: number; residency: FrameResidency }
   | { type: "contextLost" };
+
+/** B13-R 驻留遥测：VideoFrame 生命周期计数（worker 内自持，随 ack 捎带）。
+ *  framesIn = 收到的 transfer 帧；framesClosed = worker 内显式 close；
+ *  framesLive = in − closed（应为在途上传的瞬时值，持续增长即泄漏信号）；
+ *  uploadsOk/Err、closedOnErr = 错误路径回收数（判别 catch 分支漏 close）。 */
+export interface FrameResidency {
+  framesIn: number;
+  framesClosed: number;
+  framesLive: number;
+  uploadsOk: number;
+  uploadsErr: number;
+  closedOnErr: number;
+  uploadMode: "probe" | "direct" | "copyTo";
+  textureBytes: number;
+}
 
 const state = {
   canvas: null as OffscreenCanvas | null,
@@ -174,6 +191,12 @@ const state = {
   textureBytes: 0,
   /** 帧上传模式：probe（首帧尝试 direct）/ direct（GPU-GPU）/ copyTo（回退）。 */
   frameUploadMode: "probe" as "probe" | "direct" | "copyTo",
+  /** B13-R 驻留遥测计数（见 FrameResidency）。 */
+  framesIn: 0,
+  framesClosed: 0,
+  uploadsOk: 0,
+  uploadsErr: 0,
+  closedOnErr: 0,
 };
 
 const post = (message: WorkerResponse, transfer?: Transferable[]): void => {
@@ -263,6 +286,20 @@ function handleInit(message: WorkerInit): void {
   const adapter = debug ? String(gl.getParameter(debug.UNMASKED_RENDERER_WEBGL)) : "masked";
   const vendor = debug ? String(gl.getParameter(debug.UNMASKED_VENDOR_WEBGL)) : "masked";
   post({ type: "ready", adapter, vendor });
+}
+
+/** B13-R：驻留计数快照（framesLive 推导值即时计算，不做差值累积）。 */
+function residencySnapshot(): FrameResidency {
+  return {
+    framesIn: state.framesIn,
+    framesClosed: state.framesClosed,
+    framesLive: state.framesIn - state.framesClosed,
+    uploadsOk: state.uploadsOk,
+    uploadsErr: state.uploadsErr,
+    closedOnErr: state.closedOnErr,
+    uploadMode: state.frameUploadMode,
+    textureBytes: state.textureBytes,
+  };
 }
 
 /** VideoFrame → 槽位纹理（NV12 直传/I420 重打包 + mipmap；GL 错误显式抛出）。 */
@@ -389,7 +426,6 @@ async function uploadToTextures(frame: VideoFrame, targetY: WebGLTexture, target
       mipmap(targetUV);
     } else {
       gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-      frame.close();
       throw new Error(`unsupported decoded frame format: ${frame.format}`);
     }
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
@@ -397,13 +433,17 @@ async function uploadToTextures(frame: VideoFrame, targetY: WebGLTexture, target
     texMs = performance.now() - copyStart - copyToMs;
     const glError = gl.getError();
     if (glError !== gl.NO_ERROR) {
-      const format = frame.format;
       frame.close();
-      throw new Error(`texture upload GL error 0x${glError.toString(16)} @${step} (${width}x${height} ${format})`);
+      throw new Error(`texture upload GL error 0x${glError.toString(16)} @${step} (${width}x${height} ${frame.format})`);
     }
     frame.close();
     return { copyToMs: Math.round(copyToMs * 1000) / 1000, texMs: Math.round(texMs * 1000) / 1000 };
   } catch (error) {
+    // B13-R：错误路径同样必须关闭帧——否则异常上传的 VideoFrame 永不回收
+    //（worker 内计数 framesLive 持续增长可证）。close 幂等，重复调用安全。
+    try { frame.close(); } catch { /* 已关闭 */ }
+    state.framesClosed += 1;
+    state.closedOnErr += 1;
     if (step !== "getError") {
       // 分步标记伴随抛出（定位用）
       throw new Error(`[${step}] ${error instanceof Error ? error.message : String(error)}`);
@@ -721,24 +761,40 @@ self.addEventListener("message", async (event: MessageEvent<WorkerRequest>) => {
     if (message.type === "releaseInput") { handleReleaseInput(message); return; }
     if (message.type === "upload") {
       // B13：代校验——输入已释放/换代时作废上传（帧关闭防泄漏）
-      if (!generationMatches(message.inputId)) { message.frame.close(); post({ type: "uploadError", seq: message.seq, message: "input generation stale" }); return; }
+      if (!generationMatches(message.inputId)) {
+        message.frame.close();
+        state.framesIn += 1; state.framesClosed += 1; state.closedOnErr += 1; state.uploadsErr += 1;
+        post({ type: "uploadError", seq: message.seq, message: "input generation stale", residency: residencySnapshot() });
+        return;
+      }
       const slot = ringSlot(message.inputId, message.slot)!;
       const start = performance.now();
+      state.framesIn += 1;
       void uploadToTextures(message.frame, slot.y, slot.uv).then((split) => {
-        post({ type: "uploaded", seq: message.seq, ms: performance.now() - start, copyToMs: split.copyToMs, texMs: split.texMs });
+        state.framesClosed += 1; state.uploadsOk += 1;
+        post({ type: "uploaded", seq: message.seq, ms: performance.now() - start, copyToMs: split.copyToMs, texMs: split.texMs, residency: residencySnapshot() });
       }, (error: unknown) => {
-        post({ type: "uploadError", seq: message.seq, message: error instanceof Error ? error.message : String(error) });
+        state.uploadsErr += 1;
+        post({ type: "uploadError", seq: message.seq, message: error instanceof Error ? error.message : String(error), residency: residencySnapshot() });
       });
       return;
     }
     if (message.type === "uploadShadow") {
-      if (!generationMatches(message.inputId)) { message.frame.close(); post({ type: "uploadError", seq: message.seq, message: "input generation stale" }); return; }
+      if (!generationMatches(message.inputId)) {
+        message.frame.close();
+        state.framesIn += 1; state.framesClosed += 1; state.closedOnErr += 1; state.uploadsErr += 1;
+        post({ type: "uploadError", seq: message.seq, message: "input generation stale", residency: residencySnapshot() });
+        return;
+      }
       const pair = shadowPair(message.inputId);
       const start = performance.now();
+      state.framesIn += 1;
       void uploadToTextures(message.frame, pair.y, pair.uv).then(() => {
-        post({ type: "uploadedShadow", seq: message.seq, ms: performance.now() - start });
+        state.framesClosed += 1; state.uploadsOk += 1;
+        post({ type: "uploadedShadow", seq: message.seq, ms: performance.now() - start, residency: residencySnapshot() });
       }, (error: unknown) => {
-        post({ type: "uploadError", seq: message.seq, message: error instanceof Error ? error.message : String(error) });
+        state.uploadsErr += 1;
+        post({ type: "uploadError", seq: message.seq, message: error instanceof Error ? error.message : String(error), residency: residencySnapshot() });
       });
       return;
     }
@@ -768,6 +824,7 @@ self.addEventListener("message", async (event: MessageEvent<WorkerRequest>) => {
       post({ type: "readback", seq: message.seq, buffer }, [buffer]);
       return;
     }
+    if (message.type === "residencyQuery") { post({ type: "residency", seq: message.seq, residency: residencySnapshot() }); return; }
   } catch (error) {
     post({ type: "initError", message: error instanceof Error ? error.message : String(error) });
   }

@@ -30,13 +30,26 @@ export interface DecodeFrameInfo {
   fromKeyframe: number;
 }
 
+/** B13-R：decode worker 驻留计数（stats 往返取回；-1 = 未取样）。 */
+export interface DecodeResidencyInfo {
+  decoded: number;
+  posted: number;
+  cached: number;
+  closed: number;
+  live: number;
+  cacheBytes: number;
+  cacheSize: number;
+}
+
 export class DecodeWorker {
   private readonly worker: Worker;
   private nextId = 0;
   private disposed = false;
   private refreshTicket: (() => Promise<string>) | null = null;
   private readonly pending = new Map<number, { resolve: (frame: VideoFrame) => void; reject: (error: Error) => void }>();
-  hardware: string | null = null;
+  /** B13-R：stats 往返的挂起（done 消息按 id=null 广播 → 单飞行限流）。 */
+  private statsPromise: Promise<DecodeResidencyInfo> | null = null;
+  private statsSettle: { resolve: (info: DecodeResidencyInfo) => void; reject: (error: Error) => void } | null = null;  hardware: string | null = null;
   width = 0;
   height = 0;
   lastFrameInfo: DecodeFrameInfo | null = null;
@@ -82,6 +95,18 @@ export class DecodeWorker {
       } else if (data.type === "error" && data.id === undefined) {
         // Handshake error is consumed by workerReady; a runtime failure is fatal.
         if (this.pending.size) this.terminate(new Error(data.message ?? "worker error"));
+      } else if (data.type === "done" && data.id === null && data.note) {
+        // B13-R：stats 往返（decodeResidency JSON）
+        if (this.statsSettle) {
+          const settle = this.statsSettle;
+          this.statsPromise = null;
+          this.statsSettle = null;
+          try {
+            const parsed = JSON.parse(data.note) as { residency?: DecodeResidencyInfo };
+            if (parsed.residency) settle.resolve(parsed.residency);
+            else settle.reject(new Error("stats note missing residency"));
+          } catch (error) { settle.reject(error instanceof Error ? error : new Error(String(error))); }
+        }
       } else if (data.type === "error" && data.id !== undefined) {
         const pending = this.pending.get(data.id);
         this.pending.delete(data.id);
@@ -128,10 +153,37 @@ export class DecodeWorker {
     });
   }
 
+  /** B13-R：查询 worker 驻留计数（单飞行；在途时复用同一 promise）。 */
+  queryResidency(): Promise<DecodeResidencyInfo> {
+    if (this.disposed) return Promise.reject(new Error("decode worker disposed"));
+    if (this.statsPromise) return this.statsPromise;
+    this.statsPromise = new Promise<DecodeResidencyInfo>((resolve, reject) => {
+      this.statsSettle = { resolve, reject };
+      try { this.worker.postMessage({ type: "stats" }); }
+      catch (error) { this.statsPromise = null; this.statsSettle = null; reject(error instanceof Error ? error : new Error(String(error))); }
+    });
+    window.setTimeout(() => {
+      if (this.statsSettle) {
+        const settle = this.statsSettle;
+        this.statsPromise = null;
+        this.statsSettle = null;
+        settle.reject(new Error("residency query timeout"));
+      }
+    }, 5000);
+    return this.statsPromise;
+  }
+
   terminate(reason = new Error("decode worker disposed")): void {
     if (this.disposed) return;
     this.disposed = true;
     this.refreshTicket = null;
+    // B13-R：挂起的 stats 往返随 terminate 落定
+    if (this.statsSettle) {
+      const settle = this.statsSettle;
+      this.statsPromise = null;
+      this.statsSettle = null;
+      settle.reject(reason);
+    }
     // B12：先关 Range 源（释放字节缓存/在途请求），再终结 worker
     try { this.worker.postMessage({ type: "close" }); } catch { /* 已终止 */ }
     for (const pending of this.pending.values()) pending.reject(reason);

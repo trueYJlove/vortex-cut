@@ -3,7 +3,7 @@ import { throwIfAborted, workerReady } from "./worker-lifecycle.js";
  * 提供类型化 RPC（upload 带 ack、compose 顺序投递、resize/readback 往返）。
  * 会话侧只与本类对话；GL 状态全部在 compositor-worker.worker.ts。 */
 import { editorPerf } from "./perf-metrics.js";
-import type { DrawCommand, WorkerRequest, WorkerResponse } from "./compositor-worker.worker.js";
+import type { DrawCommand, FrameResidency, WorkerRequest, WorkerResponse } from "./compositor-worker.worker.js";
 
 export interface CompositorClientInit {
   inputs: Array<{ inputId: string; sourceWidth: number; width: number; height: number }>;
@@ -29,6 +29,9 @@ export class CompositorWorkerClient {
   gpuInfo: GpuInfo = { adapter: "unknown", vendor: "unknown" };
   /** 上传分步采样（copyTo/tex 毫秒，尾随 600 条；探针定位用）。 */
   readonly uploadSplit: Array<{ copyToMs: number; texMs: number }> = [];
+  /** B13-R：worker 最近一次驻留计数（ack 捎带 + residencyQuery 主动查询）。 */
+  lastResidency: FrameResidency | null = null;
+  private lastResidencyAt = 0;
 
   private constructor(canvas: HTMLCanvasElement) {
     // transferControlToOffscreen 每元素仅可一次，由 create() 统一调用；
@@ -59,6 +62,17 @@ export class CompositorWorkerClient {
             this.uploadSplit.push({ copyToMs: split.copyToMs, texMs: split.texMs });
             if (this.uploadSplit.length > 600) this.uploadSplit.shift();
           }
+          // B13-R：最新驻留计数进 perf 快照 + 事件时间线（限流 1Hz 防事件洪泛）
+          const residency = (data as { residency?: FrameResidency }).residency;
+          if (residency && editorPerf.enabled) {
+            this.lastResidency = residency;
+            const now = performance.now();
+            if (now - this.lastResidencyAt >= 1000) {
+              this.lastResidencyAt = now;
+              editorPerf.record("residency", 0, this.perfSession);
+              editorPerf.residency = { at: now, decode: { decoded: -1, posted: -1, cached: -1, closed: -1, live: -1, cacheBytes: -1, cacheSize: -1 }, compositor: residency };
+            }
+          }
           pending?.resolve(data as never);
           break;
         }
@@ -74,6 +88,13 @@ export class CompositorWorkerClient {
           const pending = this.pending.get(data.seq);
           this.pending.delete(data.seq);
           pending?.resolve((data as { buffer: ArrayBuffer }).buffer as never);
+          break;
+        }
+        case "residency": {
+          const pending = this.pending.get(data.seq);
+          this.pending.delete(data.seq);
+          this.lastResidency = (data as { residency: FrameResidency }).residency;
+          pending?.resolve(this.lastResidency as never);
           break;
         }
         case "uploadError": {
@@ -220,6 +241,18 @@ export class CompositorWorkerClient {
     const seq = this.nextSeq++;
     const request: WorkerRequest = { type: "readback", seq };
     return new Promise<ArrayBuffer>((resolve, reject) => {
+      this.pending.set(seq, { resolve: resolve as never, reject });
+      try { this.worker.postMessage(request); }
+      catch (error) { this.pending.delete(seq); reject(error); }
+    });
+  }
+
+  /** B13-R：主动查询 worker 驻留计数（无上传 ack 的静止期也可取样）。 */
+  queryResidency(): Promise<FrameResidency> {
+    if (this.disposed) return Promise.reject(new Error("compositor worker disposed"));
+    const seq = this.nextSeq++;
+    const request: WorkerRequest = { type: "residencyQuery", seq };
+    return new Promise<FrameResidency>((resolve, reject) => {
       this.pending.set(seq, { resolve: resolve as never, reject });
       try { this.worker.postMessage(request); }
       catch (error) { this.pending.delete(seq); reject(error); }

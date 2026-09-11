@@ -18,13 +18,13 @@ import { arrayFrameSource, type FrameSource } from "./frame-source.js";
  *   命令列表**（fill=模糊垫底 / draw / captions）——worker 无时间轴语义；
  * - seek（暂停态）仍走并行解码后合成，同样经环形/影子槽位 ack，并同步链游标。 */
 import type { CompositorWorkerClient } from "./compositor-worker.js";
-import type { DrawCommand } from "./compositor-worker.worker.js";
+import type { DrawCommand, FrameResidency } from "./compositor-worker.worker.js";
 import type { Ir, IrContent, IrFrame, IrOverlay } from "./ir.js";
 import type { PreviewSourceResolver } from "./source-resolver.js";
 import { BUDGET_TABLES, ringDepthFor } from "./resource-budget.js";
 import { InputPool } from "./input-pool.js";
 import { editorPerf, allocatePerfSession } from "./perf-metrics.js";
-import { DecodeWorker } from "./decode-worker.js";
+import { DecodeWorker, type DecodeResidencyInfo } from "./decode-worker.js";
 import { VARISPEED_WORKLET_NAME, createVarispeedWorkletUrl } from "./varispeed-worklet.js";
 
 /** 片段音频配置（编辑态：App 从时间线文档透传）。 */
@@ -145,6 +145,8 @@ export class PreviewSession {
   private readonly rigs = new Map<string, InputRig>();
   private rafId = 0;
   private playing = false;
+  /** B13-R：上次驻留取样墙钟（1Hz 限流）。 */
+  private lastResidencySampleAt = 0;
   private anchorWall = 0;
   private anchorFrame = 0;
   private currentFrame = 0;
@@ -1383,6 +1385,27 @@ export class PreviewSession {
         // 内容的正常管线延迟，观感无损——此前按 tick 计成 303"丢帧"）。
         this.dropped += 1;
         this.droppedLifetime += 1;
+      }
+      // B13-R：1Hz 驻留取样（decode worker 侧计数；compositor 计数随 ack
+      // 已进 perf，此处补 decode 侧与主动查询的合成器快照）。
+      if (editorPerf.enabled && now - this.lastResidencySampleAt >= 1000) {
+        this.lastResidencySampleAt = now;
+        const decodeQueries = [...this.rigs.values()]
+          .map(rig => rig.worker?.queryResidency().catch(() => null) ?? Promise.resolve(null));
+        const compositorQuery = (this.compositor?.queryResidency().catch(() => null) ?? Promise.resolve(null)) as Promise<FrameResidency | null>;
+        void Promise.all([...decodeQueries, compositorQuery]).then(results => {
+          if (this.disposed || !editorPerf.enabled) return;
+          const compositor = results[results.length - 1] as FrameResidency | null;
+          const decodeEntries = results.slice(0, -1).filter((entry): entry is DecodeResidencyInfo => entry !== null);
+          if (!compositor && decodeEntries.length === 0) return;
+          const at = performance.now();
+          editorPerf.record("residency", 0, this.perfId);
+          editorPerf.residency = {
+            at,
+            decode: decodeEntries[0] ?? { decoded: -1, posted: -1, cached: -1, closed: -1, live: -1, cacheBytes: -1, cacheSize: -1 },
+            compositor: compositor ?? editorPerf.residency?.compositor ?? { framesIn: -1, framesClosed: -1, framesLive: -1, uploadsOk: -1, uploadsErr: -1, closedOnErr: -1, uploadMode: "unknown", textureBytes: -1 },
+          };
+        });
       }
       // 结束判定 = 合成推进到片尾（而非时钟到达）：时钟先到时等待合成追平，
       // 否则会提前停在片尾、且每次续播止点渐近（用户实测 10.12→10.17→10.19）。
