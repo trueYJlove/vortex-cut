@@ -323,7 +323,7 @@ const RECIPES: Record<string, SceneRecipe> = {
   "F04": { scenario: "F04", label: "F04/48-assets-4-layers", media: [], distinct: true, inPage: assembleF04,
     scope: "complete App, 48 assets/4 visual layers (V1 spine + V2-V4 simultaneous PiP transforms) + 12 captions; 48 kept within list_assets default page (pagination gap registered); app cold launch + warm seeks; OS cache uncontrolled" },
   "F07": { scenario: "F07", label: "F07/speed-matrix-overlap", media: ["F07.mp4", "F07-mute.mp4"], inPage: assembleF07,
-    scope: "complete App, speed matrix 0.5x/1x/2x/4x + video-only segment + same-source A1 overlap (dual position mix); app cold launch + warm seeks; OS cache uncontrolled" },
+    scope: "complete App, speed matrix 0.5x/1x/2x/4x + video-only segment + mute/unmute toggle; dual-position mix NOT assembled (product constraints, B00-B report §5); app cold launch + warm seeks; OS cache uncontrolled" },
   "F03": { scenario: "F03", label: "F03/60min-deep-seek", media: ["F03.mp4"], inPage: assembleF03,
     scope: "complete App, 60min source, head/middle/tail 10s windows (deep seek); app cold launch + warm seeks; OS cache uncontrolled",
     unavailable: ["playback-side bytes-read accounting (B12 range metrics surface pending)"] },
@@ -464,7 +464,12 @@ for (const [sceneKey, recipe] of Object.entries(RECIPES)) {
           sample = { schema_version: 2, scenario: recipe.label, run: runIndex, enabled, ready_ms: readyMs, setup_recovery_count: setupRecoveryCount,
             workload: { seeks, seed: seedBase, build_mode: "production-diagnostics", code_fingerprint: config.code_fingerprint },
             seek_action_wall_ms_including_300ms_wait: seekActions, seek: seekMetrics, playback: playbackMetrics, process_samples: processSamples,
-            environment, viewport, fixture_sha256: mediaFiles[0].sha256, fixture_files: mediaFiles.map(entry => ({ file: entry.file, sha256: entry.sha256 })), playback_seconds: seconds,
+            environment, viewport, fixture_sha256: mediaFiles[0].sha256, fixture_files: mediaFiles.map(entry => ({ file: entry.file, sha256: entry.sha256 })),
+            // playback_seconds is the configured value for ALL samples including
+            // warmup, whose actual playback is min(seconds, 5)s (pipeline check
+            // only). Compare playback counts only across run>=0 samples.
+            playback_seconds: seconds,
+            playback_seconds_actual: runIndex < 0 ? Math.min(seconds, 5) : seconds,
             scope: recipe.scope, scene_extra: { ...(extra as Record<string, unknown>), ...backgroundExtra },
             unavailable: ["actual presentation", "React commits in non-profiling production React", "audio underrun", "video-frame lifetime", "GPU actual VRAM", "Core RSS", "30–60min memory", ...(recipe.unavailable ?? [])] };
           // Screenshot outside timing region; no readback in measured playback.

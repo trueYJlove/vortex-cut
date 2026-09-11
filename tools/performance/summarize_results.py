@@ -82,6 +82,9 @@ def render_scenario(name, samples, status):
         f"## {name}",
         "",
         f"status={status} measured-runs={len(runs_on)} (off/on pairs, run 0..{runs_on[-1]['run']})",
+        "All event-derived p95 values cover the last 4096 retained events per phase/kind"
+        " (ring window); playback-phase windows may be truncated when decode/upload"
+        " outpace compose (overwritten>0 in evidence). submitted is NOT presentation.",
         "",
         "| run | ready_ms | seek p95 | decode p95 (seek) | upload p95 | submitted p95 (seek)"
         " | submitted p95 (playback) | decode/s (playback) | mem peak MB (Tab/GPU) | notes |",
