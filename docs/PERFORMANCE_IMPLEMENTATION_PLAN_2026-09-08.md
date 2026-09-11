@@ -45,6 +45,14 @@
   `docs/PERFORMANCE_C20_PHASE2_PLANNING_GATE_2026-09-11.md`,Desktop
   616 项全过）。F 场景 v2 on/off A/B 实测待下一基准轮;达标后 C20c
   （revision 换 manifest 沿用会话）立项。
+- **执行状态（2026-09-12 更新·五）**：**C20 v2 A/B 实测完成**
+  （`docs/PERFORMANCE_C20_PHASE2_AB_2026-09-12.md`）。过程中发现并修复
+  ensureRange 窗口枚举错位（播放/seek 停滞根因,window_fetch 遥测定位）;
+  **F02 16.3GiB 归因修正**——与 IR 帧表无关（13.5MB 可忽略）,由 B13/B11
+  解码驻留主导,C20 v2 价值重述为协议上限解除+C20c 基础。Gate §5.2:
+  行为正确性达标;seek p95 +29~31%（取窗等待）、ready<2s 未达,列为调优
+  清单。下一工作包建议：**B13/B11 解码驻留上限**（F02 内存的正解）+
+  C20 调优（预取/并行化）+ F02 低频崩溃待查（trace 留证）。
 - 新增模块/协议/脚本均是本方案拟新增，不代表仓库已经存在。
 
 
