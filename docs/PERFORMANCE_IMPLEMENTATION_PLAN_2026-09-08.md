@@ -53,6 +53,17 @@
   行为正确性达标;seek p95 +29~31%（取窗等待）、ready<2s 未达,列为调优
   清单。下一工作包建议：**B13/B11 解码驻留上限**（F02 内存的正解）+
   C20 调优（预取/并行化）+ F02 低频崩溃待查（trace 留证）。
+- **执行状态（2026-09-11 更新·六）**：**B13/R 解码驻留判别完成**
+  （`PERFORMANCE_B13_RESIDENCY_PLANNING_GATE_2026-09-11.md` +
+  `PERFORMANCE_B13_RESIDENCY_IMPLEMENTATION_2026-09-11.md`）。三轴判别
+  实验（copyTo/direct、HW/SW、v1/v2）曲线重合:F02 16.6GiB 为 **Chromium
+  层有界池高水位**（随 unique 帧数饱和,~600KB/帧,2400s 长测无晚发增长）,
+  **应用 JS 层无泄漏**（framesLive=0 遥测）——"环槽/VideoFrame 预算硬上限"
+  路线撤销,真实方向转 Chromium 上游/B11 代理降档。交付:两 worker 驻留
+  遥测（1Hz）、错误路径 frame.close 修复、驻留平台预测器+会话预警
+  （resource-budget）。Desktop 619 项全过。C20 §6.1 "trace 留证"已勘误
+  （实际无崩溃 dump）;崩溃可诊断性缺口（failure.json 不含脱敏错误文本）
+  登记待修。
 - 新增模块/协议/脚本均是本方案拟新增，不代表仓库已经存在。
 
 

@@ -3,6 +3,8 @@ interface ImportMetaEnvProbe {
   readonly DEV: boolean;
   readonly VITE_AIVS_PERF?: string;
   readonly VITE_AIVS_PREVIEW_IR_V2?: string;
+  /** B13-R 判别诊断开关：强制软件解码（perf 诊断构建专用）。 */
+  readonly VITE_AIVS_FORCE_SW_DECODE?: string;
   readonly PROD: boolean;
   readonly MODE: string;
 }

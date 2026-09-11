@@ -21,7 +21,7 @@ import type { CompositorWorkerClient } from "./compositor-worker.js";
 import type { DrawCommand, FrameResidency } from "./compositor-worker.worker.js";
 import type { Ir, IrContent, IrFrame, IrOverlay } from "./ir.js";
 import type { PreviewSourceResolver } from "./source-resolver.js";
-import { BUDGET_TABLES, ringDepthFor } from "./resource-budget.js";
+import { BUDGET_TABLES, ringDepthFor, predictResidencyBytes } from "./resource-budget.js";
 import { InputPool } from "./input-pool.js";
 import { editorPerf, allocatePerfSession } from "./perf-metrics.js";
 import { DecodeWorker, type DecodeResidencyInfo } from "./decode-worker.js";
@@ -227,6 +227,10 @@ export class PreviewSession {
   private readonly inputLastActive = new Map<string, number>();
   private static readonly IDLE_AFTER_MS = 1_500;
   private poolWarned = false;
+  /** B13-R 判别诊断开关：强制 copyTo 上传路径（perf 诊断构建注入）。 */
+  private forceCopyTo = false;
+  /** B13-R R3：驻留平台预警一次性标志。 */
+  private residencyWarned = false;
   private readonly perfId = allocatePerfSession();
   private perfRequest = 0;
   private readonly lifetime = new AbortController();
@@ -244,9 +248,12 @@ export class PreviewSession {
                       sourceResolver?: PreviewSourceResolver | null,
                       resourceTier?: "conservative" | "balanced" | "high",
                       pcmProjectId?: string | null,
-                      frames?: FrameSource): Promise<PreviewSession> {
+                      frames?: FrameSource,
+                      forceCopyTo?: boolean): Promise<PreviewSession> {
     throwIfAborted(signal);
     const session = new PreviewSession(ir, frames);
+    // B13-R 判别诊断开关（perf 诊断构建经 runtime 注入；undefined 时行为不变）
+    if (forceCopyTo) session.forceCopyTo = true;
     // B13：档位 → 环深决策（保守档多输入收 5；LEAD 联动防写深覆盖）
     if (resourceTier) {
       session.ringDepth = ringDepthFor(resourceTier, ir.inputs.filter(input => input.asset_kind === "video").length);
@@ -292,6 +299,7 @@ export class PreviewSession {
       canvasWidth: ir.canvas.width,
       canvasHeight: ir.canvas.height,
       captionStyles: ir.caption_styles,
+      forceCopyTo: session.forceCopyTo,
     }, signal);
     if (session.disposed || signal?.aborted) { client.terminate(); throwIfAborted(signal); throw new Error("session disposed"); }
     session.compositor = client;
@@ -388,6 +396,20 @@ export class PreviewSession {
     session.poolTier = resourceTier ?? null;
     session.poolRegister(ir);
     session.rebuildPipOverlayIndex(); // A04：手势路径免全帧扫描
+    // B13-R R3：解码驻留平台预警（经验律预测，超档位预算一次性提示；
+    // 见 resource-budget.predictResidencyBytes——不阻断，仅告知量级预期）。
+    if (resourceTier) {
+      const predictedBytes = predictResidencyBytes(
+        session.frames.frameCount,
+        session.ir.canvas.width,
+        session.ir.canvas.height,
+      );
+      const budgetBytes = BUDGET_TABLES[resourceTier].textureBytesMiB * 1024 * 1024 * 8;
+      if (predictedBytes > budgetBytes && !session.residencyWarned) {
+        session.residencyWarned = true;
+        session.lastError = `长素材解码驻留预警：预计常驻约 ${Math.round(predictedBytes / (1024 * 1024 * 1024) * 10) / 10} GiB（${session.frames.frameCount} 帧，平台化不持续增长）`;
+      }
+    }
     return session;
     } catch (error) { session.dispose(); throw error; }
     finally { signal?.removeEventListener("abort", abort); }

@@ -136,8 +136,16 @@ function resourceTier(): "conservative" | "balanced" | "high" {
   return "balanced";
 }
 
-function rendererRuntime(): { protocol_version: 1; status: "ready"; resource_tier: "conservative" | "balanced" | "high" } {
-  return { protocol_version: 1, status: "ready", resource_tier: resourceTier() };
+function rendererRuntime(): { protocol_version: 1; status: "ready"; resource_tier: "conservative" | "balanced" | "high"; force_copy_to?: boolean } {
+  // B13-R 判别诊断开关：仅诊断构建（VITE_AIVS_PERF=1 编译期已对 Renderer
+  // 生效）+ 显式环境变量时下发；正常构建无此字段，行为不变。
+  const forceCopyTo = process.env.AIVS_FORCE_COPYTO === "1";
+  return {
+    protocol_version: 1,
+    status: "ready",
+    resource_tier: resourceTier(),
+    ...(forceCopyTo ? { force_copy_to: true } : {}),
+  };
 }
 
 async function restrictedMediaUrl(assetId: string): Promise<string> {

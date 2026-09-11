@@ -6,6 +6,7 @@ import {
   BUDGET_TABLES,
   frameTextureBytes,
   inputTextureBytes,
+  predictResidencyBytes,
   ringDepthFor,
   tierForTotalMemory,
   type BudgetTier,
@@ -203,5 +204,24 @@ describe("档位表与池联动", () => {
       }
       expect(pool.entryOf("in5")!.ringDepth).toBe(ringDepthFor(tier, 6));
     }
+  });
+});
+
+describe("B13-R 驻留平台预测", () => {
+  it("锚定尺寸线性随 unique 帧数增长（F02 复现口径）", () => {
+    // 27000 帧 640×360：预测 ≈ base + 27000×600KB ≈ 16.0GiB（实测平台 16.66GiB）
+    const predicted = predictResidencyBytes(27000, 640, 360);
+    expect(predicted).toBeGreaterThan(15 * 1024 ** 3);
+    expect(predicted).toBeLessThan(17 * 1024 ** 3);
+  });
+  it("小帧数预测接近 base（F01 复现口径：360 帧 ≈ 0.6GiB 量级）", () => {
+    const predicted = predictResidencyBytes(360, 640, 360);
+    expect(predicted).toBeGreaterThan(400 * 1024 ** 2);
+    expect(predicted).toBeLessThan(1024 ** 3);
+  });
+  it("大帧（≥4× 锚定）不外推 unique 帧律（F05 反例：DPB 有界）", () => {
+    const small = predictResidencyBytes(1000, 1920, 1080);
+    const large = predictResidencyBytes(100000, 1920, 1080);
+    expect(small).toBe(large); // 帧数无关的常数档
   });
 });

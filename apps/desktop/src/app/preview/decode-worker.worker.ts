@@ -71,6 +71,8 @@ let cacheHits = 0;
 let cacheMisses = 0;
 let cacheEvictions = 0;
 let cacheBytes = 0;
+/** B13-R 判别开关（init 消息 forceSwDecode 注入；worker 作用域无宿主全局）。 */
+let forceSwDecode = false;
 /** 解码请求队列（M3-2.2）：旧实现单 pendingResolve——新请求到达即置空旧引用，
  * 旧 promise 永不落定（客户端 15s 超时 → "decode timeout"），且允许后发请求被
  * 前一帧的输出按容差错配解决（系统性早一帧）。现改为严格串行队列：一次只
@@ -181,7 +183,8 @@ function requestTicketRefresh(): Promise<string> {
   });
 }
 
-async function init(url: string, cacheFrames: number, hasTicketRefresh: boolean, cacheCapBytes?: number): Promise<void> {
+async function init(url: string, cacheFrames: number, hasTicketRefresh: boolean, cacheCapBytes?: number, forceSwDecodeArg?: boolean): Promise<void> {
+  forceSwDecode = forceSwDecodeArg === true;
   // B12：Range 源初始化（bytes=0-65535 探测 + moov-only 解析）——整文件
   // arrayBuffer 下载已移除。票据 TTL 到期由 HttpRangeSource 受控续票
   //（有限一次，相同 range 重发）；续票经 ticket-refresh 消息往返桥接到
@@ -206,8 +209,13 @@ async function init(url: string, cacheFrames: number, hasTicketRefresh: boolean,
     // 色彩矩阵钉死 BT.709（冻结方案 §7.2 比对口径；texImage2D(VideoFrame) 转换依此）
     colorSpace: { primaries: "bt709", transfer: "bt709", matrix: "bt709", fullRange: false },
   };
-  const support = await VideoDecoder.isConfigSupported({ ...config, hardwareAcceleration: "prefer-hardware" });
-  if (support.supported) {
+  // B13-R 判别诊断开关：强制软件解码（绕过 D3D11 硬解表面池，用于判别
+  // Tab 常驻随 unique 解码帧增长的主体）。init 消息 forceSwDecode 下发。
+  const preferHw = !forceSwDecode;
+  const support = await VideoDecoder.isConfigSupported({
+    ...(preferHw ? { ...config, hardwareAcceleration: "prefer-hardware" } : config),
+  });
+  if (support.supported && preferHw) {
     decoderConfig = { ...config, hardwareAcceleration: "prefer-hardware" };
     hardware = "prefer-hardware";
   } else {
@@ -366,10 +374,10 @@ function binarySearchPos(index: SampleIndex, ptsUs: number): number {
 }
 
 self.onmessage = (event: MessageEvent) => {
-  const data = event.data as { type: string; url?: string; cacheFrames?: number; id?: number; frameN?: number; fps?: number; refreshTicket?: boolean; refreshUrl?: string; refreshError?: string; cacheCapBytes?: number };
+  const data = event.data as { type: string; url?: string; cacheFrames?: number; id?: number; frameN?: number; fps?: number; refreshTicket?: boolean; refreshUrl?: string; refreshError?: string; cacheCapBytes?: number; forceSwDecode?: boolean };
   try {
     if (data.type === "init" && data.url) {
-      void init(data.url, data.cacheFrames ?? 0, data.refreshTicket === true, data.cacheCapBytes);
+      void init(data.url, data.cacheFrames ?? 0, data.refreshTicket === true, data.cacheCapBytes, data.forceSwDecode);
     } else if (data.type === "ticket-refresh-response" && typeof data.id === "number") {
       const pending = ticketRefreshPending.get(data.id);
       if (!pending) return;

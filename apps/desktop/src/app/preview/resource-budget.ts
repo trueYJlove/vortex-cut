@@ -61,3 +61,28 @@ export function ringDepthFor(tier: BudgetTier, activeInputs: number): number {
   if (base <= 128 && activeInputs >= 4) return 5;
   return 8;
 }
+
+/** B13-R R3：解码驻留平台预测（实测经验律，见 B13-R 实施报告 §2）。
+ *
+ * 实测（F01/F02/F03/F04/F05 五场景 300s/2400s 轨迹拟合）：Tab 工作集随
+ * **unique 源帧解码数**饱和增长至平台 ≈ base + uniqueFrames × perFrameBytes，
+ * 与 IR 形态（v1/v2）、上传路径（copyTo/direct）、解码后端（HW/SW）无关
+ * ——驻留主体在 Chromium 合成器/解码缓冲层（应用 JS 帧生命周期无泄漏，
+ * framesLive=0 遥测证明）。perFrameBytes 为经验值（F02: 16.66GB 平台 =
+ * ~0.4GB base + 27000×~600KB；4K60 F05 不符合该律——SW 4K 解码 DPB 有界），
+ * 仅用于超限预警，不作为硬上限依据。
+ */
+const RESIDENCY_BASE_BYTES = 400 * 1024 * 1024;
+const RESIDENCY_PER_FRAME_BYTES = 600 * 1024;
+
+export function predictResidencyBytes(uniqueFrames: number, frameWidth: number, frameHeight: number): number {
+  // 尺寸缩放：640×360 实测 600KB/帧锚定；驻留主体近似随帧字节数缩放，
+  // 但 F05 反例（4K60 SW 平台 510MB）表明大帧 DPB 有界——封顶不外推。
+  const anchorBytes = 640 * 360 * 1.5;
+  const frameBytes = frameWidth * frameHeight * 1.5;
+  if (frameBytes > 4 * anchorBytes) {
+    // ≥4× 锚定尺寸（约 ≥1080p）不适用 unique 帧律（DPB 有界），给常数档。
+    return RESIDENCY_BASE_BYTES + 512 * 1024 * 1024;
+  }
+  return RESIDENCY_BASE_BYTES + uniqueFrames * RESIDENCY_PER_FRAME_BYTES;
+}

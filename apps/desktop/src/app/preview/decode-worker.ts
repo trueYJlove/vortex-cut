@@ -120,11 +120,14 @@ export class DecodeWorker {
     throwIfAborted(signal);
     const instance = new DecodeWorker();
     instance.refreshTicket = refreshTicket ?? null;
+    // B13-R 判别诊断开关：强制软件解码（perf 诊断构建环境变量；缺省 undefined）
+    let forceSwDecode: boolean | undefined;
+    try { forceSwDecode = import.meta.env.VITE_AIVS_FORCE_SW_DECODE === "1" || undefined; } catch { /* 无 env */ }
     try {
       const data = await workerReady<DecodeWorkerMessage>(instance.worker, data => {
         if (data.type === "error") throw new Error(data.message ?? "worker init error");
         return data.type === "ready" ? data : undefined;
-      }, () => instance.worker.postMessage({ type: "init", url: ticket, cacheFrames: 0, refreshTicket: Boolean(refreshTicket), ...(cacheCapBytes !== undefined ? { cacheCapBytes } : {}) }), signal);
+      }, () => instance.worker.postMessage({ type: "init", url: ticket, cacheFrames: 0, refreshTicket: Boolean(refreshTicket), ...(forceSwDecode ? { forceSwDecode: true } : {}), ...(cacheCapBytes !== undefined ? { cacheCapBytes } : {}) }), signal);
       throwIfAborted(signal);
       instance.hardware = data.hardware ?? null;
       instance.width = data.width ?? 0;

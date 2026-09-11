@@ -126,8 +126,20 @@ getFrame 立即命中。命中缓存的 seek 不受影响(F01 seek p95 仍 38ms 
 1. **F02 v2 崩溃(低频)**:run-0-on 播放段 App 崩溃一次
    (trace 留证),单场景重跑 5/5 通过——疑似与 seek 风暴后播放的
    解码/上传竞争相关(B13 范围),登记待查,不阻断。
+   **【2026-09-11 勘误(B13-R 实施轮证据核对)】**"trace 留证"表述过重:
+   `c20v2-ab-20260911-v2/F02/run-0-on/` 实际仅 failure.json(status=
+   invalid-incomplete,错误文本按隐私策略未持久化)+ user-data 快照;
+   desktop.log 末尾为正常 before-quit shutdown,无崩溃 dump/crashpad 目录。
+   test-results 下的 trace.zip 属 Playwright 自带产物,是否仍存在未核实。
+   可诊断性缺口(runner 未持久化脱敏错误文本)已随 B13-R 登记待修。
 2. **B13/B11 解码驻留上限**:F02 内存问题的正确归属,建议下一工作包
    (环槽/驻留 VideoFrame 预算硬上限)。
+   **【2026-09-11 B13-R 判别结论回填】**判别实验(见
+   `PERFORMANCE_B13_RESIDENCY_IMPLEMENTATION_2026-09-11.md`)推翻
+   "环槽/VideoFrame 预算可修"假设:F02 16.6GiB 为 Chromium 层有界池
+   高水位(随 unique 帧数饱和,~600KB/帧),与上传路径/解码后端/IR 形态/
+   JS 帧生命周期全部无关;应用层无泄漏(framesLive=0)。已落地遥测 +
+   驻留平台预测护栏,真实修复方向转 Chromium 上游/B11 代理降档。
 3. **seek 取窗等待优化**:缓存预算参数化、方向性预取 ±2 窗。
 4. **ready 串行链优化**:manifest 与首窗并行化。
 

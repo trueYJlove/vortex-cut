@@ -11,6 +11,8 @@ export interface CompositorClientInit {
   canvasWidth: number;
   canvasHeight: number;
   captionStyles: Record<string, { font_size: number; primary_rgb: [number, number, number]; outline_rgb: [number, number, number]; outline: number; shadow: number; border_style: number; margin_v: number }>;
+  /** B13-R 判别诊断开关：强制 copyTo（perf 诊断构建经 runtime 注入）。 */
+  forceCopyTo?: boolean;
 }
 
 export interface GpuInfo { adapter: string; vendor: string }
@@ -142,6 +144,7 @@ export class CompositorWorkerClient {
       canvasWidth: init.canvasWidth,
       canvasHeight: init.canvasHeight,
       captionStyles: init.captionStyles,
+      ...(init.forceCopyTo ? { forceCopyTo: true } : {}),
     };
     client.worker.postMessage(request, [offscreen]);
       }, signal);

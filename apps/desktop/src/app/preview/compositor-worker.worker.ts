@@ -109,6 +109,9 @@ export interface WorkerInit {
   canvasWidth: number;
   canvasHeight: number;
   captionStyles: Record<string, { font_size: number; primary_rgb: [number, number, number]; outline_rgb: [number, number, number]; outline: number; shadow: number; border_style: number; margin_v: number }>;
+  /** B13-R 判别诊断开关：强制 copyTo 上传路径（禁用 direct texImage2D）。
+   *  仅 perf 诊断构建下发；缺省 false 行为不变。 */
+  forceCopyTo?: boolean;
 }
 
 export type WorkerRequest =
@@ -254,6 +257,8 @@ function handleInit(message: WorkerInit): void {
   state.canvasHeight = message.canvasHeight;
   state.ringDepth = message.ringDepth;
   state.captionStyles = message.captionStyles;
+  // B13-R 判别开关：起点即 copyTo（direct 路径整会话禁用）
+  if (message.forceCopyTo) state.frameUploadMode = "copyTo";
   const built = buildProgram(gl);
   state.program = built.program;
   state.uniforms = built.uniforms;

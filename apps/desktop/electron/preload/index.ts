@@ -88,6 +88,8 @@ export interface DesktopRuntime {
   status: "ready";
   /** B13 资源预算档位（离散值；不暴露额外主机信息——Main 侧由总内存判定）。 */
   resource_tier?: "conservative" | "balanced" | "high";
+  /** B13-R 判别诊断开关（仅 perf 诊断构建 + AIVS_FORCE_COPYTO=1 时下发）。 */
+  force_copy_to?: boolean;
 }
 export interface AuthoritativePreviewPresentation { preview: AuthoritativePreview; media_url: string }
 export interface ExportRecordPresentation { export_record: ExportRecord; media_url: string | null }
