@@ -1,0 +1,28 @@
+{
+  "runs": "1",
+  "seeks": "3",
+  "playback-seconds": "120",
+  "smoke": true,
+  "scenarios": [
+    "F01"
+  ],
+  "seed": "20260908",
+  "export_base": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\performance\\b13r-discriminate-copyto\\exports",
+  "baseline_status": "smoke-only-not-G0",
+  "commit": "9d9cad409bc589e86d4ef7b8b412781370f6fbbf",
+  "code_fingerprint": "b4d377524f90c87e041e2357c80b6cdc4c740bf5d005d908e28c2ecd903d353b",
+  "dirty_files": "M apps/desktop/electron/main/index.ts\n M apps/desktop/electron/preload/index.ts\n M apps/desktop/src/app/App.tsx\n M apps/desktop/src/app/preview/SyntheticPreview.tsx\n M apps/desktop/src/app/preview/compositor-worker.ts\n M apps/desktop/src/app/preview/compositor-worker.worker.ts\n M apps/desktop/src/app/preview/preview-session.ts\n?? 1",
+  "node": "v24.19.0",
+  "fixtures_used": [
+    {
+      "file": "F01.mp4",
+      "sha256": "4e51be3e3a70ba5192f2b682ed50545cfe111ec22857366f8b54876ee1c8d5b0",
+      "duration_s": 12,
+      "size": "640x360",
+      "fps": 30,
+      "recipe": "testsrc2-av-cfr-v1",
+      "bytes": 3123032,
+      "coverage_note": "Media only; not historical PiP, VFR/B-frame, multilayer or audio-failure coverage."
+    }
+  ]
+}
