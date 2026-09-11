@@ -233,6 +233,7 @@ export class PreviewSession {
     this.ir = ir;
     // C20 第二阶段：frames 可由调用方注入（v2 窗口帧源）；缺省 = v1 全量数组
     this.frames = frames ?? arrayFrameSource(ir);
+    this.externalFrames = frames !== undefined;
   }
 
   static async create(container: HTMLElement, ir: Ir,
@@ -451,6 +452,7 @@ export class PreviewSession {
     this.ir = nextIr;
     // C20a：换表同步换帧源（引用一致性保持）；v2 注入帧源由调用方重建后传入
     this.frames = nextFrames ?? arrayFrameSource(nextIr);
+    this.externalFrames = nextFrames !== undefined;
     // B13：换表输入集合不变（sig 已校验）——池注册保持；时间窗重置活跃
     this.inputLastActive.forEach((_at, inputId) => this.inputLastActive.set(inputId, performance.now()));
     this.audioCacheBindingGeneration += 1;
@@ -506,25 +508,25 @@ export class PreviewSession {
       }
     }
     this.pipOverlayIndex = index;
-    this.pipIndexCoveredUpTo = this.frames.frameCount - 1;
+    // v2 窗口帧源：只覆盖当前已就绪帧（游标 = 最后一个连续可取帧）；
+    // v1 全量：覆盖整表。两种模式共用"游标后增量并入"语义。
+    let covered = -1;
+    while (covered + 1 < this.frames.frameCount && this.frames.getFrame(covered + 1)) covered += 1;
+    this.pipIndexCoveredUpTo = covered;
   }
 
   /** C20 v2：窗口装配完成后增量并入 pip 索引（只扫新就绪帧区间，免全帧重扫）。 */
   private extendPipOverlayIndex(fromFrame: number, toFrameExclusive: number): void {
-    if (this.externalFrames) {
-      for (let n = Math.max(this.pipIndexCoveredUpTo + 1, fromFrame); n < toFrameExclusive; n++) {
-        const frame = this.frames.getFrame(n);
-        if (!frame) continue;
-        for (const overlay of frame.overlays) {
-          let list = this.pipOverlayIndex.get(overlay.clip_id);
-          if (!list) { list = []; this.pipOverlayIndex.set(overlay.clip_id, list); }
-          list.push(overlay);
-        }
+    if (!this.externalFrames && toFrameExclusive - 1 <= this.pipIndexCoveredUpTo) return;
+    for (let n = Math.max(this.pipIndexCoveredUpTo + 1, fromFrame); n < toFrameExclusive; n++) {
+      const frame = this.frames.getFrame(n);
+      if (!frame) continue;
+      for (const overlay of frame.overlays) {
+        let list = this.pipOverlayIndex.get(overlay.clip_id);
+        if (!list) { list = []; this.pipOverlayIndex.set(overlay.clip_id, list); }
+        list.push(overlay);
       }
-      this.pipIndexCoveredUpTo = Math.max(this.pipIndexCoveredUpTo, toFrameExclusive - 1);
-    } else if (toFrameExclusive - 1 > this.pipIndexCoveredUpTo) {
-      // v1：一次性全量重建语义保持
-      this.rebuildPipOverlayIndex();
+      this.pipIndexCoveredUpTo = Math.max(this.pipIndexCoveredUpTo, n);
     }
   }
 
