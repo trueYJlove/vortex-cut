@@ -38,6 +38,13 @@
   2400s:无晚发增长,F02 ~5min 达平台后 35min 波动 <20MB;F06 40min 导出
   竞争 succeeded）。剩余：C20c 与 C20 Renderer v2 数据面（实测依据齐备,
   可启动）。
+- **执行状态（2026-09-11 更新·四）**：**C20 第二阶段已交付**
+  （Renderer v2 数据面：windowedFrameSource LRU 整窗缓存/single-flight/
+  在途上限/abort/失配丢弃 + `VITE_AIVS_PREVIEW_IR_V2` 开关接入
+  （默认 off,v1 逐字节不变）+ pip 索引 v2 增量构建;Planning Gate
+  `docs/PERFORMANCE_C20_PHASE2_PLANNING_GATE_2026-09-11.md`,Desktop
+  616 项全过）。F 场景 v2 on/off A/B 实测待下一基准轮;达标后 C20c
+  （revision 换 manifest 沿用会话）立项。
 - 新增模块/协议/脚本均是本方案拟新增，不代表仓库已经存在。
 
 
