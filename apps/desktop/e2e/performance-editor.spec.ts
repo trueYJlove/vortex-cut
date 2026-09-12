@@ -321,6 +321,11 @@ const RECIPES: Record<string, SceneRecipe> = {
     scope: "complete App, source CFR, no PiP/captions; app cold launch + warm seeks; OS cache uncontrolled" },
   "F02": { scenario: "F02", label: "F02/900s-900splices-900captions", media: ["F02.mp4"], inPage: assembleF02,
     scope: "complete App, 900x1s same-source segments + 900 captions (IR at 27000-frame cap); app cold launch + warm seeks; OS cache uncontrolled" },
+  // B11-D1 spike：320x180 代理解码输入（夹具级替换，不动 source-resolver
+  // 默认策略）——检验解码驻留平台随帧字节的缩放。默认不跑（AIVS_PERF_
+  // SCENARIOS 显式选入），装配复用 F02（同 900 段/字幕，仅媒体分辨率不同）。
+  "F02P": { scenario: "F02P", label: "F02P/320x180-proxy-decode-900s", media: ["F02P.mp4"], inPage: assembleF02,
+    scope: "complete App, same F02 assembly over a 320x180 proxy decode input (B11-D1 residency scaling spike); app cold launch + warm seeks; OS cache uncontrolled" },
   "F04": { scenario: "F04", label: "F04/48-assets-4-layers", media: [], distinct: true, inPage: assembleF04,
     scope: "complete App, 48 assets/4 visual layers (V1 spine + V2-V4 simultaneous PiP transforms) + 12 captions; 48 kept within list_assets default page (pagination gap registered); app cold launch + warm seeks; OS cache uncontrolled" },
   "F07": { scenario: "F07", label: "F07/speed-matrix-overlap", media: ["F07.mp4", "F07-mute.mp4"], inPage: assembleF07,
@@ -340,11 +345,20 @@ const RECIPES: Record<string, SceneRecipe> = {
 test.skip(process.env.AIVS_PERF_RUN !== "1", "Explicit benchmark entry only; not an ordinary E2E load");
 for (const [sceneKey, recipe] of Object.entries(RECIPES)) {
   test(`B00 complete editor ${recipe.label} (not standalone probe)`, async () => {
+    // 场景选择器（缺省 = 全跑，G0 冻结面不变；B11-D1 spike 场景 F02P 必须
+    // 显式选入，避免全量基线轮被拉长）。同时供 T1/T2 A/B 轮按场景选跑。
+    const onlyScenarios = process.env.AIVS_PERF_SCENARIOS;
+    if (onlyScenarios && !onlyScenarios.split(",").map(s => s.trim()).includes(recipe.scenario)) {
+      test.skip(true, `scenario not selected (AIVS_PERF_SCENARIOS=${onlyScenarios})`);
+    }
     const output = process.env.AIVS_PERF_RESULT!;
     const fixtures = process.env.AIVS_PERF_FIXTURES!;
     const manifest = JSON.parse(await readFile(join(fixtures, "manifest.json"), "utf8"));
     // F06 reuses the F01 media family; the runner validated that fallback.
-    const fixture: ScenarioFixture = manifest.fixtures[recipe.scenario] ?? manifest.fixtures.F01;
+    // Every other scenario must match its own fixture exactly — a silent
+    // F01 fallback would corrupt measurement (F02P must not run 640x360 media).
+    const fixture: ScenarioFixture = manifest.fixtures[recipe.scenario]
+      ?? (recipe.scenario === "F06" ? manifest.fixtures.F01 : undefined);
     if (!fixture) throw new Error(`Fixture missing for scenario ${recipe.scenario}`);
     const seedBase = Number(process.env.AIVS_PERF_SEED ?? 20260908);
     const mediaFiles: FixtureEntry[] = fixture.files

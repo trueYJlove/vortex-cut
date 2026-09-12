@@ -13,6 +13,8 @@ ROOT = Path(__file__).resolve().parents[2]
 SINGLES = {
     "F01": (12, "640x360", 30),
     "F02": (900, "640x360", 30),
+    # B11-D1 spike：320x180 代理档解码输入（同 F02 时长/装配；帧字节 4x 减小）。
+    "F02P": (900, "320x180", 30),
     "F03": (3600, "640x360", 30),
     "F05": (12, "3840x2160", 60),
 }
@@ -55,7 +57,7 @@ def main():
             "supported media recipes: " + ",".join(supported)
             + "; F06 requires an explicit local workload"
         )
-    if not args.allow_large and any(s in {"F02", "F03", "F05"} for s in scenarios):
+    if not args.allow_large and any(s in {"F02", "F02P", "F03", "F05"} for s in scenarios):
         parser.error("long/4K generation requires --allow-large and free disk space")
     output = args.output.resolve()
     if output.exists() and any(output.iterdir()):
@@ -84,9 +86,9 @@ def main():
         entries = []
         for spec in recipe_files:
             target = output / spec["file"]
-            size, fps = ("640x360", 30)
-            if scenario == "F05":
-                size, fps = "3840x2160", 60
+            # 单文件场景尺寸/帧率取自 SINGLES（原实现硬编码 640x360 仅 F05
+            # 例外；重构后 F01/F02/F03 输出逐字节不变，F02P 得到 320x180）。
+            size, fps = SINGLES[scenario][1], SINGLES[scenario][2]
             command = [
                 str(ffmpeg),
                 "-nostdin",
