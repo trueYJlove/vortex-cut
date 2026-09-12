@@ -8,6 +8,7 @@ import { cpus, totalmem, release } from "node:os";
 import { expect, test, type Page, type ElectronApplication } from "@playwright/test";
 import type { DesktopApi as PreloadDesktopApi } from "../electron/preload/index.js";
 import type { TimelinePatchOperation } from "../../../packages/contracts/src/index.js";
+import { sanitizeErrorDetail } from "../electron/main/logging.js";
 import { expectCurrentProject } from "./project-switcher";
 
 const require = createRequire(import.meta.url);
@@ -475,9 +476,12 @@ for (const [sceneKey, recipe] of Object.entries(RECIPES)) {
           // Screenshot outside timing region; no readback in measured playback.
           await page.screenshot({ path: join(runDir, "editor.png") });
         } catch (error) {
-          // Do not persist exception text: decoder failures can include media tickets/paths.
+          // Persist sanitized detail only: redact() strips media tickets/URIs/paths
+          // before anything hits disk (S1, PERFORMANCE_C20T_B11D Planning Gate).
+          const detail = sanitizeErrorDetail(error);
           await writeFile(join(runDir, "failure.json"), JSON.stringify({ schema_version: 1, scenario: recipe.scenario, run: runIndex, enabled,
-            status: "invalid-incomplete", error_type: error instanceof Error ? error.name : "unknown", setup_recovery_count: setupRecoveryCount }, null, 2));
+            status: "invalid-incomplete", error_type: detail.name, error_message: detail.message, error_stack: detail.stack,
+            setup_recovery_count: setupRecoveryCount }, null, 2));
           throw error;
         } finally {
           try { await app.close(); } finally {

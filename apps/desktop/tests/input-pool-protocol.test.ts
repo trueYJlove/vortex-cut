@@ -47,12 +47,15 @@ describe("B13 registerInput/releaseInput 协议", () => {
 
   it("registerInput 携带 generation 递增语义（调用方驱动）", async () => {
     const client = await create();
-    client.registerInput("in_a", 1, { width: 640, height: 360 }, 8, false);
+    const ack1 = client.registerInput("in_a", 1, { width: 640, height: 360 }, 8, false);
     expect(FakeWorker.last.messages.at(-1).generation).toBe(1);
-    client.registerInput("in_a", 2, { width: 640, height: 360 }, 5, false);
+    const ack2 = client.registerInput("in_a", 2, { width: 640, height: 360 }, 5, false);
     expect(FakeWorker.last.messages.at(-1).generation).toBe(2);
     expect(FakeWorker.last.messages.at(-1).ringDepth).toBe(5);
     client.terminate();
+    // terminate 拒绝全部在途 ack——显式消费锁语义，不留 unhandled rejection。
+    await expect(ack1).rejects.toThrow("compositor worker disposed");
+    await expect(ack2).rejects.toThrow("compositor worker disposed");
   });
 
   it("disposed 后 registerInput 拒绝", async () => {
