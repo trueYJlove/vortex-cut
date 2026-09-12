@@ -3,7 +3,7 @@ import { AudioSourceCache } from "./audio-source-cache.js";
 import { AudioStreamLoader } from "./audio-stream.js";
 import { PcmChunkCache, PCM_CHUNK_SAMPLES } from "./pcm-chunk-cache.js";
 import { activeInputIds } from "./ir.js";
-import { arrayFrameSource, type FrameSource } from "./frame-source.js";
+import { arrayFrameSource, windowPrefetchStarts, type FrameSource } from "./frame-source.js";
 /** 合成预览会话：持有解码 worker、GL 执行器 worker（OffscreenCanvas）、纹理簿记
  * 与 WebAudio，对外提供 play/pause/seek 与时间/指标回调。
  *
@@ -21,7 +21,8 @@ import type { CompositorWorkerClient } from "./compositor-worker.js";
 import type { DrawCommand, FrameResidency } from "./compositor-worker.worker.js";
 import type { Ir, IrContent, IrFrame, IrOverlay } from "./ir.js";
 import type { PreviewSourceResolver } from "./source-resolver.js";
-import { BUDGET_TABLES, ringDepthFor, predictResidencyBytes } from "./resource-budget.js";
+import { PREVIEW_IR_V2_MAX_WINDOW_FRAMES } from "@aivideo/contracts";
+import { BUDGET_TABLES, ringDepthFor, predictResidencyBytes, windowSourceBudget } from "./resource-budget.js";
 import { InputPool } from "./input-pool.js";
 import { editorPerf, allocatePerfSession } from "./perf-metrics.js";
 import { DecodeWorker, type DecodeResidencyInfo } from "./decode-worker.js";
@@ -231,6 +232,11 @@ export class PreviewSession {
   private forceCopyTo = false;
   /** B13-R R3：驻留平台预警一次性标志。 */
   private residencyWarned = false;
+  /** C20-T1：seek 预取去抖窗口——拖拽/连点风暴中持续重置，落定才发起。 */
+  private static readonly PREFETCH_DEBOUNCE_MS = 200;
+  /** C20-T1：v2 seek 落定预取窗数（档位驱动；0 = 关闭/非 v2 帧源）。 */
+  private prefetchSpan = 0;
+  private prefetchTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly perfId = allocatePerfSession();
   private perfRequest = 0;
   private readonly lifetime = new AbortController();
@@ -257,6 +263,8 @@ export class PreviewSession {
     // B13：档位 → 环深决策（保守档多输入收 5；LEAD 联动防写深覆盖）
     if (resourceTier) {
       session.ringDepth = ringDepthFor(resourceTier, ir.inputs.filter(input => input.asset_kind === "video").length);
+      // C20-T1：seek 落定预取窗数（仅 v2 注入帧源时生效，见 scheduleWindowPrefetch）
+      session.prefetchSpan = windowSourceBudget(resourceTier).prefetchWindows;
     }
     const abort = () => session.dispose();
     signal?.addEventListener("abort", abort, { once: true });
@@ -1340,7 +1348,25 @@ export class PreviewSession {
     // scrub 风暴中预热解码与下一 seek 的目标解码争抢解码器（实测 seek p95
     // 翻倍）；最终落定（refineAfterDrag，dragMode=false）才预热。
     if (!this.playing && !this.dragMode) this.pump(index);
+    this.scheduleWindowPrefetch(index);
     return frame.n;
+  }
+
+  /** C20-T1：seek 落定后的窗口元数据预取（仅 v2 注入帧源生效）。
+   *  拖拽/连点风暴中定时器持续重置 = 自然去抖；落定后对目标窗 ±span 逐窗
+   *  发起（近目标优先、正向优先），受帧源 maxInFlight 约束——满载窗口不
+   *  排队（window_fetch -1 遥测），fire-and-forget：loadWindow 自吞错误，
+   *  promise 不会 reject。预取只影响 IR 元数据缓存，不触发解码/上传。 */
+  private scheduleWindowPrefetch(target: number): void {
+    if (this.prefetchSpan < 1 || !this.externalFrames) return;
+    if (this.prefetchTimer) clearTimeout(this.prefetchTimer);
+    this.prefetchTimer = setTimeout(() => {
+      this.prefetchTimer = null;
+      if (this.disposed) return;
+      for (const start of windowPrefetchStarts(target, this.prefetchSpan, PREVIEW_IR_V2_MAX_WINDOW_FRAMES, this.frames.frameCount)) {
+        void this.frames.ensureRange?.(start, start + 1, this.lifetime.signal);
+      }
+    }, PreviewSession.PREFETCH_DEBOUNCE_MS);
   }
 
   /** 拖拽结束后的全量精修（覆盖 PiP/转场槽位），快速档期间跳过的内容由此补齐。 */
@@ -1489,6 +1515,7 @@ export class PreviewSession {
     editorPerf.record("session_close", 0, this.perfId);
     this.disposed = true;
     this.seekEpoch++;
+    if (this.prefetchTimer) { clearTimeout(this.prefetchTimer); this.prefetchTimer = null; }
     this.lifetime.abort();
     this.poolDispose(); // B13：池输入释放（worker 纹理删除 + 簿记清零）
     this.onTimeUs = null;

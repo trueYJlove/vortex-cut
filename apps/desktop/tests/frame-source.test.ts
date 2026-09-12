@@ -2,7 +2,7 @@
  *  （getFrame 引用稳定性——就地补丁语义依赖；越界 undefined；ensureRange
  *  立即完成；dispose 无操作——数组归 Ir 所有）。 */
 import { describe, expect, it } from "vitest";
-import { arrayFrameSource, windowedFrameSource } from "../src/app/preview/frame-source.js";
+import { arrayFrameSource, windowPrefetchStarts, windowedFrameSource } from "../src/app/preview/frame-source.js";
 import type { Ir, IrFrame } from "../src/app/preview/ir.js";
 
 function makeIr(frameCount: number): Ir {
@@ -190,5 +190,19 @@ describe("C20 v2 windowedFrameSource", () => {
     source.dispose?.();
     expect(source.getFrame(0)).toBeUndefined();
     expect(source.buffered()).toEqual([]);
+  });
+});
+
+describe("windowPrefetchStarts（C20-T1 预取窗序）", () => {
+  it("对称 ±span、同距对内先正向、近目标优先、去重", () => {
+    // 1000 帧 / 300 窗：窗口起点 0/300/600/900
+    expect(windowPrefetchStarts(250, 2, 300, 1000)).toEqual([300, 600]); // 目标在窗 0:-k 夹回自身被剔
+    expect(windowPrefetchStarts(350, 2, 300, 1000)).toEqual([600, 0, 900]); // 同距对内正向在前
+    expect(windowPrefetchStarts(950, 2, 300, 1000)).toEqual([600, 300]); // 末窗:+k 夹回自身,仅向后
+  });
+
+  it("单窗源不产生预取;span 0 返回空", () => {
+    expect(windowPrefetchStarts(50, 2, 300, 100)).toEqual([]);
+    expect(windowPrefetchStarts(50, 0, 300, 100)).toEqual([]);
   });
 });

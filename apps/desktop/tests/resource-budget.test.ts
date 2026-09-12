@@ -6,20 +6,38 @@ import {
   BUDGET_TABLES,
   frameTextureBytes,
   inputTextureBytes,
+  MAX_IN_FLIGHT_WINDOWS,
+  MAX_PREFETCH_WINDOWS,
   predictResidencyBytes,
   ringDepthFor,
   tierForTotalMemory,
+  windowSourceBudget,
   type BudgetTier,
 } from "../src/app/preview/resource-budget.js";
 import { InputPool, type PoolInput } from "../src/app/preview/input-pool.js";
 
 describe("BUDGET_TABLES", () => {
   it("三档位预算表（MiB）：保守 < balanced < high；保温 1/2/2", () => {
-    expect(BUDGET_TABLES.conservative).toEqual({ rangeCacheMiB: 64, pcmCacheMiB: 64, textureBytesMiB: 128, decoderKeepWarm: 1 });
-    expect(BUDGET_TABLES.balanced).toEqual({ rangeCacheMiB: 128, pcmCacheMiB: 128, textureBytesMiB: 256, decoderKeepWarm: 2 });
-    expect(BUDGET_TABLES.high).toEqual({ rangeCacheMiB: 256, pcmCacheMiB: 256, textureBytesMiB: 512, decoderKeepWarm: 2 });
+    expect(BUDGET_TABLES.conservative).toEqual({ rangeCacheMiB: 64, pcmCacheMiB: 64, textureBytesMiB: 128, decoderKeepWarm: 1,
+      windowCacheMiB: 16, prefetchWindows: 1, maxInFlightWindows: 2 });
+    expect(BUDGET_TABLES.balanced).toEqual({ rangeCacheMiB: 128, pcmCacheMiB: 128, textureBytesMiB: 256, decoderKeepWarm: 2,
+      windowCacheMiB: 32, prefetchWindows: 2, maxInFlightWindows: 3 });
+    expect(BUDGET_TABLES.high).toEqual({ rangeCacheMiB: 256, pcmCacheMiB: 256, textureBytesMiB: 512, decoderKeepWarm: 2,
+      windowCacheMiB: 64, prefetchWindows: 2, maxInFlightWindows: 4 });
     expect(BUDGET_TABLES.conservative.textureBytesMiB).toBeLessThan(BUDGET_TABLES.balanced.textureBytesMiB);
     expect(BUDGET_TABLES.balanced.textureBytesMiB).toBeLessThan(BUDGET_TABLES.high.textureBytesMiB);
+    expect(BUDGET_TABLES.conservative.windowCacheMiB).toBeLessThan(BUDGET_TABLES.balanced.windowCacheMiB);
+    expect(BUDGET_TABLES.balanced.windowCacheMiB).toBeLessThan(BUDGET_TABLES.high.windowCacheMiB);
+  });
+});
+
+describe("windowSourceBudget（C20-T1）", () => {
+  it("档位 → 窗缓存字节/预取窗数/在途上限，且受全局上限夹紧", () => {
+    expect(windowSourceBudget("conservative")).toEqual({ cacheBytes: 16 * 1024 * 1024, prefetchWindows: 1, maxInFlight: 2 });
+    expect(windowSourceBudget("balanced")).toEqual({ cacheBytes: 32 * 1024 * 1024, prefetchWindows: 2, maxInFlight: 3 });
+    expect(windowSourceBudget("high")).toEqual({ cacheBytes: 64 * 1024 * 1024, prefetchWindows: 2, maxInFlight: 4 });
+    expect(MAX_PREFETCH_WINDOWS).toBe(2);
+    expect(MAX_IN_FLIGHT_WINDOWS).toBe(4);
   });
 });
 

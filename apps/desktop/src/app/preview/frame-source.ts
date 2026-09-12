@@ -205,3 +205,22 @@ export function windowedFrameSource(
     },
   };
 }
+
+/** C20-T1：seek 落定后的预取窗序（纯函数，单测锁定）。
+ * 目标窗自身由 seek 路径取，不重复；对称 ±k、同距对内先正向（顺播更常见，
+ * 在途上限下先到先得）；起点去重并夹紧到合法窗口范围。 */
+export function windowPrefetchStarts(target: number, span: number, windowFrames: number, totalFrames: number): number[] {
+  if (span < 1 || windowFrames < 1 || totalFrames < 1) return [];
+  const lastStart = Math.floor((totalFrames - 1) / windowFrames) * windowFrames;
+  const startOf = (frame: number): number =>
+    Math.min(Math.max(0, Math.floor(frame / windowFrames) * windowFrames), lastStart);
+  const targetStart = startOf(target);
+  const out: number[] = [];
+  for (let k = 1; k <= span; k++) {
+    for (const off of [k, -k]) {
+      const start = startOf(target + off * windowFrames);
+      if (start !== targetStart && !out.includes(start)) out.push(start);
+    }
+  }
+  return out;
+}

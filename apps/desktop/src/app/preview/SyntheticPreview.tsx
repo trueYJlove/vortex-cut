@@ -10,6 +10,7 @@ import { PreviewSession, type PreviewSessionMetrics, type SegmentAudioConfig } f
 import { PreviewSourceResolver } from "./source-resolver.js";
 import { SyntheticPipLayer } from "./SyntheticPipLayer.js";
 import { windowedFrameSource } from "./frame-source.js";
+import { windowSourceBudget } from "./resource-budget.js";
 import { parsePreviewIrV2Manifest } from "@aivideo/contracts";
 
 const previewIrV2Enabled = (): boolean => {
@@ -119,6 +120,9 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
           }));
           const container = containerRef.current;
           if (!container || stale()) return;
+          // C20-T1：缓存预算/在途上限随资源档位（无档位 = 帧源内建默认 8MiB/2，
+          // 语义不变——档位表见 resource-budget.windowSourceBudget）
+          const wsBudget = resourceTier ? windowSourceBudget(resourceTier) : undefined;
           const frameSource = windowedFrameSource(manifest.manifest_id, manifest.total_frames, {
             fetchWindow: (startFrame, frameCount, signal) => {
               if (signal.aborted) return Promise.reject(new Error("aborted"));
@@ -127,6 +131,8 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
                 timeline_revision_id: revisionId, output_ratio: outputRatio,
               }).then(payload => payload);
             },
+            cacheBytes: wsBudget?.cacheBytes,
+            maxInFlight: wsBudget?.maxInFlight,
           });
           // 首屏：只取首窗 + 预取窗（不等待全量——v2 的核心收益点）
           await frameSource.ensureRange?.(0, Math.min(manifest.total_frames, 600), controller.signal);

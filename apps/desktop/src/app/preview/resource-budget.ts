@@ -4,9 +4,9 @@
  * - Main 只传离散档位（conservative/balanced/high），不向 Renderer 暴露
  *   额外主机信息；不能仅凭 navigator.deviceMemory 决定独显显存。
  * - 档位默认表（MiB）：
- *   conservative：Range 缓存 64 / PCM 缓存 64 / 纹理估算 128 / 保温 1
- *   balanced：    128 / 128 / 256 / 2
- *   high：        256 / 256 / 512 / 2
+ *   conservative：Range 缓存 64 / PCM 缓存 64 / 纹理估算 128 / 保温 1 / 窗缓存 16 / 预取 1 / 窗在途 2
+ *   balanced：    128 / 128 / 256 / 2 / 32 / 2 / 3
+ *   high：        256 / 256 / 512 / 2 / 64 / 2 / 4
  * - 资源紧张先缩预热、清 idle、降代理/池深，仍无法满足 active 则明确
  *   回退/暂停并提示，不能静默删图层。
  */
@@ -21,13 +21,36 @@ export interface BudgetTable {
   textureBytesMiB: number;
   /** 未激活解码器保温数。 */
   decoderKeepWarm: number;
+  /** C20-T1：v2 窗口帧源 LRU 预算（MiB；IR 帧元数据记账，与解码驻留正交）。 */
+  windowCacheMiB: number;
+  /** C20-T1：seek 落定后的预取窗数（目标窗 ±N，去抖触发）。 */
+  prefetchWindows: number;
+  /** C20-T1：窗口取数在途上限。 */
+  maxInFlightWindows: number;
 }
 
 export const BUDGET_TABLES: Record<BudgetTier, BudgetTable> = {
-  conservative: { rangeCacheMiB: 64, pcmCacheMiB: 64, textureBytesMiB: 128, decoderKeepWarm: 1 },
-  balanced: { rangeCacheMiB: 128, pcmCacheMiB: 128, textureBytesMiB: 256, decoderKeepWarm: 2 },
-  high: { rangeCacheMiB: 256, pcmCacheMiB: 256, textureBytesMiB: 512, decoderKeepWarm: 2 },
+  conservative: { rangeCacheMiB: 64, pcmCacheMiB: 64, textureBytesMiB: 128, decoderKeepWarm: 1,
+    windowCacheMiB: 16, prefetchWindows: 1, maxInFlightWindows: 2 },
+  balanced: { rangeCacheMiB: 128, pcmCacheMiB: 128, textureBytesMiB: 256, decoderKeepWarm: 2,
+    windowCacheMiB: 32, prefetchWindows: 2, maxInFlightWindows: 3 },
+  high: { rangeCacheMiB: 256, pcmCacheMiB: 256, textureBytesMiB: 512, decoderKeepWarm: 2,
+    windowCacheMiB: 64, prefetchWindows: 2, maxInFlightWindows: 4 },
 };
+
+/** C20-T1：窗口帧源参数上限（表值失配不得放大在途/预取风暴）。 */
+export const MAX_PREFETCH_WINDOWS = 2;
+export const MAX_IN_FLIGHT_WINDOWS = 4;
+
+/** C20-T1：v2 窗口帧源参数（SyntheticPreview 构造帧源与会话预取共用）。 */
+export function windowSourceBudget(tier: BudgetTier): { cacheBytes: number; prefetchWindows: number; maxInFlight: number } {
+  const table = BUDGET_TABLES[tier];
+  return {
+    cacheBytes: table.windowCacheMiB * 1024 * 1024,
+    prefetchWindows: Math.min(table.prefetchWindows, MAX_PREFETCH_WINDOWS),
+    maxInFlight: Math.min(table.maxInFlightWindows, MAX_IN_FLIGHT_WINDOWS),
+  };
+}
 
 /** 档位判定（Main 侧执行，Renderer 收离散结果）。
  *
