@@ -1,0 +1,17 @@
+{
+  "schema_version": 2,
+  "seed": 20260908,
+  "toolchain": "ffmpeg version n8.0.1-66-g27b8d1a017-20260228 Copyright (c) 2000-2025 the FFmpeg developers",
+  "fixtures": {
+    "F02P": {
+      "file": "F02P.mp4",
+      "sha256": "a51a08f64461cdbf50c502750c273d10120e23e222bcfbafeb2277e7209851f7",
+      "duration_s": 900,
+      "size": "320x180",
+      "fps": 30,
+      "recipe": "testsrc2-av-cfr-v1",
+      "bytes": 135354336,
+      "coverage_note": "Media only; not historical PiP, VFR/B-frame, multilayer or audio-failure coverage."
+    }
+  }
+}

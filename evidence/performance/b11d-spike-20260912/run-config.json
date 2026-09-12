@@ -1,0 +1,12 @@
+{
+  "scenarios": [
+    "F02P"
+  ],
+  "runs": "5",
+  "seeks": "100",
+  "playback-seconds": "300",
+  "seed": "20260908",
+  "baseline_status": "B11-D1-spike-direct-playwright (hand-seeded run-config; fingerprint per runner algorithm)",
+  "commit": "fd8d7ed89ae42e2a589835569e858cd2e91c15b0",
+  "code_fingerprint": "42585dad8c9d195a4f48d54bd8d7de97f9029f24cd3dc2a275b580c3555af323"
+}

@@ -1,0 +1,28 @@
+{
+  "scenarios": [
+    "F03"
+  ],
+  "runs": "5",
+  "seeks": "100",
+  "playback-seconds": "300",
+  "seed": "20260908",
+  "smoke": false,
+  "export_base": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\performance\\c20t-ab-20260912-v2-f03retry\\exports",
+  "baseline_status": "partial-B00-not-G0",
+  "commit": "fd8d7ed89ae42e2a589835569e858cd2e91c15b0",
+  "code_fingerprint": "42585dad8c9d195a4f48d54bd8d7de97f9029f24cd3dc2a275b580c3555af323",
+  "dirty_files": "M apps/desktop/e2e/performance-editor.spec.ts\n M docs/PERFORMANCE_B11D_PROXY_DECISION_MEMO_2026-09-12.md\n?? evidence/performance/b11d-fixtures-20260912/\n?? evidence/performance/b11d-spike-20260912-fail01/\n?? evidence/performance/b11d-spike-20260912/\n?? evidence/performance/c20t-ab-20260912-v1-fail01/\n?? evidence/performance/c20t-ab-20260912-v1-fail02/\n?? evidence/performance/c20t-ab-20260912-v1/\n?? evidence/performance/c20t-ab-20260912-v2/\n?? evidence/performance/c20t-diag-f01-campaignparams/\n?? evidence/performance/c20t-smoke-20260912-03/\n?? evidence/performance/c20t-smoke-20260912-v2/\n?? evidence/performance/c20t-smoke-20260912/",
+  "node": "v24.19.0",
+  "fixtures_used": [
+    {
+      "file": "F03.mp4",
+      "sha256": "f0ede458a66b534e84fb0363fb598fabc339bc093f5fc4d19f9ec211cc347126",
+      "duration_s": 3600,
+      "size": "640x360",
+      "fps": 30,
+      "recipe": "testsrc2-av-cfr-v1",
+      "bytes": 935625926,
+      "coverage_note": "Media only; not historical PiP, VFR/B-frame, multilayer or audio-failure coverage."
+    }
+  ]
+}

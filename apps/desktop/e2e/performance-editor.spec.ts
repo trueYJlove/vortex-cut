@@ -77,7 +77,11 @@ const assembleF01 = async (files: string[]): Promise<object> => {
 };
 
 const assembleF02 = async (files: string[]): Promise<object> => {
-  const project = await window.desktop.createProject({ name: "B00 F02" });
+  // 项目名由测试体注入（B00 <scenario>）——F02P 复用本装配，不能硬编码
+  // "B00 F02"，否则 expectCurrentProject("B00 F02P") 断言失败（B11-D1 首次
+  // E2E 实跑暴露；缺省值保持 F02 单独可读）。
+  const projectName = (window as { __benchProjectName?: string }).__benchProjectName ?? "B00 F02";
+  const project = await window.desktop.createProject({ name: projectName });
   const imported = await window.desktop.importAssetByFixture({ project_id: project.project_id, fixture_file: files[0] });
   if (!imported) throw new Error("Fixture import cancelled");
   const api = window.desktop;
@@ -392,6 +396,7 @@ for (const [sceneKey, recipe] of Object.entries(RECIPES)) {
           await page.waitForFunction(() => Boolean((window as any).__editorPerf));
           await page.evaluate(on => (window as any).__editorPerf.configure(on), enabled);
           const started = Date.now();
+          await page.evaluate(name => { (window as { __benchProjectName?: string }).__benchProjectName = name; }, `B00 ${recipe.scenario}`);
           const extra = await page.evaluate(recipe.inPage, mediaFiles.map(entry => entry.file));
           await expectCurrentProject(page, `B00 ${recipe.scenario}`);
           await page.reload();
@@ -426,6 +431,17 @@ for (const [sceneKey, recipe] of Object.entries(RECIPES)) {
           await expect.poll(async () => Number(await page.getByRole("slider", { name: "时间线播放头" }).getAttribute("aria-valuenow")), { timeout: 30000 }).toBeGreaterThan(500000);
           await page.getByRole("button", { name: "暂停", exact: true }).click();
           const readyMs = Date.now() - started;
+          // C20-T2 A/B 采数:reset() 清空事件流,ready 分段(manifest/parse/
+          // window/inject)在本次重载后装配期间记录,必须先于 reset 捕获。
+          // v1 路径不产生 ready_* 事件,样本中该字段为空集;off 通道同样为空。
+          const readySegments = await page.evaluate(() => {
+            const snapshot = (window as any).__editorPerf.snapshot();
+            return {
+              counts: snapshot.counts,
+              durations: snapshot.durations,
+              events: snapshot.events.filter((event: { kind: string }) => event.kind.startsWith("ready_")),
+            };
+          });
           await page.evaluate(() => (window as any).__editorPerf.reset());
           const seekActions: number[] = [];
           const slider = page.getByRole("slider", { name: "时间线播放头" });
@@ -476,7 +492,7 @@ for (const [sceneKey, recipe] of Object.entries(RECIPES)) {
           const environment = await app.evaluate(async ({ app: mainApp, screen }) => ({ versions: process.versions, platform: process.platform, arch: process.arch, gpu: await mainApp.getGPUInfo("basic"), refresh_hz: screen.getPrimaryDisplay().displayFrequency }));
           Object.assign(environment, { cpu_model: cpus()[0]?.model, logical_cpus: cpus().length, ram_bytes: totalmem(), os_release: release() });
           const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight, dpr: devicePixelRatio, userAgent: navigator.userAgent }));
-          sample = { schema_version: 2, scenario: recipe.label, run: runIndex, enabled, ready_ms: readyMs, setup_recovery_count: setupRecoveryCount,
+          sample = { schema_version: 2, scenario: recipe.label, run: runIndex, enabled, ready_ms: readyMs, ready_segments: readySegments, setup_recovery_count: setupRecoveryCount,
             workload: { seeks, seed: seedBase, build_mode: "production-diagnostics", code_fingerprint: config.code_fingerprint },
             seek_action_wall_ms_including_300ms_wait: seekActions, seek: seekMetrics, playback: playbackMetrics, process_samples: processSamples,
             environment, viewport, fixture_sha256: mediaFiles[0].sha256, fixture_files: mediaFiles.map(entry => ({ file: entry.file, sha256: entry.sha256 })),
