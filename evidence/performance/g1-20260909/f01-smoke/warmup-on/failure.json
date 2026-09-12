@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "run": -1,
+  "enabled": true,
+  "status": "invalid-incomplete",
+  "error_type": "Error",
+  "setup_recovery_count": 0
+}

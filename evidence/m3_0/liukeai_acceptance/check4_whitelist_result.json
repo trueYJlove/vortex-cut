@@ -1,0 +1,17 @@
+{
+ "whitelist_cases": {
+  "mask": "REJECTED: [R11 白名单硬失败] 段 c1: mask 不在 P2 实测子集",
+  "keying": "REJECTED: [R11 白名单硬失败] 段 c1: keying 不在 P2 实测子集",
+  "reframe": "REJECTED: [R11 白名单硬失败] 段 c1: reframe 不在 P2 实测子集",
+  "rotate_keyframe": "REJECTED: [R11 白名单硬失败] 段 c1: 关键帧属性 ['rotate'] 不在 P2 实测子集",
+  "scale_keyframe": "REJECTED: [R11 白名单硬失败] 段 c1: 关键帧属性 ['scale'] 不在 P2 实测子集",
+  "dissolve_transition": "REJECTED: [R11 白名单硬失败] 段 c1: 转场 dissolve 不在 P2 实测子集",
+  "non_v1_keyframes": "REJECTED: [R11 白名单硬失败] 段 c1: 非 V1 轨关键帧（权威端覆盖轨链路不叠加动画） 不在 P2 实测子集",
+  "reverse_playback": "REJECTED: [R11 白名单硬失败] 段 c1: reverse_playback 不在 P2 实测子集",
+  "caption_style_override": "REJECTED: [R11] 字幕 cap1: style_override 不在实测子集",
+  "static_pip_rotate_CONTROL_expect_pass": "ACCEPTED"
+ },
+ "known_approximations_count": 5,
+ "rotate_defect_recorded": true,
+ "position_defect_recorded": true
+}

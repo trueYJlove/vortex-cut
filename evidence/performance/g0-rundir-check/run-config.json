@@ -1,0 +1,39 @@
+{
+  "scenarios": [
+    "F01",
+    "F02"
+  ],
+  "runs": "1",
+  "seeks": "3",
+  "playback-seconds": "5",
+  "smoke": true,
+  "seed": "20260908",
+  "export_base": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\performance\\g0-rundir-check\\exports",
+  "baseline_status": "smoke-only-not-G0",
+  "commit": "5583ec6fe163f2e752d9fffe3cd04a01d9715528",
+  "code_fingerprint": "736802ad77f749f41c663bd05348f4e9ab522281156a17740182db711feb2afa",
+  "dirty_files": "M apps/desktop/e2e/performance-editor.spec.ts\n M tools/performance/compare_results.py\n M tools/performance/run_editor_benchmark.mjs\n?? evidence/performance/b00b-fixtures-f01/\n?? evidence/performance/b00b-fixtures-f03/\n?? evidence/performance/b00b-fixtures-f05/\n?? evidence/performance/g0-baseline-20260911/\n?? evidence/performance/g0-fixtures-20260911/\n?? tools/performance/summarize_results.py",
+  "node": "v24.19.0",
+  "fixtures_used": [
+    {
+      "file": "F01.mp4",
+      "sha256": "4e51be3e3a70ba5192f2b682ed50545cfe111ec22857366f8b54876ee1c8d5b0",
+      "duration_s": 12,
+      "size": "640x360",
+      "fps": 30,
+      "recipe": "testsrc2-av-cfr-v1",
+      "bytes": 3123032,
+      "coverage_note": "Media only; not historical PiP, VFR/B-frame, multilayer or audio-failure coverage."
+    },
+    {
+      "file": "F02.mp4",
+      "sha256": "bd34e2a32b6e9b3d2cb9945610678e2daab79f9ea3b0ee371003bd8c0064f464",
+      "duration_s": 900,
+      "size": "640x360",
+      "fps": 30,
+      "recipe": "testsrc2-av-cfr-v1",
+      "bytes": 233918530,
+      "coverage_note": "Media only; not historical PiP, VFR/B-frame, multilayer or audio-failure coverage."
+    }
+  ]
+}

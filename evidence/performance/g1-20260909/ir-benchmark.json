@@ -1,0 +1,67 @@
+{
+  "scope": "Pure project_preview_ir + compact JSON only; excludes compilation, probing, IPC, JS parsing and GPU.",
+  "toolchain": "python=3.13.1;aivs_core=0.0.1",
+  "repeats": 3,
+  "cases": [
+    {
+      "case": "60s-1seg",
+      "duration_s": 60,
+      "segments": 1,
+      "captions": 0,
+      "frames": 1800,
+      "project_ms_samples": [
+        9.684599994216114,
+        8.90300003811717,
+        10.406199959106743
+      ],
+      "project_ms_median": 9.684599994216114,
+      "json_ms_median": 6.3661999884061515,
+      "json_bytes": 470129
+    },
+    {
+      "case": "900s-1seg",
+      "duration_s": 900,
+      "segments": 1,
+      "captions": 0,
+      "frames": 27000,
+      "project_ms_samples": [
+        156.88439999939874,
+        174.55170000903308,
+        165.26280000107363
+      ],
+      "project_ms_median": 165.26280000107363,
+      "json_ms_median": 96.49799996986985,
+      "json_bytes": 7154535
+    },
+    {
+      "case": "300s-300",
+      "duration_s": 300,
+      "segments": 300,
+      "captions": 300,
+      "frames": 9000,
+      "project_ms_samples": [
+        79.71300004282966,
+        64.75760001922026,
+        57.59190005483106
+      ],
+      "project_ms_median": 64.75760001922026,
+      "json_ms_median": 37.09889994934201,
+      "json_bytes": 2555337
+    },
+    {
+      "case": "900s-900",
+      "duration_s": 900,
+      "segments": 900,
+      "captions": 900,
+      "frames": 27000,
+      "project_ms_samples": [
+        175.72380002820864,
+        170.5027000280097,
+        173.3325999812223
+      ],
+      "project_ms_median": 173.3325999812223,
+      "json_ms_median": 103.50210004253313,
+      "json_bytes": 7704738
+    }
+  ]
+}

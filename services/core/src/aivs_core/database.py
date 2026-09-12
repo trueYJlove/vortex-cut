@@ -15,6 +15,9 @@ from .database_v14 import V14_SQL
 from .database_v15 import V15_SQL
 from .database_v16 import V16_SQL
 from .database_v17 import V17_SQL
+from .database_v18 import V18_SQL
+from .database_v19 import V19_SQL
+from .performance import measured
 
 
 def utc_now() -> str:
@@ -42,6 +45,8 @@ V14_VERSION = "v14"
 V15_VERSION = "v15"
 V16_VERSION = "v16"
 V17_VERSION = "v17"
+V18_VERSION = "v18"
+V19_VERSION = "v19"
 V1_SQL = """
 CREATE TABLE IF NOT EXISTS media_inputs (
   id TEXT PRIMARY KEY, path TEXT NOT NULL, display_name TEXT NOT NULL,
@@ -893,6 +898,8 @@ MIGRATIONS: dict[str, str] = {
     V15_VERSION: V15_SQL,
     V16_VERSION: V16_SQL,
     V17_VERSION: V17_SQL,
+    V18_VERSION: V18_SQL,
+    V19_VERSION: V19_SQL,
 }
 
 
@@ -1217,6 +1224,7 @@ def json_loads(value: str) -> Any:
     return json.loads(value)
 
 
+@measured("hash")
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as source:

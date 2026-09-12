@@ -18,9 +18,12 @@ export function safeTaskErrorMessage(error?: unknown): string {
 }
 
 export function errorCode(error: unknown): string {
-  return typeof error === "object" && error !== null && "code" in error
+  const raw = typeof error === "object" && error !== null && "code" in error
     ? String((error as { code?: unknown }).code ?? "")
     : error instanceof Error
       ? error.message
       : "";
+  // Electron IPC 只保留 message；主进程 fetchWithUi 以 "[CODE] message" 传递业务码。
+  const bracket = raw.match(/^\[([A-Z0-9_]+)\]/);
+  return bracket ? bracket[1] : raw;
 }

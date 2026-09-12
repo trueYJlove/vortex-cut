@@ -6,7 +6,7 @@
                            "name":  "aivs-core",
                            "version":  "0.0.1",
                            "path":  "core/aivs-core/aivs-core.exe",
-                           "sha256":  "bb93348671ed2c50eb52e33ea414be77e4bd497ba37e055c5ab05d10d1f9cb73",
+                           "sha256":  "343b1ded89fbdb86328e06083e362a6cb2e51fc7d51ed86dcf740668e49f689f",
                            "hash_status":  "verified",
                            "license":  "project"
                        },

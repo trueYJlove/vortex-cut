@@ -16,14 +16,18 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import PROTOCOL_VERSION, __version__
+from . import performance as perf_diagnostics
 from .asr_jobs import AsrCoordinator
 from .auth import AuthStore
 from .config import Settings
 from .database import Database, MigrationError, json_dumps, json_loads, utc_now
 from .ids import new_id
 from .jobs import JobService
+from .media.audio_chunks import PcmChunkError, PcmChunkService
 from .media.encoders import EncoderDetector
 from .media.ffprobe import FFprobe
+from .media.probe_cache import ProbeCache, probe_cache_key
+from .media.process import run_process
 from .media_generation import MediaGenerationService
 from .model_registry import ModelError, ModelManager, ModelRegistry
 from .planning import PlanningService, ProviderRepository, RecipeRegistry
@@ -70,9 +74,67 @@ class ProbeRequest(BaseModel):
     grant_id: str
 
 
+class DerivedMediaRequest(BaseModel):
+    """B10 派生媒体查询/解析请求（kind/params 枚举白名单在服务层再强制）。"""
+    model_config = ConfigDict(extra="forbid")
+
+    asset_id: str
+    kind: str
+    params: dict[str, str] = Field(default_factory=dict)
+
+
+class PreviewSourceRequest(BaseModel):
+    """B11 预览源请求（profile/mode 枚举在服务层再强制）。"""
+    model_config = ConfigDict(extra="forbid")
+
+    profile_id: str | None = None
+    mode: str = "auto"
+    encoder_mode: str = "auto"
+    # 无 ready 条目时是否登记生成作业（默认 False：纯查询）
+    generate: bool = False
+
+
+class PreviewSourceMediaRequest(BaseModel):
+    """B11 代理票据请求（Main → Core admin；Renderer 永不直调）。"""
+    model_config = ConfigDict(extra="forbid")
+
+    asset_id: str
+    profile_id: str
+
+
+class WaveformRequest(BaseModel):
+    """B14 波形描述请求（generate=True 登记生成作业；参数服务端固定）。"""
+    model_config = ConfigDict(extra="forbid")
+
+    generate: bool = False
+
+
+class PcmChunkRequest(BaseModel):
+    """B15 PCM 块确保请求（网格对齐在服务层强制）。"""
+    model_config = ConfigDict(extra="forbid")
+
+    start_sample: int
+
+
+class PcmChunkMediaRequest(BaseModel):
+    """B15 PCM 块票据请求（Main → Core admin；Renderer 永不直调）。"""
+    model_config = ConfigDict(extra="forbid")
+
+    start_sample: int
+
+
+class EditorLoadLeaseRequest(BaseModel):
+    """B16b 编辑器负载心跳（Main → Core admin；Renderer 永不直调）。"""
+    model_config = ConfigDict(extra="forbid")
+
+    window_id: str
+    mode: str
+
+
 class ProjectCreateRequest(BaseModel):
     name: str
     root_dir_name: str | None = None
+    canvas: dict | None = None
 
 
 class ProjectPatchRequest(BaseModel):
@@ -149,6 +211,7 @@ class PreviewCreateRequest(BaseModel):
 
     timeline_revision_id: str | None = None
     encoder_mode: str = "auto"
+    output_ratio: str = "fit"
 
 
 class ExportCreateRequest(BaseModel):
@@ -157,6 +220,7 @@ class ExportCreateRequest(BaseModel):
     timeline_revision_id: str | None = None
     destination_grant_id: str
     encoder_mode: str = "auto"
+    output_ratio: str = "fit"
 
 
 class BriefPutRequest(BaseModel):
@@ -499,6 +563,10 @@ class CoreState:
         self.connections: set[WebSocket] = set()
         self.shutdown_event = asyncio.Event()
         self.ffprobe = FFprobe(settings.ffprobe)
+        # A07：probe 结果会话缓存（键 = fingerprint + stat + ffprobe build；
+        # 成功 LRU≤256、失败 TTL 5s、并发同键 single-flight）。装饰层包住
+        # FFprobe——app 内统一经 cached_probe 走缓存，FFprobe 本体语义不变。
+        self.probe_cache = ProbeCache()
         self.encoders = EncoderDetector(settings.ffmpeg)
         self.model_registry = ModelRegistry(settings.manifest_dir)
         self.model_manager = ModelManager(self.db, settings.data_dir, self.model_registry)
@@ -525,16 +593,118 @@ class CoreState:
         self.asr = AsrCoordinator(
             self.db, self.model_registry, self.model_manager, self.transcripts
         )
+        self._wire_projects()
+        self._build_render_stack(settings)
+        # B10：派生媒体缓存（video_proxy/waveform/pcm/reverse）——内容寻址
+        # 键 + project/asset 引用授权；生成作业由 B11+ 接入，本层先提供
+        # 查询/解析/统计。cache 根 = data_dir/cache（计划目录约定的根）。
+        from .media.derived_cache import DerivedMediaCache
+        from .media.derived_service import DerivedMediaService
 
+        self.derived_cache = DerivedMediaCache(self.db, settings.data_dir / "cache")
+        self.derived_media = DerivedMediaService(
+            self.db, self.derived_cache, toolchain_fingerprint=f"aivs-core-derived-v{__version__}"
+        )
+        # B11：preview-source（全源代理 + 预览源选择）。FFmpeg build 同步探测
+        # 一次（失败退化为占位——缓存键随 build 换代，不可用时明确进入
+        # no-ffmpeg-build 分支，不静默跨工具链复用）。
+        from .media.preview_source import PreviewSourceService
+
+        self.preview_source = PreviewSourceService(
+            self.db,
+            self.derived_cache,
+            settings.ffmpeg,
+            self.ffprobe,
+            self.encoders,
+            ffmpeg_build=_sync_tool_build(settings.ffmpeg),
+        )
+        # jobs 在 preview_source 之前构建（render 栈顺序）；此处回填 B11 runner。
+        self.jobs.preview_source_runner = self.preview_source.run_proxy_job
+        # B14：素材级持久化波形（流式 PCM → min/max 金字塔，kind=waveform
+        # 复用 B10 派生缓存；FFmpeg build 同键策略——换工具链即键换代）。
+        from .media.waveform import WaveformService
+
+        self.waveform = WaveformService(
+            self.db,
+            self.derived_cache,
+            settings.ffmpeg,
+            self.ffprobe,
+            ffmpeg_build=_sync_tool_build(settings.ffmpeg),
+        )
+        self.jobs.waveform_runner = self.waveform.run_waveform_job
+        # B15：分块 PCM（48000Hz 双声道 f32le、2 秒/块；同步内联生成——
+        # 低延迟任务不排 jobs 队列，begin_build single-flight 防并发重复）。
+        self.pcm_chunks = PcmChunkService(
+            self.db,
+            self.derived_cache,
+            settings.ffmpeg,
+            self.ffprobe,
+            ffmpeg_build=_sync_tool_build(settings.ffmpeg),
+        )
+
+    async def cached_probe(
+        self,
+        path: Path,
+        fingerprint: str | None = None,
+        require_video: bool = True,
+    ) -> dict[str, Any]:
+        """A07：经会话缓存的 ffprobe 探测。
+
+        - 提供 fingerprint 时与 stat(size, mtime_ns) 共同构成缓存键（文件
+          变化即键变化，自动失效）；未提供时退化为 stat+build 键。
+        - 缓存键含 ffprobe build（版本变化自动全失效）。
+        - 未命中（或失败 TTL 过期）走真实 FFprobe.probe；语义（错误码、
+          require_video 检查、normalize）与直调完全一致。
+        """
+
+        async def run_probe() -> dict[str, Any]:
+            return await self.ffprobe.probe(path, require_video=require_video)
+
+        key = probe_cache_key(path, fingerprint, await self.ffprobe_build())
+        if key is None:
+            return await run_probe()
+        return await self.probe_cache.get_or_probe(key, run_probe)
+
+    async def ffprobe_build(self) -> str:
+        """ffprobe build 标识（缓存键成分；读取一次后复用）。
+
+        可执行文件缺失（测试/未安装环境）返回空串退化为 stat-only 键，
+        不让 import 路径在 ffprobe 不可用时空抛——探测本身的失败仍由
+        FFprobe.probe 按既有错误码报告。
+        """
+        if self._ffprobe_build is None:
+            try:
+                result = await run_process(
+                    self.ffprobe.executable, ["-hide_banner", "-version"], 10
+                )
+            except (OSError, FileNotFoundError):
+                self._ffprobe_build = ""
+                return ""
+            self._ffprobe_build = (
+                result.stdout.splitlines()[0] if result.stdout and result.returncode == 0 else ""
+            )
+        return self._ffprobe_build
+
+    _ffprobe_build: str | None = None
+
+    def _wire_projects(self) -> None:
         async def probe_asset(path: Path, **kwargs: Any) -> dict[str, Any]:
-            return await self.ffprobe.probe(path, **kwargs)
+            return await self.cached_probe(path, require_video=kwargs.get("require_video", True))
 
         self.projects = ProjectAssetService(
             self.db,
-            settings.data_dir,
+            self.settings.data_dir,
             probe_asset,
             transcript_stale=self.transcripts.mark_asset_stale,
+            purge_asset_clips=self.timelines.purge_asset_clips,
         )
+
+    def _build_render_stack(self, settings: Settings) -> None:
+        """A07 抽取仅为 __init__ 可读性；语义与原内联构建完全一致。"""
+        # B16：资源配额调度器（jobs._loop 消费；编辑器 lease 经内部端点心跳）
+        from .job_scheduler import JobScheduler
+
+        self.job_scheduler = JobScheduler()
         self.image_provider_secrets = ProviderSecretVault()
         self.image_provider_configs = ImageProviderConfigService(
             self.db, self.image_provider_secrets
@@ -570,6 +740,8 @@ class CoreState:
             self.destinations,
             self.directory_grants,
             self.rendition_presets,
+            probe=self.cached_probe,
+            encoders=self.encoders,
         )
         self.jobs = JobService(
             self.db,
@@ -580,6 +752,7 @@ class CoreState:
             self.emit,
             asr_runner=self.asr.run,
             retry_validator=self.asr.validate_retry,
+            preview_source_runner=None,  # derived_cache 段构建后回填（B11）
             render_runner=self.render_coordinator.run,
             planning_runner=self.planning.run_generation,
             timeline_patch_runner=self.timeline_patch_planning.run_generation,
@@ -593,6 +766,9 @@ class CoreState:
             provider_image_generation_recover=(
                 self.provider_image_generation.recover_interrupted_tasks
             ),
+            # B16：资源配额调度（重任务单槽 + network/light 有界并行 +
+            # 编辑器 lease 暂缓低优先级重任务）
+            scheduler=self.job_scheduler,
         )
         self.renders = RenderService(
             self.db,
@@ -641,6 +817,38 @@ def _error(code: str, message: str, status: int) -> HTTPException:
     return HTTPException(status, detail={"code": code, "message": message})
 
 
+def _preview_source_asset_row(state: Any, project_id: str, asset_id: str) -> dict[str, Any]:
+    """B11 端点共用：素材行 + 归属校验（跨项目/缺素材走既有域错误）。"""
+    row = state.derived_media._asset_row(asset_id)  # noqa: SLF001 同表同语义
+    if row is None or row["project_id"] != project_id:
+        raise _domain(DomainError("ASSET_NOT_FOUND", "素材不存在"))
+    project = state.projects._require_project_row(project_id)  # noqa: SLF001 归属校验
+    if project["status"] == "archived":
+        raise _error("PROJECT_ARCHIVED", "项目已归档", 409)
+    return row
+
+
+def _sync_tool_build(executable: Path) -> str:
+    """同步读取工具 build 标识（-version 首行；不可用返回空串占位）。
+
+    构造期一次性（B11 代理缓存键成分）；ffprobe_build 是 async 版本，
+    这里避免在 CoreState.__init__ 里跑事件循环。
+    """
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            [str(executable), "-hide_banner", "-version"],
+            capture_output=True, text=True, timeout=10,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, ValueError):
+        return ""
+    if result.returncode != 0 or not result.stdout:
+        return ""
+    return result.stdout.splitlines()[0]
+
+
 def _model_error(exc: ModelError, model: dict[str, Any] | None = None) -> HTTPException:
     status = (
         404
@@ -684,10 +892,13 @@ def _domain(exc: DomainError) -> HTTPException:
             "ASSET_DUPLICATE",
             "ASSET_CHANGED",
             "ASSET_MISSING",
+            "ASSET_IN_USE",
             "PROJECT_ARCHIVED",
             "CONFLICT",
             "TIMELINE_ALREADY_EXISTS",
             "TIMELINE_CONFLICT",
+            "PREVIEW_IR_UNSUPPORTED",
+            "PREVIEW_IR_TOO_LARGE",
             "TIMELINE_DRAFT_CONFLICT",
             "TIMELINE_LOCKED",
             "TIMELINE_PATCH_EGRESS_EXPIRED",
@@ -777,6 +988,7 @@ def _domain(exc: DomainError) -> HTTPException:
         "SHOT_REQUIREMENT_ASSET_NOT_FOUND",
         "STAGE5_ASSEMBLY_NOT_FOUND",
         "STAGE6_BATCH_NOT_FOUND",
+        "DERIVED_NOT_FOUND",
     }:
         status = 404
     return _error(exc.code, exc.message, status)
@@ -809,6 +1021,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         state.provider_image_generation.cleanup_orphans()
         state.db.recover_interrupted()
         state.render_coordinator.cleanup_orphans()
+        # B10：启动恢复 building 残留（无在途认领的半产物不作命中）
+        state.derived_cache.recover_orphaned_builds()
         seed_dir = os.environ.get("AIVS_E2E_MODEL_DIR")
         if seed_dir:
             state.model_manager.seed_external(Path(seed_dir))
@@ -826,7 +1040,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 ),
                 encoding="utf-8",
             )
-        yield
+        perf_task = asyncio.create_task(perf_diagnostics.sample_loop_lag()) if perf_diagnostics.ENABLED else None
+        try:
+            yield
+        finally:
+            if perf_task is not None:
+                perf_task.cancel()
+                await asyncio.gather(perf_task, return_exceptions=True)
+            perf_diagnostics.flush()
         await state.jobs.stop()
         state.auth.clear()
 
@@ -1337,7 +1558,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: ProjectCreateRequest, _: CoreState = Depends(require_ui)
     ) -> dict[str, Any]:
         try:
-            return state.projects.create_project(request.name, request.root_dir_name)
+            return state.projects.create_project(request.name, request.root_dir_name, request.canvas)
         except DomainError as exc:
             raise _domain(exc) from exc
 
@@ -1435,6 +1656,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return await state.projects.relocate_asset(asset_id, grant_for(request.grant_id))
         except DomainError as exc:
             raise _domain(exc) from exc
+
+    @app.delete("/api/v1/assets/{asset_id}")
+    async def delete_asset(
+        asset_id: str, remove_timeline_clips: bool = False, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        """删除素材；remove_timeline_clips=true 时级联删除时间线相关片段。"""
+        try:
+            counts = state.projects.delete_asset(
+                asset_id, remove_timeline_clips=remove_timeline_clips
+            )
+        except DomainError as exc:
+            raise _domain(exc) from exc
+        return {"removed_clips": counts.get("removed_clips", 0), "removed_captions": counts.get("removed_captions", 0)}
 
     @app.post("/api/v1/projects/{project_id}/timelines", status_code=201)
     async def create_timeline(
@@ -1535,7 +1769,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> dict[str, Any]:
         try:
             return await state.renders.create_preview(
-                project_id, request.timeline_revision_id, request.encoder_mode
+                project_id,
+                request.timeline_revision_id,
+                request.encoder_mode,
+                request.output_ratio,
             )
         except DomainError as exc:
             raise _domain(exc) from exc
@@ -1554,6 +1791,391 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return {"items": items, "next_cursor": next_cursor}
         except DomainError as exc:
             raise _domain(exc) from exc
+
+    @app.get("/api/v1/projects/{project_id}/preview-ir")
+    async def get_preview_ir(
+        project_id: str,
+        timeline_revision_id: str | None = None,
+        output_ratio: str = "169",
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        if output_ratio not in {"169", "916", "11", "43", "34"}:
+            raise _error("PREVIEW_IR_RATIO_UNSUPPORTED", "合成预览画布比例不合法", 400)
+        try:
+            return await state.render_coordinator.preview_ir(project_id, timeline_revision_id, output_ratio)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    # ---- C20b：窗口化 IR v2（独立 endpoint；v1 响应形状不变） ----
+
+    @app.get("/api/v1/projects/{project_id}/preview-ir-v2/manifest")
+    async def get_preview_ir_v2_manifest(
+        project_id: str,
+        timeline_revision_id: str | None = None,
+        output_ratio: str = "169",
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """C20 manifest：非帧字段显式 DTO（canvas/inputs/segments/captions 等）。
+
+        与 v1 同鉴权（UI token）；manifest_id 绑定 revision/输出规格。"""
+        if output_ratio not in {"169", "916", "11", "43", "34"}:
+            raise _error("PREVIEW_IR_RATIO_UNSUPPORTED", "合成预览画布比例不合法", 400)
+        try:
+            return await state.render_coordinator.preview_ir_manifest(
+                project_id, timeline_revision_id, output_ratio)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/projects/{project_id}/preview-ir-v2/window")
+    async def get_preview_ir_v2_window(
+        project_id: str,
+        start_frame: int,
+        frame_count: int,
+        timeline_revision_id: str | None = None,
+        output_ratio: str = "169",
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """C20 窗口帧表：[start_frame, start_frame+frame_count) 的 v1 同语义帧。
+
+        frame_count 1..300（计划硬上限）；越界/非法 400（PREVIEW_IR_WINDOW_INVALID）。
+        同 revision 的窗口请求走服务端缓存切片（manifest 与窗口同源投影）。"""
+        from .rendering.ir_window import MAX_WINDOW_FRAMES
+
+        if output_ratio not in {"169", "916", "11", "43", "34"}:
+            raise _error("PREVIEW_IR_RATIO_UNSUPPORTED", "合成预览画布比例不合法", 400)
+        if start_frame < 0 or frame_count < 1 or frame_count > MAX_WINDOW_FRAMES:
+            raise _error(
+                "PREVIEW_IR_WINDOW_INVALID",
+                f"窗口参数不合法（frame_count 1..{MAX_WINDOW_FRAMES}，start_frame >= 0）", 400)
+        try:
+            return await state.render_coordinator.preview_ir_window(
+                project_id, timeline_revision_id, output_ratio, start_frame, frame_count)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+        except ValueError as exc:
+            raise _error("PREVIEW_IR_WINDOW_INVALID", str(exc), 400) from exc
+
+    @app.post("/api/v1/projects/{project_id}/derived-media/lookup")
+    async def lookup_derived_media(
+        project_id: str, request: DerivedMediaRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """B10：派生条目状态查询（Renderer 可见，无路径字段）。"""
+        try:
+            return state.derived_media.lookup(
+                project_id, request.asset_id, request.kind, request.params)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/projects/{project_id}/derived-media/stats")
+    async def derived_media_stats(
+        project_id: str, _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """B10：派生缓存用量统计（预算可见性；无素材路径）。"""
+        project = state.projects._require_project_row(project_id)  # noqa: SLF001 归属校验
+        if project["status"] == "archived":
+            raise _error("PROJECT_ARCHIVED", "项目已归档", 409)
+        return state.derived_media.stats()
+
+    @app.post("/api/v1/internal/projects/{project_id}/derived-media/resolve")
+    async def resolve_derived_media(
+        project_id: str, request: DerivedMediaRequest,
+        _: CoreState = Depends(require_admin),
+    ) -> dict[str, Any]:
+        """B10：Main 内部解析（admin 通道）；返回绝对路径供 Main 换票据——
+        Renderer 永远拿不到 path，只有票据 media_url。"""
+        try:
+            return state.derived_media.resolve_internal(
+                project_id, request.asset_id, request.kind, request.params)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    # ---- B11：preview-source（全源代理与预览源选择） ----
+
+    @app.post("/api/v1/projects/{project_id}/assets/{asset_id}/preview-source")
+    async def get_preview_source(
+        project_id: str, asset_id: str, request: PreviewSourceRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """B11：预览源描述/选择（Renderer 可见；无路径字段）。
+
+        mode=auto：代理 ready 时返回代理描述；否则返回原源 ready（pending
+        期间调用方回退原源，不阻塞 UI）。generate=true 且 mode=proxy 时才
+        登记生成作业（禁止导入即整段转码）。
+        """
+        asset_row = _preview_source_asset_row(state, project_id, asset_id)
+        try:
+            profile = request.profile_id
+            if profile is not None:
+                state.preview_source.proxy_params(profile)  # 档位白名单
+            else:
+                # 未指定档位：按源几何自动选择（与 describe 一致）
+                profile = state.preview_source.describe(asset_row, "auto")["profile_id"]
+            proxy = state.preview_source.proxy_entry(asset_row, profile) if (
+                request.mode == "proxy" or request.mode == "auto"
+            ) else None
+            description = state.preview_source.describe(
+                asset_row, request.mode, profile_id=profile, proxy=proxy,
+            )
+            job_id: str | None = None
+            proxy_status = (proxy or {}).get("status")
+            generate_allowed = (
+                request.generate
+                and request.mode == "proxy"
+                and proxy_status not in {"ready", "building", "queued", "failed"}
+            )
+            if generate_allowed:
+                resolved_path = state.projects.resolve_asset_path(asset_id)
+                job_id = state.preview_source.create_proxy_job(
+                    project_id, asset_row, description["profile_id"],
+                    resolved_path["path"], request.encoder_mode,
+                )
+                # 回显 pending 状态（调用方立即知道作业在途）
+                description = state.preview_source.describe(
+                    asset_row, request.mode, profile_id=profile,
+                    proxy={"cache_key": state.preview_source.proxy_cache_key(
+                        asset_row["fingerprint"], description["profile_id"]),
+                        "status": "building", "size_bytes": 0},
+                )
+            if "job_id" not in description:
+                description["job_id"] = job_id
+            return description
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/assets/{asset_id}/preview-source/jobs")
+    async def create_preview_source_job(
+        project_id: str, asset_id: str, request: PreviewSourceRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """B11：显式登记代理生成作业（全源转码；作业状态经既有 jobs 查询流）。"""
+        asset_row = _preview_source_asset_row(state, project_id, asset_id)
+        try:
+            profile = request.profile_id or state.preview_source.describe(
+                asset_row, "auto")["profile_id"]
+            state.preview_source.proxy_params(profile)
+            entry = state.preview_source.proxy_entry(asset_row, profile)
+            entry_status = (entry or {}).get("status")
+            if entry_status in {"ready", "building", "failed"}:
+                return {"job_id": None, "cache_key": (entry or {}).get("cache_key"),
+                        "status": entry_status}
+            resolved_path = state.projects.resolve_asset_path(asset_id)
+            job_id = state.preview_source.create_proxy_job(
+                project_id, asset_row, profile, resolved_path["path"],
+                request.encoder_mode,
+            )
+            return {
+                "job_id": job_id,
+                "cache_key": state.preview_source.proxy_cache_key(
+                    asset_row["fingerprint"], profile),
+                "status": "queued",
+            }
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/internal/projects/{project_id}/assets/{asset_id}/preview-source/media")
+    async def resolve_preview_source_media(
+        project_id: str, asset_id: str, request: PreviewSourceMediaRequest,
+        _: CoreState = Depends(require_admin),
+    ) -> dict[str, Any]:
+        """B11：Main 内部解析代理文件（admin 通道）——绝对路径供 Main 换
+        restricted-media 票据；Renderer 永远拿不到 path。"""
+        asset_row = _preview_source_asset_row(state, project_id, asset_id)
+        try:
+            state.preview_source.proxy_params(request.profile_id)
+            key = state.preview_source.proxy_cache_key(
+                asset_row["fingerprint"], request.profile_id)
+            entry = state.derived_cache.lookup(key)
+            if entry is None:
+                raise _error("DERIVED_NOT_FOUND", "代理条目不存在或未就绪", 404)
+            state.derived_cache.add_reference(key, project_id, asset_id)
+            from .media.derived_cache import DerivedCacheError
+
+            try:
+                path = state.derived_cache.resolved_path(entry)
+            except DerivedCacheError as exc:
+                raise _domain(DomainError("DERIVED_CACHE_UNSAFE", exc.message)) from exc
+            return {
+                "cache_key": key,
+                "status": "ready",
+                "path": str(path),
+                "size_bytes": entry.size_bytes,
+            }
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    # ---- B14：素材级持久化波形（waveform） ----
+
+    @app.post("/api/v1/projects/{project_id}/assets/{asset_id}/waveform")
+    async def get_asset_waveform(
+        project_id: str, asset_id: str, request: WaveformRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """B14：素材波形描述（Renderer 可见；无路径字段）。
+
+        generate=True 且无 ready/building 条目时登记生成作业（流式 PCM
+        聚合 → 金字塔，B10 派生缓存）；pending 期间调用方显示占位/无波形。
+        """
+        asset_row = _preview_source_asset_row(state, project_id, asset_id)
+        try:
+            if not (json_loads(asset_row["media_info_json"] or "{}").get("audio_streams") or []):
+                raise _domain(DomainError(
+                    "MEDIA_NO_AUDIO", "素材无音轨，不生成波形"))
+            entry = state.waveform.waveform_entry(asset_row)
+            job_id: str | None = None
+            status = (entry or {}).get("status")
+            if (
+                request.generate
+                and status not in {"ready", "building", "queued", "failed"}
+            ):
+                resolved_path = state.projects.resolve_asset_path(asset_id)
+                job_id = state.waveform.create_waveform_job(
+                    project_id, asset_row, resolved_path["path"])
+                status = "queued"
+            return {
+                "cache_key": state.waveform.waveform_cache_key(asset_row["fingerprint"]),
+                "status": status,
+                "job_id": job_id,
+                "size_bytes": (entry or {}).get("size_bytes"),
+                "sample_rate": 8000,
+                "channels": 1,
+                "bucket": 256,
+            }
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/internal/projects/{project_id}/assets/{asset_id}/waveform/media")
+    async def resolve_asset_waveform_media(
+        project_id: str, asset_id: str,
+        _: CoreState = Depends(require_admin),
+    ) -> dict[str, Any]:
+        """B14：Main 内部解析波形文件（admin 通道）——绝对路径供 Main 换
+        restricted-media 票据；Renderer 永远拿不到 path。
+
+        无请求体（params 由服务端算法常量唯一决定——不收 Renderer 参数）。
+        """
+        asset_row = _preview_source_asset_row(state, project_id, asset_id)
+        try:
+            key = state.waveform.waveform_cache_key(asset_row["fingerprint"])
+            entry = state.derived_cache.lookup(key)
+            if entry is None:
+                raise _error("DERIVED_NOT_FOUND", "波形条目不存在或未就绪", 404)
+            state.derived_cache.add_reference(key, project_id, asset_id)
+            from .media.derived_cache import DerivedCacheError
+
+            try:
+                path = state.derived_cache.resolved_path(entry)
+            except DerivedCacheError as exc:
+                raise _domain(DomainError("DERIVED_CACHE_UNSAFE", exc.message)) from exc
+            return {
+                "cache_key": key,
+                "status": "ready",
+                "path": str(path),
+                "size_bytes": entry.size_bytes,
+            }
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    # ---- B15：分块 PCM（audio_pcm_chunk） ----
+
+    @app.post("/api/v1/projects/{project_id}/assets/{asset_id}/pcm-chunks")
+    async def ensure_pcm_chunk(
+        project_id: str, asset_id: str, request: PcmChunkRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """B15：确保一个 PCM 块 ready（Renderer 可见；无路径字段）。
+
+        同步内联生成（2 秒块小任务，不排 jobs 队列——低延迟 PCM 不能等
+        长导出；begin_build single-flight 防并发同 key 重复生成）。
+        start_sample 必须对齐 96000 样本网格；尾块 valid_samples < 96000。
+        """
+        asset_row = _preview_source_asset_row(state, project_id, asset_id)
+        try:
+            if not (json_loads(asset_row["media_info_json"] or "{}").get("audio_streams") or []):
+                raise _domain(DomainError(
+                    "MEDIA_NO_AUDIO", "素材无音轨，不生成分块 PCM"))
+            resolved_path = state.projects.resolve_asset_path(asset_id)
+            result = await state.pcm_chunks.ensure_chunk(
+                asset_row, request.start_sample, resolved_path["path"])
+            return {
+                "cache_key": result["cache_key"],
+                "status": result["status"],
+                "start_sample": result["start_sample"],
+                "valid_samples": result["valid_samples"],
+                "sample_rate": 48000,
+                "channels": 2,
+                "chunk_samples": 96000,
+                "size_bytes": result["size_bytes"],
+            }
+        except DomainError as exc:
+            raise _domain(exc) from exc
+        except PcmChunkError as exc:
+            # 服务层网格/媒体约束 → 400（代码语义与波形端点一致）
+            raise _domain(DomainError(exc.code, exc.message)) from exc
+
+    @app.post("/api/v1/internal/projects/{project_id}/assets/{asset_id}/pcm-chunks/media")
+    async def resolve_pcm_chunk_media(
+        project_id: str, asset_id: str, request: PcmChunkMediaRequest,
+        _: CoreState = Depends(require_admin),
+    ) -> dict[str, Any]:
+        """B15：Main 内部解析 PCM 块文件（admin 通道）——路径仅供 Main 换票据。
+
+        start_sample 与 ensure 相同网格校验（Renderer 不能任意偏移——
+        请求伪造的偏移无法命中任何条目）。
+        """
+        asset_row = _preview_source_asset_row(state, project_id, asset_id)
+        try:
+            key = state.pcm_chunks.chunk_cache_key(
+                asset_row["fingerprint"], request.start_sample)
+            entry = state.derived_cache.lookup(key)
+            if entry is None:
+                raise _error("DERIVED_NOT_FOUND", "PCM 块不存在或未就绪", 404)
+            state.derived_cache.add_reference(key, project_id, asset_id)
+            from .media.derived_cache import DerivedCacheError
+
+            try:
+                path = state.derived_cache.resolved_path(entry)
+            except DerivedCacheError as exc:
+                raise _domain(DomainError("DERIVED_CACHE_UNSAFE", exc.message)) from exc
+            return {
+                "cache_key": key,
+                "status": "ready",
+                "path": str(path),
+                "size_bytes": entry.size_bytes,
+            }
+        except DomainError as exc:
+            raise _domain(exc) from exc
+        except PcmChunkError as exc:
+            raise _domain(DomainError(exc.code, exc.message)) from exc
+
+    # ---- B16：编辑器负载 lease + 调度观测（admin 内部通道） ----
+
+    @app.post("/api/v1/internal/editor-load-lease")
+    async def editor_load_lease(
+        request: EditorLoadLeaseRequest,
+        _: CoreState = Depends(require_admin),
+    ) -> dict[str, Any]:
+        """B16b：编辑器负载心跳（Main 注入 window owner；TTL 3s）。
+
+        mode ∈ playing/scrubbing/idle；无心跳/过期 = idle（Renderer 崩溃
+        不永久饿死任务）。播放/拖动中：新的低优先级（≥4 级）重任务暂缓
+        入队执行；已运行任务不受影响（不可抢占语义）。
+        """
+        import time as _time
+
+        try:
+            state.job_scheduler.lease.heartbeat(
+                request.window_id, request.mode, _time.monotonic())
+        except ValueError as exc:
+            raise _error("LEASE_MODE_INVALID", str(exc), 400) from exc
+        return {"status": "ok", "mode": request.mode, "ttl_s": 3.0}
+
+    @app.get("/api/v1/internal/job-scheduler/stats")
+    async def job_scheduler_stats(
+        _: CoreState = Depends(require_admin),
+    ) -> dict[str, Any]:
+        """B16 调度器观测（admin 诊断：容量/持有/lease 快照）。"""
+        return state.job_scheduler.snapshot()
 
     @app.get("/api/v1/platform-presets")
     async def list_platform_presets(_: CoreState = Depends(require_ui)) -> dict[str, Any]:
@@ -1773,6 +2395,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 request.timeline_revision_id,
                 request.destination_grant_id,
                 request.encoder_mode,
+                request.output_ratio,
             )
         except DomainError as exc:
             raise _domain(exc) from exc

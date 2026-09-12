@@ -8,10 +8,25 @@ from typing import Any
 
 from .database import Database, json_dumps, json_loads, utc_now
 from .ids import new_id
+from .job_scheduler import JobScheduler, policy_for
 from .media.encoders import EncoderDetector
 from .media.ffprobe import FFprobe
 from .media.render import build_render_args, render_media
 from .state import transition_sql
+
+# B16：同时在途 job 上限（重任务经调度器仍单槽；网络/轻量并行——此上限
+# 是总闸（防 jobs 表风暴下任务字典无界）；与调度器资源表共同生效）
+_MAX_CONCURRENT_JOBS = 4
+
+
+def _iso_to_epoch(value: str) -> float:
+    """ISO 时间串 → epoch 秒（aging 计算用；解析失败退 0 = 保守不 aging）。"""
+    from datetime import datetime
+
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except (ValueError, TypeError):
+        return 0.0
 
 AsrRunner = Callable[
     [Any, asyncio.Event, Callable[[float], None], Callable[[str], None]],
@@ -24,12 +39,24 @@ RenderRunner = Callable[
         Callable[[float], None],
         Callable[[str], None],
         Callable[[int | None], None],
+        Callable[[str, float | None], None],
     ],
     Awaitable[dict[str, Any]],
 ]
 PlanningRunner = Callable[
     [Any, asyncio.Event, Callable[[float], None], Callable[[str], None]], Awaitable[dict[str, Any]]
 ]
+PreviewSourceRunner = Callable[
+    [
+        Any,
+        asyncio.Event,
+        Callable[[float], None],
+        Callable[[str], None],
+    ],
+    Awaitable[dict[str, Any]],
+]
+# B14 波形作业执行体（与 PreviewSourceRunner 同形；waveform.run_waveform_job）
+WaveformRunner = PreviewSourceRunner
 GenerationStart = Callable[[str], None]
 GenerationRecover = Callable[[], int]
 GenerationFinish = Callable[[str, str, dict[str, Any] | None, str | None, str | None], None]
@@ -46,6 +73,8 @@ class JobService:
         emit: Callable[[dict[str, Any]], Awaitable[None]],
         asr_runner: AsrRunner | None = None,
         retry_validator: Callable[[Any], None] | None = None,
+        preview_source_runner: PreviewSourceRunner | None = None,
+        waveform_runner: WaveformRunner | None = None,
         render_runner: RenderRunner | None = None,
         planning_runner: PlanningRunner | None = None,
         timeline_patch_runner: PlanningRunner | None = None,
@@ -57,6 +86,7 @@ class JobService:
         provider_image_generation_start: GenerationStart | None = None,
         provider_image_generation_finish: GenerationFinish | None = None,
         provider_image_generation_recover: GenerationRecover | None = None,
+        scheduler: JobScheduler | None = None,
     ) -> None:
         self.db = db
         self.data_dir = data_dir
@@ -66,6 +96,8 @@ class JobService:
         self.emit = emit
         self.asr_runner = asr_runner
         self.retry_validator = retry_validator
+        self.preview_source_runner = preview_source_runner
+        self.waveform_runner = waveform_runner
         self.render_runner = render_runner
         self.planning_runner = planning_runner
         self.timeline_patch_runner = timeline_patch_runner
@@ -77,6 +109,8 @@ class JobService:
         self.provider_image_generation_start = provider_image_generation_start
         self.provider_image_generation_finish = provider_image_generation_finish
         self.provider_image_generation_recover = provider_image_generation_recover
+        # B16：资源配额调度器（None = 旧单槽行为——兼容既有测试/旧构造）
+        self.scheduler = scheduler
         self.tasks: dict[str, asyncio.Task[None]] = {}
         self.cancel_events: dict[str, asyncio.Event] = {}
         self.worker: asyncio.Task[None] | None = None
@@ -452,6 +486,9 @@ class JobService:
         result.pop("fallback_reason", None)
         result.pop("worker_pid", None)
         result["stage"] = result.get("stage") or result["status"]
+        # C22：细分阶段扩展（可选字段；未知 phase 的旧 UI 忽略即可）。
+        result["phase"] = result.pop("phase", None)
+        result["phase_progress"] = result.pop("phase_progress", None)
         result["attempt"] = int(result.get("attempt") or 1)
         result["progress"] = float(result["progress"])
         result["result"] = (
@@ -566,20 +603,73 @@ class JobService:
         return result
 
     async def _loop(self) -> None:
+        """B16 调度循环：分级 FIFO + 资源令牌准入（重任务单槽、network/light
+        有界并行）；无调度器时回退旧单槽行为（兼容测试/旧构造）。"""
         while True:
             if not self.tasks:
-                with self.db.connection() as db:
-                    row = db.execute(
-                        "SELECT id FROM jobs WHERE status='queued' ORDER BY created_at LIMIT 1"
-                    ).fetchone()
-                if row:
-                    job_id = row[0]
-                    task = asyncio.create_task(self._run(job_id))
-                    self.tasks[job_id] = task
-                    task.add_done_callback(
-                        lambda _, current_id=job_id: self.tasks.pop(current_id, None)
+                if self.scheduler is None:
+                    # 旧路径：一次一个（行为与 B16 前完全一致）
+                    with self.db.connection() as db:
+                        row = db.execute(
+                            "SELECT id FROM jobs WHERE status='queued' ORDER BY created_at LIMIT 1"
+                        ).fetchone()
+                    if row:
+                        self._spawn(row[0])
+                else:
+                    # B16：全部 queued 候选 → 优先级排序 → 逐个 admit 尝试
+                    # （高优先级资源不足不阻塞低优先级可运行任务）
+                    with self.db.connection() as db:
+                        rows = db.execute(
+                            "SELECT id, kind, created_at FROM jobs WHERE status='queued' "
+                            "ORDER BY created_at LIMIT 128"
+                        ).fetchall()
+                    candidates = [
+                        {
+                            "job_id": row["id"],
+                            "kind": row["kind"],
+                            # created_at 为 ISO 串——排序稳定即可（同批内比较）；
+                            # aging 用 ts_epoch 转换（失败退 0 = 不 aging，保守）
+                            "created_ts": _iso_to_epoch(str(row["created_at"])),
+                        }
+                        for row in rows
+                    ]
+                    ranked = sorted(
+                        candidates,
+                        key=lambda item: (
+                            self.scheduler.effective_priority(
+                                policy_for(str(item["kind"])), float(item["created_ts"])),
+                            float(item["created_ts"]),
+                            str(item["job_id"]),
+                        ),
                     )
+                    for candidate in ranked:
+                        if len(self.tasks) >= _MAX_CONCURRENT_JOBS:
+                            break
+                        admission = await self.scheduler.admit(
+                            str(candidate["kind"]), str(candidate["job_id"]))
+                        if admission is None:
+                            continue  # 资源不足/lease 暂缓：试下一候选（防头阻塞）
+                        self._spawn(str(candidate["job_id"]), admission)
+                        break  # 本轮只启动一个（0.05s 轮询逐个放行）
             await asyncio.sleep(0.05)
+
+    def _spawn(self, job_id: str, admission: Any = None) -> None:
+        """启动 job task；持有调度准入时 finally 归还令牌（恰好一次）。"""
+        release = (
+            self.scheduler.release(job_id) if self.scheduler and admission else None
+        )
+
+        async def run_with_release() -> None:
+            try:
+                await self._run(job_id)
+            finally:
+                if release is not None:
+                    await release
+        task = asyncio.create_task(run_with_release())
+        self.tasks[job_id] = task
+        task.add_done_callback(
+            lambda _, current_id=job_id: self.tasks.pop(current_id, None)
+        )
 
     async def _emit_update(self, job: dict[str, Any] | None) -> None:
         if job:
@@ -601,6 +691,9 @@ class JobService:
         for key, value in fields.items():
             assignments.append(f"{key}=?")
             values.append(value)
+        # C22：状态离开 running 即清细分阶段（终态行不残留过期的 phase）。
+        assignments.append("phase=NULL")
+        assignments.append("phase_progress=NULL")
         assignments.append("updated_at=?")
         values.append(utc_now())
         values.append(job_id)
@@ -667,6 +760,7 @@ class JobService:
                     lambda value: self._set_progress(job_id, value),
                     lambda value: self._set_stage(job_id, value),
                     lambda value: self._set_worker_pid(job_id, value),
+                    lambda name, value: self._set_phase(job_id, name, value),
                 )
                 with self.db.connection() as db:
                     db.execute(
@@ -807,6 +901,34 @@ class JobService:
 
     async def _run_media(self, row: Any, job_id: str, cancel_event: asyncio.Event) -> None:
         payload = json_loads(row["input_json"])
+        if row["kind"] == "waveform":
+            # B14 波形：流式 PCM 聚合 → 金字塔，产物进 B10 派生缓存
+            if self.waveform_runner is None:
+                raise RuntimeError("RENDER_FAILED")
+            result = await self.waveform_runner(
+                row, cancel_event,
+                lambda value: self._set_progress(job_id, value),
+                lambda value: self._set_stage(job_id, value),
+            )
+            with self.db.connection() as db:
+                db.execute(
+                    "UPDATE jobs SET result_json=?,updated_at=? WHERE id=?",
+                    (json_dumps(result), utc_now(), job_id),
+                )
+            return
+        if "cache_key" in payload:
+            # B11 全源代理：产物进 B10 派生缓存（不做 artifacts 行）
+            result = await self.preview_source_runner(
+                row, cancel_event,
+                lambda value: self._set_progress(job_id, value),
+                lambda value: self._set_stage(job_id, value),
+            )
+            with self.db.connection() as db:
+                db.execute(
+                    "UPDATE jobs SET result_json=?,updated_at=? WHERE id=?",
+                    (json_dumps(result), utc_now(), job_id),
+                )
+            return
         work = self.data_dir / "jobs" / job_id / "work"
         artifacts = self.data_dir / "jobs" / job_id / "artifacts"
         work.mkdir(parents=True, exist_ok=True)
@@ -882,6 +1004,17 @@ class JobService:
                 (worker_pid, utc_now(), job_id),
             )
 
+    def _set_phase(self, job_id: str, phase: str, phase_progress: float | None) -> None:
+        """C22 细分阶段：phase 必到、phase_progress 可空（None = 不定进度）。
+        发布临界区（publishing）后任务可能已提交完成——只写 running 行，
+        完成时的状态迁移会在下一步覆盖 phase。"""
+        with self.db.connection() as db:
+            db.execute(
+                "UPDATE jobs SET phase=?,phase_progress=?,updated_at=? WHERE id=? "
+                "AND status IN ('running','cancelling')",
+                (phase, phase_progress, utc_now(), job_id),
+            )
+
     def _current_status(self, job_id: str) -> str | None:
         with self.db.connection() as db:
             row = db.execute("SELECT status,kind FROM jobs WHERE id=?", (job_id,)).fetchone()
@@ -913,11 +1046,14 @@ def _job_error_message(code: str) -> str:
         "TRANSCRIPTION_CANCELLED": "转录已取消",
         "MODEL_DOWNLOAD_CANCELLED": "模型下载已取消",
         "JOB_CANCELLED": "任务已取消",
+        "PROXY_JOB_INVALID": "代理生成作业载荷不合法",
         "RENDER_PLAN_INVALID": "渲染计划不合法",
         "RENDER_INPUT_CHANGED": "渲染输入已变化",
         "RENDER_FONT_MISSING": "字幕字体资源缺失",
         "RENDER_FAILED": "渲染失败",
         "RENDER_VALIDATION_FAILED": "渲染产物校验失败",
+        "RENDER_VALIDATION_TIMEOUT": "渲染产物校验超时（解码无推进或超出绝对上限）",
+        "RENDER_REVERSE_TOO_LONG": "倒放段超出内存预算，请缩短片段或拆分倒放",
         "EXPORT_DESTINATION_INVALID": "导出目标无效",
         "EXPORT_DESTINATION_EXISTS": "导出目标已存在",
         "EXPORT_DESTINATION_EXPIRED": "导出授权已过期",

@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>属性面板重构 · 视频片段 — Vortex Cut 原型</title>
+<style>
+  :root{
+    --bg:#12171c;--panel:#161c22;--panel2:#1c242b;--inset:#0e1318;
+    --border:#263038;--border2:#33404a;
+    --text:#e8edf0;--text2:#a3aeb5;--text3:#6f7b82;
+    --accent:#86a0ff;--accent2:#5b78f0;--warn:#d9b36a;--ok:#57cf92;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font:13px/1.5 "Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;-webkit-font-smoothing:antialiased;height:100vh;overflow:hidden}
+  .topbar{height:48px;display:flex;align-items:center;gap:14px;padding:0 16px;background:linear-gradient(180deg,#181f26,#151b21);border-bottom:1px solid var(--border)}
+  .brand{font-weight:700;font-size:14px}
+  .chip{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#0d1120;border-radius:999px;padding:3px 12px;font-size:11.5px;font-weight:700}
+  .back{color:var(--text3);text-decoration:none;font-size:12.5px}
+  .back:hover{color:var(--text)}
+  .spacer{flex:1}
+  .hint{font-size:11.5px;color:var(--text3)}
+  .hint b{color:var(--accent);font-weight:600}
+  .stage{display:flex;height:calc(100vh - 48px)}
+
+  /* ---------- 画布 ---------- */
+  .canvas-wrap{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:repeating-conic-gradient(#0e1216 0% 25%,#0b0e12 0% 50%) 50%/22px 22px;padding:24px;min-width:0}
+  #canvas{position:relative;width:min(60vh,430px);aspect-ratio:9/16;border-radius:6px;overflow:hidden;background:#0a0d10;border:1px solid var(--border);box-shadow:0 18px 50px rgba(0,0,0,.5)}
+  .v1art{position:absolute;inset:0;background:
+    radial-gradient(120% 90% at 18% 8%,rgba(122,74,94,.95),transparent 58%),
+    radial-gradient(130% 100% at 88% 30%,rgba(160,96,75,.9),transparent 55%),
+    linear-gradient(160deg,#3a2e38,#493a32 45%,#3a4120)}
+  .v1tag{position:absolute;left:12px;bottom:12px;font-size:10px;color:#fff;background:rgba(0,0,0,.42);padding:3px 10px;border-radius:999px;backdrop-filter:blur(3px)}
+  .v2{position:absolute;left:57%;top:64%;width:46%;aspect-ratio:9/13;transform:translate(-50%,-50%);cursor:grab;touch-action:none;z-index:6}
+  .v2:active{cursor:grabbing}
+  .v2clip{position:absolute;inset:0;border-radius:8px;overflow:hidden;box-shadow:0 12px 30px rgba(0,0,0,.5)}
+  .v2bg{position:absolute;inset:0;background:linear-gradient(168deg,#33b364,#0d7437 78%)}
+  .subject{position:absolute;left:50%;bottom:-2px;transform:translateX(-50%);width:64%;height:84%}
+  .checker{position:absolute;inset:0;display:none;background:repeating-conic-gradient(#39424a 0% 25%,#222a31 0% 50%) 50%/12px 12px}
+  .v2tag{position:absolute;left:7px;top:7px;font-size:9px;color:#cfe0ff;background:rgba(0,0,0,.55);padding:2px 8px;border-radius:999px;z-index:3}
+  .v2frame{position:absolute;inset:-1px;border-radius:9px;border:1.5px solid rgba(134,160,255,.8);pointer-events:none}
+  .v2:hover .v2frame{border-color:var(--accent)}
+  .maskline{position:absolute;border:1.5px dashed rgba(134,160,255,.95);border-radius:50%;pointer-events:none;box-shadow:0 0 12px rgba(134,160,255,.22);z-index:5}
+  .knob{position:absolute;width:13px;height:13px;border-radius:50%;background:#fff;border:2px solid var(--accent);box-shadow:0 1px 5px rgba(0,0,0,.45);transform:translate(-50%,-50%);cursor:nwse-resize;z-index:8}
+  .knob:hover{border-color:#fff}
+  .chips{display:flex;gap:8px;font-size:11px;color:var(--text3)}
+  .chips span{border:1px solid var(--border);border-radius:999px;padding:3px 12px;background:rgba(22,28,34,.85);transition:.15s}
+  .chips span.on{border-color:rgba(134,160,255,.55);color:var(--accent)}
+
+  /* ---------- 属性面板 ---------- */
+  .props{width:336px;background:var(--panel);border-left:1px solid var(--border);display:flex;flex-direction:column;min-height:0}
+  .tabs{display:flex;height:44px;flex:none;border-bottom:1px solid var(--border);padding:0 8px}
+  .tab{flex:1;display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--text2);cursor:pointer;position:relative;transition:color .15s;user-select:none}
+  .tab:hover{color:var(--text)}
+  .tab.active{color:var(--accent);font-weight:600}
+  .tab.active::after{content:"";position:absolute;bottom:-1px;left:50%;transform:translateX(-50%);width:26px;height:2.5px;border-radius:2px;background:var(--accent)}
+  .subtabs{display:flex;gap:4px;padding:12px 14px 4px;flex:none}
+  .subtab{flex:1;padding:5px 0;height:auto;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:var(--r,7px);font-size:12px;color:var(--text2);cursor:pointer;border:1px solid transparent;transition:.15s;line-height:1.25;user-select:none}
+  .subtab:hover{color:var(--text)}
+  .subtab.active{background:#232d35;color:#fff;border-color:#2e3a44;font-weight:600}
+  .subtab .soon{font-size:8.5px;color:var(--warn);line-height:1.4}
+  .pbody{flex:1;overflow-y:auto;padding:6px 16px 24px}
+  .pbody::-webkit-scrollbar{width:8px}
+  .pbody::-webkit-scrollbar-thumb{background:#2a343c;border-radius:4px}
+  .gh{display:flex;align-items:center;gap:6px;margin:16px 0 10px;font-size:13px;font-weight:600}
+  .gh:first-child{margin-top:10px}
+  .gh .chev{color:var(--text3);font-size:9px;transition:transform .15s}
+  .gh .rst{margin-left:auto;display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;color:var(--text3);cursor:pointer;border:none;background:none;font-size:12px;visibility:hidden}
+  .gh:hover .rst{visibility:visible}
+  .gh .rst:hover{background:#232d35;color:var(--accent)}
+  .gh.coll{cursor:pointer}
+  .gh.coll.closed .chev{transform:rotate(-90deg)}
+  .sep{height:1px;background:#1f2931;margin:14px 0 2px}
+  .row{display:flex;align-items:center;gap:10px;min-height:32px;margin-bottom:7px}
+  .row>label{width:56px;flex:none;font-size:12px;color:var(--text2)}
+  .row .tail{font-size:11px;color:var(--text3)}
+  input[type=range].rng{-webkit-appearance:none;appearance:none;flex:1;height:3px;border-radius:2px;background:#2b353d;outline:none;cursor:pointer}
+  input[type=range].rng::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;background:#e8edf0;transition:box-shadow .15s}
+  input[type=range].rng:hover::-webkit-slider-thumb{box-shadow:0 0 0 4px rgba(134,160,255,.22)}
+  input[type=range].rng:disabled{opacity:.35;cursor:not-allowed}
+  .field{display:flex;align-items:center;height:28px;width:86px;flex:none;background:var(--inset);border:1px solid var(--border);border-radius:6px;transition:border-color .15s;touch-action:none}
+  .field:hover{border-color:var(--border2)}
+  .field:focus-within{border-color:var(--accent)}
+  .field input{flex:1;min-width:0;background:none;border:none;outline:none;color:var(--text);font-size:12px;text-align:right;padding:0 2px 0 8px;font-family:inherit;cursor:ew-resize}
+  .field .chev{display:flex;flex-direction:column;gap:1px;padding:0 3px 0 2px}
+  .field .chev button{width:17px;height:12.5px;display:flex;align-items:center;justify-content:center;border:none;background:none;border-radius:3px;cursor:pointer;padding:0}
+  .field .chev button:hover{background:#2b3742}
+  .field .chev button:active{background:#33414e}
+  .field .chev button i{width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent}
+  .field .chev .up i{border-bottom:5px solid #8a959c}
+  .field .chev .dn i{border-top:5px solid #8a959c}
+  .field .chev button:hover .up i{border-bottom-color:var(--accent)}
+  .field .chev button:hover .dn i{border-top-color:var(--accent)}
+  body.grabbing,body.grabbing *{cursor:grabbing!important}
+  body.scrubbing,body.scrubbing *{cursor:ew-resize!important;user-select:none}
+  .field.w66{width:66px}
+  .sw{position:relative;width:32px;height:18px;border-radius:9px;background:#2b353d;cursor:pointer;flex:none;transition:background .18s}
+  .sw::after{content:"";position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#aab4ba;transition:.18s}
+  .sw.on{background:var(--accent2)}
+  .sw.on::after{transform:translateX(14px);background:#fff}
+  .chk{display:flex;align-items:center;gap:9px;font-size:12.5px;cursor:pointer;min-height:30px;color:var(--text)}
+  .chk input{width:15px;height:15px;accent-color:var(--accent2);cursor:pointer}
+  .segset{display:flex;gap:6px;margin-bottom:8px}
+  .seg{flex:1;height:30px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text2);font-size:12px;cursor:pointer;transition:.15s;font-family:inherit}
+  .seg:hover{color:var(--text);border-color:var(--border2)}
+  .seg.active{background:#243040;border-color:var(--accent);color:var(--accent);font-weight:600}
+  .btn{width:100%;height:34px;border-radius:7px;border:1px solid var(--accent);background:rgba(134,160,255,.1);color:var(--accent);font-size:12.5px;font-weight:600;cursor:pointer;transition:.15s;font-family:inherit}
+  .btn:hover{background:rgba(134,160,255,.18)}
+  .btn.danger{border-color:rgba(224,138,138,.35);background:transparent;color:#e08a8a}
+  .btn.danger:hover{background:rgba(224,138,138,.08)}
+  .badge{font-size:9.5px;color:var(--warn);border:1px solid rgba(217,179,106,.4);border-radius:999px;padding:1px 8px;flex:none}
+  .note{font-size:11.5px;color:var(--text3);line-height:1.75;background:#10161b;border:1px solid #1f2931;border-radius:7px;padding:10px 12px;margin-top:10px}
+  .note b{color:var(--text2);font-weight:600}
+  .note em{color:var(--accent);font-style:normal}
+  .dim{opacity:.42;pointer-events:none}
+  .hidden{display:none!important}
+  .color-well{position:relative;width:46px;height:26px;border:1px solid var(--border);border-radius:6px;overflow:hidden;flex:none}
+  .color-well input{position:absolute;inset:-8px;width:200%;height:200%;cursor:pointer;border:none;padding:0;background:none}
+  .kf-row{display:flex;align-items:center;gap:8px;min-height:32px;font-size:12px}
+  .kf-row .lab{width:56px;color:var(--text2)}
+  .mini{padding:4px 12px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text2);font-size:11px;cursor:pointer;font-family:inherit}
+  .mini:hover{color:var(--text);border-color:var(--border2)}
+  .kf-row .cnt{margin-left:auto;font-size:11px;color:var(--text3)}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <a class="back" href="index.html">← 设计总览</a>
+  <div class="brand">Vortex Cut</div>
+  <span class="chip">视频 / 图片片段</span>
+  <div class="spacer"></div>
+  <span class="hint">拖画布 V2 小窗与蒙版把手 · <b>画面→基础/抠像/蒙版</b> 分页签</span>
+</div>
+<div class="stage">
+  <div class="canvas-wrap">
+    <div id="canvas">
+      <div class="v1art"></div>
+      <span class="v1tag">V1 主轨画面</span>
+      <div class="v2" id="v2">
+        <div class="v2clip" id="v2clip">
+          <div class="checker" id="checker"></div>
+          <div class="v2bg" id="v2bg"></div>
+          <svg class="subject" viewBox="0 0 100 130">
+            <ellipse cx="50" cy="24" rx="16" ry="18" fill="#ecdfc8"/>
+            <path d="M12 130 C12 88 30 60 50 60 C70 60 88 88 88 130 Z" fill="#ecdfc8"/>
+          </svg>
+        </div>
+        <span class="v2tag">V2 · 覆盖轨</span>
+        <div class="v2frame"></div>
+        <div class="maskline" id="maskline"></div>
+        <div class="knob" id="knobSE" style="left:100%;top:100%"></div>
+      </div>
+    </div>
+    <div class="chips">
+      <span id="chipV2" class="on">V2 叠在 V1 上方</span>
+      <span id="chipMask">蒙版：椭圆</span>
+      <span id="chipKey">抠像：关</span>
+    </div>
+  </div>
+
+  <div class="props">
+    <div class="tabs" id="topTabs">
+      <div class="tab active" data-top="pic">画面</div>
+      <div class="tab" data-top="aud">音频</div>
+      <div class="tab" data-top="speed">变速</div>
+      <div class="tab" data-top="anim">动画</div>
+    </div>
+
+    <!-- ============ 画面 ============ -->
+    <section data-panel="pic">
+      <div class="subtabs" id="picSub">
+        <div class="subtab active" data-sub="basic">基础</div>
+        <div class="subtab" data-sub="key">抠像</div>
+        <div class="subtab" data-sub="mask">蒙版</div>
+      </div>
+      <div class="pbody">
+        <!-- 基础 -->
+        <div data-subp="basic">
+          <div class="gh">位置大小 <span class="chev">▼</span><button class="rst" title="重置">⟲</button></div>
+          <div class="row"><label>缩放</label><input type="range" class="rng" id="scale" min="18" max="88" value="46"><span class="field"><input id="scaleNum" value="46%"><span class="chev"><button class="up" type="button" tabindex="-1" aria-label="增大"><i></i></button><button class="dn" type="button" tabindex="-1" aria-label="减小"><i></i></button></span></span></div>
+          <div class="row"><label>等比缩放</label><div class="sw on" id="ratio"></div></div>
+          <div class="row"><label>位置</label>
+            <span class="field"><input id="px" value="14"><span class="chev"><button class="up" type="button" tabindex="-1" aria-label="增大"><i></i></button><button class="dn" type="button" tabindex="-1" aria-label="减小"><i></i></button></span></span>
+            <span class="field"><input id="py" value="28"><span class="chev"><button class="up" type="button" tabindex="-1" aria-label="增大"><i></i></button><button class="dn" type="button" tabindex="-1" aria-label="减小"><i></i></button></span></span>
+            <span class="tail">X / Y（中心偏移）</span>
+          </div>
+          <div class="row"><label>旋转</label><span class="field"><input value="0.00°"><span class="chev"><button class="up" type="button" tabindex="-1" aria-label="增大"><i></i></button><button class="dn" type="button" tabindex="-1" aria-label="减小"><i></i></button></span></span></div>
+          <div class="row"><label>不透明度</label><input type="range" class="rng" id="opacity" min="0" max="100" value="100"><span class="field w66"><input id="opacityV" value="100%"><span class="chev"><button class="up" type="button" tabindex="-1" aria-label="增大"><i></i></button><button class="dn" type="button" tabindex="-1" aria-label="减小"><i></i></button></span></span></div>
+          <div class="gh coll closed">更多画面能力 <span class="chev">▼</span><span class="badge">规划中</span></div>
+          <div class="hidden">
+            <div class="row dim"><label>混合模式</label><div class="sw"></div></div>
+            <div class="row dim"><label>变形</label><div class="sw"></div></div>
+            <div class="row dim"><label>视频防抖</label><div class="sw"></div></div>
+            <div class="row dim"><label>画质增强</label><div class="sw"></div></div>
+          </div>
+          <div class="sep"></div>
+          <div class="gh">画面布局</div>
+          <div class="segset">
+            <button class="seg" data-layout>完整适配</button>
+            <button class="seg active" data-layout>裁切填满</button>
+            <button class="seg" data-layout>模糊背景</button>
+          </div>
+          <div class="note">对齐工具条（九宫格摆放）为规划占位，落地后显示在此处。</div>
+        </div>
+
+        <!-- 抠像 -->
+        <div data-subp="key" class="hidden">
+          <div class="gh">色度抠像 <span class="tail">绿幕 / 纯色背景</span></div>
+          <div id="keyOff">
+            <button class="btn" id="keyEnable">启用抠像</button>
+            <div class="note">抠除键色背景，透出<b>下层轨道画面</b>。适合绿幕素材、纯色背景拍摄。</div>
+          </div>
+          <div id="keyOn" class="hidden">
+            <div class="row" style="margin-top:2px"><label>键色</label><span class="color-well"><input type="color" id="keyColor" value="#22c55e"></span><span class="tail">取绿幕实际颜色</span></div>
+            <div class="row"><label>强度</label><input type="range" class="rng" id="keySim" min="0" max="100" value="35"><span class="field w66"><input id="keySimV" value="0.35"><span class="chev"><button class="up" type="button" tabindex="-1" aria-label="增大"><i></i></button><button class="dn" type="button" tabindex="-1" aria-label="减小"><i></i></button></span></span></div>
+            <div class="row"><label>边缘平滑</label><input type="range" class="rng" id="keyBlend" min="0" max="100" value="10"><span class="field w66"><input id="keyBlendV" value="0.10"><span class="chev"><button class="up" type="button" tabindex="-1" aria-label="增大"><i></i></button><button class="dn" type="button" tabindex="-1" aria-label="减小"><i></i></button></span></span></div>
+            <div class="chk"><input type="checkbox" id="keyInvert"><span>反选（保留键色、透明其余）</span></div>
+            <button class="btn danger" id="keyClear">清除抠像</button>
+            <div class="note"><b>预览提示</b>　画布以棋盘格示意抠像区域；精确边缘（发丝/半透明）以<em>权威预览 / 成片</em>为准。</div>
+          </div>
+        </div>
+
+        <!-- 蒙版 -->
+        <div data-subp="mask" class="hidden">
+          <div class="gh">蒙版形状</div>
+          <div class="segset" id="maskSeg">
+            <button class="seg" data-mask="none">无</button>
+            <button class="seg" data-mask="linear">线性</button>
+            <button class="seg" data-mask="rect">矩形</button>
+            <button class="seg active" data-mask="ellipse">椭圆</button>
+          </div>
+          <div id="maskParams">
+            <div class="row"><label>中心 X</label><input type="range" class="rng" id="mx" min="0" max="100" value="50"><span class="field w66"><input id="mxV" value="0.50"><span class="chev"><button class="up" type="button" tabindex="-1" aria-label="增大"><i></i></button><button class="dn" type="button" tabindex="-1" aria-label="减小"><i></i></button></span></span></div>
+            <div class="row"><label>中心 Y</label><input type="range" class="rng" id="my" min="0" max="100" value="50"><span class="field w66"><input id="myV" value="0.50"><span class="chev"><button class="up" type="button" tabindex="-1" aria-label="增大"><i></i></button><button class="dn" type="button" tabindex="-1" aria-label="减小"><i></i></button></span></span></div>
+            <div class="row"><label>宽</label><input type="range" class="rng" id="mw" min="6" max="100" value="68"><span class="field w66"><input id="mwV" value="0.68"><span class="chev"><button class="up" type="button" tabindex="-1" aria-label="增大"><i></i></button><button class="dn" type="button" tabindex="-1" aria-label="减小"><i></i></button></span></span></div>
+            <div class="row"><label>高</label><input type="range" class="rng" id="mh" min="6" max="100" value="80"><span class="field w66"><input id="mhV" value="0.80"><span class="chev"><button class="up" type="button" tabindex="-1" aria-label="增大"><i></i></button><button class="dn" type="button" tabindex="-1" aria-label="减小"><i></i></button></span></span></div>
+            <div class="row"><label>旋转</label><span class="field"><input id="rot" value="0°"><span class="chev"><button class="up" type="button" tabindex="-1" aria-label="增大"><i></i></button><button class="dn" type="button" tabindex="-1" aria-label="减小"><i></i></button></span></span></div>
+            <div class="row dim"><label>羽化</label><input type="range" class="rng" min="0" max="100" value="20" disabled><span class="badge">仅线性生效</span></div>
+            <div class="chk"><input type="checkbox" id="maskInvert"><span>反选（区域外保留）</span></div>
+            <div class="note">画布上<b>虚线框 = 蒙版边界</b>（相对本片段画面）：拖动框体平移、拖 <em>白点把手</em> 缩放；区域外透出下层画面。线性蒙版为分界线，软边带宽即羽化。</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 音频（视频片段） ============ -->
+    <section data-panel="aud" class="hidden">
+      <div class="subtabs" id="audSub">
+        <div class="subtab active" data-sub="abasic">基础</div>
+        <div class="subtab" data-sub="voice">换音色<span class="soon">规划中</span></div>
+        <div class="subtab" data-sub="fx">声音效果<span class="soon">规划中</span></div>
+      </div>
+      <div class="pbody">
+        <div data-subp="abasic">
+          <div class="gh">基础 <button class="rst" title="重置">⟲</button></div>
+          <div class="row"><label>启用音频</label><div class="sw on" id="audOn"></div></div>
+          <div class="row"><label>音量</label><input type="range" class="rng" min="-60" max="12" value="0"><span class="field w66"><input value="0.0dB"><span class="chev"><button class="up" type="button" tabindex="-1" aria-label="增大"><i></i></button><button class="dn" type="button" tabindex="-1" aria-label="减小"><i></i></button></span></span></div>
+          <div class="row dim"><label>淡入时长</label><input type="range" class="rng" min="0" max="50" value="0"><span class="field w66"><input value="0.0s"><span class="chev"><button class="up" type="button" tabindex="-1" aria-label="增大"><i></i></button><button class="dn" type="button" tabindex="-1" aria-label="减小"><i></i></button></span></span></div>
+          <div class="row dim"><label>淡出时长</label><input type="range" class="rng" min="0" max="50" value="0"><span class="field w66"><input value="0.0s"><span class="chev"><button class="up" type="button" tabindex="-1" aria-label="增大"><i></i></button><button class="dn" type="button" tabindex="-1" aria-label="减小"><i></i></button></span></span></div>
+          <div class="row dim"><label>响度统一</label><div class="sw"></div><span class="badge">规划中</span></div>
+          <div class="sep"></div>
+          <div class="gh">素材修剪</div>
+          <div class="row"><label>源起点</label><span class="field"><input value="0.0s"><span class="chev"><button class="up" type="button" tabindex="-1" aria-label="增大"><i></i></button><button class="dn" type="button" tabindex="-1" aria-label="减小"><i></i></button></span></span></div>
+          <div class="row"><label>源终点</label><span class="field"><input value="12.0s"><span class="chev"><button class="up" type="button" tabindex="-1" aria-label="增大"><i></i></button><button class="dn" type="button" tabindex="-1" aria-label="减小"><i></i></button></span></span></div>
+        </div>
+        <div data-subp="voice" class="hidden">
+          <div class="gh">换音色 <span class="badge">规划中</span></div>
+          <div class="note">变声 / 音色模板，布局对齐剪映（音色列表 + 参数）。当前版本未实现。</div>
+        </div>
+        <div data-subp="fx" class="hidden">
+          <div class="gh">声音效果</div>
+          <div class="row dim"><label>音频降噪</label><div class="sw"></div><span class="badge">规划中</span></div>
+          <div class="row dim"><label>人声美化</label><div class="sw"></div><span class="badge">规划中</span></div>
+          <div class="row dim"><label>声音分离</label><div class="sw"></div><span class="badge">规划中</span></div>
+          <div class="row dim"><label>变调</label><div class="sw"></div><span class="badge">规划中</span></div>
+          <div class="row dim"><label>立体声平衡</label><div class="sw"></div><span class="badge">规划中</span></div>
+          <div class="row dim"><label>声道配置</label><div class="sw"></div><span class="badge">规划中</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 变速 ============ -->
+    <section data-panel="speed" class="hidden">
+      <div class="pbody" style="padding-top:12px">
+        <div class="gh">倍速</div>
+        <div class="segset" style="flex-wrap:wrap">
+          <button class="seg" style="flex:0 0 23.5%">0.25x</button><button class="seg" style="flex:0 0 23.5%">0.5x</button>
+          <button class="seg" style="flex:0 0 23.5%">0.75x</button><button class="seg active" style="flex:0 0 23.5%">1x</button>
+          <button class="seg" style="flex:0 0 23.5%">1.25x</button><button class="seg" style="flex:0 0 23.5%">1.5x</button>
+          <button class="seg" style="flex:0 0 23.5%">2x</button><button class="seg" style="flex:0 0 23.5%">4x</button>
+        </div>
+        <div class="row"><label>自定义</label><span class="field w66"><input value="1.00"><span class="chev"><button class="up" type="button" tabindex="-1" aria-label="增大"><i></i></button><button class="dn" type="button" tabindex="-1" aria-label="减小"><i></i></button></span></span><span class="tail">0.25 – 4.0</span></div>
+        <div class="chk" style="margin-top:6px"><input type="checkbox"><span>倒放<span style="color:var(--text3);font-size:11px">（权威预览生效；音频静音）</span></span></div>
+        <div class="note">音频随画面同变速；当前版本倒放片段以静音占位保证轨长正确。</div>
+      </div>
+    </section>
+
+    <!-- ============ 动画 ============ -->
+    <section data-panel="anim" class="hidden">
+      <div class="pbody" style="padding-top:12px">
+        <div class="gh">关键帧动画 <span class="tail">播放头 0:01.20</span></div>
+        <div class="kf-row"><span class="lab">位置</span><button class="mini">打点</button><span class="cnt">无关键帧</span></div>
+        <div class="kf-row"><span class="lab">缩放</span><button class="mini">打点</button><span class="cnt">无关键帧</span></div>
+        <div class="kf-row"><span class="lab">旋转</span><button class="mini">打点</button><span class="cnt">无关键帧</span></div>
+        <div class="kf-row"><span class="lab">透明度</span><button class="mini">打点</button><span class="cnt">无关键帧</span></div>
+        <div class="note">按播放头位置打点；随片段变速等比重映射；动画仅<em>权威预览</em>渲染。覆盖轨片段的动画渲染待补齐（见设计文档 §6）。</div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+(function () {
+  var $ = function (s, c) { return (c || document).querySelector(s); };
+  var $$ = function (s, c) { return Array.prototype.slice.call((c || document).querySelectorAll(s)); };
+
+  /* ---- 滑杆填充色 ---- */
+  function paint(r) {
+    var p = (r.value - r.min) / (r.max - r.min) * 100;
+    r.style.background = 'linear-gradient(90deg,var(--accent2) ' + p + '%,#2b353d ' + p + '%)';
+  }
+  $$('input[type=range]').forEach(function (r) { paint(r); r.addEventListener('input', function () { paint(r); }); });
+
+  /* ---- 页签 ---- */
+  $('#topTabs').addEventListener('click', function (e) {
+    var t = e.target.closest('.tab'); if (!t) return;
+    $$('#topTabs .tab').forEach(function (x) { x.classList.remove('active'); });
+    t.classList.add('active');
+    $$('section[data-panel]').forEach(function (s) { s.classList.toggle('hidden', s.dataset.panel !== t.dataset.top); });
+  });
+  function wireSub(id) {
+    var sub = $('#' + id);
+    sub.addEventListener('click', function (e) {
+      var t = e.target.closest('.subtab'); if (!t) return;
+      $$('.subtab', sub).forEach(function (x) { x.classList.remove('active'); });
+      t.classList.add('active');
+      var body = sub.parentElement.querySelector('.pbody');
+      $$('[data-subp]', body).forEach(function (p) { p.classList.toggle('hidden', p.dataset.subp !== t.dataset.sub); });
+    });
+  }
+  wireSub('picSub'); wireSub('audSub');
+
+  /* ---- 折叠组 ---- */
+  $$('.gh.coll').forEach(function (h) {
+    h.addEventListener('click', function (e) {
+      if (e.target.closest('.rst')) return;
+      h.classList.toggle('closed');
+      var b = h.nextElementSibling; if (b) b.classList.toggle('hidden');
+    });
+  });
+  $$('.sw').forEach(function (s) { s.addEventListener('click', function () { s.classList.toggle('on'); }); });
+
+  /* ---- 画布：V2 拖拽 / 缩放 ---- */
+  var v2 = $('#v2'), clip = $('#v2clip'), maskline = $('#maskline');
+  var chipMask = $('#chipMask'), chipKey = $('#chipKey');
+  function setPos(l, t) { v2.style.left = l + '%'; v2.style.top = t + '%'; syncPosFields(); }
+  function syncPosFields() {
+    $('#px').value = Math.round((parseFloat(v2.style.left) - 50) * 2);
+    $('#py').value = Math.round((parseFloat(v2.style.top) - 50) * 2);
+  }
+  var drag = null;
+  v2.addEventListener('pointerdown', function (e) {
+    if (e.target.closest('.knob')) return;
+    e.preventDefault();
+    var pr = v2.parentElement.getBoundingClientRect(), r = v2.getBoundingClientRect();
+    /* 锚点 = 指针相对盒子“中心”的偏移（盒子以中心点定位）。
+       若误用左上角矩形坐标，第一次 move 会把中心吸附到指针处 → 向左上跳。 */
+    drag = { ox: e.clientX - (r.left + r.width / 2), oy: e.clientY - (r.top + r.height / 2), pr: pr };
+    document.body.classList.add('grabbing');
+    window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up);
+  });
+  function mv(ev) {
+    if (!drag) return;
+    var x = (ev.clientX - drag.ox - drag.pr.left) / drag.pr.width * 100;
+    var y = (ev.clientY - drag.oy - drag.pr.top) / drag.pr.height * 100;
+    setPos(Math.max(14, Math.min(86, x)), Math.max(14, Math.min(86, y)));
+    placeMask();
+  }
+  function up() {
+    drag = null; document.body.classList.remove('grabbing');
+    window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up);
+  }
+  $('#knobSE').addEventListener('pointerdown', function (e) {
+    e.preventDefault(); e.stopPropagation();
+    var pr = v2.parentElement.getBoundingClientRect();
+    function m(ev) {
+      var cx = pr.left + parseFloat(v2.style.left) / 100 * pr.width;
+      var w = Math.max(18, Math.min(88, Math.abs(ev.clientX - cx) * 2 / pr.width * 100));
+      v2.style.width = w + '%';
+      $('#scale').value = Math.round(w); $('#scaleNum').value = Math.round(w) + '%'; paint($('#scale'));
+      placeMask();
+    }
+    function u() { window.removeEventListener('pointermove', m); window.removeEventListener('pointerup', u); }
+    window.addEventListener('pointermove', m); window.addEventListener('pointerup', u);
+  });
+  $('#scale').addEventListener('input', function () { v2.style.width = this.value + '%'; $('#scaleNum').value = this.value + '%'; placeMask(); });
+  $('#scaleNum').addEventListener('change', function () {
+    var v = Math.max(18, Math.min(88, parseFloat(this.value) || 46));
+    v2.style.width = v + '%'; $('#scale').value = Math.round(v); paint($('#scale')); placeMask();
+  });
+  $('#opacity').addEventListener('input', function () { v2.style.opacity = this.value / 100; $('#opacityV').value = this.value + '%'; });
+  $('#px').addEventListener('change', function () { setPos(50 + (Math.max(-72, Math.min(72, parseFloat(this.value) || 0))) / 2, parseFloat(v2.style.top)); placeMask(); });
+  $('#py').addEventListener('change', function () { setPos(parseFloat(v2.style.left), 50 + (Math.max(-72, Math.min(72, parseFloat(this.value) || 0))) / 2); placeMask(); });
+  $$('[data-layout]').forEach(function (b) {
+    b.addEventListener('click', function () { $$('[data-layout]').forEach(function (x) { x.classList.remove('active'); }); b.classList.add('active'); });
+  });
+
+  /* ---- 蒙版（参数相对本片段画面，与渲染语义一致） ---- */
+  var M = { cx: 50, cy: 50, rw: 34, rh: 40 }, kind = 'ellipse';
+  var maskNames = { none: '无', linear: '线性', rect: '矩形', ellipse: '椭圆' };
+  function placeMask() {
+    var on = kind !== 'none';
+    maskline.style.display = on ? 'block' : 'none';
+    chipMask.textContent = '蒙版：' + maskNames[kind];
+    chipMask.classList.toggle('on', on);
+    if (!on) { clip.style.clipPath = ''; return; }
+    if (kind === 'linear') {
+      maskline.style.borderRadius = '0'; maskline.style.width = '130%'; maskline.style.height = '2px';
+      maskline.style.left = '-15%'; maskline.style.top = M.cy + '%';
+      clip.style.clipPath = 'polygon(0 0,100% 0,100% ' + (M.cy + 16) + '%,' + M.cx + '% ' + M.cy + '%,0 ' + M.cy + '%)';
+      return;
+    }
+    maskline.style.width = (M.rw * 2) + '%'; maskline.style.height = (M.rh * 2) + '%';
+    maskline.style.left = (M.cx - M.rw) + '%'; maskline.style.top = (M.cy - M.rh) + '%';
+    maskline.style.borderRadius = kind === 'ellipse' ? '50%' : '3px';
+    clip.style.clipPath = kind === 'ellipse'
+      ? 'ellipse(' + M.rw + '% ' + M.rh + '% at ' + M.cx + '% ' + M.cy + '%)'
+      : 'inset(' + (M.cy - M.rh) + '% ' + (100 - M.cx - M.rw) + '% ' + (100 - M.cy - M.rh) + '% ' + (M.cx - M.rw) + '%)';
+  }
+  $('#maskSeg').addEventListener('click', function (e) {
+    var t = e.target.closest('[data-mask]'); if (!t) return;
+    $$('[data-mask]').forEach(function (x) { x.classList.remove('active'); });
+    t.classList.add('active'); kind = t.dataset.mask;
+    $('#maskParams').classList.toggle('hidden', kind === 'none');
+    placeMask();
+  });
+  var mmap = { mx: 'cx', my: 'cy', mw: 'rw', mh: 'rh' };
+  ['mx', 'my', 'mw', 'mh'].forEach(function (id) {
+    $('#' + id).addEventListener('input', function () {
+      var k = mmap[id]; M[k] = (k === 'rw' || k === 'rh') ? this.value / 2 : +this.value;
+      $('#' + id + 'V').value = (this.value / 100).toFixed(2);
+      placeMask();
+    });
+  });
+  $('#maskInvert').addEventListener('change', function () {
+    maskline.style.borderColor = this.checked ? '#e08a8a' : '';
+    maskline.style.boxShadow = this.checked ? '0 0 12px rgba(224,138,138,.3)' : '';
+  });
+
+  /* ---- 抠像 ---- */
+  var keyed = false;
+  function applyKey() {
+    $('#v2bg').style.display = keyed ? 'none' : '';
+    $('#checker').style.display = keyed ? 'block' : 'none';
+    chipKey.textContent = '抠像：' + (keyed ? '开' : '关');
+    chipKey.classList.toggle('on', keyed);
+  }
+  $('#keyEnable').addEventListener('click', function () {
+    keyed = true; $('#keyOff').classList.add('hidden'); $('#keyOn').classList.remove('hidden'); applyKey();
+  });
+  $('#keyClear').addEventListener('click', function () {
+    keyed = false; $('#keyOn').classList.add('hidden'); $('#keyOff').classList.remove('hidden'); applyKey();
+  });
+  $('#keySim').addEventListener('input', function () { $('#keySimV').value = (this.value / 100).toFixed(2); });
+  $('#keyBlend').addEventListener('input', function () { $('#keyBlendV').value = (this.value / 100).toFixed(2); });
+
+  /* ---- 数字步进器：大命中按钮 + 数值区左右拖动搓值 + 键盘 ↑↓ ---- */
+  var CFG = {
+    scaleNum: { min: 18, max: 88, step: 1, unit: '%' },
+    px: { min: -72, max: 72, step: 1 },
+    py: { min: -72, max: 72, step: 1 },
+    rot: { min: -180, max: 180, step: 1, unit: '°' },
+    opacityV: { min: 0, max: 100, step: 1, unit: '%' },
+    keySimV: { min: 0, max: 1, step: 0.01, dec: 2 },
+    keyBlendV: { min: 0, max: 1, step: 0.01, dec: 2 },
+    mxV: { min: 0, max: 1, step: 0.01, dec: 2 },
+    myV: { min: 0, max: 1, step: 0.01, dec: 2 },
+    mwV: { min: 0.06, max: 1, step: 0.01, dec: 2 },
+    mhV: { min: 0.06, max: 1, step: 0.01, dec: 2 }
+  };
+  (function initSteppers() {
+    $$('.field').forEach(function (f) {
+      var input = $('input', f); if (!input) return;
+      var c = CFG[input.id]; if (!c) return;
+      var min = c.min, max = c.max, step = c.step || 1, unit = c.unit || '';
+      var dec = (c.dec !== undefined) ? c.dec : (step < 1 ? 2 : 0);
+      function parse() { var v = parseFloat(input.value); return isNaN(v) ? min : v; }
+      function apply(v) {
+        v = Math.round(Math.max(min, Math.min(max, v)) / step) * step;
+        input.value = parseFloat(v.toFixed(4)).toFixed(dec) + unit;
+        input.dispatchEvent(new Event('change'));
+      }
+      var upBtn = $('.chev .up', f), dnBtn = $('.chev .dn', f);
+      if (upBtn) upBtn.addEventListener('click', function () { apply(parse() + step); });
+      if (dnBtn) dnBtn.addEventListener('click', function () { apply(parse() - step); });
+      input.addEventListener('keydown', function (e) {
+        if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+        e.preventDefault(); apply(parse() + (e.key === 'ArrowUp' ? step : -step));
+      });
+      /* 搓值：按住数值区水平拖动，每 3px 一步；单击仍进入键盘编辑 */
+      var sx = 0, sv = 0, scrub = false;
+      f.addEventListener('pointerdown', function (e) {
+        if (e.target.closest('button')) return;
+        sx = e.clientX; sv = parse(); scrub = false;
+        window.addEventListener('pointermove', smv); window.addEventListener('pointerup', smu);
+      });
+      function smv(ev) {
+        if (!scrub && Math.abs(ev.clientX - sx) < 4) return;
+        if (!scrub) { scrub = true; document.body.classList.add('scrubbing'); try { input.blur(); } catch (_) {} }
+        apply(sv + Math.round((ev.clientX - sx) / 3) * step);
+      }
+      function smu() {
+        window.removeEventListener('pointermove', smv); window.removeEventListener('pointerup', smu);
+        document.body.classList.remove('scrubbing'); scrub = false;
+      }
+    });
+  })();
+
+  /* ---- 步进器 side effects：画布 / 滑杆 双向同步 ---- */
+  $('#rot').addEventListener('change', function () {
+    v2.style.transform = 'translate(-50%,-50%) rotate(' + (parseFloat(this.value) || 0) + 'deg)';
+  });
+  $('#opacityV').addEventListener('change', function () {
+    var v = Math.max(0, Math.min(100, parseFloat(this.value) || 0));
+    v2.style.opacity = v / 100;
+    $('#opacity').value = v; paint($('#opacity'));
+  });
+  [['mx', 'cx'], ['my', 'cy']].forEach(function (p) {
+    $('#' + p[0] + 'V').addEventListener('change', function () {
+      var v = Math.max(0, Math.min(1, parseFloat(this.value) || 0));
+      M[p[1]] = v * 100; $('#' + p[0]).value = v * 100; paint($('#' + p[0])); placeMask();
+    });
+  });
+  [['mw', 'rw'], ['mh', 'rh']].forEach(function (p) {
+    $('#' + p[0] + 'V').addEventListener('change', function () {
+      var v = Math.max(0.06, Math.min(1, parseFloat(this.value) || 0));
+      M[p[1]] = v * 50; $('#' + p[0]).value = v * 100; paint($('#' + p[0])); placeMask();
+    });
+  });
+  $('#keySimV').addEventListener('change', function () {
+    var v = Math.max(0, Math.min(1, parseFloat(this.value) || 0));
+    $('#keySim').value = Math.round(v * 100); paint($('#keySim')); $('#keySimV').value = v.toFixed(2);
+  });
+  $('#keyBlendV').addEventListener('change', function () {
+    var v = Math.max(0, Math.min(1, parseFloat(this.value) || 0));
+    $('#keyBlend').value = Math.round(v * 100); paint($('#keyBlend')); $('#keyBlendV').value = v.toFixed(2);
+  });
+
+  /* ---- 初始化 ---- */
+  setPos(57, 64); v2.style.width = '46%';
+  $('#scale').value = 46; $('#scaleNum').value = '46%'; paint($('#scale'));
+  placeMask(); applyKey();
+})();
+</script>
+</body>
+</html>

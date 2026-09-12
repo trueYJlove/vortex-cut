@@ -1,0 +1,27 @@
+{
+  "scenarios": [
+    "F01"
+  ],
+  "runs": "1",
+  "seeks": "3",
+  "playback-seconds": "5",
+  "smoke": true,
+  "seed": "20260908",
+  "baseline_status": "smoke-only-not-G0",
+  "commit": "ffa33ad2c796e7581b5d04dbd63243fd05437a1d",
+  "code_fingerprint": "005815643a9eb222f3a168052eeb5eec4fa159de7e602cbbad0da790db5727fb",
+  "dirty_files": "M apps/desktop/e2e/performance-editor.spec.ts\n M apps/desktop/electron/main/index.ts\n M apps/desktop/electron/preload/index.ts\n M apps/desktop/src/app/preview/decode-worker.ts\n M apps/desktop/src/app/preview/decode-worker.worker.ts\n M apps/desktop/tests/app.test.tsx\n M apps/desktop/tests/editor-commands.test.tsx\n M apps/desktop/tests/editor-shell.test.tsx\n M apps/desktop/tests/preview-lifecycle.test.tsx\n M tools/performance/make_fixtures.py\n M tools/performance/run_editor_benchmark.mjs\n?? evidence/performance/b00b-fixtures-smoke-f04-48/\n?? evidence/performance/b00b-fixtures-smoke-f04/\n?? evidence/performance/b00b-fixtures-smoke-f07/\n?? evidence/performance/b00b-smoke-f01-regression-check/\n?? evidence/performance/b00b-smoke-f04-02/\n?? evidence/performance/b00b-smoke-f04-03/\n?? evidence/performance/b00b-smoke-f04-04/\n?? evidence/performance/b00b-smoke-f04-05/\n?? evidence/performance/b00b-smoke-f04-06/\n?? evidence/performance/b00b-smoke-f07-01/\n?? evidence/performance/b00b-smoke-f07-02/\n?? evidence/performance/b00b-smoke-f07-03/\n?? evidence/performance/b00b-smoke-f07-04/",
+  "node": "v24.19.0",
+  "fixtures_used": [
+    {
+      "file": "F01.mp4",
+      "sha256": "4e51be3e3a70ba5192f2b682ed50545cfe111ec22857366f8b54876ee1c8d5b0",
+      "duration_s": 12,
+      "size": "640x360",
+      "fps": 30,
+      "recipe": "testsrc2-av-cfr-v1",
+      "bytes": 3123032,
+      "coverage_note": "Media only; not historical PiP, VFR/B-frame, multilayer or audio-failure coverage."
+    }
+  ]
+}

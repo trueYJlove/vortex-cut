@@ -26,6 +26,13 @@ describe("safeErrors", () => {
     expect(safeErrorMessage(new Error("TIMELINE_PATCH_PROVIDER_UNTESTED"))).toBe("该 Provider 尚未完成 AI 修改兼容性测试。");
   });
 
+  it("extracts a bracketed code from IPC-stripped errors ([CODE] message)", () => {
+    // Electron IPC 剥掉自定义 .code 属性；主进程 fetchWithUi 以 "[CODE] message" 传递业务码。
+    expect(safeErrorMessage(new Error("[TIMELINE_NOT_FOUND] 项目尚未创建时间线"))).toBe("当前项目还没有时间线。");
+    expect(safeErrorMessage(new Error("[TIMELINE_CONFLICT] conflict"))).toBe("时间线已发生变化，请刷新后重试。");
+    expect(safeErrorMessage(new Error("[404] Core request failed"))).toBe(DEFAULT_FALLBACK);
+  });
+
   it("falls back for an unknown error", () => {
     expect(safeErrorMessage(new Error("SOME_OTHER_THING"))).toBe(DEFAULT_FALLBACK);
   });

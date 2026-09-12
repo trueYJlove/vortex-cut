@@ -1,0 +1,12 @@
+m3mat_a_1080: width=1920,height=1080,r_frame_rate=30/1,color_space=bt709,color_transfer=bt709,color_primaries=bt709,color_range=tv,nb_frames=750
+m3mat_a_540: width=960,height=540,r_frame_rate=30/1,color_space=bt709,color_transfer=bt709,color_primaries=bt709,color_range=tv,nb_frames=750
+m3mat_b_1080: width=1920,height=1080,r_frame_rate=30/1,color_space=bt709,color_transfer=bt709,color_primaries=bt709,color_range=tv,nb_frames=750
+m3mat_b_540: width=960,height=540,r_frame_rate=30/1,color_space=bt709,color_transfer=bt709,color_primaries=bt709,color_range=tv,nb_frames=750
+m3mat_c_1080: width=1920,height=1080,r_frame_rate=30/1,color_space=bt709,color_transfer=bt709,color_primaries=bt709,color_range=tv,nb_frames=450
+m3mat_c_540: width=960,height=540,r_frame_rate=30/1,color_space=bt709,color_transfer=bt709,color_primaries=bt709,color_range=tv,nb_frames=450
+m3mat_p1_1080: width=1920,height=1080,r_frame_rate=30/1,color_space=bt709,color_transfer=bt709,color_primaries=bt709,color_range=tv,nb_frames=600
+m3mat_p1_540: width=960,height=540,r_frame_rate=30/1,color_space=bt709,color_transfer=bt709,color_primaries=bt709,color_range=tv,nb_frames=600
+m3mat_p2_1080: width=1920,height=1080,r_frame_rate=30/1,color_space=bt709,color_transfer=bt709,color_primaries=bt709,color_range=tv,nb_frames=600
+m3mat_p2_540: width=960,height=540,r_frame_rate=30/1,color_space=bt709,color_transfer=bt709,color_primaries=bt709,color_range=tv,nb_frames=600
+m3card_1080: width=1920,height=1080,r_frame_rate=30/1,color_space=bt709,color_transfer=bt709,color_primaries=bt709,color_range=tv,nb_frames=300
+m3card_540: width=960,height=540,r_frame_rate=30/1,color_space=bt709,color_transfer=bt709,color_primaries=bt709,color_range=tv,nb_frames=300

@@ -3,12 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Job, ModelDetail, TimelineDocument, TimelineState } from "@aivideo/contracts";
 import type { DesktopApi } from "../electron/preload/index.js";
 import { App } from "../src/app/App.js";
+import { fixturePreviewIrPresentation } from "./fixtures/preview-ir.js";
 
 const now = "2026-08-11T00:00:00.000Z";
 const project = { project_id: "project_1" as never, name: "演示项目", status: "active" as const, canvas: { width: 1080, height: 1920, fps_num: 30, fps_den: 1 }, root_dir_name: "Demo", current_timeline_revision_id: "revision_1", created_at: now, updated_at: now, last_opened_at: now };
 const video = { asset_id: "asset_video" as never, project_id: project.project_id, kind: "video" as const, storage_mode: "external" as const, display_name: "很长的中文素材文件名-第一幕.mp4", fingerprint: "a".repeat(64), size_bytes: 10, modified_at: now, availability: "available" as const, media_info: { duration_us: 5_000_000 }, created_at: now, updated_at: now };
 const image = { ...video, asset_id: "asset_image" as never, kind: "image" as const, display_name: "海报.png", media_info: { duration_us: 0 } };
-const timelineDocument: TimelineDocument = { schema_version: 1, project_id: project.project_id, canvas: { ...project.canvas, background_color: "#000000" }, tracks: [{ id: "V1", kind: "visual", locked: false }, { id: "C1", kind: "caption", locked: false }], clips: [{ clip_id: "clip_1" as never, track_id: "V1", order_index: 0, asset_id: video.asset_id, asset_kind: "video", source_start_us: 0, source_end_us: 5_000_000, timeline_start_us: 0, timeline_end_us: 5_000_000, layout: "fit", audio: { enabled: true, gain_db: 0 } }], captions: [{ caption_id: "caption_1" as never, track_id: "C1", source_clip_id: "clip_1" as never, start_us: 0, end_us: 1_000_000, text: "这是一条很长的中文字幕，用于验证编辑与布局。", preset_id: "default-bottom", origin: "transcript", edited: false, source_segment_ids: ["segment_1" as never] }], provenance: { created_by: "user", source_transcript_ids: ["transcript_1" as never] } };
+const timelineDocument: TimelineDocument = { schema_version: 1, project_id: project.project_id, canvas: { ...project.canvas, background_color: "#000000" }, tracks: [{ id: "C1", kind: "text", locked: false, hidden: false, muted: false, solo: false }, { id: "V1", kind: "video", locked: false, hidden: false, muted: false, solo: false }, { id: "A1", kind: "audio", locked: false, hidden: false, muted: false, solo: false }], clips: [{ clip_id: "clip_1" as never, track_id: "V1", order_index: 0, asset_id: video.asset_id, asset_kind: "video", source_start_us: 0, source_end_us: 5_000_000, timeline_start_us: 0, timeline_end_us: 5_000_000, layout: "fit", audio: { enabled: true, gain_db: 0 } }], captions: [{ caption_id: "caption_1" as never, track_id: "C1", source_clip_id: "clip_1" as never, start_us: 0, end_us: 1_000_000, text: "这是一条很长的中文字幕，用于验证编辑与布局。", preset_id: "default-bottom", origin: "transcript", edited: false, source_segment_ids: ["segment_1" as never] }], provenance: { created_by: "user", source_transcript_ids: ["transcript_1" as never] } };
 const state: TimelineState = { project_id: project.project_id, current_revision: { timeline_revision_id: "revision_1" as never, project_id: project.project_id, parent_revision_id: null, document_sha256: "a".repeat(64), summary: "创建", created_by: "user", created_at: now, schema_version: 1, document: timelineDocument }, draft: null, can_undo: true, can_redo: true, current_preview: null };
 const transcript = { transcript_id: "transcript_1" as never, asset_id: video.asset_id, status: "ready" as const, language: "zh", segments: [{ segment_id: "segment_1" as never, ordinal: 0, start_us: 0, end_us: 1_000_000, text: "第一句", confidence: 1, words: null }], words: null, provider: "fixture", model_id: "model_1" as never, model_revision: "v1", source_media_fingerprint: video.fingerprint, duration_us: 5_000_000, created_at: now, updated_at: now };
 const model: ModelDetail = { model_id: "model_1" as never, display_name: "本地测试模型", purpose: "本地语音转录", provider: "fixture", revision: "v1", supported_languages: ["zh", "en"], supports_word_timestamps: true, runtime_version: "1", model_size_bytes: 1024, installed_size_bytes: 2048, model_sha256: "b".repeat(64), license: { id: "license_1", name: "测试许可证", url: null, attribution: null, acceptance_required: true }, source: { kind: "trusted_manifest", display_name: "内置清单", host: null, url: null }, requires_network: true, local_only: true, status: "unavailable", provider_status: "installed", progress: null, required_disk_bytes: 4096, runtime_requirements: {}, files: [], available_disk_bytes: 8192 };
@@ -50,13 +51,13 @@ function desktopApi(options: { timeline?: TimelineState | null; models?: ModelDe
   return {
     getRuntime: vi.fn().mockResolvedValue({ protocol_version: 1, status: "ready" }), chooseMedia: vi.fn(), probeMedia: vi.fn(),
     listProjects: vi.fn().mockResolvedValue({ items: [project], next_cursor: null }), createProject: vi.fn().mockResolvedValue({ ...project, project_id: "project_2", name: "新项目" }), getProject: vi.fn().mockResolvedValue(project), renameProject: vi.fn().mockResolvedValue({ ...project, name: "已重命名" }), archiveProject: vi.fn().mockResolvedValue({ ...project, status: "archived" }), reopenProject: vi.fn().mockResolvedValue(project),
-    listAssets: vi.fn().mockResolvedValue({ items: [{ asset: video, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGH" }, { asset: image, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGHI" }], next_cursor: null }), importAsset: vi.fn().mockImplementation(async ({ kind }: { kind?: string }) => ({ grant: {}, asset: { ...image, asset_id: `import_${kind}` as never, kind: kind ?? "video", display_name: `import-${kind}` }, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGHI" })), refreshAsset: vi.fn().mockResolvedValue({ asset: video, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGH" }), relocateAsset: vi.fn().mockResolvedValue({ grant: {}, asset: video, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGH" }),
+    listAssets: vi.fn().mockResolvedValue({ items: [{ asset: video, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGH" }, { asset: image, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGHI" }], next_cursor: null }), importAsset: vi.fn(), importAssetByFixture: vi.fn().mockResolvedValue(null).mockImplementation(async ({ kind }: { kind?: string }) => ({ grant: {}, asset: { ...image, asset_id: `import_${kind}` as never, kind: kind ?? "video", display_name: `import-${kind}` }, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGHI" })), refreshAsset: vi.fn().mockImplementation(async (assetId: string) => ({ asset: assetId === image.asset_id ? image : video, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGH" })), relocateAsset: vi.fn().mockResolvedValue({ grant: {}, asset: video, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGH" }), importSubtitle: vi.fn().mockResolvedValue(null), deleteAsset: vi.fn().mockResolvedValue({ removed_clips: 1, removed_captions: 0 }), revealAsset: vi.fn().mockResolvedValue({ status: "opened" }),
     listJobs: vi.fn().mockResolvedValue({ items: options.jobs ?? [], next_cursor: null }), createJob: vi.fn(), getJob: vi.fn(), cancelJob: vi.fn().mockImplementation(async (jobId: string) => ({ ...createdJob, job_id: jobId, status: "cancelled" })), listModels: vi.fn().mockResolvedValue({ items: options.models ?? [], next_cursor: null }), getModel: vi.fn().mockResolvedValue(model), downloadModel: vi.fn().mockResolvedValue({ model: { ...model, status: "queued" }, job: downloadJob }), getModelDownload: vi.fn(), cancelModelDownload: vi.fn().mockResolvedValue({ model: { ...model, status: "cancelled" }, job: { ...downloadJob, status: "cancelled" } }), createTranscription: vi.fn().mockImplementation(async () => ({ job: { ...createdJob, job_id: `job_created_${++transcriptionSequence}` as never }, transcript: null })),
     listTranscripts: vi.fn().mockResolvedValue({ items: [{ ...transcript, segments: undefined, words: undefined }], next_cursor: null }), getTranscript: vi.fn().mockResolvedValue(transcript),
     getBrief: vi.fn().mockRejectedValue(new Error("BRIEF_NOT_FOUND")), putBrief: vi.fn().mockResolvedValue({}), listRecipes: vi.fn().mockResolvedValue({ items: [{ schema_version: 1, recipe_id: "balanced-narrative-v1", name: "Balanced", summary: "测试", rules: { selection: "keyword", pace: "balanced", max_gap_us: 1 }, document_sha256: `sha256:${"a".repeat(64)}` }] }), listProviders: vi.fn().mockResolvedValue({ items: [{ provider_config_id: "provider_1", kind: "openai_compatible_text", display_name: "测试 Provider", base_url: "https://provider.test", model: "model", enabled: true, credential_status: "configured", input_price_per_million: null, output_price_per_million: null, timeline_patch_capability_status: "supported", timeline_patch_response_adapter_id: "openai_chat_completions_json_schema_v1", timeline_patch_probe_protocol_version: "1", timeline_patch_capability_tested_at: now, timeline_patch_capability_failure_code: null, timeline_patch_capability_probe_sha256: `sha256:${"d".repeat(64)}`, candidate_capability_status: "supported", candidate_response_adapter_id: "openai_chat_completions_json_schema_v1", candidate_probe_protocol_version: "1", candidate_capability_tested_at: now, candidate_capability_failure_code: null, candidate_capability_probe_sha256: `sha256:${"e".repeat(64)}`, created_at: now, updated_at: now }] }), createProvider: vi.fn(), setProviderSecret: vi.fn(), deleteProviderSecret: vi.fn().mockResolvedValue({ provider_config_id: "provider_1", credential_status: "missing" }), testProvider: vi.fn().mockResolvedValue({ status: "succeeded" }), testCandidateProviderCapability: vi.fn().mockResolvedValue({ candidate_capability_status: "supported", candidate_response_adapter_id: "openai_chat_completions_json_schema_v1", candidate_probe_protocol_version: "1", candidate_capability_tested_at: now, candidate_capability_failure_code: null, candidate_capability_probe_sha256: `sha256:${"e".repeat(64)}` }), preparePlanning: vi.fn().mockResolvedValue({ egress_preview_id: "preview_1", provider: { display_name: "测试", origin: "https://provider.test", model: "model" }, prompt_template_version: "candidate-plan-v1", sent_fields: ["segments.text"], payload_sha256: `sha256:${"b".repeat(64)}`, expires_at: now, payload: { segments: [{ segment_ref: "s1", text: "第一句" }] }, stats: { transcript_count: 1, segment_count: 1, character_count: 3, estimated_tokens: 1 } }), createPlanning: vi.fn().mockResolvedValue({ job: { ...createdJob, kind: "candidate_generation" } }), listCandidatePlans: vi.fn().mockResolvedValue({ items: [] }), getCandidateClipMedia: vi.fn(), adoptCandidatePlan: vi.fn().mockResolvedValue(state),
     prepareTimelinePatch: vi.fn().mockResolvedValue({ timeline_patch_egress_preview_id: "patch_preview_1", provider: { display_name: "测试 Provider", origin: "https://provider.test", model: "model" }, prompt_template_version: "timeline-patch-v1", output_schema_version: "timeline-patch-output-v1", sent_fields: ["instruction", "timeline"], payload_sha256: `sha256:${"c".repeat(64)}`, character_count: 100, estimated_tokens: 30, clip_count: 1, caption_count: 1, locked_count: 0, expires_at: now }), testTimelinePatchProviderCapability: vi.fn().mockResolvedValue({ timeline_patch_capability_status: "supported", timeline_patch_response_adapter_id: "openai_chat_completions_json_schema_v1", timeline_patch_probe_protocol_version: "1", timeline_patch_capability_tested_at: now, timeline_patch_capability_failure_code: null, timeline_patch_probe_sha256: `sha256:${"d".repeat(64)}` }), createTimelinePatchGeneration: vi.fn().mockResolvedValue({ timeline_patch_generation_id: "patch_generation_1", job: { ...createdJob, kind: "timeline_patch_generation" } }), getTimelinePatchGeneration: vi.fn(), listTimelinePatchProposals: vi.fn().mockResolvedValue({ items: [] }), getTimelinePatchProposal: vi.fn(), applyTimelinePatchProposal: vi.fn().mockResolvedValue(state), compareTimelineRevisions: vi.fn(),
     createTimeline: vi.fn().mockResolvedValue(state), getTimeline: timeline ? vi.fn().mockResolvedValue(timeline) : vi.fn().mockRejectedValue(new Error("TIMELINE_NOT_FOUND 404")), patchTimeline: vi.fn().mockResolvedValue(state), undoTimeline: vi.fn().mockResolvedValue(state), redoTimeline: vi.fn().mockResolvedValue(state), saveTimelineDraft: vi.fn().mockResolvedValue({ project_id: project.project_id, base_revision_id: state.current_revision.timeline_revision_id, document: timelineDocument, updated_at: now, conflict: false }), deleteTimelineDraft: vi.fn().mockResolvedValue(undefined), listTimelineRevisions: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), getTimelineRevision: vi.fn(),
-    createPreview: vi.fn().mockResolvedValue({ job: null, preview: null, reused: false }), listPreviews: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), chooseExportDestination: vi.fn().mockResolvedValue(null), createExport: vi.fn(), listExports: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), getRenderArtifact: vi.fn(),
+    createPreview: vi.fn().mockResolvedValue({ job: null, preview: null, reused: false }), listPreviews: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), chooseExportDestination: vi.fn().mockResolvedValue(null), createExport: vi.fn(), listExports: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), getRenderArtifact: vi.fn(), getPreviewIr: vi.fn().mockResolvedValue(fixturePreviewIrPresentation()), lookupDerivedMedia: vi.fn(), derivedMediaStats: vi.fn(), derivedMediaUrl: vi.fn(), captionFontUrl: vi.fn().mockResolvedValue(""),
     listPlatformPresets: vi.fn().mockResolvedValue({ items: [] }), listRenditionPresets: vi.fn().mockResolvedValue({ items: [] }), createRenditionPreview: vi.fn(), listRenditionPreviews: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), chooseExportDirectory: vi.fn().mockResolvedValue(null), createExportBatch: vi.fn(), getExportBatch: vi.fn(), listExportBatches: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), cancelExportBatch: vi.fn(), retryExportBatch: vi.fn(),
     createRenditionReframePreview: vi.fn(), listRenditionReframePreviews: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), createReframeExportBatch: vi.fn(), getReframeExportBatch: vi.fn(), listReframeExportBatches: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), cancelReframeExportBatch: vi.fn(), retryReframeExportBatch: vi.fn(),
     prepareMediaGeneration: vi.fn(), createMediaGeneration: vi.fn(), listMediaGenerationRequests: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), getMediaGenerationRequest: vi.fn(), listMediaGenerationTasks: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), retryMediaGenerationTask: vi.fn(), cancelMediaGenerationTask: vi.fn(),
@@ -65,7 +66,7 @@ function desktopApi(options: { timeline?: TimelineState | null; models?: ModelDe
     getShotRequirementImageFulfillment: vi.fn(), listShotRequirementImageFulfillmentLinks: vi.fn(), listShotRequirementImageFulfillmentAdoptions: vi.fn(), prepareShotRequirementImageFulfillment: vi.fn(), createShotRequirementImageFulfillment: vi.fn(), adoptShotRequirementImageFulfillment: vi.fn(),
     prepareShotRequirementTimelineAssembly: vi.fn(), applyShotRequirementTimelineAssembly: vi.fn(), getShotRequirementTimelineAssemblyPreview: vi.fn(), getShotRequirementTimelineAssembly: vi.fn(), listShotRequirementTimelineAssemblies: vi.fn().mockResolvedValue({ items: [], next_cursor: null }),
     prepareShotRequirementTimelineBatchAssembly: vi.fn(), applyShotRequirementTimelineBatchAssembly: vi.fn(), getShotRequirementTimelineBatchAssemblyPreview: vi.fn(), getShotRequirementTimelineBatchAssembly: vi.fn(), listShotRequirementTimelineBatches: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), listShotRequirementTimelineBatchAssemblyItems: vi.fn().mockResolvedValue({ items: [], next_cursor: null }),
-    openArtifact: vi.fn(), openArtifactFolder: vi.fn(), subscribeJob: vi.fn().mockReturnValue(() => undefined), diagnostics: vi.fn()
+    openArtifact: vi.fn(), openArtifactFolder: vi.fn(), subscribeJob: vi.fn().mockReturnValue(() => undefined), getPreviewSource: vi.fn(), createPreviewSourceJob: vi.fn(), previewSourceMediaUrl: vi.fn(), getWaveform: vi.fn(), waveformMediaUrl: vi.fn(), ensurePcmChunk: vi.fn(), pcmChunkMediaUrl: vi.fn(), getPreviewIrV2Manifest: vi.fn(), getPreviewIrV2Window: vi.fn(), updateEditorLoad: vi.fn().mockResolvedValue({ status: "ok" }), diagnostics: vi.fn()
   } as DesktopApi;
 }
 
@@ -92,12 +93,12 @@ describe("Stage 1A/1B 工作流", () => {
     window.desktop = api; render(<App />);
     await expectSwitcherName("演示项目");
     openProjectManagement();
-    fireEvent.change(await screen.findByLabelText("新项目名称"), { target: { value: "新项目" } }); fireEvent.click(screen.getByRole("button", { name: "创建项目" })); await waitFor(() => expect(api.createProject).toHaveBeenCalledWith({ name: "新项目" }));
+    fireEvent.change(await screen.findByLabelText("新项目名称"), { target: { value: "新项目" } }); fireEvent.click(screen.getByRole("button", { name: "创建项目" })); await waitFor(() => expect(api.createProject).toHaveBeenCalledWith({ name: "新项目", canvas: { width: 1080, height: 1920, fps_num: 30, fps_den: 1 } }));
     // Wait for the finished create mutation, then use the real project switcher
     // to continue the remaining workflow on project_1.  API invocation alone
     // is not completion: createProject still refreshes and selects its result.
     await expectSwitcherName("新项目");
-    selectProject(/^演示项目 活动$/);
+    selectProject(/^演示项目 活跃$/);
     await expectSwitcherName("演示项目");
     openProjectManagement();
     fireEvent.change(await screen.findByLabelText("重命名项目"), { target: { value: "已重命名" } }); fireEvent.click(screen.getByRole("button", { name: "保存名称" })); await waitFor(() => expect(api.renameProject).toHaveBeenCalledWith({ project_id: "project_1", name: "已重命名" }));
@@ -106,9 +107,20 @@ describe("Stage 1A/1B 工作流", () => {
     await screen.findByRole("button", { name: "重新打开项目" });
     fireEvent.click(screen.getByRole("button", { name: "重新打开项目" })); await waitFor(() => expect(api.reopenProject).toHaveBeenCalledWith("project_1"));
     await screen.findByRole("button", { name: "归档项目" });
-    for (const label of ["视频", "音频", "图片", "文本"]) fireEvent.click(screen.getByRole("button", { name: `导入${label}` }));
-    await waitFor(() => expect(api.importAsset).toHaveBeenCalledTimes(4));
-    expect(api.importAsset).toHaveBeenNthCalledWith(1, { project_id: "project_1", kind: "video" }); expect(api.importAsset).toHaveBeenNthCalledWith(4, { project_id: "project_1", kind: "text" });
+    // txt 不再提供导入入口（文本创作走默认文本/导入字幕）。
+    for (const label of ["视频", "音频", "图片"]) fireEvent.click(screen.getByRole("button", { name: `导入${label}` }));
+    await waitFor(() => expect(api.importAsset).toHaveBeenCalledTimes(3));
+    expect(api.importAsset).toHaveBeenNthCalledWith(1, { project_id: "project_1", kind: "video" }); expect(api.importAsset).toHaveBeenNthCalledWith(3, { project_id: "project_1", kind: "image" });
+  });
+
+  it("新建项目可选画布比例，创建请求携带对应画布", async () => {
+    const api = desktopApi(); window.desktop = api; render(<App />);
+    await expectSwitcherName("演示项目");
+    openProjectManagement();
+    fireEvent.change(await screen.findByLabelText("新项目名称"), { target: { value: "横屏项目" } });
+    fireEvent.change(screen.getByLabelText("新建项目画布比例"), { target: { value: "169" } });
+    fireEvent.click(screen.getByRole("button", { name: "创建项目" }));
+    await waitFor(() => expect(api.createProject).toHaveBeenCalledWith({ name: "横屏项目", canvas: { width: 1920, height: 1080, fps_num: 30, fps_den: 1 } }));
   });
 
   it("卸载后的启动请求不会穿透到后来挂载的 Desktop bridge", async () => {
@@ -129,13 +141,23 @@ describe("Stage 1A/1B 工作流", () => {
     const refreshedProjectQ = { ...projectQ, name: "服务端项目 Q（刷新）" };
     const staleProject = { ...project, name: "服务端迟到名称" };
     const confirmedProject = { ...project, name: "服务端确认名" };
-    let refreshProjects!: () => void;
     let resolveStaleRefresh!: (value: { items: (typeof project)[]; next_cursor: null }) => void;
     const staleRefresh = new Promise<{ items: (typeof project)[]; next_cursor: null }>(resolve => { resolveStaleRefresh = resolve; });
-    const intervalSpy = vi.spyOn(globalThis, "setInterval").mockImplementation((callback, delay) => {
-      if (delay === 1500) refreshProjects = callback as () => void;
-      return 1 as never;
-    });
+    // A08：轮询改 RequestScheduler（结束后再 setTimeout + 同端点 single-flight）。
+    // 受控注入点从 setInterval 回调改为 scheduler 的延迟 setTimeout：首轮
+    // 调度立即执行（runCycle），后续由这里手动触发。
+    const originalSetTimeout = globalThis.setTimeout.bind(globalThis);
+    let refreshProjects!: () => void;
+    const timeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(((callback: TimerHandler, delay?: number) => {
+      // 调度器内部排程（数字 delay ≥1s）挂起为可手动触发的刷新钩子（只
+      // 记最新一次——手动触发即模拟"间隔到达"，不重放历史周期）；其他
+      // setTimeout（React/库内部）照常真实触发。
+      if (typeof delay === "number" && delay >= 1000 && typeof callback === "function") {
+        refreshProjects = () => { void (callback as () => void)(); };
+        return 1 as never;
+      }
+      return originalSetTimeout(callback, delay ?? 0) as never;
+    }) as unknown as typeof setTimeout);
     const api = desktopApi();
     api.listProjects = vi.fn()
       .mockResolvedValueOnce({ items: [project], next_cursor: null })
@@ -161,71 +183,112 @@ describe("Stage 1A/1B 工作流", () => {
     await waitFor(() => expect(renameInput).toHaveValue("服务端确认名"));
 
     const refreshForProjectP = refreshProjects;
-    selectProject(/^服务端项目 Q 活动$/);
+    selectProject(/^服务端项目 Q 活跃$/);
     await waitFor(() => expect(renameInput).toHaveValue("服务端项目 Q"));
     await waitFor(() => expect(refreshProjects).not.toBe(refreshForProjectP));
     await act(async () => { refreshProjects(); });
     await waitFor(() => expect(api.listProjects).toHaveBeenCalledTimes(3));
     await waitFor(() => expect(renameInput).toHaveValue("服务端项目 Q（刷新）"));
-    intervalSpy.mockRestore();
+    timeoutSpy.mockRestore();
   });
 
-  it("支持素材刷新、重新定位和只读 Transcript 查看", async () => {
+  it("支持素材库刷新、删除确认弹窗和只读 Transcript 查看", async () => {
     const api = desktopApi(); window.desktop = api; render(<App />); await screen.findByText(video.display_name);
-    fireEvent.click(screen.getAllByRole("button", { name: "刷新" })[0]); fireEvent.click(screen.getAllByRole("button", { name: "重新定位" })[0]);
-    await waitFor(() => expect(api.refreshAsset).toHaveBeenCalledWith(video.asset_id)); await waitFor(() => expect(api.relocateAsset).toHaveBeenCalledWith({ asset_id: video.asset_id }));
+    // 重新定位按钮已移除（与导入重叠）；工具栏提供素材库级刷新。
+    expect(screen.queryByRole("button", { name: "重新定位" })).toBeNull();
+    expect(screen.getByRole("button", { name: "刷新素材库" })).toBeInTheDocument();
+    await waitFor(() => expect(api.refreshAsset).not.toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: "刷新素材库" }));
+    await waitFor(() => expect(api.refreshAsset).toHaveBeenCalledWith(video.asset_id));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("所有素材文件均正常"));
     fireEvent.click(screen.getByTitle("转录")); expect(await screen.findByText("当前没有可用的本地 ASR 模型")).toBeVisible();
     fireEvent.click(screen.getAllByRole("button", { name: /^转录$/ })[0]);
+    // 转录结果在"转录"子标签下：切换后查看。
+    fireEvent.click(screen.getByRole("tab", { name: /^转录/ }));
     fireEvent.click(await screen.findByRole("button", { name: /查看转录/ })); expect(await screen.findByText("原始 ASR 结果只读。字幕修订不会覆盖这份记录。")).toBeVisible(); expect(screen.getAllByText("第一句")).toHaveLength(2);
+    fireEvent.click(screen.getByRole("tab", { name: /^素材/ }));
+    // 删除：应用内确认弹窗（含级联警告），确认后携带级联标记调用 Core。
+    fireEvent.click(screen.getAllByTitle(`删除 ${video.display_name}`)[0]);
+    expect(await screen.findByRole("heading", { name: "删除素材" })).toBeVisible();
+    expect(screen.getByText(/相关片段（含关联字幕与转场）将一并删除/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "删除素材" })).toBeNull());
+    expect(api.deleteAsset).not.toHaveBeenCalled();
+    fireEvent.click(screen.getAllByTitle(`删除 ${video.display_name}`)[0]);
+    fireEvent.click(await screen.findByRole("button", { name: "删除素材" }));
+    await waitFor(() => expect(api.deleteAsset).toHaveBeenCalledWith({ asset_id: video.asset_id, remove_timeline_clips: true }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("已删除素材"));
   });
 
   it("支持模型确认下载、取消下载、发起转录及任务取消重试", async () => {
-    const api = desktopApi({ models: [model] }); window.desktop = api; render(<App />); await screen.findByText("本地测试模型");
+    const api = desktopApi({ models: [model] }); window.desktop = api; render(<App />); fireEvent.click(screen.getByRole("tab", { name: /^模型/ })); await screen.findByText("本地测试模型");
     fireEvent.click(screen.getByRole("button", { name: "下载模型" })); expect(await screen.findByRole("heading", { name: "确认下载本地模型" })).toBeVisible(); const confirm = screen.getByRole("button", { name: "确认并下载" }); expect(confirm).toBeDisabled(); fireEvent.click(screen.getByRole("checkbox", { name: /接受/ })); fireEvent.click(confirm); await waitFor(() => expect(api.downloadModel).toHaveBeenCalledWith({ model_id: model.model_id, license_acceptance: "license_1" }));
     fireEvent.click(await screen.findByTitle("取消模型下载")); await waitFor(() => expect(api.cancelModelDownload).toHaveBeenCalledWith(model.model_id));
-    const readyApi = desktopApi({ models: [readyModel], jobs: [job] }); window.desktop = readyApi; cleanup(); render(<App />); await screen.findByText("本地测试模型"); fireEvent.click(await screen.findByTitle("转录")); expect(await screen.findByRole("heading", { name: "创建本地转录" })).toBeVisible(); fireEvent.click(screen.getByRole("button", { name: "开始转录" })); await waitFor(() => expect(readyApi.createTranscription).toHaveBeenCalledWith(expect.objectContaining({ asset_id: video.asset_id, model_id: model.model_id })));
-    fireEvent.click(screen.getByRole("button", { name: "重试转录" })); await waitFor(() => expect(readyApi.createTranscription).toHaveBeenCalledTimes(2)); fireEvent.click(screen.getAllByRole("button", { name: "取消任务" })[0]); await waitFor(() => expect(readyApi.cancelJob).toHaveBeenCalledWith("job_created_2"));
+    const readyApi = desktopApi({ models: [readyModel], jobs: [job] }); window.desktop = readyApi; cleanup(); render(<App />); fireEvent.click(screen.getByRole("tab", { name: /^模型/ })); await screen.findByText("本地测试模型");
+    // 发起转录的按钮在素材行操作区：切回"素材"标签再点。
+    fireEvent.click(screen.getByRole("tab", { name: /^素材/ })); fireEvent.click(await screen.findByTitle("转录")); expect(await screen.findByRole("heading", { name: "创建本地转录" })).toBeVisible(); fireEvent.click(screen.getByRole("button", { name: "开始转录" })); await waitFor(() => expect(readyApi.createTranscription).toHaveBeenCalledWith(expect.objectContaining({ asset_id: video.asset_id, model_id: model.model_id })));
+    // 任务在"任务"子标签下：切换后重试/取消。
+    fireEvent.click(screen.getByRole("tab", { name: /^任务/ }));
+    fireEvent.click(screen.getByRole("button", { name: "重试转录" })); await waitFor(() => expect(readyApi.createTranscription).toHaveBeenCalledTimes(2)); fireEvent.click(screen.getAllByRole("button", { name: "取消" })[0]); await waitFor(() => expect(readyApi.cancelJob).toHaveBeenCalledWith("job_created_2"));
   });
 });
 
 describe("素材箱交互", () => {
   afterEach(() => cleanup());
 
-  it("支持列表/缩略图视图切换", async () => {
+  it("素材列表固定为列表视图（视图切换已移除）", async () => {
     window.desktop = desktopApi(); render(<App />);
     await screen.findByText(video.display_name);
     expect(document.querySelector(".asset-list.asset-table")).not.toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "切换为缩略图视图" }));
-    expect(document.querySelector(".asset-list.asset-grid")).not.toBeNull();
-    expect(document.querySelectorAll(".asset-card").length).toBe(2);
-    expect(screen.getAllByRole("button", { name: "刷新" }).length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole("button", { name: "切换为列表视图" }));
-    expect(document.querySelector(".asset-list.asset-table")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "切换为缩略图视图" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "切换为列表视图" })).toBeNull();
+    // 重新定位操作已移除（与导入重叠）；删除走应用内确认弹窗。
+    expect(screen.queryByRole("button", { name: "重新定位" })).toBeNull();
+    expect(screen.getAllByTitle(/删除 /).length).toBeGreaterThan(0);
+  });
+
+  it("提示条按级别配色（成功为绿色而非红色）", async () => {
+    const api = desktopApi(); window.desktop = api; render(<App />); await screen.findByText(video.display_name);
+    // 刷新成功 → 绿色提示（而非红色）。
+    fireEvent.click(screen.getByRole("button", { name: "刷新素材库" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("所有素材文件均正常"), { timeout: 15_000 });
+    expect(document.querySelector(".notice.notice-success")).not.toBeNull();
+    expect(document.querySelector(".notice.notice-error")).toBeNull();
+    // 删除成功 → 同样是绿色成功提示。
+    fireEvent.click(screen.getAllByTitle(`删除 ${video.display_name}`)[0]);
+    fireEvent.click(await screen.findByRole("button", { name: "删除素材" }, { timeout: 15_000 }));
+    await waitFor(() => expect(document.querySelector(".notice.notice-success")?.textContent).toContain("已删除素材"), { timeout: 15_000 });
   });
 
   it("双击素材在预览播放且不修改时间线，回到时间线后退出素材预览", async () => {
     const api = desktopApi(); window.desktop = api; render(<App />);
     await screen.findByText(image.display_name);
+    // 等合成预览回退（jsdom 无 WebGL2）落定，交互预览就绪后再操作；套件并发
+    // 负载下回退可能超过默认 1s 超时，放宽。
+    await screen.findByLabelText("交互预览视频", {}, { timeout: 10_000 });
     const imageItem = screen.getByText(image.display_name).closest(".asset-item")!;
     fireEvent.doubleClick(imageItem);
     expect(await screen.findByAltText(image.display_name)).toBeInTheDocument();
     expect(screen.queryByLabelText("交互预览视频")).not.toBeInTheDocument();
     expect(api.patchTimeline).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText("时间线播放头"), { target: { value: 1000000 } });
+    // 播放头 slider 是 role=slider 的 div（无 input value setter），走键盘可访问路径。
+    // 任意 seek 即退出素材预览（seekFromProgressRatio → exitLibraryPreview）；
+    // ArrowRight 一次 = 5s/300 ≈ 16.7ms，仍在 clip_1 区间内（交互预览视频存在）。
+    fireEvent.keyDown(screen.getByLabelText("时间线播放头"), { key: "ArrowRight" });
     expect(screen.queryByAltText(image.display_name)).not.toBeInTheDocument();
     expect(screen.getByLabelText("交互预览视频")).toBeInTheDocument();
-  });
+  }, 15_000);
 
   it("点击预览画面选中播放头处的片段并显示选中边框", async () => {
     const api = desktopApi(); window.desktop = api; render(<App />);
-    await screen.findByLabelText("交互预览视频");
+    await screen.findByLabelText("交互预览视频", {}, { timeout: 10_000 });
     const frame = screen.getByRole("button", { name: "选中播放头处的片段" });
     expect(frame.className).not.toContain("selected");
     fireEvent.click(frame);
     await waitFor(() => expect(frame.className).toContain("selected"));
     expect(api.patchTimeline).not.toHaveBeenCalled();
-    // 切到无片段的播放头位置再点击，选中态清除
-    fireEvent.change(screen.getByLabelText("时间线播放头"), { target: { value: 6000000 } });
+    // 切到无片段的播放头位置（End 键跳到片尾）再点击，选中态清除
+    fireEvent.keyDown(screen.getByLabelText("时间线播放头"), { key: "End" });
     fireEvent.click(frame);
     await waitFor(() => expect(frame.className).not.toContain("selected"));
   });
@@ -240,13 +303,16 @@ describe("Stage 1C Editor", () => {
   });
 
   it("支持片段与字幕编辑", async () => {
-    const api = desktopApi(); window.desktop = api; render(<App />); fireEvent.click(await screen.findByRole("button", { name: /video 5.00s/ })); fireEvent.click(screen.getByRole("button", { name: "拆分片段" })); await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledWith(expect.objectContaining({ patch: expect.objectContaining({ operations: [expect.objectContaining({ op: "split_clip" })] }) }))); fireEvent.change(screen.getByLabelText("布局"), { target: { value: "crop_fill" } }); await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledWith(expect.objectContaining({ patch: expect.objectContaining({ operations: [expect.objectContaining({ op: "set_layout", layout: "crop_fill" })] }) }))); fireEvent.click(screen.getByRole("button", { name: /这是一条很长/ })); fireEvent.change(screen.getByLabelText("文本"), { target: { value: "修正字幕" } }); fireEvent.blur(screen.getByLabelText("文本")); await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledWith(expect.objectContaining({ patch: expect.objectContaining({ operations: [expect.objectContaining({ op: "update_caption", text: "修正字幕" })] }) })));
+    const api = desktopApi(); window.desktop = api; render(<App />); fireEvent.click(await screen.findByRole("button", { name: /video 5.00s/ })); fireEvent.click(screen.getByRole("button", { name: "拆分片段" })); await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledWith(expect.objectContaining({ patch: expect.objectContaining({ operations: [expect.objectContaining({ op: "split_clip" })] }) }))); fireEvent.click(screen.getByRole("button", { name: "裁切填满" })); await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledWith(expect.objectContaining({ patch: expect.objectContaining({ operations: [expect.objectContaining({ op: "set_layout", layout: "crop_fill" })] }) }))); fireEvent.click(screen.getByRole("button", { name: /这是一条很长/ })); fireEvent.change(screen.getByLabelText("文本"), { target: { value: "修正字幕" } }); fireEvent.blur(screen.getByLabelText("文本")); await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledWith(expect.objectContaining({ patch: expect.objectContaining({ operations: [expect.objectContaining({ op: "update_caption", text: "修正字幕" })] }) })));
   });
 
   it("创建空时间线后忽略迟到的 404，并以冻结契约追加素材与转录", async () => {
     let rejectTimeline!: (reason: unknown) => void; const pendingTimeline = new Promise<TimelineState>((_, reject) => { rejectTimeline = reject; }); const api = desktopApi({ timeline: null }); api.getTimeline = vi.fn().mockReturnValue(pendingTimeline); window.desktop = api; render(<App />); fireEvent.click(await screen.findByRole("button", { name: "创建空时间线" })); await screen.findByRole("button", { name: /video 5.00s/ }); rejectTimeline(new Error("TIMELINE_NOT_FOUND 404"));
-    fireEvent.click(screen.getByRole("button", { name: /追加 很长的中文素材/ })); await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledWith(expect.objectContaining({ patch: expect.objectContaining({ operations: [expect.objectContaining({ op: "insert_asset_clip" })] }) })));
-    fireEvent.click(screen.getAllByRole("button", { name: /^转录$/ })[0]); fireEvent.click(await screen.findByRole("checkbox")); fireEvent.click(screen.getByRole("button", { name: "追加所选片段" }));
+    fireEvent.dragOver(screen.getByLabelText("时间线画布"), { dataTransfer: { getData: () => video.asset_id, dropEffect: "copy" } }); fireEvent.drop(screen.getByLabelText("时间线画布"), { dataTransfer: { getData: () => video.asset_id, dropEffect: "copy" } }); await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledWith(expect.objectContaining({ patch: expect.objectContaining({ operations: [expect.objectContaining({ op: "insert_asset_clip" })] }) })));
+    fireEvent.click(screen.getAllByRole("button", { name: /^转录$/ })[0]);
+    // 勾选转录片段的界面在"转录"子标签下：切换后操作。A08：转录正文不再
+    // 全量预取——先点"查看转录"按需加载（并发队列 + 代次作废），再勾选。
+    fireEvent.click(screen.getByRole("tab", { name: /^转录/ })); fireEvent.click(await screen.findByRole("button", { name: /查看转录/ })); fireEvent.click(await screen.findByRole("checkbox")); fireEvent.click(screen.getByRole("button", { name: "追加所选片段" }));
     await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledTimes(2)); const operation = vi.mocked(api.patchTimeline).mock.calls[1][0].patch.operations[0]; expect(operation).toEqual({ op: "insert_transcript_segments", transcript_id: transcript.transcript_id, segment_ids: [transcript.segments[0].segment_id], at_index: timelineDocument.clips.length, padding_before_us: 150_000, padding_after_us: 150_000, create_captions: true, layout: "blurred_background" }); expect(operation).not.toHaveProperty("kind");
   });
 
@@ -271,6 +337,9 @@ describe("Stage 2A AI 粗剪", () => {
   it("必须先 prepare 再经明确确认创建，且不渲染密钥", async () => {
     const api = desktopApi(); api.listCandidatePlans = vi.fn().mockResolvedValue({ items: [{} as never] }); window.desktop = api; render(<App />);
     await expectSwitcherName("演示项目");
+    // 等合成预览回退（jsdom 无 WebGL2）落定：回退触发的重渲若撞上 RTL 模拟的
+    // change 事件会触发 React change 去重、丢掉第一次模拟输入——先 settle 再交互。
+    await screen.findByRole("note", { name: "合成预览回退提示" }, { timeout: 10_000 });
     fireEvent.click(screen.getByRole("button", { name: "AI 粗剪" }));
     fireEvent.change(await screen.findByLabelText("主题"), { target: { value: "游戏高光" } });
     fireEvent.change(screen.getByLabelText("受众"), { target: { value: "玩家" } });
@@ -292,14 +361,16 @@ describe("Stage 2A AI 粗剪", () => {
   });
   it("删除密钥使用白名单桥接且不回显", async () => {
     const api = desktopApi(); window.desktop = api; render(<App />); await expectSwitcherName("演示项目");
+    await screen.findByRole("note", { name: "合成预览回退提示" }, { timeout: 10_000 }); // 等回退落定再交互（见"必须先 prepare"用例注释）
     fireEvent.click(screen.getByRole("button", { name: "AI 粗剪" })); fireEvent.change(await screen.findByLabelText("Provider"), { target: { value: "provider_1" } });
-    fireEvent.click(screen.getByRole("button", { name: "删除当前 Provider 密钥" })); await waitFor(() => expect(api.deleteProviderSecret).toHaveBeenCalledWith("provider_1"));
+    fireEvent.click(screen.getByRole("button", { name: "删除密钥" })); await waitFor(() => expect(api.deleteProviderSecret).toHaveBeenCalledWith("provider_1"));
     expect(document.body.textContent).not.toContain("SENTINEL-KEY-NEVER-LOG");
   });
   it.each(["failed", "cancelled", "interrupted"] as const)("任务 %s 会清除旧外传预览，取消按钮调用任务取消并强制重新准备", async status => {
     const api = desktopApi(); api.listCandidatePlans = vi.fn().mockImplementation(() => new Promise(() => undefined)); let listener: ((value: Job) => void) | undefined;
     api.subscribeJob = vi.fn((_id, next) => { listener = next; return () => undefined; });
     window.desktop = api; render(<App />); await expectSwitcherName("演示项目");
+    await screen.findByRole("note", { name: "合成预览回退提示" }, { timeout: 10_000 }); // 等回退落定再交互（见"必须先 prepare"用例注释）
     fireEvent.click(screen.getByRole("button", { name: "AI 粗剪" }));
     fireEvent.change(await screen.findByLabelText("主题"), { target: { value: "游戏高光" } }); fireEvent.change(screen.getByLabelText("受众"), { target: { value: "玩家" } }); fireEvent.change(screen.getByLabelText("叙事目标"), { target: { value: "展示操作" } }); fireEvent.change(screen.getByLabelText("制作配方"), { target: { value: "balanced-narrative-v1" } }); fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "provider_1" } }); fireEvent.change(screen.getByLabelText("就绪转录"), { target: { value: "transcript_1" } });
     fireEvent.click(screen.getByRole("button", { name: "准备外传确认" })); await screen.findByText("确认发送的精确内容"); fireEvent.click(screen.getByRole("button", { name: "我确认发送以上内容" }));
@@ -318,7 +389,7 @@ describe("Stage 2B AI 修改", () => {
     const lockedState = { ...state, current_revision: { ...state.current_revision, document: { ...timelineDocument, locked_elements: ["clip_1" as never] } } };
     const api = desktopApi({ timeline: lockedState }); window.desktop = api; render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /video 5.00s/ }));
-    expect(screen.getByText(/此 Clip 已锁定/)).toBeVisible(); expect(screen.getByLabelText("布局")).toBeDisabled(); expect(screen.getByRole("button", { name: "拆分片段" })).toBeDisabled();
+    expect(screen.getByText(/此 Clip 已锁定/)).toBeVisible(); expect(screen.getByRole("button", { name: "裁切填满" })).toBeDisabled(); expect(screen.getByRole("button", { name: "拆分片段" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: /这是一条很长/ })); expect(screen.getByText(/关联 Clip 已锁定/)).toBeVisible(); expect(screen.getByLabelText("文本")).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: /video 5.00s/ }));
     fireEvent.click(screen.getByRole("button", { name: "解锁片段" })); await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledWith(expect.objectContaining({ patch: expect.objectContaining({ operations: [{ op: "set_clip_locked", clip_id: "clip_1", locked: false }] }) })));
@@ -382,10 +453,10 @@ describe("Stage 1C Render", () => {
     await waitFor(() => expect(previewButton).toBeEnabled());
     fireEvent.change(screen.getByLabelText("编码模式"), { target: { value: "software" } });
     fireEvent.click(previewButton);
-    await waitFor(() => expect(api.createPreview).toHaveBeenCalledWith({ project_id: project.project_id, preview: { timeline_revision_id: state.current_revision.timeline_revision_id, encoder_mode: "software" } }));
+    await waitFor(() => expect(api.createPreview).toHaveBeenCalledWith({ project_id: project.project_id, preview: { timeline_revision_id: state.current_revision.timeline_revision_id, encoder_mode: "software", output_ratio: "916" } }));
     fireEvent.click(screen.getByRole("button", { name: "导出正式视频" }));
     await waitFor(() => expect(api.chooseExportDestination).toHaveBeenCalledWith(project.project_id));
-    expect(api.createExport).toHaveBeenCalledWith({ project_id: project.project_id, export: { timeline_revision_id: state.current_revision.timeline_revision_id, destination_grant_id: "destination_1", encoder_mode: "software" } });
+    expect(api.createExport).toHaveBeenCalledWith({ project_id: project.project_id, export: { timeline_revision_id: state.current_revision.timeline_revision_id, destination_grant_id: "destination_1", encoder_mode: "software", output_ratio: "916" } });
   });
 
   it("空时间线和草稿会阻止 Render 提交", async () => {
@@ -492,7 +563,7 @@ describe("Stage 4B 生成验证正式入口", () => {
 
   async function generationEntry(): Promise<HTMLElement> {
     fireEvent.click(screen.getByRole("button", { name: "工具" }));
-    return await screen.findByRole("menuitem", { name: "生成验证（模拟）" });
+    return await screen.findByRole("menuitem", { name: /生成验证（模拟）/ });
   }
 
   it("未选择项目时禁用入口，选择项目后可打开模拟验证工作台", async () => {
@@ -526,7 +597,7 @@ describe("Stage 4B 生成验证正式入口", () => {
     await waitFor(() => expect(entry).toBeEnabled());
     fireEvent.click(entry);
     fireEvent.change(await screen.findByLabelText("生成验证 Prompt"), { target: { value: "切换项目必须清除" } });
-    selectProject(/^第二项目 活动$/);
+    selectProject(/^第二项目 活跃$/);
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "生成验证（模拟）" })).not.toBeInTheDocument());
     fireEvent.click(await generationEntry());
     expect(await screen.findByLabelText("生成验证 Prompt")).toHaveValue("");

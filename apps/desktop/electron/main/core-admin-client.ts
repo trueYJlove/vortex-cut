@@ -74,6 +74,46 @@ export class CoreAdminClient {
     return this.request<{ path: string }>(`/api/v1/internal/assets/${encodeURIComponent(assetId)}/resolve`);
   }
 
+  /** B10：派生媒体 Main 内部解析（admin 通道；path 只到 Main，不进 Renderer）。 */
+  resolveDerivedMedia(input: { project_id: string; asset_id: string; kind: string; params: Record<string, string> }) {
+    return this.request<{ cache_key: string; kind: string; status: string; path: string; size_bytes: number }>(
+      `/api/v1/internal/projects/${encodeURIComponent(input.project_id)}/derived-media/resolve`,
+      { method: "POST", body: JSON.stringify({ asset_id: input.asset_id, kind: input.kind, params: input.params }) },
+    );
+  }
+
+  /** B11：代理文件 Main 内部解析（admin 通道；path 只到 Main，不进 Renderer）。 */
+  resolvePreviewSourceMedia(input: { project_id: string; asset_id: string; profile_id: string }) {
+    return this.request<{ cache_key: string; status: string; path: string; size_bytes: number }>(
+      `/api/v1/internal/projects/${encodeURIComponent(input.project_id)}/assets/${encodeURIComponent(input.asset_id)}/preview-source/media`,
+      { method: "POST", body: JSON.stringify({ asset_id: input.asset_id, profile_id: input.profile_id }) },
+    );
+  }
+
+  /** B14：波形文件 Main 内部解析（admin 通道；参数服务端固定，无请求体）。 */
+  resolveWaveformMedia(input: { project_id: string; asset_id: string }) {
+    return this.request<{ cache_key: string; status: string; path: string; size_bytes: number }>(
+      `/api/v1/internal/projects/${encodeURIComponent(input.project_id)}/assets/${encodeURIComponent(input.asset_id)}/waveform/media`,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+  }
+
+  /** B15：PCM 块文件 Main 内部解析（admin 通道）。 */
+  resolvePcmChunkMedia(input: { project_id: string; asset_id: string; start_sample: number }) {
+    return this.request<{ cache_key: string; status: string; path: string; size_bytes: number }>(
+      `/api/v1/internal/projects/${encodeURIComponent(input.project_id)}/assets/${encodeURIComponent(input.asset_id)}/pcm-chunks/media`,
+      { method: "POST", body: JSON.stringify({ start_sample: input.start_sample }) },
+    );
+  }
+
+  /** B16b：编辑器负载心跳（admin 通道；TTL 3s——无心跳即 idle）。 */
+  reportEditorLoadLease(input: { window_id: string; mode: "playing" | "scrubbing" | "idle" }) {
+    return this.request<{ status: string; mode: string; ttl_s: number }>(
+      "/api/v1/internal/editor-load-lease",
+      { method: "POST", body: JSON.stringify(input) },
+    );
+  }
+
   setProviderSecret(providerConfigId: string, secret: string): Promise<{ provider_config_id: string; credential_status: string }> {
     return this.request(`/api/v1/internal/provider-secrets/${encodeURIComponent(providerConfigId)}`, { method: "PUT", body: JSON.stringify({ secret }) });
   }

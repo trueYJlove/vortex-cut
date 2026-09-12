@@ -38,6 +38,7 @@ import type {
   , AuthoritativePreview
   , DestinationGrant
   , EncoderMode
+  , OutputRatio
   , ExportRecord
   , RenderArtifact
   , RenderArtifactId
@@ -69,35 +70,62 @@ import type {
   , ShotRequirementTimelineBatchAssemblyApplyResponse, ShotRequirementTimelineBatchAssemblyPage
   , ShotRequirementTimelineBatchAssemblyPreviewId, ShotRequirementTimelineBatchAssemblyId
   , ShotRequirementTimelineBatchAssemblyItemPage
+  , DerivedMediaEntry, DerivedMediaStats
+  , PreviewSourceDescription, PreviewSourceJobResponse, PreviewSourceMediaResponse, PreviewSourceProfileId, PreviewSourceMode
+  , WaveformDescription, WaveformMediaResponse
+  , PcmChunkDescription, PcmChunkMediaResponse
+  , PreviewIrV2Manifest, PreviewIrV2Window
 } from "@aivideo/contracts";
 
+// M3-0 探针 dev-only 桥：生产构建 NODE_ENV 静态替换 → 死代码消除（见 probe-bridge.ts 注释）。
+if (process.env.NODE_ENV !== "production" && process.env.AIVS_M3_PROBE) {
+  void import("./probe-bridge.js").then(module => module.registerProbeBridge()).catch(() => undefined);
+}
+
 export interface MediaSelection { grant: FileGrant; media: MediaInfo }
-export interface DesktopRuntime { protocol_version: 1; status: "ready" }
+export interface DesktopRuntime {
+  protocol_version: 1;
+  status: "ready";
+  /** B13 资源预算档位（离散值；不暴露额外主机信息——Main 侧由总内存判定）。 */
+  resource_tier?: "conservative" | "balanced" | "high";
+  /** B13-R 判别诊断开关（仅 perf 诊断构建 + AIVS_FORCE_COPYTO=1 时下发）。 */
+  force_copy_to?: boolean;
+}
 export interface AuthoritativePreviewPresentation { preview: AuthoritativePreview; media_url: string }
-export interface ExportRecordPresentation { export_record: ExportRecord; media_url: string }
+export interface ExportRecordPresentation { export_record: ExportRecord; media_url: string | null }
 export interface RenderArtifactPresentation { artifact: RenderArtifact; media_url: string }
+export interface PreviewIrPresentation {
+  schema_version: number;
+  content_fingerprint: string;
+  timeline_revision_id: string;
+  output_ratio: string;
+  ir: Record<string, unknown>;
+}
 export interface RenditionPreviewPresentation { preview: RenditionPreview; media_url: string }
 export interface RenditionReframePreviewPresentation { preview: RenditionReframePreview; media_url: string }
 
 export interface DesktopApi {
   getRuntime: () => Promise<DesktopRuntime>;
-  minimizeWindow?: () => Promise<void>;
-  toggleMaximizeWindow?: () => Promise<boolean>;
-  closeWindow?: () => Promise<void>;
-  isWindowMaximized?: () => Promise<boolean>;
-  onWindowMaximizeChange?: (listener: (maximized: boolean) => void) => () => void;
   chooseMedia: () => Promise<MediaSelection | null>;
   probeMedia: (grantId: GrantId) => Promise<MediaInfo>;
   listProjects: (params?: { status?: ProjectStatus; limit?: number; cursor?: string }) => Promise<ProjectPage>;
-  createProject: (input: { name: string; root_dir_name?: string }) => Promise<Project>;
+  createProject: (input: { name: string; root_dir_name?: string; canvas?: { width: number; height: number; fps_num?: number; fps_den?: number } }) => Promise<Project>;
   getProject: (projectId: ProjectId) => Promise<Project>;
   renameProject: (input: { project_id: ProjectId; name: string }) => Promise<Project>;
   archiveProject: (projectId: ProjectId) => Promise<Project>;
   reopenProject: (projectId: ProjectId) => Promise<Project>;
   listAssets: (input: { project_id: ProjectId; availability?: AssetAvailability; limit?: number; cursor?: string }) => Promise<AssetPresentationPage>;
   importAsset: (input: { project_id: ProjectId; kind?: AssetKind }) => Promise<ImportedAsset | null>;
+  /** E2E 基准专用：从 AIVS_E2E_ASSET_PATHS_LIST 夹具表按文件名导入；非基准环境无该表则拒绝。 */
+  importAssetByFixture: (input: { project_id: ProjectId; fixture_file: string }) => Promise<ImportedAsset | null>;
   refreshAsset: (assetId: string) => Promise<AssetPresentation>;
   relocateAsset: (input: { asset_id: string }) => Promise<ImportedAsset | null>;
+  /** 删除素材；remove_timeline_clips=true 时级联删除时间线相关片段，返回清理计数。 */
+  deleteAsset: (input: { asset_id: string; remove_timeline_clips?: boolean }) => Promise<{ removed_clips: number; removed_captions: number }>;
+  /** 打开素材所在文件夹；文件缺失时弹框提供 重新定位 / 移除 恢复路径。 */
+  revealAsset: (assetId: string) => Promise<{ status: "opened" | "relocated" | "deleted" | "cancelled" }>;
+  /** 弹出字幕文件选择框（SRT/ASS/SSA/LRC），返回文本内容；取消返回 null。 */
+  importSubtitle: () => Promise<{ file_name: string; content: string } | null>;
   listJobs: (input: { project_id: ProjectId; status?: Job["status"]; limit?: number; cursor?: string }) => Promise<JobPage>;
   createJob: (input: { project_id: ProjectId; media_id: MediaInfo["media_id"]; kind: "proxy" | "portrait_sample"; encoder_mode?: "auto" | "software"; start_us?: number; duration_us?: number; layout?: "blurred_background" }) => Promise<Job>;
   getJob: (jobId: JobId) => Promise<Job>;
@@ -141,10 +169,10 @@ export interface DesktopApi {
   deleteTimelineDraft: (projectId: ProjectId) => Promise<void>;
   listTimelineRevisions: (input: { project_id: ProjectId; limit?: number; cursor?: string }) => Promise<TimelineRevisionPage>;
   getTimelineRevision: (revisionId: TimelineRevisionId) => Promise<TimelineRevision>;
-  createPreview: (input: { project_id: ProjectId; preview: { timeline_revision_id?: TimelineRevisionId; encoder_mode?: EncoderMode } }) => Promise<{ job: Job | null; preview: AuthoritativePreviewPresentation | null; reused: boolean }>;
+  createPreview: (input: { project_id: ProjectId; preview: { timeline_revision_id?: TimelineRevisionId; encoder_mode?: EncoderMode; output_ratio?: OutputRatio } }) => Promise<{ job: Job | null; preview: AuthoritativePreviewPresentation | null; reused: boolean }>;
   listPreviews: (input: { project_id: ProjectId; limit?: number; cursor?: string }) => Promise<{ items: AuthoritativePreviewPresentation[]; next_cursor: string | null }>;
   chooseExportDestination: (projectId: ProjectId) => Promise<DestinationGrant | null>;
-  createExport: (input: { project_id: ProjectId; export: { timeline_revision_id?: TimelineRevisionId; destination_grant_id: DestinationGrant["destination_grant_id"]; encoder_mode?: EncoderMode } }) => Promise<{ job: Job; export_record: ExportRecordPresentation | null }>;
+  createExport: (input: { project_id: ProjectId; export: { timeline_revision_id?: TimelineRevisionId; destination_grant_id: DestinationGrant["destination_grant_id"]; encoder_mode?: EncoderMode; output_ratio?: OutputRatio } }) => Promise<{ job: Job; export_record: ExportRecordPresentation | null }>;
   listExports: (input: { project_id: ProjectId; limit?: number; cursor?: string }) => Promise<{ items: ExportRecordPresentation[]; next_cursor: string | null }>;
   listPlatformPresets: () => Promise<{ items: PlatformPreset[] }>;
   listRenditionPresets: () => Promise<{ items: RenditionPreset[] }>;
@@ -205,6 +233,27 @@ export interface DesktopApi {
   listShotRequirementTimelineBatches: (input: { project_id: ProjectId; limit?: number; cursor?: string }) => Promise<ShotRequirementTimelineBatchAssemblyPage>;
   listShotRequirementTimelineBatchAssemblyItems: (input: { batch_id: ShotRequirementTimelineBatchAssemblyId; limit?: number; cursor?: string }) => Promise<ShotRequirementTimelineBatchAssemblyItemPage>;
   getRenderArtifact: (artifactId: RenderArtifactId) => Promise<RenderArtifactPresentation>;
+  getPreviewIr: (input: { project_id: ProjectId; timeline_revision_id?: string | null; output_ratio?: string }) => Promise<PreviewIrPresentation>;
+  // C20 窗口化 IR v2：manifest（非帧 DTO）+ 窗口帧表切片（Renderer 分页取帧）
+  getPreviewIrV2Manifest: (input: { project_id: ProjectId; timeline_revision_id?: string | null; output_ratio?: string }) => Promise<PreviewIrV2Manifest>;
+  getPreviewIrV2Window: (input: { project_id: ProjectId; start_frame: number; frame_count: number; timeline_revision_id?: string | null; output_ratio?: string }) => Promise<PreviewIrV2Window>;
+  // B10 派生媒体缓存（performance-v1）：查询/用量 + 票据化媒体 URL
+  lookupDerivedMedia: (input: { project_id: ProjectId; asset_id: string; kind: string; params: Record<string, string> }) => Promise<DerivedMediaEntry>;
+  derivedMediaStats: (projectId: ProjectId) => Promise<DerivedMediaStats>;
+  derivedMediaUrl: (input: { project_id: ProjectId; asset_id: string; kind: string; params: Record<string, string> }) => Promise<{ media_url: string; cache_key: string; status: "ready"; size_bytes: number }>;
+  // B11 preview-source（全源代理与预览源选择）：描述/作业/代理票据
+  getPreviewSource: (input: { project_id: ProjectId; asset_id: string; profile_id?: PreviewSourceProfileId; mode?: PreviewSourceMode; generate?: boolean }) => Promise<PreviewSourceDescription>;
+  createPreviewSourceJob: (input: { project_id: ProjectId; asset_id: string; profile_id?: PreviewSourceProfileId }) => Promise<PreviewSourceJobResponse>;
+  previewSourceMediaUrl: (input: { project_id: ProjectId; asset_id: string; profile_id: PreviewSourceProfileId }) => Promise<PreviewSourceMediaResponse>;
+  // B14 素材级持久化波形：描述（generate 登记作业）+ 票据化文件 URL
+  getWaveform: (input: { project_id: ProjectId; asset_id: string; generate?: boolean }) => Promise<WaveformDescription>;
+  waveformMediaUrl: (input: { project_id: ProjectId; asset_id: string }) => Promise<WaveformMediaResponse>;
+  // B15 分块 PCM：块确保（网格对齐）+ 票据化块文件 URL
+  ensurePcmChunk: (input: { project_id: ProjectId; asset_id: string; start_sample: number }) => Promise<PcmChunkDescription>;
+  pcmChunkMediaUrl: (input: { project_id: ProjectId; asset_id: string; start_sample: number }) => Promise<PcmChunkMediaResponse>;
+  // B16b 编辑器负载：playing/scrubbing/idle 推送（Main 侧 lease 心跳消费）
+  updateEditorLoad: (mode: "playing" | "scrubbing" | "idle") => Promise<{ status: string }>;
+  captionFontUrl: () => Promise<string>;
   openArtifact: (artifactId: string) => Promise<void>;
   openArtifactFolder: (artifactId: string) => Promise<void>;
   subscribeJob: (jobId: JobId, listener: (job: Job) => void) => () => void;
@@ -213,15 +262,6 @@ export interface DesktopApi {
 
 const api: DesktopApi = {
   getRuntime: () => ipcRenderer.invoke("runtime:get"),
-  minimizeWindow: () => ipcRenderer.invoke("window:minimize"),
-  toggleMaximizeWindow: () => ipcRenderer.invoke("window:toggle-maximize"),
-  closeWindow: () => ipcRenderer.invoke("window:close"),
-  isWindowMaximized: () => ipcRenderer.invoke("window:is-maximized"),
-  onWindowMaximizeChange: listener => {
-    const handler = (_event: Electron.IpcRendererEvent, maximized: boolean) => listener(maximized);
-    ipcRenderer.on("window:maximize-changed", handler);
-    return () => ipcRenderer.removeListener("window:maximize-changed", handler);
-  },
   chooseMedia: () => ipcRenderer.invoke("media:choose"),
   probeMedia: grantId => ipcRenderer.invoke("media:probe", grantId),
   listProjects: params => ipcRenderer.invoke("project:list", params),
@@ -232,8 +272,12 @@ const api: DesktopApi = {
   reopenProject: projectId => ipcRenderer.invoke("project:reopen", projectId),
   listAssets: input => ipcRenderer.invoke("asset:list", input),
   importAsset: input => ipcRenderer.invoke("asset:import", input),
+  importAssetByFixture: input => ipcRenderer.invoke("asset:import-fixture", input),
   refreshAsset: assetId => ipcRenderer.invoke("asset:refresh", assetId),
   relocateAsset: input => ipcRenderer.invoke("asset:relocate", input),
+  deleteAsset: input => ipcRenderer.invoke("asset:delete", input),
+  revealAsset: assetId => ipcRenderer.invoke("asset:reveal", assetId),
+  importSubtitle: () => ipcRenderer.invoke("subtitle:import"),
   listJobs: input => ipcRenderer.invoke("job:list", input),
   createJob: input => ipcRenderer.invoke("job:create", input),
   getJob: jobId => ipcRenderer.invoke("job:get", jobId),
@@ -341,6 +385,21 @@ const api: DesktopApi = {
   listShotRequirementTimelineBatches: input => ipcRenderer.invoke("stage6r:batch-assembly-list", input),
   listShotRequirementTimelineBatchAssemblyItems: input => ipcRenderer.invoke("stage6r:batch-assembly-item-list", input),
   getRenderArtifact: artifactId => ipcRenderer.invoke("render-artifact:get", artifactId),
+  getPreviewIr: input => ipcRenderer.invoke("preview-ir:get", input),
+  getPreviewIrV2Manifest: input => ipcRenderer.invoke("preview-ir-v2:manifest", input),
+  getPreviewIrV2Window: input => ipcRenderer.invoke("preview-ir-v2:window", input),
+  lookupDerivedMedia: input => ipcRenderer.invoke("derived-media:lookup", input),
+  derivedMediaStats: projectId => ipcRenderer.invoke("derived-media:stats", { project_id: projectId }),
+  derivedMediaUrl: input => ipcRenderer.invoke("derived-media:media", input),
+  getPreviewSource: input => ipcRenderer.invoke("preview-source:get", input),
+  createPreviewSourceJob: input => ipcRenderer.invoke("preview-source:jobs", input),
+  previewSourceMediaUrl: input => ipcRenderer.invoke("preview-source:media", input),
+  getWaveform: input => ipcRenderer.invoke("waveform:get", input),
+  waveformMediaUrl: input => ipcRenderer.invoke("waveform:media", input),
+  ensurePcmChunk: input => ipcRenderer.invoke("pcm-chunk:ensure", input),
+  pcmChunkMediaUrl: input => ipcRenderer.invoke("pcm-chunk:media", input),
+  updateEditorLoad: (mode: "playing" | "scrubbing" | "idle") => ipcRenderer.invoke("editor-load:update", mode),
+  captionFontUrl: () => ipcRenderer.invoke("media:caption-font-url"),
   openArtifact: artifactId => ipcRenderer.invoke("artifact:open", artifactId),
   openArtifactFolder: artifactId => ipcRenderer.invoke("artifact:folder", artifactId),
   subscribeJob: (jobId, listener) => {

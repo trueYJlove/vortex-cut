@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 
+from .background_work import AssetChangedError, hashed_fingerprint
 from .database import Database, json_dumps, json_loads, sha256_file, utc_now
 from .ids import new_id
 
@@ -42,15 +44,46 @@ class ProjectAssetService:
         data_dir: Path,
         probe: Callable[..., Awaitable[dict[str, Any]]],
         transcript_stale: Callable[[str, str | None], None] | None = None,
+        purge_asset_clips: Callable[[sqlite3.Connection, str], dict[str, int]] | None = None,
     ) -> None:
         self.db = db
         self.data_dir = data_dir
         self.probe = probe
         self.transcript_stale = transcript_stale
+        self.purge_asset_clips = purge_asset_clips
 
-    def create_project(self, name: str, root_dir_name: str | None = None) -> dict[str, Any]:
+    _DEFAULT_CANVAS = {"width": 1080, "height": 1920, "fps_num": 30, "fps_den": 1}
+
+    @staticmethod
+    def _validate_canvas(canvas: dict[str, Any] | None) -> dict[str, Any]:
+        """新建项目画布（可选）：宽高为偶数且在合理范围，帧率 1..120。
+        未提供时回退默认竖屏 1080x1920@30（历史项目同款）。"""
+        if not canvas:
+            return dict(ProjectAssetService._DEFAULT_CANVAS)
+        if not isinstance(canvas, dict):
+            raise DomainError("PROJECT_CANVAS_INVALID", "画布参数无效")
+        try:
+            width = int(canvas["width"])
+            height = int(canvas["height"])
+        except (KeyError, TypeError, ValueError):
+            raise DomainError("PROJECT_CANVAS_INVALID", "画布宽高无效") from None
+        try:
+            fps_num = int(canvas.get("fps_num", 30))
+            fps_den = int(canvas.get("fps_den", 1))
+        except (TypeError, ValueError):
+            raise DomainError("PROJECT_CANVAS_INVALID", "画布帧率无效") from None
+        if not (64 <= width <= 7680 and width % 2 == 0 and 64 <= height <= 7680 and height % 2 == 0):
+            raise DomainError("PROJECT_CANVAS_INVALID", "画布宽高需为 64..7680 的偶数")
+        fps = fps_num / fps_den if fps_den > 0 else 0
+        if fps_den <= 0 or not (1 <= fps <= 120):
+            raise DomainError("PROJECT_CANVAS_INVALID", "画布帧率需在 1..120")
+        return {"width": width, "height": height, "fps_num": fps_num, "fps_den": fps_den}
+
+    def create_project(self, name: str, root_dir_name: str | None = None,
+                       canvas: dict[str, Any] | None = None) -> dict[str, Any]:
         project_name = _project_name(name)
         root_name = _project_name(root_dir_name or project_name)
+        canvas_value = self._validate_canvas(canvas)
         project_id = f"project_{new_id()}"
         now = utc_now()
         root_dir = self.data_dir / "projects" / project_id
@@ -64,7 +97,7 @@ class ProjectAssetService:
                     project_id,
                     project_name,
                     "active",
-                    json_dumps({"width": 1080, "height": 1920, "fps_num": 30, "fps_den": 1}),
+                    json_dumps(canvas_value),
                     None,
                     str(root_dir),
                     root_name,
@@ -166,7 +199,8 @@ class ProjectAssetService:
             raise DomainError("PROJECT_ARCHIVED", "项目已归档，无法导入素材")
         path = _grant_path(grant)
         kind = _asset_kind(path, requested_kind)
-        fingerprint = sha256_file(path)
+        # A05a：大文件哈希走后台线程池（事件循环不阻塞；stat 前后比对）
+        fingerprint = await self._hash(path)
         with self.db.connection() as db:
             duplicate = db.execute(
                 "SELECT * FROM assets WHERE project_id=? AND fingerprint=?",
@@ -279,7 +313,7 @@ class ProjectAssetService:
             self._mark_transcripts_stale(asset_id, None)
             return self.get_asset(asset_id)  # type: ignore[return-value]
         try:
-            fingerprint = sha256_file(path)
+            fingerprint = await self._hash(path)
             if fingerprint != row["fingerprint"]:
                 self._remember_previous_fingerprint(asset_id, row["fingerprint"])
                 self._mark_transcripts_stale(asset_id, fingerprint)
@@ -305,6 +339,98 @@ class ProjectAssetService:
             )
         return self.get_asset(asset_id)  # type: ignore[return-value]
 
+    def delete_asset(self, asset_id: str, *, remove_timeline_clips: bool = False) -> dict[str, int]:
+        """删除素材（硬删 assets 行，级联清理 locations/transcripts 等从表）。
+
+        时间线 Clip 以 document_json 形式存于 timeline_revisions（无外键）：
+        - remove_timeline_clips=False：任一 Revision 仍引用该素材时拒绝删除
+          （ASSET_IN_USE），提示先从时间线移除相关片段；
+        - remove_timeline_clips=True：级联删除所有 Revision/草稿中的相关片段
+          （字幕、转场一并清理），随后删除素材行，返回清理计数。
+
+        transcripts 表对 assets 无级联外键，删除前先手工清理转录数据；
+        其余从表（asset_locations 等）由 ON DELETE CASCADE 处理。
+        """
+        self._require_asset_row(asset_id)
+        with self.db.connection() as db:
+            db.execute("BEGIN")
+            try:
+                used = db.execute(
+                    """
+                    SELECT COUNT(*) AS n
+                    FROM timeline_revisions tr, json_each(tr.document_json, '$.clips')
+                    WHERE json_extract(json_each.value, '$.asset_id') = ?
+                    """,
+                    (asset_id,),
+                ).fetchone()
+                clip_count = used["n"] if used else 0
+                if clip_count and not remove_timeline_clips:
+                    raise DomainError(
+                        "ASSET_IN_USE",
+                        "素材仍被时间线片段引用，请先移除相关片段后再删除",
+                    )
+                counts = {"removed_clips": 0, "removed_captions": 0}
+                if clip_count and self.purge_asset_clips:
+                    counts = dict(self.purge_asset_clips(db, asset_id))
+                # transcripts/segments/words 无级联外键，先手工清理。
+                db.execute(
+                    "DELETE FROM transcript_words WHERE segment_id IN ("
+                    "SELECT s.id FROM transcript_segments s JOIN transcripts t ON t.id=s.transcript_id WHERE t.asset_id=?)",
+                    (asset_id,),
+                )
+                db.execute(
+                    "DELETE FROM transcript_segments WHERE transcript_id IN ("
+                    "SELECT id FROM transcripts WHERE asset_id=?)",
+                    (asset_id,),
+                )
+                db.execute("DELETE FROM transcripts WHERE asset_id=?", (asset_id,))
+                try:
+                    db.execute("DELETE FROM assets WHERE id=?", (asset_id,))
+                except sqlite3.IntegrityError as exc:
+                    # 被 shot requirements / 生成记录等业务表引用时拒绝硬删，
+                    # 保护 AI 流程的引用完整性（比级联破坏历史记录更安全）。
+                    db.execute("ROLLBACK")
+                    raise DomainError(
+                        "ASSET_IN_USE",
+                        "素材被镜头需求或生成记录引用，无法删除",
+                    ) from exc
+                db.execute("COMMIT")
+                return counts
+            except DomainError:
+                if db.in_transaction:
+                    db.execute("ROLLBACK")
+                raise
+            except Exception:
+                if db.in_transaction:
+                    db.execute("ROLLBACK")
+                raise
+
+    def asset_cache_identity(self, asset_id: str) -> tuple[str, str, int, int] | None:
+        """A07：素材的缓存身份元组（fingerprint, path, size_bytes, mtime_ns）。
+
+        只读数据库与轻量 stat——不哈希、不探测；供渲染/预览侧构造 probe 缓存键
+        （fingerprint + stat 三元）。素材不可用（缺行/缺位置/文件不在）返回 None，
+        调用方自行走真实探测与既有域错误路径。
+        """
+        try:
+            row = self._require_asset_row(asset_id)
+        except DomainError:
+            return None
+        location = self._location(asset_id)
+        if not location:
+            return None
+        path = _path_from_uri(location["uri"])
+        try:
+            stat = path.stat()
+        except OSError:
+            return None
+        return (
+            str(row["fingerprint"] or ""),
+            str(path),
+            stat.st_size,
+            stat.st_mtime_ns,
+        )
+
     def current_source(self, asset_id: str) -> tuple[dict[str, Any], str | None, str | None]:
         row = self._require_asset_row(asset_id)
         location = self._location(asset_id)
@@ -318,6 +444,9 @@ class ProjectAssetService:
             self._mark_transcripts_stale(asset_id, None)
             return self.get_asset(asset_id) or _asset_dto(row), None, None
         try:
+            # 同步方法（sync 调用方 plan.py + async 端点混用）：保留同步哈希。
+            # A05a 的后台化覆盖 async 入口（import/refresh/relocate）；此快速
+            # 校验路径的阻塞搬移列入后续 API 层改造，不在本单强改签名。
             fingerprint = sha256_file(path)
         except OSError as exc:
             raise DomainError("ASSET_MISSING", "素材文件缺失") from exc
@@ -351,6 +480,7 @@ class ProjectAssetService:
             self._update_asset(asset_id, "changed")
             raise DomainError("ASSET_CHANGED", "素材文件已变化")
         try:
+            # 同步方法（rendering/service 预检路径）：保留同步哈希（同 current_source 注记）
             fingerprint = sha256_file(path)
         except OSError as exc:
             self._update_asset(asset_id, "missing")
@@ -365,7 +495,7 @@ class ProjectAssetService:
     async def relocate_asset(self, asset_id: str, grant: dict[str, Any]) -> dict[str, Any]:
         row = self._require_asset_row(asset_id)
         path = _grant_path(grant)
-        fingerprint = sha256_file(path)
+        fingerprint = await self._hash(path)
         location = self._location(asset_id)
         previous_fingerprint = location["previous_fingerprint"] if location else None
         if fingerprint not in {row["fingerprint"], previous_fingerprint}:
@@ -407,6 +537,14 @@ class ProjectAssetService:
             now=now,
         )
         return self.get_asset(asset_id)  # type: ignore[return-value]
+
+    async def _hash(self, path: Path) -> str:
+        """A05a：素材哈希走后台线程池（受限队列 + stat 前后比对）。
+        哈希期间 stat 变化 → ASSET_CHANGED（沿既有域错误语义）。"""
+        try:
+            return await hashed_fingerprint(path)
+        except AssetChangedError as exc:
+            raise DomainError("ASSET_CHANGED", "素材文件在哈希期间发生变化") from exc
 
     async def _media_info(self, path: Path, kind: str) -> dict[str, Any] | None:
         if kind == "text":

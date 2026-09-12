@@ -1,0 +1,265 @@
+{
+ "rows": [
+  {
+   "material": "540p (960x540 自产)",
+   "path": "webcodecs_worker",
+   "n_samples": 100,
+   "p50": 20.35,
+   "p95": 37.6,
+   "max": 38.6,
+   "failures_field": 0,
+   "failures_recomputed": 0,
+   "pts_field": 0,
+   "pts_recomputed": 0,
+   "black_frames": 0,
+   "max_pts_dev_observed": 1.00002
+  },
+  {
+   "material": "540p (960x540 自产)",
+   "path": "webcodecs_worker_cache",
+   "n_samples": 100,
+   "p50": 15.75,
+   "p95": 30.055,
+   "max": 34.6,
+   "failures_field": 0,
+   "failures_recomputed": 0,
+   "pts_field": 0,
+   "pts_recomputed": 0,
+   "black_frames": 0,
+   "max_pts_dev_observed": 1.00002
+  },
+  {
+   "material": "540p (960x540 自产)",
+   "path": "html5_currentTime_rVFC",
+   "n_samples": 100,
+   "p50": 13.3,
+   "p95": 13.62,
+   "max": 40.2,
+   "failures_field": 0,
+   "failures_recomputed": 0,
+   "pts_field": 0,
+   "pts_recomputed": "n/a (dev not recorded in html5 samples)",
+   "max_pts_dev_observed": null
+  },
+  {
+   "material": "1080p (1920x1080 自产)",
+   "path": "webcodecs_worker",
+   "n_samples": 100,
+   "p50": 19.15,
+   "p95": 35.125,
+   "max": 42.1,
+   "failures_field": 0,
+   "failures_recomputed": 0,
+   "pts_field": 0,
+   "pts_recomputed": 0,
+   "black_frames": 0,
+   "max_pts_dev_observed": 1.00002
+  },
+  {
+   "material": "1080p (1920x1080 自产)",
+   "path": "webcodecs_worker_cache",
+   "n_samples": 100,
+   "p50": 18.05,
+   "p95": 34.505,
+   "max": 41.8,
+   "failures_field": 0,
+   "failures_recomputed": 0,
+   "pts_field": 0,
+   "pts_recomputed": 0,
+   "black_frames": 0,
+   "max_pts_dev_observed": 1.00002
+  },
+  {
+   "material": "1080p (1920x1080 自产)",
+   "path": "html5_currentTime_rVFC",
+   "n_samples": 100,
+   "p50": 13.4,
+   "p95": 26.8,
+   "max": 53.3,
+   "failures_field": 0,
+   "failures_recomputed": 0,
+   "pts_field": 0,
+   "pts_recomputed": "n/a (dev not recorded in html5 samples)",
+   "max_pts_dev_observed": null
+  },
+  {
+   "material": "proxy ≤960p (VFR 源转出)",
+   "path": "webcodecs_worker",
+   "n_samples": 100,
+   "p50": 28.15,
+   "p95": 39.605,
+   "max": 51.4,
+   "failures_field": 0,
+   "failures_recomputed": 0,
+   "pts_field": 0,
+   "pts_recomputed": 0,
+   "black_frames": 0,
+   "max_pts_dev_observed": 1.00002
+  },
+  {
+   "material": "proxy ≤960p (VFR 源转出)",
+   "path": "webcodecs_worker_cache",
+   "n_samples": 100,
+   "p50": 20.45,
+   "p95": 38.56,
+   "max": 48.9,
+   "failures_field": 0,
+   "failures_recomputed": 0,
+   "pts_field": 0,
+   "pts_recomputed": 0,
+   "black_frames": 0,
+   "max_pts_dev_observed": 1.00002
+  },
+  {
+   "material": "proxy ≤960p (VFR 源转出)",
+   "path": "html5_currentTime_rVFC",
+   "n_samples": 100,
+   "p50": 13.5,
+   "p95": 26.8,
+   "max": 49.4,
+   "failures_field": 3,
+   "failures_recomputed": 3,
+   "pts_field": 0,
+   "pts_recomputed": "n/a (dev not recorded in html5 samples)",
+   "max_pts_dev_observed": null
+  }
+ ],
+ "replay": {
+  "540p (960x540 自产)": {
+   "uniform_count": 92,
+   "first92_all_kind0": true,
+   "matched_duration_frames": 749,
+   "targets_equal_across_paths": true,
+   "tail_kind1_frames": [
+    29,
+    30,
+    31,
+    32,
+    59,
+    60,
+    61,
+    62
+   ],
+   "tail_kinds": [
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+   ]
+  },
+  "1080p (1920x1080 自产)": {
+   "uniform_count": 92,
+   "first92_all_kind0": true,
+   "matched_duration_frames": 749,
+   "targets_equal_across_paths": true,
+   "tail_kind1_frames": [
+    29,
+    30,
+    31,
+    32,
+    59,
+    60,
+    61,
+    62
+   ],
+   "tail_kinds": [
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+   ]
+  },
+  "proxy ≤960p (VFR 源转出)": {
+   "uniform_count": 100,
+   "first92_all_kind0": true,
+   "matched_duration_frames": 87,
+   "targets_equal_across_paths": true,
+   "tail_kind1_frames": [
+    66,
+    54,
+    58,
+    81,
+    21,
+    46,
+    37,
+    0
+   ],
+   "tail_kinds": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ]
+  }
+ },
+ "problems": [],
+ "gate": [
+  {
+   "material": "540p (960x540 自产)",
+   "path": "webcodecs_worker",
+   "p95": 37.6,
+   "p95_le_100": true,
+   "failures": 0,
+   "pts": 0,
+   "black": 0
+  },
+  {
+   "material": "540p (960x540 自产)",
+   "path": "webcodecs_worker_cache",
+   "p95": 30.055,
+   "p95_le_100": true,
+   "failures": 0,
+   "pts": 0,
+   "black": 0
+  },
+  {
+   "material": "1080p (1920x1080 自产)",
+   "path": "webcodecs_worker",
+   "p95": 35.125,
+   "p95_le_100": true,
+   "failures": 0,
+   "pts": 0,
+   "black": 0
+  },
+  {
+   "material": "1080p (1920x1080 自产)",
+   "path": "webcodecs_worker_cache",
+   "p95": 34.505,
+   "p95_le_100": true,
+   "failures": 0,
+   "pts": 0,
+   "black": 0
+  },
+  {
+   "material": "proxy ≤960p (VFR 源转出)",
+   "path": "webcodecs_worker",
+   "p95": 39.605,
+   "p95_le_100": true,
+   "failures": 0,
+   "pts": 0,
+   "black": 0
+  },
+  {
+   "material": "proxy ≤960p (VFR 源转出)",
+   "path": "webcodecs_worker_cache",
+   "p95": 38.56,
+   "p95_le_100": true,
+   "failures": 0,
+   "pts": 0,
+   "black": 0
+  }
+ ],
+ "gate_pass": true
+}

@@ -9,6 +9,9 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: [resolve(__dirname, "tests/setup.ts")],
     include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
+    // 全量并行时 jsdom worker 争抢 CPU，重交互用例偶发越过 5s 默认值
+    // （编辑器工作流/安装包脚本类用例单跑均在 2s 内）——放宽默认超时消除负载抖动。
+    testTimeout: 20000,
     coverage: {
       provider: "v8",
       reportsDirectory: resolve(__dirname, "coverage", "source-only"),

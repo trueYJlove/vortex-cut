@@ -1,8 +1,10 @@
 import { app, BrowserWindow, dialog, ipcMain, protocol, shell } from "electron";
 import { join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
-import { access, readdir } from "node:fs/promises";
+import { access, readdir, readFile } from "node:fs/promises";
+import { totalmem } from "node:os";
 import { CoreAdminClient, CoreHttpError } from "./core-admin-client.js";
+import { EditorLoadLeaseHeartbeat, makeWindowOwnerId, type EditorLoadMode } from "./editor-load-lease.js";
 import { ProviderSecretStore, reinjectProviderSecrets, removeProviderSecret, saveProviderSecret } from "./provider-secrets.js";
 import { ImageProviderSecretStore, reinjectImageProviderSecrets } from "./image-provider-secrets.js";
 import { issueCandidateClipMedia } from "./candidate-media.js";
@@ -15,11 +17,13 @@ import { registerStage4dIpc } from "./stage4d-ipc.js";
 import { registerStage4eIpc } from "./stage4e-ipc.js";
 import { registerStage5Ipc } from "./stage5-ipc.js";
 import { registerStage6rIpc } from "./stage6r-ipc.js";
+import { registerPerformanceIpc } from "./performance-ipc.js";
 import { registerFileGrant } from "./file-grants.js";
 import { exportFileName, normalizeExportPath } from "./export-destination.js";
 import { defaultLogPath, appendLog, redact } from "./logging.js";
 import { SidecarSupervisor } from "./sidecar-supervisor.js";
 import { RESTRICTED_MEDIA_SCHEME, RestrictedMediaRegistry, serveRestrictedMedia } from "./restricted-media.js";
+import { probeActive, probeLoadQuery, registerProbeIpc, type ProbeIpcHandle } from "./probe-ipc.js";
 import { normalizeJob } from "../../src/lib/core-client.js";
 import {
   isApiErrorResponse,
@@ -84,7 +88,11 @@ let windowRef: BrowserWindow | undefined;
 let supervisor: SidecarSupervisor | undefined;
 let core: CoreAdminClient | undefined;
 let runtime: { base_url: string; ui_token: string; protocol_version: 1 } | undefined;
+// B16b：编辑器负载 lease 心跳（Core 就绪后 1s 自重调度；停止即 TTL 过期）
+let editorLease: EditorLoadLeaseHeartbeat | undefined;
+let editorLeaseIpc: { handle(channel: string, listener: (_event: unknown, mode?: unknown) => unknown): void } | null = null;
 const restrictedMedia = new RestrictedMediaRegistry();
+let probeIpc: ProbeIpcHandle | null = null;
 let logPath = "";
 let providerSecrets: ProviderSecretStore | undefined;
 let imageProviderSecrets: ImageProviderSecretStore | undefined;
@@ -118,8 +126,26 @@ function requireCore(): CoreAdminClient {
   return core;
 }
 
-function rendererRuntime(): { protocol_version: 1; status: "ready" } {
-  return { protocol_version: 1, status: "ready" };
+/** B13：Renderer 资源档位（离散——不暴露 totalmem 等主机信息；
+ *  8GiB/未知 → conservative，>16GiB → high，其余 balanced）。 */
+function resourceTier(): "conservative" | "balanced" | "high" {
+  const totalMiB = totalmem() / (1024 * 1024);
+  if (!Number.isFinite(totalMiB) || totalMiB <= 0) return "conservative";
+  if (totalMiB <= 8 * 1024) return "conservative";
+  if (totalMiB > 16 * 1024) return "high";
+  return "balanced";
+}
+
+function rendererRuntime(): { protocol_version: 1; status: "ready"; resource_tier: "conservative" | "balanced" | "high"; force_copy_to?: boolean } {
+  // B13-R 判别诊断开关：仅诊断构建（VITE_AIVS_PERF=1 编译期已对 Renderer
+  // 生效）+ 显式环境变量时下发；正常构建无此字段，行为不变。
+  const forceCopyTo = process.env.AIVS_FORCE_COPYTO === "1";
+  return {
+    protocol_version: 1,
+    status: "ready",
+    resource_tier: resourceTier(),
+    ...(forceCopyTo ? { force_copy_to: true } : {}),
+  };
 }
 
 async function restrictedMediaUrl(assetId: string): Promise<string> {
@@ -143,7 +169,9 @@ async function previewPresentation(preview: AuthoritativePreview) {
 }
 
 async function exportPresentation(exportRecord: ExportRecord) {
-  return { export_record: exportRecord, media_url: await artifactMediaUrl(exportRecord.render_artifact_id) };
+  // 单个导出的产物文件若已缺失/损坏，不应让整个导出列表失败：降级为 media_url=null。
+  try { return { export_record: exportRecord, media_url: await artifactMediaUrl(exportRecord.render_artifact_id) }; }
+  catch { return { export_record: exportRecord, media_url: null }; }
 }
 async function renditionPreviewPresentation(preview: RenditionPreview) {
   return { preview, media_url: await artifactMediaUrl(preview.render_artifact_id) };
@@ -221,14 +249,25 @@ async function createWindow(): Promise<void> {
     minHeight: 720,
     title: "Vortex Cut",
     autoHideMenuBar: true,
-    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
-    titleBarOverlay: undefined,
+    // 参考 dsh-desktop 的原生外框处理（Window Controls Overlay）：
+    // 系统绘制右上角原生最小化/最大化/关闭按钮，网页内容仍填充标题栏区域。
+    // overlay 高度与 .editor-titlebar 的 36px 对齐。
+    titleBarStyle: process.platform === "darwin"
+      ? "hiddenInset"
+      : process.platform === "win32" ? "hidden" : "default",
+    titleBarOverlay: process.platform === "win32"
+      ? { color: "#00000000", symbolColor: "#e6eaec", height: 36 }
+      : undefined,
     show: true,
     webPreferences: {
-      preload: join(__dirname, "../preload/index.mjs"),
+      preload: join(__dirname, "../preload/index.cjs"),
       nodeIntegration: false,
       contextIsolation: true,
-      sandbox: false
+      sandbox: false,
+      // 编辑器预览不被遮挡节流：截图工具遮罩/半覆盖窗口时 Occlusion 追踪会把
+      // rAF 节流到 ~0——合成画面冻结而音频照播，恢复后时钟狂奔（丢帧风暴 +
+      // 音频硬校正）。预览应用必须持续渲染。
+      backgroundThrottling: false
     }
     });
     await appendLog(logPath, "BrowserWindow created");
@@ -239,34 +278,34 @@ async function createWindow(): Promise<void> {
   windowRef.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   windowRef.webContents.on("will-navigate", event => event.preventDefault());
   windowRef.webContents.on("preload-error", (_event, preloadPath, error) => {
+    console.error("[preload-error RAW]", preloadPath, error);
     void appendLog(logPath, `preload error path=${preloadPath} error=${error.stack ?? error.message}`);
   });
   windowRef.webContents.on("render-process-gone", (_event, details) => {
+    probeIpc?.noteRenderGone();
     void appendLog(logPath, `render process gone reason=${details.reason} exit=${details.exitCode}`);
   });
   windowRef.webContents.on("did-finish-load", () => { void appendLog(logPath, "renderer did-finish-load"); });
   windowRef.once("ready-to-show", () => { void appendLog(logPath, "window ready-to-show"); });
-  windowRef.on("maximize", () => { windowRef?.webContents.send("window:maximize-changed", true); });
-  windowRef.on("unmaximize", () => { windowRef?.webContents.send("window:maximize-changed", false); });
+  // 最小化/最大化/关闭改由系统 caption 按钮处理（titleBarOverlay），
+  // 不再向渲染进程转发 maximize 状态；菜单栏整体隐藏（参考 dsh-desktop）。
+  if (process.platform === "win32") windowRef.setMenuBarVisibility(false);
   windowRef.webContents.on("did-fail-load", (_event, code, description, url) => {
     void appendLog(logPath, `renderer load failed code=${code} description=${description} url=${url}`);
   });
+  // M3-0 探针：dev-only 采集渲染进程 console（探针无 stdout，错误经此落日志）。
+  if (probeActive()) {
+    windowRef.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+      void appendLog(logPath, `renderer console[level=${level}] ${message} @${sourceId}:${line}`);
+    });
+  }
   windowRef.on("closed", () => { void appendLog(logPath, "window closed"); windowRef = undefined; });
+  // M3-0 探针：仅 dev + AIVS_M3_PROBE 时向加载 URL 追加 ?probe=<名>（§7.1 第 1 层）。
+  const probeQuery = probeLoadQuery();
   const load = process.env.ELECTRON_RENDERER_URL
-    ? windowRef.loadURL(process.env.ELECTRON_RENDERER_URL)
+    ? windowRef.loadURL(process.env.ELECTRON_RENDERER_URL + probeQuery)
     : windowRef.loadFile(join(__dirname, "../renderer/index.html"));
   void load.then(() => appendLog(logPath, "window loaded")).catch(error => appendLog(logPath, `window load error: ${String(error)}`));
-}
-
-function registerWindowIpc(): void {
-  ipcMain.handle("window:minimize", () => { windowRef?.minimize(); });
-  ipcMain.handle("window:toggle-maximize", () => {
-    if (!windowRef) return false;
-    if (windowRef.isMaximized()) windowRef.unmaximize(); else windowRef.maximize();
-    return windowRef.isMaximized();
-  });
-  ipcMain.handle("window:is-maximized", () => windowRef?.isMaximized() ?? false);
-  ipcMain.handle("window:close", () => { windowRef?.close(); });
 }
 
 function registerIpc(): void {
@@ -277,6 +316,17 @@ function registerIpc(): void {
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Core UI session startup timed out")), 30_000))
     ]);
     return rendererRuntime();
+  });
+  // B16b：Renderer 推送编辑器负载（playing/scrubbing/idle；转换即时 +
+  // 1s 保活——Main 侧 lease 心跳消费）。Renderer 崩溃 = 无推送 = 心跳
+  // 维持最后值（Core TTL 兜底过期回 idle）。
+  editorLeaseIpc = { handle: (channel, listener) => ipcMain.handle(channel, listener) };
+  ipcMain.handle("editor-load:update", (_event, mode: unknown) => {
+    if (mode !== "playing" && mode !== "scrubbing" && mode !== "idle") {
+      throw new Error("Invalid editor load mode");
+    }
+    editorLease?.updateMode(mode as EditorLoadMode);
+    return { status: "ok" };
   });
   ipcMain.handle("diagnostics:get", async () => rendererHealth(await requireCore().health()));
   ipcMain.handle("media:choose", async () => {
@@ -316,6 +366,27 @@ function registerIpc(): void {
     const asset = await fetchWithUi<Asset>(`${API_PREFIX}/assets/${asId(assetId, "asset_id")}/refresh`, { method: "POST" });
     return await assetPresentation(asset);
   });
+  // E2E-only multi-asset import: selects from an explicit benchmark fixture map
+  // (AIVS_E2E_ASSET_PATHS_LIST = {"F07.mp4": "...", ...}) instead of a dialog.
+  // Outside benchmark runs the env is unset and every call fails closed — the
+  // requested name must be a plain fixture file name, no paths/wildcards.
+  ipcMain.handle("asset:import-fixture", async (_event, input: { project_id: ProjectId; fixture_file: string }) => {
+    const projectId = asId(input.project_id, "project_id") as ProjectId;
+    const raw = process.env.AIVS_E2E_ASSET_PATHS_LIST;
+    let selectedPath: string | undefined;
+    if (raw) {
+      try {
+        const paths = JSON.parse(raw) as Record<string, unknown>;
+        const candidate = paths[input.fixture_file];
+        if (typeof candidate === "string") selectedPath = candidate;
+      } catch { /* fall through: invalid env selects nothing */ }
+    }
+    if (!selectedPath || !/^[A-Za-z0-9._-]+\.mp4$/.test(input.fixture_file)) throw new Error("Unknown fixture file");
+    const grant = await registerFileGrant(requireCore(), selectedPath);
+    const asset = await fetchWithUi<Asset>(`${API_PREFIX}/projects/${projectId}/assets`, { method: "POST", body: JSON.stringify({ grant_id: grant.grant_id, kind: "video" }) });
+    restrictedMedia.register(asset.asset_id, selectedPath);
+    return { grant, asset, media_url: await restrictedMediaUrl(asset.asset_id) };
+  });
   ipcMain.handle("asset:relocate", async (_event, input: { asset_id: string }) => {
     const assetId = asId(input.asset_id, "asset_id");
     const selectedPath = await chooseAssetPath(undefined, "重新定位素材", true);
@@ -324,6 +395,75 @@ function registerIpc(): void {
     const asset = await fetchWithUi<Asset>(`${API_PREFIX}/assets/${assetId}/relocate`, { method: "POST", body: JSON.stringify({ grant_id: grant.grant_id }) });
     restrictedMedia.register(asset.asset_id, selectedPath);
     return { grant, asset, media_url: await restrictedMediaUrl(asset.asset_id) };
+  });
+
+  // 打开素材所在文件夹；文件缺失时弹框提供 重新定位 / 移除 的恢复路径。
+  ipcMain.handle("asset:reveal", async (_event, assetIdValue: string) => {
+    const assetId = asId(assetIdValue, "asset_id");
+    const resolved = await requireCore().resolveAsset(assetId);
+    try {
+      await access(resolved.path);
+    } catch {
+      const box = await dialog.showMessageBox(windowRef!, {
+        type: "warning",
+        title: "素材文件不存在",
+        message: "素材文件不存在，可能已被移动或删除。",
+        detail: resolved.path,
+        buttons: ["重新定位", "移除素材", "取消"],
+        defaultId: 0,
+        cancelId: 2,
+        noLink: true
+      });
+      if (box.response === 0) {
+        const selectedPath = await chooseAssetPath(undefined, "重新定位素材", true);
+        if (!selectedPath) return { status: "cancelled" as const };
+        const grant = await registerFileGrant(requireCore(), selectedPath);
+        const asset = await fetchWithUi<Asset>(`${API_PREFIX}/assets/${assetId}/relocate`, { method: "POST", body: JSON.stringify({ grant_id: grant.grant_id }) });
+        restrictedMedia.register(asset.asset_id, selectedPath);
+        return { status: "relocated" as const };
+      }
+      if (box.response === 1) {
+        try {
+          await fetchWithUi(`${API_PREFIX}/assets/${assetId}`, { method: "DELETE" });
+          return { status: "deleted" as const };
+        } catch {
+          await dialog.showMessageBox(windowRef!, {
+            type: "warning",
+            title: "无法移除素材",
+            message: "素材仍被时间线引用，无法直接移除。请先在时间线中删除相关片段。",
+            buttons: ["确定"],
+            noLink: true
+          });
+          return { status: "cancelled" as const };
+        }
+      }
+      return { status: "cancelled" as const };
+    }
+    shell.showItemInFolder(resolved.path);
+    return { status: "opened" as const };
+  });
+
+  // 素材删除：remove_timeline_clips=true 时 Core 级联删除时间线相关片段，
+  // 返回清理计数；默认模式下仍引用时返回 409（ASSET_IN_USE）。
+  ipcMain.handle("asset:delete", async (_event, input: { asset_id: string; remove_timeline_clips?: boolean }) => {
+    const assetId = asId(input.asset_id, "asset_id");
+    const query = input.remove_timeline_clips ? "?remove_timeline_clips=true" : "";
+    return await fetchWithUi<{ removed_clips: number; removed_captions: number }>(`${API_PREFIX}/assets/${assetId}${query}`, { method: "DELETE" });
+  });
+
+  // 本地字幕导入：弹文件框（SRT/ASS/SSA/LRC）读取文本内容返回给渲染进程
+  // 解析（不走 Core 资产库——字幕文件不作为媒体素材管理）。
+  ipcMain.handle("subtitle:import", async () => {
+    const result = await dialog.showOpenDialog(windowRef!, {
+      title: "导入本地字幕",
+      properties: ["openFile"],
+      filters: [{ name: "Subtitle files", extensions: ["srt", "ass", "ssa", "lrc"] }],
+    });
+    if (result.canceled || !result.filePaths[0]) return null;
+    const filePath = result.filePaths[0];
+    const fileName = filePath.split(/[\\/]/).pop() ?? "subtitle";
+    const content = await readFile(filePath, "utf8");
+    return { file_name: fileName, content };
   });
 
   ipcMain.handle("job:list", async (_event, input: { project_id: ProjectId; status?: string; limit?: number; cursor?: string }) => {
@@ -456,11 +596,46 @@ function registerIpc(): void {
   registerStage4eIpc({ ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) }, fetchWithUi });
   registerStage5Ipc({ ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) }, fetchWithUi });
   registerStage6rIpc({ ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) }, fetchWithUi });
+  // B10：派生媒体 IPC + B11 preview-source IPC + B14 波形 IPC + B15 PCM 块
+  // IPC——lookup/stats/描述/作业 (Renderer 可见) + media(admin resolve→票据)
+  registerPerformanceIpc({
+    ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) },
+    fetchWithUi,
+    resolveDerived: input => requireCore().resolveDerivedMedia(input),
+    resolvePreviewSourceMedia: input => requireCore().resolvePreviewSourceMedia(input),
+    resolveWaveformMedia: input => requireCore().resolveWaveformMedia(input),
+    resolvePcmChunkMedia: input => requireCore().resolvePcmChunkMedia(input),
+    registerDerivedMedia: (cacheKey, path) => {
+      if (!restrictedMedia.registeredPath(cacheKey, "proxy")) {
+        restrictedMedia.register(cacheKey, path, "proxy");
+      }
+      return restrictedMedia.issue(cacheKey, "proxy");
+    },
+  });
   ipcMain.handle("preview:create", async (_event, input: { project_id: ProjectId; preview: PreviewCreateInput }) => {
     const projectId = asId(input.project_id, "project_id");
     const request = parsePreviewCreateInput(input.preview);
     const response = parsePreviewCreateResponse(rendererSafe(await fetchWithUi(`${API_PREFIX}/projects/${projectId}/previews`, { method: "POST", body: JSON.stringify(request) })));
     return { ...response, preview: response.preview ? await previewPresentation(response.preview) : null };
+  });
+  ipcMain.handle("media:caption-font-url", async () => {
+    const fontPath = resolve(
+      app.isPackaged ? process.resourcesPath : resolve(__dirname, "../../../../resources"),
+      "fonts", "noto-sans-sc", "NotoSansCJKsc-VF.ttf",
+    );
+    if (!restrictedMedia.registeredPath("caption-font")) {
+      restrictedMedia.register("caption-font", fontPath, "asset");
+    }
+    return restrictedMedia.issue("caption-font", "asset");
+  });
+  ipcMain.handle("preview-ir:get", async (_event, input: { project_id: string; timeline_revision_id?: string | null; output_ratio?: string }) => {
+    const params = new URLSearchParams();
+    if (input?.timeline_revision_id) params.set("timeline_revision_id", input.timeline_revision_id);
+    if (input?.output_ratio) params.set("output_ratio", input.output_ratio);
+    const query = params.toString();
+    // fetchWithUi 已把业务码以 "[CODE] message" 传入 message；渲染端
+    // SyntheticPreview 据此匹配 PREVIEW_IR_UNSUPPORTED 走友好回退提示。
+    return fetchWithUi(`${API_PREFIX}/projects/${asId(input?.project_id ?? "", "project_id")}/preview-ir${query ? `?${query}` : ""}`);
   });
   ipcMain.handle("preview:list", async (_event, input: { project_id: ProjectId; limit?: number; cursor?: string }) => {
     const page = rendererSafe(await fetchWithUi(`${API_PREFIX}/projects/${asId(input.project_id, "project_id")}/previews${buildQuery(input, ["project_id"])}`));
@@ -516,7 +691,11 @@ async function fetchWithUi<T = unknown>(path: string, init: RequestInit = {}): P
   try { data = await response.json(); } catch { /* preserve HTTP status for empty responses */ }
   if (!response.ok) {
     const error = isApiErrorResponse(data) ? data.error : undefined;
-    throw new CoreHttpError(response.status, redact(error?.message ?? `Core request failed: ${response.status}`), error?.code ?? statusCode(response.status), error?.trace_id);
+    const code = error?.code ?? statusCode(response.status);
+    // Electron IPC 只把 message 传给渲染端（自定义 .code 属性会被剥离）；
+    // 这里把业务码前缀进 message，渲染端 errorCode() 提取后才能识别
+    // TIMELINE_NOT_FOUND / PREVIEW_IR_UNSUPPORTED 等业务错误。
+    throw new CoreHttpError(response.status, `[${code}] ${redact(error?.message ?? "Core request failed")}`, code, error?.trace_id);
   }
   return data as T;
 }
@@ -599,6 +778,18 @@ async function startRuntime(): Promise<void> {
   // Core correctly rejects after session isolation is enabled.
   runtime = { base_url: `http://127.0.0.1:${ready.port}`, ui_token: session.token, protocol_version: 1 };
   resolveRuntime?.(runtime);
+  // B16b：编辑器负载 lease 心跳（1s 自重调度；停止/崩溃 = Core TTL 过期
+  // 回 idle——Renderer 崩溃不永久饿死后台任务）
+  editorLease?.stop();
+  editorLease = new EditorLoadLeaseHeartbeat({
+    windowId: makeWindowOwnerId(),
+    report: input => core!.reportEditorLoadLease(input),
+    schedule: (delayMs, callback) => {
+      const timer = setTimeout(() => callback(), delayMs);
+      return () => clearTimeout(timer);
+    },
+  });
+  editorLease.start();
   await appendLog(logPath, "Core UI session ready");
 }
 
@@ -636,6 +827,9 @@ function parseExecutableArgs(value: string | undefined): string[] | undefined {
 }
 
 async function shutdownRuntime(): Promise<void> {
+  // B16b：心跳停止 → Core TTL 3s 过期回 idle（不显式上报）
+  editorLease?.stop();
+  editorLease = undefined;
   try { await core?.shutdown(); } catch { /* Core may already be down. */ }
   await supervisor?.stop();
   runtime = undefined;
@@ -651,8 +845,8 @@ app.whenReady().then(async () => {
     return;
   }
   protocol.handle(RESTRICTED_MEDIA_SCHEME, request => serveRestrictedMedia(request, restrictedMedia));
-  registerWindowIpc();
-    registerIpc();
+  probeIpc = registerProbeIpc({ registry: restrictedMedia });
+  registerIpc();
   try {
     await createWindow();
     void startRuntime().catch(async error => {

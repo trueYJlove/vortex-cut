@@ -36,9 +36,9 @@ describe("C3 快捷键注册表", () => {
 
   it("normalizeRecordedBinding 拒绝无修饰符单字符键、接受空格/Delete/Ctrl 组合", () => {
     expect(normalizeRecordedBinding(key({ key: "s" }))).toBeNull();
-    expect(normalizeRecordedBinding(key({ key: " " }))).toEqual({ key: " ", ctrl: false, shift: false });
-    expect(normalizeRecordedBinding(key({ key: "Delete" }))).toEqual({ key: "delete", ctrl: false, shift: false });
-    expect(normalizeRecordedBinding(key({ key: "s", ctrl: true }))).toEqual({ key: "s", ctrl: true, shift: false });
+    expect(normalizeRecordedBinding(key({ key: " " }))).toEqual({ key: " ", ctrl: false, shift: false, alt: false });
+    expect(normalizeRecordedBinding(key({ key: "Delete" }))).toEqual({ key: "delete", ctrl: false, shift: false, alt: false });
+    expect(normalizeRecordedBinding(key({ key: "s", ctrl: true }))).toEqual({ key: "s", ctrl: true, shift: false, alt: false });
   });
 
   it("findConflict 检出新键位与既有命令冲突", () => {

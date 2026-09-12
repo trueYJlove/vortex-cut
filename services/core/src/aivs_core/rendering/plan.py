@@ -4,6 +4,7 @@ import hashlib
 import sqlite3
 from typing import Any
 
+from ..performance import measured
 from ..database import Database, json_dumps, json_loads
 from ..projects import DomainError
 from ..renditions.presets import canonical_sha256
@@ -38,11 +39,27 @@ PROFILES = {
     },
 }
 
+# 前端"比例"下拉 → 渲染输出尺寸（权威预览 / 最终导出）。
+# "fit" 表示跟随时间线默认（竖屏），由 PROFILES 兜底。
+OUTPUT_RATIO_DIMENSIONS: dict[str, dict[str, tuple[int, int]]] = {
+    "169": {"authoritative_preview": (960, 540), "final_export": (1920, 1080)},
+    "916": {"authoritative_preview": (540, 960), "final_export": (1080, 1920)},
+    "11": {"authoritative_preview": (720, 720), "final_export": (1440, 1440)},
+    "43": {"authoritative_preview": (832, 624), "final_export": (1664, 1248)},
+    "34": {"authoritative_preview": (624, 832), "final_export": (1248, 1664)},
+}
+
+RATIO_PROFILE_ID = {
+    "authoritative_preview": "preview-{ratio}-v1",
+    "final_export": "export-{ratio}-v1",
+}
+
 
 class RenderPlanCompiler:
     def __init__(self, database: Database) -> None:
         self.database = database
 
+    @measured("compile")
     def compile(
         self,
         project_id: str,
@@ -50,9 +67,12 @@ class RenderPlanCompiler:
         mode: str,
         *,
         reject_draft: bool = False,
+        output_ratio: str | None = None,
     ) -> dict[str, Any]:
         if mode not in PROFILES:
             raise DomainError("RENDER_PLAN_INVALID", "渲染模式不合法")
+        if output_ratio not in (None, "fit") and output_ratio not in OUTPUT_RATIO_DIMENSIONS:
+            raise DomainError("RENDER_PLAN_INVALID", "输出比例不合法")
         with self.database.connection() as db:
             project = db.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
             if project is None:
@@ -78,7 +98,7 @@ class RenderPlanCompiler:
             document = json_loads(revision["document_json"])
             if not document.get("clips"):
                 raise DomainError("TIMELINE_EMPTY", "空时间线不能渲染")
-            return self._compile_document(db, revision_id, document, mode)
+            return self._compile_document(db, revision_id, document, mode, output_ratio)
 
     def compile_rendition(
         self,
@@ -269,10 +289,19 @@ class RenderPlanCompiler:
         revision_id: str,
         document: dict[str, Any],
         mode: str,
+        output_ratio: str | None = None,
     ) -> dict[str, Any]:
         inputs: list[dict[str, Any]] = []
         input_by_asset: dict[str, str] = {}
         segments: list[dict[str, Any]] = []
+        # 多轨道：段落记录来源轨道与轨道标志；轨道静音/独奏直接合并进
+        # audio_enabled（当前渲染图为单视觉轨 + 随段音频语义）。
+        tracks_by_id: dict[str, dict[str, Any]] = {
+            track["id"]: track
+            for track in document.get("tracks", [])
+            if isinstance(track, dict) and track.get("id")
+        }
+        any_solo = any(bool(track.get("solo")) for track in tracks_by_id.values())
         # B2：转场锚定在片段尾部——按 after_clip_id 索引，编译段时挂到对应段。
         transition_by_anchor: dict[str, dict[str, Any]] = {
             item["after_clip_id"]: item for item in document.get("transitions", [])
@@ -302,9 +331,19 @@ class RenderPlanCompiler:
                     }
                 )
             transition = transition_by_anchor.get(clip["clip_id"])
+            track = tracks_by_id.get(clip.get("track_id", "V1"))
+            track_muted = bool(track.get("muted")) if track else False
+            track_solo = bool(track.get("solo")) if track else False
+            audio_effective = (
+                bool(clip["audio"]["enabled"])
+                and not track_muted
+                and not (any_solo and not track_solo)
+            )
             segments.append(
                 {
                     "clip_id": clip["clip_id"],
+                    "track_id": clip.get("track_id", "V1"),
+                    "track_hidden": bool(track.get("hidden")) if track else False,
                     "input_id": input_id,
                     "asset_kind": clip["asset_kind"],
                     "source_start_us": clip["source_start_us"],
@@ -312,11 +351,14 @@ class RenderPlanCompiler:
                     "timeline_start_us": clip["timeline_start_us"],
                     "timeline_end_us": clip["timeline_end_us"],
                     "layout": clip["layout"],
-                    "audio_enabled": clip["audio"]["enabled"],
+                    "audio_enabled": audio_effective,
                     "gain_db": float(clip["audio"]["gain_db"]),
                     "speed_milli": int(clip.get("speed_milli", 1000)),
                     "reverse_playback": bool(clip.get("reverse_playback", False)),
                     "keyframes": clip.get("keyframes"),
+                    "transform": clip.get("transform"),
+                    "mask": clip.get("mask"),
+                    "keying": clip.get("keying"),
                     "transition_in": (
                         {
                             "transition_id": transition["transition_id"],
@@ -342,6 +384,12 @@ class RenderPlanCompiler:
             }
             for item in document["captions"]
         ]
+        output = dict(PROFILES[mode])
+        if output_ratio in OUTPUT_RATIO_DIMENSIONS:
+            width, height = OUTPUT_RATIO_DIMENSIONS[output_ratio][mode]
+            output["width"] = width
+            output["height"] = height
+            output["profile_id"] = RATIO_PROFILE_ID[mode].format(ratio=output_ratio)
         semantics = {
             "inputs": inputs,
             "segments": segments,
@@ -349,6 +397,13 @@ class RenderPlanCompiler:
             "canvas_background_color": document["canvas"]["background_color"],
             "preset_version": PRESET_VERSION,
             "font_bundle_version": FONT_BUNDLE_VERSION,
+            # 输出规格参与指纹：同一时间线不同比例视为不同渲染产物，
+            # 避免跨比例误复用，也让排队后比例变更可被 run() 检出。
+            "output": {
+                "profile_id": output["profile_id"],
+                "width": output["width"],
+                "height": output["height"],
+            },
         }
         digest = hashlib.sha256(json_dumps(semantics).encode("utf-8")).hexdigest()
         return {
@@ -365,7 +420,7 @@ class RenderPlanCompiler:
                 "font_bundle_version": FONT_BUNDLE_VERSION,
                 "items": caption_items,
             },
-            "output": dict(PROFILES[mode]),
+            "output": output,
         }
 
 

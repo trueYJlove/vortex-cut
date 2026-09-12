@@ -11,6 +11,7 @@ from typing import Any, Protocol
 
 from ..database import Database, json_dumps, json_loads, sha256_file, utc_now
 from ..ids import new_id
+from ..ir_process import ir_project_executor
 from ..jobs import JobService
 from ..media.encoders import EncoderDetector
 from ..media.ffprobe import FFprobe
@@ -18,6 +19,7 @@ from ..media.process import run_process
 from ..projects import DomainError, ProjectAssetService
 from .ass import CaptionResources, build_ass, build_rendition_ass
 from .ffmpeg import build_timeline_args, run_timeline_render
+from .ir import resolved_caption_styles
 from .plan import COMPILER_VERSION, REFRAME_COMPILER_VERSION, RenderPlanCompiler
 from .validation import validate_rendered_media
 
@@ -183,6 +185,8 @@ class RenderCoordinator:
         destinations: DestinationGrantStore,
         directory_grants: DirectoryGrantStore | None = None,
         rendition_presets: Any | None = None,
+        probe: Any | None = None,
+        encoders: EncoderDetector | None = None,
     ) -> None:
         self.database = database
         self.data_dir = data_dir
@@ -194,6 +198,135 @@ class RenderCoordinator:
         self.destinations = destinations
         self.directory_grants = directory_grants
         self.rendition_presets = rendition_presets
+        # A07：probe 经会话缓存（键 = fingerprint + stat + build）；未注入时
+        # 回退直调 ffprobe.probe（语义等价，仅无缓存）。
+        self.probe_fn = probe
+        # A07：渲染中编码失败 → invalidate_smoke 清除该 encoder 的成功缓存
+        #（下次 choose 重新真实 smoke；不因缓存跳过实际渲染错误判断）。
+        self.encoders = encoders
+        # 合成预览 IR 缓存：键 = content_fingerprint（plan 语义 + 输出规格），
+        # 命中则跳过投影与 ffprobe；体量 ~1-3MB/条，保留最近 4 条。
+        self.preview_ir_cache: dict[str, dict[str, Any]] = {}
+        self.preview_probe_cache: dict[str, dict[str, Any]] = {}
+        # C20b：v2 manifest/全量帧 bundle 缓存（帧表体量大，LRU 2 条）。
+        self.preview_ir_v2_cache: dict[str, dict[str, Any]] = {}
+
+    async def _probe(self, path: Path, fingerprint: str | None = None) -> dict[str, Any]:
+        """A07：优先走注入的缓存探测通道。
+
+        fingerprint 语义见 app.cached_probe（素材内容指纹，非 asset_id）；
+        调用方用 projects.asset_cache_identity 取真实指纹。
+        """
+        if self.probe_fn is not None:
+            return await self.probe_fn(path, fingerprint)
+        return await self.ffprobe.probe(path)
+
+    def _asset_probe_fingerprint(self, asset_id: str) -> str | None:
+        """素材的 probe 缓存键指纹（数据库 fingerprint；素材不可用返回 None
+        —— resolve_asset_path 随后按既有域错误路径失败）。"""
+        identity = self.projects.asset_cache_identity(asset_id)
+        return identity[0] if identity else None
+
+    async def preview_ir(self, project_id: str, timeline_revision_id: str | None,
+                         output_ratio: str) -> dict[str, Any]:
+        """合成预览 IR（preview-ir-v1）：compile → ffprobe → 投影（后台执行）。
+        A05b：投影段经 IrProjectExecutor（single-flight + 默认后台线程；
+        AIVS_IR_PROCESS_POOL=1 时 spawn 进程池——冻结构建未验证即拒绝）。"""
+        plan = self.compiler.compile(project_id, timeline_revision_id,
+                                     "authoritative_preview", output_ratio=output_ratio)
+        fingerprint = plan["content_fingerprint"]
+        cached = self.preview_ir_cache.get(fingerprint)
+        if cached is not None:
+            return cached
+        ir = await self._project_plan(plan)
+        payload = {
+            "schema_version": 1,
+            "content_fingerprint": fingerprint,
+            "timeline_revision_id": plan["timeline_revision_id"],
+            "output_ratio": output_ratio,
+            "ir": ir,
+        }
+        self.preview_ir_cache[fingerprint] = payload
+        while len(self.preview_ir_cache) > 4:
+            self.preview_ir_cache.pop(next(iter(self.preview_ir_cache)))
+        return payload
+
+    async def _project_plan(self, plan: dict[str, Any]) -> dict[str, Any]:
+        """compile 后的公共投影段：ffprobe（A07 会话缓存）→ 后台投影。"""
+        probe_by_asset: dict[str, dict[str, Any]] = {}
+        for item in plan["inputs"]:
+            key = str(item["fingerprint"])
+            if key not in self.preview_probe_cache:
+                path = Path(self.projects.resolve_asset_path(item["asset_id"])["path"])
+                # A07：经会话缓存的 probe（键含 fingerprint+stat+build）；
+                # 同素材跨 revision 的 IR 重建复用同一次探测结果。
+                self.preview_probe_cache[key] = await self._probe(
+                    path, self._asset_probe_fingerprint(item["asset_id"])
+                )
+            probe_by_asset[item["asset_id"]] = self.preview_probe_cache[key]
+        _bundle, presets, _font = self.caption_resources.load()
+        return await ir_project_executor().project(plan, probe_by_asset,
+                                                   resolved_caption_styles(presets))
+
+    # ---- C20b：窗口化 IR v2（manifest/window） ----
+
+    async def preview_ir_manifest(self, project_id: str, timeline_revision_id: str | None,
+                                  output_ratio: str) -> dict[str, Any]:
+        """v2 manifest：非帧字段的显式 DTO（canvas/inputs/segments/captions 等）。
+
+        首次调用做一次全量投影并缓存（manifest 字段 + 全量帧表——窗口请求
+        从同一缓存切片，manifest_id 与窗口数据同源一致）；后续窗口请求不再
+        触发投影（C20"首窗不扫描全部时间帧"的缓存层实现——重复采样后同一
+        revision 的窗口请求零投影）。"""
+        bundle = await self._ir_v2_bundle(project_id, timeline_revision_id, output_ratio)
+        return bundle["manifest"]
+
+    async def preview_ir_window(self, project_id: str, timeline_revision_id: str | None,
+                                output_ratio: str, start_frame: int,
+                                frame_count: int) -> dict[str, Any]:
+        """v2 窗口：[start_frame, start_frame+count) 的帧表切片。
+
+        frame_count 1..300（计划硬上限）；越界/非法参数 ValueError 由
+        endpoint 转 400。窗口帧与 v1 全量投影逐帧深度相等（同一投影缓存
+        切片——构造性保证）。
+        """
+        from .ir_window import MAX_WINDOW_FRAMES
+
+        if start_frame < 0 or frame_count < 1 or frame_count > MAX_WINDOW_FRAMES:
+            raise ValueError(
+                f"frame_count 必须在 1..{MAX_WINDOW_FRAMES}，start_frame >= 0")
+        bundle = await self._ir_v2_bundle(project_id, timeline_revision_id, output_ratio)
+        total = bundle["manifest"]["total_frames"]
+        if start_frame >= total:
+            raise ValueError(f"start_frame {start_frame} 超出总帧数 {total}")
+        count = min(frame_count, total - start_frame)
+        return {
+            "schema": bundle["manifest"]["schema"],
+            "manifest_id": bundle["manifest"]["manifest_id"],
+            "start_frame": start_frame,
+            "frame_count": count,
+            "frames": bundle["frames"][start_frame:start_frame + count],
+        }
+
+    async def _ir_v2_bundle(self, project_id: str, timeline_revision_id: str | None,
+                            output_ratio: str) -> dict[str, Any]:
+        """manifest+全量帧的会话缓存（键 = content_fingerprint；LRU 2 条——
+        帧表体量大，与 v1 缓存（4 条）分池）。"""
+        plan = self.compiler.compile(project_id, timeline_revision_id,
+                                     "authoritative_preview", output_ratio=output_ratio)
+        fingerprint = plan["content_fingerprint"]
+        cached = self.preview_ir_v2_cache.get(fingerprint)
+        if cached is not None:
+            return cached
+        from .ir_window import build_manifest
+
+        ir = await self._project_plan(plan)
+        bundle = {"manifest": build_manifest(plan, {}, None, ir=ir), "frames": ir["frames"]}
+        # build_manifest 的 caption_styles 来自 ir（投影已解析）——不走二次解析
+        self.preview_ir_v2_cache[fingerprint] = bundle
+        while len(self.preview_ir_v2_cache) > 2:
+            self.preview_ir_v2_cache.pop(next(iter(self.preview_ir_v2_cache)))
+        return bundle
 
     def cleanup_orphans(self) -> None:
         with self.database.connection() as db:
@@ -238,7 +371,11 @@ class RenderCoordinator:
         progress: Any,
         stage: Any,
         worker_pid: Any,
+        phase: Any = None,
     ) -> dict[str, Any]:
+        """phase（C22，可选）：`phase(name, progress|None)` 细分阶段回调，
+        与粗粒度 stage 并行上报（preparing/rendering→encoding/validating_
+        probe/validating_decode/hashing/publishing）。None = 旧调用方语义。"""
         payload = json_loads(row["input_json"])
         mode = row["kind"]
         job_id = row["id"]
@@ -254,16 +391,39 @@ class RenderCoordinator:
                 row["project_id"], row["timeline_revision_id"], rendition_snapshot_id, mode
             )
         else:
-            plan = self.compiler.compile(row["project_id"], row["timeline_revision_id"], mode)
+            plan = self.compiler.compile(
+                row["project_id"],
+                row["timeline_revision_id"],
+                mode,
+                output_ratio=payload.get("output_ratio") or "fit",
+            )
         if plan["content_fingerprint"] != payload["content_fingerprint"]:
             raise DomainError("RENDER_INPUT_CHANGED", "渲染输入在排队后已变化")
         stage("preparing")
+        if phase is not None:
+            phase("preparing", None)  # 准备耗时组成复杂，诚实显示不定进度
         input_paths = {
             item["input_id"]: Path(self.projects.resolve_asset_path(item["asset_id"])["path"])
             for item in plan["inputs"]
         }
+        # A07：segment probes 按唯一 input 去重（900 同源切段 = 1 个 input →
+        # 1 次 ffprobe），再映射回 segment 顺序；探测走会话缓存通道。
+        probe_by_input: dict[str, dict[str, Any]] = {}
+        for item in plan["inputs"]:
+            input_id = item["input_id"]
+            if input_id in probe_by_input:
+                continue
+            probe_by_input[input_id] = await self._probe(
+                input_paths[input_id], self._asset_probe_fingerprint(item["asset_id"])
+            )
         segment_paths = [input_paths[item["input_id"]] for item in plan["segments"]]
-        segment_probes = [await self.ffprobe.probe(path) for path in segment_paths]
+        segment_probes = [probe_by_input[item["input_id"]] for item in plan["segments"]]
+        # C21a：输入深定位窗口（保守放行集；不改变输出语义——见
+        # test_render_input_window 的 legacy/深定位对拍）。不合格段自动
+        # legacy（与旧参数图完全一致）。
+        from .input_window import plan_input_windows
+
+        input_windows = plan_input_windows(plan, segment_probes)
         bundle, presets, font_path = self.caption_resources.load()
         work = self.data_dir / "jobs" / job_id / "work"
         artifact_dir = self.data_dir / "jobs" / job_id / "artifacts"
@@ -288,7 +448,13 @@ class RenderCoordinator:
             )
         else:
             (work / "captions.ass").write_text(
-                build_ass(plan["captions"]["items"], bundle, presets), encoding="utf-8-sig"
+                build_ass(
+                    plan["captions"]["items"],
+                    bundle,
+                    presets,
+                    (int(plan["output"]["width"]), int(plan["output"]["height"])),
+                ),
+                encoding="utf-8-sig",
             )
         destination_grant = None
         if mode == "final_export":
@@ -317,21 +483,39 @@ class RenderCoordinator:
             output = target.parent / f".{target.stem}.{job_id}.aivs-tmp.mp4"
         else:
             output = work / "authoritative-preview.mp4"
-        args = build_timeline_args(
-            plan,
-            segment_paths,
-            segment_probes,
-            row["encoder_requested"],
-            str(output),
-            captions=bool(plan["captions"]["items"]),
-        )
         expected_duration = _rendered_duration_us(plan["segments"])
-        attempts = 2 if mode == "authoritative_preview" else 1
+        # 编码器候选：先用请求的编码器；若它是硬件编码器（本机 QSV/AMF/NVENC 可能
+        # 间歇性失败），渲染失败后自动降级到软件编码 libopenh264 重试一次。
+        requested_encoder = row["encoder_requested"]
+        encoders_to_try = [requested_encoder]
+        if requested_encoder not in {"libopenh264", "libx264"}:
+            encoders_to_try.append("libopenh264")
+        last_error_detail: str | None = None
         try:
-            for attempt in range(1, attempts + 1):
+            for attempt_index, encoder in enumerate(encoders_to_try, start=1):
                 try:
-                    if attempt > 1:
-                        self._set_attempt(job_id, attempt)
+                    if attempt_index > 1:
+                        self._set_attempt(job_id, attempt_index)
+                        with self.database.connection() as db:
+                            db.execute(
+                                "UPDATE jobs SET encoder_used=?,fallback_reason=?,updated_at=? "
+                                "WHERE id=?",
+                                (
+                                    encoder,
+                                    f"渲染失败后自动降级自 {requested_encoder}",
+                                    utc_now(),
+                                    job_id,
+                                ),
+                            )
+                    args = build_timeline_args(
+                        plan,
+                        segment_paths,
+                        segment_probes,
+                        encoder,
+                        str(output),
+                        captions=bool(plan["captions"]["items"]),
+                        input_windows=input_windows,
+                    )
                     stage("rendering")
                     await run_timeline_render(
                         self.ffmpeg,
@@ -342,6 +526,9 @@ class RenderCoordinator:
                         progress,
                         worker_pid,
                     )
+                    # C22：校验细分阶段（validating_probe/validating_decode/
+                    # hashing）通过 phase 回调上报；stage("validating") 保持
+                    # 兼容（未注入 phase 的调用方仍只看到粗粒度文本）。
                     stage("validating")
                     media_info, size_bytes, digest = await validate_rendered_media(
                         self.ffmpeg,
@@ -349,21 +536,48 @@ class RenderCoordinator:
                         output,
                         plan["output"],
                         expected_duration,
+                        cancel_event=cancel_event,
+                        on_phase=phase,
                     )
                     break
                 except DomainError as exc:
-                    if attempt == attempts or exc.code not in {
-                        "RENDER_FAILED",
-                        "RENDER_VALIDATION_FAILED",
-                    }:
-                        raise
-                    output.unlink(missing_ok=True)
+                    if exc.code in {"RENDER_FAILED", "RENDER_VALIDATION_FAILED"}:
+                        last_error_detail = str(getattr(exc, "message", "") or exc)
+                        if attempt_index < len(encoders_to_try):
+                            # A07：实际渲染失败 → 清除该 encoder 的 smoke 成功
+                            # 缓存（缓存说它可用但渲染说不行——下次重新探测）。
+                            self._invalidate_encoder_smoke(encoder)
+                            output.unlink(missing_ok=True)
+                            continue
+                    raise
                 except RuntimeError as exc:
-                    if attempt == attempts or str(exc).startswith("JOB_CANCELLED"):
+                    if str(exc).startswith("JOB_CANCELLED"):
                         raise
-                    output.unlink(missing_ok=True)
+                    # C22：校验超时（RENDER_VALIDATION_TIMEOUT）不触发换编码
+                    # 器重跑——产物编码可能已正确，问题在校验环节或环境；
+                    # 重跑只会重复同样的超时（计划 C22-10：cancel/timeout
+                    # 区分错误码、不进入重试乘法）。
+                    if str(exc).startswith("RENDER_VALIDATION_TIMEOUT"):
+                        raise DomainError("RENDER_VALIDATION_TIMEOUT", str(exc)) from exc
+                    last_error_detail = str(exc)
+                    if attempt_index < len(encoders_to_try):
+                        self._invalidate_encoder_smoke(encoder)
+                        output.unlink(missing_ok=True)
+                        continue
+                    # 所有编码器候选均失败：用 DomainError 携带 stderr 细节，
+                    # jobs 层会把 message 原样写入 error_message。
+                    raise DomainError(
+                        "RENDER_FAILED", f"渲染失败：{last_error_detail[-500:]}"
+                    ) from exc
             if cancel_event.is_set():
                 raise RuntimeError("JOB_CANCELLED")
+            # C22 发布临界区：rename + DB 事务提交点之后成品才存在；进入后
+            # 不再响应取消（cancel/timeout 语义由 jobs 层区分——到达提交点
+            # 后完成即成功，不把成功文件标成已取消）。rename 与 DB 事务不是
+            # 一个原子事务：rename 成功 + DB 失败时 orphans 残留由
+            # cleanup_orphans 恢复（既有机制）。
+            if phase is not None:
+                phase("publishing", None)
             stage("finalizing")
             artifact_id = f"artifact_{new_id()}"
             export_record_id = None
@@ -462,6 +676,12 @@ class RenderCoordinator:
                 (attempt, utc_now(), job_id),
             )
 
+    def _invalidate_encoder_smoke(self, encoder: str) -> None:
+        """A07：渲染失败清除该 encoder 的 smoke 成功缓存；未注入 encoders
+        （测试桩）时为空操作。"""
+        if self.encoders is not None:
+            self.encoders.invalidate_smoke(encoder)
+
     def _snapshot_rendition_id(self, snapshot_id: str) -> str:
         with self.database.connection() as db:
             row = db.execute(
@@ -488,9 +708,15 @@ class RenderService:
         self.compiler = compiler
         self.jobs = jobs
         self.destinations = destinations
+        # A07：ffmpeg version 同 build 只读一次（进程内会话缓存）。
+        self._ffmpeg_version: str | None = None
 
     async def create_preview(
-        self, project_id: str, timeline_revision_id: str | None, encoder_mode: str
+        self,
+        project_id: str,
+        timeline_revision_id: str | None,
+        encoder_mode: str,
+        output_ratio: str = "fit",
     ) -> dict[str, Any]:
         encoder_mode = _encoder_mode(encoder_mode)
         plan = self.compiler.compile(
@@ -498,6 +724,7 @@ class RenderService:
             timeline_revision_id,
             "authoritative_preview",
             reject_draft=True,
+            output_ratio=output_ratio,
         )
         encoder, fallback = await self.encoders.choose(encoder_mode)
         toolchain = await self._toolchain(encoder, fallback)
@@ -512,6 +739,7 @@ class RenderService:
             {
                 "content_fingerprint": plan["content_fingerprint"],
                 "toolchain": toolchain,
+                "output_ratio": output_ratio,
             },
         )
         return {"job": job, "preview": None, "reused": False}
@@ -598,9 +826,12 @@ class RenderService:
         timeline_revision_id: str | None,
         destination_grant_id: str,
         encoder_mode: str,
+        output_ratio: str = "fit",
     ) -> dict[str, Any]:
         encoder_mode = _encoder_mode(encoder_mode)
-        plan = self.compiler.compile(project_id, timeline_revision_id, "final_export")
+        plan = self.compiler.compile(
+            project_id, timeline_revision_id, "final_export", output_ratio=output_ratio
+        )
         encoder, fallback = await self.encoders.choose(encoder_mode)
         toolchain = await self._toolchain(encoder, fallback)
         grant = self.destinations.inspect(destination_grant_id)
@@ -620,6 +851,7 @@ class RenderService:
                 "toolchain": toolchain,
                 "destination_grant_id": destination_grant_id,
                 "destination_path": str(grant["path"]),
+                "output_ratio": output_ratio,
             },
         )
         try:
@@ -937,29 +1169,54 @@ class RenderService:
         return toolchain | {"compiler_version": REFRAME_COMPILER_VERSION}
 
     async def _toolchain(self, encoder: str, fallback: str | None) -> dict[str, Any]:
-        result = await run_process(self.ffmpeg, ["-hide_banner", "-version"], 10)
-        if result.returncode != 0 or not result.stdout:
-            raise DomainError("RENDER_FAILED", "无法读取 FFmpeg 版本")
+        # A07：ffmpeg version 同 build 只读一次（后续 choose/预览复用路径
+        # 不再各跑一遍 -version 子进程）。
+        if self._ffmpeg_version is None:
+            result = await run_process(self.ffmpeg, ["-hide_banner", "-version"], 10)
+            if result.returncode != 0 or not result.stdout:
+                raise DomainError("RENDER_FAILED", "无法读取 FFmpeg 版本")
+            self._ffmpeg_version = result.stdout.splitlines()[0]
         return {
             "compiler_version": COMPILER_VERSION,
             "preset_version": 1,
             "font_bundle_version": 1,
-            "ffmpeg_version": result.stdout.splitlines()[0],
+            "ffmpeg_version": self._ffmpeg_version,
             "encoder": encoder,
             "fallback_reason": fallback,
         }
 
 
 def _rendered_duration_us(segments: list[dict[str, Any]]) -> int:
-    """渲染产物时长 = 时间线总长 − 转场区间总和（B2 借用式重叠语义）。"""
+    """渲染产物时长 = 主视频轨时间线总长（含空隙黑底填充）− 生效转场区间总和。
+
+    多轨道语义：只统计主视频轨（V1）上可见的片段；主轨隐藏/为空时输出为
+    全程黑场，时长取全部片段的最大终点。转场只在锚点与其时间序后继首尾
+    相接时生效（B2 借用式重叠语义）。
+    """
     if not segments:
         return 0
-    total = segments[-1]["timeline_end_us"]
-    transition_total = sum(
-        int(segment["transition_in"]["duration_us"])
-        for segment in segments
-        if isinstance(segment.get("transition_in"), dict)
+    visual = sorted(
+        (
+            segment
+            for segment in segments
+            if (
+                segment.get("asset_kind") != "audio"
+                and segment.get("track_id", "V1") == "V1"
+                and not segment.get("track_hidden", False)
+            )
+        ),
+        key=lambda segment: int(segment["timeline_start_us"]),
     )
+    if not visual:
+        return max(int(segment["timeline_end_us"]) for segment in segments)
+    total = max(int(segment["timeline_end_us"]) for segment in visual)
+    transition_total = 0
+    for index in range(len(visual) - 1):
+        transition = visual[index].get("transition_in")
+        if not isinstance(transition, dict):
+            continue
+        if int(visual[index + 1]["timeline_start_us"]) == int(visual[index]["timeline_end_us"]):
+            transition_total += int(transition["duration_us"])
     return max(1, total - transition_total)
 
 

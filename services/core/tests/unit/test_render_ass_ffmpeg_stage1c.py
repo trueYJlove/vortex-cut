@@ -413,3 +413,455 @@ def test_ass_inline_override_tags_snapshot() -> None:
     assert "注入" in dialogue[3]
     # 预设 Style 行仍按预设生成（不受覆盖影响）。
     assert any("Style: default-bottom" in line for line in lines)
+
+
+# ── 自由定位：时间空隙黑底填充与休眠转场 ─────────────────────────────────────
+
+
+def _gapped_plan() -> dict:
+    """两段视觉段：段 A [0, 4s)，段 B [6s, 9s)，中间 2s 空隙。
+
+    段 B 在列表中排在前面，用于同时验证渲染图按 timeline_start_us 排序。
+    """
+    return {
+        "segments": [
+            {
+                "clip_id": "right",
+                "input_id": "I1",
+                "asset_kind": "video",
+                "source_start_us": 0,
+                "source_end_us": 3_000_000,
+                "timeline_start_us": 6_000_000,
+                "timeline_end_us": 9_000_000,
+                "layout": "fit",
+                "audio_enabled": True,
+                "gain_db": 0.0,
+                "speed_milli": 1000,
+                "transition_in": None,
+            },
+            {
+                "clip_id": "left",
+                "input_id": "I0",
+                "asset_kind": "video",
+                "source_start_us": 0,
+                "source_end_us": 4_000_000,
+                "timeline_start_us": 0,
+                "timeline_end_us": 4_000_000,
+                "layout": "fit",
+                "audio_enabled": True,
+                "gain_db": 0.0,
+                "speed_milli": 1000,
+                "transition_in": None,
+            },
+        ],
+        "captions": {"items": []},
+        "output": {"width": 540, "height": 960},
+    }
+
+
+def test_builder_inserts_black_filler_for_timeline_gaps() -> None:
+    plan = _gapped_plan()
+    paths = [Path("a.mp4"), Path("b.mp4")]
+    probes = [{"audio_streams": [{}]}, {"audio_streams": [{}]}]
+    args = build_timeline_args(plan, paths, probes, "libopenh264", "out.mp4", captions=False)
+    graph = args[args.index("-filter_complex") + 1]
+
+    # 空隙 → 追加一个 lavfi 黑底输入（2 个文件输入 + 1 个填充输入 = 3 个 -i）。
+    assert args.count("-i") == 3
+    # 填充色源带显式时长（d=2s），避免 concat 图 EOF 死锁。
+    assert args.count("color=c=black:s=540x960:r=30:d=2.000000") == 1
+    # 填充段按空隙时长裁剪（2s），且位于段 A 之后、段 B 之前。
+    assert "trim=duration=2.000000,setpts=PTS-STARTPTS,fps=30,format=yuv420p[v1]" in graph
+    # 按时间排序后三段 concat（A → 填充 → B）。
+    assert "concat=n=3:v=1:a=1" in graph
+    # 排序正确：段 B（input 0）的链在段 A（input 1）之后出现。
+    assert graph.index("[1:v:0]") < graph.index("[0:v:0]")
+
+
+def test_builder_dormant_transition_across_gap_is_skipped() -> None:
+    plan = _gapped_plan()
+    # 锚点转场跨空隙：休眠，不参与渲染图。
+    plan["segments"][1]["transition_in"] = {
+        "transition_id": "t1",
+        "kind": "fade",
+        "duration_us": 500_000,
+    }
+    args = build_timeline_args(
+        plan,
+        [Path("a.mp4"), Path("b.mp4")],
+        [{"audio_streams": [{}]}, {"audio_streams": [{}]}],
+        "libopenh264",
+        "out.mp4",
+        captions=False,
+    )
+    graph = args[args.index("-filter_complex") + 1]
+    assert "xfade" not in graph
+    assert "concat=n=3:v=1:a=1" in graph
+
+
+def test_builder_fills_leading_gap_before_first_segment() -> None:
+    plan = _gapped_plan()
+    # 首段改为 [1s, 5s)：1s 引导空隙 + 1s 段间空隙 → 2 个填充段。
+    plan["segments"][1]["timeline_start_us"] = 1_000_000
+    plan["segments"][1]["timeline_end_us"] = 5_000_000
+    args = build_timeline_args(
+        plan,
+        [Path("a.mp4"), Path("b.mp4")],
+        [{"audio_streams": [{}]}, {"audio_streams": [{}]}],
+        "libopenh264",
+        "out.mp4",
+        captions=False,
+    )
+    graph = args[args.index("-filter_complex") + 1]
+    # 两段填充（1s 引导 + 1s 段间）各带显式时长。
+    assert args.count("color=c=black:s=540x960:r=30:d=1.000000") == 2
+    assert "trim=duration=1.000000,setpts=PTS-STARTPTS,fps=30,format=yuv420p[v0]" in graph
+    assert "trim=duration=1.000000,setpts=PTS-STARTPTS,fps=30,format=yuv420p[v2]" in graph
+    assert "concat=n=4:v=1:a=1" in graph
+
+
+def test_builder_skips_audio_segments_in_visual_graph() -> None:
+    plan = _gapped_plan()
+    audio_segment = {
+        "clip_id": "a1clip",
+        "input_id": "I2",
+        "asset_kind": "audio",
+        "source_start_us": 0,
+        "source_end_us": 2_000_000,
+        "timeline_start_us": 0,
+        "timeline_end_us": 2_000_000,
+        "layout": "fit",
+        "audio_enabled": True,
+        "gain_db": 0.0,
+        "speed_milli": 1000,
+        "transition_in": None,
+    }
+    plan["segments"].append(audio_segment)
+    args = build_timeline_args(
+        plan,
+        [Path("a.mp4"), Path("b.mp4"), Path("c.mp4")],
+        [{"audio_streams": [{}]}, {"audio_streams": [{}]}, {"audio_streams": [{}]}],
+        "libopenh264",
+        "out.mp4",
+        captions=False,
+    )
+    graph = args[args.index("-filter_complex") + 1]
+    # audio 段不参与视觉装配（视觉 concat 仍为 3 项：A → 填充 → B）。
+    assert "concat=n=3:v=1:a=1" in graph
+    assert "[2:v:0]" not in graph
+
+
+def test_rendered_duration_accounts_for_gaps_and_dormant_transitions() -> None:
+    from aivs_core.rendering.service import _rendered_duration_us
+
+    plan = _gapped_plan()
+    # 生效转场：首尾相接才扣减。
+    assert _rendered_duration_us(plan["segments"]) == 9_000_000
+    # 跨空隙的转场休眠：不减转场时长，总长按最大终点。
+    plan["segments"][1]["transition_in"] = {
+        "transition_id": "t1",
+        "kind": "fade",
+        "duration_us": 500_000,
+    }
+    assert _rendered_duration_us(plan["segments"]) == 9_000_000
+    # 贴合后转场生效：总长 − 0.5s（段 A 改为 [2s, 6s)，与段 B [6s, 9s) 相接）。
+    plan["segments"][1]["timeline_start_us"] = 2_000_000
+    plan["segments"][1]["timeline_end_us"] = 6_000_000
+    assert _rendered_duration_us(plan["segments"]) == 8_500_000
+
+
+def test_builder_composes_pip_overlay_for_track_v2() -> None:
+    """P1 画中画：V1 之上新增 V2 覆盖段，应生成 overlay 时间窗叠加且继承 transform。"""
+    plan = {
+        "segments": [
+            {
+                "clip_id": "main", "track_id": "V1", "asset_kind": "video",
+                "source_start_us": 0, "source_end_us": 3_000_000,
+                "timeline_start_us": 0, "timeline_end_us": 3_000_000,
+                "layout": "crop_fill", "audio_enabled": False, "gain_db": 0.0,
+            },
+            {
+                "clip_id": "pip", "track_id": "V2", "asset_kind": "video",
+                "source_start_us": 0, "source_end_us": 1_000_000,
+                "timeline_start_us": 500_000, "timeline_end_us": 1_500_000,
+                "layout": "blurred_background", "audio_enabled": False, "gain_db": 0.0,
+                "transform": {"x": 0.7, "y": 0.2, "scale": 0.4, "rotate": 15.0},
+            },
+        ],
+        "captions": {"items": []},
+        "output": {"width": 540, "height": 960},
+    }
+    args = build_timeline_args(plan,
+                               [Path("main.mp4"), Path("pip.mp4")],
+                               [{"audio_streams": [{}]}, {"audio_streams": [{}]}],
+                               "libopenh264", "out.mp4", captions=False)
+    graph = args[args.index("-filter_complex") + 1]
+    # 主 V1 单独 concat。
+    assert "concat=n=1:v=1:a=1" in graph
+    # 覆盖轨合成：MAINPIP 起装（主 V1 → null → MAINPIP）。
+    assert "[vcat]null[MAINPIP]" in graph
+    # 覆盖段子句：源取帧 → PIP 缩放 → 旋转 → PTS 平移 → overlay 时间窗。
+    assert "[1:v:0]" in graph
+    assert "scale=216:384" in graph            # 540*0.4=216, 960*0.4=384
+    assert "rotate='15.0000*PI/180'" in graph  # 度数语义：rotate 滤镜参数为弧度
+    assert "setpts=PTS+0.500000" in graph
+    assert "enable='between(t,0.500000,1.500000)'" in graph
+    # overlay 复用 [MAINPIP] 作为输入与输出（多覆盖段可继续叠加）。
+    # 坐标为中心点语义：x 左上角 = 0.7*540 − 216/2 = 270.0；y = 0.2*960 − 384/2 = 0.0。
+    assert "overlay=x='270.0':y='0.0':" in graph
+    assert "[MAINPIP][pip1a]overlay=" in graph
+    assert "MAINPIP" in graph
+
+
+def test_builder_composes_pip_overlay_with_reframe() -> None:
+    """P1 回归：覆盖轨片段带 reframe（重构图）时应使用重构图裁切滤镜且构建不崩。
+
+    历史上此分支引用了未定义变量 ref（NameError），任何带重构图快照的 PIP 片段
+    都会让渲染任务崩溃；此处锁定修复。
+    """
+    plan = {
+        "segments": [
+            {"clip_id": "main", "track_id": "V1", "asset_kind": "video",
+             "source_start_us": 0, "source_end_us": 3_000_000,
+             "timeline_start_us": 0, "timeline_end_us": 3_000_000,
+             "layout": "crop_fill", "audio_enabled": False, "gain_db": 0.0},
+            {"clip_id": "pip", "track_id": "V2", "asset_kind": "video",
+             "source_start_us": 0, "source_end_us": 1_000_000,
+             "timeline_start_us": 500_000, "timeline_end_us": 1_500_000,
+             "layout": "crop_fill", "audio_enabled": False, "gain_db": 0.0,
+             "transform": {"x": 0.5, "y": 0.5, "scale": 0.5},
+             "reframe": {"horizontal_anchor": "center", "vertical_anchor": "center",
+                          "geometry_contract_version": 1, "crop_x": 0, "crop_y": 0}},
+        ],
+        "captions": {"items": []},
+        "output": {"width": 540, "height": 960},
+    }
+    args = build_timeline_args(plan,
+                               [Path("main.mp4"), Path("pip.mp4")],
+                               [{"audio_streams": [{}]}, {"audio_streams": [{}]}],
+                               "libopenh264", "out.mp4", captions=False)
+    graph = args[args.index("-filter_complex") + 1]
+    # PIP 分支使用重构图裁切（带偏移量的 crop），而不是普通 layout 滤镜。
+    assert "crop=540:960:0:0" in graph
+    assert "[MAINPIP][pip1a]overlay=" in graph
+
+
+def test_builder_applies_static_transform_on_v1() -> None:
+    """P1 扩展：V1 主轨片段带 transform 时，缩放 + 全幅黑底合成（中心点语义）。"""
+    plan = {
+        "segments": [
+            {"clip_id": "main", "track_id": "V1", "asset_kind": "video",
+             "source_start_us": 0, "source_end_us": 3_000_000,
+             "timeline_start_us": 0, "timeline_end_us": 3_000_000,
+             "layout": "fit", "audio_enabled": False, "gain_db": 0.0,
+             "transform": {"x": 0.3, "y": 0.2, "scale": 0.5}},
+        ],
+        "captions": {"items": []},
+        "output": {"width": 540, "height": 960},
+    }
+    args = build_timeline_args(plan, [Path("main.mp4")], [{"audio_streams": [{}]}],
+                               "libopenh264", "out.mp4", captions=False)
+    graph = args[args.index("-filter_complex") + 1]
+    assert "scale=270:480:force_divisible_by=2" in graph      # 540*0.5 / 960*0.5
+    assert "color=c=black:s=540x960:r=30" in graph            # 全幅黑底
+    assert "overlay=x=27.0:y=-48.0" in graph                  # 0.3*540-135 / 0.2*960-240
+    assert "format=yuv420p[" in graph
+    # 无 transform 时保持原直通路径（无黑底合成）。
+    plan["segments"][0].pop("transform")
+    args2 = build_timeline_args(plan, [Path("main.mp4")], [{"audio_streams": [{}]}],
+                                "libopenh264", "out.mp4", captions=False)
+    graph2 = args2[args2.index("-filter_complex") + 1]
+    assert "color=c=black:s=540x960" not in graph2
+
+
+def test_builder_composes_pip_content_fit_box() -> None:
+    """剪映式内容盒：fit 布局的覆盖轨元素 = 素材等比适配进画布的实际大小（无黑边）。"""
+    plan = {
+        "segments": [
+            {"clip_id": "main", "track_id": "V1", "asset_kind": "video",
+             "source_start_us": 0, "source_end_us": 3_000_000,
+             "timeline_start_us": 0, "timeline_end_us": 3_000_000,
+             "layout": "fit", "audio_enabled": False, "gain_db": 0.0},
+            {"clip_id": "pip", "track_id": "V2", "asset_kind": "video",
+             "source_start_us": 0, "source_end_us": 1_000_000,
+             "timeline_start_us": 0, "timeline_end_us": 1_000_000,
+             "layout": "fit", "audio_enabled": False, "gain_db": 0.0},
+        ],
+        "captions": {"items": []},
+        "output": {"width": 540, "height": 960},
+    }
+    probes = [
+        {"audio_streams": [{}]},
+        {"audio_streams": [], "video_streams": [{"index": 0, "codec": "h264", "width": 1920, "height": 1080, "sample_aspect_ratio": "1:1"}]},
+    ]
+    args = build_timeline_args(plan, [Path("main.mp4"), Path("pip.mp4")], probes,
+                               "libopenh264", "out.mp4", captions=False)
+    graph = args[args.index("-filter_complex") + 1]
+    # 内容盒：min(540/1920, 960/1080)=0.28125 → 内容 540×304（偶数取整）。
+    assert "scale=540:304:force_original_aspect_ratio=decrease" in graph
+    # 中心点叠放：x=0.5*540-540/2=0.0, y=0.5*960-304/2=328.0。
+    assert "overlay=x='0.0':y='328.0'" in graph
+
+
+def test_builder_composes_mask_alpha_for_track_v2(tmp_path: Path) -> None:
+    """P2 蒙版：V2 覆盖段带椭圆蒙版时，graph 插入 geq alpha + alphamerge，overlay 消费蒙版后标签。"""
+    plan = {
+        "segments": [
+            {"clip_id": "main", "track_id": "V1", "asset_kind": "video",
+             "source_start_us": 0, "source_end_us": 3_000_000,
+             "timeline_start_us": 0, "timeline_end_us": 3_000_000,
+             "layout": "fit", "audio_enabled": False, "gain_db": 0.0},
+            {"clip_id": "pip", "track_id": "V2", "asset_kind": "video",
+             "source_start_us": 0, "source_end_us": 1_000_000,
+             "timeline_start_us": 500_000, "timeline_end_us": 1_500_000,
+             "layout": "fit", "audio_enabled": False, "gain_db": 0.0,
+             "transform": {"x": 0.5, "y": 0.5, "scale": 0.5},
+             "mask": {"kind": "ellipse", "x": 0.5, "y": 0.5, "width": 0.6, "height": 0.8, "feather": 0.05}},
+        ],
+        "captions": {"items": []},
+        "output": {"width": 540, "height": 960},
+    }
+    args = build_timeline_args(plan,
+                               [Path("main.mp4"), Path("pip.mp4")],
+                               [{"audio_streams": [{}]}, {"audio_streams": [{}]}],
+                               "libopenh264", "out.mp4", captions=False)
+    graph = args[args.index("-filter_complex") + 1]
+    # geq alpha（ellipse 表达式）与 alphamerge 与蒙版标签。
+    assert "format=gray,geq='clip(max(0,min(255,255*(1-sqrt(" in graph
+    assert "alphamerge[pip1vis]" in graph
+    assert "[pip1vis]setpts=PTS+0.500000" in graph
+    # overlay 仍复用 [MAINPIP]（时间窗合成）。
+    assert "[MAINPIP][pip1a]overlay=" in graph
+    # 无蒙版时不应出现 geq（回归）。
+    plan["segments"][1].pop("mask")
+    args2 = build_timeline_args(plan, ["main.mp4", "pip.mp4"],
+                                [{"audio_streams": [{}]}, {"audio_streams": [{}]}],
+                                "libopenh264", "out.mp4", captions=False)
+    graph2 = args2[args2.index("-filter_complex") + 1]
+    assert "geq=" not in graph2
+
+
+def test_builder_composes_chroma_keying_for_track_v2(tmp_path: Path) -> None:
+    """P3 抠像：V2 覆盖段带绿幕 keying 时，graph 插入 colorkey + alphaextract，overlay 消费抠后标签。"""
+    plan = {
+        "segments": [
+            {"clip_id": "main", "track_id": "V1", "asset_kind": "video",
+             "source_start_us": 0, "source_end_us": 3_000_000,
+             "timeline_start_us": 0, "timeline_end_us": 3_000_000,
+             "layout": "fit", "audio_enabled": False, "gain_db": 0.0},
+            {"clip_id": "pip", "track_id": "V2", "asset_kind": "video",
+             "source_start_us": 0, "source_end_us": 1_000_000,
+             "timeline_start_us": 500_000, "timeline_end_us": 1_500_000,
+             "layout": "fit", "audio_enabled": False, "gain_db": 0.0,
+             "transform": {"x": 0.5, "y": 0.5, "scale": 0.5},
+             "keying": {"color": "00FF00", "similarity": 0.4, "blend": 0.1}},
+        ],
+        "captions": {"items": []},
+        "output": {"width": 540, "height": 960},
+    }
+    args = build_timeline_args(plan,
+                               [Path("main.mp4"), Path("pip.mp4")],
+                               [{"audio_streams": [{}]}, {"audio_streams": [{}]}],
+                               "libopenh264", "out.mp4", captions=False)
+    graph = args[args.index("-filter_complex") + 1]
+    assert "colorkey=color=0x00FF00:similarity=0.400:blend=0.100" in graph
+    assert "alphaextract[pip1_key_a]" in graph
+    assert "alphamerge[pip1vis]" in graph
+    assert "[pip1vis]setpts=PTS+0.500000" in graph
+    assert "[MAINPIP][pip1a]overlay=" in graph
+
+    # 蒙版 + 抠像组合：两个 alpha 来源 multiply 求交。
+    plan["segments"][1]["mask"] = {"kind": "ellipse", "x": 0.5, "y": 0.5, "width": 0.6, "height": 0.6, "feather": 0.0}
+    args2 = build_timeline_args(plan, ["main.mp4", "pip.mp4"],
+                                [{"audio_streams": [{}]}, {"audio_streams": [{}]}],
+                                "libopenh264", "out.mp4", captions=False)
+    graph2 = args2[args2.index("-filter_complex") + 1]
+    assert "blend=all_mode=multiply[pip1_cmb_a]" in graph2
+    # 无 keying 时不应出现 colorkey（回归）。
+    plan["segments"][1].pop("keying")
+    args3 = build_timeline_args(plan, ["main.mp4", "pip.mp4"],
+                              [{"audio_streams": [{}]}, {"audio_streams": [{}]}],
+                              "libopenh264", "out.mp4", captions=False)
+    graph3 = args3[args3.index("-filter_complex") + 1]
+    assert "colorkey=" not in graph3
+
+
+def test_builder_rejects_reverse_segment_beyond_memory_budget() -> None:
+    """C23 结项护栏：reverse 滤镜未压缩帧驻留（实测 60s 1080p ≈ 4.9GiB）。
+
+    超预算倒放段显式失败（RENDER_REVERSE_TOO_LONG），不伪装成可完成的
+    长任务；预算内（如 3s 540p）照常构建。
+    """
+    from aivs_core.projects import DomainError
+
+    plan = _plan()
+    plan["output"] = {"width": 1920, "height": 1080}
+    plan["segments"] = [
+        {
+            "clip_id": "rev-long",
+            "input_id": "I0",
+            "asset_kind": "video",
+            "source_start_us": 0,
+            "source_end_us": 60_000_000,  # 60s @30fps = 1800 帧 ≈ 5.3GiB
+            "timeline_start_us": 0,
+            "timeline_end_us": 60_000_000,
+            "layout": "fit",
+            "audio_enabled": False,
+            "gain_db": 0.0,
+            "reverse_playback": True,
+        },
+    ]
+    with pytest.raises(DomainError) as exc_info:
+        build_timeline_args(
+            plan, [Path("a.mp4")], [{"audio_streams": [{}]}],
+            "libopenh264", "out.mp4", captions=False)
+    assert exc_info.value.code == "RENDER_REVERSE_TOO_LONG"
+
+    # 预算内（3s）：照常构建（既有行为不变）。
+    plan["segments"][0]["clip_id"] = "rev-short"
+    plan["segments"][0]["source_end_us"] = 3_000_000
+    plan["segments"][0]["timeline_end_us"] = 3_000_000
+    args = build_timeline_args(
+        plan, [Path("a.mp4")], [{"audio_streams": [{}]}],
+        "libopenh264", "out.mp4", captions=False)
+    graph = args[args.index("-filter_complex") + 1]
+    assert "reverse" in graph
+
+
+def test_builder_reverse_budget_ignores_hidden_track_and_forward_segments() -> None:
+    """预算护栏只作用于可见视频倒放段；隐藏轨/正向段不受影响。"""
+    plan = _plan()
+    plan["output"] = {"width": 1920, "height": 1080}
+    plan["segments"] = [
+        {
+            "clip_id": "hidden-rev",
+            "input_id": "I0",
+            "asset_kind": "video",
+            "source_start_us": 0,
+            "source_end_us": 600_000_000,
+            "timeline_start_us": 0,
+            "timeline_end_us": 10_000_000,
+            "layout": "fit",
+            "audio_enabled": False,
+            "gain_db": 0.0,
+            "reverse_playback": True,
+            "track_hidden": True,
+        },
+        {
+            "clip_id": "forward-long",
+            "input_id": "I1",
+            "asset_kind": "video",
+            "source_start_us": 0,
+            "source_end_us": 600_000_000,
+            "timeline_start_us": 10_000_000,
+            "timeline_end_us": 610_000_000,
+            "layout": "fit",
+            "audio_enabled": False,
+            "gain_db": 0.0,
+        },
+    ]
+    args = build_timeline_args(
+        plan, [Path("a.mp4"), Path("b.mp4")],
+        [{"audio_streams": [{}]}, {"audio_streams": [{}]}],
+        "libopenh264", "out.mp4", captions=False)
+    assert "-filter_complex" in args

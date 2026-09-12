@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>属性面板重构 · 音频素材 — Vortex Cut 原型</title>
+<style>
+  :root{
+    --bg:#12171c;--panel:#161c22;--panel2:#1c242b;--inset:#0e1318;
+    --border:#263038;--border2:#33404a;
+    --text:#e8edf0;--text2:#a3aeb5;--text3:#6f7b82;
+    --accent:#86a0ff;--accent2:#5b78f0;--warn:#d9b36a;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font:13px/1.5 "Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;-webkit-font-smoothing:antialiased;height:100vh;overflow:hidden}
+  .topbar{height:48px;display:flex;align-items:center;gap:14px;padding:0 16px;background:linear-gradient(180deg,#181f26,#151b21);border-bottom:1px solid var(--border)}
+  .brand{font-weight:700;font-size:14px}
+  .chip{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#0d1120;border-radius:999px;padding:3px 12px;font-size:11.5px;font-weight:700}
+  .back{color:var(--text3);text-decoration:none;font-size:12.5px}
+  .back:hover{color:var(--text)}
+  .spacer{flex:1}
+  .hint{font-size:11.5px;color:var(--text3)}
+  .stage{display:flex;height:calc(100vh - 48px)}
+  .canvas-wrap{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;background:repeating-conic-gradient(#0e1216 0% 25%,#0b0e12 0% 50%) 50%/22px 22px;padding:24px;min-width:0}
+  .wave-card{width:min(72vw,660px);background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:18px 20px;box-shadow:0 14px 40px rgba(0,0,0,.4)}
+  .wave-title{display:flex;align-items:center;gap:10px;font-size:12.5px;margin-bottom:14px}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--accent2)}
+  .wave-title .name{font-weight:600}
+  .wave-title .dur{margin-left:auto;color:var(--text3);font-size:11.5px;font-family:Consolas,monospace}
+  .wave{position:relative;height:112px;border-radius:8px;background:var(--inset);border:1px solid #1c252d;display:flex;align-items:center;gap:2px;padding:0 12px;overflow:hidden}
+  .bar{flex:1;border-radius:2px;background:linear-gradient(180deg,#86a0ff,#5b78f0);opacity:.75;min-height:3px}
+  .band{position:absolute;left:12%;width:44%;top:0;bottom:0;border:1px solid rgba(134,160,255,.8);background:rgba(134,160,255,.08);border-radius:4px}
+  .band i{position:absolute;top:50%;width:5px;height:22px;border-radius:3px;background:#fff;transform:translateY(-50%)}
+  .band i.l{left:-3px}.band i.r{right:-3px}
+  .head{position:absolute;left:34%;top:0;bottom:0;width:1.5px;background:#fff;opacity:.85}
+  .head::after{content:"";position:absolute;top:-1px;left:-4.25px;border:5px solid transparent;border-top:6px solid #fff}
+  .legend{display:flex;gap:14px;font-size:11px;color:var(--text3)}
+  .legend b{color:var(--text2);font-weight:600}
+  /* ---------- 属性面板（与 video.html 同一套规范） ---------- */
+  .props{width:336px;background:var(--panel);border-left:1px solid var(--border);display:flex;flex-direction:column;min-height:0}
+  .tabs{display:flex;height:44px;flex:none;border-bottom:1px solid var(--border);padding:0 6px}
+  .tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:12.5px;color:var(--text2);cursor:pointer;position:relative;transition:color .15s;user-select:none;line-height:1.25}
+  .tab:hover{color:var(--text)}
+  .tab.active{color:var(--accent);font-weight:600}
+  .tab.active::after{content:"";position:absolute;bottom:-1px;left:50%;transform:translateX(-50%);width:26px;height:2.5px;border-radius:2px;background:var(--accent)}
+  .tab .soon{font-size:8.5px;color:var(--warn)}
+  .pbody{flex:1;overflow-y:auto;padding:8px 16px 24px}
+  .pbody::-webkit-scrollbar{width:8px}
+  .pbody::-webkit-scrollbar-thumb{background:#2a343c;border-radius:4px}
+  .gh{display:flex;align-items:center;gap:6px;margin:16px 0 10px;font-size:13px;font-weight:600}
+  .gh:first-child{margin-top:10px}
+  .gh .rst{margin-left:auto;display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;color:var(--text3);cursor:pointer;border:none;background:none;font-size:12px;visibility:hidden}
+  .gh:hover .rst{visibility:visible}
+  .gh .rst:hover{background:#232d35;color:var(--accent)}
+  .sep{height:1px;background:#1f2931;margin:14px 0 2px}
+  .row{display:flex;align-items:center;gap:10px;min-height:32px;margin-bottom:7px}
+  .row>label{width:56px;flex:none;font-size:12px;color:var(--text2)}
+  .row .tail{font-size:11px;color:var(--text3)}
+  input[type=range].rng{-webkit-appearance:none;appearance:none;flex:1;height:3px;border-radius:2px;background:#2b353d;outline:none;cursor:pointer}
+  input[type=range].rng::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;background:#e8edf0;transition:box-shadow .15s}
+  input[type=range].rng:hover::-webkit-slider-thumb{box-shadow:0 0 0 4px rgba(134,160,255,.22)}
+  input[type=range].rng:disabled{opacity:.35;cursor:not-allowed}
+  .field{display:flex;align-items:center;height:28px;width:86px;flex:none;background:var(--inset);border:1px solid var(--border);border-radius:6px;transition:border-color .15s;touch-action:none}
+  .field:hover{border-color:var(--border2)}
+  .field:focus-within{border-color:var(--accent)}
+  .field input{flex:1;min-width:0;background:none;border:none;outline:none;color:var(--text);font-size:12px;text-align:right;padding:0 2px 0 8px;font-family:inherit;cursor:ew-resize}
+  .field .chev{display:flex;flex-direction:column;gap:1px;padding:0 3px 0 2px}
+  .field .chev button{width:17px;height:12.5px;display:flex;align-items:center;justify-content:center;border:none;background:none;border-radius:3px;cursor:pointer;padding:0}
+  .field .chev button:hover{background:#2b3742}
+  .field .chev button:active{background:#33414e}
+  .field .chev button i{width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent}
+  .field .chev .up i{border-bottom:5px solid #8a959c}
+  .field .chev .dn i{border-top:5px solid #8a959c}
+  .field .chev button:hover .up i{border-bottom-color:var(--accent)}
+  .field .chev button:hover .dn i{border-top-color:var(--accent)}
+  body.scrubbing,body.scrubbing *{cursor:ew-resize!important;user-select:none}
+  .field.w66{width:66px}
+  .sw{position:relative;width:32px;height:18px;border-radius:9px;background:#2b353d;cursor:pointer;flex:none;transition:background .18s}
+  .sw::after{content:"";position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#aab4ba;transition:.18s}
+  .sw.on{background:var(--accent2)}
+  .sw.on::after{transform:translateX(14px);background:#fff}
+  .badge{font-size:9.5px;color:var(--warn);border:1px solid rgba(217,179,106,.4);border-radius:999px;padding:1px 8px;flex:none}
+  .note{font-size:11.5px;color:var(--text3);line-height:1.75;background:#10161b;border:1px solid #1f2931;border-radius:7px;padding:10px 12px;margin-top:10px}
+  .note b{color:var(--text2);font-weight:600}
+  .dim{opacity:.42;pointer-events:none}
+  .hidden{display:none!important}
+  .segset{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap}
+  .seg{height:30px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text2);font-size:12px;cursor:pointer;transition:.15s;font-family:inherit;flex:0 0 23.5%}
+  .seg:hover{color:var(--text);border-color:var(--border2)}
+  .seg.active{background:#243040;border-color:var(--accent);color:var(--accent);font-weight:600}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <a class="back" href="index.html">← 设计总览</a>
+  <div class="brand">Vortex Cut</div>
+  <span class="chip">音频素材 · A1</span>
+  <div class="spacer"></div>
+  <span class="hint">对齐剪映：基础 / 换音色 / 声音效果 / 变速</span>
+</div>
+<div class="stage">
+  <div class="canvas-wrap">
+    <div class="wave-card">
+      <div class="wave-title"><span class="dot"></span><span class="name">背景音乐.mp3</span><span class="badge">A1 音频轨</span><span class="dur">00:12.00</span></div>
+      <div class="wave" id="wave">
+        <div class="band"><i class="l"></i><i class="r"></i></div>
+        <div class="head"></div>
+      </div>
+      <div class="legend" style="margin-top:12px"><span><b>白色竖线</b> 播放头</span><span><b>亮框</b> 片段选区</span><span>淡入淡出落地后在此区间显示包络线</span></div>
+    </div>
+  </div>
+
+  <div class="props">
+    <div class="tabs" id="topTabs">
+      <div class="tab active" data-top="basic">基础</div>
+      <div class="tab" data-top="voice">换音色<span class="soon">规划中</span></div>
+      <div class="tab" data-top="fx">声音效果<span class="soon">规划中</span></div>
+      <div class="tab" data-top="speed">变速</div>
+    </div>
+    <div class="pbody">
+      <section data-panel="basic">
+        <div class="gh">基础 <button class="rst" title="重置">⟲</button></div>
+        <div class="row"><label>启用音频</label><div class="sw on"></div></div>
+        <div class="row"><label>音量</label><input type="range" class="rng" min="-60" max="12" value="0"><span class="field w66"><input id="vol" value="0.0dB"><span class="chev"><button class="up" type="button" tabindex="-1" aria-label="增大"><i></i></button><button class="dn" type="button" tabindex="-1" aria-label="减小"><i></i></button></span></span></div>
+        <div class="row dim"><label>淡入时长</label><input type="range" class="rng" min="0" max="50" value="0"><span class="field w66"><input value="0.0s"><span class="chev"><button class="up" type="button" tabindex="-1" aria-label="增大"><i></i></button><button class="dn" type="button" tabindex="-1" aria-label="减小"><i></i></button></span></span><span class="badge">规划中</span></div>
+        <div class="row dim"><label>淡出时长</label><input type="range" class="rng" min="0" max="50" value="0"><span class="field w66"><input value="0.0s"><span class="chev"><button class="up" type="button" tabindex="-1" aria-label="增大"><i></i></button><button class="dn" type="button" tabindex="-1" aria-label="减小"><i></i></button></span></span><span class="badge">规划中</span></div>
+        <div class="row dim"><label>响度统一</label><div class="sw"></div><span class="badge">规划中</span></div>
+        <div class="sep"></div>
+        <div class="gh">素材修剪</div>
+        <div class="row"><label>源起点</label><span class="field"><input id="trimA" value="0.0s"><span class="chev"><button class="up" type="button" tabindex="-1" aria-label="增大"><i></i></button><button class="dn" type="button" tabindex="-1" aria-label="减小"><i></i></button></span></span><span class="tail">拖动波形选区可同步（规划）</span></div>
+        <div class="row"><label>源终点</label><span class="field"><input id="trimB" value="12.0s"><span class="chev"><button class="up" type="button" tabindex="-1" aria-label="增大"><i></i></button><button class="dn" type="button" tabindex="-1" aria-label="减小"><i></i></button></span></span></div>
+      </section>
+      <section data-panel="voice" class="hidden">
+        <div class="gh">换音色 <span class="badge">规划中</span></div>
+        <div class="note">音色模板 + 参数。布局对齐剪映；当前版本未实现，仅占位。</div>
+      </section>
+      <section data-panel="fx" class="hidden">
+        <div class="gh">声音效果</div>
+        <div class="row dim"><label>音频降噪</label><div class="sw"></div><span class="badge">规划中</span></div>
+        <div class="row dim"><label>人声美化</label><div class="sw"></div><span class="badge">规划中</span></div>
+        <div class="row dim"><label>声音分离</label><div class="sw"></div><span class="badge">规划中</span></div>
+        <div class="row dim"><label>变调</label><div class="sw"></div><span class="badge">规划中</span></div>
+        <div class="row dim"><label>立体声平衡</label><div class="sw"></div><span class="badge">规划中</span></div>
+        <div class="row dim"><label>声道配置</label><div class="sw"></div><span class="badge">规划中</span></div>
+      </section>
+      <section data-panel="speed" class="hidden">
+        <div class="gh">倍速</div>
+        <div class="segset">
+          <button class="seg">0.25x</button><button class="seg">0.5x</button><button class="seg">0.75x</button><button class="seg active">1x</button>
+          <button class="seg">1.25x</button><button class="seg">1.5x</button><button class="seg">2x</button><button class="seg">4x</button>
+        </div>
+        <div class="row"><label>自定义</label><span class="field w66"><input id="spd" value="1.00"><span class="chev"><button class="up" type="button" tabindex="-1" aria-label="增大"><i></i></button><button class="dn" type="button" tabindex="-1" aria-label="减小"><i></i></button></span></span><span class="tail">0.25 – 4.0</span></div>
+        <div class="note">变速后轨长按倍率重算；音频以 atempo 分级适配。</div>
+      </section>
+    </div>
+  </div>
+</div>
+<script>
+(function () {
+  var $ = function (s, c) { return (c || document).querySelector(s); };
+  var $$ = function (s, c) { return Array.prototype.slice.call((c || document).querySelectorAll(s)); };
+  /* 波形条（伪随机但稳定） */
+  var wave = $('#wave'), bars = [], h = 30;
+  for (var i = 0; i < 64; i++) {
+    h = 18 + Math.round(46 * Math.abs(Math.sin(i * 0.7) * 0.6 + Math.sin(i * 0.23) * 0.4));
+    var b = document.createElement('i'); b.className = 'bar'; b.style.height = h + '%';
+    wave.appendChild(b); bars.push(b);
+  }
+  /* 滑杆填充 */
+  function paint(r) {
+    var p = (r.value - r.min) / (r.max - r.min) * 100;
+    r.style.background = 'linear-gradient(90deg,var(--accent2) ' + p + '%,#2b353d ' + p + '%)';
+  }
+  $$('input[type=range]').forEach(function (r) { paint(r); r.addEventListener('input', function () { paint(r); }); });
+  /* 开关 */
+  $$('.sw').forEach(function (s) { s.addEventListener('click', function () { s.classList.toggle('on'); }); });
+  /* 页签 */
+  $('#topTabs').addEventListener('click', function (e) {
+    var t = e.target.closest('.tab'); if (!t) return;
+    $$('#topTabs .tab').forEach(function (x) { x.classList.remove('active'); });
+    t.classList.add('active');
+    $$('section[data-panel]').forEach(function (s) { s.classList.toggle('hidden', s.dataset.panel !== t.dataset.top); });
+  });
+  /* 倍速段 */
+  $$('.seg').forEach(function (b) {
+    b.addEventListener('click', function () {
+      $$('.seg').forEach(function (x) { x.classList.remove('active'); });
+      b.classList.add('active');
+    });
+  });
+  /* 数字步进器：大命中按钮 + 搓值 + 键盘 ↑↓ */
+  var CFG = {
+    vol: { min: -60, max: 12, step: 0.5, unit: 'dB', dec: 1 },
+    trimA: { min: 0, max: 12, step: 0.1, unit: 's', dec: 1 },
+    trimB: { min: 0, max: 12, step: 0.1, unit: 's', dec: 1 },
+    spd: { min: 0.25, max: 4, step: 0.05, dec: 2 }
+  };
+  $$('.field').forEach(function (f) {
+    var input = $('input', f); if (!input) return;
+    var c = CFG[input.id]; if (!c) return;
+    var min = c.min, max = c.max, step = c.step || 1, unit = c.unit || '';
+    var dec = (c.dec !== undefined) ? c.dec : (step < 1 ? 2 : 0);
+    function parse() { var v = parseFloat(input.value); return isNaN(v) ? min : v; }
+    function apply(v) {
+      v = Math.round(Math.max(min, Math.min(max, v)) / step) * step;
+      input.value = parseFloat(v.toFixed(4)).toFixed(dec) + unit;
+      input.dispatchEvent(new Event('change'));
+    }
+    var upBtn = $('.chev .up', f), dnBtn = $('.chev .dn', f);
+    if (upBtn) upBtn.addEventListener('click', function () { apply(parse() + step); });
+    if (dnBtn) dnBtn.addEventListener('click', function () { apply(parse() - step); });
+    input.addEventListener('keydown', function (e) {
+      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+      e.preventDefault(); apply(parse() + (e.key === 'ArrowUp' ? step : -step));
+    });
+    var sx = 0, sv = 0, scrub = false;
+    f.addEventListener('pointerdown', function (e) {
+      if (e.target.closest('button')) return;
+      sx = e.clientX; sv = parse(); scrub = false;
+      window.addEventListener('pointermove', smv); window.addEventListener('pointerup', smu);
+    });
+    function smv(ev) {
+      if (!scrub && Math.abs(ev.clientX - sx) < 4) return;
+      if (!scrub) { scrub = true; document.body.classList.add('scrubbing'); try { input.blur(); } catch (_) {} }
+      apply(sv + Math.round((ev.clientX - sx) / 3) * step);
+    }
+    function smu() {
+      window.removeEventListener('pointermove', smv); window.removeEventListener('pointerup', smu);
+      document.body.classList.remove('scrubbing'); scrub = false;
+    }
+  });
+})();
+</script>
+</body>
+</html>

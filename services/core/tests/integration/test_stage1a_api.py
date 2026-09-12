@@ -4,10 +4,47 @@ from os import replace
 from pathlib import Path
 from shutil import copyfile
 
+import pytest
 from fastapi.testclient import TestClient
 
 from aivs_core.app import create_app
 from aivs_core.config import Settings
+
+
+@pytest.mark.parametrize(
+    "canvas,expected",
+    [
+        ({"width": 1920, "height": 1080}, {"width": 1920, "height": 1080, "fps_num": 30, "fps_den": 1}),
+        ({"width": 1080, "height": 1920, "fps_num": 25, "fps_den": 1}, {"width": 1080, "height": 1920, "fps_num": 25, "fps_den": 1}),
+        (None, {"width": 1080, "height": 1920, "fps_num": 30, "fps_den": 1}),
+    ],
+)
+def test_create_project_canvas_presets(tmp_path: Path, monkeypatch, canvas, expected):
+    monkeypatch.setenv("AIVS_ADMIN_TOKEN", "admin-canvas")
+    app = create_app(Settings(data_dir=tmp_path, ffmpeg=Path("missing"), ffprobe=Path("missing")))
+    with TestClient(app) as client:
+        admin = {"Authorization": "Bearer admin-canvas"}
+        session = client.post("/api/v1/internal/sessions", headers=admin)
+        ui = {"Authorization": f"Bearer {session.json()['token']}"}
+        body = {"name": "Canvas Project"}
+        if canvas is not None:
+            body["canvas"] = canvas
+        created = client.post("/api/v1/projects", headers=ui, json=body)
+        assert created.status_code == 201
+        assert created.json()["canvas"] == expected
+
+
+def test_create_project_rejects_invalid_canvas(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("AIVS_ADMIN_TOKEN", "admin-canvas-bad")
+    app = create_app(Settings(data_dir=tmp_path, ffmpeg=Path("missing"), ffprobe=Path("missing")))
+    with TestClient(app) as client:
+        admin = {"Authorization": "Bearer admin-canvas-bad"}
+        session = client.post("/api/v1/internal/sessions", headers=admin)
+        ui = {"Authorization": f"Bearer {session.json()['token']}"}
+        for canvas in ({"width": 1001, "height": 1080}, {"height": 1080}, {"width": 2000, "height": 1080, "fps_num": 0}):
+            response = client.post("/api/v1/projects", headers=ui, json={"name": "Bad Canvas", "canvas": canvas})
+            assert response.status_code == 400
+            assert response.json()["error"]["code"] == "PROJECT_CANVAS_INVALID"
 
 
 def test_stage1a_project_asset_lifecycle_and_redaction(tmp_path: Path, monkeypatch):
@@ -152,10 +189,69 @@ def test_stage1a_project_asset_lifecycle_and_redaction(tmp_path: Path, monkeypat
         assert relocated_asset.status_code == 200
         assert relocated_asset.json()["fingerprint"] == original_fingerprint
 
+        # 素材删除：被时间线 Clip 引用时默认拒绝（ASSET_IN_USE）；
+        # remove_timeline_clips=true 时级联删除片段并返回清理计数；
+        # 无引用时直接删除（列表减少）。Timeline Clip 存于 document_json
+        # （无外键），直接插入一行带引用的 revision 模拟"素材在时间线中使用"。
+        asset_list_before = client.get(f"/api/v1/projects/{project_id}/assets", headers=ui).json()
+        deletable = next(
+            item["asset_id"] for item in asset_list_before["items"] if item["asset_id"] != assets[0][0]
+        )
+        import json as _json
+        referenced_doc = {
+            "schema_version": 1,
+            "project_id": project_id,
+            "canvas": {"width": 1080, "height": 1920, "fps_num": 30, "fps_den": 1, "background_color": "#000000"},
+            "tracks": [
+                {"id": "V1", "kind": "video", "locked": False, "hidden": False, "muted": False, "solo": False},
+                {"id": "A1", "kind": "audio", "locked": False, "hidden": False, "muted": False, "solo": False},
+            ],
+            "clips": [{
+                "clip_id": "clip_ref", "track_id": "V1", "order_index": 0,
+                "asset_id": assets[0][0], "asset_kind": "video",
+                "source_start_us": 0, "source_end_us": 1_000_000,
+                "timeline_start_us": 0, "timeline_end_us": 1_000_000,
+                "layout": "fit", "audio": {"enabled": False, "gain_db": 0},
+            }],
+            "captions": [],
+            "locked_elements": [],
+        }
+        import sqlite3 as _sqlite3
+        with _sqlite3.connect(tmp_path / "app.db") as raw_db:
+            raw_db.execute(
+                "INSERT INTO timeline_revisions(id,project_id,parent_revision_id,schema_version,"
+                "document_json,document_sha256,summary,created_by,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                ("revision_inuse", project_id, None, 1, _json.dumps(referenced_doc), "sha256:" + "0" * 64, "in-use fixture", "user", "2026-01-01T00:00:00Z"),
+            )
+        in_use = client.delete(f"/api/v1/assets/{assets[0][0]}", headers=ui)
+        assert in_use.status_code == 409
+        assert in_use.json()["error"]["code"] == "ASSET_IN_USE"
+        cascade = client.delete(f"/api/v1/assets/{assets[0][0]}?remove_timeline_clips=true", headers=ui)
+        assert cascade.status_code == 200
+        assert cascade.json()["removed_clips"] == 1
+        assert cascade.json()["removed_captions"] == 0
+        with _sqlite3.connect(tmp_path / "app.db") as raw_db:
+            row = raw_db.execute(
+                "SELECT document_json, document_sha256 FROM timeline_revisions WHERE id='revision_inuse'"
+            ).fetchone()
+            assert assets[0][0] not in row[0]
+            assert raw_db.execute(
+                "SELECT COUNT(*) FROM timeline_revisions tr, json_each(tr.document_json, '$.clips') "
+                "WHERE json_extract(json_each.value, '$.asset_id')=?",
+                (assets[0][0],),
+            ).fetchone()[0] == 0
+            assert row[1].startswith("sha256:") and row[1] != "sha256:" + "0" * 64
+            assert raw_db.execute("SELECT COUNT(*) FROM assets WHERE id=?", (assets[0][0],)).fetchone()[0] == 0
+        deleted = client.delete(f"/api/v1/assets/{deletable}", headers=ui)
+        assert deleted.status_code == 200
+        assert deleted.json() == {"removed_clips": 0, "removed_captions": 0}
+        asset_list = client.get(f"/api/v1/projects/{project_id}/assets", headers=ui).json()
+        assert len(asset_list["items"]) == len(asset_list_before["items"]) - 2
+
         project_list = client.get("/api/v1/projects", headers=ui).json()
         asset_list = client.get(f"/api/v1/projects/{project_id}/assets", headers=ui).json()
         assert len(project_list["items"]) == 1
-        assert len(asset_list["items"]) == 4
+        assert len(asset_list["items"]) == 2  # 4 项 - 级联删除 1 项 - 无引用删除 1 项
         serialized = json.dumps({"project": project_list, "assets": asset_list})
         assert str(tmp_path) not in serialized
         assert "admin-stage1a" not in serialized
@@ -182,6 +278,7 @@ def test_stage1a_project_asset_lifecycle_and_redaction(tmp_path: Path, monkeypat
             ("v15",),
             ("v16",),
             ("v17",),
+            ("v18",),
         ]
     assert list((tmp_path / "backups").glob("app-*.db"))
 

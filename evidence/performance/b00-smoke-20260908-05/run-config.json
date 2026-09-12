@@ -1,0 +1,22 @@
+{
+  "runs": "1",
+  "seeks": "100",
+  "playback-seconds": "30",
+  "smoke": true,
+  "scenarios": "F01",
+  "baseline_status": "smoke-only-not-G0",
+  "commit": "b15015b6682ec900ae1a7a3500e82ff12663b942",
+  "code_fingerprint": "1547154fcf6bf3adf4b24c6a03e32bdecad3af29d7fae284c5771bd81014c197",
+  "dirty_files": "M .gitignore\n M apps/desktop/src/app/preview/compositor-worker.ts\n M apps/desktop/src/app/preview/compositor-worker.worker.ts\n M apps/desktop/src/app/preview/preview-session.ts\n M apps/desktop/src/app/timeline/TimelineCanvas.tsx\n M apps/desktop/src/probes/env.d.ts\n M apps/desktop/src/renderer/main.tsx\n M services/core/src/aivs_core/app.py\n M services/core/src/aivs_core/database.py\n M services/core/src/aivs_core/media/ffprobe.py\n M services/core/src/aivs_core/rendering/ffmpeg.py\n M services/core/src/aivs_core/rendering/ir.py\n M services/core/src/aivs_core/rendering/plan.py\n?? apps/desktop/e2e/performance-editor.spec.ts\n?? apps/desktop/src/app/preview/perf-metrics.ts\n?? apps/desktop/tests/perf-compositor.test.ts\n?? apps/desktop/tests/perf-metrics.test.ts\n?? docs/PERFORMANCE_ASSESSMENT_2026-09-08.md\n?? docs/PERFORMANCE_IMPLEMENTATION_PLAN_2026-09-08.md\n?? evidence/performance-2026-09-08/\n?? evidence/performance/\n?? services/core/src/aivs_core/performance.py\n?? services/core/tests/unit/test_performance_diagnostics.py\n?? tools/performance/",
+  "node": "v24.19.0",
+  "fixture": {
+    "file": "F01.mp4",
+    "sha256": "4e51be3e3a70ba5192f2b682ed50545cfe111ec22857366f8b54876ee1c8d5b0",
+    "duration_s": 12,
+    "size": "640x360",
+    "fps": 30,
+    "recipe": "testsrc2-av-cfr-v1",
+    "bytes": 3123032,
+    "coverage_note": "Media only; not historical PiP, VFR/B-frame, multilayer or audio-failure coverage."
+  }
+}

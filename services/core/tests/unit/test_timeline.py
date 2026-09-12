@@ -191,7 +191,14 @@ def test_all_clip_patch_operations_and_normalization(tmp_path: Path) -> None:
     )
     clips = state["current_revision"]["document"]["clips"]
     assert [clip["order_index"] for clip in clips] == list(range(4))
-    assert [clip["timeline_start_us"] for clip in clips] == [0, 1_000_000, 3_000_000, 5_000_000]
+    # 自由定位：move_clip 只改列表顺序不重排时间；变速/裁剪在原位发生，
+    # 变长时把后续片段涟漪右推，缩短后留下空隙。
+    assert [clip["timeline_start_us"] for clip in clips] == [
+        7_000_000,
+        500_000,
+        2_500_000,
+        5_000_000,
+    ]
     assert clips[1]["layout"] == "crop_fill"
     assert clips[1]["audio"]["gain_db"] == -3.0
     state = _patch(service, state, [{"op": "remove_clip", "clip_id": image_id}])
@@ -281,6 +288,69 @@ def test_caption_operations_and_clip_linkage(tmp_path: Path) -> None:
     manual_id = state["current_revision"]["document"]["captions"][0]["caption_id"]
     state = _patch(service, state, [{"op": "remove_caption", "caption_id": manual_id}])
     assert state["current_revision"]["document"]["captions"] == []
+
+
+def test_import_captions_batch_replaces_and_validates(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "empty"})
+    # 批量导入：乱序条目自动排序；replace_existing 清掉旧手工字幕。
+    state = _patch(
+        service,
+        state,
+        [
+            {
+                "op": "add_caption",
+                "start_us": 0,
+                "end_us": 300_000,
+                "text": "旧字幕",
+                "preset_id": "default-bottom",
+                "source_clip_id": None,
+            },
+            {
+                "op": "import_captions",
+                "entries": [
+                    {"start_us": 1_000_000, "end_us": 1_500_000, "text": "第二句"},
+                    {"start_us": 0, "end_us": 800_000, "text": "第一句"},
+                ],
+                "preset_id": "default-bottom",
+                "replace_existing": True,
+            },
+        ],
+    )
+    captions = state["current_revision"]["document"]["captions"]
+    assert [c["text"] for c in captions] == ["第一句", "第二句"]
+    assert all(c["origin"] == "user" and c["track_id"] == "C1" for c in captions)
+    # 时间重叠拒绝（原子回滚，上一状态不变）。
+    with pytest.raises(DomainError):
+        _patch(
+            service,
+            state,
+            [
+                {
+                    "op": "import_captions",
+                    "entries": [
+                        {"start_us": 0, "end_us": 1_000_000, "text": "a"},
+                        {"start_us": 500_000, "end_us": 1_200_000, "text": "b"},
+                    ],
+                    "preset_id": "default-bottom",
+                    "replace_existing": False,
+                }
+            ],
+        )
+    # 条目时长不足 0.2s 拒绝。
+    with pytest.raises(DomainError):
+        _patch(
+            service,
+            state,
+            [
+                {
+                    "op": "import_captions",
+                    "entries": [{"start_us": 0, "end_us": 100_000, "text": "短"}],
+                    "preset_id": "default-bottom",
+                    "replace_existing": False,
+                }
+            ],
+        )
 
 
 def test_patch_is_atomic_conflict_navigation_branch_and_draft(tmp_path: Path) -> None:
@@ -411,7 +481,8 @@ def test_revision_listing_trimmed_caption_and_invalid_draft_shape(tmp_path: Path
         ],
     )
     caption = state["current_revision"]["document"]["captions"][0]
-    assert (caption["start_us"], caption["end_us"]) == (0, 800_000)
+    # 自由定位：裁剪后片段窗口为 [200ms, 1s)，绑定字幕钳制进该窗口。
+    assert (caption["start_us"], caption["end_us"]) == (200_000, 1_000_000)
     invalid = copy.deepcopy(state["current_revision"]["document"])
     invalid["ui_x"] = 10
     with pytest.raises(DomainError) as bad_draft:
@@ -428,25 +499,105 @@ def test_revision_listing_trimmed_caption_and_invalid_draft_shape(tmp_path: Path
         service.list_revisions("p1", cursor="bad")
 
 
-def test_audio_clip_insert_upgrades_tracks_and_appends_to_a1(tmp_path: Path) -> None:
+def test_audio_clip_insert_appends_to_a1(tmp_path: Path) -> None:
     service, _ = _service(tmp_path)
     state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
+    # 多轨道规范序（自上而下）：动态轨区 + C1 + V1 + A1；A1 恒存在。
     assert [track["id"] for track in state["current_revision"]["document"]["tracks"]] == [
+        "C1",
         "V1",
         "A1",
-        "C1",
     ]
+
+
+def test_track_management_add_remove_move_and_flags(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
+    video_id = state["current_revision"]["document"]["clips"][0]["clip_id"]
+
+    # 新增轨道插入到 C1 之上（动态区域底部）；视频轨 V2、文本轨 T1。
+    state = _patch(
+        service,
+        state,
+        [{"op": "add_track", "kind": "video"}, {"op": "add_track", "kind": "text"}],
+    )
+    tracks = state["current_revision"]["document"]["tracks"]
+    assert [track["id"] for track in tracks] == ["V2", "T1", "C1", "V1", "A1"]
+    assert [track["kind"] for track in tracks[:2]] == ["video", "text"]
+
+    # 跨轨移动：V1 → V2（同类型轨道）。
+    state = _patch(
+        service,
+        state,
+        [{"op": "position_clip", "clip_id": video_id, "timeline_start_us": 0, "track_id": "V2"}],
+    )
+    moved = next(
+        clip for clip in state["current_revision"]["document"]["clips"] if clip["clip_id"] == video_id
+    )
+    assert moved["track_id"] == "V2"
+
+    # 换位：T1 移到动态区域顶部。
+    state = _patch(service, state, [{"op": "move_track", "track_id": "T1", "to_index": 0}])
+    assert [track["id"] for track in state["current_revision"]["document"]["tracks"]][:2] == ["T1", "V2"]
+
+    # 轨道标志：隐藏/静音/独奏/锁定一次设置。
+    state = _patch(
+        service,
+        state,
+        [{"op": "set_track_flags", "track_id": "V2", "hidden": True, "muted": True, "solo": True, "locked": True}],
+    )
+    v2 = next(track for track in state["current_revision"]["document"]["tracks"] if track["id"] == "V2")
+    assert (v2["hidden"], v2["muted"], v2["solo"], v2["locked"]) == (True, True, True, True)
+
+    # 锁定轨道上的片段不可再操作；解锁由 set_track_flags 自身完成。
+    with pytest.raises(DomainError) as locked_track:
+        _patch(
+            service,
+            state,
+            [{"op": "position_clip", "clip_id": video_id, "timeline_start_us": 1_000_000}],
+        )
+    assert locked_track.value.code == "TIMELINE_LOCKED"
+    state = _patch(service, state, [{"op": "set_track_flags", "track_id": "V2", "locked": False}])
+
+    # 类型约束：文本轨不支持静音；音频轨不可新增；音频片段不可上视频轨。
+    with pytest.raises(DomainError):
+        _patch(service, state, [{"op": "set_track_flags", "track_id": "T1", "muted": True}])
+    with pytest.raises(DomainError):
+        _patch(service, state, [{"op": "add_track", "kind": "audio"}])
+    with pytest.raises(DomainError):
+        _patch(service, state, [{"op": "position_clip", "clip_id": video_id, "timeline_start_us": 0, "track_id": "T1"}])
+
+    # 删除动态轨道：其上片段级联删除；固定轨道不可删。
+    state = _patch(service, state, [{"op": "remove_track", "track_id": "V2"}])
+    assert all(clip["clip_id"] != video_id for clip in state["current_revision"]["document"]["clips"])
+    assert all(track["id"] != "V2" for track in state["current_revision"]["document"]["tracks"])
+    with pytest.raises(DomainError):
+        _patch(service, state, [{"op": "remove_track", "track_id": "V1"}])
+    with pytest.raises(DomainError):
+        _patch(service, state, [{"op": "move_track", "track_id": "A1", "to_index": 0}])
+
+    # 文本轨与动态轨一致：可删除（删后 V1/A1 尾部结构仍合法），可重建。
+    state = _patch(service, state, [{"op": "remove_track", "track_id": "C1"}])
+    remaining_ids = [track["id"] for track in state["current_revision"]["document"]["tracks"]]
+    assert remaining_ids[-2:] == ["V1", "A1"]
+    assert "C1" not in remaining_ids
+    state = _patch(service, state, [{"op": "add_track", "kind": "text"}])
+    rebuilt_ids = [track["id"] for track in state["current_revision"]["document"]["tracks"]]
+    # 新文本轨编号递增（不复用已删 id），插入到 V1 之前。
+    assert rebuilt_ids[-3].startswith("T") and rebuilt_ids[-2:] == ["V1", "A1"]
+
+
+def test_audio_insert_appends_to_a1_with_free_positions(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
     state = _patch(
         service,
         state,
         [{"op": "insert_asset_clip", "asset_id": "a1", "at_index": 0}],
     )
     document = state["current_revision"]["document"]
-    assert [track["id"] for track in document["tracks"]] == ["V1", "A1", "C1"]
     assert any(track["id"] == "A1" and track["kind"] == "audio" for track in document["tracks"])
-    video_clips = [c for c in document["clips"] if c["track_id"] == "V1"]
     audio_clips = [c for c in document["clips"] if c["track_id"] == "A1"]
-    assert len(video_clips) == 1
     assert len(audio_clips) == 1
     audio = audio_clips[0]
     assert (audio["asset_kind"], audio["timeline_start_us"], audio["timeline_end_us"]) == (
@@ -477,7 +628,7 @@ def test_audio_clip_insert_upgrades_tracks_and_appends_to_a1(tmp_path: Path) -> 
     assert [(c["timeline_start_us"], c["timeline_end_us"]) for c in video_clips] == [(0, 5_000_000)]
 
 
-def test_position_clip_moves_audio_freely_but_rejects_v1(tmp_path: Path) -> None:
+def test_position_clip_moves_audio_and_video_freely_but_rejects_overlaps(tmp_path: Path) -> None:
     service, _ = _service(tmp_path)
     state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
     state = _patch(
@@ -508,13 +659,58 @@ def test_position_clip_moves_audio_freely_but_rejects_v1(tmp_path: Path) -> None
     )
     assert (audio["timeline_start_us"], audio["timeline_end_us"]) == (12_500_000, 20_500_000)
 
-    with pytest.raises(DomainError) as video_position:
+    # V1 视频片段同样可以自由定位（可留空隙），时长保持不变。
+    state = _patch(
+        service,
+        state,
+        [{"op": "position_clip", "clip_id": video_id, "timeline_start_us": 1_000_000}],
+    )
+    video = next(c for c in state["current_revision"]["document"]["clips"] if c["track_id"] == "V1")
+    assert (video["timeline_start_us"], video["timeline_end_us"]) == (1_000_000, 6_000_000)
+    state = _patch(
+        service,
+        state,
+        [{"op": "position_clip", "clip_id": video_id, "timeline_start_us": 0}],
+    )
+    video = next(c for c in state["current_revision"]["document"]["clips"] if c["track_id"] == "V1")
+    assert (video["timeline_start_us"], video["timeline_end_us"]) == (0, 5_000_000)
+
+    # 与同轨其他片段重叠被拒绝。
+    state = _patch(
+        service,
+        state,
+        [
+            {
+                "op": "insert_asset_clip",
+                "asset_id": "v2",
+                "at_index": 1,
+                "source_start_us": 0,
+                "source_end_us": 1_000_000,
+            }
+        ],
+    )
+    second_video_id = next(
+        c["clip_id"]
+        for c in state["current_revision"]["document"]["clips"]
+        if c["track_id"] == "V1" and c["clip_id"] != video_id
+    )
+    with pytest.raises(DomainError) as overlap:
         _patch(
             service,
             state,
-            [{"op": "position_clip", "clip_id": video_id, "timeline_start_us": 1_000_000}],
+            [{"op": "position_clip", "clip_id": second_video_id, "timeline_start_us": 1_000_000}],
         )
-    assert video_position.value.code == "TIMELINE_INVALID"
+    assert overlap.value.code == "TIMELINE_INVALID"
+    # 紧贴（首尾相接）是允许的。
+    state = _patch(
+        service,
+        state,
+        [{"op": "position_clip", "clip_id": second_video_id, "timeline_start_us": 5_000_000}],
+    )
+    moved = next(
+        c for c in state["current_revision"]["document"]["clips"] if c["clip_id"] == second_video_id
+    )
+    assert (moved["timeline_start_us"], moved["timeline_end_us"]) == (5_000_000, 6_000_000)
     with pytest.raises(DomainError) as negative:
         _patch(
             service,
@@ -631,7 +827,8 @@ def test_audio_and_video_tracks_coexist_with_independent_normalization(tmp_path:
     )
     document = state["current_revision"]["document"]
     video = next(c for c in document["clips"] if c["track_id"] == "V1")
-    assert (video["timeline_start_us"], video["timeline_end_us"]) == (0, 3_500_000)
+    # 自由定位：V1 裁剪原位发生（左缘右移、右缘固定），不再重打包回零。
+    assert (video["timeline_start_us"], video["timeline_end_us"]) == (500_000, 4_000_000)
     audio_by_id = {c["clip_id"]: c for c in document["clips"] if c["track_id"] == "A1"}
     assert (
         audio_by_id[audio_ids[0]]["timeline_start_us"],
@@ -684,11 +881,21 @@ def test_set_speed_rescales_v1_timeline_and_later_clips(tmp_path: Path) -> None:
     assert clips[0]["speed_milli"] == 500
 
     # 恢复原速 + 加速：4x 时 5s 视频 → 1.25s。
+    # 自由定位：缩短后不再自动合拢，v2 保持在被推开的 10s 位置。
     state = _patch(service, state, [{"op": "set_speed", "clip_id": first_id, "speed_milli": 1000}])
     clips = state["current_revision"]["document"]["clips"]
     assert (clips[0]["timeline_start_us"], clips[0]["timeline_end_us"]) == (0, 5_000_000)
-    assert clips[1]["timeline_start_us"] == 5_000_000
+    assert clips[1]["timeline_start_us"] == 10_000_000
     state = _patch(service, state, [{"op": "set_speed", "clip_id": second_id, "speed_milli": 4000}])
+    clips = state["current_revision"]["document"]["clips"]
+    assert (clips[1]["timeline_start_us"], clips[1]["timeline_end_us"]) == (10_000_000, 10_500_000)
+
+    # 变短后的空隙可以通过 position_clip 重新贴回（自由定位语义）。
+    state = _patch(
+        service,
+        state,
+        [{"op": "position_clip", "clip_id": second_id, "timeline_start_us": 5_000_000}],
+    )
     clips = state["current_revision"]["document"]["clips"]
     assert (clips[1]["timeline_start_us"], clips[1]["timeline_end_us"]) == (5_000_000, 5_500_000)
 
@@ -1006,6 +1213,133 @@ def test_keyframes_set_clear_and_diff(tmp_path: Path) -> None:
         _patch(service, state, [{"op": "clear_clip_keyframes", "clip_id": clip_id, "property": "opacity"}])
 
 
+def test_transform_set_clear_and_diff(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
+    clip_id = state["current_revision"]["document"]["clips"][0]["clip_id"]
+    base = state["current_revision"]
+
+    # 设置静态变换（完整字段）。
+    state = _patch(
+        service, state,
+        [{"op": "set_clip_transform", "clip_id": clip_id,
+          "transform": {"x": 0.7, "y": 0.2, "scale": 0.4, "rotate": 15.0, "opacity": 0.85}}],
+    )
+    transform = state["current_revision"]["document"]["clips"][0]["transform"]
+    assert transform == {"x": 0.7, "y": 0.2, "scale": 0.4, "rotate": 15.0, "opacity": 0.85}
+
+    # 部分字段覆盖（只改归一侧，其余保留）。
+    state = _patch(
+        service, state,
+        [{"op": "set_clip_transform", "clip_id": clip_id,
+          "transform": {"scale": 0.6}}],
+    )
+    transform = state["current_revision"]["document"]["clips"][0]["transform"]
+    assert transform == {"scale": 0.6}
+
+    # diff 记录 transform_changed（相对 base，一次覆盖）。
+    diff = service.compare_revisions("p1", base["timeline_revision_id"], state["current_revision"]["timeline_revision_id"])
+    assert sum(1 for c in diff["clip_changes"] if c["type"] == "transform_changed") == 1
+
+    # 空 transform = 清除字段（回到缺省）。
+    state = _patch(service, state, [{"op": "set_clip_transform", "clip_id": clip_id, "transform": {}}])
+    assert "transform" not in state["current_revision"]["document"]["clips"][0]
+
+    # 非法路径：越界值 / 字段不合法。
+    for bad in (
+        {"x": 1.2},
+        {"y": -0.1},
+        {"scale": 6.0},
+        {"scale": 0.01},
+        {"rotate": 200.0},
+        {"opacity": 1.5},
+        {"unknown": 1.0},
+    ):
+        with pytest.raises(DomainError):
+            _patch(service, state, [{"op": "set_clip_transform", "clip_id": clip_id, "transform": bad}])
+
+
+def test_mask_set_clear_and_diff(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
+    clip_id = state["current_revision"]["document"]["clips"][0]["clip_id"]
+    base = state["current_revision"]
+
+    # 设置椭圆蒙版。
+    state = _patch(
+        service, state,
+        [{"op": "set_clip_mask", "clip_id": clip_id,
+          "mask": {"kind": "ellipse", "x": 0.5, "y": 0.5, "width": 0.6, "height": 0.8, "feather": 0.1, "rotation": 0.0, "invert": False}}],
+    )
+    mask = state["current_revision"]["document"]["clips"][0]["mask"]
+    assert mask["kind"] == "ellipse" and mask["width"] == 0.6 and mask["feather"] == 0.1
+
+    # 线性蒙版 + 反选。
+    state = _patch(service, state, [{"op": "set_clip_mask", "clip_id": clip_id, "mask": {"kind": "linear", "rotation": 90.0, "invert": True}}])
+    mask = state["current_revision"]["document"]["clips"][0]["mask"]
+    assert mask == {"kind": "linear", "rotation": 90.0, "invert": True}
+
+    # diff 记录 mask_changed（相对 base）。
+    diff = service.compare_revisions("p1", base["timeline_revision_id"], state["current_revision"]["timeline_revision_id"])
+    assert sum(1 for c in diff["clip_changes"] if c["type"] == "mask_changed") == 1
+
+    # 空 mask = 清除字段（回到无蒙版）。
+    state = _patch(service, state, [{"op": "set_clip_mask", "clip_id": clip_id, "mask": {}}])
+    assert "mask" not in state["current_revision"]["document"]["clips"][0]
+
+    # 非法路径：越界 / 非法类型 / 未知字段。
+    for bad in (
+        {"kind": "star"},
+        {"kind": "rect", "width": 0.0},
+        {"kind": "rect", "height": 1.5},
+        {"kind": "ellipse", "x": 1.2},
+        {"kind": "ellipse", "feather": -0.1},
+        {"kind": "linear", "rotation": 190.0},
+        {"kind": "rect", "unknown": 1.0},
+        {"kind": "ellipse", "invert": "yes"},
+    ):
+        with pytest.raises(DomainError):
+            _patch(service, state, [{"op": "set_clip_mask", "clip_id": clip_id, "mask": bad}])
+
+
+def test_keying_set_clear_and_diff(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
+    clip_id = state["current_revision"]["document"]["clips"][0]["clip_id"]
+    base = state["current_revision"]
+
+    # 设置绿幕抠像。
+    state = _patch(service, state, [{"op": "set_clip_keying", "clip_id": clip_id,
+                                     "keying": {"color": "00FF00", "similarity": 0.4, "blend": 0.1, "invert": False}}])
+    keying = state["current_revision"]["document"]["clips"][0]["keying"]
+    assert keying == {"color": "00FF00", "similarity": 0.4, "blend": 0.1, "invert": False}
+
+    # 部分更新 + 反选（整块替换，语义同 set_clip_mask）。
+    state = _patch(service, state, [{"op": "set_clip_keying", "clip_id": clip_id, "keying": {"similarity": 0.2, "invert": True}}])
+    keying = state["current_revision"]["document"]["clips"][0]["keying"]
+    assert keying == {"similarity": 0.2, "invert": True}
+
+    # diff 记录 keying_changed（相对 base）。
+    diff = service.compare_revisions("p1", base["timeline_revision_id"], state["current_revision"]["timeline_revision_id"])
+    assert sum(1 for c in diff["clip_changes"] if c["type"] == "keying_changed") == 1
+
+    # 空 keying = 清除字段。
+    state = _patch(service, state, [{"op": "set_clip_keying", "clip_id": clip_id, "keying": {}}])
+    assert "keying" not in state["current_revision"]["document"]["clips"][0]
+
+    # 非法路径。
+    for bad in (
+        {"color": "green"},
+        {"color": "GGGGGG"},
+        {"color": "00FF00", "similarity": 1.5},
+        {"color": "00FF00", "blend": -0.1},
+        {"color": "00FF00", "unknown": 1},
+        {"color": "00FF00", "invert": "yes"},
+    ):
+        with pytest.raises(DomainError):
+            _patch(service, state, [{"op": "set_clip_keying", "clip_id": clip_id, "keying": bad}])
+
+
 def test_keyframes_remap_on_speed_and_split_partition(tmp_path: Path) -> None:
     service, _ = _service(tmp_path)
     state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
@@ -1092,13 +1426,17 @@ def test_caption_style_set_merge_clear_and_diff(tmp_path: Path) -> None:
     assert any(c["type"] == "style_changed" for c in diff["caption_changes"])
 
     # 非法路径：字段越界、颜色格式、对齐值、坐标越界、未知字段。
+    # （对齐已扩展为 ASS numpad 1-9；0 越界、10 越界仍拒绝。）
     for bad_style in (
         {"font_size": 200},
         {"outline": 20},
-        {"alignment": 3},
+        {"alignment": 0},
+        {"alignment": 10},
         {"margin_v": 900},
         {"primary_color": "red"},
         {"pos_x": 1.5},
+        {"letter_spacing": -1},
+        {"bold": "yes"},
         {"unknown_field": 1},
     ):
         with pytest.raises(DomainError):

@@ -373,7 +373,11 @@ def test_real_preview_export_reuse_stale_fingerprint_and_ssim(
         export_artifact = client.get(
             f"/api/v1/render-artifacts/{export_record['render_artifact_id']}", headers=ui
         ).json()
-        assert export_artifact["content_fingerprint"] == preview["content_fingerprint"]
+        # c9875e2 起输出规格参与 content_fingerprint（preview 540 vs export 1080
+        # 是不同渲染产物，防跨比例误复用）：同一时间线内容跨 profile 指纹
+        # 必然不同。内容等价性由下方 duration 容差与 SSIM 校验承担。
+        assert re.fullmatch(r"sha256:[a-f0-9]{64}", export_artifact["content_fingerprint"])
+        assert export_artifact["content_fingerprint"] != preview["content_fingerprint"]
         preview_path = Path(
             client.get(
                 f"/api/v1/internal/artifacts/{preview_id}/resolve", headers=admin
@@ -483,14 +487,15 @@ def test_real_preview_export_reuse_stale_fingerprint_and_ssim(
             assert db.execute(
                 "SELECT COUNT(*) FROM artifacts WHERE job_id=?", (cancel_job_id,)
             ).fetchone()[0] == 0
+        # 字节级比较：tasklist 输出为系统本地编码（中文 Windows = GBK），
+        # text=True 按平台默认 UTF-8 解码会抛错使 stdout 为 None。
         tasklist = subprocess.run(
             ["tasklist", "/FI", f"PID eq {worker_pid}"],
             capture_output=True,
-            text=True,
             timeout=10,
             check=False,
         ).stdout
-        assert str(worker_pid) not in tasklist
+        assert str(worker_pid).encode("ascii") not in (tasklist or b"")
         if evidence_value:
             (Path(evidence_value).resolve() / "cancel.json").write_text(
                 json.dumps(

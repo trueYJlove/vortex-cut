@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vortex Cut · 整体视觉方案 v2（背景规范已确认 · 强调色待确认）</title>
+<style>
+/* ═══════════════ 页面底座 ═══════════════ */
+:root {
+  /* —— 已确认 · 背景规范（10 区域，已同步代码）—— */
+  --bg-titlebar: #000000;    /* 顶部状态栏 */
+  --bg-shell: #0f1214;       /* 面板容器：左素材库 / 右属性面板头 */
+  --bg-content: #181c1f;     /* 内容层：详情卡 / 时间线工具栏 / 无轨道区 / 播放区 / 属性页 */
+  --bg-track-video: #202427; /* 视频轨道（素材未覆盖部分） */
+  --bg-track-audio: #24272b; /* 音频轨道（素材未覆盖部分） */
+  /* —— 提案 · 待确认（万兴喵影风格强调系统）—— */
+  --accent: #25d3ac;         /* 强调 · 薄荷绿（选中/进度/主按钮） */
+  --accent-strong: #12b998;  /* 主按钮实底 */
+  --accent-dim: rgba(37,211,172,.13);
+  --playhead: #f65d55;       /* 播放头 · 珊瑚红 */
+  --playhead-dim: rgba(246,93,85,.15);
+  --bg-float: #2c2c2c;       /* 浮层（菜单/弹窗）提案 */
+  --border: rgba(255,255,255,.07);
+  --border-2: rgba(255,255,255,.13);
+  --text: #e8e8e8; --text-2: #a6a6a6; --text-3: #707070;
+  --head: #12181c;           /* 轨道头列（未规范，沿用现状） */
+  --sep: #14171a;            /* 行分隔线（连带调整） */
+  --r: 8px; --r-s: 6px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { background: #101315; }
+body { color: var(--text); font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif; font-size: 13px; padding: 34px 40px 90px; -webkit-font-smoothing: antialiased; }
+button { background: none; border: 0; font-family: inherit; color: inherit; cursor: default; }
+h1 { font-size: 22px; font-weight: 650; }
+h1 .en { color: var(--text-3); font-weight: 400; font-size: 13px; margin-left: 10px; }
+.sub { color: var(--text-2); line-height: 1.8; max-width: 1180px; margin: 8px 0 4px; }
+.sub b { color: var(--accent); font-weight: 600; }
+h2.sec { font-size: 17px; margin: 52px 0 6px; padding-top: 28px; border-top: 1px solid rgba(255,255,255,.08); }
+h2.sec .no { color: var(--accent); font-family: Consolas, monospace; margin-right: 10px; }
+h2.sec .st { font-size: 10.5px; font-weight: 600; border-radius: 999px; padding: 2px 10px; margin-left: 10px; vertical-align: 3px; }
+h2.sec .st.done { color: var(--accent); border: 1px solid rgba(37,211,172,.5); background: rgba(37,211,172,.08); }
+h2.sec .st.prop { color: var(--text-3); border: 1px solid var(--border-2); }
+.secdesc { color: var(--text-2); font-size: 12.5px; line-height: 1.8; max-width: 1180px; margin-bottom: 18px; }
+.secdesc b { color: var(--text); }
+.footnote { margin-top: 56px; color: var(--text-3); font-size: 12px; line-height: 1.9; max-width: 1180px; }
+.footnote code { color: var(--accent); font-family: Consolas, monospace; }
+.footnote .rev { color: var(--warn, #e8b45a); }
+/* 强调色候选卡 */
+.accgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(208px, 1fr)); gap: 14px; max-width: 1180px; }
+.acc { background: var(--bg-content); border: 1px solid var(--border); border-radius: var(--r); padding: 14px; }
+.acc.sel { border-color: var(--border-2); box-shadow: 0 0 0 1px var(--border-2); }
+.acc h3 { font-size: 13px; display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.acc h3 .dot { width: 14px; height: 14px; border-radius: 4px; flex: none; }
+.acc h3 code { margin-left: auto; font-size: 10.5px; color: var(--text-3); font-weight: 400; }
+.acc p { font-size: 11.5px; color: var(--text-2); line-height: 1.7; min-height: 76px; }
+.acc .use { display: block; margin-top: 8px; height: 26px; border-radius: var(--r-s); font-size: 11.5px; text-align: center; line-height: 26px; font-weight: 650; }
+.acc .pair { margin-top: 7px; font-size: 10.5px; color: var(--text-3); line-height: 1.6; }
+.acc .verdict { margin-top: 8px; font-size: 11px; font-weight: 600; }
+.acc .verdict.rec { color: #e8e8e8; }
+.acc .verdict.bad { color: #f0655e; }
+.ico { width: 15px; height: 15px; display: inline-block; vertical-align: -3px; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ═══════════════ ① 背景阶梯 ═══════════════ */
+.ladder { display: flex; align-items: stretch; gap: 8px; max-width: 1180px; flex-wrap: wrap; }
+.lstep { flex: 1; min-width: 170px; border-radius: var(--r); overflow: hidden; border: 1px solid var(--border-2); }
+.lstep .chip { height: 58px; display: flex; align-items: flex-end; padding: 8px 10px; }
+.lstep .chip b { font-family: Consolas, monospace; font-size: 12px; }
+.lstep .meta { background: var(--bg-content); padding: 8px 10px; }
+.lstep .meta b { display: block; font-size: 12px; }
+.lstep .meta span { font-size: 10.5px; color: var(--text-3); line-height: 1.5; display: block; }
+.lstep.hl { outline: 1.5px solid var(--accent); outline-offset: 2px; }
+
+/* ═══════════════ 主窗口整稿 ═══════════════ */
+.window { width: 1560px; max-width: 100%; border-radius: 10px; overflow: hidden; border: 1px solid var(--border-2); box-shadow: 0 24px 70px rgba(0,0,0,.55); background: var(--bg-content); }
+.tb { height: 40px; display: flex; align-items: center; background: var(--bg-titlebar); border-bottom: 1px solid var(--border); padding: 0 10px; gap: 2px; }
+.brand { display: flex; align-items: center; gap: 8px; padding: 0 10px 0 4px; }
+.brand .mark { width: 20px; height: 20px; border-radius: 6px; background: linear-gradient(135deg, var(--accent), var(--accent-2, #0e8f78)); display: grid; place-items: center; color: #0b1f1a; font-weight: 800; font-size: 12px; }
+.brand b { font-size: 13px; letter-spacing: .3px; }
+.menus { display: flex; gap: 2px; margin-left: 6px; }
+.menus button { height: 28px; padding: 0 11px; border-radius: var(--r-s); color: var(--text-2); font-size: 12.5px; }
+.menus button:hover, .menus button.on { background: #1c2124; color: var(--text); }
+.tb .center { flex: 1; display: flex; justify-content: center; }
+.proj { display: flex; align-items: center; gap: 7px; height: 26px; padding: 0 11px; border: 1px solid var(--border-2); border-radius: var(--r-s); background: #14171a; font-size: 12px; color: var(--text); }
+.proj .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.proj .chev { color: var(--text-3); }
+.tb .right { display: flex; align-items: center; gap: 8px; }
+.saved { display: flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--text-2); }
+.saved .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.winbtns { display: flex; margin-left: 6px; }
+.winbtns i { width: 40px; height: 28px; display: grid; place-items: center; color: var(--text-2); font-style: normal; font-size: 11px; border-radius: var(--r-s); }
+.winbtns i:hover { background: #1c2124; }
+.winbtns i.x:hover { background: #e5484d; color: #fff; }
+.body3 { display: grid; grid-template-columns: 292px minmax(0,1fr) 276px; min-height: 620px; }
+/* 左：素材库（面板容器 #0f1214，内容卡 #181c1f） */
+.lib { border-right: 1px solid var(--border); background: var(--bg-shell); display: flex; flex-direction: column; }
+.railtabs { display: flex; padding: 10px 10px 0; gap: 2px; border-bottom: 1px solid var(--border); }
+.railtab { flex: 1; display: grid; justify-items: center; gap: 4px; padding: 8px 0 9px; border-radius: var(--r-s); color: var(--text-2); font-size: 11.5px; }
+.railtab .ico { width: 17px; height: 17px; }
+.railtab:hover { background: #1a1f22; }
+.railtab.on { color: var(--accent); background: var(--accent-dim); }
+.libtools { display: flex; align-items: center; gap: 8px; padding: 10px 12px 8px; }
+.import { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border: 1px solid var(--border-2); border-radius: var(--r-s); font-size: 12px; color: var(--text); }
+.import:hover { border-color: var(--accent); color: var(--accent); }
+.search { flex: 1; display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; background: #14171a; border: 1px solid var(--border); border-radius: var(--r-s); color: var(--text-3); font-size: 12px; }
+.libcap { padding: 6px 14px 4px; font-size: 11px; color: var(--text-3); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 10px; padding: 6px 14px 14px; }
+.card { border-radius: var(--r); border: 1px solid var(--border); overflow: hidden; background: var(--bg-content); position: relative; }
+.card .thumb { aspect-ratio: 16/9; background: linear-gradient(135deg, #233029, #161d1a); display: grid; place-items: center; color: #3f5a52; }
+.card .nm { padding: 6px 8px 3px; font-size: 11.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card .du { padding: 0 8px 8px; font-size: 10.5px; color: var(--text-3); font-family: Consolas, monospace; }
+.card.sel { border-color: var(--accent); }
+.card .chk { position: absolute; right: 6px; bottom: 26px; width: 17px; height: 17px; border-radius: 50%; background: var(--accent); color: #08221c; display: grid; place-items: center; }
+.card:hover { border-color: var(--border-2); }
+.card.sel:hover { border-color: var(--accent); }
+.libtip { margin: 2px 14px 14px; padding: 10px 12px; border: 1px dashed var(--border-2); border-radius: var(--r); color: var(--text-3); font-size: 11.5px; text-align: center; }
+/* 中：播放器 + 时间线（内容层 #181c1f） */
+.mid { display: flex; flex-direction: column; min-width: 0; background: var(--bg-content); }
+.player { background: var(--bg-content); margin: 12px 14px 0; border-radius: var(--r); aspect-ratio: 16/8.2; display: grid; place-items: center; }
+.player .screen { width: 62%; aspect-ratio: 16/7.4; background: #000; border-radius: var(--r-s); display: grid; place-items: center; box-shadow: 0 0 0 1px var(--border-2); }
+.player .art { width: 46%; height: 62%; border-radius: 8px; background: linear-gradient(150deg, #f2994a 0%, #eb5757 45%, #b03a6e 80%); }
+.playbar { display: flex; align-items: center; gap: 14px; padding: 12px 18px 6px; }
+.ptrack { flex: 1; height: 4px; border-radius: 2px; background: #31363a; position: relative; }
+.ptrack .fill { position: absolute; inset: 0 auto 0 0; width: 63%; border-radius: 2px; background: var(--accent); }
+.ptrack .knob { position: absolute; left: 63%; top: 50%; transform: translate(-50%,-50%); width: 12px; height: 12px; border-radius: 50%; background: var(--accent); }
+.tc { font-family: Consolas, monospace; font-size: 12px; color: var(--text); }
+.tc span { color: var(--text-3); }
+.pbbtns { display: flex; align-items: center; justify-content: space-between; padding: 4px 18px 10px; }
+.pbleft, .pbright { display: flex; align-items: center; gap: 6px; }
+.pbtn { width: 28px; height: 28px; display: grid; place-items: center; border-radius: var(--r-s); color: var(--text-2); }
+.pbtn:hover { background: #262b2f; color: var(--text); }
+.pbtn.play { color: var(--text); }
+.ratio { height: 24px; padding: 0 8px; border: 1px solid var(--border-2); border-radius: var(--r-s); color: var(--text-2); font-size: 11.5px; display: inline-flex; align-items: center; gap: 5px; }
+/* 时间线 */
+.tl { border-top: 1px solid var(--border); background: var(--bg-content); }
+.tlbar { height: 36px; display: flex; align-items: center; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--border); background: var(--bg-content); }
+.tlb { width: 28px; height: 26px; display: grid; place-items: center; border-radius: var(--r-s); color: var(--text-2); }
+.tlb:hover, .tlb.on { background: #262b2f; color: var(--text); }
+.tlb.on { color: var(--accent); }
+.tlsep { width: 1px; height: 16px; background: var(--border-2); margin: 0 6px; }
+.tlzoom { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--text-3); }
+.ztrack { width: 90px; height: 3px; border-radius: 2px; background: #31363a; position: relative; }
+.ztrack .zfill { position: absolute; inset: 0 auto 0 0; width: 42%; background: var(--text-2); border-radius: 2px; }
+.tlbody { position: relative; }
+.ruler { height: 24px; position: relative; background: linear-gradient(#222629, #1a1e21); border-bottom: 1px solid var(--sep);
+  background-image: linear-gradient(#222629, #1a1e21), repeating-linear-gradient(90deg, rgba(255,255,255,.14) 0 1px, transparent 1px 60px), repeating-linear-gradient(90deg, rgba(255,255,255,.05) 0 1px, transparent 1px 12px); }
+.ruler span { position: absolute; top: 4px; font-size: 10px; color: var(--text-3); font-family: Consolas, monospace; transform: translateX(4px); }
+.trow { display: grid; grid-template-columns: 88px 1fr; border-bottom: 1px solid var(--sep); }
+.thead { padding: 8px 8px 8px 12px; font-size: 11.5px; color: var(--text-2); display: flex; flex-direction: column; gap: 5px; background: var(--head); }
+.thead .nm { color: var(--text); font-size: 12px; }
+.thead .flags { display: flex; gap: 8px; color: var(--text-3); }
+.thead .flags .ico { width: 13px; height: 13px; }
+.cell { position: relative; min-height: 64px; background: var(--bg-track-video); }
+.a1 .cell { min-height: 46px; background: var(--bg-track-audio); }
+.clip { position: absolute; left: 88px; top: 8px; height: 48px; width: 700px; border: 1.5px solid var(--accent); border-radius: 6px; overflow: hidden; background: #10201d; }
+.clip .bar { height: 16px; background: #123c35; color: #bfeee3; font-size: 10.5px; display: flex; align-items: center; gap: 6px; padding: 0 7px; }
+.clip .frames { position: absolute; inset: 16px 0 14px; display: flex; }
+.clip .frames i { flex: 1; margin-right: 1px; }
+.clip .frames i:nth-child(1) { background: linear-gradient(120deg, #f2994a, #c04f4a); }
+.clip .frames i:nth-child(2) { background: linear-gradient(120deg, #e8b45a, #a8653f); }
+.clip .frames i:nth-child(3) { background: linear-gradient(120deg, #7a4a8f, #40355e); }
+.clip .frames i:nth-child(4) { background: linear-gradient(120deg, #2f6f68, #1c3b3f); }
+.clip .frames i:nth-child(5) { background: linear-gradient(120deg, #465a52, #22302b); }
+.clip .wave { position: absolute; left: 0; right: 0; bottom: 0; height: 14px; }
+/* 播放头（提案：珊瑚红） */
+.ph { position: absolute; top: 0; bottom: 22px; left: 490px; width: 0; border-left: 1.5px solid var(--playhead); z-index: 5; }
+.ph .cap { position: absolute; top: 3px; left: 50%; transform: translateX(-50%); width: 12px; height: 16px; background: var(--playhead); border-radius: 3px; box-shadow: 0 1px 4px rgba(0,0,0,.5); }
+.ph .cap::after { content: ""; position: absolute; left: 50%; top: 100%; transform: translateX(-50%); border: 4px solid transparent; border-top-color: var(--playhead); }
+.hsb { height: 10px; background: var(--bg-content); border-top: 1px solid var(--border); }
+.hsb i { display: block; width: 46%; height: 4px; margin: 3px auto 0; border-radius: 2px; background: #31363a; }
+/* 右：项目信息（面板容器 #0f1214，内容 #181c1f） */
+.props { border-left: 1px solid var(--border); background: var(--bg-shell); padding: 14px 16px; }
+.props h3 { font-size: 13px; margin-bottom: 14px; color: var(--accent); font-weight: 600; }
+.prow { display: flex; gap: 10px; padding: 7px 0; font-size: 12px; border-bottom: 1px solid var(--border); }
+.prow .k { width: 64px; flex: none; color: var(--text-3); }
+.prow .v { color: var(--text); font-family: Consolas, monospace; font-size: 11.5px; }
+.cover { margin-top: 14px; border: 1px solid var(--border); border-radius: var(--r); height: 110px; background: repeating-linear-gradient(45deg, #181c1f 0 10px, #1c2124 10px 20px); display: grid; place-items: center; color: var(--text-3); }
+.coverbtn { margin-top: 10px; width: 100%; height: 28px; border-radius: var(--r-s); background: #2a2f33; color: var(--text); font-size: 12px; }
+.coverbtn:hover { background: #33393d; }
+/* 页脚 */
+.foot { height: 30px; display: flex; align-items: center; gap: 14px; padding: 0 14px; background: var(--bg-shell); border-top: 1px solid var(--border); font-size: 11.5px; color: var(--text-2); }
+.foot .sep { width: 1px; height: 12px; background: var(--border-2); }
+.foot .pill { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 9px; border-radius: 999px; border: 1px solid var(--border-2); }
+.foot .pill.mint { color: var(--accent); border-color: rgba(37,211,172,.4); background: var(--accent-dim); }
+.foot .ver { margin-left: auto; color: var(--text-3); font-family: Consolas, monospace; }
+
+/* ═══════════════ 浮层（提案） ═══════════════ */
+.row2 { display: flex; gap: 40px; flex-wrap: wrap; align-items: flex-start; }
+.menucap { margin-bottom: 10px; font-size: 12px; color: var(--text-2); }
+.menucap b { color: var(--text); }
+.menu { width: 248px; background: var(--bg-float); border: 1px solid var(--border-2); border-radius: var(--r); box-shadow: 0 18px 44px rgba(0,0,0,.5); padding: 5px; }
+.menu .mi { display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 10px; border-radius: var(--r-s); font-size: 12.5px; color: var(--text); }
+.menu .mi:hover { background: #383d41; }
+.menu .mi .ico { color: var(--text-2); }
+.menu .mi kbd { margin-left: auto; font-family: Consolas, monospace; font-size: 10.5px; color: var(--text-3); border: 1px solid var(--border-2); border-radius: 4px; padding: 1px 6px; background: #22262a; }
+.menu .div { height: 1px; background: var(--border); margin: 5px 7px; }
+.menu .grp { padding: 6px 10px 3px; font-size: 10.5px; letter-spacing: 1.5px; color: var(--text-3); }
+.dlgwrap { background: rgba(0,0,0,.45); padding: 26px; border-radius: var(--r); display: inline-block; }
+.dlg { width: 560px; background: var(--bg-float); border: 1px solid var(--border-2); border-radius: 10px; box-shadow: 0 24px 60px rgba(0,0,0,.6); overflow: hidden; }
+.dlg .hd { display: flex; align-items: center; padding: 14px 18px 0; }
+.dlg .hd b { font-size: 14px; }
+.dlg .hd .x { margin-left: auto; color: var(--text-3); }
+.dlg .tabs { display: flex; gap: 4px; padding: 12px 18px 0; border-bottom: 1px solid var(--border); }
+.dlg .tabs button { height: 30px; padding: 0 12px; font-size: 12.5px; color: var(--text-2); border-radius: var(--r-s) var(--r-s) 0 0; }
+.dlg .tabs button.on { color: var(--text); background: #383d41; }
+.dlg .bd { display: grid; grid-template-columns: 150px 1fr; gap: 20px; padding: 18px; }
+.dlg .coverbox { border: 1px solid var(--border); border-radius: var(--r); height: 96px; background: repeating-linear-gradient(45deg, #22262a 0 10px, #262b2f 10px 20px); display: grid; place-items: center; color: var(--text-3); }
+.dlg .edit { margin-top: 10px; width: 100%; height: 28px; border-radius: var(--r-s); background: #3a3f43; font-size: 12px; color: var(--text); }
+.frow { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+.fld label { display: block; font-size: 11px; color: var(--text-3); margin-bottom: 5px; }
+.fld .sel { height: 30px; display: flex; align-items: center; justify-content: space-between; padding: 0 10px; background: #22262a; border: 1px solid var(--border-2); border-radius: var(--r-s); font-size: 12.5px; color: var(--text); }
+.metaline { display: flex; gap: 16px; font-size: 11px; color: var(--text-3); margin: 4px 0 12px; font-family: Consolas, monospace; }
+.metaline .adv { margin-left: auto; color: var(--accent); font-family: inherit; }
+.tglrow { display: flex; align-items: center; gap: 9px; padding: 6px 0; font-size: 12.5px; color: var(--text-2); }
+.tgl { width: 30px; height: 16px; border-radius: 999px; background: #454545; position: relative; flex: none; }
+.tgl::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #cfcfcf; }
+.tgl.on { background: var(--accent-strong); }
+.tgl.on::after { left: auto; right: 2px; background: #fff; }
+.dlg .ft { display: flex; align-items: center; padding: 12px 18px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text-2); }
+.btn-primary { margin-left: auto; height: 30px; padding: 0 22px; border-radius: var(--r-s); background: var(--accent-strong); color: #06231c; font-weight: 650; font-size: 12.5px; }
+.btn-primary:hover { background: var(--accent); }
+
+/* ═══════════════ 表格 ═══════════════ */
+table.map { border-collapse: collapse; max-width: 1180px; width: 100%; font-size: 12px; }
+table.map th, table.map td { border: 1px solid var(--border); padding: 7px 12px; text-align: left; color: var(--text-2); }
+table.map th { color: var(--text); background: #181c1f; }
+table.map td code { font-family: Consolas, monospace; color: var(--accent); }
+table.map td .chip { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 6px; border: 1px solid rgba(255,255,255,.2); }
+table.map td.ok { color: var(--accent); white-space: nowrap; }
+table.map td.pend { color: #e8b45a; white-space: nowrap; }
+</style>
+</head>
+<body>
+
+<h1>Vortex Cut · 整体视觉方案 v2 <span class="en">背景规范已确认并同步代码 · 强调色提案待确认</span></h1>
+<p class="sub">v2 更新：按你给出的 <b>10 条背景规范</b>重定了全站灰阶（冷灰五级阶梯，替代 v1 的暖灰提案），设计稿与代码已同步；<b>强调色（薄荷绿）与播放头（珊瑚红）仍为提案</b>，未动代码，等定稿后一起替换。</p>
+
+<h2 class="sec"><span class="no">01</span>背景色规范（已确认 · 已应用）<span class="st done">✓ 代码已同步</span></h2>
+<p class="secdesc">五个层级的冷灰阶梯，从最深到最浅：<b>标题栏 → 面板容器 → 内容层 → 视频轨 → 音频轨</b>。层级靠明度差表达，边框只做辅助。</p>
+<div class="ladder">
+  <div class="lstep"><div class="chip" style="background:#000000"><b style="color:#8a8f93">#000000</b></div><div class="meta"><b>顶部状态栏</b><span>标题栏（品牌/菜单/项目切换/窗控）</span></div></div>
+  <div class="lstep"><div class="chip" style="background:#0f1214"><b style="color:#7f868c">#0f1214</b></div><div class="meta"><b>面板容器</b><span>素材/转录/模型/任务区 · 右侧属性面板头</span></div></div>
+  <div class="lstep hl"><div class="chip" style="background:#181c1f"><b style="color:#8a9298">#181c1f</b></div><div class="meta"><b>内容层</b><span>详情卡 · 时间线工具栏 · 无轨道区 · 播放区未覆盖 · 属性页</span></div></div>
+  <div class="lstep"><div class="chip" style="background:#202427"><b style="color:#93999e">#202427</b></div><div class="meta"><b>视频轨道</b><span>素材未覆盖部分</span></div></div>
+  <div class="lstep"><div class="chip" style="background:#24272b"><b style="color:#9aa0a5">#24272b</b></div><div class="meta"><b>音频轨道</b><span>素材未覆盖部分（比视频轨亮一档）</span></div></div>
+</div>
+
+<h2 class="sec"><span class="no">02</span>规范 → 代码 映射（全部已应用）<span class="st done">✓ 代码已同步</span></h2>
+<table class="map">
+  <tr><th>#</th><th>区域</th><th>色值</th><th>选择器 / 位置</th><th>状态</th></tr>
+  <tr><td>1</td><td>素材/转录/模型/任务面板底</td><td><span class="chip" style="background:#0f1214"></span><code>#0f1214</code></td><td><code>.library-pane</code></td><td class="ok">已应用</td></tr>
+  <tr><td>2</td><td>每项详细内容区</td><td><span class="chip" style="background:#181c1f"></span><code>#181c1f</code></td><td><code>.asset-item</code> / <code>.transcript-row·item</code> / <code>.model-row</code> / <code>.job-row</code></td><td class="ok">已应用</td></tr>
+  <tr><td>3</td><td>时间线工具栏</td><td><span class="chip" style="background:#181c1f"></span><code>#181c1f</code></td><td><code>.timeline-toolbar</code></td><td class="ok">已应用</td></tr>
+  <tr><td>4</td><td>没有轨道的地方</td><td><span class="chip" style="background:#181c1f"></span><code>#181c1f</code></td><td><code>.timeline-pane</code> · drawTimeline 背景 · <code>RULER_DEAD_BG</code>（终点外死区）</td><td class="ok">已应用</td></tr>
+  <tr><td>5</td><td>音频轨道（未覆盖）</td><td><span class="chip" style="background:#24272b"></span><code>#24272b</code></td><td>drawTimeline 行背景（audio）</td><td class="ok">已应用</td></tr>
+  <tr><td>6</td><td>视频轨道（未覆盖）</td><td><span class="chip" style="background:#202427"></span><code>#202427</code></td><td>drawTimeline 行背景（video/text 统一）</td><td class="ok">已应用</td></tr>
+  <tr><td>7</td><td>播放区视频未覆盖</td><td><span class="chip" style="background:#181c1f"></span><code>#181c1f</code></td><td><code>.stage-pane</code> · <code>.preview-frame</code>（视频本体 .preview-canvas 保持 #000）</td><td class="ok">已应用</td></tr>
+  <tr><td>8</td><td>顶部状态栏</td><td><span class="chip" style="background:#000000"></span><code>#000000</code></td><td><code>.editor-titlebar</code></td><td class="ok">已应用</td></tr>
+  <tr><td>9</td><td>右侧属性面板头</td><td><span class="chip" style="background:#0f1214"></span><code>#0f1214</code></td><td><code>.properties-pane:has(>.pp-panel)</code>（与左侧面板对应）</td><td class="ok">已应用</td></tr>
+  <tr><td>10</td><td>具体属性页</td><td><span class="chip" style="background:#181c1f"></span><code>#181c1f</code></td><td><code>.pp-panel .pp-body</code>（与左侧内容卡对应）</td><td class="ok">已应用</td></tr>
+  <tr><td>+</td><td>连带调整（可回退）</td><td><span class="chip" style="background:#222629"></span><code>#222629→#1a1e21</code></td><td>标尺带渐变中性化 · 轨道分隔线 <code>#14171a</code>（原蓝紫与灰阶冲突）</td><td class="ok">已应用</td></tr>
+</table>
+
+<h2 class="sec"><span class="no">03</span>主窗口整稿（新灰阶 × 喵影布局）<span class="st prop">强调色为提案</span></h2>
+<p class="secdesc">背景全部为已确认灰阶；图中<b>薄荷绿描边/进度/角标</b>与<b>珊瑚红播放头</b>为强调色提案，仅作效果预览，未进代码。悬停可感受交互态。</p>
+<div class="window">
+  <div class="tb">
+    <div class="brand"><span class="mark">V</span><b>Vortex Cut</b></div>
+    <div class="menus">
+      <button>项目</button><button>编辑</button><button>时间线</button><button>界面</button><button class="on">工具</button><button>帮助</button>
+    </div>
+    <div class="center"><div class="proj"><span class="dot"></span>未命名项目<span class="chev">▾</span></div></div>
+    <div class="right">
+      <span class="saved"><span class="dot"></span>已保存</span>
+      <div class="winbtns"><i>─</i><i>□</i><i class="x">✕</i></div>
+    </div>
+  </div>
+  <div class="body3">
+    <div class="lib">
+      <div class="railtabs">
+        <button class="railtab on"><svg class="ico" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>我的素材</button>
+        <button class="railtab"><svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l2.5 2.5"/></svg>任务</button>
+        <button class="railtab"><svg class="ico" viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 21h16"/></svg>导入</button>
+      </div>
+      <div class="libtools">
+        <button class="import"><svg class="ico" viewBox="0 0 24 24"><path d="M12 5v10m0 0 4-4m-4 4-4-4M5 19h14"/></svg>导入</button>
+        <div class="search"><svg class="ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="m20 20-4-4"/></svg>搜索素材</div>
+      </div>
+      <div class="libcap">文件夹 · 本地素材</div>
+      <div class="grid">
+        <div class="card sel">
+          <div class="thumb"><svg class="ico" viewBox="0 0 24 24"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3"/></svg></div>
+          <span class="chk"><svg class="ico" style="width:11px;height:11px" viewBox="0 0 24 24"><path d="m5 13 4 4 10-10"/></svg></span>
+          <div class="nm">8月22日 (1).mp4</div><div class="du">00:00:11</div>
+        </div>
+        <div class="card"><div class="thumb"><svg class="ico" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><circle cx="9" cy="9" r="1.6"/><path d="m5 19 5-6 4 4 2-2 3 3"/></svg></div><div class="nm">海报.png</div><div class="du">图片</div></div>
+        <div class="card"><div class="thumb"><svg class="ico" viewBox="0 0 24 24"><path d="M9 18V6l10-2v11"/><circle cx="7" cy="18" r="2.2"/><circle cx="17" cy="15" r="2.2"/></svg></div><div class="nm">BGM-轻快.mp3</div><div class="du">00:02:41</div></div>
+      </div>
+      <div class="libtip">将视频或图片拖到这里开始剪辑</div>
+    </div>
+    <div class="mid">
+      <div class="player"><div class="screen"><div class="art"></div></div></div>
+      <div class="playbar"><div class="ptrack"><div class="fill"></div><div class="knob"></div></div><div class="tc">00:00:07:09 <span>/ 00:00:11:24</span></div></div>
+      <div class="pbbtns">
+        <div class="pbleft">
+          <button class="pbtn"><svg class="ico" viewBox="0 0 24 24"><path d="M18 5v14M6 5l9 7-9 7z"/></svg></button>
+          <button class="pbtn play"><svg class="ico" viewBox="0 0 24 24"><path d="M7 4h3v16H7zM14 4h3v16h-3z"/></svg></button>
+          <button class="pbtn"><svg class="ico" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button>
+        </div>
+        <div class="pbright">
+          <span class="ratio">16:9 ▾</span>
+          <button class="pbtn"><svg class="ico" viewBox="0 0 24 24"><path d="m8 8-4 4 4 4m8-8 4 4-4 4"/></svg></button>
+          <button class="pbtn"><svg class="ico" viewBox="0 0 24 24"><path d="M4 8h12M4 12h8M4 16h12"/><path d="m17 9 3 3-3 3"/></svg></button>
+          <button class="pbtn"><svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M12 4v2m0 12v2M4 12h2m12 0h2M6 6l1.5 1.5M16.5 16.5 18 18M18 6l-1.5 1.5M7.5 16.5 6 18"/></svg></button>
+          <button class="pbtn"><svg class="ico" viewBox="0 0 24 24"><path d="M4 17V7h16v10z"/><circle cx="12" cy="20" r="1"/></svg></button>
+        </div>
+      </div>
+      <div class="tl">
+        <div class="tlbar">
+          <button class="tlb"><svg class="ico" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+          <div class="tlsep"></div>
+          <button class="tlb"><svg class="ico" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button>
+          <button class="tlb"><svg class="ico" viewBox="0 0 24 24"><path d="M7 11V7a5 5 0 0 1 10 0v4M5 11h14v9H5z"/></svg></button>
+          <div class="tlsep"></div>
+          <button class="tlb"><svg class="ico" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>
+          <button class="tlb"><svg class="ico" viewBox="0 0 24 24"><path d="m15 14 5-5-5-5M20 9H10a6 6 0 0 0 0 12h3"/></svg></button>
+          <div class="tlsep"></div>
+          <button class="tlb"><svg class="ico" viewBox="0 0 24 24"><path d="M7 20V10m5 10V4m5 16v-7M4 20h16"/></svg></button>
+          <button class="tlb"><svg class="ico" viewBox="0 0 24 24"><circle cx="7" cy="7" r="3"/><circle cx="17" cy="17" r="3"/><path d="M9.5 9.5 14.5 14.5"/></svg></button>
+          <button class="tlb on"><svg class="ico" viewBox="0 0 24 24"><path d="M6 12h12M6 8h12M6 16h12"/></svg></button>
+          <div class="tlzoom"><svg class="ico" viewBox="0 0 24 24"><path d="M5 12h14"/></svg><div class="ztrack"><div class="zfill"></div></div><svg class="ico" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></div>
+        </div>
+        <div class="tlbody">
+          <div class="ruler"><span style="left:8px">00:00</span><span style="left:33%">00:05</span><span style="left:63%">00:10</span></div>
+          <div class="trow">
+            <div class="thead"><span class="nm">视频轨 1</span><div class="flags"><svg class="ico" viewBox="0 0 24 24"><rect x="6" y="10" width="12" height="9" rx="2"/><path d="M9 10V7a3 3 0 0 1 6 0v3"/></svg><svg class="ico" viewBox="0 0 24 24"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"/><circle cx="12" cy="12" r="2.5"/></svg><svg class="ico" viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9z"/></svg></div></div>
+            <div class="cell">
+              <div class="clip">
+                <div class="bar">8月22日 (1) <span style="margin-left:auto">00:00:11:24</span></div>
+                <div class="frames"><i></i><i></i><i></i><i></i><i></i></div>
+                <svg class="wave" viewBox="0 0 700 14" preserveAspectRatio="none"><path d="M0 7 8 3l8 8 8-9 8 10 8-6 8 5 8-8 8 9 8-5 8 4 8-7 8 8 8-4 8 3 8-6 8 7 8-9 8 6 8 3 8-5 8 8 8-10 8 9 8-4 8 2 8-6 8 7 8-8 8 5 8 3 8-7 8 9 8-5 8 4 8-6 8 8 8-9 8 7 8 2 8-5 8 6 8-8 8 9 8-3 8 4 8-6 8 8 8-9 8 5 8 3 8-7 8 8 8-4 8 5 8-8 8 9 8-6 8 4 8-5 8 7 8-8 8 6 8 3 8-4 8 7 8-9 8 8 8-5 8 2 8-6 8 7 8-8 8 6 8 4 8-7 8 9 8-5 8 3 8-6 8 8 8-4 8 5 8-7 8 9 8-8 8 6 8 3 8-5 8 7 8-9 8 8 8-6 8 4" style="fill:none;stroke:var(--accent);stroke-width:1.2;opacity:.85"/></svg>
+              </div>
+            </div>
+          </div>
+          <div class="trow a1">
+            <div class="thead"><span class="nm">音频轨 1</span><div class="flags"><svg class="ico" viewBox="0 0 24 24"><rect x="6" y="10" width="12" height="9" rx="2"/><path d="M9 10V7a3 3 0 0 1 6 0v3"/></svg><svg class="ico" viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9z"/></svg></div></div>
+            <div class="cell"></div>
+          </div>
+          <div class="ph"><div class="cap"></div></div>
+          <div class="hsb"><i></i></div>
+        </div>
+      </div>
+    </div>
+    <div class="props">
+      <h3>项目信息</h3>
+      <div class="prow"><span class="k">项目名称</span><span class="v" style="font-family:inherit">未命名项目</span></div>
+      <div class="prow"><span class="k">项目文件</span><span class="v">/</span></div>
+      <div class="prow"><span class="k">分辨率</span><span class="v">1920 x 1080</span></div>
+      <div class="prow"><span class="k">帧率</span><span class="v">30fps</span></div>
+      <div class="prow"><span class="k">色彩空间</span><span class="v">SDR · Rec.709</span></div>
+      <div class="prow"><span class="k">时长</span><span class="v">00:00:11.24</span></div>
+      <div class="cover">封面图</div>
+      <button class="coverbtn">编辑</button>
+    </div>
+  </div>
+  <div class="foot">
+    <span>已保存</span><div class="sep"></div>
+    <span class="pill mint">● Core 已连接</span>
+    <span>后台空间</span><div class="sep"></div>
+    <span class="pill">多平台导出</span><span class="pill">AI 粗剪</span><span class="pill">AI 修改</span><span class="pill">版本比较</span>
+    <span class="ver">stage6r-v1</span>
+  </div>
+</div>
+
+<h2 class="sec"><span class="no">04</span>强调色候选（点击卡片，上方整稿与下方浮层实时换色）<span class="st prop">提案</span></h2>
+<p class="secdesc">候选的取舍由三条硬约束决定：<b>与冷灰阶梯的同色温融合度</b>、<b>与珊瑚红播放头的搭配</b>、<b>与警告色 #e8b45a / 成功绿的语义冲突</b>。五个候选，点卡片即可整稿联动。</p>
+<div class="accgrid">
+  <div class="acc" data-k="mint" onclick="setAccent('mint')">
+    <h3><span class="dot" style="background:#25d3ac"></span>薄荷绿<code>#25d3ac</code></h3>
+    <p>喵影同族气质，清新、有品牌记忆点；与珊瑚红播放头互为补色，「剪/播」语义最分明。注意：与现有成功绿（#7fd1a8）接近，选用后建议把成功态并入同一族。</p>
+    <span class="use" style="background:var(--accent-strong);color:#06231c">主按钮样例</span>
+    <div class="pair">参照：万兴喵影 · × 播放头：互补 ✓</div>
+    <div class="verdict rec">推荐 · 品牌区分度最高（当前提案）</div>
+  </div>
+  <div class="acc" data-k="cyan" onclick="setAccent('cyan')">
+    <h3><span class="dot" style="background:#38bdf8"></span>青蓝<code>#38bdf8</code></h3>
+    <p>与冷灰阶梯同色温、融合度最高；剪映/CapCut、Premiere 都是蓝色系，用户零学习成本。与珊瑚红播放头是经典冷暖对比。</p>
+    <span class="use" style="background:#2596cf;color:#041e2c">主按钮样例</span>
+    <div class="pair">参照：剪映/CapCut、Premiere · × 播放头：冷暖对比 ✓</div>
+    <div class="verdict rec">推荐备选 · 最稳，几乎无语义冲突</div>
+  </div>
+  <div class="acc" data-k="amber" onclick="setAccent('amber')">
+    <h3><span class="dot" style="background:#f0b429"></span>琥珀橙<code>#f0b429</code></h3>
+    <p>在冷灰上最跳、有调色软件气质（DaVinci）；但与警告色 #e8b45a 几乎同色，且与珊瑚红播放头同属暖色——强调、警告、播放头三个语义直接打架。</p>
+    <span class="use" style="background:#c98f12;color:#241a05">主按钮样例</span>
+    <div class="pair">参照：DaVinci Resolve · × 播放头：暖色撞车 ✗ · 警告色撞车 ✗</div>
+    <div class="verdict bad">不推荐 · 语义冲突</div>
+  </div>
+  <div class="acc" data-k="violet" onclick="setAccent('violet')">
+    <h3><span class="dot" style="background:#a78bfa"></span>紫罗兰<code>#a78bfa</code></h3>
+    <p>等于把现状蓝紫（#86a0ff）往紫推半步，视觉差异太小，换了个寂寞；若喜欢紫色系，建议直接保留现状微调明度即可。</p>
+    <span class="use" style="background:#7c5cf0;color:#efeaff">主按钮样例</span>
+    <div class="pair">参照：Twitch / 现状 · × 播放头：可以，但整体变化有限</div>
+    <div class="verdict bad">不推荐 · 变化太小</div>
+  </div>
+  <div class="acc" data-k="magenta" onclick="setAccent('magenta')">
+    <h3><span class="dot" style="background:#f472b6"></span>洋红<code>#f472b6</code></h3>
+    <p>视频素材里肤色/暖色占比高，洋红描边容易和内容混在一起；也和播放头红拉不开距离，蒙版/遮罩类功能还常用洋红做标识。</p>
+    <span class="use" style="background:#d15a97;color:#2b0818">主按钮样例</span>
+    <div class="pair">参照：少数创作工具 · × 播放头：同族 ✗ · 素材肤色易混 ✗</div>
+    <div class="verdict bad">不推荐 · 与素材内容易混</div>
+  </div>
+</div>
+<p class="secdesc" style="margin-top:16px">我的排序：<b>薄荷绿（品牌感、与播放头互补）≈ 青蓝（最稳、零语义冲突）</b>二选一——想要喵影那种记忆点选薄荷绿，想最低风险选青蓝；琥珀/紫罗兰/洋红不推荐。</p>
+
+<h2 class="sec"><span class="no">05</span>浮层语言示例（跟随上方所选强调色）<span class="st prop">提案</span></h2>
+  <div>
+    <div class="menucap"><b>工具菜单</b>（浮层语言示例）</div>
+    <div class="menu">
+      <div class="grp">AI</div>
+      <div class="mi"><svg class="ico" viewBox="0 0 24 24"><path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.9 2.1L22 19l-2.1.9L19 22l-.9-2.1L16 19l2.1-.9z"/></svg>AI 粗剪</div>
+      <div class="mi"><svg class="ico" viewBox="0 0 24 24"><path d="m15 4 5 5M4 20l6-6m2.5-8.5L19 12l-8 8H5v-6z"/></svg>AI 修改</div>
+      <div class="mi"><svg class="ico" viewBox="0 0 24 24"><circle cx="7" cy="17" r="3.5"/><circle cx="17" cy="7" r="3.5"/><path d="M10 15c2-1 4-3 5-5M14 9c-2 1-4 3-5 5"/></svg>版本比较</div>
+      <div class="div"></div>
+      <div class="mi"><svg class="ico" viewBox="0 0 24 24"><path d="M4 8h16v9H4zM4 8l2-4h12l2 4M9 20v-3h6v3"/></svg>镜头需求</div>
+      <div class="mi"><svg class="ico" viewBox="0 0 24 24"><path d="M9 3h6M10 3v6L5 19a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-10V3"/></svg>生成验证（模拟）</div>
+      <div class="mi"><svg class="ico" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><circle cx="9" cy="9" r="1.6"/><path d="m5 19 5-6 4 4 2-2 3 3"/></svg>真实图片生成</div>
+    </div>
+  </div>
+  <div>
+    <div class="menucap"><b>导出对话框</b></div>
+    <div class="dlgwrap" style="padding:16px">
+      <div class="dlg" style="width:440px">
+        <div class="hd"><b>导出</b><span class="x">✕</span></div>
+        <div class="tabs"><button class="on">导出到本地</button><button>导出到设备</button></div>
+        <div class="bd" style="grid-template-columns:1fr; gap:12px">
+          <div class="frow" style="margin-bottom:0">
+            <div class="fld"><label>格式</label><div class="sel">MP4 <span style="color:#707070">▾</span></div></div>
+            <div class="fld"><label>分辨率</label><div class="sel">1920×1080 <span style="color:#707070">▾</span></div></div>
+          </div>
+          <div class="tglrow"><span class="tgl on"></span>启用硬件编码加速</div>
+          <div class="metaline" style="margin:0"><span>30 fps</span><span>8000 kbps</span><span>SDR · Rec.709</span><span class="adv">进阶 ›</span></div>
+        </div>
+        <div class="ft">时长：00:00:11<button class="btn-primary">导出</button></div>
+      </div>
+    </div>
+  </div>
+
+<h2 class="sec"><span class="no">06</span>落地状态与剩余清单</h2>
+<table class="map">
+  <tr><th>批次</th><th>内容</th><th>状态</th></tr>
+  <tr><td>✓ 已应用</td><td>10 条背景规范 + 连带（标尺带中性化、分隔线 #14171a）—— <code>styles.css</code> / <code>TimelineCanvas.tsx</code></td><td class="ok">已进工作区</td></tr>
+  <tr><td>待确认后一批改</td><td>强调色薄荷绿（<code>--vc-accent</code> 全站替换）· 播放头珊瑚红（drawTimeline / drawRulerStrip）· 片段描边与名称条配色（<code>CLIP_PALETTE</code>）· 浮层 #2c2c2c · 字体栈微调</td><td class="pend">提案待确认</td></tr>
+  <tr><td>不随主题变</td><td>视频本体黑底（.preview-canvas #000）· 全屏播放纯黑 · 时间码 Consolas</td><td class="ok">保持</td></tr>
+</table>
+
+<p class="footnote">确认方式：直接回复「强调色按提案来」或给出替换值，即可一次性完成剩余批次（<code>--vc-accent</code> 变量替换 + 时间线播放头/片段配色 + 浮层色，预计一次提交）。若想先回退已应用的背景规范：<span class="rev">git checkout cab8b95 -- apps/desktop/src/styles.css apps/desktop/src/app/timeline/TimelineCanvas.tsx</span>（背景规范在 cab8b95 之后仅有这两处改动）。</p>
+
+<script>
+// 强调色切换：点击 04 节候选卡，整份设计稿（含整稿预览与浮层）实时换色。
+const ACCENTS = {
+  mint:    { a: "#25d3ac", s: "#12b998", d: "rgba(37,211,172,.13)", a2: "#0e8f78" },
+  cyan:    { a: "#38bdf8", s: "#2596cf", d: "rgba(56,189,248,.13)", a2: "#1a7fb5" },
+  amber:   { a: "#f0b429", s: "#c98f12", d: "rgba(240,180,41,.13)", a2: "#b57f10" },
+  violet:  { a: "#a78bfa", s: "#7c5cf0", d: "rgba(167,139,250,.13)", a2: "#6d4bd4" },
+  magenta: { a: "#f472b6", s: "#d15a97", d: "rgba(244,114,182,.13)", a2: "#b03d80" },
+};
+function setAccent(k) {
+  const A = ACCENTS[k]; if (!A) return;
+  const r = document.documentElement.style;
+  r.setProperty("--accent", A.a);
+  r.setProperty("--accent-strong", A.s);
+  r.setProperty("--accent-dim", A.d);
+  r.setProperty("--accent-2", A.a2);
+  document.querySelectorAll(".acc").forEach(el => el.classList.toggle("sel", el.dataset.k === k));
+}
+setAccent("mint");
+</script>
+
+</body>
+</html>

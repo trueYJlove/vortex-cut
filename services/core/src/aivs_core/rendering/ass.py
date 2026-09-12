@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import unicodedata
 from pathlib import Path
 from typing import Any
@@ -51,9 +52,22 @@ def caption_override_tags(
     preset_id = caption.get("preset_id")
     preset = preset_values.get(preset_id, {})
     tags = ""
+    font_name = override.get("font_name")
+    if font_name is not None:
+        # 字体名仅允许安全字符（渲染端二次校验，防线与 core 一致）。
+        if not isinstance(font_name, str) or not re.fullmatch(r"[\w @\-]{1,60}", font_name):
+            raise DomainError("TIMELINE_INVALID", "字幕字体名称不合法")
+        tags += f"\\fn{font_name}"
     font_size = override.get("font_size")
     if font_size is not None:
         tags += f"\\fs{int(font_size)}"
+    letter_spacing = override.get("letter_spacing")
+    if letter_spacing is not None:
+        tags += f"\\spc{round(float(letter_spacing))}"
+    for flag_key, tag_name in (("bold", "b"), ("italic", "i"), ("underline", "u")):
+        flag = override.get(flag_key)
+        if flag is not None:
+            tags += f"\\{tag_name}{1 if flag else 0}"
     primary = override.get("primary_color")
     if primary is not None:
         tags += _ass_rgb_to_bgr_tag(primary)
@@ -89,7 +103,10 @@ def escape_ass_text(value: str) -> str:
 
 
 def build_ass(
-    captions: list[dict[str, Any]], bundle: dict[str, Any], presets: dict[str, Any]
+    captions: list[dict[str, Any]],
+    bundle: dict[str, Any],
+    presets: dict[str, Any],
+    play_res: tuple[int, int] = (1080, 1920),
 ) -> str:
     family = str(bundle["family"])
     preset_values = presets.get("presets")
@@ -108,12 +125,13 @@ def build_ass(
             f"{int(value['outline'])},{int(value['shadow'])},2,80,80,"
             f"{int(value['margin_v'])},1"
         )
+    width, height = play_res
     events = []
     for caption in captions:
         preset_id = caption.get("preset_id")
         if preset_id not in preset_values:
             raise DomainError("RENDER_PLAN_INVALID", "字幕预设不合法")
-        override_tags = caption_override_tags(caption, preset_values, (1080, 1920))
+        override_tags = caption_override_tags(caption, preset_values, play_res)
         events.append(
             "Dialogue: 0,"
             f"{_ass_time(caption['start_us'])},{_ass_time(caption['end_us'])},"
@@ -123,8 +141,8 @@ def build_ass(
         [
             "[Script Info]",
             "ScriptType: v4.00+",
-            "PlayResX: 1080",
-            "PlayResY: 1920",
+            f"PlayResX: {width}",
+            f"PlayResY: {height}",
             "WrapStyle: 0",
             "ScaledBorderAndShadow: yes",
             "YCbCr Matrix: TV.709",

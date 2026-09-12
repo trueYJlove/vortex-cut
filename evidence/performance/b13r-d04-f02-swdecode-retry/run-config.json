@@ -1,0 +1,28 @@
+{
+  "scenarios": [
+    "F02"
+  ],
+  "runs": "1",
+  "seeks": "3",
+  "playback-seconds": "180",
+  "smoke": true,
+  "seed": "20260908",
+  "export_base": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\performance\\b13r-d04-f02-swdecode-retry\\exports",
+  "baseline_status": "smoke-only-not-G0",
+  "commit": "9d9cad409bc589e86d4ef7b8b412781370f6fbbf",
+  "code_fingerprint": "ba1fffe76f328ac70d0b32c09b5845384c7733c31878a7e1185ca1988e73f3d0",
+  "dirty_files": "M apps/desktop/electron/main/index.ts\n M apps/desktop/electron/preload/index.ts\n M apps/desktop/src/app/App.tsx\n M apps/desktop/src/app/preview/SyntheticPreview.tsx\n M apps/desktop/src/app/preview/compositor-worker.ts\n M apps/desktop/src/app/preview/compositor-worker.worker.ts\n M apps/desktop/src/app/preview/decode-worker.ts\n M apps/desktop/src/app/preview/decode-worker.worker.ts\n M apps/desktop/src/app/preview/preview-session.ts\n M apps/desktop/src/probes/env.d.ts\n?? 1\n?? evidence/performance/b13r-d01-f02-copyto/\n?? evidence/performance/b13r-d01-f02-direct/\n?? evidence/performance/b13r-d02-f02-copyto-fixed/\n?? evidence/performance/b13r-d03-f02-swdecode/\n?? evidence/performance/b13r-discriminate-copyto/",
+  "node": "v24.19.0",
+  "fixtures_used": [
+    {
+      "file": "F02.mp4",
+      "sha256": "bd34e2a32b6e9b3d2cb9945610678e2daab79f9ea3b0ee371003bd8c0064f464",
+      "duration_s": 900,
+      "size": "640x360",
+      "fps": 30,
+      "recipe": "testsrc2-av-cfr-v1",
+      "bytes": 233918530,
+      "coverage_note": "Media only; not historical PiP, VFR/B-frame, multilayer or audio-failure coverage."
+    }
+  ]
+}

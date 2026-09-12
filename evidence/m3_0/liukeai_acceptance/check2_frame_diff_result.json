@@ -1,0 +1,42 @@
+{
+ "frames_compared": 37,
+ "field_diff_count": 0,
+ "diffs": [],
+ "verdict": {
+  "non_caption_frames": {
+   "archived": 26,
+   "recomputed": 26,
+   "equal": true
+  },
+  "caption_frames": {
+   "archived": 11,
+   "recomputed": 11,
+   "equal": true
+  },
+  "psnr_min_db": {
+   "archived": 19.103156,
+   "recomputed": 19.103156,
+   "equal": true
+  },
+  "psnr_all_pass": {
+   "archived": false,
+   "recomputed": false,
+   "equal": true
+  },
+  "misalign_max_px": {
+   "archived": 0,
+   "recomputed": 0,
+   "equal": true
+  },
+  "misalign_all_pass": {
+   "archived": true,
+   "recomputed": true,
+   "equal": true
+  },
+  "pass": {
+   "archived": false,
+   "recomputed": false,
+   "equal": true
+  }
+ }
+}

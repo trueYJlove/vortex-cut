@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "benchmark": "f03-export-input-seek",
+  "status": "developer-measurement-not-G0",
+  "scenario": {
+    "source": "testsrc2 320x180 30fps GOP=60 + sine 880Hz",
+    "segment": "tail 10s of 60s source",
+    "source_desc": "testsrc2 320x180 30fps + sine 880Hz",
+    "structural_equivalence": "seek depth/GOP structure matched to F03 tail; duration scaled",
+    "encoder": "libopenh264"
+  },
+  "parity_frame_digest_equal": true,
+  "rounds": [
+    {
+      "round": 0,
+      "legacy": {
+        "encode_s": 0.5579710000019986,
+        "validate_decode_s": 0.11133979999431176,
+        "total_s": 0.6693107999963104
+      },
+      "deep": {
+        "encode_s": 0.350955600006273,
+        "validate_decode_s": 0.11192899999878136,
+        "total_s": 0.4628846000050544
+      }
+    },
+    {
+      "round": 1,
+      "legacy": {
+        "encode_s": 0.4591784000003827,
+        "validate_decode_s": 0.14624950000143144,
+        "total_s": 0.6054279000018141
+      },
+      "deep": {
+        "encode_s": 0.3709530999985873,
+        "validate_decode_s": 0.11880959999689367,
+        "total_s": 0.48976269999548094
+      }
+    },
+    {
+      "round": 2,
+      "legacy": {
+        "encode_s": 0.49587879999307916,
+        "validate_decode_s": 0.11922130000311881,
+        "total_s": 0.615100099996198
+      },
+      "deep": {
+        "encode_s": 0.34602730000187876,
+        "validate_decode_s": 0.1190156999946339,
+        "total_s": 0.46504299999651266
+      }
+    },
+    {
+      "round": 3,
+      "legacy": {
+        "encode_s": 0.4751992000019527,
+        "validate_decode_s": 0.10938999999780208,
+        "total_s": 0.5845891999997548
+      },
+      "deep": {
+        "encode_s": 0.3586905000047409,
+        "validate_decode_s": 0.1160846000057063,
+        "total_s": 0.4747751000104472
+      }
+    },
+    {
+      "round": 4,
+      "legacy": {
+        "encode_s": 0.5400124000007054,
+        "validate_decode_s": 0.11681090000638505,
+        "total_s": 0.6568233000070904
+      },
+      "deep": {
+        "encode_s": 0.34772220000013476,
+        "validate_decode_s": 0.1586585000040941,
+        "total_s": 0.5063807000042289
+      }
+    }
+  ],
+  "legacy_encode_ms_median": 495.87879999307916,
+  "legacy_validate_decode_ms_median": 116.81090000638505,
+  "legacy_total_ms_median": 615.100099996198,
+  "deep_encode_ms_median": 350.955600006273,
+  "deep_validate_decode_ms_median": 118.80959999689367,
+  "deep_total_ms_median": 474.7751000104472,
+  "encode_time_reduction_percent": 29.225528493823248,
+  "environment": {
+    "python": "3.13.1",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "processor": "Intel64 Family 6 Model 140 Stepping 1, GenuineIntel",
+    "commit_snapshot": "cfe41b6d5307aabf32e8eeaef8a5664e07ef2823",
+    "note": "libopenh264 software encode; hardware-encoder matrix pending"
+  },
+  "caveats": [
+    "scaled source (default 60s); tail ratio matches F03 (5/6) at default",
+    "frames decoded not directly counted; same-machine alternating wall time",
+    "probe caches not involved (direct ffmpeg invocation)"
+  ]
+}

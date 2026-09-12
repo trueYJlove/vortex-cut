@@ -1,0 +1,39 @@
+{
+  "scenarios": [
+    "F02",
+    "F06"
+  ],
+  "runs": "1",
+  "seeks": "100",
+  "playback-seconds": "2400",
+  "seed": "20260908",
+  "smoke": false,
+  "export_base": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\performance\\g0-memlong-20260911\\exports",
+  "baseline_status": "partial-B00-not-G0",
+  "commit": "e788fce98c37e36b1218e90e615c208316004550",
+  "code_fingerprint": "83165f24d22c0dd16d44c6278e3c6a72a3ccee85aeb8c5ceb659e6646fe50515",
+  "dirty_files": "",
+  "node": "v24.19.0",
+  "fixtures_used": [
+    {
+      "file": "F02.mp4",
+      "sha256": "bd34e2a32b6e9b3d2cb9945610678e2daab79f9ea3b0ee371003bd8c0064f464",
+      "duration_s": 900,
+      "size": "640x360",
+      "fps": 30,
+      "recipe": "testsrc2-av-cfr-v1",
+      "bytes": 233918530,
+      "coverage_note": "Media only; not historical PiP, VFR/B-frame, multilayer or audio-failure coverage."
+    },
+    {
+      "file": "F01.mp4",
+      "sha256": "4e51be3e3a70ba5192f2b682ed50545cfe111ec22857366f8b54876ee1c8d5b0",
+      "duration_s": 12,
+      "size": "640x360",
+      "fps": 30,
+      "recipe": "testsrc2-av-cfr-v1",
+      "bytes": 3123032,
+      "coverage_note": "Media only; not historical PiP, VFR/B-frame, multilayer or audio-failure coverage."
+    }
+  ]
+}

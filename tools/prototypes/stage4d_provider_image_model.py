@@ -614,7 +614,7 @@ def _migration_report(root: Path) -> dict[str, Any]:
     frozen = {
         version: hashlib.sha256(sql.encode()).hexdigest()
         for version, sql in MIGRATIONS.items()
-        if version not in {"v13", "v14", "v15", "v16", "v17"}
+        if version not in {"v13", "v14", "v15", "v16", "v17", "v18"}
     }
     apply_r1(r1_path)
     sql = sqlite3.connect(r1_path)

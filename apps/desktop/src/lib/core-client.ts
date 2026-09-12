@@ -200,6 +200,8 @@ export function normalizeJob(value: unknown): Job {
     status: raw.status as Job["status"],
     stage: String(raw.stage ?? "queued"),
     progress: raw.progress == null ? null : Number(raw.progress),
+    phase: raw.phase == null ? null : String(raw.phase),
+    phase_progress: raw.phase_progress == null ? null : Number(raw.phase_progress),
     attempt: Number(raw.attempt ?? 1),
     model_id: raw.model_id == null ? null : String(raw.model_id) as ModelId,
     model_revision: raw.model_revision == null ? null : String(raw.model_revision),
@@ -276,8 +278,8 @@ export class CoreClient {
       return { items: page.items.map(normalizeProject), next_cursor: page.next_cursor ?? null };
     });
   }
-  createProject(name: string, root_dir_name?: string): Promise<Project> {
-    return this.request<unknown>(`${API_PREFIX}/projects`, { method: "POST", body: JSON.stringify({ name, ...(root_dir_name ? { root_dir_name } : {}) }) }).then(normalizeProject);
+  createProject(name: string, root_dir_name?: string, canvas?: { width: number; height: number; fps_num?: number; fps_den?: number }): Promise<Project> {
+    return this.request<unknown>(`${API_PREFIX}/projects`, { method: "POST", body: JSON.stringify({ name, ...(root_dir_name ? { root_dir_name } : {}), ...(canvas ? { canvas } : {}) }) }).then(normalizeProject);
   }
   getProject(projectId: ProjectId): Promise<Project> { return this.request<unknown>(`${API_PREFIX}/projects/${projectId}`).then(normalizeProject); }
   renameProject(projectId: ProjectId, name: string): Promise<Project> { return this.request<unknown>(`${API_PREFIX}/projects/${projectId}`, { method: "PATCH", body: JSON.stringify({ name }) }).then(normalizeProject); }
