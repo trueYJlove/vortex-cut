@@ -11,7 +11,8 @@ import { PreviewSourceResolver } from "./source-resolver.js";
 import { SyntheticPipLayer } from "./SyntheticPipLayer.js";
 import { windowedFrameSource } from "./frame-source.js";
 import { windowSourceBudget } from "./resource-budget.js";
-import { parsePreviewIrV2Manifest } from "@aivideo/contracts";
+import { editorPerf } from "./perf-metrics.js";
+import { parsePreviewIrV2Manifest, PREVIEW_IR_V2_MAX_WINDOW_FRAMES } from "@aivideo/contracts";
 
 const previewIrV2Enabled = (): boolean => {
   try { return import.meta.env.VITE_AIVS_PREVIEW_IR_V2 === "1"; } catch { return false; }
@@ -113,19 +114,49 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
         // 就地换表路径在 v2 下不适用（manifest_id 变化 = 新帧源），revision
         // 变更走既有"输入变化 → 整会话重建"判定（sig 含输入集合）。
         if (previewIrV2Enabled()) {
-          const manifest = parsePreviewIrV2Manifest(await window.desktop.getPreviewIrV2Manifest({
+          // C20-T2 ready 分段遥测：manifest/解析/窗口/注入四段（分段有重叠，
+          // 相加 ≠ ready_ms；归因口径见 T2 实施报告）。
+          const readyT0 = performance.now();
+          // 无契约并行化：窗口请求入参不含 manifest_id（响应才携带，仅作失配
+          // 校验）→ 窗 0 与 manifest 并行取。只预热窗 0——窗 1 盲发在小源
+          // (<300 帧) 会越界 400（Core start_frame>=total 拒绝）；count 固定
+          // 300 由 Core 夹紧到实际帧数，loadWindow 按响应容差装填。
+          const prewarmWindow0 = window.desktop.getPreviewIrV2Window({
+            project_id: projectId as never, start_frame: 0, frame_count: PREVIEW_IR_V2_MAX_WINDOW_FRAMES,
+            timeline_revision_id: revisionId, output_ratio: outputRatio,
+          }).then(payload => payload);
+          prewarmWindow0.catch(() => undefined); // 防孤儿拒绝：装配中断时此请求无人消费
+          // 字体与 manifest 并行（装配尾段才消费；失败语义与原串行一致）
+          const fontPromise = window.desktop.captionFontUrl()
+            .then(url => fetch(url, { signal: controller.signal }))
+            .then(response => { if (!response.ok) throw new Error("caption font fetch failed"); return response.arrayBuffer(); });
+          fontPromise.catch(() => undefined);
+          const manifestT0 = performance.now();
+          const manifestRaw = await window.desktop.getPreviewIrV2Manifest({
             project_id: projectId as never,
             timeline_revision_id: revisionId,
             output_ratio: outputRatio,
-          }));
+          });
+          const manifestDone = performance.now();
+          editorPerf.record("ready_manifest", manifestDone - manifestT0);
+          const manifest = parsePreviewIrV2Manifest(manifestRaw);
+          editorPerf.record("ready_parse", performance.now() - manifestDone);
           const container = containerRef.current;
           if (!container || stale()) return;
           // C20-T1：缓存预算/在途上限随资源档位（无档位 = 帧源内建默认 8MiB/2，
           // 语义不变——档位表见 resource-budget.windowSourceBudget）
           const wsBudget = resourceTier ? windowSourceBudget(resourceTier) : undefined;
+          let pendingPrewarm: typeof prewarmWindow0 | null = prewarmWindow0;
           const frameSource = windowedFrameSource(manifest.manifest_id, manifest.total_frames, {
             fetchWindow: (startFrame, frameCount, signal) => {
               if (signal.aborted) return Promise.reject(new Error("aborted"));
+              // C20-T2：命中预热窗复用在途请求（manifest_id 失配仍在
+              // loadWindow 内整体丢弃——校验语义不变）
+              if (startFrame === 0 && pendingPrewarm) {
+                const prewarmed = pendingPrewarm;
+                pendingPrewarm = null;
+                return prewarmed;
+              }
               return window.desktop.getPreviewIrV2Window({
                 project_id: projectId as never, start_frame: startFrame, frame_count: frameCount,
                 timeline_revision_id: revisionId, output_ratio: outputRatio,
@@ -134,9 +165,11 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
             cacheBytes: wsBudget?.cacheBytes,
             maxInFlight: wsBudget?.maxInFlight,
           });
-          // 首屏：只取首窗 + 预取窗（不等待全量——v2 的核心收益点）
-          await frameSource.ensureRange?.(0, Math.min(manifest.total_frames, 600), controller.signal);
-          if (stale()) { frameSource.dispose?.(); return; }
+          // 首屏：首窗（预热命中）+预取窗**发起**，与 create 并行——不在此
+          // 等待，装配尾部 seekToFrame 前统一 await（其内部取窗 await 兜底）。
+          const ensureT0 = performance.now();
+          const ensureReady = frameSource.ensureRange?.(0, Math.min(manifest.total_frames, 600), controller.signal) ?? Promise.resolve();
+          ensureReady.catch(() => undefined); // loadWindow 自吞错误；此处防中断路径孤儿
           const ir: Ir = {
             schema: "preview-ir-v1", // 会话消费 v1 形状的元数据 + v2 窗口帧源供帧
             projector_version: String(manifest.projector_version),
@@ -149,9 +182,11 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
             known_approximations: manifest.known_approximations,
             frames: [],
           };
+          const createT0 = performance.now();
           const session = await PreviewSession.create(container, ir, mediaUrls, audioByClip, controller.signal, sourceResolver ?? null, resourceTier, typeof projectId === "string" ? projectId : null, frameSource, forceCopyTo);
+          editorPerf.record("ready_inject", performance.now() - createT0);
           creating = session;
-          if (stale()) { session.dispose(); return; }
+          if (stale()) { session.dispose(); frameSource.dispose?.(); return; }
           session.onTimeUs = (us: number) => {
             lastReportedUs.current = us;
             playheadStore?.set(us);
@@ -168,14 +203,15 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
           sessionRefLocal.current = session;
           sessionProjectRef.current = projectId;
           boxObserverRef.current?.observe(container);
-          const fontUrl = await window.desktop.captionFontUrl();
-          if (stale()) return;
-          const fontResponse = await fetch(fontUrl, { signal: controller.signal });
-          if (!fontResponse.ok) throw new Error("caption font fetch failed");
-          const fontBuffer = await fontResponse.arrayBuffer();
-          if (stale()) return;
+          // C20-T2：字体已在装配头部并行预取；首窗就绪后再 seek（seekToFrame
+          // 内部取窗 await 兜底同步——窗口未就绪时在此收敛）。
+          const fontBuffer = await fontPromise;
+          if (stale()) { session.dispose(); frameSource.dispose?.(); return; }
           await session.loadCaptionFont(fontBuffer);
           if (stale()) return;
+          await ensureReady;
+          editorPerf.record("ready_window", performance.now() - ensureT0);
+          if (stale()) { session.dispose(); frameSource.dispose?.(); return; }
           await session.seekToFrame(Math.max(0, Math.floor((playheadUs / 1e6) * ir.canvas.fps)));
           if (stale()) return;
           ready = true;

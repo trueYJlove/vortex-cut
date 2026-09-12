@@ -1313,6 +1313,9 @@ export class PreviewSession {
     // 单窗 IPC ~50-70ms，拖拽快速档由 epoch latest-wins 兜住）。
     const ensure = this.frames.ensureRange?.(index, index + 1, this.lifetime.signal);
     if (ensure) {
+      // 窗口就绪后增量并入 pip 索引（游标扫描,与播放 pump 路径同型——
+      // C20-T2 装配并行化后 create 时窗口可能未就绪,这里补齐首窗索引）
+      void ensure.then(() => this.extendPipOverlayIndex(0, this.frames.frameCount));
       await ensure.catch(() => undefined); // 取窗失败按缺帧处理（-1），不再向上抛
       // dispose 后抵达：与作废的上传任务同语义（rejected），不产出 compose
       if (this.disposed) throw new Error("session disposed");
