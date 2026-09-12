@@ -64,6 +64,20 @@
   （resource-budget）。Desktop 619 项全过。C20 §6.1 "trace 留证"已勘误
   （实际无崩溃 dump）;崩溃可诊断性缺口（failure.json 不含脱敏错误文本）
   登记待修。
+- **执行状态（2026-09-12 更新·七）**：**下一工作包 C20-T/B11-D Planning
+  Gate 批准**（`docs/PERFORMANCE_C20T_B11D_PLANNING_GATE_2026-09-12.md`,
+  LiuWei 签署）。三子包：**S1 小修**（input-pool-protocol 2 个
+  unhandled rejection + failure.json 脱敏错误文本持久化——F02 低频崩溃
+  待查的前提）；**C20-T1 seek 取窗调优**（缓存预算/预取窗数/在途上限
+  入 resource-budget 档位表 + seek 落定后方向性预取 ±2 窗,验收门：
+  seek p95 退化收敛 ≤20%）；**C20-T2 ready 并行化**（首选无契约方案,
+  附 ready 分段遥测与 F02 5.7s 归因分解,绝对值 <2s 不设门）；**B11-D
+  代理降档决策轮**（F02 320×180 spike 验证 predictResidencyBytes
+  ±25%,决策备忘录三问——auto 降档触发线/低于源短边档位/质量降级
+  UX 登记,不预授权实施）。次序 S1→T1→T2→D；v2 默认 on 挂起至 T1/T2
+  达标且 B13+C20 二阶段独立验收通过后单独决策。同日仓库整理：分支
+  `uiux-polish-round3` 推送远端备份,master fast-forward 至该分支
+  （127 提交,纯 ff 零冲突）。
 - 新增模块/协议/脚本均是本方案拟新增，不代表仓库已经存在。
 
 
