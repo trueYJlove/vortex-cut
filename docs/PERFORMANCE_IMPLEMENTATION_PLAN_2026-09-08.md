@@ -158,6 +158,16 @@
   干净),高于 ~1/50 估计,疑与 F03/晚槽位相关——建议独立小工作单:
   harness setup 超时 page.reload 恢复路径 + 根因排查。种子路径 e2e
   触发器(同文档 revision)不在自然编辑负载内,单测覆盖维持。
+- **执行状态(2026-09-13 更新·十三)**:**harness setup 装配竞态恢复路径
+  落地**(`PERFORMANCE_HARNESS_SETUP_RECOVERY_2026-09-13.md`)——setup
+  序列重构为 ≤3 次有界循环:canvas 可见性超时且状态仍 synthetic(= 竞态
+  形态)时 page.reload 重建装配再试(≤2 次恢复,计入
+  setup_recovery_count;超限或非 synthetic 状态按原样响亮失败,最坏情形
+  = 原行为)。仅 harness 改动,产品代码零改动;F01 冒烟常规路径全过
+  (recovery 计数 0,循环透明)。恢复分支由真实轮次机会性验证(计数
+  可审计);**产品侧根因排查独立挂账**(工作假设:canvas 尺寸仅靠
+  ResizeObserver 事件更新,就绪时容器 0 尺寸则不再触发——待恢复路径
+  积累现场后定位)。
 - 新增模块/协议/脚本均是本方案拟新增，不代表仓库已经存在。
 
 

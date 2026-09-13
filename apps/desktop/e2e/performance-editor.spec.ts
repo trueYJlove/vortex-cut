@@ -418,32 +418,50 @@ for (const [sceneKey, recipe] of Object.entries(RECIPES)) {
           await page.evaluate(name => { (window as { __benchProjectName?: string }).__benchProjectName = name; }, `B00 ${recipe.scenario}`);
           const extra = await page.evaluate(recipe.inPage, mediaFiles.map(entry => entry.file));
           await expectCurrentProject(page, `B00 ${recipe.scenario}`);
-          await page.reload();
-          await page.waitForFunction(() => Boolean((window as any).__editorPerf));
-          await page.evaluate(on => (window as any).__editorPerf.configure(on), enabled);
-          await expectCurrentProject(page, `B00 ${recipe.scenario}`);
           // Baseline bug: media tickets can race project loading (amplified by
           // F04's asset count — assets beyond list_assets' default page lose tickets).
           // Recovery = explicit refresh-assets (re-issues tickets) + retry-synthetic,
           // every attempt counted in setup_recovery_count, never a clean start.
-          await expect.poll(async () => {
-            if (await page.getByRole("button", { name: "重试合成预览", exact: true }).isVisible()) return "fallback";
-            return (await page.getByLabel("预览状态", { exact: true }).textContent()) === "合成预览" ? "ready" : "loading";
-          }, { timeout: 60000 }).not.toBe("loading");
-          for (let attempt = 0; attempt < 3; attempt++) {
-            const retry = page.getByRole("button", { name: "重试合成预览", exact: true });
-            if (!(await retry.isVisible())) break;
-            setupRecoveryCount++;
-            const refreshButton = page.getByRole("button", { name: "刷新素材库" });
-            if (await refreshButton.isEnabled().catch(() => false)) await refreshButton.click();
-            await page.waitForTimeout(1000);
-            await retry.click();
+          // 装配竞态恢复（2026-09-13 升级登记 3/60 启动）："预览状态 synthetic
+          // 但 canvas 不可见/不存在" 的已知脆点此前无恢复路径——canvas 可见性
+          // 超时且状态仍为 synthetic 时 page.reload 重建装配再试（≤2 次，计入
+          // setup_recovery_count——分析时剔除该 run 的 ready 绝对值）；与既有
+          // 票据竞态恢复（计数披露）同型。超限或状态非 synthetic → 按原样
+          // 响亮失败（恢复分支的机会性验证：bounded + 失败即抛，最坏情形 =
+          // 原行为；真实竞态现场的恢复经计数可审计）。
+          const synthStatus = async () =>
+            (await page.getByLabel("预览状态", { exact: true }).textContent()) === "合成预览";
+          let canvasReady = false;
+          for (let setupAttempt = 0; setupAttempt < 3 && !canvasReady; setupAttempt++) {
+            if (setupAttempt > 0) setupRecoveryCount++;
+            await page.reload();
+            await page.waitForFunction(() => Boolean((window as any).__editorPerf));
+            await page.evaluate(on => (window as any).__editorPerf.configure(on), enabled);
+            await expectCurrentProject(page, `B00 ${recipe.scenario}`);
             await expect.poll(async () => {
               if (await page.getByRole("button", { name: "重试合成预览", exact: true }).isVisible()) return "fallback";
               return (await page.getByLabel("预览状态", { exact: true }).textContent()) === "合成预览" ? "ready" : "loading";
             }, { timeout: 60000 }).not.toBe("loading");
+            for (let attempt = 0; attempt < 3; attempt++) {
+              const retry = page.getByRole("button", { name: "重试合成预览", exact: true });
+              if (!(await retry.isVisible())) break;
+              setupRecoveryCount++;
+              const refreshButton = page.getByRole("button", { name: "刷新素材库" });
+              if (await refreshButton.isEnabled().catch(() => false)) await refreshButton.click();
+              await page.waitForTimeout(1000);
+              await retry.click();
+              await expect.poll(async () => {
+                if (await page.getByRole("button", { name: "重试合成预览", exact: true }).isVisible()) return "fallback";
+                return (await page.getByLabel("预览状态", { exact: true }).textContent()) === "合成预览" ? "ready" : "loading";
+              }, { timeout: 60000 }).not.toBe("loading");
+            }
+            try {
+              await expect(page.locator(".synthetic-canvas")).toBeVisible({ timeout: 60000 });
+              canvasReady = true;
+            } catch (error) {
+              if (setupAttempt >= 2 || !(await synthStatus())) throw error;
+            }
           }
-          await expect(page.locator(".synthetic-canvas")).toBeVisible({ timeout: 60000 });
           await expect(page.getByLabel("预览状态", { exact: true })).toHaveText("合成预览", { timeout: 60000 });
           // Require an advancing ready preview, not merely an allocated canvas.
           await page.getByRole("button", { name: "播放", exact: true }).click();
