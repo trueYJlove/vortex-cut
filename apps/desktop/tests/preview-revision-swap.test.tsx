@@ -11,13 +11,15 @@ import { activeWorkers, installWorkers, ScriptedWorker, stubOffscreenCanvas } fr
 const SHA = "a".repeat(64);
 const manifestIdOf = (revisionId: string) => `sha256:${SHA}@${revisionId}@test`;
 
-/** v2 manifest 原始载荷（由 v1 夹具投影；inputChanged 模拟输入集合增删）。 */
-function manifestRaw(revisionId: string, inputChanged = false): Record<string, unknown> {
+/** v2 manifest 原始载荷（由 v1 夹具投影；inputChanged 模拟输入集合增删，
+ *  totalFrames 覆盖帧数——多窗用例需 > 300）。 */
+function manifestRaw(revisionId: string, inputChanged = false, totalFrames?: number): Record<string, unknown> {
   const ir = fixturePreviewIr() as Record<string, any>;
   if (inputChanged) {
     ir.inputs.push({ ...ir.inputs[0], input_id: "in_2", asset_id: "asset_video_2" });
     ir.segments.push({ ...ir.segments[0], clip_id: "clip_2", input_id: "in_2" });
   }
+  const frames = totalFrames ?? ir.canvas.duration_frames;
   return {
     schema: "preview-ir-v2",
     projector_version: 1,
@@ -26,8 +28,8 @@ function manifestRaw(revisionId: string, inputChanged = false): Record<string, u
     content_fingerprint: `sha256:${SHA}`,
     fps_num: 30,
     fps_den: 1,
-    total_frames: ir.canvas.duration_frames,
-    duration_us: ir.canvas.duration_us,
+    total_frames: frames,
+    duration_us: frames * 33_333,
     canvas: ir.canvas,
     inputs: ir.inputs,
     segments: ir.segments,
@@ -53,13 +55,15 @@ function windowRaw(manifestId: string, startFrame: number, frameCount: number): 
 }
 
 /** v2 形状 desktop 桩：manifest/窗口按 revision 现算（manifest_id 随 revision 变化，
- *  旧 revision 的窗口响应对新帧源即"manifest_id 失配"样本）。 */
-function stubDesktopV2(isInputChanged: (revisionId: string) => boolean = () => false) {
+ *  旧 revision 的窗口响应对新帧源即"manifest_id 失配"样本）。
+ *  sharedManifestId = 模拟撤销/重做/空转 revision（内容未变 → 同 manifest_id）。 */
+function stubDesktopV2(isInputChanged: (revisionId: string) => boolean = () => false, opts?: { sharedManifestId?: boolean; totalFrames?: number }) {
+  const idOf = (revisionId: string) => (opts?.sharedManifestId ? "shared" : revisionId);
   window.desktop = {
     getPreviewIrV2Manifest: vi.fn((input: { timeline_revision_id?: string | null }) =>
-      Promise.resolve(manifestRaw(input.timeline_revision_id ?? "revision_unknown", isInputChanged(input.timeline_revision_id ?? "")))),
+      Promise.resolve(manifestRaw(idOf(input.timeline_revision_id ?? "revision_unknown"), isInputChanged(input.timeline_revision_id ?? ""), opts?.totalFrames))),
     getPreviewIrV2Window: vi.fn((input: { start_frame: number; frame_count: number; timeline_revision_id?: string | null }) =>
-      Promise.resolve(windowRaw(manifestIdOf(input.timeline_revision_id ?? "revision_unknown"), input.start_frame, input.frame_count))),
+      Promise.resolve(windowRaw(manifestIdOf(idOf(input.timeline_revision_id ?? "revision_unknown")), input.start_frame, input.frame_count))),
     captionFontUrl: vi.fn().mockResolvedValue("https://fonts.test/caption.woff2"),
   } as never;
 }
@@ -148,5 +152,46 @@ describe("C20c-1 v2 revision 换装（会话沿用）", () => {
     await waitFor(() => expect(manifestMock().mock.calls.length).toBe(2));
     unmount();
     await waitFor(() => expect(activeWorkers()).toBe(0));
+  });
+});
+
+describe("C20c-2 v2 缓存窗口迁移（manifest_id 相等 = 同投影）", () => {
+  /** 播放头置于窗 1（帧 300，fps 30 → 10s）：初始装配即产生窗 0（预热）+
+   *  窗 1（ensureRange(0,600)）两个取窗，换装轮的取窗数差异即可判迁移。 */
+  const windowProps = () => ({ ...baseProps(), playheadUs: 10_000_000 });
+
+  function windowMock(): ReturnType<typeof vi.fn> {
+    return (window.desktop as unknown as { getPreviewIrV2Window: ReturnType<typeof vi.fn> }).getPreviewIrV2Window;
+  }
+
+  it("撤销/重做（同 manifest_id）：缓存窗口整体迁移——换装轮仅预热 1 次取窗", async () => {
+    stubDesktopV2(() => false, { sharedManifestId: true, totalFrames: 610 });
+    const props = windowProps();
+    const { rerender } = render(<SyntheticPreview {...props} />);
+    await waitFor(() => expect(ScriptedWorker.instances.length).toBe(2));
+    await waitFor(() => expect(windowMock().mock.calls.length).toBe(2)); // 预热(窗0) + ensureRange(窗1)
+    rerender(<SyntheticPreview {...props} revisionId="revision_2" />);
+    await waitFor(() => expect(manifestMock().mock.calls.length).toBe(2));
+    // 换装轮：预热窗 0 照发（装配头部盲发，幂等）；窗 0/1 均种子命中——无任何按需取窗
+    await waitFor(() => expect(windowMock().mock.calls.length).toBe(3));
+    await new Promise(resolve => setTimeout(resolve, 20)); // 收敛：确认不再有取窗
+    expect(windowMock().mock.calls.length).toBe(3);
+    expect(windowMock().mock.calls[2]![0].start_frame).toBe(0); // 第 3 次 = 换装轮预热
+    expect(ScriptedWorker.instances.every(worker => !worker.terminated)).toBe(true);
+    expect(props.onFallback).not.toHaveBeenCalled();
+  });
+
+  it("内容编辑（manifest_id 变化）：不迁移——窗 1 按需重取", async () => {
+    stubDesktopV2(() => false, { totalFrames: 610 });
+    const props = windowProps();
+    const { rerender } = render(<SyntheticPreview {...props} />);
+    await waitFor(() => expect(ScriptedWorker.instances.length).toBe(2));
+    await waitFor(() => expect(windowMock().mock.calls.length).toBe(2));
+    rerender(<SyntheticPreview {...props} revisionId="revision_2" />);
+    await waitFor(() => expect(manifestMock().mock.calls.length).toBe(2));
+    // 换装轮：预热(0) + 窗 1 重取（新 manifest_id，无种子）= 4
+    await waitFor(() => expect(windowMock().mock.calls.length).toBe(4));
+    expect(windowMock().mock.calls[3]![0].start_frame).toBe(300);
+    expect(props.onFallback).not.toHaveBeenCalled();
   });
 });

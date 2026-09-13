@@ -130,6 +130,20 @@
   共享。A/B 行为正确性轮与 C20c-2 合并(改动面不触稳态路径)。遗留:
   C20c-2 dirty-range 复用(下一工作单)、Core manifest 投影缓存/增量
   与 F02 段外残差按 C20c Gate §2 排除清单另立。
+- **执行状态(2026-09-13 更新·十一)**:**C20c-2(缓存窗口迁移)已交付 +
+  C20c-2b(契约扩展)登记**(`PERFORMANCE_C20C2_SEED_REUSE_IMPLEMENTATION_2026-09-13.md`)。
+  经代码证据裁定范围收敛:manifest_id(=content_fingerprint@mode@profile)
+  相等 ⇒ 同投影 ⇒ 缓存窗口整体迁移健全(覆盖撤销/重做/空转 revision 的
+  编辑闭环,零取窗换装、帧对象跨源同引用);**不等时不做部分复用**——
+  投影输出剥离 keyframes/transform(ir.py:456-467)、DTO 无预设/字体版本,
+  渲染器无法证明段外帧未变,按 Gate §4"宁重算不猜测"全局重算。交付
+  frame-source 种子机制(seedWindows/snapshotWindows,LRU 记账 + 防御性
+  过滤 + 引用稳定性跨源延续)+ SyntheticPreview 成对 ref 判定接线。
+  Desktop 635 项全过(629+6),v1 零改动。**C20c-2b 登记(契约扩展)**:
+  段级 visual hash(keyframes/transform)+ caption 语义 hash 下发后激活
+  结构 diff 部分复用(机制载体本轮已就绪,含 1 帧 halo + 窗口粒度扩展
+  与 golden 对拍硬门);Core 投影缓存 LRU=2 的深撤销重投影成本维持
+  C20c 排除项另立。
 - 新增模块/协议/脚本均是本方案拟新增，不代表仓库已经存在。
 
 

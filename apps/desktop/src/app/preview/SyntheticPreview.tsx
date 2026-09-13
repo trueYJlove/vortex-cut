@@ -14,7 +14,7 @@ import { PreviewSourceResolver } from "./source-resolver.js";
 import { SyntheticPipLayer } from "./SyntheticPipLayer.js";
 import { windowSourceBudget } from "./resource-budget.js";
 import { editorPerf } from "./perf-metrics.js";
-import { parsePreviewIrV2Manifest, PREVIEW_IR_V2_MAX_WINDOW_FRAMES } from "@aivideo/contracts";
+import { parsePreviewIrV2Manifest, PREVIEW_IR_V2_MAX_WINDOW_FRAMES, type PreviewIrV2Manifest } from "@aivideo/contracts";
 
 const previewIrV2Enabled = (): boolean => {
   // C20 v2 默认 on(2026-09-13 LiuWei 裁决,PERFORMANCE_C20V2_DEFAULT_ON_DECISION_2026-09-13.md);
@@ -77,6 +77,9 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
   // C20c-1：v2 外部帧源所有权在本组件（session.dispose 不释放外部帧源）——
   // 换装/重建/卸载时由此 ref 统一释放，闭合既有"项目切换/卸载漏 dispose"缺口。
   const frameSourceRef = useRef<FrameSource | null>(null);
+  // C20c-2：与帧源成对持有的 manifest（seed 判定 = 两者同一装配轮采纳的
+  // manifest_id 对比——中断装配不更新，保证配对一致）。
+  const frameManifestRef = useRef<PreviewIrV2Manifest | null>(null);
   const generationRef = useRef(0);
   const sessionProjectRef = useRef<string | null>(null);
   const lastReportedUs = useRef<number>(playheadUs);
@@ -115,6 +118,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
       existing?.dispose(); existing = null; sessionRefLocal.current = null;
       // C20c-1：外部帧源所有权在组件——项目切换一并释放（既有缺口闭合）
       frameSourceRef.current?.dispose?.(); frameSourceRef.current = null;
+      frameManifestRef.current = null;
     }
     setLoad({ status: "loading", message: "正在加载合成预览" });
     (async () => {
@@ -153,11 +157,24 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
           editorPerf.record("ready_parse", performance.now() - manifestDone);
           const container = containerRef.current;
           if (!container || stale()) return;
+          // C20c-2：manifest_id 相等（= 同 content_fingerprint ⇒ 同投影，覆盖
+          // 撤销/重做/空转 revision 的编辑闭环）→ 旧源缓存窗口整体迁移（帧对象
+          // 同引用）。不等 → 不迁移：投影输出剥离 keyframes/transform、DTO 无
+          // 预设/字体版本，manifest 对"不可见变更"盲——无法证明段外帧不变，
+          // 宁重算（部分复用待 C20c-2b 契约扩展：段级 visual hash + caption
+          // 语义 hash）。manifest_id 相等 ⇒ inputs 相等 ⇒ sig 必过 ⇒ 必走换装。
+          const prevSource = frameSourceRef.current;
+          const prevManifest = frameManifestRef.current;
+          const seedWindows = prevSource?.snapshotWindows && prevManifest
+            && prevManifest.manifest_id === manifest.manifest_id
+            ? prevSource.snapshotWindows()
+            : undefined;
           // C20-T1：缓存预算/在途上限随资源档位（无档位 = 帧源内建默认 8MiB/2，
           // 语义不变——档位表见 resource-budget.windowSourceBudget）
           const wsBudget = resourceTier ? windowSourceBudget(resourceTier) : undefined;
           let pendingPrewarm: typeof prewarmWindow0 | null = prewarmWindow0;
           const frameSource = windowedFrameSource(manifest.manifest_id, manifest.total_frames, {
+            seedWindows,
             fetchWindow: (startFrame, frameCount, signal) => {
               if (signal.aborted) return Promise.reject(new Error("aborted"));
               // C20-T2：命中预热窗复用在途请求（manifest_id 失配仍在
@@ -199,6 +216,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
           if (existingSession && existingSession.replaceIr(ir, frameSource)) {
             frameSourceRef.current?.dispose?.();
             frameSourceRef.current = frameSource;
+            frameManifestRef.current = manifest; // 与帧源同轮采纳（seed 配对一致）
             // 新源无就绪窗：暂停态显式重锚（refineAfterDrag → seekToFrame 取
             // 当前帧窗口并重呈现）；播放态由 pump 下一 tick 的 ensureRange
             // 自愈（帧源按引用读取，换装对 pump 透明）——均不重建会话。
@@ -215,12 +233,14 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
           }
           frameSourceRef.current?.dispose?.();
           frameSourceRef.current = null;
+          frameManifestRef.current = null;
           const createT0 = performance.now();
           const session = await PreviewSession.create(container, ir, mediaUrls, audioByClip, controller.signal, sourceResolver ?? null, resourceTier, typeof projectId === "string" ? projectId : null, frameSource, forceCopyTo);
           editorPerf.record("ready_inject", performance.now() - createT0);
           creating = session;
           if (stale()) { session.dispose(); frameSource.dispose?.(); return; }
           frameSourceRef.current = frameSource; // C20c-1：外部帧源所有权移交组件
+          frameManifestRef.current = manifest; // 与帧源同轮采纳（seed 配对一致）
           session.onTimeUs = (us: number) => {
             lastReportedUs.current = us;
             playheadStore?.set(us);
@@ -338,6 +358,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
     // C20c-1：外部帧源所有权在组件——卸载一并释放（既有缺口闭合）
     frameSourceRef.current?.dispose?.();
     frameSourceRef.current = null;
+    frameManifestRef.current = null;
   }, []);
 
   // 播放/暂停。

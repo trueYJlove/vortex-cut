@@ -28,6 +28,8 @@ export interface FrameSource {
   dispose?(): void;
   /** v2：窗口未就绪且不在途（显式 buffering 判定；v1 恒 false）。 */
   isBuffering?(frame: number): boolean;
+  /** C20c-2：缓存窗口快照（换装迁移用；v1 不提供）。 */
+  snapshotWindows?(): WindowSeed[];
 }
 
 /** v1 全量数组的 FrameSource 适配（零拷贝——帧对象即 ir.frames 元素）。 */
@@ -42,6 +44,13 @@ export function arrayFrameSource(ir: Ir): FrameSource {
   };
 }
 
+/** C20c-2：跨 manifest 迁移的缓存窗口（快照 = 种子；帧对象原引用共享）。 */
+export interface WindowSeed {
+  startFrame: number;
+  /** startFrame -> frame（与来源缓存同 Map 引用——dispose 只清条目不清 Map）。 */
+  frames: Map<number, IrFrame>;
+}
+
 /** v2 窗口帧源配置（Planning Gate 2026-09-11 §2.1：窗口 = Core 硬上限 300）。 */
 export interface WindowedFrameSourceOptions {
   /** 取窗口响应（main 进程 getPreviewIrV2Window 的已 parse 结果）。 */
@@ -52,6 +61,10 @@ export interface WindowedFrameSourceOptions {
   cacheBytes?: number;
   /** 在途窗口请求上限（默认 2，计划次序 4）。 */
   maxInFlight?: number;
+  /** C20c-2：构造期种子窗口（manifest_id 相等 = 同投影，撤销/重做/空转
+   *  revision 的缓存整体迁移；manifest_id 不等时不传——关键帧/预设版本对
+   *  manifest 盲，无法证明未变，宁重算）。种子帧同样计入 LRU 记账。 */
+  seedWindows?: WindowSeed[];
 }
 
 interface WindowEntry {
@@ -83,7 +96,7 @@ export function windowedFrameSource(
   manifestId: string,
   totalFrames: number,
   options: WindowedFrameSourceOptions,
-): FrameSource & { readonly buffered: () => Array<[number, number]> } {
+): FrameSource & { readonly buffered: () => Array<[number, number]>; readonly snapshotWindows: () => WindowSeed[] } {
   const windowFrames = PREVIEW_IR_V2_MAX_WINDOW_FRAMES;
   const cacheBytes = options.cacheBytes ?? DEFAULT_CACHE_BYTES;
   const maxInFlight = options.maxInFlight ?? DEFAULT_MAX_IN_FLIGHT;
@@ -107,6 +120,24 @@ export function windowedFrameSource(
       if (entry) totalBytes -= entry.estimatedBytes;
     }
   };
+
+  // C20c-2：种子窗口装填（同 loadWindow 的记账口径；防御性过滤越界帧）。
+  // manifest_id 相等 ⇒ 同指纹 ⇒ 同投影 ⇒ 种子帧即新 manifest 的投影结果
+  // （对象引用共享 = 引用稳定性契约的自然延续）。
+  for (const seed of options.seedWindows ?? []) {
+    if (disposed || seed.startFrame < 0 || seed.startFrame >= totalFrames || cache.has(seed.startFrame)) continue;
+    const frames = new Map<number, IrFrame>();
+    let bytes = 0;
+    for (const [n, frame] of seed.frames) {
+      if (n < seed.startFrame || n >= Math.min(seed.startFrame + windowFrames, totalFrames)) continue;
+      frames.set(n, frame);
+      bytes += frameBytesOf(frame);
+    }
+    if (frames.size < 1) continue;
+    cache.set(seed.startFrame, { startFrame: seed.startFrame, frames, estimatedBytes: bytes });
+    totalBytes += bytes;
+  }
+  evictIfNeeded();
 
   const loadWindow = (startFrame: number, signal?: AbortSignal): Promise<void> => {
     if (disposed || cache.has(startFrame) || inFlight.has(startFrame)) {
@@ -202,6 +233,12 @@ export function windowedFrameSource(
         else ranges.push([start, end]);
       }
       return ranges;
+    },
+    /** C20c-2：缓存窗口快照（换装迁移用）。帧 Map 原引用导出——旧源 dispose
+     *  只清条目不清 Map，新源种子继续持有同一批帧对象（引用稳定性契约）。 */
+    snapshotWindows: (): WindowSeed[] => {
+      if (disposed) return [];
+      return [...cache.values()].map(entry => ({ startFrame: entry.startFrame, frames: entry.frames }));
     },
   };
 }

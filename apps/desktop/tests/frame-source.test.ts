@@ -2,7 +2,7 @@
  *  （getFrame 引用稳定性——就地补丁语义依赖；越界 undefined；ensureRange
  *  立即完成；dispose 无操作——数组归 Ir 所有）。 */
 import { describe, expect, it } from "vitest";
-import { arrayFrameSource, windowPrefetchStarts, windowedFrameSource } from "../src/app/preview/frame-source.js";
+import { arrayFrameSource, windowPrefetchStarts, windowedFrameSource, type WindowSeed } from "../src/app/preview/frame-source.js";
 import type { Ir, IrFrame } from "../src/app/preview/ir.js";
 
 function makeIr(frameCount: number): Ir {
@@ -73,12 +73,13 @@ describe("C20a arrayFrameSource（v1 等价适配）", () => {
  *  manifest_id 失配丢弃/abort 语义/引用稳定性/显式 buffering 判定。 */
 interface WindowCall { start: number; count: number }
 
-function makeWindowHarness(totalFrames: number, opts?: { windowSize?: number; cacheBytes?: number; maxInFlight?: number }) {
+function makeWindowHarness(totalFrames: number, opts?: { windowSize?: number; cacheBytes?: number; maxInFlight?: number; seedWindows?: WindowSeed[] }) {
   const calls: WindowCall[] = [];
   const resolvers: Array<(value: { manifest_id: string; start_frame: number; frame_count: number; frames: Array<Record<string, unknown>> }) => void> = [];
   const source = windowedFrameSource("sha256:" + "a".repeat(64) + "@mode@ratio", totalFrames, {
     cacheBytes: opts?.cacheBytes,
     maxInFlight: opts?.maxInFlight,
+    seedWindows: opts?.seedWindows,
     fetchWindow: (start, count) => new Promise(resolve => {
       calls.push({ start, count });
       resolvers.push(resolve);
@@ -204,5 +205,81 @@ describe("windowPrefetchStarts（C20-T1 预取窗序）", () => {
   it("单窗源不产生预取;span 0 返回空", () => {
     expect(windowPrefetchStarts(50, 2, 300, 100)).toEqual([]);
     expect(windowPrefetchStarts(50, 0, 300, 100)).toEqual([]);
+  });
+});
+
+/** C20c-2：种子窗口迁移（manifest_id 相等 = 同投影，撤销/重做/空转 revision
+ *  的缓存整体迁移）。帧对象引用共享 = 引用稳定性契约的跨源延续。 */
+describe("C20c-2 seedWindows（缓存窗口迁移）", () => {
+  const W = 300;
+
+  function makeSeed(start: number, count: number): WindowSeed {
+    const frames = new Map<number, IrFrame>();
+    for (let i = 0; i < count; i++) {
+      const n = start + i;
+      frames.set(n, { n, t_us: n * 33_333, main: { kind: "black" }, overlays: [], captions: [] });
+    }
+    return { startFrame: start, frames };
+  }
+
+  it("种子窗口零请求就绪：getFrame 返回种子原对象（golden = 引用同一），fetchWindow 零调用", async () => {
+    const seed = makeSeed(0, W);
+    const { source, calls } = makeWindowHarness(2 * W, { seedWindows: [seed] });
+    const seeded = seed.frames.get(5)!;
+    expect(source.getFrame(5)).toBe(seeded); // 引用同一——同指纹同投影的强断言
+    await source.ensureRange!(0, W); // 种子窗已就绪：立即完成
+    expect(calls).toEqual([]);
+    expect(source.isBuffering!(W - 1)).toBe(false);
+    expect(source.isBuffering!(W)).toBe(true); // 未种子窗仍按未就绪报告
+  });
+
+  it("种子计入 LRU 记账：超预算按最旧逐出，被逐种子窗重取生成新请求", async () => {
+    // frameBytes 默认 4096/帧：预算 3 窗以内——种 2 窗 + 取 2 窗 → 首种子窗逐出
+    const { source, calls, flush } = makeWindowHarness(4 * W, {
+      seedWindows: [makeSeed(0, W), makeSeed(W, W)],
+      cacheBytes: 3.5 * W * 4096,
+    });
+    const pending = source.ensureRange!(2 * W, 4 * W); // 取窗 2、3
+    flush();
+    await pending;
+    expect(source.getFrame(5)).toBeUndefined(); // 窗 0（最旧）已逐出
+    expect(source.getFrame(2 * W)).toBeDefined();
+    // 重新取窗 0：生成新请求（逐出后重取语义不变）
+    const again = source.ensureRange!(0, 1);
+    flush();
+    await again;
+    expect(calls.some(c => c.start === 0)).toBe(true);
+  });
+
+  it("种子防御性过滤：越界帧剔除、越界窗口忽略，不崩溃不污染缓存", async () => {
+    const bad = makeSeed(2 * W, W); // start 超出 totalFrames(2W) —— 整窗忽略
+    const partial = makeSeed(W, W);
+    partial.frames.delete(W); // 缺首帧的种子窗：容忍（getFrame undefined = 未就绪语义）
+    const { source, calls, flush } = makeWindowHarness(2 * W, { seedWindows: [bad, partial] });
+    expect(source.getFrame(2 * W)).toBeUndefined();
+    expect(source.getFrame(W + 1)).toBeDefined();
+    expect(calls).toEqual([]);
+    const pending = source.ensureRange!(0, 1); // 被剔除的首帧按需补齐
+    flush();
+    await pending;
+    expect(source.getFrame(0)).toBeDefined();
+  });
+
+  it("snapshotWindows 导出缓存；dispose 清条目不清 Map，新源以同批帧对象复活", async () => {
+    const { source, calls, flush } = makeWindowHarness(2 * W);
+    const pending = source.ensureRange!(0, W);
+    flush();
+    await pending;
+    const snapshot = source.snapshotWindows();
+    expect(snapshot.map(s => s.startFrame)).toEqual([0]);
+    const frame5 = source.getFrame(5)!;
+    source.dispose!(); // 清条目——Map 与帧对象由新源种子继续持有
+    expect(source.getFrame(5)).toBeUndefined();
+    expect(snapshot[0]!.frames.get(5)).toBe(frame5);
+    const revived = windowedFrameSource("sha256:" + "a".repeat(64) + "@mode@ratio", 2 * W, {
+      seedWindows: snapshot,
+      fetchWindow: (start, count) => new Promise(resolve => { calls.push({ start, count }); }),
+    });
+    expect(revived.getFrame(5)).toBe(frame5); // 跨源引用同一（复用的 golden 语义）
   });
 });
