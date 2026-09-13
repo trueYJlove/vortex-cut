@@ -117,6 +117,19 @@
   typecheck + 625 项复跑全过;**基准口径变化:未来 v1 基线构建必须
   显式 `VITE_AIVS_PREVIEW_IR_V2=0`**(G0 冻结面不动)。C20c Planning
   Gate 同日起草(`PERFORMANCE_C20C_PLANNING_GATE_2026-09-13.md`)。
+- **执行状态(2026-09-13 更新·十)**:**C20c-1(revision 换 manifest 沿用
+  会话)已交付**(`PERFORMANCE_C20C1_SESSION_SWAP_IMPLEMENTATION_2026-09-13.md`,
+  Gate 同日批准)。v2 数据面补齐 v1 既有的"同输入 revision 变更 → 会话
+  保活"语义:编辑/撤销/重做/AI 提交的 revision 切换不再整会话重建,
+  新 manifest 帧源经 `replaceIr(ir, frameSource)` 就地换装(worker/GL/
+  池/音频全保留——会话侧机制 C20a/b 时已预留,本轮接通装配侧);暂停态
+  `refineAfterDrag` 重锚、播放态 pump 按引用自愈;`frameSourceRef`
+  所有权闭环顺带闭合项目切换/卸载两处既有帧源泄漏面。Desktop
+  typecheck/lint 通过,单测 **70 文件 629 项全过**(625+4 新增,v1 零
+  改动不动即过);测试桩抽至 `tests/fixtures/preview-worker-stubs.ts`
+  共享。A/B 行为正确性轮与 C20c-2 合并(改动面不触稳态路径)。遗留:
+  C20c-2 dirty-range 复用(下一工作单)、Core manifest 投影缓存/增量
+  与 F02 段外残差按 C20c Gate §2 排除清单另立。
 - 新增模块/协议/脚本均是本方案拟新增，不代表仓库已经存在。
 
 

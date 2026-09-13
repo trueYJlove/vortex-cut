@@ -8,10 +8,10 @@
  * VITE_AIVS_PREVIEW_IR_V2=0 显式回退 v1（v1 路径保留、语义不变）。 */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { parseIr, type Ir } from "./ir.js";
+import { windowedFrameSource, type FrameSource } from "./frame-source.js";
 import { PreviewSession, type PreviewSessionMetrics, type SegmentAudioConfig } from "./preview-session.js";
 import { PreviewSourceResolver } from "./source-resolver.js";
 import { SyntheticPipLayer } from "./SyntheticPipLayer.js";
-import { windowedFrameSource } from "./frame-source.js";
 import { windowSourceBudget } from "./resource-budget.js";
 import { editorPerf } from "./perf-metrics.js";
 import { parsePreviewIrV2Manifest, PREVIEW_IR_V2_MAX_WINDOW_FRAMES } from "@aivideo/contracts";
@@ -74,6 +74,9 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
   const { projectId, revisionId, mediaUrls, audioByClip, pipClips, selectedClipId, onSelectClip, onCommitPipTransform, onDraftPipMask, onCommitPipMask, onGesturePause, onGestureResume, playing, playheadUs, onTimeUs, onEnded, onFallback, outputRatio, playheadStore, sourceResolver, resourceTier, forceCopyTo } = props;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const sessionRef = useRef<PreviewSession | null>(null);
+  // C20c-1：v2 外部帧源所有权在本组件（session.dispose 不释放外部帧源）——
+  // 换装/重建/卸载时由此 ref 统一释放，闭合既有"项目切换/卸载漏 dispose"缺口。
+  const frameSourceRef = useRef<FrameSource | null>(null);
   const generationRef = useRef(0);
   const sessionProjectRef = useRef<string | null>(null);
   const lastReportedUs = useRef<number>(playheadUs);
@@ -110,13 +113,16 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
     let existing = sessionRefLocal.current;
     if (sessionProjectRef.current !== projectId) {
       existing?.dispose(); existing = null; sessionRefLocal.current = null;
+      // C20c-1：外部帧源所有权在组件——项目切换一并释放（既有缺口闭合）
+      frameSourceRef.current?.dispose?.(); frameSourceRef.current = null;
     }
     setLoad({ status: "loading", message: "正在加载合成预览" });
     (async () => {
       try {
         // C20 v2 数据面：manifest（无帧）→ 窗口帧源 → 会话（注入 frames）。
-        // 就地换表路径在 v2 下不适用（manifest_id 变化 = 新帧源），revision
-        // 变更走既有"输入变化 → 整会话重建"判定（sig 含输入集合）。
+        // C20c-1：同项目 revision 变更且输入绑定未变 → 会话沿用（worker/GL/
+        // 池/音频全保留），新 manifest 帧源就地换装；sig 不匹配（输入增删）
+        // 才走既有"整会话重建"。
         if (previewIrV2Enabled()) {
           // C20-T2 ready 分段遥测：manifest/解析/窗口/注入四段（分段有重叠，
           // 相加 ≠ ready_ms；归因口径见 T2 实施报告）。
@@ -186,11 +192,35 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
             known_approximations: manifest.known_approximations,
             frames: [],
           };
+          // C20c-1：同项目 revision 变更（输入绑定未变，sig 由 replaceIr 校验）
+          // → 会话沿用就地换装：worker/GL/池/音频全保留，帧表/段表换新
+          // manifest 帧源（旧源所有权在组件，换装后释放其缓存/在途）。
+          const existingSession = sessionRefLocal.current;
+          if (existingSession && existingSession.replaceIr(ir, frameSource)) {
+            frameSourceRef.current?.dispose?.();
+            frameSourceRef.current = frameSource;
+            // 新源无就绪窗：暂停态显式重锚（refineAfterDrag → seekToFrame 取
+            // 当前帧窗口并重呈现）；播放态由 pump 下一 tick 的 ensureRange
+            // 自愈（帧源按引用读取，换装对 pump 透明）——均不重建会话。
+            if (!playing) void existingSession.refineAfterDrag().catch(() => undefined);
+            if (stale()) return; // 更新轮已接管（其自身会再次换装/重建，资源经 ref 归属）
+            ready = true;
+            setLoad({ status: "ready", message: "" });
+            return;
+          }
+          // sig 不匹配（输入集合变化）或无会话：整会话重建（旧源一并释放）
+          if (existingSession) {
+            existingSession.dispose();
+            sessionRefLocal.current = null;
+          }
+          frameSourceRef.current?.dispose?.();
+          frameSourceRef.current = null;
           const createT0 = performance.now();
           const session = await PreviewSession.create(container, ir, mediaUrls, audioByClip, controller.signal, sourceResolver ?? null, resourceTier, typeof projectId === "string" ? projectId : null, frameSource, forceCopyTo);
           editorPerf.record("ready_inject", performance.now() - createT0);
           creating = session;
           if (stale()) { session.dispose(); frameSource.dispose?.(); return; }
+          frameSourceRef.current = frameSource; // C20c-1：外部帧源所有权移交组件
           session.onTimeUs = (us: number) => {
             lastReportedUs.current = us;
             playheadStore?.set(us);
@@ -300,11 +330,14 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, revisionId, outputRatio]);
 
-  // 卸载：销毁会话（含画布元素）+ 断开观察器（StrictMode 双挂载各自动一次，安全）。
+  // 卸载：销毁会话（含画布元素）+ 外部帧源 + 断开观察器（StrictMode 双挂载各自动一次，安全）。
   useEffect(() => () => {
     boxObserverRef.current?.disconnect();
     sessionRef.current?.dispose();
     sessionRef.current = null;
+    // C20c-1：外部帧源所有权在组件——卸载一并释放（既有缺口闭合）
+    frameSourceRef.current?.dispose?.();
+    frameSourceRef.current = null;
   }, []);
 
   // 播放/暂停。
