@@ -65,6 +65,14 @@ interface SceneRecipe {
   startBackground?(page: Page): Promise<Record<string, unknown>>;
   /** Node-side hook invoked after the playback loop; observes task drain. */
   finishBackground?(page: Page): Promise<Record<string, unknown>>;
+  /**
+   * C20c A/B：revision 切换相位（置于播放相位之后，前序负载保持与
+   * G0/c20t 基线可比）。text-edit = 播放头移位 + 默认文本按钮（字幕编辑，
+   * 输入不变 → v2 换装路径；无字幕场景适用）；undo-redo = Ctrl+Z/Ctrl+Y
+   * 服务端 revision 导航（字幕铺满场景适用——F02/F04/F02P）。省略 = 该场景
+   * 不跑 revision 相位。
+   */
+  revisionPhase?: "text-edit" | "undo-redo";
 }
 
 const assembleF01 = async (files: string[]): Promise<object> => {
@@ -322,28 +330,36 @@ const finishBackgroundF06 = async (page: Page): Promise<Record<string, unknown>>
 
 const RECIPES: Record<string, SceneRecipe> = {
   "F01": { scenario: "F01", label: "F01/basic-cfr", media: ["F01.mp4"], inPage: assembleF01,
-    scope: "complete App, source CFR, no PiP/captions; app cold launch + warm seeks; OS cache uncontrolled" },
+    revisionPhase: "text-edit",
+    scope: "complete App, source CFR, no PiP/captions; app cold launch + warm seeks; OS cache uncontrolled; +revision-switch phase (text-edit)" },
   "F02": { scenario: "F02", label: "F02/900s-900splices-900captions", media: ["F02.mp4"], inPage: assembleF02,
-    scope: "complete App, 900x1s same-source segments + 900 captions (IR at 27000-frame cap); app cold launch + warm seeks; OS cache uncontrolled" },
+    revisionPhase: "undo-redo",
+    scope: "complete App, 900x1s same-source segments + 900 captions (IR at 27000-frame cap); app cold launch + warm seeks; OS cache uncontrolled; +revision-switch phase (undo-redo)" },
   // B11-D1 spike：320x180 代理解码输入（夹具级替换，不动 source-resolver
   // 默认策略）——检验解码驻留平台随帧字节的缩放。默认不跑（AIVS_PERF_
   // SCENARIOS 显式选入），装配复用 F02（同 900 段/字幕，仅媒体分辨率不同）。
   "F02P": { scenario: "F02P", label: "F02P/320x180-proxy-decode-900s", media: ["F02P.mp4"], inPage: assembleF02,
-    scope: "complete App, same F02 assembly over a 320x180 proxy decode input (B11-D1 residency scaling spike); app cold launch + warm seeks; OS cache uncontrolled" },
+    revisionPhase: "undo-redo",
+    scope: "complete App, same F02 assembly over a 320x180 proxy decode input (B11-D1 residency scaling spike); app cold launch + warm seeks; OS cache uncontrolled; +revision-switch phase (undo-redo)" },
   "F04": { scenario: "F04", label: "F04/48-assets-4-layers", media: [], distinct: true, inPage: assembleF04,
-    scope: "complete App, 48 assets/4 visual layers (V1 spine + V2-V4 simultaneous PiP transforms) + 12 captions; 48 kept within list_assets default page (pagination gap registered); app cold launch + warm seeks; OS cache uncontrolled" },
+    revisionPhase: "undo-redo",
+    scope: "complete App, 48 assets/4 visual layers (V1 spine + V2-V4 simultaneous PiP transforms) + 12 captions; 48 kept within list_assets default page (pagination gap registered); app cold launch + warm seeks; OS cache uncontrolled; +revision-switch phase (undo-redo)" },
   "F07": { scenario: "F07", label: "F07/speed-matrix-overlap", media: ["F07.mp4", "F07-mute.mp4"], inPage: assembleF07,
-    scope: "complete App, speed matrix 0.5x/1x/2x/4x + video-only segment + mute/unmute toggle; dual-position mix NOT assembled (product constraints, B00-B report §5); app cold launch + warm seeks; OS cache uncontrolled" },
+    revisionPhase: "text-edit",
+    scope: "complete App, speed matrix 0.5x/1x/2x/4x + video-only segment + mute/unmute toggle; dual-position mix NOT assembled (product constraints, B00-B report §5); app cold launch + warm seeks; OS cache uncontrolled; +revision-switch phase (text-edit)" },
   "F03": { scenario: "F03", label: "F03/60min-deep-seek", media: ["F03.mp4"], inPage: assembleF03,
-    scope: "complete App, 60min source, head/middle/tail 10s windows (deep seek); app cold launch + warm seeks; OS cache uncontrolled",
+    revisionPhase: "text-edit",
+    scope: "complete App, 60min source, head/middle/tail 10s windows (deep seek); app cold launch + warm seeks; OS cache uncontrolled; +revision-switch phase (text-edit)",
     unavailable: ["playback-side bytes-read accounting (B12 range metrics surface pending)"] },
   "F05": { scenario: "F05", label: "F05/4k60-full-asset", media: ["F05.mp4"], inPage: assembleF05,
-    scope: "complete App, 4K/60fps source full-asset timeline (format ceiling probe); app cold launch + warm seeks; OS cache uncontrolled",
+    revisionPhase: "text-edit",
+    scope: "complete App, 4K/60fps source full-asset timeline (format ceiling probe); app cold launch + warm seeks; OS cache uncontrolled; +revision-switch phase (text-edit)",
     unavailable: ["proxy generation on unsupported decode (format accepted by WebCodecs in this build)",
       "seek events (observed defect: 4K60 seek path records 0 events; decode fails silently)"] },
   "F06": { scenario: "F06", label: "F06/playback-with-export", media: ["F01.mp4"], inPage: assembleF06,
     startBackground: startBackgroundF06, finishBackground: finishBackgroundF06,
-    scope: "complete App, full-asset playback while a final export runs (competition workload); app cold launch + warm seeks; OS cache uncontrolled" },
+    revisionPhase: "text-edit",
+    scope: "complete App, full-asset playback while a final export runs (competition workload); app cold launch + warm seeks; OS cache uncontrolled; +revision-switch phase (text-edit)" },
 };
 
 test.skip(process.env.AIVS_PERF_RUN !== "1", "Explicit benchmark entry only; not an ordinary E2E load");
@@ -351,9 +367,12 @@ for (const [sceneKey, recipe] of Object.entries(RECIPES)) {
   test(`B00 complete editor ${recipe.label} (not standalone probe)`, async () => {
     // 场景选择器（缺省 = 全跑，G0 冻结面不变；B11-D1 spike 场景 F02P 必须
     // 显式选入，避免全量基线轮被拉长）。同时供 T1/T2 A/B 轮按场景选跑。
-    const onlyScenarios = process.env.AIVS_PERF_SCENARIOS;
+    // 环境变量双名兼容：runner 设 AIVS_PERF_SCENES（a087ced 起），直连
+    // playwright 的 spike 轮设 AIVS_PERF_SCENARIOS（B11-D 备忘录 §2）——
+    // 此前两名错位，守卫从未生效，选择全靠 -g 正则（C20c 冒烟发现）。
+    const onlyScenarios = process.env.AIVS_PERF_SCENES ?? process.env.AIVS_PERF_SCENARIOS;
     if (onlyScenarios && !onlyScenarios.split(",").map(s => s.trim()).includes(recipe.scenario)) {
-      test.skip(true, `scenario not selected (AIVS_PERF_SCENARIOS=${onlyScenarios})`);
+      test.skip(true, `scenario not selected (AIVS_PERF_SCENES=${onlyScenarios})`);
     }
     const output = process.env.AIVS_PERF_RESULT!;
     const fixtures = process.env.AIVS_PERF_FIXTURES!;
@@ -378,7 +397,7 @@ for (const [sceneKey, recipe] of Object.entries(RECIPES)) {
     const runs = Number(process.env.AIVS_PERF_RUNS ?? 5);
     const seeks = Number(process.env.AIVS_PERF_SEEKS ?? 100);
     const seconds = Number(process.env.AIVS_PERF_PLAY_SECONDS ?? 300);
-    test.setTimeout(((2 * runs + 1) * (seconds + seeks * 10 + 150) + 300) * 1000);
+    test.setTimeout(((2 * runs + 1) * (seconds + seeks * 10 + 150) + 900) * 1000);
     const results: unknown[] = [];
     const config = JSON.parse(await readFile(join(output, "run-config.json"), "utf8"));
     // Separate launches permit opt-in diagnostics overhead A/B. First run is warmup only.
@@ -476,6 +495,75 @@ for (const [sceneKey, recipe] of Object.entries(RECIPES)) {
             try { backgroundExtra = { ...backgroundExtra, ...(await recipe.finishBackground(page)) }; }
             catch { backgroundExtra = { ...backgroundExtra, background_finish: "failed" }; }
           }
+          // C20c A/B：revision 切换相位（置于播放相位之后——前序相位负载保持
+          // 与 G0/c20t 基线可比，不被编辑污染）。每个转换：revision 基线读取 →
+          // perf reset → 动作（默认文本按钮 / Ctrl+Z / Ctrl+Y，window 级监听
+          // 无需焦点）→ 轮询 revision id 前进（比预览状态轮询硬——loading 窗口
+          // 太短会错过造成假通过）→ 轮询回到"合成预览"（fallback 也算失败——
+          // 换装路径回归必须响亮失败）→ 300ms 收敛（refineAfterDrag 去抖）→
+          // 快照。v2 记 ready_manifest/parse + window_fetch + seek(refine)；
+          // v1 走 replaceIr 同路径（事件流为空，wall_ms 即 v1 就地换表基线）。
+          const revisionTransitions: Array<Record<string, unknown>> = [];
+          const revisionCount = Number(process.env.AIVS_PERF_REVISIONS ?? 6);
+          if (recipe.revisionPhase) {
+            const projectId = await page.evaluate(async (name) => {
+              const projects = await window.desktop.listProjects({ limit: 100 });
+              const current = projects.items.find(item => item.name === name);
+              if (!current) throw new Error(`revision phase: project not found: ${name}`);
+              return current.project_id;
+            }, `B00 ${recipe.scenario}`);
+            // 探针必须读 getTimeline 的 current_revision（HEAD 指针）——
+            // listTimelineRevisions 是历史列表（创建序），undo/redo 只移动
+            // HEAD 不新增 revision，列表首项永不变（冒烟 c20c-smoke-f01-01
+            // warmup-on 失败现场 + Core DB 双 revision 实证）。
+            const revisionIdOf = () => page.evaluate(async (pid) =>
+              (await window.desktop.getTimeline(pid as never)).current_revision.timeline_revision_id, projectId);
+            const slider = page.getByRole("slider", { name: "时间线播放头" });
+            const box = await slider.boundingBox(); if (!box) throw new Error("No timeline slider");
+            const durationUs = Number(await slider.getAttribute("aria-valuemax") ?? 0);
+            for (let i = 0; revisionTransitions.length < revisionCount && Date.now() - started < 900000; i++) {
+              const steps: Array<{ action: string; prepare?: () => Promise<void>; run: () => Promise<void> }> = [];
+              if (recipe.revisionPhase === "text-edit") {
+                // 字幕加在播放头处（3s）：位置轮换避开已存在条目，且夹紧到
+                // 距末尾 3.5s 以内（add_caption 时长校验的防御）。播放头移位
+                // 属 prepare（不进测量窗）。
+                const fraction = Math.min(0.2 + 0.25 * (i % 3),
+                  durationUs > 0 ? Math.max(0.05, (durationUs - 3_500_000) / durationUs) : 0.2);
+                steps.push({ action: "add-default-text",
+                  prepare: async () => {
+                    await slider.click({ position: { x: Math.max(1, box.width * fraction), y: box.height / 2 } });
+                    await page.waitForTimeout(400); // 播放头外部 seek + 250ms 精修收敛
+                  },
+                  run: () => page.getByRole("button", { name: "默认文本", exact: true }).click() });
+                steps.push({ action: "undo", run: () => page.keyboard.press("Control+z") });
+              } else {
+                steps.push({ action: i % 2 === 0 ? "undo" : "redo", run: () => page.keyboard.press(i % 2 === 0 ? "Control+z" : "Control+y") });
+              }
+              for (const step of steps) {
+                if (revisionTransitions.length >= revisionCount) break;
+                await step.prepare?.();
+                const before = await revisionIdOf();
+                await page.evaluate(() => (window as any).__editorPerf.reset());
+                const at = Date.now();
+                await step.run();
+                await expect.poll(revisionIdOf, { timeout: 30000 }).not.toBe(before);
+                await page.waitForTimeout(500); // 预览 effect 启动（状态可能短暂 loading）
+                await expect.poll(async () => page.getByLabel("预览状态", { exact: true }).textContent(),
+                  { timeout: 30000 }).toBe("合成预览");
+                await page.waitForTimeout(300); // refineAfterDrag 250ms 去抖收敛
+                const snapshot = await page.evaluate(() => (window as any).__editorPerf.snapshot());
+                revisionTransitions.push({
+                  action: step.action,
+                  wall_ms: Date.now() - at,
+                  result: "ready",
+                  counts: snapshot.counts,
+                  durations: snapshot.durations,
+                  ready_events: (snapshot.events as Array<{ kind: string }>).filter(event => event.kind.startsWith("ready_")),
+                  window_fetch_events: (snapshot.events as Array<{ kind: string }>).filter(event => event.kind === "window_fetch"),
+                });
+              }
+            }
+          }
           expect(seekMetrics.enabled).toBe(enabled);
           expect(playbackMetrics.enabled).toBe(enabled);
           if (enabled) {
@@ -485,6 +573,12 @@ for (const [sceneKey, recipe] of Object.entries(RECIPES)) {
             // that scenario instead of failing the run.
             if (recipe.scenario !== "F05") expect(seekMetrics.counts.seek ?? 0).toBeGreaterThan(0);
             expect(playbackMetrics.counts.submitted ?? 0).toBeGreaterThan(0);
+            // C20c A/B：revision 相位必须全部转换到合成预览就绪（换装/重建
+            // 路径回归在此响亮失败——不静默记 unavailable）。
+            if (recipe.revisionPhase) {
+              expect(revisionTransitions).toHaveLength(revisionCount);
+              for (const transition of revisionTransitions) expect(transition.result).toBe("ready");
+            }
           } else {
             expect(seekMetrics.events).toHaveLength(0);
             expect(playbackMetrics.events).toHaveLength(0);
@@ -493,7 +587,8 @@ for (const [sceneKey, recipe] of Object.entries(RECIPES)) {
           Object.assign(environment, { cpu_model: cpus()[0]?.model, logical_cpus: cpus().length, ram_bytes: totalmem(), os_release: release() });
           const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight, dpr: devicePixelRatio, userAgent: navigator.userAgent }));
           sample = { schema_version: 2, scenario: recipe.label, run: runIndex, enabled, ready_ms: readyMs, ready_segments: readySegments, setup_recovery_count: setupRecoveryCount,
-            workload: { seeks, seed: seedBase, build_mode: "production-diagnostics", code_fingerprint: config.code_fingerprint },
+            workload: { seeks, seed: seedBase, build_mode: "production-diagnostics", code_fingerprint: config.code_fingerprint, revisions: recipe.revisionPhase ? revisionCount : 0 },
+            revision_transitions: revisionTransitions,
             seek_action_wall_ms_including_300ms_wait: seekActions, seek: seekMetrics, playback: playbackMetrics, process_samples: processSamples,
             environment, viewport, fixture_sha256: mediaFiles[0].sha256, fixture_files: mediaFiles.map(entry => ({ file: entry.file, sha256: entry.sha256 })),
             // playback_seconds is the configured value for ALL samples including

@@ -71,7 +71,10 @@ writeFileSync(resolve(output, "run-config.json"), JSON.stringify({ ...values, sc
   code_fingerprint: codeFingerprint, dirty_files: git(["status", "--short"]), node: process.version,
   fixtures_used: scenes.map(scene => manifest.fixtures[scene] ?? manifest.fixtures.F01) }, null, 2));
 const cli = resolve(root, "apps/desktop/node_modules/@playwright/test/cli.js");
-const result = spawnSync(process.execPath, [cli, "test", "--config=tests/playwright.config.ts", "performance-editor.spec.ts", "--workers=1", `-g`, scenes.map(scene => `B00 complete editor ${scene}`).join("|")], {
+// -g 模式加负向断言：场景名后不得跟字母数字——否则 "F02" 子串命中
+// "F02P/..." 标题（C20c 冒烟发现；spec 侧守卫因环境变量错位此前未生效，
+// 该隐患被 F01..F07 无子串关系掩盖）。
+const result = spawnSync(process.execPath, [cli, "test", "--config=tests/playwright.config.ts", "performance-editor.spec.ts", "--workers=1", `-g`, scenes.map(scene => `B00 complete editor ${scene}(?![A-Za-z0-9])`).join("|")], {
   cwd: resolve(root, "apps/desktop"), stdio: "inherit", env: { ...process.env,
     AIVS_PERF_RUN: "1", AIVS_PERF_FIXTURES: fixtures, AIVS_PERF_RESULT: output,
     AIVS_PERF_RUNS: values.runs, AIVS_PERF_SEEKS: values.seeks,

@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "scenario": "F01",
+  "run": -1,
+  "enabled": true,
+  "status": "invalid-incomplete",
+  "error_type": "Error",
+  "error_message": "\u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mnot\u001b[2m.\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: not \u001b[32m\"revision_d551515a5d2b45ac93628b1b33e0d2cd\"\u001b[39m\n\nCall Log:\n- Timeout 30000ms exceeded while waiting on the predicate",
+  "error_stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mnot\u001b[2m.\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: not \u001b[32m\"revision_d551515a5d2b45ac93628b1b33e0d2cd\"\u001b[39m\n\nCall Log:\n- Timeout 30000ms exceeded while waiting on the predicate\n    at [path-redacted]",
+  "setup_recovery_count": 0
+}

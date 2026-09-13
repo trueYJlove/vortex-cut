@@ -1,0 +1,28 @@
+{
+  "scenarios": [
+    "F01"
+  ],
+  "runs": "1",
+  "seeks": "5",
+  "playback-seconds": "10",
+  "seed": "20260908",
+  "smoke": false,
+  "export_base": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\performance\\c20c-smoke-f01-01\\exports",
+  "baseline_status": "partial-B00-not-G0",
+  "commit": "9803e174f073f3faf021181fe0f5d02a9a95679c",
+  "code_fingerprint": "c5712f07bd8777c23b792769ff5be8d34dca7250ec8ab81a6d978a6a06d70132",
+  "dirty_files": "M apps/desktop/e2e/performance-editor.spec.ts",
+  "node": "v24.19.0",
+  "fixtures_used": [
+    {
+      "file": "F01.mp4",
+      "sha256": "4e51be3e3a70ba5192f2b682ed50545cfe111ec22857366f8b54876ee1c8d5b0",
+      "duration_s": 12,
+      "size": "640x360",
+      "fps": 30,
+      "recipe": "testsrc2-av-cfr-v1",
+      "bytes": 3123032,
+      "coverage_note": "Media only; not historical PiP, VFR/B-frame, multilayer or audio-failure coverage."
+    }
+  ]
+}
