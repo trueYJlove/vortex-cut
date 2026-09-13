@@ -97,6 +97,26 @@
   勘误候选登记（其目录不可复算，per-run 中位 31.1ms）。v2 默认 off
   维持；"默认 on"待独立验收后按 Gate §3 单独提请。同日 D2 已裁决
   （LiuWei）：三问均不实施，B11-D 方向关闭（备忘录 §3）。
+- **执行状态(2026-09-13 更新·九)**:**B13+C20 二阶段+C20-T 独立验收
+  完成——有条件批准**(LiuKeAi,
+  `PERFORMANCE_B13_C20T_INDEPENDENT_ACCEPTANCE_2026-09-13.md`)。全部
+  关键数字独立重算(summarize 重跑 + 原始 JSON 重算 + Desktop 625 项
+  本机复跑零 rejection + 代码抽查 + 指纹核对):S1/T1/T2/C20 二阶段/
+  B13-R 五交付物验收通过,B11-D 关闭证据链复核无误。3 个 Minor 均为
+  报告更正并已落实——①F01 seek 百分比基线混用(对 fresh v1 实为
+  -2.0%,非 -0.4%,门不变);②F03 ready 分段子集未标注(合并 n=8 =
+  m4144/i165/w166);③spike ready 中位 5,507→5,484。**c20v2-F03 seek
+  39.7ms 勘误候选升级为确认**(= 修复前目录 c20v2-ab-20260911 逐轮
+  中位;正确值 31.1ms,+1% vs G0),登记销账。两项裁量同意原定性:
+  F03 ready +7.7% 属 v2 manifest 投影固有(重算 6869.5 vs 6888 =
+  -0.3% 持平);F02 段外残差 ~2.9s(~56%)列为"ready <2s"主战场进
+  下一工作包候选。"默认 on"两项前提成立,**LiuWei 同日裁决:批准 v2
+  默认 on**(`PERFORMANCE_C20V2_DEFAULT_ON_DECISION_2026-09-13.md`)——
+  `previewIrV2Enabled()` 缺省翻转(`VITE_AIVS_PREVIEW_IR_V2=0` 显式
+  回退,长期保留),两组 v1 形状单测经 `vi.stubEnv` 显式钉 v1,
+  typecheck + 625 项复跑全过;**基准口径变化:未来 v1 基线构建必须
+  显式 `VITE_AIVS_PREVIEW_IR_V2=0`**(G0 冻结面不动)。C20c Planning
+  Gate 同日起草(`PERFORMANCE_C20C_PLANNING_GATE_2026-09-13.md`)。
 - 新增模块/协议/脚本均是本方案拟新增，不代表仓库已经存在。
 
 

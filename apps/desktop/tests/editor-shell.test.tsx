@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, afterAll, describe, expect, it, vi } from "vitest";
 import type { Job, ModelDetail, TimelineDocument, TimelineState } from "@aivideo/contracts";
 import type { AuthoritativePreviewPresentation, DesktopApi } from "../electron/preload/index.js";
 import { App } from "../src/app/App.js";
@@ -64,7 +64,13 @@ function desktopApi(options: { timeline?: TimelineState | null; models?: ModelDe
 }
 
 describe("Editor shell 基线", () => {
-  beforeEach(() => { window.desktop = desktopApi(); });
+  // C20 v2 默认 on 后本组显式钉住 v1 数据面(desktopApi 的 v2 端点 stub
+  // 未装配 fixture,状态区分断言与数据面无关;v2 由 harness E2E 覆盖)。
+  afterAll(() => { vi.unstubAllEnvs(); });
+  beforeEach(() => {
+    vi.stubEnv("VITE_AIVS_PREVIEW_IR_V2", "0");
+    window.desktop = desktopApi();
+  });
   afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
   it("renders the editor shell with editing mode and status regions", async () => {

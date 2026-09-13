@@ -3,7 +3,7 @@
  *  连续切项目后 worker/pending 计数回基线。jsdom 无真实 worker —— 用
  *  FakeWorker（与 perf-compositor.test.ts 同模式）控制 init 握手结果。 */
 import { cleanup, render, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, afterAll, describe, expect, it, vi } from "vitest";
 import { CompositorWorkerClient } from "../src/app/preview/compositor-worker.js";
 import { DecodeWorker } from "../src/app/preview/decode-worker.js";
 import { editorPerf } from "../src/app/preview/perf-metrics.js";
@@ -363,6 +363,9 @@ describe("A01 PreviewSession.create 资源栈", () => {
 });
 
 describe("A01 SyntheticPreview 组件生命周期", () => {
+  // C20 v2 默认 on 后显式钉住 v1 数据面:本组 stub 仅为 v1 端点形状,
+  // 断言对象是 v1 装配生命周期;v2 装配行为由 A/B E2E 与帧源/契约单测覆盖。
+  afterAll(() => { vi.unstubAllEnvs(); });
   const baseProps = () => ({
     projectId: "project_1",
     revisionId: "revision_1",
@@ -383,6 +386,7 @@ describe("A01 SyntheticPreview 组件生命周期", () => {
   }
 
   beforeEach(() => {
+    vi.stubEnv("VITE_AIVS_PREVIEW_IR_V2", "0");
     stubOffscreenCanvas();
     globalThis.fetch = vi.fn(async () => new Response(new ArrayBuffer(8), { status: 200 })) as never;
   });
