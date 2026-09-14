@@ -1,0 +1,28 @@
+{
+  "scenarios": [
+    "F02"
+  ],
+  "runs": "1",
+  "seeks": "1",
+  "playback-seconds": "5",
+  "seed": "20260914",
+  "smoke": false,
+  "export_base": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\performance\\d11-residency-warn-20260914\\exports",
+  "baseline_status": "partial-B00-not-G0",
+  "commit": "05a3a1f50aa423d33d428dc3c4eb66abec3a9550",
+  "code_fingerprint": "f634988561f9c0be12772912a1490c58a7007d27c5dc6e70f51ac497dc44deb0",
+  "dirty_files": "M apps/desktop/e2e/performance-editor.spec.ts\n?? docs/PERFORMANCE_D11_RESIDENCY_CEILING_PLANNING_GATE_2026-09-14.md",
+  "node": "v24.19.0",
+  "fixtures_used": [
+    {
+      "file": "F02.mp4",
+      "sha256": "bd34e2a32b6e9b3d2cb9945610678e2daab79f9ea3b0ee371003bd8c0064f464",
+      "duration_s": 900,
+      "size": "640x360",
+      "fps": 30,
+      "recipe": "testsrc2-av-cfr-v1",
+      "bytes": 233918530,
+      "coverage_note": "Media only; not historical PiP, VFR/B-frame, multilayer or audio-failure coverage."
+    }
+  ]
+}

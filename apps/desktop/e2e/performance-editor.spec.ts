@@ -468,6 +468,14 @@ for (const [sceneKey, recipe] of Object.entries(RECIPES)) {
           await expect.poll(async () => Number(await page.getByRole("slider", { name: "时间线播放头" }).getAttribute("aria-valuenow")), { timeout: 30000 }).toBeGreaterThan(500000);
           await page.getByRole("button", { name: "暂停", exact: true }).click();
           const readyMs = Date.now() - started;
+          // D11-① R3 驻留预警采集:预警在 PreviewSession.create 时按 IR 帧数
+          // 计算(不依赖实际解码量),经 lastError → .synthetic-metrics 面板
+          // 渲染。之后 decode 失败可覆盖 lastError 通道——null=未渲染(无预警
+          // 或被覆盖),如实留样,不视为运行失败(响亮失败边界不变)。
+          const residencyWarning = await page.evaluate(() => {
+            const text = document.querySelector(".synthetic-metrics")?.textContent ?? "";
+            return text.includes("长素材解码驻留预警") ? text : null;
+          });
           // C20-T2 A/B 采数:reset() 清空事件流,ready 分段(manifest/parse/
           // window/inject)在本次重载后装配期间记录,必须先于 reset 捕获。
           // v1 路径不产生 ready_* 事件,样本中该字段为空集;off 通道同样为空。
@@ -604,7 +612,8 @@ for (const [sceneKey, recipe] of Object.entries(RECIPES)) {
           const environment = await app.evaluate(async ({ app: mainApp, screen }) => ({ versions: process.versions, platform: process.platform, arch: process.arch, gpu: await mainApp.getGPUInfo("basic"), refresh_hz: screen.getPrimaryDisplay().displayFrequency }));
           Object.assign(environment, { cpu_model: cpus()[0]?.model, logical_cpus: cpus().length, ram_bytes: totalmem(), os_release: release() });
           const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight, dpr: devicePixelRatio, userAgent: navigator.userAgent }));
-          sample = { schema_version: 2, scenario: recipe.label, run: runIndex, enabled, ready_ms: readyMs, ready_segments: readySegments, setup_recovery_count: setupRecoveryCount,
+            sample = { schema_version: 2, scenario: recipe.label, run: runIndex, enabled, ready_ms: readyMs, ready_segments: readySegments, setup_recovery_count: setupRecoveryCount,
+            residency_warning: residencyWarning,
             workload: { seeks, seed: seedBase, build_mode: "production-diagnostics", code_fingerprint: config.code_fingerprint, revisions: recipe.revisionPhase ? revisionCount : 0 },
             revision_transitions: revisionTransitions,
             seek_action_wall_ms_including_300ms_wait: seekActions, seek: seekMetrics, playback: playbackMetrics, process_samples: processSamples,

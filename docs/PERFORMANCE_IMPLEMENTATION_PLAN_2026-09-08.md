@@ -168,6 +168,19 @@
   可审计);**产品侧根因排查独立挂账**(工作假设:canvas 尺寸仅靠
   ResizeObserver 事件更新,就绪时容器 0 尺寸则不再触发——待恢复路径
   积累现场后定位)。
+- **执行状态(2026-09-14 更新·十四)**:**D11 立项——解码驻留显式天花板 +
+  Chromium 池行为测量型 spike**(`PERFORMANCE_D11_RESIDENCY_CEILING_PLANNING_GATE_2026-09-14.md`,
+  同日批准)。性质重述:v2 默认 on 解除 IR 协议 27k 上限后,~631KB/unique 帧
+  的 Chromium 池高水位成为事实天花板,不标注即为隐性约束——**产品约束登记:
+  实用 unique 帧上限 ≈ (Tab 可用预算 − 0.4GB) ÷ 631KB**(16GiB 机器 ≈1.6 万帧
+  ≈9 分钟 unique 内容;32GiB ≈2.7 万帧=现行协议上限恰好贴合;64GiB ≈7.1 万帧),
+  预警内侧表面 = R3 `predictResidencyBytes`(不阻断,超档位预算一次性提示;
+  harness 本轮补 `residency_warning` 采集点,由 F02 最小轮坐实真实触发)。
+  第二步为测量型 spike(只测不承诺):bench 分支 Electron 升版对拍
+  (现 36.2.1,对拍 16,649MB 基线,判定标准 ±5%/灰色加倍/<1% 未命中)+
+  Chromium flags 探测;命中才另立 Electron 升级工作单(27k 压力验证轮同理,
+  C20c Gate §7.9 依赖本判定),未命中则接受现状、D11 关闭。F02 段外残差
+  分段测量、Core 投影缓存评估、C20c 独立验收打包在 D11 判定后接续。
 - 新增模块/协议/脚本均是本方案拟新增，不代表仓库已经存在。
 
 
