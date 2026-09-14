@@ -85,20 +85,28 @@ const assembleF01 = async (files: string[]): Promise<object> => {
 };
 
 const assembleF02 = async (files: string[]): Promise<object> => {
-  // 项目名由测试体注入（B00 <scenario>）——F02P 复用本装配，不能硬编码
+  // 项目名由测试体注入（B00 F02）——F02P 复用本装配，不能硬编码
   // "B00 F02"，否则 expectCurrentProject("B00 F02P") 断言失败（B11-D1 首次
   // E2E 实跑暴露；缺省值保持 F02 单独可读）。
   const projectName = (window as { __benchProjectName?: string }).__benchProjectName ?? "B00 F02";
+  // 段外残差分段(D11 后继):时间线装配链各段耗时——只加 performance.now()
+  // 记账,不改任何调用序列。
+  const t0 = performance.now();
   const project = await window.desktop.createProject({ name: projectName });
+  const tCreateProject = performance.now();
   const imported = await window.desktop.importAssetByFixture({ project_id: project.project_id, fixture_file: files[0] });
   if (!imported) throw new Error("Fixture import cancelled");
+  const tImport = performance.now();
   const api = window.desktop;
   const created = await api.createTimeline({ project_id: project.project_id, timeline: { schema_version: 1,
     source: { kind: "empty" }, default_layout: "fit", caption_preset_id: "default-bottom" } });
+  const tCreateTimeline = performance.now();
   let revisionId = created.current_revision.timeline_revision_id;
   const segmentUs = 1_000_000;
   const total = 900;
+  const patchBatchMs: number[] = [];
   for (let start = 0; start < total; start += 100) {
+    const batchT0 = performance.now();
     const operations: TimelinePatchOperation[] = [];
     for (let index = 0; index < 100; index++) {
       const sourceStart = (start + index) * segmentUs;
@@ -108,15 +116,27 @@ const assembleF02 = async (files: string[]): Promise<object> => {
     const patched = await api.patchTimeline({ project_id: project.project_id, patch: { schema_version: 1,
       base_revision_id: revisionId, operations, summary: `F02 segments ${start}-${start + 99}` } });
     revisionId = patched.current_revision.timeline_revision_id;
+    patchBatchMs.push(performance.now() - batchT0);
   }
   // 900 x 1s captions aligned with segments; import validates >=0.2s and no overlap.
   const entries = Array.from({ length: total }, (_, index) => ({
     start_us: index * segmentUs, end_us: (index + 1) * segmentUs, text: `F02 caption ${index + 1}`,
   }));
+  const tPatchesDone = performance.now();
   await api.patchTimeline({ project_id: project.project_id, patch: { schema_version: 1, base_revision_id: revisionId,
     operations: [{ op: "import_captions", entries, preset_id: "default-bottom", replace_existing: true }],
     summary: "F02 captions 900" } });
-  return { segments: total, captions: total };
+  const tCaptions = performance.now();
+  return { segments: total, captions: total,
+    assemble_timings: {
+      create_project_ms: Math.round(tCreateProject - t0),
+      import_fixture_ms: Math.round(tImport - tCreateProject),
+      create_timeline_ms: Math.round(tCreateTimeline - tImport),
+      patch_batches_total_ms: Math.round(tPatchesDone - tCreateTimeline),
+      patch_batch_ms: patchBatchMs.map(v => Math.round(v)),
+      captions_patch_ms: Math.round(tCaptions - tPatchesDone),
+      in_page_total_ms: Math.round(tCaptions - t0),
+    } };
 };
 
 const assembleF04 = async (files: string[]): Promise<object> => {
@@ -417,7 +437,16 @@ for (const [sceneKey, recipe] of Object.entries(RECIPES)) {
           const started = Date.now();
           await page.evaluate(name => { (window as { __benchProjectName?: string }).__benchProjectName = name; }, `B00 ${recipe.scenario}`);
           const extra = await page.evaluate(recipe.inPage, mediaFiles.map(entry => entry.file));
+          // D11 后继(段外残差分段测量):ready_ms 中装配四段(manifest/parse/
+          // inject/window)之外的部分此前未分段(独立验收 §6.2)。inPage 返回
+          // 的时间线分段(createProject/importAsset/createTimeline/patch 累计/
+          // captions)与 node 侧后续相位耗时合并进 scene_extra——只加测量,
+          // 不改任何装配动作序列与轮询语义,历史形状兼容(extra 键新增)。
+          const assembleTimings = (extra && typeof extra === "object" && "assemble_timings" in (extra as Record<string, unknown>))
+            ? (extra as Record<string, unknown>).assemble_timings : null;
+          const tProject = Date.now();
           await expectCurrentProject(page, `B00 ${recipe.scenario}`);
+          const tStatusPoll = Date.now();
           // Baseline bug: media tickets can race project loading (amplified by
           // F04's asset count — assets beyond list_assets' default page lose tickets).
           // Recovery = explicit refresh-assets (re-issues tickets) + retry-synthetic,
@@ -432,6 +461,7 @@ for (const [sceneKey, recipe] of Object.entries(RECIPES)) {
           const synthStatus = async () =>
             (await page.getByLabel("预览状态", { exact: true }).textContent()) === "合成预览";
           let canvasReady = false;
+          let tStatusSettled = 0; let tCanvasVisible = 0;
           for (let setupAttempt = 0; setupAttempt < 3 && !canvasReady; setupAttempt++) {
             if (setupAttempt > 0) setupRecoveryCount++;
             await page.reload();
@@ -463,9 +493,11 @@ for (const [sceneKey, recipe] of Object.entries(RECIPES)) {
             }
           }
           await expect(page.getByLabel("预览状态", { exact: true })).toHaveText("合成预览", { timeout: 60000 });
+          tStatusSettled = Date.now();
           // Require an advancing ready preview, not merely an allocated canvas.
           await page.getByRole("button", { name: "播放", exact: true }).click();
           await expect.poll(async () => Number(await page.getByRole("slider", { name: "时间线播放头" }).getAttribute("aria-valuenow")), { timeout: 30000 }).toBeGreaterThan(500000);
+          tCanvasVisible = Date.now();
           await page.getByRole("button", { name: "暂停", exact: true }).click();
           const readyMs = Date.now() - started;
           // D11-① R3 驻留预警采集:预警在 PreviewSession.create 时按 IR 帧数
@@ -623,10 +655,25 @@ for (const [sceneKey, recipe] of Object.entries(RECIPES)) {
             // only). Compare playback counts only across run>=0 samples.
             playback_seconds: seconds,
             playback_seconds_actual: runIndex < 0 ? Math.min(seconds, 5) : seconds,
-            scope: recipe.scope, scene_extra: { ...(extra as Record<string, unknown>), ...backgroundExtra },
+            scope: recipe.scope, scene_extra: { ...(extra as Record<string, unknown>), ...backgroundExtra,
+              // 段外残差分段(D11 后继):node 侧相位耗时 + inPage 时间线分段。
+              // 装配段(ready_manifest/parse/inject/window)在 ready_segments;
+              // 本表覆盖其余全部链路,ready_ms = 各段之和(严格串行时)。
+              ready_phases_outside: {
+                t0_to_inpage_end_ms: extra === undefined ? null : Math.max(0, tProject - started),
+                project_assert_ms: tStatusPoll - tProject,
+                reload_and_status_settle_ms: tStatusSettled - tStatusPoll,
+                playhead_start_ms: tCanvasVisible - tStatusSettled,
+                total_ready_ms: readyMs,
+                ...(assembleTimings ? { in_page: assembleTimings } : {}),
+              } },
             unavailable: ["actual presentation", "React commits in non-profiling production React", "audio underrun", "video-frame lifetime", "GPU actual VRAM", "Core RSS", "30–60min memory", ...(recipe.unavailable ?? [])] };
           // Screenshot outside timing region; no readback in measured playback.
-          await page.screenshot({ path: join(runDir, "editor.png") });
+          // 取证动作,不在测量窗;timeout 显式 10s + 失败不弃样本——F02 分段轮
+          // warmup 出现过 screenshot 30s 默认超时整轮失败(样本数据已完整写入
+          // result.json 之前 throw,丢失 run-0..2)。纯取证不应有否决权。
+          await page.screenshot({ path: join(runDir, "editor.png"), timeout: 10_000 })
+            .catch(error => { (sample as Record<string, unknown>).screenshot_failed = String(error).slice(0, 120); });
         } catch (error) {
           // Persist sanitized detail only: redact() strips media tickets/URIs/paths
           // before anything hits disk (S1, PERFORMANCE_C20T_B11D Planning Gate).

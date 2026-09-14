@@ -1,0 +1,28 @@
+{
+  "scenarios": [
+    "F02"
+  ],
+  "runs": "3",
+  "seeks": "100",
+  "playback-seconds": "300",
+  "seed": "20260908",
+  "smoke": false,
+  "export_base": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\performance\\f02-segmented-20260914\\exports",
+  "baseline_status": "partial-B00-not-G0",
+  "commit": "91b4b0d26b2f50958cdc7bf417d11bbd59094c9b",
+  "code_fingerprint": "3a0174928f21d7932689092c4fd5e5e1d019c188c7e5302ada434726c82ac286",
+  "dirty_files": "M apps/desktop/e2e/performance-editor.spec.ts",
+  "node": "v24.19.0",
+  "fixtures_used": [
+    {
+      "file": "F02.mp4",
+      "sha256": "bd34e2a32b6e9b3d2cb9945610678e2daab79f9ea3b0ee371003bd8c0064f464",
+      "duration_s": 900,
+      "size": "640x360",
+      "fps": 30,
+      "recipe": "testsrc2-av-cfr-v1",
+      "bytes": 233918530,
+      "coverage_note": "Media only; not historical PiP, VFR/B-frame, multilayer or audio-failure coverage."
+    }
+  ]
+}
