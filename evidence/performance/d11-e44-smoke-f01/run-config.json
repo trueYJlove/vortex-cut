@@ -1,0 +1,16 @@
+{
+  "scenarios": [
+    "F02P"
+  ],
+  "runs": "0",
+  "seeks": "1",
+  "playback-seconds": "5",
+  "seed": "20260908",
+  "smoke": false,
+  "baseline_status": "D11-electron44-spike smoke probe F01 (corsEnabled fix, v2-off build)",
+  "commit": "245339169381aa33b3751ac20d7a533d4fc6bb67",
+  "code_fingerprint": "b8f4ce012e9d30fc1fb67e422c6c9161d1574dae35333acafcea4c56a52877dc",
+  "dirty_files": "M apps/desktop/package.json\n M pnpm-lock.yaml",
+  "node": "v24.19.0",
+  "electron_bumped": "44.3.0 (devDependencies pin, pnpm-lock.yaml updated)"
+}

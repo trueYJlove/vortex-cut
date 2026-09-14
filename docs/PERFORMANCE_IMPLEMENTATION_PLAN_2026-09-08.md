@@ -181,6 +181,19 @@
   Chromium flags 探测;命中才另立 Electron 升级工作单(27k 压力验证轮同理,
   C20c Gate §7.9 依赖本判定),未命中则接受现状、D11 关闭。F02 段外残差
   分段测量、Core 投影缓存评估、C20c 独立验收打包在 D11 判定后接续。
+- **执行状态(2026-09-14 更新·十五)**:**D11 第二步(Electron 升版对拍
+  spike)完成——未命中,接受现状路线落锤**(`PERFORMANCE_D11_ELECTRON44_SPIKE_
+  IMPLEMENTATION_2026-09-14.md`;证据 d11-electron44-20260914)。bench 分支
+  Electron 36.2.1→44.3.0(chrome 136→152),F02P 同形状 5 轮对拍:Tab WS
+  中位 16,583MB vs 基线 16,649MB = **−0.40%**(门 ±5%,5 轮窄带
+  16,579–16,592)——~631KB/unique 帧池高水位跨 16 个 Chromium 大版本不动,
+  升版不可移动天花板。**兼容性副产物(独立工作单登记)**:Electron 44 对
+  custom scheme fetch 默认执行 CORS 校验(E36 不做,拦截发生在 handler 之前),
+  修复形状 = `registerSchemesAsPrivileged` 增加 `corsEnabled: true` 一行,
+  修复后 F01 冒烟全过——未来 Electron 升级的唯一已知前置。flags 探测按对拍
+  证据逻辑覆盖降级(版本维度尚且不动,单机开关无理由翻转),不单独跑。
+  D11 收束建议:接受现状 + 显式天花板(更新·十四)为唯一护栏,Electron 升级
+  工作单(驻留维度)不立项,27k 压力轮维持关闭,待 LiuWei 确认关闭。
 - 新增模块/协议/脚本均是本方案拟新增，不代表仓库已经存在。
 
 
