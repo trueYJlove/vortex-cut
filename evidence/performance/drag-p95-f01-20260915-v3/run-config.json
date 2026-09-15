@@ -1,0 +1,28 @@
+{
+  "scenarios": [
+    "F01"
+  ],
+  "runs": "5",
+  "seeks": "100",
+  "playback-seconds": "60",
+  "smoke": false,
+  "seed": "20260908",
+  "export_base": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\performance\\drag-p95-f01-20260915-v3\\exports",
+  "baseline_status": "partial-B00-not-G0",
+  "commit": "998585604e197ac6584a38d8cbe16977d2e39ef9",
+  "code_fingerprint": "f147419e0daf42a5c2f38929910e00502604989097e39d47207a0e3aaa69f605",
+  "dirty_files": "M apps/desktop/e2e/performance-editor.spec.ts\n M apps/desktop/src/app/preview/SyntheticPreview.tsx\n M apps/desktop/src/app/preview/perf-metrics.ts\n M apps/desktop/src/app/preview/preview-session.ts\n M apps/desktop/tests/pcm-streaming-session.test.ts\n M apps/desktop/tests/perf-metrics.test.ts\n M docs/PERFORMANCE_B00_G0_BASELINE_2026-09-11.md\n M docs/PERFORMANCE_C20C_AB_ACCEPTANCE_2026-09-13.md\n M docs/PERFORMANCE_C20C_HARNESS_D11_INDEPENDENT_ACCEPTANCE_2026-09-14.md\n M docs/PERFORMANCE_IMPLEMENTATION_PLAN_2026-09-08.md\n M docs/PRODUCT_DEFECTS_2026-09-11.md\n?? docs/PERFORMANCE_C22_CANCEL_LATENCY_MEASUREMENT_2026-09-15.md\n?? evidence/performance/drag-p95-f01-20260915-v2/\n?? evidence/performance/drag-p95-f01-20260915/\n?? services/core/tests/integration/test_render_cancel_real.py",
+  "node": "v24.19.0",
+  "fixtures_used": [
+    {
+      "file": "F01.mp4",
+      "sha256": "4e51be3e3a70ba5192f2b682ed50545cfe111ec22857366f8b54876ee1c8d5b0",
+      "duration_s": 12,
+      "size": "640x360",
+      "fps": 30,
+      "recipe": "testsrc2-av-cfr-v1",
+      "bytes": 3123032,
+      "coverage_note": "Media only; not historical PiP, VFR/B-frame, multilayer or audio-failure coverage."
+    }
+  ]
+}
