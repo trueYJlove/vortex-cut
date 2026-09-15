@@ -417,7 +417,9 @@ for (const [sceneKey, recipe] of Object.entries(RECIPES)) {
     const runs = Number(process.env.AIVS_PERF_RUNS ?? 5);
     const seeks = Number(process.env.AIVS_PERF_SEEKS ?? 100);
     const seconds = Number(process.env.AIVS_PERF_PLAY_SECONDS ?? 300);
-    test.setTimeout(((2 * runs + 1) * (seconds + seeks * 10 + 150) + 900) * 1000);
+    // 拖拽补测相位与 seek 相位同形状（100×(拖动~120ms+300ms)≈+45s/run），
+    // 计入超时预算（seeks*10 → seeks*10 + 45 折入 150 余量）。
+    test.setTimeout(((2 * runs + 1) * (seconds + seeks * 10 + 200) + 900) * 1000);
     const results: unknown[] = [];
     const config = JSON.parse(await readFile(join(output, "run-config.json"), "utf8"));
     // Separate launches permit opt-in diagnostics overhead A/B. First run is warmup only.
@@ -534,6 +536,33 @@ for (const [sceneKey, recipe] of Object.entries(RECIPES)) {
           }
           const seekMetrics = await page.evaluate(() => (window as any).__editorPerf.snapshot());
           await page.evaluate(() => (window as any).__editorPerf.reset());
+          // 矩阵"拖动/缩放输入至下一次绘制提交"补测相位（2026-09-15）：
+          // 真实 pointer 事件序列拖拽进度条（pointerdown → 拖动 pointermove
+          // ×3 → pointerup 落定），产品探针记 drag_to_submit（seek 入口 →
+          // 结果帧 compose 提交，与 submitted 同口径）。与 seek 相位同负载
+          // 形状（100 次操作 + 固定间隔）；时间线缩放（Ctrl+wheel）只落
+          // timeline 层不触发合成预览路径，登记为 unavailable 维度。
+          const dragActions: number[] = [];
+          let dragSeed = (seedBase ^ 0x5eed) >>> 0;
+          for (let i = 0; i < seeks; i++) {
+            dragSeed = (Math.imul(dragSeed, 1664525) + 1013904223) >>> 0;
+            const at = Date.now();
+            const x0 = 1 + (dragSeed / 2**32) * (box.width - 2);
+            await page.mouse.move(box.x + x0, box.y + box.height / 2);
+            await page.mouse.down();
+            let x = x0;
+            for (let step = 0; step < 3; step++) {
+              dragSeed = (Math.imul(dragSeed, 1664525) + 1013904223) >>> 0;
+              x = Math.max(1, Math.min(box.width - 2, x + ((dragSeed / 2**32) - 0.5) * 120));
+              await page.mouse.move(box.x + x, box.y + box.height / 2, { steps: 2 });
+              await page.waitForTimeout(30);
+            }
+            await page.mouse.up();
+            await page.waitForTimeout(300);
+            dragActions.push(Date.now() - at);
+          }
+          const dragMetrics = await page.evaluate(() => (window as any).__editorPerf.snapshot());
+          await page.evaluate(() => (window as any).__editorPerf.reset());
           // Scene-specific background workload (F06) starts before the measured
           // playback loop and is drained afterwards; extras merge into scene_extra.
           let backgroundExtra: Record<string, unknown> = {};
@@ -649,6 +678,7 @@ for (const [sceneKey, recipe] of Object.entries(RECIPES)) {
             workload: { seeks, seed: seedBase, build_mode: "production-diagnostics", code_fingerprint: config.code_fingerprint, revisions: recipe.revisionPhase ? revisionCount : 0 },
             revision_transitions: revisionTransitions,
             seek_action_wall_ms_including_300ms_wait: seekActions, seek: seekMetrics, playback: playbackMetrics, process_samples: processSamples,
+            drag_action_wall_ms_including_300ms_wait: dragActions, drag: dragMetrics,
             environment, viewport, fixture_sha256: mediaFiles[0].sha256, fixture_files: mediaFiles.map(entry => ({ file: entry.file, sha256: entry.sha256 })),
             // playback_seconds is the configured value for ALL samples including
             // warmup, whose actual playback is min(seconds, 5)s (pipeline check
@@ -667,7 +697,7 @@ for (const [sceneKey, recipe] of Object.entries(RECIPES)) {
                 total_ready_ms: readyMs,
                 ...(assembleTimings ? { in_page: assembleTimings } : {}),
               } },
-            unavailable: ["actual presentation", "React commits in non-profiling production React", "audio underrun", "video-frame lifetime", "GPU actual VRAM", "Core RSS", "30–60min memory", ...(recipe.unavailable ?? [])] };
+            unavailable: ["actual presentation", "React commits in non-profiling production React", "audio underrun", "video-frame lifetime", "GPU actual VRAM", "Core RSS", "30–60min memory", "timeline-zoom drag (canvas-only path; drag phase covers playhead scrub)", ...(recipe.unavailable ?? [])] };
           // Screenshot outside timing region; no readback in measured playback.
           // 取证动作,不在测量窗;timeout 显式 10s + 失败不弃样本——F02 分段轮
           // warmup 出现过 screenshot 30s 默认超时整轮失败(样本数据已完整写入
