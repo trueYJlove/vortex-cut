@@ -207,4 +207,28 @@ describe("B15 流式音频会话接入", () => {
     expect(session).not.toBeNull();
     session.dispose();
   });
+
+  it("非 48kHz AudioContext（44.1kHz 设备）：流式守卫拒绝——不建 loader，长素材回退 A02 整段路径", async () => {
+    const { ensureCalls } = installAudioFakes(new Map());
+    // 守卫对象：块按契约固定 48kHz 生成，context 采样率不匹配 = 时间域错位
+    const original = FakeAudioContext;
+    class FakeAudioContext44100 extends original {
+      sampleRate = 44100;
+    }
+    (globalThis as Record<string, unknown>).AudioContext = FakeAudioContext44100;
+    const container = document.createElement("div");
+    const session = await PreviewSession.create(
+      container, longAudioIr(60_000_000),
+      new Map([["asset_video", "aivideo://media/one"]]),
+      AUDIO_BY_CLIP, undefined, null, undefined, "project_1",
+    );
+    expect(session).not.toBeNull();
+    session.play();
+    await new Promise(resolve => setTimeout(resolve, 60));
+    expect(ensureCalls).toHaveLength(0); // 无任何块请求（loader 未建立）
+    expect(FakeWorkletNode.instances.length).toBe(0); // 无流式 worklet
+    session.pause();
+    session.dispose();
+    (globalThis as Record<string, unknown>).AudioContext = original;
+  });
 });

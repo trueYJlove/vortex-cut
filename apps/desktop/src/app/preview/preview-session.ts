@@ -21,7 +21,7 @@ import type { CompositorWorkerClient } from "./compositor-worker.js";
 import type { DrawCommand, FrameResidency } from "./compositor-worker.worker.js";
 import type { Ir, IrContent, IrFrame, IrOverlay } from "./ir.js";
 import type { PreviewSourceResolver } from "./source-resolver.js";
-import { PREVIEW_IR_V2_MAX_WINDOW_FRAMES } from "@aivideo/contracts";
+import { PREVIEW_IR_V2_MAX_WINDOW_FRAMES, PCM_CHUNK_SAMPLE_RATE } from "@aivideo/contracts";
 import { BUDGET_TABLES, ringDepthFor, predictResidencyBytes, windowSourceBudget } from "./resource-budget.js";
 import { InputPool } from "./input-pool.js";
 import { editorPerf, allocatePerfSession } from "./perf-metrics.js";
@@ -164,6 +164,9 @@ export class PreviewSession {
   private lastSeekWall = 0;
   private lastSeekMs = 0;
   private dragMode = false;
+  /** 矩阵"拖动/缩放输入至下一次绘制提交"测量的活动起点（0=无进行中的
+   *  seek 测量；被更新的 seek 覆盖起点，被作废的 seek 不落样）。 */
+  private pendingDragSubmitT0 = 0;
   private lastAdvanceWall = 0;
   lastError: string | null = null;
   /** 诊断：seek 纪元作废的上传任务数（scrub 开销定位用）。 */
@@ -384,9 +387,12 @@ export class PreviewSession {
         (resourceTier ? BUDGET_TABLES[resourceTier].pcmCacheMiB : 128) * 1024 * 1024,
       );
       // B15：分块 PCM 流式（长素材 ≥30s 走块；Electron IPC 通道可用且调用方
-      // 提供 project 时创建。非 Electron/测试环境回退 A02 整段模式）。
+      // 提供 project 时创建。非 Electron/测试环境回退 A02 整段模式；块按契约
+      // 固定 48kHz 生成，AudioContext 采样率不匹配时时间域错位——不建流式，
+      // 回退 A02（方案 B15"初始化时拒绝该路径"条款））。
       const desktop = typeof window !== "undefined" ? (window as { desktop?: { ensurePcmChunk?: unknown; pcmChunkMediaUrl?: unknown } }).desktop : undefined;
-      if (pcmProjectId && desktop && typeof desktop.ensurePcmChunk === "function" && typeof desktop.pcmChunkMediaUrl === "function") {
+      if (pcmProjectId && desktop && typeof desktop.ensurePcmChunk === "function" && typeof desktop.pcmChunkMediaUrl === "function"
+          && session.audioCtx.sampleRate === PCM_CHUNK_SAMPLE_RATE) {
         const api = desktop as { ensurePcmChunk: (input: { project_id: string; asset_id: string; start_sample: number }) => Promise<import("@aivideo/contracts").PcmChunkDescription>; pcmChunkMediaUrl: (input: { project_id: string; asset_id: string; start_sample: number }) => Promise<{ media_url: string; cache_key: string; size_bytes: number }> };
         session.pcmChunkCache = new PcmChunkCache({
           ensurePcmChunk: api.ensurePcmChunk,
@@ -990,9 +996,11 @@ export class PreviewSession {
 
   // ---- B15：流式音频（长素材分块 PCM → worklet stream 模式） ----
 
-  /** 素材是否走流式（≥30s 阈值；loader/IPC 可用）。 */
+  /** 素材是否走流式（≥30s 阈值；loader/IPC 可用；context 采样率 = 块契约
+   *  48kHz——不匹配时块时间域与播放时钟错位，拒绝该路径回退 A02）。 */
   private useStreamingFor(input: { duration_us?: number } | undefined): boolean {
     if (!this.streamLoader || !this.pcmChunkCache || !this.audioWorkletReady) return false;
+    if (this.audioCtx && this.audioCtx.sampleRate !== PCM_CHUNK_SAMPLE_RATE) return false;
     return (input?.duration_us ?? 0) >= STREAMING_THRESHOLD_US;
   }
 
@@ -1288,6 +1296,14 @@ export class PreviewSession {
       cmds.push({ op: "captions", items });
     }
     compositor.compose(cmds, this.seekEpoch, frame.n);
+    // 矩阵"拖动/缩放输入至下一次绘制提交"测量（2026-09-15 补测）：compose
+    // 调用返回 = GL 命令组装 + postMessage 提交完成（与既有 submitted 遥测
+    // 同口径：命令已提交，非 GPU 完成/呈现）。由 seekToFrame 置起点；播放
+    // pump 的常规 compose（pendingDragSubmitT0=0）不落样。
+    if (this.pendingDragSubmitT0 > 0) {
+      editorPerf.record("drag_to_submit", performance.now() - this.pendingDragSubmitT0, this.perfId, 0, this.seekEpoch, frame.n);
+      this.pendingDragSubmitT0 = 0;
+    }
   }
 
   /**
@@ -1300,6 +1316,12 @@ export class PreviewSession {
   async seekToFrame(target: number): Promise<number> {
     if (this.disposed) return -1;
     const epoch = ++this.seekEpoch;
+    // 矩阵"拖动/缩放输入至下一次绘制提交"测量（2026-09-15 补测）：从
+    // seek 入口（用户拖动/点击进度条 → playhead → 此处）起算，到结果帧
+    // compose 提交完成止，drag_to_submit 事件在 compose 内落样。拖拽快速档
+    // 中被更新的 seek 作废（epoch 失配提前 return，不覆盖起点）——保留的
+    // 是每次落定的完整链路；风暴中的 latest-wins 语义即用户所见。
+    this.pendingDragSubmitT0 = editorPerf.enabled ? performance.now() : 0;
     // seek 是用户驱动的位置跳变：重置解码链游标（后续 pump/播放冷启重建；环内
     // 已就绪采样仍可直接复用，±1 步进零解码路径保持不变）。
     this.resetChains();

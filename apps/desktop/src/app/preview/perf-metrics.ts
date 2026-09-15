@@ -1,5 +1,5 @@
 /** Opt-in diagnostics for the complete editor. No media identifiers or payloads. */
-export type PerfKind = "compose" | "submitted" | "decode" | "upload" | "seek" | "reanchor" | "session_open" | "session_close" | "long_task" | "react_commit" | "timeline_draw" | "window_fetch" | "residency" | "ready_manifest" | "ready_parse" | "ready_window" | "ready_inject";
+export type PerfKind = "compose" | "submitted" | "decode" | "upload" | "seek" | "reanchor" | "session_open" | "session_close" | "long_task" | "react_commit" | "timeline_draw" | "window_fetch" | "residency" | "ready_manifest" | "ready_parse" | "ready_window" | "ready_inject" | "drag_to_submit";
 export interface PerfEvent { kind: PerfKind; at: number; duration: number; session: number; request: number; epoch: number; frame: number; input: number }
 /** B13-R 驻留遥测：两 worker 生命周期计数的最新快照（时长型 PerfEvent 装不下
  *  结构化数据，独立字段随 snapshot() 输出；仅 residency 事件时间线进 events）。 */

@@ -2,8 +2,8 @@
  * WebGL2 合成（OffscreenCanvas worker）的权威级实时预览。子集外语义自动降级
  * 回交互预览（PREVIEW_IR_UNSUPPORTED）。画布元素由会话自建（transferControl-
  * ToOffscreen 每元素仅可一次——会话生命周期 = 画布生命周期）。
- * C20 第二阶段：VITE_AIVS_PREVIEW_IR_V2=1 时走 v2 manifest+窗口帧源
- * （Renderer 不再驻留全量帧表）；默认 off = v1 路径逐字节不变。
+ * C20 第二阶段：VITE_AIVS_PREVIEW_IR_V2=0 时走 v1 全量帧表（Renderer 驻留
+ * 全表）；v2 走 manifest+窗口帧源。
  * C20 v2 默认 on（2026-09-13，PERFORMANCE_C20V2_DEFAULT_ON_DECISION_2026-09-13.md）：
  * VITE_AIVS_PREVIEW_IR_V2=0 显式回退 v1（v1 路径保留、语义不变）。 */
 import { useEffect, useMemo, useRef, useState } from "react";

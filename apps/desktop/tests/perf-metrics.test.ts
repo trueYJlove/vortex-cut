@@ -33,4 +33,10 @@ describe("bounded editor diagnostics", () => {
     expect(() => new PerfRecorder(0)).toThrow(); expect(() => new PerfRecorder(1e9)).toThrow();
     installEditorDiagnostics(); expect((window as any).__editorPerf).toBeUndefined();
   });
+  it("records drag_to_submit like other duration kinds (2026-09-15 matrix row)", () => {
+    const recorder = new PerfRecorder(); recorder.enabled = true;
+    recorder.record("drag_to_submit", 37.5, 1, 0, 7, 42);
+    expect(recorder.snapshot().events[0]).toMatchObject({ kind: "drag_to_submit", duration: 37.5, epoch: 7, frame: 42 });
+    expect(recorder.snapshot().durations.drag_to_submit).toEqual({ total_ms: 37.5, max_ms: 37.5 });
+  });
 });
