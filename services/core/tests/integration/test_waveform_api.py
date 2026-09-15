@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -129,14 +130,25 @@ class TestWaveformEndpoint:
         assert payload["sample_rate"] == 8000 and payload["bucket"] == 256
         assert "path" not in payload and "media_url" not in payload
         # 纯查询（generate=False）：已有条目状态回显，不再登记（测试环境
-        # ffmpeg 缺失，后台 job loop 真跑会落 failed——同为"已有条目短路"）
-        response = client.post(
-            f"/api/v1/projects/{project_id}/assets/{asset_id}/waveform",
-            json={}, headers=_ui(client),
-        )
-        payload = response.json()
+        # ffmpeg 缺失，后台 job loop 真跑会落 failed——同为"已有条目短路"）。
+        # 竞态窗口：create_waveform_job 的 jobs 行已提交，但 loop 抢跑把
+        # derived_media_cache 落到 failed 之前 / begin_build 之前，查询可能
+        # 短暂读到 status=None（条目行尚未写）——合法瞬态，poll 等待收敛
+        # 到四态之一（回归锁：None 不得成为终态）。
+        deadline = time.monotonic() + 5.0
+        status: str | None = None
+        while time.monotonic() < deadline:
+            response = client.post(
+                f"/api/v1/projects/{project_id}/assets/{asset_id}/waveform",
+                json={}, headers=_ui(client),
+            )
+            payload = response.json()
+            status = payload["status"]
+            if status in {"building", "queued", "running", "failed"}:
+                break
+            time.sleep(0.05)
         assert payload["job_id"] is None
-        assert payload["status"] in {"building", "queued", "running", "failed"}
+        assert status in {"building", "queued", "running", "failed"}
         # ready 后：幂等短路（job_id=None, status=ready）
         key = _ready_waveform(client, project_id, asset_id)
         response = client.post(
