@@ -354,12 +354,27 @@ export function App() {
   const projectDataEpochRef = useRef(0);
   const transcriptQueueRef = useRef<BoundedTaskQueue<Transcript> | null>(null);
   const loadProjectData = async (selected: Project) => {
-    const [assetPage, jobPage] = await Promise.all([window.desktop.listAssets({ project_id: selected.project_id }), window.desktop.listJobs({ project_id: selected.project_id })]);
+    // GAP-LIST-ASSETS-PAGING：assets 跟随 next_cursor 翻页装载（Core 默认
+    // limit=50，旧实现只取第一页——第 51+ 素材无 media ticket，合成预览回退
+    // "no ticket for asset_..."，刷新素材库亦不可恢复）。200 页 = 10,000 条
+    // 防病态游标环；触顶即止（行为不劣于单页现状）。
+    const listAllAssets = async (projectId: Project["project_id"]) => {
+      const items: Awaited<ReturnType<typeof window.desktop.listAssets>>["items"] = [];
+      let cursor: string | null | undefined;
+      for (let page = 0; page < 200; page++) {
+        const assetPage = await window.desktop.listAssets({ project_id: projectId, ...(cursor ? { cursor } : {}) });
+        items.push(...assetPage.items);
+        if (!assetPage.next_cursor) break;
+        cursor = assetPage.next_cursor;
+      }
+      return items;
+    };
+    const [assetsAll, jobPage] = await Promise.all([listAllAssets(selected.project_id), window.desktop.listJobs({ project_id: selected.project_id })]);
     const epoch = ++projectDataEpochRef.current;
-    setAssets(assetPage.items); setJobs(jobPage.items);
+    setAssets(assetsAll); setJobs(jobPage.items);
     // 转录摘要：每素材一次 listTranscripts（并发受限 ≤4，epoch 作废旧返回）。
     const queue = transcriptQueueRef.current ??= new BoundedTaskQueue<Transcript>(4);
-    const pairs = await Promise.all(assetPage.items.filter(item => isTranscribable(item.asset)).map(async item => {
+    const pairs = await Promise.all(assetsAll.filter(item => isTranscribable(item.asset)).map(async item => {
       const summaryPage = await window.desktop.listTranscripts(item.asset.asset_id);
       return [item.asset.asset_id, summaryPage.items] as const;
     }));

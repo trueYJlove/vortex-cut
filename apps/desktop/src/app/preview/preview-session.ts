@@ -251,6 +251,13 @@ export class PreviewSession {
     this.externalFrames = frames !== undefined;
   }
 
+  /** DEFECT-4K60-SESSION-HANG：装配总期限。15s 握手只覆盖 worker init→ready
+   *  单跳；create 链上的 IPC/fetch/addModule 等阶段此前无任何看门狗，4K 首次
+   *  装配挂起 >4min 无提示（用户只能重载）。45s ≈ 最差实测 ready(≈16s)×3
+   *  余量，远小于挂起形态；超时 → dispose（终结已拉起的 worker）+ 类型化抛错，
+   *  由既有 UI error 路径兜底展示。测试经 CREATE_DEADLINE_MS 注入短期限。 */
+  static CREATE_DEADLINE_MS = 45_000;
+
   static async create(container: HTMLElement, ir: Ir,
                       tickets: Map<string, string>,
                       audioByClip?: Map<string, SegmentAudioConfig>, signal?: AbortSignal,
@@ -271,6 +278,36 @@ export class PreviewSession {
     }
     const abort = () => session.dispose();
     signal?.addEventListener("abort", abort, { once: true });
+    // 装配看门狗：挂起阶段无法取消，用 race 让 create 在期限内落定；timer
+    // 在正常完成/异常路径的 finally 统一清除。挂起的原 promise 落定后由
+    // disposed 检查短路（各阶段 create 后均有）。
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      deadlineTimer = setTimeout(
+        () => reject(new Error(`合成预览装配超时（${PreviewSession.CREATE_DEADLINE_MS / 1000}s）——请重试或刷新；若持续出现请检查素材与 GPU 驱动`)),
+        PreviewSession.CREATE_DEADLINE_MS,
+      );
+    });
+    try {
+    return await Promise.race([
+      PreviewSession.assemble(container, ir, tickets, session, audioByClip, signal, sourceResolver, resourceTier, pcmProjectId),
+      deadline,
+    ]);
+    } catch (error) { session.dispose(); throw error; }
+    finally {
+      clearTimeout(deadlineTimer);
+      signal?.removeEventListener("abort", abort);
+    }
+  }
+
+  private static async assemble(container: HTMLElement, ir: Ir,
+                                tickets: Map<string, string>,
+                                session: PreviewSession,
+                                audioByClip: Map<string, SegmentAudioConfig> | undefined,
+                                signal: AbortSignal | undefined,
+                                sourceResolver: PreviewSourceResolver | null | undefined,
+                                resourceTier: "conservative" | "balanced" | "high" | undefined,
+                                pcmProjectId: string | null | undefined): Promise<PreviewSession> {
     try {
     session.container = container;
     session.tickets = tickets;
@@ -425,8 +462,7 @@ export class PreviewSession {
       }
     }
     return session;
-    } catch (error) { session.dispose(); throw error; }
-    finally { signal?.removeEventListener("abort", abort); }
+    } finally { /* abort 监听由 create wrapper 统一移除 */ }
   }
 
   get canvas(): HTMLCanvasElement | null {
@@ -1361,7 +1397,16 @@ export class PreviewSession {
         requests.push(this.uploadRing(rig, inputId, srcN));
       }
     }
-    await Promise.all(requests);
+    // DEFECT-4K60-SEEK：seek 解码/上传失败在此落定（写 lastError、不向上抛）——
+    // 旧实现 Promise.all 的 rejection 无人接（UI 入口是 void 调用），既成
+    // unhandled rejection 也让装配期 seek 把整个预览打成 error。
+    try {
+      await Promise.all(requests);
+    } catch (error) {
+      if (this.disposed || epoch !== this.seekEpoch) return -1; // 作废/已销毁：静默
+      this.lastError = `seek 解码失败 frame ${index}: ${error instanceof Error ? error.message : String(error)}`;
+      return -1;
+    }
     if (epoch !== this.seekEpoch) return -1; // 已被更新的 seek 取代
     this.lastSeekMs = performance.now() - now;
     editorPerf.record("seek", this.lastSeekMs, this.perfId, epoch, epoch, index);

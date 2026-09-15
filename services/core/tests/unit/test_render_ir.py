@@ -354,3 +354,80 @@ def test_whitelist_still_rejects_image_assets() -> None:
     with pytest.raises(DomainError) as exc:
         project_preview_ir(plan, _probe(plan))
     assert exc.value.code == "PREVIEW_IR_UNSUPPORTED"
+
+
+# ---- GAP-CROSS-TRACK-OVERLAP（2026-09-15 缺陷批 W4）：重叠段拆分复制输入 ----
+
+def test_cross_track_overlap_splits_duplicate_input() -> None:
+    # 同素材 V1 主轨 + V2 浮层时间重叠（跨轨重叠，契约允许）：V2 段得复制
+    # 输入 I0~1（桌面侧独立 worker/环池，双位置消费不再互相淘汰槽位）
+    plan = _plan([
+        _segment("v1", 0, 3 * US, 0, 3 * US),
+        _segment("v2", 1 * US, 3 * US, 1 * US, 3 * US, track_id="V2"),
+    ])
+    ir = project_preview_ir(plan, _probe(plan))
+    input_ids = [item["input_id"] for item in ir["inputs"]]
+    assert "I0" in input_ids and "I0~1" in input_ids
+    dup = next(item for item in ir["inputs"] if item["input_id"] == "I0~1")
+    assert dup["asset_id"] == "asset0"  # 同 asset：票据按 asset_id 解析不变
+    # 帧表：主轨用 I0，浮层 overlay 用 I0~1
+    mid = ir["frames"][45]
+    assert mid["main"]["clip_id"] == "v1"
+    assert mid["main"]["input_id"] == "I0"
+    assert len(mid["overlays"]) == 1
+    assert mid["overlays"][0]["input_id"] == "I0~1"
+    # 输出 segments 表同步重映射
+    seg = next(s for s in ir["segments"] if s["clip_id"] == "v2")
+    assert seg["input_id"] == "I0~1"
+
+
+def test_non_overlapping_same_asset_keeps_single_input() -> None:
+    # 同素材 F03 式三窗口 / F07 式矩阵：timeline 不重叠 → 仍单输入单 worker
+    plan = _plan([
+        _segment("w1", 0, 3 * US, 0, 3 * US),
+        _segment("w2", 0, 3 * US, 3 * US, 6 * US),
+        _segment("w3", 0, 3 * US, 6 * US, 9 * US),
+    ])
+    ir = project_preview_ir(plan, _probe(plan))
+    assert [item["input_id"] for item in ir["inputs"]] == ["I0"]
+    assert all(s["input_id"] == "I0" for s in ir["segments"])
+
+
+def test_v2_v2_overlap_second_duplicate_input() -> None:
+    # 两个 V2 浮层互相重叠 + 与 V1 主轨重叠：三个重叠成员 → I0 / I0~1 / I0~2
+    plan = _plan([
+        _segment("v1", 0, 4 * US, 0, 4 * US),
+        _segment("p1", 0, 3 * US, 0, 3 * US, track_id="V2"),
+        _segment("p2", 0, 3 * US, 1 * US, 4 * US, track_id="V2"),
+    ])
+    ir = project_preview_ir(plan, _probe(plan))
+    input_ids = sorted(item["input_id"] for item in ir["inputs"])
+    assert input_ids == ["I0", "I0~1", "I0~2"]
+    by_clip = {s["clip_id"]: s["input_id"] for s in ir["segments"]}
+    # plan 顺序（segments 列表序）编号：v1=I0、p1=I0~1、p2=I0~2
+    assert by_clip == {"v1": "I0", "p1": "I0~1", "p2": "I0~2"}
+    frame = ir["frames"][45]  # 1.5s：v1 主轨 + p1/p2 双浮层
+    assert frame["main"]["input_id"] == "I0"
+    assert {o["input_id"] for o in frame["overlays"]} == {"I0~1", "I0~2"}
+
+
+def test_transition_pair_not_split_by_borrow_overlap() -> None:
+    # 转场借用对：输出时间轴上重叠（blend 区），但输入 timeline 窗口首尾相接
+    # 不重叠 → 不拆分（影子槽机制保持原语义）
+    plan = _plan([
+        _segment("a", 0, 20 * US, 0, 20 * US,
+                 transition_in={"transition_id": "t", "kind": "fade", "duration_us": 1 * US}),
+        _segment("b", 0, 25 * US, 20 * US, 45 * US, asset_idx=1),
+    ], transitions=[{"transition_id": "t", "after_clip_id": "a", "kind": "fade", "duration_us": 1 * US}])
+    ir = project_preview_ir(plan, _probe(plan))
+    assert [item["input_id"] for item in ir["inputs"]] == ["I0", "I1"]
+
+
+def test_audio_segments_do_not_trigger_split() -> None:
+    # A1 音频与 V1 视频同素材时间重叠：音频无视觉装配，不参与拆分
+    plan = _plan_with_audio([
+        _segment("v1", 0, 3 * US, 0, 3 * US),
+        _audio_segment("a1", 0, 3 * US, asset_idx=1),
+    ])
+    ir = project_preview_ir(plan, _probe(plan))
+    assert [item["input_id"] for item in ir["inputs"]] == ["I0", "I1"]

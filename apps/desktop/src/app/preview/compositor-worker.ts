@@ -25,6 +25,9 @@ export class CompositorWorkerClient {
   private readonly pending = new Map<number, { resolve: (value: never) => void; reject: (error: Error) => void }>();
   private disposed = false;
   readonly canvas: HTMLCanvasElement;
+  /** upload/uploadShadow 的 ack 期限（与 decode 超时同量级）：worker 存活但
+   *  ack 不回时调用方挂起即"事件不齐"的形态（DEFECT-4K60-SEEK 登记路径）。 */
+  private static readonly UPLOAD_TIMEOUT_MS = 15_000;
   /** worker 侧 webglcontextlost（会话据此停摆并等待重建）。 */
   onContextLost: (() => void) | null = null;
   /** 就绪信息（探针取证用）。 */
@@ -160,9 +163,13 @@ export class CompositorWorkerClient {
     const seq = this.nextSeq++;
     const request: WorkerRequest = { type: "upload", inputId, slot, srcN, frame, seq };
     return new Promise<void>((resolve, reject) => {
-      this.pending.set(seq, { resolve: resolve as never, reject });
+      const timeout = setTimeout(() => {
+        // ack 期限内未回：迟到的 uploaded 项已删，optional 链无操作不误标槽位
+        if (this.pending.delete(seq)) reject(new Error(`compositor upload timeout (seq ${seq})`));
+      }, CompositorWorkerClient.UPLOAD_TIMEOUT_MS);
+      this.pending.set(seq, { resolve: (value: never) => { clearTimeout(timeout); resolve(value); }, reject });
       try { this.worker.postMessage(request, [frame]); }
-      catch (error) { this.pending.delete(seq); frame.close(); reject(error); }
+      catch (error) { this.pending.delete(seq); clearTimeout(timeout); frame.close(); reject(error); }
     });
   }
 
@@ -172,9 +179,12 @@ export class CompositorWorkerClient {
     const seq = this.nextSeq++;
     const request: WorkerRequest = { type: "uploadShadow", inputId, srcN, frame, seq };
     return new Promise<void>((resolve, reject) => {
-      this.pending.set(seq, { resolve: resolve as never, reject });
+      const timeout = setTimeout(() => {
+        if (this.pending.delete(seq)) reject(new Error(`compositor uploadShadow timeout (seq ${seq})`));
+      }, CompositorWorkerClient.UPLOAD_TIMEOUT_MS);
+      this.pending.set(seq, { resolve: (value: never) => { clearTimeout(timeout); resolve(value); }, reject });
       try { this.worker.postMessage(request, [frame]); }
-      catch (error) { this.pending.delete(seq); frame.close(); reject(error); }
+      catch (error) { this.pending.delete(seq); clearTimeout(timeout); frame.close(); reject(error); }
     });
   }
 

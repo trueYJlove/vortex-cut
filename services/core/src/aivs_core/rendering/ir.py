@@ -22,7 +22,7 @@ from .interval_index import IntervalLookup, RegionSweep
 
 FPS = 30
 IR_SCHEMA = "preview-ir-v1"
-IR_PROJECTOR_VERSION = 1
+IR_PROJECTOR_VERSION = 2  # v2（2026-09-15 W4）：跨轨重叠段拆分复制输入
 MAX_IR_FRAMES = 27_000  # 15 分钟 @30fps（O2 体量护栏）
 
 ALLOWED_KEYFRAME_PROPS = {"position", "opacity", "scale", "rotate"}
@@ -36,6 +36,60 @@ def _fail(clip_id: str, what: str) -> DomainError:
 
 def _unsupported(what: str) -> DomainError:
     return DomainError("PREVIEW_IR_UNSUPPORTED", what)
+
+
+def _split_overlapped_inputs(
+    plan: dict[str, Any],
+    inputs: list[dict[str, Any]],
+    segment_input: dict[str, str],
+    geometry_by_input: dict[str, dict[str, Any]],
+) -> dict[str, str]:
+    """重叠可视段分配复制输入（W4，见调用处注释）。
+
+    判定 = timeline 窗口与**其他可视 segment**重叠（同轨重叠被时间线契约
+    禁止，实际即跨轨）。窗口完全相同的双位置（V1+V2 同素材同窗）也视为
+    重叠——两消费位置相同但各自需要稳定槽位语义，统一拆分。
+    首个消费者保持原 input；同素材第 n 个重叠消费者得 `I<k>~n`。
+    inputs 列表按需追加同 asset/geometry 条目（会话按条目建 rig，ticket
+    按 asset_id 解析不变）。
+    """
+    visual = [
+        segment for segment in plan["segments"]
+        if segment["asset_kind"] != "audio" and not segment.get("track_hidden")
+    ]
+    if len(visual) < 2:
+        return segment_input
+    by_input: dict[str, list[dict[str, Any]]] = {}
+    for segment in visual:
+        by_input.setdefault(segment["input_id"], []).append(segment)
+    result = dict(segment_input)
+    for input_id, segments in by_input.items():
+        if len(segments) < 2:
+            continue
+        # 输入内两两判重叠（每输入段数小，O(k²) 可接受）
+        overlapped_flags = [False] * len(segments)
+        for i, seg_i in enumerate(segments):
+            for j in range(i + 1, len(segments)):
+                seg_j = segments[j]
+                if (
+                    int(seg_i["timeline_start_us"]) < int(seg_j["timeline_end_us"])
+                    and int(seg_j["timeline_start_us"]) < int(seg_i["timeline_end_us"])
+                ):
+                    overlapped_flags[i] = True
+                    overlapped_flags[j] = True
+        if not any(overlapped_flags):
+            continue
+        # 重叠组成员按 plan 顺序编号：首成员保持原 input，其余 ~1..~n
+        members = [seg for seg, flag in zip(segments, overlapped_flags) if flag]
+        base_input = next(item for item in inputs if item["input_id"] == input_id)
+        for ordinal, seg in enumerate(members):
+            if ordinal == 0:
+                continue
+            new_input_id = f"{input_id}~{ordinal}"
+            result[seg["clip_id"]] = new_input_id
+            inputs.append({**base_input, "input_id": new_input_id})
+            geometry_by_input[new_input_id] = geometry_by_input[input_id]
+    return result
 
 
 def _validate_whitelist(plan: dict[str, Any]) -> None:
@@ -216,6 +270,16 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
         })
         geometry_by_input[item["input_id"]] = geometry
     segment_input = {segment["clip_id"]: segment["input_id"] for segment in plan["segments"]}
+
+    # GAP-CROSS-TRACK-OVERLAP（2026-09-15 缺陷批 W4）：同素材跨轨重叠片段
+    # 共享一个 input → 会话侧共享一个环形纹理池（深 8）+ 单调解码链——两个
+    # 相距 >8 帧的源消费位置互相淘汰槽位，frameReady 永假，播放头停滞。
+    # 投影层拆分：可视 segments 中与**其他可视 segment**（任意轨道）timeline
+    # 重叠者，自第二份起分配复制输入（input_id 加后缀），桌面侧各得独立
+    # worker/环池。首个消费者保持原 input——非重叠同素材复用不变（F03 三窗口、
+    # F07 速度矩阵仍是单输入）；音频/A1 不在此列（无视觉装配）。权威渲染
+    # 路径零影响（本函数仅服务预览投影）。
+    segment_input = _split_overlapped_inputs(plan, inputs, segment_input, geometry_by_input)
 
     segments = plan["segments"]
     visual = [
@@ -456,7 +520,7 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
         "segments": [
             {
                 "clip_id": segment["clip_id"], "track_id": segment["track_id"],
-                "input_id": segment["input_id"],
+                "input_id": segment_input[segment["clip_id"]] if segment["asset_kind"] != "audio" else segment["input_id"],
                 "source_start_us": segment["source_start_us"], "source_end_us": segment["source_end_us"],
                 "timeline_start_us": segment["timeline_start_us"], "timeline_end_us": segment["timeline_end_us"],
                 "output_start_us": _output_window(segment)[0], "output_end_us": _output_window(segment)[1],

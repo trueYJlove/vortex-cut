@@ -377,7 +377,10 @@ self.onmessage = (event: MessageEvent) => {
   const data = event.data as { type: string; url?: string; cacheFrames?: number; id?: number; frameN?: number; fps?: number; refreshTicket?: boolean; refreshUrl?: string; refreshError?: string; cacheCapBytes?: number; forceSwDecode?: boolean };
   try {
     if (data.type === "init" && data.url) {
-      void init(data.url, data.cacheFrames ?? 0, data.refreshTicket === true, data.cacheCapBytes, data.forceSwDecode);
+      // DEFECT-4K60-SESSION-HANG：init 失败必须回发 error——旧实现 fire-and-forget
+      // 的 rejection 在 worker 内被吞，客户端只能等满 15s 泛化超时拿不到真实错误。
+      void init(data.url, data.cacheFrames ?? 0, data.refreshTicket === true, data.cacheCapBytes, data.forceSwDecode)
+        .catch(error => post({ type: "error", id: null, message: error instanceof Error ? error.message : String(error) }));
     } else if (data.type === "ticket-refresh-response" && typeof data.id === "number") {
       const pending = ticketRefreshPending.get(data.id);
       if (!pending) return;
