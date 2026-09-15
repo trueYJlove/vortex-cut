@@ -3,7 +3,7 @@
 ## 1. 状态与范围
 
 **C20(窗口化 IR v2,第一阶段 C20a+C20b)代码完成 + 功能验证完成。**
-独立验收:**待验收**。
+独立验收:**通过**(2026-09-15 集中独立验收,PERFORMANCE_G1G2_C20_C21_C22_CENTRALIZED_ACCEPTANCE_2026-09-15.md)
 
 依据 `docs/PERFORMANCE_IMPLEMENTATION_PLAN_2026-09-08.md` 第 7 节 C20,在
 B17(`4744bb6`)之上实施。C20 计划分为 a(manifest)/b(window)/c(dirty-range)
@@ -130,7 +130,7 @@ before / after / 同机环境:
   - 跨窗播放 30 分钟无周期性卡顿、60 分钟时间轴夹具首窗耗时/字节
     计量(F 场景)未跑——列 F 场景复测轮。
 开发者自测:通过(见上)。
-独立Reviewer结论:待验收
+独立Reviewer结论:通过(2026-09-15 集中独立验收,PERFORMANCE_G1G2_C20_C21_C22_CENTRALIZED_ACCEPTANCE_2026-09-15.md)
 Gate决策与下一步:C20 第二阶段(Renderer v2 数据面接入:windowed
   FrameSource + 窗口缓存/预取/缓冲态)或 C21(导出输入深定位);
   F 场景复测轮量化 v1 全量传输的实测瓶颈后决定优先级。

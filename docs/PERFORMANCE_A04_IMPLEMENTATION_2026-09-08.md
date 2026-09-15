@@ -91,7 +91,7 @@ before / after / 同机环境：
     RegionSweep/IntervalLookup 单元级 oracle + 现有行为测试交叉保障。
   - 350ms 目标待 G0 用代表夹具冻结复测；本机数字不冒充跨机门槛。
 开发者自测：通过（见上）。
-独立Reviewer结论：待验收
+独立Reviewer结论:通过(2026-09-15 集中独立验收,PERFORMANCE_G1G2_C20_C21_C22_CENTRALIZED_ACCEPTANCE_2026-09-15.md)
 Gate决策与下一步：A05（Core 哈希/IR 后台执行）按计划推进。
 ```
 

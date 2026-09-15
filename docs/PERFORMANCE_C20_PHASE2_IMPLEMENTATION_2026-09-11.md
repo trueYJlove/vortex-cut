@@ -101,7 +101,7 @@ before / after / 同机环境:
   4. Core 首次 manifest 请求仍全量投影一次(C20a/b 登记的缓存层语义);
      长项目首投影延迟未改善——增量投影(C20b 完整形态)另行立项。
 开发者自测:通过(见上)。
-独立Reviewer结论:待验收
+独立Reviewer结论:通过(2026-09-13 PERFORMANCE_B13_C20T_INDEPENDENT_ACCEPTANCE_2026-09-13.md §C20 二阶段;尾部状态行 2026-09-15 回填)
 Gate决策与下一步:F 场景 v2 on/off A/B 基准轮(previewIrV2=1 构建 +
 B00 harness F01/F02/F03 复测)→ 达标则 C20c 立项(revision 换 manifest
 沿用会话),未达标按 profile 解释。

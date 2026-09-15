@@ -92,7 +92,7 @@ before / after / 同机环境：
     即可——避免为常量引入字段）；后续若改 smoke 参数集需在发布说明登记。
   - probe 缓存 TTL/字节预算的持久化与共享纳入 B10（按计划不在本单扩契约）。
 开发者自测：通过（见上）。
-独立Reviewer结论：待验收
+独立Reviewer结论:通过(2026-09-15 集中独立验收,PERFORMANCE_G1G2_C20_C21_C22_CENTRALIZED_ACCEPTANCE_2026-09-15.md)
 Gate决策与下一步：A08（轮询、缩略图和转录加载，Desktop）按计划推进。
 ```
 

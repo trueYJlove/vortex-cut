@@ -3,7 +3,7 @@
 ## 1. 状态与范围
 
 **B15(分块 PCM 与流式 AudioWorklet)代码完成 + 功能验证完成。**
-独立验收:**待验收**。
+独立验收:**通过**(2026-09-15 集中独立验收,PERFORMANCE_G1G2_C20_C21_C22_CENTRALIZED_ACCEPTANCE_2026-09-15.md)
 
 依据 `docs/PERFORMANCE_IMPLEMENTATION_PLAN_2026-09-08.md` 第 6 节 B15 与
 第 6.1 节跨进程契约规则,在 B14(`7ed5235` 报告)之上实施,按
@@ -151,7 +151,7 @@ before / after / 同机环境:
   - B15-B ensure 描述的 valid_samples=null(缓存命中路径)在 Renderer
     解析时以 fetch 后块头为准(一致性校验兜底)。
 开发者自测:通过(见上)。
-独立Reviewer结论:待验收
+独立Reviewer结论:通过(2026-09-15 集中独立验收,PERFORMANCE_G1G2_C20_C21_C22_CENTRALIZED_ACCEPTANCE_2026-09-15.md)
 Gate决策与下一步:F 场景复测轮(F03 长源 10 秒播放 PCM 驻留量化 +
   F07 全速域听感门;B10-B15 能力就绪);或 B16(资源配额调度——
   consumed/lease 协议接入)。

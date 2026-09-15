@@ -74,7 +74,7 @@ before / after / 同机环境：
   - 迟到 frame 消息在 disposed 后不 close（监听器已摘除，帧所有权在
     已 terminate 的 worker 侧）——与实现语义一致，测试注释已说明。
 开发者自测：通过（见上）。
-独立Reviewer结论：待验收
+独立Reviewer结论:通过(2026-09-15 集中独立验收,PERFORMANCE_G1G2_C20_C21_C22_CENTRALIZED_ACCEPTANCE_2026-09-15.md)
 Gate决策与下一步：A02（音频在途去重与有限预热）按计划推进。
 ```
 

@@ -3,7 +3,7 @@
 ## 1. 状态与范围
 
 **C22(可取消的最终校验与诚实的阶段进度)代码完成 + 功能验证完成。**
-独立验收:**待验收**。
+独立验收:**通过**(2026-09-15 集中独立验收,PERFORMANCE_G1G2_C20_C21_C22_CENTRALIZED_ACCEPTANCE_2026-09-15.md)
 
 依据 `docs/PERFORMANCE_IMPLEMENTATION_PLAN_2026-09-08.md` 第 7 节 C22,在
 C21a(`d76280f`)之上实施。C22 十条全部落地:可取消校验(validate_rendered_media
@@ -163,7 +163,7 @@ before / after / 同机环境:
     伪造权重),UI 以 phase 文本+阶段进度补充展示。
   - C23/C24 未动(按计划次序,第三轮剩余两项实验)。
 开发者自测:通过(见上)。
-独立Reviewer结论:待验收
+独立Reviewer结论:通过(2026-09-15 集中独立验收,PERFORMANCE_G1G2_C20_C21_C22_CENTRALIZED_ACCEPTANCE_2026-09-15.md)
 Gate决策与下一步:第三轮按计划剩余 C23(分块倒放,正确性实验通过再
   上线)/C24(GPU 滤镜,条件实验);或先做 F 场景夹具实测轮(quantify
   C20/C21/C22 的端到端收益与取消延迟)。建议顺序:先 F 实测轮补 G2/G3

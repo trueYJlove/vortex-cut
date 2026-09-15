@@ -3,7 +3,7 @@
 ## 1. 状态与范围
 
 **B14(素材级持久化波形)代码完成 + 功能验证完成。**
-独立验收:**待验收**。
+独立验收:**通过**(2026-09-15 集中独立验收,PERFORMANCE_G1G2_C20_C21_C22_CENTRALIZED_ACCEPTANCE_2026-09-15.md)
 
 依据 `docs/PERFORMANCE_IMPLEMENTATION_PLAN_2026-09-08.md` 第 6 节 B14 与
 第 6.1 节跨进程契约规则,在 B13(`d86895e` 报告收尾)之上实施,按
@@ -126,7 +126,7 @@ before / after / 同机环境:
   - F06(播放+导出并发)下波形作业 resource_class=light 的调度行为
     未实测(B16 完整配额前保持单飞)。
 开发者自测:通过(见上)。
-独立Reviewer结论:待验收
+独立Reviewer结论:通过(2026-09-15 集中独立验收,PERFORMANCE_G1G2_C20_C21_C22_CENTRALIZED_ACCEPTANCE_2026-09-15.md)
 Gate决策与下一步:F 场景复测轮(B10-B14 能力就绪,F01-F04 量化验收);
   或 B15(分块 PCM 与流式 worklet——A02 整段回退届时替换为流式主
   路径,PCM 预算语义升级为分块缓存)。

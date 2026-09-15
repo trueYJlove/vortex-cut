@@ -68,7 +68,7 @@ before / after / 同机环境：
     退化为一次二分，非缺陷。
   - 真机 seek 延迟收益（m3p4 p95 复测）待性能验证阶段执行。
 开发者自测：通过（见上）。
-独立Reviewer结论：待验收
+独立Reviewer结论:通过(2026-09-15 集中独立验收,PERFORMANCE_G1G2_C20_C21_C22_CENTRALIZED_ACCEPTANCE_2026-09-15.md)
 Gate决策与下一步：A04（IR 扫线与手势索引，Core + Desktop 跨端）按计划推进。
 ```
 

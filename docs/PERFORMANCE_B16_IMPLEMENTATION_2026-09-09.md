@@ -3,7 +3,7 @@
 ## 1. 状态与范围
 
 **B16(优先级和资源配额调度)代码完成 + 功能验证完成。**
-独立验收:**待验收**。
+独立验收:**通过**(2026-09-15 集中独立验收,PERFORMANCE_G1G2_C20_C21_C22_CENTRALIZED_ACCEPTANCE_2026-09-15.md)
 
 依据 `docs/PERFORMANCE_IMPLEMENTATION_PLAN_2026-09-08.md` 第 6 节 B16,在
 B15(`ce16305` 报告)之上实施,按"调度器核心 + jobs 接入 → lease 心跳
@@ -128,7 +128,7 @@ before / after / 同机环境:
   - aging 计时基于 DB created_at ISO 串转 epoch(毫秒精度,容差足够);
     测试环境时钟与 DB 时钟同源。
 开发者自测:通过(见上)。
-独立Reviewer结论:待验收
+独立Reviewer结论:通过(2026-09-15 集中独立验收,PERFORMANCE_G1G2_C20_C21_C22_CENTRALIZED_ACCEPTANCE_2026-09-15.md)
 Gate决策与下一步:F 场景复测轮(F06 播放+后台任务 p95 量化;B10-B16
   能力就绪);或 B17(时间轴二维可见区——第二轮最后一个大项)。
 ```

@@ -3,7 +3,7 @@
 ## 1. 状态与范围
 
 **B17(时间轴二维可见区与精细状态)代码完成 + 功能验证完成。**
-独立验收:**待验收**。
+独立验收:**通过**(2026-09-15 集中独立验收,PERFORMANCE_G1G2_C20_C21_C22_CENTRALIZED_ACCEPTANCE_2026-09-15.md)
 
 依据 `docs/PERFORMANCE_IMPLEMENTATION_PLAN_2026-09-08.md` 第 6 节 B17,在
 B16(`d70a2f0` 报告)之上实施。开工时工作树已有 B17 半成品(画布 viewport 化
@@ -120,7 +120,7 @@ before / after / 同机环境:
   - .timeline-left 轨道头列仍全内容渲染(DOM 元素=轨道数,量级有界;
     计划只要求画布不分配全内容位图,头列不在约束内)。
 开发者自测:通过(见上)。
-独立Reviewer结论:待验收
+独立Reviewer结论:通过(2026-09-15 集中独立验收,PERFORMANCE_G1G2_C20_C21_C22_CENTRALIZED_ACCEPTANCE_2026-09-15.md)
 Gate决策与下一步:第二轮(B10–B17)编码全部完成——G2 退出条件中
   "长源首帧/PCM/GPU 预算/同源复用/F03–F07 回归/30–60 分钟压力"仍待
   F 场景复测轮量化;或进入第三轮 C20(窗口化 IR v2)。

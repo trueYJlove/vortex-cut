@@ -3,7 +3,7 @@
 ## 1. 状态与范围
 
 **C21(导出输入深定位,C21a + C21b)代码完成 + 功能验证完成。**
-独立验收:**待验收**。
+独立验收:**通过**(2026-09-15 集中独立验收,PERFORMANCE_G1G2_C20_C21_C22_CENTRALIZED_ACCEPTANCE_2026-09-15.md)
 
 依据 `docs/PERFORMANCE_IMPLEMENTATION_PLAN_2026-09-08.md` 第 7 节 C21,在
 C20 第一阶段(`1dd727f`)之上实施。C21 计划分 a(规划器+等价性实验)/
@@ -146,7 +146,7 @@ before / after / 同机环境:
     编码降幅,parity 逐位一致——见 F03 实测报告);帧计数口径与
     60 分钟源列完整 F 夹具轮。
 开发者自测:通过(见上)。
-独立Reviewer结论:待验收
+独立Reviewer结论:通过(2026-09-15 集中独立验收,PERFORMANCE_G1G2_C20_C21_C22_CENTRALIZED_ACCEPTANCE_2026-09-15.md)
 Gate决策与下一步:C21a+C21b 完成(计划 C21 范围内遗留项均为保守
   legacy/实测轮项)。下一步:C23(分块倒放)/C24(GPU 滤镜)按计划
   属条件实验;或先 F 场景夹具实测轮补 G3 证据。

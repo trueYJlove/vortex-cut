@@ -3,7 +3,7 @@
 ## 1. 状态与范围
 
 **B11(全源代理与预览源选择)代码完成 + 功能验证完成(含真实 FFmpeg 转码链)。**
-独立验收:**待验收**。
+独立验收:**通过**(2026-09-15 集中独立验收,PERFORMANCE_G1G2_C20_C21_C22_CENTRALIZED_ACCEPTANCE_2026-09-15.md)
 
 依据 `docs/PERFORMANCE_IMPLEMENTATION_PLAN_2026-09-08.md` 第 6 节 B11 与
 第 6.1 节跨进程契约规则,在 B10(`ed0032d` 及此前四提交)之上实施,按
@@ -122,7 +122,7 @@ before / after / 同机环境:
   - auto 模式的负载感知(负载轻时允许原源):当前 auto = 代理 ready 即
     代理;负载判定归 B13。
 开发者自测:通过(见上;含真实 FFmpeg 转码链四项断言)。
-独立Reviewer结论:待验收
+独立Reviewer结论:通过(2026-09-15 集中独立验收,PERFORMANCE_G1G2_C20_C21_C22_CENTRALIZED_ACCEPTANCE_2026-09-15.md)
 Gate决策与下一步:B12(MP4 Range demux,禁伪流式)——代理已就绪但
   decode-worker 仍整文件加载;B12 落地后长源播放才完整兑现 F03。
 ```

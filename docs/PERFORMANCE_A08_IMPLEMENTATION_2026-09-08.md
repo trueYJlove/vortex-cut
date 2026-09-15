@@ -97,7 +97,7 @@ before / after / 同机环境：
     多一次 listJobs——single-flight 与签名短路保证无状态污染）。
   - visibilitychange 兜底在 jsdom 不触发（测试以手动 refresh 覆盖语义）。
 开发者自测：通过（见上）。
-独立Reviewer结论：待验收
+独立Reviewer结论:通过(2026-09-15 集中独立验收,PERFORMANCE_G1G2_C20_C21_C22_CENTRALIZED_ACCEPTANCE_2026-09-15.md)
 Gate决策与下一步：G1 第一轮退出条件复测（A01–A08 功能断言齐全；
 F01 短项目回归 + F02 IR 同机复测 + 探针开销对照由 B00 诊断入口执行）
 ——复测通过后进入第二轮 B10。

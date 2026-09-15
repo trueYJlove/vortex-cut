@@ -74,7 +74,7 @@ before / after / 同机环境：
   - audioRigs 中 clip 被静音（enabled=false）时 rigs 不建立——静音开启
     需等下次 syncAudio tick 建 rig 并触发解码（延迟一帧，行为等价）。
 开发者自测：通过（见上）。
-独立Reviewer结论：待验收
+独立Reviewer结论:通过(2026-09-15 集中独立验收,PERFORMANCE_G1G2_C20_C21_C22_CENTRALIZED_ACCEPTANCE_2026-09-15.md)
 Gate决策与下一步：A03（解码 PTS/关键帧索引）按计划推进；性能验证项
   （F04 真机对比、长测）在 B00 补全夹具后统一执行。
 ```

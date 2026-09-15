@@ -83,6 +83,8 @@ FFmpeg `reverse` 滤镜将单段全部解码帧驻留内存:
   端到端。
 - **独立验收**:各修改单"独立Reviewer结论:待验收"状态未变,需
   LiuKeAi 角色复核后才能标"通过"。
+  (2026-09-15 更正:该复核已由集中独立验收补齐,21 单全部通过——
+  PERFORMANCE_G1G2_C20_C21_C22_CENTRALIZED_ACCEPTANCE_2026-09-15.md)
 - **C20c**(增量 IR 复用)与 C20 Renderer v2 数据面:留待实测瓶颈
   排序驱动(各报告已登记)。
 

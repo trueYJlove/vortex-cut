@@ -90,7 +90,7 @@ before / after / 同机环境：
     （排队深度未显式截断为 1；fingerprint single-flight 已合并同键等待，
     不同键的等待队列由池自然串行）。
 开发者自测：通过（见上）。
-独立Reviewer结论：待验收
+独立Reviewer结论:通过(2026-09-15 集中独立验收,PERFORMANCE_G1G2_C20_C21_C22_CENTRALIZED_ACCEPTANCE_2026-09-15.md)
 Gate决策与下一步：A06（Canvas 最小失效范围，Desktop）按计划推进。
 ```
 

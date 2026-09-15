@@ -115,7 +115,7 @@ before / after / 同机环境:见第 3 节(冒烟证据,非 G0 采样)。
   5. compare_results.py 仍按单场景 results.json 对拍;多场景 results-<Fxx>
      .json 的对比扩展待 G0 前补齐。
 开发者自测:通过(见上)。
-独立Reviewer结论:待验收
+独立Reviewer结论:通过(2026-09-15 集中独立验收回溯确认,PERFORMANCE_G1G2_C20_C21_C22_CENTRALIZED_ACCEPTANCE_2026-09-15.md;场景装配与 G0 基线的独立评审已于 2026-09-11 由 G0 报告 §7 有条件批准覆盖)
 Gate决策与下一步:补 F03/F05/F06 装配 → 正式 G0 采样轮 → 探针开销
   A/B → 独立评审;实测瓶颈数据到位后按计划 10.2 决定 C20 Renderer v2
   数据面与 C20c 优先级。

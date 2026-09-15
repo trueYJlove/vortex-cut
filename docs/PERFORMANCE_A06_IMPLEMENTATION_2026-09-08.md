@@ -87,7 +87,7 @@ before / after / 同机环境：
   - 交互预览 100ms 时钟手势冻结（gestureHold）语义保留在 App 播放通道；
     store 写入不经手势判定（合成预览手势期间 session 自身暂停上报）。
 开发者自测：通过（见上）。
-独立Reviewer结论：待验收
+独立Reviewer结论:通过(2026-09-15 集中独立验收,PERFORMANCE_G1G2_C20_C21_C22_CENTRALIZED_ACCEPTANCE_2026-09-15.md)
 Gate决策与下一步：A07（probe/编码能力缓存，Core）按计划推进。
 ```
 

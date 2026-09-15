@@ -3,7 +3,7 @@
 ## 1. 状态与范围
 
 **B10(派生媒体存储与缓存键)代码完成 + 功能验证完成。**
-独立验收:**待验收**。
+独立验收:**通过**(2026-09-15 集中独立验收,PERFORMANCE_G1G2_C20_C21_C22_CENTRALIZED_ACCEPTANCE_2026-09-15.md)
 
 依据 `docs/PERFORMANCE_IMPLEMENTATION_PLAN_2026-09-08.md` 第 6 节 B10 与
 第 6.1 节跨进程契约规则,在 G1 复测(`3202b96`)之上实施,按"迁移 →
@@ -122,7 +122,7 @@ before / after / 同机环境:
     ffmpeg build(A07 ffprobe_build 模式),届时缓存键随之换代。
   - Renderer 侧消费方(UI 波形/代理播放)未接入——B14/B11 落地。
 开发者自测:通过(见上)。
-独立Reviewer结论:待验收
+独立Reviewer结论:通过(2026-09-15 集中独立验收,PERFORMANCE_G1G2_C20_C21_C22_CENTRALIZED_ACCEPTANCE_2026-09-15.md)
 Gate决策与下一步:B11 全源代理与预览源选择(B10 是其前置;代理生成
   作业将直接使用 begin_build/commit_ready/mark_failed + refs 授权)。
 ```

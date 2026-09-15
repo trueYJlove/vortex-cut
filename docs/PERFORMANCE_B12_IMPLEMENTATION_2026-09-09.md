@@ -3,7 +3,7 @@
 ## 1. 状态与范围
 
 **B12(MP4 Range demux,禁止伪流式)代码完成 + 功能验证完成。**
-独立验收:**待验收**。
+独立验收:**通过**(2026-09-15 集中独立验收,PERFORMANCE_G1G2_C20_C21_C22_CENTRALIZED_ACCEPTANCE_2026-09-15.md)
 
 依据 `docs/PERFORMANCE_IMPLEMENTATION_PLAN_2026-09-08.md` 第 6 节 B12 与
 第 6.1 节跨进程契约规则,在 B11(`fbc94ee` 及此前提交)之上实施,按
@@ -100,7 +100,7 @@ before / after / 同机环境:
   - proxy 产物经 faststart(moov 前),Range 读取天然最小化;原源尾 moov
     同样按偏移定位(等价路径已测)。
 开发者自测:通过(见上)。
-独立Reviewer结论:待验收
+独立Reviewer结论:通过(2026-09-15 集中独立验收,PERFORMANCE_G1G2_C20_C21_C22_CENTRALIZED_ACCEPTANCE_2026-09-15.md)
 Gate决策与下一步:B13(活跃输入与 GPU 资源预算)或 F 场景复测轮
   (B10-B12 三件套:代理/源选择/Range demux 已就绪,F01-F04 量化验收
   可启动;按计划 B13 先行——活跃输入池是 F04 显存预算的前置)。
