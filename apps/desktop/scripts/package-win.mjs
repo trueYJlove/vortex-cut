@@ -139,13 +139,24 @@ const run = (stage, command, args, commandEnv = env) => new Promise((resolveProm
     return;
   }
   const usesCmd = process.platform === "win32" && command !== process.execPath && !command.toLowerCase().endsWith(".exe");
+  // 直接以 node 调脚本时 PATH 不含 node_modules/.bin（pnpm run 才注入）——
+  // 裸命令名在 cmd /c 下报"不是内部或外部命令"。这里解析到 .bin 绝对路径。
+  const resolveBin = name => {
+    const localShim = join(desktopDir, "node_modules", ".bin", name);
+    if (existsSync(localShim + ".cmd")) return localShim + ".cmd";
+    if (existsSync(localShim)) return localShim;
+    return name;
+  };
   const executable = usesCmd ? process.env.ComSpec : command;
   const commandArgs = usesCmd
-    ? ["/d", "/s", "/c", [command + ".cmd", ...args].map(quoteCmdArg).join(" ")]
+    ? ["/d", "/s", "/c", [resolveBin(command) === command ? command + ".cmd" : resolveBin(command), ...args].map(quoteCmdArg).join(" ")]
     : args;
   const child = execFile(executable, commandArgs, { cwd: desktopDir, env: commandEnv, windowsHide: true }, (error, stdout, stderr) => {
     if (error) {
       error.failureStage = stage;
+      // 分类前落原始输出：错误码只报分类结果，现场（config 校验/资源缺失等）
+      // 无原始输出无从定位。
+      process.stderr.write(`[package-win] stage=${stage} failed; stdout:\n${stdout}\nstderr:\n${stderr}\n`);
       if (stage === "package_verify") {
         const code = [error.message, stdout, stderr]
           .flatMap(value => String(value ?? "").match(/[A-Z][A-Z0-9_]+/g) ?? [])
