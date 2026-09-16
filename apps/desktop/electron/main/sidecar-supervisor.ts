@@ -103,6 +103,15 @@ export class SidecarSupervisor {
         // launcher process exits. Keep polling ready.json until timeout so a
         // late but valid Core handshake is not discarded.
         childExit = `Sidecar launcher exited before ready (${code ?? signal})`;
+        // ready 之后 Core 意外退出此前完全静默：后续请求只会得到
+        // ECONNREFUSED，现场无从定位（F04 复测）。运行期退出落日志。
+        if (settled) {
+          if (this.options.logPath) {
+            void appendLog(this.options.logPath,
+              `[aivs-core] exited after ready code=${code ?? "null"} signal=${signal ?? "null"}`);
+          }
+          this.ready = undefined;
+        }
       });
       const pollReadyFile = (): void => {
         if (settled) return;

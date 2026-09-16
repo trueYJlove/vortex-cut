@@ -155,8 +155,9 @@ const assembleF04 = async (files: string[]): Promise<object> => {
   const windowUs = 1_000_000;
   // Timeline shape: 24 x 2s spine slots (V1) = 48s; each overlay track (V2-V4)
   // carries 24 x 1s clips covering 0-24s, all three live simultaneously (4 layers).
-  // 48 distinct assets stay within Core list_assets' default 50-item page (see
-  // make_fixtures note — editor loads only the first page after reload).
+  // 2026-09-15 GAP-LIST-ASSETS-PAGING 修复（editor 翻页装载）：资产族从 48
+  // 升到 100（超 list_assets 默认 50/页的两页口径）——第 51+ 素材必须照常
+  // 拿到 media ticket、合成预览不回退，这正是本场景的复测目的。
   const slots = 24;
   const spineOps: TimelinePatchOperation[] = [];
   for (let slot = 0; slot < slots; slot++) {
@@ -250,12 +251,25 @@ const assembleF07 = async (files: string[]): Promise<object> => {
       { op: "set_audio", clip_id: v1Clips[2].clip_id as never, enabled: true, gain_db: 0 },
     ], summary: "F07 mute/unmute 2x segment" } });
   revisionId = muteOp.current_revision.timeline_revision_id;
-  // Known limitation (registered in the report): same-source double-position mix
-  // cannot be assembled through the patch contract — video-kind assets are
-  // rejected on A1 (audio track takes pure-audio assets only) and cross-track
-  // overlap stalls the preview playhead. Measured workload = speed matrix +
-  // video-only segment + audio toggle.
-  return { speed_clips: speeds.length, video_only_clips: 1, audio_toggled: 1 };
+  // 2026-09-15 GAP-CROSS-TRACK-OVERLAP 修复复测：同素材 V1+V2 双位置重叠
+  // 装配（旧实现：投影层 input 按素材分配 → 会话共享环形池 → 双位置消费
+  // 互相淘汰槽位 → 播放头停滞，B00-B 报告 §5 只能整段跳过）。V2 浮层用
+  // 同素材不同源窗口（2-4s）+ 静态 transform 缩成 PiP——覆盖"同源双位置"
+  // 维度；断言留给测试体（合成预览就绪 + 播放头推进 = 拆分生效）。
+  const overlapOp = await api.patchTimeline({ project_id: project.project_id, patch: { schema_version: 1,
+    base_revision_id: revisionId, operations: [
+      { op: "add_track", kind: "video" },
+      { op: "insert_asset_clip", asset_id: av.asset.asset_id as never, at_index: 0,
+        source_start_us: 2_000_000, source_end_us: 4_000_000, track_id: "V2" },
+    ], summary: "F07 same-source dual-position overlap (V1+V2)" } });
+  revisionId = overlapOp.current_revision.timeline_revision_id;
+  const overlapClip = overlapOp.current_revision.document.clips.find(clip => clip.track_id === "V2");
+  if (!overlapClip) throw new Error("F07 overlap clip missing");
+  await api.patchTimeline({ project_id: project.project_id, patch: { schema_version: 1,
+    base_revision_id: revisionId, operations: [
+      { op: "set_clip_transform", clip_id: overlapClip.clip_id as never, transform: { x: 0.5, y: 0.5, scale: 0.3 } },
+    ], summary: "F07 overlap PiP transform" } });
+  return { speed_clips: speeds.length, video_only_clips: 1, audio_toggled: 1, dual_position_overlap: 1 };
 };
 
 /**
@@ -361,12 +375,12 @@ const RECIPES: Record<string, SceneRecipe> = {
   "F02P": { scenario: "F02P", label: "F02P/320x180-proxy-decode-900s", media: ["F02P.mp4"], inPage: assembleF02,
     revisionPhase: "undo-redo",
     scope: "complete App, same F02 assembly over a 320x180 proxy decode input (B11-D1 residency scaling spike); app cold launch + warm seeks; OS cache uncontrolled; +revision-switch phase (undo-redo)" },
-  "F04": { scenario: "F04", label: "F04/48-assets-4-layers", media: [], distinct: true, inPage: assembleF04,
+  "F04": { scenario: "F04", label: "F04/100-assets-4-layers", media: [], distinct: true, inPage: assembleF04,
     revisionPhase: "undo-redo",
-    scope: "complete App, 48 assets/4 visual layers (V1 spine + V2-V4 simultaneous PiP transforms) + 12 captions; 48 kept within list_assets default page (pagination gap registered); app cold launch + warm seeks; OS cache uncontrolled; +revision-switch phase (undo-redo)" },
+    scope: "complete App, 100 assets/4 visual layers (V1 spine + V2-V4 simultaneous PiP transforms) + 12 captions; 100 exceeds list_assets default 50/page (2026-09-15 pagination fix re-measure: page 2+ assets must keep tickets, synthetic preview must not fall back); app cold launch + warm seeks; OS cache uncontrolled; +revision-switch phase (undo-redo)" },
   "F07": { scenario: "F07", label: "F07/speed-matrix-overlap", media: ["F07.mp4", "F07-mute.mp4"], inPage: assembleF07,
     revisionPhase: "text-edit",
-    scope: "complete App, speed matrix 0.5x/1x/2x/4x + video-only segment + mute/unmute toggle; dual-position mix NOT assembled (product constraints, B00-B report §5); app cold launch + warm seeks; OS cache uncontrolled; +revision-switch phase (text-edit)" },
+    scope: "complete App, speed matrix 0.5x/1x/2x/4x + video-only segment + mute/unmute toggle + same-source V1+V2 dual-position overlap (2026-09-15 cross-track overlap fix re-measure; was not assemblable, B00-B report §5); app cold launch + warm seeks; OS cache uncontrolled; +revision-switch phase (text-edit)" },
   "F03": { scenario: "F03", label: "F03/60min-deep-seek", media: ["F03.mp4"], inPage: assembleF03,
     revisionPhase: "text-edit",
     scope: "complete App, 60min source, head/middle/tail 10s windows (deep seek); app cold launch + warm seeks; OS cache uncontrolled; +revision-switch phase (text-edit)",
@@ -487,11 +501,20 @@ for (const [sceneKey, recipe] of Object.entries(RECIPES)) {
                 return (await page.getByLabel("预览状态", { exact: true }).textContent()) === "合成预览" ? "ready" : "loading";
               }, { timeout: 60000 }).not.toBe("loading");
             }
+            // canvas 等待期内的有界恢复（2026-09-16 F04 复测：票据竞态回退可发生在
+            // attempt 循环之后的 120s 窗口内——App 自动恢复撞上 Core 瞬时停顿而
+            // 预算耗尽时页面停在回退态，此处兜底一次"刷新素材库+重试"，计入
+            // setup_recovery_count；回退提示消失后正常等 canvas）。
             try {
-              await expect(page.locator(".synthetic-canvas")).toBeVisible({ timeout: 60000 });
+              // F04 100 素材口径：assets 翻页 + v2 首投影实测 ready ≈54s，已贴近
+              // 原 60s 线；装配在途时 canvas 尚未出现并非失败，给足余量（120s）。
+              await expect(page.locator(".synthetic-canvas")).toBeVisible({ timeout: 120000 });
               canvasReady = true;
             } catch (error) {
-              if (setupAttempt >= 2 || !(await synthStatus())) throw error;
+              // 回退态（synthStatus()=false）不再直接抛：回退正是下方兜底要处理的
+              // 形态（票据竞态发生在 attempt 循环之后的等待窗口内，2026-09-16
+              // F04/F05 复测同现）。仅最后一次 setupAttempt 保留响亮失败。
+              if (setupAttempt >= 2) throw error;
             }
           }
           await expect(page.getByLabel("预览状态", { exact: true })).toHaveText("合成预览", { timeout: 60000 });

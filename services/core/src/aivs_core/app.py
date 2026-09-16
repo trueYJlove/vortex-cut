@@ -1454,7 +1454,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/v1/internal/assets/{asset_id}/resolve")
     async def resolve_asset(asset_id: str, _: CoreState = Depends(require_admin)) -> dict[str, str]:
         try:
-            return state.projects.resolve_asset_path(asset_id)
+            # 异步入口：该端点被资产呈现扇出并发调用（每素材一次），同步全文件
+            # 哈希会逐个堵死事件循环（100 素材时 accept 队列溢出，见 F04 复测）。
+            return await state.projects.resolve_asset_path_async(asset_id)
         except DomainError as exc:
             raise _domain(exc) from exc
 

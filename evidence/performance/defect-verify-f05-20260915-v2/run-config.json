@@ -1,0 +1,28 @@
+{
+  "scenarios": [
+    "F05"
+  ],
+  "runs": "5",
+  "seeks": "100",
+  "playback-seconds": "300",
+  "smoke": false,
+  "seed": "20260908",
+  "export_base": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\performance\\defect-verify-f05-20260915-v2\\exports",
+  "baseline_status": "partial-B00-not-G0",
+  "commit": "938d9ef0e17181fd0e65f49b9526935c0e2e605b",
+  "code_fingerprint": "70c84a03f3ab368bd9d8ebdef3cbd881ccd8bb60a88274497dc0ca67e5a66092",
+  "dirty_files": "M apps/desktop/e2e/performance-editor.spec.ts\n M apps/desktop/electron/main/index.ts\n M apps/desktop/electron/main/performance-ipc.ts\n M apps/desktop/electron/main/sidecar-supervisor.ts\n M apps/desktop/src/app/App.tsx\n M apps/desktop/src/app/preview/SyntheticPreview.tsx\n M apps/desktop/src/app/request-scheduling.ts\n M services/core/src/aivs_core/app.py\n M services/core/src/aivs_core/projects.py\n M services/core/src/aivs_core/rendering/service.py\n M services/core/tests/integration/test_render_cancel_real.py\n M tools/performance/make_fixtures.py\n?? apps/desktop/tests/synthetic-tickets-gate.test.tsx\n?? evidence/performance/defect-verify-f04-20260915-v10/\n?? evidence/performance/defect-verify-f04-20260915-v2/\n?? evidence/performance/defect-verify-f04-20260915-v3/\n?? evidence/performance/defect-verify-f04-20260915-v4/\n?? evidence/performance/defect-verify-f04-20260915-v5/\n?? evidence/performance/defect-verify-f04-20260915-v6/\n?? evidence/performance/defect-verify-f04-20260915-v7/\n?? evidence/performance/defect-verify-f04-20260915-v8/\n?? evidence/performance/defect-verify-f04-20260915-v9/\n?? evidence/performance/defect-verify-f04-20260915/\n?? evidence/performance/defect-verify-f04-smoke/\n?? evidence/performance/defect-verify-f04-smoke10/\n?? evidence/performance/defect-verify-f04-smoke11/\n?? evidence/performance/defect-verify-f04-smoke2/\n?? evidence/performance/defect-verify-f04-smoke3/\n?? evidence/performance/defect-verify-f04-smoke4/\n?? evidence/performance/defect-verify-f04-smoke5/\n?? evidence/performance/defect-verify-f04-smoke6/\n?? evidence/performance/defect-verify-f04-smoke7/\n?? evidence/performance/defect-verify-f04-smoke8/\n?? evidence/performance/defect-verify-f04-smoke9/\n?? evidence/performance/defect-verify-f05-20260915/\n?? evidence/performance/defect-verify-f05-fixtures-20260915/\n?? evidence/performance/defect-verify-f07-smoke/\n?? evidence/performance/defect-verify-f07-smoke2/\n?? evidence/performance/defect-verify-fixtures-20260915/",
+  "node": "v24.19.0",
+  "fixtures_used": [
+    {
+      "file": "F05.mp4",
+      "sha256": "10cb2a2d743f3d97620b94f00336896dca6018e17ba3d7ade4520730e533201e",
+      "duration_s": 12,
+      "size": "3840x2160",
+      "fps": 60,
+      "recipe": "testsrc2-av-cfr-v1",
+      "bytes": 17517056,
+      "coverage_note": "Media only; not historical PiP, VFR/B-frame, multilayer or audio-failure coverage."
+    }
+  ]
+}

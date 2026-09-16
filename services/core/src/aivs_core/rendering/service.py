@@ -172,6 +172,16 @@ class DirectoryGrantStore:
         return {key: grant[key] for key in ("directory_grant_id", "display_name", "expires_at")}
 
 
+async def _compile_off_loop(compiler: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    """compile 在线程池执行（F04 100 素材复测根因修复）：_compile_document
+    对每个 clip 做一次同步 SQLite SELECT + plan 构建，全部在事件循环上执行时
+    （百 clip 级 + WAL 写锁竞争）accept 停滞数秒 → backlog 溢出 → 后续连接
+    ECONNREFUSED。编译无共享可变状态（每次新建连接、plan 为局部量），
+    to_thread 语义等价；导入/投影并发下同项目重复 compile 的幂等性与
+    单线程顺序一致（DB 读 + 纯函数）。"""
+    return await asyncio.to_thread(compiler.compile, *args, **kwargs)
+
+
 class RenderCoordinator:
     def __init__(
         self,
@@ -211,6 +221,9 @@ class RenderCoordinator:
         # C20b：v2 manifest/全量帧 bundle 缓存（帧表体量大，LRU 2 条）。
         self.preview_ir_v2_cache: dict[str, dict[str, Any]] = {}
 
+    async def _compile_off_loop(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return await _compile_off_loop(self.compiler, *args, **kwargs)
+
     async def _probe(self, path: Path, fingerprint: str | None = None) -> dict[str, Any]:
         """A07：优先走注入的缓存探测通道。
 
@@ -232,8 +245,8 @@ class RenderCoordinator:
         """合成预览 IR（preview-ir-v1）：compile → ffprobe → 投影（后台执行）。
         A05b：投影段经 IrProjectExecutor（single-flight + 默认后台线程；
         AIVS_IR_PROCESS_POOL=1 时 spawn 进程池——冻结构建未验证即拒绝）。"""
-        plan = self.compiler.compile(project_id, timeline_revision_id,
-                                     "authoritative_preview", output_ratio=output_ratio)
+        plan = await self._compile_off_loop(project_id, timeline_revision_id,
+                                            "authoritative_preview", output_ratio=output_ratio)
         fingerprint = plan["content_fingerprint"]
         cached = self.preview_ir_cache.get(fingerprint)
         if cached is not None:
@@ -257,7 +270,9 @@ class RenderCoordinator:
         for item in plan["inputs"]:
             key = str(item["fingerprint"])
             if key not in self.preview_probe_cache:
-                path = Path(self.projects.resolve_asset_path(item["asset_id"])["path"])
+                # 异步解析：同步 resolve 含全文件 SHA-256，在事件循环上逐个执行
+                # 会堵死 accept（100 素材投影实测）；线程池版本语义不变。
+                path = Path((await self.projects.resolve_asset_path_async(item["asset_id"]))["path"])
                 # A07：经会话缓存的 probe（键含 fingerprint+stat+build）；
                 # 同素材跨 revision 的 IR 重建复用同一次探测结果。
                 self.preview_probe_cache[key] = await self._probe(
@@ -312,8 +327,8 @@ class RenderCoordinator:
                             output_ratio: str) -> dict[str, Any]:
         """manifest+全量帧的会话缓存（键 = content_fingerprint；LRU 2 条——
         帧表体量大，与 v1 缓存（4 条）分池）。"""
-        plan = self.compiler.compile(project_id, timeline_revision_id,
-                                     "authoritative_preview", output_ratio=output_ratio)
+        plan = await self._compile_off_loop(project_id, timeline_revision_id,
+                                            "authoritative_preview", output_ratio=output_ratio)
         fingerprint = plan["content_fingerprint"]
         cached = self.preview_ir_v2_cache.get(fingerprint)
         if cached is not None:
@@ -383,15 +398,17 @@ class RenderCoordinator:
         rendition_snapshot_id = payload.get("rendition_snapshot_id")
         reframe_snapshot_id = payload.get("rendition_reframe_snapshot_id")
         if isinstance(reframe_snapshot_id, str):
-            plan = self.compiler.compile_reframe(
+            plan = await asyncio.to_thread(
+                self.compiler.compile_reframe,
                 row["project_id"], row["timeline_revision_id"], reframe_snapshot_id, mode
             )
         elif isinstance(rendition_snapshot_id, str):
-            plan = self.compiler.compile_rendition(
+            plan = await asyncio.to_thread(
+                self.compiler.compile_rendition,
                 row["project_id"], row["timeline_revision_id"], rendition_snapshot_id, mode
             )
         else:
-            plan = self.compiler.compile(
+            plan = await self._compile_off_loop(
                 row["project_id"],
                 row["timeline_revision_id"],
                 mode,
@@ -402,10 +419,12 @@ class RenderCoordinator:
         stage("preparing")
         if phase is not None:
             phase("preparing", None)  # 准备耗时组成复杂，诚实显示不定进度
-        input_paths = {
-            item["input_id"]: Path(self.projects.resolve_asset_path(item["asset_id"])["path"])
-            for item in plan["inputs"]
-        }
+        # 异步解析（同 _project_plan）：同步版含全文件 SHA-256，多输入时逐个
+        # 阻塞事件循环。此处按输入顺序 await，语义与同步版一致。
+        input_paths: dict[str, Path] = {}
+        for item in plan["inputs"]:
+            resolved = await self.projects.resolve_asset_path_async(item["asset_id"])
+            input_paths[item["input_id"]] = Path(resolved["path"])
         # A07：segment probes 按唯一 input 去重（900 同源切段 = 1 个 input →
         # 1 次 ffprobe），再映射回 segment 顺序；探测走会话缓存通道。
         probe_by_input: dict[str, dict[str, Any]] = {}
@@ -719,7 +738,8 @@ class RenderService:
         output_ratio: str = "fit",
     ) -> dict[str, Any]:
         encoder_mode = _encoder_mode(encoder_mode)
-        plan = self.compiler.compile(
+        plan = await _compile_off_loop(
+            self.compiler,
             project_id,
             timeline_revision_id,
             "authoritative_preview",
@@ -752,7 +772,8 @@ class RenderService:
         encoder_mode: str,
     ) -> dict[str, Any]:
         encoder_mode = _encoder_mode(encoder_mode)
-        plan = self.compiler.compile_rendition(
+        plan = await asyncio.to_thread(
+            self.compiler.compile_rendition,
             project_id,
             timeline_revision_id,
             rendition_snapshot_id,
@@ -785,7 +806,8 @@ class RenderService:
         encoder_mode: str,
     ) -> dict[str, Any]:
         encoder_mode = _encoder_mode(encoder_mode)
-        plan = self.compiler.compile_reframe(
+        plan = await asyncio.to_thread(
+            self.compiler.compile_reframe,
             project_id,
             timeline_revision_id,
             reframe_snapshot_id,
@@ -829,8 +851,8 @@ class RenderService:
         output_ratio: str = "fit",
     ) -> dict[str, Any]:
         encoder_mode = _encoder_mode(encoder_mode)
-        plan = self.compiler.compile(
-            project_id, timeline_revision_id, "final_export", output_ratio=output_ratio
+        plan = await _compile_off_loop(
+            self.compiler, project_id, timeline_revision_id, "final_export", output_ratio=output_ratio
         )
         encoder, fallback = await self.encoders.choose(encoder_mode)
         toolchain = await self._toolchain(encoder, fallback)

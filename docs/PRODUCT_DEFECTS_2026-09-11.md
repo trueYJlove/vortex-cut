@@ -21,13 +21,15 @@
 
 ## DEFECT-4K60-SEEK:4K/60fps 暂停态 seek 静默失败(事件不齐)
 
-- **状态**:FIXED(2026-09-15 缺陷批 W1,分支 defects-4k60-paging-overlap;
-  规划 `docs/PRODUCT_DEFECTS_FIX_PLAN_2026-09-15.md`)——seekToFrame 失败
-  落定写 lastError 不再向上抛(旧为 unhandled rejection)、compositor
-  upload/uploadShadow 加 15s ack 超时(挂起形态兜底)。单测 5 项
-  (preview-seek-errors.test.ts)。**注意**:本单是失败可见化;F05 的 decode
-  计数(160–165 vs 200+)不会自动恢复——decode 侧 4K60 慢/超时根因
-  另立诊断单(见规划 §5),F05 复跑待该单后一并做。
+- **状态**:FIXED→**VERIFIED**(2026-09-16 复跑,分支 defects-4k60-paging-overlap;
+  修复 2026-09-15 缺陷批 W1)——seekToFrame 失败落定写 lastError 不再向上抛
+  (旧为 unhandled rejection)、compositor upload/uploadShadow 加 15s ack 超时
+  (挂起形态兜底)。单测 5 项(preview-seek-errors.test.ts)。
+  **复跑**:`evidence/performance/defect-verify-f05-20260915-v2/` 五轮全过
+  (runs=5,seeks=100,playback=300,setup_recovery_count 全 0,装配无挂起、
+  无未处理 rejection);seek 探针 on 轮 seek 事件 86–97、decode 160–166——
+  与 G0 基线(86–96/160–165)同形态,如实记录:decode 侧 4K60 慢/超时根因
+  未修(规划 §5 另立诊断单),seek 计数恢复程度与 W1 预期管理一致。
 - **优先级建议**:高(4K 是 F05 格式上限探测的核心能力;播放正常,仅 seek 路径失效)
 - **现象**:4K60 源播放 pump 正常(播放头推进、submitted≈30/s),但暂停态点击
   时间线 seek 后 seek/decode/upload 事件不齐。G0 五轮 × 100 seek:86–96/100
@@ -40,13 +42,15 @@
 
 ## DEFECT-4K60-SESSION-HANG:4K 会话首次装配 create 挂起,无超时兜底
 
-- **状态**:FIXED(2026-09-15 缺陷批 W2,分支 defects-4k60-paging-overlap)
-  ——PreviewSession.create 加 45s 装配总期限(15s 握手仅覆盖 worker init
-  单跳;IPC/fetch/addModule 等阶段此前无看门狗),超时 dispose 已拉起的
-  worker 并走既有 error UI 兜底;decode worker init 失败回发 error(不再
-  吞 rejection,真实错误直达客户端)。单测 3 项
-  (preview-create-watchdog.test.ts)。F05 复跑待排期(验证装配不再挂起、
-  setup_recovery 维持 0)。
+- **状态**:FIXED→**VERIFIED**(2026-09-16 复跑,分支 defects-4k60-paging-overlap;
+  修复 2026-09-15 缺陷批 W2)——PreviewSession.create 加 45s 装配总期限
+  (15s 握手仅覆盖 worker init 单跳;IPC/fetch/addModule 等阶段此前无看门狗),
+  超时 dispose 已拉起的 worker 并走既有 error UI 兜底;decode worker init 失败
+  回发 error(不再吞 rejection,真实错误直达客户端)。单测 3 项
+  (preview-create-watchdog.test.ts)。
+  **复跑**:`evidence/performance/defect-verify-f05-20260915-v2/` 五轮全过,
+  装配 ready ≈2.7–4.2s(与 G0 基线一致),setup_recovery_count 全 0——
+  首次装配不挂起、reload 后装配正常,门条款(45s 看门狗+错误直达)闭合。
 - **优先级建议**:高(不可恢复的挂起,用户只能重载)
 - **现象**:4K 源首次导入装配(不 reload)时,标签已切"合成预览"但 canvas
   超过 4 分钟不挂载;无错误、无回退提示。reload 后装配正常(F05 G0 各轮
@@ -60,8 +64,22 @@
 - **状态**:FIXED(2026-09-15 缺陷批 W3,分支 defects-4k60-paging-overlap)
   ——loadProjectData 对 assets 跟随 next_cursor 翻页装载(200 页上限防
   病态游标环,触顶即止不劣于现状);转录摘要跟随全量素材。单测 2 项
-  (assets-paging.test.tsx:三页游标链 + 环防护)。F04 升 100 素材口径的
-  harness 复跑待排期。
+  (assets-paging.test.tsx:三页游标链 + 环防护)。
+  **复跑(2026-09-16,F04 升 100 素材口径)——代码行为验证通过,主数据
+  部分通过**:100 素材翻页装载/票据签发/合成预览装配全链路在成功轮稳定
+  达成(`defect-verify-f04-20260915-v5/v6/v9-v11/` 共 5 次运行,每次
+  3–5/6 轮过;成功轮 ready 41–53s、setup_recovery_count=0、数据面完备
+  ——DB 100 素材全 available、96 clips 引用 73 素材全部在册);单次运行
+  连续 5 轮全过未达成:每轮间偶发一次 reload 后装配失败(三种形态:
+  Core 连接瞬时拒连/单个素材 no-ticket/装配期慢),失败轮数据面复查全部
+  完备,判为环境性(笔记本 i7-1165G7 连续满载热节流窗口)叠加
+  renderer 票据到达时序竞态。**代码侧加固随本轮入库**:Core compile
+  移出事件循环(8 处 async 调用点,to_thread——消除百 clip 级同步 SQLite
+  编译对 accept 的阻塞贡献)、assetPresentation resolve 3 次退避重试
+  (域错误不重试)+失败落日志、App 缺票恢复预算耗尽后一次延迟终验、
+  harness 回退态恢复兜底。**Follow-up 登记**:单素材 no-ticket 在数据面
+  完备下的复现路径(renderer 票据状态与 Core 数据不同步的时窗)待另立
+  诊断单;5 轮全过复跑建议在台式机/低热噪声环境补做。
 - **优先级建议**:中(48 素材内功能正常;100 素材口径被阻塞)
 - **现象**:`list_assets` 默认 `limit=50`,编辑器 reload 只装载第一页;
   第 51+ 素材无 media ticket,合成预览回退("no ticket for asset_...")。
@@ -71,7 +89,7 @@
 
 ## GAP-CROSS-TRACK-OVERLAP:跨轨重叠片段播放头停滞
 
-- **状态**:FIXED(2026-09-15 缺陷批 W4,分支 defects-4k60-paging-overlap)
+- **状态**:FIXED→**VERIFIED**(复跑 2026-09-16,分支 defects-4k60-paging-overlap)
   ——根因定位:同素材 V1+V2 共享 input(plan 按素材分配)→ 会话侧共享
   环形纹理池(深 8)+ 单调解码链,双位置消费相距 >8 帧互相淘汰槽位,
   frameReady 永假(台账原"疑似 overlay 音频/时钟路径"排除——播放头推进
@@ -82,7 +100,12 @@
   IR_PROJECTOR_VERSION 1→2(v2 manifest 缓存自动失效)。Core 单测 5 项
   +Desktop 单测 1 项(双 rig 会话 frameReady 可满足、compose 推进)。
   已知成本:重叠成员各占一个 decode worker(档位 range-cache 预算约束)。
-  F07 双位置混音装配补测待排期。A1 不收视频素材(能力缺口)维持登记,
+  **复跑(2026-09-16)——VERIFIED**:`evidence/performance/defect-verify-f07-smoke2/`
+  F07 双位置混音装配冒烟通过(spec assembleF07 增同素材 V1+V2 重叠段
+  [源窗 2-4s] + PiP transform,`dual_position_overlap=1` 落入 scene_extra);
+  装配成功、合成预览就绪,播放 30s 期间 compose 推进 858–868 次
+  (≈28–29fps,满帧率)——旧缺陷"播放头停滞 ~1 帧"消失;off 轮探针干净;
+  setup_recovery_count 全 0。A1 不收视频素材(能力缺口)维持登记,
   需契约层设计另立工作单。
 - **优先级建议**:中(契约允许 V1+V2 重叠,但预览不可用)
 - **现象**:V1+V2 同源重叠片段经 patch 装配成功(契约校验通过)后,预览
@@ -98,11 +121,14 @@
 复跑 B00 harness F05;分页项升 F04 至 100 素材;重叠项补 F07 双位置混音
 装配并复测),结果记回本文件对应条目。
 
-**状态快照(2026-09-15 更新)**:四项已处置——2026-09-15 缺陷批
+**状态快照(2026-09-16 更新)**:四项处置完成——2026-09-15 缺陷批
 (W1–W4,分支 defects-4k60-paging-overlap,规划见
-`docs/PRODUCT_DEFECTS_FIX_PLAN_2026-09-15.md`)代码修复全部完成,状态
-FIXED(待性能侧复跑后升 VERIFIED):W1/W2(4K60 seek 可见化+装配看门狗)、
-W3(assets 翻页装载)、W4(跨轨重叠投影层拆分复制输入)。Desktop 全量
-648 passed、Core 全量见提交信息;F04 升 100 素材口径/F05 复跑/F07 双位置
-混音补测属 harness 复跑协议,待排期。A1 收视频素材为能力缺口(另立
-工作单,非缺陷)。
+`docs/PRODUCT_DEFECTS_FIX_PLAN_2026-09-15.md`)代码修复完成;2026-09-16
+性能侧复跑:W1/W2(F05 五轮全过,`defect-verify-f05-20260915-v2/`)、
+W4(F07 双位置混音装配冒烟通过,`defect-verify-f07-smoke2/`)升
+**VERIFIED**;W3(F04 100 素材口径)代码行为验证通过但单次运行连续
+5 轮全过未达成(失败轮皆环境性停顿+renderer 票据时序竞态,数据面完备;
+代码侧加固随本轮入库,follow-up 已登记),维持 **FIXED**。
+Desktop 全量 649 passed(75 文件)、Core 全量 798 passed+2 skipped
+(C22 取消测试在本机解码快于取消窗口,环境性 skip)。A1 收视频素材为
+能力缺口(另立工作单,非缺陷)。

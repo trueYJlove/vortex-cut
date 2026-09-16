@@ -1,0 +1,40 @@
+{
+  "runs": "2",
+  "seeks": "20",
+  "playback-seconds": "30",
+  "smoke": true,
+  "scenarios": [
+    "F07"
+  ],
+  "seed": "20260908",
+  "export_base": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\performance\\defect-verify-f07-smoke\\exports",
+  "baseline_status": "smoke-only-not-G0",
+  "commit": "938d9ef0e17181fd0e65f49b9526935c0e2e605b",
+  "code_fingerprint": "3030f349bee2b72e55fe188fe95596ba2072b1a83d985fdec9a81be997b6ef9a",
+  "dirty_files": "M apps/desktop/e2e/performance-editor.spec.ts\n M apps/desktop/electron/main/index.ts\n M apps/desktop/electron/main/performance-ipc.ts\n M apps/desktop/electron/main/sidecar-supervisor.ts\n M apps/desktop/src/app/App.tsx\n M services/core/src/aivs_core/app.py\n M services/core/src/aivs_core/projects.py\n M services/core/src/aivs_core/rendering/service.py\n M tools/performance/make_fixtures.py\n?? apps/desktop/tests/synthetic-tickets-gate.test.tsx\n?? evidence/performance/defect-verify-f04-20260915/\n?? evidence/performance/defect-verify-f04-smoke/\n?? evidence/performance/defect-verify-f04-smoke2/\n?? evidence/performance/defect-verify-f04-smoke3/\n?? evidence/performance/defect-verify-f04-smoke4/\n?? evidence/performance/defect-verify-f04-smoke5/\n?? evidence/performance/defect-verify-f04-smoke6/\n?? evidence/performance/defect-verify-f04-smoke7/\n?? evidence/performance/defect-verify-f05-fixtures-20260915/\n?? evidence/performance/defect-verify-fixtures-20260915/",
+  "node": "v24.19.0",
+  "fixtures_used": [
+    {
+      "files": [
+        {
+          "file": "F07.mp4",
+          "sha256": "4e51be3e3a70ba5192f2b682ed50545cfe111ec22857366f8b54876ee1c8d5b0",
+          "duration_s": 12,
+          "bytes": 3123032
+        },
+        {
+          "file": "F07-mute.mp4",
+          "sha256": "ee4d4de30d74f182f23bc5c675bfe8cdd7aeaefd3a2180e95c85c48873d5bfe0",
+          "duration_s": 12,
+          "bytes": 3009426,
+          "audio": "none"
+        }
+      ],
+      "size": "640x360",
+      "fps": 30,
+      "recipe": "testsrc2-av-cfr-multiv1",
+      "bytes": 6132458,
+      "coverage_note": "Distinct short media family; scene assembly (tracks/transforms/captions) is declared by the benchmark spec, not by media generation."
+    }
+  ]
+}

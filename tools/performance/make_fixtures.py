@@ -23,15 +23,14 @@ SINGLE_RECIPE = "testsrc2-av-cfr-v1"
 
 def _multi_files(scenario: str, seed: int) -> list[dict]:
     if scenario == "F04":
-        # 48 distinct short assets: duration and tone vary per index so every
+        # 100 distinct short assets: duration and tone vary per index so every
         # file has a unique fingerprint (project import rejects duplicates).
-        # 48 (not 100): Core list_assets defaults to limit=50 and the editor
-        # loads only the first page after reload — assets beyond the page lose
-        # their media tickets and synthetic preview falls back. Registered as a
-        # product pagination gap; scale up to 100 once the editor pages assets.
+        # 2026-09-15 GAP-LIST-ASSETS-PAGING 修复后升到 100（旧 48 上限是
+        # editor 只装载 list_assets 第一页的产品分页缺口；现在翻页装载，
+        # 复测口径恢复计划原设的 100 素材）。
         return [
-            {"file": f"F04-{index:02d}.mp4", "duration": 12 + index * 0.05, "audio_freq": 440 + index}
-            for index in range(48)
+            {"file": f"F04-{index:03d}.mp4", "duration": 12 + index * 0.05, "audio_freq": 440 + index}
+            for index in range(100)
         ]
     if scenario == "F07":
         # Speed matrix needs an audible av source plus a video-only source
@@ -84,11 +83,14 @@ def main():
         else:
             recipe_files = _multi_files(scenario, args.seed)
         entries = []
+        # 多文件场景（F04/F07）固定 640x360@30（与既有 manifest 的族级
+        # size/fps 字段一致）；单文件场景取 SINGLES。
+        if scenario in SINGLES:
+            size, fps = SINGLES[scenario][1], SINGLES[scenario][2]
+        else:
+            size, fps = "640x360", 30
         for spec in recipe_files:
             target = output / spec["file"]
-            # 单文件场景尺寸/帧率取自 SINGLES（原实现硬编码 640x360 仅 F05
-            # 例外；重构后 F01/F02/F03 输出逐字节不变，F02P 得到 320x180）。
-            size, fps = SINGLES[scenario][1], SINGLES[scenario][2]
             command = [
                 str(ffmpeg),
                 "-nostdin",

@@ -220,7 +220,16 @@ export class BoundedTaskQueue<T> {
         continue;
       }
       this.activeCount += 1;
-      void item.task().then(value => {
+      // task() 恒应返回 Promise；测试在任务排队期间 restoreAllMocks 会让迟到
+      // 的 mock 调用返回 undefined——按跳过处理，不让队列挂起或抛未接 rejection。
+      const result = item.task() as Promise<T> | undefined;
+      if (!result || typeof result.then !== "function") {
+        this.activeCount -= 1;
+        item.resolve(this.skipped);
+        void this.drain();
+        continue;
+      }
+      void result.then(value => {
         this.activeCount -= 1;
         item.resolve(item.generation === this.generation ? value : this.skipped);
         void this.drain();

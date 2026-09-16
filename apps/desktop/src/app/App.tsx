@@ -353,6 +353,8 @@ export function App() {
   // （正文由 viewTranscript 选中时加载，旧内容按项目代次作废不写入新状态）。
   const projectDataEpochRef = useRef(0);
   const transcriptQueueRef = useRef<BoundedTaskQueue<Transcript> | null>(null);
+  /** 转录摘要分页（listTranscripts）专用队列：与正文队列分开类型，同样 ≤4 并发。 */
+  const transcriptSummaryQueueRef = useRef<BoundedTaskQueue<{ items: TranscriptSummary[] }> | null>(null);
   const loadProjectData = async (selected: Project) => {
     // GAP-LIST-ASSETS-PAGING：assets 跟随 next_cursor 翻页装载（Core 默认
     // limit=50，旧实现只取第一页——第 51+ 素材无 media ticket，合成预览回退
@@ -372,14 +374,18 @@ export function App() {
     const [assetsAll, jobPage] = await Promise.all([listAllAssets(selected.project_id), window.desktop.listJobs({ project_id: selected.project_id })]);
     const epoch = ++projectDataEpochRef.current;
     setAssets(assetsAll); setJobs(jobPage.items);
-    // 转录摘要：每素材一次 listTranscripts（并发受限 ≤4，epoch 作废旧返回）。
-    const queue = transcriptQueueRef.current ??= new BoundedTaskQueue<Transcript>(4);
-    const pairs = await Promise.all(assetsAll.filter(item => isTranscribable(item.asset)).map(async item => {
-      const summaryPage = await window.desktop.listTranscripts(item.asset.asset_id);
-      return [item.asset.asset_id, summaryPage.items] as const;
+    // 转录摘要：每素材一次 listTranscripts——必须经有界队列（≤4 并发）。旧实现
+    // 直接 Promise.all 对全部素材并发（100 素材 = 100 个并发 HTTP），会在项目
+    // 装载瞬间打满本地 Core 的 accept 队列，同刻发出的 manifest 请求被
+    // ECONNREFUSED（F04 复测现场）。此处落实注释承诺的"并发受限 ≤4"。
+    const queue = transcriptSummaryQueueRef.current ??= new BoundedTaskQueue<{ items: TranscriptSummary[] }>(4);
+    const summaries = await Promise.all(assetsAll.filter(item => isTranscribable(item.asset)).map(async item => {
+      const summaryPage = await queue.push(() => window.desktop.listTranscripts(item.asset.asset_id));
+      if (typeof summaryPage === "symbol") return null; // 代次过期：丢弃
+      return [String(item.asset.asset_id), summaryPage.items] as const;
     }));
     if (epoch !== projectDataEpochRef.current) return; // 切项目：旧返回作废
-    setTranscriptSummaries(Object.fromEntries(pairs));
+    setTranscriptSummaries(Object.fromEntries(summaries.filter((entry): entry is readonly [string, TranscriptSummary[]] => entry !== null)));
   };
   const loadRenderData = async (selected: Project) => {
     const [previewPage, exportPage] = await Promise.all([
@@ -516,6 +522,7 @@ export function App() {
     // A08：切项目推进转录队列代次——在途 getTranscript 的旧返回不再写入
     // 新项目状态（viewTranscript 按 epoch 丢弃）；已缓存正文随项目清空。
     transcriptQueueRef.current?.advanceGeneration();
+    transcriptSummaryQueueRef.current?.advanceGeneration();
     setTranscripts({});
     setViewingTranscript(undefined);
     void loadProjectData(project).catch(error => active && showNotice(safeErrorMessage(error, "项目数据加载失败，请刷新后重试。")));
@@ -871,6 +878,44 @@ export function App() {
     () => (working?.clips ?? []).filter(clip => clip.track_id !== "V1" && clip.track_id !== "A1" && clip.asset_kind !== "audio").map(clip => ({ clipId: clip.clip_id, transform: { x: clip.transform?.x, y: clip.transform?.y, scale: clip.transform?.scale, rotate: clip.transform?.rotate, opacity: clip.transform?.opacity }, mask: clip.mask ?? undefined })),
     [working],
   );
+  // GAP-LIST-ASSETS-PAGING 后续（2026-09-15 F04 复测暴露）：100 素材翻页装载
+  // 时窗内 working/timeline 先到位 → SyntheticPreview 以空 mediaUrls 建会话
+  // → "no ticket" 回退并卸载组件，此后票据到位也无人重挂。修法 = 两段：
+  // (a) SyntheticPreview 侧 mediaUrls 进会话重建依赖（票据变更即重建）；
+  // (b) 此处对"缺票据"型回退做自动恢复——票据齐备即切回合成预览。
+  // 挂载不设门槛：门槛会把"素材库未就绪"变成永久挂起（F07 复测暴露）。
+  const syntheticTicketsReady = useMemo(
+    () => Boolean(working) && working!.clips.every(clip => syntheticMediaUrls.has(clip.asset_id)),
+    [working, syntheticMediaUrls],
+  );
+  const noTicketRetryRef = useRef(0);
+  const noTicketFinalRetryRef = useRef(false);
+  useEffect(() => {
+    // 仅恢复"缺票据"回退；其余回退（子集不支持/WebGL 不可用等）保持交互预览，
+    // 否则会与真实失败形成重试环。
+    if (previewMode !== "interactive" || !syntheticNotice?.includes("no ticket")) return;
+    if (syntheticTicketsReady) {
+      setSyntheticNotice(null);
+      setPreviewMode("synthetic");
+      return;
+    }
+    // 票据签发是瞬时操作，而 assetPresentation 会把失败的 resolveAsset 折成
+    // media_url=null 且不重试——缺票因此永久化（F04 复测现场）。此处重取一次
+    // 素材列表（重新签发全部票据）；有界 3 次，避免与真实失败形成重试环。
+    if (!project) return;
+    if (noTicketRetryRef.current >= 3) {
+      // 预算耗尽后一次延迟终验：前 3 次重取可能全部撞上 Core 瞬时抖动而整页
+      // 缺票；5s 后（退避覆盖抖动窗）做第 4 次也是最后一次重取，票据到位则
+      // 恢复，否则如实停在回退态（不再环）。
+      if (noTicketFinalRetryRef.current) return;
+      noTicketFinalRetryRef.current = true;
+      const timer = window.setTimeout(() => { void loadProjectData(project).catch(() => undefined); }, 5000);
+      return () => window.clearTimeout(timer);
+    }
+    noTicketRetryRef.current += 1;
+    void loadProjectData(project).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewMode, syntheticNotice, syntheticTicketsReady, project?.project_id]);
 
   const acceptState = (next: TimelineState) => { timelineLoadEpoch.current += 1; setTimeline(next); setWorking(next.current_revision.document); setSaveState("已保存"); setNotice(""); };
   // 提示条统一入口：显式分级（默认错误红色），并在数秒后自动消失；连续提示会重置计时。

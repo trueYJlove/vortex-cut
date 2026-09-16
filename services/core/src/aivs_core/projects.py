@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -491,6 +492,13 @@ class ProjectAssetService:
             self._mark_transcripts_stale(asset_id, fingerprint)
             raise DomainError("ASSET_CHANGED", "素材文件已变化")
         return {"asset_id": asset_id, "path": str(path)}
+
+    async def resolve_asset_path_async(self, asset_id: str) -> dict[str, str]:
+        """异步入口：语义与 resolve_asset_path 逐位一致（含 stat 比对 + 指纹
+        校验），但整体在线程池执行。同步版本在事件循环上做全文件 SHA-256，
+        大素材/多素材投影时会把 accept 队列堵死（F04 100 素材复测实测：
+        manifest 投影期间后续请求被 ECONNREFUSED）。"""
+        return await asyncio.to_thread(self.resolve_asset_path, asset_id)
 
     async def relocate_asset(self, asset_id: str, grant: dict[str, Any]) -> dict[str, Any]:
         row = self._require_asset_row(asset_id)

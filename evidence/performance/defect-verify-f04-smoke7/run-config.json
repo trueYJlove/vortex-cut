@@ -1,0 +1,627 @@
+{
+  "runs": "3",
+  "seeks": "10",
+  "playback-seconds": "20",
+  "smoke": true,
+  "scenarios": [
+    "F04"
+  ],
+  "seed": "20260908",
+  "export_base": "C:\\DataFolder\\codes\\AI-Vidio\\evidence\\performance\\defect-verify-f04-smoke7\\exports",
+  "baseline_status": "smoke-only-not-G0",
+  "commit": "938d9ef0e17181fd0e65f49b9526935c0e2e605b",
+  "code_fingerprint": "3030f349bee2b72e55fe188fe95596ba2072b1a83d985fdec9a81be997b6ef9a",
+  "dirty_files": "M apps/desktop/e2e/performance-editor.spec.ts\n M apps/desktop/electron/main/index.ts\n M apps/desktop/electron/main/performance-ipc.ts\n M apps/desktop/electron/main/sidecar-supervisor.ts\n M apps/desktop/src/app/App.tsx\n M services/core/src/aivs_core/app.py\n M services/core/src/aivs_core/projects.py\n M services/core/src/aivs_core/rendering/service.py\n M tools/performance/make_fixtures.py\n?? apps/desktop/tests/synthetic-tickets-gate.test.tsx\n?? evidence/performance/defect-verify-f04-20260915/\n?? evidence/performance/defect-verify-f04-smoke/\n?? evidence/performance/defect-verify-f04-smoke2/\n?? evidence/performance/defect-verify-f04-smoke3/\n?? evidence/performance/defect-verify-f04-smoke4/\n?? evidence/performance/defect-verify-f04-smoke5/\n?? evidence/performance/defect-verify-f04-smoke6/\n?? evidence/performance/defect-verify-f05-fixtures-20260915/\n?? evidence/performance/defect-verify-fixtures-20260915/",
+  "node": "v24.19.0",
+  "fixtures_used": [
+    {
+      "files": [
+        {
+          "file": "F04-000.mp4",
+          "sha256": "bc343236146f051d152fdb8b319c37a4fd0593067000f04b17784654a6d3127f",
+          "duration_s": 12,
+          "bytes": 3123038
+        },
+        {
+          "file": "F04-001.mp4",
+          "sha256": "778a44cca55eb0240aa2db810554c2ffeb31295b742695f932a8628c6de8c9e7",
+          "duration_s": 12.05,
+          "bytes": 3145603
+        },
+        {
+          "file": "F04-002.mp4",
+          "sha256": "68c288f97374b912335f4abb7d1fd4baf9b1a4e4051c514196a3dce1cf6a0613",
+          "duration_s": 12.1,
+          "bytes": 3154442
+        },
+        {
+          "file": "F04-003.mp4",
+          "sha256": "d3888f9e2e828c4ca624396b39ed220d366dd3498ac61043ce7b5a974ce4465f",
+          "duration_s": 12.15,
+          "bytes": 3171030
+        },
+        {
+          "file": "F04-004.mp4",
+          "sha256": "62a959f6b592e8ceb512c65b69ba14b5c630dc2ebc54d2196ecf348bf1d416f2",
+          "duration_s": 12.2,
+          "bytes": 3178741
+        },
+        {
+          "file": "F04-005.mp4",
+          "sha256": "3eb55cdeab86aabefe174944fb97522e88242a4ad435244143a893a6e2db4728",
+          "duration_s": 12.25,
+          "bytes": 3193853
+        },
+        {
+          "file": "F04-006.mp4",
+          "sha256": "eebbcad90d7bfa0a3e5ab672186bb2951b39cbb8a73e18ce3711594eac2dde85",
+          "duration_s": 12.3,
+          "bytes": 3201721
+        },
+        {
+          "file": "F04-007.mp4",
+          "sha256": "fd27178b82de65a460f4e4b51a45d140b644a38ba0b43b83fcdbb0e4229acca1",
+          "duration_s": 12.35,
+          "bytes": 3220465
+        },
+        {
+          "file": "F04-008.mp4",
+          "sha256": "aa1551eeb456180a3d4bace28a4285d753ebaa8c8220f81fa03f4f50f6eee0ae",
+          "duration_s": 12.4,
+          "bytes": 3229588
+        },
+        {
+          "file": "F04-009.mp4",
+          "sha256": "81cc22dd8cde77b6645d740aec369b395ec978cab7e65cc5b7d7fc11598944a4",
+          "duration_s": 12.45,
+          "bytes": 3247503
+        },
+        {
+          "file": "F04-010.mp4",
+          "sha256": "da28edb45f0e5fe5e4de123037596fdf6ee39ea0d1e0075e420a70beb9aab35f",
+          "duration_s": 12.5,
+          "bytes": 3256636
+        },
+        {
+          "file": "F04-011.mp4",
+          "sha256": "19642b28028d93a70ea3ffe9440cc11b7156b1f72e1e3e0c1f4aa500ec941c70",
+          "duration_s": 12.55,
+          "bytes": 3272475
+        },
+        {
+          "file": "F04-012.mp4",
+          "sha256": "dcdaeb467eb41bfbbb0948fb0ac3e7acb38943a370dcf011d8b2f43d2e4f5d79",
+          "duration_s": 12.6,
+          "bytes": 3282488
+        },
+        {
+          "file": "F04-013.mp4",
+          "sha256": "2eba5c849f5c728b1b868209aa9e6a4ac669dac80bf0493aa38914a6ecb2e78c",
+          "duration_s": 12.65,
+          "bytes": 3301697
+        },
+        {
+          "file": "F04-014.mp4",
+          "sha256": "45c7497452030cc3cab2021999dac29faa35360b8077f55551cc7f41d801d011",
+          "duration_s": 12.7,
+          "bytes": 3311465
+        },
+        {
+          "file": "F04-015.mp4",
+          "sha256": "674e5bb929408073e7966d254aea2eed7092cae3dbeecb1a2ebf34004bc846df",
+          "duration_s": 12.75,
+          "bytes": 3329751
+        },
+        {
+          "file": "F04-016.mp4",
+          "sha256": "bfcba88882c3b5cd51ec4f7c3d62ae04441ead993ead6f1e127795baa1e22f42",
+          "duration_s": 12.8,
+          "bytes": 3338115
+        },
+        {
+          "file": "F04-017.mp4",
+          "sha256": "7d980f8a2dc951cfcc47172459cb1bfbda7b6425993a7eb9e36a8fd68cfe04b0",
+          "duration_s": 12.85,
+          "bytes": 3357386
+        },
+        {
+          "file": "F04-018.mp4",
+          "sha256": "65d2addd5f19e9d0a4c01dcea270af88ef6d47d96acd485061c7ed9f3b5c373c",
+          "duration_s": 12.9,
+          "bytes": 3366864
+        },
+        {
+          "file": "F04-019.mp4",
+          "sha256": "4ec20e9728a0f9d636f4bd0d425a18f77072354f7b5795e989b6d50a7642ae24",
+          "duration_s": 12.95,
+          "bytes": 3383957
+        },
+        {
+          "file": "F04-020.mp4",
+          "sha256": "2e8d99976744a994a34dded16f50c8198d2db7af6d82793fde80c6efb57c742f",
+          "duration_s": 13,
+          "bytes": 3392634
+        },
+        {
+          "file": "F04-021.mp4",
+          "sha256": "4beaf5bc37dbd85822dfd79524c40da9d1f3b6946def51888e88c775c4203469",
+          "duration_s": 13.05,
+          "bytes": 3408311
+        },
+        {
+          "file": "F04-022.mp4",
+          "sha256": "4cf4fa69dd8fd714322b7a0741737ed91818a06a5e12ad698de599dceda6e641",
+          "duration_s": 13.1,
+          "bytes": 3417420
+        },
+        {
+          "file": "F04-023.mp4",
+          "sha256": "50af6cc1302717648df55103761afaed9e0e3a704366ce99030e84649619e93f",
+          "duration_s": 13.15,
+          "bytes": 3434122
+        },
+        {
+          "file": "F04-024.mp4",
+          "sha256": "5204aebac3093f42d3929913c84ac85f2aae2bf56e7d96f0dd5d62847e44a5ab",
+          "duration_s": 13.2,
+          "bytes": 3442307
+        },
+        {
+          "file": "F04-025.mp4",
+          "sha256": "c4353e3456c58bfb2be1050ae7a2117157ad3d8d957fc382eb40679db0f875c7",
+          "duration_s": 13.25,
+          "bytes": 3458422
+        },
+        {
+          "file": "F04-026.mp4",
+          "sha256": "65cc5cd751f42f8eccaee241f83e6029313be1ad6452bbdd70106c30ca346187",
+          "duration_s": 13.3,
+          "bytes": 3465703
+        },
+        {
+          "file": "F04-027.mp4",
+          "sha256": "7f4b33ce03941cc08be07dc8c58197472edf0782f930fdfc85b49808c6021ddd",
+          "duration_s": 13.35,
+          "bytes": 3481436
+        },
+        {
+          "file": "F04-028.mp4",
+          "sha256": "116490c6acc1208b8cb6cfaec88ad2fb7e55418b64c5c7eba93df35a5e3f2b1f",
+          "duration_s": 13.4,
+          "bytes": 3489659
+        },
+        {
+          "file": "F04-029.mp4",
+          "sha256": "df9b5481e560f238100a850aed725f6d1674330d3dfc8f6f59468b5d18cba4f5",
+          "duration_s": 13.45,
+          "bytes": 3505678
+        },
+        {
+          "file": "F04-030.mp4",
+          "sha256": "40ef7f3b06688788c6b477a846b97cfa4072d85d8dc026e5e9557540a33d5d1a",
+          "duration_s": 13.5,
+          "bytes": 3514349
+        },
+        {
+          "file": "F04-031.mp4",
+          "sha256": "e742f243e0b832a622a4db2737b4f7aad2df8fb4e5d6065f090513c10f22aede",
+          "duration_s": 13.55,
+          "bytes": 3530131
+        },
+        {
+          "file": "F04-032.mp4",
+          "sha256": "ab3a2ff3161af7ffe5d25a36c2d98ebcc3aaccb5f58748c4df010eb92289a832",
+          "duration_s": 13.6,
+          "bytes": 3538045
+        },
+        {
+          "file": "F04-033.mp4",
+          "sha256": "3db80fc9ddbde5bc3e9b37d87205f9ee48ec25bea3b0a182327768991f1f6024",
+          "duration_s": 13.65,
+          "bytes": 3553812
+        },
+        {
+          "file": "F04-034.mp4",
+          "sha256": "aacc688db369ccfee33a48c907649b84751cc83a87ea110b8c2b792414080b92",
+          "duration_s": 13.7,
+          "bytes": 3562614
+        },
+        {
+          "file": "F04-035.mp4",
+          "sha256": "7f1d21ab6866d94e2eac4d5932544472a34cb1424a6bfec2d7d1d0b510a732d9",
+          "duration_s": 13.75,
+          "bytes": 3578974
+        },
+        {
+          "file": "F04-036.mp4",
+          "sha256": "75b666069b9c846b0da36f5c8a09ae5792008497e7f0ade70052711391148fdb",
+          "duration_s": 13.8,
+          "bytes": 3586832
+        },
+        {
+          "file": "F04-037.mp4",
+          "sha256": "ed00cc24822e3942199c7c4ba20f22dcd653d94534a5915db0afb24b14c1015d",
+          "duration_s": 13.85,
+          "bytes": 3603560
+        },
+        {
+          "file": "F04-038.mp4",
+          "sha256": "8dc713625eb4dd6d4694ea4ab8d9528ac9924609d8009bdfe5b8273de3df5c88",
+          "duration_s": 13.9,
+          "bytes": 3612326
+        },
+        {
+          "file": "F04-039.mp4",
+          "sha256": "eb07f250e55fdd175348f1e2862c79fc34278fa6d03bc124eff49736ff61cc75",
+          "duration_s": 13.95,
+          "bytes": 3629193
+        },
+        {
+          "file": "F04-040.mp4",
+          "sha256": "5b841dcc7adf70dfba9ce09b1e786e02853becf3eb0eecbcae88f131b265b084",
+          "duration_s": 14,
+          "bytes": 3638774
+        },
+        {
+          "file": "F04-041.mp4",
+          "sha256": "ffef4c7b75bfa31eba84ad5e1676c6693fe6ca3be729946b6259a2795a809628",
+          "duration_s": 14.05,
+          "bytes": 3661768
+        },
+        {
+          "file": "F04-042.mp4",
+          "sha256": "175ff0848535780a5ab717909be4d921f22e8f8a2f2b04e06ac07473c94e2840",
+          "duration_s": 14.1,
+          "bytes": 3670781
+        },
+        {
+          "file": "F04-043.mp4",
+          "sha256": "cfb916d9a9232f31d7e577a1cc8e8f3c5c8122c44fe56823c522d57313d8b4c2",
+          "duration_s": 14.15,
+          "bytes": 3687851
+        },
+        {
+          "file": "F04-044.mp4",
+          "sha256": "c28b594434f93e20375d434ab809128a2c0c17285e02784963b313ad82e600b5",
+          "duration_s": 14.2,
+          "bytes": 3696446
+        },
+        {
+          "file": "F04-045.mp4",
+          "sha256": "edd558f44b3c61583cd42a5b8efd6e4fd112e0860acecdb1dd41b12eb7f85705",
+          "duration_s": 14.25,
+          "bytes": 3713040
+        },
+        {
+          "file": "F04-046.mp4",
+          "sha256": "7eddff313bcc223b8e6ba8c2a000877098e1652024267c0f57fe6f5388e9c34c",
+          "duration_s": 14.3,
+          "bytes": 3722153
+        },
+        {
+          "file": "F04-047.mp4",
+          "sha256": "206172b79cd188eae633cfeaa7848d47ef6ca8567fba9c849a8c10b85e07c286",
+          "duration_s": 14.35,
+          "bytes": 3742226
+        },
+        {
+          "file": "F04-048.mp4",
+          "sha256": "38ce8ede175e86ab9f55266e7c747ab8aa8a241e6deee2c4c10de0e673f07a67",
+          "duration_s": 14.4,
+          "bytes": 3751518
+        },
+        {
+          "file": "F04-049.mp4",
+          "sha256": "d6b693f132b0d33415914b24865cbc56a35b404eb673daafbf1b811587c3e69a",
+          "duration_s": 14.45,
+          "bytes": 3768175
+        },
+        {
+          "file": "F04-050.mp4",
+          "sha256": "e5f29288d85e9b223477a329a1c84d2b2a9efa5a2ee6f5385780ccf39e48253e",
+          "duration_s": 14.5,
+          "bytes": 3776950
+        },
+        {
+          "file": "F04-051.mp4",
+          "sha256": "5fe2e6b541e832295b1c642a22cf44d7c719e3140822a1004b6c5571426aab62",
+          "duration_s": 14.55,
+          "bytes": 3792223
+        },
+        {
+          "file": "F04-052.mp4",
+          "sha256": "f02292e3411fe034ab6cb3c26810d7abfde450681e1e1cb5dd4698e9b808cbce",
+          "duration_s": 14.6,
+          "bytes": 3802303
+        },
+        {
+          "file": "F04-053.mp4",
+          "sha256": "28c818c71f575f7bac929e10e2cff36b760113ee771ee66c9f10c66919ccffd5",
+          "duration_s": 14.65,
+          "bytes": 3819652
+        },
+        {
+          "file": "F04-054.mp4",
+          "sha256": "ea62df60f6687ed7b7f1f02f7838602a51aac5f560e63dc31ee5e54a21045fe8",
+          "duration_s": 14.7,
+          "bytes": 3828285
+        },
+        {
+          "file": "F04-055.mp4",
+          "sha256": "f1cdbbe9872ba4e44060b0021f316b484f38c23ad4667fcbde44c352327969ef",
+          "duration_s": 14.75,
+          "bytes": 3843546
+        },
+        {
+          "file": "F04-056.mp4",
+          "sha256": "1b6b8b6b2f492f4aa4d8df4d57662aa7c7305e682b49dc544172a7bd8be317d5",
+          "duration_s": 14.8,
+          "bytes": 3850410
+        },
+        {
+          "file": "F04-057.mp4",
+          "sha256": "c4eed049a111eb9a59019757201db1020ee024fb627e4a00c9e7c0c5dc9e8f6b",
+          "duration_s": 14.85,
+          "bytes": 3867732
+        },
+        {
+          "file": "F04-058.mp4",
+          "sha256": "c0c28700c777189ccceded0c87b0c3901a3de8794c0636d3f8841236accefd89",
+          "duration_s": 14.9,
+          "bytes": 3876024
+        },
+        {
+          "file": "F04-059.mp4",
+          "sha256": "82658402530f656cbb8a0d746817c5c1e93e6b4673381b6ff5c9739708c23209",
+          "duration_s": 14.95,
+          "bytes": 3893152
+        },
+        {
+          "file": "F04-060.mp4",
+          "sha256": "87308a02ebf53b674d7add65fc1191fdc405a41f8ca48157b2373c5764e6e91b",
+          "duration_s": 15,
+          "bytes": 3902475
+        },
+        {
+          "file": "F04-061.mp4",
+          "sha256": "41c0ba80f1f63d129e5a7f4687e9f5d9d5819356f7cef522ea5f5bd46a1fdc86",
+          "duration_s": 15.05,
+          "bytes": 3916993
+        },
+        {
+          "file": "F04-062.mp4",
+          "sha256": "b28cb4507f233677100ba048ee53265e89e6bd912697df4da85b0e41ff0da862",
+          "duration_s": 15.1,
+          "bytes": 3925027
+        },
+        {
+          "file": "F04-063.mp4",
+          "sha256": "ee0128027524ecee561c733d774a131f72934307f6dde99ea7f676e76c8e0a1e",
+          "duration_s": 15.15,
+          "bytes": 3941477
+        },
+        {
+          "file": "F04-064.mp4",
+          "sha256": "61a3d7d187cc8ce28333786ddefcaeda67c1dffa5aadb95af9ae22a3d800a55e",
+          "duration_s": 15.2,
+          "bytes": 3950034
+        },
+        {
+          "file": "F04-065.mp4",
+          "sha256": "bd5f32e68727ceb9192b85554387d02ad85db8902b2d6c5ab01285146aa3639d",
+          "duration_s": 15.25,
+          "bytes": 3967064
+        },
+        {
+          "file": "F04-066.mp4",
+          "sha256": "a75b332783460798f82a3c596e3df332c2530dda0e5b46f59d8b865786def975",
+          "duration_s": 15.3,
+          "bytes": 3976029
+        },
+        {
+          "file": "F04-067.mp4",
+          "sha256": "03551c1aff6a6c1c1a4a836ccc6823c8192c6f32e96de543d78331b5b8863e5f",
+          "duration_s": 15.35,
+          "bytes": 3994336
+        },
+        {
+          "file": "F04-068.mp4",
+          "sha256": "ea883d0110b98b570d2cef6bf4a266cedf03af77960e6fdc99fad9200f62c6b8",
+          "duration_s": 15.4,
+          "bytes": 4002878
+        },
+        {
+          "file": "F04-069.mp4",
+          "sha256": "024b52addb327012828c26caa6b6921007af97af9588f605563e17951b12e674",
+          "duration_s": 15.45,
+          "bytes": 4020276
+        },
+        {
+          "file": "F04-070.mp4",
+          "sha256": "84cec90bcaa1e4f72b8bebd2c7f03d50e0f00c5ee4938d8de8713482317054cc",
+          "duration_s": 15.5,
+          "bytes": 4030221
+        },
+        {
+          "file": "F04-071.mp4",
+          "sha256": "218dcf41d445d219b1a13b5c1b33c3a51ba6f9e56ea324caa0b62e8c5d4858b6",
+          "duration_s": 15.55,
+          "bytes": 4045975
+        },
+        {
+          "file": "F04-072.mp4",
+          "sha256": "1dcab289d56141753cf6b2cc185581389bb81adcfe98c9968f94f8222b4d3c66",
+          "duration_s": 15.6,
+          "bytes": 4054951
+        },
+        {
+          "file": "F04-073.mp4",
+          "sha256": "8bb7ce838a3908d565bc27b95abe44526daaba5381e7fb2e7060ecc1319e4239",
+          "duration_s": 15.65,
+          "bytes": 4071721
+        },
+        {
+          "file": "F04-074.mp4",
+          "sha256": "b212d2b768e022ef3ce0ff61ab251d48760a953ecc596fdeec284bff2a6a8597",
+          "duration_s": 15.7,
+          "bytes": 4080762
+        },
+        {
+          "file": "F04-075.mp4",
+          "sha256": "e1e60b2e037a54e4e4e0a63c6cbe102f4b69a1e6d63a4a4811e8d9211dd388b2",
+          "duration_s": 15.75,
+          "bytes": 4098999
+        },
+        {
+          "file": "F04-076.mp4",
+          "sha256": "3a04325dffbbad848e47bebe4848ab4c02be003e040b2a7a81623f4de15c203d",
+          "duration_s": 15.8,
+          "bytes": 4107578
+        },
+        {
+          "file": "F04-077.mp4",
+          "sha256": "a85e6637725990e845375398201a485a4fefd78dc636cd3d1bc62938d880c8a9",
+          "duration_s": 15.85,
+          "bytes": 4124949
+        },
+        {
+          "file": "F04-078.mp4",
+          "sha256": "9dfef798bdc69f7ffdfcdd3caf48120f2145dfa5e15a226ed98cfde360d54050",
+          "duration_s": 15.9,
+          "bytes": 4133947
+        },
+        {
+          "file": "F04-079.mp4",
+          "sha256": "63323cfc29869282b983230b4b0846e48d253d4afd57719c89967098886d2175",
+          "duration_s": 15.95,
+          "bytes": 4151833
+        },
+        {
+          "file": "F04-080.mp4",
+          "sha256": "f556288889d3622c0a1afab893773d8aa3cd05557718d29247c6b9d5de3303e1",
+          "duration_s": 16,
+          "bytes": 4161746
+        },
+        {
+          "file": "F04-081.mp4",
+          "sha256": "220e8b95fae2002e7022da25bb15631a4d76cb9163a967db743f13a013b692a8",
+          "duration_s": 16.05,
+          "bytes": 4184528
+        },
+        {
+          "file": "F04-082.mp4",
+          "sha256": "66cb8c2f16a1fef55c220b492608ce8c3c5a1bb4a160ce199f8d0f4187e1e8ff",
+          "duration_s": 16.1,
+          "bytes": 4193767
+        },
+        {
+          "file": "F04-083.mp4",
+          "sha256": "a798bf8e79b228ee04e409865b6a179c3b56640c22675c2e33a14591f62cbf17",
+          "duration_s": 16.15,
+          "bytes": 4209008
+        },
+        {
+          "file": "F04-084.mp4",
+          "sha256": "927f112165c4f462a0c880c6503b736225dc61307bd299e7cbfdb8287d70d968",
+          "duration_s": 16.2,
+          "bytes": 4216485
+        },
+        {
+          "file": "F04-085.mp4",
+          "sha256": "cfa9f28b8e73ac90651ea603b6f55922741dbc88471550fe8579b5acd99ac222",
+          "duration_s": 16.25,
+          "bytes": 4230599
+        },
+        {
+          "file": "F04-086.mp4",
+          "sha256": "22592c4ec2628cdf1063acb8000d59f9b16c1b80f243793cbfb022df343f596f",
+          "duration_s": 16.3,
+          "bytes": 4238181
+        },
+        {
+          "file": "F04-087.mp4",
+          "sha256": "5cb6272ac1ff00133ad493c277dcc0c8a042b302d7cd3fdab85e54043ef41816",
+          "duration_s": 16.35,
+          "bytes": 4255927
+        },
+        {
+          "file": "F04-088.mp4",
+          "sha256": "b14a342b618f667be52ab34ed5f327588f720b432b8af8d7767fef2793e088ff",
+          "duration_s": 16.4,
+          "bytes": 4264514
+        },
+        {
+          "file": "F04-089.mp4",
+          "sha256": "67b5dc3ddf77eadd77cb95b57d2a8b793ef68fec763e9e82497d6ae59235c5a7",
+          "duration_s": 16.45,
+          "bytes": 4282929
+        },
+        {
+          "file": "F04-090.mp4",
+          "sha256": "be4a693fb4ccac0e1bbf4c06b54ef05924307d7ff44943d1c1f6d705c63be8db",
+          "duration_s": 16.5,
+          "bytes": 4293392
+        },
+        {
+          "file": "F04-091.mp4",
+          "sha256": "b1e7ff0f55e27238d668e4acd8d10c7cd5114c422e813794b771426c07c2fb01",
+          "duration_s": 16.55,
+          "bytes": 4310402
+        },
+        {
+          "file": "F04-092.mp4",
+          "sha256": "2267e86b81176d86b4758bdb4c26e21d4082faa219ec6b6a5f9c458c6d369185",
+          "duration_s": 16.6,
+          "bytes": 4321438
+        },
+        {
+          "file": "F04-093.mp4",
+          "sha256": "b67b391a7a187e85a136577931e5d9e4c5c24209d528abe5894be9cdd2ad493e",
+          "duration_s": 16.65,
+          "bytes": 4339363
+        },
+        {
+          "file": "F04-094.mp4",
+          "sha256": "dd4fb938ba7c71635cdbc239d6319c8e0081e8b8ca11aa27e26c532ece67ca46",
+          "duration_s": 16.7,
+          "bytes": 4348934
+        },
+        {
+          "file": "F04-095.mp4",
+          "sha256": "35b62940fb533ce179b36ef42a2c9b8c105589861cd703d9ca4b12d0955342cb",
+          "duration_s": 16.75,
+          "bytes": 4366889
+        },
+        {
+          "file": "F04-096.mp4",
+          "sha256": "262c1df3a919d80dbd2a58156f4fc061cc59d338e69fdf8e62bae066c4db0b24",
+          "duration_s": 16.8,
+          "bytes": 4375258
+        },
+        {
+          "file": "F04-097.mp4",
+          "sha256": "43518447a57268871ec7031cd9a4c6313e9c6b530d14b1362c1b55060f930d35",
+          "duration_s": 16.85,
+          "bytes": 4394020
+        },
+        {
+          "file": "F04-098.mp4",
+          "sha256": "674a645542db4ab63ac8e84a445e07fa7d394752b59ff3a052cec56fa20ea44a",
+          "duration_s": 16.9,
+          "bytes": 4402792
+        },
+        {
+          "file": "F04-099.mp4",
+          "sha256": "9e3cd2b48e7b28e66e5feba0d30f60b376e374b029f98a48c119d9e9365a2716",
+          "duration_s": 16.95,
+          "bytes": 4419849
+        }
+      ],
+      "size": "640x360",
+      "fps": 30,
+      "recipe": "testsrc2-av-cfr-multiv1",
+      "bytes": 376982901,
+      "coverage_note": "Distinct short media family; scene assembly (tracks/transforms/captions) is declared by the benchmark spec, not by media generation."
+    }
+  ]
+}

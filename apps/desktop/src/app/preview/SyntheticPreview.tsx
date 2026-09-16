@@ -345,10 +345,12 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
         if (sessionRefLocal.current === creating) sessionRefLocal.current = null;
       }
     };
-    // mediaUrls 以内容为准（票据变更即重建）；playhead 仅挂载时取初值。
+    // mediaUrls 以内容为准：票据迟到（分页装载/项目数据晚于时间线到位）时
+    // 触发会话重建——旧实现依赖数组漏了它，空票据建的会话回退后永不重试
+    // （2026-09-15 F04 100 素材复测暴露）。playhead 仅挂载时取初值；
     // playheadStore 稳定（App useRef 持有），不参与会话重建——只影响上报通道。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, revisionId, outputRatio]);
+  }, [projectId, revisionId, outputRatio, mediaUrls]);
 
   // 卸载：销毁会话（含画布元素）+ 外部帧源 + 断开观察器（StrictMode 双挂载各自动一次，安全）。
   useEffect(() => () => {

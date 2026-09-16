@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "scenario": "F04",
+  "run": 2,
+  "enabled": false,
+  "status": "invalid-incomplete",
+  "error_type": "Error",
+  "error_message": "\u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('.synthetic-canvas')\nExpected: visible\nTimeout: 120000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 120000ms\u001b[22m\n\u001b[2m  - waiting for locator('.synthetic-canvas')\u001b[22m\n",
+  "error_stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('.synthetic-canvas')\nExpected: visible\nTimeout: 120000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 120000ms\u001b[22m\n\u001b[2m  - waiting for locator('.synthetic-canvas')\u001b[22m\n\n    at [path-redacted]",
+  "setup_recovery_count": 0
+}

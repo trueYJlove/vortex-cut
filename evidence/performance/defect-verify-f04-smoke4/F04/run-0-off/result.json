@@ -1,0 +1,1027 @@
+{
+  "schema_version": 2,
+  "scenario": "F04/100-assets-4-layers",
+  "run": 0,
+  "enabled": false,
+  "ready_ms": 49131,
+  "ready_segments": {
+    "counts": {},
+    "durations": {},
+    "events": []
+  },
+  "setup_recovery_count": 0,
+  "residency_warning": null,
+  "workload": {
+    "seeks": 3,
+    "seed": 20260908,
+    "build_mode": "production-diagnostics",
+    "code_fingerprint": "49c78731eabf0f334415f70483a342a84f311929ed45fb5ba20c16c4d67f06d5",
+    "revisions": 6
+  },
+  "revision_transitions": [
+    {
+      "action": "undo",
+      "wall_ms": 1152,
+      "result": "ready",
+      "counts": {},
+      "durations": {},
+      "ready_events": [],
+      "window_fetch_events": []
+    },
+    {
+      "action": "redo",
+      "wall_ms": 1074,
+      "result": "ready",
+      "counts": {},
+      "durations": {},
+      "ready_events": [],
+      "window_fetch_events": []
+    },
+    {
+      "action": "undo",
+      "wall_ms": 1254,
+      "result": "ready",
+      "counts": {},
+      "durations": {},
+      "ready_events": [],
+      "window_fetch_events": []
+    },
+    {
+      "action": "redo",
+      "wall_ms": 1168,
+      "result": "ready",
+      "counts": {},
+      "durations": {},
+      "ready_events": [],
+      "window_fetch_events": []
+    },
+    {
+      "action": "undo",
+      "wall_ms": 8378,
+      "result": "ready",
+      "counts": {},
+      "durations": {},
+      "ready_events": [],
+      "window_fetch_events": []
+    },
+    {
+      "action": "redo",
+      "wall_ms": 1255,
+      "result": "ready",
+      "counts": {},
+      "durations": {},
+      "ready_events": [],
+      "window_fetch_events": []
+    }
+  ],
+  "seek_action_wall_ms_including_300ms_wait": [
+    495,
+    373,
+    385
+  ],
+  "seek": {
+    "schema_version": 1,
+    "enabled": false,
+    "capacity": 4096,
+    "overwritten": 0,
+    "counts": {},
+    "durations": {},
+    "events": [],
+    "residency": null,
+    "timing_semantics": "submitted = worker GL commands returned, NOT GPU completion or presentation"
+  },
+  "playback": {
+    "schema_version": 1,
+    "enabled": false,
+    "capacity": 4096,
+    "overwritten": 0,
+    "counts": {},
+    "durations": {},
+    "events": [],
+    "residency": null,
+    "timing_semantics": "submitted = worker GL commands returned, NOT GPU completion or presentation"
+  },
+  "process_samples": [
+    [
+      {
+        "pid": 15068,
+        "type": "Browser",
+        "cpu": {
+          "cumulativeCPUUsage": 7.875024,
+          "percentCPUUsage": 0,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 190808,
+          "peakWorkingSetSize": 209648,
+          "privateBytes": 164640
+        }
+      },
+      {
+        "pid": 364,
+        "type": "GPU",
+        "cpu": {
+          "cumulativeCPUUsage": 9.523789,
+          "percentCPUUsage": 0,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 853204,
+          "peakWorkingSetSize": 853204,
+          "privateBytes": 901116
+        }
+      },
+      {
+        "pid": 7404,
+        "type": "Utility",
+        "cpu": {
+          "cumulativeCPUUsage": 0.284525,
+          "percentCPUUsage": 0,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 58236,
+          "peakWorkingSetSize": 58312,
+          "privateBytes": 19636
+        }
+      },
+      {
+        "pid": 21096,
+        "type": "Tab",
+        "cpu": {
+          "cumulativeCPUUsage": 19.948241,
+          "percentCPUUsage": 0,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 881176,
+          "peakWorkingSetSize": 916676,
+          "privateBytes": 1132740
+        }
+      },
+      {
+        "pid": 3476,
+        "type": "Utility",
+        "cpu": {
+          "cumulativeCPUUsage": 0.351535,
+          "percentCPUUsage": 0,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 87832,
+          "peakWorkingSetSize": 87832,
+          "privateBytes": 11996
+        }
+      }
+    ],
+    [
+      {
+        "pid": 15068,
+        "type": "Browser",
+        "cpu": {
+          "cumulativeCPUUsage": 7.886119,
+          "percentCPUUsage": 0.13126921416888782,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 190992,
+          "peakWorkingSetSize": 209648,
+          "privateBytes": 164816
+        }
+      },
+      {
+        "pid": 364,
+        "type": "GPU",
+        "cpu": {
+          "cumulativeCPUUsage": 9.726284,
+          "percentCPUUsage": 2.3957962616610127,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 857988,
+          "peakWorkingSetSize": 857988,
+          "privateBytes": 903000
+        }
+      },
+      {
+        "pid": 7404,
+        "type": "Utility",
+        "cpu": {
+          "cumulativeCPUUsage": 0.284525,
+          "percentCPUUsage": 0,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 58236,
+          "peakWorkingSetSize": 58312,
+          "privateBytes": 19636
+        }
+      },
+      {
+        "pid": 21096,
+        "type": "Tab",
+        "cpu": {
+          "cumulativeCPUUsage": 20.745662,
+          "percentCPUUsage": 9.435094788614007,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 884144,
+          "peakWorkingSetSize": 916676,
+          "privateBytes": 1133152
+        }
+      },
+      {
+        "pid": 3476,
+        "type": "Utility",
+        "cpu": {
+          "cumulativeCPUUsage": 0.3599,
+          "percentCPUUsage": 0.09897468614434851,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 87832,
+          "peakWorkingSetSize": 87832,
+          "privateBytes": 11996
+        }
+      }
+    ],
+    [
+      {
+        "pid": 15068,
+        "type": "Browser",
+        "cpu": {
+          "cumulativeCPUUsage": 7.93071,
+          "percentCPUUsage": 0.5443976281936708,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 155312,
+          "peakWorkingSetSize": 209648,
+          "privateBytes": 129032
+        }
+      },
+      {
+        "pid": 364,
+        "type": "GPU",
+        "cpu": {
+          "cumulativeCPUUsage": 9.922079,
+          "percentCPUUsage": 2.390395492365678,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 860456,
+          "peakWorkingSetSize": 861052,
+          "privateBytes": 904996
+        }
+      },
+      {
+        "pid": 7404,
+        "type": "Utility",
+        "cpu": {
+          "cumulativeCPUUsage": 0.284525,
+          "percentCPUUsage": 0,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 58236,
+          "peakWorkingSetSize": 58312,
+          "privateBytes": 19636
+        }
+      },
+      {
+        "pid": 21096,
+        "type": "Tab",
+        "cpu": {
+          "cumulativeCPUUsage": 21.651365,
+          "percentCPUUsage": 11.05722979525941,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 906512,
+          "peakWorkingSetSize": 916676,
+          "privateBytes": 1146928
+        }
+      },
+      {
+        "pid": 3476,
+        "type": "Utility",
+        "cpu": {
+          "cumulativeCPUUsage": 0.36807,
+          "percentCPUUsage": 0.09974225721733508,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 87832,
+          "peakWorkingSetSize": 87832,
+          "privateBytes": 11996
+        }
+      }
+    ],
+    [
+      {
+        "pid": 15068,
+        "type": "Browser",
+        "cpu": {
+          "cumulativeCPUUsage": 7.947612,
+          "percentCPUUsage": 0.20680430454436002,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 155472,
+          "peakWorkingSetSize": 209648,
+          "privateBytes": 129200
+        }
+      },
+      {
+        "pid": 364,
+        "type": "GPU",
+        "cpu": {
+          "cumulativeCPUUsage": 10.123539,
+          "percentCPUUsage": 2.4649817445013262,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 863532,
+          "peakWorkingSetSize": 863532,
+          "privateBytes": 907788
+        }
+      },
+      {
+        "pid": 7404,
+        "type": "Utility",
+        "cpu": {
+          "cumulativeCPUUsage": 0.291075,
+          "percentCPUUsage": 0.08014349968921453,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 58240,
+          "peakWorkingSetSize": 58316,
+          "privateBytes": 19640
+        }
+      },
+      {
+        "pid": 21096,
+        "type": "Tab",
+        "cpu": {
+          "cumulativeCPUUsage": 22.469148,
+          "percentCPUUsage": 10.006183945332651,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 912268,
+          "peakWorkingSetSize": 916676,
+          "privateBytes": 1147684
+        }
+      },
+      {
+        "pid": 3476,
+        "type": "Utility",
+        "cpu": {
+          "cumulativeCPUUsage": 0.37654,
+          "percentCPUUsage": 0.10363756853294231,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 87832,
+          "peakWorkingSetSize": 87832,
+          "privateBytes": 11996
+        }
+      }
+    ],
+    [
+      {
+        "pid": 15068,
+        "type": "Browser",
+        "cpu": {
+          "cumulativeCPUUsage": 7.999294,
+          "percentCPUUsage": 0.6223741595624667,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 161276,
+          "peakWorkingSetSize": 209648,
+          "privateBytes": 134888
+        }
+      },
+      {
+        "pid": 364,
+        "type": "GPU",
+        "cpu": {
+          "cumulativeCPUUsage": 10.311728,
+          "percentCPUUsage": 2.2662517329048155,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 867656,
+          "peakWorkingSetSize": 868116,
+          "privateBytes": 911624
+        }
+      },
+      {
+        "pid": 7404,
+        "type": "Utility",
+        "cpu": {
+          "cumulativeCPUUsage": 0.291075,
+          "percentCPUUsage": 0,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 58240,
+          "peakWorkingSetSize": 58316,
+          "privateBytes": 19640
+        }
+      },
+      {
+        "pid": 21096,
+        "type": "Tab",
+        "cpu": {
+          "cumulativeCPUUsage": 23.360057,
+          "percentCPUUsage": 10.728455879023642,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 940748,
+          "peakWorkingSetSize": 940748,
+          "privateBytes": 1169572
+        }
+      },
+      {
+        "pid": 3476,
+        "type": "Utility",
+        "cpu": {
+          "cumulativeCPUUsage": 0.38472,
+          "percentCPUUsage": 0.09850513045547424,
+          "idleWakeupsPerSecond": 0
+        },
+        "memory": {
+          "workingSetSize": 87836,
+          "peakWorkingSetSize": 87836,
+          "privateBytes": 12000
+        }
+      }
+    ]
+  ],
+  "drag_action_wall_ms_including_300ms_wait": [
+    768,
+    697,
+    726
+  ],
+  "drag": {
+    "schema_version": 1,
+    "enabled": false,
+    "capacity": 4096,
+    "overwritten": 0,
+    "counts": {},
+    "durations": {},
+    "events": [],
+    "residency": null,
+    "timing_semantics": "submitted = worker GL commands returned, NOT GPU completion or presentation"
+  },
+  "environment": {
+    "versions": {
+      "node": "22.15.0",
+      "acorn": "8.14.1",
+      "ada": "2.9.2",
+      "amaro": "0.4.1",
+      "ares": "1.34.5",
+      "brotli": "1.0.9",
+      "cjs_module_lexer": "2.1.0",
+      "cldr": "44.1",
+      "icu": "74.2",
+      "llhttp": "9.2.1",
+      "modules": "135",
+      "napi": "10",
+      "nbytes": "0.1.1",
+      "ncrypto": "0.0.1",
+      "nghttp2": "1.64.0",
+      "openssl": "0.0.0",
+      "simdjson": "3.12.2",
+      "simdutf": "6.4.0",
+      "sqlite": "3.49.1",
+      "tz": "2025a",
+      "undici": "6.21.2",
+      "unicode": "15.1",
+      "uv": "1.49.2",
+      "uvwasi": "0.0.21",
+      "v8": "13.6.233.8-electron.0",
+      "zlib": "1.3.0.1-motley",
+      "zstd": "1.5.7",
+      "electron": "36.2.1",
+      "chrome": "136.0.7103.93"
+    },
+    "platform": "win32",
+    "arch": "x64",
+    "gpu": {
+      "auxAttributes": {
+        "amdSwitchable": false,
+        "canSupportThreadedTextureMailbox": false,
+        "directMLFeatureLevel": "Not supported",
+        "dx12FeatureLevel": "Not supported",
+        "glImplementationParts": "(gl=none,angle=none)",
+        "glResetNotificationStrategy": 0,
+        "hardwareSupportsVulkan": false,
+        "inProcessGpu": true,
+        "initializationTime": 0,
+        "isAsan": false,
+        "isClangCoverage": false,
+        "jpegDecodeAcceleratorSupported": false,
+        "optimus": false,
+        "overlayInfo": {
+          "bgra8OverlaySupport": "NONE",
+          "directComposition": false,
+          "nv12OverlaySupport": "NONE",
+          "p010OverlaySupport": "NONE",
+          "rgb10a2OverlaySupport": "NONE",
+          "supportsOverlays": false,
+          "yuy2OverlaySupport": "NONE"
+        },
+        "passthroughCmdDecoder": false,
+        "sandboxed": false,
+        "skiaBackendType": "None",
+        "subpixelFontRendering": true,
+        "supportsD3dSharedImages": false,
+        "supportsDirectML": false,
+        "supportsDx12": false,
+        "supportsVulkan": false,
+        "targetCpuBits": 64,
+        "visibilityCallbackCallCount": 0,
+        "vulkanVersion": "Not supported"
+      },
+      "gpuDevice": [
+        {
+          "active": false,
+          "deviceId": 39497,
+          "deviceString": "Intel(R) Iris(R) Xe Graphics",
+          "driverVersion": "31.0.101.3222",
+          "gpuPreference": 2,
+          "revision": 1,
+          "subSysId": 805601414,
+          "vendorId": 32902
+        },
+        {
+          "active": false,
+          "deviceId": 39497,
+          "deviceString": "Intel(R) Iris(R) Xe Graphics",
+          "driverVersion": "31.0.101.3222",
+          "gpuPreference": 0,
+          "revision": 1,
+          "subSysId": 805601414,
+          "vendorId": 32902
+        },
+        {
+          "active": false,
+          "deviceId": 140,
+          "deviceString": "Microsoft Basic Render Driver",
+          "driverVersion": "10.0.26100.9278",
+          "gpuPreference": 0,
+          "revision": 0,
+          "subSysId": 0,
+          "vendorId": 5140
+        }
+      ]
+    },
+    "refresh_hz": 60,
+    "cpu_model": "11th Gen Intel(R) Core(TM) i7-1165G7 @ 2.80GHz",
+    "logical_cpus": 8,
+    "ram_bytes": 33965559808,
+    "os_release": "10.0.26200"
+  },
+  "viewport": {
+    "width": 1280,
+    "height": 752,
+    "dpr": 1,
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.7103.93 Electron/36.2.1 Safari/537.36"
+  },
+  "fixture_sha256": "bc343236146f051d152fdb8b319c37a4fd0593067000f04b17784654a6d3127f",
+  "fixture_files": [
+    {
+      "file": "F04-000.mp4",
+      "sha256": "bc343236146f051d152fdb8b319c37a4fd0593067000f04b17784654a6d3127f"
+    },
+    {
+      "file": "F04-001.mp4",
+      "sha256": "778a44cca55eb0240aa2db810554c2ffeb31295b742695f932a8628c6de8c9e7"
+    },
+    {
+      "file": "F04-002.mp4",
+      "sha256": "68c288f97374b912335f4abb7d1fd4baf9b1a4e4051c514196a3dce1cf6a0613"
+    },
+    {
+      "file": "F04-003.mp4",
+      "sha256": "d3888f9e2e828c4ca624396b39ed220d366dd3498ac61043ce7b5a974ce4465f"
+    },
+    {
+      "file": "F04-004.mp4",
+      "sha256": "62a959f6b592e8ceb512c65b69ba14b5c630dc2ebc54d2196ecf348bf1d416f2"
+    },
+    {
+      "file": "F04-005.mp4",
+      "sha256": "3eb55cdeab86aabefe174944fb97522e88242a4ad435244143a893a6e2db4728"
+    },
+    {
+      "file": "F04-006.mp4",
+      "sha256": "eebbcad90d7bfa0a3e5ab672186bb2951b39cbb8a73e18ce3711594eac2dde85"
+    },
+    {
+      "file": "F04-007.mp4",
+      "sha256": "fd27178b82de65a460f4e4b51a45d140b644a38ba0b43b83fcdbb0e4229acca1"
+    },
+    {
+      "file": "F04-008.mp4",
+      "sha256": "aa1551eeb456180a3d4bace28a4285d753ebaa8c8220f81fa03f4f50f6eee0ae"
+    },
+    {
+      "file": "F04-009.mp4",
+      "sha256": "81cc22dd8cde77b6645d740aec369b395ec978cab7e65cc5b7d7fc11598944a4"
+    },
+    {
+      "file": "F04-010.mp4",
+      "sha256": "da28edb45f0e5fe5e4de123037596fdf6ee39ea0d1e0075e420a70beb9aab35f"
+    },
+    {
+      "file": "F04-011.mp4",
+      "sha256": "19642b28028d93a70ea3ffe9440cc11b7156b1f72e1e3e0c1f4aa500ec941c70"
+    },
+    {
+      "file": "F04-012.mp4",
+      "sha256": "dcdaeb467eb41bfbbb0948fb0ac3e7acb38943a370dcf011d8b2f43d2e4f5d79"
+    },
+    {
+      "file": "F04-013.mp4",
+      "sha256": "2eba5c849f5c728b1b868209aa9e6a4ac669dac80bf0493aa38914a6ecb2e78c"
+    },
+    {
+      "file": "F04-014.mp4",
+      "sha256": "45c7497452030cc3cab2021999dac29faa35360b8077f55551cc7f41d801d011"
+    },
+    {
+      "file": "F04-015.mp4",
+      "sha256": "674e5bb929408073e7966d254aea2eed7092cae3dbeecb1a2ebf34004bc846df"
+    },
+    {
+      "file": "F04-016.mp4",
+      "sha256": "bfcba88882c3b5cd51ec4f7c3d62ae04441ead993ead6f1e127795baa1e22f42"
+    },
+    {
+      "file": "F04-017.mp4",
+      "sha256": "7d980f8a2dc951cfcc47172459cb1bfbda7b6425993a7eb9e36a8fd68cfe04b0"
+    },
+    {
+      "file": "F04-018.mp4",
+      "sha256": "65d2addd5f19e9d0a4c01dcea270af88ef6d47d96acd485061c7ed9f3b5c373c"
+    },
+    {
+      "file": "F04-019.mp4",
+      "sha256": "4ec20e9728a0f9d636f4bd0d425a18f77072354f7b5795e989b6d50a7642ae24"
+    },
+    {
+      "file": "F04-020.mp4",
+      "sha256": "2e8d99976744a994a34dded16f50c8198d2db7af6d82793fde80c6efb57c742f"
+    },
+    {
+      "file": "F04-021.mp4",
+      "sha256": "4beaf5bc37dbd85822dfd79524c40da9d1f3b6946def51888e88c775c4203469"
+    },
+    {
+      "file": "F04-022.mp4",
+      "sha256": "4cf4fa69dd8fd714322b7a0741737ed91818a06a5e12ad698de599dceda6e641"
+    },
+    {
+      "file": "F04-023.mp4",
+      "sha256": "50af6cc1302717648df55103761afaed9e0e3a704366ce99030e84649619e93f"
+    },
+    {
+      "file": "F04-024.mp4",
+      "sha256": "5204aebac3093f42d3929913c84ac85f2aae2bf56e7d96f0dd5d62847e44a5ab"
+    },
+    {
+      "file": "F04-025.mp4",
+      "sha256": "c4353e3456c58bfb2be1050ae7a2117157ad3d8d957fc382eb40679db0f875c7"
+    },
+    {
+      "file": "F04-026.mp4",
+      "sha256": "65cc5cd751f42f8eccaee241f83e6029313be1ad6452bbdd70106c30ca346187"
+    },
+    {
+      "file": "F04-027.mp4",
+      "sha256": "7f4b33ce03941cc08be07dc8c58197472edf0782f930fdfc85b49808c6021ddd"
+    },
+    {
+      "file": "F04-028.mp4",
+      "sha256": "116490c6acc1208b8cb6cfaec88ad2fb7e55418b64c5c7eba93df35a5e3f2b1f"
+    },
+    {
+      "file": "F04-029.mp4",
+      "sha256": "df9b5481e560f238100a850aed725f6d1674330d3dfc8f6f59468b5d18cba4f5"
+    },
+    {
+      "file": "F04-030.mp4",
+      "sha256": "40ef7f3b06688788c6b477a846b97cfa4072d85d8dc026e5e9557540a33d5d1a"
+    },
+    {
+      "file": "F04-031.mp4",
+      "sha256": "e742f243e0b832a622a4db2737b4f7aad2df8fb4e5d6065f090513c10f22aede"
+    },
+    {
+      "file": "F04-032.mp4",
+      "sha256": "ab3a2ff3161af7ffe5d25a36c2d98ebcc3aaccb5f58748c4df010eb92289a832"
+    },
+    {
+      "file": "F04-033.mp4",
+      "sha256": "3db80fc9ddbde5bc3e9b37d87205f9ee48ec25bea3b0a182327768991f1f6024"
+    },
+    {
+      "file": "F04-034.mp4",
+      "sha256": "aacc688db369ccfee33a48c907649b84751cc83a87ea110b8c2b792414080b92"
+    },
+    {
+      "file": "F04-035.mp4",
+      "sha256": "7f1d21ab6866d94e2eac4d5932544472a34cb1424a6bfec2d7d1d0b510a732d9"
+    },
+    {
+      "file": "F04-036.mp4",
+      "sha256": "75b666069b9c846b0da36f5c8a09ae5792008497e7f0ade70052711391148fdb"
+    },
+    {
+      "file": "F04-037.mp4",
+      "sha256": "ed00cc24822e3942199c7c4ba20f22dcd653d94534a5915db0afb24b14c1015d"
+    },
+    {
+      "file": "F04-038.mp4",
+      "sha256": "8dc713625eb4dd6d4694ea4ab8d9528ac9924609d8009bdfe5b8273de3df5c88"
+    },
+    {
+      "file": "F04-039.mp4",
+      "sha256": "eb07f250e55fdd175348f1e2862c79fc34278fa6d03bc124eff49736ff61cc75"
+    },
+    {
+      "file": "F04-040.mp4",
+      "sha256": "5b841dcc7adf70dfba9ce09b1e786e02853becf3eb0eecbcae88f131b265b084"
+    },
+    {
+      "file": "F04-041.mp4",
+      "sha256": "ffef4c7b75bfa31eba84ad5e1676c6693fe6ca3be729946b6259a2795a809628"
+    },
+    {
+      "file": "F04-042.mp4",
+      "sha256": "175ff0848535780a5ab717909be4d921f22e8f8a2f2b04e06ac07473c94e2840"
+    },
+    {
+      "file": "F04-043.mp4",
+      "sha256": "cfb916d9a9232f31d7e577a1cc8e8f3c5c8122c44fe56823c522d57313d8b4c2"
+    },
+    {
+      "file": "F04-044.mp4",
+      "sha256": "c28b594434f93e20375d434ab809128a2c0c17285e02784963b313ad82e600b5"
+    },
+    {
+      "file": "F04-045.mp4",
+      "sha256": "edd558f44b3c61583cd42a5b8efd6e4fd112e0860acecdb1dd41b12eb7f85705"
+    },
+    {
+      "file": "F04-046.mp4",
+      "sha256": "7eddff313bcc223b8e6ba8c2a000877098e1652024267c0f57fe6f5388e9c34c"
+    },
+    {
+      "file": "F04-047.mp4",
+      "sha256": "206172b79cd188eae633cfeaa7848d47ef6ca8567fba9c849a8c10b85e07c286"
+    },
+    {
+      "file": "F04-048.mp4",
+      "sha256": "38ce8ede175e86ab9f55266e7c747ab8aa8a241e6deee2c4c10de0e673f07a67"
+    },
+    {
+      "file": "F04-049.mp4",
+      "sha256": "d6b693f132b0d33415914b24865cbc56a35b404eb673daafbf1b811587c3e69a"
+    },
+    {
+      "file": "F04-050.mp4",
+      "sha256": "e5f29288d85e9b223477a329a1c84d2b2a9efa5a2ee6f5385780ccf39e48253e"
+    },
+    {
+      "file": "F04-051.mp4",
+      "sha256": "5fe2e6b541e832295b1c642a22cf44d7c719e3140822a1004b6c5571426aab62"
+    },
+    {
+      "file": "F04-052.mp4",
+      "sha256": "f02292e3411fe034ab6cb3c26810d7abfde450681e1e1cb5dd4698e9b808cbce"
+    },
+    {
+      "file": "F04-053.mp4",
+      "sha256": "28c818c71f575f7bac929e10e2cff36b760113ee771ee66c9f10c66919ccffd5"
+    },
+    {
+      "file": "F04-054.mp4",
+      "sha256": "ea62df60f6687ed7b7f1f02f7838602a51aac5f560e63dc31ee5e54a21045fe8"
+    },
+    {
+      "file": "F04-055.mp4",
+      "sha256": "f1cdbbe9872ba4e44060b0021f316b484f38c23ad4667fcbde44c352327969ef"
+    },
+    {
+      "file": "F04-056.mp4",
+      "sha256": "1b6b8b6b2f492f4aa4d8df4d57662aa7c7305e682b49dc544172a7bd8be317d5"
+    },
+    {
+      "file": "F04-057.mp4",
+      "sha256": "c4eed049a111eb9a59019757201db1020ee024fb627e4a00c9e7c0c5dc9e8f6b"
+    },
+    {
+      "file": "F04-058.mp4",
+      "sha256": "c0c28700c777189ccceded0c87b0c3901a3de8794c0636d3f8841236accefd89"
+    },
+    {
+      "file": "F04-059.mp4",
+      "sha256": "82658402530f656cbb8a0d746817c5c1e93e6b4673381b6ff5c9739708c23209"
+    },
+    {
+      "file": "F04-060.mp4",
+      "sha256": "87308a02ebf53b674d7add65fc1191fdc405a41f8ca48157b2373c5764e6e91b"
+    },
+    {
+      "file": "F04-061.mp4",
+      "sha256": "41c0ba80f1f63d129e5a7f4687e9f5d9d5819356f7cef522ea5f5bd46a1fdc86"
+    },
+    {
+      "file": "F04-062.mp4",
+      "sha256": "b28cb4507f233677100ba048ee53265e89e6bd912697df4da85b0e41ff0da862"
+    },
+    {
+      "file": "F04-063.mp4",
+      "sha256": "ee0128027524ecee561c733d774a131f72934307f6dde99ea7f676e76c8e0a1e"
+    },
+    {
+      "file": "F04-064.mp4",
+      "sha256": "61a3d7d187cc8ce28333786ddefcaeda67c1dffa5aadb95af9ae22a3d800a55e"
+    },
+    {
+      "file": "F04-065.mp4",
+      "sha256": "bd5f32e68727ceb9192b85554387d02ad85db8902b2d6c5ab01285146aa3639d"
+    },
+    {
+      "file": "F04-066.mp4",
+      "sha256": "a75b332783460798f82a3c596e3df332c2530dda0e5b46f59d8b865786def975"
+    },
+    {
+      "file": "F04-067.mp4",
+      "sha256": "03551c1aff6a6c1c1a4a836ccc6823c8192c6f32e96de543d78331b5b8863e5f"
+    },
+    {
+      "file": "F04-068.mp4",
+      "sha256": "ea883d0110b98b570d2cef6bf4a266cedf03af77960e6fdc99fad9200f62c6b8"
+    },
+    {
+      "file": "F04-069.mp4",
+      "sha256": "024b52addb327012828c26caa6b6921007af97af9588f605563e17951b12e674"
+    },
+    {
+      "file": "F04-070.mp4",
+      "sha256": "84cec90bcaa1e4f72b8bebd2c7f03d50e0f00c5ee4938d8de8713482317054cc"
+    },
+    {
+      "file": "F04-071.mp4",
+      "sha256": "218dcf41d445d219b1a13b5c1b33c3a51ba6f9e56ea324caa0b62e8c5d4858b6"
+    },
+    {
+      "file": "F04-072.mp4",
+      "sha256": "1dcab289d56141753cf6b2cc185581389bb81adcfe98c9968f94f8222b4d3c66"
+    },
+    {
+      "file": "F04-073.mp4",
+      "sha256": "8bb7ce838a3908d565bc27b95abe44526daaba5381e7fb2e7060ecc1319e4239"
+    },
+    {
+      "file": "F04-074.mp4",
+      "sha256": "b212d2b768e022ef3ce0ff61ab251d48760a953ecc596fdeec284bff2a6a8597"
+    },
+    {
+      "file": "F04-075.mp4",
+      "sha256": "e1e60b2e037a54e4e4e0a63c6cbe102f4b69a1e6d63a4a4811e8d9211dd388b2"
+    },
+    {
+      "file": "F04-076.mp4",
+      "sha256": "3a04325dffbbad848e47bebe4848ab4c02be003e040b2a7a81623f4de15c203d"
+    },
+    {
+      "file": "F04-077.mp4",
+      "sha256": "a85e6637725990e845375398201a485a4fefd78dc636cd3d1bc62938d880c8a9"
+    },
+    {
+      "file": "F04-078.mp4",
+      "sha256": "9dfef798bdc69f7ffdfcdd3caf48120f2145dfa5e15a226ed98cfde360d54050"
+    },
+    {
+      "file": "F04-079.mp4",
+      "sha256": "63323cfc29869282b983230b4b0846e48d253d4afd57719c89967098886d2175"
+    },
+    {
+      "file": "F04-080.mp4",
+      "sha256": "f556288889d3622c0a1afab893773d8aa3cd05557718d29247c6b9d5de3303e1"
+    },
+    {
+      "file": "F04-081.mp4",
+      "sha256": "220e8b95fae2002e7022da25bb15631a4d76cb9163a967db743f13a013b692a8"
+    },
+    {
+      "file": "F04-082.mp4",
+      "sha256": "66cb8c2f16a1fef55c220b492608ce8c3c5a1bb4a160ce199f8d0f4187e1e8ff"
+    },
+    {
+      "file": "F04-083.mp4",
+      "sha256": "a798bf8e79b228ee04e409865b6a179c3b56640c22675c2e33a14591f62cbf17"
+    },
+    {
+      "file": "F04-084.mp4",
+      "sha256": "927f112165c4f462a0c880c6503b736225dc61307bd299e7cbfdb8287d70d968"
+    },
+    {
+      "file": "F04-085.mp4",
+      "sha256": "cfa9f28b8e73ac90651ea603b6f55922741dbc88471550fe8579b5acd99ac222"
+    },
+    {
+      "file": "F04-086.mp4",
+      "sha256": "22592c4ec2628cdf1063acb8000d59f9b16c1b80f243793cbfb022df343f596f"
+    },
+    {
+      "file": "F04-087.mp4",
+      "sha256": "5cb6272ac1ff00133ad493c277dcc0c8a042b302d7cd3fdab85e54043ef41816"
+    },
+    {
+      "file": "F04-088.mp4",
+      "sha256": "b14a342b618f667be52ab34ed5f327588f720b432b8af8d7767fef2793e088ff"
+    },
+    {
+      "file": "F04-089.mp4",
+      "sha256": "67b5dc3ddf77eadd77cb95b57d2a8b793ef68fec763e9e82497d6ae59235c5a7"
+    },
+    {
+      "file": "F04-090.mp4",
+      "sha256": "be4a693fb4ccac0e1bbf4c06b54ef05924307d7ff44943d1c1f6d705c63be8db"
+    },
+    {
+      "file": "F04-091.mp4",
+      "sha256": "b1e7ff0f55e27238d668e4acd8d10c7cd5114c422e813794b771426c07c2fb01"
+    },
+    {
+      "file": "F04-092.mp4",
+      "sha256": "2267e86b81176d86b4758bdb4c26e21d4082faa219ec6b6a5f9c458c6d369185"
+    },
+    {
+      "file": "F04-093.mp4",
+      "sha256": "b67b391a7a187e85a136577931e5d9e4c5c24209d528abe5894be9cdd2ad493e"
+    },
+    {
+      "file": "F04-094.mp4",
+      "sha256": "dd4fb938ba7c71635cdbc239d6319c8e0081e8b8ca11aa27e26c532ece67ca46"
+    },
+    {
+      "file": "F04-095.mp4",
+      "sha256": "35b62940fb533ce179b36ef42a2c9b8c105589861cd703d9ca4b12d0955342cb"
+    },
+    {
+      "file": "F04-096.mp4",
+      "sha256": "262c1df3a919d80dbd2a58156f4fc061cc59d338e69fdf8e62bae066c4db0b24"
+    },
+    {
+      "file": "F04-097.mp4",
+      "sha256": "43518447a57268871ec7031cd9a4c6313e9c6b530d14b1362c1b55060f930d35"
+    },
+    {
+      "file": "F04-098.mp4",
+      "sha256": "674a645542db4ab63ac8e84a445e07fa7d394752b59ff3a052cec56fa20ea44a"
+    },
+    {
+      "file": "F04-099.mp4",
+      "sha256": "9e3cd2b48e7b28e66e5feba0d30f60b376e374b029f98a48c119d9e9365a2716"
+    }
+  ],
+  "playback_seconds": 5,
+  "playback_seconds_actual": 5,
+  "scope": "complete App, 100 assets/4 visual layers (V1 spine + V2-V4 simultaneous PiP transforms) + 12 captions; 100 exceeds list_assets default 50/page (2026-09-15 pagination fix re-measure: page 2+ assets must keep tickets, synthetic preview must not fall back); app cold launch + warm seeks; OS cache uncontrolled; +revision-switch phase (undo-redo)",
+  "scene_extra": {
+    "assets": 100,
+    "spine_clips": 24,
+    "overlay_clips": 72,
+    "captions": 12,
+    "visual_layers": 4,
+    "ready_phases_outside": {
+      "t0_to_inpage_end_ms": 12105,
+      "project_assert_ms": 22,
+      "reload_and_status_settle_ms": 35456,
+      "playhead_start_ms": 1116,
+      "total_ready_ms": 49131
+    }
+  },
+  "unavailable": [
+    "actual presentation",
+    "React commits in non-profiling production React",
+    "audio underrun",
+    "video-frame lifetime",
+    "GPU actual VRAM",
+    "Core RSS",
+    "30–60min memory",
+    "timeline-zoom drag (canvas-only path; drag phase covers playhead scrub)"
+  ]
+}

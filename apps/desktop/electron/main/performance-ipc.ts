@@ -104,7 +104,21 @@ async function safeInvoke<T>(operation: () => Promise<T>): Promise<T> {
       : undefined;
     const derivedCodes = new Set(["DERIVED_NOT_FOUND", "DERIVED_KIND_INVALID", "DERIVED_PARAMS_INVALID", "ASSET_NOT_FOUND", "ASSET_CHANGED", "ASSET_MISSING", "DERIVED_CACHE_UNSAFE", "PREVIEW_PROFILE_INVALID", "PREVIEW_SOURCE_MODE_INVALID", "ASSET_NO_VIDEO_STREAM", "MEDIA_NO_AUDIO", "PCM_CHUNK_OFFSET_INVALID", "PCM_CHUNK_FFMPEG_FAILED", "PCM_CHUNK_TOO_LARGE", "MEDIA_MISSING"]);
     if (typeof code === "string" && derivedCodes.has(code)) throw new Error(code);
-    throw new Error("Core request failed");
+    // preview-ir v2 的域错误（PREVIEW_IR_UNSUPPORTED / PREVIEW_IR_TOO_LARGE /
+    // TIMELINE_* 等）原码透传——F04×v2 首跑现场"Core request failed"吞掉了
+    // 真实错误码，回退提示无诊断价值（2026-09-15 缺陷复测暴露）。
+    if (typeof code === "string" && (code.startsWith("PREVIEW_IR") || code.startsWith("TIMELINE") || code.startsWith("RENDER_"))) throw new Error(code);
+    // 其余错误保留业务码与底层 message（fetchWithUi 已 redact）：一律折叠成
+    // "Core request failed" 会让间歇失败无从定位——F04 100 素材复测现场
+    // warmup 轮即因此只有一句无信息的回退提示（2026-09-15）。
+    const detail = error instanceof Error ? error.message : String(error);
+    // fetch 的传输层失败（ECONNRESET/UND_ERR_* 等）真实原因在 cause 里——
+    // 只透 message 会得到一句无信息量的 "fetch failed"（F04 复测现场）。
+    const cause = error && typeof error === "object" ? (error as { cause?: unknown }).cause : undefined;
+    const causeText = cause instanceof Error ? `${cause.name}: ${cause.message}` : cause === undefined ? "" : String(cause);
+    const suffix = causeText ? ` (cause: ${causeText})` : "";
+    if (typeof code === "string") throw new Error(`${code}: ${detail}${suffix}`);
+    throw new Error(`${detail}${suffix}`);
   }
 }
 
