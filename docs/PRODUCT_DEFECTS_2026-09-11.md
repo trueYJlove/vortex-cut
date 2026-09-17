@@ -28,8 +28,12 @@
   **复跑**:`evidence/performance/defect-verify-f05-20260915-v2/` 五轮全过
   (runs=5,seeks=100,playback=300,setup_recovery_count 全 0,装配无挂起、
   无未处理 rejection);seek 探针 on 轮 seek 事件 86–97、decode 160–166——
-  与 G0 基线(86–96/160–165)同形态,如实记录:decode 侧 4K60 慢/超时根因
-  未修(规划 §5 另立诊断单),seek 计数恢复程度与 W1 预期管理一致。
+  与 G0 基线(86–96/160–165)同形态。**计数缺口诊断闭环(2026-09-17,
+  `docs/DIAG_4K60_DECODE_COUNT_2026-09-17.md`)**:逐事件归因证实缺口 =
+  latest-wins 取代 + refineAfterDrag 二次 seek(每 harness seek ≈2 epoch)
+  + 解码环命中零解码三项设计语义的合成,零 decode 超时(max 668ms≪15s)、
+  零挂起,G0 1080p 同形态(非 4K60 特有退化);"decode≈seek≈200+"登记口径
+  错误已修正为观测区间,无残余故障,无需另立修复工作单。
 - **优先级建议**:高(4K 是 F05 格式上限探测的核心能力;播放正常,仅 seek 路径失效)
 - **现象**:4K60 源播放 pump 正常(播放头推进、submitted≈30/s),但暂停态点击
   时间线 seek 后 seek/decode/upload 事件不齐。G0 五轮 × 100 seek:86–96/100
