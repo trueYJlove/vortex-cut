@@ -77,9 +77,17 @@
   移出事件循环(8 处 async 调用点,to_thread——消除百 clip 级同步 SQLite
   编译对 accept 的阻塞贡献)、assetPresentation resolve 3 次退避重试
   (域错误不重试)+失败落日志、App 缺票恢复预算耗尽后一次延迟终验、
-  harness 回退态恢复兜底。**Follow-up 登记**:单素材 no-ticket 在数据面
-  完备下的复现路径(renderer 票据状态与 Core 数据不同步的时窗)待另立
-  诊断单;5 轮全过复跑建议在台式机/低热噪声环境补做。
+  harness 回退态恢复兜底。**Follow-up 诊断闭环(2026-09-17,
+  `docs/DIAG_W3_NOTICKET_RACE_2026-09-17.md`)**:四个失败轮(v5/v6/v9/v11)
+  DB 数据面核查全部完备 + desktop.log 中 assetPresentation 折叠日志**零条**
+  ——登记假设"renderer 票据状态与 Core 数据不同步的时窗"被证据否定,
+  当前代码下该形态已知入口均已闭合,不复现路径成立;残余失败实质 =
+  装配挂起形态(create 后首帧路径,create 看门狗覆盖不到;v11 两次完整
+  reload 重建仍失败佐证非票据竞态),归入 DEFECT-4K60-SESSION-HANG 延伸
+  观察窗;5 轮全过复跑维持台式机/低热噪声环境建议,本机不再重试。
+  **Follow-up 登记**:单素材 no-ticket 在数据面完备下的复现路径(renderer
+  票据状态与 Core 数据不同步的时窗)——经 2026-09-17 诊断单闭环,证据
+  否定该假设(见上)。
 - **优先级建议**:中(48 素材内功能正常;100 素材口径被阻塞)
 - **现象**:`list_assets` 默认 `limit=50`,编辑器 reload 只装载第一页;
   第 51+ 素材无 media ticket,合成预览回退("no ticket for asset_...")。
