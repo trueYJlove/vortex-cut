@@ -1,0 +1,413 @@
+{
+  "schema_version": 1,
+  "project_id": "m3probe0project",
+  "canvas": {
+    "width": 1920,
+    "height": 1080,
+    "fps_num": 30,
+    "fps_den": 1,
+    "background_color": "#000000"
+  },
+  "tracks": [
+    {
+      "id": "C1",
+      "kind": "text",
+      "locked": false,
+      "hidden": false,
+      "muted": false,
+      "solo": false
+    },
+    {
+      "id": "V4",
+      "kind": "video",
+      "locked": false,
+      "hidden": false,
+      "muted": false,
+      "solo": false
+    },
+    {
+      "id": "V3",
+      "kind": "video",
+      "locked": false,
+      "hidden": false,
+      "muted": false,
+      "solo": false
+    },
+    {
+      "id": "V2",
+      "kind": "video",
+      "locked": false,
+      "hidden": false,
+      "muted": false,
+      "solo": false
+    },
+    {
+      "id": "V1",
+      "kind": "video",
+      "locked": false,
+      "hidden": false,
+      "muted": false,
+      "solo": false
+    },
+    {
+      "id": "A1",
+      "kind": "audio",
+      "locked": false,
+      "hidden": false,
+      "muted": false,
+      "solo": false
+    }
+  ],
+  "clips": [
+    {
+      "clip_id": "m3clip_a",
+      "track_id": "V1",
+      "order_index": 0,
+      "asset_id": "asset_m3_a",
+      "asset_kind": "video",
+      "source_start_us": 0,
+      "source_end_us": 20000000,
+      "timeline_start_us": 0,
+      "timeline_end_us": 20000000,
+      "layout": "fit",
+      "audio": {
+        "enabled": false,
+        "gain_db": 0.0
+      }
+    },
+    {
+      "clip_id": "m3clip_b",
+      "track_id": "V1",
+      "order_index": 0,
+      "asset_id": "asset_m3_b",
+      "asset_kind": "video",
+      "source_start_us": 0,
+      "source_end_us": 20000000,
+      "timeline_start_us": 20000000,
+      "timeline_end_us": 45000000,
+      "layout": "fit",
+      "audio": {
+        "enabled": false,
+        "gain_db": 0.0
+      },
+      "speed_milli": 800
+    },
+    {
+      "clip_id": "m3clip_c",
+      "track_id": "V1",
+      "order_index": 0,
+      "asset_id": "asset_m3_c",
+      "asset_kind": "video",
+      "source_start_us": 0,
+      "source_end_us": 15000000,
+      "timeline_start_us": 46000000,
+      "timeline_end_us": 61000000,
+      "layout": "fit",
+      "audio": {
+        "enabled": false,
+        "gain_db": 0.0
+      },
+      "keyframes": {
+        "position": {
+          "frames": [
+            {
+              "t_us": 0,
+              "x": -0.6,
+              "y": 0.0
+            },
+            {
+              "t_us": 5000000,
+              "x": 0.0,
+              "y": -0.4
+            },
+            {
+              "t_us": 10000000,
+              "x": 0.6,
+              "y": 0.0
+            }
+          ]
+        },
+        "opacity": {
+          "frames": [
+            {
+              "t_us": 0,
+              "v": 0.0
+            },
+            {
+              "t_us": 6000000,
+              "v": 1.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "clip_id": "m3clip_p1",
+      "track_id": "V2",
+      "order_index": 0,
+      "asset_id": "asset_m3_p1",
+      "asset_kind": "video",
+      "source_start_us": 0,
+      "source_end_us": 20000000,
+      "timeline_start_us": 10000000,
+      "timeline_end_us": 30000000,
+      "layout": "fit",
+      "audio": {
+        "enabled": false,
+        "gain_db": 0.0
+      },
+      "transform": {
+        "x": 0.7,
+        "y": 0.3,
+        "scale": 0.35,
+        "rotate": 8.0
+      }
+    },
+    {
+      "clip_id": "m3clip_p2",
+      "track_id": "V3",
+      "order_index": 0,
+      "asset_id": "asset_m3_p2",
+      "asset_kind": "video",
+      "source_start_us": 0,
+      "source_end_us": 20000000,
+      "timeline_start_us": 35000000,
+      "timeline_end_us": 55000000,
+      "layout": "fit",
+      "audio": {
+        "enabled": false,
+        "gain_db": 0.0
+      },
+      "transform": {
+        "x": 0.3,
+        "y": 0.7,
+        "scale": 0.28,
+        "rotate": 0.0
+      }
+    },
+    {
+      "clip_id": "m3fx_ellipse_feather",
+      "track_id": "V4",
+      "order_index": 0,
+      "asset_id": "asset_m3_p1",
+      "asset_kind": "video",
+      "source_start_us": 2000000,
+      "source_end_us": 6000000,
+      "timeline_start_us": 6000000,
+      "timeline_end_us": 10000000,
+      "layout": "fit",
+      "audio": {
+        "enabled": false,
+        "gain_db": 0.0
+      },
+      "transform": {
+        "x": 0.5,
+        "y": 0.5,
+        "scale": 0.6,
+        "rotate": 0.0
+      },
+      "mask": {
+        "kind": "ellipse",
+        "x": 0.5,
+        "y": 0.5,
+        "width": 0.7,
+        "height": 0.7,
+        "rotation": 0.0,
+        "feather": 0.25
+      }
+    },
+    {
+      "clip_id": "m3fx_linear_soft",
+      "track_id": "V4",
+      "order_index": 0,
+      "asset_id": "asset_m3_p2",
+      "asset_kind": "video",
+      "source_start_us": 2000000,
+      "source_end_us": 5000000,
+      "timeline_start_us": 16000000,
+      "timeline_end_us": 19000000,
+      "layout": "fit",
+      "audio": {
+        "enabled": false,
+        "gain_db": 0.0
+      },
+      "transform": {
+        "x": 0.35,
+        "y": 0.35,
+        "scale": 0.5,
+        "rotate": 0.0
+      },
+      "mask": {
+        "kind": "linear",
+        "x": 0.5,
+        "y": 0.5,
+        "rotation": 30.0,
+        "feather": 0.05
+      }
+    },
+    {
+      "clip_id": "m3fx_colorkey",
+      "track_id": "V4",
+      "order_index": 0,
+      "asset_id": "asset_m3_p2",
+      "asset_kind": "video",
+      "source_start_us": 0,
+      "source_end_us": 4000000,
+      "timeline_start_us": 20000000,
+      "timeline_end_us": 24000000,
+      "layout": "fit",
+      "audio": {
+        "enabled": false,
+        "gain_db": 0.0
+      },
+      "transform": {
+        "x": 0.65,
+        "y": 0.6,
+        "scale": 0.5,
+        "rotate": 0.0
+      },
+      "keying": {
+        "color": "140C28",
+        "similarity": 0.18,
+        "blend": 0.1
+      }
+    },
+    {
+      "clip_id": "m3fx_ellipse_invert",
+      "track_id": "V4",
+      "order_index": 0,
+      "asset_id": "asset_m3_p1",
+      "asset_kind": "video",
+      "source_start_us": 0,
+      "source_end_us": 5000000,
+      "timeline_start_us": 30000000,
+      "timeline_end_us": 35000000,
+      "layout": "fit",
+      "audio": {
+        "enabled": false,
+        "gain_db": 0.0
+      },
+      "transform": {
+        "x": 0.4,
+        "y": 0.45,
+        "scale": 0.55,
+        "rotate": 12.0
+      },
+      "mask": {
+        "kind": "ellipse",
+        "x": 0.4,
+        "y": 0.5,
+        "width": 0.6,
+        "height": 0.6,
+        "rotation": 20.0,
+        "feather": 0.0,
+        "invert": true
+      }
+    },
+    {
+      "clip_id": "m3fx_rect_hard",
+      "track_id": "V4",
+      "order_index": 0,
+      "asset_id": "asset_m3_p1",
+      "asset_kind": "video",
+      "source_start_us": 0,
+      "source_end_us": 4000000,
+      "timeline_start_us": 46000000,
+      "timeline_end_us": 50000000,
+      "layout": "fit",
+      "audio": {
+        "enabled": false,
+        "gain_db": 0.0
+      },
+      "transform": {
+        "x": 0.6,
+        "y": 0.5,
+        "scale": 0.5,
+        "rotate": -15.0
+      },
+      "mask": {
+        "kind": "rect",
+        "x": 0.5,
+        "y": 0.5,
+        "width": 0.6,
+        "height": 0.5,
+        "rotation": 0.0,
+        "feather": 0.0
+      }
+    }
+  ],
+  "captions": [
+    {
+      "caption_id": "m3cap_01",
+      "track_id": "C1",
+      "source_clip_id": null,
+      "start_us": 2000000,
+      "end_us": 6000000,
+      "text": "低帧率合成探针测试字幕一",
+      "preset_id": "default-bottom",
+      "origin": "user",
+      "edited": true,
+      "source_segment_ids": []
+    },
+    {
+      "caption_id": "m3cap_02",
+      "track_id": "C1",
+      "source_clip_id": null,
+      "start_us": 12000000,
+      "end_us": 16000000,
+      "text": "第二段字幕在转场之前结束",
+      "preset_id": "default-bottom",
+      "origin": "user",
+      "edited": true,
+      "source_segment_ids": []
+    },
+    {
+      "caption_id": "m3cap_03",
+      "track_id": "C1",
+      "source_clip_id": null,
+      "start_us": 25000000,
+      "end_us": 29000000,
+      "text": "转场之后 B 段字幕三",
+      "preset_id": "default-bottom",
+      "origin": "user",
+      "edited": true,
+      "source_segment_ids": []
+    },
+    {
+      "caption_id": "m3cap_04",
+      "track_id": "C1",
+      "source_clip_id": null,
+      "start_us": 40000000,
+      "end_us": 44000000,
+      "text": "画中画与字幕同时出现四",
+      "preset_id": "default-bottom",
+      "origin": "user",
+      "edited": true,
+      "source_segment_ids": []
+    },
+    {
+      "caption_id": "m3cap_05",
+      "track_id": "C1",
+      "source_clip_id": null,
+      "start_us": 50000000,
+      "end_us": 56000000,
+      "text": "关键帧运动区间内末段字幕五",
+      "preset_id": "default-bottom",
+      "origin": "user",
+      "edited": true,
+      "source_segment_ids": []
+    }
+  ],
+  "transitions": [
+    {
+      "transition_id": "m3tr_a",
+      "after_clip_id": "m3clip_a",
+      "kind": "fade",
+      "duration_us": 1000000
+    }
+  ],
+  "provenance": {
+    "created_by": "user",
+    "source_transcript_ids": []
+  }
+}

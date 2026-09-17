@@ -43,6 +43,7 @@ uniform float u_lod;             // 显式纹理层级 = log2(源尺寸/内容�
 uniform float u_mask_kind;       // 0=无 1=linear 2=rect 3=ellipse
 uniform vec4 u_mask_geom;        // cx, cy, half_w, half_h（pip 帧像素）
 uniform vec4 u_mask_extra;       // rotation_rad, feather_x_pw, invert, unused
+uniform vec2 u_box_size;         // 内容盒像素尺寸（mask px 坐标基准 = v_box × 盒尺寸）
 uniform float u_key_mode;        // 0=无 1=colorkey
 uniform vec4 u_key_params;       // key_r, key_g, key_b, similarity
 uniform float u_key_blend;
@@ -67,7 +68,9 @@ vec4 samplePixel(vec2 norm) {
   return texture(u_tex, norm);
 }
 float maskAlpha() {
-  vec2 px = v_box * vec2(u_mask_geom.z * 2.0, u_mask_geom.w * 2.0);
+  // px = 盒内像素坐标（v_box × 盒尺寸 u_box_size）；u_mask_geom.z/w 是**半轴**，
+  // 不能当盒尺寸乘回（width≠0.5 时蒙版被缩放+偏移——P2 v0.4 重跑留证抓出）。
+  vec2 px = v_box * u_box_size;
   float ux = cos(u_mask_extra.x) * (px.x - u_mask_geom.x) + sin(u_mask_extra.x) * (px.y - u_mask_geom.y);
   if (u_mask_kind < 1.5) {
     float v = 0.5 + ux / max(u_mask_extra.y, 1.0);
@@ -191,6 +194,7 @@ export class Compositor {
       u_mask_kind: gl.getUniformLocation(this.program, "u_mask_kind"),
       u_mask_geom: gl.getUniformLocation(this.program, "u_mask_geom"),
       u_mask_extra: gl.getUniformLocation(this.program, "u_mask_extra"),
+      u_box_size: gl.getUniformLocation(this.program, "u_box_size"),
       u_key_mode: gl.getUniformLocation(this.program, "u_key_mode"),
       u_key_params: gl.getUniformLocation(this.program, "u_key_params"),
       u_key_blend: gl.getUniformLocation(this.program, "u_key_blend"),
@@ -398,6 +402,7 @@ export class Compositor {
     if (mask) {
       const kind = mask.kind === "linear" ? 1 : mask.kind === "rect" ? 2 : 3;
       gl.uniform1f(this.uniforms.u_mask_kind, kind);
+      gl.uniform2f(this.uniforms.u_box_size, rect.w, rect.h);
       const halfW = mask.kind === "linear" ? 1 : Math.max(1.0, (mask.width ?? 0.5) * rect.w / 2.0);
       const halfH = mask.kind === "linear" ? 1 : Math.max(1.0, (mask.height ?? 0.5) * rect.h / 2.0);
       gl.uniform4f(this.uniforms.u_mask_geom, (mask.x ?? 0.5) * rect.w, (mask.y ?? 0.5) * rect.h, halfW, halfH);

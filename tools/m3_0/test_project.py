@@ -9,6 +9,11 @@ RenderPlanCompiler 编译渲染计划，并按 §7.2 白名单断言（R11：测
   V1: A(0-20s) --fade 1s--> B(20-45s, speed 0.8x) [空隙 45-46s 黑底填充] C(46-61s, position+opacity 关键帧)
   V2: P1(10-30s, transform x0.7 y0.3 scale0.35 rotate8)   ← 画中画覆盖轨
   V3: P2(35-55s, transform x0.3 y0.7 scale0.28)           ← 画中画覆盖轨
+  V4: 效果片段×5（IR 契约 v0.4 蒙版/抠像重入的 P2 留证；窗口互不重叠、
+      与 V2/V3 同素材窗错开——不触发 W4 跨轨重叠拆分；字幕帧表之外）：
+      ellipse 羽化0.25 (6-10s, P1) / linear 软边0.05 (16-19s, P2) /
+      colorkey 键色 140C28 (20-24s, P2) / ellipse 硬边+invert+旋转 (30-35s, P1) /
+      rect 硬边+双向旋转 (46-50s, P1)
   C1: 5 条字幕（避开转场区间 19-20s，B2 §4.2 已知偏移帧不入硬门）
 
 用法：python test_project.py <材料目录> <输出目录>
@@ -32,6 +37,19 @@ US = 1_000_000
 # P2 采样帧表（n ↔ PTS n/30）：转场中点/起止±1、黑底填充、关键帧区间非端点、
 # PiP 叠加帧、字幕帧、普通帧；转场区间 ∩ 活动字幕 = ∅（§7.2 采样要求）。
 CAPTION_FRAMES = [120, 420, 810, 1260, 1590]  # 字幕采样帧（单独口径）
+# V4 效果片段采样（v0.4 重入留证）：每片段起/中/末 ±1 帧，覆盖羽化边界内、
+# 硬边边界、抠像 blend 渐变带与条纹像素（键色/键色邻域各一）。
+#   ellipse 羽化 6-10s → 180-299；linear 16-19s → 480-569；colorkey 20-24s
+#   → 600-719（600/601 恰为 V1 转场帧，两效果同帧组合是有意样本）；
+#   ellipse 硬边+invert 30-35s → 900-1049（900 与 PiP1 尾采样重叠=多浮层
+#   同帧组合）；rect 硬边 46-50s → 1380-1499（叠加在 C 段关键帧主轨上）。
+EFFECT_SAMPLE_FRAMES = [
+    180, 181, 240, 298, 299,             # ellipse+feather0.25 起中末
+    480, 481, 525, 568, 569,             # linear 软边
+    600, 601, 660, 718, 719,             # colorkey（含转场同帧）
+    900, 901, 975, 1048, 1049,           # ellipse 硬边+invert+rotate
+    1381, 1440, 1441, 1498, 1499,        # rect 硬边+rotate（关键帧主轨上）
+]
 SAMPLE_FRAMES = sorted(set([
     # 转场 fade(1s) 窗口 [19s,20s)：起止±1 帧 + 中点
     569, 570, 571, 585, 599, 600, 601,
@@ -43,6 +61,8 @@ SAMPLE_FRAMES = sorted(set([
     330, 450, 750, 899,
     # PiP2 [35s,55s] 叠加帧（含启用边界 1050=35s 首帧）
     1050, 1080, 1200, 1590, 1649,
+    # V4 效果片段（v0.4 重入留证）
+    *EFFECT_SAMPLE_FRAMES,
     # 字幕帧（单独口径）
     *CAPTION_FRAMES,
     # 普通主轨帧（含首帧；末采样 1799——1829 落入权威端 position-keyframe 超长缺陷的冻结尾部，见报告）
@@ -68,6 +88,7 @@ def build_document(materials: dict[str, Path]) -> dict:
         "canvas": {"width": 1920, "height": 1080, "fps_num": 30, "fps_den": 1, "background_color": "#000000"},
         "tracks": [
             {"id": "C1", "kind": "text", "locked": False, "hidden": False, "muted": False, "solo": False},
+            {"id": "V4", "kind": "video", "locked": False, "hidden": False, "muted": False, "solo": False},
             {"id": "V3", "kind": "video", "locked": False, "hidden": False, "muted": False, "solo": False},
             {"id": "V2", "kind": "video", "locked": False, "hidden": False, "muted": False, "solo": False},
             {"id": "V1", "kind": "video", "locked": False, "hidden": False, "muted": False, "solo": False},
@@ -92,6 +113,27 @@ def build_document(materials: dict[str, Path]) -> dict:
                  transform={"x": 0.7, "y": 0.3, "scale": 0.35, "rotate": 8.0}),
             clip("m3clip_p2", "V3", "m3mat_p2_1080", "asset_m3_p2", 0, 20 * US, 35 * US, 55 * US,
                  transform={"x": 0.3, "y": 0.7, "scale": 0.28, "rotate": 0.0}),
+            # V4 效果片段×5（v0.4 蒙版/抠像重入 P2 留证）。素材/窗口与 V2/V3
+            # 错开：不触发跨轨重叠拆分（W4 已单独验收）；colorkey 键色取
+            # m3mat_p2 底色 RGB(20,12,40)=140C28，blend 渐变带内含条纹像素。
+            clip("m3fx_ellipse_feather", "V4", "m3mat_p1_1080", "asset_m3_p1", 2 * US, 6 * US, 6 * US, 10 * US,
+                 transform={"x": 0.5, "y": 0.5, "scale": 0.6, "rotate": 0.0},
+                 mask={"kind": "ellipse", "x": 0.5, "y": 0.5, "width": 0.7, "height": 0.7,
+                       "rotation": 0.0, "feather": 0.25}),
+            clip("m3fx_linear_soft", "V4", "m3mat_p2_1080", "asset_m3_p2", 2 * US, 5 * US, 16 * US, 19 * US,
+                 transform={"x": 0.35, "y": 0.35, "scale": 0.5, "rotate": 0.0},
+                 mask={"kind": "linear", "x": 0.5, "y": 0.5, "rotation": 30.0, "feather": 0.05}),
+            clip("m3fx_colorkey", "V4", "m3mat_p2_1080", "asset_m3_p2", 0, 4 * US, 20 * US, 24 * US,
+                 transform={"x": 0.65, "y": 0.6, "scale": 0.5, "rotate": 0.0},
+                 keying={"color": "140C28", "similarity": 0.18, "blend": 0.10}),
+            clip("m3fx_ellipse_invert", "V4", "m3mat_p1_1080", "asset_m3_p1", 0, 5 * US, 30 * US, 35 * US,
+                 transform={"x": 0.4, "y": 0.45, "scale": 0.55, "rotate": 12.0},
+                 mask={"kind": "ellipse", "x": 0.4, "y": 0.5, "width": 0.6, "height": 0.6,
+                       "rotation": 20.0, "feather": 0.0, "invert": True}),
+            clip("m3fx_rect_hard", "V4", "m3mat_p1_1080", "asset_m3_p1", 0, 4 * US, 46 * US, 50 * US,
+                 transform={"x": 0.6, "y": 0.5, "scale": 0.5, "rotate": -15.0},
+                 mask={"kind": "rect", "x": 0.5, "y": 0.5, "width": 0.6, "height": 0.5,
+                       "rotation": 0.0, "feather": 0.0}),
         ],
         "captions": [
             {"caption_id": f"m3cap_{i:02d}", "track_id": "C1", "source_clip_id": None,
@@ -114,10 +156,16 @@ def build_document(materials: dict[str, Path]) -> dict:
 
 
 def assert_whitelist(document: dict) -> None:
-    """R11：测试时间线构建时断言不含排除语义；关键帧只配 V1 主轨。"""
+    """R11：测试时间线构建时断言不含排除语义。
+
+    v0.4 起 mask/keying 允许出现在覆盖轨（IR 契约重入），主轨（V1）仍禁止
+    （权威端不消费）；关键帧仍只配 V1 主轨。
+    """
     for item in document["clips"]:
-        assert item.get("mask") is None, f"{item['clip_id']}: mask 不在 P2 子集"
-        assert item.get("keying") is None, f"{item['clip_id']}: keying 不在 P2 子集"
+        if item.get("mask") is not None:
+            assert item["track_id"] != "V1", f"{item['clip_id']}: 主轨 mask 不在 P2 子集"
+        if item.get("keying") is not None:
+            assert item["track_id"] != "V1", f"{item['clip_id']}: 主轨 keying 不在 P2 子集"
         assert item.get("reframe") is None, f"{item['clip_id']}: reframe 不在 P2 子集"
         assert not item.get("reverse_playback"), f"{item['clip_id']}: reverse 不在 P2 实测子集"
         kf = item.get("keyframes")

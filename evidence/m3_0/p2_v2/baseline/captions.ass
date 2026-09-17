@@ -1,0 +1,21 @@
+﻿[Script Info]
+ScriptType: v4.00+
+PlayResX: 960
+PlayResY: 540
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+YCbCr Matrix: TV.709
+
+[V4+ Styles]
+Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
+Style: default-bottom,Noto Sans CJK SC,64,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,4,0,2,80,80,150,1
+Style: game-safe-bottom,Noto Sans CJK SC,64,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,4,0,2,80,80,310,1
+Style: high-contrast,Noto Sans CJK SC,62,&H00FFFFFF,&H000000FF,&H00000000,&H00101010,0,0,0,0,100,100,0,0,3,1,0,2,80,80,170,1
+
+[Events]
+Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
+Dialogue: 0,0:00:02.00,0:00:06.00,default-bottom,,0,0,0,,低帧率合成探针测试字幕一
+Dialogue: 0,0:00:12.00,0:00:16.00,default-bottom,,0,0,0,,第二段字幕在转场之前结束
+Dialogue: 0,0:00:25.00,0:00:29.00,default-bottom,,0,0,0,,转场之后 B 段字幕三
+Dialogue: 0,0:00:40.00,0:00:44.00,default-bottom,,0,0,0,,画中画与字幕同时出现四
+Dialogue: 0,0:00:50.00,0:00:56.00,default-bottom,,0,0,0,,关键帧运动区间内末段字幕五

@@ -1,0 +1,693 @@
+{
+ "probe": "m3p2",
+ "chroma_phase": [
+  0,
+  0
+ ],
+ "frame_source": "WebCodecs VideoDecoder (worker, hand-written BMFF demux), colorSpace pinned bt709",
+ "frame_source_note": "<video>.currentTime 步进呈现语义不透明（暂停视频 rVFC 不触发 / texImage2D 陈旧帧），P2 帧源改用 WebCodecs；P1 仍为 <video>",
+ "canvas": {
+  "width": 960,
+  "height": 540,
+  "fps": 30,
+  "duration_frames": 1800,
+  "duration_us": 60000000,
+  "background": "#000000"
+ },
+ "adapter": {
+  "adapter": "ANGLE (Intel, Intel(R) Iris(R) Xe Graphics (0x00009A49) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+  "vendor": "Google Inc. (Intel)"
+ },
+ "hardware_check": {
+  "hardware": true,
+  "software": false
+ },
+ "decoder_hardware": {
+  "I0": "prefer-hardware",
+  "I1": "prefer-hardware",
+  "I2": "prefer-hardware",
+  "I3": "prefer-hardware",
+  "I4": "prefer-hardware"
+ },
+ "sample_count": 55,
+ "caption_font_loaded": true,
+ "frames": [
+  {
+   "n": 0,
+   "kind": "segment",
+   "overlays": 0,
+   "caption": false,
+   "decode_upload_ms": 145.7,
+   "compose_ms": 0.6
+  },
+  {
+   "n": 30,
+   "kind": "segment",
+   "overlays": 0,
+   "caption": false,
+   "decode_upload_ms": 43.1,
+   "compose_ms": 0.2
+  },
+  {
+   "n": 120,
+   "kind": "segment",
+   "overlays": 0,
+   "caption": true,
+   "decode_upload_ms": 43.4,
+   "compose_ms": 0.6
+  },
+  {
+   "n": 180,
+   "kind": "segment",
+   "overlays": 1,
+   "caption": true,
+   "decode_upload_ms": 75.6,
+   "compose_ms": 0.2
+  },
+  {
+   "n": 181,
+   "kind": "segment",
+   "overlays": 1,
+   "caption": false,
+   "decode_upload_ms": 32.5,
+   "compose_ms": 0.2
+  },
+  {
+   "n": 240,
+   "kind": "segment",
+   "overlays": 1,
+   "caption": false,
+   "decode_upload_ms": 69,
+   "compose_ms": 0.1
+  },
+  {
+   "n": 298,
+   "kind": "segment",
+   "overlays": 1,
+   "caption": false,
+   "decode_upload_ms": 149,
+   "compose_ms": 0.2
+  },
+  {
+   "n": 299,
+   "kind": "segment",
+   "overlays": 1,
+   "caption": false,
+   "decode_upload_ms": 36.7,
+   "compose_ms": 0
+  },
+  {
+   "n": 330,
+   "kind": "segment",
+   "overlays": 1,
+   "caption": false,
+   "decode_upload_ms": 77.9,
+   "compose_ms": 0.2
+  },
+  {
+   "n": 420,
+   "kind": "segment",
+   "overlays": 1,
+   "caption": true,
+   "decode_upload_ms": 61.5,
+   "compose_ms": 0.3
+  },
+  {
+   "n": 450,
+   "kind": "segment",
+   "overlays": 1,
+   "caption": true,
+   "decode_upload_ms": 65.3,
+   "compose_ms": 0.2
+  },
+  {
+   "n": 480,
+   "kind": "segment",
+   "overlays": 2,
+   "caption": true,
+   "decode_upload_ms": 97.7,
+   "compose_ms": 0.1
+  },
+  {
+   "n": 481,
+   "kind": "segment",
+   "overlays": 2,
+   "caption": false,
+   "decode_upload_ms": 57.9,
+   "compose_ms": 0
+  },
+  {
+   "n": 510,
+   "kind": "segment",
+   "overlays": 2,
+   "caption": false,
+   "decode_upload_ms": 100.6,
+   "compose_ms": 0.1
+  },
+  {
+   "n": 525,
+   "kind": "segment",
+   "overlays": 2,
+   "caption": false,
+   "decode_upload_ms": 56.8,
+   "compose_ms": 0.2
+  },
+  {
+   "n": 568,
+   "kind": "segment",
+   "overlays": 2,
+   "caption": false,
+   "decode_upload_ms": 212,
+   "compose_ms": 0.2
+  },
+  {
+   "n": 569,
+   "kind": "segment",
+   "overlays": 2,
+   "caption": false,
+   "decode_upload_ms": 44.1,
+   "compose_ms": 0
+  },
+  {
+   "n": 570,
+   "kind": "transition",
+   "overlays": 2,
+   "caption": false,
+   "decode_upload_ms": 183.9,
+   "compose_ms": 0.2
+  },
+  {
+   "n": 571,
+   "kind": "transition",
+   "overlays": 1,
+   "caption": false,
+   "decode_upload_ms": 65.7,
+   "compose_ms": 0.2
+  },
+  {
+   "n": 585,
+   "kind": "transition",
+   "overlays": 1,
+   "caption": false,
+   "decode_upload_ms": 47.1,
+   "compose_ms": 0
+  },
+  {
+   "n": 599,
+   "kind": "transition",
+   "overlays": 1,
+   "caption": false,
+   "decode_upload_ms": 53.6,
+   "compose_ms": 0.2
+  },
+  {
+   "n": 600,
+   "kind": "segment",
+   "overlays": 2,
+   "caption": false,
+   "decode_upload_ms": 76.8,
+   "compose_ms": 0.4
+  },
+  {
+   "n": 601,
+   "kind": "segment",
+   "overlays": 2,
+   "caption": false,
+   "decode_upload_ms": 96.1,
+   "compose_ms": 0.2
+  },
+  {
+   "n": 660,
+   "kind": "segment",
+   "overlays": 2,
+   "caption": false,
+   "decode_upload_ms": 112.2,
+   "compose_ms": 0.2
+  },
+  {
+   "n": 718,
+   "kind": "segment",
+   "overlays": 2,
+   "caption": false,
+   "decode_upload_ms": 202.4,
+   "compose_ms": 0.2
+  },
+  {
+   "n": 719,
+   "kind": "segment",
+   "overlays": 2,
+   "caption": false,
+   "decode_upload_ms": 46.2,
+   "compose_ms": 0.1
+  },
+  {
+   "n": 750,
+   "kind": "segment",
+   "overlays": 1,
+   "caption": true,
+   "decode_upload_ms": 97,
+   "compose_ms": 0.4
+  },
+  {
+   "n": 810,
+   "kind": "segment",
+   "overlays": 1,
+   "caption": true,
+   "decode_upload_ms": 77.3,
+   "compose_ms": 0.1
+  },
+  {
+   "n": 899,
+   "kind": "segment",
+   "overlays": 1,
+   "caption": false,
+   "decode_upload_ms": 118.4,
+   "compose_ms": 0.1
+  },
+  {
+   "n": 900,
+   "kind": "segment",
+   "overlays": 2,
+   "caption": false,
+   "decode_upload_ms": 100.9,
+   "compose_ms": 0.2
+  },
+  {
+   "n": 901,
+   "kind": "segment",
+   "overlays": 1,
+   "caption": false,
+   "decode_upload_ms": 67.5,
+   "compose_ms": 0
+  },
+  {
+   "n": 975,
+   "kind": "segment",
+   "overlays": 1,
+   "caption": false,
+   "decode_upload_ms": 99.2,
+   "compose_ms": 0
+  },
+  {
+   "n": 1000,
+   "kind": "segment",
+   "overlays": 1,
+   "caption": false,
+   "decode_upload_ms": 86.4,
+   "compose_ms": 0.1
+  },
+  {
+   "n": 1048,
+   "kind": "segment",
+   "overlays": 1,
+   "caption": false,
+   "decode_upload_ms": 110.4,
+   "compose_ms": 0.1
+  },
+  {
+   "n": 1049,
+   "kind": "segment",
+   "overlays": 1,
+   "caption": false,
+   "decode_upload_ms": 33.7,
+   "compose_ms": 0
+  },
+  {
+   "n": 1050,
+   "kind": "segment",
+   "overlays": 2,
+   "caption": false,
+   "decode_upload_ms": 101.5,
+   "compose_ms": 0.1
+  },
+  {
+   "n": 1080,
+   "kind": "segment",
+   "overlays": 1,
+   "caption": false,
+   "decode_upload_ms": 79.2,
+   "compose_ms": 0.2
+  },
+  {
+   "n": 1200,
+   "kind": "segment",
+   "overlays": 1,
+   "caption": true,
+   "decode_upload_ms": 81.6,
+   "compose_ms": 0.2
+  },
+  {
+   "n": 1260,
+   "kind": "segment",
+   "overlays": 1,
+   "caption": true,
+   "decode_upload_ms": 68.3,
+   "compose_ms": 0.1
+  },
+  {
+   "n": 1353,
+   "kind": "segment",
+   "overlays": 1,
+   "caption": false,
+   "decode_upload_ms": 68.9,
+   "compose_ms": 0.2
+  },
+  {
+   "n": 1365,
+   "kind": "segment",
+   "overlays": 1,
+   "caption": false,
+   "decode_upload_ms": 30.1,
+   "compose_ms": 0.1
+  },
+  {
+   "n": 1380,
+   "kind": "segment",
+   "overlays": 2,
+   "caption": false,
+   "decode_upload_ms": 80,
+   "compose_ms": 0.1
+  },
+  {
+   "n": 1381,
+   "kind": "segment",
+   "overlays": 2,
+   "caption": false,
+   "decode_upload_ms": 51.1,
+   "compose_ms": 0.1
+  },
+  {
+   "n": 1395,
+   "kind": "segment",
+   "overlays": 2,
+   "caption": false,
+   "decode_upload_ms": 51,
+   "compose_ms": 0.1
+  },
+  {
+   "n": 1440,
+   "kind": "segment",
+   "overlays": 2,
+   "caption": false,
+   "decode_upload_ms": 74,
+   "compose_ms": 0.1
+  },
+  {
+   "n": 1441,
+   "kind": "segment",
+   "overlays": 2,
+   "caption": false,
+   "decode_upload_ms": 59,
+   "compose_ms": 0.1
+  },
+  {
+   "n": 1470,
+   "kind": "segment",
+   "overlays": 2,
+   "caption": false,
+   "decode_upload_ms": 87.5,
+   "compose_ms": 0.1
+  },
+  {
+   "n": 1498,
+   "kind": "segment",
+   "overlays": 2,
+   "caption": false,
+   "decode_upload_ms": 51.4,
+   "compose_ms": 0.1
+  },
+  {
+   "n": 1499,
+   "kind": "segment",
+   "overlays": 2,
+   "caption": false,
+   "decode_upload_ms": 50.7,
+   "compose_ms": 0
+  },
+  {
+   "n": 1500,
+   "kind": "segment",
+   "overlays": 2,
+   "caption": true,
+   "decode_upload_ms": 120.7,
+   "compose_ms": 0.3
+  },
+  {
+   "n": 1560,
+   "kind": "segment",
+   "overlays": 1,
+   "caption": true,
+   "decode_upload_ms": 53.1,
+   "compose_ms": 0.1
+  },
+  {
+   "n": 1590,
+   "kind": "segment",
+   "overlays": 1,
+   "caption": true,
+   "decode_upload_ms": 50.5,
+   "compose_ms": 0.1
+  },
+  {
+   "n": 1649,
+   "kind": "segment",
+   "overlays": 1,
+   "caption": true,
+   "decode_upload_ms": 118.4,
+   "compose_ms": 0
+  },
+  {
+   "n": 1740,
+   "kind": "segment",
+   "overlays": 0,
+   "caption": false,
+   "decode_upload_ms": 28.1,
+   "compose_ms": 0.1
+  },
+  {
+   "n": 1799,
+   "kind": "segment",
+   "overlays": 0,
+   "caption": false,
+   "decode_upload_ms": 58.7,
+   "compose_ms": 0.1
+  }
+ ],
+ "environment": {
+  "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) @aivideo/desktop/0.0.1 Chrome/136.0.7103.93 Electron/36.2.1 Safari/537.36",
+  "device_pixel_ratio": 1.5,
+  "hardware_concurrency": 8,
+  "metrics": [
+   {
+    "cpu": {
+     "cumulativeCPUUsage": 2.034926,
+     "percentCPUUsage": 0,
+     "idleWakeupsPerSecond": 0
+    },
+    "pid": 24572,
+    "type": "Browser",
+    "creationTime": 1789643883077.997,
+    "memory": {
+     "workingSetSize": 111072,
+     "peakWorkingSetSize": 162268,
+     "privateBytes": 81592
+    },
+    "integrityLevel": "medium",
+    "sandboxed": false
+   },
+   {
+    "cpu": {
+     "cumulativeCPUUsage": 6.793158,
+     "percentCPUUsage": 0,
+     "idleWakeupsPerSecond": 0
+    },
+    "pid": 21664,
+    "type": "GPU",
+    "creationTime": 1789643883345.05,
+    "serviceName": "GPU",
+    "memory": {
+     "workingSetSize": 686048,
+     "peakWorkingSetSize": 688084,
+     "privateBytes": 614168
+    },
+    "integrityLevel": "low",
+    "sandboxed": true
+   },
+   {
+    "cpu": {
+     "cumulativeCPUUsage": 0.227395,
+     "percentCPUUsage": 0,
+     "idleWakeupsPerSecond": 0
+    },
+    "pid": 24052,
+    "type": "Utility",
+    "creationTime": 1789643883353.76,
+    "serviceName": "network.mojom.NetworkService",
+    "name": "Network Service",
+    "memory": {
+     "workingSetSize": 53976,
+     "peakWorkingSetSize": 54200,
+     "privateBytes": 14596
+    },
+    "integrityLevel": "medium",
+    "sandboxed": false
+   },
+   {
+    "cpu": {
+     "cumulativeCPUUsage": 4.105615,
+     "percentCPUUsage": 0,
+     "idleWakeupsPerSecond": 0
+    },
+    "pid": 24040,
+    "type": "Tab",
+    "creationTime": 1789643883435.032,
+    "memory": {
+     "workingSetSize": 320164,
+     "peakWorkingSetSize": 357600,
+     "privateBytes": 266108
+    },
+    "integrityLevel": "medium",
+    "sandboxed": false
+   }
+  ],
+  "feature_status": {
+   "2d_canvas": "enabled",
+   "direct_rendering_display_compositor": "disabled_off_ok",
+   "gpu_compositing": "enabled",
+   "multiple_raster_threads": "enabled_on",
+   "opengl": "enabled_on",
+   "rasterization": "enabled",
+   "raw_draw": "disabled_off_ok",
+   "skia_graphite": "disabled_off",
+   "video_decode": "enabled",
+   "video_encode": "enabled",
+   "vulkan": "disabled_off",
+   "webgl": "enabled",
+   "webgl2": "enabled",
+   "webgpu": "enabled",
+   "webnn": "disabled_off"
+  },
+  "gpu_info": {
+   "auxAttributes": {
+    "amdSwitchable": false,
+    "canSupportThreadedTextureMailbox": false,
+    "directMLFeatureLevel": "Not supported",
+    "displayType": "ANGLE_D3D11",
+    "dx12FeatureLevel": "Not supported",
+    "glExtensions": "GL_AMD_performance_monitor GL_ANGLE_base_vertex_base_instance_shader_builtin GL_ANGLE_blob_cache GL_ANGLE_client_arrays GL_ANGLE_depth_texture GL_ANGLE_framebuffer_blit GL_ANGLE_framebuffer_multisample GL_ANGLE_get_serialized_context_string GL_ANGLE_get_tex_level_parameter GL_ANGLE_instanced_arrays GL_ANGLE_lossy_etc_decode GL_ANGLE_memory_size GL_ANGLE_pack_reverse_row_order GL_ANGLE_polygon_mode GL_ANGLE_program_binary_readiness_query GL_ANGLE_program_cache_control GL_ANGLE_provoking_vertex GL_ANGLE_request_extension GL_ANGLE_robust_client_memory GL_ANGLE_texture_compression_dxt3 GL_ANGLE_texture_compression_dxt5 GL_ANGLE_texture_usage GL_ANGLE_translated_shader_source GL_APPLE_clip_distance GL_ARM_rgba8 GL_CHROMIUM_bind_generates_resource GL_CHROMIUM_bind_uniform_location GL_CHROMIUM_color_buffer_float_rgb GL_CHROMIUM_color_buffer_float_rgba GL_CHROMIUM_copy_compressed_texture GL_CHROMIUM_copy_texture GL_CHROMIUM_lose_context GL_CHROMIUM_sync_query GL_EXT_EGL_image_external_wrap_modes GL_EXT_blend_func_extended GL_EXT_blend_minmax GL_EXT_clip_control GL_EXT_color_buffer_half_float GL_EXT_debug_label GL_EXT_debug_marker GL_EXT_depth_clamp GL_EXT_discard_framebuffer GL_EXT_disjoint_timer_query GL_EXT_draw_buffers GL_EXT_draw_elements_base_vertex GL_EXT_float_blend GL_EXT_frag_depth GL_EXT_instanced_arrays GL_EXT_map_buffer_range GL_EXT_multisampled_render_to_texture GL_EXT_occlusion_query_boolean GL_EXT_polygon_offset_clamp GL_EXT_read_format_bgra GL_EXT_robustness GL_EXT_sRGB GL_EXT_shader_texture_lod GL_EXT_texture_border_clamp GL_EXT_texture_compression_bptc GL_EXT_texture_compression_dxt1 GL_EXT_texture_compression_rgtc GL_EXT_texture_compression_s3tc_srgb GL_EXT_texture_filter_anisotropic GL_EXT_texture_format_BGRA8888 GL_EXT_texture_mirror_clamp_to_edge GL_EXT_texture_norm16 GL_EXT_texture_rg GL_EXT_texture_storage GL_EXT_texture_type_2_10_10_10_REV GL_EXT_unpack_subimage GL_KHR_debug GL_KHR_parallel_shader_compile GL_KHR_robustness GL_NV_EGL_stream_consumer_external GL_NV_fence GL_NV_framebuffer_blit GL_NV_pack_subimage GL_NV_pixel_buffer_object GL_OES_EGL_image GL_OES_EGL_image_external GL_OES_compressed_EAC_R11_signed_texture GL_OES_compressed_EAC_R11_unsigned_texture GL_OES_compressed_EAC_RG11_signed_texture GL_OES_compressed_EAC_RG11_unsigned_texture GL_OES_compressed_ETC2_RGB8_texture GL_OES_compressed_ETC2_RGBA8_texture GL_OES_compressed_ETC2_punchthroughA_RGBA8_texture GL_OES_compressed_ETC2_punchthroughA_sRGB8_alpha_texture GL_OES_compressed_ETC2_sRGB8_alpha8_texture GL_OES_compressed_ETC2_sRGB8_texture GL_OES_depth24 GL_OES_depth32 GL_OES_draw_elements_base_vertex GL_OES_element_index_uint GL_OES_fbo_render_mipmap GL_OES_get_program_binary GL_OES_mapbuffer GL_OES_packed_depth_stencil GL_OES_required_internalformat GL_OES_rgb8_rgba8 GL_OES_standard_derivatives GL_OES_surfaceless_context GL_OES_texture_border_clamp GL_OES_texture_float GL_OES_texture_float_linear GL_OES_texture_half_float GL_OES_texture_half_float_linear GL_OES_texture_npot GL_OES_vertex_array_object GL_WEBGL_video_texture ",
+    "glImplementationParts": "(gl=egl-angle,angle=d3d11)",
+    "glRenderer": "ANGLE (Intel, Intel(R) Iris(R) Xe Graphics (0x00009A49) Direct3D11 vs_5_0 ps_5_0, D3D11-31.0.101.3222)",
+    "glResetNotificationStrategy": 33362,
+    "glVendor": "Google Inc. (Intel)",
+    "glVersion": "OpenGL ES 2.0.0 (ANGLE 2.1.25160 git hash: ecc378cc6110)",
+    "glWsExtensions": "EGL_EXT_create_context_robustness EGL_ANGLE_d3d_share_handle_client_buffer EGL_ANGLE_d3d_texture_client_buffer EGL_ANGLE_surface_d3d_texture_2d_share_handle EGL_ANGLE_query_surface_pointer EGL_ANGLE_window_fixed_size EGL_ANGLE_keyed_mutex EGL_ANGLE_surface_orientation EGL_ANGLE_direct_composition EGL_NV_post_sub_buffer EGL_KHR_create_context EGL_KHR_image EGL_KHR_image_base EGL_KHR_gl_texture_2D_image EGL_KHR_gl_texture_cubemap_image EGL_KHR_gl_renderbuffer_image EGL_KHR_get_all_proc_addresses EGL_KHR_stream EGL_KHR_stream_consumer_gltexture EGL_NV_stream_consumer_gltexture_yuv EGL_ANGLE_stream_producer_d3d_texture EGL_ANGLE_create_context_webgl_compatibility EGL_CHROMIUM_create_context_bind_generates_resource EGL_CHROMIUM_sync_control EGL_EXT_pixel_format_float EGL_KHR_surfaceless_context EGL_ANGLE_display_texture_share_group EGL_ANGLE_display_semaphore_share_group EGL_ANGLE_create_context_client_arrays EGL_ANGLE_program_cache_control EGL_ANGLE_robust_resource_initialization EGL_ANGLE_create_context_extensions_enabled EGL_ANDROID_blob_cache EGL_ANDROID_recordable EGL_ANGLE_image_d3d11_texture EGL_ANGLE_create_context_backwards_compatible EGL_KHR_no_config_context EGL_KHR_create_context_no_error EGL_KHR_reusable_sync EGL_ANGLE_memory_usage_report ",
+    "glWsVendor": "Google Inc. (Intel)",
+    "glWsVersion": "1.5 (ANGLE 2.1.25160 git hash: ecc378cc6110)",
+    "hardwareSupportsVulkan": false,
+    "inProcessGpu": false,
+    "initializationTime": 288.246,
+    "isAsan": false,
+    "isClangCoverage": false,
+    "jpegDecodeAcceleratorSupported": false,
+    "maxMsaaSamples": "16",
+    "optimus": false,
+    "overlayInfo": {
+     "bgra8OverlaySupport": "SCALING",
+     "directComposition": true,
+     "nv12OverlaySupport": "SCALING",
+     "p010OverlaySupport": "SOFTWARE",
+     "rgb10a2OverlaySupport": "SCALING",
+     "supportsOverlays": true,
+     "yuy2OverlaySupport": "SCALING"
+    },
+    "passthroughCmdDecoder": true,
+    "pixelShaderVersion": "5.0",
+    "sandboxed": true,
+    "skiaBackendType": "GaneshGL",
+    "subpixelFontRendering": true,
+    "supportsD3dSharedImages": true,
+    "supportsDirectML": false,
+    "supportsDx12": false,
+    "supportsVulkan": false,
+    "targetCpuBits": 64,
+    "vertexShaderVersion": "5.0",
+    "videoDecodeAcceleratorSupportedProfile": {
+     "encrypted_only": false,
+     "maxResolutionHeight": 16384,
+     "maxResolutionWidth": 16384,
+     "minResolutionHeight": 64,
+     "minResolutionWidth": 64,
+     "profile": 29
+    },
+    "videoEncodeAcceleratorSupportedProfile": {
+     "maxFramerateDenominator": 1,
+     "maxFramerateNumerator": 30,
+     "maxResolutionHeight": 1920,
+     "maxResolutionWidth": 1080,
+     "minResolutionHeight": 114,
+     "minResolutionWidth": 66,
+     "profile": 16
+    },
+    "visibilityCallbackCallCount": 0,
+    "vulkanVersion": "Not supported"
+   },
+   "gpuDevice": [
+    {
+     "active": true,
+     "deviceId": 39497,
+     "deviceString": "Intel(R) Iris(R) Xe Graphics",
+     "driverVendor": "Intel",
+     "driverVersion": "31.0.101.3222",
+     "gpuPreference": 2,
+     "revision": 1,
+     "subSysId": 805601414,
+     "vendorId": 32902
+    },
+    {
+     "active": false,
+     "deviceId": 39497,
+     "deviceString": "Intel(R) Iris(R) Xe Graphics",
+     "driverVersion": "31.0.101.3222",
+     "gpuPreference": 0,
+     "revision": 1,
+     "subSysId": 805601414,
+     "vendorId": 32902
+    },
+    {
+     "active": false,
+     "deviceId": 140,
+     "deviceString": "Microsoft Basic Render Driver",
+     "driverVersion": "10.0.26100.9278",
+     "gpuPreference": 0,
+     "revision": 0,
+     "subSysId": 0,
+     "vendorId": 5140
+    }
+   ]
+  },
+  "render_process_gone_count": 0,
+  "primary_display": {
+   "bounds": {
+    "x": 0,
+    "y": 0,
+    "width": 1707,
+    "height": 1067
+   },
+   "work_area_size": {
+    "width": 1707,
+    "height": 1019
+   },
+   "scale_factor": 1.5,
+   "display_frequency": 60,
+   "color_depth": 24,
+   "color_space": "{primaries:BT709, transfer:SRGB, matrix:RGB, range:FULL}"
+  },
+  "device_pixel_ratio_note": "renderer reports window.devicePixelRatio separately"
+ },
+ "versions": {
+  "electron": "36.2.1",
+  "chrome": "136.0.7103.93",
+  "node": "22.15.0"
+ },
+ "note": "PNG 顺序 = sample_frames.json 顺序；compare_tool 按同一顺序映射两侧帧"
+}
