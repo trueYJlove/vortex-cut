@@ -147,6 +147,7 @@ def test_preview_ir_endpoint(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_preview_ir_unsupported_feature_degrades(tmp_path: Path, monkeypatch) -> None:
+    # v0.4 重入后：蒙版在覆盖轨放行；主轨（V1）仍 409 拒绝并明示原因。
     client, _settings = _app(tmp_path, monkeypatch)
     with client:
         ui = _ui(client)
@@ -155,7 +156,45 @@ def test_preview_ir_unsupported_feature_degrades(tmp_path: Path, monkeypatch) ->
         response = client.get("/api/v1/projects/proj-ir/preview-ir", headers=ui)
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "PREVIEW_IR_UNSUPPORTED"
-    assert "mask" in response.json()["error"]["message"]
+    assert "蒙版" in response.json()["error"]["message"]
+
+
+def test_preview_ir_overlay_mask_passes_with_effects(tmp_path: Path, monkeypatch) -> None:
+    # v0.4：覆盖轨 mask/keying 走通全链（HTTP → 投影 → overlay 条目 effects）。
+    client, _settings = _app(tmp_path, monkeypatch)
+    with client:
+        ui = _ui(client)
+        video = _fixture_video(tmp_path)
+        _seed(client, video)
+        database = client.app.state.core.db
+        document = dict(DOCUMENT)
+        document["clips"] = list(document["clips"]) + [
+            {"clip_id": "clipP", "track_id": "V2", "order_index": 0, "asset_id": "video-api",
+             "asset_kind": "video", "source_start_us": 0, "source_end_us": 1_000_000,
+             "timeline_start_us": 0, "timeline_end_us": 1_000_000, "layout": "fit",
+             "audio": {"enabled": False, "gain_db": 0.0},
+             "transform": {"x": 0.7, "y": 0.3, "scale": 0.35, "rotate": 0.0},
+             "mask": {"kind": "ellipse", "x": 0.4, "y": 0.6, "width": 0.8, "height": 0.5},
+             "keying": {"color": "00FF00", "similarity": 0.3, "blend": 0.1}},
+        ]
+        import json as _json
+
+        with database.connection() as db:
+            db.execute(
+                "INSERT INTO timeline_revisions(id,project_id,parent_revision_id,schema_version,"
+                "document_json,document_sha256,summary,created_by,created_at) "
+                "VALUES ('rev-ir-pip','proj-ir',NULL,1,?,'sha','ir pip test','user','now')",
+                (_json.dumps(document, ensure_ascii=False),),
+            )
+        response = client.get("/api/v1/projects/proj-ir/preview-ir",
+                              params={"timeline_revision_id": "rev-ir-pip"}, headers=ui)
+        assert response.status_code == 200, response.text
+        frames = response.json()["ir"]["frames"]
+        overlay = frames[15]["overlays"][0]
+        assert overlay["clip_id"] == "clipP"
+        assert overlay["effects"]["mask"] == {"kind": "ellipse", "x": 0.4, "y": 0.6, "width": 0.8, "height": 0.5}
+        assert overlay["effects"]["keying"] == {"color": "00FF00", "similarity": 0.3, "blend": 0.1}
+        assert response.json()["ir"]["projector_version"] == 3
 
 
 def test_preview_ir_unknown_revision(tmp_path: Path, monkeypatch) -> None:

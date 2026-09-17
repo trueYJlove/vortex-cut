@@ -10,6 +10,7 @@
  * - 字幕层（基础样式，IR 携带已解析数值；libass vs 浏览器光栅化为预期系统差）。
  */
 import type { Ir, IrContent, IrMainSegment, IrFrame } from "./ir.js";
+import { keyingColorRgb, type IrEffectKeying, type IrEffectMask } from "./effects.js";
 
 const VERT = `#version 300 es
 in vec2 a_pos;
@@ -38,6 +39,13 @@ uniform float u_yuv_mode;        // 1 = NV12 平面 + BT.709 limited→full
 uniform float u_chroma_phase_x;  // 色度采样相位（源色度坐标偏移，第 0 步自校准定标）
 uniform float u_chroma_phase_y;
 uniform float u_lod;             // 显式纹理层级 = log2(源尺寸/内容盒尺寸)
+// IR v0.4 覆盖轨 alpha 效果（与 worker 版同式；语义镜像 effects.ts）。
+uniform float u_mask_kind;       // 0=无 1=linear 2=rect 3=ellipse
+uniform vec4 u_mask_geom;        // cx, cy, half_w, half_h（pip 帧像素）
+uniform vec4 u_mask_extra;       // rotation_rad, feather_x_pw, invert, unused
+uniform float u_key_mode;        // 0=无 1=colorkey
+uniform vec4 u_key_params;       // key_r, key_g, key_b, similarity
+uniform float u_key_blend;
 out vec4 frag;
 vec3 yuv2rgb709(float yv, float cb, float cr) {
   float y = (yv * 255.0 - 16.0) / 219.0;
@@ -58,6 +66,35 @@ vec4 samplePixel(vec2 norm) {
   }
   return texture(u_tex, norm);
 }
+float maskAlpha() {
+  vec2 px = v_box * vec2(u_mask_geom.z * 2.0, u_mask_geom.w * 2.0);
+  float ux = cos(u_mask_extra.x) * (px.x - u_mask_geom.x) + sin(u_mask_extra.x) * (px.y - u_mask_geom.y);
+  if (u_mask_kind < 1.5) {
+    float v = 0.5 + ux / max(u_mask_extra.y, 1.0);
+    float a = clamp(v, 0.0, 1.0);
+    return u_mask_extra.z > 0.5 ? 1.0 - a : a;
+  }
+  float uy = -sin(u_mask_extra.x) * (px.x - u_mask_geom.x) + cos(u_mask_extra.x) * (px.y - u_mask_geom.y);
+  float inner;
+  if (u_mask_kind < 2.5) {
+    float norm = max(abs(ux) / u_mask_geom.z, abs(uy) / u_mask_geom.w);
+    inner = clamp(1.0 - min(1.0, norm), 0.0, 1.0);
+  } else {
+    vec2 q = vec2(ux / u_mask_geom.z, uy / u_mask_geom.w);
+    inner = clamp(1.0 - length(q), 0.0, 1.0);
+  }
+  // feather>0：过渡带收进边界内侧（inner/feather，u_mask_extra.w = 原始 feather）；
+  // =0：真硬边（一步跳变，v0.4 权威端同式）
+  float a = u_mask_extra.w > 0.001 ? clamp(inner / u_mask_extra.w, 0.0, 1.0) : (inner > 0.0 ? 1.0 : 0.0);
+  return u_mask_extra.z > 0.5 ? 1.0 - a : a;
+}
+float keyAlpha(vec3 rgb) {
+  float dist = distance(rgb, u_key_params.rgb) / 1.7320508;
+  float sim = u_key_params.w;
+  if (dist <= sim) return 0.0;
+  if (dist >= sim + u_key_blend) return 1.0;
+  return (dist - sim) / u_key_blend;
+}
 void main() {
   vec2 norm;
   if (u_rotation != 0.0) {
@@ -76,6 +113,8 @@ void main() {
   }
   vec4 tex = samplePixel(norm);
   float a = tex.a * u_alpha;
+  if (u_mask_kind > 0.5) a *= maskAlpha();
+  if (u_key_mode > 0.5) a *= keyAlpha(tex.rgb);
   frag = u_premultiplied > 0.5 ? vec4(tex.rgb * a, a) : vec4(tex.rgb, a);
 }`;
 
@@ -149,6 +188,12 @@ export class Compositor {
       u_alpha: gl.getUniformLocation(this.program, "u_alpha"),
       u_rotation: gl.getUniformLocation(this.program, "u_rotation"),
       u_premultiplied: gl.getUniformLocation(this.program, "u_premultiplied"),
+      u_mask_kind: gl.getUniformLocation(this.program, "u_mask_kind"),
+      u_mask_geom: gl.getUniformLocation(this.program, "u_mask_geom"),
+      u_mask_extra: gl.getUniformLocation(this.program, "u_mask_extra"),
+      u_key_mode: gl.getUniformLocation(this.program, "u_key_mode"),
+      u_key_params: gl.getUniformLocation(this.program, "u_key_params"),
+      u_key_blend: gl.getUniformLocation(this.program, "u_key_blend"),
     };
     gl.disable(gl.DEPTH_TEST);
     gl.enable(gl.BLEND);
@@ -314,6 +359,7 @@ export class Compositor {
     textureY: WebGLTexture, textureUV: WebGLTexture | null, textureRgba: WebGLTexture | null,
     rect: IrContent, alpha: number, rotationDeg: number, premultiplied: boolean,
     sourceWidth = 1920,
+    mask?: IrEffectMask, keying?: IrEffectKeying,
   ): void {
     const gl = this.gl;
     const target = this.targetOverride ?? { width: this.canvas.width, height: this.canvas.height, fitX: this.fitX, fitY: this.fitY, fitScale: this.fitScale };
@@ -342,7 +388,36 @@ export class Compositor {
     // GL 端同步度数语义；负号为采样方向对齐（ffmpeg rotate 正角方向，P2 实证校准）。
     gl.uniform1f(this.uniforms.u_rotation, -(rotationDeg * Math.PI) / 180);
     gl.uniform1f(this.uniforms.u_premultiplied, premultiplied ? 1 : 0);
+    this.setEffectUniforms(rect, mask, keying);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+
+  /** v0.4 覆盖轨 alpha 效果 uniform（语义镜像 effects.ts；无效果走 0 快路径）。 */
+  private setEffectUniforms(rect: IrContent, mask?: IrEffectMask, keying?: IrEffectKeying): void {
+    const gl = this.gl;
+    if (mask) {
+      const kind = mask.kind === "linear" ? 1 : mask.kind === "rect" ? 2 : 3;
+      gl.uniform1f(this.uniforms.u_mask_kind, kind);
+      const halfW = mask.kind === "linear" ? 1 : Math.max(1.0, (mask.width ?? 0.5) * rect.w / 2.0);
+      const halfH = mask.kind === "linear" ? 1 : Math.max(1.0, (mask.height ?? 0.5) * rect.h / 2.0);
+      gl.uniform4f(this.uniforms.u_mask_geom, (mask.x ?? 0.5) * rect.w, (mask.y ?? 0.5) * rect.h, halfW, halfH);
+      // linear 分支用 feather·pw 软边带宽（预乘进 uniform）；ellipse/rect 的
+      // feather 分量（u_mask_extra.w）语义为「归一化过渡窗口」，0 = 硬边。
+      const feather = Math.min(1, Math.max(0, mask.feather ?? 0));
+      const featherPw = Math.max(1.0, feather * rect.w);
+      gl.uniform4f(this.uniforms.u_mask_extra, (mask.rotation ?? 0) * Math.PI / 180, featherPw, mask.invert === true ? 1 : 0, feather);
+    } else {
+      gl.uniform1f(this.uniforms.u_mask_kind, 0);
+    }
+    if (keying) {
+      const [kr, kg, kb] = keyingColorRgb(keying);
+      const sim = Math.min(1, Math.max(0, keying.similarity ?? 0.3)) || 0.3;
+      gl.uniform1f(this.uniforms.u_key_mode, 1);
+      gl.uniform4f(this.uniforms.u_key_params, kr, kg, kb, sim);
+      gl.uniform1f(this.uniforms.u_key_blend, Math.min(1, Math.max(0, keying.blend ?? 0.1)) || 0.1);
+    } else {
+      gl.uniform1f(this.uniforms.u_key_mode, 0);
+    }
   }
 
   private static shifted(rect: IrContent, shift: { dx: number; dy: number }): IrContent {
@@ -607,7 +682,7 @@ export class Compositor {
     for (const overlay of frame.overlays) {
       const handle = this.videos.get(overlay.input_id);
       if (handle) this.drawRectYuv(handle.textureY, handle.textureUV, null, overlay.box, overlay.alpha, overlay.rotation_deg, false,
-        this.sourceWidthScale.get(overlay.input_id) ?? 1920);
+        this.sourceWidthScale.get(overlay.input_id) ?? 1920, overlay.effects?.mask, overlay.effects?.keying);
     }
   }
 

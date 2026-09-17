@@ -12,6 +12,7 @@ import { errorCode, safeErrorMessage, safeTaskErrorMessage } from "./safeErrors.
 import { PreviewPipOverlays, type PipOverlay, type PipTransform } from "./PreviewPipOverlays.js";
 import { SyntheticPreview } from "./preview/SyntheticPreview.js";
 import { PreviewSourceResolver } from "./preview/source-resolver.js";
+import { syntheticFallbackNotice } from "./preview/fallback-notice.js";
 import { WaveformCache } from "./timeline/waveform-cache.js";
 import { editorCommands, type EditorCommand } from "./editorCommands.js";
 import { bindingLabel, findConflict, loadShortcuts, matchesBinding, normalizeRecordedBinding, saveShortcuts, DEFAULT_SHORTCUTS, type ShortcutCommandId, type ShortcutEntry } from "./shortcuts.js";
@@ -89,7 +90,7 @@ const jobStatusLabels: Record<Job["status"], string> = { queued: "排队中", ru
 // C22 渲染/校验细分阶段标签；未知 phase 原样显示（旧 Core 无 phase 字段时退回 stage 文本）。
 const jobPhaseLabels: Record<string, string> = { preparing: "准备中", encoding: "编码中", validating_probe: "校验（探测）", validating_decode: "校验（完整解码）", hashing: "完整性哈希", publishing: "正在完成发布" };
 const modelBadgeLabels: Record<ModelSummary["status"], string> = { unavailable: "未下载", queued: "排队中", downloading: "下载中", paused: "已暂停", verifying: "校验中", ready: "就绪", cancelled: "已取消", failed: "失败", corrupt: "已损坏" };
-const jobKindLabels: Partial<Record<Job["kind"], string>> = { transcription: "本地转录", proxy: "代理素材", portrait_sample: "竖版样本", authoritative_preview: "权威预览", final_export: "最终导出" };
+const jobKindLabels: Partial<Record<Job["kind"], string>> = { transcription: "本地转录", proxy: "代理素材", portrait_sample: "竖版样本", authoritative_preview: "权威预览", final_export: "最终导出", waveform: "音频波形" };
 const formatBytes = (bytes: number) => bytes < 1024 ? `${bytes} B` : bytes < 1024 ** 2 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 ** 2).toFixed(1)} MB`;
 const isTranscribable = (asset: Asset) => (asset.kind === "video" || asset.kind === "audio") && asset.availability === "available";
 type RenditionTarget = { key: string; platform_preset_id: string; rendition_preset_id: string; layout_policy: LayoutPolicy };
@@ -1328,7 +1329,7 @@ export function App() {
     if (!project || !timeline || !working?.clips.length) return;
     if (timeline.draft) { showNotice("请先提交或丢弃草稿，再生成权威预览。", "warning"); return; }
     try {
-      const result = await window.desktop.createPreview({ project_id: project.project_id, preview: { timeline_revision_id: timeline.current_revision.timeline_revision_id, encoder_mode: encoderMode, output_ratio: effectiveRatio } });
+      const result = await window.desktop.createPreview({ project_id: project.project_id, preview: { timeline_revision_id: timeline.current_revision.timeline_revision_id, encoder_mode: encoderMode, output_ratio: renderRatio } });
       setPendingVerify(true);
       if (result.preview) {
         setPreviews(items => [result.preview!, ...items.filter(item => item.preview.render_artifact_id !== result.preview!.preview.render_artifact_id)]);
@@ -1353,7 +1354,7 @@ export function App() {
     try {
       const grant = await window.desktop.chooseExportDestination(project.project_id);
       if (!grant) return;
-      const result = await window.desktop.createExport({ project_id: project.project_id, export: { timeline_revision_id: timeline.current_revision.timeline_revision_id, destination_grant_id: grant.destination_grant_id, encoder_mode: encoderMode, output_ratio: effectiveRatio } });
+      const result = await window.desktop.createExport({ project_id: project.project_id, export: { timeline_revision_id: timeline.current_revision.timeline_revision_id, destination_grant_id: grant.destination_grant_id, encoder_mode: encoderMode, output_ratio: renderRatio } });
       if (result.export_record) setExports(items => [result.export_record!, ...items.filter(item => item.export_record.export_record_id !== result.export_record!.export_record.export_record_id)]);
       trackRenderJob(result.job);
       setRenderPanelOpen(true);
@@ -1484,11 +1485,44 @@ export function App() {
       : "fit")
     : "fit"; // 挂载由 working/timeline 门控，此分支仅理论可达
   const effectiveRatio: OutputRatio = (previewRatioTouched ? previewRatio : autoRatio) as OutputRatio;
-  // 合成预览比例：与预览比例选择器/权威预览/导出同源（此前独立按项目画布解析，
-  // 与下拉框显示不一致——素材 16:9 + 项目画布 9:16 时下拉显示 16:9 而合成渲染 9:16）。
-  const syntheticRatio = effectiveRatio;
-  const previewClass = `${previewLayout} ratio-${effectiveRatio}`;
+  // 比例语义（剪映式，下拉随时改渲染画幅；项目画布只是新建时的默认值）：
+  // - 选具体比例码 → 渲染画幅 = 该比例（权威预览/导出/合成预览同步切换）。
+  // - "适应"（原画）→ 渲染画幅 = **当前主轨首片段素材的原始比例**（剪映"原画"）：
+  //   从素材 media_info.video_streams[0] 宽高推比例码；无素材/无法判定时回退
+  //   项目画布比例。切素材后"适应"随之跟随。
+  const assetOriginalRatio = useMemo((): OutputRatio => {
+    const firstVideo = (working?.clips ?? []).find(clip => clip.track_id === "V1" && clip.asset_kind === "video");
+    const asset = firstVideo ? assets.find(item => item.asset.asset_id === firstVideo.asset_id)?.asset : undefined;
+    const stream = (asset?.media_info && "video_streams" in asset.media_info ? (asset.media_info as { video_streams?: Array<{ width?: number; height?: number }> }).video_streams?.[0] : undefined);
+    if (!stream?.width || !stream?.height) return autoRatio === "fit" ? "169" : (autoRatio as OutputRatio);
+    const ratio = stream.width / stream.height;
+    return Math.abs(ratio - 16 / 9) < 0.02 ? "169"
+      : Math.abs(ratio - 9 / 16) < 0.02 ? "916"
+      : Math.abs(ratio - 1) < 0.02 ? "11"
+      : Math.abs(ratio - 4 / 3) < 0.02 ? "43"
+      : Math.abs(ratio - 3 / 4) < 0.02 ? "34"
+      : "169"; // 非标准比例就近归入 16:9（渲染档位只有五档）
+  }, [working, assets, autoRatio]);
+  const renderRatio: OutputRatio = effectiveRatio === "fit" ? assetOriginalRatio : effectiveRatio;
+  // "适应"显示模式：预览框按渲染画幅比例约束（原画比例即素材比例），画布内容
+  // 等比 contain 居中；选具体比例 = 显式切换渲染画幅并按该比例约束预览框。
+  const previewClass = `${previewLayout} ratio-${renderRatio}`;
   // 时间码帧率：优先画布帧率，缺省 30fps。
+  // 比例切换（剪映式）：选具体比例时主轨布局切为 crop_fill（裁切填满——等比
+  // 放大到短边顶满、长边溢出裁剪，剪映同款默认）；blurred_background 模糊垫底
+  // 是竖版包装风格，不随比例切换自动套用。切回"适应"不动时间线布局。
+  const changePreviewRatio = (value: string) => {
+    setPreviewRatio(value);
+    setPreviewRatioTouched(true);
+    setCanvasSize(null);
+    if (canvasRef.current) { canvasRef.current.style.width = ""; canvasRef.current.style.height = ""; }
+    if (value !== "fit" && working) {
+      const layoutOps = working.clips
+        .filter(clip => clip.track_id === "V1" && clip.layout === "blurred_background" && (clip.asset_kind === "video" || clip.asset_kind === "image"))
+        .map(clip => ({ op: "set_layout" as const, clip_id: clip.clip_id, layout: "crop_fill" as const }));
+      if (layoutOps.length > 0) void patchTimeline(layoutOps, "切换比例：主轨裁切填满");
+    }
+  };
   const previewFps = working?.canvas.fps_num && working.canvas.fps_den ? working.canvas.fps_num / working.canvas.fps_den : 30;
   // 预览缩放（剪映式）：点击缩放按钮弹出滑条，对数刻度 25%–500%，缩小时以画面中心整体缩小。
   const zoomT = (z: number) => Math.round(Math.log(z / 0.25) / Math.log(20) * 1000);
@@ -1952,7 +1986,7 @@ export function App() {
         <div className="stage-column" ref={stageColumnRef}>
           <div className="preview-toolbar">
             <div className="tb-right">
-              <label className="tb-field">比例<select aria-label="预览比例" value={effectiveRatio} onChange={event => { setPreviewRatio(event.target.value); setPreviewRatioTouched(true); setCanvasSize(null); if (canvasRef.current) { canvasRef.current.style.width = ""; canvasRef.current.style.height = ""; } }}>{previewRatios.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label>
+              <label className="tb-field">比例<select aria-label="预览比例" value={effectiveRatio} onChange={event => changePreviewRatio(event.target.value)}>{previewRatios.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label>
               <span className="tb-sep" aria-hidden="true" />
               <label className="tb-field">编码<select aria-label="编码模式" value={encoderMode} onChange={event => setEncoderMode(event.target.value as EncoderMode)}><option value="auto">自动</option><option value="software">软件</option></select></label>
               <button className="render-panel-toggle" onClick={() => setRenderPanelOpen(true)}>渲染与导出{renderActivity ? <span className="render-badge" aria-hidden="true">{renderActivity}</span> : null}</button>
@@ -1964,7 +1998,7 @@ export function App() {
             {previewMode === "authoritative" && authoritativeMediaUrl && <video ref={videoRef} className="preview-foreground authoritative-video" src={authoritativeMediaUrl} aria-label={reframePlayback ? "重构图权威预览视频" : exportPlayback ? "导出视频" : "权威预览视频"} controls onEnded={() => { setPlaying(false); setExportPlayback(undefined); setReframePlayback(undefined); setPreviewMode("synthetic"); }} />}
             {/* 合成预览仅在时间线有可见片段时挂载；空时间线显示引导文案（剪映式），
                 避免对空时间线请求 preview-ir 被 Core 以 TIMELINE_EMPTY 拒绝而回退。 */}
-            {previewMode === "synthetic" && project && working && timeline && working.clips.length > 0 && <SyntheticPreview outputRatio={syntheticRatio} projectId={project.project_id} revisionId={timeline?.current_revision.timeline_revision_id ?? null} mediaUrls={syntheticMediaUrls} audioByClip={syntheticAudioByClip} pipClips={syntheticPipClips} selectedClipId={pipSelectedId} onSelectClip={clipId => setSelection({ kind: "clip", id: clipId as never })} onCommitPipTransform={(clipId, transform) => { const clip = (working?.clips ?? []).find(item => item.clip_id === clipId); commitPipTransform(clipId as never, { ...(clip?.transform ?? {}), ...transform }); }} onDraftPipMask={(clipId, mask) => draftPipMask(clipId as never, mask)} onCommitPipMask={(clipId, mask) => commitPipMask(clipId as never, mask)} onGesturePause={pausePreviewPlayback} onGestureResume={resumePreviewPlayback} playing={playing && !gestureHoldRef.current} playheadUs={playhead} playheadStore={playheadStore} onTimeUs={us => seekFromPlayback(us)} onEnded={() => setPlaying(false)} onFallback={(reason, code) => { setPreviewMode("interactive"); setSyntheticNotice(code === "PREVIEW_IR_UNSUPPORTED" ? "当前时间线包含实时合成暂不支持的效果，已回退交互预览。" : `合成预览不可用：${reason}，已回退交互预览。`); }} sourceResolver={previewSourceResolver} resourceTier={resourceTier} forceCopyTo={forceCopyTo} />}
+            {previewMode === "synthetic" && project && working && timeline && working.clips.length > 0 && <SyntheticPreview outputRatio={renderRatio} projectId={project.project_id} revisionId={timeline?.current_revision.timeline_revision_id ?? null} mediaUrls={syntheticMediaUrls} audioByClip={syntheticAudioByClip} pipClips={syntheticPipClips} selectedClipId={pipSelectedId} onSelectClip={clipId => setSelection({ kind: "clip", id: clipId as never })} onCommitPipTransform={(clipId, transform) => { const clip = (working?.clips ?? []).find(item => item.clip_id === clipId); commitPipTransform(clipId as never, { ...(clip?.transform ?? {}), ...transform }); }} onDraftPipMask={(clipId, mask) => draftPipMask(clipId as never, mask)} onCommitPipMask={(clipId, mask) => commitPipMask(clipId as never, mask)} onGesturePause={pausePreviewPlayback} onGestureResume={resumePreviewPlayback} playing={playing && !gestureHoldRef.current} playheadUs={playhead} playheadStore={playheadStore} onTimeUs={us => seekFromPlayback(us)} onEnded={() => setPlaying(false)} onFallback={(reason, code) => { setPreviewMode("interactive"); setSyntheticNotice(syntheticFallbackNotice(reason, code)); }} sourceResolver={previewSourceResolver} resourceTier={resourceTier} forceCopyTo={forceCopyTo} />}
             {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "video" && <div className="preview-transform" style={mainTransformStyle}><video className="preview-background" src={previewAsset.media_url} muted aria-hidden="true" /><video ref={videoRef} className="preview-foreground" src={previewAsset.media_url} muted={!selectedClip?.audio.enabled || previewReverse || (clipAtPlayhead ? !isClipAudible(clipAtPlayhead) : false)} aria-label="交互预览视频" onTimeUpdate={event => { if (libraryPreviewId) dispatchPlayhead("external", Math.round(event.currentTarget.currentTime * 1_000_000), true); }} onEnded={handleVideoEnded} /></div>}
             {previewMode === "interactive" && audioAsset?.media_url && <audio ref={audioRef} src={audioAsset.media_url} style={{ display: "none" }} />}
             {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "image" && <div className="preview-transform" style={mainTransformStyle}><img className="preview-background" src={previewAsset.media_url} alt="" aria-hidden="true" /><img className="preview-foreground" src={previewAsset.media_url} alt={previewAsset.asset.display_name} /></div>}

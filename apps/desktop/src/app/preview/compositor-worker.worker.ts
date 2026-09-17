@@ -10,6 +10,7 @@
  * 只按命令驱动 GL。VideoFrame 经 transfer 到达（零拷贝），copyTo/texImage2D
  * 在 worker 线程执行。 */
 import type { IrContent } from "./ir.js";
+import { keyingColorRgb, type IrEffectKeying, type IrEffectMask } from "./effects.js";
 
 const VERT = `#version 300 es
 in vec2 a_pos;
@@ -38,6 +39,14 @@ uniform float u_yuv_mode;        // 1 = NV12 平面 + BT.709 limited→full
 uniform float u_chroma_phase_x;  // 色度采样相位（源色度坐标偏移）
 uniform float u_chroma_phase_y;
 uniform float u_lod;             // 显式纹理层级 = log2(源尺寸/内容盒尺寸)
+// IR v0.4 覆盖轨 alpha 效果：mask（kind/几何/旋转/软边/反转）+ keying（色/相似度/blend）。
+// u_mask_kind：0=无 1=linear 2=rect 3=ellipse；语义镜像 effects.ts（权威端 _mask_alpha_expr）。
+uniform float u_mask_kind;
+uniform vec4 u_mask_geom;        // cx, cy, half_w(半轴/半宽), half_h（pip 帧像素）
+uniform vec4 u_mask_extra;       // rotation_rad, feather_x_pw, invert, unused
+uniform float u_key_mode;        // 0=无 1=colorkey
+uniform vec4 u_key_params;       // key_r, key_g, key_b, similarity（0..1 归一 RGB）
+uniform float u_key_blend;       // colorkey blend（0..1）
 out vec4 frag;
 vec3 yuv2rgb709(float yv, float cb, float cr) {
   float y = (yv * 255.0 - 16.0) / 219.0;
@@ -56,6 +65,42 @@ vec4 samplePixel(vec2 norm) {
   }
   return texture(u_tex, norm);
 }
+// 蒙版 alpha（0..1）：盒内归一化坐标 × 盒尺寸 = geq 的 (X,Y)∈pip 帧。
+// feather 过渡带收进边界内侧（边界恒 0 不外溢；feather=0 硬边）——与权威端
+// _mask_alpha_expr / effects.ts 同式（v0.4 增补）。
+float maskAlpha() {
+  vec2 px = v_box * vec2(u_mask_geom.z * 2.0, u_mask_geom.w * 2.0);
+  float ux = cos(u_mask_extra.x) * (px.x - u_mask_geom.x) + sin(u_mask_extra.x) * (px.y - u_mask_geom.y);
+  if (u_mask_kind < 1.5) {
+    // linear：feather·pw = 软边带宽（feather_x_pw 已预乘）
+    float v = 0.5 + ux / max(u_mask_extra.y, 1.0);
+    float a = clamp(v, 0.0, 1.0);
+    return u_mask_extra.z > 0.5 ? 1.0 - a : a;
+  }
+  float uy = -sin(u_mask_extra.x) * (px.x - u_mask_geom.x) + cos(u_mask_extra.x) * (px.y - u_mask_geom.y);
+  float inner;
+  if (u_mask_kind < 2.5) {
+    // rect：norm = max(|ux|/halW, |uy|/halH)
+    float norm = max(abs(ux) / u_mask_geom.z, abs(uy) / u_mask_geom.w);
+    inner = clamp(1.0 - min(1.0, norm), 0.0, 1.0);
+  } else {
+    // ellipse：d = 归一化椭圆距离
+    vec2 q = vec2(ux / u_mask_geom.z, uy / u_mask_geom.w);
+    inner = clamp(1.0 - length(q), 0.0, 1.0);
+  }
+  // feather>0：inner/feather（过渡带收进边界内侧，u_mask_extra.w = 原始 feather）；
+  // =0：真硬边（形状内 1、形状外 0 一步跳变——inner 即 (1−d) 的 clamp，d≤1 处为正）
+  float a = u_mask_extra.w > 0.001 ? clamp(inner / u_mask_extra.w, 0.0, 1.0) : (inner > 0.0 ? 1.0 : 0.0);
+  return u_mask_extra.z > 0.5 ? 1.0 - a : a;
+}
+// 抠像 alpha（0..1）：RGB 欧氏色距 vs similarity，blend 为线性过渡带宽。
+float keyAlpha(vec3 rgb) {
+  float dist = distance(rgb, u_key_params.rgb) / 1.7320508;
+  float sim = u_key_params.w;
+  if (dist <= sim) return 0.0;
+  if (dist >= sim + u_key_blend) return 1.0;
+  return (dist - sim) / u_key_blend;
+}
 void main() {
   vec2 norm;
   if (u_rotation != 0.0) {
@@ -73,6 +118,8 @@ void main() {
   }
   vec4 tex = samplePixel(norm);
   float a = tex.a * u_alpha;
+  if (u_mask_kind > 0.5) a *= maskAlpha();
+  if (u_key_mode > 0.5) a *= keyAlpha(tex.rgb);
   frag = u_premultiplied > 0.5 ? vec4(tex.rgb * a, a) : vec4(tex.rgb, a);
 }`;
 
@@ -93,6 +140,10 @@ export interface DrawCommand {
   rect?: IrContent;
   alpha?: number;
   rotationDeg?: number;
+  /** IR v0.4：覆盖轨 alpha 效果（mask/keying；缺省 undefined = 无效果，
+   *  shader 侧 u_mask_kind=0/u_key_mode=0 快路径不变）。 */
+  mask?: IrEffectMask;
+  keying?: IrEffectKeying;
   /** captions：已解析的字幕条目（文本随命令携带，样式取 init 注入表）。 */
   items?: Array<{ caption_id: string; text: string; preset_id: string }>;
 }
@@ -235,7 +286,7 @@ function buildProgram(gl: WebGL2RenderingContext): { program: WebGLProgram; unif
     throw new Error(`program link failed: ${gl.getProgramInfoLog(program)}`);
   }
   gl.useProgram(program);
-  const names = ["u_rect", "u_canvas", "u_fit", "u_tex", "u_tex_y", "u_tex_uv", "u_yuv_mode", "u_chroma_phase_x", "u_chroma_phase_y", "u_lod", "u_alpha", "u_rotation", "u_premultiplied"];
+  const names = ["u_rect", "u_canvas", "u_fit", "u_tex", "u_tex_y", "u_tex_uv", "u_yuv_mode", "u_chroma_phase_x", "u_chroma_phase_y", "u_lod", "u_alpha", "u_rotation", "u_premultiplied", "u_mask_kind", "u_mask_geom", "u_mask_extra", "u_key_mode", "u_key_params", "u_key_blend"];
   const uniforms: Record<string, WebGLUniformLocation | null> = {};
   for (const name of names) uniforms[name] = gl.getUniformLocation(program, name);
   return { program, uniforms };
@@ -458,7 +509,8 @@ async function uploadToTextures(frame: VideoFrame, targetY: WebGLTexture, target
 }
 
 function drawRect(textureY: WebGLTexture, textureUV: WebGLTexture | null, textureRgba: WebGLTexture | null,
-                  rect: IrContent, alpha: number, rotationDeg: number, premultiplied: boolean, sourceWidth = 1920): void {
+                  rect: IrContent, alpha: number, rotationDeg: number, premultiplied: boolean, sourceWidth = 1920,
+                  mask?: IrEffectMask, keying?: IrEffectKeying): void {
   const gl = state.gl!;
   const u = state.uniforms!;
   const target = state.targetOverride ?? { width: state.backing.width, height: state.backing.height, fitX: state.fit.x, fitY: state.fit.y, fitScale: state.fit.scale };
@@ -485,6 +537,29 @@ function drawRect(textureY: WebGLTexture, textureUV: WebGLTexture | null, textur
   gl.uniform1f(u.u_alpha, alpha);
   gl.uniform1f(u.u_rotation, -(rotationDeg * Math.PI) / 180);
   gl.uniform1f(u.u_premultiplied, premultiplied ? 1 : 0);
+  // v0.4 覆盖轨 alpha 效果（语义镜像 effects.ts；无效果走 0 快路径）。
+  if (mask) {
+    const kind = mask.kind === "linear" ? 1 : mask.kind === "rect" ? 2 : 3;
+    gl.uniform1f(u.u_mask_kind, kind);
+    const halfW = mask.kind === "linear" ? 1 : Math.max(1.0, (mask.width ?? 0.5) * rect.w / 2.0);
+    const halfH = mask.kind === "linear" ? 1 : Math.max(1.0, (mask.height ?? 0.5) * rect.h / 2.0);
+    gl.uniform4f(u.u_mask_geom, (mask.x ?? 0.5) * rect.w, (mask.y ?? 0.5) * rect.h, halfW, halfH);    // linear 分支用 feather·pw 软边带宽（预乘进 uniform）；ellipse/rect 的
+    // feather 分量（u_mask_extra.y）语义为「归一化过渡窗口」，0 = 硬边。
+    const feather = Math.min(1, Math.max(0, mask.feather ?? 0));
+    const featherPw = Math.max(1.0, feather * rect.w);
+    gl.uniform4f(u.u_mask_extra, (mask.rotation ?? 0) * Math.PI / 180, featherPw, mask.invert === true ? 1 : 0, feather);
+  } else {
+    gl.uniform1f(u.u_mask_kind, 0);
+  }
+  if (keying) {
+    const [kr, kg, kb] = keyingColorRgb(keying);
+    const sim = Math.min(1, Math.max(0, keying.similarity ?? 0.3)) || 0.3;
+    gl.uniform1f(u.u_key_mode, 1);
+    gl.uniform4f(u.u_key_params, kr, kg, kb, sim);
+    gl.uniform1f(u.u_key_blend, Math.min(1, Math.max(0, keying.blend ?? 0.1)) || 0.1);
+  } else {
+    gl.uniform1f(u.u_key_mode, 0);
+  }
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
 
@@ -751,7 +826,7 @@ function executeCompose(payload: ComposePayload): void {
     if (cmd.op === "fill") { drawBlurredFill(inputId, pair.y, uv, cmd.alpha ?? 1); continue; }
     const sourceWidth = image ? (state.geometry.get(inputId)?.width ?? 1920) : (state.sourceWidth.get(inputId) ?? 1920);
     const rect = cmd.rect ?? { x: 0, y: 0, w: state.canvasWidth, h: state.canvasHeight };
-    drawRect(pair.y, uv, rgba, rect, cmd.alpha ?? 1, cmd.rotationDeg ?? 0, false, sourceWidth);
+    drawRect(pair.y, uv, rgba, rect, cmd.alpha ?? 1, cmd.rotationDeg ?? 0, false, sourceWidth, cmd.mask, cmd.keying);
   }
   gl.flush();
 }

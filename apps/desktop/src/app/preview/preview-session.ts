@@ -73,6 +73,12 @@ export interface PreviewSessionMetrics {
   decode_in_flight: number;
   /** 纹理上传往返（postMessage+GL+ack）耗时 p95：worker 化后的负载口径。 */
   upload_ms_p95: number;
+  /** GAP-RATIO-SWAP 诊断：IR 画布与后备缓冲尺寸（比例切换后应同步换算）。 */
+  canvas_w: number;
+  canvas_h: number;
+  backing_w: number;
+  backing_h: number;
+  fit_scale: number;
 }
 
 interface RingSlot { srcN: number }
@@ -523,6 +529,8 @@ export class PreviewSession {
     if (sig(this.ir) !== sig(nextIr)) return false;
     const segOf = (ir: Ir) => new Map(ir.segments.map(segment => [segment.clip_id, segment] as const));
     const oldSegs = segOf(this.ir);
+    const oldCanvasW = this.ir.canvas.width;
+    const oldCanvasH = this.ir.canvas.height;
     this.ir = nextIr;
     // C20a：换表同步换帧源（引用一致性保持）；v2 注入帧源由调用方重建后传入
     this.frames = nextFrames ?? arrayFrameSource(nextIr);
@@ -556,6 +564,16 @@ export class PreviewSession {
     }
     this.resetChains();
     this.rebuildPipOverlayIndex(); // A04：换表后原子重建索引（不保留旧帧引用）
+    // GAP-RATIO-SWAP：换比例（如 1:1 → 16:9）时 canvas 尺寸随 IR 变化，而
+    // backing/fit 仍是旧画布的适配系数（ResizeObserver 只看容器 CSS 尺寸，
+    // 比例切换时容器尺寸不变 → 无人重算）→ 画面按旧系数拉伸。canvas 变更
+    // 时按同一容器尺寸重跑一次 resize 语义（含 worker resize 下发）。
+    if (oldCanvasW !== nextIr.canvas.width || oldCanvasH !== nextIr.canvas.height) {
+      const el = this.canvasEl;
+      const cssW = el?.clientWidth || this.backing.width;
+      const cssH = el?.clientHeight || this.backing.height;
+      this.resize(cssW, cssH);
+    }
     this.recomposeSoon();
     return true;
   }
@@ -1321,7 +1339,7 @@ export class PreviewSession {
     for (const overlay of frame.overlays) {
       const source = sourceOf(overlay.input_id, overlay.src_n, false);
       if (source) {
-        cmds.push({ ...source, rect: overlay.box, alpha: overlay.alpha, rotationDeg: overlay.rotation_deg });
+        cmds.push({ ...source, rect: overlay.box, alpha: overlay.alpha, rotationDeg: overlay.rotation_deg, mask: overlay.effects?.mask, keying: overlay.effects?.keying });
       }
     }
     if (frame.captions.length > 0) {
@@ -1560,6 +1578,11 @@ export class PreviewSession {
       decode_ms_p95: p(decodes, 0.95),
       decode_in_flight: this.decodeInFlight,
       upload_ms_p95: p(uploads, 0.95),
+      canvas_w: this.ir.canvas.width,
+      canvas_h: this.ir.canvas.height,
+      backing_w: this.backing.width,
+      backing_h: this.backing.height,
+      fit_scale: Math.round(this.fitScale * 1000) / 1000,
     };
   }
 

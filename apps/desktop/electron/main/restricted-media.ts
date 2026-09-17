@@ -22,7 +22,10 @@ export class RestrictedMediaRegistry {
   constructor(private readonly ttlMs = 5 * 60_000, private readonly now = () => Date.now()) {}
 
   register(entityId: string, inputPath: string, purpose: RestrictedMediaPurpose = "asset"): void {
-    if (!/^[A-Za-z0-9_-]{1,128}$/.test(entityId) || !isAbsolute(inputPath)) throw new Error("Invalid restricted media registration");
+    // 派生媒体缓存键（B10/B14/B15）形如 "sha256:<64hex>"——冒号是键格式的一部分，
+    // 放行 "sha256:" 前缀（冒号后仍按 entityId 白名单严拒，防路径/任意串注入）。
+    const bare = entityId.startsWith("sha256:") ? entityId.slice("sha256:".length) : entityId;
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(bare) || !isAbsolute(inputPath)) throw new Error("Invalid restricted media registration");
     this.entities.set(`${purpose}:${entityId}`, { path: normalize(resolve(inputPath)), purpose });
   }
 

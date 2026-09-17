@@ -681,6 +681,14 @@ def _mask_alpha_expr(mask, pw, ph):
 
     匹配 apply 到 pip 尺寸 pw x ph 的帧（X,Y 为该帧坐标）。几何项归一化 0..1；
     rotation 角度制；invert 为真则保留外部（alpha 反转）。返回供 `a='...'` 使用。
+
+    feather 语义（v0.4 增补，双端同式——effects.ts / 合成器 shader 镜像）：
+    - linear：feather·pw = 软边过渡带宽（分界线两侧线性）；
+    - ellipse/rect：alpha 在归一化距离（d / norm）∈ [1−feather, 1] 线性从 1
+      降到 0，过渡带**收进形状边界内侧**（边界处 alpha=0，不外溢）；
+      feather=0 → **真硬边**（形状内 255、形状外 0，一步跳变）；feather=1
+      最柔（渐变铺满形状半径）。像素过渡带宽 = feather×轴长/半宽（随形状
+      尺寸成比例）。
     """
     if not isinstance(mask, dict):
         return None
@@ -689,7 +697,7 @@ def _mask_alpha_expr(mask, pw, ph):
         return None
     cx = _mask_num(mask, "x", 0.5) * pw
     cy = _mask_num(mask, "y", 0.5) * ph
-    feather = max(0.0, min(1.0, _mask_num(mask, "feather", 0.02)))
+    feather = max(0.0, min(1.0, _mask_num(mask, "feather", 0.0)))
     import math as _m
     rot = _mask_num(mask, "rotation", 0.0) * _m.pi / 180.0
     cs = f"{_m.cos(rot):.4f}"
@@ -701,14 +709,22 @@ def _mask_alpha_expr(mask, pw, ph):
         ux = f"{cs}*(X-{cx:.1f})+{sn}*(Y-{cy:.1f})"
         uy = f"-{sn}*(X-{cx:.1f})+{cs}*(Y-{cy:.1f})"
         d = f"sqrt(pow({ux},2)/pow({ax:.1f},2)+pow({uy},2)/pow({ay:.1f},2))"
-        inside = f"max(0,min(255,255*(1-{d})))"
+        if feather > 0.0:
+            inside = f"min(255,max(0,255*min(1,(1-({d}))/{feather:.4f})))"
+        else:
+            # 本 build 的 ffmpeg 表达式无 le/ge（实测 n8.0）；硬边用 if(lt(d,1))——
+            # 边界 d=1 归形状外（与 effects.ts 的 d<1 严格口径一致）。
+            inside = f"if(lt({d},1),255,0)"
     elif kind == "rect":
         hal_w = max(1.0, _mask_num(mask, "width", 0.5) * pw / 2.0)
         hal_h = max(1.0, _mask_num(mask, "height", 0.5) * ph / 2.0)
         ux = f"{cs}*(X-{cx:.1f})+{sn}*(Y-{cy:.1f})"
         uy = f"-{sn}*(X-{cx:.1f})+{cs}*(Y-{cy:.1f})"
         norm = f"max(abs({ux})/{hal_w:.1f},abs({uy})/{hal_h:.1f})"
-        inside = f"255*max(0,1-min(1,{norm}))"
+        if feather > 0.0:
+            inside = f"min(255,max(0,255*min(1,(1-min(1,{norm}))/{feather:.4f})))"
+        else:
+            inside = f"if(lt(min(1,{norm}),1),255,0)"
     else:  # linear 硬边分界
         ux = f"{cs}*(X-{cx:.1f})+{sn}*(Y-{cy:.1f})"
         inside = f"min(255,max(0,255*(0.5+({ux})/{max(1.0, feather*pw):.2f})))"
@@ -722,6 +738,51 @@ def _mask_num(mask, key, default):
         return float(v)
     except (TypeError, ValueError):
         return default
+
+
+def _keying_alpha_expr(keying, pw, ph):
+    """抠像 alpha 表达式（rgba-geq 的 a 分量用，值域 0..255——geq alpha 平面
+    与 mask 表达式同域；实测 a='0.5' 输出近乎全透明，非 0..1）。
+
+    复刻 FFmpeg colorkey 语义：与键色的 RGB 欧氏色距（0..255 域），色距 ≤
+    similarity·255 全透明、≥ (similarity+blend)·255 全不透明、中间线性。
+    与 Renderer effects.ts keyingAlpha 同式（彼侧 0..1 域 /√3 归一，两侧同形
+    线性斜坡，常数因子由 P2 step0 自校准吸收）。r(X,Y)/g(X,Y)/b(X,Y) 为 geq
+    的同帧 RGB 取值函数。键色非法/缺省回绿幕 00FF00；similarity/blend 缺省
+    0.3/0.1，clamp 0..1，≤0 回缺省（与旧 colorkey 参数处理一致）。invert
+    权威端不消费（known_approximations 登记）。
+    """
+    if not isinstance(keying, dict) or not keying:
+        return None
+    import re as _re
+
+    color = str(keying.get("color", "00FF00"))
+    if not _re.fullmatch(r"[0-9A-Fa-f]{6}", color):
+        color = "00FF00"
+    kr = int(color[0:2], 16)
+    kg = int(color[2:4], 16)
+    kb = int(color[4:6], 16)
+    try:
+        sim = float(keying.get("similarity", 0.3))
+    except (TypeError, ValueError):
+        sim = 0.3
+    try:
+        blend = float(keying.get("blend", 0.1))
+    except (TypeError, ValueError):
+        blend = 0.1
+    sim = min(max(sim, 0.0), 1.0)
+    blend = min(max(blend, 0.0), 1.0)
+    if sim <= 0.0:
+        sim = 0.3
+    if blend <= 0.0:
+        blend = 0.1
+    # 色距归一（实测标定 2026-09-17：对键=黑/绿双组渐变读 alpha 剖面拟合）：
+    # dist01 = RGB 欧氏/(255·√3)，a255 = clip((dist01−sim)/blend)·255 —— 与
+    # FFmpeg colorkey 实测行为及 effects.ts keyingAlpha（0..1 域）同式。
+    dist = (
+        "sqrt(pow(r(X,Y)-%d,2)+pow(g(X,Y)-%d,2)+pow(b(X,Y)-%d,2))/441.67" % (kr, kg, kb)
+    )
+    return f"clip(({dist}-{sim:.4f})/{blend:.4f}*255,0,255)"
 
 
 def _mask_invert(expr, invert):
@@ -815,61 +876,33 @@ def _pip_overlay_chain(
         # 度数语义（contracts -180..180°）→ rotate 滤镜弧度参数，与关键帧 rotate 路径一致。
         head += ",format=rgba,rotate='{}*PI/180':fillcolor=black@0:ow=iw:oh=ih".format(f"{rotate_val:.4f}")
     head += f"[{label}]"
-    # 生成「灰阶 alpha（0..255）」贡献：蒙版 geq 灰 + 抠像 colorkey alphaextract。
-    # 最终 RGB 帧 + 每个 alpha 来源各一条 split 分支（避免 [label] 被多处消费）。
-    gray_sources: list[str] = []
-    alpha_clause: list[str] = []
+    # v0.4：mask/keying alpha 并入单条 rgba-geq（a 表达式逐像素计算，RGB 通道
+    # 恒等 r(X,Y)/g(X,Y)/b(X,Y)）。旧实现（split → gray-geq / colorkey
+    # alphaextract → blend=multiply → alphamerge）在本环境实测把 RGB 平面污染成
+    # alpha 灰度（RGB=alpha 的输出帧，硬边路径同样受累、此前采样点恰好不敏感）；
+    # 单 geq 既消除污染又少 4 个滤镜节点。a 平面值域 0..255（实测 a='0.5' 即近
+    # 全透明）：mask 表达式本输出 0..255，keying 表达式同域复刻 colorkey 斜坡，
+    # 两者相乘 = 乘积/255（0..255 域的 alpha 求交）。keying 色距公式与 Renderer
+    # effects.ts keyingAlpha 同形（彼侧 0..1 域 /√3 归一，线性斜坡同式，常数因子
+    # 由 P2 step0 自校准吸收）。
     mask_obj = segment.get("mask")
     keying_obj = segment.get("keying")
-    want_mask = isinstance(mask_obj, dict) and bool(_mask_alpha_expr(mask_obj, pip_w, pip_h))
-    want_key = isinstance(keying_obj, dict) and bool(keying_obj)
-    n_branches = 1 + (1 if want_mask else 0) + (1 if want_key else 0)
-    if n_branches > 1:
-        split_spec = "".join(f"[{label}_b{i}]" for i in range(n_branches))
-        alpha_clause.append(f"[{label}]split={n_branches}{split_spec}")
-        rgb_branch = f"{label}_b0"
-        next_branch = 1
-        if want_mask:
-            expr = _mask_alpha_expr(mask_obj, pip_w, pip_h)
-            alpha_clause.append(
-                f"[{label}_b{next_branch}]format=gray,geq='{expr}'[{label}_mask_a]"
-            )
-            gray_sources.append(f"{label}_mask_a")
-            next_branch += 1
-        if want_key:
-            key_color = str(keying_obj.get("color", "00FF00"))
-            try:
-                key_sim = float(keying_obj.get("similarity", 0.3))
-            except (TypeError, ValueError):
-                key_sim = 0.3
-            try:
-                key_blend = float(keying_obj.get("blend", 0.1))
-            except (TypeError, ValueError):
-                key_blend = 0.1
-            key_sim = min(max(key_sim, 0.0), 1.0)
-            key_blend = min(max(key_blend, 0.0), 1.0)
-            if key_sim <= 0.0:
-                key_sim = 0.3
-            if key_blend <= 0.0:
-                key_blend = 0.1
-            alpha_clause.append(
-                f"[{label}_b{next_branch}]colorkey=color=0x{key_color}:similarity={key_sim:.3f}:blend={key_blend:.3f},"
-                f"format=rgba,alphaextract[{label}_key_a]"
-            )
-            gray_sources.append(f"{label}_key_a")
-            next_branch += 1
-        # 合并 alpha（多来源 multiply 求交）。
-        if len(gray_sources) == 1:
-            final_gray = gray_sources[0]
-        else:
-            g0, g1 = gray_sources[0], gray_sources[1]
-            alpha_clause.append(f"[{g0}][{g1}]blend=all_mode=multiply[{label}_cmb_a]")
-            final_gray = f"{label}_cmb_a"
+    mask_expr = _mask_alpha_expr(mask_obj, pip_w, pip_h) if isinstance(mask_obj, dict) else None
+    key_expr = _keying_alpha_expr(keying_obj, pip_w, pip_h) if isinstance(keying_obj, dict) else None
+    if mask_expr is not None or key_expr is not None:
+        parts: list[str] = []
+        if mask_expr is not None:
+            parts.append(f"({mask_expr})")
+        if key_expr is not None:
+            parts.append(f"({key_expr})")
+        joined = "*".join(parts)
+        a_expr = joined if len(parts) == 1 else f"{joined}/255"
+        alpha_clause: list[str] = [
+            f"[{label}]format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='{a_expr}'[{label}vis]"
+        ]
         align_label = f"{label}vis"
-        alpha_clause.append(
-            f"[{rgb_branch}]format=rgba[{label}_rgb_b];[{label}_rgb_b][{final_gray}]alphamerge[{align_label}]"
-        )
     else:
+        alpha_clause = []
         align_label = label
     align = f"[{align_label}]setpts=PTS+{enable_start_us / 1_000_000:.6f}[{label}a]"
     # transform.x/y 为「中心点归一化位置」（0..1，与 contracts 注释及交互预览

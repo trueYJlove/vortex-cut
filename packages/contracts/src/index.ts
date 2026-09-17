@@ -70,7 +70,8 @@ export type JobKind =
   | "timeline_patch_generation"
   | "authoritative_preview"
   | "final_export"
-  | "media_generation";
+  | "media_generation"
+  | "waveform";
 export type JobStage =
   | "queued"
   | "downloading"
@@ -832,9 +833,9 @@ export interface TimelineClipStaticTransform {
 /**
  * P2 蒙版：线性/矩形/椭圆选型 + 羽化 + 反选。几何参数均归一化 0..1（相对画面），
  * 旋转以度计（-180..180）、羽化 0..1。缺省字段由渲染按 type 取合理默认。
- * - linear：以 (x,y) 处的方向线（rotation）为分界，width=软边过渡带宽；invert 反转保留侧。
- * - rect：中心 (x,y)，宽 height，rotation 旋转，feather 羽化。
- * - ellipse：中心 (x,y)，半轴 (width/2, height/2)，rotation 旋转，feather 羽化。
+ * - linear：以 (x,y) 处的方向线（rotation）为分界，feather=软边过渡带宽；invert 反转保留侧。
+ * - rect：中心 (x,y)，宽 height，rotation 旋转，feather 向内羽化边界（0=硬边）。
+ * - ellipse：中心 (x,y)，半轴 (width/2, height/2)，rotation 旋转，feather 向内羽化边界（0=硬边）。
  */
 export interface TimelineClipMask {
   kind: "linear" | "rect" | "ellipse";
@@ -1160,7 +1161,7 @@ export class ContractValidationError extends Error {
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const JOB_STATUSES: JobStatus[] = ["queued", "running", "succeeded", "failed", "cancelling", "cancelled", "interrupted"];
-const JOB_KINDS: JobKind[] = ["asset_probe", "asset_fingerprint", "proxy", "portrait_sample", "vertical_sample", "model_download", "transcription", "candidate_generation", "timeline_patch_generation", "authoritative_preview", "final_export", "media_generation"];
+const JOB_KINDS: JobKind[] = ["asset_probe", "asset_fingerprint", "proxy", "portrait_sample", "vertical_sample", "model_download", "transcription", "candidate_generation", "timeline_patch_generation", "authoritative_preview", "final_export", "media_generation", "waveform"];
 const PROJECT_STATUSES: ProjectStatus[] = ["active", "archived", "missing"];
 const ASSET_KINDS: AssetKind[] = ["video", "audio", "image", "text"];
 const ASSET_AVAILABILITIES: AssetAvailability[] = ["available", "missing", "changed", "unsupported"];

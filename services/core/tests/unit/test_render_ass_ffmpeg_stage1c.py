@@ -704,7 +704,10 @@ def test_builder_composes_pip_content_fit_box() -> None:
 
 
 def test_builder_composes_mask_alpha_for_track_v2(tmp_path: Path) -> None:
-    """P2 蒙版：V2 覆盖段带椭圆蒙版时，graph 插入 geq alpha + alphamerge，overlay 消费蒙版后标签。"""
+    """P2 蒙版：V2 覆盖段带椭圆蒙版时，graph 插入 rgba-geq alpha（v0.4 新链），
+    overlay 消费蒙版后标签。旧 split+gray-geq+alphamerge 链在 alphamerge 处
+    污染 RGB 平面（实测 RGB=alpha 灰度），已替换为单 geq（a= 表达式，RGB 通道
+    恒等）。"""
     plan = {
         "segments": [
             {"clip_id": "main", "track_id": "V1", "asset_kind": "video",
@@ -726,9 +729,9 @@ def test_builder_composes_mask_alpha_for_track_v2(tmp_path: Path) -> None:
                                [{"audio_streams": [{}]}, {"audio_streams": [{}]}],
                                "libopenh264", "out.mp4", captions=False)
     graph = args[args.index("-filter_complex") + 1]
-    # geq alpha（ellipse 表达式）与 alphamerge 与蒙版标签。
-    assert "format=gray,geq='clip(max(0,min(255,255*(1-sqrt(" in graph
-    assert "alphamerge[pip1vis]" in graph
+    # rgba-geq：a 表达式 = 椭圆硬边式/feather（0.05 过渡窗口），RGB 通道恒等。
+    assert "format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a=" in graph
+    assert ")/0.0500" in graph  # feather 过渡窗口
     assert "[pip1vis]setpts=PTS+0.500000" in graph
     # overlay 仍复用 [MAINPIP]（时间窗合成）。
     assert "[MAINPIP][pip1a]overlay=" in graph
@@ -742,7 +745,8 @@ def test_builder_composes_mask_alpha_for_track_v2(tmp_path: Path) -> None:
 
 
 def test_builder_composes_chroma_keying_for_track_v2(tmp_path: Path) -> None:
-    """P3 抠像：V2 覆盖段带绿幕 keying 时，graph 插入 colorkey + alphaextract，overlay 消费抠后标签。"""
+    """P3 抠像：V2 覆盖段带绿幕 keying 时，graph 插入 rgba-geq 色距斜坡（v0.4 新链，
+    实测标定 dist01 = RGB 欧氏/(255√3)），overlay 消费抠后标签。"""
     plan = {
         "segments": [
             {"clip_id": "main", "track_id": "V1", "asset_kind": "video",
@@ -764,26 +768,27 @@ def test_builder_composes_chroma_keying_for_track_v2(tmp_path: Path) -> None:
                                [{"audio_streams": [{}]}, {"audio_streams": [{}]}],
                                "libopenh264", "out.mp4", captions=False)
     graph = args[args.index("-filter_complex") + 1]
-    assert "colorkey=color=0x00FF00:similarity=0.400:blend=0.100" in graph
-    assert "alphaextract[pip1_key_a]" in graph
-    assert "alphamerge[pip1vis]" in graph
+    # 色距斜坡：dist01 - sim / blend × 255（255√3 = 441.67 归一常数）。
+    assert "pow(g(X,Y)-255,2)" in graph
+    assert "-0.4000)/0.1000*255" in graph
     assert "[pip1vis]setpts=PTS+0.500000" in graph
     assert "[MAINPIP][pip1a]overlay=" in graph
 
-    # 蒙版 + 抠像组合：两个 alpha 来源 multiply 求交。
+    # 蒙版 + 抠像组合：a 表达式 = mask × key（0..255 域乘积 /255）。
     plan["segments"][1]["mask"] = {"kind": "ellipse", "x": 0.5, "y": 0.5, "width": 0.6, "height": 0.6, "feather": 0.0}
     args2 = build_timeline_args(plan, ["main.mp4", "pip.mp4"],
                                 [{"audio_streams": [{}]}, {"audio_streams": [{}]}],
                                 "libopenh264", "out.mp4", captions=False)
     graph2 = args2[args2.index("-filter_complex") + 1]
-    assert "blend=all_mode=multiply[pip1_cmb_a]" in graph2
-    # 无 keying 时不应出现 colorkey（回归）。
+    assert ")*(" in graph2  # mask × key 组合
+    assert ")/255'" in graph2  # 0..255 域乘积归一
+    # 无 keying 时不应出现色距表达式（回归；mask geq 仍在）。
     plan["segments"][1].pop("keying")
     args3 = build_timeline_args(plan, ["main.mp4", "pip.mp4"],
                               [{"audio_streams": [{}]}, {"audio_streams": [{}]}],
                               "libopenh264", "out.mp4", captions=False)
     graph3 = args3[args3.index("-filter_complex") + 1]
-    assert "colorkey=" not in graph3
+    assert "pow(g(X,Y)-255,2)" not in graph3
 
 
 def test_builder_rejects_reverse_segment_beyond_memory_budget() -> None:

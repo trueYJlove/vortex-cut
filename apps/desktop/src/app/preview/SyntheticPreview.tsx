@@ -101,6 +101,10 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
   }
   const [load, setLoad] = useState<LoadState>({ status: "loading", message: "正在加载合成预览" });
   const [metrics, setMetrics] = useState<PreviewSessionMetrics | null>(null);
+  // GAP-PIP-FLASH：换表/取窗瞬间 pipBoxes() 可能短暂为空（新 IR 帧窗口未装配），
+  // 卸载 PiP 层 = 选中框消失 + click 穿透到画布误选主轨片段。保留最近一次
+  // 非空 boxes 作为兜底（纯视觉占位；数据恢复后立即被真实值覆盖）。
+  const lastPipBoxesRef = useRef<import("./SyntheticPipLayer.js").PipBoxItem[] | null>(null);
 
   // IR 加载 + 会话创建（revision 变更时重建；手势提交的变更被吸收、会话保活）。
   useEffect(() => {
@@ -120,7 +124,10 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
       frameSourceRef.current?.dispose?.(); frameSourceRef.current = null;
       frameManifestRef.current = null;
     }
-    setLoad({ status: "loading", message: "正在加载合成预览" });
+    // 会话保活（replaceIr 路径）时不降级 load 状态：画布已有上一 revision 的
+    // 完整画面，置 loading 会隐藏画布（闪黑）并卸载 PiP 交互层（选中框消失）
+    // ——编辑提交（拖拽落定/属性面板）必经此路径。仅冷启/重建显示 loading。
+    if (!existing) setLoad({ status: "loading", message: "正在加载合成预览" });
     (async () => {
       try {
         // C20 v2 数据面：manifest（无帧）→ 窗口帧源 → 会话（注入 frames）。
@@ -330,7 +337,10 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
         if (sessionRefLocal.current === creating) sessionRefLocal.current = null;
         if (stale()) return;
         const message = error instanceof Error ? error.message : String(error);
-        const code = /PREVIEW_IR_UNSUPPORTED/.test(message) ? "PREVIEW_IR_UNSUPPORTED" : null;
+        // 域错误码经 Main safeInvoke 原码透传（IPC 包装可能带前缀，按子串识别）。
+        const code = /PREVIEW_IR_UNSUPPORTED/.test(message) ? "PREVIEW_IR_UNSUPPORTED"
+          : /PREVIEW_IR_TOO_LARGE/.test(message) ? "PREVIEW_IR_TOO_LARGE"
+          : null;
         setLoad({ status: "error", message });
         onFallback(message, code);
       }
@@ -409,9 +419,12 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
         const cw = live.ir.canvas.width;
         const ch = live.ir.canvas.height;
         const transformOf = (clipId: string) => pipClips.find(item => item.clipId === clipId)?.transform;
+        const boxes = live.pipBoxes().map(box => ({ ...box, canvasW: cw, canvasH: ch, scale: transformOf(box.clipId)?.scale ?? 1, rotate: transformOf(box.clipId)?.rotate ?? 0, mask: pipClips.find(item => item.clipId === box.clipId)?.mask }));
+        if (boxes.length > 0) lastPipBoxesRef.current = boxes;
+        const displayBoxes = boxes.length > 0 ? boxes : (lastPipBoxesRef.current ?? []).filter(box => pipClips.some(item => item.clipId === box.clipId));
         return (
           <SyntheticPipLayer
-            boxes={live.pipBoxes().map(box => ({ ...box, canvasW: cw, canvasH: ch, scale: transformOf(box.clipId)?.scale ?? 1, rotate: transformOf(box.clipId)?.rotate ?? 0, mask: pipClips.find(item => item.clipId === box.clipId)?.mask }))}
+            boxes={displayBoxes}
             view={live.pipView()}
             selectedClipId={selectedClipId ?? null}
             locked={false}
@@ -430,7 +443,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
         <div className={`synthetic-metrics${metrics.last_error ? " err" : ""}`}>
           {metrics.last_error
             ? `最近错误：${metrics.last_error}`
-            : `合成预览 · 任务 p95 ${metrics.task_ms_p95}ms · 解码 p95 ${metrics.decode_ms_p95}ms · 上传 p95 ${metrics.upload_ms_p95}ms · 丢帧 ${metrics.dropped_frames}`}
+            : `合成预览 · 任务 p95 ${metrics.task_ms_p95}ms · 解码 p95 ${metrics.decode_ms_p95}ms · 上传 p95 ${metrics.upload_ms_p95}ms · 丢帧 ${metrics.dropped_frames} · 画布 ${metrics.canvas_w}×${metrics.canvas_h} → 缓冲 ${metrics.backing_w}×${metrics.backing_h} (×${metrics.fit_scale})`}
         </div>
       )}
     </div>

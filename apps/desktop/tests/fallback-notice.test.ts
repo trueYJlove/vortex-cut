@@ -1,0 +1,27 @@
+import { describe, expect, it } from "vitest";
+import { syntheticFallbackNotice } from "../src/app/preview/fallback-notice.js";
+
+describe("syntheticFallbackNotice", () => {
+  it("TOO_LARGE 映射为长度上限人话 + 恢复指引（不再裸抛英文错误码）", () => {
+    const notice = syntheticFallbackNotice(
+      "Error invoking remote method 'preview-ir-v2:manifest': Error: PREVIEW_IR_TOO_LARGE",
+      "PREVIEW_IR_TOO_LARGE",
+    );
+    expect(notice).toContain("长度上限");
+    expect(notice).toContain("已回退交互预览");
+    expect(notice).not.toContain("PREVIEW_IR_TOO_LARGE");
+    expect(notice).not.toContain("remote method");
+  });
+
+  it("UNSUPPORTED 映射为效果子集提示（保留既有语义）", () => {
+    const notice = syntheticFallbackNotice("段 clip_x: mask（蒙版）超出实时合成子集", "PREVIEW_IR_UNSUPPORTED");
+    expect(notice).toContain("暂不支持的效果");
+    expect(notice).toContain("已回退交互预览");
+  });
+
+  it("未知原因保留原始细节（诊断价值 + App no-ticket 自动恢复按子串匹配依赖）", () => {
+    const reason = "no ticket for asset_8869eeb";
+    expect(syntheticFallbackNotice(reason, null)).toContain(reason);
+    expect(syntheticFallbackNotice("WebGL2 unavailable", null)).toContain("WebGL2 unavailable");
+  });
+});

@@ -21,6 +21,20 @@ describe("restricted media protocol", () => {
     expect(registry.resolveUrl("aivideo://media/../../private")).toBeUndefined();
   });
 
+  it("accepts derived-media cache keys (sha256:<hex>) as entity ids and still rejects malformed ones", () => {
+    const registry = new RestrictedMediaRegistry();
+    // B10/B14/B15 派生媒体键带 "sha256:" 前缀（core derived_cache_key 格式）。
+    const cacheKey = `sha256:${"a".repeat(64)}`;
+    registry.register(cacheKey, "C:\\media\\derived.bin", "proxy");
+    expect(registry.registeredPath(cacheKey, "proxy")).toContain("derived.bin");
+    expect(registry.issue(cacheKey, "proxy")).toMatch(/^aivideo:\/\/media\//);
+    // 冒号后非法（路径分隔符/点/空串/超长）仍然严拒。
+    expect(() => registry.register("sha256:", "C:\\media\\x.bin", "proxy")).toThrow();
+    expect(() => registry.register("sha256:../evil", "C:\\media\\x.bin", "proxy")).toThrow();
+    expect(() => registry.register("sha256:zzzz!", "C:\\media\\x.bin", "proxy")).toThrow();
+    expect(() => registry.register("../evil", "C:\\media\\x.bin", "proxy")).toThrow();
+  });
+
   it("serves GET, HEAD and byte ranges while rejecting unsupported methods", async () => {
     const dir = await mkdtemp(join(tmpdir(), "aivideo-ticket-"));
     const path = join(dir, "clip.bin");

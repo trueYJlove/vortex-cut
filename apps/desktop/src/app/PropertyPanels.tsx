@@ -188,10 +188,8 @@ export function ClipProperties({ clip, working, locked, onPatch, onDraft, playhe
             <NumberField value={clip.mask.rotation ?? 0} min={-180} max={180} step={1} unit="°" decimals={0} ariaLabel="蒙版旋转"
               onDraft={v => draftMask({ rotation: v })} onCommit={v => applyMask({ rotation: v }, "调整蒙版旋转")} />
           </PRow>
-          <PRow label="羽化" dim>
-            <input type="range" className="pp-range" disabled min={0} max={100} value={0} aria-label="蒙版羽化（仅线性生效）" />
-            <SoonBadge>仅线性生效</SoonBadge>
-          </PRow>
+          <RangeRow label="羽化" value={clip.mask.feather ?? 0} min={0} max={1} step={0.01} w66 ariaLabel="蒙版羽化"
+            onDraft={v => draftMask({ feather: v })} onCommit={v => applyMask({ feather: v }, "调整蒙版羽化")} />
         </>}
         <div className="pp-chk">
           <input type="checkbox" checked={Boolean(clip.mask.invert)} onChange={event => applyMask({ invert: event.target.checked }, event.target.checked ? "反选蒙版" : "取消反选")} />
@@ -199,7 +197,7 @@ export function ClipProperties({ clip, working, locked, onPatch, onDraft, playhe
         </div>
       </>}
     </PGroup>
-    <PNote>画布上<b>虚线框 = 蒙版边界</b>（相对本片段画面）：拖动平移、拖白点缩放；区域外透出下层画面。矩形/椭圆羽化待渲染支持（见设计文档 §6）。</PNote>
+    <PNote>画布上<b>虚线框 = 蒙版边界</b>（相对本片段画面）：拖动平移、拖白点缩放；区域外透出下层画面。羽化向内柔化边界（0 = 硬边），预览与成片一致。</PNote>
   </>;
 
   // ---- 音频 → 基础（视频片段音频 / 音频素材共用） ----

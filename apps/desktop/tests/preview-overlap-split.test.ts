@@ -77,3 +77,54 @@ describe("W4 GAP-CROSS-TRACK-OVERLAP：拆分输入双 rig 会话", () => {
     session.dispose();
   });
 });
+
+/** v0.4：浮层带 mask/keying（effects）；主轨无效果（快路径形状不变）。 */
+function effectedIr(): Ir {
+  const ir = JSON.parse(JSON.stringify(overlappedIr())) as Ir;
+  for (const frame of ir.frames) {
+    for (const overlay of frame.overlays) {
+      if (overlay.clip_id === "clip_2") {
+        overlay.effects = {
+          mask: { kind: "ellipse", x: 0.4, y: 0.6, width: 0.8, height: 0.5 },
+          keying: { color: "00FF00", similarity: 0.3, blend: 0.1 },
+        };
+      }
+    }
+  }
+  return ir;
+}
+
+describe("IR v0.4：overlay effects 透传至合成命令", () => {
+  it("overlay 条目携带 mask/keying 时，compose draw 命令透传（无效果 overlay 不带键）", async () => {
+    const container = document.createElement("div");
+    const session = await PreviewSession.create(container, effectedIr(), new Map([["asset_video", "aivideo://media/one"]]));
+    const decodeMain = ScriptedWorker.instances[1]!;
+    const decodeDup = ScriptedWorker.instances[2]!;
+    for (const worker of [decodeMain, decodeDup]) {
+      const originalPost = worker.postMessage.bind(worker);
+      worker.postMessage = (message: any) => {
+        if (message.type === "decode") queueMicrotask(() => worker.reply({ type: "frame", id: message.id, frame: { close: () => undefined } }));
+        else originalPost(message);
+      };
+    }
+    const compositor = ScriptedWorker.instances[0]!;
+    const originalPost = compositor.postMessage.bind(compositor);
+    compositor.postMessage = (message: any) => {
+      if (message.type === "upload") queueMicrotask(() => compositor.reply({ type: "uploaded", seq: message.seq, copyToMs: 0, texMs: 0 }));
+      else originalPost(message);
+    };
+    await session.seekToFrame(30);
+    const composed = compositor.messages.filter(m => m.type === "compose");
+    expect(composed.length).toBeGreaterThanOrEqual(1);
+    const draws = composed.flatMap(m => m.payload.cmds).filter((cmd: any) => cmd.op === "draw" && cmd.inputId === "in_1~1");
+    expect(draws.length).toBeGreaterThanOrEqual(1);
+    expect(draws[0].mask).toEqual({ kind: "ellipse", x: 0.4, y: 0.6, width: 0.8, height: 0.5 });
+    expect(draws[0].keying).toEqual({ color: "00FF00", similarity: 0.3, blend: 0.1 });
+    // 主轨 draw 无 effects（快路径不变）
+    const mainDraws = composed.flatMap(m => m.payload.cmds).filter((cmd: any) => cmd.op === "draw" && cmd.inputId === "in_1");
+    expect(mainDraws.length).toBeGreaterThanOrEqual(1);
+    expect(mainDraws[0].mask).toBeUndefined();
+    expect(mainDraws[0].keying).toBeUndefined();
+    session.dispose();
+  });
+});

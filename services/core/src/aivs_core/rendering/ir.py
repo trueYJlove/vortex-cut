@@ -22,7 +22,7 @@ from .interval_index import IntervalLookup, RegionSweep
 
 FPS = 30
 IR_SCHEMA = "preview-ir-v1"
-IR_PROJECTOR_VERSION = 2  # v2（2026-09-15 W4）：跨轨重叠段拆分复制输入
+IR_PROJECTOR_VERSION = 3  # v3（2026-09-17 v0.4）：覆盖轨 mask/keying 重入（overlay 条目携带 effects）
 MAX_IR_FRAMES = 27_000  # 15 分钟 @30fps（O2 体量护栏）
 
 ALLOWED_KEYFRAME_PROPS = {"position", "opacity", "scale", "rotate"}
@@ -95,10 +95,13 @@ def _split_overlapped_inputs(
 def _validate_whitelist(plan: dict[str, Any]) -> None:
     for segment in plan["segments"]:
         clip_id = segment["clip_id"]
-        if segment.get("mask"):
-            raise _fail(clip_id, "mask（蒙版）")
-        if segment.get("keying"):
-            raise _fail(clip_id, "keying（抠像）")
+        # v0.4 重入：覆盖轨 mask/keying 放行（合成器 shader 内逐像素算 alpha，
+        # 语义对齐 _mask_alpha_expr / colorkey）；主轨（V1）权威端不消费这两个
+        # 字段，保持拒绝并明示原因。
+        if segment.get("mask") and segment["track_id"] == "V1":
+            raise _fail(clip_id, "主轨蒙版（蒙版仅覆盖轨支持实时合成）")
+        if segment.get("keying") and segment["track_id"] == "V1":
+            raise _fail(clip_id, "主轨抠像（抠像仅覆盖轨支持实时合成）")
         if segment.get("reframe"):
             raise _fail(clip_id, "reframe（重构图）")
         if segment.get("reverse_playback"):
@@ -487,7 +490,7 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
         for segment in overlay_lookup.next_batch(t_exact_us):
             box_x, box_y, pip_w, pip_h, rotation = _pip_box(
                 segment, geometry_by_input[segment_input[segment["clip_id"]]], width, height)
-            overlay_entries.append({
+            entry = {
                 "clip_id": segment["clip_id"],
                 "input_id": segment_input[segment["clip_id"]],
                 "src_n": _source_frame_n(segment, t_exact_us, 0),
@@ -496,7 +499,18 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
                 "rotation_deg": rotation,
                 # 权威端 _pip_overlay_chain 不消费 transform.opacity（已知近似清单）
                 "alpha": 1.0,
-            })
+            }
+            # v0.4：覆盖轨 mask/keying 静态参数随 overlay 条目携带（不随帧变化，
+            # 合成器 shader 内逐像素算 alpha）。字段原样透传（白名单校验已确认
+            # schema），合成器端按 _mask_alpha_expr / colorkey 同构语义消费。
+            effects: dict[str, Any] = {}
+            if isinstance(segment.get("mask"), dict) and segment["mask"]:
+                effects["mask"] = segment["mask"]
+            if isinstance(segment.get("keying"), dict) and segment["keying"]:
+                effects["keying"] = segment["keying"]
+            if effects:
+                entry["effects"] = effects
+            overlay_entries.append(entry)
         active_captions = [
             caption["caption_id"] for caption in caption_lookup.next_batch(t_exact_us)
         ]
@@ -541,6 +555,7 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
             "字幕帧文本光栅化 libass vs 浏览器（单独口径：bbox IoU + diff 比率）",
             "A1 音频窗口按段起点取借用位移；跨越主轨转场借用点的音频段不做分段重映射",
             "blurred_background 垫底 = 两级降采样(÷4→÷16)线性放大近似 gblur sigma=20",
+            "keying.invert 权威端 alpha 链不消费——合成器同语义忽略（蒙版 invert 正常生效）",
         ],
         "frames": frames,
     }

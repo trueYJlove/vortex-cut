@@ -46,6 +46,11 @@ export interface IrOverlay {
   box: IrContent;
   rotation_deg: number;
   alpha: number;
+  /** 覆盖轨 alpha 效果（IR v0.4+）：mask/keying 静态参数，缺省 = 无效果。 */
+  effects?: {
+    mask?: import("./effects.js").IrEffectMask;
+    keying?: import("./effects.js").IrEffectKeying;
+  };
 }
 
 export interface IrCaptionItem {

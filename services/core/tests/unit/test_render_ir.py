@@ -137,6 +137,27 @@ def test_pip_content_box_and_transform() -> None:
     assert frames[900 - 1 - 1]["overlays"][0]["src_n"] == 598
 
 
+def test_overlay_mask_keying_effects_passthrough() -> None:
+    # v0.4 重入：覆盖轨 mask/keying 静态参数随 overlay 条目携带（effects），
+    # 白名单放行；主轨同字段仍拒绝（test_whitelist_hard_fail）。
+    mask = {"kind": "ellipse", "x": 0.4, "y": 0.6, "width": 0.8, "height": 0.5,
+            "rotation": 30.0, "feather": 0.1, "invert": True}
+    keying = {"color": "00FF00", "similarity": 0.3, "blend": 0.1}
+    plan = _plan([
+        _segment("a", 0, 30 * US, 0, 30 * US),
+        _segment("p", 0, 20 * US, 10 * US, 30 * US, asset_idx=1, track_id="V2",
+                 mask=mask, keying=keying),
+        _segment("q", 0, 20 * US, 10 * US, 30 * US, asset_idx=1, track_id="V2"),
+    ])
+    frames = _frames(plan)
+    ov = frames[450]["overlays"]
+    assert ov[0]["clip_id"] == "p"
+    assert ov[0]["effects"] == {"mask": mask, "keying": keying}
+    # 无效果的覆盖轨条目不携带 effects 键（形状向后兼容）
+    assert ov[1]["clip_id"] == "q"
+    assert "effects" not in ov[1]
+
+
 def test_output_duration_uses_borrow_compression() -> None:
     plan = _plan([
         _segment("a", 0, 5 * US, 0, 5 * US,
@@ -183,8 +204,10 @@ def test_resolved_caption_styles() -> None:
 
 
 @pytest.mark.parametrize("mutation,fragment", [
-    ({"mask": {"kind": "rect"}}, "mask（蒙版）"),
-    ({"keying": {"color": "00FF00"}}, "keying（抠像）"),
+    # v0.4 重入：覆盖轨 mask/keying 放行（见 test_overlay_mask_keying_effects）；
+    # 主轨（默认 V1）仍拒绝并明示原因。
+    ({"mask": {"kind": "rect"}}, "主轨蒙版"),
+    ({"keying": {"color": "00FF00"}}, "主轨抠像"),
     ({"reverse_playback": True}, "reverse_playback（倒放）"),
     ({"keyframes": {"blink": {"frames": [{"t_us": 0, "v": 1.0}]}}}, "关键帧属性"),
     ({"keyframes": {"rotate": {"frames": [{"t_us": 0, "v": 30.0}]}}, "track_id": "V2"}, "非 V1 轨关键帧"),

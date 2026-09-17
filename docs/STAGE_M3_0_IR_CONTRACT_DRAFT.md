@@ -1,6 +1,6 @@
-# IR 契约冻结草案 v0.3
+# IR 契约冻结草案 v0.4
 
-> 状态：**草案 v0.3**（v0.2 经验收通过；v0.3 关键帧四属性全覆盖——scale 记录为权威端无视觉效果，rotate 逐帧值重入）
+> 状态：**草案 v0.4**（v0.2 经验收通过；v0.3 关键帧四属性全覆盖；v0.4 覆盖轨蒙版/抠像重入——`IR_PROJECTOR_VERSION` 3）
 > 上位：[M3-0 技术验证报告](./STAGE_M3_0_TECH_VALIDATION_REPORT.md)、[ADR-1](./STAGE_M3_0_ADR_1_P2_GATE.md)
 > 红线（冻结方案 §11）：本草案不得包含任何已知不一致特征；已知逐帧偏差清单见 §5——**违反即验收不通过**
 
@@ -23,6 +23,8 @@
 | 旋转关键帧 | `keyframes.rotate{v}`：绕画布中心逐帧旋转（度数语义），角落为黑（v0.3 纳入） |
 | 透明度关键帧 | **定义即近似**：渲染语义 = `fade=alpha=1:st=0:d=末关键帧t`（恒 0→1 渐入，帧值 v 不参与插值）。双端同语义 → 一致；与 UI 数值编辑语义的差异属权威端已知近似（非预览↔导出不一致），入 §5 清单 |
 | 画中画（PiP） | 覆盖轨 fit 内容盒 × transform.scale，中心点 (cx·W, cy·H)，`enable` 含两端边界、repeatlast；`transform.rotate` 度数语义（v0.2 重入：弧度错位已修复 456c89a）；transform.opacity 权威端不消费（同语义忽略） |
+| 蒙版（v0.4 重入） | **仅覆盖轨**（主轨 V1 携带仍硬拒绝——权威端 `_pip_overlay_chain` 不消费主轨 mask）。`effects.mask` 随 overlay 条目携带（静态参数，逐帧不变），合成器 shader 内逐像素算 alpha。双端语义 = `_mask_alpha_expr`（geq）：坐标 ∈ PiP 帧像素（rotate 后内容盒）；**ellipse** 硬边 `alpha=clamp(1−d)`（d = 归一化椭圆距离）；**rect** 硬边 `alpha=clamp(1−norm)`（norm = max(|ux|/halW,|uy|/halH)）；**linear** `alpha=clamp(0.5+ux/(feather·pw))`（feather·pw = 软边带宽）；rotation 角度制旋转坐标系；invert 反转。**feather（v0.4 增补消费）**：ellipse/rect 过渡带收进边界内侧——alpha 在距离 ∈ [1−feather, 1] 线性从 1 降到 0，边界处恒 0 不外溢，feather=0 硬边（缺省） |
+| 抠像（v0.4 重入） | **仅覆盖轨**。`effects.keying`（color/similarity/blend）：色距斜坡语义——dist01 = 与键色的 RGB 欧氏距离/(255·√3)（实测标定 2026-09-17，权威端 rgba-geq 与 Renderer effects.ts 同式），dist01 ≤ similarity 全透明、≥ similarity+blend 全不透明、中间线性。mask × keying 同时存在 = alpha 相乘。keying.invert 权威端不消费——同语义忽略，入 §5。权威端实现注：v0.4 起 mask/keying alpha 走单条 rgba-geq（a=mask×key），替换旧 split+colorkey+alphamerge 链——alphamerge 在本环境实测把 RGB 平面污染成 alpha 灰度（旧 bug，采样点恰好不敏感未暴露） |
 | 字幕 | 文本内容/时机/位置/样式参数语义冻结；光栅化为系统差（§5） |
 
 ## 3. 双端一致性的度量口径（ADR-1 修订后）
@@ -39,7 +41,9 @@
 | ~~V1 主轨 position 关键帧~~ | ~~overlay 时长缺陷~~ | **已重入 v0.2**（456c89a 修复 + 渲染时长集成测试 + P2 采样比对达标） |
 | ~~`transform.rotate`~~ | ~~弧度错位~~ | **已重入 v0.2**（456c89a 修复 + 度数语义像素三角验证 + P2 采样比对达标） |
 | ~~scale/rotate 关键帧~~ | ~~超出 M3-0 实测子集~~ | **已重入 v0.3**（scale=权威端无视觉效果实证 + rotate 逐帧值；关键帧四属性全覆盖） |
-| 蒙版/抠像/reframe、scale 关键帧、dissolve 等其余转场、blurred_background/crop_fill 主轨布局、音频 | 不在 M3-0 实测子集（§7.2），维持"仅权威预览"现状口径 | M3 后续阶段按同范式扩展实测后入集 |
+| ~~覆盖轨蒙版（linear/rect/ellipse）~~ | ~~不在 M3-0 实测子集~~ | **已重入 v0.4**（shader 逐像素 alpha 镜像 `_mask_alpha_expr` + 双端数值一致性测试 test_effects_reference.py / preview-effects.test.ts + P2 基准待重跑留证） |
+| ~~覆盖轨抠像（colorkey）~~ | ~~不在 M3-0 实测子集~~ | **已重入 v0.4**（colorkey alpha smoothstep 镜像 + P2 基准待重跑留证） |
+| 主轨蒙版/抠像、reframe、倒放、图片素材、dissolve 等其余转场、crop_fill 主轨布局 | 权威端不消费或未实测，维持"仅权威预览"口径 | M3 后续阶段按同范式扩展实测后入集 |
 
 ## 5. 已知逐帧偏差清单（红线文件）
 
@@ -50,5 +54,6 @@
 | 3 | 变速段帧选择口径（fps-hold floor vs nearest） | 口径差，±1 帧 | 仅 speed≠1 段，快运动内容 PSNR −10dB 档 | M3 引擎实现时与 `vf_fps` 实测对齐后消除 |
 | 4 | opacity 渲染语义与 UI 数值语义差异 | 权威端已知近似（v 值不参与，恒 0→1 渐入） | 双端渲染一致 | 非预览↔导出不一致；产品如需真 lerp 属权威端功能迭代 |
 | 5 | scale 关键帧动画被归一化抵消 | 权威端已知限制（渲染为无视觉效果） | 双端渲染一致（M3-0 实证 bbox 恒全画布） | 非预览↔导出不一致；产品如需真缩放属权威端功能迭代（overlay 主输入重构） |
+| 6 | keying.invert 不消费 | 权威端已知限制（colorkey/alpha 链未接 invert；蒙版 invert 正常消费） | 双端渲染一致（合成器同语义忽略） | 非预览↔导出不一致；产品如需反选属权威端功能迭代 |
 
 **红线声明**：v0.1 时期缺陷阻塞特征已按重入条件修复复测后纳入；§5 所列均为系统差/口径差并附实测界与处置，无特征性内容不一致。探针实现偏差记录（帧源切换、视频可见化、preserveDrawingBuffer 等）见验证报告 §2.5。
