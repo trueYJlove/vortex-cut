@@ -353,6 +353,7 @@ export class PreviewSession {
       canvasWidth: ir.canvas.width,
       canvasHeight: ir.canvas.height,
       captionStyles: ir.caption_styles,
+      captionOverrideStyles: ir.caption_override_styles ?? {},
       forceCopyTo: session.forceCopyTo,
     }, signal);
     if (session.disposed || signal?.aborted) { client.terminate(); throwIfAborted(signal); throw new Error("session disposed"); }

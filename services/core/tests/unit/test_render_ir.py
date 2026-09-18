@@ -221,13 +221,26 @@ def test_whitelist_hard_fail(mutation: dict, fragment: str) -> None:
     assert fragment in exc.value.message
 
 
-def test_whitelist_rejects_style_override() -> None:
+def test_whitelist_allows_numeric_style_override() -> None:
+    """B4 收官：数值样式覆盖（字号等）进入预览子集，随 per-caption 覆盖下发。"""
     plan = _plan([_segment("a", 0, 2 * US, 0, 2 * US)],
                  captions=[{"caption_id": "c1", "start_us": 0, "end_us": US, "text": "x",
                             "preset_id": "default-bottom", "style_override": {"font_size": 80}}])
+    ir = project_preview_ir(plan, _probe(plan))
+    assert ir["caption_override_styles"]["c1"]["font_size"] == 80
+
+
+def test_whitelist_rejects_structural_style_override() -> None:
+    """结构性字段（font_name/pos 坐标）维持"仅权威预览"：需要 FontFace 注册
+    链路与合成器坐标换算，均为独立增量。"""
+    plan = _plan([_segment("a", 0, 2 * US, 0, 2 * US)],
+                 captions=[{"caption_id": "c1", "start_us": 0, "end_us": US, "text": "x",
+                            "preset_id": "default-bottom",
+                            "style_override": {"font_name": "LXGW WenKai"}}])
     with pytest.raises(DomainError) as exc:
         project_preview_ir(plan, _probe(plan))
     assert exc.value.code == "PREVIEW_IR_UNSUPPORTED"
+    assert "font_name" in exc.value.message
 
 
 def test_whitelist_rejects_missing_geometry() -> None:

@@ -10,7 +10,8 @@ export interface CompositorClientInit {
   ringDepth: number;
   canvasWidth: number;
   canvasHeight: number;
-  captionStyles: Record<string, { font_size: number; primary_rgb: [number, number, number]; outline_rgb: [number, number, number]; outline: number; shadow: number; border_style: number; margin_v: number }>;
+  captionStyles: Record<string, { font_size: number; primary_rgb: [number, number, number]; outline_rgb: [number, number, number]; outline: number; shadow: number; border_style: number; margin_v: number; font_family?: string }>;
+  captionOverrideStyles: Record<string, Partial<{ font_size: number; primary_rgb: [number, number, number]; outline_rgb: [number, number, number]; outline: number; shadow: number; border_style: number; margin_v: number; letter_spacing: number; bold: boolean; italic: boolean; underline: boolean; alignment: number; back_rgb: [number, number, number]; fx_preset: string }>>;
   /** B13-R 判别诊断开关：强制 copyTo（perf 诊断构建经 runtime 注入）。 */
   forceCopyTo?: boolean;
 }
@@ -147,6 +148,7 @@ export class CompositorWorkerClient {
       canvasWidth: init.canvasWidth,
       canvasHeight: init.canvasHeight,
       captionStyles: init.captionStyles,
+      captionOverrideStyles: init.captionOverrideStyles,
       ...(init.forceCopyTo ? { forceCopyTo: true } : {}),
     };
     client.worker.postMessage(request, [offscreen]);

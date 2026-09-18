@@ -143,6 +143,16 @@ export type TimelineInteraction =
       targetEndUs: number;
     }
   | {
+      /** B4 追加：C1 轨字幕整体拖拽（松手提交 set_caption_timing 平移）。 */
+      kind: "caption-move";
+      captionId: string;
+      startX: number;
+      originalStartUs: number;
+      originalEndUs: number;
+      targetStartUs: number;
+      targetEndUs: number;
+    }
+  | {
       kind: "marquee";
       startX: number;
       startY: number;

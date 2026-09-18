@@ -71,6 +71,14 @@ export interface IrCaptionStyle {
   margin_v: number;
   /** 多字体：bundle 默认族名（与预注册 FontFace 名一致）；缺省回退 sans-serif。 */
   font_family?: string;
+  /** 气泡底衬色（B4 收官；border_style=3 时消费）。 */
+  back_rgb?: [number, number, number];
+  letter_spacing?: number;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  alignment?: number;
+  fx_preset?: string;
 }
 
 export interface IrFrame {
@@ -102,6 +110,11 @@ export interface Ir {
   }>;
   captions: IrCaptionItem[];
   caption_styles: Record<string, IrCaptionStyle>;
+  /** B4 收官：per-caption 数值样式覆盖（部分字段，与预设合并后消费）。 */
+  caption_override_styles?: Record<string, Partial<IrCaptionStyle> & {
+    letter_spacing?: number; bold?: boolean; italic?: boolean; underline?: boolean;
+    alignment?: number; back_rgb?: [number, number, number]; fx_preset?: string;
+  }>;
   transition_windows: Array<{ clip_id: string; kind: string; offset_us: number; duration_us: number }>;
   known_approximations: string[];
   frames: IrFrame[];

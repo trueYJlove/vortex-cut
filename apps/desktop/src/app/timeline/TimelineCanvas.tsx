@@ -1425,6 +1425,21 @@ function drawTimeline(
         width,
       );
     }
+  } else if (interaction?.kind === "caption-move") {
+    const caption = captions.find((c: TimelineCaption) => c.caption_id === interaction.captionId);
+    if (caption) {
+      const gx = timeToX(interaction.targetStartUs, view);
+      const gy = view.rulerHeight + 2 * view.trackHeight;
+      const gw = Math.max(2, ((interaction.targetEndUs - interaction.targetStartUs) / 1_000_000) * view.pixelsPerSecond);
+      ctx.save();
+      ctx.globalAlpha = 0.55;
+      ctx.fillStyle = "#7a6a3a";
+      ctx.fillRect(gx, gy + 2, gw, view.trackHeight - 4);
+      ctx.strokeStyle = "#ffd76e";
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(gx, gy + 2, gw, view.trackHeight - 4);
+      ctx.restore();
+    }
   }
 
   // Snap guide (Phase 4; group-move included since Round 4)
@@ -2330,13 +2345,26 @@ export function TimelinePanel({
         }
       }
 
-      // Caption → select + seek (click only; captions are not draggable yet)
+      // Caption → 整体拖拽启动（B4 追加；松手提交 set_caption_timing 平移）。
       const captionId = hitTestCaptions(x, y, captionRects);
       if (captionId) {
         const caption = captions.find((c) => c.caption_id === captionId);
-        if (caption && onSeek) onSeek(caption.start_us);
-        setSelection({ kind: "caption", id: captionId });
-        return;
+        if (caption) {
+          setSelection({ kind: "caption", id: captionId });
+          const next: TimelineInteraction = {
+            kind: "caption-move",
+            captionId,
+            startX: x,
+            originalStartUs: caption.start_us,
+            originalEndUs: caption.end_us,
+            targetStartUs: caption.start_us,
+            targetEndUs: caption.end_us,
+          };
+          interactionRef.current = next;
+          setInteraction(next);
+          canvas.style.cursor = "grabbing";
+          return;
+        }
       }
 
       // V1 boundary gap → offer adding a transition (B2)
@@ -2583,6 +2611,33 @@ export function TimelinePanel({
             return;
           }
         }
+        if (active.kind === "caption-move") {
+          // B4 追加：字幕整体平移。约束：与相邻字幕不重叠（保持原时长）。
+          const caption = captions.find((c) => c.caption_id === active.captionId);
+          if (caption) {
+            const deltaUs = ((x - active.startX) / pps) * 1_000_000;
+            const durationUs = active.originalEndUs - active.originalStartUs;
+            const sorted = [...captions].sort((a, b) => a.start_us - b.start_us);
+            const idx = sorted.findIndex((c) => c.caption_id === active.captionId);
+            const prev = idx > 0 ? sorted[idx - 1] : null;
+            const nextCap = idx >= 0 && idx < sorted.length - 1 ? sorted[idx + 1] : null;
+            const targetStartUs = Math.max(
+              0,
+              Math.max(prev ? prev.end_us : 0,
+                Math.min(active.originalStartUs + deltaUs,
+                  (nextCap ? nextCap.start_us : Number.MAX_SAFE_INTEGER) - durationUs)),
+            );
+            const next: TimelineInteraction = {
+              ...active,
+              targetStartUs,
+              targetEndUs: targetStartUs + durationUs,
+            };
+            interactionRef.current = next;
+            setInteraction(next);
+            canvas.style.cursor = "grabbing";
+            return;
+          }
+        }
       }
 
       // Hover cursor + trim handle detection
@@ -2775,6 +2830,21 @@ export function TimelinePanel({
               },
             ],
             "调整字幕时长",
+          );
+        }
+      } else if (active.kind === "caption-move") {
+        const moved = Math.abs(active.targetStartUs - active.originalStartUs) >= 1000;
+        if (moved) {
+          void onPatch(
+            [
+              {
+                op: "set_caption_timing",
+                caption_id: active.captionId as never,
+                start_us: Math.round(active.targetStartUs),
+                end_us: Math.round(active.targetEndUs),
+              },
+            ],
+            "移动字幕",
           );
         }
       } else if (active.kind === "marquee") {

@@ -123,8 +123,20 @@ def _validate_whitelist(plan: dict[str, Any]) -> None:
             if segment["track_id"] != "V1":
                 raise _fail(clip_id, "覆盖轨转场（权威端仅 V1 相邻段）")
     for caption in plan["captions"]["items"]:
-        if caption.get("style_override"):
-            raise _unsupported(f"字幕 {caption['caption_id']}: style_override 超出实时合成子集")
+        # B4 收官后预览子集放开 style_override：数值样式随 per-caption 覆盖
+        # 解析（_caption_override_style），合成器 Canvas 消费——预览=导出。
+        # 结构性字段（font_name 自由串/pos 坐标）仍维持"仅权威预览"：
+        # font_name 需 FontFace 注册链路，pos 需合成器坐标换算，均为独立增量。
+        override = caption.get("style_override")
+        if isinstance(override, dict):
+            structural = {
+                key for key in ("font_name", "pos_x", "pos_y")
+                if override.get(key) is not None
+            }
+            if structural:
+                raise _unsupported(
+                    f"字幕 {caption['caption_id']}: style_override 结构性字段 "
+                    f"{sorted(structural)} 超出实时合成子集")
 
 
 def _lerp_channel(frames: list[dict[str, Any]], t_seg_us: int, key: str) -> float:
@@ -234,6 +246,51 @@ def resolved_caption_styles(presets: dict[str, Any],
             **({"font_family": default_font_family} if default_font_family else {}),
         }
     return resolved
+
+
+# 预览子集放行的 style_override 数值字段（B4 收官；结构性字段 font_name/
+# pos_x/pos_y 仍"仅权威预览"，见 _validate_whitelist）。
+_CAPTION_OVERRIDE_STYLE_KEYS = (
+    "font_size", "primary_color", "outline_color", "outline",
+    "alignment", "margin_v", "letter_spacing", "bold", "italic", "underline",
+    "back_color", "border_style", "shadow", "fx_preset",
+)
+
+
+def caption_override_style(caption: dict[str, Any]) -> dict[str, Any] | None:
+    """字幕 style_override → 预览可消费的数值样式覆盖（逐字段与预设合并）。
+
+    返回 None = 无覆盖（消费预设）。alpha 位仅气泡底衬（back_color）消费。"""
+    override = caption.get("style_override")
+    if not isinstance(override, dict) or not override:
+        return None
+    style: dict[str, Any] = {}
+    if override.get("font_size") is not None:
+        style["font_size"] = int(override["font_size"])
+    for color_key, rgb_key in (("primary_color", "primary_rgb"),
+                               ("outline_color", "outline_rgb"),
+                               ("back_color", "back_rgb")):
+        value = override.get(color_key)
+        if value is not None:
+            style[rgb_key] = _parse_ass_color(value)
+    if override.get("outline") is not None:
+        style["outline"] = int(override["outline"])
+    if override.get("shadow") is not None:
+        style["shadow"] = int(override["shadow"])
+    if override.get("border_style") is not None:
+        style["border_style"] = int(override["border_style"])
+    if override.get("margin_v") is not None:
+        style["margin_v"] = int(override["margin_v"])
+    if override.get("letter_spacing") is not None:
+        style["letter_spacing"] = float(override["letter_spacing"])
+    for flag in ("bold", "italic", "underline"):
+        if override.get(flag) is not None:
+            style[flag] = bool(override[flag])
+    if override.get("alignment") is not None:
+        style["alignment"] = int(override["alignment"])
+    if override.get("fx_preset") is not None:
+        style["fx_preset"] = str(override["fx_preset"])
+    return style or None
 
 
 def _anchor_of(regions: list[dict[str, Any]], blend_region: dict[str, Any]) -> dict[str, Any]:
@@ -549,6 +606,12 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
         ],
         "captions": plan["captions"]["items"],
         "caption_styles": caption_styles or {},
+        # B4 收官：per-caption 数值样式覆盖（合成器 Canvas 消费；预览=导出）。
+        "caption_override_styles": {
+            caption["caption_id"]: style
+            for caption in plan["captions"]["items"]
+            if (style := caption_override_style(caption)) is not None
+        },
         "transition_windows": [
             {"clip_id": region["item"]["segment"]["clip_id"], **region["blend"]}
             for region in regions if region.get("blend")

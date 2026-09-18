@@ -163,6 +163,7 @@ export interface WorkerInit {
   canvasWidth: number;
   canvasHeight: number;
   captionStyles: Record<string, { font_size: number; primary_rgb: [number, number, number]; outline_rgb: [number, number, number]; outline: number; shadow: number; border_style: number; margin_v: number; font_family?: string }>;
+  captionOverrideStyles: Record<string, Partial<{ font_size: number; primary_rgb: [number, number, number]; outline_rgb: [number, number, number]; outline: number; shadow: number; border_style: number; margin_v: number; letter_spacing: number; bold: boolean; italic: boolean; underline: boolean; alignment: number; back_rgb: [number, number, number]; fx_preset: string }>>;
   /** B13-R 判别诊断开关：强制 copyTo 上传路径（禁用 direct texImage2D）。
    *  仅 perf 诊断构建下发；缺省 false 行为不变。 */
   forceCopyTo?: boolean;
@@ -229,6 +230,7 @@ const state = {
   captionCacheKey: "",
   captionFontLoaded: "",
   captionFontFamilies: new Set<string>(),
+  captionOverrideStyles: {} as Record<string, Record<string, unknown>>,
   captionStyles: {} as WorkerInit["captionStyles"],
   fit: { x: 0, y: 0, scale: 1 },
   backing: { width: 2, height: 2 },
@@ -312,6 +314,7 @@ function handleInit(message: WorkerInit): void {
   state.canvasHeight = message.canvasHeight;
   state.ringDepth = message.ringDepth;
   state.captionStyles = message.captionStyles;
+  state.captionOverrideStyles = message.captionOverrideStyles ?? {};
   // B13-R 判别开关：起点即 copyTo（direct 路径整会话禁用）
   if (message.forceCopyTo) state.frameUploadMode = "copyTo";
   const built = buildProgram(gl);
@@ -769,27 +772,66 @@ function renderCaptionLayer(items: Array<{ caption_id: string; text: string; pre
   const ctx = state.captionCtx!;
   ctx.clearRect(0, 0, width, height);
   for (const item of items) {
-    const style = state.captionStyles[item.preset_id];
-    if (!style) continue;
+    const preset = state.captionStyles[item.preset_id];
+    if (!preset) continue;
+    // B4 收官：per-caption 覆盖样式与预设逐字段合并（未提及字段保留预设）。
+    const override = state.captionOverrideStyles[item.caption_id];
+    const style = { ...preset, ...override } as typeof preset & Record<string, unknown>;
     // 多字体：样式携带 bundle 默认族名（与注册 FontFace 名一致）；
     // 未注册/未下发时回退已注册首族或 sans-serif（与导出 libass 回退一致）。
     const family = (style.font_family && state.captionFontFamilies.has(style.font_family))
       ? style.font_family
       : (state.captionFontLoaded || "sans-serif");
     ctx.font = `${style.font_size}px "${family}"`;
+    const fx = typeof style.fx_preset === "string" ? style.fx_preset : undefined;
+    let fillStyle = `rgb(${style.primary_rgb[0]},${style.primary_rgb[1]},${style.primary_rgb[2]})`;
+    let strokeStyle = `rgb(${style.outline_rgb[0]},${style.outline_rgb[1]},${style.outline_rgb[2]})`;
+    let outlineWidth = (style.outline ?? 0) * 2;
+    let blur = 0;
+    let shadowColor = "transparent";
+    let shadowBlur = 0;
+    let shadowOffsetY = 0;
+    if (fx === "gold-gradient") {
+      fillStyle = "rgb(255,192,32)"; strokeStyle = "rgb(64,32,0)";
+      outlineWidth = 12; blur = 1;
+    } else if (fx === "neon-glow") {
+      fillStyle = "rgb(0,255,255)"; strokeStyle = "rgb(128,64,0)";
+      outlineWidth = 16; blur = 3; shadowColor = "rgba(255,160,0,0.8)"; shadowBlur = 12;
+    } else if (fx === "sticker-outline") {
+      fillStyle = "rgb(255,255,255)"; strokeStyle = "rgb(16,16,16)";
+      outlineWidth = 20; blur = 0;
+    } else if (fx === "soft-shadow") {
+      fillStyle = "rgb(255,255,255)"; outlineWidth = 4;
+      shadowColor = "rgba(0,0,0,0.38)"; shadowBlur = 8; shadowOffsetY = 4;
+    }
     ctx.textAlign = "center";
     ctx.textBaseline = "alphabetic";
     const x = width / 2;
     const y = height - style.margin_v - style.font_size * 0.15;
-    if (style.outline > 0) {
-      ctx.lineWidth = style.outline * 2;
+    if (style.border_style === 3 && style.back_rgb) {
+      const [r, g, b] = style.back_rgb as [number, number, number];
+      ctx.fillStyle = `rgba(${r},${g},${b},0.55)`;
+      const metrics = ctx.measureText(item.text);
+      const padX = (style.outline ?? 0) + 12;
+      const padY = (style.outline ?? 0) + 6;
+      ctx.beginPath();
+      ctx.roundRect(x - metrics.width / 2 - padX, y - style.font_size * 0.82 - padY,
+        metrics.width + padX * 2, style.font_size * 1.1 + padY * 2, 10);
+      ctx.fill();
+    }
+    if (blur > 0) { ctx.filter = `blur(${blur}px)`; }
+    ctx.shadowColor = shadowColor; ctx.shadowBlur = shadowBlur; ctx.shadowOffsetY = shadowOffsetY;
+    if (outlineWidth > 0) {
+      ctx.lineWidth = outlineWidth;
       ctx.lineJoin = "round";
       ctx.miterLimit = 2;
-      ctx.strokeStyle = `rgb(${style.outline_rgb[0]},${style.outline_rgb[1]},${style.outline_rgb[2]})`;
+      ctx.strokeStyle = strokeStyle;
       ctx.strokeText(item.text, x, y);
     }
-    ctx.fillStyle = `rgb(${style.primary_rgb[0]},${style.primary_rgb[1]},${style.primary_rgb[2]})`;
+    ctx.filter = "none";
+    ctx.fillStyle = fillStyle;
     ctx.fillText(item.text, x, y);
+    ctx.shadowColor = "transparent"; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
   }
   gl.bindTexture(gl.TEXTURE_2D, state.captionTexture!);
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);

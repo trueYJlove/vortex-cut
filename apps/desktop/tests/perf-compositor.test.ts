@@ -16,7 +16,7 @@ async function create() {
   vi.stubGlobal("Worker", FakeWorker);
   const canvas = document.createElement("canvas");
   Object.assign(canvas, { transferControlToOffscreen: () => ({}) });
-  return CompositorWorkerClient.create(canvas, { inputs: [], ringDepth: 3, canvasWidth: 16, canvasHeight: 16, captionStyles: {} });
+  return CompositorWorkerClient.create(canvas, { inputs: [], ringDepth: 3, canvasWidth: 16, canvasHeight: 16, captionStyles: {}, captionOverrideStyles: {} });
 }
 afterEach(() => { editorPerf.enabled = false; editorPerf.reset(); vi.unstubAllGlobals(); });
 describe("diagnostic compose acknowledgement boundary", () => {

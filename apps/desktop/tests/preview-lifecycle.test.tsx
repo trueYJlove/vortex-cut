@@ -100,7 +100,7 @@ describe("A01 worker 创建失败清理", () => {
     vi.stubGlobal("Worker", InitErrorWorker);
     const canvas = document.createElement("canvas");
     Object.assign(canvas, { transferControlToOffscreen: () => ({}) });
-    await expect(CompositorWorkerClient.create(canvas, { inputs: [], ringDepth: 3, canvasWidth: 16, canvasHeight: 16, captionStyles: {} }))
+    await expect(CompositorWorkerClient.create(canvas, { inputs: [], ringDepth: 3, canvasWidth: 16, canvasHeight: 16, captionStyles: {}, captionOverrideStyles: {} }))
       .rejects.toThrow("no webgl2");
     expect(ScriptedWorker.instances.every(worker => worker.terminated)).toBe(true);
   });
@@ -386,7 +386,7 @@ describe("A01 帧所有权（transfer 后不双重 close）", () => {
     ScriptedWorker.instances = []; // makeClient 自带 ready 握手
     const canvas = document.createElement("canvas");
     Object.assign(canvas, { transferControlToOffscreen: () => ({}) });
-    return CompositorWorkerClient.create(canvas, { inputs: [], ringDepth: 3, canvasWidth: 16, canvasHeight: 16, captionStyles: {} });
+    return CompositorWorkerClient.create(canvas, { inputs: [], ringDepth: 3, canvasWidth: 16, canvasHeight: 16, captionStyles: {}, captionOverrideStyles: {} });
   }
 
   it("compositor dispose 后 upload：帧立即关闭 + 拒绝（不 post 已 dispose worker）", async () => {
