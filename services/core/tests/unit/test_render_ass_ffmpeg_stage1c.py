@@ -870,3 +870,114 @@ def test_builder_reverse_budget_ignores_hidden_track_and_forward_segments() -> N
         [{"audio_streams": [{}]}, {"audio_streams": [{}]}],
         "libopenh264", "out.mp4", captions=False)
     assert "-filter_complex" in args
+
+
+# ── A1 音频混音（M3-3 第一段）──────────────────────────────────────────────
+
+
+def _a1_segment(clip_id: str, input_id: str, tl0: int, tl1: int, *, gain_db: float = 0.0,
+                reverse: bool = False, speed_milli: int = 1000) -> dict:
+    return {
+        "clip_id": clip_id,
+        "input_id": input_id,
+        "asset_kind": "audio",
+        "source_start_us": 0,
+        "source_end_us": tl1 - tl0,
+        "timeline_start_us": tl0,
+        "timeline_end_us": tl1,
+        "layout": "fit",
+        "audio_enabled": True,
+        "gain_db": gain_db,
+        "speed_milli": speed_milli,
+        "reverse_playback": reverse,
+        "transition_in": None,
+    }
+
+
+def test_no_a1_graph_unchanged() -> None:
+    """无 A1 段：[acat]anull[aout],图与旧版语义一致（回归锁）。"""
+    plan = _gapped_plan()
+    args = build_timeline_args(
+        plan, [Path("a.mp4"), Path("b.mp4")],
+        [{"audio_streams": [{}]}, {"audio_streams": [{}]}],
+        "libopenh264", "out.mp4", captions=False)
+    graph = args[args.index("-filter_complex") + 1]
+    assert "concat=n=3:v=1:a=1[vcat][acat]" in graph
+    assert "[acat]anull[aout]" in graph
+    assert "amix" not in graph
+
+
+def test_single_a1_segment_enters_mix() -> None:
+    """单 A1 段：adelay 平移 + amix(inputs=2) 汇入 [aout],atrim 钉回视觉总长。"""
+    plan = _gapped_plan()
+    plan["segments"].append(_a1_segment("a1clip", "I2", 1_000_000, 3_000_000))
+    args = build_timeline_args(
+        plan,
+        [Path("a.mp4"), Path("b.mp4"), Path("music.mp3")],
+        [{"audio_streams": [{}]}, {"audio_streams": [{}]}, {"audio_streams": [{}]}],
+        "libopenh264", "out.mp4", captions=False)
+    graph = args[args.index("-filter_complex") + 1]
+    assert "amix=inputs=2:normalize=0:duration=longest[mixed]" in graph
+    assert "[acat]anull[aout]" not in graph
+    # A1 段从 timeline 1s 起 → adelay=1000;链尾 atrim 回视觉总长 9s。
+    assert "adelay=1000:all=1[a1s0]" in graph
+    assert "[mixed]atrim=duration=9.000000,asetpts=PTS-STARTPTS[aout]" in graph
+
+
+def test_two_a1_segments_same_window() -> None:
+    """两 A1 段同窗：amix inputs=3,各自 delay/增益独立。"""
+    plan = _gapped_plan()
+    plan["segments"].append(_a1_segment("a1a", "I2", 0, 4_000_000))
+    plan["segments"].append(_a1_segment("a1b", "I3", 2_000_000, 6_000_000, gain_db=-6.0))
+    args = build_timeline_args(
+        plan,
+        [Path("a.mp4"), Path("b.mp4"), Path("m1.mp3"), Path("m2.mp3")],
+        [{"audio_streams": [{}]}] * 4,
+        "libopenh264", "out.mp4", captions=False)
+    graph = args[args.index("-filter_complex") + 1]
+    assert "amix=inputs=3:normalize=0:duration=longest[mixed]" in graph
+    assert "adelay=0:all=1[a1s0]" in graph
+    assert "adelay=2000:all=1[a1s1]" in graph
+    assert "volume=-6.000dB" in graph
+
+
+def test_a1_reverse_and_muted_silent_placeholder() -> None:
+    """倒放 A1 段静音占位（amix 输入数稳定）;muted(solo 语义合并)不入图。"""
+    plan = _gapped_plan()
+    plan["segments"].append(_a1_segment("a1rev", "I2", 0, 2_000_000, reverse=True))
+    args = build_timeline_args(
+        plan,
+        [Path("a.mp4"), Path("b.mp4"), Path("c.mp3")],
+        [{"audio_streams": [{}]}] * 3,
+        "libopenh264", "out.mp4", captions=False)
+    graph = args[args.index("-filter_complex") + 1]
+    assert "amix=inputs=2:normalize=0:duration=longest[mixed]" in graph
+    assert "anullsrc=channel_layout=stereo:sample_rate=48000" in graph
+    assert "[2:a:0]" not in graph  # 倒放段不消费音频源
+
+    # audio_enabled=False（mute/solo 已在 plan 合并）→ 段不入混音图。
+    plan2 = _gapped_plan()
+    muted = _a1_segment("a1m", "I2", 0, 2_000_000)
+    muted["audio_enabled"] = False
+    plan2["segments"].append(muted)
+    args2 = build_timeline_args(
+        plan2,
+        [Path("a.mp4"), Path("b.mp4"), Path("c.mp3")],
+        [{"audio_streams": [{}]}] * 3,
+        "libopenh264", "out.mp4", captions=False)
+    graph2 = args2[args2.index("-filter_complex") + 1]
+    assert "amix" not in graph2
+    assert "[acat]anull[aout]" in graph2
+
+
+def test_a1_speed_atempo_chain() -> None:
+    """A1 段变速 0.5x:atempo 链进 A1 链。"""
+    plan = _gapped_plan()
+    plan["segments"].append(_a1_segment("a1slow", "I2", 0, 4_000_000, speed_milli=500))
+    args = build_timeline_args(
+        plan,
+        [Path("a.mp4"), Path("b.mp4"), Path("c.mp3")],
+        [{"audio_streams": [{}]}] * 3,
+        "libopenh264", "out.mp4", captions=False)
+    graph = args[args.index("-filter_complex") + 1]
+    assert "atempo=0.500000" in graph

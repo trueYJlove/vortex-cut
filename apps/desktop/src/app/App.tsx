@@ -1117,6 +1117,16 @@ export function App() {
     const item = assets.find(candidate => candidate.asset.asset_id === assetId);
     if (!item || item.asset.availability !== "available") { showNotice("该素材当前不可用，无法加入时间线。", "warning"); return; }
     if (item.asset.kind !== "video" && item.asset.kind !== "image" && item.asset.kind !== "audio") { showNotice("该素材类型暂不支持拖入时间线。", "warning"); return; }
+    // 视频素材落到 A1 音频轨：取其音轨作为音频片段（M3-3 as_audio 语义）。
+    if (item.asset.kind === "video" && trackId === "A1") {
+      void patchTimeline([{
+        op: "insert_asset_clip",
+        asset_id: item.asset.asset_id,
+        at_index: atIndex,
+        as_audio: true,
+      }], `以音轨形式加入音频轨 ${item.asset.display_name}`).catch(() => undefined);
+      return;
+    }
     // 视频/图片素材落到文本轨上：同样自动新建视频轨（剪映式）。
     let resolvedTrackId: string | "new" | undefined = trackId;
     const isVisual = item.asset.kind === "video" || item.asset.kind === "image";

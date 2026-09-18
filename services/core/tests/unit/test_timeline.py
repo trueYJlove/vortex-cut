@@ -1447,3 +1447,45 @@ def test_caption_style_set_merge_clear_and_diff(tmp_path: Path) -> None:
     assert "style_override" not in state["current_revision"]["document"]["captions"][0]
     with pytest.raises(DomainError):
         _patch(service, state, [{"op": "clear_caption_style", "caption_id": caption_id}])
+
+
+# ── as_audio：视频素材取音轨入 A1（M3-3 第一段）────────────────────────────
+
+
+def test_as_audio_video_insert_lands_on_a1(tmp_path: Path) -> None:
+    """视频素材 as_audio=true → clip 落 A1、asset_kind=audio、audio.enabled。"""
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
+    state = _patch(
+        service,
+        state,
+        [{"op": "insert_asset_clip", "asset_id": "v1", "at_index": 0, "as_audio": True}],
+    )
+    clips = state["current_revision"]["document"]["clips"]
+    a1_clip = next(clip for clip in clips if clip["track_id"] == "A1")
+    assert a1_clip["asset_id"] == "v1"
+    assert a1_clip["asset_kind"] == "audio"
+    assert a1_clip["audio"]["enabled"] is True
+    assert a1_clip["layout"] == "fit"
+    # 固定轨尾语义：A1 段追加到轨道末尾（与音频素材一致）。
+    assert a1_clip["timeline_start_us"] == 0
+
+
+def test_as_audio_rejects_silent_video_and_audio_kind(tmp_path: Path) -> None:
+    """无声视频与音频素材的 as_audio 插入被拒(音频素材直接插入即可)。"""
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
+    with pytest.raises(DomainError) as exc:
+        _patch(
+            service,
+            state,
+            [{"op": "insert_asset_clip", "asset_id": "v2", "at_index": 0, "as_audio": True}],
+        )
+    assert exc.value.code == "TIMELINE_INVALID"
+    with pytest.raises(DomainError) as exc:
+        _patch(
+            service,
+            state,
+            [{"op": "insert_asset_clip", "asset_id": "a1", "at_index": 0, "as_audio": True}],
+        )
+    assert exc.value.code == "TIMELINE_INVALID"

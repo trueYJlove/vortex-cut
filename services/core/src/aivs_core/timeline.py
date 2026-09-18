@@ -743,6 +743,7 @@ class TimelineService:
                     "speed_milli",
                     "reverse_playback",
                     "track_id",
+                    "as_audio",
                 },
                 optional={
                     "source_start_us",
@@ -752,8 +753,15 @@ class TimelineService:
                     "speed_milli",
                     "reverse_playback",
                     "track_id",
+                    "as_audio",
                 },
             )
+            # as_audio（M3-3）：视频素材取其音轨铺到 A1（音频轨拒收视频素材的
+            # 既有缺口）。素材必须是 video 且确有音轨；片段按 A1 纯音频语义
+            # 落轨（固定轨尾、asset_kind=audio、audio.enabled=true）。
+            as_audio = operation.get("as_audio")
+            if as_audio is not None and not isinstance(as_audio, bool):
+                raise DomainError("TIMELINE_INVALID", "as_audio 状态不合法")
             speed_milli = operation.get("speed_milli")
             if speed_milli is not None and (
                 isinstance(speed_milli, bool)
@@ -773,6 +781,16 @@ class TimelineService:
                 operation.get("source_end_us"),
                 operation.get("duration_us"),
             )
+            if as_audio:
+                if clip["asset_kind"] != "video":
+                    raise DomainError("TIMELINE_INVALID", "只有视频素材可以取音轨入音频轨")
+                # 音轨存在性在 clip.audio.enabled 中已编码（_asset_clip 依
+                # media_info.audio_streams 判定）；无声视频取音轨即拒绝。
+                if not clip["audio"]["enabled"]:
+                    raise DomainError("TIMELINE_INVALID", "视频素材没有音轨")
+                clip["track_id"] = AUDIO_TRACK_ID
+                clip["asset_kind"] = "audio"
+                clip["layout"] = "fit"
             if clip["asset_kind"] == "image":
                 if speed_milli is not None and speed_milli != 1000:
                     raise DomainError("TIMELINE_INVALID", "图片片段不能变速")
@@ -2006,7 +2024,16 @@ class TimelineService:
             clip_ids.add(clip_id)
             asset = self._asset(db, document["project_id"], clip.get("asset_id"))
             if asset["kind"] != clip.get("asset_kind"):
-                raise DomainError("TIMELINE_INVALID", "Clip 素材类型不一致")
+                # as_audio 派生片段白名单（M3-3）：视频素材取音轨铺 A1——
+                # clip.asset_kind=audio 但源素材是 video；audio.enabled=true
+                # 由插入路径保证（无声视频在插入时已拒），此处防绕过。
+                derived_audio = (
+                    clip.get("asset_kind") == "audio"
+                    and asset["kind"] == "video"
+                    and bool((clip.get("audio") or {}).get("enabled"))
+                )
+                if not derived_audio:
+                    raise DomainError("TIMELINE_INVALID", "Clip 素材类型不一致")
             track = tracks_by_id[clip["track_id"]]
             expected_track_kind = "audio" if clip.get("asset_kind") == "audio" else "video"
             if track.get("kind") != expected_track_kind:

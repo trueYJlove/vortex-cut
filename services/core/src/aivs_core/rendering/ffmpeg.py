@@ -461,7 +461,7 @@ def build_timeline_args(
         return int(segment["timeline_end_us"]) - int(segment["timeline_start_us"])
 
     if not has_active_transitions:
-        filters.append(f"{''.join(concat_inputs)}concat=n={len(graph_items)}:v=1:a=1[vcat][aout]")
+        filters.append(f"{''.join(concat_inputs)}concat=n={len(graph_items)}:v=1:a=1[vcat][acat]")
     else:
         # B2 借用式重叠（实测 FFmpeg xfade 语义：输出在 offset+duration 处结束，
         # 右输入对齐到 offset 且超出 duration 的部分被丢弃）。因此：
@@ -549,7 +549,65 @@ def build_timeline_args(
                 video_label_prev = f"vx{step}"
                 audio_label_prev = f"ax{step}"
                 accumulated_us += _item_span_us(item)
-        filters.append(f"[{video_label_prev}]null[vcat];[{audio_label_prev}]anull[aout]")
+        filters.append(f"[{video_label_prev}]null[vcat];[{audio_label_prev}]anull[acat]")
+
+    # A1 音频混音（M3-3 第一段）：纯音频段（asset_kind=audio）此前被整图
+    # 跳过——预览侧 syncAudio 对 A1 出声而导出无声（预览≠导出）。各 A1 段
+    # 构造与 V1 视频段同构的音频链（atrim/aresample/atempo/volume；倒放段
+    # 静音占位），adelay 平移到时间线起点后与 V1 混音轨 amix（normalize=0
+    # 直接相加——与预览 WebAudio 多 rig 并存的 sum 语义同构；削波由素材级
+    # gain_db 控制）。混音结果 atrim 回视觉轨总长：成片时长口径 =
+    # _rendered_duration_us（validation ±83ms 硬门），音频尾超出部分裁掉
+    # （与预览"音频长于画面以黑场延长"显示不冲突——导出容器时长必须钉死）。
+    # 无 A1 段时 [acat]anull[aout]，图与旧版逐字节一致。
+    a1_segments = [
+        (index, segment)
+        for index, segment in enumerate(segments)
+        if segment["asset_kind"] == "audio" and segment["audio_enabled"]
+    ]
+    if a1_segments:
+        mix_inputs = ["[acat]"]
+        for mix_index, (index, segment) in enumerate(a1_segments):
+            probe = segment_probes[index]
+            start = _seconds(max(int(segment["source_start_us"]), 0))
+            end = _seconds(max(int(segment["source_end_us"]), 0))
+            gain = float(segment["gain_db"])
+            speed_milli = int(segment.get("speed_milli", 1000))
+            speed = speed_milli / 1000
+            tempo_chain = ""
+            if speed != 1.0:
+                factors: list[float] = []
+                remaining = speed
+                while remaining > 2.0:
+                    factors.append(2.0)
+                    remaining /= 2.0
+                while remaining < 0.5:
+                    factors.append(0.5)
+                    remaining /= 0.5
+                factors.append(remaining)
+                tempo_chain = ",".join(f"atempo={factor:.6f}" for factor in factors) + ","
+            delay_ms = int(segment["timeline_start_us"]) // 1000
+            if segment.get("reverse_playback") or not probe.get("audio_streams"):
+                # 倒放/无音轨：静音占位（保证 amix 输入数稳定）。
+                filters.append(
+                    "anullsrc=channel_layout=stereo:sample_rate=48000,"
+                    f"atrim=duration={_seconds(int(segment['timeline_end_us']) - int(segment['timeline_start_us']))},"
+                    f"asetpts=PTS-STARTPTS[a1s{mix_index}]"
+                )
+            else:
+                filters.append(
+                    f"[{index}:a:0]atrim=start={start}:end={end},asetpts=PTS-STARTPTS,"
+                    "aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+                    f"{tempo_chain}volume={gain:.3f}dB,apad,atrim=duration={_seconds(int(segment['timeline_end_us']) - int(segment['timeline_start_us']))},"
+                    f"adelay={delay_ms}:all=1[a1s{mix_index}]"
+                )
+            mix_inputs.append(f"[a1s{mix_index}]")
+        filters.append(
+            f"{''.join(mix_inputs)}amix=inputs={len(mix_inputs)}:normalize=0:duration=longest[mixed]"
+        )
+        filters.append(f"[mixed]atrim=duration={_seconds(timeline_total_us)},asetpts=PTS-STARTPTS[aout]")
+    else:
+        filters.append("[acat]anull[aout]")
     video_label = "vcat"
     # P1 覆盖轨（画中画）合成：V1 之外的视频/图片覆盖帧，按时间窗以不透明
     # 实心浮层叠到主画面上（PIP 语义），并持久复用 [MAINPIP] 标签供逐段叠加。
