@@ -215,8 +215,12 @@ def _parse_ass_color(value: str) -> list[int]:
     return [int(body[6:8], 16), int(body[4:6], 16), int(body[2:4], 16)]
 
 
-def resolved_caption_styles(presets: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """预设 → 数值样式（Core 单点解析，Renderer 端只消费；PlayRes = 渲染画布）。"""
+def resolved_caption_styles(presets: dict[str, Any],
+                            default_font_family: str | None = None) -> dict[str, dict[str, Any]]:
+    """预设 → 数值样式（Core 单点解析，Renderer 端只消费；PlayRes = 渲染画布）。
+
+    多字体：default_font_family（bundle 默认族名）随样式下发——Renderer
+    Canvas 按注册 FontFace 名取用（与导出 ASS Fontname 同源）。"""
     resolved: dict[str, dict[str, Any]] = {}
     for preset_id, value in (presets.get("presets") or {}).items():
         resolved[preset_id] = {
@@ -227,6 +231,7 @@ def resolved_caption_styles(presets: dict[str, Any]) -> dict[str, dict[str, Any]
             "shadow": int(value["shadow"]),
             "border_style": int(value["border_style"]),
             "margin_v": int(value["margin_v"]),
+            **({"font_family": default_font_family} if default_font_family else {}),
         }
     return resolved
 

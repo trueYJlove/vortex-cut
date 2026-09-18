@@ -306,7 +306,7 @@ describe("A01 SyntheticPreview 组件生命周期", () => {
   function stubDesktop(ir: Record<string, unknown>) {
     window.desktop = {
       getPreviewIr: vi.fn().mockResolvedValue({ schema_version: 1, ir }),
-      captionFontUrl: vi.fn().mockResolvedValue("https://fonts.test/caption.woff2"),
+      captionFontUrl: vi.fn().mockResolvedValue("https://fonts.test/caption.woff2"), captionFontUrls: vi.fn().mockResolvedValue([{ family: "Noto Sans CJK SC", media_url: "" }]),
     } as never;
   }
 

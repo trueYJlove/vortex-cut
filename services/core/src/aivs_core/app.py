@@ -571,7 +571,9 @@ class CoreState:
         self.model_registry = ModelRegistry(settings.manifest_dir)
         self.model_manager = ModelManager(self.db, settings.data_dir, self.model_registry)
         self.transcripts = TranscriptRepository(self.db)
-        self.timelines = TimelineService(self.db)
+        # 字幕字体族白名单（多字体）：注入运行时字体注册表，font_name 校验
+        # 用（非法名保持拒绝——防未注册字体静默回退 sans-serif）。
+        self.timelines = TimelineService(self.db, font_families=CaptionResources(settings.font_dir).families())
         self.provider_secrets = ProviderSecretVault()
         self.providers = ProviderRepository(self.db, self.provider_secrets)
         self.recipes = RecipeRegistry(settings.recipe_dir)

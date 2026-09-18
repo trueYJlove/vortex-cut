@@ -153,6 +153,7 @@ export class Compositor {
   private captionTexture: WebGLTexture | null = null;
   private captionCacheKey = "";
   captionFontLoaded = "";
+  captionFontFamilies = new Set<string>();
   contextLost = false;
   readonly contextLostResolvers: Array<() => void> = [];
 
@@ -831,13 +832,27 @@ export class Compositor {
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
   }
 
-  async ensureCaptionFont(fontArrayBuffer: ArrayBuffer, family: string): Promise<void> {
-    if (this.captionFontLoaded === family) return;
-    const face = new FontFace(family, fontArrayBuffer);
-    await face.load();
-    document.fonts.add(face);
-    this.captionFontLoaded = family;
-    this.captionCacheKey = ""; // 字体就绪后强制重绘字幕层
+  /** 多字体：注册全部族名（family 名 = 真实族名，Canvas 按字幕样式取用）；
+   *  旧单字体入参保持兼容。 */
+  async ensureCaptionFont(fontArrayBuffer: ArrayBuffer, family: string): Promise<void>;
+  async ensureCaptionFont(fonts: Array<{ family: string; buffer: ArrayBuffer }>): Promise<void>;
+  async ensureCaptionFont(input: ArrayBuffer | Array<{ family: string; buffer: ArrayBuffer }>, family?: string): Promise<void> {
+    const entries = Array.isArray(input)
+      ? input
+      : [{ family: family as string, buffer: input }];
+    let changed = false;
+    for (const entry of entries) {
+      if (this.captionFontFamilies.has(entry.family)) continue;
+      const face = new FontFace(entry.family, entry.buffer);
+      await face.load();
+      document.fonts.add(face);
+      this.captionFontFamilies.add(entry.family);
+      changed = true;
+    }
+    if (!this.captionFontLoaded && entries.length) {
+      this.captionFontLoaded = entries[0].family;
+    }
+    if (changed) this.captionCacheKey = ""; // 字体就绪后强制重绘字幕层
   }
 
   private renderCaptionLayer(captionIds: string[]): void {
@@ -863,7 +878,11 @@ export class Compositor {
       if (!item) continue;
       const style = this.ir.caption_styles[item.preset_id];
       if (!style) continue;
-      const family = this.captionFontLoaded || "sans-serif";
+      // 多字体：样式携带 bundle 默认族名（与注册 FontFace 名一致）；
+      // 未注册/未下发时回退已注册首族或 sans-serif（与导出 libass 回退一致）。
+      const family = (style.font_family && this.captionFontFamilies.has(style.font_family))
+        ? style.font_family
+        : (this.captionFontLoaded || "sans-serif");
       ctx.font = `${style.font_size}px "${family}"`;
       ctx.textAlign = "center";
       ctx.textBaseline = "alphabetic";

@@ -16,20 +16,44 @@ class CaptionResources:
         self.presets_path = font_dir / "caption-presets.json"
 
     def load(self) -> tuple[dict[str, Any], dict[str, Any], Path]:
+        """字体包 + 预设加载。bundle v2 = fonts 数组（多字体）；v1 = 单对象
+        （归一化为单元素数组，family/file 提升到顶层兼容旧消费方）。"""
         try:
-            bundle = json.loads(self.bundle_path.read_text(encoding="utf-8"))
+            bundle_raw = json.loads(self.bundle_path.read_text(encoding="utf-8"))
             presets = json.loads(self.presets_path.read_text(encoding="utf-8"))
-            font_path = self.font_dir / bundle["file"]
         except (OSError, KeyError, json.JSONDecodeError) as exc:
             raise DomainError("RENDER_FONT_MISSING", "字幕字体资源不完整") from exc
-        if (
-            bundle.get("font_bundle_version") != 1
-            or presets.get("preset_version") != 1
-            or not font_path.is_file()
-            or not (self.font_dir / bundle.get("license_file", "")).is_file()
-        ):
+        if bundle_raw.get("font_bundle_version") == 2:
+            fonts = bundle_raw.get("fonts")
+            if not isinstance(fonts, list) or not fonts:
+                raise DomainError("RENDER_FONT_MISSING", "字幕字体资源不完整")
+            default = next((f for f in fonts if f.get("role") == "default"), fonts[0])
+            bundle = {
+                "font_bundle_version": 2,
+                "family": default["family"],
+                "file": default["file"],
+                "license_file": default["license_file"],
+                "fonts": fonts,
+            }
+        elif bundle_raw.get("font_bundle_version") == 1:
+            bundle = {**bundle_raw, "fonts": [bundle_raw]}
+        else:
+            raise DomainError("RENDER_FONT_MISSING", "字幕字体资源不完整")
+        font_path = self.font_dir / bundle["file"]
+        for font in bundle["fonts"]:
+            if not (self.font_dir / font["file"]).is_file():
+                raise DomainError("RENDER_FONT_MISSING", "字幕字体资源不完整")
+            license_file = font.get("license_file")
+            if license_file and not (self.font_dir / license_file).is_file():
+                raise DomainError("RENDER_FONT_MISSING", "字幕字体资源不完整")
+        if presets.get("preset_version") != 1:
             raise DomainError("RENDER_FONT_MISSING", "字幕字体资源不完整")
         return bundle, presets, font_path
+
+    def families(self) -> list[str]:
+        """注册字体族名列表（font_name 白名单；v1 单字体亦走此口径）。"""
+        bundle, _, _ = self.load()
+        return [str(font["family"]) for font in bundle["fonts"]]
 
 
 def _ass_rgb_to_bgr_tag(color: str) -> str:

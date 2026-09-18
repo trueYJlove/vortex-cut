@@ -668,6 +668,25 @@ function registerIpc(): void {
     }
     return restrictedMedia.issue("caption-font", "asset");
   });
+  // 多字体（M2-B4 扩展）：bundle v2 注册表 → 全部字体下发 ticket + 族名列表。
+  // bundle.json 是静态资源（随 resources 分发），直接读文件。
+  ipcMain.handle("media:caption-font-urls", async () => {
+    const fontsRoot = resolve(
+      app.isPackaged ? process.resourcesPath : resolve(__dirname, "../../../../resources"),
+      "fonts",
+    );
+    const bundle = JSON.parse(await readFile(resolve(fontsRoot, "bundle.json"), "utf8")) as {
+      fonts?: Array<{ family: string; file: string }>;
+    };
+    const fonts = Array.isArray(bundle.fonts) ? bundle.fonts : [];
+    return fonts.map(font => {
+      const key = `caption-font:${font.family}`;
+      if (!restrictedMedia.registeredPath(key)) {
+        restrictedMedia.register(key, resolve(fontsRoot, font.file), "asset");
+      }
+      return { family: font.family, media_url: restrictedMedia.issue(key, "asset") };
+    });
+  });
   ipcMain.handle("preview-ir:get", async (_event, input: { project_id: string; timeline_revision_id?: string | null; output_ratio?: string }) => {
     const params = new URLSearchParams();
     if (input?.timeline_revision_id) params.set("timeline_revision_id", input.timeline_revision_id);

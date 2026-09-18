@@ -69,6 +69,8 @@ export interface IrCaptionStyle {
   shadow: number;
   border_style: number;
   margin_v: number;
+  /** 多字体：bundle 默认族名（与预注册 FontFace 名一致）；缺省回退 sans-serif。 */
+  font_family?: string;
 }
 
 export interface IrFrame {

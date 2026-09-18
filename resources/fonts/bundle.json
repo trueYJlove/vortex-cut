@@ -1,8 +1,28 @@
 {
-  "font_bundle_version": 1,
-  "family": "Noto Sans CJK SC",
-  "file": "noto-sans-sc/NotoSansCJKsc-VF.ttf",
-  "license": "SIL Open Font License 1.1",
-  "license_file": "noto-sans-sc/OFL.txt",
-  "sha256": "990c807e79c25662a5a9ecf7f971baeb2bf2eab9a559e5ecf15cdfdb8561d21f"
+  "font_bundle_version": 2,
+  "fonts": [
+    {
+      "family": "Noto Sans CJK SC",
+      "file": "noto-sans-sc/NotoSansCJKsc-VF.ttf",
+      "license": "SIL Open Font License 1.1",
+      "license_file": "noto-sans-sc/OFL.txt",
+      "sha256": "990c807e79c25662a5a9ecf7f971baeb2bf2eab9a559e5ecf15cdfdb8561d21f",
+      "role": "default"
+    },
+    {
+      "family": "LXGW WenKai",
+      "file": "lxgw-wenkai/LXGWWenKai-Regular.ttf",
+      "license": "SIL Open Font License 1.1",
+      "license_file": "lxgw-wenkai/LICENSE.txt",
+      "role": "extra"
+    },
+    {
+      "family": "Noto Serif CJK SC",
+      "file": "noto-serif-sc/NotoSerifCJKsc-Regular.otf",
+      "license": "SIL Open Font License 1.1",
+      "license_file": "noto-serif-sc/LICENSE.txt",
+      "sha256": "2a2eae2628df83556c54018c41e20fa532c1b862c5256ae8b3f23feb918d12ca",
+      "role": "extra"
+    }
+  ]
 }

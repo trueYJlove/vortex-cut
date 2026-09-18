@@ -64,7 +64,7 @@ function stubDesktopV2(isInputChanged: (revisionId: string) => boolean = () => f
       Promise.resolve(manifestRaw(idOf(input.timeline_revision_id ?? "revision_unknown"), isInputChanged(input.timeline_revision_id ?? ""), opts?.totalFrames))),
     getPreviewIrV2Window: vi.fn((input: { start_frame: number; frame_count: number; timeline_revision_id?: string | null }) =>
       Promise.resolve(windowRaw(manifestIdOf(idOf(input.timeline_revision_id ?? "revision_unknown")), input.start_frame, input.frame_count))),
-    captionFontUrl: vi.fn().mockResolvedValue("https://fonts.test/caption.woff2"),
+    captionFontUrl: vi.fn().mockResolvedValue("https://fonts.test/caption.woff2"), captionFontUrls: vi.fn().mockResolvedValue([{ family: "Noto Sans CJK SC", media_url: "" }]),
   } as never;
 }
 

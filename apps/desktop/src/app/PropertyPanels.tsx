@@ -404,7 +404,11 @@ export function CaptionProperties({ caption, working, locked, onPatch, onDraft }
               <PRow label="字体">
                 <input type="text" className="pp-input" list="caption-font-options" maxLength={60} placeholder="预设字体" value={styleOverride.font_name ?? ""}
                   onBlur={event => { const value = event.target.value.trim(); if (value && value !== (caption.style_override?.font_name ?? "")) setStyle({ font_name: value }, `字体 ${value}`); }} />
-                <datalist id="caption-font-options"><option value="Noto Sans CJK SC" /></datalist>
+                <datalist id="caption-font-options">
+                  <option value="Noto Sans CJK SC" />
+                  <option value="LXGW WenKai" />
+                  <option value="Noto Serif CJK SC" />
+                </datalist>
               </PRow>
               <RangeRow label="字号" value={styleOverride.font_size ?? 72} min={24} max={144} step={1} ariaLabel="字号"
                 onDraft={() => { }}

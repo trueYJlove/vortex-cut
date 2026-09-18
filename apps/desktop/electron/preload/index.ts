@@ -254,6 +254,7 @@ export interface DesktopApi {
   // B16b 编辑器负载：playing/scrubbing/idle 推送（Main 侧 lease 心跳消费）
   updateEditorLoad: (mode: "playing" | "scrubbing" | "idle") => Promise<{ status: string }>;
   captionFontUrl: () => Promise<string>;
+  captionFontUrls: () => Promise<Array<{ family: string; media_url: string }>>;
   openArtifact: (artifactId: string) => Promise<void>;
   openArtifactFolder: (artifactId: string) => Promise<void>;
   subscribeJob: (jobId: JobId, listener: (job: Job) => void) => () => void;
@@ -400,6 +401,7 @@ const api: DesktopApi = {
   pcmChunkMediaUrl: input => ipcRenderer.invoke("pcm-chunk:media", input),
   updateEditorLoad: (mode: "playing" | "scrubbing" | "idle") => ipcRenderer.invoke("editor-load:update", mode),
   captionFontUrl: () => ipcRenderer.invoke("media:caption-font-url"),
+  captionFontUrls: () => ipcRenderer.invoke("media:caption-font-urls"),
   openArtifact: artifactId => ipcRenderer.invoke("artifact:open", artifactId),
   openArtifactFolder: artifactId => ipcRenderer.invoke("artifact:folder", artifactId),
   subscribeJob: (jobId, listener) => {

@@ -147,10 +147,19 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
             timeline_revision_id: revisionId, output_ratio: outputRatio,
           }).then(payload => payload);
           prewarmWindow0.catch(() => undefined); // 防孤儿拒绝：装配中断时此请求无人消费
-          // 字体与 manifest 并行（装配尾段才消费；失败语义与原串行一致）
-          const fontPromise = window.desktop.captionFontUrl()
-            .then(url => fetch(url, { signal: controller.signal }))
-            .then(response => { if (!response.ok) throw new Error("caption font fetch failed"); return response.arrayBuffer(); });
+          // 字体与 manifest 并行（装配尾段才消费；失败语义与原串行一致）。
+          // 多字体：captionFontUrls 返回全部注册字体（bundle v2）；旧端点
+          // 缺失时回退单字体端点。
+          const fontPromise = (window.desktop.captionFontUrls
+            ? window.desktop.captionFontUrls()
+            : window.desktop.captionFontUrl().then(url => [{ family: "AppCaptionCJK", media_url: url }])
+          )
+            .then(entries => Promise.all(entries.map(entry =>
+              fetch(entry.media_url, { signal: controller.signal })
+                .then(response => {
+                  if (!response.ok) throw new Error("caption font fetch failed");
+                  return response.arrayBuffer().then(buffer => ({ family: entry.family, buffer }));
+                }))));
           fontPromise.catch(() => undefined);
           const manifestT0 = performance.now();
           const manifestRaw = await window.desktop.getPreviewIrV2Manifest({
@@ -266,9 +275,9 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
           boxObserverRef.current?.observe(container);
           // C20-T2：字体已在装配头部并行预取；首窗就绪后再 seek（seekToFrame
           // 内部取窗 await 兜底同步——窗口未就绪时在此收敛）。
-          const fontBuffer = await fontPromise;
+          const fonts = await fontPromise;
           if (stale()) { session.dispose(); frameSource.dispose?.(); return; }
-          await session.loadCaptionFont(fontBuffer);
+          await session.loadCaptionFont(fonts);
           if (stale()) return;
           await ensureReady;
           editorPerf.record("ready_window", performance.now() - ensureT0);
@@ -319,13 +328,18 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
         sessionRefLocal.current = session;
         sessionProjectRef.current = projectId;
         boxObserverRef.current?.observe(container);
-        const fontUrl = await window.desktop.captionFontUrl();
+        const fontEntries = await (window.desktop.captionFontUrls
+          ? window.desktop.captionFontUrls()
+          : window.desktop.captionFontUrl().then(url => [{ family: "AppCaptionCJK", media_url: url }]));
         if (stale()) return;
-        const fontResponse = await fetch(fontUrl, { signal: controller.signal });
-        if (!fontResponse.ok) throw new Error("caption font fetch failed");
-        const fontBuffer = await fontResponse.arrayBuffer();
+        const fonts = await Promise.all(fontEntries.map(entry =>
+          fetch(entry.media_url, { signal: controller.signal })
+            .then(response => {
+              if (!response.ok) throw new Error("caption font fetch failed");
+              return response.arrayBuffer().then(buffer => ({ family: entry.family, buffer }));
+            })));
         if (stale()) return;
-        await session.loadCaptionFont(fontBuffer);
+        await session.loadCaptionFont(fonts);
         if (stale()) return;
         await session.seekToFrame(Math.max(0, Math.floor((playheadUs / 1e6) * ir.canvas.fps)));
         if (stale()) return;

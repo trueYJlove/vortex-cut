@@ -308,8 +308,9 @@ class RenderCoordinator:
                 )
             probe_by_asset[item["asset_id"]] = self.preview_probe_cache[key]
         _bundle, presets, _font = self.caption_resources.load()
-        return await ir_project_executor().project(plan, probe_by_asset,
-                                                   resolved_caption_styles(presets))
+        return await ir_project_executor().project(
+            plan, probe_by_asset,
+            resolved_caption_styles(presets, _bundle["family"]))
 
     # ---- C20b：窗口化 IR v2（manifest/window） ----
 
@@ -494,7 +495,12 @@ class RenderCoordinator:
         artifact_dir.mkdir(parents=True, exist_ok=True)
         fonts = work / "fonts"
         fonts.mkdir(exist_ok=True)
-        shutil.copy2(font_path, fonts / font_path.name)
+        # 多字体：全部注册字体拷入渲染 cwd（libass fontsdir 按名匹配；
+        # override \fn 引用任何注册字体均可命中）。
+        _bundle, _presets, _default_font = self.caption_resources.load()
+        for font in _bundle["fonts"]:
+            font_file = self.caption_resources.font_dir / font["file"]
+            shutil.copy2(font_file, fonts / font_file.name)
         if rendition_snapshot_id or reframe_snapshot_id:
             if self.rendition_presets is None:
                 raise DomainError("RENDITION_SNAPSHOT_INVALID", "画幅预设未加载")

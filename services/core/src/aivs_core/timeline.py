@@ -113,11 +113,12 @@ CAPTION_STYLE_MARGIN_RANGE = (0, 600)
 CAPTION_FX_PRESETS = ("none", "gold-gradient", "neon-glow", "sticker-outline", "soft-shadow")
 
 
-def _validate_caption_style(style: Any) -> dict[str, Any]:
+def _validate_caption_style(style: Any, font_families: set[str] | None = None) -> dict[str, Any]:
     """校验字幕样式覆盖并返回规范化副本（部分字段；见设计 §1.1）。
 
     气泡/花字扩展（M2-B4 收官）：back_color/border_style/shadow（气泡底衬）
     与 fx_preset（花字模板枚举，服务端展开固定标签序列）。
+    font_families（多字体）= 注册字体族白名单；None = 跳过白名单（旧测试）。
     """
     if not isinstance(style, dict) or not style:
         raise DomainError("TIMELINE_INVALID", "字幕样式覆盖不能为空")
@@ -134,6 +135,8 @@ def _validate_caption_style(style: Any) -> dict[str, Any]:
     if font_name is not None:
         if not isinstance(font_name, str) or not 0 < len(font_name) <= 60:
             raise DomainError("TIMELINE_INVALID", "字体名称不合法")
+        if font_families is not None and font_name not in font_families:
+            raise DomainError("TIMELINE_INVALID", "字体未注册（仅内置字体可选）")
         result["font_name"] = font_name
     font_size = style.get("font_size")
     if font_size is not None:
@@ -243,8 +246,11 @@ def _clip_timeline_duration_us(source_start: int | None, source_end: int | None,
 
 
 class TimelineService:
-    def __init__(self, db: Database) -> None:
+    def __init__(self, db: Database, *, font_families: list[str] | None = None) -> None:
         self.db = db
+        # 字幕字体族白名单（多字体）：None = 跳过 font_name 白名单校验
+        # （旧单测直构服务不受影响；生产路径由 app 注入注册表）。
+        self.font_families = set(font_families) if font_families is not None else None
 
     def create(self, project_id: str, request: dict[str, Any]) -> dict[str, Any]:
         _exact_keys(
@@ -1276,7 +1282,7 @@ class TimelineService:
             # B4：部分覆盖合并（未提及字段保留预设或既有覆盖）。
             _exact_keys(operation, {"op", "caption_id", "style"})
             caption = _caption(document, operation.get("caption_id"))
-            style = _validate_caption_style(operation.get("style"))
+            style = _validate_caption_style(operation.get("style"), self.font_families)
             override = dict(caption.get("style_override") or {})
             override.update(style)
             caption["style_override"] = override

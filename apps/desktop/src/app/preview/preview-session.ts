@@ -477,9 +477,19 @@ export class PreviewSession {
 
   private readonly contextLostResolvers: Array<() => void> = [];
 
-  /** 字幕字体（transfer 到 worker 的 FontFaceSet；worker 侧字体就绪后强制重绘字幕层）。 */
-  async loadCaptionFont(buffer: ArrayBuffer): Promise<void> {
-    this.compositor?.setFont(buffer, "AppCaptionCJK");
+  /** 字幕字体（transfer 到 worker 的 FontFaceSet；worker 侧字体就绪后强制重绘字幕层）。
+   *  多字体：fonts 数组逐个注册（family 名 = 真实族名，与 ASS \fn / Canvas 取名
+   *  一致）；旧单 buffer 入参保持兼容（视为单一默认字体 AppCaptionCJK）。 */
+  async loadCaptionFont(buffer: ArrayBuffer): Promise<void>;
+  async loadCaptionFont(fonts: Array<{ family: string; buffer: ArrayBuffer }>): Promise<void>;
+  async loadCaptionFont(input: ArrayBuffer | Array<{ family: string; buffer: ArrayBuffer }>): Promise<void> {
+    if (Array.isArray(input)) {
+      for (const font of input) {
+        this.compositor?.setFont(font.buffer, font.family);
+      }
+      return;
+    }
+    this.compositor?.setFont(input, "AppCaptionCJK");
   }
 
   get isPlaying(): boolean {

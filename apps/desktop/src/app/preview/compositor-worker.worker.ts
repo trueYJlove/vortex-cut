@@ -162,7 +162,7 @@ export interface WorkerInit {
   ringDepth: number;
   canvasWidth: number;
   canvasHeight: number;
-  captionStyles: Record<string, { font_size: number; primary_rgb: [number, number, number]; outline_rgb: [number, number, number]; outline: number; shadow: number; border_style: number; margin_v: number }>;
+  captionStyles: Record<string, { font_size: number; primary_rgb: [number, number, number]; outline_rgb: [number, number, number]; outline: number; shadow: number; border_style: number; margin_v: number; font_family?: string }>;
   /** B13-R 判别诊断开关：强制 copyTo 上传路径（禁用 direct texImage2D）。
    *  仅 perf 诊断构建下发；缺省 false 行为不变。 */
   forceCopyTo?: boolean;
@@ -228,6 +228,7 @@ const state = {
   captionTexture: null as WebGLTexture | null,
   captionCacheKey: "",
   captionFontLoaded: "",
+  captionFontFamilies: new Set<string>(),
   captionStyles: {} as WorkerInit["captionStyles"],
   fit: { x: 0, y: 0, scale: 1 },
   backing: { width: 2, height: 2 },
@@ -770,7 +771,11 @@ function renderCaptionLayer(items: Array<{ caption_id: string; text: string; pre
   for (const item of items) {
     const style = state.captionStyles[item.preset_id];
     if (!style) continue;
-    const family = state.captionFontLoaded || "sans-serif";
+    // 多字体：样式携带 bundle 默认族名（与注册 FontFace 名一致）；
+    // 未注册/未下发时回退已注册首族或 sans-serif（与导出 libass 回退一致）。
+    const family = (style.font_family && state.captionFontFamilies.has(style.font_family))
+      ? style.font_family
+      : (state.captionFontLoaded || "sans-serif");
     ctx.font = `${style.font_size}px "${family}"`;
     ctx.textAlign = "center";
     ctx.textBaseline = "alphabetic";
@@ -892,11 +897,13 @@ self.addEventListener("message", async (event: MessageEvent<WorkerRequest>) => {
       return;
     }
     if (message.type === "font") {
+      // 多字体：逐条 font 消息注册各族名（family = 真实族名，Canvas 按样式取用）。
       const face = new FontFace(message.family, message.buffer);
       void face.load().then(() => {
         const fontSet = (self as unknown as { fonts?: FontFaceSet }).fonts;
         fontSet?.add(face);
-        state.captionFontLoaded = message.family;
+        state.captionFontFamilies.add(message.family);
+        if (!state.captionFontLoaded) state.captionFontLoaded = message.family;
         state.captionCacheKey = ""; // 字体就绪后强制重绘字幕层
       }, () => undefined);
       return;
