@@ -27,7 +27,7 @@ MAX_IR_FRAMES = 27_000  # 15 分钟 @30fps（O2 体量护栏）
 
 ALLOWED_KEYFRAME_PROPS = {"position", "opacity", "scale", "rotate"}
 ALLOWED_TRANSITIONS = {"fade", "fadeblack"}
-ALLOWED_MAIN_LAYOUTS = {"fit", "blurred_background"}
+ALLOWED_MAIN_LAYOUTS = {"fit", "blurred_background", "crop_fill"}
 
 
 def _fail(clip_id: str, what: str) -> DomainError:
@@ -477,7 +477,18 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
         # scale 关键帧：权威端逐帧 scale 后被静态归一化（scale=min(iw,W)+pad，为 concat
         # 段一致）完全抵消——渲染为无视觉效果（M3-0 实证：f=0.5/1.5 内容边界恒全画布）。
         # IR 不携带 scale，合成器一致忽略；UI 数值语义与渲染不一致属权威端已知限制。
-        content_x, content_y, content_w, content_h = _fit_content_box(geometry, width, height)
+        # 布局分派（B4 追加）：fit/blurred_background = contain 缩进+黑边居中；
+        # crop_fill = cover 等比放大到短边顶满、长边溢出裁切（语义对齐
+        # _visual_filter("crop_fill"): force_original_aspect_ratio=increase+crop）。
+        if segment.get("layout") == "crop_fill":
+            disp_w_full = geometry["width"] * geometry["sar"]
+            cover_scale = max(width / disp_w_full, height / geometry["height"])
+            cover_w = int(round(disp_w_full * cover_scale / 2) * 2)
+            cover_h = int(round(geometry["height"] * cover_scale / 2) * 2)
+            content_x, content_y = (width - cover_w) // 2, (height - cover_h) // 2
+            content_w, content_h = cover_w, cover_h
+        else:
+            content_x, content_y, content_w, content_h = _fit_content_box(geometry, width, height)
         if static_scale != 1.0 or static_cx != 0.5 or static_cy != 0.5:
             content_w = max(2, int(round(content_w * static_scale / 2) * 2))
             content_h = max(2, int(round(content_h * static_scale / 2) * 2))
