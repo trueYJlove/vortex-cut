@@ -150,6 +150,7 @@ def build_timeline_args(
     *,
     captions: bool,
     input_windows: list[Any] | None = None,
+    quality: str = "standard",
 ) -> list[str]:
     """组装 FFmpeg 参数图。
 
@@ -158,6 +159,8 @@ def build_timeline_args(
     其 visual_chain/atrim 的精裁坐标回移 seek 量（实证与旧图输出帧一致，
     见 test_render_input_window 的对拍）；legacy 段（None 窗口或不合格）
     保持旧参数。None = 完整旧图（测试 oracle 与回退路径）。
+    quality（M2 第四梯队）：导出画质分层 standard|high|ultra——仅影响视频
+    码率（×1.0/×1.5/×2.2），权威预览恒 standard。
     """
     segments = plan["segments"]
     if len(segments) != len(segment_paths) or len(segments) != len(segment_probes):
@@ -661,9 +664,15 @@ def build_timeline_args(
         encoder,
     ]
     if encoder == "libopenh264":
-        args += ["-b:v", "3M" if width == 540 else "10M"]
+        # 导出画质分层（M2 第四梯队）：standard=基线（旧行为），high=×1.5，
+        # ultra=×2.2——码率随分层放大；宽度分档（540p 小 / 其余大）保持。
+        multiplier = {"high": 1.5, "ultra": 2.2}.get(quality, 1.0)
+        base = 3 if width == 540 else 10
+        args += ["-b:v", f"{base * multiplier:g}M"]
     elif encoder in {"h264_nvenc", "h264_qsv", "h264_amf"}:
-        args += ["-b:v", "4M" if width == 540 else "12M"]
+        multiplier = {"high": 1.5, "ultra": 2.2}.get(quality, 1.0)
+        base = 4 if width == 540 else 12
+        args += ["-b:v", f"{base * multiplier:g}M"]
     args += [
         "-pix_fmt",
         "yuv420p",

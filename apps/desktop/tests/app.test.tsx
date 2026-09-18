@@ -456,7 +456,7 @@ describe("Stage 1C Render", () => {
     await waitFor(() => expect(api.createPreview).toHaveBeenCalledWith({ project_id: project.project_id, preview: { timeline_revision_id: state.current_revision.timeline_revision_id, encoder_mode: "software", output_ratio: "916" } }));
     fireEvent.click(screen.getByRole("button", { name: "导出正式视频" }));
     await waitFor(() => expect(api.chooseExportDestination).toHaveBeenCalledWith(project.project_id));
-    expect(api.createExport).toHaveBeenCalledWith({ project_id: project.project_id, export: { timeline_revision_id: state.current_revision.timeline_revision_id, destination_grant_id: "destination_1", encoder_mode: "software", output_ratio: "916" } });
+    expect(api.createExport).toHaveBeenCalledWith({ project_id: project.project_id, export: { timeline_revision_id: state.current_revision.timeline_revision_id, destination_grant_id: "destination_1", encoder_mode: "software", output_ratio: "916", quality: "standard" } });
   });
 
   it("空时间线和草稿会阻止 Render 提交", async () => {

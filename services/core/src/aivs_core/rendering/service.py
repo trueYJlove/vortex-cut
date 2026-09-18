@@ -584,6 +584,7 @@ class RenderCoordinator:
                         str(output),
                         captions=bool(plan["captions"]["items"]),
                         input_windows=input_windows,
+                        quality=payload.get("quality") or "standard",
                     )
                     stage("rendering")
                     await run_timeline_render(
@@ -899,8 +900,11 @@ class RenderService:
         destination_grant_id: str,
         encoder_mode: str,
         output_ratio: str = "fit",
+        quality: str = "standard",
     ) -> dict[str, Any]:
         encoder_mode = _encoder_mode(encoder_mode)
+        if quality not in ("standard", "high", "ultra"):
+            raise DomainError("EXPORT_QUALITY_INVALID", "导出画质不合法")
         plan = await _compile_off_loop(
             self.compiler, project_id, timeline_revision_id, "final_export", output_ratio=output_ratio
         )
@@ -924,6 +928,7 @@ class RenderService:
                 "destination_grant_id": destination_grant_id,
                 "destination_path": str(grant["path"]),
                 "output_ratio": output_ratio,
+                "quality": quality,
             },
         )
         try:

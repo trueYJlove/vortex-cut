@@ -484,7 +484,7 @@ export function CaptionProperties({ caption, working, locked, onPatch, onDraft }
   </fieldset>;
 }
 
-export function ProjectProperties({ project, saveState, authoritativePreview, previewIsStale, renderDisabledReason, onGeneratePreview, onCreateExport, onOpenProjectDialog }: {
+export function ProjectProperties({ project, saveState, authoritativePreview, previewIsStale, renderDisabledReason, onGeneratePreview, onCreateExport, onOpenProjectDialog, exportQuality, onExportQualityChange }: {
   project?: Project;
   saveState: SaveState;
   authoritativePreview?: AuthoritativePreviewPresentation;
@@ -493,11 +493,13 @@ export function ProjectProperties({ project, saveState, authoritativePreview, pr
   onGeneratePreview: () => void;
   onCreateExport: () => void;
   onOpenProjectDialog: () => void;
+  exportQuality: "standard" | "high" | "ultra";
+  onExportQualityChange: (quality: "standard" | "high" | "ultra") => void;
 }) {
   return <div className="properties-project">
     <section className="property-block" aria-label="项目概览"><h2>项目概览</h2>{project ? <><div className="property-line"><span>项目名称</span><strong>{project.name}</strong></div><div className="property-line"><span>状态</span><strong>{project.status === "active" ? "活动" : project.status === "archived" ? "已归档" : "目录缺失"}</strong></div><div className="property-line"><span>画布</span><strong>{project.canvas.width}×{project.canvas.height} · {project.canvas.fps_num}fps</strong></div></> : <p className="properties-muted">未选择项目。</p>}</section>
     <section className="property-block" aria-label="保存/预览检查"><h2>保存/预览检查</h2><div className="properties-status">保存状态：{saveState}</div><div className="properties-status">权威预览：{authoritativePreview ? (previewIsStale ? "已过期" : "已就绪") : "尚未生成"}</div></section>
-    <section className="property-block" aria-label="下一步动作"><h2>下一步动作</h2><div className="properties-actions"><button disabled={Boolean(renderDisabledReason)} title={renderDisabledReason} onClick={onGeneratePreview}>生成权威预览</button><button disabled={Boolean(renderDisabledReason)} title={renderDisabledReason} onClick={onCreateExport}>导出正式视频</button><button onClick={onOpenProjectDialog}>打开项目管理</button></div></section>
+    <section className="property-block" aria-label="下一步动作"><h2>下一步动作</h2><div className="properties-actions"><button disabled={Boolean(renderDisabledReason)} title={renderDisabledReason} onClick={onGeneratePreview}>生成权威预览</button><label className="pp-inline">画质<select aria-label="导出画质" value={exportQuality} onChange={event => onExportQualityChange(event.target.value as "standard" | "high" | "ultra")}><option value="standard">标准</option><option value="high">高清</option><option value="ultra">超清</option></select></label><button disabled={Boolean(renderDisabledReason)} title={renderDisabledReason} onClick={onCreateExport}>导出正式视频</button><button onClick={onOpenProjectDialog}>打开项目管理</button></div></section>
   </div>;
 }
 

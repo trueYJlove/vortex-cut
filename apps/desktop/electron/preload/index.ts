@@ -38,6 +38,7 @@ import type {
   , AuthoritativePreview
   , DestinationGrant
   , EncoderMode
+  , ExportQuality
   , OutputRatio
   , ExportRecord
   , RenderArtifact
@@ -172,7 +173,7 @@ export interface DesktopApi {
   createPreview: (input: { project_id: ProjectId; preview: { timeline_revision_id?: TimelineRevisionId; encoder_mode?: EncoderMode; output_ratio?: OutputRatio } }) => Promise<{ job: Job | null; preview: AuthoritativePreviewPresentation | null; reused: boolean }>;
   listPreviews: (input: { project_id: ProjectId; limit?: number; cursor?: string }) => Promise<{ items: AuthoritativePreviewPresentation[]; next_cursor: string | null }>;
   chooseExportDestination: (projectId: ProjectId) => Promise<DestinationGrant | null>;
-  createExport: (input: { project_id: ProjectId; export: { timeline_revision_id?: TimelineRevisionId; destination_grant_id: DestinationGrant["destination_grant_id"]; encoder_mode?: EncoderMode; output_ratio?: OutputRatio } }) => Promise<{ job: Job; export_record: ExportRecordPresentation | null }>;
+  createExport: (input: { project_id: ProjectId; export: { timeline_revision_id?: TimelineRevisionId; destination_grant_id: DestinationGrant["destination_grant_id"]; encoder_mode?: EncoderMode; output_ratio?: OutputRatio; quality?: ExportQuality } }) => Promise<{ job: Job; export_record: ExportRecordPresentation | null }>;
   listExports: (input: { project_id: ProjectId; limit?: number; cursor?: string }) => Promise<{ items: ExportRecordPresentation[]; next_cursor: string | null }>;
   listPlatformPresets: () => Promise<{ items: PlatformPreset[] }>;
   listRenditionPresets: () => Promise<{ items: RenditionPreset[] }>;

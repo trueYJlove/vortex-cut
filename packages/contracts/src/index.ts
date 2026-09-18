@@ -556,6 +556,9 @@ export type RenderMode = "authoritative_preview" | "final_export";
 export type RenderArtifactStatus = "ready" | "stale";
 export type ExportStatus = "succeeded" | "missing";
 export type EncoderMode = "auto" | "software";
+/** 导出画质分层（M2 第四梯队）：码率倍率 standard=×1 high=×1.5 ultra=×2.2。 */
+export type ExportQuality = "standard" | "high" | "ultra";
+export const EXPORT_QUALITIES = ["standard", "high", "ultra"] as const;
 /** 工具栏"比例"下拉可选值；"fit" 表示跟随时间线默认画幅。 */
 export type OutputRatio = "fit" | "169" | "916" | "11" | "43" | "34";
 export const OUTPUT_RATIOS: OutputRatio[] = ["fit", "169", "916", "11", "43", "34"];
@@ -618,7 +621,7 @@ export interface DestinationGrant {
 }
 export interface PreviewCreateInput { timeline_revision_id?: TimelineRevisionId; encoder_mode?: EncoderMode; output_ratio?: OutputRatio; }
 export interface PreviewCreateResponse { job: Job | null; preview: AuthoritativePreview | null; reused: boolean; }
-export interface ExportCreateInput { timeline_revision_id?: TimelineRevisionId; destination_grant_id: DestinationGrantId; encoder_mode?: EncoderMode; output_ratio?: OutputRatio; }
+export interface ExportCreateInput { timeline_revision_id?: TimelineRevisionId; destination_grant_id: DestinationGrantId; encoder_mode?: EncoderMode; output_ratio?: OutputRatio; quality?: ExportQuality; }
 export interface ExportCreateResponse { job: Job; export_record: ExportRecord | null; }
 export type AuthoritativePreviewPage = Page<AuthoritativePreview>;
 export type ExportRecordPage = Page<ExportRecord>;
@@ -1481,7 +1484,7 @@ export function isPreviewCreateResponse(value: unknown): value is PreviewCreateR
   return value.reused ? value.job === null && value.preview !== null && value.preview.status === "ready" : value.job !== null && value.preview === null && value.job.kind === "authoritative_preview";
 }
 export function isExportCreateInput(value: unknown): value is ExportCreateInput {
-  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["timeline_revision_id", "destination_grant_id", "encoder_mode", "output_ratio"]) && (value.timeline_revision_id === undefined || isId(value.timeline_revision_id)) && isId(value.destination_grant_id) && (value.encoder_mode === undefined || isEncoderMode(value.encoder_mode)) && (value.output_ratio === undefined || isOutputRatio(value.output_ratio));
+  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["timeline_revision_id", "destination_grant_id", "encoder_mode", "output_ratio", "quality"]) && (value.timeline_revision_id === undefined || isId(value.timeline_revision_id)) && isId(value.destination_grant_id) && (value.encoder_mode === undefined || isEncoderMode(value.encoder_mode)) && (value.output_ratio === undefined || isOutputRatio(value.output_ratio)) && (value.quality === undefined || ["standard", "high", "ultra"].includes(String(value.quality)));
 }
 export function isExportCreateResponse(value: unknown): value is ExportCreateResponse {
   return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["job", "export_record"]) && isJob(value.job) && value.job.kind === "final_export" && (value.export_record === null || isExportRecord(value.export_record));
@@ -1546,7 +1549,7 @@ export function isCaptionStyleOverride(value: unknown): value is CaptionStyleOve
   if (value.back_color !== undefined && !isAssColor(value.back_color)) return false;
   if (value.border_style !== undefined && (value.border_style !== 1 && value.border_style !== 3)) return false;
   if (value.shadow !== undefined && (!isInteger(value.shadow, 0) || value.shadow > 10)) return false;
-  if (value.fx_preset !== undefined && !(["none", "gold-gradient", "neon-glow", "sticker-outline", "soft-shadow"] as const).includes(value.fx_preset as "none")) return false;
+  if (value.fx_preset !== undefined && !(["none", "gold-gradient", "neon-glow", "sticker-outline", "soft-shadow"] as readonly string[]).includes(String(value.fx_preset))) return false;
   return true;
 }
 export function isTimelineCaption(value: unknown): value is TimelineCaption {

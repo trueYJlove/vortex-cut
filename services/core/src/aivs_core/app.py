@@ -221,6 +221,7 @@ class ExportCreateRequest(BaseModel):
     destination_grant_id: str
     encoder_mode: str = "auto"
     output_ratio: str = "fit"
+    quality: str = "standard"
 
 
 class BriefPutRequest(BaseModel):
@@ -2400,6 +2401,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 request.destination_grant_id,
                 request.encoder_mode,
                 request.output_ratio,
+                quality=request.quality,
             )
         except DomainError as exc:
             raise _domain(exc) from exc
