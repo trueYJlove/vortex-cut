@@ -159,7 +159,9 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
                 .then(response => {
                   if (!response.ok) throw new Error("caption font fetch failed");
                   return response.arrayBuffer().then(buffer => ({ family: entry.family, buffer }));
-                }))));
+                })
+                .catch(() => null))))
+            .then(results => results.filter((entry): entry is { family: string; buffer: ArrayBuffer } => entry !== null));
           fontPromise.catch(() => undefined);
           const manifestT0 = performance.now();
           const manifestRaw = await window.desktop.getPreviewIrV2Manifest({
@@ -332,12 +334,14 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
           ? window.desktop.captionFontUrls()
           : window.desktop.captionFontUrl().then(url => [{ family: "AppCaptionCJK", media_url: url }]));
         if (stale()) return;
-        const fonts = await Promise.all(fontEntries.map(entry =>
+        const fonts = (await Promise.all(fontEntries.map(entry =>
           fetch(entry.media_url, { signal: controller.signal })
             .then(response => {
               if (!response.ok) throw new Error("caption font fetch failed");
               return response.arrayBuffer().then(buffer => ({ family: entry.family, buffer }));
-            })));
+            })
+            .catch(() => null))))
+          .filter((entry): entry is { family: string; buffer: ArrayBuffer } => entry !== null);
         if (stale()) return;
         await session.loadCaptionFont(fonts);
         if (stale()) return;

@@ -680,7 +680,11 @@ function registerIpc(): void {
     };
     const fonts = Array.isArray(bundle.fonts) ? bundle.fonts : [];
     return fonts.map(font => {
-      const key = `caption-font:${font.family}`;
+      // 实体 ID 必须过票据白名单正则([\w-],无空格)——族名含空格
+      // (如 "Noto Sans CJK SC")直接注册会抛 Invalid registration,
+      // 用序号键;族名本身经返回体 JSON 透传,不进票据键。
+      const index = fonts.indexOf(font);
+      const key = `caption-font-${index}`;
       if (!restrictedMedia.registeredPath(key)) {
         restrictedMedia.register(key, resolve(fontsRoot, font.file), "asset");
       }

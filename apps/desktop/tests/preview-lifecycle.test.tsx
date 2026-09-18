@@ -326,14 +326,26 @@ describe("A01 SyntheticPreview 组件生命周期", () => {
     expect(props.onFallback).not.toHaveBeenCalled();
   });
 
-  it("font fetch 失败：onFallback 触发且 worker 回基线", async () => {
+  it("部分字体 fetch 失败：降级 sans-serif 装配继续（不回退）", async () => {
+    // B4 收官行为变更：单字体失败仅跳过该字体（Canvas 回退 sans-serif），
+    // 不再中断装配——字体缺失不应放大为预览不可用。
     stubDesktop(fixturePreviewIr());
     globalThis.fetch = vi.fn(async () => new Response("gone", { status: 404 })) as never;
     const props = baseProps();
     render(<SyntheticPreview {...props} />);
-    await waitFor(() => expect(props.onFallback).toHaveBeenCalled());
-    expect(props.onFallback.mock.calls[0]![0]).toContain("caption font fetch failed");
-    await waitFor(() => expect(activeWorkers()).toBe(0));
+    await waitFor(() => expect(props.onFallback).not.toHaveBeenCalled(), { timeout: 3000 });
+    await waitFor(() => expect(activeWorkers()).toBe(2));
+  });
+
+  it("全部字体 fetch 失败：仍装配（字体层缺省，视频画面不受影响）", async () => {
+    stubDesktop(fixturePreviewIr());
+    // captionFontUrls 返回空列表 → 无字体可注册 → 纯视频预览
+    (window.desktop as { captionFontUrls: unknown }).captionFontUrls =
+      vi.fn().mockResolvedValue([]);
+    const props = baseProps();
+    render(<SyntheticPreview {...props} />);
+    await waitFor(() => expect(props.onFallback).not.toHaveBeenCalled(), { timeout: 3000 });
+    await waitFor(() => expect(activeWorkers()).toBe(2));
   });
 
   it("连续切项目 100 次压力：active worker 计数不泄漏（快速收敛）", async () => {
