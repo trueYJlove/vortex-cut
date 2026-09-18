@@ -20,6 +20,7 @@ from ..projects import DomainError, ProjectAssetService
 from .ass import CaptionResources, build_ass, build_rendition_ass
 from .ffmpeg import build_timeline_args, run_timeline_render
 from .ir import resolved_caption_styles
+from .ir_disk_cache import PreviewIrDiskCache, asset_fingerprint_list
 from .plan import COMPILER_VERSION, REFRAME_COMPILER_VERSION, RenderPlanCompiler
 from .validation import validate_rendered_media
 
@@ -220,6 +221,11 @@ class RenderCoordinator:
         self.preview_probe_cache: dict[str, dict[str, Any]] = {}
         # C20b：v2 manifest/全量帧 bundle 缓存（帧表体量大，LRU 2 条）。
         self.preview_ir_v2_cache: dict[str, dict[str, Any]] = {}
+        # manifest 投影缓存磁盘持久层（2026-09-18 立项）：进程内存缓存只覆盖
+        # Core 常驻期，app 重启后首投影（100 素材级 ≈1.8s）照付——磁盘层让
+        # "每 app 安装后首次"之后的冷启动直接装回。缓存只是加速，读写任何
+        # OSError 静默降级（见 ir_disk_cache）。
+        self.preview_ir_disk_cache = PreviewIrDiskCache(data_dir)
 
     async def _compile_off_loop(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         return await _compile_off_loop(self.compiler, *args, **kwargs)
@@ -251,6 +257,24 @@ class RenderCoordinator:
         cached = self.preview_ir_cache.get(fingerprint)
         if cached is not None:
             return cached
+        # 磁盘持久层共享（与 v2 同一条目——payload 携带全量 IR，v2 manifest/
+        # frames 由其派生，v1 直接包装；两协议消费同一投影产物）。
+        from .ir_window import manifest_id_of
+
+        disk_key = manifest_id_of(plan)
+        fingerprints = asset_fingerprint_list(plan)
+        disk_payload = await asyncio.to_thread(
+            self.preview_ir_disk_cache.load, disk_key, fingerprints)
+        if disk_payload is not None and isinstance(disk_payload.get("ir"), dict):
+            payload = {
+                "schema_version": 1,
+                "content_fingerprint": fingerprint,
+                "timeline_revision_id": plan["timeline_revision_id"],
+                "output_ratio": output_ratio,
+                "ir": disk_payload["ir"],
+            }
+            self.preview_ir_cache[fingerprint] = payload
+            return payload
         ir = await self._project_plan(plan)
         payload = {
             "schema_version": 1,
@@ -262,6 +286,10 @@ class RenderCoordinator:
         self.preview_ir_cache[fingerprint] = payload
         while len(self.preview_ir_cache) > 4:
             self.preview_ir_cache.pop(next(iter(self.preview_ir_cache)))
+        # 新投影写盘（条目 = 全量 IR；v1/v2 命中同键，后续谁先冷启动谁装回）。
+        disk_payload = {"ir": ir}
+        await asyncio.to_thread(
+            self.preview_ir_disk_cache.store, disk_key, fingerprints, disk_payload)
         return payload
 
     async def _project_plan(self, plan: dict[str, Any]) -> dict[str, Any]:
@@ -333,14 +361,30 @@ class RenderCoordinator:
         cached = self.preview_ir_v2_cache.get(fingerprint)
         if cached is not None:
             return cached
-        from .ir_window import build_manifest
+        # 磁盘持久层：进程缓存未命中（冷启动首请求）时查盘。manifest_id 已含
+        # fingerprint@mode@profile_id；素材指纹集不符（替换/重导）读时自愈。
+        # 条目 = 全量 IR（v1/v2 共享），v2 侧派生 manifest/frames。
+        from .ir_window import build_manifest, manifest_id_of
 
+        disk_key = manifest_id_of(plan)
+        fingerprints = asset_fingerprint_list(plan)
+        disk_payload = await asyncio.to_thread(
+            self.preview_ir_disk_cache.load, disk_key, fingerprints)
+        if disk_payload is not None and isinstance(disk_payload.get("ir"), dict):
+            ir = disk_payload["ir"]
+            bundle = {"manifest": build_manifest(plan, {}, None, ir=ir), "frames": ir["frames"]}
+            self.preview_ir_v2_cache[fingerprint] = bundle
+            return bundle
         ir = await self._project_plan(plan)
         bundle = {"manifest": build_manifest(plan, {}, None, ir=ir), "frames": ir["frames"]}
         # build_manifest 的 caption_styles 来自 ir（投影已解析）——不走二次解析
         self.preview_ir_v2_cache[fingerprint] = bundle
         while len(self.preview_ir_v2_cache) > 2:
             self.preview_ir_v2_cache.pop(next(iter(self.preview_ir_v2_cache)))
+        # 新投影写盘（条目 = 全量 IR，v1/v2 命中同键；tmp+replace 原子，
+        # OSError 静默。to_thread：1-3MB JSON 序列化不堵事件循环）。
+        await asyncio.to_thread(
+            self.preview_ir_disk_cache.store, disk_key, fingerprints, {"ir": ir})
         return bundle
 
     def cleanup_orphans(self) -> None:

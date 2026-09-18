@@ -254,6 +254,19 @@
   正式立项候选待排期(实测依据已齐,命中收益 ≈1.8s/冷启动,用户口径
   ready 可达 ~0.7s)**。至此第 8 节矩阵 15 行中 9 行有实测判定、5 行
   部分证据、0 行从未测量(原 2 行已补齐);perf 线审查处置清零。
+- **执行状态(2026-09-18 更新·二十)**:**Core manifest 投影缓存磁盘持久层
+  立项并实施完成**(`PERFORMANCE_MANIFEST_IR_DISK_CACHE_PLANNING_GATE_2026-09-18.md`
+  + `ir_disk_cache.py`)。立项复核修正一处关键认知:进程内存缓存只覆盖
+  Core 常驻期,app 重启后首投影(≈1.8s)照付——磁盘层
+  (`data_dir/cache/preview-ir/`,键 = manifest_id 的 sha256 文件名安全哈希,
+  条目内嵌 projector_version + 素材指纹集失效元数据)才是登记收益场景
+  (用户重开项目)的落点。v1/v2 共享同一条目(payload = 全量 IR);
+  读时自愈(版本/指纹不符或损坏即删),LRU 8 条 ≈25MB 上限,全部 IO
+  OSError 静默降级——缓存只是加速,不成为正确性依赖。单测 9 项
+  (roundtrip/版本失效/指纹失效/损坏容错/LRU/写失败静默/冷启动命中
+  零投影/v1-v2 共享);Core 812 passed / Desktop 667 passed / typecheck 全绿。
+  磁盘命中实测留证(F02 冷启动 vs 二次启动对比)留性能侧复跑,协议沿
+  Planning Gate §3.3;"增量投影"半边维持待真实需求。
 - 新增模块/协议/脚本均是本方案拟新增，不代表仓库已经存在。
 
 
