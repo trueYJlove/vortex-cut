@@ -981,3 +981,62 @@ def test_a1_speed_atempo_chain() -> None:
         "libopenh264", "out.mp4", captions=False)
     graph = args[args.index("-filter_complex") + 1]
     assert "atempo=0.500000" in graph
+
+
+# ── 气泡/花字渲染（B4 收官）────────────────────────────────────────────────
+
+def _fx_caption(override: dict) -> dict:
+    return {
+        "start_us": 0, "end_us": 1_000_000, "text": "样式字幕",
+        "preset_id": "default-bottom", "style_override": override,
+    }
+
+
+def test_bubble_derived_style_line_generated() -> None:
+    """气泡 border_style=3 + back_color：派生 Style 行生成且 Dialogue 引用它。"""
+    resources = CaptionResources(Path("resources/fonts"))
+    bundle, presets, _ = resources.load()
+    caption = _fx_caption({"border_style": 3, "back_color": "&H80202040", "shadow": 2})
+    result = build_ass([caption], bundle, presets)
+    # 派生 Style 行：名字含预设与覆盖参数,BorderStyle=3、BackColour=覆盖色。
+    assert "Style: default-bottom__bs3__80202040__sh2," in result
+    assert ",&H80202040," in result  # 派生行 BackColour 已覆盖
+    # Dialogue 行以 \r 引用派生 Style(在其余标签之前)。
+    assert r"{\rdefault-bottom__bs3__80202040__sh2" in result
+
+
+def test_bubble_derived_style_deduplicated() -> None:
+    """两条相同气泡覆盖 → 派生 Style 只生成一行(去重)。"""
+    resources = CaptionResources(Path("resources/fonts"))
+    bundle, presets, _ = resources.load()
+    caption = _fx_caption({"border_style": 3, "back_color": "&H80202040"})
+    result = build_ass([caption, {**caption, "start_us": 1_000_000, "end_us": 2_000_000}], bundle, presets)
+    assert result.count("Style: default-bottom__bs3__80202040,") == 1
+
+
+def test_fx_preset_tag_sequences() -> None:
+    """花字模板:每个枚举展开固定标签序列;none 无标签。"""
+    resources = CaptionResources(Path("resources/fonts"))
+    bundle, presets, _ = resources.load()
+    gold = build_ass([_fx_caption({"fx_preset": "gold-gradient"})], bundle, presets)
+    assert r"{\c&H20C0FF&\3c&H402000&\bord6\blur1" in gold
+    neon = build_ass([_fx_caption({"fx_preset": "neon-glow"})], bundle, presets)
+    assert r"{\c&H00FFFF&\3c&H804000&\bord8\blur3\shad2" in neon
+    sticker = build_ass([_fx_caption({"fx_preset": "sticker-outline"})], bundle, presets)
+    assert r"{\c&HFFFFFF&\3c&H101010&\bord10\blur0\shad0" in sticker
+    soft = build_ass([_fx_caption({"fx_preset": "soft-shadow"})], bundle, presets)
+    assert r"{\c&HFFFFFF&\bord2\shad4\4a&H60000000&" in soft
+    none = build_ass([_fx_caption({"fx_preset": "none"})], bundle, presets)
+    assert "\bord10" not in none
+
+
+def test_fx_with_position_keeps_order() -> None:
+    """fx + 自定义坐标共存:\pos 在前(自定义坐标),fx 序列其后。"""
+    resources = CaptionResources(Path("resources/fonts"))
+    bundle, presets, _ = resources.load()
+    caption = _fx_caption({"fx_preset": "gold-gradient", "pos_x": 0.5, "pos_y": 0.2})
+    result = build_ass([caption], bundle, presets)
+    line = next(l for l in result.splitlines() if l.startswith("Dialogue:") and "样式字幕" in l)
+    pos_at = line.index(r"\pos(")
+    fx_at = line.index(r"\c&H20C0FF&")
+    assert pos_at < fx_at

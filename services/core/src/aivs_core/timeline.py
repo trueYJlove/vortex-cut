@@ -109,16 +109,23 @@ CAPTION_STYLE_FONT_RANGE = (24, 144)
 CAPTION_STYLE_OUTLINE_RANGE = (0, 10)
 CAPTION_STYLE_ALIGNMENT = {1, 2, 3, 4, 5, 6, 7, 8, 9}
 CAPTION_STYLE_MARGIN_RANGE = (0, 600)
+# 花字模板枚举（M2-B4 收官）：none=清除；其余为服务端固定标签序列（见 ass.py）。
+CAPTION_FX_PRESETS = ("none", "gold-gradient", "neon-glow", "sticker-outline", "soft-shadow")
 
 
 def _validate_caption_style(style: Any) -> dict[str, Any]:
-    """校验字幕样式覆盖并返回规范化副本（部分字段；见设计 §1.1）。"""
+    """校验字幕样式覆盖并返回规范化副本（部分字段；见设计 §1.1）。
+
+    气泡/花字扩展（M2-B4 收官）：back_color/border_style/shadow（气泡底衬）
+    与 fx_preset（花字模板枚举，服务端展开固定标签序列）。
+    """
     if not isinstance(style, dict) or not style:
         raise DomainError("TIMELINE_INVALID", "字幕样式覆盖不能为空")
     allowed = {
         "font_name", "font_size", "primary_color", "outline_color", "outline",
         "alignment", "margin_v", "letter_spacing", "bold", "italic", "underline",
         "pos_x", "pos_y",
+        "back_color", "border_style", "shadow", "fx_preset",
     }
     if set(style) - allowed:
         raise DomainError("TIMELINE_INVALID", "字幕样式字段不合法")
@@ -187,6 +194,35 @@ def _validate_caption_style(style: Any) -> dict[str, Any]:
         if not 0 <= pos <= 1:
             raise DomainError("TIMELINE_INVALID", "自定义坐标需为 0-1 比率或 null")
         result[pos_key] = float(pos)
+    # 气泡：底衬色（ASS &Haabbggrr，同既有颜色格式）+ BorderStyle 枚举
+    # （1=描边+阴影 3=不透明底衬块）+ 底衬深度 shadow。
+    back_color = style.get("back_color")
+    if back_color is not None:
+        if (
+            not isinstance(back_color, str)
+            or not re.fullmatch(r"&H[0-9A-Fa-f]{8}", back_color)
+        ):
+            raise DomainError("TIMELINE_INVALID", "字幕颜色需为 &Haabbggrr 格式")
+        result["back_color"] = back_color
+    border_style = style.get("border_style")
+    if border_style is not None:
+        if isinstance(border_style, bool) or not isinstance(border_style, int) or border_style not in (1, 3):
+            raise DomainError("TIMELINE_INVALID", "字幕底衬样式需为 1（描边）或 3（底衬块）")
+        result["border_style"] = border_style
+    shadow = style.get("shadow")
+    if shadow is not None:
+        if isinstance(shadow, bool) or not isinstance(shadow, int):
+            raise DomainError("TIMELINE_INVALID", "阴影深度不合法")
+        if not 0 <= shadow <= 10:
+            raise DomainError("TIMELINE_INVALID", "阴影深度需在 0-10 之间")
+        result["shadow"] = shadow
+    # 花字：模板枚举（服务端展开固定标签序列；与基础色控件互斥由渲染后置
+    # 覆盖 + UI 禁用表达）。
+    fx_preset = style.get("fx_preset")
+    if fx_preset is not None:
+        if fx_preset not in CAPTION_FX_PRESETS:
+            raise DomainError("TIMELINE_INVALID", "花字模板不合法")
+        result["fx_preset"] = fx_preset
     return result
 
 

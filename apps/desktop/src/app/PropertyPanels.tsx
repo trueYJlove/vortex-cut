@@ -336,6 +336,20 @@ export function CaptionProperties({ caption, working, locked, onPatch, onDraft }
     setStyle({ [flag]: !current } as Partial<NonNullable<TimelineCaption["style_override"]>>, label);
   const [tab, setTab] = useState("text");
   const [sub, setSub] = useState("basic");
+  // 气泡（B4 收官）：底衬块 = border_style 3 + back_color + shadow 深度。
+  const bubbleOn = (styleOverride.border_style ?? 1) === 3;
+  const toggleBubble = () => {
+    if (bubbleOn) setStyle({ border_style: 1 }, "关闭气泡底衬");
+    else setStyle({ border_style: 3, back_color: styleOverride.back_color ?? "&H80000000" }, "开启气泡底衬");
+  };
+  // 花字模板（fx_preset；none=清除）。选中模板后基础色由模板控制（渲染后置覆盖）。
+  const fxPresets: Array<{ id: "none" | "gold-gradient" | "neon-glow" | "sticker-outline" | "soft-shadow"; label: string; hint: string }> = [
+    { id: "none", label: "无", hint: "清除花字样式" },
+    { id: "gold-gradient", label: "鎏金", hint: "金橙字·深棕描边" },
+    { id: "neon-glow", label: "霓虹", hint: "青色字·暖光晕" },
+    { id: "sticker-outline", label: "贴纸", hint: "白字·粗黑描边" },
+    { id: "soft-shadow", label: "柔影", hint: "白字·柔和投影" },
+  ];
   return <fieldset className="pp-panel locked-fieldset" aria-label={isTextMaterial ? "文本属性" : "字幕属性"} disabled={locked}>
     {locked && <p className="locked-note"><Lock />关联 Clip 已锁定，此 Caption 只读。</p>}
     <PanelTabs tabs={[{ id: "text", label: "文本" }, { id: "anim", label: "动画", soon: true }]} active={tab} onChange={setTab} />
@@ -346,10 +360,37 @@ export function CaptionProperties({ caption, working, locked, onPatch, onDraft }
         </PGroup>
       </div>
       : <>
-        <SubTabs tabs={[{ id: "basic", label: "基础" }, { id: "bubble", label: "气泡", soon: true }, { id: "fx", label: "花字", soon: true }]} active={sub} onChange={setSub} />
+        <SubTabs tabs={[{ id: "basic", label: "基础" }, { id: "bubble", label: "气泡" }, { id: "fx", label: "花字" }]} active={sub} onChange={setSub} />
         <div className="pp-body">
-          {sub !== "basic" ? <PGroup title={sub === "bubble" ? "气泡" : "花字"} tail={<SoonBadge />}>
-            <PNote>{sub === "bubble" ? "文字底衬气泡模板。布局对齐剪映：气泡列表 + 颜色。" : "花字样式模板。"}当前版本未实现。</PNote>
+          {sub === "bubble" ? <PGroup title="气泡底衬">
+            <PNote>文字底衬块：底色随文本自适应。圆角气泡尾巴造型后续版本支持。</PNote>
+            <PRow>
+              <label className="pp-inline">开启底衬
+                <input type="checkbox" checked={bubbleOn} onChange={toggleBubble} aria-label="气泡底衬开关" />
+              </label>
+            </PRow>
+            {bubbleOn && <>
+              <PRow label="底衬颜色">
+                <input type="color" className="pp-color" aria-label="底衬颜色"
+                  value={assToRgb(styleOverride.back_color ?? "&H80000000")}
+                  onChange={event => setStyle({ back_color: rgbToAss(event.target.value) }, "底衬颜色")} />
+                <PNote>半透明底衬用颜色选择器带透明度的方案暂未支持，默认半透明黑。</PNote>
+              </PRow>
+              <PRow label="底衬深度">
+                <NumberField value={styleOverride.shadow} min={0} max={10} step={1} ariaLabel="底衬深度" placeholder="0"
+                  onCommit={v => setStyle({ shadow: Math.round(v) }, `底衬深度 ${Math.round(v)}`)} />
+                <span className="tail">0 – 10</span>
+              </PRow>
+            </>}
+          </PGroup> : sub === "fx" ? <PGroup title="花字模板">
+            <PNote>{styleOverride.fx_preset && styleOverride.fx_preset !== "none" ? "花字模板控制字体颜色与描边（基础 Tab 颜色控件暂被模板覆盖）。" : "选择模板即套用；「无」清除花字。"}</PNote>
+            <div className="pp-presets fx-grid" role="listbox" aria-label="花字模板">
+              {fxPresets.map(p => (
+                <button key={p.id} type="button" className={`pp-preset fx-card${(styleOverride.fx_preset ?? "none") === p.id ? " on" : ""}`}
+                  title={p.hint} aria-label={`花字 ${p.label}`} aria-pressed={(styleOverride.fx_preset ?? "none") === p.id}
+                  onClick={() => setStyle({ fx_preset: p.id }, p.id === "none" ? "清除花字" : `花字 ${p.label}`)}>{p.label}</button>
+              ))}
+            </div>
           </PGroup> : <>
             <label className="pp-ta">文本
               <textarea value={caption.text} maxLength={200} onChange={event => updateLocal({ text: event.target.value })}

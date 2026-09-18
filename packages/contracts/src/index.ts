@@ -769,6 +769,14 @@ export interface CaptionStyleOverride {
   /** 0–1 画布比率；非 null 时以 \pos 覆盖对齐。 */
   pos_x?: number | null;
   pos_y?: number | null;
+  /** 气泡底衬色（ASS &Haabbggrr，含 alpha）；border_style=3 时生效。 */
+  back_color?: string;
+  /** 底衬样式：1=描边+阴影（预设）3=不透明底衬块（气泡）。 */
+  border_style?: number;
+  /** 阴影深度 0–10。 */
+  shadow?: number;
+  /** 花字模板（服务端固定标签序列；"none"=清除）。 */
+  fx_preset?: "none" | "gold-gradient" | "neon-glow" | "sticker-outline" | "soft-shadow";
 }
 export interface TimelineCaption {
   caption_id: TimelineCaptionId;
@@ -1519,7 +1527,7 @@ function isAssColor(value: unknown): value is string {
   return isString(value) && /^&H[0-9A-Fa-f]{8}$/.test(value);
 }
 export function isCaptionStyleOverride(value: unknown): value is CaptionStyleOverride {
-  if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["font_name", "font_size", "primary_color", "outline_color", "outline", "alignment", "margin_v", "letter_spacing", "bold", "italic", "underline", "pos_x", "pos_y"]) || !Object.keys(value).length) return false;
+  if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["font_name", "font_size", "primary_color", "outline_color", "outline", "alignment", "margin_v", "letter_spacing", "bold", "italic", "underline", "pos_x", "pos_y", "back_color", "border_style", "shadow", "fx_preset"]) || !Object.keys(value).length) return false;
   if (value.font_name !== undefined && (!isString(value.font_name) || value.font_name.length === 0 || value.font_name.length > 60)) return false;
   if (value.font_size !== undefined && (!isInteger(value.font_size, 24) || value.font_size > 144)) return false;
   if (value.primary_color !== undefined && !isAssColor(value.primary_color)) return false;
@@ -1534,6 +1542,11 @@ export function isCaptionStyleOverride(value: unknown): value is CaptionStyleOve
   const posOk = (v: unknown) => v === null || (isFiniteNumber(v) && v >= 0 && v <= 1);
   if (value.pos_x !== undefined && !posOk(value.pos_x)) return false;
   if (value.pos_y !== undefined && !posOk(value.pos_y)) return false;
+  // 气泡/花字（B4 收官）：底衬色/底衬样式/阴影深度/花字模板枚举。
+  if (value.back_color !== undefined && !isAssColor(value.back_color)) return false;
+  if (value.border_style !== undefined && (value.border_style !== 1 && value.border_style !== 3)) return false;
+  if (value.shadow !== undefined && (!isInteger(value.shadow, 0) || value.shadow > 10)) return false;
+  if (value.fx_preset !== undefined && !(["none", "gold-gradient", "neon-glow", "sticker-outline", "soft-shadow"] as const).includes(value.fx_preset as "none")) return false;
   return true;
 }
 export function isTimelineCaption(value: unknown): value is TimelineCaption {
