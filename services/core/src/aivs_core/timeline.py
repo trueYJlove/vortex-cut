@@ -63,6 +63,31 @@ AI_PATCH_OPERATIONS = PATCH_OPERATIONS - {
 MIN_VIDEO_US = 100_000
 MIN_IMAGE_US = 500_000
 MAX_IMAGE_US = 30_000_000
+
+
+def _patch_failure(
+    reason: str, operation_index: int, op: Any, field: str
+) -> ValueError:
+    """AI-1-2：op 级失败的结构化 detail（挂 __cause__，供 agent 循环反馈）。"""
+    failure = ValueError("patch_operation_failure")
+    failure.args = (
+        {
+            "reason": reason,
+            "operation_index": operation_index,
+            "op": op if isinstance(op, str) else None,
+            "field": field,
+        },
+    )
+    return failure
+
+
+def _patch_failure_field(exc: DomainError) -> str:
+    """从 DomainError 推断失败字段（供结构化反馈；推断不出给 op 级标记）。"""
+    return "operation"
+
+
+def _patch_failure_reason(exc: DomainError) -> str:
+    return exc.code
 MIN_CAPTION_US = 200_000
 MAX_PADDING_US = 300_000
 MIN_SPEED_MILLI = 250
@@ -521,11 +546,23 @@ class TimelineService:
             raise DomainError("TIMELINE_INVALID", "Patch 操作数量需为 1-100")
         result = copy.deepcopy(document)
         result.setdefault("locked_elements", [])
-        for raw_operation in operations:
+        # AI-1-2：op 级失败带机器可读 detail（步骤/字段级反馈给 agent 循环重试）。
+        # 既有调用方只读 code/message——detail 为增量字段，行为不变。
+        for operation_index, raw_operation in enumerate(operations, start=1):
             operation = _mapping(raw_operation, "Patch 操作不合法")
             if ai and operation.get("op") not in AI_PATCH_OPERATIONS:
-                raise DomainError("TIMELINE_PATCH_PROPOSAL_INVALID", "AI Patch 包含禁止操作")
-            self._apply_operation(db, project_id, result, operation)
+                raise DomainError(
+                    "TIMELINE_PATCH_PROPOSAL_INVALID", "AI Patch 包含禁止操作"
+                ) from _patch_failure(
+                    "op_forbidden", operation_index, operation.get("op"), "op"
+                )
+            try:
+                self._apply_operation(db, project_id, result, operation)
+            except DomainError as exc:
+                raise DomainError(exc.code, exc.message) from _patch_failure(
+                    _patch_failure_reason(exc), operation_index, operation.get("op"),
+                    _patch_failure_field(exc),
+                )
         self._normalize_and_validate(db, result)
         if not result["clips"]:
             raise DomainError("TIMELINE_PATCH_PROPOSAL_INVALID", "AI Patch 不得产生空时间线")

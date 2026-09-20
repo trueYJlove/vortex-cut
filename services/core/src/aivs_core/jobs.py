@@ -78,6 +78,7 @@ class JobService:
         render_runner: RenderRunner | None = None,
         planning_runner: PlanningRunner | None = None,
         timeline_patch_runner: PlanningRunner | None = None,
+        agent_session_runner: PlanningRunner | None = None,
         media_generation_runner: PlanningRunner | None = None,
         media_generation_start: GenerationStart | None = None,
         media_generation_finish: GenerationFinish | None = None,
@@ -101,6 +102,7 @@ class JobService:
         self.render_runner = render_runner
         self.planning_runner = planning_runner
         self.timeline_patch_runner = timeline_patch_runner
+        self.agent_session_runner = agent_session_runner
         self.media_generation_runner = media_generation_runner
         self.media_generation_start = media_generation_start
         self.media_generation_finish = media_generation_finish
@@ -531,6 +533,8 @@ class JobService:
                 raise ValueError("JOB_INVALID_STATE")
             if row["kind"] in {"candidate_generation", "timeline_patch_generation"}:
                 raise ValueError("CANDIDATE_GENERATION_RECONFIRM_REQUIRED")
+            # agent_session 允许 jobs.retry：会话级 consent 已消费，重试 =
+            # 全新会话重新走 prepare/confirm（AI-1 规划门 §2 裁决）。
             if row["kind"] == "media_generation":
                 raise ValueError("GENERATION_RETRY_NOT_ALLOWED")
             if self.retry_validator:
@@ -785,6 +789,22 @@ class JobService:
                 if self.timeline_patch_runner is None:
                     raise RuntimeError("PLANNING_UNAVAILABLE")
                 result = await self.timeline_patch_runner(
+                    row,
+                    cancel_event,
+                    lambda value: self._set_progress(job_id, value),
+                    lambda value: self._set_stage(job_id, value),
+                )
+                with self.db.connection() as db:
+                    db.execute(
+                        "UPDATE jobs SET result_json=?,updated_at=? WHERE id=?",
+                        (json_dumps(result), utc_now(), job_id),
+                    )
+            elif row["kind"] == "agent_session":
+                # AI-1：多步 agent 会话（runner 内部即循环体；progress/stage
+                # 经既有回调逐步上报，取消传播逐步生效）。
+                if self.agent_session_runner is None:
+                    raise RuntimeError("PLANNING_UNAVAILABLE")
+                result = await self.agent_session_runner(
                     row,
                     cancel_event,
                     lambda value: self._set_progress(job_id, value),

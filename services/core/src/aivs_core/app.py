@@ -56,6 +56,7 @@ from .shot_requirement_timeline_assembly import ShotRequirementTimelineAssemblyS
 from .shot_requirement_timeline_batch_assembly import ShotRequirementTimelineBatchAssemblyService
 from .shot_requirements import ShotRequirementService
 from .timeline import TimelineService
+from .agent_session import AgentSessionService
 from .timeline_planning import TimelinePatchPlanningService
 from .transcription import TranscriptionError, TranscriptRepository
 
@@ -304,6 +305,19 @@ class TimelinePatchProposalApplyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     base_revision_id: str
     proposed_document_sha256: str
+
+
+class AgentSessionPrepareRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    base_revision_id: str
+    provider_config_id: str
+    instruction: str
+
+
+class AgentSessionCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    agent_session_egress_preview_id: str
+    payload_sha256: str
 
 
 class TimelineRevisionDiffRequest(BaseModel):
@@ -584,6 +598,11 @@ class CoreState:
         self.timeline_patch_planning = TimelinePatchPlanningService(
             self.db, self.providers, self.provider_secrets, self.timelines
         )
+        # AI-1：多步 agent 会话（emit 传入以发 agent_session.updated 事件）。
+        self.agent_sessions = AgentSessionService(
+            self.db, self.providers, self.provider_secrets, self.timelines,
+            emit=self.emit,
+        )
         self.media_generation = MediaGenerationService(self.db)
         self.shot_requirements = ShotRequirementService(self.db)
         self.destinations = DestinationGrantStore()
@@ -759,6 +778,7 @@ class CoreState:
             render_runner=self.render_coordinator.run,
             planning_runner=self.planning.run_generation,
             timeline_patch_runner=self.timeline_patch_planning.run_generation,
+            agent_session_runner=self.agent_sessions.run_session,
             media_generation_runner=self.media_generation.run_simulation,
             media_generation_start=self.media_generation.start_job,
             media_generation_finish=self.media_generation.finish_job,
@@ -1393,6 +1413,48 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 project_id, proposal_id, request.model_dump()
             )
             return with_current_preview(state.timelines.get_state(revision["project_id"]))
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/agent-sessions/prepare")
+    async def prepare_agent_session(
+        project_id: str,
+        request: AgentSessionPrepareRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return state.agent_sessions.prepare(project_id, request.model_dump())
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/agent-sessions")
+    async def create_agent_session(
+        project_id: str,
+        request: AgentSessionCreateRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return state.agent_sessions.create_session(
+                project_id,
+                request.agent_session_egress_preview_id,
+                request.payload_sha256,
+                state.jobs,
+            )
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/projects/{project_id}/agent-sessions")
+    async def list_agent_sessions(
+        project_id: str, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        return {"items": state.agent_sessions.list_sessions(project_id)}
+
+    @app.get("/api/v1/agent-sessions/{agent_session_id}")
+    async def get_agent_session(
+        agent_session_id: str, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        try:
+            return state.agent_sessions.get_session(agent_session_id)
         except DomainError as exc:
             raise _domain(exc) from exc
 

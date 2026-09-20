@@ -29,6 +29,8 @@ export type CandidatePlanId = string & { readonly __brand: "candidate_plan_id" }
 export type TimelinePatchEgressPreviewId = string & { readonly __brand: "timeline_patch_egress_preview_id" };
 export type TimelinePatchGenerationId = string & { readonly __brand: "timeline_patch_generation_id" };
 export type TimelinePatchProposalId = string & { readonly __brand: "timeline_patch_proposal_id" };
+export type AgentSessionEgressPreviewId = string & { readonly __brand: "agent_session_egress_preview_id" };
+export type AgentSessionId = string & { readonly __brand: "agent_session_id" };
 export type PlatformPresetId = string & { readonly __brand: "platform_preset_id" };
 export type RenditionPresetId = string & { readonly __brand: "rendition_preset_id" };
 export type RenditionSnapshotId = string & { readonly __brand: "rendition_snapshot_id" };
@@ -71,7 +73,8 @@ export type JobKind =
   | "authoritative_preview"
   | "final_export"
   | "media_generation"
-  | "waveform";
+  | "waveform"
+  | "agent_session";
 export type JobStage =
   | "queued"
   | "downloading"
@@ -138,6 +141,10 @@ export const ERROR_CODES = [
   , "GENERATION_REQUEST_INVALID", "GENERATION_KIND_UNSUPPORTED", "GENERATION_INPUT_CHANGED",
   "GENERATION_HASH_MISMATCH", "GENERATION_OUTPUT_INVALID", "GENERATION_INTERRUPTED",
   "GENERATION_RETRY_NOT_ALLOWED", "GENERATION_TASK_NOT_FOUND"
+  , "AGENT_SESSION_INVALID", "AGENT_SESSION_NOT_FOUND", "AGENT_SESSION_ALREADY_ACTIVE",
+  "AGENT_SESSION_EGRESS_EXPIRED", "AGENT_SESSION_EGRESS_MISMATCH",
+  "AGENT_SESSION_PROVIDER_UNTESTED", "AGENT_SESSION_PROVIDER_UNSUPPORTED",
+  "AGENT_SESSION_STEP_LIMIT", "AGENT_SESSION_BUDGET_EXCEEDED", "AGENT_SESSION_BASE_DRIFT"
 ] as const;
 export type ErrorCode = typeof ERROR_CODES[number] | (string & {});
 
@@ -984,6 +991,30 @@ export interface TimelinePatchGenerationCreateResponse { timeline_patch_generati
 export interface TimelinePatchProposalApplyRequest { base_revision_id: TimelineRevisionId; proposed_document_sha256: string; }
 export interface TimelineRevisionDiffRequest { base_revision_id: TimelineRevisionId; target_revision_id: TimelineRevisionId; }
 
+// AI-1（ADR-0003 D2）：内置多步 agent 会话——单发提案升级为带校验反馈重试的
+// 有界循环；一个会话 = 一次 consent；每步成功即落不可变 Revision。
+export type AgentSessionStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+export interface AgentSessionEgressPreview {
+  agent_session_egress_preview_id: AgentSessionEgressPreviewId;
+  provider: { display_name: string; origin: string; model: string };
+  prompt_template_version: string; output_schema_version: string; sent_fields: string[]; payload_sha256: string;
+  character_count: number; estimated_tokens: number; clip_count: number; caption_count: number; locked_count: number;
+  max_steps: number; token_budget: number; expires_at: string;
+}
+export interface AgentSessionStep {
+  ordinal: number; status: "succeeded" | "failed"; stage: string;
+  summary: string | null; error: { code: string; message: string; failure?: { reason: string; operation_index: number; op: string | null; field: string } } | null;
+  duration_ms: number | null; created_at: string;
+}
+export interface AgentSession {
+  agent_session_id: AgentSessionId; project_id: ProjectId; base_revision_id: TimelineRevisionId;
+  instruction: string; max_steps: number; status: AgentSessionStatus; payload_sha256: string;
+  created_at: string; updated_at: string; finished_at: string | null; steps?: AgentSessionStep[];
+}
+export interface AgentSessionPrepareRequest { base_revision_id: TimelineRevisionId; provider_config_id: ProviderConfigId; instruction: string; }
+export interface AgentSessionCreateRequest { agent_session_egress_preview_id: AgentSessionEgressPreviewId; payload_sha256: string; }
+export interface AgentSessionCreateResponse { agent_session_id: AgentSessionId; job: Job; }
+
 export type GenerationKind = "image" | "tts";
 export type GenerationStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
 export type GenerationExecutionMode = "simulation_only";
@@ -1172,7 +1203,7 @@ export class ContractValidationError extends Error {
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const JOB_STATUSES: JobStatus[] = ["queued", "running", "succeeded", "failed", "cancelling", "cancelled", "interrupted"];
-const JOB_KINDS: JobKind[] = ["asset_probe", "asset_fingerprint", "proxy", "portrait_sample", "vertical_sample", "model_download", "transcription", "candidate_generation", "timeline_patch_generation", "authoritative_preview", "final_export", "media_generation", "waveform"];
+const JOB_KINDS: JobKind[] = ["asset_probe", "asset_fingerprint", "proxy", "portrait_sample", "vertical_sample", "model_download", "transcription", "candidate_generation", "timeline_patch_generation", "authoritative_preview", "final_export", "media_generation", "waveform", "agent_session"];
 const PROJECT_STATUSES: ProjectStatus[] = ["active", "archived", "missing"];
 const ASSET_KINDS: AssetKind[] = ["video", "audio", "image", "text"];
 const ASSET_AVAILABILITIES: AssetAvailability[] = ["available", "missing", "changed", "unsupported"];
