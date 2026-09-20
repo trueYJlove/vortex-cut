@@ -49,6 +49,10 @@ class Settings:
     font_dir: Path = field(default_factory=lambda: _resource_path("fonts"))
     recipe_dir: Path = field(default_factory=lambda: _resource_path("recipes"))
     image_provider_network_enabled: bool = False
+    # Provider 代理（PROXY_SUPPORT 规划门 2026-09-20）：None = 未配置（按
+    # proxy_mode 解析）；显式 URL = 自定义代理。解析三级回退见 resolve_proxy。
+    provider_proxy: str | None = None
+    proxy_mode: str = "system"  # system | custom | direct
 
     def prepare(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -87,6 +91,8 @@ class Settings:
             image_provider_network_enabled=bool(
                 getattr(args, "enable_image_provider_network", False)
             ),
+            provider_proxy=getattr(args, "provider_proxy", None),
+            proxy_mode=getattr(args, "proxy_mode", "system"),
         )
 
 
@@ -95,3 +101,41 @@ def admin_token_from_environment() -> str:
     if not token:
         raise RuntimeError("AIVS_ADMIN_TOKEN is required")
     return token
+
+
+def resolve_provider_proxy(settings: "Settings") -> str | None:
+    """Provider 代理三级回退（PROXY_SUPPORT 规划门 §1）。
+
+    custom：显式 provider_proxy 值；direct：None（强制直连）；
+    system（默认）：Windows 读注册表 Internet Settings（ProxyEnable/
+    ProxyServer），读取失败静默回退直连（代理是优化不是依赖）。
+    """
+    if settings.proxy_mode == "custom":
+        return settings.provider_proxy or None
+    if settings.proxy_mode == "direct":
+        return None
+    if sys.platform == "win32":
+        try:
+            import winreg
+
+            with winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Internet Settings",
+            ) as key:
+                enabled = winreg.QueryValueEx(key, "ProxyEnable")[0]
+                if not enabled:
+                    return None
+                server = str(winreg.QueryValueEx(key, "ProxyServer")[0])
+                if "=" not in server and server:
+                    # 形如 127.0.0.1:10809（无协议前缀）——httpx 需要 scheme
+                    return f"http://{server}"
+                # 形如 http=...;https=... 取 https 段
+                for part in server.split(";"):
+                    if part.startswith("https="):
+                        return part[6:]
+                    if part.startswith("http="):
+                        return part[5:]
+                return f"http://{server}" if server else None
+        except OSError:
+            return None
+    return None

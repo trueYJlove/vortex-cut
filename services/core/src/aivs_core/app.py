@@ -602,6 +602,28 @@ class CoreState:
         self.provider_secrets = ProviderSecretVault()
         self.providers = ProviderRepository(self.db, self.provider_secrets)
         self.recipes = RecipeRegistry(settings.recipe_dir)
+        # PROXY_SUPPORT（2026-09-20 裁决）：三级回退解析代理 → provider factory
+        # 注入（trust_env=False 保持，代理只来自显式配置链）。None = 直连。
+        from .config import resolve_provider_proxy
+
+        self.provider_proxy = resolve_provider_proxy(settings)
+        from .providers import OpenAICompatibleTextProvider
+        import httpx as _httpx
+
+        if self.provider_proxy:
+            _proxy = self.provider_proxy
+
+            class _ProxiedTextProvider(OpenAICompatibleTextProvider):
+                def __init__(self) -> None:
+                    def factory(**kwargs: Any) -> Any:
+                        kwargs.pop("trust_env", None)
+                        return _httpx.AsyncClient(proxy=_proxy, trust_env=False, **kwargs)
+
+                    super().__init__(client_factory=factory)
+
+            self._text_provider_factory: Any = _ProxiedTextProvider
+        else:
+            self._text_provider_factory = OpenAICompatibleTextProvider
         # AI-2 阶段三：CV 信号服务先行构建（planning 注入召回汇合点）。
         from .media.cv_signals import CvSignalService
 
@@ -614,14 +636,17 @@ class CoreState:
             self.providers,
             self.provider_secrets,
             self.timelines,
+            provider_factory=self._text_provider_factory,
             cv_signals=self.cv_signals,
         )
         self.timeline_patch_planning = TimelinePatchPlanningService(
-            self.db, self.providers, self.provider_secrets, self.timelines
+            self.db, self.providers, self.provider_secrets, self.timelines,
+            provider_factory=self._text_provider_factory,
         )
         # AI-1：多步 agent 会话（emit 传入以发 agent_session.updated 事件）。
         self.agent_sessions = AgentSessionService(
             self.db, self.providers, self.provider_secrets, self.timelines,
+            provider_factory=self._text_provider_factory,
             emit=self.emit,
         )
         self.media_generation = MediaGenerationService(self.db)
