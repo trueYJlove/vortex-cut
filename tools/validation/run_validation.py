@@ -96,6 +96,47 @@ def wait_job(base: str, token: str, job_id: str, timeout_s: float = 600) -> dict
     raise TimeoutError(f"job {job_id} not finished in {timeout_s}s")
 
 
+def _provider_env() -> dict[str, str]:
+    """读取 AIVS_REAL_PROVIDER_* 用户环境变量组（与 opt-in 测试同一来源）。
+
+    ENABLED 门与 opt-in 测试一致：必须显式 =1 才执行真 provider 实验。
+    """
+    names = (
+        "AIVS_REAL_PROVIDER_BASE_URL",
+        "AIVS_REAL_PROVIDER_MODEL",
+        "AIVS_REAL_PROVIDER_API_KEY",
+        "AIVS_REAL_PROVIDER_INPUT_PRICE_PER_MILLION",
+        "AIVS_REAL_PROVIDER_OUTPUT_PRICE_PER_MILLION",
+    )
+    values = {name: os.environ.get(name, "") for name in names}
+    values["AIVS_REAL_PROVIDER_ENABLED"] = os.environ.get("AIVS_REAL_PROVIDER_ENABLED", "0")
+    return values
+
+
+def _proxy_patched_factory():
+    """httpx 显式代理注入（provider_factory 注入点，与测试替身同机制）。
+
+    sidecar 出网 httpx 用 trust_env=False（不读环境），而本机 provider
+    需走系统代理——验证脚本经此 factory 传入 proxy。仅 spike 用，
+    产品侧"sidecar 尊重系统代理"是独立工作单（验证报告已登记）。
+    """
+    import httpx
+
+    proxy = os.environ.get("AIVS_VALIDATION_PROXY", "")
+    if not proxy:
+        return OpenAICompatibleTextProvider()
+
+    class _ProxyProvider(OpenAICompatibleTextProvider):
+        def __init__(self) -> None:
+            super().__init__(
+                client_factory=lambda **kwargs: httpx.AsyncClient(
+                    proxy=proxy, trust_env=False, **kwargs
+                )
+            )
+
+    return _ProxyProvider()
+
+
 def main() -> None:
     import argparse
 
@@ -103,12 +144,18 @@ def main() -> None:
     parser.add_argument("--skip-bc", action="store_true", help="只跑实验 A（无需 API key）")
     args = parser.parse_args()
 
-    api_key = os.environ.get("AIVS_VALIDATION_API_KEY", "")
+    provider_env = _provider_env()
+    enabled = provider_env["AIVS_REAL_PROVIDER_ENABLED"] == "1"
+    has_key = bool(provider_env["AIVS_REAL_PROVIDER_API_KEY"])
     if args.skip_bc:
         api_key = ""
-    elif not api_key:
-        print("未设置 AIVS_VALIDATION_API_KEY——将跳过实验 B/C（真 provider）。\n"
-              "设置后重跑即可全部执行。")
+    elif enabled and has_key:
+        api_key = provider_env["AIVS_REAL_PROVIDER_API_KEY"]
+        print(f"使用 AIVS_REAL_PROVIDER_* 配置：{provider_env['AIVS_REAL_PROVIDER_BASE_URL']} "
+              f"模型 {provider_env['AIVS_REAL_PROVIDER_MODEL']}")
+    else:
+        print("AIVS_REAL_PROVIDER_* 未就绪（需 ENABLED=1 且 API_KEY 非空）——"
+              "将跳过实验 B/C（真 provider）。")
         args.skip_bc = True
 
     report: dict = {"assets": {}, "experiment_a": {}, "experiment_b": None, "experiment_c": None}
@@ -166,21 +213,26 @@ def main() -> None:
             }
             print(f"实验A[{label}]: {report['experiment_a'][label]}")
 
-        # ---- 实验 B/C：真 provider ----
+        # ---- 实验 B/C：真 provider（AIVS_REAL_PROVIDER_* 配置组） ----
         if api_key:
             provider = _request(
                 "POST", f"{base}/api/v1/providers", token=ui,
                 payload={
                     "kind": "openai_compatible_text",
                     "display_name": "validation-provider",
-                    "base_url": os.environ.get("AIVS_VALIDATION_BASE_URL", "https://api.openai.com/v1"),
-                    "model": os.environ.get("AIVS_VALIDATION_MODEL", "gpt-4o-mini"),
-                    "input_price_per_million": 0.15,
-                    "output_price_per_million": 0.6,
+                    "base_url": provider_env["AIVS_REAL_PROVIDER_BASE_URL"],
+                    "model": provider_env["AIVS_REAL_PROVIDER_MODEL"],
+                    "input_price_per_million": float(
+                        provider_env["AIVS_REAL_PROVIDER_INPUT_PRICE_PER_MILLION"] or 0
+                    ),
+                    "output_price_per_million": float(
+                        provider_env["AIVS_REAL_PROVIDER_OUTPUT_PRICE_PER_MILLION"] or 0
+                    ),
                 },
             )
             provider_id = provider["provider_config_id"]
-            _request("PUT", f"{base}/api/v1/providers/{provider_id}/secret", token=ui,
+            # 凭据走 admin 内部端点（vault 进程内，不落盘）。
+            _request("PUT", f"{base}/api/v1/internal/provider-secrets/{provider_id}", token=admin,
                      payload={"secret": api_key})
             # 能力测试（候选 + patch 两条）
             cap_candidate = _request("POST", f"{base}/api/v1/providers/{provider_id}/candidate-planning-capability-test", token=ui)
