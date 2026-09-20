@@ -61,6 +61,8 @@ class JobPolicy:
 KIND_POLICIES: dict[str, JobPolicy] = {
     # 2 级：用户视野派生（波形——时间轴可见即触发）
     "waveform": JobPolicy("waveform", ("light",), 2),
+    # AI-2 Layer 0：CV 信号分析（关键帧采样——当前项目级）
+    "cv_analysis": JobPolicy("cv_analysis", ("light",), 3),
     # 3 级：当前项目代理（B11 全源代理）
     "proxy": JobPolicy("proxy", ("light",), 3),
     # 4 级：导出/ASR/后台生成

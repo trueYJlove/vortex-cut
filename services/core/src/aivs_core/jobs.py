@@ -75,6 +75,7 @@ class JobService:
         retry_validator: Callable[[Any], None] | None = None,
         preview_source_runner: PreviewSourceRunner | None = None,
         waveform_runner: WaveformRunner | None = None,
+        cv_signal_runner: WaveformRunner | None = None,
         render_runner: RenderRunner | None = None,
         planning_runner: PlanningRunner | None = None,
         timeline_patch_runner: PlanningRunner | None = None,
@@ -99,6 +100,7 @@ class JobService:
         self.retry_validator = retry_validator
         self.preview_source_runner = preview_source_runner
         self.waveform_runner = waveform_runner
+        self.cv_signal_runner = cv_signal_runner
         self.render_runner = render_runner
         self.planning_runner = planning_runner
         self.timeline_patch_runner = timeline_patch_runner
@@ -926,6 +928,21 @@ class JobService:
             if self.waveform_runner is None:
                 raise RuntimeError("RENDER_FAILED")
             result = await self.waveform_runner(
+                row, cancel_event,
+                lambda value: self._set_progress(job_id, value),
+                lambda value: self._set_stage(job_id, value),
+            )
+            with self.db.connection() as db:
+                db.execute(
+                    "UPDATE jobs SET result_json=?,updated_at=? WHERE id=?",
+                    (json_dumps(result), utc_now(), job_id),
+                )
+            return
+        if row["kind"] == "cv_analysis":
+            # AI-2 Layer 0：本地 CV 信号（关键帧采样 → numpy 信号 → cv_samples）
+            if self.cv_signal_runner is None:
+                raise RuntimeError("RENDER_FAILED")
+            result = await self.cv_signal_runner(
                 row, cancel_event,
                 lambda value: self._set_progress(job_id, value),
                 lambda value: self._set_stage(job_id, value),

@@ -24,6 +24,7 @@ from .database import Database, MigrationError, json_dumps, json_loads, utc_now
 from .ids import new_id
 from .jobs import JobService
 from .media.audio_chunks import PcmChunkError, PcmChunkService
+from .media.cv_signals import CV_ALGORITHM_VERSION, CvAnalysisError
 from .media.encoders import EncoderDetector
 from .media.ffprobe import FFprobe
 from .media.probe_cache import ProbeCache, probe_cache_key
@@ -105,6 +106,13 @@ class PreviewSourceMediaRequest(BaseModel):
 
 class WaveformRequest(BaseModel):
     """B14 波形描述请求（generate=True 登记生成作业；参数服务端固定）。"""
+    model_config = ConfigDict(extra="forbid")
+
+    generate: bool = False
+
+
+class CvAnalysisRequest(BaseModel):
+    """AI-2 CV 信号分析请求（generate=True 登记分析作业；参数服务端固定）。"""
     model_config = ConfigDict(extra="forbid")
 
     generate: bool = False
@@ -654,6 +662,12 @@ class CoreState:
             ffmpeg_build=_sync_tool_build(settings.ffmpeg),
         )
         self.jobs.waveform_runner = self.waveform.run_waveform_job
+        # AI-2 Layer 0：本地 CV 信号（关键帧采样 → numpy 信号集；产物为
+        # cv_samples 表行——无二进制文件，无 internal media 端点）。
+        from .media.cv_signals import CvSignalService
+
+        self.cv_signals = CvSignalService(self.db, settings.ffmpeg, self.ffprobe)
+        self.jobs.cv_signal_runner = self.cv_signals.run_analysis_job
         # B15：分块 PCM（48000Hz 双声道 f32le、2 秒/块；同步内联生成——
         # 低延迟任务不排 jobs 队列，begin_build single-flight 防并发重复）。
         self.pcm_chunks = PcmChunkService(
@@ -2110,6 +2124,47 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             }
         except DomainError as exc:
             raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/assets/{asset_id}/cv-analysis")
+    async def get_asset_cv_analysis(
+        project_id: str, asset_id: str, request: CvAnalysisRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """AI-2 Layer 0：素材 CV 信号分析描述（Renderer 可见；无路径字段）。
+
+        generate=True 且无 ready/running/queued 条目时登记分析作业
+        （关键帧采样 → numpy 信号 → cv_samples）。仅 video 素材可分析。
+        """
+        asset_row = _preview_source_asset_row(state, project_id, asset_id)
+        try:
+            if asset_row["kind"] != "video":
+                raise _domain(DomainError(
+                    "CV_ANALYSIS_UNSUPPORTED", "仅视频素材可分析 CV 信号"))
+            summary = state.cv_signals.analysis_summary(asset_row)
+            job_id: str | None = None
+            status = (summary or {}).get("status")
+            if request.generate and status not in {"ready", "running", "queued"}:
+                # 无分析或 stale/failed：登记新分析（stale = 素材指纹已变）。
+                resolved_path = state.projects.resolve_asset_path(asset_id)
+                job_id, _analysis_id = state.cv_signals.create_analysis_job(
+                    project_id, asset_row, resolved_path["path"])
+                status = "queued"
+            return {
+                "analysis_id": (summary or {}).get("analysis_id"),
+                "status": status,
+                "job_id": job_id,
+                "algorithm_version": CV_ALGORITHM_VERSION,
+                "sample_count": (summary or {}).get("sample_count"),
+                "scene_cut_count": (summary or {}).get("scene_cut_count"),
+                "signals": [
+                    "scene_cut", "motion_energy", "sharpness", "brightness",
+                    "audio_energy",
+                ],
+            }
+        except DomainError as exc:
+            raise _domain(exc) from exc
+        except CvAnalysisError as exc:
+            raise _domain(DomainError(exc.code, exc.message)) from exc
 
     @app.post("/api/v1/internal/projects/{project_id}/assets/{asset_id}/waveform/media")
     async def resolve_asset_waveform_media(

@@ -71,7 +71,7 @@ def test_v16_to_v17_is_append_only_and_preserves_checksums(
         )
         assert sql.execute("PRAGMA foreign_key_check").fetchall() == []
         assert sql.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-    assert set(MIGRATIONS) == {f"v{i}" for i in range(1, 21)}
+    assert set(MIGRATIONS) == {f"v{i}" for i in range(1, 22)}
 
 
 def test_v17_objects_and_immutable_triggers_exist(tmp_path: Path) -> None:
