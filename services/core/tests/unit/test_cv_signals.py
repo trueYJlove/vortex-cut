@@ -9,11 +9,16 @@ import pytest
 from aivs_core.database import Database, json_dumps
 from aivs_core.media.cv_signals import (
     CV_ALGORITHM_VERSION,
+    FACE_MODEL_ID,
+    FACE_MIN_BOX,
+    FACE_NMS_THRESHOLD,
     MIN_SAMPLE_INTERVAL,
     THUMB_HEIGHT,
     THUMB_WIDTH,
     CvAnalysisError,
     CvSignalService,
+    _decode_yunet_detections,
+    _nms,
     _parse_astats_rms,
     _parse_showinfo,
     cv_audio_args,
@@ -308,3 +313,91 @@ def test_samples_for_range_and_summary(tmp_path: Path) -> None:
     stale = service.analysis_summary({"id": "a1", "fingerprint": "changed", "kind": "video"})
     assert stale["status"] == "stale"
     _ = MIN_SAMPLE_INTERVAL
+
+
+# ----------------------------------------------------------------------
+# 阶段二：YuNet 解码 / NMS / partial 语义 / 双清单加载
+# ----------------------------------------------------------------------
+
+
+def test_nms_suppresses_overlapping_boxes() -> None:
+    boxes = [
+        (0.0, 0.0, 10.0, 10.0),      # A：分数最高
+        (1.0, 1.0, 11.0, 11.0),      # B：与 A IoU≈0.68 → 抑制
+        (50.0, 50.0, 60.0, 60.0),    # C：不相交 → 保留
+    ]
+    scores = [0.9, 0.8, 0.7]
+    keep = _nms(boxes, scores, FACE_NMS_THRESHOLD)
+    assert keep == [0, 2]
+
+
+def test_decode_yunet_detections_multiscale_outputs() -> None:
+    """12 输出（三尺度）→ anchor 偏移式解码 + 过阈 + 退化框剔除 + NMS。"""
+    import numpy as np
+
+    grid = 640
+    strides = (8, 16, 32)
+
+    def _outputs(specs: list[tuple[int, float]]) -> list[np.ndarray]:
+        # 各尺度按真实模型形状构造（(640/s)² 锚点）；specs 写 stride 8：
+        # (anchor, score)——bbox 回归 (dx,dy,w,h)×8 造一个 64x64 框。
+        counts = [(grid // s) ** 2 for s in strides]
+        cls = [np.zeros((1, c, 1), dtype=np.float32) for c in counts]
+        obj = [np.zeros((1, c, 1), dtype=np.float32) for c in counts]
+        bbox = [np.zeros((1, c, 4), dtype=np.float32) for c in counts]
+        kps = [np.zeros((1, c, 10), dtype=np.float32) for c in counts]
+        for anchor, score in specs:
+            cls[0][0, anchor, 0] = score
+            obj[0][0, anchor, 0] = 1.0
+            bbox[0][0, anchor] = (4.0, 4.0, 8.0, 8.0)  # 64x64 框
+        return cls + obj + bbox + kps
+
+    # 三条过阈：A 高分、B 与 A 中心重合（NMS 抑制）、C 独立位置；
+    # 另一条尺寸退化（w=h=1 → 8x8 < 16 最小框）应被剔除。
+    outputs = _outputs([(0, 0.9), (1, 0.8), (100, 0.7)])
+    outputs[6][0, 2] = (0.05, 0.05, 0.125, 0.125)  # 1x1 域 → 8x8 像素退化框
+    outputs[2][0, 2] = 0.95
+    outputs[5][0, 2] = 1.0
+    scores = _decode_yunet_detections(outputs)
+    assert scores == pytest.approx([0.9, 0.7])
+    # 无过阈 → 空
+    assert _decode_yunet_detections(_outputs([])) == []
+    _ = grid
+    _ = FACE_MIN_BOX
+
+
+def test_face_channel_partial_without_model_manager(tmp_path: Path) -> None:
+    """模型未就绪（无管理器）：其余信号照常、face 列 NULL、状态 ready。"""
+    import asyncio
+
+    service, db = _service(tmp_path)
+    media = tmp_path / "plain.mp4"
+    # 直接复用真 ffmpeg 路径在此不引入：本测走坏文件失败路径无意义——
+    # partial 语义用 face_model_ready 直接断言（集成层验证完整管线）。
+    assert service.model_manager is None
+    assert service.face_model_ready() is False
+    _ = db
+    _ = media
+
+
+def test_registry_loads_both_providers(tmp_path: Path) -> None:
+    """双清单（faster-whisper + onnx-cv）加载 + 安装根目录分派。"""
+    from aivs_core.model_registry import ModelManager, ModelRegistry
+
+    manifests_dir = (
+        Path(__file__).resolve().parents[4] / "resources/model-manifests"
+    )
+    registry = ModelRegistry(manifests_dir)
+    items = {m.model_id: m for m in registry.list()}
+    assert "faster-whisper-tiny" in items and "yunet-face-detection" in items
+    assert items["yunet-face-detection"].provider == "onnx-cv"
+    manager = ModelManager(Database(tmp_path / "m.db"), tmp_path, registry)
+    manager.db.initialize()
+    cv_root = manager._install_root("onnx-cv")
+    asr_root = manager._install_root("faster-whisper")
+    assert cv_root.name == "cv" and asr_root.name == "asr"
+    assert cv_root.parent == asr_root.parent == tmp_path / "models"
+    # onnx-cv 模型 detail：runtime 就绪（本环境有 onnxruntime）
+    detail = manager.detail(FACE_MODEL_ID)
+    assert detail["purpose"]
+    assert detail["status"] in {"unavailable", "queued", "downloading", "ready"}

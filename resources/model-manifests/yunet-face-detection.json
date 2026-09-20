@@ -1,0 +1,37 @@
+{
+  "manifest_version": 1,
+  "model_id": "yunet-face-detection",
+  "provider": "onnx-cv",
+  "revision": "2023mar",
+  "display_name": "YuNet Face Detection",
+  "purpose": "Local face detection on sampled keyframes for AI recall signals",
+  "download_url": "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
+  "trusted_source_id": "github-opencv-zoo",
+  "size_bytes": 232589,
+  "installed_size_bytes": 232589,
+  "sha256": "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4",
+  "supports_word_timestamps": false,
+  "runtime_version": "onnxruntime>=1.16",
+  "license": {
+    "id": "apache-2.0",
+    "name": "Apache License 2.0",
+    "url": "https://opensource.org/license/apache-2-0",
+    "attribution": "OpenCV Zoo face_detection_yunet_2023mar (CNN model for face detection)",
+    "acceptance_required": false
+  },
+  "supported_languages": [
+    "n/a"
+  ],
+  "runtime_requirements": {
+    "python": ">=3.12,<3.14",
+    "onnxruntime": ">=1.16"
+  },
+  "files": [
+    {
+      "path": "face_detection_yunet_2023mar.onnx",
+      "size_bytes": 232589,
+      "sha256": "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"
+    }
+  ],
+  "created_at": "2026-09-20T00:00:00.000Z"
+}

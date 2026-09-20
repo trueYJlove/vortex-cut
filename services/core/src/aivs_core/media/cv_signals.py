@@ -12,7 +12,9 @@ O(状态) 聚合；不整段缓冲）：
 - 关键帧采样的取舍（规划门 §2）：运动能量退化为采样帧间差分（粒度 =
   GOP 长度），对"跑动 vs 静止"级召回区分足够；换来 4K60 只解 I 帧。
 
-face_count/face_score 列由阶段二（YuNet ONNX）回填，本阶段恒 NULL。
+face_count/face_score 列由阶段二（YuNet ONNX）回填：模型就绪时同 select
+表达式二次遍历（RGB 小帧）+ onnxruntime 推理；模型未就绪/运行时缺失时
+人脸通道跳过（其余信号正常产出，face 列保持 NULL——partial 语义）。
 """
 from __future__ import annotations
 
@@ -39,6 +41,23 @@ SCENE_CUT_DISTANCE = 0.45
 _LAPLACIAN = np.array(
     [[0.0, 1.0, 0.0], [1.0, -4.0, 1.0], [0.0, 1.0, 0.0]], dtype=np.float32
 )
+
+# 阶段二：YuNet 人脸通道。模型 ID 对应 resources/model-manifests/
+# yunet-face-detection.json（OpenCV Zoo face_detection_yunet_2023mar）。
+# 模型规格（实测）：固定输入 1x3x640x640（float，RGB），12 输出 = 三尺度
+# （8/16/32 stride）×（cls 置信 / obj 目标性 / bbox 回归 / kps 关键点）。
+# 解码复刻 OpenCV Zoo 官方 Python demo 语义：cls×obj 分数过阈 + bbox
+# 回归（640 域）+ 贪心 NMS。小帧 letterbox 居中填充到 640（实测单帧
+# CPU 推理 ~7ms——每素材只跑关键帧采样，成本可忽略）。
+FACE_MODEL_ID = "yunet-face-detection"
+FACE_MODEL_REVISION = "2023mar"
+FACE_INPUT_SIZE = 640
+FACE_STRIDES = (8, 16, 32)
+FACE_SCORE_THRESHOLD = 0.6
+FACE_NMS_THRESHOLD = 0.45
+FACE_TOP_K = 5000
+# 最小框尺寸（640 域像素）：剔除退化回归框（角点 1x1 之类的假阳性）。
+FACE_MIN_BOX = 16.0
 
 
 class CvAnalysisError(RuntimeError):
@@ -179,6 +198,193 @@ def _parse_astats_rms(stderr: str) -> list[float]:
     return values
 
 
+# ---- 阶段二：YuNet 人脸检测（onnxruntime 懒加载；OpenCV Zoo 官方前后处理） ----
+
+
+class FaceDetector:
+    """YuNet ONNX 推理（会话只读线程安全；推理经 run_in_executor 隔离）。
+
+    模型（实测规格）：固定输入 1x3x640x640 float RGB；12 输出 = 三尺度
+    （stride 8/16/32）×（cls / obj / bbox / kps）。解码复刻 OpenCV Zoo
+    face_detection_yunet 官方 demo 语义：score = cls × obj 过阈 → bbox
+    回归 → 贪心 NMS。小帧 letterbox 居中填充到 640（填充区不产生检出）。
+    """
+
+    def __init__(self, model_path: Path) -> None:
+        import importlib.util
+
+        if importlib.util.find_spec("onnxruntime") is None:
+            raise CvAnalysisError(
+                "CV_RUNTIME_UNAVAILABLE", "onnxruntime 运行时不可用"
+            )
+        import onnxruntime
+
+        self._session = onnxruntime.InferenceSession(
+            str(model_path), providers=["CPUExecutionProvider"]
+        )
+        self._input_name = self._session.get_inputs()[0].name
+
+    def detect(self, frame_rgb: np.ndarray) -> list[float]:
+        """一帧人脸检测（输入任意尺寸 HxWx3 RGB；返回过阈分数列表）。"""
+        blob = _letterbox_640(frame_rgb)
+        outputs = self._session.run(None, {self._input_name: blob})
+        return _decode_yunet_detections(outputs)
+
+
+def _letterbox_640(frame_rgb: np.ndarray) -> np.ndarray:
+    """任意尺寸 RGB 帧 → 1x3x640x640 float（居中等比缩放 + 零填充）。"""
+    canvas = np.zeros((FACE_INPUT_SIZE, FACE_INPUT_SIZE, 3), dtype=np.float32)
+    height, width = frame_rgb.shape[:2]
+    scale = min(FACE_INPUT_SIZE / height, FACE_INPUT_SIZE / width)
+    target_h = max(1, int(round(height * scale)))
+    target_w = max(1, int(round(width * scale)))
+    rows = np.floor(np.linspace(0, height - 1, target_h)).astype(np.intp)
+    cols = np.floor(np.linspace(0, width - 1, target_w)).astype(np.intp)
+    source = np.asarray(frame_rgb, dtype=np.float32)
+    if source.ndim == 2:
+        source = np.stack([source] * 3, axis=-1)
+    canvas[:target_h, :target_w] = source[np.ix_(rows, cols)]
+    return canvas.transpose(2, 0, 1)[None, ...].astype(np.float32)
+
+
+def _decode_yunet_detections(outputs: list[np.ndarray]) -> list[float]:
+    """12 输出（三尺度 cls/obj/bbox/kps）→ 过阈分数（含 NMS）。
+
+    bbox 回编码式（实测标定 2026-09-20：astronaut 图五强激活 anchor 的
+    (dx,dy,w,h)×stride 解码中心全部收敛于真实人脸位置）：每网格 anchor
+    的回归值 = (中心 x 偏移, 中心 y 偏移, 宽, 高) × stride。kps 不消费
+    （召回层只要 count/score）。最小框尺寸剔除退化回归。
+    """
+    boxes: list[tuple[float, float, float, float]] = []
+    scores: list[float] = []
+    grid = FACE_INPUT_SIZE
+    for index, stride in enumerate(FACE_STRIDES):
+        cells = grid // stride
+        cls = np.asarray(outputs[index]).reshape(cells, cells)
+        obj = np.asarray(outputs[len(FACE_STRIDES) + index]).reshape(cells, cells)
+        bbox = np.asarray(outputs[2 * len(FACE_STRIDES) + index]).reshape(cells, cells, 4)
+        combined = cls * obj
+        for row, col in np.argwhere(combined > FACE_SCORE_THRESHOLD):
+            score = float(combined[row, col])
+            dx, dy, width, height = (float(v) * stride for v in bbox[row, col])
+            cx = (col + 0.5) * stride + dx
+            cy = (row + 0.5) * stride + dy
+            x1, y1 = cx - width / 2, cy - height / 2
+            x2, y2 = cx + width / 2, cy + height / 2
+            if x2 - x1 < FACE_MIN_BOX or y2 - y1 < FACE_MIN_BOX:
+                continue
+            boxes.append((x1, y1, x2, y2))
+            scores.append(score)
+            if len(boxes) >= FACE_TOP_K:
+                break
+    if not boxes:
+        return []
+    keep = _nms(boxes, scores, FACE_NMS_THRESHOLD)
+    return [scores[i] for i in keep]
+
+
+def _nms(
+    boxes: list[tuple[float, float, float, float]],
+    scores: list[float],
+    threshold: float,
+) -> list[int]:
+    """贪心 NMS（IoU 阈值；按分数降序保留）。"""
+    order = sorted(range(len(scores)), key=lambda i: -scores[i])
+    keep: list[int] = []
+    suppressed = [False] * len(boxes)
+    for index in order:
+        if suppressed[index]:
+            continue
+        keep.append(index)
+        x1, y1, x2, y2 = boxes[index]
+        area = max(0.0, x2 - x1) * max(0.0, y2 - y1)
+        for other in order:
+            if other == index or suppressed[other]:
+                continue
+            ox1, oy1, ox2, oy2 = boxes[other]
+            ix1, iy1 = max(x1, ox1), max(y1, oy1)
+            ix2, iy2 = min(x2, ox2), min(y2, oy2)
+            inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+            union = area + max(0.0, ox2 - ox1) * max(0.0, oy2 - oy1) - inter
+            if union > 0 and inter / union > threshold:
+                suppressed[other] = True
+    return keep
+
+
+async def analyze_faces(
+    ffmpeg: Path,
+    input_path: Path,
+    cancel_event: asyncio.Event,
+    detector: FaceDetector,
+) -> dict[int, tuple[int, float]]:
+    """人脸通道：同 select 表达式的 RGB 采样遍历 + 逐帧推理。
+
+    返回 {帧序号: (face_count, max_score)}——与阶段一灰度遍历的采样
+    帧序号天然对齐（同 select 表达式 = 同采样点序列）。采样帧缩到
+    160x120 传输（letterbox 推理时内部上采样——小脸检出率让位于传输
+    与解码成本，召回层只做加权不硬过滤）。
+    """
+    transport_width, transport_height = 160, 120
+    args = [
+        "-hide_banner", "-nostdin", "-y",
+        "-i", str(input_path),
+        "-an",
+        "-vf",
+        (
+            f"select='eq(pict_type\\,I)+gte(t-prev_selected_t\\,{MIN_SAMPLE_INTERVAL})',"
+            f"scale={transport_width}:{transport_height},format=rgb24,showinfo"
+        ),
+        "-fps_mode", "vfr",
+        "-f", "rawvideo",
+        "-pix_fmt", "rgb24",
+        "-progress", "pipe:2", "-nostats",
+        "pipe:1",
+    ]
+    process = await asyncio.create_subprocess_exec(
+        str(ffmpeg),
+        *args,
+        stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        creationflags=getattr(asyncio.subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert process.stderr is not None
+    stderr_task = asyncio.create_task(process.stderr.read())
+    frame_bytes = transport_width * transport_height * 3
+    faces: dict[int, tuple[int, float]] = {}
+    index = 0
+    try:
+        assert process.stdout is not None
+        loop = asyncio.get_running_loop()
+        while True:
+            chunk = await process.stdout.read(frame_bytes * 16)
+            if not chunk:
+                break
+            offset = 0
+            while offset + frame_bytes <= len(chunk):
+                frame = (
+                    np.frombuffer(
+                        chunk, dtype=np.uint8, count=frame_bytes, offset=offset
+                    )
+                    .reshape(transport_height, transport_width, 3)
+                )
+                scores = await loop.run_in_executor(None, detector.detect, frame)
+                if scores:
+                    faces[index] = (len(scores), max(scores))
+                offset += frame_bytes
+                index += 1
+        await process.wait()
+        stderr = (await stderr_task).decode("utf-8", errors="replace")[-262144:]
+    finally:
+        if not stderr_task.done():
+            stderr_task.cancel()
+    if cancel_event.is_set():
+        raise CvAnalysisError("JOB_CANCELLED", "任务已取消")
+    if process.returncode != 0:
+        raise CvAnalysisError("CV_FFMPEG_FAILED", "人脸采样解码失败: " + stderr[-300:])
+    return faces
+
+
 # ---- 采集执行体 ----
 
 
@@ -273,10 +479,29 @@ async def analyze_audio_energy(
 
 
 class CvSignalService:
-    def __init__(self, db: Database, ffmpeg: Path, ffprobe: Any) -> None:
+    def __init__(
+        self,
+        db: Database,
+        ffmpeg: Path,
+        ffprobe: Any,
+        model_manager: Any = None,
+    ) -> None:
         self.db = db
         self.ffmpeg = ffmpeg
         self.ffprobe = ffprobe
+        # AI-2 阶段二：模型管理器（可空——无模型链路时人脸通道整体跳过）。
+        self.model_manager = model_manager
+
+    def face_model_ready(self) -> bool:
+        """YuNet 就绪判定（清单存在 + 安装 ready + onnxruntime 可用）。"""
+        if self.model_manager is None:
+            return False
+        try:
+            manifest = self.model_manager.registry.get(FACE_MODEL_ID)
+            detail = self.model_manager.detail(FACE_MODEL_ID)
+        except Exception:
+            return False
+        return detail.get("status") == "ready" and manifest.provider == "onnx-cv"
 
     def analysis_row(self, asset_row: dict[str, Any]) -> dict[str, Any] | None:
         """素材最新非 stale 分析行（召回层入口）。"""
@@ -422,6 +647,30 @@ class CvSignalService:
                 sample["audio_energy"] = (
                     audio_windows[window_index] if audio_windows else 0.0
                 )
+            # 人脸通道（阶段二）：模型就绪才跑；未就绪 partial（face 列 NULL）。
+            faces: dict[int, tuple[int, float]] = {}
+            face_partial = not self.face_model_ready()
+            if not face_partial:
+                if stage:
+                    stage("cv:faces")
+                try:
+                    detector = FaceDetector(
+                        self.model_manager.ready_path(FACE_MODEL_ID)
+                        / "face_detection_yunet_2023mar.onnx"
+                    )
+                    faces = await analyze_faces(
+                        self.ffmpeg, input_path, cancel_event, detector
+                    )
+                except CvAnalysisError:
+                    raise
+                except Exception:
+                    # 推理失败降级为 partial（其余信号不受累）——登记进结果。
+                    face_partial = True
+            face_merged = 0
+            for index, sample in enumerate(samples):
+                if index in faces:
+                    sample["face_count"], sample["face_score"] = faces[index]
+                    face_merged += 1
             finished = utc_now()
             with self.db.connection() as db:
                 db.execute("BEGIN")
@@ -441,18 +690,20 @@ class CvSignalService:
                                 float(sample["sharpness"]),
                                 float(sample["brightness"]),
                                 float(sample["audio_energy"]),
-                                None,
-                                None,
+                                sample.get("face_count"),
+                                sample.get("face_score"),
                             )
                             for index, sample in enumerate(samples)
                         ],
                     )
                     db.execute(
                         "UPDATE cv_analyses SET status='ready',sample_count=?,"
-                        "scene_cut_count=?,updated_at=?,finished_at=? WHERE id=?",
+                        "scene_cut_count=?,model_revision=?,updated_at=?,finished_at=? "
+                        "WHERE id=?",
                         (
                             len(samples),
                             sum(1 for s in samples if s["scene_cut"]),
+                            FACE_MODEL_REVISION if not face_partial else None,
                             finished,
                             finished,
                             analysis_id,
@@ -469,6 +720,8 @@ class CvSignalService:
                 "status": "ready",
                 "sample_count": len(samples),
                 "scene_cut_count": sum(1 for s in samples if s["scene_cut"]),
+                "faces": "merged" if not face_partial else "partial",
+                "face_sample_count": face_merged,
             }
         except BaseException:
             with self.db.connection() as db:
