@@ -28,12 +28,16 @@ from ..database import Database, json_dumps, json_loads, utc_now
 from ..ids import new_id
 
 # 算法常量（改值 = algorithm_version 递增，新行不与旧条目互撞）
-CV_ALGORITHM_VERSION = 1
+CV_ALGORITHM_VERSION = 2
 THUMB_WIDTH = 64
 THUMB_HEIGHT = 36
 # 采样密度下限：GOP 超长素材的关键帧间隔兜底（秒）——select 表达式在
 # "关键帧 或 距上个输出帧 ≥ MIN_SAMPLE_INTERVAL" 任一满足时输出。
 MIN_SAMPLE_INTERVAL = 1.0
+# CV_SKIP_FRAME 混合自适应（裁决 2026-09-20）：快路径采样点最大间隔超过
+# 该值判定长 GOP 素材 → 全量解码回退。4s = 采样密度与重跑成本的折中
+#（实测 lichun 最大 GOP 8.3s；dance 全 1s GOP 不触发回退）。
+CV_SAMPLE_GAP_FALLBACK_US = 4_000_000
 # 镜头边界阈值：相邻采样帧直方图卡方距离（归一 [0,1] 域；标定值，
 # 调整须递增 algorithm_version）。
 SCENE_CUT_DISTANCE = 0.45
@@ -130,28 +134,44 @@ def _histogram_distance(a: np.ndarray, b: np.ndarray, bins: int = 32) -> float:
 # ---- FFmpeg 参数（白名单式组装） ----
 
 
-def cv_video_args(input_path: str) -> list[str]:
+def cv_video_args(
+    input_path: str, *, skip_frame: bool = False, fallback_interval: bool = True
+) -> list[str]:
     """关键帧采样灰度缩略帧 → rawvideo stdout。
 
-    select 表达式：I 帧，或距上个输出帧 ≥ MIN_SAMPLE_INTERVAL（长 GOP
-    素材的采样密度下限兜底）。采样帧 pts 时间戳经 showinfo 打进 stderr，
-    由 _parse_showinfo 解析——rawvideo 流本身无帧元数据。
+    skip_frame=True（CV_SKIP_FRAME 裁决 2026-09-20）：解码器只解 I 帧
+    （实测 6.4x 加速、输出与全量解码逐字节一致）——select 退化为纯
+    `eq(pict_type,I)`（≥1s 兜底在 skip_frame 下无意义：非 I 帧时间戳
+    不可见）。长 GOP 素材的采样空洞由 runner 层稀疏检测 + 全量回退处理。
+    skip_frame=False（全量路径/回退路径）：I 帧或距上个输出帧
+    ≥ MIN_SAMPLE_INTERVAL。采样帧 pts 时间戳经 showinfo 打进 stderr。
     """
-    return [
+    if skip_frame:
+        select_expr = "eq(pict_type\\,I)"
+    elif fallback_interval:
+        select_expr = (
+            f"eq(pict_type\\,I)+gte(t-prev_selected_t\\,{MIN_SAMPLE_INTERVAL})"
+        )
+    else:
+        select_expr = "eq(pict_type\\,I)"
+    args = [
         "-hide_banner", "-nostdin", "-y",
+    ]
+    if skip_frame:
+        args.append("-skip_frame")
+        args.append("nokey")
+    args += [
         "-i", str(input_path),
         "-an",
         "-vf",
-        (
-            f"select='eq(pict_type\\,I)+gte(t-prev_selected_t\\,{MIN_SAMPLE_INTERVAL})',"
-            f"scale={THUMB_WIDTH}:{THUMB_HEIGHT},format=gray,showinfo"
-        ),
+        f"select='{select_expr}',scale={THUMB_WIDTH}:{THUMB_HEIGHT},format=gray,showinfo",
         "-fps_mode", "vfr",
         "-f", "rawvideo",
         "-pix_fmt", "gray",
         "-progress", "pipe:2", "-nostats",
         "pipe:1",
     ]
+    return args
 
 
 def cv_audio_args(input_path: str, window: float = 1.0) -> list[str]:
@@ -316,6 +336,7 @@ async def analyze_faces(
     input_path: Path,
     cancel_event: asyncio.Event,
     detector: FaceDetector,
+    *, skip_frame: bool = False,
 ) -> dict[int, tuple[int, float]]:
     """人脸通道：同 select 表达式的 RGB 采样遍历 + 逐帧推理。
 
@@ -325,15 +346,21 @@ async def analyze_faces(
     与解码成本，召回层只做加权不硬过滤）。
     """
     transport_width, transport_height = 160, 120
+    select_expr = (
+        f"eq(pict_type\\,I)+gte(t-prev_selected_t\\,{MIN_SAMPLE_INTERVAL})"
+        if not skip_frame
+        else "eq(pict_type\\,I)"
+    )
     args = [
         "-hide_banner", "-nostdin", "-y",
+    ]
+    if skip_frame:
+        args.extend(["-skip_frame", "nokey"])
+    args += [
         "-i", str(input_path),
         "-an",
         "-vf",
-        (
-            f"select='eq(pict_type\\,I)+gte(t-prev_selected_t\\,{MIN_SAMPLE_INTERVAL})',"
-            f"scale={transport_width}:{transport_height},format=rgb24,showinfo"
-        ),
+        f"select='{select_expr}',scale={transport_width}:{transport_height},format=rgb24,showinfo",
         "-fps_mode", "vfr",
         "-f", "rawvideo",
         "-pix_fmt", "rgb24",
@@ -393,11 +420,12 @@ async def analyze_video(
     input_path: Path,
     cancel_event: asyncio.Event,
     progress: Any = None,
+    *, skip_frame: bool = False,
 ) -> list[dict[str, Any]]:
     """一次遍历：采样帧流 + 逐帧信号。返回按 timestamp_us 升序的样本列表。"""
     process = await asyncio.create_subprocess_exec(
         str(ffmpeg),
-        *cv_video_args(str(input_path)),
+        *cv_video_args(str(input_path), skip_frame=skip_frame),
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -625,10 +653,25 @@ class CvSignalService:
         try:
             if stage:
                 stage("cv:video")
+            # CV_SKIP_FRAME 混合自适应（裁决 2026-09-20）：默认快路径
+            # （只解 I 帧，6.4x 加速）；采样点最大间隔 > GAP_THRESHOLD
+            # 判定长 GOP 素材 → 全量解码回退（兜底采样恢复，无空洞盲区）。
             samples = await analyze_video(
                 self.ffmpeg, input_path, cancel_event,
-                progress or (lambda _value: None),
+                progress or (lambda _value: None), skip_frame=True,
             )
+            max_gap_us = max(
+                (b["timestamp_us"] - a["timestamp_us"]
+                 for a, b in zip(samples, samples[1:])),
+                default=0,
+            )
+            if samples and max_gap_us > CV_SAMPLE_GAP_FALLBACK_US:
+                if stage:
+                    stage("cv:video-full")
+                samples = await analyze_video(
+                    self.ffmpeg, input_path, cancel_event,
+                    progress or (lambda _value: None), skip_frame=False,
+                )
             if cancel_event.is_set():
                 raise CvAnalysisError("JOB_CANCELLED", "任务已取消")
             if stage:
@@ -659,7 +702,8 @@ class CvSignalService:
                         / "face_detection_yunet_2023mar.onnx"
                     )
                     faces = await analyze_faces(
-                        self.ffmpeg, input_path, cancel_event, detector
+                        self.ffmpeg, input_path, cancel_event, detector,
+                        skip_frame=True,
                     )
                 except CvAnalysisError:
                     raise
@@ -753,11 +797,12 @@ class CvSignalService:
         return [dict(row) for row in rows]
 
     def analysis_summary(self, asset_row: dict[str, Any]) -> dict[str, Any] | None:
-        """端点摘要（status 优先 running/queued，其次 ready/failed/stale）。"""
+        """端点摘要（当前算法版本优先；无当前版本行时报告历史行——stale）。"""
         with self.db.connection() as db:
             row = db.execute(
-                "SELECT * FROM cv_analyses WHERE asset_id=? AND algorithm_version=? "
-                "ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'queued' THEN 1 "
+                "SELECT * FROM cv_analyses WHERE asset_id=? "
+                "ORDER BY (algorithm_version=?) DESC, "
+                "CASE status WHEN 'running' THEN 0 WHEN 'queued' THEN 1 "
                 "WHEN 'ready' THEN 2 WHEN 'failed' THEN 3 ELSE 4 END, "
                 "created_at DESC LIMIT 1",
                 (asset_row["id"], CV_ALGORITHM_VERSION),

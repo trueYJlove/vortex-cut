@@ -255,16 +255,17 @@ def test_stale_row_yields_to_new_analysis(tmp_path: Path) -> None:
     assert summary["status"] == "stale"
     job_id, analysis_id = service.create_analysis_job("p1", asset_row, str(media))
     with db.connection() as conn:
-        # 单版本单行：旧行被原地重置（新行 id），旧样本明细清空。
+        # 算法版本 2 插入为**新行**（旧行 v1 保留——不同版本共存，召回层取
+        # 最新 ready）；同版本重分析才走 ON CONFLICT 原地重置。
         rows = conn.execute(
-            "SELECT id,status,source_fingerprint FROM cv_analyses WHERE asset_id='a1'"
+            "SELECT id,status,source_fingerprint FROM cv_analyses WHERE asset_id='a1' "
+            "ORDER BY algorithm_version"
         ).fetchall()
-        samples = conn.execute("SELECT COUNT(*) FROM cv_samples").fetchone()[0]
-    assert len(rows) == 1
-    assert rows[0]["id"] == analysis_id
-    assert rows[0]["status"] == "queued"
-    assert rows[0]["source_fingerprint"] == "fp2"
-    assert samples == 0
+    assert len(rows) == 2
+    assert rows[0]["source_fingerprint"] == "fp1"  # 旧 v1 行保留
+    assert rows[1]["id"] == analysis_id
+    assert rows[1]["status"] == "queued"
+    assert rows[1]["source_fingerprint"] == "fp2"
     _ = job_id
 
 
@@ -294,7 +295,7 @@ def test_samples_for_range_and_summary(tmp_path: Path) -> None:
         conn.execute(
             "INSERT INTO cv_analyses(id,asset_id,source_fingerprint,algorithm_version,"
             "status,sample_count,scene_cut_count,created_at,updated_at,finished_at) "
-            "VALUES ('an1','a1','fp1',1,'ready',3,1,'t0','t0','t1')"
+            "VALUES ('an1','a1','fp1',2,'ready',3,1,'t0','t0','t1')"
         )
         for index, (ts, cut) in enumerate([(0, 0), (1_000_000, 1), (2_000_000, 0)]):
             conn.execute(
