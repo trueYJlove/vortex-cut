@@ -148,7 +148,7 @@ export interface DesktopApi {
   deleteProviderSecret?: (providerId: string) => Promise<{ provider_config_id: string; credential_status: "missing" }>;
   testProvider?: (providerId: string) => Promise<{ ok?: boolean; message?: string }>;
   testCandidateProviderCapability: (providerId: string) => Promise<ProviderCapabilityTestResult>;
-  preparePlanning?: (input: { project_id: ProjectId; provider_config_id: string; recipe_id: string; transcript_ids: string[] }) => Promise<EgressPreview>;
+  preparePlanning?: (input: { project_id: ProjectId; provider_config_id: string; recipe_id: string; transcript_ids: string[]; candidate_source?: "auto" | "transcript" | "cv" }) => Promise<EgressPreview>;
   createPlanning?: (input: { project_id: ProjectId; egress_preview_id: string; payload_sha256: string }) => Promise<{ job: Job }>;
   listCandidatePlans?: (projectId: ProjectId) => Promise<{ items: CandidatePlan[] }>;
   getCandidateClipMedia?: (input: { project_id: ProjectId; candidate_plan_id: string; candidate_clip_id: string }) => Promise<{ media_url: string; source_start_us: number; source_end_us: number }>;

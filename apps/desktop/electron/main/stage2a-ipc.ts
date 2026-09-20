@@ -97,7 +97,11 @@ export function registerStage2aIpc(deps: Stage2aIpcDependencies): void {
     if (!Array.isArray(value.transcript_ids) || value.transcript_ids.length < 1 || value.transcript_ids.length > 20) throw new Error("Invalid transcript_ids");
     const transcriptIds = value.transcript_ids.map(item => id(item, "transcript_id"));
     if (new Set(transcriptIds).size !== transcriptIds.length) throw new Error("Invalid transcript_ids");
-    return safeFetch(`${API_PREFIX}/projects/${id(value.project_id, "project_id")}/candidate-generations/prepare`, { method: "POST", body: JSON.stringify({ provider_config_id: id(value.provider_config_id, "provider_config_id"), recipe_id: id(value.recipe_id, "recipe_id"), transcript_ids: transcriptIds }) }).then(rendererSafe);
+    // AI-2 阶段三：candidate_source 可选透传（缺省 auto = 旧行为）。
+    const source = typeof (value as Record<string, unknown>).candidate_source === "string"
+      ? (value as Record<string, unknown>).candidate_source
+      : undefined;
+    return safeFetch(`${API_PREFIX}/projects/${id(value.project_id, "project_id")}/candidate-generations/prepare`, { method: "POST", body: JSON.stringify({ provider_config_id: id(value.provider_config_id, "provider_config_id"), recipe_id: id(value.recipe_id, "recipe_id"), transcript_ids: transcriptIds, ...(source ? { candidate_source: source } : {}) }) }).then(rendererSafe);
   });
   deps.handle("planning:create", async (_event, input) => {
     const value = record(input, ["project_id", "egress_preview_id", "payload_sha256"], "planning create");

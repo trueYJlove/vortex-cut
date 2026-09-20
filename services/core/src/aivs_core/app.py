@@ -281,6 +281,8 @@ class EgressPrepareRequest(BaseModel):
     provider_config_id: str
     recipe_id: str
     transcript_ids: list[str]
+    # AI-2 阶段三：召回来源（可选增量——缺省 auto 保持旧行为）。
+    candidate_source: str | None = None
 
 
 class CandidateGenerationCreateRequest(BaseModel):
@@ -600,8 +602,19 @@ class CoreState:
         self.provider_secrets = ProviderSecretVault()
         self.providers = ProviderRepository(self.db, self.provider_secrets)
         self.recipes = RecipeRegistry(settings.recipe_dir)
+        # AI-2 阶段三：CV 信号服务先行构建（planning 注入召回汇合点）。
+        from .media.cv_signals import CvSignalService
+
+        self.cv_signals = CvSignalService(
+            self.db, settings.ffmpeg, self.ffprobe, model_manager=self.model_manager
+        )
         self.planning = PlanningService(
-            self.db, self.recipes, self.providers, self.provider_secrets, self.timelines
+            self.db,
+            self.recipes,
+            self.providers,
+            self.provider_secrets,
+            self.timelines,
+            cv_signals=self.cv_signals,
         )
         self.timeline_patch_planning = TimelinePatchPlanningService(
             self.db, self.providers, self.provider_secrets, self.timelines
@@ -662,14 +675,9 @@ class CoreState:
             ffmpeg_build=_sync_tool_build(settings.ffmpeg),
         )
         self.jobs.waveform_runner = self.waveform.run_waveform_job
-        # AI-2 Layer 0：本地 CV 信号（关键帧采样 → numpy 信号集；产物为
-        # cv_samples 表行——无二进制文件，无 internal media 端点）。
-        # 阶段二：model_manager 注入 → YuNet 人脸通道（模型未就绪 partial）。
-        from .media.cv_signals import CvSignalService
-
-        self.cv_signals = CvSignalService(
-            self.db, settings.ffmpeg, self.ffprobe, model_manager=self.model_manager
-        )
+        # AI-2 Layer 0：cv_signals 已在 planning 之前构建（召回汇合 +
+        # model_manager 注入 → YuNet 人脸通道，模型未就绪 partial）；
+        # 此处只回填 job runner。
         self.jobs.cv_signal_runner = self.cv_signals.run_analysis_job
         # B15：分块 PCM（48000Hz 双声道 f32le、2 秒/块；同步内联生成——
         # 低延迟任务不排 jobs 队列，begin_build single-flight 防并发重复）。
