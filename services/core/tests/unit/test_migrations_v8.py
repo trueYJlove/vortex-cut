@@ -80,7 +80,7 @@ def test_v8_candidate_capability_states_and_config_change_reset(
         db.execute(
             "UPDATE provider_configs SET candidate_capability_status='supported',"
             "candidate_response_adapter_id='openai_responses_candidatescript_v1',"
-            "candidate_probe_protocol_version='1',candidate_capability_tested_at='now',"
+            "candidate_probe_protocol_version='2',candidate_capability_tested_at='now',"
             "candidate_capability_failure_code=NULL,"
             "candidate_capability_probe_sha256='sha256:probe' WHERE id='provider-v7'"
         )

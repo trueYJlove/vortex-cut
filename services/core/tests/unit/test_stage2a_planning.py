@@ -96,7 +96,7 @@ def _service(tmp_path: Path) -> tuple[Database, PlanningService, Jobs]:
         conn.execute(
             "UPDATE provider_configs SET candidate_capability_status='supported',"
             "candidate_response_adapter_id='openai_chat_completions_json_schema_v1',"
-            "candidate_probe_protocol_version='1',candidate_capability_tested_at='now',"
+            "candidate_probe_protocol_version='2',candidate_capability_tested_at='now',"
             "candidate_capability_probe_sha256='sha256:probe'"
         )
     planning.put_brief(
@@ -157,7 +157,7 @@ def test_v8_preview_snapshots_and_memory_payload_are_complete(tmp_path: Path) ->
             "candidate_capability_probe_sha256 FROM egress_previews WHERE id=?",
             (preview["egress_preview_id"],),
         ).fetchone()
-    assert tuple(row) == ("{}", "openai_chat_completions_json_schema_v1", "1", "sha256:probe")
+    assert tuple(row) == ("{}", "openai_chat_completions_json_schema_v1", "2", "sha256:probe")
     stored = planning.pending_store.get(preview["egress_preview_id"])
     assert stored and stored["payload"] == preview["payload"]
 
@@ -189,7 +189,7 @@ def test_candidate_capability_mismatch_stops_before_generation(tmp_path: Path, t
 
 @pytest.mark.parametrize(
     "mutation",
-    ["wrong_order", "duplicate_ref", "unknown_ref", "short_duration"],
+    ["wrong_order", "duplicate_ref", "unknown_ref", "empty_clips"],
 )
 def test_candidate_probe_domain_rejects_invalid_synthetic_candidates(mutation: str) -> None:
     from aivs_core.planning import PlanningService
@@ -220,6 +220,8 @@ def test_candidate_probe_domain_rejects_invalid_synthetic_candidates(mutation: s
         value["candidates"][0]["clips"][0]["segment_ids"] = ["s1", "s1"]
     elif mutation == "unknown_ref":
         value["candidates"][0]["clips"][0]["segment_ids"] = ["nope"]
+    elif mutation == "empty_clips":
+        value["candidates"][0]["clips"] = []
     else:
         value["candidates"][0]["clips"][0]["segment_ids"] = ["s1"]
     with pytest.raises(Exception):
@@ -319,7 +321,7 @@ async def test_candidate_probe_cancellation_preserves_existing_capability(tmp_pa
     assert capability == {
         "candidate_capability_status": "supported",
         "candidate_response_adapter_id": "openai_chat_completions_json_schema_v1",
-        "candidate_probe_protocol_version": "1",
+        "candidate_probe_protocol_version": "2",
         "candidate_capability_tested_at": "now",
         "candidate_capability_failure_code": None,
         "candidate_capability_probe_sha256": "sha256:probe",

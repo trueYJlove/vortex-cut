@@ -99,7 +99,8 @@ def test_candidatescript_parser_enforces_closed_framing_and_variants() -> None:
         with pytest.raises(ValueError):
             parse_candidatescript(invalid)
     assert len(CANDIDATE_ADAPTER_IDS) == 4
-    assert CANDIDATE_PROBE_PROTOCOL_VERSION == "1"
+    # 探测协议 v2（2026-09-20 裁决）：时长精确匹配放宽为结构校验。
+    assert CANDIDATE_PROBE_PROTOCOL_VERSION == "2"
     assert candidate_adapter_supported("openai_responses_candidatescript_v1")
 
 
@@ -373,7 +374,7 @@ async def test_timeline_patch_adapter_accepts_only_registered_openai_content() -
     assert result.response_sha256 and result.response_sha256.startswith("sha256:")
     assert timeline_patch_adapter_supported(TIMELINE_PATCH_ADAPTER_ID)
     assert not timeline_patch_adapter_supported("json_object")
-    assert TIMELINE_PATCH_PROBE_PROTOCOL_VERSION == "1"
+    assert TIMELINE_PATCH_PROBE_PROTOCOL_VERSION == "2"
 
 
 @pytest.mark.asyncio

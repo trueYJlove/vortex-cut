@@ -11,14 +11,14 @@
 | CV 召回 | `_cv_scenes`：项目全部可用视频素材的 ready 分析 → 场景切点合并为 ≥2s 场景段 → 排序（含人脸 > 运动 > 清晰度 > 序，规划门 §5 首版权重）→ 上限 160 |
 | 载荷 | 转录段与 CV 场景段统一为 provider 可见段列表（CV 段 `text=""`、带 `cv_features{face,motion,sharpness}`）；`sent_fields` 增量登记 `segments.cv_features`（本地计算零 egress，字段清单如实） |
 | 白名单 | 条目带 `source`（transcript/cv）；CV 条目携带生成时钉死的场景范围与特征快照（哈希链保护） |
-| 校验 | `_validated_candidates` 双路解析：CV 剪辑单场景一段、素材可用性校验；转录路径不变 |
+| 校验 | `_validated_candidates` 双路解析：CV 剪辑同素材校验（放宽裁决见验证报告）；转录路径不变 |
 | adopt | 双路建剪辑：CV clip 无转录依赖（asset 可用 + 指纹内时长兜底校验），`caption_policy=auto_from_transcript` 时 CV clip 不生成字幕，`provenance.source_transcript_ids` 不含 CV 素材 |
 | Desktop | IPC `planning:prepare` 透传可选 `candidate_source`（preload/MAIN；UI 面板后续小单） |
 
 ## 1. 关键裁决
 
 - **CV 场景段的"身份"**：白名单条目直接携带场景范围与特征快照（preview 时钉死进哈希链），`_validated_candidates`/`adopt` 只校验 asset 可用性与时长兜底——不回查 `cv_analyses` 表行（合成 scene_id 非表行 id，且召回后素材再分析不影响本次候选语义）。
-- **CV 剪辑不跨段拼接**：单场景一段（场景已聚合），避免跨场景连续性校验的语义分歧。
+- **~~CV 剪辑不跨段拼接~~（已被真实 provider 验证推翻）**：deepseek 自然行为即跨场景取段，粗剪语义本就如此——放宽为同素材校验（2026-09-20，见验证报告）。
 - **auto 的回退语义**：`transcript_ids=[]` + auto → CV；显式 `source=transcript` + 空选择 → 校验拒绝（`PLANNING_INVALID`）；CV 无 ready 分析 → `PLANNING_NO_SEGMENTS`（提示先做视频分析）。
 - **隐私**：CV 特征为本地计算，无 egress 增量；`sent_fields` 如实登记新字段。
 

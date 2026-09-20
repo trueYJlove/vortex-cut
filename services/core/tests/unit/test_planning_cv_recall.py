@@ -49,7 +49,7 @@ def _service(tmp_path: Path) -> tuple[PlanningService, Database, TimelineService
         conn.execute(
             "UPDATE provider_configs SET candidate_capability_status='supported',"
             "candidate_response_adapter_id='openai_chat_completions_json_schema_v1',"
-            "candidate_probe_protocol_version='1',candidate_capability_tested_at='now',"
+            "candidate_probe_protocol_version='2',candidate_capability_tested_at='now',"
             "candidate_capability_probe_sha256='sha256:probe'"
         )
         conn.execute(

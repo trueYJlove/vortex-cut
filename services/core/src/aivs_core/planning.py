@@ -399,6 +399,13 @@ class PlanningService:
 
     @staticmethod
     def _validate_candidate_probe(value: dict[str, Any], payload: dict[str, Any]) -> None:
+        """探测协议 v2（2026-09-20 裁决）：结构正确性校验。
+
+        时长不再要求精确等于目标——真实候选采纳链本有 0.8-1.2× 时长硬门兜底
+        质量；探测的职责是验证"模型能产出结构合法、引用闭合的输出"。旧版
+        精确时长匹配经真实验证为跨模型失败点（gpt-5.6-luna 与
+        deepseek-v4.1-flash 结构正确性均 100% 合格而算术不过），故放宽。
+        """
         try:
             entries = validate_candidate_output_value(value)["candidates"]
         except ValueError as exc:
@@ -407,11 +414,11 @@ class PlanningService:
             segment["segment_ref"]: (segment["start_us"], segment["end_us"])
             for segment in payload["segments"]
         }
-        target = 15_000_000
         for expected_variant, candidate in zip(VARIANTS, entries, strict=True):
             if candidate["variant"] != expected_variant:
                 raise ProviderError("PROVIDER_SCHEMA_MISMATCH", "Candidate Probe 变体顺序无效")
-            duration = 0
+            if not candidate["clips"]:
+                raise ProviderError("PROVIDER_SCHEMA_MISMATCH", "Candidate Probe 片段为空")
             for clip in candidate["clips"]:
                 refs = clip["segment_ids"]
                 if (
@@ -420,9 +427,6 @@ class PlanningService:
                     or any(ref not in segment_ranges for ref in refs)
                 ):
                     raise ProviderError("PROVIDER_SCHEMA_MISMATCH", "Candidate Probe 引用无效")
-                duration += segment_ranges[refs[-1]][1] - segment_ranges[refs[0]][0]
-            if duration != target:
-                raise ProviderError("PROVIDER_SCHEMA_MISMATCH", "Candidate Probe 时长无效")
 
     def put_brief(self, project_id: str, raw: dict[str, Any]) -> dict[str, Any]:
         required = {
@@ -1265,12 +1269,20 @@ class PlanningService:
                     or any(x not in refs for x in selected)
                 ):
                     raise ProviderError("PROVIDER_SCHEMA_MISMATCH", "候选引用越界")
-                actual = [rows[refs[x]["segment_id"] if isinstance(refs[x], dict) else refs[x]] for x in selected]
+                actual = [
+                    rows[
+                        refs[x]["segment_id"] if isinstance(refs[x], dict) else refs[x]
+                    ]
+                    for x in selected
+                ]
                 if actual[0]["source"] == "cv":
-                    # CV 剪辑：单场景一段（场景已聚合，不跨段拼接）。
-                    if len(actual) != 1:
+                    # CV 剪辑：允许同素材多场景段拼接（真实 provider 验证
+                    # 2026-09-20：deepseek 自然行为即跨场景取段——粗剪语义
+                    # 本就如此）。校验收缩为"同一素材"（拼接点由 adopt 按
+                    # 时间线顺序铺排，无源内连续性要求）。
+                    if len({x["asset_id"] for x in actual}) != 1:
                         raise ProviderError(
-                            "PROVIDER_SCHEMA_MISMATCH", "候选 CV 片段不连续"
+                            "PROVIDER_SCHEMA_MISMATCH", "候选 CV 片段跨素材"
                         )
                 elif len({x["transcript_id"] for x in actual}) != 1 or any(
                     actual[n]["end_us"] > actual[n + 1]["start_us"] for n in range(len(actual) - 1)

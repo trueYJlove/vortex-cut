@@ -167,7 +167,7 @@ def test_capability_probe_uses_fixed_order_stops_on_first_success_and_aggregates
         "openai_chat_completions_json_schema_v1",
     ]
     assert result["timeline_patch_response_adapter_id"] == "openai_chat_completions_json_schema_v1"
-    assert result["timeline_patch_probe_protocol_version"] == "1"
+    assert result["timeline_patch_probe_protocol_version"] == "2"
 
 
 def test_capability_probe_all_failures_clear_adapter_and_protocol(
@@ -323,7 +323,7 @@ def test_capability_probe_is_explicit_data_free_and_gates_prepare(
         assert tested.json() == {
             "timeline_patch_capability_status": "supported",
             "timeline_patch_response_adapter_id": "openai_responses_json_schema_v1",
-            "timeline_patch_probe_protocol_version": "1",
+            "timeline_patch_probe_protocol_version": "2",
             "timeline_patch_capability_tested_at": tested.json()[
                 "timeline_patch_capability_tested_at"
             ],
@@ -540,7 +540,7 @@ def test_prepare_generate_propose_apply_and_sensitive_boundaries(
                 ).fetchone()[0]
             )
         assert snapshot["timeline_patch_response_adapter_id"] == "openai_responses_json_schema_v1"
-        assert snapshot["timeline_patch_probe_protocol_version"] == "1"
+        assert snapshot["timeline_patch_probe_protocol_version"] == "2"
         assert preview["clip_count"] == 1
         assert preview["caption_count"] == 1
         with pytest.raises(Exception):

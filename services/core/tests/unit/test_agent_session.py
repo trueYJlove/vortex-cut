@@ -90,7 +90,7 @@ def _agent_service(
         conn.execute(
             "UPDATE provider_configs SET timeline_patch_capability_status='supported',"
             "timeline_patch_response_adapter_id='openai_chat_completions_json_schema_v1',"
-            "timeline_patch_probe_protocol_version='1',"
+            "timeline_patch_probe_protocol_version='2',"
             "timeline_patch_capability_tested_at='now',"
             "timeline_patch_capability_probe_sha256='sha256:probe'"
         )
@@ -439,7 +439,7 @@ def test_v20_schema_tables_and_triggers(tmp_path: Path) -> None:
             row[0]
             for row in conn.execute("SELECT version FROM schema_migrations")
         ]
-        assert "v20" in versions and len(versions) == 21
+        assert "v20" in versions and len(versions) == 22
         tables = {
             row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }

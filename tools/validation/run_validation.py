@@ -49,7 +49,7 @@ def _request(method: str, url: str, payload: dict | None = None, token: str | No
     if token:
         request.add_header("Authorization", f"Bearer {token}")
     try:
-        with urllib.request.urlopen(request, timeout=300) as response:
+        with urllib.request.urlopen(request, timeout=900) as response:
             return json.loads(response.read().decode())
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode()
@@ -190,6 +190,7 @@ def main() -> None:
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--skip-bc", action="store_true", help="只跑实验 A（无需 API key）")
+    parser.add_argument("--skip-c", action="store_true", help="跳过实验 C（patch 探测网关不稳时用）")
     args = parser.parse_args()
 
     provider_env = _provider_env()
@@ -283,9 +284,52 @@ def main() -> None:
             # 凭据走 admin 内部端点（vault 进程内，不落盘）。
             _request("PUT", f"{base}/api/v1/internal/provider-secrets/{provider_id}", token=admin,
                      payload={"secret": api_key})
-            # 能力测试（候选 + patch 两条）
-            cap_candidate = _request("POST", f"{base}/api/v1/providers/{provider_id}/candidate-planning-capability-test", token=ui)
-            cap_patch = _request("POST", f"{base}/api/v1/providers/{provider_id}/timeline-patch-capability-test", token=ui)
+            # 能力测试（候选 + patch 两条；网关偶发慢响应/抖动 → 各重试 2 次；
+            # patch 探测在网关上出现过"慢滴挂起"（read timeout 被持续重置），
+            # 用线程兜底 300s 硬超时——产品侧"探测总预算"独立工作单）。
+            def _probe_with_budget(url: str, budget_s: float = 300.0):
+                import threading
+
+                result: dict = {}
+                error: list[str] = []
+
+                def run():
+                    try:
+                        result.update(
+                            _request("POST", url, token=ui)
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        error.append(str(exc)[:200])
+
+                thread = threading.Thread(target=run, daemon=True)
+                thread.start()
+                thread.join(timeout=budget_s)
+                if thread.is_alive():
+                    error.append(f"probe exceeded {budget_s:.0f}s budget (gateway slow-drip)")
+                if error:
+                    raise RuntimeError("; ".join(error))
+                return result
+
+            cap_candidate = None
+            for attempt in range(3):
+                try:
+                    cap_candidate = _probe_with_budget(
+                        f"{base}/api/v1/providers/{provider_id}/candidate-planning-capability-test"
+                    )
+                    break
+                except (TimeoutError, RuntimeError) as exc:
+                    print(f"candidate 探测第 {attempt+1} 次失败: {str(exc)[:120]}")
+            cap_patch = None
+            for attempt in range(3):
+                try:
+                    cap_patch = _probe_with_budget(
+                        f"{base}/api/v1/providers/{provider_id}/timeline-patch-capability-test"
+                    )
+                    break
+                except (TimeoutError, RuntimeError) as exc:
+                    print(f"patch 探测第 {attempt+1} 次失败: {str(exc)[:120]}")
+            cap_candidate = cap_candidate or {}
+            cap_patch = cap_patch or {}
             print("能力测试: candidate =", cap_candidate.get("candidate_capability_status"),
                   "| patch =", cap_patch.get("timeline_patch_capability_status"))
             report["capability"] = {
@@ -355,8 +399,10 @@ def main() -> None:
                     report["experiment_b"] = {"error": str(exc)[:300]}
                     print("实验B 异常:", str(exc)[:200])
 
-            if cap_patch.get("timeline_patch_capability_status") != "supported":
-                print("patch 能力不支持——跳过实验 C")
+            if cap_patch is None or cap_patch.get("timeline_patch_capability_status") != "supported":
+                print("patch 能力未就绪——跳过实验 C")
+            elif args.skip_c:
+                print("--skip-c：跳过实验 C")
             else:
                 # ---- 实验 C：AI-1 多步 agent 会话 ----
                 try:
