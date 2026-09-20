@@ -63,6 +63,28 @@ def start_core() -> tuple[subprocess.Popen, str, int]:
     model_cache = REPO / "resources/.test-model-cache"
     if model_cache.is_dir():
         env["AIVS_E2E_MODEL_DIR"] = str(model_cache)
+    pythonpath = str(REPO / "services/core/src")
+    # spike 网络桥：sidecar httpx trust_env=False 不走系统代理，境外网关
+    # 直连超时——经 sitecustomize monkey-patch 注入代理（临时桥，产品正解
+    # = PROXY_SUPPORT 工作单）。
+    proxy = os.environ.get("AIVS_VALIDATION_PROXY", "")
+    if proxy:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        bridge = DATA_DIR / "sitecustomize.py"
+        bridge.write_text(
+            "import os as _os\n"
+            "if _os.environ.get('AIVS_SPIKE_PROXY'):\n"
+            "    import httpx as _httpx\n"
+            "    _orig = _httpx.AsyncClient.__init__\n"
+            "    def _patched(self, *a, **kw):\n"
+            "        kw.pop('trust_env', None)\n"
+            "        kw.setdefault('proxy', _os.environ['AIVS_SPIKE_PROXY'])\n"
+            "        _orig(self, *a, **kw)\n"
+            "    _httpx.AsyncClient.__init__ = _patched\n",
+            encoding="utf-8",
+        )
+        env["AIVS_SPIKE_PROXY"] = proxy
+        pythonpath = f"{DATA_DIR};{pythonpath}"
     proc = subprocess.Popen(
         [
             sys.executable, "-m", "aivs_core.bootstrap",
@@ -71,7 +93,7 @@ def start_core() -> tuple[subprocess.Popen, str, int]:
             "--log-level", "warning",
         ],
         cwd=REPO,
-        env={**env, "PYTHONPATH": str(REPO / "services/core/src")},
+        env={**env, "PYTHONPATH": pythonpath},
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
@@ -97,8 +119,10 @@ def wait_job(base: str, token: str, job_id: str, timeout_s: float = 600) -> dict
 
 
 def _provider_env() -> dict[str, str]:
-    """读取 AIVS_REAL_PROVIDER_* 用户环境变量组（与 opt-in 测试同一来源）。
+    """读取 AIVS_REAL_PROVIDER_* 配置（与 opt-in 测试同一来源）。
 
+    优先从注册表 User 环境变量直读（绕过进程启动时的环境快照——用户
+    修改配置后旧 shell/新启动的脚本会读到旧值）；失败回退进程环境。
     ENABLED 门与 opt-in 测试一致：必须显式 =1 才执行真 provider 实验。
     """
     names = (
@@ -108,8 +132,32 @@ def _provider_env() -> dict[str, str]:
         "AIVS_REAL_PROVIDER_INPUT_PRICE_PER_MILLION",
         "AIVS_REAL_PROVIDER_OUTPUT_PRICE_PER_MILLION",
     )
-    values = {name: os.environ.get(name, "") for name in names}
-    values["AIVS_REAL_PROVIDER_ENABLED"] = os.environ.get("AIVS_REAL_PROVIDER_ENABLED", "0")
+    values: dict[str, str] = {}
+    if sys.platform == "win32":
+        try:
+            import winreg
+
+            with winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER, "Environment"
+            ) as key:
+                for name in names:
+                    try:
+                        values[name] = str(winreg.QueryValueEx(key, name)[0])
+                    except FileNotFoundError:
+                        values[name] = ""
+                enabled = winreg.QueryValueEx(key, "AIVS_REAL_PROVIDER_ENABLED")[0]
+                values["AIVS_REAL_PROVIDER_ENABLED"] = str(enabled)
+        except OSError:
+            pass
+    for name in names:
+        if not values.get(name):
+            values[name] = os.environ.get(name, "")
+    # ENABLED 优先级：进程环境显式 1（显式意图，如命令行前缀）> 注册表 > 缺省 0。
+    process_enabled = os.environ.get("AIVS_REAL_PROVIDER_ENABLED", "")
+    if process_enabled == "1" or not values.get("AIVS_REAL_PROVIDER_ENABLED"):
+        values["AIVS_REAL_PROVIDER_ENABLED"] = process_enabled or values.get(
+            "AIVS_REAL_PROVIDER_ENABLED", "0"
+        )
     return values
 
 
@@ -154,6 +202,7 @@ def main() -> None:
         print(f"使用 AIVS_REAL_PROVIDER_* 配置：{provider_env['AIVS_REAL_PROVIDER_BASE_URL']} "
               f"模型 {provider_env['AIVS_REAL_PROVIDER_MODEL']}")
     else:
+        api_key = ""
         print("AIVS_REAL_PROVIDER_* 未就绪（需 ENABLED=1 且 API_KEY 非空）——"
               "将跳过实验 B/C（真 provider）。")
         args.skip_bc = True
@@ -244,6 +293,110 @@ def main() -> None:
                 "patch": cap_patch.get("timeline_patch_capability_status"),
                 "adapter": cap_candidate.get("candidate_response_adapter_id"),
             }
+
+            if cap_candidate.get("candidate_capability_status") != "supported":
+                print("candidate 能力不支持——跳过实验 B")
+            else:
+                # ---- 实验 B：CV 召回（无转录）→ 三候选 ----
+                try:
+                    _request("PUT", f"{base}/api/v1/projects/{project_id}/brief", token=ui,
+                             payload={
+                                 "schema_version": 1, "topic": "舞蹈", "audience": "短视频观众",
+                                 "target_platform": "generic_vertical",
+                                 "target_duration_us": 30_000_000,
+                                 "narrative_goal": "保留最有活力的舞蹈片段", "style_notes": "",
+                                 "must_keep": [], "forbidden": [],
+                                 "original_audio_policy": "preserve",
+                                 "caption_policy": "none",
+                                 "caption_preset_id": "default-bottom",
+                                 "default_layout": "fit",
+                             })
+                    dance_asset = report["assets"].get("dance", {}).get("asset_id")
+                    preview = _request(
+                        "POST", f"{base}/api/v1/projects/{project_id}/candidate-generations/prepare",
+                        token=ui,
+                        payload={
+                            "provider_config_id": provider_id,
+                            "recipe_id": "balanced-narrative-v1",
+                            "transcript_ids": [],
+                            "candidate_source": "cv",
+                        },
+                    )
+                    created = _request(
+                        "POST", f"{base}/api/v1/projects/{project_id}/candidate-generations",
+                        token=ui,
+                        payload={"egress_preview_id": preview["egress_preview_id"],
+                                 "payload_sha256": preview["payload_sha256"]},
+                    )
+                    job = wait_job(base, ui, created["job"]["job_id"], timeout_s=600)
+                    if job["status"] != "succeeded":
+                        raise RuntimeError(f"生成失败: {job.get('error')}")
+                    plans = _request("GET", f"{base}/api/v1/projects/{project_id}/candidate-plans",
+                                     token=ui)["items"]
+                    experiment_b = {"candidates": []}
+                    for plan in plans:
+                        detail = _request("GET", f"{base}/api/v1/candidate-plans/{plan['candidate_plan_id']}",
+                                          token=ui)
+                        experiment_b["candidates"].append({
+                            "variant": detail["variant"],
+                            "title": detail["title_suggestion"],
+                            "duration_s": round(detail["duration_us"] / 1_000_000, 1),
+                            "clips": [
+                                {"range": f"{c['source_start_us']/1e6:.0f}-{c['source_end_us']/1e6:.0f}s",
+                                 "reason": c["reason"][:80]}
+                                for c in detail["clips"]
+                            ],
+                        })
+                    report["experiment_b"] = experiment_b
+                    print("实验B: 三候选生成成功")
+                    for c in experiment_b["candidates"]:
+                        print(f"  [{c['variant']}] {c['title']} | {c['duration_s']}s")
+                except Exception as exc:
+                    report["experiment_b"] = {"error": str(exc)[:300]}
+                    print("实验B 异常:", str(exc)[:200])
+
+            if cap_patch.get("timeline_patch_capability_status") != "supported":
+                print("patch 能力不支持——跳过实验 C")
+            else:
+                # ---- 实验 C：AI-1 多步 agent 会话 ----
+                try:
+                    dance_asset = report["assets"].get("dance", {}).get("asset_id")
+                    timeline = _request(
+                        "POST", f"{base}/api/v1/projects/{project_id}/timelines", token=ui,
+                        payload={"schema_version": 1,
+                                 "source": {"kind": "full_asset", "asset_id": dance_asset},
+                                 "default_layout": "fit",
+                                 "caption_preset_id": "default-bottom"},
+                    )
+                    state = _request("GET", f"{base}/api/v1/projects/{project_id}/timeline", token=ui)
+                    revision_id = state["current_revision"]["timeline_revision_id"]
+                    preview = _request(
+                        "POST", f"{base}/api/v1/projects/{project_id}/agent-sessions/prepare",
+                        token=ui,
+                        payload={"base_revision_id": revision_id,
+                                 "provider_config_id": provider_id,
+                                 "instruction": "把视频剪短一点，保留最精彩的部分"},
+                    )
+                    created = _request(
+                        "POST", f"{base}/api/v1/projects/{project_id}/agent-sessions", token=ui,
+                        payload={"agent_session_egress_preview_id": preview["agent_session_egress_preview_id"],
+                                 "payload_sha256": preview["payload_sha256"]},
+                    )
+                    job = wait_job(base, ui, created["job"]["job_id"], timeout_s=900)
+                    session = _request("GET", f"{base}/api/v1/agent-sessions/{created['agent_session_id']}",
+                                       token=ui)
+                    report["experiment_c"] = {
+                        "status": session["status"],
+                        "steps": [{"ordinal": s["ordinal"], "status": s["status"],
+                                   "summary": s.get("summary"),
+                                   "error": (s.get("error") or {}).get("code")}
+                                  for s in session.get("steps", [])],
+                    }
+                    print(f"实验C: 会话 {session['status']}, "
+                          f"{len([s for s in session.get('steps', []) if s['status'] == 'succeeded'])} 步成功")
+                except Exception as exc:
+                    report["experiment_c"] = {"error": str(exc)[:300]}
+                    print("实验C 异常:", str(exc)[:200])
 
         with (DATA_DIR / "report.json").open("w", encoding="utf-8") as f:
             json.dump(report, f, ensure_ascii=False, indent=2)
