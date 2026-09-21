@@ -801,6 +801,19 @@ class AgentSessionService:
                 "FROM agent_steps WHERE session_id=? ORDER BY ordinal",
                 (session_id,),
             ).fetchall()
+            # 会话费用聚合（阶段 B）：步骤 ↔ invocation 经 input_sha256 关联
+            # （同 payload_hash）；usage_json 的 token 计数与配置单价估算成本
+            # 汇总。估计值 = 配置单价 × 实际用量，最终以服务商账单为准。
+            usage = db.execute(
+                "SELECT COALESCE(SUM(json_extract(i.usage_json,'$.total_tokens')),0) "
+                "AS total_tokens, COALESCE(SUM(i.estimated_cost),0) AS estimated_cost, "
+                "COUNT(i.id) AS calls "
+                "FROM agent_steps st "
+                "JOIN provider_invocations i ON i.input_sha256 = st.input_sha256 "
+                "AND i.capability = 'agent_session_planning' "
+                "WHERE st.session_id = ?",
+                (session_id,),
+            ).fetchone()
         return {
             "agent_session_id": row["id"],
             "project_id": row["project_id"],
@@ -812,6 +825,11 @@ class AgentSessionService:
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
             "finished_at": row["finished_at"],
+            "token_usage": {
+                "total_tokens": int(usage["total_tokens"]),
+                "estimated_cost": float(usage["estimated_cost"]),
+                "provider_calls": int(usage["calls"]),
+            },
             "steps": [
                 {
                     "ordinal": step["ordinal"],

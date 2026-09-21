@@ -141,7 +141,7 @@ export function AgentSessionPanel({ projectId, baseRevisionId, providers, onClos
     </>}
     {step === "running" && session && <>
       <h3>会话进行中</h3>
-      <p>{session.status === "queued" ? "排队中" : "执行中"} · 步数 {session.steps?.length ?? 0}/{session.max_steps}</p>
+      <p>{session.status === "queued" ? "排队中" : "执行中"} · 步数 {session.steps?.length ?? 0}/{session.max_steps}{session.token_usage ? ` · Token ${session.token_usage.total_tokens}` : ""}</p>
       <progress max={session.max_steps} value={session.steps?.length ?? 0} aria-label="会话步数进度" />
       <ol className="agent-session-steps">
         {(session.steps ?? []).map(item => <li key={item.ordinal}><strong>第 {item.ordinal} 步</strong> · {stepStageLabel(item)}{item.summary ? <span> · {item.summary}</span> : null}{item.duration_ms !== null ? <small> · {(item.duration_ms / 1000).toFixed(1)}s</small> : null}</li>)}
@@ -152,6 +152,7 @@ export function AgentSessionPanel({ projectId, baseRevisionId, providers, onClos
       <h3>{session.status === "succeeded" ? "会话完成" : session.status === "failed" ? "会话失败" : "会话已取消"}</h3>
       {session.status === "succeeded" && <p className="readonly-note">每个成功步骤都已落为版本；使用"版本比较"查看会话轨迹，或撤销回退到任意一步。</p>}
       {session.status === "failed" && <p>共执行 {(session.steps ?? []).filter(item => item.status === "succeeded").length} 个成功步骤（已保留），失败步骤不产生修改。</p>}
+      {session.token_usage && <p className="readonly-note">费用估算：{session.token_usage.total_tokens} tokens · {session.token_usage.provider_calls} 次 Provider 调用 · ≈{session.token_usage.estimated_cost.toFixed(4)} 元（按 Provider 配置单价估算，最终以服务商账单为准）。</p>}
       <ol className="agent-session-steps">
         {(session.steps ?? []).map(item => <li key={item.ordinal}><strong>第 {item.ordinal} 步</strong> · {stepStageLabel(item)}{item.summary ? <span> · {item.summary}</span> : null}</li>)}
       </ol>
