@@ -22,7 +22,8 @@ import { registerFileGrant } from "./file-grants.js";
 import { exportFileName, normalizeExportPath } from "./export-destination.js";
 import { defaultLogPath, appendLog, redact } from "./logging.js";
 import { SidecarSupervisor } from "./sidecar-supervisor.js";
-import { DesktopSettingsStore, normalize as normalizeDesktopSettings, type DesktopSettings } from "./desktop-settings.js";
+import { DesktopSettingsStore, type DesktopSettings } from "./desktop-settings.js";
+import { registerSettingsIpc } from "./settings-ipc.js";
 import { RESTRICTED_MEDIA_SCHEME, RestrictedMediaRegistry, serveRestrictedMedia } from "./restricted-media.js";
 import { probeActive, probeLoadQuery, registerProbeIpc, type ProbeIpcHandle } from "./probe-ipc.js";
 import { normalizeJob } from "../../src/lib/core-client.js";
@@ -359,6 +360,10 @@ async function createWindow(): Promise<void> {
 
 function registerIpc(): void {
   ipcMain.handle("runtime:get", async () => {
+    // 重启窗口期（restartingCore 且 runtime 已清空）：等 startRuntime 完成，
+    // 避免竞态窗口拿到已停用旧 sidecar 的 base_url。
+    const deadline = Date.now() + 30_000;
+    while (!runtime && restartingCore && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 200));
     if (runtime) return rendererRuntime();
     await Promise.race([
       runtimeReady,
@@ -595,19 +600,13 @@ function registerIpc(): void {
   ipcMain.handle("timeline:draft-delete", async (_event, projectId: ProjectId) => { await fetchWithUi(`${API_PREFIX}/projects/${asId(projectId, "project_id")}/timeline/draft`, { method: "DELETE" }); });
   ipcMain.handle("timeline:revisions", (_event, input: { project_id: ProjectId; limit?: number; cursor?: string }) => fetchWithUi(`${API_PREFIX}/projects/${asId(input.project_id, "project_id")}/timeline/revisions${buildQuery(input, ["project_id"])}`).then(rendererSafe));
   ipcMain.handle("timeline:revision", (_event, revisionId: TimelineRevisionId) => fetchWithUi(`${API_PREFIX}/timeline-revisions/${asId(revisionId, "timeline_revision_id")}`).then(rendererSafe));
-  // DESK-1/DESK-2：桌面设置（Main-only 持久化，不经 Core HTTP）。get 返回
-  // 保存值与当前生效值两态——Core 启动时解析一次代理，重启内核前两者可不同。
-  ipcMain.handle("settings:get", () => {
-    const saved = settingsStore().get();
-    const effective = startRuntimeSettings;
-    return { saved, effective, pending_restart: effective !== null && (effective.proxy_mode !== saved.proxy_mode || effective.provider_proxy !== saved.provider_proxy) };
+  // DESK-1/DESK-2：桌面设置（Main-only 持久化，不经 Core HTTP）+ 内核重启。
+  registerSettingsIpc({
+    handle: (channel, listener) => ipcMain.handle(channel, listener),
+    store: settingsStore,
+    effective: () => startRuntimeSettings,
+    restartCore
   });
-  ipcMain.handle("settings:set", async (_event, input: unknown) => {
-    const { proxy_mode, provider_proxy } = (input ?? {}) as Partial<DesktopSettings>;
-    await settingsStore().set(normalizeDesktopSettings({ proxy_mode, provider_proxy }));
-    return settingsStore().get();
-  });
-  ipcMain.handle("core:restart", () => restartCore());
   ipcMain.handle("preset:list-platforms", async () => {
     const page = rendererSafe(await fetchWithUi<{ items: unknown[] }>(`${API_PREFIX}/platform-presets`));
     if (!page || typeof page !== "object" || !Array.isArray((page as { items?: unknown[] }).items) || !(page as { items: unknown[] }).items.every(isPlatformPreset)) throw new Error("Invalid PlatformPresetPage");
@@ -939,7 +938,6 @@ async function restartCore(): Promise<void> {
   try {
     if (windowRef && !windowRef.isDestroyed()) windowRef.webContents.send("runtime:error", "内核正在重启，界面恢复后可继续操作。");
     await shutdownRuntime();
-    resolveRuntime = undefined;
     await startRuntime();
   } finally {
     restartingCore = false;

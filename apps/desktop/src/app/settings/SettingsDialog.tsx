@@ -34,6 +34,7 @@ export function SettingsDialog({ onClose, onNotify }: { onClose: () => void; onN
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [restarting, setRestarting] = useState(false);
+  const [confirmRestart, setConfirmRestart] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -64,6 +65,8 @@ export function SettingsDialog({ onClose, onNotify }: { onClose: () => void; onN
   };
 
   const restartCore = async () => {
+    if (!confirmRestart) { setConfirmRestart(true); return; }
+    setConfirmRestart(false);
     setRestarting(true); setError("");
     try {
       await window.desktop.restartCore();
@@ -99,8 +102,9 @@ export function SettingsDialog({ onClose, onNotify }: { onClose: () => void; onN
         </div>
       </fieldset>
       <p className="settings-effective"><strong>当前生效：</strong>{effectiveLabel}{state.pending_restart && <span className="readonly-note">（有已保存未生效的更改）</span>}</p>
+      {confirmRestart && <p className="ai-status" role="alert">重启将中断进行中的任务（转录/生成/导出等），确认继续吗？<button onClick={() => { setConfirmRestart(false); void restartCore(); }}>确认重启</button><button onClick={() => setConfirmRestart(false)}>取消</button></p>}
       <div className="modal-actions">
-        <button disabled={restarting || !state.pending_restart} title={state.pending_restart ? "重启本地内核以应用新代理设置" : "没有待生效的设置"} onClick={() => void restartCore()}>{restarting ? "正在重启内核…" : "重启内核使设置生效"}</button>
+        <button disabled={restarting || !state.pending_restart} title={state.pending_restart ? "重启本地内核以应用新代理设置" : "没有待生效的设置"} onClick={() => void restartCore()}>{restarting ? "正在重启内核…" : confirmRestart ? "再次点击确认重启" : "重启内核使设置生效"}</button>
       </div>
     </>}
   </Dialog>;
