@@ -29,6 +29,8 @@ export type CandidatePlanId = string & { readonly __brand: "candidate_plan_id" }
 export type TimelinePatchEgressPreviewId = string & { readonly __brand: "timeline_patch_egress_preview_id" };
 export type TimelinePatchGenerationId = string & { readonly __brand: "timeline_patch_generation_id" };
 export type TimelinePatchProposalId = string & { readonly __brand: "timeline_patch_proposal_id" };
+export type AgentSessionEgressPreviewId = string & { readonly __brand: "agent_session_egress_preview_id" };
+export type AgentSessionId = string & { readonly __brand: "agent_session_id" };
 export type PlatformPresetId = string & { readonly __brand: "platform_preset_id" };
 export type RenditionPresetId = string & { readonly __brand: "rendition_preset_id" };
 export type RenditionSnapshotId = string & { readonly __brand: "rendition_snapshot_id" };
@@ -71,7 +73,9 @@ export type JobKind =
   | "authoritative_preview"
   | "final_export"
   | "media_generation"
-  | "waveform";
+  | "waveform"
+  | "agent_session"
+  | "cv_analysis";
 export type JobStage =
   | "queued"
   | "downloading"
@@ -138,6 +142,10 @@ export const ERROR_CODES = [
   , "GENERATION_REQUEST_INVALID", "GENERATION_KIND_UNSUPPORTED", "GENERATION_INPUT_CHANGED",
   "GENERATION_HASH_MISMATCH", "GENERATION_OUTPUT_INVALID", "GENERATION_INTERRUPTED",
   "GENERATION_RETRY_NOT_ALLOWED", "GENERATION_TASK_NOT_FOUND"
+  , "AGENT_SESSION_INVALID", "AGENT_SESSION_NOT_FOUND", "AGENT_SESSION_ALREADY_ACTIVE",
+  "AGENT_SESSION_EGRESS_EXPIRED", "AGENT_SESSION_EGRESS_MISMATCH",
+  "AGENT_SESSION_PROVIDER_UNTESTED", "AGENT_SESSION_PROVIDER_UNSUPPORTED",
+  "AGENT_SESSION_STEP_LIMIT", "AGENT_SESSION_BUDGET_EXCEEDED", "AGENT_SESSION_BASE_DRIFT"
 ] as const;
 export type ErrorCode = typeof ERROR_CODES[number] | (string & {});
 
@@ -984,6 +992,54 @@ export interface TimelinePatchGenerationCreateResponse { timeline_patch_generati
 export interface TimelinePatchProposalApplyRequest { base_revision_id: TimelineRevisionId; proposed_document_sha256: string; }
 export interface TimelineRevisionDiffRequest { base_revision_id: TimelineRevisionId; target_revision_id: TimelineRevisionId; }
 
+// AI-1（ADR-0003 D2）：内置多步 agent 会话——单发提案升级为带校验反馈重试的
+// 有界循环；一个会话 = 一次 consent；每步成功即落不可变 Revision。
+export type AgentSessionStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+export interface AgentSessionEgressPreview {
+  agent_session_egress_preview_id: AgentSessionEgressPreviewId;
+  provider: { display_name: string; origin: string; model: string };
+  prompt_template_version: string; output_schema_version: string; sent_fields: string[]; payload_sha256: string;
+  character_count: number; estimated_tokens: number; clip_count: number; caption_count: number; locked_count: number;
+  max_steps: number; token_budget: number; expires_at: string;
+}
+export interface AgentSessionStep {
+  ordinal: number; status: "succeeded" | "failed"; stage: string;
+  summary: string | null; error: { code: string; message: string; failure?: { reason: string; operation_index: number; op: string | null; field: string } } | null;
+  duration_ms: number | null; created_at: string;
+}
+export interface AgentSession {
+  agent_session_id: AgentSessionId; project_id: ProjectId; base_revision_id: TimelineRevisionId;
+  instruction: string; max_steps: number; status: AgentSessionStatus; payload_sha256: string;
+  created_at: string; updated_at: string; finished_at: string | null; steps?: AgentSessionStep[];
+}
+export interface AgentSessionPrepareRequest { base_revision_id: TimelineRevisionId; provider_config_id: ProviderConfigId; instruction: string; }
+export interface AgentSessionCreateRequest { agent_session_egress_preview_id: AgentSessionEgressPreviewId; payload_sha256: string; }
+export interface AgentSessionCreateResponse { agent_session_id: AgentSessionId; job: Job; }
+export interface AgentSessionUpdatedEvent {
+  type: "agent_session.updated";
+  event_id?: string;
+  occurred_at?: string;
+  payload: {
+    agent_session_id: AgentSessionId;
+    status: AgentSessionStatus;
+    progress: number;
+    step?: number;
+  };
+}
+
+// AI-2（Layer 0）：素材 CV 信号分析——generate=True 登记分析作业；仅 video 素材。
+export type CvAnalysisStatus = "queued" | "running" | "ready" | "failed" | "stale";
+export interface CvAnalysisRequest { generate: boolean; }
+export interface CvAnalysisSummary {
+  analysis_id: string | null;
+  status: CvAnalysisStatus | null;
+  job_id: JobId | null;
+  algorithm_version: string;
+  sample_count: number | null;
+  scene_cut_count: number | null;
+  signals: string[];
+}
+
 export type GenerationKind = "image" | "tts";
 export type GenerationStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
 export type GenerationExecutionMode = "simulation_only";
@@ -1172,7 +1228,7 @@ export class ContractValidationError extends Error {
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const JOB_STATUSES: JobStatus[] = ["queued", "running", "succeeded", "failed", "cancelling", "cancelled", "interrupted"];
-const JOB_KINDS: JobKind[] = ["asset_probe", "asset_fingerprint", "proxy", "portrait_sample", "vertical_sample", "model_download", "transcription", "candidate_generation", "timeline_patch_generation", "authoritative_preview", "final_export", "media_generation", "waveform"];
+const JOB_KINDS: JobKind[] = ["asset_probe", "asset_fingerprint", "proxy", "portrait_sample", "vertical_sample", "model_download", "transcription", "candidate_generation", "timeline_patch_generation", "authoritative_preview", "final_export", "media_generation", "waveform", "agent_session", "cv_analysis"];
 const PROJECT_STATUSES: ProjectStatus[] = ["active", "archived", "missing"];
 const ASSET_KINDS: AssetKind[] = ["video", "audio", "image", "text"];
 const ASSET_AVAILABILITIES: AssetAvailability[] = ["available", "missing", "changed", "unsupported"];
@@ -1327,14 +1383,16 @@ export function isBrief(value: unknown): value is Brief { return isRecord(value)
 export function isRecipe(value: unknown): value is Recipe { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["schema_version", "recipe_id", "name", "summary", "rules", "document_sha256"]) && isId(value.recipe_id) && value.schema_version === 1 && isBriefText(value.name, 200) && isBriefText(value.summary, 1000) && isRecord(value.rules) && onlyKeys(value.rules, ["selection", "pace", "max_gap_us"]) && isBriefText(value.rules.selection, 100) && isBriefText(value.rules.pace, 100) && isInteger(value.rules.max_gap_us, 0) && isSha256(value.document_sha256); }
 function isTimelinePatchCapabilityMetadata(value: Record<string, unknown>): boolean {
   if (!oneOf(["untested", "supported", "unsupported"] as const, value.timeline_patch_capability_status) || !(value.timeline_patch_response_adapter_id === null || oneOf(TIMELINE_PATCH_RESPONSE_ADAPTER_IDS, value.timeline_patch_response_adapter_id)) || !(value.timeline_patch_probe_protocol_version === null || isBriefText(value.timeline_patch_probe_protocol_version, 100)) || !(value.timeline_patch_capability_tested_at === null || isTime(value.timeline_patch_capability_tested_at)) || !(value.timeline_patch_capability_failure_code === null || isBriefText(value.timeline_patch_capability_failure_code, 200)) || !(value.timeline_patch_capability_probe_sha256 === null || isSha256(value.timeline_patch_capability_probe_sha256))) return false;
+  // 探测协议 v2（probe-v2 2026-09-20）：Core TIMELINE_PATCH_PROBE_PROTOCOL_
+  // VERSION = "2"——supported 记录的协议钉随之升 v2（v1 记录经 v22 迁移刷新）。
   return value.timeline_patch_capability_status === "supported"
-    ? oneOf(TIMELINE_PATCH_RESPONSE_ADAPTER_IDS, value.timeline_patch_response_adapter_id) && value.timeline_patch_probe_protocol_version === "1" && value.timeline_patch_capability_tested_at !== null && value.timeline_patch_capability_failure_code === null && value.timeline_patch_capability_probe_sha256 !== null
+    ? oneOf(TIMELINE_PATCH_RESPONSE_ADAPTER_IDS, value.timeline_patch_response_adapter_id) && value.timeline_patch_probe_protocol_version === "2" && value.timeline_patch_capability_tested_at !== null && value.timeline_patch_capability_failure_code === null && value.timeline_patch_capability_probe_sha256 !== null
     : value.timeline_patch_response_adapter_id === null && value.timeline_patch_probe_protocol_version === null && (value.timeline_patch_capability_status === "untested" ? value.timeline_patch_capability_tested_at === null && value.timeline_patch_capability_failure_code === null && value.timeline_patch_capability_probe_sha256 === null : value.timeline_patch_capability_tested_at !== null && value.timeline_patch_capability_failure_code !== null && value.timeline_patch_capability_probe_sha256 !== null);
 }
 function isCandidateCapabilityMetadata(value: Record<string, unknown>): boolean {
   if (!oneOf(["untested", "supported", "unsupported"] as const, value.candidate_capability_status) || !(value.candidate_response_adapter_id === null || oneOf(CANDIDATE_RESPONSE_ADAPTER_IDS, value.candidate_response_adapter_id)) || !(value.candidate_probe_protocol_version === null || isBriefText(value.candidate_probe_protocol_version, 100)) || !(value.candidate_capability_tested_at === null || isTime(value.candidate_capability_tested_at)) || !(value.candidate_capability_failure_code === null || isBriefText(value.candidate_capability_failure_code, 200)) || !(value.candidate_capability_probe_sha256 === null || isSha256(value.candidate_capability_probe_sha256))) return false;
   return value.candidate_capability_status === "supported"
-    ? oneOf(CANDIDATE_RESPONSE_ADAPTER_IDS, value.candidate_response_adapter_id) && value.candidate_probe_protocol_version === "1" && value.candidate_capability_tested_at !== null && value.candidate_capability_failure_code === null && value.candidate_capability_probe_sha256 !== null
+    ? oneOf(CANDIDATE_RESPONSE_ADAPTER_IDS, value.candidate_response_adapter_id) && value.candidate_probe_protocol_version === "2" && value.candidate_capability_tested_at !== null && value.candidate_capability_failure_code === null && value.candidate_capability_probe_sha256 !== null
     : value.candidate_response_adapter_id === null && value.candidate_probe_protocol_version === null && (value.candidate_capability_status === "untested" ? value.candidate_capability_tested_at === null && value.candidate_capability_failure_code === null && value.candidate_capability_probe_sha256 === null : value.candidate_capability_tested_at !== null && value.candidate_capability_failure_code !== null && value.candidate_capability_probe_sha256 !== null);
 }
 export function isCandidateResponseAdapterId(value: unknown): value is CandidateResponseAdapterId { return oneOf(CANDIDATE_RESPONSE_ADAPTER_IDS, value); }
@@ -1397,6 +1455,63 @@ export function isJobEvent(value: unknown): value is JobUpdatedEvent {
   if (value.job !== undefined && !isJob(value.job)) return false;
   if (value.payload === undefined) return true;
   return isRecord(value.payload) && isId(value.payload.job_id) && isJobStatus(value.payload.status) && (value.payload.progress === null || isFiniteNumber(value.payload.progress));
+}
+
+const AGENT_SESSION_STATUSES = ["queued", "running", "succeeded", "failed", "cancelled"] as const;
+function isAgentSessionStatus(value: unknown): value is AgentSessionStatus {
+  return typeof value === "string" && (AGENT_SESSION_STATUSES as readonly string[]).includes(value);
+}
+
+export function isAgentSessionEgressPreview(value: unknown): value is AgentSessionEgressPreview {
+  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["agent_session_egress_preview_id", "provider", "prompt_template_version", "output_schema_version", "sent_fields", "payload_sha256", "character_count", "estimated_tokens", "clip_count", "caption_count", "locked_count", "max_steps", "token_budget", "expires_at"]) && isId(value.agent_session_egress_preview_id) && isRecord(value.provider) && onlyKeys(value.provider, ["display_name", "origin", "model"]) && isBriefText(value.provider.display_name, 100) && isString(value.provider.origin) && /^https?:\/\//.test(value.provider.origin) && isBriefText(value.provider.model, 200) && isBriefText(value.prompt_template_version, 200) && isBriefText(value.output_schema_version, 200) && Array.isArray(value.sent_fields) && value.sent_fields.length > 0 && value.sent_fields.every(item => isBriefText(item, 100)) && isSha256(value.payload_sha256) && [value.character_count, value.estimated_tokens, value.clip_count, value.caption_count, value.locked_count, value.max_steps, value.token_budget].every(item => isInteger(item, 0)) && isTime(value.expires_at);
+}
+export function isAgentSessionCreateResponse(value: unknown): value is AgentSessionCreateResponse {
+  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["agent_session_id", "job"]) && isId(value.agent_session_id) && isJob(value.job) && value.job.kind === "agent_session";
+}
+export function parseAgentSessionEgressPreview(value: unknown): AgentSessionEgressPreview { if (!isAgentSessionEgressPreview(value)) throw new ContractValidationError("AgentSessionEgressPreview"); return value; }
+export function parseAgentSessionCreateResponse(value: unknown): AgentSessionCreateResponse { if (!isAgentSessionCreateResponse(value)) throw new ContractValidationError("AgentSessionCreateResponse"); return value; }
+
+export function isAgentSessionUpdatedEvent(value: unknown): value is AgentSessionUpdatedEvent {
+  if (!isRecord(value) || value.type !== "agent_session.updated" || !isRecord(value.payload)) return false;
+  const payload = value.payload;
+  return isId(payload.agent_session_id) && isAgentSessionStatus(payload.status)
+    && isFiniteNumber(payload.progress) && (payload.step === undefined || isFiniteNumber(payload.step));
+}
+
+const CV_ANALYSIS_STATUSES = ["queued", "running", "ready", "failed", "stale"] as const;
+function isCvAnalysisStatus(value: unknown): value is CvAnalysisStatus {
+  return typeof value === "string" && (CV_ANALYSIS_STATUSES as readonly string[]).includes(value);
+}
+
+export function isCvAnalysisSummary(value: unknown): value is CvAnalysisSummary {
+  if (!isRecord(value)) return false;
+  if (value.analysis_id !== null && !(typeof value.analysis_id === "string" && value.analysis_id.length > 0)) return false;
+  if (value.status !== null && !isCvAnalysisStatus(value.status)) return false;
+  if (value.job_id !== null && !isId(value.job_id)) return false;
+  if (!(typeof value.algorithm_version === "string" && value.algorithm_version.length > 0)) return false;
+  if (value.sample_count !== null && !isFiniteNumber(value.sample_count)) return false;
+  if (value.scene_cut_count !== null && !isFiniteNumber(value.scene_cut_count)) return false;
+  return Array.isArray(value.signals) && value.signals.every(item => typeof item === "string" && item.length > 0);
+}
+
+export function parseAgentSession(value: unknown): AgentSession {
+  // 两种 Core 形态：get_session 全键（含 payload_sha256/steps）；
+  // list_sessions 不含这两键。required = 公共键，steps/payload_sha256 可选。
+  const REQUIRED = ["agent_session_id", "project_id", "base_revision_id", "instruction", "max_steps", "status", "created_at", "updated_at", "finished_at"];
+  const OPTIONAL = ["payload_sha256", "steps"];
+  if (!isRecord(value) || !REQUIRED.every(key => Object.prototype.hasOwnProperty.call(value, key)) || Object.keys(value).some(key => !REQUIRED.includes(key) && !OPTIONAL.includes(key))) throw new ContractValidationError("AgentSession");
+  if (!isId(value.agent_session_id) || !isId(value.project_id) || !isId(value.base_revision_id)) throw new ContractValidationError("AgentSession");
+  if (!(typeof value.instruction === "string" && value.instruction.length > 0) || !isFiniteNumber(value.max_steps)) throw new ContractValidationError("AgentSession");
+  if (!isAgentSessionStatus(value.status)) throw new ContractValidationError("AgentSession");
+  if (Object.prototype.hasOwnProperty.call(value, "payload_sha256") && !(typeof value.payload_sha256 === "string" && value.payload_sha256.length > 0)) throw new ContractValidationError("AgentSession");
+  if (!(typeof value.created_at === "string") || !(typeof value.updated_at === "string") || !(value.finished_at === null || typeof value.finished_at === "string")) throw new ContractValidationError("AgentSession");
+  if (Object.prototype.hasOwnProperty.call(value, "steps") && value.steps !== null && (!Array.isArray(value.steps) || !value.steps.every(step => isRecord(step) && isFiniteNumber(step.ordinal)))) throw new ContractValidationError("AgentSession");
+  return value as unknown as AgentSession;
+}
+
+export function parseCvAnalysisSummary(value: unknown): CvAnalysisSummary {
+  if (!isCvAnalysisSummary(value)) throw new ContractValidationError("CvAnalysisSummary");
+  return value;
 }
 
 export function parseSidecarReadyLine(line: string): SidecarReady {

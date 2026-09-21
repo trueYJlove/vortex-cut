@@ -97,7 +97,7 @@ const launch = () => electron.launch(installed ? {
     NODE_OPTIONS: undefined,
   },
 } : {
-  args: [join(desktop, "out", "main", "index.js"), `--user-data-dir=${userData}`, ...gpuFallbackArgs],
+  args: [join(desktop, "out", "main", "index.cjs"), `--user-data-dir=${userData}`, ...gpuFallbackArgs],
   cwd: desktop,
   env: {
     ...process.env,

@@ -73,6 +73,27 @@ describe("SidecarSupervisor", () => {
     }
   });
 
+  // DESK-2：代理设置随 sidecar 启动透传（custom 显式 URL；system/direct
+  // 不出现 --provider-proxy；缺省 = 不传参数，Core 侧默认 system）。
+  it("forwards proxy mode and custom proxy URL to the sidecar argv", async () => {
+    for (const [proxyMode, providerProxy, expected, forbidden] of [
+      ["custom", "http://127.0.0.1:10809", ["--proxy-mode", "custom", "--provider-proxy", "http://127.0.0.1:10809"], []],
+      ["system", undefined, ["--proxy-mode", "system"], ["--provider-proxy"]],
+      ["direct", undefined, ["--proxy-mode", "direct"], ["--provider-proxy"]],
+      [undefined, undefined, [], ["--proxy-mode", "--provider-proxy"]]
+    ] as const) {
+      const root = join(tmpdir(), `aivideo-proxy-${Date.now()}`);
+      const manifestDir = join(root, "model-manifests"); const runtimeDir = join(root, "runtime");
+      mkdirSync(manifestDir, { recursive: true }); writeFileSync(join(manifestDir, "model.json"), "{}");
+      const child = Object.assign(new (require("node:events").EventEmitter)(), { stdout: undefined, stderr: undefined, pid: 324, exitCode: null, kill: vi.fn() });
+      const spawnImpl = vi.fn().mockImplementation((_executable: string, args: string[]) => { writeFileSync(args[args.indexOf("--ready-file") + 1], JSON.stringify({ protocol_version: 1, port: 43003, pid: 324, build_version: "0.0.1" })); return child; });
+      await new SidecarSupervisor({ executable: "aivs-core.exe", resourcesPath: root, dataDir: join(root, "data"), runtimeDir, ffmpegPath: join(root, "ffmpeg.exe"), ffprobePath: join(root, "ffprobe.exe"), manifestDir, buildVersion: "0.0.1", proxyMode, providerProxy, spawnImpl }).start();
+      const args = spawnImpl.mock.calls[0][1] as string[];
+      for (const token of expected) expect(args).toContain(token);
+      for (const token of forbidden) expect(args).not.toContain(token);
+    }
+  });
+
   it("fails before spawn when the manifest path is missing or empty", async () => {
     const root = join(tmpdir(), `aivideo-missing-manifest-${Date.now()}`); const runtimeDir = join(root, "runtime"); const spawnImpl = vi.fn();
     const input = { executable: "aivs-core.exe", resourcesPath: root, dataDir: join(root, "data"), runtimeDir, ffmpegPath: join(root, "ffmpeg.exe"), ffprobePath: join(root, "ffprobe.exe"), manifestDir: join(root, "不存在 清单"), buildVersion: "0.0.1", spawnImpl };

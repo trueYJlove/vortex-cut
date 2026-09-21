@@ -280,6 +280,9 @@ def test_stage1a_project_asset_lifecycle_and_redaction(tmp_path: Path, monkeypat
             ("v17",),
             ("v18",),
             ("v19",),
+            ("v20",),
+        ("v21",),
+        ("v22",),
         ]
     assert list((tmp_path / "backups").glob("app-*.db"))
 

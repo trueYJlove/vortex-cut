@@ -24,6 +24,8 @@ export interface SidecarLaunchOptions {
   logPath?: string;
   launchEvidencePath?: string;
   enableImageProviderNetwork?: boolean;
+  providerProxy?: string;
+  proxyMode?: "system" | "custom" | "direct";
 }
 
 export class SidecarStartupError extends Error {}
@@ -56,6 +58,10 @@ export class SidecarSupervisor {
       "--runtime-dir", this.options.runtimeDir, "--ready-file", readyFile, "--log-level", "info"
     ];
     if (this.options.enableImageProviderNetwork) args.push("--enable-image-provider-network");
+    // PROXY_SUPPORT（2026-09-20 裁决）：代理设置透传 sidecar（默认 system——
+    // Core 侧自解析注册表，Main 无需读取）。
+    if (this.options.proxyMode) args.push("--proxy-mode", this.options.proxyMode);
+    if (this.options.providerProxy) args.push("--provider-proxy", this.options.providerProxy);
     const adminToken = this.options.adminToken ?? randomBytes(32).toString("hex");
     mkdirSync(this.options.runtimeDir, { recursive: true });
     if (this.options.launchEvidencePath) {

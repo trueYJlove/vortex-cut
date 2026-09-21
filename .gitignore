@@ -59,3 +59,7 @@ evidence/m3_0/**/assets.manifest*.json
 evidence/performance/**/*.mp4
 evidence/performance/**/*.png
 evidence/performance/**/user-data/
+
+# Test-time model download cache (sha256-verified per test fixture)
+resources/.test-model-cache/
+.validation/

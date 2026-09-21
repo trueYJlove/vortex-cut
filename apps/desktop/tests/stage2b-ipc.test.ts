@@ -14,10 +14,34 @@ function setup() {
 describe("Stage2B IPC", () => {
   it("只注册冻结白名单并精确转发 prepare/create", async () => {
     const { handlers, fetchWithUi } = setup();
-    expect([...handlers.keys()]).toEqual(["planning-patch:prepare", "planning-patch:test-provider-capability", "planning-patch:create", "planning-patch:generation-get", "planning-patch:proposal-list", "planning-patch:proposal-get", "planning-patch:proposal-apply", "timeline:revision-diff"]);
+    expect([...handlers.keys()]).toEqual(["planning-patch:prepare", "planning-patch:test-provider-capability", "planning-patch:create", "planning-patch:generation-get", "planning-patch:proposal-list", "planning-patch:proposal-get", "planning-patch:proposal-apply", "timeline:revision-diff", "agent-session:prepare", "agent-session:create", "agent-session:list", "agent-session:get", "cv-analysis:get"]);
     fetchWithUi.mockResolvedValueOnce({ timeline_patch_egress_preview_id: "preview_1", provider: { display_name: "Provider", origin: "https://provider.test", model: "model" }, prompt_template_version: "timeline-patch-v1", output_schema_version: "timeline-patch-output-v1", sent_fields: ["instruction"], payload_sha256: hash, character_count: 10, estimated_tokens: 3, clip_count: 1, caption_count: 0, locked_count: 0, expires_at: now });
     await handlers.get("planning-patch:prepare")?.({}, { project_id: "project_1", base_revision_id: "revision_1", provider_config_id: "provider_1", instruction: "缩短开头" });
     expect(fetchWithUi).toHaveBeenCalledWith("/api/v1/projects/project_1/timeline-patch-generations/prepare", { method: "POST", body: JSON.stringify({ base_revision_id: "revision_1", provider_config_id: "provider_1", instruction: "缩短开头" }) });
+  });
+
+  it("agent session：精确转发 prepare/create 并解析 get_session（含 steps）", async () => {
+    const { handlers, fetchWithUi } = setup();
+    fetchWithUi.mockResolvedValueOnce({ agent_session_egress_preview_id: "agent_preview_1", provider: { display_name: "Provider", origin: "https://provider.test", model: "model" }, prompt_template_version: "agent-session-v1", output_schema_version: "agent-session-output-v1", sent_fields: ["instruction", "multi_step_feedback"], payload_sha256: hash, character_count: 10, estimated_tokens: 3, clip_count: 1, caption_count: 0, locked_count: 0, max_steps: 6, token_budget: 200000, expires_at: now });
+    const preview = await handlers.get("agent-session:prepare")?.({}, { project_id: "project_1", base_revision_id: "revision_1", provider_config_id: "provider_1", instruction: "剪短并加字幕" });
+    expect(fetchWithUi).toHaveBeenCalledWith("/api/v1/projects/project_1/agent-sessions/prepare", { method: "POST", body: JSON.stringify({ base_revision_id: "revision_1", provider_config_id: "provider_1", instruction: "剪短并加字幕" }) });
+    expect(preview).toMatchObject({ agent_session_egress_preview_id: "agent_preview_1", max_steps: 6 });
+    fetchWithUi.mockResolvedValueOnce({ agent_session_id: "agent_session_1", job: { job_id: "job_1", project_id: "project_1", asset_id: null, kind: "agent_session", status: "queued", stage: "queued", progress: 0, attempt: 1, model_id: null, model_revision: null, input_fingerprint: null, input: {}, error: null, created_at: now, updated_at: now, started_at: null, finished_at: null } });
+    const created = await handlers.get("agent-session:create")?.({}, { project_id: "project_1", agent_session_egress_preview_id: "agent_preview_1", payload_sha256: hash });
+    expect(created).toMatchObject({ agent_session_id: "agent_session_1" });
+    const session = { agent_session_id: "agent_session_1", project_id: "project_1", base_revision_id: "revision_1", instruction: "剪短并加字幕", max_steps: 6, status: "succeeded", payload_sha256: hash, created_at: now, updated_at: now, finished_at: now, steps: [{ ordinal: 1, status: "succeeded", stage: "persisting_step", summary: "ok", error: null, duration_ms: 900, created_at: now }] };
+    fetchWithUi.mockResolvedValueOnce(session);
+    await expect(handlers.get("agent-session:get")?.({}, "agent_session_1")).resolves.toEqual(session);
+    await expect(handlers.get("agent-session:prepare")?.({}, { project_id: "project_1", base_revision_id: "revision_1", provider_config_id: "provider_1", instruction: "" })).rejects.toThrow();
+  });
+
+  it("cv-analysis：generate 透传布尔，摘要返回不含路径字段", async () => {
+    const { handlers, fetchWithUi } = setup();
+    fetchWithUi.mockResolvedValueOnce({ analysis_id: "cv_analysis_1", status: "ready", job_id: "job_1", algorithm_version: "v21", sample_count: 24, scene_cut_count: 5, signals: ["scene_cut"] });
+    await expect(handlers.get("cv-analysis:get")?.({}, { project_id: "project_1", asset_id: "asset_1", generate: true })).resolves.toMatchObject({ status: "ready", sample_count: 24 });
+    expect(fetchWithUi).toHaveBeenCalledWith("/api/v1/projects/project_1/assets/asset_1/cv-analysis", { method: "POST", body: JSON.stringify({ generate: true }) });
+    await expect(handlers.get("cv-analysis:get")?.({}, { project_id: "project_1", asset_id: "asset_1", generate: "yes" })).rejects.toThrow();
+    expect(fetchWithUi).toHaveBeenCalledTimes(1);
   });
 
   it("能力测试只接受 Provider ID，并返回严格脱敏状态 DTO", async () => {

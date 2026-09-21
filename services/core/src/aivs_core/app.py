@@ -24,6 +24,7 @@ from .database import Database, MigrationError, json_dumps, json_loads, utc_now
 from .ids import new_id
 from .jobs import JobService
 from .media.audio_chunks import PcmChunkError, PcmChunkService
+from .media.cv_signals import CV_ALGORITHM_VERSION, CvAnalysisError
 from .media.encoders import EncoderDetector
 from .media.ffprobe import FFprobe
 from .media.probe_cache import ProbeCache, probe_cache_key
@@ -56,6 +57,7 @@ from .shot_requirement_timeline_assembly import ShotRequirementTimelineAssemblyS
 from .shot_requirement_timeline_batch_assembly import ShotRequirementTimelineBatchAssemblyService
 from .shot_requirements import ShotRequirementService
 from .timeline import TimelineService
+from .agent_session import AgentSessionService
 from .timeline_planning import TimelinePatchPlanningService
 from .transcription import TranscriptionError, TranscriptRepository
 
@@ -104,6 +106,13 @@ class PreviewSourceMediaRequest(BaseModel):
 
 class WaveformRequest(BaseModel):
     """B14 波形描述请求（generate=True 登记生成作业；参数服务端固定）。"""
+    model_config = ConfigDict(extra="forbid")
+
+    generate: bool = False
+
+
+class CvAnalysisRequest(BaseModel):
+    """AI-2 CV 信号分析请求（generate=True 登记分析作业；参数服务端固定）。"""
     model_config = ConfigDict(extra="forbid")
 
     generate: bool = False
@@ -272,6 +281,8 @@ class EgressPrepareRequest(BaseModel):
     provider_config_id: str
     recipe_id: str
     transcript_ids: list[str]
+    # AI-2 阶段三：召回来源（可选增量——缺省 auto 保持旧行为）。
+    candidate_source: str | None = None
 
 
 class CandidateGenerationCreateRequest(BaseModel):
@@ -304,6 +315,19 @@ class TimelinePatchProposalApplyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     base_revision_id: str
     proposed_document_sha256: str
+
+
+class AgentSessionPrepareRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    base_revision_id: str
+    provider_config_id: str
+    instruction: str
+
+
+class AgentSessionCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    agent_session_egress_preview_id: str
+    payload_sha256: str
 
 
 class TimelineRevisionDiffRequest(BaseModel):
@@ -578,11 +602,52 @@ class CoreState:
         self.provider_secrets = ProviderSecretVault()
         self.providers = ProviderRepository(self.db, self.provider_secrets)
         self.recipes = RecipeRegistry(settings.recipe_dir)
+        # PROXY_SUPPORT（2026-09-20 裁决）：三级回退解析代理 → provider factory
+        # 注入（trust_env=False 保持，代理只来自显式配置链）。None = 直连。
+        from .config import resolve_provider_proxy
+
+        self.provider_proxy = resolve_provider_proxy(settings)
+        from .providers import OpenAICompatibleTextProvider
+        import httpx as _httpx
+
+        if self.provider_proxy:
+            _proxy = self.provider_proxy
+
+            class _ProxiedTextProvider(OpenAICompatibleTextProvider):
+                def __init__(self) -> None:
+                    def factory(**kwargs: Any) -> Any:
+                        kwargs.pop("trust_env", None)
+                        return _httpx.AsyncClient(proxy=_proxy, trust_env=False, **kwargs)
+
+                    super().__init__(client_factory=factory)
+
+            self._text_provider_factory: Any = _ProxiedTextProvider
+        else:
+            self._text_provider_factory = OpenAICompatibleTextProvider
+        # AI-2 阶段三：CV 信号服务先行构建（planning 注入召回汇合点）。
+        from .media.cv_signals import CvSignalService
+
+        self.cv_signals = CvSignalService(
+            self.db, settings.ffmpeg, self.ffprobe, model_manager=self.model_manager
+        )
         self.planning = PlanningService(
-            self.db, self.recipes, self.providers, self.provider_secrets, self.timelines
+            self.db,
+            self.recipes,
+            self.providers,
+            self.provider_secrets,
+            self.timelines,
+            provider_factory=self._text_provider_factory,
+            cv_signals=self.cv_signals,
         )
         self.timeline_patch_planning = TimelinePatchPlanningService(
-            self.db, self.providers, self.provider_secrets, self.timelines
+            self.db, self.providers, self.provider_secrets, self.timelines,
+            provider_factory=self._text_provider_factory,
+        )
+        # AI-1：多步 agent 会话（emit 传入以发 agent_session.updated 事件）。
+        self.agent_sessions = AgentSessionService(
+            self.db, self.providers, self.provider_secrets, self.timelines,
+            provider_factory=self._text_provider_factory,
+            emit=self.emit,
         )
         self.media_generation = MediaGenerationService(self.db)
         self.shot_requirements = ShotRequirementService(self.db)
@@ -635,6 +700,10 @@ class CoreState:
             ffmpeg_build=_sync_tool_build(settings.ffmpeg),
         )
         self.jobs.waveform_runner = self.waveform.run_waveform_job
+        # AI-2 Layer 0：cv_signals 已在 planning 之前构建（召回汇合 +
+        # model_manager 注入 → YuNet 人脸通道，模型未就绪 partial）；
+        # 此处只回填 job runner。
+        self.jobs.cv_signal_runner = self.cv_signals.run_analysis_job
         # B15：分块 PCM（48000Hz 双声道 f32le、2 秒/块；同步内联生成——
         # 低延迟任务不排 jobs 队列，begin_build single-flight 防并发重复）。
         self.pcm_chunks = PcmChunkService(
@@ -759,6 +828,7 @@ class CoreState:
             render_runner=self.render_coordinator.run,
             planning_runner=self.planning.run_generation,
             timeline_patch_runner=self.timeline_patch_planning.run_generation,
+            agent_session_runner=self.agent_sessions.run_session,
             media_generation_runner=self.media_generation.run_simulation,
             media_generation_start=self.media_generation.start_job,
             media_generation_finish=self.media_generation.finish_job,
@@ -1393,6 +1463,48 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 project_id, proposal_id, request.model_dump()
             )
             return with_current_preview(state.timelines.get_state(revision["project_id"]))
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/agent-sessions/prepare")
+    async def prepare_agent_session(
+        project_id: str,
+        request: AgentSessionPrepareRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return state.agent_sessions.prepare(project_id, request.model_dump())
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/agent-sessions")
+    async def create_agent_session(
+        project_id: str,
+        request: AgentSessionCreateRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return state.agent_sessions.create_session(
+                project_id,
+                request.agent_session_egress_preview_id,
+                request.payload_sha256,
+                state.jobs,
+            )
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/projects/{project_id}/agent-sessions")
+    async def list_agent_sessions(
+        project_id: str, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        return {"items": state.agent_sessions.list_sessions(project_id)}
+
+    @app.get("/api/v1/agent-sessions/{agent_session_id}")
+    async def get_agent_session(
+        agent_session_id: str, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        try:
+            return state.agent_sessions.get_session(agent_session_id)
         except DomainError as exc:
             raise _domain(exc) from exc
 
@@ -2048,6 +2160,47 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             }
         except DomainError as exc:
             raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/assets/{asset_id}/cv-analysis")
+    async def get_asset_cv_analysis(
+        project_id: str, asset_id: str, request: CvAnalysisRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """AI-2 Layer 0：素材 CV 信号分析描述（Renderer 可见；无路径字段）。
+
+        generate=True 且无 ready/running/queued 条目时登记分析作业
+        （关键帧采样 → numpy 信号 → cv_samples）。仅 video 素材可分析。
+        """
+        asset_row = _preview_source_asset_row(state, project_id, asset_id)
+        try:
+            if asset_row["kind"] != "video":
+                raise _domain(DomainError(
+                    "CV_ANALYSIS_UNSUPPORTED", "仅视频素材可分析 CV 信号"))
+            summary = state.cv_signals.analysis_summary(asset_row)
+            job_id: str | None = None
+            status = (summary or {}).get("status")
+            if request.generate and status not in {"ready", "running", "queued"}:
+                # 无分析或 stale/failed：登记新分析（stale = 素材指纹已变）。
+                resolved_path = state.projects.resolve_asset_path(asset_id)
+                job_id, _analysis_id = state.cv_signals.create_analysis_job(
+                    project_id, asset_row, resolved_path["path"])
+                status = "queued"
+            return {
+                "analysis_id": (summary or {}).get("analysis_id"),
+                "status": status,
+                "job_id": job_id,
+                "algorithm_version": CV_ALGORITHM_VERSION,
+                "sample_count": (summary or {}).get("sample_count"),
+                "scene_cut_count": (summary or {}).get("scene_cut_count"),
+                "signals": [
+                    "scene_cut", "motion_energy", "sharpness", "brightness",
+                    "audio_energy",
+                ],
+            }
+        except DomainError as exc:
+            raise _domain(exc) from exc
+        except CvAnalysisError as exc:
+            raise _domain(DomainError(exc.code, exc.message)) from exc
 
     @app.post("/api/v1/internal/projects/{project_id}/assets/{asset_id}/waveform/media")
     async def resolve_asset_waveform_media(

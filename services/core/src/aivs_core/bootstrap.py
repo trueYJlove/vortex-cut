@@ -32,6 +32,9 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--log-level", default="info")
     result.add_argument("--ready-file")
     result.add_argument("--manifest-dir")
+    result.add_argument("--provider-proxy", help="Provider 出网代理 URL（custom 模式）")
+    result.add_argument("--proxy-mode", choices=["system", "custom", "direct"],
+                        default="system", help="Provider 代理模式（默认 system）")
     result.add_argument(
         "--enable-image-provider-network",
         action="store_true",

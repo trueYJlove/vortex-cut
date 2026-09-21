@@ -24,7 +24,7 @@ test("1C-Render 真实 Electron 权威预览、Artifact Ticket 与最终导出",
   await mkdir(run, { recursive: true });
   await copyFile(join(root, "test-assets", "generated", "cfr-landscape-av.mp4"), video);
   const app = await electron.launch({
-    args: [join(desktop, "out", "main", "index.js"), `--user-data-dir=${userData}`],
+    args: [join(desktop, "out", "main", "index.cjs"), `--user-data-dir=${userData}`],
     cwd: desktop,
     env: {
       ...process.env,

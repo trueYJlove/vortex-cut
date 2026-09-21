@@ -17,6 +17,7 @@ from .ids import new_id
 from .projects import DomainError
 from .providers import (
     CANDIDATE_ADAPTER_IDS,
+    RETRYABLE_PROVIDER_ERRORS,
     CANDIDATE_PROBE_PROTOCOL_VERSION,
     OpenAICompatibleTextProvider,
     ProviderError,
@@ -29,6 +30,12 @@ from .providers import (
 from .timeline import CAPTION_PRESETS, LAYOUTS, TimelineService
 
 VARIANTS = ("balanced", "compact", "bold")
+# AI-2 阶段三（ADR-0003 D3 Layer 0）：召回来源。"transcript" = 既有链路；
+# "auto" = 有可用转录用之、否则 CV 场景段；"cv" = 强制 CV。
+CANDIDATE_SOURCES = ("auto", "transcript", "cv")
+# CV 场景段参数（阶段三首版）：最小场景段 2s、召回上限对齐转录路径。
+CV_MIN_SCENE_US = 2_000_000
+CV_MAX_SCENES = 160
 
 
 class CandidatePayloadStore:
@@ -267,6 +274,7 @@ class PlanningService:
         provider_factory: Callable[[], TextReasoningProvider] = OpenAICompatibleTextProvider,
         pending_store: PendingCandidateEgressStore | None = None,
         generation_store: CandidateGenerationPayloadStore | None = None,
+        cv_signals: Any = None,
     ) -> None:
         self.db, self.recipes, self.providers, self.vault, self.timelines = (
             db,
@@ -278,6 +286,8 @@ class PlanningService:
         self.provider_factory = provider_factory
         self.pending_store = pending_store or PendingCandidateEgressStore()
         self.generation_store = generation_store or CandidateGenerationPayloadStore()
+        # AI-2 阶段三：CV 信号服务（可空——无 CV 链路时 cv/auto 回退受限）。
+        self.cv_signals = cv_signals
 
     @staticmethod
     def _candidate_supported(provider: dict[str, Any]) -> bool:
@@ -346,27 +356,35 @@ class PlanningService:
         adapter: str | None = None
         failure = "PROVIDER_CAPABILITY_UNSUPPORTED"
         for candidate in CANDIDATE_ADAPTER_IDS:
-            try:
-                result = await self.provider_factory().generate(
-                    StructuredTextRequest(
-                        provider_id,
-                        provider["base_url"],
-                        provider["model"],
-                        secret,
-                        payload,
-                        capability="candidate_capability_probe",
-                        response_adapter_id=candidate,
-                    ),
-                    asyncio.Event(),
-                )
-                self._validate_candidate_probe(result.value, payload)
-                adapter = candidate
+            # 网络类错误重试（PROVIDER 韧性工作单 2026-09-21）：同
+            # timeline-patch 探测——网关抖动不判死刑，schema 错误不重试。
+            for attempt in range(3):
+                try:
+                    result = await self.provider_factory().generate(
+                        StructuredTextRequest(
+                            provider_id,
+                            provider["base_url"],
+                            provider["model"],
+                            secret,
+                            payload,
+                            capability="candidate_capability_probe",
+                            response_adapter_id=candidate,
+                        ),
+                        asyncio.Event(),
+                    )
+                    self._validate_candidate_probe(result.value, payload)
+                    adapter = candidate
+                    break
+                except ProviderError as exc:
+                    if exc.code == "PROVIDER_CANCELLED":
+                        raise
+                    failure = exc.code
+                    if attempt == 0:
+                        failures.append({"adapter_id": candidate, "safe_error_code": exc.code})
+                    if exc.code not in RETRYABLE_PROVIDER_ERRORS:
+                        break
+            if adapter:
                 break
-            except ProviderError as exc:
-                if exc.code == "PROVIDER_CANCELLED":
-                    raise
-                failure = exc.code
-                failures.append({"adapter_id": candidate, "safe_error_code": exc.code})
         digest = sha256({"protocol": CANDIDATE_PROBE_PROTOCOL_VERSION, "results": failures})
         with self.db.connection() as db:
             db.execute(
@@ -390,6 +408,13 @@ class PlanningService:
 
     @staticmethod
     def _validate_candidate_probe(value: dict[str, Any], payload: dict[str, Any]) -> None:
+        """探测协议 v2（2026-09-20 裁决）：结构正确性校验。
+
+        时长不再要求精确等于目标——真实候选采纳链本有 0.8-1.2× 时长硬门兜底
+        质量；探测的职责是验证"模型能产出结构合法、引用闭合的输出"。旧版
+        精确时长匹配经真实验证为跨模型失败点（gpt-5.6-luna 与
+        deepseek-v4.1-flash 结构正确性均 100% 合格而算术不过），故放宽。
+        """
         try:
             entries = validate_candidate_output_value(value)["candidates"]
         except ValueError as exc:
@@ -398,11 +423,11 @@ class PlanningService:
             segment["segment_ref"]: (segment["start_us"], segment["end_us"])
             for segment in payload["segments"]
         }
-        target = 15_000_000
         for expected_variant, candidate in zip(VARIANTS, entries, strict=True):
             if candidate["variant"] != expected_variant:
                 raise ProviderError("PROVIDER_SCHEMA_MISMATCH", "Candidate Probe 变体顺序无效")
-            duration = 0
+            if not candidate["clips"]:
+                raise ProviderError("PROVIDER_SCHEMA_MISMATCH", "Candidate Probe 片段为空")
             for clip in candidate["clips"]:
                 refs = clip["segment_ids"]
                 if (
@@ -411,9 +436,6 @@ class PlanningService:
                     or any(ref not in segment_ranges for ref in refs)
                 ):
                     raise ProviderError("PROVIDER_SCHEMA_MISMATCH", "Candidate Probe 引用无效")
-                duration += segment_ranges[refs[-1]][1] - segment_ranges[refs[0]][0]
-            if duration != target:
-                raise ProviderError("PROVIDER_SCHEMA_MISMATCH", "Candidate Probe 时长无效")
 
     def put_brief(self, project_id: str, raw: dict[str, Any]) -> dict[str, Any]:
         required = {
@@ -498,12 +520,22 @@ class PlanningService:
         return json_loads(row[0])
 
     def prepare(self, project_id: str, request: dict[str, Any]) -> dict[str, Any]:
-        if set(request) != {"provider_config_id", "recipe_id", "transcript_ids"}:
+        # AI-2 阶段三：candidate_source 可选增量（缺省 auto 保持旧行为——
+        # 旧客户端不传新字段走纯转录路径，与旧图逐字节一致）。pydantic
+        # dump 会带 None 缺省值，先归一化再校验键集合。
+        request = {k: v for k, v in request.items() if v is not None}
+        if set(request) not in (
+            {"provider_config_id", "recipe_id", "transcript_ids"},
+            {"provider_config_id", "recipe_id", "transcript_ids", "candidate_source"},
+        ):
             raise DomainError("PLANNING_INVALID", "准备请求无效")
+        source = request.get("candidate_source", "auto")
+        if source not in CANDIDATE_SOURCES:
+            raise DomainError("PLANNING_INVALID", "召回来源不合法")
         transcript_ids = request["transcript_ids"]
         if (
             not isinstance(transcript_ids, list)
-            or not 1 <= len(transcript_ids) <= 20
+            or not 0 <= len(transcript_ids) <= 20
             or len(set(transcript_ids)) != len(transcript_ids)
         ):
             raise DomainError("PLANNING_INVALID", "转录选择无效")
@@ -516,8 +548,9 @@ class PlanningService:
             raise DomainError("CANDIDATE_PROVIDER_UNTESTED", "Provider 尚未测试 AI 粗剪兼容性")
         if not self._candidate_supported(provider):
             raise DomainError("CANDIDATE_PROVIDER_UNSUPPORTED", "Provider 不支持 AI 粗剪")
+        selected: list[dict[str, Any]] = []
+        cv_scenes: list[dict[str, Any]] = []
         with self.db.connection() as db:
-            selected = []
             for transcript_id in transcript_ids:
                 row = db.execute(
                     "SELECT t.*,a.project_id,a.availability,a.fingerprint FROM transcripts t JOIN assets a ON a.id=t.asset_id WHERE t.id=?",  # noqa: E501
@@ -538,7 +571,63 @@ class PlanningService:
                         (transcript_id,),
                     ).fetchall()
                 )
-        segments = self._select(brief, selected)
+        use_transcript = source in {"auto", "transcript"} and bool(selected)
+        use_cv = source == "cv" or (source == "auto" and not selected)
+        if use_cv:
+            cv_scenes = self._cv_scenes(project_id)
+            if not cv_scenes:
+                raise DomainError(
+                    "PLANNING_NO_SEGMENTS",
+                    "所选素材无可用 CV 信号分析（需先完成视频分析）",
+                )
+        elif not use_transcript:
+            # auto 但 transcript_ids 为空且无 CV：显式报错而非静默空召回。
+            raise DomainError("PLANNING_INVALID", "转录选择无效")
+        segments = self._select(brief, selected) if use_transcript else []
+        if use_transcript and not segments:
+            raise DomainError("PLANNING_NO_SEGMENTS", "预筛未得到可用片段")
+        # 载荷与白名单：转录段与 CV 场景段统一为 provider 可见的段列表
+        # （CV 段无 text——payload 里 text 置空串，sent_fields 增量登记）。
+        payload_segments: list[dict[str, Any]] = []
+        whitelist: list[dict[str, Any]] = []
+        if use_transcript:
+            for n, s in enumerate(segments):
+                payload_segments.append(
+                    {
+                        "segment_ref": f"s{n + 1}",
+                        "transcript_ref": f"t{transcript_ids.index(s['transcript_id']) + 1}",
+                        "start_us": s["start_us"],
+                        "end_us": s["end_us"],
+                        "text": s["text"],
+                    }
+                )
+                whitelist.append(
+                    {"segment_ref": f"s{n + 1}", "segment_id": s["id"], "source": "transcript"}
+                )
+        if cv_scenes:
+            base = len(payload_segments)
+            for n, scene in enumerate(cv_scenes):
+                payload_segments.append(
+                    {
+                        "segment_ref": f"s{base + n + 1}",
+                        "transcript_ref": None,
+                        "start_us": scene["start_us"],
+                        "end_us": scene["end_us"],
+                        "text": "",
+                        "cv_features": scene["features"],
+                    }
+                )
+                whitelist.append(
+                    {
+                        "segment_ref": f"s{base + n + 1}",
+                        "segment_id": scene["scene_id"],
+                        "source": "cv",
+                        "asset_id": scene["asset_id"],
+                        "start_us": scene["start_us"],
+                        "end_us": scene["end_us"],
+                        "features": scene["features"],
+                    }
+                )
         payload = {
             "brief": {
                 k: v
@@ -547,16 +636,7 @@ class PlanningService:
             },
             "recipe": recipe,
             "variants": list(VARIANTS),
-            "segments": [
-                {
-                    "segment_ref": f"s{n + 1}",
-                    "transcript_ref": f"t{transcript_ids.index(s['transcript_id']) + 1}",
-                    "start_us": s["start_us"],
-                    "end_us": s["end_us"],
-                    "text": s["text"],
-                }
-                for n, s in enumerate(segments)
-            ],
+            "segments": payload_segments,
         }
         # Preserve references only internally; provider receives the same selected content visible in preview.  # noqa: E501
         payload_hash = sha256(payload)
@@ -585,10 +665,6 @@ class PlanningService:
                 "candidate_capability_probe_sha256",
             )
         }
-        whitelist = [
-            {"segment_ref": f"s{i + 1}", "segment_id": segment["id"]}
-            for i, segment in enumerate(segments)
-        ]
         with self.db.connection() as db:
             db.execute(
                 "INSERT INTO recipe_snapshots(id,recipe_id,document_json,document_sha256,created_at) VALUES (?,?,?,?,?)",  # noqa: E501
@@ -617,9 +693,11 @@ class PlanningService:
                     "{}",
                     json_dumps(
                         {
-                            "segment_count": len(segments),
-                            "character_count": sum(len(x["text"]) for x in segments),
-                            "estimated_tokens": max(1, sum(len(x["text"]) for x in segments) // 4),
+                            "segment_count": len(payload_segments),
+                            "character_count": sum(len(x["text"]) for x in payload_segments),
+                            "estimated_tokens": max(1, sum(len(x["text"]) for x in payload_segments) // 4),
+                            "cv_scene_count": len(cv_scenes),
+                            "candidate_source": source,
                         }
                     ),
                     expiry,
@@ -659,17 +737,79 @@ class PlanningService:
                 "segments.start_us",
                 "segments.end_us",
                 "segments.text",
+                *(["segments.cv_features"] if cv_scenes else []),
             ],
             "payload_sha256": payload_hash,
             "expires_at": expiry,
             "payload": payload,
             "stats": {
-                "transcript_count": len(transcript_ids),
-                "segment_count": len(segments),
-                "character_count": sum(len(x["text"]) for x in segments),
-                "estimated_tokens": max(1, sum(len(x["text"]) for x in segments) // 4),
+                "transcript_count": len(transcript_ids) if use_transcript else 0,
+                "segment_count": len(payload_segments),
+                "character_count": sum(len(x["text"]) for x in payload_segments),
+                "estimated_tokens": max(1, sum(len(x["text"]) for x in payload_segments) // 4),
+                "cv_scene_count": len(cv_scenes),
+                "candidate_source": source,
             },
         }
+
+    def _cv_scenes(self, project_id: str) -> list[dict[str, Any]]:
+        """CV 场景段召回（阶段三首版）：项目全部视频素材的 ready 分析 →
+        场景切点合并为 ≥2s 场景段 → 特征排序（含人脸 > 运动 > 清晰度 > 序）。
+
+        段 id 稳定可复现（asset_id + 场景序），供白名单回查。
+        """
+        scenes: list[dict[str, Any]] = []
+        with self.db.connection() as db:
+            assets = db.execute(
+                "SELECT id,availability FROM assets WHERE project_id=? AND kind='video'",
+                (project_id,),
+            ).fetchall()
+        for asset in assets:
+            if asset["availability"] != "available":
+                continue
+            samples = self.cv_signals.samples_for_range(asset["id"], 0, 1 << 62) if self.cv_signals else []
+            if not samples:
+                continue
+            # 场景切点（含首帧）分界 → 场景段。
+            cuts = [0] + [
+                s["timestamp_us"] for s in samples if s["scene_cut"]
+            ]
+            for index, start in enumerate(cuts):
+                end = cuts[index + 1] if index + 1 < len(cuts) else (
+                    samples[-1]["timestamp_us"] + CV_MIN_SCENE_US
+                )
+                if end - start < CV_MIN_SCENE_US:
+                    continue
+                inside = [s for s in samples if start <= s["timestamp_us"] < end]
+                if not inside:
+                    continue
+                scenes.append(
+                    {
+                        "scene_id": f"cv_scene_{asset['id']}_{index}",
+                        "asset_id": asset["id"],
+                        "start_us": int(start),
+                        "end_us": int(min(end, 1 << 62)),
+                        "features": {
+                            "face": max(
+                                (s["face_count"] or 0) for s in inside
+                            ),
+                            "motion": max(
+                                s["motion_energy"] for s in inside
+                            ),
+                            "sharpness": max(s["sharpness"] for s in inside),
+                        },
+                    }
+                )
+        # 排序：含人脸 > 运动能量 > 清晰度（规划门 §5 权重首版）。
+        scenes.sort(
+            key=lambda scene: (
+                -scene["features"]["face"],
+                -min(scene["features"]["motion"], 1.0),
+                -min(scene["features"]["sharpness"], 1.0),
+                scene["start_us"],
+            )
+        )
+        return scenes[:CV_MAX_SCENES]
 
     def _select(self, brief: dict[str, Any], rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         keys = set(
@@ -1078,18 +1218,50 @@ class PlanningService:
             raise ProviderError("PROVIDER_SCHEMA_MISMATCH", "候选输出不符合固定三方案约束")
         brief = json_loads(generation["brief_snapshot_json"])
         whitelist = json_loads(preview["segment_whitelist_json"])
-        refs = {x["segment_ref"]: x["segment_id"] for x in whitelist}
-        placeholders = ",".join("?" * len(refs))
-        with self.db.connection() as db:
-            rows = {
-                r["id"]: r
-                for r in db.execute(
-                    "SELECT s.id,s.transcript_id,s.start_us,s.end_us,s.text,t.asset_id "
-                    "FROM transcript_segments s JOIN transcripts t ON t.id=s.transcript_id "
-                    f"WHERE s.id IN ({placeholders})",
-                    list(refs.values()),
-                ).fetchall()
-            }
+        refs = {x["segment_ref"]: x for x in whitelist}
+        transcript_refs = {
+            ref["segment_ref"]: ref["segment_id"]
+            for ref in refs.values()
+            if ref.get("source", "transcript") == "transcript"
+        }
+        cv_refs = {
+            ref["segment_ref"]: ref for ref in refs.values() if ref.get("source") == "cv"
+        }
+        rows: dict[str, dict[str, Any]] = {}
+        if transcript_refs:
+            placeholders = ",".join("?" * len(transcript_refs))
+            with self.db.connection() as db:
+                rows.update(
+                    {
+                        r["id"]: {**dict(r), "source": "transcript"}
+                        for r in db.execute(
+                            "SELECT s.id,s.transcript_id,s.start_us,s.end_us,s.text,t.asset_id "
+                            "FROM transcript_segments s JOIN transcripts t ON t.id=s.transcript_id "
+                            f"WHERE s.id IN ({placeholders})",
+                            list(transcript_refs.values()),
+                        ).fetchall()
+                    }
+                )
+        if cv_refs:
+            with self.db.connection() as db:
+                for ref, entry in cv_refs.items():
+                    asset = db.execute(
+                        "SELECT id,availability FROM assets WHERE id=? AND project_id=?",
+                        (entry["asset_id"], generation["project_id"]),
+                    ).fetchone()
+                    if not asset or asset["availability"] != "available":
+                        raise ProviderError(
+                            "PROVIDER_SCHEMA_MISMATCH", "候选引用的 CV 场景素材不可用"
+                        )
+                    rows[entry["segment_id"]] = {
+                        "id": entry["segment_id"],
+                        "source": "cv",
+                        "asset_id": entry["asset_id"],
+                        "start_us": entry["start_us"],
+                        "end_us": entry["end_us"],
+                        "text": "",
+                        "transcript_id": None,
+                    }
         documents = []
         for ordinal, variant in enumerate(VARIANTS):
             entry = next(x for x in entries if x["variant"] == variant)
@@ -1106,8 +1278,22 @@ class PlanningService:
                     or any(x not in refs for x in selected)
                 ):
                     raise ProviderError("PROVIDER_SCHEMA_MISMATCH", "候选引用越界")
-                actual = [rows[refs[x]] for x in selected]
-                if len({x["transcript_id"] for x in actual}) != 1 or any(
+                actual = [
+                    rows[
+                        refs[x]["segment_id"] if isinstance(refs[x], dict) else refs[x]
+                    ]
+                    for x in selected
+                ]
+                if actual[0]["source"] == "cv":
+                    # CV 剪辑：允许同素材多场景段拼接（真实 provider 验证
+                    # 2026-09-20：deepseek 自然行为即跨场景取段——粗剪语义
+                    # 本就如此）。校验收缩为"同一素材"（拼接点由 adopt 按
+                    # 时间线顺序铺排，无源内连续性要求）。
+                    if len({x["asset_id"] for x in actual}) != 1:
+                        raise ProviderError(
+                            "PROVIDER_SCHEMA_MISMATCH", "候选 CV 片段跨素材"
+                        )
+                elif len({x["transcript_id"] for x in actual}) != 1 or any(
                     actual[n]["end_us"] > actual[n + 1]["start_us"] for n in range(len(actual) - 1)
                 ):
                     raise ProviderError("PROVIDER_SCHEMA_MISMATCH", "候选片段不连续")
@@ -1120,12 +1306,14 @@ class PlanningService:
                 ):
                     raise ProviderError("PROVIDER_SCHEMA_MISMATCH", "模型参考分无效")
                 duration += actual[-1]["end_us"] - actual[0]["start_us"]
+                is_cv = actual[0]["source"] == "cv"
                 normalized.append(
                     {
                         "clip_id": f"candidate_clip_{new_id()}",
                         "order_index": index,
                         "asset_id": actual[0]["asset_id"],
                         "transcript_id": actual[0]["transcript_id"],
+                        "source_kind": "cv" if is_cv else "transcript",
                         "segment_ids": [x["id"] for x in actual],
                         "source_start_us": actual[0]["start_us"],
                         "source_end_us": actual[-1]["end_us"],
@@ -1335,24 +1523,52 @@ class PlanningService:
                         "SELECT * FROM assets WHERE id=? AND project_id=?",
                         (candidate_clip["asset_id"], project_id),
                     ).fetchone()
-                    transcript = db.execute(
-                        "SELECT * FROM transcripts WHERE id=?", (candidate_clip["transcript_id"],)
-                    ).fetchone()
-                    ids = candidate_clip["segment_ids"]
-                    marks = ",".join("?" * len(ids))
-                    segments = db.execute(
-                        f"SELECT id,start_us,end_us,text FROM transcript_segments WHERE id IN ({marks}) ORDER BY start_us",  # noqa: E501
-                        ids,
-                    ).fetchall()
-                    if (
-                        not asset
-                        or not transcript
-                        or asset["availability"] != "available"
-                        or asset["fingerprint"] != transcript["source_fingerprint"]
-                        or transcript["status"] != "ready"
-                        or len(segments) != len(ids)
-                    ):
-                        raise DomainError("CANDIDATE_SOURCE_INVALID", "候选引用的素材或转录已变化")
+                    is_cv = candidate_clip.get("source_kind") == "cv"
+                    transcript = None
+                    segments = []
+                    if is_cv:
+                        # CV 剪辑：无转录依赖——素材可用 + 指纹未变即可
+                        #（范围来自生成时快照，adopt 侧以 asset 时长兜底校验）。
+                        if (
+                            not asset
+                            or asset["availability"] != "available"
+                        ):
+                            raise DomainError("CANDIDATE_SOURCE_INVALID", "候选引用的素材已变化")
+                        media_info = (
+                            json_loads(asset["media_info_json"])
+                            if asset["media_info_json"]
+                            else {}
+                        )
+                        asset_duration = media_info.get("duration_us")
+                        if (
+                            not isinstance(asset_duration, int)
+                            or candidate_clip["source_end_us"] > asset_duration
+                            or candidate_clip["source_start_us"] < 0
+                            or candidate_clip["source_end_us"]
+                            <= candidate_clip["source_start_us"]
+                        ):
+                            raise DomainError(
+                                "CANDIDATE_SOURCE_INVALID", "候选引用的素材范围已变化"
+                            )
+                    else:
+                        transcript = db.execute(
+                            "SELECT * FROM transcripts WHERE id=?", (candidate_clip["transcript_id"],)
+                        ).fetchone()
+                        ids = candidate_clip["segment_ids"]
+                        marks = ",".join("?" * len(ids))
+                        segments = db.execute(
+                            f"SELECT id,start_us,end_us,text FROM transcript_segments WHERE id IN ({marks}) ORDER BY start_us",  # noqa: E501
+                            ids,
+                        ).fetchall()
+                        if (
+                            not asset
+                            or not transcript
+                            or asset["availability"] != "available"
+                            or asset["fingerprint"] != transcript["source_fingerprint"]
+                            or transcript["status"] != "ready"
+                            or len(segments) != len(ids)
+                        ):
+                            raise DomainError("CANDIDATE_SOURCE_INVALID", "候选引用的素材或转录已变化")
                     duration = candidate_clip["source_end_us"] - candidate_clip["source_start_us"]
                     clip_id = f"clip_{new_id()}"
                     clips.append(
@@ -1373,7 +1589,7 @@ class PlanningService:
                             },
                         }
                     )
-                    if brief["caption_policy"] == "auto_from_transcript":
+                    if brief["caption_policy"] == "auto_from_transcript" and not is_cv:
                         captions.append(
                             {
                                 "caption_id": f"caption_{new_id()}",
@@ -1389,7 +1605,8 @@ class PlanningService:
                             }
                         )
                     offset += duration
-                    transcripts.append(transcript["id"])
+                    if transcript is not None:
+                        transcripts.append(transcript["id"])
                 canvas = json_loads(project["canvas_json"])
                 document = {
                     "schema_version": 1,

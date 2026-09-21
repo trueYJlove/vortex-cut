@@ -32,7 +32,7 @@ test("3B 真实 Electron 独立 Reframe Preview、Ticket、Batch 与 Provider 0"
   await mkdir(exports, { recursive: true });
   await copyFile(join(root, "test-assets", "generated", "cfr-landscape-av.mp4"), video);
   const app = await electron.launch({
-    args: [join(desktop, "out", "main", "index.js"), `--user-data-dir=${userData}`],
+    args: [join(desktop, "out", "main", "index.cjs"), `--user-data-dir=${userData}`],
     cwd: desktop,
     env: {
       ...process.env,

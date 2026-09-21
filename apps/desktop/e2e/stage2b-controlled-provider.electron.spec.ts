@@ -95,7 +95,7 @@ test("Stage2B 真实 Electron/Core 经受控 loopback Provider 完成锁定、�
   await new Promise<void>(resolve => provider.listen(0, "127.0.0.1", resolve));
   const address = provider.address(); if (!address || typeof address === "string") throw new Error("provider bind failed");
   const run = join(evidenceRoot, `run-${process.pid}-${Date.now()}`); const userData = join(run, "user-data"); const destination = join(run, "final.mp4"); await mkdir(run, { recursive: true });
-  const app = await electron.launch({ args: [join(desktop, "out", "main", "index.js"), `--user-data-dir=${userData}`], cwd: desktop, env: { ...process.env, AIVS_RESOURCES_PATH: resources, AIVS_E2E_ASSET_PATHS: JSON.stringify({ video: sourceVideo }), AIVS_E2E_EXPORT_PATH: destination, AIVS_SIDECAR_EXECUTABLE: python, AIVS_SIDECAR_EXECUTABLE_ARGS: JSON.stringify(["-m", "aivs_core.bootstrap"]), PYTHONPATH: [join(root, "services", "core", "src"), process.env.PYTHONPATH].filter(Boolean).join(";"), ELECTRON_RUN_AS_NODE: undefined, NODE_OPTIONS: undefined } });
+  const app = await electron.launch({ args: [join(desktop, "out", "main", "index.cjs"), `--user-data-dir=${userData}`], cwd: desktop, env: { ...process.env, AIVS_RESOURCES_PATH: resources, AIVS_E2E_ASSET_PATHS: JSON.stringify({ video: sourceVideo }), AIVS_E2E_EXPORT_PATH: destination, AIVS_SIDECAR_EXECUTABLE: python, AIVS_SIDECAR_EXECUTABLE_ARGS: JSON.stringify(["-m", "aivs_core.bootstrap"]), PYTHONPATH: [join(root, "services", "core", "src"), process.env.PYTHONPATH].filter(Boolean).join(";"), ELECTRON_RUN_AS_NODE: undefined, NODE_OPTIONS: undefined } });
   const providerSecret = randomBytes(32).toString("base64url");
   const instructions: string[] = [];
   let evidence: Record<string, unknown> | undefined;

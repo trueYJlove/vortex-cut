@@ -18,7 +18,7 @@ const sidecarArgs = process.env.AIVS_SIDECAR_EXECUTABLE_ARGS ?? (existsSync(pyth
 const evidenceRoot = join(root, "test-results", "stage1c-editor-evidence");
 
 function env(video: string, image: string) { return { ...process.env, AIVS_RESOURCES_PATH: resources, AIVS_E2E_ASSET_PATHS: JSON.stringify({ video, image }), AIVS_SIDECAR_EXECUTABLE: sidecarExecutable, AIVS_SIDECAR_EXECUTABLE_ARGS: sidecarArgs, PYTHONPATH: [join(root, "services", "core", "src"), process.env.PYTHONPATH].filter(Boolean).join(";"), ELECTRON_RUN_AS_NODE: undefined, NODE_OPTIONS: undefined }; }
-async function launch(userData: string, video: string, image: string) { return electron.launch({ args: [join(desktop, "out", "main", "index.js"), `--user-data-dir=${userData}`], cwd: desktop, env: env(video, image) }); }
+async function launch(userData: string, video: string, image: string) { return electron.launch({ args: [join(desktop, "out", "main", "index.cjs"), `--user-data-dir=${userData}`], cwd: desktop, env: env(video, image) }); }
 async function waitForJob(page: any, jobId: string, timeoutMs = 240_000) { const deadline = Date.now() + timeoutMs; while (Date.now() < deadline) { const job = await page.evaluate((id: string) => window.desktop.getJob(id as never), jobId); if (["succeeded", "failed", "cancelled", "interrupted"].includes(job.status)) return job; await page.waitForTimeout(1_000); } throw new Error(`job ${jobId} did not reach a terminal state`); }
 
 test("1C-Editor 真实 Electron 创建、编辑、Ticket 与重启草稿恢复", async () => {

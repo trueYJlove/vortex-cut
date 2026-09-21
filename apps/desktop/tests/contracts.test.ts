@@ -3,7 +3,13 @@ import { CONTRACT_VERSION, ERROR_CODES, isApiErrorResponse, isAuthoritativePrevi
   isProviderImageGenerationPrepareInput,
   isProviderImageGenerationPreparedPreview,
   isProviderImageGenerationRequest,
-  isProviderImageGenerationTask
+  isProviderImageGenerationTask,
+  isAgentSessionEgressPreview,
+  isAgentSessionCreateResponse,
+  isAgentSessionUpdatedEvent,
+  isCvAnalysisSummary,
+  parseAgentSession,
+  parseCvAnalysisSummary
 } from "@aivideo/contracts";
 
 const now = "2026-08-11T00:00:00.000Z";
@@ -92,12 +98,12 @@ describe("Stage 0 contract", () => {
     const generation = { candidate_generation_id: "generation_1", project_id: "project_1", status: "interrupted", payload_sha256: hash, created_at: now, updated_at: now, finished_at: now };
     expect(isRecipe(recipe)).toBe(true); expect(isProviderConfig(provider)).toBe(true); expect(isCandidateGeneration(generation)).toBe(true);
     expect(isRecipe({ ...recipe, prompt: "secret" })).toBe(false); expect(isProviderConfig({ ...provider, api_key: "secret" })).toBe(false); expect(isCandidateGeneration({ ...generation, stale: true })).toBe(false);
-    const supported = { ...provider, timeline_patch_capability_status: "supported", timeline_patch_response_adapter_id: "openai_chat_completions_json_schema_v1", timeline_patch_probe_protocol_version: "1", timeline_patch_capability_tested_at: now, timeline_patch_capability_probe_sha256: `sha256:${"b".repeat(64)}` };
+    const supported = { ...provider, timeline_patch_capability_status: "supported", timeline_patch_response_adapter_id: "openai_chat_completions_json_schema_v1", timeline_patch_probe_protocol_version: "2", timeline_patch_capability_tested_at: now, timeline_patch_capability_probe_sha256: `sha256:${"b".repeat(64)}` };
     const { provider_config_id: _providerConfigId, created_at: _createdAt, updated_at: _updatedAt, credential_status: _credentialStatus, kind: _kind, display_name: _displayName, base_url: _baseUrl, model: _model, enabled: _enabled, input_price_per_million: _inputPrice, output_price_per_million: _outputPrice, candidate_capability_status: _candidateStatus, candidate_response_adapter_id: _candidateAdapter, candidate_probe_protocol_version: _candidateProtocol, candidate_capability_tested_at: _candidateTestedAt, candidate_capability_failure_code: _candidateFailure, candidate_capability_probe_sha256: _candidateHash, ...capabilityTest } = supported;
     expect(isProviderConfig(supported)).toBe(true);
     for (const adapter of ["openai_responses_json_schema_v1", "openai_responses_patchscript_v1", "openai_chat_completions_json_schema_v1", "openai_chat_completions_patchscript_v1"]) expect(isProviderConfig({ ...supported, timeline_patch_response_adapter_id: adapter })).toBe(true);
-    expect(isProviderConfig({ ...supported, timeline_patch_response_adapter_id: null })).toBe(false); expect(isProviderConfig({ ...supported, timeline_patch_response_adapter_id: "dynamic_adapter" })).toBe(false); expect(isProviderConfig({ ...supported, timeline_patch_probe_protocol_version: "v1" })).toBe(false); expect(isProviderConfig({ ...supported, timeline_patch_probe_protocol_version: "2" })).toBe(false); expect(isProviderConfig({ ...supported, timeline_patch_probe_protocol_version: "" })).toBe(false); expect(isProviderConfig({ ...supported, timeline_patch_probe_protocol_version: null })).toBe(false); expect(isTimelinePatchCapabilityTestResponse(capabilityTest)).toBe(true); expect(isTimelinePatchCapabilityTestResponse({ ...capabilityTest, timeline_patch_response_adapter_id: "openai_responses_patchscript_v1" })).toBe(true); expect(isTimelinePatchCapabilityTestResponse({ ...capabilityTest, timeline_patch_probe_protocol_version: "v1" })).toBe(false); expect(isTimelinePatchCapabilityTestResponse({ ...capabilityTest, extra: true })).toBe(false); expect(isTimelinePatchCapabilityTestResponse({ ...capabilityTest, raw_response: "body" })).toBe(false);
-    const candidateSupported = { candidate_capability_status: "supported", candidate_response_adapter_id: "openai_responses_candidatescript_v1", candidate_probe_protocol_version: "1", candidate_capability_tested_at: now, candidate_capability_failure_code: null, candidate_capability_probe_sha256: `sha256:${"c".repeat(64)}` };
+    expect(isProviderConfig({ ...supported, timeline_patch_response_adapter_id: null })).toBe(false); expect(isProviderConfig({ ...supported, timeline_patch_response_adapter_id: "dynamic_adapter" })).toBe(false); expect(isProviderConfig({ ...supported, timeline_patch_probe_protocol_version: "v1" })).toBe(false); expect(isProviderConfig({ ...supported, timeline_patch_probe_protocol_version: "2" })).toBe(true); expect(isProviderConfig({ ...supported, timeline_patch_probe_protocol_version: "" })).toBe(false); expect(isProviderConfig({ ...supported, timeline_patch_probe_protocol_version: null })).toBe(false); expect(isTimelinePatchCapabilityTestResponse(capabilityTest)).toBe(true); expect(isTimelinePatchCapabilityTestResponse({ ...capabilityTest, timeline_patch_response_adapter_id: "openai_responses_patchscript_v1" })).toBe(true); expect(isTimelinePatchCapabilityTestResponse({ ...capabilityTest, timeline_patch_probe_protocol_version: "v1" })).toBe(false); expect(isTimelinePatchCapabilityTestResponse({ ...capabilityTest, extra: true })).toBe(false); expect(isTimelinePatchCapabilityTestResponse({ ...capabilityTest, raw_response: "body" })).toBe(false);
+    const candidateSupported = { candidate_capability_status: "supported", candidate_response_adapter_id: "openai_responses_candidatescript_v1", candidate_probe_protocol_version: "2", candidate_capability_tested_at: now, candidate_capability_failure_code: null, candidate_capability_probe_sha256: `sha256:${"c".repeat(64)}` };
     expect(isProviderConfig({ ...provider, ...candidateSupported })).toBe(true); expect(isProviderCapabilityTestResult(candidateSupported)).toBe(true);
     for (const adapter of ["openai_responses_json_schema_v1", "openai_responses_candidatescript_v1", "openai_chat_completions_json_schema_v1", "openai_chat_completions_candidatescript_v1"]) expect(isCandidateResponseAdapterId(adapter)).toBe(true);
     expect(isProviderConfig({ ...provider, ...candidateSupported, candidate_response_adapter_id: "openai_responses_patchscript_v1" })).toBe(false); expect(isProviderConfig({ ...provider, ...candidateSupported, candidate_capability_failure_code: "PROVIDER_FAILED" })).toBe(false); expect(isProviderConfig({ ...provider, candidate_capability_status: "unsupported", candidate_response_adapter_id: null, candidate_probe_protocol_version: null, candidate_capability_tested_at: now, candidate_capability_failure_code: "PROVIDER_FAILED", candidate_capability_probe_sha256: `sha256:${"d".repeat(64)}` })).toBe(true); expect(isProviderConfig({ ...provider, candidate_capability_status: "untested", candidate_response_adapter_id: null, candidate_probe_protocol_version: null, candidate_capability_tested_at: now, candidate_capability_failure_code: null, candidate_capability_probe_sha256: null })).toBe(false); expect(isProviderCapabilityTestResult({ ...candidateSupported, raw_response: "body" })).toBe(false); expect(isProviderCapabilityTestResult({ ...candidateSupported, response: "body" })).toBe(false);
@@ -307,5 +313,52 @@ describe("Stage 4D provider image contracts", () => {
     expect(isProviderImageGenerationTask(task)).toBe(true);
     expect(isProviderImageGenerationTask({ ...task, absolute_path: "C:/private.png" })).toBe(false);
     expect(isImageProviderConfigSummary({ provider_config_id: "config_1", project_id: "project_1", provider_kind: "apikey_fun_images", adapter_id: "apikey_fun_images_sse_v1", capability: "image_text_to_image", protocol_version: "1", display_name: "Images", model: "gpt-image-2", enabled: true, price_per_image: 0.1, price_2k_per_image: 0.15, price_currency: "CNY", credential_status: "missing", created_at: now, updated_at: now })).toBe(true);
+  });
+});
+
+describe("DESK-6 agent session + CV analysis contracts", () => {
+  const hash = `sha256:${"f".repeat(64)}`;
+  const job = { job_id: "job_1", project_id: "project_1", asset_id: null, kind: "agent_session", status: "running", stage: "calling_provider", progress: 0.5, attempt: 1, model_id: null, model_revision: null, input_fingerprint: null, input: {}, error: null, created_at: now, updated_at: now, started_at: null, finished_at: null };
+  const preview = {
+    agent_session_egress_preview_id: "agent_preview_1",
+    provider: { display_name: "DeepSeek", origin: "https://api.test/v1", model: "deepseek-chat" },
+    prompt_template_version: "agent-session-v1", output_schema_version: "agent-session-output-v1",
+    sent_fields: ["instruction", "timeline", "multi_step_feedback"], payload_sha256: hash,
+    character_count: 120, estimated_tokens: 40, clip_count: 2, caption_count: 1, locked_count: 0,
+    max_steps: 6, token_budget: 200000, expires_at: now
+  };
+  it("accepts the session egress preview and rejects sensitive leaks", () => {
+    expect(isAgentSessionEgressPreview(preview)).toBe(true);
+    expect(isAgentSessionEgressPreview({ ...preview, payload: { instruction: "leak" } })).toBe(false);
+    expect(isAgentSessionEgressPreview({ ...preview, token_budget: -1 })).toBe(false);
+  });
+  it("accepts the create response only for agent_session jobs", () => {
+    expect(isAgentSessionCreateResponse({ agent_session_id: "agent_session_1", job })).toBe(true);
+    expect(isAgentSessionCreateResponse({ agent_session_id: "agent_session_1", job: { ...job, kind: "timeline_patch_generation" } })).toBe(false);
+  });
+  it("parses get_session shapes with step details", () => {
+    const session = {
+      agent_session_id: "agent_session_1", project_id: "project_1", base_revision_id: "timeline_revision_1",
+      instruction: "剪短并加字幕", max_steps: 6, status: "succeeded", payload_sha256: hash,
+      created_at: now, updated_at: now, finished_at: now,
+      steps: [{ ordinal: 1, status: "succeeded", stage: "persisting_step", summary: "ok", error: null, duration_ms: 1200, created_at: now }]
+    };
+    expect(parseAgentSession(session)).toEqual(session);
+    expect(() => parseAgentSession({ ...session, status: "exploded" })).toThrow();
+    expect(() => parseAgentSession({ ...session, extra: 1 })).toThrow();
+  });
+  it("validates the agent_session.updated event envelope", () => {
+    expect(isAgentSessionUpdatedEvent({ type: "agent_session.updated", payload: { agent_session_id: "agent_session_1", status: "running", progress: 0.5, step: 2 } })).toBe(true);
+    expect(isAgentSessionUpdatedEvent({ type: "job.updated", payload: { agent_session_id: "agent_session_1", status: "running", progress: 0.5 } })).toBe(false);
+    expect(isAgentSessionUpdatedEvent({ type: "agent_session.updated", payload: { agent_session_id: "agent_session_1", status: "paused", progress: 0.5 } })).toBe(false);
+    expect(isAgentSessionUpdatedEvent({ type: "agent_session.updated" })).toBe(false);
+  });
+  it("validates the CV analysis summary (nullable counters, closed status set)", () => {
+    const summary = { analysis_id: "cv_analysis_1", status: "ready", job_id: "job_1", algorithm_version: "v21", sample_count: 24, scene_cut_count: 5, signals: ["scene_cut", "motion_energy"] };
+    expect(isCvAnalysisSummary(summary)).toBe(true);
+    expect(isCvAnalysisSummary({ ...summary, status: null, analysis_id: null, job_id: null, sample_count: null, scene_cut_count: null })).toBe(true);
+    expect(isCvAnalysisSummary({ ...summary, status: "done" })).toBe(false);
+    expect(isCvAnalysisSummary({ ...summary, signals: "scene_cut" })).toBe(false);
+    expect(parseCvAnalysisSummary(summary)).toEqual(summary);
   });
 });

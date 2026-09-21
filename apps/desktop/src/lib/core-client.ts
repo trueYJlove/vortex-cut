@@ -64,6 +64,10 @@ import {
   , type RenderArtifact
   , type RenderArtifactId
   , parseTimelineDiff
+  , parseAgentSessionEgressPreview
+  , parseAgentSessionCreateResponse
+  , parseAgentSession
+  , parseCvAnalysisSummary
   , parseTimelinePatchEgressPreview
   , parseTimelinePatchGeneration
   , parseTimelinePatchGenerationCreateResponse
@@ -127,6 +131,8 @@ import {
   , type ShotRequirementTimelineAssemblyPrepareInput, type ShotRequirementTimelineAssemblyApplyInput
   , type ShotRequirementTimelineAssemblyPreview, type ShotRequirementTimelineAssembly
   , type ShotRequirementTimelineAssemblyApplyResponse, type ShotRequirementTimelineAssemblyPage
+  , type AgentSessionEgressPreview, type AgentSessionCreateResponse, type AgentSession
+  , type CvAnalysisSummary
 } from "@aivideo/contracts";
 
 export class CoreApiError extends Error {
@@ -417,6 +423,27 @@ export class CoreClient {
   }
   applyTimelinePatchProposal(projectId: ProjectId, proposalId: string, input: { base_revision_id: TimelineRevisionId; proposed_document_sha256: string }): Promise<TimelineState> {
     return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/timeline-patch-proposals/${encodeURIComponent(proposalId)}/apply`, { method: "POST", body: JSON.stringify(input) }).then(value => parseTimelineState(removeSensitiveFields(value)));
+  }
+  // AI-1：内置多步 agent 会话（三段式对齐 timeline-patch-generations 先例）。
+  prepareAgentSession(projectId: ProjectId, input: { base_revision_id: TimelineRevisionId; provider_config_id: string; instruction: string }): Promise<AgentSessionEgressPreview> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/agent-sessions/prepare`, { method: "POST", body: JSON.stringify(input) }).then(value => parseAgentSessionEgressPreview(removeSensitiveFields(value)));
+  }
+  createAgentSession(projectId: ProjectId, input: { agent_session_egress_preview_id: string; payload_sha256: string }): Promise<AgentSessionCreateResponse> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/agent-sessions`, { method: "POST", body: JSON.stringify(input) }).then(value => parseAgentSessionCreateResponse(removeSensitiveFields(value)));
+  }
+  listAgentSessions(projectId: ProjectId): Promise<{ items: AgentSession[] }> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/agent-sessions`).then(value => {
+      const page = removeSensitiveFields(value) as { items?: unknown[] };
+      if (!Array.isArray(page.items)) throw new Error("Invalid AgentSessionPage");
+      return { items: page.items.map(parseAgentSession) };
+    });
+  }
+  getAgentSession(sessionId: string): Promise<AgentSession> {
+    return this.request<unknown>(`${API_PREFIX}/agent-sessions/${encodeURIComponent(sessionId)}`).then(value => parseAgentSession(removeSensitiveFields(value)));
+  }
+  // AI-2：素材 CV 信号分析（generate=True 登记作业；仅 video 素材）。
+  getCvAnalysis(projectId: ProjectId, assetId: string, input: { generate: boolean }): Promise<CvAnalysisSummary> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/cv-analysis`, { method: "POST", body: JSON.stringify(input) }).then(value => parseCvAnalysisSummary(removeSensitiveFields(value)));
   }
   compareTimelineRevisions(projectId: ProjectId, input: { base_revision_id: TimelineRevisionId; target_revision_id: TimelineRevisionId }): Promise<TimelineDiff> {
     return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/timeline/revision-diffs`, { method: "POST", body: JSON.stringify(input) }).then(value => parseTimelineDiff(removeSensitiveFields(value)));

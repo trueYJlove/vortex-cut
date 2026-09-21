@@ -246,7 +246,7 @@ def test_v7_capability_triggers_enforce_all_metadata_combinations(tmp_path: Path
         supported = (
             "supported",
             "openai_chat_completions_json_schema_v1",
-            "1",
+            "2",
             "2026-08-13T00:00:00.000Z",
             None,
             "sha256:" + "a" * 64,
@@ -266,7 +266,7 @@ def test_v7_capability_triggers_enforce_all_metadata_combinations(tmp_path: Path
             metadata = (
                 "supported",
                 adapter,
-                "1",
+                "2",
                 "now",
                 None,
                 "sha256:" + "d" * 64,
@@ -286,11 +286,11 @@ def test_v7_capability_triggers_enforce_all_metadata_combinations(tmp_path: Path
         )
         invalid = [
             ("untested", None, None, "now", None, None),
-            ("supported", None, "1", "now", None, "sha256:" + "c" * 64),
+            ("supported", None, "2", "now", None, "sha256:" + "c" * 64),
             (
                 "supported",
                 "openai_chat_completions_json_schema_v1",
-                "2",
+                "1",
                 "now",
                 None,
                 "sha256:" + "c" * 64,
@@ -298,7 +298,7 @@ def test_v7_capability_triggers_enforce_all_metadata_combinations(tmp_path: Path
             (
                 "supported",
                 "openai_chat_completions_json_schema_v1",
-                "1",
+                "2",
                 None,
                 None,
                 "sha256:" + "c" * 64,
@@ -364,12 +364,9 @@ def test_real_v6_to_v7_preserves_chat_structured_supported_and_is_idempotent(
             "timeline_patch_probe_protocol_version,timeline_patch_capability_failure_code "
             "FROM provider_configs WHERE id='p6'"
         ).fetchone()
-        assert tuple(row) == (
-            "supported",
-            "openai_chat_completions_json_schema_v1",
-            "1",
-            None,
-        )
+        # v22：探测协议 v2 换血——旧协议（v1）的 supported 探测结果
+        # 全部重置为 untested（需重新探测），这是迁移的设计语义。
+        assert tuple(row) == ("untested", None, None, None)
         count = db.execute("SELECT COUNT(*) FROM schema_migrations WHERE version='v7'").fetchone()[
             0
         ]

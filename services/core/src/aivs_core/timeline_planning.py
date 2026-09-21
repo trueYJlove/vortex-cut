@@ -13,6 +13,7 @@ from .ids import new_id
 from .planning import ProviderRepository, canonical_json, invocation_cost, sha256
 from .projects import DomainError
 from .providers import (
+    RETRYABLE_PROVIDER_ERRORS,
     TIMELINE_PATCH_ADAPTER_IDS,
     TIMELINE_PATCH_PROBE_PROTOCOL_VERSION,
     OpenAICompatibleTextProvider,
@@ -263,37 +264,45 @@ class TimelinePatchPlanningService:
             }
             probe_hashes: list[str] = []
             for candidate in TIMELINE_PATCH_ADAPTER_IDS:
-                try:
-                    request = StructuredTextRequest(
-                        provider_config_id,
-                        provider["base_url"],
-                        provider["model"],
-                        secret,
-                        payload,
-                        capability="timeline_patch_capability_probe",
-                        output_schema="timeline-patch-output-v1",
-                        response_adapter_id=candidate,
-                    )
-                    result = await self.provider_factory().generate(
-                        request,
-                        asyncio.Event(),
-                    )
-                    probe_hashes.append(result.response_sha256 or sha256(result.value))
-                    self._validate_probe_output(result.value)
-                    self._validate_probe_domain(result.value)
-                    status = "supported"
-                    adapter = candidate
-                    protocol = TIMELINE_PATCH_PROBE_PROTOCOL_VERSION
-                    failure = None
+                # 网络类错误重试（PROVIDER 韧性工作单 2026-09-21）：网关
+                # 抖动/慢滴不该把 provider 永久标 unsupported；schema 类
+                # 错误是确定性失败，不重试。
+                for attempt in range(3):
+                    try:
+                        request = StructuredTextRequest(
+                            provider_config_id,
+                            provider["base_url"],
+                            provider["model"],
+                            secret,
+                            payload,
+                            capability="timeline_patch_capability_probe",
+                            output_schema="timeline-patch-output-v1",
+                            response_adapter_id=candidate,
+                        )
+                        result = await self.provider_factory().generate(
+                            request,
+                            asyncio.Event(),
+                        )
+                        probe_hashes.append(result.response_sha256 or sha256(result.value))
+                        self._validate_probe_output(result.value)
+                        self._validate_probe_domain(result.value)
+                        status = "supported"
+                        adapter = candidate
+                        protocol = TIMELINE_PATCH_PROBE_PROTOCOL_VERSION
+                        failure = None
+                        break
+                    except ProviderError as exc:
+                        probe_hashes.append(sha256({"adapter": candidate, "code": exc.code}))
+                        failure = (
+                            "PROVIDER_CAPABILITY_UNSUPPORTED"
+                            if exc.code
+                            in {"PROVIDER_INVALID_RESPONSE", "PROVIDER_SCHEMA_MISMATCH"}
+                            else exc.code
+                        )
+                        if exc.code not in RETRYABLE_PROVIDER_ERRORS:
+                            break
+                if adapter:
                     break
-                except ProviderError as exc:
-                    probe_hashes.append(sha256({"adapter": candidate, "code": exc.code}))
-                    failure = (
-                        "PROVIDER_CAPABILITY_UNSUPPORTED"
-                        if exc.code
-                        in {"PROVIDER_INVALID_RESPONSE", "PROVIDER_SCHEMA_MISMATCH"}
-                        else exc.code
-                    )
             digest = sha256(
                 {
                     "protocol": TIMELINE_PATCH_PROBE_PROTOCOL_VERSION,

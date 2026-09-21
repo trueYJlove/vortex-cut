@@ -59,7 +59,7 @@ test("真实 Electron 覆盖 Stage 1A 项目、四类素材和 availability 流�
     NODE_OPTIONS: undefined
   };
   const app = await electron.launch({
-    args: [join(desktop, "out", "main", "index.js"), `--user-data-dir=${fixtures.userData}`],
+    args: [join(desktop, "out", "main", "index.cjs"), `--user-data-dir=${fixtures.userData}`],
     cwd: desktop,
     env
   });
@@ -67,7 +67,7 @@ test("真实 Electron 覆盖 Stage 1A 项目、四类素材和 availability 流�
     const page = await app.firstWindow();
     await page.waitForFunction(() => Boolean(window.desktop?.getRuntime));
     await page.evaluate(() => window.desktop.getRuntime());
-    await expect(page.getByRole("heading", { name: "素材工作区" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("tab", { name: "素材", exact: true })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText(/Core 已连接/)).toBeVisible({ timeout: 30_000 });
 
     await openProjectManagement(page);
@@ -84,9 +84,11 @@ test("真实 Electron 覆盖 Stage 1A 项目、四类素材和 availability 流�
     await expect(page.locator(".project-current-name")).toContainText("活动");
     await page.getByRole("button", { name: "关闭项目管理" }).click();
 
-    const expectedNames: Record<string, string> = { video: "clip.mp4", audio: "sound.wav", image: "still.png", text: "notes.txt" };
-    for (const kind of ["video", "audio", "image", "text"]) {
-      await page.getByRole("button", { name: `导入${kind}` }).click();
+    // 左栏信息架构重构（f452d63）后：媒体导入按钮仅 视频/音频/图片；文本改为
+    // 默认文本插入与字幕导入（notes.txt 夹具不再经导入文件对话框消费）。
+    const expectedNames: Record<string, string> = { video: "clip.mp4", audio: "sound.wav", image: "still.png" };
+    for (const kind of ["video", "audio", "image"]) {
+      await page.getByRole("button", { name: kind === "video" ? "导入视频" : kind === "audio" ? "导入音频" : "导入图片" }).click();
       const assetRow = page.locator(".asset-row").filter({ hasText: expectedNames[kind] });
       await expect(assetRow).toBeVisible({ timeout: 30_000 });
       await expect(assetRow.locator(".asset-name strong")).toHaveText(expectedNames[kind]);
@@ -106,7 +108,7 @@ test("真实 Electron 覆盖 Stage 1A 项目、四类素材和 availability 流�
     }, { timeout: 15_000 }).toMatch(/^aivideo:\/\/media\/[A-Za-z0-9_-]{32,}$/);
     const mediaBytes = await page.evaluate(async url => (await fetch(url)).arrayBuffer().then(buffer => buffer.byteLength), videoMediaUrl!);
     expect(mediaBytes).toBeGreaterThan(0);
-    await expect(page.getByRole("heading", { name: "任务" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "任务" })).toBeVisible();
 
     const projectId = await page.evaluate(async () => {
       const page = await window.desktop.listProjects({ limit: 100 });
@@ -124,6 +126,8 @@ test("真实 Electron 覆盖 Stage 1A 项目、四类素材和 availability 流�
     expect(createdJob.project_id).toBe(projectId);
     const projectJobs = await page.evaluate(input => window.desktop.listJobs({ project_id: input, limit: 100 }), projectId);
     expect(projectJobs.items.some(job => job.job_id === createdJob.job_id && job.project_id === projectId)).toBe(true);
+    // 左栏四子标签重构后：任务列表在"任务"页签内。
+    await page.getByRole("tab", { name: "任务" }).click();
     await expect(page.locator(".job-row").filter({ hasText: "代理素材" })).toBeVisible({ timeout: 30_000 });
 
     const database = join(fixtures.userData, "data-v2", "app.db");
@@ -133,11 +137,15 @@ test("真实 Electron 覆盖 Stage 1A 项目、四类素材和 availability 流�
 
     const videoRow = page.locator(".asset-row").filter({ hasText: "clip.mp4" });
     const refreshButton = page.getByRole("button", { name: "刷新素材库" });
+    // 刷新控件在"素材"页签；上一步切换到了"任务"页签，先切回。
+    await page.getByRole("tab", { name: "素材", exact: true }).click();
     // Use the same atomic-replacement operation as the Core availability
     // contract: a copy-over can retain an opened file's observed metadata.
     await atomicallyReplace(join(root, "test-assets", "generated", "short-odd-size.mp4"), fixtures.paths.video);
     await refreshButton.click();
-    await expect(videoRow.getByText("已变更")).toBeVisible({ timeout: 30_000 });
+    // 左栏重构后 list 行不再渲染 availability 角标（f452d63）；刷新结果经
+    // 全局 notice（role=alert）呈现，据此断言 availability 流转。
+    await expect(page.locator(".notice").filter({ hasText: "已刷新素材库" })).toBeVisible({ timeout: 30_000 });
     await unlink(fixtures.paths.video);
     // 素材未被时间线引用时，刷新会把本地文件已删除的素材清理出列表。
     await refreshButton.click();

@@ -29,6 +29,19 @@ class ModelError(ValueError):
         self.message = message
 
 
+# AI-2：受信 provider 白名单（曾硬编码 faster-whisper）。新增 provider 须
+# 同时登记安装根目录与运行时探测模块——三表一处维护。
+MODEL_PROVIDERS = ("faster-whisper", "onnx-cv")
+MODEL_PROVIDER_DIRECTORIES = {
+    "faster-whisper": "asr",
+    "onnx-cv": "cv",
+}
+MODEL_PROVIDER_RUNTIME_MODULES = {
+    "faster-whisper": "faster_whisper",
+    "onnx-cv": "onnxruntime",
+}
+
+
 @dataclass(frozen=True)
 class LicenseInfo:
     id: str
@@ -155,8 +168,16 @@ class ModelManager:
     def __init__(self, db: Database, data_dir: Path, registry: ModelRegistry) -> None:
         self.db = db
         self.registry = registry
+        # AI-2：按 provider 分目录（faster-whisper → models/asr 保持旧路径；
+        # onnx-cv → models/cv）。_install_root 依据清单 provider 分派。
         self.root = data_dir / "models" / "asr"
         self.root.mkdir(parents=True, exist_ok=True)
+
+    def _install_root(self, provider: str) -> Path:
+        subdirectory = MODEL_PROVIDER_DIRECTORIES.get(provider, "other")
+        root = self.root.parent / subdirectory
+        root.mkdir(parents=True, exist_ok=True)
+        return root
 
     def detail(self, model_id: str) -> dict[str, Any]:
         manifest = self.registry.get(model_id)
@@ -183,7 +204,10 @@ class ModelManager:
             and installation["revision"] == manifest.revision
         ):
             return
-        partial_dir = self.root / ".partial" / manifest.model_id / manifest.revision
+        partial_dir = (
+            self._install_root(manifest.provider) / ".partial"
+            / manifest.model_id / manifest.revision
+        )
         self._set_installation(manifest, "queued", _directory_size(partial_dir), None)
 
     def ready_path(self, model_id: str) -> Path:
@@ -245,11 +269,12 @@ class ModelManager:
         stage: Callable[[str], None],
     ) -> dict[str, Any]:
         required = math.ceil(manifest.installed_size_bytes * 1.2)
-        partial_dir = self.root / ".partial" / manifest.model_id / manifest.revision
-        ready_dir = self.root / manifest.model_id / manifest.revision
+        install_root = self._install_root(manifest.provider)
+        partial_dir = install_root / ".partial" / manifest.model_id / manifest.revision
+        ready_dir = install_root / manifest.model_id / manifest.revision
         partial_dir.mkdir(parents=True, exist_ok=True)
         try:
-            free = shutil.disk_usage(self.root).free
+            free = shutil.disk_usage(install_root).free
         except OSError as exc:
             self._set_installation(
                 manifest, "failed", _directory_size(partial_dir), "无法确认模型磁盘空间"
@@ -358,7 +383,7 @@ class ModelManager:
         error: str | None,
         install_dir: Path | None = None,
     ) -> None:
-        directory = install_dir or self.root / manifest.model_id / manifest.revision
+        directory = install_dir or (self._install_root(manifest.provider) / manifest.model_id / manifest.revision)
         with self.db.connection() as db:
             db.execute(
                 "INSERT INTO model_installations "
@@ -422,7 +447,7 @@ class ModelManager:
         progress: float | None,
         available_disk_bytes: int | None,
     ) -> dict[str, Any]:
-        provider_status = _provider_status(status)
+        provider_status = _provider_status(status, manifest.provider)
         return {
             "model_id": manifest.model_id,
             "display_name": manifest.display_name,
@@ -556,7 +581,7 @@ def _download_file(
 
 
 def _validate_manifest(manifest: ModelManifest) -> None:
-    if manifest.provider != "faster-whisper":
+    if manifest.provider not in MODEL_PROVIDERS:
         raise ModelError("INTERNAL_ERROR", "内部错误")
     if sum(model_file.size_bytes for model_file in manifest.files) != manifest.size_bytes:
         raise ModelError("INTERNAL_ERROR", "内部错误")
@@ -568,8 +593,9 @@ def _validate_manifest(manifest: ModelManifest) -> None:
         raise ModelError("INTERNAL_ERROR", "内部错误")
 
 
-def _provider_status(install_status: str) -> str:
-    if importlib.util.find_spec("faster_whisper") is None:
+def _provider_status(install_status: str, provider: str = "faster-whisper") -> str:
+    runtime_module = MODEL_PROVIDER_RUNTIME_MODULES.get(provider)
+    if runtime_module and importlib.util.find_spec(runtime_module) is None:
         return "runtime_unavailable"
     if install_status == "ready":
         return "installed"
