@@ -49,17 +49,42 @@ PATCH_OPERATIONS = {
     "move_track",
     "set_track_flags",
 }
-AI_PATCH_OPERATIONS = PATCH_OPERATIONS - {
-    "insert_asset_clip",
-    "insert_transcript_segments",
-    "add_caption",
-    "import_captions",
-    "set_clip_locked",
-    "add_track",
-    "remove_track",
-    "move_track",
-    "set_track_flags",
-}
+# AI 白名单（WHITELIST_EXPANSION 2026-09-22）：显式冻结集合 + 导入期断言，
+# 替代历史"差集"写法——差集让 8-28 后新增 op 未经裁决自动成为 AI 可用
+# （漂移至 24 种且契约/字段清单未跟随）。准入制：新 op 必须"白名单 +
+# TIMELINE_PATCH_OPERATIONS_SCHEMA oneOf + _PATCH_FIELDS"三处同步（一致性
+# 由 test_provider_operations_consistency 钉死）。
+#   - set_clip_mask / set_clip_keying 显式排除：蒙版形状/抠像色彩是像素级
+#     数据，文本指令生成即猜测（无 CV 信号辅助前无效能）；
+#   - add_caption / import_captions 排除：字幕文本创作属人工输入域；
+#   - 其余结构性操作（素材插入/转录插入/轨道增删移/锁定）排除不变。
+AI_PATCH_OPERATIONS = frozenset({
+    "remove_clip",
+    "move_clip",
+    "position_clip",
+    "trim_clip",
+    "split_clip",
+    "set_layout",
+    "set_audio",
+    "set_speed",
+    "set_reverse_playback",
+    "set_image_duration",
+    "remove_caption",
+    "update_caption",
+    "set_caption_timing",
+    "set_caption_preset",
+    "add_transition",
+    "update_transition",
+    "remove_transition",
+    "set_caption_style",
+    "clear_caption_style",
+    "set_clip_transform",
+    "set_clip_keyframes",
+    "clear_clip_keyframes",
+})
+assert AI_PATCH_OPERATIONS <= PATCH_OPERATIONS, (
+    "AI_PATCH_OPERATIONS contains operations absent from PATCH_OPERATIONS"
+)
 MIN_VIDEO_US = 100_000
 MIN_IMAGE_US = 500_000
 MAX_IMAGE_US = 30_000_000
