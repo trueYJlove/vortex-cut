@@ -23,6 +23,17 @@ TIMELINE_PATCH_ADAPTER_IDS = (
 # capability probing must use TIMELINE_PATCH_ADAPTER_IDS in its declared order.
 TIMELINE_PATCH_ADAPTER_ID = "openai_chat_completions_json_schema_v1"
 TIMELINE_PATCH_PROBE_PROTOCOL_VERSION = "2"
+# Provider 韧性（真实世界验证发现 4，2026-09-21）：网关对某些请求"慢滴"
+# （每 <timeout 间隔发字节使 read timeout 永不触发）——单次 read timeout
+# 不够，generate() 外层加整体 deadline 兜底。探测预算紧（网关行为筛选
+# 不能拖慢用户），正式调用预算宽（生成耗时长是正常）。
+PROBE_TOTAL_BUDGET_SECONDS = 120.0
+GENERATE_TOTAL_BUDGET_SECONDS = 600.0
+# 网络类错误码（可重试；区别于 schema/认证等确定性失败）
+RETRYABLE_PROVIDER_ERRORS = frozenset({
+    "PROVIDER_NETWORK_ERROR", "PROVIDER_UNAVAILABLE", "PROVIDER_RATE_LIMITED",
+    "PROVIDER_TIMEOUT",
+})
 CANDIDATE_ADAPTER_IDS = (
     "openai_responses_json_schema_v1",
     "openai_responses_candidatescript_v1",
@@ -544,6 +555,23 @@ class OpenAICompatibleTextProvider:
         self._client_factory = client_factory
 
     async def generate(
+        self, request: StructuredTextRequest, cancel_event: asyncio.Event
+    ) -> StructuredTextResult:
+        # 总预算兜底（PROVIDER 总预算工作单）：单次 read timeout 会被
+        # 网关慢滴重置，这里用整体 deadline 强制封顶。
+        is_probe = "probe" in request.capability
+        budget = (PROBE_TOTAL_BUDGET_SECONDS if is_probe
+                  else GENERATE_TOTAL_BUDGET_SECONDS)
+        try:
+            return await asyncio.wait_for(
+                self._generate_inner(request, cancel_event), timeout=budget
+            )
+        except asyncio.TimeoutError as exc:
+            raise ProviderError(
+                "PROVIDER_TIMEOUT", f"Provider 请求超出总预算（{budget:.0f}s）"
+            ) from exc
+
+    async def _generate_inner(
         self, request: StructuredTextRequest, cancel_event: asyncio.Event
     ) -> StructuredTextResult:
         if request.response_adapter_id is not None:

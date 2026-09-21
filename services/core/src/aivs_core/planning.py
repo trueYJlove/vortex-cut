@@ -17,6 +17,7 @@ from .ids import new_id
 from .projects import DomainError
 from .providers import (
     CANDIDATE_ADAPTER_IDS,
+    RETRYABLE_PROVIDER_ERRORS,
     CANDIDATE_PROBE_PROTOCOL_VERSION,
     OpenAICompatibleTextProvider,
     ProviderError,
@@ -355,27 +356,35 @@ class PlanningService:
         adapter: str | None = None
         failure = "PROVIDER_CAPABILITY_UNSUPPORTED"
         for candidate in CANDIDATE_ADAPTER_IDS:
-            try:
-                result = await self.provider_factory().generate(
-                    StructuredTextRequest(
-                        provider_id,
-                        provider["base_url"],
-                        provider["model"],
-                        secret,
-                        payload,
-                        capability="candidate_capability_probe",
-                        response_adapter_id=candidate,
-                    ),
-                    asyncio.Event(),
-                )
-                self._validate_candidate_probe(result.value, payload)
-                adapter = candidate
+            # 网络类错误重试（PROVIDER 韧性工作单 2026-09-21）：同
+            # timeline-patch 探测——网关抖动不判死刑，schema 错误不重试。
+            for attempt in range(3):
+                try:
+                    result = await self.provider_factory().generate(
+                        StructuredTextRequest(
+                            provider_id,
+                            provider["base_url"],
+                            provider["model"],
+                            secret,
+                            payload,
+                            capability="candidate_capability_probe",
+                            response_adapter_id=candidate,
+                        ),
+                        asyncio.Event(),
+                    )
+                    self._validate_candidate_probe(result.value, payload)
+                    adapter = candidate
+                    break
+                except ProviderError as exc:
+                    if exc.code == "PROVIDER_CANCELLED":
+                        raise
+                    failure = exc.code
+                    if attempt == 0:
+                        failures.append({"adapter_id": candidate, "safe_error_code": exc.code})
+                    if exc.code not in RETRYABLE_PROVIDER_ERRORS:
+                        break
+            if adapter:
                 break
-            except ProviderError as exc:
-                if exc.code == "PROVIDER_CANCELLED":
-                    raise
-                failure = exc.code
-                failures.append({"adapter_id": candidate, "safe_error_code": exc.code})
         digest = sha256({"protocol": CANDIDATE_PROBE_PROTOCOL_VERSION, "results": failures})
         with self.db.connection() as db:
             db.execute(
