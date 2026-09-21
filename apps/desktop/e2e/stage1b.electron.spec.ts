@@ -113,7 +113,7 @@ async function runLanguageSample(sample: typeof languageSamples[number], sourceP
     ELECTRON_RUN_AS_NODE: undefined,
     NODE_OPTIONS: undefined
   };
-  const app = await electron.launch({ args: [join(desktop, "out", "main", "index.js"), `--user-data-dir=${userData}`], cwd: desktop, env });
+  const app = await electron.launch({ args: [join(desktop, "out", "main", "index.cjs"), `--user-data-dir=${userData}`], cwd: desktop, env });
   try {
     const page = await app.firstWindow();
     await page.waitForFunction(() => Boolean(window.desktop?.getRuntime));
@@ -198,12 +198,12 @@ test("Stage 1B 真实 Electron/Core 启动、模型契约和未验证证据", as
     NODE_OPTIONS: undefined
   };
   await writeFile(video, await readFile(videoFixture));
-  const app = await electron.launch({ args: [join(desktop, "out", "main", "index.js"), `--user-data-dir=${userData}`], cwd: desktop, env });
+  const app = await electron.launch({ args: [join(desktop, "out", "main", "index.cjs"), `--user-data-dir=${userData}`], cwd: desktop, env });
   try {
     const page = await app.firstWindow();
     await page.waitForFunction(() => Boolean(window.desktop?.getRuntime));
     await page.evaluate(() => window.desktop.getRuntime());
-    await expect(page.getByRole("heading", { name: "素材工作区" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("tab", { name: "素材", exact: true })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText(/Core 已连接/)).toBeVisible({ timeout: 30_000 });
 
     const models = await page.evaluate(() => window.desktop.listModels({ limit: 100 }));
@@ -258,7 +258,7 @@ test("Stage 1B 真实 Transcript/stale 链路，仅在真实模型权重可用�
     PYTHONPATH: [join(root, "services", "core", "src"), process.env.PYTHONPATH].filter(Boolean).join(";")
   };
   await copyFile(videoFixture, video);
-  const app = await electron.launch({ args: [join(desktop, "out", "main", "index.js"), `--user-data-dir=${userData}`], cwd: desktop, env });
+  const app = await electron.launch({ args: [join(desktop, "out", "main", "index.cjs"), `--user-data-dir=${userData}`], cwd: desktop, env });
   try {
     const page = await app.firstWindow();
     await page.waitForFunction(() => Boolean(window.desktop?.getRuntime));

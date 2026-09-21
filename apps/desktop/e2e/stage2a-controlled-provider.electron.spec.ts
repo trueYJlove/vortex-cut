@@ -112,7 +112,7 @@ test("Stage2C 受控 Electron Provider 先探测 Candidate capability 再生成�
   const looped = spawnSync(ffmpeg, ["-y", "-stream_loop", "9", "-i", sourceFixture, "-c", "copy", video], { encoding: "utf8", windowsHide: true });
   if (looped.status !== 0) throw new Error("controlled E2E could not make a 30-second video fixture");
   const providerSecret = randomBytes(32).toString("base64url");
-  const app = await electron.launch({ args: [join(desktop, "out", "main", "index.js"), `--user-data-dir=${userData}`], cwd: desktop, env: { ...process.env, AIVS_RESOURCES_PATH: resources, AIVS_E2E_ASSET_PATHS: JSON.stringify({ video }), AIVS_E2E_EXPORT_PATH: destination, AIVS_SIDECAR_EXECUTABLE: python, AIVS_SIDECAR_EXECUTABLE_ARGS: JSON.stringify(["-m", "aivs_core.bootstrap"]), PYTHONPATH: [join(root, "services", "core", "src"), process.env.PYTHONPATH].filter(Boolean).join(";"), ELECTRON_RUN_AS_NODE: undefined, NODE_OPTIONS: undefined } });
+  const app = await electron.launch({ args: [join(desktop, "out", "main", "index.cjs"), `--user-data-dir=${userData}`], cwd: desktop, env: { ...process.env, AIVS_RESOURCES_PATH: resources, AIVS_E2E_ASSET_PATHS: JSON.stringify({ video }), AIVS_E2E_EXPORT_PATH: destination, AIVS_SIDECAR_EXECUTABLE: python, AIVS_SIDECAR_EXECUTABLE_ARGS: JSON.stringify(["-m", "aivs_core.bootstrap"]), PYTHONPATH: [join(root, "services", "core", "src"), process.env.PYTHONPATH].filter(Boolean).join(";"), ELECTRON_RUN_AS_NODE: undefined, NODE_OPTIONS: undefined } });
   try {
     const page = await app.firstWindow();
     await page.waitForFunction(() => Boolean(window.desktop?.getRuntime));

@@ -116,7 +116,7 @@ export function registerStage2bIpc(deps: Stage2bIpcDependencies): void {
     return parseAgentSessionCreateResponse(stage2bRendererSafe(response));
   });
   deps.handle("agent-session:list", async (_event, projectId) => {
-    const page = stage2bRendererSafe(await fetchSafe(`${API_PREFIX}/projects/${id(projectId, "project_id")}/agent-sessions`)) as { items?: unknown[] };
+    const page = stage2bRendererSafeAllowInstruction(await fetchSafe(`${API_PREFIX}/projects/${id(projectId, "project_id")}/agent-sessions`)) as { items?: unknown[] };
     if (!Array.isArray(page.items)) throw new Error("Core request failed");
     return { items: page.items.map(parseAgentSession) };
   });

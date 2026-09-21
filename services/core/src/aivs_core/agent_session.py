@@ -326,7 +326,10 @@ class AgentSessionService:
     async def run_session(
         self, row: Any, cancel: asyncio.Event, progress: Any, stage: Any
     ) -> dict[str, Any]:
-        session_id = row["input"]["agent_session_id"]
+        # 调度器传入裸 jobs 行（SELECT *，input_json 未水合）；直接从
+        # input_json 取会话 ID（run_session 可能拿到重试时新造的最小行）。
+        input_payload = row["input"] if "input" in row.keys() else json_loads(row["input_json"])
+        session_id = input_payload["agent_session_id"]
         entry = self.session_store.pop(session_id)
         try:
             stage("loading_snapshot")

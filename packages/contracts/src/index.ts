@@ -1383,14 +1383,16 @@ export function isBrief(value: unknown): value is Brief { return isRecord(value)
 export function isRecipe(value: unknown): value is Recipe { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["schema_version", "recipe_id", "name", "summary", "rules", "document_sha256"]) && isId(value.recipe_id) && value.schema_version === 1 && isBriefText(value.name, 200) && isBriefText(value.summary, 1000) && isRecord(value.rules) && onlyKeys(value.rules, ["selection", "pace", "max_gap_us"]) && isBriefText(value.rules.selection, 100) && isBriefText(value.rules.pace, 100) && isInteger(value.rules.max_gap_us, 0) && isSha256(value.document_sha256); }
 function isTimelinePatchCapabilityMetadata(value: Record<string, unknown>): boolean {
   if (!oneOf(["untested", "supported", "unsupported"] as const, value.timeline_patch_capability_status) || !(value.timeline_patch_response_adapter_id === null || oneOf(TIMELINE_PATCH_RESPONSE_ADAPTER_IDS, value.timeline_patch_response_adapter_id)) || !(value.timeline_patch_probe_protocol_version === null || isBriefText(value.timeline_patch_probe_protocol_version, 100)) || !(value.timeline_patch_capability_tested_at === null || isTime(value.timeline_patch_capability_tested_at)) || !(value.timeline_patch_capability_failure_code === null || isBriefText(value.timeline_patch_capability_failure_code, 200)) || !(value.timeline_patch_capability_probe_sha256 === null || isSha256(value.timeline_patch_capability_probe_sha256))) return false;
+  // 探测协议 v2（probe-v2 2026-09-20）：Core TIMELINE_PATCH_PROBE_PROTOCOL_
+  // VERSION = "2"——supported 记录的协议钉随之升 v2（v1 记录经 v22 迁移刷新）。
   return value.timeline_patch_capability_status === "supported"
-    ? oneOf(TIMELINE_PATCH_RESPONSE_ADAPTER_IDS, value.timeline_patch_response_adapter_id) && value.timeline_patch_probe_protocol_version === "1" && value.timeline_patch_capability_tested_at !== null && value.timeline_patch_capability_failure_code === null && value.timeline_patch_capability_probe_sha256 !== null
+    ? oneOf(TIMELINE_PATCH_RESPONSE_ADAPTER_IDS, value.timeline_patch_response_adapter_id) && value.timeline_patch_probe_protocol_version === "2" && value.timeline_patch_capability_tested_at !== null && value.timeline_patch_capability_failure_code === null && value.timeline_patch_capability_probe_sha256 !== null
     : value.timeline_patch_response_adapter_id === null && value.timeline_patch_probe_protocol_version === null && (value.timeline_patch_capability_status === "untested" ? value.timeline_patch_capability_tested_at === null && value.timeline_patch_capability_failure_code === null && value.timeline_patch_capability_probe_sha256 === null : value.timeline_patch_capability_tested_at !== null && value.timeline_patch_capability_failure_code !== null && value.timeline_patch_capability_probe_sha256 !== null);
 }
 function isCandidateCapabilityMetadata(value: Record<string, unknown>): boolean {
   if (!oneOf(["untested", "supported", "unsupported"] as const, value.candidate_capability_status) || !(value.candidate_response_adapter_id === null || oneOf(CANDIDATE_RESPONSE_ADAPTER_IDS, value.candidate_response_adapter_id)) || !(value.candidate_probe_protocol_version === null || isBriefText(value.candidate_probe_protocol_version, 100)) || !(value.candidate_capability_tested_at === null || isTime(value.candidate_capability_tested_at)) || !(value.candidate_capability_failure_code === null || isBriefText(value.candidate_capability_failure_code, 200)) || !(value.candidate_capability_probe_sha256 === null || isSha256(value.candidate_capability_probe_sha256))) return false;
   return value.candidate_capability_status === "supported"
-    ? oneOf(CANDIDATE_RESPONSE_ADAPTER_IDS, value.candidate_response_adapter_id) && value.candidate_probe_protocol_version === "1" && value.candidate_capability_tested_at !== null && value.candidate_capability_failure_code === null && value.candidate_capability_probe_sha256 !== null
+    ? oneOf(CANDIDATE_RESPONSE_ADAPTER_IDS, value.candidate_response_adapter_id) && value.candidate_probe_protocol_version === "2" && value.candidate_capability_tested_at !== null && value.candidate_capability_failure_code === null && value.candidate_capability_probe_sha256 !== null
     : value.candidate_response_adapter_id === null && value.candidate_probe_protocol_version === null && (value.candidate_capability_status === "untested" ? value.candidate_capability_tested_at === null && value.candidate_capability_failure_code === null && value.candidate_capability_probe_sha256 === null : value.candidate_capability_tested_at !== null && value.candidate_capability_failure_code !== null && value.candidate_capability_probe_sha256 !== null);
 }
 export function isCandidateResponseAdapterId(value: unknown): value is CandidateResponseAdapterId { return oneOf(CANDIDATE_RESPONSE_ADAPTER_IDS, value); }
@@ -1493,13 +1495,17 @@ export function isCvAnalysisSummary(value: unknown): value is CvAnalysisSummary 
 }
 
 export function parseAgentSession(value: unknown): AgentSession {
-  const KEYS = ["agent_session_id", "project_id", "base_revision_id", "instruction", "max_steps", "status", "payload_sha256", "created_at", "updated_at", "finished_at", "steps"];
-  if (!isRecord(value) || !KEYS.every(key => Object.prototype.hasOwnProperty.call(value, key)) || Object.keys(value).some(key => !KEYS.includes(key))) throw new ContractValidationError("AgentSession");
+  // 两种 Core 形态：get_session 全键（含 payload_sha256/steps）；
+  // list_sessions 不含这两键。required = 公共键，steps/payload_sha256 可选。
+  const REQUIRED = ["agent_session_id", "project_id", "base_revision_id", "instruction", "max_steps", "status", "created_at", "updated_at", "finished_at"];
+  const OPTIONAL = ["payload_sha256", "steps"];
+  if (!isRecord(value) || !REQUIRED.every(key => Object.prototype.hasOwnProperty.call(value, key)) || Object.keys(value).some(key => !REQUIRED.includes(key) && !OPTIONAL.includes(key))) throw new ContractValidationError("AgentSession");
   if (!isId(value.agent_session_id) || !isId(value.project_id) || !isId(value.base_revision_id)) throw new ContractValidationError("AgentSession");
   if (!(typeof value.instruction === "string" && value.instruction.length > 0) || !isFiniteNumber(value.max_steps)) throw new ContractValidationError("AgentSession");
-  if (!isAgentSessionStatus(value.status) || !(typeof value.payload_sha256 === "string" && value.payload_sha256.length > 0)) throw new ContractValidationError("AgentSession");
+  if (!isAgentSessionStatus(value.status)) throw new ContractValidationError("AgentSession");
+  if (Object.prototype.hasOwnProperty.call(value, "payload_sha256") && !(typeof value.payload_sha256 === "string" && value.payload_sha256.length > 0)) throw new ContractValidationError("AgentSession");
   if (!(typeof value.created_at === "string") || !(typeof value.updated_at === "string") || !(value.finished_at === null || typeof value.finished_at === "string")) throw new ContractValidationError("AgentSession");
-  if (value.steps !== null && (!Array.isArray(value.steps) || !value.steps.every(step => isRecord(step) && isFiniteNumber(step.ordinal)))) throw new ContractValidationError("AgentSession");
+  if (Object.prototype.hasOwnProperty.call(value, "steps") && value.steps !== null && (!Array.isArray(value.steps) || !value.steps.every(step => isRecord(step) && isFiniteNumber(step.ordinal)))) throw new ContractValidationError("AgentSession");
   return value as unknown as AgentSession;
 }
 

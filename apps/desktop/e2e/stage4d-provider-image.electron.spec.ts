@@ -58,7 +58,7 @@ const launch = () => electron.launch(installed ? {
     NODE_OPTIONS: undefined,
   },
 } : {
-  args: [join(desktop, "out", "main", "index.js"), `--user-data-dir=${userData}`],
+  args: [join(desktop, "out", "main", "index.cjs"), `--user-data-dir=${userData}`],
   cwd: desktop,
   env: {
     ...process.env,
