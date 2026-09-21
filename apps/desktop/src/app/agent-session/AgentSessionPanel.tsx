@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { AgentSession, AgentSessionEgressPreview, AgentSessionStep, ProviderConfig, ProjectId, TimelineRevisionId } from "@aivideo/contracts";
+import type { AgentSession, AgentSessionEgressPreview, AgentSessionStep, ProviderConfig, ProjectId, TimelineDiff, TimelineRevisionId } from "@aivideo/contracts";
 import { Dialog } from "../Dialog.js";
+import { TimelineDiffView } from "../PropertyPanels.js";
 import { errorCode, safeErrorMessage } from "../safeErrors.js";
 
 type Step = "form" | "confirm" | "running" | "done";
@@ -39,6 +40,7 @@ export function AgentSessionPanel({ projectId, baseRevisionId, providers, onClos
   const [providerId, setProviderId] = useState("");
   const [preview, setPreview] = useState<AgentSessionEgressPreview>();
   const [session, setSession] = useState<AgentSession>();
+  const [stepDiffs, setStepDiffs] = useState<Record<number, TimelineDiff | "loading">>({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const pollRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -73,6 +75,25 @@ export function AgentSessionPanel({ projectId, baseRevisionId, providers, onClos
         setStep("done");
       }
     } catch { pollRef.current = setTimeout(() => void refreshSession(sessionId), 3000); }
+  };
+
+  // 阶段 B 第三单：每步 diff 浏览。零 Core 改动——每步成功已落 Revision
+  //（summary = "agent step N: …"），revisions 列表的 parent_revision_id
+  // 给出 diff 对；复用既有 revision-diffs 端点与 TimelineDiffView。
+  const loadStepDiff = async (ordinal: number): Promise<void> => {
+    if (stepDiffs[ordinal]) return;
+    setStepDiffs(current => ({ ...current, [ordinal]: "loading" }));
+    try {
+      const page = await window.desktop.listTimelineRevisions({ project_id: projectId, limit: 200 });
+      const target = page.items.find(item => item.summary === `agent step ${ordinal}: ${session?.steps?.find(s => s.ordinal === ordinal)?.summary ?? ""}` && item.parent_revision_id)
+        ?? page.items.find(item => item.summary.startsWith(`agent step ${ordinal}:`) && item.parent_revision_id);
+      if (!target?.parent_revision_id) throw new Error("step revision not found");
+      const diff = await window.desktop.compareTimelineRevisions({ project_id: projectId, base_revision_id: target.parent_revision_id, target_revision_id: target.timeline_revision_id });
+      setStepDiffs(current => ({ ...current, [ordinal]: diff }));
+    } catch {
+      setStepDiffs(current => { const next = { ...current }; delete next[ordinal]; return next; });
+      onNotify("步骤差异加载失败。");
+    }
   };
 
   const prepare = async () => {
@@ -154,10 +175,21 @@ export function AgentSessionPanel({ projectId, baseRevisionId, providers, onClos
       {session.status === "failed" && <p>共执行 {(session.steps ?? []).filter(item => item.status === "succeeded").length} 个成功步骤（已保留），失败步骤不产生修改。</p>}
       {session.token_usage && <p className="readonly-note">费用估算：{session.token_usage.total_tokens} tokens · {session.token_usage.provider_calls} 次 Provider 调用 · ≈{session.token_usage.estimated_cost.toFixed(4)} 元（按 Provider 配置单价估算，最终以服务商账单为准）。</p>}
       <ol className="agent-session-steps">
-        {(session.steps ?? []).map(item => <li key={item.ordinal}><strong>第 {item.ordinal} 步</strong> · {stepStageLabel(item)}{item.summary ? <span> · {item.summary}</span> : null}</li>)}
+        {(session.steps ?? []).map(item => <li key={item.ordinal}>
+          <strong>第 {item.ordinal} 步</strong> · {stepStageLabel(item)}{item.summary ? <span> · {item.summary}</span> : null}
+          {item.status === "succeeded" && (stepDiffs[item.ordinal] === undefined ? <button className="mini-btn" onClick={() => void loadStepDiff(item.ordinal)}>查看此步差异</button>
+            : stepDiffs[item.ordinal] === "loading" ? <small> 差异加载中…</small>
+            : null)}
+        </li>)}
       </ol>
+      {(session.steps ?? []).filter(item => item.status === "succeeded" && stepDiffs[item.ordinal] && stepDiffs[item.ordinal] !== "loading").map(item => (
+        <section key={`diff-${item.ordinal}`} aria-label={`第 ${item.ordinal} 步差异`}>
+          <h4>第 {item.ordinal} 步差异</h4>
+          <TimelineDiffView diff={stepDiffs[item.ordinal] as TimelineDiff} />
+        </section>
+      ))}
       <div className="modal-actions">
-        <button onClick={() => { setSession(undefined); setInstruction(""); setStep("form"); }}>发起新会话</button>
+        <button onClick={() => { setSession(undefined); setInstruction(""); setStepDiffs({}); setStep("form"); }}>发起新会话</button>
         <button onClick={onClose}>关闭</button>
       </div>
     </>}
