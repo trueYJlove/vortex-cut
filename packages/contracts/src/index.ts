@@ -1015,6 +1015,30 @@ export interface AgentSession {
 export interface AgentSessionPrepareRequest { base_revision_id: TimelineRevisionId; provider_config_id: ProviderConfigId; instruction: string; }
 export interface AgentSessionCreateRequest { agent_session_egress_preview_id: AgentSessionEgressPreviewId; payload_sha256: string; }
 export interface AgentSessionCreateResponse { agent_session_id: AgentSessionId; job: Job; }
+export interface AgentSessionUpdatedEvent {
+  type: "agent_session.updated";
+  event_id?: string;
+  occurred_at?: string;
+  payload: {
+    agent_session_id: AgentSessionId;
+    status: AgentSessionStatus;
+    progress: number;
+    step?: number;
+  };
+}
+
+// AI-2（Layer 0）：素材 CV 信号分析——generate=True 登记分析作业；仅 video 素材。
+export type CvAnalysisStatus = "queued" | "running" | "ready" | "failed" | "stale";
+export interface CvAnalysisRequest { generate: boolean; }
+export interface CvAnalysisSummary {
+  analysis_id: string | null;
+  status: CvAnalysisStatus | null;
+  job_id: JobId | null;
+  algorithm_version: string;
+  sample_count: number | null;
+  scene_cut_count: number | null;
+  signals: string[];
+}
 
 export type GenerationKind = "image" | "tts";
 export type GenerationStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
@@ -1429,6 +1453,59 @@ export function isJobEvent(value: unknown): value is JobUpdatedEvent {
   if (value.job !== undefined && !isJob(value.job)) return false;
   if (value.payload === undefined) return true;
   return isRecord(value.payload) && isId(value.payload.job_id) && isJobStatus(value.payload.status) && (value.payload.progress === null || isFiniteNumber(value.payload.progress));
+}
+
+const AGENT_SESSION_STATUSES = ["queued", "running", "succeeded", "failed", "cancelled"] as const;
+function isAgentSessionStatus(value: unknown): value is AgentSessionStatus {
+  return typeof value === "string" && (AGENT_SESSION_STATUSES as readonly string[]).includes(value);
+}
+
+export function isAgentSessionEgressPreview(value: unknown): value is AgentSessionEgressPreview {
+  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["agent_session_egress_preview_id", "provider", "prompt_template_version", "output_schema_version", "sent_fields", "payload_sha256", "character_count", "estimated_tokens", "clip_count", "caption_count", "locked_count", "max_steps", "token_budget", "expires_at"]) && isId(value.agent_session_egress_preview_id) && isRecord(value.provider) && onlyKeys(value.provider, ["display_name", "origin", "model"]) && isBriefText(value.provider.display_name, 100) && isString(value.provider.origin) && /^https?:\/\//.test(value.provider.origin) && isBriefText(value.provider.model, 200) && isBriefText(value.prompt_template_version, 200) && isBriefText(value.output_schema_version, 200) && Array.isArray(value.sent_fields) && value.sent_fields.length > 0 && value.sent_fields.every(item => isBriefText(item, 100)) && isSha256(value.payload_sha256) && [value.character_count, value.estimated_tokens, value.clip_count, value.caption_count, value.locked_count, value.max_steps, value.token_budget].every(item => isInteger(item, 0)) && isTime(value.expires_at);
+}
+export function isAgentSessionCreateResponse(value: unknown): value is AgentSessionCreateResponse {
+  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["agent_session_id", "job"]) && isId(value.agent_session_id) && isJob(value.job) && value.job.kind === "agent_session";
+}
+export function parseAgentSessionEgressPreview(value: unknown): AgentSessionEgressPreview { if (!isAgentSessionEgressPreview(value)) throw new ContractValidationError("AgentSessionEgressPreview"); return value; }
+export function parseAgentSessionCreateResponse(value: unknown): AgentSessionCreateResponse { if (!isAgentSessionCreateResponse(value)) throw new ContractValidationError("AgentSessionCreateResponse"); return value; }
+
+export function isAgentSessionUpdatedEvent(value: unknown): value is AgentSessionUpdatedEvent {
+  if (!isRecord(value) || value.type !== "agent_session.updated" || !isRecord(value.payload)) return false;
+  const payload = value.payload;
+  return isId(payload.agent_session_id) && isAgentSessionStatus(payload.status)
+    && isFiniteNumber(payload.progress) && (payload.step === undefined || isFiniteNumber(payload.step));
+}
+
+const CV_ANALYSIS_STATUSES = ["queued", "running", "ready", "failed", "stale"] as const;
+function isCvAnalysisStatus(value: unknown): value is CvAnalysisStatus {
+  return typeof value === "string" && (CV_ANALYSIS_STATUSES as readonly string[]).includes(value);
+}
+
+export function isCvAnalysisSummary(value: unknown): value is CvAnalysisSummary {
+  if (!isRecord(value)) return false;
+  if (value.analysis_id !== null && !(typeof value.analysis_id === "string" && value.analysis_id.length > 0)) return false;
+  if (value.status !== null && !isCvAnalysisStatus(value.status)) return false;
+  if (value.job_id !== null && !isId(value.job_id)) return false;
+  if (!(typeof value.algorithm_version === "string" && value.algorithm_version.length > 0)) return false;
+  if (value.sample_count !== null && !isFiniteNumber(value.sample_count)) return false;
+  if (value.scene_cut_count !== null && !isFiniteNumber(value.scene_cut_count)) return false;
+  return Array.isArray(value.signals) && value.signals.every(item => typeof item === "string" && item.length > 0);
+}
+
+export function parseAgentSession(value: unknown): AgentSession {
+  const KEYS = ["agent_session_id", "project_id", "base_revision_id", "instruction", "max_steps", "status", "payload_sha256", "created_at", "updated_at", "finished_at", "steps"];
+  if (!isRecord(value) || !KEYS.every(key => Object.prototype.hasOwnProperty.call(value, key)) || Object.keys(value).some(key => !KEYS.includes(key))) throw new ContractValidationError("AgentSession");
+  if (!isId(value.agent_session_id) || !isId(value.project_id) || !isId(value.base_revision_id)) throw new ContractValidationError("AgentSession");
+  if (!(typeof value.instruction === "string" && value.instruction.length > 0) || !isFiniteNumber(value.max_steps)) throw new ContractValidationError("AgentSession");
+  if (!isAgentSessionStatus(value.status) || !(typeof value.payload_sha256 === "string" && value.payload_sha256.length > 0)) throw new ContractValidationError("AgentSession");
+  if (!(typeof value.created_at === "string") || !(typeof value.updated_at === "string") || !(value.finished_at === null || typeof value.finished_at === "string")) throw new ContractValidationError("AgentSession");
+  if (value.steps !== null && (!Array.isArray(value.steps) || !value.steps.every(step => isRecord(step) && isFiniteNumber(step.ordinal)))) throw new ContractValidationError("AgentSession");
+  return value as unknown as AgentSession;
+}
+
+export function parseCvAnalysisSummary(value: unknown): CvAnalysisSummary {
+  if (!isCvAnalysisSummary(value)) throw new ContractValidationError("CvAnalysisSummary");
+  return value;
 }
 
 export function parseSidecarReadyLine(line: string): SidecarReady {

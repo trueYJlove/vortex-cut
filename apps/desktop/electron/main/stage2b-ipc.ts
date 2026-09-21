@@ -5,7 +5,11 @@ import {
   parseTimelinePatchGenerationCreateResponse,
   parseTimelinePatchProposal,
   parseTimelinePatchCapabilityTestResponse,
-  parseTimelineState
+  parseTimelineState,
+  parseAgentSessionEgressPreview,
+  parseAgentSessionCreateResponse,
+  parseAgentSession,
+  parseCvAnalysisSummary
 } from "@aivideo/contracts";
 
 type RequestInitLike = { method?: string; body?: string };
@@ -30,6 +34,22 @@ export function stage2bRendererSafe(value: unknown): unknown {
   if (!value || typeof value !== "object") return value;
   const result: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) if (!rendererSensitiveKeys.has(key.toLowerCase())) result[key] = stage2bRendererSafe(item);
+  return result;
+}
+
+/**
+ * agent-session DTO 允许 `instruction`：会话指令是用户本地输入的原样回显
+ * （Core get_session 如实返回），不是 provider 生成内容——其余敏感键照旧
+ * 裁剪，provider 响应正文（error_json 展开后的 message 等）不受豁免。
+ */
+export function stage2bRendererSafeAllowInstruction(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stage2bRendererSafeAllowInstruction);
+  if (!value || typeof value !== "object") return value;
+  const result: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    const lowered = key.toLowerCase();
+    if (lowered === "instruction" || !rendererSensitiveKeys.has(lowered)) result[key] = stage2bRendererSafeAllowInstruction(item);
+  }
   return result;
 }
 
@@ -82,5 +102,30 @@ export function registerStage2bIpc(deps: Stage2bIpcDependencies): void {
   deps.handle("timeline:revision-diff", async (_event, input) => {
     const value = record(input, ["project_id", "base_revision_id", "target_revision_id"], "timeline revision diff");
     return parseTimelineDiff(stage2bRendererSafe(await fetchSafe(`${API_PREFIX}/projects/${id(value.project_id, "project_id")}/timeline/revision-diffs`, { method: "POST", body: JSON.stringify({ base_revision_id: id(value.base_revision_id, "base_revision_id"), target_revision_id: id(value.target_revision_id, "target_revision_id") }) })));
+  });
+  // AI-1：内置多步 agent 会话（三段式对齐 planning-patch 先例；一项目一个
+  // active session，Core 侧 AGENT_SESSION_ALREADY_ACTIVE 兜底）。
+  deps.handle("agent-session:prepare", async (_event, input) => {
+    const value = record(input, ["project_id", "base_revision_id", "provider_config_id", "instruction"], "agent session prepare");
+    const response = await fetchSafe(`${API_PREFIX}/projects/${id(value.project_id, "project_id")}/agent-sessions/prepare`, { method: "POST", body: JSON.stringify({ base_revision_id: id(value.base_revision_id, "base_revision_id"), provider_config_id: id(value.provider_config_id, "provider_config_id"), instruction: instruction(value.instruction) }) });
+    return parseAgentSessionEgressPreview(stage2bRendererSafe(response));
+  });
+  deps.handle("agent-session:create", async (_event, input) => {
+    const value = record(input, ["project_id", "agent_session_egress_preview_id", "payload_sha256"], "agent session create");
+    const response = await fetchSafe(`${API_PREFIX}/projects/${id(value.project_id, "project_id")}/agent-sessions`, { method: "POST", body: JSON.stringify({ agent_session_egress_preview_id: id(value.agent_session_egress_preview_id, "agent_session_egress_preview_id"), payload_sha256: sha256(value.payload_sha256, "payload_sha256") }) });
+    return parseAgentSessionCreateResponse(stage2bRendererSafe(response));
+  });
+  deps.handle("agent-session:list", async (_event, projectId) => {
+    const page = stage2bRendererSafe(await fetchSafe(`${API_PREFIX}/projects/${id(projectId, "project_id")}/agent-sessions`)) as { items?: unknown[] };
+    if (!Array.isArray(page.items)) throw new Error("Core request failed");
+    return { items: page.items.map(parseAgentSession) };
+  });
+  deps.handle("agent-session:get", async (_event, sessionId) => parseAgentSession(stage2bRendererSafeAllowInstruction(await fetchSafe(`${API_PREFIX}/agent-sessions/${id(sessionId, "agent_session_id")}`))));
+  // AI-2：素材 CV 信号分析摘要（generate=True 登记作业；Renderer 只见摘要）。
+  deps.handle("cv-analysis:get", async (_event, input) => {
+    const value = record(input, ["project_id", "asset_id", "generate"], "cv analysis get");
+    if (typeof value.generate !== "boolean") throw new Error("Invalid cv analysis input");
+    const response = await fetchSafe(`${API_PREFIX}/projects/${id(value.project_id, "project_id")}/assets/${id(value.asset_id, "asset_id")}/cv-analysis`, { method: "POST", body: JSON.stringify({ generate: value.generate }) });
+    return parseCvAnalysisSummary(stage2bRendererSafe(response));
   });
 }

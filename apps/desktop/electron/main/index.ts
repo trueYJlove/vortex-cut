@@ -22,6 +22,7 @@ import { registerFileGrant } from "./file-grants.js";
 import { exportFileName, normalizeExportPath } from "./export-destination.js";
 import { defaultLogPath, appendLog, redact } from "./logging.js";
 import { SidecarSupervisor } from "./sidecar-supervisor.js";
+import { DesktopSettingsStore, normalize as normalizeDesktopSettings, type DesktopSettings } from "./desktop-settings.js";
 import { RESTRICTED_MEDIA_SCHEME, RestrictedMediaRegistry, serveRestrictedMedia } from "./restricted-media.js";
 import { probeActive, probeLoadQuery, registerProbeIpc, type ProbeIpcHandle } from "./probe-ipc.js";
 import { normalizeJob } from "../../src/lib/core-client.js";
@@ -96,6 +97,14 @@ let probeIpc: ProbeIpcHandle | null = null;
 let logPath = "";
 let providerSecrets: ProviderSecretStore | undefined;
 let imageProviderSecrets: ImageProviderSecretStore | undefined;
+let desktopSettings: DesktopSettingsStore | undefined;
+// DESK-2：当前 sidecar 进程启动时的设置快照（设置页"当前生效"态的依据；
+// null = 运行时尚未启动）。
+let startRuntimeSettings: DesktopSettings | null = null;
+function settingsStore(): DesktopSettingsStore {
+  desktopSettings ??= new DesktopSettingsStore(app.getPath("userData"));
+  return desktopSettings;
+}
 // Acquire the lock before startup work so duplicate launches cannot race with
 // window creation or sidecar startup.
 const hasSingleInstanceLock = !app.isPackaged || app.requestSingleInstanceLock();
@@ -586,6 +595,19 @@ function registerIpc(): void {
   ipcMain.handle("timeline:draft-delete", async (_event, projectId: ProjectId) => { await fetchWithUi(`${API_PREFIX}/projects/${asId(projectId, "project_id")}/timeline/draft`, { method: "DELETE" }); });
   ipcMain.handle("timeline:revisions", (_event, input: { project_id: ProjectId; limit?: number; cursor?: string }) => fetchWithUi(`${API_PREFIX}/projects/${asId(input.project_id, "project_id")}/timeline/revisions${buildQuery(input, ["project_id"])}`).then(rendererSafe));
   ipcMain.handle("timeline:revision", (_event, revisionId: TimelineRevisionId) => fetchWithUi(`${API_PREFIX}/timeline-revisions/${asId(revisionId, "timeline_revision_id")}`).then(rendererSafe));
+  // DESK-1/DESK-2：桌面设置（Main-only 持久化，不经 Core HTTP）。get 返回
+  // 保存值与当前生效值两态——Core 启动时解析一次代理，重启内核前两者可不同。
+  ipcMain.handle("settings:get", () => {
+    const saved = settingsStore().get();
+    const effective = startRuntimeSettings;
+    return { saved, effective, pending_restart: effective !== null && (effective.proxy_mode !== saved.proxy_mode || effective.provider_proxy !== saved.provider_proxy) };
+  });
+  ipcMain.handle("settings:set", async (_event, input: unknown) => {
+    const { proxy_mode, provider_proxy } = (input ?? {}) as Partial<DesktopSettings>;
+    await settingsStore().set(normalizeDesktopSettings({ proxy_mode, provider_proxy }));
+    return settingsStore().get();
+  });
+  ipcMain.handle("core:restart", () => restartCore());
   ipcMain.handle("preset:list-platforms", async () => {
     const page = rendererSafe(await fetchWithUi<{ items: unknown[] }>(`${API_PREFIX}/platform-presets`));
     if (!page || typeof page !== "object" || !Array.isArray((page as { items?: unknown[] }).items) || !(page as { items: unknown[] }).items.every(isPlatformPreset)) throw new Error("Invalid PlatformPresetPage");
@@ -802,7 +824,8 @@ async function waitForCoreHealth(client: CoreAdminClient, timeoutMs = 20_000): P
 async function startRuntime(): Promise<void> {
   logPath = defaultLogPath(app.getPath("userData"));
   const adminToken = randomBytes(32).toString("hex");
-  const resourcesPath = process.env.AIVS_RESOURCES_PATH
+  const launchSettings = settingsStore().get();
+  startRuntimeSettings = launchSettings;  const resourcesPath = process.env.AIVS_RESOURCES_PATH
     ? resolve(process.env.AIVS_RESOURCES_PATH)
     : app.isPackaged
       ? process.resourcesPath
@@ -820,7 +843,11 @@ async function startRuntime(): Promise<void> {
     manifestDir: join(resourcesPath, "model-manifests"),
     buildVersion: app.getVersion(), adminToken,
     launchEvidencePath: process.env.AIVS_E2E_SIDECAR_ARGV_EVIDENCE,
-    enableImageProviderNetwork: process.env.AIVS_ENABLE_IMAGE_PROVIDER_NETWORK === "true"
+    enableImageProviderNetwork: process.env.AIVS_ENABLE_IMAGE_PROVIDER_NETWORK === "true",
+    // DESK-2：设置持久化的代理模式/地址随 sidecar 启动传入（Core 启动时解析
+    // 一次，运行中不热生效——生效语义 = 重启内核，规划门 §5 裁决①）。
+    proxyMode: launchSettings.proxy_mode,
+    providerProxy: launchSettings.provider_proxy ?? undefined
   });
   await appendLog(logPath, `starting sidecar resources=${resourcesPath}`);
   const ready = await supervisor.start();
@@ -897,6 +924,26 @@ async function shutdownRuntime(): Promise<void> {
   await supervisor?.stop();
   runtime = undefined;
   core = undefined;
+}
+
+/**
+ * DESK-2：代理等设置变更后的"重启内核"动作——stop→start 全量就绪序列复用
+ * （CoreAdminClient 重建 + 密钥重注入 + UI session 重开，与冷启动同路径）。
+ * 运行时未就绪（首次启动尚未完成）时拒绝重启，避免与 startRuntime 竞争。
+ */
+let restartingCore = false;
+async function restartCore(): Promise<void> {
+  if (restartingCore) throw new Error("内核正在重启，请稍候");
+  if (!runtime || !supervisor) throw new Error("内核尚未就绪，无法重启");
+  restartingCore = true;
+  try {
+    if (windowRef && !windowRef.isDestroyed()) windowRef.webContents.send("runtime:error", "内核正在重启，界面恢复后可继续操作。");
+    await shutdownRuntime();
+    resolveRuntime = undefined;
+    await startRuntime();
+  } finally {
+    restartingCore = false;
+  }
 }
 
 app.whenReady().then(async () => {

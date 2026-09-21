@@ -1,4 +1,11 @@
 import { contextBridge, ipcRenderer } from "electron";
+import type { DesktopSettings, SettingsState } from "../main/desktop-settings.js";
+import type {
+  AgentSession,
+  AgentSessionCreateResponse,
+  AgentSessionEgressPreview,
+  CvAnalysisSummary
+} from "@aivideo/contracts";
 import type {
   Asset,
   AssetAvailability,
@@ -161,6 +168,12 @@ export interface DesktopApi {
   getTimelinePatchProposal: (proposalId: string) => Promise<TimelinePatchProposal>;
   applyTimelinePatchProposal: (input: { project_id: ProjectId; proposal_id: string; base_revision_id: TimelineRevisionId; proposed_document_sha256: string }) => Promise<TimelineState>;
   compareTimelineRevisions: (input: { project_id: ProjectId; base_revision_id: TimelineRevisionId; target_revision_id: TimelineRevisionId }) => Promise<TimelineDiff>;
+  // AI-1 内置多步 agent 会话 + AI-2 素材 CV 信号分析
+  prepareAgentSession: (input: { project_id: ProjectId; base_revision_id: TimelineRevisionId; provider_config_id: string; instruction: string }) => Promise<AgentSessionEgressPreview>;
+  createAgentSession: (input: { project_id: ProjectId; agent_session_egress_preview_id: string; payload_sha256: string }) => Promise<AgentSessionCreateResponse>;
+  listAgentSessions: (projectId: ProjectId) => Promise<{ items: AgentSession[] }>;
+  getAgentSession: (sessionId: string) => Promise<AgentSession>;
+  getCvAnalysis: (input: { project_id: ProjectId; asset_id: string; generate: boolean }) => Promise<CvAnalysisSummary>;
   createTimeline: (input: { project_id: ProjectId; timeline: TimelineCreateInput }) => Promise<TimelineState>;
   getTimeline: (projectId: ProjectId) => Promise<TimelineState>;
   patchTimeline: (input: { project_id: ProjectId; patch: TimelinePatch }) => Promise<TimelineState>;
@@ -259,6 +272,10 @@ export interface DesktopApi {
   openArtifact: (artifactId: string) => Promise<void>;
   openArtifactFolder: (artifactId: string) => Promise<void>;
   subscribeJob: (jobId: JobId, listener: (job: Job) => void) => () => void;
+  // DESK-1/DESK-2/DESK-3：桌面设置 + 内核重启（代理生效语义 = 重启）
+  getSettings: () => Promise<SettingsState>;
+  setSettings: (input: { proxy_mode: "system" | "custom" | "direct"; provider_proxy?: string | null }) => Promise<DesktopSettings>;
+  restartCore: () => Promise<void>;
   diagnostics: () => Promise<CoreHealth>;
 }
 
@@ -314,6 +331,11 @@ const api: DesktopApi = {
   getTimelinePatchProposal: proposalId => ipcRenderer.invoke("planning-patch:proposal-get", proposalId),
   applyTimelinePatchProposal: input => ipcRenderer.invoke("planning-patch:proposal-apply", input),
   compareTimelineRevisions: input => ipcRenderer.invoke("timeline:revision-diff", input),
+  prepareAgentSession: input => ipcRenderer.invoke("agent-session:prepare", input),
+  createAgentSession: input => ipcRenderer.invoke("agent-session:create", input),
+  listAgentSessions: projectId => ipcRenderer.invoke("agent-session:list", projectId),
+  getAgentSession: sessionId => ipcRenderer.invoke("agent-session:get", sessionId),
+  getCvAnalysis: input => ipcRenderer.invoke("cv-analysis:get", input),
   createTimeline: input => ipcRenderer.invoke("timeline:create", input),
   getTimeline: projectId => ipcRenderer.invoke("timeline:get", projectId),
   patchTimeline: input => ipcRenderer.invoke("timeline:patch", input),
@@ -411,7 +433,10 @@ const api: DesktopApi = {
     ipcRenderer.on(channel, handler);
     return () => ipcRenderer.removeListener(channel, handler);
   },
-  diagnostics: () => ipcRenderer.invoke("diagnostics:get")
+  diagnostics: () => ipcRenderer.invoke("diagnostics:get"),
+  getSettings: () => ipcRenderer.invoke("settings:get"),
+  setSettings: input => ipcRenderer.invoke("settings:set", input),
+  restartCore: () => ipcRenderer.invoke("core:restart")
 };
 
 contextBridge.exposeInMainWorld("desktop", api);
