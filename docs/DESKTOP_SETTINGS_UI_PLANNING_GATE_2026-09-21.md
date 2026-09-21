@@ -125,3 +125,11 @@
 | App.tsx 继续膨胀 | AI 助手面板独立组件目录；设置对话框同样独立 |
 | `agent_session.updated` 与 job.updated 双通道状态竞争 | 权威源 = get_session 轮询；事件只做"触发提前刷新"信号 |
 | 契约漂移（Core 手写 dict vs contracts 手写 parse） | 新 DTO 以 Core get_session 实际返回为准逐字段对齐 + parse 单测 |
+
+## 5. 裁决记录（用户，2026-09-21）
+
+- **① 代理"重启 sidecar 生效"语义：接受**（否决 Core 运行时热重载方案）。
+- **② AI 助手面板 v1 范围 = 步骤列表：接受**（每步 diff 用现有版本比较查看；
+  token 聚合展示与 CV 可视化维持独立小单）。
+
+本门据此进入实施（YeJing 面）。
