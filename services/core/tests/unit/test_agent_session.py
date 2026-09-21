@@ -506,3 +506,42 @@ def test_structured_failure_extraction(tmp_path: Path) -> None:
         "op": "remove_clip",
         "field": "operation",
     }
+
+
+# ----------------------------------------------------------------------
+# 阶段 B：会话费用聚合（get_session.token_usage）
+# ----------------------------------------------------------------------
+
+
+async def test_session_reports_token_usage_aggregate(tmp_path: Path) -> None:
+    # 两步会话（失败反馈 + 成功）各一次 provider 调用，usage 100+100；
+    # get_session 聚合 = total_tokens 200、provider_calls 2。
+    class Factory:
+        async def generate(self, request: Any, _cancel: Any) -> StructuredTextResult:
+            if not hasattr(Factory, "_n"):
+                Factory._n = 0
+            Factory._n += 1
+            if Factory._n == 1:
+                return StructuredTextResult(
+                    _patch_result([{"op": "remove_clip", "clip_id": "missing"}], "bad"),
+                    _usage(100), None,
+                )
+            return StructuredTextResult(
+                _patch_result(
+                    [{"op": "set_layout", "clip_id": _CLIP["id"], "layout": "fit"}], "ok"
+                ),
+                _usage(100), None,
+            )
+
+    db, service, timelines = _agent_service(tmp_path, Factory)
+    state = _seed_timeline(timelines)
+    session_id, jobs = _start_session(db, service, state)
+    await _run(db, service, jobs)
+    detail = service.get_session(session_id)
+    usage = detail["token_usage"]
+    assert usage["total_tokens"] == 200
+    assert usage["provider_calls"] == 2
+    # 配置单价缺省（0）→ 估算成本 0；字段恒存在（数值型聚合）。
+    assert usage["estimated_cost"] == 0.0
+
+

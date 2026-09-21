@@ -1011,6 +1011,14 @@ export interface AgentSession {
   agent_session_id: AgentSessionId; project_id: ProjectId; base_revision_id: TimelineRevisionId;
   instruction: string; max_steps: number; status: AgentSessionStatus; payload_sha256: string;
   created_at: string; updated_at: string; finished_at: string | null; steps?: AgentSessionStep[];
+  token_usage?: AgentSessionTokenUsage;
+}
+// 阶段 B：会话费用聚合（provider_invocations 经 agent_steps.input_sha256 关联；
+// estimated_cost = 配置单价 × 实际用量，最终以服务商账单为准）。list 端点不含。
+export interface AgentSessionTokenUsage {
+  total_tokens: number;
+  estimated_cost: number;
+  provider_calls: number;
 }
 export interface AgentSessionPrepareRequest { base_revision_id: TimelineRevisionId; provider_config_id: ProviderConfigId; instruction: string; }
 export interface AgentSessionCreateRequest { agent_session_egress_preview_id: AgentSessionEgressPreviewId; payload_sha256: string; }
@@ -1495,10 +1503,10 @@ export function isCvAnalysisSummary(value: unknown): value is CvAnalysisSummary 
 }
 
 export function parseAgentSession(value: unknown): AgentSession {
-  // 两种 Core 形态：get_session 全键（含 payload_sha256/steps）；
-  // list_sessions 不含这两键。required = 公共键，steps/payload_sha256 可选。
+  // 两种 Core 形态：get_session 全键（含 payload_sha256/steps/token_usage）；
+  // list_sessions 不含这三键。required = 公共键，其余可选。
   const REQUIRED = ["agent_session_id", "project_id", "base_revision_id", "instruction", "max_steps", "status", "created_at", "updated_at", "finished_at"];
-  const OPTIONAL = ["payload_sha256", "steps"];
+  const OPTIONAL = ["payload_sha256", "steps", "token_usage"];
   if (!isRecord(value) || !REQUIRED.every(key => Object.prototype.hasOwnProperty.call(value, key)) || Object.keys(value).some(key => !REQUIRED.includes(key) && !OPTIONAL.includes(key))) throw new ContractValidationError("AgentSession");
   if (!isId(value.agent_session_id) || !isId(value.project_id) || !isId(value.base_revision_id)) throw new ContractValidationError("AgentSession");
   if (!(typeof value.instruction === "string" && value.instruction.length > 0) || !isFiniteNumber(value.max_steps)) throw new ContractValidationError("AgentSession");
@@ -1506,6 +1514,7 @@ export function parseAgentSession(value: unknown): AgentSession {
   if (Object.prototype.hasOwnProperty.call(value, "payload_sha256") && !(typeof value.payload_sha256 === "string" && value.payload_sha256.length > 0)) throw new ContractValidationError("AgentSession");
   if (!(typeof value.created_at === "string") || !(typeof value.updated_at === "string") || !(value.finished_at === null || typeof value.finished_at === "string")) throw new ContractValidationError("AgentSession");
   if (Object.prototype.hasOwnProperty.call(value, "steps") && value.steps !== null && (!Array.isArray(value.steps) || !value.steps.every(step => isRecord(step) && isFiniteNumber(step.ordinal)))) throw new ContractValidationError("AgentSession");
+  if (Object.prototype.hasOwnProperty.call(value, "token_usage") && value.token_usage !== null && !(isRecord(value.token_usage) && isFiniteNumber(value.token_usage.total_tokens) && isFiniteNumber(value.token_usage.estimated_cost) && isFiniteNumber(value.token_usage.provider_calls))) throw new ContractValidationError("AgentSession");
   return value as unknown as AgentSession;
 }
 
