@@ -7,13 +7,15 @@ import { errorCode, safeErrorMessage } from "../safeErrors.js";
 type Step = "form" | "confirm" | "running" | "done";
 
 const FAILURE_LABELS: Record<string, string> = {
-  AGENT_SESSION_STEP_LIMIT: "已达单会话步数上限，会话中止（已完成的步骤保留）。",
-  AGENT_SESSION_BUDGET_EXCEEDED: "已达会话 token 预算上限，会话中止。",
-  AGENT_SESSION_BASE_DRIFT: "会话期间时间线在会话之外被修改，会话中止；请基于最新版本重新发起。",
-  AGENT_SESSION_ALREADY_ACTIVE: "已有进行中的会话；请等待其结束。",
-  AGENT_SESSION_EGRESS_EXPIRED: "外传确认已过期，请重新准备并确认。",
-  AGENT_SESSION_EGRESS_MISMATCH: "外传内容校验不一致，请重新准备并确认。",
-  AGENT_SESSION_PROVIDER_UNSUPPORTED: "Provider 不支持多步会话；请先在 AI 修改中测试兼容性。"
+  AGENT_SESSION_STEP_LIMIT: "已达单会话步数上限。下一步：把任务拆成多个小会话（如先剪短、再单独加样式），逐个发起。",
+  AGENT_SESSION_BUDGET_EXCEEDED: "已达会话 token 预算上限。下一步：简化指令（如指定只做一类修改）后重新发起会话。",
+  AGENT_SESSION_BASE_DRIFT: "会话期间时间线在会话之外被修改。下一步：基于最新版本重新发起会话即可（已完成步骤保留）。",
+  AGENT_SESSION_ALREADY_ACTIVE: "已有进行中的会话。下一步：在面板中等待其完成，或关闭面板稍后回来查看结果。",
+  AGENT_SESSION_EGRESS_EXPIRED: "外传确认已过期。下一步：返回表单重新点'准备外传确认'。",
+  AGENT_SESSION_EGRESS_MISMATCH: "外传内容校验不一致。下一步：返回表单重新准备并确认。",
+  AGENT_SESSION_PROVIDER_UNSUPPORTED: "Provider 不支持多步会话。下一步：先在 AI 修改中点'测试 AI 修改兼容性'。",
+  AGENT_SESSION_PROVIDER_UNTESTED: "Provider 尚未通过能力测试。下一步：先在 AI 修改中完成兼容性测试。",
+  TIMELINE_NOT_FOUND: "时间线不存在。下一步：先在编辑器创建或选择时间线。"
 };
 
 function stepStageLabel(step: AgentSessionStep): string {
@@ -41,17 +43,20 @@ export function AgentSessionPanel({ projectId, baseRevisionId, providers, onClos
   const [preview, setPreview] = useState<AgentSessionEgressPreview>();
   const [session, setSession] = useState<AgentSession>();
   const [stepDiffs, setStepDiffs] = useState<Record<number, TimelineDiff | "loading">>({});
+  const [history, setHistory] = useState<AgentSession[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const pollRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const eligible = useMemo(() => providers.filter(item => item.enabled && item.credential_status === "configured" && item.timeline_patch_capability_status === "supported"), [providers]);
 
-  // 打开面板即查活跃会话：存在 active 会话则直接进入运行/结果视图。
+  // 打开面板即查活跃会话：存在 active 会话则直接进入运行/结果视图；
+  // 同时拉取历史会话（稳定性收尾包②：历史入口——结果页可回看）。
   useEffect(() => {
     let active = true;
     void window.desktop.listAgentSessions(projectId).then(page => {
       if (!active) return;
+      setHistory(page.items.filter(item => item.status !== "queued" && item.status !== "running"));
       const activeSession = page.items.find(item => item.status === "queued" || item.status === "running");
       if (activeSession) {
         setSession(activeSession);
@@ -140,6 +145,16 @@ export function AgentSessionPanel({ projectId, baseRevisionId, providers, onClos
       {eligible.length === 0 && <p className="readonly-note">尚无支持的 Provider：请先在 AI 修改中完成"测试 AI 修改兼容性"（多步会话与 AI 修改使用同一能力门）。</p>}
       <p className="readonly-note">一次确认覆盖整个会话：会话中每一步的失败反馈会作为上下文再次外发，具体字段在下一步确认页明示。</p>
       <div className="modal-actions"><button disabled={!canPrepare} onClick={() => void prepare()}>准备外传确认</button></div>
+      {history.length > 0 && <fieldset>
+        <legend>历史会话</legend>
+        <ul className="agent-session-history">
+          {history.slice(0, 8).map(item => <li key={item.agent_session_id}>
+            <button onClick={() => { setSession(item); setStep("done"); }}>
+              {item.status === "succeeded" ? "✓" : item.status === "failed" ? "✗" : "⊘"} {item.instruction.slice(0, 40)}{item.instruction.length > 40 ? "…" : ""} · {item.created_at.slice(0, 16).replace("T", " ")}
+            </button>
+          </li>)}
+        </ul>
+      </fieldset>}
     </>}
     {step === "confirm" && preview && <>
       <h3>确认本次会话外传</h3>

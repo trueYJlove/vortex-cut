@@ -68,6 +68,7 @@ import {
   , parseAgentSessionCreateResponse
   , parseAgentSession
   , parseCvAnalysisSummary
+  , parseCvSamplesPage
   , parseTimelinePatchEgressPreview
   , parseTimelinePatchGeneration
   , parseTimelinePatchGenerationCreateResponse
@@ -132,7 +133,7 @@ import {
   , type ShotRequirementTimelineAssemblyPreview, type ShotRequirementTimelineAssembly
   , type ShotRequirementTimelineAssemblyApplyResponse, type ShotRequirementTimelineAssemblyPage
   , type AgentSessionEgressPreview, type AgentSessionCreateResponse, type AgentSession
-  , type CvAnalysisSummary
+  , type CvAnalysisSummary, type CvSamplesPage
 } from "@aivideo/contracts";
 
 export class CoreApiError extends Error {
@@ -444,6 +445,10 @@ export class CoreClient {
   // AI-2：素材 CV 信号分析（generate=True 登记作业；仅 video 素材）。
   getCvAnalysis(projectId: ProjectId, assetId: string, input: { generate: boolean }): Promise<CvAnalysisSummary> {
     return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/cv-analysis`, { method: "POST", body: JSON.stringify(input) }).then(value => parseCvAnalysisSummary(removeSensitiveFields(value)));
+  }
+  // 阶段 C 稳定性包：CV 信号样本（sparkline 可视化数据）。
+  listCvSamples(projectId: ProjectId, assetId: string): Promise<CvSamplesPage> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/cv-samples`).then(value => parseCvSamplesPage(removeSensitiveFields(value)));
   }
   compareTimelineRevisions(projectId: ProjectId, input: { base_revision_id: TimelineRevisionId; target_revision_id: TimelineRevisionId }): Promise<TimelineDiff> {
     return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/timeline/revision-diffs`, { method: "POST", body: JSON.stringify(input) }).then(value => parseTimelineDiff(removeSensitiveFields(value)));

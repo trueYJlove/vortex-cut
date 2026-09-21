@@ -9,7 +9,8 @@ import {
   parseAgentSessionEgressPreview,
   parseAgentSessionCreateResponse,
   parseAgentSession,
-  parseCvAnalysisSummary
+  parseCvAnalysisSummary,
+  parseCvSamplesPage
 } from "@aivideo/contracts";
 
 type RequestInitLike = { method?: string; body?: string };
@@ -127,5 +128,11 @@ export function registerStage2bIpc(deps: Stage2bIpcDependencies): void {
     if (typeof value.generate !== "boolean") throw new Error("Invalid cv analysis input");
     const response = await fetchSafe(`${API_PREFIX}/projects/${id(value.project_id, "project_id")}/assets/${id(value.asset_id, "asset_id")}/cv-analysis`, { method: "POST", body: JSON.stringify({ generate: value.generate }) });
     return parseCvAnalysisSummary(stage2bRendererSafe(response));
+  });
+  // 阶段 C 稳定性包：CV 信号样本（sparkline 可视化数据）。
+  deps.handle("cv-samples:list", async (_event, input) => {
+    const value = record(input, ["project_id", "asset_id"], "cv samples list");
+    const response = await fetchSafe(`${API_PREFIX}/projects/${id(value.project_id, "project_id")}/assets/${id(value.asset_id, "asset_id")}/cv-samples`);
+    return parseCvSamplesPage(stage2bRendererSafe(response));
   });
 }

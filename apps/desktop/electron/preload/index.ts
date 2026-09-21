@@ -4,7 +4,8 @@ import type {
   AgentSession,
   AgentSessionCreateResponse,
   AgentSessionEgressPreview,
-  CvAnalysisSummary
+  CvAnalysisSummary,
+  CvSamplesPage
 } from "@aivideo/contracts";
 import type {
   Asset,
@@ -174,6 +175,7 @@ export interface DesktopApi {
   listAgentSessions: (projectId: ProjectId) => Promise<{ items: AgentSession[] }>;
   getAgentSession: (sessionId: string) => Promise<AgentSession>;
   getCvAnalysis: (input: { project_id: ProjectId; asset_id: string; generate: boolean }) => Promise<CvAnalysisSummary>;
+  listCvSamples: (input: { project_id: ProjectId; asset_id: string }) => Promise<CvSamplesPage>;
   createTimeline: (input: { project_id: ProjectId; timeline: TimelineCreateInput }) => Promise<TimelineState>;
   getTimeline: (projectId: ProjectId) => Promise<TimelineState>;
   patchTimeline: (input: { project_id: ProjectId; patch: TimelinePatch }) => Promise<TimelineState>;
@@ -336,6 +338,7 @@ const api: DesktopApi = {
   listAgentSessions: projectId => ipcRenderer.invoke("agent-session:list", projectId),
   getAgentSession: sessionId => ipcRenderer.invoke("agent-session:get", sessionId),
   getCvAnalysis: input => ipcRenderer.invoke("cv-analysis:get", input),
+  listCvSamples: input => ipcRenderer.invoke("cv-samples:list", input),
   createTimeline: input => ipcRenderer.invoke("timeline:create", input),
   getTimeline: projectId => ipcRenderer.invoke("timeline:get", projectId),
   patchTimeline: input => ipcRenderer.invoke("timeline:patch", input),

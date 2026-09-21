@@ -2202,6 +2202,37 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except CvAnalysisError as exc:
             raise _domain(DomainError(exc.code, exc.message)) from exc
 
+    @app.get("/api/v1/projects/{project_id}/assets/{asset_id}/cv-samples")
+    async def list_asset_cv_samples(
+        project_id: str, asset_id: str, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        """AI-2 可视化：素材最新 ready 分析的信号样本（Renderer sparkline）。
+
+        只读投影：时间戳 + 数值信号，无路径字段；未就绪返回空 samples。
+        """
+        try:
+            asset_row = _preview_source_asset_row(state, project_id, asset_id)
+            if asset_row["kind"] != "video":
+                raise _domain(DomainError(
+                    "CV_ANALYSIS_UNSUPPORTED", "仅视频素材可分析 CV 信号"))
+            samples = state.cv_signals.samples_for_range(asset_id, 0, 1 << 62)
+            return {
+                "asset_id": asset_id,
+                "samples": [
+                    {
+                        "timestamp_us": s["timestamp_us"],
+                        "scene_cut": bool(s["scene_cut"]),
+                        "motion_energy": s["motion_energy"],
+                        "sharpness": s["sharpness"],
+                        "brightness": s["brightness"],
+                        "audio_energy": s["audio_energy"],
+                    }
+                    for s in samples
+                ],
+            }
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
     @app.post("/api/v1/internal/projects/{project_id}/assets/{asset_id}/waveform/media")
     async def resolve_asset_waveform_media(
         project_id: str, asset_id: str,

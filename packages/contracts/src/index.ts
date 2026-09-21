@@ -1047,6 +1047,19 @@ export interface CvAnalysisSummary {
   scene_cut_count: number | null;
   signals: string[];
 }
+// 可视化（阶段 C 稳定性包）：最新 ready 分析的信号样本 sparkline 数据。
+export interface CvSample {
+  timestamp_us: number;
+  scene_cut: boolean;
+  motion_energy: number;
+  sharpness: number;
+  brightness: number;
+  audio_energy: number;
+}
+export interface CvSamplesPage {
+  asset_id: AssetId;
+  samples: CvSample[];
+}
 
 export type GenerationKind = "image" | "tts";
 export type GenerationStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
@@ -1500,6 +1513,22 @@ export function isCvAnalysisSummary(value: unknown): value is CvAnalysisSummary 
   if (value.sample_count !== null && !isFiniteNumber(value.sample_count)) return false;
   if (value.scene_cut_count !== null && !isFiniteNumber(value.scene_cut_count)) return false;
   return Array.isArray(value.signals) && value.signals.every(item => typeof item === "string" && item.length > 0);
+}
+
+function isCvSample(value: unknown): value is CvSample {
+  if (!isRecord(value)) return false;
+  if (!isFiniteNumber(value.timestamp_us) || typeof value.scene_cut !== "boolean") return false;
+  return ["motion_energy", "sharpness", "brightness", "audio_energy"].every(key => isFiniteNumber(value[key]) && value[key] >= 0 && value[key] <= 1);
+}
+
+export function isCvSamplesPage(value: unknown): value is CvSamplesPage {
+  if (!isRecord(value) || !isId(value.asset_id)) return false;
+  return Array.isArray(value.samples) && value.samples.every(isCvSample);
+}
+
+export function parseCvSamplesPage(value: unknown): CvSamplesPage {
+  if (!isCvSamplesPage(value)) throw new ContractValidationError("CvSamplesPage");
+  return value;
 }
 
 export function parseAgentSession(value: unknown): AgentSession {

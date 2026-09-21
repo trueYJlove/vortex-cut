@@ -14,7 +14,7 @@ function setup() {
 describe("Stage2B IPC", () => {
   it("只注册冻结白名单并精确转发 prepare/create", async () => {
     const { handlers, fetchWithUi } = setup();
-    expect([...handlers.keys()]).toEqual(["planning-patch:prepare", "planning-patch:test-provider-capability", "planning-patch:create", "planning-patch:generation-get", "planning-patch:proposal-list", "planning-patch:proposal-get", "planning-patch:proposal-apply", "timeline:revision-diff", "agent-session:prepare", "agent-session:create", "agent-session:list", "agent-session:get", "cv-analysis:get"]);
+    expect([...handlers.keys()]).toEqual(["planning-patch:prepare", "planning-patch:test-provider-capability", "planning-patch:create", "planning-patch:generation-get", "planning-patch:proposal-list", "planning-patch:proposal-get", "planning-patch:proposal-apply", "timeline:revision-diff", "agent-session:prepare", "agent-session:create", "agent-session:list", "agent-session:get", "cv-analysis:get", "cv-samples:list"]);
     fetchWithUi.mockResolvedValueOnce({ timeline_patch_egress_preview_id: "preview_1", provider: { display_name: "Provider", origin: "https://provider.test", model: "model" }, prompt_template_version: "timeline-patch-v1", output_schema_version: "timeline-patch-output-v1", sent_fields: ["instruction"], payload_sha256: hash, character_count: 10, estimated_tokens: 3, clip_count: 1, caption_count: 0, locked_count: 0, expires_at: now });
     await handlers.get("planning-patch:prepare")?.({}, { project_id: "project_1", base_revision_id: "revision_1", provider_config_id: "provider_1", instruction: "缩短开头" });
     expect(fetchWithUi).toHaveBeenCalledWith("/api/v1/projects/project_1/timeline-patch-generations/prepare", { method: "POST", body: JSON.stringify({ base_revision_id: "revision_1", provider_config_id: "provider_1", instruction: "缩短开头" }) });
@@ -33,6 +33,13 @@ describe("Stage2B IPC", () => {
     fetchWithUi.mockResolvedValueOnce(session);
     await expect(handlers.get("agent-session:get")?.({}, "agent_session_1")).resolves.toEqual(session);
     await expect(handlers.get("agent-session:prepare")?.({}, { project_id: "project_1", base_revision_id: "revision_1", provider_config_id: "provider_1", instruction: "" })).rejects.toThrow();
+  });
+
+  it("cv-samples:list：GET 样本页（sparkline 数据）", async () => {
+    const { handlers, fetchWithUi } = setup();
+    fetchWithUi.mockResolvedValueOnce({ asset_id: "asset_1", samples: [{ timestamp_us: 0, scene_cut: false, motion_energy: 0.1, sharpness: 0.2, brightness: 0.3, audio_energy: 0.4 }] });
+    await expect(handlers.get("cv-samples:list")?.({}, { project_id: "project_1", asset_id: "asset_1" })).resolves.toMatchObject({ asset_id: "asset_1" });
+    expect(fetchWithUi).toHaveBeenCalledWith("/api/v1/projects/project_1/assets/asset_1/cv-samples", undefined);
   });
 
   it("cv-analysis：generate 透传布尔，摘要返回不含路径字段", async () => {
