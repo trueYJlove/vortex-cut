@@ -75,7 +75,7 @@ import {
 } from "./types.js";
 import { TimelinePlayheadLayer } from "./TimelinePlayheadLayer.js";
 import { createPlayheadStore, type PlayheadStore } from "./playhead-store.js";
-import { ThumbnailLoader } from "./thumbnail-loader.js";
+import { ThumbnailLoader, defaultFilmstripSourceFactory } from "./thumbnail-loader.js";
 import { OVERSCAN_ROWS, filterVisibleRects } from "./viewport-index.js";
 import type { WaveformCache } from "./waveform-cache.js";
 
@@ -207,8 +207,11 @@ function IconButton({
 
 /** 帧数档位：缩放时量化到最近档，小幅缩放直接复用已抽帧（不重抽）。
  *  上限 64（配合"只抽可视区格子"的按需请求，seek 负载仍有界）——
- *  长片段放大后格宽能继续变小，帧与时间对位随之更准。 */
-const FRAME_COUNT_STEPS = [1, 2, 3, 4, 6, 8, 11, 14, 18, 24, 32, 40, 48, 56, 64];
+ *  长片段放大后格宽能继续变小，帧与时间对位随之更准。
+ *  档位对齐剪映密度：格宽基准 44px + 3 步进细档——同宽下格数与剪映一致
+ *  （11.8s 片段 @~94pps：剪映 22 格，旧 56px/粗档只有 18 格），格间距越小
+ *  硬切场景的采样错位越不易被察觉。 */
+const FRAME_COUNT_STEPS = [1, 2, 3, 4, 5, 6, 8, 10, 13, 16, 20, 24, 29, 35, 42, 50, 58, 64];
 export function quantizeFrameCount(raw: number): number {
   const capped = Math.max(1, Math.min(64, raw));
   let best = FRAME_COUNT_STEPS[0];
@@ -224,7 +227,7 @@ export function quantizeFrameCount(raw: number): number {
 }
 
 /** Compute (mediaUrl, seek time) pairs for a clip's filmstrip frames.
- *  所见即所得：格位由片段的【时间线】时长均匀切分（格宽≈56px 量化档位），
+ *  所见即所得：格位由片段的【时间线】时长均匀切分（格宽≈44px 量化档位），
  *  每帧 seek 该格中心的源时刻（含变速/倒放映射：源时刻 = source_start +
  *  时间线偏移 × speed，倒放从 source_end 反向）；绘制端按 fromUs/toUs 精确
  *  落位——片段放得越大、格越小，帧与时间的对位误差越小。
@@ -239,7 +242,7 @@ export function computeFrameRequests(
   if (!isVisual) return [];
   const timelineDurUs = clip.timeline_end_us - clip.timeline_start_us;
   if (timelineDurUs <= 0) return [];
-  const count = quantizeFrameCount(Math.round(((timelineDurUs / 1_000_000) * pps) / 56));
+  const count = quantizeFrameCount(Math.round(((timelineDurUs / 1_000_000) * pps) / 44));
   const sourceStartUs = clip.source_start_us ?? 0;
   const sourceEndUs = clip.source_end_us ?? 0;
   const speed = (clip.speed_milli ?? 1000) / 1000;
@@ -814,14 +817,14 @@ function drawTimeline(
     ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
 
     // 2) 缩略图带（视频/图片）：所见即所得——片段【时间线】时长均匀切格
-    //    （格宽≈56px 档位），每格 seek 该格中心的源时刻，绘制按格位精确落位
+    //    （格宽≈44px 档位），每格 seek 该格中心的源时刻，绘制按格位精确落位
     //    并等比 cover 裁切（不拉伸、不留缝）。播放头压在哪一格，看到的就是
     //    那一刻的内容；片段放得越大格越小、对位越准。缩放换档后旧帧经
     //    ":any:" 别名兜底，新档位帧到达即逐格替换。
     if (thumbnailCache && isVisualClip && rect.width > 10) {
       const clipDurUs = rect.clip.timeline_end_us - rect.clip.timeline_start_us;
       if (clipDurUs > 0) {
-        const frameCount = quantizeFrameCount(Math.round(((clipDurUs / 1_000_000) * view.pixelsPerSecond) / 56));
+        const frameCount = quantizeFrameCount(Math.round(((clipDurUs / 1_000_000) * view.pixelsPerSecond) / 44));
         const clipRight = rect.x + rect.width;
         // 帧只画在名称条以下的体内；cover 的垂直溢出由该矩形裁掉。
         ctx.save();
@@ -836,7 +839,7 @@ function drawTimeline(
           const cellW = Math.max(1, timeToX(cellToUs, view) - cellX);
           const frame =
             thumbnailCache.get(`${rect.clip.clip_id}:${frameCount}:${fi}`) ??
-            thumbnailCache.get(`${rect.clip.clip_id}:any:${fi}`);
+            thumbnailCache.get(`${rect.clip.clip_id}:any:${frameCount}:${fi}`);
           if (!frame || frame.height <= 0 || frame.width <= 0) continue; // 未抽好，到达后补上
           const scale = Math.max(cellW / frame.width, bodyH / frame.height);
           const drawW = frame.width * scale;
@@ -1783,29 +1786,43 @@ export function TimelinePanel({
   // A08：缩略图加载器——组件作用域 owner（非全局单例），请求带 viewport
   // epoch/priority；旧视口未开始的任务取消、超时 5s 不堵队列、完成回调
   // rAF 批量通知（详见 timeline/thumbnail-loader.ts）。
-  const thumbnailLoaderRef = useRef<ThumbnailLoader | null>(null);
-  if (!thumbnailLoaderRef.current) {
-    thumbnailLoaderRef.current = new ThumbnailLoader({
+  // loader 持有走 state 而非渲染期 ref 惰性初始化：StrictMode（dev）的
+  // setup→cleanup→setup 会 dispose 掉 ref 实例且 ref 不重建——之后所有请求
+  // 静默返回 null，视频抽帧永不出现（安装版无双跑故不复现）。effect 里创建
+  // /清理让 StrictMode 重挂载拿到新实例，生产行为不变。
+  const [thumbnailLoader, setThumbnailLoader] = useState<ThumbnailLoader | null>(null);
+  // 档位淘汰计票（问题3修复）：tier → 连续未成为当前档位的轮数。
+  const tierStaleRoundsRef = useRef<Map<string, number>>(new Map());
+  useEffect(() => {
+    const loader = new ThumbnailLoader({
+      // 抽帧源：首选 filmstrip worker（WebCodecs 硬解，FIFO 出队 = 源时间
+      // 单调 → 近似一次线性解码 pass）；不可用时 loader 内部降级 video seek。
+      createFilmstripSource: defaultFilmstripSourceFactory(assetId => window.desktop.assetMediaTicket(assetId).then(result => result.media_url)),
       onBatchLoaded: keys => {
         const cache = thumbnailCache.current;
-        const loader = thumbnailLoaderRef.current;
         if (!loader) return;
         let changed = false;
         for (const key of keys) {
           const frame = loader.peek(key);
           if (!frame) continue;
-          const [clipId, , frameIndex] = key.split(":");
+          // 键形 = clipId:frameCount:fi。别名键带档位（frameCount）：
+          // 兜底语义 = 同档位内"epoch 取消未入缓存的格"复用本档位已抽帧；
+          // 旧实现无档位（clipId:any:fi），跨档位同 fi 时间点不同——换档后
+          // 旧图按同 fi 落在新格位上，出现"抽帧内容与所在位置对不上"。
+          const [clipId, frameCount, frameIndex] = key.split(":");
           cache.set(key, frame.canvas);
-          cache.set(`${clipId}:any:${frameIndex}`, frame.canvas);
+          cache.set(`${clipId}:any:${frameCount}:${frameIndex}`, frame.canvas);
           changed = true;
         }
         if (changed) setThumbnailVersion(v => v + 1);
       },
     });
-  }
-  const thumbnailLoader = thumbnailLoaderRef.current;
-  // 卸载/滚动视口代次推进：旧任务出队即丢；卸载释放 video/缓存。
-  useEffect(() => () => thumbnailLoader.dispose(), [thumbnailLoader]);
+    setThumbnailLoader(loader);
+    return () => {
+      loader.dispose();
+      setThumbnailLoader(current => (current === loader ? null : current));
+    };
+  }, []);
 
   // B14 波形：素材级金字塔缓存（App 注入；绘制路径按 clip 取窗）。
   // 版本号 = 金字塔 ready/失效信号——驱动主画布重绘（不随播放头变化）。
@@ -1816,6 +1833,7 @@ export function TimelinePanel({
   // （别名键 ":any:"），新帧就绪后逐格替换——缩放时画面不消失。请求防抖
   // 200ms，连续缩放不触发重抽风暴。
   useEffect(() => {
+    if (!thumbnailLoader) return; // StrictMode 重挂载间隙：新 loader 到位后再发请求
     const timer = window.setTimeout(() => {
       const cache = thumbnailCache.current;
       const clipIds = new Set(clips.map((clip) => clip.clip_id));
@@ -1842,7 +1860,7 @@ export function TimelinePanel({
               captured.height = Math.max(2, img.naturalHeight || 54);
               captured.getContext("2d")?.drawImage(img, 0, 0, captured.width, captured.height);
               cache.set(key, captured);
-              cache.set(`${rect.clip.clip_id}:any:${fi}`, captured);
+              cache.set(`${rect.clip.clip_id}:any:${frames.length}:${fi}`, captured);
               pendingImageKeys.current.delete(`${key}:img`);
               setThumbnailVersion((v) => v + 1);
             };
@@ -1853,6 +1871,7 @@ export function TimelinePanel({
           const inCoreViewport = cellLeft >= 0 && cellRight <= canvasSize.width;
           void thumbnailLoader.request({
             key,
+            assetId: rect.clip.asset_id,
             url: frames[fi].url,
             timeSec: frames[fi].timeSec,
             priority: inCoreViewport ? 0 : 1,
@@ -1866,6 +1885,34 @@ export function TimelinePanel({
         if (!thumbnailLoader.peek(key) && !key.includes(":any:")) {
           const clipId = key.split(":")[0] as TimelineClipId;
           if (!clipIds.has(clipId)) cache.delete(key);
+        }
+      }
+      // 档位收敛【按轮次计票】：连续 N 轮（3 轮 ≈ 600ms）都未成为当前档位的
+      // 键才淘汰——缩放是连续动画（每轮 pps 都在变），按"单轮非当前"清理会把
+      // 抽了一半的新档位帧删掉（实测：缩放后抽帧消失只剩一帧的根因）。
+      const currentTiers = new Set<string>();
+      for (const rect of clipRects) {
+        if ((rect.clip.asset_kind === "video" || rect.clip.asset_kind === "image")
+          && (rect.clip.timeline_end_us - rect.clip.timeline_start_us) > 0) {
+          const count = quantizeFrameCount(Math.round((((rect.clip.timeline_end_us - rect.clip.timeline_start_us) / 1_000_000) * view.pixelsPerSecond) / 44));
+          currentTiers.add(`${rect.clip.clip_id}:${count}`);
+        }
+      }
+      const tierStaleRounds = tierStaleRoundsRef.current;
+      for (const tier of [...tierStaleRounds.keys()]) {
+        if (currentTiers.has(tier)) tierStaleRounds.delete(tier);
+        else tierStaleRounds.set(tier, (tierStaleRounds.get(tier) ?? 0) + 1);
+      }
+      const staleTiers = new Set(
+        [...tierStaleRounds.entries()].filter(([, rounds]) => rounds >= 3).map(([tier]) => tier),
+      );
+      for (const stale of staleTiers) tierStaleRounds.delete(stale);
+      if (staleTiers.size > 0) {
+        for (const key of [...cache.keys()]) {
+          const parts = key.split(":");
+          // 精确键 clipId:frameCount:fi；别名键 clipId:any:frameCount:fi
+          const tier = key.includes(":any:") ? `${parts[0]}:${parts[2]}` : `${parts[0]}:${parts[1]}`;
+          if (staleTiers.has(tier)) cache.delete(key);
         }
       }
       while (cache.size > 600) {

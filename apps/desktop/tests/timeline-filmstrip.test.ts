@@ -23,9 +23,9 @@ function clip(overrides: Partial<TimelineClip> = {}): TimelineClip {
 
 describe("filmstrip frame requests — 时间对位（所见即所得）", () => {
   it("格位由时间线时长均匀切分，帧时刻=格中心，含格位边界", () => {
-    // 10s 片段 @ 60pps → 600px → 档位 11 帧。
+    // 10s 片段 @ 60pps → 600px → 档位 13 帧。
     const frames = computeFrameRequests("aivideo://media/x", clip(), 60);
-    expect(frames.length).toBe(quantizeFrameCount(Math.round(600 / 56)));
+    expect(frames.length).toBe(quantizeFrameCount(Math.round(600 / 44)));
     const count = frames.length;
     const step = 10_000_000 / count;
     for (let i = 0; i < count; i++) {

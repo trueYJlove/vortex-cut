@@ -86,6 +86,7 @@ function makeLoader(video: StubVideo, options: Partial<ConstructorParameters<typ
 function request(overrides: Partial<ThumbnailRequest> = {}): ThumbnailRequest {
   return {
     key: "clip_1:8:0",
+    assetId: "asset_1",
     url: "aivideo://media/token-1",
     timeSec: 0.5,
     viewportEpoch: 0,

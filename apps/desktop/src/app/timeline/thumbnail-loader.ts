@@ -1,21 +1,37 @@
-/** 时间线缩略图加载器（A08）：从 TimelineCanvas 抽出的帧请求调度。
-
+/** 时间线缩略图加载器（A08 → filmstrip WebCodecs 化 2026-09-22）：从
+ *  TimelineCanvas 抽出的帧请求调度。
+ *
  *  - 组件/项目作用域 owner：每个 TimelinePanel 实例一个 loader（非全局
  *    单例——旧实现共享全局 video 元素，跨项目切换会串状态）。
  *  - 请求含 owner、viewportEpoch、priority、assetKey、sourceTime、
  *    sizeBucket；尚未开始的旧 viewport 任务取消（epoch 失配即丢），
- *    active 任务最多一个（隐藏 video 元素串行 seek 的固有约束）。
- *  - loadeddata/seeked 超时初值 5 秒；finally 无条件清监听器并继续队列
- *    （坏媒体不堵住后续请求）。
+ *    active 任务最多一个（解码器串行约束）。
+ *  - 帧来源按素材分源（FrameSource）：首选 FilmstripSource（专用 worker，
+ *    WebCodecs 硬解 + Range 字节源，FIFO 出队 = 源时间单调 → 近似一次线性
+ *    解码 pass，每 GOP 只解一遍）；worker/编解码不可用时降级
+ *    VideoSeekFrameSource（隐藏 video 元素串行 seek，原 A08 路径）。
+ *  - 活跃源上限 2（LRU 驱逐）；空闲 20s 自动释放（解码器内存不常驻）。
+ *  - 超时初值 5 秒（video seek 路径；filmstrip 路径自持 15s 解码超时）；
+ *    finally 无条件清监听器并继续队列（坏媒体不堵住后续请求）。
  *  - seek 同 currentTime 时直接取当前已就绪帧，不等待不会发生的 seeked。
  *  - 完成回调按 rAF 批量通知（一帧多次到达只触发一次上层重渲）。
- *  - 缓存按 key（asset+sourceTime+sizeBucket+content generation）共享，
- *    维持条数上限并做 bytes 记账（width*height*4 估算）。
+ *  - 缓存按 key（asset+帧序/档位+content generation）共享，维持条数上限
+ *    并做 bytes 记账（width*height*4 估算）。
  */
+import { FilmstripSource, type FrameSource, type ReissueTicket } from "./filmstrip-source.js";
+
+/** dev 诊断（同 filmstrip-source.diagWarn；生产恒 false）。 */
+const LOADER_DIAG: boolean = import.meta.env.DEV;
+function diagWarn(message: string): void {
+  if (LOADER_DIAG) console.warn(`[thumbnails] ${message}`);
+}
+
 export interface ThumbnailRequest {
   /** 帧缓存键（调用方组合 asset/帧序/档位）。 */
   key: string;
-  /** 媒体 URL（票据 URL）。 */
+  /** 素材 id（分源：同素材共享一个解码源）。 */
+  assetId: string;
+  /** 媒体 URL（票据 URL；filmstrip 源的 hint——开工前会重签新票）。 */
   url: string;
   /** 目标源时刻（秒）。 */
   timeSec: number;
@@ -31,17 +47,26 @@ export interface ThumbnailFrame {
   height: number;
 }
 
+/** 每素材帧源契约（filmstrip-source.ts 实现 + video 回退实现）。 */
+export type ThumbnailFrameSource = FrameSource;
+
 export interface ThumbnailLoaderOptions {
   /** 帧缓存条数上限（默认 600，与旧实现一致）。 */
   maxEntries?: number;
-  /** 单请求超时（ms，默认 5000）。 */
+  /** 单请求超时（ms，默认 5000；video seek 路径用）。 */
   requestTimeoutMs?: number;
   /** 完成通知节流（rAF；jsdom 无 rAF 时直接同步）。 */
   onBatchLoaded?: (keys: string[]) => void;
-  /** 供测试注入的隐藏 video 工厂。 */
+  /** 供测试注入的隐藏 video 工厂（video 回退路径）。 */
   createVideo?: () => HTMLVideoElement | null;
   /** 供测试注入的计时函数。 */
   scheduleTimer?: (callback: () => void, ms: number) => () => void;
+  /** 供测试注入的 filmstrip 源工厂；返回 null = 该素材降级 video 路径。 */
+  createFilmstripSource?: (input: { assetId: string; url: string }) => Promise<FrameSource | null>;
+  /** 活跃源上限（默认 2）。 */
+  maxActiveSources?: number;
+  /** 源空闲释放时长（ms，默认 20_000）。 */
+  sourceIdleMs?: number;
 }
 
 /** 计数口径（测试与诊断）。 */
@@ -61,6 +86,94 @@ interface QueueItem extends ThumbnailRequest {
 }
 
 const ESTIMATED_BYTES_PER_PIXEL = 4;
+const DEFAULT_MAX_ACTIVE_SOURCES = 2;
+const DEFAULT_SOURCE_IDLE_MS = 20_000;
+
+/** video 回退帧源：原 A08 隐藏 video 串行 seek 抽帧（runJob 逻辑原样迁入）。 */
+class VideoSeekFrameSource implements FrameSource {
+  private video: HTMLVideoElement | null = null;
+  private currentUrl: string | null = null;
+
+  constructor(
+    private readonly url: string,
+    private readonly requestTimeoutMs: number,
+    private readonly createVideo: () => HTMLVideoElement | null,
+    private readonly scheduleTimer: (callback: () => void, ms: number) => () => void,
+    private readonly onTimeout: () => void,
+  ) {}
+
+  async loadFrame(timeSec: number): Promise<HTMLCanvasElement | null> {
+    const video = (this.video ??= this.createVideo());
+    if (!video) return null;
+    try {
+      if (this.currentUrl !== this.url) {
+        await this.awaitEvent(
+          video,
+          ["loadeddata"],
+          () => { video.src = this.url; this.currentUrl = this.url; video.load(); },
+        );
+      }
+      if (video.readyState < 2) return null;
+      const target = Math.max(0, timeSec);
+      if (Math.abs(video.currentTime - target) > 1e-4) {
+        await this.awaitEvent(video, ["seeked"], () => { video.currentTime = target; });
+      }
+      const width = Math.max(2, Math.min(160, video.videoWidth || 96));
+      const height = Math.max(2, Math.round((width * (video.videoHeight || 54)) / (video.videoWidth || 96)));
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return null;
+      ctx.drawImage(video, 0, 0, width, height);
+      return canvas;
+    } catch {
+      return null; // 解码/寻址/超时失败：跳过该帧（不堵队列）。
+    }
+  }
+
+  dispose(): void {
+    this.video = null;
+    this.currentUrl = null;
+  }
+
+  /** 事件等待 + 超时：finally 无条件清理监听器（坏媒体不泄漏监听）。 */
+  private awaitEvent(target: HTMLVideoElement, successEvents: string[], begin: () => void): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      let done = false;
+      const cancelTimer = this.scheduleTimer(() => {
+        if (done) return;
+        done = true;
+        cleanup();
+        this.onTimeout();
+        reject(new Error("thumbnail request timed out"));
+      }, this.requestTimeoutMs);
+      const onSuccess = () => { if (done) return; done = true; cancelTimer(); cleanup(); resolve(); };
+      const onError = () => { if (done) return; done = true; cancelTimer(); cleanup(); reject(new Error("media failed")); };
+      function cleanup() {
+        for (const name of successEvents) target.removeEventListener(name, onSuccess);
+        target.removeEventListener("error", onError);
+      }
+      for (const name of successEvents) target.addEventListener(name, onSuccess);
+      target.addEventListener("error", onError);
+      try {
+        begin();
+      } catch (error) {
+        done = true;
+        cancelTimer();
+        cleanup();
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+  }
+}
+
+interface SourceEntry {
+  source: FrameSource;
+  busy: boolean;
+  lastUsedAt: number;
+  idleTimerCancel: (() => void) | null;
+}
 
 export class ThumbnailLoader {
   private readonly cache = new Map<string, ThumbnailFrame>();
@@ -68,13 +181,17 @@ export class ThumbnailLoader {
   private readonly queue: QueueItem[] = [];
   private busy = false;
   private disposed = false;
-  private video: HTMLVideoElement | null = null;
-  private currentUrl: string | null = null;
   private readonly maxEntries: number;
   private readonly requestTimeoutMs: number;
   private readonly onBatchLoaded: ((keys: string[]) => void) | undefined;
   private readonly createVideo: () => HTMLVideoElement | null;
   private readonly scheduleTimer: (callback: () => void, ms: number) => () => void;
+  private readonly createFilmstripSource: ((input: { assetId: string; url: string }) => Promise<FrameSource | null>) | null;
+  private readonly maxActiveSources: number;
+  private readonly sourceIdleMs: number;
+  /** 每素材帧源（filmstrip 首选 / video 回退）；LRU 上限 + 空闲释放。 */
+  private readonly sources = new Map<string, SourceEntry>();
+  private readonly degradedAssets = new Set<string>();
   private batchNotifyScheduled = false;
   private batchLoadedKeys: string[] = [];
   readonly stats: ThumbnailLoaderStats = {
@@ -104,6 +221,9 @@ export class ThumbnailLoader {
       const timer = setTimeout(callback, ms);
       return () => clearTimeout(timer);
     });
+    this.createFilmstripSource = options.createFilmstripSource ?? null;
+    this.maxActiveSources = options.maxActiveSources ?? DEFAULT_MAX_ACTIVE_SOURCES;
+    this.sourceIdleMs = options.sourceIdleMs ?? DEFAULT_SOURCE_IDLE_MS;
   }
 
   /** 当前视口代次：滚动/缩放后由调用方递增；旧代次任务出队即丢。 */
@@ -175,6 +295,11 @@ export class ThumbnailLoader {
     this.queue.splice(0).forEach(item => item.resolve(null));
     this.pendingKeys.clear();
     this.cache.clear();
+    for (const entry of this.sources.values()) {
+      if (entry.idleTimerCancel) entry.idleTimerCancel();
+      entry.source.dispose();
+    }
+    this.sources.clear();
     this.recalculateStats();
   }
 
@@ -231,85 +356,91 @@ export class ThumbnailLoader {
     }
   }
 
-  /** seek 同 currentTime 时直接取当前已就绪帧（不等待不会发生的 seeked）。 */
-  private async runJob(job: QueueItem): Promise<ThumbnailFrame | null> {
-    const video = this.ensureVideo();
-    if (!video) return null;
-    try {
-      if (this.currentUrl !== job.url) {
-        await this.awaitEvent(
-          video,
-          ["loadeddata"],
-          "load",
-          () => { video.src = job.url; this.currentUrl = job.url; video.load(); },
-          this.requestTimeoutMs,
-        );
-      }
-      if (video.readyState < 2) return null;
-      const target = Math.max(0, job.timeSec);
-      if (Math.abs(video.currentTime - target) > 1e-4) {
-        await this.awaitEvent(
-          video,
-          ["seeked"],
-          "seek",
-          () => { video.currentTime = target; },
-          this.requestTimeoutMs,
-        );
-      }
-      const width = Math.max(2, Math.min(160, video.videoWidth || 96));
-      const height = Math.max(2, Math.round((width * (video.videoHeight || 54)) / (video.videoWidth || 96)));
-      const frame = document.createElement("canvas");
-      frame.width = width;
-      frame.height = height;
-      const ctx = frame.getContext("2d");
-      if (!ctx) return null;
-      ctx.drawImage(video, 0, 0, width, height);
-      return { canvas: frame, width, height };
-    } catch {
-      return null; // 解码/寻址/超时失败：跳过该帧（不堵队列）。
+  private createVideoSource(job: ThumbnailRequest): SourceEntry {
+    const source = new VideoSeekFrameSource(job.url, this.requestTimeoutMs, this.createVideo, this.scheduleTimer, () => { this.stats.timeouts += 1; });
+    const entry: SourceEntry = { source, busy: false, lastUsedAt: Date.now(), idleTimerCancel: null };
+    this.sources.set(job.assetId, entry);
+    this.armIdleTimer(job.assetId, entry);
+    return entry;
+  }
+
+  /** LRU 驱逐一个非在用源（未在用时关其空闲计时器并 dispose）。 */
+  private evictIdleSource(): void {
+    for (const [assetId, entry] of this.sources) {
+      if (entry.busy) continue;
+      if (entry.idleTimerCancel) entry.idleTimerCancel();
+      entry.source.dispose();
+      this.sources.delete(assetId);
+      return;
     }
   }
 
-  private ensureVideo(): HTMLVideoElement | null {
-    if (this.video) return this.video;
-    this.video = this.createVideo();
-    return this.video;
+  private armIdleTimer(assetId: string, entry: SourceEntry): void {
+    if (entry.idleTimerCancel) entry.idleTimerCancel();
+    entry.idleTimerCancel = this.scheduleTimer(() => {
+      if (entry.busy) { this.armIdleTimer(assetId, entry); return; }
+      if (this.sources.get(assetId) === entry) {
+        entry.source.dispose();
+        this.sources.delete(assetId);
+      }
+    }, this.sourceIdleMs);
   }
 
-  /** 事件等待 + 超时：finally 无条件清理监听器（坏媒体不泄漏监听）。 */
-  private awaitEvent(
-    target: HTMLVideoElement,
-    successEvents: string[],
-    _phase: string,
-    begin: () => void,
-    timeoutMs: number,
-  ): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      let done = false;
-      const cancelTimer = this.scheduleTimer(() => {
-        if (done) return;
-        done = true;
-        cleanup();
-        this.stats.timeouts += 1;
-        reject(new Error("thumbnail request timed out"));
-      }, timeoutMs);
-      const onSuccess = () => { if (done) return; done = true; cancelTimer(); cleanup(); resolve(); };
-      const onError = () => { if (done) return; done = true; cancelTimer(); cleanup(); reject(new Error("media failed")); };
-      function cleanup() {
-        for (const name of successEvents) target.removeEventListener(name, onSuccess);
-        target.removeEventListener("error", onError);
-      }
-      for (const name of successEvents) target.addEventListener(name, onSuccess);
-      target.addEventListener("error", onError);
-      try {
-        begin();
-      } catch (error) {
-        done = true;
-        cancelTimer();
-        cleanup();
-        reject(error instanceof Error ? error : new Error(String(error)));
-      }
-    });
+  /** 取（或创建）素材帧源并执行请求。同步序言直达 loadFrame（video 回退
+   *  路径的事件监听必须在 pump 的同步栈内注册——测试/真实 load 事件都依赖
+   *  "请求发出后、事件到达前监听就绪"）；filmstrip 源创建才走异步。 */
+  private runJob(job: QueueItem): Promise<ThumbnailFrame | null> {
+    const entry = this.sources.get(job.assetId);
+    if (entry) {
+      if (entry.busy) return Promise.resolve(null); // 同素材上一帧仍在途：丢弃本轮（effect 重跑会补）
+      return this.invokeSource(job, entry);
+    }
+    if (this.degradedAssets.has(job.assetId) || !this.createFilmstripSource) {
+      const created = this.createVideoSource(job);
+      return this.invokeSource(job, created);
+    }
+    if (this.sources.size >= this.maxActiveSources) this.evictIdleSource();
+    if (this.sources.size >= this.maxActiveSources) {
+      // 上限已满且无空闲可逐：丢弃本轮（effect 重跑会再请求）。
+      return Promise.resolve(null);
+    }
+    return this.createFilmstripAndRun(job);
+  }
+
+  /** filmstrip 源异步创建后执行（init 失败降级 video 路径，按素材记忆）。 */
+  private async createFilmstripAndRun(job: QueueItem): Promise<ThumbnailFrame | null> {
+    let source: FrameSource | null = null;
+    try {
+      source = await this.createFilmstripSource!({ assetId: job.assetId, url: job.url });
+    } catch (error) {
+      diagWarn(`filmstrip init failed asset=${job.assetId}: ${error instanceof Error ? error.message : String(error)} → video 回退`);
+      // init 失败（WebCodecs 不可用/编解码不支持/BMFF 解析失败）。
+    }
+    if (this.disposed) return null;
+    if (!source) {
+      this.degradedAssets.add(job.assetId);
+      const created = this.createVideoSource(job);
+      return this.invokeSource(job, created);
+    }
+    const entry: SourceEntry = { source, busy: false, lastUsedAt: Date.now(), idleTimerCancel: null };
+    this.sources.set(job.assetId, entry);
+    this.armIdleTimer(job.assetId, entry);
+    if (entry.busy) return null;
+    return this.invokeSource(job, entry);
+  }
+
+  /** 源互斥执行：同素材串行（解码器状态机约束）。loadFrame 在本异步函数的
+   *  同步序言内调用（见 runJob 注释）。 */
+  private async invokeSource(job: QueueItem, entry: SourceEntry): Promise<ThumbnailFrame | null> {
+    entry.busy = true;
+    try {
+      const canvas = await entry.source.loadFrame(job.timeSec);
+      return canvas ? { canvas, width: Math.max(2, canvas.width), height: Math.max(2, canvas.height) } : null;
+    } finally {
+      entry.busy = false;
+      entry.lastUsedAt = Date.now();
+      this.armIdleTimer(job.assetId, entry);
+    }
   }
 
   /** 完成回调按 rAF 批量通知：一帧多次完成只通知一次上层。 */
@@ -326,4 +457,11 @@ export class ThumbnailLoader {
     if (typeof requestAnimationFrame === "function") requestAnimationFrame(flush);
     else flush();
   }
+}
+
+/** 默认 filmstrip 源工厂（生产路径）：reissueTicket 走主进程轻量重签 IPC。 */
+export function defaultFilmstripSourceFactory(reissueTicket: ReissueTicket) {
+  return async ({ assetId, url }: { assetId: string; url: string }): Promise<FrameSource | null> => {
+    return await FilmstripSource.create(assetId, url, reissueTicket);
+  };
 }

@@ -128,6 +128,8 @@ export interface DesktopApi {
   /** E2E 基准专用：从 AIVS_E2E_ASSET_PATHS_LIST 夹具表按文件名导入；非基准环境无该表则拒绝。 */
   importAssetByFixture: (input: { project_id: ProjectId; fixture_file: string }) => Promise<ImportedAsset | null>;
   refreshAsset: (assetId: string) => Promise<AssetPresentation>;
+  /** 按素材重签媒体票据（时间线抽帧源）；不触发 Core 素材重扫。 */
+  assetMediaTicket: (assetId: string) => Promise<{ media_url: string }>;
   relocateAsset: (input: { asset_id: string }) => Promise<ImportedAsset | null>;
   /** 删除素材；remove_timeline_clips=true 时级联删除时间线相关片段，返回清理计数。 */
   deleteAsset: (input: { asset_id: string; remove_timeline_clips?: boolean }) => Promise<{ removed_clips: number; removed_captions: number }>;
@@ -295,6 +297,7 @@ const api: DesktopApi = {
   importAsset: input => ipcRenderer.invoke("asset:import", input),
   importAssetByFixture: input => ipcRenderer.invoke("asset:import-fixture", input),
   refreshAsset: assetId => ipcRenderer.invoke("asset:refresh", assetId),
+  assetMediaTicket: assetId => ipcRenderer.invoke("asset:media-ticket", assetId),
   relocateAsset: input => ipcRenderer.invoke("asset:relocate", input),
   deleteAsset: input => ipcRenderer.invoke("asset:delete", input),
   revealAsset: assetId => ipcRenderer.invoke("asset:reveal", assetId),

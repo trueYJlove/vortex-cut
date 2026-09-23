@@ -349,6 +349,13 @@ async function createWindow(): Promise<void> {
       void appendLog(logPath, `renderer console[level=${level}] ${message} @${sourceId}:${line}`);
     });
   }
+  // AIVS_RENDERER_CONSOLE=1（dev 诊断开关）：渲染进程 console 落桌面日志
+  //（抽帧链路在 worker 内报错，无此通道时现场无从定位）。
+  if (!app.isPackaged && process.env.AIVS_RENDERER_CONSOLE === "1") {
+    windowRef.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+      void appendLog(logPath, `renderer-console[level=${level}] ${message} @${sourceId}:${line}`);
+    });
+  }
   windowRef.on("closed", () => { void appendLog(logPath, "window closed"); windowRef = undefined; });
   // M3-0 探针：仅 dev + AIVS_M3_PROBE 时向加载 URL 追加 ?probe=<名>（§7.1 第 1 层）。
   const probeQuery = probeLoadQuery();
@@ -419,6 +426,12 @@ function registerIpc(): void {
   ipcMain.handle("asset:refresh", async (_event, assetId: string) => {
     const asset = await fetchWithUi<Asset>(`${API_PREFIX}/assets/${asId(assetId, "asset_id")}/refresh`, { method: "POST" });
     return await assetPresentation(asset);
+  });
+  // 按素材重签媒体票据（时间线抽帧 filmstrip worker 用）：restrictedMediaUrl
+  // 已注册路径纯内存签发（零网络），未注册才走带退避的 Core resolve。与
+  // asset:refresh 的区别：不触发 Core 侧素材重扫。
+  ipcMain.handle("asset:media-ticket", async (_event, assetId: string) => {
+    return { media_url: await restrictedMediaUrl(asId(assetId, "asset_id")) };
   });
   // E2E-only multi-asset import: selects from an explicit benchmark fixture map
   // (AIVS_E2E_ASSET_PATHS_LIST = {"F07.mp4": "...", ...}) instead of a dialog.
