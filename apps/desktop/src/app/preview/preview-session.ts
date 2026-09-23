@@ -181,6 +181,31 @@ export class PreviewSession {
   get uploadSplitDebug(): Array<{ copyToMs: number; texMs: number }> {
     return this.compositor?.uploadSplit ?? [];
   }
+  /** 当前合成画面 PNG 截帧（项目封面取帧用）：worker 侧全画布 convertToBlob
+   *  回读。返回 PNG 字节 + 内容区几何（IR 画布 contain 居中于后备缓冲的
+   *  fit 矩形——调用方据此裁掉留边）。会话已 dispose/无合成器（v1 静态
+   *  路径）返回 null。 */
+  async snapshotPng(): Promise<{ buffer: ArrayBuffer; contentX: number; contentY: number; contentW: number; contentH: number } | null> {
+    if (this.disposed || !this.compositor) return null;
+    try {
+      const buffer = await this.compositor.readback();
+      // 几何防御：fitX/Y 可能是浮点甚至轻微负残差（contain 居中除不尽），
+      // 调用方 drawImage 源矩形需非负整数；钳到后备缓冲边界内。
+      const maxX = Math.max(0, this.backing.width - 2);
+      const maxY = Math.max(0, this.backing.height - 2);
+      const contentX = Math.max(0, Math.min(maxX, Math.round(this.fitX)));
+      const contentY = Math.max(0, Math.min(maxY, Math.round(this.fitY)));
+      return {
+        buffer,
+        contentX,
+        contentY,
+        contentW: Math.max(1, Math.min(this.backing.width - contentX, Math.round(this.ir.canvas.width * this.fitScale))),
+        contentH: Math.max(1, Math.min(this.backing.height - contentY, Math.round(this.ir.canvas.height * this.fitScale))),
+      };
+    } catch {
+      return null;
+    }
+  }
   onTimeUs: ((us: number) => void) | null = null;
   private tickets: Map<string, string> | null = null;
   private audioByClip: Map<string, SegmentAudioConfig> | null = null;

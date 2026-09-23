@@ -1325,14 +1325,45 @@ export function App() {
     }
   };
   // 项目封面：从预览画布截取当前播放头帧（本地持久化；无后端依赖）。
-  const captureCover = () => {
-    const video = videoRef.current;
-    if (!video || !video.videoWidth) { showNotice("预览尚未就绪，无法截取封面。", "warning"); return; }
-    const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext("2d")?.drawImage(video, 0, 0);
-    const url = canvas.toDataURL("image/jpeg", 0.85);
+  // 合成模式（默认主力）无 video 元素——帧画在 OffscreenCanvas，经会话的
+  // snapshotPng 回读（含 fit 几何：裁掉 contain 留边）后解码裁剪缩放为
+  // JPEG（≤540px，localStorage 容量安全）；交互/权威模式沿用 video 元素。
+  const syntheticSnapshotRef = useRef<(() => Promise<{ buffer: ArrayBuffer; contentX: number; contentY: number; contentW: number; contentH: number } | null>) | null>(null);
+  const captureCover = async () => {
+    let url: string | null = null;
+    if (previewMode === "synthetic") {
+      const snapshot = await syntheticSnapshotRef.current?.();
+      if (snapshot && snapshot.contentW > 0 && snapshot.contentH > 0) {
+        url = await new Promise<string | null>(resolve => {
+          const blob = new Blob([snapshot.buffer], { type: "image/png" });
+          const blobUrl = URL.createObjectURL(blob);
+          const img = new Image();
+          img.onload = () => {
+            URL.revokeObjectURL(blobUrl);
+            const sx = snapshot.contentX, sy = snapshot.contentY, sw = snapshot.contentW, sh = snapshot.contentH;
+            const scale = Math.min(1, 540 / sw);
+            const canvas = document.createElement("canvas");
+            canvas.width = Math.max(2, Math.round(sw * scale));
+            canvas.height = Math.max(2, Math.round(sh * scale));
+            const ctx = canvas.getContext("2d");
+            if (!ctx) { resolve(null); return; }
+            ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+            resolve(canvas.toDataURL("image/jpeg", 0.85));
+          };
+          img.onerror = () => { URL.revokeObjectURL(blobUrl); resolve(null); };
+          img.src = blobUrl;
+        });
+      }
+    }
+    if (!url) {
+      const video = videoRef.current;
+      if (!video || !video.videoWidth) { showNotice("预览尚未就绪，无法截取封面。", "warning"); return; }
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext("2d")?.drawImage(video, 0, 0);
+      url = canvas.toDataURL("image/jpeg", 0.85);
+    }
     setCoverUrl(url);
     try { localStorage.setItem(`vortex-cut.cover.${project?.project_id ?? "default"}`, url); } catch { /* 配额不足忽略 */ }
     showNotice("已截取当前播放头画面作为项目封面。", "success");
@@ -2089,7 +2120,7 @@ export function App() {
             {previewMode === "authoritative" && authoritativeMediaUrl && <video ref={videoRef} className="preview-foreground authoritative-video" src={authoritativeMediaUrl} aria-label={reframePlayback ? "重构图权威预览视频" : exportPlayback ? "导出视频" : "权威预览视频"} controls onEnded={() => { setPlaying(false); setExportPlayback(undefined); setReframePlayback(undefined); setPreviewMode("synthetic"); }} />}
             {/* 合成预览仅在时间线有可见片段时挂载；空时间线显示引导文案（剪映式），
                 避免对空时间线请求 preview-ir 被 Core 以 TIMELINE_EMPTY 拒绝而回退。 */}
-            {previewMode === "synthetic" && project && working && timeline && working.clips.length > 0 && <SyntheticPreview outputRatio={renderRatio} projectId={project.project_id} revisionId={timeline?.current_revision.timeline_revision_id ?? null} mediaUrls={syntheticMediaUrls} audioByClip={syntheticAudioByClip} pipClips={syntheticPipClips} selectedClipId={pipSelectedId} onSelectClip={clipId => setSelection({ kind: "clip", id: clipId as never })} onCommitPipTransform={(clipId, transform) => { const clip = (working?.clips ?? []).find(item => item.clip_id === clipId); commitPipTransform(clipId as never, { ...(clip?.transform ?? {}), ...transform }); }} onDraftPipMask={(clipId, mask) => draftPipMask(clipId as never, mask)} onCommitPipMask={(clipId, mask) => commitPipMask(clipId as never, mask)} onGesturePause={pausePreviewPlayback} onGestureResume={resumePreviewPlayback} playing={playing && !gestureHoldRef.current} playheadUs={playhead} playheadStore={playheadStore} onTimeUs={us => seekFromPlayback(us)} onEnded={() => setPlaying(false)} onFallback={(reason, code) => { if (!seenAnyTicketRef.current) return; setPreviewMode("interactive"); setSyntheticNotice(syntheticFallbackNotice(reason, code)); }} sourceResolver={previewSourceResolver} resourceTier={resourceTier} forceCopyTo={forceCopyTo} />}
+            {previewMode === "synthetic" && project && working && timeline && working.clips.length > 0 && <SyntheticPreview outputRatio={renderRatio} projectId={project.project_id} revisionId={timeline?.current_revision.timeline_revision_id ?? null} mediaUrls={syntheticMediaUrls} audioByClip={syntheticAudioByClip} pipClips={syntheticPipClips} selectedClipId={pipSelectedId} onSelectClip={clipId => setSelection({ kind: "clip", id: clipId as never })} onCommitPipTransform={(clipId, transform) => { const clip = (working?.clips ?? []).find(item => item.clip_id === clipId); commitPipTransform(clipId as never, { ...(clip?.transform ?? {}), ...transform }); }} onDraftPipMask={(clipId, mask) => draftPipMask(clipId as never, mask)} onCommitPipMask={(clipId, mask) => commitPipMask(clipId as never, mask)} onGesturePause={pausePreviewPlayback} onGestureResume={resumePreviewPlayback} playing={playing && !gestureHoldRef.current} playheadUs={playhead} playheadStore={playheadStore} onTimeUs={us => seekFromPlayback(us)} onEnded={() => setPlaying(false)} onFallback={(reason, code) => { if (!seenAnyTicketRef.current) return; setPreviewMode("interactive"); setSyntheticNotice(syntheticFallbackNotice(reason, code)); }} sourceResolver={previewSourceResolver} resourceTier={resourceTier} forceCopyTo={forceCopyTo} snapshotRef={syntheticSnapshotRef} />}
             {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "video" && <div className="preview-transform" style={mainTransformStyle}><video className="preview-background" src={previewAsset.media_url} muted aria-hidden="true" /><video ref={videoRef} className="preview-foreground" src={previewAsset.media_url} muted={!selectedClip?.audio.enabled || previewReverse || (clipAtPlayhead ? !isClipAudible(clipAtPlayhead) : false)} aria-label="交互预览视频" onTimeUpdate={event => { if (libraryPreviewId) dispatchPlayhead("external", Math.round(event.currentTarget.currentTime * 1_000_000), true); }} onEnded={handleVideoEnded} /></div>}
             {previewMode === "interactive" && audioAsset?.media_url && <audio ref={audioRef} src={audioAsset.media_url} style={{ display: "none" }} />}
             {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "image" && <div className="preview-transform" style={mainTransformStyle}><img className="preview-background" src={previewAsset.media_url} alt="" aria-hidden="true" /><img className="preview-foreground" src={previewAsset.media_url} alt={previewAsset.asset.display_name} /></div>}

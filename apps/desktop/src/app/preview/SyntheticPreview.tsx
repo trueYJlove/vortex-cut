@@ -63,6 +63,10 @@ export interface SyntheticPreviewProps {
   resourceTier?: "conservative" | "balanced" | "high";
   /** B13-R 判别诊断开关：强制 copyTo 上传（perf 诊断构建经 runtime 注入）。 */
   forceCopyTo?: boolean;
+  /** 合成画面截帧通道（项目封面取帧用）：组件挂载时写入当前会话的
+   *  snapshotPng 转发函数、卸载时清空——App 经此 ref 在合成模式下取帧
+   *  （无 video 元素可 drawImage，v1 静态路径无合成器时返回 null）。 */
+  snapshotRef?: { current: (() => Promise<{ buffer: ArrayBuffer; contentX: number; contentY: number; contentW: number; contentH: number } | null>) | null };
 }
 
 interface LoadState {
@@ -71,7 +75,7 @@ interface LoadState {
 }
 
 export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactElement {
-  const { projectId, revisionId, mediaUrls, audioByClip, pipClips, selectedClipId, onSelectClip, onCommitPipTransform, onDraftPipMask, onCommitPipMask, onGesturePause, onGestureResume, playing, playheadUs, onTimeUs, onEnded, onFallback, outputRatio, playheadStore, sourceResolver, resourceTier, forceCopyTo } = props;
+  const { projectId, revisionId, mediaUrls, audioByClip, pipClips, selectedClipId, onSelectClip, onCommitPipTransform, onDraftPipMask, onCommitPipMask, onGesturePause, onGestureResume, playing, playheadUs, onTimeUs, onEnded, onFallback, outputRatio, playheadStore, sourceResolver, resourceTier, forceCopyTo, snapshotRef } = props;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const sessionRef = useRef<PreviewSession | null>(null);
   // C20c-1：v2 外部帧源所有权在本组件（session.dispose 不释放外部帧源）——
@@ -397,7 +401,15 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
     frameSourceRef.current?.dispose?.();
     frameSourceRef.current = null;
     frameManifestRef.current = null;
+    if (snapshotRef) snapshotRef.current = null;
   }, []);
+
+  // 截帧通道：转发当前会话的 snapshotPng（会话换装/重建后 ref 内函数不变——
+  // 闭包读 sessionRef.current，取的是"调用时刻"的会话）。
+  useEffect(() => {
+    if (!snapshotRef) return;
+    snapshotRef.current = () => sessionRef.current?.snapshotPng() ?? Promise.resolve(null);
+  }, [snapshotRef]);
 
   // 播放/暂停。
   useEffect(() => {

@@ -238,6 +238,38 @@ describe("A01 PreviewSession.create 资源栈", () => {
     expect(messages).not.toContain("compose");
   });
 
+  it("snapshotPng：回读 PNG + 内容区 fit 几何（封面裁留边用）；dispose 后返回 null", async () => {
+    // 项目封面取帧通道（2026-09-23）：合成模式无 video 元素，封面经
+    // compositor.readback 全画布回读 + session 提供内容区矩形（IR 画布
+    // contain 居中于后备缓冲），调用方据此裁掉 fit 留边。
+    installWorkers();
+    stubOffscreenCanvas();
+    const container = document.createElement("div");
+    const session = await PreviewSession.create(container, freshIr(), TICKETS, undefined, undefined, null, "balanced");
+    const compositor = ScriptedWorker.instances[0]!;
+    // 已知 fit：resize 后 session 计算 contentX/Y/W/H（此处验证字段齐全与
+    // 回读字节透传，几何数值由 resize 数学另行保证——见下方手动断言）。
+    session.resize(1000, 500);
+    const pngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]).buffer;
+    const pending = session.snapshotPng();
+    await vi.waitFor(() => {
+      const readback = compositor.messages.find(m => m.type === "readback");
+      expect(readback).toBeTruthy();
+    });
+    const readbackSeq = (compositor.messages.find(m => m.type === "readback") as { seq: number }).seq;
+    compositor.reply({ type: "readback", seq: readbackSeq, buffer: pngBytes });
+    const snapshot = await pending;
+    expect(snapshot).not.toBeNull();
+    expect(new Uint8Array(snapshot!.buffer)).toEqual(new Uint8Array(pngBytes));
+    // fit 几何完备：内容区为非空正矩形，且落在后备缓冲内。
+    expect(snapshot!.contentW).toBeGreaterThan(0);
+    expect(snapshot!.contentH).toBeGreaterThan(0);
+    expect(snapshot!.contentX).toBeGreaterThanOrEqual(0);
+    expect(snapshot!.contentY).toBeGreaterThanOrEqual(0);
+    session.dispose();
+    expect(await session.snapshotPng()).toBeNull();
+  });
+
   it("create 中 abort：外部 signal 中止 → 会话清理并抛 AbortError", async () => {
     stubOffscreenCanvas();
     // compositor 握手挂起：abort 发生在握手等待期（decode worker 尚未创建）
