@@ -7,7 +7,7 @@
  *  "original" 档由调用方解析素材最大短边传入（未知时结果卡显示"跟随素材"）。
  *  文件名联动：已有授权（grant）时输入防抖 400ms 走 rename 桥同步目标路径；
  *  无授权时文件名仅作为保存对话框 defaultPath。 */
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { Dialog } from "./Dialog.js";
 import { safeErrorMessage } from "./safeErrors.js";
@@ -59,46 +59,6 @@ export function ratioLabelText(ratio: OutputRatio, dims: readonly [number, numbe
 export function estimateBitrateMbps(shortEdge: number, encoderMode: EncoderMode, quality: ExportQuality): number {
   const base = encoderMode === "auto" ? Math.max(4, Math.round(12 * (shortEdge / 1080) ** 2)) : Math.max(3, Math.round(10 * (shortEdge / 1080) ** 2));
   return Math.round(base * QUALITY_MULTIPLIER[quality] * 10) / 10;
-}
-
-/** 轻量下拉（设计稿 .sel/.sel-menu 形态；点击外部收起）。 */
-function Sel<T extends string | number>({ ariaLabel, value, options, onChange }: {
-  ariaLabel: string;
-  value: T;
-  options: Array<{ value: T; label: ReactNode; hint?: ReactNode }>;
-  onChange: (value: T) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDocClick = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, [open]);
-  const current = options.find(item => item.value === value);
-  return (
-    <div className="exd-sel" ref={rootRef} data-open={open || undefined}>
-      <button type="button" className={`exd-sel-face${open ? " on" : ""}`} aria-label={ariaLabel} aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen(!open)}>
-        <span className="exd-sel-value">{current?.label}</span>
-        <span className="exd-caret" aria-hidden>▼</span>
-      </button>
-      {open && (
-        <div className="exd-sel-menu" role="listbox">
-          {options.map(option => (
-            <button type="button" key={String(option.value)} role="option" aria-selected={option.value === value}
-              className={`exd-opt${option.value === value ? " on" : ""}`}
-              onClick={() => { onChange(option.value); setOpen(false); }}>
-              <span>{option.label}</span>
-              {option.hint && <span className="exd-opt-dim">{option.hint}</span>}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
 }
 
 export interface ExportSettings {
@@ -182,12 +142,12 @@ export function ExportDialog({ projectId, projectName, durationUs, clipCount, ca
 
   return (
     <Dialog titleId="export-video-title" label="导出视频" onClose={onClose} className="export-modal">
-      <div className="exd-head">
+      <div className="modal-heading">
         <div>
           <h2 id="export-video-title">导出视频</h2>
-          <div className="exd-sub">当前 Revision · {previewReady ? "画面内容与权威预览一致" : "画面内容以时间线为准"}</div>
+          <p>当前 Revision · {previewReady ? "画面内容与权威预览一致" : "画面内容以时间线为准"}</p>
         </div>
-        <button type="button" className="exd-close" aria-label="关闭导出弹窗" onClick={onClose}><X size={15} /></button>
+        <button type="button" className="icon-btn" title="关闭导出弹窗" aria-label="关闭导出弹窗" onClick={onClose}><X size={15} /></button>
       </div>
       <div className="exd-body">
         <div className="exd-hero">
@@ -217,23 +177,28 @@ export function ExportDialog({ projectId, projectName, durationUs, clipCount, ca
           <div className="exd-settings-left">
             <div className="exd-field">
               <label>分辨率 <span className="exd-hint">输出像素尺寸</span></label>
-              <Sel ariaLabel="导出分辨率" value={resolution} onChange={onResolutionChange}
-                options={RESOLUTION_OPTIONS.map(option => ({ value: option.value, label: <>{option.label} <span className="exd-opt-dim">·{resolutionHint(option.value)}</span></>, hint: undefined }))} />
+              <select aria-label="导出分辨率" value={resolution} onChange={event => onResolutionChange(event.target.value as ExportResolution)}>
+                {RESOLUTION_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label} · {resolutionHint(option.value)}</option>)}
+              </select>
             </div>
             <div className="exd-field">
               <label>帧率 <span className="exd-hint">恒定帧率</span></label>
-              <Sel ariaLabel="导出帧率" value={frameRate} onChange={onFrameRateChange}
-                options={([24, 25, 30, 60] as const).map(rate => ({ value: rate, label: <>{rate} fps</> }))} />
+              <select aria-label="导出帧率" value={frameRate} onChange={event => onFrameRateChange(Number(event.target.value) as ExportFrameRate)}>
+                {[24, 25, 30, 60].map(rate => <option key={rate} value={rate}>{rate} fps</option>)}
+              </select>
             </div>
             <div className="exd-field">
               <label>画质 <span className="exd-hint">码率分层</span></label>
-              <Sel ariaLabel="导出画质" value={quality} onChange={onQualityChange}
-                options={QUALITY_OPTIONS.map(option => ({ value: option.value, label: <>{option.label} <span className="exd-opt-dim">·≈{Math.round(bitrate / QUALITY_MULTIPLIER[quality] * QUALITY_MULTIPLIER[option.value])} Mbps</span></> }))} />
+              <select aria-label="导出画质" value={quality} onChange={event => onQualityChange(event.target.value as ExportQuality)}>
+                {QUALITY_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label} · ≈{Math.round(bitrate / QUALITY_MULTIPLIER[quality] * QUALITY_MULTIPLIER[option.value])} Mbps</option>)}
+              </select>
             </div>
             <div className="exd-field">
               <label>编码 <span className="exd-hint">硬件失败自动回退</span></label>
-              <Sel ariaLabel="导出编码" value={encoderMode} onChange={onEncoderModeChange}
-                options={[{ value: "auto" as EncoderMode, label: <>H.264 <span className="exd-opt-dim">·自动（硬件优先）</span></> }, { value: "software" as EncoderMode, label: <>H.264 <span className="exd-opt-dim">·软件编码</span></> }]} />
+              <select aria-label="导出编码" value={encoderMode} onChange={event => onEncoderModeChange(event.target.value as EncoderMode)}>
+                <option value="auto">H.264 · 自动（硬件优先）</option>
+                <option value="software">H.264 · 软件编码</option>
+              </select>
             </div>
             <div className="exd-field exd-wide">
               <label>保存位置 <span className="exd-hint">完整路径预览</span></label>
@@ -255,13 +220,13 @@ export function ExportDialog({ projectId, projectName, durationUs, clipCount, ca
           </div>
         </div>
       </div>
-      <div className="exd-foot">
-        <div className="exd-foot-info">
+      <div className="modal-actions">
+        <span className="exd-foot-info">
           {previewReady
-            ? <span>导出完成后可在「渲染与导出」面板查看进度与产物</span>
+            ? "导出完成后可在「渲染与导出」面板查看进度与产物"
             : <span className="exd-warn">权威预览尚未生成——画面以时间线为准，建议先预览确认效果</span>}
-        </div>
-        <button type="button" className="exd-btn-export" disabled={busy || !sanitize(fileName)} onClick={() => void onExport(grant, { fileName: sanitize(fileName), resolution, frameRate, quality })}>
+        </span>
+        <button type="button" disabled={busy || !sanitize(fileName)} onClick={() => void onExport(grant, { fileName: sanitize(fileName), resolution, frameRate, quality })}>
           {busy ? "提交中…" : "导出"}
         </button>
       </div>
