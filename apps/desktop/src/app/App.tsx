@@ -810,8 +810,11 @@ export function App() {
     if (commitReact) setPlayhead(timeUs);
   }, [playheadStore]);
   /** 用户主动 seek：立即同步 React 状态（交互跟手），后续 playback 回传在
-   *  新的用户命令到达前被 10Hz 节流合并。 */
+   *  新的用户命令到达前被 10Hz 节流合并。播放中 seek = 暂停 + 跳转（剪映
+   *  语义）：合成预览在 playing 时忽略外部 seek（防自身上报回环）、交互
+   *  预览的 100ms 播放时钟会把播放头拉回播放轨道——不先暂停则点击被吞。 */
   const seekFromUser = useCallback((timeUs: number) => {
+    setPlaying(false);
     dispatchPlayhead("user", timeUs, true);
   }, [dispatchPlayhead]);
   /** 预览播放回传：只写 store + 10Hz 节流 React——覆盖层每帧跟随，

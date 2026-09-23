@@ -292,6 +292,24 @@ describe("素材箱交互", () => {
     fireEvent.click(frame);
     await waitFor(() => expect(frame.className).not.toContain("selected"));
   });
+
+  it("播放中用户 seek = 暂停 + 跳转（剪映式：点击时间轴不再被播放吞掉）", async () => {
+    const api = desktopApi(); window.desktop = api; render(<App />);
+    await screen.findByLabelText("交互预览视频", {}, { timeout: 10_000 });
+    const playButton = () => screen.getByRole("button", { name: "播放" });
+    const pauseButton = () => screen.getByRole("button", { name: "暂停" });
+    // 开始播放（按钮翻转为"暂停"探针 = playing 状态）。
+    fireEvent.click(playButton());
+    expect(await screen.findByRole("button", { name: "暂停" })).toBeInTheDocument();
+    // 播放中用户 seek（时间轴/进度条/方向键共用 seekFromUser 入口）：
+    // 剪映语义 = 先暂停再跳转。旧实现 playing 时合成预览忽略外部 seek、
+    // 交互预览 100ms 时钟回拉播放头——点击被吞（2026-09-23 用户反馈）。
+    fireEvent.keyDown(screen.getByLabelText("时间线播放头"), { key: "End" });
+    await waitFor(() => expect(playButton()).toBeInTheDocument());
+    // 暂停后播放头停在跳转位置（片尾 5s），不回跳、不继续推进。
+    expect(screen.getByLabelText("时间线播放头").getAttribute("aria-valuenow")).toBe("5000000");
+    expect(screen.queryByRole("button", { name: "暂停" })).not.toBeInTheDocument();
+  }, 15_000);
 });
 
 describe("Stage 1C Editor", () => {
