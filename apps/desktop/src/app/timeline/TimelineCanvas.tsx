@@ -3553,17 +3553,24 @@ export function TimelinePanel({
               top: canvasTopY,
             }}
           />
-          {/* 主轨封面入口（剪映式）：仅主轨一处，位于轨道头列与片段区之间的竖条；
-              点击截取当前播放头画面设为项目封面。 */}
-          <button
-            className="timeline-cover-entry"
-            style={{ top: view.rulerHeight + 2, height: view.trackHeight - 4, width: view.headerWidth - 8 }}
-            title={coverUrl ? "点击更换项目封面（截取当前播放头画面）" : "截取当前播放头画面设为项目封面"}
-            onClick={() => onCaptureCover?.()}
-          >
-            {coverUrl ? <img src={coverUrl} alt="" /> : <ImagePlus size={13} />}
-            <span>封面</span>
-          </button>
+          {/* 主轨封面入口（剪映式）：仅主轨一处，钉在 V1 轨道头列（与左侧
+              图标区同高齐平——上方有字幕轨/动态视频轨时仍随 V1 行定位，
+              不再写死标尺下方首行）；点击截取当前播放头画面设为项目封面。 */}
+          {(() => {
+            const mainRow = trackRowOf(trackRows, "V1");
+            if (!mainRow) return null;
+            return (
+              <button
+                className="timeline-cover-entry"
+                style={{ top: mainRow.y + 2, height: mainRow.height - 4, width: view.headerWidth - 8 }}
+                title={coverUrl ? "点击更换项目封面（截取当前播放头画面）" : "截取当前播放头画面设为项目封面"}
+                onClick={() => onCaptureCover?.()}
+              >
+                {coverUrl ? <img src={coverUrl} alt="" /> : <ImagePlus size={13} />}
+                <span>封面</span>
+              </button>
+            );
+          })()}
           {/* Accessible clip list (DOM): mirrors selection so keyboard /
               screen-reader users and tests can select clips. */}
           <div
