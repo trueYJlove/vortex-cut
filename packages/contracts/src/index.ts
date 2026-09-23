@@ -567,6 +567,15 @@ export type EncoderMode = "auto" | "software";
 /** 导出画质分层（M2 第四梯队）：码率倍率 standard=×1 high=×1.5 ultra=×2.2。 */
 export type ExportQuality = "standard" | "high" | "ultra";
 export const EXPORT_QUALITIES = ["standard", "high", "ultra"] as const;
+/** 导出分辨率档（2026-09-23 剪映式导出弹窗）：短边口径；"original" 跟随素材最大分辨率。
+ *  与工具栏 OutputRatio 正交：比例管画面形状、分辨率管输出像素数。 */
+export type ExportResolution = "480p" | "720p" | "1080p" | "2k" | "4k" | "original";
+export const EXPORT_RESOLUTIONS: ExportResolution[] = ["480p", "720p", "1080p", "2k", "4k", "original"];
+export function isExportResolution(value: unknown): value is ExportResolution { return oneOf(EXPORT_RESOLUTIONS, value); }
+/** 导出帧率（恒定帧率；默认 30 与既有管线一致）。 */
+export type ExportFrameRate = 24 | 25 | 30 | 60;
+export const EXPORT_FRAME_RATES: ExportFrameRate[] = [24, 25, 30, 60];
+export function isExportFrameRate(value: unknown): value is ExportFrameRate { return EXPORT_FRAME_RATES.includes(Number(value) as ExportFrameRate); }
 /** 工具栏"比例"下拉可选值；"fit" 表示跟随时间线默认画幅。 */
 export type OutputRatio = "fit" | "169" | "916" | "11" | "43" | "34";
 export const OUTPUT_RATIOS: OutputRatio[] = ["fit", "169", "916", "11", "43", "34"];
@@ -623,13 +632,15 @@ export interface ExportRecord {
 export interface DestinationGrant {
   destination_grant_id: DestinationGrantId;
   display_name: string;
+  /** 目录展示串（用户经原生对话框自选的回显路径；导出弹窗保存位置行拼接用）。 */
+  directory_display?: string;
   extension: ".mp4";
   overwrite_authorized: boolean;
   expires_at: string;
 }
 export interface PreviewCreateInput { timeline_revision_id?: TimelineRevisionId; encoder_mode?: EncoderMode; output_ratio?: OutputRatio; }
 export interface PreviewCreateResponse { job: Job | null; preview: AuthoritativePreview | null; reused: boolean; }
-export interface ExportCreateInput { timeline_revision_id?: TimelineRevisionId; destination_grant_id: DestinationGrantId; encoder_mode?: EncoderMode; output_ratio?: OutputRatio; quality?: ExportQuality; }
+export interface ExportCreateInput { timeline_revision_id?: TimelineRevisionId; destination_grant_id: DestinationGrantId; encoder_mode?: EncoderMode; output_ratio?: OutputRatio; quality?: ExportQuality; resolution?: ExportResolution; frame_rate?: ExportFrameRate; }
 export interface ExportCreateResponse { job: Job; export_record: ExportRecord | null; }
 export type AuthoritativePreviewPage = Page<AuthoritativePreview>;
 export type ExportRecordPage = Page<ExportRecord>;
@@ -1627,7 +1638,7 @@ export function isExportRecord(value: unknown): value is ExportRecord {
     isId(value.export_record_id) && isId(value.project_id) && isId(value.timeline_revision_id) && isId(value.render_artifact_id) && oneOf(EXPORT_STATUSES, value.status) && EXPORT_RENDER_PROFILE_IDS.includes(value.profile_id as ExportRenderProfileId) && isString(value.destination_display_name) && value.destination_display_name.length > 0 && isInteger(value.size_bytes, 1) && isSha256(value.sha256) && isRenderedMediaInfo(value.media_info) && isString(value.encoder) && value.encoder.length > 0 && isNullableString(value.fallback_reason) && isTime(value.created_at);
 }
 export function isDestinationGrant(value: unknown): value is DestinationGrant {
-  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["destination_grant_id", "display_name", "extension", "overwrite_authorized", "expires_at"]) && isId(value.destination_grant_id) && isString(value.display_name) && value.display_name.length > 0 && value.extension === ".mp4" && typeof value.overwrite_authorized === "boolean" && isTime(value.expires_at);
+  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["destination_grant_id", "display_name", "directory_display", "extension", "overwrite_authorized", "expires_at"]) && isId(value.destination_grant_id) && isString(value.display_name) && value.display_name.length > 0 && (value.directory_display === undefined || isString(value.directory_display)) && value.extension === ".mp4" && typeof value.overwrite_authorized === "boolean" && isTime(value.expires_at);
 }
 export function isPreviewCreateInput(value: unknown): value is PreviewCreateInput {
   return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["timeline_revision_id", "encoder_mode", "output_ratio"]) && (value.timeline_revision_id === undefined || isId(value.timeline_revision_id)) && (value.encoder_mode === undefined || isEncoderMode(value.encoder_mode)) && (value.output_ratio === undefined || isOutputRatio(value.output_ratio));
@@ -1637,7 +1648,7 @@ export function isPreviewCreateResponse(value: unknown): value is PreviewCreateR
   return value.reused ? value.job === null && value.preview !== null && value.preview.status === "ready" : value.job !== null && value.preview === null && value.job.kind === "authoritative_preview";
 }
 export function isExportCreateInput(value: unknown): value is ExportCreateInput {
-  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["timeline_revision_id", "destination_grant_id", "encoder_mode", "output_ratio", "quality"]) && (value.timeline_revision_id === undefined || isId(value.timeline_revision_id)) && isId(value.destination_grant_id) && (value.encoder_mode === undefined || isEncoderMode(value.encoder_mode)) && (value.output_ratio === undefined || isOutputRatio(value.output_ratio)) && (value.quality === undefined || ["standard", "high", "ultra"].includes(String(value.quality)));
+  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["timeline_revision_id", "destination_grant_id", "encoder_mode", "output_ratio", "quality", "resolution", "frame_rate"]) && (value.timeline_revision_id === undefined || isId(value.timeline_revision_id)) && isId(value.destination_grant_id) && (value.encoder_mode === undefined || isEncoderMode(value.encoder_mode)) && (value.output_ratio === undefined || isOutputRatio(value.output_ratio)) && (value.quality === undefined || ["standard", "high", "ultra"].includes(String(value.quality))) && (value.resolution === undefined || isExportResolution(value.resolution)) && (value.frame_rate === undefined || isExportFrameRate(value.frame_rate));
 }
 export function isExportCreateResponse(value: unknown): value is ExportCreateResponse {
   return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["job", "export_record"]) && isJob(value.job) && value.job.kind === "final_export" && (value.export_record === null || isExportRecord(value.export_record));

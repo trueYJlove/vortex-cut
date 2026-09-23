@@ -54,6 +54,34 @@ RATIO_PROFILE_ID = {
     "final_export": "export-{ratio}-v1",
 }
 
+# 导出分辨率档（2026-09-23 剪映式导出弹窗）→ 短边像素。与比例正交：
+# 比例决定宽高形状，分辨率决定输出像素数（短边口径，同剪映）。
+# "original" 不在此表——由 service 层解析素材最大短边后按数值传入。
+EXPORT_RESOLUTION_SHORT_EDGE: dict[str, int] = {
+    "480p": 480,
+    "720p": 720,
+    "1080p": 1080,
+    "2k": 1440,
+    "4k": 2160,
+}
+
+
+def _resolution_dimensions(
+    ratio_dims: tuple[int, int], short_edge: int
+) -> tuple[int, int]:
+    """按短边档位缩放比例基准尺寸（宽高比严格保持，不裁形）。
+
+    偶数对齐（yuv420p 要求 2 的倍数）。"original" 档的 short_edge 已由
+    调用方钳制到素材实际最大短边。"""
+    width, height = ratio_dims
+    base_short = min(width, height)
+    if base_short <= 0 or short_edge <= 0:
+        return width, height
+    scale = short_edge / base_short
+    out_w = max(2, round(width * scale) // 2 * 2)
+    out_h = max(2, round(height * scale) // 2 * 2)
+    return out_w, out_h
+
 
 class RenderPlanCompiler:
     def __init__(self, database: Database) -> None:
@@ -68,11 +96,17 @@ class RenderPlanCompiler:
         *,
         reject_draft: bool = False,
         output_ratio: str | None = None,
+        resolution: str | None = None,
+        frame_rate: int | None = None,
     ) -> dict[str, Any]:
         if mode not in PROFILES:
             raise DomainError("RENDER_PLAN_INVALID", "渲染模式不合法")
         if output_ratio not in (None, "fit") and output_ratio not in OUTPUT_RATIO_DIMENSIONS:
             raise DomainError("RENDER_PLAN_INVALID", "输出比例不合法")
+        if resolution is not None and resolution not in (*EXPORT_RESOLUTION_SHORT_EDGE, "original"):
+            raise DomainError("EXPORT_RESOLUTION_INVALID", "导出分辨率不合法")
+        if frame_rate is not None and frame_rate not in (24, 25, 30, 60):
+            raise DomainError("EXPORT_FRAME_RATE_INVALID", "导出帧率不合法")
         with self.database.connection() as db:
             project = db.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
             if project is None:
@@ -98,7 +132,10 @@ class RenderPlanCompiler:
             document = json_loads(revision["document_json"])
             if not document.get("clips"):
                 raise DomainError("TIMELINE_EMPTY", "空时间线不能渲染")
-            return self._compile_document(db, revision_id, document, mode, output_ratio)
+            return self._compile_document(
+                db, revision_id, document, mode, output_ratio,
+                resolution=resolution, frame_rate=frame_rate,
+            )
 
     def compile_rendition(
         self,
@@ -290,7 +327,12 @@ class RenderPlanCompiler:
         document: dict[str, Any],
         mode: str,
         output_ratio: str | None = None,
+        *,
+        resolution: str | None = None,
+        frame_rate: int | None = None,
     ) -> dict[str, Any]:
+        # "original" 档：素材最大短边在片段循环累计（无视频流兜底 1080；8K 钳 4K）。
+        max_source_short_edge = 0
         inputs: list[dict[str, Any]] = []
         input_by_asset: dict[str, str] = {}
         segments: list[dict[str, Any]] = []
@@ -316,6 +358,12 @@ class RenderPlanCompiler:
             ):
                 raise DomainError("RENDER_INPUT_CHANGED", "Timeline 引用的素材不可用或已变化")
             media_info = json_loads(asset["media_info_json"]) if asset["media_info_json"] else {}
+            if mode == "final_export" and resolution == "original":
+                for stream in media_info.get("video_streams") or []:
+                    stream_w = int(stream.get("width") or 0)
+                    stream_h = int(stream.get("height") or 0)
+                    if stream_w > 0 and stream_h > 0:
+                        max_source_short_edge = max(max_source_short_edge, min(stream_w, stream_h))
             input_id = input_by_asset.get(asset["id"])
             if input_id is None:
                 input_id = f"I{len(inputs)}"
@@ -387,9 +435,25 @@ class RenderPlanCompiler:
         output = dict(PROFILES[mode])
         if output_ratio in OUTPUT_RATIO_DIMENSIONS:
             width, height = OUTPUT_RATIO_DIMENSIONS[output_ratio][mode]
-            output["width"] = width
-            output["height"] = height
             output["profile_id"] = RATIO_PROFILE_ID[mode].format(ratio=output_ratio)
+        else:
+            width, height = output["width"], output["height"]
+        # 分辨率档（仅导出）：短边口径缩放，宽高比严格保持；"original" 取
+        # 素材最大短边（无视频流兜底 1080；8K 源钳到 4K——管线不提供 8K 档）。
+        if mode == "final_export" and resolution is not None:
+            if resolution == "original":
+                short_edge = min(max_source_short_edge or 1080, 2160)
+            else:
+                short_edge = EXPORT_RESOLUTION_SHORT_EDGE[resolution]
+            width, height = _resolution_dimensions((width, height), short_edge)
+            output["profile_id"] = f"{output['profile_id']}-{short_edge}p"
+        output["width"] = width
+        output["height"] = height
+        # 帧率档（仅导出；预览恒基线 30）：直接写 fps_num，ffmpeg 消费
+        # plan["output"] 里的 fps（见 build_timeline_args -r）。
+        if mode == "final_export" and frame_rate is not None:
+            output["fps_num"] = int(frame_rate)
+            output["fps_den"] = 1
         semantics = {
             "inputs": inputs,
             "segments": segments,
@@ -403,6 +467,8 @@ class RenderPlanCompiler:
                 "profile_id": output["profile_id"],
                 "width": output["width"],
                 "height": output["height"],
+                "fps_num": output["fps_num"],
+                "fps_den": output["fps_den"],
             },
         }
         digest = hashlib.sha256(json_dumps(semantics).encode("utf-8")).hexdigest()

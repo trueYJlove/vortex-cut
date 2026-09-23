@@ -222,6 +222,9 @@ def build_timeline_args(
     black_input_index = len(segments) if needs_black_input else -1
     width = int(plan["output"]["width"])
     height = int(plan["output"]["height"])
+    # 帧率档（导出可选 24/25/30/60；预览恒 30）：plan["output"] 是唯一来源，
+    # 合成时间域（图片循环/黑底 lavfi/倒放预算/-r）全部随它走。
+    fps = max(1, int(plan["output"].get("fps_num") or 30) // max(1, int(plan["output"].get("fps_den") or 1)))
     # C23 结项护栏：reverse 滤镜在单段全部解码帧驻留内存（实测 60s 1080p
     # ≈ 4.9GiB——FFmpeg 滤镜缓存未压缩帧）。超出预算的倒放段显式失败
     # （RENDER_REVERSE_TOO_LONG），不伪装成可完成的长任务；分块倒放
@@ -233,7 +236,7 @@ def build_timeline_args(
             and not segment.get("track_hidden", False)
         ):
             source_us = max(int(segment["source_end_us"]) - int(segment["source_start_us"]), 0)
-            frames = source_us / 1_000_000 * 30  # 合成时间域固定 30fps（导出规格）
+            frames = source_us / 1_000_000 * fps
             est_bytes = frames * width * height * 1.5  # yuv420p 未压缩帧
             if est_bytes > REVERSE_MEMORY_BUDGET_BYTES:
                 raise DomainError(
@@ -246,7 +249,7 @@ def build_timeline_args(
         # C21a：深定位图——eligible 输入前插 -ss（-i 前为准确 seek）；
         # legacy 输入零改动。图像输入不定位（loop 无 seek 语义）。
         if segment["asset_kind"] == "image":
-            args += ["-loop", "1", "-framerate", "30"]
+            args += ["-loop", "1", "-framerate", str(fps)]
         else:
             window = input_windows[position] if input_windows is not None and position < len(input_windows) else None
             if window is not None and getattr(window, "eligible", False):
@@ -258,7 +261,7 @@ def build_timeline_args(
         black_duration = _seconds(max(timeline_total_us, 1))
         args += [
             "-f", "lavfi", "-i",
-            f"color=c=black:s={width}x{height}:r=30:d={black_duration}",
+            f"color=c=black:s={width}x{height}:r={fps}:d={black_duration}",
         ]
         next_input_index += 1
     for item in graph_items:
@@ -270,7 +273,7 @@ def build_timeline_args(
             fill_duration = _seconds(item["duration_us"])
             args += [
                 "-f", "lavfi", "-i",
-                f"color=c=black:s={width}x{height}:r=30:d={fill_duration}",
+                f"color=c=black:s={width}x{height}:r={fps}:d={fill_duration}",
             ]
 
     filters: list[str] = []
@@ -319,7 +322,7 @@ def build_timeline_args(
             if isinstance(reframe, dict)
             else _visual_filter(segment["layout"], width, height, label_id)
         )
-        base = f"{source},{_square_pixel_filter()},{visual},setsar=1,fps=30,format=yuv420p"
+        base = f"{source},{_square_pixel_filter()},{visual},setsar=1,fps={fps},format=yuv420p"
         # P1 扩展：静态画面变换（transform，中心点语义）对主轨（V1）与所有视觉
         # 片段生效——缩放至目标尺寸（可选旋转）后叠到全幅黑底；透明度 <1 时走
         # rgba + colorchannelmixer。变换先后：关键帧动画在前，静态变换在后
@@ -360,7 +363,7 @@ def build_timeline_args(
                 static += f"[vpre{label_id}]"
                 clauses.append(static)
                 clauses.append(
-                    f"color=c=black:s={width}x{height}:r=30:d={bg_duration:.6f},setsar=1[ppbg{label_id}]"
+                    f"color=c=black:s={width}x{height}:r={fps}:d={bg_duration:.6f},setsar=1[ppbg{label_id}]"
                 )
                 clauses.append(
                     f"[ppbg{label_id}][vpre{label_id}]overlay=x={cx * width - pip_w / 2:.1f}"
@@ -378,7 +381,7 @@ def build_timeline_args(
             fill_duration = _seconds(item["duration_us"])
             filters.append(
                 f"[{item['input_index']}:v]trim=duration={fill_duration},"
-                "setpts=PTS-STARTPTS,fps=30,format=yuv420p"
+                f"setpts=PTS-STARTPTS,fps={fps},format=yuv420p"
                 f"[v{position}]"
             )
             filters.append(
@@ -663,21 +666,22 @@ def build_timeline_args(
         "-c:v",
         encoder,
     ]
+    # 码率 = 分辨率基线 × 画质系数（standard=×1 high=×1.5 ultra=×2.2）。
+    # 基线按短边面积缩放（1080p 锚点：软件 10M / 硬件 12M；540p 预览
+    # 落回旧基线 3M/4M）——分辨率档解耦后不再用 width==540 硬编码分档。
+    short_edge = min(width, height)
+    multiplier = {"high": 1.5, "ultra": 2.2}.get(quality, 1.0)
     if encoder == "libopenh264":
-        # 导出画质分层（M2 第四梯队）：standard=基线（旧行为），high=×1.5，
-        # ultra=×2.2——码率随分层放大；宽度分档（540p 小 / 其余大）保持。
-        multiplier = {"high": 1.5, "ultra": 2.2}.get(quality, 1.0)
-        base = 3 if width == 540 else 10
+        base = max(3, round(10 * (short_edge / 1080) ** 2))
         args += ["-b:v", f"{base * multiplier:g}M"]
     elif encoder in {"h264_nvenc", "h264_qsv", "h264_amf"}:
-        multiplier = {"high": 1.5, "ultra": 2.2}.get(quality, 1.0)
-        base = 4 if width == 540 else 12
+        base = max(4, round(12 * (short_edge / 1080) ** 2))
         args += ["-b:v", f"{base * multiplier:g}M"]
     args += [
         "-pix_fmt",
         "yuv420p",
         "-r",
-        "30",
+        str(fps),
         "-fps_mode",
         "cfr",
         "-c:a",

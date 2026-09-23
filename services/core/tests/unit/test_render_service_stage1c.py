@@ -21,6 +21,7 @@ def test_destination_grant_is_safe_explicit_and_single_use(tmp_path: Path) -> No
     assert set(grant) == {
         "destination_grant_id",
         "display_name",
+        "directory_display",
         "extension",
         "overwrite_authorized",
         "expires_at",

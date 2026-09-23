@@ -231,6 +231,8 @@ class ExportCreateRequest(BaseModel):
     encoder_mode: str = "auto"
     output_ratio: str = "fit"
     quality: str = "standard"
+    resolution: str = "1080p"
+    frame_rate: int = 30
 
 
 class BriefPutRequest(BaseModel):
@@ -341,6 +343,12 @@ class DestinationGrantRequest(BaseModel):
 
     path: str
     overwrite_authorized: bool
+
+
+class DestinationGrantRenameRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    file_name: str
 
 
 class DirectoryGrantRequest(BaseModel):
@@ -1584,6 +1592,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except DomainError as exc:
             raise _domain(exc) from exc
 
+    @app.post("/api/v1/internal/destination-grants/{grant_id}/rename")
+    async def rename_destination_grant(
+        grant_id: str,
+        request: DestinationGrantRenameRequest,
+        _: CoreState = Depends(require_admin),
+    ) -> dict[str, Any]:
+        try:
+            return state.destinations.rename(grant_id, request.file_name)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
     @app.post("/api/v1/internal/directory-grants")
     async def create_directory_grant(
         request: DirectoryGrantRequest, _: CoreState = Depends(require_admin)
@@ -2586,6 +2605,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 request.encoder_mode,
                 request.output_ratio,
                 quality=request.quality,
+                resolution=request.resolution,
+                frame_rate=request.frame_rate,
             )
         except DomainError as exc:
             raise _domain(exc) from exc

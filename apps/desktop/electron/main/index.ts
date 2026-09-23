@@ -739,13 +739,14 @@ function registerIpc(): void {
     if (!isPage(page, isAuthoritativePreview)) throw new Error("Invalid AuthoritativePreviewPage");
     return { next_cursor: page.next_cursor, items: await Promise.all(page.items.map(previewPresentation)) };
   });
-  ipcMain.handle("export:choose-destination", async (_event, projectIdValue: ProjectId) => {
+  ipcMain.handle("export:choose-destination", async (_event, projectIdValue: ProjectId, fileNameOverride?: string) => {
     const projectId = asId(projectIdValue, "project_id");
     const project = await fetchWithUi<{ name: string }>(`${API_PREFIX}/projects/${projectId}`);
     const configured = process.env.AIVS_E2E_EXPORT_PATH;
+    const defaultName = fileNameOverride ? exportFileName(fileNameOverride) : exportFileName(project.name);
     const selected = configured ? { canceled: false, filePath: configured } : await dialog.showSaveDialog(windowRef!, {
       title: "导出视频",
-      defaultPath: exportFileName(project.name),
+      defaultPath: defaultName,
       filters: [{ name: "MP4 视频", extensions: ["mp4"] }],
       properties: ["showOverwriteConfirmation"]
     });
@@ -754,6 +755,9 @@ function registerIpc(): void {
     let overwriteAuthorized = false;
     try { await access(destinationPath); overwriteAuthorized = true; } catch { /* new destination */ }
     return requireCore().createDestinationGrant(destinationPath, overwriteAuthorized);
+  });
+  ipcMain.handle("export:rename-destination", async (_event, input: { grant_id: string; file_name: string }) => {
+    return requireCore().renameDestinationGrant(asId(input.grant_id, "destination_grant_id"), input.file_name);
   });
   ipcMain.handle("export:create", async (_event, input: { project_id: ProjectId; export: ExportCreateInput }) => {
     const projectId = asId(input.project_id, "project_id");

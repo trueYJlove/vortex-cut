@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import shutil
 import time
 from datetime import UTC, datetime, timedelta
@@ -21,7 +22,7 @@ from .ass import CaptionResources, build_ass, build_rendition_ass
 from .ffmpeg import build_timeline_args, run_timeline_render
 from .ir import resolved_caption_styles
 from .ir_disk_cache import PreviewIrDiskCache, asset_fingerprint_list
-from .plan import COMPILER_VERSION, REFRAME_COMPILER_VERSION, RenderPlanCompiler
+from .plan import COMPILER_VERSION, EXPORT_RESOLUTION_SHORT_EDGE, REFRAME_COMPILER_VERSION, RenderPlanCompiler
 from .validation import validate_rendered_media
 
 logger = logging.getLogger(__name__)
@@ -62,6 +63,9 @@ class DestinationGrantStore:
         grant = {
             "destination_grant_id": grant_id,
             "display_name": target.name,
+            # 目录展示串：用户经原生对话框自选的回显路径（非系统内部路径泄露），
+            # 导出弹窗"保存位置"行 = directory_display\ + display_name 实时拼接。
+            "directory_display": str(parent),
             "extension": ".mp4",
             "overwrite_authorized": overwrite_authorized,
             "expires_at": expires_at,
@@ -69,6 +73,32 @@ class DestinationGrantStore:
             "claimed_by": None,
         }
         self._grants[grant_id] = grant
+        return self.safe_dto(grant)
+
+    _UNSAFE_NAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+    def rename(self, grant_id: str, file_name: Any) -> dict[str, Any]:
+        """未认领授权改名（导出弹窗文件名输入联动）：只换文件名、目录不变。
+
+        与 create 同一套校验（非法字符清洗、.mp4 后缀、存在性需覆盖授权）；
+        已被任务认领的授权拒绝改名。"""
+        grant = self.inspect(grant_id)
+        if not isinstance(file_name, str):
+            raise DomainError("EXPORT_DESTINATION_INVALID", "导出文件名不合法")
+        safe = self._UNSAFE_NAME_CHARS.sub("_", file_name.strip())
+        safe = re.sub(r"[. ]+$", "", safe)
+        if not safe:
+            raise DomainError("EXPORT_DESTINATION_INVALID", "导出文件名不合法")
+        if not safe.lower().endswith(".mp4"):
+            safe = f"{safe}.mp4"
+        target = Path(grant["path"]).parent / safe
+        if target.exists():
+            if not target.is_file():
+                raise DomainError("EXPORT_DESTINATION_INVALID", "导出目标不是普通文件")
+            if not grant["overwrite_authorized"]:
+                raise DomainError("EXPORT_DESTINATION_EXISTS", "导出目标已存在")
+        grant["path"] = target
+        grant["display_name"] = target.name
         return self.safe_dto(grant)
 
     def claim(self, grant_id: str, job_id: str) -> None:
@@ -106,6 +136,7 @@ class DestinationGrantStore:
         return {
             "destination_grant_id": grant["destination_grant_id"],
             "display_name": grant["display_name"],
+            "directory_display": grant["directory_display"],
             "extension": grant["extension"],
             "overwrite_authorized": grant["overwrite_authorized"],
             "expires_at": grant["expires_at"],
@@ -458,6 +489,8 @@ class RenderCoordinator:
                 row["timeline_revision_id"],
                 mode,
                 output_ratio=payload.get("output_ratio") or "fit",
+                resolution=payload.get("resolution"),
+                frame_rate=payload.get("frame_rate"),
             )
         if plan["content_fingerprint"] != payload["content_fingerprint"]:
             raise DomainError("RENDER_INPUT_CHANGED", "渲染输入在排队后已变化")
@@ -901,12 +934,19 @@ class RenderService:
         encoder_mode: str,
         output_ratio: str = "fit",
         quality: str = "standard",
+        resolution: str = "1080p",
+        frame_rate: int = 30,
     ) -> dict[str, Any]:
         encoder_mode = _encoder_mode(encoder_mode)
         if quality not in ("standard", "high", "ultra"):
             raise DomainError("EXPORT_QUALITY_INVALID", "导出画质不合法")
+        if resolution not in (*EXPORT_RESOLUTION_SHORT_EDGE, "original"):
+            raise DomainError("EXPORT_RESOLUTION_INVALID", "导出分辨率不合法")
+        if frame_rate not in (24, 25, 30, 60):
+            raise DomainError("EXPORT_FRAME_RATE_INVALID", "导出帧率不合法")
         plan = await _compile_off_loop(
-            self.compiler, project_id, timeline_revision_id, "final_export", output_ratio=output_ratio
+            self.compiler, project_id, timeline_revision_id, "final_export", output_ratio=output_ratio,
+            resolution=resolution, frame_rate=frame_rate,
         )
         encoder, fallback = await self.encoders.choose(encoder_mode)
         toolchain = await self._toolchain(encoder, fallback)
@@ -929,6 +969,8 @@ class RenderService:
                 "destination_path": str(grant["path"]),
                 "output_ratio": output_ratio,
                 "quality": quality,
+                "resolution": resolution,
+                "frame_rate": frame_rate,
             },
         )
         try:

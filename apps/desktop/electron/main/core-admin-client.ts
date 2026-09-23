@@ -62,6 +62,10 @@ export class CoreAdminClient {
     return this.request<unknown>("/api/v1/internal/destination-grants", { method: "POST", body: JSON.stringify({ path, overwrite_authorized: overwriteAuthorized }) }).then(parseDestinationGrant);
   }
 
+  renameDestinationGrant(grantId: string, fileName: string): Promise<DestinationGrant> {
+    return this.request<unknown>(`/api/v1/internal/destination-grants/${encodeURIComponent(grantId)}/rename`, { method: "POST", body: JSON.stringify({ file_name: fileName }) }).then(parseDestinationGrant);
+  }
+
   createDirectoryGrant(path: string): Promise<DirectoryGrant> {
     return this.request<unknown>("/api/v1/internal/directory-grants", { method: "POST", body: JSON.stringify({ path }) }).then(parseDirectoryGrant);
   }
