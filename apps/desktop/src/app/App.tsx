@@ -896,11 +896,31 @@ export function App() {
   );
   const noTicketRetryRef = useRef(0);
   const noTicketFinalRetryRef = useRef(false);
+  /** 启动时序（2026-09-23 用户反馈）：getTimeline 先于 listAssets 落地时，
+   *  SyntheticPreview 以空 mediaUrls 建会话 → 回退（"no ticket"，或装载窗内
+   *  的其他瞬时错误如字体抓取失败）。这不是故障而是装载次序——首个 ticket
+   *  到达前项目数据仍在装载，回退不亮错误不切交互预览（保持 synthetic，
+   *  票据到位由 mediaUrls 依赖自动重建会话）。一旦见过任一票据（装载完成、
+   *  mediaUrls 进入稳态），后续回退即视为真实故障，走原有回退+重试链。
+   *  F07 门控教训仍有效：挂载本身不设门槛。 */
+  const seenAnyTicketRef = useRef(false);
+  if (syntheticMediaUrls.size > 0) seenAnyTicketRef.current = true;
   useEffect(() => {
+    // 静默窗：票据从未就绪（项目数据装载中）且非用户手动重试 → 不亮错误，
+    // synthetic 模式保持挂载，票据到位（mediaUrls 变化）自动重建会话。
+    if (previewMode === "synthetic" && syntheticNotice === null && !seenAnyTicketRef.current) return;
     // 仅恢复"缺票据"回退；其余回退（子集不支持/WebGL 不可用等）保持交互预览，
     // 否则会与真实失败形成重试环。
     if (previewMode !== "interactive" || !syntheticNotice?.includes("no ticket")) return;
     if (syntheticTicketsReady) {
+      setSyntheticNotice(null);
+      setPreviewMode("synthetic");
+      return;
+    }
+    // 装载窗内的回退（从未见过票据）：静默拉回合成模式——票据到位由
+    // syntheticMediaUrls 依赖自动驱动重建，重取反而打满装载中的项目数据链。
+    // 已见过票据后的缺票才走有界重签重试。
+    if (!seenAnyTicketRef.current) {
       setSyntheticNotice(null);
       setPreviewMode("synthetic");
       return;
@@ -921,7 +941,7 @@ export function App() {
     noTicketRetryRef.current += 1;
     void loadProjectData(project).catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [previewMode, syntheticNotice, syntheticTicketsReady, project?.project_id]);
+  }, [previewMode, syntheticNotice, syntheticTicketsReady, project?.project_id, syntheticMediaUrls]);
 
   const acceptState = (next: TimelineState) => { timelineLoadEpoch.current += 1; setTimeline(next); setWorking(next.current_revision.document); setSaveState("已保存"); setNotice(""); };
   // 提示条统一入口：显式分级（默认错误红色），并在数秒后自动消失；连续提示会重置计时。
@@ -2066,7 +2086,7 @@ export function App() {
             {previewMode === "authoritative" && authoritativeMediaUrl && <video ref={videoRef} className="preview-foreground authoritative-video" src={authoritativeMediaUrl} aria-label={reframePlayback ? "重构图权威预览视频" : exportPlayback ? "导出视频" : "权威预览视频"} controls onEnded={() => { setPlaying(false); setExportPlayback(undefined); setReframePlayback(undefined); setPreviewMode("synthetic"); }} />}
             {/* 合成预览仅在时间线有可见片段时挂载；空时间线显示引导文案（剪映式），
                 避免对空时间线请求 preview-ir 被 Core 以 TIMELINE_EMPTY 拒绝而回退。 */}
-            {previewMode === "synthetic" && project && working && timeline && working.clips.length > 0 && <SyntheticPreview outputRatio={renderRatio} projectId={project.project_id} revisionId={timeline?.current_revision.timeline_revision_id ?? null} mediaUrls={syntheticMediaUrls} audioByClip={syntheticAudioByClip} pipClips={syntheticPipClips} selectedClipId={pipSelectedId} onSelectClip={clipId => setSelection({ kind: "clip", id: clipId as never })} onCommitPipTransform={(clipId, transform) => { const clip = (working?.clips ?? []).find(item => item.clip_id === clipId); commitPipTransform(clipId as never, { ...(clip?.transform ?? {}), ...transform }); }} onDraftPipMask={(clipId, mask) => draftPipMask(clipId as never, mask)} onCommitPipMask={(clipId, mask) => commitPipMask(clipId as never, mask)} onGesturePause={pausePreviewPlayback} onGestureResume={resumePreviewPlayback} playing={playing && !gestureHoldRef.current} playheadUs={playhead} playheadStore={playheadStore} onTimeUs={us => seekFromPlayback(us)} onEnded={() => setPlaying(false)} onFallback={(reason, code) => { setPreviewMode("interactive"); setSyntheticNotice(syntheticFallbackNotice(reason, code)); }} sourceResolver={previewSourceResolver} resourceTier={resourceTier} forceCopyTo={forceCopyTo} />}
+            {previewMode === "synthetic" && project && working && timeline && working.clips.length > 0 && <SyntheticPreview outputRatio={renderRatio} projectId={project.project_id} revisionId={timeline?.current_revision.timeline_revision_id ?? null} mediaUrls={syntheticMediaUrls} audioByClip={syntheticAudioByClip} pipClips={syntheticPipClips} selectedClipId={pipSelectedId} onSelectClip={clipId => setSelection({ kind: "clip", id: clipId as never })} onCommitPipTransform={(clipId, transform) => { const clip = (working?.clips ?? []).find(item => item.clip_id === clipId); commitPipTransform(clipId as never, { ...(clip?.transform ?? {}), ...transform }); }} onDraftPipMask={(clipId, mask) => draftPipMask(clipId as never, mask)} onCommitPipMask={(clipId, mask) => commitPipMask(clipId as never, mask)} onGesturePause={pausePreviewPlayback} onGestureResume={resumePreviewPlayback} playing={playing && !gestureHoldRef.current} playheadUs={playhead} playheadStore={playheadStore} onTimeUs={us => seekFromPlayback(us)} onEnded={() => setPlaying(false)} onFallback={(reason, code) => { if (!seenAnyTicketRef.current) return; setPreviewMode("interactive"); setSyntheticNotice(syntheticFallbackNotice(reason, code)); }} sourceResolver={previewSourceResolver} resourceTier={resourceTier} forceCopyTo={forceCopyTo} />}
             {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "video" && <div className="preview-transform" style={mainTransformStyle}><video className="preview-background" src={previewAsset.media_url} muted aria-hidden="true" /><video ref={videoRef} className="preview-foreground" src={previewAsset.media_url} muted={!selectedClip?.audio.enabled || previewReverse || (clipAtPlayhead ? !isClipAudible(clipAtPlayhead) : false)} aria-label="交互预览视频" onTimeUpdate={event => { if (libraryPreviewId) dispatchPlayhead("external", Math.round(event.currentTarget.currentTime * 1_000_000), true); }} onEnded={handleVideoEnded} /></div>}
             {previewMode === "interactive" && audioAsset?.media_url && <audio ref={audioRef} src={audioAsset.media_url} style={{ display: "none" }} />}
             {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "image" && <div className="preview-transform" style={mainTransformStyle}><img className="preview-background" src={previewAsset.media_url} alt="" aria-hidden="true" /><img className="preview-foreground" src={previewAsset.media_url} alt={previewAsset.asset.display_name} /></div>}

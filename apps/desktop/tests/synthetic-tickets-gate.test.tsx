@@ -62,4 +62,43 @@ describe("SyntheticPreview 票据迟到重建（分页装载时序）", () => {
     await waitFor(() => expect(listAssetsCalls).toBeGreaterThanOrEqual(1), { timeout: 5000 });
     expect(screen.queryByText("正在装载素材票据…")).toBeNull();
   });
+
+  it("启动时序（2026-09-23）：票据未到期间不亮'合成预览暂时无法启动'错误", async () => {
+    // 用户现场：进入主界面项目未加载完 → 预览报"合成预览暂时无法启动，已
+    // 回退交互预览"，片刻后自愈消失。根因 = getTimeline 先落地、listAssets
+    // 仍在途 → 空票据建会话 → "no ticket" 被当故障亮出。装载窗内缺票是
+    // 次序而非故障：保持合成模式中性装载观感，不亮错误不切交互预览。
+    const timelineState = (doc: ReturnType<typeof clipDoc>) => ({
+      project_id: project.project_id,
+      current_revision: { timeline_revision_id: "revision_1" as never, project_id: project.project_id, parent_revision_id: null, document_sha256: "a".repeat(64), summary: "创建", created_by: "user", created_at: now, schema_version: 1, document: doc },
+      draft: null, can_undo: true, can_redo: true, current_preview: null,
+    });
+    let releaseAssets: (() => void) | undefined;
+    const assetsGate = new Promise<void>(resolve => { releaseAssets = resolve; });
+    const api = buildDesktopApi({
+      overrides: {
+        listAssets: vi.fn(async () => {
+          await assetsGate; // 首次装载全程被门控：时间线先到位的启动时序
+          return { items: [0, 1, 2].map(n => ({ asset: makeAsset(n), media_url: `aivideo://media/t${n}` })), next_cursor: null };
+        }),
+        getTimeline: vi.fn(async () => timelineState(clipDoc(["asset_0", "asset_1", "asset_2"]))) as never,
+      },
+    });
+    (window as { desktop?: DesktopApi }).desktop = api;
+    const { App } = await import("../src/app/App.js");
+    render(<App />);
+    // 时间线到位、素材票据仍在途：合成预览容器挂载（保持 synthetic 模式）。
+    await waitFor(() => expect(document.querySelector(".synthetic-preview")).not.toBeNull(), { timeout: 5000 });
+    // 装载窗内：无回退错误条、无"已回退交互预览"文案、无原始错误串。
+    expect(document.querySelector(".synthetic-note")).toBeNull();
+    expect(screen.queryByText(/已回退交互预览/)).toBeNull();
+    expect(screen.queryByText(/no ticket/)).toBeNull();
+    // 交互预览未顶替合成预览（previewMode 保持 synthetic）。
+    expect(document.querySelector('video[aria-label="交互预览视频"]')).toBeNull();
+    // 素材到位：数据面收敛，错误条始终未出现过。
+    releaseAssets?.();
+    await waitFor(() => expect(api.listAssets).toHaveBeenCalled(), { timeout: 5000 });
+    expect(document.querySelector(".synthetic-note")).toBeNull();
+    expect(screen.queryByText(/已回退交互预览/)).toBeNull();
+  });
 });

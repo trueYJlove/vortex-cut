@@ -359,6 +359,14 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
         const code = /PREVIEW_IR_UNSUPPORTED/.test(message) ? "PREVIEW_IR_UNSUPPORTED"
           : /PREVIEW_IR_TOO_LARGE/.test(message) ? "PREVIEW_IR_TOO_LARGE"
           : null;
+        // 启动时序（2026-09-23）：时间线先于素材票据落地时 "no ticket" 是装载
+        // 次序而非故障——mediaUrls 依赖变化会自动重建会话，此处保持装载观感
+        // （中性文案），不进错误态、不外抛 onFallback（App 层亦按同语义拦截，
+        // 双闸防中间一帧错误闪现）。
+        if (message.includes("no ticket") && mediaUrls.size === 0) {
+          setLoad({ status: "loading", message: "正在装载素材…" });
+          return;
+        }
         setLoad({ status: "error", message });
         onFallback(message, code);
       }
