@@ -1,5 +1,27 @@
 # AI 操作白名单纪律与扩容（阶段 B 第一单）——Planning Gate
 
+> ## ✅ 本单已交付（commit `5bec655`，PR #36）——交付后对照（2026-09-24 补）
+>
+> **以下为规划时点内容；与最终交付不一致之处以本横幅为准。**
+>
+> | 本文表述 | 最终交付 | 说明 |
+> |---|---|---|
+> | §0「白名单已漂移至 **24 种**」 | **22 种** | 24 是**治理前快照**。最终 22 = 24 − 2 |
+> | §1.2「晋升 **12 种**（含 transform/mask/keying **五件套**）」 | **晋升 11 op** | `set_clip_mask` / `set_clip_keying` **被显式排除**——理由：蒙版形状/抠像色彩是像素级数据，文本指令生成即猜测（`timeline.py` 注释）。句内 `clear_clip_keyframes` 重复、'五件套'实为 3 项，**原算术不闭合** |
+> | §0「`TIMELINE_PATCH_OPERATIONS_SCHEMA` 只覆盖 **11 种**，`_PATCH_FIELDS` 同样 11 种」 | **各 22** | 缺口已全部关闭：schema oneOf = 22 分支、`_PATCH_FIELDS` = 22 条，三处一致由测试钉死 |
+> | §2「字段清单 **15 op** × ~3 字段，prompt 增约 500 字符」 | **22 op** | 增量大于原估算 |
+> | §5 开放问题「`set_clip_transform/mask/keying` 数值域收敛性」 | 适用面**缩小** | mask/keying 已出白名单，仅 `set_clip_transform` 在列 |
+>
+> ### 验收项落实（对照 §3）
+>
+> | # | 验收项 | 状态 |
+> |---|---|---|
+> | §3.1 | 白名单显式冻结 + 导入期断言 + 12 种晋升 op 沙盒用例 + 三处同步一致性测试 | ✅ `test_ai_whitelist_consistency.py`（10 项） |
+> | §3.2 | 真实 deepseek 扩展指令（"剪短并加一个转场"）**跑通两步会话** | ❓ **仓内无证据**——`AI_VALIDATION_REPORT_2026-09-20.md` 实验 C 两模型均为 **1 步**；`AI_VALIDATION_DEEPSEEK_PATCH_RERUN_2026-09-21.md` 是探测/补丁复跑。**已登记为 `docs/STATUS.md` §4 承诺 P4** |
+> | §3.3 | Core + Desktop 全量回归；candidate 链路不回归 | ✅ |
+> | §3.4 | PROTOCOL_VERSION 不动；`sent_fields` 如实 | ✅ |
+> | §3.5 | **更新 AI-1 规划门"13 种"记载** | ✅ **2026-09-24 补做**（W0.1）——原文长期未改，是本次审计中"验收项静默丢失"的典型。**已登记为 `docs/STATUS.md` §4 承诺 P3** |
+
 > 起草：LiuWei，2026-09-22。承接 AI-1 规划门 §1 边界（"AI 操作白名单扩容……
 > 独立工作单"）。分支 `ai/whitelist-expansion`。实施：ZhangSan（Core）+
 > YeJing（Desktop 无改动预期）。验收：LiuKeAi。

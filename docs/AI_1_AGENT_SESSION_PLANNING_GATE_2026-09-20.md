@@ -11,7 +11,8 @@ Stage 2B 闭环现状（证据：`timeline_planning.py`、`providers.py`、`time
 
 **可直接复用的组件**（接缝调研结论，无新造）：
 
-1. `apply_in_memory(ai=True)`（timeline.py:511）——无副作用沙盒执行器，就是 agent 循环每步的现成验证器；AI 白名单 `AI_PATCH_OPERATIONS`（timeline.py:52）= `PATCH_OPERATIONS`（22 种，timeline.py:17）减 9 种结构性操作，净 13 种：remove_clip / move_clip / position_clip / trim_clip / split_clip / set_layout / set_audio / set_speed / set_reverse_playback / set_image_duration / remove_caption / update_caption / set_caption_timing / set_caption_preset —— 此处按 13 计。
+1. `apply_in_memory(ai=True)`（timeline.py:511）——无副作用沙盒执行器，就是 agent 循环每步的现成验证器；AI 白名单 `AI_PATCH_OPERATIONS`（~~timeline.py:52~~）——~~= `PATCH_OPERATIONS`（22 种，timeline.py:17）减 9 种结构性操作，净 13 种：remove_clip / move_clip / position_clip / trim_clip / split_clip / set_layout / set_audio / set_speed / set_reverse_playback / set_image_duration / remove_caption / update_caption / set_caption_timing / set_caption_preset —— 此处按 13 计。~~
+   **【2026-09-24 修正】上述"净 13 种"记载自本单落地当日起即不成立**（当时 `PATCH_OPERATIONS` 已是 33 种、差集白名单已是 24 种），且已于 `AI_WHITELIST_EXPANSION_PLANNING_GATE_2026-09-22`（commit `5bec655`）治理。**当前事实**：`AI_PATCH_OPERATIONS` = **22 种显式冻结集合**（`timeline.py:61`，已非"差集"写法）；`PATCH_OPERATIONS` = **33 种**；结构性排除 11 种。准入纪律 = "白名单 + `TIMELINE_PATCH_OPERATIONS_SCHEMA` oneOf + `_PATCH_FIELDS`"三处同步，由一致性测试钉死。**当前值以 [`docs/STATUS.md`](STATUS.md) §1 为准。**
 2. 单次 LLM 调用原语 `StructuredTextRequest` + `OpenAICompatibleTextProvider`（providers.py）——严格解析（拒绝重复键/非有限数）、90s 超时、2MB 响应上限、取消传播、审计一行。
 3. job 骨架：`PlanningRunner` 签名（jobs.py:46）、`phase/phase_progress` 细粒度列（C22）、cancel_event → httpx 传播、network 令牌（容量 2）。
 4. `timeline_diff` + 每步审计：`provider_invocations` 天然一行一步。
@@ -36,7 +37,8 @@ Stage 2B 闭环现状（证据：`timeline_planning.py`、`providers.py`、`time
 
 ### 明确不做（边界）
 
-- **AI 操作白名单扩容**（add_transition / set_caption_style / add_caption 等）：独立工作单。本单白名单维持 `AI_PATCH_OPERATIONS` 13 种不动——验证循环机制不与操作能力混谈。
+- **AI 操作白名单扩容**（add_transition / set_caption_style / add_caption 等）：独立工作单。~~本单白名单维持 `AI_PATCH_OPERATIONS` 13 种不动~~——验证循环机制不与操作能力混谈。
+  **【2026-09-24 修正】该独立工作单已交付**（`AI_WHITELIST_EXPANSION_PLANNING_GATE_2026-09-22`，commit `5bec655`）：白名单扩至 **22 种显式冻结**；`add_transition`/`update_transition`/`remove_transition`、`set_caption_style`/`clear_caption_style`、`set_clip_keyframes`/`clear_clip_keyframes`、`set_clip_transform` 等 11 op 已晋升；`add_caption` 经显式裁决**维持排除**（需人工文本创作）。本单"机制与能力分离"的边界裁决当时成立、结论不变。
 - **嵌套会话 / 并行会话**：一项目同时仅一个 active session；会话不支持嵌套。
 - **自主改写 instruction**：会话指令用户定，agent 只能基于它执行；反馈重试不改指令语义。
 - **UI 面板**：agent 步骤可视化（每步指令/diff 展示）为独立 Desktop 小单，依赖 AI-1-7 事件到位。

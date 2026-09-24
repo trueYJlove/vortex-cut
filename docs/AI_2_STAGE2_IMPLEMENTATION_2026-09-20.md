@@ -9,7 +9,7 @@
 |---|---|
 | 模型清单 | `resources/model-manifests/yunet-face-detection.json`——OpenCV Zoo `face_detection_yunet_2023mar.onnx`（232KB，sha256 实测钉死，Apache-2.0，trusted_source `github-opencv-zoo`） |
 | 注册表 | `model_registry.py`：provider 白名单化（`faster-whisper` + `onnx-cv`，曾硬编码单值）；安装根按 provider 分目录（`models/asr` 保持 / `models/cv` 新增）；`_provider_status` 按表查 runtime 模块（`faster_whisper` / `onnxruntime`）——faster-whisper 行为逐字节不变 |
-| 人脸通道 | `media/cv_signals.py`：`FaceDetector`（onnxruntime 懒加载 + CPU EP）+ `analyze_faces`（同 select 表达式的 RGB 160x120 采样遍历，帧序号与灰度遍历天然对齐）+ 结果合并进 `cv_samples.face_count/face_score` |
+| 人脸通道 | `media/cv_signals.py`：`FaceDetector`（onnxruntime 懒加载 + CPU EP）+ `analyze_faces`（RGB 160x120 采样遍历，**帧序号与灰度遍历对齐**）+ 结果合并进 `cv_samples.face_count/face_score`。<br>**【2026-09-24 修正】原记为"同 select 表达式"**——现两通道**各自**走快/全路径并同步 `skip_frame`（commit `a349866`），"同一表达式"不再逐字成立，**仅帧序对齐这一语义保持**。该提交同时修复了 `analyze_faces` 的 args 替换未生效残留（视频遍历已走快路径而人脸通道未走，即 25s 差异的来源） |
 | partial 语义 | 模型未就绪/推理失败 → 人脸通道跳过、其余信号照常 ready（face 列 NULL、`model_revision` NULL、job 结果标 `faces=partial`）；就绪且合并成功标 `faces=merged` + model_revision 钉死 |
 | 装配 | `CvSignalService` 注入 `model_manager`；`face_model_ready()` = 清单存在 + 安装 ready + runtime 可用 |
 

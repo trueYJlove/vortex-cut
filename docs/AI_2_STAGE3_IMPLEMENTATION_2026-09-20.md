@@ -39,5 +39,15 @@ AI 粗剪 prepare(candidate_source=auto) → 无转录 → _cv_scenes 排序召�
 ```
 
 - 阶段一（2b3558b）：信号引擎与存储；阶段二（ea1d8e6）：YuNet 人脸；阶段三（本单）：召回汇合。
-- 性能门（p95 ≤ 10s/分钟源）与采样密度校准仍为待办——需真实素材测量，随 UI 面单独立工作单。
-- 剩余后续：Desktop UI（CV 分析入口 + AI 粗剪的来源选择）、MCP 适配层、AI-1 Desktop 面板。
+- ~~性能门（p95 ≤ 10s/分钟源）与采样密度校准仍为待办——需真实素材测量，随 UI 面单独立工作单。~~
+  **【2026-09-24 修正】两者均已落地**：采样密度经 `CV_SKIP_FRAME_PLANNING_GATE_2026-09-20`
+  裁决为 **skip_frame 混合自适应**（commit `a349866`，算法版本 1→2）；性能门 **1080p 档已达标**
+  （完整作业 dance 4.3 / science 7.6 / lichun 3.4 s/分）。
+  **残留**：4K60 档从未标定；采样密度"可配"入口未做。详见
+  `AI_2_SKIP_FRAME_IMPLEMENTATION_2026-09-24.md` §4，当前状态见 [`docs/STATUS.md`](STATUS.md)。
+- ~~剩余后续：Desktop UI（CV 分析入口 + AI 粗剪的来源选择）、MCP 适配层、AI-1 Desktop 面板。~~
+  **【2026-09-24 修正】四项中两项已交付**：**CV 分析入口** ✅ 已交付
+  （IPC `cv-analysis:get`；验收 DESK-4 ✅）；**AI-1 Desktop 面板** ✅ 已交付
+  （`AgentSessionPanel.tsx`；验收 DESK-5 ✅）。**仍未做**：AI 粗剪来源选择 UI、
+  MCP 适配层——两者均已在 `AI_CAPABILITY_MASTER_PLAN_2026-09-24.md` 立项
+  （W4.2 / W4.3），**规划状态不在本文声明**。

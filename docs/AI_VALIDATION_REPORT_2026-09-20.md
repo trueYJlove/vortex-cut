@@ -1,6 +1,23 @@
 # AI-2/AI-1 真实世界验证报告（spike）
 
-- 日期：2026-09-20（实验 B/C 补充同日）
+> ## ⚠️ 本文是 2026-09-20 时点记录——引用为现状前必读（2026-09-24 补记）
+>
+> **这是本仓库最容易被误引为"当前状态"的一份文档。** 当时的结论与今天的事实差异：
+>
+> | 本文结论 | 现状 |
+> |---|---|
+> | §实验 A：dance **19.5s/分，✗ 超标**；「A1 判定：条件性达标」 | **性能门已达标**——次日 commit `a349866` 修复（skip_frame 混合自适应），完整作业 **4.3 / 7.6 / 3.4 s/分**，全部 ≤10。见 `AI_2_SKIP_FRAME_IMPLEMENTATION_2026-09-24.md` |
+> | §实验 B：「端到端**被探测门槛挡住**」「放宽探测时长校验的裁决依据已齐」 | **已裁决并落地**——探测协议 v2（迁移 **v22**），candidate 探测转 supported |
+> | §发现 2：sidecar 不走系统代理，「**登记 provider 域独立工作单**」 | **已交付**（`PROXY_SUPPORT_PLANNING_GATE`；Core `151742b` + Desktop 设置 UI） |
+> | §发现「网关慢滴挂起毒化 sidecar……需总预算机制」 | **已交付**（Provider 韧性 `2f3de00`；复跑未再复现） |
+> | §结论「后续顺序建议 ③ **UI 面单（含性能参数校准）**」 | UI 面单**已交付**；但**"性能参数校准"未随之交付**——采样密度参数暴露仍待机制裁决 |
+> | §附「验证脚本 `run_validation.py`……零重复配置」 | ⚠️ **该脚本当前挂起**（存活 13 分钟无进展），**已不可作为可用验证驱动引用**。见 `AI_2_SKIP_FRAME_IMPLEMENTATION_2026-09-24.md` §4.1 |
+>
+> **当前状态请读 [`STATUS.md`](STATUS.md)。** 保留本文的原因：它是 AI 线首次真实世界
+> 验证的完整数据（真素材、真 provider、真 sidecar），且命中了 1 个真 bug + 1 个产品需求
+> + 1 个设计裁决——**真实验证的价值样本，不应删改**。
+
+> 日期：2026-09-20（实验 B/C 补充同日）
 - 执行：ZhangSan（Core 验证脚本 `tools/validation/run_validation.py`，隔离 data_dir `.validation/`，真实 sidecar + 真实素材 + 真实 provider）
 - 素材（均为本机真实视频，非合成）：dance（1080p50，168s）、science（720p 竖屏，10.1s）、lichun（720p，150.9s）
 - Provider：用户既有 `AIVS_REAL_PROVIDER_*` 配置组（apikey.fun 网关 / deepseek-v4.1-flash / 期望 json_schema 适配器），零重复配置

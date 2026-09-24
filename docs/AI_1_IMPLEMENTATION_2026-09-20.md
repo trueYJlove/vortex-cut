@@ -34,7 +34,16 @@
 
 ## 3. 开放边界（后续工作单）
 
-- Desktop UI（会话启动/步骤可视化/取消按钮）——依赖本单事件与端点，已就绪。
-- AI 操作白名单扩容（`add_caption`/`set_caption_style`/`add_transition` 等）——独立单，机制面已验证。
-- 真实 provider 集成验收（capability 测试通过的 provider 端到端）——依赖用户提供真实 provider 配置。
+> **【2026-09-24 修正】本节三条边界已全部关闭**，原文保留作历史记录。
+> 当前状态以 [`docs/STATUS.md`](STATUS.md) 为准。
+
+- ~~Desktop UI（会话启动/步骤可视化/取消按钮）——依赖本单事件与端点，已就绪。~~
+  **✅ 已交付**：`AgentSessionPanel.tsx`（挂载 `App.tsx`），含每步 diff 浏览与费用聚合；
+  独立验收见 `DESKTOP_SETTINGS_UI_INDEPENDENT_ACCEPTANCE_2026-09-21.md`（DESK-5 ✅）。
+- ~~AI 操作白名单扩容（`add_caption`/`set_caption_style`/`add_transition` 等）——独立单，机制面已验证。~~
+  **✅ 已交付**：commit `5bec655`（`AI_WHITELIST_EXPANSION_PLANNING_GATE_2026-09-22`），
+  白名单扩至 **22 种显式冻结** + 三处同步准入；`add_caption` 经显式裁决维持排除。
+- ~~真实 provider 集成验收（capability 测试通过的 provider 端到端）——依赖用户提供真实 provider 配置。~~
+  **✅ 已完成**：`AI_VALIDATION_REPORT_2026-09-20.md` §实验 C 双模型
+  （deepseek-v4.1-flash / gpt-5.6-luna）会话均 succeeded；`AI_VALIDATION_DEEPSEEK_PATCH_RERUN_2026-09-21.md` 复跑。
 - 开放问题裁决落实：agent_steps 的 input/output 已含 sha256 钉死（input_sha256 列）；会话 preview TTL 定为 30 分钟（步间总时长 + 缓冲）。

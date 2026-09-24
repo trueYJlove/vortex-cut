@@ -15,10 +15,12 @@
 
 ## 1. 核心语义（对规划门的落实）
 
-- **关键帧采样**：`select='eq(pict_type,I)+gte(t-prev_selected_t,1.0)'`——I 帧或距上个输出帧 ≥1s（长 GOP 素材的采样密度下限兜底）；4K60 只解 I 帧，解码成本与 GOP 数线性。
+- ~~**关键帧采样**：`select='eq(pict_type,I)+gte(t-prev_selected_t,1.0)'`——I 帧或距上个输出帧 ≥1s（长 GOP 素材的采样密度下限兜底）；4K60 只解 I 帧，解码成本与 GOP 数线性。~~
+  **【2026-09-24 修正】已改为双路径混合自适应**（`CV_SKIP_FRAME_PLANNING_GATE_2026-09-20`，commit `a349866`）：默认快路径 `-skip_frame nokey` + 纯 `eq(pict_type,I)`；采样点最大间隔 > 4s 判定长 GOP 素材 → **全量解码回退**（恢复 ≥1s 兜底）。上述 select 表达式现仅用于**回退路径**。详见 `AI_2_SKIP_FRAME_IMPLEMENTATION_2026-09-24.md`。
 - **存储不走 derived_media_cache**（规划门 §2 裁决）：cv_analyses/cv_samples 独立表，stale 判定复用 transcripts 指纹比对先例；召回层入口 `samples_for_range(asset, start, end)`。
 - **单版本单行**：重分析 = 旧行 `ON CONFLICT DO UPDATE` 原地重置（复用行、清明细、重置指纹），不插新行——UNIQUE(asset_id, algorithm_version) 约束的推论。
-- **algorithm_version 即信号集版本**：当前 1；调阈值/加信号须递增（新行不与旧条目互撞）。
+- ~~**algorithm_version 即信号集版本**：当前 1；调阈值/加信号须递增（新行不与旧条目互撞）。~~
+  **【2026-09-24 修正】当前为 `2`**（`cv_signals.py`）：`a349866` 因采样策略变化而递增（信号语义变化——运动能量粒度随路径不同）。递增语义本身不变：调阈值/加信号仍须递增，旧行标 stale 不重算。当前值见 [`STATUS.md`](STATUS.md) §1。
 - **隐私（ADR-0003 D4）**：全程本地计算零 egress 零 consent；唯一外部交互是 FFmpeg 子进程读本地文件。
 - **音频能量自包含**：同 job 内独立 astats 遍历（不复用懒生成的 waveform 缓存——不保证存在）；无音轨跳过恒 0。
 
@@ -31,7 +33,18 @@
 
 ## 3. 开放边界（阶段二/三）
 
-- 阶段二（AI-2-2）：模型注册表放开 provider 枚举 + `models/cv` 目录分层；YuNet ONNX 人脸检测回填 face_count/face_score；模型未就绪时 partial 语义。
-- 阶段三（AI-2-3）：`planning.py` 召回汇合——segments 查询处聚合 CV 特征、`_select` 排序键融合、`candidate_source` 扩展（无转录素材 CV 场景段召回——本单最终目标）。
-- 性能门（p95 ≤ 10s/分钟源，1080p30 与 4K60 两档）：需真实素材标定，随阶段三一起做测量工作单。
-- 采样密度参数校准（GOP 自适应 vs 固定 fps 下限）：当前 1s 下限为初值，阶段三测量后钉死。
+> **【2026-09-24 修正】本节的"后续单"已全部交付，原文保留作历史记录。**
+> 当前状态见 [`STATUS.md`](STATUS.md)。
+
+- ~~阶段二（AI-2-2）：模型注册表放开 provider 枚举 + `models/cv` 目录分层；YuNet ONNX 人脸检测回填 face_count/face_score；模型未就绪时 partial 语义。~~
+  **✅ 已交付**（`AI_2_STAGE2_IMPLEMENTATION_2026-09-20.md`，commit `ea1d8e6`）。
+- ~~阶段三（AI-2-3）：`planning.py` 召回汇合——segments 查询处聚合 CV 特征、`_select` 排序键融合、`candidate_source` 扩展（无转录素材 CV 场景段召回——本单最终目标）。~~
+  **✅ 已交付**（`AI_2_STAGE3_IMPLEMENTATION_2026-09-20.md`；`_cv_scenes`）。**Layer 0 至此闭环。**
+- ~~性能门（p95 ≤ 10s/分钟源，1080p30 与 4K60 两档）：需真实素材标定，随阶段三一起做测量工作单。~~
+  **✅ 1080p 档已达标**（完整作业 dance 4.3 / science 7.6 / lichun 3.4 s/分）。**残留：4K60 从未标定。**
+- ~~采样密度参数校准（GOP 自适应 vs 固定 fps 下限）：当前 1s 下限为初值，阶段三测量后钉死。~~
+  **✅ 已裁决并落地**：skip_frame 混合自适应（4s 回退阈值）。**残留：规划门要求的"可配"入口未做。**
+  详见 `AI_2_SKIP_FRAME_IMPLEMENTATION_2026-09-24.md` §4。
+
+**计数说明**：§2 的"单测 15 项"是**阶段一交付时点**的计数；`test_cv_signals.py` 现为
+19 项（阶段二补入人脸解码/NMS/partial 用例）。引用该计数时注意时点。

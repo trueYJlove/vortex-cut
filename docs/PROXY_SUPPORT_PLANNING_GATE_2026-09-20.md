@@ -1,5 +1,19 @@
 # Provider 代理支持（默认系统代理 + 可自定义）——Planning Gate
 
+> ## ✅ 本单已交付（2026-09-24 补记）
+>
+> **§0 的现状走读已全部消解**，原文保留作历史记录：
+>
+> | §0 原文表述 | 真实现状 |
+> |---|---|
+> | 「`trust_env=False` 且不传 proxy……**完全无法穿越代理**，境外网关直连超时」 | **已修复**：代理三级回退全部贯通（system 默认 / custom / direct），client factory 增加 proxy 透传；`trust_env=False` **按设计保留**（文档 §1 明确不做项） |
+> | 「桌面端 UI 侧网络与 sidecar 侧网络行为**不一致**是用户可感知的现状」 | **已消除**：Desktop 设置 UI 代理三选 + 自定义地址，重启生效语义 |
+> | §1「Desktop 设置 UI：代理模式三选 + 自定义地址输入 + 连接测试提示」 | **已交付**（`SettingsDialog.tsx`，`pending_restart` 两态如实） |
+>
+> **落地证据**：Core commit `151742b`（`config.py` 的 `provider_proxy`/`proxy_mode`/`resolve_provider_proxy`；`app.py` 注入；CLI `--provider-proxy`/`--proxy-mode`）+ Desktop（`desktop-settings.ts`、`settings-proxy.electron.spec.ts`）；`DESKTOP_SETTINGS_UI_INDEPENDENT_ACCEPTANCE_2026-09-21.md` DESK-2 / DESK-3 ✅。
+>
+> **验收项状态（对照 §3）**：§3.1（Core 单测 + 三级回退矩阵）✅；**§3.2（本地 forward proxy 验证 provider 经代理可达）❓ 未见明确取证**；§3.3（真实世界复跑）——所依赖的 `run_validation.py` **当前挂起**（见 `AI_2_SKIP_FRAME_IMPLEMENTATION_2026-09-24.md` §4.1）。后两项已登记为 [`docs/STATUS.md`](STATUS.md) §4 承诺 P5。
+
 > 起草：LiuWei，2026-09-20。来源：AI 真实世界验证发现 2
 > （`AI_VALIDATION_REPORT_2026-09-20.md`——sidecar `trust_env=False` 直连
 > 境外网关超时，中国用户配 provider 后必遇 `PROVIDER_NETWORK_ERROR`）。

@@ -6,15 +6,15 @@ Vortex Cut 是 Vortex 旗下的本地优先、AI 驱动的视频剪辑与多平�
 
 ## 当前能力与阶段
 
-项目当前处于 Stage 2C 实现与验收阶段。Stage 3 尚未实现；平台预设、游戏配方、HUD保护、BGM/字幕模板与批量导出仍属于后续规划。现有实现覆盖：
+> **当前阶段、迁移版本与能力边界统一声明在 [`docs/STATUS.md`](docs/STATUS.md)。**
+> 本文件不再复述——状态在多处独立复述正是漂移的起点（纪律见 `AGENTS.md`
+> 「Documentation Sync Discipline」）。
+>
+> **历史教训**：本节曾长期写着"项目当前处于 Stage 2C 实现与验收阶段 / Stage 3 尚未实现"。
+> 该表述自 Stage 3B 起即已过期（`docs/STAGE3B_DETAILED_DESIGN.md` 当时已记录并搁置），
+> 直到 2026-09-24 文档审计才修正——期间它使 README 读者低估项目约六个 Stage。
 
-- 本地项目、素材导入、模型管理、转录、基于转录或素材建立时间线；
-- 时间线 Revision、锁定元素、受控 AI 修改提案、差异比较与显式应用；
-- 权威预览、H.264/AAC 导出、预览失效与重启恢复验证链路；
-- Stage 2A 的 AI 候选粗剪准备、确认与比较/采纳流程；
-- Stage 2C 的 Provider Candidate capability 显式测试，以及只有已配置且 capability 为 supported 时才可准备 AI 粗剪外传确认。
-
-可选外部 Provider 只会在用户明确触发的受控流程中调用；常规开发、单元测试、静态验证与受控 loopback 测试不需要真实 Provider。项目尚未声明实现或验收任何 Stage 3 功能。
+可选外部 Provider 只会在用户明确触发的受控流程中调用；常规开发、单元测试、静态验证与受控 loopback 测试不需要真实 Provider。
 
 ## 本地架构
 

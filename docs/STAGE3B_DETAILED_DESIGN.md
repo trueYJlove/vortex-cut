@@ -44,8 +44,11 @@ retry lineage、重启恢复和真实 Windows 包验收。
 | 打包 | 打包 Core、FFmpeg、字体、recipes、platform/rendition resources | 无新增模型/字体；扩展真实包验证链路 |
 | 测试 | Stage 3A 单元测试较集中，真实包脚本已覆盖双画幅、partial、retry | 在改公共渲染/批次代码前补足 Stage 3A 特征回归 |
 
-维护提示：`README.md` 的阶段描述仍停留在 Stage 2C/“Stage 3 尚未实现”，但用户已确认本阶段不处理；
-不得把该修正混入 Stage 3B 实现 diff。
+维护提示（**已于 2026-09-24 处理，保留作历史记录**）：`README.md` 的阶段描述当时停留在
+Stage 2C，用户当时确认不在 Stage 3B 处理。该过期表述最终于 2026-09-24 文档审计中修正——
+README 与 `BRAND_BASELINE.md` 不再复述阶段，统一引用 `docs/STATUS.md`
+（纪律见 `AGENTS.md`「Documentation Sync Discipline」）。
+当时"不得把该修正混入 Stage 3B 实现 diff"的约束依然成立：**文档修正与实现 diff 不应混提**。
 
 ## 3. 总体数据流
 

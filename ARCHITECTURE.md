@@ -489,7 +489,7 @@ apps/
 services/
   core/                    FastAPI 入口和应用组装
 packages/
-  contracts/               OpenAPI 生成的 TypeScript 契约
+  contracts/               TypeScript 契约（**手写**——见下方现状对照）
   ui/                      可复用 UI 组件
 python/
   domain/                  纯领域模型和规则
@@ -506,7 +506,19 @@ docs/
   adr/                     架构决策记录
 ```
 
-前端类型从 OpenAPI 契约生成，避免手工维护两套请求模型。Python 领域层不得导入 FastAPI、Electron 或具体 Provider SDK。
+### 17.1 现状对照（2026-09-24 核实）
+
+> **上面是目标结构，与实际仓库现状有四处不符。** 新增此节是因为该节曾被读作现状描述，
+> 导致新加入者去找不存在的目录（2026-09-24 文档审计发现）。
+
+| 本节所列 | 现状 | 说明 |
+|---|---|---|
+| `apps/web/` | **不存在** | `apps/` 下只有 `desktop/`。`services/web/` 存在但仅一个未接线的占位组件，未进入 Electron/Renderer 链路（`ADR-0002` R4 已登记） |
+| `packages/ui/` | **不存在** | `packages/` 下只有 `contracts/` |
+| 顶层 `python/{domain,application,infrastructure,media,jobs}` | **不存在** | 领域代码位于 `services/core/src/aivs_core/`，**平铺单层**，未按本节分层。此为 `ADR-0002` R2 登记的结构债，采用"增量分层"渐进偿还 |
+| 「前端类型从 **OpenAPI 契约生成**」 | **与现状相反** | `packages/contracts/src/` 为**手写** TypeScript（`index.ts` 约 2300 行 + `performance.ts`/`stage4e.ts`/`stage5.ts`/`stage6r.ts`），仓库内无 OpenAPI 产物；根 `package.json` 的 `contracts:generate` 实为 `contracts build`，**不是** OpenAPI 生成。契约的单一来源由手写 + 契约守卫测试保证，而非生成器 |
+
+**仍然成立**：`apps/desktop/`、`services/core/`、`packages/contracts/`、`resources/`、`docs/adr/` 的位置与职责描述；以及"Python 领域层不得导入 FastAPI、Electron 或具体 Provider SDK"——该约束由代码证据支持（`ADR-0002` 评审结论：领域层纯净）。
 
 ## 18. 分阶段实施计划
 
