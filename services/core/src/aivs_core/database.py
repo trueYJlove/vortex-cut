@@ -23,6 +23,7 @@ from .database_v22 import V22_SQL
 from .database_v23 import V23_SQL
 from .database_v24 import V24_SQL
 from .database_v25 import V25_SQL
+from .database_v26 import V26_SQL
 from .performance import measured
 
 
@@ -59,6 +60,7 @@ V22_VERSION = "v22"
 V23_VERSION = "v23"
 V24_VERSION = "v24"
 V25_VERSION = "v25"
+V26_VERSION = "v26"
 V1_SQL = """
 CREATE TABLE IF NOT EXISTS media_inputs (
   id TEXT PRIMARY KEY, path TEXT NOT NULL, display_name TEXT NOT NULL,
@@ -918,6 +920,7 @@ MIGRATIONS: dict[str, str] = {
     V23_VERSION: V23_SQL,
     V24_VERSION: V24_SQL,
     V25_VERSION: V25_SQL,
+    V26_VERSION: V26_SQL,
 }
 
 

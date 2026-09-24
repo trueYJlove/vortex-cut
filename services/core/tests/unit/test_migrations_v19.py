@@ -51,7 +51,7 @@ def test_v18_to_v19_is_append_only_and_preserves_checksums(
         )
         assert sql.execute("PRAGMA foreign_key_check").fetchall() == []
         assert sql.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-    assert set(MIGRATIONS) == {f"v{i}" for i in range(1, 26)}
+    assert set(MIGRATIONS) == {f"v{i}" for i in range(1, 27)}
 
 
 def test_v19_columns_exist_and_nullable(tmp_path: Path) -> None:

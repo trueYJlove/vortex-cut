@@ -18,7 +18,7 @@
 ```json
 {
   "protocol_version": 1,
-  "latest_migration": 25,
+  "latest_migration": 26,
   "patch_operations": 36,
   "ai_patch_operations": 22,
   "cv_algorithm_version": 2
@@ -111,6 +111,7 @@ PiP 自由定位、A1 音频混音、代理与权威预览、H.264/AAC 导出与
 | P12 | **W0.3 声画链接模型**：链接组 + 联动 trim/move/remove/position + 解除联动 | `CLIP_LINKAGE_PLANNING_GATE_2026-09-24` §1.1 / §3（ADR-0004 D1/D8） | 工作包 | ✅ **2026-09-24 核销**——实施记录 `CLIP_LINKAGE_IMPLEMENTATION_2026-09-24.md` §2；`test_clip_linkage.py` 10 项；旧文档零行为用例通过 |
 | P13 | **W1.1 剪辑语法层骨架**：editing_grammar + 参考规划器 + 三段式零 egress 采纳链 | `EDITING_GRAMMAR_PLANNING_GATE_2026-09-24` §1.1 / §3 | 工作包 | ✅ **2026-09-24 核销**——实施记录 `EDITING_GRAMMAR_IMPLEMENTATION_2026-09-24.md` §2；`test_editing_grammar.py` 6 项 + 迁移 v24 |
 | P14 | **W1.5 跳切/去停顿**：静音检测 + remove_pauses 规划器 | `REMOVE_PAUSES_PLANNING_GATE_2026-09-24` §1.1 / §3 | 工作包 | ✅ **2026-09-24 核销**——实施记录 `REMOVE_PAUSES_IMPLEMENTATION_2026-09-24.md` §2；`test_remove_pauses.py` 9 项；迁移 v25（拟议文档落盘） |
+| P15 | **W1.2 节拍网格**：纯 numpy 检测 + beat_grids 存储 | `BEAT_GRID_PLANNING_GATE_2026-09-24` §1.1 / §3 | 工作包 | ✅ **2026-09-24 核销**——实施记录 `BEAT_GRID_IMPLEMENTATION_2026-09-24.md` §2；`test_beat_grid.py` 8 项；迁移 v26 |
 
 ---
 

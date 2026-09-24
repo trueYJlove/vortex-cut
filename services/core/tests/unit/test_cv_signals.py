@@ -154,7 +154,7 @@ def test_v21_schema_tables_and_constraints(tmp_path: Path) -> None:
     db.initialize()
     with db.connection() as conn:
         versions = [row[0] for row in conn.execute("SELECT version FROM schema_migrations")]
-        assert "v21" in versions and len(versions) == 25
+        assert "v21" in versions and len(versions) == 26
         conn.execute(
             "INSERT INTO projects(id,name,status,canvas_json,root_dir,root_dir_name,"
             "created_at,updated_at,last_opened_at) "
