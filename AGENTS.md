@@ -103,10 +103,70 @@ The project follows a staged development process with specific gates:
 
 Each stage must pass all gates before proceeding to the next stage.
 
+## Documentation Sync Discipline
+
+**Why this exists.** The 2026-09-24 documentation audit found ~80 stale items across 17 documents,
+including **5 written commitments that were never closed**. The root cause is not carelessness:
+status was restated independently in ~22 places, with no single source and no enforcement.
+Conventions alone decay — the five-gate process already existed and still leaked. This section
+therefore pairs a written rule with a machine check.
+
+### Rule 1 — Single source of truth
+
+`docs/STATUS.md` is the **only** place that declares current state. No other document may restate
+the current stage, migration version, capability boundary, or completion status. Other documents
+must **reference** STATUS.md instead. This applies to `README.md`, `BRAND_BASELINE.md`, roadmaps,
+handoffs, and the user manual alike.
+
+### Rule 2 — Machine-checked facts (enforced by test)
+
+`docs/STATUS.md` §1 holds a machine-readable facts block, verified against code by
+`services/core/tests/unit/test_status_doc_consistency.py`. Changing any of the following in code
+**requires updating STATUS.md §1 in the same change** — otherwise the test goes red:
+
+| Code change | STATUS.md field |
+|---|---|
+| SQLite migration added or changed | `latest_migration` |
+| TimelinePatch operation added or removed | `patch_operations` |
+| AI whitelist operation added or removed | `ai_patch_operations` |
+| CV signal algorithm constants changed | `cv_algorithm_version` |
+| `PROTOCOL_VERSION` changed | `protocol_version` |
+
+The test also fails if any document outside `docs/STATUS.md` reintroduces a known-stale
+status claim (blacklist maintained in the test).
+
+### Rule 3 — Commitments must be registered and closed
+
+**Any** commitment written in a Planning Gate — acceptance item, **risk mitigation**, or resolved
+open question — MUST be registered in `docs/STATUS.md` §4. It is closed only by updating §4 with
+evidence and date. An unregistered commitment is treated as non-existent; an unclosed one is
+tracked debt.
+
+Risk mitigations are explicitly included because they are the ones that rot silently: acceptance
+items at least have a checklist, mitigations have none.
+
+### Rule 4 — Point-in-time records must not be cited as current
+
+Acceptance records, validation reports, and implementation records describe a moment in time.
+When superseded, add a `已被 X 取代` banner at the top **and** list the document in
+`docs/STATUS.md` §6. Never cite them as current state.
+
+### Rule 5 — Reference, do not restate
+
+If you are about to write "当前处于…", "最新版本是…", or "尚未实现…" outside `docs/STATUS.md`,
+stop and link to STATUS.md instead. Restating state is the origin of drift.
+
+### Enforcement
+
+- **Rule 2** — enforced by test (CI).
+- **Rules 1, 3, 4, 5** — verified at the Verification Gate by LiuKeAi, who checks that
+  STATUS.md §1 matches code, §4 reflects every open commitment, and no new state restatement
+  has appeared elsewhere.
+
 ## Collaboration Principles
 
 - Agents communicate through documented interfaces and contracts
 - Changes must be reviewed by relevant agents before implementation
 - Gate approvals require consensus from all relevant agents
-- Documentation must be updated in parallel with implementation
+- Documentation must be updated in parallel with implementation (see **Documentation Sync Discipline** above)
 - Roles may be combined for smaller tasks but maintained for major features

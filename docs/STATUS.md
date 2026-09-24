@@ -1,0 +1,147 @@
+# Vortex Cut 状态源（Single Source of Truth）
+
+> **本文件是唯一声明"项目当前状态"的地方。**
+> 其他文档**不得复述**当前阶段、迁移版本、能力边界或完成状态，只能**引用本文件**。
+> 纪律条文见 `AGENTS.md`「文档同步纪律」。
+>
+> **机器校验**：`services/core/tests/unit/test_status_doc_consistency.py` 会解析
+> §1 的字段块并与代码实际值比对——**字段漂移即测试红**。这是本文件不腐烂的保证：
+> 改了迁移/白名单/算法版本却忘了改这里，CI 会拦住。
+>
+> 建立：2026-09-24（W0.1）。来源：2026-09-24 文档过期审计（17 份文档、约 80 条过期）。
+
+---
+
+## 1. 机器可校验字段
+
+<!-- STATUS-FACTS-BEGIN -->
+```json
+{
+  "protocol_version": 1,
+  "latest_migration": 22,
+  "patch_operations": 33,
+  "ai_patch_operations": 22,
+  "cv_algorithm_version": 2
+}
+```
+<!-- STATUS-FACTS-END -->
+
+| 字段 | 含义 | 校验源（改这些代码就必须改上面的块） |
+|---|---|---|
+| `protocol_version` | 契约协议版本 | `packages/contracts/src/index.ts` 的 `PROTOCOL_VERSION` |
+| `latest_migration` | 最新 SQLite 迁移版本 | `aivs_core.database.MIGRATIONS` 的最大版本号 |
+| `patch_operations` | TimelinePatch 操作总数 | `aivs_core.timeline.PATCH_OPERATIONS` |
+| `ai_patch_operations` | **AI 白名单操作数**（显式冻结集合） | `aivs_core.timeline.AI_PATCH_OPERATIONS` |
+| `cv_algorithm_version` | CV 信号算法版本 | `aivs_core.media.cv_signals.CV_ALGORITHM_VERSION` |
+
+> **为什么是这几个**：它们全部满足两个条件——①会被代码改动而改变；②能从代码确定性地读出来。
+> 只有同时满足这两条的字段才值得机器校验。其余状态（如"某功能是否可用"）无法自动判定，
+> 依赖 §4 的人工核销纪律。
+
+---
+
+## 2. 当前阶段
+
+**本项目已不再用单一编号描述当前阶段。** Stage 0–8 是历史阶段，已全部收口；
+其后工作按**并行工作线**推进：
+
+| 工作线 | 状态 | 说明 |
+|---|---|---|
+| Stage 0–8 | ✅ 历史完成 | 各有独立验收记录；Stage 7/8 为发布加固与收口 |
+| M2 里程碑（交互与编辑能力） | ✅ 已交付 | B1 变速 / B2 转场 / B3 关键帧 / B4 字幕均有设计与验收；B2 视觉验收已声明自动化可验部分全满足 |
+| M3 里程碑（预览引擎） | 部分交付 | M3-0 预览引擎、M3-2 播放重构、M3-3 A1 音频混音已有文档与验收 |
+| **AI 能力线** | **进行中（当前主投入）** | AI-1 多步 agent 会话、AI-2 本地 CV 信号层（Layer 0）已合入；总纲与 ADR-0004 已立 |
+
+- **当前活跃分支**：`ai/stability-polish`（HEAD 持续前进，不在此处绑定具体提交号）
+- **发布版本**：`0.0.1`（`package.json`）；下一版维护范围见历史发布文档
+
+> **⚠️ 不要再用 "Stage 2C" 描述当前状态。** 该表述自 Stage 3B 起即已过期
+> （`STAGE3B_DETAILED_DESIGN.md:47` 曾记录并搁置），是 2026-09-24 审计中最高危的过期项。
+
+---
+
+## 3. 能力边界（已交付，可对外）
+
+> 这一节用于纠正历史文档中"Stage 3 尚未实现"类表述造成的**对外口径压制**
+> （`BRAND_BASELINE.md` 曾据此禁止宣传已交付能力）。
+
+**编辑核心**：多轨时间线、转场、关键帧、字幕（含样式/花字）、变速与倒放、蒙版/抠像、
+PiP 自由定位、A1 音频混音、代理与权威预览、H.264/AAC 导出与多平台 Profile、封面设置。
+
+**AI 能力线（本地优先）**：
+- 本地 ASR 转录（faster-whisper，词级时间戳），模型按需下载、不随包分发；
+- **AI 候选粗剪**（Stage 2A）：转录或 CV 场景段召回 → 外部 Provider 出三候选 → 采纳；
+- **AI 修改提案**（Stage 2B）：自然语言 → TimelinePatch → 差异预览 → 显式应用；
+- **AI 多步 agent 会话**（AI-1，迁移 v20）：有界循环（步数 ≤6 / token 预算 / 结构化失败反馈 /
+  基线漂移中止），每步落不可变 Revision，Desktop 面板含每步 diff 浏览与费用聚合；
+- **本地 CV 信号层**（AI-2 Layer 0，迁移 v21）：镜头边界 / 运动能量 / 清晰度 / 亮度 /
+  音频能量 / YuNet 人脸；`skip_frame` 混合自适应采样（算法版本 2）；
+- **AI 操作白名单**：22 种显式冻结 + "白名单 + schema + 字段清单"三处同步准入；
+- Desktop 设置 UI（含代理三选）、CV 分析入口。
+
+**隐私边界（ADR-0003 D4 硬承诺）**：云端永不默认、永不静默；egress preview 可逐张审计；
+本地信号计算零 egress；默认（纯本地）体验自立。
+
+> 能力**规划**（尚未交付的部分）见 `AI_CAPABILITY_MASTER_PLAN_2026-09-24.md` §4 能力矩阵，
+> **不在本文件重复**——本文件只声明"已交付"，规划声明属于总纲。
+
+---
+
+## 4. 未闭环承诺（**验收项 + 风险对策**）
+
+> **为什么两类都要登记**：五门流程只追踪验收项，风险对策写完就无人再看。
+> 2026-09-24 审计发现的 5 项欠账中，有 1 项正是"风险对策"型。
+>
+> **纪律**：规划门写下的**任何**承诺（验收项、风险对策、开放问题裁决）在此登记；
+> 完成时核销并注明证据。**未在此登记的承诺视为不存在。**
+
+| # | 承诺 | 出处 | 类型 | 状态 |
+|---|---|---|---|---|
+| P1 | sha256 对拍锁（非回退素材双路径逐字节一致） | `CV_SKIP_FRAME_PLANNING_GATE` §3.1 | 验收项 | ⏳ 仅人工实测，**无自动化测试** |
+| P2 | 合成长 GOP fixture 的回退触发测试 | `CV_SKIP_FRAME_PLANNING_GATE` §3.2 | 验收项 | ⏳ 同上 |
+| P3 | 更新 AI-1 规划门"13 种"记载为准入纪律 + 显式清单 | `AI_WHITELIST_EXPANSION_PLANNING_GATE` §3.5 | 验收项 | ✅ **2026-09-24 核销**（W0.1 补做） |
+| P4 | 真实 deepseek 两步会话（"剪短并加一个转场"） | `AI_WHITELIST_EXPANSION_PLANNING_GATE` §3.2 | 验收项 | ❓ **仓内无证据**，按"未取证"登记 |
+| P5 | 本地 forward proxy 验证 provider 经代理可达 | `PROXY_SUPPORT_PLANNING_GATE` §3.2 | 验收项 | ❓ **未见明确取证** |
+| P6 | `pyproject` 显式声明 numpy / onnxruntime 版本下限 | `AI_2_CV_SIGNALS_PLANNING_GATE` §4 风险表 | **风险对策** | ⏳ **未落地**（现为 faster-whisper 传递依赖；PyInstaller spec 已含 onnxruntime，但依赖树漂移无人拦） |
+
+---
+
+## 5. 已知未完成工作（**不是过期，是真实待办**）
+
+| 项 | 说明 | 出处 |
+|---|---|---|
+| 4K60 档性能标定 | 规划门定义两档门（1080p30 / 4K60），**4K60 从未测量**，仓库无 4K60 素材 | `AI_2_SKIP_FRAME_IMPLEMENTATION_2026-09-24.md` §4.2 |
+| CV 采样密度参数暴露 | 规划门 §1.2/§4 要求阈值"可配"、ADR-0004 D6 要求"高级用户可调"；现状为模块常量，`CvAnalysisRequest` 仅 `generate` | 同上 §4.3 |
+| **`run_validation.py` 挂起** | 仓库唯一的"真素材 + 真 sidecar"验证驱动，复跑时挂起无进展——**当前无法复跑任何真实链路验证** | 同上 §4.1 |
+| json_schema 适配器被网关拒 | provider 兼容面窄于设计，script 类适配器为唯一通路 | `AI_VALIDATION_REPORT_2026-09-20.md` §实验 B |
+| Provider 域独立工作单 | 代理与探测总预算**均已交付**；本条保留用于跟踪 provider 域后续 | — |
+
+---
+
+## 6. 历史状态文档索引（点时间记录，**引为现状前必须先读本文件**）
+
+> **登记规则**：本表只收**点时间记录**（某一时刻的快照/验证数据/交接）。
+> **活文档不得登记在此**——活文档过期应当**修正**，而不是豁免。
+> 把文档登记在此即自动豁免机器校验的过期表述黑名单（见 `test_status_doc_consistency.py`），
+> 因此**误登记等于放行漂移**。
+
+| 文档 | 性质 | 注意 |
+|---|---|---|
+| `docs/PROJECT_RELEASE_STATUS.md` | Stage 7/8 发布时点记录 | **已过期**（v17 / 旧分支）；现仅作发布历史 |
+| `docs/PROJECT_STATUS_AND_NEXT_STAGE.md` | 2026-08-20 阶段总结快照 | **整篇结论已被推翻**；其中"从 stash 恢复"指引**已失效**（stash 不存在） |
+| `docs/AI_VALIDATION_REPORT_2026-09-20.md` | 2026-09-20 真实验证数据 | **性能门"未过"已于次日修复达标**；全仓最易被误引为现状的一份 |
+| `docs/PHASE2_HANDOFF.md` | 2026-09-06 预览线交接快照 | "下一步"条目已部分完成 |
+
+**不在此表的活文档**（过期即修正，不得豁免）：`README.md`、`ARCHITECTURE.md`、
+`docs/BRAND_BASELINE.md`、`docs/M2_ROADMAP.md`、`docs/VORTEX_CUT_USER_MANUAL.md`、
+`docs/AI_CAPABILITY_MASTER_PLAN_2026-09-24.md` 及各规划门/实施记录。
+
+---
+
+## 7. 维护本文件的规则
+
+1. **改代码改了 §1 的字段 → 立刻改 §1 的块**。忘了也没关系，测试会红。
+2. **规划门新增任何承诺 → 在 §4 加一行**。完成时把状态改为 ✅ 并注明证据与日期。
+3. **交付了新能力 → 在 §3 加一条**；规划中的能力**不加**（属于总纲）。
+4. **发现某个历史文档被取代 → 在 §6 加一行**，并给该文档加"已被 X 取代"横幅。
+5. **其他文档不要复述状态**——复述即漂移的起点。
