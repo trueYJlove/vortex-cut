@@ -19,7 +19,7 @@
 {
   "protocol_version": 1,
   "latest_migration": 23,
-  "patch_operations": 33,
+  "patch_operations": 36,
   "ai_patch_operations": 22,
   "cv_algorithm_version": 2
 }
@@ -108,6 +108,7 @@ PiP 自由定位、A1 音频混音、代理与权威预览、H.264/AAC 导出与
 | P9 | **W0.4 质量评测体系骨架** | `QUALITY_EVAL_PLANNING_GATE_2026-09-24` §1.1 / §3 | 工作包 | ✅ **2026-09-24 核销**——实施记录 `QUALITY_EVAL_IMPLEMENTATION_2026-09-24.md` §2 验收核对表全项；Core 全量 **930 passed + 1 skipped, 0 failed** |
 | P10 | 评测样本不足 → harness `insufficient` 诚实语义 + 分档缺口表（禁止假分） | 同上 §4 风险表 / §7 | **风险对策** | ✅ **2026-09-24 核销**——`test_insufficient_not_fake_score` + 首基线 `gaps`（五档缺口如实暴露） |
 | P11 | 评测指标口径冻结（容差/k/公式入快照；禁止静默改口径救指标） | 同上 §2.3 / §7 | **风险对策** | ✅ **2026-09-24 核销**——快照 `params` 含容差/k/tolerance；公式写死于 `tools/quality_eval/metrics.py` |
+| P12 | **W0.3 声画链接模型**：链接组 + 联动 trim/move/remove/position + 解除联动 | `CLIP_LINKAGE_PLANNING_GATE_2026-09-24` §1.1 / §3（ADR-0004 D1/D8） | 工作包 | ✅ **2026-09-24 核销**——实施记录 `CLIP_LINKAGE_IMPLEMENTATION_2026-09-24.md` §2；`test_clip_linkage.py` 10 项；旧文档零行为用例通过 |
 
 ---
 

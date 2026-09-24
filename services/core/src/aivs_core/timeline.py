@@ -48,6 +48,10 @@ PATCH_OPERATIONS = {
     "remove_track",
     "move_track",
     "set_track_flags",
+    # W0.3 声画链接（结构域，不进 AI 白名单——见 CLIP_LINKAGE_PLANNING_GATE §2.5）
+    "detach_audio",
+    "set_clip_link",
+    "clear_clip_link",
 }
 # AI 白名单（WHITELIST_EXPANSION 2026-09-22）：显式冻结集合 + 导入期断言，
 # 替代历史"差集"写法——差集让 8-28 后新增 op 未经裁决自动成为 AI 可用
@@ -85,7 +89,44 @@ AI_PATCH_OPERATIONS = frozenset({
 assert AI_PATCH_OPERATIONS <= PATCH_OPERATIONS, (
     "AI_PATCH_OPERATIONS contains operations absent from PATCH_OPERATIONS"
 )
+def _ignore_link(operation: dict[str, Any]) -> bool:
+    value = operation.get("ignore_link")
+    if value is None:
+        return False
+    if not isinstance(value, bool):
+        raise DomainError("TIMELINE_INVALID", "ignore_link 状态不合法")
+    return value
+
+
 MIN_VIDEO_US = 100_000
+
+
+def _clip_link_members(document: dict[str, Any], clip: dict[str, Any]) -> list[dict[str, Any]]:
+    """W0.3：链接组成员；无 link_group_id 时仅自身（旧语义）。"""
+    group_id = clip.get("link_group_id")
+    if not group_id:
+        return [clip]
+    return [c for c in document["clips"] if c.get("link_group_id") == group_id]
+
+
+def _assign_link_group(clips: list[dict[str, Any]], members: list[dict[str, Any]], group_id: str) -> None:
+    for member in members:
+        member["link_group_id"] = group_id
+
+
+def _drop_empty_link_groups(document: dict[str, Any]) -> None:
+    """序列化前清理：组内仅剩 0/1 个成员时不落 link_group_id（保持旧形状）。"""
+    counts: dict[str, int] = {}
+    for clip in document["clips"]:
+        gid = clip.get("link_group_id")
+        if gid:
+            counts[gid] = counts.get(gid, 0) + 1
+    for clip in document["clips"]:
+        gid = clip.get("link_group_id")
+        if gid and counts.get(gid, 0) < 2:
+            del clip["link_group_id"]
+
+
 MIN_IMAGE_US = 500_000
 MAX_IMAGE_US = 30_000_000
 
@@ -529,6 +570,7 @@ class TimelineService:
             for raw_operation in operations:
                 operation = _mapping(raw_operation, "Patch 操作不合法")
                 self._apply_operation(db, project_id, document, operation)
+            _drop_empty_link_groups(document)
             self._normalize_and_validate(db, document)
             db.execute("BEGIN")
             try:
@@ -588,6 +630,7 @@ class TimelineService:
                     _patch_failure_reason(exc), operation_index, operation.get("op"),
                     _patch_failure_field(exc),
                 )
+        _drop_empty_link_groups(result)
         self._normalize_and_validate(db, result)
         if not result["clips"]:
             raise DomainError("TIMELINE_PATCH_PROPOSAL_INVALID", "AI Patch 不得产生空时间线")
@@ -848,6 +891,7 @@ class TimelineService:
                     "reverse_playback",
                     "track_id",
                     "as_audio",
+                    "link_to_clip_id",
                 },
                 optional={
                     "source_start_us",
@@ -858,6 +902,7 @@ class TimelineService:
                     "reverse_playback",
                     "track_id",
                     "as_audio",
+                    "link_to_clip_id",
                 },
             )
             # as_audio（M3-3）：视频素材取其音轨铺到 A1（音频轨拒收视频素材的
@@ -944,6 +989,12 @@ class TimelineService:
                 self._place_clip_on_track(
                     clips, captions, clip, operation.get("at_index"), target_track_id
                 )
+            link_to = operation.get("link_to_clip_id")
+            if link_to is not None:
+                partner = _clip(document, link_to)
+                group_id = partner.get("link_group_id") or f"link_{new_id()}"
+                partner["link_group_id"] = group_id
+                clip["link_group_id"] = group_id
         elif op == "insert_transcript_segments":
             _exact_keys(
                 operation,
@@ -1003,9 +1054,42 @@ class TimelineService:
             if transcript_id not in provenance:
                 provenance.append(transcript_id)
         elif op == "remove_clip":
-            _exact_keys(operation, {"op", "clip_id"})
+            _exact_keys(operation, {"op", "clip_id", "ignore_link"}, optional={"ignore_link"})
             clip = _clip(document, operation.get("clip_id"))
-            clips.remove(clip)
+            targets = (
+                [clip] if _ignore_link(operation) else list(_clip_link_members(document, clip))
+            )
+            for target in list(targets):
+                if target not in clips:
+                    continue
+                clips.remove(target)
+                captions[:] = [
+                    c for c in captions if c["source_clip_id"] != target["clip_id"]
+                ]
+                if document.get("transitions"):
+                    v1_left = sorted(
+                        (
+                            c
+                            for c in clips
+                            if c.get("track_id") == "V1" and c is not target
+                        ),
+                        key=lambda c: c["timeline_start_us"],
+                    )
+                    successor_id = next(
+                        (
+                            c["clip_id"]
+                            for c in v1_left
+                            if c["timeline_start_us"] >= target["timeline_start_us"]
+                        ),
+                        None,
+                    )
+                    document["transitions"] = [
+                        item
+                        for item in document["transitions"]
+                        if item["after_clip_id"] != target["clip_id"]
+                        and item["after_clip_id"] != successor_id
+                    ]
+            _drop_empty_link_groups(document)
             captions[:] = [c for c in captions if c["source_clip_id"] != clip["clip_id"]]
             # 级联删除涉及该片段的转场：作为锚点的转场直接删；时间序中
             # "被删片段的直接后继"为锚的转场也删（该相邻关系已不存在）。
@@ -1033,7 +1117,11 @@ class TimelineService:
                     and item["after_clip_id"] != successor_id
                 ]
         elif op == "move_clip":
-            _exact_keys(operation, {"op", "clip_id", "to_index"})
+            _exact_keys(
+                operation,
+                {"op", "clip_id", "to_index", "ignore_link"},
+                optional={"ignore_link"},
+            )
             clip = _clip(document, operation.get("clip_id"))
             to_index = operation.get("to_index")
             if (
@@ -1042,16 +1130,25 @@ class TimelineService:
                 or not 0 <= to_index < len(clips)
             ):
                 raise DomainError("TIMELINE_INVALID", "目标片段位置不合法")
-            clips.remove(clip)
-            clips.insert(to_index, clip)
+            if _ignore_link(operation) or not clip.get("link_group_id"):
+                clips.remove(clip)
+                clips.insert(to_index, clip)
+            else:
+                # W0.3：整组保持相对次序落到目标邻域（规划门 §5.2）。
+                members = _clip_link_members(document, clip)
+                member_ids = {m["clip_id"] for m in members}
+                block = [c for c in clips if c["clip_id"] in member_ids]
+                rest = [c for c in clips if c["clip_id"] not in member_ids]
+                insert_at = max(0, min(to_index, len(rest)))
+                clips[:] = rest[:insert_at] + block + rest[insert_at:]
         elif op == "position_clip":
             # 自由定位：视频与音频片段都可以放在任意时间位置（同轨允许空隙）。
             # 可选 track_id：跨轨道移动（仅限同类型轨道；视频片段在视频轨之间
             # 移动，音频片段固定 A1）。同轨禁止重叠——前端负责钳制，这里兜底拒绝。
             _exact_keys(
                 operation,
-                {"op", "clip_id", "timeline_start_us", "track_id"},
-                optional={"track_id"},
+                {"op", "clip_id", "timeline_start_us", "track_id", "ignore_link"},
+                optional={"track_id", "ignore_link"},
             )
             clip = _clip(document, operation.get("clip_id"))
             new_start = _integer(operation.get("timeline_start_us"), "时间线开始时间不合法")
@@ -1089,10 +1186,25 @@ class TimelineService:
                         if caption.get("source_clip_id") == clip["clip_id"]:
                             caption["start_us"] += delta
                             caption["end_us"] += delta
+            position_delta = new_start - clip["timeline_start_us"]
             clip["timeline_start_us"] = new_start
             clip["timeline_end_us"] = new_start + duration
+            if (
+                not _ignore_link(operation)
+                and clip.get("link_group_id")
+                and position_delta
+            ):
+                for member in _clip_link_members(document, clip):
+                    if member is clip:
+                        continue
+                    member["timeline_start_us"] += position_delta
+                    member["timeline_end_us"] += position_delta
         elif op == "trim_clip":
-            _exact_keys(operation, {"op", "clip_id", "source_start_us", "source_end_us"})
+            _exact_keys(
+                operation,
+                {"op", "clip_id", "source_start_us", "source_end_us", "ignore_link"},
+                optional={"ignore_link"},
+            )
             clip = _clip(document, operation.get("clip_id"))
             if clip["asset_kind"] not in ("video", "audio"):
                 raise DomainError("TIMELINE_INVALID", "只有视频/音频片段可以修剪")
@@ -1133,6 +1245,48 @@ class TimelineService:
                 self._trim_bound_captions(
                     document, clip["clip_id"], retained_start, retained_end, 0
                 )
+            if not _ignore_link(operation) and clip.get("link_group_id"):
+                for member in _clip_link_members(document, clip):
+                    if member is clip:
+                        continue
+                    if (
+                        member.get("asset_id") != clip.get("asset_id")
+                        or member.get("asset_kind") not in ("video", "audio")
+                    ):
+                        raise DomainError(
+                            "TIMELINE_INVALID", "链接组成员素材不一致，无法联动修剪"
+                        )
+                    if (
+                        new_start < member["source_start_us"]
+                        or new_end > member["source_end_us"]
+                    ):
+                        raise DomainError(
+                            "TIMELINE_INVALID", "修剪范围必须位于链接组成员当前片段内"
+                        )
+                    if (
+                        member["asset_kind"] == "audio"
+                    ):  # noqa: SIM108 — 与独立 trim 相同的音频边缘语义
+                        old_timeline_start = member["timeline_start_us"]
+                        shift = new_start - member["source_start_us"]
+                        member["source_start_us"] = new_start
+                        member["source_end_us"] = new_end
+                        member["timeline_start_us"] = old_timeline_start + shift
+                        member["timeline_end_us"] = member["timeline_start_us"] + (
+                            new_end - new_start
+                        )
+                    else:
+                        speed = _clip_speed(member)
+                        old_source_start = member["source_start_us"]
+                        retained_start = member["timeline_start_us"] + round(
+                            (new_start - old_source_start) * 1000 / speed
+                        )
+                        retained_end = member["timeline_start_us"] + round(
+                            (new_end - old_source_start) * 1000 / speed
+                        )
+                        member["source_start_us"] = new_start
+                        member["source_end_us"] = new_end
+                        member["timeline_start_us"] = retained_start
+                        member["timeline_end_us"] = retained_end
         elif op == "split_clip":
             _exact_keys(operation, {"op", "clip_id", "source_time_us"})
             clip = _clip(document, operation.get("clip_id"))
@@ -1184,6 +1338,62 @@ class TimelineService:
             split_t_us = split_timeline - clip["timeline_start_us"]
             _split_clip_keyframes(clip, right, split_t_us)
             self._split_bound_captions(document, clip["clip_id"], right["clip_id"], split_timeline)
+        elif op == "detach_audio":
+            # W0.3：A/V 对构造器——同源派生 A1 音频并与画面默认链接（D1）。
+            _exact_keys(operation, {"op", "clip_id"})
+            clip = _clip(document, operation.get("clip_id"))
+            if clip["asset_kind"] != "video":
+                raise DomainError("TIMELINE_INVALID", "只有视频片段可以分离音频")
+            if not clip["audio"].get("enabled"):
+                raise DomainError("TIMELINE_INVALID", "视频片段没有可分离的音轨")
+            if any(
+                c.get("asset_kind") == "audio"
+                and c.get("asset_id") == clip.get("asset_id")
+                and c.get("source_start_us") == clip.get("source_start_us")
+                and c.get("source_end_us") == clip.get("source_end_us")
+                and c.get("track_id") == AUDIO_TRACK_ID
+                for c in clips
+            ):
+                raise DomainError("TIMELINE_INVALID", "该片段音频已分离")
+            audio_clip = {
+                "clip_id": f"clip_{new_id()}",
+                "track_id": AUDIO_TRACK_ID,
+                "order_index": 0,
+                "asset_id": clip["asset_id"],
+                "asset_kind": "audio",
+                "source_start_us": clip["source_start_us"],
+                "source_end_us": clip["source_end_us"],
+                "timeline_start_us": clip["timeline_start_us"],
+                "timeline_end_us": clip["timeline_end_us"],
+                "layout": "fit",
+                "audio": {"enabled": True, "gain_db": clip["audio"].get("gain_db", 0.0)},
+                "speed_milli": clip.get("speed_milli", 1000),
+            }
+            group_id = clip.get("link_group_id") or f"link_{new_id()}"
+            clip["link_group_id"] = group_id
+            audio_clip["link_group_id"] = group_id
+            clip["audio"] = {"enabled": False, "gain_db": clip["audio"].get("gain_db", 0.0)}
+            clips.append(audio_clip)
+            a1_clips = [c for c in clips if c["track_id"] == AUDIO_TRACK_ID]
+            audio_clip["order_index"] = len(a1_clips) - 1
+        elif op == "set_clip_link":
+            _exact_keys(operation, {"op", "clip_ids"})
+            clip_ids = operation.get("clip_ids")
+            if (
+                not isinstance(clip_ids, list)
+                or len(clip_ids) < 2
+                or len(set(clip_ids)) != len(clip_ids)
+            ):
+                raise DomainError("TIMELINE_INVALID", "链接至少需要两个不同片段")
+            members = [_clip(document, clip_id) for clip_id in clip_ids]
+            group_id = f"link_{new_id()}"
+            for member in members:
+                member["link_group_id"] = group_id
+        elif op == "clear_clip_link":
+            _exact_keys(operation, {"op", "clip_id"})
+            clip = _clip(document, operation.get("clip_id"))
+            for member in _clip_link_members(document, clip):
+                member.pop("link_group_id", None)
         elif op == "set_layout":
             _exact_keys(operation, {"op", "clip_id", "layout"})
             _clip(document, operation.get("clip_id"))["layout"] = _enum(
@@ -2119,9 +2329,22 @@ class TimelineService:
                     "transform",
                     "mask",
                     "keying",
+                    "link_group_id",
                 },
-                optional={"speed_milli", "reverse_playback", "keyframes", "transform", "mask", "keying"},
+                optional={
+                    "speed_milli",
+                    "reverse_playback",
+                    "keyframes",
+                    "transform",
+                    "mask",
+                    "keying",
+                    "link_group_id",
+                },
             )
+            if "link_group_id" in clip and (
+                not isinstance(clip.get("link_group_id"), str) or not clip.get("link_group_id")
+            ):
+                raise DomainError("TIMELINE_INVALID", "链接组 ID 不合法")
             clip_id = _identifier(clip.get("clip_id"), "Clip ID 不合法")
             if clip_id in clip_ids:
                 raise DomainError("TIMELINE_INVALID", "Clip ID 重复")
