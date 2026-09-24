@@ -166,13 +166,17 @@ def main() -> None:
         "--asset", action="append", default=None,
         help="自定义素材路径（可重复）；缺省用内置三段真实素材",
     )
-    parser.add_argument("--label", default=None, help="配合单个 --asset 的标签")
+    parser.add_argument(
+        "--label", action="append", default=None,
+        help="配合 --asset 的标签（可重复；按出现顺序与 --asset 一一对应）",
+    )
     args = parser.parse_args()
 
     if args.asset:
+        labels = args.label or []
         assets = [
-            (args.label or f"custom{index}", p)
-            for index, p in enumerate(args.asset, start=1)
+            (labels[index] if index < len(labels) else f"custom{index + 1}", path)
+            for index, path in enumerate(args.asset)
         ]
     else:
         assets = DEFAULT_ASSETS

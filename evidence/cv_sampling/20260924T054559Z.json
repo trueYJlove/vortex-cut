@@ -1,0 +1,59 @@
+{
+  "measured_at": "2026-09-24T05:45:59.961720+00:00",
+  "algorithm_version": 2,
+  "ffmpeg": "C:\\DataFolder\\codes\\AI-Vidio\\resources\\ffmpeg\\win-x64\\ffmpeg.exe",
+  "summary": {
+    "perf_gate_per_minute_s": 10.0,
+    "assets_measured": 2,
+    "all_meet_gate": false,
+    "max_effective_per_minute_s": 15.7
+  },
+  "assets": [
+    {
+      "label": "4k60-gop1s",
+      "path": "test-assets\\generated\\4k60\\gop1s-60s.mp4",
+      "size_mb": 349.3,
+      "duration_s": 60.0,
+      "max_gop_s": 1.0,
+      "fast_path": {
+        "wall_clock_s": 1.6,
+        "frames": 60,
+        "per_minute_s": 1.6
+      },
+      "full_path": {
+        "wall_clock_s": 12.5,
+        "frames": 60,
+        "per_minute_s": 12.5
+      },
+      "speedup": 7.6,
+      "falls_back_to_full": false,
+      "effective_per_minute_s": 1.6,
+      "meets_gate": true,
+      "note": "生产路径仅快路径一遍遍历。",
+      "avg_sample_interval_s": 1.0
+    },
+    {
+      "label": "4k60-gop5s",
+      "path": "test-assets\\generated\\4k60\\gop5s-15s.mp4",
+      "size_mb": 87.5,
+      "duration_s": 15.0,
+      "max_gop_s": 5.0,
+      "fast_path": {
+        "wall_clock_s": 0.2,
+        "frames": 3,
+        "per_minute_s": 0.9
+      },
+      "full_path": {
+        "wall_clock_s": 3.7,
+        "frames": 15,
+        "per_minute_s": 14.8
+      },
+      "speedup": 15.6,
+      "falls_back_to_full": true,
+      "effective_per_minute_s": 15.7,
+      "meets_gate": false,
+      "note": "生产路径为快路径 + 全量回退两遍遍历（长 GOP 触发）；effective 即两遍之和。",
+      "avg_sample_interval_s": 5.0
+    }
+  ]
+}

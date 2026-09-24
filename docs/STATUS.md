@@ -103,6 +103,7 @@ PiP 自由定位、A1 音频混音、代理与权威预览、H.264/AAC 导出与
 | P4 | 真实 deepseek 两步会话（"剪短并加一个转场"） | `AI_WHITELIST_EXPANSION_PLANNING_GATE` §3.2 | 验收项 | ❓ **仓内无证据**，按"未取证"登记 |
 | P5 | 本地 forward proxy 验证 provider 经代理可达 | `PROXY_SUPPORT_PLANNING_GATE` §3.2 | 验收项 | ❓ **未见明确取证** |
 | P6 | `pyproject` 显式声明 numpy / onnxruntime 版本下限 | `AI_2_CV_SIGNALS_PLANNING_GATE` §4 风险表 | **风险对策** | ⏳ **未落地**（现为 faster-whisper 传递依赖；PyInstaller spec 已含 onnxruntime，但依赖树漂移无人拦） |
+| P7 | **4K60 长 GOP 回退策略裁决**（成本感知阈值 / 定点补洞 / 诚实降级） | 4K60 标定发现（`AI_2_SKIP_FRAME_IMPLEMENTATION` §4.2） | **裁决项** | ⏳ **待裁决**——4K60 长 GOP 实测 15.4（H.264）/ **38.3**（HEVC）s/分，超 10 门 |
 
 ---
 
@@ -110,9 +111,9 @@ PiP 自由定位、A1 音频混音、代理与权威预览、H.264/AAC 导出与
 
 | 项 | 说明 | 出处 |
 |---|---|---|
-| 4K60 档性能标定 | 规划门定义两档门（1080p30 / 4K60），**4K60 从未测量**，仓库无 4K60 素材 | `AI_2_SKIP_FRAME_IMPLEMENTATION_2026-09-24.md` §4.2 |
-| CV 采样密度参数暴露 | 规划门 §1.2/§4 要求阈值"可配"、ADR-0004 D6 要求"高级用户可调"；现状为模块常量，`CvAnalysisRequest` 仅 `generate` | 同上 §4.3 |
-| **`run_validation.py` 挂起** | 仓库唯一的"真素材 + 真 sidecar"验证驱动，复跑时挂起无进展——**当前无法复跑任何真实链路验证** | 同上 §4.1 |
+| **4K60 长 GOP 性能不达标** | 2026-09-24 标定完成：**常态（GOP 1s）通过**（H.264 1.6 / HEVC 2.8 s/分）；**长 GOP（>4s）触发回退后超门**（H.264 15.4 / **HEVC 38.3** s/分 vs 门 10）。根因：4s 阈值是常量，回退成本随分辨率×编码放大（1080p 1.1 → 4K60 HEVC 37.3 s/分，**34 倍**）。**待裁决，见 §4 承诺 P7** | `AI_2_SKIP_FRAME_IMPLEMENTATION_2026-09-24.md` §4.2 |
+| CV 采样密度参数暴露 | 规划门 §1.2/§4 要求阈值"可配"、ADR-0004 D6 要求"高级用户可调"；现状为模块常量，`CvAnalysisRequest` 仅 `generate`。**4K60 标定结果为该要求提供了实证依据** | 同上 §4.3 |
+| **`run_validation.py` 挂起** | 仓库唯一的"真素材 + 真 sidecar"验证驱动，复跑时挂起无进展——**当前无法复跑任何真实链路验证**（含 4K60 完整作业） | 同上 §4.1 |
 | json_schema 适配器被网关拒 | provider 兼容面窄于设计，script 类适配器为唯一通路 | `AI_VALIDATION_REPORT_2026-09-20.md` §实验 B |
 | Provider 域独立工作单 | 代理与探测总预算**均已交付**；本条保留用于跟踪 provider 域后续 | — |
 
