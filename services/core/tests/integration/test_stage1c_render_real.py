@@ -329,10 +329,15 @@ def test_real_preview_export_reuse_stale_fingerprint_and_ssim(
         assert set(destination_grant) == {
             "destination_grant_id",
             "display_name",
+            # 导出弹窗"保存位置"行需要回显用户自选目录（见 rendering/service.py
+            # 的目录展示串注释：用户经原生对话框自选的回显路径，非内部路径泄露）。
+            # 该键由导出弹窗功能引入，本断言此前未跟随更新——2026-09-24 补。
+            "directory_display",
             "extension",
             "overwrite_authorized",
             "expires_at",
         }
+        # 隐私守卫：完整目标路径不得出现在 DTO（`directory_display` 仅为父目录）。
         assert str(destination.resolve()) not in str(destination_grant)
         export_response = client.post(
             f"/api/v1/projects/{project_id}/exports",
