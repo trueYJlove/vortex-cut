@@ -112,6 +112,7 @@ PiP 自由定位、A1 音频混音、代理与权威预览、H.264/AAC 导出与
 | P13 | **W1.1 剪辑语法层骨架**：editing_grammar + 参考规划器 + 三段式零 egress 采纳链 | `EDITING_GRAMMAR_PLANNING_GATE_2026-09-24` §1.1 / §3 | 工作包 | ✅ **2026-09-24 核销**——实施记录 `EDITING_GRAMMAR_IMPLEMENTATION_2026-09-24.md` §2；`test_editing_grammar.py` 6 项 + 迁移 v24 |
 | P14 | **W1.5 跳切/去停顿**：静音检测 + remove_pauses 规划器 | `REMOVE_PAUSES_PLANNING_GATE_2026-09-24` §1.1 / §3 | 工作包 | ✅ **2026-09-24 核销**——实施记录 `REMOVE_PAUSES_IMPLEMENTATION_2026-09-24.md` §2；`test_remove_pauses.py` 9 项；迁移 v25（拟议文档落盘） |
 | P15 | **W1.2 节拍网格**：纯 numpy 检测 + beat_grids 存储 | `BEAT_GRID_PLANNING_GATE_2026-09-24` §1.1 / §3 | 工作包 | ✅ **2026-09-24 核销**——实施记录 `BEAT_GRID_IMPLEMENTATION_2026-09-24.md` §2；`test_beat_grid.py` 8 项；迁移 v26 |
+| P16 | **W1.3 卡点规划器** beat_sync：切点吸附 beat + 强拍重镜头 | `BEAT_SYNC_PLANNING_GATE_2026-09-24` §1.1 / §3 | 工作包 | ✅ **2026-09-24 核销**——实施记录 `BEAT_SYNC_IMPLEMENTATION_2026-09-24.md` §2；`test_beat_sync.py` 6 项 |
 
 ---
 

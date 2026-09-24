@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ..projects import DomainError
+from .beat_sync import BeatSyncPlanner
 from .planners import DropShortClipsPlanner
 from .protocol import Planner
 from .silence import RemovePausesPlanner
@@ -34,4 +35,5 @@ def default_registry() -> PlannerRegistry:
     registry = PlannerRegistry()
     registry.register(DropShortClipsPlanner())
     registry.register(RemovePausesPlanner())
+    registry.register(BeatSyncPlanner())
     return registry

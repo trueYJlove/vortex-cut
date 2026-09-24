@@ -131,9 +131,10 @@ def test_tool_catalog_shape(tmp_path: Path) -> None:
     service, db = _service(tmp_path)
     grammar = EditingGrammarService(db, service)
     tools = grammar.list_planners()["items"]
-    assert tools[0]["name"] == "drop_short_clips"
-    assert "parameters_schema" in tools[0]
-    assert tools[0]["preconditions"]
+    by_name = {t["name"]: t for t in tools}
+    assert "drop_short_clips" in by_name
+    assert "parameters_schema" in by_name["drop_short_clips"]
+    assert by_name["drop_short_clips"]["preconditions"]
 
 
 def test_same_proposal_patch_sha(tmp_path: Path) -> None:
