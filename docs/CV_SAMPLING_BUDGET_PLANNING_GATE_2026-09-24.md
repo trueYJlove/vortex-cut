@@ -63,7 +63,8 @@ model_revision / sample_count / scene_cut_count / created_at / updated_at / fini
 3. **回退硬 deadline（双保险）**：即使准入通过，回退仍带 `deadline = 剩余预算`；
    超时则中止回退、保留快路径采样。**需先让 `analyze_video` 支持中途取消。**
 4. **迁移 v23**：`cv_analyses` 增 `density_status`（`full` / `sparse`）、
-   `target_interval_us`、`achieved_max_gap_us`、`wall_clock_ms`。
+   `gap_threshold_us`（分析时阈值快照）、`achieved_max_gap_us`、`wall_clock_ms`。
+   存量行回填 `full`（依据见 §2.5，需在迁移测试中断言）。
 5. **召回层消费**：`_cv_scenes` 排序对 `sparse` 分析降权（权重值以测试钉死）。
 6. **契约暴露**：`POST …/cv-analysis` 响应 DTO 增 `density_status` 等字段（**增量可选**）。
 7. **估算模型标定数据入档**：模型常量、标定来源、已知误差方向写入实施记录。
@@ -132,15 +133,23 @@ projected_full_decode_s = duration_s × (width × height × fps) / THROUGHPUT_PX
 
 ### 2.5 `density_status` 语义
 
+**判据是"回退阈值"，不是"目标间隔"。**（初稿误用 `MIN_SAMPLE_INTERVAL` = 1s 作判据，
+会把 1s < 间隔 ≤ 4s 这一正常区间的素材大量误标为 sparse——该区间本就不该回退。）
+
 | 值 | 含义 |
 |---|---|
-| `full` | 达成本次分析的目标间隔（即 `achieved_max_gap_us ≤ target_interval_us × 容差`） |
-| `sparse` | **未**达成目标间隔——快路径的 I 帧间隔即实际密度 |
+| `full` | `achieved_max_gap_us ≤ gap_threshold_us`——**没有留下"本该填而没填"的盲区** |
+| `sparse` | `achieved_max_gap_us > gap_threshold_us`——**明知有盲区但未填**（预算不足或回退被中止） |
 
-- `target_interval_us` = `MIN_SAMPLE_INTERVAL`（当前 1.0s）的微秒表示；
+- `gap_threshold_us` = 分析时生效的 `CV_SAMPLE_GAP_FALLBACK_US`（当前 4s）**快照**；
+  存快照而非读当前常量，因为该常量可能被调整，而历史行必须能自我解释；
 - `achieved_max_gap_us` = 落库样本相邻时间戳最大差；
 - **为什么存实际最大间隔而不只存布尔**：布尔无法回答"差多少"，
   召回层加权与后续 UI 呈现都需要程度信息；且该值 O(1) 可算（样本已按时间排序）。
+
+**既有行的回填**：迁移 v23 将存量行默认置 `full`。**该默认值是准确的**——
+存量行全部产生于"无条件回退"的旧行为：凡 `max_gap > 4s` 者必已回退至 ≤4s，
+故所有存量行都满足 `achieved ≤ threshold`。回填需在迁移测试中断言这一点。
 
 ### 2.6 召回层消费
 
@@ -200,10 +209,15 @@ projected_full_decode_s = duration_s × (width × height × fps) / THROUGHPUT_PX
 
 ## 5. 开放问题（实施前裁决，ZhangSan）
 
-1. **`algorithm_version` 是否递增？** 本单不改变信号**计算**（`frame_signals` 不变），
-   但改变**采样决策**——同一素材在不同预算下可能产出不同密度。
-   倾向**递增**（因为"同一 algorithm_version 意味着可比的采样密度"是召回层隐含依赖），
-   但这会触发全量重分析。**需权衡后裁决并记录。**
+1. **`algorithm_version` 是否递增？**
+   本单不改变信号**计算**（`frame_signals` 不变），但改变**采样决策**；
+   且 §2.3 的 deadline 兜底使同一素材在**不同性能的机器上**可能得到不同密度
+   （快机回退完成、慢机中止）。
+   **倾向：不递增。** 理由：①信号计算未变，递增会触发全量重分析而无信号收益；
+   ②"同一 `algorithm_version` 意味着可比密度"这一隐含依赖，**已由 `density_status`
+   显式承担**——这正是该字段存在的意义；③存量行回填 `full` 是准确的（§2.5）。
+   **但需确认**：召回层不得再假设"同版本 = 同密度"，须实际消费 `density_status`。
+   **若不递增，则本单必须包含 §1.1 第 5 项（召回层消费）才算完整**——否则依赖被破坏而无替代。
 2. **`analyze_video` 的 `progress` 参数如何处理？**（§0.4 发现 2）
    三选一：(a) 本单顺带实现细粒度进度；(b) 显式删除该参数（承认它从未生效）；
    (c) 登记为独立小单、本单不动。**倾向前两者之一**——留一个永不生效的参数是陷阱。
