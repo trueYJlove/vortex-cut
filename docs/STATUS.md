@@ -18,7 +18,7 @@
 ```json
 {
   "protocol_version": 1,
-  "latest_migration": 22,
+  "latest_migration": 23,
   "patch_operations": 33,
   "ai_patch_operations": 22,
   "cv_algorithm_version": 2
@@ -104,7 +104,7 @@ PiP 自由定位、A1 音频混音、代理与权威预览、H.264/AAC 导出与
 | P5 | 本地 forward proxy 验证 provider 经代理可达 | `PROXY_SUPPORT_PLANNING_GATE` §3.2 | 验收项 | ❓ **未见明确取证** |
 | P6 | `pyproject` 显式声明 numpy / onnxruntime 版本下限 | `AI_2_CV_SIGNALS_PLANNING_GATE` §4 风险表 | **风险对策** | ⏳ **未落地**（现为 faster-whisper 传递依赖；PyInstaller spec 已含 onnxruntime，但依赖树漂移无人拦） |
 | P7 | **4K60 长 GOP 密度策略** | `ADR-0005`（三杠杆：预算约束下的密度旋钮 + 诚实降级 + 硬件解码；**定点补洞经实测否决**） | 裁决项 | ✅ **2026-09-24 已裁决**，分三阶段实施（阶段 1 成本模型+诚实降级 / 阶段 2 密度旋钮 / 阶段 3 硬件解码） |
-| P8 | **ADR-0005 阶段 1 实施**：CV 采样预算 + 诚实降级 | `CV_SAMPLING_BUDGET_PLANNING_GATE_2026-09-24` §1.1（7 项交付）/ §3（验收） | 工作包 | ⏳ **规划门已出，待实施前裁决 §5 两项开放问题**。核销条件 = 实施记录含**验收核对表且逐项落实** |
+| P8 | **ADR-0005 阶段 1 实施**：CV 采样预算 + 诚实降级 | `CV_SAMPLING_BUDGET_PLANNING_GATE_2026-09-24` §1.1 / §3 | 工作包 | ✅ **2026-09-24 核销**——实施记录 `CV_SAMPLING_BUDGET_IMPLEMENTATION_2026-09-24.md` §2 验收核对表各项落实；Core 全量 **913 passed + 2 skipped, 0 failed** |
 
 ---
 
@@ -112,8 +112,10 @@ PiP 自由定位、A1 音频混音、代理与权威预览、H.264/AAC 导出与
 
 | 项 | 说明 | 出处 |
 |---|---|---|
-| **4K60 长 GOP 性能不达标** | 2026-09-24 标定完成。**完整作业**（性能门判定依据）：常态 GOP 1s **5.4 s/分 ✅**（余量仅 1.85 倍）；长 GOP >4s **40.5 s/分 ❌**（超门 4.1 倍）。根因：4s 阈值是常量，回退成本随分辨率×编码放大（1080p 1.1 → 4K60 HEVC 37.3 s/分，**34 倍**）。**已裁决，见 §4 承诺 P7 / ADR-0005** | `AI_2_SKIP_FRAME_IMPLEMENTATION_2026-09-24.md` §4.2 |
-| CV 采样密度参数暴露 | 规划门 §1.2/§4 要求阈值"可配"、ADR-0004 D6 要求"高级用户可调"；现状为模块常量，`CvAnalysisRequest` 仅 `generate`。**4K60 标定结果为该要求提供了实证依据** | 同上 §4.3 |
+| **4K60 长 GOP 性能** | ✅ **已解决（2026-09-24，ADR-0005 阶段 1）**：预算准入使付不起的回退**根本不启动**——4K60 HEVC 长 GOP 由 **40.5 → 5.4 s/分**（样本回落为 12 个 I 帧，`density_status='sparse'` 如实标记）。常态 GOP 1s 保持 `full`。见 `CV_SAMPLING_BUDGET_IMPLEMENTATION_2026-09-24.md` | 同上 §4.2 + 实施记录 §3 |
+| CV 采样密度参数暴露 | 规划门 §1.2/§4 要求阈值"可配"、ADR-0004 D6 要求"高级用户可调"；现状为模块常量（`CV_PER_MINUTE_BUDGET_S` 等），`CvAnalysisRequest` 仅 `generate`。**阶段 1 已把常量集中，为该要求留出接入点** | 同上 §4.3 |
+| 4K60 常态约 1.0s 未归因差异 | 同素材同路径三次复跑一致（7.3/7.8/7.5 vs 原 5.4），已归因约 19% 为机器变慢、**剩余约 1.0s 未归因**。仍远低于 10 门限 | 实施记录 §4 L1 |
+| 细粒度进度仍缺失 | `analyze_video` 的死参数已删除，但未实现替代；长分析无中途进度 | 实施记录 §4 L2 |
 | json_schema 适配器被网关拒 | provider 兼容面窄于设计，script 类适配器为唯一通路 | `AI_VALIDATION_REPORT_2026-09-20.md` §实验 B |
 | Provider 域独立工作单 | 代理与探测总预算**均已交付**；本条保留用于跟踪 provider 域后续 | — |
 
