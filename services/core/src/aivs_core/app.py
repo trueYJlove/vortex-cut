@@ -319,6 +319,23 @@ class TimelinePatchProposalApplyRequest(BaseModel):
     proposed_document_sha256: str
 
 
+class EditingGrammarPrepareRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    base_revision_id: str
+    planner: str
+    params: dict[str, Any]
+
+
+class EditingGrammarProposalCreateRequest(EditingGrammarPrepareRequest):
+    pass
+
+
+class EditingGrammarProposalApplyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    base_revision_id: str
+    proposed_document_sha256: str
+
+
 class AgentSessionPrepareRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     base_revision_id: str
@@ -651,6 +668,10 @@ class CoreState:
             self.db, self.providers, self.provider_secrets, self.timelines,
             provider_factory=self._text_provider_factory,
         )
+        # W1.1：剪辑语法层（P-A，零 egress，无 provider/consent）。
+        from .editing_grammar import EditingGrammarService
+
+        self.editing_grammar = EditingGrammarService(self.db, self.timelines)
         # AI-1：多步 agent 会话（emit 传入以发 agent_session.updated 事件）。
         self.agent_sessions = AgentSessionService(
             self.db, self.providers, self.provider_secrets, self.timelines,
@@ -1469,6 +1490,67 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> dict[str, Any]:
         try:
             revision = state.timeline_patch_planning.apply(
+                project_id, proposal_id, request.model_dump()
+            )
+            return with_current_preview(state.timelines.get_state(revision["project_id"]))
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    # ---- W1.1 剪辑语法层（P-A：零 egress，无 provider/consent）----
+    @app.get("/api/v1/projects/{project_id}/editing-grammar/planners")
+    async def list_editing_grammar_planners(
+        project_id: str, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        return state.editing_grammar.list_planners()
+
+    @app.post("/api/v1/projects/{project_id}/editing-grammar/prepare")
+    async def prepare_editing_grammar(
+        project_id: str,
+        request: EditingGrammarPrepareRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return state.editing_grammar.prepare(project_id, request.model_dump())
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/editing-grammar/proposals")
+    async def create_editing_grammar_proposal(
+        project_id: str,
+        request: EditingGrammarProposalCreateRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return state.editing_grammar.propose(project_id, request.model_dump())
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/projects/{project_id}/editing-grammar/proposals")
+    async def list_editing_grammar_proposals(
+        project_id: str, _: CoreState = Depends(require_ui)
+    ) -> dict[str, Any]:
+        return {"items": state.editing_grammar.list_proposals(project_id)}
+
+    @app.get("/api/v1/projects/{project_id}/editing-grammar/proposals/{proposal_id}")
+    async def get_editing_grammar_proposal(
+        project_id: str,
+        proposal_id: str,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return state.editing_grammar.get_proposal(project_id, proposal_id)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/editing-grammar/proposals/{proposal_id}/apply")
+    async def apply_editing_grammar_proposal(
+        project_id: str,
+        proposal_id: str,
+        request: EditingGrammarProposalApplyRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            revision = state.editing_grammar.apply(
                 project_id, proposal_id, request.model_dump()
             )
             return with_current_preview(state.timelines.get_state(revision["project_id"]))

@@ -608,6 +608,7 @@ class TimelineService:
         operations: list[dict[str, Any]],
         *,
         ai: bool = False,
+        require_non_empty: bool = True,
     ) -> dict[str, Any]:
         if not 1 <= len(operations) <= 100:
             raise DomainError("TIMELINE_INVALID", "Patch 操作数量需为 1-100")
@@ -632,7 +633,7 @@ class TimelineService:
                 )
         _drop_empty_link_groups(result)
         self._normalize_and_validate(db, result)
-        if not result["clips"]:
+        if require_non_empty and not result["clips"]:
             raise DomainError("TIMELINE_PATCH_PROPOSAL_INVALID", "AI Patch 不得产生空时间线")
         return result
 
