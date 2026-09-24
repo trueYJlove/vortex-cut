@@ -191,7 +191,21 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--skip-bc", action="store_true", help="只跑实验 A（无需 API key）")
     parser.add_argument("--skip-c", action="store_true", help="跳过实验 C（patch 探测网关不稳时用）")
+    parser.add_argument(
+        "--asset", action="append", default=None,
+        help="自定义素材，格式 label=路径（可重复）；缺省用内置三段真实素材。"
+             "实验 B/C 依赖 label 为 dance 的素材。",
+    )
     args = parser.parse_args()
+
+    assets: list[tuple[str, str]] = ASSETS
+    if args.asset:
+        assets = []
+        for index, item in enumerate(args.asset, start=1):
+            label, separator, path = item.partition("=")
+            if not separator or not path:
+                raise SystemExit(f"--asset 需为 label=路径 格式，收到：{item!r}")
+            assets.append((label, path))
 
     provider_env = _provider_env()
     enabled = provider_env["AIVS_REAL_PROVIDER_ENABLED"] == "1"
@@ -222,7 +236,7 @@ def main() -> None:
         report["project_id"] = project_id
 
         # ---- 导入素材（admin file-grant → import 两步） ----
-        for label, path in ASSETS:
+        for label, path in assets:
             if not Path(path).is_file():
                 report["assets"][label] = {"error": "missing", "path": path}
                 continue
