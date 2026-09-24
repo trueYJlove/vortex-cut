@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "asset_id": "syn-cut-basic",
+  "bucket": "life_no_voice",
+  "annotator": "selfcheck",
+  "annotated_at": "2026-09-24T00:00:00Z",
+  "notes": "合成真值：切点 @ 2s/5s/8s",
+  "scene_cuts_us": [2000000, 5000000, 8000000]
+}

@@ -1,0 +1,6 @@
+{
+  "task": "recall_rank",
+  "queries": [
+    { "query_id": "q1", "ranking": ["a", "b", "c", "d"] }
+  ]
+}

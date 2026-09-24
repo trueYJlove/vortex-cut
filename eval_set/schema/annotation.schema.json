@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "vortex-cut/quality-eval/annotation.schema.json",
+  "title": "Vortex Cut 质量评测标注",
+  "type": "object",
+  "required": ["schema_version", "asset_id", "bucket", "annotator", "annotated_at"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "type": "integer", "minimum": 1 },
+    "asset_id": { "type": "string", "minLength": 1 },
+    "bucket": {
+      "type": "string",
+      "enum": ["spoken_single", "spoken_multi", "life_no_voice", "music", "long_gop"]
+    },
+    "annotator": { "type": "string", "minLength": 1 },
+    "secondary": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "annotator": { "type": "string" },
+        "annotated_at": { "type": "string" }
+      },
+      "required": ["annotator", "annotated_at"]
+    },
+    "annotated_at": { "type": "string", "minLength": 1 },
+    "notes": { "type": "string" },
+    "scene_cuts_us": {
+      "type": "array",
+      "items": { "type": "integer", "minimum": 0 }
+    },
+    "silence_intervals_us": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["start_us", "end_us"],
+        "additionalProperties": false,
+        "properties": {
+          "start_us": { "type": "integer", "minimum": 0 },
+          "end_us": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "beat_grid_us": {
+      "type": "array",
+      "items": { "type": "integer", "minimum": 0 }
+    },
+    "speaker_turns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["start_us", "end_us", "speaker"],
+        "additionalProperties": false,
+        "properties": {
+          "start_us": { "type": "integer", "minimum": 0 },
+          "end_us": { "type": "integer", "minimum": 0 },
+          "speaker": { "type": "string" }
+        }
+      }
+    },
+    "lj_offsets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["at_us", "direction", "delta_us"],
+        "additionalProperties": false,
+        "properties": {
+          "at_us": { "type": "integer", "minimum": 0 },
+          "direction": { "type": "string", "enum": ["L", "J"] },
+          "delta_us": { "type": "integer" }
+        }
+      }
+    },
+    "multicam_switch_us": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["at_us", "camera_id"],
+        "additionalProperties": false,
+        "properties": {
+          "at_us": { "type": "integer", "minimum": 0 },
+          "camera_id": { "type": "string" }
+        }
+      }
+    },
+    "recall": {
+      "type": "object",
+      "required": ["queries"],
+      "additionalProperties": false,
+      "properties": {
+        "queries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["query_id", "relevance"],
+            "additionalProperties": false,
+            "properties": {
+              "query_id": { "type": "string", "minLength": 1 },
+              "query_text": { "type": "string" },
+              "relevance": {
+                "type": "object",
+                "additionalProperties": { "type": "integer", "minimum": 0, "maximum": 3 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "narrative_coherence": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "maximum": 5
+    },
+    "structure_usable": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["usable"],
+      "properties": {
+        "usable": { "type": "boolean" },
+        "change_notes": { "type": "string" }
+      }
+    },
+    "av_defects": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "预留：双声/静音缺陷（骨架不计指标）",
+      "properties": {
+        "dual_audio_count": { "type": "integer", "minimum": 0 },
+        "mute_count": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

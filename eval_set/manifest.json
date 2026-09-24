@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "buckets": {
+    "spoken_single": { "min_samples": 5, "min_total_duration_s": 600 },
+    "spoken_multi": { "min_samples": 3, "min_cameras": 2 },
+    "life_no_voice": { "min_samples": 5 },
+    "music": { "min_samples": 3, "min_distinct_bpm": 3 },
+    "long_gop": { "min_samples": 2, "min_gop_s": 5 }
+  },
+  "assets": [
+    {
+      "asset_id": "syn-cut-basic",
+      "bucket": "life_no_voice",
+      "kind": "synthetic_metric_fixture",
+      "media": null,
+      "source_fingerprint": "sha256:syn-cut-basic",
+      "duration_us": 12000000,
+      "notes": "harness 自检用：切点真值，无真实媒体"
+    },
+    {
+      "asset_id": "syn-ndcg-basic",
+      "bucket": "life_no_voice",
+      "kind": "synthetic_metric_fixture",
+      "media": null,
+      "source_fingerprint": "sha256:syn-ndcg-basic",
+      "duration_us": 0,
+      "notes": "harness 自检用：nDCG 真值，无真实媒体"
+    },
+    {
+      "asset_id": "4k60-hevc-gop5s-60s",
+      "bucket": "long_gop",
+      "kind": "synthetic_media",
+      "media": "test-assets/generated/4k60/hevc-gop5s-60s.mp4",
+      "source_fingerprint": "sha256:pending",
+      "duration_us": 60000000,
+      "notes": "ADR-0005 4K60 长 GOP 合成素材；缺人工切点标注前不参与切点 P/R"
+    }
+  ]
+}

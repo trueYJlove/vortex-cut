@@ -1,0 +1,340 @@
+{
+  "generated_at": "2026-09-24T09:04:00Z",
+  "kind": "baseline",
+  "schema_version": 1,
+  "git_commit": "3d53179febb7224c4a2dbcf054ce1a906e553226",
+  "algorithm_version": 2,
+  "params": {
+    "cut_tolerance_us": 200000,
+    "ndcg_k": 10,
+    "regression_tolerance": 0.0
+  },
+  "buckets": {
+    "life_no_voice": {
+      "min_samples": 5,
+      "annotated_count": 2,
+      "asset_count": 2,
+      "metrics": {
+        "cut_pr": {
+          "status": "insufficient",
+          "reason": "annotated_assets 2 < min_samples 5",
+          "value": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "matched": 3,
+            "pred_count": 3,
+            "label_count": 3,
+            "tol_us": 200000,
+            "assets": [
+              {
+                "precision": 1.0,
+                "recall": 1.0,
+                "f1": 1.0,
+                "matched": 3,
+                "pred_count": 3,
+                "label_count": 3,
+                "tol_us": 200000,
+                "density_status": "full",
+                "asset_id": "syn-cut-basic"
+              }
+            ]
+          },
+          "pool_size": 2
+        },
+        "recall_ndcg": {
+          "status": "insufficient",
+          "reason": "annotated_assets 2 < min_samples 5",
+          "value": {
+            "ndcg": 1.0,
+            "query_count": 1,
+            "per_query": [
+              1.0
+            ],
+            "k": 10
+          },
+          "pool_size": 2
+        },
+        "beat_hit_rate": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "lj_offset_accuracy": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "multicam_consistency": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "narrative_coherence": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "structure_usable_rate": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "av_defect_rate": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        }
+      }
+    },
+    "long_gop": {
+      "min_samples": 2,
+      "annotated_count": 0,
+      "asset_count": 1,
+      "metrics": {
+        "cut_pr": {
+          "status": "unavailable",
+          "reason": "no scene_cuts_us labels in bucket",
+          "value": null
+        },
+        "recall_ndcg": {
+          "status": "unavailable",
+          "reason": "no recall labels in bucket",
+          "value": null
+        },
+        "beat_hit_rate": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "lj_offset_accuracy": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "multicam_consistency": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "narrative_coherence": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "structure_usable_rate": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "av_defect_rate": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        }
+      }
+    },
+    "music": {
+      "min_samples": 3,
+      "annotated_count": 0,
+      "asset_count": 0,
+      "metrics": {
+        "cut_pr": {
+          "status": "unavailable",
+          "reason": "no scene_cuts_us labels in bucket",
+          "value": null
+        },
+        "recall_ndcg": {
+          "status": "unavailable",
+          "reason": "no recall labels in bucket",
+          "value": null
+        },
+        "beat_hit_rate": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "lj_offset_accuracy": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "multicam_consistency": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "narrative_coherence": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "structure_usable_rate": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "av_defect_rate": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        }
+      }
+    },
+    "spoken_multi": {
+      "min_samples": 3,
+      "annotated_count": 0,
+      "asset_count": 0,
+      "metrics": {
+        "cut_pr": {
+          "status": "unavailable",
+          "reason": "no scene_cuts_us labels in bucket",
+          "value": null
+        },
+        "recall_ndcg": {
+          "status": "unavailable",
+          "reason": "no recall labels in bucket",
+          "value": null
+        },
+        "beat_hit_rate": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "lj_offset_accuracy": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "multicam_consistency": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "narrative_coherence": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "structure_usable_rate": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "av_defect_rate": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        }
+      }
+    },
+    "spoken_single": {
+      "min_samples": 5,
+      "annotated_count": 0,
+      "asset_count": 0,
+      "metrics": {
+        "cut_pr": {
+          "status": "unavailable",
+          "reason": "no scene_cuts_us labels in bucket",
+          "value": null
+        },
+        "recall_ndcg": {
+          "status": "unavailable",
+          "reason": "no recall labels in bucket",
+          "value": null
+        },
+        "beat_hit_rate": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "lj_offset_accuracy": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "multicam_consistency": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "narrative_coherence": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "structure_usable_rate": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "av_defect_rate": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        }
+      }
+    }
+  },
+  "gaps": {
+    "life_no_voice": {
+      "min_samples": 5,
+      "annotated_count": 2,
+      "shortfall": 3
+    },
+    "long_gop": {
+      "min_samples": 2,
+      "annotated_count": 0,
+      "shortfall": 2
+    },
+    "music": {
+      "min_samples": 3,
+      "annotated_count": 0,
+      "shortfall": 3
+    },
+    "spoken_multi": {
+      "min_samples": 3,
+      "annotated_count": 0,
+      "shortfall": 3
+    },
+    "spoken_single": {
+      "min_samples": 5,
+      "annotated_count": 0,
+      "shortfall": 5
+    }
+  },
+  "assets": [
+    {
+      "asset_id": "syn-cut-basic",
+      "bucket": "life_no_voice",
+      "kind": "synthetic_metric_fixture",
+      "density_status": "full",
+      "annotation": "ok",
+      "cut": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "matched": 3,
+        "pred_count": 3,
+        "label_count": 3,
+        "tol_us": 200000,
+        "density_status": "full",
+        "asset_id": "syn-cut-basic"
+      }
+    },
+    {
+      "asset_id": "syn-ndcg-basic",
+      "bucket": "life_no_voice",
+      "kind": "synthetic_metric_fixture",
+      "density_status": null,
+      "annotation": "ok"
+    },
+    {
+      "asset_id": "4k60-hevc-gop5s-60s",
+      "bucket": "long_gop",
+      "kind": "synthetic_media",
+      "density_status": null,
+      "annotation": "missing"
+    }
+  ]
+}

@@ -1,0 +1,90 @@
+{
+  "generated_at": "2026-09-24T09:04:00Z",
+  "kind": "selfcheck",
+  "params": {
+    "cut_tolerance_us": 200000,
+    "ndcg_k": 10
+  },
+  "checks": [
+    {
+      "name": "cut_perfect",
+      "ok": true,
+      "detail": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "matched": 3,
+        "pred_count": 3,
+        "label_count": 3,
+        "tol_us": 200000
+      }
+    },
+    {
+      "name": "cut_miss_beyond_tol",
+      "ok": true,
+      "detail": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "matched": 0,
+        "pred_count": 1,
+        "label_count": 1,
+        "tol_us": 200000
+      }
+    },
+    {
+      "name": "cut_hit_within_tol",
+      "ok": true,
+      "detail": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "matched": 1,
+        "pred_count": 1,
+        "label_count": 1,
+        "tol_us": 200000
+      }
+    },
+    {
+      "name": "cut_empty_both",
+      "ok": true,
+      "detail": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "matched": 0,
+        "pred_count": 0,
+        "label_count": 0,
+        "tol_us": 200000
+      }
+    },
+    {
+      "name": "ndcg_perfect",
+      "ok": true,
+      "detail": {
+        "ndcg": 1.0,
+        "query_count": 1,
+        "per_query": [
+          1.0
+        ],
+        "k": 10
+      }
+    },
+    {
+      "name": "ndcg_reversed_matches_hand_calc",
+      "ok": true,
+      "detail": {
+        "got": {
+          "ndcg": 0.7899980042460358,
+          "query_count": 1,
+          "per_query": [
+            0.7899980042460358
+          ],
+          "k": 10
+        },
+        "expected": 0.7899980042460358
+      }
+    }
+  ],
+  "ok": true
+}

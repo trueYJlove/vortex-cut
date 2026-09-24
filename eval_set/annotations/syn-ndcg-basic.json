@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "asset_id": "syn-ndcg-basic",
+  "bucket": "life_no_voice",
+  "annotator": "selfcheck",
+  "annotated_at": "2026-09-24T00:00:00Z",
+  "notes": "合成真值：分级相关度用于 nDCG",
+  "recall": {
+    "queries": [
+      {
+        "query_id": "q1",
+        "query_text": "synthetic",
+        "relevance": { "a": 3, "b": 2, "c": 1, "d": 0 }
+      }
+    ]
+  }
+}
