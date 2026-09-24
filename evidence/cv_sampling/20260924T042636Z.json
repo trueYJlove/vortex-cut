@@ -1,0 +1,82 @@
+{
+  "measured_at": "2026-09-24T04:26:36.724453+00:00",
+  "algorithm_version": 2,
+  "ffmpeg": "C:\\DataFolder\\codes\\AI-Vidio\\resources\\ffmpeg\\win-x64\\ffmpeg.exe",
+  "summary": {
+    "perf_gate_per_minute_s": 10.0,
+    "assets_measured": 3,
+    "all_meet_gate": true,
+    "max_effective_per_minute_s": 1.8
+  },
+  "assets": [
+    {
+      "label": "dance",
+      "path": "C:\\Users\\trueY\\Desktop\\刘可艾 小花猫舞蹈视频.mp4",
+      "size_mb": 676.9,
+      "duration_s": 168.0,
+      "max_gop_s": 1.0,
+      "fast_path": {
+        "wall_clock_s": 3.3,
+        "frames": 168,
+        "per_minute_s": 1.2
+      },
+      "full_path": {
+        "wall_clock_s": 19.5,
+        "frames": 168,
+        "per_minute_s": 7.0
+      },
+      "speedup": 6.0,
+      "falls_back_to_full": false,
+      "effective_per_minute_s": 1.2,
+      "meets_gate": true,
+      "note": "生产路径仅快路径一遍遍历。",
+      "avg_sample_interval_s": 1.0
+    },
+    {
+      "label": "science",
+      "path": "C:\\Users\\trueY\\Downloads\\给三年级学生讲解倒春寒的科普视频.mp4",
+      "size_mb": 1.4,
+      "duration_s": 10.1,
+      "max_gop_s": 7.08,
+      "fast_path": {
+        "wall_clock_s": 0.1,
+        "frames": 2,
+        "per_minute_s": 0.6
+      },
+      "full_path": {
+        "wall_clock_s": 0.2,
+        "frames": 11,
+        "per_minute_s": 1.2
+      },
+      "speedup": 2.0,
+      "falls_back_to_full": true,
+      "effective_per_minute_s": 1.8,
+      "meets_gate": true,
+      "note": "生产路径为快路径 + 全量回退两遍遍历（长 GOP 触发）；effective 即两遍之和。",
+      "avg_sample_interval_s": 5.04
+    },
+    {
+      "label": "lichun",
+      "path": "C:\\Users\\trueY\\Downloads\\立春视频.mp4",
+      "size_mb": 26.4,
+      "duration_s": 150.9,
+      "max_gop_s": 8.33,
+      "fast_path": {
+        "wall_clock_s": 0.3,
+        "frames": 30,
+        "per_minute_s": 0.1
+      },
+      "full_path": {
+        "wall_clock_s": 2.7,
+        "frames": 167,
+        "per_minute_s": 1.1
+      },
+      "speedup": 8.8,
+      "falls_back_to_full": true,
+      "effective_per_minute_s": 1.2,
+      "meets_gate": true,
+      "note": "生产路径为快路径 + 全量回退两遍遍历（长 GOP 触发）；effective 即两遍之和。",
+      "avg_sample_interval_s": 5.03
+    }
+  ]
+}
