@@ -95,7 +95,27 @@ const jobStatusLabels: Record<Job["status"], string> = { queued: "排队中", ru
 const jobPhaseLabels: Record<string, string> = { preparing: "准备中", encoding: "编码中", validating_probe: "校验（探测）", validating_decode: "校验（完整解码）", hashing: "完整性哈希", publishing: "正在完成发布" };
 const modelBadgeLabels: Record<ModelSummary["status"], string> = { unavailable: "未下载", queued: "排队中", downloading: "下载中", paused: "已暂停", verifying: "校验中", ready: "就绪", cancelled: "已取消", failed: "失败", corrupt: "已损坏" };
 const jobKindLabels: Partial<Record<Job["kind"], string>> = { transcription: "本地转录", proxy: "代理素材", portrait_sample: "竖版样本", authoritative_preview: "权威预览", final_export: "最终导出", waveform: "音频波形" };
+// 任务从最后一次可见进度平滑跑到 100% 的收尾窗口（问题1：短片在两次轮询
+// 间隔内完成时 56%→成功跳变突兀）。进度条 CSS transition .4s + 完成停留。
+const FINALIZING_MS = 900;
 const formatBytes = (bytes: number) => bytes < 1024 ? `${bytes} B` : bytes < 1024 ** 2 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+// ISO 时间 → 相对时间（导出产物行锚点："3 分钟前"比绝对时间戳更易扫读）。
+const formatRelativeTime = (iso: string) => {
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return "";
+  const seconds = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  if (seconds < 60) return "刚刚";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} 分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} 小时前`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days} 天前`;
+  return new Date(then).toLocaleDateString();
+};
+// fallback_reason 是 Core 的 API 语义值（encoders.py 硬编码英文串），UI 层映射为
+// 中文；未知值原样透出兜底。导出不受影响，仅是编码器选择的补充说明。
+const fallbackReasonLabel = (reason: string) => reason === "hardware encoder smoke test failed; fell back to software" ? "硬件编码不可用，已用软件编码完成" : reason;
 const isTranscribable = (asset: Asset) => (asset.kind === "video" || asset.kind === "audio") && asset.availability === "available";
 type RenditionTarget = { key: string; platform_preset_id: string; rendition_preset_id: string; layout_policy: LayoutPolicy };
 type ReframeAnchor = Pick<RenditionReframeAdjustment, "horizontal_anchor" | "vertical_anchor">;
@@ -144,6 +164,10 @@ export function App() {
   const [transcripts, setTranscripts] = useState<Record<string, Transcript[]>>({});
   const [transcriptSummaries, setTranscriptSummaries] = useState<Record<string, TranscriptSummary[]>>({});
   const [jobs, setJobs] = useState<Job[]>([]);
+  // 轮询 effect 的闭包持有的是 effect 建立时的 jobs——活跃判定与终态对账
+  // 都必须读最新值（hasActiveWork 同理），否则会以陈旧列表误判退避/终态。
+  const jobsRef = useRef<Job[]>([]);
+  jobsRef.current = jobs;
   const [models, setModels] = useState<ModelSummary[]>([]);
   const [confirmModel, setConfirmModel] = useState<ModelDetail>();
   const [licenseAccepted, setLicenseAccepted] = useState(false);
@@ -231,6 +255,9 @@ export function App() {
   const [agentOpen, setAgentOpen] = useState(false);
   const [generationOpen, setGenerationOpen] = useState(false);
   const [renderPanelOpen, setRenderPanelOpen] = useState(false);
+  // 轮询 effect 闭包读面板开关最新值（决定 exports 对账端点是否参与本轮）。
+  const renderPanelOpenRef = useRef(false);
+  renderPanelOpenRef.current = renderPanelOpen;
   const [commandSearchOpen, setCommandSearchOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState("");
   const [commandIndex, setCommandIndex] = useState(0);
@@ -362,7 +389,16 @@ export function App() {
     setProject(current => page.items.find(item => item.project_id === current?.project_id) ?? page.items[0]);
   };
   const loadModels = async () => { const page = await window.desktop.listModels({ limit: 100 }); setModels(page.items); };
-  const loadJobs = async (selected: Project) => { const page = await window.desktop.listJobs({ project_id: selected.project_id }); setJobs(page.items); };
+  // 活跃任务拉取（初始加载与轮询共用）：按三个活跃状态各查一页合并去重。
+  // Core 的 /jobs 端点只支持单 status 过滤，历史终态任务不进 UI（会话内终态
+  // 由 trackRenderJob 维持展示）；同 job_id 多页出现时以先到者为准（mock 环境
+  // 三次查询可能回同一份列表，生产三状态互斥）。
+  const fetchActiveJobs = async (projectId: Project["project_id"]): Promise<Job[]> => {
+    const statuses = ["queued", "running", "cancelling"] as const;
+    const pages = await Promise.all(statuses.map(status => window.desktop.listJobs({ project_id: projectId, status })));
+    const seen = new Set<string>();
+    return pages.flatMap(page => page.items).filter(item => { if (seen.has(item.job_id)) return false; seen.add(item.job_id); return true; });
+  };
   // A08：loadProjectData 摘要优先——素材/任务先落库，转录正文不再全量预取
   // （正文由 viewTranscript 选中时加载，旧内容按项目代次作废不写入新状态）。
   const projectDataEpochRef = useRef(0);
@@ -385,9 +421,9 @@ export function App() {
       }
       return items;
     };
-    const [assetsAll, jobPage] = await Promise.all([listAllAssets(selected.project_id), window.desktop.listJobs({ project_id: selected.project_id })]);
+    const [assetsAll, activeJobs] = await Promise.all([listAllAssets(selected.project_id), fetchActiveJobs(selected.project_id)]);
     const epoch = ++projectDataEpochRef.current;
-    setAssets(assetsAll); setJobs(jobPage.items);
+    setAssets(assetsAll); setJobs(activeJobs);
     // 转录摘要：每素材一次 listTranscripts——必须经有界队列（≤4 并发）。旧实现
     // 直接 Promise.all 对全部素材并发（100 素材 = 100 个并发 HTTP），会在项目
     // 装载瞬间打满本地 Core 的 accept 队列，同刻发出的 manifest 请求被
@@ -408,6 +444,19 @@ export function App() {
     ]);
     setPreviews(previewPage.items);
     setExports(exportPage.items);
+  };
+  // 移除一条文件已缺失的导出记录（问题2：成品文件在系统层被删后，记录
+  // 保留会让列表堆积不可用条目；Core 校验文件仍存在时拒绝——UI 端不提供
+  // 静默销毁成品的通道）。移除后从本地列表去掉，产物计数同步。
+  const removeMissingExport = async (item: ExportRecordPresentation) => {
+    if (!project) return;
+    try {
+      await window.desktop.deleteExportRecord({ project_id: project.project_id, export_record_id: item.export_record.export_record_id });
+      setExports(items => items.filter(entry => entry.export_record.export_record_id !== item.export_record.export_record_id));
+      showNotice(`已移除导出记录「${item.export_record.destination_display_name}」。`);
+    } catch (error) {
+      showNotice(safeErrorMessage(error, "移除导出记录失败，请稍后重试。"), "warning");
+    }
   };
   const openAi = async () => {
     if (!project || !window.desktop.listProviders || !window.desktop.listRecipes) return;
@@ -569,8 +618,9 @@ export function App() {
     pollInstanceRef.current = instance;
     const projectsSignature = { value: "" };
     const jobsSignature = { value: "" };
+    const exportsSignature = { value: "" };
     const scheduler = new RequestScheduler({
-      hasActiveWork: () => jobs.some(job => ["queued", "running", "cancelling"].includes(job.status)),
+      hasActiveWork: () => jobsRef.current.some(job => ["queued", "running", "cancelling"].includes(job.status)),
     });
     scheduler.register({
       key: "projects",
@@ -588,13 +638,74 @@ export function App() {
     scheduler.register({
       key: "jobs",
       enabled: () => pollInstanceRef.current === instance,
-      fetch: async () => (project ? await window.desktop.listJobs({ project_id: project.project_id }) : { items: [], next_cursor: null }),
+      // 只拉活跃任务：终态任务行是会话内过程记录，历史终态不进 UI（重启即清）；
+      // 轮询结果与本地合并而非覆盖，避免把会话内失败/中断记录冲掉。
+      fetch: async () => {
+        if (!project) return { items: [], next_cursor: null };
+        return { items: await fetchActiveJobs(project.project_id), next_cursor: null };
+      },
       apply: (page) => {
         if (pollInstanceRef.current !== instance) return false;
-        const signature = page.items.map(item => `${item.job_id}:${item.status}:${item.progress ?? ""}`).join("|");
+        const activeIds = new Set(page.items.map(item => item.job_id));
+        // 终态对账：订阅推送（job:event）当前未接通，活跃列表是终态的唯一
+        // 来源。本地仍活跃、但已不在服务端活跃列表的任务 = 刚进入终态——
+        // getJob 回填真实状态，否则行会永久冻结在最后一次轮询到的运行中
+        // 进度（产物实际已生成，看似卡死）。stale 数量进签名：对账请求
+        // 失败时下一轮签名不同，会重试而不是被浅比较短路。
+        const staleActive = jobsRef.current.filter(item => ["queued", "running", "cancelling"].includes(item.status) && !activeIds.has(item.job_id));
+        const signature = `${page.items.map(item => `${item.job_id}:${item.status}:${item.progress ?? ""}`).join("|")}#${staleActive.length}`;
         if (signature === jobsSignature.value) return false;
         jobsSignature.value = signature;
-        setJobs(page.items);
+        setJobs(items => [...page.items, ...items.filter(item => !activeIds.has(item.job_id))]);
+        for (const job of staleActive) {
+          void window.desktop.getJob(job.job_id).then(updated => {
+            if (pollInstanceRef.current !== instance) return;
+            const wasRunning = jobsRef.current.find(item => item.job_id === updated.job_id)?.status === "running";
+            setJobs(items => {
+              const current = items.find(item => item.job_id === updated.job_id);
+              if (!current || current.status === updated.status) return items;
+              // 成功收尾：最后一次可见进度与 100% 之间可能差一整个轮询
+              // 间隔（短片校验+哈希在间隔内跑完），直接跳变很突兀——
+              // 先以「收尾中」行（保留最后进度，进度条 CSS 过渡跑满）
+              // 展示 finalizingMs，再落到真实终态。
+              if (updated.status === "succeeded" && wasRunning && current.progress !== null && current.progress < 1) {
+                const finishing: Job = { ...updated, status: "running", progress: 1 };
+                setTimeout(() => {
+                  if (pollInstanceRef.current !== instance) return;
+                  setJobs(items => items.map(item => item.job_id === updated.job_id && item.status === "running" && item.progress === 1 ? updated : item));
+                }, FINALIZING_MS);
+                return [finishing, ...items.filter(item => item.job_id !== updated.job_id)];
+              }
+              return [updated, ...items.filter(item => item.job_id !== updated.job_id)];
+            });
+            // 渲染类任务终态顺带刷新产物/预览列表（导出成功立即可见）。
+            if (["succeeded", "failed", "cancelled", "interrupted"].includes(updated.status)
+              && (updated.kind === "authoritative_preview" || updated.kind === "final_export")
+              && project) {
+              void loadRenderData(project).catch(() => undefined);
+            }
+          }).catch(() => undefined);
+        }
+        return true;
+      },
+    });
+    scheduler.register({
+      key: "exports",
+      enabled: () => pollInstanceRef.current === instance && renderPanelOpenRef.current,
+      // 产物列表文件存在性对账（问题2）：export_dto 每次列出都实时 stat 文件，
+      // 手动删除本地产物后 status 会变 missing——但此前只在任务终态/挂载时拉
+      // 一次，面板开着期间永远不更新。面板打开期间随轮询刷新（签名短路，
+      // 无变化不写 state；关闭面板即停，不增加常驻负载）。
+      fetch: async () => {
+        if (!project) return { items: [], next_cursor: null };
+        return window.desktop.listExports({ project_id: project.project_id, limit: 100 });
+      },
+      apply: (page) => {
+        if (pollInstanceRef.current !== instance) return false;
+        const signature = page.items.map(item => `${item.export_record.export_record_id}:${item.export_record.status}`).join("|");
+        if (signature === exportsSignature.value) return false;
+        exportsSignature.value = signature;
+        setExports(page.items);
         return true;
       },
     });
@@ -1726,9 +1837,14 @@ export function App() {
   const renderDisabledReason = !timeline || !working?.clips.length ? "时间线为空" : timeline.draft ? "存在未提交草稿，请先形成正式 Revision" : undefined;
   const renderJobs = jobs.filter(item => item.kind === "authoritative_preview" || item.kind === "final_export");
   const renderActivity = renderJobs.filter(item => ["queued", "running", "cancelling"].includes(item.status)).length;
-  // 状态栏任务摘要：取第一个有进度的运行中任务展示「类型 xx%」。
+  // 状态栏任务摘要：取第一个有进度的运行中任务展示「类型 xx%」；
+  // 收尾任务（progress=1）显示「即将完成」，0.9s 后随终态回落。
   const runningProgressJob = jobs.find(job => job.status === "running" && job.progress !== null);
-  const runningProgressText = runningProgressJob ? `${jobKindLabels[runningProgressJob.kind] ?? runningProgressJob.kind} ${Math.round((runningProgressJob.progress ?? 0) * 100)}%` : "";
+  const runningProgressText = runningProgressJob
+    ? (runningProgressJob.progress! >= 1
+      ? `${jobKindLabels[runningProgressJob.kind] ?? runningProgressJob.kind} 即将完成`
+      : `${jobKindLabels[runningProgressJob.kind] ?? runningProgressJob.kind} ${Math.round(runningProgressJob.progress! * 100)}%`)
+    : "";
 
   const filteredCommands = useMemo(() => {
     const q = commandQuery.trim().toLocaleLowerCase();
@@ -2132,7 +2248,7 @@ export function App() {
         <div className="asset-list asset-table">{visibleAssets.map(item => <div className={`asset-item asset-row ${selectedAssetId === item.asset.asset_id ? "sel" : ""} ${isDraggableAsset(item.asset.kind) ? "draggable-asset" : ""}`} key={item.asset.asset_id} onClick={() => setSelectedAssetId(item.asset.asset_id)} onDoubleClick={() => previewFromLibrary(item)} {...assetDragProps(item)}><div className="asset-thumb">{item.asset.kind === "image" ? <img src={item.media_url ?? undefined} alt="" loading="lazy" /> : item.asset.kind === "video" ? <video src={item.media_url ?? undefined} muted preload="metadata" aria-hidden="true" /> : <FileAudio className="asset-thumb-icon" />}</div><div className="asset-name"><strong title={item.asset.display_name}>{item.asset.display_name}</strong><small>{assetMetaIcon(item.asset)}{assetMetaText(item.asset)}{cvSummaryText(item.asset) ? ` · ${cvSummaryText(item.asset)}` : ""}</small>{item.asset.kind === "video" && cvSummaries[item.asset.asset_id]?.status === "ready" && <button className="cv-spark-toggle" aria-label={`展开 ${item.asset.display_name} 的信号曲线`} onClick={event => { event.stopPropagation(); toggleCvSpark(item.asset); }}>{cvSparkAssetId === item.asset.asset_id ? "收起信号" : "信号曲线"}</button>}{cvSparkAssetId === item.asset.asset_id && item.asset.asset_id === cvSparkAssetId && <div className="cv-spark" onClick={event => event.stopPropagation()}>{cvSparkSamples === null ? <small>加载中…</small> : cvSparkSamples.length < 2 ? <small>暂无样本数据</small> : <><svg viewBox="0 0 100 1" preserveAspectRatio="none" aria-label="CV 信号曲线"><path d={cvSparkPath(cvSparkSamples, "motion_energy")} fill="none" stroke="#7aa2f7" strokeWidth="0.02" /><path d={cvSparkPath(cvSparkSamples, "audio_energy")} fill="none" stroke="#9ece6a" strokeWidth="0.02" opacity="0.7" />{cvSparkSamples.filter(s => s.scene_cut).map((s, i) => <line key={i} x1={(s.timestamp_us / (cvSparkSamples[cvSparkSamples.length - 1]?.timestamp_us || 1)) * 100} y1={0} x2={(s.timestamp_us / (cvSparkSamples[cvSparkSamples.length - 1]?.timestamp_us || 1)) * 100} y2={1} stroke="#f7768e" strokeWidth={0.03} />)}</svg><small className="cv-spark-legend"><span style={{ color: "#7aa2f7" }}>运动能量</span> · <span style={{ color: "#9ece6a" }}>音频能量</span> · <span style={{ color: "#f7768e" }}>场景切换</span></small></>}</div>}</div><div className="asset-side"><span className="asset-dur">{assetDurationLabel(item.asset)}</span>{assetActions(item)}</div></div>)}</div>
       </> : tab === "transcripts" ? <div className="transcript-list"><p className="panel-hint">只读展示语音识别结果；勾选片段后点"追加所选片段"，会把它们插入时间线并生成字幕。</p>{Object.values(transcripts).flat().length === 0 && <p className="panel-hint">尚未生成转录：在"素材"页对视频/音频素材点击"转录"按钮后，结果会出现在这里。</p>}{assets.filter(item => isTranscribable(item.asset)).map(assetItem => <div className="transcript-row" key={assetItem.asset.asset_id}><strong title={assetItem.asset.display_name}>{assetItem.asset.display_name}</strong><div className="transcript-variants">{(transcriptSummaries[assetItem.asset.asset_id] ?? []).map(summary => <button key={summary.transcript_id} className="ts-chip" aria-label={`查看转录 ${summary.transcript_id}`} onClick={() => void viewTranscript(summary)}><Eye size={12} />{summary.language} · {summary.status}</button>)}</div></div>)}{Object.values(transcripts).flat().map(item => <div className="transcript-item" key={item.transcript_id}><strong>{assets.find(asset => asset.asset.asset_id === item.asset_id)?.asset.display_name ?? "转录"}</strong>{item.segments.map(segment => <SegmentRow key={segment.segment_id} segment={segment} selected={(selectedSegments[item.transcript_id] ?? []).includes(segment.segment_id)} onToggle={() => setSelectedSegments(state => ({ ...state, [item.transcript_id]: toggle(state[item.transcript_id] ?? [], segment.segment_id) }))} />)}<button className="append-btn" onClick={() => insertSegments(item)}>追加所选片段</button></div>)}</div>
         : tab === "models" ? <div className="model-page"><p className="panel-hint">本地语音识别模型：下载后可在视频/音频素材上发起转录，生成带时间戳的字幕底稿；下载中可取消，失败可重试。</p>{models.map(model => { const dl = ["queued", "downloading", "verifying", "paused"].includes(model.status); const pct = model.progress !== null && model.progress !== undefined ? `${Math.round(model.progress * 100)}%` : "—"; return <div className={`model-row${dl ? " dl" : ""}`} key={model.model_id}><div className="model-ico"><FileText size={14} /></div><div className="model-main"><div className="model-head"><strong title={model.display_name}>{model.display_name}</strong><span className={`badge ${model.status === "ready" ? "ok" : dl ? "run" : model.status === "failed" || model.status === "corrupt" ? "bad" : "dim"}`}>{modelBadgeLabels[model.status]}</span>{dl && <span className="mpct">{pct}</span>}</div>{dl && <div className="model-down"><progress className="model-progress" max={1} value={model.progress ?? 0} /><button className="mini-btn" title="取消模型下载" onClick={() => void cancelModel(model)}>取消下载</button></div>}<small className="model-sub">{modelStatusLabels[model.status]} · {model.provider}</small></div>{!dl && ["unavailable", "failed", "cancelled", "paused", "corrupt"].includes(model.status) && <button className="mini-btn" onClick={() => void openModel(model)}>{model.status === "failed" ? "重试下载" : model.status === "corrupt" ? "重新下载" : model.status === "paused" ? "继续下载" : "下载模型"}</button>}</div>; })}</div>
-        : <div className="jobs-page"><p className="panel-hint">转录、权威预览与导出的后台进度会显示在这里；运行中的任务可取消，失败的转录可重试。</p>{jobs.length === 0 && <p className="panel-hint">暂无任务。</p>}{(() => { const activeJobs = jobs.filter(job => ["running", "cancelling"].includes(job.status)); const queuedJobs = jobs.filter(job => job.status === "queued"); const doneJobs = jobs.filter(job => ["succeeded", "failed", "cancelled", "interrupted"].includes(job.status)); const renderJobRow = (job: Job) => { const badgeClass = job.status === "succeeded" ? "ok" : job.status === "failed" ? "bad" : job.status === "running" ? "run" : "dim"; const phaseText = job.phase ? (jobPhaseLabels[job.phase] ?? job.phase) : null; const phasePct = phaseText && job.phase_progress !== null && job.phase_progress !== undefined ? ` ${Math.round(job.phase_progress * 100)}%` : ""; return <div className="job-row" key={job.job_id}><div className="jmain"><div className="jhead"><strong>{jobKindLabels[job.kind] ?? job.kind}</strong><span className={`badge ${badgeClass}`}>{jobStatusLabels[job.status]}</span><span className="jpct">{job.progress !== null ? `${Math.round(job.progress * 100)}%` : "—"}</span></div>{job.progress !== null && <div className="jbar"><i style={{ width: `${Math.round(job.progress * 100)}%` }} /></div>}<div className="jmeta"><span>{phaseText ? `${phaseText}${phasePct} · ` : ""}{job.stage}{job.error ? ` · ${safeTaskErrorMessage(job.error)}` : ""}</span>{job.status === "running" && <JobEta job={job} />}</div><div className="jops">{job.kind === "transcription" && (job.status === "failed" || job.status === "interrupted") && <button className="mini-btn" onClick={() => void retryTranscription(job)}>重试转录</button>}{["queued", "running", "cancelling"].includes(job.status) && <button className="mini-btn" onClick={() => void cancelJob(job)}>取消</button>}</div></div></div>; }; return <>{activeJobs.length > 0 && <div className="jobs-group">进行中</div>}{activeJobs.map(renderJobRow)}{queuedJobs.length > 0 && <div className="jobs-group">排队</div>}{queuedJobs.map(renderJobRow)}{doneJobs.length > 0 && <div className="jobs-group">已完成 / 失败</div>}{doneJobs.map(renderJobRow)}</>; })()}</div>}
+        : <div className="jobs-page"><p className="panel-hint">转录、权威预览与导出的后台进度会显示在这里；运行中的任务可取消，失败的转录可重试。</p>{jobs.length === 0 && <p className="panel-hint">暂无任务。</p>}{(() => { const activeJobs = jobs.filter(job => ["running", "cancelling"].includes(job.status)); const queuedJobs = jobs.filter(job => job.status === "queued"); const doneJobs = jobs.filter(job => ["succeeded", "failed", "cancelled", "interrupted"].includes(job.status)); const renderJobRow = (job: Job) => { const badgeClass = job.status === "succeeded" ? "ok" : job.status === "failed" ? "bad" : job.status === "running" ? "run" : "dim"; const phaseText = job.phase ? (jobPhaseLabels[job.phase] ?? job.phase) : null; const phasePct = phaseText && job.phase_progress !== null && job.phase_progress !== undefined ? ` ${Math.round(job.phase_progress * 100)}%` : ""; return <div className="job-row" key={job.job_id}><div className="jmain"><div className="jhead"><strong>{jobKindLabels[job.kind] ?? job.kind}</strong><span className={`badge ${badgeClass}`}>{jobStatusLabels[job.status]}</span><span className="jpct">{job.progress !== null ? `${Math.round(job.progress * 100)}%` : "—"}</span></div>{job.progress !== null && <div className="jbar"><i style={{ width: `${Math.round(job.progress * 100)}%` }} /></div>}<div className="jmeta"><span>{phaseText ? `${phaseText}${phasePct}` : job.stage}{job.error ? ` · ${safeTaskErrorMessage(job.error)}` : ""}</span>{job.status === "running" && <JobEta job={job} />}</div><div className="jops">{job.kind === "transcription" && (job.status === "failed" || job.status === "interrupted") && <button className="mini-btn" onClick={() => void retryTranscription(job)}>重试转录</button>}{["queued", "running", "cancelling"].includes(job.status) && <button className="mini-btn" onClick={() => void cancelJob(job)}>取消</button>}</div></div></div>; }; return <>{activeJobs.length > 0 && <div className="jobs-group">进行中</div>}{activeJobs.map(renderJobRow)}{queuedJobs.length > 0 && <div className="jobs-group">排队</div>}{queuedJobs.map(renderJobRow)}{doneJobs.length > 0 && <div className="jobs-group">已完成 / 失败</div>}{doneJobs.map(renderJobRow)}</>; })()}</div>}
         {!timeline && project && <div className="empty-timeline"><button onClick={() => void createTimeline({ kind: "empty" })}>创建空时间线</button></div>}
       </section>
       <div className="resize-handle resize-handle-left" role="separator" aria-label="调整左侧面板宽度" onPointerDown={event => beginResize("left", event)} />
@@ -2242,7 +2358,7 @@ export function App() {
     {transcriptionAsset && <Dialog titleId="transcription-title" label="创建本地转录" onClose={() => setTranscriptionAsset(undefined)} className="compact-dialog"><div className="modal-heading"><h2 id="transcription-title">创建本地转录</h2><IconButton label="关闭" onClick={() => setTranscriptionAsset(undefined)}><X /></IconButton></div><p>{transcriptionAsset.display_name}</p><label>语言<select value={language} onChange={event => setLanguage(event.target.value)}><option value="auto">自动检测</option><option value="zh">中文</option><option value="en">English</option></select></label><label className="check-line"><input type="checkbox" checked={wordTimestamps} onChange={event => setWordTimestamps(event.target.checked)} />生成词级时间戳</label><div className="modal-actions"><button onClick={() => setTranscriptionAsset(undefined)}>取消</button><button onClick={() => void submitTranscription()}>开始转录</button></div></Dialog>}
     {pendingDeleteAsset && <Dialog titleId="asset-delete-title" label="删除素材" onClose={() => setPendingDeleteAsset(undefined)} className="asset-delete-modal"><div className="modal-heading"><h2 id="asset-delete-title">删除素材</h2><IconButton label="关闭" onClick={() => setPendingDeleteAsset(undefined)}><X /></IconButton></div><p>确定要删除素材「{pendingDeleteAsset.display_name}」吗？</p><div className="delete-warning">如果该素材已添加到时间线，其相关片段（含关联字幕与转场）将一并删除，此操作不可撤销。</div><div className="modal-actions"><button disabled={deleteBusy} onClick={() => setPendingDeleteAsset(undefined)}>取消</button><button className="danger" disabled={deleteBusy} onClick={() => void deleteAsset(pendingDeleteAsset)}>{deleteBusy ? "删除中…" : "删除素材"}</button></div></Dialog>}
     {viewingTranscript && <Dialog titleId="transcript-title" label="原始转录" onClose={() => setViewingTranscript(undefined)} className="transcript-viewer"><div className="modal-heading"><div><h2 id="transcript-title">原始转录</h2><small>{viewingTranscript.language} · {viewingTranscript.provider} · {viewingTranscript.model_revision}</small></div><IconButton label="关闭" onClick={() => setViewingTranscript(undefined)}><X /></IconButton></div><div className="readonly-note">原始 ASR 结果只读。字幕修订不会覆盖这份记录。</div><div className="readonly-segments">{viewingTranscript.segments.map(segment => <div key={segment.segment_id}><span>{formatTime(segment.start_us)}-{formatTime(segment.end_us)}</span><p>{segment.text}</p></div>)}</div></Dialog>}
-    {aiOpen && <Dialog titleId="ai-roughcut-title" label="AI 粗剪" onClose={() => setAiOpen(false)} className="ai-roughcut"><div className="modal-heading"><div><h2 id="ai-roughcut-title">AI 粗剪</h2><p>仅在确认外传内容后调用 Provider。</p></div><IconButton label="关闭 AI 粗剪" onClick={() => setAiOpen(false)}><X /></IconButton></div>{aiError && <p className="ai-status" role="status">{aiError}</p>}{aiStep === "form" && <><label>主题<input value={aiForm.topic} onChange={e => setAiForm(v => ({ ...v, topic: e.target.value }))} /></label><label>受众<input value={aiForm.audience} onChange={e => setAiForm(v => ({ ...v, audience: e.target.value }))} /></label><label>叙事目标<textarea value={aiForm.narrative_goal} onChange={e => setAiForm(v => ({ ...v, narrative_goal: e.target.value }))} /></label><label>风格说明<textarea value={aiForm.style_notes} onChange={e => setAiForm(v => ({ ...v, style_notes: e.target.value }))} /></label><label>制作配方<select value={aiForm.recipe_id} onChange={e => setAiForm(v => ({ ...v, recipe_id: e.target.value }))}><option value="">选择配方</option>{aiRecipes.map(item => <option key={item.recipe_id} value={item.recipe_id}>{item.name ?? item.display_name} · {item.summary}</option>)}</select></label><label>Provider<select value={aiForm.provider_id} onChange={e => setAiForm(v => ({ ...v, provider_id: e.target.value }))}><option value="">选择 Provider</option>{aiProviders.map(item => <option key={item.provider_config_id} value={item.provider_config_id} disabled={!item.enabled || item.credential_status !== "configured" || item.candidate_capability_status !== "supported"}>{item.display_name} · {item.candidate_capability_status === "supported" ? "AI 粗剪可用" : item.candidate_capability_status === "untested" ? "未测试" : "当前 Provider 不支持 AI 粗剪"}</option>)}</select></label><div className="provider-capability-list">{aiProviders.map(item => <div key={item.provider_config_id}><span>{item.display_name} · {item.candidate_capability_status === "supported" ? "AI 粗剪可用" : item.candidate_capability_status === "untested" ? "未测试" : "当前 Provider 不支持 AI 粗剪"}</span><button disabled={aiCapabilityTesting} onClick={() => void testCandidateProviderCapability(item.provider_config_id)}>{aiCapabilityTesting ? "正在测试兼容性" : "测试 AI 粗剪兼容性"}</button></div>)}</div><div className="ai-inline"><input id="ai-provider-secret" aria-label="Provider 密钥" type="password" autoComplete="off" placeholder="仅提交新密钥" /><button onClick={() => void saveAiSecret()}>安全保存密钥</button><button onClick={() => void testAiProvider()}>连接测试</button></div><fieldset><legend>新建 Provider（可选）</legend><input aria-label="Provider 名称" value={aiProviderDraft.display_name} onChange={e => setAiProviderDraft(v => ({ ...v, display_name: e.target.value }))} placeholder="名称" /><input aria-label="Provider 地址" value={aiProviderDraft.base_url} onChange={e => setAiProviderDraft(v => ({ ...v, base_url: e.target.value }))} placeholder="https://..." /><input aria-label="Provider 模型" value={aiProviderDraft.model} onChange={e => setAiProviderDraft(v => ({ ...v, model: e.target.value }))} placeholder="模型" /><button onClick={() => void saveAiProvider()}>创建 Provider</button></fieldset><label>就绪转录<select value={aiForm.transcript_id} onChange={e => setAiForm(v => ({ ...v, transcript_id: e.target.value }))}><option value="">选择已就绪转录</option>{Object.values(transcriptSummaries).flat().filter(item => item.status === "ready").map(item => <option key={item.transcript_id} value={item.transcript_id}>{item.language} · 就绪</option>)}</select></label><div className="modal-actions"><button disabled={!aiForm.topic || !aiForm.audience || !aiForm.narrative_goal || !aiForm.provider_id || !aiForm.recipe_id || !aiForm.transcript_id || aiProviders.find(item => item.provider_config_id === aiForm.provider_id)?.candidate_capability_status !== "supported" || aiProviders.find(item => item.provider_config_id === aiForm.provider_id)?.credential_status !== "configured" || !aiProviders.find(item => item.provider_config_id === aiForm.provider_id)?.enabled} onClick={() => void prepareAi()}>准备外传确认</button></div></>}{aiStep === "confirm" && aiPreview && <><h3>确认发送的精确内容</h3><dl><dt>目标</dt><dd>{aiPreview.provider.origin}</dd><dt>模型</dt><dd>{aiPreview.provider.model}</dd><dt>字段</dt><dd>{aiPreview.sent_fields.join("、")}</dd><dt>段落/字符</dt><dd>{aiPreview.stats.segment_count} 段 / {aiPreview.stats.character_count} 字</dd><dt>估算 Token</dt><dd>{aiPreview.stats.estimated_tokens}</dd><dt>费用提示</dt><dd>指 Provider 配置的单价估算，最终费用以服务商账单为准。</dd><dt>哈希</dt><dd>{aiPreview.payload_sha256}</dd><dt>有效期</dt><dd>{aiPreview.expires_at}</dd></dl><div className="egress-text">{Array.isArray(aiPreview.payload.segments) && (aiPreview.payload.segments as Array<Record<string, unknown>>).map(segment => <p key={String(segment.segment_ref)}>{String(segment.text)}</p>)}</div><div className="modal-actions"><button onClick={() => { setAiPreview(undefined); setAiStep("form"); }}>返回修改</button><button onClick={() => void createAi()}>我确认发送以上内容</button></div></>}{aiStep === "running" && <><h3>正在生成候选方案</h3><p>任务进度与取消操作沿用现有任务中心；如失败或取消，请重新准备并再次确认。</p></>}{aiStep === "candidates" && <><h3>三个候选方案</h3><div className="candidate-columns">{(["balanced", "compact", "bold"] as const).map((variant, index) => { const item = aiCandidates.find(candidate => candidate.variant === variant); const title = ["稳妥版", "紧凑版", "高能版"][index]; return <section key={variant}><h4>{title}</h4>{item ? <><strong>{String(item.title_suggestion)}</strong><p>{String(item.summary)}</p><small>{Number(item.duration_us) / 1_000_000}s · 模型参考</small>{Array.isArray(item.clips) && (item.clips as Array<Record<string, unknown>>).map(clip => <div className="candidate-clip" key={String(clip.clip_id)}><span>{Number(clip.source_start_us) / 1_000_000}s–{Number(clip.source_end_us) / 1_000_000}s</span><button onClick={() => void playAiClip(clip)}>试播片段</button><p>{String(clip.reason)}</p></div>)}<button onClick={() => void adoptAi(item)}>采用此方案</button></> : <p>等待有效响应</p>}</section>; })}</div>{aiPlayback && <video className="candidate-player" src={aiPlayback.media_url} controls autoPlay onLoadedMetadata={e => { e.currentTarget.currentTime = aiPlayback.source_start_us / 1_000_000; }} onTimeUpdate={e => { if (e.currentTarget.currentTime >= aiPlayback.source_end_us / 1_000_000) e.currentTarget.pause(); }} />}</>}</Dialog>}
+    {aiOpen && <Dialog titleId="ai-roughcut-title" label="AI 粗剪" onClose={() => setAiOpen(false)} className="ai-roughcut"><div className="modal-heading"><div><h2 id="ai-roughcut-title">AI 粗剪</h2><p>仅在确认外传内容后调用 Provider。</p></div><IconButton label="关闭 AI 粗剪" onClick={() => setAiOpen(false)}><X /></IconButton></div>{aiError && <p className="ai-status" role="status">{aiError}</p>}{aiStep === "form" && <><label>主题<input value={aiForm.topic} onChange={e => setAiForm(v => ({ ...v, topic: e.target.value }))} /></label><label>受众<input value={aiForm.audience} onChange={e => setAiForm(v => ({ ...v, audience: e.target.value }))} /></label><label>叙事目标<textarea value={aiForm.narrative_goal} onChange={e => setAiForm(v => ({ ...v, narrative_goal: e.target.value }))} /></label><label>风格说明<textarea value={aiForm.style_notes} onChange={e => setAiForm(v => ({ ...v, style_notes: e.target.value }))} /></label><label>制作配方<select value={aiForm.recipe_id} onChange={e => setAiForm(v => ({ ...v, recipe_id: e.target.value }))}><option value="">选择配方</option>{aiRecipes.map(item => <option key={item.recipe_id} value={item.recipe_id}>{item.name ?? item.display_name} · {item.summary}</option>)}</select></label><label>Provider<select value={aiForm.provider_id} onChange={e => setAiForm(v => ({ ...v, provider_id: e.target.value }))}><option value="">选择 Provider</option>{aiProviders.map(item => <option key={item.provider_config_id} value={item.provider_config_id} disabled={!item.enabled || item.credential_status !== "configured" || item.candidate_capability_status !== "supported"}>{item.display_name} · {item.candidate_capability_status === "supported" ? "AI 粗剪可用" : item.candidate_capability_status === "untested" ? "未测试" : "当前 Provider 不支持 AI 粗剪"}</option>)}</select></label><div className="provider-capability-list">{aiProviders.map(item => <div key={item.provider_config_id}><span>{item.display_name} · {item.candidate_capability_status === "supported" ? "AI 粗剪可用" : item.candidate_capability_status === "untested" ? "未测试" : "当前 Provider 不支持 AI 粗剪"}</span><button disabled={aiCapabilityTesting} onClick={() => void testCandidateProviderCapability(item.provider_config_id)}>{aiCapabilityTesting ? "正在测试兼容性" : "测试 AI 粗剪兼容性"}</button></div>)}</div><div className="ai-inline"><input id="ai-provider-secret" aria-label="Provider 密钥" type="password" autoComplete="off" placeholder="仅提交新密钥" /><button onClick={() => void saveAiSecret()}>安全保存密钥</button><button onClick={() => void testAiProvider()}>连接测试</button></div><fieldset className="ai-provider-create"><legend>新建 Provider（可选）</legend><input aria-label="Provider 名称" value={aiProviderDraft.display_name} onChange={e => setAiProviderDraft(v => ({ ...v, display_name: e.target.value }))} placeholder="名称" /><input aria-label="Provider 地址" value={aiProviderDraft.base_url} onChange={e => setAiProviderDraft(v => ({ ...v, base_url: e.target.value }))} placeholder="https://..." /><input aria-label="Provider 模型" value={aiProviderDraft.model} onChange={e => setAiProviderDraft(v => ({ ...v, model: e.target.value }))} placeholder="模型" /><button onClick={() => void saveAiProvider()}>创建 Provider</button></fieldset><label>就绪转录<select value={aiForm.transcript_id} onChange={e => setAiForm(v => ({ ...v, transcript_id: e.target.value }))}><option value="">选择已就绪转录</option>{Object.values(transcriptSummaries).flat().filter(item => item.status === "ready").map(item => <option key={item.transcript_id} value={item.transcript_id}>{item.language} · 就绪</option>)}</select></label><div className="modal-actions"><button disabled={!aiForm.topic || !aiForm.audience || !aiForm.narrative_goal || !aiForm.provider_id || !aiForm.recipe_id || !aiForm.transcript_id || aiProviders.find(item => item.provider_config_id === aiForm.provider_id)?.candidate_capability_status !== "supported" || aiProviders.find(item => item.provider_config_id === aiForm.provider_id)?.credential_status !== "configured" || !aiProviders.find(item => item.provider_config_id === aiForm.provider_id)?.enabled} onClick={() => void prepareAi()}>准备外传确认</button></div></>}{aiStep === "confirm" && aiPreview && <><h3>确认发送的精确内容</h3><dl><dt>目标</dt><dd>{aiPreview.provider.origin}</dd><dt>模型</dt><dd>{aiPreview.provider.model}</dd><dt>字段</dt><dd>{aiPreview.sent_fields.join("、")}</dd><dt>段落/字符</dt><dd>{aiPreview.stats.segment_count} 段 / {aiPreview.stats.character_count} 字</dd><dt>估算 Token</dt><dd>{aiPreview.stats.estimated_tokens}</dd><dt>费用提示</dt><dd>指 Provider 配置的单价估算，最终费用以服务商账单为准。</dd><dt>哈希</dt><dd>{aiPreview.payload_sha256}</dd><dt>有效期</dt><dd>{aiPreview.expires_at}</dd></dl><div className="egress-text">{Array.isArray(aiPreview.payload.segments) && (aiPreview.payload.segments as Array<Record<string, unknown>>).map(segment => <p key={String(segment.segment_ref)}>{String(segment.text)}</p>)}</div><div className="modal-actions"><button onClick={() => { setAiPreview(undefined); setAiStep("form"); }}>返回修改</button><button onClick={() => void createAi()}>我确认发送以上内容</button></div></>}{aiStep === "running" && <><h3>正在生成候选方案</h3><p>任务进度与取消操作沿用现有任务中心；如失败或取消，请重新准备并再次确认。</p></>}{aiStep === "candidates" && <><h3>三个候选方案</h3><div className="candidate-columns">{(["balanced", "compact", "bold"] as const).map((variant, index) => { const item = aiCandidates.find(candidate => candidate.variant === variant); const title = ["稳妥版", "紧凑版", "高能版"][index]; return <section key={variant}><h4>{title}</h4>{item ? <><strong>{String(item.title_suggestion)}</strong><p>{String(item.summary)}</p><small>{Number(item.duration_us) / 1_000_000}s · 模型参考</small>{Array.isArray(item.clips) && (item.clips as Array<Record<string, unknown>>).map(clip => <div className="candidate-clip" key={String(clip.clip_id)}><span>{Number(clip.source_start_us) / 1_000_000}s–{Number(clip.source_end_us) / 1_000_000}s</span><button onClick={() => void playAiClip(clip)}>试播片段</button><p>{String(clip.reason)}</p></div>)}<button onClick={() => void adoptAi(item)}>采用此方案</button></> : <p>等待有效响应</p>}</section>; })}</div>{aiPlayback && <video className="candidate-player" src={aiPlayback.media_url} controls autoPlay onLoadedMetadata={e => { e.currentTarget.currentTime = aiPlayback.source_start_us / 1_000_000; }} onTimeUpdate={e => { if (e.currentTarget.currentTime >= aiPlayback.source_end_us / 1_000_000) e.currentTarget.pause(); }} />}</>}</Dialog>}
      {aiOpen && aiStep === "running" && <section className="ai-job-progress" aria-live="polite" aria-label="AI 粗剪任务进度"><strong>阶段：{aiJob?.stage ?? "queued"}</strong><span>进度：{Math.round((aiJob?.progress ?? 0) * 100)}%</span><progress aria-label="AI 粗剪进度" max="1" value={aiJob?.progress ?? 0} /><button disabled={!aiJob || !["queued", "running", "cancelling"].includes(aiJob.status)} onClick={() => { if (!aiJob) return; void window.desktop.cancelJob(aiJob.job_id).then(job => { setAiJob(job); setAiPreview(undefined); setAiCandidates([]); setAiPlayback(undefined); setAiStep("form"); setAiError("生成已取消。请重新准备外传内容并再次确认。"); }).catch(() => setAiError("取消请求失败；请等待当前任务状态刷新。")); }}>取消生成</button></section>}
     {patchOpen && <Dialog titleId="planning-patch-title" label="AI 修改" onClose={closePatch} className="planning-patch"><div className="modal-heading"><div><h2 id="planning-patch-title">AI 修改</h2><p>提案不会自动修改正式 Timeline。</p></div><IconButton label="关闭 AI 修改" onClick={closePatch}><X /></IconButton></div>{patchError && <p className="ai-status" role="status">{patchError}</p>}{patchStep === "form" && <><label>修改指令<textarea aria-label="修改指令" maxLength={4000} value={patchInstruction} onChange={event => setPatchInstruction(event.target.value)} /></label><label>Provider<select aria-label="AI 修改 Provider" value={patchProviderId} onChange={event => setPatchProviderId(event.target.value)}><option value="">选择已配置 Provider</option>{patchProviders.map(item => <option value={item.provider_config_id} key={item.provider_config_id} disabled={item.timeline_patch_capability_status !== "supported"}>{item.display_name} · {item.model} · {item.timeline_patch_capability_status === "supported" ? "AI 修改可用" : item.timeline_patch_capability_status === "untested" ? "未测试" : "当前 Provider 不支持 AI 修改"}</option>)}</select></label><div className="provider-capability-list">{patchProviders.map(item => <div key={item.provider_config_id}><span>{item.display_name} · {item.timeline_patch_capability_status === "supported" ? "AI 修改可用" : item.timeline_patch_capability_status === "untested" ? "未测试" : "当前 Provider 不支持 AI 修改"}</span><button disabled={patchCapabilityTesting} onClick={() => void testPatchProviderCapability(item.provider_config_id)}>{patchCapabilityTesting ? "正在测试兼容性" : "测试 AI 修改兼容性"}</button></div>)}</div><div className="modal-actions"><button disabled={!patchProviderId || !patchInstruction.trim() || patchProviders.find(item => item.provider_config_id === patchProviderId)?.timeline_patch_capability_status !== "supported"} onClick={() => void preparePatch()}>准备外传确认</button></div></>}{patchStep === "confirm" && patchPreview && <><h3>确认本次外传</h3><div className="instruction-preview"><strong>你的本地指令</strong><p>{patchInstruction}</p></div><dl><dt>Provider</dt><dd>{patchPreview.provider.display_name} · {patchPreview.provider.origin}</dd><dt>模型</dt><dd>{patchPreview.provider.model}</dd><dt>字段类别</dt><dd>{patchPreview.sent_fields.join("、")}</dd><dt>内容计数</dt><dd>{patchPreview.clip_count} Clip / {patchPreview.caption_count} Caption / {patchPreview.locked_count} 锁定</dd><dt>字符 / Token</dt><dd>{patchPreview.character_count} / {patchPreview.estimated_tokens}</dd><dt>哈希</dt><dd>{patchPreview.payload_sha256}</dd><dt>费用</dt><dd>最终费用以 Provider 账单为准。</dd></dl><p className="readonly-note">上方指令来自当前本地输入；Core 确认 DTO 不包含正文。</p><div className="modal-actions"><button onClick={() => { setPatchPreview(undefined); setPatchStep("form"); }}>返回修改</button><button onClick={() => void createPatch()}>确认并发送一次</button></div></>}{patchStep === "running" && <><h3>正在生成提案</h3><p>{patchJob?.stage ?? "queued"} · {Math.round((patchJob?.progress ?? 0) * 100)}%</p><progress max="1" value={patchJob?.progress ?? 0} /><div className="modal-actions"><button disabled={!patchJob || !["queued", "running", "cancelling"].includes(patchJob.status)} onClick={() => void cancelPatch()}>取消生成</button></div></>}{patchStep === "proposal" && patchProposal && <><h3>提案差异</h3><TimelineDiffView diff={patchProposal.diff} /><div className="modal-actions"><button onClick={closePatch}>放弃</button><button disabled={patchProposal.applied_revision_id !== null} onClick={() => void applyPatchProposal()}>应用修改</button></div></>}</Dialog>}
     {generationOpen && project && <MediaGenerationWorkbench key={project.project_id} project={project} assets={assets} onClose={() => setGenerationOpen(false)} />}
@@ -2251,9 +2367,43 @@ export function App() {
     {providerImageGenerationOpen && project && <ProviderImageGenerationWorkbench key={`provider-image-${project.project_id}`} project={project} assets={assets} onClose={() => setProviderImageGenerationOpen(false)} />}
     {shotRequirementsOpen && project && <ShotRequirementWorkbench key={project.project_id} project={project} assets={assets} onClose={() => setShotRequirementsOpen(false)} />}
     {revisionOpen && <Dialog titleId="revision-compare-title" label="版本比较" onClose={() => { setRevisionOpen(false); setRevisionDiff(undefined); }} className="revision-compare"><div className="modal-heading"><div><h2 id="revision-compare-title">版本比较</h2><p>只读操作，不改变当前 Revision、草稿或渲染记录。</p></div><IconButton label="关闭版本比较" onClick={() => { setRevisionOpen(false); setRevisionDiff(undefined); }}><X /></IconButton></div><div className="revision-selectors"><label>基线<select aria-label="基线 Revision" value={revisionPair.base} onChange={event => setRevisionPair(value => ({ ...value, base: event.target.value }))}>{revisions.map(item => <option value={item.timeline_revision_id} key={`base-${item.timeline_revision_id}`}>{item.summary} · {item.created_at}</option>)}</select></label><label>目标<select aria-label="目标 Revision" value={revisionPair.target} onChange={event => setRevisionPair(value => ({ ...value, target: event.target.value }))}>{revisions.map(item => <option value={item.timeline_revision_id} key={`target-${item.timeline_revision_id}`}>{item.summary} · {item.created_at}</option>)}</select></label></div><div className="modal-actions"><button disabled={!revisionPair.base || !revisionPair.target || revisionPair.base === revisionPair.target} onClick={() => void compareRevisions()}>比较</button></div>{revisionDiff && <TimelineDiffView diff={revisionDiff} />}</Dialog>}
-       {renderPanelOpen && <Dialog titleId="render-panel-title" label="渲染与导出" onClose={() => setRenderPanelOpen(false)} className="render-panel-dialog"><div className="modal-heading"><div><h2 id="render-panel-title">渲染与导出</h2><p>权威预览与最终导出的任务与产物记录，关闭后任务继续在后台推进。</p></div><IconButton label="关闭渲染与导出" onClick={() => setRenderPanelOpen(false)}><X /></IconButton></div><section className="export-records dialog-export-records">          <div><strong>任务与产物</strong>{!authoritativePreview && <small>当前没有权威预览，仍可直接导出。</small>}</div>
-          {jobs.filter(item => item.kind === "authoritative_preview" || item.kind === "final_export").map(item => <div className="render-job" key={item.job_id}><div><strong>{item.kind === "authoritative_preview" ? "权威预览" : "最终导出"}</strong><small>{jobStatusLabels[item.status]} · {item.phase ? `${jobPhaseLabels[item.phase] ?? item.phase}${item.phase_progress !== null && item.phase_progress !== undefined ? ` ${Math.round(item.phase_progress * 100)}%` : ""} · ` : ""}{item.stage} · {item.progress === null ? "--" : `${Math.round(item.progress * 100)}%`}{item.error ? ` · ${safeTaskErrorMessage(item.error)}` : ""}</small>{item.status === "running" && <JobEta job={item} />}</div>{["queued", "running", "cancelling"].includes(item.status) && <IconButton label="取消渲染任务" onClick={() => void cancelJob(item)}><Square /></IconButton>}</div>)}
-          {exports.map(item => <div className="export-record" key={item.export_record.export_record_id}><div><strong>{item.export_record.destination_display_name}</strong><small>{item.export_record.status} · {item.export_record.encoder}{item.export_record.fallback_reason ? ` · ${item.export_record.fallback_reason}` : ""}</small></div><div><IconButton label="播放导出" onClick={() => { setExportPlayback(item); setPreviewMode("authoritative"); }}><Play /></IconButton><IconButton label="打开导出" onClick={() => void window.desktop.openArtifact(item.export_record.render_artifact_id)}><Eye /></IconButton><IconButton label="定位导出" onClick={() => void window.desktop.openArtifactFolder(item.export_record.render_artifact_id)}><MapPin /></IconButton></div></div>)}</section></Dialog>}
+       {renderPanelOpen && <Dialog titleId="render-panel-title" label="渲染与导出" onClose={() => setRenderPanelOpen(false)} className="render-panel-dialog"><div className="modal-heading"><div><h2 id="render-panel-title">渲染与导出</h2><p>任务为本次会话的过程记录；导出产物为持久记录，关闭后任务继续在后台推进。</p></div><IconButton label="关闭渲染与导出" onClick={() => setRenderPanelOpen(false)}><X /></IconButton></div>
+        <section className="render-tasks-card" aria-label="任务">
+          {(() => {
+            // 任务区分组：进行中/排队 → 失败/中断（保留原因）→ 成功折叠为一行
+            // 摘要（任务行的价值在过程，终态后不再逐条占位；产物区才是结果）。
+            const panelJobs = jobs.filter(item => item.kind === "authoritative_preview" || item.kind === "final_export");
+            const activeJobs = panelJobs.filter(item => ["queued", "running", "cancelling"].includes(item.status));
+            const failedJobs = panelJobs.filter(item => ["failed", "cancelled", "interrupted"].includes(item.status));
+            const succeededCount = panelJobs.filter(item => item.status === "succeeded").length;
+            const renderJobRow = (item: Job) => {
+              const pct = item.progress === null ? null : Math.round(item.progress * 100);
+              const isActive = ["queued", "running", "cancelling"].includes(item.status);
+              // 收尾窗口：任务实际已成功，正在做 100% 平滑展示——不显示
+              // 「运行中」（误导，像还要跑很久）也不显示取消/ETA。
+              const finishing = isActive && item.progress === 1;
+              return <div className={`render-job${isActive ? " active" : ""}${finishing ? " finishing" : ""}`} key={item.job_id}>
+                <div className="render-job-main">
+                  <div className="render-job-title"><strong>{jobKindLabels[item.kind] ?? item.kind}</strong><span className={`render-job-state ${item.status === "failed" || item.status === "interrupted" ? "bad" : isActive ? "run" : "dim"}`}>{finishing ? "即将完成" : jobStatusLabels[item.status]}</span>{item.status === "running" && !finishing && <JobEta job={item} />}</div>
+                  <small>{item.phase ? `${jobPhaseLabels[item.phase] ?? item.phase}${item.phase_progress !== null && item.phase_progress !== undefined ? ` ${Math.round(item.phase_progress * 100)}%` : ""}` : ""}{item.error ? `${item.phase ? " · " : ""}${safeTaskErrorMessage(item.error)}` : ""}</small>
+                  {pct !== null && <div className="render-job-bar" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}><i style={{ width: `${pct}%` }} /></div>}
+                </div>
+                {isActive && !finishing && <IconButton label="取消渲染任务" onClick={() => void cancelJob(item)}><Square /></IconButton>}
+              </div>;
+            };
+            return <>{(activeJobs.length > 0 || failedJobs.length > 0 || succeededCount > 0) && <div className="render-group-title">任务{activeJobs.length > 0 && <span className="render-group-count">{activeJobs.length} 个进行中</span>}</div>}
+            {activeJobs.length === 0 && failedJobs.length === 0 && succeededCount === 0 && <div className="render-empty">暂无任务。{!authoritativePreview && "当前没有权威预览，仍可直接导出。"}</div>}
+            {activeJobs.map(renderJobRow)}
+            {failedJobs.length > 0 && <div className="render-group-subtitle">失败 / 中断</div>}
+            {failedJobs.map(renderJobRow)}
+            {succeededCount > 0 && <div className="render-done-summary">本轮已完成 {succeededCount} 个任务，产物见下方。</div>}</>;
+          })()}
+        </section>
+        <section className="render-products-card" aria-label="导出产物">
+          <div className="render-group-title">导出产物{exports.length > 0 && <span className="render-group-count">{exports.length} 个文件</span>}</div>
+          {exports.length === 0 && <div className="render-empty">尚无导出产物。</div>}
+          {exports.map(item => { const info = item.export_record.media_info; const dims = info ? `${info.video.width}×${info.video.height}` : null; const fps = info ? Math.round(info.video.fps_num / info.video.fps_den) : null; const missing = item.export_record.status !== "succeeded"; return <div className={`export-record${missing ? " missing" : ""}`} key={item.export_record.export_record_id}><div><strong>{item.export_record.destination_display_name}</strong><small>{formatRelativeTime(item.export_record.created_at)}{dims ? ` · ${dims}${fps ? ` · ${fps}fps` : ""}` : ""} · {formatBytes(item.export_record.size_bytes)} · {missing ? "文件缺失（本地文件已被移动或删除）" : "成功"}</small>{item.export_record.fallback_reason && <small className="render-fallback-note">{fallbackReasonLabel(item.export_record.fallback_reason)}</small>}</div><div>{missing ? <IconButton label="移除记录" onClick={() => void removeMissingExport(item)}><Trash2 /></IconButton> : <IconButton label="定位导出" onClick={() => void window.desktop.openArtifactFolder(item.export_record.render_artifact_id)}><MapPin /></IconButton>}<IconButton label="播放导出" disabled={missing} onClick={() => { setExportPlayback(item); setPreviewMode("authoritative"); }}><Play /></IconButton><IconButton label="打开导出" disabled={missing} onClick={() => void window.desktop.openArtifact(item.export_record.render_artifact_id)}><Eye /></IconButton></div></div>; })}
+        </section></Dialog>}
     {commandSearchOpen && <Dialog titleId="command-search-title" label="命令搜索" onClose={closeCommandSearch} className="command-palette">
       <div className="modal-heading"><div><h2 id="command-search-title">命令搜索</h2><p>输入命令名过滤；↑↓ 选择 · Enter 执行 · Esc 关闭。</p></div></div>
       <input type="search" aria-label="命令搜索" aria-controls="command-list" aria-activedescendant={filteredCommands[commandIndex] ? `command-option-${filteredCommands[commandIndex].id}` : undefined} placeholder="输入命令名称…" value={commandQuery} onChange={event => { setCommandQuery(event.target.value); setCommandIndex(0); }} onKeyDown={handleCommandPaletteKeyDown} />

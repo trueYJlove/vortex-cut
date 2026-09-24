@@ -193,6 +193,7 @@ export interface DesktopApi {
   renameExportDestination: (input: { grant_id: DestinationGrant["destination_grant_id"]; file_name: string }) => Promise<DestinationGrant>;
   createExport: (input: { project_id: ProjectId; export: { timeline_revision_id?: TimelineRevisionId; destination_grant_id: DestinationGrant["destination_grant_id"]; encoder_mode?: EncoderMode; output_ratio?: OutputRatio; quality?: ExportQuality; resolution?: string; frame_rate?: number } }) => Promise<{ job: Job; export_record: ExportRecordPresentation | null }>;
   listExports: (input: { project_id: ProjectId; limit?: number; cursor?: string }) => Promise<{ items: ExportRecordPresentation[]; next_cursor: string | null }>;
+  deleteExportRecord: (input: { project_id: ProjectId; export_record_id: string }) => Promise<void>;
   listPlatformPresets: () => Promise<{ items: PlatformPreset[] }>;
   listRenditionPresets: () => Promise<{ items: RenditionPreset[] }>;
   createRenditionPreview: (input: { project_id: ProjectId; preview: RenditionPreviewCreateInput }) => Promise<{ job: Job | null; preview: RenditionPreviewPresentation | null; reused: boolean }>;
@@ -358,6 +359,7 @@ const api: DesktopApi = {
   renameExportDestination: input => ipcRenderer.invoke("export:rename-destination", input),
   createExport: input => ipcRenderer.invoke("export:create", input),
   listExports: input => ipcRenderer.invoke("export:list", input),
+  deleteExportRecord: input => ipcRenderer.invoke("export:delete-record", input),
   listPlatformPresets: () => ipcRenderer.invoke("preset:list-platforms"),
   listRenditionPresets: () => ipcRenderer.invoke("preset:list-renditions"),
   createRenditionPreview: input => ipcRenderer.invoke("rendition-preview:create", input),

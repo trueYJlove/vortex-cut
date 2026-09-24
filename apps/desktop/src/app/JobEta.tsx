@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import type { Job } from "@aivideo/contracts";
 
 // C2 任务剩余时间估计：对运行中任务的 progress 做速率采样，
-// 用最近窗口的线性外推给出 ETA。样本不足或进度停滞时不显示。
+// 用最近窗口的线性外推给出 ETA。样本不足或进度停滞时不显示
+// （不出现「估计中…」占位——避免与状态徽标并列读成第三种状态）。
 type Sample = { at: number; progress: number };
 const WINDOW_MS = 20_000;
 const MIN_SPAN_MS = 4_000;
@@ -48,7 +49,9 @@ export function JobEta({ job }: { job: Job }) {
     const spanMs = now - start.at;
     const delta = job.progress! - start.progress;
     if (spanMs < MIN_SPAN_MS || delta < MIN_PROGRESS_DELTA) {
-      setEtaText("估计中…");
+      // 样本不足：不显示占位文案——「估计中…」与状态徽标/阶段并列时
+      // 会被读成第三种状态。窗口满足后 ETA 直接出现。
+      setEtaText("");
       return;
     }
     const rate = delta / spanMs; // progress/ms

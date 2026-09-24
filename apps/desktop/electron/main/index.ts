@@ -770,6 +770,10 @@ function registerIpc(): void {
     if (!isPage(page, isExportRecord)) throw new Error("Invalid ExportRecordPage");
     return { next_cursor: page.next_cursor, items: await Promise.all(page.items.map(exportPresentation)) };
   });
+  ipcMain.handle("export:delete-record", async (_event, input: { project_id: ProjectId; export_record_id: string }) => {
+    // 移除文件已缺失的导出记录（Core 校验文件仍存在时拒绝）。
+    await fetchWithUi(`${API_PREFIX}/projects/${asId(input.project_id, "project_id")}/exports/${asId(input.export_record_id, "export_record_id")}`, { method: "DELETE" });
+  });
   ipcMain.handle("render-artifact:get", async (_event, artifactIdValue: RenderArtifactId) => {
     const artifactId = asId(artifactIdValue, "render_artifact_id");
     const artifact = parseRenderArtifact(rendererSafe(await fetchWithUi(`${API_PREFIX}/render-artifacts/${artifactId}`)));

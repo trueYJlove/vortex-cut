@@ -170,7 +170,7 @@ textarea { min-height: 92px; padding: 8px; resize: vertical; }
 .sp-mask-knob { position: absolute; width: 11px; height: 11px; margin-left: -6px; margin-top: -6px; background: #e2564f; border: 1.5px solid #fff; border-radius: 50%; cursor: nwse-resize; }
 .playback-bar { width: 100%; }
 .layout-switch { width: min(620px, 100%); }.layout-switch button { flex: 1; font-size: var(--dlg-fs-body); }
-.export-records { width: min(620px, 100%); min-height: 0; overflow: auto; border-top: 1px solid #303b40; }.export-records > div:first-child, .export-record, .render-job { min-width: 0; padding: 6px 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; }.export-records small, .export-record strong, .render-job strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.export-records small { color: #89989f; font-size: var(--dlg-fs-caption); }.export-record > div:first-child, .render-job > div:first-child { min-width: 0; }.export-record > div:last-child { display: flex; gap: 4px; }.export-record .icon-btn, .render-job .icon-btn { width: 28px; min-height: 28px; }
+.export-record, .render-job { min-width: 0; padding: 6px 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; }.export-record strong, .render-job strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.export-record > div:first-child, .render-job > div:first-child { min-width: 0; }.export-record > div:last-child { display: flex; gap: 4px; }
 .property-form { display: grid; gap: 13px; }.property-form h2, .properties-empty strong { font-size: 15px; }.property-form label { display: grid; gap: 6px; color: #aeb9bd; font-size: var(--dlg-fs-body); }.property-form label.check { grid-template-columns: 18px 18px 1fr; align-items: center; }.property-form label.check.two-part { grid-template-columns: 18px 1fr; grid-template-rows: none; }.property-form .check input { width: 15px; height: 15px; }.property-form input[type=range] { padding: 0; }.properties-empty p { color: #7f8d93; font-size: var(--dlg-fs-body); line-height: 1.5; }
 .properties-project { display: grid; gap: 13px; }.property-block { display: grid; gap: 7px; }.property-block h2 { margin: 0; font-size: 13px; color: #d1a453; }.property-line { display: flex; justify-content: space-between; gap: 8px; min-width: 0; font-size: var(--dlg-fs-body); }.property-line span { color: #7f8d93; }.property-line strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }.properties-actions { display: grid; gap: 6px; }.properties-actions button { min-height: 28px; }.properties-muted { margin: 0; color: #7f8d93; font-size: var(--dlg-fs-body); }.properties-status { font-size: var(--dlg-fs-body); color: #aeb9bd; }
 
@@ -186,7 +186,7 @@ textarea { min-height: 92px; padding: 8px; resize: vertical; }
 .clip-frames .clip-frame { flex: 1 1 0; min-width: 0; height: 100%; object-fit: cover; opacity: .6; pointer-events: none; }
 .clip-label { position: absolute; left: 6px; right: 6px; bottom: 4px; top: auto; z-index: 2; padding: 2px 4px; background: rgba(0, 0, 0, .62); color: #dbe4e8; font-size: var(--dlg-fs-label); border-radius: 3px; }
 .clip-block:not(:has(.clip-frames)) .clip-label { position: static; background: transparent; padding: 0; color: inherit; }
-footer { padding: 0 12px; border-top: 1px solid var(--vc-border); color: #6f7b82; font-size: var(--dlg-fs-label); overflow: hidden; white-space: nowrap; display: flex; align-items: center; gap: 8px; }.footer-status { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; min-width: 0; }.footer-sep { width: 1px; height: 14px; background: var(--vc-border); flex: none; }.footer-tasks { display: flex; align-items: center; justify-content: center; gap: 10px; flex: 1 1 auto; min-width: 0; }.tasks-summary { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; height: 20px; padding: 0 10px; border: 1px solid rgba(37, 211, 172, .35); border-radius: 999px; background: rgba(37, 211, 172, .08); color: #25d3ac; font-size: var(--dlg-fs-label); cursor: default; overflow: hidden; }.tasks-summary:hover { background: rgba(37, 211, 172, .16); }.tasks-spinner { width: 8px; height: 8px; flex: none; border-radius: 50%; border: 1.5px solid rgba(37, 211, 172, .3); border-top-color: #25d3ac; animation: sb-spin .9s linear infinite; }@keyframes sb-spin { to { transform: rotate(360deg); } }.tasks-idle { color: #556067; font-size: var(--dlg-fs-label); }.footer-actions { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; min-width: 0; overflow: hidden; }.footer-version { margin-left: auto; flex: 0 0 auto; max-width: 320px; color: #6f7b82; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+footer { padding: 0 12px; border-top: 1px solid var(--vc-border); color: #6f7b82; font-size: var(--dlg-fs-label); overflow: hidden; white-space: nowrap; display: flex; align-items: center; gap: 8px; }.footer-status { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; min-width: 0; }.footer-sep { width: 1px; height: 14px; background: var(--vc-border); flex: none; }.footer-tasks { display: flex; align-items: center; justify-content: center; gap: 10px; flex: 1 1 auto; min-width: 0; }.tasks-summary { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; height: 20px; /* min-height 显式压回：全局 button{min-height:32px} 优先于 height，会把胶囊撑出 28px footer 行被裁剪 */ min-height: 20px; padding: 0 10px; border: 1px solid rgba(37, 211, 172, .35); border-radius: 999px; background: rgba(37, 211, 172, .08); color: #25d3ac; font-size: var(--dlg-fs-label); cursor: default; overflow: hidden; }.tasks-summary:hover { background: rgba(37, 211, 172, .16); }.tasks-spinner { width: 8px; height: 8px; flex: none; border-radius: 50%; border: 1.5px solid rgba(37, 211, 172, .3); border-top-color: #25d3ac; animation: sb-spin .9s linear infinite; }@keyframes sb-spin { to { transform: rotate(360deg); } }.tasks-idle { color: #556067; font-size: var(--dlg-fs-label); }.footer-actions { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; min-width: 0; overflow: hidden; }.footer-version { margin-left: auto; flex: 0 0 auto; max-width: 320px; color: #6f7b82; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 footer .ai-entry { min-height: 22px; padding: 0 7px; border: 1px solid #263038; border-radius: 6px; background: none; color: #a3aeb5; font-size: var(--dlg-fs-label); display: inline-flex; align-items: center; gap: 5px; } footer .ai-entry:hover:not(:disabled) { color: #e8edf0; border-color: #33404a; background: rgba(255, 255, 255, .03); } footer .ai-entry svg { width: 12px; height: 12px; }
 .modal-backdrop { position: fixed; inset: 0; z-index: 20; padding: 24px; display: grid; place-items: center; overflow: auto; background: rgba(4,7,8,.82); }.modal { width: min(560px, 100%); min-height: 0; max-height: calc(100vh - 48px); overflow: auto; padding: 20px; border: 1px solid #4b585e; background: #2c2c2c; }.modal-heading { display: flex; align-items: start; justify-content: space-between; gap: 12px; }.modal h2, .modal h3 { margin: 0 0 10px; }.modal p { overflow-wrap: anywhere; }.modal dl { display: grid; grid-template-columns: 90px 1fr; gap: 8px; font-size: var(--dlg-fs-body); }.modal dd { margin: 0; overflow-wrap: anywhere; }.check-line { display: flex; align-items: center; gap: 7px; font-size: var(--dlg-fs-body); }.check-line input { width: 16px; height: 16px; }.modal-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 7px; margin-top: 16px; }.modal-actions .danger, button.danger { border-color: #a34a41; background: #3a2320; color: #f0b9b2; }.modal-actions .danger:hover, button.danger:hover:not(:disabled) { border-color: #d16055; background: #4a2a26; color: #ffd6d0; }.delete-warning { margin-top: 4px; padding: 9px; border-left: 3px solid #d16055; background: #2e211f; color: #eec4be; font-size: var(--dlg-fs-body); }.readonly-note { padding: 9px; border-left: 3px solid #8fc5aa; background: #1d2a26; color: #aad0bd; font-size: var(--dlg-fs-body); }.readonly-segments > div { padding: 10px 0; display: grid; grid-template-columns: 100px 1fr; gap: 8px; border-bottom: 1px solid #303b40; }.readonly-segments span { color: #d1a453; font-size: var(--dlg-fs-label); }.readonly-segments p { margin: 0; overflow-wrap: anywhere; }
 .ai-roughcut { width: min(900px, 100%); display: grid; gap: 10px; }.ai-roughcut label { display: grid; gap: 5px; font-size: var(--dlg-fs-body); }.ai-roughcut fieldset { display: grid; grid-template-columns: 1fr 1.4fr 1fr auto; gap: 6px; border: 1px solid #3b474d; }.ai-inline { display: flex; gap: 6px; }.ai-inline input { flex: 1; }.ai-status { padding: 8px; border-left: 3px solid #d1a453; background: #29251a; font-size: var(--dlg-fs-body); }.egress-text { max-height: 220px; overflow: auto; padding: 8px; border: 1px solid #303b40; background: #101417; font-size: var(--dlg-fs-body); }.egress-text p { margin: 0 0 8px; white-space: pre-wrap; overflow-wrap: anywhere; }.candidate-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }.candidate-columns > section { min-width: 0; padding: 10px; border: 1px solid #3b474d; background: #141b1f; }.candidate-columns h4 { margin: 0 0 8px; color: #d1a453; }.candidate-columns strong, .candidate-columns p { overflow-wrap: anywhere; }.candidate-columns small { color: #9eabb1; }.candidate-clip { margin: 8px 0; padding-top: 7px; border-top: 1px solid #303b40; font-size: var(--dlg-fs-label); }.candidate-clip span { color: #d1a453; margin-right: 6px; }.candidate-clip p { margin: 5px 0; }.candidate-player { width: min(420px, 100%); max-height: 42vh; background: #000; }
@@ -203,7 +203,10 @@ footer .ai-entry { min-height: 22px; padding: 0 7px; border: 1px solid #263038; 
 .reframe-clip { display: grid; grid-template-columns: 80px 156px; align-items: center; gap: 10px; padding-top: 8px; border-top: 1px solid #303b40; font-size: var(--dlg-fs-label); }
 .anchor-grid { display: grid; grid-template-columns: repeat(3, 48px); gap: 3px; }.anchor-grid button { min-height: 28px; padding: 0 2px; font-size: var(--dlg-fs-caption); }.anchor-grid button.active { border-color: #d1a453; color: #f3d79d; background: #3a3325; }
 .reframe-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }.reframe-actions small { flex: 1 1 240px; }
-.reframe-batch-actions { margin-top: 14px; padding-top: 10px; border-top: 1px solid #53636a; }.reframe-batch-actions h3 { margin: 0 0 5px; color: #d1a453; }.reframe-batch-actions > p { margin: 0 0 8px; color: #aeb9bd; font-size: var(--dlg-fs-label); }.reframe-batch-status { border-color: #53636a; }
+.reframe-batch-actions { margin-top: 14px; padding-top: 10px; border-top: 1px solid #53636a; }.reframe-batch-actions h3 { margin: 0 0 5px; color: #d1a453; }.reframe-batch-actions > p { margin: 0 0 8px; color: #aeb9bd; font-size: var(--dlg-fs-label); }
+/* 盒式缩进/底部留白统一收口在文件末尾「弹窗全宽盒子统一盒式缩进」块（特异性
+   需压过 :not() 通用规则，中途的低特异性版本会被压制——勿在此处重复）。 */
+.reframe-batch-status { border-color: #53636a; }
 
 @media (max-width: 1120px) { .editor-grid { grid-template-columns: 220px minmax(450px, 1fr) 230px; }.project-control strong { display: none; }.project-title { max-width: 96px; }.project-control select { width: 110px; }.project-control input { width: 78px; }.top-actions button:not(.icon-btn) { width: 32px; padding: 0; font-size: 0; }.top-actions button:not(.icon-btn) svg { margin: 0; }.job-state { display: none; }.editor-topbar { gap: 8px; padding: 0 8px; }.caption-overlay { font-size: var(--dlg-fs-body); max-height: 38%; } }
 @media (max-width: 760px) { .revision-selectors, .diff-groups { grid-template-columns: 1fr; } }
@@ -638,13 +641,14 @@ input, select, textarea { font-size: var(--dlg-fs-body); }
 .render-panel-toggle { height: 26px; padding: 0 11px; font-size: var(--dlg-fs-label); color: var(--vc-text, #e8e8ef); background: var(--vc-raised, #22222e); border: 1px solid var(--vc-border-2, #32323f); border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .render-panel-toggle:hover { border-color: var(--vc-accent, #25d3ac); }
 .render-badge { min-width: 16px; height: 16px; padding: 0 4px; display: inline-grid; place-items: center; border-radius: 8px; background: var(--vc-accent); color: #0b0b12; font-size: var(--dlg-fs-caption); line-height: 1; }
-.render-panel-dialog .export-records { width: 100%; max-height: 46vh; border-top: 0; }
+/* 渲染面板卡片盒式缩进/底部留白：统一收口在文件末尾「弹窗全宽盒子统一盒式
+   缩进」块（此处历史规则的 (0,2,0) 特异性压不过 :not() 通用规则 (0,3,0)）。 */
 
 /* Stage 9E 统一预览、保存和任务反馈 */
 .toolbar-output { min-width: 0; flex: 0 1 auto; }
 .footer-status .save-state { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .footer-status .job-state { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.status-chip.stale { flex: none; display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 5px; border: 0; border-radius: 5px; background: none; color: #d9b36a; font-size: var(--dlg-fs-label); white-space: nowrap; }
+.status-chip.stale { flex: none; display: inline-flex; align-items: center; gap: 5px; height: 20px; min-height: 20px; /* 同 tasks-summary：压回全局 button min-height */ padding: 0 5px; border: 0; border-radius: 5px; background: none; color: #d9b36a; font-size: var(--dlg-fs-label); white-space: nowrap; }
 .status-chip.stale::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #d9b36a; flex: none; }
 .status-chip.stale:hover:not(:disabled) { background: rgba(217, 179, 106, .08); color: #f0c979; }
 .status-chip.stale:disabled { opacity: .5; }
@@ -941,6 +945,9 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
   --dlg-fs-body: 12.5px;
   --dlg-fs-label: 11.5px;
   --dlg-fs-caption: 10.5px;
+  /* 弹窗统一水平内边距（v5 设计稿头/内容/底栏均为 22px；
+     modal-heading/modal-actions/正文区的 padding 均取此令牌）。 */
+  --dlg-hpad: 22px;
 }
 
 /* ── 背幕与框架 ─────────────────────────────────────────────── */
@@ -965,10 +972,10 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 .modal::-webkit-scrollbar-thumb { background: #34393c; border-radius: 4px; border: 2px solid var(--dlg-bg); }
 .modal::-webkit-scrollbar-track { background: transparent; }
 .modal > * { margin: 0; }
-.modal > *:not(.modal-heading):not(.modal-actions) { padding-left: 18px; padding-right: 18px; }
-.modal > .modal-heading { position: sticky; top: 0; z-index: 3; flex: none; padding: 15px 18px 0; background: var(--dlg-bg); }
-.modal > .modal-actions { position: sticky; bottom: 0; z-index: 3; flex: none; padding: 13px 18px 15px; background: var(--dlg-bg); }
-.modal > .project-steps { padding-left: 18px; padding-right: 18px; }
+.modal > *:not(.modal-heading):not(.modal-actions) { padding-left: var(--dlg-hpad); padding-right: var(--dlg-hpad); }
+.modal > .modal-heading { position: sticky; top: 0; z-index: 3; flex: none; padding: 15px var(--dlg-hpad) 0; background: var(--dlg-bg); }
+.modal > .modal-actions { position: sticky; bottom: 0; z-index: 3; flex: none; padding: 13px var(--dlg-hpad) 15px; background: var(--dlg-bg); }
+.modal > .project-steps { padding-left: var(--dlg-hpad); padding-right: var(--dlg-hpad); }
 
 /* 弹窗宽度档位（设计稿 §04-§19） */
 .modal.ai-roughcut { width: min(720px, 100%); }
@@ -1136,7 +1143,10 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 .modal .target-summary small { color: var(--dlg-text-3); font-size: var(--dlg-fs-caption); line-height: 1.7; }
 
 /* ── fieldset ───────────────────────────────────────────────── */
-.modal fieldset { min-width: 0; margin: 0; padding: 12px 14px; display: grid; gap: 10px; border: 1px solid var(--dlg-line); border-radius: var(--r-box); background: var(--dlg-raise); }
+/* fieldset 是带边框/背景的整宽盒子：通用 :not() 规则的 22px 会变成盒子
+   内边距（盒子仍贴边），这里统一改盒式缩进——水平 margin 22px + 自身
+   padding 12px（内容到盒边的呼吸由自身 padding 承担，与卡片形态一致）。 */
+.modal fieldset { min-width: 0; margin: 0 var(--dlg-hpad, 22px); padding: 12px 14px; display: grid; gap: 10px; border: 1px solid var(--dlg-line); border-radius: var(--r-box); background: var(--dlg-raise); }
 .modal legend { padding-right: 8px; font-size: var(--dlg-fs-label); letter-spacing: .5px; color: var(--dlg-text-3); }
 .modal .generation-create fieldset > label { display: inline-flex; align-items: center; gap: 8px; margin: 0; }
 .modal .shot-card fieldset { padding: 10px 12px; }
@@ -1159,16 +1169,46 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 }
 .modal kbd.shortcut-recording { color: var(--vc-accent, #25d3ac); border-color: rgba(37, 211, 172, .5); background: var(--dlg-accent-dim); animation: pulse 1.2s ease-in-out infinite; }
 
-/* ── 渲染与导出：任务与产物列表 ─────────────────────────────── */
-.modal .export-records { width: 100%; padding: 2px; background: transparent; border: 0; }
-.modal .export-records > div:first-child { padding: 9px 12px 7px; color: var(--dlg-text-2); }
-.modal .export-records > div:first-child strong { font-size: var(--dlg-fs-body); }
-.modal .export-records > div:first-child small { font-size: var(--dlg-fs-caption); }
+/* ── 渲染与导出：任务与产物列表（2026-09-24 分区卡片化 + 进度条改造） ── */
 .modal .export-record, .modal .render-job { padding: 9px 12px; border-top: 1px solid var(--dlg-line); background: transparent; border-radius: 0; }
 .modal .export-record strong, .modal .render-job strong { font-size: var(--dlg-fs-body); font-weight: 500; }
-.modal .export-records small, .modal .render-job small { color: var(--dlg-text-3); font-size: var(--dlg-fs-caption); }
+.modal .render-job small, .modal .export-record small { color: var(--dlg-text-3); font-size: var(--dlg-fs-caption); }
 .modal .export-record .icon-btn, .modal .render-job .icon-btn { width: 26px; min-width: 26px; height: 26px; min-height: 26px; }
-.modal .render-panel-dialog .export-records { max-height: 46vh; background: var(--dlg-raise); border: 1px solid var(--dlg-line); border-radius: var(--r-box); }
+/* 两区独立卡片：任务区（过程，普通底）与产物区（结果，抬升底+主色描边）视觉分离 */
+.modal .render-tasks-card, .modal .render-products-card { max-height: 46vh; overflow: auto; background: var(--dlg-raise); border: 1px solid var(--dlg-line); border-radius: var(--r-box); }
+.modal .render-products-card { border-color: rgba(43, 216, 176, .22); }
+.modal .render-group-title { padding: 10px 12px 4px; font-size: var(--dlg-fs-label); color: var(--dlg-text-2); border-top: 1px solid var(--dlg-line); display: flex; align-items: baseline; gap: 8px; }
+.modal .render-products-card .render-group-title { color: var(--dlg-primary); }
+.modal .render-group-title:first-child { border-top: none; }
+.modal .render-group-count { font-size: var(--dlg-fs-caption); color: var(--dlg-text-4); font-weight: 400; }
+.modal .render-group-subtitle { padding: 8px 12px 2px; font-size: var(--dlg-fs-caption); color: var(--dlg-text-4); }
+.modal .render-done-summary { padding: 7px 12px 9px; font-size: var(--dlg-fs-caption); color: var(--dlg-text-4); border-top: 1px solid var(--dlg-line); }
+.modal .render-empty { padding: 12px; font-size: var(--dlg-fs-caption); color: var(--dlg-text-4); }
+/* 任务行：标题行（类型+状态徽标+ETA）与说明行分开，进行中带主色描边 */
+.modal .render-job { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.modal .render-job-main { min-width: 0; flex: 1; }
+.modal .render-job-title { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.modal .render-job-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.modal .render-job-state { flex: none; font-size: var(--dlg-fs-caption); border-radius: 4px; padding: 1px 6px; }
+.modal .render-job-state.run { color: var(--dlg-primary); background: var(--dlg-accent-dim); }
+/* 收尾窗口（任务已成功、进度平滑到 100% 的短暂展示）：徽标用完成绿但保持
+   主色行描边，传达「还在收尾」而非「继续运行」。 */
+.modal .render-job.finishing .render-job-state.run { color: #9fd4a8; background: rgba(78, 158, 106, .16); }
+.modal .render-job.finishing .render-job-bar i { background: var(--dlg-primary); }
+.modal .render-job-state.bad { color: #f0b9b2; background: rgba(229, 72, 77, .14); }
+.modal .render-job-state.dim { color: var(--dlg-text-3); background: var(--ctl-bg); }
+.modal .render-job.active { background: rgba(43, 216, 176, .05); box-shadow: inset 2px 0 0 var(--dlg-primary); }
+/* 进度条：比侧边栏 jbar（3px）更醒目——5px 高 + 渐变填充。
+   transition 承担完成收尾的平滑跑满（56%→100% 不跳变）。 */
+.modal .render-job-bar { height: 5px; margin-top: 7px; border-radius: 3px; background: #2b353d; overflow: hidden; }
+.modal .render-job-bar i { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, #1fa886, var(--dlg-primary)); transition: width .45s ease-out; }
+/* 产物缺失态：不报警（文件被删是用户的主动操作）——整行与说明文字同款
+   次级弱显，仅状态文本可扫读；播放/打开禁用，主操作换成「移除记录」。 */
+.modal .export-record.missing { opacity: .62; }
+.modal .export-record.missing strong { color: var(--dlg-text-2); }
+.modal .export-record.missing .icon-btn:disabled { opacity: .35; }
+/* fallback 说明降为次行小字（导出成功的前提下，编码器选择只是补充信息） */
+.modal .export-record .render-fallback-note { display: block; margin-top: 2px; color: var(--dlg-text-4); font-size: var(--dlg-fs-caption); }
 
 /* ── 批次状态 ───────────────────────────────────────────────── */
 .modal .batch-status { margin-top: 0; padding: 14px; background: var(--dlg-raise); border: 1px solid var(--dlg-line); border-radius: var(--r-box); }
@@ -1381,11 +1421,13 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
    字号全部走 --dlg-fs-* 令牌阶梯；颜色走 --dlg-* 色板；零裸数字字号。 */
 .modal.export-modal { width: min(620px, 100%); row-gap: 0; }
 .modal.cover-modal { width: min(420px, 100%); row-gap: 0; }
-.exd-body { padding: 0 22px; }
+.exd-body { padding: 0 var(--dlg-hpad); }
 .exd-hero { display: grid; grid-template-columns: 224px 1fr; gap: 18px; padding: 18px 0 16px; }
-.exd-cover { width: 224px; height: 126px; border-radius: var(--r-box); position: relative; background: linear-gradient(135deg, #10282c 0%, #133539 50%, #0d2029 100%); border: 1px solid var(--dlg-border); cursor: pointer; overflow: hidden; display: grid; place-items: center; padding: 0; transition: border-color .15s ease; }
-.exd-cover:hover { border-color: var(--dlg-primary); }
-.exd-cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+/* .modal button { height:30px } 特异性 (0,1,1) 高于 .exd-cover (0,1,0)，会把
+   封面压成 224×30 灰条——封面卡是 button 所以提权到 (0,2,0) 并显式覆盖。 */
+.modal .exd-cover { width: 224px; height: 126px; min-height: 0; flex: none; align-self: start; border-radius: var(--r-box); position: relative; background: linear-gradient(135deg, #10282c 0%, #133539 50%, #0d2029 100%); border: 1px solid var(--dlg-border); cursor: pointer; overflow: hidden; display: grid; place-items: center; padding: 0; transition: border-color .15s ease; }
+.modal .exd-cover:hover { border-color: var(--dlg-primary); background: linear-gradient(135deg, #10282c 0%, #133539 50%, #0d2029 100%); }
+.modal .exd-cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .exd-cover-ph { color: #2e6a70; font-size: var(--dlg-fs-label); }
 .exd-cover-chip { position: absolute; left: 8px; bottom: 8px; font-size: var(--dlg-fs-caption); color: var(--dlg-text); background: rgba(9, 12, 16, .72); border-radius: 5px; padding: 3px 8px; display: inline-flex; align-items: center; gap: 5px; pointer-events: none; }
 .exd-cover:hover .exd-cover-chip { color: var(--dlg-primary); }
@@ -1427,7 +1469,7 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 .exd-warn { color: var(--dlg-warn); }
 .export-modal .modal-actions, .cover-modal .modal-actions { justify-content: space-between; align-items: center; }
 /* 封面设置弹窗（v5 场景③ · 两入口共用） */
-.cov-body { padding: 18px 22px 14px; display: grid; gap: 14px; }
+.cov-body { padding: 18px var(--dlg-hpad) 14px; display: grid; gap: 14px; }
 .cov-preview { width: 100%; aspect-ratio: 16 / 9; border-radius: var(--r-box); background: linear-gradient(135deg, #10282c 0%, #133539 50%, #0d2029 100%); border: 1px solid var(--dlg-border); display: grid; place-items: center; color: #2e6a70; font-size: var(--dlg-fs-label); object-fit: cover; }
 .cov-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .cov-actions button { height: 34px; border-radius: var(--r-box); border: 1px solid var(--dlg-border); background: var(--ctl-bg); color: var(--dlg-text-2); font-size: var(--dlg-fs-body); cursor: pointer; }
@@ -1436,3 +1478,41 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 .cov-actions .cov-accent { border-color: var(--dlg-primary); color: var(--dlg-primary); background: var(--dlg-accent-dim); }
 .cov-actions .cov-accent:hover:not(:disabled) { background: rgba(37, 211, 172, .14); }
 .cov-error { margin: 0; font-size: var(--dlg-fs-caption); color: var(--dlg-danger); }
+
+/* ═══════════════════════════════════════════════════════════════════
+   弹窗全宽盒子统一盒式缩进（2026-09-24 收口）
+   问题：:not() 通用规则给直系子元素 22px「内边距」，带边框/背景的整宽
+   盒子（fieldset/分段框/卡片）视觉上仍铺满弹窗——内边距只是把内容推进
+   去，盒子没缩进。此前多轮低特异性补丁都被 (0,3,0) 的 :not 规则压制。
+   收口方案：文件末尾追加、特异性 ≥ :not 规则，全部改「margin 缩进 +
+   自身 padding 压 0」的盒式模型（与渲染面板卡片一致）。
+   ═══════════════════════════════════════════════════════════════════ */
+.modal fieldset:not(.locked-fieldset),
+.modal > *:not(.modal-heading):not(.modal-actions).reframe-batch-actions,
+.modal > *:not(.modal-heading):not(.modal-actions).batch-status,
+.render-panel-dialog .render-tasks-card,
+.render-panel-dialog .render-products-card {
+  margin-left: var(--dlg-hpad, 22px);
+  margin-right: var(--dlg-hpad, 22px);
+  padding-left: 0;
+  padding-right: 0;
+}
+/* 分段框内嵌的操作行不是弹窗直系子元素，吃不到底栏 22px——补齐；
+   batch-status 内同理。 */
+.modal .reframe-batch-actions .modal-actions,
+.modal .batch-status .modal-actions { padding-left: var(--dlg-hpad, 22px); padding-right: var(--dlg-hpad, 22px); }
+/* 没有弹窗级底栏的弹窗（关闭钮在标题行、按钮嵌在各分段里），尾部内容
+   贴弹窗底边——补与水平边距同源的底部留白。 */
+.modal.render-panel-dialog,
+.modal.export-batch-modal { padding-bottom: var(--dlg-hpad, 22px); }
+@media (max-width: 760px) {
+  .modal fieldset:not(.locked-fieldset),
+  .modal > *:not(.modal-heading):not(.modal-actions).reframe-batch-actions,
+  .modal > *:not(.modal-heading):not(.modal-actions).batch-status,
+  .render-panel-dialog .render-tasks-card,
+  .render-panel-dialog .render-products-card { margin-left: 14px; margin-right: 14px; }
+  .modal .reframe-batch-actions .modal-actions,
+  .modal .batch-status .modal-actions { padding-left: 14px; padding-right: 14px; }
+  .modal.render-panel-dialog,
+  .modal.export-batch-modal { padding-bottom: 14px; }
+}
