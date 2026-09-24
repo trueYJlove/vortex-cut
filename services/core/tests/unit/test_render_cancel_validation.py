@@ -217,6 +217,55 @@ async def test_validate_reports_phase_sequence_and_progress(tmp_path: Path, monk
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("fps_num", [24, 25, 60])
+async def test_validate_accepts_profile_frame_rates(
+    tmp_path: Path, monkeypatch, fps_num: int
+) -> None:
+    """导出帧率档（24/25/60）不因硬编码 30 被判校验失败——回归：非 30fps
+    导出曾必败并触发换编码器整轮重渲（表现：任务卡在 96% 永不完成）。"""
+    output = tmp_path / "out.mp4"
+    output.write_bytes(b"valid")
+    probe_payload = _probe()
+    probe_payload["video_streams"][0]["avg_frame_rate_num"] = fps_num
+
+    async def decoded(ffmpeg, path, **_kwargs):
+        return None
+
+    monkeypatch.setattr(validation_module, "decode_validate", decoded)
+    media, _size, _digest = await validate_rendered_media(
+        Path("ffmpeg"),
+        FakeProbe(probe_payload),
+        output,
+        {"width": 540, "height": 960, "fps_num": fps_num, "fps_den": 1},
+        1_000_000,
+    )
+    assert media["video"]["fps_num"] == fps_num
+
+
+@pytest.mark.asyncio
+async def test_validate_rejects_frame_rate_mismatch(tmp_path: Path, monkeypatch) -> None:
+    """产物帧率与 Profile 期望不符仍必须失败（校验语义不放宽）。"""
+    output = tmp_path / "out.mp4"
+    output.write_bytes(b"valid")
+    probe_payload = _probe()
+    probe_payload["video_streams"][0]["avg_frame_rate_num"] = 60
+
+    async def decoded(ffmpeg, path, **_kwargs):
+        return None
+
+    monkeypatch.setattr(validation_module, "decode_validate", decoded)
+    with pytest.raises(DomainError) as exc_info:
+        await validate_rendered_media(
+            Path("ffmpeg"),
+            FakeProbe(probe_payload),
+            output,
+            {"width": 540, "height": 960, "fps_num": 30, "fps_den": 1},
+            1_000_000,
+        )
+    assert exc_info.value.code == "RENDER_VALIDATION_FAILED"
+
+
+@pytest.mark.asyncio
 async def test_validate_cancel_during_hash(tmp_path: Path, monkeypatch) -> None:
     output = tmp_path / "out.mp4"
     output.write_bytes(b"valid")

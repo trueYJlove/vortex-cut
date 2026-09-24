@@ -57,13 +57,17 @@ async def validate_rendered_media(
         raise DomainError("RENDER_VALIDATION_FAILED", "渲染产物音视频流数量不合法")
     video = videos[0]
     audio = audios[0]
+    # 帧率按 Profile 期望值校验（导出帧率档 24/25/30/60 可选；硬编码 30 会把
+    # 非 30fps 的正确产物判成校验失败 → 换编码器整轮重渲仍失败）。
+    expected_fps_num = int(profile.get("fps_num") or 30)
+    expected_fps_den = int(profile.get("fps_den") or 1)
     if (
         video.get("codec") != "h264"
         or video.get("width") != profile["width"]
         or video.get("height") != profile["height"]
         or video.get("pixel_format") != "yuv420p"
-        or video.get("avg_frame_rate_num") != 30
-        or video.get("avg_frame_rate_den") != 1
+        or video.get("avg_frame_rate_num") != expected_fps_num
+        or video.get("avg_frame_rate_den") != expected_fps_den
         or audio.get("codec") != "aac"
         or audio.get("sample_rate") != 48000
     ):

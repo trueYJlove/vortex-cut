@@ -1044,6 +1044,7 @@ def _domain(exc: DomainError) -> HTTPException:
         "STAGE6_BATCH_POSITION_INVALID",
         "STAGE6_BATCH_DURATION_INVALID",
         "STAGE6_BATCH_CONFIRMATION_REQUIRED",
+        "EXPORT_STILL_PRESENT",
     }:
         status = 422
     if exc.code in {
@@ -2623,6 +2624,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             items, next_cursor = state.renders.list_exports(project_id, limit, cursor)
             return {"items": items, "next_cursor": next_cursor}
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.delete("/api/v1/projects/{project_id}/exports/{export_record_id}", status_code=204)
+    async def delete_export_record(
+        project_id: str, export_record_id: str, _: CoreState = Depends(require_ui)
+    ) -> None:
+        """移除一条文件已缺失的导出记录（文件在系统层被删后的列表清理）。
+
+        记录不存在或归属项目不符均 404（不区分，避免越权探测）。"""
+        try:
+            dto = state.renders.export_dto(export_record_id)
+            if dto["project_id"] != project_id:
+                raise DomainError("EXPORT_NOT_FOUND", "导出记录不存在")
+            state.renders.remove_export_record(export_record_id)
         except DomainError as exc:
             raise _domain(exc) from exc
 

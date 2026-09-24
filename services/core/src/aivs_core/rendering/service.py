@@ -27,6 +27,41 @@ from .validation import validate_rendered_media
 
 logger = logging.getLogger(__name__)
 
+# 总进度分段刻度（phase_progress 与总进度同源同值，保证单调推进）：
+# 编码 0–88%，完整解码校验 88–94%，SHA-256 哈希 94–98%，发布临界区不动
+# 进度（终态迁移一次性写 1）。此前编码用裸 0–0.99、校验/哈希阶段完全不
+# 推进总进度——进度条长时间冻结在编码末值（如 96%），看起来像卡死。
+_PROGRESS_ENCODING_END = 0.88
+_PROGRESS_DECODE_END = 0.94
+_PROGRESS_HASH_END = 0.98
+
+
+def _map_phase_progress(name: str, value: float) -> float:
+    if name == "encoding":
+        return value * _PROGRESS_ENCODING_END
+    if name == "validating_decode":
+        return _PROGRESS_ENCODING_END + value * (_PROGRESS_DECODE_END - _PROGRESS_ENCODING_END)
+    if name == "hashing":
+        return _PROGRESS_DECODE_END + value * (_PROGRESS_HASH_END - _PROGRESS_DECODE_END)
+    return value
+
+
+def _phase_aware_progress(progress: Any, phase: Any) -> Any:
+    """phase 注入时的统一进度回调：`_report(name, value|None)`。
+    有定量值 → 按分段刻度映射后同时写 phase_progress 与总进度；
+    None（不定进度，如 probe/publishing）→ 只上报阶段名。phase 为
+    None 的旧调用方语义不变（裸总进度 0–0.99）。"""
+
+    def _report(name: str, value: float | None) -> None:
+        if value is None:
+            phase(name, None)
+            return
+        mapped = min(_map_phase_progress(name, value), 0.99)
+        phase(name, mapped)
+        progress(mapped)
+
+    return _report
+
 
 class JobRow(Protocol):
     def __getitem__(self, key: str) -> Any: ...
@@ -586,6 +621,9 @@ class RenderCoordinator:
         else:
             output = work / "authoritative-preview.mp4"
         expected_duration = _rendered_duration_us(plan["segments"])
+        # phase 注入时统一走分段进度回调（编码/校验/哈希共同推进总进度）；
+        # 旧调用方（phase=None）保持裸总进度语义。
+        report = progress if phase is None else _phase_aware_progress(progress, phase)
         # 编码器候选：先用请求的编码器；若它是硬件编码器（本机 QSV/AMF/NVENC 可能
         # 间歇性失败），渲染失败后自动降级到软件编码 libopenh264 重试一次。
         requested_encoder = row["encoder_requested"]
@@ -620,13 +658,17 @@ class RenderCoordinator:
                         quality=payload.get("quality") or "standard",
                     )
                     stage("rendering")
+                    if phase is not None:
+                        # 编码阶段才有真实进度；此前 phase 停在 preparing 会让
+                        # UI 在进度条已走时仍显示「准备中」。
+                        phase("encoding", 0.0)
                     await run_timeline_render(
                         self.ffmpeg,
                         args,
                         work,
                         expected_duration,
                         cancel_event,
-                        progress,
+                        progress if phase is None else (lambda value: report("encoding", value)),
                         worker_pid,
                     )
                     # C22：校验细分阶段（validating_probe/validating_decode/
@@ -640,7 +682,7 @@ class RenderCoordinator:
                         plan["output"],
                         expected_duration,
                         cancel_event=cancel_event,
-                        on_phase=phase,
+                        on_phase=None if phase is None else report,
                     )
                     break
                 except DomainError as exc:
@@ -1187,6 +1229,45 @@ class RenderService:
             "fallback_reason": row["fallback_reason"],
             "created_at": row["created_at"],
         }
+
+    def remove_export_record(self, export_record_id: str) -> None:
+        """移除一条文件已缺失的导出记录（用户在系统层删了成品文件后的
+        列表清理路径）。文件仍存在时拒绝——成品删除应走系统文件操作并
+        留下明确痕迹，不提供从 UI 静默销毁成品的通道。
+
+        export_records 是 references 表（无外部从表），删行即可；若其
+        artifact 已无任何 export_record/render_artifact 引用，一并清理
+        artifacts/render_artifacts 行（渲染任务历史行保留——它是过程记录）。
+        EXPORT_STILL_PRESENT 是 409 冲突（状态不允许，而非找不到）。
+        """
+        with self.database.connection() as db:
+            row = db.execute(
+                "SELECT e.id,e.artifact_id,a.path FROM export_records e "
+                "JOIN artifacts a ON a.id=e.artifact_id WHERE e.id=?",
+                (export_record_id,),
+            ).fetchone()
+            if row is None:
+                raise DomainError("EXPORT_NOT_FOUND", "导出记录不存在")
+            if Path(row["path"]).is_file():
+                raise DomainError("EXPORT_STILL_PRESENT", "导出文件仍存在，不能移除记录")
+            db.execute("BEGIN")
+            try:
+                db.execute("DELETE FROM export_records WHERE id=?", (export_record_id,))
+                # 孤儿判定：artifact 同时服务 export_records（成品发布）与
+                # render_artifacts（权威预览/去重）两个消费方，两处都不再
+                # 引用才清理。
+                orphan = db.execute(
+                    "SELECT 1 FROM export_records WHERE artifact_id=? "
+                    "UNION ALL SELECT 1 FROM render_artifacts WHERE artifact_id=?",
+                    (row["artifact_id"], row["artifact_id"]),
+                ).fetchone() is None
+                if orphan:
+                    db.execute("DELETE FROM render_artifacts WHERE artifact_id=?", (row["artifact_id"],))
+                    db.execute("DELETE FROM artifacts WHERE id=?", (row["artifact_id"],))
+                db.execute("COMMIT")
+            except Exception:
+                db.execute("ROLLBACK")
+                raise
 
     def resolve_artifact(self, artifact_id: str) -> dict[str, str]:
         with self.database.connection() as db:
