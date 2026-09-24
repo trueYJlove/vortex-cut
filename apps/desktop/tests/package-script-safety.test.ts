@@ -86,8 +86,12 @@ describe("Windows 安装包验收脚本安全边界", () => {
     expect(captured.builder_config).toMatchObject({
       appId: "io.github.trueyjlove.vortexcut",
       productName: "Vortex Cut",
-      win: { artifactName: "VortexCut-Setup-${version}-x64.exe" },
+      win: { artifactName: "VortexCut-Setup-${version}-x64.exe", icon: expect.stringContaining("icon.ico") },
       files: ["out", "package.json"]
+    });
+    expect(captured.builder_config.nsis).toMatchObject({
+      installerIcon: expect.stringContaining("icon.ico"),
+      uninstallerIcon: expect.stringContaining("icon.ico")
     });
     expect(captured.builder_config.extends).toBeUndefined();
     expect(captured.extra_resources).toHaveLength(9);

@@ -58,6 +58,9 @@ const packageVerifyCodes = new Set([
 // Use a self-contained JSON config rather than YAML `extends`: electron-builder
 // resolves `extends` relative to the generated file, which is outside projectDir.
 const builderConfigPath = join(tmpdir(), `aivideo-electron-builder-${packageRunId}.json`);
+// 品牌图标（见 docs/BRANDING_ASSETS.md）：exe / 安装包 / 快捷方式 / 卸载入口共用。
+// 生成的配置文件位于 tmpdir，electron-builder 会相对配置文件解析相对路径，故用绝对路径。
+const appIcon = join(desktopDir, "build", "icon.ico");
 const builderConfig = {
   appId: "io.github.trueyjlove.vortexcut",
   productName: "Vortex Cut",
@@ -70,13 +73,16 @@ const builderConfig = {
   extraResources: resourceEntries,
   win: {
     target: [{ target: "nsis", arch: ["x64"] }],
-    artifactName: "VortexCut-Setup-${version}-x64.exe"
+    artifactName: "VortexCut-Setup-${version}-x64.exe",
+    icon: appIcon
   },
   nsis: {
     oneClick: false,
     perMachine: false,
     allowToChangeInstallationDirectory: true,
     createDesktopShortcut: true,
+    installerIcon: appIcon,
+    uninstallerIcon: appIcon,
     deleteAppDataOnUninstall: false
   }
 };

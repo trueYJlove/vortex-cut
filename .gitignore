@@ -19,6 +19,11 @@ dist/
 # Local build, packaging and dependency staging outputs
 .deps-download/
 build/
+# apps/desktop/build/icon.ico 是品牌图标源资产（exe/安装包/快捷方式图标），必须入库；
+# 该目录下的其余本地产物（如 aivs-core 暂存）保持忽略。
+!apps/desktop/build/
+apps/desktop/build/*
+!apps/desktop/build/icon.ico
 package/
 resources/core/
 resources/ffmpeg/win-x64/

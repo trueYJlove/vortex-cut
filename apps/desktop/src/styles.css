@@ -377,7 +377,8 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--vc-accent); }
 /* Brand + menu bar（pp 同源：强调色 #25d3ac / 浮层 #2c2c2c / kbd Consolas） */
 .brand-lockup strong { color: var(--vc-text); font-size: var(--dlg-fs-body); font-weight: 650; letter-spacing: .4px; }
 .brand-lockup span { color: var(--vc-text-2); font-size: var(--dlg-fs-label); }
-.brand-mark { width: 20px; height: 20px; flex: none; border-radius: 6px; background: linear-gradient(135deg, #25d3ac, #12b998); display: grid; place-items: center; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .16), 0 1px 4px rgba(18, 185, 152, .35); }
+.brand-mark { width: 20px; height: 20px; flex: none; border-radius: 6px; overflow: hidden; display: grid; place-items: center; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .16), 0 1px 4px rgba(0, 0, 0, .4); }
+.brand-mark img { width: 100%; height: 100%; display: block; object-fit: contain; }
 .menu-item > button { display: flex; align-items: center; min-height: 26px; height: 26px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: #a3aeb5; font-size: var(--dlg-fs-body); position: relative; }
 .menu-item > button:hover, .menu-item > button.active { background: rgba(255, 255, 255, .05); border-color: transparent; color: #e8edf0; }
 .menu-item > button[aria-expanded="true"] { background: rgba(37, 211, 172, .12); color: #25d3ac; font-weight: 600; }

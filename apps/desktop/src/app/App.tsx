@@ -2205,7 +2205,7 @@ export function App() {
     <div className="editor-titlebar">
       <div className="custom-titlebar-drag">
         <div className="brand-lockup" title="Vortex Cut">
-          <span className="brand-mark"><svg width="11" height="11" viewBox="0 0 12 12"><path d="M3 1.8v8.4L10.2 6z" fill="#fff" /></svg></span>
+          <span className="brand-mark"><img src="./icons/256.png" alt="" /></span>
           <strong>Vortex Cut</strong>
         </div>
         <nav className="menu-bar" aria-label="主菜单" onKeyDown={handleMenuBarKeyDown}>

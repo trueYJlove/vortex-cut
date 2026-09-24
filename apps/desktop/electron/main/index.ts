@@ -8,6 +8,8 @@ import { EditorLoadLeaseHeartbeat, makeWindowOwnerId, type EditorLoadMode } from
 import { ProviderSecretStore, reinjectProviderSecrets, removeProviderSecret, saveProviderSecret } from "./provider-secrets.js";
 import { ImageProviderSecretStore, reinjectImageProviderSecrets } from "./image-provider-secrets.js";
 import { issueCandidateClipMedia } from "./candidate-media.js";
+import { windowIconPath } from "./app-icons.js";
+import { destroyTray, initTray } from "./tray.js";
 import { registerStage2aIpc } from "./stage2a-ipc.js";
 import { registerStage2bIpc } from "./stage2b-ipc.js";
 import { registerStage3bIpc } from "./stage3b-ipc.js";
@@ -118,12 +120,19 @@ if (app.isPackaged && !hasSingleInstanceLock) {
   app.quit();
 }
 
-app.on("second-instance", () => {
-  if (windowRef && !windowRef.isDestroyed()) {
-    if (windowRef.isMinimized()) windowRef.restore();
-    windowRef.focus();
-  }
-});
+// Windows 任务栏/通知身份与安装包快捷方式（AppUserModelID = appId）保持一致，
+// 否则固定到任务栏后会以通用 Electron 身份分组、丢失品牌图标。
+if (process.platform === "win32") app.setAppUserModelId("io.github.trueyjlove.vortexcut");
+
+/** 托盘单击 / 二次启动唤起主窗口的统一入口。 */
+function showMainWindow(): void {
+  if (!windowRef || windowRef.isDestroyed()) return;
+  if (windowRef.isMinimized()) windowRef.restore();
+  windowRef.show();
+  windowRef.focus();
+}
+
+app.on("second-instance", () => showMainWindow());
 
 process.on("uncaughtException", error => {
   void appendLog(logPath || join(app.getPath("userData"), "logs", "desktop.log"), `uncaughtException: ${error.stack ?? error.message}`);
@@ -291,6 +300,8 @@ function asId(value: unknown, name: string): string {
 }
 async function createWindow(): Promise<void> {
   await appendLog(logPath, `createWindow renderer=${process.env.ELECTRON_RENDERER_URL ?? "file"}`);
+  // 窗口图标：任务栏 / Alt-Tab / 系统窗口处的品牌 logo（Windows 取多尺寸 .ico）。
+  const icon = windowIconPath();
   try {
     windowRef = new BrowserWindow({
     width: 1440,
@@ -298,6 +309,7 @@ async function createWindow(): Promise<void> {
     minWidth: 1024,
     minHeight: 720,
     title: "Vortex Cut",
+    ...(icon ? { icon } : {}),
     autoHideMenuBar: true,
     // 参考 dsh-desktop 的原生外框处理（Window Controls Overlay）：
     // 系统绘制右上角原生最小化/最大化/关闭按钮，网页内容仍填充标题栏区域。
@@ -978,6 +990,8 @@ app.whenReady().then(async () => {
   registerIpc();
   try {
     await createWindow();
+    // Windows 右下角系统托盘：品牌图标 + 显示主窗口/退出菜单。
+    initTray({ showWindow: showMainWindow, quit: () => app.quit() }, message => void appendLog(logPath, message));
     void startRuntime().catch(async error => {
       const message = error instanceof Error ? error.stack ?? error.message : String(error);
       await appendLog(logPath, `runtime startup failed after window: ${message}`).catch(() => undefined);
@@ -1016,6 +1030,7 @@ app.on("before-quit", event => {
   if (shuttingDown) return;
   event.preventDefault();
   shuttingDown = true;
+  destroyTray(message => void appendLog(logPath, message));
   void appendLog(logPath, "shutdown started").catch(() => undefined);
   void shutdownRuntime().finally(() => app.exit(0));
 });
