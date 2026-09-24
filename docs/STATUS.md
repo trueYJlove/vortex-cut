@@ -97,13 +97,13 @@ PiP 自由定位、A1 音频混音、代理与权威预览、H.264/AAC 导出与
 
 | # | 承诺 | 出处 | 类型 | 状态 |
 |---|---|---|---|---|
-| P1 | sha256 对拍锁（非回退素材双路径逐字节一致） | `CV_SKIP_FRAME_PLANNING_GATE` §3.1 | 验收项 | ⏳ 仅人工实测，**无自动化测试** |
-| P2 | 合成长 GOP fixture 的回退触发测试 | `CV_SKIP_FRAME_PLANNING_GATE` §3.2 | 验收项 | ⏳ 同上 |
+| P1 | sha256 对拍锁（非回退素材双路径逐字节一致） | `CV_SKIP_FRAME_PLANNING_GATE` §3.1 | 验收项 | ✅ **2026-09-24 核销**——`test_short_gop_fast_and_full_paths_are_byte_identical`（**含反向对照**，证明相等断言有区分力而非恒真） |
+| P2 | 合成长 GOP fixture 的回退触发测试 | `CV_SKIP_FRAME_PLANNING_GATE` §3.2 | 验收项 | ✅ **2026-09-24 核销**——`test_long_gop_triggers_full_decode_fallback`（三段断言：触发条件成立 → 进入 `cv:video-full` 阶段 → 密度确实恢复） |
 | P3 | 更新 AI-1 规划门"13 种"记载为准入纪律 + 显式清单 | `AI_WHITELIST_EXPANSION_PLANNING_GATE` §3.5 | 验收项 | ✅ **2026-09-24 核销**（W0.1 补做） |
 | P4 | 真实 deepseek 两步会话（"剪短并加一个转场"） | `AI_WHITELIST_EXPANSION_PLANNING_GATE` §3.2 | 验收项 | ❓ **仓内无证据**，按"未取证"登记 |
 | P5 | 本地 forward proxy 验证 provider 经代理可达 | `PROXY_SUPPORT_PLANNING_GATE` §3.2 | 验收项 | ❓ **未见明确取证** |
 | P6 | `pyproject` 显式声明 numpy / onnxruntime 版本下限 | `AI_2_CV_SIGNALS_PLANNING_GATE` §4 风险表 | **风险对策** | ⏳ **未落地**（现为 faster-whisper 传递依赖；PyInstaller spec 已含 onnxruntime，但依赖树漂移无人拦） |
-| P7 | **4K60 长 GOP 密度策略裁决**——裁决的是**三个杠杆采用哪些组合**：①预算约束下的密度选择（把 fast/full 二值改为连续旋钮）②诚实降级（标 `sparse`）③硬件解码。**不是四选一**：初版列的"定点补洞"经实测证明比全量解码更慢（GOP 内 seek 成本与偏移成正比），已否决 | 4K60 标定发现（`AI_2_SKIP_FRAME_IMPLEMENTATION` §4.2，含更正分析） | **裁决项** | ⏳ **待裁决**——4K60 长 GOP 实测 15.4（H.264）/ **38.3**（HEVC）s/分，超 10 门 |
+| P7 | **4K60 长 GOP 密度策略** | `ADR-0005`（三杠杆：预算约束下的密度旋钮 + 诚实降级 + 硬件解码；**定点补洞经实测否决**） | 裁决项 | ✅ **2026-09-24 已裁决**，分三阶段实施（阶段 1 成本模型+诚实降级 / 阶段 2 密度旋钮 / 阶段 3 硬件解码） |
 
 ---
 
