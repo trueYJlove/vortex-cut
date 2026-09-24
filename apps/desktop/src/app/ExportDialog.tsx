@@ -5,8 +5,9 @@
  *  分辨率与比例正交：比例管画面形状（基准尺寸表与 Core plan.py
  *  OUTPUT_RATIO_DIMENSIONS.final_export 同步），分辨率管短边像素；
  *  "original" 档由调用方解析素材最大短边传入（未知时结果卡显示"跟随素材"）。
- *  文件名联动：已有授权（grant）时输入防抖 400ms 走 rename 桥同步目标路径；
- *  无授权时文件名仅作为保存对话框 defaultPath。 */
+ *  文件名联动：已有授权（grant）时输入防抖 400ms 走 rename 桥同步目标路径，
+ *  点导出时强制 flush 待发的 rename（失败则中止导出）；无授权时文件名仅
+ *  作为保存对话框 defaultPath。 */
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { Dialog } from "./Dialog.js";
@@ -97,6 +98,7 @@ export function ExportDialog({ projectId, projectName, durationUs, clipCount, ca
   const [grant, setGrant] = useState<DestinationGrant | null>(null);
   const [renameError, setRenameError] = useState("");
   const [choosing, setChoosing] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   // 文件名 → 授权目标路径联动（防抖 400ms；仅换文件名、目录不变）。
   const grantId = grant?.destination_grant_id;
@@ -123,6 +125,29 @@ export function ExportDialog({ projectId, projectName, durationUs, clipCount, ca
       setRenameError(safeErrorMessage(error, "选择保存位置失败"));
     } finally {
       setChoosing(false);
+    }
+  };
+
+  // 导出前 flush：防抖 400ms 内点导出时 rename 尚未发出（弹窗卸载即取消），
+  // 这里强制补一次同步——文件名以输入框为准，同步失败则不导出。
+  const submit = async () => {
+    if (busy || submitting || !sanitize(fileName)) return;
+    setSubmitting(true);
+    try {
+      let effective = grant;
+      const safe = sanitize(fileName);
+      if (grant && grant.display_name !== `${safe}.mp4`) {
+        try {
+          effective = await window.desktop.renameExportDestination({ grant_id: grant.destination_grant_id, file_name: safe });
+          setGrant(effective);
+        } catch (error) {
+          setRenameError(safeErrorMessage(error, "文件名同步失败"));
+          return;
+        }
+      }
+      await onExport(effective, { fileName: safe, resolution, frameRate, quality });
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -226,8 +251,8 @@ export function ExportDialog({ projectId, projectName, durationUs, clipCount, ca
             ? "导出完成后可在「渲染与导出」面板查看进度与产物"
             : <span className="exd-warn">权威预览尚未生成——画面以时间线为准，建议先预览确认效果</span>}
         </span>
-        <button type="button" disabled={busy || !sanitize(fileName)} onClick={() => void onExport(grant, { fileName: sanitize(fileName), resolution, frameRate, quality })}>
-          {busy ? "提交中…" : "导出"}
+        <button type="button" disabled={busy || submitting || !sanitize(fileName)} onClick={() => void submit()}>
+          {busy || submitting ? "提交中…" : "导出"}
         </button>
       </div>
     </Dialog>

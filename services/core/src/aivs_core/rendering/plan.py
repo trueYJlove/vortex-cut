@@ -445,8 +445,10 @@ class RenderPlanCompiler:
                 short_edge = min(max_source_short_edge or 1080, 2160)
             else:
                 short_edge = EXPORT_RESOLUTION_SHORT_EDGE[resolution]
+            # 注意：profile_id 不追加分辨率后缀——契约层 EXPORT_RENDER_PROFILE_IDS
+            # 是封闭枚举（"original" 档短边为素材实际值无法穷举），宽度/高度/帧率
+            # 已进 semantics 指纹，产物去重与排队后变更检出不依赖 profile_id。
             width, height = _resolution_dimensions((width, height), short_edge)
-            output["profile_id"] = f"{output['profile_id']}-{short_edge}p"
         output["width"] = width
         output["height"] = height
         # 帧率档（仅导出；预览恒基线 30）：直接写 fps_num，ffmpeg 消费
