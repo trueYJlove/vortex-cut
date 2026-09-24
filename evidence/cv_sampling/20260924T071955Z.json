@@ -1,0 +1,36 @@
+{
+  "measured_at": "2026-09-24T07:19:55.430973+00:00",
+  "algorithm_version": 2,
+  "ffmpeg": "C:\\DataFolder\\codes\\AI-Vidio\\resources\\ffmpeg\\win-x64\\ffmpeg.exe",
+  "summary": {
+    "perf_gate_per_minute_s": 10.0,
+    "assets_measured": 1,
+    "all_meet_gate": true,
+    "max_effective_per_minute_s": 1.9
+  },
+  "assets": [
+    {
+      "label": "gop1s-recheck",
+      "path": "test-assets\\generated\\4k60\\gop1s-60s.mp4",
+      "size_mb": 349.3,
+      "duration_s": 60.0,
+      "max_gop_s": 1.0,
+      "fast_path": {
+        "wall_clock_s": 1.9,
+        "frames": 60,
+        "per_minute_s": 1.9
+      },
+      "full_path": {
+        "wall_clock_s": 18.2,
+        "frames": 60,
+        "per_minute_s": 18.2
+      },
+      "speedup": 9.7,
+      "falls_back_to_full": false,
+      "effective_per_minute_s": 1.9,
+      "meets_gate": true,
+      "note": "生产路径仅快路径一遍遍历。",
+      "avg_sample_interval_s": 1.0
+    }
+  ]
+}

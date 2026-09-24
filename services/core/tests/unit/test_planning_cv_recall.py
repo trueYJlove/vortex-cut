@@ -1,4 +1,4 @@
-from __future__ import annotations  # noqa: I001
+﻿from __future__ import annotations  # noqa: I001
 
 import asyncio
 import json
@@ -73,7 +73,7 @@ def _service(tmp_path: Path) -> tuple[PlanningService, Database, TimelineService
 
 
 class _FakeCvSignals:
-    """单元级替身：samples_for_range 透传（真实服务在集成测试覆盖）。"""
+    """单元级替身：samples_for_range / latest_density 透传（真实服务在集成测试覆盖）。"""
 
     def samples_for_range(self, asset_id: str, start_us: int, end_us: int) -> list[dict[str, Any]]:
         with _SHARED_DB[0].connection() as conn:
@@ -91,6 +91,17 @@ class _FakeCvSignals:
                 (analysis["id"], start_us, end_us),
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def latest_density(self, asset_id: str) -> dict[str, Any] | None:
+        """ADR-0005 阶段 1：召回层消费密度元数据（sparse 运动能量降权）。"""
+        with _SHARED_DB[0].connection() as conn:
+            row = conn.execute(
+                "SELECT density_status,achieved_max_gap_us,gap_threshold_us "
+                "FROM cv_analyses WHERE asset_id=? AND status='ready' "
+                "ORDER BY created_at DESC LIMIT 1",
+                (asset_id,),
+            ).fetchone()
+        return dict(row) if row else None
 
 
 _SHARED_DB: list[Database] = [None]  # type: ignore[list-item]
@@ -318,3 +329,67 @@ def test_transcript_source_rejects_empty_ids(tmp_path: Path) -> None:
         )
     assert exc.value.code == "PLANNING_INVALID"
 
+
+
+def test_sparse_analysis_motion_is_downweighted_in_recall_order(tmp_path: Path) -> None:
+    """ADR-0005 阶段 1：`sparse` 分析的运动能量**降权**，且**只降权不排除**。
+
+    构造成对素材：稀疏但运动更高（0.80）vs 密集但运动更低（0.60）。
+    降权系数 0.5 使有效运动反超（0.40 < 0.60）——**若降权被移除，顺序会翻转**，
+    本测试即红；若改成"排除 sparse"，则第二个断言失败。
+    """
+    planning, db, _timelines = _service(tmp_path)
+    _SHARED_DB[0] = db
+    _brief(planning)
+    media_info = json_dumps(
+        {"duration_us": 30_000_000, "video_streams": [{}], "audio_streams": [{}]}
+    )
+    with db.connection() as conn:
+        conn.execute("DELETE FROM cv_samples")
+        conn.execute("DELETE FROM cv_analyses")
+        conn.execute(
+            "INSERT INTO assets(id,project_id,kind,storage_mode,display_name,fingerprint,"
+            "size_bytes,availability,media_info_json,created_at,updated_at) "
+            "VALUES ('a2','p1','video','external','B','fp2',1,'available',?, 'now','now')",
+            (media_info,),
+        )
+        # a1：sparse（采样间隔 5s > 阈值 4s），运动更高。
+        conn.execute(
+            "INSERT INTO cv_analyses(id,asset_id,source_fingerprint,algorithm_version,"
+            "status,sample_count,scene_cut_count,density_status,gap_threshold_us,"
+            "achieved_max_gap_us,created_at,updated_at,finished_at) "
+            "VALUES ('sp1','a1','fp1',1,'ready',2,0,'sparse',4000000,5000000,"
+            "'now','now','now')"
+        )
+        for index, timestamp in enumerate((0, 5_000_000)):
+            conn.execute(
+                "INSERT INTO cv_samples(id,analysis_id,sample_index,timestamp_us,scene_cut,"
+                "motion_energy,sharpness,brightness,audio_energy,face_count,face_score) "
+                "VALUES (?,?,?,?,0,0.80,0.5,0.5,0.0,0,NULL)",
+                (f"sp{index}", "sp1", index, timestamp),
+            )
+        # a2：full（采样间隔 2s ≤ 阈值），运动更低。
+        conn.execute(
+            "INSERT INTO cv_analyses(id,asset_id,source_fingerprint,algorithm_version,"
+            "status,sample_count,scene_cut_count,density_status,gap_threshold_us,"
+            "achieved_max_gap_us,created_at,updated_at,finished_at) "
+            "VALUES ('fu1','a2','fp2',1,'ready',2,0,'full',4000000,2000000,"
+            "'now','now','now')"
+        )
+        for index, timestamp in enumerate((0, 2_000_000)):
+            conn.execute(
+                "INSERT INTO cv_samples(id,analysis_id,sample_index,timestamp_us,scene_cut,"
+                "motion_energy,sharpness,brightness,audio_energy,face_count,face_score) "
+                "VALUES (?,?,?,?,0,0.60,0.5,0.5,0.0,0,NULL)",
+                (f"fu{index}", "fu1", index, timestamp),
+            )
+
+    scenes = planning._cv_scenes("p1")
+    assert len(scenes) == 2
+    # 密集（有效运动 0.60）排在稀疏（0.80 × 0.5 = 0.40）之前。
+    assert scenes[0]["asset_id"] == "a2", "sparse 未降权——顺序应与降权前相反"
+    assert scenes[1]["asset_id"] == "a1"
+    # 只降权不排除：稀疏场景仍在结果中。
+    assert {scene["asset_id"] for scene in scenes} == {"a1", "a2"}
+    # 排序辅助键不得进入 provider 载荷（载荷只取 features）。
+    assert "sparse" not in scenes[0]["features"]

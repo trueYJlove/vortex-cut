@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
@@ -96,7 +96,7 @@ class TestMigrationV2:
             versions = [
                 row[0] for row in db.execute("SELECT version FROM schema_migrations ORDER BY rowid")
             ]
-        assert versions == [f"v{i}" for i in range(1, 23)]
+        assert versions == [f"v{i}" for i in range(1, 24)]
         # each migration writes a pre-flight backup
         assert len(list((tmp_path / "backups").glob("app-*.db"))) >= 2
 
@@ -122,7 +122,7 @@ class TestMigrationV2:
             versions = [
                 row[0] for row in db.execute("SELECT version FROM schema_migrations ORDER BY rowid")
             ]
-        assert versions == [f"v{i}" for i in range(1, 23)]
+        assert versions == [f"v{i}" for i in range(1, 24)]
 
     def test_transcript_foreign_keys_and_cascade_delete(self, tmp_path: Path):
         db_path = _init(tmp_path)

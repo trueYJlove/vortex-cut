@@ -577,7 +577,7 @@ def test_stage3b_real_v9_copy_upgrades_to_current_without_history_backfill(
         maximum = db.execute(
             "SELECT MAX(CAST(SUBSTR(version,2) AS INTEGER)) FROM schema_migrations"
         ).fetchone()[0]
-        assert maximum == 22
+        assert maximum == 23
         assert {table: _table_digest(db, table) for table in before} == before
         assert db.execute("SELECT COUNT(*) FROM rendition_reframe_snapshots").fetchone()[0] == 0
         assert db.execute("SELECT COUNT(*) FROM reframe_export_batches").fetchone()[0] == 0

@@ -20,6 +20,7 @@ from .database_v19 import V19_SQL
 from .database_v20 import V20_SQL
 from .database_v21 import V21_SQL
 from .database_v22 import V22_SQL
+from .database_v23 import V23_SQL
 from .performance import measured
 
 
@@ -53,6 +54,7 @@ V19_VERSION = "v19"
 V20_VERSION = "v20"
 V21_VERSION = "v21"
 V22_VERSION = "v22"
+V23_VERSION = "v23"
 V1_SQL = """
 CREATE TABLE IF NOT EXISTS media_inputs (
   id TEXT PRIMARY KEY, path TEXT NOT NULL, display_name TEXT NOT NULL,
@@ -909,6 +911,7 @@ MIGRATIONS: dict[str, str] = {
     V20_VERSION: V20_SQL,
     V21_VERSION: V21_SQL,
     V22_VERSION: V22_SQL,
+    V23_VERSION: V23_SQL,
 }
 
 
@@ -971,6 +974,8 @@ class Database:
                         statements = self._v9_statements(db, statements)
                     elif version == V10_VERSION:
                         statements = self._v10_statements(db, statements)
+                    elif version == V23_VERSION:
+                        statements = self._v23_statements(db, statements)
                     for statement in statements:
                         db.execute(statement)
                     db.execute(
@@ -1195,6 +1200,23 @@ class Database:
             if not any(
                 statement.startswith(prefix) and column in existing[table]
                 for prefix, (table, column) in additions.items()
+            )
+        ]
+
+    @staticmethod
+    def _v23_statements(db: sqlite3.Connection, statements: list[str]) -> list[str]:
+        """v23 是 ALTER ADD COLUMN 迁移：过滤列已存在的 ALTER（对齐 v9/v10 先例）。
+
+        **回填 UPDATE 必须保留**——`gap_threshold_us` 是可空列、无自动默认，
+        列已存在时存量行仍需该快照。
+        """
+        existing = {row[1] for row in db.execute("PRAGMA table_info(cv_analyses)")}
+        return [
+            statement
+            for statement in statements
+            if not (
+                statement.startswith("ALTER TABLE cv_analyses ADD COLUMN")
+                and statement.split()[5] in existing
             )
         ]
 

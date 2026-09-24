@@ -1,0 +1,36 @@
+{
+  "measured_at": "2026-09-24T07:20:54.767492+00:00",
+  "algorithm_version": 2,
+  "ffmpeg": "C:\\DataFolder\\codes\\AI-Vidio\\resources\\ffmpeg\\win-x64\\ffmpeg.exe",
+  "summary": {
+    "perf_gate_per_minute_s": 10.0,
+    "assets_measured": 1,
+    "all_meet_gate": false,
+    "max_effective_per_minute_s": 45.2
+  },
+  "assets": [
+    {
+      "label": "hevc-recheck",
+      "path": "test-assets\\generated\\4k60\\hevc-gop5s-60s.mp4",
+      "size_mb": 363.0,
+      "duration_s": 60.0,
+      "max_gop_s": 5.0,
+      "fast_path": {
+        "wall_clock_s": 0.9,
+        "frames": 12,
+        "per_minute_s": 0.9
+      },
+      "full_path": {
+        "wall_clock_s": 44.3,
+        "frames": 60,
+        "per_minute_s": 44.3
+      },
+      "speedup": 46.8,
+      "falls_back_to_full": true,
+      "effective_per_minute_s": 45.2,
+      "meets_gate": false,
+      "note": "生产路径为快路径 + 全量回退两遍遍历（长 GOP 触发）；effective 即两遍之和。",
+      "avg_sample_interval_s": 5.0
+    }
+  ]
+}

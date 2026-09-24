@@ -9,6 +9,9 @@ import pytest
 from aivs_core.database import Database, json_dumps
 from aivs_core.media.cv_signals import (
     CV_ALGORITHM_VERSION,
+    CV_BUDGET_CAP_S,
+    CV_BUDGET_FLOOR_S,
+    CV_SAMPLE_GAP_FALLBACK_US,
     FACE_MODEL_ID,
     FACE_MIN_BOX,
     FACE_NMS_THRESHOLD,
@@ -21,9 +24,13 @@ from aivs_core.media.cv_signals import (
     _nms,
     _parse_astats_rms,
     _parse_showinfo,
+    analysis_budget_s,
     cv_audio_args,
     cv_video_args,
+    density_status_of,
     frame_signals,
+    max_gap_us,
+    project_full_decode_s,
 )
 
 
@@ -147,7 +154,7 @@ def test_v21_schema_tables_and_constraints(tmp_path: Path) -> None:
     db.initialize()
     with db.connection() as conn:
         versions = [row[0] for row in conn.execute("SELECT version FROM schema_migrations")]
-        assert "v21" in versions and len(versions) == 22
+        assert "v21" in versions and len(versions) == 23
         conn.execute(
             "INSERT INTO projects(id,name,status,canvas_json,root_dir,root_dir_name,"
             "created_at,updated_at,last_opened_at) "
@@ -402,3 +409,73 @@ def test_registry_loads_both_providers(tmp_path: Path) -> None:
     detail = manager.detail(FACE_MODEL_ID)
     assert detail["purpose"]
     assert detail["status"] in {"unavailable", "queued", "downloading", "ready"}
+
+
+# ---- ADR-0005 阶段 1：采样预算与诚实降级（纯函数） ----
+
+
+def test_analysis_budget_scales_with_duration_and_clamps() -> None:
+    """预算 = 时长(分) × 每分钟预算，钳制在 [下限, 上限]。"""
+    # 触下限：1 分钟按比例只有 10s，低于下限 15s——防误伤短视频
+    # （10s 素材按比例仅 1.7s，连快路径都不够）。
+    assert analysis_budget_s(0) == CV_BUDGET_FLOOR_S
+    assert analysis_budget_s(60_000_000) == CV_BUDGET_FLOOR_S
+    # 区间内：2 分钟 → 20s。
+    assert analysis_budget_s(120_000_000) == pytest.approx(20.0)
+    # 触上限：60 分钟按比例 600s，钳到 300s——防长时间占用 light 令牌。
+    assert analysis_budget_s(3_600_000_000) == CV_BUDGET_CAP_S
+
+
+def test_project_full_decode_scales_linearly_with_duration() -> None:
+    stream = {
+        "width": 3840, "height": 2160,
+        "avg_frame_rate_num": 60, "avg_frame_rate_den": 1, "codec": "h264",
+    }
+    base = project_full_decode_s(60_000_000, stream)
+    assert base > 0
+    assert project_full_decode_s(120_000_000, stream) == pytest.approx(2 * base)
+
+
+def test_project_full_decode_treats_hevc_and_unknown_as_conservative() -> None:
+    """HEVC 慢于 H.264；未知编码取保守值（等于 HEVC）——宁可高估成本。"""
+    h264 = {
+        "width": 3840, "height": 2160,
+        "avg_frame_rate_num": 60, "avg_frame_rate_den": 1, "codec": "h264",
+    }
+    hevc = {**h264, "codec": "hevc"}
+    unknown = {**h264, "codec": "vp9"}
+    assert project_full_decode_s(60_000_000, hevc) > project_full_decode_s(60_000_000, h264)
+    assert project_full_decode_s(60_000_000, unknown) == pytest.approx(
+        project_full_decode_s(60_000_000, hevc)
+    )
+
+
+def test_project_full_decode_returns_zero_without_stream_metadata() -> None:
+    """缺分辨率/帧率信息 → 0.0（表示无法估算，交由 deadline 兜底，不阻断回退）。"""
+    assert project_full_decode_s(60_000_000, {}) == 0.0
+    assert project_full_decode_s(60_000_000, {"width": 0, "height": 1080}) == 0.0
+    assert project_full_decode_s(
+        60_000_000,
+        {"width": 1920, "height": 1080, "avg_frame_rate_num": 0, "avg_frame_rate_den": 1},
+    ) == 0.0
+
+
+def test_density_status_uses_fallback_threshold_not_target_interval() -> None:
+    """判据是**回退阈值**（4s）而非目标间隔（1s）。
+
+    关键回归：1s < 间隔 ≤ 4s 属"既未达标也不该回退"的正常区间，
+    按目标间隔判定会把这类素材大量误标 sparse。
+    """
+    threshold = CV_SAMPLE_GAP_FALLBACK_US
+    assert density_status_of(0, threshold) == "full"
+    assert density_status_of(threshold, threshold) == "full"
+    assert density_status_of(2_000_000, threshold) == "full"  # 2s：正常区间
+    assert density_status_of(threshold + 1, threshold) == "sparse"
+
+
+def test_max_gap_us_handles_empty_and_single_sample() -> None:
+    assert max_gap_us([]) == 0
+    assert max_gap_us([{"timestamp_us": 5}]) == 0
+    assert max_gap_us([
+        {"timestamp_us": 0}, {"timestamp_us": 3}, {"timestamp_us": 10},
+    ]) == 7

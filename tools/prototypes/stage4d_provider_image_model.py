@@ -616,7 +616,12 @@ def _migration_report(root: Path) -> dict[str, Any]:
     frozen = {
         version: hashlib.sha256(sql.encode()).hexdigest()
         for version, sql in MIGRATIONS.items()
-        if version not in {"v13", "v14", "v15", "v16", "v17", "v18", "v19", "v20", "v21", "v22"}
+        # 排除基线之后新增的版本：原型只锁定 v1..v12 的校验和不变。
+        # 新增迁移（当前最新 v23）须追加进本集合，否则 frozen 计数漂移。
+        if version not in {
+            "v13", "v14", "v15", "v16", "v17", "v18",
+            "v19", "v20", "v21", "v22", "v23",
+        }
     }
     apply_r1(r1_path)
     sql = sqlite3.connect(r1_path)

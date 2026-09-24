@@ -1,9 +1,10 @@
-from __future__ import annotations  # noqa: I001
+﻿from __future__ import annotations  # noqa: I001
 
 import asyncio
 import hashlib
 import sqlite3
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,7 @@ import pytest
 from aivs_core.database import Database, json_dumps
 from aivs_core.media.cv_signals import (
     CV_SAMPLE_GAP_FALLBACK_US,
+    CvAnalysisError,
     CvSignalService,
     analyze_video,
     cv_video_args,
@@ -76,15 +78,30 @@ def _max_gap_us(samples: list[dict[str, Any]]) -> int:
     )
 
 
-def _ffprobe_stub() -> Any:
+def _ffprobe_stub(
+    *, video_stream: dict[str, Any] | None = None, duration_us: int = 0
+) -> Any:
+    """探测替身。
+
+    **`video_stream` 必须可注入**：ADR-0005 阶段 1 的预算准入依赖
+    分辨率/帧率/编码，空 stream 会让成本估算恒为 0、准入恒通过——
+    那样就测不到准入逻辑本身（本测试初版即栽在此处）。
+    """
+
     class _Probe:
         async def probe(self, path: Path) -> dict[str, Any]:
-            return {"video_streams": [{}], "audio_streams": []}
+            return {
+                "duration_us": duration_us,
+                "video_streams": [video_stream or {}],
+                "audio_streams": [],
+            }
 
     return _Probe()
 
 
-def _service(tmp_path: Path) -> tuple[CvSignalService, Database]:
+def _service(
+    tmp_path: Path, *, probe: Any | None = None
+) -> tuple[CvSignalService, Database]:
     db = Database(tmp_path / "app.db")
     db.initialize()
     with db.connection() as conn:
@@ -99,7 +116,7 @@ def _service(tmp_path: Path) -> tuple[CvSignalService, Database]:
             "VALUES ('a1','p1','video','external','A','fp1',1,'available',"
             "'{}','now','now')"
         )
-    return CvSignalService(db, FFMPEG, _ffprobe_stub()), db
+    return CvSignalService(db, FFMPEG, probe or _ffprobe_stub()), db
 
 
 def test_real_cv_analysis_detects_scene_cut_and_timestamps(tmp_path: Path) -> None:
@@ -209,7 +226,7 @@ def test_long_gop_triggers_full_decode_fallback(tmp_path: Path) -> None:
 
     # ① 快路径（仅 I 帧）确实稀疏。
     fast_samples = asyncio.run(
-        analyze_video(FFMPEG, media, asyncio.Event(), None, skip_frame=True)
+        analyze_video(FFMPEG, media, asyncio.Event(), skip_frame=True)
     )
     assert len(fast_samples) >= 2, "长 GOP 素材应至少有 2 个 I 帧采样点"
     assert _max_gap_us(fast_samples) > CV_SAMPLE_GAP_FALLBACK_US, (
@@ -228,6 +245,9 @@ def test_long_gop_triggers_full_decode_fallback(tmp_path: Path) -> None:
     ))
     assert result["status"] == "ready"
     assert "cv:video-full" in stages, "长 GOP 素材未触发全量解码回退"
+    # ADR-0005 阶段 1：准入通过时密度应达 full（未留下"本该填而没填"的盲区）。
+    assert result["density_status"] == "full"
+    assert result["fallback_aborted"] is False
 
     # ③ 兜底采样恢复密度：最大间隔回落到采样下限量级（1s + 一帧容差）。
     with db.connection() as conn:
@@ -240,3 +260,141 @@ def test_long_gop_triggers_full_decode_fallback(tmp_path: Path) -> None:
     assert max(gaps) <= 1_500_000, (
         f"回退后采样密度未恢复：最大间隔 {max(gaps) / 1e6:.2f}s"
     )
+
+
+# ---- ADR-0005 阶段 1：预算准入与中止语义 ----
+
+
+def _run_job(service: CvSignalService, media: Path, stages: list[str]) -> dict[str, Any]:
+    asset_row = {"id": "a1", "fingerprint": "fp1", "kind": "video"}
+    job_id, _analysis_id = service.create_analysis_job("p1", asset_row, str(media))
+    with service.db.connection() as conn:
+        row = conn.execute("SELECT input_json FROM jobs WHERE id=?", (job_id,)).fetchone()
+    return asyncio.run(service.run_analysis_job(
+        {"input_json": row["input_json"]}, asyncio.Event(), None, stages.append
+    ))
+
+
+def test_budget_blocks_unaffordable_fallback_and_marks_sparse(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """**预算准入**阻止付不起的回退，并以 sparse 如实标记。
+
+    把预算压到 0 来模拟"4K60 长 GOP 素材"的实际处境（真实基线：完整作业
+    40.5 s/分钟源，超门 4.1 倍）——该场景下保守估算远超预算，回退**根本不该启动**。
+    断言：不进入 cv:video-full、density_status='sparse'、样本数回落为 I 帧数。
+    """
+    import aivs_core.media.cv_signals as cv_module
+
+    _require_ffmpeg()
+    monkeypatch.setattr(cv_module, "CV_PER_MINUTE_BUDGET_S", 0.0)
+    monkeypatch.setattr(cv_module, "CV_BUDGET_FLOOR_S", 0.0)
+
+    # 探测替身必须给真实元数据，否则成本估算恒为 0、准入恒通过。
+    probe = _ffprobe_stub(
+        video_stream={
+            "codec": "mpeg4", "width": 320, "height": 180,
+            "avg_frame_rate_num": 30, "avg_frame_rate_den": 1,
+        },
+        duration_us=12_000_000,
+    )
+    service, _db = _service(tmp_path, probe=probe)
+    media = tmp_path / "long-gop.mp4"
+    _synthetic_long_gop_video(media)
+    stages: list[str] = []
+    result = _run_job(service, media, stages)
+
+    assert "cv:video" in stages
+    assert "cv:video-full" not in stages, "预算不足时不应启动全量回退"
+    assert result["density_status"] == "sparse", "未回退必须如实标记 sparse"
+    assert result["fallback_aborted"] is False
+    assert result["sample_count"] == 2, "应为纯 I 帧采样（12s / GOP 6s）"
+    assert result["achieved_max_gap_us"] > CV_SAMPLE_GAP_FALLBACK_US
+
+
+def test_run_fallback_aborts_on_deadline_and_keeps_fast_samples(tmp_path: Path) -> None:
+    """**deadline 兜底**：回退超时即中止，且**保留快路径采样**（诚实降级）。
+
+    估算模型已知可高估约 2.4 倍，不足以单独作保证，故该兜底必须独立可用。
+    用极小 deadline 确定性触发中止路径。
+    """
+    _require_ffmpeg()
+    service, _db = _service(tmp_path)
+    media = tmp_path / "long-gop.mp4"
+    _synthetic_long_gop_video(media)
+    fast = asyncio.run(analyze_video(FFMPEG, media, asyncio.Event(), skip_frame=True))
+    assert len(fast) == 2
+
+    samples, aborted = asyncio.run(
+        service._run_fallback(media, fast, asyncio.Event(), deadline_s=0.001)
+    )
+    assert aborted is True, "极小 deadline 下回退应被中止"
+    assert samples is fast, "中止后必须保留快路径采样，不得丢段"
+
+
+def test_run_fallback_prioritises_job_cancel_over_deadline(tmp_path: Path) -> None:
+    """**中止语义区分**：作业取消优先于回退中止。
+
+    若顺序写反，用户取消会被误判为"回退中止"，从而错误地产出一份 sparse 结果
+    （规划门 §2.4 明确要求避免）。
+    """
+    _require_ffmpeg()
+    service, _db = _service(tmp_path)
+    media = tmp_path / "long-gop.mp4"
+    _synthetic_long_gop_video(media)
+    fast = asyncio.run(analyze_video(FFMPEG, media, asyncio.Event(), skip_frame=True))
+
+    cancelled = asyncio.Event()
+    cancelled.set()
+    with pytest.raises(CvAnalysisError) as excinfo:
+        asyncio.run(
+            service._run_fallback(media, fast, cancelled, deadline_s=30.0)
+        )
+    assert excinfo.value.code == "JOB_CANCELLED"
+
+
+def test_run_fallback_returns_fast_samples_when_budget_already_spent(tmp_path: Path) -> None:
+    """预算已耗尽（deadline<=0）时不启动子进程，直接按中止处理。"""
+    _require_ffmpeg()
+    service, _db = _service(tmp_path)
+    media = tmp_path / "long-gop.mp4"
+    _synthetic_long_gop_video(media)
+    fast = asyncio.run(analyze_video(FFMPEG, media, asyncio.Event(), skip_frame=True))
+
+    samples, aborted = asyncio.run(
+        service._run_fallback(media, fast, asyncio.Event(), deadline_s=0.0)
+    )
+    assert aborted is True
+    assert samples is fast
+
+def test_analyze_video_cancel_interrupts_in_flight_decode(tmp_path: Path) -> None:
+    """**中途取消**：解码进行中置位取消应迅速中止，而非等解码跑完。
+
+    该能力是 ADR-0005 阶段 1「回退超预算即中止」的前提——此前 `cancel_event`
+    只在读循环**结束后**检查，一次 4K60 全量解码必须白等到底。
+
+    **本测试证明**：取消路径抛 `JOB_CANCELLED` 且**及时返回**（不阻塞于解码）。
+    **本测试不证明**：OS 层面无残留进程——该保证由 `process.kill()` 后紧跟
+    `await process.wait()`（收尸）在实现上成立，本测试未做 OS 级断言。
+    """
+    _require_ffmpeg()
+    media = tmp_path / "long-gop.mp4"
+    # 30s / GOP 15s：全量解码耗时显著长于取消延迟，使"未及时返回"可辨识。
+    _synthetic_long_gop_video(media, duration_s=30, gop_s=15)
+    cancel = asyncio.Event()
+
+    async def _run() -> None:
+        task = asyncio.create_task(
+            analyze_video(FFMPEG, media, cancel, skip_frame=False)
+        )
+        await asyncio.sleep(0.05)  # 让解码真正启动
+        cancel.set()
+        await task
+
+    started = time.perf_counter()
+    with pytest.raises(CvAnalysisError) as excinfo:
+        asyncio.run(_run())
+    elapsed = time.perf_counter() - started
+    assert excinfo.value.code == "JOB_CANCELLED"
+    # 及时返回：若取消未生效，需等完 30s 源的全量解码。
+    assert elapsed < 5.0, f"取消未及时生效（{elapsed:.1f}s）"

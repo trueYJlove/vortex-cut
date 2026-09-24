@@ -36,6 +36,11 @@ CANDIDATE_SOURCES = ("auto", "transcript", "cv")
 # CV 场景段参数（阶段三首版）：最小场景段 2s、召回上限对齐转录路径。
 CV_MIN_SCENE_US = 2_000_000
 CV_MAX_SCENES = 160
+# ADR-0005 阶段 1：`sparse` 分析的**运动能量降权系数**（只降权不排除）。
+# 理由：sparse = 采样间隔超回退阈值，运动能量按"采样帧间差分"计算，
+# 密度越稀越容易漏掉峰值运动 → 该维度系统性偏低，排序时需折减。
+# **首版经验值，待 W0.4 评测集校准**——不做运行时可调（可预测性优先）。
+CV_SPARSE_MOTION_WEIGHT = 0.5
 
 
 class CandidatePayloadStore:
@@ -770,6 +775,10 @@ class PlanningService:
             samples = self.cv_signals.samples_for_range(asset["id"], 0, 1 << 62) if self.cv_signals else []
             if not samples:
                 continue
+            # ADR-0005 阶段 1：sparse 分析的运动能量系统性偏低（采样帧间差分，
+            # 密度越稀越易漏峰值），排序时折减——**只降权不排除**。
+            density = self.cv_signals.latest_density(asset["id"]) if self.cv_signals else None
+            sparse = bool(density and density.get("density_status") == "sparse")
             # 场景切点（含首帧）分界 → 场景段。
             cuts = [0] + [
                 s["timestamp_us"] for s in samples if s["scene_cut"]
@@ -789,6 +798,8 @@ class PlanningService:
                         "asset_id": asset["id"],
                         "start_us": int(start),
                         "end_us": int(min(end, 1 << 62)),
+                        # 仅供本方法排序使用；不进 provider 载荷（载荷只取 features）。
+                        "sparse": sparse,
                         "features": {
                             "face": max(
                                 (s["face_count"] or 0) for s in inside
@@ -801,10 +812,15 @@ class PlanningService:
                     }
                 )
         # 排序：含人脸 > 运动能量 > 清晰度（规划门 §5 权重首版）。
+        # sparse 分析的运动能量按 CV_SPARSE_MOTION_WEIGHT 折减后再比较。
         scenes.sort(
             key=lambda scene: (
                 -scene["features"]["face"],
-                -min(scene["features"]["motion"], 1.0),
+                -min(
+                    scene["features"]["motion"]
+                    * (CV_SPARSE_MOTION_WEIGHT if scene["sparse"] else 1.0),
+                    1.0,
+                ),
                 -min(scene["features"]["sharpness"], 1.0),
                 scene["start_us"],
             )

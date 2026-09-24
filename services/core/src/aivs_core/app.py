@@ -2212,6 +2212,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "algorithm_version": CV_ALGORITHM_VERSION,
                 "sample_count": (summary or {}).get("sample_count"),
                 "scene_cut_count": (summary or {}).get("scene_cut_count"),
+                # ADR-0005 阶段 1：采样密度（增量可选字段；旧客户端不读不受影响）。
+                "density_status": (summary or {}).get("density_status"),
+                "achieved_max_gap_us": (summary or {}).get("achieved_max_gap_us"),
+                "gap_threshold_us": (summary or {}).get("gap_threshold_us"),
                 "signals": [
                     "scene_cut", "motion_energy", "sharpness", "brightness",
                     "audio_energy",

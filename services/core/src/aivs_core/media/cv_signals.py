@@ -19,6 +19,7 @@ face_count/face_score 列由阶段二（YuNet ONNX）回填：模型就绪时同
 from __future__ import annotations
 
 import asyncio
+import time
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,23 @@ MIN_SAMPLE_INTERVAL = 1.0
 # 该值判定长 GOP 素材 → 全量解码回退。4s = 采样密度与重跑成本的折中
 #（实测 lichun 最大 GOP 8.3s；dance 全 1s GOP 不触发回退）。
 CV_SAMPLE_GAP_FALLBACK_US = 4_000_000
+
+# ---- ADR-0005 阶段 1：采样预算与诚实降级 ----
+# 作业墙钟预算 = 源时长(分) × CV_PER_MINUTE_BUDGET_S，钳制在 [下限, 上限]。
+# 下限的理由：极短素材（如 10s）按比例只有 1.7s，连快路径都不够，会把正常素材
+# 误判为超预算。上限的理由：防止超长素材（1 小时→600s）长时间占用 light 令牌
+# （cv_analysis 优先级 3 与 waveform 2 共享）。
+CV_PER_MINUTE_BUDGET_S = 10.0
+CV_BUDGET_FLOOR_S = 15.0
+CV_BUDGET_CAP_S = 300.0
+# 全量解码吞吐（像素/秒）——保守静态估算，标定见
+# CV_SAMPLING_BUDGET_PLANNING_GATE_2026-09-24 §2.2。
+# 误差方向偏保守（高估成本 → 更倾向不回退）；合成 4K60 素材上实测高估约 2.4 倍。
+# 未知编码取保守值（等于 hevc），宁可高估。
+CV_THROUGHPUT_PX_PER_S = {"h264": 894_000_000.0, "hevc": 331_000_000.0}
+CV_DEFAULT_THROUGHPUT_PX_PER_S = 331_000_000.0
+# 读循环内每处理 N 帧检查一次取消事件并上报进度（粒度与开销的折中）。
+CV_CANCEL_CHECK_FRAMES = 16
 # 镜头边界阈值：相邻采样帧直方图卡方距离（归一 [0,1] 域；标定值，
 # 调整须递增 algorithm_version）。
 SCENE_CUT_DISTANCE = 0.45
@@ -71,6 +89,22 @@ class CvAnalysisError(RuntimeError):
         super().__init__(message)
         self.code = code
         self.message = message
+
+
+class _CombinedCancel:
+    """组合取消源：任一置位即视为置位。
+
+    供 `analyze_video` 的单事件接口使用——回退路径需同时响应"作业被用户取消"
+    与"回退自身超预算中止"两个来源（ADR-0005 阶段 1 §2.4）。
+    """
+
+    __slots__ = ("_events",)
+
+    def __init__(self, *events: asyncio.Event) -> None:
+        self._events = events
+
+    def is_set(self) -> bool:
+        return any(event.is_set() for event in self._events)
 
 
 # ---- 纯函数：信号计算（单测主对象） ----
@@ -129,6 +163,55 @@ def _histogram_distance(a: np.ndarray, b: np.ndarray, bins: int = 32) -> float:
     pa = hist_a / total_a
     pb = hist_b / total_b
     return float(((pa - pb) ** 2 / (pa + pb + 1e-9)).sum() / 2.0)
+
+
+# ---- 纯函数：采样预算与密度（ADR-0005 阶段 1，单测主对象） ----
+
+
+def analysis_budget_s(duration_us: int) -> float:
+    """作业墙钟预算：源时长(分) × 每分钟预算，钳制在 [下限, 上限]。"""
+    minutes = max(duration_us, 0) / 60_000_000.0
+    raw = minutes * CV_PER_MINUTE_BUDGET_S
+    return min(max(raw, CV_BUDGET_FLOOR_S), CV_BUDGET_CAP_S)
+
+
+def project_full_decode_s(duration_us: int, video_stream: dict[str, Any]) -> float:
+    """保守估算全量解码耗时（秒）。
+
+    模型：`时长 × 像素率 / 吞吐`。吞吐按编码族查表，未知编码取保守值。
+    **已知误差方向：偏保守（高估）。** 见常量区注释与规划门 §2.2。
+    无有效分辨率/帧率信息时返回 0.0（表示"无法估算"→ 调用方按可承受处理，
+    由 deadline 兜底）。
+    """
+    width = int(video_stream.get("width") or 0)
+    height = int(video_stream.get("height") or 0)
+    num = int(video_stream.get("avg_frame_rate_num") or 0)
+    den = int(video_stream.get("avg_frame_rate_den") or 0)
+    if width <= 0 or height <= 0 or num <= 0 or den <= 0:
+        return 0.0
+    fps = num / den
+    codec = str(video_stream.get("codec") or "").lower()
+    throughput = CV_THROUGHPUT_PX_PER_S.get(codec, CV_DEFAULT_THROUGHPUT_PX_PER_S)
+    pixels_per_s = width * height * fps
+    return (duration_us / 1_000_000.0) * pixels_per_s / throughput
+
+
+def density_status_of(achieved_max_gap_us: int, gap_threshold_us: int) -> str:
+    """采样密度判定（规划门 §2.5）。
+
+    判据是**回退阈值**而非目标间隔：`full` = 没有留下"本该填而没填"的盲区；
+    `sparse` = 明知有盲区但未填（预算不足或回退被中止）。
+    """
+    return "sparse" if achieved_max_gap_us > gap_threshold_us else "full"
+
+
+def max_gap_us(samples: list[dict[str, Any]]) -> int:
+    """相邻采样点最大时间间隔（样本需按时间升序）。单点或空集返回 0。"""
+    return max(
+        (b["timestamp_us"] - a["timestamp_us"]
+         for a, b in zip(samples, samples[1:])),
+        default=0,
+    )
 
 
 # ---- FFmpeg 参数（白名单式组装） ----
@@ -419,10 +502,18 @@ async def analyze_video(
     ffmpeg: Path,
     input_path: Path,
     cancel_event: asyncio.Event,
-    progress: Any = None,
-    *, skip_frame: bool = False,
+    *,
+    skip_frame: bool = False,
 ) -> list[dict[str, Any]]:
-    """一次遍历：采样帧流 + 逐帧信号。返回按 timestamp_us 升序的样本列表。"""
+    """一次遍历：采样帧流 + 逐帧信号。返回按 timestamp_us 升序的样本列表。
+
+    **ADR-0005 阶段 1**：读循环内每 `CV_CANCEL_CHECK_FRAMES` 帧检查一次取消事件
+    并终止子进程——支撑"回退超预算即中止"（此前只在循环**结束后**检查，
+    无法中途中断，死等一次 4K60 全量解码要多花 30s+）。
+
+    注：原 `progress` 参数被接受但**从未使用**（视频遍历的细粒度进度实际未上报），
+    本单**显式删除**而非留作死参数——阶段级进度由调用方的 `stage()` 承担。
+    """
     process = await asyncio.create_subprocess_exec(
         str(ffmpeg),
         *cv_video_args(str(input_path), skip_frame=skip_frame),
@@ -436,6 +527,7 @@ async def analyze_video(
     frame_bytes = THUMB_WIDTH * THUMB_HEIGHT
     samples: list[dict[str, Any]] = []
     previous: np.ndarray | None = None
+    frames_since_check = 0
     try:
         assert process.stdout is not None
         while True:
@@ -457,6 +549,13 @@ async def analyze_video(
                 samples.append(signals)
                 previous = frame
                 offset += frame_bytes
+                frames_since_check += 1
+            if frames_since_check >= CV_CANCEL_CHECK_FRAMES:
+                frames_since_check = 0
+                if cancel_event.is_set():
+                    process.kill()
+                    await process.wait()
+                    raise CvAnalysisError("JOB_CANCELLED", "任务已取消")
         await process.wait()
         stderr = (await stderr_task).decode("utf-8", errors="replace")[-262144:]
     finally:
@@ -623,6 +722,55 @@ class CvSignalService:
                 raise
         return job_id, analysis_id
 
+    async def _run_fallback(
+        self,
+        input_path: Path,
+        fast_samples: list[dict[str, Any]],
+        cancel_event: asyncio.Event,
+        *,
+        deadline_s: float,
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """全量解码回退，带 deadline 兜底（ADR-0005 阶段 1 §2.3）。
+
+        估算模型已知可高估约 2.4 倍，**不足以单独作保证**，故回退本身仍受墙钟约束：
+        超时即中止并**保留快路径采样**（诚实降级）。返回 `(samples, aborted)`。
+
+        中止语义（§2.4）：**作业取消优先于回退中止**——先判用户取消并向上抛，
+        避免把用户取消误判为"回退中止"而错误产出一份 sparse 结果。
+        """
+        if deadline_s <= 0.0:
+            # 预算已耗尽：不启动回退（避免起一个立刻被取消的子进程）。
+            return fast_samples, True
+        fallback_cancel = asyncio.Event()
+
+        async def _arm_deadline() -> None:
+            await asyncio.sleep(deadline_s)
+            fallback_cancel.set()
+
+        deadline_task = asyncio.create_task(_arm_deadline())
+        try:
+            samples = await analyze_video(
+                self.ffmpeg,
+                input_path,
+                _CombinedCancel(cancel_event, fallback_cancel),
+                skip_frame=False,
+            )
+        except CvAnalysisError as exc:
+            if cancel_event.is_set():
+                raise
+            if exc.code == "JOB_CANCELLED" and fallback_cancel.is_set():
+                return fast_samples, True
+            raise
+        finally:
+            deadline_task.cancel()
+            try:
+                await deadline_task
+            except asyncio.CancelledError:
+                pass
+        if cancel_event.is_set():
+            raise CvAnalysisError("JOB_CANCELLED", "任务已取消")
+        return samples, False
+
     async def run_analysis_job(
         self,
         row: Any,
@@ -653,31 +801,35 @@ class CvSignalService:
         try:
             if stage:
                 stage("cv:video")
-            # CV_SKIP_FRAME 混合自适应（裁决 2026-09-20）：默认快路径
-            # （只解 I 帧，6.4x 加速）；采样点最大间隔 > GAP_THRESHOLD
-            # 判定长 GOP 素材 → 全量解码回退（兜底采样恢复，无空洞盲区）。
+            started = time.perf_counter()
+            # 提前探测：成本估算需要分辨率/帧率/编码，音频分支也要用（下方复用）。
+            probe = await self.ffprobe.probe(input_path)
+            video_stream = (probe.get("video_streams") or [{}])[0]
+            duration_us = int(probe.get("duration_us") or 0)
+            budget_s = analysis_budget_s(duration_us)
+
+            # CV_SKIP_FRAME 混合自适应（裁决 2026-09-20）：默认快路径（只解 I 帧）。
             samples = await analyze_video(
-                self.ffmpeg, input_path, cancel_event,
-                progress or (lambda _value: None), skip_frame=True,
+                self.ffmpeg, input_path, cancel_event, skip_frame=True,
             )
-            max_gap_us = max(
-                (b["timestamp_us"] - a["timestamp_us"]
-                 for a, b in zip(samples, samples[1:])),
-                default=0,
-            )
-            if samples and max_gap_us > CV_SAMPLE_GAP_FALLBACK_US:
-                if stage:
-                    stage("cv:video-full")
-                samples = await analyze_video(
-                    self.ffmpeg, input_path, cancel_event,
-                    progress or (lambda _value: None), skip_frame=False,
-                )
+            fallback_aborted = False
+            if samples and max_gap_us(samples) > CV_SAMPLE_GAP_FALLBACK_US:
+                # ADR-0005 阶段 1：回退须过预算准入——估算可能超预算则直接不回退，
+                # 免为一次明知付不起的全量解码白等（4K60 HEVC 可达 37s/分钟源）。
+                elapsed_s = time.perf_counter() - started
+                projected_s = project_full_decode_s(duration_us, video_stream)
+                if projected_s <= 0.0 or elapsed_s + projected_s <= budget_s:
+                    if stage:
+                        stage("cv:video-full")
+                    samples, fallback_aborted = await self._run_fallback(
+                        input_path, samples, cancel_event,
+                        deadline_s=max(budget_s - elapsed_s, 0.0),
+                    )
             if cancel_event.is_set():
                 raise CvAnalysisError("JOB_CANCELLED", "任务已取消")
             if stage:
                 stage("cv:audio")
             audio_windows: list[float] = []
-            probe = await self.ffprobe.probe(input_path)
             if probe.get("audio_streams"):
                 audio_windows = await analyze_audio_energy(
                     self.ffmpeg, input_path, cancel_event
@@ -716,6 +868,10 @@ class CvSignalService:
                     sample["face_count"], sample["face_score"] = faces[index]
                     face_merged += 1
             finished = utc_now()
+            # ADR-0005 阶段 1：记录实际达成的采样密度（诚实降级）。
+            achieved_gap_us = max_gap_us(samples)
+            density = density_status_of(achieved_gap_us, CV_SAMPLE_GAP_FALLBACK_US)
+            wall_clock_ms = int((time.perf_counter() - started) * 1000)
             with self.db.connection() as db:
                 db.execute("BEGIN")
                 try:
@@ -742,7 +898,9 @@ class CvSignalService:
                     )
                     db.execute(
                         "UPDATE cv_analyses SET status='ready',sample_count=?,"
-                        "scene_cut_count=?,model_revision=?,updated_at=?,finished_at=? "
+                        "scene_cut_count=?,model_revision=?,updated_at=?,finished_at=?,"
+                        "density_status=?,gap_threshold_us=?,achieved_max_gap_us=?,"
+                        "wall_clock_ms=? "
                         "WHERE id=?",
                         (
                             len(samples),
@@ -750,6 +908,10 @@ class CvSignalService:
                             FACE_MODEL_REVISION if not face_partial else None,
                             finished,
                             finished,
+                            density,
+                            CV_SAMPLE_GAP_FALLBACK_US,
+                            achieved_gap_us,
+                            wall_clock_ms,
                             analysis_id,
                         ),
                     )
@@ -766,6 +928,10 @@ class CvSignalService:
                 "scene_cut_count": sum(1 for s in samples if s["scene_cut"]),
                 "faces": "merged" if not face_partial else "partial",
                 "face_sample_count": face_merged,
+                "density_status": density,
+                "achieved_max_gap_us": achieved_gap_us,
+                "fallback_aborted": fallback_aborted,
+                "wall_clock_ms": wall_clock_ms,
             }
         except BaseException:
             with self.db.connection() as db:
@@ -816,9 +982,28 @@ class CvSignalService:
                 "algorithm_version": row["algorithm_version"],
                 "sample_count": row["sample_count"],
                 "scene_cut_count": row["scene_cut_count"],
+                "density_status": row["density_status"],
+                "achieved_max_gap_us": row["achieved_max_gap_us"],
+                "gap_threshold_us": row["gap_threshold_us"],
+                "wall_clock_ms": row["wall_clock_ms"],
                 "created_at": row["created_at"],
                 "finished_at": row["finished_at"],
             }
+
+    def latest_density(self, asset_id: str) -> dict[str, Any] | None:
+        """召回层查询：素材最新 ready 分析的密度元数据（无 ready 分析返回 None）。
+
+        ADR-0005 阶段 1：召回层据此对 `sparse` 分析降权——**只降权不排除**，
+        与既有"误检代价是排序偏移而非丢段"的裁决一致。
+        """
+        with self.db.connection() as db:
+            row = db.execute(
+                "SELECT density_status,achieved_max_gap_us,gap_threshold_us "
+                "FROM cv_analyses WHERE asset_id=? AND status='ready' "
+                "AND algorithm_version=? ORDER BY created_at DESC LIMIT 1",
+                (asset_id, CV_ALGORITHM_VERSION),
+            ).fetchone()
+        return dict(row) if row else None
 
     def mark_stale(self, asset_id: str, fingerprint: str) -> None:
         """素材指纹变化时调用（transcripts mark_asset_stale 先例）。"""
