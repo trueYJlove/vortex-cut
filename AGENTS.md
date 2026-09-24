@@ -142,6 +142,18 @@ open question — MUST be registered in `docs/STATUS.md` §4. It is closed only 
 evidence and date. An unregistered commitment is treated as non-existent; an unclosed one is
 tracked debt.
 
+**Registration granularity** (refined 2026-09-24 after first use):
+
+- **A gate is registered as ONE row** (type: 工作包), not one row per acceptance sub-item —
+  otherwise §4 becomes unreadable and people stop maintaining it.
+- **Individually registered** regardless of the above: risk mitigations, resolved open questions,
+  and any acceptance item that has already been silently dropped once. These are the ones with a
+  proven failure mode.
+- **Closing a gate row requires the implementation record to contain an acceptance cross-check
+  table** listing every acceptance item with its outcome (see
+  `AI_2_SKIP_FRAME_IMPLEMENTATION_2026-09-24.md` §5 for the pattern). Without that table, the row
+  stays open — the gate is not closed by assertion.
+
 Risk mitigations are explicitly included because they are the ones that rot silently: acceptance
 items at least have a checklist, mitigations have none.
 

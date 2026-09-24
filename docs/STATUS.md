@@ -104,6 +104,7 @@ PiP 自由定位、A1 音频混音、代理与权威预览、H.264/AAC 导出与
 | P5 | 本地 forward proxy 验证 provider 经代理可达 | `PROXY_SUPPORT_PLANNING_GATE` §3.2 | 验收项 | ❓ **未见明确取证** |
 | P6 | `pyproject` 显式声明 numpy / onnxruntime 版本下限 | `AI_2_CV_SIGNALS_PLANNING_GATE` §4 风险表 | **风险对策** | ⏳ **未落地**（现为 faster-whisper 传递依赖；PyInstaller spec 已含 onnxruntime，但依赖树漂移无人拦） |
 | P7 | **4K60 长 GOP 密度策略** | `ADR-0005`（三杠杆：预算约束下的密度旋钮 + 诚实降级 + 硬件解码；**定点补洞经实测否决**） | 裁决项 | ✅ **2026-09-24 已裁决**，分三阶段实施（阶段 1 成本模型+诚实降级 / 阶段 2 密度旋钮 / 阶段 3 硬件解码） |
+| P8 | **ADR-0005 阶段 1 实施**：CV 采样预算 + 诚实降级 | `CV_SAMPLING_BUDGET_PLANNING_GATE_2026-09-24` §1.1（7 项交付）/ §3（验收） | 工作包 | ⏳ **规划门已出，待实施前裁决 §5 两项开放问题**。核销条件 = 实施记录含**验收核对表且逐项落实** |
 
 ---
 
