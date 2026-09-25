@@ -51,6 +51,10 @@ function fmtUs(us: number): string {
   return `${m}:${(s % 60).toFixed(1).padStart(4, "0")}`;
 }
 
+function shortId(id: string): string {
+  return id.length > 18 ? id.slice(0, 8) + "…" + id.slice(-4) : id;
+}
+
 function clipSourceRange(clip: TimelineClip): { start: number; end: number } | null {
   const start = clip.source_start_us;
   const end = clip.source_end_us;
@@ -58,79 +62,94 @@ function clipSourceRange(clip: TimelineClip): { start: number; end: number } | n
   return { start, end };
 }
 
-/** 去停顿时间轴示意（对齐原型 .timeline / .lane / .seg）。 */
+function errText(caught: unknown): string {
+  const code = errorCode(caught);
+  const label = FAILURE_LABELS[code];
+  if (label) return label;
+  // 保留 "[CODE] message" 原文，便于对照 Core 业务错误
+  return safeErrorMessage(caught, caught instanceof Error && caught.message.startsWith("[")
+    ? caught.message
+    : "操作失败。请检查参数与时间线后重试。");
+}
+
+/** 去停顿时间轴（对齐原型 .timeline / .lane / .seg） */
 function PauseTimeline({ durationUs, minSilenceMs, padMs }: { durationUs: number; minSilenceMs: number; padMs: number }) {
-  // 原型示意：两段静音（约 33% / 66% 处），随参数略变宽
-  const silRatio = Math.min(0.12, Math.max(0.03, minSilenceMs / 122400 * 3));
-  const keeps = [
-    { a: 0, b: 0.32 },
-    { a: 0.32 + silRatio, b: 0.65 },
-    { a: 0.65 + silRatio, b: 1 }
+  const dur = Math.max(durationUs, 1);
+  // 原型示意两段静音：约 32–34% 与 65–68% 处；宽度随最短静音缩放
+  const sil = Math.min(0.06, Math.max(0.012, (minSilenceMs / 1000) / (dur / 1e6) * 2));
+  const pieces: Array<{ t: "keep" | "silence"; a: number; b: number }> = [
+    { t: "keep", a: 0, b: 0.32 },
+    { t: "silence", a: 0.32, b: 0.32 + sil },
+    { t: "keep", a: 0.32 + sil, b: 0.65 },
+    { t: "silence", a: 0.65, b: 0.65 + sil },
+    { t: "keep", a: 0.65 + sil, b: 1 }
   ];
-  const sils = [
-    { a: 0.32, b: 0.32 + silRatio },
-    { a: 0.65, b: 0.65 + silRatio }
-  ];
-  return <div className="et-timeline" aria-label="静音保留预览">
-    <div className="et-lane">
-      {keeps.map((k, i) => (
-        <div key={"k" + i} className="et-seg keep" style={{ left: `${k.a * 100}%`, width: `${(k.b - k.a) * 100}%` }} />
-      ))}
-      {sils.map((s, i) => (
-        <div key={"s" + i} className="et-seg silence" style={{ left: `${s.a * 100}%`, width: `${(s.b - s.a) * 100}%` }} title={`静音 pad=${padMs}ms`} />
-      ))}
+  return <div>
+    <div className="et-timeline" aria-label="静音保留预览">
+      <div className="et-lane">
+        {pieces.map((p, i) => (
+          <div
+            key={i}
+            className={"et-seg-blk " + p.t}
+            style={{ left: `${p.a * 100}%`, width: `${(p.b - p.a) * 100}%` }}
+            title={p.t === "keep" ? "保留" : `静音 pad=${padMs}ms`}
+          />
+        ))}
+      </div>
     </div>
     <div className="et-axis"><span>0:00</span><span>0:30</span><span>1:00</span><span>1:30</span><span>{fmtUs(durationUs)}</span></div>
-    <div className="et-note">预计删除 2 段静音 · pad {padMs}ms · 最短静音 {minSilenceMs}ms</div>
+    <div className="et-note">预计删除 2 段静音 · 保留时长 ≈ {(dur / 1e6 - (minSilenceMs / 1000) * 2).toFixed(1)}s</div>
   </div>;
 }
 
-/** 卡点 beat 刻度 + 镜头条。 */
 function BeatTimeline({ targetSec, beatsPerShot, shotCount, bpm = 110 }: { targetSec: number; beatsPerShot: number; shotCount: number; bpm?: number }) {
   const beatStep = 60 / bpm;
   const shotDur = beatStep * beatsPerShot;
   const n = Math.max(1, Math.floor(targetSec / shotDur));
   const ticks: number[] = [];
   for (let t = 0; t < 30; t += beatStep) ticks.push(t);
-  return <div className="et-timeline tall" aria-label="beat 与切点预览">
-    <div className="et-lane shots">
-      {Array.from({ length: Math.min(n, 24) }, (_, i) => (
-        <div key={i} className="et-seg shot" style={{ flex: 1 }} />
-      ))}
-    </div>
-    <div className="et-ticks">
-      {ticks.map((t, i) => (
-        <div key={i} className={"et-tick" + (i % 4 === 0 ? " down" : "")} style={{ left: `${(t / 30) * 100}%` }} />
-      ))}
-      {ticks.filter((_, i) => i % beatsPerShot === 0).map((t, i) => (
-        <div key={"c" + i} className="et-cut" style={{ left: `${(t / 30) * 100}%` }} />
-      ))}
+  return <div>
+    <div className="et-timeline" aria-label="beat 与切点预览" style={{ height: 88 }}>
+      <div className="et-lane" style={{ display: "flex", gap: 2, height: 28 }}>
+        {Array.from({ length: Math.min(n, 24) }, (_, i) => (
+          <div key={i} className="et-seg-blk shot" style={{ position: "relative", flex: 1, left: "auto", right: "auto", width: "auto" }} />
+        ))}
+      </div>
+      <div className="et-ticks">
+        {ticks.map((t, i) => (
+          <div key={i} className={"et-tick" + (i % 4 === 0 ? " down" : "")} style={{ left: `${(t / 30) * 100}%` }} />
+        ))}
+        {ticks.filter((_, i) => i % beatsPerShot === 0).map((t, i) => (
+          <div key={"c" + i} className="et-cut" style={{ left: `${(t / 30) * 100}%` }} />
+        ))}
+      </div>
     </div>
     <div className="et-axis"><span>0s</span><span>7.5s</span><span>15s</span><span>22.5s</span><span>30s</span></div>
-    <div className="et-note">镜头时长 ≈ {shotDur.toFixed(2)}s（{beatsPerShot} × 60/{bpm}）· 选中 {shotCount} 段 · 切点吸附 beat</div>
+    <div className="et-note">镜头时长 ≈ {shotDur.toFixed(2)}s（{beatsPerShot} × 60/{bpm}）· 预计 {n} 个镜头 · 选中 {shotCount} 段</div>
   </div>;
 }
 
-/** L/J 声画错位。 */
 function LjTimeline({ cutSec, offsetMs, mode }: { cutSec: number; offsetMs: number; mode: "auto" | "j" | "l" }) {
   const dir = mode === "auto" ? "j" : mode;
   const delta = dir === "j" ? -offsetMs : offsetMs;
   const cutPct = Math.min(92, Math.max(8, (cutSec / 122.4) * 100));
   const audioPct = Math.min(96, Math.max(2, cutPct + (delta / 1000 / 122.4) * 100 * 6));
-  return <div className="et-av" aria-label="声画错位预览">
-    <div className="et-av-row">
-      <div className="et-av-lbl"><span>画面 Video</span><span>切于 {fmtUs(cutSec * 1e6)}</span></div>
-      <div className="et-bar-track">
-        <div className="et-bar-fill" />
-        <div className="et-bar-cut" style={{ left: `${cutPct}%` }} />
+  return <div>
+    <div className="et-av" aria-label="声画错位预览">
+      <div className="et-av-row">
+        <div className="et-av-lbl"><span>画面 Video</span><span>切于 {fmtUs(cutSec * 1e6)}</span></div>
+        <div className="et-bar-track">
+          <div className="et-bar-fill" />
+          <div className="et-bar-cut" style={{ left: `${cutPct}%` }} />
+        </div>
       </div>
-    </div>
-    <div className="et-av-row">
-      <div className="et-av-lbl"><span>音频 Audio</span><span>切于 {fmtUs((cutSec + delta / 1000) * 1e6)}（{dir.toUpperCase()} · {delta > 0 ? "+" : "−"}{offsetMs}ms）</span></div>
-      <div className="et-bar-track">
-        <div className="et-bar-fill gold" style={{ right: `${100 - audioPct}%` }} />
-        <div className="et-bar-cut audio" style={{ left: `${audioPct}%` }} />
-        {[12, 28, 41, 58, 72, 86].map(p => <div key={p} className="et-word" style={{ left: `${p}%` }} />)}
+      <div className="et-av-row">
+        <div className="et-av-lbl"><span>音频 Audio</span><span>切于 {fmtUs((cutSec + delta / 1000) * 1e6)}（{dir.toUpperCase()} · {delta > 0 ? "+" : "−"}{offsetMs}ms）</span></div>
+        <div className="et-bar-track">
+          <div className="et-bar-fill gold" style={{ right: `${100 - audioPct}%` }} />
+          <div className="et-bar-cut audio" style={{ left: `${audioPct}%` }} />
+          {[12, 28, 41, 58, 72, 86].map(p => <div key={p} className="et-word" style={{ left: `${p}%` }} />)}
+        </div>
       </div>
     </div>
     <div className="et-note">{dir === "j" ? `J-cut：下句声提前 ${offsetMs}ms 进入当前画面。` : `L-cut：上句声延后 ${offsetMs}ms 叠到下一画面。`}</div>
@@ -186,6 +205,7 @@ export function EditingToolsPanel({
     const r = currentClip ? clipSourceRange(currentClip) : null;
     return r ? r.end - r.start : 122_400_000;
   }, [currentClip]);
+  const bgmClip = useMemo(() => clips.find(c => c.clip_id === bgmClipId) ?? null, [clips, bgmClipId]);
 
   useEffect(() => {
     let active = true;
@@ -205,8 +225,6 @@ export function EditingToolsPanel({
     if (!bgmClipId && audioClips.length) setBgmClipId(audioClips[audioClips.length - 1].clip_id);
   }, [audioClips, bgmClipId]);
 
-  const bgmClip = useMemo(() => clips.find(c => c.clip_id === bgmClipId) ?? null, [clips, bgmClipId]);
-
   const buildParams = (): Record<string, unknown> | null => {
     if (!baseRevisionId) {
       setError("请先创建时间线。");
@@ -222,7 +240,7 @@ export function EditingToolsPanel({
       };
     }
     if (tool === "beat_sync") {
-      const segments: Array<{ asset_id: string; source_start_us: number; source_end_us: number; motion?: number; face?: number; sharpness?: number }> = [];
+      const segments: Array<{ asset_id: string; source_start_us: number; source_end_us: number }> = [];
       for (const id of pickedShots) {
         const c = clips.find(x => x.clip_id === id);
         if (!c) continue;
@@ -268,7 +286,7 @@ export function EditingToolsPanel({
       setDryNote("干跑完成：可生成提案。");
     } catch (caught) {
       setDryNote("干跑失败。");
-      setError(FAILURE_LABELS[errorCode(caught) ?? ""] ?? safeErrorMessage(caught, "干跑失败。请检查参数与时间线后重试。"));
+      setError(errText(caught));
     } finally { setBusy(false); }
   };
 
@@ -288,7 +306,7 @@ export function EditingToolsPanel({
       const page = await window.desktop.listEditingGrammarProposals(projectId);
       setHistory(page.items);
     } catch (caught) {
-      setError(FAILURE_LABELS[errorCode(caught) ?? ""] ?? safeErrorMessage(caught, "提案失败。请检查参数后重试。"));
+      setError(errText(caught));
     } finally { setBusy(false); }
   };
 
@@ -306,7 +324,7 @@ export function EditingToolsPanel({
       onApplied(next);
       onNotify("剪辑手法提案已应用为新的正式 Revision。");
     } catch (caught) {
-      setError(FAILURE_LABELS[errorCode(caught) ?? ""] ?? safeErrorMessage(caught, "采纳失败。提案可能是空操作或基线已变化。"));
+      setError(errText(caught));
     } finally { setBusy(false); }
   };
 
@@ -318,7 +336,7 @@ export function EditingToolsPanel({
       setPreview(null);
       setAdopted(Boolean(detail.applied_revision_id));
     } catch (caught) {
-      setError(FAILURE_LABELS[errorCode(caught) ?? ""] ?? safeErrorMessage(caught, "打开提案失败。"));
+      setError(errText(caught));
     } finally { setBusy(false); }
   };
 
@@ -332,11 +350,10 @@ export function EditingToolsPanel({
   };
 
   const meta = TOOL_META[tool];
+  const range = currentClip ? clipSourceRange(currentClip) : null;
   const cutSecForLj = pictureCutUs !== null
     ? pictureCutUs / 1e6
-    : (currentClip && clipSourceRange(currentClip)
-      ? (clipSourceRange(currentClip)!.start + clipSourceRange(currentClip)!.end) / 2 / 1e6
-      : 39);
+    : range ? (range.start + range.end) / 2 / 1e6 : 39;
 
   return <Dialog titleId="editing-tools-title" label="剪辑手法" onClose={onClose} className="editing-tools">
     <div className="et-topbar">
@@ -353,7 +370,7 @@ export function EditingToolsPanel({
 
       <div className="et-tabs" role="tablist" aria-label="手法页签">
         {(Object.keys(TOOL_META) as ToolId[]).map(id => (
-          <button key={id} role="tab" aria-selected={tool === id} className={tool === id ? "on" : ""} onClick={() => switchTool(id)}>
+          <button key={id} type="button" role="tab" aria-selected={tool === id} className={tool === id ? "on" : ""} onClick={() => switchTool(id)}>
             <strong>{TOOL_META[id].title}</strong>
             <span>{TOOL_META[id].sub}</span>
           </button>
@@ -362,8 +379,8 @@ export function EditingToolsPanel({
 
       <div className="et-shell">
         <div className="et-bar">
-          <div className="et-title">{meta.title} · {currentClip?.clip_id ?? bgmClipId ?? "—"}</div>
-          <div className="et-meta">{clipDurUs ? fmtUs(clipDurUs) : "—"} · 基线 {baseRevisionId ? baseRevisionId.slice(0, 8) + "…" : "—"}</div>
+          <div className="et-title">{meta.title} · {shortId(currentClip?.clip_id ?? bgmClipId ?? "—")}</div>
+          <div className="et-meta">{fmtUs(clipDurUs)} · 基线 {baseRevisionId ? shortId(baseRevisionId) : "—"}</div>
           <div className="et-spacer" />
           {tool === "remove_pauses" && <span className="et-pill ok">CV 音频能量</span>}
           {tool === "beat_sync" && <span className="et-pill gold">beat_grid</span>}
@@ -378,7 +395,7 @@ export function EditingToolsPanel({
                 <select value={clipId} onChange={e => setClipId(e.target.value)}>
                   {videoClips.map(c => {
                     const r = clipSourceRange(c);
-                    return <option key={c.clip_id} value={c.clip_id}>{c.clip_id} · {r ? fmtUs(r.end - r.start) : "—"}</option>;
+                    return <option key={c.clip_id} value={c.clip_id}>{shortId(c.clip_id)} · {r ? fmtUs(r.end - r.start) : "—"}</option>;
                   })}
                 </select>
               </div>
@@ -406,7 +423,7 @@ export function EditingToolsPanel({
               <div className="et-field">
                 <label>BGM / 音频轨</label>
                 <select value={bgmClipId} onChange={e => setBgmClipId(e.target.value)}>
-                  {audioClips.map(c => <option key={c.clip_id} value={c.clip_id}>{c.clip_id} · {c.asset_kind}</option>)}
+                  {audioClips.map(c => <option key={c.clip_id} value={c.clip_id}>{shortId(c.clip_id)} · {c.asset_kind}</option>)}
                 </select>
               </div>
               <div className="et-field">
@@ -418,18 +435,16 @@ export function EditingToolsPanel({
                 <input type="range" min={1} max={8} step={1} value={beatsPerShot} onChange={e => setBeatsPerShot(+e.target.value)} />
               </div>
               <div className="et-field">
-                <label>镜头段（按强度排序 · 可多选）</label>
+                <label>镜头段（可多选）</label>
                 <div className="et-shots">
-                  {videoClips.map((c, idx) => (
+                  {videoClips.map(c => (
                     <label key={c.clip_id} className="et-shot-row">
                       <input
                         type="checkbox"
                         checked={pickedShots.includes(c.clip_id)}
                         onChange={e => setPickedShots(prev => e.target.checked ? [...prev, c.clip_id] : prev.filter(id => id !== c.clip_id))}
                       />
-                      <span style={{ flex: 1 }}>{c.clip_id}</span>
-                      <span className="et-pill">face {idx % 2}</span>
-                      <span className="et-pill acc">motion {(0.9 - idx * 0.15).toFixed(2)}</span>
+                      <span>{shortId(c.clip_id)}</span>
                     </label>
                   ))}
                 </div>
@@ -447,7 +462,7 @@ export function EditingToolsPanel({
                 <select value={clipId} onChange={e => setClipId(e.target.value)}>
                   {videoClips.map(c => {
                     const r = clipSourceRange(c);
-                    return <option key={c.clip_id} value={c.clip_id}>{c.clip_id} · {r ? `${fmtUs(r.start)}–${fmtUs(r.end)}` : "—"}</option>;
+                    return <option key={c.clip_id} value={c.clip_id}>{shortId(c.clip_id)} · {r ? `${fmtUs(r.start)}–${fmtUs(r.end)}` : "—"}</option>;
                   })}
                 </select>
               </div>
@@ -458,10 +473,10 @@ export function EditingToolsPanel({
                   onChange={e => setPictureCutUs(e.target.value === "mid" ? null : Number(e.target.value))}
                 >
                   <option value="mid">片段中点（默认）</option>
-                  {currentClip && clipSourceRange(currentClip) && (
+                  {range && (
                     <>
-                      <option value={String(clipSourceRange(currentClip)!.start + Math.round(clipDurUs * 0.32))}>{fmtUs(clipSourceRange(currentClip)!.start + Math.round(clipDurUs * 0.32))} · 与静音/切换对齐</option>
-                      <option value={String(clipSourceRange(currentClip)!.start + Math.round(clipDurUs * 0.66))}>{fmtUs(clipSourceRange(currentClip)!.start + Math.round(clipDurUs * 0.66))} · 第二处切换</option>
+                      <option value={String(range.start + Math.round(clipDurUs * 0.32))}>{fmtUs(range.start + Math.round(clipDurUs * 0.32))} · 与静音/切换对齐</option>
+                      <option value={String(range.start + Math.round(clipDurUs * 0.66))}>{fmtUs(range.start + Math.round(clipDurUs * 0.66))} · 第二处切换</option>
                     </>
                   )}
                 </select>
@@ -490,14 +505,14 @@ export function EditingToolsPanel({
             </>}
 
             <div className="et-actions">
-              <button className="et-btn" disabled={busy || !baseRevisionId} onClick={() => void runPrepare()}>干跑预览</button>
-              <button className="et-btn primary" disabled={busy || !baseRevisionId} onClick={() => void runPropose()}>生成提案</button>
+              <button type="button" className="et-btn" disabled={busy || !baseRevisionId} onClick={() => void runPrepare()}>干跑预览</button>
+              <button type="button" className="et-btn primary" disabled={busy || !baseRevisionId} onClick={() => void runPropose()}>生成提案</button>
             </div>
             <div className="et-note">{dryNote}</div>
 
             {history.length > 0 && <div className="et-adv" style={{ marginTop: 14 }}>
-              <div className="et-note" style={{ marginBottom: 6 }}>历史提案</div>
-              <ul className="agent-session-history">
+              <div className="et-note" style={{ marginTop: 0, marginBottom: 6 }}>历史提案</div>
+              <ul className="agent-session-history" style={{ margin: 0, paddingLeft: 16 }}>
                 {history.slice(0, 6).map(item => (
                   <li key={item.id}>
                     <button type="button" onClick={() => void openHistory(item)}>{item.planner} · {item.created_at.slice(0, 16).replace("T", " ")}</button>
@@ -510,23 +525,21 @@ export function EditingToolsPanel({
           <div className="et-col">
             <div className="et-preview">
               <div className="et-ph">
-                <h3>
-                  {tool === "remove_pauses" ? "时间轴预览 · 静音 / 保留" : tool === "beat_sync" ? "时间轴预览 · beat 与切点" : "声画错位预览"}
-                </h3>
+                <h3>{tool === "remove_pauses" ? "时间轴预览 · 静音 / 保留" : tool === "beat_sync" ? "时间轴预览 · beat 与切点" : "声画错位预览"}</h3>
                 <div className="et-legend">
                   {tool === "remove_pauses" && <>
                     <span><i style={{ background: "#3a5fd4" }} />保留有声</span>
                     <span><i style={{ background: "#2a333b" }} />静音（将删除）</span>
                   </>}
                   {tool === "beat_sync" && <>
-                    <span><i style={{ background: "var(--dlg-gold, #d1a453)" }} />beat</span>
-                    <span><i style={{ background: "var(--dlg-accent, #86a0ff)" }} />切点</span>
+                    <span><i style={{ background: "#d1a453" }} />beat</span>
+                    <span><i style={{ background: "#86a0ff" }} />切点</span>
                     <span><i style={{ background: "#243044" }} />镜头</span>
                   </>}
                   {tool === "lj_cut" && <>
                     <span><i style={{ background: "#fff" }} />画面切线</span>
-                    <span><i style={{ background: "var(--dlg-gold, #d1a453)" }} />音频切线</span>
-                    <span><i style={{ background: "var(--dlg-ok, #57cf92)" }} />词锚</span>
+                    <span><i style={{ background: "#d1a453" }} />音频切线</span>
+                    <span><i style={{ background: "#57cf92" }} />词锚</span>
                   </>}
                 </div>
               </div>
@@ -538,8 +551,8 @@ export function EditingToolsPanel({
                 <h4>干跑结果</h4>
                 <p>{preview.summary}</p>
                 <p className="et-note">操作 {preview.operations_count} 条{preview.noop ? " · 空操作（可提案，不可采纳）" : ""}</p>
-                <ul className="agent-session-steps">
-                  {preview.operations.slice(0, 8).map((op, i) => <li key={i}><code>{String(op.op)}</code></li>)}
+                <ul style={{ margin: "6px 0 0", paddingLeft: 16 }}>
+                  {preview.operations.slice(0, 8).map((op, i) => <li key={i} style={{ fontSize: 11, color: "#a3aeb5" }}><code>{String(op.op)}</code></li>)}
                 </ul>
               </div>}
             </div>
@@ -554,10 +567,11 @@ export function EditingToolsPanel({
               </div>
               <TimelineDiffView diff={proposal.diff} />
               <div className="et-actions">
-                <button className="et-btn ghost" onClick={() => setProposal(null)}>返回</button>
-                <div style={{ flex: 1 }} />
+                <button type="button" className="et-btn ghost" onClick={() => setProposal(null)}>返回</button>
+                <div className="et-spacer" />
                 {!proposal.applied_revision_id && proposal.patch.operations.length > 0 && (
                   <button
+                    type="button"
                     className="et-btn primary"
                     disabled={busy || adopted || !baseRevisionId || proposal.base_revision_id !== baseRevisionId}
                     onClick={() => void applyProposal()}
@@ -575,6 +589,6 @@ export function EditingToolsPanel({
         </div>
       </div>
     </div>
-    {error && <p className="ai-status" role="status">{error}</p>}
+    {error && <p className="ai-status" role="status" style={{ margin: "0 22px 16px" }}>{error}</p>}
   </Dialog>;
 }

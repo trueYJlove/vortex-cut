@@ -73,6 +73,11 @@ async function safeInvoke<T>(operation: () => Promise<T>): Promise<T> {
   catch (error) {
     const code = error && typeof error === "object" ? (error as { code?: unknown }).code : undefined;
     if (code === "TIMELINE_PATCH_PROVIDER_UNTESTED" || code === "TIMELINE_PATCH_PROVIDER_UNSUPPORTED") throw new Error(code);
+    // fetchWithUi 已 redact，并把业务码写成 "[CODE] message"；该形态原样上抛
+    // 供渲染端 errorCode() / FAILURE_LABELS 识别。其余异常（可能含路径）
+    // 统一折叠，避免泄漏。
+    const message = error instanceof Error ? error.message : "";
+    if (message.startsWith("[")) throw new Error(message);
     throw new Error("Core request failed");
   }
 }
