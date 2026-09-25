@@ -52,7 +52,10 @@ function fmtUs(us: number): string {
 }
 
 function shortId(id: string): string {
-  return id.length > 18 ? id.slice(0, 8) + "…" + id.slice(-4) : id;
+  if (!id) return "—";
+  // 下拉/标题用短名：保留可辨识前缀 + 末 4 位
+  if (id.length <= 16) return id;
+  return id.slice(0, 12) + "…";
 }
 
 function clipSourceRange(clip: TimelineClip): { start: number; end: number } | null {
@@ -392,10 +395,12 @@ export function EditingToolsPanel({
             {tool === "remove_pauses" && <>
               <div className="et-field">
                 <label>目标片段</label>
-                <select value={clipId} onChange={e => setClipId(e.target.value)}>
+                <select value={clipId} onChange={e => setClipId(e.target.value)} title={clipId}>
                   {videoClips.map(c => {
                     const r = clipSourceRange(c);
-                    return <option key={c.clip_id} value={c.clip_id}>{shortId(c.clip_id)} · {r ? fmtUs(r.end - r.start) : "—"}</option>;
+                    return <option key={c.clip_id} value={c.clip_id} title={c.clip_id}>
+                      {shortId(c.clip_id)} · {r ? fmtUs(r.end - r.start) : "—"}
+                    </option>;
                   })}
                 </select>
               </div>
@@ -422,8 +427,8 @@ export function EditingToolsPanel({
             {tool === "beat_sync" && <>
               <div className="et-field">
                 <label>BGM / 音频轨</label>
-                <select value={bgmClipId} onChange={e => setBgmClipId(e.target.value)}>
-                  {audioClips.map(c => <option key={c.clip_id} value={c.clip_id}>{shortId(c.clip_id)} · {c.asset_kind}</option>)}
+                <select value={bgmClipId} onChange={e => setBgmClipId(e.target.value)} title={bgmClipId}>
+                  {audioClips.map(c => <option key={c.clip_id} value={c.clip_id} title={c.clip_id}>{shortId(c.clip_id)} · {c.asset_kind}</option>)}
                 </select>
               </div>
               <div className="et-field">
@@ -459,10 +464,12 @@ export function EditingToolsPanel({
             {tool === "lj_cut" && <>
               <div className="et-field">
                 <label>目标片段</label>
-                <select value={clipId} onChange={e => setClipId(e.target.value)}>
+                <select value={clipId} onChange={e => setClipId(e.target.value)} title={clipId}>
                   {videoClips.map(c => {
                     const r = clipSourceRange(c);
-                    return <option key={c.clip_id} value={c.clip_id}>{shortId(c.clip_id)} · {r ? `${fmtUs(r.start)}–${fmtUs(r.end)}` : "—"}</option>;
+                    return <option key={c.clip_id} value={c.clip_id} title={c.clip_id}>
+                      {shortId(c.clip_id)}{r ? ` · ${fmtUs(r.start)}` : ""}
+                    </option>;
                   })}
                 </select>
               </div>
