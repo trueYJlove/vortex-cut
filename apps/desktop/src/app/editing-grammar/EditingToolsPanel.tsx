@@ -53,9 +53,7 @@ function fmtUs(us: number): string {
 
 function shortId(id: string): string {
   if (!id) return "—";
-  // 下拉/标题用短名：保留可辨识前缀 + 末 4 位
-  if (id.length <= 16) return id;
-  return id.slice(0, 12) + "…";
+  return id.length <= 16 ? id : id.slice(0, 12) + "…";
 }
 
 function clipSourceRange(clip: TimelineClip): { start: number; end: number } | null {
@@ -67,18 +65,14 @@ function clipSourceRange(clip: TimelineClip): { start: number; end: number } | n
 
 function errText(caught: unknown): string {
   const code = errorCode(caught);
-  const label = FAILURE_LABELS[code];
-  if (label) return label;
-  // 保留 "[CODE] message" 原文，便于对照 Core 业务错误
-  return safeErrorMessage(caught, caught instanceof Error && caught.message.startsWith("[")
-    ? caught.message
-    : "操作失败。请检查参数与时间线后重试。");
+  return FAILURE_LABELS[code]
+    ?? safeErrorMessage(caught, caught instanceof Error && caught.message.startsWith("[")
+      ? caught.message
+      : "操作失败。请检查参数与时间线后重试。");
 }
 
-/** 去停顿时间轴（对齐原型 .timeline / .lane / .seg） */
 function PauseTimeline({ durationUs, minSilenceMs, padMs }: { durationUs: number; minSilenceMs: number; padMs: number }) {
   const dur = Math.max(durationUs, 1);
-  // 原型示意两段静音：约 32–34% 与 65–68% 处；宽度随最短静音缩放
   const sil = Math.min(0.06, Math.max(0.012, (minSilenceMs / 1000) / (dur / 1e6) * 2));
   const pieces: Array<{ t: "keep" | "silence"; a: number; b: number }> = [
     { t: "keep", a: 0, b: 0.32 },
@@ -87,22 +81,21 @@ function PauseTimeline({ durationUs, minSilenceMs, padMs }: { durationUs: number
     { t: "silence", a: 0.65, b: 0.65 + sil },
     { t: "keep", a: 0.65 + sil, b: 1 }
   ];
-  return <div>
+  return <>
     <div className="et-timeline" aria-label="静音保留预览">
       <div className="et-lane">
         {pieces.map((p, i) => (
-          <div
-            key={i}
-            className={"et-seg-blk " + p.t}
+          <div key={i} className={"et-seg-blk " + p.t}
             style={{ left: `${p.a * 100}%`, width: `${(p.b - p.a) * 100}%` }}
-            title={p.t === "keep" ? "保留" : `静音 pad=${padMs}ms`}
-          />
+            title={p.t === "keep" ? "保留" : `静音 pad=${padMs}ms`} />
         ))}
       </div>
     </div>
-    <div className="et-axis"><span>0:00</span><span>0:30</span><span>1:00</span><span>1:30</span><span>{fmtUs(durationUs)}</span></div>
-    <div className="et-note">预计删除 2 段静音 · 保留时长 ≈ {(dur / 1e6 - (minSilenceMs / 1000) * 2).toFixed(1)}s</div>
-  </div>;
+    <div className="et-axis">
+      <span>0:00</span><span>0:30</span><span>1:00</span><span>1:30</span><span>{fmtUs(durationUs)}</span>
+    </div>
+    <p className="et-note">预计删除 2 段静音 · 保留时长 ≈ {(dur / 1e6 - (minSilenceMs / 1000) * 2).toFixed(1)}s</p>
+  </>;
 }
 
 function BeatTimeline({ targetSec, beatsPerShot, shotCount, bpm = 110 }: { targetSec: number; beatsPerShot: number; shotCount: number; bpm?: number }) {
@@ -111,11 +104,11 @@ function BeatTimeline({ targetSec, beatsPerShot, shotCount, bpm = 110 }: { targe
   const n = Math.max(1, Math.floor(targetSec / shotDur));
   const ticks: number[] = [];
   for (let t = 0; t < 30; t += beatStep) ticks.push(t);
-  return <div>
+  return <>
     <div className="et-timeline" aria-label="beat 与切点预览" style={{ height: 88 }}>
       <div className="et-lane" style={{ display: "flex", gap: 2, height: 28 }}>
         {Array.from({ length: Math.min(n, 24) }, (_, i) => (
-          <div key={i} className="et-seg-blk shot" style={{ position: "relative", flex: 1, left: "auto", right: "auto", width: "auto" }} />
+          <div key={i} className="et-seg-blk shot" style={{ flex: 1 }} />
         ))}
       </div>
       <div className="et-ticks">
@@ -128,8 +121,8 @@ function BeatTimeline({ targetSec, beatsPerShot, shotCount, bpm = 110 }: { targe
       </div>
     </div>
     <div className="et-axis"><span>0s</span><span>7.5s</span><span>15s</span><span>22.5s</span><span>30s</span></div>
-    <div className="et-note">镜头时长 ≈ {shotDur.toFixed(2)}s（{beatsPerShot} × 60/{bpm}）· 预计 {n} 个镜头 · 选中 {shotCount} 段</div>
-  </div>;
+    <p className="et-note">镜头时长 ≈ {shotDur.toFixed(2)}s（{beatsPerShot} × 60/{bpm}）· 预计 {n} 个镜头 · 选中 {shotCount} 段</p>
+  </>;
 }
 
 function LjTimeline({ cutSec, offsetMs, mode }: { cutSec: number; offsetMs: number; mode: "auto" | "j" | "l" }) {
@@ -137,7 +130,7 @@ function LjTimeline({ cutSec, offsetMs, mode }: { cutSec: number; offsetMs: numb
   const delta = dir === "j" ? -offsetMs : offsetMs;
   const cutPct = Math.min(92, Math.max(8, (cutSec / 122.4) * 100));
   const audioPct = Math.min(96, Math.max(2, cutPct + (delta / 1000 / 122.4) * 100 * 6));
-  return <div>
+  return <>
     <div className="et-av" aria-label="声画错位预览">
       <div className="et-av-row">
         <div className="et-av-lbl"><span>画面 Video</span><span>切于 {fmtUs(cutSec * 1e6)}</span></div>
@@ -147,7 +140,10 @@ function LjTimeline({ cutSec, offsetMs, mode }: { cutSec: number; offsetMs: numb
         </div>
       </div>
       <div className="et-av-row">
-        <div className="et-av-lbl"><span>音频 Audio</span><span>切于 {fmtUs((cutSec + delta / 1000) * 1e6)}（{dir.toUpperCase()} · {delta > 0 ? "+" : "−"}{offsetMs}ms）</span></div>
+        <div className="et-av-lbl">
+          <span>音频 Audio</span>
+          <span>切于 {fmtUs((cutSec + delta / 1000) * 1e6)}（{dir.toUpperCase()} · {delta > 0 ? "+" : "−"}{offsetMs}ms）</span>
+        </div>
         <div className="et-bar-track">
           <div className="et-bar-fill gold" style={{ right: `${100 - audioPct}%` }} />
           <div className="et-bar-cut audio" style={{ left: `${audioPct}%` }} />
@@ -155,8 +151,8 @@ function LjTimeline({ cutSec, offsetMs, mode }: { cutSec: number; offsetMs: numb
         </div>
       </div>
     </div>
-    <div className="et-note">{dir === "j" ? `J-cut：下句声提前 ${offsetMs}ms 进入当前画面。` : `L-cut：上句声延后 ${offsetMs}ms 叠到下一画面。`}</div>
-  </div>;
+    <p className="et-note">{dir === "j" ? `J-cut：下句声提前 ${offsetMs}ms 进入当前画面。` : `L-cut：上句声延后 ${offsetMs}ms 叠到下一画面。`}</p>
+  </>;
 }
 
 export function EditingToolsPanel({
@@ -191,12 +187,10 @@ export function EditingToolsPanel({
   const [threshold, setThreshold] = useState(0.05);
   const [minSilenceMs, setMinSilenceMs] = useState(400);
   const [padMs, setPadMs] = useState(50);
-
   const [targetSec, setTargetSec] = useState(15);
   const [beatsPerShot, setBeatsPerShot] = useState(2);
   const [bgmClipId, setBgmClipId] = useState("");
   const [pickedShots, setPickedShots] = useState<string[]>([]);
-
   const [ljMode, setLjMode] = useState<"auto" | "j" | "l">("auto");
   const [offsetMs, setOffsetMs] = useState(400);
   const [pictureCutUs, setPictureCutUs] = useState<number | null>(null);
@@ -249,11 +243,7 @@ export function EditingToolsPanel({
         if (!c) continue;
         const range = clipSourceRange(c);
         if (!range) continue;
-        segments.push({
-          asset_id: String(c.asset_id),
-          source_start_us: range.start,
-          source_end_us: range.end
-        });
+        segments.push({ asset_id: String(c.asset_id), source_start_us: range.start, source_end_us: range.end });
       }
       if (!segments.length) { setError("请选择至少一个镜头段。"); return null; }
       return {
@@ -266,11 +256,10 @@ export function EditingToolsPanel({
     if (!clipId || !currentClip) { setError("请选择目标视频片段。"); return null; }
     const range = clipSourceRange(currentClip);
     if (!range) { setError("片段缺少源时间范围。"); return null; }
-    const cutUs = pictureCutUs ?? Math.round((range.start + range.end) / 2);
     return {
       clip_id: clipId,
       mode: ljMode,
-      source_time_us: cutUs,
+      source_time_us: pictureCutUs ?? Math.round((range.start + range.end) / 2),
       offset_us: Math.round(offsetMs * 1000)
     };
   };
@@ -281,10 +270,7 @@ export function EditingToolsPanel({
     setBusy(true); setError(""); setPreview(null); setProposal(null); setAdopted(false);
     try {
       setPreview(await window.desktop.prepareEditingGrammar({
-        project_id: projectId,
-        base_revision_id: baseRevisionId,
-        planner: tool,
-        params
+        project_id: projectId, base_revision_id: baseRevisionId, planner: tool, params
       }));
       setDryNote("干跑完成：可生成提案。");
     } catch (caught) {
@@ -299,10 +285,7 @@ export function EditingToolsPanel({
     setBusy(true); setError(""); setAdopted(false);
     try {
       const created = await window.desktop.proposeEditingGrammar({
-        project_id: projectId,
-        base_revision_id: baseRevisionId,
-        planner: tool,
-        params
+        project_id: projectId, base_revision_id: baseRevisionId, planner: tool, params
       });
       setProposal(created);
       setPreview(null);
@@ -344,11 +327,7 @@ export function EditingToolsPanel({
   };
 
   const switchTool = (id: ToolId) => {
-    setTool(id);
-    setPreview(null);
-    setProposal(null);
-    setError("");
-    setAdopted(false);
+    setTool(id); setPreview(null); setProposal(null); setError(""); setAdopted(false);
     setDryNote(id === "remove_pauses" ? "拖动滑杆可实时预览保留区间。" : "调整参数后干跑预览。");
   };
 
@@ -359,18 +338,15 @@ export function EditingToolsPanel({
     : range ? (range.start + range.end) / 2 / 1e6 : 39;
 
   return <Dialog titleId="editing-tools-title" label="剪辑手法" onClose={onClose} className="editing-tools">
-    <div className="et-topbar">
-      <div className="et-brand">剪辑手法</div>
-      <span className="et-chip">{meta.sub}</span>
-      <div className="et-spacer" />
-      <span className="et-hint">本地零外传 · 提案不自动改 Timeline</span>
-      <button className="icon-button" aria-label="关闭剪辑手法" onClick={onClose}>×</button>
+    <div className="modal-heading">
+      <div>
+        <h2 id="editing-tools-title">剪辑手法</h2>
+        <p>{meta.desc}</p>
+      </div>
+      <button type="button" className="icon-btn" aria-label="关闭剪辑手法" onClick={onClose}>×</button>
     </div>
 
     <div className="et-wrap">
-      <h1 className="et-h1">{meta.title}</h1>
-      <p className="et-sub">{meta.desc}</p>
-
       <div className="et-tabs" role="tablist" aria-label="手法页签">
         {(Object.keys(TOOL_META) as ToolId[]).map(id => (
           <button key={id} type="button" role="tab" aria-selected={tool === id} className={tool === id ? "on" : ""} onClick={() => switchTool(id)}>
@@ -380,222 +356,212 @@ export function EditingToolsPanel({
         ))}
       </div>
 
-      <div className="et-shell">
-        <div className="et-bar">
-          <div className="et-title">{meta.title} · {shortId(currentClip?.clip_id ?? bgmClipId ?? "—")}</div>
-          <div className="et-meta">{fmtUs(clipDurUs)} · 基线 {baseRevisionId ? shortId(baseRevisionId) : "—"}</div>
-          <div className="et-spacer" />
-          {tool === "remove_pauses" && <span className="et-pill ok">CV 音频能量</span>}
-          {tool === "beat_sync" && <span className="et-pill gold">beat_grid</span>}
-          {tool === "lj_cut" && <span className="et-pill ok">word_source: asr</span>}
-        </div>
-
-        <div className="et-grid">
-          <div className="et-col">
-            {tool === "remove_pauses" && <>
-              <div className="et-field">
-                <label>目标片段</label>
-                <select value={clipId} onChange={e => setClipId(e.target.value)} title={clipId}>
-                  {videoClips.map(c => {
-                    const r = clipSourceRange(c);
-                    return <option key={c.clip_id} value={c.clip_id} title={c.clip_id}>
-                      {shortId(c.clip_id)} · {r ? fmtUs(r.end - r.start) : "—"}
-                    </option>;
-                  })}
-                </select>
-              </div>
-              <div className="et-field">
-                <label>能量阈值 <span className="et-val">{threshold.toFixed(2)}</span></label>
-                <input type="range" min={0.01} max={0.3} step={0.01} value={threshold} onChange={e => setThreshold(+e.target.value)} />
-              </div>
-              <div className="et-field">
-                <label>最短静音（ms） <span className="et-val">{minSilenceMs}</span></label>
-                <input type="range" min={100} max={2000} step={50} value={minSilenceMs} onChange={e => setMinSilenceMs(+e.target.value)} />
-              </div>
-              <div className="et-field">
-                <label>保留边距 pad（ms） <span className="et-val">{padMs}</span></label>
-                <input type="range" min={0} max={300} step={10} value={padMs} onChange={e => setPadMs(+e.target.value)} />
-              </div>
-              <details className="et-adv">
-                <summary>高级 · 与 Core 参数对齐</summary>
-                <div className="et-field"><label>energy_threshold 默认</label><input type="text" readOnly value="DEFAULT_ENERGY_THRESHOLD = 0.05" /></div>
-                <div className="et-field"><label>min_silence_us 默认</label><input type="text" readOnly value="DEFAULT_MIN_SILENCE_US = 400000" /></div>
-                <div className="et-note">源：editing_grammar/silence.py · 空操作可提案、不可采纳</div>
-              </details>
-            </>}
-
-            {tool === "beat_sync" && <>
-              <div className="et-field">
-                <label>BGM / 音频轨</label>
-                <select value={bgmClipId} onChange={e => setBgmClipId(e.target.value)} title={bgmClipId}>
-                  {audioClips.map(c => <option key={c.clip_id} value={c.clip_id} title={c.clip_id}>{shortId(c.clip_id)} · {c.asset_kind}</option>)}
-                </select>
-              </div>
-              <div className="et-field">
-                <label>目标成片时长（s） <span className="et-val">{targetSec.toFixed(1)}</span></label>
-                <input type="range" min={5} max={60} step={0.5} value={targetSec} onChange={e => setTargetSec(+e.target.value)} />
-              </div>
-              <div className="et-field">
-                <label>每镜头拍数 beats_per_shot <span className="et-val">{beatsPerShot}</span></label>
-                <input type="range" min={1} max={8} step={1} value={beatsPerShot} onChange={e => setBeatsPerShot(+e.target.value)} />
-              </div>
-              <div className="et-field">
-                <label>镜头段（可多选）</label>
-                <div className="et-shots">
-                  {videoClips.map(c => (
-                    <label key={c.clip_id} className="et-shot-row">
-                      <input
-                        type="checkbox"
-                        checked={pickedShots.includes(c.clip_id)}
-                        onChange={e => setPickedShots(prev => e.target.checked ? [...prev, c.clip_id] : prev.filter(id => id !== c.clip_id))}
-                      />
-                      <span>{shortId(c.clip_id)}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-              <details className="et-adv">
-                <summary>高级 · 与 Core 参数对齐</summary>
-                <div className="et-field"><label>权重（冻结）</label><input type="text" readOnly value="face 3.0 · motion 2.0 · sharpness 1.0" /></div>
-                <div className="et-note">源：editing_grammar/beat_sync.py · 切点吸附 beat 网格</div>
-              </details>
-            </>}
-
-            {tool === "lj_cut" && <>
-              <div className="et-field">
-                <label>目标片段</label>
-                <select value={clipId} onChange={e => setClipId(e.target.value)} title={clipId}>
-                  {videoClips.map(c => {
-                    const r = clipSourceRange(c);
-                    return <option key={c.clip_id} value={c.clip_id} title={c.clip_id}>
-                      {shortId(c.clip_id)}{r ? ` · ${fmtUs(r.start)}` : ""}
-                    </option>;
-                  })}
-                </select>
-              </div>
-              <div className="et-field">
-                <label>画面切点</label>
-                <select
-                  value={String(pictureCutUs ?? "mid")}
-                  onChange={e => setPictureCutUs(e.target.value === "mid" ? null : Number(e.target.value))}
-                >
-                  <option value="mid">片段中点（默认）</option>
-                  {range && (
-                    <>
-                      <option value={String(range.start + Math.round(clipDurUs * 0.32))}>{fmtUs(range.start + Math.round(clipDurUs * 0.32))} · 与静音/切换对齐</option>
-                      <option value={String(range.start + Math.round(clipDurUs * 0.66))}>{fmtUs(range.start + Math.round(clipDurUs * 0.66))} · 第二处切换</option>
-                    </>
-                  )}
-                </select>
-              </div>
-              <div className="et-field">
-                <label>方向 mode</label>
-                <div className="et-seg" role="group" aria-label="LJ 方向">
-                  {(["auto", "j", "l"] as const).map(m => (
-                    <button key={m} type="button" className={ljMode === m ? "on" : ""} onClick={() => setLjMode(m)}>
-                      {m === "auto" ? "自动" : m === "j" ? "J · 声先入" : "L · 声延后"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="et-field">
-                <label>偏移 offset（ms） <span className="et-val">{offsetMs}</span></label>
-                <input type="range" min={300} max={500} step={10} value={offsetMs} onChange={e => setOffsetMs(+e.target.value)} />
-                <div className="et-note">Core 窗口 [300, 500] · 默认 400</div>
-              </div>
-              <details className="et-adv">
-                <summary>高级 · 与 Core 参数对齐</summary>
-                <div className="et-field"><label>自动方向启发</label><input type="text" readOnly value="auto_lj_mode：有下句词 → J，否则 L" /></div>
-                <div className="et-field"><label>op</label><input type="text" readOnly value="split_edit {clip_id, source_time_us, audio_delta_us}" /></div>
-                <div className="et-note">源：editing_grammar/lj_cut.py</div>
-              </details>
-            </>}
-
-            <div className="et-actions">
-              <button type="button" className="et-btn" disabled={busy || !baseRevisionId} onClick={() => void runPrepare()}>干跑预览</button>
-              <button type="button" className="et-btn primary" disabled={busy || !baseRevisionId} onClick={() => void runPropose()}>生成提案</button>
-            </div>
-            <div className="et-note">{dryNote}</div>
-
-            {history.length > 0 && <div className="et-adv" style={{ marginTop: 14 }}>
-              <div className="et-note" style={{ marginTop: 0, marginBottom: 6 }}>历史提案</div>
-              <ul className="agent-session-history" style={{ margin: 0, paddingLeft: 16 }}>
-                {history.slice(0, 6).map(item => (
-                  <li key={item.id}>
-                    <button type="button" onClick={() => void openHistory(item)}>{item.planner} · {item.created_at.slice(0, 16).replace("T", " ")}</button>
-                  </li>
-                ))}
-              </ul>
-            </div>}
-          </div>
-
-          <div className="et-col">
-            <div className="et-preview">
-              <div className="et-ph">
-                <h3>{tool === "remove_pauses" ? "时间轴预览 · 静音 / 保留" : tool === "beat_sync" ? "时间轴预览 · beat 与切点" : "声画错位预览"}</h3>
-                <div className="et-legend">
-                  {tool === "remove_pauses" && <>
-                    <span><i style={{ background: "#3a5fd4" }} />保留有声</span>
-                    <span><i style={{ background: "#2a333b" }} />静音（将删除）</span>
-                  </>}
-                  {tool === "beat_sync" && <>
-                    <span><i style={{ background: "#d1a453" }} />beat</span>
-                    <span><i style={{ background: "#86a0ff" }} />切点</span>
-                    <span><i style={{ background: "#243044" }} />镜头</span>
-                  </>}
-                  {tool === "lj_cut" && <>
-                    <span><i style={{ background: "#fff" }} />画面切线</span>
-                    <span><i style={{ background: "#d1a453" }} />音频切线</span>
-                    <span><i style={{ background: "#57cf92" }} />词锚</span>
-                  </>}
-                </div>
-              </div>
-              {tool === "remove_pauses" && <PauseTimeline durationUs={clipDurUs} minSilenceMs={minSilenceMs} padMs={padMs} />}
-              {tool === "beat_sync" && <BeatTimeline targetSec={targetSec} beatsPerShot={beatsPerShot} shotCount={pickedShots.length} />}
-              {tool === "lj_cut" && <LjTimeline cutSec={cutSecForLj} offsetMs={offsetMs} mode={ljMode} />}
-
-              {preview && <div className="et-dry">
-                <h4>干跑结果</h4>
-                <p>{preview.summary}</p>
-                <p className="et-note">操作 {preview.operations_count} 条{preview.noop ? " · 空操作（可提案，不可采纳）" : ""}</p>
-                <ul style={{ margin: "6px 0 0", paddingLeft: 16 }}>
-                  {preview.operations.slice(0, 8).map((op, i) => <li key={i} style={{ fontSize: 11, color: "#a3aeb5" }}><code>{String(op.op)}</code></li>)}
-                </ul>
-              </div>}
-            </div>
-
-            {proposal && <div className="et-proposal">
-              <h4>提案 · {proposal.planner}</h4>
-              <div className="et-sum">{proposal.patch.summary}</div>
-              <div className="et-diff">
-                <div className="et-cell"><div className="et-n">{proposal.diff.summary.clip_changes}</div><div className="et-k">Clip 变更</div></div>
-                <div className="et-cell"><div className="et-n">{proposal.diff.summary.caption_changes}</div><div className="et-k">Caption</div></div>
-                <div className="et-cell"><div className="et-n">{(proposal.diff.duration_delta_us / 1e6).toFixed(1)}s</div><div className="et-k">时长变化</div></div>
-              </div>
-              <TimelineDiffView diff={proposal.diff} />
-              <div className="et-actions">
-                <button type="button" className="et-btn ghost" onClick={() => setProposal(null)}>返回</button>
-                <div className="et-spacer" />
-                {!proposal.applied_revision_id && proposal.patch.operations.length > 0 && (
-                  <button
-                    type="button"
-                    className="et-btn primary"
-                    disabled={busy || adopted || !baseRevisionId || proposal.base_revision_id !== baseRevisionId}
-                    onClick={() => void applyProposal()}
-                  >
-                    采纳为正式 Timeline
-                  </button>
-                )}
-              </div>
-              {adopted && <div className="et-note ok">已采纳为新 Revision。</div>}
-              {baseRevisionId && proposal.base_revision_id !== baseRevisionId && (
-                <div className="et-note warn">基线已变化：请返回后基于当前版本重新规划。</div>
-              )}
-            </div>}
-          </div>
-        </div>
+      <div className="et-ctx">
+        <span>目标 <b>{meta.title}</b></span>
+        <span>素材 <b>{shortId(currentClip?.clip_id ?? bgmClipId ?? "")}</b></span>
+        <span>基线 <b>{baseRevisionId ? shortId(baseRevisionId) : "—"}</b></span>
       </div>
+
+      {error && <p className="ai-status" role="status">{error}</p>}
+
+      {!proposal && <div className="et-shell">
+        <div className="et-col">
+          {tool === "remove_pauses" && <>
+            <div className="et-field">
+              <label>目标片段</label>
+              <select value={clipId} onChange={e => setClipId(e.target.value)} title={clipId}>
+                {videoClips.map(c => {
+                  const r = clipSourceRange(c);
+                  return <option key={c.clip_id} value={c.clip_id} title={c.clip_id}>
+                    {shortId(c.clip_id)} · {r ? fmtUs(r.end - r.start) : "—"}
+                  </option>;
+                })}
+              </select>
+            </div>
+            <div className="et-field">
+              <label>能量阈值 <span className="et-val">{threshold.toFixed(2)}</span></label>
+              <input type="range" min={0.01} max={0.3} step={0.01} value={threshold} onChange={e => setThreshold(+e.target.value)} />
+            </div>
+            <div className="et-field">
+              <label>最短静音（ms） <span className="et-val">{minSilenceMs}</span></label>
+              <input type="range" min={100} max={2000} step={50} value={minSilenceMs} onChange={e => setMinSilenceMs(+e.target.value)} />
+            </div>
+            <div className="et-field">
+              <label>保留边距 pad（ms） <span className="et-val">{padMs}</span></label>
+              <input type="range" min={0} max={300} step={10} value={padMs} onChange={e => setPadMs(+e.target.value)} />
+            </div>
+            <details className="et-adv">
+              <summary>高级 · 与 Core 参数对齐</summary>
+              <div className="et-field"><label>energy_threshold 默认</label><input type="text" readOnly value="DEFAULT_ENERGY_THRESHOLD = 0.05" /></div>
+              <div className="et-field"><label>min_silence_us 默认</label><input type="text" readOnly value="DEFAULT_MIN_SILENCE_US = 400000" /></div>
+              <p className="et-note">源：editing_grammar/silence.py · 空操作可提案、不可采纳</p>
+            </details>
+          </>}
+
+          {tool === "beat_sync" && <>
+            <div className="et-field">
+              <label>BGM / 音频轨</label>
+              <select value={bgmClipId} onChange={e => setBgmClipId(e.target.value)} title={bgmClipId}>
+                {audioClips.map(c => (
+                  <option key={c.clip_id} value={c.clip_id} title={c.clip_id}>{shortId(c.clip_id)} · {c.asset_kind}</option>
+                ))}
+              </select>
+            </div>
+            <div className="et-field">
+              <label>目标成片时长（s） <span className="et-val">{targetSec.toFixed(1)}</span></label>
+              <input type="range" min={5} max={60} step={0.5} value={targetSec} onChange={e => setTargetSec(+e.target.value)} />
+            </div>
+            <div className="et-field">
+              <label>每镜头拍数 <span className="et-val">{beatsPerShot}</span></label>
+              <input type="range" min={1} max={8} step={1} value={beatsPerShot} onChange={e => setBeatsPerShot(+e.target.value)} />
+            </div>
+            <div className="et-field">
+              <label>镜头段（可多选）</label>
+              <div className="et-shots">
+                {videoClips.map(c => (
+                  <label key={c.clip_id} className="et-shot-row">
+                    <input
+                      type="checkbox"
+                      checked={pickedShots.includes(c.clip_id)}
+                      onChange={e => setPickedShots(prev => e.target.checked ? [...prev, c.clip_id] : prev.filter(id => id !== c.clip_id))}
+                    />
+                    <span>{shortId(c.clip_id)}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <details className="et-adv">
+              <summary>高级 · 与 Core 参数对齐</summary>
+              <div className="et-field"><label>权重（冻结）</label><input type="text" readOnly value="face 3.0 · motion 2.0 · sharpness 1.0" /></div>
+              <p className="et-note">源：editing_grammar/beat_sync.py</p>
+            </details>
+          </>}
+
+          {tool === "lj_cut" && <>
+            <div className="et-field">
+              <label>目标片段</label>
+              <select value={clipId} onChange={e => setClipId(e.target.value)} title={clipId}>
+                {videoClips.map(c => {
+                  const r = clipSourceRange(c);
+                  return <option key={c.clip_id} value={c.clip_id} title={c.clip_id}>
+                    {shortId(c.clip_id)}{r ? ` · ${fmtUs(r.start)}` : ""}
+                  </option>;
+                })}
+              </select>
+            </div>
+            <div className="et-field">
+              <label>画面切点</label>
+              <select value={String(pictureCutUs ?? "mid")} onChange={e => setPictureCutUs(e.target.value === "mid" ? null : Number(e.target.value))}>
+                <option value="mid">片段中点（默认）</option>
+                {range && <>
+                  <option value={String(range.start + Math.round(clipDurUs * 0.32))}>{fmtUs(range.start + Math.round(clipDurUs * 0.32))} · 与静音/切换对齐</option>
+                  <option value={String(range.start + Math.round(clipDurUs * 0.66))}>{fmtUs(range.start + Math.round(clipDurUs * 0.66))} · 第二处切换</option>
+                </>}
+              </select>
+            </div>
+            <div className="et-field">
+              <label>方向 mode</label>
+              <div className="et-seg" role="group" aria-label="LJ 方向">
+                {(["auto", "j", "l"] as const).map(m => (
+                  <button key={m} type="button" className={ljMode === m ? "on" : ""} onClick={() => setLjMode(m)}>
+                    {m === "auto" ? "自动" : m === "j" ? "J · 声先入" : "L · 声延后"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="et-field">
+              <label>偏移 offset（ms） <span className="et-val">{offsetMs}</span></label>
+              <input type="range" min={300} max={500} step={10} value={offsetMs} onChange={e => setOffsetMs(+e.target.value)} />
+              <p className="et-note">Core 窗口 [300, 500] · 默认 400</p>
+            </div>
+            <details className="et-adv">
+              <summary>高级 · 与 Core 参数对齐</summary>
+              <div className="et-field"><label>自动方向启发</label><input type="text" readOnly value="auto_lj_mode：有下句词 → J，否则 L" /></div>
+              <div className="et-field"><label>op</label><input type="text" readOnly value="split_edit {clip_id, source_time_us, audio_delta_us}" /></div>
+            </details>
+          </>}
+        </div>
+
+        <div className="et-col">
+          <div className="et-preview">
+            <div className="et-ph">
+              <h3>
+                {tool === "remove_pauses" ? "时间轴预览 · 静音 / 保留"
+                  : tool === "beat_sync" ? "时间轴预览 · beat 与切点"
+                  : "声画错位预览"}
+              </h3>
+              <div className="et-legend">
+                {tool === "remove_pauses" && <>
+                  <span><i style={{ background: "var(--dlg-primary)" }} />保留有声</span>
+                  <span><i style={{ background: "var(--ctl-bg)" }} />静音（将删除）</span>
+                </>}
+                {tool === "beat_sync" && <>
+                  <span><i style={{ background: "var(--dlg-primary)" }} />beat</span>
+                  <span><i style={{ background: "var(--dlg-text)" }} />切点</span>
+                  <span><i style={{ background: "var(--ctl-bg)" }} />镜头</span>
+                </>}
+                {tool === "lj_cut" && <>
+                  <span><i style={{ background: "var(--dlg-text)" }} />画面切线</span>
+                  <span><i style={{ background: "var(--dlg-warn)" }} />音频切线</span>
+                  <span><i style={{ background: "var(--dlg-primary)" }} />词锚</span>
+                </>}
+              </div>
+            </div>
+            {tool === "remove_pauses" && <PauseTimeline durationUs={clipDurUs} minSilenceMs={minSilenceMs} padMs={padMs} />}
+            {tool === "beat_sync" && <BeatTimeline targetSec={targetSec} beatsPerShot={beatsPerShot} shotCount={pickedShots.length} />}
+            {tool === "lj_cut" && <LjTimeline cutSec={cutSecForLj} offsetMs={offsetMs} mode={ljMode} />}
+            {preview && <div className="et-dry">
+              <h4>干跑结果</h4>
+              <p>{preview.summary}</p>
+              <p className="et-note">操作 {preview.operations_count} 条{preview.noop ? " · 空操作（可提案，不可采纳）" : ""}</p>
+            </div>}
+          </div>
+
+          {history.length > 0 && <div>
+            <p className="et-note" style={{ marginBottom: 6 }}>历史提案</p>
+            <div className="et-hist">
+              {history.slice(0, 6).map(item => (
+                <button key={item.id} type="button" onClick={() => void openHistory(item)}>
+                  {item.planner} · {item.created_at.slice(0, 16).replace("T", " ")}
+                </button>
+              ))}
+            </div>
+          </div>}
+        </div>
+      </div>}
+
+      {proposal && <div className="et-proposal">
+        <h4>提案 · {proposal.planner}</h4>
+        <p className="et-sum">{proposal.patch.summary}</p>
+        <div className="et-diff">
+          <div className="et-cell"><div className="et-n">{proposal.diff.summary.clip_changes}</div><div className="et-k">Clip 变更</div></div>
+          <div className="et-cell"><div className="et-n">{proposal.diff.summary.caption_changes}</div><div className="et-k">Caption</div></div>
+          <div className="et-cell"><div className="et-n">{(proposal.diff.duration_delta_us / 1e6).toFixed(1)}s</div><div className="et-k">时长变化</div></div>
+        </div>
+        <TimelineDiffView diff={proposal.diff} />
+        {adopted && <p className="et-note ok">已采纳为新 Revision。</p>}
+        {baseRevisionId && proposal.base_revision_id !== baseRevisionId && (
+          <p className="et-note warn">基线已变化：请返回后基于当前版本重新规划。</p>
+        )}
+      </div>}
     </div>
-    {error && <p className="ai-status" role="status" style={{ margin: "0 22px 16px" }}>{error}</p>}
+
+    <div className="modal-actions">
+      {proposal ? <>
+        <button type="button" onClick={() => setProposal(null)}>返回</button>
+        {!proposal.applied_revision_id && proposal.patch.operations.length > 0 && (
+          <button
+            type="button"
+            disabled={busy || adopted || !baseRevisionId || proposal.base_revision_id !== baseRevisionId}
+            onClick={() => void applyProposal()}
+          >
+            采纳为正式 Timeline
+          </button>
+        )}
+      </> : <>
+        <button type="button" disabled={busy || !baseRevisionId} onClick={() => void runPrepare()}>干跑预览</button>
+        <button type="button" disabled={busy || !baseRevisionId} onClick={() => void runPropose()}>生成提案</button>
+      </>}
+    </div>
   </Dialog>;
 }
