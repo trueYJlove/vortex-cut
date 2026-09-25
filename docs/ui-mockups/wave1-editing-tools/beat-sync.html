@@ -13,197 +13,163 @@
   <div class="spacer"></div>
   <a class="hint" href="index.html">← 设计总览</a>
 </div>
-<div class="wrap">
-  <h1>卡点</h1>
-  <p class="sub">BGM 节拍网格吸附镜头切点，强拍优先放高运动/人脸镜头。前置：BGM 已分析 <code>beat_grid</code>。</p>
-
-  <div class="tabs">
-    <a href="remove-pauses.html"><strong>去停顿</strong><span>remove_pauses</span></a>
-    <a class="on" href="beat-sync.html"><strong>卡点</strong><span>beat_sync</span></a>
-    <a href="lj-cut.html"><strong>L/J cut</strong><span>lj_cut</span></a>
-  </div>
-
-  <div class="shell">
-    <div class="bar">
-      <div class="title">卡点 · music-110bpm</div>
-      <div class="meta">BGM 30.0s · 110 BPM · 基线 rev_8f2a</div>
-      <div class="spacer"></div>
-      <span class="pill gold">beat_grid 已就绪 · 55 拍</span>
+<div class="modal-backdrop">
+  <div class="modal editing-tools" role="dialog" aria-label="剪辑手法">
+    <div class="modal-heading">
+      <div>
+        <h2>剪辑手法</h2>
+        <p>BGM 节拍网格吸附镜头切点，强拍优先放高运动/人脸镜头。前置：BGM 已分析节拍。</p>
+      </div>
+      <button type="button" class="icon-btn" aria-label="关闭剪辑手法">×</button>
     </div>
 
-    <div class="col">
-      <div class="field">
-        <label>BGM 素材</label>
-        <select id="bgm">
-          <option>music-110bpm.mp3 · 110 BPM</option>
-          <option>music-90bpm.mp3 · 90 BPM</option>
-          <option>music-140bpm.mp3 · 140 BPM</option>
-        </select>
-      </div>
-      <div class="field">
-        <label>目标成片时长（s） <span class="val" id="tVal">15.0</span></label>
-        <input type="range" id="target" min="5" max="60" step="0.5" value="15" />
-      </div>
-      <div class="field">
-        <label>每镜头拍数 beats_per_shot <span class="val" id="bVal">2</span></label>
-        <input type="range" id="bps" min="1" max="8" step="1" value="2" />
+    <div class="et-wrap">
+      <div class="et-tabs" role="tablist" aria-label="手法页签">
+        <button type="button" role="tab" aria-selected="false" onclick="location.href='remove-pauses.html'"><strong>去停顿</strong><span>remove_pauses</span></button>
+        <button type="button" role="tab" aria-selected="true" class="on"><strong>卡点</strong><span>beat_sync</span></button>
+        <button type="button" role="tab" aria-selected="false" onclick="location.href='lj-cut.html'"><strong>L/J cut</strong><span>lj_cut</span></button>
       </div>
 
-      <div class="field">
-        <label>镜头段（按强度排序 · 可多选）</label>
-        <div id="segs" style="display:flex;flex-direction:column;gap:6px"></div>
+      <div class="et-ctx">
+        <span>目标 <b>卡点</b></span>
+        <span>素材 <b>clip_a1…</b></span>
+        <span>基线 <b>rev_8f2a…</b></span>
       </div>
 
-      <details class="adv">
-        <summary>高级 · 与 Core 参数对齐</summary>
-        <div class="field">
-          <label>权重（冻结）</label>
-          <input type="text" value="face 3.0 · motion 2.0 · sharpness 1.0" readonly />
+      <div class="et-shell">
+        <div class="et-col">
+          <div class="et-field">
+            <label>BGM / 音频轨</label>
+            <select id="bgm">
+              <option>music-110bpm… · audio</option>
+              <option>music-90bpm… · audio</option>
+            </select>
+          </div>
+          <div class="et-field">
+            <label>目标成片时长（s） <span class="et-val" id="tVal">15.0</span></label>
+            <input type="range" id="target" min="5" max="60" step="0.5" value="15" />
+          </div>
+          <div class="et-field">
+            <label>每镜头拍数 beats_per_shot <span class="et-val" id="bVal">2</span></label>
+            <input type="range" id="bps" min="1" max="8" step="1" value="2" />
+          </div>
+          <div class="et-field">
+            <label>镜头段（可多选）</label>
+            <div class="et-shots" id="shots">
+              <label class="et-shot-row"><input type="checkbox" checked /><span>clip_a1…</span></label>
+              <label class="et-shot-row"><input type="checkbox" checked /><span>clip_b2…</span></label>
+              <label class="et-shot-row"><input type="checkbox" checked /><span>clip_c3…</span></label>
+            </div>
+          </div>
+          <details class="et-adv">
+            <summary>高级 · 与 Core 参数对齐</summary>
+            <div class="et-field"><label>权重（冻结）</label><input type="text" value="face 3.0 · motion 2.0 · sharpness 1.0" readonly /></div>
+            <p class="et-note">源：editing_grammar/beat_sync.py · 切点吸附 beat 网格</p>
+          </details>
         </div>
-        <div class="note">源：editing_grammar/beat_sync.py · 切点吸附 beat 网格</div>
-      </details>
 
-      <div class="actions" style="margin-top:16px">
-        <button class="btn" id="dry">干跑预览</button>
-        <button class="btn primary" id="propose">生成提案</button>
-      </div>
-      <div class="note" id="dryNote">镜头时长 = beat 间隔 × 每镜头拍数。</div>
-    </div>
+        <div class="et-col">
+          <div class="et-preview">
+            <div class="et-ph">
+              <h3>时间轴预览 · beat 与切点</h3>
+              <div class="et-legend">
+                <span><i style="background:var(--dlg-primary)"></i>beat</span>
+                <span><i style="background:var(--dlg-text)"></i>切点</span>
+                <span><i style="background:var(--ctl-bg)"></i>镜头</span>
+              </div>
+            </div>
+            <div class="et-timeline" style="height:88px">
+              <div class="et-lane" id="shotLane" style="display:flex;gap:2px;height:28px"></div>
+              <div class="et-ticks" id="ticks"></div>
+            </div>
+            <div class="et-axis"><span>0s</span><span>7.5s</span><span>15s</span><span>22.5s</span><span>30s</span></div>
+            <p class="et-note" id="stat">镜头时长 ≈ 1.09s（2 × 60/110）· 预计 13 个镜头 · 选中 3 段</p>
+            <div class="et-dry" id="dryBox" hidden>
+              <h4>干跑结果</h4>
+              <p id="drySum">按 2 拍/镜排列 13 个镜头，切点吸附 beat 网格（BPM 110）。</p>
+              <p class="et-note">操作 13 条</p>
+            </div>
+          </div>
 
-    <div class="col">
-      <div class="preview">
-        <div class="ph">
-          <h3>时间轴预览 · beat 与切点</h3>
-          <div class="legend">
-            <span><i style="background:var(--gold)"></i>beat</span>
-            <span><i style="background:var(--accent)"></i>切点</span>
-            <span><i style="background:#243044"></i>镜头</span>
+          <div class="et-proposal" id="proposal" hidden>
+            <h4>提案 · beat_sync</h4>
+            <p class="et-sum" id="propSum">按 2 拍/镜排列 13 个镜头，切点吸附 beat 网格（BPM 110）。</p>
+            <div class="et-diff">
+              <div class="et-cell"><div class="et-n" id="dClip">13</div><div class="et-k">Clip 插入</div></div>
+              <div class="et-cell"><div class="et-n">0</div><div class="et-k">Caption</div></div>
+              <div class="et-cell"><div class="et-n" id="dDur">15.0s</div><div class="et-k">目标时长</div></div>
+            </div>
+            <p class="et-note ok" id="adoptNote" hidden>已采纳为新 Revision。</p>
           </div>
         </div>
-        <div class="timeline" style="height:88px">
-          <div class="lane" id="shots"></div>
-          <div class="ticks" id="ticks"></div>
-        </div>
-        <div class="axis"><span>0s</span><span>7.5s</span><span>15s</span><span>22.5s</span><span>30s</span></div>
-        <div class="note" id="stat">镜头时长 ≈ 1.09s（2 × 110 BPM）· 切点吸附网格</div>
       </div>
+    </div>
 
-      <div class="proposal" id="proposal" hidden>
-        <h4>提案 · beat_sync</h4>
-        <div class="sum" id="propSum">按 2 拍/镜排列 13 个镜头，切点吸附 beat。</div>
-        <div class="diff">
-          <div class="cell"><div class="n" id="dClip">13</div><div class="k">Clip 插入</div></div>
-          <div class="cell"><div class="n">0</div><div class="k">Caption</div></div>
-          <div class="cell"><div class="n" id="dDur">15.0s</div><div class="k">目标时长</div></div>
-        </div>
-        <div class="actions">
-          <button class="btn ghost" id="back">返回</button>
-          <div class="right"><button class="btn primary" id="adopt">采纳为正式 Timeline</button></div>
-        </div>
-        <div class="note ok" id="adoptNote" hidden>已采纳为新 Revision（原型示意）。</div>
-      </div>
+    <div class="modal-actions" id="actions">
+      <button type="button" id="dry">干跑预览</button>
+      <button type="button" id="propose">生成提案</button>
     </div>
   </div>
 </div>
 
 <script>
 const BPM = 110;
-const DUR_S = 30;
-const SHOTS = [
-  { id: "s1", name: "跑动镜头", motion: 0.92, face: 1 },
-  { id: "s2", name: "静物特写", motion: 0.18, face: 0 },
-  { id: "s3", name: "中景摇移", motion: 0.55, face: 0 },
-  { id: "s4", name: "人物跟拍", motion: 0.78, face: 2 },
-  { id: "s5", name: "空镜风景", motion: 0.12, face: 0 }
-];
-const selected = new Set(SHOTS.map(s => s.id));
-
-function beatTimes() {
-  const step = 60 / BPM;
-  const out = [];
-  for (let t = 0; t < DUR_S; t += step) out.push(t);
-  return out;
-}
-function shotDur() {
-  const bps = +document.getElementById("bps").value;
-  return (60 / BPM) * bps;
-}
-function renderSegs() {
-  const box = document.getElementById("segs");
-  box.innerHTML = "";
-  const ranked = [...SHOTS].sort((a, b) => (b.face * 3 + b.motion * 2) - (a.face * 3 + a.motion * 2));
-  for (const s of ranked) {
-    const row = document.createElement("label");
-    row.style.cssText = "display:flex;align-items:center;gap:8px;background:var(--inset);border:1px solid var(--border);border-radius:8px;padding:8px 10px;cursor:pointer";
-    row.innerHTML = `<input type="checkbox" ${selected.has(s.id) ? "checked" : ""} data-id="${s.id}" />
-      <span style="flex:1">${s.name}</span>
-      <span class="pill ${s.face ? "ok" : ""}">face ${s.face}</span>
-      <span class="pill acc">motion ${s.motion.toFixed(2)}</span>`;
-    row.querySelector("input").onchange = e => {
-      const id = e.target.dataset.id;
-      e.target.checked ? selected.add(id) : selected.delete(id);
-      render();
-    };
-    box.appendChild(row);
-  }
-}
 function render() {
-  const bps = +document.getElementById("bps").value;
-  const target = +document.getElementById("target").value;
-  document.getElementById("bVal").textContent = bps;
-  document.getElementById("tVal").textContent = target.toFixed(1);
-  const beats = beatTimes();
-  const dur = shotDur();
-  const n = Math.max(1, Math.floor(target / dur));
-
-  const ticks = document.getElementById("ticks");
-  ticks.innerHTML = "";
-  beats.forEach((t, i) => {
+  const bps = +bpsEl.value;
+  const target = +targetEl.value;
+  bVal.textContent = bps;
+  tVal.textContent = target.toFixed(1);
+  const shotDur = (60 / BPM) * bps;
+  const n = Math.max(1, Math.floor(target / shotDur));
+  shotLane.innerHTML = "";
+  for (let i = 0; i < Math.min(n, 24); i++) {
     const el = document.createElement("div");
-    el.className = "t" + (i % 4 === 0 ? " down" : "");
-    el.style.left = (t / DUR_S * 100) + "%";
-    ticks.appendChild(el);
-    if (i % bps === 0) {
-      const c = document.createElement("div");
-      c.className = "cut";
-      c.style.left = (t / DUR_S * 100) + "%";
-      ticks.appendChild(c);
-    }
-  });
-
-  const shots = document.getElementById("shots");
-  shots.innerHTML = "";
-  const pool = SHOTS.filter(s => selected.has(s.id));
-  const ranked = [...pool].sort((a, b) => (b.face * 3 + b.motion * 2) - (a.face * 3 + a.motion * 2));
-  for (let i = 0; i < n; i++) {
-    const s = ranked[i % Math.max(ranked.length, 1)] || SHOTS[0];
-    const el = document.createElement("div");
-    el.className = "seg shot";
+    el.className = "et-seg-blk shot";
     el.style.flex = "1";
-    el.title = s.name + " · " + (i * dur).toFixed(2) + "s";
-    el.style.opacity = String(0.75 + (s.motion * 0.25));
-    shots.appendChild(el);
+    shotLane.appendChild(el);
   }
-
-  document.getElementById("stat").textContent =
-    `镜头时长 ≈ ${dur.toFixed(2)}s（${bps} × 60/${BPM}）· 预计 ${n} 个镜头 · 切点吸附 beat`;
-  document.getElementById("dClip").textContent = String(n);
-  document.getElementById("dDur").textContent = target.toFixed(1) + "s";
-  document.getElementById("propSum").textContent =
-    `按 ${bps} 拍/镜排列 ${n} 个镜头，切点吸附 beat 网格（BPM ${BPM}）。`;
+  ticks.innerHTML = "";
+  for (let t = 0, i = 0; t < 30; t += 60 / BPM, i++) {
+    const tick = document.createElement("div");
+    tick.className = "et-tick" + (i % 4 === 0 ? " down" : "");
+    tick.style.left = (t / 30 * 100) + "%";
+    ticks.appendChild(tick);
+    if (i % bps === 0) {
+      const cut = document.createElement("div");
+      cut.className = "et-cut";
+      cut.style.left = (t / 30 * 100) + "%";
+      ticks.appendChild(cut);
+    }
+  }
+  const sum = `按 ${bps} 拍/镜排列 ${n} 个镜头，切点吸附 beat 网格（BPM ${BPM}）。`;
+  stat.textContent = `镜头时长 ≈ ${shotDur.toFixed(2)}s（${bps} × 60/${BPM}）· 预计 ${n} 个镜头 · 选中 3 段`;
+  propSum.textContent = sum;
+  drySum.textContent = sum;
+  dClip.textContent = String(n);
+  dDur.textContent = target.toFixed(1) + "s";
 }
-["bps","target"].forEach(id => document.getElementById(id).addEventListener("input", render));
-document.getElementById("bgm").onchange = render;
-document.getElementById("dry").onclick = () => {
-  document.getElementById("dryNote").textContent = "干跑完成：insert_asset_clip × N，时长对齐 beat。";
-};
+const bpsEl = document.getElementById("bps");
+const targetEl = document.getElementById("target");
+const bVal = document.getElementById("bVal");
+const tVal = document.getElementById("tVal");
+const shotLane = document.getElementById("shotLane");
+const ticks = document.getElementById("ticks");
+const stat = document.getElementById("stat");
+const propSum = document.getElementById("propSum");
+const drySum = document.getElementById("drySum");
+const dClip = document.getElementById("dClip");
+const dDur = document.getElementById("dDur");
+bpsEl.addEventListener("input", render);
+targetEl.addEventListener("input", render);
+document.getElementById("dry").onclick = () => { document.getElementById("dryBox").hidden = false; };
 document.getElementById("propose").onclick = () => {
   document.getElementById("proposal").hidden = false;
-  document.getElementById("adoptNote").hidden = true;
+  document.getElementById("dryBox").hidden = true;
+  document.getElementById("actions").innerHTML =
+    '<button type="button" id="back">返回</button><button type="button" id="adopt">采纳为正式 Timeline</button>';
+  document.getElementById("back").onclick = () => location.reload();
+  document.getElementById("adopt").onclick = () => { document.getElementById("adoptNote").hidden = false; };
 };
-document.getElementById("back").onclick = () => { document.getElementById("proposal").hidden = true; };
-document.getElementById("adopt").onclick = () => { document.getElementById("adoptNote").hidden = false; };
-renderSegs();
 render();
 </script>
 </body>
