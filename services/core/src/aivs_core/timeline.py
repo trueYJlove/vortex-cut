@@ -52,6 +52,8 @@ PATCH_OPERATIONS = {
     "detach_audio",
     "set_clip_link",
     "clear_clip_link",
+    # W1.4 L/J cut（DEC-7 准入 AI 白名单）
+    "split_edit",
 }
 # AI 白名单（WHITELIST_EXPANSION 2026-09-22）：显式冻结集合 + 导入期断言，
 # 替代历史"差集"写法——差集让 8-28 后新增 op 未经裁决自动成为 AI 可用
@@ -85,6 +87,7 @@ AI_PATCH_OPERATIONS = frozenset({
     "set_clip_transform",
     "set_clip_keyframes",
     "clear_clip_keyframes",
+    "split_edit",
 })
 assert AI_PATCH_OPERATIONS <= PATCH_OPERATIONS, (
     "AI_PATCH_OPERATIONS contains operations absent from PATCH_OPERATIONS"
@@ -1339,6 +1342,138 @@ class TimelineService:
             split_t_us = split_timeline - clip["timeline_start_us"]
             _split_clip_keyframes(clip, right, split_t_us)
             self._split_bound_captions(document, clip["clip_id"], right["clip_id"], split_timeline)
+        elif op == "split_edit":
+            # W1.4：原子「画面切点 + 声音偏移 Δ」。音频切点 = source_time + audio_delta_us。
+            # J-cut：delta<0（下段声先入）；L-cut：delta>0（上段声延后）。
+            _exact_keys(
+                operation,
+                {"op", "clip_id", "source_time_us", "audio_delta_us"},
+            )
+            clip = _clip(document, operation.get("clip_id"))
+            if clip["asset_kind"] != "video":
+                raise DomainError("TIMELINE_INVALID", "只有视频片段可以做声画分离剪辑")
+            split_source = _integer(operation.get("source_time_us"), "拆分时间不合法")
+            audio_delta = _integer(operation.get("audio_delta_us"), "声音偏移不合法")
+            if not clip["source_start_us"] < split_source < clip["source_end_us"]:
+                raise DomainError("TIMELINE_INVALID", "拆分时间必须位于片段内部")
+            if (
+                split_source - clip["source_start_us"] < MIN_VIDEO_US
+                or clip["source_end_us"] - split_source < MIN_VIDEO_US
+            ):
+                raise DomainError("TIMELINE_INVALID", "拆分后的片段不得短于 100ms")
+            audio_cut = split_source + audio_delta
+            if not (
+                clip["source_start_us"] <= audio_cut <= clip["source_end_us"]
+            ):
+                raise DomainError("TIMELINE_INVALID", "声音切点越出素材范围")
+            if (
+                audio_cut - clip["source_start_us"] < MIN_VIDEO_US
+                and clip["source_end_us"] - audio_cut < MIN_VIDEO_US
+            ):
+                raise DomainError("TIMELINE_INVALID", "声音切点两侧均过短")
+            # 画面拆分（同 split_clip 自由定位语义）
+            speed = _clip_speed(clip)
+            split_timeline = clip["timeline_start_us"] + round(
+                (split_source - clip["source_start_us"]) * 1000 / speed
+            )
+            right = copy.deepcopy(clip)
+            right["clip_id"] = f"clip_{new_id()}"
+            right["source_start_us"] = split_source
+            clip["source_end_us"] = split_source
+            index = clips.index(clip)
+            clips.insert(index + 1, right)
+            old_timeline_end = clip["timeline_end_us"]
+            clip["timeline_end_us"] = split_timeline
+            right["timeline_start_us"] = split_timeline
+            right["timeline_end_us"] = old_timeline_end
+            _split_clip_keyframes(clip, right, split_timeline - clip["timeline_start_us"])
+            self._split_bound_captions(
+                document, clip["clip_id"], right["clip_id"], split_timeline
+            )
+            # 声音：内嵌 → 派生 A1 并静音 V1（防双声）；已有链接 A1 → 拆 A1。
+            gain = clip["audio"].get("gain_db", 0.0)
+            linked_audio = next(
+                (
+                    c
+                    for c in _clip_link_members(document, clip)
+                    if c is not clip and c.get("asset_kind") == "audio"
+                ),
+                None,
+            )
+            if linked_audio is not None:
+                if not (
+                    linked_audio["source_start_us"]
+                    <= audio_cut
+                    <= linked_audio["source_end_us"]
+                ):
+                    raise DomainError("TIMELINE_INVALID", "声音切点越出音频素材范围")
+                audio_right = copy.deepcopy(linked_audio)
+                audio_right["clip_id"] = f"clip_{new_id()}"
+                audio_right["source_start_us"] = audio_cut
+                linked_audio["source_end_us"] = audio_cut
+                a_index = clips.index(linked_audio)
+                clips.insert(a_index + 1, audio_right)
+                a_split_t = linked_audio["timeline_start_us"] + (
+                    audio_cut - linked_audio["source_start_us"]
+                )
+                a_old_end = linked_audio["timeline_end_us"]
+                linked_audio["timeline_end_us"] = a_split_t
+                audio_right["timeline_start_us"] = a_split_t
+                audio_right["timeline_end_us"] = a_old_end
+                # 组内若拆成多段，保持 link_group_id
+                if right.get("link_group_id"):
+                    audio_right["link_group_id"] = right["link_group_id"]
+            elif clip["audio"].get("enabled"):
+                # 内嵌音轨：派生 A1 两段（音频切点），V1 两段静音
+                left_audio = {
+                    "clip_id": f"clip_{new_id()}",
+                    "track_id": AUDIO_TRACK_ID,
+                    "order_index": 0,
+                    "asset_id": clip["asset_id"],
+                    "asset_kind": "audio",
+                    "source_start_us": clip["source_start_us"],
+                    "source_end_us": audio_cut,
+                    "timeline_start_us": clip["timeline_start_us"],
+                    "timeline_end_us": clip["timeline_start_us"]
+                    + max(0, audio_cut - clip["source_start_us"]),
+                    "layout": "fit",
+                    "audio": {"enabled": True, "gain_db": gain},
+                    "speed_milli": 1000,
+                }
+                right_audio = {
+                    "clip_id": f"clip_{new_id()}",
+                    "track_id": AUDIO_TRACK_ID,
+                    "order_index": 0,
+                    "asset_id": clip["asset_id"],
+                    "asset_kind": "audio",
+                    "source_start_us": audio_cut,
+                    "source_end_us": right["source_end_us"],
+                    "timeline_start_us": right["timeline_start_us"],
+                    "timeline_end_us": right["timeline_start_us"]
+                    + max(0, right["source_end_us"] - audio_cut),
+                    "layout": "fit",
+                    "audio": {"enabled": True, "gain_db": gain},
+                    "speed_milli": 1000,
+                }
+                # 时间线长度对齐源音频段（speed=1000）
+                left_audio["timeline_end_us"] = left_audio["timeline_start_us"] + (
+                    audio_cut - clip["source_start_us"]
+                )
+                right_audio["timeline_end_us"] = right_audio["timeline_start_us"] + (
+                    right["source_end_us"] - audio_cut
+                )
+                clip["audio"] = {"enabled": False, "gain_db": gain}
+                right["audio"] = {"enabled": False, "gain_db": gain}
+                clips.append(left_audio)
+                clips.append(right_audio)
+                for offset, aclip in enumerate(
+                    [c for c in clips if c["track_id"] == AUDIO_TRACK_ID]
+                ):
+                    aclip["order_index"] = offset
+            else:
+                clip["audio"] = {"enabled": False, "gain_db": gain}
+                right["audio"] = {"enabled": False, "gain_db": gain}
+            _drop_empty_link_groups(document)
         elif op == "detach_audio":
             # W0.3：A/V 对构造器——同源派生 A1 音频并与画面默认链接（D1）。
             _exact_keys(operation, {"op", "clip_id"})

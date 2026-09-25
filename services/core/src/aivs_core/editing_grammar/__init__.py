@@ -1,6 +1,7 @@
 """W1.1 剪辑语法层（确定性、零 egress）。"""
 
 from .beat_sync import BeatSyncPlanner
+from .lj_cut import LjCutPlanner
 from .planners import DropShortClipsPlanner
 from .protocol import PlanResult, Planner, ToolDescription
 from .registry import PlannerRegistry, default_registry
@@ -11,6 +12,7 @@ __all__ = [
     "BeatSyncPlanner",
     "DropShortClipsPlanner",
     "EditingGrammarService",
+    "LjCutPlanner",
     "PlanResult",
     "Planner",
     "PlannerRegistry",

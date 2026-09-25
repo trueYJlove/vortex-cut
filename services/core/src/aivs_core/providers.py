@@ -143,6 +143,15 @@ TIMELINE_PATCH_OPERATIONS_SCHEMA = {
             {"op": {"const": "split_clip"}, "clip_id": _STRING, "source_time_us": _INTEGER},
         ),
         _operation_schema(
+            ["clip_id", "source_time_us", "audio_delta_us"],
+            {
+                "op": {"const": "split_edit"},
+                "clip_id": _STRING,
+                "source_time_us": _INTEGER,
+                "audio_delta_us": _INTEGER,
+            },
+        ),
+        _operation_schema(
             ["clip_id", "layout"],
             {
                 "op": {"const": "set_layout"},
@@ -485,6 +494,7 @@ _PATCH_FIELDS: dict[str, dict[str, type | tuple[type, ...]]] = {
     "move_clip": {"clip_id": str, "to_index": int},
     "trim_clip": {"clip_id": str, "source_start_us": int, "source_end_us": int},
     "split_clip": {"clip_id": str, "source_time_us": int},
+    "split_edit": {"clip_id": str, "source_time_us": int, "audio_delta_us": int},
     "set_layout": {"clip_id": str, "layout": str},
     "set_audio": {"clip_id": str, "enabled": bool, "gain_db": (int, float)},
     "set_image_duration": {"clip_id": str, "duration_us": int},

@@ -943,6 +943,7 @@ export type TimelinePatchOperation =
   | { op: "set_track_flags"; track_id: string; locked?: boolean; hidden?: boolean; muted?: boolean; solo?: boolean }
   | { op: "trim_clip"; clip_id: TimelineClipId; source_start_us: number; source_end_us: number; ignore_link?: boolean }
   | { op: "split_clip"; clip_id: TimelineClipId; source_time_us: number }
+  | { op: "split_edit"; clip_id: TimelineClipId; source_time_us: number; audio_delta_us: number }
   | { op: "set_layout"; clip_id: TimelineClipId; layout: TimelineLayout }
   | { op: "set_audio"; clip_id: TimelineClipId; enabled: boolean; gain_db: number }
   | { op: "add_transition"; after_clip_id: TimelineClipId; kind: TransitionKind; duration_us: number }
@@ -1881,6 +1882,7 @@ export function isTimelinePatchOperation(value: unknown): value is TimelinePatch
     case "set_track_flags": return onlyKeys(value, ["op", "track_id", "locked", "hidden", "muted", "solo"]) && isString(value.track_id) && Boolean(value.track_id.length) && (value.locked === undefined || typeof value.locked === "boolean") && (value.hidden === undefined || typeof value.hidden === "boolean") && (value.muted === undefined || typeof value.muted === "boolean") && (value.solo === undefined || typeof value.solo === "boolean") && (value.locked !== undefined || value.hidden !== undefined || value.muted !== undefined || value.solo !== undefined);
     case "trim_clip": return onlyKeys(value, ["op", "clip_id", "source_start_us", "source_end_us", "ignore_link"]) && id("clip_id") && us("source_start_us") && us("source_end_us", 1) && Number(value.source_end_us) - Number(value.source_start_us) >= 100_000 && (value.ignore_link === undefined || typeof value.ignore_link === "boolean");
     case "split_clip": return onlyKeys(value, ["op", "clip_id", "source_time_us"]) && id("clip_id") && us("source_time_us", 1);
+    case "split_edit": return onlyKeys(value, ["op", "clip_id", "source_time_us", "audio_delta_us"]) && id("clip_id") && us("source_time_us", 1) && isInteger(value.audio_delta_us);
     case "set_layout": return onlyKeys(value, ["op", "clip_id", "layout"]) && id("clip_id") && isTimelineLayout(value.layout);
     case "set_audio": return onlyKeys(value, ["op", "clip_id", "enabled", "gain_db"]) && id("clip_id") && typeof value.enabled === "boolean" && isFiniteNumber(value.gain_db) && value.gain_db >= -60 && value.gain_db <= 12;
     case "add_transition": return onlyKeys(value, ["op", "after_clip_id", "kind", "duration_us"]) && id("after_clip_id") && oneOf(TRANSITION_IDS, value.kind) && us("duration_us", 100_000) && Number(value.duration_us) <= 2_000_000;

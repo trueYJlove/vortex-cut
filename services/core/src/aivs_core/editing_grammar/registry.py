@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from ..projects import DomainError
 from .beat_sync import BeatSyncPlanner
+from .lj_cut import LjCutPlanner
 from .planners import DropShortClipsPlanner
 from .protocol import Planner
 from .silence import RemovePausesPlanner
@@ -36,4 +37,5 @@ def default_registry() -> PlannerRegistry:
     registry.register(DropShortClipsPlanner())
     registry.register(RemovePausesPlanner())
     registry.register(BeatSyncPlanner())
+    registry.register(LjCutPlanner())
     return registry
