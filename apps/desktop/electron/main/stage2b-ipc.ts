@@ -10,7 +10,11 @@ import {
   parseAgentSessionCreateResponse,
   parseAgentSession,
   parseCvAnalysisSummary,
-  parseCvSamplesPage
+  parseCvSamplesPage,
+  parseEditingGrammarTool,
+  parseEditingGrammarPrepareResult,
+  parseEditingGrammarProposal,
+  parseEditingGrammarProposalListItem
 } from "@aivideo/contracts";
 
 type RequestInitLike = { method?: string; body?: string };
@@ -134,5 +138,47 @@ export function registerStage2bIpc(deps: Stage2bIpcDependencies): void {
     const value = record(input, ["project_id", "asset_id"], "cv samples list");
     const response = await fetchSafe(`${API_PREFIX}/projects/${id(value.project_id, "project_id")}/assets/${id(value.asset_id, "asset_id")}/cv-samples`);
     return parseCvSamplesPage(stage2bRendererSafe(response));
+  });
+  // W1.1 剪辑语法层（P-A 零 egress）：工具目录 / 干跑 / 提案 / 采纳。
+  deps.handle("editing-grammar:planners", async (_event, projectId) => {
+    const page = stage2bRendererSafe(await fetchSafe(`${API_PREFIX}/projects/${id(projectId, "project_id")}/editing-grammar/planners`)) as { items?: unknown[] };
+    if (!Array.isArray(page.items)) throw new Error("Core request failed");
+    return { items: page.items.map(parseEditingGrammarTool) };
+  });
+  deps.handle("editing-grammar:prepare", async (_event, input) => {
+    const value = record(input, ["project_id", "base_revision_id", "planner", "params"], "editing grammar prepare");
+    const params = value.params;
+    if (!params || typeof params !== "object" || Array.isArray(params)) throw new Error("Invalid editing grammar params");
+    const response = await fetchSafe(`${API_PREFIX}/projects/${id(value.project_id, "project_id")}/editing-grammar/prepare`, {
+      method: "POST",
+      body: JSON.stringify({ base_revision_id: id(value.base_revision_id, "base_revision_id"), planner: id(value.planner, "planner"), params })
+    });
+    return parseEditingGrammarPrepareResult(stage2bRendererSafe(response));
+  });
+  deps.handle("editing-grammar:propose", async (_event, input) => {
+    const value = record(input, ["project_id", "base_revision_id", "planner", "params"], "editing grammar propose");
+    const params = value.params;
+    if (!params || typeof params !== "object" || Array.isArray(params)) throw new Error("Invalid editing grammar params");
+    const response = await fetchSafe(`${API_PREFIX}/projects/${id(value.project_id, "project_id")}/editing-grammar/proposals`, {
+      method: "POST",
+      body: JSON.stringify({ base_revision_id: id(value.base_revision_id, "base_revision_id"), planner: id(value.planner, "planner"), params })
+    });
+    return parseEditingGrammarProposal(stage2bRendererSafe(response));
+  });
+  deps.handle("editing-grammar:proposal-list", async (_event, projectId) => {
+    const page = stage2bRendererSafe(await fetchSafe(`${API_PREFIX}/projects/${id(projectId, "project_id")}/editing-grammar/proposals`)) as { items?: unknown[] };
+    if (!Array.isArray(page.items)) throw new Error("Core request failed");
+    return { items: page.items.map(parseEditingGrammarProposalListItem) };
+  });
+  deps.handle("editing-grammar:proposal-get", async (_event, input) => {
+    const value = record(input, ["project_id", "proposal_id"], "editing grammar proposal get");
+    return parseEditingGrammarProposal(stage2bRendererSafe(await fetchSafe(`${API_PREFIX}/projects/${id(value.project_id, "project_id")}/editing-grammar/proposals/${id(value.proposal_id, "proposal_id")}`)));
+  });
+  deps.handle("editing-grammar:proposal-apply", async (_event, input) => {
+    const value = record(input, ["project_id", "proposal_id", "base_revision_id", "proposed_document_sha256"], "editing grammar proposal apply");
+    return parseTimelineState(stage2bRendererSafe(await fetchSafe(`${API_PREFIX}/projects/${id(value.project_id, "project_id")}/editing-grammar/proposals/${id(value.proposal_id, "proposal_id")}/apply`, {
+      method: "POST",
+      body: JSON.stringify({ base_revision_id: id(value.base_revision_id, "base_revision_id"), proposed_document_sha256: sha256(value.proposed_document_sha256, "proposed_document_sha256") })
+    })));
   });
 }

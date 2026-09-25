@@ -112,10 +112,17 @@ class WaveformRequest(BaseModel):
 
 
 class CvAnalysisRequest(BaseModel):
-    """AI-2 CV 信号分析请求（generate=True 登记分析作业；参数服务端固定）。"""
+    """AI-2 CV 信号分析请求（generate=True 登记分析作业）。
+
+    ADR-0005 阶段 2 密度旋钮（可选；不传 = 默认，行为与阶段 1 决策面一致）：
+    - `target_gap_us`：当前采样是否已够密的判据（默认 4s 盲区阈值）；
+    - `budget_per_minute_s`：每分钟墙钟预算（默认 10，仍过 floor/cap）。
+    """
     model_config = ConfigDict(extra="forbid")
 
     generate: bool = False
+    target_gap_us: int | None = Field(default=None, ge=100_000, le=60_000_000)
+    budget_per_minute_s: float | None = Field(default=None, ge=1.0, le=120.0)
 
 
 class PcmChunkRequest(BaseModel):
@@ -2285,7 +2292,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 # 无分析或 stale/failed：登记新分析（stale = 素材指纹已变）。
                 resolved_path = state.projects.resolve_asset_path(asset_id)
                 job_id, _analysis_id = state.cv_signals.create_analysis_job(
-                    project_id, asset_row, resolved_path["path"])
+                    project_id, asset_row, resolved_path["path"],
+                    target_gap_us=request.target_gap_us,
+                    budget_per_minute_s=request.budget_per_minute_s,
+                )
                 status = "queued"
             return {
                 "analysis_id": (summary or {}).get("analysis_id"),
@@ -2294,7 +2304,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "algorithm_version": CV_ALGORITHM_VERSION,
                 "sample_count": (summary or {}).get("sample_count"),
                 "scene_cut_count": (summary or {}).get("scene_cut_count"),
-                # ADR-0005 阶段 1：采样密度（增量可选字段；旧客户端不读不受影响）。
+                # ADR-0005 阶段 1/2：采样密度（增量可选字段；旧客户端不读不受影响）。
                 "density_status": (summary or {}).get("density_status"),
                 "achieved_max_gap_us": (summary or {}).get("achieved_max_gap_us"),
                 "gap_threshold_us": (summary or {}).get("gap_threshold_us"),

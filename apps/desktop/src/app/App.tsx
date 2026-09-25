@@ -11,6 +11,7 @@ import { ProviderImageGenerationWorkbench } from "./provider-image-generation/Pr
 import { ShotRequirementWorkbench } from "./shot-requirements/ShotRequirementWorkbench.js";
 import { SettingsDialog } from "./settings/SettingsDialog.js";
 import { AgentSessionPanel } from "./agent-session/AgentSessionPanel.js";
+import { EditingGrammarPanel } from "./editing-grammar/EditingGrammarPanel.js";
 import { Dialog } from "./Dialog.js";
 import { errorCode, safeErrorMessage, safeTaskErrorMessage } from "./safeErrors.js";
 import { PreviewPipOverlays, type PipOverlay, type PipTransform } from "./PreviewPipOverlays.js";
@@ -253,6 +254,7 @@ export function App() {
   const [batchOpen, setBatchOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
+  const [editingGrammarOpen, setEditingGrammarOpen] = useState(false);
   const [generationOpen, setGenerationOpen] = useState(false);
   const [renderPanelOpen, setRenderPanelOpen] = useState(false);
   // 轮询 effect 闭包读面板开关最新值（决定 exports 对账端点是否参与本轮）。
@@ -2198,7 +2200,7 @@ export function App() {
     编辑: [{ label: "撤销", icon: Undo2, action: () => void undoRedo("undo"), disabled: Boolean(commandDisabledReason("timeline.undo")) }, { label: "重做", icon: Redo2, action: () => void undoRedo("redo"), disabled: Boolean(commandDisabledReason("timeline.redo")) }],
     时间线: [{ label: "创建空时间线", icon: SquarePlus, action: () => void createTimeline({ kind: "empty" }), disabled: Boolean(commandDisabledReason("timeline.create")) }, { divider: true }, { label: "拆分所选片段", icon: Scissors, action: () => runCommand("timeline.split"), disabled: Boolean(commandDisabledReason("timeline.split")) }, { label: "生成预览", icon: MonitorPlay, action: () => runCommand("preview.generate"), disabled: Boolean(commandDisabledReason("preview.generate")) }, { label: "导出", icon: Upload, action: () => runCommand("export.open"), disabled: Boolean(commandDisabledReason("export.open")) }],
     界面: [{ label: "恢复默认布局", icon: LayoutPanelLeft, action: () => { setLeftWidth(280); setRightWidth(300); setTimelineHeight(230); } }, { label: "命令搜索", icon: CommandIcon, action: () => setCommandSearchOpen(true) }, { label: "快捷键设置", icon: Keyboard, action: () => setShortcutsOpen(true) }],
-    工具: [{ group: "AI" }, { label: "AI 助手", icon: WandSparkles, action: () => setAgentOpen(true), disabled: !project }, { label: "AI 粗剪", icon: Sparkles, action: () => void openAi(), disabled: Boolean(commandDisabledReason("ai.open")) }, { label: "AI 修改", icon: WandSparkles, action: () => void openPatch(), disabled: Boolean(commandDisabledReason("ai.revise")) }, { label: "版本比较", icon: GitCompare, action: () => void openRevisionCompare(), disabled: Boolean(commandDisabledReason("tools.compare")) }, { divider: true }, { label: "镜头需求", icon: Clapperboard, action: () => setShotRequirementsOpen(true), disabled: Boolean(commandDisabledReason("tools.shots")) }, { label: "生成验证（模拟）", icon: FlaskConical, action: () => setGenerationOpen(true), disabled: Boolean(commandDisabledReason("tools.verify")) }, { label: "真实图片生成", icon: ImageIcon, action: () => setProviderImageGenerationOpen(true), disabled: Boolean(commandDisabledReason("tools.imageGen")) }],
+    工具: [{ group: "AI" }, { label: "AI 助手", icon: WandSparkles, action: () => setAgentOpen(true), disabled: !project }, { label: "AI 粗剪", icon: Sparkles, action: () => void openAi(), disabled: Boolean(commandDisabledReason("ai.open")) }, { label: "AI 修改", icon: WandSparkles, action: () => void openPatch(), disabled: Boolean(commandDisabledReason("ai.revise")) }, { label: "剪辑语法", icon: Scissors, action: () => setEditingGrammarOpen(true), disabled: !project }, { label: "版本比较", icon: GitCompare, action: () => void openRevisionCompare(), disabled: Boolean(commandDisabledReason("tools.compare")) }, { divider: true }, { label: "镜头需求", icon: Clapperboard, action: () => setShotRequirementsOpen(true), disabled: Boolean(commandDisabledReason("tools.shots")) }, { label: "生成验证（模拟）", icon: FlaskConical, action: () => setGenerationOpen(true), disabled: Boolean(commandDisabledReason("tools.verify")) }, { label: "真实图片生成", icon: ImageIcon, action: () => setProviderImageGenerationOpen(true), disabled: Boolean(commandDisabledReason("tools.imageGen")) }],
     帮助: [{ label: "用户使用手册", icon: BookOpen, action: () => showNotice("请查看 docs/VORTEX_CUT_USER_MANUAL.md", "info") }]
   };
   return <main className="editor-shell" style={{ "--left-width": `${leftWidth}px`, "--right-width": `${rightWidth}px`, "--timeline-height": `${timelineHeight}px` } as React.CSSProperties} onClick={() => activeMenu && setActiveMenu(null)}>
@@ -2364,6 +2366,13 @@ export function App() {
     {generationOpen && project && <MediaGenerationWorkbench key={project.project_id} project={project} assets={assets} onClose={() => setGenerationOpen(false)} />}
     {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} onNotify={message => showNotice(message, "info")} />}
     {agentOpen && project && <AgentSessionPanel projectId={project.project_id} baseRevisionId={timeline?.current_revision.timeline_revision_id ?? null} providers={[...aiProviders, ...patchProviders.filter(item => !aiProviders.some(p => p.provider_config_id === item.provider_config_id))]} onClose={() => setAgentOpen(false)} onNotify={message => showNotice(message, "info")} />}
+    {editingGrammarOpen && project && <EditingGrammarPanel
+      projectId={project.project_id}
+      baseRevisionId={timeline?.current_revision.timeline_revision_id ?? null}
+      onClose={() => setEditingGrammarOpen(false)}
+      onApplied={state => { acceptState(state); void loadRenderData(project); }}
+      onNotify={message => showNotice(message, "success")}
+    />}
     {providerImageGenerationOpen && project && <ProviderImageGenerationWorkbench key={`provider-image-${project.project_id}`} project={project} assets={assets} onClose={() => setProviderImageGenerationOpen(false)} />}
     {shotRequirementsOpen && project && <ShotRequirementWorkbench key={project.project_id} project={project} assets={assets} onClose={() => setShotRequirementsOpen(false)} />}
     {revisionOpen && <Dialog titleId="revision-compare-title" label="版本比较" onClose={() => { setRevisionOpen(false); setRevisionDiff(undefined); }} className="revision-compare"><div className="modal-heading"><div><h2 id="revision-compare-title">版本比较</h2><p>只读操作，不改变当前 Revision、草稿或渲染记录。</p></div><IconButton label="关闭版本比较" onClick={() => { setRevisionOpen(false); setRevisionDiff(undefined); }}><X /></IconButton></div><div className="revision-selectors"><label>基线<select aria-label="基线 Revision" value={revisionPair.base} onChange={event => setRevisionPair(value => ({ ...value, base: event.target.value }))}>{revisions.map(item => <option value={item.timeline_revision_id} key={`base-${item.timeline_revision_id}`}>{item.summary} · {item.created_at}</option>)}</select></label><label>目标<select aria-label="目标 Revision" value={revisionPair.target} onChange={event => setRevisionPair(value => ({ ...value, target: event.target.value }))}>{revisions.map(item => <option value={item.timeline_revision_id} key={`target-${item.timeline_revision_id}`}>{item.summary} · {item.created_at}</option>)}</select></label></div><div className="modal-actions"><button disabled={!revisionPair.base || !revisionPair.target || revisionPair.base === revisionPair.target} onClick={() => void compareRevisions()}>比较</button></div>{revisionDiff && <TimelineDiffView diff={revisionDiff} />}</Dialog>}

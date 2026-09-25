@@ -69,6 +69,10 @@ import {
   , parseAgentSession
   , parseCvAnalysisSummary
   , parseCvSamplesPage
+  , parseEditingGrammarTool
+  , parseEditingGrammarPrepareResult
+  , parseEditingGrammarProposal
+  , parseEditingGrammarProposalListItem
   , parseTimelinePatchEgressPreview
   , parseTimelinePatchGeneration
   , parseTimelinePatchGenerationCreateResponse
@@ -78,6 +82,10 @@ import {
   , type TimelinePatchGeneration
   , type TimelinePatchGenerationCreateResponse
   , type TimelinePatchProposal
+  , type EditingGrammarTool
+  , type EditingGrammarPrepareResult
+  , type EditingGrammarProposal
+  , type EditingGrammarProposalListItem
   , parseTimelinePatchCapabilityTestResponse
   , type TimelinePatchCapabilityTestResponse
   , isPlatformPreset, isRenditionPreset, isRenditionPreview, isExportBatch
@@ -449,6 +457,33 @@ export class CoreClient {
   // 阶段 C 稳定性包：CV 信号样本（sparkline 可视化数据）。
   listCvSamples(projectId: ProjectId, assetId: string): Promise<CvSamplesPage> {
     return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/cv-samples`).then(value => parseCvSamplesPage(removeSensitiveFields(value)));
+  }
+  // W1.1 剪辑语法层（零 egress）。
+  listEditingGrammarPlanners(projectId: ProjectId): Promise<{ items: EditingGrammarTool[] }> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/editing-grammar/planners`).then(value => {
+      const page = removeSensitiveFields(value) as { items?: unknown[] };
+      if (!Array.isArray(page.items)) throw new Error("Invalid EditingGrammarToolPage");
+      return { items: page.items.map(parseEditingGrammarTool) };
+    });
+  }
+  prepareEditingGrammar(projectId: ProjectId, input: { base_revision_id: TimelineRevisionId; planner: string; params: Record<string, unknown> }): Promise<EditingGrammarPrepareResult> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/editing-grammar/prepare`, { method: "POST", body: JSON.stringify(input) }).then(value => parseEditingGrammarPrepareResult(removeSensitiveFields(value)));
+  }
+  proposeEditingGrammar(projectId: ProjectId, input: { base_revision_id: TimelineRevisionId; planner: string; params: Record<string, unknown> }): Promise<EditingGrammarProposal> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/editing-grammar/proposals`, { method: "POST", body: JSON.stringify(input) }).then(value => parseEditingGrammarProposal(removeSensitiveFields(value)));
+  }
+  listEditingGrammarProposals(projectId: ProjectId): Promise<{ items: EditingGrammarProposalListItem[] }> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/editing-grammar/proposals`).then(value => {
+      const page = removeSensitiveFields(value) as { items?: unknown[] };
+      if (!Array.isArray(page.items)) throw new Error("Invalid EditingGrammarProposalPage");
+      return { items: page.items.map(parseEditingGrammarProposalListItem) };
+    });
+  }
+  getEditingGrammarProposal(projectId: ProjectId, proposalId: string): Promise<EditingGrammarProposal> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/editing-grammar/proposals/${encodeURIComponent(proposalId)}`).then(value => parseEditingGrammarProposal(removeSensitiveFields(value)));
+  }
+  applyEditingGrammarProposal(projectId: ProjectId, proposalId: string, input: { base_revision_id: TimelineRevisionId; proposed_document_sha256: string }): Promise<TimelineState> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/editing-grammar/proposals/${encodeURIComponent(proposalId)}/apply`, { method: "POST", body: JSON.stringify(input) }).then(value => parseTimelineState(removeSensitiveFields(value)));
   }
   compareTimelineRevisions(projectId: ProjectId, input: { base_revision_id: TimelineRevisionId; target_revision_id: TimelineRevisionId }): Promise<TimelineDiff> {
     return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/timeline/revision-diffs`, { method: "POST", body: JSON.stringify(input) }).then(value => parseTimelineDiff(removeSensitiveFields(value)));

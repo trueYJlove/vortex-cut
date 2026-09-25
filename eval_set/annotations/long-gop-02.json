@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "asset_id": "long-gop-02",
+  "bucket": "long_gop",
+  "annotator": "synthetic-ground-truth",
+  "annotated_at": "2026-09-25T02:47:34Z",
+  "notes": "合成真值标注（make_eval_materials.py）",
+  "scene_cuts_us": [
+    6000000
+  ]
+}

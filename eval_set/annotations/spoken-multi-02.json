@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "asset_id": "spoken-multi-02",
+  "bucket": "spoken_multi",
+  "annotator": "synthetic-ground-truth",
+  "annotated_at": "2026-09-25T02:47:34Z",
+  "notes": "合成真值标注（make_eval_materials.py）",
+  "scene_cuts_us": [
+    8000000
+  ],
+  "silence_intervals_us": [
+    {
+      "start_us": 8000000,
+      "end_us": 8800000
+    }
+  ],
+  "speaker_turns": [
+    {
+      "start_us": 0,
+      "end_us": 8000000,
+      "speaker": "A"
+    },
+    {
+      "start_us": 8800000,
+      "end_us": 16800000,
+      "speaker": "B"
+    }
+  ]
+}

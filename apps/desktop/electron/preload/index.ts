@@ -5,7 +5,11 @@ import type {
   AgentSessionCreateResponse,
   AgentSessionEgressPreview,
   CvAnalysisSummary,
-  CvSamplesPage
+  CvSamplesPage,
+  EditingGrammarTool,
+  EditingGrammarPrepareResult,
+  EditingGrammarProposal,
+  EditingGrammarProposalListItem
 } from "@aivideo/contracts";
 import type {
   Asset,
@@ -178,6 +182,13 @@ export interface DesktopApi {
   getAgentSession: (sessionId: string) => Promise<AgentSession>;
   getCvAnalysis: (input: { project_id: ProjectId; asset_id: string; generate: boolean }) => Promise<CvAnalysisSummary>;
   listCvSamples: (input: { project_id: ProjectId; asset_id: string }) => Promise<CvSamplesPage>;
+  // W1.1 剪辑语法层（零 egress）
+  listEditingGrammarPlanners: (projectId: ProjectId) => Promise<{ items: EditingGrammarTool[] }>;
+  prepareEditingGrammar: (input: { project_id: ProjectId; base_revision_id: TimelineRevisionId; planner: string; params: Record<string, unknown> }) => Promise<EditingGrammarPrepareResult>;
+  proposeEditingGrammar: (input: { project_id: ProjectId; base_revision_id: TimelineRevisionId; planner: string; params: Record<string, unknown> }) => Promise<EditingGrammarProposal>;
+  listEditingGrammarProposals: (projectId: ProjectId) => Promise<{ items: EditingGrammarProposalListItem[] }>;
+  getEditingGrammarProposal: (input: { project_id: ProjectId; proposal_id: string }) => Promise<EditingGrammarProposal>;
+  applyEditingGrammarProposal: (input: { project_id: ProjectId; proposal_id: string; base_revision_id: TimelineRevisionId; proposed_document_sha256: string }) => Promise<TimelineState>;
   createTimeline: (input: { project_id: ProjectId; timeline: TimelineCreateInput }) => Promise<TimelineState>;
   getTimeline: (projectId: ProjectId) => Promise<TimelineState>;
   patchTimeline: (input: { project_id: ProjectId; patch: TimelinePatch }) => Promise<TimelineState>;
@@ -344,6 +355,12 @@ const api: DesktopApi = {
   getAgentSession: sessionId => ipcRenderer.invoke("agent-session:get", sessionId),
   getCvAnalysis: input => ipcRenderer.invoke("cv-analysis:get", input),
   listCvSamples: input => ipcRenderer.invoke("cv-samples:list", input),
+  listEditingGrammarPlanners: projectId => ipcRenderer.invoke("editing-grammar:planners", projectId),
+  prepareEditingGrammar: input => ipcRenderer.invoke("editing-grammar:prepare", input),
+  proposeEditingGrammar: input => ipcRenderer.invoke("editing-grammar:propose", input),
+  listEditingGrammarProposals: projectId => ipcRenderer.invoke("editing-grammar:proposal-list", projectId),
+  getEditingGrammarProposal: input => ipcRenderer.invoke("editing-grammar:proposal-get", input),
+  applyEditingGrammarProposal: input => ipcRenderer.invoke("editing-grammar:proposal-apply", input),
   createTimeline: input => ipcRenderer.invoke("timeline:create", input),
   getTimeline: projectId => ipcRenderer.invoke("timeline:get", projectId),
   patchTimeline: input => ipcRenderer.invoke("timeline:patch", input),

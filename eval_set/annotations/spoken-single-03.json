@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "asset_id": "spoken-single-03",
+  "bucket": "spoken_single",
+  "annotator": "synthetic-ground-truth",
+  "annotated_at": "2026-09-25T02:47:34Z",
+  "notes": "合成真值标注（make_eval_materials.py）",
+  "scene_cuts_us": [
+    39000000,
+    80500000
+  ],
+  "silence_intervals_us": [
+    {
+      "start_us": 39000000,
+      "end_us": 41500000
+    },
+    {
+      "start_us": 80500000,
+      "end_us": 83000000
+    }
+  ]
+}

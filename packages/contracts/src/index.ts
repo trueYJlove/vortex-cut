@@ -1007,6 +1007,54 @@ export interface TimelinePatchPrepareRequest { base_revision_id: TimelineRevisio
 export interface TimelinePatchGenerationCreateRequest { timeline_patch_egress_preview_id: TimelinePatchEgressPreviewId; payload_sha256: string; }
 export interface TimelinePatchGenerationCreateResponse { timeline_patch_generation_id: TimelinePatchGenerationId; job: Job; }
 export interface TimelinePatchProposalApplyRequest { base_revision_id: TimelineRevisionId; proposed_document_sha256: string; }
+
+// W1.1 剪辑语法层（P-A：零 egress）——工具目录 / 干跑 / 提案 / 采纳
+export interface EditingGrammarTool {
+  name: string;
+  title: string;
+  description: string;
+  parameters_schema: Record<string, unknown>;
+  preconditions: string[];
+}
+export interface EditingGrammarPrepareResult {
+  planner: string;
+  params: Record<string, unknown>;
+  summary: string;
+  operations: TimelinePatchOperation[];
+  operations_count: number;
+  noop: boolean;
+  rationale: Record<string, unknown>;
+  base_revision_id: TimelineRevisionId;
+  base_document_sha256: string;
+}
+/** 语法提案 patch：summary + operations（无 TimelinePatch 的 schema/base 包装）。 */
+export interface EditingGrammarPatch {
+  summary: string;
+  operations: TimelinePatchOperation[];
+}
+export interface EditingGrammarProposal {
+  editing_grammar_proposal_id: string;
+  project_id: ProjectId;
+  planner: string;
+  params: Record<string, unknown>;
+  base_revision_id: TimelineRevisionId;
+  base_document_sha256: string;
+  patch: EditingGrammarPatch;
+  patch_sha256: string;
+  proposed_document_sha256: string;
+  rationale: Record<string, unknown>;
+  diff: TimelineDiff;
+  created_at: string;
+  applied_revision_id: TimelineRevisionId | null;
+}
+export interface EditingGrammarProposalListItem {
+  id: string;
+  planner: string;
+  base_revision_id: TimelineRevisionId;
+  proposed_document_sha256: string;
+  created_at: string;
+  patch_sha256: string;
+}
 export interface TimelineRevisionDiffRequest { base_revision_id: TimelineRevisionId; target_revision_id: TimelineRevisionId; }
 
 // AI-1（ADR-0003 D2）：内置多步 agent 会话——单发提案升级为带校验反馈重试的
@@ -1053,8 +1101,16 @@ export interface AgentSessionUpdatedEvent {
 }
 
 // AI-2（Layer 0）：素材 CV 信号分析——generate=True 登记分析作业；仅 video 素材。
+// ADR-0005 阶段 2 密度旋钮（可选；不传 = 默认，决策面与阶段 1 一致）。
 export type CvAnalysisStatus = "queued" | "running" | "ready" | "failed" | "stale";
-export interface CvAnalysisRequest { generate: boolean; }
+export type CvDensityStatus = "full" | "sparse";
+export interface CvAnalysisRequest {
+  generate: boolean;
+  /** 当前采样是否已够密的判据（默认 4s 盲区阈值；钳制 100ms–60s）。 */
+  target_gap_us?: number | null;
+  /** 每分钟墙钟预算（默认 10；钳制 1–120）。 */
+  budget_per_minute_s?: number | null;
+}
 export interface CvAnalysisSummary {
   analysis_id: string | null;
   status: CvAnalysisStatus | null;
@@ -1063,6 +1119,9 @@ export interface CvAnalysisSummary {
   sample_count: number | null;
   scene_cut_count: number | null;
   signals: string[];
+  density_status?: CvDensityStatus | null;
+  achieved_max_gap_us?: number | null;
+  gap_threshold_us?: number | null;
 }
 // 可视化（阶段 C 稳定性包）：最新 ready 分析的信号样本 sparkline 数据。
 export interface CvSample {
@@ -1949,6 +2008,78 @@ export function parseTimelinePatchEgressPreview(value: unknown): TimelinePatchEg
 export function parseTimelinePatchGeneration(value: unknown): TimelinePatchGeneration { if (!isTimelinePatchGeneration(value)) throw new ContractValidationError("TimelinePatchGeneration"); return value; }
 export function parseTimelineDiff(value: unknown): TimelineDiff { if (!isTimelineDiff(value)) throw new ContractValidationError("TimelineDiff"); return value; }
 export function parseTimelinePatchProposal(value: unknown): TimelinePatchProposal { if (!isTimelinePatchProposal(value)) throw new ContractValidationError("TimelinePatchProposal"); return value; }
+
+// W1.1 剪辑语法层校验：required 键 + 类型正确；params/rationale 为自由对象。
+function isEditingGrammarTool(value: unknown): value is EditingGrammarTool {
+  return isRecord(value)
+    && typeof value.name === "string" && value.name.length > 0
+    && typeof value.title === "string" && value.title.length > 0
+    && typeof value.description === "string"
+    && isRecord(value.parameters_schema)
+    && Array.isArray(value.preconditions) && value.preconditions.every(item => typeof item === "string");
+}
+export function parseEditingGrammarTool(value: unknown): EditingGrammarTool {
+  if (!isEditingGrammarTool(value)) throw new ContractValidationError("EditingGrammarTool");
+  return value;
+}
+
+function isEditingGrammarPatch(value: unknown): value is EditingGrammarPatch {
+  return isRecord(value)
+    && typeof value.summary === "string" && value.summary.length > 0
+    && Array.isArray(value.operations)
+    && value.operations.every(op => isRecord(op) && typeof op.op === "string");
+}
+function isEditingGrammarPrepareResult(value: unknown): value is EditingGrammarPrepareResult {
+  return isRecord(value)
+    && typeof value.planner === "string" && value.planner.length > 0
+    && isRecord(value.params)
+    && typeof value.summary === "string"
+    && Array.isArray(value.operations) && value.operations.every(op => isRecord(op) && typeof op.op === "string")
+    && typeof value.operations_count === "number" && isFiniteNumber(value.operations_count)
+    && typeof value.noop === "boolean"
+    && isRecord(value.rationale)
+    && isId(value.base_revision_id)
+    && isSha256(value.base_document_sha256);
+}
+export function parseEditingGrammarPrepareResult(value: unknown): EditingGrammarPrepareResult {
+  if (!isEditingGrammarPrepareResult(value)) throw new ContractValidationError("EditingGrammarPrepareResult");
+  return value;
+}
+
+function isEditingGrammarProposal(value: unknown): value is EditingGrammarProposal {
+  return isRecord(value)
+    && isId(value.editing_grammar_proposal_id)
+    && isId(value.project_id)
+    && typeof value.planner === "string" && value.planner.length > 0
+    && isRecord(value.params)
+    && isId(value.base_revision_id)
+    && isSha256(value.base_document_sha256)
+    && isEditingGrammarPatch(value.patch)
+    && isSha256(value.patch_sha256)
+    && isSha256(value.proposed_document_sha256)
+    && isRecord(value.rationale)
+    && isTimelineDiff(value.diff)
+    && isTime(value.created_at)
+    && (value.applied_revision_id === null || isId(value.applied_revision_id));
+}
+export function parseEditingGrammarProposal(value: unknown): EditingGrammarProposal {
+  if (!isEditingGrammarProposal(value)) throw new ContractValidationError("EditingGrammarProposal");
+  return value;
+}
+
+function isEditingGrammarProposalListItem(value: unknown): value is EditingGrammarProposalListItem {
+  return isRecord(value)
+    && isId(value.id)
+    && typeof value.planner === "string" && value.planner.length > 0
+    && isId(value.base_revision_id)
+    && isSha256(value.proposed_document_sha256)
+    && isTime(value.created_at)
+    && isSha256(value.patch_sha256);
+}
+export function parseEditingGrammarProposalListItem(value: unknown): EditingGrammarProposalListItem {
+  if (!isEditingGrammarProposalListItem(value)) throw new ContractValidationError("EditingGrammarProposalListItem");
+  return value;
+}
 export function parseTimelinePatchGenerationCreateResponse(value: unknown): TimelinePatchGenerationCreateResponse { if (!isTimelinePatchGenerationCreateResponse(value)) throw new ContractValidationError("TimelinePatchGenerationCreateResponse"); return value; }
 export function parseRenderedMediaInfo(value: unknown): RenderedMediaInfo { if (!isRenderedMediaInfo(value)) throw new ContractValidationError("RenderedMediaInfo"); return value; }
 export function parseRenderArtifact(value: unknown): RenderArtifact { if (!isRenderArtifact(value)) throw new ContractValidationError("RenderArtifact"); return value; }

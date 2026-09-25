@@ -1,4 +1,4 @@
-﻿from __future__ import annotations  # noqa: I001
+from __future__ import annotations  # noqa: I001
 
 import asyncio
 import hashlib
@@ -312,11 +312,12 @@ def test_budget_blocks_unaffordable_fallback_and_marks_sparse(
     assert result["achieved_max_gap_us"] > CV_SAMPLE_GAP_FALLBACK_US
 
 
-def test_run_fallback_aborts_on_deadline_and_keeps_fast_samples(tmp_path: Path) -> None:
-    """**deadline 兜底**：回退超时即中止，且**保留快路径采样**（诚实降级）。
+def test_run_fallback_aborts_on_deadline_and_merges_partial(tmp_path: Path) -> None:
+    """**deadline 兜底 + 阶段 2 合并**：回退超时即中止，保留全片覆盖。
 
     估算模型已知可高估约 2.4 倍，不足以单独作保证，故该兜底必须独立可用。
-    用极小 deadline 确定性触发中止路径。
+    用极小 deadline 确定性触发中止路径。阶段 2：中止后与快路径 I 帧合并
+    （密集前缀 + I 帧尾部），不再 `samples is fast` 整段丢弃。
     """
     _require_ffmpeg()
     service, _db = _service(tmp_path)
@@ -329,7 +330,10 @@ def test_run_fallback_aborts_on_deadline_and_keeps_fast_samples(tmp_path: Path) 
         service._run_fallback(media, fast, asyncio.Event(), deadline_s=0.001)
     )
     assert aborted is True, "极小 deadline 下回退应被中止"
-    assert samples is fast, "中止后必须保留快路径采样，不得丢段"
+    # 合并结果必须覆盖全片（含快路径尾部），不得丢段。
+    assert len(samples) >= len(fast)
+    assert samples[-1]["timestamp_us"] == fast[-1]["timestamp_us"]
+    assert samples[0]["timestamp_us"] == min(fast[0]["timestamp_us"], samples[0]["timestamp_us"])
 
 
 def test_run_fallback_prioritises_job_cancel_over_deadline(tmp_path: Path) -> None:

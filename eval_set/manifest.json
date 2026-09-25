@@ -1,11 +1,25 @@
 {
   "schema_version": 1,
   "buckets": {
-    "spoken_single": { "min_samples": 5, "min_total_duration_s": 600 },
-    "spoken_multi": { "min_samples": 3, "min_cameras": 2 },
-    "life_no_voice": { "min_samples": 5 },
-    "music": { "min_samples": 3, "min_distinct_bpm": 3 },
-    "long_gop": { "min_samples": 2, "min_gop_s": 5 }
+    "spoken_single": {
+      "min_samples": 5,
+      "min_total_duration_s": 600
+    },
+    "spoken_multi": {
+      "min_samples": 3,
+      "min_cameras": 2
+    },
+    "life_no_voice": {
+      "min_samples": 5
+    },
+    "music": {
+      "min_samples": 3,
+      "min_distinct_bpm": 3
+    },
+    "long_gop": {
+      "min_samples": 2,
+      "min_gop_s": 5
+    }
   },
   "assets": [
     {
@@ -34,6 +48,118 @@
       "source_fingerprint": "sha256:pending",
       "duration_us": 60000000,
       "notes": "ADR-0005 4K60 长 GOP 合成素材；缺人工切点标注前不参与切点 P/R"
+    },
+    {
+      "asset_id": "spoken-single-01",
+      "bucket": "spoken_single",
+      "kind": "synthetic_media",
+      "media": "test-assets/generated/eval/spoken-single-01.mp4",
+      "duration_us": 122000000
+    },
+    {
+      "asset_id": "spoken-single-02",
+      "bucket": "spoken_single",
+      "kind": "synthetic_media",
+      "media": "test-assets/generated/eval/spoken-single-02.mp4",
+      "duration_us": 122000000
+    },
+    {
+      "asset_id": "spoken-single-03",
+      "bucket": "spoken_single",
+      "kind": "synthetic_media",
+      "media": "test-assets/generated/eval/spoken-single-03.mp4",
+      "duration_us": 122000000
+    },
+    {
+      "asset_id": "spoken-single-04",
+      "bucket": "spoken_single",
+      "kind": "synthetic_media",
+      "media": "test-assets/generated/eval/spoken-single-04.mp4",
+      "duration_us": 122000000
+    },
+    {
+      "asset_id": "spoken-single-05",
+      "bucket": "spoken_single",
+      "kind": "synthetic_media",
+      "media": "test-assets/generated/eval/spoken-single-05.mp4",
+      "duration_us": 122000000
+    },
+    {
+      "asset_id": "music-90bpm",
+      "bucket": "music",
+      "kind": "synthetic_media",
+      "media": "test-assets/generated/eval/music-90bpm.mp4",
+      "duration_us": 30000000
+    },
+    {
+      "asset_id": "music-110bpm",
+      "bucket": "music",
+      "kind": "synthetic_media",
+      "media": "test-assets/generated/eval/music-110bpm.mp4",
+      "duration_us": 30000000
+    },
+    {
+      "asset_id": "music-140bpm",
+      "bucket": "music",
+      "kind": "synthetic_media",
+      "media": "test-assets/generated/eval/music-140bpm.mp4",
+      "duration_us": 30000000
+    },
+    {
+      "asset_id": "life-no-voice-01",
+      "bucket": "life_no_voice",
+      "kind": "synthetic_media",
+      "media": "test-assets/generated/eval/life-no-voice-01.mp4",
+      "duration_us": 12000000
+    },
+    {
+      "asset_id": "life-no-voice-02",
+      "bucket": "life_no_voice",
+      "kind": "synthetic_media",
+      "media": "test-assets/generated/eval/life-no-voice-02.mp4",
+      "duration_us": 12000000
+    },
+    {
+      "asset_id": "life-no-voice-03",
+      "bucket": "life_no_voice",
+      "kind": "synthetic_media",
+      "media": "test-assets/generated/eval/life-no-voice-03.mp4",
+      "duration_us": 12000000
+    },
+    {
+      "asset_id": "long-gop-01",
+      "bucket": "long_gop",
+      "kind": "synthetic_media",
+      "media": "test-assets/generated/eval/long-gop-01.mp4",
+      "duration_us": 12000000
+    },
+    {
+      "asset_id": "long-gop-02",
+      "bucket": "long_gop",
+      "kind": "synthetic_media",
+      "media": "test-assets/generated/eval/long-gop-02.mp4",
+      "duration_us": 12000000
+    },
+    {
+      "asset_id": "spoken-multi-01",
+      "bucket": "spoken_multi",
+      "kind": "synthetic_media",
+      "media": "test-assets/generated/eval/spoken-multi-01.mp4",
+      "duration_us": 16800000
+    },
+    {
+      "asset_id": "spoken-multi-02",
+      "bucket": "spoken_multi",
+      "kind": "synthetic_media",
+      "media": "test-assets/generated/eval/spoken-multi-02.mp4",
+      "duration_us": 16800000
+    },
+    {
+      "asset_id": "spoken-multi-03",
+      "bucket": "spoken_multi",
+      "kind": "synthetic_media",
+      "media": "test-assets/generated/eval/spoken-multi-03.mp4",
+      "duration_us": 16800000
     }
   ]
 }

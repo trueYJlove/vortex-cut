@@ -16,6 +16,7 @@ from aivs_core.media.cv_signals import (
     FACE_MIN_BOX,
     FACE_NMS_THRESHOLD,
     MIN_SAMPLE_INTERVAL,
+    MIN_SAMPLE_INTERVAL_US,
     THUMB_HEIGHT,
     THUMB_WIDTH,
     CvAnalysisError,
@@ -25,12 +26,16 @@ from aivs_core.media.cv_signals import (
     _parse_astats_rms,
     _parse_showinfo,
     analysis_budget_s,
+    clamp_budget_per_minute_s,
+    clamp_target_gap_us,
     cv_audio_args,
     cv_video_args,
     density_status_of,
     frame_signals,
     max_gap_us,
+    merge_sample_streams,
     project_full_decode_s,
+    select_sampling_plan,
 )
 
 
@@ -302,7 +307,8 @@ def test_samples_for_range_and_summary(tmp_path: Path) -> None:
         conn.execute(
             "INSERT INTO cv_analyses(id,asset_id,source_fingerprint,algorithm_version,"
             "status,sample_count,scene_cut_count,created_at,updated_at,finished_at) "
-            "VALUES ('an1','a1','fp1',2,'ready',3,1,'t0','t0','t1')"
+            "VALUES ('an1','a1','fp1',?,'ready',3,1,'t0','t0','t1')",
+            (CV_ALGORITHM_VERSION,),
         )
         for index, (ts, cut) in enumerate([(0, 0), (1_000_000, 1), (2_000_000, 0)]):
             conn.execute(
@@ -376,8 +382,6 @@ def test_decode_yunet_detections_multiscale_outputs() -> None:
 
 def test_face_channel_partial_without_model_manager(tmp_path: Path) -> None:
     """模型未就绪（无管理器）：其余信号照常、face 列 NULL、状态 ready。"""
-    import asyncio
-
     service, db = _service(tmp_path)
     media = tmp_path / "plain.mp4"
     # 直接复用真 ffmpeg 路径在此不引入：本测走坏文件失败路径无意义——
@@ -479,3 +483,136 @@ def test_max_gap_us_handles_empty_and_single_sample() -> None:
     assert max_gap_us([
         {"timestamp_us": 0}, {"timestamp_us": 3}, {"timestamp_us": 10},
     ]) == 7
+
+
+# ---- ADR-0005 阶段 2：密度旋钮与连续密度（纯函数） ----
+
+
+def test_algorithm_version_is_3_for_density_knob() -> None:
+    """阶段 2 采样策略语义变化 → algorithm_version 递增到 3（ADR D1）。"""
+    assert CV_ALGORITHM_VERSION == 3
+
+
+def test_clamp_target_gap_defaults_to_blind_zone_threshold() -> None:
+    """默认 target = 4s 盲区阈值——不传旋钮时决策面与阶段 1 一致。"""
+    assert clamp_target_gap_us(None) == CV_SAMPLE_GAP_FALLBACK_US
+    assert clamp_target_gap_us(50_000) == 100_000
+    assert clamp_target_gap_us(120_000_000) == 60_000_000
+    assert clamp_target_gap_us(1_500_000) == 1_500_000
+
+
+def test_clamp_budget_per_minute_s() -> None:
+    assert clamp_budget_per_minute_s(None) == 10.0
+    assert clamp_budget_per_minute_s(0.1) == 1.0
+    assert clamp_budget_per_minute_s(500.0) == 120.0
+    assert clamp_budget_per_minute_s(20.0) == 20.0
+
+
+def test_analysis_budget_accepts_per_minute_override() -> None:
+    assert analysis_budget_s(120_000_000, per_minute_s=20.0) == pytest.approx(40.0)
+    assert analysis_budget_s(120_000_000, per_minute_s=20.0) != analysis_budget_s(
+        120_000_000
+    )
+
+
+_STREAM_4K = {
+    "width": 3840, "height": 2160,
+    "avg_frame_rate_num": 60, "avg_frame_rate_den": 1, "codec": "hevc",
+}
+
+
+def test_select_sampling_plan_full_when_budget_allows() -> None:
+    plan = select_sampling_plan(
+        duration_us=60_000_000,
+        video_stream=_STREAM_4K,
+        remaining_budget_s=300.0,
+        fast_max_gap_us=6_000_000,
+    )
+    assert plan["strategy"] == "full"
+    assert plan["reason"] == "full_fits_budget"
+    # 发射间隔上限对齐阶段 1 的 1s（默认 target 4s 不会把发射变粗）。
+    assert plan["sample_interval_us"] == MIN_SAMPLE_INTERVAL_US
+
+
+def test_select_sampling_plan_budget_capped_when_partial_affordable() -> None:
+    plan = select_sampling_plan(
+        duration_us=60_000_000,
+        video_stream=_STREAM_4K,
+        remaining_budget_s=8.0,
+        fast_max_gap_us=6_000_000,
+    )
+    assert plan["strategy"] == "budget_capped_full"
+    assert plan["reason"] == "partial_density_within_budget"
+
+
+def test_select_sampling_plan_iframe_when_budget_near_zero() -> None:
+    plan = select_sampling_plan(
+        duration_us=60_000_000,
+        video_stream=_STREAM_4K,
+        remaining_budget_s=0.5,
+        fast_max_gap_us=6_000_000,
+    )
+    assert plan["strategy"] == "iframe_only"
+    assert plan["reason"] == "budget_too_small_for_dense"
+
+
+def test_select_sampling_plan_skips_when_fast_meets_target() -> None:
+    plan = select_sampling_plan(
+        duration_us=60_000_000,
+        video_stream=_STREAM_4K,
+        remaining_budget_s=300.0,
+        target_gap_us=CV_SAMPLE_GAP_FALLBACK_US,
+        fast_max_gap_us=2_000_000,
+    )
+    assert plan["strategy"] == "iframe_only"
+    assert plan["reason"] == "fast_path_meets_target"
+
+
+def test_select_sampling_plan_densifies_when_user_target_tighter() -> None:
+    """用户把 target 收紧到 1s 时，2s 间隔也不再「已达标」。"""
+    plan = select_sampling_plan(
+        duration_us=60_000_000,
+        video_stream=_STREAM_4K,
+        remaining_budget_s=300.0,
+        target_gap_us=1_000_000,
+        fast_max_gap_us=2_000_000,
+    )
+    assert plan["strategy"] == "full"
+
+
+def test_select_sampling_plan_unprojectable_tries_full_or_gives_up() -> None:
+    stream = {}
+    assert select_sampling_plan(
+        duration_us=60_000_000, video_stream=stream,
+        remaining_budget_s=10.0, fast_max_gap_us=6_000_000,
+    )["strategy"] == "full"
+    assert select_sampling_plan(
+        duration_us=60_000_000, video_stream=stream,
+        remaining_budget_s=0.0, fast_max_gap_us=6_000_000,
+    )["strategy"] == "iframe_only"
+
+
+def test_merge_sample_streams_dense_prefix_plus_iframe_tail() -> None:
+    dense = [
+        {"timestamp_us": 0, "motion_energy": 0.1},
+        {"timestamp_us": 1_000_000, "motion_energy": 0.2},
+        {"timestamp_us": 2_000_000, "motion_energy": 0.3},
+    ]
+    iframe = [
+        {"timestamp_us": 0, "motion_energy": 0.0},
+        {"timestamp_us": 2_000_000, "motion_energy": 0.0},
+        {"timestamp_us": 5_000_000, "motion_energy": 0.4},
+        {"timestamp_us": 8_000_000, "motion_energy": 0.5},
+    ]
+    merged = merge_sample_streams(dense, iframe)
+    assert [s["timestamp_us"] for s in merged] == [0, 1_000_000, 2_000_000, 5_000_000, 8_000_000]
+    # 密集段以 dense 为准，I 帧重复点被剔除。
+    assert merged[0]["motion_energy"] == 0.1
+    assert max_gap_us(merged) == 3_000_000
+
+
+def test_merge_sample_streams_empty_edges() -> None:
+    iframe = [{"timestamp_us": 0}, {"timestamp_us": 4_000_000}]
+    assert merge_sample_streams([], iframe) == iframe
+    dense = [{"timestamp_us": 0}, {"timestamp_us": 1_000_000}]
+    assert merge_sample_streams(dense, []) == dense
