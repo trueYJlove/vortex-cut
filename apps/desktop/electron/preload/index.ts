@@ -180,7 +180,7 @@ export interface DesktopApi {
   createAgentSession: (input: { project_id: ProjectId; agent_session_egress_preview_id: string; payload_sha256: string }) => Promise<AgentSessionCreateResponse>;
   listAgentSessions: (projectId: ProjectId) => Promise<{ items: AgentSession[] }>;
   getAgentSession: (sessionId: string) => Promise<AgentSession>;
-  getCvAnalysis: (input: { project_id: ProjectId; asset_id: string; generate: boolean }) => Promise<CvAnalysisSummary>;
+  getCvAnalysis: (input: { project_id: ProjectId; asset_id: string; generate: boolean; target_gap_us?: number | null; budget_per_minute_s?: number | null }) => Promise<CvAnalysisSummary>;
   listCvSamples: (input: { project_id: ProjectId; asset_id: string }) => Promise<CvSamplesPage>;
   // W1.1 剪辑语法层（零 egress）
   listEditingGrammarPlanners: (projectId: ProjectId) => Promise<{ items: EditingGrammarTool[] }>;

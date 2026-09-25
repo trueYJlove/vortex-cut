@@ -51,6 +51,16 @@ describe("Stage2B IPC", () => {
     expect(fetchWithUi).toHaveBeenCalledTimes(1);
   });
 
+  it("cv-analysis：密度旋钮可选透传，非法值拒绝", async () => {
+    const { handlers, fetchWithUi } = setup();
+    fetchWithUi.mockResolvedValueOnce({ analysis_id: "cv_analysis_1", status: "queued", job_id: "job_1", algorithm_version: "3", sample_count: null, scene_cut_count: null, signals: ["scene_cut"], density_status: null });
+    await handlers.get("cv-analysis:get")?.({}, { project_id: "project_1", asset_id: "asset_1", generate: true, target_gap_us: 1_000_000, budget_per_minute_s: 20 });
+    expect(fetchWithUi).toHaveBeenCalledWith("/api/v1/projects/project_1/assets/asset_1/cv-analysis", { method: "POST", body: JSON.stringify({ generate: true, target_gap_us: 1_000_000, budget_per_minute_s: 20 }) });
+    await expect(handlers.get("cv-analysis:get")?.({}, { project_id: "project_1", asset_id: "asset_1", generate: true, target_gap_us: 10 })).rejects.toThrow();
+    await expect(handlers.get("cv-analysis:get")?.({}, { project_id: "project_1", asset_id: "asset_1", generate: true, budget_per_minute_s: 999 })).rejects.toThrow();
+    expect(fetchWithUi).toHaveBeenCalledTimes(1);
+  });
+
   it("能力测试只接受 Provider ID，并返回严格脱敏状态 DTO", async () => {
     const { handlers, fetchWithUi } = setup();
     fetchWithUi.mockResolvedValueOnce({ timeline_patch_capability_status: "unsupported", timeline_patch_response_adapter_id: null, timeline_patch_probe_protocol_version: null, timeline_patch_capability_tested_at: now, timeline_patch_capability_failure_code: "PROVIDER_SCHEMA_MISMATCH", timeline_patch_capability_probe_sha256: hash, raw_response: "must-not-pass" });

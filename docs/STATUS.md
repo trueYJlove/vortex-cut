@@ -118,6 +118,7 @@ PiP 自由定位、A1 音频混音、代理与权威预览、H.264/AAC 导出与
 | P19 | **W0.4 补素材 + Wave 1 真实验收**：五档缺口清零 + 去停顿/节拍/卡点/L-J e2e | `W0_4_MATERIALS_WAVE1_E2E_2026-09-25.md` §2 | 工作包 | ✅ **2026-09-25 核销**——缺口表 shortfall 全 0；`test_wave1_real_media.py` 10 项 |
 | P20 | **Desktop 接剪辑语法层**：提案列表 / 干跑 / Diff / 采纳 UI | `DESKTOP_EDITING_GRAMMAR_2026-09-25.md` §2 | 工作包 | ✅ **2026-09-25 核销**——Desktop 707 tests + typecheck 绿；工具菜单「剪辑语法」 |
 | P21 | **W0.4 评测预测接入**：CV/节拍真实输出写 predictions，beat_hit_rate 可测 | `W0_4_PREDICTIONS_2026-09-25.md` §2 | 工作包 | ✅ **2026-09-25 核销**——基线 `20260925T040102Z`：cut_pr 出数、music beat≈0.91 |
+| P22 | **Desktop 密度旋钮呈现**：CV 分析选项 + 密度状态可见 | `DESKTOP_DENSITY_KNOB_2026-09-25.md` §2 | 工作包 | ✅ **2026-09-25 核销**——Desktop 708 tests；摘要含 full/sparse |
 
 ---
 
@@ -126,7 +127,7 @@ PiP 自由定位、A1 音频混音、代理与权威预览、H.264/AAC 导出与
 | 项 | 说明 | 出处 |
 |---|---|---|
 | **4K60 长 GOP 性能** | ✅ **已解决（2026-09-24，ADR-0005 阶段 1）**：预算准入使付不起的回退**根本不启动**——4K60 HEVC 长 GOP 由 **40.5 → 5.4 s/分**（样本回落为 12 个 I 帧，`density_status='sparse'` 如实标记）。常态 GOP 1s 保持 `full`。见 `CV_SAMPLING_BUDGET_IMPLEMENTATION_2026-09-24.md` | 同上 §4.2 + 实施记录 §3 |
-| CV 采样密度参数暴露 | ✅ **已落地（2026-09-25，ADR-0005 阶段 2）**：`CvAnalysisRequest.target_gap_us` / `budget_per_minute_s`（契约钳制）；默认不传时决策面与阶段 1 一致。Desktop UI 仍属后续小单 | `CV_DENSITY_KNOB_IMPLEMENTATION_2026-09-24.md` |
+| CV 采样密度参数暴露 | ✅ **已落地（2026-09-25，ADR-0005 阶段 2 + Desktop）**：契约旋钮 + 分析选项 UI + 摘要密度标记 | `CV_DENSITY_KNOB_IMPLEMENTATION_2026-09-24.md` / `DESKTOP_DENSITY_KNOB_2026-09-25.md` |
 | 4K60 常态约 1.0s 未归因差异 | 同素材同路径三次复跑一致（7.3/7.8/7.5 vs 原 5.4），已归因约 19% 为机器变慢、**剩余约 1.0s 未归因**。仍远低于 10 门限 | 实施记录 §4 L1 |
 | 细粒度进度仍缺失 | `analyze_video` 的死参数已删除，但未实现替代；长分析无中途进度 | 实施记录 §4 L2 |
 | json_schema 适配器被网关拒 | provider 兼容面窄于设计，script 类适配器为唯一通路 | `AI_VALIDATION_REPORT_2026-09-20.md` §实验 B |

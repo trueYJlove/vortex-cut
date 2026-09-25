@@ -127,10 +127,23 @@ export function registerStage2bIpc(deps: Stage2bIpcDependencies): void {
   });
   deps.handle("agent-session:get", async (_event, sessionId) => parseAgentSession(stage2bRendererSafeAllowInstruction(await fetchSafe(`${API_PREFIX}/agent-sessions/${id(sessionId, "agent_session_id")}`))));
   // AI-2：素材 CV 信号分析摘要（generate=True 登记作业；Renderer 只见摘要）。
+  // ADR-0005 阶段 2：可选密度旋钮（不传 = 默认）。
   deps.handle("cv-analysis:get", async (_event, input) => {
-    const value = record(input, ["project_id", "asset_id", "generate"], "cv analysis get");
+    if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("Invalid cv analysis input");
+    const raw = input as Record<string, unknown>;
+    const { target_gap_us, budget_per_minute_s, ...core } = raw;
+    const value = record(core, ["project_id", "asset_id", "generate"], "cv analysis get");
     if (typeof value.generate !== "boolean") throw new Error("Invalid cv analysis input");
-    const response = await fetchSafe(`${API_PREFIX}/projects/${id(value.project_id, "project_id")}/assets/${id(value.asset_id, "asset_id")}/cv-analysis`, { method: "POST", body: JSON.stringify({ generate: value.generate }) });
+    const body: Record<string, unknown> = { generate: value.generate };
+    if (target_gap_us !== undefined && target_gap_us !== null) {
+      if (typeof target_gap_us !== "number" || !Number.isFinite(target_gap_us) || target_gap_us < 100_000 || target_gap_us > 60_000_000) throw new Error("Invalid target_gap_us");
+      body.target_gap_us = target_gap_us;
+    }
+    if (budget_per_minute_s !== undefined && budget_per_minute_s !== null) {
+      if (typeof budget_per_minute_s !== "number" || !Number.isFinite(budget_per_minute_s) || budget_per_minute_s < 1 || budget_per_minute_s > 120) throw new Error("Invalid budget_per_minute_s");
+      body.budget_per_minute_s = budget_per_minute_s;
+    }
+    const response = await fetchSafe(`${API_PREFIX}/projects/${id(value.project_id, "project_id")}/assets/${id(value.asset_id, "asset_id")}/cv-analysis`, { method: "POST", body: JSON.stringify(body) });
     return parseCvAnalysisSummary(stage2bRendererSafe(response));
   });
   // 阶段 C 稳定性包：CV 信号样本（sparkline 可视化数据）。

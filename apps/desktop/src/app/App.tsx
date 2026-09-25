@@ -1381,18 +1381,21 @@ export function App() {
     <div className="asset-actions">
       <IconButton label={`预览播放 ${item.asset.display_name}`} disabled={item.asset.availability !== "available"} onClick={() => previewFromLibrary(item)}><Play size={13} /></IconButton>
       {isTranscribable(item.asset) && <IconButton label="转录" onClick={() => startTranscription(item.asset)}><FileText size={13} /></IconButton>}
-      {item.asset.kind === "video" && item.asset.availability === "available" && <IconButton label="AI 信号分析" disabled={cvBusy !== null} onClick={() => startCvAnalysis(item)}><Sparkles size={13} /></IconButton>}
+      {item.asset.kind === "video" && item.asset.availability === "available" && <IconButton label="AI 信号分析" disabled={cvBusy !== null} onClick={() => { setCvOptionsAsset(item); setCvOptionsOpen(true); setCvTargetGapS(""); setCvBudgetPerMin(""); }}><Sparkles size={13} /></IconButton>}
       <IconButton label={`打开 ${item.asset.display_name} 所在文件夹`} onClick={() => void revealAsset(item.asset)}><FolderOpen size={13} /></IconButton>
       <IconButton label={`删除 ${item.asset.display_name}`} onClick={() => setPendingDeleteAsset(item.asset)}><Trash2 size={13} /></IconButton>
     </div>
   );
-  // AI-2：CV 摘要文本行（视频条目副标题下方；状态 + 采样数 + 场景切换数）。
+  // AI-2：CV 摘要文本行（视频条目副标题下方；状态 + 采样数 + 场景切换数 + 密度）。
   const cvSummaryText = (asset: Asset): string | undefined => {
     const summary = cvSummaries[asset.asset_id];
     if (!summary?.status) return undefined;
     if (summary.status === "queued") return "AI 信号分析排队中";
     if (summary.status === "running") return "AI 信号分析进行中";
-    if (summary.status === "ready" || summary.status === "stale") return `AI 信号${summary.status === "stale" ? "（已过期）" : ""} · 采样 ${summary.sample_count ?? 0} · 场景切换 ${summary.scene_cut_count ?? 0}`;
+    if (summary.status === "ready" || summary.status === "stale") {
+      const density = summary.density_status === "sparse" ? "密度 sparse" : summary.density_status === "full" ? "密度 full" : null;
+      return `AI 信号${summary.status === "stale" ? "（已过期）" : ""} · 采样 ${summary.sample_count ?? 0} · 场景切换 ${summary.scene_cut_count ?? 0}${density ? ` · ${density}` : ""}`;
+    }
     return "AI 信号分析失败";
   };
   // 阶段 C 稳定性包：CV 信号 sparkline——选中视频素材时懒加载样本并以
@@ -1530,17 +1533,28 @@ export function App() {
   // 成后拉取一次摘要（无 generate，只读）。
   const [cvSummaries, setCvSummaries] = useState<Partial<Record<AssetId, CvAnalysisSummary>>>({});
   const [cvBusy, setCvBusy] = useState<AssetId | null>(null);
+  // ADR-0005 阶段 2：密度旋钮（可选高级项；空 = 默认 4s / 10s·min⁻¹）。
+  const [cvOptionsOpen, setCvOptionsOpen] = useState(false);
+  const [cvOptionsAsset, setCvOptionsAsset] = useState<AssetPresentation | null>(null);
+  const [cvTargetGapS, setCvTargetGapS] = useState("");
+  const [cvBudgetPerMin, setCvBudgetPerMin] = useState("");
   const refreshCvSummary = useCallback(async (assetId: AssetId) => {
     if (!project) return;
     try { const summary = await window.desktop.getCvAnalysis({ project_id: project.project_id, asset_id: assetId, generate: false }); setCvSummaries(current => ({ ...current, [assetId]: summary })); } catch { /* 摘要拉取失败不打断素材列表 */ }
   }, [project]);
-  const startCvAnalysis = (item: AssetPresentation) => {
+  const startCvAnalysis = (item: AssetPresentation, knobs?: { target_gap_us?: number; budget_per_minute_s?: number }) => {
     const assetId = item.asset.asset_id;
     if (!project || cvBusy) return;
     setCvBusy(assetId);
     void (async () => {
       try {
-        const summary = await window.desktop.getCvAnalysis({ project_id: project.project_id, asset_id: assetId, generate: true });
+        const summary = await window.desktop.getCvAnalysis({
+          project_id: project.project_id,
+          asset_id: assetId,
+          generate: true,
+          ...(knobs?.target_gap_us ? { target_gap_us: knobs.target_gap_us } : {}),
+          ...(knobs?.budget_per_minute_s ? { budget_per_minute_s: knobs.budget_per_minute_s } : {}),
+        });
         setCvSummaries(current => ({ ...current, [assetId]: summary }));
         if (summary.job_id) {
           const unsubscribe = window.desktop.subscribeJob(summary.job_id, job => {
@@ -1550,6 +1564,20 @@ export function App() {
       } catch (caught) { showNotice(safeErrorMessage(caught, "CV 信号分析发起失败。"), "error"); }
       finally { setCvBusy(null); }
     })();
+  };
+  const submitCvOptions = () => {
+    if (!cvOptionsAsset) return;
+    const gapMs = Number(cvTargetGapS);
+    const budget = Number(cvBudgetPerMin);
+    const knobs = {
+      ...(cvTargetGapS.trim() !== "" && Number.isFinite(gapMs) && gapMs > 0 ? { target_gap_us: Math.round(gapMs * 1_000_000) } : {}),
+      ...(cvBudgetPerMin.trim() !== "" && Number.isFinite(budget) && budget > 0 ? { budget_per_minute_s: budget } : {}),
+    };
+    startCvAnalysis(cvOptionsAsset, knobs);
+    setCvOptionsOpen(false);
+    setCvOptionsAsset(null);
+    setCvTargetGapS("");
+    setCvBudgetPerMin("");
   };
   // A08：转录正文按需加载（选中 chip 时才 getTranscript，经并发≤4 队列 +
   // 项目代次作废——旧项目迟到结果不写入新项目）；已加载内容缓存复用。
@@ -2366,6 +2394,16 @@ export function App() {
     {generationOpen && project && <MediaGenerationWorkbench key={project.project_id} project={project} assets={assets} onClose={() => setGenerationOpen(false)} />}
     {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} onNotify={message => showNotice(message, "info")} />}
     {agentOpen && project && <AgentSessionPanel projectId={project.project_id} baseRevisionId={timeline?.current_revision.timeline_revision_id ?? null} providers={[...aiProviders, ...patchProviders.filter(item => !aiProviders.some(p => p.provider_config_id === item.provider_config_id))]} onClose={() => setAgentOpen(false)} onNotify={message => showNotice(message, "info")} />}
+    {cvOptionsOpen && cvOptionsAsset && <Dialog titleId="cv-density-title" label="AI 信号分析" onClose={() => { setCvOptionsOpen(false); setCvOptionsAsset(null); }} className="cv-density">
+      <div className="modal-heading"><div><h2 id="cv-density-title">AI 信号分析</h2><p>本地零外传。可选密度旋钮：留空则用默认（目标间隔 4s、预算 10s/分钟源）。</p></div><button className="icon-button" aria-label="关闭 AI 信号分析" onClick={() => { setCvOptionsOpen(false); setCvOptionsAsset(null); }}>×</button></div>
+      <label>目标采样间隔（秒，可选）<input aria-label="目标采样间隔秒" type="number" min={0.1} max={60} step={0.1} value={cvTargetGapS} onChange={event => setCvTargetGapS(event.target.value)} placeholder="默认 4" /></label>
+      <label>每分钟预算（秒，可选）<input aria-label="每分钟预算秒" type="number" min={1} max={120} step={1} value={cvBudgetPerMin} onChange={event => setCvBudgetPerMin(event.target.value)} placeholder="默认 10" /></label>
+      <p className="readonly-note">间隔越小越密；预算不足时自动退到预算内尽量密，并如实标记密度。</p>
+      <div className="modal-actions">
+        <button onClick={() => { startCvAnalysis(cvOptionsAsset); setCvOptionsOpen(false); setCvOptionsAsset(null); }}>使用默认设置</button>
+        <button onClick={submitCvOptions}>按上述设置分析</button>
+      </div>
+    </Dialog>}
     {editingGrammarOpen && project && <EditingGrammarPanel
       projectId={project.project_id}
       baseRevisionId={timeline?.current_revision.timeline_revision_id ?? null}

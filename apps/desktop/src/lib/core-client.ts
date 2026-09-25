@@ -451,7 +451,7 @@ export class CoreClient {
     return this.request<unknown>(`${API_PREFIX}/agent-sessions/${encodeURIComponent(sessionId)}`).then(value => parseAgentSession(removeSensitiveFields(value)));
   }
   // AI-2：素材 CV 信号分析（generate=True 登记作业；仅 video 素材）。
-  getCvAnalysis(projectId: ProjectId, assetId: string, input: { generate: boolean }): Promise<CvAnalysisSummary> {
+  getCvAnalysis(projectId: ProjectId, assetId: string, input: { generate: boolean; target_gap_us?: number | null; budget_per_minute_s?: number | null }): Promise<CvAnalysisSummary> {
     return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/cv-analysis`, { method: "POST", body: JSON.stringify(input) }).then(value => parseCvAnalysisSummary(removeSensitiveFields(value)));
   }
   // 阶段 C 稳定性包：CV 信号样本（sparkline 可视化数据）。
