@@ -1,0 +1,10 @@
+{
+  "task": "lj_cut",
+  "items": [
+    {
+      "at_us": 8000000,
+      "direction": "J",
+      "delta_us": -400000
+    }
+  ]
+}

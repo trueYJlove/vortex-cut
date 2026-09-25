@@ -67,6 +67,29 @@ class TestBeatHitRate:
         assert "beat_hit_rate" not in metrics.UNAVAILABLE_TASKS
 
 
+class TestLjOffsetAccuracy:
+    def test_perfect(self):
+        items = [{"at_us": 1_000_000, "direction": "J", "delta_us": -400_000}]
+        r = metrics.lj_offset_accuracy(items, items)
+        assert r["accuracy"] == 1.0 and r["hit"] == 1
+
+    def test_direction_mismatch(self):
+        pred = [{"at_us": 1_000_000, "direction": "L", "delta_us": 400_000}]
+        lab = [{"at_us": 1_000_000, "direction": "J", "delta_us": -400_000}]
+        r = metrics.lj_offset_accuracy(pred, lab)
+        assert r["accuracy"] == 0.0 and r["details"][0]["direction_ok"] is False
+
+    def test_delta_out_of_tolerance(self):
+        pred = [{"at_us": 1_000_000, "direction": "J", "delta_us": -400_000}]
+        lab = [{"at_us": 1_000_000, "direction": "J", "delta_us": -200_000}]
+        r = metrics.lj_offset_accuracy(pred, lab, delta_tol_us=50_000)
+        assert r["accuracy"] == 0.0
+
+    def test_measurable_task_registered(self):
+        assert "lj_offset_accuracy" in metrics.MEASURABLE_TASKS
+        assert "lj_offset_accuracy" not in metrics.UNAVAILABLE_TASKS
+
+
 class TestNDCG:
     def test_perfect_ranking(self):
         r = metrics.ndcg_at_k(["a", "b", "c"], {"a": 3, "b": 2, "c": 1, "d": 0}, 10)

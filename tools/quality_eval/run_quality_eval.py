@@ -16,6 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from metrics import (  # noqa: E402
     DEFAULT_BEAT_TOLERANCE_US,
     DEFAULT_CUT_TOLERANCE_US,
+    DEFAULT_LJ_AT_TOLERANCE_US,
+    DEFAULT_LJ_DELTA_TOLERANCE_US,
     DEFAULT_NDCG_K,
     DEFAULT_REGRESSION_TOLERANCE,
     MIN_SAMPLES,
@@ -23,6 +25,7 @@ from metrics import (  # noqa: E402
     UNAVAILABLE_TASKS,
     beat_hit_rate,
     cut_precision_recall,
+    lj_offset_accuracy,
     mean_recall_ndcg,
     validate_annotation,
 )
@@ -158,6 +161,7 @@ def run_eval(
         b: [] for b in min_samples
     }
     per_bucket_beat: dict[str, list[dict[str, Any]]] = {b: [] for b in min_samples}
+    per_bucket_lj: dict[str, list[dict[str, Any]]] = {b: [] for b in min_samples}
     per_bucket_annotated: dict[str, int] = {b: 0 for b in min_samples}
 
     for asset in manifest.get("assets", []):
@@ -220,6 +224,18 @@ def run_eval(
             score["bpm"] = beat_pred.get("bpm")
             per_bucket_beat.setdefault(bucket, []).append(score)
             entry["beat"] = score
+
+        lj_pred = load_predictions(eval_set, asset_id, "lj_cut")
+        if lj_pred is not None and "lj_offsets" in ann:
+            score = lj_offset_accuracy(
+                lj_pred.get("items") or [],
+                list(ann.get("lj_offsets") or []),
+                at_tol_us=DEFAULT_LJ_AT_TOLERANCE_US,
+                delta_tol_us=DEFAULT_LJ_DELTA_TOLERANCE_US,
+            )
+            score["asset_id"] = asset_id
+            per_bucket_lj.setdefault(bucket, []).append(score)
+            entry["lj"] = score
 
         assets_out.append(entry)
 
@@ -349,6 +365,47 @@ def run_eval(
                 }
             else:
                 bucket_metrics["beat_hit_rate"] = _ok_metric(value, pool_size=ann_n)
+
+        lj_scores = per_bucket_lj.get(bucket) or []
+        has_lj_label = any(
+            "lj_offsets" in (annotations.get(a["asset_id"]) or {})
+            and "__invalid__" not in (annotations.get(a["asset_id"]) or {})
+            for a in assets_out
+            if a.get("bucket") == bucket and a.get("annotation") == "ok"
+        )
+        has_lj_pred = any(
+            load_predictions(eval_set, a["asset_id"], "lj_cut") is not None
+            for a in assets_out
+            if a.get("bucket") == bucket
+        )
+        if not has_lj_label:
+            bucket_metrics["lj_offset_accuracy"] = _empty_metric(
+                "unavailable", "no lj_offsets labels in bucket"
+            )
+        elif not has_lj_pred or not lj_scores:
+            bucket_metrics["lj_offset_accuracy"] = _empty_metric(
+                "unavailable", "no lj_cut predictions in bucket"
+            )
+        else:
+            hit = sum(s["hit"] for s in lj_scores)
+            lab_n = sum(s["label_count"] for s in lj_scores)
+            value = {
+                "accuracy": (hit / lab_n) if lab_n else 0.0,
+                "hit": hit,
+                "label_count": lab_n,
+                "at_tol_us": DEFAULT_LJ_AT_TOLERANCE_US,
+                "delta_tol_us": DEFAULT_LJ_DELTA_TOLERANCE_US,
+                "assets": lj_scores,
+            }
+            if ann_n < min_n:
+                bucket_metrics["lj_offset_accuracy"] = {
+                    "status": "insufficient",
+                    "reason": f"annotated_assets {ann_n} < min_samples {min_n}",
+                    "value": value,
+                    "pool_size": ann_n,
+                }
+            else:
+                bucket_metrics["lj_offset_accuracy"] = _ok_metric(value, pool_size=ann_n)
 
         for task in UNAVAILABLE_TASKS:
             bucket_metrics[task] = _empty_metric(

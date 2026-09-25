@@ -1,0 +1,15 @@
+{
+  "task": "lj_cut",
+  "items": [
+    {
+      "at_us": 39000000,
+      "direction": "J",
+      "delta_us": -400000
+    },
+    {
+      "at_us": 80500000,
+      "direction": "J",
+      "delta_us": -400000
+    }
+  ]
+}

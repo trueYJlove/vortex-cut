@@ -78,6 +78,24 @@ def choose_audio_delta(
     }
 
 
+def auto_lj_mode(words: list[dict[str, Any]], picture_cut_us: int) -> str:
+    """无显式 mode 时的方向启发：优先 J（下句声先入），否则 L（上句声延后）。
+
+    评测与「一键 L/J」共用；显式 mode 仍走 `choose_audio_delta` 原路径。
+    """
+    ordered = sorted(
+        (w for w in words if "start_us" in w and "end_us" in w),
+        key=lambda w: int(w["start_us"]),
+    )
+    if not ordered:
+        raise DomainError("EDITING_GRAMMAR_NO_WORDS", "缺少词级时间戳")
+    if any(int(w["start_us"]) >= picture_cut_us for w in ordered):
+        return "j"
+    if any(int(w["end_us"]) <= picture_cut_us for w in ordered):
+        return "l"
+    raise DomainError("EDITING_GRAMMAR_NO_WORDS", "切点附近无可对齐词")
+
+
 class LjCutPlanner:
     @property
     def tool(self) -> ToolDescription:

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from aivs_core.editing_grammar import EditingGrammarService, LjCutPlanner
-from aivs_core.editing_grammar.lj_cut import choose_audio_delta
+from aivs_core.editing_grammar.lj_cut import auto_lj_mode, choose_audio_delta
 from aivs_core.projects import DomainError
 from aivs_core.timeline import AI_PATCH_OPERATIONS
 from test_timeline import _create, _patch, _service
@@ -175,6 +175,24 @@ class TestLjCutPlanner:
                 clip_end_us=5_000_000,
                 offset_us=400_000,
             )
+        assert exc.value.code == "EDITING_GRAMMAR_NO_WORDS"
+
+
+class TestAutoLjMode:
+    def test_prefers_j_when_next_word_exists(self):
+        words = [
+            {"start_us": 0, "end_us": 1_000_000},
+            {"start_us": 2_200_000, "end_us": 2_800_000},
+        ]
+        assert auto_lj_mode(words, 2_000_000) == "j"
+
+    def test_falls_back_to_l_without_next_word(self):
+        words = [{"start_us": 0, "end_us": 1_000_000}]
+        assert auto_lj_mode(words, 2_000_000) == "l"
+
+    def test_no_words_rejected(self):
+        with pytest.raises(DomainError) as exc:
+            auto_lj_mode([], 1_000_000)
         assert exc.value.code == "EDITING_GRAMMAR_NO_WORDS"
 
     def test_e2e_propose_apply(self, tmp_path: Path) -> None:

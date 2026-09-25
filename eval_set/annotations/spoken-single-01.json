@@ -18,5 +18,17 @@
       "start_us": 80500000,
       "end_us": 83000000
     }
+  ],
+  "lj_offsets": [
+    {
+      "at_us": 39000000,
+      "direction": "J",
+      "delta_us": -400000
+    },
+    {
+      "at_us": 80500000,
+      "direction": "J",
+      "delta_us": -400000
+    }
   ]
 }

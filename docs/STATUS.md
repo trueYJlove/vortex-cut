@@ -119,6 +119,7 @@ PiP 自由定位、A1 音频混音、代理与权威预览、H.264/AAC 导出与
 | P20 | **Desktop 接剪辑语法层**：提案列表 / 干跑 / Diff / 采纳 UI | `DESKTOP_EDITING_GRAMMAR_2026-09-25.md` §2 | 工作包 | ✅ **2026-09-25 核销**——Desktop 707 tests + typecheck 绿；工具菜单「剪辑语法」 |
 | P21 | **W0.4 评测预测接入**：CV/节拍真实输出写 predictions，beat_hit_rate 可测 | `W0_4_PREDICTIONS_2026-09-25.md` §2 | 工作包 | ✅ **2026-09-25 核销**——基线 `20260925T040102Z`：cut_pr 出数、music beat≈0.91 |
 | P22 | **Desktop 密度旋钮呈现**：CV 分析选项 + 密度状态可见 | `DESKTOP_DENSITY_KNOB_2026-09-25.md` §2 | 工作包 | ✅ **2026-09-25 核销**——Desktop 708 tests；摘要含 full/sparse |
+| P23 | **lj_offset_accuracy 出数**：auto_lj_mode + 预测/指标接通 | `W0_4_LJ_OFFSET_2026-09-25.md` §2 | 工作包 | ✅ **2026-09-25 核销**——spoken 档 acc=1.0（规则一致性，非审美分） |
 
 ---
 

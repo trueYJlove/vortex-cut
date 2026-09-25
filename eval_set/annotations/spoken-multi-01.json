@@ -25,5 +25,12 @@
       "end_us": 16800000,
       "speaker": "B"
     }
+  ],
+  "lj_offsets": [
+    {
+      "at_us": 8000000,
+      "direction": "J",
+      "delta_us": -400000
+    }
   ]
 }

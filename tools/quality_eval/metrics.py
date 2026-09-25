@@ -31,16 +31,104 @@ MIN_SAMPLES = {
     "long_gop": 2,
 }
 
-# W0.4 可测 + Wave 1 落地后新增 beat_hit_rate；其余任务标 unavailable（规划门 §0.4）。
-MEASURABLE_TASKS = ("cut_pr", "recall_ndcg", "beat_hit_rate")
+# W0.4 可测 + Wave 1 落地后新增 beat_hit_rate / lj_offset_accuracy。
+MEASURABLE_TASKS = ("cut_pr", "recall_ndcg", "beat_hit_rate", "lj_offset_accuracy")
 UNAVAILABLE_TASKS = (
-    "lj_offset_accuracy",
     "multicam_consistency",
     "narrative_coherence",
     "structure_usable_rate",
     "av_defect_rate",
 )
 DEFAULT_BEAT_TOLERANCE_US = 50_000
+DEFAULT_LJ_AT_TOLERANCE_US = 200_000
+DEFAULT_LJ_DELTA_TOLERANCE_US = 100_000
+
+
+def lj_offset_accuracy(
+    predicted: list[dict[str, Any]],
+    labeled: list[dict[str, Any]],
+    *,
+    at_tol_us: int = DEFAULT_LJ_AT_TOLERANCE_US,
+    delta_tol_us: int = DEFAULT_LJ_DELTA_TOLERANCE_US,
+) -> dict[str, Any]:
+    """L/J 偏移正确率：按 at_us 配对，方向一致且 |Δ| 在容差内记 hit。
+
+    预测/标注项形状：`{at_us, direction: "L"|"J", delta_us}`。
+    """
+
+    def _norm(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            at = item.get("at_us")
+            direction = item.get("direction")
+            delta = item.get("delta_us")
+            if not isinstance(at, int) or direction not in ("L", "J"):
+                continue
+            out.append(
+                {
+                    "at_us": int(at),
+                    "direction": direction,
+                    "delta_us": int(delta) if isinstance(delta, int) else 0,
+                }
+            )
+        return sorted(out, key=lambda x: x["at_us"])
+
+    preds = _norm(predicted)
+    labels = _norm(labeled)
+    if not labels:
+        return {
+            "accuracy": 0.0,
+            "hit": 0,
+            "label_count": 0,
+            "pred_count": len(preds),
+            "at_tol_us": at_tol_us,
+            "delta_tol_us": delta_tol_us,
+        }
+    used: set[int] = set()
+    hit = 0
+    details: list[dict[str, Any]] = []
+    for lab in labels:
+        best_i = None
+        best_d = at_tol_us + 1
+        for i, pred in enumerate(preds):
+            if i in used:
+                continue
+            d = abs(pred["at_us"] - lab["at_us"])
+            if d <= at_tol_us and d < best_d:
+                best_i = i
+                best_d = d
+        if best_i is None:
+            details.append({"at_us": lab["at_us"], "matched": False, "reason": "no_pred"})
+            continue
+        used.add(best_i)
+        pred = preds[best_i]
+        ok = (
+            pred["direction"] == lab["direction"]
+            and abs(pred["delta_us"] - lab["delta_us"]) <= delta_tol_us
+        )
+        if ok:
+            hit += 1
+        details.append(
+            {
+                "at_us": lab["at_us"],
+                "matched": True,
+                "hit": ok,
+                "direction_ok": pred["direction"] == lab["direction"],
+                "delta_us": pred["delta_us"],
+                "label_delta_us": lab["delta_us"],
+            }
+        )
+    return {
+        "accuracy": hit / len(labels),
+        "hit": hit,
+        "label_count": len(labels),
+        "pred_count": len(preds),
+        "at_tol_us": at_tol_us,
+        "delta_tol_us": delta_tol_us,
+        "details": details,
+    }
 
 
 def beat_hit_rate(
