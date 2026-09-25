@@ -188,6 +188,48 @@ def main() -> None:
                     "delta_us": int(decision["audio_delta_us"]),
                 })
             _write_pred(asset_id, "lj_cut", {"task": "lj_cut", "items": items})
+
+        # 召回排序：有 recall 标注时，按窗口音频能量排序（对齐 _cv_scenes 特征排序精神）。
+        # 窗口 id 形如 `t{start_us}`，窗宽由相邻 id 差或末窗时长推断。
+        recall_ann = ann.get("recall") or {}
+        queries = recall_ann.get("queries") or []
+        if queries:
+            wav_path = media.with_suffix(".wav")
+            if not wav_path.is_file():
+                print(f"skip recall {asset_id}: missing {wav_path.name}")
+                continue
+            pcm, sr = _wav_pcm(wav_path)
+            duration_us = int(len(pcm) / sr * 1_000_000) if sr else 0
+            pred_queries = []
+            for q in queries:
+                qid = q.get("query_id") or "q"
+                rel = q.get("relevance") or {}
+                starts = []
+                for key in rel:
+                    text = str(key)
+                    if text.startswith("t") and text[1:].isdigit():
+                        starts.append(int(text[1:]))
+                if not starts:
+                    continue
+                starts.sort()
+                if len(starts) >= 2:
+                    win_us = starts[1] - starts[0]
+                else:
+                    win_us = max(duration_us, 1)
+                scores = []
+                for start in starts:
+                    end = min(start + win_us, duration_us) if duration_us else start + win_us
+                    a = int(start * sr / 1_000_000) if sr else 0
+                    b = int(end * sr / 1_000_000) if sr else 0
+                    chunk = pcm[a:b] if b > a else pcm[:1]
+                    energy = float(np.sqrt(np.mean(chunk**2))) if chunk.size else 0.0
+                    scores.append((energy, f"t{start}"))
+                scores.sort(key=lambda t: (-t[0], t[1]))
+                pred_queries.append({
+                    "query_id": qid,
+                    "ranking": [wid for _, wid in scores],
+                })
+            _write_pred(asset_id, "recall", {"task": "recall_rank", "queries": pred_queries})
     print("done")
 
 
