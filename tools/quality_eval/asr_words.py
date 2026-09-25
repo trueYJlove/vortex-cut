@@ -16,6 +16,31 @@ import numpy as np
 
 WORD_CHUNK_US = 400_000
 
+# 产品模型根（Desktop data-v2）；仓库本地 .aivideo 作备用。
+_DEFAULT_MODEL_ROOTS = (
+    Path.home() / "AppData" / "Roaming" / "@aivideo" / "desktop" / "data-v2" / "models" / "asr",
+    Path.home() / "AppData" / "Roaming" / "aivideo" / "desktop" / "data-v2" / "models" / "asr",
+)
+
+
+def discover_asr_model_dir(model_id: str = "faster-whisper-tiny") -> Path | None:
+    """定位已就绪的 ASR 模型目录（含 config.json / model.bin 的 revision 子目录）。"""
+    roots = list(_DEFAULT_MODEL_ROOTS)
+    cwd_root = Path.cwd() / ".aivideo" / "models" / "asr"
+    roots.append(cwd_root)
+    roots.append(Path(__file__).resolve().parents[2] / ".aivideo" / "models" / "asr")
+    for root in roots:
+        base = root / model_id
+        if not base.is_dir():
+            continue
+        for child in sorted(base.iterdir()):
+            if child.is_dir() and (child / "model.bin").is_file() and (child / "config.json").is_file():
+                return child
+        # 兼容直接平铺
+        if (base / "model.bin").is_file() and (base / "config.json").is_file():
+            return base
+    return None
+
 
 def _wav_pcm(path: Path) -> tuple[np.ndarray, int]:
     with wave.open(str(path), "r") as wav:
@@ -114,7 +139,12 @@ def resolve_lj_words(
     model_dir: Path | None = None,
     language: str = "auto",
 ) -> tuple[list[dict[str, Any]], str]:
-    """返回 (words, word_source)。word_source ∈ {asr, energy_proxy}。"""
+    """返回 (words, word_source)。word_source ∈ {asr, energy_proxy}。
+
+    `model_dir` 为空时自动发现产品安装的 faster-whisper-tiny。
+    """
+    if model_dir is None:
+        model_dir = discover_asr_model_dir()
     words = asr_words_from_media(media, model_dir=model_dir, language=language)
     if words:
         return words, "asr"

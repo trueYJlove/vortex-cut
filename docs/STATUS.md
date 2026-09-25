@@ -121,7 +121,7 @@ PiP 自由定位、A1 音频混音、代理与权威预览、H.264/AAC 导出与
 | P22 | **Desktop 密度旋钮呈现**：CV 分析选项 + 密度状态可见 | `DESKTOP_DENSITY_KNOB_2026-09-25.md` §2 | 工作包 | ✅ **2026-09-25 核销**——Desktop 708 tests；摘要含 full/sparse |
 | P23 | **lj_offset_accuracy 出数**：auto_lj_mode + 预测/指标接通 | `W0_4_LJ_OFFSET_2026-09-25.md` §2 | 工作包 | ✅ **2026-09-25 核销**——spoken 档 acc=1.0（规则一致性，非审美分） |
 | P24 | **recall_ndcg 真实预测**：窗口能量排序 + spoken 档出数 | `W0_4_RECALL_NDCG_2026-09-25.md` §2 | 工作包 | ✅ **2026-09-25 核销**——W0.4 四项可测指标全部出数 |
-| P25 | **L/J 词戳 ASR 优先**：faster-whisper 路径 + 能量回退 + word_source | `W0_4_ASR_WORDS_2026-09-25.md` §2 | 工作包 | ✅ **2026-09-25 核销**——`test_asr_words.py` 4 项；当前素材为 energy_proxy |
+| P25 | **L/J 词戳 ASR 优先**：faster-whisper 路径 + 能量回退 + word_source | `W0_4_ASR_WORDS_2026-09-25.md` §2 | 工作包 | ✅ **2026-09-25 核销**——产品 Whisper Tiny 自动发现；当前预测 `word_source=asr` |
 
 ---
 

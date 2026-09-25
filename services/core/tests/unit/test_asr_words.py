@@ -14,6 +14,7 @@ sys.path.insert(0, str(QE))
 
 from asr_words import (  # noqa: E402
     asr_words_from_media,
+    discover_asr_model_dir,
     energy_words_from_pcm,
     resolve_lj_words,
 )
@@ -46,10 +47,16 @@ def test_energy_words_splits_speech_runs(tmp_path: Path) -> None:
 def test_resolve_falls_back_to_energy_proxy(tmp_path: Path) -> None:
     wav = tmp_path / "tone.wav"
     _write_tone_wav(wav)
-    # 无 model_dir → 不走 ASR
-    words, source = resolve_lj_words(wav, model_dir=None)
+    # 显式缺失模型目录 → 不走 ASR
+    words, source = resolve_lj_words(wav, model_dir=tmp_path / "no-such-model")
     assert source == "energy_proxy"
     assert words
+
+
+def test_discover_asr_model_dir_optional() -> None:
+    # 产品安装的 Whisper Tiny 存在则找到 revision；不存在则 None（不断言环境）。
+    found = discover_asr_model_dir()
+    assert found is None or (found / "model.bin").is_file()
 
 
 def test_asr_empty_when_model_missing(tmp_path: Path) -> None:
