@@ -14,12 +14,14 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from metrics import (  # noqa: E402
+    DEFAULT_BEAT_TOLERANCE_US,
     DEFAULT_CUT_TOLERANCE_US,
     DEFAULT_NDCG_K,
     DEFAULT_REGRESSION_TOLERANCE,
     MIN_SAMPLES,
     SCHEMA_VERSION,
     UNAVAILABLE_TASKS,
+    beat_hit_rate,
     cut_precision_recall,
     mean_recall_ndcg,
     validate_annotation,
@@ -155,6 +157,7 @@ def run_eval(
     per_bucket_recall: dict[str, list[tuple[list[str], dict[str, int]]]] = {
         b: [] for b in min_samples
     }
+    per_bucket_beat: dict[str, list[dict[str, Any]]] = {b: [] for b in min_samples}
     per_bucket_annotated: dict[str, int] = {b: 0 for b in min_samples}
 
     for asset in manifest.get("assets", []):
@@ -205,6 +208,18 @@ def run_eval(
                 per_bucket_recall.setdefault(bucket, []).append(
                     (ranking, q.get("relevance") or {})
                 )
+
+        beat_pred = load_predictions(eval_set, asset_id, "beat_grid")
+        if beat_pred is not None and "beat_grid_us" in ann:
+            score = beat_hit_rate(
+                beat_pred.get("beats_us") or [],
+                list(ann.get("beat_grid_us") or []),
+                DEFAULT_BEAT_TOLERANCE_US,
+            )
+            score["asset_id"] = asset_id
+            score["bpm"] = beat_pred.get("bpm")
+            per_bucket_beat.setdefault(bucket, []).append(score)
+            entry["beat"] = score
 
         assets_out.append(entry)
 
@@ -295,6 +310,46 @@ def run_eval(
             else:
                 bucket_metrics["recall_ndcg"] = _ok_metric(agg, pool_size=ann_n)
 
+        beat_scores = per_bucket_beat.get(bucket) or []
+        has_beat_label = any(
+            "beat_grid_us" in (annotations.get(a["asset_id"]) or {})
+            and "__invalid__" not in (annotations.get(a["asset_id"]) or {})
+            for a in assets_out
+            if a.get("bucket") == bucket and a.get("annotation") == "ok"
+        )
+        has_beat_pred = any(
+            load_predictions(eval_set, a["asset_id"], "beat_grid") is not None
+            for a in assets_out
+            if a.get("bucket") == bucket
+        )
+        if not has_beat_label:
+            bucket_metrics["beat_hit_rate"] = _empty_metric(
+                "unavailable", "no beat_grid_us labels in bucket"
+            )
+        elif not has_beat_pred or not beat_scores:
+            bucket_metrics["beat_hit_rate"] = _empty_metric(
+                "unavailable", "no beat_grid predictions in bucket"
+            )
+        else:
+            hit = sum(s["hit"] for s in beat_scores)
+            lab_n = sum(s["label_count"] for s in beat_scores)
+            value = {
+                "hit_rate": (hit / lab_n) if lab_n else 0.0,
+                "hit": hit,
+                "label_count": lab_n,
+                "tol_us": DEFAULT_BEAT_TOLERANCE_US,
+                "assets": beat_scores,
+            }
+            if ann_n < min_n:
+                bucket_metrics["beat_hit_rate"] = {
+                    "status": "insufficient",
+                    "reason": f"annotated_assets {ann_n} < min_samples {min_n}",
+                    "value": value,
+                    "pool_size": ann_n,
+                }
+            else:
+                bucket_metrics["beat_hit_rate"] = _ok_metric(value, pool_size=ann_n)
+
         for task in UNAVAILABLE_TASKS:
             bucket_metrics[task] = _empty_metric(
                 "unavailable", "capability not delivered yet (W0.4 skeleton)"
@@ -324,7 +379,7 @@ def run_eval(
         "kind": "baseline",
         "schema_version": SCHEMA_VERSION,
         "git_commit": _git_commit(),
-        "algorithm_version": 2,
+        "algorithm_version": 3,
         "params": {
             "cut_tolerance_us": tol_us,
             "ndcg_k": k,

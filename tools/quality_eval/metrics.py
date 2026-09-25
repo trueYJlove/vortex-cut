@@ -31,16 +31,44 @@ MIN_SAMPLES = {
     "long_gop": 2,
 }
 
-# W0.4 可测；其余任务标 unavailable（规划门 §0.4）。
-MEASURABLE_TASKS = ("cut_pr", "recall_ndcg")
+# W0.4 可测 + Wave 1 落地后新增 beat_hit_rate；其余任务标 unavailable（规划门 §0.4）。
+MEASURABLE_TASKS = ("cut_pr", "recall_ndcg", "beat_hit_rate")
 UNAVAILABLE_TASKS = (
-    "beat_hit_rate",
     "lj_offset_accuracy",
     "multicam_consistency",
     "narrative_coherence",
     "structure_usable_rate",
     "av_defect_rate",
 )
+DEFAULT_BEAT_TOLERANCE_US = 50_000
+
+
+def beat_hit_rate(
+    predicted_us: list[int],
+    labeled_us: list[int],
+    tol_us: int = DEFAULT_BEAT_TOLERANCE_US,
+) -> dict[str, Any]:
+    """标注 beat 被预测命中的比例（W1.2 误差门口径）。"""
+    preds = sorted(int(x) for x in predicted_us)
+    labels = sorted(int(x) for x in labeled_us)
+    if not labels:
+        return {
+            "hit_rate": 0.0,
+            "hit": 0,
+            "label_count": 0,
+            "pred_count": len(preds),
+            "tol_us": tol_us,
+        }
+    hit = sum(
+        1 for lab in labels if any(abs(p - lab) <= tol_us for p in preds)
+    )
+    return {
+        "hit_rate": hit / len(labels),
+        "hit": hit,
+        "label_count": len(labels),
+        "pred_count": len(preds),
+        "tol_us": tol_us,
+    }
 
 
 def cut_precision_recall(

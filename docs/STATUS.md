@@ -117,6 +117,7 @@ PiP 自由定位、A1 音频混音、代理与权威预览、H.264/AAC 导出与
 | P18 | **ADR-0005 阶段 2 密度旋钮**：`select_sampling_plan` + `budget_capped_full` 合并 + 旋钮暴露 + `algorithm_version` 2→3 | `CV_DENSITY_KNOB_PLANNING_GATE_2026-09-24` §1.1 / §3 | 工作包 | ✅ **2026-09-25 核销**——实施记录 `CV_DENSITY_KNOB_IMPLEMENTATION_2026-09-24.md` §2 验收核对表全项；Core 全量 **811 unit + 150 integration passed** |
 | P19 | **W0.4 补素材 + Wave 1 真实验收**：五档缺口清零 + 去停顿/节拍/卡点/L-J e2e | `W0_4_MATERIALS_WAVE1_E2E_2026-09-25.md` §2 | 工作包 | ✅ **2026-09-25 核销**——缺口表 shortfall 全 0；`test_wave1_real_media.py` 10 项 |
 | P20 | **Desktop 接剪辑语法层**：提案列表 / 干跑 / Diff / 采纳 UI | `DESKTOP_EDITING_GRAMMAR_2026-09-25.md` §2 | 工作包 | ✅ **2026-09-25 核销**——Desktop 707 tests + typecheck 绿；工具菜单「剪辑语法」 |
+| P21 | **W0.4 评测预测接入**：CV/节拍真实输出写 predictions，beat_hit_rate 可测 | `W0_4_PREDICTIONS_2026-09-25.md` §2 | 工作包 | ✅ **2026-09-25 核销**——基线 `20260925T040102Z`：cut_pr 出数、music beat≈0.91 |
 
 ---
 

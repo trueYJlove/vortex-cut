@@ -49,6 +49,24 @@ class TestCutPR:
         assert r["precision"] == 1.0 and r["recall"] == 1.0
 
 
+class TestBeatHitRate:
+    def test_perfect(self):
+        r = metrics.beat_hit_rate([0, 500_000, 1_000_000], [0, 500_000, 1_000_000], 50_000)
+        assert r["hit_rate"] == 1.0 and r["hit"] == 3
+
+    def test_partial(self):
+        r = metrics.beat_hit_rate([0, 510_000], [0, 500_000, 1_000_000], 50_000)
+        assert r["hit"] == 2 and r["hit_rate"] == pytest.approx(2 / 3)
+
+    def test_empty_labels(self):
+        r = metrics.beat_hit_rate([0], [], 50_000)
+        assert r["hit_rate"] == 0.0 and r["label_count"] == 0
+
+    def test_measurable_task_registered(self):
+        assert "beat_hit_rate" in metrics.MEASURABLE_TASKS
+        assert "beat_hit_rate" not in metrics.UNAVAILABLE_TASKS
+
+
 class TestNDCG:
     def test_perfect_ranking(self):
         r = metrics.ndcg_at_k(["a", "b", "c"], {"a": 3, "b": 2, "c": 1, "d": 0}, 10)
