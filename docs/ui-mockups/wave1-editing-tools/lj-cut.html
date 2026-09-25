@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>L/J cut · Wave 1 剪辑手法 · Vortex Cut</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="topbar">
+  <div class="brand">Vortex Cut</div>
+  <span class="chip">剪辑手法</span>
+  <div class="spacer"></div>
+  <a class="hint" href="index.html">← 设计总览</a>
+</div>
+<div class="wrap">
+  <h1>L/J cut</h1>
+  <p class="sub">
+    画面切点不变，声音提前（<b>J</b>）或延后（<b>L</b>）。词戳优先 <b>ASR</b>，缺失时能量代理；
+    与评测一致，预测文件记录 <code>word_source</code>。
+  </p>
+
+  <div class="tabs">
+    <a href="remove-pauses.html"><strong>去停顿</strong><span>remove_pauses</span></a>
+    <a href="beat-sync.html"><strong>卡点</strong><span>beat_sync</span></a>
+    <a class="on" href="lj-cut.html"><strong>L/J cut</strong><span>lj_cut</span></a>
+  </div>
+
+  <div class="shell">
+    <div class="bar">
+      <div class="title">L/J cut · clip_a1</div>
+      <div class="meta">画面切点 0:39 · 0:00–2:02</div>
+      <div class="spacer"></div>
+      <span class="pill ok">word_source: asr</span>
+      <span class="pill gold">词锚 24</span>
+    </div>
+
+    <div class="col">
+      <div class="field">
+        <label>目标片段</label>
+        <select id="clip">
+          <option>clip_a1 · 口播开场</option>
+          <option>clip_b2 · 访谈片段</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>画面切点</label>
+        <select id="cut">
+          <option value="39">0:39.0 · 与静音/说话人切换对齐</option>
+          <option value="80.5">1:20.5 · 第二处切换</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>方向 mode</label>
+        <div class="seg" id="modeSeg">
+          <button type="button" data-m="auto" class="on">自动</button>
+          <button type="button" data-m="j">J · 声先入</button>
+          <button type="button" data-m="l">L · 声延后</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>偏移 offset（ms） <span class="val" id="offVal">400</span></label>
+        <input type="range" id="off" min="300" max="500" step="10" value="400" />
+        <div class="note">Core 窗口 [300, 500] · 默认 400</div>
+      </div>
+
+      <details class="adv">
+        <summary>高级 · 与 Core 参数对齐</summary>
+        <div class="field">
+          <label>自动方向启发</label>
+          <input type="text" value="auto_lj_mode：有下句词 → J，否则 L" readonly />
+        </div>
+        <div class="field">
+          <label>op</label>
+          <input type="text" value="split_edit {clip_id, source_time_us, audio_delta_us}" readonly />
+        </div>
+        <div class="note">源：editing_grammar/lj_cut.py</div>
+      </details>
+
+      <div class="actions" style="margin-top:16px">
+        <button class="btn" id="dry">干跑预览</button>
+        <button class="btn primary" id="propose">生成提案</button>
+      </div>
+      <div class="note" id="dryNote">预览区将显示画面/音频切线错位与词锚。</div>
+    </div>
+
+    <div class="col">
+      <div class="preview">
+        <div class="ph">
+          <h3>声画错位预览</h3>
+          <div class="legend">
+            <span><i style="background:#fff"></i>画面切线</span>
+            <span><i style="background:var(--gold)"></i>音频切线</span>
+            <span><i style="background:var(--ok)"></i>词锚</span>
+          </div>
+        </div>
+
+        <div class="av">
+          <div class="av-row">
+            <div class="lbl"><span>画面 Video</span><span id="vLabel">切于 0:39.0</span></div>
+            <div class="bar-track" id="vTrack">
+              <div class="bar-fill" style="left:0;right:0"></div>
+              <div class="bar-cut" id="vCut" style="left:32%"></div>
+            </div>
+          </div>
+          <div class="av-row">
+            <div class="lbl"><span>音频 Audio</span><span id="aLabel">切于 0:38.6（J · −400ms）</span></div>
+            <div class="bar-track" id="aTrack">
+              <div class="bar-fill gold" id="aFill"></div>
+              <div class="bar-cut audio" id="aCut"></div>
+              <div class="word" style="left:12%"></div>
+              <div class="word" style="left:28%"></div>
+              <div class="word" style="left:41%"></div>
+              <div class="word" style="left:58%"></div>
+              <div class="word" style="left:72%"></div>
+              <div class="word" style="left:86%"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="note" id="stat">J-cut：下句声提前 400ms 进入当前画面。</div>
+      </div>
+
+      <div class="proposal" id="proposal" hidden>
+        <h4>提案 · lj_cut</h4>
+        <div class="sum" id="propSum">split_edit · audio_delta_us = −400000</div>
+        <div class="diff">
+          <div class="cell"><div class="n">1</div><div class="k">split_edit</div></div>
+          <div class="cell"><div class="n" id="dDir">J</div><div class="k">方向</div></div>
+          <div class="cell"><div class="n" id="dDelta">−400ms</div><div class="k">音频偏移</div></div>
+        </div>
+        <div class="actions">
+          <button class="btn ghost" id="back">返回</button>
+          <div class="right"><button class="btn primary" id="adopt">采纳为正式 Timeline</button></div>
+        </div>
+        <div class="note ok" id="adoptNote" hidden>已采纳为新 Revision（原型示意）。</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let mode = "auto";
+const CUTS = { "39": 32, "80.5": 66 };
+
+function resolvedMode() {
+  if (mode !== "auto") return mode;
+  // 自动：有下句词 → J（与 auto_lj_mode 一致）
+  return "j";
+}
+function render() {
+  const off = +document.getElementById("off").value;
+  const cutKey = document.getElementById("cut").value;
+  const cutPct = CUTS[cutKey] ?? 32;
+  const dir = resolvedMode();
+  const deltaMs = dir === "j" ? -off : off;
+
+  document.getElementById("offVal").textContent = off;
+  document.getElementById("vCut").style.left = cutPct + "%";
+  const aPct = cutPct + (deltaMs / 1000 / 122.4 * 100) * 8; // 示意放大
+  document.getElementById("aCut").style.left = Math.max(2, Math.min(96, aPct)) + "%";
+  document.getElementById("aFill").style.left = "0%";
+  document.getElementById("aFill").style.right = Math.max(0, 100 - Math.max(2, Math.min(96, aPct))) + "%";
+
+  const cutSec = parseFloat(cutKey);
+  const audioSec = cutSec + deltaMs / 1000;
+  document.getElementById("vLabel").textContent = "切于 " + fmt(cutSec);
+  document.getElementById("aLabel").textContent =
+    "切于 " + fmt(audioSec) + "（" + dir.toUpperCase() + " · " + (deltaMs > 0 ? "+" : "−") + off + "ms）";
+  document.getElementById("stat").textContent =
+    dir === "j"
+      ? `J-cut：下句声提前 ${off}ms 进入当前画面。`
+      : `L-cut：上句声延后 ${off}ms 叠到下一画面。`;
+  document.getElementById("dDir").textContent = dir.toUpperCase();
+  document.getElementById("dDelta").textContent = (deltaMs > 0 ? "+" : "−") + off + "ms";
+  document.getElementById("propSum").textContent =
+    `split_edit · mode=${dir} · audio_delta_us = ${deltaMs * 1000} · word_source=asr`;
+}
+function fmt(s) {
+  return Math.floor(s / 60) + ":" + (s % 60).toFixed(1).padStart(4, "0");
+}
+document.querySelectorAll("#modeSeg button").forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll("#modeSeg button").forEach(b => b.classList.remove("on"));
+    btn.classList.add("on");
+    mode = btn.dataset.m;
+    render();
+  };
+});
+document.getElementById("off").oninput = render;
+document.getElementById("cut").onchange = render;
+document.getElementById("dry").onclick = () => {
+  document.getElementById("dryNote").textContent = "干跑完成：split_edit × 1，音频切线已偏移。";
+};
+document.getElementById("propose").onclick = () => {
+  document.getElementById("proposal").hidden = false;
+  document.getElementById("adoptNote").hidden = true;
+};
+document.getElementById("back").onclick = () => { document.getElementById("proposal").hidden = true; };
+document.getElementById("adopt").onclick = () => { document.getElementById("adoptNote").hidden = false; };
+render();
+</script>
+</body>
+</html>
