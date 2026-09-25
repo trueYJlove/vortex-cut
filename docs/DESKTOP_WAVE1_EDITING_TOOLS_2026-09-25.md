@@ -29,9 +29,18 @@
 
 ## 3. 边界
 
-- **L/J 词戳**：面板暂传空 `words`（Core 侧 ASR 注入/后续接线）；有词时自动/J 由 `auto_lj_mode` 决定。
-- **卡点 beat 网格**：segments 由时间线 clip 派生；BGM beat 需素材已分析（Core signals）。
-- 手测清单见设计 §6.5（需真机点一遍 UI；自动化仅覆盖类型与既有回归）。
+- **L/J 词戳**：`params.words` 为空时由 Core 从 `transcript_words` 注入；无转录则报 `NO_WORDS`（文案引导先转录）。
+- **卡点 beat**：`beats_us` 从 `beat_grids` 注入（`bgm_asset_id` 或首 segment 素材）。
+- **去停顿**：仍需该素材 CV 音频能量（先「AI 信号分析」）。
+
+## 5. 验收反馈修复（2026-09-25 第二轮）
+
+| 问题 | 修复 |
+|---|---|
+| UI 未 1:1 对齐原型 | 重做 `EditingToolsPanel`：et-shell/bar/timeline/av/proposal 卡 + 原型文案与布局 |
+| 干跑/生成提案报错 | Core `_signals_for` 注入 beat/词戳；`lj_cut` 支持 `mode=auto`；Desktop 不再传空 words |
+
+回归：Core 语法 36 项 + Desktop 708 项绿。
 
 ## 4. 剩余范围
 

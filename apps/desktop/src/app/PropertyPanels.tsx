@@ -29,11 +29,11 @@ const keyframePropertyLabels: Array<{ property: "position" | "scale" | "rotate" 
 ];
 
 /**
- * 片段属性面板 v2：按 docs/uiux/property-panel/DESIGN.md §1.1 信息架构分页签。
+ * 片段属性面板 v2：按 docs/ui-mockups/property-panel/DESIGN.md §1.1 信息架构分页签。
  * 视频/图片：画面（基础·抠像·蒙版）/ 音频 / 变速（含倒放）/ 动画；音频素材：基础 / 换音色 / 声音效果 / 变速。
  * 仅重组 UI，patch 操作与字段语义与 v1 完全一致；「规划中」为静态占位。
  */
-export function ClipProperties({ clip, working, locked, onPatch, onDraft, playheadUs }: { clip: TimelineClip; working: TimelineDocument; locked: boolean; onPatch: (ops: TimelinePatchOperation[], summary: string) => Promise<void>; onDraft: (doc: TimelineDocument) => void; playheadUs?: number }) {
+export function ClipProperties({ clip, working, locked, onPatch, onDraft, playheadUs, onOpenEditingTools }: { clip: TimelineClip; working: TimelineDocument; locked: boolean; onPatch: (ops: TimelinePatchOperation[], summary: string) => Promise<void>; onDraft: (doc: TimelineDocument) => void; playheadUs?: number; onOpenEditingTools?: (tool: "remove_pauses" | "beat_sync" | "lj_cut") => void }) {
   const isVideo = clip.asset_kind === "video";
   const isImage = clip.asset_kind === "image";
   const isAudioClip = clip.asset_kind === "audio";
@@ -64,9 +64,9 @@ export function ClipProperties({ clip, working, locked, onPatch, onDraft, playhe
 
   // ---- 页签状态（跨片段选择持久；按素材类型回退到首个可用页签） ----
   const topTabs = isAudioClip
-    ? [{ id: "basic", label: "基础" }, { id: "voice", label: "换音色", soon: true }, { id: "fx", label: "声音效果", soon: true }, { id: "speed", label: "变速" }]
+    ? [{ id: "basic", label: "基础" }, { id: "voice", label: "换音色", soon: true }, { id: "fx", label: "声音效果", soon: true }, { id: "speed", label: "变速" }, { id: "tools", label: "手法" }]
     : isVideo
-      ? [{ id: "pic", label: "画面" }, { id: "aud", label: "音频" }, { id: "speed", label: "变速" }, { id: "anim", label: "动画" }]
+      ? [{ id: "pic", label: "画面" }, { id: "aud", label: "音频" }, { id: "speed", label: "变速" }, { id: "anim", label: "动画" }, { id: "tools", label: "手法" }]
       : [{ id: "pic", label: "画面" }, { id: "speed", label: "变速" }, { id: "anim", label: "动画" }];
   const [tab, setTab] = useState<string>(isAudioClip ? "basic" : "pic");
   const [picSub, setPicSub] = useState("basic");
@@ -308,8 +308,26 @@ export function ClipProperties({ clip, working, locked, onPatch, onDraft, playhe
         </>}
         {activeTab === "speed" && <div className="pp-body">{speedSection}</div>}
         {activeTab === "anim" && <div className="pp-body">{animSection}</div>}
+        {activeTab === "tools" && <div className="pp-body">
+          <PGroup title="剪辑手法">
+            <PNote>本地确定性规划 · 零外传。提案不自动改 Timeline，采纳后落新 Revision。</PNote>
+            <div className="properties-actions" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <button type="button" disabled={!onOpenEditingTools} onClick={() => onOpenEditingTools?.("remove_pauses")}>去停顿</button>
+              <button type="button" disabled={!onOpenEditingTools} onClick={() => onOpenEditingTools?.("beat_sync")}>卡点</button>
+              <button type="button" disabled={!onOpenEditingTools} onClick={() => onOpenEditingTools?.("lj_cut")}>L/J cut</button>
+            </div>
+          </PGroup>
+        </div>}
       </>
     )}
+    {isAudioClip && activeTab === "tools" && <div className="pp-body">
+      <PGroup title="剪辑手法">
+        <PNote>音频片段可先用于卡点 BGM；去停顿 / L-J 需视频片段。</PNote>
+        <div className="properties-actions">
+          <button type="button" disabled={!onOpenEditingTools} onClick={() => onOpenEditingTools?.("beat_sync")}>卡点</button>
+        </div>
+      </PGroup>
+    </div>}
   </fieldset>;
 }
 

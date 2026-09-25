@@ -112,7 +112,7 @@ class LjCutPlanner:
                 "required": ["clip_id", "mode", "source_time_us", "words"],
                 "properties": {
                     "clip_id": {"type": "string"},
-                    "mode": {"type": "string", "enum": ["j", "l"]},
+                    "mode": {"type": "string", "enum": ["j", "l", "auto"]},
                     "source_time_us": {"type": "integer", "minimum": MIN_VIDEO_US},
                     "offset_us": {
                         "type": "integer",
@@ -156,8 +156,8 @@ class LjCutPlanner:
         words = params.get("words")
         if not isinstance(clip_id, str) or not clip_id:
             raise DomainError("EDITING_GRAMMAR_PARAMS_INVALID", "clip_id 不合法")
-        if mode not in ("j", "l"):
-            raise DomainError("EDITING_GRAMMAR_PARAMS_INVALID", "mode 必须为 j 或 l")
+        if mode not in ("j", "l", "auto"):
+            raise DomainError("EDITING_GRAMMAR_PARAMS_INVALID", "mode 必须为 j / l / auto")
         if (
             isinstance(cut, bool)
             or not isinstance(cut, int)
@@ -170,8 +170,12 @@ class LjCutPlanner:
             or not MIN_JL_OFFSET_US <= offset <= MAX_JL_OFFSET_US
         ):
             raise DomainError("EDITING_GRAMMAR_PARAMS_INVALID", "offset_us 不合法")
+        if words is None:
+            words = []
         if not isinstance(words, list):
             raise DomainError("EDITING_GRAMMAR_PARAMS_INVALID", "words 不合法")
+        if not words:
+            words = list((signals or {}).get("words") or [])
 
         clip = next(
             (c for c in document.get("clips") or [] if c.get("clip_id") == clip_id),
@@ -187,8 +191,9 @@ class LjCutPlanner:
         if cut - src_start < MIN_VIDEO_US or src_end - cut < MIN_VIDEO_US:
             raise DomainError("EDITING_GRAMMAR_PARAMS_INVALID", "切点两侧过短")
 
+        decision_mode = auto_lj_mode(words, cut) if mode == "auto" else mode
         decision = choose_audio_delta(
-            mode=mode,
+            mode=decision_mode,
             picture_cut_us=cut,
             words=words,
             clip_start_us=src_start,
@@ -205,7 +210,7 @@ class LjCutPlanner:
         )
         return PlanResult(
             summary=(
-                f"{'J' if mode == 'j' else 'L'}-cut @ {cut}us"
+                f"{'J' if decision_mode == 'j' else 'L'}-cut @ {cut}us"
                 f"（Δ={decision['audio_delta_us']}us）"
             ),
             operations=operations,
@@ -213,7 +218,8 @@ class LjCutPlanner:
                 "planner": "lj_cut",
                 "params": {
                     "clip_id": clip_id,
-                    "mode": mode,
+                    "mode": decision_mode,
+                    "requested_mode": mode,
                     "source_time_us": cut,
                     "offset_us": offset,
                 },

@@ -43,41 +43,100 @@ class EditingGrammarService:
             return self.timelines._revision(db, base_revision_id)
 
     def _signals_for(
-        self, document: dict[str, Any], params: dict[str, Any]
-    ) -> dict[str, Any] | None:
-        """W1.5：为 remove_pauses 注入 CV 音频能量样本（无则 None，由参数显式区间兜底）。"""
-        clip_id = params.get("clip_id")
-        if not isinstance(clip_id, str):
-            return None
-        clip = next(
-            (c for c in document.get("clips") or [] if c.get("clip_id") == clip_id),
-            None,
-        )
-        if not clip or clip.get("asset_kind") != "video":
-            return None
-        start_us, end_us = clip.get("source_start_us"), clip.get("source_end_us")
-        if start_us is None or end_us is None:
-            return None
-        with self.db.connection() as db:
-            analysis = db.execute(
-                "SELECT id FROM cv_analyses WHERE asset_id=? AND status='ready' "
-                "ORDER BY created_at DESC LIMIT 1",
-                (clip.get("asset_id"),),
-            ).fetchone()
-            if not analysis:
-                return {"samples": []}
-            rows = db.execute(
-                "SELECT timestamp_us,audio_energy FROM cv_samples "
-                "WHERE analysis_id=? AND timestamp_us>=? AND timestamp_us<? "
-                "ORDER BY timestamp_us",
-                (analysis["id"], start_us, end_us),
-            ).fetchall()
-        return {
-            "samples": [
+        self,
+        document: dict[str, Any],
+        params: dict[str, Any],
+        planner: str,
+    ) -> dict[str, Any]:
+        """按规划器注入本地信号（零 egress）。
+
+        - remove_pauses：CV 音频能量样本
+        - beat_sync：beat_grids 的 beats_us/downbeats_us
+        - lj_cut：transcript_words（params.words 为空时）
+        """
+        signals: dict[str, Any] = {}
+        if planner == "remove_pauses":
+            clip_id = params.get("clip_id")
+            if not isinstance(clip_id, str):
+                return signals
+            clip = next(
+                (c for c in document.get("clips") or [] if c.get("clip_id") == clip_id),
+                None,
+            )
+            if not clip or clip.get("asset_kind") != "video":
+                return signals
+            start_us, end_us = clip.get("source_start_us"), clip.get("source_end_us")
+            if start_us is None or end_us is None:
+                return signals
+            with self.db.connection() as db:
+                analysis = db.execute(
+                    "SELECT id FROM cv_analyses WHERE asset_id=? AND status='ready' "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (clip.get("asset_id"),),
+                ).fetchone()
+                if not analysis:
+                    signals["samples"] = []
+                    return signals
+                rows = db.execute(
+                    "SELECT timestamp_us,audio_energy FROM cv_samples "
+                    "WHERE analysis_id=? AND timestamp_us>=? AND timestamp_us<? "
+                    "ORDER BY timestamp_us",
+                    (analysis["id"], start_us, end_us),
+                ).fetchall()
+            signals["samples"] = [
                 {"timestamp_us": row["timestamp_us"], "audio_energy": row["audio_energy"]}
                 for row in rows
             ]
-        }
+            return signals
+
+        if planner == "beat_sync":
+            bgm_asset_id = params.get("bgm_asset_id")
+            if not isinstance(bgm_asset_id, str) or not bgm_asset_id:
+                first = (params.get("segments") or [{}])[0]
+                bgm_asset_id = first.get("asset_id") if isinstance(first, dict) else None
+            if not isinstance(bgm_asset_id, str):
+                return signals
+            with self.db.connection() as db:
+                row = db.execute(
+                    "SELECT beats_json,downbeats_json FROM beat_grids "
+                    "WHERE asset_id=? AND status='ready' "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (bgm_asset_id,),
+                ).fetchone()
+            if row:
+                signals["beats_us"] = json_loads(row["beats_json"] or "[]")
+                signals["downbeats_us"] = json_loads(row["downbeats_json"] or "[]")
+            return signals
+
+        if planner == "lj_cut":
+            explicit = params.get("words")
+            if isinstance(explicit, list) and explicit:
+                return signals
+            clip_id = params.get("clip_id")
+            if not isinstance(clip_id, str):
+                return signals
+            clip = next(
+                (c for c in document.get("clips") or [] if c.get("clip_id") == clip_id),
+                None,
+            )
+            if not clip:
+                return signals
+            with self.db.connection() as db:
+                rows = db.execute(
+                    "SELECT w.start_us,w.end_us,w.text FROM transcript_words w "
+                    "JOIN transcript_segments s ON w.segment_id=s.id "
+                    "JOIN transcripts t ON s.transcript_id=t.id "
+                    "WHERE t.asset_id=? AND t.status='ready' "
+                    "ORDER BY w.start_us,w.ordinal",
+                    (clip.get("asset_id"),),
+                ).fetchall()
+            signals["words"] = [
+                {"start_us": row["start_us"], "end_us": row["end_us"], "text": row["text"]}
+                for row in rows
+            ]
+            return signals
+
+        return signals
 
     def prepare(self, project_id: str, request: dict[str, Any]) -> dict[str, Any]:
         if set(request) != {"base_revision_id", "planner", "params"}:
@@ -87,7 +146,7 @@ class EditingGrammarService:
         if not isinstance(params, dict):
             raise DomainError("EDITING_GRAMMAR_PARAMS_INVALID", "规划器参数不合法")
         revision = self._load_base(project_id, request["base_revision_id"])
-        signals = self._signals_for(revision["document"], params)
+        signals = self._signals_for(revision["document"], params, planner.tool.name)
         result = planner.plan(revision["document"], params, signals=signals)
         return {
             "planner": planner.tool.name,

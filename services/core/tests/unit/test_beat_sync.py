@@ -125,3 +125,31 @@ def test_requires_beats(tmp_path: Path) -> None:
     with pytest.raises(DomainError) as exc:
         planner.plan(state["current_revision"]["document"], params)
     assert exc.value.code == "EDITING_GRAMMAR_PARAMS_INVALID"
+
+
+def test_beats_injected_from_beat_grids(tmp_path: Path) -> None:
+    """params 不带 beats_us 时，由 beat_grids 信号注入（Desktop 一键路径）。"""
+    service, db = _service(tmp_path)
+    state = _create(service)
+    grammar = EditingGrammarService(db, service)
+    params = _params(n_segments=1)
+    params.pop("beats_us", None)
+    params.pop("downbeats_us", None)
+    params["bgm_asset_id"] = "v1"
+    beats = [i * 500_000 for i in range(20)]
+    with db.connection() as conn:
+        conn.execute(
+            "INSERT INTO beat_grids(id,asset_id,source_fingerprint,algorithm_version,"
+            "status,bpm,lag_s,confidence,beats_json,downbeats_json,candidates_json,"
+            "reason,model_revision,sample_rate,created_at,updated_at,finished_at) "
+            "VALUES ('bg1','v1','fp',1,'ready',120,0.5,0.9,?,?,'[]',NULL,NULL,22050,'t0','t0','t0')",
+            (__import__("aivs_core.database", fromlist=["json_dumps"]).json_dumps(beats),
+             __import__("aivs_core.database", fromlist=["json_dumps"]).json_dumps(beats[::4])),
+        )
+    req = {
+        "base_revision_id": state["current_revision"]["timeline_revision_id"],
+        "planner": "beat_sync",
+        "params": params,
+    }
+    preview = grammar.prepare("p1", req)
+    assert preview["operations_count"] >= 1

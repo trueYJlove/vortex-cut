@@ -195,6 +195,46 @@ class TestAutoLjMode:
             auto_lj_mode([], 1_000_000)
         assert exc.value.code == "EDITING_GRAMMAR_NO_WORDS"
 
+
+class TestLjSignalsInjection:
+    def test_words_from_transcript_when_params_empty(self, tmp_path: Path) -> None:
+        service, db = _service(tmp_path)
+        state = _create(service)
+        state, clip_id = _video(service, state)
+        with db.connection() as conn:
+            conn.execute(
+                "INSERT INTO transcripts(id,asset_id,status,language,duration_us,created_at,updated_at,"
+                "provider,model_id,model_revision,source_fingerprint) "
+                "VALUES ('tr_lj1','v1','ready','zh',5000000,'t0','t0','p','m','r','fp')"
+            )
+            conn.execute(
+                "INSERT INTO transcript_segments(id,transcript_id,ordinal,start_us,end_us,text,confidence) "
+                "VALUES ('sg_lj1','tr_lj1',0,0,5000000,'hi',1.0)"
+            )
+            conn.execute(
+                "INSERT INTO transcript_words(id,segment_id,ordinal,start_us,end_us,text,confidence) "
+                "VALUES ('wd_lj1','sg_lj1',0,1000000,1400000,'a',1.0)"
+            )
+            conn.execute(
+                "INSERT INTO transcript_words(id,segment_id,ordinal,start_us,end_us,text,confidence) "
+                "VALUES ('wd_lj2','sg_lj1',1,2200000,2600000,'b',1.0)"
+            )
+        grammar = EditingGrammarService(db, service)
+        req = {
+            "base_revision_id": state["current_revision"]["timeline_revision_id"],
+            "planner": "lj_cut",
+            "params": {
+                "clip_id": clip_id,
+                "mode": "auto",
+                "source_time_us": 2_000_000,
+                "offset_us": 400_000,
+            },
+        }
+        preview = grammar.prepare("p1", req)
+        assert preview["operations"][0]["op"] == "split_edit"
+        assert preview["operations"][0]["audio_delta_us"] < 0
+        assert preview["rationale"]["params"]["mode"] == "j"
+
     def test_e2e_propose_apply(self, tmp_path: Path) -> None:
         service, db = _service(tmp_path)
         state = _create(service)

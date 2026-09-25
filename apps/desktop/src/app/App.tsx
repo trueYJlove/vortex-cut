@@ -12,6 +12,7 @@ import { ShotRequirementWorkbench } from "./shot-requirements/ShotRequirementWor
 import { SettingsDialog } from "./settings/SettingsDialog.js";
 import { AgentSessionPanel } from "./agent-session/AgentSessionPanel.js";
 import { EditingGrammarPanel } from "./editing-grammar/EditingGrammarPanel.js";
+import { EditingToolsPanel } from "./editing-grammar/EditingToolsPanel.js";
 import { Dialog } from "./Dialog.js";
 import { errorCode, safeErrorMessage, safeTaskErrorMessage } from "./safeErrors.js";
 import { PreviewPipOverlays, type PipOverlay, type PipTransform } from "./PreviewPipOverlays.js";
@@ -255,6 +256,13 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
   const [editingGrammarOpen, setEditingGrammarOpen] = useState(false);
+  const [editingToolsTool, setEditingToolsTool] = useState<"remove_pauses" | "beat_sync" | "lj_cut" | null>(null);
+  const [editingToolsClipId, setEditingToolsClipId] = useState<string | null>(null);
+  const openEditingTools = (tool: "remove_pauses" | "beat_sync" | "lj_cut", clipId?: string | null) => {
+    setEditingToolsTool(tool);
+    setEditingToolsClipId(clipId ?? selectedClip?.clip_id ?? null);
+    setEditingGrammarOpen(true);
+  };
   const [generationOpen, setGenerationOpen] = useState(false);
   const [renderPanelOpen, setRenderPanelOpen] = useState(false);
   // 轮询 effect 闭包读面板开关最新值（决定 exports 对账端点是否参与本轮）。
@@ -1381,6 +1389,7 @@ export function App() {
     <div className="asset-actions">
       <IconButton label={`预览播放 ${item.asset.display_name}`} disabled={item.asset.availability !== "available"} onClick={() => previewFromLibrary(item)}><Play size={13} /></IconButton>
       {isTranscribable(item.asset) && <IconButton label="转录" onClick={() => startTranscription(item.asset)}><FileText size={13} /></IconButton>}
+      {item.asset.kind === "video" && item.asset.availability === "available" && <IconButton label="剪辑手法" disabled={cvBusy !== null} onClick={() => openEditingTools("remove_pauses")}><Scissors size={13} /></IconButton>}
       {item.asset.kind === "video" && item.asset.availability === "available" && <IconButton label="AI 信号分析" disabled={cvBusy !== null} onClick={() => { setCvOptionsAsset(item); setCvOptionsOpen(true); setCvTargetGapS(""); setCvBudgetPerMin(""); }}><Sparkles size={13} /></IconButton>}
       <IconButton label={`打开 ${item.asset.display_name} 所在文件夹`} onClick={() => void revealAsset(item.asset)}><FolderOpen size={13} /></IconButton>
       <IconButton label={`删除 ${item.asset.display_name}`} onClick={() => setPendingDeleteAsset(item.asset)}><Trash2 size={13} /></IconButton>
@@ -2228,7 +2237,7 @@ export function App() {
     编辑: [{ label: "撤销", icon: Undo2, action: () => void undoRedo("undo"), disabled: Boolean(commandDisabledReason("timeline.undo")) }, { label: "重做", icon: Redo2, action: () => void undoRedo("redo"), disabled: Boolean(commandDisabledReason("timeline.redo")) }],
     时间线: [{ label: "创建空时间线", icon: SquarePlus, action: () => void createTimeline({ kind: "empty" }), disabled: Boolean(commandDisabledReason("timeline.create")) }, { divider: true }, { label: "拆分所选片段", icon: Scissors, action: () => runCommand("timeline.split"), disabled: Boolean(commandDisabledReason("timeline.split")) }, { label: "生成预览", icon: MonitorPlay, action: () => runCommand("preview.generate"), disabled: Boolean(commandDisabledReason("preview.generate")) }, { label: "导出", icon: Upload, action: () => runCommand("export.open"), disabled: Boolean(commandDisabledReason("export.open")) }],
     界面: [{ label: "恢复默认布局", icon: LayoutPanelLeft, action: () => { setLeftWidth(280); setRightWidth(300); setTimelineHeight(230); } }, { label: "命令搜索", icon: CommandIcon, action: () => setCommandSearchOpen(true) }, { label: "快捷键设置", icon: Keyboard, action: () => setShortcutsOpen(true) }],
-    工具: [{ group: "AI" }, { label: "AI 助手", icon: WandSparkles, action: () => setAgentOpen(true), disabled: !project }, { label: "AI 粗剪", icon: Sparkles, action: () => void openAi(), disabled: Boolean(commandDisabledReason("ai.open")) }, { label: "AI 修改", icon: WandSparkles, action: () => void openPatch(), disabled: Boolean(commandDisabledReason("ai.revise")) }, { label: "剪辑语法", icon: Scissors, action: () => setEditingGrammarOpen(true), disabled: !project }, { label: "版本比较", icon: GitCompare, action: () => void openRevisionCompare(), disabled: Boolean(commandDisabledReason("tools.compare")) }, { divider: true }, { label: "镜头需求", icon: Clapperboard, action: () => setShotRequirementsOpen(true), disabled: Boolean(commandDisabledReason("tools.shots")) }, { label: "生成验证（模拟）", icon: FlaskConical, action: () => setGenerationOpen(true), disabled: Boolean(commandDisabledReason("tools.verify")) }, { label: "真实图片生成", icon: ImageIcon, action: () => setProviderImageGenerationOpen(true), disabled: Boolean(commandDisabledReason("tools.imageGen")) }],
+    工具: [{ group: "AI" }, { label: "AI 助手", icon: WandSparkles, action: () => setAgentOpen(true), disabled: !project }, { label: "AI 粗剪", icon: Sparkles, action: () => void openAi(), disabled: Boolean(commandDisabledReason("ai.open")) }, { label: "AI 修改", icon: WandSparkles, action: () => void openPatch(), disabled: Boolean(commandDisabledReason("ai.revise")) }, { label: "剪辑手法", icon: Scissors, action: () => openEditingTools("remove_pauses"), disabled: !project }, { label: "剪辑语法（高级）", icon: Scissors, action: () => { setEditingToolsTool(null); setEditingGrammarOpen(true); }, disabled: !project }, { label: "版本比较", icon: GitCompare, action: () => void openRevisionCompare(), disabled: Boolean(commandDisabledReason("tools.compare")) }, { divider: true }, { label: "镜头需求", icon: Clapperboard, action: () => setShotRequirementsOpen(true), disabled: Boolean(commandDisabledReason("tools.shots")) }, { label: "生成验证（模拟）", icon: FlaskConical, action: () => setGenerationOpen(true), disabled: Boolean(commandDisabledReason("tools.verify")) }, { label: "真实图片生成", icon: ImageIcon, action: () => setProviderImageGenerationOpen(true), disabled: Boolean(commandDisabledReason("tools.imageGen")) }],
     帮助: [{ label: "用户使用手册", icon: BookOpen, action: () => showNotice("请查看 docs/VORTEX_CUT_USER_MANUAL.md", "info") }]
   };
   return <main className="editor-shell" style={{ "--left-width": `${leftWidth}px`, "--right-width": `${rightWidth}px`, "--timeline-height": `${timelineHeight}px` } as React.CSSProperties} onClick={() => activeMenu && setActiveMenu(null)}>
@@ -2343,7 +2352,7 @@ export function App() {
         </div>
       </section>
       <div className="resize-handle resize-handle-right" role="separator" aria-label="调整右侧面板宽度" onPointerDown={event => beginResize("right", event)} />
-      <aside className="properties-pane" aria-label="上下文属性" role="region">{selectedClip ? <ClipProperties clip={selectedClip} locked={Boolean(working?.locked_elements?.includes(selectedClip.clip_id))} onPatch={patchTimeline} onDraft={queueDraft} working={working!} playheadUs={playhead} /> : selectedCaption ? <CaptionProperties caption={selectedCaption} locked={Boolean(selectedCaption.source_clip_id && working?.locked_elements?.includes(selectedCaption.source_clip_id))} onPatch={patchTimeline} onDraft={queueDraft} working={working!} /> : selectedTransition ? <TransitionProperties transition={selectedTransition} onPatch={patchTimeline} /> : <ProjectProperties project={project} saveState={saveState} authoritativePreview={authoritativePreview} previewIsStale={previewIsStale} renderDisabledReason={renderDisabledReason} onGeneratePreview={() => void generatePreview()} onCreateExport={openExportDialog} onOpenProjectDialog={() => setProjectDialogOpen(true)} />}</aside>
+      <aside className="properties-pane" aria-label="上下文属性" role="region">{selectedClip ? <ClipProperties clip={selectedClip} locked={Boolean(working?.locked_elements?.includes(selectedClip.clip_id))} onPatch={patchTimeline} onDraft={queueDraft} working={working!} playheadUs={playhead} onOpenEditingTools={tool => openEditingTools(tool, selectedClip.clip_id)} /> : selectedCaption ? <CaptionProperties caption={selectedCaption} locked={Boolean(selectedCaption.source_clip_id && working?.locked_elements?.includes(selectedCaption.source_clip_id))} onPatch={patchTimeline} onDraft={queueDraft} working={working!} /> : selectedTransition ? <TransitionProperties transition={selectedTransition} onPatch={patchTimeline} /> : <ProjectProperties project={project} saveState={saveState} authoritativePreview={authoritativePreview} previewIsStale={previewIsStale} renderDisabledReason={renderDisabledReason} onGeneratePreview={() => void generatePreview()} onCreateExport={openExportDialog} onOpenProjectDialog={() => setProjectDialogOpen(true)} />}</aside>
     </section>
     <div className="timeline-resize-handle" role="separator" aria-label="调整时间线高度" onPointerDown={event => beginResize("timeline", event)} />
     <TimelinePanel document={working} selection={selection} setSelection={(sel) => { setSelection(sel); exitLibraryPreview(); }} onPatch={patchTimeline} onDropAsset={dropAsset} coverUrl={coverUrl} onCaptureCover={() => setCoverDialogOpen(true)} canUndo={Boolean(timeline?.can_undo)} canRedo={Boolean(timeline?.can_redo)} onUndo={() => void undoRedo("undo")} onRedo={() => void undoRedo("redo")} assetMedia={timelineAssetMedia} waveformCache={waveformCache} playheadStore={playheadStore} onSeek={(timeUs) => { exitLibraryPreview(); seekFromUser(timeUs); const clip = sortedClips.find(c => timeUs >= c.timeline_start_us && timeUs < c.timeline_end_us); if (clip && videoRef.current) { const sourceStart = (clip.source_start_us ?? 0) / 1_000_000; const elapsed = (timeUs - clip.timeline_start_us) / 1_000_000 * ((clip.speed_milli ?? 1000) / 1000); pendingSeekRef.current = sourceStart + elapsed; videoRef.current.currentTime = pendingSeekRef.current; } else if (videoRef.current) { videoRef.current.currentTime = timeUs / 1_000_000; } }} onCommand={(id) => runCommand(id)} />
@@ -2404,7 +2413,17 @@ export function App() {
         <button onClick={submitCvOptions}>按上述设置分析</button>
       </div>
     </Dialog>}
-    {editingGrammarOpen && project && <EditingGrammarPanel
+    {editingGrammarOpen && project && editingToolsTool && <EditingToolsPanel
+      projectId={project.project_id}
+      baseRevisionId={timeline?.current_revision.timeline_revision_id ?? null}
+      clips={working?.clips ?? []}
+      initialClipId={editingToolsClipId}
+      initialTool={editingToolsTool}
+      onClose={() => { setEditingGrammarOpen(false); setEditingToolsTool(null); }}
+      onApplied={state => { acceptState(state); void loadRenderData(project); }}
+      onNotify={message => showNotice(message, "success")}
+    />}
+    {editingGrammarOpen && project && !editingToolsTool && <EditingGrammarPanel
       projectId={project.project_id}
       baseRevisionId={timeline?.current_revision.timeline_revision_id ?? null}
       onClose={() => setEditingGrammarOpen(false)}
