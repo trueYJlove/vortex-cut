@@ -1,0 +1,1257 @@
+{
+  "generated_at": "2026-09-25T06:10:44Z",
+  "kind": "baseline",
+  "schema_version": 1,
+  "git_commit": "194e787e278a477e27a684f4c707a16ef062de7f",
+  "algorithm_version": 3,
+  "params": {
+    "cut_tolerance_us": 200000,
+    "ndcg_k": 10,
+    "regression_tolerance": 0.0
+  },
+  "buckets": {
+    "life_no_voice": {
+      "min_samples": 5,
+      "annotated_count": 5,
+      "asset_count": 5,
+      "metrics": {
+        "cut_pr": {
+          "status": "ok",
+          "reason": null,
+          "value": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "matched": 6,
+            "pred_count": 6,
+            "label_count": 6,
+            "tol_us": 200000,
+            "assets": [
+              {
+                "precision": 1.0,
+                "recall": 1.0,
+                "f1": 1.0,
+                "matched": 3,
+                "pred_count": 3,
+                "label_count": 3,
+                "tol_us": 200000,
+                "density_status": "full",
+                "asset_id": "syn-cut-basic"
+              },
+              {
+                "precision": 1.0,
+                "recall": 1.0,
+                "f1": 1.0,
+                "matched": 1,
+                "pred_count": 1,
+                "label_count": 1,
+                "tol_us": 200000,
+                "density_status": "full",
+                "asset_id": "life-no-voice-01"
+              },
+              {
+                "precision": 1.0,
+                "recall": 1.0,
+                "f1": 1.0,
+                "matched": 1,
+                "pred_count": 1,
+                "label_count": 1,
+                "tol_us": 200000,
+                "density_status": "full",
+                "asset_id": "life-no-voice-02"
+              },
+              {
+                "precision": 1.0,
+                "recall": 1.0,
+                "f1": 1.0,
+                "matched": 1,
+                "pred_count": 1,
+                "label_count": 1,
+                "tol_us": 200000,
+                "density_status": "full",
+                "asset_id": "life-no-voice-03"
+              }
+            ]
+          },
+          "pool_size": 5
+        },
+        "recall_ndcg": {
+          "status": "ok",
+          "reason": null,
+          "value": {
+            "ndcg": 1.0,
+            "query_count": 1,
+            "per_query": [
+              1.0
+            ],
+            "k": 10
+          },
+          "pool_size": 5
+        },
+        "beat_hit_rate": {
+          "status": "unavailable",
+          "reason": "no beat_grid_us labels in bucket",
+          "value": null
+        },
+        "lj_offset_accuracy": {
+          "status": "unavailable",
+          "reason": "no lj_offsets labels in bucket",
+          "value": null
+        },
+        "multicam_consistency": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "narrative_coherence": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "structure_usable_rate": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "av_defect_rate": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        }
+      }
+    },
+    "long_gop": {
+      "min_samples": 2,
+      "annotated_count": 2,
+      "asset_count": 3,
+      "metrics": {
+        "cut_pr": {
+          "status": "ok",
+          "reason": null,
+          "value": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "matched": 2,
+            "pred_count": 2,
+            "label_count": 2,
+            "tol_us": 200000,
+            "assets": [
+              {
+                "precision": 1.0,
+                "recall": 1.0,
+                "f1": 1.0,
+                "matched": 1,
+                "pred_count": 1,
+                "label_count": 1,
+                "tol_us": 200000,
+                "density_status": "full",
+                "asset_id": "long-gop-01"
+              },
+              {
+                "precision": 1.0,
+                "recall": 1.0,
+                "f1": 1.0,
+                "matched": 1,
+                "pred_count": 1,
+                "label_count": 1,
+                "tol_us": 200000,
+                "density_status": "full",
+                "asset_id": "long-gop-02"
+              }
+            ]
+          },
+          "pool_size": 2
+        },
+        "recall_ndcg": {
+          "status": "unavailable",
+          "reason": "no recall labels in bucket",
+          "value": null
+        },
+        "beat_hit_rate": {
+          "status": "unavailable",
+          "reason": "no beat_grid_us labels in bucket",
+          "value": null
+        },
+        "lj_offset_accuracy": {
+          "status": "unavailable",
+          "reason": "no lj_offsets labels in bucket",
+          "value": null
+        },
+        "multicam_consistency": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "narrative_coherence": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "structure_usable_rate": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "av_defect_rate": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        }
+      }
+    },
+    "music": {
+      "min_samples": 3,
+      "annotated_count": 3,
+      "asset_count": 3,
+      "metrics": {
+        "cut_pr": {
+          "status": "unavailable",
+          "reason": "no scene_cuts_us labels in bucket",
+          "value": null
+        },
+        "recall_ndcg": {
+          "status": "unavailable",
+          "reason": "no recall labels in bucket",
+          "value": null
+        },
+        "beat_hit_rate": {
+          "status": "ok",
+          "reason": null,
+          "value": {
+            "hit_rate": 0.9122807017543859,
+            "hit": 156,
+            "label_count": 171,
+            "tol_us": 50000,
+            "assets": [
+              {
+                "hit_rate": 0.8888888888888888,
+                "hit": 40,
+                "label_count": 45,
+                "pred_count": 44,
+                "tol_us": 50000,
+                "asset_id": "music-90bpm",
+                "bpm": 89.67825004083903
+              },
+              {
+                "hit_rate": 1.0,
+                "hit": 55,
+                "label_count": 55,
+                "pred_count": 55,
+                "tol_us": 50000,
+                "asset_id": "music-110bpm",
+                "bpm": 110.05584951733891
+              },
+              {
+                "hit_rate": 0.8591549295774648,
+                "hit": 61,
+                "label_count": 71,
+                "pred_count": 71,
+                "tol_us": 50000,
+                "asset_id": "music-140bpm",
+                "bpm": 140.38103407041325
+              }
+            ]
+          },
+          "pool_size": 3
+        },
+        "lj_offset_accuracy": {
+          "status": "unavailable",
+          "reason": "no lj_offsets labels in bucket",
+          "value": null
+        },
+        "multicam_consistency": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "narrative_coherence": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "structure_usable_rate": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "av_defect_rate": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        }
+      }
+    },
+    "spoken_multi": {
+      "min_samples": 3,
+      "annotated_count": 3,
+      "asset_count": 3,
+      "metrics": {
+        "cut_pr": {
+          "status": "ok",
+          "reason": null,
+          "value": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "matched": 3,
+            "pred_count": 3,
+            "label_count": 3,
+            "tol_us": 200000,
+            "assets": [
+              {
+                "precision": 1.0,
+                "recall": 1.0,
+                "f1": 1.0,
+                "matched": 1,
+                "pred_count": 1,
+                "label_count": 1,
+                "tol_us": 200000,
+                "density_status": "full",
+                "asset_id": "spoken-multi-01"
+              },
+              {
+                "precision": 1.0,
+                "recall": 1.0,
+                "f1": 1.0,
+                "matched": 1,
+                "pred_count": 1,
+                "label_count": 1,
+                "tol_us": 200000,
+                "density_status": "full",
+                "asset_id": "spoken-multi-02"
+              },
+              {
+                "precision": 1.0,
+                "recall": 1.0,
+                "f1": 1.0,
+                "matched": 1,
+                "pred_count": 1,
+                "label_count": 1,
+                "tol_us": 200000,
+                "density_status": "full",
+                "asset_id": "spoken-multi-03"
+              }
+            ]
+          },
+          "pool_size": 3
+        },
+        "recall_ndcg": {
+          "status": "ok",
+          "reason": null,
+          "value": {
+            "ndcg": 1.0,
+            "query_count": 3,
+            "per_query": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "k": 10
+          },
+          "pool_size": 3
+        },
+        "beat_hit_rate": {
+          "status": "unavailable",
+          "reason": "no beat_grid_us labels in bucket",
+          "value": null
+        },
+        "lj_offset_accuracy": {
+          "status": "ok",
+          "reason": null,
+          "value": {
+            "accuracy": 1.0,
+            "hit": 3,
+            "label_count": 3,
+            "at_tol_us": 200000,
+            "delta_tol_us": 100000,
+            "assets": [
+              {
+                "accuracy": 1.0,
+                "hit": 1,
+                "label_count": 1,
+                "pred_count": 1,
+                "at_tol_us": 200000,
+                "delta_tol_us": 100000,
+                "details": [
+                  {
+                    "at_us": 8000000,
+                    "matched": true,
+                    "hit": true,
+                    "direction_ok": true,
+                    "delta_us": -400000,
+                    "label_delta_us": -400000
+                  }
+                ],
+                "asset_id": "spoken-multi-01"
+              },
+              {
+                "accuracy": 1.0,
+                "hit": 1,
+                "label_count": 1,
+                "pred_count": 1,
+                "at_tol_us": 200000,
+                "delta_tol_us": 100000,
+                "details": [
+                  {
+                    "at_us": 8000000,
+                    "matched": true,
+                    "hit": true,
+                    "direction_ok": true,
+                    "delta_us": -400000,
+                    "label_delta_us": -400000
+                  }
+                ],
+                "asset_id": "spoken-multi-02"
+              },
+              {
+                "accuracy": 1.0,
+                "hit": 1,
+                "label_count": 1,
+                "pred_count": 1,
+                "at_tol_us": 200000,
+                "delta_tol_us": 100000,
+                "details": [
+                  {
+                    "at_us": 8000000,
+                    "matched": true,
+                    "hit": true,
+                    "direction_ok": true,
+                    "delta_us": -400000,
+                    "label_delta_us": -400000
+                  }
+                ],
+                "asset_id": "spoken-multi-03"
+              }
+            ]
+          },
+          "pool_size": 3
+        },
+        "multicam_consistency": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "narrative_coherence": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "structure_usable_rate": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "av_defect_rate": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        }
+      }
+    },
+    "spoken_single": {
+      "min_samples": 5,
+      "annotated_count": 5,
+      "asset_count": 5,
+      "metrics": {
+        "cut_pr": {
+          "status": "ok",
+          "reason": null,
+          "value": {
+            "precision": 1.0,
+            "recall": 0.5,
+            "f1": 0.6666666666666666,
+            "matched": 5,
+            "pred_count": 5,
+            "label_count": 10,
+            "tol_us": 200000,
+            "assets": [
+              {
+                "precision": 1.0,
+                "recall": 0.5,
+                "f1": 0.6666666666666666,
+                "matched": 1,
+                "pred_count": 1,
+                "label_count": 2,
+                "tol_us": 200000,
+                "density_status": "full",
+                "asset_id": "spoken-single-01"
+              },
+              {
+                "precision": 1.0,
+                "recall": 0.5,
+                "f1": 0.6666666666666666,
+                "matched": 1,
+                "pred_count": 1,
+                "label_count": 2,
+                "tol_us": 200000,
+                "density_status": "full",
+                "asset_id": "spoken-single-02"
+              },
+              {
+                "precision": 1.0,
+                "recall": 0.5,
+                "f1": 0.6666666666666666,
+                "matched": 1,
+                "pred_count": 1,
+                "label_count": 2,
+                "tol_us": 200000,
+                "density_status": "full",
+                "asset_id": "spoken-single-03"
+              },
+              {
+                "precision": 1.0,
+                "recall": 0.5,
+                "f1": 0.6666666666666666,
+                "matched": 1,
+                "pred_count": 1,
+                "label_count": 2,
+                "tol_us": 200000,
+                "density_status": "full",
+                "asset_id": "spoken-single-04"
+              },
+              {
+                "precision": 1.0,
+                "recall": 0.5,
+                "f1": 0.6666666666666666,
+                "matched": 1,
+                "pred_count": 1,
+                "label_count": 2,
+                "tol_us": 200000,
+                "density_status": "full",
+                "asset_id": "spoken-single-05"
+              }
+            ]
+          },
+          "pool_size": 5
+        },
+        "recall_ndcg": {
+          "status": "ok",
+          "reason": null,
+          "value": {
+            "ndcg": 1.0,
+            "query_count": 5,
+            "per_query": [
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "k": 10
+          },
+          "pool_size": 5
+        },
+        "beat_hit_rate": {
+          "status": "unavailable",
+          "reason": "no beat_grid_us labels in bucket",
+          "value": null
+        },
+        "lj_offset_accuracy": {
+          "status": "ok",
+          "reason": null,
+          "value": {
+            "accuracy": 1.0,
+            "hit": 10,
+            "label_count": 10,
+            "at_tol_us": 200000,
+            "delta_tol_us": 100000,
+            "assets": [
+              {
+                "accuracy": 1.0,
+                "hit": 2,
+                "label_count": 2,
+                "pred_count": 2,
+                "at_tol_us": 200000,
+                "delta_tol_us": 100000,
+                "details": [
+                  {
+                    "at_us": 39000000,
+                    "matched": true,
+                    "hit": true,
+                    "direction_ok": true,
+                    "delta_us": -400000,
+                    "label_delta_us": -400000
+                  },
+                  {
+                    "at_us": 80500000,
+                    "matched": true,
+                    "hit": true,
+                    "direction_ok": true,
+                    "delta_us": -400000,
+                    "label_delta_us": -400000
+                  }
+                ],
+                "asset_id": "spoken-single-01"
+              },
+              {
+                "accuracy": 1.0,
+                "hit": 2,
+                "label_count": 2,
+                "pred_count": 2,
+                "at_tol_us": 200000,
+                "delta_tol_us": 100000,
+                "details": [
+                  {
+                    "at_us": 39000000,
+                    "matched": true,
+                    "hit": true,
+                    "direction_ok": true,
+                    "delta_us": -400000,
+                    "label_delta_us": -400000
+                  },
+                  {
+                    "at_us": 80500000,
+                    "matched": true,
+                    "hit": true,
+                    "direction_ok": true,
+                    "delta_us": -400000,
+                    "label_delta_us": -400000
+                  }
+                ],
+                "asset_id": "spoken-single-02"
+              },
+              {
+                "accuracy": 1.0,
+                "hit": 2,
+                "label_count": 2,
+                "pred_count": 2,
+                "at_tol_us": 200000,
+                "delta_tol_us": 100000,
+                "details": [
+                  {
+                    "at_us": 39000000,
+                    "matched": true,
+                    "hit": true,
+                    "direction_ok": true,
+                    "delta_us": -400000,
+                    "label_delta_us": -400000
+                  },
+                  {
+                    "at_us": 80500000,
+                    "matched": true,
+                    "hit": true,
+                    "direction_ok": true,
+                    "delta_us": -400000,
+                    "label_delta_us": -400000
+                  }
+                ],
+                "asset_id": "spoken-single-03"
+              },
+              {
+                "accuracy": 1.0,
+                "hit": 2,
+                "label_count": 2,
+                "pred_count": 2,
+                "at_tol_us": 200000,
+                "delta_tol_us": 100000,
+                "details": [
+                  {
+                    "at_us": 39000000,
+                    "matched": true,
+                    "hit": true,
+                    "direction_ok": true,
+                    "delta_us": -400000,
+                    "label_delta_us": -400000
+                  },
+                  {
+                    "at_us": 80500000,
+                    "matched": true,
+                    "hit": true,
+                    "direction_ok": true,
+                    "delta_us": -400000,
+                    "label_delta_us": -400000
+                  }
+                ],
+                "asset_id": "spoken-single-04"
+              },
+              {
+                "accuracy": 1.0,
+                "hit": 2,
+                "label_count": 2,
+                "pred_count": 2,
+                "at_tol_us": 200000,
+                "delta_tol_us": 100000,
+                "details": [
+                  {
+                    "at_us": 39000000,
+                    "matched": true,
+                    "hit": true,
+                    "direction_ok": true,
+                    "delta_us": -400000,
+                    "label_delta_us": -400000
+                  },
+                  {
+                    "at_us": 80500000,
+                    "matched": true,
+                    "hit": true,
+                    "direction_ok": true,
+                    "delta_us": -400000,
+                    "label_delta_us": -400000
+                  }
+                ],
+                "asset_id": "spoken-single-05"
+              }
+            ]
+          },
+          "pool_size": 5
+        },
+        "multicam_consistency": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "narrative_coherence": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "structure_usable_rate": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        },
+        "av_defect_rate": {
+          "status": "unavailable",
+          "reason": "capability not delivered yet (W0.4 skeleton)",
+          "value": null
+        }
+      }
+    }
+  },
+  "gaps": {
+    "life_no_voice": {
+      "min_samples": 5,
+      "annotated_count": 5,
+      "shortfall": 0
+    },
+    "long_gop": {
+      "min_samples": 2,
+      "annotated_count": 2,
+      "shortfall": 0
+    },
+    "music": {
+      "min_samples": 3,
+      "annotated_count": 3,
+      "shortfall": 0
+    },
+    "spoken_multi": {
+      "min_samples": 3,
+      "annotated_count": 3,
+      "shortfall": 0
+    },
+    "spoken_single": {
+      "min_samples": 5,
+      "annotated_count": 5,
+      "shortfall": 0
+    }
+  },
+  "assets": [
+    {
+      "asset_id": "syn-cut-basic",
+      "bucket": "life_no_voice",
+      "kind": "synthetic_metric_fixture",
+      "density_status": "full",
+      "annotation": "ok",
+      "cut": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "matched": 3,
+        "pred_count": 3,
+        "label_count": 3,
+        "tol_us": 200000,
+        "density_status": "full",
+        "asset_id": "syn-cut-basic"
+      }
+    },
+    {
+      "asset_id": "syn-ndcg-basic",
+      "bucket": "life_no_voice",
+      "kind": "synthetic_metric_fixture",
+      "density_status": null,
+      "annotation": "ok"
+    },
+    {
+      "asset_id": "4k60-hevc-gop5s-60s",
+      "bucket": "long_gop",
+      "kind": "synthetic_media",
+      "density_status": null,
+      "annotation": "missing"
+    },
+    {
+      "asset_id": "spoken-single-01",
+      "bucket": "spoken_single",
+      "kind": "synthetic_media",
+      "density_status": "full",
+      "annotation": "ok",
+      "cut": {
+        "precision": 1.0,
+        "recall": 0.5,
+        "f1": 0.6666666666666666,
+        "matched": 1,
+        "pred_count": 1,
+        "label_count": 2,
+        "tol_us": 200000,
+        "density_status": "full",
+        "asset_id": "spoken-single-01"
+      },
+      "lj": {
+        "accuracy": 1.0,
+        "hit": 2,
+        "label_count": 2,
+        "pred_count": 2,
+        "at_tol_us": 200000,
+        "delta_tol_us": 100000,
+        "details": [
+          {
+            "at_us": 39000000,
+            "matched": true,
+            "hit": true,
+            "direction_ok": true,
+            "delta_us": -400000,
+            "label_delta_us": -400000
+          },
+          {
+            "at_us": 80500000,
+            "matched": true,
+            "hit": true,
+            "direction_ok": true,
+            "delta_us": -400000,
+            "label_delta_us": -400000
+          }
+        ],
+        "asset_id": "spoken-single-01"
+      }
+    },
+    {
+      "asset_id": "spoken-single-02",
+      "bucket": "spoken_single",
+      "kind": "synthetic_media",
+      "density_status": "full",
+      "annotation": "ok",
+      "cut": {
+        "precision": 1.0,
+        "recall": 0.5,
+        "f1": 0.6666666666666666,
+        "matched": 1,
+        "pred_count": 1,
+        "label_count": 2,
+        "tol_us": 200000,
+        "density_status": "full",
+        "asset_id": "spoken-single-02"
+      },
+      "lj": {
+        "accuracy": 1.0,
+        "hit": 2,
+        "label_count": 2,
+        "pred_count": 2,
+        "at_tol_us": 200000,
+        "delta_tol_us": 100000,
+        "details": [
+          {
+            "at_us": 39000000,
+            "matched": true,
+            "hit": true,
+            "direction_ok": true,
+            "delta_us": -400000,
+            "label_delta_us": -400000
+          },
+          {
+            "at_us": 80500000,
+            "matched": true,
+            "hit": true,
+            "direction_ok": true,
+            "delta_us": -400000,
+            "label_delta_us": -400000
+          }
+        ],
+        "asset_id": "spoken-single-02"
+      }
+    },
+    {
+      "asset_id": "spoken-single-03",
+      "bucket": "spoken_single",
+      "kind": "synthetic_media",
+      "density_status": "full",
+      "annotation": "ok",
+      "cut": {
+        "precision": 1.0,
+        "recall": 0.5,
+        "f1": 0.6666666666666666,
+        "matched": 1,
+        "pred_count": 1,
+        "label_count": 2,
+        "tol_us": 200000,
+        "density_status": "full",
+        "asset_id": "spoken-single-03"
+      },
+      "lj": {
+        "accuracy": 1.0,
+        "hit": 2,
+        "label_count": 2,
+        "pred_count": 2,
+        "at_tol_us": 200000,
+        "delta_tol_us": 100000,
+        "details": [
+          {
+            "at_us": 39000000,
+            "matched": true,
+            "hit": true,
+            "direction_ok": true,
+            "delta_us": -400000,
+            "label_delta_us": -400000
+          },
+          {
+            "at_us": 80500000,
+            "matched": true,
+            "hit": true,
+            "direction_ok": true,
+            "delta_us": -400000,
+            "label_delta_us": -400000
+          }
+        ],
+        "asset_id": "spoken-single-03"
+      }
+    },
+    {
+      "asset_id": "spoken-single-04",
+      "bucket": "spoken_single",
+      "kind": "synthetic_media",
+      "density_status": "full",
+      "annotation": "ok",
+      "cut": {
+        "precision": 1.0,
+        "recall": 0.5,
+        "f1": 0.6666666666666666,
+        "matched": 1,
+        "pred_count": 1,
+        "label_count": 2,
+        "tol_us": 200000,
+        "density_status": "full",
+        "asset_id": "spoken-single-04"
+      },
+      "lj": {
+        "accuracy": 1.0,
+        "hit": 2,
+        "label_count": 2,
+        "pred_count": 2,
+        "at_tol_us": 200000,
+        "delta_tol_us": 100000,
+        "details": [
+          {
+            "at_us": 39000000,
+            "matched": true,
+            "hit": true,
+            "direction_ok": true,
+            "delta_us": -400000,
+            "label_delta_us": -400000
+          },
+          {
+            "at_us": 80500000,
+            "matched": true,
+            "hit": true,
+            "direction_ok": true,
+            "delta_us": -400000,
+            "label_delta_us": -400000
+          }
+        ],
+        "asset_id": "spoken-single-04"
+      }
+    },
+    {
+      "asset_id": "spoken-single-05",
+      "bucket": "spoken_single",
+      "kind": "synthetic_media",
+      "density_status": "full",
+      "annotation": "ok",
+      "cut": {
+        "precision": 1.0,
+        "recall": 0.5,
+        "f1": 0.6666666666666666,
+        "matched": 1,
+        "pred_count": 1,
+        "label_count": 2,
+        "tol_us": 200000,
+        "density_status": "full",
+        "asset_id": "spoken-single-05"
+      },
+      "lj": {
+        "accuracy": 1.0,
+        "hit": 2,
+        "label_count": 2,
+        "pred_count": 2,
+        "at_tol_us": 200000,
+        "delta_tol_us": 100000,
+        "details": [
+          {
+            "at_us": 39000000,
+            "matched": true,
+            "hit": true,
+            "direction_ok": true,
+            "delta_us": -400000,
+            "label_delta_us": -400000
+          },
+          {
+            "at_us": 80500000,
+            "matched": true,
+            "hit": true,
+            "direction_ok": true,
+            "delta_us": -400000,
+            "label_delta_us": -400000
+          }
+        ],
+        "asset_id": "spoken-single-05"
+      }
+    },
+    {
+      "asset_id": "music-90bpm",
+      "bucket": "music",
+      "kind": "synthetic_media",
+      "density_status": null,
+      "annotation": "ok",
+      "beat": {
+        "hit_rate": 0.8888888888888888,
+        "hit": 40,
+        "label_count": 45,
+        "pred_count": 44,
+        "tol_us": 50000,
+        "asset_id": "music-90bpm",
+        "bpm": 89.67825004083903
+      }
+    },
+    {
+      "asset_id": "music-110bpm",
+      "bucket": "music",
+      "kind": "synthetic_media",
+      "density_status": null,
+      "annotation": "ok",
+      "beat": {
+        "hit_rate": 1.0,
+        "hit": 55,
+        "label_count": 55,
+        "pred_count": 55,
+        "tol_us": 50000,
+        "asset_id": "music-110bpm",
+        "bpm": 110.05584951733891
+      }
+    },
+    {
+      "asset_id": "music-140bpm",
+      "bucket": "music",
+      "kind": "synthetic_media",
+      "density_status": null,
+      "annotation": "ok",
+      "beat": {
+        "hit_rate": 0.8591549295774648,
+        "hit": 61,
+        "label_count": 71,
+        "pred_count": 71,
+        "tol_us": 50000,
+        "asset_id": "music-140bpm",
+        "bpm": 140.38103407041325
+      }
+    },
+    {
+      "asset_id": "life-no-voice-01",
+      "bucket": "life_no_voice",
+      "kind": "synthetic_media",
+      "density_status": "full",
+      "annotation": "ok",
+      "cut": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "matched": 1,
+        "pred_count": 1,
+        "label_count": 1,
+        "tol_us": 200000,
+        "density_status": "full",
+        "asset_id": "life-no-voice-01"
+      }
+    },
+    {
+      "asset_id": "life-no-voice-02",
+      "bucket": "life_no_voice",
+      "kind": "synthetic_media",
+      "density_status": "full",
+      "annotation": "ok",
+      "cut": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "matched": 1,
+        "pred_count": 1,
+        "label_count": 1,
+        "tol_us": 200000,
+        "density_status": "full",
+        "asset_id": "life-no-voice-02"
+      }
+    },
+    {
+      "asset_id": "life-no-voice-03",
+      "bucket": "life_no_voice",
+      "kind": "synthetic_media",
+      "density_status": "full",
+      "annotation": "ok",
+      "cut": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "matched": 1,
+        "pred_count": 1,
+        "label_count": 1,
+        "tol_us": 200000,
+        "density_status": "full",
+        "asset_id": "life-no-voice-03"
+      }
+    },
+    {
+      "asset_id": "long-gop-01",
+      "bucket": "long_gop",
+      "kind": "synthetic_media",
+      "density_status": "full",
+      "annotation": "ok",
+      "cut": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "matched": 1,
+        "pred_count": 1,
+        "label_count": 1,
+        "tol_us": 200000,
+        "density_status": "full",
+        "asset_id": "long-gop-01"
+      }
+    },
+    {
+      "asset_id": "long-gop-02",
+      "bucket": "long_gop",
+      "kind": "synthetic_media",
+      "density_status": "full",
+      "annotation": "ok",
+      "cut": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "matched": 1,
+        "pred_count": 1,
+        "label_count": 1,
+        "tol_us": 200000,
+        "density_status": "full",
+        "asset_id": "long-gop-02"
+      }
+    },
+    {
+      "asset_id": "spoken-multi-01",
+      "bucket": "spoken_multi",
+      "kind": "synthetic_media",
+      "density_status": "full",
+      "annotation": "ok",
+      "cut": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "matched": 1,
+        "pred_count": 1,
+        "label_count": 1,
+        "tol_us": 200000,
+        "density_status": "full",
+        "asset_id": "spoken-multi-01"
+      },
+      "lj": {
+        "accuracy": 1.0,
+        "hit": 1,
+        "label_count": 1,
+        "pred_count": 1,
+        "at_tol_us": 200000,
+        "delta_tol_us": 100000,
+        "details": [
+          {
+            "at_us": 8000000,
+            "matched": true,
+            "hit": true,
+            "direction_ok": true,
+            "delta_us": -400000,
+            "label_delta_us": -400000
+          }
+        ],
+        "asset_id": "spoken-multi-01"
+      }
+    },
+    {
+      "asset_id": "spoken-multi-02",
+      "bucket": "spoken_multi",
+      "kind": "synthetic_media",
+      "density_status": "full",
+      "annotation": "ok",
+      "cut": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "matched": 1,
+        "pred_count": 1,
+        "label_count": 1,
+        "tol_us": 200000,
+        "density_status": "full",
+        "asset_id": "spoken-multi-02"
+      },
+      "lj": {
+        "accuracy": 1.0,
+        "hit": 1,
+        "label_count": 1,
+        "pred_count": 1,
+        "at_tol_us": 200000,
+        "delta_tol_us": 100000,
+        "details": [
+          {
+            "at_us": 8000000,
+            "matched": true,
+            "hit": true,
+            "direction_ok": true,
+            "delta_us": -400000,
+            "label_delta_us": -400000
+          }
+        ],
+        "asset_id": "spoken-multi-02"
+      }
+    },
+    {
+      "asset_id": "spoken-multi-03",
+      "bucket": "spoken_multi",
+      "kind": "synthetic_media",
+      "density_status": "full",
+      "annotation": "ok",
+      "cut": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "matched": 1,
+        "pred_count": 1,
+        "label_count": 1,
+        "tol_us": 200000,
+        "density_status": "full",
+        "asset_id": "spoken-multi-03"
+      },
+      "lj": {
+        "accuracy": 1.0,
+        "hit": 1,
+        "label_count": 1,
+        "pred_count": 1,
+        "at_tol_us": 200000,
+        "delta_tol_us": 100000,
+        "details": [
+          {
+            "at_us": 8000000,
+            "matched": true,
+            "hit": true,
+            "direction_ok": true,
+            "delta_us": -400000,
+            "label_delta_us": -400000
+          }
+        ],
+        "asset_id": "spoken-multi-03"
+      }
+    }
+  ]
+}

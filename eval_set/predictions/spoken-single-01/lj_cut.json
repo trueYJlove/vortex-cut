@@ -1,5 +1,6 @@
 {
   "task": "lj_cut",
+  "word_source": "energy_proxy",
   "items": [
     {
       "at_us": 39000000,

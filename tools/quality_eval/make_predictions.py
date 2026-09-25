@@ -3,7 +3,8 @@
 **禁止用真值冒充预测**——本脚本只调用生产算法：
 - scene_cut：`analyze_video` 采样 + `frame_signals` 镜头边界
 - beat_grid：`beat_grid.analyze_pcm`
-- lj_cut：能量词段 + `auto_lj_mode` / `choose_audio_delta`（ASR 未就绪时的词戳代理）
+- lj_cut：`asr_words.resolve_lj_words`（faster-whisper 词戳，失败回退能量伪词）
+  + `auto_lj_mode` / `choose_audio_delta`
 
 产出：
 - `eval_set/predictions/<asset_id>/scene_cut.json`
@@ -27,6 +28,8 @@ sys.path.insert(0, str(ROOT / "services" / "core" / "src"))
 from aivs_core.editing_grammar.lj_cut import auto_lj_mode, choose_audio_delta  # noqa: E402
 from aivs_core.media.beat_grid import analyze_pcm  # noqa: E402
 from aivs_core.media.cv_signals import analyze_video  # noqa: E402
+
+from asr_words import resolve_lj_words  # noqa: E402
 
 EVAL_SET = ROOT / "eval_set"
 MEDIA_DIR = ROOT / "test-assets" / "generated" / "eval"
@@ -72,40 +75,6 @@ async def _scene_cuts(media: Path) -> tuple[list[int], str]:
     max_gap = max(gaps, default=0)
     density = "sparse" if max_gap > 4_000_000 else "full"
     return cuts, density
-
-
-def _speech_words_from_pcm(pcm: np.ndarray, sr: int) -> list[dict]:
-    """能量有声段切分为伪词（ASR 未就绪时的词戳代理，规则仍走生产 `choose_audio_delta`）。"""
-    win = max(int(sr * 0.05), 1)  # 50ms
-    hop = win
-    energies = []
-    for i in range(0, max(len(pcm) - win + 1, 0), hop):
-        chunk = pcm[i : i + win]
-        energies.append((int(i / sr * 1_000_000), float(np.sqrt(np.mean(chunk**2)))))
-    if not energies:
-        return []
-    threshold = 0.05
-    runs: list[tuple[int, int]] = []
-    run_start = None
-    last = 0
-    for ts, e in energies:
-        if e > threshold:
-            if run_start is None:
-                run_start = ts
-            last = ts
-        elif run_start is not None:
-            runs.append((run_start, last + 50_000))
-            run_start = None
-    if run_start is not None:
-        runs.append((run_start, last + 50_000))
-    words: list[dict] = []
-    for start, end in runs:
-        t = start
-        while t < end:
-            t_end = min(t + WORD_CHUNK_US, end)
-            words.append({"start_us": t, "end_us": t_end, "text": ""})
-            t = t_end
-    return words
 
 
 def _write_pred(asset_id: str, task: str, doc: dict) -> None:
@@ -164,8 +133,9 @@ def main() -> None:
             if not wav_path.is_file():
                 print(f"skip lj_cut {asset_id}: missing {wav_path.name}")
                 continue
+            words, word_source = resolve_lj_words(media)
             pcm, sr = _wav_pcm(wav_path)
-            words = _speech_words_from_pcm(pcm, sr)
+            clip_end_us = int(len(pcm) / sr * 1_000_000) if sr else 0
             items = []
             for lab in lj_labels:
                 at = int(lab["at_us"])
@@ -176,7 +146,7 @@ def main() -> None:
                         picture_cut_us=at,
                         words=words,
                         clip_start_us=0,
-                        clip_end_us=int(len(pcm) / sr * 1_000_000),
+                        clip_end_us=clip_end_us,
                         offset_us=400_000,
                     )
                 except Exception as exc:  # noqa: BLE001
@@ -187,7 +157,11 @@ def main() -> None:
                     "direction": "J" if mode == "j" else "L",
                     "delta_us": int(decision["audio_delta_us"]),
                 })
-            _write_pred(asset_id, "lj_cut", {"task": "lj_cut", "items": items})
+            _write_pred(asset_id, "lj_cut", {
+                "task": "lj_cut",
+                "word_source": word_source,
+                "items": items,
+            })
 
         # 召回排序：有 recall 标注时，按窗口音频能量排序（对齐 _cv_scenes 特征排序精神）。
         # 窗口 id 形如 `t{start_us}`，窗宽由相邻 id 差或末窗时长推断。
