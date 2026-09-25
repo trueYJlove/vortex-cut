@@ -65,10 +65,18 @@ function clipSourceRange(clip: TimelineClip): { start: number; end: number } | n
 
 function errText(caught: unknown): string {
   const code = errorCode(caught);
-  return FAILURE_LABELS[code]
-    ?? safeErrorMessage(caught, caught instanceof Error && caught.message.startsWith("[")
-      ? caught.message
-      : "操作失败。请检查参数与时间线后重试。");
+  if (FAILURE_LABELS[code]) return FAILURE_LABELS[code];
+  const raw = caught instanceof Error ? caught.message : "";
+  // 契约校验失败 / IPC 包装后的业务码原样露出，避免一律「操作失败」
+  if (raw.includes("Invalid contract") || raw.startsWith("Error invoking")) {
+    const bracket = raw.match(/\[([A-Z][A-Z0-9_]{2,})\]/);
+    const codePart = bracket ? `[${bracket[1]}] ` : "";
+    const tail = raw.replace(/^Error invoking remote method '[^']+':\s*Error:\s*/i, "");
+    return `${codePart}${tail}`.slice(0, 200) || "操作失败。请检查参数与时间线后重试。";
+  }
+  return safeErrorMessage(caught, raw.startsWith("[")
+    ? raw
+    : "操作失败。请检查参数与时间线后重试。");
 }
 
 function PauseTimeline({ durationUs, minSilenceMs, padMs }: { durationUs: number; minSilenceMs: number; padMs: number }) {

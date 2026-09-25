@@ -23,7 +23,8 @@ export function errorCode(error: unknown): string {
     : error instanceof Error
       ? error.message
       : "";
-  // Electron IPC 只保留 message；主进程 fetchWithUi 以 "[CODE] message" 传递业务码。
-  const bracket = raw.match(/^\[([A-Z0-9_]+)\]/);
+  // Electron IPC 会包装成 "Error invoking remote method '...': Error: [CODE] msg"，
+  // 因此不能用 ^ 锚定；取首个 [ALL_CAPS_CODE] 作为业务码。
+  const bracket = raw.match(/\[([A-Z][A-Z0-9_]{2,})\]/);
   return bracket ? bracket[1] : raw;
 }

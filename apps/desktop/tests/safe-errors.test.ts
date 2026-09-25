@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { safeErrorMessage, safeTaskErrorMessage } from "../src/app/safeErrors.js";
+import { errorCode, safeErrorMessage, safeTaskErrorMessage } from "../src/app/safeErrors.js";
 
 const DEFAULT_FALLBACK = "操作未完成，请刷新后重试。";
 const TASK_FALLBACK = "任务未完成；请检查任务状态或刷新后重试。";
@@ -31,6 +31,16 @@ describe("safeErrors", () => {
     expect(safeErrorMessage(new Error("[TIMELINE_NOT_FOUND] 项目尚未创建时间线"))).toBe("当前项目还没有时间线。");
     expect(safeErrorMessage(new Error("[TIMELINE_CONFLICT] conflict"))).toBe("时间线已发生变化，请刷新后重试。");
     expect(safeErrorMessage(new Error("[404] Core request failed"))).toBe(DEFAULT_FALLBACK);
+  });
+
+  it("extracts code from Electron IPC-wrapped messages", () => {
+    // ipcRenderer.invoke 抛错时 message 被包成
+    // "Error invoking remote method 'x': Error: [CODE] msg"，不能只靠 ^ 锚定。
+    const wrapped = new Error(
+      "Error invoking remote method 'editing-grammar:prepare': Error: [EDITING_GRAMMAR_NO_SPEECH] 无有效语音信号"
+    );
+    expect(errorCode(wrapped)).toBe("EDITING_GRAMMAR_NO_SPEECH");
+    expect(errorCode(new Error("[EDITING_GRAMMAR_NO_WORDS] 缺少词级时间戳"))).toBe("EDITING_GRAMMAR_NO_WORDS");
   });
 
   it("falls back for an unknown error", () => {
