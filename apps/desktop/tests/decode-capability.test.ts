@@ -105,7 +105,7 @@ describe("MediaDecoderFactoryImpl 判定顺序", () => {
     })).rejects.toMatchObject({ code: "BMFF_CODEC_UNSUPPORTED" });
   });
 
-  it("仅 ffmpeg 可用时倾向 ffmpeg；H3 未就绪则明确失败（不假装成功）", async () => {
+  it("仅 ffmpeg 可用时倾向 ffmpeg；无 decodeFrames 则明确失败", async () => {
     const factory = new MediaDecoderFactoryImpl(tableWith({
       codec: "hevc",
       webcodecs_supported: false,
@@ -118,5 +118,47 @@ describe("MediaDecoderFactoryImpl 判定顺序", () => {
       width: 1,
       height: 1,
     })).rejects.toMatchObject({ code: "DECODE_BACKEND_UNAVAILABLE" });
+  });
+
+  it("注入 decodeFrames 后后端 B 返回 plane_payload", async () => {
+    const y = new Uint8Array([1, 2, 3, 4]);
+    const uv = new Uint8Array([5, 6]);
+    const header = new Uint8Array(12 + 28 + y.length + uv.length);
+    const view = new DataView(header.buffer);
+    header.set([0x41, 0x49, 0x56, 0x31], 0);
+    view.setUint32(4, 1, true);
+    view.setUint32(8, 0, true);
+    view.setUint32(12, 3, true); // frame_n
+    view.setUint32(16, 2, true);
+    view.setUint32(20, 2, true);
+    view.setUint32(24, 2, true);
+    view.setUint32(28, 2, true);
+    view.setUint32(32, y.length, true);
+    view.setUint32(36, uv.length, true);
+    header.set(y, 40);
+    header.set(uv, 40 + y.length);
+    const factory = new MediaDecoderFactoryImpl(tableWith({
+      codec: "hevc",
+      webcodecs_supported: false,
+      ffmpeg_supported: true,
+      preferred: "ffmpeg",
+    }));
+    const decoder = await factory.create({
+      mediaUrl: "aivideo://t",
+      codec: "hevc",
+      width: 2,
+      height: 2,
+      decodeFrames: async () => header.buffer,
+    });
+    expect(decoder.backend).toBe("ffmpeg");
+    const frame = await decoder.decode(3, 30);
+    expect(frame.kind).toBe("plane_payload");
+    if (frame.kind === "plane_payload") {
+      expect(frame.frameN).toBe(3);
+      expect(Array.from(frame.planes.y)).toEqual([1, 2, 3, 4]);
+      frame.release();
+      frame.release(); // 幂等
+    }
+    decoder.dispose();
   });
 });

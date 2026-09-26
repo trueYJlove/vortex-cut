@@ -170,7 +170,105 @@ export class MediaDecoderFactoryImpl implements MediaDecoderFactory {
       );
       return new WebCodecsMediaDecoder(worker, input.codec);
     }
-    // 后端 B（FfmpegFrameDecoder）属 H3；此处明确失败以触发次选/回退，禁止静默。
-    throw Object.assign(new Error("FFmpeg frame backend not ready (H3)"), { code: "DECODE_BACKEND_UNAVAILABLE" });
+    if (!input.decodeFrames) {
+      throw Object.assign(new Error("DECODE_BACKEND_UNAVAILABLE: decodeFrames 未注入"), {
+        code: "DECODE_BACKEND_UNAVAILABLE",
+      });
+    }
+    return new FfmpegMediaDecoder(input.decodeFrames, input.codec, input.width, input.height);
+  }
+}
+
+/** AIV1 紧凑二进制 → 平面帧列表（与 Core pack_nv12_response 对齐）。 */
+export function unpackNv12Response(buffer: ArrayBuffer): Array<{
+  frameN: number;
+  width: number;
+  height: number;
+  strideY: number;
+  strideUv: number;
+  y: Uint8Array;
+  uv: Uint8Array;
+}> {
+  const view = new DataView(buffer);
+  const bytes = new Uint8Array(buffer);
+  if (bytes.length < 12 || String.fromCharCode(bytes[0]!, bytes[1]!, bytes[2]!, bytes[3]!) !== "AIV1") {
+    throw new Error("DECODE_PAYLOAD_INVALID: bad magic");
+  }
+  const count = view.getUint32(4, true);
+  const noteCount = view.getUint32(8, true);
+  let offset = 12;
+  for (let i = 0; i < noteCount; i++) {
+    const n = view.getUint16(offset, true);
+    offset += 2 + n;
+  }
+  const frames: Array<{
+    frameN: number;
+    width: number;
+    height: number;
+    strideY: number;
+    strideUv: number;
+    y: Uint8Array;
+    uv: Uint8Array;
+  }> = [];
+  for (let i = 0; i < count; i++) {
+    const frameN = view.getUint32(offset, true);
+    const width = view.getUint32(offset + 4, true);
+    const height = view.getUint32(offset + 8, true);
+    const strideY = view.getUint32(offset + 12, true);
+    const strideUv = view.getUint32(offset + 16, true);
+    const yLen = view.getUint32(offset + 20, true);
+    const uvLen = view.getUint32(offset + 24, true);
+    offset += 28;
+    const y = bytes.subarray(offset, offset + yLen);
+    offset += yLen;
+    const uv = bytes.subarray(offset, offset + uvLen);
+    offset += uvLen;
+    frames.push({ frameN, width, height, strideY, strideUv, y, uv });
+  }
+  return frames;
+}
+
+class FfmpegMediaDecoder implements MediaDecoder {
+  readonly backend = "ffmpeg" as const;
+  readonly hardware = null;
+  private disposed = false;
+
+  constructor(
+    private readonly decodeFrames: NonNullable<MediaDecoderFactoryInput["decodeFrames"]>,
+    readonly codec: string,
+    readonly width: number,
+    readonly height: number,
+  ) {}
+
+  async decode(frameN: number, fps: number, signal?: AbortSignal): Promise<DecodedFrame> {
+    if (this.disposed) throw new Error("media decoder disposed");
+    if (signal?.aborted) throw new Error("decode aborted");
+    const payload = await this.decodeFrames({ frameNumbers: [frameN], fps });
+    const frames = unpackNv12Response(payload);
+    const hit = frames.find(item => item.frameN === frameN) ?? frames[0];
+    if (!hit) throw new Error(`DECODE_FRAME_NOT_FOUND: ${frameN}`);
+    let released = false;
+    return {
+      kind: "plane_payload",
+      timestampUs: Math.round(frameN / fps * 1e6),
+      frameN: hit.frameN,
+      width: hit.width,
+      height: hit.height,
+      planes: { y: hit.y, uv: hit.uv },
+      colorSpace: "bt709",
+      release: () => {
+        if (released) return;
+        released = true;
+        // subarray 不持有可 detach 的独立缓冲；置空引用即可（GC 回收）
+      },
+    };
+  }
+
+  residency(): Promise<DecodeResidencyInfo | null> {
+    return Promise.resolve(null);
+  }
+
+  dispose(): void {
+    this.disposed = true;
   }
 }

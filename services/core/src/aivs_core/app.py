@@ -12,7 +12,7 @@ from typing import Any, Literal, cast
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import PROTOCOL_VERSION, __version__
@@ -27,6 +27,11 @@ from .media.audio_chunks import PcmChunkError, PcmChunkService
 from .media.cv_signals import CV_ALGORITHM_VERSION, CvAnalysisError
 from .media.encoders import EncoderDetector
 from .media.ffprobe import FFprobe
+from .media.frame_decode import (
+    FrameDecodeError,
+    decode_frames,
+    pack_nv12_response,
+)
 from .media.probe_cache import ProbeCache, probe_cache_key
 from .media.process import run_process
 from .media_generation import MediaGenerationService
@@ -109,6 +114,15 @@ class WaveformRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     generate: bool = False
+
+
+class DecodeFramesRequest(BaseModel):
+    """H3 后端 B 窗口帧解码（合成帧号 → NV12 平面；路径永不进响应）。"""
+    model_config = ConfigDict(extra="forbid")
+
+    frame_numbers: list[int] = Field(min_length=1, max_length=32)
+    fps: float = Field(gt=0)
+    pixel_format: Literal["nv12"] = "nv12"
 
 
 class CvAnalysisRequest(BaseModel):
@@ -2268,6 +2282,48 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "channels": 1,
                 "bucket": 256,
             }
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/assets/{asset_id}/decode-frames")
+    async def decode_asset_frames(
+        project_id: str, asset_id: str, request: DecodeFramesRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> Response:
+        """H3 后端 B：合成帧号窗 → NV12 平面（路径永不进响应）。
+
+        取帧语义与后端 A 对齐：target_us = frameN/fps*1e6，PTS 最近邻
+        ±33_334μs。响应为 pack_nv12_response 紧凑二进制（AIV1）。
+        """
+        asset_row = _preview_source_asset_row(state, project_id, asset_id)
+        try:
+            if asset_row["kind"] != "video":
+                raise _domain(DomainError(
+                    "DECODE_UNSUPPORTED_ASSET", "仅视频素材可解码窗口帧"))
+            media = json_loads(asset_row["media_info_json"] or "{}")
+            streams = media.get("video_streams") or []
+            if not streams:
+                raise _domain(DomainError("DECODE_NO_VIDEO", "素材无视频流"))
+            width = int(streams[0].get("width") or 0)
+            height = int(streams[0].get("height") or 0)
+            resolved = state.projects.resolve_asset_path(asset_id)
+            frames = await decode_frames(
+                state.settings.ffmpeg,
+                state.settings.ffprobe,
+                Path(resolved["path"]),
+                width=width,
+                height=height,
+                frame_numbers=request.frame_numbers,
+                fps=request.fps,
+            )
+            body = pack_nv12_response(frames)
+            return Response(
+                content=body,
+                media_type="application/vnd.aivideo.decode-frames-v1",
+                headers={"X-Frame-Count": str(len(frames))},
+            )
+        except FrameDecodeError as exc:
+            raise _domain(DomainError(exc.code, exc.message)) from exc
         except DomainError as exc:
             raise _domain(exc) from exc
 

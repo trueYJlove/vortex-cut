@@ -60,6 +60,8 @@ export interface MediaDecoderFactoryInput {
   forceSwDecode?: boolean;
   cacheCapBytes?: number;
   refreshTicket?: () => Promise<string>;
+  /** H3 后端 B：窗口帧解码（Main→Core；响应为 AIV1 紧凑二进制）。 */
+  decodeFrames?: (input: { frameNumbers: number[]; fps: number }) => Promise<ArrayBuffer>;
 }
 
 export interface MediaDecoderFactory {

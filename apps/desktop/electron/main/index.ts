@@ -410,6 +410,20 @@ function registerIpc(): void {
     return { grant, media };
   });
   ipcMain.handle("media:probe", (_event, grantId: GrantId) => fetchWithUi<MediaInfo>("/api/v1/media/probe", { method: "POST", body: JSON.stringify({ grant_id: asId(grantId, "grant_id") }) }));
+  ipcMain.handle("decode-frames", async (_event, input: { project_id: string; asset_id: string; frame_numbers: number[]; fps: number }) => {
+    const projectId = asId(input?.project_id, "project_id");
+    const assetId = asId(input?.asset_id, "asset_id");
+    const frameNumbers = Array.isArray(input?.frame_numbers) ? input.frame_numbers : [];
+    const fps = Number(input?.fps);
+    if (!frameNumbers.length || frameNumbers.some(n => !Number.isInteger(n) || n < 0)) {
+      throw new Error("DECODE_WINDOW_EMPTY");
+    }
+    if (!Number.isFinite(fps) || fps <= 0) throw new Error("DECODE_FPS_INVALID");
+    return fetchBinaryWithUi(`/api/v1/projects/${projectId}/assets/${assetId}/decode-frames`, {
+      method: "POST",
+      body: JSON.stringify({ frame_numbers: frameNumbers, fps, pixel_format: "nv12" }),
+    });
+  });
 
   ipcMain.handle("project:list", (_event, params: { status?: string; limit?: number; cursor?: string } = {}) => fetchWithUi(`${API_PREFIX}/projects${buildQuery(params)}`));
   ipcMain.handle("project:create", (_event, input: { name: string; root_dir_name?: string }) => {
@@ -815,6 +829,22 @@ async function fetchWithUi<T = unknown>(path: string, init: RequestInit = {}): P
     throw new CoreHttpError(response.status, `[${code}] ${redact(error?.message ?? "Core request failed")}`, code, error?.trace_id);
   }
   return data as T;
+}
+
+async function fetchBinaryWithUi(path: string, init: RequestInit = {}): Promise<ArrayBuffer> {
+  if (!runtime) throw new Error("Runtime is not ready");
+  const response = await fetch(`${runtime.base_url}${path}`, {
+    ...init,
+    headers: { Authorization: `Bearer ${runtime.ui_token}`, ...(init.body ? { "Content-Type": "application/json" } : {}) },
+  });
+  if (!response.ok) {
+    let data: unknown = null;
+    try { data = await response.json(); } catch { /* binary error bodies */ }
+    const error = isApiErrorResponse(data) ? data.error : undefined;
+    const code = error?.code ?? statusCode(response.status);
+    throw new CoreHttpError(response.status, `[${code}] ${redact(error?.message ?? "Core request failed")}`, code, error?.trace_id);
+  }
+  return response.arrayBuffer();
 }
 
 const API_PREFIX = "/api/v1";

@@ -622,3 +622,38 @@ export const parseDecodeCapabilityRow = (value: unknown): DecodeCapabilityRow =>
   parse(value, isDecodeCapabilityRow, "DecodeCapabilityRow");
 export const parseDecodeCapabilityTable = (value: unknown): DecodeCapabilityTable =>
   parse(value, isDecodeCapabilityTable, "DecodeCapabilityTable");
+
+// ---- H3：窗口帧解码（后端 B / MEDIA_DECODER_HEVC_PLANNING_GATE §2.5） ----
+
+export const MAX_DECODE_FRAMES_PER_REQUEST = 32 as const;
+
+export interface DecodeFramesRequest {
+  /** 合成时间轴帧号（非媒体采样序号） */
+  frame_numbers: number[];
+  /** 合成 fps（number，承载 23.976/29.97） */
+  fps: number;
+  pixel_format: "nv12";
+}
+
+export interface DecodeFramesMeta {
+  width: number;
+  height: number;
+  /** 与请求等长；失败帧号出现在 notes，不在 frames 中 */
+  frame_count: number;
+  color_space: "bt709";
+}
+
+export function isDecodeFramesRequest(value: unknown): value is DecodeFramesRequest {
+  if (!record(value) || !only(value, ["frame_numbers", "fps", "pixel_format"])) return false;
+  return Array.isArray(value.frame_numbers)
+    && value.frame_numbers.length > 0
+    && value.frame_numbers.length <= MAX_DECODE_FRAMES_PER_REQUEST
+    && value.frame_numbers.every((n: unknown) => Number.isInteger(n) && (n as number) >= 0)
+    && typeof value.fps === "number"
+    && Number.isFinite(value.fps)
+    && (value.fps as number) > 0
+    && value.pixel_format === "nv12";
+}
+
+export const parseDecodeFramesRequest = (value: unknown): DecodeFramesRequest =>
+  parse(value, isDecodeFramesRequest, "DecodeFramesRequest");
