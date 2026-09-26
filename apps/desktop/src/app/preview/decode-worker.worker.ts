@@ -99,13 +99,44 @@ interface DecodeRequest {
 }
 const decodeQueue: DecodeRequest[] = [];
 let activeRequest: DecodeRequest | null = null;
-let fedIndex = -1; // 解码器已馈送的最后一个采样索引（热态顺序解码游标）
+let fedIndex = -1; // 最近一次**请求目标**（顺序判定用；勿与已喂采样游标混用）
+/** 已喂入解码器的最大采样索引（含 B 帧 lookahead；顺序请求从 lastFedSample+1 续喂）。 */
+let lastFedSample = -1;
 /** A03 顺播定位游标：上次 locateByPts 命中的排序位置（目标单调时局部推进）。 */
 let ptsCursor = -1;
 let samplesFed = 0;
 let fromKeyframe = -1;
 
-/** 解码器工厂：output 按选中采样 PTS 精确匹配（±1ms 浮点容差），其余输出关闭。 */
+/** 解码器工厂：output 按选中采样 PTS 匹配；其余输出按 PTS 暂存供后续请求取用
+ *  （lookahead 会提前解出后续帧，若当时丢弃则下个请求等不到 → decode timeout）。 */
+const readyByPts = new Map<number, VideoFrame>();
+const READY_BY_PTS_MAX = 8;
+
+function stashByPts(frame: VideoFrame): void {
+  if (readyByPts.size >= READY_BY_PTS_MAX) {
+    const oldest = readyByPts.keys().next().value;
+    if (oldest !== undefined) {
+      const old = readyByPts.get(oldest);
+      readyByPts.delete(oldest);
+      try { old?.close(); if (old) resClosed += 1; } catch { /* 已关闭 */ }
+    }
+  }
+  readyByPts.set(frame.timestamp, frame);
+}
+
+function takeByPts(ptsUs: number): VideoFrame | null {
+  const hit = readyByPts.get(ptsUs);
+  if (hit) { readyByPts.delete(ptsUs); return hit; }
+  // 浮点容差 ±1ms
+  for (const [pts, frame] of readyByPts) {
+    if (Math.abs(pts - ptsUs) <= 1_000) {
+      readyByPts.delete(pts);
+      return frame;
+    }
+  }
+  return null;
+}
+
 function createDecoder(): VideoDecoder {
   return new VideoDecoder({
     output: (frame: VideoFrame) => {
@@ -132,7 +163,8 @@ function createDecoder(): VideoDecoder {
         pendingAnchorPts = -1;
         holdGopAnchor(frame); // GOP 锚 IDR：持有到下个关键帧冷启（绝不中途关闭）
       } else {
-        holdOrCloseIntermediate(frame); // 非当前目标（顺序喂入的中间帧/速度变换跳过帧）
+        // 非当前目标：优先按 PTS 暂存（lookahead 已解出的后续帧），否则进中间环
+        stashByPts(frame);
       }
     },
     error: (error: DOMException) => {
@@ -169,6 +201,13 @@ function holdOrCloseIntermediate(frame: VideoFrame): void {
 
 function drainIntermediateRing(): void {
   for (const frame of intermediateRing.splice(0)) { frame.close(); resClosed += 1; }
+}
+
+function clearReadyByPts(): void {
+  for (const frame of readyByPts.values()) {
+    try { frame.close(); resClosed += 1; } catch { /* 已关闭 */ }
+  }
+  readyByPts.clear();
 }
 
 /** GOP 锚帧：冷启回退所喂 IDR 的输出绝不在 GOP 中途关闭（其表面是整个 GOP
@@ -313,6 +352,7 @@ function decodeSamples(request: DecodeRequest): void {
     startSample = keyframeAtOrBefore(sampleIndex, target);
     releaseGopAnchor();
     drainIntermediateRing();
+    clearReadyByPts();
     // 整例重建：reset() 无法清零长解码历史在 D3D11 会话内的残留状态
     //（实证：连续解码整片后 reset+关键帧重解仍产出花屏，新 Worker 实例则干净；
     // evidence/m3_2/playback-repro fixed10 vs fixed14/15 postmortem）。
@@ -320,12 +360,24 @@ function decodeSamples(request: DecodeRequest): void {
     decoder = createDecoder();
     decoder.configure(decoderConfig as VideoDecoderConfig);
     fedIndex = -1;
+    lastFedSample = startSample - 1;
     // 冷启首个输出 = 关键帧 IDR：持有为 GOP 锚（见 gopAnchor 注释）
     pendingAnchorPts = ((samples[startSample]!.dts + samples[startSample]!.ctsOffset) / timescale) * 1e6;
+  } else {
+    // 顺序：从上次已喂游标续喂——lookahead 会多喂 target+4，绝不可从 target
+    // 重喂（真机 I0#4 decode timeout：重复喂包打乱 VideoDecoder 输出序）。
+    startSample = lastFedSample + 1;
+    if (startSample > target + BFRAME_LOOKAHEAD) {
+      // 全部所需采样已喂过：只等输出（无需再 decode）
+      samplesFed = 0;
+      fromKeyframe = lastFedSample;
+      return;
+    }
   }
   samplesFed = 0;
-  fromKeyframe = sequential ? fedIndex + 1 : startSample;
+  fromKeyframe = sequential ? startSample : startSample;
   void feedSamples(samples, startSample, target, timescale, request);
+  fedIndex = target;
 }
 
 /** B12：按需读取采样区间并喂包（Range 源字节缓存合并连续读）。
@@ -351,7 +403,7 @@ async function feedSamples(
       });
       decoder!.decode(chunk);
       samplesFed += 1;
-      if (index <= target) fedIndex = index;
+      lastFedSample = index;
     }
     // 不在此 flush()：VideoDecoder 在 flush 后要求下一包为关键帧，会打断
     // 同 GOP 顺序解码（真机报 "A key frame is required after configure() or
@@ -382,9 +434,15 @@ function decodeFrame(id: number, frameN: number, fps: number): void {
     post({ type: "frame", id, frameN, timestampUs: cached.timestamp, fromCache: true, samplesFed: 0, fromKeyframe: target, allocationSize: cached.allocationSize(), frame: cached }, [cached]);
     return;
   }
-  cacheMisses += cacheEnabled ? 1 : 0;
-  // 输出匹配锚点 = 选中采样 PTS（与 EncodedVideoChunk.timestamp 同源）
+  // lookahead 提前解出的帧（readyByPts）：直接回填，不再进解码队列
   const samplePtsUs = sampleIndex.ptsUs[target]!;
+  const staged = takeByPts(samplePtsUs);
+  if (staged) {
+    resPosted += 1;
+    post({ type: "frame", id, frameN, timestampUs: staged.timestamp, fromCache: true, samplesFed: 0, fromKeyframe: target, allocationSize: staged.allocationSize(), frame: staged }, [staged]);
+    return;
+  }
+  cacheMisses += cacheEnabled ? 1 : 0;
   decodeQueue.push({ id, frameN, targetUs, sampleIndex: target, samplePtsUs });
   pumpQueue();
 }
