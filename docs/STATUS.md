@@ -122,6 +122,8 @@ PiP 自由定位、A1 音频混音、代理与权威预览、H.264/AAC 导出与
 | P23 | **lj_offset_accuracy 出数**：auto_lj_mode + 预测/指标接通 | `W0_4_LJ_OFFSET_2026-09-25.md` §2 | 工作包 | ✅ **2026-09-25 核销**——spoken 档 acc=1.0（规则一致性，非审美分） |
 | P24 | **recall_ndcg 真实预测**：窗口能量排序 + spoken 档出数 | `W0_4_RECALL_NDCG_2026-09-25.md` §2 | 工作包 | ✅ **2026-09-25 核销**——W0.4 四项可测指标全部出数 |
 | P25 | **L/J 词戳 ASR 优先**：faster-whisper 路径 + 能量回退 + word_source | `W0_4_ASR_WORDS_2026-09-25.md` §2 | 工作包 | ✅ **2026-09-25 核销**——产品 Whisper Tiny 自动发现；当前预测 `word_source=asr` |
+| P26 | **Desktop Wave 1 剪辑手法 UI**：三页壳 + 属性/素材入口 | `DESKTOP_WAVE1_EDITING_TOOLS_2026-09-25.md` §2 | 工作包 | ✅ **2026-09-25 核销**——设计稿确认后落地；Desktop 708 tests |
+| P27 | **MediaDecoder 双后端 + HEVC 合成预览**：能力表 + WebCodecs/FFmpeg 旁路 + 帧回传 F1 | `MEDIA_DECODER_HEVC_PLANNING_GATE_2026-09-26.md` §1.1 / §3 / §4 | 工作包 | ⏳ **已裁决待实施**（2026-09-26 用户认可架构）；执行序 H1→H5 |
 
 ---
 
