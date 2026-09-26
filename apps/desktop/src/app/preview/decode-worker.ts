@@ -142,7 +142,7 @@ export class DecodeWorker {
       const id = this.nextId++;
       const timeout = window.setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`decode timeout for frame ${frameN}`));
+        reject(new Error(`decode timeout for frame ${frameN}（输出未命中选中采样 PTS——VFR/B 帧或解码器无输出）`));
       }, 15000);
       this.pending.set(id, {
         resolve: frame => { window.clearTimeout(timeout); resolve(frame); },

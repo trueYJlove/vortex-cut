@@ -86,8 +86,17 @@ let forceSwDecode = false;
 /** 解码请求队列（M3-2.2）：旧实现单 pendingResolve——新请求到达即置空旧引用，
  * 旧 promise 永不落定（客户端 15s 超时 → "decode timeout"），且允许后发请求被
  * 前一帧的输出按容差错配解决（系统性早一帧）。现改为严格串行队列：一次只
- * 处理一个请求，输出按其目标 PTS 匹配，完成后自动续队。 */
-interface DecodeRequest { id: number; frameN: number; targetUs: number; sampleIndex: number }
+ * 处理一个请求，输出按**选中采样 PTS**匹配（不是 targetUs——VFR/29.97/HEVC
+ * 上最近邻采样可偏离 targetUs 达 33ms，按 targetUs 半帧匹配会永不命中而超时），
+ * 完成后自动续队。 */
+interface DecodeRequest {
+  id: number;
+  frameN: number;
+  targetUs: number;
+  sampleIndex: number;
+  /** 选中采样的真实 PTS（输出匹配锚点）。 */
+  samplePtsUs: number;
+}
 const decodeQueue: DecodeRequest[] = [];
 let activeRequest: DecodeRequest | null = null;
 let fedIndex = -1; // 解码器已馈送的最后一个采样索引（热态顺序解码游标）
@@ -96,14 +105,15 @@ let ptsCursor = -1;
 let samplesFed = 0;
 let fromKeyframe = -1;
 
-/** 解码器工厂：output 按当前请求的目标 PTS 匹配（半帧容差），其余输出关闭。 */
+/** 解码器工厂：output 按选中采样 PTS 精确匹配（±1ms 浮点容差），其余输出关闭。 */
 function createDecoder(): VideoDecoder {
   return new VideoDecoder({
     output: (frame: VideoFrame) => {
       resDecoded += 1;
       const request = activeRequest;
-      if (request && Math.abs(frame.timestamp - request.targetUs) <= 16_667) {
-        // 半帧容差（旧实现 33_334 会把相邻帧错配 → 系统性早一帧）
+      if (request && Math.abs(frame.timestamp - request.samplePtsUs) <= 1_000) {
+        // 锚在 samplePtsUs（locateByPts 已完成最近邻）；勿用 targetUs 半帧窗——
+        // HEVC/VFR 上会永不命中 → 15s decode timeout（2026-09-26 真机现场）。
         activeRequest = null;
         pendingAnchorPts = -1;
         if (cacheEnabled) {
@@ -318,7 +328,10 @@ function decodeSamples(request: DecodeRequest): void {
   void feedSamples(samples, startSample, target, timescale, request);
 }
 
-/** B12：按需读取采样区间并喂包（Range 源字节缓存合并连续读）。 */
+/** B12：按需读取采样区间并喂包（Range 源字节缓存合并连续读）。
+ *  目标后额外喂 LOOKAHEAD 采样：HEVC/B 帧重排需要前方参考帧才吐目标输出。 */
+const BFRAME_LOOKAHEAD = 4;
+
 async function feedSamples(
   samples: Array<{ offset: number; size: number; dts: number; ctsOffset: number; sync: boolean }>,
   startSample: number,
@@ -327,7 +340,8 @@ async function feedSamples(
   request: DecodeRequest,
 ): Promise<void> {
   try {
-    for (let index = startSample; index <= target; index++) {
+    const end = Math.min(samples.length - 1, target + BFRAME_LOOKAHEAD);
+    for (let index = startSample; index <= end; index++) {
       const sample = samples[index]!;
       const chunkData = await rangeSource!.read(sample.offset, sample.size);
       const chunk = new EncodedVideoChunk({
@@ -337,8 +351,10 @@ async function feedSamples(
       });
       decoder!.decode(chunk);
       samplesFed += 1;
-      fedIndex = index;
+      if (index <= target) fedIndex = index;
     }
+    // 喂完后 flush：推动解码器吐出重排缓冲中的目标帧（B 帧/HEVC 必要）
+    await decoder!.flush();
   } catch (error) {
     post({ type: "error", id: request.id, message: errorText(error) });
   }
@@ -366,7 +382,9 @@ function decodeFrame(id: number, frameN: number, fps: number): void {
     return;
   }
   cacheMisses += cacheEnabled ? 1 : 0;
-  decodeQueue.push({ id, frameN, targetUs, sampleIndex: target });
+  // 输出匹配锚点 = 选中采样 PTS（与 EncodedVideoChunk.timestamp 同源）
+  const samplePtsUs = sampleIndex.ptsUs[target]!;
+  decodeQueue.push({ id, frameN, targetUs, sampleIndex: target, samplePtsUs });
   pumpQueue();
 }
 
