@@ -12,7 +12,7 @@
 | 蒙版范围 | **线性蒙版 + 矩形/椭圆基础图形起步**；贝塞尔任意路径留后续 |
 | 画中画交互 | 预览画布上**直接鼠标拖拽 + 手柄缩放**，配合属性面板数值微调 |
 | 抠像范围 | **纯色/绿幕 chroma key（FFmpeg colorkey/chromakey，本地）**；AI 智能抠像留后续 |
-| UI/UX 展示 | 随方案产出**可点击 HTML 原型**（`docs/uiux/plugins-pip-mask-key/`） |
+| UI/UX 展示 | 随方案产出**可点击 HTML 原型**（`docs/ui-mockups/plugins-pip-mask-key/`） |
 
 ---
 
@@ -135,7 +135,7 @@ UI：选中片段开启"抠像"→ 取色器点在预览画布上选背景色 �
 | `services/core/src/aivs_core/rendering/ffmpeg.py` | 多轨 overlay 合成 + mask/keying 滤镜 |
 | `apps/desktop/src/app/App.tsx` | preview-canvas 画布拖拽/手柄 |
 | `apps/desktop/src/app/PropertyPanels.tsx` | 位置/缩放蒙版/抠像 UI |
-| `docs/uiux/plugins-pip-mask-key/*.html` | UI/UX 原型（本规划配套） |
+| `docs/ui-mockups/plugins-pip-mask-key/*.html` | UI/UX 原型（本规划配套） |
 
 ---
 
@@ -162,7 +162,7 @@ UI：选中片段开启"抠像"→ 取色器点在预览画布上选背景色 �
 
 ---
 
-配套原型文件：见 `docs/uiux/plugins-pip-mask-key/` 目录。
+配套原型文件：见 `docs/ui-mockups/plugins-pip-mask-key/` 目录。
 
 ---
 

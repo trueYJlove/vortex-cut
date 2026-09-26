@@ -3,7 +3,7 @@
 > 角色：YeJing（桌面/UI）+ LiuWei（架构）+ LiuKeAi（评审）
 > 状态：设计定稿待评审 → 通过后按「落地拆分」实施
 > 原型：本目录 `index.html` / `video.html` / `audio.html` / `text.html`（纯静态、可点击、不连真实数据）
-> 画布交互原型沿用 `docs/uiux/plugins-pip-mask-key/`（pip / mask / keying 三件套）
+> 画布交互原型沿用 `docs/ui-mockups/plugins-pip-mask-key/`（pip / mask / keying 三件套）
 
 ---
 
