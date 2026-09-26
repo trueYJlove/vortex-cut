@@ -52,6 +52,7 @@ export class DecodeWorker {
   private statsSettle: { resolve: (info: DecodeResidencyInfo) => void; reject: (error: Error) => void } | null = null;  hardware: string | null = null;
   width = 0;
   height = 0;
+  hasBFrames = false;
   lastFrameInfo: DecodeFrameInfo | null = null;
 
   private constructor() {
@@ -132,6 +133,7 @@ export class DecodeWorker {
       instance.hardware = data.hardware ?? null;
       instance.width = data.width ?? 0;
       instance.height = data.height ?? 0;
+      instance.hasBFrames = Boolean((data as { hasBFrames?: boolean }).hasBFrames);
       return instance;
     } catch (error) { instance.terminate(); throw error; }
   }
@@ -143,7 +145,7 @@ export class DecodeWorker {
       const timeout = window.setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`decode timeout for frame ${frameN}（worker 侧无匹配输出或长 GOP 冷启超时）`));
-      }, 50_000);
+      }, 8_000);
       this.pending.set(id, {
         resolve: frame => { window.clearTimeout(timeout); resolve(frame); },
         reject: error => { window.clearTimeout(timeout); reject(error); },

@@ -29,6 +29,8 @@ export interface DemuxResult {
   /** VideoDecoderConfig.description：avcC 或 hvcC 的 payload（不含 8 字节盒头）。 */
   description: Uint8Array;
   codec: string;
+  /** 存在非零 ctsOffset（B 帧重排）。WebCodecs 对 iPhone HEVC 不稳时工厂可改走 FFmpeg。 */
+  hasBFrames: boolean;
 }
 
 /** 防御上限：超过即明确回退（不冒充支持、不 OOM）。 */
@@ -315,7 +317,10 @@ function parseMoov(u8: Uint8Array, view: DataView): DemuxResult {
   for (let index = 0; index < sampleCount; index++) {
     samples.push({ offset: offsets[index]!, size: sizes[index]!, dts: dts[index]!, ctsOffset: ctsOffsets[index]!, sync: syncSet.has(index) });
   }
-  return { samples, timescale, width, height, description, codec };
+  return {
+    samples, timescale, width, height, description, codec,
+    hasBFrames: samples.some(s => s.ctsOffset !== 0),
+  };
 }
 
 /** ISO/IEC 14496-15 Annex E.3：HEVCDecoderConfigurationRecord → WebCodecs codec string。

@@ -102,6 +102,7 @@ class WebCodecsMediaDecoder implements MediaDecoder {
   get height(): number { return this.worker.height; }
   get hardware(): WebCodecsDecodeMode | null { return mapHardware(this.worker.hardware); }
   get lastFrameInfo() { return this.worker.lastFrameInfo; }
+  get hasBFrames(): boolean { return this.worker.hasBFrames; }
 
   async decode(frameN: number, fps: number, signal?: AbortSignal): Promise<DecodedFrame> {
     if (this.disposed) throw new Error("media decoder disposed");
@@ -195,6 +196,12 @@ export class MediaDecoderFactoryImpl implements MediaDecoderFactory {
         input.refreshTicket,
         input.cacheCapBytes,
       );
+      // iPhone HEVC + B 帧（ctts）在 WebCodecs 上呈现序易卡死——有 FFmpeg 旁路
+      // 则立刻改走 B，不把 8s 超时冻感留给用户（真机 fdf0f0e2）。
+      if (worker.hasBFrames && input.decodeFrames && input.preferBackend !== "webcodecs") {
+        worker.terminate();
+        return this.createBackend("ffmpeg", input, signal);
+      }
       return new WebCodecsMediaDecoder(worker, input.codec);
     }
     if (!input.decodeFrames) {

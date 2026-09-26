@@ -24,7 +24,7 @@ interface Sample {
 
 
 type Outbound =
-  | { type: "ready"; sampleCount: number; durationUs: number; timescale: number; keyframes: number[]; width: number; height: number; hardware: string | null; cacheEnabled: boolean; cacheCap: number }
+  | { type: "ready"; sampleCount: number; durationUs: number; timescale: number; keyframes: number[]; width: number; height: number; hardware: string | null; cacheEnabled: boolean; cacheCap: number; hasBFrames: boolean }
   | { type: "frame"; id: number; frameN: number; timestampUs: number; fromCache: boolean; samplesFed: number; fromKeyframe: number; allocationSize: number; frame: VideoFrame }
   | { type: "done"; id: number | null; note: string }
   | { type: "error"; id: number | null; message: string }
@@ -318,6 +318,7 @@ async function init(url: string, cacheFrames: number, hasTicketRefresh: boolean,
     keyframes: demuxed.samples.map((sample, index) => (sample.sync ? index : -1)).filter(index => index >= 0),
     width: demuxed.width, height: demuxed.height,
     hardware, cacheEnabled, cacheCap,
+    hasBFrames: demuxed.hasBFrames,
   });
 }
 

@@ -22,6 +22,10 @@ PTS_NEAREST_MAX_DIFF_US = 33_334
 MAX_DECODE_FRAMES_PER_REQUEST = 32
 NV12_MAGIC = b"AIV1"
 
+# PTS 表缓存：ffprobe -show_frames 对长片可达数秒～数十秒，逐帧请求不可重复付
+_pts_cache: dict[tuple[str, int, int], list["FramePts"]] = {}
+_PTS_CACHE_MAX = 8
+
 
 @dataclass(frozen=True)
 class DecodedPlaneFrame:
@@ -41,6 +45,7 @@ class FramePts:
     """ffprobe 单帧时间戳（best_effort 优先）。"""
     index: int
     pts_us: int
+    key_frame: bool = False
 
 
 class FrameDecodeError(RuntimeError):
@@ -113,7 +118,8 @@ def parse_frame_pts_json(payload: dict) -> list[FramePts]:
             pts_us = int(round(float(raw) * 1_000_000))
         except (TypeError, ValueError):
             continue
-        out.append(FramePts(index=i, pts_us=pts_us))
+        key = str(row.get("key_frame") or "") in {"1", "true", "True"}
+        out.append(FramePts(index=i, pts_us=pts_us, key_frame=key))
     return out
 
 
@@ -152,14 +158,21 @@ def pack_nv12_response(
 async def list_frame_pts(ffprobe: Path, input_path: Path, timeout: float = 120.0) -> list[FramePts]:
     """ffprobe -show_frames 取视频帧 PTS（best_effort 优先）。
 
-    长 4K 素材全帧表可达数秒～数十秒——timeout 默认 120s（短命 request 仍可
-    超时失败，禁止静默空表）。后续可改为按窗口局部探测（H4）。
+    结果按 (path, size, mtime) 缓存——逐帧 decode-frames 不可每次重付全表探测。
     """
+    try:
+        stat = input_path.stat()
+        cache_key = (str(input_path.resolve()), stat.st_size, int(stat.st_mtime))
+    except OSError:
+        cache_key = (str(input_path), 0, 0)
+    cached = _pts_cache.get(cache_key)
+    if cached is not None:
+        return cached
     process = await asyncio.create_subprocess_exec(
         str(ffprobe),
         "-v", "error",
         "-select_streams", "v:0",
-        "-show_entries", "frame=pts_time,best_effort_timestamp_time",
+        "-show_entries", "frame=pts_time,best_effort_timestamp_time,key_frame",
         "-print_format", "json",
         str(input_path),
         stdin=asyncio.subprocess.DEVNULL,
@@ -185,6 +198,9 @@ async def list_frame_pts(ffprobe: Path, input_path: Path, timeout: float = 120.0
     pts = parse_frame_pts_json(payload)
     if not pts:
         raise FrameDecodeError("DECODE_NO_FRAMES", "ffprobe 未给出视频帧时间戳")
+    if len(_pts_cache) >= _PTS_CACHE_MAX:
+        _pts_cache.pop(next(iter(_pts_cache)))
+    _pts_cache[cache_key] = pts
     return pts
 
 
@@ -207,9 +223,21 @@ async def decode_nv12_frames(
     unique_indices = sorted({item.index for _, item in selected})
     if not unique_indices:
         return []
-    select = "+".join(f"eq(n\\,{i})" for i in unique_indices)
+    # 关键帧 seek：-ss 到目标前最近 sync，n 从该关键帧起算（0=seek 落点关键帧）。
+    # 避免每次从文件头线性解到目标（GOP≈88 时 frame 368 单次 >10s）。
+    earliest = unique_indices[0]
+    kf_index = 0
+    for i in range(earliest, -1, -1):
+        if pts_list[i].key_frame:
+            kf_index = i
+            break
+    seek_us = pts_list[kf_index].pts_us
+    select = "+".join(f"eq(n\\,{i - kf_index})" for i in unique_indices if i >= kf_index)
+    if not select:
+        raise FrameDecodeError("DECODE_FRAME_NOT_FOUND", "目标帧不在关键帧之后")
     args = [
         "-hide_banner", "-nostdin", "-y",
+        "-ss", f"{seek_us / 1e6:.6f}",
         "-i", str(input_path),
         "-an", "-sn",
         "-vf", f"select='{select}'",
