@@ -149,8 +149,12 @@ def pack_nv12_response(
     return b"".join(parts)
 
 
-async def list_frame_pts(ffprobe: Path, input_path: Path, timeout: float = 30.0) -> list[FramePts]:
-    """ffprobe -show_frames 取视频帧 PTS（best_effort 优先）。"""
+async def list_frame_pts(ffprobe: Path, input_path: Path, timeout: float = 120.0) -> list[FramePts]:
+    """ffprobe -show_frames 取视频帧 PTS（best_effort 优先）。
+
+    长 4K 素材全帧表可达数秒～数十秒——timeout 默认 120s（短命 request 仍可
+    超时失败，禁止静默空表）。后续可改为按窗口局部探测（H4）。
+    """
     process = await asyncio.create_subprocess_exec(
         str(ffprobe),
         "-v", "error",
