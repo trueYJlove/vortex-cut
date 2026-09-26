@@ -266,6 +266,8 @@ class FfmpegMediaDecoder implements MediaDecoder {
   readonly backend = "ffmpeg" as const;
   readonly hardware = null;
   private disposed = false;
+  private readonly ready = new Map<number, ReturnType<typeof unpackNv12Response>[number]>();
+  private inflight: Promise<void> | null = null;
 
   constructor(
     private readonly decodeFrames: NonNullable<MediaDecoderFactoryInput["decodeFrames"]>,
@@ -274,31 +276,73 @@ class FfmpegMediaDecoder implements MediaDecoder {
     readonly height: number,
   ) {}
 
+  private async ensureWindow(frameN: number, fps: number): Promise<void> {
+    if (this.ready.has(frameN)) return;
+    while (this.inflight) await this.inflight;
+    if (this.ready.has(frameN)) return;
+    const nums: number[] = [];
+    for (let n = Math.max(0, frameN - 1); n <= frameN + 7; n++) if (!this.ready.has(n)) nums.push(n);
+    if (!nums.length) return;
+    this.inflight = (async () => {
+      try {
+        const payload = await this.decodeFrames({ frameNumbers: nums, fps });
+        for (const item of unpackNv12Response(payload)) this.ready.set(item.frameN, item);
+        if (this.ready.size > 64) {
+          for (const key of [...this.ready.keys()].sort((a, b) => a - b).slice(0, this.ready.size - 48)) {
+            this.ready.delete(key);
+          }
+        }
+      } finally {
+        this.inflight = null;
+      }
+    })();
+    await this.inflight;
+  }
+
   async decode(frameN: number, fps: number, signal?: AbortSignal): Promise<DecodedFrame> {
     if (this.disposed) throw new Error("media decoder disposed");
     if (signal?.aborted) throw new Error("decode aborted");
-    const payload = await this.decodeFrames({ frameNumbers: [frameN], fps });
-    const frames = unpackNv12Response(payload);
-    const hit = frames.find(item => item.frameN === frameN) ?? frames[0];
+    await this.ensureWindow(frameN, fps);
+    const hit = this.ready.get(frameN);
     if (!hit) throw new Error(`DECODE_FRAME_NOT_FOUND: ${frameN}`);
-    // 独立拷贝：subarray 共享底层缓冲，transfer 会带走整块
-    const y = hit.y.slice();
-    const uv = hit.uv.slice();
-    let released = false;
+    // 封装为 VideoFrame（NV12）：与 WebCodecs 路径同走 uploadToTextures。
+    // 直接传平面会在 frameUploadMode=direct 时被当 RGBA 画 → 纯绿（真机现场）。
+    const packed = new Uint8Array(hit.y.length + hit.uv.length);
+    packed.set(hit.y, 0);
+    packed.set(hit.uv, hit.y.length);
+    const timestampUs = Math.round(frameN / fps * 1e6);
+    let frame: VideoFrame;
+    try {
+      frame = new VideoFrame(packed.buffer, {
+        format: "NV12",
+        codedWidth: hit.width,
+        codedHeight: hit.height,
+        timestamp: timestampUs,
+      });
+    } catch {
+      // 回退 plane_payload（compositor 平面入口）
+      const y = hit.y.slice();
+      const uv = hit.uv.slice();
+      let released = false;
+      return {
+        kind: "plane_payload",
+        timestampUs,
+        frameN: hit.frameN,
+        width: hit.width,
+        height: hit.height,
+        planes: { y, uv },
+        strideY: hit.strideY,
+        strideUv: hit.strideUv,
+        colorSpace: "bt709",
+        release: () => { released = true; },
+      };
+    }
     return {
-      kind: "plane_payload",
-      timestampUs: Math.round(frameN / fps * 1e6),
+      kind: "video_frame",
+      frame,
+      timestampUs,
       frameN: hit.frameN,
-      width: hit.width,
-      height: hit.height,
-      planes: { y, uv },
-      strideY: hit.strideY,
-      strideUv: hit.strideUv,
-      colorSpace: "bt709",
-      release: () => {
-        if (released) return;
-        released = true;
-      },
+      release: () => { try { frame.close(); } catch { /* 已关闭 */ } },
     };
   }
 
@@ -308,5 +352,6 @@ class FfmpegMediaDecoder implements MediaDecoder {
 
   dispose(): void {
     this.disposed = true;
+    this.ready.clear();
   }
 }

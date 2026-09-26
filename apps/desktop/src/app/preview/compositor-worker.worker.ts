@@ -529,6 +529,9 @@ function uploadPlanesToTextures(
   const ch = height >> 1;
   let step = "planes";
   try {
+    // 平面载荷必须走 YUV 绘制分支；若曾进入 direct(RGBA) 模式，绘制会把
+    // R8/RG8 当 RGBA → 纯绿（真机 fdf0f0e2）。强制 copyTo。
+    state.frameUploadMode = "copyTo";
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
