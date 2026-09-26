@@ -196,12 +196,8 @@ export class MediaDecoderFactoryImpl implements MediaDecoderFactory {
         input.refreshTicket,
         input.cacheCapBytes,
       );
-      // iPhone HEVC + B 帧（ctts）在 WebCodecs 上呈现序易卡死——有 FFmpeg 旁路
-      // 则立刻改走 B，不把 8s 超时冻感留给用户（真机 fdf0f0e2）。
-      if (worker.hasBFrames && input.decodeFrames && input.preferBackend !== "webcodecs") {
-        worker.terminate();
-        return this.createBackend("ffmpeg", input, signal);
-      }
+      // B 帧仍走 WebCodecs（硬解 + 已修 GOP 连续喂包）；仅当调用方强制
+      // preferBackend=ffmpeg 时才不用 A。软解 FFmpeg 约 2s/帧，不能当主路径。
       return new WebCodecsMediaDecoder(worker, input.codec);
     }
     if (!input.decodeFrames) {
@@ -280,15 +276,16 @@ class FfmpegMediaDecoder implements MediaDecoder {
     if (this.ready.has(frameN)) return;
     while (this.inflight) await this.inflight;
     if (this.ready.has(frameN)) return;
+    // 大窗摊薄软解成本：一次取 30 帧（1s@30fps），避免每 8 帧就从关键帧重解
     const nums: number[] = [];
-    for (let n = Math.max(0, frameN - 1); n <= frameN + 7; n++) if (!this.ready.has(n)) nums.push(n);
+    for (let n = Math.max(0, frameN - 2); n <= frameN + 27; n++) if (!this.ready.has(n)) nums.push(n);
     if (!nums.length) return;
     this.inflight = (async () => {
       try {
-        const payload = await this.decodeFrames({ frameNumbers: nums, fps });
+        const payload = await this.decodeFrames({ frameNumbers: nums.slice(0, 32), fps });
         for (const item of unpackNv12Response(payload)) this.ready.set(item.frameN, item);
-        if (this.ready.size > 64) {
-          for (const key of [...this.ready.keys()].sort((a, b) => a - b).slice(0, this.ready.size - 48)) {
+        if (this.ready.size > 80) {
+          for (const key of [...this.ready.keys()].sort((a, b) => a - b).slice(0, this.ready.size - 60)) {
             this.ready.delete(key);
           }
         }
