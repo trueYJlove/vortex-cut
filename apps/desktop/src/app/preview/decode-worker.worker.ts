@@ -55,6 +55,16 @@ const post = (message: Outbound, transfer: Transferable[] = []): void => {
   (self as unknown as Worker).postMessage(message, transfer);
 };
 
+/** 错误消息带上结构化 code 前缀（`CODE: message`）——SyntheticPreview 按
+ *  子串识别域码；无 code 的错误保持原 message。 */
+function errorText(error: unknown): string {
+  if (error instanceof Error) {
+    const code = (error as { code?: unknown }).code;
+    return typeof code === "string" && code.length > 0 ? `${code}: ${error.message}` : error.message;
+  }
+  return String(error);
+}
+
 
 let demuxResult: DemuxResult | null = null;
 let sampleIndex: SampleIndex | null = null;
@@ -125,8 +135,8 @@ function createDecoder(): VideoDecoder {
       } catch { /* reset 失败则后续请求自行暴露 */ }
       intermediateRing.length = 0;
       fedIndex = -1;
-      if (request) post({ type: "error", id: request.id, message: `decoder error: ${error.message}` });
-      else post({ type: "error", id: null, message: `decoder error: ${error.message}` });
+      if (request) post({ type: "error", id: request.id, message: `decoder error: ${errorText(error)}` });
+      else post({ type: "error", id: null, message: `decoder error: ${errorText(error)}` });
       pumpQueue();
     },
   });
@@ -261,7 +271,7 @@ function pumpQueue(): void {
       decodeSamples(request);
     } catch (error) {
       activeRequest = null;
-      post({ type: "error", id: request.id, message: error instanceof Error ? error.message : String(error) });
+      post({ type: "error", id: request.id, message: errorText(error) });
     }
   }
 }
@@ -330,7 +340,7 @@ async function feedSamples(
       fedIndex = index;
     }
   } catch (error) {
-    post({ type: "error", id: request.id, message: error instanceof Error ? error.message : String(error) });
+    post({ type: "error", id: request.id, message: errorText(error) });
   }
 }
 
@@ -380,7 +390,7 @@ self.onmessage = (event: MessageEvent) => {
       // DEFECT-4K60-SESSION-HANG：init 失败必须回发 error——旧实现 fire-and-forget
       // 的 rejection 在 worker 内被吞，客户端只能等满 15s 泛化超时拿不到真实错误。
       void init(data.url, data.cacheFrames ?? 0, data.refreshTicket === true, data.cacheCapBytes, data.forceSwDecode)
-        .catch(error => post({ type: "error", id: null, message: error instanceof Error ? error.message : String(error) }));
+        .catch(error => post({ type: "error", id: null, message: errorText(error) }));
     } else if (data.type === "ticket-refresh-response" && typeof data.id === "number") {
       const pending = ticketRefreshPending.get(data.id);
       if (!pending) return;
@@ -397,6 +407,6 @@ self.onmessage = (event: MessageEvent) => {
       post({ type: "done", id: null, note: JSON.stringify({ hits: cacheHits, misses: cacheMisses, evictions: cacheEvictions, size: cache.size, bytes: cacheBytes, residency: decodeResidency() }) });
     }
   } catch (error) {
-    post({ type: "error", id: (data as { id?: number }).id ?? null, message: error instanceof Error ? error.message : String(error) });
+    post({ type: "error", id: (data as { id?: number }).id ?? null, message: errorText(error) });
   }
 };

@@ -9,7 +9,10 @@ import { CONTRACT_VERSION, ERROR_CODES, isApiErrorResponse, isAuthoritativePrevi
   isAgentSessionUpdatedEvent,
   isCvAnalysisSummary,
   parseAgentSession,
-  parseCvAnalysisSummary
+  parseCvAnalysisSummary,
+  isDecodeCapabilityRow,
+  isDecodeCapabilityTable,
+  parseDecodeCapabilityTable
 } from "@aivideo/contracts";
 
 const now = "2026-08-11T00:00:00.000Z";
@@ -360,5 +363,26 @@ describe("DESK-6 agent session + CV analysis contracts", () => {
     expect(isCvAnalysisSummary({ ...summary, status: "done" })).toBe(false);
     expect(isCvAnalysisSummary({ ...summary, signals: "scene_cut" })).toBe(false);
     expect(parseCvAnalysisSummary(summary)).toEqual(summary);
+  });
+});
+
+describe("H1 decode capability contracts", () => {
+  const row = {
+    codec: "hevc" as const,
+    webcodecs_supported: true,
+    webcodecs_mode: "no-preference" as const,
+    ffmpeg_supported: true,
+    preferred: "webcodecs" as const,
+  };
+  it("locks DecodeCapabilityRow / Table shape", () => {
+    expect(isDecodeCapabilityRow(row)).toBe(true);
+    expect(isDecodeCapabilityRow({ ...row, codec: "vp09" })).toBe(false);
+    expect(isDecodeCapabilityRow({ ...row, webcodecs_mode: "prefer-software" })).toBe(false);
+    expect(isDecodeCapabilityRow({ ...row, preferred: "gpu" })).toBe(false);
+    expect(isDecodeCapabilityTable({ rows: [row], probed_at: now })).toBe(true);
+    expect(isDecodeCapabilityTable({ rows: [row], probed_at: "not-a-time" })).toBe(false);
+    expect(isDecodeCapabilityTable({ rows: [row], probed_at: now, extra: 1 })).toBe(false);
+    expect(parseDecodeCapabilityTable({ rows: [row], probed_at: now })).toEqual({ rows: [row], probed_at: now });
+    expect(() => parseDecodeCapabilityTable({ rows: [], probed_at: now, path: "/secret" })).toThrow();
   });
 });

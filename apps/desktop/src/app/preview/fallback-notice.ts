@@ -12,5 +12,8 @@ export function syntheticFallbackNotice(reason: string, code: string | null): st
   if (code === "PREVIEW_IR_UNSUPPORTED") {
     return "当前时间线包含实时合成暂不支持的效果（如蒙版、抠像、倒放、图片素材等），已回退交互预览。";
   }
+  if (code === "BMFF_CODEC_UNSUPPORTED") {
+    return "该视频编码暂不支持实时合成预览，已回退交互预览。";
+  }
   return `合成预览暂时无法启动，已回退交互预览。（${reason}）`;
 }

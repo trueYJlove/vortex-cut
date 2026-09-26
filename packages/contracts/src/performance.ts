@@ -575,3 +575,50 @@ export const parsePreviewIrV2Manifest = (value: unknown): PreviewIrV2Manifest =>
   parse(value, isPreviewIrV2Manifest, "PreviewIrV2Manifest");
 export const parsePreviewIrV2Window = (value: unknown): PreviewIrV2Window =>
   parse(value, isPreviewIrV2Window, "PreviewIrV2Window");
+
+// ---- H1：解码能力表（MediaDecoder 双后端；MEDIA_DECODER_HEVC_PLANNING_GATE §2.2） ----
+
+export type DecodeBackendId = "webcodecs" | "ffmpeg";
+export const DECODE_BACKEND_IDS = ["webcodecs", "ffmpeg"] as const;
+
+/** 实测解码模式（诊断呈现用，不参与后端决策）。 */
+export type WebCodecsDecodeMode = "prefer-hardware" | "no-preference";
+
+/** 规范化 codec 标识（非 RFC codec string）。 */
+export type DecodeCapabilityCodec = "avc" | "hevc" | "av1";
+export const DECODE_CAPABILITY_CODECS = ["avc", "hevc", "av1"] as const;
+
+export interface DecodeCapabilityRow {
+  codec: DecodeCapabilityCodec;
+  /** 平台实测（启动后探测写入，非写死）。 */
+  webcodecs_supported: boolean;
+  /** 仅呈现用；null = 未探测。 */
+  webcodecs_mode: WebCodecsDecodeMode | null;
+  ffmpeg_supported: boolean;
+  /** 决策：首选后端；webcodecs 不可用时自动 ffmpeg。 */
+  preferred: DecodeBackendId;
+}
+
+export interface DecodeCapabilityTable {
+  rows: DecodeCapabilityRow[];
+  probed_at: string;
+}
+
+export function isDecodeCapabilityRow(value: unknown): value is DecodeCapabilityRow {
+  if (!record(value) || !only(value, ["codec", "webcodecs_supported", "webcodecs_mode", "ffmpeg_supported", "preferred"])) return false;
+  return (DECODE_CAPABILITY_CODECS as readonly string[]).includes(value.codec as string)
+    && typeof value.webcodecs_supported === "boolean"
+    && (value.webcodecs_mode === null || value.webcodecs_mode === "prefer-hardware" || value.webcodecs_mode === "no-preference")
+    && typeof value.ffmpeg_supported === "boolean"
+    && (value.preferred === "webcodecs" || value.preferred === "ffmpeg");
+}
+
+export function isDecodeCapabilityTable(value: unknown): value is DecodeCapabilityTable {
+  if (!record(value) || !only(value, ["rows", "probed_at"])) return false;
+  return Array.isArray(value.rows) && value.rows.every(isDecodeCapabilityRow) && iso(value.probed_at);
+}
+
+export const parseDecodeCapabilityRow = (value: unknown): DecodeCapabilityRow =>
+  parse(value, isDecodeCapabilityRow, "DecodeCapabilityRow");
+export const parseDecodeCapabilityTable = (value: unknown): DecodeCapabilityTable =>
+  parse(value, isDecodeCapabilityTable, "DecodeCapabilityTable");

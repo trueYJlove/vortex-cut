@@ -279,6 +279,7 @@ describe("demuxRange 明确回退", () => {
     expect(avcIdx).toBeGreaterThan(0);
     mutated[avcIdx] = 0x68; // "hvc1"
     await expect(demuxRange(new MemoryRangeSource(mutated))).rejects.toMatchObject({ code: "BMFF_CODEC_UNSUPPORTED" });
+    await expect(demuxRange(new MemoryRangeSource(mutated))).rejects.toThrow(/编码不受支持/);
   });
 });
 

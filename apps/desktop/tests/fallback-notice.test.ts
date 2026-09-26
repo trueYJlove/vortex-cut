@@ -24,4 +24,14 @@ describe("syntheticFallbackNotice", () => {
     expect(syntheticFallbackNotice(reason, null)).toContain(reason);
     expect(syntheticFallbackNotice("WebGL2 unavailable", null)).toContain("WebGL2 unavailable");
   });
+
+  it("BMFF_CODEC_UNSUPPORTED 映射为编码不支持人话（去「仅 AVC」）", () => {
+    const notice = syntheticFallbackNotice(
+      "BMFF_CODEC_UNSUPPORTED: 采样入口 hev1 编码不受支持",
+      "BMFF_CODEC_UNSUPPORTED",
+    );
+    expect(notice).toContain("该视频编码暂不支持实时合成预览");
+    expect(notice).not.toContain("仅 AVC");
+    expect(notice).not.toContain("BMFF_CODEC_UNSUPPORTED");
+  });
 });

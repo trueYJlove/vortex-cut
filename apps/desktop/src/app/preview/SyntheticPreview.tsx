@@ -360,8 +360,10 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
         if (stale()) return;
         const message = error instanceof Error ? error.message : String(error);
         // 域错误码经 Main safeInvoke 原码透传（IPC 包装可能带前缀，按子串识别）。
+        // decode-worker 路径同样把 code 前缀进 message（errorText）。
         const code = /PREVIEW_IR_UNSUPPORTED/.test(message) ? "PREVIEW_IR_UNSUPPORTED"
           : /PREVIEW_IR_TOO_LARGE/.test(message) ? "PREVIEW_IR_TOO_LARGE"
+          : /BMFF_CODEC_UNSUPPORTED/.test(message) ? "BMFF_CODEC_UNSUPPORTED"
           : null;
         // 启动时序（2026-09-23）：时间线先于素材票据落地时 "no ticket" 是装载
         // 次序而非故障——mediaUrls 依赖变化会自动重建会话，此处保持装载观感

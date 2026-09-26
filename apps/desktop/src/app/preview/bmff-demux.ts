@@ -179,13 +179,13 @@ function parseMoov(u8: Uint8Array, view: DataView): DemuxResult {
     view.getUint8(stsd.start + 12), view.getUint8(stsd.start + 13),
     view.getUint8(stsd.start + 14), view.getUint8(stsd.start + 15));
   if (entryType !== "avc1") {
-    throw new BmffUnsupportedError("BMFF_CODEC_UNSUPPORTED", `采样入口 ${entryType} 不支持（仅 AVC）`);
+    throw new BmffUnsupportedError("BMFF_CODEC_UNSUPPORTED", `采样入口 ${entryType} 编码不受支持`);
   }
   const entryStart = stsd.start + 16;
   const entryEndAbs = stsd.start + 8 + entrySize;
   if (entryEndAbs > stsd.end + 8) throw new BmffUnsupportedError("BMFF_MALFORMED", "stsd entry 越界");
   const avcCStart = findU32Tag(u8, entryStart + 60, entryEndAbs, 0x61766343); // "avcC"
-  if (avcCStart < 0) throw new BmffUnsupportedError("BMFF_MALFORMED", "avcC 未找到（仅 AVC 支持）");
+  if (avcCStart < 0) throw new BmffUnsupportedError("BMFF_MALFORMED", "avcC 未找到");
   const avcCSize = view.getUint32(avcCStart);
   if (avcCSize < 8 || avcCStart + avcCSize > entryEndAbs) {
     throw new BmffUnsupportedError("BMFF_MALFORMED", "avcC 盒长非法");
