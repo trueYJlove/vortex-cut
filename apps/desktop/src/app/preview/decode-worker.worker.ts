@@ -108,9 +108,10 @@ let samplesFed = 0;
 let fromKeyframe = -1;
 
 /** 解码器工厂：output 按选中采样 PTS 匹配；其余输出按 PTS 暂存供后续请求取用
- *  （lookahead 会提前解出后续帧，若当时丢弃则下个请求等不到 → decode timeout）。 */
+ *  （lookahead 会提前解出后续帧，若当时丢弃则下个请求等不到 → decode timeout）。
+ *  MAX=2：每帧都是 GPU 表面，多 hold 会耗尽 D3D11 输出池导致解码停摆。 */
 const readyByPts = new Map<number, VideoFrame>();
-const READY_BY_PTS_MAX = 8;
+const READY_BY_PTS_MAX = 2;
 
 function stashByPts(frame: VideoFrame): void {
   if (readyByPts.size >= READY_BY_PTS_MAX) {
@@ -381,8 +382,10 @@ function decodeSamples(request: DecodeRequest): void {
 }
 
 /** B12：按需读取采样区间并喂包（Range 源字节缓存合并连续读）。
- *  目标后额外喂 LOOKAHEAD 采样：HEVC/B 帧重排需要前方参考帧才吐目标输出。 */
-const BFRAME_LOOKAHEAD = 4;
+ *  目标后额外喂 LOOKAHEAD 采样：HEVC/B 帧重排需要前方参考帧才吐目标输出。
+ *  上限必须小：hold 住的 VideoFrame 占 D3D11 输出表面池（环 3 + 暂存 2 已接近
+ *  硬件池边界，8 层实测解码停摆）。 */
+const BFRAME_LOOKAHEAD = 2;
 
 async function feedSamples(
   samples: Array<{ offset: number; size: number; dts: number; ctsOffset: number; sync: boolean }>,
@@ -438,6 +441,8 @@ function decodeFrame(id: number, frameN: number, fps: number): void {
   const samplePtsUs = sampleIndex.ptsUs[target]!;
   const staged = takeByPts(samplePtsUs);
   if (staged) {
+    // 同步推进请求游标：否则后续跨关键帧误判需冷启（真机 2s 后卡死）
+    if (target > fedIndex) fedIndex = target;
     resPosted += 1;
     post({ type: "frame", id, frameN, timestampUs: staged.timestamp, fromCache: true, samplesFed: 0, fromKeyframe: target, allocationSize: staged.allocationSize(), frame: staged }, [staged]);
     return;
