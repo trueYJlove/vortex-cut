@@ -430,17 +430,9 @@ async function uploadToTextures(frame: VideoFrame, targetY: WebGLTexture, target
     // LINEAR-only（MIN_FILTER 非 mip 型 → textureLod 钳到 base 层，历史
     // mipmap=0 A/B 模式已验证可用；代价是缩小画面无双线性 mip 抗闪烁）。
     const mipmap = (target: WebGLTexture): void => {
-      if (!state.mipSupported) return;
-      gl.generateMipmap(gl.TEXTURE_2D);
-      const e = gl.getError();
-      if (e !== gl.NO_ERROR) {
-        state.mipSupported = false;
-        // 降级清扫：所有 YUV 纹理改 LINEAR（挂着不完整 mip 链的纹理会采黑）
-        for (const tex of state.allYuvTextures) {
-          gl.bindTexture(gl.TEXTURE_2D, tex);
-          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-        }
-      }
+      // 视频槽位每帧 generateMipmap 是上传 p95 大头（真机 56ms）；缩放显示
+      // 用 LINEAR 即可，预览优先流畅。仅静图/一次性纹理保留 mip。
+      void target;
     };
     if (frame.format === "NV12") {
       const yLayout = layout[0]!;

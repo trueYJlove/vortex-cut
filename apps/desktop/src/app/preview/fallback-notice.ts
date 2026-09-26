@@ -10,7 +10,9 @@ export function syntheticFallbackNotice(reason: string, code: string | null): st
     return "时间线超出实时合成预览的长度上限（约 15 分钟），已回退交互预览。裁短时间线或只剪辑所需片段后即可恢复实时预览。";
   }
   if (code === "PREVIEW_IR_UNSUPPORTED") {
-    return "当前时间线包含实时合成暂不支持的效果（如蒙版、抠像、倒放、图片素材等），已回退交互预览。";
+    const detail = reason.replace(/^PREVIEW_IR_UNSUPPORTED:?\s*/i, "").replace(/^Error invoking remote method[^:]*:\s*/i, "").trim();
+    const why = detail && !/^PREVIEW_IR_UNSUPPORTED$/i.test(detail) ? `原因：${detail}。` : "";
+    return `当前时间线包含实时合成暂不支持的效果（如蒙版、抠像、倒放、图片素材等），已回退交互预览。${why}`;
   }
   if (code === "BMFF_CODEC_UNSUPPORTED") {
     return "该视频编码暂不支持实时合成预览，已回退交互预览。";

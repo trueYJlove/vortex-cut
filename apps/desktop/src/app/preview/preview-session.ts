@@ -249,7 +249,7 @@ export class PreviewSession {
   /** 预读超前帧数（吸收转场/换段冷启路径的解码尖峰）。 */
   private static readonly LEAD = 8;
   /** 每输入在途解码/上传路数（2 路流水：解码 A 时可上传 B）。 */
-  private static readonly IN_FLIGHT = 2;
+  private static readonly IN_FLIGHT = 3;
   /** 新输入入场提前量：首次入窗的输入提前 ~1.5s 冷启。 */
   private static readonly LEAD_ENTER = 45;
   /** 合成落后目标超过该帧数 → 重锚时钟。 */
@@ -1604,6 +1604,9 @@ export class PreviewSession {
         if (frame && this.frameReady(frame)) { composed = n; break; }
       }
       if (composed >= 0 && composed > this.currentFrame) {
+        // 丢帧口径 = 本次推进跳过的帧数（不是 rAF tick 数；60Hz 会虚高数倍）
+        const skipped = composed - this.currentFrame - 1;
+        if (skipped > 0) { this.dropped += skipped; this.droppedLifetime += skipped; }
         const taskStart = performance.now();
         const composedFrame = this.frames.getFrame(composed)!;
         this.compose(composedFrame);
@@ -1620,11 +1623,6 @@ export class PreviewSession {
         editorPerf.record("reanchor", 0, this.perfId, 0, this.seekEpoch, this.currentFrame);
         this.anchorFrame = this.currentFrame;
         this.anchorWall = now;
-      } else if (target - this.currentFrame > 1 && target > this.currentFrame) {
-        // 丢帧口径 = 展示落后时钟 ≥2 帧（持续 1 帧滞后是 60Hz 时钟对 30fps
-        // 内容的正常管线延迟，观感无损——此前按 tick 计成 303"丢帧"）。
-        this.dropped += 1;
-        this.droppedLifetime += 1;
       }
       // B13-R：1Hz 驻留取样（decode worker 侧计数；compositor 计数随 ack
       // 已进 perf，此处补 decode 侧与主动查询的合成器快照）。

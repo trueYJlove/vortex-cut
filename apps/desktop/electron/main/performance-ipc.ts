@@ -105,9 +105,12 @@ async function safeInvoke<T>(operation: () => Promise<T>): Promise<T> {
     const derivedCodes = new Set(["DERIVED_NOT_FOUND", "DERIVED_KIND_INVALID", "DERIVED_PARAMS_INVALID", "ASSET_NOT_FOUND", "ASSET_CHANGED", "ASSET_MISSING", "DERIVED_CACHE_UNSAFE", "PREVIEW_PROFILE_INVALID", "PREVIEW_SOURCE_MODE_INVALID", "ASSET_NO_VIDEO_STREAM", "MEDIA_NO_AUDIO", "PCM_CHUNK_OFFSET_INVALID", "PCM_CHUNK_FFMPEG_FAILED", "PCM_CHUNK_TOO_LARGE", "MEDIA_MISSING"]);
     if (typeof code === "string" && derivedCodes.has(code)) throw new Error(code);
     // preview-ir v2 的域错误（PREVIEW_IR_UNSUPPORTED / PREVIEW_IR_TOO_LARGE /
-    // TIMELINE_* 等）原码透传——F04×v2 首跑现场"Core request failed"吞掉了
-    // 真实错误码，回退提示无诊断价值（2026-09-15 缺陷复测暴露）。
-    if (typeof code === "string" && (code.startsWith("PREVIEW_IR") || code.startsWith("TIMELINE") || code.startsWith("RENDER_"))) throw new Error(code);
+    // TIMELINE_* 等）原码 + 详情透传——只抛 code 会让回退提示无诊断价值
+    //（真机 2026-09-26：只看到 PREVIEW_IR_UNSUPPORTED，不知是蒙版还是倒放）。
+    if (typeof code === "string" && (code.startsWith("PREVIEW_IR") || code.startsWith("TIMELINE") || code.startsWith("RENDER_"))) {
+      const irDetail = error instanceof Error ? error.message : String(error);
+      throw new Error(irDetail.includes(code) ? irDetail : `${code}: ${irDetail}`);
+    }
     // 其余错误保留业务码与底层 message（fetchWithUi 已 redact）：一律折叠成
     // "Core request failed" 会让间歇失败无从定位——F04 100 素材复测现场
     // warmup 轮即因此只有一句无信息的回退提示（2026-09-15）。
