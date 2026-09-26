@@ -133,7 +133,8 @@ let fromKeyframe = -1;
  *  （lookahead 会提前解出后续帧，若当时丢弃则下个请求等不到 → decode timeout）。
  *  MAX=2：每帧都是 GPU 表面，多 hold 会耗尽 D3D11 输出池导致解码停摆。 */
 const readyByPts = new Map<number, VideoFrame>();
-const READY_BY_PTS_MAX = 2;
+/** B 帧重排窗：has_b_frames=2 的素材需保留 ≥3 帧已解输出供呈现序回填。 */
+const READY_BY_PTS_MAX = 4;
 
 function stashByPts(frame: VideoFrame): void {
   if (readyByPts.size >= READY_BY_PTS_MAX) {
@@ -356,27 +357,17 @@ function decodeSamples(request: DecodeRequest): void {
   if (!demuxResult || !decoder || !rangeSource || !sampleIndex) throw new Error("worker not initialized");
   const { samples, timescale } = demuxResult;
   const target = request.sampleIndex;
-  // 热态顺序解码（M3-2 播放架构）：目标在已馈送位置之前（含跨采样跳帧，如
-  // speed≠1 的 1.25x 每 4 帧跳 1 采样）一律不 reset——顺序喂入中间采样即可
-  // （中间输出按时间戳不匹配自动关闭）。仅回退（seek/换段回头）才 reset +
-  // 关键帧重解。此前 sequential 条件是 target === fedIndex+1：任何跳帧都触发
-  // 冷启 reset+关键帧重解，代价随 GOP 深度线性增长（1.25x 项目实测后半段
-  // 每帧 50-60ms → 播放放慢 + 丢帧，evidence/m3_2/playback-repro 实证）。
-  // 例外——热态跳帧跨关键帧时仍走冷启：该关键帧作为中间采样输出后被即刻
-  // 关闭，实证会在部分硬件解码器上破坏后续参考链（src300 关键帧被跨跳后
-  // src~303 起确定性花屏，两次运行 PNG 逐字节一致；冷启路径同位置干净）。
-  let sequential = fedIndex >= 0 && target > fedIndex;
-  if (sequential) {
-    // 跨关键帧检查：目标之后的首个关键帧位置二分（≤ target 的最大关键帧
-    // 与 ≤ fedIndex 的最大关键帧相同 → 区间无关键帧）
-    const keyBeforeFed = keyframeAtOrBefore(sampleIndex, fedIndex);
-    const keyBeforeTarget = keyframeAtOrBefore(sampleIndex, target);
-    sequential = keyBeforeTarget === keyBeforeFed;
-  }
+  // 热态顺序解码：**同一 GOP 且已喂过 target 或可续喂** 即可，绝不能用
+  // `target > fedIndex` 判顺序——HEVC/B 帧 ctts 使呈现序采样号上下跳
+  // （fdf0f0e2 真机：frame1→sample3, frame2→sample2），每次回跳都冷启
+  // 会把 720p 也解到超时。
+  const keyTarget = keyframeAtOrBefore(sampleIndex, target);
+  const keyFed = lastFedSample >= 0 ? keyframeAtOrBefore(sampleIndex, lastFedSample) : -1;
+  const sameGop = lastFedSample >= 0 && keyFed === keyTarget;
   let startSample = target;
-  if (!sequential) {
+  if (!sameGop) {
     // A03：关键帧回退二分（原逐样本线性回退，长 GOP 深 seek O(GOP)）
-    startSample = keyframeAtOrBefore(sampleIndex, target);
+    startSample = keyTarget;
     releaseGopAnchor();
     drainIntermediateRing();
     clearReadyByPts();
@@ -391,18 +382,17 @@ function decodeSamples(request: DecodeRequest): void {
     // 冷启首个输出 = 关键帧 IDR：持有为 GOP 锚（见 gopAnchor 注释）
     pendingAnchorPts = ((samples[startSample]!.dts + samples[startSample]!.ctsOffset) / timescale) * 1e6;
   } else {
-    // 顺序：从上次已喂游标续喂——lookahead 会多喂 target+4，绝不可从 target
-    // 重喂（真机 I0#4 decode timeout：重复喂包打乱 VideoDecoder 输出序）。
+    // 同 GOP：从上次已喂游标续喂；target 已在已喂区间则只补 lookahead
     startSample = lastFedSample + 1;
-    if (startSample > target + BFRAME_LOOKAHEAD) {
-      // 全部所需采样已喂过：只等输出（无需再 decode）
+    const needEnd = target + BFRAME_LOOKAHEAD;
+    if (startSample > needEnd) {
       samplesFed = 0;
       fromKeyframe = lastFedSample;
       return;
     }
   }
   samplesFed = 0;
-  fromKeyframe = sequential ? startSample : startSample;
+  fromKeyframe = startSample;
   void feedSamples(samples, startSample, target, timescale, request);
   fedIndex = target;
 }
@@ -411,7 +401,7 @@ function decodeSamples(request: DecodeRequest): void {
  *  目标后额外喂 LOOKAHEAD 采样：HEVC/B 帧重排需要前方参考帧才吐目标输出。
  *  上限必须小：hold 住的 VideoFrame 占 D3D11 输出表面池（环 3 + 暂存 2 已接近
  *  硬件池边界，8 层实测解码停摆）。 */
-const BFRAME_LOOKAHEAD = 2;
+const BFRAME_LOOKAHEAD = 3;
 
 async function feedSamples(
   samples: Array<{ offset: number; size: number; dts: number; ctsOffset: number; sync: boolean }>,
