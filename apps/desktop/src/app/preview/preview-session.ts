@@ -97,7 +97,7 @@ interface InputRig {
   /** 顺序解码链游标：已向 worker 请求的最大 src_n（seek 上传后同步）。 */
   fed: number;
   /** 在途链请求的 src_n（深度 1）。 */
-  inFlightN: number | null;
+  inFlightCount: number;
   /** 转场共享输入第二帧槽位（影子槽，ack 后置值）。 */
   shadowUploaded: number;
   /** 影子槽在途请求 src_n。 */
@@ -245,13 +245,15 @@ export class PreviewSession {
   /** 环形纹理池深度：LEAD 超前 + 当前合成 + 在途 1 + 提前入场 1，取 8 留余量。
    *  B13：档位/压力可收 5（LEAD 联动 = min(LEAD, ringDepth-3)——写深不覆盖
    *  未展示槽位；实例字段经 create(tier) 决策。 */
-  private static readonly RING = 8;
+  private static readonly RING = 12;
   /** 预读超前帧数（吸收转场/换段冷启路径的解码尖峰）。 */
-  private static readonly LEAD = 5;
+  private static readonly LEAD = 8;
+  /** 每输入在途解码/上传路数（2 路流水：解码 A 时可上传 B）。 */
+  private static readonly IN_FLIGHT = 2;
   /** 新输入入场提前量：首次入窗的输入提前 ~1.5s 冷启。 */
   private static readonly LEAD_ENTER = 45;
   /** 合成落后目标超过该帧数 → 重锚时钟。 */
-  private static readonly LAG_REANCHOR = 10;
+  private static readonly LAG_REANCHOR = 12;
   /** 合成时向历史回溯的最大帧数（starving 后取最近就绪帧）。 */
   private static readonly BACKSCAN = 15;
 
@@ -407,7 +409,7 @@ export class PreviewSession {
         ring: Array.from({ length: session.ringDepth }, () => null),
         ringSeq: 0,
         fed: -1,
-        inFlightN: null,
+        inFlightCount: 0,
         shadowUploaded: -1,
         shadowInFlight: null,
         uploadTail: Promise.resolve(),
@@ -740,7 +742,7 @@ export class PreviewSession {
     for (const [inputId, rig] of this.rigs) {
       state[inputId] = {
         fed: rig.fed,
-        inFlight: rig.inFlightN,
+        inFlight: rig.inFlightCount,
         ring: rig.ring.filter(slot => slot).map(slot => slot!.srcN),
         shadow: rig.shadowUploaded,
         last_decode: rig.worker?.lastFrameInfo ?? null,
@@ -834,7 +836,7 @@ export class PreviewSession {
   private resetChains(): void {
     for (const [, rig] of this.rigs) {
       rig.fed = -1;
-      rig.inFlightN = null;
+      rig.inFlightCount = 0;
       rig.shadowInFlight = null;
     }
   }
@@ -1061,13 +1063,13 @@ export class PreviewSession {
         rig.fed = next;
         next += 1;
       }
-      if (next > max || rig.inFlightN !== null || rig.shadowInFlight !== null) continue;
+      if (next > max || rig.inFlightCount >= PreviewSession.IN_FLIGHT || rig.shadowInFlight !== null) continue;
       rig.fed = next;
-      rig.inFlightN = next;
+      rig.inFlightCount += 1;
       void this.uploadRing(rig, inputId, next)
         .catch(error => this.noteDecodeError(inputId, next, error))
         .finally(() => {
-          if (rig.inFlightN === next) rig.inFlightN = null;
+          rig.inFlightCount = Math.max(0, rig.inFlightCount - 1);
           if (!this.disposed && this.playing) this.pump(this.latestTarget);
         });
     }
