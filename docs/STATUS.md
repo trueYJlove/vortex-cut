@@ -123,7 +123,12 @@ PiP 自由定位、A1 音频混音、代理与权威预览、H.264/AAC 导出与
 | P24 | **recall_ndcg 真实预测**：窗口能量排序 + spoken 档出数 | `W0_4_RECALL_NDCG_2026-09-25.md` §2 | 工作包 | ✅ **2026-09-25 核销**——W0.4 四项可测指标全部出数 |
 | P25 | **L/J 词戳 ASR 优先**：faster-whisper 路径 + 能量回退 + word_source | `W0_4_ASR_WORDS_2026-09-25.md` §2 | 工作包 | ✅ **2026-09-25 核销**——产品 Whisper Tiny 自动发现；当前预测 `word_source=asr` |
 | P26 | **Desktop Wave 1 剪辑手法 UI**：三页壳 + 属性/素材入口 | `DESKTOP_WAVE1_EDITING_TOOLS_2026-09-25.md` §2 | 工作包 | ✅ **2026-09-25 核销**——设计稿确认后落地；Desktop 708 tests |
-| P27 | **MediaDecoder 双后端 + HEVC 合成预览**：能力表 + WebCodecs/FFmpeg 旁路 + 帧回传 F1 | `MEDIA_DECODER_HEVC_PLANNING_GATE_2026-09-26.md` §1.1 / §3 / §4 | 工作包 | ⏳ **已裁决待实施**（2026-09-26 用户认可架构）；执行序 H1→H5 |
+| P27 | **MediaDecoder 双后端 + HEVC 合成预览**：能力表 + WebCodecs/FFmpeg 旁路 + 帧回传 F1 + 后端 B Core 端点契约 | `MEDIA_DECODER_HEVC_PLANNING_GATE_2026-09-26.md` §1 / §3 / §4（含 §7 评审修订） | 工作包 | ⏳ **已裁决待实施**（2026-09-26 用户认可架构，同日评审修订：判定顺序去硬解前置、补 §2.5 Core 契约与 §2.6 错误码链）；执行序 H1→H5 |
+| P28 | 能力表探测 + 实配失败回写降级（防每素材反复试错）；软解为合法 A 路径 | `MEDIA_DECODER_HEVC_PLANNING_GATE_2026-09-26.md` §5 风险表 | **风险对策** | ⏳ 未落地 |
+| P29 | F1 帧回传带宽/延迟达门限；A/B 同素材同帧号取帧一致（VFR 对拍） | 同上 §5 风险表 | **风险对策** | ⏳ 未落地 |
+| P30 | 后端 B Core 端点复用票据鉴权 + 路径不下发渲染进程 + 窗口上限；能力表按 FFmpeg build 指纹失效重探 | 同上 §5 风险表 | **风险对策** | ⏳ 未落地 |
+| P31 | 手写 demux 扩 hev1 仅覆盖主流 MP4，异常容器强制 B 后端；色彩钉死 BT.709 | 同上 §5 风险表 | **风险对策** | ⏳ 未落地 |
+| P32 | 代理与能力表解耦：代理只加速，能力表不读代理状态（H5 收口） | 同上 §5 风险表 | **风险对策** | ⏳ 未落地 |
 
 ---
 
@@ -137,6 +142,7 @@ PiP 自由定位、A1 音频混音、代理与权威预览、H.264/AAC 导出与
 | 细粒度进度仍缺失 | `analyze_video` 的死参数已删除，但未实现替代；长分析无中途进度 | 实施记录 §4 L2 |
 | json_schema 适配器被网关拒 | provider 兼容面窄于设计，script 类适配器为唯一通路 | `AI_VALIDATION_REPORT_2026-09-20.md` §实验 B |
 | Provider 域独立工作单 | 代理与探测总预算**均已交付**；本条保留用于跟踪 provider 域后续 | — |
+| Wave1 剪辑手法收尾 | L1/L2 自动注入（词戳/beat）与 L3 真机手测签字未闭环 | `DESKTOP_WAVE1_EDITING_TOOLS_2026-09-25.md` §4 |
 
 ---
 
