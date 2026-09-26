@@ -358,8 +358,9 @@ function computeTicks(
 
 /** Amplitude gain applied at draw time so quiet audio stays visible. */
 const WAVEFORM_GAIN = 1.4;
-/** 绘制路径每 clip 峰值数上限（clip 像素宽封顶——更细无显示增益）。 */
-const WAVEFORM_PEAK_COUNT_MAX = 200;
+/** 绘制路径每 clip 峰值数上限。须 ≥ 片段像素宽——旧值 200 会把宽片段
+ *  拉成大块台阶（剪映是近似 1 峰/像素的密柱）。 */
+const WAVEFORM_PEAK_COUNT_MAX = 4096;
 
 // ── 剪映式片段外观（1:1 复刻参考） ────────────────────────────────────────────
 /** 片段圆角半径（px）。 */
@@ -858,11 +859,8 @@ function drawTimeline(
       }
     }
 
-    // 3) 音频波形（剪映式 1:1）：连续实心轮廓——按相邻峰值画实心梯形，柱与
-    //    柱之间无缝衔接（图1 的"整块实心"质感），底部对齐；峰值采样点顶端
-    //    1px 橙色点亮；带底一条 1px 亮线（剪映基线）。
-    //    B14：峰值按 clip 源区间/速度/倒放从素材金字塔取窗（同源不同 trim
-    //    各自正确；不再把整素材波形挤进 clip 矩形）。
+    // 3) 音频波形（剪映式一体剪影）：单 path 填充 + 顶边二次曲线，底部对齐；
+    //    偶发峰顶橙点；带底 1px 亮线。B14：按 clip 源区间/速度/倒放取窗。
     if (waveformCache && band && rect.width > 20) {
       const pxWidthForPeaks = Math.max(1, Math.floor(rect.width) - 2);
       const peaks = waveformCache.peaksFor({
@@ -872,7 +870,7 @@ function drawTimeline(
         sourceEndUs: rect.clip.source_end_us ?? 0,
         speedMilli: rect.clip.speed_milli ?? 1000,
         reverse: rect.clip.reverse_playback ?? false,
-      }, Math.min(WAVEFORM_PEAK_COUNT_MAX, pxWidthForPeaks));
+      }, Math.min(WAVEFORM_PEAK_COUNT_MAX, pxWidthForPeaks * 2));
       if (peaks && peaks.length > 0) {
         if (!isAudioClip) {
           ctx.fillStyle = palette.band;
@@ -882,54 +880,58 @@ function drawTimeline(
         // 纯音频片段固定 100% 高度（不随轨道高度/波形占比设置变化，剪映式）；
         // 视频片段原声带按占比档位缩放。
         const maxH = Math.max(2, band.height * (isAudioClip ? 1 : Math.max(0.1, Math.min(1, waveformRatio ?? 0.4))));
-        // 连续平滑轮廓：像素高度由相邻峰值线性插值——峰与峰之间是斜坡
-        // （剪映式自然衔接），而非直角跳变。先用滑动窗口(max)聚合成
-        // "包络"，再逐像素在包络采样点间插值。
+        // 剪映「一体感」来源：整条波形是一块连续剪影（单 path 填充 + 顶边
+        // 二次曲线），而不是一排 fillRect 密柱。密柱即使高度连续，边缘仍是
+        // 折线/接缝，读起来会“碎”。
         const drawLeft = rect.x + 1;
-        const drawRight = rect.x + rect.width - 1;
-        const pxWidth = Math.max(1, Math.floor(drawRight - drawLeft));
-        // 峰值包络：每个像素列取其所覆盖的波形缓存区间的最大幅值。
-        const env: number[] = [];
+        const pxWidth = Math.max(1, Math.floor(rect.width - 2));
+        const shapeAmp = (v: number): number => {
+          const gained = Math.min(1, Math.max(0, v) * WAVEFORM_GAIN);
+          return Math.pow(gained, 0.72);
+        };
+        // 剪映「毛刺」感：保留高频瞬态——像素内取 max，且不做邻域抹平。
+        // 线性插值 + 平滑会把尖刺吃掉，只剩光滑山脊。
+        const heights: number[] = new Array(pxWidth);
         for (let px = 0; px < pxWidth; px += 1) {
-          const from = Math.floor((px / pxWidth) * peaks.length);
-          const to = Math.max(from + 1, Math.floor(((px + 1) / pxWidth) * peaks.length));
+          const t0 = pxWidth === 1 ? 0 : px / pxWidth;
+          const t1 = pxWidth === 1 ? 1 : (px + 1) / pxWidth;
+          // 该像素覆盖的 peaks 区间取 max（瞬态尖刺保留为「毛刺」）
+          const i0 = Math.min(peaks.length - 1, Math.floor(t0 * peaks.length));
+          const i1 = Math.min(peaks.length - 1, Math.max(i0, Math.ceil(t1 * peaks.length) - 1));
           let peak = 0;
-          for (let k = from; k < to && k < peaks.length; k += 1) {
-            const v = Math.min(1, peaks[k] * WAVEFORM_GAIN);
+          for (let k = i0; k <= i1; k += 1) {
+            const v = shapeAmp(peaks[k]);
             if (v > peak) peak = v;
           }
-          env.push(peak);
+          heights[px] = maxH * peak;
         }
-        // 三点滑动平均抹平毛刺（保峰：中心点取 max(原值, 邻均值)）。
-        const smooth: number[] = new Array(pxWidth);
-        for (let px = 0; px < pxWidth; px += 1) {
-          const prev = env[Math.max(0, px - 1)];
-          const next = env[Math.min(pxWidth - 1, px + 1)];
-          smooth[px] = Math.max(env[px], (prev + env[px] + next) / 3);
+        // 单路径剪影 + 纯折线顶边：微尖刺全部保留（无二次曲线、无平滑）。
+        const topY = (px: number): number => baseline - Math.max(1, heights[px]);
+        const topX = (px: number): number => drawLeft + px;
+        ctx.beginPath();
+        ctx.moveTo(topX(0), baseline);
+        ctx.lineTo(topX(0), topY(0));
+        for (let px = 1; px < pxWidth; px += 1) {
+          ctx.lineTo(topX(px), topY(px));
         }
+        ctx.lineTo(topX(pxWidth - 1), baseline);
+        ctx.closePath();
         ctx.fillStyle = palette.wave;
-        let prevH = Math.max(1, Math.round(maxH * smooth[0]));
-        for (let px = 0; px < pxWidth; px += 1) {
-          const h = Math.max(1, Math.round(maxH * smooth[px]));
-          // 与前一像素取较低者先填（消除高度差 >1 的台阶），高差用逐像素
-          // 斜坡自然呈现：直接填充本列 [baseline-h, baseline) 即可，因为
-          // 相邻列高度已平滑。
-          const x = drawLeft + px;
-          const top = Math.min(prevH, h);
-          ctx.fillRect(x, baseline - h, 1.25, h);
-          // 峰值点顶端橙色亮（仅局部峰值处，剪映式）。
+        ctx.fill();
+        // 偶发峰值点：2px 橙点落在剪影顶端（点缀，不切开主体）。
+        ctx.fillStyle = "rgb(233, 150, 68)";
+        for (let px = 2; px < pxWidth - 2; px += 1) {
+          const h = heights[px];
           const isLocalPeak =
-            smooth[px] > 0.5 &&
-            (px === 0 || smooth[px] >= smooth[px - 1]) &&
-            (px === pxWidth - 1 || smooth[px] > smooth[px + 1]);
+            h / maxH > 0.55 &&
+            h >= heights[px - 1] && h >= heights[px + 1] &&
+            h > heights[px - 2] + maxH * 0.06 &&
+            h > heights[px + 2] + maxH * 0.06;
           if (isLocalPeak) {
-            ctx.fillStyle = "rgb(233, 150, 68)";
-            ctx.fillRect(x, baseline - h, 1, Math.min(2, h));
-            ctx.fillStyle = palette.wave;
+            ctx.fillRect(topX(px), topY(px), 1.5, Math.min(2.5, h));
           }
-          prevH = h;
         }
-        // 基线：带底 1px 亮线。
+        // 基线：带底 1px 亮线（压在剪影下沿，不抢一体感）。
         ctx.fillStyle = "rgba(150, 224, 221, 0.45)";
         ctx.fillRect(drawLeft, Math.round(baseline) + 0.5 - 1, pxWidth, 1);
       }

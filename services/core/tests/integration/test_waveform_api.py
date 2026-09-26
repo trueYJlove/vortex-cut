@@ -160,6 +160,30 @@ class TestWaveformEndpoint:
         assert payload["job_id"] is None
         assert payload["cache_key"] == key
 
+    def test_failed_allows_regenerate(self, client: TestClient, tmp_path: Path) -> None:
+        """failed 不是终态：generate=True 可重新登记（retry/重进视口）。"""
+        project_id, asset_id = _seed_asset(client, tmp_path)
+        state = client.app.state.core
+        with state.db.connection() as db:
+            row = db.execute(
+                "SELECT fingerprint FROM assets WHERE id=?", (asset_id,)
+            ).fetchone()
+        key = state.waveform.waveform_cache_key(str(row["fingerprint"]))
+        # 直接落 failed 占位行（模拟上次作业失败）
+        state.derived_cache.begin_build(
+            key, str(row["fingerprint"]), "waveform",
+            state.waveform.params(), state.waveform.toolchain_fingerprint(),
+        )
+        state.derived_cache.mark_failed(key, "waveform")
+        response = client.post(
+            f"/api/v1/projects/{project_id}/assets/{asset_id}/waveform",
+            json={"generate": True}, headers=_ui(client),
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "queued"
+        assert payload["job_id"] is not None
+
     def test_cross_project_denied(self, client: TestClient, tmp_path: Path) -> None:
         project_id, asset_id = _seed_asset(client, tmp_path)
         other = client.post(

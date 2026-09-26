@@ -5,8 +5,8 @@
  * - clip 映射：源区间取窗（同源不同 trim 不再共用同一全源图）、
  *   2x 速度、倒放、静音、脉冲在已知位置可定位。
  * - 缓存生命周期：single-flight（同 asset 一次 describe+fetch）、
- *   failed 不重试、pending 静默、LRU 字节上限逐出、dispose 清空、
- *   retry 门。
+ *   pending 退避重查直至 ready（作业完成后曲线可画）、failed 不自动重试、
+ *   LRU 字节上限逐出、dispose 清空、retry 门。
  * - 金字塔等价：base 层峰值 = 逐样本重算 reference。
  */
 import { describe, expect, it, vi } from "vitest";
@@ -186,6 +186,25 @@ describe("peaksForClip 源区间映射", () => {
     // 10 桶窗 3 像素 → 每像素 ~3.3 桶 → level 2
     expect(pickLevel(pyramid, bucketSpanUs, 10 * bucketSpanUs, 3)).toBeGreaterThanOrEqual(1);
   });
+
+  it("选层后索引按该层桶跨换算（误用 base 跨度会挤到末桶）", () => {
+    // 16 base 桶：仅最后一段有声。2 个采样点 → pickLevel≈3（每层 2 桶）
+    const loudTail: Array<[number, number]> = [];
+    for (let i = 0; i < 16; i += 1) loudTail.push(i >= 12 ? [0, 1] : [0, 0]);
+    const pyr: WaveformPyramid = {
+      baseBuckets: 16, levels: buildPyramid(loudTail).length,
+      levelData: buildPyramid(loudTail).map(level => new Float32Array(level.flat())),
+      totalBytes: 64,
+    };
+    const { peaks } = peaksForClip(pyr, bucketSpanUs, {
+      clipId: "cLevel", assetId: "a1",
+      sourceStartUs: 0, sourceEndUs: 16 * bucketSpanUs,
+      speedMilli: 1000, reverse: false,
+    }, 2)!;
+    // 正确：前半段静音、后半段有声；若按 base 跨度索引会两段都落到末桶=1
+    expect(peaks[0]).toBeCloseTo(0, 5);
+    expect(peaks[1]).toBeCloseTo(1, 5);
+  });
 });
 
 describe("WaveformCache 生命周期", () => {
@@ -227,27 +246,78 @@ describe("WaveformCache 生命周期", () => {
     vi.unstubAllGlobals();
   });
 
-  it("pending 状态：building 描述返回 null 且不 fetch", async () => {
-    const getWaveform = vi.fn(async () => ({ ...description, status: "building" as const }));
-    const waveformMediaUrl = vi.fn();
-    const fetchMock = stubFetch(new ArrayBuffer(8));
-    const cache = new WaveformCache({ getWaveform, waveformMediaUrl }, "project_1");
-    expect(await cache.pyramidFor("asset_1")).toBeNull();
-    expect(waveformMediaUrl).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(cache.snapshot()[0].state).toBe("pending");
+  it("pending（building）退避重查：ready 后 resolve 金字塔并可取峰值", async () => {
+    const file = buildWaveformFile(buildPyramid([[0, 0.5], [0, 0.25]]));
+    let call = 0;
+    const getWaveform = vi.fn(async () => {
+      call += 1;
+      return { ...description, status: call < 3 ? ("building" as const) : ("ready" as const) };
+    });
+    const waveformMediaUrl = vi.fn(async () => ({ media_url: "aivideo://media/t", cache_key: description.cache_key, size_bytes: 4 }));
+    const fetchMock = stubFetch(file);
+    const cache = new WaveformCache(
+      { getWaveform, waveformMediaUrl }, "project_1", undefined, async () => {});
+    const pyramid = await cache.pyramidFor("asset_1");
+    expect(pyramid).not.toBeNull();
+    expect(pyramid?.baseBuckets).toBe(2);
+    // building 两轮不 fetch；ready 后才取件
+    expect(getWaveform).toHaveBeenCalledTimes(3);
+    expect(waveformMediaUrl).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(cache.snapshot()[0].state).toBe("ready");
+    expect(cache.peaksFor({
+      clipId: "c", assetId: "asset_1",
+      sourceStartUs: 0, sourceEndUs: 64000, speedMilli: 1000, reverse: false,
+    }, 4)).not.toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it("pending 期间 single-flight：并发共享同一轮询，不重复 describe", async () => {
+    const file = buildWaveformFile(buildPyramid([[0, 0.5], [0, 0.25]]));
+    let call = 0;
+    const getWaveform = vi.fn(async () => {
+      call += 1;
+      return { ...description, status: call < 2 ? ("queued" as const) : ("ready" as const) };
+    });
+    const waveformMediaUrl = vi.fn(async () => ({ media_url: "aivideo://media/t", cache_key: description.cache_key, size_bytes: 4 }));
+    stubFetch(file);
+    const cache = new WaveformCache(
+      { getWaveform, waveformMediaUrl }, "project_1", undefined, async () => {});
+    const [a, b] = await Promise.all([cache.pyramidFor("asset_1"), cache.pyramidFor("asset_1")]);
+    expect(a && b && a === b).toBe(true);
+    expect(getWaveform).toHaveBeenCalledTimes(2); // queued → ready 各一次
     vi.unstubAllGlobals();
   });
 
   it("failed 不自动重试；retry() 后可再来一次", async () => {
     const getWaveform = vi.fn(async () => { throw new Error("MEDIA_NO_AUDIO"); });
-    const cache = new WaveformCache({ getWaveform, waveformMediaUrl: vi.fn() }, "project_1");
+    const cache = new WaveformCache(
+      { getWaveform, waveformMediaUrl: vi.fn() }, "project_1", undefined, async () => {});
     expect(await cache.pyramidFor("asset_1")).toBeNull();
     expect(await cache.pyramidFor("asset_1")).toBeNull();
     expect(getWaveform).toHaveBeenCalledTimes(1); // failed 态不重试
     cache.retry("asset_1");
     expect(await cache.pyramidFor("asset_1")).toBeNull();
     expect(getWaveform).toHaveBeenCalledTimes(2);
+  });
+
+  it("status=failed 按失败落库（不再卡 pending），retry 可重查", async () => {
+    let call = 0;
+    const getWaveform = vi.fn(async () => {
+      call += 1;
+      return { ...description, status: (call < 2 ? "failed" : "ready") as "failed" | "ready" };
+    });
+    const file = buildWaveformFile(buildPyramid([[0, 0.5], [0, 0.25]]));
+    const waveformMediaUrl = vi.fn(async () => ({ media_url: "aivideo://media/t", cache_key: description.cache_key, size_bytes: 4 }));
+    stubFetch(file);
+    const cache = new WaveformCache(
+      { getWaveform, waveformMediaUrl }, "project_1", undefined, async () => {});
+    expect(await cache.pyramidFor("asset_1")).toBeNull();
+    expect(cache.snapshot()[0].state).toBe("failed");
+    cache.retry("asset_1");
+    expect(await cache.pyramidFor("asset_1")).not.toBeNull();
+    expect(cache.snapshot()[0].state).toBe("ready");
+    vi.unstubAllGlobals();
   });
 
   it("字节上限 LRU：超限逐出最旧，cachedBytes 记账", async () => {

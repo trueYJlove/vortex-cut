@@ -2252,7 +2252,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             status = (entry or {}).get("status")
             if (
                 request.generate
-                and status not in {"ready", "building", "queued", "failed"}
+                # failed 允许重登记（显式 retry/重进视口）；ready/building/queued 幂等短路
+                and status not in {"ready", "building", "queued"}
             ):
                 resolved_path = state.projects.resolve_asset_path(asset_id)
                 job_id = state.waveform.create_waveform_job(
