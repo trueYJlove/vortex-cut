@@ -353,8 +353,9 @@ async function feedSamples(
       samplesFed += 1;
       if (index <= target) fedIndex = index;
     }
-    // 喂完后 flush：推动解码器吐出重排缓冲中的目标帧（B 帧/HEVC 必要）
-    await decoder!.flush();
+    // 不在此 flush()：VideoDecoder 在 flush 后要求下一包为关键帧，会打断
+    // 同 GOP 顺序解码（真机报 "A key frame is required after configure() or
+    // flush()"）。B 帧靠上方 LOOKAHEAD 前方参考帧即可吐出目标输出。
   } catch (error) {
     post({ type: "error", id: request.id, message: errorText(error) });
   }
