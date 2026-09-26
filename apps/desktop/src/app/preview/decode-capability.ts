@@ -134,10 +134,15 @@ export class MediaDecoderFactoryImpl implements MediaDecoderFactory {
   async create(input: MediaDecoderFactoryInput, signal?: AbortSignal): Promise<MediaDecoder> {
     // codec="auto"：调用方未知编码（demux 会发现）——依次尝试 A/B。
     // 未识别的具体 codec 串仍明确拒绝（禁止静默当 auto）。
-    if (input.codec === "auto") {
+    if (input.codec === "auto" || input.preferBackend) {
+      const order: DecodeBackendId[] = input.preferBackend === "ffmpeg"
+        ? ["ffmpeg", "webcodecs"]
+        : input.preferBackend === "webcodecs"
+          ? ["webcodecs", "ffmpeg"]
+          : ["webcodecs", "ffmpeg"];
       let firstError: unknown = null;
       let lastError: unknown = null;
-      for (const backend of ["webcodecs", "ffmpeg"] as const) {
+      for (const backend of order) {
         try {
           return await this.createBackend(backend, input, signal);
         } catch (error) {

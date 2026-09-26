@@ -26,7 +26,7 @@ import { BUDGET_TABLES, ringDepthFor, predictResidencyBytes, windowSourceBudget 
 import { InputPool } from "./input-pool.js";
 import { editorPerf, allocatePerfSession } from "./perf-metrics.js";
 import type { DecodeResidencyInfo } from "./decode-worker.js";
-import type { DecodedFrame, MediaDecoder } from "./media-decoder.js";
+import type { DecodedFrame, MediaDecoder, MediaDecoderFactory, MediaDecoderFactoryInput } from "./media-decoder.js";
 import { MediaDecoderFactoryImpl, probeDecodeCapability } from "./decode-capability.js";
 import { VARISPEED_WORKLET_NAME, createVarispeedWorkletUrl } from "./varispeed-worklet.js";
 
@@ -89,6 +89,8 @@ interface InputRig {
   kind: "video" | "image";
   /** H1/H3：MediaDecoder（webcodecs=DecodeWorker 包装；ffmpeg=decodeFrames 回调）。 */
   worker: MediaDecoder | null;
+  /** 超时后降级重试：preferBackend=ffmpeg 的创建参数快照。 */
+  decoderRetry?: { ticket: string; width: number; height: number; cacheCapBytes: number; refreshTicket: () => Promise<string>; decodeFrames?: MediaDecoderFactoryInput["decodeFrames"] };
   /** 播放/seek 共用的环形簿记：槽位按 ringSeq 轮转，srcN=-1 表示空。 */
   ring: Array<RingSlot | null>;
   ringSeq: number;
@@ -277,6 +279,7 @@ export class PreviewSession {
   private readonly perfId = allocatePerfSession();
   private perfRequest = 0;
   private readonly lifetime = new AbortController();
+  private decoderFactory: MediaDecoderFactory | null = null;
   private constructor(ir: Ir, frames?: FrameSource) {
     editorPerf.record("session_open", 0, this.perfId);
     this.ir = ir;
@@ -428,7 +431,8 @@ export class PreviewSession {
         const rangeCacheBytes = (resourceTier ? BUDGET_TABLES[resourceTier].rangeCacheMiB : 128) * 1024 * 1024;
         // H1/H3：MediaDecoderFactory 选 A/B；codec=auto（demux 发现）。
         // 后端 B 的 decodeFrames 经 Main→Core（路径不进 Renderer）。
-        const factory = new MediaDecoderFactoryImpl(await probeDecodeCapability());
+        const factory = session.decoderFactory ?? new MediaDecoderFactoryImpl(await probeDecodeCapability());
+        session.decoderFactory = factory;
         const desktopApi = typeof window !== "undefined"
           ? (window as unknown as { desktop?: { decodeFrames?: (input: { project_id: string; asset_id: string; frame_numbers: number[]; fps: number }) => Promise<ArrayBuffer> } }).desktop
           : undefined;
@@ -451,6 +455,14 @@ export class PreviewSession {
         }, signal);
         if (session.disposed || signal?.aborted) { decoder.dispose(); throw new DOMException("Session disposed", "AbortError"); }
         rig.worker = decoder;
+        rig.decoderRetry = {
+          ticket,
+          width: input.geometry.width,
+          height: input.geometry.height,
+          cacheCapBytes: rangeCacheBytes,
+          refreshTicket: refreshTicket(input.asset_id),
+          decodeFrames,
+        };
       }
       session.rigs.set(input.input_id, rig);
     }
@@ -863,6 +875,31 @@ export class PreviewSession {
    *  直接作废（解码前后双重检查；作废帧 close 释放）——否则 scrub 时新 seek
    *  的上传会排在整条过期预取队尾（worker 化后每任务含双跳 RTT，实测 seek
    *  p95 翻倍的根因）。 */
+  /** 解码超时/看门狗 → 降级 ffmpeg 后端重试一次（WebCodecs 对长 GOP HEVC 可能过慢）。 */
+  private async maybeFallBackToFfmpeg(rig: InputRig, error: unknown): Promise<boolean> {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/timeout|watchdog|key frame is required/i.test(message)) return false;
+    const retry = rig.decoderRetry;
+    const factory = this.decoderFactory;
+    if (!retry || !factory || !retry.decodeFrames) return false;
+    try {
+      rig.worker?.dispose();
+      rig.worker = await factory.create({
+        mediaUrl: retry.ticket,
+        codec: "auto",
+        width: retry.width,
+        height: retry.height,
+        cacheCapBytes: retry.cacheCapBytes,
+        refreshTicket: retry.refreshTicket,
+        decodeFrames: retry.decodeFrames,
+        preferBackend: "ffmpeg",
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   private uploadRing(rig: InputRig, inputId: string, srcN: number): Promise<void> {
     if (!rig.worker) return Promise.reject(new Error(`no worker for input`));
     const slotIndex = rig.ringSeq % this.ringDepth;
@@ -876,7 +913,12 @@ export class PreviewSession {
       this.decodeInFlight += 1;
       let decoded: DecodedFrame;
       try {
-        decoded = await rig.worker!.decode(srcN, this.ir.canvas.fps);
+        try {
+          decoded = await rig.worker!.decode(srcN, this.ir.canvas.fps);
+        } catch (error) {
+          if (this.disposed || !(await this.maybeFallBackToFfmpeg(rig, error))) throw error;
+          decoded = await rig.worker!.decode(srcN, this.ir.canvas.fps);
+        }
         this.decodeTimes.push(performance.now() - decodeStart);
         editorPerf.record("decode", performance.now() - decodeStart, this.perfId, perfRequest, epoch, srcN, perfInput);
         if (this.decodeTimes.length > 600) this.decodeTimes.splice(0, this.decodeTimes.length - 600);

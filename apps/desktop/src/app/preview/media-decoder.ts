@@ -67,6 +67,8 @@ export interface MediaDecoderFactoryInput {
   refreshTicket?: () => Promise<string>;
   /** H3 后端 B：窗口帧解码（Main→Core；响应为 AIV1 紧凑二进制）。 */
   decodeFrames?: (input: { frameNumbers: number[]; fps: number }) => Promise<ArrayBuffer>;
+  /** 强制首选后端（超时/失败后降级重试用；缺省按能力表）。 */
+  preferBackend?: DecodeBackendId;
 }
 
 export interface MediaDecoderFactory {

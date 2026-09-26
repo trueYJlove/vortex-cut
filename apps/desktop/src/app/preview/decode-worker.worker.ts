@@ -99,6 +99,28 @@ interface DecodeRequest {
 }
 const decodeQueue: DecodeRequest[] = [];
 let activeRequest: DecodeRequest | null = null;
+/** 在途请求看门狗：客户端超时后若 worker 仍占着 activeRequest，后续请求会
+ *  永久排队（真机：一次 timeout 后全部 decode timeout）。到点强制清占并报错。 */
+let activeRequestTimer: ReturnType<typeof setTimeout> | null = null;
+const ACTIVE_REQUEST_TIMEOUT_MS = 45_000;
+
+function clearActiveRequestTimer(): void {
+  if (activeRequestTimer !== null) {
+    clearTimeout(activeRequestTimer);
+    activeRequestTimer = null;
+  }
+}
+
+function armActiveRequestTimer(request: DecodeRequest): void {
+  clearActiveRequestTimer();
+  activeRequestTimer = setTimeout(() => {
+    if (activeRequest?.id !== request.id) return;
+    activeRequest = null;
+    clearActiveRequestTimer();
+    post({ type: "error", id: request.id, message: `decode worker watchdog: frame ${request.frameN} 无匹配输出（pts=${request.samplePtsUs}）` });
+    pumpQueue();
+  }, ACTIVE_REQUEST_TIMEOUT_MS);
+}
 let fedIndex = -1; // 最近一次**请求目标**（顺序判定用；勿与已喂采样游标混用）
 /** 已喂入解码器的最大采样索引（含 B 帧 lookahead；顺序请求从 lastFedSample+1 续喂）。 */
 let lastFedSample = -1;
@@ -143,10 +165,11 @@ function createDecoder(): VideoDecoder {
     output: (frame: VideoFrame) => {
       resDecoded += 1;
       const request = activeRequest;
-      if (request && Math.abs(frame.timestamp - request.samplePtsUs) <= 1_000) {
-        // 锚在 samplePtsUs（locateByPts 已完成最近邻）；勿用 targetUs 半帧窗——
-        // HEVC/VFR 上会永不命中 → 15s decode timeout（2026-09-26 真机现场）。
+      if (request && Math.abs(frame.timestamp - request.samplePtsUs) <= 33_334) {
+        // 与取样容差同宽（一帧@30fps）；锚在 samplePtsUs。更窄会在 VFR/HEVC
+        // 上永不命中 → 超时；更宽会错配相邻帧。用最近邻二次确认。
         activeRequest = null;
+        clearActiveRequestTimer();
         pendingAnchorPts = -1;
         if (cacheEnabled) {
           const clone = frame.clone();
@@ -171,6 +194,7 @@ function createDecoder(): VideoDecoder {
     error: (error: DOMException) => {
       const request = activeRequest;
       activeRequest = null;
+      clearActiveRequestTimer();
       // 解码器进入错误态后必须 reset 才可复用：重建配置、清热态游标
       try {
         decoder!.reset();
@@ -317,10 +341,12 @@ function pumpQueue(): void {
   while (!activeRequest && decodeQueue.length) {
     const request = decodeQueue.shift()!;
     activeRequest = request;
+    armActiveRequestTimer(request);
     try {
       decodeSamples(request);
     } catch (error) {
       activeRequest = null;
+      clearActiveRequestTimer();
       post({ type: "error", id: request.id, message: errorText(error) });
     }
   }
