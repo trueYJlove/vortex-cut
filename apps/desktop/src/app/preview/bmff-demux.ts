@@ -26,7 +26,8 @@ export interface DemuxResult {
   timescale: number;
   width: number;
   height: number;
-  avcC: Uint8Array;
+  /** VideoDecoderConfig.description：avcC 或 hvcC 的 payload（不含 8 字节盒头）。 */
+  description: Uint8Array;
   codec: string;
 }
 
@@ -171,30 +172,43 @@ function parseMoov(u8: Uint8Array, view: DataView): DemuxResult {
   const stblStart = findBox(view, chosen.start, chosen.end, ["mdia", "minf", "stbl"])[0];
   if (!stblStart) throw new BmffUnsupportedError("BMFF_MALFORMED", "stbl 缺失");
 
-  // stsd → avcC + codec + 尺寸
+  // stsd → description（avcC/hvcC）+ codec + 尺寸
   const stsd = findBox(view, stblStart.start, stblStart.end, ["stsd"])[0];
   if (!stsd) throw new BmffUnsupportedError("BMFF_MALFORMED", "stsd 缺失");
   const entrySize = view.getUint32(stsd.start + 8);
   const entryType = String.fromCharCode(
     view.getUint8(stsd.start + 12), view.getUint8(stsd.start + 13),
     view.getUint8(stsd.start + 14), view.getUint8(stsd.start + 15));
-  if (entryType !== "avc1") {
+  const isHevcEntry = entryType === "hev1" || entryType === "hvc1";
+  if (entryType !== "avc1" && !isHevcEntry) {
     throw new BmffUnsupportedError("BMFF_CODEC_UNSUPPORTED", `采样入口 ${entryType} 编码不受支持`);
   }
   const entryStart = stsd.start + 16;
   const entryEndAbs = stsd.start + 8 + entrySize;
   if (entryEndAbs > stsd.end + 8) throw new BmffUnsupportedError("BMFF_MALFORMED", "stsd entry 越界");
-  const avcCStart = findU32Tag(u8, entryStart + 60, entryEndAbs, 0x61766343); // "avcC"
-  if (avcCStart < 0) throw new BmffUnsupportedError("BMFF_MALFORMED", "avcC 未找到");
-  const avcCSize = view.getUint32(avcCStart);
-  if (avcCSize < 8 || avcCStart + avcCSize > entryEndAbs) {
-    throw new BmffUnsupportedError("BMFF_MALFORMED", "avcC 盒长非法");
+  // "hvcC" / "avcC"（ISO/IEC 14496-15）
+  const configTag = isHevcEntry ? 0x68766343 : 0x61766343;
+  const configName = isHevcEntry ? "hvcC" : "avcC";
+  const configStart = findU32Tag(u8, entryStart + 60, entryEndAbs, configTag);
+  if (configStart < 0) throw new BmffUnsupportedError("BMFF_MALFORMED", `${configName} 未找到`);
+  const configSize = view.getUint32(configStart);
+  if (configSize < 8 || configStart + configSize > entryEndAbs) {
+    throw new BmffUnsupportedError("BMFF_MALFORMED", `${configName} 盒长非法`);
   }
-  const avcCBytes = u8.slice(avcCStart + 8, avcCStart + avcCSize);
-  const profile = avcCBytes[1];
-  const compat = avcCBytes[2];
-  const level = avcCBytes[3];
-  const codec = `avc1.${profile.toString(16).padStart(2, "0")}${compat.toString(16).padStart(2, "0")}${level.toString(16).padStart(2, "0")}`;
+  const description = u8.slice(configStart + 8, configStart + configSize);
+  let codec: string;
+  if (isHevcEntry) {
+    // HEVCDecoderConfigurationRecord 至少 23 字节（到 numOfArrays）
+    if (description.length < 23) {
+      throw new BmffUnsupportedError("BMFF_MALFORMED", "hvcC 配置记录过短");
+    }
+    codec = buildHevcCodecString(entryType as "hev1" | "hvc1", description);
+  } else {
+    const profile = description[1]!;
+    const compat = description[2]!;
+    const level = description[3]!;
+    codec = `avc1.${profile.toString(16).padStart(2, "0")}${compat.toString(16).padStart(2, "0")}${level.toString(16).padStart(2, "0")}`;
+  }
   const width = view.getUint16(entryStart + 24);
   const height = view.getUint16(entryStart + 26);
 
@@ -301,7 +315,48 @@ function parseMoov(u8: Uint8Array, view: DataView): DemuxResult {
   for (let index = 0; index < sampleCount; index++) {
     samples.push({ offset: offsets[index]!, size: sizes[index]!, dts: dts[index]!, ctsOffset: ctsOffsets[index]!, sync: syncSet.has(index) });
   }
-  return { samples, timescale, width, height, avcC: avcCBytes, codec };
+  return { samples, timescale, width, height, description, codec };
+}
+
+/** ISO/IEC 14496-15 Annex E.3：HEVCDecoderConfigurationRecord → WebCodecs codec string。
+ *
+ *  compatibility flags 须按位反转：记录里 flag[i] 落在整数 MSB 侧（flag[0] 即
+ *  bit31），codec string 要求 flag[31] 为 MSB——故对 32 位字段做 reverseBits32。
+ *  约束字节自 progressive_source_flag 起逐字节 hex、以点分隔，尾部零字节省略
+ *  （常见 Main Profile 0xB0… → `.B0`）。
+ */
+export function buildHevcCodecString(prefix: "hvc1" | "hev1", hvcC: Uint8Array): string {
+  if (hvcC.length < 23) {
+    throw new BmffUnsupportedError("BMFF_MALFORMED", "hvcC 配置记录过短");
+  }
+  const profileSpace = (hvcC[1]! >> 6) & 0x03;
+  const tierFlag = (hvcC[1]! >> 5) & 0x01;
+  const profileIdc = hvcC[1]! & 0x1f;
+  const compat = ((hvcC[2]! << 24) | (hvcC[3]! << 16) | (hvcC[4]! << 8) | hvcC[5]!) >>> 0;
+  const levelIdc = hvcC[12]!;
+  let codec = `${prefix}.`;
+  if (profileSpace > 0) codec += String.fromCharCode(0x41 + profileSpace - 1);
+  codec += `${profileIdc}.`;
+  codec += `${reverseBits32(compat).toString(16).toUpperCase()}.`;
+  codec += `${tierFlag ? "H" : "L"}${levelIdc}`;
+  let lastConstraint = -1;
+  for (let i = 5; i >= 0; i--) {
+    if (hvcC[6 + i] !== 0) { lastConstraint = i; break; }
+  }
+  for (let i = 0; i <= lastConstraint; i++) {
+    codec += `.${hvcC[6 + i]!.toString(16).padStart(2, "0").toUpperCase()}`;
+  }
+  return codec;
+}
+
+function reverseBits32(value: number): number {
+  let v = value >>> 0;
+  let result = 0;
+  for (let i = 0; i < 32; i++) {
+    result = ((result << 1) | (v & 1)) >>> 0;
+    v >>>= 1;
+  }
+  return result >>> 0;
 }
 
 function findBox(buffer: DataView, start: number, end: number, path: string[]): Array<{ start: number; end: number }> {

@@ -214,7 +214,7 @@ async function init(url: string, cacheFrames: number, hasTicketRefresh: boolean,
     codec: demuxed.codec,
     codedWidth: demuxed.width,
     codedHeight: demuxed.height,
-    description: demuxed.avcC,
+    description: demuxed.description,
     optimizeForLatency: true,
     // 色彩矩阵钉死 BT.709（冻结方案 §7.2 比对口径；texImage2D(VideoFrame) 转换依此）
     colorSpace: { primaries: "bt709", transfer: "bt709", matrix: "bt709", fullRange: false },

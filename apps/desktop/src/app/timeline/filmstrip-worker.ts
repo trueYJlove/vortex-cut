@@ -242,7 +242,7 @@ async function init(url: string, hasTicketRefresh: boolean): Promise<void> {
     codec: demuxResult.codec,
     codedWidth: demuxResult.width,
     codedHeight: demuxResult.height,
-    description: demuxResult.avcC,
+    description: demuxResult.description,
     optimizeForLatency: true,
     colorSpace: { primaries: "bt709", transfer: "bt709", matrix: "bt709", fullRange: false },
   };

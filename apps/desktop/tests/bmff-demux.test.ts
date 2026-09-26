@@ -4,13 +4,15 @@
  * - test-faststart.mp4（moov 前置）
  * - test-tail-moov.mp4（moov 尾部：按 box 偏移定位，不字符串扫描）
  * 等价性金标准 = 旧整缓冲 demux（decode-worker.worker.ts demux()）在
- * 同一文件的输出逐字段一致（samples/timescale/width/height/codec/avcC）。
- * 回退路径：fragmented(moof)、无 moov、64 位超安全整数、采样数上限。 */
+ * 同一文件的输出逐字段一致（samples/timescale/width/height/codec/description）。
+ * HEVC：手工最小 moov（hev1/hvc1 + hvcC）覆盖 codec string 与 description。
+ * 回退路径：fragmented(moof)、无 moov、64 位超安全整数、采样数上限、非法 hvcC。 */
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   BmffUnsupportedError,
+  buildHevcCodecString,
   demuxRange,
   MAX_SAMPLE_COUNT,
   MemoryRangeSource,
@@ -270,14 +272,15 @@ describe("demuxRange 明确回退", () => {
     expect(result.samples.length).toBeLessThan(MAX_SAMPLE_COUNT);
   });
 
-  it("非 AVC codec 入口拒绝（avc1 以外）", async () => {
+  it("未知编码入口拒绝（avc1/hev1/hvc1 以外）", async () => {
     const data = await loadFixture("test-faststart.mp4");
     const mutated = new Uint8Array(data);
     // stsd 入口 avc1 在 moov 内（ftyp 的兼容品牌也含 "avc1"——限定 moov 范围）
     const moovStart = 32, moovEnd = 1079;
     const avcIdx = indexOfBytesInRange(mutated, [0x61, 0x76, 0x63, 0x31], moovStart, moovEnd);
     expect(avcIdx).toBeGreaterThan(0);
-    mutated[avcIdx] = 0x68; // "hvc1"
+    // "avc1" → "av01"（未知入口）
+    mutated[avcIdx + 2] = 0x30;
     await expect(demuxRange(new MemoryRangeSource(mutated))).rejects.toMatchObject({ code: "BMFF_CODEC_UNSUPPORTED" });
     await expect(demuxRange(new MemoryRangeSource(mutated))).rejects.toThrow(/编码不受支持/);
   });
@@ -321,5 +324,179 @@ describe("组合路径：HttpRangeSource + demuxRange", () => {
     expect(result.height).toBe(expected.height);
     expect(result.timescale).toBe(expected.timescale);
     expect(result.samples).toEqual(expected.samples);
+  });
+});
+
+// ——— HEVC（hev1/hvc1 + hvcC）手工最小 moov ———
+
+function u16be(n: number): Uint8Array {
+  const out = new Uint8Array(2);
+  new DataView(out.buffer).setUint16(0, n);
+  return out;
+}
+function u32be(n: number): Uint8Array {
+  const out = new Uint8Array(4);
+  new DataView(out.buffer).setUint32(0, n);
+  return out;
+}
+function fourcc(s: string): Uint8Array {
+  return new Uint8Array([s.charCodeAt(0), s.charCodeAt(1), s.charCodeAt(2), s.charCodeAt(3)]);
+}
+function concat(...parts: Uint8Array[]): Uint8Array {
+  const total = parts.reduce((n, p) => n + p.length, 0);
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const p of parts) { out.set(p, off); off += p.length; }
+  return out;
+}
+function box(type: string, payload: Uint8Array): Uint8Array {
+  return concat(u32be(8 + payload.length), fourcc(type), payload);
+}
+
+/** 最小 hvcC（23 字节固定头，numOfArrays=0）。 */
+function buildHvcc(options: {
+  profileSpace?: number;
+  tierFlag?: number;
+  profileIdc?: number;
+  /** 32 位 general_profile_compatibility_flags（记录位序，flag[0] 在 MSB）。 */
+  compatFlags?: number;
+  constraints?: number[]; // 6 字节
+  levelIdc?: number;
+  /** 截断到指定长度，用于构造非法 hvcC。 */
+  truncateTo?: number;
+}): Uint8Array {
+  const {
+    profileSpace = 0,
+    tierFlag = 0,
+    profileIdc = 1,
+    compatFlags = 0x60000000,
+    constraints = [0xb0, 0, 0, 0, 0, 0],
+    levelIdc = 120,
+    truncateTo,
+  } = options;
+  const payload = new Uint8Array(23);
+  const view = new DataView(payload.buffer);
+  payload[0] = 1; // configurationVersion
+  payload[1] = ((profileSpace & 3) << 6) | ((tierFlag & 1) << 5) | (profileIdc & 0x1f);
+  view.setUint32(2, compatFlags >>> 0);
+  for (let i = 0; i < 6; i++) payload[6 + i] = constraints[i] ?? 0;
+  payload[12] = levelIdc;
+  // [13..21] reserved/avgFrameRate/lengthSize 取 0 即可
+  payload[22] = 0; // numOfArrays
+  return truncateTo === undefined ? payload : payload.subarray(0, truncateTo);
+}
+
+/** 最小 video-only MP4（ftyp + moov；无 mdat——demux 不读样本载荷）。 */
+function buildHevcMp4(options: {
+  entryType: "hev1" | "hvc1";
+  hvcC?: Uint8Array | null; // null = 不写 hvcC 盒
+  width?: number;
+  height?: number;
+  timescale?: number;
+}): Uint8Array {
+  const {
+    entryType,
+    hvcC = buildHvcc({}),
+    width = 640,
+    height = 360,
+    timescale = 30_000,
+  } = options;
+
+  // VisualSampleEntry 固定字段 78 字节 + 扩展盒
+  const entryPayload = new Uint8Array(78 + (hvcC ? 8 + hvcC.length : 0));
+  const entryView = new DataView(entryPayload.buffer);
+  entryView.setUint16(6, 1); // data_reference_index
+  entryView.setUint16(24, width);
+  entryView.setUint16(26, height);
+  entryView.setUint32(28, 0x00480000);
+  entryView.setUint32(32, 0x00480000);
+  entryView.setUint16(40, 1); // frame_count
+  entryView.setUint16(74, 0x0018); // depth
+  entryView.setInt16(76, -1);
+  if (hvcC) entryPayload.set(box("hvcC", hvcC), 78);
+  const entry = box(entryType, entryPayload);
+
+  const stsd = box("stsd", concat(u32be(0), u32be(1), entry));
+  const stts = box("stts", concat(u32be(0), u32be(1), u32be(1), u32be(1)));
+  const stsc = box("stsc", concat(u32be(0), u32be(1), u32be(1), u32be(1), u32be(1)));
+  const stsz = box("stsz", concat(u32be(0), u32be(4), u32be(1)));
+  const stco = box("stco", concat(u32be(0), u32be(1), u32be(0)));
+  const stbl = box("stbl", concat(stsd, stts, stsc, stsz, stco));
+
+  const mdhd = box("mdhd", concat(
+    u32be(0), // version/flags
+    u32be(0), u32be(0), // creation/modification
+    u32be(timescale),
+    u32be(1), // duration
+  ));
+  const hdlr = box("hdlr", concat(
+    u32be(0),
+    u32be(0),
+    fourcc("vide"),
+    new Uint8Array(12),
+    new Uint8Array([0]),
+  ));
+  const minf = box("minf", stbl);
+  const mdia = box("mdia", concat(mdhd, hdlr, minf));
+  const trak = box("trak", mdia);
+  const moov = box("moov", trak);
+  const ftyp = box("ftyp", concat(fourcc("isom"), u32be(0), fourcc("isom")));
+  return concat(ftyp, moov);
+}
+
+describe("demuxRange HEVC（hev1/hvc1 + hvcC）", () => {
+  it("hvc1 入口：codec 形如 hvc1.…，description 为 hvcC payload", async () => {
+    const hvcC = buildHvcc({
+      profileIdc: 1,
+      compatFlags: 0x60000000, // flag[1]|flag[2] → reverse 后 6
+      constraints: [0xb0, 0, 0, 0, 0, 0],
+      levelIdc: 120,
+    });
+    const mp4 = buildHevcMp4({ entryType: "hvc1", hvcC, width: 1280, height: 720, timescale: 60_000 });
+    const result = await demuxRange(new MemoryRangeSource(mp4));
+    expect(result.codec).toBe("hvc1.1.6.L120.B0");
+    expect(result.codec).toMatch(/^hvc1\./);
+    expect(Array.from(result.description)).toEqual(Array.from(hvcC));
+    expect(result.width).toBe(1280);
+    expect(result.height).toBe(720);
+    expect(result.timescale).toBe(60_000);
+    expect(result.samples).toHaveLength(1);
+  });
+
+  it("hev1 入口：codec 前缀 hev1，description 为 hvcC payload", async () => {
+    const hvcC = buildHvcc({ profileIdc: 2, compatFlags: 0x60000000, levelIdc: 93 });
+    const mp4 = buildHevcMp4({ entryType: "hev1", hvcC });
+    const result = await demuxRange(new MemoryRangeSource(mp4));
+    expect(result.codec).toBe("hev1.2.6.L93.B0");
+    expect(Array.from(result.description)).toEqual(Array.from(hvcC));
+  });
+
+  it("buildHevcCodecString：compat bit reverse 与 constraint 尾零省略", () => {
+    // flag[1]|flag[2] 存于 bit30|bit29 → 0x60000000，reverse → 6
+    expect(buildHevcCodecString("hvc1", buildHvcc({ compatFlags: 0x60000000 })))
+      .toBe("hvc1.1.6.L120.B0");
+    // 仅 flag[0]（bit31）→ reverse → 1
+    expect(buildHevcCodecString("hvc1", buildHvcc({ compatFlags: 0x80000000, constraints: [0x90, 0, 0, 0, 0, 0] })))
+      .toBe("hvc1.1.1.L120.90");
+    // 仅 flag[31]（bit0）→ reverse → 0x80000000
+    expect(buildHevcCodecString("hvc1", buildHvcc({ compatFlags: 0x00000001, profileSpace: 0, constraints: [0, 0, 0, 0, 0, 0] })))
+      .toBe("hvc1.1.80000000.L120");
+    // profile_space=1 → 'A'；high tier → 'H'；中间约束字节保留、尾零省略
+    expect(buildHevcCodecString("hev1", buildHvcc({
+      profileSpace: 1,
+      tierFlag: 1,
+      profileIdc: 3,
+      compatFlags: 0x60000000,
+      constraints: [0xb0, 0x00, 0x80, 0, 0, 0],
+      levelIdc: 150,
+    }))).toBe("hev1.A3.6.H150.B0.00.80");
+  });
+
+  it("非法 hvcC / 缺 hvcC 拒绝", async () => {
+    const short = buildHevcMp4({ entryType: "hvc1", hvcC: buildHvcc({ truncateTo: 10 }) });
+    await expect(demuxRange(new MemoryRangeSource(short))).rejects.toMatchObject({ code: "BMFF_MALFORMED" });
+
+    const missing = buildHevcMp4({ entryType: "hvc1", hvcC: null });
+    await expect(demuxRange(new MemoryRangeSource(missing))).rejects.toMatchObject({ code: "BMFF_MALFORMED" });
   });
 });
