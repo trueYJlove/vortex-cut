@@ -223,4 +223,31 @@ class EncoderDetector:
             "available_encoders": available,
             "default_encoder": selected,
             "fallback_reason": fallback,
+            "decode_capability": await self.decode_capability(),
         }
+
+    async def decode_capability(self) -> dict[str, bool]:
+        """`ffmpeg -decoders` → 规范化 codec 可解性（H3 能力表数据源）。
+
+        不探测具体 profile/硬软——只回答「FFmpeg 旁路能否解该编码族」。
+        """
+        cached = self._cached_ok("decode", "__list__")
+        names = self._decode_names
+        if cached is None:
+            try:
+                result = await run_process(self.ffmpeg, ["-hide_banner", "-decoders"], 10)
+            except (OSError, TimeoutError):
+                return {key: False for key in ("avc", "hevc", "av1")}
+            if result.returncode != 0:
+                self._store("decode", "__list__", False)
+                return {key: False for key in ("avc", "hevc", "av1")}
+            names = set(result.stdout.split())
+            self._decode_names = names
+            self._store("decode", "__list__", True)
+        return {
+            "avc": bool({"h264", "avc"} & names),
+            "hevc": bool({"hevc", "h265"} & names),
+            "av1": bool({"av1", "libdav1d", "libaom-av1"} & names),
+        }
+
+    _decode_names: set[str] = set()

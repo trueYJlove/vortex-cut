@@ -123,9 +123,9 @@ PiP 自由定位、A1 音频混音、代理与权威预览、H.264/AAC 导出与
 | P24 | **recall_ndcg 真实预测**：窗口能量排序 + spoken 档出数 | `W0_4_RECALL_NDCG_2026-09-25.md` §2 | 工作包 | ✅ **2026-09-25 核销**——W0.4 四项可测指标全部出数 |
 | P25 | **L/J 词戳 ASR 优先**：faster-whisper 路径 + 能量回退 + word_source | `W0_4_ASR_WORDS_2026-09-25.md` §2 | 工作包 | ✅ **2026-09-25 核销**——产品 Whisper Tiny 自动发现；当前预测 `word_source=asr` |
 | P26 | **Desktop Wave 1 剪辑手法 UI**：三页壳 + 属性/素材入口 | `DESKTOP_WAVE1_EDITING_TOOLS_2026-09-25.md` §2 | 工作包 | ✅ **2026-09-25 核销**——设计稿确认后落地；Desktop 708 tests |
-| P27 | **MediaDecoder 双后端 + HEVC 合成预览**：能力表 + WebCodecs/FFmpeg 旁路 + 帧回传 F1 + 后端 B Core 端点契约 | `MEDIA_DECODER_HEVC_PLANNING_GATE_2026-09-26.md` §1 / §3 / §4（含 §7 评审修订） | 工作包 | ⏳ **H1+H2+H3 核心已落地**（H1 能力表/工厂/错误码链；H2 hev1/hvc1+hvcC；H3 `decode-frames`+NV12+A/B PTS 对拍——见三份 `MEDIA_DECODER_HEVC_H*_IMPLEMENTATION_2026-09-26.md`）；真机 HEVC 端到端、preview-session 接线、p95 门限待收口；执行序 H1→H5 |
+| P27 | **MediaDecoder 双后端 + HEVC 合成预览**：能力表 + WebCodecs/FFmpeg 旁路 + 帧回传 F1 + 后端 B Core 端点契约 | `MEDIA_DECODER_HEVC_PLANNING_GATE_2026-09-26.md` §1 / §3 / §4（含 §7 评审修订） | 工作包 | ⏳ **H1–H3 核心 + session 接线已落地**（四份 `MEDIA_DECODER_HEVC_H*_IMPLEMENTATION/…CLOSEOUT_2026-09-26.md`）；**真机 HEVC e2e 与 p95 门限定档待收口（P29）**；执行序 H1→H5 |
 | P28 | 能力表探测 + 实配失败回写降级（防每素材反复试错）；软解为合法 A 路径 | `MEDIA_DECODER_HEVC_PLANNING_GATE_2026-09-26.md` §5 风险表 | **风险对策** | ⏳ 未落地 |
-| P29 | F1 帧回传带宽/延迟达门限；A/B 同素材同帧号取帧一致（VFR 对拍） | 同上 §5 风险表 | **风险对策** | ⏳ 未落地 |
+| P29 | F1 帧回传带宽/延迟达门限；A/B 同素材同帧号取帧一致（VFR 对拍） | 同上 §5 风险表 | **风险对策** | ⏳ A/B PTS 对拍已过（`test_a_b_same_frame_number_same_pts`）；p95 小夹具初值 2s 过门，**真机 1080p/HEVC 门限定档待收口** |
 | P30 | 后端 B Core 端点复用票据鉴权 + 路径不下发渲染进程 + 窗口上限；能力表按 FFmpeg build 指纹失效重探 | 同上 §5 风险表 | **风险对策** | ⏳ 未落地 |
 | P31 | 手写 demux 扩 hev1 仅覆盖主流 MP4，异常容器强制 B 后端；色彩钉死 BT.709 | 同上 §5 风险表 | **风险对策** | ⏳ 未落地 |
 | P32 | 代理与能力表解耦：代理只加速，能力表不读代理状态（H5 收口） | 同上 §5 风险表 | **风险对策** | ⏳ 未落地 |

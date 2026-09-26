@@ -190,12 +190,107 @@ export class CompositorWorkerClient {
     });
   }
 
+  /** F1 平面载荷上传（NV12 y/uv transfer；与 VideoFrame upload 同 ack 语义）。 */
+  uploadPlanes(inputId: string, slot: number, srcN: number, planes: {
+    y: ArrayBuffer; uv: ArrayBuffer; width: number; height: number; strideY: number; strideUv: number;
+  }): Promise<void> {
+    if (this.disposed) return Promise.reject(new Error("compositor worker disposed"));
+    const seq = this.nextSeq++;
+    const request: WorkerRequest = {
+      type: "uploadPlanes", inputId, slot, srcN, seq,
+      y: planes.y, uv: planes.uv, width: planes.width, height: planes.height,
+      strideY: planes.strideY, strideUv: planes.strideUv,
+    };
+    return new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        if (this.pending.delete(seq)) reject(new Error(`compositor uploadPlanes timeout (seq ${seq})`));
+      }, CompositorWorkerClient.UPLOAD_TIMEOUT_MS);
+      this.pending.set(seq, { resolve: (value: never) => { clearTimeout(timeout); resolve(value); }, reject });
+      try { this.worker.postMessage(request, [planes.y, planes.uv]); }
+      catch (error) { this.pending.delete(seq); clearTimeout(timeout); reject(error); }
+    });
+  }
+
+  uploadShadowPlanes(inputId: string, srcN: number, planes: {
+    y: ArrayBuffer; uv: ArrayBuffer; width: number; height: number; strideY: number; strideUv: number;
+  }): Promise<void> {
+    if (this.disposed) return Promise.reject(new Error("compositor worker disposed"));
+    const seq = this.nextSeq++;
+    const request: WorkerRequest = {
+      type: "uploadShadowPlanes", inputId, srcN, seq,
+      y: planes.y, uv: planes.uv, width: planes.width, height: planes.height,
+      strideY: planes.strideY, strideUv: planes.strideUv,
+    };
+    return new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        if (this.pending.delete(seq)) reject(new Error(`compositor uploadShadowPlanes timeout (seq ${seq})`));
+      }, CompositorWorkerClient.UPLOAD_TIMEOUT_MS);
+      this.pending.set(seq, { resolve: (value: never) => { clearTimeout(timeout); resolve(value); }, reject });
+      try { this.worker.postMessage(request, [planes.y, planes.uv]); }
+      catch (error) { this.pending.delete(seq); clearTimeout(timeout); reject(error); }
+    });
+  }
+
   /** 静图一次上传（ImageBitmap transfer；worker 侧 RGBA 纹理全程复用）。 */
   uploadImage(inputId: string, bitmap: ImageBitmap): void {
     if (this.disposed) { bitmap.close(); return; }
     const request: WorkerRequest = { type: "uploadImage", inputId, bitmap };
     try { this.worker.postMessage(request, [bitmap]); }
     catch (error) { bitmap.close(); throw error; }
+  }
+
+  /** DecodedFrame 统一入口：video_frame / plane_payload 均可。 */
+  async uploadDecoded(inputId: string, slot: number, srcN: number, frame: import("./media-decoder.js").DecodedFrame): Promise<void> {
+    try {
+      if (frame.kind === "video_frame") {
+        await this.upload(inputId, slot, srcN, frame.frame);
+        return;
+      }
+      const yBuf = frame.planes.y.buffer instanceof ArrayBuffer
+        ? (frame.planes.y.byteOffset === 0 && frame.planes.y.byteLength === frame.planes.y.buffer.byteLength
+          ? frame.planes.y.buffer
+          : frame.planes.y.slice().buffer)
+        : frame.planes.y.slice().buffer;
+      const uvView = frame.planes.uv ?? frame.planes.u;
+      if (!uvView) throw new Error("plane_payload missing uv");
+      const uvBuf = uvView.buffer instanceof ArrayBuffer
+        ? (uvView.byteOffset === 0 && uvView.byteLength === uvView.buffer.byteLength
+          ? uvView.buffer
+          : uvView.slice().buffer)
+        : uvView.slice().buffer;
+      await this.uploadPlanes(inputId, slot, srcN, {
+        y: yBuf as ArrayBuffer,
+        uv: uvBuf as ArrayBuffer,
+        width: frame.width,
+        height: frame.height,
+        strideY: frame.strideY ?? frame.width,
+        strideUv: frame.strideUv ?? frame.width,
+      });
+    } finally {
+      frame.release();
+    }
+  }
+
+  async uploadShadowDecoded(inputId: string, srcN: number, frame: import("./media-decoder.js").DecodedFrame): Promise<void> {
+    try {
+      if (frame.kind === "video_frame") {
+        await this.uploadShadow(inputId, srcN, frame.frame);
+        return;
+      }
+      const yBuf = frame.planes.y.slice().buffer as ArrayBuffer;
+      const uvView = frame.planes.uv ?? frame.planes.u;
+      if (!uvView) throw new Error("plane_payload missing uv");
+      await this.uploadShadowPlanes(inputId, srcN, {
+        y: yBuf,
+        uv: uvView.slice().buffer as ArrayBuffer,
+        width: frame.width,
+        height: frame.height,
+        strideY: frame.strideY ?? frame.width,
+        strideUv: frame.strideUv ?? frame.width,
+      });
+    } finally {
+      frame.release();
+    }
   }
 
   /** B13：注册/换代表输入（generation 递增；环池按 ringDepth 重建 + 字节

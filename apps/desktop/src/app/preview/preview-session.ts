@@ -25,7 +25,9 @@ import { PREVIEW_IR_V2_MAX_WINDOW_FRAMES, PCM_CHUNK_SAMPLE_RATE } from "@aivideo
 import { BUDGET_TABLES, ringDepthFor, predictResidencyBytes, windowSourceBudget } from "./resource-budget.js";
 import { InputPool } from "./input-pool.js";
 import { editorPerf, allocatePerfSession } from "./perf-metrics.js";
-import { DecodeWorker, type DecodeResidencyInfo } from "./decode-worker.js";
+import type { DecodeResidencyInfo } from "./decode-worker.js";
+import type { DecodedFrame, MediaDecoder } from "./media-decoder.js";
+import { MediaDecoderFactoryImpl, probeDecodeCapability } from "./decode-capability.js";
 import { VARISPEED_WORKLET_NAME, createVarispeedWorkletUrl } from "./varispeed-worklet.js";
 
 /** 片段音频配置（编辑态：App 从时间线文档透传）。 */
@@ -85,7 +87,8 @@ interface RingSlot { srcN: number }
 
 interface InputRig {
   kind: "video" | "image";
-  worker: DecodeWorker | null;
+  /** H1/H3：MediaDecoder（webcodecs=DecodeWorker 包装；ffmpeg=decodeFrames 回调）。 */
+  worker: MediaDecoder | null;
   /** 播放/seek 共用的环形簿记：槽位按 ringSeq 轮转，srcN=-1 表示空。 */
   ring: Array<RingSlot | null>;
   ringSeq: number;
@@ -423,10 +426,31 @@ export class PreviewSession {
         };
         // B13：Range 字节缓存预算随档位（64/128/256MiB）
         const rangeCacheBytes = (resourceTier ? BUDGET_TABLES[resourceTier].rangeCacheMiB : 128) * 1024 * 1024;
-        const worker = await DecodeWorker.create(
-          ticket, signal, refreshTicket(input.asset_id), rangeCacheBytes);
-        if (session.disposed || signal?.aborted) { worker.terminate(); throw new DOMException("Session disposed", "AbortError"); }
-        rig.worker = worker;
+        // H1/H3：MediaDecoderFactory 选 A/B；codec=auto（demux 发现）。
+        // 后端 B 的 decodeFrames 经 Main→Core（路径不进 Renderer）。
+        const factory = new MediaDecoderFactoryImpl(await probeDecodeCapability());
+        const desktopApi = typeof window !== "undefined"
+          ? (window as unknown as { desktop?: { decodeFrames?: (input: { project_id: string; asset_id: string; frame_numbers: number[]; fps: number }) => Promise<ArrayBuffer> } }).desktop
+          : undefined;
+        const decodeFrames = pcmProjectId && desktopApi?.decodeFrames
+          ? (req: { frameNumbers: number[]; fps: number }) => desktopApi.decodeFrames!({
+              project_id: pcmProjectId,
+              asset_id: input.asset_id,
+              frame_numbers: req.frameNumbers,
+              fps: req.fps,
+            })
+          : undefined;
+        const decoder = await factory.create({
+          mediaUrl: ticket,
+          codec: "auto",
+          width: input.geometry.width,
+          height: input.geometry.height,
+          cacheCapBytes: rangeCacheBytes,
+          refreshTicket: refreshTicket(input.asset_id),
+          decodeFrames,
+        }, signal);
+        if (session.disposed || signal?.aborted) { decoder.dispose(); throw new DOMException("Session disposed", "AbortError"); }
+        rig.worker = decoder;
       }
       session.rigs.set(input.input_id, rig);
     }
@@ -765,7 +789,7 @@ export class PreviewSession {
         if (!entry) continue;
         pool.mark(inputId, "evicting");
         const rig = this.rigs.get(inputId);
-        void rig?.worker?.terminate(); // 解码器保温让位（重入时 pump 冷启重建）
+        void rig?.worker?.dispose(); // 解码器保温让位（重入时 pump 冷启重建）
         void this.compositor?.releaseInput(inputId, entry.generation)
           .then(() => pool.release(inputId, entry.generation))
           .catch(() => pool.mark(inputId, "failed"));
@@ -850,7 +874,7 @@ export class PreviewSession {
       const perfRequest = ++this.perfRequest;
       const perfInput = editorPerf.enabled ? this.ir.inputs.findIndex(item => item.input_id === inputId) : -1;
       this.decodeInFlight += 1;
-      let decoded: VideoFrame;
+      let decoded: DecodedFrame;
       try {
         decoded = await rig.worker!.decode(srcN, this.ir.canvas.fps);
         this.decodeTimes.push(performance.now() - decodeStart);
@@ -859,9 +883,9 @@ export class PreviewSession {
       } finally {
         this.decodeInFlight -= 1;
       }
-      if (epoch !== this.seekEpoch) { this.skippedUploads += 1; decoded.close(); return; }
+      if (epoch !== this.seekEpoch) { this.skippedUploads += 1; decoded.release(); return; }
       const uploadStart = performance.now();
-      await this.compositor!.upload(inputId, slotIndex, srcN, decoded);
+      await this.compositor!.uploadDecoded(inputId, slotIndex, srcN, decoded);
       if (this.disposed || epoch !== this.seekEpoch) return;
       this.uploadTimes.push(performance.now() - uploadStart);
       editorPerf.record("upload", performance.now() - uploadStart, this.perfId, perfRequest, epoch, srcN, perfInput);
@@ -890,8 +914,8 @@ export class PreviewSession {
         this.decodeTimes.push(performance.now() - decodeStart);
         editorPerf.record("decode", performance.now() - decodeStart, this.perfId, perfRequest, epoch, srcN, perfInput);
         if (this.decodeTimes.length > 600) this.decodeTimes.splice(0, this.decodeTimes.length - 600);
-        if (epoch !== this.seekEpoch) { decoded.close(); return; }
-        await this.compositor!.uploadShadow(inputId, srcN, decoded);
+        if (epoch !== this.seekEpoch) { decoded.release(); return; }
+        await this.compositor!.uploadShadowDecoded(inputId, srcN, decoded);
         if (this.disposed || epoch !== this.seekEpoch) return;
         rig.shadowUploaded = srcN;
         rig.fed = srcN;
@@ -1563,7 +1587,7 @@ export class PreviewSession {
       if (editorPerf.enabled && now - this.lastResidencySampleAt >= 1000) {
         this.lastResidencySampleAt = now;
         const decodeQueries = [...this.rigs.values()]
-          .map(rig => rig.worker?.queryResidency().catch(() => null) ?? Promise.resolve(null));
+          .map(rig => rig.worker?.residency().catch(() => null) ?? Promise.resolve(null));
         const compositorQuery = (this.compositor?.queryResidency().catch(() => null) ?? Promise.resolve(null)) as Promise<FrameResidency | null>;
         void Promise.all([...decodeQueries, compositorQuery]).then(results => {
           if (this.disposed || !editorPerf.enabled) return;
@@ -1665,7 +1689,7 @@ export class PreviewSession {
     this.pcmChunkCache = null;
     if (this.recomposeRaf) cancelAnimationFrame(this.recomposeRaf);
     this.recomposeRaf = 0;
-    for (const rig of [...this.rigs.values()].reverse()) rig.worker?.terminate();
+    for (const rig of [...this.rigs.values()].reverse()) rig.worker?.dispose();
     this.rigs.clear();
     this.compositor?.terminate();
     this.compositor = null;

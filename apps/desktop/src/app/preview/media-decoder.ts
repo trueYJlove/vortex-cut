@@ -7,7 +7,7 @@
  * 决定是否 close()。
  */
 import type { DecodeBackendId, WebCodecsDecodeMode } from "@aivideo/contracts";
-import type { DecodeResidencyInfo } from "./decode-worker.js";
+import type { DecodeFrameInfo, DecodeResidencyInfo } from "./decode-worker.js";
 
 export interface VideoFrameDecodedFrame {
   kind: "video_frame";
@@ -26,6 +26,9 @@ export interface PlanePayloadDecodedFrame {
   height: number;
   /** NV12（y+uv）或 I420（y+u+v）；transfer 语义与 VideoFrame 零拷贝路径对齐 */
   planes: { y: Uint8Array; uv?: Uint8Array; u?: Uint8Array; v?: Uint8Array };
+  /** 行距（缺省 = width，紧致排布）；uv 行距 NV12 下同 width */
+  strideY?: number;
+  strideUv?: number;
   /** 缺省 BT.709，与冻结方案一致 */
   colorSpace?: "bt709";
   /** 上传完成后释放（detach 平面缓冲；与 video_frame 分支语义对齐）。 */
@@ -41,6 +44,8 @@ export interface MediaDecoder {
   readonly height: number;
   /** 实际解码模式（诊断呈现用，不参与后端决策）；对齐现 worker 值。 */
   readonly hardware: WebCodecsDecodeMode | null;
+  /** 诊断：最近一次解码回执（webcodecs 路径有值；ffmpeg 路径可为 null）。 */
+  readonly lastFrameInfo?: DecodeFrameInfo | null;
   /**
    * 随机访问：frameN 为合成时间轴帧号。
    * 取样定位 PTS 最近邻 ±33_334μs；输出匹配半帧 ±16_667μs（见 decode-worker.worker.ts）。

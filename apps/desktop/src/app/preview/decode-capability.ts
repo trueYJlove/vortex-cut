@@ -101,6 +101,7 @@ class WebCodecsMediaDecoder implements MediaDecoder {
   get width(): number { return this.worker.width; }
   get height(): number { return this.worker.height; }
   get hardware(): WebCodecsDecodeMode | null { return mapHardware(this.worker.hardware); }
+  get lastFrameInfo() { return this.worker.lastFrameInfo; }
 
   async decode(frameN: number, fps: number, signal?: AbortSignal): Promise<DecodedFrame> {
     if (this.disposed) throw new Error("media decoder disposed");
@@ -131,6 +132,27 @@ export class MediaDecoderFactoryImpl implements MediaDecoderFactory {
   constructor(private readonly table: DecodeCapabilityTable) {}
 
   async create(input: MediaDecoderFactoryInput, signal?: AbortSignal): Promise<MediaDecoder> {
+    // codec="auto"：调用方未知编码（demux 会发现）——依次尝试 A/B。
+    // 未识别的具体 codec 串仍明确拒绝（禁止静默当 auto）。
+    if (input.codec === "auto") {
+      let firstError: unknown = null;
+      let lastError: unknown = null;
+      for (const backend of ["webcodecs", "ffmpeg"] as const) {
+        try {
+          return await this.createBackend(backend, input, signal);
+        } catch (error) {
+          if (firstError === null) firstError = error;
+          lastError = error;
+        }
+      }
+      // 优先抛首个后端错误（webcodecs/demux 诊断更有用）；若 ffmpeg 因未注入
+      // decodeFrames 而失败，勿用它掩盖 webcodecs 的真实原因。
+      if (firstError) throw firstError;
+      if (lastError) throw lastError;
+      throw Object.assign(new Error("BMFF_CODEC_UNSUPPORTED: 无可用解码后端"), {
+        code: "BMFF_CODEC_UNSUPPORTED",
+      });
+    }
     const row = selectCapabilityRow(this.table, input.codec);
     if (!row) {
       throw Object.assign(new Error(`BMFF_CODEC_UNSUPPORTED: 无法识别的编码 ${input.codec}`), {
@@ -247,6 +269,9 @@ class FfmpegMediaDecoder implements MediaDecoder {
     const frames = unpackNv12Response(payload);
     const hit = frames.find(item => item.frameN === frameN) ?? frames[0];
     if (!hit) throw new Error(`DECODE_FRAME_NOT_FOUND: ${frameN}`);
+    // 独立拷贝：subarray 共享底层缓冲，transfer 会带走整块
+    const y = hit.y.slice();
+    const uv = hit.uv.slice();
     let released = false;
     return {
       kind: "plane_payload",
@@ -254,12 +279,13 @@ class FfmpegMediaDecoder implements MediaDecoder {
       frameN: hit.frameN,
       width: hit.width,
       height: hit.height,
-      planes: { y: hit.y, uv: hit.uv },
+      planes: { y, uv },
+      strideY: hit.strideY,
+      strideUv: hit.strideUv,
       colorSpace: "bt709",
       release: () => {
         if (released) return;
         released = true;
-        // subarray 不持有可 detach 的独立缓冲；置空引用即可（GC 回收）
       },
     };
   }

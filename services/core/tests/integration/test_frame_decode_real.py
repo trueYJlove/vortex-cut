@@ -71,3 +71,22 @@ async def test_pack_response_and_window_limit() -> None:
             frame_numbers=list(range(33)), fps=30.0,
         )
     assert exc.value.code == "DECODE_WINDOW_TOO_LARGE"
+
+
+@pytest.mark.asyncio
+async def test_p95_latency_gate_small_fixture() -> None:
+    """p95 门限（P29）：短命 ffmpeg 单帧窗。小夹具宽限 2s；真机 1080p/HEVC
+    收口时按 scrub 场景再定档（见实施记录）。"""
+    import time
+
+    samples: list[float] = []
+    for _ in range(5):
+        t0 = time.perf_counter()
+        await decode_frames(
+            FFMPEG, FFPROBE, FIXTURE, width=320, height=180,
+            frame_numbers=[0, 1], fps=30.0,
+        )
+        samples.append((time.perf_counter() - t0) * 1000)
+    samples.sort()
+    p95 = samples[int(len(samples) * 0.95) - 1] if len(samples) > 1 else samples[0]
+    assert p95 < 2000, f"p95={p95:.0f}ms 超门限 2000ms（samples={samples}）"

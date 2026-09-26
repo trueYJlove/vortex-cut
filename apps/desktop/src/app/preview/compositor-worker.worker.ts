@@ -175,6 +175,8 @@ export type WorkerRequest =
   | { type: "releaseInput"; inputId: string; generation: number; seq: number }
   | { type: "upload"; inputId: string; slot: number; srcN: number; frame: VideoFrame; seq: number }
   | { type: "uploadShadow"; inputId: string; srcN: number; frame: VideoFrame; seq: number }
+  | { type: "uploadPlanes"; inputId: string; slot: number; srcN: number; y: ArrayBuffer; uv: ArrayBuffer; width: number; height: number; strideY: number; strideUv: number; seq: number }
+  | { type: "uploadShadowPlanes"; inputId: string; srcN: number; y: ArrayBuffer; uv: ArrayBuffer; width: number; height: number; strideY: number; strideUv: number; seq: number }
   | { type: "uploadImage"; inputId: string; bitmap: ImageBitmap }
   | { type: "compose"; payload: ComposePayload; seq?: number }
   | { type: "resize"; backingWidth: number; backingHeight: number; fitX: number; fitY: number; fitScale: number }
@@ -512,6 +514,49 @@ async function uploadToTextures(frame: VideoFrame, targetY: WebGLTexture, target
       throw new Error(`[${step}] ${error instanceof Error ? error.message : String(error)}`);
     }
     throw error;
+  }
+}
+
+/** F1 平面载荷 → 槽位纹理（NV12 y/uv；与 uploadToTextures 的 NV12 分支同一入口）。 */
+function uploadPlanesToTextures(
+  yBytes: ArrayBuffer, uvBytes: ArrayBuffer,
+  width: number, height: number, strideY: number, strideUv: number,
+  targetY: WebGLTexture, targetUV: WebGLTexture,
+): { copyToMs: number; texMs: number } {
+  const gl = state.gl!;
+  const start = performance.now();
+  const cw = width >> 1;
+  const ch = height >> 1;
+  let step = "planes";
+  try {
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    const checkErr = (where: string): void => {
+      const e = gl.getError();
+      if (e !== gl.NO_ERROR) throw new Error(`GL 0x${e.toString(16)} @${where}`);
+    };
+    step = "texY";
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, targetY);
+    gl.pixelStorei(gl.UNPACK_ROW_LENGTH, strideY);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, width, height, 0, gl.RED, gl.UNSIGNED_BYTE,
+      new Uint8Array(yBytes, 0, strideY * (height - 1) + width));
+    checkErr("texY_planes");
+    step = "texUV";
+    gl.bindTexture(gl.TEXTURE_2D, targetUV);
+    gl.pixelStorei(gl.UNPACK_ROW_LENGTH, strideUv >> 1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG8, cw, ch, 0, gl.RG, gl.UNSIGNED_BYTE,
+      new Uint8Array(uvBytes, 0, strideUv * (ch - 1) + cw * 2));
+    checkErr("texUV_planes");
+    gl.pixelStorei(gl.UNPACK_ROW_LENGTH, 0);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    const texMs = performance.now() - start;
+    return { copyToMs: 0, texMs: Math.round(texMs * 1000) / 1000 };
+  } catch (error) {
+    gl.pixelStorei(gl.UNPACK_ROW_LENGTH, 0);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    throw new Error(`[${step}] ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -927,6 +972,44 @@ self.addEventListener("message", async (event: MessageEvent<WorkerRequest>) => {
         state.uploadsErr += 1;
         post({ type: "uploadError", seq: message.seq, message: error instanceof Error ? error.message : String(error), residency: residencySnapshot() });
       });
+      return;
+    }
+    if (message.type === "uploadPlanes") {
+      if (!generationMatches(message.inputId)) {
+        state.framesIn += 1; state.framesClosed += 1; state.closedOnErr += 1; state.uploadsErr += 1;
+        post({ type: "uploadError", seq: message.seq, message: "input generation stale", residency: residencySnapshot() });
+        return;
+      }
+      const slot = ringSlot(message.inputId, message.slot)!;
+      const start = performance.now();
+      state.framesIn += 1;
+      try {
+        const split = uploadPlanesToTextures(message.y, message.uv, message.width, message.height, message.strideY, message.strideUv, slot.y, slot.uv);
+        state.framesClosed += 1; state.uploadsOk += 1;
+        post({ type: "uploaded", seq: message.seq, ms: performance.now() - start, copyToMs: split.copyToMs, texMs: split.texMs, residency: residencySnapshot() });
+      } catch (error) {
+        state.uploadsErr += 1;
+        post({ type: "uploadError", seq: message.seq, message: error instanceof Error ? error.message : String(error), residency: residencySnapshot() });
+      }
+      return;
+    }
+    if (message.type === "uploadShadowPlanes") {
+      if (!generationMatches(message.inputId)) {
+        state.framesIn += 1; state.framesClosed += 1; state.closedOnErr += 1; state.uploadsErr += 1;
+        post({ type: "uploadError", seq: message.seq, message: "input generation stale", residency: residencySnapshot() });
+        return;
+      }
+      const pair = shadowPair(message.inputId);
+      const start = performance.now();
+      state.framesIn += 1;
+      try {
+        uploadPlanesToTextures(message.y, message.uv, message.width, message.height, message.strideY, message.strideUv, pair.y, pair.uv);
+        state.framesClosed += 1; state.uploadsOk += 1;
+        post({ type: "uploadedShadow", seq: message.seq, ms: performance.now() - start, residency: residencySnapshot() });
+      } catch (error) {
+        state.uploadsErr += 1;
+        post({ type: "uploadError", seq: message.seq, message: error instanceof Error ? error.message : String(error), residency: residencySnapshot() });
+      }
       return;
     }
     if (message.type === "uploadImage") { uploadImage(message.inputId, message.bitmap); return; }
