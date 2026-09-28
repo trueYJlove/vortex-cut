@@ -129,7 +129,7 @@ PiP 自由定位、A1 音频混音、代理与权威预览、H.264/AAC 导出与
 | P30 | 后端 B Core 端点复用票据鉴权 + 路径不下发渲染进程 + 窗口上限；能力表按 FFmpeg build 指纹失效重探 | 同上 §5 风险表 | **风险对策** | ⏳ 未落地 |
 | P31 | 手写 demux 扩 hev1 仅覆盖主流 MP4，异常容器强制 B 后端；色彩钉死 BT.709 | 同上 §5 风险表 | **风险对策** | ⏳ 未落地 |
 | P32 | 代理与能力表解耦：代理只加速，能力表不读代理状态（H5 收口） | 同上 §5 风险表 | **风险对策** | ⏳ 未落地 |
-| P33 | **预览播放流畅度收敛**：残余丢帧 ≤0.5% 全片帧数（3 轮稳定）+ decode p95 ≤20ms / p50 ≤12ms + compose interval p95 ≤40ms + 看门狗/降级保持 0；测量载体 m3p5 探针 + 分段计时插桩（VITE_AIVS_DECODE_TIMING=1）+ CDP trace；硬约束：在途未关闭 VideoFrame 总量不超背压阈值 ~13 帧、解码与上传不真解耦（除非带在途帧预算证据） | `PREVIEW_SMOOTHNESS_PLANNING_GATE_2026-09-28.md` §2 / §3 / §5 | 工作包 | ⏳ 规划门已立；基线测量（W2）进行中 |
+| P33 | **预览播放流畅度收敛**：残余丢帧 ≤0.5% 全片帧数（3 轮稳定）+ decode p95 ≤20ms / p50 ≤12ms + compose interval p95 ≤40ms + 看门狗/降级保持 0；测量载体 m3p5 探针 + 分段计时插桩（VITE_AIVS_DECODE_TIMING=1）+ CDP trace；硬约束：在途未关闭 VideoFrame 总量不超背压阈值 ~13 帧、解码与上传不真解耦（除非带在途帧预算证据） | `PREVIEW_SMOOTHNESS_PLANNING_GATE_2026-09-28.md` §2 / §3 / §5 | 工作包 | ⏳ **实现与真机 3 轮复测达成**（skip2-r1..r3：丢帧 0/1800、decode p95 1.6-2.2ms、compose p95 33.6ms；实施记录 `PREVIEW_SMOOTHNESS_IMPLEMENTATION_2026-09-29.md` §3 验收对照表）；⏳ 剩：插桩零开销对跑（L1）+ 真机 App 内 EOF 降级验证（L2）+ **用户复测确认** |
 
 ---
 
