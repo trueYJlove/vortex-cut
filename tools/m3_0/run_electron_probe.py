@@ -68,8 +68,10 @@ def main() -> None:
         env["AIVS_M3_PROBE_ASSETS"] = str(calibration_manifest.resolve())
     print(f"[run] probe={args.probe} evidence={args.evidence}")
     # P33 多轮复测：外部调用方负责用不同 evidence 子目录区分轮次
-    # （如 preview-smoothness-baseline/r1..r3）；本脚本只透传轮次号供结果标注。
-    env.setdefault("AIVS_M3_PROBE_ROUND", "")
+    # （如 preview-smoothness-baseline/r1..r3）；分段计时开关经主进程
+    # probeLoadQuery 注入 URL（VITE_* env 直通渲染侧不可靠，实测 None）。
+    if os.environ.get("VITE_AIVS_DECODE_TIMING") == "1":
+        env["AIVS_M3_PROBE_DECODE_TIMING"] = "1"
     result = subprocess.run(["node", "scripts/dev.mjs"], cwd=str(DESKTOP), env=env)
     sys.exit(result.returncode)
 

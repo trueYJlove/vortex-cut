@@ -102,6 +102,7 @@ class WebCodecsMediaDecoder implements MediaDecoder {
   get height(): number { return this.worker.height; }
   get hardware(): WebCodecsDecodeMode | null { return mapHardware(this.worker.hardware); }
   get lastFrameInfo() { return this.worker.lastFrameInfo; }
+  get timingSamples() { return this.worker.timingSamples; }
   get hasBFrames(): boolean { return this.worker.hasBFrames; }
 
   async decode(frameN: number, fps: number, signal?: AbortSignal): Promise<DecodedFrame> {

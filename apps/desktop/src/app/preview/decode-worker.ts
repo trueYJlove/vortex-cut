@@ -164,8 +164,11 @@ export class DecodeWorker {
     // B13-R 判别诊断开关：强制软件解码（perf 诊断构建环境变量；缺省 undefined）
     let forceSwDecode: boolean | undefined;
     try { forceSwDecode = import.meta.env.VITE_AIVS_FORCE_SW_DECODE === "1" || undefined; } catch { /* 无 env */ }
-    // P33 分段计时开关（VITE_AIVS_DECODE_TIMING=1；默认关，生产零开销）
-    try { instance.timingOn = import.meta.env.VITE_AIVS_DECODE_TIMING === "1"; } catch { /* 无 env */ }
+    // P33 分段计时开关：优先 URL 参数（探针链路稳定），其次 VITE_ env。
+    try {
+      instance.timingOn = new URLSearchParams(window.location.search).get("decodeTiming") === "1"
+        || import.meta.env.VITE_AIVS_DECODE_TIMING === "1";
+    } catch { /* 无 window/env */ }
     try {
       const data = await workerReady<DecodeWorkerMessage>(instance.worker, data => {
         if (data.type === "error") throw new Error(data.message ?? "worker init error");

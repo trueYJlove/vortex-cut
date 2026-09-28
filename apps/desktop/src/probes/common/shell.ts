@@ -108,6 +108,7 @@ export async function collectEnvironment(): Promise<Record<string, unknown>> {
     user_agent: navigator.userAgent,
     device_pixel_ratio: window.devicePixelRatio,
     hardware_concurrency: navigator.hardwareConcurrency,
+    location_search: window.location.search, // P33：取证 URL 注入参数（decodeTiming 等）
     ...gpuInfo,
     ...envInfo,
   };

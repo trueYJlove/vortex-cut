@@ -170,6 +170,10 @@ export async function runProbe(): Promise<void> {
     // 新会话对照：同一画布重建 PreviewSession（全新解码器/环形池）后直接 seek
     // 片尾——区分"解码器历史状态依赖"与"该流本身在此解码路径必然花屏"。
     const audioDebugSnapshot = session.audioDebug(); // dispose 清空 audioRigs，先取证
+    // P33：分段表必须在 dispose 前**快照**——dispose 清空 rigs（worker 连同
+    // timingSamples），事后 finalMetrics 的 decode_seg 恒为 None（timing-r1..r4
+    // 实测踩坑）。播放段结束、postmortem 后的分段覆盖到此刻为止。
+    const decodeSegSnapshot = session.metrics().decode_seg;
     session.dispose();
     const freshSession = await PreviewSession.create(container, ir, tickets);
     await freshSession.seekToFrame(ir.canvas.duration_frames - 1);
@@ -201,8 +205,8 @@ export async function runProbe(): Promise<void> {
       dropped_frames: finalMetrics.dropped_frames,
       task_ms: { p50: finalMetrics.task_ms_p50, p95: finalMetrics.task_ms_p95 },
       decode_ms: { p50: finalMetrics.decode_ms_p50, p95: finalMetrics.decode_ms_p95 },
-      // P33 解码 RTT 分段表（feed/output/residual；VITE_AIVS_DECODE_TIMING=1 出数）
-      decode_seg: finalMetrics.decode_seg,
+      // P33 解码 RTT 分段表（dispose 前快照；URL 参数 decodeTiming=1 出数）
+      decode_seg: decodeSegSnapshot ?? finalMetrics.decode_seg,
       compose_interval_ms: { p50: pick(0.5), p95: pick(0.95), max: sorted.length ? sorted[sorted.length - 1]! : 0 },
       last_error: finalMetrics.last_error,
       replay_after_end_ok: replayOk,

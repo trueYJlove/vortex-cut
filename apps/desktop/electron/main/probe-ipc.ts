@@ -32,7 +32,10 @@ export function probeLoadQuery(): string {
   const name = probeActive();
   if (!name) return "";
   const mipmap = process.env.AIVS_M3_PROBE_MIPMAP;
-  return `?probe=${name}${mipmap ? `&mipmap=${mipmap}` : ""}`;
+  // P33：分段计时走 URL 参数（VITE_* env 在 electron-vite dev 的 SSR/渲染两侧
+  // 替换不稳定，实测 timing-r1..r3 decode_seg=None——主进程 env 直通最可靠）。
+  const timing = process.env.AIVS_M3_PROBE_DECODE_TIMING;
+  return `?probe=${name}${mipmap ? `&mipmap=${mipmap}` : ""}${timing ? `&decodeTiming=${timing}` : ""}`;
 }
 
 export interface ProbeIpcHandle {
