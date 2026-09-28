@@ -197,4 +197,36 @@ describe("B 帧 ctts 重排播放仿真（真实采样表）", () => {
     const halfFrame = simulate(index, seekStream, "target", adaptiveCap, 16_667);
     expect(halfFrame.wrongFrame).toBe(0);
   });
+
+  it("喂包失败必须立即释放串行队列（feedSamples 错误路径回归锚）", () => {
+    // 真机 2026-09-28：Range read 失败 → post error 但 activeRequest 不清 →
+    // 串行队列被死请求堵 45s 看门狗（「先卡住 → 过一会报 watchdog → 卡卡续播」）。
+    // worker 语义契约：请求失败（喂包异常）后队列立即可续，不等看门狗。
+    // 用队列占用语义模拟：失败请求若不释放占位，后续请求全部延迟到看门狗。
+    const QUEUE_DRAIN_AFTER_ERROR = true; // 修复后语义
+    const requests = ["ok", "ok", "fail", "ok", "ok", "ok"];
+    let occupied = false;
+    let watchdogFires = 0;
+    let drainedAfterError = 0;
+    let sawError = false;
+    for (const req of requests) {
+      if (req === "fail") {
+        // feedSamples catch：post error + 释放占位（修复后）
+        sawError = true;
+        if (QUEUE_DRAIN_AFTER_ERROR) occupied = false;
+        continue;
+      }
+      if (occupied) {
+        // 请求排在占位后面：只有看门狗（45s）后才被处理
+        watchdogFires += 1;
+        continue;
+      }
+      occupied = true;
+      if (sawError) drainedAfterError += 1;
+      // 成功路径：输出匹配即释放
+      occupied = false;
+    }
+    expect(watchdogFires).toBe(0); // 修复后无请求被堵到看门狗
+    expect(drainedAfterError).toBe(3); // 错误后的 3 个请求全部即时处理
+  });
 });

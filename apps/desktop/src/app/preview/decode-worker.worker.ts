@@ -117,7 +117,10 @@ function armActiveRequestTimer(request: DecodeRequest): void {
     if (activeRequest?.id !== request.id) return;
     activeRequest = null;
     clearActiveRequestTimer();
-    post({ type: "error", id: request.id, message: `decode worker watchdog: frame ${request.frameN} 无匹配输出（pts=${request.samplePtsUs}）` });
+    // 附带 worker 状态快照：真机复现「无匹配输出」时直接看到 stash/游标/队列，
+    // 免去二次复现定位（2026-09-28 真机 frame4 挂起即靠该快照核验路径）。
+    const snapshot = `stash=[${[...readyByPts.keys()].map(k => Math.round(k)).join(",")}] lastFed=${lastFedSample} fedIndex=${fedIndex} queue=${decodeQueue.length}`;
+    post({ type: "error", id: request.id, message: `decode worker watchdog: frame ${request.frameN} 无匹配输出（pts=${request.samplePtsUs}）；${snapshot}` });
     pumpQueue();
   }, ACTIVE_REQUEST_TIMEOUT_MS);
 }
@@ -203,7 +206,7 @@ function createDecoder(): VideoDecoder {
           post({ type: "frame", id: request.id, frameN: request.frameN, timestampUs: frame.timestamp, fromCache: false, samplesFed, fromKeyframe, allocationSize: frame.allocationSize(), frame }, [frame]);
         }
         pumpQueue();
-      } else if (frame.timestamp === pendingAnchorPts) {
+      } else if (Math.abs(frame.timestamp - pendingAnchorPts) <= 1_000) {
         pendingAnchorPts = -1;
         holdGopAnchor(frame); // GOP 锚 IDR：持有到下个关键帧冷启（绝不中途关闭）
       } else {
@@ -494,7 +497,16 @@ async function feedSamples(
     // 同 GOP 顺序解码（真机报 "A key frame is required after configure() or
     // flush()"）。B 帧靠上方 LOOKAHEAD 前方参考帧即可吐出目标输出。
   } catch (error) {
+    // 喂包失败（Range 读失败等）必须立即释放 activeRequest 并续队：旧实现
+    // 只 post error 不清占位——客户端已收到错误并继续发新请求，但 worker 的
+    // 串行队列被死请求堵满 45s 直到看门狗（真机 2026-09-28「播放先卡住、
+    // 过一会报 watchdog 无匹配输出、之后卡卡续播」的时间线根因）。
+    if (activeRequest?.id === request.id) {
+      activeRequest = null;
+      clearActiveRequestTimer();
+    }
     post({ type: "error", id: request.id, message: errorText(error) });
+    pumpQueue();
   }
 }
 
