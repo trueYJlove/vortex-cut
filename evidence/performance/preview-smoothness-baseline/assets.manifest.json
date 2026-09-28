@@ -1,0 +1,9 @@
+{
+ "assets": [
+  {
+   "entity_id": "asset_hevc_b",
+   "path": "C:/DataFolder/codes/AI-Vidio/test-assets/generated/hevc/hevc-1080p-60s-g90-b3.mp4",
+   "display_name": "hevc-1080p-60s-g90-b3"
+  }
+ ]
+}

@@ -121,7 +121,16 @@ export async function runProbe(): Promise<void> {
       new Map([...ir.segments].map(segment => [segment.clip_id, { enabled: true, gainDb: 0 }] as [string, SegmentAudioConfig])));
     const composeWallMs: number[] = [];
     let lastContentUs = -1;
-    session.onTimeUs = (us: number) => { composeWallMs.push(performance.now()); lastContentUs = us; };
+    // P33：合成间隔只计**播放段**（play() 起至自然停）——片尾 postmortem 的
+    // 暂停态 seek 会拉出 45s 级伪间隔污染 p95/max（smoke1 实测 max=135s）。
+    let playingWindow = false;
+    session.onTimeUs = (us: number) => {
+      lastContentUs = us;
+      if (playingWindow) composeWallMs.push(performance.now());
+    };
+    // 首个推进事件不可见（onTimeUs 首发在 play() 内部首 tick），用 isPlaying
+    // 轮询开窗；结束判定见播放 while 循环退出点。
+    const playWindow = { open: (v: boolean) => { playingWindow = v; } };
 
     await session.seekToFrame(0);
     await snapshot(session, bridge, "frame_000_seek0");
@@ -130,6 +139,7 @@ export async function runProbe(): Promise<void> {
     const samples: Sample[] = [];
     const t0 = performance.now();
     session.play();
+    playWindow.open(true);
     let nextSampleAt = 0;
     let readbackIndex = 0;
     while (session.isPlaying && performance.now() - t0 < durationMs + 8000) {
@@ -148,6 +158,7 @@ export async function runProbe(): Promise<void> {
       }
     }
     session.pause();
+    playWindow.open(false);
     await snapshot(session, bridge, "frame_999_end");
     // 事后取证：暂停态逐帧重解码+合成片尾区段（区分"解码坏帧"与"播放链路坏帧"）
     const postMortem: Array<Record<string, number>> = [];
@@ -171,7 +182,7 @@ export async function runProbe(): Promise<void> {
     freshSession.dispose();
     const finalMetrics = session.metrics();
 
-    // 合成节奏：相邻合成帧的墙钟间隔分布（播放流畅度直接证据）
+    // 合成节奏：相邻合成帧的墙钟间隔分布（播放流畅度直接证据；只含播放段）
     const intervals: number[] = [];
     for (let index = 1; index < composeWallMs.length; index++) {
       intervals.push(Math.round((composeWallMs[index]! - composeWallMs[index - 1]!) * 1000) / 1000);
