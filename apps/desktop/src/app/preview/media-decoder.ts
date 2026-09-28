@@ -7,7 +7,7 @@
  * 决定是否 close()。
  */
 import type { DecodeBackendId, WebCodecsDecodeMode } from "@aivideo/contracts";
-import type { DecodeFrameInfo, DecodeResidencyInfo } from "./decode-worker.js";
+import type { DecodeFrameInfo, DecodeResidencyInfo, DecodeTimingSample } from "./decode-worker.js";
 
 export interface VideoFrameDecodedFrame {
   kind: "video_frame";
@@ -46,6 +46,9 @@ export interface MediaDecoder {
   readonly hardware: WebCodecsDecodeMode | null;
   /** 诊断：最近一次解码回执（webcodecs 路径有值；ffmpeg 路径可为 null）。 */
   readonly lastFrameInfo?: DecodeFrameInfo | null;
+  /** P33 分段计时样本（VITE_AIVS_DECODE_TIMING=1 时填充；ffmpeg 后端无）。
+   *  会话侧 metrics().decode_seg 聚合消费。 */
+  readonly timingSamples?: DecodeTimingSample[];
   /**
    * 随机访问：frameN 为合成时间轴帧号。
    * 取样定位 PTS 最近邻 ±33_334μs；输出匹配半帧 ±16_667μs（见 decode-worker.worker.ts）。

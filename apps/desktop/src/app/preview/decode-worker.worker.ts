@@ -25,10 +25,22 @@ interface Sample {
 
 type Outbound =
   | { type: "ready"; sampleCount: number; durationUs: number; timescale: number; keyframes: number[]; width: number; height: number; hardware: string | null; cacheEnabled: boolean; cacheCap: number; hasBFrames: boolean }
-  | { type: "frame"; id: number; frameN: number; timestampUs: number; fromCache: boolean; samplesFed: number; fromKeyframe: number; allocationSize: number; frame: VideoFrame }
+  | { type: "frame"; id: number; frameN: number; timestampUs: number; fromCache: boolean; samplesFed: number; fromKeyframe: number; allocationSize: number; timing: DecodeTiming | null; frame: VideoFrame }
   | { type: "done"; id: number | null; note: string }
   | { type: "error"; id: number | null; message: string }
   | { type: "ticket-refresh-request"; id: number };
+
+/** 解码 RTT 分段计时（P33 规划门 §3.1；decodeTiming=true 时随 frame 消息捎带，
+ *  默认关、生产零开销）。两段均为 worker 时钟内的**时长**（跨线程时钟原点
+ *  不同，不传绝对时间戳、不做跨钟合成——客户端以自身 RTT 总量减两段得
+ *  「排队 + 双跳传输」残差）：
+ *  - feedMs: 出队开始处理 → 最后一批喂包提交（Range 读 + 批间让步）；
+ *  - outputMs: 喂包提交 → 匹配输出到达（解码器吐帧滞后；flush 救援亦归此段）。
+ *  缓存/stash 回填路径两段均为 0（由 fromCache/samplesFed 区分路径）。 */
+interface DecodeTiming {
+  feedMs: number;
+  outputMs: number;
+}
 
 /** B13-R 驻留遥测（decode worker 侧）：输出帧去向计数。decoded = 解码器输出
  *  总数;posted = transfer 给客户端;cached = 转入 LRU（禁用时为 0）;closed =
@@ -106,6 +118,10 @@ interface DecodeRequest {
   sampleIndex: number;
   /** 选中采样的真实 PTS（输出匹配锚点）。 */
   samplePtsUs: number;
+  /** P33 分段计时基点：pumpQueue 出队开始处理时刻（worker 时钟 ms；-1 = 未计时）。 */
+  startedMs: number;
+  /** 最后一批喂包提交时刻（feedMs 终点 = outputMs 起点；-1 = 未喂包）。 */
+  fedMs: number;
 }
 const decodeQueue: DecodeRequest[] = [];
 let activeRequest: DecodeRequest | null = null;
@@ -209,6 +225,9 @@ function takeByPts(ptsUs: number): VideoFrame | null {
   return null;
 }
 
+/** P33 分段计时开关（init 消息注入；默认关，生产零开销）。 */
+let decodeTiming = false;
+
 function createDecoder(): VideoDecoder {
   return new VideoDecoder({
     output: (frame: VideoFrame) => {
@@ -229,16 +248,21 @@ function createDecoder(): VideoDecoder {
         activeRequest = null;
         clearActiveRequestTimer();
         pendingAnchorPts = -1;
+        const nowMs = performance.now();
+        const timing = decodeTiming && request.startedMs >= 0 ? {
+          feedMs: request.fedMs >= 0 ? Math.round((request.fedMs - request.startedMs) * 1000) / 1000 : 0,
+          outputMs: request.fedMs >= 0 ? Math.round((nowMs - request.fedMs) * 1000) / 1000 : Math.round((nowMs - request.startedMs) * 1000) / 1000,
+        } : null;
         if (cacheEnabled) {
           const clone = frame.clone();
           cachePut(request.sampleIndex, frame); // 缓存接管原始帧（保持开启）
           resCached += 1;
           resPosted += 1;
-          post({ type: "frame", id: request.id, frameN: request.frameN, timestampUs: clone.timestamp, fromCache: false, samplesFed, fromKeyframe, allocationSize: clone.allocationSize(), frame: clone }, [clone]);
+          post({ type: "frame", id: request.id, frameN: request.frameN, timestampUs: clone.timestamp, fromCache: false, samplesFed, fromKeyframe, allocationSize: clone.allocationSize(), timing, frame: clone }, [clone]);
         } else {
           // 直传原始帧（免 clone：每帧减一次 GPU 内存搬运；所有权随转移交出）
           resPosted += 1;
-          post({ type: "frame", id: request.id, frameN: request.frameN, timestampUs: frame.timestamp, fromCache: false, samplesFed, fromKeyframe, allocationSize: frame.allocationSize(), frame }, [frame]);
+          post({ type: "frame", id: request.id, frameN: request.frameN, timestampUs: frame.timestamp, fromCache: false, samplesFed, fromKeyframe, allocationSize: frame.allocationSize(), timing, frame }, [frame]);
         }
         pumpQueue();
       } else if (Math.abs(frame.timestamp - pendingAnchorPts) <= 1_000) {
@@ -328,8 +352,9 @@ function requestTicketRefresh(): Promise<string> {
   });
 }
 
-async function init(url: string, cacheFrames: number, hasTicketRefresh: boolean, cacheCapBytes?: number, forceSwDecodeArg?: boolean): Promise<void> {
+async function init(url: string, cacheFrames: number, hasTicketRefresh: boolean, cacheCapBytes?: number, forceSwDecodeArg?: boolean, decodeTimingArg?: boolean): Promise<void> {
   forceSwDecode = forceSwDecodeArg === true;
+  decodeTiming = decodeTimingArg === true;
   VERIFY_TRACE = (self as unknown as { VERIFY_TRACE?: boolean }).VERIFY_TRACE === true;
   // B12：Range 源初始化（bytes=0-65535 探测 + moov-only 解析）——整文件
   // arrayBuffer 下载已移除。票据 TTL 到期由 HttpRangeSource 受控续票
@@ -434,6 +459,7 @@ function pumpQueue(): void {
   if (flushRecovering) return; // flush 救援窗口：reset 完成后续队
   while (!activeRequest && decodeQueue.length) {
     const request = decodeQueue.shift()!;
+    if (decodeTiming) request.startedMs = performance.now(); // P33：出队开始处理
     activeRequest = request;
     armActiveRequestTimer(request);
     try {
@@ -615,6 +641,9 @@ async function feedSamples(
       if (generation !== feedGeneration) return; // 换代：让位新喂包流
       if (activeRequest?.id !== request.id) return; // 目标已匹配：立即停喂
     }
+    // P33：喂包循环终点（outputMs 起点；request 已被匹配则忽略——正常批次
+    // 输出在让步间隙到达，fedMs 仍记在提交完最后一批时，归属正确）。
+    if (decodeTiming && activeRequest?.id === request.id) activeRequest.fedMs = performance.now();
   } catch (error) {
     // 喂包失败（Range 读失败等）必须立即释放 activeRequest 并续队：旧实现
     // 只 post error 不清占位——客户端已收到错误并继续发新请求，但 worker 的
@@ -647,7 +676,7 @@ function decodeFrame(id: number, frameN: number, fps: number): void {
   if (cacheEnabled && cache.has(target)) {
     cacheHits += 1;
     const cached = cache.get(target)!.clone();
-    post({ type: "frame", id, frameN, timestampUs: cached.timestamp, fromCache: true, samplesFed: 0, fromKeyframe: target, allocationSize: cached.allocationSize(), frame: cached }, [cached]);
+    post({ type: "frame", id, frameN, timestampUs: cached.timestamp, fromCache: true, samplesFed: 0, fromKeyframe: target, allocationSize: cached.allocationSize(), timing: null, frame: cached }, [cached]);
     return;
   }
   // lookahead 提前解出的帧（readyByPts）：直接回填，不再进解码队列
@@ -667,15 +696,15 @@ function decodeFrame(id: number, frameN: number, fps: number): void {
       const clone = staged.clone();
       cachePut(target, staged);
       resCached += 1;
-      post({ type: "frame", id, frameN, timestampUs: clone.timestamp, fromCache: true, samplesFed: 0, fromKeyframe: target, allocationSize: clone.allocationSize(), frame: clone }, [clone]);
+      post({ type: "frame", id, frameN, timestampUs: clone.timestamp, fromCache: true, samplesFed: 0, fromKeyframe: target, allocationSize: clone.allocationSize(), timing: null, frame: clone }, [clone]);
       return;
     }
-    post({ type: "frame", id, frameN, timestampUs: staged.timestamp, fromCache: true, samplesFed: 0, fromKeyframe: target, allocationSize: staged.allocationSize(), frame: staged }, [staged]);
+    post({ type: "frame", id, frameN, timestampUs: staged.timestamp, fromCache: true, samplesFed: 0, fromKeyframe: target, allocationSize: staged.allocationSize(), timing: null, frame: staged }, [staged]);
     return;
   }
   cacheMisses += cacheEnabled ? 1 : 0;
   trace("enqueue", { id, frameN, target, samplePtsUs });
-  decodeQueue.push({ id, frameN, targetUs, sampleIndex: target, samplePtsUs });
+  decodeQueue.push({ id, frameN, targetUs, sampleIndex: target, samplePtsUs, startedMs: -1, fedMs: -1 });
   pumpQueue();
 }
 
@@ -693,12 +722,12 @@ function binarySearchPos(index: SampleIndex, ptsUs: number): number {
 }
 
 self.onmessage = (event: MessageEvent) => {
-  const data = event.data as { type: string; url?: string; cacheFrames?: number; id?: number; frameN?: number; fps?: number; refreshTicket?: boolean; refreshUrl?: string; refreshError?: string; cacheCapBytes?: number; forceSwDecode?: boolean };
+  const data = event.data as { type: string; url?: string; cacheFrames?: number; id?: number; frameN?: number; fps?: number; refreshTicket?: boolean; refreshUrl?: string; refreshError?: string; cacheCapBytes?: number; forceSwDecode?: boolean; decodeTiming?: boolean };
   try {
     if (data.type === "init" && data.url) {
       // DEFECT-4K60-SESSION-HANG：init 失败必须回发 error——旧实现 fire-and-forget
       // 的 rejection 在 worker 内被吞，客户端只能等满 15s 泛化超时拿不到真实错误。
-      void init(data.url, data.cacheFrames ?? 0, data.refreshTicket === true, data.cacheCapBytes, data.forceSwDecode)
+      void init(data.url, data.cacheFrames ?? 0, data.refreshTicket === true, data.cacheCapBytes, data.forceSwDecode, data.decodeTiming)
         .catch(error => post({ type: "error", id: null, message: errorText(error) }));
     } else if (data.type === "ticket-refresh-response" && typeof data.id === "number") {
       const pending = ticketRefreshPending.get(data.id);

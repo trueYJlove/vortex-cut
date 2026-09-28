@@ -5,6 +5,8 @@ interface ImportMetaEnvProbe {
   readonly VITE_AIVS_PREVIEW_IR_V2?: string;
   /** B13-R 判别诊断开关：强制软件解码（perf 诊断构建专用）。 */
   readonly VITE_AIVS_FORCE_SW_DECODE?: string;
+  /** P33 解码 RTT 分段计时（=1 开启；默认关，生产零开销）。 */
+  readonly VITE_AIVS_DECODE_TIMING?: string;
   readonly PROD: boolean;
   readonly MODE: string;
 }

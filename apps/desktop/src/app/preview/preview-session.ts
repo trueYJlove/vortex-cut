@@ -71,6 +71,10 @@ export interface PreviewSessionMetrics {
   /** 解码往返（请求→VideoFrame 回传）耗时分布；m3p5 播放探针与指标行消费。 */
   decode_ms_p50: number;
   decode_ms_p95: number;
+  /** P33 解码 RTT 分段（VITE_AIVS_DECODE_TIMING=1 时出数；否则 null）：
+   *  feed = worker 喂包（Range 读+让步）；output = 解码器吐帧滞后；
+   *  residual = 总 RTT − 两段（队列等待+双跳传输+主线程处理）。 */
+  decode_seg: { feed_p50: number; feed_p95: number; output_p50: number; output_p95: number; residual_p50: number; residual_p95: number } | null;
   /** 当前在途解码请求数（全部输入合计，含影子槽）。 */
   decode_in_flight: number;
   /** 纹理上传往返（postMessage+GL+ack）耗时 p95：worker 化后的负载口径。 */
@@ -1680,6 +1684,31 @@ export class PreviewSession {
     const decodes = [...this.decodeTimes].sort((a, b) => a - b);
     const uploads = [...this.uploadTimes].sort((a, b) => a - b);
     const p = (list: number[], q: number) => list.length ? Math.round(list[Math.min(list.length - 1, Math.floor(q * list.length))] * 1000) / 1000 : 0;
+    // P33 分段聚合：全输入 timingSamples 合并后取分位数（m3p5 探针消费）。
+    let decodeSeg: PreviewSessionMetrics["decode_seg"] = null;
+    {
+      const feeds: number[] = [];
+      const outputs: number[] = [];
+      const residuals: number[] = [];
+      for (const rig of this.rigs.values()) {
+        for (const sample of rig.worker?.timingSamples ?? []) {
+          if (sample.fromCache) continue; // 缓存命中不代表解码路径
+          feeds.push(sample.feedMs);
+          outputs.push(sample.outputMs);
+          residuals.push(sample.residualMs);
+        }
+      }
+      if (residuals.length > 0) {
+        feeds.sort((a, b) => a - b);
+        outputs.sort((a, b) => a - b);
+        residuals.sort((a, b) => a - b);
+        decodeSeg = {
+          feed_p50: p(feeds, 0.5), feed_p95: p(feeds, 0.95),
+          output_p50: p(outputs, 0.5), output_p95: p(outputs, 0.95),
+          residual_p50: p(residuals, 0.5), residual_p95: p(residuals, 0.95),
+        };
+      }
+    }
     return {
       task_ms_p50: p(times, 0.5),
       task_ms_p95: p(times, 0.95),
@@ -1688,6 +1717,7 @@ export class PreviewSession {
       last_error: this.lastError,
       decode_ms_p50: p(decodes, 0.5),
       decode_ms_p95: p(decodes, 0.95),
+      decode_seg: decodeSeg,
       decode_in_flight: this.decodeInFlight,
       upload_ms_p95: p(uploads, 0.95),
       canvas_w: this.ir.canvas.width,

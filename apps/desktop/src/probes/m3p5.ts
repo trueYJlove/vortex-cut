@@ -27,6 +27,8 @@ interface Sample {
   decode_in_flight: number;
   last_error: string | null;
   chain?: Record<string, unknown>;
+  /** P33 分段计时（VITE_AIVS_DECODE_TIMING=1 时出数，否则 null）。 */
+  decode_seg?: PreviewSessionMetrics["decode_seg"];
 }
 
 /** 画布 PNG 取证（会话侧 readback：OffscreenCanvas worker convertToBlob →
@@ -54,6 +56,7 @@ function sampleOf(tMs: number, contentUs: number, metrics: PreviewSessionMetrics
     upload_ms_p95: metrics.upload_ms_p95,
     decode_in_flight: metrics.decode_in_flight,
     last_error: metrics.last_error,
+    decode_seg: metrics.decode_seg ?? undefined,
   };
 }
 
@@ -187,6 +190,8 @@ export async function runProbe(): Promise<void> {
       dropped_frames: finalMetrics.dropped_frames,
       task_ms: { p50: finalMetrics.task_ms_p50, p95: finalMetrics.task_ms_p95 },
       decode_ms: { p50: finalMetrics.decode_ms_p50, p95: finalMetrics.decode_ms_p95 },
+      // P33 解码 RTT 分段表（feed/output/residual；VITE_AIVS_DECODE_TIMING=1 出数）
+      decode_seg: finalMetrics.decode_seg,
       compose_interval_ms: { p50: pick(0.5), p95: pick(0.95), max: sorted.length ? sorted[sorted.length - 1]! : 0 },
       last_error: finalMetrics.last_error,
       replay_after_end_ok: replayOk,

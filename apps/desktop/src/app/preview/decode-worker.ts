@@ -19,6 +19,10 @@ export interface DecodeWorkerMessage {
   height?: number;
   message?: string;
   note?: string;
+  /** P33 分段计时（worker 时钟内时长；decodeTiming 开启时随 frame 捎带）：
+   *  feedMs = 出队→最后一批喂包提交；outputMs = 喂包提交→匹配输出到达。
+   *  客户端残差 = 自测 RTT − feedMs − outputMs（排队等待 + 双跳传输）。 */
+  timing?: { feedMs: number; outputMs: number } | null;
 }
 
 /** 最近一次解码回执的取证信息（worker 附带；播放诊断用）。 */
@@ -28,6 +32,16 @@ export interface DecodeFrameInfo {
   fromCache: boolean;
   samplesFed: number;
   fromKeyframe: number;
+}
+
+/** P33 分段计时单样本（残差 = 客户端 RTT − worker feed/output 两段；缓存
+ *  命中路径 worker 段为 null，残差即全 RTT）。 */
+export interface DecodeTimingSample {
+  rttMs: number;
+  feedMs: number;
+  outputMs: number;
+  residualMs: number;
+  fromCache: boolean;
 }
 
 /** B13-R：decode worker 驻留计数（stats 往返取回；-1 = 未取样）。 */
@@ -54,6 +68,11 @@ export class DecodeWorker {
   height = 0;
   hasBFrames = false;
   lastFrameInfo: DecodeFrameInfo | null = null;
+  /** P33 分段计时环形样本（decodeTiming 开启时填充；容量 512）。 */
+  timingSamples: DecodeTimingSample[] = [];
+  private timingOn = false;
+  /** decode 请求 postMessage 时刻（残差段计算用；id → performance.now ms）。 */
+  private readonly postedAt = new Map<number, number>();
 
   private constructor() {
     this.worker = new Worker(new URL("./decode-worker.worker.ts", import.meta.url), { type: "module" });
@@ -86,6 +105,8 @@ export class DecodeWorker {
       if (data.type === "frame" && data.id !== undefined) {
         const pending = this.pending.get(data.id);
         this.pending.delete(data.id);
+        const posted = this.postedAt.get(data.id);
+        this.postedAt.delete(data.id);
         this.lastFrameInfo = {
           frameN: data.frameN ?? -1,
           timestampUs: data.timestampUs ?? -1,
@@ -93,6 +114,21 @@ export class DecodeWorker {
           samplesFed: data.samplesFed ?? 0,
           fromKeyframe: data.fromKeyframe ?? -1,
         };
+        // P33：残差段 = 客户端自测 RTT − worker 两段（同源时钟内不做跨钟合成；
+        // 未开启计时/无 post 时刻时跳过）。容量 512 环形，会话侧聚合分位数。
+        if (this.timingOn && posted !== undefined) {
+          const rttMs = performance.now() - posted;
+          const feedMs = data.timing?.feedMs ?? 0;
+          const outputMs = data.timing?.outputMs ?? 0;
+          this.timingSamples.push({
+            rttMs: Math.round(rttMs * 1000) / 1000,
+            feedMs,
+            outputMs,
+            residualMs: Math.round((rttMs - feedMs - outputMs) * 1000) / 1000,
+            fromCache: data.fromCache ?? false,
+          });
+          if (this.timingSamples.length > 512) this.timingSamples.splice(0, this.timingSamples.length - 512);
+        }
         if (data.frame) {
           if (pending) pending.resolve(data.frame);
           else data.frame.close(); // 迟到的结果（客户端已超时放弃）：关闭防泄漏
@@ -128,6 +164,8 @@ export class DecodeWorker {
     // B13-R 判别诊断开关：强制软件解码（perf 诊断构建环境变量；缺省 undefined）
     let forceSwDecode: boolean | undefined;
     try { forceSwDecode = import.meta.env.VITE_AIVS_FORCE_SW_DECODE === "1" || undefined; } catch { /* 无 env */ }
+    // P33 分段计时开关（VITE_AIVS_DECODE_TIMING=1；默认关，生产零开销）
+    try { instance.timingOn = import.meta.env.VITE_AIVS_DECODE_TIMING === "1"; } catch { /* 无 env */ }
     try {
       const data = await workerReady<DecodeWorkerMessage>(instance.worker, data => {
         if (data.type === "error") throw new Error(data.message ?? "worker init error");
@@ -138,7 +176,7 @@ export class DecodeWorker {
           // 永远等不到输出（首个输出已被消费/释放）→ 45s 看门狗 → 降级
           // 慢路径。cap=4 帧（720p≈5MB GPU）即可覆盖并发重复窗口。
           cacheFrames: 3,
-          refreshTicket: Boolean(refreshTicket), ...(forceSwDecode ? { forceSwDecode: true } : {}), ...(cacheCapBytes !== undefined ? { cacheCapBytes } : {}) }), signal);
+          refreshTicket: Boolean(refreshTicket), ...(forceSwDecode ? { forceSwDecode: true } : {}), ...(instance.timingOn ? { decodeTiming: true } : {}), ...(cacheCapBytes !== undefined ? { cacheCapBytes } : {}) }), signal);
       throwIfAborted(signal);
       instance.hardware = data.hardware ?? null;
       instance.width = data.width ?? 0;
@@ -165,8 +203,10 @@ export class DecodeWorker {
         resolve: frame => { window.clearTimeout(timeout); resolve(frame); },
         reject: error => { window.clearTimeout(timeout); reject(error); },
       });
+      if (this.timingOn) this.postedAt.set(id, performance.now());
       try { this.worker.postMessage({ type: "decode", id, frameN, fps }); }
       catch (error) {
+        this.postedAt.delete(id);
         this.pending.get(id)?.reject(error instanceof Error ? error : new Error(String(error)));
         this.pending.delete(id);
       }
@@ -197,6 +237,7 @@ export class DecodeWorker {
     if (this.disposed) return;
     this.disposed = true;
     this.refreshTicket = null;
+    this.postedAt.clear();
     // B13-R：挂起的 stats 往返随 terminate 落定
     if (this.statsSettle) {
       const settle = this.statsSettle;
