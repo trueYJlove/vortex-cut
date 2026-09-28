@@ -62,6 +62,7 @@ const trace = (event: string, detail: Record<string, unknown> = {}): void => {
   if (!VERIFY_TRACE) return;
   // eslint-disable-next-line no-console
   console.log(`[trace] ${event} ${JSON.stringify(detail)}`);
+  post({ type: "trace", event, detail } as never);
 };
 
 /** 错误消息带上结构化 code 前缀（`CODE: message`）——SyntheticPreview 按
@@ -142,6 +143,9 @@ let lastFedSample = -1;
  *  包序错乱破坏参考链（真浏览器实验：输出停在排序位 9 后永久停止）。
  *  每次启动/重启动喂包前递增；批循环每步检查代际，不同代立即退出。 */
 let feedGeneration = 0;
+/** flush 救援进行中（救援→reset→续队的窗口期）：pumpQueue 在此期间不启动
+ *  新请求——flush 后解码器「需关键帧」，新请求的 delta 喂包会同步抛错。 */
+let flushRecovering = false;
 /** 最近一次请求**目标采样**所在 GOP 的关键帧索引（GOP 连续性判定锚）。
  *  绝不能用 lastFedSample（含 +LOOKAHEAD 前瞻）做该判定：目标+3 越过下一
  *  GOP 关键帧时，keyframeAtOrBefore(lastFedSample) 已落在下个 GOP——真实
@@ -168,12 +172,23 @@ const READY_BY_PTS_MIN = 4;
 const READY_BY_PTS_BACKPRESSURE_CAP = 6;
 let readyByPtsMax = READY_BY_PTS_MIN;
 
+/** 最近一次请求的目标 pts（智能驱逐锚：B 帧交错流的下一个请求目标大概率
+ *  在其邻域——FIFO 驱逐恰好先丢掉 pts 最老的回跳目标，是 miss 频发的根源）。 */
+let lastRequestPtsUs = -1;
+
 function stashByPts(frame: VideoFrame): void {
   if (readyByPts.size >= readyByPtsMax) {
-    const oldest = readyByPts.keys().next().value;
-    if (oldest !== undefined) {
-      const old = readyByPts.get(oldest);
-      readyByPts.delete(oldest);
+    // 驱逐「距当前请求目标最远」的暂存帧（而非 FIFO 最老）：保住目标邻域，
+    // 回跳请求的输出几乎总能命中，miss 只剩真异常（flush 救援兜底）。
+    let worstKey = -1;
+    let worstDist = -1;
+    for (const key of readyByPts.keys()) {
+      const dist = Math.abs(key - lastRequestPtsUs);
+      if (dist > worstDist) { worstDist = dist; worstKey = key; }
+    }
+    if (worstKey >= 0) {
+      const old = readyByPts.get(worstKey);
+      readyByPts.delete(worstKey);
       try { old?.close(); if (old) resClosed += 1; } catch { /* 已关闭 */ }
     }
   }
@@ -416,6 +431,7 @@ function cachePut(sampleIndex: number, frame: VideoFrame): void {
 }
 
 function pumpQueue(): void {
+  if (flushRecovering) return; // flush 救援窗口：reset 完成后续队
   while (!activeRequest && decodeQueue.length) {
     const request = decodeQueue.shift()!;
     activeRequest = request;
@@ -475,20 +491,48 @@ function decodeSamples(request: DecodeRequest): void {
   if (!sameGop) {
     startSample = keyTarget;
     coldStart(startSample);
-  } else {
-    // 同 GOP：从上次已喂游标续喂；target 已在已喂区间则只补 lookahead
-    startSample = lastFedSample + 1;
-    const needEnd = feedEndFor(target);
-    if (startSample > needEnd) {
-      // 目标采样已被喂过但输出不在暂存（容量驱逐 / 已被前次请求消费后重放）：
-      // 旧行为静默 return → activeRequest 等一个不会来的输出 → 45s 看门狗。
-      // 回跳距离超过暂存覆盖（任意 scrub/变速回退）时这是常态，改为按关键帧
-      // 冷启重喂（一次性成本 ≤ GOP 长度，正确性优先——挂起换不来任何帧）。
-      trace("rescue_cold", { target, lastFedSample, hardEnd: feedEndFor(target) });
-      startSample = keyTarget;
-      coldStart(startSample);
-    }
+    samplesFed = 0;
+    fromKeyframe = startSample;
+    const generation = ++feedGeneration; // 换代：作废任何在途旧批循环
+    void feedSamples(samples, startSample, target, timescale, request, generation);
+    fedIndex = target;
+    return;
   }
+  // 同 GOP：从上次已喂游标续喂；target 已在已喂区间则只补 lookahead
+  const needEnd = feedEndFor(target);
+  if (lastFedSample + 1 > needEnd) {
+    // 目标的喂包覆盖已被之前的请求完成（B 帧交错流上回跳目标的排序覆盖
+    // 常小于已喂边界），输出不在暂存（takeByPts 已 miss）＝输出滞留在
+    // 解码器重排缓冲/输出管道里。
+    // 【2026-09-28 真浏览器定位】旧救援=冷启重喂：每次 miss 都 close+重建
+    // +从关键帧重喂（真机素材实测 60 帧触发 28 次、喂包量单调涨到 64 包），
+    // 解码 p95 655ms、播放速率掉到 0.65x——「丢帧不多但非常卡」的元凶。
+    // 且目标帧早已解码过，重喂同采样纯属浪费。正确救援 = decoder.flush()：
+    // 强制吐出重排缓冲里的全部帧（含目标），~10ms 级。
+    // flush 后解码器处于「需关键帧」态：用 flushRecovering 标志闸住
+    // pumpQueue（flush 期间不启动新请求 → 无并发喂包 → 竞态安全），
+    // flush 落定后 reset+configure+清热态游标 → 续队（下个请求自然冷启）。
+    trace("rescue_flush", { target, lastFedSample, needEnd });
+    activeRequest = request;
+    armActiveRequestTimer(request);
+    flushRecovering = true;
+    feedGeneration += 1; // 作废任何残余批循环
+    fedIndex = target;
+    void decoder!.flush().catch(() => undefined).then(() => {
+      try {
+        decoder!.reset();
+        decoder!.configure(decoderConfig as VideoDecoderConfig);
+      } catch { /* reset 失败则后续请求自行暴露 */ }
+      drainIntermediateRing();
+      fedIndex = -1;
+      lastFedSample = -1;
+      lastTargetKey = -1;
+      flushRecovering = false;
+      pumpQueue();
+    });
+    return;
+  }
+  startSample = lastFedSample + 1;
   samplesFed = 0;
   fromKeyframe = startSample;
   const generation = ++feedGeneration; // 换代：作废任何在途旧批循环
@@ -608,6 +652,7 @@ function decodeFrame(id: number, frameN: number, fps: number): void {
   }
   // lookahead 提前解出的帧（readyByPts）：直接回填，不再进解码队列
   const samplePtsUs = sampleIndex.ptsUs[target]!;
+  lastRequestPtsUs = samplePtsUs; // 智能驱逐锚（stashByPts 用）
   const staged = takeByPts(samplePtsUs);
   if (staged) {
     // 同步推进请求游标：否则后续跨关键帧误判需冷启（真机 2s 后卡死）。
@@ -615,6 +660,16 @@ function decodeFrame(id: number, frameN: number, fps: number): void {
     if (target > fedIndex) fedIndex = target;
     lastTargetKey = keyframeAtOrBefore(sampleIndex, target);
     resPosted += 1;
+    if (cacheEnabled) {
+      // LRU 接管原帧 + 回传 clone：stash 命中的帧也进缓存——3 路并发下
+      // 同一 src_n 的重复请求（窗口重发/seek 回退/重锚）只有这里能秒回；
+      // 否则第二发永远等不到已消费的输出 → 45s 看门狗（2026-09-28 真机定位）。
+      const clone = staged.clone();
+      cachePut(target, staged);
+      resCached += 1;
+      post({ type: "frame", id, frameN, timestampUs: clone.timestamp, fromCache: true, samplesFed: 0, fromKeyframe: target, allocationSize: clone.allocationSize(), frame: clone }, [clone]);
+      return;
+    }
     post({ type: "frame", id, frameN, timestampUs: staged.timestamp, fromCache: true, samplesFed: 0, fromKeyframe: target, allocationSize: staged.allocationSize(), frame: staged }, [staged]);
     return;
   }

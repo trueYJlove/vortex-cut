@@ -79,6 +79,10 @@ export class DecodeWorker {
         );
         return;
       }
+      if ((data as { type?: string; event?: string }).type === "trace") {
+        (window as unknown as { __TRACE?: unknown[] }).__TRACE?.push(data);
+        return;
+      }
       if (data.type === "frame" && data.id !== undefined) {
         const pending = this.pending.get(data.id);
         this.pending.delete(data.id);
@@ -128,7 +132,13 @@ export class DecodeWorker {
       const data = await workerReady<DecodeWorkerMessage>(instance.worker, data => {
         if (data.type === "error") throw new Error(data.message ?? "worker init error");
         return data.type === "ready" ? data : undefined;
-      }, () => instance.worker.postMessage({ type: "init", url: ticket, cacheFrames: 0, refreshTicket: Boolean(refreshTicket), ...(forceSwDecode ? { forceSwDecode: true } : {}), ...(cacheCapBytes !== undefined ? { cacheCapBytes } : {}) }), signal);
+      }, () => instance.worker.postMessage({ type: "init", url: ticket,
+          // 解码帧 LRU（2026-09-28 真机定位启用）：3 路并发客户端会对同一
+          // src_n 发出重复请求（窗口重发/seek 回退/重锚），无缓存时第二发
+          // 永远等不到输出（首个输出已被消费/释放）→ 45s 看门狗 → 降级
+          // 慢路径。cap=4 帧（720p≈5MB GPU）即可覆盖并发重复窗口。
+          cacheFrames: 3,
+          refreshTicket: Boolean(refreshTicket), ...(forceSwDecode ? { forceSwDecode: true } : {}), ...(cacheCapBytes !== undefined ? { cacheCapBytes } : {}) }), signal);
       throwIfAborted(signal);
       instance.hardware = data.hardware ?? null;
       instance.width = data.width ?? 0;
