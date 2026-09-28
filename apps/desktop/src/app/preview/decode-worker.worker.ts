@@ -527,6 +527,18 @@ function decodeSamples(request: DecodeRequest): void {
   // 同 GOP：从上次已喂游标续喂；target 已在已喂区间则只补 lookahead
   const needEnd = feedEndFor(target);
   if (lastFedSample + 1 > needEnd) {
+    // P33 W2.5：已喂至文件尾且目标仍 miss —— 重排尾帧滞留且 flush 实测
+    // 永不落定（eof-flush-r1..r3 定位：D3D11 硬解尾帧缺后续参考，flush()
+    // promise 挂起 + reset 丢排队输出，重排队冷启再撞同一堵墙）。快速报错
+    // （消息含 watchdog 命中降级正则）交 FFmpeg B 后端兜底，勿占 45s 看门狗。
+    if (lastFedSample >= sampleIndex.count - 1) {
+      trace("eof_reorder_stuck_rescue", { target, lastFedSample, needEnd, dq: decoder?.decodeQueueSize ?? -1 });
+      activeRequest = null;
+      clearActiveRequestTimer();
+      post({ type: "error", id: request.id, message: `EOF reorder watchdog: frame ${request.frameN} 尾 GOP 重排输出滞留（pts=${request.samplePtsUs}）；已喂至文件尾 lastFedSample=${lastFedSample}` });
+      pumpQueue();
+      return;
+    }
     // 目标的喂包覆盖已被之前的请求完成（B 帧交错流上回跳目标的排序覆盖
     // 常小于已喂边界），输出不在暂存（takeByPts 已 miss）＝输出滞留在
     // 解码器重排缓冲/输出管道里。
@@ -544,7 +556,13 @@ function decodeSamples(request: DecodeRequest): void {
     flushRecovering = true;
     feedGeneration += 1; // 作废任何残余批循环
     fedIndex = target;
-    void decoder!.flush().catch(() => undefined).then(() => {
+    // P33 W2.5：flush 竞速 5s——flush 在部分驱动状态下 promise 永不落定，
+    // 超时即按冷启收尾放行泵（输出已吐的进 stash，未吐的由降级路径兜底）。
+    const flushed = Promise.race([
+      decoder!.flush().catch(() => undefined),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("flush timeout")), 5_000)),
+    ]);
+    void flushed.catch(() => undefined).then(() => {
       try {
         decoder!.reset();
         decoder!.configure(decoderConfig as VideoDecoderConfig);
@@ -640,6 +658,28 @@ async function feedSamples(
       await new Promise<void>(resolve => setTimeout(resolve, 0));
       if (generation !== feedGeneration) return; // 换代：让位新喂包流
       if (activeRequest?.id !== request.id) return; // 目标已匹配：立即停喂
+    }
+    // P33 W2.5 EOF 边界 flush（postmortem 1780/1783/1786/1789 看门狗定位）：
+    // 尾 GOP 冷启喂到 hardEnd=文件尾（lastFedSample=最后采样）后，B 帧重排
+    // 金字塔的尾帧滞留在解码器输出管道——没有后续采样驱动，也无人 flush，
+    // 目标永不匹配 → 45s 看门狗。此处喂尽文件尾且目标未匹配时强制
+    // decoder.flush() 吐出重排缓冲（与 rescue_flush 同收尾：flush 后解码器
+    // 需关键帧，reset+configure+清热态游标，flushRecovering 闸泵）。
+    // P33 W2.5 EOF 边界快速报错（postmortem 1780/1783/1786/1789 看门狗定位）：
+    // 尾 GOP 冷启喂到文件尾（lastFedSample=最后采样）后，B 帧重排金字塔的
+    // 尾帧滞留解码器输出管道——没有后续采样驱动。flush 救援实测无效
+    // （eof-flush-r1..r3：D3D11 硬解尾帧缺后续参考时 flush() promise 永不
+    // 落定、reset 丢弃排队输出，重排队后又冷启撞同一堵墙循环到客户端
+    // 50s 超时）。改为立即报错（消息含 watchdog 词命中降级正则），由
+    // preview-session maybeFallBackToFfmpeg 连续 2 次判定降级 FFmpeg
+    // B 后端（窗口解码无此边界），把 45-50s 挂起压到秒级。
+    if (activeRequest?.id === request.id && lastFedSample >= (sampleIndex?.count ?? 0) - 1) {
+      trace("eof_reorder_stuck", { target: request.sampleIndex, lastFedSample, dq: decoder?.decodeQueueSize ?? -1 });
+      activeRequest = null;
+      clearActiveRequestTimer();
+      post({ type: "error", id: request.id, message: `EOF reorder watchdog: frame ${request.frameN} 尾 GOP 重排输出滞留（pts=${request.samplePtsUs}）；已喂至文件尾 lastFedSample=${lastFedSample}` });
+      pumpQueue();
+      return;
     }
     // P33：喂包循环终点（outputMs 起点；request 已被匹配则忽略——正常批次
     // 输出在让步间隙到达，fedMs 仍记在提交完最后一批时，归属正确）。
