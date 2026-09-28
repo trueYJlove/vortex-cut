@@ -1,0 +1,3 @@
+Error: RANGE_FETCH_FAILED: 初始化请求失败: 404
+    at instance.worker.postMessage.type (http://localhost:5173/@fs/C:/DataFolder/codes/AI-Vidio/apps/desktop/src/app/preview/decode-worker.ts:120:43)
+    at Worker.message (http://localhost:5173/@fs/C:/DataFolder/codes/AI-Vidio/apps/desktop/src/app/preview/worker-lifecycle.ts:21:24)

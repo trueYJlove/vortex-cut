@@ -258,8 +258,12 @@ export class PreviewSession {
   private static readonly IN_FLIGHT = 3;
   /** 新输入入场提前量：首次入窗的输入提前 ~1.5s 冷启。 */
   private static readonly LEAD_ENTER = 45;
-  /** 合成落后目标超过该帧数 → 重锚时钟。 */
-  private static readonly LAG_REANCHOR = 12;
+  /** 合成落后目标超过该帧数 → 重锚时钟。P33 收紧 12→4：起播爬坡期（rAF/GPU
+   *  预热 + 预读链淘汰环槽）墙钟目标会领先合成 ~5-8 帧，旧阈值 12 下这段
+   *  落后全部计丢帧（final-r1..r3 / fix-cap-r1..r3 六轮一致：起播 0.5s 丢
+   *  5-6 帧后满速）。落后 4 帧即重锚=播放按吞吐放慢 0.1s 量级（不可感知），
+   *  起播段零丢帧；稳态合成 33ms/帧贴满不触发。 */
+  private static readonly LAG_REANCHOR = 4;
   /** 合成时向历史回溯的最大帧数（starving 后取最近就绪帧）。 */
   private static readonly BACKSCAN = 15;
 
@@ -1006,6 +1010,24 @@ export class PreviewSession {
     });
   }
 
+  /** P33 起播追赶：在 (from, to] 中找「洞后第一个就绪帧」。洞 = 某帧的展示
+   *  需求不在环内（已被预读淘汰、且 pump 游标单调不回补——永不可展示）。
+   *  - 无洞（单纯解码慢）：返回 from（保持旧重锚语义：原地等解码）；
+   *  - 有洞：返回洞后第一个 frameReady 帧（没有则 from）。
+   *  单输入顺播是最常见形态；多输入下取所有输入洞的并集判定（任一输入
+   *  缺帧即该输出帧不可展示）。调用方把 to 延到 target+LAG：洞后的就绪帧
+   *  在预读区，必须扫出 (from, target] 才能命中。 */
+  private findHoleSkipCandidate(from: number, to: number): number {
+    let holeSeen = false;
+    for (let n = from + 1; n <= to; n++) {
+      const frame = this.frames.getFrame(n);
+      if (!frame) continue;
+      if (!this.frameReady(frame)) { holeSeen = true; continue; }
+      if (holeSeen) return n; // 洞后第一个就绪帧
+    }
+    return from;
+  }
+
   /**
    * 顺序预读链：对每个输入把解码游标单调推进到 [前沿, target+LEAD] 窗口内的
    * 展示需求 src_n；展示需求之间的跳帧采样由 worker 热态连续喂入内部消化
@@ -1068,7 +1090,14 @@ export class PreviewSession {
       // ≤ target 找到就绪帧。代价仅是 speed>1 时的预读跑道收窄（仍有
       // (RING-3)/speed 个输出帧），换段冷启尖峰由链完成即续吸收。
       const anchor = displayMaxByInput.get(inputId) ?? sorted[0]!;
-      const max = Math.min(sorted[sorted.length - 1]!, anchor + this.ringDepth - 3);
+      // P33 冷启丢帧根修（final-r1..r3 三轮一致：起播 0.5s 丢 5 帧）：链完成即续
+      // ~20ms/帧快于实时 33ms/帧，旧封顶 anchor+RING-3（=anchor+9）允许 fed 在
+      // 两个 tick 间冲到 anchor+9，环 12 槽把**尚未合成**的 [anchor−3, anchor) 段
+      // 淘汰——回扫窗又只回看 3 帧，被淘汰帧永跳过。收紧为 anchor+LEAD：LEAD
+      // 联动环深（≤RING−3），fed 最多超前 anchor 8 帧，环内保有 ≥RING−LEAD≥3
+      // 槽未消费余量（变速 speed>1 时 src 超前 8 = 4 输出帧跑道 ≥3 槽约束不变；
+      // 环浅档 RING=5/LEAD=2 与旧值逐位相同）。代价仅预读跑道 9→8。
+      const max = Math.min(sorted[sorted.length - 1]!, anchor + Math.min(PreviewSession.LEAD, this.ringDepth - 3));
       // 正向单调推进（冷启动首个请求直达入场点）。
       // 向后跳转只发生在用户动作（回卷重播/回退 seek）——由 resetChains() 显式
       // 重置链游标，pump 本身不做启发式回跳（避免深窗口陈旧需求引发震荡）。
@@ -1633,9 +1662,18 @@ export class PreviewSession {
       }
       // 饥饿护栏：落后过多 → 重锚时钟（播放按解码吞吐放慢），而不是让目标
       // 无限狂奔、丢帧按 tick 线性堆积（旧实现冻结+丢帧 404 的直接根源）。
+      // P33 起播追赶（fix-ttl-r14..r16 / hole-skip-r1..r3 死锁定位）：LAG 收紧
+      // 后若 [current+1, target] 存在**已被环槽淘汰的洞**，锚在 currentFrame 的
+      // 重锚会让 target 永远爬不出洞区（重锚即归位 → 差值再超 → 再归位），
+      // 而预读区（洞后）的就绪帧永远轮不到回扫窗——合成冻结在洞前。把播放头
+      // 跳到「洞后第一个就绪帧」：被淘汰帧本就永远无法展示；搜索窗延伸
+      // target+LAG（重锚后 target 落在候选附近，且环内就绪区必在预读界内）。
       if (target - this.currentFrame > PreviewSession.LAG_REANCHOR) {
-        editorPerf.record("reanchor", 0, this.perfId, 0, this.seekEpoch, this.currentFrame);
-        this.anchorFrame = this.currentFrame;
+        const reanchorTo = this.findHoleSkipCandidate(this.currentFrame,
+          Math.min(target + PreviewSession.LAG_REANCHOR, this.frames.frameCount - 1));
+        editorPerf.record("reanchor", 0, this.perfId, 0, this.seekEpoch, reanchorTo);
+        this.currentFrame = reanchorTo;
+        this.anchorFrame = reanchorTo;
         this.anchorWall = now;
       }
       // B13-R：1Hz 驻留取样（decode worker 侧计数；compositor 计数随 ack

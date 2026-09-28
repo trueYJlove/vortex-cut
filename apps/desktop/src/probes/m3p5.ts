@@ -175,6 +175,11 @@ export async function runProbe(): Promise<void> {
     // 实测踩坑）。播放段结束、postmortem 后的分段覆盖到此刻为止。
     const decodeSegSnapshot = session.metrics().decode_seg;
     session.dispose();
+    // P33：session1（播放 60s+）+ postmortem（片尾 seek 看门狗挂起 4×45s）后
+    // 距会话票签发已 ~250-290s，**贴着票据 TTL 5min**——freshSession 创建跨线
+    // 即 init 404（fix-lag-r1..r13 实测；LAG=4 时 wall 略长更易压线，造成
+    // 伪相关）。freshSession 前重签票（R8：票据可按需重发，实体注册保持）。
+    for (const input of ir.inputs) tickets.set(input.asset_id, await bridge.mediaTicket(input.asset_id));
     const freshSession = await PreviewSession.create(container, ir, tickets);
     await freshSession.seekToFrame(ir.canvas.duration_frames - 1);
     await snapshot(freshSession, bridge, "fresh_session_seek_end");
