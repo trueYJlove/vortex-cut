@@ -55,6 +55,15 @@ const post = (message: Outbound, transfer: Transferable[] = []): void => {
   (self as unknown as Worker).postMessage(message, transfer);
 };
 
+/** 临时诊断钩子（VERIFY_TRACE=1 时输出解码决策/输出到达事件——真机定位用；
+ *  生产默认关闭零开销）。 */
+let VERIFY_TRACE = false;
+const trace = (event: string, detail: Record<string, unknown> = {}): void => {
+  if (!VERIFY_TRACE) return;
+  // eslint-disable-next-line no-console
+  console.log(`[trace] ${event} ${JSON.stringify(detail)}`);
+};
+
 /** 错误消息带上结构化 code 前缀（`CODE: message`）——SyntheticPreview 按
  *  子串识别域码；无 code 的错误保持原 message。 */
 function errorText(error: unknown): string {
@@ -119,7 +128,7 @@ function armActiveRequestTimer(request: DecodeRequest): void {
     clearActiveRequestTimer();
     // 附带 worker 状态快照：真机复现「无匹配输出」时直接看到 stash/游标/队列，
     // 免去二次复现定位（2026-09-28 真机 frame4 挂起即靠该快照核验路径）。
-    const snapshot = `stash=[${[...readyByPts.keys()].map(k => Math.round(k)).join(",")}] lastFed=${lastFedSample} fedIndex=${fedIndex} queue=${decodeQueue.length}`;
+    const snapshot = `stash=[${[...readyByPts.keys()].join(",")}] lastFed=${lastFedSample} fedIndex=${fedIndex} queue=${decodeQueue.length} dqSize=${decoder?.decodeQueueSize ?? -1}`;
     post({ type: "error", id: request.id, message: `decode worker watchdog: frame ${request.frameN} 无匹配输出（pts=${request.samplePtsUs}）；${snapshot}` });
     pumpQueue();
   }, ACTIVE_REQUEST_TIMEOUT_MS);
@@ -127,6 +136,12 @@ function armActiveRequestTimer(request: DecodeRequest): void {
 let fedIndex = -1; // 最近一次**请求目标**（顺序判定用；勿与已喂采样游标混用）
 /** 已喂入解码器的最大采样索引（含 B 帧 lookahead；顺序请求从 lastFedSample+1 续喂）。 */
 let lastFedSample = -1;
+/** 喂包代际（并发守卫）：feedSamples 是异步批循环（网络读/批间让步点
+ *  多处 await），本请求匹配完成后 pumpQueue 会立即启动下一请求的
+ *  decodeSamples——若旧批循环不终止，两个喂包流会交错喂同一解码器，
+ *  包序错乱破坏参考链（真浏览器实验：输出停在排序位 9 后永久停止）。
+ *  每次启动/重启动喂包前递增；批循环每步检查代际，不同代立即退出。 */
+let feedGeneration = 0;
 /** 最近一次请求**目标采样**所在 GOP 的关键帧索引（GOP 连续性判定锚）。
  *  绝不能用 lastFedSample（含 +LOOKAHEAD 前瞻）做该判定：目标+3 越过下一
  *  GOP 关键帧时，keyframeAtOrBefore(lastFedSample) 已落在下个 GOP——真实
@@ -143,11 +158,14 @@ let fromKeyframe = -1;
  *  （lookahead 会提前解出后续帧，若当时丢弃则下个请求等不到 → decode timeout）。 */
 const readyByPts = new Map<number, VideoFrame>();
 /** B 帧重排暂存窗（lookahead 已解出、等待后续请求取用的输出）。
- *  容量必须 ≥ 素材重排深度（呈现序回跳距离）+ LOOKAHEAD：小于它，
- *  FIFO 驱逐会丢掉"即将被请求"的输出 → 请求无包可喂 → 看门狗/超时。
- *  定长常量无法覆盖所有编码器（本仓真机素材 maxBackstep=6 旧值=4 丢帧）；
- *  init 按 ctts 计算实际深度并抬高（见 init）。上限守住 D3D11 输出表面池。 */
+ *  容量须覆盖素材重排深度，但**必须计入解码器输出背压**：未 close 的
+ *  VideoFrame 总量（stash + gopAnchor + intermediateRing）超过阈值后
+ *  Chrome 解码器停止吐帧（真浏览器实测 ~13 帧：stash 9+anchor 1+环 3
+ *  → 输出永久停滞；裸解码器逐帧 close 无此问题）。
+ *  容量公式：min(BACKPRESSURE_CAP, max(4, 回跳深度+2))——重排覆盖由
+ *  feedEndFor 的排序空间喂包终点保证，stash 只兜「已释放待请求」帧。 */
 const READY_BY_PTS_MIN = 4;
+const READY_BY_PTS_BACKPRESSURE_CAP = 6;
 let readyByPtsMax = READY_BY_PTS_MIN;
 
 function stashByPts(frame: VideoFrame): void {
@@ -160,11 +178,12 @@ function stashByPts(frame: VideoFrame): void {
     }
   }
   readyByPts.set(frame.timestamp, frame);
+  trace("stash_put", { pts: frame.timestamp, size: readyByPts.size, cap: readyByPtsMax });
 }
 
 function takeByPts(ptsUs: number): VideoFrame | null {
   const hit = readyByPts.get(ptsUs);
-  if (hit) { readyByPts.delete(ptsUs); return hit; }
+  if (hit) { readyByPts.delete(ptsUs); trace("take_hit_exact", { ptsUs }); return hit; }
   // 浮点容差 ±1ms
   for (const [pts, frame] of readyByPts) {
     if (Math.abs(pts - ptsUs) <= 1_000) {
@@ -180,6 +199,7 @@ function createDecoder(): VideoDecoder {
     output: (frame: VideoFrame) => {
       resDecoded += 1;
       const request = activeRequest;
+      trace("output", { pts: frame.timestamp, active: request ? request.samplePtsUs : null });
       // 半帧容差（一帧@30fps 的一半）：锚在 samplePtsUs（locateByPts 已完成
       // 最近邻选择）。历史教训两次：
       // - 33_334（整帧）容差 ≥ 相邻帧间距 33_333us：B 帧金字塔内先到的相邻
@@ -215,6 +235,7 @@ function createDecoder(): VideoDecoder {
       }
     },
     error: (error: DOMException) => {
+      trace("decoder_error", { msg: errorText(error) });
       const request = activeRequest;
       activeRequest = null;
       clearActiveRequestTimer();
@@ -239,7 +260,7 @@ function createDecoder(): VideoDecoder {
  * （fixed3/fixed11，evidence/m3_2/playback-repro）。改为延迟关闭——保留最近
  * K 个中间输出，新输出到来再关最旧；reset/回退时清空。 */
 const intermediateRing: VideoFrame[] = [];
-const INTERMEDIATE_RING = 3; // 环过大会耗尽 D3D11 输出表面池（实测 8 层 → 解码停摆）
+const INTERMEDIATE_RING = 1; // 背压预算：stash(≤6) + gopAnchor(1) + 环(1) = 8 帧未 close（实测 ~13 帧触发解码器输出背压停摆）
 
 function holdOrCloseIntermediate(frame: VideoFrame): void {
   if (intermediateRing.length >= INTERMEDIATE_RING) {
@@ -294,6 +315,7 @@ function requestTicketRefresh(): Promise<string> {
 
 async function init(url: string, cacheFrames: number, hasTicketRefresh: boolean, cacheCapBytes?: number, forceSwDecodeArg?: boolean): Promise<void> {
   forceSwDecode = forceSwDecodeArg === true;
+  VERIFY_TRACE = (self as unknown as { VERIFY_TRACE?: boolean }).VERIFY_TRACE === true;
   // B12：Range 源初始化（bytes=0-65535 探测 + moov-only 解析）——整文件
   // arrayBuffer 下载已移除。票据 TTL 到期由 HttpRangeSource 受控续票
   //（有限一次，相同 range 重发）；续票经 ticket-refresh 消息往返桥接到
@@ -334,7 +356,7 @@ async function init(url: string, cacheFrames: number, hasTicketRefresh: boolean,
         }
         fedBoundary = Math.max(fedBoundary, target + LOOKAHEAD);
       }
-      readyByPtsMax = Math.min(16, Math.max(READY_BY_PTS_MIN, maxBackstep + LOOKAHEAD + 1));
+      readyByPtsMax = Math.min(READY_BY_PTS_BACKPRESSURE_CAP, Math.max(READY_BY_PTS_MIN, maxBackstep + 2));
     }
   }
   cacheEnabled = cacheFrames > 0;
@@ -425,7 +447,11 @@ function decodeSamples(request: DecodeRequest): void {
   // 卡顿根因；见 tests/decode-reorder-playback.test.ts 仿真）。
   const keyTarget = keyframeAtOrBefore(sampleIndex, target);
   const sameGop = lastTargetKey >= 0 && lastTargetKey === keyTarget;
-  /** 冷启重建（decoder 整例重建 + 关键帧重喂 + 清暂存）。 */
+  /** 冷启重建（decoder 整例重建 + 关键帧重喂 + 清暂存 + 喂包换代）。
+   *  代际必须在此递增：RESCUE/错误自愈都经由本函数重建解码器，任何
+   *  在途旧批循环（await read 中）若不终止，会向**新解码器**交错喂
+   *  旧区间的包，破坏包序与参考链（真浏览器实验：输出停在排序位 9
+   *  后永久停止；裸解码器对照实验证明解码器本身无此问题）。 */
   const coldStart = (start: number): void => {
     // A03：关键帧回退二分（原逐样本线性回退，长 GOP 深 seek O(GOP)）
     releaseGopAnchor();
@@ -434,6 +460,7 @@ function decodeSamples(request: DecodeRequest): void {
     // 整例重建：reset() 无法清零长解码历史在 D3D11 会话内的残留状态
     //（实证：连续解码整片后 reset+关键帧重解仍产出花屏，新 Worker 实例则干净；
     // evidence/m3_2/playback-repro fixed10 vs fixed14/15 postmortem）。
+    feedGeneration += 1; // 先换代：在途旧批循环在下一个 await 恢复点退出
     try { decoder!.close(); } catch { /* 已关闭 */ }
     decoder = createDecoder();
     decoder.configure(decoderConfig as VideoDecoderConfig);
@@ -444,33 +471,62 @@ function decodeSamples(request: DecodeRequest): void {
     pendingAnchorPts = ((samples[start]!.dts + samples[start]!.ctsOffset) / timescale) * 1e6;
   };
   let startSample = target;
+  trace("decodeSamples", { target, keyTarget, sameGop, lastFedSample, lastTargetKey });
   if (!sameGop) {
     startSample = keyTarget;
     coldStart(startSample);
   } else {
     // 同 GOP：从上次已喂游标续喂；target 已在已喂区间则只补 lookahead
     startSample = lastFedSample + 1;
-    const needEnd = target + BFRAME_LOOKAHEAD;
+    const needEnd = feedEndFor(target);
     if (startSample > needEnd) {
       // 目标采样已被喂过但输出不在暂存（容量驱逐 / 已被前次请求消费后重放）：
       // 旧行为静默 return → activeRequest 等一个不会来的输出 → 45s 看门狗。
       // 回跳距离超过暂存覆盖（任意 scrub/变速回退）时这是常态，改为按关键帧
       // 冷启重喂（一次性成本 ≤ GOP 长度，正确性优先——挂起换不来任何帧）。
+      trace("rescue_cold", { target, lastFedSample, hardEnd: feedEndFor(target) });
       startSample = keyTarget;
       coldStart(startSample);
     }
   }
   samplesFed = 0;
   fromKeyframe = startSample;
-  void feedSamples(samples, startSample, target, timescale, request);
+  const generation = ++feedGeneration; // 换代：作废任何在途旧批循环
+  void feedSamples(samples, startSample, target, timescale, request, generation);
   fedIndex = target;
 }
 
 /** B12：按需读取采样区间并喂包（Range 源字节缓存合并连续读）。
  *  目标后额外喂 LOOKAHEAD 采样：HEVC/B 帧重排需要前方参考帧才吐目标输出。
  *  上限必须小：hold 住的 VideoFrame 占 D3D11 输出表面池（环 3 + 暂存 2 已接近
- *  硬件池边界，8 层实测解码停摆）。 */
+ *  硬件池边界，8 层实测解码停摆）。
+ *  喂包终点（2026-09-28 真浏览器 trace 修正）：解码器释放滞后按 **pts 排序
+ *  距离**计（D3D11 HEVC 实测：喂 N 包释放窗口内 pts 排序前 N−2 帧），不是
+ *  采样索引距离。B 帧交错流上目标的 pts 排序位置可能远超其索引（真机素材：
+ *  目标索引 5 的 pts 排序位 8——喂到索引 8 只释放排序前 7，目标永不释放 →
+ *  45s 看门狗挂起）。终点改为覆盖「目标排序位置 + LOOKAHEAD」的全部原索引
+ *  （sampleIndex.maxSampleIdxByRank 前缀最大；交错流上可能 > target+LA）。 */
 const BFRAME_LOOKAHEAD = 3;
+
+/** 喂包区间终点：覆盖目标 pts 排序位置 rank+偏移 以前的全部采样。
+ *  偏移 = max(BFRAME_LOOKAHEAD, 交错跨度)：D3D11 释放滞后随 B 金字塔结构
+ *  浮动（真浏览器 trace：同一素材 2~3+），交错跨度是其确定性上界。 */
+function feedEndFor(target: number): number {
+  if (!sampleIndex) return target;
+  const pts = sampleIndex.ptsUs[target]!;
+  // 目标的排序位置（lowerBound；pts 相同并列时取首位置即可——保守侧）
+  let lo = 0;
+  let hi = sampleIndex.sortedPtsUs.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (sampleIndex.sortedPtsUs[mid]! < pts) lo = mid + 1;
+    else hi = mid;
+  }
+  const offset = Math.max(BFRAME_LOOKAHEAD, sampleIndex.maxStagger + 1);
+  const rankEnd = Math.min(sampleIndex.count - 1, lo + offset);
+  const idxEnd = sampleIndex.maxSampleIdxByRank[rankEnd]!;
+  return Math.max(target, Math.min(sampleIndex.count - 1, idxEnd));
+}
 
 async function feedSamples(
   samples: Array<{ offset: number; size: number; dts: number; ctsOffset: number; sync: boolean }>,
@@ -478,24 +534,43 @@ async function feedSamples(
   target: number,
   timescale: number,
   request: DecodeRequest,
+  generation: number,
 ): Promise<void> {
   try {
-    const end = Math.min(samples.length - 1, target + BFRAME_LOOKAHEAD);
-    for (let index = startSample; index <= end; index++) {
-      const sample = samples[index]!;
-      const chunkData = await rangeSource!.read(sample.offset, sample.size);
-      const chunk = new EncodedVideoChunk({
-        type: sample.sync ? "key" : "delta",
-        timestamp: ((sample.dts + sample.ctsOffset) / timescale) * 1e6,
-        data: chunkData,
-      });
-      decoder!.decode(chunk);
-      samplesFed += 1;
-      lastFedSample = index;
+    // 输出驱动的增量喂包（2026-09-28 真浏览器定位重构）：解码器释放滞后
+    // 随 B 金字塔结构与驱动行为浮动（同素材实测 2~7+），任何静态喂包终点
+    // 公式都无法保证目标输出必达——喂少了挂 45s 看门狗，懒 flush 又与
+    // 后续喂包竞态（flush 后需关键帧）。改为按批喂包 + 每批后检查：
+    // 目标匹配即停（正常帧 1~2 批），未匹配继续下一批直至目标达成或
+    // 喂到文件尾（远端 EOF 时由看门狗兜底）。批大小取「交错跨度+1」
+    // （maxStagger，见 sampleIndex）保证每批至少推进一个排序位。
+    // 代际守卫（feedGeneration）：匹配完成/冷启重建都会使本循环失效——
+    // 每步检查代际，不同代立即退出，绝不让两个喂包流交错喂同一解码器。
+    const batch = Math.max(BFRAME_LOOKAHEAD, sampleIndex?.maxStagger ?? 0) + 1;
+    const hardEnd = Math.min(samples.length - 1, feedEndFor(target));
+    let fed = startSample - 1;
+    while (fed < hardEnd) {
+      const batchEnd = Math.min(hardEnd, fed + batch);
+      for (let index = fed + 1; index <= batchEnd; index++) {
+        if (generation !== feedGeneration) return; // 换代：让位新喂包流
+        const sample = samples[index]!;
+        const chunkData = await rangeSource!.read(sample.offset, sample.size);
+        const chunk = new EncodedVideoChunk({
+          type: sample.sync ? "key" : "delta",
+          timestamp: ((sample.dts + sample.ctsOffset) / timescale) * 1e6,
+          data: chunkData,
+        });
+        decoder!.decode(chunk);
+        samplesFed += 1;
+        lastFedSample = index;
+        trace("feed", { index, batchEnd, gen: generation, dq: decoder?.decodeQueueSize ?? -1, stash: readyByPts.size });
+      }
+      fed = batchEnd;
+      // 批间让步：输出回调在任务队列中落地后再检查占位。
+      await new Promise<void>(resolve => setTimeout(resolve, 0));
+      if (generation !== feedGeneration) return; // 换代：让位新喂包流
+      if (activeRequest?.id !== request.id) return; // 目标已匹配：立即停喂
     }
-    // 不在此 flush()：VideoDecoder 在 flush 后要求下一包为关键帧，会打断
-    // 同 GOP 顺序解码（真机报 "A key frame is required after configure() or
-    // flush()"）。B 帧靠上方 LOOKAHEAD 前方参考帧即可吐出目标输出。
   } catch (error) {
     // 喂包失败（Range 读失败等）必须立即释放 activeRequest 并续队：旧实现
     // 只 post error 不清占位——客户端已收到错误并继续发新请求，但 worker 的
@@ -544,6 +619,7 @@ function decodeFrame(id: number, frameN: number, fps: number): void {
     return;
   }
   cacheMisses += cacheEnabled ? 1 : 0;
+  trace("enqueue", { id, frameN, target, samplePtsUs });
   decodeQueue.push({ id, frameN, targetUs, sampleIndex: target, samplePtsUs });
   pumpQueue();
 }

@@ -118,7 +118,9 @@ describe("B 帧 ctts 重排播放仿真（真实采样表）", () => {
   );
   const fullDisplay = displayTargets(index, 0, index.count);
   const depth = maxBackstepOf(index, fullDisplay);
-  const adaptiveCap = Math.min(16, Math.max(4, depth + LOOKAHEAD + 1));
+  // worker init 同式：min(背压上限 6, max(4, 回跳深度+2))——总 hold 预算
+  // （stash+anchor+中间环）须低于解码器输出背压阈值（真浏览器实测 ~13）。
+  const adaptiveCap = Math.min(6, Math.max(4, depth + 2));
 
   it("fixture 是 B 帧素材且带真实重排（守卫：fixture 覆盖目标形态）", () => {
     expect(index.count).toBeGreaterThan(1000);
@@ -131,8 +133,8 @@ describe("B 帧 ctts 重排播放仿真（真实采样表）", () => {
       minGap = Math.min(minGap, index.sortedPtsUs[k]! - index.sortedPtsUs[k - 1]!);
     }
     expect(minGap).toBeGreaterThan(16_667);
-    // 自适应容量公式（worker init 同式）
-    expect(adaptiveCap).toBe(depth + LOOKAHEAD + 1);
+    // 自适应容量公式（worker init 同式；背压上限封顶）
+    expect(adaptiveCap).toBe(Math.min(6, Math.max(4, depth + 2)));
   });
 
   it("seek 后播放（显示序回跳流）：旧配置挂起 47 帧整 GOP 重建——修复后零挂起零错帧", () => {

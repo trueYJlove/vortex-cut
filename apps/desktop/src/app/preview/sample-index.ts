@@ -24,6 +24,15 @@ export interface SampleIndex {
   readonly sortedPtsUs: Float64Array;
   /** 关键帧原始索引升序序列（stss 或全关键帧回退）。 */
   readonly keyframes: Uint32Array;
+  /** 排序空间前缀最大索引：maxSampleIdxByRank[r] = max(sampleByPts[0..r])。
+   *  B 帧交错流上「排序位置 r 以前的全部帧」散布在原索引 0..maxSampleIdxByRank[r]；
+   *  解码器释放滞后按 pts 排序距离计（D3D11 HEVC 实测随 B 金字塔结构浮动），
+   *  喂包区间必须覆盖到该前缀最大索引才能保证释放目标。 */
+  readonly maxSampleIdxByRank: Uint32Array;
+  /** 交错跨度：max(i − rank(i))，即原索引超前其 pts 排序位置的最大值。
+   *  解码器重排缓冲 ≤ has_b_frames+1 ≤ 交错跨度——喂包终点在排序空间的
+   *  安全偏移量（覆盖任意释放滞后）。 */
+  readonly maxStagger: number;
 }
 
 /** demux 后构建索引（一次性成本 O(N log N)，108k 样本 <10ms）。 */
@@ -48,7 +57,17 @@ export function buildSampleIndex(samples: Array<{ dts: number; ctsOffset: number
   for (let index = 0; index < count; index++) {
     if (samples[index]!.sync) keys.push(index);
   }
-  return { count, ptsUs, sampleByPts, sortedPtsUs, keyframes: new Uint32Array(keys) };
+  // 排序空间前缀最大索引（B 帧交错流的喂包覆盖计算，见 decodeSamples）
+  const maxSampleIdxByRank = new Uint32Array(count);
+  let runningMax = 0;
+  let maxStagger = 0;
+  for (let r = 0; r < count; r++) {
+    const idx = sampleByPts[r]!;
+    if (idx > runningMax) runningMax = idx;
+    maxSampleIdxByRank[r] = runningMax;
+    if (idx - r > maxStagger) maxStagger = idx - r;
+  }
+  return { count, ptsUs, sampleByPts, sortedPtsUs, keyframes: new Uint32Array(keys), maxSampleIdxByRank, maxStagger };
 }
 
 /** 二分比较计数（测试断言 O(log N) 用；生产忽略）。 */
