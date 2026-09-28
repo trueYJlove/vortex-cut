@@ -142,10 +142,15 @@ export class DecodeWorker {
     if (this.disposed) return Promise.reject(new Error("decode worker disposed"));
     return new Promise((resolve, reject) => {
       const id = this.nextId++;
+      // 客户端兜底期限 = worker 看门狗（45s）+ 传播余量：worker 在处理请求时
+      // 它的看门狗错误（类型化 message）是权威信号；客户端先到期会制造
+      // "假超时"（主线程 GC/忙导致 postMessage 延迟、worker 其实健康），
+      // 并被 maybeFallBackToFfmpeg 的 /timeout/ 正则误判 → 整输入永久降级
+      // 到慢速 FFmpeg IPC 路径（2026-09-28 真机"丢帧不多但持续卡"的一环）。
       const timeout = window.setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`decode timeout for frame ${frameN}（worker 侧无匹配输出或长 GOP 冷启超时）`));
-      }, 8_000);
+      }, 50_000);
       this.pending.set(id, {
         resolve: frame => { window.clearTimeout(timeout); resolve(frame); },
         reject: error => { window.clearTimeout(timeout); reject(error); },

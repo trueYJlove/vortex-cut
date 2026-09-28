@@ -242,6 +242,11 @@ async def decode_nv12_frames(
         "-an", "-sn",
         "-vf", f"select='{select}'",
         "-fps_mode", "passthrough",
+        # select 只筛输出不停输入：不加输出上限，ffmpeg 会为评估 select 把
+        # 窗口之后的帧全部解完（真机 59s 素材窗口在后半段时实测 2s+/窗，
+        # 70ms/帧——桌面端 FFmpeg 降级路径"丢帧不多但持续卡"的根因）。选中
+        # 帧数即输出帧数，-frames:v 到点即停，实测同窗口 2033ms → 320ms。
+        "-frames:v", str(len(unique_indices)),
         "-f", "rawvideo",
         "-pix_fmt", "nv12",
         "pipe:1",

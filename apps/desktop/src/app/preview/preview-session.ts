@@ -91,6 +91,8 @@ interface InputRig {
   worker: MediaDecoder | null;
   /** 超时后降级重试：preferBackend=ffmpeg 的创建参数快照。 */
   decoderRetry?: { ticket: string; width: number; height: number; cacheCapBytes: number; refreshTicket: () => Promise<string>; decodeFrames?: MediaDecoderFactoryInput["decodeFrames"] };
+  /** 连续超时类失败计数（成功解码清零；≥2 才降级 FFmpeg——见 maybeFallBackToFfmpeg）。 */
+  timeoutStrikes?: number;
   /** 播放/seek 共用的环形簿记：槽位按 ringSeq 轮转，srcN=-1 表示空。 */
   ring: Array<RingSlot | null>;
   ringSeq: number;
@@ -877,10 +879,17 @@ export class PreviewSession {
    *  直接作废（解码前后双重检查；作废帧 close 释放）——否则 scrub 时新 seek
    *  的上传会排在整条过期预取队尾（worker 化后每任务含双跳 RTT，实测 seek
    *  p95 翻倍的根因）。 */
-  /** 解码超时/看门狗 → 降级 ffmpeg 后端重试一次（WebCodecs 对长 GOP HEVC 可能过慢）。 */
+  /** 解码超时/看门狗 → 降级 ffmpeg 后端重试一次（WebCodecs 对长 GOP HEVC 可能过慢）。
+   *  2026-09-28 收紧：单次超时不再永久降级——降级后整输入落入 FFmpeg IPC 路径
+   *  （每窗口 spawn ffmpeg，软解吞吐有限），一次瞬时抖动（主线程 GC、网络读慢、
+   *  看门狗误报陈旧请求）就把会话钉死在慢路径，恰是"丢帧不多但持续卡"的形态。
+   *  现改为**连续 2 次**超时类失败才降级（计数在成功后清零）；错误类别不变
+   *  （timeout/watchdog/key frame is required）。 */
   private async maybeFallBackToFfmpeg(rig: InputRig, error: unknown): Promise<boolean> {
     const message = error instanceof Error ? error.message : String(error);
     if (!/timeout|watchdog|key frame is required/i.test(message)) return false;
+    rig.timeoutStrikes = (rig.timeoutStrikes ?? 0) + 1;
+    if (rig.timeoutStrikes < 2) return false;
     const retry = rig.decoderRetry;
     const factory = this.decoderFactory;
     if (!retry || !factory || !retry.decodeFrames) return false;
@@ -924,6 +933,7 @@ export class PreviewSession {
         this.decodeTimes.push(performance.now() - decodeStart);
         editorPerf.record("decode", performance.now() - decodeStart, this.perfId, perfRequest, epoch, srcN, perfInput);
         if (this.decodeTimes.length > 600) this.decodeTimes.splice(0, this.decodeTimes.length - 600);
+        rig.timeoutStrikes = 0; // 成功解码：连续超时计数清零（偶发抖动不累积降级）
       } finally {
         this.decodeInFlight -= 1;
       }

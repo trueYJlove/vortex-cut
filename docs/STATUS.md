@@ -139,6 +139,7 @@ PiP 自由定位、A1 音频混音、代理与权威预览、H.264/AAC 导出与
 | **4K60 长 GOP 性能** | ✅ **已解决（2026-09-24，ADR-0005 阶段 1）**：预算准入使付不起的回退**根本不启动**——4K60 HEVC 长 GOP 由 **40.5 → 5.4 s/分**（样本回落为 12 个 I 帧，`density_status='sparse'` 如实标记）。常态 GOP 1s 保持 `full`。见 `CV_SAMPLING_BUDGET_IMPLEMENTATION_2026-09-24.md` | 同上 §4.2 + 实施记录 §3 |
 | CV 采样密度参数暴露 | ✅ **已落地（2026-09-25，ADR-0005 阶段 2 + Desktop）**：契约旋钮 + 分析选项 UI + 摘要密度标记 | `CV_DENSITY_KNOB_IMPLEMENTATION_2026-09-24.md` / `DESKTOP_DENSITY_KNOB_2026-09-25.md` |
 | 4K60 常态约 1.0s 未归因差异 | 同素材同路径三次复跑一致（7.3/7.8/7.5 vs 原 5.4），已归因约 19% 为机器变慢、**剩余约 1.0s 未归因**。仍远低于 10 门限 | 实施记录 §4 L1 |
+| **HEVC/B 帧预览播放卡顿** | ✅ **已解决（2026-09-28）**：三层修复——① Core `decode_nv12_frames` 加 `-frames:v`（select 不停输入，旧实现把窗口后全部帧解完：真机素材实测 2033ms/30 帧窗 → 320ms）；② decode-worker GOP 锚改 `lastTargetKey` + 暂存容量按重排深度自适应 + 输出匹配容差整帧→半帧 + 回跳冷启救援（防看门狗挂起）；③ 降级门控连续 2 次超时才落 FFmpeg（防单次抖动钉死慢路径）。仿真回归 `tests/decode-reorder-playback.test.ts`（真实采样表 6 项）。真机复测待用户侧确认 | 本会话定位记录（B 帧素材 fdf0f0e2：回跳深度 6 / GOP 88） |
 | 细粒度进度仍缺失 | `analyze_video` 的死参数已删除，但未实现替代；长分析无中途进度 | 实施记录 §4 L2 |
 | json_schema 适配器被网关拒 | provider 兼容面窄于设计，script 类适配器为唯一通路 | `AI_VALIDATION_REPORT_2026-09-20.md` §实验 B |
 | Provider 域独立工作单 | 代理与探测总预算**均已交付**；本条保留用于跟踪 provider 域后续 | — |

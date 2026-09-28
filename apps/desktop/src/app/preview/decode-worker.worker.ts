@@ -124,20 +124,31 @@ function armActiveRequestTimer(request: DecodeRequest): void {
 let fedIndex = -1; // 最近一次**请求目标**（顺序判定用；勿与已喂采样游标混用）
 /** 已喂入解码器的最大采样索引（含 B 帧 lookahead；顺序请求从 lastFedSample+1 续喂）。 */
 let lastFedSample = -1;
+/** 最近一次请求**目标采样**所在 GOP 的关键帧索引（GOP 连续性判定锚）。
+ *  绝不能用 lastFedSample（含 +LOOKAHEAD 前瞻）做该判定：目标+3 越过下一
+ *  GOP 关键帧时，keyframeAtOrBefore(lastFedSample) 已落在下个 GOP——真实
+ *  请求流仍在本 GOP 内回跳（B 帧重排，最大回跳 6 采样），误判"跨 GOP"即
+ *  冷启重建：整 GOP（真机 88 采样）重解 + clearReadyByPts 丢弃全部已解
+ *  暂存 → 连环重建风暴（每 GOP 边界 3 次、每 2.93s 卡一下的根因）。 */
+let lastTargetKey = -1;
 /** A03 顺播定位游标：上次 locateByPts 命中的排序位置（目标单调时局部推进）。 */
 let ptsCursor = -1;
 let samplesFed = 0;
 let fromKeyframe = -1;
 
 /** 解码器工厂：output 按选中采样 PTS 匹配；其余输出按 PTS 暂存供后续请求取用
- *  （lookahead 会提前解出后续帧，若当时丢弃则下个请求等不到 → decode timeout）。
- *  MAX=2：每帧都是 GPU 表面，多 hold 会耗尽 D3D11 输出池导致解码停摆。 */
+ *  （lookahead 会提前解出后续帧，若当时丢弃则下个请求等不到 → decode timeout）。 */
 const readyByPts = new Map<number, VideoFrame>();
-/** B 帧重排窗：has_b_frames=2 的素材需保留 ≥3 帧已解输出供呈现序回填。 */
-const READY_BY_PTS_MAX = 4;
+/** B 帧重排暂存窗（lookahead 已解出、等待后续请求取用的输出）。
+ *  容量必须 ≥ 素材重排深度（呈现序回跳距离）+ LOOKAHEAD：小于它，
+ *  FIFO 驱逐会丢掉"即将被请求"的输出 → 请求无包可喂 → 看门狗/超时。
+ *  定长常量无法覆盖所有编码器（本仓真机素材 maxBackstep=6 旧值=4 丢帧）；
+ *  init 按 ctts 计算实际深度并抬高（见 init）。上限守住 D3D11 输出表面池。 */
+const READY_BY_PTS_MIN = 4;
+let readyByPtsMax = READY_BY_PTS_MIN;
 
 function stashByPts(frame: VideoFrame): void {
-  if (readyByPts.size >= READY_BY_PTS_MAX) {
+  if (readyByPts.size >= readyByPtsMax) {
     const oldest = readyByPts.keys().next().value;
     if (oldest !== undefined) {
       const old = readyByPts.get(oldest);
@@ -166,9 +177,17 @@ function createDecoder(): VideoDecoder {
     output: (frame: VideoFrame) => {
       resDecoded += 1;
       const request = activeRequest;
-      if (request && Math.abs(frame.timestamp - request.samplePtsUs) <= 33_334) {
-        // 与取样容差同宽（一帧@30fps）；锚在 samplePtsUs。更窄会在 VFR/HEVC
-        // 上永不命中 → 超时；更宽会错配相邻帧。用最近邻二次确认。
+      // 半帧容差（一帧@30fps 的一半）：锚在 samplePtsUs（locateByPts 已完成
+      // 最近邻选择）。历史教训两次：
+      // - 33_334（整帧）容差 ≥ 相邻帧间距 33_333us：B 帧金字塔内先到的相邻
+      //   输出会偷走匹配（activeRequest 拿到错帧、真目标输出被挤出暂存链）
+      //   → 下个请求 miss → 同 GOP 无包可喂 → 看门狗超时（2026-09-28 边界
+      //   仿真复现，tests/decode-reorder-playback.test.ts）。
+      // - 1_000（1ms）容差在 HEVC/VFR 半帧窗上永不命中 → decode timeout
+      //   （e9201e9 真机现场）。
+      // 半帧是两者平衡：相邻帧间距 ≥ 33ms > 16.7ms，永不偷相邻；VFR 半帧
+      // 偏移 16.7ms 仍可命中。
+      if (request && Math.abs(frame.timestamp - request.samplePtsUs) <= 16_667) {
         activeRequest = null;
         clearActiveRequestTimer();
         pendingAnchorPts = -1;
@@ -203,6 +222,8 @@ function createDecoder(): VideoDecoder {
       } catch { /* reset 失败则后续请求自行暴露 */ }
       intermediateRing.length = 0;
       fedIndex = -1;
+      lastFedSample = -1;
+      lastTargetKey = -1; // reset 后热态游标失效：下个请求按 GOP 锚重新判定
       if (request) post({ type: "error", id: request.id, message: `decoder error: ${errorText(error)}` });
       else post({ type: "error", id: null, message: `decoder error: ${errorText(error)}` });
       pumpQueue();
@@ -283,6 +304,36 @@ async function init(url: string, cacheFrames: number, hasTicketRefresh: boolean,
   const demuxed = demuxResult;
   sampleIndex = buildSampleIndex(demuxed.samples, demuxed.timescale); // A03：一次性索引
   ptsCursor = -1;
+  // 重排深度（呈现序回跳距离）：B 帧素材的显示序请求流会周期性回跳——已喂
+  // 游标（含 LOOKAHEAD）到下一个待请求目标之间最多隔这么多个采样。暂存窗
+  // 容量不足会 FIFO 驱逐即将被请求的输出（真机素材 ctts 回跳 6/旧容量 4 丢帧
+  // → 每 GOP 边界连环冷启重建）。按实测深度抬高，上限守住 D3D11 表面池。
+  // fps 此处未知（decode 调用才带）：按 sampleIndex 排序 PTS 的相邻差分近似
+  // 帧率（VFR 下取 p50），误差只影响逐帧对齐精度——回跳深度上界由 LOOKAHEAD
+  // 余量兜住。
+  {
+    const LOOKAHEAD = BFRAME_LOOKAHEAD;
+    // 帧率近似：排序 PTS 相邻差分的中位数（VFR/ctts 单调场景稳健）。
+    const gaps: number[] = [];
+    for (let k = 1; k < sampleIndex.sortedPtsUs.length; k++) {
+      gaps.push(sampleIndex.sortedPtsUs[k]! - sampleIndex.sortedPtsUs[k - 1]!);
+    }
+    gaps.sort((a, b) => a - b);
+    const medianGap = gaps.length ? gaps[Math.floor(gaps.length / 2)]! : 0;
+    if (medianGap > 0) {
+      let fedBoundary = -1;
+      let maxBackstep = 0;
+      for (let k = 0; k < sampleIndex.sortedPtsUs.length; k++) {
+        const target = sampleIndex.sampleByPts[k]!;
+        if (target < 0) continue;
+        if (fedBoundary >= 0 && target < fedBoundary) {
+          maxBackstep = Math.max(maxBackstep, fedBoundary - target);
+        }
+        fedBoundary = Math.max(fedBoundary, target + LOOKAHEAD);
+      }
+      readyByPtsMax = Math.min(16, Math.max(READY_BY_PTS_MIN, maxBackstep + LOOKAHEAD + 1));
+    }
+  }
   cacheEnabled = cacheFrames > 0;
   cacheCap = cacheFrames;
   const config: VideoDecoderConfig = {
@@ -362,34 +413,48 @@ function decodeSamples(request: DecodeRequest): void {
   // `target > fedIndex` 判顺序——HEVC/B 帧 ctts 使呈现序采样号上下跳
   // （fdf0f0e2 真机：frame1→sample3, frame2→sample2），每次回跳都冷启
   // 会把 720p 也解到超时。
+  //
+  // GOP 连续性锚定**请求目标的 GOP**（lastTargetKey），不用含 LOOKAHEAD 的
+  // lastFedSample：目标+3 前瞻越过下个关键帧时 keyframeAtOrBefore(lastFedSample)
+  // 已落在下个 GOP，而真实请求流仍在本 GOP 回跳（B 帧重排深度可达 6）——
+  // 误判跨 GOP = 冷启重建整 GOP（真机 88 采样）+ clearReadyByPts 丢弃全部
+  // 已解暂存，边界处连续 3 帧请求全部触发 → 每 2.93s 一次重建风暴（周期性
+  // 卡顿根因；见 tests/decode-reorder-playback.test.ts 仿真）。
   const keyTarget = keyframeAtOrBefore(sampleIndex, target);
-  const keyFed = lastFedSample >= 0 ? keyframeAtOrBefore(sampleIndex, lastFedSample) : -1;
-  const sameGop = lastFedSample >= 0 && keyFed === keyTarget;
-  let startSample = target;
-  if (!sameGop) {
+  const sameGop = lastTargetKey >= 0 && lastTargetKey === keyTarget;
+  /** 冷启重建（decoder 整例重建 + 关键帧重喂 + 清暂存）。 */
+  const coldStart = (start: number): void => {
     // A03：关键帧回退二分（原逐样本线性回退，长 GOP 深 seek O(GOP)）
-    startSample = keyTarget;
     releaseGopAnchor();
     drainIntermediateRing();
     clearReadyByPts();
     // 整例重建：reset() 无法清零长解码历史在 D3D11 会话内的残留状态
     //（实证：连续解码整片后 reset+关键帧重解仍产出花屏，新 Worker 实例则干净；
     // evidence/m3_2/playback-repro fixed10 vs fixed14/15 postmortem）。
-    try { decoder.close(); } catch { /* 已关闭 */ }
+    try { decoder!.close(); } catch { /* 已关闭 */ }
     decoder = createDecoder();
     decoder.configure(decoderConfig as VideoDecoderConfig);
     fedIndex = -1;
-    lastFedSample = startSample - 1;
+    lastFedSample = start - 1;
+    lastTargetKey = keyTarget;
     // 冷启首个输出 = 关键帧 IDR：持有为 GOP 锚（见 gopAnchor 注释）
-    pendingAnchorPts = ((samples[startSample]!.dts + samples[startSample]!.ctsOffset) / timescale) * 1e6;
+    pendingAnchorPts = ((samples[start]!.dts + samples[start]!.ctsOffset) / timescale) * 1e6;
+  };
+  let startSample = target;
+  if (!sameGop) {
+    startSample = keyTarget;
+    coldStart(startSample);
   } else {
     // 同 GOP：从上次已喂游标续喂；target 已在已喂区间则只补 lookahead
     startSample = lastFedSample + 1;
     const needEnd = target + BFRAME_LOOKAHEAD;
     if (startSample > needEnd) {
-      samplesFed = 0;
-      fromKeyframe = lastFedSample;
-      return;
+      // 目标采样已被喂过但输出不在暂存（容量驱逐 / 已被前次请求消费后重放）：
+      // 旧行为静默 return → activeRequest 等一个不会来的输出 → 45s 看门狗。
+      // 回跳距离超过暂存覆盖（任意 scrub/变速回退）时这是常态，改为按关键帧
+      // 冷启重喂（一次性成本 ≤ GOP 长度，正确性优先——挂起换不来任何帧）。
+      startSample = keyTarget;
+      coldStart(startSample);
     }
   }
   samplesFed = 0;
@@ -458,8 +523,10 @@ function decodeFrame(id: number, frameN: number, fps: number): void {
   const samplePtsUs = sampleIndex.ptsUs[target]!;
   const staged = takeByPts(samplePtsUs);
   if (staged) {
-    // 同步推进请求游标：否则后续跨关键帧误判需冷启（真机 2s 后卡死）
+    // 同步推进请求游标：否则后续跨关键帧误判需冷启（真机 2s 后卡死）。
+    // GOP 锚同样推进（stash 回填 = 目标所在 GOP 与热态一致）。
     if (target > fedIndex) fedIndex = target;
+    lastTargetKey = keyframeAtOrBefore(sampleIndex, target);
     resPosted += 1;
     post({ type: "frame", id, frameN, timestampUs: staged.timestamp, fromCache: true, samplesFed: 0, fromKeyframe: target, allocationSize: staged.allocationSize(), frame: staged }, [staged]);
     return;
