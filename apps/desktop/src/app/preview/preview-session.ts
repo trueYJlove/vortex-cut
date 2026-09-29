@@ -1700,7 +1700,12 @@ export class PreviewSession {
       // 结束判定 = 合成推进到片尾（而非时钟到达）：时钟先到时等待合成追平，
       // 否则会提前停在片尾、且每次续播止点渐近（用户实测 10.12→10.17→10.19）。
       // 片尾解码长期不可达的兜底：2s 无推进则结束（已知驱动限制场景）。
+      // P33 W2.6：停滞兜底结束时把播放头**吸附到末帧**——片尾截断 GOP 的尾帧
+      // 永久不可达时 currentFrame 停在 last-3，回卷条件（currentFrame >= last）
+      // 永不成立，再点播放 = 从卡死点原地续播再停滞 2s（真机「播放到尾后
+      // 再点播放无效」）。吸附后按播放正常回卷从头；画面保持最后定格帧。
       if (this.currentFrame >= last || (target >= last && now - this.lastAdvanceWall > 2000)) {
+        this.currentFrame = last;
         this.pause();
         this.onEnded?.();
         return;

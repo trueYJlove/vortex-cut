@@ -28,7 +28,8 @@ type Outbound =
   | { type: "frame"; id: number; frameN: number; timestampUs: number; fromCache: boolean; samplesFed: number; fromKeyframe: number; allocationSize: number; timing: DecodeTiming | null; frame: VideoFrame }
   | { type: "done"; id: number | null; note: string }
   | { type: "error"; id: number | null; message: string }
-  | { type: "ticket-refresh-request"; id: number };
+  | { type: "ticket-refresh-request"; id: number }
+  | { type: "trace"; event: string; detail: Record<string, unknown> };
 
 /** 解码 RTT 分段计时（P33 规划门 §3.1；decodeTiming=true 时随 frame 消息捎带，
  *  默认关、生产零开销）。两段均为 worker 时钟内的**时长**（跨线程时钟原点
@@ -159,9 +160,6 @@ let lastFedSample = -1;
  *  包序错乱破坏参考链（真浏览器实验：输出停在排序位 9 后永久停止）。
  *  每次启动/重启动喂包前递增；批循环每步检查代际，不同代立即退出。 */
 let feedGeneration = 0;
-/** flush 救援进行中（救援→reset→续队的窗口期）：pumpQueue 在此期间不启动
- *  新请求——flush 后解码器「需关键帧」，新请求的 delta 喂包会同步抛错。 */
-let flushRecovering = false;
 /** 最近一次请求**目标采样**所在 GOP 的关键帧索引（GOP 连续性判定锚）。
  *  绝不能用 lastFedSample（含 +LOOKAHEAD 前瞻）做该判定：目标+3 越过下一
  *  GOP 关键帧时，keyframeAtOrBefore(lastFedSample) 已落在下个 GOP——真实
@@ -352,10 +350,10 @@ function requestTicketRefresh(): Promise<string> {
   });
 }
 
-async function init(url: string, cacheFrames: number, hasTicketRefresh: boolean, cacheCapBytes?: number, forceSwDecodeArg?: boolean, decodeTimingArg?: boolean): Promise<void> {
+async function init(url: string, cacheFrames: number, hasTicketRefresh: boolean, cacheCapBytes?: number, forceSwDecodeArg?: boolean, decodeTimingArg?: boolean, verifyTraceArg?: boolean): Promise<void> {
   forceSwDecode = forceSwDecodeArg === true;
   decodeTiming = decodeTimingArg === true;
-  VERIFY_TRACE = (self as unknown as { VERIFY_TRACE?: boolean }).VERIFY_TRACE === true;
+  VERIFY_TRACE = verifyTraceArg === true || (self as unknown as { VERIFY_TRACE?: boolean }).VERIFY_TRACE === true;
   // B12：Range 源初始化（bytes=0-65535 探测 + moov-only 解析）——整文件
   // arrayBuffer 下载已移除。票据 TTL 到期由 HttpRangeSource 受控续票
   //（有限一次，相同 range 重发）；续票经 ticket-refresh 消息往返桥接到
@@ -455,8 +453,49 @@ function cachePut(sampleIndex: number, frame: VideoFrame): void {
   cacheBytes += frame.allocationSize();
 }
 
+/** P33 W2.6：EOF 重排滞留的定格替代（2026-09-29 真机「播放到尾再点播放无效」根修）。
+ *  尾 GOP 截断素材（真机素材：88 帧 GOP 尾部仅 20 帧，最后 3 帧滞留 D3D11
+ *  重排缓冲永不吐出）逐帧报错 → 片尾形成永久洞 → currentFrame 停在 last-3、
+ *  播放靠 2s 停滞兜底结束且 play() 回卷条件（currentFrame >= last）永不成立
+ *  → 「再点播放无效」。改为贴标准播放器「尾帧定格」语义：取 stash/缓存中
+ *  pts ≤ 目标的最近持有帧 clone 回填（不消耗持有者所有权；同时 cachePut 到
+ *  目标位，后续同目标请求直接缓存命中）。无任何持有帧时返回 false，调用方
+ *  回落原报错路径（strike/降级兜底）。 */
+function postEofFreezeFrame(request: DecodeRequest): boolean {
+  const targetPts = request.samplePtsUs;
+  let donor: VideoFrame | null = null;
+  let donorPts = -Infinity;
+  for (const [pts, frame] of readyByPts) {
+    if (pts <= targetPts + 1_000 && pts > donorPts) { donorPts = pts; donor = frame; }
+  }
+  if (!donor && cacheEnabled) {
+    let donorIdx = -1;
+    for (const key of cache.keys()) {
+      if (key > request.sampleIndex || key <= donorIdx) continue;
+      const pts = sampleIndex?.ptsUs[key];
+      if (pts === undefined || pts <= targetPts + 1_000) donorIdx = key;
+    }
+    if (donorIdx >= 0) donor = cache.get(donorIdx) ?? null;
+  }
+  if (!donor) return false;
+  activeRequest = null;
+  clearActiveRequestTimer();
+  trace("eof_freeze_frame", { target: request.sampleIndex, donorPts: donorPts === -Infinity ? null : donorPts });
+  // 先 clone 出全部副本再触碰 cachePut：cachePut 满容驱逐可能恰好作用于
+  // donor 的底层帧（同 pts 旧条目 close → 后续 donor.clone() 抛
+  // "Cannot clone closed VideoFrame"，user-eof-r1 实测 frame 1774）。
+  const out = donor.clone();
+  let cached: VideoFrame | null = null;
+  try { cached = donor.clone(); } catch { /* donor 已关闭：out 已在手，仅放弃缓存 */ }
+  if (cached && cacheEnabled) cachePut(request.sampleIndex, cached);
+  else cached?.close();
+  resPosted += 1;
+  post({ type: "frame", id: request.id, frameN: request.frameN, timestampUs: out.timestamp, fromCache: true, samplesFed: 0, fromKeyframe: request.sampleIndex, allocationSize: out.allocationSize(), timing: null, frame: out }, [out]);
+  pumpQueue();
+  return true;
+}
+
 function pumpQueue(): void {
-  if (flushRecovering) return; // flush 救援窗口：reset 完成后续队
   while (!activeRequest && decodeQueue.length) {
     const request = decodeQueue.shift()!;
     if (decodeTiming) request.startedMs = performance.now(); // P33：出队开始处理
@@ -527,11 +566,16 @@ function decodeSamples(request: DecodeRequest): void {
   // 同 GOP：从上次已喂游标续喂；target 已在已喂区间则只补 lookahead
   const needEnd = feedEndFor(target);
   if (lastFedSample + 1 > needEnd) {
-    // P33 W2.5：已喂至文件尾且目标仍 miss —— 重排尾帧滞留且 flush 实测
-    // 永不落定（eof-flush-r1..r3 定位：D3D11 硬解尾帧缺后续参考，flush()
-    // promise 挂起 + reset 丢排队输出，重排队冷启再撞同一堵墙）。快速报错
-    // （消息含 watchdog 命中降级正则）交 FFmpeg B 后端兜底，勿占 45s 看门狗。
+    // P33 W2.5：已喂覆盖 needEnd 但目标仍 miss —— 输出滞留重排缓冲。
+    // P33 W2.6（user-eof-r1/r2 定稿）：**废弃 flush 救援**（eof-flush-r1..r3：
+    // D3D11 截断尾 GOP 上 flush() promise 永不落定 + reset 丢排队输出，
+    // user-eof-r2 复现 45s 看门狗）——重排滞留的正确释放是**继续喂后续
+    // 采样**（B 塔参考到位即吐，feedSamples 本就输出驱动、匹配即停）。
+    // 续喂终点 = 文件尾（有界）：目标输出在续喂中到达即正常返回；
+    // 喂到文件尾仍 miss（截断尾 GOP 的最后几帧，真机素材 1774-1776）
+    // = 永久不可达 → 定格替代（尾帧定格语义）或快速报错兜底。
     if (lastFedSample >= sampleIndex.count - 1) {
+      if (postEofFreezeFrame(request)) return;
       trace("eof_reorder_stuck_rescue", { target, lastFedSample, needEnd, dq: decoder?.decodeQueueSize ?? -1 });
       activeRequest = null;
       clearActiveRequestTimer();
@@ -539,41 +583,13 @@ function decodeSamples(request: DecodeRequest): void {
       pumpQueue();
       return;
     }
-    // 目标的喂包覆盖已被之前的请求完成（B 帧交错流上回跳目标的排序覆盖
-    // 常小于已喂边界），输出不在暂存（takeByPts 已 miss）＝输出滞留在
-    // 解码器重排缓冲/输出管道里。
-    // 【2026-09-28 真浏览器定位】旧救援=冷启重喂：每次 miss 都 close+重建
-    // +从关键帧重喂（真机素材实测 60 帧触发 28 次、喂包量单调涨到 64 包），
-    // 解码 p95 655ms、播放速率掉到 0.65x——「丢帧不多但非常卡」的元凶。
-    // 且目标帧早已解码过，重喂同采样纯属浪费。正确救援 = decoder.flush()：
-    // 强制吐出重排缓冲里的全部帧（含目标），~10ms 级。
-    // flush 后解码器处于「需关键帧」态：用 flushRecovering 标志闸住
-    // pumpQueue（flush 期间不启动新请求 → 无并发喂包 → 竞态安全），
-    // flush 落定后 reset+configure+清热态游标 → 续队（下个请求自然冷启）。
-    trace("rescue_flush", { target, lastFedSample, needEnd });
-    activeRequest = request;
-    armActiveRequestTimer(request);
-    flushRecovering = true;
-    feedGeneration += 1; // 作废任何残余批循环
+    trace("rescue_continue_feed", { target, lastFedSample, needEnd });
+    startSample = lastFedSample + 1;
+    samplesFed = 0;
+    fromKeyframe = startSample;
+    const rescueGeneration = ++feedGeneration; // 换代：作废任何在途旧批循环
     fedIndex = target;
-    // P33 W2.5：flush 竞速 5s——flush 在部分驱动状态下 promise 永不落定，
-    // 超时即按冷启收尾放行泵（输出已吐的进 stash，未吐的由降级路径兜底）。
-    const flushed = Promise.race([
-      decoder!.flush().catch(() => undefined),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("flush timeout")), 5_000)),
-    ]);
-    void flushed.catch(() => undefined).then(() => {
-      try {
-        decoder!.reset();
-        decoder!.configure(decoderConfig as VideoDecoderConfig);
-      } catch { /* reset 失败则后续请求自行暴露 */ }
-      drainIntermediateRing();
-      fedIndex = -1;
-      lastFedSample = -1;
-      lastTargetKey = -1;
-      flushRecovering = false;
-      pumpQueue();
-    });
+    void feedSamples(samples, startSample, target, timescale, request, rescueGeneration, sampleIndex.count - 1);
     return;
   }
   startSample = lastFedSample + 1;
@@ -623,6 +639,7 @@ async function feedSamples(
   timescale: number,
   request: DecodeRequest,
   generation: number,
+  forcedEnd?: number,
 ): Promise<void> {
   try {
     // 输出驱动的增量喂包（2026-09-28 真浏览器定位重构）：解码器释放滞后
@@ -630,15 +647,28 @@ async function feedSamples(
     // 公式都无法保证目标输出必达——喂少了挂 45s 看门狗，懒 flush 又与
     // 后续喂包竞态（flush 后需关键帧）。改为按批喂包 + 每批后检查：
     // 目标匹配即停（正常帧 1~2 批），未匹配继续下一批直至目标达成或
-    // 喂到文件尾（远端 EOF 时由看门狗兜底）。批大小取「交错跨度+1」
-    // （maxStagger，见 sampleIndex）保证每批至少推进一个排序位。
+    // 喂到所在 GOP 终点（截断尾 GOP 目标 = 文件尾——见下方 W2.6 终版条件）。
+    // 批大小取「交错跨度+1」（maxStagger，见 sampleIndex）保证每批至少
+    // 推进一个排序位。
     // 代际守卫（feedGeneration）：匹配完成/冷启重建都会使本循环失效——
     // 每步检查代际，不同代立即退出，绝不让两个喂包流交错喂同一解码器。
     const batch = Math.max(BFRAME_LOOKAHEAD, sampleIndex?.maxStagger ?? 0) + 1;
-    const hardEnd = Math.min(samples.length - 1, feedEndFor(target));
+    // P33 W2.6（user-eof-r6..r8 三轮 trace 定稿）：feedEndFor 启发式对
+    // **截断尾 GOP**（真机素材最后 GOP 仅 20 帧）会估短——冷启喂完 hardEnd
+    // 后目标仍滞留重排缓冲，原实现原地等输出 45s 看门狗。无差别的「miss 即
+    // 延伸」被 r7/r8 证伪（中段请求 dq 积压期 miss 也延伸 → 整 GOP 狂喂、
+    // 丢帧 343/900+ 定格）。终版条件：**延伸仅限目标位于最后一个 GOP**
+    // （截断尾 GOP 是唯一启发式系统性低估的场景；r3 播放段零问题佐证），
+    // 延伸终点 = 文件尾；且延伸前要求解码器队列已清空（dq==0——输出确实
+    // 空转而非在路上）。中段 GOP 的 miss 仍走看门狗兜底（r3 实测零发生）。
+    const lastGopKey = sampleIndex ? sampleIndex.keyframes[sampleIndex.keyframes.length - 1] ?? -1 : -1;
+    const inLastGop = keyframeAtOrBefore(sampleIndex!, target) === lastGopKey;
+    const hardEnd = forcedEnd ?? Math.min(samples.length - 1,
+      inLastGop ? samples.length - 1 : feedEndFor(target));
     let fed = startSample - 1;
-    while (fed < hardEnd) {
-      const batchEnd = Math.min(hardEnd, fed + batch);
+    let end = hardEnd;
+    while (fed < end) {
+      const batchEnd = Math.min(end, fed + batch);
       for (let index = fed + 1; index <= batchEnd; index++) {
         if (generation !== feedGeneration) return; // 换代：让位新喂包流
         const sample = samples[index]!;
@@ -659,21 +689,16 @@ async function feedSamples(
       if (generation !== feedGeneration) return; // 换代：让位新喂包流
       if (activeRequest?.id !== request.id) return; // 目标已匹配：立即停喂
     }
-    // P33 W2.5 EOF 边界 flush（postmortem 1780/1783/1786/1789 看门狗定位）：
-    // 尾 GOP 冷启喂到 hardEnd=文件尾（lastFedSample=最后采样）后，B 帧重排
-    // 金字塔的尾帧滞留在解码器输出管道——没有后续采样驱动，也无人 flush，
-    // 目标永不匹配 → 45s 看门狗。此处喂尽文件尾且目标未匹配时强制
-    // decoder.flush() 吐出重排缓冲（与 rescue_flush 同收尾：flush 后解码器
-    // 需关键帧，reset+configure+清热态游标，flushRecovering 闸泵）。
-    // P33 W2.5 EOF 边界快速报错（postmortem 1780/1783/1786/1789 看门狗定位）：
-    // 尾 GOP 冷启喂到文件尾（lastFedSample=最后采样）后，B 帧重排金字塔的
-    // 尾帧滞留解码器输出管道——没有后续采样驱动。flush 救援实测无效
-    // （eof-flush-r1..r3：D3D11 硬解尾帧缺后续参考时 flush() promise 永不
-    // 落定、reset 丢弃排队输出，重排队后又冷启撞同一堵墙循环到客户端
-    // 50s 超时）。改为立即报错（消息含 watchdog 词命中降级正则），由
-    // preview-session maybeFallBackToFfmpeg 连续 2 次判定降级 FFmpeg
-    // B 后端（窗口解码无此边界），把 45-50s 挂起压到秒级。
+    // P33 W2.6 EOF 边界（postmortem 1780/1783/1786/1789 看门狗定位；W2.5 的
+    // flush 救援已废弃——eof-flush-r1..r3：D3D11 硬解尾帧缺后续参考时
+    // flush() promise 永不落定、reset 丢弃排队输出，重排队后又冷启撞同一
+    // 堵墙循环到客户端 50s 超时）。喂尽文件尾且目标未匹配（截断尾 GOP 的
+    // 永久不可达帧，真机素材 1774-1776）：先试定格替代（尾帧定格语义）；
+    // 无持有帧才立即报错（消息含 watchdog 词命中降级正则），由
+    // preview-session maybeFallBackToFfmpeg 连续 2 次判定降级 FFmpeg B 后端
+    // （窗口解码无此边界），把 45-50s 挂起压到秒级。
     if (activeRequest?.id === request.id && lastFedSample >= (sampleIndex?.count ?? 0) - 1) {
+      if (postEofFreezeFrame(request)) return;
       trace("eof_reorder_stuck", { target: request.sampleIndex, lastFedSample, dq: decoder?.decodeQueueSize ?? -1 });
       activeRequest = null;
       clearActiveRequestTimer();
@@ -762,12 +787,12 @@ function binarySearchPos(index: SampleIndex, ptsUs: number): number {
 }
 
 self.onmessage = (event: MessageEvent) => {
-  const data = event.data as { type: string; url?: string; cacheFrames?: number; id?: number; frameN?: number; fps?: number; refreshTicket?: boolean; refreshUrl?: string; refreshError?: string; cacheCapBytes?: number; forceSwDecode?: boolean; decodeTiming?: boolean };
+  const data = event.data as { type: string; url?: string; cacheFrames?: number; id?: number; frameN?: number; fps?: number; refreshTicket?: boolean; refreshUrl?: string; refreshError?: string; cacheCapBytes?: number; forceSwDecode?: boolean; decodeTiming?: boolean; verifyTrace?: boolean };
   try {
     if (data.type === "init" && data.url) {
       // DEFECT-4K60-SESSION-HANG：init 失败必须回发 error——旧实现 fire-and-forget
       // 的 rejection 在 worker 内被吞，客户端只能等满 15s 泛化超时拿不到真实错误。
-      void init(data.url, data.cacheFrames ?? 0, data.refreshTicket === true, data.cacheCapBytes, data.forceSwDecode, data.decodeTiming)
+      void init(data.url, data.cacheFrames ?? 0, data.refreshTicket === true, data.cacheCapBytes, data.forceSwDecode, data.decodeTiming, data.verifyTrace)
         .catch(error => post({ type: "error", id: null, message: errorText(error) }));
     } else if (data.type === "ticket-refresh-response" && typeof data.id === "number") {
       const pending = ticketRefreshPending.get(data.id);

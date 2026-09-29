@@ -179,7 +179,7 @@ export class DecodeWorker {
           // 永远等不到输出（首个输出已被消费/释放）→ 45s 看门狗 → 降级
           // 慢路径。cap=4 帧（720p≈5MB GPU）即可覆盖并发重复窗口。
           cacheFrames: 3,
-          refreshTicket: Boolean(refreshTicket), ...(forceSwDecode ? { forceSwDecode: true } : {}), ...(instance.timingOn ? { decodeTiming: true } : {}), ...(cacheCapBytes !== undefined ? { cacheCapBytes } : {}) }), signal);
+          refreshTicket: Boolean(refreshTicket), ...(forceSwDecode ? { forceSwDecode: true } : {}), ...(instance.timingOn ? { decodeTiming: true } : {}), ...(instance.timingOn ? { verifyTrace: true } : {}), ...(cacheCapBytes !== undefined ? { cacheCapBytes } : {}) }), signal);
       throwIfAborted(signal);
       instance.hardware = data.hardware ?? null;
       instance.width = data.width ?? 0;

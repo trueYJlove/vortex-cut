@@ -15,6 +15,9 @@ export interface ProbeShell {
 export async function setupProbe(expectedProbe: "m3p1" | "m3p2" | "m3p3" | "m3p4" | "m3p5"): Promise<ProbeShell> {
   document.title = `M3-0 probe ${expectedProbe}`;
   document.body.style.cssText = "margin:0;background:#000;color:#9aa4ad;font:12px monospace;";
+  // P33 W2.6：decode worker trace 收集池（DecodeWorker onMessage 推入；探针
+  // 结束时落盘 decode_trace.jsonl——挂死形态离线取证）。
+  (window as unknown as { __TRACE?: unknown[] }).__TRACE ??= [];
   const canvas = document.createElement("canvas");
   const statusDiv = document.createElement("div");
   statusDiv.style.cssText = "position:fixed;left:8px;top:8px;white-space:pre;z-index:9;";

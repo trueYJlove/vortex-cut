@@ -228,6 +228,11 @@ export async function runProbe(): Promise<void> {
     };
     await (window as unknown as { probeDesktop: { writeArtifact: (name: string, content: unknown) => Promise<string> } }).probeDesktop
       .writeArtifact("m3p5_result.json", JSON.stringify(result, null, 1));
+    // P33 W2.6：decode worker trace 落盘（decodeTiming=1 时 worker 同步开
+    // VERIFY_TRACE，喂包/输出/救援决策全量事件）——挂死形态离线取证。
+    const traces = (window as unknown as { __TRACE?: Array<{ event: string; detail?: Record<string, unknown> }> }).__TRACE ?? [];
+    await (window as unknown as { probeDesktop: { writeArtifact: (name: string, content: unknown) => Promise<string> } }).probeDesktop
+      .writeArtifact("decode_trace.jsonl", traces.map(t => JSON.stringify({ event: t.event, ...t.detail })).join("\n"));
     await shell.finish({
       probe: "m3p5",
       composed: finalMetrics.composed_frames,

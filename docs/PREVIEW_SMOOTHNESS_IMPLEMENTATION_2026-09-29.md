@@ -13,6 +13,7 @@
 | compose interval p95 ≤40ms | 未取样 | **33.6~33.7ms**（满帧率 30fps） | ✅ |
 | 看门狗/降级 = 0（回归） | 0 | 播放段 0（EOF 边界另见 §4） | ✅ |
 | 插桩零开销 | — | 未单测（插桩仅开启路径生效，见 §5 L1） | ⚠️ L1 |
+| EOF 回卷（真机 App 内，用户原素材） | 播到尾后再点播放无效 | **e2e 通过：片尾吸附 → 回卷复播 → 推进**（2026-09-29，见 §2 W2.6） | ✅ |
 | 用户真机确认 | — | **待用户复测** | ⏳ |
 
 测量载体：`python tools/m3_0/run_electron_probe.py m3p5 --ir evidence/performance/preview-smoothness-baseline/ir_hevc_b_60s.json --assets evidence/performance/preview-smoothness-baseline/assets.manifest.json --evidence <dir>`，素材 `test-assets/generated/hevc/hevc-1080p-60s-g90-b3.mp4`（1080p30 HEVC Main、GOP=90、B 帧重排实测回跳 7、60s、faststart）。
@@ -38,6 +39,16 @@
 - 收口：rescue_flush/feedSamples 检测已喂至文件尾 → 立即报 `EOF reorder watchdog`（命中降级正则）；rescue_flush 加 5s 竞速超时防 promise 挂起闸死泵。
 - 效果：探针 wall 286s → **61.5s**（4×45s 挂起全消），播放丢帧保持 0/1800。
 
+### W2.6 EOF 定格替代 + 片尾吸附——「播放到尾后再点播放无效」根修（真机素材）
+- 真机现象（用户素材 fdf0f0e2，HEVC 720x1280 B 帧交错、尾 GOP 截断 88→20 帧）：播到片尾自动暂停后，**再点播放无效**——原地续播再停滞 2s 循环。
+- 根因链（user-eof-r1..r9 十轮 A/B + decode_trace 离线取证）：截断尾 GOP 的最后 3 帧（1774-1776）滞留 D3D11 重排缓冲**永久不可达** → 片尾形成洞 → `currentFrame` 停在 `last-3`，播放靠 2s 停滞兜底结束，而 `play()` 回卷条件（`currentFrame >= last`）永不成立 → 再点播放从卡死点原地续播。
+- 收口（两处）：
+  1. **decode-worker.worker `postEofFreezeFrame`**：喂至文件尾仍 miss 时，取 stash/缓存中 pts ≤ 目标的最近持有帧 clone 回填（贴标准播放器「尾帧定格」语义）；同时 cachePut 目标位供后续命中。无持有帧才回落快速报错（W2.5 路径兜底降级）。附带废弃 flush 救援（eof-flush-r1..r3 已证伪）；中段 GOP 的 miss **不**延伸喂包（r7/r8 证伪：整 GOP 狂喂丢帧 343），延伸仅限目标位于最后一个 GOP 且 dq==0。
+  2. **preview-session 片尾吸附**：停滞兜底结束时 `currentFrame = last` 再 pause+onEnded——吸附后回卷条件成立，再点播放正常从头复播。
+- 效果（user-eof-r10，**用户原素材**直测）：dropped 3/1800、decode p95 2.7ms、compose p95 34.1ms、`replay_after_end_ok=true`；真机 App 内 e2e（`e2e/p33-eof-replay.electron.spec.ts`）：播到片尾吸附 → 再点播放回卷 `00:00:00:07` → 复播推进 → 全程无 watchdog 错误。
+- 探针侧：`verifyTrace` 经 init 参数注入（decodeTiming 开启时同步开启），trace 事件经 `__TRACE` 池落盘 `decode_trace.jsonl`（挂死形态离线取证）。
+- **e2e 复测期间定位的既有产品缺陷（未修，记录）**：overlay-only 时间线（片段全部落在 V2/画中画等叠加轨、V1 主轨为空）→ IR 投影 `visual` 只取 V1 → manifest `total_frames=0` → `play()` 首个 tick 即结束判定，**静默无任何提示**。应回落取最早可视段建主图或显式报错。e2e spec 内以 V1 行带落点（y=112）+ 落轨断言规避。
+
 ### 探针/测量链路修复（非生产路径）
 - freshSession 前重签票据：session1 + postmortem 挂起后距签票 ~250-290s 贴着票据 TTL 5min，跨线即 init 404（fix-lag-r1..r13 伪相关定位：与代码改动无关，与 wall 时长相关）。
 - m3p5 合成间隔只计播放段；run_electron_probe 多轮轮次透传。
@@ -52,6 +63,7 @@
 | compose interval p95 ≤40ms | 未取样 | 33.6~33.7ms | ✅ |
 | 看门狗/降级 = 0（回归） | 0 | 播放段 0 | ✅ |
 | 插桩零开销 | — | 未做关/开 env 对跑 | ⚠️ L1 |
+| EOF 回卷（真机 App 内，用户原素材） | 播到尾后再点播放无效 | e2e 通过（§2 W2.6） | ✅ |
 | 用户真机确认 | — | 待复测 | ⏳ |
 
 Desktop 全量 735 tests + typecheck 绿（每项改动后各跑一次）。
@@ -59,9 +71,9 @@ Desktop 全量 735 tests + typecheck 绿（每项改动后各跑一次）。
 ## 4. 遗留与已知限制
 
 - **L1 插桩零开销未对跑**：插桩全部在 `decodeTiming` 开启分支内，默认关；未做关/开 env 探针对跑定量确认（规划门 §6 风险项）。
-- **L2 EOF 边界降级待真机验证**：探针无 pcmProjectId → FFmpeg B 后端降级不可用，postmortem 尾帧 5/9；生产 App 内 decodeFrames 可用，EOF 快速报错 + 连续 2 次降级应在秒级恢复——需在真机 App 中 seek 片尾验证一次。
+- ~~L2 EOF 边界降级待真机验证~~ ✅ **2026-09-29 核销**：W2.6 定格替代后探针 postmortem 全速（user-eof-r10 尾帧取证全过），真机 App 内 e2e 播放到片尾无 watchdog 错误（`e2e/p33-eof-replay.electron.spec.ts` 通过）。
 - **L3 起播洞跳过的用户感知**：起播期跳过的是已被预读淘汰的帧（≤8 帧、<0.3s 内容），正常播放不可感知；变速/多输入组合仅单输入顺播验证过，现有 playback 回归测试全绿。
-- **L4 用户素材复测**：本所有结论基于仓内复刻素材（hevc_qsv GOP90 bf3）；用户原素材（fdf0f0e2，不在仓）需真机复测确认同向改善。
+- ~~L4 用户素材复测~~ ✅ **2026-09-29 核销**：user-eof-r1..r10 全程使用用户原素材 fdf0f0e2（探针），r10 dropped 3/1800 + replay_ok；真机 App 内 e2e 同素材通过。结论同向成立。
 
 ## 5. 复测命令（可复现）
 
