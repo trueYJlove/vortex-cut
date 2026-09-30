@@ -1,0 +1,893 @@
+{
+ "label": "dev-h264",
+ "media": "C:/Users/trueY/Videos/5月11日(3)/5月11日(3)-1.mp4",
+ "total_us": 41378005,
+ "final_text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.9ms / p95 4.2ms · 上传 p95 2.4ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 16.3 / 排队 0.1 / 残差 2ms(p95)",
+ "long_tasks": {
+  "count": 2,
+  "top": [
+   {
+    "start": 5571,
+    "dur": 63
+   },
+   {
+    "start": 47009,
+    "dur": 57
+   }
+  ],
+  "p95": 63
+ },
+ "raf_interval_ms": {
+  "samples": 3165,
+  "p50": 13.3,
+  "p95": 14.2,
+  "max": 68.3
+ },
+ "main_thread_attribution": {
+  "counts": {
+   "react_commit": 42,
+   "long_task": 1,
+   "residency": 81,
+   "decode": 1234,
+   "compose": 1216,
+   "upload": 1234,
+   "submitted": 1216,
+   "window_fetch": 2
+  },
+  "durations": {
+   "react_commit": {
+    "total_ms": 69.50000000372529,
+    "max_ms": 57.90000000037253
+   },
+   "long_task": {
+    "total_ms": 63,
+    "max_ms": 63
+   },
+   "residency": {
+    "total_ms": 0,
+    "max_ms": 0
+   },
+   "decode": {
+    "total_ms": 3151.3999999938533,
+    "max_ms": 37.10000000055879
+   },
+   "compose": {
+    "total_ms": 0,
+    "max_ms": 0
+   },
+   "upload": {
+    "total_ms": 1568.3000000044703,
+    "max_ms": 19.5
+   },
+   "submitted": {
+    "total_ms": 2677.2000000094995,
+    "max_ms": 7.900000000372529
+   },
+   "window_fetch": {
+    "total_ms": 36.90000000037253,
+    "max_ms": 20.299999999813735
+   }
+  }
+ },
+ "samples": [
+  {
+   "tc": "00:00:01:15",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.6ms / p95 37.1ms · 上传 p95 19.5ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 77.1 / 排队 0.1 / 残差 4.5ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.6,
+    "p95": 37.1,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.6,
+     "output_p95": 77.1,
+     "queue_p50": 0.1,
+     "queue_p95": 0.1,
+     "residual_p50": 2.2,
+     "residual_p95": 4.5
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:02:15",
+   "text": "合成预览 · 任务 p95 0.2ms · 解码 p50 1.6ms / p95 7.7ms · 上传 p95 7.9ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 77.1 / 排队 0.1 / 残差 4.5ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.6,
+    "p95": 7.7,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.3,
+     "output_p95": 77.1,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 1.8,
+     "residual_p95": 4.5
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:03:16",
+   "text": "合成预览 · 任务 p95 0.2ms · 解码 p50 1.6ms / p95 7.3ms · 上传 p95 6ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 3.1 / 排队 0.1 / 残差 2.6ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.6,
+    "p95": 7.3,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.3,
+     "output_p95": 3.1,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 1.5,
+     "residual_p95": 2.6
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:04:18",
+   "text": "合成预览 · 任务 p95 0.2ms · 解码 p50 1.6ms / p95 4.5ms · 上传 p95 4.9ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 3.1 / 排队 0.1 / 残差 2.6ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.6,
+    "p95": 4.5,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.3,
+     "output_p95": 3.1,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 1.5,
+     "residual_p95": 2.6
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:05:16",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.6ms / p95 4.5ms · 上传 p95 4.6ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 15.6 / 排队 0.1 / 残差 2.7ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.6,
+    "p95": 4.5,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.3,
+     "output_p95": 15.6,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 1.5,
+     "residual_p95": 2.7
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:06:18",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.6ms / p95 4ms · 上传 p95 4.2ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 3.1 / 排队 0.1 / 残差 2.6ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.6,
+    "p95": 4,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.3,
+     "output_p95": 3.1,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 1.6,
+     "residual_p95": 2.6
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:07:21",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.6ms / p95 3.9ms · 上传 p95 3.6ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 15.6 / 排队 0.1 / 残差 2.6ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.6,
+    "p95": 3.9,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.3,
+     "output_p95": 15.6,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 1.6,
+     "residual_p95": 2.6
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:08:22",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.6ms / p95 3.9ms · 上传 p95 2.4ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 3.1 / 排队 0.1 / 残差 2.4ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.6,
+    "p95": 3.9,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.3,
+     "output_p95": 3.1,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 1.7,
+     "residual_p95": 2.4
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:09:20",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.6ms / p95 3.9ms · 上传 p95 2.4ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 15.6 / 排队 0.1 / 残差 2.4ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.6,
+    "p95": 3.9,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.4,
+     "output_p95": 15.6,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 1.6,
+     "residual_p95": 2.4
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:10:22",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.7ms / p95 3.9ms · 上传 p95 2.4ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 15.6 / 排队 0.1 / 残差 2.4ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.7,
+    "p95": 3.9,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.4,
+     "output_p95": 15.6,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 1.6,
+     "residual_p95": 2.4
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:11:24",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.6ms / p95 3.8ms · 上传 p95 2.4ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 15.6 / 排队 0.1 / 残差 2.4ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.6,
+    "p95": 3.8,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.4,
+     "output_p95": 15.6,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 1.6,
+     "residual_p95": 2.4
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:12:22",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.6ms / p95 3.8ms · 上传 p95 2.2ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 15.7 / 排队 0.1 / 残差 2.4ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.6,
+    "p95": 3.8,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.4,
+     "output_p95": 15.7,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 1.6,
+     "residual_p95": 2.4
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:13:27",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.7ms / p95 3.8ms · 上传 p95 2.1ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 15.7 / 排队 0.1 / 残差 2.4ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.7,
+    "p95": 3.8,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.4,
+     "output_p95": 15.7,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 1.6,
+     "residual_p95": 2.4
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:14:24",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.7ms / p95 3.8ms · 上传 p95 2.1ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 15.7 / 排队 0.1 / 残差 2.4ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.7,
+    "p95": 3.8,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.4,
+     "output_p95": 15.7,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 1.6,
+     "residual_p95": 2.4
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:15:25",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.7ms / p95 3.8ms · 上传 p95 2.1ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 15.7 / 排队 0.1 / 残差 2.4ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.7,
+    "p95": 3.8,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.4,
+     "output_p95": 15.7,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 1.5,
+     "residual_p95": 2.4
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:16:28",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.7ms / p95 3.8ms · 上传 p95 2.1ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 15.7 / 排队 0.1 / 残差 2.4ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.7,
+    "p95": 3.8,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.4,
+     "output_p95": 15.7,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 1.5,
+     "residual_p95": 2.4
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:17:26",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.7ms / p95 3.8ms · 上传 p95 2.1ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 15.7 / 排队 0.1 / 残差 2.3ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.7,
+    "p95": 3.8,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.4,
+     "output_p95": 15.7,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 1.5,
+     "residual_p95": 2.3
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:19:00",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.7ms / p95 3.9ms · 上传 p95 2.1ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 15.9 / 排队 0.1 / 残差 2.3ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.7,
+    "p95": 3.9,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.4,
+     "output_p95": 15.9,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 1.4,
+     "residual_p95": 2.3
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:20:01",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.7ms / p95 3.8ms · 上传 p95 2ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 16 / 排队 0.1 / 残差 2.3ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.7,
+    "p95": 3.8,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.4,
+     "output_p95": 16,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 1.5,
+     "residual_p95": 2.3
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:21:03",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.7ms / p95 3.7ms · 上传 p95 1.9ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 16.1 / 排队 0.1 / 残差 2.3ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.7,
+    "p95": 3.7,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.5,
+     "output_p95": 16.1,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 1.4,
+     "residual_p95": 2.3
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:22:00",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.7ms / p95 3.7ms · 上传 p95 2ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 16.1 / 排队 0.1 / 残差 2.3ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.7,
+    "p95": 3.7,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.5,
+     "output_p95": 16.1,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 1.3,
+     "residual_p95": 2.3
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:23:00",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.7ms / p95 3.8ms · 上传 p95 2ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 16.1 / 排队 0.1 / 残差 2.2ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.7,
+    "p95": 3.8,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.5,
+     "output_p95": 16.1,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 1.2,
+     "residual_p95": 2.2
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:24:03",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.7ms / p95 3.8ms · 上传 p95 2ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 16.1 / 排队 0.1 / 残差 2.2ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.7,
+    "p95": 3.8,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.5,
+     "output_p95": 16.1,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 1.2,
+     "residual_p95": 2.2
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:25:04",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.7ms / p95 3.8ms · 上传 p95 2ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 16.2 / 排队 0.1 / 残差 2.2ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.7,
+    "p95": 3.8,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.5,
+     "output_p95": 16.2,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 1.1,
+     "residual_p95": 2.2
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:26:05",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.7ms / p95 3.8ms · 上传 p95 2ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 16.2 / 排队 0.1 / 残差 2.1ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.7,
+    "p95": 3.8,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.5,
+     "output_p95": 16.2,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 0.9,
+     "residual_p95": 2.1
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:27:06",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.7ms / p95 3.8ms · 上传 p95 2.1ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 16.2 / 排队 0.1 / 残差 2.1ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.7,
+    "p95": 3.8,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.5,
+     "output_p95": 16.2,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 0.7,
+     "residual_p95": 2.1
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:28:09",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.8ms / p95 3.9ms · 上传 p95 2.1ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 16.2 / 排队 0.1 / 残差 2.1ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.8,
+    "p95": 3.9,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.5,
+     "output_p95": 16.2,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 0.5,
+     "residual_p95": 2.1
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:29:06",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.8ms / p95 3.9ms · 上传 p95 2.1ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 16.2 / 排队 0.1 / 残差 2.1ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.8,
+    "p95": 3.9,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.5,
+     "output_p95": 16.2,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 0.5,
+     "residual_p95": 2.1
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:30:09",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.8ms / p95 3.9ms · 上传 p95 2.1ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 16.1 / 排队 0.1 / 残差 2ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.8,
+    "p95": 3.9,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.5,
+     "output_p95": 16.1,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 0.5,
+     "residual_p95": 2
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:31:10",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.8ms / p95 3.9ms · 上传 p95 2.1ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 16.2 / 排队 0.1 / 残差 2ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.8,
+    "p95": 3.9,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.5,
+     "output_p95": 16.2,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 0.5,
+     "residual_p95": 2
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:32:08",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.8ms / p95 3.9ms · 上传 p95 2.1ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 16.2 / 排队 0.1 / 残差 2ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.8,
+    "p95": 3.9,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.5,
+     "output_p95": 16.2,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 0.4,
+     "residual_p95": 2
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:33:10",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.9ms / p95 4ms · 上传 p95 2.2ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 16.1 / 排队 0.1 / 残差 2ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.9,
+    "p95": 4,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.5,
+     "output_p95": 16.1,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 0.5,
+     "residual_p95": 2
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:34:12",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.9ms / p95 3.9ms · 上传 p95 2.2ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 16.1 / 排队 0.1 / 残差 2ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.9,
+    "p95": 3.9,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.5,
+     "output_p95": 16.1,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 0.4,
+     "residual_p95": 2
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:35:15",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.9ms / p95 4ms · 上传 p95 2.2ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 16.1 / 排队 0.1 / 残差 2ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.9,
+    "p95": 4,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.5,
+     "output_p95": 16.1,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 0.5,
+     "residual_p95": 2
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:36:15",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.9ms / p95 3.9ms · 上传 p95 2.3ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 15.9 / 排队 0.1 / 残差 2ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.9,
+    "p95": 3.9,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.5,
+     "output_p95": 15.9,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 0.5,
+     "residual_p95": 2
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:37:15",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.9ms / p95 4.2ms · 上传 p95 2.3ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 16.1 / 排队 0.1 / 残差 2ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.9,
+    "p95": 4.2,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.5,
+     "output_p95": 16.1,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 0.5,
+     "residual_p95": 2
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:38:15",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.9ms / p95 4ms · 上传 p95 2.3ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 15.9 / 排队 0.1 / 残差 2ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.9,
+    "p95": 4,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.5,
+     "output_p95": 15.9,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 0.5,
+     "residual_p95": 2
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:39:15",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.8ms / p95 3.8ms · 上传 p95 2.3ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 16.1 / 排队 0.1 / 残差 2ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.8,
+    "p95": 3.8,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.5,
+     "output_p95": 16.1,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 0.5,
+     "residual_p95": 2
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  },
+  {
+   "tc": "00:00:40:16",
+   "text": "合成预览 · 任务 p95 0.3ms · 解码 p50 1.9ms / p95 3.8ms · 上传 p95 2.3ms · 丢帧 3 · 画布 960×540 → 缓冲 778×438 (×0.81) · 分段 喂包 0 / 出帧 16.1 / 排队 0.1 / 残差 2ms(p95)",
+   "metrics": {
+    "dropped": 3,
+    "p50": 1.9,
+    "p95": 3.8,
+    "seg": {
+     "feed_p50": 0,
+     "feed_p95": 0,
+     "output_p50": 1.4,
+     "output_p95": 16.1,
+     "queue_p50": 0,
+     "queue_p95": 0.1,
+     "residual_p50": 0.5,
+     "residual_p95": 2
+    },
+    "backend": "webcodecs",
+    "hardware": "prefer-hardware"
+   }
+  }
+ ]
+}

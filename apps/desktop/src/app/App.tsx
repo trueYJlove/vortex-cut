@@ -946,17 +946,29 @@ export function App() {
     setPlaying(false);
     dispatchPlayhead("user", timeUs, true);
   }, [dispatchPlayhead]);
-  /** 预览播放回传：只写 store + 节流 React——覆盖层每帧跟随，
-   *  App 组件树不随 rAF 频率提交。
+  /** 预览播放回传：只写 store（覆盖层命令式跟随）+ 节流 React。
    *
-   *  节流窗口按构建模式分档（P33 L9 实测依据）：dev 构建下 React StrictMode 双渲染
-   *  + 未压缩协调使**每秒 ~29 次提交、合计 21.5 秒/59 秒**（单次最大 67ms），把主线程
-   *  切成 rAF p95 51ms 的碎片，呈现循环因此跳帧（真机 dev 丢帧 85~112；同机生产构建
-   *  同样素材 0 丢帧）。dev 档放宽到 250ms 以压低提交密度；生产保持 10Hz 的观感。 */
+   *  P33 W10（dev 流畅度收口）：**播放期间不再提交 React** —— 时间码/进度条的
+   *  每个显示位在播放中由 `applyPlayheadDom` 直接写 DOM（见下），App 组件树在
+   *  整个播放段保持静止。实测依据：dev 构建下每次 App 提交 ~36ms（StrictMode
+   *  双渲染 + 未压缩协调），4Hz 提交即把主线程切成 rAF p95 ~50ms 的碎片，呈现
+   *  循环因此跳帧；生产构建每次提交便宜得多，结论同向（更多余量）。
+   *  暂停/用户 seek/片尾结束时仍走 React 提交，保证状态与 DOM 一致。 */
   const lastReactTimeReport = useRef(0);
   const PLAYBACK_COMMIT_INTERVAL_MS = import.meta.env.DEV ? 250 : 100;
+  /** 播放态 ref 镜像：会话回调（onTimeUs）在会话创建时只捕获一次闭包，
+   *  必须经 ref 读「此刻是否在播放」，不能依赖每次渲染新生成的闭包。 */
+  const playingRef = useRef(false);
+  /** 播放中播放头 DOM 直写（时间码 / 进度气泡 / 填充 / aria-valuenow）。
+   *  每次渲染重新赋值 → 闭包内始终是当前 totalUs/previewFps/refs。 */
+  const playheadDomRef = useRef<(us: number) => void>(() => undefined);
   const seekFromPlayback = useCallback((timeUs: number) => {
     const now = performance.now();
+    if (playingRef.current) {
+      playheadDomRef.current(timeUs); // 播放中：零 React 提交
+      lastReactTimeReport.current = now;
+      return;
+    }
     const commit = now - lastReactTimeReport.current >= PLAYBACK_COMMIT_INTERVAL_MS;
     dispatchPlayhead("playback", timeUs, commit);
     if (commit) lastReactTimeReport.current = now;
@@ -1840,6 +1852,26 @@ export function App() {
   const zoomZ = (t: number) => 0.25 * Math.exp(Math.log(20) * t / 1000);
   // 悬浮进度条：以比例换算播放头（与剪映进度条一致）。
   const progressPct = Math.max(0, Math.min(100, (playhead / Math.max(totalUs, 1)) * 100));
+  /** 播放头 DOM 直写实现（P33 W10）：播放期间 React 不提交，时间码/气泡/填充/
+   *  aria 由这里按 store 回传逐帧更新——观感与 10Hz 提交一致（甚至更密），
+   *  但主线程不再为整棵编辑器树做协调。暂停/seek 后由 React 提交重新接管。 */
+  const pgBubbleRef = useRef<HTMLDivElement | null>(null);
+  const pgFillRef = useRef<HTMLDivElement | null>(null);
+  const tcTimeRef = useRef<HTMLElement | null>(null);
+  playheadDomRef.current = (us: number): void => {
+    const clamped = Math.max(0, Math.min(us, totalUs));
+    const pct = totalUs > 0 ? (clamped / totalUs) * 100 : 0;
+    const text = formatSmpteTimecode(clamped, previewFps);
+    if (tcTimeRef.current && tcTimeRef.current.textContent !== text) tcTimeRef.current.textContent = text;
+    if (pgBubbleRef.current) {
+      pgBubbleRef.current.textContent = text;
+      pgBubbleRef.current.style.left = `${pct}%`;
+    }
+    if (pgFillRef.current) pgFillRef.current.style.width = `${pct}%`;
+    progressRef.current?.setAttribute("aria-valuenow", String(clamped));
+  };
+  // 播放态 ref 镜像（会话回调经它读最新值）
+  playingRef.current = playing && !gestureHoldRef.current;
   const seekFromProgressRatio = (ratio: number) => {
     exitLibraryPreview();
     const value = Math.round(ratio * Math.max(totalUs, 1));
@@ -2327,12 +2359,12 @@ export function App() {
         </div>
           <span className={`interactive-label ${previewIsStale && previewMode === "authoritative" && !exportPlayback ? "stale" : ""}`}>{previewMode === "interactive" ? "交互预览 · 非权威" : previewMode === "synthetic" ? "合成预览 · 实时（非权威）" : reframePlayback ? "静态焦点重构图 · 权威预览" : exportPlayback ? `导出 · ${exportPlayback.export_record.destination_display_name}` : previewIsStale ? "权威预览 · 已过期" : "权威预览 · 当前 Revision"}</span><span role="status" aria-label="预览状态" className={`preview-context ${previewMode === "authoritative" ? "authoritative" : previewMode === "synthetic" ? "synthetic" : "interactive"}${previewIsStale ? " stale" : ""}`}>{previewMode === "authoritative" ? (previewIsStale ? "权威预览已过期" : authoritativePreview ? "权威预览" : "尚未生成权威预览") : previewMode === "synthetic" ? "合成预览" : "交互预览"}</span>{syntheticNotice && <span role="note" aria-label="合成预览回退提示" className="synthetic-note">{syntheticNotice}<button className="synthetic-note-retry" onClick={() => { setSyntheticNotice(null); setPreviewMode("synthetic"); }}>重试合成预览</button></span>}
           <div className={`progress${progressDragging ? " dragging" : ""}`} ref={progressRef} role="slider" tabIndex={0} aria-label="时间线播放头" aria-valuemin={0} aria-valuemax={Math.max(totalUs, 1)} aria-valuenow={Math.min(playhead, totalUs)} onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); setProgressDragging(true); seekFromProgress(event.clientX); }} onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) seekFromProgress(event.clientX); }} onPointerUp={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); setProgressDragging(false); }} onKeyDown={event => { if (event.key === "ArrowLeft") { event.preventDefault(); seekFromProgressRatio(Math.max(0, playhead / Math.max(totalUs, 1) - 1 / 300)); } else if (event.key === "ArrowRight") { event.preventDefault(); seekFromProgressRatio(Math.min(1, playhead / Math.max(totalUs, 1) + 1 / 300)); } else if (event.key === "Home") { event.preventDefault(); seekFromProgressRatio(0); } else if (event.key === "End") { event.preventDefault(); seekFromProgressRatio(1); } }}>
-            <div className="pg-bubble" style={{ left: `${progressPct}%` }}>{formatSmpteTimecode(playhead, previewFps)}</div>
-            <div className="pg-rail"><div className="pg-fill" style={{ width: `${progressPct}%` }}><i className="pg-dot" /></div></div>
+            <div className="pg-bubble" ref={pgBubbleRef} style={{ left: `${progressPct}%` }}>{formatSmpteTimecode(playhead, previewFps)}</div>
+            <div className="pg-rail"><div className="pg-fill" ref={pgFillRef} style={{ width: `${progressPct}%` }}><i className="pg-dot" /></div></div>
           </div>
         </div>
         <div className="playback-bar">
-          <div className="pb-left"><span className="tc"><b>{formatSmpteTimecode(playhead, previewFps)}</b><i> / </i><span className="tot">{formatSmpteTimecode(totalUs, previewFps)}</span></span><span className={`vu${playing ? " active" : ""}`} aria-hidden="true"><i ref={vuBarLRef} /><i ref={vuBarRRef} /></span></div>
+          <div className="pb-left"><span className="tc"><b ref={tcTimeRef}>{formatSmpteTimecode(playhead, previewFps)}</b><i> / </i><span className="tot">{formatSmpteTimecode(totalUs, previewFps)}</span></span><span className={`vu${playing ? " active" : ""}`} aria-hidden="true"><i ref={vuBarLRef} /><i ref={vuBarRRef} /></span></div>
           <div className="pb-center"><button className="pb-play" aria-label={playing ? "暂停" : "播放"} title={playing ? "暂停" : "播放"} onClick={togglePlayback}>{playing ? <Pause /> : <Play />}</button></div>
           <div className="pb-right" role="group" aria-label="播放器控制">
             <span className="vol-anchor">
