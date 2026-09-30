@@ -685,7 +685,8 @@ function postEofFreezeFrame(request: DecodeRequest): boolean {
 function pumpQueue(): void {
   while (!activeRequest && decodeQueue.length) {
     const request = decodeQueue.shift()!;
-    if (decodeTiming) request.startedMs = performance.now(); // P33：出队开始处理    activeRequest = request;
+    if (decodeTiming) request.startedMs = performance.now(); // P33：出队开始处理
+    activeRequest = request;
     armActiveRequestTimer(request);
     try {
       decodeSamples(request);
