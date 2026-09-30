@@ -446,7 +446,20 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
     if (load.status !== "ready") return;
     const timer = window.setInterval(() => {
       const session = sessionRef.current;
-      if (session) setMetrics(session.metrics());
+      if (!session) return;
+      const snapshot = session.metrics();
+      setMetrics(snapshot);
+      // 真机取证通道（VITE_AIVS_PERF=1 诊断构建才存在；发布构建无此全局）：
+      // e2e/真机复测读 window.__aivsPreviewMetrics 拿到与指标条同源的数值
+      //（含 decode_seg 分段与链状态），免去"探针 0 丢帧、App 丢帧"两张皮的
+      // 无法对账问题（P33 用户素材复现要求 App 内可量化）。
+      if (import.meta.env.VITE_AIVS_PERF === "1") {
+        (window as unknown as { __aivsPreviewMetrics?: unknown }).__aivsPreviewMetrics = {
+          at: performance.now(),
+          ...snapshot,
+          chain: session.chainState(),
+        };
+      }
     }, 1000);
     return () => window.clearInterval(timer);
   }, [load.status]);

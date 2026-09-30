@@ -1,0 +1,9 @@
+{
+ "assets": [
+  {
+   "entity_id": "asset_h264_nb",
+   "path": "C:/DataFolder/codes/AI-Vidio/test-assets/generated/4k60/gop1s-60s.mp4",
+   "display_name": "h264-gop1s-60s"
+  }
+ ]
+}

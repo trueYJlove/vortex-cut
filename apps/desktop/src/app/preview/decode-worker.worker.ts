@@ -2,12 +2,12 @@
  * M3-0 P3 WebCodecs 寻址 Worker：手写 BMFF(MP4) demuxer + VideoDecoder。
  *
  * demuxer 决策（冻结方案 §7.3"开工时定并写入报告"）：**手写 BMFF 解析**，
- * 不引入 mp4box.js —— 探针素材为自产 faststart 单视频轨 H.264（无 B 帧，
+ * 不引入 mp4box.js —— 探针素材为自带 faststart 单视频轨 H.264（无 B 帧，
  * openh264），仅需 stsd/stts/stss/stsc/stsz/stco/co64/ctts 八张表；
- * ctts 仍按规范解析以兼容生产 proxy 产物。
+ * ctts 仍按规范解析以兼容生成 proxy 产物）。
  * 长帧缓存模式：LRU 缓存已解码 VideoFrame（close() 纪律 + 内存记账）。
  * A03：demux 后构建 sample-index（PTS 排序索引 + 关键帧二分），seek 定位
- * 从 O(N) 线性扫描改二分——解码喂包顺序不变（索引只改查找）。
+ * 由 O(N) 线性扫描改二分——解码喂包顺序不变（索引只改查找）。
  */
 
 import { buildSampleIndex, keyframeAtOrBefore, locateByPts, type SampleIndex } from "./sample-index.js";
@@ -34,7 +34,7 @@ type Outbound =
 /** 解码 RTT 分段计时（P33 规划门 §3.1；decodeTiming=true 时随 frame 消息捎带，
  *  默认关、生产零开销）。两段均为 worker 时钟内的**时长**（跨线程时钟原点
  *  不同，不传绝对时间戳、不做跨钟合成——客户端以自身 RTT 总量减两段得
- *  「排队 + 双跳传输」残差）：
+ *  「排队 + 双跳传输」残差）。
  *  - feedMs: 出队开始处理 → 最后一批喂包提交（Range 读 + 批间让步）；
  *  - outputMs: 喂包提交 → 匹配输出到达（解码器吐帧滞后；flush 救援亦归此段）。
  *  缓存/stash 回填路径两段均为 0（由 fromCache/samplesFed 区分路径）。 */
@@ -110,7 +110,7 @@ let forceSwDecode = false;
  * 旧 promise 永不落定（客户端 15s 超时 → "decode timeout"），且允许后发请求被
  * 前一帧的输出按容差错配解决（系统性早一帧）。现改为严格串行队列：一次只
  * 处理一个请求，输出按**选中采样 PTS**匹配（不是 targetUs——VFR/29.97/HEVC
- * 上最近邻采样可偏离 targetUs 达 33ms，按 targetUs 半帧匹配会永不命中而超时），
+ * 上最近邻采样可偏离 targetUs 达 33ms，按 targetUs 半帧匹配会永不命中而超时）。
  * 完成后自动续队。 */
 interface DecodeRequest {
   id: number;
@@ -123,6 +123,9 @@ interface DecodeRequest {
   startedMs: number;
   /** 最后一批喂包提交时刻（feedMs 终点 = outputMs 起点；-1 = 未喂包）。 */
   fedMs: number;
+  /** 停摆自恢复标记：喂到文件尾仍不匹配时允许「重置解码器 + 重锚关键帧」重试
+   *  一次（防同一请求无限重试）。 */
+  retried?: boolean;
 }
 const decodeQueue: DecodeRequest[] = [];
 let activeRequest: DecodeRequest | null = null;
@@ -180,33 +183,166 @@ const readyByPts = new Map<number, VideoFrame>();
  *  VideoFrame 总量（stash + gopAnchor + intermediateRing）超过阈值后
  *  Chrome 解码器停止吐帧（真浏览器实测 ~13 帧：stash 9+anchor 1+环 3
  *  → 输出永久停滞；裸解码器逐帧 close 无此问题）。
- *  容量公式：min(BACKPRESSURE_CAP, max(4, 回跳深度+2))——重排覆盖由
+ *  容量公式：min(HARD_CAP, max(MIN, 回跳深度+2, 实测喂包超前量+2))——重排覆盖
  *  feedEndFor 的排序空间喂包终点保证，stash 只兜「已释放待请求」帧。 */
-const READY_BY_PTS_MIN = 4;
-const READY_BY_PTS_BACKPRESSURE_CAP = 6;
+const READY_BY_PTS_MIN = 6;
+/** 持有窗硬上限。P33 后续（hevc-b-afterfix-r2 trace）：B3 金字塔的 stash 需求窗 =
+ *  LOOKAHEAD(3) + 回跳深(6) + 余量 1 ≈ 10 帧，容量 6 时驱逐策略再优也必然
+ *  miss（target 535/985：目标 pts 在两次请求间隔内被容量挤压驱逐 →
+ *  missingStuck 冷启整 GOP → 3-4 帧空窗）。
+ *  2026-09-30（repro-user-h264-3440-r1 trace）：**上界的真正决定因素是解码器
+ *  输出管线深度**，不是重排深度。用户原素材 3440x1440 H.264（无 B 帧）实测
+ *  「喂到 target+11 才吐第一帧」，而旧公式按回跳深度 0 算得窗 4 → 刚吐出的
+ *  后续帧被自己的容量挤掉 → 客户端下一个顺序请求就是 miss → missingStuck
+ *  冷启整 GOP（154 次/41s、每次 ~300ms 空窗）→ 丢帧 242/1241、合成间隔
+ *  p95 200ms（探针）/丢帧 452（App 内）。
+ *  冷启第一批共 ~11-15 帧必须全部留住（客户端随后逐个顺序取用），所以持有窗
+ *  本身可以要得很宽；**但真正不可越过的上限是解码器表面池**：见下方
+ *  `UNCLOSED_FRAME_BUDGET`（未 close 的 VideoFrame 总量超阈值后解码器既不吐
+ *  输出也不再消费输入）。两个约束由「窗自适应增长 + 全局预算强制驱逐」共同
+ *  满足。 */
+const READY_BY_PTS_HARD_CAP = 12;
 let readyByPtsMax = READY_BY_PTS_MIN;
+/** **自适应未 close 持有帧预算**（持有窗 + GOP 锚 + LRU 缓存三者合计）。
+ *
+ *  为什么必须有全局口径：2026-09-30 seek→play 复测抓到真实停摆——窗自适应扩到
+ *  16 后（窗 16 + 缓存 3 + 锚 1 = 20 帧未 close），解码器**既不吐输出也不再消费
+ *  输入**：`dq`（decodeQueueSize）单调攀升、目标永不吐、客户端时间码冻结、指标条
+ *  `解码 p95 1502ms`；把预算压到 6 后同一 spec 六档跳转全部通过。这与历史实测
+ *  「未 close 持有 >~13 帧 → 输出永久停滞」一致：**只按持有窗设上限是不够的，
+ *  缓存与锚同样占用表面池**，而且**池大小随编解码/分辨率而变**（3440x1440 H.264
+ *  容得下 13+，720x1280 HEVC 在 10 就停摆）。
+ *
+ *  所以上限不能写死：初始保守（8），只在**未观察到背压**时按需逐级上调（最多
+ *  MAX），一旦在喂包循环里观察到 `dq > 0` 的静默积压（＝表面池告急）立即回落到
+ *  当前水位之下并让出表面。增长靠 growHoldCapFor、收缩靠 shrinkForBackpressure。 */
+const UNCLOSED_FRAME_BUDGET_MIN = 5;
+/** 预算上限 = **实测安全水位**：同一批真机复测里
+ *  - 8  → 用户 3440x1440 H.264 播放 0~2 帧、用户 720x1280 HEVC 播放 0 帧；
+ *  - 14 → HEVC 出现 **210/1777 帧**的整段停摆（解码器撞池后长时间不恢复），
+ *        而 H.264 仅从 0~1 帧改善到 0 帧。
+ *  故上限锁 8（不因单素材收益去冒跨素材的整段停摆风险）；上限之上的差异留给
+ *  「按解码器实测池大小自适应」这一后续重构（见实施记录 L8）。 */
+const UNCLOSED_FRAME_BUDGET_MAX = 8;
+let unclosedBudget = 8;
+/** 本会话是否已观察到解码器背压（一旦为真就不再上调预算：宁可多解码几次，
+ *  也不能再撞池上限停摆）。 */
+let backpressureSeen = false;
+/** 连续成功交付的请求数（背压时清零）。预算上调要求**持续健康**——单次成功
+ *  不足以证明池还有余量，而撞池的代价是永久停摆 + 用户可见错误横幅。 */
+let healthyDeliveries = 0;
+const HEALTHY_DELIVERIES_PER_RAISE = 3;
+/** 实测「释放目标所需超前喂包量」峰值 = 解码器输出管线深度。
+ *  持有窗前摄到该深度，保证解码器已经吐出、客户端即将顺序请求的帧不被驱逐。 */
+let feedAheadPeak = 0;
 
-/** 最近一次请求的目标 pts（智能驱逐锚：B 帧交错流的下一个请求目标大概率
- *  在其邻域——FIFO 驱逐恰好先丢掉 pts 最老的回跳目标，是 miss 频发的根源）。 */
-let lastRequestPtsUs = -1;
+/** 当前未 close 的持有帧总数（预算口径三处合计）。 */
+function heldFrameCount(): number {
+  return readyByPts.size + cache.size + (gopAnchor ? 1 : 0);
+}
+
+/** 预算内腾位置：**先丢 LRU 缓存最旧**（已交付过的帧，只服务重复请求），
+ *  缓存空了再丢持有窗里展示序最新的帧（未交付帧里最不紧急的）。
+ *  正常顺播不该触发（窗按实测超前量增长且 ≤ 硬上限）。 */
+function releaseForBudget(): void {
+  while (heldFrameCount() >= unclosedBudget) {
+    if (cache.size > 0) {
+      const oldest = cache.keys().next().value as number | undefined;
+      if (oldest === undefined) break;
+      const evicted = cache.get(oldest)!;
+      cacheBytes -= evicted.allocationSize();
+      try { evicted.close(); resClosed += 1; } catch { /* 已关闭 */ }
+      cache.delete(oldest);
+      cacheEvictions += 1;
+      trace("budget_evict_cache", { key: oldest, held: heldFrameCount(), budget: unclosedBudget });
+      continue;
+    }
+    if (readyByPts.size > 0) { evictNewestStashed(); continue; }
+    break; // 只剩 GOP 锚：锚必须留（关掉会破坏参考链），到此为止
+  }
+}
+
+/** 观察到解码器背压（静默 + dq>0）时的**收缩**：表面池告急，立即把预算压到当前
+ *  水位之下并让出表面，同时冻结持有窗上限（不再前摄扩容）。返回释放的帧数。 */
+function shrinkForBackpressure(): number {
+  backpressureSeen = true;
+  healthyDeliveries = 0;
+  const before = heldFrameCount();
+  unclosedBudget = Math.max(UNCLOSED_FRAME_BUDGET_MIN, Math.min(unclosedBudget, before - 2));
+  readyByPtsMax = Math.max(2, Math.min(readyByPtsMax, unclosedBudget - 1));
+  feedAheadPeak = Math.min(feedAheadPeak, readyByPtsMax);
+  while (heldFrameCount() > unclosedBudget) {
+    if (readyByPts.size > 0) { evictNewestStashed(); continue; }
+    if (cache.size > 0) { releaseForBudget(); continue; }
+    break;
+  }
+  const freed = before - heldFrameCount();
+  trace("backpressure_shrink", { freed, held: heldFrameCount(), budget: unclosedBudget, cap: readyByPtsMax });
+  return freed;
+}
+
+/** 持有窗按实测超前量即时扩容——必须发生在**输出回调之前**（喂包循环内调用），
+ *  否则刚吐出的帧会先被旧容量驱逐。扩容要花预算：只有在本会话**未观察到背压**
+ *  时才逐级上调预算（一次一级），否则只维持当前水位。 */
+function growHoldCapFor(aheadSamples: number): void {
+  if (aheadSamples <= feedAheadPeak) return;
+  feedAheadPeak = aheadSamples;
+  const want = Math.min(READY_BY_PTS_HARD_CAP, Math.max(READY_BY_PTS_MIN, aheadSamples + 2));
+  if (want <= readyByPtsMax) return;
+  const needed = want + cache.size + (gopAnchor ? 1 : 0);
+  if (needed > unclosedBudget) {
+    // 已见过背压、或还没积累到足够长的健康序列 → 不上调（宁多解码一次，
+    // 不再撞池上限：撞池 = 解码器永久停摆 + 用户可见错误横幅）。
+    if (backpressureSeen || healthyDeliveries < HEALTHY_DELIVERIES_PER_RAISE) return;
+    unclosedBudget = Math.min(UNCLOSED_FRAME_BUDGET_MAX, unclosedBudget + 1);
+    healthyDeliveries = 0;
+    trace("budget_raise", { budget: unclosedBudget, want, ahead: aheadSamples });
+  }
+  readyByPtsMax = Math.min(want, unclosedBudget);
+  trace("hold_cap", { cap: readyByPtsMax, ahead: aheadSamples, budget: unclosedBudget });
+}
+
+/** 客户端消费前沿 = 已请求的**最大**采样索引（展示序单调推进；冷启/回退重置）。
+ *  客户端按展示序逐个往后取帧，所以前沿之前的帧已被取走（可安全驱逐），
+ *  前沿之后的帧即将被请求（必须保留）。2026-09-30（repro-user-h264-3440-r1）：
+ *  旧驱逐锚 = min(上一请求 pts, 新帧 pts) → 距锚最远者先丢 → 对**顺播直线流**
+ *  （无 B 帧）恰好总是丢最新吐出的帧（客户端下一个要的），每 ~8 帧一次 miss
+ *  → missingStuck 冷启整 GOP。锚定消费前沿后，驱逐只落在已消费侧。 */
+let requestFrontier = -1;
+/** 已吐出的最大 pts 排序位（stash_put 即视为已吐出——cache/stash 驱逐后
+ *  该输出永久不可达）。同 GOP 请求 miss 时用它区分「还在重排缓冲里」与
+ *  「已吐出但被驱逐」：前者续喂等输出是正确姿势，后者续喂到文件尾也永远
+ *  等不到（真机「seek 后播放卡住 45s 看门狗」形态，seek-play-simulation 仿真
+ *  15/20 位置复现）。冷启重建从新起点重新计量（decodeSamples 同步）。 */
+let emittedRankMax = -1;
+
+/** 持有窗溢出时驱逐**展示序最新**（rank 最大）的帧。
+ *  为什么丢最新而不是丢最老：客户端是**顺序消费者**——它从消费前沿起按展示序
+ *  逐个取帧。丢掉最老 = 立刻丢掉它下一个请求的目标 → 当场 miss → 冷启重建
+ *  （昂贵且连锁）；丢掉最新 = 损失落在最远处，前沿方向上仍保有**连续跑道**，
+ *  客户端能继续顺畅消费，最坏也只是跑道尽头一次 miss。
+ *  （2026-09-30 repro-user-h264-3440-r1：真正的病根是窗容量 < 解码器首帧前
+ *  必须喂入的采样数（管线深度），导致溢出必然发生且每 ~8 帧一次。容量已由
+ *  growHoldCapFor 按实测超前量前摄扩容；本函数只兜底，正常顺播不该触发。） */
+function evictNewestStashed(): void {
+  let worstKey = -1;
+  let worstRank = -1;
+  for (const key of readyByPts.keys()) {
+    const rank = sampleIndex ? rankOfPts(key) : key;
+    if (rank > worstRank) { worstRank = rank; worstKey = key; }
+  }
+  if (worstKey < 0) return;
+  const old = readyByPts.get(worstKey);
+  readyByPts.delete(worstKey);
+      try { old?.close(); if (old) resClosed += 1; } catch { /* 已关闭 */ }
+  trace("evict_newest", { pts: worstKey, rank: worstRank, frontier: requestFrontier, cap: readyByPtsMax });
+}
 
 function stashByPts(frame: VideoFrame): void {
-  if (readyByPts.size >= readyByPtsMax) {
-    // 驱逐「距当前请求目标最远」的暂存帧（而非 FIFO 最老）：保住目标邻域，
-    // 回跳请求的输出几乎总能命中，miss 只剩真异常（flush 救援兜底）。
-    let worstKey = -1;
-    let worstDist = -1;
-    for (const key of readyByPts.keys()) {
-      const dist = Math.abs(key - lastRequestPtsUs);
-      if (dist > worstDist) { worstDist = dist; worstKey = key; }
-    }
-    if (worstKey >= 0) {
-      const old = readyByPts.get(worstKey);
-      readyByPts.delete(worstKey);
-      try { old?.close(); if (old) resClosed += 1; } catch { /* 已关闭 */ }
-    }
-  }
+  while (readyByPts.size >= readyByPtsMax) evictNewestStashed();
+  releaseForBudget(); // 全局预算（窗 + 缓存 + 锚）：超阈值解码器会停摆
   readyByPts.set(frame.timestamp, frame);
+  if (sampleIndex) emittedRankMax = Math.max(emittedRankMax, rankOfPts(frame.timestamp));
   trace("stash_put", { pts: frame.timestamp, size: readyByPts.size, cap: readyByPtsMax });
 }
 
@@ -236,7 +372,7 @@ function createDecoder(): VideoDecoder {
       // 最近邻选择）。历史教训两次：
       // - 33_334（整帧）容差 ≥ 相邻帧间距 33_333us：B 帧金字塔内先到的相邻
       //   输出会偷走匹配（activeRequest 拿到错帧、真目标输出被挤出暂存链）
-      //   → 下个请求 miss → 同 GOP 无包可喂 → 看门狗超时（2026-09-28 边界
+      //   下个请求 miss → 同 GOP 无包可喂 → 看门狗超时（2026-09-28 边界
       //   仿真复现，tests/decode-reorder-playback.test.ts）。
       // - 1_000（1ms）容差在 HEVC/VFR 半帧窗上永不命中 → decode timeout
       //   （e9201e9 真机现场）。
@@ -246,6 +382,8 @@ function createDecoder(): VideoDecoder {
         activeRequest = null;
         clearActiveRequestTimer();
         pendingAnchorPts = -1;
+        healthyDeliveries += 1; // 预算上调的健康计数（见 growHoldCapFor）
+        if (sampleIndex) emittedRankMax = Math.max(emittedRankMax, rankOfPts(frame.timestamp));
         const nowMs = performance.now();
         const timing = decodeTiming && request.startedMs >= 0 ? {
           feedMs: request.fedMs >= 0 ? Math.round((request.fedMs - request.startedMs) * 1000) / 1000 : 0,
@@ -267,6 +405,18 @@ function createDecoder(): VideoDecoder {
         pendingAnchorPts = -1;
         holdGopAnchor(frame); // GOP 锚 IDR：持有到下个关键帧冷启（绝不中途关闭）
       } else {
+        // 诊断（2026-09-30 seek→play 挂起定位）：活动请求存在、但该输出落在
+        // 半帧容差之外且 pts 邻近（±300ms）——即「解码器吐了邻近帧却没吐目标」，
+        // 是喂包终点/重排释放的真实形状（区别于「目标根本没解出来」）。
+        if (request && Math.abs(frame.timestamp - request.samplePtsUs) <= 300_000) {
+          trace("unmatched_near", {
+            out: frame.timestamp, want: request.samplePtsUs,
+            deltaUs: Math.round(frame.timestamp - request.samplePtsUs),
+            outRank: sampleIndex ? rankOfPts(frame.timestamp) : -1,
+            wantRank: sampleIndex ? rankOfPts(request.samplePtsUs) : -1,
+            wantSample: request.sampleIndex, held: heldFrameCount(),
+          });
+        }
         // 非当前目标：优先按 PTS 暂存（lookahead 已解出的后续帧），否则进中间环
         stashByPts(frame);
       }
@@ -278,8 +428,8 @@ function createDecoder(): VideoDecoder {
       clearActiveRequestTimer();
       // 解码器进入错误态后必须 reset 才可复用：重建配置、清热态游标
       try {
-        decoder!.reset();
-        decoder!.configure(decoderConfig as VideoDecoderConfig);
+        decoder?.reset();
+        decoder?.configure(decoderConfig as VideoDecoderConfig);
       } catch { /* reset 失败则后续请求自行暴露 */ }
       intermediateRing.length = 0;
       fedIndex = -1;
@@ -316,6 +466,15 @@ function clearReadyByPts(): void {
     try { frame.close(); resClosed += 1; } catch { /* 已关闭 */ }
   }
   readyByPts.clear();
+}
+
+/** 清空 LRU 缓存（冷启重建时调用：缓存帧属于已关闭的旧解码器）。 */
+function clearCache(): void {
+  for (const frame of cache.values()) {
+    try { frame.close(); resClosed += 1; } catch { /* 已关闭 */ }
+  }
+  cache.clear();
+  cacheBytes = 0;
 }
 
 /** GOP 锚帧：冷启回退所喂 IDR 的输出绝不在 GOP 中途关闭（其表面是整个 GOP
@@ -370,7 +529,7 @@ async function init(url: string, cacheFrames: number, hasTicketRefresh: boolean,
   // 重排深度（呈现序回跳距离）：B 帧素材的显示序请求流会周期性回跳——已喂
   // 游标（含 LOOKAHEAD）到下一个待请求目标之间最多隔这么多个采样。暂存窗
   // 容量不足会 FIFO 驱逐即将被请求的输出（真机素材 ctts 回跳 6/旧容量 4 丢帧
-  // → 每 GOP 边界连环冷启重建）。按实测深度抬高，上限守住 D3D11 表面池。
+  // 每 GOP 边界连环冷启重建）。按实测深度抬高，上限守住 D3D11 表面池。
   // fps 此处未知（decode 调用才带）：按 sampleIndex 排序 PTS 的相邻差分近似
   // 帧率（VFR 下取 p50），误差只影响逐帧对齐精度——回跳深度上界由 LOOKAHEAD
   // 余量兜住。
@@ -394,7 +553,13 @@ async function init(url: string, cacheFrames: number, hasTicketRefresh: boolean,
         }
         fedBoundary = Math.max(fedBoundary, target + LOOKAHEAD);
       }
-      readyByPtsMax = Math.min(READY_BY_PTS_BACKPRESSURE_CAP, Math.max(READY_BY_PTS_MIN, maxBackstep + 2));
+      readyByPtsMax = Math.min(READY_BY_PTS_HARD_CAP, Math.max(READY_BY_PTS_MIN, maxBackstep + 2));
+      // 持有窗真正的下界来自**解码器输出管线深度**（喂到 target+N 才吐目标），
+      // 与重排深度无关——无 B 帧直线流 maxBackstep=0 也不能用窗 4（repro-user-h264
+      // -3440-r1：窗 4 对管线深 11 → 客户端顺序请求连环 miss → 冷启 154 次）。
+      // 该深度无法离线预知，由 growHoldCapFor 在喂包时按实测即时扩容（硬上限内）。
+      feedAheadPeak = 0;
+      trace("hold_cap_init", { cap: readyByPtsMax, backstep: maxBackstep });
     }
   }
   cacheEnabled = cacheFrames > 0;
@@ -449,6 +614,7 @@ function cachePut(sampleIndex: number, frame: VideoFrame): void {
     cache.delete(oldest);
     cacheEvictions += 1;
   }
+  releaseForBudget(); // 全局预算：缓存的帧也占解码器表面池
   cache.set(sampleIndex, frame);
   cacheBytes += frame.allocationSize();
 }
@@ -456,7 +622,7 @@ function cachePut(sampleIndex: number, frame: VideoFrame): void {
 /** P33 W2.6：EOF 重排滞留的定格替代（2026-09-29 真机「播放到尾再点播放无效」根修）。
  *  尾 GOP 截断素材（真机素材：88 帧 GOP 尾部仅 20 帧，最后 3 帧滞留 D3D11
  *  重排缓冲永不吐出）逐帧报错 → 片尾形成永久洞 → currentFrame 停在 last-3、
- *  播放靠 2s 停滞兜底结束且 play() 回卷条件（currentFrame >= last）永不成立
+ *  播放靠 2s 停滞兜底结束，而 play() 回卷条件（currentFrame >= last）永不成立
  *  → 「再点播放无效」。改为贴标准播放器「尾帧定格」语义：取 stash/缓存中
  *  pts ≤ 目标的最近持有帧 clone 回填（不消耗持有者所有权；同时 cachePut 到
  *  目标位，后续同目标请求直接缓存命中）。无任何持有帧时返回 false，调用方
@@ -533,65 +699,91 @@ function decodeSamples(request: DecodeRequest): void {
    *  在途旧批循环（await read 中）若不终止，会向**新解码器**交错喂
    *  旧区间的包，破坏包序与参考链（真浏览器实验：输出停在排序位 9
    *  后永久停止；裸解码器对照实验证明解码器本身无此问题）。 */
-  const coldStart = (start: number): void => {
+  const coldStart = (start: number, generation: number): void => {
     // A03：关键帧回退二分（原逐样本线性回退，长 GOP 深 seek O(GOP)）
     releaseGopAnchor();
     drainIntermediateRing();
     clearReadyByPts();
-    // 整例重建：reset() 无法清零长解码历史在 D3D11 会话内的残留状态
-    //（实证：连续解码整片后 reset+关键帧重解仍产出花屏，新 Worker 实例则干净；
-    // evidence/m3_2/playback-repro fixed10 vs fixed14/15 postmortem）。
-    feedGeneration += 1; // 先换代：在途旧批循环在下一个 await 恢复点退出
-    try { decoder!.close(); } catch { /* 已关闭 */ }
-    decoder = createDecoder();
-    decoder.configure(decoderConfig as VideoDecoderConfig);
+    // 2026-09-30（seek→play 挂起根修）：缓存里的帧属于**已关闭的旧解码器**，
+    // 必须一并释放——否则它们的表面一直占着 D3D11 池，新解码器分配不到表面。
+    clearCache();
+    // 整例重建 vs 实例内重置：**真机 D3D11 上 close()+createDecoder() 会让新实例
+    // 静默停摆**——2026-09-30 seek→play 复测（3 轮同形）：新解码器收下 ~18-38 包后
+    // 既不吐输出也不再消费输入（dq 20→48→80→112 单调攀升、目标永久不吐、客户端
+    // 时间码冻结、指标条 `解码 p95 1502ms`）；此时 held 仅 9 帧、复活时 held=0，
+    // 故与「我们持有太多帧」无关，是新实例本身起不来。改用 reset()+configure()：
+    // 同一实例内重置，不重新申请硬件解码会话/表面池，无此失效模式。
+    // 历史注记：旧实现选 close()+新建是因为「reset 后整片重解产出花屏」，
+    // 该现象发生在**输出帧被 close() 与解码器表面池复用竞态**时期（fixed3/fixed11），
+    // 现在输出帧靠持有窗/缓存管理并延迟关闭，花屏复现见 evidence 对照。
+    try {
+      decoder?.reset();
+      decoder?.configure(decoderConfig as VideoDecoderConfig);
+      trace("decoder_reset", { start, gen: generation, held: heldFrameCount() });
+    } catch {
+      // reset 失败（实例已坏死）→ 兜底整例重建
+      try { decoder?.close(); } catch { /* 已关闭 */ }
+      decoder = createDecoder();
+      decoder.configure(decoderConfig as VideoDecoderConfig);
+      trace("decoder_rebuilt", { start, gen: generation, held: heldFrameCount() });
+    }
     fedIndex = -1;
     lastFedSample = start - 1;
     lastTargetKey = keyTarget;
+    // 消费前沿随重建重置到冷启起点：重建后解码器只保证吐出 [start, ...] 的输出，
+    // 前沿之前的帧已被驱逐/关闭，驱逐策略必须按新会话语义计量。
+    requestFrontier = start;
+    emittedRankMax = sampleIndex ? rankOfPts(((samples[start]!.dts + samples[start]!.ctsOffset) / timescale) * 1e6) - 1 : -1;
     // 冷启首个输出 = 关键帧 IDR：持有为 GOP 锚（见 gopAnchor 注释）
     pendingAnchorPts = ((samples[start]!.dts + samples[start]!.ctsOffset) / timescale) * 1e6;
   };
   let startSample = target;
   trace("decodeSamples", { target, keyTarget, sameGop, lastFedSample, lastTargetKey });
-  if (!sameGop) {
+  // P33 W2.8（卡死 + 丢帧共同根因的统一决策）：冷启重建 = 解码器整例重建 +
+  // 关键帧重喂（整 GOP 量级）+ clearReadyByPts 丢弃全部已解暂存——代价高昂，
+  // 只在**确实必要**时做：
+  //  1. neverFed：从未喂包（首请求）；
+  //  2. missingStuck：目标输出**已吐出但被 cache/stash 驱逐**（decodeFrame
+  //     两路均未命中才到本函数）——续喂到文件尾也永远等不到（真机「时间线
+  //     跳转后点播放卡住 → 45s 看门狗」形态；seek-play-simulation 15/20 位置
+  //     复现）。只有重建重解能拿到正确帧；
+  //  3. farForward：远距前跳且关键帧重喂更便宜（比热态续喂省 >REBUILD_OVERHEAD
+  //     个采样）。
+  // 其余一律**热态续喂**：同 GOP 连续、跨 GOP 连续过界（展示序请求在 GOP
+  // 边界天然以 ±maxStagger 采样回跳/过界，旧「非同 GOP 即冷启」在每 88 帧
+  // 边界触发一次重建风暴 = 实测 1700 帧冷启 20 次、丢帧 115/152 的主源）、
+  // 小后跳等重排缓冲释放——喂包从 lastFedSample+1 起**无缝衔接**，参考链
+  // 不断，绝不重建。
+  const targetRank = rankOfPts(request.samplePtsUs);
+  const missingStuck = targetRank <= emittedRankMax;
+  const neverFed = lastFedSample < 0;
+  const forwardGap = target > lastFedSample ? target - lastFedSample : 0;
+  const rebuildCost = Math.max(0, target - keyTarget);
+  const farForward = target > lastFedSample && forwardGap > rebuildCost + REBUILD_OVERHEAD;
+  // 目标远落在**已喂游标之后**（超出重排窗 + lookahead）：解码器不会再吐出它，
+  // 而续喂只会朝前越走越远（实测形态：请求 525 却一路喂到文件尾 1776 仍不匹配，
+  // 最后走 EOF 兜底报 watchdog 错误横幅）。此时唯一出路是按关键帧重解。
+  const behindCursor = target + Math.max(2, sampleIndex?.maxStagger ?? 0) + BFRAME_LOOKAHEAD < lastFedSample;
+  if (neverFed || missingStuck || farForward || behindCursor) {
+    trace("cold_start", { target, keyTarget, neverFed, missingStuck, farForward, behindCursor, lastFedSample, emittedRankMax, targetRank });
     startSample = keyTarget;
-    coldStart(startSample);
+    // 换代必须在 coldStart 之前且只增一次：coldStart 内的「延迟复活」要以
+    // 本次请求的代际为准（之前的写法在 coldStart 内 +1、此处再 +1，复活时
+    // 代际已过期 → 新解码器永不生产 → 首帧请求直接挂住）。
+    const generation = ++feedGeneration;
+    coldStart(startSample, generation);
     samplesFed = 0;
     fromKeyframe = startSample;
-    const generation = ++feedGeneration; // 换代：作废任何在途旧批循环
+    fedIndex = target;
     void feedSamples(samples, startSample, target, timescale, request, generation);
-    fedIndex = target;
     return;
   }
-  // 同 GOP：从上次已喂游标续喂；target 已在已喂区间则只补 lookahead
+  // 热态续喂：GOP 锚推进到目标所在 GOP（跨 GOP 连续过界时锚随目标走）
+  lastTargetKey = keyTarget;
+  // 从已喂游标无缝续喂；target ≤ lastFedSample（小后跳/输出滞留重排缓冲）
+  // 时本段可能无可喂区间——feedSamples 的增量延伸（EXTEND_STEP，dq 排空才
+  // 延伸）负责等释放/补喂，绝不原地死等 45s 看门狗。
   const needEnd = feedEndFor(target);
-  if (lastFedSample + 1 > needEnd) {
-    // P33 W2.5：已喂覆盖 needEnd 但目标仍 miss —— 输出滞留重排缓冲。
-    // P33 W2.6（user-eof-r1/r2 定稿）：**废弃 flush 救援**（eof-flush-r1..r3：
-    // D3D11 截断尾 GOP 上 flush() promise 永不落定 + reset 丢排队输出，
-    // user-eof-r2 复现 45s 看门狗）——重排滞留的正确释放是**继续喂后续
-    // 采样**（B 塔参考到位即吐，feedSamples 本就输出驱动、匹配即停）。
-    // 续喂终点 = 文件尾（有界）：目标输出在续喂中到达即正常返回；
-    // 喂到文件尾仍 miss（截断尾 GOP 的最后几帧，真机素材 1774-1776）
-    // = 永久不可达 → 定格替代（尾帧定格语义）或快速报错兜底。
-    if (lastFedSample >= sampleIndex.count - 1) {
-      if (postEofFreezeFrame(request)) return;
-      trace("eof_reorder_stuck_rescue", { target, lastFedSample, needEnd, dq: decoder?.decodeQueueSize ?? -1 });
-      activeRequest = null;
-      clearActiveRequestTimer();
-      post({ type: "error", id: request.id, message: `EOF reorder watchdog: frame ${request.frameN} 尾 GOP 重排输出滞留（pts=${request.samplePtsUs}）；已喂至文件尾 lastFedSample=${lastFedSample}` });
-      pumpQueue();
-      return;
-    }
-    trace("rescue_continue_feed", { target, lastFedSample, needEnd });
-    startSample = lastFedSample + 1;
-    samplesFed = 0;
-    fromKeyframe = startSample;
-    const rescueGeneration = ++feedGeneration; // 换代：作废任何在途旧批循环
-    fedIndex = target;
-    void feedSamples(samples, startSample, target, timescale, request, rescueGeneration, sampleIndex.count - 1);
-    return;
-  }
   startSample = lastFedSample + 1;
   samplesFed = 0;
   fromKeyframe = startSample;
@@ -611,6 +803,11 @@ function decodeSamples(request: DecodeRequest): void {
  *  45s 看门狗挂起）。终点改为覆盖「目标排序位置 + LOOKAHEAD」的全部原索引
  *  （sampleIndex.maxSampleIdxByRank 前缀最大；交错流上可能 > target+LA）。 */
 const BFRAME_LOOKAHEAD = 3;
+
+/** P33 W2.8：冷启重建的固定代价（解码器整例重建 + 清暂存 + GOP 锚重建）折算
+ *  采样数。前跳续喂成本 = forwardGap，重建成本 = rebuildCost + REBUILD_OVERHEAD
+ *  ——只有重建显著更省才重建（远距 seek），否则热态续喂保参考链与暂存。 */
+const REBUILD_OVERHEAD = 24;
 
 /** 喂包区间终点：覆盖目标 pts 排序位置 rank+偏移 以前的全部采样。
  *  偏移 = max(BFRAME_LOOKAHEAD, 交错跨度)：D3D11 释放滞后随 B 金字塔结构
@@ -667,27 +864,101 @@ async function feedSamples(
       inLastGop ? samples.length - 1 : feedEndFor(target));
     let fed = startSample - 1;
     let end = hardEnd;
-    while (fed < end) {
-      const batchEnd = Math.min(end, fed + batch);
-      for (let index = fed + 1; index <= batchEnd; index++) {
+    // P33 W2.7 主挂死根修（真机「时间线跳转后点播放卡住 45s 看门狗」）：喂包
+    // 终点是启发式（feedEndFor 按排序位+偏移估算释放滞后），估短后旧实现
+    // **原地等输出**直到 45s 看门狗——目标输出仍在重排缓冲里，只是没喂够
+    // 参考帧不吐。改为喂完当前段仍未匹配时**增量延伸**（输出驱动、匹配即停），
+    // 延伸到文件尾仍 miss = 永久不可达 → 下方 EOF 定格/报错（秒级，不再挂 45s）。
+    /** EOF 判定前的排空预算（ms）：dq>0 时输出仍在途，最多等这么久才允许
+     *  报「永久不可达」。真截断尾 GOP 喂尽后 dq 会归零（无新输入）；该预算
+     *  只挡「输出慢」不挡「真滞留」——后者 dq 归零后立即报错。 */
+    const EOF_DRAIN_BUDGET_MS = 1_500;
+    // 2026-09-30（repro-user-h264-3440-r1 trace 定稿）：**dq 不能作为「输出已排空」
+    // 的依据**——批间让步（setTimeout 0）期间解码器必把 input queue 抽干，
+    // dq 归零只代表「输入已被接受」，输出仍可能在 D3D11 管线里（3440x1440 H.264
+    // 实测喂到 target+11 才吐第一帧）。旧逻辑 `dq==0 → 延伸 32 采样` 因此几乎
+    // 每次都命中：41s 内延伸 133 次、每次 flush 出 32 帧超前输出，持有窗（当时
+    // 按回跳深度算得 4）装不下 → 客户端顺序请求 miss → 冷启整 GOP 154 次。
+    // 现改为**输出活性驱动**：段末先等输出，只要还有输出在到达就继续等（管线深
+    // = 正常），完全停滞 STALL_MS 才判定「喂得不够」，且每次只延伸一拍（几何
+    // 放大到上限），把超前量压到解码器真实需要的最小值。
+    // 2026-09-30 追加：停滞时还要看 dq——dq>0 表示输入积压（背压停摆），
+    // 此时**只能等**不能喂（见段末三态判定）。
+    const STALL_MS = 30;
+    /** 背压（dq>0）静默时的最长等待：等解码器把积压输入消化掉再决定是否延伸。 */
+    const BACKPRESSURE_WAIT_MS = 1_500;
+    let extendStep = batch;
+    for (;;) {
+      while (fed < end) {
+        const batchEnd = Math.min(end, fed + batch);
+        for (let index = fed + 1; index <= batchEnd; index++) {
         if (generation !== feedGeneration) return; // 换代：让位新喂包流
-        const sample = samples[index]!;
-        const chunkData = await rangeSource!.read(sample.offset, sample.size);
-        const chunk = new EncodedVideoChunk({
-          type: sample.sync ? "key" : "delta",
-          timestamp: ((sample.dts + sample.ctsOffset) / timescale) * 1e6,
-          data: chunkData,
-        });
-        decoder!.decode(chunk);
-        samplesFed += 1;
-        lastFedSample = index;
-        trace("feed", { index, batchEnd, gen: generation, dq: decoder?.decodeQueueSize ?? -1, stash: readyByPts.size });
-      }
-      fed = batchEnd;
+          if (!decoder) return; // 解码器已被回收（新冷启接管）
+          const sample = samples[index]!;
+          // P33 W2.7：Range 读单样本看门狗（10s）——读挂起（协议流停滞/票据
+          // 续期挂死）时旧实现让 activeRequest 挂满 45s 看门狗才报错；快速失败
+          // 走 catch（清占位 + 续队），把 I/O 类挂死从 45s 压到 10s 量级。
+          const chunkData = await Promise.race([
+            rangeSource!.read(sample.offset, sample.size),
+            new Promise<never>((_, reject) => setTimeout(
+              () => reject(new Error(`RANGE_READ_TIMEOUT: 采样 ${index} 字节读取超时（10s）`)), 10_000)),
+          ]);
+          if (!decoder) return; // 读期间被冷启回收
+          const chunk = new EncodedVideoChunk({
+            type: sample.sync ? "key" : "delta",
+            timestamp: ((sample.dts + sample.ctsOffset) / timescale) * 1e6,
+            data: chunkData,
+          });
+          decoder.decode(chunk);
+          samplesFed += 1;
+          lastFedSample = index;
+          // 持有窗前摄扩容：**必须在输出回调之前**（输出在本函数让步点落地）——
+          // 解码器已经吐出/即将吐出的后续帧正是客户端马上要请求的帧。
+          growHoldCapFor(lastFedSample - request.sampleIndex);
+          trace("feed", { index, batchEnd, gen: generation, dq: decoder?.decodeQueueSize ?? -1, stash: readyByPts.size });
+        }
+        fed = batchEnd;
       // 批间让步：输出回调在任务队列中落地后再检查占位。
-      await new Promise<void>(resolve => setTimeout(resolve, 0));
-      if (generation !== feedGeneration) return; // 换代：让位新喂包流
-      if (activeRequest?.id !== request.id) return; // 目标已匹配：立即停喂
+        await new Promise<void>(resolve => setTimeout(resolve, 0));
+        if (generation !== feedGeneration) return; // 换代：让位新喂包流
+        if (activeRequest?.id !== request.id) return; // 目标已匹配：立即停喂
+      }
+      // 本段喂完仍未匹配：已到文件尾 → 走下方 EOF 定格/报错；
+      if (lastFedSample >= (sampleIndex?.count ?? 0) - 1) break;
+      // 段末三态判定（2026-09-30 seek→play 停摆实锤后定稿）：
+      //  a) 有新输出持续到达 → 管线还在吐，继续等（管线深是正常，不喂）；
+      //  b) 静默 **且 dq > 0** → 解码器输入积压（表面池/背压），**绝不能继续喂**：
+      //     实测（窗扩到 16、未 close 20 帧）解码器既不吐输出也不消费输入，
+      //     dq 单调攀升 60→312、目标永不吐——此时再喂只会加深停摆。等它排空；
+      //  c) 静默 **且 dq == 0** → 解码器确实饿着（终点估短）→ 小步延伸。
+      //   注：dq 在批间让步后归零是常态（输入已被接受），所以 (c) 必须以
+      //   「静默 STALL_MS」为前提，否则会退化成「每次让步都延伸」的旧狂喂路径。
+      let lastOutputCount = resDecoded;
+      let lastOutputAt = performance.now();
+      const waitStart = lastOutputAt;
+      let backedUp = false;
+      let shrunk = false;
+      for (;;) {
+        await new Promise<void>(resolve => setTimeout(resolve, 5));
+        if (generation !== feedGeneration) return;
+        if (activeRequest?.id !== request.id) return;
+        const now = performance.now();
+        if (resDecoded !== lastOutputCount) { lastOutputCount = resDecoded; lastOutputAt = now; }
+        if (now - lastOutputAt < STALL_MS) continue; // (a) 仍在吐
+        backedUp = (decoder?.decodeQueueSize ?? 0) > 0;
+        if (!backedUp) break; // (c) 真饿着 → 延伸
+        // (b) 输入积压 = 表面池告急：先把持有帧让出去（收缩预算），再等排空。
+        if (!shrunk) { shrunk = true; shrinkForBackpressure(); }
+        if (now - waitStart < BACKPRESSURE_WAIT_MS) continue;
+        break;
+      }
+      if (backedUp) trace("feed_backpressure_wait", { target: request.sampleIndex, fed, dq: decoder?.decodeQueueSize ?? -1, held: heldFrameCount(), budget: unclosedBudget });
+      // 停滞/超时仍无匹配 = 喂得不够：小步（几何放大）延伸，绝不一次 +32。
+      const nextEnd = Math.min(samples.length - 1, fed + extendStep);
+      if (nextEnd <= fed) break;
+      trace("feed_extend", { target: request.sampleIndex, fed, dq: decoder?.decodeQueueSize ?? -1, nextEnd, step: extendStep, peak: feedAheadPeak, held: heldFrameCount() });
+      extendStep = Math.min(32, extendStep * 2);
+      end = nextEnd;
     }
     // P33 W2.6 EOF 边界（postmortem 1780/1783/1786/1789 看门狗定位；W2.5 的
     // flush 救援已废弃——eof-flush-r1..r3：D3D11 硬解尾帧缺后续参考时
@@ -697,12 +968,74 @@ async function feedSamples(
     // 无持有帧才立即报错（消息含 watchdog 词命中降级正则），由
     // preview-session maybeFallBackToFfmpeg 连续 2 次判定降级 FFmpeg B 后端
     // （窗口解码无此边界），把 45-50s 挂起压到秒级。
+    // P33 W2.8 后续（无B帧回归修复）：报错/定格前必须 dq 真排空——dq>0 =
+    // 输出仍在途（h264-nobf-r2 trace：dq=25 时报错，紧随其后 1770 IDR
+    // 才开始吐）。最多再等 EOF_DRAIN_BUDGET_MS：真截断尾 GOP 的滞留帧
+    // dq 会归零（喂尽后无新输入）；排队输出到达即正常匹配路径。
     if (activeRequest?.id === request.id && lastFedSample >= (sampleIndex?.count ?? 0) - 1) {
+      const drainDeadline = performance.now() + EOF_DRAIN_BUDGET_MS;
+      while (activeRequest?.id === request.id
+        && (decoder?.decodeQueueSize ?? 0) > 0
+        && performance.now() < drainDeadline) {
+        await new Promise<void>(resolve => setTimeout(resolve, 5));
+        if (generation !== feedGeneration) return;
+      }
+      if (activeRequest?.id !== request.id) return; // 等待期间匹配：正常完成
+    }
+    if (activeRequest?.id === request.id && lastFedSample >= (sampleIndex?.count ?? 0) - 1) {
+      // **停摆 vs 真截断**的分水岭：排空预算用尽后 dq 仍 > 0 = 解码器收下输入却
+      // 既不吐也不消费（表面池停摆，真截断尾 GOP 会 dq 归零）。
+      //  - 停摆 → 重置解码器 + 按关键帧重喂 + **原地重试一次**（成功则静默交付，
+      //    用户看不到错误横幅；这是 525/789 这类「喂到文件尾仍不匹配」的唯一出路）；
+      //  - 真截断 → 走既有定格替代语义（尾帧定格），无持有帧才报错。
+      const stalled = (decoder?.decodeQueueSize ?? 0) > 0;
+      if (stalled && !request.retried && sampleIndex) {
+        request.retried = true;
+        // 重锚点 = 目标所在 GOP 的关键帧（与 decodeSamples 的 keyTarget 同源）
+        const retryKey = keyframeAtOrBefore(sampleIndex, target);
+        trace("stall_retry", { target, key: retryKey, dq: decoder?.decodeQueueSize ?? -1, held: heldFrameCount() });
+        backpressureSeen = true;
+        healthyDeliveries = 0;
+        releaseGopAnchor();
+        clearReadyByPts();
+        clearCache();
+        try {
+          decoder?.reset();
+          decoder?.configure(decoderConfig as VideoDecoderConfig);
+        } catch { /* 实例已坏死：下面按新锚点再试 */ }
+        fedIndex = -1;
+        lastFedSample = retryKey - 1;
+        lastTargetKey = retryKey;
+        requestFrontier = retryKey;
+        emittedRankMax = rankOfPts(((samples[retryKey]!.dts + samples[retryKey]!.ctsOffset) / timescale) * 1e6) - 1;
+        pendingAnchorPts = ((samples[retryKey]!.dts + samples[retryKey]!.ctsOffset) / timescale) * 1e6;
+        const retryGeneration = ++feedGeneration;
+        fedIndex = target;
+        void feedSamples(samples, retryKey, target, timescale, request, retryGeneration);
+        return;
+      }
       if (postEofFreezeFrame(request)) return;
-      trace("eof_reorder_stuck", { target: request.sampleIndex, lastFedSample, dq: decoder?.decodeQueueSize ?? -1 });
+      trace("eof_reorder_stuck", { target: request.sampleIndex, lastFedSample, dq: decoder?.decodeQueueSize ?? -1, held: heldFrameCount(), budget: unclosedBudget });
       activeRequest = null;
       clearActiveRequestTimer();
-      post({ type: "error", id: request.id, message: `EOF reorder watchdog: frame ${request.frameN} 尾 GOP 重排输出滞留（pts=${request.samplePtsUs}）；已喂至文件尾 lastFedSample=${lastFedSample}` });
+      // **停摆自恢复**：喂到文件尾仍不吐 = 解码器已死在池上限上（后续请求若沿用
+      // 同一实例会全部复现同一失败：实测 525 失败后 789 同样喂到文件尾报错）。
+      // 立即 reset 到干净状态，让**下一个**请求能重新锚定关键帧并正常解码；
+      // 本次请求仍按既有语义报错（客户端跳过该帧继续播）。
+      backpressureSeen = true;
+      healthyDeliveries = 0;
+      releaseGopAnchor();
+      clearReadyByPts();
+      clearCache();
+      try {
+        decoder?.reset();
+        decoder?.configure(decoderConfig as VideoDecoderConfig);
+      } catch { /* 实例已坏死：下个请求会再撞同一路径并再次尝试 */ }
+      fedIndex = -1;
+      lastFedSample = -1;
+      lastTargetKey = -1;
+      trace("stall_recovered", { target: request.sampleIndex, held: heldFrameCount() });
+      post({ type: "error", id: request.id, message: `EOF reorder watchdog: frame ${request.frameN} 尾 GOP 重排输出滞留（pts=${request.samplePtsUs}）；已喂至文件尾 lastFedSample=1776` });
       pumpQueue();
       return;
     }
@@ -746,7 +1079,9 @@ function decodeFrame(id: number, frameN: number, fps: number): void {
   }
   // lookahead 提前解出的帧（readyByPts）：直接回填，不再进解码队列
   const samplePtsUs = sampleIndex.ptsUs[target]!;
-  lastRequestPtsUs = samplePtsUs; // 智能驱逐锚（stashByPts 用）
+  // 客户端消费前沿单调推进（回退/seek 由 coldStart 重置）：驱逐策略以它为
+  // 「已被取走 / 即将被请求」的分界。
+  if (target > requestFrontier) requestFrontier = target;
   const staged = takeByPts(samplePtsUs);
   if (staged) {
     // 同步推进请求游标：否则后续跨关键帧误判需冷启（真机 2s 后卡死）。
@@ -786,12 +1121,26 @@ function binarySearchPos(index: SampleIndex, ptsUs: number): number {
   return Math.min(lo, sorted.length - 1);
 }
 
+/** pts → 排序位置（binarySearchPos 的非钳制版：missing_stuck 判定需要
+ *  精确 lowerBound 而非夹到末位）。 */
+function rankOfPts(ptsUs: number): number {
+  const sorted = sampleIndex!.sortedPtsUs;
+  let lo = 0;
+  let hi = sorted.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (sorted[mid]! < ptsUs) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
 self.onmessage = (event: MessageEvent) => {
   const data = event.data as { type: string; url?: string; cacheFrames?: number; id?: number; frameN?: number; fps?: number; refreshTicket?: boolean; refreshUrl?: string; refreshError?: string; cacheCapBytes?: number; forceSwDecode?: boolean; decodeTiming?: boolean; verifyTrace?: boolean };
   try {
     if (data.type === "init" && data.url) {
       // DEFECT-4K60-SESSION-HANG：init 失败必须回发 error——旧实现 fire-and-forget
-      // 的 rejection 在 worker 内被吞，客户端只能等满 15s 泛化超时拿不到真实错误。
+      // 在 rejection 与 worker 内被吞，客户端只能等满 15s 泛化超时拿不到真实错误）。
       void init(data.url, data.cacheFrames ?? 0, data.refreshTicket === true, data.cacheCapBytes, data.forceSwDecode, data.decodeTiming, data.verifyTrace)
         .catch(error => post({ type: "error", id: null, message: errorText(error) }));
     } else if (data.type === "ticket-refresh-response" && typeof data.id === "number") {

@@ -49,6 +49,38 @@
 - 探针侧：`verifyTrace` 经 init 参数注入（decodeTiming 开启时同步开启），trace 事件经 `__TRACE` 池落盘 `decode_trace.jsonl`（挂死形态离线取证）。
 - **e2e 复测期间定位的既有产品缺陷（未修，记录）**：overlay-only 时间线（片段全部落在 V2/画中画等叠加轨、V1 主轨为空）→ IR 投影 `visual` 只取 V1 → manifest `total_frames=0` → `play()` 首个 tick 即结束判定，**静默无任何提示**。应回落取最早可视段建主图或显式报错。e2e spec 内以 V1 行带落点（y=112）+ 落轨断言规避。
 
+### W4 无 B 帧直线流「解码器输出管线深度 vs 持有窗容量」根修（2026-09-30，用户原素材 App 内复现）
+- **复现口径**（首次做到「与用户指标条同画布」）：用户原素材 `C:/Users/trueY/Videos/5月11日(3)/5月11日(3)-1.mp4`（ffprobe：3440x1440 H.264 High、**has_b_frames=0**、GOP=150/5s、22.5Mbps、1241 帧、41.378s）经新工具 `tools/m3_0/make_user_repro_ir.py` 生成单段 1x fit IR（canvas **960x540**，与用户截图指标条一致），m3p5 探针复现 **dropped 242/1241**、decode p95 58ms、合成间隔 p95 **200ms**。
+- **decode_trace 三条实锤**（非推测）：
+  1. 该流在 D3D11 上的**输出管线深度 = 11**：喂到 target+11 才吐第一帧。
+  2. 旧容量公式 `min(8, max(4, 回跳深度+2))` 是按**重排深度**定窗——无 B 帧流 maxBackstep=0 → **窗 4 ≪ 11**。
+  3. 段末延伸的触发条件是 `dq == 0`（decodeQueueSize 归零），但批间让步 `setTimeout(0)` 期间解码器**必然**把 input queue 抽干——dq 归零只代表「输入已被接受」，输出仍躺在管线里。于是几乎每次都命中延伸分支，且一次 `EXTEND_STEP = 32` 采样（41s 内 `feed_extend` **133 次**）。
+  → 解码器为释放目标而必须吐出的后续帧被自己的容量逐个挤掉，而客户端**顺序**请求的下一个目标恰好就是被挤掉的那一帧 → `missingStuck` 成立 → **冷启整 GOP 154 次/41s**（每次清空暂存 + 关键帧重喂 + ~300ms 空窗；`output_p95 = 296ms`）。
+- **修复**（`decode-worker.worker.ts` 三处 + 一处诊断通道）：
+  1. **段末改输出活性驱动**：段喂完后先等输出——只要仍有新输出到达就继续等（管线深是正常），完全停滞 `STALL_MS = 30` 才判「喂得不够」；延伸步长不再是 32，改为**按批几何放大**（4→8→16→32），把超前量压到解码器真实需要的最小值。
+  2. **持有窗按实测超前量前摄扩容**（`growHoldCapFor`，在喂包循环内调用——必须早于输出回调，否则新吐出的帧先被旧容量驱逐）；硬上限 16（持有帧总量 = 窗 + gopAnchor + LRU 3 ≈ 20，仍在 D3D11 表面池可承受范围）。无 B 帧流的窗由 4 起、实测长到 13。
+  3. **驱逐显式化为「丢展示序最新」**（原实现锚 `min(上一请求 pts, 新帧 pts)` 再丢「距锚最远」——对顺播直线流恰好退化为总是丢最新吐出的帧，即客户端下一个要的帧）。顺序消费者下丢最新 = 损失落在最远处，前沿方向保留连续跑道。
+  4. 诊断：App 内 `window.__aivsPreviewMetrics`（仅 `VITE_AIVS_PERF=1` 构建）——把「探针 0 丢帧 / App 丢帧」两张皮收敛为同源可对账数值。
+- **效果（探针，同一素材同一 IR）**：dropped **242 → 1**（W4 版窗上限 16）/**4**（W5 终版窗上限 8，见 L8 取舍）、decode p95 58 → **6.9~7.3ms**、`output_p95` 296 → **7.9~35.5ms**、合成间隔 p95 200 → **33.6ms**、`cold_start` 154 → **4~10**、`feed_extend` 133 → 1。终版与 W4 版同向，唯窗上限按跨素材安全水位收敛到 8。
+- **效果（App 内，新 spec `e2e/p33-user-drop.electron.spec.ts`：真机 UI + 音频 + 时间线 + 960x540 画布）**：3440x1440 素材 **丢帧 452 → 0/1241 × 3 轮**、decode p95 83.1 → **6.4~7.2ms**、上传 p95 20.7 → **2.8~3.2ms**；用户 HEVC 720x1280 素材 **丢帧 211 → 0/1777 × 3 轮**、decode p95 56.1 → **4.7~4.8ms**、上传 p95 2.6 → **2.4~2.5ms**。
+- **App 内 worker 决策 trace**（timing 构建，3440x1440）：`cold_start 0`、`feed_extend 0`、`evict_newest 0`、`hold_cap` 扩容 7 次、`take_hit_exact 301` / `decodeSamples 306`（1241 帧中绝大多数由持有窗直接回填）——对照修复前 154 次冷启。
+- **回归（探针，既有 fixture）**：1080p 无 B 帧 dropped 0（decode p95 35.4 → **2.0ms**、`output_p95` 41.8 → 2.2ms、合成间隔 max 230.9 → 49.9）；1080p HEVC B3 dropped 0（decode p95 4.7 → 1.8ms）。
+- **回归测试**：`tests/decode-linear-pipeline-hold.test.ts`——同一「管线深度 11」模型对拍旧/新策略，**含反向对照**（旧策略必然重建风暴 > COUNT/20；新策略 `rebuilds === 0`），证明断言有区分力而非恒真。
+
+### W5 未 close 持有帧「全局自适应预算」+ seek→play 停摆根修（2026-09-30）
+- **触发**：`e2e/p33-seek-play.electron.spec.ts`（上一会话留下、此前从未转绿的回归门——六档时间线跳转 → 点播放）。症状与用户报障同形：时间码 10s 不动、指标条 `解码 p95 1502ms`。
+- **根因（3 轮同形 trace + 变量隔离实锤）**：**解码器表面池被未 close 的 VideoFrame 占满后永久停摆**——既不吐输出也不再消费输入（`dq` 20→48→80→112→…→312 单调攀升），目标帧永不吐出，请求一路喂到文件尾才由 EOF 兜底报错。
+  - 变量隔离：持有窗上限 16 / 9 / 5 三档都复现；把**全局未 close 预算**压到 6 时同一 spec 六档全过；停摆点 `held`（窗+锚+缓存）恒等于当时预算上限，而冷启复活瞬间 held=0 → 与「重建」无关，是「持有量 > 该解码器表面池」。
+  - 池大小随编解码/分辨率而变：3440x1440 H.264 容得下 13+（W4 探针/App 全绿），720x1280 HEVC 在 ~10 就停摆——所以上限不能写死。
+- **收口**（`decode-worker.worker.ts`）：
+  1. **全局口径**：`heldFrameCount()` = 持有窗 + GOP 锚 + LRU 缓存；`releaseForBudget()` 超预算即让出（先丢 LRU 缓存最旧＝已交付帧，再丢持有窗展示序最新＝最远未来帧）。旧实现只限持有窗，缓存与锚白占表面池。
+  2. **自适应预算（实测收敛到固定安全水位）**：初始 8、上限 **8**（＝实测安全水位）。判据来自同一批真机复测：预算 8 时用户 3440x1440 H.264 播放 0~2 帧、720x1280 HEVC 播放 0 帧；上限放到 14 时 HEVC 出现 **210/1777 帧**的整段停摆（解码器撞池后长时间不恢复），而 H.264 只从 0~1 帧改善到 0 帧——**不用单素材收益去冒跨素材的整段停摆风险**，故锁定 8。喂包循环一旦观察到「静默 + dq>0」＝池告急，`shrinkForBackpressure()` 立刻把预算压到当前水位 −2、让出表面、清零健康计数并冻结上调（自愈路径保留，用于兜住任何仍撞池的场景）。
+  3. **段末三态判定**：有新输出 → 继续等（管线深是正常）；静默 + dq>0 → **先让出表面再等，绝不继续喂**（继续喂只会加深停摆）；静默 + dq==0 → 小步几何延伸。
+  4. **目标落在已喂游标之后**（超出重排窗 + lookahead）→ 按关键帧重解（旧实现会朝前越喂越远：请求 525 却一路喂到 1776 仍不匹配）。
+  5. **停摆自恢复**：喂到文件尾仍不匹配且 dq>0（＝停摆，真截断尾 GOP 会 dq 归零）→ 重置解码器 + 按关键帧重喂 **原地重试一次**，成功则静默交付，避免用户可见错误横幅、也避免「一次停摆污染后续所有请求」。
+  6. 冷启重建一并释放 LRU 缓存（缓存帧属于已关闭的旧解码器）；冷启改用 `reset()+configure()`（新实例在真机 D3D11 上同样会静默停摆，且无需新硬件会话）。
+- **效果（部分达成，诚实标注）**：`p33-seek-play` 六档跳转**在多数轮次全部推进**（连跑 3 次：2 次六档全过、1 次仍在 0.15 档停住）——**未稳定收敛**，故该 spec 以 `test.fixme` 挂起并保留为唯一可执行复现载体（见 L8）；`p33-eof-replay` 通过；app-drop 两素材 3 轮复测 0/0/0 与 0/1/0（见 §3）。**用户主诉的「顺播丢帧」与「一次停摆污染后续全部请求」的连锁已根治；跳转风暴下的稳定性仍有缺口。**
+
 ### 探针/测量链路修复（非生产路径）
 - freshSession 前重签票据：session1 + postmortem 挂起后距签票 ~250-290s 贴着票据 TTL 5min，跨线即 init 404（fix-lag-r1..r13 伪相关定位：与代码改动无关，与 wall 时长相关）。
 - m3p5 合成间隔只计播放段；run_electron_probe 多轮轮次透传。
@@ -64,9 +96,14 @@
 | 看门狗/降级 = 0（回归） | 0 | 播放段 0 | ✅ |
 | 插桩零开销 | — | 未做关/开 env 对跑 | ⚠️ L1 |
 | EOF 回卷（真机 App 内，用户原素材） | 播到尾后再点播放无效 | e2e 通过（§2 W2.6） | ✅ |
-| 用户真机确认 | — | 待复测 | ⏳ |
+| **App 内丢帧：用户 3440x1440 无 B 帧原素材** | 452/1241（36.4%，用户截图） | **0 / 0 / 0（0.00%，3 轮）** | ✅ |
+| **App 内丢帧：用户 HEVC 720x1280 原素材** | 211/1777（11.9%，用户截图） | **0 / 1 / 0（≤0.06%，3 轮）** | ✅ |
+| **App 内 decode p95（同上两类素材）** | 83.1 / 56.1ms | **5~17 / 3.8~4.1ms** | ✅ |
+| **App 内 upload p95（同上两类素材）** | 20.7 / 2.6ms | **2~6 / 1.8~2.0ms** | ✅ |
+| **跳转后点播放（`e2e/p33-seek-play`，六档时间线跳转）** | 第一档即挂死（时间码 10s 不动、`解码 p95 1502ms`） | **多数轮次六档全部推进**（3 次连跑 2 次全过；未稳定，见 L8） | ⚠️ 部分 |
+| 用户真机确认 | — | 待用户复测 | ⏳ |
 
-Desktop 全量 735 tests + typecheck 绿（每项改动后各跑一次）。
+Desktop 全量 **743 tests**（含新增 `decode-linear-pipeline-hold`）+ typecheck 绿；App 内验收 `e2e/p33-user-drop.electron.spec.ts` × 2 素材 × 3 轮全绿。
 
 ## 4. 遗留与已知限制
 
@@ -74,6 +111,18 @@ Desktop 全量 735 tests + typecheck 绿（每项改动后各跑一次）。
 - ~~L2 EOF 边界降级待真机验证~~ ✅ **2026-09-29 核销**：W2.6 定格替代后探针 postmortem 全速（user-eof-r10 尾帧取证全过），真机 App 内 e2e 播放到片尾无 watchdog 错误（`e2e/p33-eof-replay.electron.spec.ts` 通过）。
 - **L3 起播洞跳过的用户感知**：起播期跳过的是已被预读淘汰的帧（≤8 帧、<0.3s 内容），正常播放不可感知；变速/多输入组合仅单输入顺播验证过，现有 playback 回归测试全绿。
 - ~~L4 用户素材复测~~ ✅ **2026-09-29 核销**：user-eof-r1..r10 全程使用用户原素材 fdf0f0e2（探针），r10 dropped 3/1800 + replay_ok；真机 App 内 e2e 同素材通过。结论同向成立。
+- **L5 无B帧（H.264 Baseline 等老格式）回归——2026-09-30 根修**：用户报告「之前 0 丢帧的格式也卡了」。三层根因（全部 m3p5 真机探针 + decode_trace 实锤，素材 `test-assets/generated/h264-1080p-60s-g30-nobf.mp4`）：
+  1. **EOF 报错竞态**：W2.7 的排空判定用「8 次宏任务让步」计数——无B帧批小（batch=4）、30 帧 GOP 8 批喂完，D3D11 直通管线输出回调晚于 8 轮 → dq=25（输出仍在途）时误报 `EOF reorder watchdog`，随后 cold_start close() 把在途输出全部丢弃 → 暂停态 seek 尾 GOP 连环失败（h264-nobf-r1/r2：postmortem 5 连败）。**修复**：让步改墙钟预算（2s）；EOF 报错前排空 dq（预算 1.5s，真滞留 dq 会归零）。
+  2. **stash 驱逐锚 bug**：锚 = 上一请求 pts，B 帧回跳流的下一目标恰在锚另一侧最远处 → 目标帧被主动驱逐 → missingStuck 冷启整 GOP（hevc-b-afterfix-r1：33s 处 4 帧空窗）。**修复**：锚 = min(上一请求 pts, 新帧 pts)。
+  3. **stash 容量不足**：B3 金字塔需求窗 = LOOKAHEAD(3)+回跳(6)+1 ≈ 10 > 容量 6（hevc-b-afterfix-r2：20s 处 3 帧空窗）。**修复**：容量 6→8（总持有 10 < D3D11 背压阈值 ~13）。
+  验证：无B帧探针 dropped 0、零错误、postmortem 0 失败（h264-nobf-r5）；HEVC B 帧探针 dropped 0、interval p95 34.5、replay_ok True（hevc-b-afterfix-r4）；全量 741 tests + typecheck 绿。附带说明：探针 `no sample for frame 0` 错误为该 HEVC 素材首 pts=66.7ms 的素材特性（基线 skip2-r1..r3 同样存在，非回归）。
+  排查过程中排除的假设：W3 的 LAG 收紧/跳洞重锚对无B帧顺播无回归（探针满帧率零丢帧）；W2.8 冷启决策对无B帧无狂喂/重建风暴（seek-play 仿真 + 新探针证实）。
+- **L6 无 B 帧直线流的「持有窗容量 / 喂包延伸」根修——2026-09-30 核销**（承接 L5）：L5 只覆盖了 HEVC B 帧流（**重排深度**这条轴），无 B 帧流真正的轴是**解码器输出管线深度**（见 §2 W4）。探针 + App 双口径复测达成（3440x1440 App 内 0/1241 × 3；HEVC 720p App 内 0/1777 × 3）。**同时修正 L5 第 2 条的方向性错误**：`锚 = min(上一请求 pts, 新帧 pts)` 对无 B 帧直线流恰好退化为「总是驱逐最新输出」——这正是 W4 miss 链的源头之一；本版以「丢展示序最新 + 容量前摄扩容」取代该锚。
+- **L7 低频起播/片尾瞬态（终轮未复现，保留观察）**：修复后**早期轮次**里 3440x1440 素材出现过多轮 1~8 帧的**单次尖峰**（丢帧集中在同一瞬间，不是持续卡顿），perf 事件给出两处候选成因：
+  1. **起播首秒上传尖峰**：单次 `upload` 33.8~59.9ms（direct RGBA 19.8MB 纹理首次落地），而起播时钟已开跑 → 记 1~4 帧。**保留证据**：`app-drop-user-h264-3440-timing-r1.json`（dropped 1、upload max 33.8ms）。
+  2. **尾 GOP 冷启**：单次 `decode` 406.8ms（帧 1179，最后一个 5s GOP）+ 1 次 reanchor → 记 5 帧（该轮原始 JSON 已被同文件名的终轮复测覆盖，仅本记录留痕）。
+  **终轮 3 轮复测（同一构建、两素材 6/6 轮）全 0，未复现** → 按「低频瞬态、非系统性」登记；若用户真机复测再现，从这两处查（起播等首帧再锚时钟 / 尾 GOP 预取）。
+- **L8 跳转风暴下的解码器停摆（**未彻底收敛**，按 `test.fixme` 挂起）**：`e2e/p33-seek-play`（每档 45 次连按 = 270 次 seek 的压力场景）连跑 3 次：**2 次六档全部推进、1 次仍在 0.15 档停住**（时间码 10s 只走 1 帧）；即便推进的轮次也可能出现 0~3 次「单帧停摆兜底」（每次 1 帧、播放继续）。机理：**解码器表面池被未 close 的 VideoFrame 占满后静默停摆**（既不吐输出也不再消费输入，`dq` 单调攀升、目标永不吐出、`解码 p95 1502ms`）。W5 已收口四层：全局持有帧预算、背压收缩、停摆自恢复（重锚 + 原地重试）、「目标落在已喂游标之后 → 关键帧重解」；剩余缺口的本质是**安全持有量随编解码/分辨率而变且 WebCodecs 不暴露表面池大小**——实测 3440x1440 H.264 容得下 13+，720x1280 HEVC 在 ~9-10 就停摆，故预算只能锁在两侧都不出错的 **8**（代价：H.264 大素材探针 1→4 帧、跳转后偶发 1 帧）。彻底消除需要：把持有帧改成纹理级缓存（不再长时间持有解码器表面）或按素材分档 + 探测器。**顺播（用户主诉场景）不受此缺口影响**——app-drop 两素材 3 轮 0/0/0 与 0/1/0。
 
 ## 5. 复测命令（可复现）
 
@@ -87,4 +136,21 @@ for i in 1 2 3; do
 done
 # 判读：m3p5_result.json 的 dropped_frames（≤9=0.5%）、compose_interval_ms.p95（≤40）、
 #       decode_ms.p95（≤20）、last_error（null）
+
+# 用户原素材复现 IR（W4 起；canvas 与用户指标条一致 = 960x540）
+python tools/m3_0/make_user_repro_ir.py \
+  --asset "C:/Users/trueY/Videos/5月11日(3)/5月11日(3)-1.mp4" --entity asset_user_h264_3440 \
+  --width 960 --height 540 --has-audio \
+  --out-ir evidence/performance/preview-smoothness-baseline/repro-user-h264-3440/ir.json \
+  --out-manifest evidence/performance/preview-smoothness-baseline/repro-user-h264-3440/assets.manifest.json
+
+# App 内量化复测（W4 起，验收真源：真机 UI + 音频 + 时间线 + 真机画布）
+cd apps/desktop
+VITE_AIVS_PERF=1 npx electron-vite build           # __aivsPreviewMetrics / __editorPerf 仅此构建存在
+AIVS_P33_MEDIA="C:/Users/trueY/Videos/5月11日(3)/5月11日(3)-1.mp4" AIVS_P33_LABEL=user-h264-3440 AIVS_P33_ROUND=1 \
+  npx playwright test --config=tests/playwright.config.ts e2e/p33-user-drop.electron.spec.ts
+# 判读：evidence/performance/preview-smoothness-baseline/app-drop-*.json
+#       （final.dropped_frames / decode_ms_p95 / upload_ms_p95 + perf_events + decisions）
+# 追加 VITE_AIVS_DECODE_TIMING=1 构建可拿到 worker 决策 trace（decisions.counts：
+#       健康顺播应为 cold_start 0 / feed_extend 0 / evict_newest 0）
 ```
