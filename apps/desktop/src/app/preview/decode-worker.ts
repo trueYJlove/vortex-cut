@@ -71,6 +71,9 @@ export class DecodeWorker {
   /** P33 分段计时环形样本（decodeTiming 开启时填充；容量 512）。 */
   timingSamples: DecodeTimingSample[] = [];
   private timingOn = false;
+  /** 事件级 trace（喂包/输出/决策逐条 postMessage）：只在显式要求时开，
+   *  与 timingOn 解耦——dev 默认只开轻量的分段计时。 */
+  private traceOn = false;
   /** decode 请求 postMessage 时刻（残差段计算用；id → performance.now ms）。 */
   private readonly postedAt = new Map<number, number>();
 
@@ -164,9 +167,16 @@ export class DecodeWorker {
     // B13-R 判别诊断开关：强制软件解码（perf 诊断构建环境变量；缺省 undefined）
     let forceSwDecode: boolean | undefined;
     try { forceSwDecode = import.meta.env.VITE_AIVS_FORCE_SW_DECODE === "1" || undefined; } catch { /* 无 env */ }
-    // P33 分段计时开关：优先 URL 参数（探针链路稳定），其次 VITE_ env。
+    // P33 分段计时开关：优先 URL 参数（探针链路稳定），其次 VITE_ env；
+    // **dev 默认开启**（只多两次时钟差，零事件风暴）——真机 dev 复测里
+    // 「p50 1.6ms / p95 52ms」这类尾巴问题必须能当场分段（喂包 / 出帧 / 残差），
+    // 否则只能靠猜。事件级 trace 仍只在显式要求时开（postMessage 风暴有代价）。
     try {
-      instance.timingOn = new URLSearchParams(window.location.search).get("decodeTiming") === "1"
+      const params = new URLSearchParams(window.location.search);
+      instance.timingOn = params.get("decodeTiming") === "1"
+        || import.meta.env.VITE_AIVS_DECODE_TIMING === "1"
+        || Boolean(import.meta.env.DEV);
+      instance.traceOn = params.get("decodeTrace") === "1"
         || import.meta.env.VITE_AIVS_DECODE_TIMING === "1";
     } catch { /* 无 window/env */ }
     try {
@@ -179,7 +189,7 @@ export class DecodeWorker {
           // 永远等不到输出（首个输出已被消费/释放）→ 45s 看门狗 → 降级
           // 慢路径。cap=4 帧（720p≈5MB GPU）即可覆盖并发重复窗口。
           cacheFrames: 3,
-          refreshTicket: Boolean(refreshTicket), ...(forceSwDecode ? { forceSwDecode: true } : {}), ...(instance.timingOn ? { decodeTiming: true } : {}), ...(instance.timingOn ? { verifyTrace: true } : {}), ...(cacheCapBytes !== undefined ? { cacheCapBytes } : {}) }), signal);
+          refreshTicket: Boolean(refreshTicket), ...(forceSwDecode ? { forceSwDecode: true } : {}), ...(instance.timingOn ? { decodeTiming: true } : {}), ...(instance.traceOn ? { verifyTrace: true } : {}), ...(cacheCapBytes !== undefined ? { cacheCapBytes } : {}) }), signal);
       throwIfAborted(signal);
       instance.hardware = data.hardware ?? null;
       instance.width = data.width ?? 0;

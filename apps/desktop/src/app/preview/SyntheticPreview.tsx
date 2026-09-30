@@ -507,6 +507,12 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
           {metrics.decode_hardware && metrics.decode_hardware !== "" && !metrics.decode_hardware.includes("prefer-hardware") && (
             <span className="synthetic-backend-warn">{` · 硬解不可用（${metrics.decode_hardware}，软件解码）`}</span>
           )}
+          {/* 分段计时（dev 默认开、可通过 VITE_AIVS_DECODE_TIMING=1 强制）：
+              把「解码 p95 的尾巴」拆成 喂包 / 出帧 / 残差 三段——p95 高到底是
+              我们喂得慢、解码器吐得慢，还是排队/传输慢，一眼可判。 */}
+          {metrics.decode_seg && (
+            <span>{` · 分段 喂包 ${metrics.decode_seg.feed_p95} / 出帧 ${metrics.decode_seg.output_p95} / 残差 ${metrics.decode_seg.residual_p95}ms(p95)`}</span>
+          )}
         </div>
       )}
     </div>
