@@ -60,6 +60,13 @@ test(`P33 App 内丢帧复测：${label}`, async () => {
   });
   try {
     const page = await app.firstWindow();
+    // 视口可覆写（AIVS_P33_VIEWPORT=1920x1080）：复刻用户真机窗口——预览面板越大，
+    // 合成器后备缓冲越大（用户实测 1096x617 vs e2e 默认 778x438），是「残差 63ms」
+    // 这类主线程/呈现压力的关键变量之一。
+    if (process.env.AIVS_P33_VIEWPORT) {
+      const [width, height] = process.env.AIVS_P33_VIEWPORT.split("x").map(Number);
+      if (Number.isFinite(width) && Number.isFinite(height)) await page.setViewportSize({ width: width!, height: height! });
+    }
     await page.waitForFunction(() => Boolean(window.desktop?.getRuntime));
     await page.evaluate(() => window.desktop.getRuntime());
     await expect(page.getByRole("tab", { name: "素材", exact: true })).toBeVisible({ timeout: 30_000 });
