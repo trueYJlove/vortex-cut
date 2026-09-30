@@ -145,6 +145,8 @@ interface DecodeRequest {
   /** 停摆自恢复标记：喂到文件尾仍不匹配时允许「重置解码器 + 重锚关键帧」重试
    *  一次（防同一请求无限重试）。 */
   retried?: boolean;
+  /** 选中采样的展示序位（= 消费前沿判据；入队时算好，见 evictNewestStashed）。 */
+  rank: number;
 }
 const decodeQueue: DecodeRequest[] = [];
 let activeRequest: DecodeRequest | null = null;
@@ -288,11 +290,24 @@ function heldFrameCount(): number {
   return readyByPts.size + cache.size + (gopAnchor ? 1 : 0);
 }
 
-/** 预算内腾位置：**先丢 LRU 缓存最旧**（已交付过的帧，只服务重复请求），
- *  缓存空了再丢持有窗里展示序最新的帧（未交付帧里最不紧急的）。
- *  正常顺播不该触发（窗按实测超前量增长且 ≤ 硬上限）。 */
+/** 持有窗里是否有「消费前沿之前」的陈旧帧（fps 不匹配/变速素材的固有产物）。 */
+function hasStaleStashed(): boolean {
+  const threshold = evictionThresholdRank();
+  if (!(threshold >= 0)) return false;
+  for (const key of readyByPts.keys()) {
+    const rank = sampleIndex ? rankOfPts(key) : key;
+    if (rank < threshold) return true;
+  }
+  return false;
+}
+
+/** 预算内腾位置。腾挪顺序（2026-09-30 W12 起）：**先丢陈旧帧**（前沿之前，本播放轮
+ *  永不再被请求——丢它零代价），再按旧口径丢 LRU 缓存最旧，最后丢持有窗最新。
+ *  （曾试过给缓存加 2 帧保留额度：窗被压到 budget−3 → 同一素材丢帧反而 168→897，
+ *  已回退——窗是预读跑道，优先级高于缓存。） */
 function releaseForBudget(): void {
   while (heldFrameCount() >= unclosedBudget) {
+    if (hasStaleStashed()) { evictNewestStashed(); continue; }
     if (cache.size > 0) {
       const oldest = cache.keys().next().value as number | undefined;
       if (oldest === undefined) break;
@@ -335,7 +350,10 @@ function shrinkForBackpressure(): number {
 /** 持有窗按实测超前量即时扩容——必须发生在**输出回调之前**（喂包循环内调用），
  *  否则刚吐出的帧会先被旧容量驱逐。扩容要花预算：逐级上调（一次一级），且要求
  *  「持续健康交付」——并且若最近刚观察到背压，还要先安静够冷却窗口（见
- *  lastBackpressureAt 注释：收缩可恢复，但不在池子还紧的时候往上撞）。 */
+ *  lastBackpressureAt 注释：收缩可恢复，但不在池子还紧的时候往上撞）。
+ *  （2026-09-30 W12 试过「每次调用都重试扩容」：峰值 20 会让 want 顶到硬上限 12、
+ *  持有量随之抬高，同素材 p95 反而 55ms→1021ms，已回退——峰值只是「曾经多喂过」的
+ *  记录，不等于管线真的需要那么宽。） */
 function growHoldCapFor(aheadSamples: number): void {
   if (aheadSamples <= feedAheadPeak) return;
   feedAheadPeak = aheadSamples;
@@ -389,6 +407,15 @@ function recoverBudgetAfterEvictedMiss(): void {
  *  （无 B 帧）恰好总是丢最新吐出的帧（客户端下一个要的），每 ~8 帧一次 miss
  *  → missingStuck 冷启整 GOP。锚定消费前沿后，驱逐只落在已消费侧。 */
 let requestFrontier = -1;
+/** 消费前沿的**展示序位**（rank）：驱逐判据用它而不是采样索引——B 帧流的采样索引
+ *  在展示序上会回跳，只有 rank 才代表「客户端已经走过去、不会再回头要」。
+ *  **每次请求直接赋值**（不做 max 单调化、也**不随冷启重置到关键帧**）：
+ *   - 顺播（含 fps 不匹配/变速的跳跃请求）天然单调前移；
+ *   - 回退 seek 时跳回小 rank，前沿随之回落（陈旧帧判定不会误伤新区间）；
+ *   - 冷启是「为某个更靠后的目标重解 GOP」的**手段**，若把前沿拉回关键帧，
+ *     关键帧到目标之间的陈旧帧就不再可判（2026-09-30 W12 trace 实锤：
+ *     frontierRank 停在 5700 而窗口里全是 5744~5749 的陈旧帧 → 每帧 miss）。 */
+let requestFrontierRank = -1;
 /** 已吐出的最大 pts 排序位（stash_put 即视为已吐出——cache/stash 驱逐后
  *  该输出永久不可达）。同 GOP 请求 miss 时用它区分「还在重排缓冲里」与
  *  「已吐出但被驱逐」：前者续喂等输出是正确姿势，后者续喂到文件尾也永远
@@ -396,15 +423,56 @@ let requestFrontier = -1;
  *  15/20 位置复现）。冷启重建从新起点重新计量（decodeSamples 同步）。 */
 let emittedRankMax = -1;
 
-/** 持有窗溢出时驱逐**展示序最新**（rank 最大）的帧。
- *  为什么丢最新而不是丢最老：客户端是**顺序消费者**——它从消费前沿起按展示序
- *  逐个取帧。丢掉最老 = 立刻丢掉它下一个请求的目标 → 当场 miss → 冷启重建
- *  （昂贵且连锁）；丢掉最新 = 损失落在最远处，前沿方向上仍保有**连续跑道**，
- *  客户端能继续顺畅消费，最坏也只是跑道尽头一次 miss。
- *  （2026-09-30 repro-user-h264-3440-r1：真正的病根是窗容量 < 解码器首帧前
- *  必须喂入的采样数（管线深度），导致溢出必然发生且每 ~8 帧一次。容量已由
- *  growHoldCapFor 按实测超前量前摄扩容；本函数只兜底，正常顺播不该触发。） */
+/** 持有窗溢出/超预算时的驱逐：**先丢「消费前沿之前、永远不会再被请求」的陈旧帧**，
+ *  再按 W4 语义丢展示序最新的帧。
+ *
+ *  为什么要有第一档（2026-09-30 W12 真机复测，素材「刘可艾 小花猫舞蹈视频」1920x1080
+ *  **50fps** + 30fps 画布）：客户端只请求约 3/5 的源帧（0,2,3,5,6,8…），其余 2/5 被
+ *  解码出来后**永远不会被请求**。旧策略只有「丢展示序最新」一档，于是这些陈旧帧堆满
+ *  持有窗（窗 4），而被丢掉的恰好是客户端下一步要的帧 → 每个请求都 miss → missingStuck
+ *  冷启整 GOP（实测：41s 内 cold_start **2251** 次、`unmatched_near` 32067、解码器吐出
+ *  **73837** 帧而只交付 3459 帧＝21× 放大、丢帧 60/5040、解码 p50 64ms —— 观感幻灯片）。
+ *  同一缺陷也覆盖**变速片段**（speed≠1 同样是「请求跳过部分源帧」）与 VFR 源。
+ *
+ *  判据用 rank（展示序位）而非采样索引（B 帧流的采样索引在展示序上会回跳），并按
+ *  **最旧未服务请求**取阈值（见 evictionThresholdRank），取其中**最旧**的一个丢，
+ *  让窗尽快收敛到「阈值之后的连续跑道」——那才是 W4 要保护的东西。 */
+/** 「已越过、且不会再被请求」的阈值 rank = **最旧的未服务请求**的展示序位。
+ *
+ *  为什么不是「已请求的最大 rank（前沿）」：请求泵会**提前**把环形缓冲填满，前沿可比
+ *  当前正在服务的请求靠前 ~13 个源帧（8 个输出槽 @30fps ↔ 50fps 源）。若按前沿判陈旧，
+ *  这段时间里刚吐出、正在被等待的帧会被当成陈旧帧丢掉 → 紧接着的请求 miss → 冷启整 GOP
+ *  （2026-09-30 W12 trace：`evict_stale` 25997 伴随 `cold_start` 938）。
+ *  取「最旧未服务请求」则严格保守：低于它的帧只可能是**已被服务**或**被跳过**
+ *  （客户端按展示序单调请求），高于它的一律保留——包括泵的预取。
+ *  没有未服务请求（空闲）时退回前沿。 */
+function evictionThresholdRank(): number {
+  let oldest = Number.POSITIVE_INFINITY;
+  if (activeRequest) oldest = activeRequest.rank;
+  for (const request of decodeQueue) if (request.rank < oldest) oldest = request.rank;
+  return Number.isFinite(oldest) ? oldest : requestFrontierRank;
+}
+
 function evictNewestStashed(): void {
+  /** 第一档：阈值之前的陈旧帧（最旧优先）。 */
+  const threshold = evictionThresholdRank();
+  let staleKey = -1;
+  let staleRank = -1;
+  if (threshold >= 0) {
+    for (const key of readyByPts.keys()) {
+      const rank = sampleIndex ? rankOfPts(key) : key;
+      if (rank >= threshold) continue;
+      if (staleRank < 0 || rank < staleRank) { staleRank = rank; staleKey = key; }
+    }
+  }
+  if (staleKey >= 0) {
+    const stale = readyByPts.get(staleKey);
+    readyByPts.delete(staleKey);
+    try { stale?.close(); if (stale) resClosed += 1; } catch { /* 已关闭 */ }
+    trace("evict_stale", { pts: staleKey, rank: staleRank, thresholdRank: threshold, frontierRank: requestFrontierRank, cap: readyByPtsMax });
+    return;
+  }
+  /** 第二档：展示序最新（W4 语义——损失落在最远处，前沿方向保留连续跑道）。 */
   let worstKey = -1;
   let worstRank = -1;
   for (const key of readyByPts.keys()) {
@@ -415,7 +483,7 @@ function evictNewestStashed(): void {
   const old = readyByPts.get(worstKey);
   readyByPts.delete(worstKey);
       try { old?.close(); if (old) resClosed += 1; } catch { /* 已关闭 */ }
-  trace("evict_newest", { pts: worstKey, rank: worstRank, frontier: requestFrontier, cap: readyByPtsMax });
+  trace("evict_newest", { pts: worstKey, rank: worstRank, frontier: requestFrontier, frontierRank: requestFrontierRank, cap: readyByPtsMax });
 }
 
 function stashByPts(frame: VideoFrame): void {
@@ -764,6 +832,47 @@ function postEofFreezeFrame(request: DecodeRequest): boolean {
   return true;
 }
 
+/** **近邻替代**：目标帧「刚吐出过、已被我们驱逐」且**距离极近**（≤ NEAR_REPEAT_RANKS 个
+ *  展示序位）时，用手里最近的持有帧顶替，而不是冷启整 GOP。
+ *
+ *  为什么（2026-09-30 W12 真机复测，1080p**50fps** 素材 + 30fps 画布）：客户端会对同一
+ *  个输出帧发出**重复请求**（trace 实测同一 frameN 连续 2~3 次；22 个冷启目标里 19 个是
+ *  重复请求，间隔 p50 = 1 个请求）。重复请求的第一发已经交付过该帧，第二发时帧已随驱逐
+ *  释放 → 旧路径判 `missingStuck` → 冷启整 GOP（每 26s 实测 368 次）→ 解码器被重解塞满
+ *  → 停摆 → 收缩预算 → 更多 miss，形成 14 次/秒的自锁风暴（丢帧 3~4%、解码 p50 64ms）。
+ *  替代帧与原目标相差 ≤3 个源帧（50fps 下 ≤60ms，30fps 下 ≤100ms），预览本就是非权威
+ *  通道且边界早已使用「相邻帧定格」语义；相对一次整 GOP 重解 + 停摆，这是明显更优的
+ *  取舍（实测把该素材从 3.5% 丢帧压到 0.x% 量级）。
+ *  只有**真的近**才替代：更远的 miss 仍走原冷启/定格路径，不掩盖真实缺口。 */
+const NEAR_REPEAT_RANKS = 3;
+function postNearRepeatSubstitute(request: DecodeRequest, targetRank: number): boolean {
+  let donor: VideoFrame | null = null;
+  let donorRank = -1;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const [pts, frame] of readyByPts) {
+    const rank = sampleIndex ? rankOfPts(pts) : pts;
+    const distance = Math.abs(rank - targetRank);
+    if (distance <= NEAR_REPEAT_RANKS && distance < bestDistance) { bestDistance = distance; donor = frame; donorRank = rank; }
+  }
+  if (!donor && cacheEnabled) {
+    for (const [key, frame] of cache) {
+      const rank = sampleIndex ? rankOfPts(sampleIndex.ptsUs[key] ?? 0) : key;
+      const distance = Math.abs(rank - targetRank);
+      if (distance <= NEAR_REPEAT_RANKS && distance < bestDistance) { bestDistance = distance; donor = frame; donorRank = rank; }
+    }
+  }
+  if (!donor) return false;
+  let out: VideoFrame;
+  try { out = donor.clone(); } catch { return false; } // donor 刚被驱逐关闭
+  activeRequest = null;
+  clearActiveRequestTimer();
+  resPosted += 1;
+  trace("near_repeat_substitute", { target: request.sampleIndex, targetRank, donorRank, distance: bestDistance });
+  post({ type: "frame", id: request.id, frameN: request.frameN, timestampUs: out.timestamp, fromCache: true, samplesFed: 0, fromKeyframe: request.sampleIndex, allocationSize: out.allocationSize(), timing: null, frame: out }, [out]);
+  pumpQueue();
+  return true;
+}
+
 function pumpQueue(): void {
   while (!activeRequest && decodeQueue.length) {
     const request = decodeQueue.shift()!;
@@ -868,6 +977,11 @@ function decodeSamples(request: DecodeRequest): void {
   // 最后走 EOF 兜底报 watchdog 错误横幅）。此时唯一出路是按关键帧重解。
   const behindCursor = target + Math.max(2, sampleIndex?.maxStagger ?? 0) + BFRAME_LOOKAHEAD < lastFedSample;
   if (neverFed || missingStuck || farForward || behindCursor) {
+    // 近邻替代优先（重复请求的救命路径，见 postNearRepeatSubstitute）：`missingStuck`
+    // （刚吐出过、已被驱逐）与 `behindCursor`（目标落在已喂游标之后的小幅回退请求——
+    // 重复请求在预读推进后到达就是这一形态）两者都适用；只有「手里确实有近邻帧」才替代，
+    // 远距 miss 与真正的回退 seek 仍走原冷启路径。
+    if ((missingStuck || behindCursor) && postNearRepeatSubstitute(request, targetRank)) return;
     trace("cold_start", { target, keyTarget, neverFed, missingStuck, farForward, behindCursor, lastFedSample, emittedRankMax, targetRank });
     if (missingStuck) recoverBudgetAfterEvictedMiss(); // 窗太小 → 先把水位抬回来（见该函数注释）
     startSample = keyTarget;
@@ -964,6 +1078,8 @@ async function feedSamples(
     // 空转而非在路上）。中段 GOP 的 miss 仍走看门狗兜底（r3 实测零发生）。
     const lastGopKey = sampleIndex ? sampleIndex.keyframes[sampleIndex.keyframes.length - 1] ?? -1 : -1;
     const inLastGop = keyframeAtOrBefore(sampleIndex!, target) === lastGopKey;
+    // （2026-09-30 W12 试过「按实测峰值前摄喂够」以避免停滞检测的 30ms 空等：同素材
+    //  p95 55ms→1021ms，已回退。峰值是几何延伸的过冲值，按它喂会撞池/塞爆持有窗。）
     const hardEnd = forcedEnd ?? Math.min(samples.length - 1,
       inLastGop ? samples.length - 1 : feedEndFor(target));
     let fed = startSample - 1;
@@ -1213,9 +1329,11 @@ function decodeFrame(id: number, frameN: number, fps: number): void {
   }
   // lookahead 提前解出的帧（readyByPts）：直接回填，不再进解码队列
   const samplePtsUs = sampleIndex.ptsUs[target]!;
-  // 客户端消费前沿单调推进（回退/seek 由 coldStart 重置）：驱逐策略以它为
-  // 「已被取走 / 即将被请求」的分界。
+  // 消费前沿：索引版只作簿记；**rank 版是驱逐的实际判据**（见 evictNewestStashed：
+  // fps 不匹配/变速素材里落在前沿之前的陈旧帧永不再被请求，必须优先丢）。
+  // 每次请求直接赋值、冷启不重置——理由见 requestFrontierRank 的声明注释。
   if (target > requestFrontier) requestFrontier = target;
+  requestFrontierRank = rankOfPts(samplePtsUs);
   const staged = takeByPts(samplePtsUs);
   if (staged) {
     // 同步推进请求游标：否则后续跨关键帧误判需冷启（真机 2s 后卡死）。
@@ -1238,7 +1356,7 @@ function decodeFrame(id: number, frameN: number, fps: number): void {
   }
   cacheMisses += cacheEnabled ? 1 : 0;
   trace("enqueue", { id, frameN, target, samplePtsUs });
-  decodeQueue.push({ id, frameN, targetUs, sampleIndex: target, samplePtsUs, startedMs: -1, arrivedMs: performance.now(), fedMs: -1 });
+  decodeQueue.push({ id, frameN, targetUs, sampleIndex: target, samplePtsUs, startedMs: -1, arrivedMs: performance.now(), fedMs: -1, rank: rankOfPts(samplePtsUs) });
   pumpQueue();
 }
 

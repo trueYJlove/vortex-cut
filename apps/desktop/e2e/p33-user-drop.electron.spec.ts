@@ -212,6 +212,12 @@ test(`P33 App 内丢帧复测：${label}`, async () => {
       label, fixture, total_us: totalUs, expected_frames: expectedFrames,
       reached_end: reachedEnd, metrics_text: metricsText, final: finalMetrics,
       residency: perfResidency, samples: trace, perf_events: perfEvents, decisions,
+      // P33 W12 取证：worker 决策 trace 的**原始事件序列**（仅在 AIVS_P33_TRACE=1 时落盘，
+      // 截尾 20000 条）——聚合计数能看出「有 986 次冷启」，但只有序列能回答「为什么这次
+      // 请求会 miss」（前一次请求喂到哪、吐了哪些、驱逐落在谁身上）。
+      raw_trace: process.env.AIVS_P33_TRACE === "1"
+        ? await page.evaluate(() => (window as unknown as { __TRACE?: unknown[] }).__TRACE?.slice(-20_000) ?? [])
+        : undefined,
     };
     const outPath = join(root, "evidence", "performance", "preview-smoothness-baseline",
       `app-drop-${label}${process.env.AIVS_P33_ROUND ? `-r${process.env.AIVS_P33_ROUND}` : ""}.json`);
