@@ -121,6 +121,12 @@ interface DecodeRequest {
   samplePtsUs: number;
   /** P33 分段计时基点：pumpQueue 出队开始处理时刻（worker 时钟 ms；-1 = 未计时）。 */
   startedMs: number;
+  /** 消息到达 worker（onmessage 入口）时刻：`startedMs - arrivedMs` = **排队等待**
+   *  ——即本请求在 worker 侧等前一个请求处理完的时间。它不属于 feed/output 任何
+   *  一段，是客户端「残差」里唯一能在 worker 内拆出来的部分。
+   *  2026-09-30 真机 dev 实测：残差 p95 53.2ms 而 feed 0 / output 3.9ms，需要它来
+   *  判定「worker 排队」与「主线程投递/调度」各占多少。 */
+  arrivedMs: number;
   /** 最后一批喂包提交时刻（feedMs 终点 = outputMs 起点；-1 = 未喂包）。 */
   fedMs: number;
   /** 停摆自恢复标记：喂到文件尾仍不匹配时允许「重置解码器 + 重锚关键帧」重试
@@ -394,6 +400,9 @@ function createDecoder(): VideoDecoder {
         const timing = decodeTiming && request.startedMs >= 0 ? {
           feedMs: request.fedMs >= 0 ? Math.round((request.fedMs - request.startedMs) * 1000) / 1000 : 0,
           outputMs: request.fedMs >= 0 ? Math.round((nowMs - request.fedMs) * 1000) / 1000 : Math.round((nowMs - request.startedMs) * 1000) / 1000,
+          // **排队段**：消息到达 worker → 出队开始处理（等前一个请求跑完）。
+          // 它不属于 feed/output，是客户端「残差」里唯一能在 worker 内拆出来的部分。
+          queueMs: Math.round((request.startedMs - request.arrivedMs) * 1000) / 1000,
         } : null;
         if (cacheEnabled) {
           const clone = frame.clone();
@@ -676,8 +685,7 @@ function postEofFreezeFrame(request: DecodeRequest): boolean {
 function pumpQueue(): void {
   while (!activeRequest && decodeQueue.length) {
     const request = decodeQueue.shift()!;
-    if (decodeTiming) request.startedMs = performance.now(); // P33：出队开始处理
-    activeRequest = request;
+    if (decodeTiming) request.startedMs = performance.now(); // P33：出队开始处理    activeRequest = request;
     armActiveRequestTimer(request);
     try {
       decodeSamples(request);
@@ -1146,7 +1154,7 @@ function decodeFrame(id: number, frameN: number, fps: number): void {
   }
   cacheMisses += cacheEnabled ? 1 : 0;
   trace("enqueue", { id, frameN, target, samplePtsUs });
-  decodeQueue.push({ id, frameN, targetUs, sampleIndex: target, samplePtsUs, startedMs: -1, fedMs: -1 });
+  decodeQueue.push({ id, frameN, targetUs, sampleIndex: target, samplePtsUs, startedMs: -1, arrivedMs: performance.now(), fedMs: -1 });
   pumpQueue();
 }
 

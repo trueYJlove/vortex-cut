@@ -22,7 +22,7 @@ export interface DecodeWorkerMessage {
   /** P33 分段计时（worker 时钟内时长；decodeTiming 开启时随 frame 捎带）：
    *  feedMs = 出队→最后一批喂包提交；outputMs = 喂包提交→匹配输出到达。
    *  客户端残差 = 自测 RTT − feedMs − outputMs（排队等待 + 双跳传输）。 */
-  timing?: { feedMs: number; outputMs: number } | null;
+  timing?: { feedMs: number; outputMs: number; queueMs?: number } | null;
 }
 
 /** 最近一次解码回执的取证信息（worker 附带；播放诊断用）。 */
@@ -40,6 +40,8 @@ export interface DecodeTimingSample {
   rttMs: number;
   feedMs: number;
   outputMs: number;
+  /** worker 侧排队等待（消息到达 → 出队处理；不属于 feed/output）。 */
+  queueMs: number;
   residualMs: number;
   fromCache: boolean;
 }
@@ -123,11 +125,15 @@ export class DecodeWorker {
           const rttMs = performance.now() - posted;
           const feedMs = data.timing?.feedMs ?? 0;
           const outputMs = data.timing?.outputMs ?? 0;
+          const queueMs = data.timing?.queueMs ?? 0;
           this.timingSamples.push({
             rttMs: Math.round(rttMs * 1000) / 1000,
             feedMs,
             outputMs,
-            residualMs: Math.round((rttMs - feedMs - outputMs) * 1000) / 1000,
+            queueMs,
+            // 残差 = RTT − worker 三段（喂包 / 出帧 / 排队）：剩下的就是双跳消息
+            // 投递 + 主线程任务调度等待（真机 dev 复测里 53ms 尾巴的嫌疑段）。
+            residualMs: Math.round((rttMs - feedMs - outputMs - queueMs) * 1000) / 1000,
             fromCache: data.fromCache ?? false,
           });
           if (this.timingSamples.length > 512) this.timingSamples.splice(0, this.timingSamples.length - 512);

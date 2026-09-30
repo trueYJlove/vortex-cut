@@ -74,7 +74,7 @@ export interface PreviewSessionMetrics {
   /** P33 解码 RTT 分段（VITE_AIVS_DECODE_TIMING=1 时出数；否则 null）：
    *  feed = worker 喂包（Range 读+让步）；output = 解码器吐帧滞后；
    *  residual = 总 RTT − 两段（队列等待+双跳传输+主线程处理）。 */
-  decode_seg: { feed_p50: number; feed_p95: number; output_p50: number; output_p95: number; residual_p50: number; residual_p95: number } | null;
+  decode_seg: { feed_p50: number; feed_p95: number; output_p50: number; output_p95: number; queue_p50: number; queue_p95: number; residual_p50: number; residual_p95: number } | null;
   /** 当前在途解码请求数（全部输入合计，含影子槽）。 */
   decode_in_flight: number;
   /** 实际解码后端（各输入逗号分隔）：webcodecs=快路径；**ffmpeg=已降级到 Core
@@ -1808,22 +1808,26 @@ export class PreviewSession {
     {
       const feeds: number[] = [];
       const outputs: number[] = [];
+      const queues: number[] = [];
       const residuals: number[] = [];
       for (const rig of this.rigs.values()) {
         for (const sample of rig.worker?.timingSamples ?? []) {
           if (sample.fromCache) continue; // 缓存命中不代表解码路径
           feeds.push(sample.feedMs);
           outputs.push(sample.outputMs);
+          queues.push(sample.queueMs ?? 0);
           residuals.push(sample.residualMs);
         }
       }
       if (residuals.length > 0) {
         feeds.sort((a, b) => a - b);
         outputs.sort((a, b) => a - b);
+        queues.sort((a, b) => a - b);
         residuals.sort((a, b) => a - b);
         decodeSeg = {
           feed_p50: p(feeds, 0.5), feed_p95: p(feeds, 0.95),
           output_p50: p(outputs, 0.5), output_p95: p(outputs, 0.95),
+          queue_p50: p(queues, 0.5), queue_p95: p(queues, 0.95),
           residual_p50: p(residuals, 0.5), residual_p95: p(residuals, 0.95),
         };
       }
