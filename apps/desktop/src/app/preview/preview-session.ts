@@ -80,6 +80,10 @@ export interface PreviewSessionMetrics {
   /** 实际解码后端（各输入逗号分隔）：webcodecs=快路径；**ffmpeg=已降级到 Core
    *  IPC 软解**（~180ms/帧量级，必须立刻可见的异常态）。 */
   decode_backend: string;
+  /** 解码器实际模式（各输入逗号分隔）：`prefer-hardware` = 硬解；`no-preference`
+   *  = **软解**（3440x1440 上 ~190ms/帧、720p 上 ~50ms/帧，观感幻灯片）；
+   *  空串 = 尚未握手。用于把「GPU/硬解不可用」这类环境问题当场暴露出来。 */
+  decode_hardware: string;
   /** 纹理上传往返（postMessage+GL+ack）耗时 p95：worker 化后的负载口径。 */
   upload_ms_p95: number;
   /** GAP-RATIO-SWAP 诊断：IR 画布与后备缓冲尺寸（比例切换后应同步换算）。 */
@@ -1737,7 +1741,13 @@ export class PreviewSession {
       if (target - this.currentFrame > PreviewSession.LAG_REANCHOR) {
         const reanchorTo = this.findHoleSkipCandidate(this.currentFrame,
           Math.min(target + PreviewSession.LAG_REANCHOR, this.frames.frameCount - 1));
-        editorPerf.record("reanchor", 0, this.perfId, 0, this.seekEpoch, reanchorTo);
+        // **丢帧口径诚实化**（2026-09-30 用户真机复测暴露）：重锚跳过的帧同样是
+        // 「未能展示的帧」，必须计入丢帧。旧实现只把播放头挪过去不计数——解码吞吐
+        // 不足时界面会显示「丢帧 0」而画面实为幻灯片（用户实测：H.264 素材
+        // `解码 p95 192.3ms`、`丢帧 0`、观感幻灯片），指标因此失去诊断价值。
+        const skippedByReanchor = reanchorTo - this.currentFrame - 1;
+        if (skippedByReanchor > 0) { this.dropped += skippedByReanchor; this.droppedLifetime += skippedByReanchor; }
+        editorPerf.record("reanchor", skippedByReanchor, this.perfId, 0, this.seekEpoch, reanchorTo);
         this.currentFrame = reanchorTo;
         this.anchorFrame = reanchorTo;
         this.anchorWall = now;
@@ -1828,6 +1838,7 @@ export class PreviewSession {
       // 是需要立刻被看见的异常态（2026-09-30 真机「越修越卡」根因即为此路径
       // 被瞬时抖动永久钉死，而界面当时没有任何提示）。
       decode_backend: [...this.rigs.values()].map(rig => rig.preferFfmpeg ? "ffmpeg" : (rig.worker?.backend ?? "?")).join(","),
+      decode_hardware: [...this.rigs.values()].map(rig => rig.worker?.hardware ?? "").join(","),
       decode_ms_p50: p(decodes, 0.5),
       decode_ms_p95: p(decodes, 0.95),
       decode_seg: decodeSeg,
