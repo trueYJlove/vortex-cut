@@ -8,10 +8,13 @@
  *
  * 用法（先起 dev 实例）：
  *   $env:ELECTRON_CLI_ARGS='["--user-data-dir=<temp>"]'; $env:REMOTE_DEBUGGING_PORT='9333'
- *   $env:VITE_AIVS_PERF='1'; $env:AIVS_E2E_MEDIA_PATH='<media>'; npx electron-vite dev
- *   node dev-cdp-probe.mjs --port 9333 --label dev-hevc --media <media> --out <json>
+ *   $env:VITE_AIVS_PERF='1'; $env:AIVS_E2E_MEDIA_PATH='<media>'
+ *   $env:AIVS_E2E_ASSET_PATHS='{"video":"<media>"}'   # ← 「导入视频」按钮走 kind=video，
+ *                                                     #   只设 MEDIA_PATH 会弹原生对话框
+ *   npx electron-vite dev
+ *   node dev-cdp-probe.mjs --port 9333 --label dev-hevc --media <media> --viewport 1920x1080
  */
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 
@@ -26,6 +29,14 @@ const argv = Object.fromEntries(process.argv.slice(2).reduce((pairs, token, inde
 const port = argv.port ?? "9333";
 const label = argv.label ?? "dev";
 const media = argv.media ?? "C:/Users/trueY/Videos/fdf0f0e269126269ed686f208b3063e3.mp4";
+/** 视口覆写（`--viewport 1920x1080`）：复刻用户真机窗口——预览面板越大，合成器
+ *  后备缓冲越大（用户实测 1122x631 ×1.169 vs dev 默认 778x438 ×0.81），是
+ *  「用户会卡、探针不卡」这类差异的第一个待排除变量。 */
+const viewport = (() => {
+  if (!argv.viewport) return null;
+  const [w, h] = argv.viewport.split("x").map(Number);
+  return Number.isFinite(w) && Number.isFinite(h) ? { width: w, height: h } : null;
+})();
 const out = resolve(argv.out ?? `evidence/performance/preview-smoothness-baseline/dev-probe-${label}.json`);
 const projectName = `Dev Probe ${label}`;
 
@@ -38,6 +49,20 @@ const main = async () => {
   await page.waitForFunction(() => Boolean(window.desktop?.getRuntime), undefined, { timeout: 60_000 });
   await page.getByRole("tab", { name: "素材", exact: true }).waitFor({ timeout: 60_000 });
   await page.getByText(/Core 已连接/).waitFor({ timeout: 60_000 });
+  // 视口覆写只改渲染层布局；**真实窗口**（交换链尺寸 / DWM 合成面积）要另设。
+  // 用户真机是 1920x1080 窗口（后备缓冲 1122x631 ×1.169），窗口尺寸不回放就无法
+  // 声称「复刻了用户环境」。CDP Browser 域在 Electron 上不稳定 → 失败即忽略。
+  if (viewport) {
+    try {
+      const session = await page.context().newCDPSession(page);
+      const { windowId } = await session.send("Browser.getWindowForTarget");
+      await session.send("Browser.setWindowBounds", { windowId, bounds: { width: viewport.width, height: viewport.height, windowState: "normal" } });
+      console.log(`[dev-probe] OS window resized to ${viewport.width}x${viewport.height}`);
+    } catch (error) {
+      console.log(`[dev-probe] window resize unavailable: ${String(error).slice(0, 120)}`);
+    }
+  }
+  if (viewport) await page.setViewportSize(viewport);
 
   // 建项目（若同名已存在则直接复用）
   const existing = await page.evaluate(async name => {
@@ -98,6 +123,7 @@ const main = async () => {
   await page.reload({ waitUntil: "domcontentloaded" }).catch(() => undefined);
   await page.waitForFunction(() => Boolean(window.desktop?.getRuntime), undefined, { timeout: 60_000 });
   await page.getByRole("tab", { name: "素材", exact: true }).waitFor({ timeout: 60_000 });
+  if (viewport) await page.setViewportSize(viewport); // 导航后再钉一次（覆写不随 reflow 失效）
   await page.getByLabel("预览比例").selectOption("169").catch(() => undefined);
   const metricsRow = page.locator(".synthetic-metrics");
   await metricsRow.waitFor({ timeout: 180_000 });
@@ -178,12 +204,13 @@ const main = async () => {
   const raf = (probe?.raf ?? []).slice().sort((a, b) => a - b);
   const pick = (list, q) => (list.length ? list[Math.min(list.length - 1, Math.floor(q * list.length))] : -1);
   const report = {
-    label, media, total_us: totalUs, final_text: finalText.replace(/\s+/g, " "),
+    label, media, viewport: viewport ? `${viewport.width}x${viewport.height}` : "default", total_us: totalUs, final_text: finalText.replace(/\s+/g, " "),
     long_tasks: { count: longTasks.length, top: longTasks.slice(0, 15), p95: pick(longTasks.map(t => t.dur).sort((a, b) => a - b), 0.95) },
     raf_interval_ms: { samples: raf.length, p50: pick(raf, 0.5), p95: pick(raf, 0.95), max: raf.length ? raf[raf.length - 1] : -1 },
     main_thread_attribution: page.__perfAcc ?? null,
     samples,
   };
+  mkdirSync(dirname(out), { recursive: true });
   writeFileSync(out, JSON.stringify(report, null, 1), "utf8");
   console.log(`[dev-probe] ${finalText.replace(/\s+/g, " ")}`);
   console.log(`[dev-probe] longtask n=${report.long_tasks.count} p95=${report.long_tasks.p95}ms | raf p50=${report.raf_interval_ms.p50} p95=${report.raf_interval_ms.p95} max=${report.raf_interval_ms.max}ms`);

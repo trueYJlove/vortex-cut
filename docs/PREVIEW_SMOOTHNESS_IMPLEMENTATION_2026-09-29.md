@@ -122,6 +122,41 @@
 - **效果（同机 dev，同素材）**：HEVC 丢帧 **112 → 12 → 3**、H.264 丢帧 **135 → 3**；longtask **295 → 33 → 1~2**；rAF 间隔 p95 **51.8 → 14ms**（≈60Hz 满帧）；`react_commit` 次数 1723 → 282 → **播放期 ~0**（时间码/进度条改 DOM 直写后，播放段 App 组件树完全静止）。注意 `解码 p95` 也从 55.8ms 回落到 **2.8~4.2ms**——那 50ms 本身就是主线程卡顿把 RTT 测量拉长的假象，而非解码慢。
 - **生产路径回归**：两素材各 3 轮 = **0/3/0**（H.264，≤0.24%）与 **0/0/0**（HEVC）；749 单测 + typecheck 绿。
 
+### W11 「收缩变棘轮」：持有帧预算/持有窗必须能自愈（2026-09-30，用户第三次复测暴露）
+用户现象（截图）：**同一 dev 会话**里 HEVC 720x1280 素材流畅（`解码 p50 1.5 / p95 2.6ms · 上传 p95 2.3 · 丢帧 2`），而 3440x1440 H.264 素材「很卡、无法正常播放」（`解码 p50 30.7 / p95 194.6ms · 上传 p95 11.9 · 丢帧 35 · 分段 喂包 0 / 出帧 204.3 / 排队 0.1 / 残差 1.2ms`）。
+
+**先排除（每条都是实测，不是推断）**：
+1. **文件与画布尺寸**：生产构建 + 用户同款画布（`AIVS_P33_VIEWPORT=1920x1080` ⇒ 缓冲 1132×637 ≈ 用户 1122×631）播放同一素材：`丢帧 3/1241 · 解码 p50 2.6ms`；dev + 同画布（`dev-cdp-probe.mjs --viewport`，本轮新增参数）：`丢帧 3 · p50 1.9ms`。
+2. **模糊垫底布局**：`blurred_background` vs `crop_fill` 同实例同素材 A/B（`dev-playback-sample.mjs`，本轮新增工具）：两者都顺（出帧 p95 7~17ms）。此前 `预览比例` 切换会把主轨布局自动改写为 `crop_fill`（App.tsx「比例切换」策略），所以**用户真机那种 `blurred_background` 形态从没被真正测到过**——本次补测，无罪。
+3. **上传慢路径**：`AIVS_FORCE_COPYTO=1` 强制 copyTo 上传（上传 p95 30ms，为 direct 的 ~10 倍）：播放仍 **0 丢帧**（环形缓冲吸收了上传延迟）⇒ 上传慢不是充分条件。
+4. **硬解能力**：当场探针 `navigator.mediaCapabilities.decodingInfo`（`powerEfficient` 才是「真会用硬解」；`VideoDecoder.isConfigSupported` 只回显请求的模式）：`avc1.640032` 3440x1440 = **powerEfficient true** ⇒ 本机硬解可用。
+
+**确定性复现（新增诊断开关 `VITE_AIVS_FORCE_DEGRADED_BUDGET=<n>`）**：把会话起点钉在「刚观察到一次背压」的收缩水位（预算 n / 窗 n−1 / 回升计时=现在）。同素材同窗口 20s 采样：
+
+| 起点 | 解码 p50 | 出帧 p95 | 冷启 | 观感 |
+|---|---|---|---|---|
+| 预算 6 / 窗 5（修复前） | 53→107ms（持续恶化） | 173ms | **176** | 时间码 20s 只走 2s（≈10× 慢），`evict_newest` 5648 次 |
+| 预算 9 / 窗 8 | 1.9ms | 17ms | 0 | 正常 |
+| 预算 6 / 窗 5（修复后） | 1.8~2.6ms | 4.6~17ms | **0** | 正常（首秒 4 帧起播抖动后恢复） |
+
+用户指标条的形状（p50 数十毫秒 + 出帧 p95 200ms + 上传 p95 12ms + 残差干净）与「持有窗被压到 5~7」完全一致。
+
+**根因**：`shrinkForBackpressure()` 里的 `backpressureSeen = true` 是**单向棘轮**——「一旦见过背压就永不上调预算」。本素材的解码器输出管线深度是 11（W4 实测），窗 < 管线深度 ⇒ 客户端顺序请求连环 miss ⇒ 每帧「冷启整 GOP」⇒ 越卡越重建 ⇒ **直到该 worker 复位才恢复**。持有帧水位是 **worker 模块级状态、每个输入一个 worker**，因此：换素材（= 换 worker）会拿到初始水位 ⇒ 同会话里另一个素材照常流畅（对应「图 1 顺、图 2 卡」）；重启（全部 worker 重建）则整段复位。触发那次收缩的事件可以只是任何一次瞬时抖动（判据是喂包循环的「静默 30ms + dq>0」），与素材/画布无关——这正是它「偶发、粘住、重启即好」的原因。
+
+**修复（`decode-worker.worker.ts`，四处）**：
+1. 单向标记 → `lastBackpressureAt` 时间戳：**收缩仍然即时且激进**（安全侧不变，W5/W6 结论不动），但回升允许在「安静 ≥1.5s + 连续 4 次健康交付」后逐级放行（真撞池会持续复现背压、冷却窗口被反复重置 ⇒ 等于维持不涨）。
+2. **被驱逐导致的 miss（`missingStuck`）= 「窗太小」的确凿证据**：目标帧**曾吐出过**、损失完全由我们自己的容量/预算驱逐造成，而且证明池子当时在工作 ⇒ 立即抬一级水位，**不受冷却窗口限制**（按 codec 档位封顶 + 200ms 限速）。这条是自愈主力：纯计时式自愈会被风暴自身的「疑似背压」观测反复重置（实测同一会话误触发 94 次，冷却永不生效）。
+3. 新增 `unclosedBudgetCap`：回升**绝不越过**本会话 codec 档位（HEVC 8 / 其余 12）——否则自愈会把 HEVC 爬回 W5 记录的 10+ 停摆水位。
+4. 收缩时**不再抹掉**实测管线深度 `feedAheadPeak`（它是知识不是水位）：旧实现抹掉后 `want = peak + 2` 只剩 7，窗再也回不到实测需要的 12。
+- **顺带把状态变成可见证据**：`residency` 快照（1Hz，perf 构建随 e2e/探针落 JSON）新增 `budget / budgetCap / windowCap / feedAheadPeak / shrinks`——「窗 < 管线深度」这类**状态性**卡顿只能从这里当场看出来（指标行的分段只能看到症状）。
+
+**验证**：
+- **修复前臂**（同一 knob、修复前构建，本记录留痕；该臂的 JSON 未保留——当时的构建已被回滚）：冷启 176 次、时间码 20s 只走 2s、出帧 p95 173ms、`evict_newest` 5648 次。
+- **修复后臂**（证据在库）：`dev-sample-w11-degraded-6.json`（强制降级起点 预算 6/窗 5，20s 采样）**冷启 0 次**、解码 p50 1.6~2.8ms、出帧 p95 7.5~16.9ms（首秒 50.9ms 起播抖动后恢复）、时间码实时；`dev-sample-w11-healthy.json`（健康臂对照）p50 2.7~2.8ms、出帧 p95 8~16.8ms、丢帧 3；`dev-probe-w11-h264.json`（dev + 用户同窗，完整用户操作链路）丢帧 5/1241、p50 2.7 / p95 5.9ms、longtask 1、rAF p95 14.2ms。
+- App 内 e2e（生产构建，用户同画布 1920x1080 ⇒ 缓冲 1132×637）：**H.264 3440 3 轮 = 2 / 0 / 3 帧（≤0.24%）**、**HEVC 720 3 轮 = 3 / 4 / 0 帧（≤0.23%）**，全在门限（≤0.5%）内；`e2e/p33-eof-replay` 通过。
+- 全量 **753 tests + typecheck** 绿（新增 `tests/decode-hold-budget-recovery.test.ts`：4 例策略回归，含「旧棘轮必然回不去」的反向对照与 HEVC 档位封顶）。
+- 工具链修复（非生产路径）：`dev-cdp-probe.mjs` 新增 `--viewport`（复刻用户窗口）+ 输出目录自动创建 + 文档补 `AIVS_E2E_ASSET_PATHS`（「导入视频」按钮走 `kind=video`，**只设 `AIVS_E2E_MEDIA_PATH` 会弹原生对话框**；且该 JSON 里路径要用正斜杠，反斜杠是非法 JSON 转义 → 解析失败同样退化成对话框）；新增 `dev-playback-sample.mjs`（同实例单变量对照 + 决策 trace 落 JSON）。
+
 ### 探针/测量链路修复（非生产路径）
 - freshSession 前重签票据：session1 + postmortem 挂起后距签票 ~250-290s 贴着票据 TTL 5min，跨线即 init 404（fix-lag-r1..r13 伪相关定位：与代码改动无关，与 wall 时长相关）。
 - m3p5 合成间隔只计播放段；run_electron_probe 多轮轮次透传。
@@ -142,6 +177,8 @@
 | **App 内 decode p95（同上两类素材）** | 83.1 / 56.1ms | **5.4~6.5 / 3.7~4.4ms** | ✅ |
 | **App 内 upload p95（同上两类素材）** | 20.7 / 2.6ms | **1.8~2.9 / 2.1~2.2ms** | ✅ |
 | **解码后端（上述全部轮次）** | — | **webcodecs（快路径）**，`last_error` 全为 null | ✅ |
+| **W11 自愈：强制降级起点（预算 6/窗 5）** | 冷启 176 次 / 时间码 10× 慢 / 出帧 p95 173ms | **冷启 0 次 / p50 1.8~2.6ms / 出帧 p95 4.6~17ms / 时间码实时** | ✅ |
+| **W11 App 内丢帧（用户同画布 1920x1080 ⇒ 缓冲 1132×637）** | 用户截图 35 帧 / 7s（同会话小素材流畅） | **H.264 2/0/3 ÷1241（≤0.24%）· HEVC 3/4/0 ÷1777（≤0.23%）** | ✅ |
 | **跳转后点播放（`e2e/p33-seek-play`，六档时间线跳转）** | 第一档即挂死（时间码 10s 不动、`解码 p95 1502ms`） | **多数轮次六档全部推进**（3 次连跑 2 次全过；未稳定，见 L8） | ⚠️ 部分 |
 | 用户真机确认 | — | 待用户复测 | ⏳ |
 
@@ -166,6 +203,8 @@ Desktop 全量 **743 tests**（含新增 `decode-linear-pipeline-hold`）+ typec
   **终轮 3 轮复测（同一构建、两素材 6/6 轮）全 0，未复现** → 按「低频瞬态、非系统性」登记；若用户真机复测再现，从这两处查（起播等首帧再锚时钟 / 尾 GOP 预取）。
 - **L8 跳转风暴下的解码器停摆（未彻底收敛，按 `test.fixme` 挂起）**：`e2e/p33-seek-play`（每档 45 次连按 = 270 次 seek 的压力场景）连跑多次：多数轮次六档全部推进、个别轮次仍在某一档停住。机理：**解码器表面池被未 close 的 VideoFrame 占满后静默停摆**（既不吐输出也不再消费输入，`dq` 单调攀升）。已收口五层：全局持有帧预算、**按编解码分档**（W7）、背压收缩、停摆自恢复（重锚 + 原地重试）、「目标落在已喂游标之后 → 关键帧重解」、以及**降级闸门不再被单帧缺口误触 + 可回退**（W6）。剩余缺口的本质：安全持有量随编解码/分辨率而变且 WebCodecs 不暴露表面池大小，只能用「两侧都不出错」的分档水位近似。彻底消除需要：把持有帧改成纹理级缓存（不再长时间持有解码器表面）或按解码器实测池大小自适应探测。**顺播（用户主诉场景）与 EOF 回卷均不受此缺口影响**——最终复测两素材 3 轮全 0 丢帧、后端全程 webcodecs。
 - **L9 流水线对主线程尖峰敏感（dev 已收敛至与生产同级）**：见 §2 W9/W10——三处收口后 dev 实测 **丢帧 112 → 3（HEVC）/ 135 → 3（H.264）**、longtask 295 → 1~2、rAF p95 51.8 → 14ms；生产同素材 0~3 帧。**残留（低优先）**：极端负载下每次 App 提交仍可能 ~50-60ms（dev StrictMode），长视频/多轨工程仍在，长期方案是把帧交接与呈现节拍下沉到 worker（decode worker → compositor worker 直连 + 合成器自走），属跨模块改动，按需立项。
+- **L10 棘轮触发源未坐实（观察项，W11 已消除其放大效应）**：用户那次 dev 会话**触发收缩的那一瞬间**没有现场证据（当时指标行/快照看不到水位，重启即复位）。本轮修掉的是「一次瞬时抖动 → 整段幻灯片」这条**放大器**（对任何触发源都成立，且已用强制降级起点 A/B 证明自愈），触发源候选：GPU/驱动瞬时抖动、解码器表面池在长会话下的竞争、`dq>0` 判据对「窗太小导致的自我节流」误判。**下一步取证手段已就位**：`residency` 快照现有 `budget / cap / windowCap / feedAheadPeak / shrinks`，复现时一眼可见是否走了收缩；如需更强证据，可在 `VITE_AIVS_DECODE_TIMING=1` 构建下看 `__TRACE` 的 `backpressure_shrink` / `budget_raise_evicted_miss` 序列。
+- **L11 分段归因在「喂包被 I/O 阻塞」时会串段（诚实记录，未改）**：`fedMs` 只在喂包循环**正常收尾**时打点；若请求在喂包过程中被匹配/被读阻塞，`feedMs` 记 0 而把等待算进 `outputMs`（指标行会显示「喂包 0 / 出帧很大」）。W11 排查中曾据此怀疑读慢，后用强制降级 A/B 证明该形态与桶一致（真因是冷启风暴而非读慢）。修法（把每批喂包时刻也打点、或单列「读等待」段）留待需要时再做，避免再次插桩改动。
 
 ## 5. 复测命令（可复现）
 
@@ -196,4 +235,22 @@ AIVS_P33_MEDIA="C:/Users/trueY/Videos/5月11日(3)/5月11日(3)-1.mp4" AIVS_P33_
 #       （final.dropped_frames / decode_ms_p95 / upload_ms_p95 + perf_events + decisions）
 # 追加 VITE_AIVS_DECODE_TIMING=1 构建可拿到 worker 决策 trace（decisions.counts：
 #       健康顺播应为 cold_start 0 / feed_extend 0 / evict_newest 0）
+#       + residency.decode.budget / windowCap / feedAheadPeak / shrinks（W11 起）：
+#       窗 < 管线深度（本素材 11）= 状态性卡顿，冷启风暴会同时把 shrinks 顶起来
+
+# ── W11 自愈验证（真机 dev，单变量对照；先起 dev 实例）────────────────────
+cd apps/desktop
+REMOTE_DEBUGGING_PORT=9333 VITE_AIVS_PERF=1 VITE_AIVS_DECODE_TIMING=1 \
+  AIVS_E2E_ASSET_PATHS='{"video":"C:/Users/trueY/Videos/5月11日(3)/5月11日(3)-1.mp4"}' \
+  npx electron-vite dev -- --user-data-dir=<临时 profile>
+
+# 健康臂（对照）
+node scripts/dev-playback-sample.mjs --port 9333 --label healthy --seconds 16 --viewport 1920x1080
+# 强制降级臂（模拟「刚观察到一次背压」的收缩水位；**修复后必须自愈**）
+#   重启 dev 时加 VITE_AIVS_FORCE_DEGRADED_BUDGET=6
+node scripts/dev-playback-sample.mjs --port 9333 --label degraded-6 --seconds 18 --viewport 1920x1080
+# 判读：evidence/.../dev-sample-*.json 的逐秒 p50/p95/out95 + decisions
+#   修复前后对照（同素材同窗口）：冷启 176 → 0、解码 p50 53~107ms → 1.8~2.6ms、
+#   出帧 p95 173ms → 4.6~17ms、时间码从 10× 慢回到实时
+#   AIVS_FORCE_COPYTO=1 可另测上传慢路径（上传 p95 ~30ms 但播放仍 0 丢帧）
 ```

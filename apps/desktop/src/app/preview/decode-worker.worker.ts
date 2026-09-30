@@ -55,13 +55,26 @@ interface DecodeResidency {
   live: number;
   cacheBytes: number;
   cacheSize: number;
+  /** P33 W11：持有帧水位与收缩次数——「窗 < 管线深度」这类**状态性**卡顿的唯一
+   *  现场证据（指标行的分段只能看到症状）。1Hz 随 residency 快照落进 perf 证据。 */
+  budget: number;
+  budgetCap: number;
+  windowCap: number;
+  feedAheadPeak: number;
+  shrinks: number;
 }
 let resDecoded = 0;
 let resPosted = 0;
 let resCached = 0;
 let resClosed = 0;
+let resShrinks = 0;
 function decodeResidency(): DecodeResidency {
-  return { decoded: resDecoded, posted: resPosted, cached: resCached, closed: resClosed, live: resDecoded - resPosted - resCached - resClosed, cacheBytes, cacheSize: cache.size };
+  return {
+    decoded: resDecoded, posted: resPosted, cached: resCached, closed: resClosed,
+    live: resDecoded - resPosted - resCached - resClosed, cacheBytes, cacheSize: cache.size,
+    budget: unclosedBudget, budgetCap: unclosedBudgetCap, windowCap: readyByPtsMax,
+    feedAheadPeak, shrinks: resShrinks,
+  };
 }
 
 const post = (message: Outbound, transfer: Transferable[] = []): void => {
@@ -219,9 +232,24 @@ let readyByPtsMax = READY_BY_PTS_MIN;
  *  缓存与锚同样占用表面池**，而且**池大小随编解码/分辨率而变**（3440x1440 H.264
  *  容得下 13+，720x1280 HEVC 在 10 就停摆）。
  *
- *  所以上限不能写死：初始保守（8），只在**未观察到背压**时按需逐级上调（最多
- *  MAX），一旦在喂包循环里观察到 `dq > 0` 的静默积压（＝表面池告急）立即回落到
- *  当前水位之下并让出表面。增长靠 growHoldCapFor、收缩靠 shrinkForBackpressure。 */
+ *  所以上限不能写死：初始保守（8），按需逐级上调（最多 MAX），一旦在喂包循环里
+ *  观察到 `dq > 0` 的静默积压（＝表面池告急）立即回落到当前水位之下并让出表面。
+ *  增长靠 growHoldCapFor、收缩靠 shrinkForBackpressure。
+ *
+ *  **收缩必须是可恢复的（2026-09-30 真机复测补）**：背压是瞬时事件（一次 GPU/驱动
+ *  抖动、一次主线程 GC 都会让 dq 短暂 >0），而「已见背压即永不回升」的单向棘轮
+ *  会把**管线深度 > 持有窗**的素材钉死在幻灯片上——窗 5/预算 6 时每个顺序请求都
+ *  miss（刚吐出的帧被自己的容量挤掉）→ 冷启整 GOP → 越卡越重建。真机 dev 复测
+ *  （VITE_AIVS_FORCE_DEGRADED_BUDGET 强制降级 A/B，同一素材同一窗口）：
+ *
+ *  | 起始预算/窗 | 解码 p50 | 出帧 p95 | 观感 |
+ *  |---|---|---|---|
+ *  | 6 / 5（棘轮后最坏水位） | 53→107ms（持续恶化） | 173ms | 时间码 20s 只走 2s（10× 慢） |
+ *  | 9 / 8（用户实测形态附近） | 1.9ms | 17ms | 正常 |
+ *
+ *  故收缩后**允许逐级回升**，但要求「安静一段（BACKPRESSURE_RECOVERY_COOLDOWN_MS）
+ *  + 持续健康交付（RECOVERY_DELIVERIES_PER_RAISE）」——真正撞池的场景会持续复现
+ *  背压，冷却窗口被反复重置，等于维持不涨；瞬时事件则在 ~1s 内自愈。 */
 const UNCLOSED_FRAME_BUDGET_MIN = 5;
 /** 预算上限 = **实测安全水位，且按编解码分档**（见下表；通用解见实施记录 L8）。
  *
@@ -236,12 +264,19 @@ const UNCLOSED_FRAME_BUDGET_MIN = 5;
  *  其余（H.264/AV1）取 12（覆盖 11 的管线深度 + 1 余量）。 */
 const UNCLOSED_FRAME_BUDGET_MAX = 12;
 const UNCLOSED_FRAME_BUDGET_HEVC = 8;
+/** 本会话的预算上限（按 codec 分档；demux 后写入）。回升**不得越过它**——
+ *  否则 HEVC 会在自愈回升里爬回 10+ 的水位，正是 W5 记录的整段停摆形态。 */
+let unclosedBudgetCap = UNCLOSED_FRAME_BUDGET_MAX;
 let unclosedBudget = 8;
-/** 本会话是否已观察到解码器背压（一旦为真就不再上调预算：宁可多解码几次，
- *  也不能再撞池上限停摆）。 */
-let backpressureSeen = false;
+/** 最近一次观察到解码器背压（表面池告急）的时刻。**不是永久标记**（旧实现是
+ *  `backpressureSeen = true`，见上方表格：单向棘轮会把深管线素材钉死在幻灯片上）。
+ *  收缩本身仍然即时且激进（安全侧不变），回升则要求「安静 + 持续健康」。 */
+let lastBackpressureAt = Number.NEGATIVE_INFINITY;
+/** 收缩后的回升门槛：安静时长（ms）与连续健康交付数。 */
+const BACKPRESSURE_RECOVERY_COOLDOWN_MS = 1_500;
+const RECOVERY_DELIVERIES_PER_RAISE = 4;
 /** 连续成功交付的请求数（背压时清零）。预算上调要求**持续健康**——单次成功
- *  不足以证明池还有余量，而撞池的代价是永久停摆 + 用户可见错误横幅。 */
+ *  不足以证明池还有余量，而撞池的代价是停摆 + 用户可见错误横幅。 */
 let healthyDeliveries = 0;
 const HEALTHY_DELIVERIES_PER_RAISE = 3;
 /** 实测「释放目标所需超前喂包量」峰值 = 解码器输出管线深度。
@@ -275,14 +310,18 @@ function releaseForBudget(): void {
 }
 
 /** 观察到解码器背压（静默 + dq>0）时的**收缩**：表面池告急，立即把预算压到当前
- *  水位之下并让出表面，同时冻结持有窗上限（不再前摄扩容）。返回释放的帧数。 */
+ *  水位之下并让出表面（即时 + 激进，安全侧不变）；同时**重置回升计时**并清零健康
+ *  计数——回升由 growHoldCapFor 在「安静 + 持续健康」后逐级放行（可恢复，非棘轮）。 */
 function shrinkForBackpressure(): number {
-  backpressureSeen = true;
+  lastBackpressureAt = performance.now();
   healthyDeliveries = 0;
+  resShrinks += 1;
   const before = heldFrameCount();
   unclosedBudget = Math.max(UNCLOSED_FRAME_BUDGET_MIN, Math.min(unclosedBudget, before - 2));
   readyByPtsMax = Math.max(2, Math.min(readyByPtsMax, unclosedBudget - 1));
-  feedAheadPeak = Math.min(feedAheadPeak, readyByPtsMax);
+  // 注意：**不清掉 feedAheadPeak**（实测管线深度是知识，不是水位）。旧实现把它压到
+  // 窗容量，于是自愈时 `want = peak + 2` 只剩 7——窗再也回不到实测需要的 12。窗口
+  // 的收缩/回升由「预算 + growHoldCapFor 的新峰值门槛」共同约束，见该函数。
   while (heldFrameCount() > unclosedBudget) {
     if (readyByPts.size > 0) { evictNewestStashed(); continue; }
     if (cache.size > 0) { releaseForBudget(); continue; }
@@ -294,8 +333,9 @@ function shrinkForBackpressure(): number {
 }
 
 /** 持有窗按实测超前量即时扩容——必须发生在**输出回调之前**（喂包循环内调用），
- *  否则刚吐出的帧会先被旧容量驱逐。扩容要花预算：只有在本会话**未观察到背压**
- *  时才逐级上调预算（一次一级），否则只维持当前水位。 */
+ *  否则刚吐出的帧会先被旧容量驱逐。扩容要花预算：逐级上调（一次一级），且要求
+ *  「持续健康交付」——并且若最近刚观察到背压，还要先安静够冷却窗口（见
+ *  lastBackpressureAt 注释：收缩可恢复，但不在池子还紧的时候往上撞）。 */
 function growHoldCapFor(aheadSamples: number): void {
   if (aheadSamples <= feedAheadPeak) return;
   feedAheadPeak = aheadSamples;
@@ -303,15 +343,43 @@ function growHoldCapFor(aheadSamples: number): void {
   if (want <= readyByPtsMax) return;
   const needed = want + cache.size + (gopAnchor ? 1 : 0);
   if (needed > unclosedBudget) {
-    // 已见过背压、或还没积累到足够长的健康序列 → 不上调（宁多解码一次，
-    // 不再撞池上限：撞池 = 解码器永久停摆 + 用户可见错误横幅）。
-    if (backpressureSeen || healthyDeliveries < HEALTHY_DELIVERIES_PER_RAISE) return;
-    unclosedBudget = Math.min(UNCLOSED_FRAME_BUDGET_MAX, unclosedBudget + 1);
+    const recovering = Number.isFinite(lastBackpressureAt);
+    const required = recovering ? RECOVERY_DELIVERIES_PER_RAISE : HEALTHY_DELIVERIES_PER_RAISE;
+    if (healthyDeliveries < required) return; // 单次成功不足以证明池还有余量
+    if (recovering && performance.now() - lastBackpressureAt < BACKPRESSURE_RECOVERY_COOLDOWN_MS) return;
+    unclosedBudget = Math.min(unclosedBudgetCap, unclosedBudget + 1);
     healthyDeliveries = 0;
-    trace("budget_raise", { budget: unclosedBudget, want, ahead: aheadSamples });
+    trace("budget_raise", { budget: unclosedBudget, want, ahead: aheadSamples, recovering, cap: unclosedBudgetCap });
   }
   readyByPtsMax = Math.min(want, unclosedBudget);
   trace("hold_cap", { cap: readyByPtsMax, ahead: aheadSamples, budget: unclosedBudget });
+}
+
+/** **被驱逐导致的 miss 是「窗太小」的确凿证据**（2026-09-30 真机复测补）。
+ *
+ *  判据：`missingStuck` = 目标帧**曾经吐出过**（rank ≤ emittedRankMax），现在不在
+ *  窗/缓存里 → 损失完全由我们自己的容量/预算驱逐造成，而且**证明池子当时在工作**
+ *  （输出确实到达过）。此时唯一正确的反应是把水位抬回来：带着「刚被驱逐的帧」
+ *  继续跑就是冷启风暴（窗 5/预算 6 实测：解码 p50 53→107ms、出帧 p95 173ms、
+ *  时间码 20s 只走 2s）。
+ *
+ *  与背压收缩的关系：收缩**不再**是单向的——但这条回升路径**不受冷却窗口限制**，
+ *  因为它的证据比「静默 + dq>0」强得多（后者在窗太小时也会被误触发：解码器被自己
+ *  的驱逐节流，看起来就像池子饱和，实测同一会话误触发 94 次并把冷却窗口永久重置，
+ *  使纯计时式自愈失效）。上限仍钉在本会话 codec 档位（HEVC 8 / 其余 12），并按
+ *  MIN_INTERVAL 限速，避免风暴里每帧一跳。 */
+const EVICTED_MISS_RAISE_INTERVAL_MS = 200;
+let lastEvictedMissRaiseAt = Number.NEGATIVE_INFINITY;
+function recoverBudgetAfterEvictedMiss(): void {
+  const now = performance.now();
+  if (now - lastEvictedMissRaiseAt < EVICTED_MISS_RAISE_INTERVAL_MS) return;
+  if (unclosedBudget >= unclosedBudgetCap) return;
+  lastEvictedMissRaiseAt = now;
+  unclosedBudget = Math.min(unclosedBudgetCap, unclosedBudget + 1);
+  const want = Math.min(READY_BY_PTS_HARD_CAP, Math.max(READY_BY_PTS_MIN, feedAheadPeak + 2));
+  readyByPtsMax = Math.min(want, unclosedBudget);
+  healthyDeliveries = 0;
+  trace("budget_raise_evicted_miss", { budget: unclosedBudget, cap: unclosedBudgetCap, cap_window: readyByPtsMax, held: heldFrameCount() });
 }
 
 /** 客户端消费前沿 = 已请求的**最大**采样索引（展示序单调推进；冷启/回退重置）。
@@ -582,7 +650,21 @@ async function init(url: string, cacheFrames: number, hasTicketRefresh: boolean,
   // 预算按编解码分档（见 UNCLOSED_FRAME_BUDGET_MAX 的表）：HEVC 解码器表面池更紧。
   {
     const isHevc = /^h(ev|vc)/i.test(demuxed.codec ?? "");
-    unclosedBudget = Math.max(UNCLOSED_FRAME_BUDGET_MIN, isHevc ? UNCLOSED_FRAME_BUDGET_HEVC : UNCLOSED_FRAME_BUDGET_MAX);
+    unclosedBudgetCap = isHevc ? UNCLOSED_FRAME_BUDGET_HEVC : UNCLOSED_FRAME_BUDGET_MAX;
+    unclosedBudget = Math.max(UNCLOSED_FRAME_BUDGET_MIN, unclosedBudgetCap);
+    // 回归/诊断开关（`VITE_AIVS_FORCE_DEGRADED_BUDGET=<n>`，perf 诊断构建）：把会话
+    // 起点钉在「刚观察到一次背压」的收缩水位（预算 n / 窗 n−1 / 回升计时 = 现在），
+    // 用来复现并守住「收缩后必须能自愈」这条性质。对管线深度 11 的素材，窗 ≤5 是
+    // 不够的（每个顺序请求都 miss → 冷启整 GOP 风暴）；修复后应在冷却窗口过后按
+    // 健康交付逐级回升到 12，秒级恢复顺播（真机 dev A/B 见 UNCLOSED_FRAME_BUDGET_MAX
+    // 上方表格）。
+    const forcedBudget = Number((import.meta as unknown as { env?: Record<string, string> }).env?.VITE_AIVS_FORCE_DEGRADED_BUDGET ?? "");
+    if (Number.isFinite(forcedBudget) && forcedBudget >= UNCLOSED_FRAME_BUDGET_MIN) {
+      unclosedBudget = Math.min(unclosedBudgetCap, forcedBudget);
+      readyByPtsMax = Math.max(2, unclosedBudget - 1);
+      lastBackpressureAt = performance.now();
+      trace("budget_forced_degraded", { budget: unclosedBudget, cap: readyByPtsMax });
+    }
     trace("budget_init", { codec: demuxed.codec, budget: unclosedBudget, width: demuxed.width, height: demuxed.height });
   }
   const config: VideoDecoderConfig = {
@@ -787,6 +869,7 @@ function decodeSamples(request: DecodeRequest): void {
   const behindCursor = target + Math.max(2, sampleIndex?.maxStagger ?? 0) + BFRAME_LOOKAHEAD < lastFedSample;
   if (neverFed || missingStuck || farForward || behindCursor) {
     trace("cold_start", { target, keyTarget, neverFed, missingStuck, farForward, behindCursor, lastFedSample, emittedRankMax, targetRank });
+    if (missingStuck) recoverBudgetAfterEvictedMiss(); // 窗太小 → 先把水位抬回来（见该函数注释）
     startSample = keyTarget;
     // 换代必须在 coldStart 之前且只增一次：coldStart 内的「延迟复活」要以
     // 本次请求的代际为准（之前的写法在 coldStart 内 +1、此处再 +1，复活时
@@ -1030,7 +1113,7 @@ async function feedSamples(
         // 重锚点 = 目标所在 GOP 的关键帧（与 decodeSamples 的 keyTarget 同源）
         const retryKey = keyframeAtOrBefore(sampleIndex, target);
         trace("stall_retry", { target, key: retryKey, dq: decoder?.decodeQueueSize ?? -1, held: heldFrameCount() });
-        backpressureSeen = true;
+        lastBackpressureAt = performance.now();
         healthyDeliveries = 0;
         releaseGopAnchor();
         clearReadyByPts();
@@ -1061,7 +1144,7 @@ async function feedSamples(
       // 这是已自恢复的单帧缺口，不是「后端不可用」——preview-session 的降级闸门
       // 会跳过它，避免两次这样的单帧缺口就把整个输入钉死在 FFmpeg IPC 慢路径上
       // （真机 dev 运行实测：钉死后 解码 p95 180ms、丢帧 95）。
-      backpressureSeen = true;
+      lastBackpressureAt = performance.now();
       healthyDeliveries = 0;
       releaseGopAnchor();
       clearReadyByPts();

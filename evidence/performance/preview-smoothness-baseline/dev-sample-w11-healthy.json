@@ -1,0 +1,306 @@
+{
+ "label": "w11-healthy",
+ "env": {
+  "renderer": "ANGLE (Intel, Intel(R) Iris(R) Xe Graphics (0x00009A49) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+  "h264_3440_power_efficient": true,
+  "window": {
+   "w": 1920,
+   "h": 1080,
+   "dpr": 1
+  },
+  "project": "Dev Probe w11-dev",
+  "clips": [
+   {
+    "track": "V1",
+    "layout": "crop_fill",
+    "end_us": 41378005
+   }
+  ]
+ },
+ "samples": [
+  {
+   "tc": "00:00:01:00",
+   "dropped": 3,
+   "p50": 1.8,
+   "p95": 37.7,
+   "up95": 72.1,
+   "seg": {
+    "feed_p50": 0,
+    "feed_p95": 0,
+    "output_p50": 3,
+    "output_p95": 71.8,
+    "queue_p50": 0,
+    "queue_p95": 0.1,
+    "residual_p50": 0.7,
+    "residual_p95": 6.3
+   },
+   "inFlight": 0,
+   "hw": "prefer-hardware",
+   "backend": "webcodecs",
+   "backing": "1132x637",
+   "canvas": "960x540",
+   "error": null
+  },
+  {
+   "tc": "00:00:01:27",
+   "dropped": 3,
+   "p50": 2.8,
+   "p95": 9.8,
+   "up95": 8.8,
+   "seg": {
+    "feed_p50": 0,
+    "feed_p95": 0,
+    "output_p50": 2.5,
+    "output_p95": 71.8,
+    "queue_p50": 0,
+    "queue_p95": 0.1,
+    "residual_p50": 0.7,
+    "residual_p95": 6.3
+   },
+   "inFlight": 0,
+   "hw": "prefer-hardware",
+   "backend": "webcodecs",
+   "backing": "1132x637",
+   "canvas": "960x540",
+   "error": null
+  },
+  {
+   "tc": "00:00:03:00",
+   "dropped": 3,
+   "p50": 2.6,
+   "p95": 4.8,
+   "up95": 6.3,
+   "seg": {
+    "feed_p50": 0,
+    "feed_p95": 0,
+    "output_p50": 2.3,
+    "output_p95": 71.8,
+    "queue_p50": 0,
+    "queue_p95": 0.1,
+    "residual_p50": 0.6,
+    "residual_p95": 6.3
+   },
+   "inFlight": 0,
+   "hw": "prefer-hardware",
+   "backend": "webcodecs",
+   "backing": "1132x637",
+   "canvas": "960x540",
+   "error": null
+  },
+  {
+   "tc": "00:00:03:27",
+   "dropped": 3,
+   "p50": 2.6,
+   "p95": 4.2,
+   "up95": 4.7,
+   "seg": {
+    "feed_p50": 0,
+    "feed_p95": 0,
+    "output_p50": 2.3,
+    "output_p95": 8,
+    "queue_p50": 0,
+    "queue_p95": 0.1,
+    "residual_p50": 0.6,
+    "residual_p95": 2
+   },
+   "inFlight": 0,
+   "hw": "prefer-hardware",
+   "backend": "webcodecs",
+   "backing": "1132x637",
+   "canvas": "960x540",
+   "error": null
+  },
+  {
+   "tc": "00:00:05:00",
+   "dropped": 3,
+   "p50": 2.7,
+   "p95": 4.3,
+   "up95": 3.9,
+   "seg": {
+    "feed_p50": 0,
+    "feed_p95": 0,
+    "output_p50": 2.2,
+    "output_p95": 8,
+    "queue_p50": 0,
+    "queue_p95": 0.1,
+    "residual_p50": 0.6,
+    "residual_p95": 3.3
+   },
+   "inFlight": 0,
+   "hw": "prefer-hardware",
+   "backend": "webcodecs",
+   "backing": "1132x637",
+   "canvas": "960x540",
+   "error": null
+  },
+  {
+   "tc": "00:00:05:27",
+   "dropped": 3,
+   "p50": 2.7,
+   "p95": 4.2,
+   "up95": 3.9,
+   "seg": {
+    "feed_p50": 0,
+    "feed_p95": 0,
+    "output_p50": 2.2,
+    "output_p95": 8,
+    "queue_p50": 0,
+    "queue_p95": 0.1,
+    "residual_p50": 0.6,
+    "residual_p95": 2
+   },
+   "inFlight": 0,
+   "hw": "prefer-hardware",
+   "backend": "webcodecs",
+   "backing": "1132x637",
+   "canvas": "960x540",
+   "error": null
+  },
+  {
+   "tc": "00:00:07:00",
+   "dropped": 3,
+   "p50": 2.7,
+   "p95": 4.1,
+   "up95": 3.8,
+   "seg": {
+    "feed_p50": 0,
+    "feed_p95": 0,
+    "output_p50": 2.3,
+    "output_p95": 8,
+    "queue_p50": 0,
+    "queue_p95": 0.1,
+    "residual_p50": 0.6,
+    "residual_p95": 2
+   },
+   "inFlight": 0,
+   "hw": "prefer-hardware",
+   "backend": "webcodecs",
+   "backing": "1132x637",
+   "canvas": "960x540",
+   "error": null
+  },
+  {
+   "tc": "00:00:08:01",
+   "dropped": 3,
+   "p50": 2.7,
+   "p95": 4.1,
+   "up95": 3.4,
+   "seg": {
+    "feed_p50": 0,
+    "feed_p95": 0,
+    "output_p50": 2.3,
+    "output_p95": 16.8,
+    "queue_p50": 0,
+    "queue_p95": 0.1,
+    "residual_p50": 0.6,
+    "residual_p95": 2.1
+   },
+   "inFlight": 0,
+   "hw": "prefer-hardware",
+   "backend": "webcodecs",
+   "backing": "1132x637",
+   "canvas": "960x540",
+   "error": null
+  },
+  {
+   "tc": "00:00:09:00",
+   "dropped": 3,
+   "p50": 2.8,
+   "p95": 4.2,
+   "up95": 3.4,
+   "seg": {
+    "feed_p50": 0,
+    "feed_p95": 0,
+    "output_p50": 2.3,
+    "output_p95": 8,
+    "queue_p50": 0,
+    "queue_p95": 0.1,
+    "residual_p50": 0.6,
+    "residual_p95": 2
+   },
+   "inFlight": 0,
+   "hw": "prefer-hardware",
+   "backend": "webcodecs",
+   "backing": "1132x637",
+   "canvas": "960x540",
+   "error": null
+  },
+  {
+   "tc": "00:00:10:01",
+   "dropped": 3,
+   "p50": 2.8,
+   "p95": 4.2,
+   "up95": 3.2,
+   "seg": {
+    "feed_p50": 0,
+    "feed_p95": 0,
+    "output_p50": 2.3,
+    "output_p95": 16.6,
+    "queue_p50": 0,
+    "queue_p95": 0.1,
+    "residual_p50": 0.6,
+    "residual_p95": 2
+   },
+   "inFlight": 0,
+   "hw": "prefer-hardware",
+   "backend": "webcodecs",
+   "backing": "1132x637",
+   "canvas": "960x540",
+   "error": null
+  },
+  {
+   "tc": "00:00:11:00",
+   "dropped": 3,
+   "p50": 2.8,
+   "p95": 4.2,
+   "up95": 3.4,
+   "seg": {
+    "feed_p50": 0,
+    "feed_p95": 0,
+    "output_p50": 2.4,
+    "output_p95": 16.8,
+    "queue_p50": 0,
+    "queue_p95": 0.1,
+    "residual_p50": 0.6,
+    "residual_p95": 2
+   },
+   "inFlight": 0,
+   "hw": "prefer-hardware",
+   "backend": "webcodecs",
+   "backing": "1132x637",
+   "canvas": "960x540",
+   "error": null
+  },
+  {
+   "tc": "00:00:12:01",
+   "dropped": 3,
+   "p50": 2.8,
+   "p95": 4.2,
+   "up95": 3.4,
+   "seg": {
+    "feed_p50": 0,
+    "feed_p95": 0,
+    "output_p50": 2.4,
+    "output_p95": 16.7,
+    "queue_p50": 0,
+    "queue_p95": 0.1,
+    "residual_p50": 0.6,
+    "residual_p95": 1.8
+   },
+   "inFlight": 0,
+   "hw": "prefer-hardware",
+   "backend": "webcodecs",
+   "backing": "1132x637",
+   "canvas": "960x540",
+   "error": null
+  }
+ ],
+ "decisions": {
+  "take_hit_exact": 89,
+  "enqueue": 91,
+  "decodeSamples": 91,
+  "feed": 364,
+  "output": 364,
+  "stash_put": 273
+ }
+}

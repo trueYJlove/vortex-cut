@@ -46,7 +46,9 @@ export interface DecodeTimingSample {
   fromCache: boolean;
 }
 
-/** B13-R：decode worker 驻留计数（stats 往返取回；-1 = 未取样）。 */
+/** B13-R：decode worker 驻留计数（stats 往返取回；-1 = 未取样）。
+ *  P33 W11 起附带持有帧水位（budget/cap/windowCap/feedAheadPeak/shrinks）——
+ *  「窗 < 解码器管线深度」这类状态性卡顿只能从这里当场看出来。 */
 export interface DecodeResidencyInfo {
   decoded: number;
   posted: number;
@@ -55,6 +57,11 @@ export interface DecodeResidencyInfo {
   live: number;
   cacheBytes: number;
   cacheSize: number;
+  budget?: number;
+  budgetCap?: number;
+  windowCap?: number;
+  feedAheadPeak?: number;
+  shrinks?: number;
 }
 
 export class DecodeWorker {
