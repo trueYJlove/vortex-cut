@@ -217,13 +217,19 @@ let readyByPtsMax = READY_BY_PTS_MIN;
  *  MAX），一旦在喂包循环里观察到 `dq > 0` 的静默积压（＝表面池告急）立即回落到
  *  当前水位之下并让出表面。增长靠 growHoldCapFor、收缩靠 shrinkForBackpressure。 */
 const UNCLOSED_FRAME_BUDGET_MIN = 5;
-/** 预算上限 = **实测安全水位**：同一批真机复测里
- *  - 8  → 用户 3440x1440 H.264 播放 0~2 帧、用户 720x1280 HEVC 播放 0 帧；
- *  - 14 → HEVC 出现 **210/1777 帧**的整段停摆（解码器撞池后长时间不恢复），
- *        而 H.264 仅从 0~1 帧改善到 0 帧。
- *  故上限锁 8（不因单素材收益去冒跨素材的整段停摆风险）；上限之上的差异留给
- *  「按解码器实测池大小自适应」这一后续重构（见实施记录 L8）。 */
-const UNCLOSED_FRAME_BUDGET_MAX = 8;
+/** 预算上限 = **实测安全水位，且按编解码分档**（见下表；通用解见实施记录 L8）。
+ *
+ *  | 素材 | 释放首帧所需喂入（管线深度） | 容得下的未 close 持有量 |
+ *  |---|---|---|
+ *  | 3440x1440 H.264（无 B 帧） | 11 | 13+ |
+ *  | 720x1280 HEVC（B 帧） | ~8 | ~9-10 即停摆 |
+ *
+ *  单一水位两边都不讨好：取 8 → H.264 大素材冷启首批 11 帧装不下 → 驱逐 miss →
+ *  偶发起播丢帧（实测 9~24 帧）；取 14 → HEVC 撞池后整段停摆（实测 210/1777）。
+ *  故按 demux 得到的 codec 分档：HEVC 解码器内部参考面更多、表面池更紧，取 8；
+ *  其余（H.264/AV1）取 12（覆盖 11 的管线深度 + 1 余量）。 */
+const UNCLOSED_FRAME_BUDGET_MAX = 12;
+const UNCLOSED_FRAME_BUDGET_HEVC = 8;
 let unclosedBudget = 8;
 /** 本会话是否已观察到解码器背压（一旦为真就不再上调预算：宁可多解码几次，
  *  也不能再撞池上限停摆）。 */
@@ -564,6 +570,12 @@ async function init(url: string, cacheFrames: number, hasTicketRefresh: boolean,
   }
   cacheEnabled = cacheFrames > 0;
   cacheCap = cacheFrames;
+  // 预算按编解码分档（见 UNCLOSED_FRAME_BUDGET_MAX 的表）：HEVC 解码器表面池更紧。
+  {
+    const isHevc = /^h(ev|vc)/i.test(demuxed.codec ?? "");
+    unclosedBudget = Math.max(UNCLOSED_FRAME_BUDGET_MIN, isHevc ? UNCLOSED_FRAME_BUDGET_HEVC : UNCLOSED_FRAME_BUDGET_MAX);
+    trace("budget_init", { codec: demuxed.codec, budget: unclosedBudget, width: demuxed.width, height: demuxed.height });
+  }
   const config: VideoDecoderConfig = {
     codec: demuxed.codec,
     codedWidth: demuxed.width,
@@ -888,6 +900,13 @@ async function feedSamples(
     /** 背压（dq>0）静默时的最长等待：等解码器把积压输入消化掉再决定是否延伸。 */
     const BACKPRESSURE_WAIT_MS = 1_500;
     let extendStep = batch;
+    // **单请求总预算**：喂包 + 延伸必须在这个墙钟内收敛，否则直接走
+    // 定格/停摆兜底。没有它时，撞池停摆的请求会以「每轮等 1.5s 背压 + 小步延伸」
+    // 一路喂到文件尾（1776 采样 ≈ 55 轮 ≈ 80s），先撞客户端 50s 超时 → 错误文案
+    // 命中降级正则 → 整个输入被钉死在 FFmpeg IPC 慢路径（真机 dev 实测
+    // 解码 p95 180.5ms、丢帧 95）。预算 6s 足够覆盖最长 GOP（4K 5s GOP）冷启。
+    const REQUEST_FEED_BUDGET_MS = 6_000;
+    const feedDeadline = performance.now() + REQUEST_FEED_BUDGET_MS;
     for (;;) {
       while (fed < end) {
         const batchEnd = Math.min(end, fed + batch);
@@ -925,6 +944,11 @@ async function feedSamples(
       }
       // 本段喂完仍未匹配：已到文件尾 → 走下方 EOF 定格/报错；
       if (lastFedSample >= (sampleIndex?.count ?? 0) - 1) break;
+      // 单请求预算耗尽：不再无限延伸，交给下方定格/停摆兜底（秒级收敛）。
+      if (performance.now() >= feedDeadline) {
+        trace("feed_budget_exhausted", { target: request.sampleIndex, fed: lastFedSample, dq: decoder?.decodeQueueSize ?? -1 });
+        break;
+      }
       // 段末三态判定（2026-09-30 seek→play 停摆实锤后定稿）：
       //  a) 有新输出持续到达 → 管线还在吐，继续等（管线深是正常，不喂）；
       //  b) 静默 **且 dq > 0** → 解码器输入积压（表面池/背压），**绝不能继续喂**：
@@ -972,7 +996,10 @@ async function feedSamples(
     // 输出仍在途（h264-nobf-r2 trace：dq=25 时报错，紧随其后 1770 IDR
     // 才开始吐）。最多再等 EOF_DRAIN_BUDGET_MS：真截断尾 GOP 的滞留帧
     // dq 会归零（喂尽后无新输入）；排队输出到达即正常匹配路径。
-    if (activeRequest?.id === request.id && lastFedSample >= (sampleIndex?.count ?? 0) - 1) {
+    // 收口条件：喂到文件尾（EOF 定格/报错路径）**或**单请求预算耗尽（停摆兜底）。
+    const reachedEof = lastFedSample >= (sampleIndex?.count ?? 0) - 1;
+    const budgetExhausted = !reachedEof && performance.now() >= feedDeadline;
+    if (activeRequest?.id === request.id && reachedEof) {
       const drainDeadline = performance.now() + EOF_DRAIN_BUDGET_MS;
       while (activeRequest?.id === request.id
         && (decoder?.decodeQueueSize ?? 0) > 0
@@ -982,7 +1009,7 @@ async function feedSamples(
       }
       if (activeRequest?.id !== request.id) return; // 等待期间匹配：正常完成
     }
-    if (activeRequest?.id === request.id && lastFedSample >= (sampleIndex?.count ?? 0) - 1) {
+    if (activeRequest?.id === request.id && (reachedEof || budgetExhausted)) {
       // **停摆 vs 真截断**的分水岭：排空预算用尽后 dq 仍 > 0 = 解码器收下输入却
       // 既不吐也不消费（表面池停摆，真截断尾 GOP 会 dq 归零）。
       //  - 停摆 → 重置解码器 + 按关键帧重喂 + **原地重试一次**（成功则静默交付，
@@ -1021,7 +1048,10 @@ async function feedSamples(
       // **停摆自恢复**：喂到文件尾仍不吐 = 解码器已死在池上限上（后续请求若沿用
       // 同一实例会全部复现同一失败：实测 525 失败后 789 同样喂到文件尾报错）。
       // 立即 reset 到干净状态，让**下一个**请求能重新锚定关键帧并正常解码；
-      // 本次请求仍按既有语义报错（客户端跳过该帧继续播）。
+      // 本次请求仍报错（客户端跳过该帧继续播），但**前缀标记为 FRAME_UNREACHABLE**：
+      // 这是已自恢复的单帧缺口，不是「后端不可用」——preview-session 的降级闸门
+      // 会跳过它，避免两次这样的单帧缺口就把整个输入钉死在 FFmpeg IPC 慢路径上
+      // （真机 dev 运行实测：钉死后 解码 p95 180ms、丢帧 95）。
       backpressureSeen = true;
       healthyDeliveries = 0;
       releaseGopAnchor();
@@ -1035,7 +1065,7 @@ async function feedSamples(
       lastFedSample = -1;
       lastTargetKey = -1;
       trace("stall_recovered", { target: request.sampleIndex, held: heldFrameCount() });
-      post({ type: "error", id: request.id, message: `EOF reorder watchdog: frame ${request.frameN} 尾 GOP 重排输出滞留（pts=${request.samplePtsUs}）；已喂至文件尾 lastFedSample=1776` });
+      post({ type: "error", id: request.id, message: `FRAME_UNREACHABLE: 单帧停摆兜底（已重置解码器恢复）frame ${request.frameN} 尾 GOP 重排输出滞留（pts=${request.samplePtsUs}）；已喂至文件尾 lastFedSample=1776` });
       pumpQueue();
       return;
     }
@@ -1065,7 +1095,19 @@ function decodeFrame(id: number, frameN: number, fps: number): void {
   const located = locateByPts(sampleIndex, targetUs, ptsCursor);
   const target = located.sample;
   const bestDiff = located.diffUs;
-  if (target < 0 || bestDiff > 33_334) throw new Error(`no sample for frame ${frameN} (best diff ${bestDiff}us)`);
+  // **首/尾越界钳制**（2026-09-30 真机 dev 复现）：请求落在素材最后（或最前）
+  // 采样之外 ≤2 帧时，交付最近的端帧而不是报错——播放器的标准语义就是「片尾
+  // 定格在最后一帧」。真机 HEVC 素材 duration 59.233s 而最后 pts 59.2s，客户端
+  // 会请求 59.2667s（再下一帧）→ 旧实现逐次抛 `no sample for frame`（FFmpeg
+  // 路径表现为 Core `DECODE_FRAME_NOT_FOUND`），既刷错误横幅、又把降级闸门推向
+  // 慢路径。真越界（>2 帧 / 非端帧）仍按原样报错。
+  const EDGE_CLAMP_US = 2 * 33_334;
+  const clampedToEdge = target >= 0 && bestDiff > 33_334 && bestDiff <= EDGE_CLAMP_US
+    && (target === sampleIndex.count - 1 || target === 0);
+  if (target < 0 || (bestDiff > 33_334 && !clampedToEdge)) {
+    throw new Error(`no sample for frame ${frameN} (best diff ${bestDiff}us)`);
+  }
+  if (clampedToEdge) trace("edge_clamp", { frameN, target, bestDiff });
   // 游标推进：命中后记录其排序位置（单调目标走 O(1) 局部推进）
   ptsCursor = sampleIndex.sortedPtsUs.length > 0
     ? binarySearchPos(sampleIndex, sampleIndex.ptsUs[target]!)

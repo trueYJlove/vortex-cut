@@ -77,6 +77,9 @@ export interface PreviewSessionMetrics {
   decode_seg: { feed_p50: number; feed_p95: number; output_p50: number; output_p95: number; residual_p50: number; residual_p95: number } | null;
   /** 当前在途解码请求数（全部输入合计，含影子槽）。 */
   decode_in_flight: number;
+  /** 实际解码后端（各输入逗号分隔）：webcodecs=快路径；**ffmpeg=已降级到 Core
+   *  IPC 软解**（~180ms/帧量级，必须立刻可见的异常态）。 */
+  decode_backend: string;
   /** 纹理上传往返（postMessage+GL+ack）耗时 p95：worker 化后的负载口径。 */
   upload_ms_p95: number;
   /** GAP-RATIO-SWAP 诊断：IR 画布与后备缓冲尺寸（比例切换后应同步换算）。 */
@@ -97,6 +100,11 @@ interface InputRig {
   decoderRetry?: { ticket: string; width: number; height: number; cacheCapBytes: number; refreshTicket: () => Promise<string>; decodeFrames?: MediaDecoderFactoryInput["decodeFrames"] };
   /** 连续超时类失败计数（成功解码清零；≥2 才降级 FFmpeg——见 maybeFallBackToFfmpeg）。 */
   timeoutStrikes?: number;
+  /** 当前是否落在 FFmpeg 降级路径（用于按冷却期**回退到 WebCodecs 快路径**，
+   *  避免一次瞬时抖把整个输入永久钉死在 ~180ms/帧的 IPC 软解上）。 */
+  preferFfmpeg?: boolean;
+  /** 进入 FFmpeg 路径的时刻（冷却期计时起点）。 */
+  ffmpegSince?: number;
   /** 播放/seek 共用的环形簿记：槽位按 ringSeq 轮转，srcN=-1 表示空。 */
   ring: Array<RingSlot | null>;
   ringSeq: number;
@@ -892,10 +900,46 @@ export class PreviewSession {
    *  （每窗口 spawn ffmpeg，软解吞吐有限），一次瞬时抖动（主线程 GC、网络读慢、
    *  看门狗误报陈旧请求）就把会话钉死在慢路径，恰是"丢帧不多但持续卡"的形态。
    *  现改为**连续 2 次**超时类失败才降级（计数在成功后清零）；错误类别不变
-   *  （timeout/watchdog/key frame is required）。 */
+   *  （timeout/watchdog/key frame is required）。
+   *
+   *  2026-09-30（真机 dev 运行复现「越修越卡」）：该闸门仍会误伤——worker 侧的
+   *  单帧停摆兜底与尾帧不可达都会以含 `watchdog` 的文案报错，连续两次就把整个
+   *  输入钉在 FFmpeg IPC 路径上（实测 dev 运行 `解码 p95 180.5ms`、丢帧 95，
+   *  而同一素材在同一机器的生产构建里是 5~7ms / 0 帧）。两处收紧：
+   *  1. **只认「后端真的不会解」类**：`key frame is required` 与显式 timeout；
+   *     worker 已自恢复的单帧停摆（消息带 `FRAME_UNREACHABLE` 前缀）不再计数——
+   *     它已被「重置解码器 + 关键帧重锚 + 原地重试」处理过，不代表后端不可用。
+   *  2. **降级可回退**：降级后经过 `FFMPEG_RETRY_COOLDOWN_MS` 允许一次回到
+   *     WebCodecs 的尝试（成功则彻底恢复快路径），避免一次瞬时抖动永久钉死。 */
+  private static readonly FFMPEG_RETRY_COOLDOWN_MS = 45_000;
+
   private async maybeFallBackToFfmpeg(rig: InputRig, error: unknown): Promise<boolean> {
     const message = error instanceof Error ? error.message : String(error);
+    // 已自恢复的单帧停摆：不计入降级判据（见上）。
+    if (/FRAME_UNREACHABLE/.test(message)) return false;
     if (!/timeout|watchdog|key frame is required/i.test(message)) return false;
+    // 已在 FFmpeg 路径：超过冷却期允许一次回到 WebCodecs（快路径）的尝试。
+    if (rig.preferFfmpeg) {
+      if (performance.now() - (rig.ffmpegSince ?? 0) < PreviewSession.FFMPEG_RETRY_COOLDOWN_MS) return false;
+      const retry = rig.decoderRetry;
+      const factory = this.decoderFactory;
+      if (!retry || !factory) return false;
+      try {
+        rig.worker?.dispose();
+        rig.worker = await factory.create({
+          mediaUrl: retry.ticket, codec: "auto", width: retry.width, height: retry.height,
+          cacheCapBytes: retry.cacheCapBytes, refreshTicket: retry.refreshTicket,
+          decodeFrames: retry.decodeFrames, preferBackend: "webcodecs",
+        });
+        rig.preferFfmpeg = false;
+        rig.timeoutStrikes = 0;
+        this.lastError = null; // 快路径恢复：清掉慢路径期间的错误横幅
+        return true;
+      } catch {
+        rig.ffmpegSince = performance.now(); // 再等一个冷却期
+        return false;
+      }
+    }
     rig.timeoutStrikes = (rig.timeoutStrikes ?? 0) + 1;
     if (rig.timeoutStrikes < 2) return false;
     const retry = rig.decoderRetry;
@@ -913,6 +957,8 @@ export class PreviewSession {
         decodeFrames: retry.decodeFrames,
         preferBackend: "ffmpeg",
       });
+      rig.preferFfmpeg = true;
+      rig.ffmpegSince = performance.now();
       return true;
     } catch {
       return false;
@@ -935,8 +981,28 @@ export class PreviewSession {
         try {
           decoded = await rig.worker!.decode(srcN, this.ir.canvas.fps);
         } catch (error) {
-          if (this.disposed || !(await this.maybeFallBackToFfmpeg(rig, error))) throw error;
-          decoded = await rig.worker!.decode(srcN, this.ir.canvas.fps);
+          const message = error instanceof Error ? error.message : String(error);
+          // **缺失帧回退到相邻帧**（播放器「定格」语义）：片尾多请求一帧
+          // （duration 59.233s vs 末帧 pts 59.2s）或首帧 pts 偏移（真机 HEVC
+          // 素材首帧 66.7ms）都会命中 `DECODE_FRAME_NOT_FOUND` / `no sample`。
+          // 旧实现把这类素材边界当故障：既刷「最近错误」横幅，又把它算进降级
+          // 判据。改为向相邻帧各试一次，拿到就按请求位（srcN）入环——画面定格
+          // 在端帧，播放继续，不产生错误状态。
+          if (/DECODE_FRAME_NOT_FOUND|no sample for frame/i.test(message)) {
+            for (const fallback of [srcN - 1, srcN + 1]) {
+              if (fallback < 0) continue;
+              if (this.disposed || epoch !== this.seekEpoch) break;
+              try {
+                decoded = await rig.worker!.decode(fallback, this.ir.canvas.fps);
+                editorPerf.record("edge_fallback", 0, this.perfId, perfRequest, epoch, srcN, perfInput);
+                break;
+              } catch { /* 再试下一个邻居 */ }
+            }
+          }
+          if (!decoded!) {
+            if (this.disposed || !(await this.maybeFallBackToFfmpeg(rig, error))) throw error;
+            decoded = await rig.worker!.decode(srcN, this.ir.canvas.fps);
+          }
         }
         this.decodeTimes.push(performance.now() - decodeStart);
         editorPerf.record("decode", performance.now() - decodeStart, this.perfId, perfRequest, epoch, srcN, perfInput);
@@ -1758,6 +1824,10 @@ export class PreviewSession {
       dropped_frames: this.dropped,
       composed_frames: this.taskTimes.length,
       last_error: this.lastError,
+      // 解码后端可见化：`ffmpeg` = 已降级到 Core IPC 软解（~180ms/帧量级），
+      // 是需要立刻被看见的异常态（2026-09-30 真机「越修越卡」根因即为此路径
+      // 被瞬时抖动永久钉死，而界面当时没有任何提示）。
+      decode_backend: [...this.rigs.values()].map(rig => rig.preferFfmpeg ? "ffmpeg" : (rig.worker?.backend ?? "?")).join(","),
       decode_ms_p50: p(decodes, 0.5),
       decode_ms_p95: p(decodes, 0.95),
       decode_seg: decodeSeg,

@@ -497,6 +497,11 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
           {metrics.last_error
             ? `最近错误：${metrics.last_error}`
             : `合成预览 · 任务 p95 ${metrics.task_ms_p95}ms · 解码 p95 ${metrics.decode_ms_p95}ms · 上传 p95 ${metrics.upload_ms_p95}ms · 丢帧 ${metrics.dropped_frames} · 画布 ${metrics.canvas_w}×${metrics.canvas_h} → 缓冲 ${metrics.backing_w}×${metrics.backing_h} (×${metrics.fit_scale})`}
+          {/* 解码后端异常态提示（正常 = webcodecs，不显示）：降级到 FFmpeg IPC
+              软解后解码 ~180ms/帧，必须让用户当场看见而不是靠终端日志推断。 */}
+          {metrics.decode_backend && metrics.decode_backend !== "webcodecs" && (
+            <span className="synthetic-backend-warn">{` · 解码后端 ${metrics.decode_backend}（已降级，慢路径）`}</span>
+          )}
         </div>
       )}
     </div>
