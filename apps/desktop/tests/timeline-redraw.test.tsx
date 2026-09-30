@@ -197,12 +197,15 @@ describe("A06 — TimelinePlayheadLayer 覆盖层", () => {
     expect(line?.style.transform).toBe("translateX(260px)"); // 钳制 2s：60 + 2×100
   });
 
-  it("位于头列左缘外时线不渲染（与旧 Canvas 可视判据一致）", () => {
+  it("位于头列左缘外时线不可见（与旧 Canvas 可视判据一致）", () => {
     const s = store!;
     const { container } = render(
       <TimelinePlayheadLayer store={s} view={{ pixelsPerSecond: 100, scrollX: 800, headerWidth: 60, rulerHeight: 24, trackHeight: 80 } as never} totalUs={2_000_000} contentHeight={300} />,
     );
-    expect(container.querySelector(".timeline-playhead-line")).toBeNull();
+    // P33 L9：覆盖层改为命令式跟随（播放期零 React 提交），可视判据由「条件渲染」
+    // 变为「display 切换」——语义不变（不可见），断言随之改为检查隐藏态。
+    const layer = container.querySelector<HTMLElement>(".timeline-playhead-layer");
+    expect(layer?.style.display).toBe("none");
   });
 });
 

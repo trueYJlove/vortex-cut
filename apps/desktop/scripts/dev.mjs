@@ -31,7 +31,11 @@ const entry = require.resolve("electron-vite");
 const pkgDir = path.dirname(path.dirname(entry));
 const cli = path.join(pkgDir, "bin", "electron-vite.js");
 
-const proc = spawn(process.execPath, [cli, "dev"], {
+// 转发额外参数给 electron-vite（`pnpm dev -- --user-data-dir=...`）。
+// 用途：dev 模式自动化/隔离复现——electron-vite 会把 `--` 之后的参数原样交给
+// Electron 进程（cli.js 里 `process.env.ELECTRON_CLI_ARGS = JSON.stringify(options['--'])`），
+// 因此可指定独立的 user-data-dir 而不触碰本机真实项目库（P33 L9 自测闭环需要）。
+const proc = spawn(process.execPath, [cli, "dev", ...process.argv.slice(2)], {
   stdio: "inherit",
   env: process.env,
   cwd: process.cwd(),

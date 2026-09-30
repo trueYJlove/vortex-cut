@@ -946,13 +946,20 @@ export function App() {
     setPlaying(false);
     dispatchPlayhead("user", timeUs, true);
   }, [dispatchPlayhead]);
-  /** 预览播放回传：只写 store + 10Hz 节流 React——覆盖层每帧跟随，
-   *  App 组件树不随 rAF 频率提交。 */
+  /** 预览播放回传：只写 store + 节流 React——覆盖层每帧跟随，
+   *  App 组件树不随 rAF 频率提交。
+   *
+   *  节流窗口按构建模式分档（P33 L9 实测依据）：dev 构建下 React StrictMode 双渲染
+   *  + 未压缩协调使**每秒 ~29 次提交、合计 21.5 秒/59 秒**（单次最大 67ms），把主线程
+   *  切成 rAF p95 51ms 的碎片，呈现循环因此跳帧（真机 dev 丢帧 85~112；同机生产构建
+   *  同样素材 0 丢帧）。dev 档放宽到 250ms 以压低提交密度；生产保持 10Hz 的观感。 */
   const lastReactTimeReport = useRef(0);
+  const PLAYBACK_COMMIT_INTERVAL_MS = import.meta.env.DEV ? 250 : 100;
   const seekFromPlayback = useCallback((timeUs: number) => {
     const now = performance.now();
-    dispatchPlayhead("playback", timeUs, now - lastReactTimeReport.current >= 100);
-    if (now - lastReactTimeReport.current >= 100) lastReactTimeReport.current = now;
+    const commit = now - lastReactTimeReport.current >= PLAYBACK_COMMIT_INTERVAL_MS;
+    dispatchPlayhead("playback", timeUs, commit);
+    if (commit) lastReactTimeReport.current = now;
   }, [dispatchPlayhead]);
   // 时间线驱动播放：播放头是唯一时钟（100ms 步进推进，媒体元素跟随标尺——
   // 所见即所得：标尺在哪个片段，播放的就是那个片段的内容）。
