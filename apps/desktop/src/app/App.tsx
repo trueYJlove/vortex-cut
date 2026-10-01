@@ -355,7 +355,7 @@ export function App() {
   const timelineLoadEpoch = useRef(0);
   // 新建项目自动补建空时间线（剪映/喵影式：项目即有时间线，无需手动创建）。
   // 仅对新建项目生效——存量无时间线项目仍走菜单「创建空时间线」。
-  const autoProvisionTimeline = useRef(false);
+  const autoProvisionProjectId = useRef<Project["project_id"] | undefined>(undefined);
   const pollInstanceRef = useRef<symbol | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -396,7 +396,15 @@ export function App() {
   const refreshProjects = async () => {
     const page = await window.desktop.listProjects({ limit: 100 });
     setProjects(page.items);
-    setProject(current => page.items.find(item => item.project_id === current?.project_id) ?? page.items[0]);
+    const next = page.items.find(item => item.project_id === projectRef.current?.project_id) ?? page.items[0];
+    if (!next) {
+      projectDataEpochRef.current += 1;
+      setAssets([]); setTimeline(undefined); setWorking(undefined); setSelection(null); setProject(undefined);
+    } else if (next.project_id !== projectRef.current?.project_id) {
+      switchProject(next);
+    } else {
+      setProject(next);
+    }
   };
   const loadModels = async () => { const page = await window.desktop.listModels({ limit: 100 }); setModels(page.items); };
   // 活跃任务拉取（初始加载与轮询共用）：按三个活跃状态各查一页合并去重。
@@ -412,10 +420,15 @@ export function App() {
   // A08：loadProjectData 摘要优先——素材/任务先落库，转录正文不再全量预取
   // （正文由 viewTranscript 选中时加载，旧内容按项目代次作废不写入新状态）。
   const projectDataEpochRef = useRef(0);
+  const renderDataEpochRef = useRef(0);
+  const seenAnyTicketRef = useRef(false);
+  const noTicketRetryRef = useRef(0);
+  const noTicketFinalRetryRef = useRef(false);
   const transcriptQueueRef = useRef<BoundedTaskQueue<Transcript> | null>(null);
   /** 转录摘要分页（listTranscripts）专用队列：与正文队列分开类型，同样 ≤4 并发。 */
   const transcriptSummaryQueueRef = useRef<BoundedTaskQueue<{ items: TranscriptSummary[] }> | null>(null);
   const loadProjectData = async (selected: Project) => {
+    const epoch = ++projectDataEpochRef.current;
     // GAP-LIST-ASSETS-PAGING：assets 跟随 next_cursor 翻页装载（Core 默认
     // limit=50，旧实现只取第一页——第 51+ 素材无 media ticket，合成预览回退
     // "no ticket for asset_..."，刷新素材库亦不可恢复）。200 页 = 10,000 条
@@ -432,7 +445,7 @@ export function App() {
       return items;
     };
     const [assetsAll, activeJobs] = await Promise.all([listAllAssets(selected.project_id), fetchActiveJobs(selected.project_id)]);
-    const epoch = ++projectDataEpochRef.current;
+    if (epoch !== projectDataEpochRef.current) return;
     setAssets(assetsAll); setJobs(activeJobs);
     // 转录摘要：每素材一次 listTranscripts——必须经有界队列（≤4 并发）。旧实现
     // 直接 Promise.all 对全部素材并发（100 素材 = 100 个并发 HTTP），会在项目
@@ -448,12 +461,31 @@ export function App() {
     setTranscriptSummaries(Object.fromEntries(summaries.filter((entry): entry is readonly [string, TranscriptSummary[]] => entry !== null)));
   };
   const loadRenderData = async (selected: Project) => {
+    const epoch = ++renderDataEpochRef.current;
     const [previewPage, exportPage] = await Promise.all([
       window.desktop.listPreviews({ project_id: selected.project_id, limit: 100 }),
       window.desktop.listExports({ project_id: selected.project_id, limit: 100 })
     ]);
+    if (epoch !== renderDataEpochRef.current || projectRef.current?.project_id !== selected.project_id) return;
     setPreviews(previewPage.items);
     setExports(exportPage.items);
+  };
+  const switchProject = (next: Project) => {
+    if (next.project_id === projectRef.current?.project_id) return;
+    projectDataEpochRef.current += 1;
+    renderDataEpochRef.current += 1;
+    transcriptQueueRef.current?.advanceGeneration();
+    transcriptSummaryQueueRef.current?.advanceGeneration();
+    setAssets([]); setJobs([]); setTimeline(undefined); setWorking(undefined); setSelection(null);
+    setTranscripts({}); setTranscriptSummaries({}); setViewingTranscript(undefined);
+    setPreviews([]); setExports([]); setLibraryPreviewId(null); setSelectedAssetId(null);
+    setPlaying(false); setSyntheticNotice(null); setPreviewMode("synthetic");
+    setExportPlayback(undefined); setReframePlayback(undefined); setCoverUrl(null);
+    setCvSummaries({}); setCvSparkAssetId(null); setCvSparkSamples(null); setCvBusy(null);
+    setCvOptionsOpen(false); setCvOptionsAsset(null); setTranscriptionAsset(undefined); setPendingDeleteAsset(undefined);
+    seenAnyTicketRef.current = false; noTicketRetryRef.current = 0; noTicketFinalRetryRef.current = false;
+    if (autoProvisionProjectId.current !== next.project_id) autoProvisionProjectId.current = undefined;
+    setProject(next);
   };
   // 移除一条文件已缺失的导出记录（问题2：成品文件在系统层被删后，记录
   // 保留会让列表堆积不可用条目；Core 校验文件仍存在时拒绝——UI 端不提供
@@ -581,13 +613,21 @@ export function App() {
       if (!active) return;
       setRuntimeReady(true);
       setProjects(projectPage.items);
-      setProject(current => projectPage.items.find(item => item.project_id === current?.project_id) ?? projectPage.items[0]);
+      const initialProject = projectPage.items[0];
+      if (initialProject) switchProject(initialProject);
+      else setProject(undefined);
       setModels(modelPage.items);
     }).catch(error => { if (active) showNotice(safeErrorMessage(error, "运行环境初始化失败，请刷新后重试。")); });
     return () => { active = false; };
   }, []);
   useEffect(() => {
     if (!project) return;
+    // 防御性清理：直接由外部状态驱动项目变化时，也不能保留上一项目数据。
+    setAssets([]); setJobs([]); setTimeline(undefined); setWorking(undefined); setSelection(null);
+    setTranscripts({}); setTranscriptSummaries({}); setViewingTranscript(undefined);
+    setPreviews([]); setExports([]); setLibraryPreviewId(null); setSelectedAssetId(null);
+    setPlaying(false); setSyntheticNotice(null); setPreviewMode("synthetic"); setExportPlayback(undefined); setReframePlayback(undefined); setCoverUrl(null);
+    seenAnyTicketRef.current = false; noTicketRetryRef.current = 0; noTicketFinalRetryRef.current = false;
     closePatch(); setRevisionOpen(false); setRevisionDiff(undefined);
     setReframeSelections({}); setReframePreviews({}); setReframePending({}); setReframePlayback(undefined); setReframeDirectoryGrant(undefined); setActiveReframeBatch(undefined); setReframeError("");
     let active = true;
@@ -604,8 +644,8 @@ export function App() {
       if (!active || epoch !== timelineLoadEpoch.current) return;
       const code = errorCode(error);
       // 新建项目尚未有时间线：自动补建空时间线（剪映/喵影式，项目即有时间线），无需手动创建。
-      if (autoProvisionTimeline.current && (code.includes("TIMELINE_NOT_FOUND") || code.includes("404"))) {
-        autoProvisionTimeline.current = false;
+      if (autoProvisionProjectId.current === project.project_id && (code.includes("TIMELINE_NOT_FOUND") || code.includes("404"))) {
+        autoProvisionProjectId.current = undefined;
         try {
           const value = await window.desktop.createTimeline({ project_id: project.project_id, timeline: { schema_version: 1, source: { kind: "empty" }, default_layout: "blurred_background", caption_preset_id: "default-bottom" } });
           if (active && epoch === timelineLoadEpoch.current) { setTimeline(value); setWorking(value.current_revision.document); setSelection(null); }
@@ -641,7 +681,12 @@ export function App() {
         if (signature === projectsSignature.value) return false;
         projectsSignature.value = signature;
         setProjects(page.items);
-        setProject(current => page.items.find(item => item.project_id === current?.project_id) ?? page.items[0]);
+        const next = page.items.find(item => item.project_id === projectRef.current?.project_id) ?? page.items[0];
+        if (!next) {
+          projectDataEpochRef.current += 1;
+          setAssets([]); setTimeline(undefined); setWorking(undefined); setSelection(null); setProject(undefined);
+        } else if (next.project_id !== projectRef.current?.project_id) switchProject(next);
+        else setProject(next);
         return true;
       },
     });
@@ -1011,6 +1056,7 @@ export function App() {
   );
   // B11：预览源解析器（视频输入优先代理票据；失败/未 ready 静默回退原源，
   // 预览永不因代理缺失阻塞）。项目切换即换实例（resolver 绑定项目授权域）。
+  const projectStateReady = Boolean(project && timeline && working && timeline.project_id === project.project_id && timeline.current_revision.project_id === project.project_id && working.project_id === project.project_id);
   const previewSourceResolver = useMemo(
     () => project ? new PreviewSourceResolver({
       getPreviewSource: input => window.desktop.getPreviewSource({ ...input, project_id: project.project_id }),
@@ -1025,8 +1071,9 @@ export function App() {
       getWaveform: input => window.desktop.getWaveform({ ...input, project_id: project.project_id }),
       waveformMediaUrl: input => window.desktop.waveformMediaUrl({ ...input, project_id: project.project_id }),
     }, project.project_id) : null,
-    [project],
+    [project?.project_id],
   );
+  useEffect(() => () => { waveformCache?.dispose(); }, [waveformCache]);
   const syntheticAudioByClip = useMemo(
     () => new Map((working?.clips ?? []).flatMap(clip => clip.audio ? [[clip.clip_id, { enabled: isClipAudible(clip), gainDb: clip.audio.gain_db }] as const] : [])),
     [working, isClipAudible],
@@ -1045,8 +1092,6 @@ export function App() {
     () => Boolean(working) && working!.clips.every(clip => syntheticMediaUrls.has(clip.asset_id)),
     [working, syntheticMediaUrls],
   );
-  const noTicketRetryRef = useRef(0);
-  const noTicketFinalRetryRef = useRef(false);
   /** 启动时序（2026-09-23 用户反馈）：getTimeline 先于 listAssets 落地时，
    *  SyntheticPreview 以空 mediaUrls 建会话 → 回退（"no ticket"，或装载窗内
    *  的其他瞬时错误如字体抓取失败）。这不是故障而是装载次序——首个 ticket
@@ -1054,7 +1099,6 @@ export function App() {
    *  票据到位由 mediaUrls 依赖自动重建会话）。一旦见过任一票据（装载完成、
    *  mediaUrls 进入稳态），后续回退即视为真实故障，走原有回退+重试链。
    *  F07 门控教训仍有效：挂载本身不设门槛。 */
-  const seenAnyTicketRef = useRef(false);
   if (syntheticMediaUrls.size > 0) seenAnyTicketRef.current = true;
   useEffect(() => {
     // 静默窗：票据从未就绪（项目数据装载中）且非用户手动重试 → 不亮错误，
@@ -1318,7 +1362,7 @@ export function App() {
     const source = { kind: "transcript_selection" as const, transcript_id: transcript.transcript_id, segment_ids: ids as never[], padding_before_us: 150_000, padding_after_us: 150_000, create_captions: true };
     if (timeline) void patchTimeline([{ op: "insert_transcript_segments", transcript_id: transcript.transcript_id, segment_ids: ids as never[], at_index: working?.clips.length ?? 0, padding_before_us: 150_000, padding_after_us: 150_000, create_captions: true, layout: "blurred_background" }], "追加转录选段"); else void createTimeline(source);
   };
-  const createProject = async () => { if (!newProject.trim()) return; const created = await window.desktop.createProject({ name: newProject.trim(), canvas: projectCanvasPresets[newProjectRatio] }); setNewProject(""); await refreshProjects(); autoProvisionTimeline.current = true; setProject(created); setProjectDialogOpen(false); };
+  const createProject = async () => { if (!newProject.trim()) return; const created = await window.desktop.createProject({ name: newProject.trim(), canvas: projectCanvasPresets[newProjectRatio] }); setNewProject(""); autoProvisionProjectId.current = created.project_id; await refreshProjects(); switchProject(created); setProjectDialogOpen(false); };
   const renameProject = async () => { if (!project || !projectName.trim()) return; const updated = await window.desktop.renameProject({ project_id: project.project_id, name: projectName.trim() }); projectNameDirty.current = false; setProject(updated); setProjects(items => items.map(item => item.project_id === updated.project_id ? updated : item)); };
   const toggleArchive = async () => { if (!project) return; const updated = project.status === "archived" ? await window.desktop.reopenProject(project.project_id) : await window.desktop.archiveProject(project.project_id); setProject(updated); setProjects(items => items.map(item => item.project_id === updated.project_id ? updated : item)); };
   const importAsset = async (kind: AssetKind) => { if (!project) return; const result = await window.desktop.importAsset({ project_id: project.project_id, kind }); if (result) setAssets(items => [...items, { asset: result.asset, media_url: result.media_url }]); };
@@ -1326,6 +1370,8 @@ export function App() {
   // （无时间线引用时直接删除，仍被引用时保留并标记缺失）。
   const refreshAssets = async () => {
     if (!project || refreshingAssets) return;
+    const projectId = project.project_id;
+    const epoch = projectDataEpochRef.current;
     setRefreshingAssets(true);
     try {
       const current = assets;
@@ -1338,6 +1384,7 @@ export function App() {
         try { await window.desktop.deleteAsset({ asset_id: item.asset.asset_id }); removedIds.add(item.asset.asset_id); } catch { /* 仍被时间线/生成记录引用：保留在列表中 */ }
       }
       const kept = refreshed.filter(item => !removedIds.has(item.asset.asset_id));
+      if (projectRef.current?.project_id !== projectId || projectDataEpochRef.current !== epoch) return;
       setAssets(kept);
       if (removedIds.size > 0) {
         showNotice(`已刷新素材库：清理了 ${removedIds.size} 个本地文件已删除的素材。`, "success");
@@ -1349,21 +1396,27 @@ export function App() {
     } catch (error) {
       showNotice(safeErrorMessage(error, "素材库刷新失败，请稍后重试。"));
     } finally {
-      setRefreshingAssets(false);
+      if (projectRef.current?.project_id === projectId && projectDataEpochRef.current === epoch) setRefreshingAssets(false);
     }
   };
   const deleteAsset = async (asset: Asset) => {
+    if (!project) return;
+    const projectId = project.project_id;
+    const epoch = projectDataEpochRef.current;
     setDeleteBusy(true);
     try {
       const counts = await window.desktop.deleteAsset({ asset_id: asset.asset_id, remove_timeline_clips: true });
+      if (projectRef.current?.project_id !== projectId || projectDataEpochRef.current !== epoch) return;
       setAssets(items => items.filter(item => item.asset.asset_id !== asset.asset_id));
       setPendingDeleteAsset(undefined);
       setSaveState("已保存");
       // 级联删除重写了时间线 Revision：重新拉取最新时间线，保持本地状态一致。
       // 项目尚未创建时间线时无需刷新（Core 会报 TIMELINE_NOT_FOUND，忽略即可）。
-      if (project && timeline) {
+      if (projectRef.current?.project_id === projectId && projectDataEpochRef.current === epoch && timeline) {
         try {
-          acceptState(await window.desktop.getTimeline(project.project_id));
+          const latest = await window.desktop.getTimeline(projectId);
+          if (projectRef.current?.project_id !== projectId || projectDataEpochRef.current !== epoch) return;
+          acceptState(latest);
         } catch (timelineError) {
           if (!errorCode(timelineError).includes("TIMELINE_NOT_FOUND")) throw timelineError;
         }
@@ -1373,7 +1426,7 @@ export function App() {
       setPendingDeleteAsset(undefined);
       showNotice(safeErrorMessage(error, "素材删除失败，请刷新后重试。"));
     } finally {
-      setDeleteBusy(false);
+      if (projectRef.current?.project_id === projectId && projectDataEpochRef.current === epoch) setDeleteBusy(false);
     }
   };
   const previewFromLibrary = (item: AssetPresentation) => {
@@ -1432,11 +1485,14 @@ export function App() {
   const [cvSparkSamples, setCvSparkSamples] = useState<CvSample[] | null>(null);
   const toggleCvSpark = (asset: Asset) => {
     if (cvSparkAssetId === asset.asset_id) { setCvSparkAssetId(null); setCvSparkSamples(null); return; }
+    if (!project) return;
+    const projectId = project.project_id;
+    const epoch = projectDataEpochRef.current;
     setCvSparkAssetId(asset.asset_id);
     setCvSparkSamples(null);
-    void window.desktop.listCvSamples({ project_id: project!.project_id, asset_id: asset.asset_id })
-      .then(page => setCvSparkSamples(page.samples))
-      .catch(() => { setCvSparkSamples([]); showNotice("CV 信号样本加载失败。", "error"); });
+    void window.desktop.listCvSamples({ project_id: projectId, asset_id: asset.asset_id })
+      .then(page => { if (projectRef.current?.project_id === projectId && projectDataEpochRef.current === epoch) setCvSparkSamples(page.samples); })
+      .catch(() => { if (projectRef.current?.project_id === projectId && projectDataEpochRef.current === epoch) { setCvSparkSamples([]); showNotice("CV 信号样本加载失败。", "error"); } });
   };
   const cvSparkPath = (samples: CvSample[], key: "motion_energy" | "audio_energy"): string => {
     if (samples.length < 2) return "";
@@ -1633,12 +1689,19 @@ export function App() {
   };
 
   const trackRenderJob = (job: Job) => {
+    const projectId = project?.project_id;
+    const epoch = projectDataEpochRef.current;
+    if (!projectId) return;
     setJobs(items => [job, ...items.filter(item => item.job_id !== job.job_id)]);
     const unsubscribe = window.desktop.subscribeJob(job.job_id, updated => {
+      if (projectRef.current?.project_id !== projectId || projectDataEpochRef.current !== epoch) {
+        unsubscribe();
+        return;
+      }
       setJobs(items => [updated, ...items.filter(item => item.job_id !== updated.job_id)]);
       if (["succeeded", "failed", "cancelled", "interrupted"].includes(updated.status)) {
         unsubscribe();
-        if (project) void loadRenderData(project).catch(error => showNotice(safeErrorMessage(error, "渲染记录加载失败，请刷新后重试。")));
+        void loadRenderData({ ...projectRef.current!, project_id: projectId }).catch(error => showNotice(safeErrorMessage(error, "渲染记录加载失败，请刷新后重试。")));
       }
     });
   };
@@ -2303,7 +2366,7 @@ export function App() {
         {projectSwitcherOpen && <div className="project-switcher-dropdown" role="listbox" aria-label="选择项目">
           <div className="project-switcher-head">切换项目<small>本机项目</small></div>
           <label className="project-switcher-search" onClick={event => event.stopPropagation()}><Search size={13} /><input value={projectSwitcherQuery} onChange={event => setProjectSwitcherQuery(event.target.value)} placeholder="搜索项目名…" /></label>
-          {(projectSwitcherQuery.trim() ? projects.filter(item => item.name.toLowerCase().includes(projectSwitcherQuery.trim().toLowerCase())) : projects).map(item => <button key={item.project_id} role="option" aria-selected={item.project_id === project?.project_id} className={item.project_id === project?.project_id ? "active" : ""} onClick={event => { event.stopPropagation(); if (item.project_id !== project?.project_id) setProject(item); setProjectSwitcherOpen(false); setProjectSwitcherQuery(""); }}><span className={`pdot ${item.status === "active" ? "active" : item.status === "archived" ? "archived" : "missing"}`} /><span className="project-switcher-name">{item.name}</span><span className="project-switcher-state">{item.status === "active" ? "活跃" : item.status === "archived" ? "已归档" : "目录缺失"}</span></button>)}
+          {(projectSwitcherQuery.trim() ? projects.filter(item => item.name.toLowerCase().includes(projectSwitcherQuery.trim().toLowerCase())) : projects).map(item => <button key={item.project_id} role="option" aria-selected={item.project_id === project?.project_id} className={item.project_id === project?.project_id ? "active" : ""} onClick={event => { event.stopPropagation(); if (item.project_id !== project?.project_id) switchProject(item); setProjectSwitcherOpen(false); setProjectSwitcherQuery(""); }}><span className={`pdot ${item.status === "active" ? "active" : item.status === "archived" ? "archived" : "missing"}`} /><span className="project-switcher-name">{item.name}</span><span className="project-switcher-state">{item.status === "active" ? "活跃" : item.status === "archived" ? "已归档" : "目录缺失"}</span></button>)}
           {!(projectSwitcherQuery.trim() ? projects.filter(item => item.name.toLowerCase().includes(projectSwitcherQuery.trim().toLowerCase())) : projects).length && <div className="project-switcher-none">没有匹配的项目</div>}
           {!projects.length && <div className="project-switcher-empty">尚无项目，请先创建</div>}
           <div className="project-switcher-actions"><button role="menuitem" className="project-switcher-manage" onClick={event => { event.stopPropagation(); setProjectSwitcherOpen(false); setProjectSwitcherQuery(""); setProjectDialogOpen(true); }}>项目管理</button></div>
@@ -2346,7 +2409,7 @@ export function App() {
             {previewMode === "authoritative" && authoritativeMediaUrl && <video ref={videoRef} className="preview-foreground authoritative-video" src={authoritativeMediaUrl} aria-label={reframePlayback ? "重构图权威预览视频" : exportPlayback ? "导出视频" : "权威预览视频"} controls onEnded={() => { setPlaying(false); setExportPlayback(undefined); setReframePlayback(undefined); setPreviewMode("synthetic"); }} />}
             {/* 合成预览仅在时间线有可见片段时挂载；空时间线显示引导文案（剪映式），
                 避免对空时间线请求 preview-ir 被 Core 以 TIMELINE_EMPTY 拒绝而回退。 */}
-            {previewMode === "synthetic" && project && working && timeline && working.clips.length > 0 && <SyntheticPreview outputRatio={renderRatio} projectId={project.project_id} revisionId={timeline?.current_revision.timeline_revision_id ?? null} mediaUrls={syntheticMediaUrls} audioByClip={syntheticAudioByClip} pipClips={syntheticPipClips} selectedClipId={pipSelectedId} onSelectClip={clipId => setSelection({ kind: "clip", id: clipId as never })} onCommitPipTransform={(clipId, transform) => { const clip = (working?.clips ?? []).find(item => item.clip_id === clipId); commitPipTransform(clipId as never, { ...(clip?.transform ?? {}), ...transform }); }} onDraftPipMask={(clipId, mask) => draftPipMask(clipId as never, mask)} onCommitPipMask={(clipId, mask) => commitPipMask(clipId as never, mask)} onGesturePause={pausePreviewPlayback} onGestureResume={resumePreviewPlayback} playing={playing && !gestureHoldRef.current} playheadUs={playhead} playheadStore={playheadStore} onTimeUs={us => seekFromPlayback(us)} onEnded={() => setPlaying(false)} onFallback={(reason, code) => { if (!seenAnyTicketRef.current) return; setPreviewMode("interactive"); setSyntheticNotice(syntheticFallbackNotice(reason, code)); }} sourceResolver={previewSourceResolver} resourceTier={resourceTier} forceCopyTo={forceCopyTo} snapshotRef={syntheticSnapshotRef} />}
+            {previewMode === "synthetic" && projectStateReady && project && working && timeline && working.clips.length > 0 && <SyntheticPreview key={project.project_id} outputRatio={renderRatio} projectId={project.project_id} revisionId={timeline.current_revision.timeline_revision_id} mediaUrls={syntheticMediaUrls} audioByClip={syntheticAudioByClip} pipClips={syntheticPipClips} selectedClipId={pipSelectedId} onSelectClip={clipId => setSelection({ kind: "clip", id: clipId as never })} onCommitPipTransform={(clipId, transform) => { const clip = (working?.clips ?? []).find(item => item.clip_id === clipId); commitPipTransform(clipId as never, { ...(clip?.transform ?? {}), ...transform }); }} onDraftPipMask={(clipId, mask) => draftPipMask(clipId as never, mask)} onCommitPipMask={(clipId, mask) => commitPipMask(clipId as never, mask)} onGesturePause={pausePreviewPlayback} onGestureResume={resumePreviewPlayback} playing={playing && !gestureHoldRef.current} playheadUs={playhead} playheadStore={playheadStore} onTimeUs={us => seekFromPlayback(us)} onEnded={() => setPlaying(false)} onFallback={(reason, code) => { if (!seenAnyTicketRef.current) return; setPreviewMode("interactive"); setSyntheticNotice(syntheticFallbackNotice(reason, code)); }} sourceResolver={previewSourceResolver} resourceTier={resourceTier} forceCopyTo={forceCopyTo} snapshotRef={syntheticSnapshotRef} />}
             {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "video" && <div className="preview-transform" style={mainTransformStyle}><video className="preview-background" src={previewAsset.media_url} muted aria-hidden="true" /><video ref={videoRef} className="preview-foreground" src={previewAsset.media_url} muted={!selectedClip?.audio.enabled || previewReverse || (clipAtPlayhead ? !isClipAudible(clipAtPlayhead) : false)} aria-label="交互预览视频" onTimeUpdate={event => { if (libraryPreviewId) dispatchPlayhead("external", Math.round(event.currentTarget.currentTime * 1_000_000), true); }} onEnded={handleVideoEnded} /></div>}
             {previewMode === "interactive" && audioAsset?.media_url && <audio ref={audioRef} src={audioAsset.media_url} style={{ display: "none" }} />}
             {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "image" && <div className="preview-transform" style={mainTransformStyle}><img className="preview-background" src={previewAsset.media_url} alt="" aria-hidden="true" /><img className="preview-foreground" src={previewAsset.media_url} alt={previewAsset.asset.display_name} /></div>}
