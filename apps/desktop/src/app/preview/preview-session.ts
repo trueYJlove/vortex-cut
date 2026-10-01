@@ -122,6 +122,7 @@ interface InputRig {
   shadowInFlight: number | null;
   /** 同一输入的上传串行尾（ack 顺序保证槽位标记不被乱序覆盖）。 */
   uploadTail: Promise<void>;
+  decoderRecreate?: Promise<void>;
 }
 
 /** 主轨（段或转场左右）所需的 (输入, 源帧, 是否影子槽)。 */
@@ -381,12 +382,16 @@ export class PreviewSession {
         const original = tickets.get(input.asset_id);
         if (!original) continue;
         const resolved = await sourceResolver.resolve(input.asset_id, original);
+        if (session.disposed || signal?.aborted) {
+          throw new DOMException("Session disposed", "AbortError");
+        }
         if (resolved && resolved.isProxy) {
           tickets = new Map(tickets);
           tickets.set(input.asset_id, resolved.url);
         }
       }
     }
+    if (session.disposed || signal?.aborted) throw new DOMException("Session disposed", "AbortError");
     const canvas = document.createElement("canvas");
     canvas.className = "synthetic-canvas";
     canvas.style.width = "100%";
@@ -825,7 +830,14 @@ export class PreviewSession {
         if (!entry) continue;
         pool.mark(inputId, "evicting");
         const rig = this.rigs.get(inputId);
-        void rig?.worker?.dispose(); // 解码器保温让位（重入时 pump 冷启重建）
+        if (rig?.worker) {
+          const old = rig.worker;
+          rig.worker = null;
+          void old.dispose();
+          if (rig.decoderRetry && this.decoderFactory && !rig.decoderRecreate) {
+            rig.decoderRecreate = this.recreateDecoder(rig);
+          }
+        }
         void this.compositor?.releaseInput(inputId, entry.generation)
           .then(() => pool.release(inputId, entry.generation))
           .catch(() => pool.mark(inputId, "failed"));
@@ -969,8 +981,27 @@ export class PreviewSession {
     }
   }
 
+  private async recreateDecoder(rig: InputRig): Promise<void> {
+    try {
+      const retry = rig.decoderRetry;
+      const factory = this.decoderFactory;
+      if (!retry || !factory) return;
+      const worker = await factory.create({ mediaUrl: retry.ticket, codec: "auto", width: retry.width, height: retry.height, cacheCapBytes: retry.cacheCapBytes, refreshTicket: retry.refreshTicket, decodeFrames: retry.decodeFrames }, this.lifetime.signal);
+      if (this.disposed) { worker.dispose(); return; }
+      rig.worker = worker;
+      rig.fed = -1;
+      rig.ring = Array.from({ length: this.ringDepth }, () => null);
+      rig.shadowUploaded = -1;
+    } catch (error) {
+      if (!this.disposed) this.lastError = `解码器重建失败: ${error instanceof Error ? error.message : String(error)}`;
+    } finally {
+      rig.decoderRecreate = undefined;
+      if (!this.disposed && this.playing) this.pump(this.latestTarget);
+    }
+  }
+
   private uploadRing(rig: InputRig, inputId: string, srcN: number): Promise<void> {
-    if (!rig.worker) return Promise.reject(new Error(`no worker for input`));
+    if (!rig.worker || rig.decoderRecreate) return Promise.reject(new Error(`no worker for input`));
     const slotIndex = rig.ringSeq % this.ringDepth;
     rig.ringSeq += 1;
     const epoch = this.seekEpoch;
@@ -1141,7 +1172,7 @@ export class PreviewSession {
     if (toEnter > to) collectNeeds(from, toEnter, enterNeeds);
     for (const [inputId, needs] of needsByInput) {
       const rig = this.rigs.get(inputId);
-      if (!rig || rig.kind !== "video") continue;
+      if (!rig || rig.kind !== "video" || !rig.worker || rig.decoderRecreate) continue;
       let sorted: number[];
       if (rig.fed < 0) {
         sorted = [...(enterNeeds.get(inputId) ?? needs)].sort((a, b) => a - b);

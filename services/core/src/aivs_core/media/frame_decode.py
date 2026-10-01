@@ -24,7 +24,10 @@ NV12_MAGIC = b"AIV1"
 
 # PTS 表缓存：ffprobe -show_frames 对长片可达数秒～数十秒，逐帧请求不可重复付
 _pts_cache: dict[tuple[str, int, int], list["FramePts"]] = {}
+_pts_inflight: dict[tuple[str, int, int], asyncio.Task[list["FramePts"]]] = {}
 _PTS_CACHE_MAX = 8
+# 条目数之外再限制总帧数，避免 8 个长片的完整 FramePts 表常驻占满 Core 内存。
+_PTS_CACHE_MAX_FRAMES = 500_000
 
 
 @dataclass(frozen=True)
@@ -155,7 +158,7 @@ def pack_nv12_response(
     return b"".join(parts)
 
 
-async def list_frame_pts(ffprobe: Path, input_path: Path, timeout: float = 120.0) -> list[FramePts]:
+async def _probe_frame_pts(ffprobe: Path, input_path: Path, timeout: float = 120.0) -> list[FramePts]:
     """ffprobe -show_frames 取视频帧 PTS（best_effort 优先）。
 
     结果按 (path, size, mtime) 缓存——逐帧 decode-frames 不可每次重付全表探测。
@@ -198,10 +201,31 @@ async def list_frame_pts(ffprobe: Path, input_path: Path, timeout: float = 120.0
     pts = parse_frame_pts_json(payload)
     if not pts:
         raise FrameDecodeError("DECODE_NO_FRAMES", "ffprobe 未给出视频帧时间戳")
-    if len(_pts_cache) >= _PTS_CACHE_MAX:
-        _pts_cache.pop(next(iter(_pts_cache)))
     _pts_cache[cache_key] = pts
+    while len(_pts_cache) > _PTS_CACHE_MAX or sum(len(item) for item in _pts_cache.values()) > _PTS_CACHE_MAX_FRAMES:
+        _pts_cache.pop(next(iter(_pts_cache)))
     return pts
+
+
+async def list_frame_pts(ffprobe: Path, input_path: Path, timeout: float = 120.0) -> list[FramePts]:
+    """并发请求共享同一份 ffprobe 帧表探测。"""
+    try:
+        stat = input_path.stat()
+        cache_key = (str(input_path.resolve()), stat.st_size, int(stat.st_mtime))
+    except OSError:
+        cache_key = (str(input_path), 0, 0)
+    cached = _pts_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    task = _pts_inflight.get(cache_key)
+    if task is None:
+        task = asyncio.create_task(_probe_frame_pts(ffprobe, input_path, timeout))
+        _pts_inflight[cache_key] = task
+    try:
+        return await asyncio.shield(task)
+    finally:
+        if _pts_inflight.get(cache_key) is task:
+            _pts_inflight.pop(cache_key, None)
 
 
 async def decode_nv12_frames(
@@ -225,13 +249,21 @@ async def decode_nv12_frames(
         return []
     # 关键帧 seek：-ss 到目标前最近 sync，n 从该关键帧起算（0=seek 落点关键帧）。
     # 避免每次从文件头线性解到目标（GOP≈88 时 frame 368 单次 >10s）。
+    pts_by_index = {item.index: item for item in pts_list}
     earliest = unique_indices[0]
     kf_index = 0
+    kf_pts: FramePts | None = None
     for i in range(earliest, -1, -1):
-        if pts_list[i].key_frame:
+        candidate = pts_by_index.get(i)
+        if candidate is not None and candidate.key_frame:
             kf_index = i
+            kf_pts = candidate
             break
-    seek_us = pts_list[kf_index].pts_us
+    if kf_pts is None:
+        kf_pts = pts_by_index.get(kf_index)
+    if kf_pts is None:
+        raise FrameDecodeError("DECODE_FRAME_NOT_FOUND", f"缺少目标帧 {earliest} 的 PTS")
+    seek_us = kf_pts.pts_us
     select = "+".join(f"eq(n\\,{i - kf_index})" for i in unique_indices if i >= kf_index)
     if not select:
         raise FrameDecodeError("DECODE_FRAME_NOT_FOUND", "目标帧不在关键帧之后")
@@ -288,7 +320,9 @@ async def decode_nv12_frames(
         base = slot * frame_size
         y = stdout[base : base + y_size]
         uv = stdout[base + y_size : base + frame_size]
-        pts = next(p for p in pts_list if p.index == index)
+        pts = pts_by_index.get(index)
+        if pts is None:
+            raise FrameDecodeError("DECODE_FRAME_NOT_FOUND", f"缺少目标帧 {index} 的 PTS")
         by_index[index] = DecodedPlaneFrame(
             frame_n=-1,
             width=width,

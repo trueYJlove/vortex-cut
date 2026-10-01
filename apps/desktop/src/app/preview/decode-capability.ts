@@ -283,7 +283,20 @@ class FfmpegMediaDecoder implements MediaDecoder {
     if (!nums.length) return;
     this.inflight = (async () => {
       try {
-        const payload = await this.decodeFrames({ frameNumbers: nums.slice(0, 32), fps });
+        // 片尾预取窗可能越过素材末尾；Core 对整个窗口采用严格 PTS 校验，
+        // 因此从尾部收缩到目标帧，避免一个不存在的未来帧使有效目标整体失败。
+        let requestNumbers = nums.slice(0, 32);
+        let payload: ArrayBuffer;
+        for (;;) {
+          try {
+            payload = await this.decodeFrames({ frameNumbers: requestNumbers, fps });
+            break;
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (!/DECODE_FRAME_NOT_FOUND|DECODE_COUNT_MISMATCH/.test(message) || requestNumbers.length <= 1 || !requestNumbers.includes(frameN)) throw error;
+            requestNumbers = requestNumbers.slice(0, -1);
+          }
+        }
         for (const item of unpackNv12Response(payload)) this.ready.set(item.frameN, item);
         if (this.ready.size > 80) {
           for (const key of [...this.ready.keys()].sort((a, b) => a - b).slice(0, this.ready.size - 60)) {

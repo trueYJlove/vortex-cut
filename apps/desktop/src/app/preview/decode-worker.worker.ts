@@ -167,6 +167,10 @@ function armActiveRequestTimer(request: DecodeRequest): void {
   activeRequestTimer = setTimeout(() => {
     if (activeRequest?.id !== request.id) return;
     activeRequest = null;
+    feedGeneration += 1; // 作废仍在 await Range 读/批间让步的旧喂包流
+    try { decoder?.reset(); decoder?.configure(decoderConfig as VideoDecoderConfig); } catch { /* 下一请求冷启重建 */ }
+    lastFedSample = -1;
+    fedIndex = -1;
     clearActiveRequestTimer();
     // 附带 worker 状态快照：真机复现「无匹配输出」时直接看到 stash/游标/队列，
     // 免去二次复现定位（2026-09-28 真机 frame4 挂起即靠该快照核验路径）。
@@ -1130,7 +1134,7 @@ async function feedSamples(
             new Promise<never>((_, reject) => setTimeout(
               () => reject(new Error(`RANGE_READ_TIMEOUT: 采样 ${index} 字节读取超时（10s）`)), 10_000)),
           ]);
-          if (!decoder) return; // 读期间被冷启回收
+          if (generation !== feedGeneration || activeRequest?.id !== request.id || !decoder) return; // 读期间旧请求已过期/冷启接管
           const chunk = new EncodedVideoChunk({
             type: sample.sync ? "key" : "delta",
             timestamp: ((sample.dts + sample.ctsOffset) / timescale) * 1e6,

@@ -242,6 +242,7 @@ export function App() {
   const [aiPlayback, setAiPlayback] = useState<{ media_url: string; source_start_us: number; source_end_us: number }>();
   const [aiProviderDraft, setAiProviderDraft] = useState({ display_name: "", base_url: "", model: "" });
   const [aiForm, setAiForm] = useState({ topic: "", audience: "", narrative_goal: "", style_notes: "", provider_id: "", recipe_id: "", transcript_id: "" });
+  const aiRunRef = useRef<{ generation: number; stop?: () => void; timer?: ReturnType<typeof setTimeout> }>({ generation: 0 });
   const [patchOpen, setPatchOpen] = useState(false);
   const [patchStep, setPatchStep] = useState<"form" | "confirm" | "running" | "proposal">("form");
   const [patchInstruction, setPatchInstruction] = useState("");
@@ -472,6 +473,12 @@ export function App() {
   };
   const switchProject = (next: Project) => {
     if (next.project_id === projectRef.current?.project_id) return;
+    aiRunRef.current.generation += 1;
+    aiRunRef.current.stop?.();
+    if (aiRunRef.current.timer) clearTimeout(aiRunRef.current.timer);
+    aiRunRef.current.stop = undefined;
+    aiRunRef.current.timer = undefined;
+    setAiOpen(false); setAiStep("form"); setAiError(""); setAiPreview(undefined); setAiCandidates([]); setAiJob(undefined); setAiPlayback(undefined);
     projectDataEpochRef.current += 1;
     renderDataEpochRef.current += 1;
     transcriptQueueRef.current?.advanceGeneration();
@@ -522,8 +529,42 @@ export function App() {
   };
   const createAi = async () => {
     if (!project || !aiPreview || !window.desktop.createPlanning) return;
-    try { setAiStep("running"); const result = await window.desktop.createPlanning({ project_id: project.project_id, egress_preview_id: aiPreview.egress_preview_id, payload_sha256: aiPreview.payload_sha256 }); setAiJob(result.job); trackRenderJob(result.job); const stop = window.desktop.subscribeJob(result.job.job_id, job => { setAiJob(job); if (["failed", "cancelled", "interrupted"].includes(job.status)) { setAiPreview(undefined); setAiStep("form"); setAiError("生成未完成。请重新准备外传内容并再次确认。"); } }); const poll = async () => { const items = await window.desktop.listCandidatePlans?.(project.project_id); if (items?.items.length) { stop(); setAiCandidates(items.items as unknown as Array<Record<string, unknown>>); setAiStep("candidates"); } else setTimeout(() => void poll(), 1500); }; void poll(); }
-    catch { setAiPreview(undefined); setAiError("调用失败；重试前必须重新准备并确认外传内容。"); setAiStep("form"); }
+    const projectId = project.project_id;
+    const epoch = projectDataEpochRef.current;
+    const generation = ++aiRunRef.current.generation;
+    aiRunRef.current.stop?.();
+    if (aiRunRef.current.timer) clearTimeout(aiRunRef.current.timer);
+    const current = () => projectRef.current?.project_id === projectId && projectDataEpochRef.current === epoch && aiRunRef.current.generation === generation;
+    try {
+      setAiStep("running");
+      const result = await window.desktop.createPlanning({ project_id: projectId, egress_preview_id: aiPreview.egress_preview_id, payload_sha256: aiPreview.payload_sha256 });
+      if (!current()) return;
+      setAiJob(result.job);
+      trackRenderJob(result.job);
+      const stop = window.desktop.subscribeJob(result.job.job_id, job => {
+        if (!current()) { stop(); return; }
+        setAiJob(job);
+        if (["failed", "cancelled", "interrupted"].includes(job.status)) {
+          stop(); setAiPreview(undefined); setAiStep("form"); setAiError("生成未完成。请重新准备外传内容并再次确认。");
+        }
+      });
+      aiRunRef.current.stop = stop;
+      const poll = async (): Promise<void> => {
+        if (!current()) return;
+        const items = await window.desktop.listCandidatePlans?.(projectId);
+        if (!current()) return;
+        if (items?.items.length) {
+          stop(); aiRunRef.current.stop = undefined;
+          setAiCandidates(items.items as unknown as Array<Record<string, unknown>>); setAiStep("candidates");
+        } else {
+          aiRunRef.current.timer = setTimeout(() => void poll(), 1500);
+        }
+      };
+      void poll();
+    } catch {
+      if (!current()) return;
+      setAiPreview(undefined); setAiError("调用失败；重试前必须重新准备并确认外传内容。"); setAiStep("form");
+    }
   };
   const saveAiProvider = async () => {
     if (!window.desktop.createProvider) return;
