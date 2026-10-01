@@ -364,6 +364,26 @@ class AgentSessionPrepareRequest(BaseModel):
     instruction: str
 
 
+class WorklistPrepareRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    base_revision_id: str
+    steps: list[dict[str, Any]]
+    max_steps: int
+    token_budget: int
+
+
+class WorklistCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    worklist_id: str
+    base_revision_id: str
+
+
+class WorklistApplyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    base_revision_id: str
+    proposed_document_sha256: str
+
+
 class AgentSessionCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     agent_session_egress_preview_id: str
@@ -693,6 +713,8 @@ class CoreState:
         from .editing_grammar import EditingGrammarService
 
         self.editing_grammar = EditingGrammarService(self.db, self.timelines)
+        from .worklist import WorklistService
+        self.worklists = WorklistService(self.db, self.timelines, self.editing_grammar)
         # AI-1：多步 agent 会话（emit 传入以发 agent_session.updated 事件）。
         self.agent_sessions = AgentSessionService(
             self.db, self.providers, self.provider_secrets, self.timelines,
@@ -1577,6 +1599,37 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return with_current_preview(state.timelines.get_state(revision["project_id"]))
         except DomainError as exc:
             raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/worklists/prepare")
+    async def prepare_worklist(project_id: str, request: WorklistPrepareRequest, _: CoreState = Depends(require_ui)) -> dict[str, Any]:
+        try: return state.worklists.prepare(project_id, request.model_dump())
+        except DomainError as exc: raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/worklists")
+    async def create_worklist(project_id: str, request: WorklistCreateRequest, _: CoreState = Depends(require_ui)) -> dict[str, Any]:
+        try: return state.worklists.create(project_id, request.model_dump())
+        except DomainError as exc: raise _domain(exc) from exc
+
+    @app.get("/api/v1/projects/{project_id}/worklists")
+    async def list_worklists(project_id: str, _: CoreState = Depends(require_ui)) -> dict[str, Any]:
+        return {"items": state.worklists.list(project_id)}
+
+    @app.get("/api/v1/projects/{project_id}/worklists/{worklist_id}")
+    async def get_worklist(project_id: str, worklist_id: str, _: CoreState = Depends(require_ui)) -> dict[str, Any]:
+        try: return state.worklists.get(project_id, worklist_id)
+        except DomainError as exc: raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/worklists/{worklist_id}/cancel")
+    async def cancel_worklist(project_id: str, worklist_id: str, _: CoreState = Depends(require_ui)) -> dict[str, Any]:
+        try: return state.worklists.cancel(project_id, worklist_id)
+        except DomainError as exc: raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/worklists/{worklist_id}/steps/{step_id}/apply")
+    async def apply_worklist_step(project_id: str, worklist_id: str, step_id: str, request: WorklistApplyRequest, _: CoreState = Depends(require_ui)) -> dict[str, Any]:
+        try:
+            result = state.worklists.apply(project_id, worklist_id, step_id, request.model_dump())
+            return with_current_preview(state.timelines.get_state(project_id))
+        except DomainError as exc: raise _domain(exc) from exc
 
     @app.post("/api/v1/projects/{project_id}/agent-sessions/prepare")
     async def prepare_agent_session(

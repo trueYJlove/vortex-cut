@@ -1100,7 +1100,16 @@ export interface AgentSessionUpdatedEvent {
   };
 }
 
-// AI-2（Layer 0）：素材 CV 信号分析——generate=True 登记分析作业；仅 video 素材。
+export type WorklistStatus = "prepared" | "confirmed" | "running" | "waiting_for_apply" | "succeeded" | "failed" | "cancelled" | "expired";
+export type WorklistStepKind = "roughcut" | "editing_grammar" | "captions" | "style";
+export type WorklistStepStatus = "pending" | "running" | "waiting_for_apply" | "succeeded" | "failed" | "cancelled" | "expired";
+export interface WorklistStep { id: string; ordinal: number; kind: WorklistStepKind; planner_id: string; status: WorklistStepStatus; base_revision_id: TimelineRevisionId | null; proposal_id: string | null; applied_revision_id: TimelineRevisionId | null; input_sha256: string | null; error_json: string | null; created_at: string; }
+export interface Worklist { id: string; project_id: ProjectId; base_revision_id: TimelineRevisionId; base_document_sha256: string; status: WorklistStatus; current_step_ordinal: number; step_count: number; max_steps: number; token_budget: number; steps: WorklistStep[]; created_at: string; updated_at: string; finished_at: string | null; }
+export interface WorklistStepInput { kind: WorklistStepKind; planner: string; params: Record<string, unknown>; }
+export interface WorklistPrepareRequest { base_revision_id: TimelineRevisionId; steps: WorklistStepInput[]; max_steps: number; token_budget: number; }
+export interface WorklistCreateRequest { worklist_id: string; base_revision_id: TimelineRevisionId; }
+
+// AI-2（Layer 0）：素材 CV 信号分析——generate=True 登记分析作业；仅 video 素材.
 // ADR-0005 阶段 2 密度旋钮（可选；不传 = 默认，决策面与阶段 1 一致）。
 export type CvAnalysisStatus = "queued" | "running" | "ready" | "failed" | "stale";
 export type CvDensityStatus = "full" | "sparse";

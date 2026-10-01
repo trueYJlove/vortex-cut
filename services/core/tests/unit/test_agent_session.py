@@ -439,7 +439,7 @@ def test_v20_schema_tables_and_triggers(tmp_path: Path) -> None:
             row[0]
             for row in conn.execute("SELECT version FROM schema_migrations")
         ]
-        assert "v20" in versions and len(versions) == 26
+        assert "v20" in versions and len(versions) == 27
         tables = {
             row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }
