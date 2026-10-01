@@ -11,6 +11,8 @@ dependencies = [
     { name = "fastapi" },
     { name = "faster-whisper" },
     { name = "httpx" },
+    { name = "numpy" },
+    { name = "onnxruntime" },
     { name = "pydantic" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -31,6 +33,8 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115,<1" },
     { name = "faster-whisper", specifier = ">=1.0,<2" },
     { name = "httpx", specifier = ">=0.27,<1" },
+    { name = "numpy", specifier = ">=2.0,<3" },
+    { name = "onnxruntime", specifier = ">=1.18,<2" },
     { name = "pydantic", specifier = ">=2.9,<3" },
     { name = "pyinstaller", marker = "extra == 'dev'", specifier = ">=6.11,<7" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.390,<2" },
