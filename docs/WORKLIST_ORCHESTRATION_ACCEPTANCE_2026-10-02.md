@@ -19,8 +19,8 @@
 | Main IPC 白名单和脱敏解析 | ✅ | `tests/stage2b-ipc.test.ts` |
 | Preload bridge | ✅ | `tests/preload.test.ts`；`pnpm typecheck` |
 | Desktop 最小面板 | ✅ | `apps/desktop/src/app/worklist/WorklistPanel.tsx`；`tests/worklist-panel.test.tsx` |
-| Desktop 项目切换隔离 | ⚠️ 部分 | 面板使用 `key={project.project_id}` 且请求按 projectId；已有 `project-switch-isolation.test.tsx` 通过，但尚无 Worklist 专项 A→B 延迟响应测试 |
-| Core 重启恢复 | ⚠️ 未核销 | 数据持久化存在；尚无重启后 running/waiting 恢复专项测试 |
+| Desktop 项目切换隔离 | ✅ 自动化通过 | `tests/worklist-panel.test.tsx`：A 请求迟到、组件切换到 B 后不污染 B；面板使用 `key={project.project_id}` 且请求按 projectId |
+| Core 重启恢复 | ✅ 数据状态恢复自动化通过 | `test_worklist_state_survives_database_reopen_without_reproposing`：数据库重开后保留 waiting/proposal 状态且不重复 propose；真实 Core 进程重启签字仍可补做 |
 | roughcut/captions/style 明确拒绝 | ✅ | Core `WORKLIST_STEP_UNAVAILABLE`；当前切片未产生 job 副作用 |
 | 真实 GUI/Electron 手工验收 | ⚠️ 未核销 | 当前证据为 jsdom/Vitest、Core API 和 TypeScript；未使用真实素材启动 Electron 完成手工签字 |
 
@@ -40,7 +40,6 @@ STATUS consistency: passed
 
 ## 3. Remaining acceptance work
 
-1. 增加 Worklist 专项 A→B 项目切换延迟响应测试；
-2. 增加 Core 重启后 Worklist 状态恢复/不重复执行测试；
-3. 以真实 Electron/真实素材完成一次面板操作签字；
-4. 完成上述证据后再将 STATUS P35 核销，不提前宣称完整验收通过。
+1. 真实 Core 进程重启后再做一次 waiting 状态查询签字（当前已有数据库重开自动化证据）；
+2. 以真实 Electron/真实素材完成一次面板操作签字；
+3. 完成上述真实环境证据后再将 STATUS P35 核销，不提前宣称完整验收通过。

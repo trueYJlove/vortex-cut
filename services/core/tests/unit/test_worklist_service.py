@@ -58,6 +58,22 @@ def test_worklist_advances_each_step_and_finishes(tmp_path: Path) -> None:
     assert len(fake.proposed) == 2
 
 
+def test_worklist_state_survives_database_reopen_without_reproposing(tmp_path: Path) -> None:
+    db, timelines, revision_id = _setup(tmp_path)
+    fake = FakeEditing()
+    service = WorklistService(db, timelines, fake)  # type: ignore[arg-type]
+    prepared = service.prepare("p1", _request(revision_id))
+    running = service.create("p1", {"worklist_id": prepared["id"], "base_revision_id": revision_id})
+    assert running["status"] == "waiting_for_apply"
+    proposed_count = len(fake.proposed)
+    reopened = Database(tmp_path / "app.db")
+    reopened_service = WorklistService(reopened, TimelineService(reopened), FakeEditing())  # type: ignore[arg-type]
+    restored = reopened_service.get("p1", prepared["id"])
+    assert restored["status"] == "waiting_for_apply"
+    assert restored["steps"][0]["proposal_id"] == running["steps"][0]["proposal_id"]
+    assert len(fake.proposed) == proposed_count
+
+
 def test_worklist_active_is_project_scoped_and_duplicate_apply_rejected(tmp_path: Path) -> None:
     db, timelines, revision_id = _setup(tmp_path)
     fake = FakeEditing()
