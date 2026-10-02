@@ -58,6 +58,32 @@ class WorklistService:
                 db.execute("INSERT INTO worklist_steps(id,worklist_id,ordinal,kind,planner_id,params_json,status,created_at) VALUES(?,?,?,?,?,?,?,?)", (f"worklist_step_{new_id()}", worklist_id, ordinal, item["kind"], item["planner"], json_dumps(item["params"]), "pending", now))
         return self._row(project_id, worklist_id)
 
+    def _start_next_step(self, project_id: str, worklist_id: str, base_revision_id: str) -> dict[str, Any]:
+        with self.db.connection() as db:
+            row = db.execute("SELECT * FROM worklists WHERE id=? AND project_id=?", (worklist_id, project_id)).fetchone()
+            step = db.execute("SELECT * FROM worklist_steps WHERE worklist_id=? AND status='pending' ORDER BY ordinal LIMIT 1", (worklist_id,)).fetchone()
+            if not row or not step:
+                raise DomainError("WORKLIST_NOT_FOUND", "工作单步骤不存在")
+            if step["kind"] != "editing_grammar":
+                raise DomainError("WORKLIST_STEP_UNAVAILABLE", "当前切片仅支持 editing_grammar")
+            now = utc_now()
+            db.execute("UPDATE worklists SET status='running',current_step_ordinal=?,updated_at=? WHERE id=?", (step["ordinal"], now, worklist_id))
+            db.execute("UPDATE worklist_steps SET status='running',base_revision_id=?,started_at=? WHERE id=?", (base_revision_id, now, step["id"]))
+        try:
+            params = json_loads(step["params_json"])
+            proposal = self.editing.propose(project_id, {"base_revision_id": base_revision_id, "planner": step["planner_id"], "params": params})
+        except Exception as exc:
+            now = utc_now()
+            with self.db.connection() as db:
+                db.execute("UPDATE worklists SET status='failed',updated_at=?,finished_at=? WHERE id=?", (now, now, worklist_id))
+                db.execute("UPDATE worklist_steps SET status='failed',error_json=?,finished_at=? WHERE id=?", (json_dumps({"message": str(exc)}), now, step["id"]))
+            raise
+        now = utc_now()
+        with self.db.connection() as db:
+            db.execute("UPDATE worklists SET status='waiting_for_apply',updated_at=? WHERE id=?", (now, worklist_id))
+            db.execute("UPDATE worklist_steps SET status='waiting_for_apply',proposal_id=?,input_sha256=? WHERE id=?", (proposal["editing_grammar_proposal_id"], sha256(params), step["id"]))
+        return self._row(project_id, worklist_id)
+
     def create(self, project_id: str, request: dict[str, Any]) -> dict[str, Any]:
         if set(request) != {"worklist_id", "base_revision_id"}:
             raise DomainError("WORKLIST_REQUEST_INVALID", "工作单创建请求无效")
@@ -71,17 +97,7 @@ class WorklistService:
         if step["kind"] != "editing_grammar":
             raise DomainError("WORKLIST_STEP_UNAVAILABLE", "当前切片仅支持 editing_grammar")
         now = utc_now()
-        with self.db.connection() as db:
-            db.execute("UPDATE worklists SET status='running',updated_at=? WHERE id=?", (now, row["id"]))
-            db.execute("UPDATE worklist_steps SET status='running',base_revision_id=?,started_at=? WHERE id=?", (row["base_revision_id"], now, step["id"]))
-        # 当前首切片同步生成本地提案；后续 provider 步骤再接 job runner。
-        params = json_loads(step["params_json"])
-        proposal = self.editing.propose(project_id, {"base_revision_id": row["base_revision_id"], "planner": step["planner_id"], "params": params})
-        now = utc_now()
-        with self.db.connection() as db:
-            db.execute("UPDATE worklists SET status='waiting_for_apply',updated_at=? WHERE id=?", (now, row["id"]))
-            db.execute("UPDATE worklist_steps SET status='waiting_for_apply',proposal_id=?,input_sha256=? WHERE id=?", (proposal["editing_grammar_proposal_id"], sha256(params), step["id"]))
-        return self._row(project_id, row["id"])
+        return self._start_next_step(project_id, row["id"], row["base_revision_id"])
 
     def apply(self, project_id: str, worklist_id: str, step_id: str, request: dict[str, Any]) -> dict[str, Any]:
         if set(request) != {"base_revision_id", "proposed_document_sha256"}:
@@ -96,8 +112,11 @@ class WorklistService:
         now = utc_now()
         with self.db.connection() as db:
             db.execute("UPDATE worklist_steps SET status='succeeded',applied_revision_id=?,finished_at=? WHERE id=?", (revision["timeline_revision_id"], now, step_id))
-            db.execute("UPDATE worklists SET status='succeeded',current_step_ordinal=step_count,updated_at=?,finished_at=? WHERE id=?", (now, now, worklist_id))
-        return self._row(project_id, worklist_id)
+            remaining = db.execute("SELECT 1 FROM worklist_steps WHERE worklist_id=? AND status='pending' LIMIT 1", (worklist_id,)).fetchone()
+            if not remaining:
+                db.execute("UPDATE worklists SET status='succeeded',current_step_ordinal=step_count,updated_at=?,finished_at=? WHERE id=?", (now, now, worklist_id))
+                return self._row(project_id, worklist_id)
+        return self._start_next_step(project_id, worklist_id, revision["timeline_revision_id"])
 
     def cancel(self, project_id: str, worklist_id: str) -> dict[str, Any]:
         with self.db.connection() as db:
