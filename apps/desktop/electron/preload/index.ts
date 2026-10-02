@@ -9,7 +9,8 @@ import type {
   EditingGrammarTool,
   EditingGrammarPrepareResult,
   EditingGrammarProposal,
-  EditingGrammarProposalListItem
+  EditingGrammarProposalListItem,
+  Worklist
 } from "@aivideo/contracts";
 import type {
   Asset,
@@ -189,6 +190,11 @@ export interface DesktopApi {
   listEditingGrammarProposals: (projectId: ProjectId) => Promise<{ items: EditingGrammarProposalListItem[] }>;
   getEditingGrammarProposal: (input: { project_id: ProjectId; proposal_id: string }) => Promise<EditingGrammarProposal>;
   applyEditingGrammarProposal: (input: { project_id: ProjectId; proposal_id: string; base_revision_id: TimelineRevisionId; proposed_document_sha256: string }) => Promise<TimelineState>;
+  listWorklists?: (projectId: ProjectId) => Promise<{ items: Worklist[] }>;
+  prepareWorklist?: (input: { project_id: ProjectId; base_revision_id: TimelineRevisionId; steps: Array<{ kind: string; planner: string; params: Record<string, unknown> }>; max_steps: number; token_budget: number }) => Promise<Worklist>;
+  createWorklist?: (input: { project_id: ProjectId; worklist_id: string; base_revision_id: TimelineRevisionId }) => Promise<Worklist>;
+  cancelWorklist?: (input: { project_id: ProjectId; worklist_id: string }) => Promise<Worklist>;
+  applyWorklistStep?: (input: { project_id: ProjectId; worklist_id: string; step_id: string; base_revision_id: TimelineRevisionId; proposed_document_sha256: string }) => Promise<Worklist>;
   createTimeline: (input: { project_id: ProjectId; timeline: TimelineCreateInput }) => Promise<TimelineState>;
   getTimeline: (projectId: ProjectId) => Promise<TimelineState>;
   patchTimeline: (input: { project_id: ProjectId; patch: TimelinePatch }) => Promise<TimelineState>;
@@ -359,6 +365,11 @@ const api: DesktopApi = {
   listCvSamples: input => ipcRenderer.invoke("cv-samples:list", input),
   listEditingGrammarPlanners: projectId => ipcRenderer.invoke("editing-grammar:planners", projectId),
   prepareEditingGrammar: input => ipcRenderer.invoke("editing-grammar:prepare", input),
+  listWorklists: projectId => ipcRenderer.invoke("worklist:list", projectId),
+  prepareWorklist: input => ipcRenderer.invoke("worklist:prepare", input),
+  createWorklist: input => ipcRenderer.invoke("worklist:create", input),
+  cancelWorklist: input => ipcRenderer.invoke("worklist:cancel", input),
+  applyWorklistStep: input => ipcRenderer.invoke("worklist:apply", input),
   proposeEditingGrammar: input => ipcRenderer.invoke("editing-grammar:propose", input),
   listEditingGrammarProposals: projectId => ipcRenderer.invoke("editing-grammar:proposal-list", projectId),
   getEditingGrammarProposal: input => ipcRenderer.invoke("editing-grammar:proposal-get", input),

@@ -1,3 +1,4 @@
+import { parseWorklist, type Worklist } from "@aivideo/contracts";
 import {
   API_PREFIX,
   isApiErrorResponse,
@@ -446,6 +447,28 @@ export class CoreClient {
       if (!Array.isArray(page.items)) throw new Error("Invalid AgentSessionPage");
       return { items: page.items.map(parseAgentSession) };
     });
+  }
+  listWorklists(projectId: ProjectId): Promise<{ items: Worklist[] }> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/worklists`).then(value => {
+      const page = removeSensitiveFields(value) as { items?: unknown[] };
+      if (!Array.isArray(page.items)) throw new Error("Invalid WorklistPage");
+      return { items: page.items.map(parseWorklist) };
+    });
+  }
+  getWorklist(projectId: ProjectId, worklistId: string): Promise<Worklist> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/worklists/${encodeURIComponent(worklistId)}`).then(value => parseWorklist(removeSensitiveFields(value)));
+  }
+  prepareWorklist(projectId: ProjectId, input: { base_revision_id: TimelineRevisionId; steps: Array<{ kind: string; planner: string; params: Record<string, unknown> }>; max_steps: number; token_budget: number }): Promise<Worklist> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/worklists/prepare`, { method: "POST", body: JSON.stringify(input) }).then(value => parseWorklist(removeSensitiveFields(value)));
+  }
+  createWorklist(projectId: ProjectId, input: { worklist_id: string; base_revision_id: TimelineRevisionId }): Promise<Worklist> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/worklists`, { method: "POST", body: JSON.stringify(input) }).then(value => parseWorklist(removeSensitiveFields(value)));
+  }
+  cancelWorklist(projectId: ProjectId, worklistId: string): Promise<Worklist> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/worklists/${encodeURIComponent(worklistId)}/cancel`, { method: "POST" }).then(value => parseWorklist(removeSensitiveFields(value)));
+  }
+  applyWorklistStep(projectId: ProjectId, worklistId: string, stepId: string, input: { base_revision_id: TimelineRevisionId; proposed_document_sha256: string }): Promise<Worklist> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/worklists/${encodeURIComponent(worklistId)}/steps/${encodeURIComponent(stepId)}/apply`, { method: "POST", body: JSON.stringify(input) }).then(value => parseWorklist(removeSensitiveFields(value)));
   }
   getAgentSession(sessionId: string): Promise<AgentSession> {
     return this.request<unknown>(`${API_PREFIX}/agent-sessions/${encodeURIComponent(sessionId)}`).then(value => parseAgentSession(removeSensitiveFields(value)));

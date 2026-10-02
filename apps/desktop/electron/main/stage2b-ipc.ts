@@ -14,7 +14,8 @@ import {
   parseEditingGrammarTool,
   parseEditingGrammarPrepareResult,
   parseEditingGrammarProposal,
-  parseEditingGrammarProposalListItem
+  parseEditingGrammarProposalListItem,
+  parseWorklist
 } from "@aivideo/contracts";
 
 type RequestInitLike = { method?: string; body?: string };
@@ -108,6 +109,27 @@ export function registerStage2bIpc(deps: Stage2bIpcDependencies): void {
   deps.handle("planning-patch:proposal-apply", async (_event, input) => {
     const value = record(input, ["project_id", "proposal_id", "base_revision_id", "proposed_document_sha256"], "timeline patch proposal apply");
     return parseTimelineState(stage2bRendererSafe(await fetchSafe(`${API_PREFIX}/projects/${id(value.project_id, "project_id")}/timeline-patch-proposals/${id(value.proposal_id, "timeline_patch_proposal_id")}/apply`, { method: "POST", body: JSON.stringify({ base_revision_id: id(value.base_revision_id, "base_revision_id"), proposed_document_sha256: sha256(value.proposed_document_sha256, "proposed_document_sha256") }) })));
+  });
+  deps.handle("worklist:list", async (_event, projectId) => {
+    const page = stage2bRendererSafe(await fetchSafe(`${API_PREFIX}/projects/${id(projectId, "project_id")}/worklists`)) as { items?: unknown[] };
+    if (!Array.isArray(page.items)) throw new Error("Core request failed");
+    return { items: page.items.map(parseWorklist) };
+  });
+  deps.handle("worklist:prepare", async (_event, input) => {
+    const value = record(input, ["project_id", "base_revision_id", "steps", "max_steps", "token_budget"], "worklist prepare");
+    return parseWorklist(stage2bRendererSafe(await fetchSafe(`${API_PREFIX}/projects/${id(value.project_id, "project_id")}/worklists/prepare`, { method: "POST", body: JSON.stringify({ base_revision_id: id(value.base_revision_id, "base_revision_id"), steps: value.steps, max_steps: value.max_steps, token_budget: value.token_budget }) })));
+  });
+  deps.handle("worklist:create", async (_event, input) => {
+    const value = record(input, ["project_id", "worklist_id", "base_revision_id"], "worklist create");
+    return parseWorklist(stage2bRendererSafe(await fetchSafe(`${API_PREFIX}/projects/${id(value.project_id, "project_id")}/worklists`, { method: "POST", body: JSON.stringify({ worklist_id: id(value.worklist_id, "worklist_id"), base_revision_id: id(value.base_revision_id, "base_revision_id") }) })));
+  });
+  deps.handle("worklist:cancel", async (_event, input) => {
+    const value = record(input, ["project_id", "worklist_id"], "worklist cancel");
+    return parseWorklist(stage2bRendererSafe(await fetchSafe(`${API_PREFIX}/projects/${id(value.project_id, "project_id")}/worklists/${id(value.worklist_id, "worklist_id")}/cancel`, { method: "POST" })));
+  });
+  deps.handle("worklist:apply", async (_event, input) => {
+    const value = record(input, ["project_id", "worklist_id", "step_id", "base_revision_id", "proposed_document_sha256"], "worklist apply");
+    return parseWorklist(stage2bRendererSafe(await fetchSafe(`${API_PREFIX}/projects/${id(value.project_id, "project_id")}/worklists/${id(value.worklist_id, "worklist_id")}/steps/${id(value.step_id, "step_id")}/apply`, { method: "POST", body: JSON.stringify({ base_revision_id: id(value.base_revision_id, "base_revision_id"), proposed_document_sha256: sha256(value.proposed_document_sha256, "proposed_document_sha256") }) })));
   });
   deps.handle("timeline:revision-diff", async (_event, input) => {
     const value = record(input, ["project_id", "base_revision_id", "target_revision_id"], "timeline revision diff");

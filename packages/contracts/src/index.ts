@@ -1108,6 +1108,10 @@ export interface Worklist { id: string; project_id: ProjectId; base_revision_id:
 export interface WorklistStepInput { kind: WorklistStepKind; planner: string; params: Record<string, unknown>; }
 export interface WorklistPrepareRequest { base_revision_id: TimelineRevisionId; steps: WorklistStepInput[]; max_steps: number; token_budget: number; }
 export interface WorklistCreateRequest { worklist_id: string; base_revision_id: TimelineRevisionId; }
+export function isWorklist(value: unknown): value is Worklist {
+  return isRecord(value) && typeof value.id === "string" && typeof value.project_id === "string" && typeof value.base_revision_id === "string" && typeof value.base_document_sha256 === "string" && typeof value.status === "string" && typeof value.current_step_ordinal === "number" && typeof value.step_count === "number" && typeof value.max_steps === "number" && typeof value.token_budget === "number" && Array.isArray(value.steps);
+}
+export function parseWorklist(value: unknown): Worklist { if (!isWorklist(value)) throw new ContractValidationError("Worklist"); return value; }
 
 // AI-2（Layer 0）：素材 CV 信号分析——generate=True 登记分析作业；仅 video 素材.
 // ADR-0005 阶段 2 密度旋钮（可选；不传 = 默认，决策面与阶段 1 一致）。
