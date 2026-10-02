@@ -47,8 +47,10 @@ class WorklistService:
         for item in steps:
             if not isinstance(item, dict) or set(item) != {"kind", "planner", "params"} or item["kind"] not in KINDS or not isinstance(item["params"], dict):
                 raise DomainError("WORKLIST_STEP_INVALID", "工作单步骤格式或类型无效")
-            if item["kind"] != "editing_grammar":
-                raise DomainError("WORKLIST_STEP_UNAVAILABLE", "当前切片仅支持 editing_grammar")
+            if item["kind"] == "captions" and item["planner"] != "captions":
+                raise DomainError("WORKLIST_CAPTIONS_PARAMS_INVALID", "captions step 必须使用 captions planner")
+            if item["kind"] not in {"editing_grammar", "captions"}:
+                raise DomainError("WORKLIST_STEP_UNAVAILABLE", "当前切片仅支持 editing_grammar/captions")
             normalized.append(item)
         worklist_id = f"worklist_{new_id()}"
         now = utc_now()
@@ -64,8 +66,8 @@ class WorklistService:
             step = db.execute("SELECT * FROM worklist_steps WHERE worklist_id=? AND status='pending' ORDER BY ordinal LIMIT 1", (worklist_id,)).fetchone()
             if not row or not step:
                 raise DomainError("WORKLIST_NOT_FOUND", "工作单步骤不存在")
-            if step["kind"] != "editing_grammar":
-                raise DomainError("WORKLIST_STEP_UNAVAILABLE", "当前切片仅支持 editing_grammar")
+            if step["kind"] not in {"editing_grammar", "captions"}:
+                raise DomainError("WORKLIST_STEP_UNAVAILABLE", "当前切片仅支持 editing_grammar/captions")
             now = utc_now()
             db.execute("UPDATE worklists SET status='running',current_step_ordinal=?,updated_at=? WHERE id=?", (step["ordinal"], now, worklist_id))
             db.execute("UPDATE worklist_steps SET status='running',base_revision_id=?,started_at=? WHERE id=?", (base_revision_id, now, step["id"]))
@@ -94,8 +96,8 @@ class WorklistService:
             if row["base_revision_id"] != request["base_revision_id"]:
                 raise DomainError("WORKLIST_BASE_DRIFT", "工作单基线已变化")
             step = db.execute("SELECT * FROM worklist_steps WHERE worklist_id=? AND ordinal=0", (row["id"],)).fetchone()
-        if step["kind"] != "editing_grammar":
-            raise DomainError("WORKLIST_STEP_UNAVAILABLE", "当前切片仅支持 editing_grammar")
+        if step["kind"] not in {"editing_grammar", "captions"}:
+            raise DomainError("WORKLIST_STEP_UNAVAILABLE", "当前切片仅支持 editing_grammar/captions")
         now = utc_now()
         return self._start_next_step(project_id, row["id"], row["base_revision_id"])
 

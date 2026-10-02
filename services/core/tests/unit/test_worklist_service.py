@@ -37,8 +37,8 @@ def _setup(tmp_path: Path) -> tuple[Database, TimelineService, str]:
     return db, timelines, state["current_revision"]["timeline_revision_id"]
 
 
-def _request(revision_id: str, count: int = 1) -> dict:
-    return {"base_revision_id": revision_id, "steps": [{"kind": "editing_grammar", "planner": f"planner-{i}", "params": {"i": i}} for i in range(count)], "max_steps": count, "token_budget": 100}
+def _request(revision_id: str, count: int = 1, kind: str = "editing_grammar", planner: str | None = None) -> dict:
+    return {"base_revision_id": revision_id, "steps": [{"kind": kind, "planner": planner or f"planner-{i}", "params": {"i": i}} for i in range(count)], "max_steps": count, "token_budget": 100}
 
 
 def test_worklist_advances_each_step_and_finishes(tmp_path: Path) -> None:
@@ -72,6 +72,16 @@ def test_worklist_state_survives_database_reopen_without_reproposing(tmp_path: P
     assert restored["status"] == "waiting_for_apply"
     assert restored["steps"][0]["proposal_id"] == running["steps"][0]["proposal_id"]
     assert len(fake.proposed) == proposed_count
+
+
+def test_worklist_captions_step_is_accepted_only_with_captions_planner(tmp_path: Path) -> None:
+    db, timelines, revision_id = _setup(tmp_path)
+    service = WorklistService(db, timelines, FakeEditing())  # type: ignore[arg-type]
+    prepared = service.prepare("p1", {"base_revision_id": revision_id, "steps": [{"kind": "captions", "planner": "captions", "params": {"transcript_id": "t1", "segment_ids": ["s1"], "at_index": 0}}], "max_steps": 1, "token_budget": 1})
+    assert prepared["steps"][0]["kind"] == "captions"
+    service.cancel("p1", prepared["id"])
+    with pytest.raises(DomainError, match="captions step"):
+        service.prepare("p1", {"base_revision_id": revision_id, "steps": [{"kind": "captions", "planner": "wrong", "params": {}}], "max_steps": 1, "token_budget": 1})
 
 
 def test_worklist_active_is_project_scoped_and_duplicate_apply_rejected(tmp_path: Path) -> None:

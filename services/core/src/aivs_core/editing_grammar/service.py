@@ -141,8 +141,21 @@ class EditingGrammarService:
     def prepare(self, project_id: str, request: dict[str, Any]) -> dict[str, Any]:
         if set(request) != {"base_revision_id", "planner", "params"}:
             raise DomainError("EDITING_GRAMMAR_REQUEST_INVALID", "准备请求无效")
-        planner = self.registry.get(request["planner"])
+        planner_name = request["planner"]
         params = request["params"]
+        if planner_name == "captions":
+            if set(params) != {"transcript_id", "segment_ids", "at_index"}:
+                raise DomainError("WORKLIST_CAPTIONS_PARAMS_INVALID", "字幕装配参数无效")
+            if not isinstance(params["transcript_id"], str) or not isinstance(params["segment_ids"], list) or not params["segment_ids"] or len(set(params["segment_ids"])) != len(params["segment_ids"]):
+                raise DomainError("WORKLIST_CAPTIONS_SEGMENTS_INVALID", "字幕转录片段无效")
+            if not isinstance(params["at_index"], int) or params["at_index"] < 0:
+                raise DomainError("WORKLIST_CAPTIONS_INDEX_INVALID", "字幕插入位置无效")
+            revision = self._load_base(project_id, request["base_revision_id"])
+            operations = [{"op": "insert_transcript_segments", "transcript_id": params["transcript_id"], "segment_ids": params["segment_ids"], "at_index": params["at_index"], "padding_before_us": 0, "padding_after_us": 0, "create_captions": True, "layout": "blurred_background"}]
+            with self.db.connection() as db:
+                self.timelines.apply_in_memory(db, project_id, revision["document"], operations, ai=False, require_non_empty=True)
+            return {"planner": "captions", "params": params, "summary": "从本地转录片段装配字幕", "operations": operations, "operations_count": 1, "noop": False, "rationale": [{"rule": "transcript_segments_to_captions", "transcript_id": params["transcript_id"], "segment_count": len(params["segment_ids"])}], "base_revision_id": revision["timeline_revision_id"], "base_document_sha256": revision["document_sha256"]}
+        planner = self.registry.get(planner_name)
         if not isinstance(params, dict):
             raise DomainError("EDITING_GRAMMAR_PARAMS_INVALID", "规划器参数不合法")
         revision = self._load_base(project_id, request["base_revision_id"])
