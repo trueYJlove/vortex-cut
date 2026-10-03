@@ -22,7 +22,7 @@
 | Desktop 项目切换隔离 | ✅ 自动化通过 | `tests/worklist-panel.test.tsx`：A 请求迟到、组件切换到 B 后不污染 B；面板使用 `key={project.project_id}` 且请求按 projectId |
 | Core 重启恢复 | ✅ 数据状态恢复自动化通过 | `test_worklist_state_survives_database_reopen_without_reproposing`：数据库重开后保留 waiting/proposal 状态且不重复 propose；真实 Core 进程重启签字仍可补做 |
 | roughcut/style 明确拒绝 | ✅ | Core `WORKLIST_STEP_UNAVAILABLE`；当前切片未产生 job 副作用 |
-| captions 本地 transcript 装配 | ✅ 自动化通过 | `WORKLIST_CAPTIONS_DESIGN_GATE_2026-10-02.md`；`EditingGrammarService` captions planner + `test_worklist_captions_step_is_accepted_only_with_captions_planner`；Provider 文本生成仍明确不在本切片 |
+| captions 本地 transcript 装配 | ✅ 自动化通过 | `WORKLIST_CAPTIONS_DESIGN_GATE_2026-10-02.md`；Core captions planner；Desktop `WorklistPanel` 可选 captions 参数；Provider 文本生成仍明确不在本切片 |
 | 真实 GUI/Electron 手工验收 | ⚠️ 未核销 | 当前证据为 jsdom/Vitest、Core API 和 TypeScript；未使用真实素材启动 Electron 完成手工签字 |
 
 ## 2. Automated verification

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach } from "vitest";
 import { WorklistPanel } from "../src/app/worklist/WorklistPanel.js";
 
@@ -18,6 +18,19 @@ describe("WorklistPanel", () => {
     resolveA({ items: [] });
     await waitFor(() => expect(api.listWorklists).toHaveBeenCalledWith("p2"));
     expect(screen.getByText("已有工作单：0 个")).toBeVisible();
+  });
+
+  it("requires transcript and unique segments for captions step", async () => {
+    const api = { listWorklists: vi.fn().mockResolvedValue({ items: [] }), prepareWorklist: vi.fn(), createWorklist: vi.fn() };
+    Object.defineProperty(window, "desktop", { configurable: true, value: api });
+    render(<WorklistPanel projectId={"p1" as never} baseRevisionId={"r1" as never} onClose={vi.fn()} onApplied={vi.fn()} onNotify={vi.fn()} />);
+    await screen.findByText("已有工作单：0 个");
+    fireEvent.change(screen.getByLabelText("工作单步骤类型"), { target: { value: "captions" } });
+    fireEvent.change(screen.getByLabelText("Transcript ID"), { target: { value: "t1" } });
+    fireEvent.change(screen.getByLabelText("Segment IDs"), { target: { value: "s1,s1" } });
+    fireEvent.click(screen.getByRole("button", { name: "创建本地工作单" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("不重复");
+    expect(api.prepareWorklist).not.toHaveBeenCalled();
   });
 
   it("loads only the current project and exposes local worklist action", async () => {
