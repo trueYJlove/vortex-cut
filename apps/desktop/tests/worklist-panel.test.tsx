@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { CaptionsProviderProposal } from "@aivideo/contracts";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach } from "vitest";
 import { WorklistPanel } from "../src/app/worklist/WorklistPanel.js";
@@ -20,6 +21,22 @@ describe("WorklistPanel", () => {
     expect(screen.getByText("已有工作单：0 个")).toBeVisible();
   });
 
+  it("drops a late captions proposal response after switching projects", async () => {
+    let resolveProposal!: (value: CaptionsProviderProposal) => void;
+    const proposal = new Promise<CaptionsProviderProposal>(resolve => { resolveProposal = resolve; });
+    const api = { listWorklists: vi.fn().mockResolvedValue({ items: [] }), createCaptionsProviderProposal: vi.fn().mockReturnValue(proposal), prepareWorklist: vi.fn(), createWorklist: vi.fn() };
+    Object.defineProperty(window, "desktop", { configurable: true, value: api });
+    const view = render(<WorklistPanel projectId={"p1" as never} baseRevisionId={"r1" as never} onClose={vi.fn()} onApplied={vi.fn()} onNotify={vi.fn()} />);
+    await screen.findByText("已有工作单：0 个");
+    fireEvent.change(screen.getByLabelText("字幕 Provider generation ID"), { target: { value: "g1" } });
+    fireEvent.click(screen.getByRole("button", { name: "查看字幕提案（只读）" }));
+    view.rerender(<WorklistPanel projectId={"p2" as never} baseRevisionId={"r2" as never} onClose={vi.fn()} onApplied={vi.fn()} onNotify={vi.fn()} />);
+    resolveProposal({ captions_provider_proposal_id: "cp1", generation_id: "g1", project_id: "p1", base_revision_id: "r1", base_document_sha256: "sha256:a", patch: { summary: "old", operations: [{ op: "update_caption", caption_id: "c1", text: "old" }] }, patch_sha256: "sha256:a", proposed_document_sha256: "sha256:a", created_at: "now", applied_revision_id: null } as CaptionsProviderProposal);
+    await waitFor(() => expect(screen.getByLabelText("字幕 Provider generation ID")).toHaveValue(""));
+    expect(screen.queryByText("提案：")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "创建本地工作单" })).not.toBeDisabled();
+  });
+
   it("requires transcript and unique segments for captions step", async () => {
     const api = { listWorklists: vi.fn().mockResolvedValue({ items: [] }), prepareWorklist: vi.fn(), createWorklist: vi.fn() };
     Object.defineProperty(window, "desktop", { configurable: true, value: api });
@@ -31,6 +48,18 @@ describe("WorklistPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "创建本地工作单" }));
     expect(await screen.findByRole("status")).toHaveTextContent("不重复");
     expect(api.prepareWorklist).not.toHaveBeenCalled();
+  });
+
+  it("clears current worklist and errors on project switch", async () => {
+    const api = { listWorklists: vi.fn((projectId: string) => Promise.resolve({ items: projectId === "p1" ? [base] : [] })), createCaptionsProviderProposal: vi.fn(), prepareWorklist: vi.fn(), createWorklist: vi.fn() };
+    Object.defineProperty(window, "desktop", { configurable: true, value: api });
+    const view = render(<WorklistPanel projectId={"p1" as never} baseRevisionId={"r1" as never} onClose={vi.fn()} onApplied={vi.fn()} onNotify={vi.fn()} />);
+    await screen.findByText("已有工作单：1 个");
+    fireEvent.click(screen.getByRole("button", { name: /w1/ }));
+    expect(screen.getByText("状态：prepared")).toBeVisible();
+    view.rerender(<WorklistPanel projectId={"p2" as never} baseRevisionId={"r2" as never} onClose={vi.fn()} onApplied={vi.fn()} onNotify={vi.fn()} />);
+    await waitFor(() => expect(screen.queryByText("状态：prepared")).not.toBeInTheDocument());
+    expect(screen.getByText("已有工作单：0 个")).toBeVisible();
   });
 
   it("loads only the current project and exposes local worklist action", async () => {

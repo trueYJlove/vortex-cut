@@ -29,6 +29,8 @@ export type CandidatePlanId = string & { readonly __brand: "candidate_plan_id" }
 export type TimelinePatchEgressPreviewId = string & { readonly __brand: "timeline_patch_egress_preview_id" };
 export type TimelinePatchGenerationId = string & { readonly __brand: "timeline_patch_generation_id" };
 export type TimelinePatchProposalId = string & { readonly __brand: "timeline_patch_proposal_id" };
+export type CaptionsProviderEgressPreviewId = string & { readonly __brand: "captions_provider_egress_preview_id" };
+export type CaptionsProviderGenerationId = string & { readonly __brand: "captions_provider_generation_id" };
 export type AgentSessionEgressPreviewId = string & { readonly __brand: "agent_session_egress_preview_id" };
 export type AgentSessionId = string & { readonly __brand: "agent_session_id" };
 export type PlatformPresetId = string & { readonly __brand: "platform_preset_id" };
@@ -70,6 +72,7 @@ export type JobKind =
   | "transcription"
   | "candidate_generation"
   | "timeline_patch_generation"
+  | "captions_provider_generation"
   | "authoritative_preview"
   | "final_export"
   | "media_generation"
@@ -478,6 +481,10 @@ export interface Transcript {
 export type ProviderKind = "openai_compatible_text";
 export type CredentialStatus = "missing" | "configured" | "unavailable";
 export type TimelinePatchCapabilityStatus = "untested" | "supported" | "unsupported";
+// captions 响应适配器阶梯（Core CAPTIONS_ADAPTER_IDS 的契约镜像）
+export type CaptionsProviderResponseAdapterId =
+  | "openai_chat_completions_json_schema_v1"
+  | "openai_chat_completions_captionscript_v1";
 export type CandidateCapabilityStatus = "untested" | "supported" | "unsupported";
 /**
  * 仅供 Core 持久化及进程内路由使用的固定认证适配器白名单。
@@ -519,7 +526,16 @@ export interface ProviderConfig {
   candidate_capability_status: CandidateCapabilityStatus;
   candidate_response_adapter_id: CandidateResponseAdapterId | null; candidate_probe_protocol_version: string | null;
   candidate_capability_tested_at: string | null; candidate_capability_failure_code: ErrorCode | null;
-  candidate_capability_probe_sha256: string | null; created_at: string; updated_at: string;
+  candidate_capability_probe_sha256: string | null;
+  // captions Provider 适配器阶梯（ADAPTER_DESIGN_GATE 2026-10-05）：与
+  // timeline_patch/candidate 对称的能力元数据；UI 依此判断是否可发起字幕优化。
+  captions_provider_capability_status: TimelinePatchCapabilityStatus;
+  captions_provider_response_adapter_id: CaptionsProviderResponseAdapterId | null;
+  captions_provider_probe_protocol_version: string | null;
+  captions_provider_capability_tested_at: string | null;
+  captions_provider_capability_failure_code: ErrorCode | null;
+  captions_provider_capability_probe_sha256: string | null;
+  created_at: string; updated_at: string;
 }
 export interface TimelinePatchCapabilityTestResponse {
   timeline_patch_capability_status: TimelinePatchCapabilityStatus;
@@ -1006,6 +1022,19 @@ export interface TimelinePatchProposal {
 export interface TimelinePatchPrepareRequest { base_revision_id: TimelineRevisionId; provider_config_id: ProviderConfigId; instruction: string; }
 export interface TimelinePatchGenerationCreateRequest { timeline_patch_egress_preview_id: TimelinePatchEgressPreviewId; payload_sha256: string; }
 export interface TimelinePatchGenerationCreateResponse { timeline_patch_generation_id: TimelinePatchGenerationId; job: Job; }
+export type CaptionsProviderGenerationStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
+export interface CaptionsProviderEgressPreview {
+  captions_provider_egress_preview_id: CaptionsProviderEgressPreviewId;
+  provider: { display_name: string; origin: string; model: string };
+  prompt_template_version: string; output_schema_version: string; sent_fields: string[]; payload_sha256: string;
+  segment_count: number; character_count: number; expires_at: string;
+}
+export interface CaptionsProviderPrepareRequest { base_revision_id: TimelineRevisionId; provider_config_id: ProviderConfigId; transcript_id: TranscriptId; segment_ids: TranscriptSegmentId[]; language?: string | null; preset_id: string; max_chars_per_caption: number; }
+export interface CaptionsProviderCreateRequest { captions_provider_egress_preview_id: CaptionsProviderEgressPreviewId; payload_sha256: string; }
+export interface CaptionsProviderGeneration { captions_provider_generation_id: CaptionsProviderGenerationId; project_id: ProjectId; base_revision_id: TimelineRevisionId; status: CaptionsProviderGenerationStatus; payload_sha256: string; created_at: string; updated_at: string; finished_at: string | null; }
+export interface CaptionsProviderCreateResponse { captions_provider_generation_id: CaptionsProviderGenerationId; status: CaptionsProviderGenerationStatus; consent_id: string; }
+export interface CaptionsProviderProposalApplyRequest { base_revision_id: TimelineRevisionId; proposed_document_sha256: string; }
+export interface CaptionsProviderProposal { captions_provider_proposal_id: string; generation_id: CaptionsProviderGenerationId; project_id: ProjectId; base_revision_id: TimelineRevisionId; base_document_sha256: string; patch: { summary: string; operations: Array<{ op: "update_caption"; caption_id: TimelineCaptionId; text: string }> }; patch_sha256: string; proposed_document_sha256: string; created_at: string; applied_revision_id: TimelineRevisionId | null; }
 export interface TimelinePatchProposalApplyRequest { base_revision_id: TimelineRevisionId; proposed_document_sha256: string; }
 
 // W1.1 剪辑语法层（P-A：零 egress）——工具目录 / 干跑 / 提案 / 采纳
@@ -1338,7 +1367,7 @@ export class ContractValidationError extends Error {
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const JOB_STATUSES: JobStatus[] = ["queued", "running", "succeeded", "failed", "cancelling", "cancelled", "interrupted"];
-const JOB_KINDS: JobKind[] = ["asset_probe", "asset_fingerprint", "proxy", "portrait_sample", "vertical_sample", "model_download", "transcription", "candidate_generation", "timeline_patch_generation", "authoritative_preview", "final_export", "media_generation", "waveform", "agent_session", "cv_analysis"];
+const JOB_KINDS: JobKind[] = ["asset_probe", "asset_fingerprint", "proxy", "portrait_sample", "vertical_sample", "model_download", "transcription", "candidate_generation", "timeline_patch_generation", "captions_provider_generation", "authoritative_preview", "final_export", "media_generation", "waveform", "agent_session", "cv_analysis"];
 const PROJECT_STATUSES: ProjectStatus[] = ["active", "archived", "missing"];
 const ASSET_KINDS: AssetKind[] = ["video", "audio", "image", "text"];
 const ASSET_AVAILABILITIES: AssetAvailability[] = ["available", "missing", "changed", "unsupported"];
@@ -1472,7 +1501,8 @@ const BRIEF_INPUT_KEYS = ["schema_version", "topic", "audience", "target_platfor
 const BRIEF_KEYS = ["brief_id", "project_id", "document_sha256", ...BRIEF_INPUT_KEYS] as const;
 const PROVIDER_CAPABILITY_KEYS = ["timeline_patch_capability_status", "timeline_patch_response_adapter_id", "timeline_patch_probe_protocol_version", "timeline_patch_capability_tested_at", "timeline_patch_capability_failure_code", "timeline_patch_capability_probe_sha256"] as const;
 const CANDIDATE_CAPABILITY_KEYS = ["candidate_capability_status", "candidate_response_adapter_id", "candidate_probe_protocol_version", "candidate_capability_tested_at", "candidate_capability_failure_code", "candidate_capability_probe_sha256"] as const;
-const PROVIDER_KEYS = ["provider_config_id", "kind", "display_name", "base_url", "model", "enabled", "credential_status", "input_price_per_million", "output_price_per_million", ...PROVIDER_CAPABILITY_KEYS, ...CANDIDATE_CAPABILITY_KEYS, "created_at", "updated_at"] as const;
+const CAPTIONS_CAPABILITY_KEYS = ["captions_provider_capability_status", "captions_provider_response_adapter_id", "captions_provider_probe_protocol_version", "captions_provider_capability_tested_at", "captions_provider_capability_failure_code", "captions_provider_capability_probe_sha256"] as const;
+const PROVIDER_KEYS = ["provider_config_id", "kind", "display_name", "base_url", "model", "enabled", "credential_status", "input_price_per_million", "output_price_per_million", ...PROVIDER_CAPABILITY_KEYS, ...CANDIDATE_CAPABILITY_KEYS, ...CAPTIONS_CAPABILITY_KEYS, "created_at", "updated_at"] as const;
 const TIMELINE_PATCH_RESPONSE_ADAPTER_IDS: TimelinePatchResponseAdapterId[] = [
   "openai_responses_json_schema_v1",
   "openai_responses_patchscript_v1",
@@ -1506,7 +1536,19 @@ function isCandidateCapabilityMetadata(value: Record<string, unknown>): boolean 
     : value.candidate_response_adapter_id === null && value.candidate_probe_protocol_version === null && (value.candidate_capability_status === "untested" ? value.candidate_capability_tested_at === null && value.candidate_capability_failure_code === null && value.candidate_capability_probe_sha256 === null : value.candidate_capability_tested_at !== null && value.candidate_capability_failure_code !== null && value.candidate_capability_probe_sha256 !== null);
 }
 export function isCandidateResponseAdapterId(value: unknown): value is CandidateResponseAdapterId { return oneOf(CANDIDATE_RESPONSE_ADAPTER_IDS, value); }
-export function isProviderConfig(value: unknown): value is ProviderConfig { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, PROVIDER_KEYS) && isId(value.provider_config_id) && value.kind === "openai_compatible_text" && isBriefText(value.display_name, 100) && isString(value.base_url) && /^https?:\/\//.test(value.base_url) && isBriefText(value.model, 200) && typeof value.enabled === "boolean" && oneOf(["missing", "configured", "unavailable"] as const, value.credential_status) && (value.input_price_per_million === null || isFiniteNumber(value.input_price_per_million)) && (value.output_price_per_million === null || isFiniteNumber(value.output_price_per_million)) && isTimelinePatchCapabilityMetadata(value) && isCandidateCapabilityMetadata(value) && isTime(value.created_at) && isTime(value.updated_at); }
+export const CAPTIONS_PROVIDER_RESPONSE_ADAPTER_IDS: readonly CaptionsProviderResponseAdapterId[] = [
+  "openai_chat_completions_json_schema_v1",
+  "openai_chat_completions_captionscript_v1"
+] as const;
+export function isCaptionsProviderResponseAdapterId(value: unknown): value is CaptionsProviderResponseAdapterId { return oneOf(CAPTIONS_PROVIDER_RESPONSE_ADAPTER_IDS, value); }
+function isCaptionsCapabilityMetadata(value: Record<string, unknown>): boolean {
+  if (!oneOf(["untested", "supported", "unsupported"] as const, value.captions_provider_capability_status) || !(value.captions_provider_response_adapter_id === null || oneOf(CAPTIONS_PROVIDER_RESPONSE_ADAPTER_IDS, value.captions_provider_response_adapter_id)) || !(value.captions_provider_probe_protocol_version === null || isBriefText(value.captions_provider_probe_protocol_version, 100)) || !(value.captions_provider_capability_tested_at === null || isTime(value.captions_provider_capability_tested_at)) || !(value.captions_provider_capability_failure_code === null || isBriefText(value.captions_provider_capability_failure_code, 200)) || !(value.captions_provider_capability_probe_sha256 === null || isSha256(value.captions_provider_capability_probe_sha256))) return false;
+  // captions 探测协议 v1（Core CAPTIONS_PROBE_PROTOCOL_VERSION = "1"）。
+  return value.captions_provider_capability_status === "supported"
+    ? oneOf(CAPTIONS_PROVIDER_RESPONSE_ADAPTER_IDS, value.captions_provider_response_adapter_id) && value.captions_provider_probe_protocol_version === "1" && value.captions_provider_capability_tested_at !== null && value.captions_provider_capability_failure_code === null && value.captions_provider_capability_probe_sha256 !== null
+    : value.captions_provider_response_adapter_id === null && value.captions_provider_probe_protocol_version === null && (value.captions_provider_capability_status === "untested" ? value.captions_provider_capability_tested_at === null && value.captions_provider_capability_failure_code === null && value.captions_provider_capability_probe_sha256 === null : value.captions_provider_capability_tested_at !== null && value.captions_provider_capability_failure_code !== null && value.captions_provider_capability_probe_sha256 !== null);
+}
+export function isProviderConfig(value: unknown): value is ProviderConfig { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, PROVIDER_KEYS) && isId(value.provider_config_id) && value.kind === "openai_compatible_text" && isBriefText(value.display_name, 100) && isString(value.base_url) && /^https?:\/\//.test(value.base_url) && isBriefText(value.model, 200) && typeof value.enabled === "boolean" && oneOf(["missing", "configured", "unavailable"] as const, value.credential_status) && (value.input_price_per_million === null || isFiniteNumber(value.input_price_per_million)) && (value.output_price_per_million === null || isFiniteNumber(value.output_price_per_million)) && isTimelinePatchCapabilityMetadata(value) && isCandidateCapabilityMetadata(value) && isCaptionsCapabilityMetadata(value) && isTime(value.created_at) && isTime(value.updated_at); }
 export function isTimelinePatchCapabilityTestResponse(value: unknown): value is TimelinePatchCapabilityTestResponse { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, PROVIDER_CAPABILITY_KEYS) && isTimelinePatchCapabilityMetadata(value); }
 export function isProviderCapabilityTestResult(value: unknown): value is ProviderCapabilityTestResult { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, CANDIDATE_CAPABILITY_KEYS) && isCandidateCapabilityMetadata(value); }
 export function isEgressPreview(value: unknown): value is EgressPreview { return isRecord(value) && !hasSensitiveKey({ ...value, payload: undefined }) && onlyKeys(value, ["egress_preview_id", "provider", "prompt_template_version", "sent_fields", "payload_sha256", "expires_at", "payload", "stats"]) && isId(value.egress_preview_id) && isRecord(value.provider) && onlyKeys(value.provider, ["display_name", "origin", "model"]) && isBriefText(value.provider.display_name, 100) && isString(value.provider.origin) && /^https?:\/\//.test(value.provider.origin) && isBriefText(value.provider.model, 200) && isBriefText(value.prompt_template_version, 200) && Array.isArray(value.sent_fields) && value.sent_fields.every(item => isString(item) && item.length > 0) && isSha256(value.payload_sha256) && isTime(value.expires_at) && isRecord(value.payload) && isRecord(value.stats) && onlyKeys(value.stats, ["transcript_count", "segment_count", "character_count", "estimated_tokens"]) && [value.stats.transcript_count, value.stats.segment_count, value.stats.character_count, value.stats.estimated_tokens].every(item => isInteger(item, 0)); }
@@ -2018,6 +2060,15 @@ export function isTimelinePatchGenerationCreateResponse(value: unknown): value i
 export function isTimelinePatchProposalApplyRequest(value: unknown): value is TimelinePatchProposalApplyRequest { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["base_revision_id", "proposed_document_sha256"]) && isId(value.base_revision_id) && isSha256(value.proposed_document_sha256); }
 export function isTimelineRevisionDiffRequest(value: unknown): value is TimelineRevisionDiffRequest { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["base_revision_id", "target_revision_id"]) && isId(value.base_revision_id) && isId(value.target_revision_id); }
 export function parseTimelinePatchEgressPreview(value: unknown): TimelinePatchEgressPreview { if (!isTimelinePatchEgressPreview(value)) throw new ContractValidationError("TimelinePatchEgressPreview"); return value; }
+const CAPTIONS_PROVIDER_GENERATION_STATUSES: CaptionsProviderGenerationStatus[] = ["queued", "running", "succeeded", "failed", "cancelled", "interrupted"];
+export function isCaptionsProviderEgressPreview(value: unknown): value is CaptionsProviderEgressPreview { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["captions_provider_egress_preview_id", "provider", "prompt_template_version", "output_schema_version", "sent_fields", "payload_sha256", "segment_count", "character_count", "expires_at"]) && isId(value.captions_provider_egress_preview_id) && isRecord(value.provider) && onlyKeys(value.provider, ["display_name", "origin", "model"]) && isBriefText(value.provider.display_name, 100) && /^https?:\/\//.test(String(value.provider.origin)) && isBriefText(value.provider.model, 200) && isBriefText(value.prompt_template_version, 100) && isBriefText(value.output_schema_version, 100) && Array.isArray(value.sent_fields) && value.sent_fields.length > 0 && value.sent_fields.every(item => isBriefText(item, 100)) && isSha256(value.payload_sha256) && isInteger(value.segment_count, 1) && isInteger(value.character_count, 0) && isTime(value.expires_at); }
+export function isCaptionsProviderGeneration(value: unknown): value is CaptionsProviderGeneration { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["captions_provider_generation_id", "project_id", "base_revision_id", "status", "payload_sha256", "created_at", "updated_at", "finished_at"]) && isId(value.captions_provider_generation_id) && isId(value.project_id) && isId(value.base_revision_id) && oneOf(CAPTIONS_PROVIDER_GENERATION_STATUSES, value.status) && isSha256(value.payload_sha256) && isTime(value.created_at) && isTime(value.updated_at) && (value.finished_at === null || isTime(value.finished_at)); }
+export function isCaptionsProviderCreateResponse(value: unknown): value is CaptionsProviderCreateResponse { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["captions_provider_generation_id", "status", "consent_id"]) && isId(value.captions_provider_generation_id) && oneOf(CAPTIONS_PROVIDER_GENERATION_STATUSES, value.status) && isId(value.consent_id); }
+export function parseCaptionsProviderEgressPreview(value: unknown): CaptionsProviderEgressPreview { if (!isCaptionsProviderEgressPreview(value)) throw new ContractValidationError("CaptionsProviderEgressPreview"); return value; }
+export function parseCaptionsProviderGeneration(value: unknown): CaptionsProviderGeneration { if (!isCaptionsProviderGeneration(value)) throw new ContractValidationError("CaptionsProviderGeneration"); return value; }
+export function parseCaptionsProviderCreateResponse(value: unknown): CaptionsProviderCreateResponse { if (!isCaptionsProviderCreateResponse(value)) throw new ContractValidationError("CaptionsProviderCreateResponse"); return value; }
+export function isCaptionsProviderProposal(value: unknown): value is CaptionsProviderProposal { return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["captions_provider_proposal_id", "generation_id", "project_id", "base_revision_id", "base_document_sha256", "patch", "patch_sha256", "proposed_document_sha256", "created_at", "applied_revision_id"]) && isId(value.captions_provider_proposal_id) && isId(value.generation_id) && isId(value.project_id) && isId(value.base_revision_id) && isSha256(value.base_document_sha256) && isRecord(value.patch) && onlyKeys(value.patch, ["summary", "operations"]) && isBriefText(value.patch.summary, 200) && Array.isArray(value.patch.operations) && value.patch.operations.length > 0 && value.patch.operations.every(item => isRecord(item) && onlyKeys(item, ["op", "caption_id", "text"]) && item.op === "update_caption" && isId(item.caption_id) && isBriefText(item.text, 200)) && isSha256(value.patch_sha256) && isSha256(value.proposed_document_sha256) && isTime(value.created_at) && (value.applied_revision_id === null || isId(value.applied_revision_id)); }
+export function parseCaptionsProviderProposal(value: unknown): CaptionsProviderProposal { if (!isCaptionsProviderProposal(value)) throw new ContractValidationError("CaptionsProviderProposal"); return value; }
 export function parseTimelinePatchGeneration(value: unknown): TimelinePatchGeneration { if (!isTimelinePatchGeneration(value)) throw new ContractValidationError("TimelinePatchGeneration"); return value; }
 export function parseTimelineDiff(value: unknown): TimelineDiff { if (!isTimelineDiff(value)) throw new ContractValidationError("TimelineDiff"); return value; }
 export function parseTimelinePatchProposal(value: unknown): TimelinePatchProposal { if (!isTimelinePatchProposal(value)) throw new ContractValidationError("TimelinePatchProposal"); return value; }

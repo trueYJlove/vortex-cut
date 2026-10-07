@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 
 import httpx
 import pytest
 
+from aivs_core.captions_provider import build_captions_provider_payload, build_captions_provider_patch, captions_provider_preview
 from aivs_core.providers import (
     CANDIDATE_ADAPTER_IDS,
     CANDIDATE_PROBE_PROTOCOL_VERSION,
+    CAPTIONS_ADAPTER_IDS,
+    CAPTIONS_PROBE_PROTOCOL_VERSION,
     MAX_RESPONSE_BYTES,
     TIMELINE_PATCH_ADAPTER_ID,
     TIMELINE_PATCH_ADAPTER_IDS,
@@ -17,10 +21,14 @@ from aivs_core.providers import (
     ProviderError,
     StructuredTextRequest,
     candidate_adapter_supported,
+    captions_adapter_is_captionscript,
+    captions_adapter_supported,
     normalized_base_url,
     parse_candidatescript,
+    parse_captionscript,
     parse_patchscript,
     timeline_patch_adapter_supported,
+    validate_captions_provider_value,
 )
 
 
@@ -59,6 +67,32 @@ def _candidate_script(
 
 def _request() -> StructuredTextRequest:
     return StructuredTextRequest("p1", "https://provider.example/v1", "model", "SENTINEL_KEY", {})
+
+
+def test_captions_provider_output_is_closed_and_covers_input_segments() -> None:
+    value = {"items": [{"segment_refs": ["s1", "s2"], "text": "精简字幕", "confidence": 0.9}], "warnings": []}
+    assert validate_captions_provider_value(value, ["s1", "s2"]) == value
+
+
+def test_captions_provider_rejects_unknown_refs_duplicate_refs_and_uncovered_segments() -> None:
+    with pytest.raises(ValueError, match="segment refs"):
+        validate_captions_provider_value({"items": [{"segment_refs": ["s9"], "text": "x", "confidence": None}], "warnings": []}, ["s1"])
+    with pytest.raises(ValueError, match="duplicate"):
+        validate_captions_provider_value({"items": [{"segment_refs": ["s1"], "text": "x", "confidence": None}, {"segment_refs": ["s1"], "text": "y", "confidence": None}], "warnings": []}, ["s1", "s2"])
+    with pytest.raises(ValueError, match="covered"):
+        validate_captions_provider_value({"items": [{"segment_refs": ["s1"], "text": "x", "confidence": None}], "warnings": []}, ["s1", "s2"])
+
+
+def test_captions_provider_rejects_prompt_like_oversized_text_and_invalid_confidence() -> None:
+    with pytest.raises(ValueError, match="text"):
+        validate_captions_provider_value({"items": [{"segment_refs": ["s1"], "text": "x" * 25, "confidence": None}], "warnings": []}, ["s1"])
+    with pytest.raises(ValueError, match="confidence"):
+        validate_captions_provider_value({"items": [{"segment_refs": ["s1"], "text": "x", "confidence": 2}], "warnings": []}, ["s1"])
+
+
+def test_captions_provider_rejects_duplicate_refs_within_one_item() -> None:
+    with pytest.raises(ValueError, match="duplicate"):
+        validate_captions_provider_value({"items": [{"segment_refs": ["s1", "s1"], "text": "x", "confidence": None}], "warnings": []}, ["s1"])
 
 
 def test_candidatescript_parser_enforces_closed_framing_and_variants() -> None:
@@ -220,6 +254,21 @@ async def test_provider_sends_strict_schema_and_no_network_fallback() -> None:
     assert captured["body"]["response_format"]["type"] == "json_schema"
     assert captured["body"]["response_format"]["json_schema"]["strict"] is True
     assert "untrusted" in captured["body"]["messages"][0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_connection_test_omits_json_schema_and_accepts_plain_text() -> None:
+    captured: dict = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, content=json.dumps({"choices": [{"message": {"content": "OK"}}]}).encode(), request=request)
+
+    request = dataclasses.replace(_request(), capability="connection_test")
+    result = await _provider(httpx.MockTransport(handler)).generate(request, asyncio.Event())
+    assert result.value == {"ok": True}
+    assert "response_format" not in captured["body"]
+    assert captured["body"]["messages"][1]["content"] == "Connection test. Reply OK."
 
 
 @pytest.mark.asyncio
@@ -604,6 +653,23 @@ def test_patchscript_parser_rejects_framing_and_forbidden_operations(raw: str) -
         parse_patchscript(raw)
 
 
+def test_captions_provider_patch_adapter_uses_core_caption_ids_and_rejects_unknown_mapping() -> None:
+    payload = build_captions_provider_payload(language="en", preset_id="default-bottom", max_chars_per_caption=24, segments=[{"segment_id": "s1", "text": "old", "duration_bucket": "short"}])
+    value = {"items": [{"segment_refs": ["s1"], "text": "new", "confidence": 0.8}], "warnings": []}
+    document = {"captions": [{"caption_id": "caption_1", "origin": "transcript", "source_segment_ids": ["s1"], "text": "old"}]}
+    assert build_captions_provider_patch(document=document, payload=payload, provider_value=value) == {"summary": "Provider 字幕文本提案", "operations": [{"op": "update_caption", "caption_id": "caption_1", "text": "new"}]}
+    with pytest.raises(ValueError, match="map"):
+        build_captions_provider_patch(document={"captions": []}, payload=payload, provider_value=value)
+
+
+def test_captions_provider_payload_is_allowlisted_and_preview_is_redacted() -> None:
+    payload = build_captions_provider_payload(language="zh-CN", preset_id="default-bottom", max_chars_per_caption=24, segments=[{"segment_id": "s1", "text": "hello", "duration_bucket": "short"}])
+    assert set(payload) == {"schema_version", "recipe_id", "language", "preset_id", "max_chars_per_caption", "segments"}
+    preview = captions_provider_preview(provider={"display_name": "P", "base_url": "https://example.test", "model": "m"}, payload=payload, payload_sha256="sha256:" + "a" * 64, expires_at="2026-10-03T00:00:00Z")
+    assert "hello" not in str(preview)
+    assert "segments.text" in preview["sent_fields"]
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "response",
@@ -640,3 +706,196 @@ async def test_responses_adapter_rejects_non_unique_output_text(response: dict) 
     with pytest.raises(ProviderError) as raised:
         await _provider(httpx.MockTransport(handler)).generate(request, asyncio.Event())
     assert raised.value.code == "PROVIDER_INVALID_RESPONSE"
+
+
+# ---------------------------------------------------------------------------
+# ADAPTER_DESIGN_GATE 2026-10-05：captions 响应适配器阶梯
+# ---------------------------------------------------------------------------
+
+
+def test_captions_adapter_ladder_declares_json_schema_then_captionscript() -> None:
+    """阶梯顺序即优先级：json_schema 首档（最强约束），captionscript 兜底。"""
+    assert CAPTIONS_ADAPTER_IDS == (
+        "openai_chat_completions_json_schema_v1",
+        "openai_chat_completions_captionscript_v1",
+    )
+    assert CAPTIONS_PROBE_PROTOCOL_VERSION == "1"
+    assert captions_adapter_supported("openai_chat_completions_json_schema_v1")
+    assert captions_adapter_supported("openai_chat_completions_captionscript_v1")
+    assert not captions_adapter_supported("openai_responses_json_schema_v1")
+    assert not captions_adapter_supported(None)
+    assert captions_adapter_is_captionscript("openai_chat_completions_captionscript_v1")
+    assert not captions_adapter_is_captionscript("openai_chat_completions_json_schema_v1")
+
+
+def _caption_script(records: list[str]) -> str:
+    return "\n".join(["AIVS-CAPTION/1", *records, "AIVS-END"])
+
+
+def test_captionscript_parser_compiles_records_and_normalizes_confidence() -> None:
+    raw = _caption_script(
+        [
+            '{"segment_refs":["s0"],"text":"hello"}',
+            '{"segment_refs":["s1","s2"],"text":"world"}',
+        ]
+    )
+    parsed = parse_captionscript(raw, ["s0", "s1", "s2"], 24)
+    assert parsed == {
+        "items": [
+            {"segment_refs": ["s0"], "text": "hello", "confidence": None},
+            {"segment_refs": ["s1", "s2"], "text": "world", "confidence": None},
+        ],
+        "warnings": [],
+    }
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        # 缺首行信封
+        '{"segment_refs":["s0"],"text":"a"}\nAIVS-END',
+        # 缺末行信封
+        'AIVS-CAPTION/1\n{"segment_refs":["s0"],"text":"a"}',
+        # 错误的信封版本
+        'AIVS-CAPTION/2\n{"segment_refs":["s0"],"text":"a"}\nAIVS-END',
+        # 空行
+        'AIVS-CAPTION/1\n\n{"segment_refs":["s0"],"text":"a"}\nAIVS-END',
+        # 无记录
+        "AIVS-CAPTION/1\nAIVS-END",
+        # 额外字段
+        _caption_script(['{"segment_refs":["s0"],"text":"a","confidence":1.0}']),
+        # 缺字段
+        _caption_script(['{"segment_refs":["s0"]}']),
+        # 未在输入集合中的 segment
+        _caption_script(['{"segment_refs":["nope"],"text":"a"}']),
+        # 重复引用同一 segment
+        _caption_script(['{"segment_refs":["s0","s0"],"text":"a"}']),
+        # 空 refs
+        _caption_script(['{"segment_refs":[],"text":"a"}']),
+        # 空 text
+        _caption_script(['{"segment_refs":["s0"],"text":"   "}']),
+        # 超过 max_chars_per_caption
+        _caption_script(['{"segment_refs":["s0"],"text":"' + "x" * 25 + '"}']),
+        # 覆盖不全（漏 s1）
+        _caption_script(['{"segment_refs":["s0"],"text":"a"}']),
+        # 重复 JSON 键
+        _caption_script(['{"segment_refs":["s0"],"text":"a","text":"b"}']),
+        # 非对象记录
+        _caption_script(["[1,2]"]),
+        # Markdown 围栏
+        "```json\nAIVS-CAPTION/1\nAIVS-END\n```",
+        # 混用换行
+        'AIVS-CAPTION/1\r\n{"segment_refs":["s0"],"text":"a"}\nAIVS-END',
+        # BOM
+        '\ufeffAIVS-CAPTION/1\n{"segment_refs":["s0"],"text":"a"}\nAIVS-END',
+        # NUL
+        'AIVS-CAPTION/1\n{"segment_refs":["s0"],"text":"a\x00"}\nAIVS-END',
+    ],
+)
+def test_captionscript_parser_rejects_untrusted_or_invalid_records(raw: str) -> None:
+    with pytest.raises(ValueError):
+        parse_captionscript(raw, ["s0", "s1"], 24)
+
+
+async def test_captions_adapter_sends_captionscript_instructions_without_response_format() -> None:
+    """captionscript 档必须绕开 response_format（该网关不支持 json_schema）。"""
+    captured: dict[str, object] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": _caption_script(
+                                ['{"segment_refs":["s0"],"text":"hi"}']
+                            )
+                        }
+                    }
+                ]
+            },
+            request=request,
+        )
+
+    request = StructuredTextRequest(
+        "p1",
+        "https://provider.example/v1",
+        "m",
+        "SENTINEL_KEY",
+        {"segments": [{"segment_id": "s0"}], "max_chars_per_caption": 24},
+        capability="captions_provider_capability_probe",
+        output_schema="caption-text-output-v1",
+        response_adapter_id="openai_chat_completions_captionscript_v1",
+    )
+    result = await _provider(httpx.MockTransport(handler)).generate(request, asyncio.Event())
+    assert result.value["items"][0]["text"] == "hi"
+    assert captured["url"] == "https://provider.example/v1/chat/completions"
+    body = captured["body"]
+    assert "response_format" not in body  # type: ignore[operator]
+    assert "AIVS-CAPTION/1" in body["messages"][0]["content"]  # type: ignore[index]
+
+
+async def test_captions_json_schema_adapter_still_sends_response_format() -> None:
+    """首档仍使用 json_schema——对支持它的网关保留最强结构化约束。"""
+    captured: dict[str, object] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "items": [
+                                        {
+                                            "segment_refs": ["s0"],
+                                            "text": "hi",
+                                            "confidence": None,
+                                        }
+                                    ],
+                                    "warnings": [],
+                                }
+                            )
+                        }
+                    }
+                ]
+            },
+            request=request,
+        )
+
+    request = StructuredTextRequest(
+        "p1",
+        "https://provider.example/v1",
+        "m",
+        "SENTINEL_KEY",
+        {"segments": [{"segment_id": "s0"}], "max_chars_per_caption": 24},
+        capability="captions_provider_capability_probe",
+        output_schema="caption-text-output-v1",
+        response_adapter_id="openai_chat_completions_json_schema_v1",
+    )
+    result = await _provider(httpx.MockTransport(handler)).generate(request, asyncio.Event())
+    assert result.value["items"][0]["text"] == "hi"
+    body = captured["body"]
+    assert body["response_format"]["type"] == "json_schema"  # type: ignore[index]
+
+
+async def test_captions_adapter_rejects_unknown_adapter_id() -> None:
+    request = StructuredTextRequest(
+        "p1",
+        "https://provider.example/v1",
+        "m",
+        "SENTINEL_KEY",
+        {"segments": [{"segment_id": "s0"}]},
+        capability="captions_provider_capability_probe",
+        output_schema="caption-text-output-v1",
+        response_adapter_id="openai_responses_captionscript_v1",
+    )
+    with pytest.raises(ProviderError) as raised:
+        await _provider(httpx.MockTransport(lambda r: None)).generate(request, asyncio.Event())
+    assert raised.value.code == "PROVIDER_CAPABILITY_UNSUPPORTED"

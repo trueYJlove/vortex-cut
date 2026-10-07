@@ -4,6 +4,7 @@ from typing import Any
 
 from .database import Database, json_dumps, json_loads, utc_now
 from .editing_grammar.service import EditingGrammarService
+from .captions_provider_egress import CaptionsProviderEgressService
 from .ids import new_id
 from .planning import sha256
 from .projects import DomainError
@@ -14,8 +15,8 @@ ACTIVE = ("prepared", "confirmed", "running", "waiting_for_apply")
 
 
 class WorklistService:
-    def __init__(self, db: Database, timelines: TimelineService, editing: EditingGrammarService) -> None:
-        self.db, self.timelines, self.editing = db, timelines, editing
+    def __init__(self, db: Database, timelines: TimelineService, editing: EditingGrammarService, captions_provider: CaptionsProviderEgressService | None = None) -> None:
+        self.db, self.timelines, self.editing, self.captions_provider = db, timelines, editing, captions_provider
 
     def _row(self, project_id: str, worklist_id: str) -> dict[str, Any]:
         with self.db.connection() as db:
@@ -47,8 +48,10 @@ class WorklistService:
         for item in steps:
             if not isinstance(item, dict) or set(item) != {"kind", "planner", "params"} or item["kind"] not in KINDS or not isinstance(item["params"], dict):
                 raise DomainError("WORKLIST_STEP_INVALID", "工作单步骤格式或类型无效")
-            if item["kind"] == "captions" and item["planner"] != "captions":
-                raise DomainError("WORKLIST_CAPTIONS_PARAMS_INVALID", "captions step 必须使用 captions planner")
+            if item["kind"] == "captions" and item["planner"] not in {"captions", "captions_provider"}:
+                raise DomainError("WORKLIST_CAPTIONS_PARAMS_INVALID", "captions step planner 不合法")
+            if item["planner"] == "captions_provider" and (set(item["params"]) != {"generation_id"} or not isinstance(item["params"].get("generation_id"), str) or not item["params"]["generation_id"]):
+                raise DomainError("WORKLIST_CAPTIONS_PARAMS_INVALID", "Provider 字幕步骤必须指定 generation_id")
             if item["kind"] not in {"editing_grammar", "captions"}:
                 raise DomainError("WORKLIST_STEP_UNAVAILABLE", "当前切片仅支持 editing_grammar/captions")
             normalized.append(item)
@@ -73,7 +76,13 @@ class WorklistService:
             db.execute("UPDATE worklist_steps SET status='running',base_revision_id=?,started_at=? WHERE id=?", (base_revision_id, now, step["id"]))
         try:
             params = json_loads(step["params_json"])
-            proposal = self.editing.propose(project_id, {"base_revision_id": base_revision_id, "planner": step["planner_id"], "params": params})
+            if step["planner_id"] == "captions_provider":
+                if self.captions_provider is None:
+                    raise DomainError("WORKLIST_STEP_UNAVAILABLE", "Provider 字幕服务不可用")
+                proposal = self.captions_provider.create_proposal(project_id, params["generation_id"])
+                proposal = {"captions_provider_proposal_id": proposal["captions_provider_proposal_id"]}
+            else:
+                proposal = self.editing.propose(project_id, {"base_revision_id": base_revision_id, "planner": step["planner_id"], "params": params})
         except Exception as exc:
             now = utc_now()
             with self.db.connection() as db:
@@ -83,7 +92,8 @@ class WorklistService:
         now = utc_now()
         with self.db.connection() as db:
             db.execute("UPDATE worklists SET status='waiting_for_apply',updated_at=? WHERE id=?", (now, worklist_id))
-            db.execute("UPDATE worklist_steps SET status='waiting_for_apply',proposal_id=?,input_sha256=? WHERE id=?", (proposal["editing_grammar_proposal_id"], sha256(params), step["id"]))
+            proposal_id = proposal.get("captions_provider_proposal_id", proposal.get("editing_grammar_proposal_id"))
+            db.execute("UPDATE worklist_steps SET status='waiting_for_apply',proposal_id=?,input_sha256=? WHERE id=?", (proposal_id, sha256(params), step["id"]))
         return self._row(project_id, worklist_id)
 
     def create(self, project_id: str, request: dict[str, Any]) -> dict[str, Any]:
@@ -110,7 +120,12 @@ class WorklistService:
             if not row or not step: raise DomainError("WORKLIST_NOT_FOUND", "工作单步骤不存在")
             if row["status"] != "waiting_for_apply" or step["status"] != "waiting_for_apply": raise DomainError("WORKLIST_INVALID_STATE", "工作单当前不可应用")
             proposal_id = step["proposal_id"]
-        revision = self.editing.apply(project_id, proposal_id, request)
+        if step["planner_id"] == "captions_provider":
+            if self.captions_provider is None:
+                raise DomainError("WORKLIST_STEP_UNAVAILABLE", "Provider 字幕服务不可用")
+            revision = self.captions_provider.apply_proposal(project_id, proposal_id, request)
+        else:
+            revision = self.editing.apply(project_id, proposal_id, request)
         now = utc_now()
         with self.db.connection() as db:
             db.execute("UPDATE worklist_steps SET status='succeeded',applied_revision_id=?,finished_at=? WHERE id=?", (revision["timeline_revision_id"], now, step_id))

@@ -41,6 +41,9 @@ def test_kind_policies_cover_plan_tiers() -> None:
     assert set(policy_for("final_export").resources) == {"cpu_heavy", "gpu_heavy", "disk_heavy"}
     assert policy_for("candidate_generation").resources == ("network",)
     assert policy_for("waveform").resources == ("light",)
+    # captions Provider 生成与其它 Provider 生成同档（network，优先级 4）
+    assert policy_for("captions_provider_generation").resources == ("network",)
+    assert policy_for("captions_provider_generation").priority == 4
 
 
 def test_unknown_kind_conservative_exclusive() -> None:

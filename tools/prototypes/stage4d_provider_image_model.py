@@ -617,11 +617,9 @@ def _migration_report(root: Path) -> dict[str, Any]:
         version: hashlib.sha256(sql.encode()).hexdigest()
         for version, sql in MIGRATIONS.items()
         # 排除基线之后新增的版本：原型只锁定 v1..v12 的校验和不变。
-        # 新增迁移（当前最新 v26）须追加进本集合，否则 frozen 计数漂移。
-        if version not in {
-            "v13", "v14", "v15", "v16", "v17", "v18",
-            "v19", "v20", "v21", "v22", "v23", "v24", "v25", "v26",
-        }
+        # 由 v12 之后的所有版本自动推导，避免每次新增迁移都要手工追加
+        # 而导致的 frozen 计数漂移（该漂移曾使本原型长期红）。
+        if int(version[1:]) <= 12
     }
     apply_r1(r1_path)
     sql = sqlite3.connect(r1_path)

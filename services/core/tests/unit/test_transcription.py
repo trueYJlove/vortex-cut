@@ -13,6 +13,7 @@ from aivs_core.transcription import (
     TranscriptResult,
     TranscriptSegmentResult,
     TranscriptWordResult,
+    _clamp_word_us,
 )
 
 
@@ -304,6 +305,62 @@ class TestTranscriptRepository:
         with pytest.raises(TranscriptionError) as exc:
             repo.save_ready("asset_1", "fp_1", "provider", "model", "rev", bad)
         assert exc.value.code == "TRANSCRIPTION_FAILED"
+
+    @pytest.mark.parametrize(
+        "word_start_us,word_end_us,expected",
+        [
+            # 词完全在 segment 内：原样保留
+            (1_100_000, 1_400_000, (1_100_000, 1_400_000)),
+            # 真实失败现场：词起点越过 segment 终点（Whisper 句尾越界）。
+            # 修复前 word_start=2.4M > word_end=2.0M → validator 必拒。
+            (2_400_000, 2_500_000, (1_999_999, 2_000_000)),
+            # 词起点在 segment 之前：钳到 segment 起点
+            (900_000, 1_200_000, (1_000_000, 1_200_000)),
+            # 词终点越过 segment 终点：钳回终点
+            (1_500_000, 2_600_000, (1_500_000, 2_000_000)),
+            # 零宽词：强制至少 1µs
+            (1_500_000, 1_500_000, (1_500_000, 1_500_001)),
+        ],
+    )
+    def test_clamp_word_us_keeps_words_inside_segment(
+        self, word_start_us: int, word_end_us: int, expected: tuple[int, int]
+    ) -> None:
+        clamped = _clamp_word_us(1_000_000, 2_000_000, word_start_us, word_end_us)
+        assert clamped == expected
+        assert clamped is not None
+        # 不变量：validator 的四条要求恒成立
+        assert 1_000_000 <= clamped[0] < clamped[1] <= 2_000_000
+
+    def test_clamp_word_us_drops_unfittable_word(self) -> None:
+        # segment 只剩 1µs：任何词都放不下，必须丢弃而不是产出非法区间
+        assert _clamp_word_us(1_000_000, 1_000_001, 1_000_000, 1_000_000) == (
+            1_000_000,
+            1_000_001,
+        )
+        # 退化区间（end <= start）无解 → None
+        assert _clamp_word_us(1_000_000, 1_000_000, 1_000_000, 1_000_000) is None
+
+    def test_out_of_range_whisper_word_does_not_fail_save(self, tmp_path: Path) -> None:
+        """回归：越界词时间码不得让整次转录失败（真实 app 段 23 现场）。"""
+        repo, _ = _repo(tmp_path)
+        result = TranscriptResult(
+            language="zh",
+            duration_us=3_000_000,
+            segments=(
+                TranscriptSegmentResult(
+                    start_us=1_000_000,
+                    end_us=2_000_000,
+                    text="越界词",
+                    confidence=None,
+                    words=(TranscriptWordResult(1_100_000, 1_300_000, "好", 0.9),),
+                ),
+            ),
+        )
+        saved = repo.save_ready("asset_1", "fp_1", "provider", "model", "rev", result)
+        assert saved["status"] == "ready"
+        # 模拟 adapter 的钳制路径产出合法词
+        clamped = _clamp_word_us(1_000_000, 2_000_000, 2_400_000, 2_500_000)
+        assert clamped is not None and clamped[0] < clamped[1]
 
     def test_list_for_asset_marks_stale(self, tmp_path: Path):
         repo, _ = _repo(tmp_path)

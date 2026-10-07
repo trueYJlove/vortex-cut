@@ -9,6 +9,7 @@ import type {
   TimelineState
 } from "@aivideo/contracts";
 import { Dialog } from "../Dialog.js";
+import { formatLocalStamp } from "../localTime.js";
 import { TimelineDiffView } from "../PropertyPanels.js";
 import { errorCode, safeErrorMessage } from "../safeErrors.js";
 
@@ -530,7 +531,7 @@ export function EditingToolsPanel({
             <div className="et-hist">
               {history.slice(0, 6).map(item => (
                 <button key={item.id} type="button" onClick={() => void openHistory(item)}>
-                  {item.planner} · {item.created_at.slice(0, 16).replace("T", " ")}
+                  {item.planner} · {formatLocalStamp(item.created_at)}
                 </button>
               ))}
             </div>

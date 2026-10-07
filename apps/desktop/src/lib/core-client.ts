@@ -83,7 +83,15 @@ import {
   , type TimelinePatchGeneration
   , type TimelinePatchGenerationCreateResponse
   , type TimelinePatchProposal
-  , type EditingGrammarTool
+  , parseCaptionsProviderEgressPreview
+   , parseCaptionsProviderGeneration
+   , parseCaptionsProviderCreateResponse
+   , type CaptionsProviderEgressPreview
+   , type CaptionsProviderGeneration
+   , type CaptionsProviderCreateResponse
+   , parseCaptionsProviderProposal
+   , type CaptionsProviderProposal
+   , type EditingGrammarTool
   , type EditingGrammarPrepareResult
   , type EditingGrammarProposal
   , type EditingGrammarProposalListItem
@@ -447,6 +455,24 @@ export class CoreClient {
       if (!Array.isArray(page.items)) throw new Error("Invalid AgentSessionPage");
       return { items: page.items.map(parseAgentSession) };
     });
+  }
+  prepareCaptionsProvider(projectId: ProjectId, input: Record<string, unknown>): Promise<CaptionsProviderEgressPreview> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/captions-provider/prepare`, { method: "POST", body: JSON.stringify(input) }).then(value => parseCaptionsProviderEgressPreview(removeSensitiveFields(value)));
+  }
+  createCaptionsProvider(projectId: ProjectId, input: { captions_provider_egress_preview_id: string; payload_sha256: string }): Promise<CaptionsProviderCreateResponse> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/captions-provider`, { method: "POST", body: JSON.stringify(input) }).then(value => parseCaptionsProviderCreateResponse(removeSensitiveFields(value)));
+  }
+  applyCaptionsProviderProposal(projectId: ProjectId, proposalId: string, input: { base_revision_id: TimelineRevisionId; proposed_document_sha256: string }): Promise<TimelineState> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/captions-provider-proposals/${encodeURIComponent(proposalId)}/apply`, { method: "POST", body: JSON.stringify(input) }).then(value => parseTimelineState(removeSensitiveFields(value)));
+  }
+  getCaptionsProviderProposal(projectId: ProjectId, proposalId: string): Promise<CaptionsProviderProposal> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/captions-provider-proposals/${encodeURIComponent(proposalId)}`).then(value => parseCaptionsProviderProposal(removeSensitiveFields(value)));
+  }
+  createCaptionsProviderProposal(projectId: ProjectId, generationId: string): Promise<CaptionsProviderProposal> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/captions-provider-generations/${encodeURIComponent(generationId)}/proposal`).then(value => parseCaptionsProviderProposal(removeSensitiveFields(value)));
+  }
+  getCaptionsProviderGeneration(projectId: ProjectId, generationId: string): Promise<CaptionsProviderGeneration> {
+    return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/captions-provider-generations/${encodeURIComponent(generationId)}`).then(value => parseCaptionsProviderGeneration(removeSensitiveFields(value)));
   }
   listWorklists(projectId: ProjectId): Promise<{ items: Worklist[] }> {
     return this.request<unknown>(`${API_PREFIX}/projects/${encodeURIComponent(projectId)}/worklists`).then(value => {

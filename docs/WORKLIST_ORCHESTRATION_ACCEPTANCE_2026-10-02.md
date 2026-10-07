@@ -20,10 +20,10 @@
 | Preload bridge | ✅ | `tests/preload.test.ts`；`pnpm typecheck` |
 | Desktop 最小面板 | ✅ | `apps/desktop/src/app/worklist/WorklistPanel.tsx`；`tests/worklist-panel.test.tsx` |
 | Desktop 项目切换隔离 | ✅ 自动化通过 | `tests/worklist-panel.test.tsx`：A 请求迟到、组件切换到 B 后不污染 B；面板使用 `key={project.project_id}` 且请求按 projectId |
-| Core 重启恢复 | ✅ 数据状态恢复自动化通过 | `test_worklist_state_survives_database_reopen_without_reproposing`：数据库重开后保留 waiting/proposal 状态且不重复 propose；真实 Core 进程重启签字仍可补做 |
+| Core 重启恢复 | ✅ | `test_worklist_state_survives_database_reopen_without_reproposing`；真实打包 Electron 两次启动均显示 Core 已连接，第二次通过历史工作单选择器打开同一 worklist，UI 恢复显示 `waiting_for_apply` |
 | roughcut/style 明确拒绝 | ✅ | Core `WORKLIST_STEP_UNAVAILABLE`；当前切片未产生 job 副作用 |
 | captions 本地 transcript 装配 | ✅ 自动化通过 | `WORKLIST_CAPTIONS_DESIGN_GATE_2026-10-02.md`；Core captions planner；Desktop `WorklistPanel` 可选 captions 参数；Provider 文本生成仍明确不在本切片 |
-| 真实 GUI/Electron 手工验收 | ⚠️ 未核销 | 当前证据为 jsdom/Vitest、Core API 和 TypeScript；未使用真实素材启动 Electron 完成手工签字 |
+| 真实 GUI/Electron 手工验收 | ✅ | 已使用重建后的打包 Windows Electron + 真实 `cfr-landscape-av.mp4` 创建项目、导入素材、打开 AI 工作单并创建 `editing_grammar` worklist；真实 UI 显示 `waiting_for_apply` 与待审阅提案；重启后通过历史工作单选择器重新打开并确认同一状态 |
 
 ## 2. Automated verification
 
@@ -41,6 +41,4 @@ STATUS consistency: passed
 
 ## 3. Remaining acceptance work
 
-1. 真实 Core 进程重启后再做一次 waiting 状态查询签字（当前已有数据库重开自动化证据）；
-2. 以真实 Electron/真实素材完成一次面板操作签字；
-3. 完成上述真实环境证据后再将 STATUS P35 核销，不提前宣称完整验收通过。
+本切片列出的真实环境验收项已全部完成；历史工作单选择器作为最小面板补强已实现并通过 Desktop 回归测试、typecheck 及真实 Electron 两次启动验证。

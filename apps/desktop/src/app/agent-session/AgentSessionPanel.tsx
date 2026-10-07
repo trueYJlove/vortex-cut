@@ -3,6 +3,7 @@ import type { AgentSession, AgentSessionEgressPreview, AgentSessionStep, Provide
 import { Dialog } from "../Dialog.js";
 import { TimelineDiffView } from "../PropertyPanels.js";
 import { errorCode, safeErrorMessage } from "../safeErrors.js";
+import { formatLocalStamp } from "../localTime.js";
 
 type Step = "form" | "confirm" | "running" | "done";
 
@@ -150,7 +151,7 @@ export function AgentSessionPanel({ projectId, baseRevisionId, providers, onClos
         <ul className="agent-session-history">
           {history.slice(0, 8).map(item => <li key={item.agent_session_id}>
             <button onClick={() => { setSession(item); setStep("done"); }}>
-              {item.status === "succeeded" ? "✓" : item.status === "failed" ? "✗" : "⊘"} {item.instruction.slice(0, 40)}{item.instruction.length > 40 ? "…" : ""} · {item.created_at.slice(0, 16).replace("T", " ")}
+              {item.status === "succeeded" ? "✓" : item.status === "failed" ? "✗" : "⊘"} {item.instruction.slice(0, 40)}{item.instruction.length > 40 ? "…" : ""} · {formatLocalStamp(item.created_at)}
             </button>
           </li>)}
         </ul>

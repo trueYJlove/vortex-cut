@@ -25,6 +25,14 @@ from .database_v24 import V24_SQL
 from .database_v25 import V25_SQL
 from .database_v26 import V26_SQL
 from .database_v27 import V27_SQL
+from .database_v28 import V28_SQL
+from .database_v29 import V29_SQL
+from .database_v30 import V30_SQL
+from .database_v31 import V31_SQL
+from .database_v32 import V32_SQL
+from .database_v33 import V33_SQL
+from .database_v34 import V34_SQL
+from .database_v35 import V35_SQL
 from .performance import measured
 
 
@@ -63,6 +71,14 @@ V24_VERSION = "v24"
 V25_VERSION = "v25"
 V26_VERSION = "v26"
 V27_VERSION = "v27"
+V28_VERSION = "v28"
+V29_VERSION = "v29"
+V30_VERSION = "v30"
+V31_VERSION = "v31"
+V32_VERSION = "v32"
+V33_VERSION = "v33"
+V34_VERSION = "v34"
+V35_VERSION = "v35"
 V1_SQL = """
 CREATE TABLE IF NOT EXISTS media_inputs (
   id TEXT PRIMARY KEY, path TEXT NOT NULL, display_name TEXT NOT NULL,
@@ -924,6 +940,14 @@ MIGRATIONS: dict[str, str] = {
     V25_VERSION: V25_SQL,
     V26_VERSION: V26_SQL,
     V27_VERSION: V27_SQL,
+    V28_VERSION: V28_SQL,
+    V29_VERSION: V29_SQL,
+    V30_VERSION: V30_SQL,
+    V31_VERSION: V31_SQL,
+    V32_VERSION: V32_SQL,
+    V33_VERSION: V33_SQL,
+    V34_VERSION: V34_SQL,
+    V35_VERSION: V35_SQL,
 }
 
 

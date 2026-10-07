@@ -119,35 +119,7 @@ def test_real_v3_copy_upgrades_to_v4_and_preserves_all_stage1_data(
             for x in db.execute(
                 "SELECT version FROM schema_migrations ORDER BY CAST(SUBSTR(version,2) AS INTEGER)"
             )
-        ] == [
-            "v1",
-            "v2",
-            "v3",
-            "v4",
-            "v5",
-            "v6",
-            "v7",
-            "v8",
-            "v9",
-            "v10",
-            "v11",
-            "v12",
-            "v13",
-            "v14",
-            "v15",
-            "v16",
-            "v17",
-            "v18",
-            "v19",
-            "v20",
-            "v21",
-        "v22",
-        "v23",
-        "v24",
-        "v25",
-        "v26",
-        "v27",
-        ]
+        ] == [f"v{i}" for i in range(1, len(database_module.MIGRATIONS) + 1)]
         assert db.execute("SELECT name FROM projects WHERE id='p1'").fetchone() == ("project",)
         assert db.execute("SELECT fingerprint FROM assets WHERE id='a1'").fetchone() == ("fp",)
         assert db.execute("SELECT status FROM jobs WHERE id='j1'").fetchone() == ("succeeded",)

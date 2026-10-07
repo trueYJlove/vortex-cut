@@ -45,15 +45,28 @@ function sha256(value: unknown, name: string): string {
   return value;
 }
 
+const PROVIDER_TEST_ERRORS = new Set([
+  "PROVIDER_AUTH_FAILED", "PROVIDER_RATE_LIMITED", "PROVIDER_TIMEOUT",
+  "PROVIDER_NETWORK_ERROR", "PROVIDER_TLS_ERROR", "PROVIDER_UNAVAILABLE",
+  "PROVIDER_CONTENT_REJECTED", "PROVIDER_INVALID_REQUEST", "PROVIDER_ENDPOINT_NOT_FOUND",
+  "PROVIDER_INVALID_RESPONSE", "PROVIDER_INVALID_CONFIG", "PROVIDER_SECRET_MISSING",
+  "PROVIDER_CREDENTIAL_MISSING", "PROVIDER_NOT_FOUND", "PROVIDER_RESPONSE_TOO_LARGE",
+]);
 function safeError(): Error { return new Error("Core request failed"); }
-async function safeInvoke<T>(operation: () => Promise<T>): Promise<T> {
+async function safeInvoke<T>(operation: () => Promise<T>, providerTest = false): Promise<T> {
   try {
     return await operation();
   } catch (error) {
-    // 真实原因仅打印到主进程终端（dev 可见），便于区分「404 无 Brief」与「Core 未启动」；
-    // 对 Renderer 仍抛通用错误，维持 IPC 错误契约不变。
-    const reason = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-    console.error(`[core] request failed — ${reason}`);
+    // Electron strips custom error properties. Pass only an allowlisted code
+    // in the message, never upstream text (which can contain credentials).
+    const candidate = error as { code?: unknown; message?: unknown } | null;
+    const message = typeof candidate?.message === "string" ? candidate.message : "";
+    const code = typeof candidate?.code === "string" ? candidate.code : /^\[([A-Z_]+)\]/.exec(message)?.[1];
+    if (providerTest && code && PROVIDER_TEST_ERRORS.has(code)) {
+      console.error(`[core] provider test failed: ${code}`);
+      throw new Error(`[${code}] Provider connection test failed`);
+    }
+    console.error("[core] request failed (details withheld)");
     throw safeError();
   }
 }
@@ -90,7 +103,10 @@ export function registerStage2aIpc(deps: Stage2aIpcDependencies): void {
     await safeInvoke(() => deps.deleteSecret(providerConfigId));
     return { provider_config_id: providerConfigId, credential_status: "missing" };
   });
-  deps.handle("provider:test", (_event, providerId) => safeFetch(`${API_PREFIX}/providers/${encodeURIComponent(id(providerId, "provider_config_id"))}/test`, { method: "POST" }).then(rendererSafe));
+  deps.handle("provider:test", (_event, providerId) => safeInvoke(
+    () => deps.fetchWithUi(`${API_PREFIX}/providers/${encodeURIComponent(id(providerId, "provider_config_id"))}/test`, { method: "POST" }),
+    true,
+  ).then(rendererSafe));
   deps.handle("planning:test-provider-capability", (_event, providerId) => safeFetch(`${API_PREFIX}/providers/${encodeURIComponent(id(providerId, "provider_config_id"))}/candidate-planning-capability-test`, { method: "POST" }).then(value => parseProviderCapabilityTestResult(rendererSafe(value))));
   deps.handle("planning:prepare", async (_event, input) => {
     const value = record(input, ["project_id", "provider_config_id", "recipe_id", "transcript_ids"], "planning prepare");

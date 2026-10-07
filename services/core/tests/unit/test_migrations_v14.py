@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import hashlib
 import sqlite3
@@ -61,7 +61,7 @@ def test_v14_fresh_database_has_all_versions_and_integrity(tmp_path: Path) -> No
     database.initialize()
     with database.connection() as sql:
         versions = [row[0] for row in sql.execute("SELECT version FROM schema_migrations")]
-        assert set(versions) == {f"v{i}" for i in range(1, 27)}
+        assert set(versions) == {f"v{i}" for i in range(1, len(MIGRATIONS) + 1)}
         assert sql.execute("PRAGMA foreign_key_check").fetchall() == []
         assert sql.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         config_columns = {
@@ -72,7 +72,7 @@ def test_v14_fresh_database_has_all_versions_and_integrity(tmp_path: Path) -> No
         }
         assert {"price_2k_per_image", "price_currency"} <= config_columns
         assert {"estimated_cost_currency", "price_tier"} <= invocation_columns
-    assert set(MIGRATIONS) == {f"v{i}" for i in range(1, 27)}
+    assert set(MIGRATIONS) == {f"v{i}" for i in range(1, len(MIGRATIONS) + 1)}
 
 
 def test_v13_to_v14_preserves_official_history_checksums_and_adds_strict_third_party(

@@ -43,6 +43,10 @@ export class CoreAdminClient {
       } catch { /* preserve the HTTP status when Core did not return JSON */ }
       throw new CoreHttpError(result.status, apiError?.message ?? `Core request failed: ${result.status}`, apiError?.code ?? statusCode(result.status), apiError?.trace_id);
     }
+    // DELETE endpoints may intentionally return 204 with an empty body.
+    // Treat a successful empty response as void instead of surfacing
+    // `Unexpected end of JSON input` to the renderer.
+    if (!result.data.trim()) return undefined as T;
     return JSON.parse(result.data) as T;
   }
 

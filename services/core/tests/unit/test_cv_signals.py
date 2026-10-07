@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from aivs_core.database import Database, json_dumps
+from aivs_core.database import MIGRATIONS, Database, json_dumps
 from aivs_core.media.cv_signals import (
     CV_ALGORITHM_VERSION,
     CV_BUDGET_CAP_S,
@@ -159,7 +159,7 @@ def test_v21_schema_tables_and_constraints(tmp_path: Path) -> None:
     db.initialize()
     with db.connection() as conn:
         versions = [row[0] for row in conn.execute("SELECT version FROM schema_migrations")]
-        assert "v21" in versions and len(versions) == 27
+        assert "v21" in versions and len(versions) == len(MIGRATIONS)
         conn.execute(
             "INSERT INTO projects(id,name,status,canvas_json,root_dir,root_dir_name,"
             "created_at,updated_at,last_opened_at) "

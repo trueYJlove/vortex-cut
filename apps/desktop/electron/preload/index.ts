@@ -10,7 +10,11 @@ import type {
   EditingGrammarPrepareResult,
   EditingGrammarProposal,
   EditingGrammarProposalListItem,
-  Worklist
+  Worklist,
+  CaptionsProviderEgressPreview,
+  CaptionsProviderGeneration,
+  CaptionsProviderCreateResponse,
+  CaptionsProviderProposal
 } from "@aivideo/contracts";
 import type {
   Asset,
@@ -146,6 +150,8 @@ export interface DesktopApi {
   createJob: (input: { project_id: ProjectId; media_id: MediaInfo["media_id"]; kind: "proxy" | "portrait_sample"; encoder_mode?: "auto" | "software"; start_us?: number; duration_us?: number; layout?: "blurred_background" }) => Promise<Job>;
   getJob: (jobId: JobId) => Promise<Job>;
   cancelJob: (jobId: JobId) => Promise<Job>;
+  /** 移除一条已结束的任务记录（历史清理）；运行中/排队中由 Core 拒绝。 */
+  deleteJob: (jobId: JobId) => Promise<void>;
   listModels: (params?: { status?: string; limit?: number; cursor?: string }) => Promise<ModelDownloadPage>;
   getModel: (modelId: ModelId) => Promise<ModelDetail>;
   downloadModel: (input: { model_id: ModelId; license_acceptance: string | null }) => Promise<ModelDownloadResponse>;
@@ -154,6 +160,8 @@ export interface DesktopApi {
   createTranscription: (input: { asset_id: string; model_id: ModelId; language: string; word_timestamps: boolean; license_acceptance: string | null }) => Promise<TranscriptionCreateResponse>;
   listTranscripts: (assetId: string) => Promise<TranscriptPage>;
   getTranscript: (transcriptId: TranscriptId) => Promise<Transcript>;
+  /** 删除转录；仍被时间线字幕引用时由 Core 拒绝（TRANSCRIPTION_IN_USE）。 */
+  deleteTranscript: (transcriptId: TranscriptId) => Promise<void>;
   getBrief?: (projectId: ProjectId) => Promise<Brief>;
   putBrief?: (input: { project_id: ProjectId; brief: BriefInput }) => Promise<Brief>;
   listRecipes?: () => Promise<{ items: Recipe[] }>;
@@ -172,6 +180,13 @@ export interface DesktopApi {
   testTimelinePatchProviderCapability: (providerId: string) => Promise<TimelinePatchCapabilityTestResponse>;
   createTimelinePatchGeneration: (input: { project_id: ProjectId; timeline_patch_egress_preview_id: string; payload_sha256: string }) => Promise<TimelinePatchGenerationCreateResponse>;
   getTimelinePatchGeneration: (generationId: string) => Promise<TimelinePatchGeneration>;
+  testCaptionsProviderCapability?: (providerId: string) => Promise<Record<string, unknown>>;
+  prepareCaptionsProvider?: (input: { project_id: ProjectId; base_revision_id: TimelineRevisionId; provider_config_id: string; transcript_id: TranscriptId; segment_ids: string[]; language?: string | null; preset_id: string; max_chars_per_caption: number }) => Promise<CaptionsProviderEgressPreview>;
+  createCaptionsProvider?: (input: { project_id: ProjectId; captions_provider_egress_preview_id: string; payload_sha256: string }) => Promise<CaptionsProviderCreateResponse>;
+  getCaptionsProviderGeneration?: (input: { project_id: ProjectId; generation_id: string }) => Promise<CaptionsProviderGeneration>;
+  applyCaptionsProviderProposal?: (input: { project_id: ProjectId; proposal_id: string; base_revision_id: TimelineRevisionId; proposed_document_sha256: string }) => Promise<TimelineState>;
+  getCaptionsProviderProposal?: (input: { project_id: ProjectId; proposal_id: string }) => Promise<CaptionsProviderProposal>;
+  createCaptionsProviderProposal?: (input: { project_id: ProjectId; generation_id: string }) => Promise<CaptionsProviderProposal>;
   listTimelinePatchProposals: (projectId: ProjectId) => Promise<{ items: TimelinePatchProposal[] }>;
   getTimelinePatchProposal: (proposalId: string) => Promise<TimelinePatchProposal>;
   applyTimelinePatchProposal: (input: { project_id: ProjectId; proposal_id: string; base_revision_id: TimelineRevisionId; proposed_document_sha256: string }) => Promise<TimelineState>;
@@ -327,6 +342,7 @@ const api: DesktopApi = {
   createJob: input => ipcRenderer.invoke("job:create", input),
   getJob: jobId => ipcRenderer.invoke("job:get", jobId),
   cancelJob: jobId => ipcRenderer.invoke("job:cancel", jobId),
+  deleteJob: jobId => ipcRenderer.invoke("job:delete", jobId),
   listModels: params => ipcRenderer.invoke("model:list", params),
   getModel: modelId => ipcRenderer.invoke("model:get", modelId),
   downloadModel: input => ipcRenderer.invoke("model:download", input),
@@ -335,6 +351,7 @@ const api: DesktopApi = {
   createTranscription: input => ipcRenderer.invoke("transcription:create", input),
   listTranscripts: assetId => ipcRenderer.invoke("transcription:list", assetId),
   getTranscript: transcriptId => ipcRenderer.invoke("transcript:get", transcriptId),
+  deleteTranscript: transcriptId => ipcRenderer.invoke("transcript:delete", transcriptId),
   getBrief: projectId => ipcRenderer.invoke("brief:get", projectId),
   putBrief: input => ipcRenderer.invoke("brief:put", input),
   listRecipes: () => ipcRenderer.invoke("recipe:list"),
@@ -350,6 +367,13 @@ const api: DesktopApi = {
   getCandidateClipMedia: input => ipcRenderer.invoke("planning:clip-media", input),
   adoptCandidatePlan: input => ipcRenderer.invoke("planning:adopt", input),
   prepareTimelinePatch: input => ipcRenderer.invoke("planning-patch:prepare", input),
+  testCaptionsProviderCapability: providerId => ipcRenderer.invoke("captions-provider:test-capability", providerId),
+  prepareCaptionsProvider: input => ipcRenderer.invoke("captions-provider:prepare", input),
+  createCaptionsProvider: input => ipcRenderer.invoke("captions-provider:create", input),
+  getCaptionsProviderGeneration: input => ipcRenderer.invoke("captions-provider:get", input),
+  applyCaptionsProviderProposal: input => ipcRenderer.invoke("captions-provider:proposal-apply", input),
+  getCaptionsProviderProposal: input => ipcRenderer.invoke("captions-provider:proposal-get", input),
+  createCaptionsProviderProposal: input => ipcRenderer.invoke("captions-provider:proposal-from-generation", input),
   testTimelinePatchProviderCapability: providerId => ipcRenderer.invoke("planning-patch:test-provider-capability", providerId),
   createTimelinePatchGeneration: input => ipcRenderer.invoke("planning-patch:create", input),
   getTimelinePatchGeneration: generationId => ipcRenderer.invoke("planning-patch:generation-get", generationId),

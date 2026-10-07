@@ -575,6 +575,10 @@ function registerIpc(): void {
   });
   ipcMain.handle("job:get", (_event, jobId: JobId) => fetchWithUi<unknown>(`/api/v1/jobs/${asId(jobId, "job_id")}`).then(normalizeJob));
   ipcMain.handle("job:cancel", (_event, jobId: JobId) => fetchWithUi<unknown>(`/api/v1/jobs/${asId(jobId, "job_id")}/cancel`, { method: "POST" }).then(normalizeJob));
+  // 已结束任务可从列表移除（历史清理）；运行中/排队中由 Core 拒绝。
+  ipcMain.handle("job:delete", async (_event, jobId: JobId) => {
+    await fetchWithUi<unknown>(`/api/v1/jobs/${asId(jobId, "job_id")}`, { method: "DELETE" });
+  });
 
   ipcMain.handle("model:list", async (_event, params: { status?: string; limit?: number; cursor?: string } = {}) => {
     const page = await fetchWithUi<{ items: unknown[]; next_cursor: string | null }>(`${API_PREFIX}/models${buildQuery(params)}`);
@@ -611,6 +615,10 @@ function registerIpc(): void {
     return { next_cursor: page.next_cursor ?? null, items: page.items.map(transcriptSummary) };
   });
   ipcMain.handle("transcript:get", (_event, transcriptId: TranscriptId) => fetchWithUi<unknown>(`${API_PREFIX}/transcriptions/${encodeURIComponent(asId(transcriptId, "transcript_id"))}`).then(transcript));
+  // 删除转录；仍被时间线字幕引用时由 Core 拒绝（TRANSCRIPTION_IN_USE）。
+  ipcMain.handle("transcript:delete", async (_event, transcriptId: TranscriptId) => {
+    await fetchWithUi<unknown>(`${API_PREFIX}/transcriptions/${encodeURIComponent(asId(transcriptId, "transcript_id"))}`, { method: "DELETE" });
+  });
   registerStage2aIpc({
     handle: ipcMain.handle.bind(ipcMain),
     fetchWithUi,

@@ -120,12 +120,18 @@ class FasterWhisperProvider:
             words: list[TranscriptWordResult] = []
             if word_timestamps:
                 for word in getattr(segment, "words", None) or []:
-                    word_start = max(start_us, int(float(word.start) * 1_000_000))
-                    word_end = min(end_us, max(word_start + 1, int(float(word.end) * 1_000_000)))
+                    clamped = _clamp_word_us(
+                        start_us,
+                        end_us,
+                        int(float(word.start) * 1_000_000),
+                        int(float(word.end) * 1_000_000),
+                    )
+                    if clamped is None:
+                        continue
                     words.append(
                         TranscriptWordResult(
-                            start_us=word_start,
-                            end_us=word_end,
+                            start_us=clamped[0],
+                            end_us=clamped[1],
                             text=str(word.word),
                             confidence=_confidence(getattr(word, "probability", None)),
                         )
@@ -223,6 +229,80 @@ class TranscriptRepository:
                 db.execute("ROLLBACK")
             raise
         return self.get(transcript_id)  # type: ignore[return-value]
+
+    def delete(self, transcript_id: str) -> None:
+        """删除一条转录（含 segments/words），但拒绝破坏时间线引用。
+
+        时间线的 transcript 字幕通过 `source_segment_ids` 记录来源片段；若该
+        转录仍被任一 Revision 或草稿引用，删除会让这些字幕永久失去来源
+        （无法再据此生成 Provider 字幕提案），故 fail-closed 拒绝。
+        """
+        with self.db.connection() as db:
+            transcript = db.execute(
+                "SELECT id, asset_id FROM transcripts WHERE id=?", (transcript_id,)
+            ).fetchone()
+            if not transcript:
+                raise TranscriptionError("TRANSCRIPTION_NOT_FOUND", "转录不存在")
+            segment_ids = [
+                row[0]
+                for row in db.execute(
+                    "SELECT id FROM transcript_segments WHERE transcript_id=?",
+                    (transcript_id,),
+                )
+            ]
+            if segment_ids and self._segments_referenced(db, segment_ids):
+                raise TranscriptionError(
+                    "TRANSCRIPTION_IN_USE",
+                    "该转录已被时间线字幕引用，请先移除相关字幕或片段后再删除",
+                )
+            db.execute("BEGIN")
+            try:
+                # transcript_words/segments 有 ON DELETE CASCADE，但历史库可能
+                # 由兼容路径建成无级联，故显式逐层清理（与 delete_asset 同法）。
+                db.execute(
+                    "DELETE FROM transcript_words WHERE segment_id IN ("
+                    "SELECT id FROM transcript_segments WHERE transcript_id=?)",
+                    (transcript_id,),
+                )
+                db.execute(
+                    "DELETE FROM transcript_segments WHERE transcript_id=?", (transcript_id,)
+                )
+                db.execute("DELETE FROM transcripts WHERE id=?", (transcript_id,))
+                db.execute("COMMIT")
+            except Exception:
+                db.execute("ROLLBACK")
+                raise
+
+    @staticmethod
+    def _segments_referenced(db: Any, segment_ids: list[str]) -> bool:
+        """任一 Revision / 草稿的 transcript 字幕是否引用这些片段。
+
+        用两层 json_each 展开：先展开 captions 数组取每条字幕，再对字幕的
+        source_segment_ids 展开。注意 json_each 的两参形式在部分 SQLite 版本
+        对「路径取出的文本」会报 malformed JSON，故内层改用
+        `json_each(json_extract(c.value,'$.source_segment_ids'))` 单参形式。
+        """
+        placeholders = ",".join("?" for _ in segment_ids)
+        for table in ("timeline_revisions", "timeline_drafts"):
+            exists = db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
+            ).fetchone()
+            if not exists:
+                continue
+            hit = db.execute(
+                f"""
+                SELECT 1
+                FROM {table} t,
+                     json_each(t.document_json, '$.captions') c,
+                     json_each(json_extract(c.value, '$.source_segment_ids')) s
+                WHERE s.value IN ({placeholders})
+                LIMIT 1
+                """,
+                segment_ids,
+            ).fetchone()
+            if hit:
+                return True
+        return False
 
     def get(self, transcript_id: str) -> dict[str, Any] | None:
         with self.db.connection() as db:
@@ -356,6 +436,29 @@ class TranscriptRepository:
                     "AND source_fingerprint<>? AND status='ready'",
                     (utc_now(), asset_id, source_fingerprint),
                 )
+
+
+def _clamp_word_us(
+    segment_start_us: int, segment_end_us: int, word_start_us: int, word_end_us: int
+) -> tuple[int, int] | None:
+    """Clamp a Whisper word into its segment, or drop it when it cannot fit.
+
+    The validator requires `segment.start <= word.start < word.end <= segment.end`.
+    Whisper emits out-of-range word times at sentence/silence boundaries. Clamping
+    only the lower bound (the previous behaviour) let `word.start` exceed
+    `segment.end`; clamping `word.end` back then produced `end < start` and the
+    whole transcription failed with "word timing invalid in segment N"
+    (observed in the real app on segment 23). Both bounds must be clamped, and a
+    word that still cannot fit (degenerate 1µs segment) is dropped rather than
+    persisted as an illegal range.
+    """
+    if segment_end_us <= segment_start_us:
+        return None
+    start = min(max(segment_start_us, word_start_us), segment_end_us - 1)
+    end = min(segment_end_us, max(start + 1, word_end_us))
+    if end <= start:
+        return None
+    return start, end
 
 
 def _normalize_result(result: TranscriptResult) -> TranscriptResult:

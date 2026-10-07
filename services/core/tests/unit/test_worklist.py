@@ -16,7 +16,7 @@ def test_v27_worklist_schema_is_present_and_constrained(tmp_path: Path) -> None:
         assert {"worklists", "worklist_steps", "worklist_step_audits"} <= names
         columns = {row[1] for row in conn.execute("PRAGMA table_info(worklist_steps)")}
         assert {"planner_id", "params_json", "proposal_id", "applied_revision_id"} <= columns
-        assert conn.execute("SELECT version FROM schema_migrations ORDER BY rowid DESC LIMIT 1").fetchone()[0] == "v27"
+        assert conn.execute("SELECT version FROM schema_migrations WHERE version='v27'").fetchone() is not None
 
 
 def test_v27_worklist_kind_check_rejects_unknown_value(tmp_path: Path) -> None:

@@ -15,7 +15,11 @@ import {
   parseEditingGrammarPrepareResult,
   parseEditingGrammarProposal,
   parseEditingGrammarProposalListItem,
-  parseWorklist
+  parseWorklist,
+  parseCaptionsProviderEgressPreview,
+  parseCaptionsProviderGeneration,
+  parseCaptionsProviderCreateResponse,
+  parseCaptionsProviderProposal
 } from "@aivideo/contracts";
 
 type RequestInitLike = { method?: string; body?: string };
@@ -69,6 +73,29 @@ function instruction(value: unknown): string {
   if (typeof value !== "string" || value.trim().length < 1 || [...value].length > 4000 || /[\0-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(value)) throw new Error("Invalid instruction");
   return value;
 }
+const CAPTION_PRESETS = new Set(["default-bottom", "game-safe-bottom", "high-contrast"]);
+function captionSegmentIds(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 2000) throw new Error("Invalid segment_ids");
+  const seen = new Set<string>();
+  for (const segmentId of value) {
+    if (typeof segmentId !== "string" || !ID.test(segmentId) || seen.has(segmentId)) throw new Error("Invalid segment_ids");
+    seen.add(segmentId);
+  }
+  return value;
+}
+function captionLanguage(value: unknown): string | null {
+  if (value === null) return null;
+  if (typeof value !== "string" || value.trim().length < 1 || [...value].length > 32) throw new Error("Invalid language");
+  return value;
+}
+function captionPreset(value: unknown): string {
+  if (typeof value !== "string" || !CAPTION_PRESETS.has(value)) throw new Error("Invalid preset_id");
+  return value;
+}
+function captionMaxChars(value: unknown): number {
+  if (typeof value !== "number" || typeof value === "boolean" || !Number.isInteger(value) || value < 1 || value > 200) throw new Error("Invalid max_chars_per_caption");
+  return value;
+}
 async function safeInvoke<T>(operation: () => Promise<T>): Promise<T> {
   try { return await operation(); }
   catch (error) {
@@ -109,6 +136,34 @@ export function registerStage2bIpc(deps: Stage2bIpcDependencies): void {
   deps.handle("planning-patch:proposal-apply", async (_event, input) => {
     const value = record(input, ["project_id", "proposal_id", "base_revision_id", "proposed_document_sha256"], "timeline patch proposal apply");
     return parseTimelineState(stage2bRendererSafe(await fetchSafe(`${API_PREFIX}/projects/${id(value.project_id, "project_id")}/timeline-patch-proposals/${id(value.proposal_id, "timeline_patch_proposal_id")}/apply`, { method: "POST", body: JSON.stringify({ base_revision_id: id(value.base_revision_id, "base_revision_id"), proposed_document_sha256: sha256(value.proposed_document_sha256, "proposed_document_sha256") }) })));
+  });
+  deps.handle("captions-provider:test-capability", async (_event, providerId) => {
+    return stage2bRendererSafe(await fetchSafe(`${API_PREFIX}/providers/${id(providerId, "provider_config_id")}/captions-provider-capability-test`, { method: "POST" }));
+  });
+  deps.handle("captions-provider:prepare", async (_event, input) => {
+    const value = record(input, ["project_id", "base_revision_id", "provider_config_id", "transcript_id", "segment_ids", "language", "preset_id", "max_chars_per_caption"], "captions provider prepare");
+    const response = await fetchSafe(`${API_PREFIX}/projects/${id(value.project_id, "project_id")}/captions-provider/prepare`, { method: "POST", body: JSON.stringify({ base_revision_id: id(value.base_revision_id, "base_revision_id"), provider_config_id: id(value.provider_config_id, "provider_config_id"), transcript_id: id(value.transcript_id, "transcript_id"), segment_ids: captionSegmentIds(value.segment_ids), language: captionLanguage(value.language), preset_id: captionPreset(value.preset_id), max_chars_per_caption: captionMaxChars(value.max_chars_per_caption) }) });
+    return parseCaptionsProviderEgressPreview(stage2bRendererSafe(response));
+  });
+  deps.handle("captions-provider:create", async (_event, input) => {
+    const value = record(input, ["project_id", "captions_provider_egress_preview_id", "payload_sha256"], "captions provider create");
+    return parseCaptionsProviderCreateResponse(stage2bRendererSafe(await fetchSafe(`${API_PREFIX}/projects/${id(value.project_id, "project_id")}/captions-provider`, { method: "POST", body: JSON.stringify({ captions_provider_egress_preview_id: id(value.captions_provider_egress_preview_id, "captions_provider_egress_preview_id"), payload_sha256: sha256(value.payload_sha256, "payload_sha256") }) })));
+  });
+  deps.handle("captions-provider:get", async (_event, input) => {
+    const value = record(input, ["project_id", "generation_id"], "captions provider get");
+    return parseCaptionsProviderGeneration(stage2bRendererSafe(await fetchSafe(`${API_PREFIX}/projects/${id(value.project_id, "project_id")}/captions-provider-generations/${id(value.generation_id, "generation_id")}`)));
+  });
+  deps.handle("captions-provider:proposal-apply", async (_event, input) => {
+    const value = record(input, ["project_id", "proposal_id", "base_revision_id", "proposed_document_sha256"], "captions provider proposal apply");
+    return parseTimelineState(stage2bRendererSafe(await fetchSafe(`${API_PREFIX}/projects/${id(value.project_id, "project_id")}/captions-provider-proposals/${id(value.proposal_id, "captions_provider_proposal_id")}/apply`, { method: "POST", body: JSON.stringify({ base_revision_id: id(value.base_revision_id, "base_revision_id"), proposed_document_sha256: sha256(value.proposed_document_sha256, "proposed_document_sha256") }) })));
+  });
+  deps.handle("captions-provider:proposal-get", async (_event, input) => {
+    const value = record(input, ["project_id", "proposal_id"], "captions provider proposal get");
+    return parseCaptionsProviderProposal(stage2bRendererSafe(await fetchSafe(`${API_PREFIX}/projects/${id(value.project_id, "project_id")}/captions-provider-proposals/${id(value.proposal_id, "captions_provider_proposal_id")}`)));
+  });
+  deps.handle("captions-provider:proposal-from-generation", async (_event, input) => {
+    const value = record(input, ["project_id", "generation_id"], "captions provider proposal from generation");
+    return parseCaptionsProviderProposal(stage2bRendererSafe(await fetchSafe(`${API_PREFIX}/projects/${id(value.project_id, "project_id")}/captions-provider-generations/${id(value.generation_id, "generation_id")}/proposal`, { method: "POST" })));
   });
   deps.handle("worklist:list", async (_event, projectId) => {
     const page = stage2bRendererSafe(await fetchSafe(`${API_PREFIX}/projects/${id(projectId, "project_id")}/worklists`)) as { items?: unknown[] };

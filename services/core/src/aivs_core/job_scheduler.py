@@ -72,6 +72,7 @@ KIND_POLICIES: dict[str, JobPolicy] = {
     "model_download": JobPolicy("model_download", ("network",), 4),
     "candidate_generation": JobPolicy("candidate_generation", ("network",), 4),
     "timeline_patch_generation": JobPolicy("timeline_patch_generation", ("network",), 4),
+    "captions_provider_generation": JobPolicy("captions_provider_generation", ("network",), 4),
     "agent_session": JobPolicy("agent_session", ("network",), 4),
     "media_generation": JobPolicy("media_generation", ("network",), 4),
     # 5 级：预热/维护（legacy sample 路径）

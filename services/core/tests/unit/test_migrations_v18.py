@@ -1,4 +1,4 @@
-﻿# ruff: noqa: E501
+# ruff: noqa: E501
 """B10 v18 迁移测试：derived_media_cache 表与引用映射（计划第 6 节 B10）。
 
 要求（PERFORMANCE_IMPLEMENTATION_PLAN B10）：
@@ -90,7 +90,7 @@ def test_v17_to_v18_is_append_only_and_preserves_checksums(
         )
         assert sql.execute("PRAGMA foreign_key_check").fetchall() == []
         assert sql.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-    assert set(MIGRATIONS) == {f"v{i}" for i in range(1, 27)}
+    assert set(MIGRATIONS) == {f"v{i}" for i in range(1, len(MIGRATIONS) + 1)}
 
 
 def test_v18_objects_exist(tmp_path: Path) -> None:

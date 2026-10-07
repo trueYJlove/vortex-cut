@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from aivs_core.app import create_app
 from aivs_core.config import Settings
-from aivs_core.database import Database
+from aivs_core.database import MIGRATIONS, Database
 
 FFMPEG = Path("resources/ffmpeg/win-x64/ffmpeg.exe").resolve()
 FFPROBE = Path("resources/ffmpeg/win-x64/ffprobe.exe").resolve()
@@ -510,9 +510,23 @@ def test_stage3b_real_reframe_preview_batch_partial_retry_and_restart(
             assert db.execute("SELECT COUNT(*) FROM provider_invocations").fetchone()[0] == 0
 
 
-def _table_digest(connection: sqlite3.Connection, table: str) -> str:
-    rows = connection.execute(f"SELECT * FROM {table} ORDER BY rowid").fetchall()
+def _table_digest(
+    connection: sqlite3.Connection, table: str, columns: list[str] | None = None
+) -> str:
+    """Digest row content over an explicit column list.
+
+    Passing the source snapshot's columns keeps this assertion about "history
+    was not backfilled" (no rows added or mutated) rather than about "schema is
+    frozen" — additive migrations legitimately widen the table, and SELECT *
+    would turn every new column into a false positive here.
+    """
+    projection = ", ".join(columns) if columns else "*"
+    rows = connection.execute(f"SELECT {projection} FROM {table} ORDER BY rowid").fetchall()
     return hashlib.sha256(repr(rows).encode("utf-8")).hexdigest()
+
+
+def _table_columns(connection: sqlite3.Connection, table: str) -> list[str]:
+    return [row[1] for row in connection.execute(f"PRAGMA table_info({table})")]
 
 
 def test_stage3b_real_v9_copy_upgrades_to_current_without_history_backfill(
@@ -559,15 +573,15 @@ def test_stage3b_real_v9_copy_upgrades_to_current_without_history_backfill(
             ),
         )
         db.commit()
+        # 记录升级前的列清单：断言只针对"历史行未被回填/篡改"，
+        # 而非"表结构被冻结"——增量迁移合法地加列。
+        before_columns = {
+            table: _table_columns(db, table)
+            for table in ("projects", "provider_configs", "provider_invocations")
+        }
         before = {
-            table: _table_digest(db, table)
-            for table in (
-                "projects",
-                "provider_configs",
-                "provider_invocations",
-                "schema_migrations",
-            )
-            if table != "schema_migrations"
+            table: _table_digest(db, table, columns)
+            for table, columns in before_columns.items()
         }
     upgraded = tmp_path / "upgraded.db"
     with sqlite3.connect(source) as source_db, sqlite3.connect(upgraded) as destination_db:
@@ -577,8 +591,10 @@ def test_stage3b_real_v9_copy_upgrades_to_current_without_history_backfill(
         maximum = db.execute(
             "SELECT MAX(CAST(SUBSTR(version,2) AS INTEGER)) FROM schema_migrations"
         ).fetchone()[0]
-        assert maximum == 26
-        assert {table: _table_digest(db, table) for table in before} == before
+        assert maximum == len(MIGRATIONS)
+        assert {
+            table: _table_digest(db, table, before_columns[table]) for table in before
+        } == before
         assert db.execute("SELECT COUNT(*) FROM rendition_reframe_snapshots").fetchone()[0] == 0
         assert db.execute("SELECT COUNT(*) FROM reframe_export_batches").fetchone()[0] == 0
         assert db.execute("SELECT COUNT(*) FROM reframe_export_batch_items").fetchone()[0] == 0

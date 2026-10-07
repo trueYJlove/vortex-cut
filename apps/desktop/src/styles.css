@@ -97,9 +97,21 @@ textarea { min-height: 92px; padding: 8px; resize: vertical; }
 .badge.bad { color: #e08a8a; border: 1px solid rgba(224, 138, 138, .35); }
 .badge.dim { color: #6f7b82; border: 1px solid #33404a; }
 .transcript-row { min-width: 0; padding: 9px 10px; border: 1px solid #263038; }.transcript-row > strong { display: block; font-size: var(--dlg-fs-body); font-weight: 600; color: #e8edf0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.transcript-variants { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }.ts-chip { display: inline-flex; align-items: center; gap: 5px; min-height: 24px; padding: 0 8px; border: 1px solid #263038; border-radius: 5px; background: #0e1318; color: #a3aeb5; font-size: var(--dlg-fs-caption); }.ts-chip:hover { color: #e8edf0; border-color: #33404a; }
-.transcript-item { padding: 9px 10px; border: 1px solid #263038; }.transcript-item > strong { display: block; margin-bottom: 8px; font-size: var(--dlg-fs-body); font-weight: 600; color: #e8edf0; overflow-wrap: anywhere; }
+.transcript-item { padding: 9px 10px; border: 1px solid #263038; }
+/* 标题行：素材名 + 删除转录（危险操作降权为幽灵按钮，悬停才显红）。 */
+.transcript-item-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.transcript-item-head > strong { min-width: 0; font-size: var(--dlg-fs-body); font-weight: 600; color: #e8edf0; overflow-wrap: anywhere; }
+.mini-btn.danger-ghost { flex: none; height: 24px; min-height: 24px; padding: 0 9px; border: 1px solid #3a2a2a; border-radius: 5px; background: transparent; color: #b98a86; font-size: var(--dlg-fs-caption); }
+.mini-btn.danger-ghost:hover:not(:disabled) { border-color: #a34a41; background: rgba(229, 72, 77, .12); color: #f0b9b2; }
 .append-btn { width: 100%; height: 32px; margin-top: 9px; border: 1px solid #25d3ac; border-radius: 7px; background: rgba(37, 211, 172, .1); color: #25d3ac; font-size: var(--dlg-fs-body); font-weight: 600; }
 .append-btn:hover:not(:disabled) { background: rgba(37, 211, 172, .18); }
+.append-btn:disabled { opacity: .45; cursor: not-allowed; }
+/* 转录页操作行：追加片段 + AI 字幕优化并排（两者共用同一份勾选状态）。 */
+.transcript-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.transcript-actions .append-btn { margin-top: 9px; }
+.captions-provider-diff { margin: 8px 0 0; padding-left: 18px; max-height: 220px; overflow: auto; font-size: var(--dlg-fs-label); color: #cfd8dd; }
+.captions-provider-diff li { margin-bottom: 5px; overflow-wrap: anywhere; }
+.captions-provider-diff code { color: #8fa0a8; font-family: Consolas, monospace; font-size: var(--dlg-fs-caption); }
 .segment-row { padding: 7px 0; display: grid; grid-template-columns: 18px 78px 1fr; gap: 5px; border-top: 1px solid #1f2931; font-size: var(--dlg-fs-label); color: #a3aeb5; line-height: 1.55; }.segment-row input { width: 13px; height: 13px; accent-color: #12b998; }.segment-row span { color: #25d3ac; font-family: Consolas, monospace; font-size: var(--dlg-fs-caption); }.segment-row p { margin: 0; overflow-wrap: anywhere; }
 .empty-timeline { padding: 10px; }.empty-timeline button { width: 100%; }
 .preview-frame { position: relative; width: 100%; height: 100%; overflow: visible; background: #181c1f; }
@@ -987,6 +999,34 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 .modal.provider-image-modal { width: min(860px, 100%); }
 .modal.export-batch-modal { width: min(860px, 100%); }
 .modal.transcript-viewer { width: min(620px, 100%); }
+/* AI 字幕优化（Slice 5）：与 AI 修改同档宽度；确认页 dl 与外发字段需要横向空间。 */
+.modal.captions-provider { width: min(680px, 100%); }
+/* Provider：单任务表单，主体独立滚动；非全屏窗口保持外围留白。 */
+.modal.provider-settings { width: min(480px, calc(100vw - 64px)); max-height: min(600px, 80dvh, calc(100dvh - 80px)); overflow: hidden; row-gap: 0; }
+.modal.provider-settings > .modal-heading { padding: 18px 22px 14px; position: static; }
+.modal.provider-settings > .ps-body { min-height: 0; overflow-y: auto; scrollbar-width: thin; padding: 0 22px 16px; display: grid; gap: 14px; }
+.modal.provider-settings .ps-form { display: grid; gap: 12px; }
+.modal.provider-settings .ps-body label { gap: 5px; }
+.modal.provider-settings .ps-body input, .modal.provider-settings .ps-body select { width: 100%; height: 32px; min-height: 32px; border: 1px solid var(--dlg-line); }
+.modal.provider-settings .ps-body select:disabled { opacity: .75; }
+.modal.provider-settings .provider-mode-tabs { display: flex; gap: 3px; padding: 3px; background: var(--ctl-bg); border: 1px solid var(--dlg-line); border-radius: 7px; }
+.modal.provider-settings .provider-mode-tabs button { flex: 1; height: 30px; min-height: 30px; padding: 0 8px; background: transparent; color: var(--dlg-text-3); }
+.modal.provider-settings .provider-mode-tabs button.active { background: var(--tab-active); color: var(--dlg-text); }
+.modal.provider-settings .ps-hint { margin: 0; color: var(--dlg-text-3); font-size: var(--dlg-fs-caption); line-height: 1.5; }
+.modal.provider-settings .ps-feedback { margin: 0; padding: 8px 10px; border-radius: var(--r-ctl); background: var(--dlg-accent-dim); font-size: var(--dlg-fs-caption); line-height: 1.5; }
+.modal.provider-settings .ps-error { background: var(--dlg-warn-dim); }
+.modal.provider-settings .ps-details { margin: 0; grid-template-columns: 70px minmax(0, 1fr); gap: 8px 12px; padding: 12px; }
+.modal.provider-settings .ps-secret-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.modal.provider-settings > .ps-footer { position: static; border-top: 1px solid var(--dlg-line); padding: 12px 22px 16px; gap: 8px; }
+.modal.provider-settings .ps-footer button { padding: 0 14px; }
+.modal.provider-settings .ps-footer .ps-back { margin-right: auto; padding: 0; background: transparent; color: var(--dlg-text-3); }
+.modal.captions-provider .captions-provider-status-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 30px; padding: 7px 10px; border: 1px solid var(--dlg-line); border-radius: var(--r-ctl); background: var(--dlg-raise); color: var(--dlg-text-2); font-size: var(--dlg-fs-caption); }
+.modal.captions-provider .captions-provider-status-row button { height: 26px; min-height: 26px; padding: 0 10px; font-size: var(--dlg-fs-caption); }
+@media (max-width: 560px), (max-height: 560px) {
+  .modal.provider-settings { width: min(440px, calc(100vw - 40px)); max-height: min(80dvh, calc(100dvh - 48px)); }
+  .modal.provider-settings > .ps-body { gap: 10px; }
+  .modal.provider-settings .ps-form { gap: 9px; }
+}
 .modal.command-palette { width: min(600px, 100%); }
 .modal.shortcuts-dialog { width: min(620px, 100%); }
 .modal.render-panel-dialog { width: min(780px, 100%); }
@@ -1506,6 +1546,63 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
    贴弹窗底边——补与水平边距同源的底部留白。 */
 .modal.render-panel-dialog,
 .modal.export-batch-modal { padding-bottom: var(--dlg-hpad, 22px); }
+
+/* 带边框/背景的整宽「提示盒 / 容器」同属盒式缩进范畴（2026-10-06 补漏）。
+   上面 1490 段的收口只列了 fieldset / batch-status / 卡片，遗漏了
+   readonly-note / readonly-segments / provider-capability-list 等提示盒：
+   它们仍吃通用 :not() 规则的 padding（只推内容、不缩盒子），边框与背景
+   继续铺满弹窗左右边缘（用户实测转录查看器与 AI 字幕优化弹窗现场）。
+
+   特异性必须 ≥ 通用 :not() 规则的 (0,3,0)，否则 padding 覆盖失效、
+   margin 与旧 padding 叠加成双倍缩进。故沿用同文件 batch-status 的既有
+   写法 `.modal > *:not(.modal-heading):not(.modal-actions).<class>`（0,4,0）。 */
+.modal > *:not(.modal-heading):not(.modal-actions).readonly-note,
+.modal > *:not(.modal-heading):not(.modal-actions).delete-warning,
+.modal > *:not(.modal-heading):not(.modal-actions).ai-status,
+.modal > *:not(.modal-heading):not(.modal-actions).simulation-notice,
+.modal > *:not(.modal-heading):not(.modal-actions).locked-note,
+.modal > *:not(.modal-heading):not(.modal-actions).provider-cost-notice,
+.modal > *:not(.modal-heading):not(.modal-actions).instruction-preview,
+.modal > *:not(.modal-heading):not(.modal-actions).egress-text,
+.modal > *:not(.modal-heading):not(.modal-actions).readonly-segments,
+.modal > *:not(.modal-heading):not(.modal-actions).provider-capability-list {
+  margin-left: var(--dlg-hpad, 22px);
+  margin-right: var(--dlg-hpad, 22px);
+}
+/* 盒内水平内边距：提示盒 12px；列表型容器只有 2px（边框紧贴行内容）。 */
+.modal > *:not(.modal-heading):not(.modal-actions).readonly-note,
+.modal > *:not(.modal-heading):not(.modal-actions).delete-warning,
+.modal > *:not(.modal-heading):not(.modal-actions).ai-status,
+.modal > *:not(.modal-heading):not(.modal-actions).simulation-notice,
+.modal > *:not(.modal-heading):not(.modal-actions).locked-note,
+.modal > *:not(.modal-heading):not(.modal-actions).provider-cost-notice,
+.modal > *:not(.modal-heading):not(.modal-actions).instruction-preview,
+.modal > *:not(.modal-heading):not(.modal-actions).egress-text {
+  padding-left: 12px;
+  padding-right: 12px;
+}
+.modal > *:not(.modal-heading):not(.modal-actions).readonly-segments,
+.modal > *:not(.modal-heading):not(.modal-actions).provider-capability-list {
+  padding-left: 2px;
+  padding-right: 2px;
+}
+
+/* 转录查看器：片段列表长时自身滚动，避免弹窗撑满整屏（未全屏时尤其明显）；
+   该弹窗没有 modal-actions 底栏，需补底部留白，否则末行贴弹窗底边。 */
+.modal.transcript-viewer { padding-bottom: var(--dlg-hpad, 22px); }
+.modal.transcript-viewer .readonly-segments { max-height: min(52vh, 460px); overflow: auto; }
+.transcript-open-button { min-width: 0; flex: 1; display: grid; justify-items: start; gap: 3px; padding: 0; background: transparent; color: inherit; text-align: left; }
+.transcript-open-button:hover:not(:disabled) { background: transparent; }
+.transcript-open-button strong { overflow: hidden; max-width: 100%; text-overflow: ellipsis; white-space: nowrap; }
+.transcript-open-button small { color: #8b9396; font-size: var(--dlg-fs-caption); }
+.transcript-viewer-toolbar { display: flex; align-items: center; gap: 7px; min-height: 28px; }
+.transcript-viewer-toolbar strong { margin-right: auto; font-size: var(--dlg-fs-body); }
+.transcript-viewer-toolbar .mini-btn { height: 25px; min-height: 25px; padding: 0 9px; }
+.transcript-selectable-segments { padding: 0 2px; }
+.transcript-selectable-segments .segment-row { grid-template-columns: 18px 78px 1fr; padding: 8px 6px; }
+.transcript-viewer-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.transcript-viewer-actions .append-btn { margin-top: 0; }
+@media (max-width: 560px) { .transcript-viewer-actions { grid-template-columns: 1fr; } }
 @media (max-width: 760px) {
   .modal fieldset:not(.locked-fieldset),
   .modal > *:not(.modal-heading):not(.modal-actions).reframe-batch-actions,
@@ -1516,6 +1613,18 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
   .modal .batch-status .modal-actions { padding-left: 14px; padding-right: 14px; }
   .modal.render-panel-dialog,
   .modal.export-batch-modal { padding-bottom: 14px; }
+  .modal > *:not(.modal-heading):not(.modal-actions).readonly-note,
+  .modal > *:not(.modal-heading):not(.modal-actions).delete-warning,
+  .modal > *:not(.modal-heading):not(.modal-actions).ai-status,
+  .modal > *:not(.modal-heading):not(.modal-actions).simulation-notice,
+  .modal > *:not(.modal-heading):not(.modal-actions).locked-note,
+  .modal > *:not(.modal-heading):not(.modal-actions).provider-cost-notice,
+  .modal > *:not(.modal-heading):not(.modal-actions).instruction-preview,
+  .modal > *:not(.modal-heading):not(.modal-actions).egress-text,
+  .modal > *:not(.modal-heading):not(.modal-actions).readonly-segments,
+  .modal > *:not(.modal-heading):not(.modal-actions).provider-capability-list { margin-left: 14px; margin-right: 14px; }
+  .modal.transcript-viewer { padding-bottom: 14px; }
+  .modal.transcript-viewer .readonly-segments { max-height: min(46vh, 380px); }
 }
 
 

@@ -1,0 +1,189 @@
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ProviderConfig } from "@aivideo/contracts";
+import { ProviderSettingsDialog } from "../src/app/provider-settings/ProviderSettingsDialog.js";
+
+const now = "2026-08-11T00:00:00.000Z";
+
+function provider(overrides: Partial<ProviderConfig> = {}): ProviderConfig {
+  return {
+    provider_config_id: "provider_1" as never,
+    kind: "openai_compatible_text",
+    display_name: "测试 Provider",
+    base_url: "https://provider.test",
+    model: "model",
+    enabled: true,
+    credential_status: "missing",
+    input_price_per_million: null,
+    output_price_per_million: null,
+    timeline_patch_capability_status: "untested",
+    timeline_patch_response_adapter_id: null,
+    timeline_patch_probe_protocol_version: null,
+    timeline_patch_capability_tested_at: null,
+    timeline_patch_capability_failure_code: null,
+    timeline_patch_capability_probe_sha256: null,
+    candidate_capability_status: "untested",
+    candidate_response_adapter_id: null,
+    candidate_probe_protocol_version: null,
+    candidate_capability_tested_at: null,
+    candidate_capability_failure_code: null,
+    candidate_capability_probe_sha256: null,
+    captions_provider_capability_status: "untested",
+    captions_provider_response_adapter_id: null,
+    captions_provider_probe_protocol_version: null,
+    captions_provider_capability_tested_at: null,
+    captions_provider_capability_failure_code: null,
+    captions_provider_capability_probe_sha256: null,
+    created_at: now,
+    updated_at: now,
+    ...overrides,
+  };
+}
+
+function setup(items: ProviderConfig[]) {
+  const onProvidersChange = vi.fn();
+  const onNotify = vi.fn();
+  const desktop = {
+    listProviders: vi.fn().mockResolvedValue({ items }),
+    setProviderSecret: vi.fn().mockResolvedValue({ provider_config_id: "provider_1", credential_status: "configured" }),
+    deleteProviderSecret: vi.fn().mockResolvedValue({ provider_config_id: "provider_1", credential_status: "missing" }),
+    testProvider: vi.fn().mockResolvedValue({ status: "succeeded" }),
+    createProvider: vi.fn(),
+  };
+  (window as unknown as { desktop: unknown }).desktop = desktop;
+  render(<ProviderSettingsDialog providers={items} onProvidersChange={onProvidersChange} onClose={() => undefined} onNotify={onNotify} />);
+  return { desktop, onProvidersChange, onNotify };
+}
+
+describe("Provider 设置：共用状态与脱敏", () => {
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+  it("无 Provider 时给出空态与下一步", async () => {
+    setup([]);
+    const dialog = screen.getByRole("dialog", { name: "Provider 设置" });
+    expect(await within(dialog).findByText(/尚无 Provider/)).toBeVisible();
+    expect(within(dialog).getByLabelText("Provider 名称")).toBeVisible();
+    expect(within(dialog).queryByLabelText("已有 Provider")).not.toBeInTheDocument();
+  });
+
+  it("保存密钥后把更新后的列表回报给上层（各 AI 功能共用同一份状态）", async () => {
+    // 这是「共用状态」的实际契约：面板必须通过 onProvidersChange 把新状态交回 App，
+    // 否则其它 AI 功能仍看到旧的 credential_status=missing。
+    const items = [provider()];
+    const { desktop, onProvidersChange } = setup(items);
+    const dialog = screen.getByRole("dialog", { name: "Provider 设置" });
+    fireEvent.change(within(dialog).getByLabelText("已有 Provider"), { target: { value: "provider_1" } });
+    fireEvent.change(within(dialog).getByLabelText("Provider 密钥"), { target: { value: "SENTINEL" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "安全保存密钥" }));
+    await waitFor(() => expect(desktop.setProviderSecret).toHaveBeenCalledWith({ provider_config_id: "provider_1", secret: "SENTINEL" }));
+    await waitFor(() => expect(onProvidersChange).toHaveBeenCalled());
+    const reported = onProvidersChange.mock.calls.at(-1)![0] as ProviderConfig[];
+    expect(reported[0].credential_status).toBe("configured");
+    // 换密钥等于换能力前提：三组探测结论都必须失效重测。
+    expect(reported[0].candidate_capability_status).toBe("untested");
+    expect(reported[0].timeline_patch_capability_status).toBe("untested");
+    expect(reported[0].captions_provider_capability_status).toBe("untested");
+    // 脱敏：密钥不回显
+    expect(document.body.textContent).not.toContain("SENTINEL");
+  });
+
+  it("删除密钥同样回报上层，并清空为 missing", async () => {
+    const items = [provider({ credential_status: "configured" })];
+    const { desktop, onProvidersChange } = setup(items);
+    const dialog = screen.getByRole("dialog", { name: "Provider 设置" });
+    fireEvent.change(within(dialog).getByLabelText("已有 Provider"), { target: { value: "provider_1" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "删除密钥" }));
+    await waitFor(() => expect(desktop.deleteProviderSecret).toHaveBeenCalledWith("provider_1"));
+    await waitFor(() => expect(onProvidersChange).toHaveBeenCalled());
+    const reported = onProvidersChange.mock.calls.at(-1)![0] as ProviderConfig[];
+    expect(reported[0].credential_status).toBe("missing");
+  });
+
+  it("未填完整信息时禁止创建，填全后回报新 Provider", async () => {
+    const items: ProviderConfig[] = [];
+    const created = provider({ provider_config_id: "provider_new" as never, display_name: "我的网关", base_url: "https://gw.test" });
+    const { desktop, onProvidersChange } = setup(items);
+    desktop.createProvider.mockResolvedValue(created);
+    const dialog = screen.getByRole("dialog", { name: "Provider 设置" });
+    const submit = within(dialog).getByRole("button", { name: "创建 Provider" });
+    expect(submit).toBeDisabled();
+    fireEvent.change(within(dialog).getByLabelText("Provider 名称"), { target: { value: "我的网关" } });
+    expect(submit).toBeDisabled(); // 缺地址/模型仍禁用
+    fireEvent.change(within(dialog).getByLabelText("Provider 地址"), { target: { value: "https://gw.test" } });
+    fireEvent.change(within(dialog).getByLabelText("Provider 模型"), { target: { value: "m" } });
+    await waitFor(() => expect(submit).toBeEnabled());
+    fireEvent.click(submit);
+    await waitFor(() => expect(desktop.createProvider).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "openai_compatible_text", display_name: "我的网关", base_url: "https://gw.test", model: "m", enabled: true,
+    })));
+    // 空列表时面板会先自行拉取并回报一次，故此处只断言最后一次是最新结果。
+    await waitFor(() => expect(onProvidersChange).toHaveBeenCalled());
+    const reported = onProvidersChange.mock.calls.at(-1)![0] as ProviderConfig[];
+    expect(reported).toHaveLength(1);
+    expect(reported[0].provider_config_id).toBe("provider_new");
+    expect(await within(dialog).findByText(/下一步：填入密钥并保存/)).toBeVisible();
+  });
+
+  it("第三方模型提供商不是摆设：选择模板会填充真实地址和模型", () => {
+    setup([]);
+    const dialog = screen.getByRole("dialog", { name: "Provider 设置" });
+    fireEvent.click(within(dialog).getByRole("tab", { name: "第三方模型提供商" }));
+    expect(within(dialog).getByRole("combobox", { name: "提供商预设" })).toBeVisible();
+    fireEvent.change(within(dialog).getByLabelText("提供商预设"), { target: { value: "deepseek" } });
+    expect(within(dialog).getByLabelText("Provider 名称")).toHaveValue("DeepSeek");
+    expect(within(dialog).getByLabelText("Provider 地址")).toHaveValue("https://api.deepseek.com/v1");
+    expect(within(dialog).getByLabelText("Provider 模型")).toHaveValue("deepseek-chat");
+  });
+
+  it("已有配置与新建表单不会堆叠；切换时清空密钥输入", () => {
+    setup([provider()]);
+    const dialog = screen.getByRole("dialog", { name: "Provider 设置" });
+    expect(within(dialog).queryByLabelText("Provider 名称")).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "删除密钥" })).toBeDisabled();
+    fireEvent.change(within(dialog).getByLabelText("Provider 密钥"), { target: { value: "UNSAVED" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "＋ 新建 Provider" }));
+    expect(within(dialog).getByLabelText("Provider 名称")).toBeVisible();
+    expect(within(dialog).queryByLabelText("已有 Provider")).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "已有配置" }));
+    expect(within(dialog).getByLabelText("Provider 密钥")).toHaveValue("");
+  });
+
+  it("多个已有配置仍用一个下拉；切换 Provider 不携带上个密钥", () => {
+    setup([provider(), provider({ provider_config_id: "provider_2" as never, display_name: "第二个", model: "m2" })]);
+    fireEvent.change(screen.getByLabelText("Provider 密钥"), { target: { value: "UNSAVED" } });
+    fireEvent.change(screen.getByLabelText("已有 Provider"), { target: { value: "provider_2" } });
+    expect(screen.getByLabelText("Provider 密钥")).toHaveValue("");
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+    expect(screen.getByText("m2")).toBeVisible();
+  });
+
+  it("创建成功但密钥同步失败时保留配置并提示重试，不重复创建", async () => {
+    const { desktop, onProvidersChange } = setup([]);
+    desktop.createProvider.mockResolvedValue(provider({ provider_config_id: "provider_new" as never }));
+    desktop.setProviderSecret.mockRejectedValue(new Error("SENTINEL"));
+    fireEvent.change(screen.getByLabelText("Provider 名称"), { target: { value: "网关" } });
+    fireEvent.change(screen.getByLabelText("Provider 地址"), { target: { value: "https://gw.test/v1" } });
+    fireEvent.change(screen.getByLabelText("Provider 模型"), { target: { value: "m" } });
+    fireEvent.change(screen.getByLabelText("新建 Provider 密钥"), { target: { value: "SENTINEL" } });
+    fireEvent.click(screen.getByRole("button", { name: "创建 Provider" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("配置已创建，但密钥未能同步");
+    expect(desktop.createProvider).toHaveBeenCalledTimes(1);
+    expect(onProvidersChange.mock.calls.at(-1)?.[0][0].credential_status).toBe("missing");
+    expect(screen.getByLabelText("Provider 密钥")).toHaveValue("");
+    expect(document.body.textContent).not.toContain("SENTINEL");
+  });
+
+  it("新建时可一并保存密钥；切换管理后不回显", async () => {
+    const { desktop, onProvidersChange } = setup([]);
+    desktop.createProvider.mockResolvedValue(provider({ provider_config_id: "provider_new" as never }));
+    fireEvent.change(screen.getByLabelText("Provider 名称"), { target: { value: "网关" } });
+    fireEvent.change(screen.getByLabelText("Provider 地址"), { target: { value: "https://gw.test/v1" } });
+    fireEvent.change(screen.getByLabelText("Provider 模型"), { target: { value: "m" } });
+    fireEvent.change(screen.getByLabelText("新建 Provider 密钥"), { target: { value: "SENTINEL" } });
+    fireEvent.click(screen.getByRole("button", { name: "创建 Provider" }));
+    await waitFor(() => expect(desktop.setProviderSecret).toHaveBeenCalledWith({ provider_config_id: "provider_new", secret: "SENTINEL" }));
+    await waitFor(() => expect(onProvidersChange.mock.calls.at(-1)?.[0][0].credential_status).toBe("configured"));
+    expect(screen.getByLabelText("Provider 密钥")).toHaveValue("");
+    expect(screen.queryByLabelText("Provider 名称")).not.toBeInTheDocument();
+  });
+});

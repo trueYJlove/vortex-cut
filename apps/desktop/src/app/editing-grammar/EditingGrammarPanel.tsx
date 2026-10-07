@@ -9,6 +9,7 @@ import type {
   TimelineState
 } from "@aivideo/contracts";
 import { Dialog } from "../Dialog.js";
+import { formatLocalStamp } from "../localTime.js";
 import { TimelineDiffView } from "../PropertyPanels.js";
 import { errorCode, safeErrorMessage } from "../safeErrors.js";
 
@@ -196,7 +197,7 @@ export function EditingGrammarPanel({
         <legend>历史提案</legend>
         <ul className="agent-session-history">
           {list.slice(0, 8).map(item => <li key={item.id}>
-            <button onClick={() => void openProposal(item)}>{item.planner} · {item.created_at.slice(0, 16).replace("T", " ")}</button>
+            <button onClick={() => void openProposal(item)}>{item.planner} · {formatLocalStamp(item.created_at)}</button>
           </li>)}
         </ul>
       </fieldset>}

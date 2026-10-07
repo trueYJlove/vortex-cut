@@ -63,6 +63,8 @@ describe("Stage2A Main IPC 安全编排", () => {
       ["/api/v1/projects/project_1/candidate-generations/prepare", { method: "POST", body: JSON.stringify({ provider_config_id: "provider_1", recipe_id: "recipe_1", transcript_ids: ["transcript_1"] }) }],
       ["/api/v1/projects/project_1/candidate-generations", { method: "POST", body: JSON.stringify({ egress_preview_id: "preview_1", payload_sha256: hash }) }]
     ]);
+    fetchWithUi.mockRejectedValueOnce(Object.assign(new Error("upstream secret must not escape"), { code: "PROVIDER_INVALID_REQUEST" }));
+    await expect(handlers.get("provider:test")!({}, "provider_1")).rejects.toThrow("[PROVIDER_INVALID_REQUEST]");
     fetchWithUi.mockRejectedValueOnce(new Error("C:\\secret-path SENTINEL-SECRET"));
     await expect(handlers.get("provider:test")!({}, "provider_1")).rejects.toThrow("Core request failed");
   });

@@ -1,9 +1,10 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Job, ModelDetail, TimelineDocument, TimelineState } from "@aivideo/contracts";
+import type { Job, ModelDetail, ProviderConfig, TimelineDocument, TimelineState } from "@aivideo/contracts";
 import type { DesktopApi } from "../electron/preload/index.js";
 import { App } from "../src/app/App.js";
 import { fixturePreviewIrPresentation } from "./fixtures/preview-ir.js";
+import { formatLocalStamp } from "../src/app/localTime.js";
 
 const now = "2026-08-11T00:00:00.000Z";
 const project = { project_id: "project_1" as never, name: "演示项目", status: "active" as const, canvas: { width: 1080, height: 1920, fps_num: 30, fps_den: 1 }, root_dir_name: "Demo", current_timeline_revision_id: "revision_1", created_at: now, updated_at: now, last_opened_at: now };
@@ -52,10 +53,18 @@ function desktopApi(options: { timeline?: TimelineState | null; models?: ModelDe
     getRuntime: vi.fn().mockResolvedValue({ protocol_version: 1, status: "ready" }), chooseMedia: vi.fn(), probeMedia: vi.fn(),
     listProjects: vi.fn().mockResolvedValue({ items: [project], next_cursor: null }), createProject: vi.fn().mockResolvedValue({ ...project, project_id: "project_2", name: "新项目" }), getProject: vi.fn().mockResolvedValue(project), renameProject: vi.fn().mockResolvedValue({ ...project, name: "已重命名" }), archiveProject: vi.fn().mockResolvedValue({ ...project, status: "archived" }), reopenProject: vi.fn().mockResolvedValue(project),
     listAssets: vi.fn().mockResolvedValue({ items: [{ asset: video, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGH" }, { asset: image, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGHI" }], next_cursor: null }), importAsset: vi.fn(), importAssetByFixture: vi.fn().mockResolvedValue(null).mockImplementation(async ({ kind }: { kind?: string }) => ({ grant: {}, asset: { ...image, asset_id: `import_${kind}` as never, kind: kind ?? "video", display_name: `import-${kind}` }, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGHI" })), refreshAsset: vi.fn().mockImplementation(async (assetId: string) => ({ asset: assetId === image.asset_id ? image : video, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGH" })), assetMediaTicket: vi.fn().mockResolvedValue({ media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGH" }), relocateAsset: vi.fn().mockResolvedValue({ grant: {}, asset: video, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGH" }), importSubtitle: vi.fn().mockResolvedValue(null), deleteAsset: vi.fn().mockResolvedValue({ removed_clips: 1, removed_captions: 0 }), revealAsset: vi.fn().mockResolvedValue({ status: "opened" }),
-    listJobs: vi.fn().mockResolvedValue({ items: options.jobs ?? [], next_cursor: null }), createJob: vi.fn(), getJob: vi.fn(), cancelJob: vi.fn().mockImplementation(async (jobId: string) => ({ ...createdJob, job_id: jobId, status: "cancelled" })), listModels: vi.fn().mockResolvedValue({ items: options.models ?? [], next_cursor: null }), getModel: vi.fn().mockResolvedValue(model), downloadModel: vi.fn().mockResolvedValue({ model: { ...model, status: "queued" }, job: downloadJob }), getModelDownload: vi.fn(), cancelModelDownload: vi.fn().mockResolvedValue({ model: { ...model, status: "cancelled" }, job: { ...downloadJob, status: "cancelled" } }), createTranscription: vi.fn().mockImplementation(async () => ({ job: { ...createdJob, job_id: `job_created_${++transcriptionSequence}` as never }, transcript: null })),
+    listJobs: vi.fn().mockResolvedValue({ items: options.jobs ?? [], next_cursor: null }), createJob: vi.fn(), getJob: vi.fn(), cancelJob: vi.fn().mockImplementation(async (jobId: string) => ({ ...createdJob, job_id: jobId, status: "cancelled" })), deleteJob: vi.fn().mockResolvedValue(undefined), deleteTranscript: vi.fn().mockResolvedValue(undefined), listModels: vi.fn().mockResolvedValue({ items: options.models ?? [], next_cursor: null }), getModel: vi.fn().mockResolvedValue(model), downloadModel: vi.fn().mockResolvedValue({ model: { ...model, status: "queued" }, job: downloadJob }), getModelDownload: vi.fn(), cancelModelDownload: vi.fn().mockResolvedValue({ model: { ...model, status: "cancelled" }, job: { ...downloadJob, status: "cancelled" } }), createTranscription: vi.fn().mockImplementation(async () => ({ job: { ...createdJob, job_id: `job_created_${++transcriptionSequence}` as never }, transcript: null })),
     listTranscripts: vi.fn().mockResolvedValue({ items: [{ ...transcript, segments: undefined, words: undefined }], next_cursor: null }), getTranscript: vi.fn().mockResolvedValue(transcript),
-    getBrief: vi.fn().mockRejectedValue(new Error("BRIEF_NOT_FOUND")), putBrief: vi.fn().mockResolvedValue({}), listRecipes: vi.fn().mockResolvedValue({ items: [{ schema_version: 1, recipe_id: "balanced-narrative-v1", name: "Balanced", summary: "测试", rules: { selection: "keyword", pace: "balanced", max_gap_us: 1 }, document_sha256: `sha256:${"a".repeat(64)}` }] }), listProviders: vi.fn().mockResolvedValue({ items: [{ provider_config_id: "provider_1", kind: "openai_compatible_text", display_name: "测试 Provider", base_url: "https://provider.test", model: "model", enabled: true, credential_status: "configured", input_price_per_million: null, output_price_per_million: null, timeline_patch_capability_status: "supported", timeline_patch_response_adapter_id: "openai_chat_completions_json_schema_v1", timeline_patch_probe_protocol_version: "1", timeline_patch_capability_tested_at: now, timeline_patch_capability_failure_code: null, timeline_patch_capability_probe_sha256: `sha256:${"d".repeat(64)}`, candidate_capability_status: "supported", candidate_response_adapter_id: "openai_chat_completions_json_schema_v1", candidate_probe_protocol_version: "1", candidate_capability_tested_at: now, candidate_capability_failure_code: null, candidate_capability_probe_sha256: `sha256:${"e".repeat(64)}`, created_at: now, updated_at: now }] }), createProvider: vi.fn(), setProviderSecret: vi.fn(), deleteProviderSecret: vi.fn().mockResolvedValue({ provider_config_id: "provider_1", credential_status: "missing" }), testProvider: vi.fn().mockResolvedValue({ status: "succeeded" }), testCandidateProviderCapability: vi.fn().mockResolvedValue({ candidate_capability_status: "supported", candidate_response_adapter_id: "openai_chat_completions_json_schema_v1", candidate_probe_protocol_version: "1", candidate_capability_tested_at: now, candidate_capability_failure_code: null, candidate_capability_probe_sha256: `sha256:${"e".repeat(64)}` }), preparePlanning: vi.fn().mockResolvedValue({ egress_preview_id: "preview_1", provider: { display_name: "测试", origin: "https://provider.test", model: "model" }, prompt_template_version: "candidate-plan-v1", sent_fields: ["segments.text"], payload_sha256: `sha256:${"b".repeat(64)}`, expires_at: now, payload: { segments: [{ segment_ref: "s1", text: "第一句" }] }, stats: { transcript_count: 1, segment_count: 1, character_count: 3, estimated_tokens: 1 } }), createPlanning: vi.fn().mockResolvedValue({ job: { ...createdJob, kind: "candidate_generation" } }), listCandidatePlans: vi.fn().mockResolvedValue({ items: [] }), getCandidateClipMedia: vi.fn(), adoptCandidatePlan: vi.fn().mockResolvedValue(state),
-    prepareTimelinePatch: vi.fn().mockResolvedValue({ timeline_patch_egress_preview_id: "patch_preview_1", provider: { display_name: "测试 Provider", origin: "https://provider.test", model: "model" }, prompt_template_version: "timeline-patch-v1", output_schema_version: "timeline-patch-output-v1", sent_fields: ["instruction", "timeline"], payload_sha256: `sha256:${"c".repeat(64)}`, character_count: 100, estimated_tokens: 30, clip_count: 1, caption_count: 1, locked_count: 0, expires_at: now }), testTimelinePatchProviderCapability: vi.fn().mockResolvedValue({ timeline_patch_capability_status: "supported", timeline_patch_response_adapter_id: "openai_chat_completions_json_schema_v1", timeline_patch_probe_protocol_version: "1", timeline_patch_capability_tested_at: now, timeline_patch_capability_failure_code: null, timeline_patch_probe_sha256: `sha256:${"d".repeat(64)}` }), createTimelinePatchGeneration: vi.fn().mockResolvedValue({ timeline_patch_generation_id: "patch_generation_1", job: { ...createdJob, kind: "timeline_patch_generation" } }), getTimelinePatchGeneration: vi.fn(), listTimelinePatchProposals: vi.fn().mockResolvedValue({ items: [] }), getTimelinePatchProposal: vi.fn(), applyTimelinePatchProposal: vi.fn().mockResolvedValue(state), compareTimelineRevisions: vi.fn(), prepareAgentSession: vi.fn(), createAgentSession: vi.fn(), listAgentSessions: vi.fn().mockResolvedValue({ items: [] }), getAgentSession: vi.fn(), getCvAnalysis: vi.fn(), listCvSamples: vi.fn().mockResolvedValue({ asset_id: "asset_1", samples: [] }), listEditingGrammarPlanners: vi.fn().mockResolvedValue({ items: [] }), prepareEditingGrammar: vi.fn(), proposeEditingGrammar: vi.fn(), listEditingGrammarProposals: vi.fn().mockResolvedValue({ items: [] }), getEditingGrammarProposal: vi.fn(), applyEditingGrammarProposal: vi.fn().mockResolvedValue(state),
+    getBrief: vi.fn().mockRejectedValue(new Error("BRIEF_NOT_FOUND")), putBrief: vi.fn().mockResolvedValue({}), listRecipes: vi.fn().mockResolvedValue({ items: [{ schema_version: 1, recipe_id: "balanced-narrative-v1", name: "Balanced", summary: "测试", rules: { selection: "keyword", pace: "balanced", max_gap_us: 1 }, document_sha256: `sha256:${"a".repeat(64)}` }] }), listProviders: vi.fn().mockResolvedValue({ items: [{ provider_config_id: "provider_1", kind: "openai_compatible_text", display_name: "测试 Provider", base_url: "https://provider.test", model: "model", enabled: true, credential_status: "configured", input_price_per_million: null, output_price_per_million: null, timeline_patch_capability_status: "supported", timeline_patch_response_adapter_id: "openai_chat_completions_json_schema_v1", timeline_patch_probe_protocol_version: "1", timeline_patch_capability_tested_at: now, timeline_patch_capability_failure_code: null, timeline_patch_capability_probe_sha256: `sha256:${"d".repeat(64)}`, candidate_capability_status: "supported", candidate_response_adapter_id: "openai_chat_completions_json_schema_v1", candidate_probe_protocol_version: "1", candidate_capability_tested_at: now, candidate_capability_failure_code: null, candidate_capability_probe_sha256: `sha256:${"e".repeat(64)}`, captions_provider_capability_status: "supported", captions_provider_response_adapter_id: "openai_chat_completions_captionscript_v1", captions_provider_probe_protocol_version: "1", captions_provider_capability_tested_at: now, captions_provider_capability_failure_code: null, captions_provider_capability_probe_sha256: `sha256:${"f".repeat(64)}`, created_at: now, updated_at: now }] }), createProvider: vi.fn(), setProviderSecret: vi.fn(), deleteProviderSecret: vi.fn().mockResolvedValue({ provider_config_id: "provider_1", credential_status: "missing" }), testProvider: vi.fn().mockResolvedValue({ status: "succeeded" }), testCandidateProviderCapability: vi.fn().mockResolvedValue({ candidate_capability_status: "supported", candidate_response_adapter_id: "openai_chat_completions_json_schema_v1", candidate_probe_protocol_version: "1", candidate_capability_tested_at: now, candidate_capability_failure_code: null, candidate_capability_probe_sha256: `sha256:${"e".repeat(64)}` }), preparePlanning: vi.fn().mockResolvedValue({ egress_preview_id: "preview_1", provider: { display_name: "测试", origin: "https://provider.test", model: "model" }, prompt_template_version: "candidate-plan-v1", sent_fields: ["segments.text"], payload_sha256: `sha256:${"b".repeat(64)}`, expires_at: now, payload: { segments: [{ segment_ref: "s1", text: "第一句" }] }, stats: { transcript_count: 1, segment_count: 1, character_count: 3, estimated_tokens: 1 } }), createPlanning: vi.fn().mockResolvedValue({ job: { ...createdJob, kind: "candidate_generation" } }), listCandidatePlans: vi.fn().mockResolvedValue({ items: [] }), getCandidateClipMedia: vi.fn(), adoptCandidatePlan: vi.fn().mockResolvedValue(state),
+    prepareTimelinePatch: vi.fn().mockResolvedValue({ timeline_patch_egress_preview_id: "patch_preview_1", provider: { display_name: "测试 Provider", origin: "https://provider.test", model: "model" }, prompt_template_version: "timeline-patch-v1", output_schema_version: "timeline-patch-output-v1", sent_fields: ["instruction", "timeline"], payload_sha256: `sha256:${"c".repeat(64)}`, character_count: 100, estimated_tokens: 30, clip_count: 1, caption_count: 1, locked_count: 0, expires_at: now }), testTimelinePatchProviderCapability: vi.fn().mockResolvedValue({ timeline_patch_capability_status: "supported", timeline_patch_response_adapter_id: "openai_chat_completions_json_schema_v1", timeline_patch_probe_protocol_version: "1", timeline_patch_capability_tested_at: now, timeline_patch_capability_failure_code: null, timeline_patch_probe_sha256: `sha256:${"d".repeat(64)}` }), createTimelinePatchGeneration: vi.fn().mockResolvedValue({ timeline_patch_generation_id: "patch_generation_1", job: { ...createdJob, kind: "timeline_patch_generation" } }), getTimelinePatchGeneration: vi.fn(), listTimelinePatchProposals: vi.fn().mockResolvedValue({ items: [] }), getTimelinePatchProposal: vi.fn(), applyTimelinePatchProposal: vi.fn().mockResolvedValue(state), compareTimelineRevisions: vi.fn(), prepareAgentSession: vi.fn(), createAgentSession: vi.fn(), listAgentSessions: vi.fn().mockResolvedValue({ items: [] }), getAgentSession: vi.fn(),
+    // AI 字幕优化（Slice 5）：发起入口在转录页。
+    testCaptionsProviderCapability: vi.fn().mockResolvedValue({ captions_provider_capability_status: "supported", captions_provider_response_adapter_id: "openai_chat_completions_captionscript_v1", captions_provider_probe_protocol_version: "1", captions_provider_capability_tested_at: now, captions_provider_capability_failure_code: null, captions_provider_capability_probe_sha256: `sha256:${"f".repeat(64)}` }),
+    prepareCaptionsProvider: vi.fn().mockResolvedValue({ captions_provider_egress_preview_id: "captions_preview_1", provider: { display_name: "测试 Provider", origin: "https://provider.test", model: "model" }, prompt_template_version: "captions_provider_v1", output_schema_version: "caption-text-output-v1", sent_fields: ["language", "preset_id", "max_chars_per_caption", "segments.segment_id", "segments.ordinal", "segments.text", "segments.duration_bucket"], payload_sha256: `sha256:${"a".repeat(64)}`, segment_count: 1, character_count: 12, expires_at: now }),
+    createCaptionsProvider: vi.fn().mockResolvedValue({ captions_provider_generation_id: "captions_generation_1", status: "queued", consent_id: "captions_consent_1" }),
+    getCaptionsProviderGeneration: vi.fn().mockResolvedValue({ captions_provider_generation_id: "captions_generation_1", project_id: project.project_id, base_revision_id: state.current_revision.timeline_revision_id, status: "succeeded", payload_sha256: `sha256:${"a".repeat(64)}`, created_at: now, updated_at: now, finished_at: now }),
+    createCaptionsProviderProposal: vi.fn().mockResolvedValue({ captions_provider_proposal_id: "captions_proposal_1", generation_id: "captions_generation_1", project_id: project.project_id, base_revision_id: state.current_revision.timeline_revision_id, base_document_sha256: `sha256:${"b".repeat(64)}`, patch: { summary: "Provider 字幕文本提案", operations: [{ op: "update_caption", caption_id: "caption_1", text: "改写后的字幕" }] }, patch_sha256: `sha256:${"c".repeat(64)}`, proposed_document_sha256: `sha256:${"d".repeat(64)}`, created_at: now, applied_revision_id: null }),
+    applyCaptionsProviderProposal: vi.fn().mockResolvedValue(state),
+    getCaptionsProviderProposal: vi.fn(), getCvAnalysis: vi.fn(), listCvSamples: vi.fn().mockResolvedValue({ asset_id: "asset_1", samples: [] }), listEditingGrammarPlanners: vi.fn().mockResolvedValue({ items: [] }), prepareEditingGrammar: vi.fn(), proposeEditingGrammar: vi.fn(), listEditingGrammarProposals: vi.fn().mockResolvedValue({ items: [] }), getEditingGrammarProposal: vi.fn(), applyEditingGrammarProposal: vi.fn().mockResolvedValue(state),
     createTimeline: vi.fn().mockResolvedValue(state), getTimeline: timeline ? vi.fn().mockResolvedValue(timeline) : vi.fn().mockRejectedValue(new Error("TIMELINE_NOT_FOUND 404")), patchTimeline: vi.fn().mockResolvedValue(state), undoTimeline: vi.fn().mockResolvedValue(state), redoTimeline: vi.fn().mockResolvedValue(state), saveTimelineDraft: vi.fn().mockResolvedValue({ project_id: project.project_id, base_revision_id: state.current_revision.timeline_revision_id, document: timelineDocument, updated_at: now, conflict: false }), deleteTimelineDraft: vi.fn().mockResolvedValue(undefined), listTimelineRevisions: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), getTimelineRevision: vi.fn(),
     createPreview: vi.fn().mockResolvedValue({ job: null, preview: null, reused: false }), listPreviews: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), chooseExportDestination: vi.fn().mockResolvedValue(null), renameExportDestination: vi.fn(), createExport: vi.fn(), listExports: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), deleteExportRecord: vi.fn().mockResolvedValue(undefined), getRenderArtifact: vi.fn(), getPreviewIr: vi.fn().mockResolvedValue(fixturePreviewIrPresentation()), lookupDerivedMedia: vi.fn(), derivedMediaStats: vi.fn(), derivedMediaUrl: vi.fn(), captionFontUrl: vi.fn().mockResolvedValue(""), captionFontUrls: vi.fn().mockResolvedValue([{ family: "Noto Sans CJK SC", media_url: "" }]),
     listPlatformPresets: vi.fn().mockResolvedValue({ items: [] }), listRenditionPresets: vi.fn().mockResolvedValue({ items: [] }), createRenditionPreview: vi.fn(), listRenditionPreviews: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), chooseExportDirectory: vi.fn().mockResolvedValue(null), createExportBatch: vi.fn(), getExportBatch: vi.fn(), listExportBatches: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), cancelExportBatch: vi.fn(), retryExportBatch: vi.fn(),
@@ -231,6 +240,107 @@ describe("Stage 1A/1B 工作流", () => {
     fireEvent.click(screen.getByRole("tab", { name: /^任务/ }));
     fireEvent.click(screen.getByRole("button", { name: "重试转录" })); await waitFor(() => expect(readyApi.createTranscription).toHaveBeenCalledTimes(2)); fireEvent.click(screen.getAllByRole("button", { name: "取消" })[0]); await waitFor(() => expect(readyApi.cancelJob).toHaveBeenCalledWith("job_created_2"));
   });
+
+  it("转录完成后刷新转录摘要，转录页出现可勾选片段", async () => {
+    // 回归（2026-10-06 现场）：转录在"任务"页显示成功，转录页却仍显示
+    // "尚未生成转录"——因为发起转录后从未订阅 job、也从未重拉摘要。
+    const api = desktopApi({ models: [readyModel] });
+    let listener: ((job: Job) => void) | undefined;
+    api.subscribeJob = vi.fn((_id, next) => { listener = next; return () => undefined; });
+    // 首次加载：无转录；转录完成后重拉：出现一条 ready 摘要。
+    let listed = 0;
+    const listTranscripts = vi.fn().mockImplementation(async () => {
+      listed += 1;
+      return listed === 1
+        ? { items: [], next_cursor: null }
+        : { items: [{ transcript_id: "transcript_1", asset_id: video.asset_id, status: "ready", language: "zh", duration_us: 1_000_000, created_at: now, updated_at: now } as never], next_cursor: null };
+    });
+    api.listTranscripts = listTranscripts;
+    window.desktop = api; render(<App />);
+    await expectSwitcherName("演示项目");
+    fireEvent.click(screen.getByRole("tab", { name: /^素材/ })); fireEvent.click(await screen.findByTitle("转录"));
+    fireEvent.click(await screen.findByRole("button", { name: "开始转录" }));
+    await waitFor(() => expect(api.subscribeJob).toHaveBeenCalled());
+    // 任务成功 → 应触发摘要重拉
+    act(() => listener?.({ ...createdJob, job_id: "job_created_1" as never, status: "succeeded" } as Job));
+    await waitFor(() => expect(listTranscripts.mock.calls.length).toBeGreaterThan(1));
+    // 转录页现在应能点开该转录并勾选片段
+    fireEvent.click(screen.getByRole("tab", { name: /^转录/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /查看转录 transcript_1/ }));
+    expect(await screen.findByRole("checkbox", { name: /第一句/ })).toBeVisible();
+  });
+
+  it("同类任务行可区分（素材名 + 时间），不只显示相同标题", async () => {
+    const first = "2026-10-06T11:25:39.989Z";
+    const second = "2026-10-06T07:30:19.056Z";
+    const api = desktopApi({ jobs: [
+      { ...job, job_id: "job_a" as never, status: "succeeded", stage: "completed", created_at: first },
+      { ...job, job_id: "job_b" as never, status: "succeeded", stage: "completed", created_at: second },
+    ] });
+    window.desktop = api; render(<App />);
+    await expectSwitcherName("演示项目");
+    fireEvent.click(screen.getByRole("tab", { name: /^任务/ }));
+    // 两行都必须带上可区分信息。时间按**本地时区**渲染（Core 存 UTC）——
+    // 直接用 UTC 串会显示错误时间，故以格式化结果断言。
+    expect(await screen.findByText(new RegExp(formatLocalStamp(first).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")))).toBeVisible();
+    expect(screen.getByText(new RegExp(formatLocalStamp(second).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")))).toBeVisible();
+  });
+
+  it("可删除已结束任务；进行中任务只提供取消，不提供删除", async () => {
+    const api = desktopApi({ jobs: [
+      { ...job, job_id: "job_done" as never, status: "succeeded", stage: "completed" },
+      { ...job, job_id: "job_run" as never, status: "running", stage: "transcribing" },
+    ] });
+    window.desktop = api; render(<App />);
+    await expectSwitcherName("演示项目");
+    fireEvent.click(screen.getByRole("tab", { name: /^任务/ }));
+    // 进行中行不得出现删除（必须先取消）。
+    expect(screen.queryByRole("button", { name: /删除任务 job_run/ })).not.toBeInTheDocument();
+    // 已结束行提供删除，且走 IPC。
+    const deleteBtn = await screen.findByRole("button", { name: /删除任务 job_done/ });
+    fireEvent.click(deleteBtn);
+    await waitFor(() => expect(api.deleteJob).toHaveBeenCalledWith("job_done"));
+    await waitFor(() => expect(screen.queryByRole("button", { name: /删除任务 job_done/ })).not.toBeInTheDocument());
+  });
+
+  it("任务被引用时删除给出下一步提示", async () => {
+    const api = desktopApi({ jobs: [
+      { ...job, job_id: "job_ref" as never, status: "succeeded", stage: "completed" },
+    ] });
+    api.deleteJob = vi.fn().mockRejectedValue(new Error("[JOB_REFERENCED] in use"));
+    window.desktop = api; render(<App />);
+    await expectSwitcherName("演示项目");
+    fireEvent.click(screen.getByRole("tab", { name: /^任务/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /删除任务 job_ref/ }));
+    expect(await screen.findByText(/被渲染产物或生成记录引用，无法删除/)).toBeVisible();
+  });
+
+  it("转录删除需显式确认，且被时间线引用时给出下一步", async () => {
+    const api = desktopApi();
+    window.desktop = api; render(<App />);
+    await expectSwitcherName("演示项目");
+    fireEvent.click(screen.getByRole("tab", { name: /^转录/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /查看转录 transcript_1/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /删除转录 transcript_1/ }));
+    const dialog = await screen.findByRole("dialog", { name: "删除转录" });
+    expect(within(dialog).getByText(/此操作不可撤销/)).toBeVisible();
+    expect(api.deleteTranscript).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "删除转录" }));
+    await waitFor(() => expect(api.deleteTranscript).toHaveBeenCalledWith("transcript_1"));
+  });
+
+  it("转录被时间线字幕引用时删除被拒并提示先移除", async () => {
+    const api = desktopApi();
+    api.deleteTranscript = vi.fn().mockRejectedValue(new Error("[TRANSCRIPTION_IN_USE] referenced"));
+    window.desktop = api; render(<App />);
+    await expectSwitcherName("演示项目");
+    fireEvent.click(screen.getByRole("tab", { name: /^转录/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /查看转录 transcript_1/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /删除转录 transcript_1/ }));
+    const dialog = await screen.findByRole("dialog", { name: "删除转录" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "删除转录" }));
+    expect(await screen.findByText(/请先移除相关字幕或片段后再删除/)).toBeVisible();
+  });
 });
 
 describe("素材箱交互", () => {
@@ -343,7 +453,7 @@ describe("Stage 2A AI 粗剪", () => {
   afterEach(() => cleanup());
   it("未测试 Provider 不可准备，只有用户点击兼容性测试后才允许 AI 粗剪", async () => {
     const api = desktopApi();
-    vi.mocked(api.listProviders!).mockResolvedValue({ items: [{ provider_config_id: "provider_1" as never, kind: "openai_compatible_text", display_name: "未测试 Provider", base_url: "https://provider.test", model: "model", enabled: true, credential_status: "configured", input_price_per_million: null, output_price_per_million: null, timeline_patch_capability_status: "supported", timeline_patch_response_adapter_id: "openai_chat_completions_json_schema_v1", timeline_patch_probe_protocol_version: "1", timeline_patch_capability_tested_at: now, timeline_patch_capability_failure_code: null, timeline_patch_capability_probe_sha256: `sha256:${"d".repeat(64)}`, candidate_capability_status: "untested", candidate_response_adapter_id: null, candidate_probe_protocol_version: null, candidate_capability_tested_at: null, candidate_capability_failure_code: null, candidate_capability_probe_sha256: null, created_at: now, updated_at: now }] });
+    vi.mocked(api.listProviders!).mockResolvedValue({ items: [{ provider_config_id: "provider_1" as never, kind: "openai_compatible_text", display_name: "未测试 Provider", base_url: "https://provider.test", model: "model", enabled: true, credential_status: "configured", input_price_per_million: null, output_price_per_million: null, timeline_patch_capability_status: "supported", timeline_patch_response_adapter_id: "openai_chat_completions_json_schema_v1", timeline_patch_probe_protocol_version: "1", timeline_patch_capability_tested_at: now, timeline_patch_capability_failure_code: null, timeline_patch_capability_probe_sha256: `sha256:${"d".repeat(64)}`, candidate_capability_status: "untested", candidate_response_adapter_id: null, candidate_probe_protocol_version: null, candidate_capability_tested_at: null, candidate_capability_failure_code: null, candidate_capability_probe_sha256: null, captions_provider_capability_status: "supported", captions_provider_response_adapter_id: "openai_chat_completions_captionscript_v1", captions_provider_probe_protocol_version: "1", captions_provider_capability_tested_at: now, captions_provider_capability_failure_code: null, captions_provider_capability_probe_sha256: `sha256:${"f".repeat(64)}`, created_at: now, updated_at: now }] });
     vi.mocked(api.testCandidateProviderCapability).mockResolvedValue({ candidate_capability_status: "supported", candidate_response_adapter_id: "openai_chat_completions_json_schema_v1", candidate_probe_protocol_version: "1", candidate_capability_tested_at: now, candidate_capability_failure_code: null, candidate_capability_probe_sha256: `sha256:${"e".repeat(64)}` });
     window.desktop = api; render(<App />); await expectSwitcherName("演示项目");
     fireEvent.click(screen.getByRole("button", { name: "AI 粗剪" }));
@@ -365,10 +475,7 @@ describe("Stage 2A AI 粗剪", () => {
     fireEvent.change(screen.getByLabelText("制作配方"), { target: { value: "balanced-narrative-v1" } });
     fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "provider_1" } });
     fireEvent.change(screen.getByLabelText("就绪转录"), { target: { value: "transcript_1" } });
-    fireEvent.change(screen.getByLabelText("Provider 密钥"), { target: { value: "SENTINEL-SECRET" } });
-    fireEvent.click(screen.getByRole("button", { name: "安全保存密钥" }));
-    await waitFor(() => expect(api.setProviderSecret).toHaveBeenCalledWith({ provider_config_id: "provider_1", secret: "SENTINEL-SECRET" }));
-    expect(document.body.textContent).not.toContain("SENTINEL-SECRET");
+    // 密钥/连接测试已移至独立「Provider 设置」：AI 粗剪里只保留能力测试与 prepare。
     fireEvent.click(screen.getByRole("button", { name: "测试 AI 粗剪兼容性" }));
     await waitFor(() => expect(api.testCandidateProviderCapability).toHaveBeenCalledWith("provider_1"));
     expect(api.createPlanning).not.toHaveBeenCalled();
@@ -377,11 +484,58 @@ describe("Stage 2A AI 粗剪", () => {
     fireEvent.click(screen.getByRole("button", { name: "我确认发送以上内容" }));
     await waitFor(() => expect(api.createPlanning).toHaveBeenCalledWith({ project_id: "project_1", egress_preview_id: "preview_1", payload_sha256: `sha256:${"b".repeat(64)}` }));
   });
+  it("Provider 设置是独立入口：可创建 Provider 并保存密钥且不回显", async () => {
+    const api = desktopApi(); window.desktop = api; render(<App />); await expectSwitcherName("演示项目");
+    await screen.findByRole("note", { name: "合成预览回退提示" }, { timeout: 10_000 }); // 等回退落定再交互
+    // 入口在工具菜单的 AI 组
+    fireEvent.click(screen.getByRole("button", { name: /工具/ }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Provider 设置" }));
+    const dialog = await screen.findByRole("dialog", { name: "Provider 设置" });
+    expect(within(dialog).getByText(/密钥只提交、不回显/)).toBeVisible();
+    // 选中已有 Provider → 保存密钥
+    fireEvent.change(await within(dialog).findByLabelText("已有 Provider"), { target: { value: "provider_1" } });
+    fireEvent.change(within(dialog).getByLabelText("Provider 密钥"), { target: { value: "SENTINEL-SECRET" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "安全保存密钥" }));
+    await waitFor(() => expect(api.setProviderSecret).toHaveBeenCalledWith({ provider_config_id: "provider_1", secret: "SENTINEL-SECRET" }));
+    expect(document.body.textContent).not.toContain("SENTINEL-SECRET");
+  });
+  it("Provider 设置也可从「设置」进入，并关闭设置避免两窗叠加", async () => {
+    const api = desktopApi(); window.desktop = api; render(<App />); await expectSwitcherName("演示项目");
+    await screen.findByRole("note", { name: "合成预览回退提示" }, { timeout: 10_000 });
+    fireEvent.click(screen.getByRole("button", { name: "设置" }));
+    const settings = await screen.findByRole("dialog", { name: "设置" });
+    expect(within(settings).getByText(/AI 粗剪、AI 修改、AI 助手与 AI 字幕优化共用/)).toBeVisible();
+    fireEvent.click(within(settings).getByRole("button", { name: "打开 Provider 设置" }));
+    // 设置关、Provider 设置开——不得同时叠两个 modal。
+    expect(await screen.findByRole("dialog", { name: "Provider 设置" })).toBeVisible();
+    expect(screen.queryByRole("dialog", { name: "设置" })).not.toBeInTheDocument();
+  });
+
+  it("Provider 设置可新建 Provider，并提示接着填密钥", async () => {
+    const api = desktopApi();
+    api.listProviders = vi.fn().mockResolvedValue({ items: [] });
+    vi.mocked(api.createProvider!).mockResolvedValue({ provider_config_id: "provider_new" as never, kind: "openai_compatible_text", display_name: "我的网关", base_url: "https://gw.test", model: "m", enabled: true, credential_status: "missing", input_price_per_million: null, output_price_per_million: null, timeline_patch_capability_status: "untested", timeline_patch_response_adapter_id: null, timeline_patch_probe_protocol_version: null, timeline_patch_capability_tested_at: null, timeline_patch_capability_failure_code: null, timeline_patch_capability_probe_sha256: null, candidate_capability_status: "untested", candidate_response_adapter_id: null, candidate_probe_protocol_version: null, candidate_capability_tested_at: null, candidate_capability_failure_code: null, candidate_capability_probe_sha256: null, captions_provider_capability_status: "untested", captions_provider_response_adapter_id: null, captions_provider_probe_protocol_version: null, captions_provider_capability_tested_at: null, captions_provider_capability_failure_code: null, captions_provider_capability_probe_sha256: null, created_at: now, updated_at: now });
+    window.desktop = api; render(<App />); await expectSwitcherName("演示项目");
+    fireEvent.click(screen.getByRole("button", { name: /工具/ }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Provider 设置" }));
+    const dialog = await screen.findByRole("dialog", { name: "Provider 设置" });
+    // 无 Provider 时给出明确空态与下一步
+    expect(await within(dialog).findByText(/尚无 Provider/)).toBeVisible();
+    fireEvent.change(within(dialog).getByLabelText("Provider 名称"), { target: { value: "我的网关" } });
+    fireEvent.change(within(dialog).getByLabelText("Provider 地址"), { target: { value: "https://gw.test" } });
+    fireEvent.change(within(dialog).getByLabelText("Provider 模型"), { target: { value: "m" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "创建 Provider" }));
+    await waitFor(() => expect(api.createProvider).toHaveBeenCalledWith(expect.objectContaining({ kind: "openai_compatible_text", display_name: "我的网关", base_url: "https://gw.test", model: "m", enabled: true })));
+    expect(await within(dialog).findByText(/下一步：填入密钥并保存/)).toBeVisible();
+  });
   it("删除密钥使用白名单桥接且不回显", async () => {
     const api = desktopApi(); window.desktop = api; render(<App />); await expectSwitcherName("演示项目");
     await screen.findByRole("note", { name: "合成预览回退提示" }, { timeout: 10_000 }); // 等回退落定再交互（见"必须先 prepare"用例注释）
-    fireEvent.click(screen.getByRole("button", { name: "AI 粗剪" })); fireEvent.change(await screen.findByLabelText("Provider"), { target: { value: "provider_1" } });
-    fireEvent.click(screen.getByRole("button", { name: "删除密钥" })); await waitFor(() => expect(api.deleteProviderSecret).toHaveBeenCalledWith("provider_1"));
+    fireEvent.click(screen.getByRole("button", { name: /工具/ }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Provider 设置" }));
+    const dialog = await screen.findByRole("dialog", { name: "Provider 设置" });
+    fireEvent.change(await within(dialog).findByLabelText("已有 Provider"), { target: { value: "provider_1" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "删除密钥" })); await waitFor(() => expect(api.deleteProviderSecret).toHaveBeenCalledWith("provider_1"));
     expect(document.body.textContent).not.toContain("SENTINEL-KEY-NEVER-LOG");
   });
   it.each(["failed", "cancelled", "interrupted"] as const)("任务 %s 会清除旧外传预览，取消按钮调用任务取消并强制重新准备", async status => {
@@ -434,7 +588,7 @@ describe("Stage 2B AI 修改", () => {
   });
   it("未测试 Provider 禁用 AI 修改选择，兼容性测试后仅显示安全状态", async () => {
     const api = desktopApi();
-    vi.mocked(api.listProviders!).mockResolvedValue({ items: [{ provider_config_id: "provider_1" as never, kind: "openai_compatible_text", display_name: "未测试 Provider", base_url: "https://provider.test", model: "model", enabled: true, credential_status: "configured", input_price_per_million: null, output_price_per_million: null, timeline_patch_capability_status: "untested", timeline_patch_response_adapter_id: null, timeline_patch_probe_protocol_version: null, timeline_patch_capability_tested_at: null, timeline_patch_capability_failure_code: null, timeline_patch_capability_probe_sha256: null, candidate_capability_status: "untested", candidate_response_adapter_id: null, candidate_probe_protocol_version: null, candidate_capability_tested_at: null, candidate_capability_failure_code: null, candidate_capability_probe_sha256: null, created_at: now, updated_at: now }] });
+    vi.mocked(api.listProviders!).mockResolvedValue({ items: [{ provider_config_id: "provider_1" as never, kind: "openai_compatible_text", display_name: "未测试 Provider", base_url: "https://provider.test", model: "model", enabled: true, credential_status: "configured", input_price_per_million: null, output_price_per_million: null, timeline_patch_capability_status: "untested", timeline_patch_response_adapter_id: null, timeline_patch_probe_protocol_version: null, timeline_patch_capability_tested_at: null, timeline_patch_capability_failure_code: null, timeline_patch_capability_probe_sha256: null, candidate_capability_status: "untested", candidate_response_adapter_id: null, candidate_probe_protocol_version: null, candidate_capability_tested_at: null, candidate_capability_failure_code: null, candidate_capability_probe_sha256: null, captions_provider_capability_status: "supported", captions_provider_response_adapter_id: "openai_chat_completions_captionscript_v1", captions_provider_probe_protocol_version: "1", captions_provider_capability_tested_at: now, captions_provider_capability_failure_code: null, captions_provider_capability_probe_sha256: `sha256:${"f".repeat(64)}`, created_at: now, updated_at: now }] });
     window.desktop = api; render(<App />); const entry = await screen.findByRole("button", { name: "AI 修改" }); await waitFor(() => expect(entry).toBeEnabled()); fireEvent.click(entry);
     expect(await screen.findByRole("option", { name: /未测试 Provider.*未测试/ })).toBeDisabled();
     fireEvent.click(await screen.findByRole("button", { name: "测试 AI 修改兼容性" }));
@@ -443,7 +597,7 @@ describe("Stage 2B AI 修改", () => {
   });
   it("AI 修改界面不回显协议、适配器或失败码细节", async () => {
     const api = desktopApi();
-    vi.mocked(api.listProviders!).mockResolvedValue({ items: [{ provider_config_id: "provider_1" as never, kind: "openai_compatible_text", display_name: "不支持 Provider", base_url: "https://provider.test", model: "model", enabled: true, credential_status: "configured", input_price_per_million: null, output_price_per_million: null, timeline_patch_capability_status: "unsupported", timeline_patch_response_adapter_id: null, timeline_patch_probe_protocol_version: null, timeline_patch_capability_tested_at: now, timeline_patch_capability_failure_code: "PROVIDER_SCHEMA_MISMATCH", timeline_patch_capability_probe_sha256: `sha256:${"d".repeat(64)}`, candidate_capability_status: "unsupported", candidate_response_adapter_id: null, candidate_probe_protocol_version: null, candidate_capability_tested_at: now, candidate_capability_failure_code: "PROVIDER_FAILED", candidate_capability_probe_sha256: `sha256:${"e".repeat(64)}`, created_at: now, updated_at: now }] });
+    vi.mocked(api.listProviders!).mockResolvedValue({ items: [{ provider_config_id: "provider_1" as never, kind: "openai_compatible_text", display_name: "不支持 Provider", base_url: "https://provider.test", model: "model", enabled: true, credential_status: "configured", input_price_per_million: null, output_price_per_million: null, timeline_patch_capability_status: "unsupported", timeline_patch_response_adapter_id: null, timeline_patch_probe_protocol_version: null, timeline_patch_capability_tested_at: now, timeline_patch_capability_failure_code: "PROVIDER_SCHEMA_MISMATCH", timeline_patch_capability_probe_sha256: `sha256:${"d".repeat(64)}`, candidate_capability_status: "unsupported", candidate_response_adapter_id: null, candidate_probe_protocol_version: null, candidate_capability_tested_at: now, candidate_capability_failure_code: "PROVIDER_FAILED", candidate_capability_probe_sha256: `sha256:${"e".repeat(64)}`, captions_provider_capability_status: "untested", captions_provider_response_adapter_id: null, captions_provider_probe_protocol_version: null, captions_provider_capability_tested_at: null, captions_provider_capability_failure_code: null, captions_provider_capability_probe_sha256: null, created_at: now, updated_at: now }] });
     vi.mocked(api.testTimelinePatchProviderCapability).mockResolvedValue({ timeline_patch_capability_status: "unsupported", timeline_patch_response_adapter_id: null, timeline_patch_probe_protocol_version: null, timeline_patch_capability_tested_at: now, timeline_patch_capability_failure_code: "PROVIDER_SCHEMA_MISMATCH", timeline_patch_capability_probe_sha256: `sha256:${"d".repeat(64)}` });
     window.desktop = api; render(<App />); const entry = await screen.findByRole("button", { name: "AI 修改" }); await waitFor(() => expect(entry).toBeEnabled()); fireEvent.click(entry);
     expect((await screen.findAllByText(/当前 Provider 不支持 AI 修改/)).length).toBeGreaterThan(0);
@@ -621,5 +775,80 @@ describe("Stage 4B 生成验证正式入口", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "生成验证（模拟）" })).not.toBeInTheDocument());
     fireEvent.click(await generationEntry());
     expect(await screen.findByLabelText("生成验证 Prompt")).toHaveValue("");
+  });
+});
+
+describe("AI 字幕优化（转录页发起）", () => {
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+  const openOptimize = async (api: DesktopApi) => {
+    window.desktop = api;
+    render(<App />);
+    await expectSwitcherName("演示项目");
+    fireEvent.click(screen.getByRole("tab", { name: "转录" }));
+    // 转录正文按需加载：先点开转录条目，片段勾选框才出现。
+    fireEvent.click(await screen.findByRole("button", { name: /查看转录 transcript_1/ }));
+    const checkbox = await screen.findByRole("checkbox", { name: /第一句/ });
+    fireEvent.click(checkbox);
+    const entry = await screen.findByRole("button", { name: "AI 优化字幕文本" });
+    await waitFor(() => expect(entry).toBeEnabled());
+    fireEvent.click(entry);
+    return screen.findByRole("dialog", { name: "AI 字幕优化" });
+  };
+
+  it("未通过字幕能力测试时不可准备，测试通过后才放行", async () => {
+    const api = desktopApi();
+    const base = (await api.listProviders!()).items[0];
+    vi.mocked(api.listProviders!).mockResolvedValue({ items: [{ ...base, captions_provider_capability_status: "untested", captions_provider_response_adapter_id: null, captions_provider_probe_protocol_version: null, captions_provider_capability_tested_at: null, captions_provider_capability_failure_code: null, captions_provider_capability_probe_sha256: null }] });
+    await openOptimize(api);
+    fireEvent.change(await screen.findByLabelText("字幕优化 Provider"), { target: { value: "provider_1" } });
+    expect(screen.getByRole("button", { name: "准备外传确认" })).toBeDisabled();
+    expect(api.testCaptionsProviderCapability).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "测试字幕兼容性" }));
+    await waitFor(() => expect(api.testCaptionsProviderCapability).toHaveBeenCalledWith("provider_1"));
+    expect(await screen.findByText("字幕能力可用。")).toBeVisible();
+    await waitFor(() => expect(screen.getByRole("button", { name: "准备外传确认" })).toBeEnabled());
+  });
+
+  it("必须先准备并确认外传，再生成提案，最后显式应用", async () => {
+    const api = desktopApi();
+    await openOptimize(api);
+    fireEvent.change(await screen.findByLabelText("字幕优化 Provider"), { target: { value: "provider_1" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "准备外传确认" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "准备外传确认" }));
+    // 确认页明示外发字段，且不显示 Provider 响应内容。
+    expect(await screen.findByText(/segments\.text/)).toBeVisible();
+    expect(api.createCaptionsProvider).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "确认并生成" }));
+    await waitFor(() => expect(api.createCaptionsProvider).toHaveBeenCalledTimes(1));
+    // 轮询 generation → 生成提案 → 显式应用。
+    expect(await screen.findByText("字幕改写提案")).toBeVisible();
+    expect(api.applyCaptionsProviderProposal).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "应用为新的 Revision" }));
+    await waitFor(() => expect(api.applyCaptionsProviderProposal).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("已应用")).toBeVisible();
+  });
+
+  it("未勾选片段时入口不可用", async () => {
+    const api = desktopApi();
+    window.desktop = api;
+    render(<App />);
+    await expectSwitcherName("演示项目");
+    fireEvent.click(screen.getByRole("tab", { name: "转录" }));
+    // 展开转录正文后入口才渲染；未勾选时禁用。
+    fireEvent.click(await screen.findByRole("button", { name: /查看转录 transcript_1/ }));
+    const entry = await screen.findByRole("button", { name: "AI 优化字幕文本" });
+    expect(entry).toBeDisabled();
+    expect(screen.queryByRole("dialog", { name: "AI 字幕优化" })).not.toBeInTheDocument();
+  });
+
+  it("界面不回显协议、适配器或失败码细节", async () => {
+    const api = desktopApi();
+    await openOptimize(api);
+    fireEvent.change(await screen.findByLabelText("字幕优化 Provider"), { target: { value: "provider_1" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "准备外传确认" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "准备外传确认" }));
+    await screen.findByText(/segments\.text/);
+    expect(document.body.textContent).not.toMatch(/captionscript|json_schema|adapter|probe_sha256/i);
   });
 });

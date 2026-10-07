@@ -1,4 +1,4 @@
-﻿# ruff: noqa: E501
+# ruff: noqa: E501
 """C22 v19 迁移测试：jobs.phase / jobs.phase_progress 追加列。
 
 要求（PERFORMANCE_IMPLEMENTATION_PLAN C22-6/7）：
@@ -51,7 +51,7 @@ def test_v18_to_v19_is_append_only_and_preserves_checksums(
         )
         assert sql.execute("PRAGMA foreign_key_check").fetchall() == []
         assert sql.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-    assert set(MIGRATIONS) == {f"v{i}" for i in range(1, 27)}
+    assert set(MIGRATIONS) == {f"v{i}" for i in range(1, len(MIGRATIONS) + 1)}
 
 
 def test_v19_columns_exist_and_nullable(tmp_path: Path) -> None:

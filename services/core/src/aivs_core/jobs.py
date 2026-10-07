@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import shutil
+import sqlite3
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -79,6 +80,7 @@ class JobService:
         render_runner: RenderRunner | None = None,
         planning_runner: PlanningRunner | None = None,
         timeline_patch_runner: PlanningRunner | None = None,
+        captions_provider_runner: PlanningRunner | None = None,
         agent_session_runner: PlanningRunner | None = None,
         media_generation_runner: PlanningRunner | None = None,
         media_generation_start: GenerationStart | None = None,
@@ -104,6 +106,7 @@ class JobService:
         self.render_runner = render_runner
         self.planning_runner = planning_runner
         self.timeline_patch_runner = timeline_patch_runner
+        self.captions_provider_runner = captions_provider_runner
         self.agent_session_runner = agent_session_runner
         self.media_generation_runner = media_generation_runner
         self.media_generation_start = media_generation_start
@@ -450,9 +453,81 @@ class JobService:
             ),
         )
 
+    @staticmethod
+    def insert_captions_provider_job(
+        db: Any,
+        job_id: str,
+        now: str,
+        project_id: str,
+        generation_id: str,
+        invocation_id: str,
+        payload_sha256: str,
+    ) -> None:
+        """Queue a captions Provider generation on the existing job pipeline.
+
+        Kept in the caller's transaction so consent, generation, invocation and
+        job become visible atomically (mirrors insert_timeline_patch_job).
+        """
+        db.execute(
+            "INSERT INTO jobs(id,project_id,kind,type,status,stage,progress,input_json,"
+            "captions_provider_generation_id,provider_invocation_id,resource_class,attempt,"
+            "created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                job_id,
+                project_id,
+                "captions_provider_generation",
+                "captions_provider_generation",
+                "queued",
+                "queued",
+                0,
+                json_dumps(
+                    {
+                        "captions_provider_generation_id": generation_id,
+                        "egress_payload_sha256": payload_sha256,
+                    }
+                ),
+                generation_id,
+                invocation_id,
+                "network",
+                1,
+                now,
+                now,
+            ),
+        )
+
     def delete_queued(self, job_id: str) -> None:
         with self.db.connection() as db:
             db.execute("DELETE FROM jobs WHERE id=? AND status='queued'", (job_id,))
+
+    # 终态任务可从"任务"列表移除（历史清理）。运行中/排队中的任务不允许
+    # 直接删除——必须先取消，避免留下无主 worker 或资源租约。
+    TERMINAL_JOB_STATUSES = ("succeeded", "failed", "cancelled", "interrupted")
+
+    def delete_finished(self, job_id: str) -> None:
+        """删除一条已结束的任务记录（含其 artifacts 行）。
+
+        运行中/排队中拒绝（JOB_INVALID_STATE）——先取消再删，避免与调度器
+        的租约和 worker 竞争。被 render_artifacts / media_generation_tasks
+        等业务表引用时由外键拒绝（JOB_IN_PROGRESS_OR_REFERENCED）。
+        """
+        with self.db.connection() as db:
+            row = db.execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
+            if not row:
+                raise ValueError("JOB_NOT_FOUND")
+            if row["status"] not in self.TERMINAL_JOB_STATUSES:
+                raise ValueError("JOB_INVALID_STATE")
+            db.execute("BEGIN")
+            try:
+                # artifacts.job_id 无级联：先删从表行，再删任务行。
+                db.execute("DELETE FROM artifacts WHERE job_id=?", (job_id,))
+                db.execute("DELETE FROM jobs WHERE id=?", (job_id,))
+                db.execute("COMMIT")
+            except sqlite3.IntegrityError as exc:
+                db.execute("ROLLBACK")
+                raise ValueError("JOB_REFERENCED") from exc
+            except Exception:
+                db.execute("ROLLBACK")
+                raise
 
     def get(self, job_id: str) -> dict[str, Any] | None:
         with self.db.connection() as db:
@@ -533,7 +608,11 @@ class JobService:
                 return None
             if row["status"] not in {"interrupted", "failed"}:
                 raise ValueError("JOB_INVALID_STATE")
-            if row["kind"] in {"candidate_generation", "timeline_patch_generation"}:
+            if row["kind"] in {
+                "candidate_generation",
+                "timeline_patch_generation",
+                "captions_provider_generation",
+            }:
                 raise ValueError("CANDIDATE_GENERATION_RECONFIRM_REQUIRED")
             # agent_session 允许 jobs.retry：会话级 consent 已消费，重试 =
             # 全新会话重新走 prepare/confirm（AI-1 规划门 §2 裁决）。
@@ -599,7 +678,11 @@ class JobService:
             if (
                 job_id in self.tasks
                 and job
-                and job["kind"] in {"candidate_generation", "timeline_patch_generation"}
+                and job["kind"] in {
+                    "candidate_generation",
+                    "timeline_patch_generation",
+                    "captions_provider_generation",
+                }
             ):
                 self.tasks[job_id].cancel()
         elif status == "cancelling":
@@ -791,6 +874,20 @@ class JobService:
                 if self.timeline_patch_runner is None:
                     raise RuntimeError("PLANNING_UNAVAILABLE")
                 result = await self.timeline_patch_runner(
+                    row,
+                    cancel_event,
+                    lambda value: self._set_progress(job_id, value),
+                    lambda value: self._set_stage(job_id, value),
+                )
+                with self.db.connection() as db:
+                    db.execute(
+                        "UPDATE jobs SET result_json=?,updated_at=? WHERE id=?",
+                        (json_dumps(result), utc_now(), job_id),
+                    )
+            elif row["kind"] == "captions_provider_generation":
+                if self.captions_provider_runner is None:
+                    raise RuntimeError("PLANNING_UNAVAILABLE")
+                result = await self.captions_provider_runner(
                     row,
                     cancel_event,
                     lambda value: self._set_progress(job_id, value),

@@ -14,10 +14,60 @@ function setup() {
 describe("Stage2B IPC", () => {
   it("只注册冻结白名单并精确转发 prepare/create", async () => {
     const { handlers, fetchWithUi } = setup();
-    expect([...handlers.keys()]).toEqual(["planning-patch:prepare", "planning-patch:test-provider-capability", "planning-patch:create", "planning-patch:generation-get", "planning-patch:proposal-list", "planning-patch:proposal-get", "planning-patch:proposal-apply", "worklist:list", "worklist:prepare", "worklist:create", "worklist:cancel", "worklist:apply", "timeline:revision-diff", "agent-session:prepare", "agent-session:create", "agent-session:list", "agent-session:get", "cv-analysis:get", "cv-samples:list", "editing-grammar:planners", "editing-grammar:prepare", "editing-grammar:propose", "editing-grammar:proposal-list", "editing-grammar:proposal-get", "editing-grammar:proposal-apply"]);
+    expect([...handlers.keys()]).toEqual(["planning-patch:prepare", "planning-patch:test-provider-capability", "planning-patch:create", "planning-patch:generation-get", "planning-patch:proposal-list", "planning-patch:proposal-get", "planning-patch:proposal-apply", "captions-provider:test-capability", "captions-provider:prepare", "captions-provider:create", "captions-provider:get", "captions-provider:proposal-apply", "captions-provider:proposal-get", "captions-provider:proposal-from-generation", "worklist:list", "worklist:prepare", "worklist:create", "worklist:cancel", "worklist:apply", "timeline:revision-diff", "agent-session:prepare", "agent-session:create", "agent-session:list", "agent-session:get", "cv-analysis:get", "cv-samples:list", "editing-grammar:planners", "editing-grammar:prepare", "editing-grammar:propose", "editing-grammar:proposal-list", "editing-grammar:proposal-get", "editing-grammar:proposal-apply"]);
     fetchWithUi.mockResolvedValueOnce({ timeline_patch_egress_preview_id: "preview_1", provider: { display_name: "Provider", origin: "https://provider.test", model: "model" }, prompt_template_version: "timeline-patch-v1", output_schema_version: "timeline-patch-output-v1", sent_fields: ["instruction"], payload_sha256: hash, character_count: 10, estimated_tokens: 3, clip_count: 1, caption_count: 0, locked_count: 0, expires_at: now });
     await handlers.get("planning-patch:prepare")?.({}, { project_id: "project_1", base_revision_id: "revision_1", provider_config_id: "provider_1", instruction: "缩短开头" });
     expect(fetchWithUi).toHaveBeenCalledWith("/api/v1/projects/project_1/timeline-patch-generations/prepare", { method: "POST", body: JSON.stringify({ base_revision_id: "revision_1", provider_config_id: "provider_1", instruction: "缩短开头" }) });
+  });
+
+  it("captions provider：prepare/create/get 精确转发并解析响应，响应敏感字段被裁剪", async () => {
+    const { handlers, fetchWithUi } = setup();
+    const preview = { captions_provider_egress_preview_id: "caption_preview_1", provider: { display_name: "Provider", origin: "https://provider.test", model: "model" }, prompt_template_version: "captions_provider_v1", output_schema_version: "caption-text-output-v1", sent_fields: ["language", "preset_id", "max_chars_per_caption"], payload_sha256: hash, segment_count: 2, character_count: 12, expires_at: now, raw_response: "must-not-pass" };
+    fetchWithUi.mockResolvedValueOnce(preview);
+    const prepared = await handlers.get("captions-provider:prepare")?.({}, { project_id: "project_1", base_revision_id: "revision_1", provider_config_id: "provider_1", transcript_id: "transcript_1", segment_ids: ["segment_1", "segment_2"], language: "zh-CN", preset_id: "default-bottom", max_chars_per_caption: 24 });
+    const { raw_response: _rawResponse, ...safePreview } = preview;
+    expect(prepared).toEqual(safePreview);
+    expect(prepared).not.toHaveProperty("raw_response");
+    expect(fetchWithUi).toHaveBeenCalledWith("/api/v1/projects/project_1/captions-provider/prepare", { method: "POST", body: JSON.stringify({ base_revision_id: "revision_1", provider_config_id: "provider_1", transcript_id: "transcript_1", segment_ids: ["segment_1", "segment_2"], language: "zh-CN", preset_id: "default-bottom", max_chars_per_caption: 24 }) });
+    fetchWithUi.mockResolvedValueOnce({ captions_provider_generation_id: "caption_generation_1", status: "queued", consent_id: "consent_1", secret: "must-not-pass" });
+    await expect(handlers.get("captions-provider:create")?.({}, { project_id: "project_1", captions_provider_egress_preview_id: "caption_preview_1", payload_sha256: hash })).resolves.toEqual({ captions_provider_generation_id: "caption_generation_1", status: "queued", consent_id: "consent_1" });
+    expect(fetchWithUi).toHaveBeenCalledWith("/api/v1/projects/project_1/captions-provider", { method: "POST", body: JSON.stringify({ captions_provider_egress_preview_id: "caption_preview_1", payload_sha256: hash }) });
+    const generation = { captions_provider_generation_id: "caption_generation_1", project_id: "project_1", base_revision_id: "revision_1", status: "succeeded", payload_sha256: hash, created_at: now, updated_at: now, finished_at: now };
+    fetchWithUi.mockResolvedValueOnce(generation);
+    await expect(handlers.get("captions-provider:get")?.({}, { project_id: "project_1", generation_id: "caption_generation_1" })).resolves.toEqual(generation);
+    expect(fetchWithUi).toHaveBeenCalledWith("/api/v1/projects/project_1/captions-provider-generations/caption_generation_1", undefined);
+  });
+
+  it("captions provider：非法输入拒绝且不 fetch", async () => {
+    const { handlers, fetchWithUi } = setup();
+    const base = { project_id: "project_1", base_revision_id: "revision_1", provider_config_id: "provider_1", transcript_id: "transcript_1", segment_ids: ["segment_1"], language: null, preset_id: "default-bottom", max_chars_per_caption: 24 };
+    for (const input of [
+      { ...base, segment_ids: ["segment_1", "segment_1"] },
+      { ...base, segment_ids: ["bad id"] },
+      { ...base, segment_ids: [] },
+      { ...base, language: "   " },
+      { ...base, language: "x".repeat(33) },
+      { ...base, preset_id: "custom" },
+      { ...base, max_chars_per_caption: true },
+      { ...base, max_chars_per_caption: 0 },
+      { ...base, extra: true }
+    ]) await expect(handlers.get("captions-provider:prepare")?.({}, input)).rejects.toThrow();
+    await expect(handlers.get("captions-provider:create")?.({}, { project_id: "project_1", captions_provider_egress_preview_id: "preview_1", payload_sha256: "bad", extra: true })).rejects.toThrow();
+    await expect(handlers.get("captions-provider:get")?.({}, { project_id: "project_1", generation_id: "bad id" })).rejects.toThrow();
+    expect(fetchWithUi).not.toHaveBeenCalled();
+  });
+
+  it("captions proposal：只读获取和按 generation 创建，拒绝 raw/完整 Timeline", async () => {
+    const { handlers, fetchWithUi } = setup();
+    const proposal = { captions_provider_proposal_id: "captions_proposal_1", generation_id: "captions_generation_1", project_id: "project_1", base_revision_id: "revision_1", base_document_sha256: hash, patch: { summary: "Provider 字幕文本提案", operations: [{ op: "update_caption", caption_id: "caption_1", text: "new" }] }, patch_sha256: hash, proposed_document_sha256: hash, created_at: now, applied_revision_id: null };
+    fetchWithUi.mockResolvedValueOnce(proposal);
+    await expect(handlers.get("captions-provider:proposal-get")?.({}, { project_id: "project_1", proposal_id: "captions_proposal_1" })).resolves.toEqual(proposal);
+    expect(fetchWithUi).toHaveBeenCalledWith("/api/v1/projects/project_1/captions-provider-proposals/captions_proposal_1", undefined);
+    fetchWithUi.mockResolvedValueOnce(proposal);
+    await expect(handlers.get("captions-provider:proposal-from-generation")?.({}, { project_id: "project_1", generation_id: "captions_generation_1" })).resolves.toEqual(proposal);
+    expect(fetchWithUi).toHaveBeenCalledWith("/api/v1/projects/project_1/captions-provider-generations/captions_generation_1/proposal", { method: "POST" });
+    fetchWithUi.mockResolvedValueOnce({ ...proposal, raw_response: "secret", timeline: { clips: [] } });
+    await expect(handlers.get("captions-provider:proposal-get")?.({}, { project_id: "project_1", proposal_id: "captions_proposal_1" })).rejects.toThrow();
   });
 
   it("agent session：精确转发 prepare/create 并解析 get_session（含 steps）", async () => {

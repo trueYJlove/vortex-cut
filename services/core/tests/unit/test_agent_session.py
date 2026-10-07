@@ -13,7 +13,7 @@ from aivs_core.agent_session import (
     AgentSessionService,
     _structured_failure,
 )
-from aivs_core.database import Database, json_dumps
+from aivs_core.database import MIGRATIONS, Database, json_dumps
 from aivs_core.planning import ProviderRepository, sha256
 from aivs_core.projects import DomainError
 from aivs_core.providers import ProviderSecretVault, StructuredTextResult
@@ -439,7 +439,7 @@ def test_v20_schema_tables_and_triggers(tmp_path: Path) -> None:
             row[0]
             for row in conn.execute("SELECT version FROM schema_migrations")
         ]
-        assert "v20" in versions and len(versions) == 27
+        assert "v20" in versions and len(versions) == len(MIGRATIONS)
         tables = {
             row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }

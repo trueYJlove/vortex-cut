@@ -27,7 +27,7 @@ const EFFECTIVE_LABELS: Record<ProxyMode, string> = {
  * "已保存"与"当前生效"两态——Core 启动时解析一次代理，保存后需重启内核
  * 才生效（规划门 §5 裁决①）。
  */
-export function SettingsDialog({ onClose, onNotify }: { onClose: () => void; onNotify: (message: string) => void }) {
+export function SettingsDialog({ onClose, onNotify, onOpenProviderSettings }: { onClose: () => void; onNotify: (message: string) => void; onOpenProviderSettings: () => void }) {
   const [state, setState] = useState<SettingsState | undefined>();
   const [mode, setMode] = useState<ProxyMode>("system");
   const [proxyUrl, setProxyUrl] = useState("");
@@ -102,6 +102,13 @@ export function SettingsDialog({ onClose, onNotify }: { onClose: () => void; onN
         </div>
       </fieldset>
       <p className="settings-effective"><strong>当前生效：</strong>{effectiveLabel}{state.pending_restart && <span className="readonly-note">（有已保存未生效的更改）</span>}</p>
+      <fieldset>
+        <legend>Provider 配置</legend>
+        <p className="readonly-note">AI 粗剪、AI 修改、AI 助手与 AI 字幕优化共用的 Provider（地址、模型、密钥）。</p>
+        <div className="modal-actions">
+          <button onClick={() => { onOpenProviderSettings(); onClose(); }}>打开 Provider 设置</button>
+        </div>
+      </fieldset>
       {confirmRestart && <p className="ai-status" role="alert">重启将中断进行中的任务（转录/生成/导出等），确认继续吗？<button onClick={() => { setConfirmRestart(false); void restartCore(); }}>确认重启</button><button onClick={() => setConfirmRestart(false)}>取消</button></p>}
       <div className="modal-actions">
         <button disabled={restarting || !state.pending_restart} title={state.pending_restart ? "重启本地内核以应用新代理设置" : "没有待生效的设置"} onClick={() => void restartCore()}>{restarting ? "正在重启内核…" : confirmRestart ? "再次点击确认重启" : "重启内核使设置生效"}</button>

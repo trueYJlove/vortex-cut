@@ -1,4 +1,4 @@
-﻿# ruff: noqa: E501
+# ruff: noqa: E501
 from __future__ import annotations
 
 import hashlib
@@ -274,7 +274,7 @@ def test_fresh_database_has_all_versions_schema_and_integrity(tmp_path: Path) ->
     database.initialize()
     with database.connection() as sql:
         assert {row[0] for row in sql.execute("SELECT version FROM schema_migrations")} == {
-            f"v{i}" for i in range(1, 27)
+            f"v{i}" for i in range(1, len(MIGRATIONS) + 1)
         }
         objects = {row[0] for row in sql.execute("SELECT name FROM sqlite_master")}
         assert {
@@ -298,7 +298,7 @@ def test_fresh_database_has_all_versions_schema_and_integrity(tmp_path: Path) ->
         )
         assert sql.execute("PRAGMA foreign_key_check").fetchall() == []
         assert sql.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-    assert set(MIGRATIONS) == {f"v{i}" for i in range(1, 27)}
+    assert set(MIGRATIONS) == {f"v{i}" for i in range(1, len(MIGRATIONS) + 1)}
 
 
 def test_v14_to_v15_is_append_only_and_preserves_checksums(

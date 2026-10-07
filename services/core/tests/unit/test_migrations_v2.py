@@ -1,9 +1,9 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
 
-from aivs_core.database import Database
+from aivs_core.database import MIGRATIONS, Database
 
 V2_TABLES = {"model_installations", "transcripts", "transcript_segments", "transcript_words"}
 V2_INDEXES = {
@@ -96,7 +96,7 @@ class TestMigrationV2:
             versions = [
                 row[0] for row in db.execute("SELECT version FROM schema_migrations ORDER BY rowid")
             ]
-        assert versions == [f"v{i}" for i in range(1, 27)]
+        assert versions == [f"v{i}" for i in range(1, len(MIGRATIONS) + 1)]
         # each migration writes a pre-flight backup
         assert len(list((tmp_path / "backups").glob("app-*.db"))) >= 2
 
@@ -122,7 +122,7 @@ class TestMigrationV2:
             versions = [
                 row[0] for row in db.execute("SELECT version FROM schema_migrations ORDER BY rowid")
             ]
-        assert versions == [f"v{i}" for i in range(1, 27)]
+        assert versions == [f"v{i}" for i in range(1, len(MIGRATIONS) + 1)]
 
     def test_transcript_foreign_keys_and_cascade_delete(self, tmp_path: Path):
         db_path = _init(tmp_path)

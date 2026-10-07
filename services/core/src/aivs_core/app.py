@@ -364,6 +364,29 @@ class AgentSessionPrepareRequest(BaseModel):
     instruction: str
 
 
+class CaptionsProviderPrepareRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    base_revision_id: str
+    provider_config_id: str
+    transcript_id: str
+    segment_ids: list[str]
+    language: str | None = None
+    preset_id: str
+    max_chars_per_caption: int
+
+
+class CaptionsProviderCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    captions_provider_egress_preview_id: str
+    payload_sha256: str
+
+
+class CaptionsProviderProposalApplyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    base_revision_id: str
+    proposed_document_sha256: str
+
+
 class WorklistPrepareRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     base_revision_id: str
@@ -705,6 +728,10 @@ class CoreState:
             provider_factory=self._text_provider_factory,
             cv_signals=self.cv_signals,
         )
+        from .captions_provider_egress import CaptionsProviderEgressService
+        self.captions_provider_egress = CaptionsProviderEgressService(
+            self.db, self.providers, self.provider_secrets, self.timelines, self.transcripts, provider_factory=self._text_provider_factory
+        )
         self.timeline_patch_planning = TimelinePatchPlanningService(
             self.db, self.providers, self.provider_secrets, self.timelines,
             provider_factory=self._text_provider_factory,
@@ -714,7 +741,7 @@ class CoreState:
 
         self.editing_grammar = EditingGrammarService(self.db, self.timelines)
         from .worklist import WorklistService
-        self.worklists = WorklistService(self.db, self.timelines, self.editing_grammar)
+        self.worklists = WorklistService(self.db, self.timelines, self.editing_grammar, self.captions_provider_egress)
         # AI-1：多步 agent 会话（emit 传入以发 agent_session.updated 事件）。
         self.agent_sessions = AgentSessionService(
             self.db, self.providers, self.provider_secrets, self.timelines,
@@ -900,6 +927,7 @@ class CoreState:
             render_runner=self.render_coordinator.run,
             planning_runner=self.planning.run_generation,
             timeline_patch_runner=self.timeline_patch_planning.run_generation,
+            captions_provider_runner=self.captions_provider_egress.run_generation,
             agent_session_runner=self.agent_sessions.run_session,
             media_generation_runner=self.media_generation.run_simulation,
             media_generation_start=self.media_generation.start_job,
@@ -1016,12 +1044,13 @@ def _model_error(exc: ModelError, model: dict[str, Any] | None = None) -> HTTPEx
 def _transcription_error(exc: TranscriptionError) -> HTTPException:
     status = (
         404
-        if exc.code == "ASSET_NOT_FOUND"
+        if exc.code in {"ASSET_NOT_FOUND", "TRANSCRIPTION_NOT_FOUND"}
         else 409
         if exc.code
         in {
             "TRANSCRIPTION_INPUT_CHANGED",
             "TRANSCRIPTION_NOT_READY",
+            "TRANSCRIPTION_IN_USE",
             "MODEL_NOT_INSTALLED",
         }
         else 400
@@ -1597,6 +1626,63 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 project_id, proposal_id, request.model_dump()
             )
             return with_current_preview(state.timelines.get_state(revision["project_id"]))
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/providers/{provider_id}/captions-provider-capability-test")
+    async def test_captions_provider_capability(provider_id: str, _: CoreState = Depends(require_ui)) -> dict[str, Any]:
+        try:
+            return await state.captions_provider_egress.test_capability(provider_id)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/captions-provider/prepare")
+    async def prepare_captions_provider(project_id: str, request: CaptionsProviderPrepareRequest, _: CoreState = Depends(require_ui)) -> dict[str, Any]:
+        try:
+            return state.captions_provider_egress.prepare(project_id, request.model_dump())
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/captions-provider")
+    async def create_captions_provider(project_id: str, request: CaptionsProviderCreateRequest, _: CoreState = Depends(require_ui)) -> dict[str, Any]:
+        try:
+            return state.captions_provider_egress.create(project_id, request.captions_provider_egress_preview_id, request.payload_sha256, state.jobs)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/captions-provider-generations/{generation_id}/proposal")
+    async def create_captions_provider_proposal(project_id: str, generation_id: str, _: CoreState = Depends(require_ui)) -> dict[str, Any]:
+        try:
+            return state.captions_provider_egress.create_proposal(project_id, generation_id)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/projects/{project_id}/captions-provider-generations/{generation_id}/proposal")
+    async def get_captions_provider_proposal(project_id: str, generation_id: str, _: CoreState = Depends(require_ui)) -> dict[str, Any]:
+        try:
+            return state.captions_provider_egress.get_proposal_for_generation(project_id, generation_id)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/captions-provider-proposals/{proposal_id}/apply")
+    async def apply_captions_provider_proposal(project_id: str, proposal_id: str, request: CaptionsProviderProposalApplyRequest, _: CoreState = Depends(require_ui)) -> dict[str, Any]:
+        try:
+            revision = state.captions_provider_egress.apply_proposal(project_id, proposal_id, request.model_dump())
+            return with_current_preview(state.timelines.get_state(revision["project_id"]))
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/projects/{project_id}/captions-provider-proposals/{proposal_id}")
+    async def get_captions_provider_proposal_by_id(project_id: str, proposal_id: str, _: CoreState = Depends(require_ui)) -> dict[str, Any]:
+        try:
+            return state.captions_provider_egress.get_proposal(project_id, proposal_id)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/projects/{project_id}/captions-provider-generations/{generation_id}")
+    async def get_captions_provider(project_id: str, generation_id: str, _: CoreState = Depends(require_ui)) -> dict[str, Any]:
+        try:
+            return state.captions_provider_egress.get(project_id, generation_id)
         except DomainError as exc:
             raise _domain(exc) from exc
 
@@ -3039,6 +3125,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except TranscriptionError as exc:
             raise _transcription_error(exc) from exc
 
+    @app.delete("/api/v1/transcriptions/{transcript_id}", status_code=204)
+    async def delete_transcription(
+        transcript_id: str, _: CoreState = Depends(require_ui)
+    ) -> None:
+        """删除一条转录（含片段/词级数据）。
+
+        仍被时间线字幕引用时拒绝（TRANSCRIPTION_IN_USE），避免让字幕永久
+        失去来源片段。"""
+        try:
+            state.transcripts.delete(transcript_id)
+        except TranscriptionError as exc:
+            raise _transcription_error(exc) from exc
+
     @app.get("/api/v1/transcriptions/{transcript_id}")
     async def get_transcription(
         transcript_id: str, _: CoreState = Depends(require_ui)
@@ -3679,6 +3778,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not result:
             raise _error("JOB_NOT_FOUND", "任务不存在", 404)
         return result
+
+    @app.delete("/api/v1/jobs/{job_id}", status_code=204)
+    async def delete_job(job_id: str, _: CoreState = Depends(require_ui)) -> None:
+        """移除一条已结束的任务记录（历史清理）。
+
+        运行中/排队中拒绝（JOB_INVALID_STATE）；被渲染产物或生成任务引用时
+        拒绝（JOB_REFERENCED）。"""
+        try:
+            state.jobs.delete_finished(job_id)
+        except ValueError as exc:
+            code = str(exc)
+            status = 404 if code == "JOB_NOT_FOUND" else 409
+            message = (
+                "任务不存在"
+                if code == "JOB_NOT_FOUND"
+                else "任务仍在进行中，请先取消后再删除"
+                if code == "JOB_INVALID_STATE"
+                else "任务被渲染产物或生成记录引用，无法删除"
+            )
+            raise _error(code, message, status) from exc
 
     @app.post("/api/v1/jobs/{job_id}/retry")
     async def retry(job_id: str, _: CoreState = Depends(require_ui)) -> dict[str, Any]:
