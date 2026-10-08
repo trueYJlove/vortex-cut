@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from pathlib import Path
 
 import pytest
@@ -32,10 +33,24 @@ class FakeInfo:
 
 
 class FakeWhisperModel:
+    """镜像 faster-whisper `WhisperModel.transcribe` 的关键入参：
+    真实签名接受 vad_filter，且它决定是否过滤非语音段（2026-10-08 修复的
+    幻听重复段问题依赖它）。这里显式记录，供测试断言。"""
+
+    last_kwargs: dict = {}
+
     def __init__(self, *args, **kwargs):
         pass
 
-    def transcribe(self, path: str, language: str | None = None, word_timestamps: bool = False):
+    def transcribe(
+        self,
+        path: str,
+        language: str | None = None,
+        word_timestamps: bool = False,
+        vad_filter: bool = False,
+        **kwargs,
+    ):
+        FakeWhisperModel.last_kwargs = {"vad_filter": vad_filter, **kwargs}
         segments = [
             FakeSegment(0.0, 1.0, "你好", [FakeWord(0.0, 0.5, "你好"), FakeWord(0.5, 1.0, "世界")]),
             FakeSegment(1.0, 2.0, "世界", []),
@@ -116,6 +131,29 @@ class TestFasterWhisperProvider:
         assert result.segments[0].words[0].text == "你好"
         assert result.segments[0].words[0].start_us == 0
         assert result.segments[0].words[1].end_us == 1_000_000
+        # 必须开启 VAD：否则纯音乐素材会被 Whisper 幻听出重复段（2026-10-08 现场）。
+        assert FakeWhisperModel.last_kwargs.get("vad_filter") is True
+
+    @pytest.mark.asyncio
+    async def test_segment_confidence_is_probability_not_clamped_logprob(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """回归（2026-10-08）：avg_logprob 恒为负，旧实现 max(0, ·) 把每段
+        confidence 压成 0.0，导致 AI 粗剪按置信度排序的权重长期失效。
+
+        FakeSegment.avg_logprob = -0.2 应还原为 exp(-0.2) ≈ 0.819。"""
+        provider = _provider_with_fake_runtime(monkeypatch)
+        audio = tmp_path / "a.wav"
+        audio.write_bytes(b"data")
+        result = await provider.transcribe(
+            audio.as_uri(), "auto", "m", tmp_path, True, asyncio.Event(), lambda _p: None
+        )
+        confidence = result.segments[0].confidence
+        assert confidence is not None
+        assert confidence > 0.5, f"负 logprob 被压成 {confidence}（旧缺陷：恒为 0.0）"
+        assert abs(confidence - math.exp(-0.2)) < 1e-6
+        # 词级概率不受影响（Word.probability 本就是概率）。
+        assert result.segments[0].words[0].confidence == pytest.approx(0.95)
 
     @pytest.mark.asyncio
     async def test_cancel_during_transcribe(self, tmp_path: Path, monkeypatch):

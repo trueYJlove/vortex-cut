@@ -105,10 +105,18 @@ class FasterWhisperProvider:
             str(model_dir), device="auto", compute_type="default"
         )
         requested_language = None if language == "auto" else language
+        # vad_filter：先用内置 Silero VAD（随 faster-whisper 离线打包，无需联网）
+        # 切掉非语音段。没有它时，纯音乐/环境声素材会让 Whisper 反复"幻听"出
+        # 同一句（实测 `刘可艾 小花猫舞蹈视频.mp4`：VAD 判定语音仅占 14.4%，
+        # 关掉 VAD 会产出 8 连「丫谱」+ 5 连「丫语」这类重复垃圾段；开启后
+        # 重复段归零、平均 logprob 从 -0.97 升到 -0.45，保留的是真实人声）。
+        # condition_on_previous_text 保持默认 True：实测关闭它反而把平均
+        # logprob 拉低到 -2.87（上下文丢失，质量下降）。
         segments, info = whisper_model.transcribe(
             str(path),
             language=requested_language,
             word_timestamps=word_timestamps,
+            vad_filter=True,
         )
         duration_us = max(1, int(float(getattr(info, "duration", 0.0)) * 1_000_000))
         result_segments: list[TranscriptSegmentResult] = []
@@ -141,7 +149,7 @@ class FasterWhisperProvider:
                     start_us=start_us,
                     end_us=end_us,
                     text=str(segment.text),
-                    confidence=_confidence(getattr(segment, "avg_logprob", None)),
+                    confidence=_logprob_confidence(getattr(segment, "avg_logprob", None)),
                     words=tuple(words),
                 )
             )
@@ -518,11 +526,28 @@ def _validate_result(result: TranscriptResult) -> None:
 
 
 def _confidence(value: Any) -> float | None:
+    """词级置信度：faster-whisper 的 `Word.probability` 本就是 [0,1] 概率。"""
     if value is None:
         return None
     if isinstance(value, (int, float)) and math.isfinite(float(value)):
         return min(1.0, max(0.0, float(value)))
     return None
+
+
+def _logprob_confidence(value: Any) -> float | None:
+    """段级置信度：faster-whisper 的 `Segment.avg_logprob` 是**对数**概率，
+    取值恒 ≤ 0（实测 -0.2 ~ -3.4）。旧实现直接拿它当概率、再用 max(0, ·) 钳制，
+    结果每条段的 confidence 都被压成 0.0（2026-10-08 用真实库核对：57/57 段
+    全为 0），而 AI 粗剪的 `planning._select` 正是按 confidence 排序，等于该
+    权重长期失效。此处按 exp() 还原为 [0,1] 概率（-0.2 → 0.82）。"""
+    if value is None:
+        return None
+    if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+        return None
+    # 幂等：若上游已给概率（> 0），不要重复取指数。
+    if float(value) > 0:
+        return min(1.0, float(value))
+    return min(1.0, max(0.0, math.exp(float(value))))
 
 
 def _is_int(value: Any) -> bool:
