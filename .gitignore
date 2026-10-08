@@ -68,3 +68,6 @@ evidence/performance/**/user-data/
 # Test-time model download cache (sha256-verified per test fixture)
 resources/.test-model-cache/
 .validation/
+
+# Windows 文件权限诊断/修复工具的输出（含 ACL 备份与回滚脚本），非项目产物
+/.acl-recovery/
