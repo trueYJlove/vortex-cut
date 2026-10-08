@@ -112,16 +112,24 @@ interface InputRig {
   /** 播放/seek 共用的环形簿记：槽位按 ringSeq 轮转，srcN=-1 表示空。 */
   ring: Array<RingSlot | null>;
   ringSeq: number;
-  /** 顺序解码链游标：已向 worker 请求的最大 src_n（seek 上传后同步）。 */
+  /** 顺序解码链游标：已向 worker 请求的最大 src_n（seek 上传后同步）。
+   *  仅作诊断与「是否已冷启过」判定；请求选择不再依赖它（见 pump）。 */
   fed: number;
-  /** 在途链请求的 src_n（深度 1）。 */
-  inFlightCount: number;
+  /** 在途链请求：src_n → 入队时的 chainGeneration。**必须按 src_n 记账而不是
+   *  只计数**：同一输入在同素材多片段场景下会被反复要求同一批展示需求，只有
+   *  计数时无法判断「这一帧已经在途」，于是对同一 src_n 重复入队（L12 实锤：
+   *  单帧最多被请求 37 次），把 worker 串行队列堵满、拖慢真正需要的帧。
+   *  带世代是为了让**被 seek/重建作废**的旧任务收尾时不会误删同 src_n 的新
+   *  在途标记（否则会重新引入一次重复请求）。 */
+  inFlight: Map<number, number>;
   /** 转场共享输入第二帧槽位（影子槽，ack 后置值）。 */
   shadowUploaded: number;
   /** 影子槽在途请求 src_n。 */
   shadowInFlight: number | null;
   /** 同一输入的上传串行尾（ack 顺序保证槽位标记不被乱序覆盖）。 */
   uploadTail: Promise<void>;
+  /** 剪辑跳转/解码器重建世代；使旧片段的在途任务失效。 */
+  chainGeneration: number;
   decoderRecreate?: Promise<void>;
 }
 
@@ -436,10 +444,11 @@ export class PreviewSession {
         ring: Array.from({ length: session.ringDepth }, () => null),
         ringSeq: 0,
         fed: -1,
-        inFlightCount: 0,
+        inFlight: new Map<number, number>(),
         shadowUploaded: -1,
         shadowInFlight: null,
         uploadTail: Promise.resolve(),
+        chainGeneration: 0,
       };
       if (rig.kind === "image") {
         // 静图：解码为 ImageBitmap → transfer 到 worker 一次上传，src_n 恒 0 全程复用
@@ -769,7 +778,7 @@ export class PreviewSession {
     for (const [inputId, rig] of this.rigs) {
       state[inputId] = {
         fed: rig.fed,
-        inFlight: rig.inFlightCount,
+        inFlight: [...rig.inFlight.keys()],
         ring: rig.ring.filter(slot => slot).map(slot => slot!.srcN),
         shadow: rig.shadowUploaded,
         last_decode: rig.worker?.lastFrameInfo ?? null,
@@ -866,11 +875,17 @@ export class PreviewSession {
   }
 
   /** 用户驱动的向后跳转（回卷重播/回退 seek）后重置解码链：游标回 -1，
-   *  pump 冷启重建（worker 冷启路径实证干净）。 */
+   *  pump 冷启重建（worker 冷启路径实证干净）。
+   *
+   *  **不清环形槽**：槽内已 ack 的纹理在合成器侧仍然有效，seekToFrame 会先
+   *  查 `ringSlotIndex` 复用（「±1 步进零解码路径保持不变」）；清空会让每次
+   *  seek 都重解一遍已就绪帧。chainGeneration 只作废**在途**任务，不影响已
+   *  落定槽位。 */
   private resetChains(): void {
     for (const [, rig] of this.rigs) {
+      rig.chainGeneration += 1;
       rig.fed = -1;
-      rig.inFlightCount = 0;
+      rig.inFlight.clear();
       rig.shadowInFlight = null;
     }
   }
@@ -986,11 +1001,16 @@ export class PreviewSession {
       const retry = rig.decoderRetry;
       const factory = this.decoderFactory;
       if (!retry || !factory) return;
+      const previousWorker = rig.worker;
       const worker = await factory.create({ mediaUrl: retry.ticket, codec: "auto", width: retry.width, height: retry.height, cacheCapBytes: retry.cacheCapBytes, refreshTicket: retry.refreshTicket, decodeFrames: retry.decodeFrames }, this.lifetime.signal);
       if (this.disposed) { worker.dispose(); return; }
       rig.worker = worker;
+      previousWorker?.dispose();
+      rig.chainGeneration += 1;
       rig.fed = -1;
+      rig.inFlight.clear();
       rig.ring = Array.from({ length: this.ringDepth }, () => null);
+      rig.ringSeq = 0;
       rig.shadowUploaded = -1;
     } catch (error) {
       if (!this.disposed) this.lastError = `解码器重建失败: ${error instanceof Error ? error.message : String(error)}`;
@@ -1005,8 +1025,9 @@ export class PreviewSession {
     const slotIndex = rig.ringSeq % this.ringDepth;
     rig.ringSeq += 1;
     const epoch = this.seekEpoch;
+    const generation = rig.chainGeneration;
     const task = async (): Promise<void> => {
-      if (this.disposed || epoch !== this.seekEpoch) { this.skippedUploads += 1; return; }
+      if (this.disposed || epoch !== this.seekEpoch || generation !== rig.chainGeneration) { this.skippedUploads += 1; return; }
       const decodeStart = performance.now();
       const perfRequest = ++this.perfRequest;
       const perfInput = editorPerf.enabled ? this.ir.inputs.findIndex(item => item.input_id === inputId) : -1;
@@ -1026,7 +1047,7 @@ export class PreviewSession {
           if (/DECODE_FRAME_NOT_FOUND|no sample for frame/i.test(message)) {
             for (const fallback of [srcN - 1, srcN + 1]) {
               if (fallback < 0) continue;
-              if (this.disposed || epoch !== this.seekEpoch) break;
+              if (this.disposed || epoch !== this.seekEpoch || generation !== rig.chainGeneration) break;
               try {
                 decoded = await rig.worker!.decode(fallback, this.ir.canvas.fps);
                 editorPerf.record("edge_fallback", 0, this.perfId, perfRequest, epoch, srcN, perfInput);
@@ -1046,10 +1067,10 @@ export class PreviewSession {
       } finally {
         this.decodeInFlight -= 1;
       }
-      if (epoch !== this.seekEpoch) { this.skippedUploads += 1; decoded.release(); return; }
+      if (epoch !== this.seekEpoch || generation !== rig.chainGeneration) { this.skippedUploads += 1; decoded.release(); return; }
       const uploadStart = performance.now();
       await this.compositor!.uploadDecoded(inputId, slotIndex, srcN, decoded);
-      if (this.disposed || epoch !== this.seekEpoch) return;
+      if (this.disposed || epoch !== this.seekEpoch || generation !== rig.chainGeneration) return;
       this.uploadTimes.push(performance.now() - uploadStart);
       editorPerf.record("upload", performance.now() - uploadStart, this.perfId, perfRequest, epoch, srcN, perfInput);
       if (this.uploadTimes.length > 600) this.uploadTimes.splice(0, this.uploadTimes.length - 600);
@@ -1066,8 +1087,9 @@ export class PreviewSession {
   private uploadShadow(rig: InputRig, inputId: string, srcN: number): Promise<void> {
     if (!rig.worker) return Promise.reject(new Error(`no worker for input`));
     const epoch = this.seekEpoch;
+    const generation = rig.chainGeneration;
     const task = async (): Promise<void> => {
-      if (epoch !== this.seekEpoch) return;
+      if (epoch !== this.seekEpoch || generation !== rig.chainGeneration) return;
       const decodeStart = performance.now();
       const perfRequest = ++this.perfRequest;
       const perfInput = editorPerf.enabled ? this.ir.inputs.findIndex(item => item.input_id === inputId) : -1;
@@ -1077,9 +1099,9 @@ export class PreviewSession {
         this.decodeTimes.push(performance.now() - decodeStart);
         editorPerf.record("decode", performance.now() - decodeStart, this.perfId, perfRequest, epoch, srcN, perfInput);
         if (this.decodeTimes.length > 600) this.decodeTimes.splice(0, this.decodeTimes.length - 600);
-        if (epoch !== this.seekEpoch) { decoded.release(); return; }
+        if (epoch !== this.seekEpoch || generation !== rig.chainGeneration) { decoded.release(); return; }
         await this.compositor!.uploadShadowDecoded(inputId, srcN, decoded);
-        if (this.disposed || epoch !== this.seekEpoch) return;
+        if (this.disposed || epoch !== this.seekEpoch || generation !== rig.chainGeneration) return;
         rig.shadowUploaded = srcN;
         rig.fed = srcN;
       } finally {
@@ -1173,49 +1195,58 @@ export class PreviewSession {
     for (const [inputId, needs] of needsByInput) {
       const rig = this.rigs.get(inputId);
       if (!rig || rig.kind !== "video" || !rig.worker || rig.decoderRecreate) continue;
-      let sorted: number[];
-      if (rig.fed < 0) {
-        sorted = [...(enterNeeds.get(inputId) ?? needs)].sort((a, b) => a - b);
-      } else {
-        sorted = [...needs].sort((a, b) => a - b);
+      // 候选 = 窗口内**真实展示需求**的源帧（升序、去重）。
+      //
+      // 顺序链只按需求推进，绝不按稠密整数步进。`plan.py` 按 **asset** 去重
+      // 分配 input_id，因此同一素材的多个剪辑片段共享一个 input → 一个
+      // worker → 一条顺序链；自动粗剪正是这个形状（同一素材被切成几十段、
+      // 源窗口散布）。剪辑点的源跳变会让 `[fed+1, anchor)` 之间出现大段
+      // **无任何展示需求**的区间：
+      //  - 旧实现 `next = rig.fed + 1` 会逐帧空走这段区间——每帧一次
+      //    「解码 + 上传」往返，源距离 3000 帧即 3000 次往返，期间新片段的
+      //    帧永不就绪 → 播放头在剪辑点假死（用户：「很卡顿」）。
+      //  - 源位置**回跳**时（自动粗剪里同样常见）超前上限 `max` 落在旧位置
+      //    之前，`next = fed + 1 > max` → **一个请求都不发**，目标帧永不
+      //    就绪 → 播放头彻底冻结（用户：「直接卡住不播放了」）。
+      // 按需求取帧同时修掉两者：前跳只请求新片段的需求（worker 侧
+      // `farForward` 自行决定关键帧重解），回跳直接请求更早的需求（worker
+      // 侧 `behindCursor` 自行决定冷启），会话不再做启发式回卷。
+      const demanded = [...(rig.fed < 0 ? (enterNeeds.get(inputId) ?? needs) : needs)]
+        .sort((a, b) => a - b);
+      if (demanded.length === 0) continue;
+      // 影子槽在途时不发主环请求（既有串行约束：共享输入的转场两侧经同一条
+      // uploadTail，影子 ack 会回写 rig.fed）。
+      if (rig.shadowInFlight !== null) continue;
+      // 变速防卡顶（2x 播放冻结根修）：链超前「展示需求」的 src 距离受环形池
+      // 深度硬约束（槽位先进先出覆盖）。speed>1 时 src 每输出帧前进 speed 帧，
+      // 旧 max = src(target+LEAD) 允许超前 LEAD×speed 帧——2x 时超前 10 帧 > 8
+      // 槽，展示帧纹理**必然**已被淘汰：合成找不到 ≤ target 的就绪帧 → 画面
+      // 冻结 + 重锚风暴。以 ≤target 帧的最大展示需求（无则窗口内最小需求，
+      // 即将入场的输入）为锚 + LEAD 封顶：speed=1 时等价旧 max；speed=2 时
+      // 最多超前展示需求 5 帧，展示帧就绪后在环内保有 ≥3 槽余量。
+      const anchor = displayMaxByInput.get(inputId) ?? demanded[0]!;
+      const max = anchor + Math.min(PreviewSession.LEAD, this.ringDepth - 3);
+      // 按需求升序补齐「未就绪且未在途」的帧（在途上限内）。ring 命中与
+      // 在途去重都必须按 src_n 判定：同一 src_n 在剪辑点会被反复要求，
+      // 旧实现只按计数无法识别重复（L12 实锤单帧最多重复请求 37 次），
+      // 重复请求把 worker 串行队列堵满、拖慢真正需要的帧。
+      for (const srcN of demanded) {
+        if (srcN > max) break;
+        if (rig.inFlight.size >= PreviewSession.IN_FLIGHT) break;
+        if (rig.inFlight.has(srcN)) continue;
+        if (this.ringSlotIndex(rig, srcN) >= 0) continue;
+        const generation = rig.chainGeneration;
+        rig.inFlight.set(srcN, generation);
+        rig.fed = Math.max(rig.fed, srcN);
+        void this.uploadRing(rig, inputId, srcN)
+          .catch(error => this.noteDecodeError(inputId, srcN, error))
+          .finally(() => {
+            // 仅当在途标记仍是本次入队留下的才删除：被 seek/重建作废的旧任务
+            // 收尾时不得误删同 src_n 的新在途标记。
+            if (rig.inFlight.get(srcN) === generation) rig.inFlight.delete(srcN);
+            if (!this.disposed && this.playing) this.pump(this.latestTarget);
+          });
       }
-      // 变速防卡顶（2x 播放冻结根修）：链游标超前「展示需求」的 src 距离受环形
-      // 池深度硬约束（RING=8，槽位先进先出覆盖）。speed>1 时 src 每输出帧前进
-      // speed 帧，旧 max = src(target+LEAD) 允许游标超前当前展示需求
-      // LEAD×speed 帧——2x 时超前 10 帧 > 8 槽，链追平钟点后展示帧纹理**必然**
-      // 已被淘汰：合成永远找不到 ≤ target 的就绪帧 → 画面冻结 + 时钟重锚风暴
-      // （重锚后游标不可回退，冻结固化）→ 播放卡死不前进。以 ≤target 帧的最大
-      // 展示需求（无则窗口内最小需求，即将入场的输入）+ RING-3 封顶游标：
-      // speed=1 时 anchor+5 ≡ 旧 max（1x 行为逐位不变）；speed=2 时游标最多
-      // 超前展示需求 5 帧，展示帧就绪后在环内保有 ≥3 槽余量，合成始终能在
-      // ≤ target 找到就绪帧。代价仅是 speed>1 时的预读跑道收窄（仍有
-      // (RING-3)/speed 个输出帧），换段冷启尖峰由链完成即续吸收。
-      const anchor = displayMaxByInput.get(inputId) ?? sorted[0]!;
-      // P33 冷启丢帧根修（final-r1..r3 三轮一致：起播 0.5s 丢 5 帧）：链完成即续
-      // ~20ms/帧快于实时 33ms/帧，旧封顶 anchor+RING-3（=anchor+9）允许 fed 在
-      // 两个 tick 间冲到 anchor+9，环 12 槽把**尚未合成**的 [anchor−3, anchor) 段
-      // 淘汰——回扫窗又只回看 3 帧，被淘汰帧永跳过。收紧为 anchor+LEAD：LEAD
-      // 联动环深（≤RING−3），fed 最多超前 anchor 8 帧，环内保有 ≥RING−LEAD≥3
-      // 槽未消费余量（变速 speed>1 时 src 超前 8 = 4 输出帧跑道 ≥3 槽约束不变；
-      // 环浅档 RING=5/LEAD=2 与旧值逐位相同）。代价仅预读跑道 9→8。
-      const max = Math.min(sorted[sorted.length - 1]!, anchor + Math.min(PreviewSession.LEAD, this.ringDepth - 3));
-      // 正向单调推进（冷启动首个请求直达入场点）。
-      // 向后跳转只发生在用户动作（回卷重播/回退 seek）——由 resetChains() 显式
-      // 重置链游标，pump 本身不做启发式回跳（避免深窗口陈旧需求引发震荡）。
-      let next = rig.fed < 0 ? sorted[0]! : rig.fed + 1;
-      while (next <= max && this.ringSlotIndex(rig, next) >= 0) {
-        rig.fed = next;
-        next += 1;
-      }
-      if (next > max || rig.inFlightCount >= PreviewSession.IN_FLIGHT || rig.shadowInFlight !== null) continue;
-      rig.fed = next;
-      rig.inFlightCount += 1;
-      void this.uploadRing(rig, inputId, next)
-        .catch(error => this.noteDecodeError(inputId, next, error))
-        .finally(() => {
-          rig.inFlightCount = Math.max(0, rig.inFlightCount - 1);
-          if (!this.disposed && this.playing) this.pump(this.latestTarget);
-        });
     }
     // 转场影子槽（共享输入第二帧）：直发（ack 后就绪；窗口内单帧）
     for (let n = target; n <= to; n++) {

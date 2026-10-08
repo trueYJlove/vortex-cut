@@ -1085,9 +1085,10 @@ export function App() {
     return () => window.clearInterval(timer);
   }, [playing, previewMode, libraryPreviewId, timelineEndUs, playheadStore, dispatchPlayhead]);
   const handleVideoEnded = () => {
-    // 素材播完（视频元素 ended）：时间线播放由播放头时钟驱动，这里只停播——
-    // 播放头保持当前位置（不回跳、不自动续播下一段）。
-    setPlaying(false);
+    // 素材箱预览只有一个媒体源，ended 才代表本次播放结束。时间线交互
+    // 预览的 video 只是当前片段的源窗口：源文件 EOF 不等于时间线 EOF，
+    // 播放头时钟会在下一个 tick 切到后续片段（或保持 V1 空档黑场）。
+    if (libraryPreviewId) setPlaying(false);
   };
 
   // ── 稳定依赖（A06 第 5 条）：传给 TimelinePanel / SyntheticPreview 的数组与
