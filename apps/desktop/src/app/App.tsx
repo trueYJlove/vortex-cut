@@ -101,6 +101,7 @@ const jobStatusLabels: Record<Job["status"], string> = { queued: "排队中", ru
 const jobPhaseLabels: Record<string, string> = { preparing: "准备中", encoding: "编码中", validating_probe: "校验（探测）", validating_decode: "校验（完整解码）", hashing: "完整性哈希", publishing: "正在完成发布" };
 const modelBadgeLabels: Record<ModelSummary["status"], string> = { unavailable: "未下载", queued: "排队中", downloading: "下载中", paused: "已暂停", verifying: "校验中", ready: "就绪", cancelled: "已取消", failed: "失败", corrupt: "已损坏" };
 const jobKindLabels: Partial<Record<Job["kind"], string>> = { transcription: "本地转录", proxy: "代理素材", portrait_sample: "竖版样本", authoritative_preview: "权威预览", final_export: "最终导出", waveform: "音频波形" };
+const transcriptStatusLabels: Record<TranscriptSummary["status"], string> = { pending: "排队中", ready: "就绪", stale: "已过期", failed: "失败" };
 /** 任务行副标题：同类任务（如多次转录）必须能区分是哪一条。 */
 const jobDetailText = (job: Job, assetName?: string): string => {
   const parts: string[] = [];
@@ -213,7 +214,8 @@ export function App() {
   // 记录发起时锁定的转录与片段，避免对话框打开期间勾选变化导致外传内容漂移。
   const [captionsOptimize, setCaptionsOptimize] = useState<{ transcript: Transcript; segmentIds: string[] }>();
   // 转录删除确认（危险操作需显式确认；仍被时间线字幕引用时 Core 拒绝）。
-  const [pendingDeleteTranscript, setPendingDeleteTranscript] = useState<Transcript>();
+  // 只依赖 transcript_id：确认框对「摘要行」与「已加载正文」通用。
+  const [pendingDeleteTranscript, setPendingDeleteTranscript] = useState<Pick<TranscriptSummary, "transcript_id">>();
   const [deleteTranscriptBusy, setDeleteTranscriptBusy] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [runtimeReady, setRuntimeReady] = useState(false);
@@ -474,13 +476,33 @@ export function App() {
     // 装载瞬间打满本地 Core 的 accept 队列，同刻发出的 manifest 请求被
     // ECONNREFUSED（F04 复测现场）。此处落实注释承诺的"并发受限 ≤4"。
     const queue = transcriptSummaryQueueRef.current ??= new BoundedTaskQueue<{ items: TranscriptSummary[] }>(4);
+    // 每项结果三态：{kind:"stale"} 代次过期 / {kind:"failed"} 本次没取到 /
+    // {kind:"ok"} 已知列表。用显式判别字段而非 symbol 比较，便于收窄类型。
     const summaries = await Promise.all(assetsAll.filter(item => isTranscribable(item.asset)).map(async item => {
+      const assetId = String(item.asset.asset_id);
       const summaryPage = await queue.push(() => window.desktop.listTranscripts(item.asset.asset_id));
-      if (typeof summaryPage === "symbol") return null; // 代次过期：丢弃
-      return [String(item.asset.asset_id), summaryPage.items] as const;
+      if (summaryPage === queue.skipped) return { assetId, kind: "stale" as const };
+      // 该素材这次没取到（网络/IPC/业务错误）：标记为未知而非空列表。
+      // 旧实现把失败也当成 items=[]，于是一次瞬时失败就把该素材的转录从
+      // 界面上抹掉，且没有重试——转录页显示"尚未生成转录"，而库里其实是
+      // ready（2026-10-08 用户现场）。未知的条目在合并时保留上一次已知值。
+      if (summaryPage === queue.failed) return { assetId, kind: "failed" as const };
+      return { assetId, kind: "ok" as const, items: summaryPage.items };
     }));
     if (epoch !== projectDataEpochRef.current) return; // 切项目：旧返回作废
-    setTranscriptSummaries(Object.fromEntries(summaries.filter((entry): entry is readonly [string, TranscriptSummary[]] => entry !== null)));
+    // 合并语义：已知 → 覆盖；未知(failed) → 保留上一次的值（首次加载时即空）。
+    setTranscriptSummaries(previous => {
+      const next: Record<string, TranscriptSummary[]> = {};
+      for (const entry of summaries) {
+        if (entry.kind === "stale") continue;
+        if (entry.kind === "failed") {
+          if (entry.assetId in previous) next[entry.assetId] = previous[entry.assetId];
+          continue;
+        }
+        next[entry.assetId] = entry.items;
+      }
+      return next;
+    });
   };
   const loadRenderData = async (selected: Project) => {
     const epoch = ++renderDataEpochRef.current;
@@ -511,6 +533,11 @@ export function App() {
     setExportPlayback(undefined); setReframePlayback(undefined); setCoverUrl(null);
     setCvSummaries({}); setCvSparkAssetId(null); setCvSparkSamples(null); setCvBusy(null);
     setCvOptionsOpen(false); setCvOptionsAsset(null); setTranscriptionAsset(undefined); setPendingDeleteAsset(undefined);
+    // 删除/刷新是**瞬态** UI 标志：切项目时上一项目的在途请求仍会走 finally，
+    // 但若它因任何原因没有复位，卡住的「删除中…」会跨项目泄漏（用户看到
+    // "换了项目还是删不掉"）。此处一并清掉，保证新项目从干净状态开始。
+    setPendingDeleteTranscript(undefined); setDeleteTranscriptBusy(false);
+    setDeleteBusy(false); setRefreshingAssets(false);
     seenAnyTicketRef.current = false; noTicketRetryRef.current = 0; noTicketFinalRetryRef.current = false;
     if (autoProvisionProjectId.current !== next.project_id) autoProvisionProjectId.current = undefined;
     setProject(next);
@@ -785,6 +812,15 @@ export function App() {
               && (updated.kind === "authoritative_preview" || updated.kind === "final_export")
               && project) {
               void loadRenderData(project).catch(() => undefined);
+            }
+            // 转录成功必须重拉项目数据，否则转录页停在"尚未生成转录"。
+            // 注意：**不能**依赖 trackTranscriptionJob 的 subscribeJob —— 主进程
+            // 从未 emit `job:event:*`（见上方注释"订阅推送当前未接通"），那个回调
+            // 永不触发。轮询对账是终态的唯一可靠来源，刷新必须挂在这里。
+            // （2026-10-08 用户现场：lwd 项目两条转录在"任务"页显示已完成、
+            // 库里也确实 ready，转录页却始终为空。）
+            if (updated.status === "succeeded" && updated.kind === "transcription" && projectRef.current) {
+              void loadProjectData(projectRef.current).catch(() => undefined);
             }
           }).catch(() => undefined);
         }
@@ -1444,7 +1480,9 @@ export function App() {
     } catch (error) {
       showNotice(safeErrorMessage(error, "素材库刷新失败，请稍后重试。"));
     } finally {
-      if (projectRef.current?.project_id === projectId && projectDataEpochRef.current === epoch) setRefreshingAssets(false);
+      // 同 deleteTranscript：刷新中标志不能被项目代次守卫，否则刷新期间任何
+      // 推进代次的路径都会让「刷新素材库」永久卡在禁用态。
+      setRefreshingAssets(false);
     }
   };
   const deleteAsset = async (asset: Asset) => {
@@ -1474,10 +1512,13 @@ export function App() {
       setPendingDeleteAsset(undefined);
       showNotice(safeErrorMessage(error, "素材删除失败，请刷新后重试。"));
     } finally {
-      if (projectRef.current?.project_id === projectId && projectDataEpochRef.current === epoch) setDeleteBusy(false);
+      // 同 deleteTranscript：busy 是纯 UI 标志，不能用项目代次守卫。删除期间
+      // 其它路径（转录终态轮询 / 缺票重取）可能已推进代次，守卫会让按钮永久
+      // 停在「删除中…」。
+      setDeleteBusy(false);
     }
   };
-  const deleteTranscript = async (transcript: Transcript) => {
+  const deleteTranscript = async (transcript: Pick<TranscriptSummary, "transcript_id">) => {
     const projectId = projectRef.current?.project_id;
     const epoch = projectDataEpochRef.current;
     setDeleteTranscriptBusy(true);
@@ -1501,8 +1542,24 @@ export function App() {
         delete next[transcript.transcript_id];
         return next;
       });
+      // 转录页的行来自 transcriptSummaries（不是上面的 transcripts 正文缓存），
+      // 必须**同步**摘掉，否则提示"已删除"之后记录还要在列表里停留数秒——
+      // 那几秒是 loadProjectData 的整轮往返：翻页拉全部素材 → 三状态拉任务
+      // → 再按素材经 ≤4 并发队列逐个 listTranscripts（2026-10-08 用户现场：
+      // "提示删除成功，记录还在，要好几秒才消失"）。删除已是 Core 确认的事实，
+      // 本地无需等权威列表回话就能收起该行。
+      setTranscriptSummaries(current => {
+        const next = { ...current };
+        for (const assetId of Object.keys(next)) {
+          const kept = next[assetId].filter(item => item.transcript_id !== transcript.transcript_id);
+          if (kept.length) next[assetId] = kept; else delete next[assetId];
+        }
+        return next;
+      });
       showNotice("已删除该转录。", "success");
-      // 摘要由服务端权威列表决定，重拉以覆盖分页/状态细节。
+      // 摘要仍以服务端权威列表为准，重拉以覆盖分页/状态细节；上面的本地摘除
+      // 只是不等这次往返。合并语义对"本次拉取失败"保留上一次已知值——被摘掉
+      // 的记录不会因一次失败而复现。
       if (projectRef.current) void loadProjectData(projectRef.current).catch(() => undefined);
     } catch (error) {
       const code = errorCode(error);
@@ -1513,8 +1570,19 @@ export function App() {
           : safeErrorMessage(error, "转录删除失败，请刷新后重试。"),
       );
     } finally {
-      if (projectRef.current?.project_id === projectId && projectDataEpochRef.current === epoch) setDeleteTranscriptBusy(false);
+      // busy 是纯 UI 标志，**不能**用项目代次守卫它：成功路径里的
+      // loadProjectData 在同步段就 `++projectDataEpochRef.current`，使这里捕获的
+      // epoch 立刻过期，于是 setDeleteTranscriptBusy(false) 永不执行——弹窗永久
+      // 停在「删除中…」且取消/确认都被 disabled（2026-10-08 用户现场：lwd 项目
+      // 转录"删不掉，点开就显示删除中"）。删除期间确认按钮是 disabled 的，
+      // 不存在并发删除，故直接复位即可。
+      setDeleteTranscriptBusy(false);
     }
+  };
+  /** 打开删除确认框：先复位 busy，避免任何遗留的「删除中…」锁死本次操作。 */
+  const openDeleteTranscriptDialog = (summary: Pick<TranscriptSummary, "transcript_id">) => {
+    setDeleteTranscriptBusy(false);
+    setPendingDeleteTranscript(summary);
   };
   const deleteJob = async (job: Job) => {
     const projectId = projectRef.current?.project_id;
@@ -2101,6 +2169,13 @@ export function App() {
   const previewIsStale = Boolean(authoritativePreview && (authoritativePreview.preview.status === "stale" || authoritativePreview.preview.timeline_revision_id !== timeline?.current_revision.timeline_revision_id));
   const firstMediaAsset = assets.find(item => (item.asset.kind === "video" || item.asset.kind === "image") && item.asset.availability === "available");
   const firstTranscribableAsset = assets.find(item => isTranscribable(item.asset));
+  /** 已按需加载正文的转录（未加载时为 undefined，行内只显示摘要信息）。 */
+  const loadedTranscript = (transcriptId: string) => Object.values(transcripts).flat().find(item => item.transcript_id === transcriptId);
+  // 转录页统一列表：以服务端权威摘要（listTranscripts）为唯一数据源。
+  // 旧实现把「摘要 chip」与「已加载正文卡片」渲染成两份列表，点一次 chip 就在
+  // 下方多出一条同名记录；且未打开过的转录没有删除入口（用户实测 2026-10-08）。
+  const transcriptRows = assets.filter(item => isTranscribable(item.asset)).flatMap(assetItem =>
+    (transcriptSummaries[assetItem.asset.asset_id] ?? []).map(summary => ({ summary, assetName: assetItem.asset.display_name })));
   useEffect(() => { setGenerationOpen(false); setShotRequirementsOpen(false); setCoverUrl(project?.project_id ? localStorage.getItem(`vortex-cut.cover.${project.project_id}`) : null); }, [project?.project_id]);
 
   const authoritativeMediaUrl = reframePlayback?.media_url ?? exportPlayback?.media_url ?? authoritativePreview?.media_url;
@@ -2516,7 +2591,7 @@ export function App() {
         <div className="text-materials" aria-label="文本素材"><button disabled={!project || project.status !== "active"} onClick={() => void insertDefaultText()} title="插入到播放头处（3 秒）"><Type size={13} />默认文本</button><button disabled={!project || project.status !== "active"} onClick={() => void importSubtitleFile()} title="支持 SRT / ASS / SSA / LRC"><Captions size={13} />导入字幕</button></div>
         <div className="library-filter-toolbar"><input role="searchbox" type="search" aria-label="搜索素材" placeholder="搜索素材" value={assetQuery} onChange={event => setAssetQuery(event.target.value)} /><select aria-label="素材类型" value={assetFilter} onChange={event => setAssetFilter(event.target.value as AssetFilter)}><option value="all">全部</option>{assetKinds.map(kind => <option value={kind} key={kind}>{assetKindLabels[kind]}</option>)}</select><IconButton label="刷新素材库" disabled={refreshingAssets || !project} onClick={() => void refreshAssets()}><RefreshCw size={13} className={refreshingAssets ? "spin" : ""} /></IconButton></div>
         <div className="asset-list asset-table">{visibleAssets.map(item => <div className={`asset-item asset-row ${selectedAssetId === item.asset.asset_id ? "sel" : ""} ${isDraggableAsset(item.asset.kind) ? "draggable-asset" : ""}`} key={item.asset.asset_id} onClick={() => setSelectedAssetId(item.asset.asset_id)} onDoubleClick={() => previewFromLibrary(item)} {...assetDragProps(item)}><div className="asset-thumb">{item.asset.kind === "image" ? <img src={item.media_url ?? undefined} alt="" loading="lazy" /> : item.asset.kind === "video" ? <video src={item.media_url ?? undefined} muted preload="metadata" aria-hidden="true" /> : <FileAudio className="asset-thumb-icon" />}</div><div className="asset-name"><strong title={item.asset.display_name}>{item.asset.display_name}</strong><small>{assetMetaIcon(item.asset)}{assetMetaText(item.asset)}{cvSummaryText(item.asset) ? ` · ${cvSummaryText(item.asset)}` : ""}</small>{item.asset.kind === "video" && cvSummaries[item.asset.asset_id]?.status === "ready" && <button className="cv-spark-toggle" aria-label={`展开 ${item.asset.display_name} 的信号曲线`} onClick={event => { event.stopPropagation(); toggleCvSpark(item.asset); }}>{cvSparkAssetId === item.asset.asset_id ? "收起信号" : "信号曲线"}</button>}{cvSparkAssetId === item.asset.asset_id && item.asset.asset_id === cvSparkAssetId && <div className="cv-spark" onClick={event => event.stopPropagation()}>{cvSparkSamples === null ? <small>加载中…</small> : cvSparkSamples.length < 2 ? <small>暂无样本数据</small> : <><svg viewBox="0 0 100 1" preserveAspectRatio="none" aria-label="CV 信号曲线"><path d={cvSparkPath(cvSparkSamples, "motion_energy")} fill="none" stroke="#7aa2f7" strokeWidth="0.02" /><path d={cvSparkPath(cvSparkSamples, "audio_energy")} fill="none" stroke="#9ece6a" strokeWidth="0.02" opacity="0.7" />{cvSparkSamples.filter(s => s.scene_cut).map((s, i) => <line key={i} x1={(s.timestamp_us / (cvSparkSamples[cvSparkSamples.length - 1]?.timestamp_us || 1)) * 100} y1={0} x2={(s.timestamp_us / (cvSparkSamples[cvSparkSamples.length - 1]?.timestamp_us || 1)) * 100} y2={1} stroke="#f7768e" strokeWidth={0.03} />)}</svg><small className="cv-spark-legend"><span style={{ color: "#7aa2f7" }}>运动能量</span> · <span style={{ color: "#9ece6a" }}>音频能量</span> · <span style={{ color: "#f7768e" }}>场景切换</span></small></>}</div>}</div><div className="asset-side"><span className="asset-dur">{assetDurationLabel(item.asset)}</span>{assetActions(item)}</div></div>)}</div>
-      </> : tab === "transcripts" ? <div className="transcript-list"><p className="panel-hint">只读展示语音识别结果；勾选片段后点"追加所选片段"，会把它们插入时间线并生成字幕。</p>{Object.values(transcripts).flat().length === 0 && <p className="panel-hint">尚未生成转录：在"素材"页对视频/音频素材点击"转录"按钮后，结果会出现在这里。</p>}{assets.filter(item => isTranscribable(item.asset)).map(assetItem => <div className="transcript-row" key={assetItem.asset.asset_id}><strong title={assetItem.asset.display_name}>{assetItem.asset.display_name}</strong><div className="transcript-variants">{(transcriptSummaries[assetItem.asset.asset_id] ?? []).map(summary => <button key={summary.transcript_id} className="ts-chip" aria-label={`查看转录 ${summary.transcript_id}`} onClick={() => void viewTranscript(summary)}><Eye size={12} />{summary.language} · {summary.status}</button>)}</div></div>)}{Object.values(transcripts).flat().map(item => <div className="transcript-item" key={item.transcript_id}><div className="transcript-item-head"><button className="transcript-open-button" onClick={() => setViewingTranscript(item)} title="查看并选择转录片段"><strong>{assets.find(asset => asset.asset.asset_id === item.asset_id)?.asset.display_name ?? "转录"}</strong><small>{item.segments.length} 段 · 点击查看内容与操作</small></button><button className="mini-btn danger-ghost" aria-label={`删除转录 ${item.transcript_id}`} title="删除这条转录（仍被时间线字幕引用时会拒绝）" onClick={() => setPendingDeleteTranscript(item)}>删除转录</button></div></div>)}</div>
+      </> : tab === "transcripts" ? <div className="transcript-list"><p className="panel-hint">只读展示语音识别结果；点开一条记录后勾选片段，可追加到时间线并生成字幕。</p>{transcriptRows.length === 0 && <p className="panel-hint">尚未生成转录：在"素材"页对视频/音频素材点击"转录"按钮后，结果会出现在这里。</p>}{transcriptRows.map(({ summary, assetName }) => { const loaded = loadedTranscript(summary.transcript_id); return <div className="transcript-item" key={summary.transcript_id}><div className="transcript-item-head"><button className="transcript-open-button" aria-label={`查看转录 ${summary.transcript_id}`} onClick={() => void viewTranscript(summary)} title="查看并选择转录片段"><strong title={assetName}>{assetName}</strong><small>{transcriptStatusLabels[summary.status]} · {summary.language}{loaded ? ` · ${loaded.segments.length} 段` : ""} · 点击查看内容与操作</small></button><IconButton label={`删除转录 ${summary.transcript_id}`} onClick={() => openDeleteTranscriptDialog(summary)}><Trash2 size={13} /></IconButton></div></div>; })}</div>
         : tab === "models" ? <div className="model-page"><p className="panel-hint">本地语音识别模型：下载后可在视频/音频素材上发起转录，生成带时间戳的字幕底稿；下载中可取消，失败可重试。</p>{models.map(model => { const dl = ["queued", "downloading", "verifying", "paused"].includes(model.status); const pct = model.progress !== null && model.progress !== undefined ? `${Math.round(model.progress * 100)}%` : "—"; return <div className={`model-row${dl ? " dl" : ""}`} key={model.model_id}><div className="model-ico"><FileText size={14} /></div><div className="model-main"><div className="model-head"><strong title={model.display_name}>{model.display_name}</strong><span className={`badge ${model.status === "ready" ? "ok" : dl ? "run" : model.status === "failed" || model.status === "corrupt" ? "bad" : "dim"}`}>{modelBadgeLabels[model.status]}</span>{dl && <span className="mpct">{pct}</span>}</div>{dl && <div className="model-down"><progress className="model-progress" max={1} value={model.progress ?? 0} /><button className="mini-btn" title="取消模型下载" onClick={() => void cancelModel(model)}>取消下载</button></div>}<small className="model-sub">{modelStatusLabels[model.status]} · {model.provider}</small></div>{!dl && ["unavailable", "failed", "cancelled", "paused", "corrupt"].includes(model.status) && <button className="mini-btn" onClick={() => void openModel(model)}>{model.status === "failed" ? "重试下载" : model.status === "corrupt" ? "重新下载" : model.status === "paused" ? "继续下载" : "下载模型"}</button>}</div>; })}</div>
         : <div className="jobs-page"><p className="panel-hint">转录、权威预览与导出的后台进度会显示在这里；运行中的任务可取消，失败的转录可重试。</p>{jobs.length === 0 && <p className="panel-hint">暂无任务。</p>}{(() => { const activeJobs = jobs.filter(job => ["running", "cancelling"].includes(job.status)); const queuedJobs = jobs.filter(job => job.status === "queued"); const doneJobs = jobs.filter(job => ["succeeded", "failed", "cancelled", "interrupted"].includes(job.status)); const renderJobRow = (job: Job) => { const badgeClass = job.status === "succeeded" ? "ok" : job.status === "failed" ? "bad" : job.status === "running" ? "run" : "dim"; const phaseText = job.phase ? (jobPhaseLabels[job.phase] ?? job.phase) : null; const phasePct = phaseText && job.phase_progress !== null && job.phase_progress !== undefined ? ` ${Math.round(job.phase_progress * 100)}%` : ""; return <div className="job-row" key={job.job_id}><div className="jmain"><div className="jhead"><strong>{jobKindLabels[job.kind] ?? job.kind}</strong><span className={`badge ${badgeClass}`}>{jobStatusLabels[job.status]}</span><span className="jpct">{job.progress !== null ? `${Math.round(job.progress * 100)}%` : "—"}</span></div>{job.progress !== null && <div className="jbar"><i style={{ width: `${Math.round(job.progress * 100)}%` }} /></div>}<div className="jmeta"><span>{jobDetailText(job, assets.find(item => item.asset.asset_id === job.asset_id)?.asset.display_name)}{phaseText || job.stage ? ` · ${phaseText ? `${phaseText}${phasePct}` : job.stage}` : ""}{job.error ? ` · ${safeTaskErrorMessage(job.error)}` : ""}</span>{job.status === "running" && <JobEta job={job} />}</div><div className="jops">{job.kind === "transcription" && (job.status === "failed" || job.status === "interrupted") && <button className="mini-btn" onClick={() => void retryTranscription(job)}>重试转录</button>}{["queued", "running", "cancelling"].includes(job.status) && <button className="mini-btn" onClick={() => void cancelJob(job)}>取消</button>}{["succeeded", "failed", "cancelled", "interrupted"].includes(job.status) && <button className="mini-btn danger-ghost" aria-label={`删除任务 ${job.job_id}`} title="从列表移除这条任务记录" onClick={() => void deleteJob(job)}>删除</button>}</div></div></div>; }; return <>{activeJobs.length > 0 && <div className="jobs-group">进行中</div>}{activeJobs.map(renderJobRow)}{queuedJobs.length > 0 && <div className="jobs-group">排队</div>}{queuedJobs.map(renderJobRow)}{doneJobs.length > 0 && <div className="jobs-group">已完成 / 失败</div>}{doneJobs.map(renderJobRow)}</>; })()}</div>}
         {!timeline && project && <div className="empty-timeline"><button onClick={() => void createTimeline({ kind: "empty" })}>创建空时间线</button></div>}

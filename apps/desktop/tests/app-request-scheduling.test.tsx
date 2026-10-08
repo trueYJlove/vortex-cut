@@ -255,11 +255,22 @@ describe("BoundedTaskQueue — 并发上限与代次作废", () => {
     expect(await first).toBe(queue.skipped);
   });
 
-  it("任务异常不堵队列（后续任务继续）", async () => {
+  it("任务异常不堵队列（后续任务继续），且失败与代次过期可区分", async () => {
     const queue = new BoundedTaskQueue<string>(2);
     const failed = queue.push(async () => { throw new Error("bad media"); });
     const ok = queue.push(async () => "good");
-    await expect(failed).resolves.toBe(queue.skipped);
+    // 失败 → failed（不是 skipped）：调用方据此区分"没拿到数据"与"结果过期"，
+    // 前者应保留上一次已知值而不是当成空列表（2026-10-08 转录页空白缺陷）。
+    await expect(failed).resolves.toBe(queue.failed);
     await expect(ok).resolves.toBe("good");
+    // 同步抛出同样归为 failed，且不挂起、不堵后续任务。
+    const syncThrow = queue.push((() => { throw new Error("sync"); }) as never);
+    const after = queue.push(async () => "after");
+    await expect(syncThrow).resolves.toBe(queue.failed);
+    await expect(after).resolves.toBe("after");
+    // 代次过期仍是 skipped。
+    const stale = queue.push(async () => "late");
+    queue.advanceGeneration();
+    await expect(stale).resolves.toBe(queue.skipped);
   });
 });

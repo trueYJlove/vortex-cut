@@ -279,7 +279,7 @@ test("Stage 1B 真实 Transcript/stale 链路，仅在真实模型权重可用�
     expect(transcript.status).toBe("ready");
     expect(transcript.segments.every((segment: any) => Number.isInteger(segment.start_us) && Number.isInteger(segment.end_us))).toBe(true);
     await page.locator(".tabs button").filter({ hasText: "转录" }).click();
-    await page.locator(".transcript-row button").last().click();
+    await page.locator(".transcript-item .transcript-open-button").last().click();
     await expect(page.locator(".transcript-viewer")).toBeVisible();
     await expect(page.getByText("原始 ASR 结果只读")).toBeVisible();
     await appendFile(video, Buffer.from([0]));

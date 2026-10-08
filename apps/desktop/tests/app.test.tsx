@@ -214,7 +214,10 @@ describe("Stage 1A/1B 工作流", () => {
     fireEvent.click(screen.getAllByRole("button", { name: /^转录$/ })[0]);
     // 转录结果在"转录"子标签下：切换后查看。
     fireEvent.click(screen.getByRole("tab", { name: /^转录/ }));
-    fireEvent.click(await screen.findByRole("button", { name: /查看转录/ })); expect(await screen.findByText("原始 ASR 结果只读。字幕修订不会覆盖这份记录。")).toBeVisible(); expect(screen.getAllByText("第一句")).toHaveLength(2);
+    fireEvent.click(await screen.findByRole("button", { name: /查看转录/ })); expect(await screen.findByText("原始 ASR 结果只读。勾选片段后，可追加到时间线或交给 AI 优化字幕文本。")).toBeVisible();
+    // 片段只在查看器里出现一次：转录页是"记录摘要 + 弹窗内勾选"，不再把同一份
+    // 片段同时渲染到左侧列表（旧实现会因此出现两条同名记录）。
+    expect(screen.getAllByText("第一句")).toHaveLength(1);
     fireEvent.click(screen.getByRole("tab", { name: /^素材/ }));
     // 删除：应用内确认弹窗（含级联警告），确认后携带级联标记调用 Core。
     fireEvent.click(screen.getAllByTitle(`删除 ${video.display_name}`)[0]);
@@ -268,6 +271,101 @@ describe("Stage 1A/1B 工作流", () => {
     fireEvent.click(screen.getByRole("tab", { name: /^转录/ }));
     fireEvent.click(await screen.findByRole("button", { name: /查看转录 transcript_1/ }));
     expect(await screen.findByRole("checkbox", { name: /第一句/ })).toBeVisible();
+  });
+
+  it("转录终态经轮询对账后刷新摘要（不依赖未接通的 subscribeJob）", async () => {
+    // 回归（2026-10-08 lwd 真实现场）：主进程从未 emit `job:event:*`，
+    // subscribeJob 的回调永不触发；P49 的刷新只挂在那个死通道上，于是
+    // 转录在"任务"页显示已完成、库里也确实 ready，转录页却始终为空。
+    // 本用例**不注入** subscribeJob 回调，只驱动轮询对账路径。
+    const api = desktopApi({ models: [readyModel] });
+    // 订阅是死通道：显式断言它不会被用来刷新。
+    api.subscribeJob = vi.fn(() => () => undefined);
+    let listed = 0;
+    const listTranscripts = vi.fn().mockImplementation(async () => {
+      listed += 1;
+      return listed === 1
+        ? { items: [], next_cursor: null }
+        : { items: [{ transcript_id: "transcript_1", asset_id: video.asset_id, status: "ready", language: "zh", duration_us: 1_000_000, created_at: now, updated_at: now } as never], next_cursor: null };
+    });
+    api.listTranscripts = listTranscripts;
+    // 轮询可见：任务先活跃，随后从活跃列表消失（= 进入终态），
+    // getJob 回填 succeeded —— 这正是生产里唯一的终态来源。
+    api.listJobs = vi.fn().mockResolvedValue({ items: [{ ...createdJob, job_id: "job_created_1" as never, status: "running", progress: 0.5 }], next_cursor: null });
+    api.getJob = vi.fn().mockResolvedValue({ ...createdJob, job_id: "job_created_1" as never, status: "succeeded", progress: 1 } as Job);
+    window.desktop = api; render(<App />);
+    await expectSwitcherName("演示项目");
+    fireEvent.click(screen.getByRole("tab", { name: /^素材/ })); fireEvent.click(await screen.findByTitle("转录"));
+    fireEvent.click(await screen.findByRole("button", { name: "开始转录" }));
+    await waitFor(() => expect(api.subscribeJob).toHaveBeenCalled());
+    // 任务进入终态：活跃列表变空 → 轮询对账调用 getJob → 应触发摘要重拉。
+    api.listJobs = vi.fn().mockResolvedValue({ items: [], next_cursor: null });
+    await act(async () => { await Promise.resolve(); });
+    // 手动驱动一轮调度（模拟间隔到达）。
+    await waitFor(() => expect(listTranscripts.mock.calls.length).toBeGreaterThan(1), { timeout: 15_000 });
+    fireEvent.click(screen.getByRole("tab", { name: /^转录/ }));
+    expect(await screen.findByRole("button", { name: /查看转录 transcript_1/ })).toBeVisible();
+  });
+
+  it("单条转录摘要拉取失败不会抹掉其它已加载的转录", async () => {
+    // 回归（2026-10-08）：队列把"执行失败"与"代次过期"都折成 skipped，
+    // loadProjectData 又把两者都当成 items=[]，于是一次瞬时失败就把该素材
+    // 的转录从界面上抹掉且不重试——表现为"转录页为空"。
+    // 这里用**真实重载路径**（转录终态轮询对账 → loadProjectData）制造第二次
+    // 拉取，并让该次拉取失败，断言已加载的记录仍在。
+    const api = desktopApi({ models: [readyModel] });
+    api.subscribeJob = vi.fn(() => () => undefined); // 死通道：刷新必须走轮询
+    let failNext = false;
+    const listTranscripts = vi.fn().mockImplementation(async () => {
+      if (failNext) throw new Error("ECONNREFUSED");
+      return { items: [{ transcript_id: "transcript_1", asset_id: video.asset_id, status: "ready", language: "zh", duration_us: 1_000_000, created_at: now, updated_at: now } as never], next_cursor: null };
+    });
+    api.listTranscripts = listTranscripts;
+    api.listJobs = vi.fn().mockResolvedValue({ items: [{ ...createdJob, job_id: "job_created_1" as never, status: "running", progress: 0.5 }], next_cursor: null });
+    api.getJob = vi.fn().mockResolvedValue({ ...createdJob, job_id: "job_created_1" as never, status: "succeeded", progress: 1 } as Job);
+    window.desktop = api; render(<App />);
+    await expectSwitcherName("演示项目");
+    fireEvent.click(screen.getByRole("tab", { name: /^转录/ }));
+    expect(await screen.findByRole("button", { name: /查看转录 transcript_1/ })).toBeVisible();
+    // 制造第二次拉取，并让这次失败。
+    failNext = true;
+    fireEvent.click(screen.getByRole("tab", { name: /^素材/ })); fireEvent.click(await screen.findByTitle("转录"));
+    fireEvent.click(await screen.findByRole("button", { name: "开始转录" }));
+    await waitFor(() => expect(api.subscribeJob).toHaveBeenCalled());
+    api.listJobs = vi.fn().mockResolvedValue({ items: [], next_cursor: null });
+    await waitFor(() => expect(listTranscripts.mock.calls.length).toBeGreaterThan(1), { timeout: 15_000 });
+    // 失败的这一次不得把已知记录抹掉。
+    fireEvent.click(screen.getByRole("tab", { name: /^转录/ }));
+    expect(screen.getByRole("button", { name: /查看转录 transcript_1/ })).toBeVisible();
+    expect(screen.queryByText(/尚未生成转录/)).toBeNull();
+  });
+
+  it("转录页每条记录只出现一次，点开后不新增重复记录", async () => {
+    // 回归（2026-10-08 用户截图）：旧实现把「摘要 chip」与「已加载正文卡片」
+    // 渲染成两份列表 —— 点一次 chip，下方就多出一条同名记录，同一转录出现两次。
+    const api = desktopApi();
+    window.desktop = api; render(<App />);
+    await expectSwitcherName("演示项目");
+    fireEvent.click(screen.getByRole("tab", { name: /^转录/ }));
+    const before = await screen.findAllByText(video.display_name);
+    expect(before).toHaveLength(1);
+    fireEvent.click(await screen.findByRole("button", { name: /查看转录 transcript_1/ }));
+    // 打开查看器后：记录行仍只有一条（片段只在弹窗内渲染）
+    expect(await screen.findByRole("checkbox", { name: /第一句/ })).toBeVisible();
+    expect(screen.getAllByText(video.display_name)).toHaveLength(1);
+    expect(document.querySelectorAll(".transcript-item")).toHaveLength(1);
+  });
+
+  it("未打开过的转录也能直接删除（无需先点开正文）", async () => {
+    // 旧实现只在「已加载正文」的卡片上放删除入口，未点开的转录无法删除。
+    const api = desktopApi();
+    window.desktop = api; render(<App />);
+    await expectSwitcherName("演示项目");
+    fireEvent.click(screen.getByRole("tab", { name: /^转录/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /删除转录 transcript_1/ }));
+    const dialog = await screen.findByRole("dialog", { name: "删除转录" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "删除转录" }));
+    await waitFor(() => expect(api.deleteTranscript).toHaveBeenCalledWith("transcript_1"));
   });
 
   it("同类任务行可区分（素材名 + 时间），不只显示相同标题", async () => {
@@ -340,6 +438,68 @@ describe("Stage 1A/1B 工作流", () => {
     const dialog = await screen.findByRole("dialog", { name: "删除转录" });
     fireEvent.click(within(dialog).getByRole("button", { name: "删除转录" }));
     expect(await screen.findByText(/请先移除相关字幕或片段后再删除/)).toBeVisible();
+  });
+
+  it("删除成功后弹窗不得永久停在「删除中…」", async () => {
+    // 回归（2026-10-08 用户现场，lwd 项目"转录删不掉，点开就是删除中"）：
+    // deleteTranscript 成功后调用 loadProjectData，后者在**同步段**执行
+    // `++projectDataEpochRef.current`；而 finally 的守卫是
+    // `projectDataEpochRef.current === epoch`，此刻必然为假，
+    // setDeleteTranscriptBusy(false) 永不执行 —— busy 永久为 true，
+    // 之后打开**任何**转录的删除弹窗都渲染成禁用态「删除中…」，
+    // 用户看到的就是"删不掉、点开就显示删除中"。
+    const api = desktopApi();
+    const summaries = (ids: string[]) => ({
+      items: ids.map(id => ({ transcript_id: id, asset_id: video.asset_id, status: "ready", language: "zh", duration_us: 1_000_000, created_at: now, updated_at: now } as never)),
+      next_cursor: null,
+    });
+    let deleted = false;
+    api.listTranscripts = vi.fn().mockImplementation(async () => summaries(deleted ? ["transcript_2"] : ["transcript_1", "transcript_2"]));
+    api.deleteTranscript = vi.fn().mockImplementation(async () => { deleted = true; });
+    window.desktop = api; render(<App />);
+    await expectSwitcherName("演示项目");
+    fireEvent.click(screen.getByRole("tab", { name: /^转录/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /删除转录 transcript_1/ }));
+    fireEvent.click(within(await screen.findByRole("dialog", { name: "删除转录" })).getByRole("button", { name: "删除转录" }));
+    await waitFor(() => expect(api.deleteTranscript).toHaveBeenCalledWith("transcript_1"));
+    // 服务端权威列表已不含它：被删记录消失。
+    await waitFor(() => expect(screen.queryByRole("button", { name: /删除转录 transcript_1/ })).toBeNull());
+    // 另一条转录的删除弹窗必须仍然可用（busy 已复位）。
+    fireEvent.click(await screen.findByRole("button", { name: /删除转录 transcript_2/ }));
+    const confirm = within(await screen.findByRole("dialog", { name: "删除转录" })).getByRole("button", { name: /删除/ });
+    expect(confirm).toHaveTextContent("删除转录");
+    expect(confirm).toBeEnabled();
+  });
+
+  it("删除成功后记录立即消失，不等权威列表重拉", async () => {
+    // 回归（2026-10-08 用户截图）：确认删除后提示已成功，记录却还在列表里停留
+    // 数秒。行数据来自 transcriptSummaries，而成功路径只清了 transcripts 正文
+    // 缓存，摘要要等 loadProjectData 的整轮往返（素材翻页 → 三状态拉任务 →
+    // 按素材经 ≤4 并发队列逐个 listTranscripts）才更新。
+    // 这里让删除后的重拉**永不 resolve**：记录若仍然消失，只可能是同步摘除
+    // 生效。（负向对照：去掉 deleteTranscript 里的 setTranscriptSummaries，
+    // 记录会一直留在列表里，断言失败。）
+    const api = desktopApi();
+    const summaries = (ids: string[]) => ({
+      items: ids.map(id => ({ transcript_id: id, asset_id: video.asset_id, status: "ready", language: "zh", duration_us: 1_000_000, created_at: now, updated_at: now } as never)),
+      next_cursor: null,
+    });
+    let hang = false;
+    api.listTranscripts = vi.fn().mockImplementation(async () => {
+      if (hang) return new Promise(() => undefined);
+      return summaries(["transcript_1", "transcript_2"]);
+    });
+    window.desktop = api; render(<App />);
+    await expectSwitcherName("演示项目");
+    fireEvent.click(screen.getByRole("tab", { name: /^转录/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /删除转录 transcript_1/ }));
+    // 删除之后的重拉不再返回：行消失只能来自本地同步摘除。
+    hang = true;
+    fireEvent.click(within(await screen.findByRole("dialog", { name: "删除转录" })).getByRole("button", { name: "删除转录" }));
+    await waitFor(() => expect(api.deleteTranscript).toHaveBeenCalledWith("transcript_1"));
+    await waitFor(() => expect(screen.queryByRole("button", { name: /删除转录 transcript_1/ })).toBeNull());
+    // 同素材的其它转录不受影响。
+    expect(screen.getByRole("button", { name: /删除转录 transcript_2/ })).toBeVisible();
   });
 });
 

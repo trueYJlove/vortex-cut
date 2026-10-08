@@ -166,6 +166,15 @@ export class RequestScheduler {
 const FAILED = Symbol("request-failed");
 
 /**
+ * 队列的两种哨兵。必须是模块级 `const`（推断为 unique symbol），否则
+ * `T | symbol` 无法用 `===` 收窄——调用方就拿不到 T 的属性。
+ * - SKIPPED：代次过期（切项目），旧结果本就该丢；
+ * - FAILED：本次执行失败（网络/IPC/业务错误），数据"未知"而非"为空"。
+ */
+const TASK_SKIPPED: unique symbol = Symbol("task-skipped");
+const TASK_FAILED: unique symbol = Symbol("task-failed");
+
+/**
  * 并发受限的任务队列（A08：转录/缩略图加载共用）。
  * - 顺序 FIFO，最大并发 maxConcurrent；
  * - generation 作废：push 时捕获代次，执行前若代次已过期则跳过（返回
@@ -173,11 +182,15 @@ const FAILED = Symbol("request-failed");
  * - dispose：清空队列（在途任务自然完成，结果被代次拦截）。
  */
 export class BoundedTaskQueue<T> {
-  readonly skipped = Symbol("task-skipped");
+  readonly skipped: typeof TASK_SKIPPED = TASK_SKIPPED;
+  /** 任务**执行失败**。与 skipped 分开：skipped 表示代次过期（旧结果本就该
+   *  丢），failed 表示这次没拿到数据（调用方应保留上一次的已知值，而不是把
+   *  它当成"该素材没有数据"）。 */
+  readonly failed: typeof TASK_FAILED = TASK_FAILED;
   private queue: Array<{
     generation: number;
     task: () => Promise<T>;
-    resolve: (value: T | symbol) => void;
+    resolve: (value: T | typeof TASK_SKIPPED | typeof TASK_FAILED) => void;
   }> = [];
   private activeCount = 0;
   private disposed = false;
@@ -191,7 +204,7 @@ export class BoundedTaskQueue<T> {
   /** 当前代次：外部事件（切项目）递增后，旧任务执行前被作废。 */
   generation = 0;
 
-  push(task: () => Promise<T>): Promise<T | symbol> {
+  push(task: () => Promise<T>): Promise<T | typeof TASK_SKIPPED | typeof TASK_FAILED> {
     if (this.disposed) return Promise.resolve(this.skipped);
     const generation = this.generation;
     return new Promise(resolve => {
@@ -222,10 +235,23 @@ export class BoundedTaskQueue<T> {
       this.activeCount += 1;
       // task() 恒应返回 Promise；测试在任务排队期间 restoreAllMocks 会让迟到
       // 的 mock 调用返回 undefined——按跳过处理，不让队列挂起或抛未接 rejection。
-      const result = item.task() as Promise<T> | undefined;
+      // task() 也可能**同步抛出**（例如 IPC 桥未就绪、参数校验失败）。旧实现
+      // 把它留在 try 之外：异常逃出 drain()（void 调用 → 未处理 rejection），
+      // 且 item.resolve 永不执行 → 该 Promise 永久挂起、activeCount 永不复位。
+      // 症状是"素材列出来了，转录摘要却永远是空"（2026-10-08 用户现场：lwd
+      // 项目两条 ready 转录，UI 显示"尚未生成转录"）。
+      let result: Promise<T> | undefined;
+      try {
+        result = item.task() as Promise<T> | undefined;
+      } catch {
+        this.activeCount -= 1;
+        item.resolve(this.failed);
+        void this.drain();
+        continue;
+      }
       if (!result || typeof result.then !== "function") {
         this.activeCount -= 1;
-        item.resolve(this.skipped);
+        item.resolve(this.failed);
         void this.drain();
         continue;
       }
@@ -235,7 +261,7 @@ export class BoundedTaskQueue<T> {
         void this.drain();
       }).catch(() => {
         this.activeCount -= 1;
-        item.resolve(this.skipped);
+        item.resolve(this.failed);
         void this.drain();
       });
     }

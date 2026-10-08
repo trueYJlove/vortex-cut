@@ -96,11 +96,14 @@ textarea { min-height: 92px; padding: 8px; resize: vertical; }
 .badge.warn { color: #d9b36a; border: 1px solid rgba(217, 179, 106, .4); }
 .badge.bad { color: #e08a8a; border: 1px solid rgba(224, 138, 138, .35); }
 .badge.dim { color: #6f7b82; border: 1px solid #33404a; }
-.transcript-row { min-width: 0; padding: 9px 10px; border: 1px solid #263038; }.transcript-row > strong { display: block; font-size: var(--dlg-fs-body); font-weight: 600; color: #e8edf0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.transcript-variants { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }.ts-chip { display: inline-flex; align-items: center; gap: 5px; min-height: 24px; padding: 0 8px; border: 1px solid #263038; border-radius: 5px; background: #0e1318; color: #a3aeb5; font-size: var(--dlg-fs-caption); }.ts-chip:hover { color: #e8edf0; border-color: #33404a; }
 .transcript-item { padding: 9px 10px; border: 1px solid #263038; }
-/* 标题行：素材名 + 删除转录（危险操作降权为幽灵按钮，悬停才显红）。 */
+/* 标题行：素材名 + 删除转录（图标按钮，与素材行/导出记录的删除入口同形）。 */
 .transcript-item-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
-.transcript-item-head > strong { min-width: 0; font-size: var(--dlg-fs-body); font-weight: 600; color: #e8edf0; overflow-wrap: anywhere; }
+/* 删除转录：沿用 .asset-actions .icon-btn 的形态（无边框、悬停才显红底），
+   与素材行、导出记录、任务行的删除入口保持一致；不占用横向文字宽度。 */
+.transcript-item-head .icon-btn { width: 26px; min-width: 26px; height: 24px; min-height: 24px; display: grid; place-items: center; border: 0; border-radius: 5px; background: none; color: #8b9396; }
+.transcript-item-head .icon-btn:hover:not(:disabled) { background: rgba(229, 72, 77, .14); color: #f0b9b2; }
+.transcript-item-head .icon-btn:disabled { opacity: .4; }
 .mini-btn.danger-ghost { flex: none; height: 24px; min-height: 24px; padding: 0 9px; border: 1px solid #3a2a2a; border-radius: 5px; background: transparent; color: #b98a86; font-size: var(--dlg-fs-caption); }
 .mini-btn.danger-ghost:hover:not(:disabled) { border-color: #a34a41; background: rgba(229, 72, 77, .12); color: #f0b9b2; }
 .append-btn { width: 100%; height: 32px; margin-top: 9px; border: 1px solid #25d3ac; border-radius: 7px; background: rgba(37, 211, 172, .1); color: #25d3ac; font-size: var(--dlg-fs-body); font-weight: 600; }
@@ -411,7 +414,6 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--vc-accent); }
 .menu-item-ico svg { width: 14px; height: 14px; }
 .asset-actions .icon-btn svg { width: 13px; height: 13px; }
 .library-filter-toolbar .icon-btn svg { width: 13px; height: 13px; }
-.ts-chip svg { width: 12px; height: 12px; }
 .imp2 button svg { width: 13px; height: 13px; flex: none; }
 
 /* Project summary in topbar */
@@ -428,7 +430,7 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--vc-accent); }
 .tabs button.active { border-bottom-color: var(--vc-accent); color: var(--vc-text); background: transparent; }
 .asset-item { background: var(--vc-panel-2); border-color: var(--vc-border); border-radius: 8px; }
 .draggable-asset:hover { border-color: var(--vc-accent); box-shadow: 0 0 0 1px var(--vc-accent-soft); }
-.transcript-row, .transcript-item { border-color: #263038; border-radius: 8px; background: #181c1f; }
+.transcript-item { border-color: #263038; border-radius: 8px; background: #181c1f; }
 .legacy-section { border-top-color: var(--vc-border); }
 
 /* Preview stage — 剪映式：基准宽列（stage-column）承载工具栏/舞台/进度条/播放条，舞台黑底圆角。 */
@@ -1055,12 +1057,20 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 
 /* ── 表单节奏：标签在上、控件在下 ──────────────────────────── */
 .modal label { display: grid; gap: 6px; align-content: start; font-size: var(--dlg-fs-body); color: var(--dlg-text-2); }
-.modal label:has(> input[type="checkbox"]:first-child), .modal label:has(> input[type="radio"]:first-child) { display: inline-flex; align-items: center; gap: 8px; }
+/* 行内「复选框 + 单行文字」标签。必须排除 .segment-row：转录片段行是
+   `<label>` 且首子元素就是复选框，会被这条 (0,3,2) 规则改成 inline-flex，
+   压掉 .segment-row 自己的 (0,1,0) grid —— 结果是每行按内容宽度收缩、彼此
+   首尾相接折行，长转录变成一屏碎块（用户实测 2026-10-08 现场）。 */
+.modal label:has(> input[type="checkbox"]:first-child):not(.segment-row), .modal label:has(> input[type="radio"]:first-child):not(.segment-row) { display: inline-flex; align-items: center; gap: 8px; }
 .modal label.tb-field { display: inline-flex; align-items: center; gap: 6px; font-size: var(--dlg-fs-body); color: var(--dlg-text-2); }
 .modal .check-line { display: inline-flex; align-items: center; gap: 8px; font-size: var(--dlg-fs-body); color: var(--dlg-text-2); }
 .modal input[type="checkbox"], .modal input[type="radio"] { accent-color: var(--dlg-primary); }
 
-.modal input, .modal select, .modal textarea {
+/* 通用输入框高度（30px）不适用于复选框/单选框：它们必须保持方框尺寸。
+   旧写法 `input` 一并命中 checkbox，把 13×13 的方框撑成 13×30——方框内
+   垂直居中后，勾选标记相对同一行的文字下沉约 8px（用户实测 2026-10-08）。
+   `.segment-row input` 只声明了 width/height，压不过 (0,1,1) 的 min-height。 */
+.modal input:not([type="checkbox"]):not([type="radio"]), .modal select, .modal textarea {
   height: 30px; min-height: 30px; padding: 0 10px;
   background: var(--ctl-bg); border: 1px solid transparent; border-radius: var(--r-ctl);
   color: var(--dlg-text); font-size: var(--dlg-fs-body); outline: none;
@@ -1599,7 +1609,25 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 .transcript-viewer-toolbar strong { margin-right: auto; font-size: var(--dlg-fs-body); }
 .transcript-viewer-toolbar .mini-btn { height: 25px; min-height: 25px; padding: 0 9px; }
 .transcript-selectable-segments { padding: 0 2px; }
-.transcript-selectable-segments .segment-row { grid-template-columns: 18px 78px 1fr; padding: 8px 6px; }
+/* 三列「复选框 / 时间码 / 正文」必须落在同一条水平线上（用户实测 2026-10-08：
+   复选框夹在时间码与正文中间）。根因是两列字号不同却各自按**无单位倍数**换算
+   行盒：时间码 --dlg-fs-caption(10.5px) × 1.55 = 16.275px，正文
+   --dlg-fs-body(12.5px) × 1.7 = 21.25px，行盒差 4.975px ⇒ 同一行内两列基线
+   错开约 4px（Chromium 实测 span 基线 433.19 vs p 基线 437.19）。13px 复选框
+   又因 grid 默认 align-items:stretch 贴到行盒顶部，三者墨迹中心互不重合。
+   修法：①两列显式取同一长度行盒（calc 产物是长度，不随各自字号再缩放），
+   行高不再随字号漂移；②align-items:center 把复选框放进行盒垂直中心
+   （设计稿 §16 的 .lrow 同为 align-items:center）。
+   注：行盒高度不变（正文本来就是 21.25px），只把时间码对齐过来。 */
+.transcript-selectable-segments .segment-row {
+  grid-template-columns: 18px 78px 1fr;
+  padding: 8px 6px;
+  align-items: center;
+}
+.transcript-selectable-segments .segment-row > span,
+.transcript-selectable-segments .segment-row > p {
+  line-height: calc(var(--dlg-fs-body) * 1.7);
+}
 .transcript-viewer-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .transcript-viewer-actions .append-btn { margin-top: 0; }
 @media (max-width: 560px) { .transcript-viewer-actions { grid-template-columns: 1fr; } }
