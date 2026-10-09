@@ -75,8 +75,12 @@ async def test_pack_response_and_window_limit() -> None:
 
 @pytest.mark.asyncio
 async def test_p95_latency_gate_small_fixture() -> None:
-    """p95 门限（P29）：短命 ffmpeg 单帧窗。小夹具宽限 2s；真机 1080p/HEVC
-    收口时按 scrub 场景再定档（见实施记录）。"""
+    """p95 门限（P29）：短命 ffmpeg 单帧窗。小夹具宽限 2s。
+
+    真机定档（2026-10-09）：**1080p/HEVC scrub 2 帧窗 p95 ≤ 1200ms**——
+    三轴实测（720p HEVC 250ms / 1080p H.264 313ms / 3440x1440 698ms）按
+    像素/编码保守外推 560ms 的约 2 倍；推导与协议见
+    `MEDIA_DECODER_HEVC_P29_REALMACHINE_2026-10-09.md`。"""
     import time
 
     samples: list[float] = []
