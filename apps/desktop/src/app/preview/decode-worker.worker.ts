@@ -762,7 +762,14 @@ async function init(url: string, cacheFrames: number, hasTicketRefresh: boolean,
     hardware = "no-preference";
   }
   decoder = createDecoder();
-  decoder.configure(decoderConfig);
+  try {
+    decoder.configure(decoderConfig);
+  } catch (error) {
+    // P28：isConfigSupported 报 supported 但实配 configure 失败（探测与实配
+    // 错位）——必须以类型化错误上报，让主线程能力表回写降级；否则每个素材
+    // 都会在同一失败路径上反复试错。错误码经 errorText 变成消息前缀。
+    throw Object.assign(new Error(errorText(error)), { code: "DECODE_CONFIGURE_FAILED" });
+  }
   const last = demuxed.samples.at(-1)!;
   post({
     type: "ready",

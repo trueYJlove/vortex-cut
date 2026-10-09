@@ -89,6 +89,21 @@ export function selectCapabilityRow(table: DecodeCapabilityTable, codec: string)
   return table.rows.find(row => row.codec === normalized) ?? null;
 }
 
+/**
+ * P28：实配失败判定（探测与实配错位）。
+ *
+ * worker 在 init 的 decoder.configure 失败时以 DECODE_CONFIGURE_FAILED 类型化
+ * 上报（经 errorText 变成消息前缀；主线程重建 Error 后 code 属性丢失，故以
+ * 消息前缀为准、code 为辅）。只有这类**确定性**失败才回写能力表降级——
+ * 瞬态失败（票据过期/网络/超时）不污染能力表，本次素材仍走次选后端。
+ */
+export function isDecodeConfigureFailure(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (code === "DECODE_CONFIGURE_FAILED") return true;
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return message.startsWith("DECODE_CONFIGURE_FAILED");
+}
+
 class WebCodecsMediaDecoder implements MediaDecoder {
   readonly backend = "webcodecs" as const;
   private disposed = false;
@@ -177,12 +192,30 @@ export class MediaDecoderFactoryImpl implements MediaDecoderFactory {
         return await this.createBackend(backend, input, signal);
       } catch (error) {
         lastError = error;
+        // P28：实配失败回写降级（防每素材反复试错）。只降级确定性的
+        // configure 拒绝；瞬态失败（票据/网络/超时）不污染能力表。
+        if (isDecodeConfigureFailure(error)) this.downgradeRow(row, backend);
       }
     }
     if (lastError) throw lastError;
     throw Object.assign(new Error(`BMFF_CODEC_UNSUPPORTED: ${input.codec} 无可用解码后端`), {
       code: "BMFF_CODEC_UNSUPPORTED",
     });
+  }
+
+  /** P28：实配失败回写降级——同一 (codec, 后端) 确定性失败只试一次。 */
+  private downgradeRow(row: DecodeCapabilityRow, backend: DecodeBackendId): void {
+    if (backend === "webcodecs") {
+      row.webcodecs_supported = false;
+      row.webcodecs_mode = null;
+    } else {
+      row.ffmpeg_supported = false;
+    }
+    row.preferred = row.webcodecs_supported
+      ? "webcodecs"
+      : row.ffmpeg_supported
+        ? "ffmpeg"
+        : "webcodecs";
   }
 
   private async createBackend(

@@ -159,7 +159,7 @@ PiP 自由定位、A1 音频混音、代理与权威预览、H.264/AAC 导出与
 | P25 | **L/J 词戳 ASR 优先**：faster-whisper 路径 + 能量回退 + word_source | `W0_4_ASR_WORDS_2026-09-25.md` §2 | 工作包 | ✅ **2026-09-25 核销**——产品 Whisper Tiny 自动发现；当前预测 `word_source=asr` |
 | P26 | **Desktop Wave 1 剪辑手法 UI**：三页壳 + 属性/素材入口 | `DESKTOP_WAVE1_EDITING_TOOLS_2026-09-25.md` §2 | 工作包 | ✅ **2026-09-25 核销**——设计稿确认后落地；Desktop 708 tests |
 | P27 | **MediaDecoder 双后端 + HEVC 合成预览**：能力表 + WebCodecs/FFmpeg 旁路 + 帧回传 F1 + 后端 B Core 端点契约 | `MEDIA_DECODER_HEVC_PLANNING_GATE_2026-09-26.md` §1 / §3 / §4（含 §7 评审修订） | 工作包 | ⏳ **H1–H3 核心 + session 接线已落地**（四份 `MEDIA_DECODER_HEVC_H*_IMPLEMENTATION/…CLOSEOUT_2026-09-26.md`）；**真机 HEVC e2e 与 p95 门限定档待收口（P29）**；执行序 H1→H5 |
-| P28 | 能力表探测 + 实配失败回写降级（防每素材反复试错）；软解为合法 A 路径 | `MEDIA_DECODER_HEVC_PLANNING_GATE_2026-09-26.md` §5 风险表 | **风险对策** | ⏳ 未落地 |
+| P28 | 能力表探测 + 实配失败回写降级（防每素材反复试错）；软解为合法 A 路径 | `MEDIA_DECODER_HEVC_PLANNING_GATE_2026-09-26.md` §5 风险表 | **风险对策** | ✅ **2026-10-09 核销**——探测与「软解为合法 A 路径」已随 H1 落地（`probeDecodeCapability` / `no-preference` 判定）；本次补齐**实配失败回写降级**：worker init 的 `decoder.configure` 失败以类型化 `DECODE_CONFIGURE_FAILED` 上报（经 `errorText` 变消息前缀），工厂只对这类确定性失败回写能力表（`downgradeRow`：webcodecs/ffmpeg 行降级 + `preferred` 翻转），**瞬态失败（票据/网络/超时）不污染能力表**——同一 (codec, 后端) 确定性失败只试一次，下个素材不再反复试错。测试 4 项（分类器钉死 / 回写+防重复试错 / 瞬态不降级 / 双失败明确报错），**负向对照 2 组**（去回写调用 → 2 红；分类器恒真 → 3 红）。`decode-capability` 11 passed + typecheck 绿 |
 | P29 | F1 帧回传带宽/延迟达门限；A/B 同素材同帧号取帧一致（VFR 对拍） | 同上 §5 风险表 | **风险对策** | ⏳ A/B PTS 对拍已过（`test_a_b_same_frame_number_same_pts`）；p95 小夹具初值 2s 过门，**真机 1080p/HEVC 门限定档待收口** |
 | P30 | 后端 B Core 端点复用票据鉴权 + 路径不下发渲染进程 + 窗口上限；能力表按 FFmpeg build 指纹失效重探 | 同上 §5 风险表 | **风险对策** | ⏳ 未落地 |
 | P31 | 手写 demux 扩 hev1 仅覆盖主流 MP4，异常容器强制 B 后端；色彩钉死 BT.709 | 同上 §5 风险表 | **风险对策** | ⏳ 未落地 |

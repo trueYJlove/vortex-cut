@@ -1,10 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   normalizeDecodeCodec,
   probeDecodeCapability,
   selectCapabilityRow,
   MediaDecoderFactoryImpl,
 } from "../src/app/preview/decode-capability.js";
+import { DecodeWorker } from "../src/app/preview/decode-worker.js";
+import { isDecodeConfigureFailure } from "../src/app/preview/decode-capability.js";
 import type { DecodeCapabilityTable } from "@aivideo/contracts";
 
 function tableWith(partial: Partial<DecodeCapabilityTable["rows"][number]> & { codec: "avc" | "hevc" | "av1" }): DecodeCapabilityTable {
@@ -160,5 +162,67 @@ describe("MediaDecoderFactoryImpl 判定顺序", () => {
       frame.release(); // 幂等
     }
     decoder.dispose();
+  });
+});
+
+describe("P28 实配失败回写降级（防每素材反复试错）", () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  const configureError = () => Object.assign(new Error("configure boom"), { code: "DECODE_CONFIGURE_FAILED" });
+  const factoryInput = {
+    mediaUrl: "aivideo://t",
+    codec: "hvc1.1.6.L120.B0",
+    width: 2,
+    height: 2,
+    decodeFrames: async () => new ArrayBuffer(0),
+  };
+
+  it("分类器只认 DECODE_CONFIGURE_FAILED，瞬态错误不认", () => {
+    expect(isDecodeConfigureFailure(new Error("DECODE_CONFIGURE_FAILED: x"))).toBe(true);
+    expect(isDecodeConfigureFailure(configureError())).toBe(true);
+    expect(isDecodeConfigureFailure(new Error("ticket expired"))).toBe(false);
+    expect(isDecodeConfigureFailure(null)).toBe(false);
+  });
+
+  it("实配失败当次落次选后端且能力表回写降级，后续素材不再试错", async () => {
+    const table = tableWith({ codec: "hevc", webcodecs_supported: true, webcodecs_mode: "prefer-hardware", ffmpeg_supported: true });
+    const create = vi.spyOn(DecodeWorker, "create").mockRejectedValue(configureError());
+    const factory = new MediaDecoderFactoryImpl(table);
+
+    const first = await factory.create(factoryInput);
+    expect(first.backend).toBe("ffmpeg");
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(table.rows[0]).toMatchObject({ webcodecs_supported: false, webcodecs_mode: null, preferred: "ffmpeg" });
+
+    const second = await factory.create(factoryInput);
+    expect(second.backend).toBe("ffmpeg");
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("瞬态失败不污染能力表，下一素材仍可尝试 webcodecs", async () => {
+    const table = tableWith({ codec: "hevc", webcodecs_supported: true, webcodecs_mode: "no-preference", ffmpeg_supported: true });
+    const create = vi.spyOn(DecodeWorker, "create")
+      .mockRejectedValueOnce(new Error("ticket expired"))
+      .mockResolvedValueOnce({ width: 2, height: 2 } as never);
+    const factory = new MediaDecoderFactoryImpl(table);
+
+    const first = await factory.create(factoryInput);
+    expect(first.backend).toBe("ffmpeg");
+    expect(table.rows[0]).toMatchObject({ webcodecs_supported: true, preferred: "webcodecs" });
+
+    const second = await factory.create(factoryInput);
+    expect(second.backend).toBe("webcodecs");
+    expect(create).toHaveBeenCalledTimes(2);
+  });
+
+  it("确定性失败全部降级后明确失败，不静默", async () => {
+    const table = tableWith({ codec: "hevc", webcodecs_supported: true, ffmpeg_supported: true });
+    vi.spyOn(DecodeWorker, "create").mockRejectedValue(configureError());
+    const factory = new MediaDecoderFactoryImpl(table);
+    const noFallback = { ...factoryInput, decodeFrames: undefined };
+
+    await expect(factory.create(noFallback)).rejects.toMatchObject({ code: "DECODE_BACKEND_UNAVAILABLE" });
+    expect(table.rows[0]).toMatchObject({ webcodecs_supported: false });
+    await expect(factory.create(noFallback)).rejects.toMatchObject({ code: "DECODE_BACKEND_UNAVAILABLE" });
   });
 });
