@@ -306,7 +306,8 @@ export interface DesktopApi {
   ensurePcmChunk: (input: { project_id: ProjectId; asset_id: string; start_sample: number }) => Promise<PcmChunkDescription>;
   pcmChunkMediaUrl: (input: { project_id: ProjectId; asset_id: string; start_sample: number }) => Promise<PcmChunkMediaResponse>;
   /** H3 后端 B：窗口帧解码（AIV1 紧凑二进制；路径永不进 Renderer）。 */
-  decodeFrames: (input: { project_id: ProjectId; asset_id: string; frame_numbers: number[]; fps: number }) => Promise<ArrayBuffer>;
+  decodeFrames: (input: { project_id: ProjectId; asset_id: string; frame_numbers: number[]; fps: number; ticket_ref: string }) => Promise<ArrayBuffer>;
+  decodeCapability?: () => Promise<{ decoders: Record<string, boolean>; probed_at: string; ffmpeg_fingerprint: string }>;
   // B16b 编辑器负载：playing/scrubbing/idle 推送（Main 侧 lease 心跳消费）
   updateEditorLoad: (mode: "playing" | "scrubbing" | "idle") => Promise<{ status: string }>;
   captionFontUrl: () => Promise<string>;
@@ -490,6 +491,7 @@ const api: DesktopApi = {
   ensurePcmChunk: input => ipcRenderer.invoke("pcm-chunk:ensure", input),
   pcmChunkMediaUrl: input => ipcRenderer.invoke("pcm-chunk:media", input),
   decodeFrames: input => ipcRenderer.invoke("decode-frames", input),
+  decodeCapability: () => ipcRenderer.invoke("decode-capability"),
   updateEditorLoad: (mode: "playing" | "scrubbing" | "idle") => ipcRenderer.invoke("editor-load:update", mode),
   captionFontUrl: () => ipcRenderer.invoke("media:caption-font-url"),
   captionFontUrls: () => ipcRenderer.invoke("media:caption-font-urls"),

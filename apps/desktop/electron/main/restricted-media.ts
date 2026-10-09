@@ -53,6 +53,22 @@ export class RestrictedMediaRegistry {
   }
 }
 
+/**
+ * P30：decode-frames 等媒体面消费前的票据校验（§2.5 复用 restricted-media
+ * 鉴权面）——票据必须存在、未过期、purpose 匹配且属于该实体；否则拒绝。
+ */
+export function requireAssetTicket(
+  registry: RestrictedMediaRegistry,
+  ticketRef: unknown,
+  entityId: string,
+  purpose: RestrictedMediaPurpose = "asset",
+): void {
+  const item = typeof ticketRef === "string" ? registry.resolveUrl(ticketRef, purpose) : undefined;
+  if (!item || item.entity_id !== entityId) {
+    throw new Error("DECODE_TICKET_INVALID");
+  }
+}
+
 export function ticketFromRestrictedUrl(value: string): string | null {
   try {
     const url = new URL(value);

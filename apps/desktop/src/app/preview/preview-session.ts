@@ -469,18 +469,38 @@ export class PreviewSession {
         const rangeCacheBytes = (resourceTier ? BUDGET_TABLES[resourceTier].rangeCacheMiB : 128) * 1024 * 1024;
         // H1/H3：MediaDecoderFactory 选 A/B；codec=auto（demux 发现）。
         // 后端 B 的 decodeFrames 经 Main→Core（路径不进 Renderer）。
-        const factory = session.decoderFactory ?? new MediaDecoderFactoryImpl(await probeDecodeCapability());
-        session.decoderFactory = factory;
         const desktopApi = typeof window !== "undefined"
-          ? (window as unknown as { desktop?: { decodeFrames?: (input: { project_id: string; asset_id: string; frame_numbers: number[]; fps: number }) => Promise<ArrayBuffer> } }).desktop
+          ? (window as unknown as { desktop?: {
+              decodeFrames?: (input: { project_id: string; asset_id: string; frame_numbers: number[]; fps: number; ticket_ref: string }) => Promise<ArrayBuffer>;
+              decodeCapability?: () => Promise<{ decoders: Record<string, boolean>; probed_at: string; ffmpeg_fingerprint: string }>;
+              assetMediaTicket?: (assetId: string) => Promise<{ media_url: string }>;
+            } }).desktop
           : undefined;
-        const decodeFrames = pcmProjectId && desktopApi?.decodeFrames
-          ? (req: { frameNumbers: number[]; fps: number }) => desktopApi.decodeFrames!({
-              project_id: pcmProjectId,
-              asset_id: input.asset_id,
-              frame_numbers: req.frameNumbers,
-              fps: req.fps,
-            })
+        // P30：ffmpeg_supported 数据源 = Core `ffmpeg -decoders`（FFmpeg build
+        // 指纹失效重探）。取不到时保持空表——禁止无探测就假定 FFmpeg 可解。
+        const ffmpegDecoders = await desktopApi?.decodeCapability?.().then(
+          value => value.decoders ?? {},
+          () => ({}) as Record<string, boolean>,
+        ) ?? ({} as Record<string, boolean>);
+        const factory = session.decoderFactory ?? new MediaDecoderFactoryImpl(await probeDecodeCapability({
+          avc: ffmpegDecoders.avc === true,
+          hevc: ffmpegDecoders.hevc === true,
+          av1: ffmpegDecoders.av1 === true,
+        }));
+        session.decoderFactory = factory;
+        const decodeFrames = pcmProjectId && desktopApi?.decodeFrames && desktopApi?.assetMediaTicket
+          ? async (req: { frameNumbers: number[]; fps: number }) => {
+              // P30：每窗现取 restricted-media 票据随请求出示（§2.5 ticket_ref；
+              // 已注册路径纯内存签发，零网络）——长会话不受票据 TTL 影响。
+              const fresh = await desktopApi.assetMediaTicket!(input.asset_id);
+              return desktopApi.decodeFrames!({
+                project_id: pcmProjectId,
+                asset_id: input.asset_id,
+                frame_numbers: req.frameNumbers,
+                fps: req.fps,
+                ticket_ref: fresh.media_url,
+              });
+            }
           : undefined;
         const decoder = await factory.create({
           mediaUrl: ticket,

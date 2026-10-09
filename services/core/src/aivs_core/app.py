@@ -25,6 +25,7 @@ from .ids import new_id
 from .jobs import JobService
 from .media.audio_chunks import PcmChunkError, PcmChunkService
 from .media.cv_signals import CV_ALGORITHM_VERSION, CvAnalysisError
+from .media.decode_capability import DecodeCapabilityProbe
 from .media.encoders import EncoderDetector
 from .media.ffprobe import FFprobe
 from .media.frame_decode import (
@@ -117,12 +118,24 @@ class WaveformRequest(BaseModel):
 
 
 class DecodeFramesRequest(BaseModel):
-    """H3 后端 B 窗口帧解码（合成帧号 → NV12 平面；路径永不进响应）。"""
+    """H3 后端 B 窗口帧解码（合成帧号 → NV12 平面；路径永不进响应）。
+
+    P30（§2.5 契约）：携带 restricted-media 票据 ticket_ref
+    （aivideo://media/<ticket>），与媒体字节同一鉴权面——票据由 Electron
+    Main 的 RestrictedMediaRegistry 权威校验（同 TTL/同 purpose/同实体），
+    Core 侧做格式校验 + 窗口上限；路径解析保持 Core 内部（既有纪律：
+    路径永不进响应、永不进渲染进程）。
+    """
     model_config = ConfigDict(extra="forbid")
 
     frame_numbers: list[int] = Field(min_length=1, max_length=32)
     fps: float = Field(gt=0)
     pixel_format: Literal["nv12"] = "nv12"
+    ticket_ref: str = Field(
+        min_length=1,
+        max_length=512,
+        pattern=r"^aivideo://media/[A-Za-z0-9_-]{32,128}$",
+    )
 
 
 class CvAnalysisRequest(BaseModel):
@@ -681,6 +694,9 @@ class CoreState:
         # 成功 LRU≤256、失败 TTL 5s、并发同键 single-flight）。装饰层包住
         # FFprobe——app 内统一经 cached_probe 走缓存，FFprobe 本体语义不变。
         self.probe_cache = ProbeCache()
+        # P30：`ffmpeg -decoders` 能力数据源（§2.5）——FFmpeg build 指纹键
+        # 失效重探；进程内缓存（Core 重启即重探）。
+        self.decode_capability_probe = DecodeCapabilityProbe(settings.ffmpeg)
         self.encoders = EncoderDetector(settings.ffmpeg)
         self.model_registry = ModelRegistry(settings.manifest_dir)
         self.model_manager = ModelManager(self.db, settings.data_dir, self.model_registry)
@@ -2438,6 +2454,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             }
         except DomainError as exc:
             raise _domain(exc) from exc
+
+    @app.get("/api/v1/decode-capability")
+    async def decode_capability(_: CoreState = Depends(require_ui)) -> dict[str, Any]:
+        """P30：`ffmpeg -decoders` 能力数据源（§2.5）。
+
+        响应含 decoders / probed_at / ffmpeg_fingerprint；FFmpeg build 指纹
+        变化即重探（换 FFmpeg 不再沿用陈旧结论）。进程内缓存 = Core 重启重探。
+        """
+        return state.decode_capability_probe.get()
 
     @app.post("/api/v1/projects/{project_id}/assets/{asset_id}/decode-frames")
     async def decode_asset_frames(

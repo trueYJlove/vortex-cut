@@ -26,7 +26,7 @@ import { defaultLogPath, appendLog, redact } from "./logging.js";
 import { SidecarSupervisor } from "./sidecar-supervisor.js";
 import { DesktopSettingsStore, type DesktopSettings } from "./desktop-settings.js";
 import { registerSettingsIpc } from "./settings-ipc.js";
-import { RESTRICTED_MEDIA_SCHEME, RestrictedMediaRegistry, serveRestrictedMedia } from "./restricted-media.js";
+import { RESTRICTED_MEDIA_SCHEME, RestrictedMediaRegistry, requireAssetTicket, serveRestrictedMedia } from "./restricted-media.js";
 import { probeActive, probeLoadQuery, registerProbeIpc, type ProbeIpcHandle } from "./probe-ipc.js";
 import { normalizeJob } from "../../src/lib/core-client.js";
 import {
@@ -410,7 +410,7 @@ function registerIpc(): void {
     return { grant, media };
   });
   ipcMain.handle("media:probe", (_event, grantId: GrantId) => fetchWithUi<MediaInfo>("/api/v1/media/probe", { method: "POST", body: JSON.stringify({ grant_id: asId(grantId, "grant_id") }) }));
-  ipcMain.handle("decode-frames", async (_event, input: { project_id: string; asset_id: string; frame_numbers: number[]; fps: number }) => {
+  ipcMain.handle("decode-frames", async (_event, input: { project_id: string; asset_id: string; frame_numbers: number[]; fps: number; ticket_ref: string }) => {
     const projectId = asId(input?.project_id, "project_id");
     const assetId = asId(input?.asset_id, "asset_id");
     const frameNumbers = Array.isArray(input?.frame_numbers) ? input.frame_numbers : [];
@@ -418,12 +418,18 @@ function registerIpc(): void {
     if (!frameNumbers.length || frameNumbers.some(n => !Number.isInteger(n) || n < 0)) {
       throw new Error("DECODE_WINDOW_EMPTY");
     }
+    // P30：窗口上限（Core 侧 max_length=32 为权威；这里提前拒绝给清晰错误）。
+    if (frameNumbers.length > 32) throw new Error("DECODE_WINDOW_TOO_LARGE");
     if (!Number.isFinite(fps) || fps <= 0) throw new Error("DECODE_FPS_INVALID");
+    // P30：复用 restricted-media 票据鉴权（§2.5）——与媒体字节同一登记表、
+    // 同一 TTL/purpose 校验；票据必须属于本实体。未持票渲染面不得发起窗口解码。
+    requireAssetTicket(restrictedMedia, input?.ticket_ref, assetId);
     return fetchBinaryWithUi(`/api/v1/projects/${projectId}/assets/${assetId}/decode-frames`, {
       method: "POST",
-      body: JSON.stringify({ frame_numbers: frameNumbers, fps, pixel_format: "nv12" }),
+      body: JSON.stringify({ frame_numbers: frameNumbers, fps, pixel_format: "nv12", ticket_ref: input.ticket_ref }),
     });
   });
+  ipcMain.handle("decode-capability", () => fetchWithUi<unknown>("/api/v1/decode-capability"));
 
   ipcMain.handle("project:list", (_event, params: { status?: string; limit?: number; cursor?: string } = {}) => fetchWithUi(`${API_PREFIX}/projects${buildQuery(params)}`));
   ipcMain.handle("project:create", (_event, input: { name: string; root_dir_name?: string }) => {
