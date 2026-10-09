@@ -1212,6 +1212,29 @@ export class PreviewSession {
     };
     collectNeeds(from, to, needsByInput, true);
     if (toEnter > to) collectNeeds(from, toEnter, enterNeeds);
+    // P72 剪辑点链预热：同一 input 的**片段切换** = 源链不连续，worker 必须
+    // 「关键帧重建 + GOP 重喂」才能接上新片段——这是 H.264 帧间预测的固有成本。
+    // 但旧实现让它**从边界那一刻才开始**：请求封顶 `max = anchor + LEAD` 以
+    // ≤target 帧的最大展示需求为锚，target 未越过边界时新片段的 src_n 根本不在
+    // 允许请求的范围内，于是这段等待完全落在呈现关键路径上（真机多片段实测：
+    // 单个剪辑点丢 1~9 帧，远距源跳变最重）。
+    // 这里先定位**前方最近一处同输入的片段切换**（边界帧的展示需求 = 新链链头），
+    // 真正的提前发起在下方每输入循环里、且要求「旧链到边界为止已就绪/在途」。
+    const chainWarmByInput = new Map<string, { frame: number; srcN: number }>();
+    {
+      let previousClip: string | null = null;
+      let previousInput: string | null = null;
+      for (let n = from; n <= toEnter; n++) {
+        const main = this.frames.getFrame(n)?.main;
+        if (!main || main.kind !== "segment") { previousClip = null; previousInput = null; continue; }
+        if (previousClip !== null && previousInput === main.input_id && main.clip_id !== previousClip
+          && n > target && !chainWarmByInput.has(main.input_id)) {
+          chainWarmByInput.set(main.input_id, { frame: n, srcN: main.src_n });
+        }
+        previousClip = main.clip_id;
+        previousInput = main.input_id;
+      }
+    }
     for (const [inputId, needs] of needsByInput) {
       const rig = this.rigs.get(inputId);
       if (!rig || rig.kind !== "video" || !rig.worker || rig.decoderRecreate) continue;
@@ -1266,6 +1289,38 @@ export class PreviewSession {
             if (rig.inFlight.get(srcN) === generation) rig.inFlight.delete(srcN);
             if (!this.disposed && this.playing) this.pump(this.latestTarget);
           });
+      }
+      // P72 剪辑点链预热：边界落在 LEAD_ENTER 内、且**旧链到边界为止的展示需求
+      // 都已就绪或在途**（此刻解码器不再需要服务旧链，提前请求新链不会造成
+      // 「请求新链 → 又回头要旧链」的来回切换）时，提前发起新链链头**一次**：
+      // 链头请求即触发 worker 的链切换（关键帧重建 + GOP 重喂），把这段固有等待
+      // 挪到边界到达之前。只占 1 个环槽位（边界前剩余帧 D + 1 ≤ ringDepth−3），
+      // 不顶掉待展示帧；链头若在到达前被淘汰，展示时刻的请求仍能命中 worker 缓存
+      // ——冷启只需发生一次。
+      const warm = chainWarmByInput.get(inputId);
+      if (warm && rig.inFlight.size < PreviewSession.IN_FLIGHT
+        && this.ringSlotIndex(rig, warm.srcN) < 0 && !rig.inFlight.has(warm.srcN)) {
+        let covered = true;
+        for (let n = target; n < warm.frame && covered; n++) {
+          const main = this.frames.getFrame(n)?.main;
+          if (!main || main.kind !== "segment" || main.input_id !== inputId) continue;
+          if (this.ringSlotIndex(rig, main.src_n) >= 0) continue;
+          if (rig.inFlight.has(main.src_n)) continue;
+          covered = false;
+        }
+        if (covered) {
+          const generation = rig.chainGeneration;
+          rig.inFlight.set(warm.srcN, generation);
+          rig.fed = Math.max(rig.fed, warm.srcN);
+          editorPerf.record("chain_warm", 0, this.perfId, 0, this.seekEpoch, warm.srcN,
+            editorPerf.enabled ? this.ir.inputs.findIndex(item => item.input_id === inputId) : -1);
+          void this.uploadRing(rig, inputId, warm.srcN)
+            .catch(error => this.noteDecodeError(inputId, warm.srcN, error))
+            .finally(() => {
+              if (rig.inFlight.get(warm.srcN) === generation) rig.inFlight.delete(warm.srcN);
+              if (!this.disposed && this.playing) this.pump(this.latestTarget);
+            });
+        }
       }
     }
     // 转场影子槽（共享输入第二帧）：直发（ack 后就绪；窗口内单帧）

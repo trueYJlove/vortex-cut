@@ -217,4 +217,50 @@ describe("同素材多剪辑片段：顺序解码链必须按展示需求推进"
     expect(requested.length).toBeLessThan(TOTAL_FRAMES * 4);
     session.dispose();
   }, 30_000);
+
+  /**
+   * P72 剪辑点链预热：同输入的片段切换 = 源链不连续，worker 必须「关键帧重建 +
+   * GOP 重喂」才能接上新片段——这是 H.264 帧间预测的固有成本。旧实现让它从**边界
+   * 那一刻**才开始（请求封顶 `max = anchor + LEAD` 以当前展示需求为锚，target 未
+   * 越过边界时新片段的 src_n 不在允许请求的范围内），于是这段等待整个落在呈现关键
+   * 路径上（真机 13 片段实测：单个剪辑点丢 1~9 帧）。
+   *
+   * 判据（可判别）：**前跳片段的链头必须在展示前沿到达边界之前就被请求**——预热把
+   * 链切换提前，冷启因而发生在边界之前。反向对照：去掉预热，链头只会在展示前沿
+   * 越过边界之后才发出（atFrame ≥ 边界帧）。
+   */
+  it("P72 剪辑点链预热：前跳片段的链头早于边界被请求", async () => {
+    const container = document.createElement("div");
+    const session = await PreviewSession.create(
+      container, scatteredClipsIr(), new Map([["asset_video", "aivideo://media/one"]]),
+    );
+    const decode = wireInstantWorkers();
+    // 判据必须用 **pump 的 target**（时钟前沿），不能用 currentFrame：合成滞后于
+    // 时钟，target 已越过边界而 currentFrame 还没到时，旧代码也会「看起来提前」
+    // ——首版判据正是这样被负对照当场证伪的。
+    let pumpTarget = -1;
+    const originalPump = (session as unknown as { pump(target: number): void }).pump.bind(session);
+    (session as unknown as { pump(target: number): void }).pump = (target: number) => {
+      pumpTarget = target;
+      originalPump(target);
+    };
+    const stamps: Array<{ frameN: number; atTarget: number }> = [];
+    const originalPost = decode.postMessage.bind(decode);
+    decode.postMessage = (message: any) => {
+      if (message.type === "decode") {
+        stamps.push({ frameN: message.frameN as number, atTarget: pumpTarget });
+      }
+      originalPost(message);
+    };
+    session.play();
+    await step(1100);
+    // 第 2 段源窗口 3000 是**前跳**（第 1 段源 0..29）：边界帧 = CLIP_FRAMES。
+    // 旧实现下该请求只可能在 target 已进入第 2 段后发出（anchor 才够到 3000）；
+    // 预热把它提前到 target 仍在第 1 段内。
+    const head = stamps.find(stamp => stamp.frameN === CLIP_SOURCE_STARTS[1]);
+    expect(head, "前跳片段的链头未被请求").toBeTruthy();
+    expect(head!.atTarget, `链头在 target=${head!.atTarget} 才发出（边界 ${CLIP_FRAMES}）`)
+      .toBeLessThan(CLIP_FRAMES);
+    session.dispose();
+  }, 30_000);
 });
