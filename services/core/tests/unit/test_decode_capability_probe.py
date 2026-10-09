@@ -77,6 +77,29 @@ def test_decoder_parsing_ignores_header_and_non_video_lines() -> None:
     assert result["decoders"]["av1"] is True
 
 
+def test_capability_probe_stays_decoupled_from_proxy() -> None:
+    """P32：能力表不读代理状态（H5 收口）——模块禁依赖代理域、禁代理标识符。
+
+    规划门 §5：「代理只加速，能力表不读代理状态」。`ffmpeg -decoders` 探测
+    与指纹重探必须与代理（preview_source/derived_media）完全无关。
+    """
+    import ast
+
+    from aivs_core.media import decode_capability as module
+
+    source = Path(module.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    imported: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            imported.append(node.module)
+        elif isinstance(node, ast.Import):
+            imported.extend(alias.name for alias in node.names)
+    tainted = [name for name in imported if any(key in name.lower() for key in ("proxy", "preview_source", "derived"))]
+    assert tainted == [], f"能力表 import 了代理域模块：{tainted}"
+    assert "proxy" not in source.lower(), "能力表模块出现代理标识符/注释"
+
+
 def test_decode_frames_request_requires_ticket_ref() -> None:
     with pytest.raises(ValidationError):
         DecodeFramesRequest(frame_numbers=[0], fps=30.0)

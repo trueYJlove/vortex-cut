@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   normalizeDecodeCodec,
@@ -224,6 +227,22 @@ describe("P28 实配失败回写降级（防每素材反复试错）", () => {
     await expect(factory.create(noFallback)).rejects.toMatchObject({ code: "DECODE_BACKEND_UNAVAILABLE" });
     expect(table.rows[0]).toMatchObject({ webcodecs_supported: false });
     await expect(factory.create(noFallback)).rejects.toMatchObject({ code: "DECODE_BACKEND_UNAVAILABLE" });
+  });
+});
+
+describe("P32 代理与能力表解耦（H5 收口）", () => {
+  it("能力表模块不读代理状态：禁 import 代理模块、禁代理标识符", () => {
+    // 规划门 §5：「代理只加速，能力表不读代理状态」。代理（preview_source）
+    // 只替换解码输入；A/B 选择、探测与降级必须与代理就绪与否无关。
+    const source = readFileSync(
+      resolve(dirname(fileURLToPath(import.meta.url)), "../src/app/preview/decode-capability.ts"),
+      "utf8",
+    );
+    const imports = [...source.matchAll(/from\s+["']([^"']+)["']/g)].map(match => match[1]!);
+    const tainted = imports.filter(name => /proxy|preview[_-]?source|derived/i.test(name));
+    expect(tainted, "能力表 import 了代理域模块").toEqual([]);
+    // 标识符面（含注释）：耦合从"提一嘴"开始。
+    expect(/proxy/i.test(source), "能力表模块出现代理标识符/注释").toBe(false);
   });
 });
 
