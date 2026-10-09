@@ -75,8 +75,8 @@ PiP 自由定位、A1 音频混音、代理与权威预览、H.264/AAC 导出与
 - **AI 多步 agent 会话**（AI-1，迁移 v20）：有界循环（步数 ≤6 / token 预算 / 结构化失败反馈 /
   基线漂移中止），每步落不可变 Revision，Desktop 面板含每步 diff 浏览与费用聚合；
 - **本地 CV 信号层**（AI-2 Layer 0，迁移 v21）：镜头边界 / 运动能量 / 清晰度 / 亮度 /
-  音频能量 / YuNet 人脸；`skip_frame` 混合自适应采样（算法版本 2）；
-- **AI 操作白名单**：22 种显式冻结 + "白名单 + schema + 字段清单"三处同步准入；
+  音频能量 / YuNet 人脸；`skip_frame` 混合自适应采样（算法版本 3）；
+- **AI 操作白名单**：23 种显式冻结 + "白名单 + schema + 字段清单"三处同步准入；
 - Desktop 设置 UI（含代理三选）、CV 分析入口。
 
 **隐私边界（ADR-0003 D4 硬承诺）**：云端永不默认、永不静默；egress preview 可逐张审计；
@@ -134,6 +134,7 @@ PiP 自由定位、A1 音频混音、代理与权威预览、H.264/AAC 导出与
 | P62 | **转录删除永久卡在「删除中…」（lwd 真实现场）**：删除确认框一点确认就停在禁用态「删除中…」，取消/确认/关闭全部失效；此后打开**任何**转录的删除弹窗都直接是「删除中…」，表现为"这条转录删不掉" | 2026-10-08 用户截图（`lwd` 项目转录页 + 删除确认框） | 缺陷修复 | ✅ **2026-10-08 修复**——分层核对确认**后端无责**：对真实库副本跑 `TranscriptRepository.delete` 实删成功（`DELETE SUCCEEDED`，行数 1→0），`_segments_referenced` 对两条 lwd 转录均返回 `False`（0.18s，无引用），故 Core 不会返回 `TRANSCRIPTION_IN_USE`。根因在 Desktop 侧：`deleteTranscript` 的 `finally` 用项目代次守卫纯 UI 标志（`if (projectDataEpochRef.current === epoch) setDeleteTranscriptBusy(false)`），而**成功路径**里的 `loadProjectData` 在**同步段**就 `++projectDataEpochRef.current`，使捕获的 `epoch` 立刻过期 → `setDeleteTranscriptBusy(false)` 永不执行 → `busy` 永久为 `true`，弹窗按钮 `disabled={deleteTranscriptBusy}` 恒为禁用。修复为 `finally` 无条件复位（删除期间确认按钮本就 disabled，不存在并发删除），并加两道防线：①`switchProject` 清空瞬态标志（卡住的「删除中…」不再跨项目泄漏）；②打开确认框的入口 `openDeleteTranscriptDialog` 先复位 `busy`，任何遗留态都能自愈。同类缺陷一并修掉：`deleteAsset`（`deleteBusy`）与 `refreshAssets`（`refreshingAssets`）有完全相同的守卫错误。新增 App 回归测试 1 项（**负向对照**：还原旧守卫即报 `expected element to have text content 删除转录, received 删除中…`，正是用户看到的症状）。Desktop 全量 **815 passed**（98 文件，`--no-file-parallelism`）+ typecheck/lint 通过；Core `test_transcript_delete`/`test_transcription` 39 passed；无迁移/协议/白名单变更 |
 | P63 | **删除转录后记录滞留数秒**：确认框已提示「已删除该转录」，记录仍留在转录页列表里数秒才消失 | 2026-10-08 用户截图（转录页 + 绿色成功提示） | 缺陷修复 | ✅ **2026-10-08 修复**——转录页的行来自 `transcriptSummaries`（`listTranscripts` 权威摘要），而 `deleteTranscript` 成功路径只清了 `transcripts` **正文缓存**（`viewTranscript` 按需加载的那份），摘要要等 `loadProjectData` 整轮往返才更新：翻页拉全部素材 → 三状态拉任务 → 再按素材经 ≤4 并发队列逐个 `listTranscripts`——用户看到的数秒滞后正是这一轮往返。修复为删除成功后**同步**从 `transcriptSummaries` 摘除该 `transcript_id`（同素材其它转录不受影响），权威重拉仍然照发以覆盖分页/状态细节；合并语义对"本次拉取失败"保留上一次已知值，被摘掉的记录不会因一次失败而复现。新增 App 回归测试 1 项（**负向对照**：去掉同步摘除即报 `expected <button class="icon-btn" …> to be null`，记录一直留在列表里，正是用户看到的症状；该用例让删除后的重拉**永不 resolve**，故行消失只可能来自同步摘除，而非恰好赶上重拉返回）。Desktop `app.test.tsx` **53 passed** + typecheck 通过；无迁移/协议/白名单变更 |
 | P64 | **片段行三列未水平对齐（P59 后续）**：原始转录查看器里复选框、时间码、正文三者墨迹中心不在同一条水平线上，复选框明显夹在时间码与正文中间 | 2026-10-08 用户截图（原始转录查看器） | 缺陷修复 | ✅ **2026-10-08 修复**——根因是两列**行盒高度不同**：时间码只有继承来的基础规则 `.segment-row { line-height: 1.55 }`（0,1,0），按 `--dlg-fs-caption`(10.5px) 算出 16.275px；正文有 `.modal .readonly-segments p { line-height: 1.7 }`（0,2,1），按 `--dlg-fs-body`(12.5px) 算出 21.25px——同一行内基线错开约 4px（Chromium 实测 span 基线 433.19 vs p 基线 437.19）；13px 复选框又因 grid 默认 `align-items:stretch` 贴到行盒顶部。修复为两列显式取同一长度行盒（`line-height: calc(var(--dlg-fs-body) * 1.7)`，calc 是长度、不随各自字号再缩放）+ 行 `align-items:center`（与设计稿 §16 `.lrow` 一致），行盒总高不变。`transcript-segment-layout.test.ts` 扩到 7 项，新增 2 项做**级联裁决**（算出真正生效的 line-height / align-items 而非断言声明存在；**负向对照**：整体还原即 2 项失败并指名 `.segment-row` 的 1.55，仅去掉 align-items 即第 2 项失败——修复过程中辅助函数曾因未剥离 `:not(.segment-row)` 而误判，负向对照当场暴露并已修正）。Chromium 实测三列中心偏差（@4x device px）由 cb-time +7.5 / cb-text −4.5 变为 **0 / 0 / 0**（含换行行）。Desktop **818 passed**（98 文件）+ typecheck 通过；无迁移/协议/白名单变更 |
+| P65 | **STATUS.md 正文数值复述漂移（校验盲区）**：§1 事实块有机器校验，但 §3 散文曾写死「算法版本 2」与「22 种显式冻结」（代码实为 3 / 23），自建立日起即不符，多轮全量回归全绿放行——校验只比对 §1 的结构化声明，正文复述绕过了它（正是 Rule 5「复述即漂移」预言的失败模式） | 2026-10-09 项目盘点复核发现 | 缺陷修复 | ✅ **2026-10-09 修复核销**——§3 两处改为 3 / 23；一致性测试新增 `test_status_prose_numbers_match_facts`（正文数值钉到 §1，按行扫描并沿用修正语境豁免）与 `test_status_prose_number_patterns_actually_match`（登记模式失配即红，防校验恒真）；**负向对照 3 项**（算法版本还原为旧值、白名单条数还原为旧值、改措辞致模式失配）各自触发对应断言失败；一致性套件 8 → 10 passed |
 | P7 | **4K60 长 GOP 密度策略** | `ADR-0005`（三杠杆：预算约束下的密度旋钮 + 诚实降级 + 硬件解码；**定点补洞经实测否决**） | 裁决项 | ✅ **2026-09-24 已裁决**，分三阶段实施（阶段 1 成本模型+诚实降级 / 阶段 2 密度旋钮 / 阶段 3 硬件解码） |
 | P8 | **ADR-0005 阶段 1 实施**：CV 采样预算 + 诚实降级 | `CV_SAMPLING_BUDGET_PLANNING_GATE_2026-09-24` §1.1 / §3 | 工作包 | ✅ **2026-09-24 核销**——实施记录 `CV_SAMPLING_BUDGET_IMPLEMENTATION_2026-09-24.md` §2 验收核对表各项落实；Core 全量 **913 passed + 2 skipped, 0 failed** |
 | P9 | **W0.4 质量评测体系骨架** | `QUALITY_EVAL_PLANNING_GATE_2026-09-24` §1.1 / §3 | 工作包 | ✅ **2026-09-24 核销**——实施记录 `QUALITY_EVAL_IMPLEMENTATION_2026-09-24.md` §2 验收核对表全项；Core 全量 **930 passed + 1 skipped, 0 failed** |
@@ -201,7 +202,7 @@ PiP 自由定位、A1 音频混音、代理与权威预览、H.264/AAC 导出与
 
 ## 7. 维护本文件的规则
 
-1. **改代码改了 §1 的字段 → 立刻改 §1 的块**。忘了也没关系，测试会红。
+1. **改代码改了 §1 的字段 → 立刻改 §1 的块**。忘了也没关系，测试会红。**正文散文里复述的数字（如「算法版本 3」「23 种显式冻结」）同样被测试比对**——写死数字时必须与 §1 一致，或改为引用 §1。
 2. **规划门新增任何承诺 → 在 §4 加一行**。完成时把状态改为 ✅ 并注明证据与日期。
 3. **交付了新能力 → 在 §3 加一条**；规划中的能力**不加**（属于总纲）。
 4. **发现某个历史文档被取代 → 在 §6 加一行**，并给该文档加"已被 X 取代"横幅。

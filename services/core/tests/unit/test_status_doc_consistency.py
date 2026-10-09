@@ -4,13 +4,16 @@
 Core 全量回归是本仓库既有的强制回归门；治理检查必须挂在"会被真正执行"的地方，
 否则就是又一纸空文（2026-09-24 审计的核心教训）。
 
-校验两件事：
+校验三件事：
 
 1. **事实块一致性**：`docs/STATUS.md` §1 的机器可读块必须等于代码实际值。
    新增/修改迁移、白名单 op、CV 算法版本、协议版本时若不同步更新 STATUS.md，本测试红。
 2. **过期表述黑名单**：非历史文档不得重新引入已知过期表述。
    "历史文档"由 `docs/STATUS.md` §6 的表格声明——把某文档列入 §6 即自动豁免黑名单，
    因此豁免集是自维护的，不需要在本文件里手工维护列表。
+3. **正文数值复述一致性**：STATUS.md 正文散文里写死的数字（如"算法版本 3"、
+   "23 种显式冻结"）也必须等于 §1 事实块。§1 只覆盖结构化声明，正文复述是 2026-09-24
+   至 2026-10-09 之间静默存活的一处盲区——本测试把它一并纳入机器校验。
 
 维护方式见 `docs/STATUS.md` §7。
 """
@@ -50,6 +53,14 @@ _CORRECTION_MARKERS = (
 
 # 扫描范围：人类入口与 docs 下的全部 Markdown。
 _SCAN_GLOBS = ("*.md", "docs/**/*.md")
+
+# 正文数值复述：STATUS.md 散文里写死的数字必须等于 §1 事实块。
+# 键 = 事实块字段；值 = (正则, 人类可读说明)。正则必须捕获数字。
+# 只登记"确实被正文复述过"的字段——没有正文复述的字段无需在此出现。
+_PROSE_NUMBER_PATTERNS = {
+    "cv_algorithm_version": (r"算法版本\s*(\d+)", "CV 信号算法版本"),
+    "ai_patch_operations": (r"(\d+)\s*种显式冻结", "AI 操作白名单条数"),
+}
 
 
 def _status_text() -> str:
@@ -110,6 +121,66 @@ def test_status_facts_match_code() -> None:
     assert not drift, (
         "docs/STATUS.md §1 的事实块与代码不一致——改了代码就必须同步改状态源："
         f"{json.dumps(drift, ensure_ascii=False)}"
+    )
+
+
+def test_status_prose_numbers_match_facts() -> None:
+    """STATUS.md 正文散文里复述的数字必须等于 §1 事实块。
+
+    背景（2026-10-09 发现，见 §4 P65）：§1 的结构化字段有机器校验，但 §3 散文
+    里写死的数字曾自建立日起就与代码不符（CV 算法版本、白名单条数），多轮全量
+    回归全绿放行——"复述"绕过了唯一被校验的那一份声明（Rule 5 预言的失败模式）。
+    本测试把正文复述拉回校验范围，与 §1 用同一个事实来源比对。
+
+    按行判定并沿用 _CORRECTION_MARKERS 豁免，理由与黑名单测试相同：
+    勘误/登记历史旧值时必然要引用被修正的数字（§4 P65 行本身就引用了旧值），
+    连引用都禁止会让这套机制因误伤而被绕过——那比不检查更糟。
+    """
+    text = _status_text()
+    facts = _status_facts()
+    for field in _PROSE_NUMBER_PATTERNS:
+        assert facts.get(field) is not None, f"正文复述登记了未知事实字段：{field}"
+    drift: list[str] = []
+    in_facts_block = False
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        if _FACTS_BEGIN in line:
+            in_facts_block = True
+            continue
+        if _FACTS_END in line:
+            in_facts_block = False
+            continue
+        if in_facts_block or any(marker in line for marker in _CORRECTION_MARKERS):
+            continue
+        for field, (pattern, label) in _PROSE_NUMBER_PATTERNS.items():
+            expected = facts[field]
+            for match in re.finditer(pattern, line):
+                if int(match.group(1)) != expected:
+                    drift.append(
+                        f"docs/STATUS.md:{lineno} {label}：正文写 {match.group(1)}，"
+                        f"§1 {field} = {expected}"
+                    )
+    assert not drift, (
+        "docs/STATUS.md 正文散文复述的数字与 §1 事实块不一致——"
+        "复述即漂移的起点（AGENTS.md 文档同步纪律 Rule 5）：\n  "
+        + "\n  ".join(drift)
+    )
+
+
+def test_status_prose_number_patterns_actually_match() -> None:
+    """反向对照：登记的每个正文模式必须真的能匹配到东西。
+
+    否则模式写错（错别字/格式变了）会让上面那条测试**恒真**——这正是
+    "有校验但校验失效"的经典失败模式，必须自带区分力证明。
+    """
+    text = _status_text()
+    unmatched = [
+        f"{label}（模式 {pattern!r}）"
+        for field, (pattern, label) in _PROSE_NUMBER_PATTERNS.items()
+        if not re.search(pattern, text)
+    ]
+    assert not unmatched, (
+        "以下正文复述模式在 STATUS.md 中匹配不到任何内容，"
+        "说明模式已失效、对应校验形同虚设：\n  " + "\n  ".join(unmatched)
     )
 
 
