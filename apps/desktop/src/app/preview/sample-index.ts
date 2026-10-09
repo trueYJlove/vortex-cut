@@ -148,6 +148,54 @@ function pickNeighbor(index: SampleIndex, k: number, targetUs: number): { sample
   return best;
 }
 
+/** 喂包区间终点（P33 W2.7）：覆盖目标 pts 排序位 + 偏移以前的全部采样。
+ *  偏移 = max(bframeLookahead, 交错跨度)——D3D11 释放滞后随 B 金字塔结构
+ *  浮动（真浏览器 trace：同一素材 2~3+），交错跨度是其确定性上界。
+ *  与 worker 内原 `feedEndFor` 同式（P71 提取为纯函数以便直接单测）。 */
+export function feedEndForIndex(index: SampleIndex, target: number, bframeLookahead: number): number {
+  const pts = index.ptsUs[target]!;
+  // 目标的排序位置（lowerBound；pts 相同并列时取首位置即可——保守侧）
+  let lo = 0;
+  let hi = index.sortedPtsUs.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (index.sortedPtsUs[mid]! < pts) lo = mid + 1;
+    else hi = mid;
+  }
+  const offset = Math.max(bframeLookahead, index.maxStagger + 1);
+  const rankEnd = Math.min(index.count - 1, lo + offset);
+  const idxEnd = index.maxSampleIdxByRank[rankEnd]!;
+  return Math.max(target, Math.min(index.count - 1, idxEnd));
+}
+
+/** P71：单次喂包的**初始终点**——恒有界，末段 GOP 不特殊化为文件尾。
+ *
+ *  为什么必须恒有界（2026-10-09 真机「固定 2:47:07 起卡」trace 定稿）：W2.6
+ *  曾对「目标位于最后一个 GOP」直接把初始终点设为文件尾，其意图是覆盖**截断
+ *  尾 GOP**（feedEndFor 对截断尾会估短）。但该捷径把「末段」当成了「接近文件
+ *  尾」：1920x1080 50fps 素材的末段 GOP 有完整 50 帧（源采样 8350..8399），
+ *  目标 8365 距文件尾 34 个采样，无界终点使一次性灌入 29 个采样——解码器输入
+ *  队列 dq 2→30 单调攀升且零输出（表面池停摆），只能靠 stall_retry 整例重建
+ *  挽回（约 1s 空窗 = 用户看到的固定卡顿）；同时喂包游标被推到目标之后，
+ *  紧随其后的顺序请求被误判 `behindCursor` → 近邻替代交付重复帧。
+ *
+ *  正确切分：**初始终点恒取 feedEndForIndex**（有界）；「喂到文件尾」只经由
+ *  worker 内输出驱动的几何小步延伸发生（要求静默 STALL_MS 且 dq==0）。截断
+ *  尾 GOP 场景不受影响——feedEndForIndex 对贴近文件尾的目标本就返回文件尾
+ *  （rankEnd 被 count−1 截断），故 W2.6 的 EOF 定格语义原样保留。
+ *
+ *  `forcedEnd` 仅供调用方显式覆写（worker 现有参数）。 */
+export function initialFeedEnd(
+  index: SampleIndex | null,
+  target: number,
+  bframeLookahead: number,
+  forcedEnd?: number,
+): number {
+  if (forcedEnd !== undefined) return forcedEnd;
+  if (!index) return target;
+  return Math.min(index.count - 1, feedEndForIndex(index, target, bframeLookahead));
+}
+
 /** 关键帧回退：≤ sample 的最大关键帧原始索引（无 ≤ 者返回 0——与原实现
  *  "startSample 退到 0" 语义一致）。二分 O(log N)。 */
 export function keyframeAtOrBefore(index: SampleIndex, sample: number): number {

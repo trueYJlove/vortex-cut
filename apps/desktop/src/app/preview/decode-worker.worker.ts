@@ -10,7 +10,7 @@
  * 由 O(N) 线性扫描改二分——解码喂包顺序不变（索引只改查找）。
  */
 
-import { buildSampleIndex, keyframeAtOrBefore, locateByPts, type SampleIndex } from "./sample-index.js";
+import { buildSampleIndex, feedEndForIndex, initialFeedEnd, keyframeAtOrBefore, locateByPts, type SampleIndex } from "./sample-index.js";
 import { demuxRange, type DemuxResult } from "./bmff-demux.js";
 import { HttpRangeSource, type RangeSource } from "./range-source.js";
 
@@ -1038,24 +1038,11 @@ const BFRAME_LOOKAHEAD = 3;
  *  ——只有重建显著更省才重建（远距 seek），否则热态续喂保参考链与暂存。 */
 const REBUILD_OVERHEAD = 24;
 
-/** 喂包区间终点：覆盖目标 pts 排序位置 rank+偏移 以前的全部采样。
- *  偏移 = max(BFRAME_LOOKAHEAD, 交错跨度)：D3D11 释放滞后随 B 金字塔结构
- *  浮动（真浏览器 trace：同一素材 2~3+），交错跨度是其确定性上界。 */
+/** 喂包区间终点：覆盖目标 pts 排序位置 rank+偏移 以前的全部采样（纯函数在
+ *  sample-index.ts，便于单测直接覆盖生产策略）。 */
 function feedEndFor(target: number): number {
   if (!sampleIndex) return target;
-  const pts = sampleIndex.ptsUs[target]!;
-  // 目标的排序位置（lowerBound；pts 相同并列时取首位置即可——保守侧）
-  let lo = 0;
-  let hi = sampleIndex.sortedPtsUs.length;
-  while (lo < hi) {
-    const mid = (lo + hi) >>> 1;
-    if (sampleIndex.sortedPtsUs[mid]! < pts) lo = mid + 1;
-    else hi = mid;
-  }
-  const offset = Math.max(BFRAME_LOOKAHEAD, sampleIndex.maxStagger + 1);
-  const rankEnd = Math.min(sampleIndex.count - 1, lo + offset);
-  const idxEnd = sampleIndex.maxSampleIdxByRank[rankEnd]!;
-  return Math.max(target, Math.min(sampleIndex.count - 1, idxEnd));
+  return feedEndForIndex(sampleIndex, target, BFRAME_LOOKAHEAD);
 }
 
 async function feedSamples(
@@ -1087,12 +1074,20 @@ async function feedSamples(
     // （截断尾 GOP 是唯一启发式系统性低估的场景；r3 播放段零问题佐证），
     // 延伸终点 = 文件尾；且延伸前要求解码器队列已清空（dq==0——输出确实
     // 空转而非在路上）。中段 GOP 的 miss 仍走看门狗兜底（r3 实测零发生）。
-    const lastGopKey = sampleIndex ? sampleIndex.keyframes[sampleIndex.keyframes.length - 1] ?? -1 : -1;
-    const inLastGop = keyframeAtOrBefore(sampleIndex!, target) === lastGopKey;
     // （2026-09-30 W12 试过「按实测峰值前摄喂够」以避免停滞检测的 30ms 空等：同素材
     //  p95 55ms→1021ms，已回退。峰值是几何延伸的过冲值，按它喂会撞池/塞爆持有窗。）
-    const hardEnd = forcedEnd ?? Math.min(samples.length - 1,
-      inLastGop ? samples.length - 1 : feedEndFor(target));
+    //
+    // P71（2026-10-09 真机「固定 2:47:07 起卡」trace 定稿）：W2.6 曾把**初始喂包
+    // 终点**直接设为文件尾（`inLastGop ? samples.length - 1 : …`）。这破坏了
+    // `behindCursor` / 近邻替代共同依赖的不变量——「喂包游标最多超前当前目标
+    // maxStagger + BFRAME_LOOKAHEAD」。真机证据（1920x1080 50fps 素材，末段 GOP =
+    // 源采样 8350..8399）：目标 8365 时游标已被**前一次请求**的无界喂包推到 8370，
+    // 本请求随即从 8371 一口气灌 29 个采样到文件尾（dq 2→30 单调攀升、期间
+    // output = 0）→ 解码器表面池停摆 → stall_retry 整例重建 + 关键帧重喂（帧 5017
+    // 起约 1s 空窗 = 丢帧）；紧随其后的顺序请求又因游标超前被误判 behindCursor →
+    // 近邻替代交付重复帧。故**初始终点恒有界**（feedEndFor）；末段 GOP 的「喂到
+    // 文件尾」只经由下方输出驱动的几何小步延伸发生（静默 + dq==0 才延伸）。
+    const hardEnd = initialFeedEnd(sampleIndex, target, BFRAME_LOOKAHEAD, forcedEnd);
     let fed = startSample - 1;
     let end = hardEnd;
     // P33 W2.7 主挂死根修（真机「时间线跳转后点播放卡住 45s 看门狗」）：喂包
