@@ -126,6 +126,40 @@ def parse_frame_pts_json(payload: dict) -> list[FramePts]:
     return out
 
 
+def parse_packet_pts_csv(text: str) -> list[FramePts]:
+    """-show_entries packet=pts_time,dts_time,flags -of csv 的输出 → FramePts 表。
+
+    P69 快速通道：-show_frames 必须逐帧**解码**才吐帧条目（8400 帧实测
+    79.2s），-show_packets 只解封装（同素材 0.4s，~200x）；三材料实证 PTS
+    集合与关键帧集合逐项一致。
+
+    语义保持：包序是解码序（B 帧 PTS 乱序），而 FramePts.index 是**展示序
+    序号**（decode_nv12_frames 的 select=eq(n,…）对齐用；-show_frames 通道
+    输出即 PTS 单调，实测 B 帧材料亦然）——故按 PTS 稳定排序后编 index，
+    与 frames 通道逐项等价。pts 缺失（N/A）回退 dts；非数值行（表头等）跳过。
+    """
+    rows: list[tuple[int, int]] = []
+    for line in text.splitlines():
+        parts = line.split(",")
+        if len(parts) < 3:
+            continue
+        pts_raw = parts[0].strip()
+        dts_raw = parts[1].strip()
+        best = pts_raw if pts_raw not in ("", "N/A") else dts_raw
+        if best in ("", "N/A"):
+            continue
+        try:
+            pts_us = int(round(float(best) * 1_000_000))
+        except ValueError:
+            continue  # 表头/杂行
+        rows.append((pts_us, 1 if "K" in parts[2] else 0))
+    rows.sort(key=lambda item: item[0])
+    return [
+        FramePts(index=i, pts_us=pts_us, key_frame=bool(key))
+        for i, (pts_us, key) in enumerate(rows)
+    ]
+
+
 def pack_nv12_response(
     frames: list[DecodedPlaneFrame], notes: list[str] | None = None
 ) -> bytes:
@@ -159,9 +193,12 @@ def pack_nv12_response(
 
 
 async def _probe_frame_pts(ffprobe: Path, input_path: Path, timeout: float = 120.0) -> list[FramePts]:
-    """ffprobe -show_frames 取视频帧 PTS（best_effort 优先）。
+    """ffprobe -show_packets（解封装）取视频帧 PTS（P69 快速通道）。
 
     结果按 (path, size, mtime) 缓存——逐帧 decode-frames 不可每次重付全表探测。
+    通道选型（P69，2026-10-09 真机实证）：-show_frames 逐帧解码，8400 帧素材
+    79.2s；-show_packets 只解封装 0.4s。PTS/关键帧集合三材料逐项一致；index
+    按展示序编（见 parse_packet_pts_csv）。
     """
     try:
         stat = input_path.stat()
@@ -175,8 +212,8 @@ async def _probe_frame_pts(ffprobe: Path, input_path: Path, timeout: float = 120
         str(ffprobe),
         "-v", "error",
         "-select_streams", "v:0",
-        "-show_entries", "frame=pts_time,best_effort_timestamp_time,key_frame",
-        "-print_format", "json",
+        "-show_entries", "packet=pts_time,dts_time,flags",
+        "-of", "csv=p=0",
         str(input_path),
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
@@ -192,13 +229,7 @@ async def _probe_frame_pts(ffprobe: Path, input_path: Path, timeout: float = 120
     if process.returncode not in (0, None):
         detail = (stderr or b"")[-200:].decode("utf-8", errors="replace")
         raise FrameDecodeError("DECODE_PROBE_FAILED", f"ffprobe 帧表失败：{detail}")
-    import json
-
-    try:
-        payload = json.loads(stdout.decode("utf-8", errors="replace"))
-    except json.JSONDecodeError as exc:
-        raise FrameDecodeError("DECODE_PROBE_FAILED", "ffprobe 帧表 JSON 非法") from exc
-    pts = parse_frame_pts_json(payload)
+    pts = parse_packet_pts_csv(stdout.decode("utf-8", errors="replace"))
     if not pts:
         raise FrameDecodeError("DECODE_NO_FRAMES", "ffprobe 未给出视频帧时间戳")
     _pts_cache[cache_key] = pts

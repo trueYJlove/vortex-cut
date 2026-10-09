@@ -1,6 +1,8 @@
 """H3 真实 ffmpeg 窗口帧解码（NV12）+ 与后端 A 的帧号映射对拍。"""
 from __future__ import annotations
 
+import asyncio
+import json
 from pathlib import Path
 
 import pytest
@@ -11,6 +13,7 @@ from aivs_core.media.frame_decode import (
     list_frame_pts,
     map_frame_numbers_to_pts,
     pack_nv12_response,
+    parse_frame_pts_json,
 )
 
 REPO = Path(__file__).resolve().parents[4]
@@ -55,6 +58,33 @@ async def test_a_b_same_frame_number_same_pts() -> None:
     )
     for (_n, a_choice), b_frame in zip(mapped, frames, strict=True):
         assert b_frame.pts_us == a_choice.pts_us
+
+
+@pytest.mark.asyncio
+async def test_packet_pts_table_matches_frames_channel() -> None:
+    """P69 等价锁：packets 快速通道与 -show_frames 通道逐项等价（含展示序 index）。
+
+    -show_frames 逐帧解码（8400 帧实测 79.2s），-show_packets 只解封装
+    （0.4s）；两者必须产出相同的 (index, pts_us, key_frame) 表，否则 B 帧
+    素材的 select=eq(n,…）取帧语义会漂移。
+    """
+    process = await asyncio.create_subprocess_exec(
+        str(FFPROBE),
+        "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "frame=pts_time,best_effort_timestamp_time,key_frame",
+        "-print_format", "json",
+        str(FIXTURE),
+        stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, _ = await process.communicate()
+    legacy = parse_frame_pts_json(json.loads(stdout.decode("utf-8", errors="replace")))
+    fast = await list_frame_pts(FFPROBE, FIXTURE)
+    assert [(p.index, p.pts_us, p.key_frame) for p in fast] == [
+        (p.index, p.pts_us, p.key_frame) for p in legacy
+    ]
 
 
 @pytest.mark.asyncio

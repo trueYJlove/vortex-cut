@@ -13,6 +13,7 @@ from aivs_core.media.frame_decode import (
     map_frame_numbers_to_pts,
     pack_nv12_response,
     parse_frame_pts_json,
+    parse_packet_pts_csv,
     target_us_for_frame,
 )
 
@@ -72,6 +73,28 @@ def test_parse_frame_pts_json_prefers_best_effort() -> None:
     assert pts[0].pts_us == 10_000
     assert pts[1].pts_us == 40_000
     assert len(pts) == 2  # N/A 跳过
+
+
+def test_parse_packet_pts_csv_sorts_to_presentation_order() -> None:
+    """P69 快速通道：包序是解码序（B 帧 PTS 乱序），index 必须按 PTS 展示序编
+    （decode_nv12_frames 的 select=eq(n,…）对齐用）。dts 回退 + 杂行跳过。"""
+    csv = (
+        "0.000000,0.000000,K__\n"      # pts 0（解码序 0，展示序 0）
+        "0.066667,0.033333,___\n"      # pts 66667（解码序 1，展示序 2）
+        "0.033333,0.066667,___\n"      # pts 33333（解码序 2，展示序 1）
+        "packet,pts_time,dts_time,flags\n"  # 表头杂行（非数值跳过）
+        "N/A,0.100000,K__\n"           # pts 缺失回退 dts
+    )
+    pts = parse_packet_pts_csv(csv)
+    assert [p.pts_us for p in pts] == [0, 33_333, 66_667, 100_000]
+    assert [p.index for p in pts] == [0, 1, 2, 3]
+    assert [p.key_frame for p in pts] == [True, False, False, True]
+
+
+def test_parse_packet_pts_csv_matches_frames_channel_conversion() -> None:
+    """与 parse_frame_pts_json 同一转换口径：int(round(float * 1e6))。"""
+    pts = parse_packet_pts_csv("0.033333,0.033333,___\n")
+    assert pts[0].pts_us == 33_333
 
 
 def test_pack_nv12_response_roundtrip_header() -> None:
