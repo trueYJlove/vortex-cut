@@ -32,19 +32,20 @@ const fixture = existsSync(realUserAsset) ? realUserAsset
     : fallbackFixture;
 
 /**
- * ⚠️ **已知未彻底收敛的回归门（以 `test.fixme` 挂起，非跳过永久豁免）**
+ * **L8 已核销（2026-10-10，复现消失模式）**：`test.fixme` 摘除后同构建
+ * **12 轮连跑全部通过**（六档跳转每轮全部推进；`stall_retry` 12 轮全 0、
+ * 单帧 EOF 重排兜底 0~2 次/轮且播放继续、无 45s 看门狗形态）。历史失败形态
+ * （2026-09-30 W5 记录：3 连跑 1 次在 0.15 档停住、时间码 10s 只走 1 帧）
+ * 不再复现——归因于 P71（初始喂包终点恒有界，根修「末段 GOP 无界喂到文件尾
+ * 把 dq 顶进停摆」）+ P72（剪辑点链预热）+ W5~W7 五层防御（全局持有帧预算
+ * /按 codec 分档/背压收缩/停摆自恢复/behindCursor 关键帧重解）的累积收口。
+ * 残余单帧兜底（`eof_reorder_stuck` ≤4 断言）是设计内的有界行为：每次仅
+ * 丢 1 帧、解码器自恢复、播放继续。核销注见实施记录 §4 L8 行。
  *
- * 2026-09-30（W5）状态：六档跳转**全部推进**已能达成，但**仍不稳定**——
- * 同一构建连跑 3 次：2 次六档全过、1 次在 0.15 档停住（时间码 10s 只走 1 帧）。
- * 停摆机理已定位并部分收口（解码器表面池被未 close 持有帧占满后静默停摆；
- * 全局预算 + 背压收缩 + 停摆自恢复 + 「目标落在已喂游标之后→关键帧重解」），
- * 彻底消除需按解码器实测池大小自适应（WebCodecs 无该 API）或改纹理级缓存，
- * 见 docs/PREVIEW_SMOOTHNESS_IMPLEMENTATION_2026-09-29.md §4 L8。
- *
- * 保留原因：它是「跳转后点播放卡死」唯一可执行的复现载体；转绿前不得删除。
- * 转绿路径：修好 L8 后把 `test.fixme` 改回 `test` 并复跑 5 次全过。
+ * 保留断言不动：本 spec 仍是「跳转后点播放卡死」的唯一回归锁（六档推进 +
+ * 无「无匹配输出」看门狗形态 + 单帧兜底有界），拦住任何回到系统性挂死的回归。
  */
-test.fixme("P33 seek→play：跳转后点播放必须正常推进", async () => {
+test("P33 seek→play：跳转后点播放必须正常推进", async () => {
   test.setTimeout(300_000);
   if (!existsSync(fixture)) throw new Error("测试夹具不存在");
   const dir = join(root, "test-results", `p33-seek-play-${process.pid}-${Date.now()}`);
@@ -266,6 +267,7 @@ test.fixme("P33 seek→play：跳转后点播放必须正常推进", async () =>
     const coldStarts = diag.counts["cold_start"] ?? 0;
     if (metricsText.includes("最近错误")) console.warn(`[p33sp] metrics error note: ${metricsText}`);
     console.log(`[p33sp] decisions: cold_start=${coldStarts} eof_reorder_stuck=${stalls} stall_retry=${diag.counts["stall_retry"] ?? 0} backpressure_shrink=${diag.counts["backpressure_shrink"] ?? 0}`);
+    console.log(`[p33sp] all counts: ${JSON.stringify(diag.counts)}`);
     expect(metricsText).not.toContain("无匹配输出"); // 45s 看门狗形态（不得复现）
     // 六档跳转风暴（每档 45 次连按 = 270 次 seek）下单帧级停摆兜底的实测上界
     // 为 0~3 次/会话（每次仅丢 1 帧、播放继续，见 L8）。这条断言的作用是**拦住
