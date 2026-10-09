@@ -168,6 +168,61 @@ def _wait(client: TestClient, ui: dict[str, str], job_id: str) -> dict:
     raise AssertionError("job did not finish")
 
 
+def test_provider_delete_api_removes_unreferenced_and_refuses_referenced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P67：DELETE /api/v1/providers/{id}——未引用 204 且列表消失；
+    被调用历史引用 409 PROVIDER_IN_USE（行保持原样）；未知 404。"""
+    monkeypatch.setenv("AIVS_ADMIN_TOKEN", "admin-del")
+    app = create_app(Settings(data_dir=tmp_path, ffmpeg=Path("missing"), ffprobe=Path("missing")))
+    client = TestClient(app)
+    client.__enter__()
+    try:
+        admin = {"Authorization": "Bearer admin-del"}
+        ui = {
+            "Authorization": f"Bearer {client.post('/api/v1/internal/sessions', headers=admin).json()['token']}"  # noqa: E501
+        }
+
+        def _create(name: str) -> str:
+            return client.post(
+                "/api/v1/providers",
+                headers=ui,
+                json={
+                    "kind": "openai_compatible_text",
+                    "display_name": name,
+                    "base_url": "http://127.0.0.1:9999/v1",
+                    "model": "mock",
+                },
+            ).json()["provider_config_id"]
+
+        unreferenced, referenced = _create("drop"), _create("keep-history")
+        with app.state.core.db.connection() as conn:
+            conn.execute(
+                "INSERT INTO provider_invocations"
+                "(id,provider_config_id,capability,provider_name,model,"
+                "prompt_template_version,output_schema_version,input_sha256,status,created_at)"
+                " VALUES ('inv_del',?,'cap','p','m','1','1',?,'succeeded','now')",
+                (referenced, "sha256:" + "a" * 64),
+            )
+
+        assert client.delete(f"/api/v1/providers/{unreferenced}", headers=ui).status_code == 204
+        remaining = [
+            item["provider_config_id"]
+            for item in client.get("/api/v1/providers", headers=ui).json()["items"]
+        ]
+        assert unreferenced not in remaining and referenced in remaining
+
+        conflict = client.delete(f"/api/v1/providers/{referenced}", headers=ui)
+        assert conflict.status_code == 409
+        assert conflict.json()["error"]["code"] == "PROVIDER_IN_USE"
+
+        missing = client.delete("/api/v1/providers/provider_none", headers=ui)
+        assert missing.status_code == 404
+        assert missing.json()["error"]["code"] == "PROVIDER_NOT_FOUND"
+    finally:
+        client.__exit__(None, None, None)
+
+
 @pytest.mark.parametrize(
     "outcome,code",
     [

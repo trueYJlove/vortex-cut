@@ -495,6 +495,18 @@ def _strict_json_object(raw: bytes | str) -> dict[str, Any]:
     return value
 
 
+class _TokenBudgetExhausted(ValueError):
+    """推理模型 token 预算耗尽（适配器规划门 R1 / STATUS §4 P43，实测 2026-10-05）。
+
+    该网关模型先输出 reasoning_content，max_tokens 不足时 finish_reason=length
+    且 content 为空。这是**确定性**失败：同样的请求重试必然同样耗尽——
+    绝不能归入网络类（RETRYABLE 会浪费 3 次往返并把根因伪装成抖动），
+    也不能与"返回了垃圾结构"（PROVIDER_INVALID_RESPONSE）混为一谈，
+    否则诊断面退回 2026-10-03 误判网络的时代。
+    继承 ValueError：未显式处理的调用路径自动退化为既有确定性分类。
+    """
+
+
 def _extract_chat_content(content: bytes) -> tuple[str, dict[str, Any] | None]:
     """Extract exactly choices[0].message.content; never inspect alternatives."""
     envelope = _strict_json_object(content)
@@ -505,6 +517,13 @@ def _extract_chat_content(content: bytes) -> tuple[str, dict[str, Any] | None]:
     if not isinstance(message, dict) or "tool_calls" in message or "function_call" in message:
         raise ValueError("invalid message")
     raw = message.get("content")
+    if choices[0].get("finish_reason") == "length" and (
+        not isinstance(raw, str) or not raw.strip()
+    ):
+        # P43/R1：finish_reason=length 且 content 空/缺 → token 预算耗尽。
+        # 只认 chat 路径（实证所在）；responses 族的对应形态无实测证据，
+        # 不做推测性处理（宁可少收，不可误伤）。
+        raise _TokenBudgetExhausted("finish_reason=length with empty content")
     if not isinstance(raw, str):
         raise ValueError("content must be a string")
     usage = envelope.get("usage")
@@ -1007,6 +1026,10 @@ class OpenAICompatibleTextProvider:
         try:
             envelope = _strict_json_object(content)
             message = envelope["choices"][0]["message"]
+            if envelope["choices"][0].get("finish_reason") == "length" and not (
+                isinstance(message.get("content"), str) and message["content"].strip()
+            ):
+                raise _TokenBudgetExhausted("finish_reason=length with empty content")
             refused = message.get("refusal")
             if refused:
                 raise ProviderError("PROVIDER_CONTENT_REJECTED", "Provider 拒绝请求")
@@ -1018,6 +1041,12 @@ class OpenAICompatibleTextProvider:
             usage = envelope.get("usage") if isinstance(envelope.get("usage"), dict) else None
         except ProviderError:
             raise
+        except _TokenBudgetExhausted as exc:
+            # P43/R1：确定性 token 预算耗尽，非网络、不重试。
+            raise ProviderError(
+                "PROVIDER_TOKEN_BUDGET_EXHAUSTED",
+                "Provider token 预算耗尽（finish_reason=length 且无内容）",
+            ) from exc
         except (
             KeyError,
             IndexError,
@@ -1221,6 +1250,13 @@ class OpenAICompatibleTextProvider:
                 value = parse_patchscript(raw)
             else:
                 value = validate_timeline_patch_value(_strict_json_object(raw))
+        except _TokenBudgetExhausted as exc:
+            # P43/R1：确定性 token 预算耗尽，非网络、不重试。必须先于
+            # ValueError 元组捕获，否则被吞成 PROVIDER_INVALID_RESPONSE。
+            raise ProviderError(
+                "PROVIDER_TOKEN_BUDGET_EXHAUSTED",
+                "Provider token budget exhausted (finish_reason=length, empty content)",
+            ) from exc
         except (UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
             raise ProviderError(
                 "CANDIDATE_CANDIDATESCRIPT_INVALID"

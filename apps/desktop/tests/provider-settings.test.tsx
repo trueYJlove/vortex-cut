@@ -47,6 +47,7 @@ function setup(items: ProviderConfig[]) {
     listProviders: vi.fn().mockResolvedValue({ items }),
     setProviderSecret: vi.fn().mockResolvedValue({ provider_config_id: "provider_1", credential_status: "configured" }),
     deleteProviderSecret: vi.fn().mockResolvedValue({ provider_config_id: "provider_1", credential_status: "missing" }),
+    deleteProvider: vi.fn().mockResolvedValue({ provider_config_id: "provider_1", deleted: true }),
     testProvider: vi.fn().mockResolvedValue({ status: "succeeded" }),
     createProvider: vi.fn(),
   };
@@ -185,5 +186,55 @@ describe("Provider 设置：共用状态与脱敏", () => {
     await waitFor(() => expect(onProvidersChange.mock.calls.at(-1)?.[0][0].credential_status).toBe("configured"));
     expect(screen.getByLabelText("Provider 密钥")).toHaveValue("");
     expect(screen.queryByLabelText("Provider 名称")).not.toBeInTheDocument();
+  });
+});
+
+describe("Provider 设置：删除配置（P67）", () => {
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+  it("删除需经危险确认弹窗；成功后条目从列表消失并回报上层", async () => {
+    const items = [
+      provider({ provider_config_id: "provider_1" as never, display_name: "废弃网关" }),
+      provider({ provider_config_id: "provider_2" as never, display_name: "在用网关" }),
+    ];
+    const { desktop, onProvidersChange } = setup(items);
+    const dialog = screen.getByRole("dialog", { name: "Provider 设置" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "删除配置" }));
+    // 未确认前不得发起删除
+    expect(desktop.deleteProvider).not.toHaveBeenCalled();
+    const confirm = screen.getByRole("dialog", { name: "删除 Provider" });
+    expect(within(confirm).getByText(/此操作不可撤销/)).toBeVisible();
+    fireEvent.click(within(confirm).getByRole("button", { name: "删除 Provider" }));
+    await waitFor(() => expect(desktop.deleteProvider).toHaveBeenCalledWith("provider_1"));
+    const reported = onProvidersChange.mock.calls.at(-1)![0] as ProviderConfig[];
+    expect(reported).toHaveLength(1);
+    expect(reported[0].provider_config_id).toBe("provider_2");
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "删除 Provider" })).not.toBeInTheDocument());
+    expect(within(dialog).queryByText("废弃网关")).not.toBeInTheDocument();
+  });
+
+  it("删除被历史引用（PROVIDER_IN_USE）时给出可操作出路，条目保留", async () => {
+    const items = [provider({ provider_config_id: "provider_1" as never, display_name: "历史网关" })];
+    const { desktop } = setup(items);
+    desktop.deleteProvider.mockRejectedValue(new Error("[PROVIDER_IN_USE] Provider 已被外发/生成历史引用"));
+    const dialog = screen.getByRole("dialog", { name: "Provider 设置" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "删除配置" }));
+    const confirm = screen.getByRole("dialog", { name: "删除 Provider" });
+    fireEvent.click(within(confirm).getByRole("button", { name: "删除 Provider" }));
+    await waitFor(() => expect(within(dialog).getByText(/删除密钥.*停用/)).toBeVisible());
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "删除 Provider" })).not.toBeInTheDocument());
+    expect(within(dialog).getByText(/历史网关/)).toBeVisible();
+  });
+
+  it("删除最后一个 Provider 后回落到新建视图", async () => {
+    const items = [provider({ provider_config_id: "provider_1" as never, display_name: "独苗" })];
+    const { desktop, onProvidersChange } = setup(items);
+    const dialog = screen.getByRole("dialog", { name: "Provider 设置" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "删除配置" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "删除 Provider" })).getByRole("button", { name: "删除 Provider" }));
+    await waitFor(() => expect(desktop.deleteProvider).toHaveBeenCalledWith("provider_1"));
+    const reported = onProvidersChange.mock.calls.at(-1)![0] as ProviderConfig[];
+    expect(reported).toHaveLength(0);
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "创建 Provider" })).toBeVisible());
   });
 });

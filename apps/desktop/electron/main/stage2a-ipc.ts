@@ -53,7 +53,10 @@ const PROVIDER_TEST_ERRORS = new Set([
   "PROVIDER_CREDENTIAL_MISSING", "PROVIDER_NOT_FOUND", "PROVIDER_RESPONSE_TOO_LARGE",
 ]);
 function safeError(): Error { return new Error("Core request failed"); }
-async function safeInvoke<T>(operation: () => Promise<T>, providerTest = false): Promise<T> {
+// P67：Provider 删除的失败码白名单——只有这两个确定性业务码允许透传到
+// 渲染端（决定 UI 文案走向），其余上游文本一律吞掉（可能含凭据）。
+const PROVIDER_DELETE_ERRORS = new Set(["PROVIDER_NOT_FOUND", "PROVIDER_IN_USE"]);
+async function safeInvoke<T>(operation: () => Promise<T>, providerTest = false, allowCodes?: ReadonlySet<string>): Promise<T> {
   try {
     return await operation();
   } catch (error) {
@@ -65,6 +68,10 @@ async function safeInvoke<T>(operation: () => Promise<T>, providerTest = false):
     if (providerTest && code && PROVIDER_TEST_ERRORS.has(code)) {
       console.error(`[core] provider test failed: ${code}`);
       throw new Error(`[${code}] Provider connection test failed`);
+    }
+    if (code && allowCodes?.has(code)) {
+      console.error(`[core] provider delete failed: ${code}`);
+      throw new Error(`[${code}] Provider 删除被拒绝`);
     }
     console.error("[core] request failed (details withheld)");
     throw safeError();
@@ -102,6 +109,19 @@ export function registerStage2aIpc(deps: Stage2aIpcDependencies): void {
     const providerConfigId = id(providerId, "provider_config_id");
     await safeInvoke(() => deps.deleteSecret(providerConfigId));
     return { provider_config_id: providerConfigId, credential_status: "missing" };
+  });
+  deps.handle("provider:delete", async (_event, providerId) => {
+    // P67：删除 Provider 配置。Core 侧 fail-closed（被外发/生成历史引用 →
+    // PROVIDER_IN_USE）；行删除成功后必须再清加密存储条目，否则重启时
+    // reinjectProviderSecrets 会永远携带孤儿密钥（隐私债）。
+    const providerConfigId = id(providerId, "provider_config_id");
+    await safeInvoke(
+      () => deps.fetchWithUi(`${API_PREFIX}/providers/${encodeURIComponent(providerConfigId)}`, { method: "DELETE" }),
+      false,
+      PROVIDER_DELETE_ERRORS,
+    );
+    await safeInvoke(() => deps.deleteSecret(providerConfigId));
+    return { provider_config_id: providerConfigId, deleted: true };
   });
   deps.handle("provider:test", (_event, providerId) => safeInvoke(
     () => deps.fetchWithUi(`${API_PREFIX}/providers/${encodeURIComponent(id(providerId, "provider_config_id"))}/test`, { method: "POST" }),

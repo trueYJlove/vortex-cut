@@ -46,6 +46,8 @@ export function ProviderSettingsDialog({
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<ProviderConfig | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const [loading, setLoading] = useState(providers.length === 0);
   const secretRef = useRef<HTMLInputElement>(null);
   // 本对话框自持一份权威列表：打开时重新拉取，变更后回写 App（供其它 AI 功能共用）。
@@ -168,6 +170,35 @@ export function ProviderSettingsDialog({
     } finally { setBusy(false); }
   };
 
+  const deleteProvider = async (provider: ProviderConfig) => {
+    // P67：废弃 Provider 此前只能删密钥、条目永留下拉。被外发/生成历史
+    // 引用时 Core fail-closed（PROVIDER_IN_USE）——此时出路是删除密钥并停用。
+    if (!window.desktop.deleteProvider) { setError("删除 Provider 不可用。"); return; }
+    setDeleteBusy(true); setError(""); setStatus("");
+    try {
+      await window.desktop.deleteProvider(provider.provider_config_id);
+      const next = items.filter(item => item.provider_config_id !== provider.provider_config_id);
+      publish(next);
+      setPendingDelete(null);
+      if (!next.length) {
+        setSelectedId("");
+        setView("create");
+        setStatus("已删除全部 Provider。可新建一个继续使用 AI 功能。");
+      } else {
+        setSelectedId(current => (current === provider.provider_config_id ? next[0].provider_config_id : current));
+        setStatus(`已删除「${provider.display_name}」。`);
+      }
+    } catch (caught) {
+      const code = errorCode(caught);
+      setError(code === "PROVIDER_IN_USE"
+        ? "该 Provider 已被外发/生成历史引用，不可删除（历史审计不可断链）。可先「删除密钥」并停用，使其不再出现在 AI 功能中。"
+        : code === "PROVIDER_NOT_FOUND"
+        ? "该 Provider 已不存在，请刷新列表。"
+        : safeErrorMessage(caught, "删除 Provider 失败。"));
+      setPendingDelete(null);
+    } finally { setDeleteBusy(false); }
+  };
+
   const testConnection = async () => {
     if (!window.desktop.testProvider || !selectedId) return;
     setBusy(true); setError(""); setStatus("");
@@ -201,6 +232,15 @@ export function ProviderSettingsDialog({
   };
 
   return <Dialog titleId="provider-settings-title" label="Provider 设置" onClose={onClose} className="provider-settings">
+    {pendingDelete && <Dialog titleId="provider-delete-title" label="删除 Provider" onClose={() => setPendingDelete(null)} className="asset-delete-modal">
+      <div className="modal-heading"><div><h2 id="provider-delete-title">删除 Provider</h2></div></div>
+      <p>确定要删除「{pendingDelete.display_name}」吗？</p>
+      <div className="delete-warning">该 Provider 的配置与本机加密存储中的密钥将一并删除，此操作不可撤销。若其已被外发/生成历史引用，删除会被拒绝——此时请改为删除密钥并停用。</div>
+      <div className="modal-actions">
+        <button disabled={deleteBusy} onClick={() => setPendingDelete(null)}>取消</button>
+        <button className="danger" disabled={deleteBusy} onClick={() => void deleteProvider(pendingDelete)}>{deleteBusy ? "删除中…" : "删除 Provider"}</button>
+      </div>
+    </Dialog>}
     <div className="modal-heading">
       <div><h2 id="provider-settings-title">Provider 设置</h2><p>管理 AI 模型连接 · 密钥只提交、不回显</p></div>
       <button className="icon-button" aria-label="关闭 Provider 设置" onClick={onClose}>×</button>
@@ -237,6 +277,7 @@ export function ProviderSettingsDialog({
           <dl className="ps-details"><dt>API 地址</dt><dd>{selected.base_url}</dd><dt>模型 ID</dt><dd>{selected.model}</dd><dt>密钥状态</dt><dd>{selected.credential_status === "configured" ? "密钥已配置" : "缺少密钥"}</dd></dl>
           <label>API 密钥<input key={selectedId} ref={secretRef} aria-label="Provider 密钥" type="password" autoComplete="off" disabled={busy} placeholder="仅输入新密钥，留空保留已保存密钥" /></label>
           <div className="ps-secret-actions"><button disabled={busy} onClick={() => void saveSecret()}>安全保存密钥</button><button disabled={busy || selected.credential_status !== "configured"} onClick={() => void deleteSecret()}>删除密钥</button></div>
+          <div className="ps-secret-actions"><button className="danger" disabled={busy || deleteBusy} onClick={() => { setError(""); setStatus(""); setPendingDelete(selected); }}>删除配置</button></div>
           <small className="ps-hint">连接测试不发送项目内容；能力兼容性在各 AI 功能中测试。</small>
         </>}
       </>}

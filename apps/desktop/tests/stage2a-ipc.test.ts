@@ -32,7 +32,7 @@ describe("Stage2A Main IPC 安全编排", () => {
     const { handlers } = setup();
     expect([...handlers.keys()].sort()).toEqual([
       "brief:get", "brief:put", "planning:adopt", "planning:clip-media", "planning:create", "planning:get", "planning:list", "planning:prepare",
-      "planning:test-provider-capability", "provider:create", "provider:delete-secret", "provider:list", "provider:set-secret", "provider:test", "provider:update", "recipe:get", "recipe:list"
+      "planning:test-provider-capability", "provider:create", "provider:delete", "provider:delete-secret", "provider:list", "provider:set-secret", "provider:test", "provider:update", "recipe:get", "recipe:list"
     ]);
     expect(handlers.has("provider:get-secret")).toBe(false);
     expect(handlers.has("planning:clip-media-by-asset")).toBe(false);
@@ -76,6 +76,25 @@ describe("Stage2A Main IPC 安全编排", () => {
     await expect(handlers.get("planning:test-provider-capability")!({}, "provider_1")).resolves.toEqual({ candidate_capability_status: "unsupported", candidate_response_adapter_id: null, candidate_probe_protocol_version: null, candidate_capability_tested_at: "2026-08-14T00:00:00.000Z", candidate_capability_failure_code: "PROVIDER_FAILED", candidate_capability_probe_sha256: hash });
     expect(fetchWithUi).toHaveBeenCalledWith("/api/v1/providers/provider_1/candidate-planning-capability-test", { method: "POST" });
     expect(() => handlers.get("planning:test-provider-capability")!({}, { provider_config_id: "provider_1" })).toThrow("Invalid provider_config_id");
+  });
+
+  it("provider:delete（P67）：行删除成功后必清密钥；IN_USE 码透传、其余脱敏", async () => {
+    const { handlers, fetchWithUi, deleteSecret } = setup();
+    fetchWithUi.mockClear();
+    await expect(handlers.get("provider:delete")!({}, "provider_1")).resolves.toEqual({ provider_config_id: "provider_1", deleted: true });
+    expect(fetchWithUi).toHaveBeenCalledWith("/api/v1/providers/provider_1", { method: "DELETE" });
+    // 行删除成功后必须清除加密存储条目（否则重启时 reinject 携带孤儿密钥）
+    expect(deleteSecret).toHaveBeenCalledWith("provider_1");
+
+    const failing = setup();
+    failing.fetchWithUi.mockRejectedValueOnce(Object.assign(new Error("historical audit trail"), { code: "PROVIDER_IN_USE" }));
+    await expect(failing.handlers.get("provider:delete")!({}, "provider_1")).rejects.toThrow("[PROVIDER_IN_USE]");
+    // 被拒绝时不得清密钥（fail-closed：行还在，密钥也应还在）
+    expect(failing.deleteSecret).not.toHaveBeenCalled();
+
+    const hostile = setup();
+    hostile.fetchWithUi.mockRejectedValueOnce(new Error("C:\secret-path SENTINEL-SECRET"));
+    await expect(hostile.handlers.get("provider:delete")!({}, "provider_1")).rejects.toThrow("Core request failed");
   });
 
   it("candidate ticket 只由已验证 plan/clip 签发，adopt 成功后必重读权威 Timeline", async () => {

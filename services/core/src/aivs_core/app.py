@@ -1067,6 +1067,7 @@ def _domain(exc: DomainError) -> HTTPException:
             "ASSET_CHANGED",
             "ASSET_MISSING",
             "ASSET_IN_USE",
+            "PROVIDER_IN_USE",
             "PROJECT_ARCHIVED",
             "CONFLICT",
             "TIMELINE_ALREADY_EXISTS",
@@ -1144,6 +1145,7 @@ def _domain(exc: DomainError) -> HTTPException:
         "PROJECT_NOT_FOUND",
         "ASSET_NOT_FOUND",
         "GRANT_NOT_FOUND",
+        "PROVIDER_NOT_FOUND",
         "MEDIA_NOT_FOUND",
         "TIMELINE_NOT_FOUND",
         "TIMELINE_CLIP_NOT_FOUND",
@@ -1381,6 +1383,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise (
                 _domain(exc) if isinstance(exc, DomainError) else _error(exc.code, exc.message, 400)
             )
+
+    @app.delete("/api/v1/providers/{provider_config_id}", status_code=204)
+    async def delete_provider(
+        provider_config_id: str, _: CoreState = Depends(require_ui)
+    ) -> None:
+        """删除 Provider 配置（P67：废弃条目此前只能删密钥、条目永留下拉）。
+
+        被外发/生成历史引用时拒绝（PROVIDER_IN_USE）——审计链不可静默断链；
+        此时出路是删除密钥并停用。"""
+        try:
+            state.providers.delete(provider_config_id)
+        except DomainError as exc:
+            raise _domain(exc) from exc
 
     @app.post("/api/v1/providers/{provider_config_id}/test")
     async def test_provider(

@@ -225,6 +225,52 @@ class ProviderRepository:
             )
         return self.get(provider_id)
 
+    # 引用 provider_configs 的历史表（外发预览/生成/调用审计，ADR-0003 D2 不可变）。
+    # 任何一张有行即 fail-closed：审计链不得静默断链（对齐 P51 转录删除语义）。
+    _REFERENCING_TABLES = (
+        "candidate_generations",
+        "egress_previews",
+        "provider_invocations",
+        "timeline_patch_egress_previews",
+        "timeline_patch_generations",
+        "timeline_patch_proposals",
+        "agent_sessions",
+        "agent_session_egress_previews",
+        "captions_provider_egress_previews",
+        "captions_provider_generations",
+        # 图像 Provider 域（v13/v14）：schema 推导回归锁抓出的遗漏——
+        # 调用审计与请求档案同样引用 provider_configs。
+        "provider_image_invocations",
+        "provider_image_request_profiles",
+    )
+
+    def delete(self, provider_id: str) -> None:
+        """删除 Provider 配置（含内存库中的密钥）。
+
+        仅允许删除从未进入外发/生成历史的 Provider：被任一审计表引用时
+        PROVIDER_IN_USE 拒绝——此时出路是「删除密钥 + 停用」（密钥删除
+        已有独立入口，UI 按 enabled 过滤后停用条目不再出现在 AI 功能里）。
+        """
+        with self.db.connection() as db:
+            row = db.execute(
+                "SELECT id FROM provider_configs WHERE id=?", (provider_id,)
+            ).fetchone()
+            if not row:
+                raise DomainError("PROVIDER_NOT_FOUND", "Provider 不存在")
+            for table in self._REFERENCING_TABLES:
+                referenced = db.execute(
+                    f"SELECT 1 FROM {table} WHERE provider_config_id=? LIMIT 1",
+                    (provider_id,),
+                ).fetchone()
+                if referenced:
+                    raise DomainError(
+                        "PROVIDER_IN_USE",
+                        "Provider 已被外发/生成历史引用，不可删除；可删除密钥并停用",
+                    )
+            db.execute("DELETE FROM provider_configs WHERE id=?", (provider_id,))
+        # 行删除成功后同步清内存库（加密文件条目由 Electron 侧 removeProviderSecret 处理）。
+        self.vault.delete(provider_id)
+
     def patch(self, provider_id: str, request: dict[str, Any]) -> dict[str, Any]:
         current = self.get(provider_id)
         merged = {**current, **request}

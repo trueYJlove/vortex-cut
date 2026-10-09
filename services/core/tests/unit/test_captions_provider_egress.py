@@ -287,6 +287,44 @@ def test_capability_probe_retries_retryable_but_not_schema_failures(tmp_path: Pa
     assert result2["captions_provider_capability_probe_sha256"]
 
 
+def test_capability_probe_treats_token_exhaustion_as_deterministic(tmp_path: Path) -> None:
+    """P43/R1：token 预算耗尽码不重试（每档恰 1 次即换档），失败码原样落库。
+
+    若该码被误归网络类：两档各重试 3 次 = 6 次往返全部耗尽，且落库码
+    退化为 PROVIDER_INVALID_RESPONSE，诊断面消失。
+    """
+    import asyncio
+
+    db = Database(tmp_path / "app.db")
+    db.initialize()
+    _seed_provider(db)
+    calls: list[str] = []
+    service = _probe_service(
+        db,
+        {
+            "openai_chat_completions_json_schema_v1": ["PROVIDER_TOKEN_BUDGET_EXHAUSTED"],
+            "openai_chat_completions_captionscript_v1": ["PROVIDER_TOKEN_BUDGET_EXHAUSTED"],
+        },
+        calls,
+    )
+    result = asyncio.run(service.test_capability("provider_1"))
+    # 每档只调用一次：确定性失败立即换档，不重试
+    assert calls == [
+        "openai_chat_completions_json_schema_v1",
+        "openai_chat_completions_captionscript_v1",
+    ]
+    assert result["captions_provider_capability_status"] == "unsupported"
+    assert (
+        result["captions_provider_capability_failure_code"]
+        == "PROVIDER_TOKEN_BUDGET_EXHAUSTED"
+    )
+    with db.connection() as conn:
+        row = conn.execute(
+            "SELECT captions_provider_capability_failure_code FROM provider_configs WHERE id='provider_1'"
+        ).fetchone()
+    assert row[0] == "PROVIDER_TOKEN_BUDGET_EXHAUSTED"
+
+
 def test_capability_probe_advances_ladder_on_schema_invalid_output(tmp_path: Path) -> None:
     """首档 HTTP 200 但内容不合 schema（validator 抛 ValueError）也必须换档。
 
