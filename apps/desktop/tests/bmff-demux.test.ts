@@ -284,6 +284,26 @@ describe("demuxRange 明确回退", () => {
     await expect(demuxRange(new MemoryRangeSource(mutated))).rejects.toMatchObject({ code: "BMFF_CODEC_UNSUPPORTED" });
     await expect(demuxRange(new MemoryRangeSource(mutated))).rejects.toThrow(/编码不受支持/);
   });
+
+  it("非主流 MP4 容器拒绝（ftyp 主品牌白名单 → 强制 B 后端）", async () => {
+    const data = await loadFixture("test-faststart.mp4");
+    const mutated = new Uint8Array(data);
+    // ftyp 主品牌 @8..12："isom" → "qt  "（QuickTime）
+    mutated[8] = 0x71; mutated[9] = 0x74; mutated[10] = 0x20; mutated[11] = 0x20;
+    await expect(demuxRange(new MemoryRangeSource(mutated))).rejects.toMatchObject({
+      code: "BMFF_CONTAINER_UNSUPPORTED",
+    });
+  });
+
+  it("缺 ftyp 一律拒绝（非主流容器不冒充支持）", async () => {
+    const data = await loadFixture("test-faststart.mp4");
+    const mutated = new Uint8Array(data);
+    // "ftyp" 盒类型改名 "junk" → 顶层扫描找不到 ftyp
+    mutated[4] = 0x6a; mutated[5] = 0x75; mutated[6] = 0x6e; mutated[7] = 0x6b;
+    await expect(demuxRange(new MemoryRangeSource(mutated))).rejects.toMatchObject({
+      code: "BMFF_CONTAINER_UNSUPPORTED",
+    });
+  });
 });
 
 function indexOfBytes(haystack: Uint8Array, needle: number[]): number {

@@ -226,3 +226,53 @@ describe("P28 实配失败回写降级（防每素材反复试错）", () => {
     await expect(factory.create(noFallback)).rejects.toMatchObject({ code: "DECODE_BACKEND_UNAVAILABLE" });
   });
 });
+
+describe("P31 色彩矩阵钉死 BT.709", () => {
+  it("B 路径 NV12 VideoFrame 与 A 路径/着色器同口径标注 bt709", async () => {
+    const inits: Array<{ colorSpace?: Record<string, unknown> }> = [];
+    class FakeVideoFrame {
+      timestamp = 0;
+      constructor(_data: unknown, init: { timestamp?: number; colorSpace?: Record<string, unknown> }) {
+        inits.push(init);
+        this.timestamp = init?.timestamp ?? 0;
+      }
+      close() {}
+    }
+    const original = (globalThis as { VideoFrame?: unknown }).VideoFrame;
+    try {
+      (globalThis as { VideoFrame?: unknown }).VideoFrame = FakeVideoFrame;
+      const y = new Uint8Array([1, 2, 3, 4]);
+      const uv = new Uint8Array([5, 6]);
+      const header = new Uint8Array(12 + 28 + y.length + uv.length);
+      const view = new DataView(header.buffer);
+      header.set([0x41, 0x49, 0x56, 0x31], 0);
+      view.setUint32(4, 1, true);
+      view.setUint32(8, 0, true);
+      view.setUint32(12, 3, true);
+      view.setUint32(16, 2, true);
+      view.setUint32(20, 2, true);
+      view.setUint32(24, 2, true);
+      view.setUint32(28, 2, true);
+      view.setUint32(32, y.length, true);
+      view.setUint32(36, uv.length, true);
+      header.set(y, 40);
+      header.set(uv, 40 + y.length);
+      const factory = new MediaDecoderFactoryImpl(tableWith({
+        codec: "hevc", webcodecs_supported: false, ffmpeg_supported: true, preferred: "ffmpeg",
+      }));
+      const decoder = await factory.create({
+        mediaUrl: "aivideo://t", codec: "hevc", width: 2, height: 2,
+        decodeFrames: async () => header.buffer,
+      });
+      const frame = await decoder.decode(3, 30);
+      expect(frame.kind).toBe("video_frame");
+      expect(inits[0]?.colorSpace).toMatchObject({
+        matrix: "bt709", primaries: "bt709", transfer: "bt709", fullRange: false,
+      });
+      decoder.dispose();
+    } finally {
+      if (original === undefined) delete (globalThis as { VideoFrame?: unknown }).VideoFrame;
+      else (globalThis as { VideoFrame?: unknown }).VideoFrame = original;
+    }
+  });
+});

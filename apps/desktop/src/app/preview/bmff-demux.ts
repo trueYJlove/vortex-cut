@@ -125,19 +125,48 @@ function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException("aborted", "AbortError");
 }
 
+/**
+ * P31：手写 demux 只覆盖**主流 MP4**（ftyp 主品牌白名单）。QuickTime/3GP/
+ * HEIF/AVIF 等异常容器一律 typed 拒绝 → 工厂落 B 后端（FFmpeg），不在渲染
+ * 进程爆表（规划门 §5：「H2 只覆盖主流 MP4；异常容器强制 B 后端」）。
+ * 白名单宁宽勿漏（ISO-BMFF 家族）：误拒的代价只是走 B 后端，漏放的代价是
+ * 手写解析在边界容器上出错。
+ */
+const MAINSTREAM_MP4_BRANDS = new Set([
+  "isom", "iso2", "iso3", "iso4", "iso5", "iso6",
+  "mp41", "mp42", "avc1", "dash", "mmp4",
+]);
+
 /** moov 定位与解析（moov-only 读取）。 */
 export async function demuxRange(
   source: RangeSource,
   signal?: AbortSignal,
 ): Promise<DemuxResult> {
   let moov: Box | null = null;
+  let ftyp: Box | null = null;
   let sawMoof = false;
   await walkTopBoxes(source, async box => {
     if (box.type === "moov") moov = box;
     else if (box.type === "moof") sawMoof = true;
+    else if (box.type === "ftyp") ftyp = box;
   }, signal);
   if (sawMoof) {
     throw new BmffUnsupportedError("BMFF_FRAGMENTED", "fragmented MP4（moof）不在支持集");
+  }
+  // P31：容器白名单（主流 MP4）——异常容器强制 B 后端。
+  // 注意 Box.start 指向盒内容起点（offset + headerSize）：ftyp 内容布局为
+  // major(4) + minor(4) + compatible*4——主品牌在 start+0。
+  const ftypBox = ftyp as Box | null;
+  if (!ftypBox) {
+    throw new BmffUnsupportedError("BMFF_CONTAINER_UNSUPPORTED", "缺少 ftyp（非主流 MP4）");
+  }
+  if (ftypBox.end - ftypBox.start < 8) {
+    throw new BmffUnsupportedError("BMFF_CONTAINER_UNSUPPORTED", "ftyp 盒过短（缺主品牌）");
+  }
+  const brandBytes = await source.read(ftypBox.start, 4, signal);
+  const brand = String.fromCharCode(brandBytes[0]!, brandBytes[1]!, brandBytes[2]!, brandBytes[3]!);
+  if (!MAINSTREAM_MP4_BRANDS.has(brand)) {
+    throw new BmffUnsupportedError("BMFF_CONTAINER_UNSUPPORTED", "容器主品牌 " + brand + " 不在主流 MP4 集");
   }
   if (!moov) {
     throw new BmffUnsupportedError("BMFF_NO_MOOV", "moov 未找到");

@@ -362,6 +362,10 @@ class FfmpegMediaDecoder implements MediaDecoder {
         codedWidth: hit.width,
         codedHeight: hit.height,
         timestamp: timestampUs,
+        // P31：色彩矩阵钉死 BT.709（与后端 A 的 VideoDecoder config、
+        // plane_payload 回退、H3 契约同口径；着色器固定按 BT.709 解释，
+        // 各路径标注必须一致，否则预览/导出色彩漂移）。
+        colorSpace: { primaries: "bt709", transfer: "bt709", matrix: "bt709", fullRange: false },
       });
     } catch {
       // 回退 plane_payload（compositor 平面入口）
