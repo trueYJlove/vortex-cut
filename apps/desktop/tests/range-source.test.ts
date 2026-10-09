@@ -219,3 +219,90 @@ describe("RangeFetchError", () => {
     expect(error.message).toBe("x");
   });
 });
+/** P70 真机缺陷回归：票据过期模拟——对齐 `restricted-media` 真语义：
+ *  过期/未知票据返回 **404**（不是 401/403），服务端从不返回 401。
+ *  初始票据可正常探测，`expireAll()` 后旧票一律 404，换票签发的新票正常。 */
+function makeExpiringFetch(file: Uint8Array) {
+  let seq = 0;
+  const issued: string[] = [];
+  const expired = new Set<string>();
+  const calls: Array<{ url: string; range: string | null }> = [];
+  const issue = () => { const u = `aivideo://media/t${++seq}`; issued.push(u); return u; };
+  const first = issue();
+  const fetchLike = vi.fn(async (url: string, init?: RequestInit): Promise<Response> => {
+    const range = (init?.headers as Record<string, string> | undefined)?.Range ?? null;
+    calls.push({ url, range });
+    if (expired.has(url)) return new Response(null, { status: 404 });
+    const respond = (status: number, headers: Record<string, string>, body: Uint8Array) =>
+      new Response(body as unknown as BodyInit, { status, headers });
+    if (!range) return respond(200, { "Content-Length": String(file.length) }, file);
+    const match = /^bytes=(\d+)-(\d+)$/.exec(range);
+    if (!match) return respond(416, { "Content-Range": `bytes */${file.length}` }, new Uint8Array(0));
+    const start = Number(match[1]);
+    const end = Math.min(Number(match[2]), file.length - 1);
+    if (start >= file.length || end < start) {
+      return respond(416, { "Content-Range": `bytes */${file.length}` }, new Uint8Array(0));
+    }
+    return respond(206, {
+      "Content-Range": `bytes ${start}-${end}/${file.length}`,
+      "Content-Length": String(end - start + 1),
+    }, file.subarray(start, end + 1));
+  });
+  const refresh = vi.fn(async () => issue());
+  const expireAll = () => { for (const u of issued) expired.add(u); };
+  return { fetchLike, refresh, calls, expireAll, first };
+}
+
+describe("HttpRangeSource 票据过期（P70：服务端过期票返回 404，非 401）", () => {
+  it("读取遇 404 触发一次换票并以相同 range 重发", async () => {
+    const data = file(300_000);
+    const { fetchLike, refresh, calls, expireAll, first } = makeExpiringFetch(data);
+    const source = await HttpRangeSource.create(first, fetchLike, refresh);
+    expireAll();
+    const view = await source.read(100_000, 16);
+    expect(view.length).toBe(16);
+    for (let i = 0; i < 16; i++) expect(view[i]).toBe(data[100_000 + i]);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    // 重发必须换成新票（旧票仍是过期态）
+    const retry = calls[calls.length - 1]!;
+    expect(retry.url).not.toBe(first);
+    source.close();
+  });
+
+  it("换票成功后持久化新 URL：后续网络 miss 不回退旧票", async () => {
+    const data = file(4 * 1024 * 1024);
+    const { fetchLike, refresh, expireAll, first } = makeExpiringFetch(data);
+    const source = await HttpRangeSource.create(first, fetchLike, refresh);
+    expireAll();
+    await source.read(100_000, 16);                 // 第一次 miss：换票
+    const view = await source.read(3_000_000, 16);  // 第二次 miss：必须用新票
+    expect(view.length).toBe(16);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    for (let i = 0; i < 16; i++) expect(view[i]).toBe(data[3_000_000 + i]);
+    source.close();
+  });
+
+  it("多次过期各自换票一次（长会话 >2×TTL，而非整源仅一次）", async () => {
+    const data = file(4 * 1024 * 1024);
+    const { fetchLike, refresh, expireAll, first } = makeExpiringFetch(data);
+    const source = await HttpRangeSource.create(first, fetchLike, refresh);
+    expireAll();
+    await source.read(100_000, 16);
+    expireAll();
+    const view = await source.read(3_000_000, 16);
+    expect(view.length).toBe(16);
+    expect(refresh).toHaveBeenCalledTimes(2);
+    source.close();
+  });
+
+  it("初始化即遇 404（建源时票据已过期）：注入换票回调则重试探测成功", async () => {
+    const data = file(200_000);
+    const { fetchLike, refresh, expireAll, first } = makeExpiringFetch(data);
+    expireAll();
+    const source = await HttpRangeSource.create(first, fetchLike, refresh);
+    expect(source.size).toBe(data.length);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    source.close();
+  });
+});
+

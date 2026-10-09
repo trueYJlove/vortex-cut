@@ -9,8 +9,14 @@
  * - byte LRU 缓存；不得把所有 chunk 拼回 dataBytes 长期保存。
  * - request epoch：seek 替换时取消尚未消费 range；陈旧返回只释放。
  * - 媒体票据 TTL 5min（restricted-media）；持续播放超 5 分钟需受控续票
- *   （401/403 有限一次刷新重新发相同 range）——续票由调用方注入
+ *   （失效态有限刷新、以相同 range 重发）——续票由调用方注入
  *   refreshTicket；refresh 不改变 source fingerprint。
+ *   **失效判据 = 401/403/404**：服务端 restricted-media 对过期/未知票据返回
+ *   **404**（代码中根本没有 401 分支），403 用于目录/方法非法。旧实现只认
+ *   401/403 ⇒ 票据一过期即 RANGE_UNSUPPORTED: 非 206 响应 404，且换票
+ *   回调永不触发（2026-10-09 真机 I0#1775，见 P70）。
+ *   **换票粒度 = 每次失效一次**（不是每源一次）：25 分钟会话跨 5 个 TTL，
+ *   单向标志会让第二次过期后永久失败。新票**持久化**到 this.url。
  */
 export interface RangeSource {
   readonly size: number;
@@ -28,6 +34,12 @@ export const MAX_CHUNK_BYTES = 1024 * 1024 * 16;
 export const MAX_CONCURRENT = 2;
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
+
+/** 票据失效态（可换票恢复）。P70：服务端 restricted-media 对过期/未知票据返回
+ *  **404**——客户端旧实现只认 401/403，故换票路径在生产上从未被触达。 */
+function isTicketInvalid(status: number): boolean {
+  return status === 401 || status === 403 || status === 404;
+}
 
 export class RangeFetchError extends Error {
   constructor(readonly code: string, message: string) {
@@ -56,7 +68,8 @@ interface CacheEntry {
  */
 export class HttpRangeSource implements RangeSource {
   readonly size: number;
-  private readonly url: string;
+  /** 当前票据 URL——换票成功后**就地更新**（旧实现 readonly，新票只用于当次重发）。 */
+  private url: string;
   private readonly fetchLike: FetchLike;
   private readonly refreshTicket: (() => Promise<string>) | null;
   private readonly cacheCapBytes: number;
@@ -66,7 +79,8 @@ export class HttpRangeSource implements RangeSource {
   private active = 0;
   private readonly queue: Array<() => void> = [];
   private closed = false;
-  private refreshed = false;
+  /** 换票单飞：并发读同时撞失效态时只换一次（见 refreshTicketOnce）。 */
+  private refreshInFlight: Promise<string> | null = null;
   private head?: Uint8Array; // init 探测窗口数据（首个 read 免请求复用）
 
   private constructor(
@@ -84,7 +98,9 @@ export class HttpRangeSource implements RangeSource {
     this.head = head;
   }
 
-  /** 初始化探测（bytes=0-65535）；200 大文件拒绝。 */
+  /** 初始化探测（bytes=0-65535）；200 大文件拒绝。
+   *  P70：探测遇票据失效（401/403/404）且注入换票回调时，换票重试一次——
+   *  否则「建源时票据刚好过期」会直接 RANGE_FETCH_FAILED 拒绝整个会话。 */
   static async create(
     url: string,
     fetchLike: FetchLike,
@@ -92,9 +108,16 @@ export class HttpRangeSource implements RangeSource {
     options?: { cacheCapBytes?: number; fullReadLimit?: number },
     signal?: AbortSignal,
   ): Promise<HttpRangeSource> {
-    const response = await fetchLike(url, {
+    let current = url;
+    let response = await fetchLike(current, {
       headers: { Range: `bytes=0-${PROBE_WINDOW_BYTES - 1}` }, signal,
     });
+    if (isTicketInvalid(response.status) && refreshTicket) {
+      current = await refreshTicket();
+      response = await fetchLike(current, {
+        headers: { Range: `bytes=0-${PROBE_WINDOW_BYTES - 1}` }, signal,
+      });
+    }
     if (response.status === 206) {
       const total = parseTotalFromContentRange(response.headers.get("content-range"));
       if (total === null) throw new RangeFetchError("RANGE_HEADER_INVALID", "206 响应缺少合法 Content-Range");
@@ -102,7 +125,7 @@ export class HttpRangeSource implements RangeSource {
       if (body.length > PROBE_WINDOW_BYTES) {
         throw new RangeFetchError("RANGE_BODY_MISMATCH", "206 响应字节数超出请求范围");
       }
-      return new HttpRangeSource(total, url, fetchLike, refreshTicket, options, body);
+      return new HttpRangeSource(total, current, fetchLike, refreshTicket, options, body);
     }
     if (response.status === 200) {
       const body = new Uint8Array(await response.arrayBuffer());
@@ -111,7 +134,7 @@ export class HttpRangeSource implements RangeSource {
         throw new RangeFetchError("RANGE_UNSUPPORTED", `服务忽略 Range 且响应超过 ${limit} 字节`);
       }
       // 小文件整读：全部数据即缓存（无后续网络请求）
-      return new HttpRangeSource(body.length, url, fetchLike, refreshTicket, options, body);
+      return new HttpRangeSource(body.length, current, fetchLike, refreshTicket, options, body);
     }
     if (response.status === 401 || response.status === 403) {
       throw new RangeFetchError("RANGE_UNAUTHORIZED", "媒体票据未授权（初始化阶段）");
@@ -212,6 +235,21 @@ export class HttpRangeSource implements RangeSource {
     }
   }
 
+  /** 换票单飞：并发读同时撞失效态时只换一次，并**持久化**新票到 this.url。
+   *  粒度是「每次失效一次」——长会话（>2×TTL）会多次过期，单向标志不够。 */
+  private refreshTicketOnce(): Promise<string> {
+    if (this.refreshInFlight) return this.refreshInFlight;
+    const pending = (async () => {
+      const next = await this.refreshTicket!();
+      this.url = next; // 持久化：后续网络 miss 直接用新票（旧实现只用于当次重发）
+      return next;
+    })();
+    this.refreshInFlight = pending;
+    const clear = () => { if (this.refreshInFlight === pending) this.refreshInFlight = null; };
+    void pending.then(clear, clear);
+    return pending;
+  }
+
   private async requestWithRefresh(offset: number, end: number, signal?: AbortSignal): Promise<Uint8Array> {
     const attempt = async (url: string): Promise<Response> =>
       this.fetchLike(url, { headers: { Range: `bytes=${offset}-${end}` }, signal });
@@ -221,13 +259,13 @@ export class HttpRangeSource implements RangeSource {
     } catch (error) {
       throw new RangeFetchError("RANGE_FETCH_FAILED", String(error));
     }
-    if ((response.status === 401 || response.status === 403) && this.refreshTicket && !this.refreshed) {
-      this.refreshed = true;
+    // P70：失效判据含 404——服务端对过期票据返回 404（无 401 分支）。
+    if (isTicketInvalid(response.status) && this.refreshTicket) {
       try {
-        const next = await this.refreshTicket();
+        const next = await this.refreshTicketOnce();
         const retried = await attempt(next);
-        if (retried.status === 401 || retried.status === 403) {
-          throw new RangeFetchError("RANGE_UNAUTHORIZED", "续票后仍 401/403（不重试）");
+        if (isTicketInvalid(retried.status)) {
+          throw new RangeFetchError("RANGE_UNAUTHORIZED", `续票后仍 ${retried.status}（不重试）`);
         }
         response = retried;
       } catch (error) {
