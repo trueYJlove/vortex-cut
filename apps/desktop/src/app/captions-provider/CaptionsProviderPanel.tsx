@@ -24,6 +24,7 @@ const FAILURE_LABELS: Record<string, string> = {
   CAPTIONS_PROVIDER_EGRESS_REUSED: "该外传确认已被使用。下一步：重新准备新的确认。",
   CAPTIONS_PROVIDER_SNAPSHOT_DRIFT: "Provider 配置或凭据状态已变化。下一步：重新准备外传确认。",
   CAPTIONS_PROVIDER_OUTPUT_INVALID: "Provider 返回内容不符合固定结构；未写入任何结果。下一步：重试或更换 Provider。",
+  CAPTIONS_PROVIDER_SEGMENTS_UNMAPPED: "所选片段与当前时间线字幕不对应。下一步：先在转录查看器里把这些片段「追加所选片段」到时间线并生成字幕，再发起优化。",
   CAPTIONS_PROVIDER_PROPOSAL_EMPTY: "Provider 没有产生文本变化（原文已足够简短），无需应用。",
   CAPTIONS_PROVIDER_PARAMS_INVALID: "字幕参数不合法（例如最大字数）。下一步：调整后重试。",
   CAPTIONS_PROVIDER_RESULT_NOT_FOUND: "尚未产生可用结果。下一步：等待生成完成或重新发起。",
@@ -38,6 +39,15 @@ const PRESETS = [
   { value: "game-safe-bottom", label: "游戏安全区" },
   { value: "high-contrast", label: "高对比" },
 ];
+
+// 人话状态标签；不再把原始状态码括号回显（"执行中（succeeded）"自相矛盾）。
+const GENERATION_STATUS_LABELS: Record<string, string> = {
+  queued: "已排队",
+  running: "执行中",
+  succeeded: "已完成",
+  failed: "生成失败",
+  cancelled: "已取消",
+};
 
 /**
  * AI 字幕优化面板（Slice 5）。
@@ -312,9 +322,12 @@ export function CaptionsProviderPanel({
 
     {step === "running" && <>
       <h3>正在生成字幕文本</h3>
-      <p>{generation?.status === "queued" ? "排队中" : "执行中"}（{generation?.status ?? "queued"}）</p>
+      <p>{GENERATION_STATUS_LABELS[generation?.status ?? "queued"] ?? "执行中"}</p>
       <progress max={1} value={generation?.status === "succeeded" ? 1 : 0} aria-label="字幕生成进度" />
       <p className="readonly-note">生成期间可关闭面板；结果会保留，稍后可从工作单继续处理。</p>
+      <div className="modal-actions">
+        <button onClick={onClose}>关闭面板</button>
+      </div>
     </>}
 
     {step === "proposal" && proposal && <>

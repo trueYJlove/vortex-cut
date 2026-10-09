@@ -991,6 +991,16 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 .modal > .modal-heading { position: sticky; top: 0; z-index: 3; flex: none; padding: 15px var(--dlg-hpad) 0; background: var(--dlg-bg); }
 .modal > .modal-actions { position: sticky; bottom: 0; z-index: 3; flex: none; padding: 13px var(--dlg-hpad) 15px; background: var(--dlg-bg); }
 .modal > .project-steps { padding-left: var(--dlg-hpad); padding-right: var(--dlg-hpad); }
+/* 原生 <progress> 的 trough 占满 border box（Chromium 实测：元素 0..300、
+   padding 0 40px，绿色仍从 x=1 起画）——通用 padding 规则推不动它，进度条
+   通铺弹窗全宽，与缩进的内容列错位（P68，2026-10-09 真机；AI 修改/Agent
+   会话面板同病）。改用 width + margin 让元素自身缩进：trough 填满 border
+   box，元素多宽条就多宽，与内容列对齐。 */
+.modal > progress {
+  width: calc(100% - var(--dlg-hpad, 22px) * 2);
+  margin-left: var(--dlg-hpad, 22px);
+  margin-right: var(--dlg-hpad, 22px);
+}
 
 /* 弹窗宽度档位（设计稿 §04-§19） */
 .modal.ai-roughcut { width: min(720px, 100%); }
@@ -1556,6 +1566,10 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
    贴弹窗底边——补与水平边距同源的底部留白。 */
 .modal.render-panel-dialog,
 .modal.export-batch-modal { padding-bottom: var(--dlg-hpad, 22px); }
+/* captions-provider 只有 running 步骤缺 modal-actions 底栏（P68，2026-10-09
+   用户实测：底部提示盒贴弹窗底边被裁）。:has() 精确匹配"无底栏"状态——
+   有底栏时交给 sticky actions 自带的 padding，避免叠加。 */
+.modal.captions-provider:not(:has(> .modal-actions)) { padding-bottom: var(--dlg-hpad, 22px); }
 
 /* 带边框/背景的整宽「提示盒 / 容器」同属盒式缩进范畴（2026-10-06 补漏）。
    上面 1490 段的收口只列了 fieldset / batch-status / 卡片，遗漏了
@@ -1641,6 +1655,8 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
   .modal .batch-status .modal-actions { padding-left: 14px; padding-right: 14px; }
   .modal.render-panel-dialog,
   .modal.export-batch-modal { padding-bottom: 14px; }
+  .modal.captions-provider:not(:has(> .modal-actions)) { padding-bottom: 14px; }
+  .modal > progress { width: calc(100% - 28px); margin-left: 14px; margin-right: 14px; }
   .modal > *:not(.modal-heading):not(.modal-actions).readonly-note,
   .modal > *:not(.modal-heading):not(.modal-actions).delete-warning,
   .modal > *:not(.modal-heading):not(.modal-actions).ai-status,

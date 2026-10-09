@@ -810,3 +810,177 @@ async def test_job_service_dispatches_captions_generation_end_to_end(tmp_path: P
     assert gen == "succeeded"
     assert provider.seen, "Provider 必须被真实调用"
     assert json.loads(job["result_json"])["status"] == "succeeded"
+
+
+# ---------------------------------------------------------------------------
+# P68（2026-10-09 真机）：段↔字幕映射失败必须是领域错误，且尽量提前
+# ---------------------------------------------------------------------------
+
+
+class _MappingTranscripts:
+    def __init__(self, segments: list[dict]) -> None:
+        self._segments = segments
+
+    def get(self, transcript_id: str):
+        return {"transcript_id": transcript_id, "asset_id": "a1", "language": "zh", "segments": self._segments}
+
+
+class _MappingProviders:
+    def get(self, _id: str) -> dict:
+        return {
+            "provider_config_id": "provider_1", "display_name": "P",
+            "enabled": True, "credential_status": "configured",
+            "base_url": "https://p.test", "model": "m", **CAPABLE_FIELDS,
+        }
+
+
+def _seed_mapping_world(db: Database, *, caption_segment: str) -> None:
+    """项目 + Revision（transcript 字幕绑定 caption_segment）+ 素材 + Provider 行。"""
+    document = {
+        "schema_version": 1,
+        "clips": [],
+        "tracks": [],
+        "transitions": [],
+        "captions": [
+            {"caption_id": "cap1", "origin": "transcript",
+             "source_segment_ids": [caption_segment], "text": "旧文字"}
+        ]
+    }
+    with db.connection() as conn:
+        conn.execute(
+            "INSERT INTO projects(id,name,status,canvas_json,root_dir,root_dir_name,"
+            "created_at,updated_at,last_opened_at,current_timeline_revision_id)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?)",
+            ("p1", "p", "active", "{}", "r", "r", "n", "n", "n", "rev1"),
+        )
+        conn.execute(
+            "INSERT INTO timeline_revisions(id,project_id,parent_revision_id,schema_version,"
+            "document_json,document_sha256,summary,created_by,created_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?)",
+            ("rev1", "p1", None, 1, json_dumps(document), "sha256:" + "a" * 64, "s", "u", "n"),
+        )
+        conn.execute(
+            "INSERT INTO assets(id,project_id,kind,storage_mode,display_name,fingerprint,"
+            "size_bytes,availability,media_info_json,created_at,updated_at)"
+            " VALUES (?,?,?,?,'x','fp',1,'available','{}','n','n')",
+            ("a1", "p1", "video", "external"),
+        )
+    _seed_provider(db)
+
+
+def test_prepare_rejects_unmapped_segments_before_any_egress(tmp_path: Path) -> None:
+    """P68：所选片段未生成时间线字幕 → prepare 立即拒绝（真实调用之前）。
+
+    真机现场：旧实现一路走到真实生成结束才在提案阶段抛裸 ValueError →
+    500 → UI「提案读取失败；请稍后重试」。预检后：无外传预览、无 Provider 调用。
+    """
+    db = Database(tmp_path / "app.db")
+    db.initialize()
+    _seed_mapping_world(db, caption_segment="seg_captioned")
+    transcripts = _MappingTranscripts([
+        {"segment_id": "seg_captioned", "text": "已追加的段", "start_us": 0, "end_us": 1_000_000},
+        {"segment_id": "seg_unmapped", "text": "未追加的段", "start_us": 0, "end_us": 1_000_000},
+    ])
+    service = CaptionsProviderEgressService(
+        db, _MappingProviders(), ProviderSecretVault(), TimelineService(db), transcripts,
+    )
+    request = {
+        "provider_config_id": "provider_1", "base_revision_id": "rev1",
+        "transcript_id": "t1", "preset_id": "default-bottom", "max_chars_per_caption": 24,
+        "language": "zh",
+    }
+    with pytest.raises(DomainError) as raised:
+        service.prepare("p1", {**request, "segment_ids": ["seg_unmapped"]})
+    assert raised.value.code == "CAPTIONS_PROVIDER_SEGMENTS_UNMAPPED"
+    with db.connection() as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM captions_provider_egress_previews"
+        ).fetchone()[0] == 0, "预检失败不得创建外传预览（更不得真实调用）"
+
+    preview = service.prepare("p1", {**request, "segment_ids": ["seg_captioned"]})
+    assert preview["segment_count"] == 1
+
+
+def test_create_proposal_maps_mapping_failure_to_domain_error(tmp_path: Path) -> None:
+    """P68 兜底：结果段与时间线字幕不对应 → DomainError（不再是裸 ValueError/500）。"""
+    db = Database(tmp_path / "app.db")
+    db.initialize()
+    _seed_mapping_world(db, caption_segment="seg_captioned")
+    payload = {
+        "schema_version": 1, "recipe_id": "captions_provider_v1", "language": "zh",
+        "preset_id": "default-bottom", "max_chars_per_caption": 24,
+        "segments": [{"segment_id": "seg_unmapped", "ordinal": 0, "text": "旧", "duration_bucket": "short"}],
+    }
+    output = {"items": [{"segment_refs": ["seg_unmapped"], "text": "新文字", "confidence": None}], "warnings": []}
+    with db.connection() as conn:
+        conn.execute(
+            "INSERT INTO captions_provider_egress_previews(id,project_id,provider_config_id,"
+            "base_revision_id,base_document_sha256,provider_snapshot_json,provider_config_sha256,"
+            "payload_sha256,stats_json,expires_at,created_at,payload_json)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("pv1", "p1", "provider_1", "rev1", "sha256:" + "b" * 64, "{}", "sha256:" + "b" * 64,
+             sha256(payload), "{}", "2999-01-01T00:00:00Z", "n", json_dumps(payload)),
+        )
+        conn.execute("INSERT INTO captions_provider_egress_consents VALUES (?,?,?,?,?)",
+                     ("c1", "pv1", sha256(payload), "n", None))
+        conn.execute("INSERT INTO captions_provider_generations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                     ("g1", "p1", "pv1", "c1", "provider_1", "rev1", "sha256:" + "b" * 64,
+                      "succeeded", sha256(payload), "n", "n", None))
+        conn.execute(
+            "INSERT INTO captions_provider_results(id,generation_id,output_json,output_sha256,created_at)"
+            " VALUES (?,?,?,?,?)",
+            ("r1", "g1", json_dumps(output), sha256(output), "n"),
+        )
+    service = CaptionsProviderEgressService(
+        db, _MappingProviders(), ProviderSecretVault(), TimelineService(db), _MappingTranscripts([]),
+    )
+    with pytest.raises(DomainError) as raised:
+        service.create_proposal("p1", "g1")
+    assert raised.value.code == "CAPTIONS_PROVIDER_SEGMENTS_UNMAPPED"
+
+
+def test_create_proposal_builds_patch_for_mapped_segments(tmp_path: Path) -> None:
+    """正向对照：段↔字幕对应成立时提案照常构建（同一条代码路径）。"""
+    db = Database(tmp_path / "app.db")
+    db.initialize()
+    _seed_mapping_world(db, caption_segment="seg_captioned")
+    payload = {
+        "schema_version": 1, "recipe_id": "captions_provider_v1", "language": "zh",
+        "preset_id": "default-bottom", "max_chars_per_caption": 24,
+        "segments": [{"segment_id": "seg_captioned", "ordinal": 0, "text": "旧", "duration_bucket": "short"}],
+    }
+    output = {"items": [{"segment_refs": ["seg_captioned"], "text": "新文字", "confidence": None}], "warnings": []}
+    with db.connection() as conn:
+        conn.execute(
+            "INSERT INTO captions_provider_egress_previews(id,project_id,provider_config_id,"
+            "base_revision_id,base_document_sha256,provider_snapshot_json,provider_config_sha256,"
+            "payload_sha256,stats_json,expires_at,created_at,payload_json)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("pv1", "p1", "provider_1", "rev1", "sha256:" + "b" * 64, "{}", "sha256:" + "b" * 64,
+             sha256(payload), "{}", "2999-01-01T00:00:00Z", "n", json_dumps(payload)),
+        )
+        conn.execute("INSERT INTO captions_provider_egress_consents VALUES (?,?,?,?,?)",
+                     ("c1", "pv1", sha256(payload), "n", None))
+        conn.execute("INSERT INTO captions_provider_generations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                     ("g1", "p1", "pv1", "c1", "provider_1", "rev1", "sha256:" + "b" * 64,
+                      "succeeded", sha256(payload), "n", "n", None))
+        conn.execute(
+            "INSERT INTO captions_provider_results(id,generation_id,output_json,output_sha256,created_at)"
+            " VALUES (?,?,?,?,?)",
+            ("r1", "g1", json_dumps(output), sha256(output), "n"),
+        )
+    service = CaptionsProviderEgressService(
+        db, _MappingProviders(), ProviderSecretVault(), TimelineService(db), _MappingTranscripts([]),
+    )
+    proposal = service.create_proposal("p1", "g1")
+    assert proposal["patch"]["operations"] == [
+        {"op": "update_caption", "caption_id": "cap1", "text": "新文字"}
+    ]
+
+
+def test_mapping_error_is_value_error_subclass() -> None:
+    """兼容契约：CaptionsProviderMappingError 继承 ValueError——未显式处理的
+    调用路径行为不变（探测/校验各处以 ValueError 捕获的地方照旧生效）。"""
+    from aivs_core.captions_provider import CaptionsProviderMappingError
+
+    assert issubclass(CaptionsProviderMappingError, ValueError)

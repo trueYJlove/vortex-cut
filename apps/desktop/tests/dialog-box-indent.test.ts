@@ -118,3 +118,41 @@ describe("弹窗盒式缩进：覆盖规则特异性必须胜过通用 :not() �
     expect(rule, "AI 字幕优化弹窗缺少宽度档位（会退到 560px 默认）").toBeDefined();
   });
 });
+
+describe("进度条与无底栏弹窗底部留白（P68，2026-10-09 真机）", () => {
+  it("进度条以 width+margin 缩进——padding 对原生 progress 无效（Chromium 实测）", () => {
+    // 实测依据：元素占 x=0..300、padding 0 40px，accent 色仍从 x=1 起画
+    // （trough 填满 border box）。缩进必须落在元素自身（width+margin），
+    // 只靠通用 padding 规则会让进度条通铺弹窗全宽。
+    const rule = rules(css).find(
+      item => item.selector.replace(/\s+/g, " ").trim() === ".modal > progress" && /width\s*:/.test(item.body),
+    );
+    expect(rule, ".modal > progress 缺少 width 缩进（进度条会通铺弹窗全宽）").toBeDefined();
+    expect(rule!.body, "width 必须按 --dlg-hpad 收缩元素自身").toMatch(/width\s*:\s*calc\(100% - var\(--dlg-hpad/);
+    expect(rule!.body, "margin-left 缩进缺失").toMatch(/margin-left\s*:/);
+    expect(rule!.body, "margin-right 缩进缺失").toMatch(/margin-right\s*:/);
+    // margin 必须胜过 .modal > * { margin: 0 }（0,1,0），否则缩进被抹平。
+    expect(
+      compare(specificity(".modal > progress"), specificity(".modal > *")),
+      "margin 缩进特异性未胜过 .modal > * 的 margin:0",
+    ).toBeGreaterThan(0);
+  });
+
+  it("captions-provider 无 modal-actions 底栏时有底部留白（:has 精确匹配）", () => {
+    // running 步骤无底栏时末行贴弹窗底边（P52 同款漏网）。
+    // 锁两个变体：桌面（var(--dlg-hpad)）与窄屏（14px）。只锁"存在一条"
+    // 会让删除桌面变体的变异恒真（媒体查询残留的 14px 规则顶包）——
+    // 2026-10-09 负向对照当场暴露过这一失效模式。
+    const target = ".modal.captions-provider:not(:has(> .modal-actions))";
+    const bodies = rules(css)
+      .filter(item => item.selector.replace(/\s+/g, " ").trim() === target && /padding-bottom\s*:/.test(item.body))
+      .map(item => item.body);
+    expect(bodies.some(body => /padding-bottom\s*:\s*var\(--dlg-hpad/.test(body)), "缺少桌面档底部留白（var(--dlg-hpad) 变体）").toBe(true);
+    expect(bodies.some(body => /padding-bottom\s*:\s*14px/.test(body)), "缺少窄屏档底部留白（14px 变体）").toBe(true);
+    // 必须胜过 .modal { padding: 0 }（0,1,0）。
+    expect(
+      compare(specificity(target), specificity(".modal")),
+      "底部留白特异性未胜过 .modal 的 padding:0",
+    ).toBeGreaterThan(0);
+  });
+});

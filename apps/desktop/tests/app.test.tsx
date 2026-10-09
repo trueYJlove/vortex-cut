@@ -1011,4 +1011,42 @@ describe("AI 字幕优化（转录页发起）", () => {
     await screen.findByText(/segments\.text/);
     expect(document.body.textContent).not.toMatch(/captionscript|json_schema|adapter|probe_sha256/i);
   });
+
+  it("生成期间有关闭出口，状态用人话（P68 排版/文案）", async () => {
+    const api = desktopApi();
+    vi.mocked(api.getCaptionsProviderGeneration!).mockResolvedValue({ status: "running" } as never);
+    await openOptimize(api);
+    fireEvent.change(await screen.findByLabelText("字幕优化 Provider"), { target: { value: "provider_1" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "准备外传确认" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "准备外传确认" }));
+    await screen.findByText(/segments\.text/);
+    fireEvent.click(screen.getByRole("button", { name: "确认并生成" }));
+    await screen.findByText("正在生成字幕文本");
+    // 人话状态：不再渲染 "执行中（running）" 这类自相矛盾的括号回显。
+    expect(screen.getByText("执行中")).toBeVisible();
+    expect(document.body.textContent).not.toMatch(/执行中（|（running）|（queued）/);
+    // 底栏出口（running 步骤原先无按钮，末行贴弹窗底边被裁）。
+    const close = screen.getByRole("button", { name: "关闭面板" });
+    expect(close).toBeVisible();
+    fireEvent.click(close);
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "AI 字幕优化" })).not.toBeInTheDocument());
+  });
+
+  it("段↔字幕映射失败给可操作出路，不给「请稍后重试」（P68）", async () => {
+    const api = desktopApi();
+    vi.mocked(api.createCaptionsProviderProposal!).mockRejectedValue(
+      new Error("[CAPTIONS_PROVIDER_SEGMENTS_UNMAPPED] 所选片段与时间线字幕不对应"),
+    );
+    await openOptimize(api);
+    fireEvent.change(await screen.findByLabelText("字幕优化 Provider"), { target: { value: "provider_1" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "准备外传确认" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "准备外传确认" }));
+    await screen.findByText(/segments\.text/);
+    fireEvent.click(screen.getByRole("button", { name: "确认并生成" }));
+    await waitFor(() => expect(api.createCaptionsProviderProposal).toHaveBeenCalledTimes(1));
+    expect(
+      await screen.findByText(/先在转录查看器里把这些片段「追加所选片段」到时间线/),
+    ).toBeVisible();
+    expect(screen.queryByText(/请稍后重试/)).not.toBeInTheDocument();
+  });
 });

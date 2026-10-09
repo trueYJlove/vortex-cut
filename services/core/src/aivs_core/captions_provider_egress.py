@@ -9,9 +9,11 @@ from typing import Any
 from .captions_provider import (
     CAPTIONS_PROVIDER_OUTPUT_SCHEMA,
     CAPTIONS_PROVIDER_RECIPE_ID,
+    CaptionsProviderMappingError,
     build_captions_provider_payload,
     build_captions_provider_patch,
     captions_provider_preview,
+    unmapped_segments,
 )
 from .database import Database, json_dumps, json_loads, utc_now
 from .ids import new_id
@@ -154,6 +156,14 @@ class CaptionsProviderEgressService:
         ids = request["segment_ids"]
         if not isinstance(ids, list) or not ids or len(set(ids)) != len(ids) or any(item not in by_id for item in ids):
             raise DomainError("CAPTIONS_PROVIDER_SEGMENTS_INVALID", "字幕片段选择无效")
+        # 前置条件在真实调用前强制（P68 真机现场）：所选片段必须已「追加所选
+        # 片段」到时间线并生成字幕，否则提案阶段必然映射失败——不能白花一次
+        # 真实 Provider 调用再报错。
+        if unmapped_segments(revision["document"], list(ids)):
+            raise DomainError(
+                "CAPTIONS_PROVIDER_SEGMENTS_UNMAPPED",
+                "所选片段尚未生成时间线字幕（请先把这些片段追加到时间线）",
+            )
         segments = [{"segment_id": item, "text": by_id[item]["text"], "duration_bucket": "short" if by_id[item]["end_us"] - by_id[item]["start_us"] < 2_000_000 else "long"} for item in ids]
         try:
             payload = build_captions_provider_payload(language=request.get("language") or transcript["language"], preset_id=request["preset_id"], max_chars_per_caption=request["max_chars_per_caption"], segments=segments)
@@ -502,7 +512,15 @@ class CaptionsProviderEgressService:
             if not payload_row:
                 raise DomainError("CAPTIONS_PROVIDER_PROPOSAL_INVALID", "字幕 Provider 输入快照不存在")
             payload = json_loads(payload_row["payload_json"])
-            patch = build_captions_provider_patch(document=revision["document"], payload=payload, provider_value=json_loads(row["output_json"]))
+            try:
+                patch = build_captions_provider_patch(document=revision["document"], payload=payload, provider_value=json_loads(row["output_json"]))
+            except CaptionsProviderMappingError as exc:
+                # P68（2026-10-09 真机）：裸 ValueError 穿透路由只捕的 DomainError
+                # → 500 INTERNAL_ERROR → UI 只能显示「提案读取失败；请稍后重试」
+                # （重试必然同样失败）。映射失败必须是可操作的领域错误。
+                raise DomainError("CAPTIONS_PROVIDER_SEGMENTS_UNMAPPED", "所选片段与时间线字幕不对应") from exc
+            except ValueError as exc:
+                raise DomainError("CAPTIONS_PROVIDER_OUTPUT_INVALID", "Provider 输出不合固定结构") from exc
             if not patch["operations"]:
                 raise DomainError("CAPTIONS_PROVIDER_PROPOSAL_EMPTY", "字幕 Provider 没有产生文本变化")
             proposed = deepcopy(revision["document"])
