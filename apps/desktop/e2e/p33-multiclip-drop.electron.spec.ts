@@ -264,7 +264,8 @@ test(`P33 多片段真实 App 丢帧测量：${label}`, async () => {
         ? await page.evaluate(() => (window as unknown as { __TRACE?: unknown[] }).__TRACE?.slice(-20_000) ?? [])
         : undefined,
     };
-    const outPath = join(root, "evidence", "performance", "preview-smoothness-baseline", `app-multiclip-${label}.json`);
+    const outPath = join(root, "evidence", "performance", "preview-smoothness-baseline",
+      `app-multiclip-${label}${process.env.AIVS_P33_ROUND ? `-r${process.env.AIVS_P33_ROUND}` : ""}.json`);
     await mkdir(dirname(outPath), { recursive: true });
     await writeFile(outPath, JSON.stringify(report, null, 1), "utf8");
     console.log(`[p33multi] metrics: ${metricsText}`);
