@@ -6,6 +6,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from aivs_core.app import create_app
+from aivs_core.rendering.ir import IR_PROJECTOR_VERSION
 from aivs_core.config import Settings
 from aivs_core.database import sha256_file
 from aivs_core.projects import modified_iso
@@ -194,7 +195,8 @@ def test_preview_ir_overlay_mask_passes_with_effects(tmp_path: Path, monkeypatch
         assert overlay["clip_id"] == "clipP"
         assert overlay["effects"]["mask"] == {"kind": "ellipse", "x": 0.4, "y": 0.6, "width": 0.8, "height": 0.5}
         assert overlay["effects"]["keying"] == {"color": "00FF00", "similarity": 0.3, "blend": 0.1}
-        assert response.json()["ir"]["projector_version"] == 3
+        # 版本从常量推导（P45：硬编码会在下次 bump 时变红）
+        assert response.json()["ir"]["projector_version"] == IR_PROJECTOR_VERSION
 
 
 def test_preview_ir_unknown_revision(tmp_path: Path, monkeypatch) -> None:

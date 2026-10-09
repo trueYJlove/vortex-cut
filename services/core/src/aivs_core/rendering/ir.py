@@ -22,7 +22,7 @@ from .interval_index import IntervalLookup, RegionSweep
 
 FPS = 30
 IR_SCHEMA = "preview-ir-v1"
-IR_PROJECTOR_VERSION = 3  # v3（2026-09-17 v0.4）：覆盖轨 mask/keying 重入（overlay 条目携带 effects）
+IR_PROJECTOR_VERSION = 4  # v4（2026-10-10）：主轨空时以可见覆盖轨终点作时长下限（对齐权威端「全程黑场+覆盖轨叠加」）；v3（2026-09-17 v0.4）：覆盖轨 mask/keying 重入（overlay 条目携带 effects）
 MAX_IR_FRAMES = 27_000  # 15 分钟 @30fps（O2 体量护栏）
 
 ALLOWED_KEYFRAME_PROPS = {"position", "opacity", "scale", "rotate"}
@@ -508,12 +508,22 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
 
     # 输出时长：可视化区段终点与 A1 纯音频窗口终点取大——音频长于画面时以
     # 黑场延长输出（前端合成器对越界帧渲染黑场，音频照常调度）。
+    # 主轨为空（V1 无可见视频段）时以**可见覆盖轨终点**作时长下限：权威端对
+    # 同形态输出「全程黑场 + 覆盖轨照常叠加」（ffmpeg.py 空主轨黑场分支，
+    # 时长 = 全时间线，含覆盖轨终点），预览必须同语义——缺失时 total_frames=0
+    # → play() 首个 tick 即结束、静默无任何提示（W2.6 末条登记缺陷）。
+    # V1 非空时不取覆盖轨终点：权威端视频长度 = 主轨链长，覆盖轨窗口超出
+    # 主画面的部分被 overlay 主输入时长截断，预览保持一致。
     audio_tail_end = max(
         (_output_window(segment)[1] for segment in segments
          if segment["asset_kind"] == "audio" and not segment.get("track_hidden")),
         default=0,
     )
-    total_us = max(regions[-1]["t1"] if regions else 0, audio_tail_end)
+    overlay_tail_end = (
+        max((int(segment["timeline_end_us"]) for segment in overlays), default=0)
+        if not visual else 0
+    )
+    total_us = max(regions[-1]["t1"] if regions else 0, audio_tail_end, overlay_tail_end)
     total_frames = -(-int(total_us) * FPS // 1_000_000)
     # O2 体量护栏（M3-2）：全量逐帧数值表按帧数线性增长，超长时间线先拒绝，
     # 分页/按需投影留待后续增量（设计 §7-O2）。

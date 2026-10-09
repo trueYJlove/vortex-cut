@@ -158,6 +158,50 @@ def test_overlay_mask_keying_effects_passthrough() -> None:
     assert "effects" not in ov[1]
 
 
+def test_overlay_only_timeline_full_length_black() -> None:
+    # 主轨为空（V1 无可见段）但覆盖轨有内容：对齐权威端「全程黑场 + 覆盖轨
+    # 照常叠加」（ffmpeg.py 空主轨黑场分支，时长 = 全时间线含覆盖轨终点）。
+    # 缺失该下限时 total_frames=0 → 前端 play() 首个 tick 即结束、静默无任何
+    # 提示（W2.6 末条登记缺陷）。门控的负向对照由
+    # test_overlay_beyond_main_does_not_extend_duration 钉死。
+    plan = _plan([
+        _segment("p", 0, 2 * US, 0, 2 * US, asset_idx=1, track_id="V2"),
+    ])
+    ir = project_preview_ir(plan, _probe(plan))
+    assert ir["canvas"]["duration_frames"] == 60
+    assert ir["frames"][0]["main"] == {"kind": "black"}
+    assert ir["frames"][0]["overlays"][0]["clip_id"] == "p"
+    assert ir["frames"][59]["overlays"][0]["src_n"] == 59
+    assert ir["frames"][-1]["overlays"]  # 末帧仍在 overlay 窗口内
+
+
+def test_overlay_beyond_main_does_not_extend_duration() -> None:
+    # V1 非空：视频长度 = 主轨链长（权威端 overlay 滤镜随主输入时长截断），
+    # 覆盖轨窗口超出主画面的部分不延长输出。**负向对照**：若覆盖轨终点
+    # 无条件参与时长（去掉 `if not visual` 门控），duration 变 120 → 本测试红。
+    plan = _plan([
+        _segment("a", 0, 2 * US, 0, 2 * US),
+        _segment("p", 0, 3 * US, 1 * US, 4 * US, asset_idx=1, track_id="V2"),
+    ])
+    ir = project_preview_ir(plan, _probe(plan))
+    assert ir["canvas"]["duration_frames"] == 60
+    assert ir["frames"][59]["main"]["clip_id"] == "a"  # 主轨段覆盖到末帧
+    assert ir["frames"][59]["overlays"][0]["clip_id"] == "p"  # 窗口内 overlay 正常
+
+
+def test_overlay_only_audio_tail_still_extends() -> None:
+    # 主轨空 + 覆盖轨 + A1 音频更长：三者取大（音频黑场延长语义保持）。
+    plan = _plan([
+        _segment("p", 0, 2 * US, 0, 2 * US, asset_idx=1, track_id="V2"),
+        _segment("s", 0, 5 * US, 0, 5 * US, asset_idx=2, track_id="A1",
+                 asset_kind="audio", input_id="I2"),
+    ])
+    ir = project_preview_ir(plan, _probe(plan))
+    assert ir["canvas"]["duration_frames"] == 150
+    assert ir["frames"][100]["main"] == {"kind": "black"}
+    assert ir["frames"][100]["overlays"] == []  # overlay 窗口已过
+
+
 def test_output_duration_uses_borrow_compression() -> None:
     plan = _plan([
         _segment("a", 0, 5 * US, 0, 5 * US,
