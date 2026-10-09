@@ -12,7 +12,7 @@
 >
 > **落地证据**：Core commit `151742b`（`config.py` 的 `provider_proxy`/`proxy_mode`/`resolve_provider_proxy`；`app.py` 注入；CLI `--provider-proxy`/`--proxy-mode`）+ Desktop（`desktop-settings.ts`、`settings-proxy.electron.spec.ts`）；`DESKTOP_SETTINGS_UI_INDEPENDENT_ACCEPTANCE_2026-09-21.md` DESK-2 / DESK-3 ✅。
 >
-> **验收项状态（对照 §3）**：§3.1（Core 单测 + 三级回退矩阵）✅；**§3.2（本地 forward proxy 验证 provider 经代理可达）❓ 未见明确取证**；§3.3（真实世界复跑）——所依赖的 `run_validation.py` **当前挂起**（见 `AI_2_SKIP_FRAME_IMPLEMENTATION_2026-09-24.md` §4.1）。后两项已登记为 [`docs/STATUS.md`](STATUS.md) §4 承诺 P5。
+> **验收项状态（对照 §3）**：§3.1（Core 单测 + 三级回退矩阵）✅；§3.2（本地 forward proxy 验证 provider 经代理可达）✅ **2026-10-09 核销**——以真实本地 forward proxy（v2rayN/Xray `http://127.0.0.1:10809`，比 mock 专项更强）取证：直连 `/v1/models` 超时 `000` vs 经代理 `200`；`resolve_provider_proxy(Settings())` 注册表解析出同一代理；生产接线（`resolve_provider_proxy` + 注入代理的 client factory，`trust_env=False` 保持）真实 probe/生成/端到端 apply 全绿（[`REAL_PROVIDER_VERIFICATION_2026-10-03.md`](REAL_PROVIDER_VERIFICATION_2026-10-03.md) §修复后真实复测/§真实全链路复测）；「系统代理关闭时直连路径不变」由 §3.1 三级回退矩阵单测覆盖。§3.3（真实世界复跑）——同一真实链路即产品机制的真实世界复跑（同上证据），`run_validation.py` 挂起不再阻塞本项。承诺 P5 已在 [`docs/STATUS.md`](STATUS.md) §4 核销。
 
 > 起草：LiuWei，2026-09-20。来源：AI 真实世界验证发现 2
 > （`AI_VALIDATION_REPORT_2026-09-20.md`——sidecar `trust_env=False` 直连
