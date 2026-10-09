@@ -100,7 +100,7 @@ PiP 自由定位、A1 音频混音、权威预览（代理为**可选加速项**
 | P1 | sha256 对拍锁（非回退素材双路径逐字节一致） | `CV_SKIP_FRAME_PLANNING_GATE` §3.1 | 验收项 | ✅ **2026-09-24 核销**——`test_short_gop_fast_and_full_paths_are_byte_identical`（**含反向对照**，证明相等断言有区分力而非恒真） |
 | P2 | 合成长 GOP fixture 的回退触发测试 | `CV_SKIP_FRAME_PLANNING_GATE` §3.2 | 验收项 | ✅ **2026-09-24 核销**——`test_long_gop_triggers_full_decode_fallback`（三段断言：触发条件成立 → 进入 `cv:video-full` 阶段 → 密度确实恢复） |
 | P3 | 更新 AI-1 规划门"13 种"记载为准入纪律 + 显式清单 | `AI_WHITELIST_EXPANSION_PLANNING_GATE` §3.5 | 验收项 | ✅ **2026-09-24 核销**（W0.1 补做） |
-| P4 | 真实 deepseek 两步会话（"剪短并加一个转场"） | `AI_WHITELIST_EXPANSION_PLANNING_GATE` §3.2 | 验收项 | ❓ **仓内无证据**，按"未取证"登记 |
+| P4 | 真实 deepseek 两步会话（"剪短并加一个转场"） | `AI_WHITELIST_EXPANSION_PLANNING_GATE` §3.2 | 验收项 | ⚠️ **实质已达成、待裁决（2026-10-09）**——真实 provider 跑扩展指令取证：`xiaomi/mimo-v2.6-pro` **1 步**产出 `trim_clip` + `split_clip` + **`add_transition`**（dissolve 0.5s），白名单 `ai=True` 校验过、落真实 Revision（clips 2 / transitions 1）；`provider_invocations` 行数 = 步数不变量成立。**两处偏离待裁决**：① 模型非验收点名的 deepseek（`AIVS_REAL_PROVIDER_*` 已切 `xiaomi/mimo-v2.6-pro`；历史 deepseek 真实调用记录在 `.validation/app.db`，但用单动作指令；复跑 deepseek 需恢复该配置）；② **「两步会话」与实现收束判定不一致**——`agent_session.py` 收束判定为「成功步即会话成功」（失败步带反馈重试后 `break`），故多步只出现在失败→反馈→重试路径（AI-1 单测 C1）；点名指令 1 步即成、2 步非确定性。证据 `AI_WHITELIST_EXPANSION_P4_PROVIDER_RUN_2026-10-09.md` |
 | P5 | 本地 forward proxy 验证 provider 经代理可达 | `PROXY_SUPPORT_PLANNING_GATE` §3.2 | 验收项 | ✅ **2026-10-09 核销**——以**真实本地 forward proxy**（本机 v2rayN/Xray，`http://127.0.0.1:10809`）取代 mock 专项（更强证据）：直连 `/v1/models` 超时 `000` vs 经代理 `200`（代理确在出网路径上、非旁路）；`resolve_provider_proxy(Settings())` system 模式从注册表解析出同一代理；**生产接线**（`resolve_provider_proxy` + 注入代理的 client factory，`trust_env=False` 保持）真实 probe `supported`、真实生成 `succeeded`、proposal→apply 端到端（2026-10-03/05 复测，`REAL_PROVIDER_VERIFICATION_2026-10-03.md` §修复后/§真实全链路）；「系统代理关闭时直连路径不变」由 §3.1 三级回退矩阵单测覆盖（direct 回退分支）。§3.3 真实世界复跑由同一真实链路满足，`run_validation.py` 挂起不再阻塞本项 |
 | P6 | `pyproject` 显式声明 numpy / onnxruntime 版本下限 | `AI_2_CV_SIGNALS_PLANNING_GATE` §4 风险表 | **风险对策** | ✅ **2026-10-01 核销**——`pyproject.toml` 已声明 `numpy>=2.0,<3` 与 `onnxruntime>=1.18,<2`，`uv.lock` 已同步；未改变迁移/协议字段 |
 | P34 | **W4.1 工作单编排 MVP 规划/设计门**：固定步骤链、逐步 Diff/Apply、取消/基线漂移/项目隔离 | `WORKLIST_ORCHESTRATION_PLANNING_GATE_2026-10-01.md` / `WORKLIST_ORCHESTRATION_DESIGN_GATE_2026-10-01.md` | 工作包 | ✅ **2026-10-01 Design Gate 完成**——冻结新增 worklist 三表、v27、状态机、API/IPC、事件和首个 editing_grammar 实现切片；Implementation Gate 待开始 |
@@ -198,6 +198,7 @@ PiP 自由定位、A1 音频混音、权威预览（代理为**可选加速项**
 |---|---|---|
 | `docs/PROJECT_RELEASE_STATUS.md` | Stage 7/8 发布时点记录 | **已过期**（v17 / 旧分支）；现仅作发布历史 |
 | `docs/PROJECT_STATUS_AND_NEXT_STAGE.md` | 2026-08-20 阶段总结快照 | **整篇结论已被推翻**；其中"从 stash 恢复"指引**已失效**（stash 不存在） |
+| `docs/AI_WHITELIST_EXPANSION_P4_PROVIDER_RUN_2026-10-09.md` | 2026-10-09 真实 provider 扩展指令会话取证 | 模型为 `xiaomi/mimo-v2.6-pro`（**非**验收点名的 deepseek）；「两步会话」步数口径待裁决 |
 | `docs/AI_VALIDATION_REPORT_2026-09-20.md` | 2026-09-20 真实验证数据 | **性能门"未过"已于次日修复达标**；全仓最易被误引为现状的一份 |
 | `docs/PHASE2_HANDOFF.md` | 2026-09-06 预览线交接快照 | "下一步"条目已部分完成 |
 

@@ -192,6 +192,11 @@ def main() -> None:
     parser.add_argument("--skip-bc", action="store_true", help="只跑实验 A（无需 API key）")
     parser.add_argument("--skip-c", action="store_true", help="跳过实验 C（patch 探测网关不稳时用）")
     parser.add_argument(
+        "--instruction", default="把视频剪短一点，保留最精彩的部分",
+        help="实验 C 的 agent 指令（缺省=AI_VALIDATION_REPORT 原指令）；"
+             "P4 验收用扩展指令「剪短并加一个转场」跑两步会话。"
+    )
+    parser.add_argument(
         "--asset", action="append", default=None,
         help="自定义素材，格式 label=路径（可重复）；缺省用内置三段真实素材。"
              "实验 B/C 依赖 label 为 dance 的素材。",
@@ -435,7 +440,7 @@ def main() -> None:
                         token=ui,
                         payload={"base_revision_id": revision_id,
                                  "provider_config_id": provider_id,
-                                 "instruction": "把视频剪短一点，保留最精彩的部分"},
+                                 "instruction": args.instruction},
                     )
                     created = _request(
                         "POST", f"{base}/api/v1/projects/{project_id}/agent-sessions", token=ui,

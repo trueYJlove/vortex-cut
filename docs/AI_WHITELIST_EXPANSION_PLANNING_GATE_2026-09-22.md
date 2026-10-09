@@ -17,7 +17,7 @@
 > | # | 验收项 | 状态 |
 > |---|---|---|
 > | §3.1 | 白名单显式冻结 + 导入期断言 + 12 种晋升 op 沙盒用例 + 三处同步一致性测试 | ✅ `test_ai_whitelist_consistency.py`（10 项） |
-> | §3.2 | 真实 deepseek 扩展指令（"剪短并加一个转场"）**跑通两步会话** | ❓ **仓内无证据**——`AI_VALIDATION_REPORT_2026-09-20.md` 实验 C 两模型均为 **1 步**；`AI_VALIDATION_DEEPSEEK_PATCH_RERUN_2026-09-21.md` 是探测/补丁复跑。**已登记为 `docs/STATUS.md` §4 承诺 P4** |
+> | §3.2 | 真实 deepseek 扩展指令（"剪短并加一个转场"）**跑通两步会话** | ⚠️ **实质已达成、步数口径待裁决（2026-10-09）**——真实 provider 跑扩展指令：`xiaomi/mimo-v2.6-pro` **1 步**产出 3 op（`trim_clip` + `split_clip` + **`add_transition`** dissolve 0.5s），白名单 `ai=True` 校验过、落真实 Revision（clips 2 / transitions 1）；`provider_invocations` 行数 = 步数不变量成立。**两处偏离**：① 模型非点名的 deepseek（注册表配置已切，历史 deepseek 调用记录在 `.validation/app.db` 但用单动作指令）；② 「两步会话」与实现收束判定（「成功步即会话成功」，多步仅出现在失败→反馈→重试路径）不一致——点名指令 1 步即成，2 步非确定性。取证 `AI_WHITELIST_EXPANSION_P4_PROVIDER_RUN_2026-10-09.md`。**已登记为 `docs/STATUS.md` §4 承诺 P4** |
 > | §3.3 | Core + Desktop 全量回归；candidate 链路不回归 | ✅ |
 > | §3.4 | PROTOCOL_VERSION 不动；`sent_fields` 如实 | ✅ |
 > | §3.5 | **更新 AI-1 规划门"13 种"记载** | ✅ **2026-09-24 补做**（W0.1）——原文长期未改，是本次审计中"验收项静默丢失"的典型。**已登记为 `docs/STATUS.md` §4 承诺 P3** |
