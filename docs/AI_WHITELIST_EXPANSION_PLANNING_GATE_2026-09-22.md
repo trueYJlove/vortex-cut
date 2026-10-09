@@ -17,7 +17,7 @@
 > | # | 验收项 | 状态 |
 > |---|---|---|
 > | §3.1 | 白名单显式冻结 + 导入期断言 + 12 种晋升 op 沙盒用例 + 三处同步一致性测试 | ✅ `test_ai_whitelist_consistency.py`（10 项） |
-> | §3.2 | 真实 deepseek 扩展指令（"剪短并加一个转场"）**跑通两步会话** | ⚠️ **实质已达成、步数口径待裁决（2026-10-09）**——真实 provider 跑扩展指令：`xiaomi/mimo-v2.6-pro` **1 步**产出 3 op（`trim_clip` + `split_clip` + **`add_transition`** dissolve 0.5s），白名单 `ai=True` 校验过、落真实 Revision（clips 2 / transitions 1）；`provider_invocations` 行数 = 步数不变量成立。**两处偏离**：① 模型非点名的 deepseek（注册表配置已切，历史 deepseek 调用记录在 `.validation/app.db` 但用单动作指令）；② 「两步会话」与实现收束判定（「成功步即会话成功」，多步仅出现在失败→反馈→重试路径）不一致——点名指令 1 步即成，2 步非确定性。取证 `AI_WHITELIST_EXPANSION_P4_PROVIDER_RUN_2026-10-09.md`。**已登记为 `docs/STATUS.md` §4 承诺 P4** |
+> | §3.2 | 真实 provider 扩展指令（"剪短并加一个转场"，含晋升 op）**端到端跑通**（原措辞「真实 deepseek…两步会话」，修订见 §3.2 条文） | ✅ **2026-10-09 核销**——真实 provider（`xiaomi/mimo-v2.6-pro`）跑扩展指令：**1 步**产出 3 op（`trim_clip` + `split_clip` + **`add_transition`** dissolve 0.5s），白名单 `ai=True` 校验过、落真实 Revision（clips 2 / transitions 1）；`provider_invocations` 行数 = 步数不变量成立；`--instruction` 参数已加进验证脚本（缺省不变）。**裁决（LiuWei）**：① 模型偏离**接受**——provider 配置本就设计为可随时切换可用 key/模型，验收不点名具体模型；② 「两步会话」措辞修订为「端到端跑通」（收束判定使多动作合并进一次 patch，2 步非确定性；多步路径由 AI-1 单测 C1 覆盖）。取证 `AI_WHITELIST_EXPANSION_P4_PROVIDER_RUN_2026-10-09.md`。**已登记为 `docs/STATUS.md` §4 承诺 P4** |
 > | §3.3 | Core + Desktop 全量回归；candidate 链路不回归 | ✅ |
 > | §3.4 | PROTOCOL_VERSION 不动；`sent_fields` 如实 | ✅ |
 > | §3.5 | **更新 AI-1 规划门"13 种"记载** | ✅ **2026-09-24 补做**（W0.1）——原文长期未改，是本次审计中"验收项静默丢失"的典型。**已登记为 `docs/STATUS.md` §4 承诺 P3** |
@@ -130,8 +130,12 @@ timeline_planning.py:493），白名单变化自动反映在用户确认页—�
      apply 全链成功；json_schema 端到端同；
    - 3 种存量缺口 op（position_clip/set_speed/set_reverse_playback）经
      json_schema 输出路径可用。
-2. **集成**：真实 deepseek（复用验证脚本）实验 C 扩展指令
-   （"剪短并加一个转场"）跑通两步会话。
+2. **集成**：真实 provider（复用验证脚本）实验 C 扩展指令
+   （"剪短并加一个转场"）端到端跑通。~~跑通两步会话~~ **措辞修订（2026-10-09，LiuWei 裁决）**：
+   ① 不点名具体模型——provider 配置本就设计为可随时切换可用 key/模型，验收对象是
+   「真实 provider」；② 「两步会话」改为「扩展指令（含晋升 op）端到端跑通」——按
+   `agent_session.py` 收束判定（成功步即会话成功）多动作指令会合并进一次 patch，
+   「2 步」非确定性；失败→反馈→重试的多步路径由 AI-1 单测 C1 覆盖。
 3. **回归**：Core + Desktop 全量全绿；既有 candidate 链路（独立 schema）
    不回归。
 4. **契约**：PROTOCOL_VERSION 不动；sent_fields 如实（allowed_operations
