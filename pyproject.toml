@@ -29,6 +29,11 @@ pythonpath = ["services/core/src"]
 testpaths = ["services/core/tests"]
 addopts = "--strict-markers"
 asyncio_mode = "auto"
+# 临时目录保留策略：默认保留最近 3 次全量运行，而本仓库的集成测试会生成真实媒体夹具，
+# 单次全量 10+GB —— 多轮累积会把系统盘写满（2026-10-10 实测 %TEMP% 下 pytest-of-* 达
+# 41.6GB，全量回归因 ENOSPC 中断）。只保留失败运行：够定位问题，又不再吃盘。
+tmp_path_retention_count = 1
+tmp_path_retention_policy = "failed"
 markers = [
   "real_provider: explicit opt-in test that sends selected text to a configured external provider",
 ]
