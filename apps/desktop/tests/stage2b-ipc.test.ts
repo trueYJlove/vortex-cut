@@ -14,7 +14,7 @@ function setup() {
 describe("Stage2B IPC", () => {
   it("只注册冻结白名单并精确转发 prepare/create", async () => {
     const { handlers, fetchWithUi } = setup();
-    expect([...handlers.keys()]).toEqual(["planning-patch:prepare", "planning-patch:test-provider-capability", "planning-patch:create", "planning-patch:generation-get", "planning-patch:proposal-list", "planning-patch:proposal-get", "planning-patch:proposal-apply", "captions-provider:test-capability", "captions-provider:prepare", "captions-provider:create", "captions-provider:get", "captions-provider:proposal-apply", "captions-provider:proposal-get", "captions-provider:proposal-from-generation", "worklist:list", "worklist:prepare", "worklist:create", "worklist:cancel", "worklist:apply", "timeline:revision-diff", "agent-session:prepare", "agent-session:create", "agent-session:list", "agent-session:get", "cv-analysis:get", "beat-analysis:get", "cv-samples:list", "editing-grammar:planners", "editing-grammar:prepare", "editing-grammar:propose", "editing-grammar:proposal-list", "editing-grammar:proposal-get", "editing-grammar:proposal-apply"]);
+    expect([...handlers.keys()]).toEqual(["planning-patch:prepare", "planning-patch:test-provider-capability", "planning-patch:create", "planning-patch:generation-get", "planning-patch:proposal-list", "planning-patch:proposal-get", "planning-patch:proposal-apply", "captions-provider:test-capability", "captions-provider:prepare", "captions-provider:create", "captions-provider:get", "captions-provider:proposal-apply", "captions-provider:proposal-get", "captions-provider:proposal-from-generation", "worklist:list", "worklist:prepare", "worklist:create", "worklist:cancel", "worklist:apply", "timeline:revision-diff", "agent-session:prepare", "agent-session:create", "agent-session:list", "agent-session:get", "cv-analysis:get", "beat-analysis:get", "angle-sync:groups", "angle-sync:create", "angle-sync:get", "angle-sync:sync", "angle-sync:offset", "cv-samples:list", "editing-grammar:planners", "editing-grammar:prepare", "editing-grammar:propose", "editing-grammar:proposal-list", "editing-grammar:proposal-get", "editing-grammar:proposal-apply"]);
     fetchWithUi.mockResolvedValueOnce({ timeline_patch_egress_preview_id: "preview_1", provider: { display_name: "Provider", origin: "https://provider.test", model: "model" }, prompt_template_version: "timeline-patch-v1", output_schema_version: "timeline-patch-output-v1", sent_fields: ["instruction"], payload_sha256: hash, character_count: 10, estimated_tokens: 3, clip_count: 1, caption_count: 0, locked_count: 0, expires_at: now });
     await handlers.get("planning-patch:prepare")?.({}, { project_id: "project_1", base_revision_id: "revision_1", provider_config_id: "provider_1", instruction: "缩短开头" });
     expect(fetchWithUi).toHaveBeenCalledWith("/api/v1/projects/project_1/timeline-patch-generations/prepare", { method: "POST", body: JSON.stringify({ base_revision_id: "revision_1", provider_config_id: "provider_1", instruction: "缩短开头" }) });
@@ -109,6 +109,60 @@ describe("Stage2B IPC", () => {
     await expect(handlers.get("cv-analysis:get")?.({}, { project_id: "project_1", asset_id: "asset_1", generate: true, target_gap_us: 10 })).rejects.toThrow();
     await expect(handlers.get("cv-analysis:get")?.({}, { project_id: "project_1", asset_id: "asset_1", generate: true, budget_per_minute_s: 999 })).rejects.toThrow();
     expect(fetchWithUi).toHaveBeenCalledTimes(1);
+  });
+
+
+  it("angle-sync：建组精确转发（参考机位 + 成员）并校验入参", async () => {
+    const { handlers, fetchWithUi } = setup();
+    fetchWithUi.mockResolvedValueOnce({
+      group_id: "angle_group_1", project_id: "project_1", name: "双机位",
+      reference_asset_id: "asset_a", algorithm_version: "1",
+      angles: [{ asset_id: "asset_a", is_reference: true, status: "missing", reason: null,
+                 offset_us: null, confidence: null, source: null, stale: false, recorded_at: null }],
+      created_at: "2026-10-10T00:00:00Z", updated_at: "2026-10-10T00:00:00Z"
+    });
+    await expect(handlers.get("angle-sync:create")?.({}, {
+      project_id: "project_1", name: " 双机位 ", reference_asset_id: "asset_a",
+      member_asset_ids: ["asset_a", "asset_b"]
+    })).resolves.toMatchObject({ group_id: "angle_group_1", angles: [{ status: "missing" }] });
+    expect(fetchWithUi).toHaveBeenCalledWith("/api/v1/projects/project_1/angle-groups", {
+      method: "POST",
+      body: JSON.stringify({ name: "双机位", reference_asset_id: "asset_a", member_asset_ids: ["asset_a", "asset_b"] })
+    });
+    await expect(handlers.get("angle-sync:create")?.({}, {
+      project_id: "project_1", name: "x", reference_asset_id: "asset_a", member_asset_ids: []
+    })).rejects.toThrow();
+    expect(fetchWithUi).toHaveBeenCalledTimes(1);
+  });
+
+  it("angle-sync：同步允许 job_id=null（幂等短路）；人工偏移只接受整数微秒", async () => {
+    const { handlers, fetchWithUi } = setup();
+    const group = {
+      group_id: "angle_group_1", project_id: "project_1", name: "双机位",
+      reference_asset_id: "asset_a", algorithm_version: "1",
+      angles: [{ asset_id: "asset_a", is_reference: true, status: "ready", reason: null,
+                 offset_us: 0, confidence: 1, source: "auto", stale: false, recorded_at: null }],
+      created_at: "2026-10-10T00:00:00Z", updated_at: "2026-10-10T00:00:00Z"
+    };
+    fetchWithUi.mockResolvedValueOnce({ job_id: null, group });
+    await expect(handlers.get("angle-sync:sync")?.({}, {
+      project_id: "project_1", group_id: "angle_group_1", generate: true
+    })).resolves.toMatchObject({ job_id: null });
+    expect(fetchWithUi).toHaveBeenCalledWith("/api/v1/projects/project_1/angle-groups/angle_group_1/sync", {
+      method: "POST", body: JSON.stringify({ generate: true })
+    });
+
+    fetchWithUi.mockResolvedValueOnce(group);
+    await handlers.get("angle-sync:offset")?.({}, {
+      project_id: "project_1", group_id: "angle_group_1", asset_id: "asset_b", offset_us: -253_000
+    });
+    expect(fetchWithUi).toHaveBeenLastCalledWith(
+      "/api/v1/projects/project_1/angle-groups/angle_group_1/angles/asset_b/offset",
+      { method: "POST", body: JSON.stringify({ offset_us: -253_000 }) }
+    );
+    await expect(handlers.get("angle-sync:offset")?.({}, {
+      project_id: "project_1", group_id: "angle_group_1", asset_id: "asset_b", offset_us: 1.5
+    })).rejects.toThrow();
   });
 
   it("能力测试只接受 Provider ID，并返回严格脱敏状态 DTO", async () => {

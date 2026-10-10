@@ -20,7 +20,9 @@ import {
   parseCaptionsProviderEgressPreview,
   parseCaptionsProviderGeneration,
   parseCaptionsProviderCreateResponse,
-  parseCaptionsProviderProposal
+  parseCaptionsProviderProposal,
+  parseAngleGroup,
+  parseAngleSyncResponse
 } from "@aivideo/contracts";
 
 type RequestInitLike = { method?: string; body?: string };
@@ -236,6 +238,53 @@ export function registerStage2bIpc(deps: Stage2bIpcDependencies): void {
     if (typeof value.generate !== "boolean") throw new Error("Invalid beat analysis input");
     const response = await fetchSafe(`${API_PREFIX}/projects/${id(value.project_id, "project_id")}/assets/${id(value.asset_id, "asset_id")}/beat-analysis`, { method: "POST", body: JSON.stringify({ generate: value.generate }) });
     return parseBeatAnalysisSummary(stage2bRendererSafe(response));
+  });
+  // W2.1 机位同步：机位组 / 触发同步 / 人工偏移（Renderer 只见元数据；DTO 无路径字段）。
+  deps.handle("angle-sync:groups", async (_event, projectId) => {
+    const response = await fetchSafe(`${API_PREFIX}/projects/${id(projectId, "project_id")}/angle-groups`);
+    const value = record(response, ["items"], "angle groups");
+    if (!Array.isArray(value.items)) throw new Error("Invalid angle groups");
+    return { items: value.items.map(parseAngleGroup) };
+  });
+  deps.handle("angle-sync:create", async (_event, input) => {
+    const value = record(input, ["project_id", "name", "reference_asset_id", "member_asset_ids"], "angle group create");
+    if (typeof value.name !== "string" || value.name.trim().length < 1 || value.name.length > 120) throw new Error("Invalid angle group name");
+    if (!Array.isArray(value.member_asset_ids) || value.member_asset_ids.length < 1 || value.member_asset_ids.length > 16) throw new Error("Invalid angle members");
+    const members = value.member_asset_ids.map(assetId => id(assetId, "asset_id"));
+    const response = await fetchSafe(`${API_PREFIX}/projects/${id(value.project_id, "project_id")}/angle-groups`, {
+      method: "POST",
+      body: JSON.stringify({
+        name: value.name.trim(),
+        reference_asset_id: id(value.reference_asset_id, "asset_id"),
+        member_asset_ids: members
+      })
+    });
+    return parseAngleGroup(stage2bRendererSafe(response));
+  });
+  deps.handle("angle-sync:get", async (_event, input) => {
+    const value = record(input, ["project_id", "group_id"], "angle group get");
+    const response = await fetchSafe(
+      `${API_PREFIX}/projects/${id(value.project_id, "project_id")}/angle-groups/${id(value.group_id, "group_id")}`
+    );
+    return parseAngleGroup(stage2bRendererSafe(response));
+  });
+  deps.handle("angle-sync:sync", async (_event, input) => {
+    const value = record(input, ["project_id", "group_id", "generate"], "angle sync");
+    if (typeof value.generate !== "boolean") throw new Error("Invalid angle sync input");
+    const response = await fetchSafe(
+      `${API_PREFIX}/projects/${id(value.project_id, "project_id")}/angle-groups/${id(value.group_id, "group_id")}/sync`,
+      { method: "POST", body: JSON.stringify({ generate: value.generate }) }
+    );
+    return parseAngleSyncResponse(stage2bRendererSafe(response));
+  });
+  deps.handle("angle-sync:offset", async (_event, input) => {
+    const value = record(input, ["project_id", "group_id", "asset_id", "offset_us"], "angle offset");
+    if (typeof value.offset_us !== "number" || !Number.isFinite(value.offset_us) || !Number.isInteger(value.offset_us)) throw new Error("Invalid angle offset");
+    const response = await fetchSafe(
+      `${API_PREFIX}/projects/${id(value.project_id, "project_id")}/angle-groups/${id(value.group_id, "group_id")}/angles/${id(value.asset_id, "asset_id")}/offset`,
+      { method: "POST", body: JSON.stringify({ offset_us: value.offset_us }) }
+    );
+    return parseAngleGroup(stage2bRendererSafe(response));
   });
   // 阶段 C 稳定性包：CV 信号样本（sparkline 可视化数据）。
   deps.handle("cv-samples:list", async (_event, input) => {

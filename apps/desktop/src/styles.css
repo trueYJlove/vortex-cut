@@ -2088,3 +2088,17 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
     border-top: 1px solid var(--dlg-line);
   }
 }
+
+/* W2.1 机位同步面板（只做表格/勾选列表排版；提示盒沿用既有 .readonly-note / .ai-status 收口） */
+.angle-sync-modal .angle-sync-create { display: grid; gap: 8px; }
+.angle-sync-modal .angle-sync-members { display: grid; gap: 4px; max-height: 160px; overflow: auto; }
+.angle-sync-modal .angle-sync-member { display: flex; gap: 6px; align-items: center; }
+.angle-sync-modal .angle-sync-groups { display: flex; gap: 8px; align-items: flex-end; margin-top: 10px; }
+.angle-sync-modal .angle-sync-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+.angle-sync-modal .angle-sync-table th,
+.angle-sync-modal .angle-sync-table td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--ctl-bg); }
+.angle-sync-modal .angle-sync-table input { width: 72px; }
+.angle-sync-modal .angle-status.ready { color: var(--dlg-primary); }
+.angle-sync-modal .angle-status.unavailable,
+.angle-sync-modal .angle-status.failed,
+.angle-sync-modal .angle-status.stale { color: var(--dlg-warn); }

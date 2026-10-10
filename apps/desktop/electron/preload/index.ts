@@ -5,6 +5,10 @@ import type {
   AgentSessionCreateResponse,
   AgentSessionEgressPreview,
   CvAnalysisSummary,
+  AngleGroup,
+  AngleGroupCreateInput,
+  AngleGroupId,
+  AngleSyncResponse,
   BeatAnalysisSummary,
   CvSamplesPage,
   EditingGrammarTool,
@@ -203,6 +207,12 @@ export interface DesktopApi {
   listCvSamples: (input: { project_id: ProjectId; asset_id: string }) => Promise<CvSamplesPage>;
   /** Wave1 L2：BGM 节拍网格摘要（generate=true 登记分析作业；卡点面板消费）。 */
   getBeatAnalysis: (input: { project_id: ProjectId; asset_id: string; generate: boolean }) => Promise<BeatAnalysisSummary>;
+  /** W2.1 机位同步：机位组（只产元数据；同步作业登记与人工偏移）。 */
+  listAngleGroups: (projectId: ProjectId) => Promise<{ items: AngleGroup[] }>;
+  createAngleGroup: (input: AngleGroupCreateInput & { project_id: ProjectId }) => Promise<AngleGroup>;
+  getAngleGroup: (input: { project_id: ProjectId; group_id: AngleGroupId }) => Promise<AngleGroup>;
+  syncAngleGroup: (input: { project_id: ProjectId; group_id: AngleGroupId; generate: boolean }) => Promise<AngleSyncResponse>;
+  setAngleOffset: (input: { project_id: ProjectId; group_id: AngleGroupId; asset_id: string; offset_us: number }) => Promise<AngleGroup>;
   // W1.1 剪辑语法层（零 egress）
   listEditingGrammarPlanners: (projectId: ProjectId) => Promise<{ items: EditingGrammarTool[] }>;
   prepareEditingGrammar: (input: { project_id: ProjectId; base_revision_id: TimelineRevisionId; planner: string; params: Record<string, unknown> }) => Promise<EditingGrammarPrepareResult>;
@@ -395,6 +405,11 @@ const api: DesktopApi = {
   getCvAnalysis: input => ipcRenderer.invoke("cv-analysis:get", input),
   listCvSamples: input => ipcRenderer.invoke("cv-samples:list", input),
   getBeatAnalysis: input => ipcRenderer.invoke("beat-analysis:get", input),
+  listAngleGroups: projectId => ipcRenderer.invoke("angle-sync:groups", projectId),
+  createAngleGroup: input => ipcRenderer.invoke("angle-sync:create", input),
+  getAngleGroup: input => ipcRenderer.invoke("angle-sync:get", input),
+  syncAngleGroup: input => ipcRenderer.invoke("angle-sync:sync", input),
+  setAngleOffset: input => ipcRenderer.invoke("angle-sync:offset", input),
   listEditingGrammarPlanners: projectId => ipcRenderer.invoke("editing-grammar:planners", projectId),
   prepareEditingGrammar: input => ipcRenderer.invoke("editing-grammar:prepare", input),
   listWorklists: projectId => ipcRenderer.invoke("worklist:list", projectId),
