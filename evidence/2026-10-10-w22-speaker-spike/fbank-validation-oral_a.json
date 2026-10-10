@@ -1,0 +1,22 @@
+{
+  "media": "fdf0f0e269126269ed686f208b3063e3.mp4",
+  "samples": 480000,
+  "snip_edges=False": {
+    "frames_mine": 3000,
+    "frames_ref": 3000,
+    "shape_match": true,
+    "max_abs_delta": 0.0017371056126318507,
+    "mean_abs_delta": 5.3005697479591e-06,
+    "p99_abs_delta": 3.2079217122937883e-05,
+    "ref_abs_mean": 6.068659659611692
+  },
+  "snip_edges=True": {
+    "frames_mine": 2998,
+    "frames_ref": 2998,
+    "shape_match": true,
+    "max_abs_delta": 0.0013199800744185808,
+    "mean_abs_delta": 5.253914835557913e-06,
+    "p99_abs_delta": 3.19258818637235e-05,
+    "ref_abs_mean": 6.0674437078986
+  }
+}

@@ -158,10 +158,14 @@ CREATE INDEX idx_angle_syncs_group ON angle_syncs(group_id, asset_id, created_at
 
 ## 6. 门禁状态
 
-- [x] Planning Gate 起草（2026-10-10）
-- [x] **独立评审完成（LiuKeAi，2026-10-10）：判定「需修改后批准」，最小修改集 7 项已全部落回本文件**
-- [ ] Planning Gate 批准（用户）
-- [ ] Design Gate / Implementation / Verification / Release
+> **本门当前推进状态不在本文件声明**——见 `docs/STATUS.md` §4（P80 / P87）。
+> 原勾选框已移除：它长期停在起草时刻（Design Gate / Implementation / Verification 实际均已完成），
+> 与 STATUS 声明的口径不符，属 Rule 5「复述即漂移」的同一失败模式（2026-10-10 盘点发现）。
+
+本节点时间事实：
+
+- Planning Gate 起草：2026-10-10
+- LiuKeAi 独立评审：2026-10-10，判定「需修改后批准」，最小修改集 7 项已全部落回本文件（处置见 §7）
 
 ## 7. 评审处置记录（2026-10-10）
 

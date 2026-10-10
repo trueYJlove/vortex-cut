@@ -1,0 +1,6 @@
+  baseline_correct           max|Δ| = 8.533e-04  ✅ 等价
+  NC1_slaney_mel_scale       max|Δ| = 1.351e+01  （基线的 15,834×）  ✅ 被抓出
+  NC2_no_preemphasis         max|Δ| = 1.375e+01  （基线的 16,111×）  ✅ 被抓出
+  NC3_hamming_window         max|Δ| = 8.759e+00  （基线的 10,266×）  ✅ 被抓出
+  NC4_wrong_snip_edges       max|Δ| = 9.826e+00  （基线的 11,516×）  ✅ 被抓出
+  NC5_no_dc_removal          max|Δ| = 4.682e+00  （基线的 5,488×）  ✅ 被抓出

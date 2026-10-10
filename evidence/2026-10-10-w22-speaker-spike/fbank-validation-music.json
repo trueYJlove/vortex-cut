@@ -1,0 +1,22 @@
+{
+  "media": "慢慢后退.mp3",
+  "samples": 480000,
+  "snip_edges=False": {
+    "frames_mine": 3000,
+    "frames_ref": 3000,
+    "shape_match": true,
+    "max_abs_delta": 0.00032236653589023945,
+    "mean_abs_delta": 5.282976498524249e-06,
+    "p99_abs_delta": 3.278496476928795e-05,
+    "ref_abs_mean": 4.798917045542663
+  },
+  "snip_edges=True": {
+    "frames_mine": 2998,
+    "frames_ref": 2998,
+    "shape_match": true,
+    "max_abs_delta": 0.00030760980063426757,
+    "mean_abs_delta": 5.275120601389768e-06,
+    "p99_abs_delta": 3.266421281206541e-05,
+    "ref_abs_mean": 4.79533919898724
+  }
+}
