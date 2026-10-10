@@ -19,6 +19,7 @@ face_count/face_score 列由阶段二（YuNet ONNX）回填：模型就绪时同
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -377,15 +378,29 @@ def cv_video_args(
 
 
 def cv_audio_args(input_path: str, window: float = 1.0) -> list[str]:
-    """窗口 RMS → ffmpeg ametadata 打印进 stderr（astats 每 1s 窗口）。"""
+    """窗口 RMS → stdout 的 ametadata 逐帧打印（astats 统计按窗口秒重置）。
+
+    为什么必须带 ametadata=print：astats 自身只在收尾打一份 **Overall 汇总**
+    （单声道 2 行、立体声 4 行），解析它得到的是"整段平均"的常数序列 ——
+    audio_energy 全片同值 ⇒ 去停顿永远「无需去停顿」（2026-10-10 真机现场：
+    59.2s 素材 21 个样本 audio_energy 全为 0.0668）。逐窗口值必须由
+    ametadata=print 打印，且它只写 stdout（file=-），故音频遍历改读 stdout。
+    窗口对齐：aresample=48000 → asetnsamples=n=48000 把解码帧重切成精确 1s 帧
+    → astats=reset=1（astats 的 reset 以**帧**计）⇒ 每帧即一个 1s 窗口、
+    每帧打印的值就是该窗口 RMS。（此前用 reset=48000 是把它当样本数——
+    48000 帧≈50 分钟，全程只累积一次，等于整段平均。）
+    """
     return [
         "-hide_banner", "-nostdin", "-y",
         "-i", str(input_path),
         "-vn",
         "-map", "0:a:0",
-        "-af", f"astats=metadata=1:reset={int(window * 48000)}",
+        "-af",
+        f"aresample=48000,asetnsamples=n={int(window * 48000)},"
+        "astats=metadata=1:reset=1,"
+        "ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-",
         "-f", "null",
-        "-progress", "pipe:2", "-nostats",
+        "-nostats",
         "-",
     ]
 
@@ -403,21 +418,44 @@ def _parse_showinfo(stderr: str) -> list[int]:
     return timestamps
 
 
-def _parse_astats_rms(stderr: str) -> list[float]:
-    """astats 的 RMS level dB 行（窗口序）→ 线性能量 [0,1] 近似。"""
-    values: list[float] = []
-    for line in stderr.splitlines():
-        if "RMS level dB:" in line:
+def _db_to_linear(db_text: str) -> float:
+    """dB 文本 → 线性能量 [0,1]；-inf（数字静音）与 ≤ -60dB 一律钳 0。"""
+    try:
+        db = float(db_text)
+    except ValueError:
+        return 0.0
+    if not math.isfinite(db) or db <= -60.0:
+        return 0.0
+    return min(1.0, 10.0 ** (db / 20.0))
+
+
+def _parse_window_rms(stdout: str, *, window_s: float = 1.0) -> list[float]:
+    """ametadata=print 的逐帧 RMS → 逐窗口能量序列（窗口取该窗口末值）。
+
+    输出每帧两行：帧头（含 pts_time）与 lavfi.astats.Overall.RMS_level=<dB>。
+    astats 的统计量自上次 reset 起累积，故窗口内最后一帧携带的正是该窗口 RMS。
+    """
+    buckets: dict[int, float] = {}
+    current: int | None = None
+    for line in stdout.splitlines():
+        if "pts_time:" in line:
+            current = None
             try:
-                db_text = line.split("RMS level dB:", 1)[1].strip().split(" ", 1)[0]
-                db = float(db_text)
+                seconds = float(line.split("pts_time:", 1)[1].strip().split(" ", 1)[0])
             except (ValueError, IndexError):
                 continue
-            if db <= -60.0:  # 静音窗口钳 0
-                values.append(0.0)
-            else:
-                values.append(min(1.0, 10.0 ** (db / 20.0)))
-    return values
+            if math.isfinite(seconds) and seconds >= 0:
+                current = int(seconds / window_s)
+        elif "RMS_level=" in line and current is not None:
+            buckets[current] = _db_to_linear(
+                line.split("RMS_level=", 1)[1].strip().split(" ", 1)[0]
+            )
+    if not buckets:
+        return []
+    series: list[float] = []
+    for index in range(max(buckets) + 1):
+        series.append(buckets.get(index, series[-1] if series else 0.0))
+    return series
 
 
 # ---- 阶段二：YuNet 人脸检测（onnxruntime 懒加载；OpenCV Zoo 官方前后处理） ----
@@ -741,24 +779,30 @@ async def analyze_audio_energy(
     input_path: Path,
     cancel_event: asyncio.Event,
 ) -> list[float]:
-    """音频窗口 RMS 能量序列（无音轨返回空）。"""
+    """音频窗口 RMS 能量序列（无音轨返回空）。
+
+    只缓冲 ametadata 的文本行（约 60B/s，1 小时 ≈ 1.5MB），不缓冲 PCM。
+    """
     process = await asyncio.create_subprocess_exec(
         str(ffmpeg),
         *cv_audio_args(str(input_path)),
         stdin=asyncio.subprocess.DEVNULL,
-        stdout=asyncio.subprocess.DEVNULL,
+        # 逐窗口 RMS 由 ametadata=print:file=- 写 stdout（stderr 只留错误）。
+        stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         creationflags=getattr(asyncio.subprocess, "CREATE_NO_WINDOW", 0),
     )
-    assert process.stderr is not None
+    assert process.stdout is not None and process.stderr is not None
+    stdout_task = asyncio.create_task(process.stdout.read())
     stderr_task = asyncio.create_task(process.stderr.read())
     await process.wait()
+    stdout = (await stdout_task).decode("utf-8", errors="replace")
     stderr = (await stderr_task).decode("utf-8", errors="replace")[-262144:]
     if cancel_event.is_set():
         raise CvAnalysisError("JOB_CANCELLED", "任务已取消")
     if process.returncode != 0:
         raise CvAnalysisError("CV_FFMPEG_FAILED", "CV 音频能量分析失败: " + stderr[-300:])
-    return _parse_astats_rms(stderr)
+    return _parse_window_rms(stdout)
 
 
 # ---- 服务层：登记/执行/查询（waveform 模式） ----

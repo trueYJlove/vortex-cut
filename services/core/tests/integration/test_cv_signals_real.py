@@ -15,7 +15,9 @@ from aivs_core.media.cv_signals import (
     CV_SAMPLE_GAP_FALLBACK_US,
     CvAnalysisError,
     CvSignalService,
+    analyze_audio_energy,
     analyze_video,
+    cv_audio_args,
     cv_video_args,
 )
 
@@ -44,6 +46,48 @@ def _synthetic_two_scene_video(path: Path) -> None:
         str(path),
     ]
     subprocess.run(args, check=True, capture_output=True)
+
+
+def _synthetic_tone_silence_wav(path: Path) -> None:
+    """4s 音频：1s 220Hz 正弦 / 1s 数字静音交替（窗口能量必须逐秒交替）。"""
+    args = [
+        str(FFMPEG), "-hide_banner", "-nostdin", "-y",
+        "-f", "lavfi",
+        "-i", "sine=frequency=220:sample_rate=48000:duration=4",
+        "-af", "volume=volume='if(lt(mod(t,2),1),1,0)':eval=frame",
+        "-ac", "1",
+        "-c:a", "pcm_s16le",
+        str(path),
+    ]
+    subprocess.run(args, check=True, capture_output=True)
+
+
+def test_audio_energy_varies_with_content(tmp_path: Path) -> None:
+    """真实 ffmpeg：1s 音 / 1s 静音交替 ⇒ 窗口能量必须交替（非常数）。
+
+    2026-10-10 真机现场：cv_audio_args 只解析 astats 收尾汇总（单声道 2 行），
+    59.2s 素材全部 21 个样本 audio_energy 恒为 0.0668 ⇒ 去停顿永远「无需去停顿」。
+    本用例是「audio_energy 必须随内容变化」的回归锁。
+    负向对照：去掉 ametadata=print 段（还原旧实现）即红——序列退化为常数。
+    """
+    _require_ffmpeg()
+    media = tmp_path / "tone-silence.wav"
+    _synthetic_tone_silence_wav(media)
+    windows = asyncio.run(analyze_audio_energy(FFMPEG, media, asyncio.Event()))
+    assert len(windows) >= 4, windows
+    loud = windows[0::2][:2]
+    quiet = windows[1::2][:2]
+    # 语义阈值 = 去停顿规划器默认 energy_threshold（0.05）：有声窗口在其上、静音窗口在其下。
+    assert min(loud) > 0.05, windows
+    assert max(quiet) <= 0.05, windows
+    # 区分力：有声窗口至少是静音窗口的 5 倍（旧实现全片常数 ⇒ 此处必红）。
+    assert min(loud) > 5 * max(quiet), windows
+
+
+def test_cv_audio_args_use_single_stdout_metadata_pass() -> None:
+    args = cv_audio_args("C:/media/a.wav", window=1.0)
+    assert "-progress" not in args
+    assert "ametadata=print" in args[args.index("-af") + 1]
 
 
 def _synthetic_long_gop_video(path: Path, *, duration_s: int = 12, gop_s: int = 6) -> None:

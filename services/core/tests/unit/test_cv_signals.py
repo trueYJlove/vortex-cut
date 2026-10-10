@@ -23,7 +23,7 @@ from aivs_core.media.cv_signals import (
     CvSignalService,
     _decode_yunet_detections,
     _nms,
-    _parse_astats_rms,
+    _parse_window_rms,
     _parse_showinfo,
     analysis_budget_s,
     clamp_budget_per_minute_s,
@@ -113,20 +113,44 @@ def test_parse_showinfo_ignores_malformed() -> None:
     assert _parse_showinfo(stderr) == [2_000_000]
 
 
-def test_parse_astats_rms_clamps_and_scales() -> None:
-    stderr = (
-        "[Parsed_astats_0 @ 0x1] Overall\n"
-        "  RMS level dB:  -20.0\n"
-        "  RMS level dB:  -3.0\n"
-        "  RMS level dB:  -inf\n"
-        "  RMS level dB:  -75.0\n"
-    )
-    values = _parse_astats_rms(stderr)
+def _ametadata_dump(rows: list[tuple[float, str]]) -> str:
+    """构造 ametadata=print 的真实输出片段（帧头 + 能量行）。"""
+    lines: list[str] = []
+    for index, (seconds, db) in enumerate(rows):
+        lines.append(f"frame:{index}    pts:{int(seconds * 48000)}       pts_time:{seconds}")
+        lines.append(f"lavfi.astats.Overall.RMS_level={db}")
+    return "\n".join(lines) + "\n"
+
+
+def test_parse_window_rms_scales_clamps_and_groups() -> None:
+    stdout = _ametadata_dump([
+        (0, "-20.0"),
+        (1, "-3.0"),
+        (2, "-inf"),        # 数字静音：astats 打 -inf
+        (3, "-75.0"),       # ≤ -60dB 钳 0
+        (4, "-40.0"),
+        (4.166667, "-26.0"),  # 同窗口末值覆盖（窗口取末值）
+    ])
+    values = _parse_window_rms(stdout)
+    assert len(values) == 5
     assert values[0] == pytest.approx(10 ** (-20 / 20))
     assert values[1] == pytest.approx(10 ** (-3 / 20))
-    assert values[2] == 0.0  # -inf 走 dB 比较被钳 0
-    assert values[3] == 0.0  # ≤ -60dB 钳 0
-    assert len(values) == 4
+    assert values[2] == 0.0
+    assert values[3] == 0.0
+    assert values[4] == pytest.approx(10 ** (-26 / 20))
+
+
+def test_parse_window_rms_fills_gaps_with_previous_value() -> None:
+    """缺帧窗口沿用上一个已知值——不得用 0 伪造静音（会让去停顿误删有声段）。"""
+    stdout = _ametadata_dump([(0, "-20"), (2, "-30")])
+    values = _parse_window_rms(stdout)
+    assert len(values) == 3
+    assert values[1] == values[0]
+
+
+def test_parse_window_rms_empty_without_metadata() -> None:
+    """只有收尾汇总（旧实现依赖的 stderr 形态）时不得产出任何窗口值。"""
+    assert _parse_window_rms("  RMS level dB:  -23.5\n") == []
 
 
 # ----------------------------------------------------------------------
@@ -144,9 +168,20 @@ def test_cv_video_args_whitelist_shape() -> None:
     assert "-an" in args
 
 
-def test_cv_audio_args_window_reset() -> None:
+def test_cv_audio_args_prints_per_window_rms_via_stdout() -> None:
+    """逐窗口 RMS 必须由 ametadata=print 打到 stdout。
+
+    负向对照：去掉 ametadata 段（历史上的实现）⇒ 只剩 astats 收尾汇总，
+    用例红；真机上表现为全片 audio_energy 同值、去停顿永远空操作。
+    """
     args = cv_audio_args("C:/media/a.mp4", window=1.0)
-    assert "astats=metadata=1:reset=48000" in args[args.index("-af") + 1]
+    af = args[args.index("-af") + 1]
+    assert "aresample=48000" in af
+    # 1s 窗口 = asetnsamples 重切帧 + astats reset=1（reset 计的是帧，不是样本）
+    assert "asetnsamples=n=48000" in af
+    assert "astats=metadata=1:reset=1" in af
+    assert "ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-" in af
+    assert args[-1] == "-"
 
 
 # ----------------------------------------------------------------------
