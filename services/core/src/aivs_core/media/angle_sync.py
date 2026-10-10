@@ -233,7 +233,9 @@ class AngleSyncService:
             "project_id": group["project_id"],
             "name": group["name"],
             "reference_asset_id": reference_id,
-            "algorithm_version": ANGLE_SYNC_ALGORITHM_VERSION,
+            # 与 CvAnalysisSummary / BeatAnalysisSummary 同口径：DTO 出 **string**
+            # （P74 的教训——Core 出 int 而 Desktop 契约要 string，真实接线必红）。
+            "algorithm_version": str(ANGLE_SYNC_ALGORITHM_VERSION),
             "angles": angles,
             "created_at": group["created_at"],
             "updated_at": group["updated_at"],

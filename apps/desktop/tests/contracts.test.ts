@@ -4,6 +4,9 @@ import { CONTRACT_VERSION, ERROR_CODES, isApiErrorResponse, isAuthoritativePrevi
   isProviderImageGenerationPreparedPreview,
   isProviderImageGenerationRequest,
   isProviderImageGenerationTask,
+  isAngleGroup,
+  parseAngleGroup,
+  parseAngleSyncResponse,
   isAgentSessionEgressPreview,
   isAgentSessionCreateResponse,
   isAgentSessionUpdatedEvent,
@@ -363,6 +366,44 @@ describe("DESK-6 agent session + CV analysis contracts", () => {
     expect(isCvAnalysisSummary({ ...summary, status: "done" })).toBe(false);
     expect(isCvAnalysisSummary({ ...summary, signals: "scene_cut" })).toBe(false);
     expect(parseCvAnalysisSummary(summary)).toEqual(summary);
+  });
+});
+
+describe("W2.1 机位同步契约", () => {
+  const angle = {
+    asset_id: "asset_1", is_reference: false, status: "ready" as const, reason: null,
+    offset_us: 687000, confidence: 0.93, source: "auto" as const, stale: false,
+    recorded_at: "2026-10-10T00:00:00.000Z"
+  };
+  const group = {
+    group_id: "angle_group_1", project_id: "project_1", name: "双机位",
+    reference_asset_id: "asset_ref", algorithm_version: "1",
+    angles: [{ ...angle, asset_id: "asset_ref", is_reference: true, offset_us: 0 }, angle],
+    created_at: "2026-10-10T00:00:00.000Z", updated_at: "2026-10-10T00:00:00.000Z"
+  };
+
+  it("接受合法机位组，并拒绝版本号类型漂移（P74 教训：契约要 string，Core 出 int 时必须红）", () => {
+    expect(isAngleGroup(group)).toBe(true);
+    expect(isAngleGroup({ ...group, algorithm_version: 1 })).toBe(false);
+    expect(isAngleGroup({ ...group, angles: [] })).toBe(false);
+    expect(isAngleGroup({ ...group, angles: [{ ...angle, status: "done" }] })).toBe(false);
+    expect(parseAngleGroup(group)).toEqual(group);
+  });
+
+  it("缺键即拒绝（JS 侧是 undefined；这是 P74/beat 那一类漂移的运行时锁）", () => {
+    const { confidence, ...incomplete } = angle;
+    void confidence;
+    expect(isAngleGroup({ ...group, angles: [incomplete] })).toBe(false);
+  });
+
+  it("同步响应允许 job_id 为 null（幂等短路）", () => {
+    expect(parseAngleSyncResponse({ job_id: null, group })).toBeTruthy();
+    expect(parseAngleSyncResponse({ job_id: "job_1", group })).toBeTruthy();
+    expect(() => parseAngleSyncResponse({ job_id: null, group: { ...group, group_id: "" } })).toThrow();
+  });
+
+  it("JobKind 白名单包含 angle_sync", () => {
+    expect(isJobKind("angle_sync")).toBe(true);
   });
 });
 

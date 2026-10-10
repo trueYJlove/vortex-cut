@@ -1183,6 +1183,41 @@ export interface BeatAnalysisSummary {
   algorithm_version: string;
   reason: string | null;
 }
+// W2.1 机位同步（angle_groups / angle_syncs）——只产「机位映射元数据」，
+// 不写任何时间线 op（V1 展平属 W2.3，I4/DEC-2）。Renderer 可见面无路径字段。
+export type AngleGroupId = string & { readonly __brand: "angle_group_id" };
+// 派生状态 missing/stale 由 Core 读时计算，不入库（DB CHECK 只含 5 个落库状态）。
+export type AngleSyncStatus =
+  | "queued" | "running" | "ready" | "failed" | "unavailable" | "stale" | "missing";
+export interface AngleSyncAngle {
+  asset_id: AssetId;
+  is_reference: boolean;
+  status: AngleSyncStatus;
+  reason: string | null;
+  offset_us: number | null;
+  confidence: number | null;
+  source: "auto" | "manual" | null;
+  stale: boolean;
+  recorded_at: string | null;
+  pending?: boolean;
+}
+export interface AngleGroup {
+  group_id: AngleGroupId;
+  project_id: ProjectId;
+  name: string;
+  reference_asset_id: AssetId;
+  algorithm_version: string;
+  angles: AngleSyncAngle[];
+  created_at: string;
+  updated_at: string;
+}
+export interface AngleGroupCreateInput {
+  name: string;
+  reference_asset_id: AssetId;
+  member_asset_ids: AssetId[];
+}
+export interface AngleSyncResponse { job_id: JobId | null; group: AngleGroup; }
+
 // 可视化（阶段 C 稳定性包）：最新 ready 分析的信号样本 sparkline 数据。
 export interface CvSample {
   timestamp_us: number;
@@ -1717,6 +1752,40 @@ export function isBeatAnalysisSummary(value: unknown): value is BeatAnalysisSumm
   if (value.downbeat_count !== null && !isFiniteNumber(value.downbeat_count)) return false;
   if (!(typeof value.algorithm_version === "string" && value.algorithm_version.length > 0)) return false;
   return value.reason === null || typeof value.reason === "string";
+}
+
+const ANGLE_SYNC_STATUSES = ["queued", "running", "ready", "failed", "unavailable", "stale", "missing"] as const;
+function isAngleSyncStatus(value: unknown): value is AngleSyncStatus {
+  return typeof value === "string" && (ANGLE_SYNC_STATUSES as readonly string[]).includes(value);
+}
+function isAngleSyncAngle(value: unknown): value is AngleSyncAngle {
+  if (!isRecord(value) || !isId(value.asset_id) || typeof value.is_reference !== "boolean") return false;
+  if (!isAngleSyncStatus(value.status) || typeof value.stale !== "boolean") return false;
+  if (value.reason !== null && typeof value.reason !== "string") return false;
+  if (value.offset_us !== null && !isFiniteNumber(value.offset_us)) return false;
+  if (value.confidence !== null && !isFiniteNumber(value.confidence)) return false;
+  if (value.source !== null && !oneOf(["auto", "manual"], value.source)) return false;
+  if (value.recorded_at !== null && typeof value.recorded_at !== "string") return false;
+  return value.pending === undefined || typeof value.pending === "boolean";
+}
+export function isAngleGroup(value: unknown): value is AngleGroup {
+  if (!isRecord(value) || !isId(value.group_id) || !isId(value.project_id)) return false;
+  if (typeof value.name !== "string" || value.name.length === 0) return false;
+  if (!isId(value.reference_asset_id)) return false;
+  // 与 CvAnalysisSummary / BeatAnalysisSummary 同口径：版本号必须是 string
+  // （P74：Core 出 int 而契约要 string，两端各自绿、真实接线必红）。
+  if (!(typeof value.algorithm_version === "string" && value.algorithm_version.length > 0)) return false;
+  if (typeof value.created_at !== "string" || typeof value.updated_at !== "string") return false;
+  return Array.isArray(value.angles) && value.angles.length > 0 && value.angles.every(isAngleSyncAngle);
+}
+export function parseAngleGroup(value: unknown): AngleGroup {
+  if (!isAngleGroup(value)) throw new ContractValidationError("AngleGroup");
+  return value;
+}
+export function parseAngleSyncResponse(value: unknown): AngleSyncResponse {
+  if (!isRecord(value) || !isAngleGroup(value.group)) throw new ContractValidationError("AngleSyncResponse");
+  if (value.job_id !== null && !isId(value.job_id)) throw new ContractValidationError("AngleSyncResponse");
+  return value as unknown as AngleSyncResponse;
 }
 
 export function parseBeatAnalysisSummary(value: unknown): BeatAnalysisSummary {

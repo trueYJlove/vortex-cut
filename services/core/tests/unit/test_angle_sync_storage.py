@@ -71,6 +71,11 @@ def test_create_group_starts_missing(tmp_path: Path) -> None:
     assert summary["reference_asset_id"] == "a1"
     assert [entry["status"] for entry in summary["angles"]] == ["missing", "missing"]
     assert _entry(summary, "a1")["is_reference"] is True
+    # DTO 契约形状锁（P74 教训：algorithm_version 必须是 string，不是 int）
+    assert isinstance(summary["algorithm_version"], str)
+    per_angle = {"asset_id", "is_reference", "status", "reason", "offset_us",
+                 "confidence", "source", "stale", "recorded_at"}
+    assert per_angle <= set(_entry(summary, "a1"))
 
 
 def test_group_requires_video_assets(tmp_path: Path) -> None:
