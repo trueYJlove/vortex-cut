@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-10T21:39:21",
+  "generated_at": "2026-10-10T21:50:52",
   "window": {
     "window_s": 2.0,
     "hop_s": 1.0,
@@ -26,28 +26,28 @@
       "file": "3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx",
       "size_bytes": 28281138,
       "dim": 192,
-      "load_s": 0.322,
-      "infer_s": 8.238,
-      "fbank_s": 1.037,
-      "peak_rss_mb": 350.5
+      "load_s": 0.297,
+      "infer_s": 8.286,
+      "fbank_s": 0.995,
+      "peak_rss_mb": 352.2
     },
     "resnet34": {
       "file": "wespeaker_zh_cnceleb_resnet34.onnx",
       "size_bytes": 26534363,
       "dim": 256,
-      "load_s": 0.05,
-      "infer_s": 21.033,
-      "fbank_s": 1.315,
-      "peak_rss_mb": 350.5
+      "load_s": 0.101,
+      "infer_s": 21.448,
+      "fbank_s": 1.323,
+      "peak_rss_mb": 352.2
     },
     "light_mfcc": {
       "file": "(no model: numpy MFCC statistics)",
       "size_bytes": 0,
       "dim": 144,
       "load_s": 0.0,
-      "infer_s": 1.031,
+      "infer_s": 1.106,
       "fbank_s": 0.0,
-      "peak_rss_mb": 350.5
+      "peak_rss_mb": 352.2
     }
   },
   "materials": {
@@ -55,7 +55,7 @@
       "single_speaker": true,
       "analyzed_s": 59.21,
       "excerpt_seconds": 180.0,
-      "decode_s": 0.111,
+      "decode_s": 0.104,
       "rms_dbfs": -20.99,
       "peak": 0.8614,
       "campplus": {
@@ -81,7 +81,7 @@
         },
         "count_at_0.50": 1,
         "merge_height": 0.4775,
-        "wall_s": 0.44,
+        "wall_s": 0.454,
         "adjacent_self_sim": {
           "n": 11,
           "mean": 0.7061,
@@ -122,7 +122,7 @@
         },
         "count_at_0.50": 1,
         "merge_height": 0.3288,
-        "wall_s": 0.977,
+        "wall_s": 1.052,
         "adjacent_self_sim": {
           "n": 11,
           "mean": 0.8077,
@@ -163,7 +163,7 @@
         },
         "count_at_0.50": 1,
         "merge_height": 0.0419,
-        "wall_s": 0.091,
+        "wall_s": 0.095,
         "adjacent_self_sim": {
           "n": 11,
           "mean": 0.9845,
@@ -186,7 +186,7 @@
       "single_speaker": false,
       "analyzed_s": 168.0,
       "excerpt_seconds": 180.0,
-      "decode_s": 0.254,
+      "decode_s": 0.246,
       "rms_dbfs": -21.1,
       "peak": 0.4046,
       "campplus": {
@@ -212,7 +212,7 @@
         },
         "count_at_0.50": 1,
         "merge_height": 0.4691,
-        "wall_s": 3.922,
+        "wall_s": 3.925,
         "adjacent_self_sim": {
           "n": 114,
           "mean": 0.7953,
@@ -253,7 +253,7 @@
         },
         "count_at_0.50": 2,
         "merge_height": 0.5532,
-        "wall_s": 9.219,
+        "wall_s": 9.479,
         "adjacent_self_sim": {
           "n": 114,
           "mean": 0.8985,
@@ -294,7 +294,7 @@
         },
         "count_at_0.50": 1,
         "merge_height": 0.0794,
-        "wall_s": 0.558,
+        "wall_s": 0.522,
         "adjacent_self_sim": {
           "n": 114,
           "mean": 0.9867,
@@ -343,7 +343,7 @@
         },
         "count_at_0.50": 4,
         "merge_height": 0.7727,
-        "wall_s": 5.216,
+        "wall_s": 5.198,
         "adjacent_self_sim": {
           "n": 154,
           "mean": 0.8131,
@@ -384,7 +384,7 @@
         },
         "count_at_0.50": 3,
         "merge_height": 0.688,
-        "wall_s": 12.44,
+        "wall_s": 12.555,
         "adjacent_self_sim": {
           "n": 154,
           "mean": 0.8661,
@@ -425,7 +425,7 @@
         },
         "count_at_0.50": 1,
         "merge_height": 0.1186,
-        "wall_s": 0.635,
+        "wall_s": 0.736,
         "adjacent_self_sim": {
           "n": 154,
           "mean": 0.9909,
@@ -448,7 +448,7 @@
       "single_speaker": false,
       "analyzed_s": 173.3,
       "excerpt_seconds": 180.0,
-      "decode_s": 0.254,
+      "decode_s": 0.256,
       "rms_dbfs": -19.61,
       "peak": 0.4913,
       "campplus": {
@@ -474,7 +474,7 @@
         },
         "count_at_0.50": 0,
         "merge_height": null,
-        "wall_s": 0.107,
+        "wall_s": 0.108,
         "adjacent_self_sim": null,
         "all_pairs_self_sim": null
       },
@@ -528,7 +528,7 @@
         },
         "count_at_0.50": 0,
         "merge_height": null,
-        "wall_s": 0.104,
+        "wall_s": 0.11,
         "adjacent_self_sim": null,
         "all_pairs_self_sim": null
       }
@@ -624,7 +624,7 @@
         },
         "count_at_0.50": 1,
         "merge_height": 0.4363,
-        "wall_s": 0.121,
+        "wall_s": 0.113,
         "adjacent_self_sim": {
           "n": 2,
           "mean": 0.7023,
@@ -667,7 +667,7 @@
         },
         "count_at_0.50": 1,
         "merge_height": 0.2368,
-        "wall_s": 0.242,
+        "wall_s": 0.248,
         "adjacent_self_sim": {
           "n": 2,
           "mean": 0.824,
@@ -710,7 +710,7 @@
         },
         "count_at_0.50": 1,
         "merge_height": 0.0124,
-        "wall_s": 0.027,
+        "wall_s": 0.025,
         "adjacent_self_sim": {
           "n": 2,
           "mean": 0.9878,
@@ -755,7 +755,7 @@
         },
         "count_at_0.50": 3,
         "merge_height": 0.8591,
-        "wall_s": 0.436,
+        "wall_s": 0.432,
         "adjacent_self_sim": {
           "n": 12,
           "mean": 0.7418,
@@ -798,7 +798,7 @@
         },
         "count_at_0.50": 1,
         "merge_height": 0.4771,
-        "wall_s": 1.035,
+        "wall_s": 1.02,
         "adjacent_self_sim": {
           "n": 12,
           "mean": 0.8833,
@@ -841,7 +841,7 @@
         },
         "count_at_0.50": 1,
         "merge_height": 0.0591,
-        "wall_s": 0.055,
+        "wall_s": 0.057,
         "adjacent_self_sim": {
           "n": 12,
           "mean": 0.9843,
@@ -886,7 +886,7 @@
         },
         "count_at_0.50": 2,
         "merge_height": 0.7372,
-        "wall_s": 0.352,
+        "wall_s": 0.341,
         "adjacent_self_sim": {
           "n": 9,
           "mean": 0.7274,
@@ -929,7 +929,7 @@
         },
         "count_at_0.50": 2,
         "merge_height": 0.6456,
-        "wall_s": 0.794,
+        "wall_s": 0.806,
         "adjacent_self_sim": {
           "n": 9,
           "mean": 0.8047,
@@ -1017,7 +1017,7 @@
         },
         "count_at_0.50": 1,
         "merge_height": 0.4225,
-        "wall_s": 0.462,
+        "wall_s": 0.466,
         "adjacent_self_sim": {
           "n": 13,
           "mean": 0.7882,
@@ -1060,7 +1060,7 @@
         },
         "count_at_0.50": 1,
         "merge_height": 0.44,
-        "wall_s": 1.099,
+        "wall_s": 1.122,
         "adjacent_self_sim": {
           "n": 13,
           "mean": 0.8302,
@@ -1103,7 +1103,7 @@
         },
         "count_at_0.50": 1,
         "merge_height": 0.0781,
-        "wall_s": 0.054,
+        "wall_s": 0.053,
         "adjacent_self_sim": {
           "n": 13,
           "mean": 0.9752,
@@ -1148,7 +1148,7 @@
         },
         "count_at_0.50": 4,
         "merge_height": 0.8998,
-        "wall_s": 0.402,
+        "wall_s": 0.405,
         "adjacent_self_sim": {
           "n": 11,
           "mean": 0.6433,
@@ -1191,7 +1191,7 @@
         },
         "count_at_0.50": 2,
         "merge_height": 0.6888,
-        "wall_s": 1.033,
+        "wall_s": 0.939,
         "adjacent_self_sim": {
           "n": 11,
           "mean": 0.8446,
@@ -1234,7 +1234,7 @@
         },
         "count_at_0.50": 1,
         "merge_height": 0.0371,
-        "wall_s": 0.088,
+        "wall_s": 0.048,
         "adjacent_self_sim": {
           "n": 11,
           "mean": 0.9848,
@@ -1608,6 +1608,22 @@
   },
   "environment": {
     "python": "3.13.1",
-    "peak_rss_mb_end": 373.0
+    "harness": {
+      "combined": "207fe9c39cfb6d8a0c44a5d539422b675cfcf855f083b8482784f2c088763c1e",
+      "files": {
+        "__init__.py": "62ef7721ce36203c7398f6d0d8f40d23d3e114a9429ed5ee025926ad62104a1f",
+        "audio.py": "038ac06e1a203a32c09f68e992a7d1f24a93324a68a08532e7c13a72c939218d",
+        "cluster.py": "7dec2d895d4ad242fd8cfbc76bb726142de512e8e3cd8f94d9664f0e79a41121",
+        "embedding.py": "2cf5b19c2019fdf8171c4a76b4ef2ad4c0c17c061d7c6449c347b3db9145831e",
+        "fbank.py": "b7088c359741efc793182a557b725a51b3130c699224b999797ddd2ac0c584fa",
+        "light.py": "986b1b2652370c43f61adbf44f888733073241ab9fde1eff12605999174a5d50",
+        "negative_controls.py": "b88806f17327ff1fb83582ef2d174f543f085d0da6de652205b5223379ccca48",
+        "resources.py": "3869c0afc425c9af372ebb310d123bf97c6a6dfa17db10c77e8b83e44af265c7",
+        "run_spike.py": "8c637928fba3cf0c470ac69c4c8453ac681072e13bad491d860b8bb9caa9c671",
+        "vad.py": "2f783a85ae1645f25c23144cad08eaaa80c69c11012bea8cfcdd474e3cbcdfc1",
+        "validate_fbank.py": "daa73c50307242c6464ccf7ea62fd89c65e302df545b4fc19dc489151fc921db"
+      }
+    },
+    "peak_rss_mb_end": 360.6
   }
 }

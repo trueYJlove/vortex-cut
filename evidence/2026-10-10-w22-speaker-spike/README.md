@@ -24,6 +24,10 @@
 | `fbank-negative-controls.json` / `.log` | **负向对照**：5 组已知缺陷全部被抓出（基线的 5,488×–16,111×）⇒ 等价断言有区分力 |
 | `models.sha256` | 两个候选 ONNX 模型的 sha256 |
 | `harness.sha256` | 生成该批证据时 harness 全部源文件的 sha256（评审要求：证据必须钉到可核验的代码快照） |
+
+> **证据自证**：三份 `spike-report*.json` 的 `environment.harness` 字段**自带** harness 全部 `.py` 的
+> sha256 与合并指纹。这是 2026-10-10 终局复核发现"外部台账会与证据实际生成态脱节"（`vad.py` 在证据
+> 生成之后又被改动）后的**结构性修复**：不再依赖外部 sha256 文件的时序，报告自己就能证明由哪版代码生成。
 | `materials-roles.json` | 素材角色映射（**只记角色名，不记用户路径**） |
 
 ## 复现
@@ -70,6 +74,8 @@ PYTHONPATH=tools .tmp/spike-venv/Scripts/python.exe tools/spikes/w22_speaker/run
 ## 口径与边界（**引为现状前必读**）
 
 - 窗口 2.0s / hop 1.0s / 窗内语音占比 ≥ 0.6；聚类 = 余弦距离 + 平均连接（UPGMA）。
+- **三个候选都实测了**：C-折中（CAM++ / ResNet34，ONNX）、**C-轻（无模型，`light.py`，判定不可用）**、
+  C-重（只做成本取证，未安装运行）。C-轻 的判定与边界见门文档 §2.4(e)。
 - **精度轴未取证**：本机无真实多说话人单麦对话素材；`eval_set` 的 `spoken-multi-*` 是纯音调夹具（非语音），
   **不可**用于 diarization 精度。构造夹具 `cross_identity` 是**易化用例**（跨录音设备），非对话真值。
 - `oral_a` 的"1 位说话人"是**推定**（单镜口播 + 单叙述者转录），**未经人工听审**。

@@ -35,6 +35,23 @@ HOP_S = 1.0
 MIN_SPEECH_FRACTION = 0.60
 
 
+def harness_digest() -> dict:
+    """计算本 harness 全部 .py 的自指纹，写进报告。
+
+    动机（2026-10-10 评审发现）：人工维护的 `harness.sha256` 会与"证据实际由哪版代码生成"脱节
+    ——本次就出现过 vad.py 在证据生成之后又被改动（虽仅 docstring）的情况。
+    让**报告自带指纹**，证据即可自证，不依赖外部台账的时序。
+    """
+    import hashlib
+
+    files = sorted(Path(__file__).resolve().parent.glob("*.py"))
+    per_file = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in files}
+    combined = hashlib.sha256(
+        "\n".join(f"{k}:{v}" for k, v in per_file.items()).encode("utf-8")
+    ).hexdigest()
+    return {"combined": combined, "files": per_file}
+
+
 def embed_windows(embedder, samples, wins):
     mat = []
     for w in wins:
@@ -161,7 +178,7 @@ def main() -> int:
         "cross_similarity": {},
         "constructed": {},
         "snip_edges_ab": {},
-        "environment": {"python": sys.version.split()[0]},
+        "environment": {"python": sys.version.split()[0], "harness": harness_digest()},
     }
 
     # 素材规格：允许字符串（路径）或 {"path":…, "single_speaker": bool}
