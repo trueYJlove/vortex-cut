@@ -77,12 +77,27 @@ def _seed_asset(db: Database, *, with_audio: bool = True) -> dict[str, Any]:
 
 
 class _FakeProbe:
-    def __init__(self, has_audio: bool = True) -> None:
-        self.has_audio = has_audio
+    """镜像 FFprobe.probe 语义：require_video=True 且无视频流 → MEDIA_HAS_NO_VIDEO。
 
-    async def probe(self, path: Path) -> dict[str, Any]:
+    记录每次调用的 require_video 实参，让「波形作业按音轨而不是按视频探测」可断言
+    （假探针若只接受 path，就恰好掩盖了纯音频素材必失败的这一类缺陷）。
+    """
+
+    def __init__(self, has_audio: bool = True, has_video: bool = True) -> None:
+        self.has_audio = has_audio
+        self.has_video = has_video
+        self.calls: list[bool] = []
+
+    async def probe(self, path: Path, require_video: bool = True) -> dict[str, Any]:
+        self.calls.append(require_video)
+        if require_video and not self.has_video:
+            raise RuntimeError("MEDIA_HAS_NO_VIDEO")
         return {
             "duration_us": 12_000_000,
+            "video_streams": (
+                [{"index": 0, "codec": "h264", "width": 640, "height": 360,
+                  "fps_num": 30, "fps_den": 1}] if self.has_video else []
+            ),
             "audio_streams": (
                 [{"index": 1, "codec": "aac", "sample_rate": 48000, "channels": 2}]
                 if self.has_audio else []
@@ -113,9 +128,9 @@ def _fake_ffmpeg(tmp_path: Path, samples: list[int]) -> Path:
 
 
 def _service(db: Database, tmp_path: Path, ffmpeg: Path,
-             has_audio: bool = True) -> WaveformService:
+             has_audio: bool = True, has_video: bool = True) -> WaveformService:
     return WaveformService(
-        db, DerivedMediaCache(db, tmp_path / "cache"), ffmpeg, _FakeProbe(has_audio),
+        db, DerivedMediaCache(db, tmp_path / "cache"), ffmpeg, _FakeProbe(has_audio, has_video),
         ffmpeg_build="ffmpeg version 7.0",
     )
 
@@ -321,6 +336,33 @@ class TestWaveformService:
         with pytest.raises(WaveformBuildError) as excinfo:
             await service.run_waveform_job(row, asyncio.Event())
         assert excinfo.value.code == "MEDIA_NO_AUDIO"
+
+    @pytest.mark.asyncio
+    async def test_run_job_audio_only_asset_succeeds(self, tmp_path: Path) -> None:
+        """纯音频素材（BGM mp3）波形作业必须成功：探测不得要求视频流。
+
+        2026-10-10 真机现场：默认 require_video=True ⇒ 音频素材在探测阶段即
+        MEDIA_HAS_NO_VIDEO（路由只按「有音轨」放行）⇒ BGM 波形永远画不出，
+        且 UI 每次重进视口都重登记一个必然失败的作业。
+        负向对照：还原 probe(input_path)（require_video 默认 True）即本用例红。
+        """
+        db = _db(tmp_path)
+        asset = _seed_asset(db)
+        ffmpeg = _fake_ffmpeg(tmp_path, [0] * (BUCKET * 2))
+        service = _service(db, tmp_path, ffmpeg, has_video=False)
+        source = tmp_path / "bgm.mp3"
+        source.write_bytes(b"audio-only-bytes")
+        key = service.waveform_cache_key(asset["fingerprint"])
+        payload = {
+            "asset_id": "asset_b14", "asset_fingerprint": asset["fingerprint"],
+            "cache_key": key, "path": str(source),
+            "size_bytes": source.stat().st_size,
+            "modified_at": source.stat().st_mtime_ns,
+        }
+        row = {"input_json": json_dumps(payload)}
+        result = await service.run_waveform_job(row, asyncio.Event())
+        assert result["status"] == "ready"
+        assert service.ffprobe.calls == [False], "波形探测必须显式 require_video=False"
 
     @pytest.mark.asyncio
     async def test_run_job_media_changed(self, tmp_path: Path) -> None:

@@ -423,7 +423,11 @@ class WaveformService:
             raise WaveformBuildError("MEDIA_CHANGED", "素材文件已变化")
         self.derived_cache.enforce_disk_budget()
         try:
-            probe = await self.ffprobe.probe(input_path)
+            # require_video=False：波形只需要音轨。默认 True 会让纯音频素材（BGM mp3）
+            # 在探测阶段就抛 MEDIA_HAS_NO_VIDEO —— 而路由侧只按「有音轨」放行，
+            # 于是作业必然失败且被 UI 反复重登记（2026-10-10 真机现场：BGM 波形
+            # 永远画不出 + 任务页刷屏失败）。与 P73（渲染/预览探测）同款根因。
+            probe = await self.ffprobe.probe(input_path, require_video=False)
             if not (probe.get("audio_streams") or []):
                 raise WaveformBuildError("MEDIA_NO_AUDIO", "素材无音轨")
             if stage:
