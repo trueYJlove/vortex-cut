@@ -291,6 +291,17 @@ class AngleSyncService:
             stale = (chosen["asset_fingerprint"] != asset["fingerprint"] or
                      reference_fingerprint is None or
                      chosen["reference_fingerprint"] != reference_fingerprint)
+            # 冻结例外（Planning Gate §2.1）：manual 行若 stale，不参与优先——回退到
+            # 最佳 auto 行（按正常排序取第一条）并**重算它的失鲜**，同时标注 manual_stale
+            # （不让用户修正被一次重导出静默作废，也不让陈旧人工值冒充有效结果）。
+            if stale and chosen["source"] == "manual":
+                fallback = next((row for row in usable if row["source"] == "auto"), None)
+                if fallback is not None:
+                    entry["manual_stale"] = True
+                    chosen = fallback
+                    stale = (chosen["asset_fingerprint"] != asset["fingerprint"] or
+                             reference_fingerprint is None or
+                             chosen["reference_fingerprint"] != reference_fingerprint)
             entry.update(
                 status="stale" if stale else chosen["status"],
                 reason=chosen["reason"],
@@ -305,12 +316,29 @@ class AngleSyncService:
             entry["status"] = pending["status"]
         return entry
 
+    def delete_group(self, project_id: str, group_id: str) -> dict[str, Any]:
+        """删除机位组及其同步行（ON DELETE CASCADE）。组是元数据的所有者，删组即丢同步数据。"""
+        group = self._group_row(project_id, group_id)
+        if group is None:
+            raise DomainError("ANGLE_GROUP_NOT_FOUND", "机位组不存在")
+        with self.db.connection() as db:
+            db.execute("DELETE FROM angle_groups WHERE id=?", (group_id,))
+        return {"group_id": group_id, "deleted": True}
+
     # ---- 作业 ----
 
     def create_sync_job(self, project_id: str, group_id: str) -> str | None:
         """登记同步作业；组内全部机位都有指纹相符的可用行时幂等短路（返回 None）。"""
         summary = self.group_summary(project_id, group_id)
-        if all(entry["status"] in ("ready", "unavailable") for entry in summary["angles"]):
+        # 短路条件：每个机位都有「指纹相符的可用行」。注意 "unavailable(asset_not_available)"
+        # / "asset_not_found" **不算**可用——素材被换掉（availability=changed）时必须允许登记
+        # 重算（不然换过素材的组永远重算不了：摘要显示不可用、却又不给作业）。
+        def usable(entry: dict[str, Any]) -> bool:
+            if entry["status"] not in ("ready", "unavailable"):
+                return False
+            return entry["reason"] not in ("asset_not_available", "asset_not_found")
+
+        if all(usable(entry) for entry in summary["angles"]):
             return None
         job_id = new_id()
         now = utc_now()
@@ -437,16 +465,38 @@ class AngleSyncService:
                     asset_fingerprint: str | None) -> None:
         now = utc_now()
         with self.db.connection() as db:
+            # 幂等写入（验证门 ③-1）：同 (组, 机位, 算法版本, 来源, 双侧指纹) 的结论行
+            # 已存在时不再插入——部分唯一索引 idx_angle_syncs_ready 正是以这些列为键，
+            # 重复插入会抛 sqlite3.IntegrityError（非 DomainError，作业会整条崩掉）。
+            # 触发场景：某成员 stale 后重算，而参考机位那一行仍新鲜。
+            if status in ("ready", "unavailable"):
+                existing = db.execute(
+                    "SELECT id FROM angle_syncs WHERE group_id=? AND asset_id=? "
+                    "AND algorithm_version=? AND source=? AND asset_fingerprint=? "
+                    "AND reference_fingerprint=? AND status IN ('ready','unavailable')",
+                    (group_id, asset_id, ANGLE_SYNC_ALGORITHM_VERSION, source,
+                     asset_fingerprint or reference_fingerprint, reference_fingerprint),
+                ).fetchone()
+                if existing is not None:
+                    return
             db.execute(
                 "INSERT INTO angle_syncs(id,group_id,asset_id,is_reference,offset_us,"
                 "confidence,status,reason,source,reference_fingerprint,asset_fingerprint,"
                 "algorithm_version,created_at,updated_at,finished_at) VALUES "
                 "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 ("angle_sync_" + new_id(), group_id, asset_id,
-                 0, offset_us, confidence, status, reason, source,
+                 1 if self._is_reference_asset(group_id, asset_id) else 0,
+                 offset_us, confidence, status, reason, source,
                  reference_fingerprint, asset_fingerprint or reference_fingerprint,
                  ANGLE_SYNC_ALGORITHM_VERSION, now, now, now),
             )
+
+    def _is_reference_asset(self, group_id: str, asset_id: str) -> bool:
+        with self.db.connection() as db:
+            row = db.execute(
+                "SELECT reference_asset_id FROM angle_groups WHERE id=?", (group_id,)
+            ).fetchone()
+        return bool(row) and row["reference_asset_id"] == asset_id
 
     def _resolve(self, asset_id: str) -> str:
         return str(self.resolve_asset_path(asset_id)["path"])

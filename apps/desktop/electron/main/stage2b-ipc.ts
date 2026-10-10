@@ -277,6 +277,16 @@ export function registerStage2bIpc(deps: Stage2bIpcDependencies): void {
     );
     return parseAngleSyncResponse(stage2bRendererSafe(response));
   });
+  deps.handle("angle-sync:delete", async (_event, input) => {
+    const value = record(input, ["project_id", "group_id"], "angle group delete");
+    const response = await fetchSafe(
+      `${API_PREFIX}/projects/${id(value.project_id, "project_id")}/angle-groups/${id(value.group_id, "group_id")}`,
+      { method: "DELETE" }
+    );
+    const result = record(response, ["group_id", "deleted"], "angle group delete result");
+    if (typeof result.deleted !== "boolean") throw new Error("Invalid angle group delete result");
+    return { group_id: id(result.group_id, "group_id"), deleted: result.deleted };
+  });
   deps.handle("angle-sync:offset", async (_event, input) => {
     const value = record(input, ["project_id", "group_id", "asset_id", "offset_us"], "angle offset");
     if (typeof value.offset_us !== "number" || !Number.isFinite(value.offset_us) || !Number.isInteger(value.offset_us)) throw new Error("Invalid angle offset");

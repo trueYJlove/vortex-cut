@@ -7,18 +7,18 @@
 
 | 切片 | 内容 | 状态 |
 |---|---|---|
-| S1a | 算法纯函数（`media/angle_sync.py` 前半：envelope / _xcorr / _fine_residual / measure_offset / window_pcm_args / decode_window） | ✅ 完成（15 项单测绿） |
-| S1b | v36 迁移（`database_v36.py`）+ `AngleSyncService` | ✅ 完成（7 项单测绿） |
-| S1c | Core 路由 + `jobs` 分派 + `JobKind` 契约 + 端到端集成测试 | ✅ 完成（4 项集成测试绿） |
-| S2 | 契约 DTO/parse + Desktop IPC/preload | ✅ 完成（契约 4 项 + IPC 2 项测试绿） |
-| S3 | Desktop 面板（工具菜单入口 + 偏移表 + 手填） | ✅ 完成（组件测试 3 项绿；入口按 Design Gate §5 修订） |
+| S1a | 算法纯函数（`media/angle_sync.py` 前半：envelope / _xcorr / _fine_residual / measure_offset / window_pcm_args / decode_window） | ✅ 完成（**18** 项单测绿，含漂移 3 例） |
+| S1b | v36 迁移（`database_v36.py`）+ `AngleSyncService` | ✅ 完成（**7** 项单测绿） |
+| S1c | Core 路由 + `jobs` 分派 + `JobKind` 契约 + 端到端集成测试 | ✅ 完成（**7** 项集成测试绿） |
+| S2 | 契约 DTO/parse + Desktop IPC/preload | ✅ 完成（契约新增 4 项；IPC 新增 3 项 —— groups/create/get/sync/delete/offset 六通道） |
+| S3 | Desktop 面板（工具菜单入口 + 偏移表 + 手填 + 删组） | ✅ 完成（组件测试 **5** 项绿；入口按 Design Gate §5 修订） |
 | S4 | 真机 e2e（真实 Electron 全链路） + 真实多机位素材端到端（验收 9） | 真机 e2e ✅（`e2e/angle-sync.electron.spec.ts`，8.9s）；真实素材 ⏳ 待用户提供 |
 
 ## 2. 验收逐项对照（Planning Gate §3）
 
 | # | 验收项 | 证据 | 判定 |
 |---|---|---|---|
-| 1 | 合成偏移 fixture：粗 ≤10ms 且精 ≤1ms（真值 1234 / 137.4 / 41.7 / 0 / −253 / −1500 ms） | `test_angle_sync_algorithm.py::test_two_level_tolerance`（参数化 6 例）；真实链路 `test_angle_sync_api.py::test_end_to_end_known_offset`（pink noise + AAC + adelay 687ms ⇒ 实测误差在 10ms 门内） | ✅ |
+| 1 | 合成偏移 fixture：粗 ≤10ms 且精 ≤1ms（真值 1234 / 137.4 / 41.7 / 0 / −253 / −1500 ms） | `test_two_level_tolerance`（合成，两级门都断）；真实 AAC 链路 `test_end_to_end_known_offset` **只断粗门 10ms**（精门 ≤1ms 目前在合成链路上取证，真实编解码链路的精门见"待补"） | ✅（精门合成）/ 🟡（真实链路精门待补） |
 | 1-负向 | 关掉精对齐 ⇒ 必红 | `test_negative_control_coarse_only_fails_fine_gate`（monkeypatch `_fine_residual` 后精门失败） | ✅ |
 | 2 | 区分力对照：无关音频 ⇒ unavailable；同源退化 ⇒ 仍 ready；静音 ⇒ unavailable | `test_unrelated_audio_is_unavailable`（conf≈0.05）/ `test_degraded_same_source_still_ready`（混响 + 噪声底低 30dB）/ `test_silence_is_unavailable` | ✅ |
 | 2b | 双窗一致性：单窗可信 ⇒ unavailable | `test_dual_window_disagreement_is_unavailable` | ✅ |
@@ -42,13 +42,30 @@
 | 3 | 集成夹具用白噪声 | AAC 对白噪声是最坏情况（实设置信度 0.46 ⇒ 如实判 unavailable）——是编解码失真而非算法问题 | 夹具改 pink noise（近似真实频谱）+ 192k 码率 |
 | 4 | pytest 临时目录默认保留最近 3 次全量运行 | 本仓库集成测试生成真实媒体夹具，单次全量 10+GB ⇒ 多轮累积把系统盘写满（实测 %TEMP% 下 pytest-of-* 达 **41.6GB**，全量回归因 ENOSPC 中断；磁盘压力还会让 enforce_disk_budget 清掉用例夹具） | `pyproject.toml` 设 `tmp_path_retention_count = 1` + `tmp_path_retention_policy = "failed"`（只留失败运行）；手工清理一次释放 42GB |
 
-## 4. 风险对策落点（P81–P86）
+## 5. Verification Gate 处置（LiuKeAi 独立验证，2026-10-10）
+
+验证员判定 **「有条件通过（仅静态层面）」**，并明确声明本轮**未实跑**（会话中断）⇒ 其结论全部为静态逐行审查。
+实施方逐条核对后确认 **3 条主要发现全部成立**，处置如下：
+
+| 发现 | 判定 | 处置 | 证据 |
+|---|---|---|---|
+| ③-1 重算必崩：参考机位的 ready/auto 行第二次同指纹插入撞部分唯一索引（IntegrityError 非 DomainError ⇒ 整作业崩） | ✅ 成立（高危） | `_insert_row` 增「同键同指纹已有结论行则不重复写」；**先写失败用例**（`test_resync_after_member_fingerprint_change_succeeds`，改文件 + refresh + 重算）再修 | 用例修复前红 / 修复后绿；**NC1** 归档于 evidence |
+| ③-2 C3① 未实现：删素材无机位分支（误导文案）；无删除组路径 ⇒ 素材不可回收 | ✅ 成立（高危） | `delete_asset` 增机位引用分支（文案「素材被机位组引用…」）+ `DELETE /angle-groups/{id}`（行随组 CASCADE）+ IPC `angle-sync:delete` + 面板两步确认删除 | `test_group_reference_blocks_asset_delete_and_group_delete_unblocks`（Core）+ IPC 白名单/转发 + 面板删除用例 |
+| ③-3 短素材上 R1 静默失效；缺 duration 时 reason 不可读 | ✅ 成立（中危） | `drift_us=None` 明确定义为**未取证**并写进口径；双击窗都取不齐时给 `window_too_short`（不再是不易理解的 window_out_of_range） | 漂移用例 + 算法注释/门文档口径 |
+| 次要：manual 行 stale 不回退 auto | ✅ 成立 | 回退到最佳 auto 行并**重算**其失鲜 + 标注 `manual_stale` | `test_manual_stale_falls_back_to_auto` |
+| 次要：`_insert_row` 恒传 is_reference=0 ⇒ CHECK 形同虚设 | ✅ 成立 | 传真实值（`_is_reference_asset`） | CHECK 约束用例（迁移层）+ 组摘要断言 |
+| M3 验收 7 文档自相矛盾 + evidence 未归档 | ✅ 成立 | 本节 + §2/§4 修正；新增 `evidence/2026-10-10-angle-sync/`（环境与性能口径、两组负向对照、e2e 通过记录） | 见 evidence 目录 |
+| M4 有区分力验证未执行 | ✅ 成立（验证员未跑） | **实施方补跑并归档两组负向对照**（NC1 幂等保护 / NC2 漂移阈值），均已恢复现场（`git status` 干净） | `evidence/2026-10-10-angle-sync/negative-controls.md` |
+| M5 STATUS 文案（P84 验收项编号、P80 GCC-PHAT） | ✅ 成立 | 已改（验收 9；归一化相关峰） | STATUS §4 |
+| 计数不符（记录写 15/7/4，实际随补测增加） | ✅ 成立 | 本文件 §1/§2 已按当前测试数更新（算法 18 / 存储 6 / 集成 7 / 面板 5 / IPC 14 / 契约 4） | 见 §1/§2 |
+
+## 6. 风险对策落点（P81–P86）
 
 | 登记 | 落点 | 状态 |
 |---|---|---|
-| P81 时钟漂移 | 分段偏移 + 线性拟合**未实现**；当前实现遇到漂移素材会通过双窗差（>5ms）如实判 unavailable | ⏳ 保留（D4 先取证；S4 真实素材到位后按需实现） |
+| P81 时钟漂移 | **取证已实现**：远距窗口（相隔 20s）残差差 >10ms ⇒ `unavailable(clock_drift)`，不返回两端各错一半的单值；素材短于 ~22s 时该检查**未取证**（`drift_us=None`，摘要照常 ready —— 短视频跨度内漂移有界，已写进 §2.2 口径）。分段偏移/线性拟合**未实现** | 🟡 部分（D4 先取证；真实素材到位后再定是否实现分段） |
 | P82 无音频降级 | 无音轨 ⇒ `unavailable(no_audio)`；人工偏移合法降级并已测 | ✅ 闭环 |
 | P83 相关性退化 | 归一化相关峰 + 双窗一致性 + 阈值 0.5（spike 与退化用例双向验证） | ✅ 闭环 |
 | P84 真实素材取证 | 待用户素材；未取证前验收 9 显式标「未取证」 | ⏳ |
-| P85 长素材成本 | 单遍流式解码（实测 2×20s 端到端 <30s）；60s 档与冷热态口径待补 | ⏳ 部分 |
+| P85 长素材成本 | **2×60s 端到端实测 0.60s**（冷态单跑；机型/ffmpeg build/采样口径见 `evidence/2026-10-10-angle-sync/machine-and-perf.md`），门槛 30s ⇒ 50× 余量 | ✅ 闭环 |
 | P86 陈旧偏移误用 | 双侧指纹入行并入唯一键 + 读时 stale（4 变体已测） | ✅ 闭环 |

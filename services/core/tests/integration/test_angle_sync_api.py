@@ -203,6 +203,124 @@ def test_stale_after_fingerprint_change(client: TestClient, tmp_path: Path) -> N
     assert _entry(summary, ref_id)["status"] == "ready"   # 参考侧不受影响
 
 
+
+def test_resync_after_member_fingerprint_change_succeeds(client: TestClient, tmp_path: Path) -> None:
+    """M1（验证门 ③-1）：成员指纹变化后重算必须成功。
+
+    此前 run_sync_job 会为参考机位无条件再插一条 ready/auto 行，而部分唯一索引
+    idx_angle_syncs_ready 以 (组,机位,版本,来源,双侧指纹) 为键 ⇒ 第二次同指纹插入抛
+    sqlite3.IntegrityError；它不是 DomainError，run_sync_job 的 except 接不住，
+    整个作业崩（触发场景正是「换素材后点重算」）。
+    """
+    _require_ffmpeg()
+    ref, mem = _make_pair(tmp_path)
+    project_id, ref_id, mem_id = _seed(client, ref, mem)
+    group = _create_group(client, project_id, ref_id, mem_id)
+    state = client.app.state.core
+
+    first = client.post(
+        "/api/v1/projects/" + project_id + "/angle-groups/" + group["group_id"] + "/sync",
+        json={"generate": True}, headers=_ui(client)).json()
+    with state.db.connection() as db:
+        row = db.execute("SELECT * FROM jobs WHERE id=?", (first["job_id"],)).fetchone()
+    asyncio.run(state.angle_sync.run_sync_job(row, asyncio.Event()))
+
+    # 成员侧素材**真的被换掉**：改文件内容 + refresh（指纹更新、availability 回到 available）
+    # ⇒ 旧结果 stale ⇒ 必须允许且能够重算（不撞唯一索引、不崩）
+    changed = tmp_path / "mem-changed.mp4"
+    subprocess.run([
+        str(FFMPEG), "-hide_banner", "-nostdin", "-y", "-f", "lavfi",
+        "-i", "color=c=black:s=320x180:r=30:d=20",
+        "-i", str(tmp_path / "audio.wav"), "-map", "0:v", "-map", "1:a",
+        "-af", "adelay=" + str(OFFSET_MS + 120), "-c:v", "mpeg4", "-c:a", "aac", "-b:a", "192k",
+        str(changed),
+    ], check=True, capture_output=True)
+    mem.write_bytes(changed.read_bytes())
+    first_refresh = client.post("/api/v1/assets/" + mem_id + "/refresh", headers=_ui(client)).json()
+    assert first_refresh["availability"] == "changed"   # 第一次：如实报「素材已变化」并记新基准
+    refreshed = client.post("/api/v1/assets/" + mem_id + "/refresh", headers=_ui(client)).json()
+    assert refreshed["availability"] == "available"     # 再次校验：新内容被接受 ⇒ 可用
+    assert _entry(client.get(
+        "/api/v1/projects/" + project_id + "/angle-groups/" + group["group_id"],
+        headers=_ui(client)).json(), mem_id)["status"] == "stale"
+    second = client.post(
+        "/api/v1/projects/" + project_id + "/angle-groups/" + group["group_id"] + "/sync",
+        json={"generate": True}, headers=_ui(client)).json()
+    assert second["job_id"], "stale 后必须能登记重算作业"
+    with state.db.connection() as db:
+        row = db.execute("SELECT * FROM jobs WHERE id=?", (second["job_id"],)).fetchone()
+    asyncio.run(state.angle_sync.run_sync_job(row, asyncio.Event()))   # 修复前在此崩
+
+    summary = client.get(
+        "/api/v1/projects/" + project_id + "/angle-groups/" + group["group_id"],
+        headers=_ui(client)).json()
+    assert _entry(summary, ref_id)["status"] == "ready"
+    assert _entry(summary, ref_id)["offset_us"] == 0
+    assert _entry(summary, mem_id)["status"] == "ready"     # 用新指纹重算成功
+
+
+def test_manual_stale_falls_back_to_auto(client: TestClient, tmp_path: Path) -> None:
+    """验证门次要项：manual 行 stale 时必须回退到指纹相符的 auto 行并标注 manual_stale
+    （Planning Gate §2.1 冻结例外）。"""
+    _require_ffmpeg()
+    ref, mem = _make_pair(tmp_path, seconds=8)
+    project_id, ref_id, mem_id = _seed(client, ref, mem)
+    group = _create_group(client, project_id, ref_id, mem_id)
+    state = client.app.state.core
+    sync = client.post(
+        "/api/v1/projects/" + project_id + "/angle-groups/" + group["group_id"] + "/sync",
+        json={"generate": True}, headers=_ui(client)).json()
+    with state.db.connection() as db:
+        row = db.execute("SELECT * FROM jobs WHERE id=?", (sync["job_id"],)).fetchone()
+    asyncio.run(state.angle_sync.run_sync_job(row, asyncio.Event()))
+
+    client.post(
+        "/api/v1/projects/" + project_id + "/angle-groups/" + group["group_id"]
+        + "/angles/" + mem_id + "/offset",
+        json={"offset_us": 111_000}, headers=_ui(client))
+
+    with state.db.connection() as db:
+        db.execute("UPDATE assets SET fingerprint='sha256:changed2' WHERE id=?", (mem_id,))
+    entry = _entry(client.get(
+        "/api/v1/projects/" + project_id + "/angle-groups/" + group["group_id"],
+        headers=_ui(client)).json(), mem_id)
+    # manual 行 stale ⇒ 回退 auto（auto 也因指纹变了而 stale ⇒ 整体仍是 stale，
+    # 但不得把 stale 的 manual 值当作有效结果返回）
+    assert entry["status"] == "stale"
+    assert entry["source"] == "auto", entry
+
+
+
+def test_group_reference_blocks_asset_delete_and_group_delete_unblocks(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """C3①（验证门 M2）：机位组引用素材 ⇒ 删除给出**机位文案**；删组后即可删除素材，
+    且同步行随组 CASCADE 清理。"""
+    _require_ffmpeg()
+    ref, mem = _make_pair(tmp_path, seconds=5)
+    project_id, ref_id, mem_id = _seed(client, ref, mem)
+    group = _create_group(client, project_id, ref_id, mem_id)
+
+    blocked = client.delete("/api/v1/assets/" + mem_id, headers=_ui(client))
+    assert blocked.status_code >= 400
+    assert "机位组" in blocked.text, blocked.text
+
+    deleted = client.delete(
+        "/api/v1/projects/" + project_id + "/angle-groups/" + group["group_id"],
+        headers=_ui(client))
+    assert deleted.status_code == 200 and deleted.json()["deleted"] is True
+
+    state = client.app.state.core
+    with state.db.connection() as db:
+        remaining = db.execute(
+            "SELECT COUNT(*) FROM angle_syncs WHERE group_id=?", (group["group_id"],)
+        ).fetchone()[0]
+    assert remaining == 0, "同步行必须随组 CASCADE 清理"
+
+    after = client.delete("/api/v1/assets/" + mem_id, headers=_ui(client))
+    assert after.status_code == 200, after.text
+
+
 def test_non_video_asset_rejected(client: TestClient, tmp_path: Path) -> None:
     _require_ffmpeg()
     ref, mem = _make_pair(tmp_path, seconds=5)

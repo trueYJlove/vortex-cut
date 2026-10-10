@@ -369,6 +369,26 @@ class ProjectAssetService:
         其余从表（asset_locations 等）由 ON DELETE CASCADE 处理。
         """
         self._require_asset_row(asset_id)
+        # W2.1（Planning Gate §2.1 C3①）：机位组引用走显式拒绝——否则会撞 FK 后落到
+        # 「素材被镜头需求或生成记录引用」这种与机位无关的误导文案。机位组一旦引用素材
+        # 就锁住它，用户需先删除机位组（DELETE /angle-groups/{id}，元数据随组 CASCADE）。
+        with self.db.connection() as db:
+            angle_used = db.execute(
+                "SELECT COUNT(*) AS n FROM angle_groups WHERE reference_asset_id=?",
+                (asset_id,),
+            ).fetchone()["n"]
+            angle_member = db.execute(
+                "SELECT COUNT(*) AS n FROM angle_syncs WHERE asset_id=?", (asset_id,)
+            ).fetchone()["n"]
+            group_member = db.execute(
+                "SELECT COUNT(*) AS n FROM angle_groups WHERE members_json LIKE ?",
+                ("%" + asset_id + "%",),
+            ).fetchone()["n"]
+        if angle_used or angle_member or group_member:
+            raise DomainError(
+                "ASSET_IN_USE",
+                "素材被机位组引用，请先删除相关机位组后再删除素材",
+            )
         with self.db.connection() as db:
             db.execute("BEGIN")
             try:

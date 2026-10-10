@@ -58,6 +58,8 @@ export function AngleSyncPanel({
   /** 在飞作业（job_id + 所属组）：**以 jobs 行终态为轮询依据**——Core 只落「完成行」，
    *  不落过渡行，所以按行状态判断 pending 会永远看不到进度（2026-10-10 e2e 现场）。 */
   const [inFlight, setInFlight] = useState<{ jobId: string; groupId: string } | null>(null);
+  /** 两步确认删除机位组（组是元数据所有者，删组即丢同步数据；删后素材才可移除）。 */
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const selected = groups.find(group => group.group_id === selectedId) ?? null;
 
@@ -158,6 +160,21 @@ export function AngleSyncPanel({
     } finally { setBusy(false); }
   };
 
+  const removeGroup = async () => {
+    if (!selected) return;
+    if (!confirmDelete) { setConfirmDelete(true); return; }
+    setBusy(true); setError("");
+    try {
+      await window.desktop.deleteAngleGroup({ project_id: projectId, group_id: selected.group_id });
+      setConfirmDelete(false);
+      setManual({});
+      await load();
+      onNotify("已删除机位组（其同步数据一并移除）。");
+    } catch (caught) {
+      setError(safeErrorMessage(caught, "删除机位组失败。"));
+    } finally { setBusy(false); }
+  };
+
   const saveOffset = async (angle: AngleSyncAngle) => {
     const raw = manual[String(angle.asset_id)];
     const ms = Number(raw);
@@ -218,11 +235,15 @@ export function AngleSyncPanel({
 
     {groups.length > 0 && <div className="angle-sync-groups">
       <label>机位组
-        <select value={selectedId} onChange={event => setSelectedId(event.target.value)}>
+        <select value={selectedId} onChange={event => { setSelectedId(event.target.value); setConfirmDelete(false); }}>
           {groups.map(group => <option key={group.group_id} value={group.group_id}>{group.name}</option>)}
         </select>
       </label>
       <button type="button" disabled={busy || !selected} onClick={() => void sync()}>重新同步</button>
+      <button type="button" className={confirmDelete ? "danger" : ""} disabled={busy || !selected}
+        onClick={() => void removeGroup()}>
+        {confirmDelete ? "确认删除机位组" : "删除机位组"}
+      </button>
     </div>}
 
     {selected && <table className="angle-sync-table">

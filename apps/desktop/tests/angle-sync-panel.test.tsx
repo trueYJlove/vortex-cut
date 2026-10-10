@@ -43,6 +43,7 @@ function setup(overrides: Record<string, unknown> = {}) {
     createAngleGroup: vi.fn().mockResolvedValue(group()),
     syncAngleGroup: vi.fn().mockResolvedValue({ job_id: "job_1", group: group() }),
     getJob: vi.fn().mockResolvedValue({ status: "succeeded", error: null }),
+    deleteAngleGroup: vi.fn().mockResolvedValue({ group_id: "angle_group_1", deleted: true }),
     getAngleGroup: vi.fn().mockResolvedValue(group()),
     setAngleOffset: vi.fn().mockResolvedValue(group({
       angles: [angle({ asset_id: "asset_a", is_reference: true, offset_us: 0 }),
@@ -122,6 +123,21 @@ describe("W2.1 机位同步面板", () => {
       const table = within(dialog).queryByRole("table");
       expect(table?.textContent ?? "(无表格)").toContain("+687.0 ms");
     }, { timeout: 5_000 });
+  });
+
+
+  it("删除机位组：两步确认后调用 deleteAngleGroup 并刷新列表", async () => {
+    const { desktop } = setup({
+      listAngleGroups: vi.fn().mockResolvedValue({ items: [group()] })
+    });
+    const dialog = screen.getByRole("dialog", { name: "机位同步" });
+    fireEvent.click(await within(dialog).findByRole("button", { name: "删除机位组" }));
+    expect(desktop.deleteAngleGroup).not.toHaveBeenCalled();     // 第一次点击只进入确认态
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认删除机位组" }));
+    await waitFor(() => expect(desktop.deleteAngleGroup).toHaveBeenCalledWith({
+      project_id: "project_1", group_id: "angle_group_1"
+    }));
+    await waitFor(() => expect(desktop.listAngleGroups).toHaveBeenCalledTimes(2));
   });
 
   it("人工偏移：毫秒换算成微秒提交，非数字给错误提示", async () => {

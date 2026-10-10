@@ -208,6 +208,8 @@ def test_schema_checks_reject_invalid_rows(tmp_path: Path) -> None:
         raw({"id": "bad_reference", "status": "ready", "is_reference": 1, "offset_us": 999})
 
 
+
+
 def test_sync_job_idempotent_and_retryable(tmp_path: Path) -> None:
     """验收 3：全 ready ⇒ 幂等短路；stale/缺失 ⇒ 建作业；failed 行不得永久锁死。"""
     db, service = _service(tmp_path)

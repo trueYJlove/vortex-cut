@@ -2576,6 +2576,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except DomainError as exc:
             raise _domain(exc) from exc
 
+    @app.delete("/api/v1/projects/{project_id}/angle-groups/{group_id}")
+    async def delete_angle_group(
+        project_id: str, group_id: str, _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """删除机位组（同步行随组 CASCADE）；删除后其素材即可从项目移除。"""
+        try:
+            return state.angle_sync.delete_group(project_id, group_id)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
     @app.post("/api/v1/projects/{project_id}/angle-groups/{group_id}/sync")
     async def sync_angle_group(
         project_id: str, group_id: str, request: AngleSyncRequest,

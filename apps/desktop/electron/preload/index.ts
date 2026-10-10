@@ -213,6 +213,7 @@ export interface DesktopApi {
   getAngleGroup: (input: { project_id: ProjectId; group_id: AngleGroupId }) => Promise<AngleGroup>;
   syncAngleGroup: (input: { project_id: ProjectId; group_id: AngleGroupId; generate: boolean }) => Promise<AngleSyncResponse>;
   setAngleOffset: (input: { project_id: ProjectId; group_id: AngleGroupId; asset_id: string; offset_us: number }) => Promise<AngleGroup>;
+  deleteAngleGroup: (input: { project_id: ProjectId; group_id: AngleGroupId }) => Promise<{ group_id: AngleGroupId; deleted: boolean }>;
   // W1.1 剪辑语法层（零 egress）
   listEditingGrammarPlanners: (projectId: ProjectId) => Promise<{ items: EditingGrammarTool[] }>;
   prepareEditingGrammar: (input: { project_id: ProjectId; base_revision_id: TimelineRevisionId; planner: string; params: Record<string, unknown> }) => Promise<EditingGrammarPrepareResult>;
@@ -410,6 +411,7 @@ const api: DesktopApi = {
   getAngleGroup: input => ipcRenderer.invoke("angle-sync:get", input),
   syncAngleGroup: input => ipcRenderer.invoke("angle-sync:sync", input),
   setAngleOffset: input => ipcRenderer.invoke("angle-sync:offset", input),
+  deleteAngleGroup: input => ipcRenderer.invoke("angle-sync:delete", input),
   listEditingGrammarPlanners: projectId => ipcRenderer.invoke("editing-grammar:planners", projectId),
   prepareEditingGrammar: input => ipcRenderer.invoke("editing-grammar:prepare", input),
   listWorklists: projectId => ipcRenderer.invoke("worklist:list", projectId),
