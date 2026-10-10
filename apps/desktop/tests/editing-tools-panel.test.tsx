@@ -80,7 +80,7 @@ describe("Wave1 L2：卡点节拍网格触发", () => {
       beatSummary({ status: "queued", job_id: "job_beat" as never }),
       beatSummary({ status: "ready", beat_grid_id: "bg_1", bpm: 110.4, beat_count: 60, downbeat_count: 15 }),
     ];
-    const getBeatAnalysis = vi.fn(async (input: { generate: boolean }) => {
+    const getBeatAnalysis = vi.fn(async (input: { project_id: string; asset_id: string; generate: boolean }) => {
       expect(input.project_id).toBe("project_1");
       expect(input.asset_id).toBe("asset_bgm");
       // generate=true 的登记调用返回 queued；轮询调用按序列推进到 ready。
