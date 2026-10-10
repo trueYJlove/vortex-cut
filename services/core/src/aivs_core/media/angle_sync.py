@@ -117,7 +117,11 @@ def measure_offset(ref: np.ndarray, mem: np.ndarray) -> dict[str, Any]:
     res1, conf1 = _fine_residual(ref, mem, coarse_us, 0.0)
     res2, conf2 = _fine_residual(ref, mem, coarse_us, FINE_WINDOW_OFFSET_S)
     if res1 != res1 or res2 != res2:
-        return {"status": "unavailable", "reason": "window_out_of_range",
+        # 素材短到连「1s 间隔的双窗」都取不齐 ⇒ 给可读 reason（复核 M-b）：
+        # window_too_short 说明时长不够，window_out_of_range 才是真正的越界异常。
+        short = len(ref) < int((FINE_WINDOW_S + FINE_WINDOW_OFFSET_S) * SAMPLE_RATE)
+        return {"status": "unavailable",
+                "reason": "window_too_short" if short else "window_out_of_range",
                 "offset_us": None, "confidence": 0.0, "coarse_us": int(coarse_us),
                 "dual_delta_us": None, "drift_us": None}
     dual_delta_us = abs(res1 - res2)
@@ -127,6 +131,10 @@ def measure_offset(ref: np.ndarray, mem: np.ndarray) -> dict[str, Any]:
                 "confidence": confidence, "coarse_us": int(coarse_us), "dual_delta_us": dual_delta_us,
                 "drift_us": None}
     # R1：漂移取证——远距窗口再测一次；偏差超阈即如实拒答（不返回看似可用的单值）
+    # drift_us 语义（复核 M-b）：数值 = 该跨度上的实测漂移；**None = 未取证**
+    # （素材短于 DRIFT_WINDOW_SPACING_S + 2s，远窗取不齐）。调用方据此知道 R1 检查没跑，
+    # 而不是把 None 当成「无漂移」；短视频跨度内的漂移有界（≤ 跨度×时钟差），
+    # 故此时照常 ready，属**已知限制**而非静默承诺。
     drift_us: float | None = None
     res_far, conf_far = _fine_residual(ref, mem, coarse_us, DRIFT_WINDOW_SPACING_S)
     if res_far == res_far and conf_far >= CONFIDENCE_THRESHOLD:
@@ -340,6 +348,15 @@ class AngleSyncService:
 
         if all(usable(entry) for entry in summary["angles"]):
             return None
+        # 在飞短路（复核 M-a）：Core 只在完成时落行，摘要看不到 queued/running，因此
+        # 「连点重算」会入队两个作业、两个 worker 并发跑同一组（正是 TOCTOU 的生产同源路径）。
+        with self.db.connection() as db:
+            active = db.execute(
+                "SELECT id FROM jobs WHERE kind='angle_sync' AND status IN ('queued','running') "
+                "AND input_json LIKE ?", ("%" + group_id + "%",),
+            ).fetchone()
+        if active is not None:
+            return None
         job_id = new_id()
         now = utc_now()
         payload = {"group_id": group_id, "project_id": project_id}
@@ -465,25 +482,17 @@ class AngleSyncService:
                     asset_fingerprint: str | None) -> None:
         now = utc_now()
         with self.db.connection() as db:
-            # 幂等写入（验证门 ③-1）：同 (组, 机位, 算法版本, 来源, 双侧指纹) 的结论行
-            # 已存在时不再插入——部分唯一索引 idx_angle_syncs_ready 正是以这些列为键，
-            # 重复插入会抛 sqlite3.IntegrityError（非 DomainError，作业会整条崩掉）。
-            # 触发场景：某成员 stale 后重算，而参考机位那一行仍新鲜。
-            if status in ("ready", "unavailable"):
-                existing = db.execute(
-                    "SELECT id FROM angle_syncs WHERE group_id=? AND asset_id=? "
-                    "AND algorithm_version=? AND source=? AND asset_fingerprint=? "
-                    "AND reference_fingerprint=? AND status IN ('ready','unavailable')",
-                    (group_id, asset_id, ANGLE_SYNC_ALGORITHM_VERSION, source,
-                     asset_fingerprint or reference_fingerprint, reference_fingerprint),
-                ).fetchone()
-                if existing is not None:
-                    return
+            # 幂等写入（验证门 ③-1 / 复核 M-a）：同 (组, 机位, 算法版本, 来源, 双侧指纹)
+            # 的结论行已存在时不再插入。**用 ON CONFLICT DO NOTHING 而非 SELECT→INSERT 预检**：
+            # 后者是 TOCTOU——并发执行同一作业（内置 worker + 手工 runner / 连点重算两个作业）
+            # 会双双通过预检，随后撞部分唯一索引抛 sqlite3.IntegrityError（非 DomainError，
+            # 作业整条崩；复核实测 1/8 概率复现）。ON CONFLICT 只吞唯一性冲突，
+            # CHECK / NOT NULL 违规照旧抛出（不会掩盖真实缺陷）。
             db.execute(
                 "INSERT INTO angle_syncs(id,group_id,asset_id,is_reference,offset_us,"
                 "confidence,status,reason,source,reference_fingerprint,asset_fingerprint,"
                 "algorithm_version,created_at,updated_at,finished_at) VALUES "
-                "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
                 ("angle_sync_" + new_id(), group_id, asset_id,
                  1 if self._is_reference_asset(group_id, asset_id) else 0,
                  offset_us, confidence, status, reason, source,

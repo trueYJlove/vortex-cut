@@ -192,6 +192,16 @@ def test_no_drift_reports_near_zero_drift() -> None:
     assert abs(result["drift_us"]) <= angle_sync.DRIFT_TOLERANCE_US
 
 
+
+def test_short_material_reports_window_too_short() -> None:
+    """复核 M-b：素材短到双窗取不齐 ⇒ reason 必须是可读的 window_too_short
+    （不是令人费解的 window_out_of_range）。"""
+    ref = _reference(2.0)
+    result = measure_offset(ref, _shift(ref, 100.0))
+    assert result["status"] == "unavailable"
+    assert result["reason"] == "window_too_short", result
+
+
 def test_determinism() -> None:
     """验收 5：同输入两次运行结果逐位相同。"""
     ref = _reference()

@@ -14,5 +14,6 @@ seconds: 60 | elapsed_s: 0.6
    ready 687000 0.894
 ```
 
-- 口径：冷态单跑（无 derived_cache 命中依赖），素材为 pink noise + mpeg4 视频、成员侧 adelay 687ms。
+- 口径：**单次冷态运行**（无 derived_cache 命中依赖）、**并发度 1**（未做重复测量，也未测并发/多组并行——复核 M-d 指出，属已知取证边界），
+  素材为 pink noise + mpeg4 视频、成员侧 adelay 687ms。
 - 实测 0.60s ⇒ 门槛余量 50×；真机 Electron e2e 整轮 6.5–8.9s（含 App + sidecar 启动）。

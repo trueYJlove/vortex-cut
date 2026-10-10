@@ -258,7 +258,10 @@ export function AngleSyncPanel({
             </td>
             <td>{fmtMs(angle.offset_us)}</td>
             <td>{angle.confidence === null ? "—" : (angle.confidence * 100).toFixed(0) + "%"}</td>
-            <td>{angle.source === "manual" ? "人工" : angle.source === "auto" ? "自动" : "—"}</td>
+            <td>
+              {angle.source === "manual" ? "人工" : angle.source === "auto" ? "自动" : "—"}
+              {angle.manual_stale && <small> · 人工值已失鲜，显示自动值</small>}
+            </td>
             <td>
               <input aria-label={"手填偏移 " + nameOf(String(angle.asset_id))}
                 value={manual[String(angle.asset_id)] ?? ""}

@@ -100,6 +100,9 @@ CREATE INDEX idx_angle_syncs_group ON angle_syncs(group_id, asset_id, created_at
 - 置信度 = 精对齐窗的**归一化相关峰**（不用峰值/次峰比：spike 实测无区分力）；`confidence >= 0.5` 且双窗差 ≤ 5ms 才 `ready`；
 - **精度口径（两级，评审 B1）**：粗对齐断言 |误差| ≤ 10ms（证明粗阶段工作）；**精对齐断言 |误差| ≤ 1ms**（48kHz 下 48 样本）——
   这样「没做精对齐」的实现必然红；
+- **短素材口径（R1，复核 M-b 回写）**：远距漂移检查需要 `DRIFT_WINDOW_SPACING_S + FINE_WINDOW_S`（≈22s）以上可用时长；
+  不足时 `drift_us = None` 表示**未取证**（不是"无漂移"），此时照常 ready——短视频跨度内的漂移有界
+  （≤ 跨度 × 时钟差），属已声明的已知限制。双窗都取不齐（素材过短）⇒ `unavailable(window_too_short)`。
 - **漂移取证（R1，2026-10-10 实施）**：在相隔 `DRIFT_WINDOW_SPACING_S = 20s` 的两处各测一次残差，
   差 > `DRIFT_TOLERANCE_US = 10ms` ⇒ `unavailable(clock_drift)`（**不返回看似可用的单值**）。
   分段偏移/线性拟合按 D4 待真实素材取证后再实现（当前策略：宁可拒答，不给两端各错一半的单值）。

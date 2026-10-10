@@ -1200,6 +1200,8 @@ export interface AngleSyncAngle {
   stale: boolean;
   recorded_at: string | null;
   pending?: boolean;
+  /** Core 侧标注：人工偏移行已失鲜，摘要已回退到自动值（面板据此提示用户）。 */
+  manual_stale?: boolean;
 }
 export interface AngleGroup {
   group_id: AngleGroupId;
@@ -1766,6 +1768,7 @@ function isAngleSyncAngle(value: unknown): value is AngleSyncAngle {
   if (value.confidence !== null && !isFiniteNumber(value.confidence)) return false;
   if (value.source !== null && !oneOf(["auto", "manual"], value.source)) return false;
   if (value.recorded_at !== null && typeof value.recorded_at !== "string") return false;
+  if (value.manual_stale !== undefined && typeof value.manual_stale !== "boolean") return false;
   return value.pending === undefined || typeof value.pending === "boolean";
 }
 export function isAngleGroup(value: unknown): value is AngleGroup {

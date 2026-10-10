@@ -78,6 +78,24 @@ def test_create_group_starts_missing(tmp_path: Path) -> None:
     assert per_angle <= set(_entry(summary, "a1"))
 
 
+def test_reference_row_is_persisted_with_is_reference_flag(tmp_path: Path) -> None:
+    """复核 M-c：is_reference 必须**落库**为 1（此前恒传 0，使
+    CHECK(is_reference=0 OR offset_us=0) 形同虚设）。"""
+    import asyncio
+
+    db, service = _service(tmp_path)
+    group_id = service.create_group("p1", "双机位", "a1", ["a1", "a2"])["group_id"]
+    # 直接写一条参考行（绕开解码：run_sync_job 的参考行分支需要真实解码，这里验的是落库语义）
+    service._insert_row(group_id, "a1", 0, 1.0, "ready", None, "auto",
+                        "sha256:aaa", "sha256:aaa")
+    service._insert_row(group_id, "a2", 1234, 0.9, "ready", None, "auto",
+                        "sha256:aaa", "sha256:bbb")
+    with db.connection() as con:
+        flags = {row["asset_id"]: row["is_reference"] for row in con.execute(
+            "SELECT asset_id, is_reference FROM angle_syncs WHERE group_id=?", (group_id,)).fetchall()}
+    assert flags == {"a1": 1, "a2": 0}, flags
+
+
 def test_group_requires_video_assets(tmp_path: Path) -> None:
     db, service = _service(tmp_path)
     with db.connection() as con:
@@ -211,10 +229,14 @@ def test_schema_checks_reject_invalid_rows(tmp_path: Path) -> None:
 
 
 def test_sync_job_idempotent_and_retryable(tmp_path: Path) -> None:
-    """验收 3：全 ready ⇒ 幂等短路；stale/缺失 ⇒ 建作业；failed 行不得永久锁死。"""
+    """验收 3：全 ready ⇒ 幂等短路；stale/缺失 ⇒ 建作业；failed 行不得永久锁死；
+    且在飞作业期间「连点重算」不得入队第二个作业（复核 M-a 的生产同源路径）。"""
     db, service = _service(tmp_path)
     group_id = service.create_group("p1", "双机位", "a1", ["a1", "a2"])["group_id"]
-    assert service.create_sync_job("p1", group_id) is not None   # missing ⇒ 建作业
+    first_job = service.create_sync_job("p1", group_id)           # missing ⇒ 建作业
+    assert first_job is not None
+    # 在飞短路：作业仍 queued/running 期间再点一次 ⇒ 不重复入队（否则两个 worker 并发跑同组）
+    assert service.create_sync_job("p1", group_id) is None
 
     now = utc_now()
     for row in (
@@ -226,10 +248,16 @@ def test_sync_job_idempotent_and_retryable(tmp_path: Path) -> None:
          "reference_fingerprint": "sha256:aaa", "asset_fingerprint": "sha256:bbb", "created_at": now},
     ):
         _insert_row(db, row)
+    # 让首个作业收尾（模拟 worker 完成），否则在飞短路会一直生效
+    with db.connection() as con:
+        con.execute("UPDATE jobs SET status='succeeded' WHERE id=?", (first_job,))
     assert service.create_sync_job("p1", group_id) is None        # 全可用 ⇒ 短路
 
     _set_fingerprint(db, "a2", "sha256:bbb9")
-    assert service.create_sync_job("p1", group_id) is not None    # 指纹变化 ⇒ 建新作业
+    retry = service.create_sync_job("p1", group_id)               # 指纹变化 ⇒ 建新作业
+    assert retry is not None
+    with db.connection() as con:
+        con.execute("UPDATE jobs SET status='succeeded' WHERE id=?", (retry,))
 
     _set_fingerprint(db, "a2", "sha256:bbb")
     _set_fingerprint(db, "a1", "sha256:aaaX")

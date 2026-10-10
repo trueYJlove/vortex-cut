@@ -113,6 +113,23 @@ def _entry(summary: dict, asset_id: str) -> dict:
     return next(entry for entry in summary["angles"] if entry["asset_id"] == asset_id)
 
 
+def _await_job(client: TestClient, job_id: str, timeout_s: float = 120.0) -> str:
+    """等**内置 worker** 把作业跑到终态。
+
+    不再手工 asyncio.run(run_sync_job(...))：那会与 worker 并发执行同一作业，两条路径同时
+    通过幂等预检后撞部分唯一索引（复核 M-a 实测 1/8 随机红的来源）。顺带也更贴近生产路径。
+    """
+    state = client.app.state.core
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        with state.db.connection() as db:
+            row = db.execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
+        if row is not None and row["status"] in ("succeeded", "failed", "cancelled", "interrupted"):
+            return str(row["status"])
+        time.sleep(1.0)
+    raise AssertionError("作业未在超时内到达终态：" + job_id)
+
+
 def test_requires_session_and_cross_project(tmp_path: Path) -> None:
     _require_ffmpeg()
     with TestClient(create_app(Settings(
@@ -139,7 +156,7 @@ def test_end_to_end_known_offset(client: TestClient, tmp_path: Path) -> None:
     with state.db.connection() as db:
         row = db.execute("SELECT * FROM jobs WHERE id=?", (sync["job_id"],)).fetchone()
     assert row["kind"] == "angle_sync" and row["resource_class"] == "light"
-    asyncio.run(state.angle_sync.run_sync_job(row, asyncio.Event()))
+    assert _await_job(client, sync["job_id"]) == "succeeded"
     elapsed = time.monotonic() - started
 
     summary = client.get(
@@ -190,9 +207,7 @@ def test_stale_after_fingerprint_change(client: TestClient, tmp_path: Path) -> N
     sync = client.post(
         "/api/v1/projects/" + project_id + "/angle-groups/" + group["group_id"] + "/sync",
         json={"generate": True}, headers=_ui(client)).json()
-    with state.db.connection() as db:
-        row = db.execute("SELECT * FROM jobs WHERE id=?", (sync["job_id"],)).fetchone()
-    asyncio.run(state.angle_sync.run_sync_job(row, asyncio.Event()))
+    assert _await_job(client, sync["job_id"]) == "succeeded"
 
     with state.db.connection() as db:
         db.execute("UPDATE assets SET fingerprint='sha256:changed' WHERE id=?", (mem_id,))
@@ -221,9 +236,7 @@ def test_resync_after_member_fingerprint_change_succeeds(client: TestClient, tmp
     first = client.post(
         "/api/v1/projects/" + project_id + "/angle-groups/" + group["group_id"] + "/sync",
         json={"generate": True}, headers=_ui(client)).json()
-    with state.db.connection() as db:
-        row = db.execute("SELECT * FROM jobs WHERE id=?", (first["job_id"],)).fetchone()
-    asyncio.run(state.angle_sync.run_sync_job(row, asyncio.Event()))
+    assert _await_job(client, first["job_id"]) == "succeeded"
 
     # 成员侧素材**真的被换掉**：改文件内容 + refresh（指纹更新、availability 回到 available）
     # ⇒ 旧结果 stale ⇒ 必须允许且能够重算（不撞唯一索引、不崩）
@@ -247,9 +260,7 @@ def test_resync_after_member_fingerprint_change_succeeds(client: TestClient, tmp
         "/api/v1/projects/" + project_id + "/angle-groups/" + group["group_id"] + "/sync",
         json={"generate": True}, headers=_ui(client)).json()
     assert second["job_id"], "stale 后必须能登记重算作业"
-    with state.db.connection() as db:
-        row = db.execute("SELECT * FROM jobs WHERE id=?", (second["job_id"],)).fetchone()
-    asyncio.run(state.angle_sync.run_sync_job(row, asyncio.Event()))   # 修复前在此崩
+    assert _await_job(client, second["job_id"]) == "succeeded"   # 修复前在此崩
 
     summary = client.get(
         "/api/v1/projects/" + project_id + "/angle-groups/" + group["group_id"],
@@ -270,9 +281,7 @@ def test_manual_stale_falls_back_to_auto(client: TestClient, tmp_path: Path) -> 
     sync = client.post(
         "/api/v1/projects/" + project_id + "/angle-groups/" + group["group_id"] + "/sync",
         json={"generate": True}, headers=_ui(client)).json()
-    with state.db.connection() as db:
-        row = db.execute("SELECT * FROM jobs WHERE id=?", (sync["job_id"],)).fetchone()
-    asyncio.run(state.angle_sync.run_sync_job(row, asyncio.Event()))
+    assert _await_job(client, sync["job_id"]) == "succeeded"
 
     client.post(
         "/api/v1/projects/" + project_id + "/angle-groups/" + group["group_id"]

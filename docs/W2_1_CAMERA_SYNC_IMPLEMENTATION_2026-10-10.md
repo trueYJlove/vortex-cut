@@ -57,7 +57,19 @@
 | M3 验收 7 文档自相矛盾 + evidence 未归档 | ✅ 成立 | 本节 + §2/§4 修正；新增 `evidence/2026-10-10-angle-sync/`（环境与性能口径、两组负向对照、e2e 通过记录） | 见 evidence 目录 |
 | M4 有区分力验证未执行 | ✅ 成立（验证员未跑） | **实施方补跑并归档两组负向对照**（NC1 幂等保护 / NC2 漂移阈值），均已恢复现场（`git status` 干净） | `evidence/2026-10-10-angle-sync/negative-controls.md` |
 | M5 STATUS 文案（P84 验收项编号、P80 GCC-PHAT） | ✅ 成立 | 已改（验收 9；归一化相关峰） | STATUS §4 |
-| 计数不符（记录写 15/7/4，实际随补测增加） | ✅ 成立 | 本文件 §1/§2 已按当前测试数更新（算法 18 / 存储 6 / 集成 7 / 面板 5 / IPC 14 / 契约 4） | 见 §1/§2 |
+| 计数不符（记录写 15/7/4，实际随补测增加） | ✅ 成立 | 本文件 §1/§2 按当前测试数更新：**算法 19 / 存储 8 / 集成 7 / 面板 5 / IPC 14 / 契约 4** | `--collect-only` + 各文件实跑 |
+
+
+### 5.1 复核轮（2026-10-10 第二轮，只读复核 47cecc4）
+
+复核确认 ③-1/③-2 已修，但指出三处**未修/不实**，全部成立并已处置：
+
+| 复核项 | 判定 | 处置 |
+|---|---|---|
+| **M-a** 幂等写入是 SELECT→INSERT 的 TOCTOU：并发执行同一作业仍撞唯一索引（复核实测 **1/8** 随机红；生产同源路径＝「连点重算」入队两个作业） | ✅ 成立 | ① `_insert_row` 改 **`ON CONFLICT DO NOTHING`**（原子；只吞唯一性冲突，CHECK/NOT NULL 照旧抛）；② `create_sync_job` 增**在飞作业短路**（同组 queued/running 存在 ⇒ 不入队第二个）；③ 集成用例不再手工 `asyncio.run(run_sync_job)`，改 `_await_job` **等内置 worker** 到终态（顺带更贴生产路径） |
+| **M-b** ③-3 实际未实现（记录与代码不符）；Planning Gate §2.2 / STATUS P81 未回写短素材口径 | ✅ 成立（上一轮 checkout 事故把该改动冲掉后漏贴） | 已实现 `window_too_short`（含新用例 `test_short_material_reports_window_too_short`）+ `drift_us=None` 语义注释；**冻结口径回写 Planning Gate §2.2 与 STATUS §4 P81** |
+| **M-c** `is_reference` 无落库回归锁；`manual_stale` 只到 API、面板无法展示 | ✅ 成立 | 新增 `test_reference_row_is_persisted_with_is_reference_flag`；`manual_stale` 进契约 DTO 校验 + 面板列显示「人工值已失鲜，显示自动值」 |
+| **M-d** STATUS P87 计数陈旧、记录 §5 写「存储 6」、性能 evidence 缺重复/并发口径 | ✅ 成立 | 计数已更新（见上）；evidence 补「单次冷态、并发度 1、未做重复测量」口径 |
 
 ## 6. 风险对策落点（P81–P86）
 
