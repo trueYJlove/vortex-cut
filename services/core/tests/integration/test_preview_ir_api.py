@@ -284,3 +284,123 @@ def test_preview_ir_v2_manifest_ratio_and_auth(tmp_path: Path, monkeypatch) -> N
         anonymous_window = client.get("/api/v1/projects/proj-ir/preview-ir-v2/window",
                                       params={"start_frame": 0, "frame_count": 10})
         assert anonymous_window.status_code == 401
+
+
+# ---- A1 音频素材上轨后 manifest 500（2026-10-10 用户现场）回归锁 ----
+
+
+def _fixture_audio(root: Path) -> Path:
+    audio = root / "bgm.mp3"
+    result = subprocess.run(
+        [str(FFMPEG), "-hide_banner", "-y", "-f", "lavfi", "-i",
+         "sine=frequency=440:duration=5", "-c:a", "libmp3lame", str(audio)],
+        capture_output=True, timeout=120,
+    )
+    assert result.returncode == 0, result.stderr[-800:]
+    return audio
+
+
+def _seed_with_audio(client: TestClient, video: Path, audio: Path) -> None:
+    """V1 视频 3s + A1 音频 5s（音频长于视频 = 用户现场形状）。"""
+    import json as _json
+
+    database = client.app.state.core.db
+    document = {
+        "schema_version": 1,
+        "project_id": "proj-ir",
+        "canvas": {"width": 1080, "height": 1920, "fps_num": 30, "fps_den": 1,
+                   "background_color": "#000000"},
+        "tracks": [
+            {"id": "V1", "kind": "video", "locked": False, "hidden": False,
+             "muted": False, "solo": False},
+            {"id": "A1", "kind": "audio", "locked": False, "hidden": False,
+             "muted": False, "solo": False},
+        ],
+        "clips": [
+            {"clip_id": "clipV", "track_id": "V1", "order_index": 0,
+             "asset_id": "video-api", "asset_kind": "video",
+             "source_start_us": 0, "source_end_us": 3_000_000,
+             "timeline_start_us": 0, "timeline_end_us": 3_000_000,
+             "layout": "fit", "audio": {"enabled": False, "gain_db": 0.0},
+             "speed_milli": 1000},
+            {"clip_id": "clipA", "track_id": "A1", "order_index": 0,
+             "asset_id": "audio-api", "asset_kind": "audio",
+             "source_start_us": 0, "source_end_us": 5_000_000,
+             "timeline_start_us": 0, "timeline_end_us": 5_000_000,
+             "layout": "fit", "audio": {"enabled": True, "gain_db": 0.0},
+             "speed_milli": 1000},
+        ],
+        "captions": [],
+        "provenance": {"created_by": "user", "source_transcript_ids": []},
+    }
+    with database.connection() as db:
+        db.execute(
+            "INSERT INTO projects(id,name,status,canvas_json,current_timeline_revision_id,"
+            "root_dir,root_dir_name,created_at,updated_at,last_opened_at) "
+            "VALUES ('proj-ir','IR 音频项目','active','{}','rev-ir-audio',?,?,'now','now','now')",
+            (str(tmp_root(video)), str(tmp_root(video))),
+        )
+        stat = video.stat()
+        db.execute(
+            "INSERT INTO assets(id,project_id,kind,storage_mode,display_name,fingerprint,"
+            "size_bytes,modified_at,availability,media_info_json,created_at,updated_at) "
+            "VALUES ('video-api','proj-ir','video','external','video.mp4',?,?,?,'available',?,'now','now')",
+            (sha256_file(video), stat.st_size, modified_iso(video),
+             '{"duration_us": 3000000, "audio_streams": [], "video_streams": ['
+             '{"width": 1920, "height": 1080, "sample_aspect_ratio": "1:1"}]}'),
+        )
+        db.execute(
+            "INSERT INTO asset_locations(asset_id,uri,last_verified_at) VALUES ('video-api',?,?)",
+            (video.as_uri(), modified_iso(video)),
+        )
+        astat = audio.stat()
+        db.execute(
+            "INSERT INTO assets(id,project_id,kind,storage_mode,display_name,fingerprint,"
+            "size_bytes,modified_at,availability,media_info_json,created_at,updated_at) "
+            "VALUES ('audio-api','proj-ir','audio','external','bgm.mp3',?,?,?,'available',?,'now','now')",
+            (sha256_file(audio), astat.st_size, modified_iso(audio),
+             '{"duration_us": 5000000, "video_streams": [], "audio_streams": ['
+             '{"index": 0, "codec": "mp3", "sample_rate": 44100, "channels": 1}]}'),
+        )
+        db.execute(
+            "INSERT INTO asset_locations(asset_id,uri,last_verified_at) VALUES ('audio-api',?,?)",
+            (audio.as_uri(), modified_iso(audio)),
+        )
+        db.execute(
+            "INSERT INTO timeline_revisions(id,project_id,parent_revision_id,schema_version,"
+            "document_json,document_sha256,summary,created_by,created_at) "
+            "VALUES ('rev-ir-audio','proj-ir',NULL,1,?,'sha','ir audio test','user','now')",
+            (_json.dumps(document, ensure_ascii=False),),
+        )
+
+
+def test_preview_ir_v2_manifest_with_audio_clip(tmp_path: Path, monkeypatch) -> None:
+    """A1 音频素材上轨后 manifest 不得 500（2026-10-10 用户现场）。
+
+    根因：RenderCoordinator._probe 对 plan 全部 inputs 用默认 require_video=True
+    探测——纯音频素材命中 MEDIA_HAS_NO_VIDEO，经路由未捕获路径落 500
+    INTERNAL_ERROR。修复后音频素材按 kind 探测（与导入侧同语义）；输出时长
+    按音频尾巴延长（5s > 3s 视频）——顺带钉住 A1 时长语义。
+    """
+    client, _settings = _app(tmp_path, monkeypatch)
+    with client:
+        ui = _ui(client)
+        video = _fixture_video(tmp_path)
+        audio = _fixture_audio(tmp_path)
+        _seed_with_audio(client, video, audio)
+
+        response = client.get(
+            "/api/v1/projects/proj-ir/preview-ir-v2/manifest?timeline_revision_id=rev-ir-audio",
+            headers=ui,
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        # 音频 5s 长于视频 3s → 输出时长 = 音频尾巴（A1 黑场延长语义）。
+        assert body["duration_us"] == 5_000_000
+        assert body["total_frames"] == 150
+        # v1 共享同一投影路径（_project_plan），同步钉住。
+        v1 = client.get(
+            "/api/v1/projects/proj-ir/preview-ir?timeline_revision_id=rev-ir-audio",
+            headers=ui,
+        )
+        assert v1.status_code == 200, v1.text

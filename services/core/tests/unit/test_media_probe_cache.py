@@ -282,12 +282,14 @@ async def test_render_coordinator_segment_probes_deduped_by_input(tmp_path, monk
             real_calls.append(str(path))
             return {"video_streams": [{"codec": "h264"}]}
 
-    async def probe_fn(path, fingerprint=None):
+    async def probe_fn(path, fingerprint=None, *, require_video=True):
+        # require_video 与 _probe 透传一致（P73：音频素材必须能以
+        # require_video=False 探测，签名缺参即 TypeError）。
         key = probe_cache_key(path, fingerprint, "ffprobe version 8.0-test")
         assert key is not None
 
         async def run_probe():
-            return await StubFFprobe().probe(path, require_video=True)
+            return await StubFFprobe().probe(path, require_video=require_video)
 
         return await cache.get_or_probe(key, run_probe)
 

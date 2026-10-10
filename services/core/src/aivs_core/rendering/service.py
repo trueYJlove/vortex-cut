@@ -296,15 +296,20 @@ class RenderCoordinator:
     async def _compile_off_loop(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         return await _compile_off_loop(self.compiler, *args, **kwargs)
 
-    async def _probe(self, path: Path, fingerprint: str | None = None) -> dict[str, Any]:
+    async def _probe(self, path: Path, fingerprint: str | None = None, *,
+                     require_video: bool = True) -> dict[str, Any]:
         """A07：优先走注入的缓存探测通道。
 
         fingerprint 语义见 app.cached_probe（素材内容指纹，非 asset_id）；
         调用方用 projects.asset_cache_identity 取真实指纹。
+        require_video 与导入侧同语义（projects：kind == "video" 才要求视频流）
+        ——A1 音频素材/图片探测不得因「无视频流」失败。此前两处调用（IR 投影
+        与渲染段探测）都用默认 require_video=True，音频素材一上轨即
+        MEDIA_HAS_NO_VIDEO → manifest 500 INTERNAL_ERROR（2026-10-10 现场）。
         """
         if self.probe_fn is not None:
-            return await self.probe_fn(path, fingerprint)
-        return await self.ffprobe.probe(path)
+            return await self.probe_fn(path, fingerprint, require_video=require_video)
+        return await self.ffprobe.probe(path, require_video=require_video)
 
     def _asset_probe_fingerprint(self, asset_id: str) -> str | None:
         """素材的 probe 缓存键指纹（数据库 fingerprint；素材不可用返回 None
@@ -370,7 +375,8 @@ class RenderCoordinator:
                 # A07：经会话缓存的 probe（键含 fingerprint+stat+build）；
                 # 同素材跨 revision 的 IR 重建复用同一次探测结果。
                 self.preview_probe_cache[key] = await self._probe(
-                    path, self._asset_probe_fingerprint(item["asset_id"])
+                    path, self._asset_probe_fingerprint(item["asset_id"]),
+                    require_video=item["asset_kind"] == "video",
                 )
             probe_by_asset[item["asset_id"]] = self.preview_probe_cache[key]
         _bundle, presets, _font = self.caption_resources.load()
@@ -546,7 +552,8 @@ class RenderCoordinator:
             if input_id in probe_by_input:
                 continue
             probe_by_input[input_id] = await self._probe(
-                input_paths[input_id], self._asset_probe_fingerprint(item["asset_id"])
+                input_paths[input_id], self._asset_probe_fingerprint(item["asset_id"]),
+                require_video=item["asset_kind"] == "video",
             )
         segment_paths = [input_paths[item["input_id"]] for item in plan["segments"]]
         segment_probes = [probe_by_input[item["input_id"]] for item in plan["segments"]]
