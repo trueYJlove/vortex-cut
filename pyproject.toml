@@ -29,11 +29,12 @@ pythonpath = ["services/core/src"]
 testpaths = ["services/core/tests"]
 addopts = "--strict-markers"
 asyncio_mode = "auto"
-# 临时目录保留策略：默认保留最近 3 次全量运行，而本仓库的集成测试会生成真实媒体夹具，
-# 单次全量 10+GB —— 多轮累积会把系统盘写满（2026-10-10 实测 %TEMP% 下 pytest-of-* 达
-# 41.6GB，全量回归因 ENOSPC 中断）。只保留失败运行：够定位问题，又不再吃盘。
-tmp_path_retention_count = 1
-tmp_path_retention_policy = "failed"
+# 临时目录：默认保留最近 3 次全量运行，而本仓库集成测试会生成真实媒体夹具（单次全量 10+GB），
+# 多轮累积会写满系统盘（2026-10-10 实测 %TEMP% 下 pytest-of-* 达 41.6GB，全量回归因 ENOSPC 中断）。
+# **不要**用 tmp_path_retention_policy="failed" + count=1 来省盘：那会让"已通过"用例的临时目录
+# 被过早回收，导致全量随机红（同机对照：原策略 unit 范围 989 passed / 0 failed；收紧后同一范围
+# 出现 test_decode_capability_probe / test_bootstrap 等失败，且各自单跑必绿）。
+# 需要的只是**偶发手工清理**：rm -rf "$TEMP"/pytest-of-*  （或 CI 每轮 --basetemp 后自行删除）。
 markers = [
   "real_provider: explicit opt-in test that sends selected text to a configured external provider",
 ]

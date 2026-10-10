@@ -40,7 +40,7 @@
 | 1 | `_fine_residual` 只平移成员侧（参考窗未随第二窗偏移） | 负偏移下第二窗错位（实测残差 −1s）⇒ 双窗判定失真 | 两侧同步平移；负基准改由参考窗吸收（`offset - base`） |
 | 2 | 集成用例误用 SNR 口径（写 −30dB 变成噪声淹没信号） | 用例本身不可信 | 改为 SNR=+30dB（噪声底低 30dB），与评审口径一致 |
 | 3 | 集成夹具用白噪声 | AAC 对白噪声是最坏情况（实设置信度 0.46 ⇒ 如实判 unavailable）——是编解码失真而非算法问题 | 夹具改 pink noise（近似真实频谱）+ 192k 码率 |
-| 4 | pytest 临时目录默认保留最近 3 次全量运行 | 本仓库集成测试生成真实媒体夹具，单次全量 10+GB ⇒ 多轮累积把系统盘写满（实测 %TEMP% 下 pytest-of-* 达 **41.6GB**，全量回归因 ENOSPC 中断；磁盘压力还会让 enforce_disk_budget 清掉用例夹具） | `pyproject.toml` 设 `tmp_path_retention_count = 1` + `tmp_path_retention_policy = "failed"`（只留失败运行）；手工清理一次释放 42GB |
+| 4 | pytest 临时目录默认保留最近 3 次全量运行 | 本仓库集成测试生成真实媒体夹具，单次全量 10+GB ⇒ 多轮累积把系统盘写满（实测 %TEMP% 下 pytest-of-* 达 **41.6GB**，全量回归因 ENOSPC 中断；磁盘压力还会让 enforce_disk_budget 清掉用例夹具） | 曾尝试 `tmp_path_retention_count = 1` + `policy="failed"`，**经同机对照证实是回归**（收紧后 unit 范围出现 test_decode_capability_probe / test_bootstrap 失败，覆盖回原策略同一范围 989 passed / 0 failed；相关用例单跑必绿）⇒ **已回滚**，只保留 pyproject 注释里的手工清理方式；手工清理一次释放 42GB |
 
 ## 5. Verification Gate 处置（LiuKeAi 独立验证，2026-10-10）
 
