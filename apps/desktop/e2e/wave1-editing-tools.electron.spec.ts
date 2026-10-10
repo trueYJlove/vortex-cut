@@ -758,17 +758,16 @@ test("Wave1 剪辑手法 L3 手测清单自动化（去停顿 / 卡点 / L-J / �
       await page.screenshot({ path: join(run, "34-beat-stale.png"), fullPage: true });
       expect(note).toContain("已变化");
       expect(button).toBe(1);
-      // 还原文件：素材 availability 仍会停在 changed（refresh 把「新指纹」记为基准，
-      // 内容改回原样也无法被识别为回退）——记为观察项，非本步判据。
+      // 还原文件：内容改回原样后 refresh 必须恢复 available（回退语义，P79）——
+      // 此前会把基准写成新指纹，回退无法自证，素材永久停在 changed 且时间线不可编辑。
       await copyFile(musicSource, music);
       await page.evaluate(async (aid: string) => window.desktop.refreshAsset(aid), musicAssetId);
       const availability = await page.evaluate(async (input: { pid: string; aid: string }) => {
         const assets = await window.desktop.listAssets({ project_id: input.pid as never, limit: 20 });
         return assets.items.find((item: any) => item.asset.asset_id === input.aid)?.asset.availability ?? "?";
       }, { pid: projectId, aid: musicAssetId }).catch(() => "?");
-      observe("2.5-观察", "素材「改回原样」后仍为 changed",
-        "还原文件 + refreshAsset 后 availability=" + availability + "（Core refresh 用新指纹覆盖基准，回退无法自证；只读语义下不可恢复，需重新导入）");
-      return "状态行：" + note + "；按钮数=" + button + "；还原后 availability=" + availability;
+      expect(availability).toBe("available");
+      return "状态行：" + note + "；按钮数=" + button + "；还原文件 + refresh 后 availability=" + availability + "（回退恢复可用）";
     });
   } finally {
     const summary = { run, items, notes, when: new Date().toISOString() };

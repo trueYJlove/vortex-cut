@@ -70,6 +70,37 @@ function switchTab(name: RegExp): void {
   fireEvent.click(screen.getByRole("tab", { name }));
 }
 
+describe("Wave1 L3：卡点默认 BGM 选择", () => {
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+  it("默认选中「纯音频素材」上的片段，而不是 L/J 派生的 A1 片段", async () => {
+    // L/J cut / 声画分离派生出的 A1 片段 asset_kind=audio 但 asset_id 指向视频素材，
+    // 且排在音乐之后——旧规则取 audioClips 末位 ⇒ 默认选到人声片段，
+    // 用户点「分析节拍」分析的是人声（2026-10-10 真机观察）。
+    // 顺序按真机现场：音乐片段在前，L/J 派生的 A1 片段在后（旧规则取末位 ⇒ 选到人声）
+    setup({ clips: [
+      clip({ clip_id: "clip_video" as never, asset_id: "asset_speech" as never, asset_kind: "video", track_id: "V1" as never }),
+      clip({ clip_id: "clip_music" as never, asset_id: "asset_music" as never, asset_kind: "audio", track_id: "A1" as never }),
+      clip({ clip_id: "clip_derived" as never, asset_id: "asset_speech" as never, asset_kind: "audio", track_id: "A1" as never }),
+    ] });
+    switchTab(/卡点/);
+    const dialog = screen.getByRole("dialog", { name: "剪辑手法" });
+    const select = dialog.querySelector("select") as HTMLSelectElement;
+    expect(select.value).toBe("clip_music");
+  });
+
+  it("没有纯音频素材时退回原规则（audioClips 末位）", async () => {
+    setup({ clips: [
+      clip({ clip_id: "clip_video" as never, asset_id: "asset_speech" as never, asset_kind: "video", track_id: "V1" as never }),
+      clip({ clip_id: "clip_derived" as never, asset_id: "asset_speech" as never, asset_kind: "audio", track_id: "A1" as never }),
+    ] });
+    switchTab(/卡点/);
+    const dialog = screen.getByRole("dialog", { name: "剪辑手法" });
+    const select = dialog.querySelector("select") as HTMLSelectElement;
+    expect(select.value).toBe("clip_derived");
+  });
+});
+
 describe("Wave1 L2：卡点节拍网格触发", () => {
   afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 

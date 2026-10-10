@@ -903,6 +903,7 @@ class CoreState:
             probe_asset,
             transcript_stale=self.transcripts.mark_asset_stale,
             purge_asset_clips=self.timelines.purge_asset_clips,
+            transcript_revalidate=self.transcripts.revalidate_for_fingerprint,
         )
 
     def _build_render_stack(self, settings: Settings) -> None:

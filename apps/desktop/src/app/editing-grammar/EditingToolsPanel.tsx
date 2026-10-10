@@ -207,6 +207,10 @@ export function EditingToolsPanel({
 
   const videoClips = useMemo(() => clips.filter(c => c.asset_kind === "video"), [clips]);
   const audioClips = useMemo(() => clips.filter(c => c.asset_kind === "audio" || c.asset_kind === "video"), [clips]);
+  // 视频素材的 asset_id 集合：L/J cut 与声画分离派生出的 A1 片段虽然 asset_kind
+  // 是 audio，但 asset_id 仍指向视频素材——默认 BGM 必须把它们排除（否则「分析节拍」
+  // 分析的是人声而不是音乐）。
+  const videoAssetIds = useMemo(() => new Set(clips.filter(c => c.asset_kind === "video").map(c => String(c.asset_id))), [clips]);
   const currentClip = useMemo(() => clips.find(c => c.clip_id === clipId) ?? null, [clips, clipId]);
   const clipDurUs = useMemo(() => {
     const r = currentClip ? clipSourceRange(currentClip) : null;
@@ -292,8 +296,13 @@ export function EditingToolsPanel({
   }, [videoClips, pickedShots.length]);
 
   useEffect(() => {
-    if (!bgmClipId && audioClips.length) setBgmClipId(audioClips[audioClips.length - 1].clip_id);
-  }, [audioClips, bgmClipId]);
+    if (bgmClipId || !audioClips.length) return;
+    // 默认 BGM：优先「纯音频素材」（音乐文件）上的片段；一个都没有时退回原规则
+    // （audioClips 末位）。2026-10-10 真机观察：原规则会选到 L/J 派生的人声片段。
+    const pureAudio = audioClips.filter(clip => !videoAssetIds.has(String(clip.asset_id)));
+    const preferred = pureAudio.length ? pureAudio : audioClips;
+    setBgmClipId(preferred[preferred.length - 1].clip_id);
+  }, [audioClips, videoAssetIds, bgmClipId]);
 
   const buildParams = (): Record<string, unknown> | null => {
     if (!baseRevisionId) {

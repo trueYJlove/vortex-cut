@@ -428,6 +428,21 @@ class TranscriptRepository:
                 return transcript
         return None
 
+    def revalidate_for_fingerprint(self, asset_id: str, source_fingerprint: str) -> None:
+        """素材内容回退到曾被转录的版本：把对应转录从 stale 恢复为 ready。
+
+        只恢复 source_fingerprint 完全相符的行——指纹不同的转录描述的确实是另一版
+        内容，保持 stale。与 mark_asset_stale 互为逆操作，供 projects.refresh_asset
+        的「回退」分支调用（2026-10-10：此前只有单向 stale，外部改动再改回来素材
+        永久不可用）。
+        """
+        with self.db.connection() as db:
+            db.execute(
+                "UPDATE transcripts SET status='ready',updated_at=? WHERE asset_id=? "
+                "AND source_fingerprint=? AND status='stale'",
+                (utc_now(), asset_id, source_fingerprint),
+            )
+
     def mark_asset_stale(
         self, asset_id: str, source_fingerprint: str | None
     ) -> None:

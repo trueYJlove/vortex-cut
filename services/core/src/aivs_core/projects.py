@@ -46,12 +46,14 @@ class ProjectAssetService:
         probe: Callable[..., Awaitable[dict[str, Any]]],
         transcript_stale: Callable[[str, str | None], None] | None = None,
         purge_asset_clips: Callable[[sqlite3.Connection, str], dict[str, int]] | None = None,
+        transcript_revalidate: Callable[[str, str], None] | None = None,
     ) -> None:
         self.db = db
         self.data_dir = data_dir
         self.probe = probe
         self.transcript_stale = transcript_stale
         self.purge_asset_clips = purge_asset_clips
+        self.transcript_revalidate = transcript_revalidate
 
     _DEFAULT_CANVAS = {"width": 1080, "height": 1920, "fps_num": 30, "fps_den": 1}
 
@@ -315,11 +317,25 @@ class ProjectAssetService:
             return self.get_asset(asset_id)  # type: ignore[return-value]
         try:
             fingerprint = await self._hash(path)
-            if fingerprint != row["fingerprint"]:
+            # 「内容回退到上一版」是合法状态：接受集与 relocate_asset 同口径
+            # （当前指纹 ∪ previous_fingerprint）。否则一次外部修改会让素材永久停在
+            # changed——refresh 会把新指纹写成基准，改回原样也无法自证（2026-10-10
+            # 真机观察：还原文件后 availability 仍为 changed，且 Core 对任何
+            # TimelinePatch fail-closed）。回退时把基准指回当前内容，并把该指纹
+            # 对应的转录从 stale 恢复为 ready（内容逐字节相同，转录仍然有效）。
+            accepted = {row["fingerprint"]}
+            previous = location["previous_fingerprint"] if location else None
+            if previous:
+                accepted.add(previous)
+            reverted = fingerprint != row["fingerprint"] and fingerprint in accepted
+            if fingerprint not in accepted:
                 self._remember_previous_fingerprint(asset_id, row["fingerprint"])
                 self._mark_transcripts_stale(asset_id, fingerprint)
+            elif reverted:
+                self._remember_previous_fingerprint(asset_id, row["fingerprint"])
+                self._revalidate_transcripts(asset_id, fingerprint)
             media_info = await self._media_info(path, row["kind"])
-            availability = "available" if fingerprint == row["fingerprint"] else "changed"
+            availability = "available" if fingerprint in accepted else "changed"
         except DomainError:
             fingerprint = row["fingerprint"]
             media_info = None
@@ -327,7 +343,7 @@ class ProjectAssetService:
         self._update_asset(
             asset_id,
             availability,
-            fingerprint=fingerprint if availability == "changed" else None,
+            fingerprint=fingerprint if (availability == "changed" or reverted) else None,
             size_bytes=path.stat().st_size,
             modified_at=modified_iso(path),
             media_info=media_info,
@@ -626,6 +642,10 @@ class ProjectAssetService:
     def _mark_transcripts_stale(self, asset_id: str, fingerprint: str | None) -> None:
         if self.transcript_stale:
             self.transcript_stale(asset_id, fingerprint)
+
+    def _revalidate_transcripts(self, asset_id: str, fingerprint: str) -> None:
+        if self.transcript_revalidate:
+            self.transcript_revalidate(asset_id, fingerprint)
 
 
 def _project_name(value: str) -> str:

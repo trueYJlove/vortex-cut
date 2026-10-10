@@ -85,7 +85,12 @@ pnpm exec playwright test --config=tests/playwright.config.ts wave1-editing-tool
 | P76 | BGM 波形永远画不出，且任务页刷屏失败（单轮 69 个 failed waveform） | 波形作业探测沿用默认 `require_video=True` ⇒ 纯音频素材在探测阶段即 `MEDIA_HAS_NO_VIDEO`（路由只按「有音轨」放行） | 探测改 `require_video=False`；假探针改成镜像 FFprobe 语义并记录实参；新用例 + 负向对照 |
 | P77 | `pnpm lint`（tsc）在 HEAD 红（2 项 TS2339） | 面板测试的 `getBeatAnalysis` mock 入参类型缺 `project_id/asset_id`（随 c78d6d6 引入，CI 门未被执行） | mock 类型补齐；lint 转绿 |
 
-## 5. 观察项（本轮未修，留待裁决）
+## 5. 观察项
+
+> **2026-10-10 补充（P79）**：观察 1、2 已修复——默认 BGM 改为优先「纯音频素材」上的片段；
+> `refresh_asset` 接受「回退到上一版」并把该指纹的转录恢复为 ready
+> （新增 `test_asset_refresh_revert.py` 2 项 + 面板测试 2 项，均带负向对照；L3 e2e 的对应观察项已升级为断言）。
+> 观察 3、4 维持待裁决。
 
 1. **「BGM / 音频轨」默认选中项不是音乐片段**：面板取 audioClips 末位，L/J 派生出的 A1 音频片段排在音乐之后 ⇒ 用户点「分析节拍」很可能分析到人声而不是 BGM。
 2. **素材「改回原样」后仍为 changed**：`refreshAsset` 用新指纹覆盖基准（`projects.refresh_asset`），内容改回原样无法自证 ⇒ availability 停在 changed，且 Core 对任何 TimelinePatch fail-closed（`TIMELINE_SOURCE_INVALID 素材不可用于 Timeline`）。只读语义下需重新导入才能恢复。
