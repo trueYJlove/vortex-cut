@@ -426,6 +426,10 @@ class TestWaveformService:
         assert root is not None
         (root / "waveform.bin").write_bytes(b"ready")
         service.derived_cache.commit_ready(key, "waveform", root / "waveform.bin")
+        # 磁盘压力下 enforce_disk_budget() 会 LRU 清掉这条 ready 条目（本机 C 盘
+        # 可用 < MIN_FREE_BYTES=2GB 时必然发生）——pin 住它，让用例只测「already-ready
+        # 短路 + 载荷缺指纹时回查 DB」这条语义，而不是依赖机器剩余空间。
+        service.derived_cache.add_reference(key, "p1", "asset_b14")
         source = tmp_path / "源.mp4"
         source.write_bytes(b"src")
         payload = {"cache_key": key, "path": str(source)}

@@ -12,7 +12,7 @@
 | S1c | Core 路由 + `jobs` 分派 + `JobKind` 契约 + 端到端集成测试 | ✅ 完成（4 项集成测试绿） |
 | S2 | 契约 DTO/parse + Desktop IPC/preload | ✅ 完成（契约 4 项 + IPC 2 项测试绿） |
 | S3 | Desktop 面板（工具菜单入口 + 偏移表 + 手填） | ✅ 完成（组件测试 3 项绿；入口按 Design Gate §5 修订） |
-| S4 | 真实多机位素材端到端（验收 9） | ⏳ 阻塞：待用户提供素材 |
+| S4 | 真机 e2e（真实 Electron 全链路） + 真实多机位素材端到端（验收 9） | 真机 e2e ✅（`e2e/angle-sync.electron.spec.ts`，8.9s）；真实素材 ⏳ 待用户提供 |
 
 ## 2. 验收逐项对照（Planning Gate §3）
 
@@ -26,7 +26,7 @@
 | 4 | stale 4 变体（参考侧 / 成员侧 / 回退 / availability） | `test_stale_matrix`（4 变体逐一断言）+ 集成 `test_stale_after_fingerprint_change` | ✅ |
 | 5 | 确定性：同输入两次逐位相同 | `test_determinism` | ✅ |
 | 6 | 零 egress + 无新模型面 | 集成断言 `provider_invocations / model_download / model_installations` 三者均 0 | ✅ |
-| 7 | 性能门（2×60s ≤30s，带环境口径） | 集成实测 2×20s 素材端到端 <30s（真实 ffmpeg 解码 + 互相关）；**60s 档与机型/ffmpeg build/冷热态口径待 S1c 收尾补齐** | ⏳ 部分 |
+| 7 | 性能门（2×60s ≤30s，带环境口径） | **实测 0.60s**（2×60s 素材、冷态、单跑）：i7-1165G7 / 31.6GB / Win11 专业版 / ffmpeg n8.0.1-66；同一路径真机 Electron e2e 整轮 8.9s（含 App+sidecar 启动）。门槛 30s ⇒ **50× 余量** | ✅ |
 | 8 | 人工偏移并列 + 时间戳 + 参考机位恒 0 | `test_manual_offset_preferred_and_timestamped` + 集成断言（auto 行保留）+ 面板测试（毫秒→微秒换算、非数字给出错误、manual 标注） | ✅ |
 | — | 契约形状（Renderer 侧） | `contracts.test.ts`：合法组通过；`algorithm_version` 为 int / 缺键 / 空 angles / 非法 status 全部拒绝；`angle_sync` 进 JobKind 白名单 | ✅ |
 | — | IPC（Main 侧） | `stage2b-ipc.test.ts`：路径与 body 精确转发、成员数为空拒绝、`job_id=null` 幂等短路、人工偏移只接受整数微秒；**冻结通道白名单同步扩张** | ✅ |

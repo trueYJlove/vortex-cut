@@ -32,6 +32,10 @@ from aivs_core.job_scheduler import (
 def test_kind_policies_cover_plan_tiers() -> None:
     # 2 波形（用户视野）；3 代理；4 导出/ASR/生成；5 sample 预热
     assert policy_for("waveform").priority == 2
+    # W2.1：机位同步与 waveform/beat_analysis 同档（light/2）——**缺这条策略会让作业
+    # 永远排在 heavy 默认档而拾取不到**（2026-10-10 真机 e2e 现场：面板卡在「排队中」）
+    assert policy_for("angle_sync").priority == 2
+    assert policy_for("angle_sync").resources == ("light",)
     assert policy_for("proxy").priority == 3
     assert policy_for("final_export").priority == 4
     assert policy_for("transcription").priority == 4

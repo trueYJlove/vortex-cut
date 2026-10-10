@@ -42,6 +42,7 @@ function setup(overrides: Record<string, unknown> = {}) {
     listAngleGroups: vi.fn().mockResolvedValue({ items: [] }),
     createAngleGroup: vi.fn().mockResolvedValue(group()),
     syncAngleGroup: vi.fn().mockResolvedValue({ job_id: "job_1", group: group() }),
+    getJob: vi.fn().mockResolvedValue({ status: "succeeded", error: null }),
     getAngleGroup: vi.fn().mockResolvedValue(group()),
     setAngleOffset: vi.fn().mockResolvedValue(group({
       angles: [angle({ asset_id: "asset_a", is_reference: true, offset_us: 0 }),
@@ -93,6 +94,34 @@ describe("W2.1 机位同步面板", () => {
     expect(within(dialog).getByText("素材已变化")).toBeTruthy();
     expect(within(dialog).getAllByText("人工").length).toBe(1);
     expect(within(dialog).getByText(/-253\.0 ms/)).toBeTruthy();
+  });
+
+
+  it("作业在飞：显示分析中提示，作业成功后自动刷新为已就绪（以 jobs 终态为轮询依据）", async () => {
+    const syncedGroup = group({
+      angles: [angle({ asset_id: "asset_a", is_reference: true, offset_us: 0 }),
+               angle({ asset_id: "asset_b", offset_us: 687_000 })]
+    });
+    const { desktop } = setup({
+      createAngleGroup: vi.fn().mockResolvedValue(group({
+        angles: [angle({ asset_id: "asset_a", is_reference: true, offset_us: 0 }),
+                 angle({ asset_id: "asset_b", status: "missing", offset_us: null, confidence: null, source: null })]
+      })),
+      syncAngleGroup: vi.fn().mockResolvedValue({ job_id: "job_1", group: group({
+        angles: [angle({ asset_id: "asset_a", is_reference: true, offset_us: 0 }),
+                 angle({ asset_id: "asset_b", status: "missing", offset_us: null, confidence: null, source: null })]
+      }) }),
+      getAngleGroup: vi.fn().mockResolvedValue(syncedGroup)
+    });
+    const dialog = screen.getByRole("dialog", { name: "机位同步" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "建组并同步" }));
+    expect(await within(dialog).findByText(/机位同步分析中/)).toBeTruthy();
+    await waitFor(() => expect(desktop.getJob).toHaveBeenCalledWith("job_1"), { timeout: 5_000 });
+    await waitFor(() => expect(desktop.getAngleGroup).toHaveBeenCalled(), { timeout: 5_000 });
+    await waitFor(() => {
+      const table = within(dialog).queryByRole("table");
+      expect(table?.textContent ?? "(无表格)").toContain("+687.0 ms");
+    }, { timeout: 5_000 });
   });
 
   it("人工偏移：毫秒换算成微秒提交，非数字给错误提示", async () => {

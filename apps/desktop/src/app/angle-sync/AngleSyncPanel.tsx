@@ -54,16 +54,23 @@ export function AngleSyncPanel({
   const [manual, setManual] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  /** 在飞作业（job_id + 所属组）：**以 jobs 行终态为轮询依据**——Core 只落「完成行」，
+   *  不落过渡行，所以按行状态判断 pending 会永远看不到进度（2026-10-10 e2e 现场）。 */
+  const [inFlight, setInFlight] = useState<{ jobId: string; groupId: string } | null>(null);
 
   const selected = groups.find(group => group.group_id === selectedId) ?? null;
 
-  const load = useCallback(async (keepSelection = true) => {
+  // 注意：load 不得依赖 selectedId——否则每次选中变化都会重拉列表，
+  // 并在列表尚未包含新建组时把它冲掉（2026-10-10 组件测试现场）。
+  const load = useCallback(async () => {
     const page = await window.desktop.listAngleGroups(projectId);
     setGroups(page.items);
-    if (!keepSelection || !page.items.some(group => group.group_id === selectedId)) {
-      setSelectedId(page.items[0]?.group_id ?? "");
-    }
-  }, [projectId, selectedId]);
+    setSelectedId(current => (
+      current && page.items.some(group => group.group_id === current)
+        ? current
+        : (page.items[0]?.group_id ?? "")
+    ));
+  }, [projectId]);
 
   useEffect(() => {
     void load().catch(caught => setError(safeErrorMessage(caught, "机位组读取失败。")));
@@ -75,7 +82,30 @@ export function AngleSyncPanel({
     setMemberIds(current => (current.length ? current : videoAssets.slice(0, 3).map(item => String(item.asset.asset_id))));
   }, [videoAssets]);
 
-  // 轮询对账（subscribeJob 是死通道，沿用 Wave1 结论：状态以轮询为准）
+  // 作业终态轮询（subscribeJob 是死通道，沿用 Wave1 结论：状态以轮询为准）
+  useEffect(() => {
+    if (!inFlight) return;
+    const timer = window.setInterval(() => {
+      void window.desktop.getJob(inFlight.jobId as never).then(async job => {
+        if (!["succeeded", "failed", "cancelled", "interrupted"].includes(job.status)) return;
+        window.clearInterval(timer);
+        setInFlight(null);
+        if (job.status === "succeeded") {
+          const group = await window.desktop.getAngleGroup({
+            project_id: projectId, group_id: inFlight.groupId as never
+          });
+          setGroups(prev => prev.map(item => item.group_id === group.group_id ? group : item));
+          setSelectedId(group.group_id);
+          onNotify("机位同步完成。");
+        } else {
+          setError("机位同步未完成（" + job.status + "）。");
+        }
+      }).catch(() => undefined);
+    }, 1_200);
+    return () => window.clearInterval(timer);
+  }, [inFlight, projectId, onNotify]);
+
+  // 兜底：将来若 Core 落过渡行（queued/running），同样按行轮询
   const pending = selected?.angles.some(angle => angle.status === "queued" || angle.status === "running") ?? false;
   useEffect(() => {
     if (!selected || !pending) return;
@@ -105,6 +135,7 @@ export function AngleSyncPanel({
       });
       setGroups(prev => [synced.group, ...prev.filter(item => item.group_id !== synced.group.group_id)]);
       setSelectedId(synced.group.group_id);
+      if (synced.job_id) setInFlight({ jobId: synced.job_id, groupId: synced.group.group_id });
       onNotify(synced.job_id ? "已登记机位同步作业。" : "机位偏移已是最新（无需重算）。");
     } catch (caught) {
       setError(safeErrorMessage(caught, "机位同步登记失败。"));
@@ -119,6 +150,7 @@ export function AngleSyncPanel({
         project_id: projectId, group_id: selected.group_id, generate: true
       });
       setGroups(prev => prev.map(item => item.group_id === synced.group.group_id ? synced.group : item));
+      if (synced.job_id) setInFlight({ jobId: synced.job_id, groupId: synced.group.group_id });
       onNotify(synced.job_id ? "已登记重新同步。" : "偏移已是最新（无需重算）。");
     } catch (caught) {
       setError(safeErrorMessage(caught, "重新同步失败。"));
@@ -155,6 +187,7 @@ export function AngleSyncPanel({
     </div>
 
     {error && <p className="ai-status" role="status">{error}</p>}
+    {inFlight && <p className="readonly-note" role="status" aria-live="polite">机位同步分析中…（完成后自动刷新）</p>}
 
     <div className="angle-sync-create">
       <label>组名<input value={name} onChange={event => setName(event.target.value)} /></label>

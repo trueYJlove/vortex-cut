@@ -63,6 +63,8 @@ KIND_POLICIES: dict[str, JobPolicy] = {
     "waveform": JobPolicy("waveform", ("light",), 2),
     # Wave1 L2：BGM 节拍分析（卡点面板触发即用户视野，同波形档）
     "beat_analysis": JobPolicy("beat_analysis", ("light",), 2),
+    # W2.1：机位同步（面板触发即用户视野，同波形/节拍档）
+    "angle_sync": JobPolicy("angle_sync", ("light",), 2),
     # AI-2 Layer 0：CV 信号分析（关键帧采样——当前项目级）
     "cv_analysis": JobPolicy("cv_analysis", ("light",), 3),
     # 3 级：当前项目代理（B11 全源代理）
