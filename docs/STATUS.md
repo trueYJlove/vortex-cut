@@ -147,6 +147,7 @@ PiP 自由定位、A1 音频混音、权威预览（代理为**可选加速项**
 | P75 | **CV audio_energy 全片近似常数**：cv_audio_args ①把 astats 的 reset 当样本数（实为帧数）②只解析 astats 收尾汇总（单声道 2 行）⇒ 59.2s 素材 21 个采样能量恒为 0.0668 ⇒ 去停顿永远「无需去停顿」（0 操作）、CV 音频曲线与召回权重失真 | 同上（运行库 cv_samples 实证） | 缺陷修复 | ✅ **2026-10-10 修复**——aresample=48000 + asetnsamples=n=48000（重切成精确 1s 帧）+ astats=metadata=1:reset=1 + ametadata=print（逐窗口值只写 stdout，音频遍历改读 stdout）；新增 _parse_window_rms（窗口末值 / -inf 与 ≤-60dB 钳 0 / 缺帧窗口沿用上一值）。测试：单元 3 项 + **真实媒体** 1 项（1s 正弦 / 1s 数字静音交替，窗口能量必须跨 0.05 阈值交替）；**负向对照 2 组**（还原旧 args / 去掉 ametadata）各自变红 |
 | P76 | **纯音频素材波形作业必失败**：run_waveform_job 探测沿用默认 require_video=True ⇒ 音频素材在探测阶段即 MEDIA_HAS_NO_VIDEO（路由只按「有音轨」放行）⇒ BGM 波形永远画不出，且 UI 每次重进视口都重登记一个必然失败的作业（实测单轮 69 个 failed） | 同上（运行库 jobs 实证） | 缺陷修复 | ✅ **2026-10-10 修复**——探测改 probe(input_path, require_video=False)；测试侧假探针改成**镜像 FFprobe 语义**（require_video=True 且无视频流即抛）并记录实参；新增用例断言作业成功且实参为 False；**负向对照**：还原默认参数即红。与 P73（渲染/预览探测）同族 |
 | P77 | **Desktop pnpm lint（tsc）在 HEAD 红**：tests/editing-tools-panel.test.tsx 的 getBeatAnalysis mock 入参类型缺 project_id/asset_id（随 c78d6d6 引入），2 项 TS2339 | 2026-10-10 执行本清单前的现状核对 | 缺陷修复 | ✅ **2026-10-10 修复**——mock 入参类型补齐，pnpm lint 转绿（退出码 0）。教训：该次提交未跑 CI 门，「面板测试绿」是 vitest 的绿而非 tsc 的绿 |
+| P78 | **Wave1 L3 手测清单自动化执行**：用 Playwright 真机 e2e（真实 Electron + 真实 Core sidecar + 真实 ffmpeg/ASR/节拍检测）覆盖清单测试 1–4 的机器可判定部分 | WAVE1_MANUAL_CHECKLIST_2026-10-10.md / DESKTOP_WAVE1_EDITING_TOOLS_2026-09-25.md §4 L3 | 工作包 | ✅ **2026-10-10 执行**——spec apps/desktop/e2e/wave1-editing-tools.electron.spec.ts；本轮 20 项通过 / 0 失败 / 2 观察，逐项证据见 WAVE1_L3_AUTOMATION_EVIDENCE_2026-10-10.md（含 P74–P77 四条修复与 2 条观察）。**边界如实**：人耳听感不可机器判定，代理证据为「采纳后声画边界差 == Δ」与「切点落拍残差」；签字仍属人工 |
 | P7 | **4K60 长 GOP 密度策略** | `ADR-0005`（三杠杆：预算约束下的密度旋钮 + 诚实降级 + 硬件解码；**定点补洞经实测否决**） | 裁决项 | ✅ **2026-09-24 已裁决**，分三阶段实施（阶段 1 成本模型+诚实降级 / 阶段 2 密度旋钮 / 阶段 3 硬件解码） |
 | P8 | **ADR-0005 阶段 1 实施**：CV 采样预算 + 诚实降级 | `CV_SAMPLING_BUDGET_PLANNING_GATE_2026-09-24` §1.1 / §3 | 工作包 | ✅ **2026-09-24 核销**——实施记录 `CV_SAMPLING_BUDGET_IMPLEMENTATION_2026-09-24.md` §2 验收核对表各项落实；Core 全量 **913 passed + 2 skipped, 0 failed** |
 | P9 | **W0.4 质量评测体系骨架** | `QUALITY_EVAL_PLANNING_GATE_2026-09-24` §1.1 / §3 | 工作包 | ✅ **2026-09-24 核销**——实施记录 `QUALITY_EVAL_IMPLEMENTATION_2026-09-24.md` §2 验收核对表全项；Core 全量 **930 passed + 1 skipped, 0 failed** |
@@ -188,7 +189,7 @@ PiP 自由定位、A1 音频混音、权威预览（代理为**可选加速项**
 | 细粒度进度仍缺失 | ✅ **2026-10-10 核销**——CV 分析作业细粒度进度落地：回退全量解码阶段按**实际样本数/期望样本数**流式上报（真实计数、不虚构墙钟线性；整百分点节流防 DB 写放大，映射 0.1..0.6），阶段边界 0.05/0.1/0.65/0.75/0.95 → 落库 1.0；I 帧快路径无期望样本数（GOP 未知）保持阶段级 `stage()`（快路径秒级完成，边际收益不值一次额外探测）。未走 2026-09-24 记录的「增量 stderr 解析」路线（当时顾虑的并发失败面仍在，且 stdout 样本计数即可达成诚实比例）。测试 3 项新增（真实 ffmpeg：流式单调+节流 / 无期望不流式 / 作业级含中途值）+ **负向对照**（抹掉阶段调用 → 作业级测试红，实测过）；CV 相关 6 套件 75 passed | 实施记录 §4 L2 / `CV_SAMPLING_BUDGET_PLANNING_GATE_2026-09-24.md` §5 |
 | json_schema 适配器被网关拒 | provider 兼容面窄于设计，script 类适配器为唯一通路 | `AI_VALIDATION_REPORT_2026-09-20.md` §实验 B |
 | Provider 域独立工作单 | 代理与探测总预算**均已交付**；本条保留用于跟踪 provider 域后续 | — |
-| Wave1 剪辑手法收尾 | **L1/L2 已核销（2026-10-10）**：L1 词戳自动拉取 = Core `_signals_for` 注入（既有）+ 面板词戳来源徽标（新）；L2 = 注入半边既有，**产出半边补齐**（此前 `BeatGridService` 零调用方、`beat_grids` 生产永远为空 → 卡点必失败）——新增 `POST …/assets/{a}/beat-analysis`（generate 登记作业）+ jobs `beat_analysis` 派发（waveform 同型）+ 面板「分析节拍」按钮与轮询 + `_signals_for` 补 algorithm_version 过滤；测试 单元 8（含 110BPM 真实素材全链 + 负向对照）+ API 5 + 面板 5。**L3 真机手测签字待用户**：清单 `WAVE1_MANUAL_CHECKLIST_2026-10-10.md` | `DESKTOP_WAVE1_EDITING_TOOLS_2026-09-25.md` §4 |
+| Wave1 剪辑手法收尾 | **L1/L2 已核销（2026-10-10）**：L1 词戳自动拉取 = Core `_signals_for` 注入（既有）+ 面板词戳来源徽标（新）；L2 = 注入半边既有，**产出半边补齐**（此前 `BeatGridService` 零调用方、`beat_grids` 生产永远为空 → 卡点必失败）——新增 `POST …/assets/{a}/beat-analysis`（generate 登记作业）+ jobs `beat_analysis` 派发（waveform 同型）+ 面板「分析节拍」按钮与轮询 + `_signals_for` 补 algorithm_version 过滤；测试 单元 8（含 110BPM 真实素材全链 + 负向对照）+ API 5 + 面板 5。**L3 真机手测**：机器可判定部分已由自动化执行并留证（P78；执行中发现并修复 P74–P77），**人工签字项（听感/审美）待用户**——清单 `WAVE1_MANUAL_CHECKLIST_2026-10-10.md`、证据 `WAVE1_L3_AUTOMATION_EVIDENCE_2026-10-10.md` | `DESKTOP_WAVE1_EDITING_TOOLS_2026-09-25.md` §4 |
 
 ---
 
@@ -206,6 +207,7 @@ PiP 自由定位、A1 音频混音、权威预览（代理为**可选加速项**
 | `docs/AI_WHITELIST_EXPANSION_P4_PROVIDER_RUN_2026-10-09.md` | 2026-10-09 真实 provider 扩展指令会话取证 | 模型为 `xiaomi/mimo-v2.6-pro`（**非**验收点名的 deepseek）；「两步会话」步数口径待裁决 |
 | `docs/AI_VALIDATION_REPORT_2026-09-20.md` | 2026-09-20 真实验证数据 | **性能门"未过"已于次日修复达标**；全仓最易被误引为现状的一份 |
 | `docs/PHASE2_HANDOFF.md` | 2026-09-06 预览线交接快照 | "下一步"条目已部分完成 |
+| `docs/WAVE1_L3_AUTOMATION_EVIDENCE_2026-10-10.md` | 2026-10-10 Wave1 手测清单自动化执行证据 | 点时间证据（本轮运行 + P74–P77 现场）；状态口径引用本文件，被后续运行取代时加横幅 |
 
 **不在此表的活文档**（过期即修正，不得豁免）：`README.md`、`ARCHITECTURE.md`、
 `docs/BRAND_BASELINE.md`、`docs/M2_ROADMAP.md`、`docs/VORTEX_CUT_USER_MANUAL.md`、
