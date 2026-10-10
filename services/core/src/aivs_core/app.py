@@ -2593,7 +2593,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "analysis_id": (summary or {}).get("analysis_id"),
                 "status": status,
                 "job_id": job_id,
-                "algorithm_version": CV_ALGORITHM_VERSION,
+                # 契约类型是 string（packages/contracts CvAnalysisSummary.algorithm_version；
+                # Desktop 侧 parseCvAnalysisSummary 强制 typeof === "string"）。DB 常量是 int，
+                # 此处曾直出 int → 桌面端每次读 CV 摘要都 ContractValidationError（真机手测
+                # 2026-10-10 现场）。与 beat 路由同口径：出参统一 str。
+                "algorithm_version": str(CV_ALGORITHM_VERSION),
                 "sample_count": (summary or {}).get("sample_count"),
                 "scene_cut_count": (summary or {}).get("scene_cut_count"),
                 # ADR-0005 阶段 1/2：采样密度（增量可选字段；旧客户端不读不受影响）。
