@@ -44,7 +44,9 @@
 
 ## 5. Verification Gate 处置（LiuKeAi 独立验证，2026-10-10）
 
-验证员判定 **「有条件通过（仅静态层面）」**，并明确声明本轮**未实跑**（会话中断）⇒ 其结论全部为静态逐行审查。
+**最终判定：通过（2026-10-10 第三轮，提交 2334f44 只读复核）** —— "M-a/M-b/M-c/M-d 四项均在代码、测试、冻结门文档与 evidence 四个层面落地并可复现；上轮唯一实证缺陷（1/8 随机 IntegrityError）已由『原子写入 + 在飞短路 + 用例等 worker 终态』三层消除（5 连绿）。W2.1 验证门可收口。" 复核提出的 4 条非阻塞 nit 中 a/b/c 已顺手修（详见下表末行），d 为 P84 待用户素材事项（按 Planning Gate §3.9 不阻塞本门）。
+
+首轮判定为 **「有条件通过（仅静态层面）」**，并明确声明本轮**未实跑**（会话中断）⇒ 其结论全部为静态逐行审查。
 实施方逐条核对后确认 **3 条主要发现全部成立**，处置如下：
 
 | 发现 | 判定 | 处置 | 证据 |
@@ -66,10 +68,11 @@
 
 | 复核项 | 判定 | 处置 |
 |---|---|---|
-| **M-a** 幂等写入是 SELECT→INSERT 的 TOCTOU：并发执行同一作业仍撞唯一索引（复核实测 **1/8** 随机红；生产同源路径＝「连点重算」入队两个作业） | ✅ 成立 | ① `_insert_row` 改 **`ON CONFLICT DO NOTHING`**（原子；只吞唯一性冲突，CHECK/NOT NULL 照旧抛）；② `create_sync_job` 增**在飞作业短路**（同组 queued/running 存在 ⇒ 不入队第二个）；③ 集成用例不再手工 `asyncio.run(run_sync_job)`，改 `_await_job` **等内置 worker** 到终态（顺带更贴生产路径） |
+| **M-a** 幂等写入是 SELECT→INSERT 的 TOCTOU：并发执行同一作业仍撞唯一索引（复核实测 **1/8** 随机红；生产同源路径＝「连点重算」入队两个作业） | ✅ 成立 | ① `_insert_row` 改 **`ON CONFLICT DO NOTHING`**（原子；只吞唯一性冲突，CHECK/NOT NULL 照旧抛）；② `create_sync_job` 增**在飞作业短路**（同组 queued/running 存在 ⇒ 不入队第二个）；③ 集成用例不再手工 `asyncio.run(run_sync_job)`，改 `_await_job` **等内置 worker** 到终态（顺带更贴生产路径）。**复现验证：修复后连续 6 轮 `34 passed`（修复前 1/8 随机红）** |
 | **M-b** ③-3 实际未实现（记录与代码不符）；Planning Gate §2.2 / STATUS P81 未回写短素材口径 | ✅ 成立（上一轮 checkout 事故把该改动冲掉后漏贴） | 已实现 `window_too_short`（含新用例 `test_short_material_reports_window_too_short`）+ `drift_us=None` 语义注释；**冻结口径回写 Planning Gate §2.2 与 STATUS §4 P81** |
 | **M-c** `is_reference` 无落库回归锁；`manual_stale` 只到 API、面板无法展示 | ✅ 成立 | 新增 `test_reference_row_is_persisted_with_is_reference_flag`；`manual_stale` 进契约 DTO 校验 + 面板列显示「人工值已失鲜，显示自动值」 |
 | **M-d** STATUS P87 计数陈旧、记录 §5 写「存储 6」、性能 evidence 缺重复/并发口径 | ✅ 成立 | 计数已更新（见上）；evidence 补「单次冷态、并发度 1、未做重复测量」口径 |
+| 终轮 nit a/b/c（非阻塞） | ✅ 已顺手修 | a) `window_too_short` 判定改取**双侧较短者**（成员更短不再误报越界）+ 用例覆盖；b) 在飞短路加 **project 过滤**并注明 recover_interrupted 兜底；c) STATUS P87 单元格残留旧计数（15 项/4 项）修正 |
 
 ## 6. 风险对策落点（P81–P86）
 

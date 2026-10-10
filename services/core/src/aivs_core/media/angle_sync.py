@@ -119,7 +119,9 @@ def measure_offset(ref: np.ndarray, mem: np.ndarray) -> dict[str, Any]:
     if res1 != res1 or res2 != res2:
         # 素材短到连「1s 间隔的双窗」都取不齐 ⇒ 给可读 reason（复核 M-b）：
         # window_too_short 说明时长不够，window_out_of_range 才是真正的越界异常。
-        short = len(ref) < int((FINE_WINDOW_S + FINE_WINDOW_OFFSET_S) * SAMPLE_RATE)
+        # 取双侧较短者（复核 nit a：只看参考侧会让"成员更短"误报成越界异常）
+        shortest = min(len(ref), len(mem))
+        short = shortest < int((FINE_WINDOW_S + FINE_WINDOW_OFFSET_S) * SAMPLE_RATE)
         return {"status": "unavailable",
                 "reason": "window_too_short" if short else "window_out_of_range",
                 "offset_us": None, "confidence": 0.0, "coarse_us": int(coarse_us),
@@ -351,9 +353,12 @@ class AngleSyncService:
         # 在飞短路（复核 M-a）：Core 只在完成时落行，摘要看不到 queued/running，因此
         # 「连点重算」会入队两个作业、两个 worker 并发跑同一组（正是 TOCTOU 的生产同源路径）。
         with self.db.connection() as db:
+            # 按 project + group 双条件匹配（复核 nit b：只按 group 会让历史遗留 running 行
+            # 挡住重算）；进程重启时的 recover_interrupted 会把悬挂 running 行收尾。
             active = db.execute(
                 "SELECT id FROM jobs WHERE kind='angle_sync' AND status IN ('queued','running') "
-                "AND input_json LIKE ?", ("%" + group_id + "%",),
+                "AND input_json LIKE ? AND input_json LIKE ?",
+                ("%" + project_id + "%", "%" + group_id + "%"),
             ).fetchone()
         if active is not None:
             return None
