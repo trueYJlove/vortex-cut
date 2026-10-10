@@ -79,7 +79,8 @@ export type JobKind =
   | "waveform"
   | "agent_session"
   | "cv_analysis"
-  | "beat_analysis";
+  | "beat_analysis"
+  | "angle_sync";
 export type JobStage =
   | "queued"
   | "downloading"
@@ -1384,7 +1385,7 @@ export class ContractValidationError extends Error {
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const JOB_STATUSES: JobStatus[] = ["queued", "running", "succeeded", "failed", "cancelling", "cancelled", "interrupted"];
-const JOB_KINDS: JobKind[] = ["asset_probe", "asset_fingerprint", "proxy", "portrait_sample", "vertical_sample", "model_download", "transcription", "candidate_generation", "timeline_patch_generation", "captions_provider_generation", "authoritative_preview", "final_export", "media_generation", "waveform", "agent_session", "cv_analysis", "beat_analysis"];
+const JOB_KINDS: JobKind[] = ["asset_probe", "asset_fingerprint", "proxy", "portrait_sample", "vertical_sample", "model_download", "transcription", "candidate_generation", "timeline_patch_generation", "captions_provider_generation", "authoritative_preview", "final_export", "media_generation", "waveform", "agent_session", "cv_analysis", "beat_analysis", "angle_sync"];
 const PROJECT_STATUSES: ProjectStatus[] = ["active", "archived", "missing"];
 const ASSET_KINDS: AssetKind[] = ["video", "audio", "image", "text"];
 const ASSET_AVAILABILITIES: AssetAvailability[] = ["available", "missing", "changed", "unsupported"];

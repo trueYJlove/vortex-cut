@@ -129,6 +129,29 @@ class BeatAnalysisRequest(BaseModel):
     generate: bool = False
 
 
+class AngleGroupCreateRequest(BaseModel):
+    """W2.1：建机位组（参考机位 + 有序成员；成员必须都是本项目视频素材）。"""
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    reference_asset_id: str
+    member_asset_ids: list[str] = Field(default_factory=list)
+
+
+class AngleSyncRequest(BaseModel):
+    """W2.1：机位同步（generate=True 登记作业；全可用且指纹相符时幂等短路）。"""
+    model_config = ConfigDict(extra="forbid")
+
+    generate: bool = False
+
+
+class AngleOffsetRequest(BaseModel):
+    """W2.1：人工偏移（source=manual 的独立行，不覆盖自动测量）。"""
+    model_config = ConfigDict(extra="forbid")
+
+    offset_us: int
+
+
 class DecodeFramesRequest(BaseModel):
     """H3 后端 B 窗口帧解码（合成帧号 → NV12 平面；路径永不进响应）。
 
@@ -834,6 +857,13 @@ class CoreState:
 
         self.beats = BeatGridService(self.db, settings.ffmpeg)
         self.jobs.beat_runner = self.beats.run_beat_job
+        # W2.1 机位同步：音频互相关 → 机位时间偏移表（本地、零 egress；只产元数据，
+        # 不写任何时间线 op）。轻作业档，与 beat_analysis 同型。
+        from .media.angle_sync import AngleSyncService
+
+        self.angle_sync = AngleSyncService(
+            self.db, settings.ffmpeg, self.projects.resolve_asset_path)
+        self.jobs.angle_sync_runner = self.angle_sync.run_sync_job
         # AI-2 Layer 0：cv_signals 已在 planning 之前构建（召回汇合 +
         # model_manager 注入 → YuNet 人脸通道，模型未就绪 partial）；
         # 此处只回填 job runner。
@@ -2511,6 +2541,65 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             }
         except DomainError as exc:
             raise _domain(exc) from exc
+
+    # ── W2.1 机位同步（只产元数据，不写任何时间线 op；I4/DEC-2）──
+
+    @app.post("/api/v1/projects/{project_id}/angle-groups")
+    async def create_angle_group(
+        project_id: str, request: AngleGroupCreateRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """建机位组：参考机位 + 有序成员（均为本项目视频素材）。"""
+        try:
+            return state.angle_sync.create_group(
+                project_id, request.name, request.reference_asset_id,
+                request.member_asset_ids,
+            )
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/projects/{project_id}/angle-groups")
+    async def list_angle_groups(
+        project_id: str, _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return {"items": state.angle_sync.list_groups(project_id)}
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/projects/{project_id}/angle-groups/{group_id}")
+    async def get_angle_group(
+        project_id: str, group_id: str, _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        try:
+            return state.angle_sync.group_summary(project_id, group_id)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/angle-groups/{group_id}/sync")
+    async def sync_angle_group(
+        project_id: str, group_id: str, request: AngleSyncRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """登记同步作业（generate=True）；组内全可用且指纹相符时幂等短路。"""
+        try:
+            job_id = state.angle_sync.create_sync_job(project_id, group_id) if request.generate else None
+            return {"job_id": job_id, "group": state.angle_sync.group_summary(project_id, group_id)}
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/angle-groups/{group_id}/angles/{asset_id}/offset")
+    async def set_angle_offset(
+        project_id: str, group_id: str, asset_id: str, request: AngleOffsetRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """人工偏移（source=manual 独立行，与自动结果并列）。"""
+        try:
+            return state.angle_sync.write_manual_offset(
+                project_id, group_id, asset_id, request.offset_us)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
 
     @app.get("/api/v1/decode-capability")
     async def decode_capability(_: CoreState = Depends(require_ui)) -> dict[str, Any]:
