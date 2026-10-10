@@ -5,6 +5,7 @@ import type {
   AgentSessionCreateResponse,
   AgentSessionEgressPreview,
   CvAnalysisSummary,
+  BeatAnalysisSummary,
   CvSamplesPage,
   EditingGrammarTool,
   EditingGrammarPrepareResult,
@@ -200,6 +201,8 @@ export interface DesktopApi {
   getAgentSession: (sessionId: string) => Promise<AgentSession>;
   getCvAnalysis: (input: { project_id: ProjectId; asset_id: string; generate: boolean; target_gap_us?: number | null; budget_per_minute_s?: number | null }) => Promise<CvAnalysisSummary>;
   listCvSamples: (input: { project_id: ProjectId; asset_id: string }) => Promise<CvSamplesPage>;
+  /** Wave1 L2：BGM 节拍网格摘要（generate=true 登记分析作业；卡点面板消费）。 */
+  getBeatAnalysis: (input: { project_id: ProjectId; asset_id: string; generate: boolean }) => Promise<BeatAnalysisSummary>;
   // W1.1 剪辑语法层（零 egress）
   listEditingGrammarPlanners: (projectId: ProjectId) => Promise<{ items: EditingGrammarTool[] }>;
   prepareEditingGrammar: (input: { project_id: ProjectId; base_revision_id: TimelineRevisionId; planner: string; params: Record<string, unknown> }) => Promise<EditingGrammarPrepareResult>;
@@ -391,6 +394,7 @@ const api: DesktopApi = {
   getAgentSession: sessionId => ipcRenderer.invoke("agent-session:get", sessionId),
   getCvAnalysis: input => ipcRenderer.invoke("cv-analysis:get", input),
   listCvSamples: input => ipcRenderer.invoke("cv-samples:list", input),
+  getBeatAnalysis: input => ipcRenderer.invoke("beat-analysis:get", input),
   listEditingGrammarPlanners: projectId => ipcRenderer.invoke("editing-grammar:planners", projectId),
   prepareEditingGrammar: input => ipcRenderer.invoke("editing-grammar:prepare", input),
   listWorklists: projectId => ipcRenderer.invoke("worklist:list", projectId),

@@ -183,7 +183,7 @@ PiP 自由定位、A1 音频混音、权威预览（代理为**可选加速项**
 | 细粒度进度仍缺失 | `analyze_video` 的死参数已删除，但未实现替代；长分析无中途进度 | 实施记录 §4 L2 |
 | json_schema 适配器被网关拒 | provider 兼容面窄于设计，script 类适配器为唯一通路 | `AI_VALIDATION_REPORT_2026-09-20.md` §实验 B |
 | Provider 域独立工作单 | 代理与探测总预算**均已交付**；本条保留用于跟踪 provider 域后续 | — |
-| Wave1 剪辑手法收尾 | L1/L2 自动注入（词戳/beat）与 L3 真机手测签字未闭环 | `DESKTOP_WAVE1_EDITING_TOOLS_2026-09-25.md` §4 |
+| Wave1 剪辑手法收尾 | **L1/L2 已核销（2026-10-10）**：L1 词戳自动拉取 = Core `_signals_for` 注入（既有）+ 面板词戳来源徽标（新）；L2 = 注入半边既有，**产出半边补齐**（此前 `BeatGridService` 零调用方、`beat_grids` 生产永远为空 → 卡点必失败）——新增 `POST …/assets/{a}/beat-analysis`（generate 登记作业）+ jobs `beat_analysis` 派发（waveform 同型）+ 面板「分析节拍」按钮与轮询 + `_signals_for` 补 algorithm_version 过滤；测试 单元 8（含 110BPM 真实素材全链 + 负向对照）+ API 5 + 面板 5。**L3 真机手测签字待用户**：清单 `WAVE1_MANUAL_CHECKLIST_2026-10-10.md` | `DESKTOP_WAVE1_EDITING_TOOLS_2026-09-25.md` §4 |
 
 ---
 

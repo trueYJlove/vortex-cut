@@ -78,7 +78,8 @@ export type JobKind =
   | "media_generation"
   | "waveform"
   | "agent_session"
-  | "cv_analysis";
+  | "cv_analysis"
+  | "beat_analysis";
 export type JobStage =
   | "queued"
   | "downloading"
@@ -1165,6 +1166,22 @@ export interface CvAnalysisSummary {
   achieved_max_gap_us?: number | null;
   gap_threshold_us?: number | null;
 }
+// Wave1 L2：素材节拍网格（beat_grids）——generate=True 登记分析作业
+// （FFmpeg PCM 解码 → numpy 检测）；音频/视频素材均可，无音轨 → unavailable。
+// beat_sync 规划器的 beats_us 由 Core 从最新 ready 网格注入（_signals_for）。
+export type BeatAnalysisStatus = "queued" | "running" | "ready" | "failed" | "stale" | "unavailable";
+export interface BeatAnalysisRequest { generate: boolean; }
+export interface BeatAnalysisSummary {
+  beat_grid_id: string | null;
+  status: BeatAnalysisStatus | null;
+  job_id: JobId | null;
+  bpm: number | null;
+  confidence: number | null;
+  beat_count: number | null;
+  downbeat_count: number | null;
+  algorithm_version: string;
+  reason: string | null;
+}
 // 可视化（阶段 C 稳定性包）：最新 ready 分析的信号样本 sparkline 数据。
 export interface CvSample {
   timestamp_us: number;
@@ -1367,7 +1384,7 @@ export class ContractValidationError extends Error {
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const JOB_STATUSES: JobStatus[] = ["queued", "running", "succeeded", "failed", "cancelling", "cancelled", "interrupted"];
-const JOB_KINDS: JobKind[] = ["asset_probe", "asset_fingerprint", "proxy", "portrait_sample", "vertical_sample", "model_download", "transcription", "candidate_generation", "timeline_patch_generation", "captions_provider_generation", "authoritative_preview", "final_export", "media_generation", "waveform", "agent_session", "cv_analysis"];
+const JOB_KINDS: JobKind[] = ["asset_probe", "asset_fingerprint", "proxy", "portrait_sample", "vertical_sample", "model_download", "transcription", "candidate_generation", "timeline_patch_generation", "captions_provider_generation", "authoritative_preview", "final_export", "media_generation", "waveform", "agent_session", "cv_analysis", "beat_analysis"];
 const PROJECT_STATUSES: ProjectStatus[] = ["active", "archived", "missing"];
 const ASSET_KINDS: AssetKind[] = ["video", "audio", "image", "text"];
 const ASSET_AVAILABILITIES: AssetAvailability[] = ["available", "missing", "changed", "unsupported"];
@@ -1680,6 +1697,29 @@ export function parseAgentSession(value: unknown): AgentSession {
 
 export function parseCvAnalysisSummary(value: unknown): CvAnalysisSummary {
   if (!isCvAnalysisSummary(value)) throw new ContractValidationError("CvAnalysisSummary");
+  return value;
+}
+
+const BEAT_ANALYSIS_STATUSES = ["queued", "running", "ready", "failed", "stale", "unavailable"] as const;
+function isBeatAnalysisStatus(value: unknown): value is BeatAnalysisStatus {
+  return typeof value === "string" && (BEAT_ANALYSIS_STATUSES as readonly string[]).includes(value);
+}
+
+export function isBeatAnalysisSummary(value: unknown): value is BeatAnalysisSummary {
+  if (!isRecord(value)) return false;
+  if (value.beat_grid_id !== null && !(typeof value.beat_grid_id === "string" && value.beat_grid_id.length > 0)) return false;
+  if (value.status !== null && !isBeatAnalysisStatus(value.status)) return false;
+  if (value.job_id !== null && !isId(value.job_id)) return false;
+  if (value.bpm !== null && !isFiniteNumber(value.bpm)) return false;
+  if (value.confidence !== null && !isFiniteNumber(value.confidence)) return false;
+  if (value.beat_count !== null && !isFiniteNumber(value.beat_count)) return false;
+  if (value.downbeat_count !== null && !isFiniteNumber(value.downbeat_count)) return false;
+  if (!(typeof value.algorithm_version === "string" && value.algorithm_version.length > 0)) return false;
+  return value.reason === null || typeof value.reason === "string";
+}
+
+export function parseBeatAnalysisSummary(value: unknown): BeatAnalysisSummary {
+  if (!isBeatAnalysisSummary(value)) throw new ContractValidationError("BeatAnalysisSummary");
   return value;
 }
 

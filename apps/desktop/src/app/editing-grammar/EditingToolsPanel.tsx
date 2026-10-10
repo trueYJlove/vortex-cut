@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type {
+  BeatAnalysisSummary,
   EditingGrammarPrepareResult,
   EditingGrammarProposal,
   EditingGrammarProposalListItem,
@@ -213,6 +214,69 @@ export function EditingToolsPanel({
   }, [currentClip]);
   const bgmClip = useMemo(() => clips.find(c => c.clip_id === bgmClipId) ?? null, [clips, bgmClipId]);
 
+  // ── Wave1 L2：BGM 节拍网格状态（beat_grids 的 UI 触发与轮询）──
+  // subscribeJob 是死通道（P61 实锤）：就绪判定走 getBeatAnalysis 轮询对账。
+  const [beatSummary, setBeatSummary] = useState<BeatAnalysisSummary | null>(null);
+  const [beatBusy, setBeatBusy] = useState(false);
+  /** 与 Core _signals_for 同序的 BGM 资产：显式 BGM 片段优先，否则首个镜头段素材。 */
+  const beatAssetId = bgmClip ? String(bgmClip.asset_id)
+    : pickedShots.length ? String(videoClips.find(c => c.clip_id === pickedShots[0])?.asset_id ?? "") : "";
+  const beatStatus = beatSummary?.status ?? null;
+
+  useEffect(() => {
+    let active = true;
+    setBeatSummary(null);
+    if (!beatAssetId) return;
+    void window.desktop.getBeatAnalysis({ project_id: projectId, asset_id: beatAssetId, generate: false })
+      .then(summary => { if (active) setBeatSummary(summary); })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [projectId, beatAssetId]);
+
+  useEffect(() => {
+    if (beatStatus !== "queued" && beatStatus !== "running") return;
+    const deadline = Date.now() + 150_000;
+    const timer = setInterval(() => {
+      if (Date.now() > deadline) { clearInterval(timer); return; }
+      void window.desktop.getBeatAnalysis({ project_id: projectId, asset_id: beatAssetId, generate: false })
+        .then(summary => setBeatSummary(summary))
+        .catch(() => undefined);
+    }, 1_200);
+    return () => clearInterval(timer);
+  }, [beatStatus, projectId, beatAssetId]);
+
+  const analyzeBeats = () => {
+    if (!beatAssetId) { setError("请先选择 BGM 或镜头段。"); return; }
+    setBeatBusy(true); setError("");
+    void window.desktop.getBeatAnalysis({ project_id: projectId, asset_id: beatAssetId, generate: true })
+      .then(summary => setBeatSummary(summary))
+      .catch(caught => setError(errText(caught)))
+      .finally(() => setBeatBusy(false));
+  };
+
+  // ── Wave1 L1：L/J 词戳来源徽标（设计 §3.3：asr 可见、缺词不静默）──
+  const [ljWordsSource, setLjWordsSource] = useState<"checking" | "asr" | "none">("checking");
+  const ljClipAssetId = tool === "lj_cut" && currentClip ? String(currentClip.asset_id) : null;
+  useEffect(() => {
+    let active = true;
+    if (!ljClipAssetId) { setLjWordsSource("none"); return; }
+    setLjWordsSource("checking");
+    // 摘要层无词级信息（TranscriptSummary 不带 words）：取最新 ready 转录
+    // 的详情核对 words 非空——徽标必须精确（设计 §3.3：禁止静默混用来源）。
+    void window.desktop.listTranscripts(ljClipAssetId)
+      .then(page => {
+        const ready = page.items.find(item => item.status === "ready");
+        if (!ready) return null;
+        return window.desktop.getTranscript(ready.transcript_id);
+      })
+      .then(detail => {
+        if (!active) return;
+        setLjWordsSource(detail && (detail.words?.length ?? 0) > 0 ? "asr" : "none");
+      })
+      .catch(() => { if (active) setLjWordsSource("none"); });
+    return () => { active = false; };
+  }, [ljClipAssetId]);
+
   useEffect(() => {
     let active = true;
     void window.desktop.listEditingGrammarProposals(projectId).then(page => {
@@ -417,6 +481,22 @@ export function EditingToolsPanel({
               </select>
             </div>
             <div className="et-field">
+              <label>节拍网格（Wave1 L2）</label>
+              <p className="et-note">{
+                beatSummary === null ? "检查中…"
+                : beatStatus === "ready" ? `✓ 已就绪 · BPM ${beatSummary?.bpm != null ? beatSummary.bpm.toFixed(1) : "—"} · ${beatSummary?.beat_count ?? 0} 拍（强拍 ${beatSummary?.downbeat_count ?? 0}）`
+                : beatStatus === "queued" || beatStatus === "running" ? "分析中…（完成后自动刷新，干跑前请稍候）"
+                : beatStatus === "unavailable" ? "该素材无法检出节拍（无音轨或置信度不足）"
+                : beatStatus === "stale" ? "素材已变化，节拍网格需重新分析。"
+                : "无节拍网格 —— 干跑会失败，请先分析。"
+              }</p>
+              {beatSummary !== null && beatStatus !== "ready" && beatStatus !== "queued" && beatStatus !== "running" && (
+                <button type="button" disabled={beatBusy || !beatAssetId} onClick={analyzeBeats}>
+                  {beatBusy ? "登记中…" : beatStatus === "stale" || beatStatus === "failed" ? "重新分析节拍" : "分析节拍"}
+                </button>
+              )}
+            </div>
+            <div className="et-field">
               <label>目标成片时长（s） <span className="et-val">{targetSec.toFixed(1)}</span></label>
               <input type="range" min={5} max={60} step={0.5} value={targetSec} onChange={e => setTargetSec(+e.target.value)} />
             </div>
@@ -457,6 +537,14 @@ export function EditingToolsPanel({
                   </option>;
                 })}
               </select>
+            </div>
+            <div className="et-field">
+              <label>词戳来源（Wave1 L1）</label>
+              <p className="et-note">{
+                ljWordsSource === "asr" ? "ASR 词级转录 ✓ —— Core 自动拉取 words（面板无需填写）"
+                : ljWordsSource === "checking" ? "检查该素材的转录…"
+                : "无词级转录 —— 先在「转录」页对该素材转录；无词戳时 L/J 干跑会报「缺少词级时间戳」。"
+              }</p>
             </div>
             <div className="et-field">
               <label>画面切点</label>

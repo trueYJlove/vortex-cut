@@ -11,6 +11,7 @@ from typing import Any
 
 from ..database import Database, json_dumps, json_loads, utc_now
 from ..ids import new_id
+from ..media.beat_grid import BEAT_ALGORITHM_VERSION
 from ..planning import sha256
 from ..projects import DomainError
 from ..timeline import TimelineService, timeline_diff
@@ -99,9 +100,9 @@ class EditingGrammarService:
             with self.db.connection() as db:
                 row = db.execute(
                     "SELECT beats_json,downbeats_json FROM beat_grids "
-                    "WHERE asset_id=? AND status='ready' "
+                    "WHERE asset_id=? AND status='ready' AND algorithm_version=? "
                     "ORDER BY created_at DESC LIMIT 1",
-                    (bgm_asset_id,),
+                    (bgm_asset_id, BEAT_ALGORITHM_VERSION),
                 ).fetchone()
             if row:
                 signals["beats_us"] = json_loads(row["beats_json"] or "[]")

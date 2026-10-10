@@ -44,8 +44,8 @@
 
 ## 4. 剩余范围
 
-| # | 项 |
-|---|---|
-| L1 | L/J 词戳自动拉取（ASR transcript → words） |
-| L2 | 卡点 beat 自动从 BGM 分析结果注入 `beats_us` |
-| L3 | 真机手测清单签字 |
+| # | 项 | 状态 |
+|---|---|---|
+| L1 | L/J 词戳自动拉取（ASR transcript → words） | ✅ **2026-10-10 核销**——Core `_signals_for`（`params.words` 为空时按 clip 素材拉 `transcript_words`，`test_split_edit.py::TestLjSignalsInjection`）+ 面板词戳来源徽标（`EditingToolsPanel`：检查该素材 ready 转录的 words 非空 → 「ASR 词级转录 ✓ / Core 自动拉取」；无转录给「先在转录页转录」指引，不静默——设计 §3.3 的来源可见性落地）。能量代理路径按设计「禁止静默混用」**未实现**：无词即 `NO_WORDS` 显式引导 |
+| L2 | 卡点 beat 自动从 BGM 分析结果注入 `beats_us` | ✅ **2026-10-10 核销**——注入半边早已在 Core（`_signals_for` beat_sync 分支），**产出半边此前全仓缺失**（`BeatGridService` 零调用方，`beat_grids` 生产环境永远为空 → 卡点必失败）。本次补齐触发链：`POST /api/v1/projects/{p}/assets/{a}/beat-analysis`（generate=True 登记作业，ready/queued/running 幂等短路，stale 让位，音频/视频素材均可）+ `jobs` kind=`beat_analysis` 派发（waveform 同型轻作业、light 档优先级 2）+ `BeatGridService.run_beat_job`（stat 守卫 → FFmpeg PCM → numpy 检测 → 落库）+ 面板「节拍网格」状态行与「分析节拍」按钮（轮询对账，subscribeJob 死通道不依赖）+ `_signals_for` 查询补 `algorithm_version` 过滤（与 `latest_beat_grid` 同口径，旧版本网格不进注入）。验证：单元 8 项（含 **110BPM 真实 click 素材全链**：登记→执行→落库→prepare 注入→非空操作；负向对照：去版本过滤即红）+ API 集成 5 项（登记/幂等/stale/401/越权）+ 面板 5 项（缺网格提示+按钮+轮询收起 / ready 无按钮负向对照 / unavailable 可重试 / 词戳徽标两态） |
+| L3 | 真机手测清单签字 | ⏳ 待用户：见 `WAVE1_MANUAL_CHECKLIST_2026-10-10.md`（三页各走通干跑→提案→采纳；卡点先点「分析节拍」；L/J 先转录；签字后核销） |

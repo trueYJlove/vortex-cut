@@ -24,6 +24,7 @@ from .database import Database, MigrationError, json_dumps, json_loads, utc_now
 from .ids import new_id
 from .jobs import JobService
 from .media.audio_chunks import PcmChunkError, PcmChunkService
+from .media.beat_grid import BEAT_ALGORITHM_VERSION
 from .media.cv_signals import CV_ALGORITHM_VERSION, CvAnalysisError
 from .media.decode_capability import DecodeCapabilityProbe
 from .media.encoders import EncoderDetector
@@ -112,6 +113,17 @@ class PreviewSourceMediaRequest(BaseModel):
 
 class WaveformRequest(BaseModel):
     """B14 波形描述请求（generate=True 登记生成作业；参数服务端固定）。"""
+    model_config = ConfigDict(extra="forbid")
+
+    generate: bool = False
+
+
+class BeatAnalysisRequest(BaseModel):
+    """Wave1 L2：BGM 节拍分析请求（generate=True 登记分析作业）。
+
+    音频/视频素材均可（视频取其音轨）；无音轨的分析结果为
+    status=unavailable（非失败——调用方按摘要提示该素材无法检出节拍）。
+    """
     model_config = ConfigDict(extra="forbid")
 
     generate: bool = False
@@ -815,6 +827,13 @@ class CoreState:
             ffmpeg_build=_sync_tool_build(settings.ffmpeg),
         )
         self.jobs.waveform_runner = self.waveform.run_waveform_job
+        # Wave1 L2：BGM 节拍网格（PCM → numpy 检测 → beat_grids；卡点面板
+        # 触发即用户视野，与 waveform 同档轻作业）。此前 BeatGridService 无
+        # 任何调用方——beat_grids 在生产环境永远为空，beat_sync 必失败。
+        from .media.beat_service import BeatGridService
+
+        self.beats = BeatGridService(self.db, settings.ffmpeg)
+        self.jobs.beat_runner = self.beats.run_beat_job
         # AI-2 Layer 0：cv_signals 已在 planning 之前构建（召回汇合 +
         # model_manager 注入 → YuNet 人脸通道，模型未就绪 partial）；
         # 此处只回填 job runner。
@@ -2451,6 +2470,43 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "sample_rate": 8000,
                 "channels": 1,
                 "bucket": 256,
+            }
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/assets/{asset_id}/beat-analysis")
+    async def get_asset_beat_analysis(
+        project_id: str, asset_id: str, request: BeatAnalysisRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """Wave1 L2：素材节拍网格描述（Renderer 可见；无路径字段）。
+
+        generate=True 且无 ready/queued/running 作业在途时登记分析作业
+        （FFmpeg PCM 解码 → numpy 检测 → beat_grids）。beat_sync 的
+        _signals_for 从 beat_grids 注入 beats_us——本路由是它在生产
+        环境的唯一产出链路。音频/视频素材均可；无音轨 → unavailable。
+        """
+        asset_row = _preview_source_asset_row(state, project_id, asset_id)
+        try:
+            summary = state.beats.beat_summary(asset_row)
+            job_id: str | None = None
+            status = (summary or {}).get("status")
+            if request.generate and status not in {"ready", "queued", "running", "unavailable"}:
+                # 无分析或 stale/failed：登记新分析（stale = 素材指纹已变）。
+                resolved_path = state.projects.resolve_asset_path(asset_id)
+                job_id = state.beats.create_beat_job(
+                    project_id, asset_row, resolved_path["path"])
+                status = "queued"
+            return {
+                "beat_grid_id": (summary or {}).get("beat_grid_id"),
+                "status": status,
+                "job_id": job_id,
+                "bpm": (summary or {}).get("bpm"),
+                "confidence": (summary or {}).get("confidence"),
+                "beat_count": (summary or {}).get("beat_count"),
+                "downbeat_count": (summary or {}).get("downbeat_count"),
+                "algorithm_version": (summary or {}).get("algorithm_version") or str(BEAT_ALGORITHM_VERSION),
+                "reason": (summary or {}).get("reason"),
             }
         except DomainError as exc:
             raise _domain(exc) from exc

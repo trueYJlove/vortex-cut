@@ -11,6 +11,7 @@ import {
   parseAgentSession,
   parseCvAnalysisSummary,
   parseCvSamplesPage,
+  parseBeatAnalysisSummary,
   parseEditingGrammarTool,
   parseEditingGrammarPrepareResult,
   parseEditingGrammarProposal,
@@ -227,6 +228,14 @@ export function registerStage2bIpc(deps: Stage2bIpcDependencies): void {
     }
     const response = await fetchSafe(`${API_PREFIX}/projects/${id(value.project_id, "project_id")}/assets/${id(value.asset_id, "asset_id")}/cv-analysis`, { method: "POST", body: JSON.stringify(body) });
     return parseCvAnalysisSummary(stage2bRendererSafe(response));
+  });
+  // Wave1 L2：素材节拍网格摘要（generate=True 登记作业；Renderer 只见摘要）。
+  deps.handle("beat-analysis:get", async (_event, input) => {
+    if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("Invalid beat analysis input");
+    const value = record(input, ["project_id", "asset_id", "generate"], "beat analysis get");
+    if (typeof value.generate !== "boolean") throw new Error("Invalid beat analysis input");
+    const response = await fetchSafe(`${API_PREFIX}/projects/${id(value.project_id, "project_id")}/assets/${id(value.asset_id, "asset_id")}/beat-analysis`, { method: "POST", body: JSON.stringify({ generate: value.generate }) });
+    return parseBeatAnalysisSummary(stage2bRendererSafe(response));
   });
   // 阶段 C 稳定性包：CV 信号样本（sparkline 可视化数据）。
   deps.handle("cv-samples:list", async (_event, input) => {

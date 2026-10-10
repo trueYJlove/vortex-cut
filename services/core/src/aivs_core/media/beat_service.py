@@ -131,6 +131,100 @@ class BeatGridService:
     def is_stale(self, grid: dict[str, Any], asset_fingerprint: str) -> bool:
         return grid.get("source_fingerprint") != asset_fingerprint
 
+    # ---- Wave1 L2 收尾：作业化触发（jobs 表 kind=beat_analysis；与 waveform 同型） ----
+
+    def beat_summary(self, asset_row: dict[str, Any]) -> dict[str, Any] | None:
+        """最新节拍网格摘要（Renderer 可见；无路径字段）。
+
+        stale 语义：行内 ready 但素材指纹已变 → 报 stale（调用方据此重登记）。
+        """
+        grid = self.latest_beat_grid(asset_row["id"])
+        if not grid:
+            return None
+        parsed = parse_grid_payload(grid)
+        status = parsed["status"]
+        if status == "ready" and self.is_stale(parsed, str(asset_row["fingerprint"])):
+            status = "stale"
+        return {
+            "beat_grid_id": parsed["id"],
+            "status": status,
+            "bpm": parsed.get("bpm"),
+            "confidence": parsed.get("confidence"),
+            "beat_count": len(parsed["beats_us"]),
+            "downbeat_count": len(parsed["downbeats_us"]),
+            "algorithm_version": str(parsed["algorithm_version"]),
+            "reason": parsed.get("reason"),
+        }
+
+    def create_beat_job(
+        self,
+        project_id: str,
+        asset_row: dict[str, Any],
+        path: str,
+    ) -> str:
+        """登记节拍分析作业（queued）。stat 在登记时取（执行期校验素材未变）。"""
+        job_id = new_id()
+        now = utc_now()
+        stat = Path(path).stat()
+        payload = {
+            "asset_id": asset_row["id"],
+            "asset_fingerprint": str(asset_row["fingerprint"]),
+            "path": str(path),
+            "size_bytes": stat.st_size,
+            "modified_at": stat.st_mtime_ns,
+        }
+        with self.db.connection() as db:
+            db.execute(
+                "INSERT INTO jobs (id,project_id,asset_id,kind,type,status,stage,"
+                "progress,input_json,encoder_requested,resource_class,attempt,"
+                "created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    job_id, project_id, asset_row["id"], "beat_analysis", "beat_analysis",
+                    "queued", "queued", 0, json_dumps(payload),
+                    None, "light", 1, now, now,
+                ),
+            )
+        return job_id
+
+    async def run_beat_job(
+        self,
+        row: Any,
+        cancel_event: asyncio.Event,
+        progress: Any = None,
+        stage: Any = None,
+    ) -> dict[str, Any]:
+        """节拍分析作业执行体：stat 校验 → PCM 解码 → 检测 → 落库 beat_grids。
+
+        无音轨 → status=unavailable（analyze_samples 对空 PCM 的既有语义），
+        不算失败——调用方按摘要提示「该素材无法检出节拍」。
+        """
+        payload = json_loads(row["input_json"])
+        if "asset_id" not in payload or "path" not in payload:
+            raise DomainError("BEAT_JOB_INVALID", "非节拍分析作业载荷")
+        input_path = Path(payload["path"])
+        if not input_path.is_file():
+            raise DomainError("MEDIA_CHANGED", "素材文件不存在")
+        stat = input_path.stat()
+        if ("size_bytes" in payload and "modified_at" in payload) and (
+            stat.st_size != payload["size_bytes"] or stat.st_mtime_ns != payload["modified_at"]
+        ):
+            raise DomainError("MEDIA_CHANGED", "素材文件已变化")
+        if stage:
+            stage("beat:decode")
+        result = await self.analyze_path(
+            payload["asset_id"], payload["asset_fingerprint"], input_path, cancel_event,
+        )
+        if progress:
+            progress(1.0)
+        return {
+            "beat_grid_id": result["beat_grid_id"],
+            "status": result["status"],
+            "bpm": result.get("bpm"),
+            "confidence": result.get("confidence"),
+            "beat_count": len(result.get("beats_us") or []),
+        }
+
+
 
 def parse_grid_payload(row: dict[str, Any]) -> dict[str, Any]:
     return {
