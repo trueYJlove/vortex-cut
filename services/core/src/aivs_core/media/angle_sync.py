@@ -32,6 +32,12 @@ FINE_WINDOW_OFFSET_S = 1.0
 CONFIDENCE_THRESHOLD = 0.5
 DUAL_WINDOW_TOLERANCE_US = 5_000
 MIN_WINDOW_S = 1.0
+# R1（时钟漂移）：在相隔 DRIFT_WINDOW_SPACING_S 的两处各测一次残差；两者的差
+# 就是这段跨度上的漂移量。超阈 ⇒ 如实判 unavailable(clock_drift)——**不静默给单值**
+# （单偏移在漂移下两端各错一半，剪辑点会整体偏）。分段偏移/线性拟合按 D4 待真实
+# 素材取证后再实现。
+DRIFT_WINDOW_SPACING_S = 20.0
+DRIFT_TOLERANCE_US = 10_000
 DECODE_PREROLL_S = 0.5
 MANUAL_OFFSET_LIMIT_US = 600_000_000
 
@@ -98,7 +104,8 @@ def _fine_residual(
 
 def measure_offset(ref: np.ndarray, mem: np.ndarray) -> dict[str, Any]:
     """测成员相对参考的偏移（正 = 成员更晚）。"""
-    blank = {"offset_us": None, "confidence": 0.0, "coarse_us": None, "dual_delta_us": None}
+    blank = {"offset_us": None, "confidence": 0.0, "coarse_us": None, "dual_delta_us": None,
+             "drift_us": None}
     if len(ref) < MIN_WINDOW_S * SAMPLE_RATE or len(mem) < MIN_WINDOW_S * SAMPLE_RATE:
         return {"status": "unavailable", "reason": "window_too_short", **blank}
     ref_env, mem_env = envelope(ref), envelope(mem)
@@ -111,14 +118,26 @@ def measure_offset(ref: np.ndarray, mem: np.ndarray) -> dict[str, Any]:
     res2, conf2 = _fine_residual(ref, mem, coarse_us, FINE_WINDOW_OFFSET_S)
     if res1 != res1 or res2 != res2:
         return {"status": "unavailable", "reason": "window_out_of_range",
-                "offset_us": None, "confidence": 0.0, "coarse_us": int(coarse_us), "dual_delta_us": None}
+                "offset_us": None, "confidence": 0.0, "coarse_us": int(coarse_us),
+                "dual_delta_us": None, "drift_us": None}
     dual_delta_us = abs(res1 - res2)
     confidence = min(conf1, conf2)
     if confidence < CONFIDENCE_THRESHOLD or dual_delta_us > DUAL_WINDOW_TOLERANCE_US:
         return {"status": "unavailable", "reason": "low_confidence", "offset_us": None,
-                "confidence": confidence, "coarse_us": int(coarse_us), "dual_delta_us": dual_delta_us}
+                "confidence": confidence, "coarse_us": int(coarse_us), "dual_delta_us": dual_delta_us,
+                "drift_us": None}
+    # R1：漂移取证——远距窗口再测一次；偏差超阈即如实拒答（不返回看似可用的单值）
+    drift_us: float | None = None
+    res_far, conf_far = _fine_residual(ref, mem, coarse_us, DRIFT_WINDOW_SPACING_S)
+    if res_far == res_far and conf_far >= CONFIDENCE_THRESHOLD:
+        drift_us = res_far - res1
+        if abs(drift_us) > DRIFT_TOLERANCE_US:
+            return {"status": "unavailable", "reason": "clock_drift", "offset_us": None,
+                    "confidence": min(confidence, conf_far), "coarse_us": int(coarse_us),
+                    "dual_delta_us": dual_delta_us, "drift_us": int(round(drift_us))}
     return {"status": "ready", "reason": None, "offset_us": int(round(coarse_us + res1)),
-            "confidence": confidence, "coarse_us": int(coarse_us), "dual_delta_us": dual_delta_us}
+            "confidence": confidence, "coarse_us": int(coarse_us), "dual_delta_us": dual_delta_us,
+            "drift_us": None if drift_us is None else int(round(drift_us))}
 
 
 def window_pcm_args(input_path: str, start_s: float, duration_s: float) -> list[str]:

@@ -21,6 +21,7 @@ const REASON_LABEL: Record<string, string> = {
   window_out_of_range: "对齐窗越出素材范围",
   asset_not_available: "素材当前不可用",
   asset_not_found: "素材不存在",
+  clock_drift: "检测到时钟漂移（单偏移不适用，需分段对齐）",
   ANGLE_SYNC_NO_AUDIO: "音频解码失败或素材无音轨"
 };
 

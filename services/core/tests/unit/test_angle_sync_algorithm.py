@@ -128,6 +128,70 @@ def test_dual_window_disagreement_is_unavailable() -> None:
     assert result["reason"] in {"low_confidence", "window_out_of_range"}
 
 
+
+def _resample(signal: np.ndarray, rate: float) -> np.ndarray:
+    """频域重采样（带限）：模拟设备采样时钟差；rate>1 = 成员走得更快（内容逐秒提前）。
+
+    不用线性插值——那等于给信号加低通，噪声类素材的相关性会被插值误差打掉，
+   用例就会先撞 low_confidence 而测不到漂移分支（本用例首版即如此，已修正）。
+    """
+    n = len(signal)
+    spectrum = np.fft.rfft(signal)
+    m = max(1, int(round(n / rate)))
+    keep = min(len(spectrum), m // 2 + 1)
+    out = np.fft.irfft(spectrum[:keep], m)
+    if len(out) < n:
+        out = np.concatenate([out, np.zeros(n - len(out))])
+    return out[:n]
+
+
+def test_clock_drift_is_rejected_not_silently_averaged() -> None:
+    """R1：0.1% 采样时钟差 ⇒ 必须 unavailable(clock_drift)，**不得**返回看似可用的单值。
+
+    单偏移在漂移下两端各错一半（30s 素材、0.1% ⇒ 跨度内 ~30ms），剪出来的切点整体偏，
+    而这是"看起来成功"的失败——宁可拒答。
+
+    信号用**低频主导**的素材（重低通）：宽带噪声在 0.1% 拉伸下 2s 窗内就相位走完，
+    会先撞 low_confidence（那也是如实拒答，但测不到漂移分支）。
+    """
+    rng = np.random.default_rng(7)
+    smooth = np.convolve(rng.standard_normal(SAMPLE_RATE * 30), np.ones(1024) / 1024, mode="same")
+    ref = smooth * np.interp(np.arange(len(smooth)),
+                             [0, len(smooth) * 0.5, len(smooth)],
+                             [1.0, 1.0, 1.0])
+    drifted = _resample(ref, 1.001)
+    result = measure_offset(ref, drifted)
+    assert result["status"] == "unavailable", result
+    assert result["reason"] == "clock_drift", result
+    assert result["offset_us"] is None
+    assert abs(result["drift_us"]) > angle_sync.DRIFT_TOLERANCE_US
+
+
+def test_drift_branch_is_locked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """分支锁：近窗一致、远窗偏 50ms ⇒ 必须走 clock_drift 分支（不依赖夹具形态）。"""
+    original = angle_sync._fine_residual
+
+    def fake(ref, mem, coarse_us, window_offset_s):
+        residual, confidence = original(ref, mem, coarse_us, window_offset_s)
+        if residual == residual and abs(window_offset_s - angle_sync.DRIFT_WINDOW_SPACING_S) < 1e-6:
+            return residual + 50_000.0, confidence      # 远窗偏 50ms ⇒ 漂移
+        return residual, confidence
+
+    monkeypatch.setattr(angle_sync, "_fine_residual", fake)
+    ref = _reference()
+    result = measure_offset(ref, _shift(ref, 300.0))
+    assert result["status"] == "unavailable" and result["reason"] == "clock_drift", result
+    assert result["drift_us"] == 50_000
+
+
+def test_no_drift_reports_near_zero_drift() -> None:
+    """对照：无漂移素材照常 ready，且漂移读数接近 0（防"恒判漂移"的实现蒙过）。"""
+    ref = _reference()
+    result = measure_offset(ref, _shift(ref, 300.0))
+    assert result["status"] == "ready", result
+    assert abs(result["drift_us"]) <= angle_sync.DRIFT_TOLERANCE_US
+
+
 def test_determinism() -> None:
     """验收 5：同输入两次运行结果逐位相同。"""
     ref = _reference()

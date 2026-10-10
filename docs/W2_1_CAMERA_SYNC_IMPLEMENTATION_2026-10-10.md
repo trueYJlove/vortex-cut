@@ -31,6 +31,7 @@
 | — | 契约形状（Renderer 侧） | `contracts.test.ts`：合法组通过；`algorithm_version` 为 int / 缺键 / 空 angles / 非法 status 全部拒绝；`angle_sync` 进 JobKind 白名单 | ✅ |
 | — | IPC（Main 侧） | `stage2b-ipc.test.ts`：路径与 body 精确转发、成员数为空拒绝、`job_id=null` 幂等短路、人工偏移只接受整数微秒；**冻结通道白名单同步扩张** | ✅ |
 | 9 | 真实多机位素材端到端（含 D-2 共同声音事件核对） | 待用户提供素材 | ⏳ 阻塞 |
+| — | 漂移取证（R1） | `test_clock_drift_is_rejected_not_silently_averaged`（0.1% 重采样 ⇒ `unavailable(clock_drift)`）+ `test_drift_branch_is_locked`（分支锁）+ `test_no_drift_reports_near_zero_drift`（对照） | ✅ |
 
 ## 3. 实施中修正的实现缺陷（测试当场抓出）
 
