@@ -402,3 +402,66 @@ def test_analyze_video_cancel_interrupts_in_flight_decode(tmp_path: Path) -> Non
     assert excinfo.value.code == "JOB_CANCELLED"
     # 及时返回：若取消未生效，需等完 30s 源的全量解码。
     assert elapsed < 5.0, f"取消未及时生效（{elapsed:.1f}s）"
+
+
+# ---- 细粒度进度（2026-10-10 独立小单；STATUS §5「细粒度进度仍缺失」核销）----
+
+
+class TestFineGrainedProgress:
+    def test_analyze_video_streams_by_sample_count(self, tmp_path: Path) -> None:
+        """等间隔采样路径：进度按实际样本数/期望样本数流式上报（真实 ffmpeg）。
+
+        3s 素材 + 0.2s 间隔 ≈ 15 帧；回调序列必须：非空、单调递增、≤0.99、
+        无重复值（整百分点节流——每次回调一条 DB UPDATE，写放大必须受控）。
+        """
+        _require_ffmpeg()
+        media = tmp_path / "prog.mp4"
+        _synthetic_two_scene_video(media)
+        calls: list[float] = []
+        samples = asyncio.run(analyze_video(
+            FFMPEG, media, asyncio.Event(),
+            skip_frame=False, sample_interval_s=0.2,
+            progress=calls.append, expected_samples=15,
+        ))
+        assert len(samples) >= 10
+        assert calls, "progress 回调从未触发"
+        assert calls == sorted(calls), f"进度非单调: {calls}"
+        assert all(call <= 0.99 for call in calls)
+        assert len(calls) == len(set(calls)), f"整百分点节流失效（重复桶）: {calls}"
+
+    def test_analyze_video_no_progress_without_expected(self, tmp_path: Path) -> None:
+        """I 帧快路径语义：无期望样本数（GOP 未知）→ 不流式（阶段级 stage 承担）。"""
+        _require_ffmpeg()
+        media = tmp_path / "prog-fast.mp4"
+        _synthetic_two_scene_video(media)
+        calls: list[float] = []
+        asyncio.run(analyze_video(
+            FFMPEG, media, asyncio.Event(),
+            skip_frame=True, progress=calls.append,
+        ))
+        assert calls == []
+
+    def test_run_analysis_job_reports_monotonic_progress(self, tmp_path: Path) -> None:
+        """作业级：进度序列阶段递进（0.05 起步 … 1.0 收尾）、单调、含中途值。
+
+        该锁同时钉住「中途进度」这一验收点：还原旧实现（全程 progress=0、
+        仅末尾 1.0）时本测试红（calls 尾部才有 1.0，缺 <0.5 的中途值）。
+        """
+        _require_ffmpeg()
+        service, db = _service(tmp_path)
+        media = tmp_path / "job-prog.mp4"
+        _synthetic_two_scene_video(media)
+        asset_row = {"id": "a1", "fingerprint": "fp1", "kind": "video"}
+        job_id, _analysis_id = service.create_analysis_job("p1", asset_row, str(media))
+        with db.connection() as conn:
+            row = conn.execute("SELECT input_json FROM jobs WHERE id=?", (job_id,)).fetchone()
+        calls: list[float] = []
+        result = asyncio.run(service.run_analysis_job(
+            {"input_json": row["input_json"]}, asyncio.Event(),
+            progress=calls.append,
+        ))
+        assert result["status"] == "ready"
+        assert calls and calls[-1] == 1.0
+        assert calls == sorted(calls)
+        mid = [call for call in calls[:-1] if call < 0.5]
+        assert mid, f"缺中途进度（长分析仍全程 0 直到 1.0）: {calls}"

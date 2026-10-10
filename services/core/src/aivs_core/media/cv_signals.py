@@ -21,7 +21,7 @@ from __future__ import annotations
 import asyncio
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 
@@ -625,6 +625,8 @@ async def analyze_video(
     skip_frame: bool = False,
     sample_interval_s: float = MIN_SAMPLE_INTERVAL,
     keep_partial_on_cancel: bool = False,
+    progress: Callable[[float], None] | None = None,
+    expected_samples: int | None = None,
 ) -> list[dict[str, Any]]:
     """一次遍历：采样帧流 + 逐帧信号。返回按 timestamp_us 升序的样本列表。
 
@@ -637,8 +639,13 @@ async def analyze_video(
     作业取消语义不变——调用方仍通过 `CvAnalysisError('JOB_CANCELLED')` 区分；
     本参数只影响「抛出前是否把前缀挂到 `error.partial_samples`」。
 
-    注：原 `progress` 参数被接受但**从未使用**（视频遍历的细粒度进度实际未上报），
-    本单**显式删除**而非留作死参数——阶段级进度由调用方的 `stage()` 承担。
+    **细粒度进度（2026-10-10，独立小单）**：`expected_samples` 已知（等间隔
+    采样回退路径 = duration/interval）且传入 `progress` 时，读循环按**实际
+    已解码样本数 / 期望样本数**流式上报（0..1，钳 0.99）；整百分点变化才回调
+    （`_set_progress` 每次一条 UPDATE，DB 写放大必须节流）。I 帧快路径的
+    期望样本数不可知（GOP 未知），保持阶段级 `stage()`——快路径秒级完成，
+    边际收益不值一次额外探测。历史注记：2026-09-24 曾把 `progress` 显式
+    删除（当时是永不生效的死参数）；本单以真实样本计数重新引入，非复活。
     """
     process = await asyncio.create_subprocess_exec(
         str(ffmpeg),
@@ -656,6 +663,7 @@ async def analyze_video(
     samples: list[dict[str, Any]] = []
     previous: np.ndarray | None = None
     cancelled = False
+    progress_state: dict[str, int] = {"bucket": -1}
     try:
         assert process.stdout is not None
         while True:
@@ -677,6 +685,13 @@ async def analyze_video(
                 samples.append(signals)
                 previous = frame
                 offset += frame_bytes
+            # 细粒度进度：整百分点变化才回调（DB UPDATE 节流）；仅等间隔
+            # 采样路径有期望样本数可算真实比例。
+            if progress and expected_samples and samples:
+                bucket = int(min(len(samples) / expected_samples, 0.99) * 100)
+                if bucket != progress_state["bucket"]:
+                    progress_state["bucket"] = bucket
+                    progress(bucket / 100)
             # 每块读完即查取消（Event.is_set 开销可忽略；阶段 2 deadline 依赖及时中止）。
             if cancel_event.is_set():
                 cancelled = True
@@ -887,6 +902,8 @@ class CvSignalService:
         *,
         deadline_s: float,
         sample_interval_s: float = MIN_SAMPLE_INTERVAL,
+        duration_us: int | None = None,
+        progress: Callable[[float], None] | None = None,
     ) -> tuple[list[dict[str, Any]], bool]:
         """全量解码回退，带 deadline 兜底（ADR-0005 阶段 1 §2.3 / 阶段 2 合并）。
 
@@ -909,6 +926,15 @@ class CvSignalService:
 
         deadline_task = asyncio.create_task(_arm_deadline())
         try:
+            # 细粒度进度：回退解码占整个作业的大头——实际样本数/期望样本数
+            # 流式映射到 [0.1, 0.6] 区间（阶段权重见 run_analysis_job）。
+            expected = (
+                max(1, round(duration_us / 1e6 / sample_interval_s))
+                if duration_us and progress else None
+            )
+            def _fallback_progress(fraction: float) -> None:
+                assert progress is not None
+                progress(0.1 + min(fraction, 0.99) * 0.5)
             samples = await analyze_video(
                 self.ffmpeg,
                 input_path,
@@ -916,6 +942,8 @@ class CvSignalService:
                 skip_frame=False,
                 sample_interval_s=sample_interval_s,
                 keep_partial_on_cancel=True,
+                progress=_fallback_progress if progress else None,
+                expected_samples=expected,
             )
         except CvAnalysisError as exc:
             if cancel_event.is_set():
@@ -963,9 +991,17 @@ class CvSignalService:
             ).rowcount
         if updated != 1:
             raise CvAnalysisError("CV_JOB_INVALID", "分析行状态不允许执行")
+        # 细粒度进度（阶段权重近似）：0.05 起步 → 快路径完成 0.1 →（有回退时
+        # 0.1..0.6 流式）→ 音频 0.65..0.75 → 人脸 0.78..0.95 → 落库 1.0。
+        # 阶段权重是近似（各阶段成本随素材浮动），阶段内比例全部来自真实
+        # 计数（回退样本数），不虚构墙钟线性进度。
+        def _progress(value: float) -> None:
+            if progress:
+                progress(max(0.0, min(value, 0.99)))
         try:
             if stage:
                 stage("cv:video")
+            _progress(0.05)
             started = time.perf_counter()
             # 提前探测：成本估算需要分辨率/帧率/编码，音频分支也要用（下方复用）。
             probe = await self.ffprobe.probe(input_path)
@@ -990,6 +1026,7 @@ class CvSignalService:
                 fast_max_gap_us=max_gap_us(samples) if samples else None,
             )
             strategy = plan["strategy"]
+            _progress(0.1)
             if strategy in {"full", "budget_capped_full"}:
                 # ADR-0005 阶段 2：全量或预算封顶全量——连续密度取代二值回退。
                 if stage:
@@ -998,11 +1035,14 @@ class CvSignalService:
                     input_path, samples, cancel_event,
                     deadline_s=max(budget_s - elapsed_s, 0.0),
                     sample_interval_s=plan["sample_interval_us"] / 1_000_000.0,
+                    duration_us=duration_us,
+                    progress=progress,
                 )
                 if strategy == "budget_capped_full" and not fallback_aborted:
                     strategy = "full"  # 预算内跑完 = 事实上的全量
             if cancel_event.is_set():
                 raise CvAnalysisError("JOB_CANCELLED", "任务已取消")
+            _progress(0.65)
             if stage:
                 stage("cv:audio")
             audio_windows: list[float] = []
@@ -1019,6 +1059,7 @@ class CvSignalService:
                     audio_windows[window_index] if audio_windows else 0.0
                 )
             # 人脸通道（阶段二）：模型就绪才跑；未就绪 partial（face 列 NULL）。
+            _progress(0.75)
             faces: dict[int, tuple[int, float]] = {}
             face_partial = not self.face_model_ready()
             if not face_partial:
@@ -1038,6 +1079,7 @@ class CvSignalService:
                 except Exception:
                     # 推理失败降级为 partial（其余信号不受累）——登记进结果。
                     face_partial = True
+            _progress(0.95)
             face_merged = 0
             for index, sample in enumerate(samples):
                 if index in faces:
