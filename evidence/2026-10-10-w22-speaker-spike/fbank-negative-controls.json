@@ -1,14 +1,14 @@
 {
   "media": "fdf0f0e269126269ed686f208b3063e3.mp4",
-  "seconds": 20.0,
+  "seconds": 30.0,
   "defect_floor": 0.1,
   "results": {
-    "baseline_correct": 0.0008532560455929428,
+    "baseline_correct": 0.0017371056126318507,
     "NC1_slaney_mel_scale": 13.510866924514458,
     "NC2_no_preemphasis": 13.746941405759346,
-    "NC3_hamming_window": 8.75932015427794,
-    "NC4_wrong_snip_edges": 9.825991887456173,
-    "NC5_no_dc_removal": 4.6823673762818245
+    "NC3_hamming_window": 8.943313880228459,
+    "NC4_wrong_snip_edges": 10.011807023798896,
+    "NC5_no_dc_removal": 4.8752763645121036
   },
   "all_defects_detected": true
 }

@@ -17,11 +17,13 @@
 | 文件 | 内容 |
 |---|---|
 | `spike-report.json` | 主控原始输出：资源轴 / 过分割曲线 / 区分度 / 构造夹具 / 前端口径 A/B |
-| `spike-report-rerun.json` | 同条件重跑（重复性核验）：**除计时字段外逐字段一致**；耗时波动 ±5% 量级 |
+| `spike-report-rerun.json` | 同条件重跑（重复性核验）：**除计时字段外逐字段一致**；耗时波动 **±15%** 量级（与同机负载相关） |
+| `spike-report-w3.json` | **尺度稳健性**：窗口 3.0s/1.5s（其余同）；用于判定离散结论是否随尺度变化 |
 | `fbank-validation-oral_a.json` | 纯 numpy fbank vs kaldi-native-fbank 对拍（真实口播 30s） |
 | `fbank-validation-music.json` | 同上（真实音乐 30s） |
 | `fbank-negative-controls.json` / `.log` | **负向对照**：5 组已知缺陷全部被抓出（基线的 5,488×–16,111×）⇒ 等价断言有区分力 |
 | `models.sha256` | 两个候选 ONNX 模型的 sha256 |
+| `harness.sha256` | 生成该批证据时 harness 全部源文件的 sha256（评审要求：证据必须钉到可核验的代码快照） |
 | `materials-roles.json` | 素材角色映射（**只记角色名，不记用户路径**） |
 
 ## 复现
@@ -35,13 +37,35 @@ python -m venv .tmp/spike-venv
 #    3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx / wespeaker_zh_cnceleb_resnet34.onnx
 #    → .tmp/spike-models/（sha256 见 models.sha256）
 
-# 3) 前端对拍
+# 3) 前端对拍（归档 evidence 用的就是 --seconds 30）
 PYTHONPATH=tools .tmp/spike-venv/Scripts/python.exe tools/spikes/w22_speaker/validate_fbank.py <媒体> --seconds 30
 
-# 4) 主控
+# 4) 前端负向对照（归档 evidence 用的就是 --seconds 30）
+PYTHONPATH=tools .tmp/spike-venv/Scripts/python.exe tools/spikes/w22_speaker/negative_controls.py <媒体> --seconds 30
+
+# 5) 主控
 PYTHONPATH=tools .tmp/spike-venv/Scripts/python.exe tools/spikes/w22_speaker/run_spike.py \
   --materials .tmp/spike-materials.json --out .tmp/spike-report.json --snip-edges-ab --excerpt-seconds 180
+
+# 6) 尺度稳健性（窗口 3.0s/1.5s）
+PYTHONPATH=tools .tmp/spike-venv/Scripts/python.exe tools/spikes/w22_speaker/run_spike.py \
+  --materials .tmp/spike-materials.json --out .tmp/spike-report-w3.json --excerpt-seconds 180 \
+  --window-s 3.0 --hop-s 1.5
 ```
+
+> **本文引用的所有数字都以 `--seconds 30` 为准。** 2026-10-10 评审指出：初版归档的负向对照用
+> 的是 `--seconds 20`，与本节的 30 不一致（断言本身不受影响，但读者复现会对不上数）——已统一为 30。
+
+## 素材清单格式
+
+```json
+{
+  "角色名": { "path": "<仓外绝对路径>", "single_speaker": true }
+}
+```
+
+`single_speaker` **不是装饰**：只有声明为单说话人的素材，「同素材首 8s + 静音 + 末 8s」这类构造夹具
+才具备真值（= 1 位）；未声明者该字段记 `null`、**只作观测**——别把观测当结论。
 
 ## 口径与边界（**引为现状前必读**）
 

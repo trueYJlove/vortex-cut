@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from spikes.w22_speaker.audio import decode_mono16k  # noqa: E402
 from spikes.w22_speaker.cluster import build_dendrogram, count_at, count_curve  # noqa: E402
 from spikes.w22_speaker.embedding import OnnxSpeakerEmbedder  # noqa: E402
+from spikes.w22_speaker.light import LightStatsEmbedder  # noqa: E402
 from spikes.w22_speaker.resources import peak_rss_mb  # noqa: E402
 from spikes.w22_speaker.vad import sliding_windows, speech_regions  # noqa: E402
 
@@ -44,11 +45,17 @@ def embed_windows(embedder, samples, wins):
     return np.asarray(mat, dtype=np.float64) if mat else np.zeros((0, embedder.dim))
 
 
-def analyse(embedder, samples, *, cap=400):
+def analyse(embedder, samples, *, cap=400, window_s=None, hop_s=None, min_speech_fraction=None):
     t0 = time.perf_counter()
     regions = speech_regions(samples)
     wins = sliding_windows(
-        samples, SR, window_s=WINDOW_S, hop_s=HOP_S, min_speech_fraction=MIN_SPEECH_FRACTION
+        samples,
+        SR,
+        window_s=WINDOW_S if window_s is None else window_s,
+        hop_s=HOP_S if hop_s is None else hop_s,
+        min_speech_fraction=(
+            MIN_SPEECH_FRACTION if min_speech_fraction is None else min_speech_fraction
+        ),
     )
     vecs = embed_windows(embedder, samples, wins)
     wall = time.perf_counter() - t0
@@ -118,6 +125,9 @@ def main() -> int:
     ap.add_argument("--models-dir", default=".tmp/spike-models")
     ap.add_argument("--out", default=".tmp/spike-report.json")
     ap.add_argument("--snip-edges-ab", action="store_true")
+    ap.add_argument("--window-s", type=float, default=WINDOW_S)
+    ap.add_argument("--hop-s", type=float, default=HOP_S)
+    ap.add_argument("--min-speech-fraction", type=float, default=MIN_SPEECH_FRACTION)
     ap.add_argument(
         "--excerpt-seconds",
         type=float,
@@ -131,6 +141,12 @@ def main() -> int:
         "campplus": Path(args.models_dir) / "3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx",
         "resnet34": Path(args.models_dir) / "wespeaker_zh_cnceleb_resnet34.onnx",
     }
+
+    def make_embedder(name: str, *, snip_edges: bool = False):
+        """C-轻（无模型）与 C-折中（ONNX）统一构造入口。"""
+        if name == "light_mfcc":
+            return LightStatsEmbedder(snip_edges=snip_edges, num_bins=80)
+        return OnnxSpeakerEmbedder(model_paths[name], snip_edges=snip_edges)
 
     report: dict = {
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -148,14 +164,27 @@ def main() -> int:
         "environment": {"python": sys.version.split()[0]},
     }
 
+    # 素材规格：允许字符串（路径）或 {"path":…, "single_speaker": bool}
+    # `single_speaker` 决定了"同素材首尾拼接"夹具的真值是否成立——
+    # 只有**确认单说话人**的素材，"首 8s + 静音 + 末 8s ⇒ 真值恰 1 人"才成立。
+    paths: dict[str, str] = {}
+    single_flags: dict[str, bool] = {}
+    for role, spec in roles.items():
+        if isinstance(spec, str):
+            paths[role], single_flags[role] = spec, False
+        else:
+            paths[role] = spec["path"]
+            single_flags[role] = bool(spec.get("single_speaker", False))
+
     decoded: dict[str, np.ndarray] = {}
-    for role, path in roles.items():
+    for role, path in paths.items():
         t0 = time.perf_counter()
         take = None if args.excerpt_seconds <= 0 else args.excerpt_seconds
         samples = decode_mono16k(path, 0.0, take)
         dt = time.perf_counter() - t0
         decoded[role] = samples
         report["materials"][role] = {
+            "single_speaker": single_flags[role],
             "analyzed_s": round(samples.shape[0] / SR, 2),
             "excerpt_seconds": args.excerpt_seconds,
             "decode_s": round(dt, 3),
@@ -166,20 +195,31 @@ def main() -> int:
     vectors: dict[tuple[str, str], np.ndarray] = {}
     active: list[str] = []
 
-    for name, path in model_paths.items():
-        if not path.exists():
-            report["models"][name] = {"error": "model missing"}
-            continue
+    candidates = ["campplus", "resnet34", "light_mfcc"]
+    for name in candidates:
+        if name != "light_mfcc":
+            path = model_paths[name]
+            if not path.exists():
+                report["models"][name] = {"error": "model missing"}
+                continue
+        else:
+            path = None
         active.append(name)
-        embedder = OnnxSpeakerEmbedder(path)
+        embedder = make_embedder(name)
         report["models"][name] = {
-            "file": path.name,
-            "size_bytes": path.stat().st_size,
+            "file": path.name if path is not None else "(no model: numpy MFCC statistics)",
+            "size_bytes": path.stat().st_size if path is not None else 0,
             "dim": embedder.dim,
             "load_s": round(embedder.load_s, 3),
         }
         for role, samples in decoded.items():
-            summary, vecs, used = analyse(embedder, samples)
+            summary, vecs, used = analyse(
+                embedder,
+                samples,
+                window_s=args.window_s,
+                hop_s=args.hop_s,
+                min_speech_fraction=args.min_speech_fraction,
+            )
             summary["adjacent_self_sim"] = similarity_stats(vecs)
             summary["all_pairs_self_sim"] = similarity_stats(used, adjacent_only=False)
             report["materials"][role][name] = summary
@@ -205,26 +245,40 @@ def main() -> int:
 
     for label, kind, ra, rb in constructions:
         for m in active:
-            embedder = OnnxSpeakerEmbedder(model_paths[m])
+            embedder = make_embedder(m)
             built = build_construction(kind, decoded[ra], decoded[rb])
-            summary, vecs, used = analyse(embedder, built)
+            summary, vecs, used = analyse(
+                embedder,
+                built,
+                window_s=args.window_s,
+                hop_s=args.hop_s,
+                min_speech_fraction=args.min_speech_fraction,
+            )
             summary["adjacent_self_sim"] = similarity_stats(vecs)
             summary["all_pairs_self_sim"] = similarity_stats(used, adjacent_only=False)
-            summary["ground_truth_speakers"] = 1 if kind == "same_across_gap" else 2
-            summary["truth_note"] = (
-                "同一素材首 8s + 0.5s 静音 + 末 8s：真值恰 1 位说话人"
-                if kind == "same_across_gap"
-                else (
+            if kind == "same_across_gap":
+                known_single = single_flags.get(ra, False)
+                summary["ground_truth_speakers"] = 1 if known_single else None
+                summary["truth_note"] = (
+                    "同一素材首 8s + 0.5s 静音 + 末 8s；该素材**已声明单说话人**，故真值恰 1 位"
+                    if known_single
+                    else (
+                        "同一素材首 8s + 0.5s 静音 + 末 8s，但该素材**人数未核实**——"
+                        "首尾可能本就是不同说话人，**本夹具无真值**，只作观测"
+                    )
+                )
+            else:
+                summary["ground_truth_speakers"] = 2
+                summary["truth_note"] = (
                     "跨录音拼接（两素材分属不同录音设备，两独立模型一致判定为异身份）"
                     "——**易化用例**，非单麦对话真值"
                 )
-            )
             report["constructed"].setdefault(label, {})[m] = summary
 
     if args.snip_edges_ab and role_names:
         for m in active:
             for snip in (False, True):
-                embedder = OnnxSpeakerEmbedder(model_paths[m], snip_edges=snip)
+                embedder = make_embedder(m, snip_edges=snip)
                 row: dict = {}
                 vs: dict[str, np.ndarray] = {}
                 for role in role_names[:2]:

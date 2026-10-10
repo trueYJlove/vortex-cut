@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-10T21:08:48",
+  "generated_at": "2026-10-10T21:39:21",
   "window": {
     "window_s": 2.0,
     "hop_s": 1.0,
@@ -26,26 +26,36 @@
       "file": "3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx",
       "size_bytes": 28281138,
       "dim": 192,
-      "load_s": 0.302,
-      "infer_s": 8.146,
-      "fbank_s": 0.971,
-      "peak_rss_mb": 347.7
+      "load_s": 0.322,
+      "infer_s": 8.238,
+      "fbank_s": 1.037,
+      "peak_rss_mb": 350.5
     },
     "resnet34": {
       "file": "wespeaker_zh_cnceleb_resnet34.onnx",
       "size_bytes": 26534363,
       "dim": 256,
-      "load_s": 0.067,
-      "infer_s": 20.964,
-      "fbank_s": 1.338,
-      "peak_rss_mb": 347.7
+      "load_s": 0.05,
+      "infer_s": 21.033,
+      "fbank_s": 1.315,
+      "peak_rss_mb": 350.5
+    },
+    "light_mfcc": {
+      "file": "(no model: numpy MFCC statistics)",
+      "size_bytes": 0,
+      "dim": 144,
+      "load_s": 0.0,
+      "infer_s": 1.031,
+      "fbank_s": 0.0,
+      "peak_rss_mb": 350.5
     }
   },
   "materials": {
     "oral_a": {
+      "single_speaker": true,
       "analyzed_s": 59.21,
       "excerpt_seconds": 180.0,
-      "decode_s": 0.11,
+      "decode_s": 0.111,
       "rms_dbfs": -20.99,
       "peak": 0.8614,
       "campplus": {
@@ -71,7 +81,7 @@
         },
         "count_at_0.50": 1,
         "merge_height": 0.4775,
-        "wall_s": 0.451,
+        "wall_s": 0.44,
         "adjacent_self_sim": {
           "n": 11,
           "mean": 0.7061,
@@ -112,7 +122,7 @@
         },
         "count_at_0.50": 1,
         "merge_height": 0.3288,
-        "wall_s": 0.974,
+        "wall_s": 0.977,
         "adjacent_self_sim": {
           "n": 11,
           "mean": 0.8077,
@@ -129,12 +139,54 @@
           "p95": 0.8807,
           "min": 0.5562
         }
+      },
+      "light_mfcc": {
+        "regions": 21,
+        "speech_s": 25.75,
+        "windows": 12,
+        "windows_clustered": 12,
+        "count_curve": {
+          "0.05": 1,
+          "0.10": 1,
+          "0.15": 1,
+          "0.20": 1,
+          "0.25": 1,
+          "0.30": 1,
+          "0.35": 1,
+          "0.40": 1,
+          "0.45": 1,
+          "0.50": 1,
+          "0.55": 1,
+          "0.60": 1,
+          "0.65": 1,
+          "0.70": 1
+        },
+        "count_at_0.50": 1,
+        "merge_height": 0.0419,
+        "wall_s": 0.091,
+        "adjacent_self_sim": {
+          "n": 11,
+          "mean": 0.9845,
+          "p05": 0.9655,
+          "p50": 0.9874,
+          "p95": 0.9948,
+          "min": 0.961
+        },
+        "all_pairs_self_sim": {
+          "n": 66,
+          "mean": 0.981,
+          "p05": 0.9531,
+          "p50": 0.9856,
+          "p95": 0.9934,
+          "min": 0.9495
+        }
       }
     },
     "scene": {
+      "single_speaker": false,
       "analyzed_s": 168.0,
       "excerpt_seconds": 180.0,
-      "decode_s": 0.237,
+      "decode_s": 0.254,
       "rms_dbfs": -21.1,
       "peak": 0.4046,
       "campplus": {
@@ -201,7 +253,7 @@
         },
         "count_at_0.50": 2,
         "merge_height": 0.5532,
-        "wall_s": 9.3,
+        "wall_s": 9.219,
         "adjacent_self_sim": {
           "n": 114,
           "mean": 0.8985,
@@ -218,12 +270,54 @@
           "p95": 0.8908,
           "min": 0.2775
         }
+      },
+      "light_mfcc": {
+        "regions": 15,
+        "speech_s": 137.17,
+        "windows": 115,
+        "windows_clustered": 115,
+        "count_curve": {
+          "0.05": 2,
+          "0.10": 1,
+          "0.15": 1,
+          "0.20": 1,
+          "0.25": 1,
+          "0.30": 1,
+          "0.35": 1,
+          "0.40": 1,
+          "0.45": 1,
+          "0.50": 1,
+          "0.55": 1,
+          "0.60": 1,
+          "0.65": 1,
+          "0.70": 1
+        },
+        "count_at_0.50": 1,
+        "merge_height": 0.0794,
+        "wall_s": 0.558,
+        "adjacent_self_sim": {
+          "n": 114,
+          "mean": 0.9867,
+          "p05": 0.9706,
+          "p50": 0.9884,
+          "p95": 0.9949,
+          "min": 0.9276
+        },
+        "all_pairs_self_sim": {
+          "n": 6555,
+          "mean": 0.9626,
+          "p05": 0.9329,
+          "p50": 0.9641,
+          "p95": 0.9883,
+          "min": 0.8388
+        }
       }
     },
     "lecture": {
+      "single_speaker": false,
       "analyzed_s": 180.0,
       "excerpt_seconds": 180.0,
-      "decode_s": 0.252,
+      "decode_s": 0.253,
       "rms_dbfs": -22.55,
       "peak": 0.7563,
       "campplus": {
@@ -249,7 +343,7 @@
         },
         "count_at_0.50": 4,
         "merge_height": 0.7727,
-        "wall_s": 5.072,
+        "wall_s": 5.216,
         "adjacent_self_sim": {
           "n": 154,
           "mean": 0.8131,
@@ -290,7 +384,7 @@
         },
         "count_at_0.50": 3,
         "merge_height": 0.688,
-        "wall_s": 12.331,
+        "wall_s": 12.44,
         "adjacent_self_sim": {
           "n": 154,
           "mean": 0.8661,
@@ -307,12 +401,54 @@
           "p95": 0.8269,
           "min": -0.0087
         }
+      },
+      "light_mfcc": {
+        "regions": 22,
+        "speech_s": 165.61,
+        "windows": 155,
+        "windows_clustered": 155,
+        "count_curve": {
+          "0.05": 3,
+          "0.10": 2,
+          "0.15": 1,
+          "0.20": 1,
+          "0.25": 1,
+          "0.30": 1,
+          "0.35": 1,
+          "0.40": 1,
+          "0.45": 1,
+          "0.50": 1,
+          "0.55": 1,
+          "0.60": 1,
+          "0.65": 1,
+          "0.70": 1
+        },
+        "count_at_0.50": 1,
+        "merge_height": 0.1186,
+        "wall_s": 0.635,
+        "adjacent_self_sim": {
+          "n": 154,
+          "mean": 0.9909,
+          "p05": 0.9689,
+          "p50": 0.9948,
+          "p95": 0.9997,
+          "min": 0.8976
+        },
+        "all_pairs_self_sim": {
+          "n": 11935,
+          "mean": 0.9462,
+          "p05": 0.8593,
+          "p50": 0.9662,
+          "p95": 0.9946,
+          "min": 0.77
+        }
       }
     },
     "music": {
+      "single_speaker": false,
       "analyzed_s": 173.3,
       "excerpt_seconds": 180.0,
-      "decode_s": 0.294,
+      "decode_s": 0.254,
       "rms_dbfs": -19.61,
       "peak": 0.4913,
       "campplus": {
@@ -338,7 +474,7 @@
         },
         "count_at_0.50": 0,
         "merge_height": null,
-        "wall_s": 0.145,
+        "wall_s": 0.107,
         "adjacent_self_sim": null,
         "all_pairs_self_sim": null
       },
@@ -365,7 +501,34 @@
         },
         "count_at_0.50": 0,
         "merge_height": null,
-        "wall_s": 0.112,
+        "wall_s": 0.102,
+        "adjacent_self_sim": null,
+        "all_pairs_self_sim": null
+      },
+      "light_mfcc": {
+        "regions": 4,
+        "speech_s": 2.25,
+        "windows": 0,
+        "windows_clustered": 0,
+        "count_curve": {
+          "0.05": 0,
+          "0.10": 0,
+          "0.15": 0,
+          "0.20": 0,
+          "0.25": 0,
+          "0.30": 0,
+          "0.35": 0,
+          "0.40": 0,
+          "0.45": 0,
+          "0.50": 0,
+          "0.55": 0,
+          "0.60": 0,
+          "0.65": 0,
+          "0.70": 0
+        },
+        "count_at_0.50": 0,
+        "merge_height": null,
+        "wall_s": 0.104,
         "adjacent_self_sim": null,
         "all_pairs_self_sim": null
       }
@@ -413,7 +576,28 @@
       "max": 0.5529
     },
     "resnet34:scene~music": null,
-    "resnet34:lecture~music": null
+    "resnet34:lecture~music": null,
+    "light_mfcc:oral_a~scene": {
+      "mean": 0.8438,
+      "p50": 0.8428,
+      "p95": 0.9222,
+      "max": 0.9525
+    },
+    "light_mfcc:oral_a~lecture": {
+      "mean": 0.9304,
+      "p50": 0.9426,
+      "p95": 0.9744,
+      "max": 0.987
+    },
+    "light_mfcc:oral_a~music": null,
+    "light_mfcc:scene~lecture": {
+      "mean": 0.8554,
+      "p50": 0.8774,
+      "p95": 0.9448,
+      "max": 0.9757
+    },
+    "light_mfcc:scene~music": null,
+    "light_mfcc:lecture~music": null
   },
   "constructed": {
     "same_across_gap:oral_a": {
@@ -440,7 +624,7 @@
         },
         "count_at_0.50": 1,
         "merge_height": 0.4363,
-        "wall_s": 0.11,
+        "wall_s": 0.121,
         "adjacent_self_sim": {
           "n": 2,
           "mean": 0.7023,
@@ -458,7 +642,7 @@
           "min": 0.5468
         },
         "ground_truth_speakers": 1,
-        "truth_note": "同一素材首 8s + 0.5s 静音 + 末 8s：真值恰 1 位说话人"
+        "truth_note": "同一素材首 8s + 0.5s 静音 + 末 8s；该素材**已声明单说话人**，故真值恰 1 位"
       },
       "resnet34": {
         "regions": 8,
@@ -483,7 +667,7 @@
         },
         "count_at_0.50": 1,
         "merge_height": 0.2368,
-        "wall_s": 0.257,
+        "wall_s": 0.242,
         "adjacent_self_sim": {
           "n": 2,
           "mean": 0.824,
@@ -501,7 +685,50 @@
           "min": 0.7498
         },
         "ground_truth_speakers": 1,
-        "truth_note": "同一素材首 8s + 0.5s 静音 + 末 8s：真值恰 1 位说话人"
+        "truth_note": "同一素材首 8s + 0.5s 静音 + 末 8s；该素材**已声明单说话人**，故真值恰 1 位"
+      },
+      "light_mfcc": {
+        "regions": 8,
+        "speech_s": 8.17,
+        "windows": 3,
+        "windows_clustered": 3,
+        "count_curve": {
+          "0.05": 1,
+          "0.10": 1,
+          "0.15": 1,
+          "0.20": 1,
+          "0.25": 1,
+          "0.30": 1,
+          "0.35": 1,
+          "0.40": 1,
+          "0.45": 1,
+          "0.50": 1,
+          "0.55": 1,
+          "0.60": 1,
+          "0.65": 1,
+          "0.70": 1
+        },
+        "count_at_0.50": 1,
+        "merge_height": 0.0124,
+        "wall_s": 0.027,
+        "adjacent_self_sim": {
+          "n": 2,
+          "mean": 0.9878,
+          "p05": 0.9875,
+          "p50": 0.9878,
+          "p95": 0.9881,
+          "min": 0.9874
+        },
+        "all_pairs_self_sim": {
+          "n": 3,
+          "mean": 0.9878,
+          "p05": 0.9875,
+          "p50": 0.9878,
+          "p95": 0.9881,
+          "min": 0.9874
+        },
+        "ground_truth_speakers": 1,
+        "truth_note": "同一素材首 8s + 0.5s 静音 + 末 8s；该素材**已声明单说话人**，故真值恰 1 位"
       }
     },
     "same_across_gap:scene": {
@@ -528,7 +755,7 @@
         },
         "count_at_0.50": 3,
         "merge_height": 0.8591,
-        "wall_s": 0.429,
+        "wall_s": 0.436,
         "adjacent_self_sim": {
           "n": 12,
           "mean": 0.7418,
@@ -545,8 +772,8 @@
           "p95": 0.8457,
           "min": 0.0627
         },
-        "ground_truth_speakers": 1,
-        "truth_note": "同一素材首 8s + 0.5s 静音 + 末 8s：真值恰 1 位说话人"
+        "ground_truth_speakers": null,
+        "truth_note": "同一素材首 8s + 0.5s 静音 + 末 8s，但该素材**人数未核实**——首尾可能本就是不同说话人，**本夹具无真值**，只作观测"
       },
       "resnet34": {
         "regions": 5,
@@ -571,7 +798,7 @@
         },
         "count_at_0.50": 1,
         "merge_height": 0.4771,
-        "wall_s": 1.017,
+        "wall_s": 1.035,
         "adjacent_self_sim": {
           "n": 12,
           "mean": 0.8833,
@@ -588,8 +815,51 @@
           "p95": 0.9361,
           "min": 0.3511
         },
-        "ground_truth_speakers": 1,
-        "truth_note": "同一素材首 8s + 0.5s 静音 + 末 8s：真值恰 1 位说话人"
+        "ground_truth_speakers": null,
+        "truth_note": "同一素材首 8s + 0.5s 静音 + 末 8s，但该素材**人数未核实**——首尾可能本就是不同说话人，**本夹具无真值**，只作观测"
+      },
+      "light_mfcc": {
+        "regions": 5,
+        "speech_s": 13.39,
+        "windows": 13,
+        "windows_clustered": 13,
+        "count_curve": {
+          "0.05": 2,
+          "0.10": 1,
+          "0.15": 1,
+          "0.20": 1,
+          "0.25": 1,
+          "0.30": 1,
+          "0.35": 1,
+          "0.40": 1,
+          "0.45": 1,
+          "0.50": 1,
+          "0.55": 1,
+          "0.60": 1,
+          "0.65": 1,
+          "0.70": 1
+        },
+        "count_at_0.50": 1,
+        "merge_height": 0.0591,
+        "wall_s": 0.055,
+        "adjacent_self_sim": {
+          "n": 12,
+          "mean": 0.9843,
+          "p05": 0.9489,
+          "p50": 0.9917,
+          "p95": 0.9983,
+          "min": 0.9287
+        },
+        "all_pairs_self_sim": {
+          "n": 78,
+          "mean": 0.9601,
+          "p05": 0.9215,
+          "p50": 0.9566,
+          "p95": 0.9945,
+          "min": 0.9136
+        },
+        "ground_truth_speakers": null,
+        "truth_note": "同一素材首 8s + 0.5s 静音 + 末 8s，但该素材**人数未核实**——首尾可能本就是不同说话人，**本夹具无真值**，只作观测"
       }
     },
     "same_across_gap:lecture": {
@@ -616,7 +886,7 @@
         },
         "count_at_0.50": 2,
         "merge_height": 0.7372,
-        "wall_s": 0.331,
+        "wall_s": 0.352,
         "adjacent_self_sim": {
           "n": 9,
           "mean": 0.7274,
@@ -633,8 +903,8 @@
           "p95": 0.8112,
           "min": 0.023
         },
-        "ground_truth_speakers": 1,
-        "truth_note": "同一素材首 8s + 0.5s 静音 + 末 8s：真值恰 1 位说话人"
+        "ground_truth_speakers": null,
+        "truth_note": "同一素材首 8s + 0.5s 静音 + 末 8s，但该素材**人数未核实**——首尾可能本就是不同说话人，**本夹具无真值**，只作观测"
       },
       "resnet34": {
         "regions": 3,
@@ -659,7 +929,7 @@
         },
         "count_at_0.50": 2,
         "merge_height": 0.6456,
-        "wall_s": 0.806,
+        "wall_s": 0.794,
         "adjacent_self_sim": {
           "n": 9,
           "mean": 0.8047,
@@ -676,8 +946,51 @@
           "p95": 0.8354,
           "min": 0.1091
         },
-        "ground_truth_speakers": 1,
-        "truth_note": "同一素材首 8s + 0.5s 静音 + 末 8s：真值恰 1 位说话人"
+        "ground_truth_speakers": null,
+        "truth_note": "同一素材首 8s + 0.5s 静音 + 末 8s，但该素材**人数未核实**——首尾可能本就是不同说话人，**本夹具无真值**，只作观测"
+      },
+      "light_mfcc": {
+        "regions": 3,
+        "speech_s": 12.12,
+        "windows": 10,
+        "windows_clustered": 10,
+        "count_curve": {
+          "0.05": 2,
+          "0.10": 1,
+          "0.15": 1,
+          "0.20": 1,
+          "0.25": 1,
+          "0.30": 1,
+          "0.35": 1,
+          "0.40": 1,
+          "0.45": 1,
+          "0.50": 1,
+          "0.55": 1,
+          "0.60": 1,
+          "0.65": 1,
+          "0.70": 1
+        },
+        "count_at_0.50": 1,
+        "merge_height": 0.0826,
+        "wall_s": 0.042,
+        "adjacent_self_sim": {
+          "n": 9,
+          "mean": 0.9857,
+          "p05": 0.9596,
+          "p50": 0.9923,
+          "p95": 0.995,
+          "min": 0.9433
+        },
+        "all_pairs_self_sim": {
+          "n": 45,
+          "mean": 0.9618,
+          "p05": 0.8968,
+          "p50": 0.9825,
+          "p95": 0.9937,
+          "min": 0.8733
+        },
+        "ground_truth_speakers": null,
+        "truth_note": "同一素材首 8s + 0.5s 静音 + 末 8s，但该素材**人数未核实**——首尾可能本就是不同说话人，**本夹具无真值**，只作观测"
       }
     },
     "same_across_gap:music": {
@@ -704,7 +1017,7 @@
         },
         "count_at_0.50": 1,
         "merge_height": 0.4225,
-        "wall_s": 0.451,
+        "wall_s": 0.462,
         "adjacent_self_sim": {
           "n": 13,
           "mean": 0.7882,
@@ -721,8 +1034,8 @@
           "p95": 0.863,
           "min": 0.4179
         },
-        "ground_truth_speakers": 1,
-        "truth_note": "同一素材首 8s + 0.5s 静音 + 末 8s：真值恰 1 位说话人"
+        "ground_truth_speakers": null,
+        "truth_note": "同一素材首 8s + 0.5s 静音 + 末 8s，但该素材**人数未核实**——首尾可能本就是不同说话人，**本夹具无真值**，只作观测"
       },
       "resnet34": {
         "regions": 2,
@@ -747,7 +1060,7 @@
         },
         "count_at_0.50": 1,
         "merge_height": 0.44,
-        "wall_s": 1.097,
+        "wall_s": 1.099,
         "adjacent_self_sim": {
           "n": 13,
           "mean": 0.8302,
@@ -764,8 +1077,51 @@
           "p95": 0.8779,
           "min": 0.349
         },
-        "ground_truth_speakers": 1,
-        "truth_note": "同一素材首 8s + 0.5s 静音 + 末 8s：真值恰 1 位说话人"
+        "ground_truth_speakers": null,
+        "truth_note": "同一素材首 8s + 0.5s 静音 + 末 8s，但该素材**人数未核实**——首尾可能本就是不同说话人，**本夹具无真值**，只作观测"
+      },
+      "light_mfcc": {
+        "regions": 2,
+        "speech_s": 14.38,
+        "windows": 14,
+        "windows_clustered": 14,
+        "count_curve": {
+          "0.05": 2,
+          "0.10": 1,
+          "0.15": 1,
+          "0.20": 1,
+          "0.25": 1,
+          "0.30": 1,
+          "0.35": 1,
+          "0.40": 1,
+          "0.45": 1,
+          "0.50": 1,
+          "0.55": 1,
+          "0.60": 1,
+          "0.65": 1,
+          "0.70": 1
+        },
+        "count_at_0.50": 1,
+        "merge_height": 0.0781,
+        "wall_s": 0.054,
+        "adjacent_self_sim": {
+          "n": 13,
+          "mean": 0.9752,
+          "p05": 0.9104,
+          "p50": 0.9905,
+          "p95": 0.9948,
+          "min": 0.8884
+        },
+        "all_pairs_self_sim": {
+          "n": 91,
+          "mean": 0.9511,
+          "p05": 0.8999,
+          "p50": 0.9554,
+          "p95": 0.9916,
+          "min": 0.8524
+        },
+        "ground_truth_speakers": null,
+        "truth_note": "同一素材首 8s + 0.5s 静音 + 末 8s，但该素材**人数未核实**——首尾可能本就是不同说话人，**本夹具无真值**，只作观测"
       }
     },
     "cross_identity:oral_a+scene": {
@@ -792,7 +1148,7 @@
         },
         "count_at_0.50": 4,
         "merge_height": 0.8998,
-        "wall_s": 0.392,
+        "wall_s": 0.402,
         "adjacent_self_sim": {
           "n": 11,
           "mean": 0.6433,
@@ -835,7 +1191,7 @@
         },
         "count_at_0.50": 2,
         "merge_height": 0.6888,
-        "wall_s": 0.928,
+        "wall_s": 1.033,
         "adjacent_self_sim": {
           "n": 11,
           "mean": 0.8446,
@@ -851,6 +1207,49 @@
           "p50": 0.4657,
           "p95": 0.9132,
           "min": 0.156
+        },
+        "ground_truth_speakers": 2,
+        "truth_note": "跨录音拼接（两素材分属不同录音设备，两独立模型一致判定为异身份）——**易化用例**，非单麦对话真值"
+      },
+      "light_mfcc": {
+        "regions": 3,
+        "speech_s": 14.25,
+        "windows": 12,
+        "windows_clustered": 12,
+        "count_curve": {
+          "0.05": 1,
+          "0.10": 1,
+          "0.15": 1,
+          "0.20": 1,
+          "0.25": 1,
+          "0.30": 1,
+          "0.35": 1,
+          "0.40": 1,
+          "0.45": 1,
+          "0.50": 1,
+          "0.55": 1,
+          "0.60": 1,
+          "0.65": 1,
+          "0.70": 1
+        },
+        "count_at_0.50": 1,
+        "merge_height": 0.0371,
+        "wall_s": 0.088,
+        "adjacent_self_sim": {
+          "n": 11,
+          "mean": 0.9848,
+          "p05": 0.9681,
+          "p50": 0.9854,
+          "p95": 0.9974,
+          "min": 0.9609
+        },
+        "all_pairs_self_sim": {
+          "n": 66,
+          "mean": 0.9732,
+          "p05": 0.9454,
+          "p50": 0.976,
+          "p95": 0.9944,
+          "min": 0.9227
         },
         "ground_truth_speakers": 2,
         "truth_note": "跨录音拼接（两素材分属不同录音设备，两独立模型一致判定为异身份）——**易化用例**，非单麦对话真值"
@@ -1089,10 +1488,126 @@
         "p95": 0.5097,
         "max": 0.643
       }
+    },
+    "light_mfcc:snip=False": {
+      "oral_a:count_curve": {
+        "0.05": 1,
+        "0.10": 1,
+        "0.15": 1,
+        "0.20": 1,
+        "0.25": 1,
+        "0.30": 1,
+        "0.35": 1,
+        "0.40": 1,
+        "0.45": 1,
+        "0.50": 1,
+        "0.55": 1,
+        "0.60": 1,
+        "0.65": 1,
+        "0.70": 1
+      },
+      "oral_a:adjacent_self_sim": {
+        "n": 11,
+        "mean": 0.9845,
+        "p05": 0.9655,
+        "p50": 0.9874,
+        "p95": 0.9948,
+        "min": 0.961
+      },
+      "oral_a:merge_height": 0.0419,
+      "scene:count_curve": {
+        "0.05": 2,
+        "0.10": 1,
+        "0.15": 1,
+        "0.20": 1,
+        "0.25": 1,
+        "0.30": 1,
+        "0.35": 1,
+        "0.40": 1,
+        "0.45": 1,
+        "0.50": 1,
+        "0.55": 1,
+        "0.60": 1,
+        "0.65": 1,
+        "0.70": 1
+      },
+      "scene:adjacent_self_sim": {
+        "n": 114,
+        "mean": 0.9867,
+        "p05": 0.9706,
+        "p50": 0.9884,
+        "p95": 0.9949,
+        "min": 0.9276
+      },
+      "scene:merge_height": 0.0794,
+      "cross_sim": {
+        "mean": 0.8438,
+        "p50": 0.8428,
+        "p95": 0.9222,
+        "max": 0.9525
+      }
+    },
+    "light_mfcc:snip=True": {
+      "oral_a:count_curve": {
+        "0.05": 1,
+        "0.10": 1,
+        "0.15": 1,
+        "0.20": 1,
+        "0.25": 1,
+        "0.30": 1,
+        "0.35": 1,
+        "0.40": 1,
+        "0.45": 1,
+        "0.50": 1,
+        "0.55": 1,
+        "0.60": 1,
+        "0.65": 1,
+        "0.70": 1
+      },
+      "oral_a:adjacent_self_sim": {
+        "n": 11,
+        "mean": 0.984,
+        "p05": 0.9644,
+        "p50": 0.9875,
+        "p95": 0.9945,
+        "min": 0.9599
+      },
+      "oral_a:merge_height": 0.0427,
+      "scene:count_curve": {
+        "0.05": 2,
+        "0.10": 1,
+        "0.15": 1,
+        "0.20": 1,
+        "0.25": 1,
+        "0.30": 1,
+        "0.35": 1,
+        "0.40": 1,
+        "0.45": 1,
+        "0.50": 1,
+        "0.55": 1,
+        "0.60": 1,
+        "0.65": 1,
+        "0.70": 1
+      },
+      "scene:adjacent_self_sim": {
+        "n": 114,
+        "mean": 0.9865,
+        "p05": 0.9695,
+        "p50": 0.9883,
+        "p95": 0.9949,
+        "min": 0.9261
+      },
+      "scene:merge_height": 0.0791,
+      "cross_sim": {
+        "mean": 0.843,
+        "p50": 0.8416,
+        "p95": 0.9225,
+        "max": 0.9529
+      }
     }
   },
   "environment": {
     "python": "3.13.1",
-    "peak_rss_mb_end": 359.4
+    "peak_rss_mb_end": 373.0
   }
 }
