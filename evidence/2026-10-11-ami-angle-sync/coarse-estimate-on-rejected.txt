@@ -1,0 +1,4 @@
+{"case": "不同阵列 对齐（真值 0）", "status": "unavailable", "reason": "low_confidence", "coarse_us": 0, "offset_us": null, "confidence": 0.4623, "dual_delta_us": 208.3}
+{"case": "不同阵列 成员晚 83ms（真值 -83000）", "status": "unavailable", "reason": "low_confidence", "coarse_us": -80000, "offset_us": null, "confidence": 0.4681, "dual_delta_us": 312.5}
+{"case": "不同阵列 成员晚 400ms（真值 -400000）", "status": "unavailable", "reason": "low_confidence", "coarse_us": -400000, "offset_us": null, "confidence": 0.468, "dual_delta_us": 187.5}
+{"case": "同阵列相邻 对齐（真值 0）", "status": "ready", "reason": null, "coarse_us": 0, "offset_us": -83, "confidence": 0.9705, "dual_delta_us": 20.8}

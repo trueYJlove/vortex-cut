@@ -1,0 +1,27 @@
+{
+  "同阵列相邻 Array1-01 vs Array1-02": {
+    "nlcc_peak": 0.5692,
+    "lag_samples": -6,
+    "lag_ms": -0.125
+  },
+  "同阵列对角 Array1-01 vs Array1-05": {
+    "nlcc_peak": 0.5705,
+    "lag_samples": 6,
+    "lag_ms": 0.125
+  },
+  "不同阵列 Array1-01 vs Array2-01": {
+    "nlcc_peak": 0.5251,
+    "lag_samples": 7,
+    "lag_ms": 0.146
+  },
+  "混合头戴 vs 阵列 Mix vs Array2-01": {
+    "nlcc_peak": 0.0922,
+    "lag_samples": -31294,
+    "lag_ms": -651.958
+  },
+  "自相关基线 Array2-01 vs 自身": {
+    "nlcc_peak": 1.0,
+    "lag_samples": 0,
+    "lag_ms": 0.0
+  }
+}

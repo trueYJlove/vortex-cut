@@ -1,0 +1,35 @@
+[
+  {
+    "case": "A_aligned",
+    "expect_us": 0,
+    "status": "unavailable",
+    "reason": "low_confidence",
+    "offset_us": null,
+    "confidence": 0.4623,
+    "dual_delta_us": 208.33333333333334,
+    "drift_us": null,
+    "elapsed_s": 0.062
+  },
+  {
+    "case": "B_member_later_687ms",
+    "expect_us": -687000,
+    "status": "unavailable",
+    "reason": "low_confidence",
+    "offset_us": null,
+    "confidence": 0.4365,
+    "dual_delta_us": 270.83333333333303,
+    "drift_us": null,
+    "elapsed_s": 0.051
+  },
+  {
+    "case": "C_member_earlier_687ms",
+    "expect_us": 687000,
+    "status": "unavailable",
+    "reason": "low_confidence",
+    "offset_us": null,
+    "confidence": 0.4362,
+    "dual_delta_us": 208.33333333333348,
+    "drift_us": null,
+    "elapsed_s": 0.052
+  }
+]

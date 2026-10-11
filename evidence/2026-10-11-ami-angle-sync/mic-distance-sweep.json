@@ -1,0 +1,101 @@
+[
+  {
+    "ref": "Array1-01",
+    "mem": "Array2-01",
+    "label": "different-arrays(far)",
+    "window_s": 60.0,
+    "coarse_peak": 10.9712,
+    "status": "unavailable",
+    "reason": "low_confidence",
+    "confidence": 0.4623,
+    "offset_us": null
+  },
+  {
+    "ref": "Array1-01",
+    "mem": "Array2-01",
+    "label": "different-arrays(far)",
+    "window_s": 180.0,
+    "coarse_peak": 3.4354,
+    "status": "unavailable",
+    "reason": "low_confidence",
+    "confidence": 0.4623,
+    "offset_us": null
+  },
+  {
+    "ref": "Array1-01",
+    "mem": "Array2-01",
+    "label": "different-arrays(far)",
+    "window_s": 420.0,
+    "coarse_peak": 2.1143,
+    "status": "unavailable",
+    "reason": "low_confidence",
+    "confidence": 0.4623,
+    "offset_us": null
+  },
+  {
+    "ref": "Array1-01",
+    "mem": "Array1-02",
+    "label": "same-array-adjacent(near)",
+    "window_s": 60.0,
+    "coarse_peak": 12.6017,
+    "status": "ready",
+    "reason": null,
+    "confidence": 0.9705,
+    "offset_us": 83
+  },
+  {
+    "ref": "Array1-01",
+    "mem": "Array1-02",
+    "label": "same-array-adjacent(near)",
+    "window_s": 180.0,
+    "coarse_peak": 2.5838,
+    "status": "ready",
+    "reason": null,
+    "confidence": 0.9705,
+    "offset_us": 83
+  },
+  {
+    "ref": "Array1-01",
+    "mem": "Array1-02",
+    "label": "same-array-adjacent(near)",
+    "window_s": 420.0,
+    "coarse_peak": 1.4407,
+    "status": "ready",
+    "reason": null,
+    "confidence": 0.9705,
+    "offset_us": 83
+  },
+  {
+    "ref": "Array1-01",
+    "mem": "Array1-05",
+    "label": "same-array-opposite(mid)",
+    "window_s": 60.0,
+    "coarse_peak": 12.2533,
+    "status": "ready",
+    "reason": null,
+    "confidence": 0.9158,
+    "offset_us": -62
+  },
+  {
+    "ref": "Array1-01",
+    "mem": "Array1-05",
+    "label": "same-array-opposite(mid)",
+    "window_s": 180.0,
+    "coarse_peak": 2.415,
+    "status": "ready",
+    "reason": null,
+    "confidence": 0.9158,
+    "offset_us": -62
+  },
+  {
+    "ref": "Array1-01",
+    "mem": "Array1-05",
+    "label": "same-array-opposite(mid)",
+    "window_s": 420.0,
+    "coarse_peak": 1.3428,
+    "status": "ready",
+    "reason": null,
+    "confidence": 0.9158,
+    "offset_us": -62
+  }
+]

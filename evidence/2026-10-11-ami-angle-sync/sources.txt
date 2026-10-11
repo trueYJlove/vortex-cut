@@ -1,0 +1,2 @@
+AMI Meeting Corpus（CC BY 4.0）ES2004a 多路阵列通道 —— 同一场景的真实多设备录音。
+署名与完整许可说明见 evidence/2026-10-11-ami-diarization/sources.txt。

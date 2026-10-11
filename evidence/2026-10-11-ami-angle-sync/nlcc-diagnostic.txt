@@ -1,0 +1,8 @@
+2s 窗 @ 300.0s，NLCC（1.0=完全相同，0=无关）
+  同阵列相邻 Array1-01 vs Array1-02           NLCC=0.569  lag=-0.12 ms
+  同阵列对角 Array1-01 vs Array1-05           NLCC=0.571  lag=+0.12 ms
+  不同阵列 Array1-01 vs Array2-01            NLCC=0.525  lag=+0.15 ms
+  混合头戴 vs 阵列 Mix vs Array2-01            NLCC=0.092  lag=-651.96 ms
+  自相关基线 Array2-01 vs 自身                  NLCC=1.000  lag=+0.00 ms
+
+  人为 +83ms：NLCC=0.488 lag=-82.88 ms（应≈ -83 或 +83，符号见约定）
