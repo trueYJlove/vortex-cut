@@ -2,6 +2,7 @@
 L_R003S01C02    2363     6    2312   2361/138/1639/2146
 M_R003S01C01    2282     6    2192   2281/63/1607/2082
 S_R003S01C01    2216     5    2128   2214/325/1697/2112
+M_R003S02C01    2321     6    2377   2320/93/1721/2177
 
 -- L_R003S01C02 (参考 6 人)
    campplus  energy_vad  DER  95.0% @tau=0.55 | 假定   5 人 | miss  93.7% FA   0.2% spk   1.1%
@@ -26,3 +27,11 @@ S_R003S01C01    2216     5    2128   2214/325/1697/2112
    resnet34  energy_vad  DER  87.5% @tau=0.30 | 假定   9 人 | miss  75.9% FA   0.0% spk  11.6%
    resnet34  silero_vad  DER  54.9% @tau=0.35 | 假定   7 人 | miss   7.3% FA   0.2% spk  47.4%
    resnet34  oracle_vad  DER  51.4% @tau=0.35 | 假定   8 人 | miss   0.1% FA   1.1% spk  50.3%
+
+-- M_R003S02C01 (参考 6 人)
+   campplus  energy_vad  DER  95.5% @tau=0.45 | 假定   9 人 | miss  95.0% FA   0.2% spk   0.2%
+   campplus  silero_vad  DER  35.5% @tau=0.55 | 假定   5 人 | miss  11.1% FA   0.2% spk  24.2%
+   campplus  oracle_vad  DER  30.3% @tau=0.55 | 假定   5 人 | miss   0.1% FA   1.0% spk  29.2%
+   resnet34  energy_vad  DER  96.6% @tau=0.35 | 假定   2 人 | miss  95.0% FA   0.2% spk   1.4%
+   resnet34  silero_vad  DER  61.8% @tau=0.35 | 假定   2 人 | miss  11.1% FA   0.2% spk  50.6%
+   resnet34  oracle_vad  DER  55.6% @tau=0.35 | 假定   2 人 | miss   0.1% FA   1.0% spk  54.5%
