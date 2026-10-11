@@ -14,8 +14,9 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 
@@ -143,13 +144,17 @@ def measure_offset(ref: np.ndarray, mem: np.ndarray) -> dict[str, Any]:
     # P95a（2026-10-11 复核）：两个门**分开报**。原先共用 reason="low_confidence"，
     # 于双窗门触发时用户会看到"置信度低"——而那时置信度往往并不低（如实测 0.34），诊断误导。
     if confidence < CONFIDENCE_THRESHOLD:
-        return {"status": "unavailable", "reason": "low_confidence", "offset_us": None,
-                "confidence": confidence, "coarse_us": int(coarse_us), "dual_delta_us": dual_delta_us,
-                "drift_us": None}
+        return {
+            "status": "unavailable", "reason": "low_confidence", "offset_us": None,
+            "confidence": confidence, "coarse_us": int(coarse_us),
+            "dual_delta_us": dual_delta_us, "drift_us": None,
+        }
     if dual_delta_us > DUAL_WINDOW_TOLERANCE_US:
-        return {"status": "unavailable", "reason": "dual_window_inconsistent", "offset_us": None,
-                "confidence": confidence, "coarse_us": int(coarse_us), "dual_delta_us": dual_delta_us,
-                "drift_us": None}
+        return {
+            "status": "unavailable", "reason": "dual_window_inconsistent", "offset_us": None,
+            "confidence": confidence, "coarse_us": int(coarse_us),
+            "dual_delta_us": dual_delta_us, "drift_us": None,
+        }
     # R1：漂移取证——远距窗口再测一次；偏差超阈即如实拒答（不返回看似可用的单值）
     # drift_us 语义（复核 M-b）：数值 = 该跨度上的实测漂移；**None = 未取证**
     # （素材短于 DRIFT_WINDOW_SPACING_S + 2s，远窗取不齐）。调用方据此知道 R1 检查没跑，
@@ -177,11 +182,12 @@ def window_pcm_args(input_path: str, start_s: float, duration_s: float) -> list[
     trim_start = start_s - seek_s
     return [
         "-hide_banner", "-nostdin", "-y",
-        "-ss", "%.6f" % seek_s,
+        "-ss", f"{seek_s:.6f}",
         "-i", str(input_path),
         "-vn", "-map", "0:a:0",
-        "-af", "aresample=%d:async=1:first_pts=0,atrim=start=%.6f:end=%.6f" % (
-            SAMPLE_RATE, trim_start, trim_start + duration_s),
+        "-af",
+        f"aresample={SAMPLE_RATE}:async=1:first_pts=0"
+        f",atrim=start={trim_start:.6f}:end={trim_start + duration_s:.6f}",
         "-ac", "1", "-ar", str(SAMPLE_RATE),
         "-c:a", "pcm_f32le", "-f", "f32le",
         "pipe:1",

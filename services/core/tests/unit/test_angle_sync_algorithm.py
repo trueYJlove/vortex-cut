@@ -238,7 +238,8 @@ def test_short_material_reports_window_too_short() -> None:
     assert result["reason"] == "window_too_short", result
     # 成员侧更短（复核 nit a）：同样必须是 window_too_short，而不是越界异常
     longer = _reference(10.0)
-    assert measure_offset(longer, _shift(longer, 100.0)[: int(SAMPLE_RATE * 2)])["reason"] == "window_too_short"
+    shorter_member = _shift(longer, 100.0)[: int(SAMPLE_RATE * 2)]
+    assert measure_offset(longer, shorter_member)["reason"] == "window_too_short"
 
 
 def test_determinism() -> None:
