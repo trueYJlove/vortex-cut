@@ -53,6 +53,27 @@ PYTHONPATH=tools .tmp/spike-venv/Scripts/python.exe tools/spikes/w22_speaker/ami
 PYTHONPATH=tools .tmp/spike-venv/Scripts/python.exe tools/spikes/w22_speaker/der.py
 ```
 
+## 阈值策略 spike（`threshold-strategies*.{json,txt}` / `normalization-*.{json,txt}`）
+
+回答"不靠真值怎么选 τ"。8 类无监督策略 × 4 场 × 2 模型，τ 网格 0.20–0.80：
+
+| 策略 | 均值 DER | 最差 |
+|---|---|---|
+| oracle（用真值，上界） | 37.8% | 57.6% |
+| dist_pct70 | **49.8%** | **63.6%** |
+| silhouette | 50.2% | 62.9% |
+| gap_mid | 51.2% | 62.9% |
+| fixed 0.45（现基线） | 57.0% | **94.5%** |
+| gap_ratio | 73.6% | 101.0% |
+| capK4/6/8 | 46.0–47.6% | 62.8% | ⚠️ **不可采信，见下** |
+
+- **现成启发式只填回一半差距**，没有任何一个达可用线；唯一实质收益是**最差一场 94.5% → ~63%**。
+- ⚠️ **capK 被数据集混淆**：AMI 人数几乎恒为 4（test 15/16、dev 18/18、train 129/136），
+  "限 6–8 人"等于**偷看答案区间**，不能证明其在人数多变素材上成立。
+- **两个廉价归一化修法都不成立**：均值中心化 **78.6%**（反而大幅变差）、秩归一化 40.3%（中性）。
+  中心化变差的**机制尚未坐实**（候选：中心化后部分向量范数趋零、归一化放噪），
+  故只采信"本形态下有害"，不采信"中心化必然有害"。
+
 ## 仍未取证
 
 跨语言（AMI 为英语）、重叠语音（本口径忽略）、远场单麦（用 Mix-Headset 头戴混合）、
