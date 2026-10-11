@@ -1,0 +1,497 @@
+{
+  "threshold": 0.2,
+  "groups": {
+    "far-arrays 不同阵列(≈两机位)": {
+      "n": 12,
+      "ready": 8,
+      "expect_ready": true,
+      "min_conf": 0.2357,
+      "max_conf": 0.7705,
+      "max_abs_offset_us": 2833,
+      "rows": [
+        {
+          "a": "ES2004a.Array1-01@60",
+          "b": "ES2004a.Array2-01@60",
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.7705,
+          "offset_us": 1375
+        },
+        {
+          "a": "ES2004a.Array1-01@140",
+          "b": "ES2004a.Array2-01@140",
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.5126,
+          "offset_us": 521
+        },
+        {
+          "a": "ES2004a.Array1-01@220",
+          "b": "ES2004a.Array2-01@220",
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.4531,
+          "offset_us": 375
+        },
+        {
+          "a": "ES2004a.Array1-01@300",
+          "b": "ES2004a.Array2-01@300",
+          "status": "unavailable",
+          "reason": "clock_drift",
+          "confidence": 0.2965,
+          "offset_us": null
+        },
+        {
+          "a": "ES2004a.Array1-01@380",
+          "b": "ES2004a.Array2-01@380",
+          "status": "unavailable",
+          "reason": "clock_drift",
+          "confidence": 0.2357,
+          "offset_us": null
+        },
+        {
+          "a": "ES2004a.Array1-01@460",
+          "b": "ES2004a.Array2-01@460",
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.4137,
+          "offset_us": 375
+        },
+        {
+          "a": "ES2004a.Array1-01@540",
+          "b": "ES2004a.Array2-01@540",
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.5579,
+          "offset_us": 1375
+        },
+        {
+          "a": "ES2004a.Array1-01@620",
+          "b": "ES2004a.Array2-01@620",
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.3561,
+          "offset_us": 708
+        },
+        {
+          "a": "ES2004a.Array1-01@700",
+          "b": "ES2004a.Array2-01@700",
+          "status": "unavailable",
+          "reason": "low_confidence",
+          "confidence": 0.3365,
+          "offset_us": null
+        },
+        {
+          "a": "ES2004a.Array1-01@780",
+          "b": "ES2004a.Array2-01@780",
+          "status": "unavailable",
+          "reason": "low_confidence",
+          "confidence": 0.39,
+          "offset_us": null
+        },
+        {
+          "a": "ES2004a.Array1-01@860",
+          "b": "ES2004a.Array2-01@860",
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.7195,
+          "offset_us": 750
+        },
+        {
+          "a": "ES2004a.Array1-01@940",
+          "b": "ES2004a.Array2-01@940",
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.5313,
+          "offset_us": 2833
+        }
+      ]
+    },
+    "same-near 同阵列相邻": {
+      "n": 12,
+      "ready": 12,
+      "expect_ready": true,
+      "min_conf": 0.8709,
+      "max_conf": 0.9828,
+      "max_abs_offset_us": 146,
+      "rows": [
+        {
+          "a": "ES2004a.Array1-02@60",
+          "b": "ES2004a.Array1-01@60",
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.9781,
+          "offset_us": -125
+        },
+        {
+          "a": "ES2004a.Array1-02@140",
+          "b": "ES2004a.Array1-01@140",
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.9686,
+          "offset_us": 21
+        },
+        {
+          "a": "ES2004a.Array1-02@220",
+          "b": "ES2004a.Array1-01@220",
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.9828,
+          "offset_us": -104
+        },
+        {
+          "a": "ES2004a.Array1-02@300",
+          "b": "ES2004a.Array1-01@300",
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.9705,
+          "offset_us": -83
+        },
+        {
+          "a": "ES2004a.Array1-02@380",
+          "b": "ES2004a.Array1-01@380",
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.9047,
+          "offset_us": 104
+        },
+        {
+          "a": "ES2004a.Array1-02@460",
+          "b": "ES2004a.Array1-01@460",
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.9299,
+          "offset_us": 21
+        },
+        {
+          "a": "ES2004a.Array1-02@540",
+          "b": "ES2004a.Array1-01@540",
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.9623,
+          "offset_us": 21
+        },
+        {
+          "a": "ES2004a.Array1-02@620",
+          "b": "ES2004a.Array1-01@620",
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.8709,
+          "offset_us": 21
+        },
+        {
+          "a": "ES2004a.Array1-02@700",
+          "b": "ES2004a.Array1-01@700",
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.9255,
+          "offset_us": 21
+        },
+        {
+          "a": "ES2004a.Array1-02@780",
+          "b": "ES2004a.Array1-01@780",
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.9705,
+          "offset_us": 0
+        },
+        {
+          "a": "ES2004a.Array1-02@860",
+          "b": "ES2004a.Array1-01@860",
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.9587,
+          "offset_us": 146
+        },
+        {
+          "a": "ES2004a.Array1-02@940",
+          "b": "ES2004a.Array1-01@940",
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.969,
+          "offset_us": 0
+        }
+      ]
+    },
+    "same-mid 同阵列对角": {
+      "n": 12,
+      "ready": 11,
+      "expect_ready": true,
+      "min_conf": 0.0,
+      "max_conf": 0.9825,
+      "max_abs_offset_us": 521,
+      "rows": [
+        {
+          "a": "ES2004a.Array1-05@60",
+          "b": "ES2004a.Array1-01@60",
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.9825,
+          "offset_us": 42
+        },
+        {
+          "a": "ES2004a.Array1-05@140",
+          "b": "ES2004a.Array1-01@140",
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.8485,
+          "offset_us": 271
+        },
+        {
+          "a": "ES2004a.Array1-05@220",
+          "b": "ES2004a.Array1-01@220",
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.9664,
+          "offset_us": -83
+        },
+        {
+          "a": "ES2004a.Array1-05@300",
+          "b": "ES2004a.Array1-01@300",
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.9158,
+          "offset_us": 62
+        },
+        {
+          "a": "ES2004a.Array1-05@380",
+          "b": "ES2004a.Array1-01@380",
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.6506,
+          "offset_us": 0
+        },
+        {
+          "a": "ES2004a.Array1-05@460",
+          "b": "ES2004a.Array1-01@460",
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.5758,
+          "offset_us": 521
+        },
+        {
+          "a": "ES2004a.Array1-05@540",
+          "b": "ES2004a.Array1-01@540",
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.921,
+          "offset_us": 62
+        },
+        {
+          "a": "ES2004a.Array1-05@620",
+          "b": "ES2004a.Array1-01@620",
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.5849,
+          "offset_us": 375
+        },
+        {
+          "a": "ES2004a.Array1-05@700",
+          "b": "ES2004a.Array1-01@700",
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.622,
+          "offset_us": 62
+        },
+        {
+          "a": "ES2004a.Array1-05@780",
+          "b": "ES2004a.Array1-01@780",
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.8063,
+          "offset_us": -354
+        },
+        {
+          "a": "ES2004a.Array1-05@860",
+          "b": "ES2004a.Array1-01@860",
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.8816,
+          "offset_us": -125
+        },
+        {
+          "a": "ES2004a.Array1-05@940",
+          "b": "ES2004a.Array1-01@940",
+          "status": "unavailable",
+          "reason": "window_too_short",
+          "confidence": 0.0,
+          "offset_us": null
+        }
+      ]
+    },
+    "unrelated 跨会议": {
+      "n": 12,
+      "ready": 0,
+      "expect_ready": false,
+      "min_conf": 0.0238,
+      "max_conf": 0.122,
+      "max_abs_offset_us": null,
+      "rows": [
+        {
+          "a": "ES2004a.Mix-Headset@60",
+          "b": "IS1009a.Mix-Headset@60",
+          "status": "unavailable",
+          "reason": "low_confidence",
+          "confidence": 0.0549,
+          "offset_us": null
+        },
+        {
+          "a": "ES2004a.Mix-Headset@140",
+          "b": "IS1009a.Mix-Headset@140",
+          "status": "unavailable",
+          "reason": "low_confidence",
+          "confidence": 0.0238,
+          "offset_us": null
+        },
+        {
+          "a": "ES2004a.Mix-Headset@220",
+          "b": "IS1009a.Mix-Headset@220",
+          "status": "unavailable",
+          "reason": "low_confidence",
+          "confidence": 0.0413,
+          "offset_us": null
+        },
+        {
+          "a": "ES2004a.Mix-Headset@300",
+          "b": "IS1009a.Mix-Headset@300",
+          "status": "unavailable",
+          "reason": "low_confidence",
+          "confidence": 0.0517,
+          "offset_us": null
+        },
+        {
+          "a": "ES2004a.Mix-Headset@380",
+          "b": "IS1009a.Mix-Headset@380",
+          "status": "unavailable",
+          "reason": "low_confidence",
+          "confidence": 0.0319,
+          "offset_us": null
+        },
+        {
+          "a": "ES2004a.Mix-Headset@460",
+          "b": "IS1009a.Mix-Headset@460",
+          "status": "unavailable",
+          "reason": "low_confidence",
+          "confidence": 0.122,
+          "offset_us": null
+        },
+        {
+          "a": "ES2004a.Mix-Headset@60",
+          "b": "IS1009c.Mix-Headset@60",
+          "status": "unavailable",
+          "reason": "low_confidence",
+          "confidence": 0.0251,
+          "offset_us": null
+        },
+        {
+          "a": "ES2004a.Mix-Headset@140",
+          "b": "IS1009c.Mix-Headset@140",
+          "status": "unavailable",
+          "reason": "low_confidence",
+          "confidence": 0.0316,
+          "offset_us": null
+        },
+        {
+          "a": "ES2004a.Mix-Headset@220",
+          "b": "IS1009c.Mix-Headset@220",
+          "status": "unavailable",
+          "reason": "low_confidence",
+          "confidence": 0.026,
+          "offset_us": null
+        },
+        {
+          "a": "ES2004a.Mix-Headset@300",
+          "b": "IS1009c.Mix-Headset@300",
+          "status": "unavailable",
+          "reason": "low_confidence",
+          "confidence": 0.0395,
+          "offset_us": null
+        },
+        {
+          "a": "ES2004a.Mix-Headset@380",
+          "b": "IS1009c.Mix-Headset@380",
+          "status": "unavailable",
+          "reason": "low_confidence",
+          "confidence": 0.0562,
+          "offset_us": null
+        },
+        {
+          "a": "ES2004a.Mix-Headset@460",
+          "b": "IS1009c.Mix-Headset@460",
+          "status": "unavailable",
+          "reason": "low_confidence",
+          "confidence": 0.0476,
+          "offset_us": null
+        }
+      ]
+    },
+    "同会议 不同时间 远设备": {
+      "n": 4,
+      "ready": 0,
+      "expect_ready": false,
+      "min_conf": 0.0513,
+      "max_conf": 0.0801,
+      "max_abs_offset_us": null,
+      "rows": [
+        {
+          "a": "ES2004a.Array1-01@300",
+          "b": "ES2004a.Array2-01@900",
+          "status": "unavailable",
+          "reason": "low_confidence",
+          "confidence": 0.0801,
+          "offset_us": null
+        },
+        {
+          "a": "ES2004a.Array1-01@600",
+          "b": "ES2004a.Array2-01@120",
+          "status": "unavailable",
+          "reason": "low_confidence",
+          "confidence": 0.072,
+          "offset_us": null
+        },
+        {
+          "a": "ES2004a.Array2-01@420",
+          "b": "ES2004a.Array1-01@840",
+          "status": "unavailable",
+          "reason": "low_confidence",
+          "confidence": 0.0513,
+          "offset_us": null
+        },
+        {
+          "a": "ES2004a.Array1-01@180",
+          "b": "ES2004a.Array2-01@720",
+          "status": "unavailable",
+          "reason": "low_confidence",
+          "confidence": 0.0782,
+          "offset_us": null
+        }
+      ]
+    },
+    "同会议 不同时间 同设备": {
+      "n": 2,
+      "ready": 0,
+      "expect_ready": false,
+      "min_conf": 0.0463,
+      "max_conf": 0.0527,
+      "max_abs_offset_us": null,
+      "rows": [
+        {
+          "a": "ES2004a.Array1-01@300",
+          "b": "ES2004a.Array1-01@900",
+          "status": "unavailable",
+          "reason": "low_confidence",
+          "confidence": 0.0463,
+          "offset_us": null
+        },
+        {
+          "a": "ES2004a.Array1-01@600",
+          "b": "ES2004a.Array1-01@120",
+          "status": "unavailable",
+          "reason": "low_confidence",
+          "confidence": 0.0527,
+          "offset_us": null
+        }
+      ]
+    }
+  }
+}

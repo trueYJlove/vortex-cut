@@ -1,8 +1,15 @@
-2s 窗 @ 300.0s，NLCC（1.0=完全相同，0=无关）
-  同阵列相邻 Array1-01 vs Array1-02           NLCC=0.569  lag=-0.12 ms
-  同阵列对角 Array1-01 vs Array1-05           NLCC=0.571  lag=+0.12 ms
-  不同阵列 Array1-01 vs Array2-01            NLCC=0.525  lag=+0.15 ms
-  混合头戴 vs 阵列 Mix vs Array2-01            NLCC=0.092  lag=-651.96 ms
-  自相关基线 Array2-01 vs 自身                  NLCC=1.000  lag=+0.00 ms
+窗 60s @ 300.0s；置信度 = min(两窗 NLCC)，2s 窗，off=0 / +1s
 
-  人为 +83ms：NLCC=0.488 lag=-82.88 ms（应≈ -83 或 +83，符号见约定）
+配对                                    NLCC@0s  NLCC@1s     min | measure_offset
+同阵列 相邻（物理近）                             0.976    0.964   0.964 | ready(-) conf=0.970
+同阵列 对角（物理中）                             0.926    0.902   0.902 | ready(-) conf=0.916
+**不同阵列**（物理远 ≈ 两机位）                     0.525    0.433   0.433 | unavailable(clock_drift) conf=0.296
+不同设备类型（头戴混合 vs 阵列）                      0.092    0.099   0.092 | unavailable(low_confidence) conf=0.093
+
+--- 负向对照：跨会议（内容无关）---
+ES2004a vs IS1009a    NLCC  0.057/ 0.054 min  0.054 | conf=0.042 unavailable
+ES2004a vs IS1009c    NLCC  0.058/ 0.034 min  0.034 | conf=0.052 unavailable
+ES2004a vs EN2002b    NLCC  0.076/ 0.147 min  0.076 | conf=0.095 unavailable
+IS1009a vs IS1009c    NLCC  0.106/ 0.126 min  0.106 | conf=0.092 unavailable
+IS1009a vs EN2002b    NLCC  0.031/ 0.035 min  0.031 | conf=0.034 unavailable
+IS1009c vs EN2002b    NLCC  0.065/ 0.017 min  0.017 | conf=0.085 unavailable

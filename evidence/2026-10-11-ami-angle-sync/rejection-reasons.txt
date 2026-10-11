@@ -1,0 +1,15 @@
+CONF=0.2 DUAL=5000 DRIFT=10000
+
+  win   conf   dual_us   drift_us       status reason
+   60  0.771     833.3    -1083.0        ready None
+  140  0.513       0.0     -188.0        ready None
+  220  0.453     312.5    -1417.0        ready None
+  300  0.296     208.3    36854.0  unavailable clock_drift
+  380  0.236    2833.3   -34312.0  unavailable clock_drift
+  460  0.414       0.0      229.0        ready None
+  540  0.558      20.8     -562.0        ready None
+  620  0.356      20.8     2542.0        ready None
+  700  0.337    7687.5        nan  unavailable low_confidence
+  780  0.390    6937.5        nan  unavailable low_confidence
+  860  0.719      20.8      229.0        ready None
+  940  0.531      20.8      208.0        ready None

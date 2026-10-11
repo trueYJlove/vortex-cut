@@ -224,3 +224,59 @@ def test_window_pcm_contract() -> None:
 
 def test_envelope_hop_is_10ms() -> None:
     assert envelope(np.ones(SAMPLE_RATE)).shape[0] == pytest.approx(100, abs=1)
+
+def _partial_correlation(ref: np.ndarray, alpha: float, seed: int = 23) -> np.ndarray:
+    """构造与参考"半相关"的信号：归一化相关峰约为 alpha。
+
+    动机（P94）：真实**不同麦克风位置**的两路录音，相关峰落在 0.24–0.77 的"中等相关"区间，
+    而既有 fixture 只有"同源 0.79"与"无关 0.05"两端。没有中间档位，阈值就无从标定。
+    """
+    rng = np.random.default_rng(seed)
+    raw = np.convolve(rng.standard_normal(len(ref)), np.ones(32) / 32, mode="same")
+    # 关键：噪声要**用参考的包络调制**。否则两者包络结构不同，粗对齐（包络互相关）
+    # 找不到峰，整个测量退化为"无关"（实测 conf 0.05），fixture 就失去意义。
+    env = np.abs(ref)
+    shaped = raw * (env / (env.max() + 1e-12))
+    shaped = shaped / (np.linalg.norm(shaped) + 1e-12) * np.linalg.norm(ref)
+    return alpha * ref + np.sqrt(max(0.0, 1.0 - alpha * alpha)) * shaped
+
+
+def test_confidence_threshold_is_calibrated_for_real_multidevice_material() -> None:
+    """阈值标定回归（P94）：**双向**锁死"中等相关"区间。
+
+    背景：`CONFIDENCE_THRESHOLD` 原为 0.5，由**合成同源 fixture** 标定
+    （R3：同源 0.788 / 无关 0.052），**从未在真实多设备素材上验证**。
+    2026-10-11 用 AMI 真实多阵列同场景录音实测：物理远距设备（≈ 两个机位）
+    落在 **0.236–0.771**（12 窗），被 0.5 挡下 7 个；而估计器本身正确
+    （已知真值 0 / −83 / −400 ms ⇒ 粗估 0 / −80 / −400 ms）。
+    负样本：跨会议 ≤0.122，同房间不同时段 ≤0.080 ⇒ 取 **0.20**。
+
+    本用例的区分力：
+    - `alpha=0.30`（≈ 真实远距设备区间）必须 `ready` ⇒ **阈值回退到 0.5 即红**；
+    - `alpha=0.15` 必须 `unavailable(low_confidence)` ⇒ **阈值下调到 0.10 即红**。
+    """
+    ref = _reference(seconds=30.0)
+
+    mid = measure_offset(ref, _partial_correlation(ref, 0.30))
+    assert 0.20 < mid["confidence"] < 0.50, (
+        f"合成信号的相关峰 {mid['confidence']:.3f} 应落在重标定区间 (0.20, 0.50) 内，"
+        "否则本用例失去区分力（先修 fixture 再谈断言）"
+    )
+    assert mid["status"] == "ready", (
+        f"真实多设备量级的相关系数（{mid['confidence']:.3f}）必须被接受——"
+        "此处失败多半是 CONFIDENCE_THRESHOLD 被调回了 0.5 以上"
+    )
+
+    # 低档 fixture 必须落在 (0.10, 0.20)：低于 0.10 就守不住"阈值下调过头"这一侧。
+    # （首版用 seed=31，实测 conf 过低，负向对照 NC-B 当场证明它守不住。）
+    low = measure_offset(ref, _partial_correlation(ref, 0.15))
+    assert 0.10 < low["confidence"] < 0.20, (
+        f"低档 fixture 的相关峰 {low['confidence']:.3f} 应落在 (0.10, 0.20)，"
+        "否则它既拦不住上调也拦不住下调"
+    )
+    assert low["status"] == "unavailable"
+    assert low["reason"] == "low_confidence", (
+        f"低于阈值的相关（{low['confidence']:.3f}）必须被拒——"
+        "此处通过多半是阈值被下调过头，真实无关音频会被误收"
+    )
+

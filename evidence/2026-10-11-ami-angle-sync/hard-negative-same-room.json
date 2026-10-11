@@ -1,0 +1,95 @@
+{
+  "同会议 不同时间 不同设备(远)": {
+    "confidences": [
+      0.0801,
+      0.072,
+      0.0513,
+      0.0782
+    ],
+    "max": 0.0801,
+    "details": [
+      {
+        "a": "Array1-01@300",
+        "b": "Array2-01@900",
+        "confidence": 0.0801,
+        "status": "unavailable",
+        "reason": "low_confidence",
+        "offset_us": null
+      },
+      {
+        "a": "Array1-01@600",
+        "b": "Array2-01@120",
+        "confidence": 0.072,
+        "status": "unavailable",
+        "reason": "low_confidence",
+        "offset_us": null
+      },
+      {
+        "a": "Array2-01@420",
+        "b": "Array1-01@840",
+        "confidence": 0.0513,
+        "status": "unavailable",
+        "reason": "low_confidence",
+        "offset_us": null
+      },
+      {
+        "a": "Array1-01@180",
+        "b": "Array2-01@720",
+        "confidence": 0.0782,
+        "status": "unavailable",
+        "reason": "low_confidence",
+        "offset_us": null
+      }
+    ]
+  },
+  "同会议 不同时间 同设备": {
+    "confidences": [
+      0.0463,
+      0.0527
+    ],
+    "max": 0.0527,
+    "details": [
+      {
+        "a": "Array1-01@300",
+        "b": "Array1-01@900",
+        "confidence": 0.0463,
+        "status": "unavailable",
+        "reason": "low_confidence",
+        "offset_us": null
+      },
+      {
+        "a": "Array1-01@600",
+        "b": "Array1-01@120",
+        "confidence": 0.0527,
+        "status": "unavailable",
+        "reason": "low_confidence",
+        "offset_us": null
+      }
+    ]
+  },
+  "同会议 不同时间 近距设备": {
+    "confidences": [
+      0.0497,
+      0.0438
+    ],
+    "max": 0.0497,
+    "details": [
+      {
+        "a": "Array1-01@300",
+        "b": "Array1-02@900",
+        "confidence": 0.0497,
+        "status": "unavailable",
+        "reason": "low_confidence",
+        "offset_us": null
+      },
+      {
+        "a": "Array1-01@600",
+        "b": "Array1-02@120",
+        "confidence": 0.0438,
+        "status": "unavailable",
+        "reason": "low_confidence",
+        "offset_us": null
+      }
+    ]
+  }
+}

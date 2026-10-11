@@ -1,27 +1,88 @@
 {
-  "同阵列相邻 Array1-01 vs Array1-02": {
-    "nlcc_peak": 0.5692,
-    "lag_samples": -6,
-    "lag_ms": -0.125
+  "同阵列 相邻（物理近）": {
+    "a": "Array1-01",
+    "b": "Array1-02",
+    "nlcc_off0": 0.9756,
+    "nlcc_off1": 0.9641,
+    "min": 0.9641,
+    "status": "ready",
+    "confidence": 0.9705,
+    "offset_us": 83,
+    "coarse_us": 0
   },
-  "同阵列对角 Array1-01 vs Array1-05": {
-    "nlcc_peak": 0.5705,
-    "lag_samples": 6,
-    "lag_ms": 0.125
+  "同阵列 对角（物理中）": {
+    "a": "Array1-01",
+    "b": "Array1-05",
+    "nlcc_off0": 0.9256,
+    "nlcc_off1": 0.9023,
+    "min": 0.9023,
+    "status": "ready",
+    "confidence": 0.9158,
+    "offset_us": -62,
+    "coarse_us": 0
   },
-  "不同阵列 Array1-01 vs Array2-01": {
-    "nlcc_peak": 0.5251,
-    "lag_samples": 7,
-    "lag_ms": 0.146
+  "**不同阵列**（物理远 ≈ 两机位）": {
+    "a": "Array1-01",
+    "b": "Array2-01",
+    "nlcc_off0": 0.5251,
+    "nlcc_off1": 0.4331,
+    "min": 0.4331,
+    "status": "unavailable",
+    "confidence": 0.2965,
+    "offset_us": null,
+    "coarse_us": 0
   },
-  "混合头戴 vs 阵列 Mix vs Array2-01": {
-    "nlcc_peak": 0.0922,
-    "lag_samples": -31294,
-    "lag_ms": -651.958
+  "不同设备类型（头戴混合 vs 阵列）": {
+    "a": "Mix-Headset",
+    "b": "Array2-01",
+    "nlcc_off0": 0.0922,
+    "nlcc_off1": 0.0989,
+    "min": 0.0922,
+    "status": "unavailable",
+    "confidence": 0.0929,
+    "offset_us": null,
+    "coarse_us": 30000
   },
-  "自相关基线 Array2-01 vs 自身": {
-    "nlcc_peak": 1.0,
-    "lag_samples": 0,
-    "lag_ms": 0.0
+  "ES2004a~IS1009a": {
+    "nlcc_off0": 0.0566,
+    "nlcc_off1": 0.054,
+    "min": 0.054,
+    "status": "unavailable",
+    "confidence": 0.0423
+  },
+  "ES2004a~IS1009c": {
+    "nlcc_off0": 0.0581,
+    "nlcc_off1": 0.0343,
+    "min": 0.0343,
+    "status": "unavailable",
+    "confidence": 0.052
+  },
+  "ES2004a~EN2002b": {
+    "nlcc_off0": 0.0762,
+    "nlcc_off1": 0.1473,
+    "min": 0.0762,
+    "status": "unavailable",
+    "confidence": 0.0954
+  },
+  "IS1009a~IS1009c": {
+    "nlcc_off0": 0.1063,
+    "nlcc_off1": 0.1262,
+    "min": 0.1063,
+    "status": "unavailable",
+    "confidence": 0.0917
+  },
+  "IS1009a~EN2002b": {
+    "nlcc_off0": 0.0312,
+    "nlcc_off1": 0.0353,
+    "min": 0.0312,
+    "status": "unavailable",
+    "confidence": 0.034
+  },
+  "IS1009c~EN2002b": {
+    "nlcc_off0": 0.0652,
+    "nlcc_off1": 0.0168,
+    "min": 0.0168,
+    "status": "unavailable",
+    "confidence": 0.0846
   }
 }
