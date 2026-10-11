@@ -1,0 +1,22 @@
+CONFIDENCE_THRESHOLD=0.2 DRIFT_MIN_CONFIDENCE=0.5 DRIFT_TOLERANCE_US=10000
+
+== 真漂移（低频 + 重采样）应该判 clock_drift ==
+真漂移 0.1%                         c1=0.949 c2=0.971 cf=0.976 min3=0.949 drift= -20.10ms  unavailable/clock_drift
+真漂移 0.3%                         c1=0.891 c2=0.920 cf=0.916 min3=0.891 drift= -60.27ms  unavailable/clock_drift
+
+== 假漂移（AMI 硬同步双阵列，真值滞后 +0.15ms）不得判 clock_drift ==
+双阵列@ 60s                         c1=0.773 c2=0.771 cf=0.645 min3=0.645 drift=  -1.08ms  ready/None
+双阵列@ 220s                        c1=0.653 c2=0.453 cf=0.270 min3=0.270 drift=  -1.42ms  ready/None
+双阵列@ 300s                        c1=0.525 c2=0.462 cf=0.296 min3=0.296 drift=  36.85ms  ready/None
+双阵列@ 380s                        c1=0.256 c2=0.239 cf=0.236 min3=0.236 drift= -34.31ms  ready/None
+双阵列@ 460s                        c1=0.414 c2=0.424 cf=0.492 min3=0.414 drift=   0.23ms  ready/None
+双阵列@ 540s                        c1=0.560 c2=0.558 cf=0.650 min3=0.558 drift=  -0.56ms  ready/None
+双阵列@ 620s                        c1=0.357 c2=0.356 cf=0.463 min3=0.356 drift=   2.54ms  ready/None
+双阵列@ 700s                        c1=0.337 c2=0.396 cf=0.424 min3=0.337 drift=  39.42ms  unavailable/dual_window_inconsistent
+双阵列@ 780s                        c1=0.390 c2=0.399 cf=0.451 min3=0.390 drift= -13.75ms  unavailable/dual_window_inconsistent
+双阵列@ 860s                        c1=0.719 c2=0.748 cf=0.602 min3=0.602 drift=   0.23ms  ready/None
+双阵列@ 940s                        c1=0.623 c2=0.531 cf=0.468 min3=0.468 drift=   0.21ms  ready/None
+双阵列@ 140s                        c1=0.513 c2=0.626 cf=0.350 min3=0.350 drift=  -0.19ms  ready/None
+
+== 对照：同阵列相邻（近场）==
+同阵列相邻@300s                       c1=0.976 c2=0.970 cf=0.950 min3=0.950 drift=   0.12ms  ready/None

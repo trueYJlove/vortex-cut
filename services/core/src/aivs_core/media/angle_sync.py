@@ -51,6 +51,16 @@ MIN_WINDOW_S = 1.0
 # 素材取证后再实现。
 DRIFT_WINDOW_SPACING_S = 20.0
 DRIFT_TOLERANCE_US = 10_000
+# P96：漂移是**对素材的断言**（"这台设备的时钟在漂"），比对单个偏移的断言强得多，
+# 因此要求**更高的测量质量**才可下结论。实测标定（2026-10-11，
+# 见 evidence/2026-10-11-ami-angle-sync/drift-confidence-calibration.txt）：
+#   真漂移（0.1% / 0.3% 重采样）三窗（off 0 / +1s / +20s）置信度最低 **0.891 / 0.949**；
+#   假漂移（AMI **硬同步**双阵列上的低相干窗，实测滞后仅 +0.15 ms）最低 **0.236 / 0.296**。
+# 两者**不重叠** ⇒ 取 **0.50**：高于最高假漂移 1.69×、低于最低真漂移 1.78×，两侧余量均衡。
+# 质量不足时**不判漂移**——drift_us 记 None（= 未取证，与既有语义一致），
+# 而不是把测量噪声当成漂移去拒答；后者会把合法的双机位素材误拒
+# （P94 降阈值后实测 12 窗里有 2 窗就是这样被误拒的）。
+DRIFT_MIN_CONFIDENCE = 0.50
 DECODE_PREROLL_S = 0.5
 MANUAL_OFFSET_LIMIT_US = 600_000_000
 
@@ -163,11 +173,15 @@ def measure_offset(ref: np.ndarray, mem: np.ndarray) -> dict[str, Any]:
     drift_us: float | None = None
     res_far, conf_far = _fine_residual(ref, mem, coarse_us, DRIFT_WINDOW_SPACING_S)
     if res_far == res_far and conf_far >= CONFIDENCE_THRESHOLD:
-        drift_us = res_far - res1
-        if abs(drift_us) > DRIFT_TOLERANCE_US:
-            return {"status": "unavailable", "reason": "clock_drift", "offset_us": None,
-                    "confidence": min(confidence, conf_far), "coarse_us": int(coarse_us),
-                    "dual_delta_us": dual_delta_us, "drift_us": int(round(drift_us))}
+        candidate = res_far - res1
+        # P96：漂移判定必须**测量质量足够**（三窗都过 DRIFT_MIN_CONFIDENCE）才成立；
+        # 质量不足 ⇒ 只记「未取证」（drift_us = None），**不据此拒答**。
+        if min(conf1, conf2, conf_far) >= DRIFT_MIN_CONFIDENCE:
+            if abs(candidate) > DRIFT_TOLERANCE_US:
+                return {"status": "unavailable", "reason": "clock_drift", "offset_us": None,
+                        "confidence": min(confidence, conf_far), "coarse_us": int(coarse_us),
+                        "dual_delta_us": dual_delta_us, "drift_us": int(round(candidate))}
+            drift_us = candidate
     return {"status": "ready", "reason": None, "offset_us": int(round(coarse_us + res1)),
             "confidence": confidence, "coarse_us": int(coarse_us), "dual_delta_us": dual_delta_us,
             "drift_us": None if drift_us is None else int(round(drift_us))}

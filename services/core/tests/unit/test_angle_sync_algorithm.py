@@ -181,6 +181,35 @@ def test_dual_window_inconsistency_has_its_own_reason() -> None:
     )
 
 
+def test_low_confidence_material_does_not_raise_false_drift() -> None:
+    """P96：**测量质量不足时不得判 `clock_drift`**。
+
+    背景：漂移门的进入条件曾只要求远窗置信度过 `CONFIDENCE_THRESHOLD`（0.20），
+    于是**低相干但硬同步**的素材会因远窗残差抖动被整条拒答。实测（AMI **硬同步**双阵列，
+    真值滞后仅 +0.15 ms）：12 窗里有 2 窗就是这样被判成时钟漂移的——且**只在 P94 降阈值后才可达**
+    （0.5 时那两窗连漂移门都进不去）。
+
+    构造：低频素材 → **0.2% 重采样**（表观漂移 ≈40 ms @20 s 跨度，> 10 ms 容差）
+          → 再与包络整形噪声相混（alpha=0.30）⇒ 三窗置信度都在 **0.28** 附近。
+    期望：**ready** 且 `drift_us is None`（= 未取证），而非 `unavailable(clock_drift)`。
+
+    区分力：把 `DRIFT_MIN_CONFIDENCE` 去掉（或置 0）⇒ 本用例红。
+    """
+    rng = np.random.default_rng(7)
+    smooth = np.convolve(rng.standard_normal(SAMPLE_RATE * 30), np.ones(1024) / 1024, mode="same")
+    mem = _partial_correlation(_resample(smooth, 1.002), 0.30)
+    result = measure_offset(smooth, mem)
+    assert result["confidence"] < angle_sync.DRIFT_MIN_CONFIDENCE, (
+        f"夹具置信度 {result['confidence']:.3f} 必须低于漂移门限，否则测的不是本条"
+    )
+    assert (result["dual_delta_us"] or 0) <= angle_sync.DUAL_WINDOW_TOLERANCE_US, (
+        f"夹具双窗差 {result['dual_delta_us']:.0f}us 必须过双窗门，否则会先被它拦下"
+    )
+    assert result["status"] == "ready", result
+    assert result["reason"] is None, result
+    assert result["drift_us"] is None, "质量不足时漂移应为『未取证』(None)"
+
+
 def test_clock_drift_is_rejected_not_silently_averaged() -> None:
     """R1：0.1% 采样时钟差 ⇒ 必须 unavailable(clock_drift)，**不得**返回看似可用的单值。
 
