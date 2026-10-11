@@ -140,7 +140,13 @@ def pick_strategies(dendro, vecs, tau_grid):
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--setup-dir", required=True)
+    ap.add_argument("--setup-dir", help="AMI diarization setup 目录（与 --rttm-dir 二选一）")
+    ap.add_argument("--rttm-dir", help="扁平 RTTM 目录（AISHELL-4 等）")
+    ap.add_argument("--audio-ext", default=None, help="音频扩展名；默认试 Mix-Headset.wav 与 .flac")
+    ap.add_argument(
+        "--channel", type=int, default=None,
+        help="取单通道（多通道阵列必须给，避免下混梳状干涉）",
+    )
     ap.add_argument("--audio-dir", required=True)
     ap.add_argument("--models-dir", default=".tmp/spike-models")
     ap.add_argument("--meetings", nargs="+", required=True)
@@ -151,26 +157,33 @@ def main() -> int:
     ap.add_argument("--out", default=".tmp/threshold-strategies.json")
     args = ap.parse_args()
 
-    setup, audio_dir = Path(args.setup_dir), Path(args.audio_dir)
+    setup = Path(args.setup_dir) if args.setup_dir else Path(".")
+    audio_dir = Path(args.audio_dir)
     models_dir = Path(args.models_dir)
     rttm_of = {}
-    for part in ("test", "dev", "train"):
-        for p in (setup / "only_words" / "rttms" / part).glob("*.rttm"):
+    if args.rttm_dir:
+        for p in Path(args.rttm_dir).glob("*.rttm"):
             rttm_of.setdefault(p.stem, p)
+    else:
+        for part in ("test", "dev", "train"):
+            for p in (setup / "only_words" / "rttms" / part).glob("*.rttm"):
+                rttm_of.setdefault(p.stem, p)
 
     report = {"generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
               "tau_grid": FINE_TAU, "meetings": {}, "models": args.models}
     windows_dump: dict[str, list] = {}
     sv = SileroVad(".venv/Lib/site-packages/faster_whisper/assets/silero_vad_v6.onnx")
 
+    exts = [args.audio_ext] if args.audio_ext else [".Mix-Headset.wav", ".flac", ".wav"]
     for meeting in args.meetings:
-        wav = audio_dir / f"{meeting}.Mix-Headset.wav"
+        wav = next((audio_dir / f"{meeting}{e}" for e in exts
+                    if (audio_dir / f"{meeting}{e}").exists()), None)
         rttm = rttm_of.get(meeting)
-        if rttm is None or not wav.exists():
+        if rttm is None or wav is None:
             report["meetings"][meeting] = {"error": "missing rttm or audio"}
             continue
         ref = load_rttm(rttm)
-        samples = decode_mono16k(wav)
+        samples = decode_mono16k(wav, 0.0, None, channel=args.channel)
         total_s = samples.shape[0] / SR
         voiced = sv.voiced_10ms(samples, hop_ms=10.0)
         hop_s = 0.01
