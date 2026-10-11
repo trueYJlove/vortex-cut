@@ -1,0 +1,15 @@
+--- 语料与标注来源 ---
+AMI Meeting Corpus —— https://groups.inf.ed.ac.uk/ami/corpus/
+  音频：Edinburgh 官方镜像 amicorpus/<meeting>/audio/<meeting>.Mix-Headset.wav
+  许可：Creative Commons Attribution 4.0 International (CC BY 4.0)
+
+AMI manual annotations v1.6.2 —— CC BY 4.0
+  https://groups.inf.ed.ac.uk/ami/download/
+
+diarization setup（参考轮次派生自官方标注）—— Apache-2.0
+  https://github.com/pyannote/AMI-diarization-setup
+  引用：F. Landini, J. Profant, M. Diez, L. Burget,
+        "Bayesian HMM clustering of x-vector sequences (VBx) in speaker diarization",
+        https://arxiv.org/abs/2012.14952
+
+Silero VAD v6 —— 项目已随包分发（faster-whisper assets），本 spike 直接复用，无新增下载。

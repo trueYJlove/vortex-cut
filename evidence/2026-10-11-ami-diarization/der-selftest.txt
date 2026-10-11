@@ -1,0 +1,14 @@
+case                              DER  判定
+identical                      0.0000  ✅
+permuted labels                0.0000  ✅
+empty hypothesis               1.0000  ✅
+single speaker everywhere      0.5000  （无期望值，仅取值）
+shifted +1s                    0.0975  （无期望值，仅取值）
+half missing                   0.5000  （无期望值，仅取值）
+extra speech in silence        0.2634  （无期望值，仅取值）
+single-speaker == 1-max_share   0.5000  期望≈0.5000 ✅
+shift monotonic 0/1/2/5s     0.0000 0.0975 0.2292 0.6243  单调=✅ 5s>0.4=✅
+  （empty: miss=1.000 fa=0.000 spk=0.000）
+  （single: miss=0.000 fa=0.000 spk=0.500）
+
+自检: 全部通过 ✅
