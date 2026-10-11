@@ -27,6 +27,14 @@ W2.2 的精度轴此前标"未取证"，原因是本机无真实多说话人对�
 | `der-selftest.txt` | 评分器自检（9 项，含平移单调性对照） |
 | `harness.sha256` / `audio.sha256` | 生成该批结果时的 harness 与音频的 sha256 |
 
+> **⚠️ 仪器已迁移（2026-10-11 晚，Design Gate §6 S0 ①）**：`tools/spikes/w22_speaker/der.py`
+> 已改为**薄转发**到常设实现 `tools/quality_eval/diarization.py`（转发器 docstring 记有旧版 sha256）。
+> 因此 `sha256sum -c harness.sha256` **会对 `der.py` 报不匹配——这是预期的**：
+> 本清单记录的是**生成该批证据时的修订**，迁移前内容可由 git 在提交 `49f3edf` 取回。
+> **行为等价性已核**：走转发器重跑自检，数值与本目录 `der-selftest.txt` **逐位相同**
+> （`0.0000 / 0.0975 / 0.2292 / 0.6243`，单调性与 5s 门判定一致）。
+> 同一说明适用于 `evidence/2026-10-11-aishell4-chinese/` 与 `evidence/2026-10-10-w22-speaker-spike/` 的同名清单。
+
 ## 评分口径（**引数字前必读**）
 
 - 自实现 DER（`tools/spikes/w22_speaker/der.py`）：10 ms 帧、**0.25 s collar**、
