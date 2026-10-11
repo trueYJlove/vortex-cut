@@ -421,6 +421,21 @@ class ProjectAssetService:
                     (asset_id,),
                 )
                 db.execute("DELETE FROM transcripts WHERE asset_id=?", (asset_id,))
+                # 派生分析数据（可重算）同样先手工清理。
+                # 2026-10-11 复现的既有缺陷：beat_grids / cv_analyses 对 assets 是
+                # ON DELETE **NO ACTION**，一旦存在分析行，下面的 DELETE 直接被 FK 拒绝，
+                # 而上面的通用 except 会把它报成"素材被镜头需求或生成记录引用"——
+                # **原因错且无出路**（用户跑过一次 CV 分析或节拍分析就永远删不掉素材）。
+                # 这两张表是纯派生数据（删掉可重新分析），故与 transcripts 同口径清理。
+                db.execute("DELETE FROM beat_grids WHERE asset_id=?", (asset_id,))
+                # cv_analyses 还有子表 cv_samples（FK 同为 NO ACTION）⇒ 必须自下而上清，
+                # 否则删分析行本身会被拒（这条是写测试时才暴露的：只清父表会撞 cv_samples）。
+                db.execute(
+                    "DELETE FROM cv_samples WHERE analysis_id IN ("
+                    "SELECT id FROM cv_analyses WHERE asset_id=?)",
+                    (asset_id,),
+                )
+                db.execute("DELETE FROM cv_analyses WHERE asset_id=?", (asset_id,))
                 try:
                     db.execute("DELETE FROM assets WHERE id=?", (asset_id,))
                 except sqlite3.IntegrityError as exc:

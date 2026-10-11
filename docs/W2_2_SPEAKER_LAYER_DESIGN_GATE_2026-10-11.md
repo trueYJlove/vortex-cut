@@ -26,7 +26,7 @@
 
 | 层 | 文件 | 内容 |
 |---|---|---|
-| Core VAD（新） | `services/core/src/aivs_core/media/speaker_vad.py` | `voiced_mask_10ms`：**包装随包 Silero**（经 `faster_whisper.utils.get_assets_path()` 定位），不自己实现 VAD |
+| Core VAD（新） | `services/core/src/aivs_core/media/speaker_vad.py` | `voiced_mask_10ms`：**包装随包 Silero**（经 `faster_whisper.utils.get_assets_path()` 定位），不自己实现 VAD。**⚠️ 这两个符号都不在 `faster_whisper.__all__`**（复核实测：`get_assets_path` 在 `utils.py`、`get_vad_model` 在 `vad.py`，均**非导出面**）；生产代码此前只用 `WhisperModel` 这一公开面 ⇒ **耦合风险比初版判断更高**，见 §10 O1 |
 | Core 算法（纯函数，无 DB/无 ONNX） | `services/core/src/aivs_core/media/speaker.py` | 窗栅格与选取 / 层次聚类 / **τ 选择策略** / 窗标签→轮次 |
 | Core 模型（ONNX） | 同上（`SpeakerEmbedder`） | CAM++ 会话加载 + Kaldi 80 维 fbank 前端（**纯 numpy，已与 `kaldi-native-fbank` 逐值等价**，spike §2.5） |
 | Core 服务 | 同上（`SpeakerDiarizationService`） | 建作业 / 执行 / 摘要 / **重聚类（复用已存 embedding 换 τ，不重跑推理）** |
@@ -63,7 +63,10 @@ class SpeakerEmbedder:
 class SpeakerDiarizationService:
     def create_job(self, project_id: str, asset_id: str) -> str | None      # None = 幂等短路
     async def run_job(self, row, cancel_event, progress=None, stage=None) -> dict
-    def summary(self, project_id: str, asset_id: str) -> dict               # 行选择 + stale 读时计算
+    def summary(self, project_id: str, asset_id: str) -> dict
+        # 行选择 + stale 读时计算。**列投影约束（复核 F6）**：
+        # 摘要**不得** SELECT *——`embeddings_blob` 单行可达 1.3 MB，整行读会把它拉进内存。
+        # 摘要只取标量列；BLOB 仅由 `recluster` 显式读取
     def recluster(self, project_id: str, asset_id: str, *, k_max: int | None = None) -> dict
 ```
 
@@ -74,7 +77,11 @@ class SpeakerDiarizationService:
 ```sql
 CREATE TABLE speaker_diarizations (
   id TEXT PRIMARY KEY,
-  asset_id TEXT NOT NULL REFERENCES assets(id),
+  -- **删除语义（F1，阻断级，必须冻结）**：派生分析数据**随素材自动清**。
+  -- 反例警示：beat_grids / cv_analyses 用的是 NO ACTION，实测「插一行分析 ⇒
+  -- DELETE FROM assets 直接被 FK 拒绝」（2026-10-11 复现，且 delete_asset 把该拒绝
+  -- 报成"被镜头需求或生成记录引用"，原因错、无出路）。本表**不重蹈**：
+  asset_id TEXT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
   source_fingerprint TEXT NOT NULL,
   algorithm_version INTEGER NOT NULL CHECK(algorithm_version >= 1),
   status TEXT NOT NULL CHECK(status IN ('queued','running','ready','failed','unavailable')),
@@ -98,10 +105,18 @@ CREATE UNIQUE INDEX idx_speaker_diarizations_ready
   WHERE status IN ('ready','unavailable');
 ```
 
-**为什么存 embedding**：本包已确定瓶颈在**τ 选择**（spike §2.9/§2.10）。存下窗 embedding 后，
-换策略/换 τ 只需重跑聚类（毫秒级）而不必重跑 ONNX（spike 实测每场 2–4 分钟）——
-**这让"阈值策略"的迭代成本从分钟级降到秒级**，是本包最重要的一处工程杠杆。
-体量：约 1500 窗 × 192 维 × 4 B ≈ **1.2 MB/场**，桌面端可接受。
+**为什么存 embedding**：本包已确定瓶颈在 **τ 选择**（见 §5）。存下窗 embedding 后，
+换策略/换 τ **只重跑聚类、不重跑 ONNX**。
+
+**量级（2026-10-11 第一手实测，非估计）**：
+- **重聚类耗时**：n=527–547 窗 **0.30–0.40 s**；n=1366 窗 **5.1–5.5 s**；n=1639–1697 窗 **7.8–9.4 s**
+  （建树是主导项，随窗数**平方**增长）。对照重跑 embedding 的 **71–79 s/场**（AISHELL-4，spike 记录）
+  ⇒ 收益是 **约 8–15×**，**是"分钟级→秒级"而非"毫秒级"**（初版口径写错，已改）。
+- **体量**：`n_windows × dim × 4 B`。CAM++（192 维）实测 **0.40 MB**（547 窗）–**1.25 MB**（1639 窗）；
+  取会话上限约 **1.3 MB/场**。36 场合计约 **15–45 MB**。**备份/迁移影响未实测**（§10 O5）。
+
+> **实现注记**：上表的建树是 spike 级实现（Python 循环的 Lance-Williams，O(n²)）。
+> 生产实现应对 1600 窗级会议做优化（优先队列 UPGMA 或向量化更新）；S2 的性能门以实测为准。
 
 ## 4. 流水线与参数（冻结；每个值都带取证出处）
 
@@ -113,7 +128,9 @@ CREATE UNIQUE INDEX idx_speaker_diarizations_ready
 | 前端 | Kaldi 80 维 log-fbank，**纯 numpy**（与 `kaldi-native-fbank` 逐值等价） | spike §2.5（不引入 C++ 扩展） |
 | embedding | CAM++，L2 归一化，192 维 | spike §2.7 |
 | 聚类 | 余弦距离 + **平均连接（UPGMA）** | spike §2.9（与单/全连接有区分力的对照） |
-| τ 选择 | **silhouette 在簇数 ∈ [2, k_max] 上取最大**；`k_max = 8` 作为**上限安全界** | spike §2.9/§2.10（silhouette 是跨语料唯一稳住第一档者；capK 的上限**低于真值也有效** ⇒ 价值在抑制过分割） |
+| τ 选择（**对照**） | `silhouette` —— **spike 已实测的定义**：整条 τ 网格上取 silhouette 最大，簇数仅受 40 封顶 | spike §2.9/§2.10（跨语料唯一稳住第一档：50.2% / 47.9%） |
+| τ 选择（**本门候选**） | `silhouette + k_max` —— **本门新组合（silhouette 限定在簇数 ∈ [2, k_max]、k_max = 8）、spike 从未实测** | 依据：capK 的上限**低于真值也有效**（中文 6 人场上 capK4 仍居第一档）⇒ 价值在抑制过分割。**⚠️ 无实测值：S1 必须首先测它**，且在测出之前**不得**用旧 silhouette 的数字替它背书 |
+| VAD 判决阈值 | `vad_threshold = 0.5`（Silero 逐块语音概率）；**不使用** `get_speech_timestamps` 的 neg_threshold / min_silence / min_speech 口径 | 本门冻结；**注意与 `min_speech_fraction` 是两个不同的东西**（后者是窗级语音占比筛选，见上一行）。**改这个阈值必须重测 §5 精度门**（spike §2.9 边界：最优 τ 随 VAD 条件变，0.45→0.50） |
 | 轮次化 | 窗标签 → 帧标签（最近中心裁决）→ 合并 < 0.4 s 的碎段 | spike §2.7 的实现口径 |
 
 ## 5. 精度门（**本门最重要的裁决**）
@@ -127,24 +144,35 @@ CREATE UNIQUE INDEX idx_speaker_diarizations_ready
 
 **门限（切片 1 必须达到）**：
 
-| 指标 | 门限 | 现状（4+4 样本，spike §2.9/§2.10） |
-|---|---|---|
-| **自动 τ** 下 DER 均值 | **≤ 40%**（**两个语料都要满足**） | silhouette：AMI 50.2% / 中文 47.9% |
-| **自动 τ** 下 DER 最差场 | **≤ 55%** | AMI 62.9% / 中文 64.2% |
-| 上界参照（**非门限**，仅供定位） | oracle τ：AMI 30.1% / 中文 33.4% | — |
-| 资源 | ≤ 10 s/分钟源；峰值 RSS ≤ 600 MB | 实测 1.7–4.7 s/分钟、347–373 MB |
+| 指标 | 门限 |
+|---|---|
+| **自动 τ** 下 DER 均值 | **≤ 40%**（**两个语料都要满足**） |
+| **自动 τ** 下 DER 最差场 | **≤ 55%** |
+| 资源 | ≤ 10 s/分钟源；峰值 RSS ≤ 600 MB |
 
-**为什么是 40%**：它**严格优于**现状（48–50%）、又**高于** oracle 上界（30–33%），
-落在一个"必须真的改进 τ 策略、但不必换掉整条技术路线"的位置。
-**若切片 1 达不到** ⇒ **触发 D5 升级路径裁决**（概率化聚类 VBx / 引入更强分段先验），
-**不得**以"再调调参数"续期——这是 spike §2.9 已经否掉的方向。
+> **口径限定（复核 F10，必须写明）**：与此对照的三个参照**不是同一口径**，不得混读——
+> ① **每场用真值调 τ**（乐观上界，不可产品化）；② **自动选 τ 家族的每场真值调参上界**；
+> ③ 现状的**自动 τ** 实现。三者数值见 spike §2.9/§2.10 与
+> `evidence/2026-10-11-ami-diarization/threshold-strategies-summary.txt`、
+> `evidence/2026-10-11-aishell4-chinese/threshold-strategies-summary.txt`（**本文件不复述数字**，Rule 5）。
+>
+> **由此得出的一条硬结论**：40% 这个门限**严于中文语料的"自动选 τ 家族真值调参上界"（44.2%）**。
+> 换言之，**它不可能靠继续微调 AHC 阈值启发式达到**——这直接决定下面 §6 的切片结构。
+
+**与 spike D5 书面结论的关系（复核 F4，必须承认这处翻转）**：spike §2.9 明确写过
+"**不要再试 AHC 阈值启发式**"，D5 也要求走"专门设计"路线。本门**不假装**第一切片能靠启发式达标，
+因此把切片结构改成**对照 + 专门设计并行**（§6 S1），并给出**可判定的升级判据**：
+
+> **升级判据（机器可读）**：S1 结束时报出两条路线的 DER。
+> **若「专门设计」路线相对「对照」路线无显著改善，或两者都未过 40%**，则裁定为
+> **需要 VBx 级方案**，本包**停在 S1**并回到架构裁决——**不得**以"再调参数"续期。
 
 ## 6. 实施切片
 
 | 切片 | 内容 | 完成判据 |
 |---|---|---|
-| **S0** | 评测仪器常设化 + 语料扩到全场 | `der.py` 迁入 `tools/quality_eval/`（9 项自检随迁）；AMI 16 + AISHELL-4 20 全部下载并校验；**跑出自动 τ 的基线**（两个语料） |
-| **S1** | 纯函数（VAD 包装 / 窗 / 聚类 / **τ 策略** / 轮次化）+ 单测 | 纯函数测试全绿；**τ 策略的负向对照**（把 silhouette 换成固定 τ ⇒ 精度门用例红） |
+| **S0** | 评测仪器常设化（**含进 CI**）+ 语料扩到全场 + embedding 缓存 | ① `der.py` 迁入 `tools/quality_eval/`，**且 9 项自检以 pytest 用例形态纳入 `services/core/tests`**（`pyproject` 的 `testpaths` 只收 core，迁到 tools 的自检**不会进任何门**——复核 F2 实测）；spike 侧保留**薄转发**以免两份实现漂移，`der.py` 原件去向在此定稿；② AMI 16 + AISHELL-4 20 下载并逐场校验（`audio.sha256` 同步扩写）；③ **派生 embedding 缓存**：目录 + 以（素材指纹，模型 id，算法版本）为键 + 缓存文件 sha256 + 复算清单（**生产侧此前无此设施**，复核 F6）；④ 跑出**自动 τ 的基线**（两语料） |
+| **S1** | **对照 + 专门设计并行**（见 §5 的升级判据）：① 对照 = `silhouette + k_max`（**无实测值，先测**）；② 专门设计 = **逐录音距离分布建模**（spike §2.9 的①） | 两条路线都跑出 DER；**升级判据**按 §5 判定并回写；纯函数单测全绿（含"把 silhouette 换成固定 τ ⇒ 精度门用例红"的负向对照） |
 | **S2** | `SpeakerEmbedder` + v37 迁移 + 服务（幂等 / stale / 重聚类） + STATUS §1 同改 | 迁移测试 + 服务单测；**重聚类不重跑推理**由测试钉死（推理调用计数为 0） |
 | **S3** | 路由 + jobs 分派 + 集成（真实素材、零 egress 断言、**精度门**） | 集成全绿；**精度门在两语料上都过**；性能归档 |
 | **S4** | 契约 + IPC + preload + Desktop 面板（含 τ 重聚类入口） | 契约/IPC/组件测试；冻结通道白名单同步扩张 |
@@ -154,7 +182,7 @@ CREATE UNIQUE INDEX idx_speaker_diarizations_ready
 
 | 测试 | 覆盖 |
 |---|---|
-| `tools/quality_eval/diarization.py` 自检（9 项，含平移单调性） | 验收仪器的**区分力**（spike 已证） |
+| `services/core/tests/unit/test_diarization_scorer.py`（**pytest 形态**，9 项含平移单调性；仪器实现在 `tools/quality_eval/diarization.py`） | 验收仪器的**区分力**（spike 已证）。**必须落在 core 的 testpaths 内**，否则等于没有门（复核 F2） |
 | `speaker_algorithm_test.py`：τ 策略在合成双说话人上选对；固定 τ 负向对照；窗/轮次化边界；确定性 | 1 / 5 |
 | `speaker_vad_test.py`：Silero 包装在纯静音/低电平噪声上 0 误报；**能量 VAD 不得出现在任何调用路径**（import 锁） | D4 / R2 |
 | `speaker_storage_test.py`：v37 形状 + 部分唯一索引 + 指纹变化新行 + stale + 幂等短路 + **重聚类不重跑推理** | 2 / 3 |
@@ -164,7 +192,7 @@ CREATE UNIQUE INDEX idx_speaker_diarizations_ready
 
 ## 8. 实施中必须回写的文档（纪律）
 
-- v37 落地 → **同改 `docs/STATUS.md` §1 `latest_migration` 36 → 37**（否则一致性测试红）；
+- v37 落地 → **同改 `docs/STATUS.md` §1 `latest_migration`**（写成新值；一致性测试会拦住漏改，**本文件不预写数字**，Rule 5）；
 - 新增 provider / 模型（若最终自注册 Silero）→ 同改 `STATUS` §1 与 `model_registry` 三表；
 - 每个切片完成 → 在 `W2_2_SPEAKER_LAYER_IMPLEMENTATION_2026-10-11.md` 记**验收逐项对照表**
   （AGENTS.md Rule 3：无对照表不算闭环）；
@@ -182,7 +210,8 @@ CREATE UNIQUE INDEX idx_speaker_diarizations_ready
 
 | # | 项 | 处置 |
 |---|---|---|
-| O1 | Silero 资产耦合：经 `faster_whisper.utils.get_assets_path()` 定位 | 若 faster-whisper 移除该资产 ⇒ 改为在 `model_registry` 自注册（S2 预留 provider `onnx-speaker` 即可容纳） |
+| O1 | **Silero 资产耦合（风险高于初判）**：`get_assets_path` / `get_vad_model` **均非导出面**（不在 `__all__`），当前 faster-whisper 版本 1.2.1 | **S0 必须交付**：① 启动/首次使用时的**资产存在性探测**；② 缺失 ⇒ `unavailable(silero_asset_missing)`（**可测分支**，不是静默降级）；③ 记录版本上限约束。若上游移除 ⇒ 改为在 `model_registry` 自注册（S2 的 provider `onnx-speaker` 即可容纳） |
+| O5 | `speaker_diarizations` 含 BLOB 后的备份/恢复体积与耗时**未实测** | S2 实测一次（36 场派生行的备份/恢复），结论回写 §3 |
 | O2 | `k_max = 8` 的依据来自"上限低于真值也有效"，但**人数分布只覆盖 4–6** | 全场语料（S0）里 AISHELL-4 有 4–8 人档 ⇒ S0 基线时**顺便复核 k_max**，结论回写本文件 |
 | O3 | 重叠语音**未纳入评分**（口径忽略重叠） | 生产上是已知高估；若 S3 精度门在含重叠素材上失效，触发口径扩展（需与 W0.4 评测体系一起改） |
 | O4 | 分段（谁在说）与聚类的**联合**建模（VBx 路线） | 仅作为 D5 升级路径，本门不实施 |
