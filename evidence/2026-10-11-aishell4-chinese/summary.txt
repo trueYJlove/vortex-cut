@@ -1,0 +1,28 @@
+会议        时长s  参考人  语音s   grid/energy/silero/oracle
+L_R003S01C02    2363     6    2312   2361/138/1639/2146
+M_R003S01C01    2282     6    2192   2281/63/1607/2082
+S_R003S01C01    2216     5    2128   2214/325/1697/2112
+
+-- L_R003S01C02 (参考 6 人)
+   campplus  energy_vad  DER  95.0% @tau=0.55 | 假定   5 人 | miss  93.7% FA   0.2% spk   1.1%
+   campplus  silero_vad  DER  29.3% @tau=0.55 | 假定   7 人 | miss  12.4% FA   0.4% spk  16.5%
+   campplus  oracle_vad  DER  25.3% @tau=0.55 | 假定   9 人 | miss   0.0% FA   1.1% spk  24.1%
+   resnet34  energy_vad  DER  97.0% @tau=0.35 | 假定   3 人 | miss  93.7% FA   0.2% spk   3.1%
+   resnet34  silero_vad  DER  62.3% @tau=0.25 | 假定  44 人 | miss  12.4% FA   0.4% spk  49.5%
+   resnet34  oracle_vad  DER  57.5% @tau=0.30 | 假定  11 人 | miss   0.0% FA   1.1% spk  56.3%
+
+-- M_R003S01C01 (参考 6 人)
+   campplus  energy_vad  DER  96.4% @tau=0.50 | 假定   5 人 | miss  96.1% FA   0.2% spk   0.1%
+   campplus  silero_vad  DER  50.0% @tau=0.55 | 假定   3 人 | miss  11.0% FA   0.2% spk  38.9%
+   campplus  oracle_vad  DER  33.6% @tau=0.50 | 假定   6 人 | miss   0.2% FA   1.2% spk  32.2%
+   resnet34  energy_vad  DER  97.5% @tau=0.25 | 假定  11 人 | miss  96.1% FA   0.2% spk   1.2%
+   resnet34  silero_vad  DER  61.9% @tau=0.30 | 假定   8 人 | miss  11.0% FA   0.2% spk  50.8%
+   resnet34  oracle_vad  DER  57.1% @tau=0.30 | 假定   7 人 | miss   0.2% FA   1.2% spk  55.8%
+
+-- S_R003S01C01 (参考 5 人)
+   campplus  energy_vad  DER  77.0% @tau=0.50 | 假定   7 人 | miss  75.9% FA   0.0% spk   1.1%
+   campplus  silero_vad  DER  18.8% @tau=0.55 | 假定   8 人 | miss   7.3% FA   0.2% spk  11.3%
+   campplus  oracle_vad  DER   3.6% @tau=0.60 | 假定   6 人 | miss   0.1% FA   1.1% spk   2.5%
+   resnet34  energy_vad  DER  87.5% @tau=0.30 | 假定   9 人 | miss  75.9% FA   0.0% spk  11.6%
+   resnet34  silero_vad  DER  54.9% @tau=0.35 | 假定   7 人 | miss   7.3% FA   0.2% spk  47.4%
+   resnet34  oracle_vad  DER  51.4% @tau=0.35 | 假定   8 人 | miss   0.1% FA   1.1% spk  50.3%

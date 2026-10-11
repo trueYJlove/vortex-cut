@@ -1,0 +1,12 @@
+AISHELL-4 —— 真实中文会议语料（8 通道环形阵列，4–8 人，含重叠与快速轮替）
+  许可：Apache-2.0（以 HuggingFace 数据集卡为准：license:apache-2.0）
+  官方：https://www.openslr.org/111/   （test.tar.gz 5.2 GB）
+  本次镜像：https://hf-mirror.com/datasets/shenyunhang/AISHELL-4/  （分会议 FLAC + RTTM）
+  引用：Y. Fu et al., "AISHELL-4: An Open Source Dataset for Speech Enhancement,
+        Separation, Recognition and Speaker Diarization in Conference Scenario", Interspeech 2021.
+
+下载路径实测（2026-10-11，本机）：huggingface.co 直连不通、经代理 ~80KB/s；
+hf-mirror.com **直连** ~470KB/s（本次采用）；openslr 直连抖动 41–214KB/s。
+
+⚠️ 采集条件与 AMI 不同：**8 通道阵列的第 0 通道**（远场），而 AMI 用的是 Mix-Headset（近场头戴混合）。
+   两者 DER **不可直接比大小**；本目录的意义是"换一个语言 + 换一种采集条件看结论是否成立"。
