@@ -38,19 +38,27 @@ W2.2 的精度轴此前标"未取证"，原因是本机无真实多说话人对�
 
 ## 复现
 
+> ⚠️ **必须设 `PYTHONIOENCODING=utf-8`**（复核发现）：`der.py` 自检输出含 ✅/❌，
+> 中文 Windows 控制台默认 GBK 会直接 `UnicodeEncodeError` 崩掉。
+> 下面每条命令都已带该环境变量。
+
 ```bash
 # 1) 语料（仓外；CC BY 4.0，请保留署名）
 #    AMI 音频：https://groups.inf.ed.ac.uk/ami/AMICorpusMirror/amicorpus/<m>/audio/<m>.Mix-Headset.wav
 #    参考标注：https://codeload.github.com/pyannote/AMI-diarization-setup/tar.gz/refs/heads/main
 
 # 2) 评测（用 spike 隔离环境）
-PYTHONPATH=tools .tmp/spike-venv/Scripts/python.exe tools/spikes/w22_speaker/ami_eval.py \\
+PYTHONIOENCODING=utf-8 PYTHONPATH=tools .tmp/spike-venv/Scripts/python.exe tools/spikes/w22_speaker/ami_eval.py \\
   --setup-dir .tmp/ami/AMI-diarization-setup-main --audio-dir .tmp/ami/audio \\
   --meetings ES2004a IS1009a IS1009c EN2002b --models campplus resnet34 \\
   --out .tmp/ami-report.json
 
 # 3) 评分器自检（必须先绿）
-PYTHONPATH=tools .tmp/spike-venv/Scripts/python.exe tools/spikes/w22_speaker/der.py
+PYTHONIOENCODING=utf-8 PYTHONPATH=tools .tmp/spike-venv/Scripts/python.exe tools/spikes/w22_speaker/der.py
+
+# 4) 阈值策略 / 归一化实验（读 .tmp/strat-cache 的 embedding 缓存，不重跑推理）
+PYTHONIOENCODING=utf-8 PYTHONPATH=tools .tmp/spike-venv/Scripts/python.exe tools/spikes/w22_speaker/threshold_strategies.py --setup-dir .tmp/ami/AMI-diarization-setup-main --audio-dir .tmp/ami/audio --meetings ES2004a IS1009a IS1009c EN2002b --models campplus resnet34 --out .tmp/threshold-strategies.json
+PYTHONIOENCODING=utf-8 PYTHONPATH=tools .tmp/spike-venv/Scripts/python.exe tools/spikes/w22_speaker/normalization_experiment.py --setup-dir .tmp/ami/AMI-diarization-setup-main --out .tmp/normalization-experiment.json
 ```
 
 ## 阈值策略 spike（`threshold-strategies*.{json,txt}` / `normalization-*.{json,txt}`）

@@ -96,6 +96,12 @@ def test_unrelated_audio_is_unavailable() -> None:
     assert result["status"] == "unavailable"
     assert result["reason"] == "low_confidence"
     assert result["offset_us"] is None
+    # P94 重标定（0.5→0.20）后，"无关"必须仍被拒——**显式上界，不靠注释背书**
+    # （2026-10-11 复核：原实现只在注释里宣称"旧合成证据不被破坏"，无断言防它再变）
+    assert result["confidence"] < 0.10, (
+        f"合成无关音频的相关峰 {result['confidence']:.3f} 超出 0.10——"
+        "R3 的区分力基线（无关 ≈0.05）被破坏，须复查重标定"
+    )
 
 
 def test_degraded_same_source_still_ready() -> None:
@@ -125,7 +131,14 @@ def test_dual_window_disagreement_is_unavailable() -> None:
     mem[start:end] = _shift(_reference(seed=5), 0.0)[: end - start]
     result = _measure(ref, mem)
     assert result["status"] == "unavailable"
-    assert result["reason"] in {"low_confidence", "window_out_of_range"}
+    assert result["reason"] in {
+        "low_confidence",
+        "dual_window_inconsistent",
+        "window_out_of_range",
+    }
+    # ⚠️ 区分力边界（2026-10-11 复核 NC-5）：本构造把第二窗内容整体换掉，实测是
+    # **置信度门**先拦下（conf≈0.055），双窗门根本没机会触发 ⇒ 本用例**不能**当作
+    # 双窗门的证据。双窗门的证据见 test_dual_window_inconsistency_has_its_own_reason。
 
 
 
@@ -143,6 +156,29 @@ def _resample(signal: np.ndarray, rate: float) -> np.ndarray:
     if len(out) < n:
         out = np.concatenate([out, np.zeros(n - len(out))])
     return out[:n]
+
+
+def test_dual_window_inconsistency_has_its_own_reason() -> None:
+    """P95a：双窗门必须与"置信度低"**分开报**。
+
+    构造：低频主导素材 + **1% 重采样**（成员走快 1%）⇒ 两个精细窗（off 0 / +1s）
+    各自都相关得很好（置信度过门），但残差相差 ≈10 ms > 5 ms 容差 ⇒ **只有双窗门能拦**。
+    （既有 test_dual_window_disagreement_is_unavailable 的构造会让置信度先崩，
+      对双窗门没有区分力——本条补上那个缺口。）
+
+    区分力：若把双窗门的 reason 改回 `low_confidence`（与置信度门合并），本用例红。
+    """
+    rng = np.random.default_rng(11)
+    smooth = np.convolve(rng.standard_normal(SAMPLE_RATE * 30), np.ones(1024) / 1024, mode="same")
+    result = measure_offset(smooth, _resample(smooth, 1.01))
+    assert result["status"] == "unavailable", result
+    assert result["reason"] == "dual_window_inconsistent", (
+        f"双窗不一致应单独报案（reason={result['reason']}）——"
+        "与置信度门合并报 low_confidence 会把用户指向错误的原因"
+    )
+    assert result["confidence"] >= angle_sync.CONFIDENCE_THRESHOLD, (
+        f"本构造的置信度 {result['confidence']:.3f} 必须过门，否则测的是置信度门而不是双窗门"
+    )
 
 
 def test_clock_drift_is_rejected_not_silently_averaged() -> None:
@@ -251,16 +287,19 @@ def test_confidence_threshold_is_calibrated_for_real_multidevice_material() -> N
     （已知真值 0 / −83 / −400 ms ⇒ 粗估 0 / −80 / −400 ms）。
     负样本：跨会议 ≤0.122，同房间不同时段 ≤0.080 ⇒ 取 **0.20**。
 
-    本用例的区分力：
-    - `alpha=0.30`（≈ 真实远距设备区间）必须 `ready` ⇒ **阈值回退到 0.5 即红**；
-    - `alpha=0.15` 必须 `unavailable(low_confidence)` ⇒ **阈值下调到 0.10 即红**。
+    本用例的区分力（**实际夹持区间 `(0.123, 0.273]`，不是 0.20 这个值本身**——
+    2026-10-11 复核指出初版注释把它说宽了）：
+    - `alpha=0.30`（实测 conf≈0.273）必须 `ready` ⇒ 阈值 > 0.273 即红（含回退到 0.5）；
+    - `alpha=0.15`（实测 conf≈0.123）必须 `unavailable(low_confidence)` ⇒ 阈值 ≤ 0.123 即红。
+    即：本用例锁"量级落在 0.12–0.27"，**锁不住 0.20 这个具体标定值**（取 0.15 或 0.26 同样绿）。
+    这是有意为之——标定值本身来自 AMI 实测分布，不该由合成 fixture 钉死。
     """
     ref = _reference(seconds=30.0)
 
     mid = measure_offset(ref, _partial_correlation(ref, 0.30))
-    assert 0.20 < mid["confidence"] < 0.50, (
-        f"合成信号的相关峰 {mid['confidence']:.3f} 应落在重标定区间 (0.20, 0.50) 内，"
-        "否则本用例失去区分力（先修 fixture 再谈断言）"
+    assert 0.24 < mid["confidence"] < 0.32, (
+        f"合成信号的相关峰 {mid['confidence']:.3f} 应落在 (0.24, 0.32)（实测 0.273）——"
+        "它偏了就说明夹持区间变了，先修 fixture 再谈断言"
     )
     assert mid["status"] == "ready", (
         f"真实多设备量级的相关系数（{mid['confidence']:.3f}）必须被接受——"
@@ -270,9 +309,9 @@ def test_confidence_threshold_is_calibrated_for_real_multidevice_material() -> N
     # 低档 fixture 必须落在 (0.10, 0.20)：低于 0.10 就守不住"阈值下调过头"这一侧。
     # （首版用 seed=31，实测 conf 过低，负向对照 NC-B 当场证明它守不住。）
     low = measure_offset(ref, _partial_correlation(ref, 0.15))
-    assert 0.10 < low["confidence"] < 0.20, (
-        f"低档 fixture 的相关峰 {low['confidence']:.3f} 应落在 (0.10, 0.20)，"
-        "否则它既拦不住上调也拦不住下调"
+    assert 0.10 < low["confidence"] < 0.16, (
+        f"低档 fixture 的相关峰 {low['confidence']:.3f} 应落在 (0.10, 0.16)（实测 0.123）——"
+        "低于 0.10 就守不住'阈值下调过头'这一侧"
     )
     assert low["status"] == "unavailable"
     assert low["reason"] == "low_confidence", (
