@@ -73,6 +73,19 @@ def _embed_windows(samples: np.ndarray, grid, sel, model_path: Path):
     return vecs
 
 
+def _selection_fingerprint(windows: list[tuple[float, float]]) -> str:
+    """窗选取的内容指纹：把窗时间栅格哈希进缓存键。
+
+    **为什么必须**：缓存键若只含 window_s/hop_s/min_speech_fraction，则"用 silero 选的窗"
+    与"用参考标注选的窗"（oracle_vad）会算出同一个键 ⇒ 后者静默复用前者的向量。
+    实测确认过该同键（2026-10-12），故改为对**实际窗集合**取指纹。
+    """
+    import hashlib
+
+    payload = ";".join(f"{a:.4f}-{b:.4f}" for a, b in windows)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
 def evaluate_meeting(
     *,
     meeting: str,
@@ -109,12 +122,19 @@ def evaluate_meeting(
         return entry
 
     fp = file_fingerprint(audio)
+    # **窗选取指纹（缺陷修复 2026-10-12）**：键必须包含"选了哪些窗"，否则换 VAD 条件
+    # （silero vs oracle_vad）会得到**同一个键**、静默复用另一条件的向量 —— 那会让
+    # "分离 VAD 与聚类"的诊断得出错误结论。本实现首版就漏了这一项，已修。
+    # 用窗时间栅格的 sha256 而非"选择规则名"：规则名无法覆盖"参考标注决定选择"的情形。
+    sel_fingerprint = _selection_fingerprint([grid[i] for i in sel])
     params = {
         "window_s": window_s, "hop_s": hop_s,
         "min_speech_fraction": min_speech_fraction,
         "vad_threshold": vad_threshold,
+        "vad_model": Path(silero_model).name,
         "channel": channel,
         "frontend": "kaldi80_fbank_numpy",
+        "selection": sel_fingerprint,
     }
     key = embedding_cache_key(fp, model_id, DEFAULT_ALGORITHM_VERSION, params)
     t0 = time.perf_counter()

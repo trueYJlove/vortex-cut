@@ -1,0 +1,549 @@
+{
+  "generated_at": "2026-10-12T09:53:54",
+  "purpose": "方案 A：定位 AMI 在 τ 之前的瓶颈（条件对照 + DER 分量分解）",
+  "config": {
+    "model_id": "campplus",
+    "window_s": 2.0,
+    "hop_s": 1.0,
+    "min_speech_fraction": 0.6,
+    "min_turn_s": 0.4,
+    "vad_threshold": 0.5,
+    "k_max": 8,
+    "tau_grid": [
+      0.2,
+      0.22,
+      0.24,
+      0.26,
+      0.28,
+      0.3,
+      0.32,
+      0.34,
+      0.36,
+      0.38,
+      0.4,
+      0.42,
+      0.44,
+      0.46,
+      0.48,
+      0.5,
+      0.52,
+      0.54,
+      0.56,
+      0.58,
+      0.6,
+      0.62,
+      0.64,
+      0.66,
+      0.68,
+      0.7,
+      0.72,
+      0.74,
+      0.76,
+      0.78,
+      0.8
+    ],
+    "scoring": {
+      "frame_s": 0.01,
+      "collar_s": 0.25,
+      "ignore_overlap": true
+    }
+  },
+  "meetings": {
+    "EN2002a": {
+      "total_s": 2142.71,
+      "ref_speakers": 4,
+      "silero_windows": 1528,
+      "oracle_windows": 1878,
+      "conditions": {
+        "silero_vad": {
+          "best": {
+            "der": 0.611,
+            "miss": 0.123,
+            "fa": 0.0114,
+            "spkerr": 0.4766,
+            "hyp_speakers": 3
+          },
+          "best_tau": "0.58",
+          "windows": 1528
+        },
+        "oracle_vad": {
+          "best": {
+            "der": 0.5782,
+            "miss": 0.0039,
+            "fa": 0.0267,
+            "spkerr": 0.5476,
+            "hyp_speakers": 7
+          },
+          "best_tau": "0.54",
+          "windows": 1878
+        }
+      }
+    },
+    "EN2002b": {
+      "total_s": 1786.85,
+      "ref_speakers": 4,
+      "silero_windows": 1229,
+      "oracle_windows": 1452,
+      "conditions": {
+        "silero_vad": {
+          "best": {
+            "der": 0.3215,
+            "miss": 0.103,
+            "fa": 0.0144,
+            "spkerr": 0.2041,
+            "hyp_speakers": 65
+          },
+          "best_tau": "0.34",
+          "windows": 1229
+        },
+        "oracle_vad": {
+          "best": {
+            "der": 0.5328,
+            "miss": 0.0018,
+            "fa": 0.0233,
+            "spkerr": 0.5076,
+            "hyp_speakers": 10
+          },
+          "best_tau": "0.50",
+          "windows": 1452
+        }
+      }
+    },
+    "EN2002c": {
+      "total_s": 2972.26,
+      "ref_speakers": 3,
+      "silero_windows": 2109,
+      "oracle_windows": 2591,
+      "conditions": {
+        "silero_vad": {
+          "best": {
+            "der": 0.4174,
+            "miss": 0.1202,
+            "fa": 0.0063,
+            "spkerr": 0.2909,
+            "hyp_speakers": 9
+          },
+          "best_tau": "0.48",
+          "windows": 2109
+        },
+        "oracle_vad": {
+          "best": {
+            "der": 0.626,
+            "miss": 0.0017,
+            "fa": 0.015,
+            "spkerr": 0.6092,
+            "hyp_speakers": 165
+          },
+          "best_tau": "0.30",
+          "windows": 2591
+        }
+      }
+    },
+    "EN2002d": {
+      "total_s": 2209.9,
+      "ref_speakers": 4,
+      "silero_windows": 1592,
+      "oracle_windows": 1913,
+      "conditions": {
+        "silero_vad": {
+          "best": {
+            "der": 0.5537,
+            "miss": 0.1103,
+            "fa": 0.0093,
+            "spkerr": 0.4341,
+            "hyp_speakers": 48
+          },
+          "best_tau": "0.40",
+          "windows": 1592
+        },
+        "oracle_vad": {
+          "best": {
+            "der": 0.6694,
+            "miss": 0.0013,
+            "fa": 0.0206,
+            "spkerr": 0.6475,
+            "hyp_speakers": 7
+          },
+          "best_tau": "0.54",
+          "windows": 1913
+        }
+      }
+    },
+    "ES2004a": {
+      "total_s": 1049.35,
+      "ref_speakers": 4,
+      "silero_windows": 547,
+      "oracle_windows": 769,
+      "conditions": {
+        "silero_vad": {
+          "best": {
+            "der": 0.3013,
+            "miss": 0.2082,
+            "fa": 0.0066,
+            "spkerr": 0.0866,
+            "hyp_speakers": 6
+          },
+          "best_tau": "0.48",
+          "windows": 547
+        },
+        "oracle_vad": {
+          "best": {
+            "der": 0.2026,
+            "miss": 0.0036,
+            "fa": 0.0298,
+            "spkerr": 0.1693,
+            "hyp_speakers": 6
+          },
+          "best_tau": "0.48",
+          "windows": 769
+        }
+      }
+    },
+    "ES2004b": {
+      "total_s": 2345.49,
+      "ref_speakers": 4,
+      "silero_windows": 1589,
+      "oracle_windows": 1984,
+      "conditions": {
+        "silero_vad": {
+          "best": {
+            "der": 0.1435,
+            "miss": 0.1167,
+            "fa": 0.0066,
+            "spkerr": 0.0202,
+            "hyp_speakers": 10
+          },
+          "best_tau": "0.40",
+          "windows": 1589
+        },
+        "oracle_vad": {
+          "best": {
+            "der": 0.1868,
+            "miss": 0.0013,
+            "fa": 0.018,
+            "spkerr": 0.1674,
+            "hyp_speakers": 5
+          },
+          "best_tau": "0.52",
+          "windows": 1984
+        }
+      }
+    },
+    "ES2004c": {
+      "total_s": 2334.37,
+      "ref_speakers": 4,
+      "silero_windows": 1643,
+      "oracle_windows": 1985,
+      "conditions": {
+        "silero_vad": {
+          "best": {
+            "der": 0.3062,
+            "miss": 0.0937,
+            "fa": 0.0105,
+            "spkerr": 0.202,
+            "hyp_speakers": 6
+          },
+          "best_tau": "0.42",
+          "windows": 1643
+        },
+        "oracle_vad": {
+          "best": {
+            "der": 0.0852,
+            "miss": 0.0016,
+            "fa": 0.0192,
+            "spkerr": 0.0644,
+            "hyp_speakers": 7
+          },
+          "best_tau": "0.42",
+          "windows": 1985
+        }
+      }
+    },
+    "ES2004d": {
+      "total_s": 2222.29,
+      "ref_speakers": 4,
+      "silero_windows": 1293,
+      "oracle_windows": 1669,
+      "conditions": {
+        "silero_vad": {
+          "best": {
+            "der": 0.3905,
+            "miss": 0.1422,
+            "fa": 0.0154,
+            "spkerr": 0.2328,
+            "hyp_speakers": 9
+          },
+          "best_tau": "0.42",
+          "windows": 1293
+        },
+        "oracle_vad": {
+          "best": {
+            "der": 0.3687,
+            "miss": 0.0056,
+            "fa": 0.0347,
+            "spkerr": 0.3284,
+            "hyp_speakers": 9
+          },
+          "best_tau": "0.44",
+          "windows": 1669
+        }
+      }
+    },
+    "IS1009a": {
+      "total_s": 838.83,
+      "ref_speakers": 4,
+      "silero_windows": 527,
+      "oracle_windows": 600,
+      "conditions": {
+        "silero_vad": {
+          "best": {
+            "der": 0.1819,
+            "miss": 0.0654,
+            "fa": 0.0148,
+            "spkerr": 0.1017,
+            "hyp_speakers": 6
+          },
+          "best_tau": "0.60",
+          "windows": 527
+        },
+        "oracle_vad": {
+          "best": {
+            "der": 0.1253,
+            "miss": 0.0004,
+            "fa": 0.0246,
+            "spkerr": 0.1004,
+            "hyp_speakers": 6
+          },
+          "best_tau": "0.62",
+          "windows": 600
+        }
+      }
+    },
+    "IS1009b": {
+      "total_s": 2052.33,
+      "ref_speakers": 4,
+      "silero_windows": 1658,
+      "oracle_windows": 1766,
+      "conditions": {
+        "silero_vad": {
+          "best": {
+            "der": 0.2271,
+            "miss": 0.0291,
+            "fa": 0.0067,
+            "spkerr": 0.1913,
+            "hyp_speakers": 5
+          },
+          "best_tau": "0.66",
+          "windows": 1658
+        },
+        "oracle_vad": {
+          "best": {
+            "der": 0.2231,
+            "miss": 0.0011,
+            "fa": 0.0127,
+            "spkerr": 0.2093,
+            "hyp_speakers": 5
+          },
+          "best_tau": "0.66",
+          "windows": 1766
+        }
+      }
+    },
+    "IS1009c": {
+      "total_s": 1820.83,
+      "ref_speakers": 4,
+      "silero_windows": 1366,
+      "oracle_windows": 1482,
+      "conditions": {
+        "silero_vad": {
+          "best": {
+            "der": 0.2525,
+            "miss": 0.0285,
+            "fa": 0.0118,
+            "spkerr": 0.2122,
+            "hyp_speakers": 4
+          },
+          "best_tau": "0.64",
+          "windows": 1366
+        },
+        "oracle_vad": {
+          "best": {
+            "der": 0.3975,
+            "miss": 0.0016,
+            "fa": 0.0212,
+            "spkerr": 0.3746,
+            "hyp_speakers": 19
+          },
+          "best_tau": "0.54",
+          "windows": 1482
+        }
+      }
+    },
+    "IS1009d": {
+      "total_s": 1944.5,
+      "ref_speakers": 4,
+      "silero_windows": 1329,
+      "oracle_windows": 1519,
+      "conditions": {
+        "silero_vad": {
+          "best": {
+            "der": 0.2769,
+            "miss": 0.0642,
+            "fa": 0.022,
+            "spkerr": 0.1907,
+            "hyp_speakers": 6
+          },
+          "best_tau": "0.66",
+          "windows": 1329
+        },
+        "oracle_vad": {
+          "best": {
+            "der": 0.2399,
+            "miss": 0.0037,
+            "fa": 0.0298,
+            "spkerr": 0.2064,
+            "hyp_speakers": 7
+          },
+          "best_tau": "0.68",
+          "windows": 1519
+        }
+      }
+    },
+    "TS3003a": {
+      "total_s": 1505.64,
+      "ref_speakers": 4,
+      "silero_windows": 535,
+      "oracle_windows": 930,
+      "conditions": {
+        "silero_vad": {
+          "best": {
+            "der": 0.3643,
+            "miss": 0.2857,
+            "fa": 0.0101,
+            "spkerr": 0.0685,
+            "hyp_speakers": 1
+          },
+          "best_tau": "0.42",
+          "windows": 535
+        },
+        "oracle_vad": {
+          "best": {
+            "der": 0.1339,
+            "miss": 0.0076,
+            "fa": 0.0264,
+            "spkerr": 0.1,
+            "hyp_speakers": 2
+          },
+          "best_tau": "0.44",
+          "windows": 930
+        }
+      }
+    },
+    "TS3003b": {
+      "total_s": 2210.3,
+      "ref_speakers": 4,
+      "silero_windows": 1215,
+      "oracle_windows": 1680,
+      "conditions": {
+        "silero_vad": {
+          "best": {
+            "der": 0.4095,
+            "miss": 0.1429,
+            "fa": 0.0223,
+            "spkerr": 0.2443,
+            "hyp_speakers": 8
+          },
+          "best_tau": "0.32",
+          "windows": 1215
+        },
+        "oracle_vad": {
+          "best": {
+            "der": 0.3822,
+            "miss": 0.0028,
+            "fa": 0.0333,
+            "spkerr": 0.3461,
+            "hyp_speakers": 6
+          },
+          "best_tau": "0.34",
+          "windows": 1680
+        }
+      }
+    },
+    "TS3003c": {
+      "total_s": 2570.0,
+      "ref_speakers": 4,
+      "silero_windows": 1111,
+      "oracle_windows": 1762,
+      "conditions": {
+        "silero_vad": {
+          "best": {
+            "der": 0.2437,
+            "miss": 0.2205,
+            "fa": 0.0097,
+            "spkerr": 0.0135,
+            "hyp_speakers": 4
+          },
+          "best_tau": "0.44",
+          "windows": 1111
+        },
+        "oracle_vad": {
+          "best": {
+            "der": 0.3186,
+            "miss": 0.0036,
+            "fa": 0.0303,
+            "spkerr": 0.2847,
+            "hyp_speakers": 3
+          },
+          "best_tau": "0.46",
+          "windows": 1762
+        }
+      }
+    },
+    "TS3003d": {
+      "total_s": 2618.2,
+      "ref_speakers": 4,
+      "silero_windows": 1060,
+      "oracle_windows": 1778,
+      "conditions": {
+        "silero_vad": {
+          "best": {
+            "der": 0.4622,
+            "miss": 0.2675,
+            "fa": 0.0167,
+            "spkerr": 0.178,
+            "hyp_speakers": 7
+          },
+          "best_tau": "0.42",
+          "windows": 1060
+        },
+        "oracle_vad": {
+          "best": {
+            "der": 0.3925,
+            "miss": 0.0077,
+            "fa": 0.0471,
+            "spkerr": 0.3377,
+            "hyp_speakers": 6
+          },
+          "best_tau": "0.44",
+          "windows": 1778
+        }
+      }
+    }
+  },
+  "summary": {
+    "silero_vad": {
+      "der_mean": 0.3414,
+      "der_worst": 0.611,
+      "miss_mean": 0.1326,
+      "fa_mean": 0.0122,
+      "spkerr_mean": 0.1967
+    },
+    "oracle_vad": {
+      "der_mean": 0.3414,
+      "der_worst": 0.6694,
+      "miss_mean": 0.0031,
+      "fa_mean": 0.0258,
+      "spkerr_mean": 0.3125
+    }
+  }
+}

@@ -69,6 +69,38 @@ class TestKeySensitivity:
         assert "/" not in k and "\\" not in k and len(k) == 64
 
 
+class TestSelectionFingerprintRegression:
+    """**回归锁（2026-10-12 实测缺陷）**：缓存键必须包含"选了哪些窗"。
+
+    本实现首版只把 window_s/hop_s/min_speech_fraction 放进 params，于是
+    "silero 选的窗"与"参考标注选的窗（oracle_vad）"算出**同一个键** ⇒
+    后者静默复用前者的向量，使"分离 VAD 与聚类"的诊断得出**错误结论**。
+    该同键已在 2026-10-12 实测确认。本用例防它复发。
+    """
+
+    def test_selection_field_changes_key(self):
+        # 同一素材/模型/窗参数，仅"窗集合"不同 ⇒ 必须换键
+        a = cache_mod.embedding_cache_key("fp1", "campplus", 1, {**PARAMS, "selection": "aaa"})
+        b = cache_mod.embedding_cache_key("fp1", "campplus", 1, {**PARAMS, "selection": "bbb"})
+        assert a != b, "窗选取不同却同键 ⇒ 会静默复用错向量"
+
+    def test_vad_model_field_changes_key(self):
+        # 换 VAD 模型（v5/v6）必须换键
+        a = cache_mod.embedding_cache_key("fp1", "campplus", 1, {**PARAMS, "vad_model": "v5"})
+        b = cache_mod.embedding_cache_key("fp1", "campplus", 1, {**PARAMS, "vad_model": "v6"})
+        assert a != b
+
+    def test_eval_harness_includes_selection_and_vad_in_params(self):
+        """**端到端锁**：评测 harness 构造的 params 必须含 selection 与 vad_model。
+
+        直接读源码断言，防止将来有人"简化"掉这两项（那会静默恢复该缺陷）。
+        """
+        src = (QE / "diarization_eval.py").read_text(encoding="utf-8")
+        assert '"selection": sel_fingerprint' in src
+        assert '"vad_model": Path(silero_model).name' in src
+        assert "_selection_fingerprint" in src
+
+
 class TestRoundTrip:
     def test_put_then_get(self, tmp_path: Path):
         c = cache_mod.EmbeddingCache(tmp_path / "cache")
