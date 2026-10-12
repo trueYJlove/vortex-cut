@@ -1,0 +1,49 @@
+{
+  "per_rule": {
+    "A0 silhouette (现行)": {
+      "mean": 0.0569,
+      "worst": 0.4644,
+      "n": 23
+    },
+    "B1 K>=Khat_dm (安全)": {
+      "mean": 0.0406,
+      "worst": 0.1831,
+      "n": 23
+    },
+    "E2 K>=Khat_dm-1 (安全)": {
+      "mean": 0.0386,
+      "worst": 0.1831,
+      "n": 23
+    },
+    "B3 K>=4 (闸门判不安全)": {
+      "mean": 0.0732,
+      "worst": 0.2741,
+      "n": 23
+    }
+  },
+  "khat_dm": {
+    "ampme": 1,
+    "asxwr": 2,
+    "aufkn": 2,
+    "blwmj": 2,
+    "bravd": 4,
+    "bspxd": 2,
+    "bydui": 3,
+    "cmhsm": 2,
+    "crixb": 4,
+    "cyyxp": 1,
+    "djngn": 2,
+    "djqif": 2,
+    "dscgs": 2,
+    "ehpau": 2,
+    "eqttu": 2,
+    "evtyi": 1,
+    "gpjne": 2,
+    "grzbb": 2,
+    "hkzpa": 2,
+    "jsdmu": 3,
+    "kkghn": 2,
+    "qouur": 2,
+    "zmndm": 2
+  }
+}

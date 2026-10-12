@@ -31,6 +31,15 @@ from pathlib import Path
 UA = {"User-Agent": "aivs-w22-corpus-fetcher/1.0"}
 AMI_BASE = "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror/amicorpus/"
 A4_BASE = "https://hf-mirror.com/datasets/shenyunhang/AISHELL-4/resolve/main/"
+# VoxConverse（**O6 缺口档语料**）：真实对话、CC BY 4.0、**说话人数 1–21 覆盖**，
+# 而 AMI/AISHELL-4 只覆盖 3–7。整包 zip（dev 2.0 GB / test 4.3 GB），非逐场 URL。
+VC_BASE = "https://www.robots.ox.ac.uk/~vgg/data/voxconverse/data/"
+VC_ARCHIVES = {
+    "dev": f"{VC_BASE}voxconverse_dev_wav.zip",
+    "test": f"{VC_BASE}voxconverse_test_wav.zip",
+}
+# RTTM 在 GitHub 仓库里（很小），与音频分开取
+VC_RTTM_TARBALL = "https://codeload.github.com/joonson/voxconverse/tar.gz/refs/heads/master"
 
 AMI_TEST = [
     "EN2002a", "EN2002b", "EN2002c", "EN2002d",

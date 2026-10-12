@@ -181,7 +181,7 @@ def main() -> int:
     ap.add_argument("--hop-s", type=float, default=sp.HOP_S)
     ap.add_argument("--min-speech-fraction", type=float, default=sp.MIN_SPEECH_FRACTION)
     ap.add_argument("--min-turn-s", type=float, default=sp.MIN_TURN_S)
-    ap.add_argument("--corpus", choices=["ami", "aishell4"], default="ami")
+    ap.add_argument("--corpus", choices=["ami", "aishell4", "voxconverse"], default="ami")
     ap.add_argument("--audio-ext", default=None,
                     help="音频扩展名；默认 ami=.Mix-Headset.wav / aishell4=.flac")
     ap.add_argument("--channel", type=int, default=None,
@@ -221,7 +221,10 @@ def main() -> int:
         },
         "meetings": {},
     }
-    ext = args.audio_ext or (".Mix-Headset.wav" if args.corpus == "ami" else ".flac")
+    # VoxConverse（O6 缺口档语料）：wav 已是 16 kHz 单声道 ⇒ 扩展名 .wav，
+    # 且**不需要**像 AISHELL-4 那样取单通道（channel 由 CLI 显式传，默认 None）。
+    default_ext = {"ami": ".Mix-Headset.wav", "aishell4": ".flac", "voxconverse": ".wav"}
+    ext = args.audio_ext or default_ext[args.corpus]
     for m in args.meetings:
         audio = audio_dir / f"{m}{ext}"
         rttm = rttm_of.get(m)
