@@ -30,6 +30,7 @@ def _load(name: str, path: Path):
 # 依赖：diarization_cache / diarization 在同目录
 sys.path.insert(0, str(QE))
 routes = _load("quality_eval_cluster_routes", QE / "diarization_cluster_routes.py")
+robust = _load("quality_eval_diarization_robustness", QE / "diarization_robustness.py")
 
 
 def _two_clusters(n_per: int = 30, dim: int = 16, gap: float = 1.0, seed: int = 0):
@@ -94,3 +95,25 @@ class TestSilhouetteWrapper:
         x = routes._l2(v)
         dmat = 1.0 - x @ x.T
         assert routes.silhouette_of(v, lab) == sp.silhouette(dmat, lab)
+
+
+class TestRobustnessScript:
+    """三条反证（决策依据）的可复现脚本——钉死它的关键结构，防止被"简化"掉。"""
+
+    def test_script_exposes_main(self):
+        assert callable(robust.main)
+
+    def test_channel_is_propagated_to_vad_reconstruction(self):
+        """**回归锁**：重建 silero 窗时必须传 channel。
+
+        实测缺陷：不传 channel 时 AISHELL-4（多通道阵列）按 None 解码，
+        窗集合与缓存向量（channel=0）不一致 ⇒ 20 场只剩 1 场可用（n=1），
+        而那 1 场的结论会**错误地显示"全过门"**。
+        """
+        src = (QE / "diarization_robustness.py").read_text(encoding="utf-8")
+        assert "_routes._CHANNEL = args.channel" in src
+
+    def test_reports_all_three_checks(self):
+        src = (QE / "diarization_robustness.py").read_text(encoding="utf-8")
+        for key in ('"seeds"', '"overlap_rule"', '"auto_k"'):
+            assert key in src, key

@@ -1,0 +1,162 @@
+{
+  "generated_at": "2026-10-12T13:46:09",
+  "purpose": "kmeans_silhouette 的稳健性复核：种子稳定性 / 评分口径敏感性 / 自动 K 欠分割",
+  "config": {
+    "diag_json": ".tmp/w22-diag-cn.json",
+    "condition": "silero_vad",
+    "seeds": 8,
+    "n_meetings_used": 20
+  },
+  "seeds": {
+    "per_seed": {
+      "0": {
+        "mean": 0.2407,
+        "worst": 0.4716,
+        "mean_pass_40": true,
+        "worst_pass_55": true,
+        "auto_k": [
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ]
+      },
+      "1": {
+        "mean": 0.2463,
+        "worst": 0.4872,
+        "mean_pass_40": true,
+        "worst_pass_55": true,
+        "auto_k": [
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ]
+      },
+      "2": {
+        "mean": 0.2449,
+        "worst": 0.5451,
+        "mean_pass_40": true,
+        "worst_pass_55": true,
+        "auto_k": [
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ]
+      },
+      "3": {
+        "mean": 0.2371,
+        "worst": 0.4775,
+        "mean_pass_40": true,
+        "worst_pass_55": true,
+        "auto_k": [
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ]
+      },
+      "4": {
+        "mean": 0.2463,
+        "worst": 0.538,
+        "mean_pass_40": true,
+        "worst_pass_55": true,
+        "auto_k": [
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ]
+      },
+      "5": {
+        "mean": 0.2472,
+        "worst": 0.5458,
+        "mean_pass_40": true,
+        "worst_pass_55": true,
+        "auto_k": [
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ]
+      },
+      "6": {
+        "mean": 0.2487,
+        "worst": 0.5711,
+        "mean_pass_40": true,
+        "worst_pass_55": false,
+        "auto_k": [
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ]
+      },
+      "7": {
+        "mean": 0.252,
+        "worst": 0.5546,
+        "mean_pass_40": true,
+        "worst_pass_55": false,
+        "auto_k": [
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ]
+      }
+    },
+    "mean_range": [
+      0.2371,
+      0.252
+    ],
+    "worst_range": [
+      0.4716,
+      0.5711
+    ],
+    "all_pass_both": false,
+    "failing_seeds": [
+      "6:worst=0.5711",
+      "7:worst=0.5546"
+    ]
+  },
+  "overlap_rule": {
+    "ignore": {
+      "mean": 0.2407,
+      "worst": 0.4716,
+      "worst_pass_55": true
+    },
+    "count_overlap": {
+      "mean": 0.2592,
+      "worst": 0.4895,
+      "worst_pass_55": true
+    }
+  },
+  "auto_k": {
+    "auto_lt_true": "8/20"
+  }
+}

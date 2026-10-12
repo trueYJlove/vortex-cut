@@ -59,6 +59,9 @@
 
 ## ⚠️ 但必须同时报告三条**反证**（不掩饰）
 
+> **三条反证均有可复现脚本**：`tools/quality_eval/diarization_robustness.py`，
+> 归档 `robustness-ami.json` / `robustness-aishell4.json`（本 README 数字与之一致）。
+
 ### 反证 1：AMI 的"过门"**依赖评分口径**
 
 本门限按**忽略重叠**口径设定。若改为**含重叠**计分（更严格、更接近真实使用）：
@@ -115,6 +118,18 @@ AMI 上对比"自动 K"与"真值 K"：
 ## 复现
 
 ```bash
+# ③ 稳健性复核（三条反证的来源；需先有 ① 的 diag 报告）
+PYTHONIOENCODING=utf-8 PYTHONPATH=tools .venv/Scripts/python.exe tools/quality_eval/diarization_robustness.py \
+  --diag-json .tmp/w22-diag-ami.json \
+  --rttm-dir .tmp/ami/AMI-diarization-setup-main/only_words/rttms/test \
+  --audio-dir .tmp/ami/audio --audio-ext .Mix-Headset.wav --condition silero_vad --seeds 8 \
+  --out evidence/2026-10-12-w22-b-cluster-routes/robustness-ami.json
+PYTHONIOENCODING=utf-8 PYTHONPATH=tools .venv/Scripts/python.exe tools/quality_eval/diarization_robustness.py \
+  --diag-json .tmp/w22-diag-cn.json --rttm-dir .tmp/aishell4/rttm \
+  --audio-dir .tmp/aishell4/audio --audio-ext .flac --channel 0 \
+  --condition silero_vad --seeds 8 \
+  --out evidence/2026-10-12-w22-b-cluster-routes/robustness-aishell4.json
+
 # ① 中文诊断（注意 --channel 0，阵列取单通道不下混）
 PYTHONIOENCODING=utf-8 PYTHONPATH=tools .venv/Scripts/python.exe tools/quality_eval/diarization_diagnose.py \
   --corpus aishell4 --audio-dir .tmp/aishell4/audio --rttm-dir .tmp/aishell4/rttm --channel 0 \
