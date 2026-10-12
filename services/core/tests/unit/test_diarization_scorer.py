@@ -183,6 +183,88 @@ class TestOptimalMappingSubsetSearch:
         assert r.mapping == {0: 0, 2: 1, 3: 2}  # 跳过序号 1 的多余簇
         assert r.false_alarm > 0.0  # 多余簇在参考静音处说话 ⇒ 有 FA（这是对的）
 
+    def test_der_is_invariant_to_hypothesis_relabeling(self):
+        """**最强的一条性质**：说话人编号是任意的 ⇒ DER 必须与编号命名无关。
+
+        这条性质一旦成立，「只排列前 m 个假设」这类按**序号**裁剪的实现就必然违反它
+        （因为"哪些编号排在前 m"取决于命名）。实测旧实现会在 24 种编号里给出多个值。
+
+        本用例对 4 个假设说话人的**全部 24 种编号**逐一评分，要求取值唯一。
+        """
+        from itertools import permutations
+
+        ref = [(0.0, 10.0, "R0"), (20.0, 30.0, "R1"), (40.0, 50.0, "R2")]
+        # 真实对应 R0<-XA、R1<-XB、R2<-XC；XJ 是多余的短簇（且命名会打乱顺序）
+        base = [
+            (0.0, 10.0, "XA"),
+            (50.0, 50.5, "XJ"),
+            (20.0, 30.0, "XB"),
+            (40.0, 50.0, "XC"),
+        ]
+        names = ["XA", "XJ", "XB", "XC"]
+        seen = set()
+        for perm in permutations(names):
+            ren = dict(zip(names, perm))
+            hyp = [(a, b, ren[s]) for a, b, s in base]
+            seen.add(round(der.score(ref, hyp, total_s=60.0, ignore_overlap=True).der, 9))
+        assert len(seen) == 1, f"DER 随假设编号变化：{sorted(seen)}"
+        assert seen.pop() == pytest.approx(0.00843, abs=1e-4)
+
+    def test_negative_control_old_implementation_violates_relabeling(self):
+        """**负向对照**：旧实现（只排列前 m 个假设）**确实违反**上一条性质。
+
+        若不做这一步，「重新编号不变性」可能只是**恒真**（比如评分器恰好对编号不敏感），
+        那它就证明不了任何事。实测旧实现在 24 种编号下给出 **2 个不同值**
+        （0.00843 与 0.341763）——差异高达 **33 个点**，正是"按序号裁剪"的直接后果。
+        """
+        from itertools import permutations
+
+        import numpy as np
+
+        COLLAR_S, FRAME_S = der.COLLAR_S, der.FRAME_S
+        _collar_mask, _hyp_frames, _ref_frames = (
+            der._collar_mask,
+            der._hyp_frames,
+            der._ref_frames,
+        )
+
+        def der_old(ref, hyp, total_s):
+            """**复刻旧实现**：只对前 min(n_hyp, n_ref) 个假设做排列。"""
+            n_frames = int(round(total_s / FRAME_S))
+            ref_count, ref_owner = _ref_frames(ref, n_frames)
+            hyp_owner = _hyp_frames(hyp, n_frames)
+            collar = _collar_mask(ref, n_frames, COLLAR_S)
+            scored = (ref_count > 0) & (ref_count == 1) & (~collar)
+            n_scored = int(scored.sum())
+            n_ref = int(ref_owner.max()) + 1 if ref_owner.max() >= 0 else 0
+            n_hyp = int(hyp_owner.max()) + 1 if hyp_owner.max() >= 0 else 0
+            cont = np.zeros((max(n_ref, 1), max(n_hyp, 1)), dtype=np.int64)
+            both = scored & (hyp_owner >= 0) & (ref_owner >= 0)
+            np.add.at(cont, (ref_owner[both], hyp_owner[both]), 1)
+            hit_frames = n_scored - int(((hyp_owner == -1) & scored).sum())
+            best_hit = -1
+            for target in permutations(range(n_ref), min(n_hyp, n_ref)):
+                best_hit = max(best_hit, sum(int(cont[r, h]) for h, r in enumerate(target)))
+            miss = int(((hyp_owner == -1) & scored).sum())
+            fa = int(((hyp_owner != -1) & (ref_count == 0) & (~collar)).sum())
+            return (miss + (hit_frames - max(best_hit, 0)) + fa) / n_scored
+
+        ref = [(0.0, 10.0, "R0"), (20.0, 30.0, "R1"), (40.0, 50.0, "R2")]
+        base = [
+            (0.0, 10.0, "XA"),
+            (50.0, 50.5, "XJ"),
+            (20.0, 30.0, "XB"),
+            (40.0, 50.0, "XC"),
+        ]
+        names = ["XA", "XJ", "XB", "XC"]
+        old_vals = set()
+        for perm in permutations(names):
+            ren = dict(zip(names, perm))
+            hyp = [(a, b, ren[s]) for a, b, s in base]
+            old_vals.add(round(der_old(ref, hyp, 60.0), 6))
+        assert len(old_vals) > 1, "旧实现竟未违反不变性——本对照失去区分力"
+        assert max(old_vals) - min(old_vals) > 0.3
+
     def test_n_hyp_le_n_ref_still_correct(self):
         # **负向对照的方向**：假设数 ≤ 参考数时新旧等价，必须仍然正确
         hyp = [(0.0, 10.0, "X0"), (20.0, 30.0, "X1")]

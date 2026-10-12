@@ -1,0 +1,297 @@
+{
+  "corpus": "ami",
+  "ceiling": {
+    "EN2002a": {
+      "der": 0.0344,
+      "miss": 0.0039,
+      "spkerr": 0.0037,
+      "ref_speakers": 4,
+      "windows": 1878
+    },
+    "EN2002b": {
+      "der": 0.0293,
+      "miss": 0.0018,
+      "spkerr": 0.0041,
+      "ref_speakers": 4,
+      "windows": 1452
+    },
+    "EN2002c": {
+      "der": 0.0192,
+      "miss": 0.0017,
+      "spkerr": 0.0025,
+      "ref_speakers": 3,
+      "windows": 2591
+    },
+    "EN2002d": {
+      "der": 0.0287,
+      "miss": 0.0013,
+      "spkerr": 0.0067,
+      "ref_speakers": 4,
+      "windows": 1913
+    },
+    "ES2004a": {
+      "der": 0.0363,
+      "miss": 0.0036,
+      "spkerr": 0.003,
+      "ref_speakers": 4,
+      "windows": 769
+    },
+    "ES2004b": {
+      "der": 0.0215,
+      "miss": 0.0013,
+      "spkerr": 0.0022,
+      "ref_speakers": 4,
+      "windows": 1984
+    },
+    "ES2004c": {
+      "der": 0.0227,
+      "miss": 0.0016,
+      "spkerr": 0.0019,
+      "ref_speakers": 4,
+      "windows": 1985
+    },
+    "ES2004d": {
+      "der": 0.0432,
+      "miss": 0.0056,
+      "spkerr": 0.0029,
+      "ref_speakers": 4,
+      "windows": 1669
+    },
+    "IS1009a": {
+      "der": 0.0273,
+      "miss": 0.0004,
+      "spkerr": 0.0024,
+      "ref_speakers": 4,
+      "windows": 600
+    },
+    "IS1009b": {
+      "der": 0.0146,
+      "miss": 0.0011,
+      "spkerr": 0.0008,
+      "ref_speakers": 4,
+      "windows": 1766
+    },
+    "IS1009c": {
+      "der": 0.0242,
+      "miss": 0.0016,
+      "spkerr": 0.0013,
+      "ref_speakers": 4,
+      "windows": 1482
+    },
+    "IS1009d": {
+      "der": 0.0371,
+      "miss": 0.0037,
+      "spkerr": 0.0036,
+      "ref_speakers": 4,
+      "windows": 1519
+    },
+    "TS3003a": {
+      "der": 0.0357,
+      "miss": 0.0076,
+      "spkerr": 0.0017,
+      "ref_speakers": 4,
+      "windows": 930
+    },
+    "TS3003b": {
+      "der": 0.037,
+      "miss": 0.0028,
+      "spkerr": 0.0009,
+      "ref_speakers": 4,
+      "windows": 1680
+    },
+    "TS3003c": {
+      "der": 0.0356,
+      "miss": 0.0036,
+      "spkerr": 0.0017,
+      "ref_speakers": 4,
+      "windows": 1762
+    },
+    "TS3003d": {
+      "der": 0.0576,
+      "miss": 0.0077,
+      "spkerr": 0.0028,
+      "ref_speakers": 4,
+      "windows": 1778
+    }
+  },
+  "kmeans": {
+    "EN2002a": {
+      "k_true": 4,
+      "ahc_best_tau": 0.2972,
+      "kmeans_true_k": 0.2179
+    },
+    "EN2002b": {
+      "k_true": 4,
+      "ahc_best_tau": 0.2099,
+      "kmeans_true_k": 0.2307
+    },
+    "EN2002c": {
+      "k_true": 3,
+      "ahc_best_tau": 0.1053,
+      "kmeans_true_k": 0.116
+    },
+    "EN2002d": {
+      "k_true": 4,
+      "ahc_best_tau": 0.1907,
+      "kmeans_true_k": 0.3123
+    },
+    "ES2004a": {
+      "k_true": 4,
+      "ahc_best_tau": 0.1351,
+      "kmeans_true_k": 0.3462
+    },
+    "ES2004b": {
+      "k_true": 4,
+      "ahc_best_tau": 0.0729,
+      "kmeans_true_k": 0.067
+    },
+    "ES2004c": {
+      "k_true": 4,
+      "ahc_best_tau": 0.0852,
+      "kmeans_true_k": 0.0683
+    },
+    "ES2004d": {
+      "k_true": 4,
+      "ahc_best_tau": 0.3687,
+      "kmeans_true_k": 0.236
+    },
+    "IS1009a": {
+      "k_true": 4,
+      "ahc_best_tau": 0.1253,
+      "kmeans_true_k": 0.2404
+    },
+    "IS1009b": {
+      "k_true": 4,
+      "ahc_best_tau": 0.043,
+      "kmeans_true_k": 0.0249
+    },
+    "IS1009c": {
+      "k_true": 4,
+      "ahc_best_tau": 0.0447,
+      "kmeans_true_k": 0.0339
+    },
+    "IS1009d": {
+      "k_true": 4,
+      "ahc_best_tau": 0.0897,
+      "kmeans_true_k": 0.0589
+    },
+    "TS3003a": {
+      "k_true": 4,
+      "ahc_best_tau": 0.1339,
+      "kmeans_true_k": 0.6174
+    },
+    "TS3003b": {
+      "k_true": 4,
+      "ahc_best_tau": 0.3106,
+      "kmeans_true_k": 0.324
+    },
+    "TS3003c": {
+      "k_true": 4,
+      "ahc_best_tau": 0.1752,
+      "kmeans_true_k": 0.0641
+    },
+    "TS3003d": {
+      "k_true": 4,
+      "ahc_best_tau": 0.2069,
+      "kmeans_true_k": 0.4369
+    }
+  },
+  "separability": {
+    "EN2002a": {
+      "pure_windows": 1742,
+      "same_mean": 0.388,
+      "diff_mean": 0.486,
+      "overlap": 0.8144
+    },
+    "EN2002b": {
+      "pure_windows": 1357,
+      "same_mean": 0.3487,
+      "diff_mean": 0.4735,
+      "overlap": 0.735
+    },
+    "EN2002c": {
+      "pure_windows": 2479,
+      "same_mean": 0.3763,
+      "diff_mean": 0.4911,
+      "overlap": 0.7369
+    },
+    "EN2002d": {
+      "pure_windows": 1802,
+      "same_mean": 0.393,
+      "diff_mean": 0.4905,
+      "overlap": 0.7813
+    },
+    "ES2004a": {
+      "pure_windows": 702,
+      "same_mean": 0.3455,
+      "diff_mean": 0.5082,
+      "overlap": 0.5165
+    },
+    "ES2004b": {
+      "pure_windows": 1875,
+      "same_mean": 0.3291,
+      "diff_mean": 0.5399,
+      "overlap": 0.3186
+    },
+    "ES2004c": {
+      "pure_windows": 1852,
+      "same_mean": 0.2857,
+      "diff_mean": 0.4868,
+      "overlap": 0.2981
+    },
+    "ES2004d": {
+      "pure_windows": 1502,
+      "same_mean": 0.3428,
+      "diff_mean": 0.4832,
+      "overlap": 0.5081
+    },
+    "IS1009a": {
+      "pure_windows": 543,
+      "same_mean": 0.4908,
+      "diff_mean": 0.6401,
+      "overlap": 0.5362
+    },
+    "IS1009b": {
+      "pure_windows": 1684,
+      "same_mean": 0.4397,
+      "diff_mean": 0.6986,
+      "overlap": 0.2485
+    },
+    "IS1009c": {
+      "pure_windows": 1375,
+      "same_mean": 0.4164,
+      "diff_mean": 0.698,
+      "overlap": 0.1387
+    },
+    "IS1009d": {
+      "pure_windows": 1373,
+      "same_mean": 0.4754,
+      "diff_mean": 0.6705,
+      "overlap": 0.4038
+    },
+    "TS3003a": {
+      "pure_windows": 850,
+      "same_mean": 0.2901,
+      "diff_mean": 0.3347,
+      "overlap": 0.8334
+    },
+    "TS3003b": {
+      "pure_windows": 1510,
+      "same_mean": 0.2491,
+      "diff_mean": 0.3381,
+      "overlap": 0.6668
+    },
+    "TS3003c": {
+      "pure_windows": 1585,
+      "same_mean": 0.3274,
+      "diff_mean": 0.4813,
+      "overlap": 0.4469
+    },
+    "TS3003d": {
+      "pure_windows": 1528,
+      "same_mean": 0.3627,
+      "diff_mean": 0.4483,
+      "overlap": 0.699
+    }
+  }
+}
