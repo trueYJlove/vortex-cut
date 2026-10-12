@@ -181,6 +181,12 @@ def main() -> int:
     ap.add_argument("--hop-s", type=float, default=sp.HOP_S)
     ap.add_argument("--min-speech-fraction", type=float, default=sp.MIN_SPEECH_FRACTION)
     ap.add_argument("--min-turn-s", type=float, default=sp.MIN_TURN_S)
+    ap.add_argument("--corpus", choices=["ami", "aishell4"], default="ami")
+    ap.add_argument("--audio-ext", default=None,
+                    help="音频扩展名；默认 ami=.Mix-Headset.wav / aishell4=.flac")
+    ap.add_argument("--channel", type=int, default=None,
+                    help="多通道阵列取单通道（aishell4 必须给 0，避免下混梳状干涉）")
+    ap.add_argument("--rttm-dir", default=None, help="扁平 RTTM 目录（aishell4 用）")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
@@ -191,15 +197,21 @@ def main() -> int:
     silero_model = Path(args.silero)
     cache = EmbeddingCache(args.cache_dir)
 
-    setup = Path(args.setup_dir)
-    rttm_of = {}
-    for part in ("test", "dev", "train"):
-        for p in (setup / "only_words" / "rttms" / part).glob("*.rttm"):
+    rttm_of: dict[str, Path] = {}
+    if args.rttm_dir:
+        for p in Path(args.rttm_dir).rglob("*.rttm"):
             rttm_of.setdefault(p.stem, p)
+    else:
+        setup = Path(args.setup_dir)
+        for part in ("test", "dev", "train"):
+            for p in (setup / "only_words" / "rttms" / part).glob("*.rttm"):
+                rttm_of.setdefault(p.stem, p)
 
     report: dict = {
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        "purpose": "方案 A：定位 AMI 在 τ 之前的瓶颈（条件对照 + DER 分量分解）",
+        "purpose": f"方案 A：定位 {args.corpus} 在 τ 之前的瓶颈（条件对照 + DER 分量分解）",
+        "corpus": args.corpus,
+        "channel": args.channel,
         "config": {
             "model_id": args.model_id, "window_s": args.window_s, "hop_s": args.hop_s,
             "min_speech_fraction": args.min_speech_fraction, "min_turn_s": args.min_turn_s,
@@ -209,15 +221,16 @@ def main() -> int:
         },
         "meetings": {},
     }
+    ext = args.audio_ext or (".Mix-Headset.wav" if args.corpus == "ami" else ".flac")
     for m in args.meetings:
-        audio = audio_dir / f"{m}.Mix-Headset.wav"
+        audio = audio_dir / f"{m}{ext}"
         rttm = rttm_of.get(m)
         if not audio.exists() or rttm is None:
             report["meetings"][m] = {"error": "missing audio or rttm"}
             print(f"[{m}] MISSING", flush=True)
             continue
         ref = load_rttm(rttm)
-        samples = _decode(audio, None)
+        samples = _decode(audio, args.channel)
         total_s = samples.shape[0] / SR
         grid = sp.window_grid(total_s, args.window_s, args.hop_s)
         voiced = _silero(samples, silero_model, args.vad_threshold)
@@ -231,6 +244,12 @@ def main() -> int:
             "grid_windows": len(grid),
             "silero_windows": len(silero_sel),
             "oracle_windows": len(oracle_sel),
+            # **落盘窗集合**（时间栅格）：下游脚本（聚类族替换、误差分析）可直接复用，
+            # 不必重新解码+VAD。首版未落盘，导致下游只能重跑 VAD 重建（慢且易漂移）。
+            "window_grids": {
+                "silero_vad": [[round(grid[i][0], 4), round(grid[i][1], 4)] for i in silero_sel],
+                "oracle_vad": [[round(grid[i][0], 4), round(grid[i][1], 4)] for i in oracle_sel],
+            },
             "conditions": {},
         }
         fp = file_fingerprint(audio)
@@ -238,7 +257,7 @@ def main() -> int:
             c = run_condition(
                 label=label, samples=samples, total_s=total_s, grid=grid, sel=sel, ref=ref,
                 speaker_model=speaker_model, model_id=args.model_id, cache=cache, fp=fp,
-                vad_model_name=silero_model.name, channel=None,
+                vad_model_name=silero_model.name, channel=args.channel,
                 vad_threshold=args.vad_threshold, window_s=args.window_s, hop_s=args.hop_s,
                 min_speech_fraction=args.min_speech_fraction, min_turn_s=args.min_turn_s,
                 tau_grid=sp.TAU_GRID, k_max=args.k_max,

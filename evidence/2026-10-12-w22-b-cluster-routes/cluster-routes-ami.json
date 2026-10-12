@@ -1,0 +1,810 @@
+{
+  "generated_at": "2026-10-12T12:51:17",
+  "k_range": [
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
+  ],
+  "meetings": {
+    "EN2002a": {
+      "k_true": 4,
+      "total_s": 2142.71,
+      "conditions": {
+        "silero_vad": {
+          "windows": 1528,
+          "ahc_silhouette_capk": {
+            "der": 0.611,
+            "tau": 0.62
+          },
+          "kmeans_silhouette": {
+            "der": 0.4642,
+            "k": 2,
+            "silhouette": 0.2445
+          },
+          "kmeans_elbow": {
+            "der": 0.5846,
+            "k": 7
+          },
+          "kmeans_oracle_k": {
+            "der": 0.3925,
+            "k": 4
+          }
+        },
+        "oracle_vad": {
+          "windows": 1878,
+          "ahc_silhouette_capk": {
+            "der": 0.5908,
+            "tau": 0.62
+          },
+          "kmeans_silhouette": {
+            "der": 0.4615,
+            "k": 2,
+            "silhouette": 0.23
+          },
+          "kmeans_elbow": {
+            "der": 0.4862,
+            "k": 7
+          },
+          "kmeans_oracle_k": {
+            "der": 0.2266,
+            "k": 4
+          }
+        }
+      }
+    },
+    "EN2002b": {
+      "k_true": 4,
+      "total_s": 1786.85,
+      "conditions": {
+        "silero_vad": {
+          "windows": 1229,
+          "ahc_silhouette_capk": {
+            "der": 0.5868,
+            "tau": 0.66
+          },
+          "kmeans_silhouette": {
+            "der": 0.3913,
+            "k": 2,
+            "silhouette": 0.2766
+          },
+          "kmeans_elbow": {
+            "der": 0.2558,
+            "k": 3
+          },
+          "kmeans_oracle_k": {
+            "der": 0.2502,
+            "k": 4
+          }
+        },
+        "oracle_vad": {
+          "windows": 1452,
+          "ahc_silhouette_capk": {
+            "der": 0.541,
+            "tau": 0.66
+          },
+          "kmeans_silhouette": {
+            "der": 0.3318,
+            "k": 2,
+            "silhouette": 0.2537
+          },
+          "kmeans_elbow": {
+            "der": 0.2024,
+            "k": 3
+          },
+          "kmeans_oracle_k": {
+            "der": 0.2307,
+            "k": 4
+          }
+        }
+      }
+    },
+    "EN2002c": {
+      "k_true": 3,
+      "total_s": 2972.26,
+      "conditions": {
+        "silero_vad": {
+          "windows": 2109,
+          "ahc_silhouette_capk": {
+            "der": 0.6761,
+            "tau": 0.58
+          },
+          "kmeans_silhouette": {
+            "der": 0.4659,
+            "k": 4,
+            "silhouette": 0.2948
+          },
+          "kmeans_elbow": {
+            "der": 0.1871,
+            "k": 3
+          },
+          "kmeans_oracle_k": {
+            "der": 0.1871,
+            "k": 3
+          }
+        },
+        "oracle_vad": {
+          "windows": 2591,
+          "ahc_silhouette_capk": {
+            "der": 0.6461,
+            "tau": 0.6
+          },
+          "kmeans_silhouette": {
+            "der": 0.116,
+            "k": 3,
+            "silhouette": 0.2643
+          },
+          "kmeans_elbow": {
+            "der": 0.116,
+            "k": 3
+          },
+          "kmeans_oracle_k": {
+            "der": 0.116,
+            "k": 3
+          }
+        }
+      }
+    },
+    "EN2002d": {
+      "k_true": 4,
+      "total_s": 2209.9,
+      "conditions": {
+        "silero_vad": {
+          "windows": 1592,
+          "ahc_silhouette_capk": {
+            "der": 0.7016,
+            "tau": 0.62
+          },
+          "kmeans_silhouette": {
+            "der": 0.2507,
+            "k": 4,
+            "silhouette": 0.2431
+          },
+          "kmeans_elbow": {
+            "der": 0.2477,
+            "k": 3
+          },
+          "kmeans_oracle_k": {
+            "der": 0.2507,
+            "k": 4
+          }
+        },
+        "oracle_vad": {
+          "windows": 1913,
+          "ahc_silhouette_capk": {
+            "der": 0.6759,
+            "tau": 0.6
+          },
+          "kmeans_silhouette": {
+            "der": 0.1987,
+            "k": 4,
+            "silhouette": 0.2234
+          },
+          "kmeans_elbow": {
+            "der": 0.1978,
+            "k": 3
+          },
+          "kmeans_oracle_k": {
+            "der": 0.1987,
+            "k": 4
+          }
+        }
+      }
+    },
+    "ES2004a": {
+      "k_true": 4,
+      "total_s": 1049.35,
+      "conditions": {
+        "silero_vad": {
+          "windows": 547,
+          "ahc_silhouette_capk": {
+            "der": 0.4172,
+            "tau": 0.54
+          },
+          "kmeans_silhouette": {
+            "der": 0.2982,
+            "k": 3,
+            "silhouette": 0.3071
+          },
+          "kmeans_elbow": {
+            "der": 0.2982,
+            "k": 3
+          },
+          "kmeans_oracle_k": {
+            "der": 0.251,
+            "k": 4
+          }
+        },
+        "oracle_vad": {
+          "windows": 769,
+          "ahc_silhouette_capk": {
+            "der": 0.2026,
+            "tau": 0.48
+          },
+          "kmeans_silhouette": {
+            "der": 0.4502,
+            "k": 5,
+            "silhouette": 0.2607
+          },
+          "kmeans_elbow": {
+            "der": 0.4502,
+            "k": 5
+          },
+          "kmeans_oracle_k": {
+            "der": 0.3483,
+            "k": 4
+          }
+        }
+      }
+    },
+    "ES2004b": {
+      "k_true": 4,
+      "total_s": 2345.49,
+      "conditions": {
+        "silero_vad": {
+          "windows": 1589,
+          "ahc_silhouette_capk": {
+            "der": 0.2621,
+            "tau": 0.5
+          },
+          "kmeans_silhouette": {
+            "der": 0.2605,
+            "k": 3,
+            "silhouette": 0.3634
+          },
+          "kmeans_elbow": {
+            "der": 0.1416,
+            "k": 4
+          },
+          "kmeans_oracle_k": {
+            "der": 0.1416,
+            "k": 4
+          }
+        },
+        "oracle_vad": {
+          "windows": 1984,
+          "ahc_silhouette_capk": {
+            "der": 0.1868,
+            "tau": 0.52
+          },
+          "kmeans_silhouette": {
+            "der": 0.1507,
+            "k": 5,
+            "silhouette": 0.3206
+          },
+          "kmeans_elbow": {
+            "der": 0.1507,
+            "k": 5
+          },
+          "kmeans_oracle_k": {
+            "der": 0.067,
+            "k": 4
+          }
+        }
+      }
+    },
+    "ES2004c": {
+      "k_true": 4,
+      "total_s": 2334.37,
+      "conditions": {
+        "silero_vad": {
+          "windows": 1643,
+          "ahc_silhouette_capk": {
+            "der": 0.6501,
+            "tau": 0.52
+          },
+          "kmeans_silhouette": {
+            "der": 0.1373,
+            "k": 4,
+            "silhouette": 0.3574
+          },
+          "kmeans_elbow": {
+            "der": 0.1373,
+            "k": 4
+          },
+          "kmeans_oracle_k": {
+            "der": 0.1373,
+            "k": 4
+          }
+        },
+        "oracle_vad": {
+          "windows": 1985,
+          "ahc_silhouette_capk": {
+            "der": 0.0852,
+            "tau": 0.42
+          },
+          "kmeans_silhouette": {
+            "der": 0.0683,
+            "k": 4,
+            "silhouette": 0.3356
+          },
+          "kmeans_elbow": {
+            "der": 0.0683,
+            "k": 4
+          },
+          "kmeans_oracle_k": {
+            "der": 0.0683,
+            "k": 4
+          }
+        }
+      }
+    },
+    "ES2004d": {
+      "k_true": 4,
+      "total_s": 2222.29,
+      "conditions": {
+        "silero_vad": {
+          "windows": 1293,
+          "ahc_silhouette_capk": {
+            "der": 0.6948,
+            "tau": 0.54
+          },
+          "kmeans_silhouette": {
+            "der": 0.4306,
+            "k": 2,
+            "silhouette": 0.3382
+          },
+          "kmeans_elbow": {
+            "der": 0.2622,
+            "k": 3
+          },
+          "kmeans_oracle_k": {
+            "der": 0.2459,
+            "k": 4
+          }
+        },
+        "oracle_vad": {
+          "windows": 1669,
+          "ahc_silhouette_capk": {
+            "der": 0.6799,
+            "tau": 0.58
+          },
+          "kmeans_silhouette": {
+            "der": 0.3892,
+            "k": 2,
+            "silhouette": 0.3174
+          },
+          "kmeans_elbow": {
+            "der": 0.2361,
+            "k": 4
+          },
+          "kmeans_oracle_k": {
+            "der": 0.2361,
+            "k": 4
+          }
+        }
+      }
+    },
+    "IS1009a": {
+      "k_true": 4,
+      "total_s": 838.83,
+      "conditions": {
+        "silero_vad": {
+          "windows": 527,
+          "ahc_silhouette_capk": {
+            "der": 0.3694,
+            "tau": 0.72
+          },
+          "kmeans_silhouette": {
+            "der": 0.2312,
+            "k": 2,
+            "silhouette": 0.2305
+          },
+          "kmeans_elbow": {
+            "der": 0.2774,
+            "k": 4
+          },
+          "kmeans_oracle_k": {
+            "der": 0.2774,
+            "k": 4
+          }
+        },
+        "oracle_vad": {
+          "windows": 600,
+          "ahc_silhouette_capk": {
+            "der": 0.3465,
+            "tau": 0.7
+          },
+          "kmeans_silhouette": {
+            "der": 0.1796,
+            "k": 2,
+            "silhouette": 0.2178
+          },
+          "kmeans_elbow": {
+            "der": 0.2395,
+            "k": 4
+          },
+          "kmeans_oracle_k": {
+            "der": 0.2395,
+            "k": 4
+          }
+        }
+      }
+    },
+    "IS1009b": {
+      "k_true": 4,
+      "total_s": 2052.33,
+      "conditions": {
+        "silero_vad": {
+          "windows": 1658,
+          "ahc_silhouette_capk": {
+            "der": 0.2298,
+            "tau": 0.62
+          },
+          "kmeans_silhouette": {
+            "der": 0.0414,
+            "k": 4,
+            "silhouette": 0.3558
+          },
+          "kmeans_elbow": {
+            "der": 0.0414,
+            "k": 4
+          },
+          "kmeans_oracle_k": {
+            "der": 0.0414,
+            "k": 4
+          }
+        },
+        "oracle_vad": {
+          "windows": 1766,
+          "ahc_silhouette_capk": {
+            "der": 0.4671,
+            "tau": 0.64
+          },
+          "kmeans_silhouette": {
+            "der": 0.0249,
+            "k": 4,
+            "silhouette": 0.3374
+          },
+          "kmeans_elbow": {
+            "der": 0.0249,
+            "k": 4
+          },
+          "kmeans_oracle_k": {
+            "der": 0.0249,
+            "k": 4
+          }
+        }
+      }
+    },
+    "IS1009c": {
+      "k_true": 4,
+      "total_s": 1820.83,
+      "conditions": {
+        "silero_vad": {
+          "windows": 1366,
+          "ahc_silhouette_capk": {
+            "der": 0.4287,
+            "tau": 0.62
+          },
+          "kmeans_silhouette": {
+            "der": 0.0466,
+            "k": 4,
+            "silhouette": 0.3582
+          },
+          "kmeans_elbow": {
+            "der": 0.0466,
+            "k": 4
+          },
+          "kmeans_oracle_k": {
+            "der": 0.0466,
+            "k": 4
+          }
+        },
+        "oracle_vad": {
+          "windows": 1482,
+          "ahc_silhouette_capk": {
+            "der": 0.422,
+            "tau": 0.62
+          },
+          "kmeans_silhouette": {
+            "der": 0.0339,
+            "k": 4,
+            "silhouette": 0.3394
+          },
+          "kmeans_elbow": {
+            "der": 0.0339,
+            "k": 4
+          },
+          "kmeans_oracle_k": {
+            "der": 0.0339,
+            "k": 4
+          }
+        }
+      }
+    },
+    "IS1009d": {
+      "k_true": 4,
+      "total_s": 1944.5,
+      "conditions": {
+        "silero_vad": {
+          "windows": 1329,
+          "ahc_silhouette_capk": {
+            "der": 0.2769,
+            "tau": 0.66
+          },
+          "kmeans_silhouette": {
+            "der": 0.103,
+            "k": 4,
+            "silhouette": 0.2676
+          },
+          "kmeans_elbow": {
+            "der": 0.103,
+            "k": 4
+          },
+          "kmeans_oracle_k": {
+            "der": 0.103,
+            "k": 4
+          }
+        },
+        "oracle_vad": {
+          "windows": 1519,
+          "ahc_silhouette_capk": {
+            "der": 0.5707,
+            "tau": 0.78
+          },
+          "kmeans_silhouette": {
+            "der": 0.0573,
+            "k": 4,
+            "silhouette": 0.2478
+          },
+          "kmeans_elbow": {
+            "der": 0.0573,
+            "k": 4
+          },
+          "kmeans_oracle_k": {
+            "der": 0.0573,
+            "k": 4
+          }
+        }
+      }
+    },
+    "TS3003a": {
+      "k_true": 4,
+      "total_s": 1505.64,
+      "conditions": {
+        "silero_vad": {
+          "windows": 535,
+          "ahc_silhouette_capk": {
+            "der": 0.3739,
+            "tau": 0.38
+          },
+          "kmeans_silhouette": {
+            "der": 0.4187,
+            "k": 2,
+            "silhouette": 0.2368
+          },
+          "kmeans_elbow": {
+            "der": 0.749,
+            "k": 7
+          },
+          "kmeans_oracle_k": {
+            "der": 0.615,
+            "k": 4
+          }
+        },
+        "oracle_vad": {
+          "windows": 930,
+          "ahc_silhouette_capk": {
+            "der": 0.1339,
+            "tau": 0.44
+          },
+          "kmeans_silhouette": {
+            "der": 0.3318,
+            "k": 2,
+            "silhouette": 0.271
+          },
+          "kmeans_elbow": {
+            "der": 0.5835,
+            "k": 3
+          },
+          "kmeans_oracle_k": {
+            "der": 0.6176,
+            "k": 4
+          }
+        }
+      }
+    },
+    "TS3003b": {
+      "k_true": 4,
+      "total_s": 2210.3,
+      "conditions": {
+        "silero_vad": {
+          "windows": 1215,
+          "ahc_silhouette_capk": {
+            "der": 0.6762,
+            "tau": 0.42
+          },
+          "kmeans_silhouette": {
+            "der": 0.4184,
+            "k": 2,
+            "silhouette": 0.2681
+          },
+          "kmeans_elbow": {
+            "der": 0.5877,
+            "k": 5
+          },
+          "kmeans_oracle_k": {
+            "der": 0.2788,
+            "k": 4
+          }
+        },
+        "oracle_vad": {
+          "windows": 1680,
+          "ahc_silhouette_capk": {
+            "der": 0.6173,
+            "tau": 0.44
+          },
+          "kmeans_silhouette": {
+            "der": 0.3652,
+            "k": 2,
+            "silhouette": 0.2387
+          },
+          "kmeans_elbow": {
+            "der": 0.4223,
+            "k": 3
+          },
+          "kmeans_oracle_k": {
+            "der": 0.4371,
+            "k": 4
+          }
+        }
+      }
+    },
+    "TS3003c": {
+      "k_true": 4,
+      "total_s": 2570.0,
+      "conditions": {
+        "silero_vad": {
+          "windows": 1111,
+          "ahc_silhouette_capk": {
+            "der": 0.2437,
+            "tau": 0.44
+          },
+          "kmeans_silhouette": {
+            "der": 0.2419,
+            "k": 4,
+            "silhouette": 0.3292
+          },
+          "kmeans_elbow": {
+            "der": 0.2419,
+            "k": 4
+          },
+          "kmeans_oracle_k": {
+            "der": 0.2419,
+            "k": 4
+          }
+        },
+        "oracle_vad": {
+          "windows": 1762,
+          "ahc_silhouette_capk": {
+            "der": 0.5989,
+            "tau": 0.42
+          },
+          "kmeans_silhouette": {
+            "der": 0.355,
+            "k": 5,
+            "silhouette": 0.2694
+          },
+          "kmeans_elbow": {
+            "der": 0.355,
+            "k": 5
+          },
+          "kmeans_oracle_k": {
+            "der": 0.0641,
+            "k": 4
+          }
+        }
+      }
+    },
+    "TS3003d": {
+      "k_true": 4,
+      "total_s": 2618.2,
+      "conditions": {
+        "silero_vad": {
+          "windows": 1060,
+          "ahc_silhouette_capk": {
+            "der": 0.6203,
+            "tau": 0.46
+          },
+          "kmeans_silhouette": {
+            "der": 0.5179,
+            "k": 2,
+            "silhouette": 0.2144
+          },
+          "kmeans_elbow": {
+            "der": 0.4575,
+            "k": 5
+          },
+          "kmeans_oracle_k": {
+            "der": 0.3414,
+            "k": 4
+          }
+        },
+        "oracle_vad": {
+          "windows": 1778,
+          "ahc_silhouette_capk": {
+            "der": 0.4905,
+            "tau": 0.5
+          },
+          "kmeans_silhouette": {
+            "der": 0.4332,
+            "k": 5,
+            "silhouette": 0.1805
+          },
+          "kmeans_elbow": {
+            "der": 0.5172,
+            "k": 6
+          },
+          "kmeans_oracle_k": {
+            "der": 0.4369,
+            "k": 4
+          }
+        }
+      }
+    }
+  },
+  "summary": {
+    "silero_vad": {
+      "n": 16,
+      "routes": {
+        "ahc_silhouette_capk": {
+          "mean_der": 0.4887,
+          "worst_der": 0.7016,
+          "mean_pass_40": false,
+          "worst_pass_55": false
+        },
+        "kmeans_silhouette": {
+          "mean_der": 0.2949,
+          "worst_der": 0.5179,
+          "mean_pass_40": true,
+          "worst_pass_55": true
+        },
+        "kmeans_elbow": {
+          "mean_der": 0.2887,
+          "worst_der": 0.749,
+          "mean_pass_40": true,
+          "worst_pass_55": false
+        },
+        "kmeans_oracle_k": {
+          "mean_der": 0.2376,
+          "worst_der": 0.615,
+          "mean_pass_40": true,
+          "worst_pass_55": false
+        }
+      }
+    },
+    "oracle_vad": {
+      "n": 16,
+      "routes": {
+        "ahc_silhouette_capk": {
+          "mean_der": 0.4535,
+          "worst_der": 0.6799,
+          "mean_pass_40": false,
+          "worst_pass_55": false
+        },
+        "kmeans_silhouette": {
+          "mean_der": 0.2467,
+          "worst_der": 0.4615,
+          "mean_pass_40": true,
+          "worst_pass_55": true
+        },
+        "kmeans_elbow": {
+          "mean_der": 0.2588,
+          "worst_der": 0.5835,
+          "mean_pass_40": true,
+          "worst_pass_55": false
+        },
+        "kmeans_oracle_k": {
+          "mean_der": 0.2127,
+          "worst_der": 0.6176,
+          "mean_pass_40": true,
+          "worst_pass_55": false
+        }
+      }
+    }
+  }
+}
