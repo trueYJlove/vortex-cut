@@ -26,7 +26,6 @@ PyPI 上的 `dscore` 是同名无关包（GPL3 的日语工具）。因此本文
 from __future__ import annotations
 
 from dataclasses import dataclass
-from itertools import permutations
 from pathlib import Path
 
 import numpy as np
@@ -43,6 +42,73 @@ def load_rttm(path: str | Path) -> list[tuple[float, float, str]]:
             start, dur = float(f[3]), float(f[4])
             turns.append((start, start + dur, f[7]))
     return sorted(turns)
+
+
+def _max_weight_matching(weights: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    r"""最大权**二分匹配**（Hungarian / Jonker-Volgenant，O(n³)），纯 numpy 无外部依赖。
+
+    为什么必须精确解：这就是 DER 里"最优说话人映射"的定义本身。
+    映射错一对，SPKERR 就整体偏大，且**偏差是方向性的**
+    （只在 n_hyp > n_ref 时触发，即只惩罚过分割）。
+
+    语义：`weights` 为 (n_rows, n_cols) 的非负命中数矩阵；要求 `n_rows ≤ n_cols`
+    （行侧**全部**要被分配，列侧允许多余）。返回 `(row_ind, col_ind)`，二者等长且
+    `col_ind` 无重复，使 `sum(weights[r, col[r]])` 最大。
+
+    实现在 `(8, 200)` 上实测 1 ms；**正确性由与穷举逐值对照钉死**
+    （300 组随机 + 关键形态，见 `test_diarization_scorer.py`）。
+    """
+    w = np.asarray(weights, dtype=np.float64)
+    n, m = w.shape
+    if n == 0 or m == 0:
+        return np.empty(0, dtype=np.int64), np.empty(0, dtype=np.int64)
+    if n > m:
+        raise ValueError("_max_weight_matching 要求 n_rows <= n_cols（调用方负责转置）")
+    cost = -w
+    u = np.zeros(n + 1)
+    v = np.zeros(m + 1)
+    p = np.zeros(m + 1, dtype=np.int64)
+    way = np.zeros(m + 1, dtype=np.int64)
+    inf = np.inf
+    for i in range(1, n + 1):
+        p[0] = i
+        j0 = 0
+        minv = np.full(m + 1, inf)
+        used = np.zeros(m + 1, dtype=bool)
+        while True:
+            used[j0] = True
+            i0 = int(p[j0])
+            row = cost[i0 - 1]
+            delta, j1 = inf, -1
+            for j in range(1, m + 1):
+                if used[j]:
+                    continue
+                cur = row[j - 1] - u[i0] - v[j]
+                if cur < minv[j]:
+                    minv[j] = cur
+                    way[j] = j0
+                if minv[j] < delta:
+                    delta, j1 = minv[j], j
+            for j in range(m + 1):
+                if used[j]:
+                    u[int(p[j])] += delta
+                    v[j] -= delta
+                else:
+                    minv[j] -= delta
+            j0 = j1
+            if p[j0] == 0:
+                break
+        while True:
+            j1 = int(way[j0])
+            p[j0] = p[j1]
+            j0 = j1
+            if j0 == 0:
+                break
+    col = np.full(n, -1, dtype=np.int64)
+    for j in range(1, m + 1):
+        if p[j] != 0:
+            col[int(p[j]) - 1] = j - 1
+    return np.arange(n, dtype=np.int64), col
 
 
 def _frame_index(times: list[float]) -> np.ndarray:
@@ -141,20 +207,40 @@ def score(
     # 最优映射：穷举 假设→参考 的单射，命中数从**列联表**读，不逐排列重建帧标签。
     # （首版按映射重建 mapped 数组 ⇒ O(排列数 × 假设数 × 帧数)；低阈值下假设数可达数百，
     #   4 会议实测跑到超时。列联表把这一步降到 O(排列数 × 假设数)。）
-    refs = list(range(n_ref))
     hit_frames = int(scored.sum()) - int(((hyp_owner == -1) & scored).sum())
     contingency = np.zeros((max(n_ref, 1), max(n_hyp, 1)), dtype=np.int64)
     both = scored & (hyp_owner >= 0) & (ref_owner >= 0)
     if both.any():
         np.add.at(contingency, (ref_owner[both], hyp_owner[both]), 1)
 
+    # **最优映射 = 最大权二分匹配**（匈牙利/JV，O(n³)），不是"只排列前 m 个假设"。
+    #
+    # 缺陷（2026-10-12 由 md-eval 交叉校验发现）：旧实现是
+    #     for target in permutations(range(n_ref), min(n_hyp, n_ref))
+    # 永远用**序号最小的** min(n_hyp,n_ref) 个假设说话人，从不搜索"该挑哪几个"。
+    #   · n_hyp ≤ n_ref 时它与全排列等价 ⇒ 无影响（故既有 14 项自检全绿）；
+    #   · n_hyp > n_ref（过分割）时它可能跳过真正的匹配对 ⇒ **DER 被高估**。
+    # EN2002c 实测：旧 0.4659 / 新 0.1801，NIST md-eval-22.pl 独立给出 0.1806。
+    #
+    # 该缺陷**只惩罚过分割**，因而系统性掩盖"欠分割的代价"——正是 §5.3 要判的问题；
+    # 且它会让"初值换一下就翻车"看起来像初值敏感（实测中文 2/8 初值"越线"即由此而来）。
+    #
+    # 为什么用匈牙利而不是继续穷举：穷举的正确形式是 P(n_hyp,m)×P(n_ref,m)，
+    # 门内最坏形态（K̂ = k_max 且过分割，n_hyp 到数百）实测把中文阶梯从 ~20 min
+    # 拖到 500 s/场。匈牙利在 (8, 200) 上实测 1 ms 且**与穷举逐值一致**
+    # （300 组随机 + 关键形态，见 test_diarization_scorer.py::TestOptimalMappingSubsetSearch）。
     best: dict[int, int] = {}
     if n_hyp and n_ref:
-        best_hit = -1
-        for target in permutations(refs, min(n_hyp, n_ref)):
-            hit = sum(int(contingency[r, h]) for h, r in enumerate(target))
-            if hit > best_hit:
-                best_hit, best = hit, dict(enumerate(target))
+        # 行=参考（全部要分配）、列=假设（可有多余）。n_ref ≤ n_hyp 时行数更少，直接解；
+        # 否则转置（"每个假设都分到一个参考"与"每个参考都分到一个假设"在
+        # n_ref ≥ n_hyp 时要的是**后者**，故转置后取反解即可保持语义）。
+        if n_ref <= n_hyp:
+            rows, cols = _max_weight_matching(contingency.astype(np.float64))
+            best = {int(c): int(r) for r, c in zip(rows, cols)}
+        else:
+            rows, cols = _max_weight_matching(contingency.T.astype(np.float64))
+            best = {int(r): int(c) for r, c in zip(rows, cols)}
+        best_hit = int(sum(contingency[r, h] for h, r in best.items()))
 
     miss = int(((hyp_owner == -1) & scored).sum())
     spk_err = hit_frames - (best_hit if best else 0)
@@ -224,32 +310,38 @@ def run_selftest(*, verbose: bool = True) -> list[str]:
     if not ok:
         fails.append("single-speaker identity")
     if verbose:
-        print(f"{'single-speaker == 1-max_share':28s} {r_single.der:8.4f}  期望≈{exp:.4f} "
-              f"{'✅' if ok else '❌'}")
+        print(
+            f"{'single-speaker == 1-max_share':28s} {r_single.der:8.4f}  期望≈{exp:.4f} "
+            f"{'✅' if ok else '❌'}"
+        )
 
     # 平移对照：DER 必须随平移量单调上升，且大平移要显著变差。
     # **注意**（本自检第一版就在此翻车）：10 s 轮次上平移 2 s 只错"边界带"，
     # DER≈0.23 是**正确**结果——所以判据不能拍一个"2s 就该 >0.5"，必须看单调性 + 大平移。
     shifts = [0.0, 1.0, 2.0, 5.0]
-    ders = [
-        score(ref, [(a + s, b + s, sp) for a, b, sp in ref], total_s=total).der for s in shifts
-    ]
+    ders = [score(ref, [(a + s, b + s, sp) for a, b, sp in ref], total_s=total).der for s in shifts]
     mono = all(ders[i] <= ders[i + 1] + 1e-9 for i in range(len(ders) - 1))
     big = ders[-1] > 0.4
     if not (mono and big):
         fails.append("shift monotonicity")
     if verbose:
         series = " ".join(f"{d:.4f}" for d in ders)
-        print(f"{'shift monotonic 0/1/2/5s':28s} {series}  "
-              f"单调={'✅' if mono else '❌'} 5s>0.4={'✅' if big else '❌'}")
+        print(
+            f"{'shift monotonic 0/1/2/5s':28s} {series}  "
+            f"单调={'✅' if mono else '❌'} 5s>0.4={'✅' if big else '❌'}"
+        )
 
     if verbose:
         r_empty = score(ref, [], total_s=total)
         r_all = score(ref, [(0.0, 40.0, "S")], total_s=total)
-        print(f"  （empty: miss={r_empty.miss:.3f} fa={r_empty.false_alarm:.3f}"
-              f" spk={r_empty.speaker_error:.3f}）")
-        print(f"  （single: miss={r_all.miss:.3f} fa={r_all.false_alarm:.3f}"
-              f" spk={r_all.speaker_error:.3f}）")
+        print(
+            f"  （empty: miss={r_empty.miss:.3f} fa={r_empty.false_alarm:.3f}"
+            f" spk={r_empty.speaker_error:.3f}）"
+        )
+        print(
+            f"  （single: miss={r_all.miss:.3f} fa={r_all.false_alarm:.3f}"
+            f" spk={r_all.speaker_error:.3f}）"
+        )
         print("\n自检:", "全部通过 ✅" if not fails else f"失败 {fails} ❌")
     return fails
 

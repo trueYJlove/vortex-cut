@@ -1,0 +1,200 @@
+{
+  "generated_at": "2026-10-12T17:04:49",
+  "corpus": "ami",
+  "model_id": "campplus",
+  "channel": null,
+  "config": {
+    "window_s": 2.0,
+    "hop_s": 1.0,
+    "min_speech_fraction": 0.6,
+    "min_turn_s": 0.4,
+    "k_max": 8,
+    "vad_threshold": 0.5,
+    "tau_grid": [
+      0.2,
+      0.22,
+      0.24,
+      0.26,
+      0.28,
+      0.3,
+      0.32,
+      0.34,
+      0.36,
+      0.38,
+      0.4,
+      0.42,
+      0.44,
+      0.46,
+      0.48,
+      0.5,
+      0.52,
+      0.54,
+      0.56,
+      0.58,
+      0.6,
+      0.62,
+      0.64,
+      0.66,
+      0.68,
+      0.7,
+      0.72,
+      0.74,
+      0.76,
+      0.78,
+      0.8
+    ],
+    "scoring": {
+      "frame_s": 0.01,
+      "collar_s": 0.25,
+      "ignore_overlap": true
+    }
+  },
+  "meetings": {
+    "EN2002a": {
+      "total_s": 2142.71,
+      "ref_speakers": 4,
+      "grid_windows": 2141,
+      "selected_windows": 1528,
+      "embed_s": 79.64,
+      "embed_cached": false,
+      "cache_key": "fe58f8b00ffb0722a31a86ef2a53f447f290cd65da69fd420a38ab4a9f2cecde",
+      "dendrogram_s": 5.68,
+      "strategies": {
+        "silhouette_capK": {
+          "tau": 0.62,
+          "tau_on_grid": 0.62,
+          "der": 0.611,
+          "strategy_name": "silhouette+capK",
+          "n_speakers": 2
+        },
+        "distance_mixture": {
+          "tau": 0.58,
+          "tau_on_grid": 0.58,
+          "der": 0.611,
+          "strategy_name": "distance_mixture(k_hat=3)",
+          "n_speakers": 3
+        },
+        "fixed0.45": {
+          "tau": 0.45,
+          "tau_on_grid": 0.44,
+          "der": 0.3873,
+          "strategy_name": "fixed",
+          "n_speakers": 33
+        },
+        "oracle": {
+          "tau": 0.38,
+          "tau_on_grid": 0.38,
+          "der": 0.2935,
+          "strategy_name": "oracle(uses_truth)",
+          "n_speakers": 71
+        }
+      },
+      "curve": {
+        "0.20": 0.7827,
+        "0.22": 0.7381,
+        "0.24": 0.6812,
+        "0.26": 0.5852,
+        "0.28": 0.5579,
+        "0.30": 0.4497,
+        "0.32": 0.3852,
+        "0.34": 0.3333,
+        "0.36": 0.3069,
+        "0.38": 0.2935,
+        "0.40": 0.3943,
+        "0.42": 0.3904,
+        "0.44": 0.3873,
+        "0.46": 0.5375,
+        "0.48": 0.5368,
+        "0.50": 0.5351,
+        "0.52": 0.5351,
+        "0.54": 0.6207,
+        "0.56": 0.6207,
+        "0.58": 0.611,
+        "0.60": 0.611,
+        "0.62": 0.611,
+        "0.64": 0.611,
+        "0.66": 0.6154,
+        "0.68": 0.6154,
+        "0.70": 0.6154,
+        "0.72": 0.6154,
+        "0.74": 0.6154,
+        "0.76": 0.6154,
+        "0.78": 0.6154,
+        "0.80": 0.6154
+      }
+    },
+    "EN2002b": {
+      "total_s": 1786.85,
+      "ref_speakers": 4,
+      "grid_windows": 1785,
+      "selected_windows": 1229,
+      "embed_s": 64.74,
+      "embed_cached": false,
+      "cache_key": "069971fe9f9f48a3b9f0bacc902a3bb38af73a4a5b893f4df9e9c4d737c7be40",
+      "dendrogram_s": 2.73,
+      "strategies": {
+        "silhouette_capK": {
+          "tau": 0.66,
+          "tau_on_grid": 0.66,
+          "der": 0.5868,
+          "strategy_name": "silhouette+capK",
+          "n_speakers": 2
+        },
+        "distance_mixture": {
+          "tau": 0.56,
+          "tau_on_grid": 0.56,
+          "der": 0.5857,
+          "strategy_name": "distance_mixture(k_hat=4)",
+          "n_speakers": 4
+        },
+        "fixed0.45": {
+          "tau": 0.45,
+          "tau_on_grid": 0.44,
+          "der": 0.3923,
+          "strategy_name": "fixed",
+          "n_speakers": 21
+        },
+        "oracle": {
+          "tau": 0.34,
+          "tau_on_grid": 0.34,
+          "der": 0.2565,
+          "strategy_name": "oracle(uses_truth)",
+          "n_speakers": 65
+        }
+      },
+      "curve": {
+        "0.20": 0.7646,
+        "0.22": 0.6848,
+        "0.24": 0.6246,
+        "0.26": 0.4222,
+        "0.28": 0.3883,
+        "0.30": 0.3777,
+        "0.32": 0.349,
+        "0.34": 0.2565,
+        "0.36": 0.2997,
+        "0.38": 0.2717,
+        "0.40": 0.2717,
+        "0.42": 0.3827,
+        "0.44": 0.3923,
+        "0.46": 0.389,
+        "0.48": 0.3848,
+        "0.50": 0.5778,
+        "0.52": 0.5761,
+        "0.54": 0.5819,
+        "0.56": 0.5857,
+        "0.58": 0.5857,
+        "0.60": 0.5857,
+        "0.62": 0.5857,
+        "0.64": 0.5857,
+        "0.66": 0.5868,
+        "0.68": 0.5868,
+        "0.70": 0.5868,
+        "0.72": 0.5868,
+        "0.74": 0.5868,
+        "0.76": 0.5868,
+        "0.78": 0.5868,
+        "0.80": 0.5868
+      }
+    }
+  }
+}

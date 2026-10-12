@@ -1,0 +1,244 @@
+{
+  "md_eval": "C:\\DataFolder\\codes\\AI-Vidio\\.tmp\\md-eval\\md-eval-22.pl",
+  "condition": "silero_vad",
+  "collar_s": 0.25,
+  "meetings": {
+    "EN2002a": {
+      "k": 2,
+      "n_windows": 1528,
+      "ignore_overlap": {
+        "ours": 0.4642,
+        "md_eval_minus1": 0.4968,
+        "delta": 0.0326
+      },
+      "count_overlap": {
+        "ours": 0.5716,
+        "md_eval_default": 0.5525,
+        "delta": -0.0191
+      }
+    },
+    "EN2002b": {
+      "k": 2,
+      "n_windows": 1229,
+      "ignore_overlap": {
+        "ours": 0.3913,
+        "md_eval_minus1": 0.392,
+        "delta": 0.0007
+      },
+      "count_overlap": {
+        "ours": 0.5155,
+        "md_eval_default": 0.4844,
+        "delta": -0.0311
+      }
+    },
+    "EN2002c": {
+      "k": 4,
+      "n_windows": 2109,
+      "ignore_overlap": {
+        "ours": 0.1801,
+        "md_eval_minus1": 0.1806,
+        "delta": 0.0005
+      },
+      "count_overlap": {
+        "ours": 0.3394,
+        "md_eval_default": 0.3433,
+        "delta": 0.0039
+      }
+    },
+    "EN2002d": {
+      "k": 4,
+      "n_windows": 1592,
+      "ignore_overlap": {
+        "ours": 0.2507,
+        "md_eval_minus1": 0.2514,
+        "delta": 0.0007
+      },
+      "count_overlap": {
+        "ours": 0.4296,
+        "md_eval_default": 0.4291,
+        "delta": -0.0005
+      }
+    },
+    "ES2004a": {
+      "k": 3,
+      "n_windows": 547,
+      "ignore_overlap": {
+        "ours": 0.2982,
+        "md_eval_minus1": 0.2986,
+        "delta": 0.0004
+      },
+      "count_overlap": {
+        "ours": 0.3567,
+        "md_eval_default": 0.3436,
+        "delta": -0.0131
+      }
+    },
+    "ES2004b": {
+      "k": 3,
+      "n_windows": 1589,
+      "ignore_overlap": {
+        "ours": 0.2605,
+        "md_eval_minus1": 0.2609,
+        "delta": 0.0004
+      },
+      "count_overlap": {
+        "ours": 0.2937,
+        "md_eval_default": 0.2916,
+        "delta": -0.0021
+      }
+    },
+    "ES2004c": {
+      "k": 4,
+      "n_windows": 1643,
+      "ignore_overlap": {
+        "ours": 0.1373,
+        "md_eval_minus1": 0.1379,
+        "delta": 0.0006
+      },
+      "count_overlap": {
+        "ours": 0.1814,
+        "md_eval_default": 0.1828,
+        "delta": 0.0014
+      }
+    },
+    "ES2004d": {
+      "k": 2,
+      "n_windows": 1293,
+      "ignore_overlap": {
+        "ours": 0.4306,
+        "md_eval_minus1": 0.4317,
+        "delta": 0.0011
+      },
+      "count_overlap": {
+        "ours": 0.4779,
+        "md_eval_default": 0.4609,
+        "delta": -0.017
+      }
+    },
+    "IS1009a": {
+      "k": 2,
+      "n_windows": 527,
+      "ignore_overlap": {
+        "ours": 0.2312,
+        "md_eval_minus1": 0.2319,
+        "delta": 0.0007
+      },
+      "count_overlap": {
+        "ours": 0.2846,
+        "md_eval_default": 0.2757,
+        "delta": -0.0089
+      }
+    },
+    "IS1009b": {
+      "k": 4,
+      "n_windows": 1658,
+      "ignore_overlap": {
+        "ours": 0.0414,
+        "md_eval_minus1": 0.0419,
+        "delta": 0.0005
+      },
+      "count_overlap": {
+        "ours": 0.0834,
+        "md_eval_default": 0.0852,
+        "delta": 0.0018
+      }
+    },
+    "IS1009c": {
+      "k": 4,
+      "n_windows": 1366,
+      "ignore_overlap": {
+        "ours": 0.0466,
+        "md_eval_minus1": 0.0472,
+        "delta": 0.0006
+      },
+      "count_overlap": {
+        "ours": 0.0636,
+        "md_eval_default": 0.0659,
+        "delta": 0.0023
+      }
+    },
+    "IS1009d": {
+      "k": 4,
+      "n_windows": 1329,
+      "ignore_overlap": {
+        "ours": 0.103,
+        "md_eval_minus1": 0.1003,
+        "delta": -0.0027
+      },
+      "count_overlap": {
+        "ours": 0.1415,
+        "md_eval_default": 0.1427,
+        "delta": 0.0012
+      }
+    },
+    "TS3003a": {
+      "k": 2,
+      "n_windows": 535,
+      "ignore_overlap": {
+        "ours": 0.4187,
+        "md_eval_minus1": 0.4194,
+        "delta": 0.0007
+      },
+      "count_overlap": {
+        "ours": 0.427,
+        "md_eval_default": 0.4303,
+        "delta": 0.0033
+      }
+    },
+    "TS3003b": {
+      "k": 2,
+      "n_windows": 1215,
+      "ignore_overlap": {
+        "ours": 0.4184,
+        "md_eval_minus1": 0.4129,
+        "delta": -0.0055
+      },
+      "count_overlap": {
+        "ours": 0.4249,
+        "md_eval_default": 0.4186,
+        "delta": -0.0063
+      }
+    },
+    "TS3003c": {
+      "k": 4,
+      "n_windows": 1111,
+      "ignore_overlap": {
+        "ours": 0.2419,
+        "md_eval_minus1": 0.2406,
+        "delta": -0.0013
+      },
+      "count_overlap": {
+        "ours": 0.2595,
+        "md_eval_default": 0.2562,
+        "delta": -0.0033
+      }
+    },
+    "TS3003d": {
+      "k": 2,
+      "n_windows": 1060,
+      "ignore_overlap": {
+        "ours": 0.5179,
+        "md_eval_minus1": 0.5188,
+        "delta": 0.0009
+      },
+      "count_overlap": {
+        "ours": 0.5424,
+        "md_eval_default": 0.5353,
+        "delta": -0.0071
+      }
+    }
+  },
+  "summary": {
+    "n": 16,
+    "ignore": {
+      "mean_delta": 0.0019,
+      "max_abs_delta": 0.0326,
+      "pearson_r": 0.9987
+    },
+    "count": {
+      "mean_delta": -0.0059,
+      "max_abs_delta": 0.0311
+    },
+    "same_ordering": true
+  }
+}

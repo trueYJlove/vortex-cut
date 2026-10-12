@@ -135,6 +135,151 @@ class TestNegativeControls:
         assert keep.scored_frames > ignore.scored_frames
 
 
+class TestOptimalMappingSubsetSearch:
+    """**最优映射必须穷举"挑哪几个假设说话人"**（2026-10-12 交叉校验发现的缺陷）。
+
+    旧实现 `permutations(range(n_ref), min(n_hyp, n_ref))` 永远只用**序号最小的**
+    min(n_hyp,n_ref) 个假设去映射，从不搜索子集。n_hyp ≤ n_ref 时它与全排列等价
+    （故既有 9 项自检全绿）；**一旦 n_hyp > n_ref，它就可能跳过真正的匹配对**，
+    把 DER 高估——而且**只惩罚过分割**，恰好掩盖"欠分割的代价"。
+
+    实测（EN2002c，AMI）：旧 0.4659 / 新 0.1801 / NIST md-eval-22.pl 独立给 0.1806。
+    故本组用例是**仪器正确性**的门，不是风格问题。
+    """
+
+    @staticmethod
+    def _ref_three():
+        return [(0.0, 10.0, "R0"), (20.0, 30.0, "R1"), (40.0, 50.0, "R2")]
+
+    def test_extra_leading_cluster_does_not_hide_the_match(self):
+        # hyp 的第一个说话人是**多余的空簇**；真正的对应在 hyp1..hyp3。
+        # 旧实现只用前 3 个假设（X0,X1,X2）⇒ 找不到最优 ⇒ DER 高估。
+        hyp = [(0.0, 0.2, "X0"), (0.0, 10.0, "X1"), (20.0, 30.0, "X2"), (40.0, 50.0, "X3")]
+        r = der.score(self._ref_three(), hyp, total_s=60.0, ignore_overlap=True)
+        assert r.der == pytest.approx(0.0, abs=1e-9), r.der
+        assert r.speaker_error == pytest.approx(0.0, abs=1e-9)
+        # 映射必须指向 hyp1..hyp3，**不能**包含 X0
+        assert set(r.mapping) == {1, 2, 3}
+
+    def test_extra_middle_cluster_does_not_hide_the_match(self):
+        """多余簇夹在中间（序号小于后面的真簇）⇒ 必须仍能跳过它。
+
+        **只断言 speaker_error 与映射**，不断言 DER：XJUNK 在参考静音里说话，
+        那段**合法地**计入 FA（9.55 s / 29.5 s ≈ 0.32），与本用例要测的
+        "映射搜索是否完整"无关。（初版把 DER 断言成 0 是我自己写错了夹具，
+        被这条失败的用例当场纠正。）
+        """
+        # **说话人编号是 sorted(标签) 的序**（`_hyp_frames` 实现如此），
+        # 故这里用 "XB" 作多余簇，使其**确实落在序号 1**（初版用 "XJUNK"，
+        # 它按字典序排到最后、根本没夹在中间——是我的夹具错了，不是搜索错了）。
+        hyp = [
+            (0.0, 10.0, "XA"),
+            (10.0, 19.8, "XB"),  # 多余簇，序号 1
+            (20.0, 30.0, "XC"),
+            (40.0, 50.0, "XD"),
+        ]
+        r = der.score(self._ref_three(), hyp, total_s=60.0, ignore_overlap=True)
+        assert r.speaker_error == pytest.approx(0.0, abs=1e-9), r.speaker_error
+        assert r.mapping == {0: 0, 2: 1, 3: 2}  # 跳过序号 1 的多余簇
+        assert r.false_alarm > 0.0  # 多余簇在参考静音处说话 ⇒ 有 FA（这是对的）
+
+    def test_n_hyp_le_n_ref_still_correct(self):
+        # **负向对照的方向**：假设数 ≤ 参考数时新旧等价，必须仍然正确
+        hyp = [(0.0, 10.0, "X0"), (20.0, 30.0, "X1")]
+        r = der.score(self._ref_three(), hyp, total_s=60.0, ignore_overlap=True)
+        # R0,R1 各被正确命中；R2 全丢（10 s / 30 s 参考语音）
+        assert r.miss > 0.0 and r.speaker_error == pytest.approx(0.0, abs=1e-9)
+
+    def test_hungarian_matches_brute_force_exactly(self):
+        """**匹配器本身**必须与穷举逐值一致——否则"修好映射"只是换了个 bug。
+
+        300 组随机矩阵（含并列/零权重/n_hyp 远大于 n_ref），逐组比对最优命中数。
+        """
+        from itertools import permutations
+
+        import numpy as np
+
+        rng = np.random.default_rng(20261012)
+        mismatches = 0
+        for trial in range(300):
+            n = int(rng.integers(1, 6))
+            m = int(rng.integers(n, 10))
+            w = rng.integers(0, 50, size=(n, m)).astype(np.float64)
+            if trial % 3 == 0:
+                w[int(rng.integers(0, n)), int(rng.integers(0, m))] = 0.0
+            best = -1.0
+            for cols in permutations(range(m), n):
+                best = max(best, sum(w[r, cols[r]] for r in range(n)))
+            rows, col = der._max_weight_matching(w)
+            got = sum(w[r, col[r]] for r in range(len(rows)))
+            if abs(got - best) > 1e-9:
+                mismatches += 1
+        assert mismatches == 0
+
+    def test_hungarian_requires_rows_le_cols(self):
+        import numpy as np
+        import pytest
+
+        with pytest.raises(ValueError):
+            der._max_weight_matching(np.zeros((3, 2)))
+
+    def test_hungarian_bounded_at_gate_worst_case(self):
+        """门内最坏形态（n_ref=8, n_hyp=200）必须**毫秒级**——否则整套评测跑不完。
+
+        这是把穷举换成匈牙利的直接理由：穷举的正确形式是 P(n_hyp,m)×P(n_ref,m)，
+        实测把中文 K 阶梯从 ~20 min 拖到 500 s/场。
+        """
+        import time
+
+        import numpy as np
+
+        rng = np.random.default_rng(0)
+        w = rng.integers(0, 1000, size=(8, 200)).astype(np.float64)
+        t0 = time.perf_counter()
+        _, col = der._max_weight_matching(w)
+        elapsed = time.perf_counter() - t0
+        assert elapsed < 0.5, elapsed
+        assert len(set(col.tolist())) == 8  # 单射
+
+    def test_regression_old_implementation_would_fail(self):
+        """**负向对照**：把旧的"只排列前 m 个假设"逻辑原地复算一遍，必须给出更差的分数。
+
+        这证明本组用例真的在测那个缺陷，而不是在测别的东西。
+        """
+        from itertools import permutations
+
+        import numpy as np
+
+        # 用已加载的常设实现里的私有助手，**不新开 import**（tools/ 不在 testpaths 的 path 上）
+        COLLAR_S, FRAME_S = der.COLLAR_S, der.FRAME_S
+        _collar_mask, _hyp_frames = der._collar_mask, der._hyp_frames
+        _ref_frames = der._ref_frames
+
+        ref = self._ref_three()
+        hyp = [(0.0, 0.2, "X0"), (0.0, 10.0, "X1"), (20.0, 30.0, "X2"), (40.0, 50.0, "X3")]
+        n_frames = int(round(60.0 / FRAME_S))
+        ref_count, ref_owner = _ref_frames(ref, n_frames)
+        hyp_owner = _hyp_frames(hyp, n_frames)
+        collar = _collar_mask(ref, n_frames, COLLAR_S)
+        scored = (ref_count > 0) & (ref_count == 1) & (~collar)
+        n_scored = int(scored.sum())
+        n_ref = int(ref_owner.max()) + 1
+        n_hyp = int(hyp_owner.max()) + 1
+        cont = np.zeros((n_ref, n_hyp), dtype=np.int64)
+        both = scored & (hyp_owner >= 0) & (ref_owner >= 0)
+        np.add.at(cont, (ref_owner[both], hyp_owner[both]), 1)
+        hit_frames = n_scored - int(((hyp_owner == -1) & scored).sum())
+        # 旧逻辑
+        old_hit = -1
+        for target in permutations(range(n_ref), min(n_hyp, n_ref)):
+            old_hit = max(old_hit, sum(int(cont[r, h]) for h, r in enumerate(target)))
+        miss = int(((hyp_owner == -1) & scored).sum())
+        fa = int(((hyp_owner != -1) & (ref_count == 0) & (~collar)).sum())
+        old_der = (miss + (hit_frames - max(old_hit, 0)) + fa) / n_scored
+        new_der = der.score(ref, hyp, total_s=60.0, ignore_overlap=True).der
+        assert old_der > new_der + 0.1, (old_der, new_der)
+
+
 class TestSelftestHarness:
     def test_run_selftest_all_pass(self):
         assert der.run_selftest(verbose=False) == []

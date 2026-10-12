@@ -1,0 +1,128 @@
+{
+  "generated_at": "2026-10-12T17:33:14",
+  "purpose": "kmeans_silhouette 的稳健性复核：种子稳定性 / 评分口径敏感性 / 自动 K 欠分割",
+  "config": {
+    "diag_json": ".tmp/w22-diag-ami.json",
+    "condition": "silero_vad",
+    "seeds": 8,
+    "n_meetings_used": 16
+  },
+  "seeds": {
+    "per_seed": {
+      "0": {
+        "mean": 0.277,
+        "worst": 0.5179,
+        "mean_pass_40": true,
+        "worst_pass_55": true,
+        "auto_k": [
+          2,
+          3,
+          4
+        ]
+      },
+      "1": {
+        "mean": 0.2771,
+        "worst": 0.5179,
+        "mean_pass_40": true,
+        "worst_pass_55": true,
+        "auto_k": [
+          2,
+          3,
+          4
+        ]
+      },
+      "2": {
+        "mean": 0.2781,
+        "worst": 0.5179,
+        "mean_pass_40": true,
+        "worst_pass_55": true,
+        "auto_k": [
+          2,
+          3,
+          4,
+          5
+        ]
+      },
+      "3": {
+        "mean": 0.277,
+        "worst": 0.5179,
+        "mean_pass_40": true,
+        "worst_pass_55": true,
+        "auto_k": [
+          2,
+          3,
+          4
+        ]
+      },
+      "4": {
+        "mean": 0.2771,
+        "worst": 0.5179,
+        "mean_pass_40": true,
+        "worst_pass_55": true,
+        "auto_k": [
+          2,
+          3,
+          4
+        ]
+      },
+      "5": {
+        "mean": 0.2771,
+        "worst": 0.5179,
+        "mean_pass_40": true,
+        "worst_pass_55": true,
+        "auto_k": [
+          2,
+          3,
+          4
+        ]
+      },
+      "6": {
+        "mean": 0.2768,
+        "worst": 0.5179,
+        "mean_pass_40": true,
+        "worst_pass_55": true,
+        "auto_k": [
+          2,
+          3,
+          4
+        ]
+      },
+      "7": {
+        "mean": 0.2772,
+        "worst": 0.5179,
+        "mean_pass_40": true,
+        "worst_pass_55": true,
+        "auto_k": [
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    "mean_range": [
+      0.2768,
+      0.2781
+    ],
+    "worst_range": [
+      0.5179,
+      0.5179
+    ],
+    "all_pass_both": true,
+    "failing_seeds": []
+  },
+  "overlap_rule": {
+    "ignore": {
+      "mean": 0.277,
+      "worst": 0.5179,
+      "worst_pass_55": true
+    },
+    "count_overlap": {
+      "mean": 0.337,
+      "worst": 0.5716,
+      "worst_pass_55": false
+    }
+  },
+  "auto_k": {
+    "auto_lt_true": "9/16"
+  }
+}
