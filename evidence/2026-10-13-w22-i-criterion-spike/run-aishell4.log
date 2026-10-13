@@ -1,0 +1,101 @@
+[bgvvt] k_true=2 K_hat=1 mono=False | A0 K=2 DER=0.0924 | G1 K=2 DER=0.0924 | G2 K=1 DER=0.2685 | G3 K=2 DER=0.0924
+[bjruf] k_true=2 K_hat=2 mono=False | A0 K=2 DER=0.5269 | G1 K=2 DER=0.5269 | G2 K=2 DER=0.5269 | G3 K=2 DER=0.5269
+[bvyvm] k_true=3 K_hat=2 mono=False | A0 K=2 DER=0.2065 | G1 K=2 DER=0.2065 | G2 K=2 DER=0.2065 | G3 K=2 DER=0.2065
+[bxcfq] k_true=2 K_hat=2 mono=False | A0 K=2 DER=0.4504 | G1 K=2 DER=0.4504 | G2 K=2 DER=0.4504 | G3 K=2 DER=0.4504
+[cpebh] k_true=1 K_hat=2 mono=False | A0 K=2 DER=0.0034 | G1 K=2 DER=0.0034 | G2 K=2 DER=0.0034 | G3 K=2 DER=0.0034
+[crorm] k_true=2 K_hat=1 mono=False | A0 K=2 DER=0.0198 | G1 K=2 DER=0.0198 | G2 K=1 DER=0.0277 | G3 K=2 DER=0.0198
+[dohag] k_true=1 K_hat=2 mono=False | A0 K=6 DER=0.3308 | G1 K=2 DER=0.0420 | G2 K=2 DER=0.0420 | G3 K=6 DER=0.3308
+[dxbbt] k_true=3 K_hat=3 mono=False | A0 K=3 DER=0.0133 | G1 K=3 DER=0.0133 | G2 K=3 DER=0.0133 | G3 K=3 DER=0.0133
+[dzsef] k_true=3 K_hat=1 mono=False | A0 K=2 DER=0.1070 | G1 K=2 DER=0.1070 | G2 K=1 DER=0.2007 | G3 K=2 DER=0.1070
+[eazeq] k_true=2 K_hat=2 mono=False | A0 K=2 DER=0.1009 | G1 K=2 DER=0.1009 | G2 K=2 DER=0.1009 | G3 K=2 DER=0.1009
+[eguui] k_true=3 K_hat=2 mono=False | A0 K=3 DER=0.0089 | G1 K=2 DER=0.1115 | G2 K=2 DER=0.1115 | G3 K=3 DER=0.0089
+[euqef] k_true=1 K_hat=3 mono=True | A0 K=7 DER=0.8111 | G1 K=3 DER=0.4119 | G2 K=3 DER=0.4119 | G3 K=3 DER=0.4119
+[fuzfh] k_true=3 K_hat=2 mono=False | A0 K=3 DER=0.0339 | G1 K=2 DER=0.0764 | G2 K=2 DER=0.0764 | G3 K=3 DER=0.0339
+[fxnwf] k_true=3 K_hat=2 mono=False | A0 K=2 DER=0.5563 | G1 K=2 DER=0.5563 | G2 K=2 DER=0.5563 | G3 K=2 DER=0.5563
+[fyqoe] k_true=3 K_hat=2 mono=False | A0 K=3 DER=0.2581 | G1 K=2 DER=0.2283 | G2 K=2 DER=0.2283 | G3 K=3 DER=0.2581
+[gcvrb] k_true=2 K_hat=2 mono=False | A0 K=2 DER=0.0495 | G1 K=2 DER=0.0495 | G2 K=2 DER=0.0495 | G3 K=2 DER=0.0495
+[gmmwm] k_true=2 K_hat=2 mono=False | A0 K=2 DER=0.0311 | G1 K=2 DER=0.0311 | G2 K=2 DER=0.0311 | G3 K=2 DER=0.0311
+[gwloo] k_true=1 K_hat=2 mono=False | A0 K=2 DER=0.0543 | G1 K=2 DER=0.0543 | G2 K=2 DER=0.0543 | G3 K=2 DER=0.0543
+[gylzn] k_true=2 K_hat=1 mono=False | A0 K=2 DER=0.0057 | G1 K=2 DER=0.0057 | G2 K=1 DER=0.1694 | G3 K=2 DER=0.0057
+[iabca] k_true=3 K_hat=2 mono=False | A0 K=2 DER=0.2900 | G1 K=2 DER=0.2900 | G2 K=2 DER=0.2900 | G3 K=2 DER=0.2900
+[ifwki] k_true=2 K_hat=2 mono=False | A0 K=2 DER=0.0368 | G1 K=2 DER=0.0368 | G2 K=2 DER=0.0368 | G3 K=2 DER=0.0368
+[jxydp] k_true=1 K_hat=3 mono=False | A0 K=2 DER=0.2196 | G1 K=2 DER=0.2196 | G2 K=3 DER=0.2196 | G3 K=2 DER=0.2196
+[kmunk] k_true=2 K_hat=2 mono=False | A0 K=2 DER=0.0219 | G1 K=2 DER=0.0219 | G2 K=2 DER=0.0219 | G3 K=2 DER=0.0219
+[laoyl] k_true=2 K_hat=2 mono=False | A0 K=2 DER=0.1346 | G1 K=2 DER=0.1346 | G2 K=2 DER=0.1346 | G3 K=2 DER=0.1346
+[ledhe] k_true=3 K_hat=2 mono=False | A0 K=3 DER=0.0087 | G1 K=2 DER=0.0367 | G2 K=2 DER=0.0367 | G3 K=3 DER=0.0087
+[leneg] k_true=2 K_hat=2 mono=False | A0 K=2 DER=0.0282 | G1 K=2 DER=0.0282 | G2 K=2 DER=0.0282 | G3 K=2 DER=0.0282
+[lkikz] k_true=2 K_hat=2 mono=False | A0 K=2 DER=0.0157 | G1 K=2 DER=0.0157 | G2 K=2 DER=0.0157 | G3 K=2 DER=0.0157
+[lpola] k_true=3 K_hat=3 mono=False | A0 K=2 DER=0.5221 | G1 K=2 DER=0.5221 | G2 K=3 DER=0.5206 | G3 K=2 DER=0.5221
+[ltgmz] k_true=2 K_hat=2 mono=False | A0 K=2 DER=0.1687 | G1 K=2 DER=0.1687 | G2 K=2 DER=0.1687 | G3 K=2 DER=0.1687
+[lubpm] k_true=2 K_hat=2 mono=False | A0 K=2 DER=0.0204 | G1 K=2 DER=0.0204 | G2 K=2 DER=0.0204 | G3 K=2 DER=0.0204
+[luobn] k_true=2 K_hat=2 mono=False | A0 K=2 DER=0.0256 | G1 K=2 DER=0.0256 | G2 K=2 DER=0.0256 | G3 K=2 DER=0.0256
+[mupzb] k_true=2 K_hat=2 mono=False | A0 K=2 DER=0.0890 | G1 K=2 DER=0.0890 | G2 K=2 DER=0.0890 | G3 K=2 DER=0.0890
+[mxdpo] k_true=2 K_hat=2 mono=True | A0 K=8 DER=0.4826 | G1 K=8 DER=0.4826 | G2 K=1 DER=0.0837 | G3 K=8 DER=0.4826
+[myjoe] k_true=2 K_hat=3 mono=False | A0 K=2 DER=0.4404 | G1 K=2 DER=0.4404 | G2 K=3 DER=0.4313 | G3 K=2 DER=0.4404
+[neiye] k_true=1 K_hat=2 mono=False | A0 K=8 DER=0.6871 | G1 K=2 DER=0.0272 | G2 K=2 DER=0.0272 | G3 K=8 DER=0.6871
+[ocfop] k_true=2 K_hat=1 mono=False | A0 K=2 DER=0.3482 | G1 K=2 DER=0.3482 | G2 K=1 DER=0.4964 | G3 K=2 DER=0.3482
+[olzkb] k_true=2 K_hat=2 mono=False | A0 K=2 DER=0.2380 | G1 K=2 DER=0.2380 | G2 K=2 DER=0.2380 | G3 K=2 DER=0.2380
+[ooxlj] k_true=1 K_hat=2 mono=False | A0 K=2 DER=0.0640 | G1 K=2 DER=0.0640 | G2 K=2 DER=0.0640 | G3 K=2 DER=0.0640
+[otmpf] k_true=3 K_hat=1 mono=False | A0 K=2 DER=0.0207 | G1 K=2 DER=0.0207 | G2 K=2 DER=0.0207 | G3 K=2 DER=0.0207
+[ouvtt] k_true=2 K_hat=2 mono=False | A0 K=2 DER=0.3273 | G1 K=2 DER=0.3273 | G2 K=2 DER=0.3273 | G3 K=2 DER=0.3273
+[pccww] k_true=3 K_hat=2 mono=False | A0 K=3 DER=0.0133 | G1 K=2 DER=0.3960 | G2 K=2 DER=0.3960 | G3 K=3 DER=0.0133
+[ppexo] k_true=1 K_hat=2 mono=False | A0 K=2 DER=0.0885 | G1 K=2 DER=0.0885 | G2 K=2 DER=0.0885 | G3 K=2 DER=0.0885
+[pxqme] k_true=1 K_hat=1 mono=False | A0 K=2 DER=0.1476 | G1 K=2 DER=0.1476 | G2 K=1 DER=0.0074 | G3 K=2 DER=0.1476
+[rmvsh] k_true=2 K_hat=2 mono=False | A0 K=2 DER=0.0219 | G1 K=2 DER=0.0219 | G2 K=2 DER=0.0219 | G3 K=2 DER=0.0219
+[sbrmv] k_true=3 K_hat=2 mono=False | A0 K=2 DER=0.1816 | G1 K=2 DER=0.1816 | G2 K=2 DER=0.1816 | G3 K=2 DER=0.1816
+[sfdvy] k_true=1 K_hat=2 mono=False | A0 K=2 DER=0.0199 | G1 K=2 DER=0.0199 | G2 K=2 DER=0.0199 | G3 K=2 DER=0.0199
+[svxzm] k_true=1 K_hat=2 mono=False | A0 K=2 DER=0.0127 | G1 K=2 DER=0.0127 | G2 K=2 DER=0.0127 | G3 K=2 DER=0.0127
+[sxqvt] k_true=2 K_hat=1 mono=False | A0 K=2 DER=0.1420 | G1 K=2 DER=0.1420 | G2 K=1 DER=0.1520 | G3 K=2 DER=0.1420
+[tiido] k_true=2 K_hat=1 mono=False | A0 K=2 DER=0.4617 | G1 K=2 DER=0.4617 | G2 K=2 DER=0.4617 | G3 K=2 DER=0.4617
+[tkhgs] k_true=2 K_hat=2 mono=False | A0 K=2 DER=0.0028 | G1 K=2 DER=0.0028 | G2 K=2 DER=0.0028 | G3 K=2 DER=0.0028
+[tvtoe] k_true=3 K_hat=2 mono=False | A0 K=3 DER=0.0055 | G1 K=3 DER=0.0055 | G2 K=1 DER=0.1149 | G3 K=3 DER=0.0055
+[uicid] k_true=1 K_hat=2 mono=False | A0 K=2 DER=0.1222 | G1 K=2 DER=0.1222 | G2 K=2 DER=0.1222 | G3 K=2 DER=0.1222
+[wcxfk] k_true=3 K_hat=2 mono=False | A0 K=2 DER=0.3083 | G1 K=2 DER=0.3083 | G2 K=2 DER=0.3083 | G3 K=2 DER=0.3083
+[wdvva] k_true=2 K_hat=1 mono=False | A0 K=2 DER=0.0308 | G1 K=2 DER=0.0308 | G2 K=1 DER=0.3609 | G3 K=2 DER=0.0308
+[wibky] k_true=1 K_hat=2 mono=False | A0 K=2 DER=0.0447 | G1 K=2 DER=0.0447 | G2 K=2 DER=0.0447 | G3 K=2 DER=0.0447
+[wprog] k_true=2 K_hat=2 mono=False | A0 K=2 DER=0.3531 | G1 K=2 DER=0.3531 | G2 K=2 DER=0.3531 | G3 K=2 DER=0.3531
+[xkmqx] k_true=3 K_hat=5 mono=False | A0 K=3 DER=0.0383 | G1 K=3 DER=0.0383 | G2 K=4 DER=0.1595 | G3 K=3 DER=0.0383
+[xlyov] k_true=1 K_hat=2 mono=False | A0 K=2 DER=0.0061 | G1 K=2 DER=0.0061 | G2 K=2 DER=0.0061 | G3 K=2 DER=0.0061
+[xtdcl] k_true=2 K_hat=1 mono=False | A0 K=4 DER=0.2088 | G1 K=2 DER=0.1623 | G2 K=1 DER=0.2125 | G3 K=4 DER=0.2088
+[ylgug] k_true=3 K_hat=2 mono=False | A0 K=2 DER=0.0412 | G1 K=2 DER=0.0412 | G2 K=2 DER=0.0412 | G3 K=2 DER=0.0412
+[ylzez] k_true=2 K_hat=1 mono=False | A0 K=2 DER=0.0337 | G1 K=2 DER=0.0337 | G2 K=1 DER=0.1299 | G3 K=2 DER=0.0337
+[zfzlc] k_true=2 K_hat=1 mono=False | A0 K=2 DER=0.0158 | G1 K=2 DER=0.0158 | G2 K=1 DER=0.1394 | G3 K=2 DER=0.0158
+[zztbo] k_true=1 K_hat=2 mono=False | A0 K=7 DER=0.8046 | G1 K=2 DER=0.1616 | G2 K=2 DER=0.1616 | G3 K=7 DER=0.8046
+
+=== VoxConverse test K<=3（主判定语料）  n=63 ===
+  rule       mean      worst     n_best
+  A0       0.1739     0.8111         53
+  G1       0.1499     0.5563         55
+  G2       0.1639     0.5563         47
+  G3       0.1676     0.8046         54
+  K_hat_dm median=2.0   silhouette 单调不减占比=3%   G3 触发守卫占比=2%
+[L_R003S01C02] k_true=6 K_hat=2 mono=False | A0 K=8 DER=0.2580 | G1 K=2 DER=0.4763 | G2 K=2 DER=0.4763 | G3 K=8 DER=0.2580
+[L_R003S02C02] k_true=6 K_hat=3 mono=False | A0 K=8 DER=0.3178 | G1 K=2 DER=0.6087 | G2 K=2 DER=0.6087 | G3 K=8 DER=0.3178
+[L_R003S03C02] k_true=6 K_hat=2 mono=False | A0 K=5 DER=0.3259 | G1 K=2 DER=0.5692 | G2 K=2 DER=0.5692 | G3 K=5 DER=0.3259
+[L_R003S04C02] k_true=6 K_hat=3 mono=True | A0 K=7 DER=0.3195 | G1 K=3 DER=0.4075 | G2 K=3 DER=0.4075 | G3 K=3 DER=0.4075
+[L_R004S01C01] k_true=7 K_hat=3 mono=False | A0 K=2 DER=0.3282 | G1 K=2 DER=0.3282 | G2 K=3 DER=0.3153 | G3 K=2 DER=0.3282
+[L_R004S02C01] k_true=7 K_hat=3 mono=False | A0 K=6 DER=0.0899 | G1 K=2 DER=0.4196 | G2 K=3 DER=0.4060 | G3 K=6 DER=0.0899
+[L_R004S03C01] k_true=7 K_hat=3 mono=False | A0 K=8 DER=0.0645 | G1 K=2 DER=0.4254 | G2 K=3 DER=0.4057 | G3 K=8 DER=0.0645
+[L_R004S06C01] k_true=7 K_hat=4 mono=False | A0 K=6 DER=0.1972 | G1 K=4 DER=0.4673 | G2 K=4 DER=0.4673 | G3 K=6 DER=0.1972
+[M_R003S01C01] k_true=6 K_hat=3 mono=False | A0 K=6 DER=0.5387 | G1 K=3 DER=0.5001 | G2 K=3 DER=0.5001 | G3 K=6 DER=0.5387
+[M_R003S02C01] k_true=6 K_hat=3 mono=False | A0 K=2 DER=0.6174 | G1 K=2 DER=0.6174 | G2 K=3 DER=0.6174 | G3 K=2 DER=0.6174
+[M_R003S04C01] k_true=6 K_hat=3 mono=False | A0 K=3 DER=0.3705 | G1 K=3 DER=0.3705 | G2 K=3 DER=0.3705 | G3 K=3 DER=0.3705
+[M_R003S05C01] k_true=6 K_hat=2 mono=False | A0 K=2 DER=0.7636 | G1 K=2 DER=0.7636 | G2 K=2 DER=0.7636 | G3 K=2 DER=0.7636
+[S_R003S01C01] k_true=5 K_hat=3 mono=False | A0 K=7 DER=0.0909 | G1 K=3 DER=0.2984 | G2 K=3 DER=0.2984 | G3 K=7 DER=0.0909
+[S_R003S02C01] k_true=5 K_hat=4 mono=False | A0 K=6 DER=0.1795 | G1 K=4 DER=0.2760 | G2 K=4 DER=0.2760 | G3 K=6 DER=0.1795
+[S_R003S03C01] k_true=5 K_hat=5 mono=False | A0 K=5 DER=0.1441 | G1 K=5 DER=0.1441 | G2 K=5 DER=0.1441 | G3 K=5 DER=0.1441
+[S_R003S04C01] k_true=5 K_hat=4 mono=False | A0 K=4 DER=0.1136 | G1 K=4 DER=0.1136 | G2 K=4 DER=0.1136 | G3 K=4 DER=0.1136
+[S_R004S01C01] k_true=5 K_hat=3 mono=False | A0 K=5 DER=0.1949 | G1 K=3 DER=0.3087 | G2 K=3 DER=0.3087 | G3 K=5 DER=0.1949
+[S_R004S02C01] k_true=5 K_hat=4 mono=False | A0 K=6 DER=0.1078 | G1 K=2 DER=0.4555 | G2 K=3 DER=0.4067 | G3 K=6 DER=0.1078
+[S_R004S03C01] k_true=5 K_hat=5 mono=False | A0 K=5 DER=0.0989 | G1 K=5 DER=0.0989 | G2 K=5 DER=0.0989 | G3 K=5 DER=0.0989
+[S_R004S04C01] k_true=5 K_hat=4 mono=False | A0 K=6 DER=0.0878 | G1 K=4 DER=0.2676 | G2 K=4 DER=0.2676 | G3 K=6 DER=0.0878
+
+=== AISHELL-4 test（中文对照）  n=20 ===
+  rule       mean      worst     n_best
+  A0       0.2604     0.7636         18
+  G1       0.3958     0.7636          7
+  G2       0.3911     0.7636          8
+  G3       0.2648     0.7636         17
+  K_hat_dm median=3.0   silhouette 单调不减占比=5%   G3 触发守卫占比=5%
+
+wrote .tmp/w22-criterion-spike-cn.json
