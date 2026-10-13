@@ -1,0 +1,12 @@
+=== w22-lowk-vc-test.json  n=63  k_max=8 ===
+  DER mean=0.1739 worst=0.8111
+  argmax 落在窗口上沿（pinned）: 5/63 = 8%
+    pinned   DER mean=0.6232 worst=0.8111
+    unpinned DER mean=0.1352 worst=0.5563
+  放开 cap 会选更大 K 的场次: 21/63
+    这些场：现行 DER mean=0.2479 / 放开后 mean=0.8265
+    => 上限在这些场上是 保护（放开后 DER 变差）
+  K_true=1: n=15 pinned=4/15 DER mean=0.2278 worst=0.8111
+  K_true=2..3: n=48 pinned=1/48 DER mean=0.1570 worst=0.5563
+
+wrote .tmp/w22-cap-trace-vc-test.json

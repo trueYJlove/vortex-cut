@@ -1,0 +1,21 @@
+n = 63
+
+=== K_true=1  n=15 ===
+  DER mean=0.2278 worst=0.8111
+  **方向反了（rho<0）**: 4/15   其 DER mean=0.6584 worst=0.8111
+  方向正常           : 11/15   其 DER mean=0.0712 worst=0.2196
+  钉在上沿（pinned）  : 4/15 = 27%
+
+=== K_true=2..3  n=48 ===
+  DER mean=0.1570 worst=0.5563
+  **方向反了（rho<0）**: 9/48   其 DER mean=0.3904 worst=0.5269
+  方向正常           : 39/48   其 DER mean=0.1032 worst=0.5563
+  钉在上沿（pinned）  : 1/48 = 2%
+
+=== 全体  n=63 ===
+  DER mean=0.1739 worst=0.8111
+  **方向反了（rho<0）**: 13/63   其 DER mean=0.4729 worst=0.8111
+  方向正常           : 50/63   其 DER mean=0.0962 worst=0.5563
+  钉在上沿（pinned）  : 5/63 = 8%
+
+wrote .tmp/w22-criterion-vc-test.json
