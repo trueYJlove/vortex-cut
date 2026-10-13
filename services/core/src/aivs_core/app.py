@@ -25,6 +25,7 @@ from .ids import new_id
 from .jobs import JobService
 from .media.audio_chunks import PcmChunkError, PcmChunkService
 from .media.beat_grid import BEAT_ALGORITHM_VERSION
+from .media.speaker_service import SPEAKER_ALGORITHM_VERSION
 from .media.cv_signals import CV_ALGORITHM_VERSION, CvAnalysisError
 from .media.decode_capability import DecodeCapabilityProbe
 from .media.encoders import EncoderDetector
@@ -127,6 +128,25 @@ class BeatAnalysisRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     generate: bool = False
+
+
+class SpeakerDiarizationRequest(BaseModel):
+    """W2.2：说话人分离（generate=True 登记分析作业）。
+
+    音频/视频素材均可（视频取其音轨）；无语音 / 模型未就绪 ⇒ unavailable
+    （非失败——调用方按摘要提示，**不静默降级**到能量 VAD 之类未取证路径）。
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    generate: bool = False
+
+
+class SpeakerReclusterRequest(BaseModel):
+    """W2.2：换 τ / 换策略重聚类（复用已存 embedding，**不重跑推理**）。"""
+    model_config = ConfigDict(extra="forbid")
+
+    strategy: str = "silhouette_capk"
+    k_max: int | None = None
 
 
 class AngleGroupCreateRequest(BaseModel):
@@ -864,6 +884,16 @@ class CoreState:
         self.angle_sync = AngleSyncService(
             self.db, settings.ffmpeg, self.projects.resolve_asset_path)
         self.jobs.angle_sync_runner = self.angle_sync.run_sync_job
+        # W2.2 说话人分离：解码 → 随包 Silero VAD → 窗 embedding（CAM++，受信下载）
+        # → 余弦 UPGMA 聚类 → speaker_diarizations（含 embedding BLOB，换 τ 不重跑推理）。
+        # 全本地、零 egress（ADR-0003 D4）；模型未就绪 ⇒ unavailable，不静默降级。
+        from .media.speaker_service import SpeakerDiarizationService
+
+        self.speaker = SpeakerDiarizationService(
+            self.db, settings.ffmpeg, self.projects.resolve_asset_path,
+            model_manager=self.model_manager, ffprobe=self.ffprobe,
+        )
+        self.jobs.speaker_runner = self.speaker.run_job
         # AI-2 Layer 0：cv_signals 已在 planning 之前构建（召回汇合 +
         # model_manager 注入 → YuNet 人脸通道，模型未就绪 partial）；
         # 此处只回填 job runner。
@@ -1232,6 +1262,7 @@ def _domain(exc: DomainError) -> HTTPException:
         "STAGE5_ASSEMBLY_NOT_FOUND",
         "STAGE6_BATCH_NOT_FOUND",
         "DERIVED_NOT_FOUND",
+        "SPEAKER_NOT_FOUND",
     }:
         status = 404
     return _error(exc.code, exc.message, status)
@@ -2539,6 +2570,88 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "algorithm_version": (summary or {}).get("algorithm_version") or str(BEAT_ALGORITHM_VERSION),
                 "reason": (summary or {}).get("reason"),
             }
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    # ── W2.2 说话人分离（只产元数据，不写任何时间线 op）──
+
+    @app.post("/api/v1/projects/{project_id}/assets/{asset_id}/diarization")
+    async def get_asset_diarization(
+        project_id: str, asset_id: str, request: SpeakerDiarizationRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """说话人分离摘要（Renderer 可见；**无路径字段、无 embedding**）。
+
+        generate=True 且无 ready/queued/running/stale 行时登记分析作业
+        （解码 → 随包 Silero VAD → 窗 embedding → 聚类 → speaker_diarizations）。
+        全本地零 egress；模型未就绪 ⇒ unavailable(embedding_model_missing)。
+        """
+        asset_row = _preview_source_asset_row(state, project_id, asset_id)
+        try:
+            summary = state.speaker.summary(asset_row)
+            job_id: str | None = None
+            if request.generate:
+                job_id = state.speaker.create_job(project_id, asset_row)
+            ready = state.speaker.availability()
+            return {
+                "speaker_diarization_id": (summary or {}).get("speaker_diarization_id"),
+                "status": (summary or {}).get("status") if summary else (
+                    "queued" if job_id else None),
+                "job_id": job_id,
+                "reason": (summary or {}).get("reason"),
+                "speaker_count": (summary or {}).get("speaker_count"),
+                "turn_count": (summary or {}).get("turn_count"),
+                "window_count": (summary or {}).get("window_count"),
+                "threshold": (summary or {}).get("threshold"),
+                "threshold_strategy": (summary or {}).get("threshold_strategy"),
+                "algorithm_version": (summary or {}).get("algorithm_version") or str(
+                    SPEAKER_ALGORITHM_VERSION),
+                "embedding_model": (summary or {}).get("embedding_model"),
+                "vad_model": (summary or {}).get("vad_model"),
+                "model_ready": ready["ready"],
+                "model_reason": ready["reason"],
+                "recorded_at": (summary or {}).get("recorded_at"),
+            }
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/projects/{project_id}/assets/{asset_id}/diarization/turns")
+    async def get_asset_diarization_turns(
+        project_id: str, asset_id: str, _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """说话人轮次时间轴（按需读取——摘要不带 turns，避免每次列表拉全量）。"""
+        asset_row = _preview_source_asset_row(state, project_id, asset_id)
+        try:
+            row = state.speaker.latest_row(asset_row["id"])
+            if row is None:
+                raise DomainError("SPEAKER_NOT_FOUND", "尚无说话人分离结果")
+            status = str(row["status"])
+            stale = status in {"ready", "unavailable"} and (
+                row["source_fingerprint"] != asset_row["fingerprint"])
+            return {
+                "speaker_diarization_id": row["id"],
+                "status": "stale" if stale else status,
+                "speaker_count": row["speaker_count"],
+                "threshold": row["threshold"],
+                "threshold_strategy": row["threshold_strategy"],
+                "turns": json_loads(row["turns_json"] or "[]"),
+            }
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/assets/{asset_id}/diarization/recluster")
+    async def recluster_asset_diarization(
+        project_id: str, asset_id: str, request: SpeakerReclusterRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """换 τ / 换策略重聚类（复用已存 embedding，**不重跑推理**）。"""
+        asset_row = _preview_source_asset_row(state, project_id, asset_id)
+        try:
+            from .media import speaker as speaker_algo
+
+            k_max = request.k_max or speaker_algo.DEFAULT_K_MAX
+            return state.speaker.recluster(
+                asset_row["id"], strategy=request.strategy, k_max=k_max)
         except DomainError as exc:
             raise _domain(exc) from exc
 

@@ -34,6 +34,7 @@ from .database_v33 import V33_SQL
 from .database_v34 import V34_SQL
 from .database_v35 import V35_SQL
 from .database_v36 import V36_SQL
+from .database_v37 import V37_SQL
 from .performance import measured
 
 
@@ -81,6 +82,7 @@ V33_VERSION = "v33"
 V34_VERSION = "v34"
 V35_VERSION = "v35"
 V36_VERSION = "v36"
+V37_VERSION = "v37"
 V1_SQL = """
 CREATE TABLE IF NOT EXISTS media_inputs (
   id TEXT PRIMARY KEY, path TEXT NOT NULL, display_name TEXT NOT NULL,
@@ -951,6 +953,7 @@ MIGRATIONS: dict[str, str] = {
     V34_VERSION: V34_SQL,
     V35_VERSION: V35_SQL,
     V36_VERSION: V36_SQL,
+    V37_VERSION: V37_SQL,
 }
 
 

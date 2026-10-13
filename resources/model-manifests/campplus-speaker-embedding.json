@@ -1,0 +1,38 @@
+{
+  "manifest_version": 1,
+  "model_id": "campplus-speaker-embedding",
+  "provider": "onnx-speaker",
+  "revision": "campplus-zh-cn-16k-common",
+  "display_name": "3D-Speaker CAM++ (zh-cn 16k common)",
+  "purpose": "Local speaker embedding for offline diarization (windowed cosine clustering)",
+  "download_url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx",
+  "trusted_source_id": "github-k2-fsa-sherpa-onnx",
+  "size_bytes": 28281138,
+  "installed_size_bytes": 28281138,
+  "sha256": "f682b514c05d947ee3fa91cd6ec6c5c7543479a128373fa29b1faedccd21fd11",
+  "supports_word_timestamps": false,
+  "runtime_version": "onnxruntime>=1.18,<2",
+  "license": {
+    "id": "apache-2.0",
+    "name": "Apache License 2.0",
+    "url": "https://opensource.org/licenses/Apache-2.0",
+    "attribution": "3D-Speaker CAM++ speaker verification model (modelscope/3D-Speaker), distributed via k2-fsa/sherpa-onnx releases",
+    "acceptance_required": false
+  },
+  "supported_languages": [
+    "zh",
+    "en"
+  ],
+  "runtime_requirements": {
+    "python": ">=3.12,<3.14",
+    "onnxruntime": ">=1.18"
+  },
+  "files": [
+    {
+      "path": "3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx",
+      "size_bytes": 28281138,
+      "sha256": "f682b514c05d947ee3fa91cd6ec6c5c7543479a128373fa29b1faedccd21fd11"
+    }
+  ],
+  "created_at": "2026-10-13T00:00:00.000Z"
+}

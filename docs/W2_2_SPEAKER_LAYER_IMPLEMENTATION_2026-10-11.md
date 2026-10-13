@@ -505,3 +505,141 @@ VoxConverse dev 有大量 K>8 的会议。在 K=9..20 的 18 场上，**上限 8
 - **§5.5 的新第一顺位「参数化选择」只是机制判定，未做实现**：
   具体如何在产品上放开簇数上限（而不同时引入过分割）**属下一步设计**，本批**未给方案**。
 - O3（重叠未纳入评分）、O5（BLOB 备份体积）按门保持开放。
+
+## S2 —— `SpeakerEmbedder` + v37 迁移 + 服务（2026-10-13）
+
+**前置裁决（本切片开工前，用户 2026-10-13 采纳建议）**：① **不上 VBx（B 路径）**，
+按现路线继续；② S2 落地的选择规则**暂用现行 `silhouette+capK`**（候选规则 B1/E2
+仍在等低 K 样本量，未批准落 Core）；③ `k_max=8` 保持（>8 人会议属产品边界，另裁）。
+本切片**不依赖** ②③ 的最终答案——选择规则经由`strategy` 参数注入，换规则不需要改存储。
+
+### 交付件
+
+| 文件 | 内容 |
+|---|---|
+| `services/core/src/aivs_core/database_v37.py`（新） | v37 迁移：`speaker_diarizations` 单表 + 部分唯一索引；`asset_id ... ON DELETE CASCADE` |
+| `services/core/src/aivs_core/database.py` | v37 接线（import / 常量 / `MIGRATIONS`） |
+| `services/core/src/aivs_core/media/speaker_vad.py`（新） | 随包 Silero 包装 + **O1 资产探测的可测分支** |
+| `services/core/src/aivs_core/media/speaker_embedding.py`（新） | Kaldi 80 维 log-fbank（纯 numpy）+ `SpeakerEmbedder`（CAM++ ONNX） |
+| `services/core/src/aivs_core/media/speaker_service.py`（新） | `SpeakerDiarizationService`：建作业 / 执行 / 摘要 / **重聚类** |
+| `services/core/src/aivs_core/jobs.py` / `job_scheduler.py` | `kind=speaker_diarization` 分派 + `light` 档策略 |
+| `services/core/src/aivs_core/app.py` | 三条路由（登记 / 轮次 / 重聚类）+ 服务接线 + `SPEAKER_NOT_FOUND`→404 映射 |
+| `services/core/src/aivs_core/model_registry.py` | 新 provider `onnx-speaker`（三表一处维护） |
+| `resources/model-manifests/campplus-speaker-embedding.json`（新） | CAM++ 受信直链 + sha256（与 spike 归档逐位一致） |
+| `docs/STATUS.md` §1 | `latest_migration` 36 → 37（与迁移**同一次改动**） |
+
+### 与冻结设计的**两处偏离**（如实登记，两者都不改语义）
+
+1. **模型与前端落独立模块**：门 §1 把 ONNX 嵌入器与纯函数算法同列在 `speaker.py`。
+   实施时拆成 `speaker_embedding.py`——否则 `speaker.py` 的**纯函数契约**
+   （无 I/O、无 DB、无 ONNX）会被 ONNX import 破坏，其 26 项单测将不得不装 onnxruntime。
+   **签名与 §2 冻结一致**（`SpeakerEmbedder(model_path, *, num_threads=1)`、`.dim`、`.embed()`）。
+2. **服务类落独立模块**：门 §1 写"同上（`speaker.py:SpeakerDiarizationService`）"，
+   实施时落 `speaker_service.py`（与 `beat_service.py` / `angle_sync.py` 同型，
+   便于与既有服务层并列阅读）。**类名与方法签名与 §2 冻结一致。**
+
+> ⚠️ 两处偏离都**未**改变任何对外契约，故不改门 §2 的签名块；仅在此登记事实。
+
+### 验收逐项对照（门 §6 S2 的完成判据）
+
+| 门 §6 S2 要求 | 结果 | 证据 |
+|---|---|---|
+| `SpeakerEmbedder` | ✅ | `speaker_embedding.py`：fbank（纯 numpy）+ ONNX 会话；真实 CAM++ 逐位哈希校验 |
+| v37 迁移 | ✅ | `database_v37.py`；`test_speaker_storage.TestMigrationShape`（表/索引/CHECK/CASCADE） |
+| 服务（幂等） | ✅ | `TestIdempotency` 5 项：ready/unavailable/stale 短路 + 在飞短路 + 缺席登记 |
+| 服务（stale） | ✅ | `TestSummaryAndStale::test_stale_is_computed_at_read_time`（含**回退自证**） |
+| 服务（重聚类） | ✅ | `TestRecluster` 4 项 + 真实素材项 |
+| **重聚类不重跑推理（测试钉死，推理计数为 0）** | ✅ | `test_recluster_does_not_rerun_inference`（单测）+ `..._on_real_embeddings_...`（真实素材） |
+| STATUS §1 同改 | ✅ | `latest_migration: 37`；一致性测试 10 passed |
+
+### 额外交付：O1（Silero 资产耦合）的可测分支
+
+门 §10 O1 要求 S0 交付「资产存在性探测 + `unavailable(silero_asset_missing)` 可测分支」，
+实际落在本切片（S0 未做）。`speaker_vad.silero_asset_path()` 走**延迟 import**，
+faster-whisper 缺失/资产缺失都只返回 `None`，服务层据此落
+`unavailable(silero_asset_missing)`——**不是静默降级**（D4：任何能量 VAD 兜底都不允许）。
+资产存在性探测已在真实环境跑通（faster-whisper **1.2.1**：`.../faster_whisper/assets/silero_vad_v6.onnx`）。
+
+### 测试与回归
+
+| 套件 | 结果 |
+|---|---|
+| `unit/test_speaker_vad.py`（新） | **10 passed**（资产探测 4 / Silero 检测 4 / 能量 VAD import 锁 2） |
+| `unit/test_speaker_storage.py`（新） | **25 passed**（迁移形状 / 摘要与 stale / 幂等 / 重聚类 / 语义 / 可用性 / BLOB） |
+| `integration/test_speaker_api.py`（新） | **10 passed**（401 / 登记 / 幂等 / stale / 跨项目 404 / 轮次 / 重聚类 404 / 零 egress 锁） |
+| `integration/test_speaker_real.py`（新） | **11 passed**（真实 ffmpeg + 真实 Silero + 真实 CAM++） |
+| `test_status_doc_consistency.py` + `test_model_registry.py` | **34 passed**（含新 provider 的清单校验） |
+| **Core 全量回归** | `services/core/tests` **1398 passed + 2 skipped**（18 分 06 秒），**2 failed**——两条**均为本次改动引入，均已修复并复验**，见下条 |
+| 修复后定向复验 | 说话人 4 套件 + 一致性 + 模型清单 **91 passed**（87.7 s）；`test_cv_faces_real` + 存储套件 **28 passed** |
+
+**全量回归抓出的两处真问题（都已修，不留红）**：
+
+1. **模型缓存目录冲突（跨测试污染）**：本切片把 CAM++ 放进
+   `resources/.test-model-cache/`，而 `ModelManager.seed_external` 只登记**第一个**
+   文件齐全的清单就 `return` ⇒ **既有** `test_cv_faces_real` 的 YuNet 永远登记不上，
+   `face_model_ready()` 变 False。**修法**：CAM++ 迁到独立子目录
+   `resources/.test-model-cache/speaker/`（该目录已在 `.gitignore` 内）。
+   ⇒ 教训与 P102/P111 同族：**"新设施与既有设施共用命名空间"必须在全量回归里验，
+   定向测试看不见**。
+2. **断言写错自己的错误码**：`test_recluster_without_row_raises` 写 `SPEAKER_NO_READY_ROW`，
+   而实现发的是 `SPEAKER_NOT_FOUND`（为映射 404 而统一）。定向跑时该用例先于实现改动通过，
+   全量回归才暴露。**修法**：断言改为 `SPEAKER_NOT_FOUND`（与 API 层 404 用例同源）。
+
+**真实素材套件测什么、不测什么**（边界，防止越界引用）：
+
+- **测**：真实链路端到端跑通；**真实单说话人语音不过分割**；
+  **oracle τ 真的生效且方向正确**；确定性；**性能门**；BLOB 量级；模型版本落库；静音守卫。
+- **不测**：**对话精度（DER）**——那需要全场语料 + 评测仪器，属 **S3**（门 §5 精度门）。
+  本套件用的是单说话人真实语音，**不得**据它宣称说话人分离精度。
+
+**性能实测**（本机，66 s 源 / 真实语音）：**2.79 s·分钟⁻¹**（门限 ≤10 s·分钟⁻¹，约 **3.6× 余量**）。
+
+### 负向对照（6 组，验证新断言有区分力）
+
+| # | 还原的缺陷 | 期望 | 实测 |
+|---|---|---|---|
+| NC-1 | 唯一索引去掉 `source_fingerprint` | 红 | ✅ **1 failed** |
+| NC-2 | 摘要列投影改成 `SELECT *` | 红 | ✅ **1 failed** |
+| NC-3 | 重聚类改走嵌入器（重跑推理） | 红 | ✅ **1 failed** |
+| NC-4 | VAD 资产探测恒返回路径 | 红 | ✅ **1 failed**（**首轮 GREEN，缺口当场暴露，见下） |
+| NC-5 | τ 遮蔽缺陷还原 | 红 | ✅ **1 failed** |
+| NC-6 | 注入能量 VAD 符号 | 红 | ✅ **1 failed** |
+
+> **NC-4 抓出一个真缺口（本批最重要的一次自证伪）**：首轮 NC-4 是 **GREEN**——
+> 原用例 monkeypatch 了 `silero_asset_path` **本身**，于是"探测函数对**文件缺失**的处理"
+> 从未被覆盖，把 `return candidate if candidate.is_file() else None` 改成恒返回**仍然全绿**。
+> 已补 `test_probe_returns_none_when_asset_file_absent`（走真实 import 路径、只把 assets
+> 目录换空），重做后 **RED(预期)**、恢复后 10 passed。
+
+### 实施中当场抓出的实现缺陷（已修 + 已上锁）
+
+**τ 遮蔽**：`analyze_pcm` 首版把入参 `threshold` 当累加器复用
+（`threshold: float | None = None` 就写在函数体里）⇒ 外部传入的 **oracle τ 被静默丢弃**，
+一轮 τ 扫描给出"所有 τ 同结果"的**假结论**——正是 oracle 方法论最不能容忍的失效模式。
+改为独立变量 `chosen_threshold` + 策略名标注 `oracle:external`，
+并由 `test_oracle_threshold_actually_changes_clustering` 钉死（NC-5 即它）。
+
+### 真实多说话人素材上的**观测**（诚实标注：非门内数字）
+
+在 AMI `EN2002a` 前 90 s（真实四人会议、真实 Silero + CAM++、**未做 oracle 调参**）上：
+
+- `silhouette+capK` → 8 个说话人（**过分割**，τ 落在网格下界 0.40）；
+- `distance_mixture` → 4 个说话人（与 AMI 该场真值一致）。
+
+**这只是一次观测，不是精度结论**：单场、90 s、未跑 DER、未做四层剥离。
+`silhouette+capK` 在低 τ 过分割与门 §5.6 ② 记录的机制一致（最优解卡在候选下界），
+**但本条观测不足以据此改默认策略**——默认仍为 `silhouette_capk`，
+换策略由 S3 的精度门决定。
+
+### 未完成 / 未处置（如实）
+
+- **S3–S5 未开工**：路由/jobs/集成已有机制半边，**精度门（两语料 DER）、
+  性能归档、真实 Electron e2e 未做**。
+- **精度门尚未在两语料上跑过**——S1 的门内数字仍是`silhouette+capK` 的
+  50.2%/47.9%（AMI/AISHELL-4）；**该数字尚未经生产链路复现**。
+- **O5（BLOB 备份/恢复体积）未实测**：`embeddings_blob` 已随 S2 落地，
+  门要求的"36 场派生行的备份/恢复实测"**仍未做**。
+- **O2（`k_max=8`）与候选选择规则（B1/E2）仍待裁决**：S2 用现行规则落地，
+  换规则只需改 `strategy` 入参（存储层不受影响）。
+- **VoxConverse test 集**下载仍在进行（后台），用于补低 K 样本量。
+

@@ -79,6 +79,7 @@ class JobService:
         cv_signal_runner: WaveformRunner | None = None,
         beat_runner: WaveformRunner | None = None,
         angle_sync_runner: WaveformRunner | None = None,
+        speaker_runner: WaveformRunner | None = None,
         render_runner: RenderRunner | None = None,
         planning_runner: PlanningRunner | None = None,
         timeline_patch_runner: PlanningRunner | None = None,
@@ -107,6 +108,7 @@ class JobService:
         self.cv_signal_runner = cv_signal_runner
         self.beat_runner = beat_runner
         self.angle_sync_runner = angle_sync_runner
+        self.speaker_runner = speaker_runner
         self.render_runner = render_runner
         self.planning_runner = planning_runner
         self.timeline_patch_runner = timeline_patch_runner
@@ -1059,6 +1061,21 @@ class JobService:
             if self.angle_sync_runner is None:
                 raise RuntimeError("RENDER_FAILED")
             result = await self.angle_sync_runner(
+                row, cancel_event,
+                lambda value: self._set_progress(job_id, value),
+                lambda value: self._set_stage(job_id, value),
+            )
+            with self.db.connection() as db:
+                db.execute(
+                    "UPDATE jobs SET result_json=?,updated_at=? WHERE id=?",
+                    (json_dumps(result), utc_now(), job_id),
+                )
+            return
+        if row["kind"] == "speaker_diarization":
+            # W2.2 说话人分离：解码 → Silero VAD → 窗 embedding → 聚类 → speaker_diarizations。
+            if self.speaker_runner is None:
+                raise RuntimeError("RENDER_FAILED")
+            result = await self.speaker_runner(
                 row, cancel_event,
                 lambda value: self._set_progress(job_id, value),
                 lambda value: self._set_stage(job_id, value),

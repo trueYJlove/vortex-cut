@@ -1,0 +1,263 @@
+{
+  "corpus": "VoxConverse test (CC BY 4.0)",
+  "selection_rule": "说话人数 K<=3（由官方 RTTM 直接统计），先于看任何 DER 定死",
+  "n": 64,
+  "meetings": [
+    {
+      "name": "bgvvt",
+      "k_true": 2
+    },
+    {
+      "name": "bjruf",
+      "k_true": 2
+    },
+    {
+      "name": "bvyvm",
+      "k_true": 3
+    },
+    {
+      "name": "bxcfq",
+      "k_true": 2
+    },
+    {
+      "name": "cpebh",
+      "k_true": 1
+    },
+    {
+      "name": "crorm",
+      "k_true": 2
+    },
+    {
+      "name": "dohag",
+      "k_true": 1
+    },
+    {
+      "name": "dxbbt",
+      "k_true": 3
+    },
+    {
+      "name": "dzsef",
+      "k_true": 3
+    },
+    {
+      "name": "eazeq",
+      "k_true": 2
+    },
+    {
+      "name": "eguui",
+      "k_true": 3
+    },
+    {
+      "name": "euqef",
+      "k_true": 1
+    },
+    {
+      "name": "fuzfh",
+      "k_true": 3
+    },
+    {
+      "name": "fxnwf",
+      "k_true": 3
+    },
+    {
+      "name": "fyqoe",
+      "k_true": 3
+    },
+    {
+      "name": "gcvrb",
+      "k_true": 2
+    },
+    {
+      "name": "gmmwm",
+      "k_true": 2
+    },
+    {
+      "name": "gwloo",
+      "k_true": 1
+    },
+    {
+      "name": "gylzn",
+      "k_true": 2
+    },
+    {
+      "name": "iabca",
+      "k_true": 3
+    },
+    {
+      "name": "ifwki",
+      "k_true": 2
+    },
+    {
+      "name": "jxydp",
+      "k_true": 1
+    },
+    {
+      "name": "kmunk",
+      "k_true": 2
+    },
+    {
+      "name": "laoyl",
+      "k_true": 2
+    },
+    {
+      "name": "ledhe",
+      "k_true": 3
+    },
+    {
+      "name": "leneg",
+      "k_true": 2
+    },
+    {
+      "name": "lkikz",
+      "k_true": 2
+    },
+    {
+      "name": "lpola",
+      "k_true": 3
+    },
+    {
+      "name": "ltgmz",
+      "k_true": 2
+    },
+    {
+      "name": "lubpm",
+      "k_true": 2
+    },
+    {
+      "name": "luobn",
+      "k_true": 2
+    },
+    {
+      "name": "mupzb",
+      "k_true": 2
+    },
+    {
+      "name": "mxdpo",
+      "k_true": 2
+    },
+    {
+      "name": "myjoe",
+      "k_true": 2
+    },
+    {
+      "name": "neiye",
+      "k_true": 1
+    },
+    {
+      "name": "ocfop",
+      "k_true": 2
+    },
+    {
+      "name": "olzkb",
+      "k_true": 2
+    },
+    {
+      "name": "ooxlj",
+      "k_true": 1
+    },
+    {
+      "name": "otmpf",
+      "k_true": 3
+    },
+    {
+      "name": "ouvtt",
+      "k_true": 2
+    },
+    {
+      "name": "pccww",
+      "k_true": 3
+    },
+    {
+      "name": "ppexo",
+      "k_true": 1
+    },
+    {
+      "name": "pxqme",
+      "k_true": 1
+    },
+    {
+      "name": "rmvsh",
+      "k_true": 2
+    },
+    {
+      "name": "sbrmv",
+      "k_true": 3
+    },
+    {
+      "name": "sfdvy",
+      "k_true": 1
+    },
+    {
+      "name": "svxzm",
+      "k_true": 1
+    },
+    {
+      "name": "sxqvt",
+      "k_true": 2
+    },
+    {
+      "name": "tiido",
+      "k_true": 2
+    },
+    {
+      "name": "tkhgs",
+      "k_true": 2
+    },
+    {
+      "name": "tvtoe",
+      "k_true": 3
+    },
+    {
+      "name": "uicid",
+      "k_true": 1
+    },
+    {
+      "name": "vylyk",
+      "k_true": 3
+    },
+    {
+      "name": "wcxfk",
+      "k_true": 3
+    },
+    {
+      "name": "wdvva",
+      "k_true": 2
+    },
+    {
+      "name": "wibky",
+      "k_true": 1
+    },
+    {
+      "name": "wprog",
+      "k_true": 2
+    },
+    {
+      "name": "xkmqx",
+      "k_true": 3
+    },
+    {
+      "name": "xlyov",
+      "k_true": 1
+    },
+    {
+      "name": "xtdcl",
+      "k_true": 2
+    },
+    {
+      "name": "ylgug",
+      "k_true": 3
+    },
+    {
+      "name": "ylzez",
+      "k_true": 2
+    },
+    {
+      "name": "zfzlc",
+      "k_true": 2
+    },
+    {
+      "name": "zztbo",
+      "k_true": 1
+    }
+  ]
+}

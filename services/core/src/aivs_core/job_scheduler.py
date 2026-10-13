@@ -65,6 +65,8 @@ KIND_POLICIES: dict[str, JobPolicy] = {
     "beat_analysis": JobPolicy("beat_analysis", ("light",), 2),
     # W2.1：机位同步（面板触发即用户视野，同波形/节拍档）
     "angle_sync": JobPolicy("angle_sync", ("light",), 2),
+    # W2.2：说话人分离（离线派生，与节拍/波形同档；ONNX 单线程、CPU 亲和）
+    "speaker_diarization": JobPolicy("speaker_diarization", ("light",), 2),
     # AI-2 Layer 0：CV 信号分析（关键帧采样——当前项目级）
     "cv_analysis": JobPolicy("cv_analysis", ("light",), 3),
     # 3 级：当前项目代理（B11 全源代理）
