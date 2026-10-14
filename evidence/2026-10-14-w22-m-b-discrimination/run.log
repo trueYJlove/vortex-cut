@@ -1,0 +1,5 @@
+[eval] dev: n=48
+[eval] vc_test_lowk: n=63
+[eval] ami: n=16
+[eval] aishell4: n=20
+{"B1": {"ran": true, "K0": false, "K1a": true, "K1b": true, "K2a": false, "K2b": false, "ADOPT": false}, "B2": {"ran": true, "K0": false, "K1a": true, "K1b": false, "K2a": true, "K2b": true, "ADOPT": false}}
