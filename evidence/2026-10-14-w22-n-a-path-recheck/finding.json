@@ -1,0 +1,289 @@
+{
+  "inputs": {
+    "ami_baseline": "evidence\\2026-10-12-w22-d-planA-recheck\\baseline-routes-ami.json",
+    "ami_ceiling": "evidence\\2026-10-12-w22-d-planA-recheck\\ceiling-kmeans-separability-ami.json",
+    "vc_lowk": "evidence\\2026-10-13-w22-g-voxconverse-test-lowk\\lowk-test-report.json"
+  },
+  "finding2_oracle_hypothesis_space": {
+    "n": 16,
+    "k_gt_8": 11,
+    "k_eq_1": 1,
+    "k_within_2_8": 4,
+    "oracle_k_list": [
+      1,
+      4,
+      5,
+      8,
+      8,
+      9,
+      10,
+      10,
+      10,
+      13,
+      13,
+      17,
+      22,
+      23,
+      65,
+      71
+    ],
+    "note": "门槛 k_max=8 是产品边界；oracle 多数场在其外 ⇒ 「oracle 过双门」不等于「产品可达域内有余量」"
+  },
+  "finding3_three_levels_ami": {
+    "n": 16,
+    "ceiling_perfect_labels": {
+      "mean": 0.0315,
+      "worst": 0.0576
+    },
+    "kmeans_true_k": {
+      "mean": 0.2122,
+      "worst": 0.6174
+    },
+    "ahc_silhouette_capk": {
+      "mean": 0.454,
+      "worst": 0.7016
+    },
+    "ahc_oracle_unrestricted": {
+      "mean": 0.2196,
+      "worst": 0.3905
+    },
+    "separability_overlap_mean": 0.5426,
+    "gate": {
+      "mean_max": 0.4,
+      "worst_max": 0.6
+    }
+  },
+  "finding3_exact_kstar_ami": {
+    "n": 16,
+    "mean": 0.3267,
+    "worst": 0.6882,
+    "meets_ami_gate": false,
+    "per_meeting": [
+      {
+        "meeting": "EN2002a",
+        "k_true": 4,
+        "kstar": 8,
+        "der": 0.5335
+      },
+      {
+        "meeting": "EN2002b",
+        "k_true": 4,
+        "kstar": 7,
+        "der": 0.5761
+      },
+      {
+        "meeting": "EN2002c",
+        "k_true": 3,
+        "kstar": 5,
+        "der": 0.4174
+      },
+      {
+        "meeting": "EN2002d",
+        "k_true": 4,
+        "kstar": 5,
+        "der": 0.6882
+      },
+      {
+        "meeting": "ES2004a",
+        "k_true": 4,
+        "kstar": 4,
+        "der": 0.2995
+      },
+      {
+        "meeting": "ES2004b",
+        "k_true": 4,
+        "kstar": 6,
+        "der": 0.1413
+      },
+      {
+        "meeting": "ES2004c",
+        "k_true": 4,
+        "kstar": 7,
+        "der": 0.15
+      },
+      {
+        "meeting": "ES2004d",
+        "k_true": 4,
+        "kstar": 8,
+        "der": 0.3905
+      },
+      {
+        "meeting": "IS1009a",
+        "k_true": 4,
+        "kstar": 5,
+        "der": 0.1674
+      },
+      {
+        "meeting": "IS1009b",
+        "k_true": 4,
+        "kstar": 7,
+        "der": 0.0506
+      },
+      {
+        "meeting": "IS1009c",
+        "k_true": 4,
+        "kstar": 5,
+        "der": 0.0542
+      },
+      {
+        "meeting": "IS1009d",
+        "k_true": 4,
+        "kstar": 7,
+        "der": 0.2751
+      },
+      {
+        "meeting": "TS3003a",
+        "k_true": 4,
+        "kstar": 3,
+        "der": 0.3734
+      },
+      {
+        "meeting": "TS3003b",
+        "k_true": 4,
+        "kstar": 7,
+        "der": 0.4095
+      },
+      {
+        "meeting": "TS3003c",
+        "k_true": 4,
+        "kstar": 4,
+        "der": 0.2437
+      },
+      {
+        "meeting": "TS3003d",
+        "k_true": 4,
+        "kstar": 4,
+        "der": 0.4575
+      }
+    ],
+    "note": "K 限定在 [2,8]（产品可达域）；不经 τ 网格 ⇒ 不受网格分辨率影响"
+  },
+  "finding3_exact_kstar_aishell4": {
+    "n": 20,
+    "mean": 0.1937,
+    "worst": 0.4352,
+    "meets_gate": true,
+    "per_meeting": [
+      {
+        "meeting": "L_R003S01C02",
+        "k_true": 6,
+        "kstar": 8,
+        "der": 0.258
+      },
+      {
+        "meeting": "L_R003S02C02",
+        "k_true": 6,
+        "kstar": 7,
+        "der": 0.2528
+      },
+      {
+        "meeting": "L_R003S03C02",
+        "k_true": 6,
+        "kstar": 6,
+        "der": 0.2283
+      },
+      {
+        "meeting": "L_R003S04C02",
+        "k_true": 6,
+        "kstar": 6,
+        "der": 0.2281
+      },
+      {
+        "meeting": "L_R004S01C01",
+        "k_true": 7,
+        "kstar": 6,
+        "der": 0.1425
+      },
+      {
+        "meeting": "L_R004S02C01",
+        "k_true": 7,
+        "kstar": 8,
+        "der": 0.0735
+      },
+      {
+        "meeting": "L_R004S03C01",
+        "k_true": 7,
+        "kstar": 7,
+        "der": 0.0645
+      },
+      {
+        "meeting": "L_R004S06C01",
+        "k_true": 7,
+        "kstar": 6,
+        "der": 0.1972
+      },
+      {
+        "meeting": "M_R003S01C01",
+        "k_true": 6,
+        "kstar": 4,
+        "der": 0.3921
+      },
+      {
+        "meeting": "M_R003S02C01",
+        "k_true": 6,
+        "kstar": 5,
+        "der": 0.3547
+      },
+      {
+        "meeting": "M_R003S04C01",
+        "k_true": 6,
+        "kstar": 7,
+        "der": 0.2643
+      },
+      {
+        "meeting": "M_R003S05C01",
+        "k_true": 6,
+        "kstar": 7,
+        "der": 0.4352
+      },
+      {
+        "meeting": "S_R003S01C01",
+        "k_true": 5,
+        "kstar": 7,
+        "der": 0.0909
+      },
+      {
+        "meeting": "S_R003S02C01",
+        "k_true": 5,
+        "kstar": 6,
+        "der": 0.1795
+      },
+      {
+        "meeting": "S_R003S03C01",
+        "k_true": 5,
+        "kstar": 5,
+        "der": 0.1441
+      },
+      {
+        "meeting": "S_R003S04C01",
+        "k_true": 5,
+        "kstar": 4,
+        "der": 0.1136
+      },
+      {
+        "meeting": "S_R004S01C01",
+        "k_true": 5,
+        "kstar": 6,
+        "der": 0.16
+      },
+      {
+        "meeting": "S_R004S02C01",
+        "k_true": 5,
+        "kstar": 6,
+        "der": 0.1078
+      },
+      {
+        "meeting": "S_R004S03C01",
+        "k_true": 5,
+        "kstar": 5,
+        "der": 0.0989
+      },
+      {
+        "meeting": "S_R004S04C01",
+        "k_true": 5,
+        "kstar": 5,
+        "der": 0.0878
+      }
+    ]
+  }
+}
