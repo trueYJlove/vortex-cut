@@ -1,0 +1,32 @@
+[sep] archived vc_test_lowk: n=63
+[sep] archived ami: n=16
+[load] dev: n=48 skipped=0
+[load] vc_test_lowk: n=63 skipped=1
+[load] ami: n=16 skipped=0
+[load] aishell4: n=20 skipped=0
+  [dev] 10/48  (sep cached=9 computed=0)
+  [dev] 20/48  (sep cached=19 computed=0)
+  [dev] 30/48  (sep cached=29 computed=0)
+  [dev] 40/48  (sep cached=39 computed=0)
+  [dev] 48/48  (sep cached=47 computed=0)
+[eval] dev: n=48
+  [vc_test_lowk] 10/63  (sep cached=57 computed=0)
+  [vc_test_lowk] 20/63  (sep cached=67 computed=0)
+  [vc_test_lowk] 30/63  (sep cached=77 computed=0)
+  [vc_test_lowk] 40/63  (sep cached=87 computed=0)
+  [vc_test_lowk] 50/63  (sep cached=97 computed=0)
+  [vc_test_lowk] 60/63  (sep cached=107 computed=0)
+  [vc_test_lowk] 63/63  (sep cached=110 computed=0)
+[eval] vc_test_lowk: n=63
+  [ami] 10/16  (sep cached=120 computed=0)
+  [ami] 16/16  (sep cached=126 computed=0)
+[eval] ami: n=16
+  [aishell4] 10/20  (sep cached=136 computed=0)
+  [aishell4] 20/20  (sep cached=146 computed=0)
+[eval] aishell4: n=20
+[tune] dev baseline mean=0.1104 worst=0.6085 feasible=6 chosen_T=1.2
+[apply] dev: base 0.1104/0.6085 -> cand 0.1092/0.6085 (fp=1, caught=7/8)
+[apply] vc_test_lowk: base 0.1739/0.8111 -> cand 0.1376/0.8111 (fp=4, caught=8/15)
+[apply] ami: base 0.454/0.7016 -> cand 0.454/0.7016 (fp=1, caught=0/0)
+[apply] aishell4: base 0.2604/0.7636 -> cand 0.2604/0.7636 (fp=0, caught=0/0)
+[verdict] {"K1a": false, "K1b": true, "K2a": true, "K2b": true, "K3": true, "K4": true, "ADOPT": false}

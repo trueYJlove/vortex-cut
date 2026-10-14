@@ -1,0 +1,84 @@
+{
+  "K5_required_reports": {
+    "direction_reversed_sessions": {
+      "dev": {
+        "reversed": {
+          "n": 0
+        },
+        "normal": {
+          "n": 0
+        },
+        "reversed_sessions": [],
+        "criterion": "rho = Spearman(silhouette(K), -DER(K)) < 0（与 §5.10 判据逐字一致）"
+      },
+      "vc_test_lowk": {
+        "reversed": {
+          "n": 0
+        },
+        "normal": {
+          "n": 0
+        },
+        "reversed_sessions": [],
+        "criterion": "rho = Spearman(silhouette(K), -DER(K)) < 0（与 §5.10 判据逐字一致）"
+      },
+      "ami": {
+        "reversed": {
+          "n": 0
+        },
+        "normal": {
+          "n": 0
+        },
+        "reversed_sessions": [],
+        "criterion": "rho = Spearman(silhouette(K), -DER(K)) < 0（与 §5.10 判据逐字一致）"
+      },
+      "aishell4": {
+        "reversed": {
+          "n": 0
+        },
+        "normal": {
+          "n": 0
+        },
+        "reversed_sessions": [],
+        "criterion": "rho = Spearman(silhouette(K), -DER(K)) < 0（与 §5.10 判据逐字一致）"
+      }
+    },
+    "bidirectional_deviation": {
+      "dev": {
+        "k1_fields": 8,
+        "true_positive_says_single": 7,
+        "false_positive_says_single_but_multi": 1,
+        "false_negative_missed_single": 1,
+        "fn_rate": 0.125,
+        "fp_rate": 0.025,
+        "note": "FP=高估方向、FN=低估方向；两方向都必须报（§5.11 判定五）"
+      },
+      "vc_test_lowk": {
+        "k1_fields": 15,
+        "true_positive_says_single": 8,
+        "false_positive_says_single_but_multi": 4,
+        "false_negative_missed_single": 7,
+        "fn_rate": 0.4667,
+        "fp_rate": 0.0833,
+        "note": "FP=高估方向、FN=低估方向；两方向都必须报（§5.11 判定五）"
+      },
+      "ami": {
+        "k1_fields": 0,
+        "true_positive_says_single": 0,
+        "false_positive_says_single_but_multi": 1,
+        "false_negative_missed_single": 0,
+        "fn_rate": null,
+        "fp_rate": 0.0625,
+        "note": "FP=高估方向、FN=低估方向；两方向都必须报（§5.11 判定五）"
+      },
+      "aishell4": {
+        "k1_fields": 0,
+        "true_positive_says_single": 0,
+        "false_positive_says_single_but_multi": 0,
+        "false_negative_missed_single": 0,
+        "fn_rate": null,
+        "fp_rate": 0.0,
+        "note": "FP=高估方向、FN=低估方向；两方向都必须报（§5.11 判定五）"
+      }
+    }
+  }
+}
