@@ -1,0 +1,272 @@
+{
+  "inputs": {
+    "lowk_grid": "evidence\\2026-10-13-w22-g-voxconverse-test-lowk\\lowk-test-report.json",
+    "conditions": "evidence\\2026-10-13-w22-g-voxconverse-test-lowk\\conditions.json",
+    "kest_vc": "evidence\\2026-10-13-w22-j-k-estimator\\e0-vc-test-lowk.json",
+    "kest_ami": "evidence\\2026-10-13-w22-j-k-estimator\\e0-ami.json",
+    "spike_g": "evidence\\2026-10-13-w22-i-criterion-spike\\spike-vc-ami.json",
+    "ami_diag": "evidence\\2026-10-12-w22-d-planA-recheck\\diag-ami-fixed.json",
+    "ami_base": "evidence\\2026-10-12-w22-d-planA-recheck\\baseline-routes-ami.json"
+  },
+  "A_decomposition": {
+    "n": 63,
+    "baseline_current": {
+      "mean": 0.1739,
+      "worst": 0.8111
+    },
+    "fix_a_only_expressiveness": {
+      "mean": 0.1278,
+      "worst": 0.5563
+    },
+    "fix_b_only_discrimination": {
+      "mean": 0.0869,
+      "worst": 0.4504
+    },
+    "fix_both": {
+      "mean": 0.0748,
+      "worst": 0.4504
+    },
+    "gate_lines": {
+      "mean_max": 0.4,
+      "worst_max": 0.55
+    },
+    "note": "fix_b 与门 §5.9 的 oracle 候选窗逐值同源（[2, k_max]）；三者为上界，非可达精度"
+  },
+  "B_gate_oracle_blind_to_k1": {
+    "gate_oracle_min_k2": {
+      "mean": 0.0869,
+      "worst": 0.4504
+    },
+    "true_oracle_any_k": {
+      "mean": 0.0748,
+      "worst": 0.4504
+    },
+    "fields_where_gate_oracle_is_not_true_best": 16,
+    "fields_whose_grid_contains_a_k1_point": 54,
+    "note": "worst 不变 => 门 §5.5「oracle 过双门」仍成立且保守；但 mean 被虚高"
+  },
+  "C_by_true_k": {
+    "1": {
+      "n": 15,
+      "current_mean": 0.2278,
+      "current_worst": 0.8111,
+      "chosen_k_hat": [
+        2,
+        6,
+        7,
+        8
+      ],
+      "at_k1_mean": 0.0344,
+      "at_k1_worst": 0.1333
+    },
+    "2": {
+      "n": 31,
+      "current_mean": 0.1589,
+      "current_worst": 0.5269,
+      "chosen_k_hat": [
+        2,
+        4,
+        8
+      ],
+      "at_k1_mean": 0.3018,
+      "at_k1_worst": 0.699
+    },
+    "3": {
+      "n": 17,
+      "current_mean": 0.1537,
+      "current_worst": 0.5563,
+      "chosen_k_hat": [
+        2,
+        3
+      ],
+      "at_k1_mean": 0.3952,
+      "at_k1_worst": 0.6042
+    }
+  },
+  "D_single_speaker_fields": {
+    "n": 15,
+    "current_mean": 0.2278,
+    "current_worst": 0.8111,
+    "at_k1_mean": 0.0344,
+    "at_k1_worst": 0.1333,
+    "chosen_k_hat_histogram": {
+      "2": 11,
+      "6": 1,
+      "7": 2,
+      "8": 1
+    },
+    "fields_choosing_k_hat_gt_2": 4,
+    "k1_der_unique_per_field": 63,
+    "note": "K=1 时全部窗并入单轮次，DER 只由分段决定、与 tau 无关 => (a) 一旦修好是确定的"
+  },
+  "E_residual_multi_speaker": [
+    {
+      "meeting": "fxnwf",
+      "der": 0.5563,
+      "k_true": 3,
+      "k_hat": 2,
+      "best_in_2_8": 0.19,
+      "gap_to_oracle": 0.3663
+    },
+    {
+      "meeting": "bjruf",
+      "der": 0.5269,
+      "k_true": 2,
+      "k_hat": 2,
+      "best_in_2_8": 0.0942,
+      "gap_to_oracle": 0.4327
+    },
+    {
+      "meeting": "lpola",
+      "der": 0.5221,
+      "k_true": 3,
+      "k_hat": 2,
+      "best_in_2_8": 0.1591,
+      "gap_to_oracle": 0.363
+    },
+    {
+      "meeting": "mxdpo",
+      "der": 0.4826,
+      "k_true": 2,
+      "k_hat": 8,
+      "best_in_2_8": 0.1985,
+      "gap_to_oracle": 0.2841
+    },
+    {
+      "meeting": "tiido",
+      "der": 0.4617,
+      "k_true": 2,
+      "k_hat": 2,
+      "best_in_2_8": 0.2247,
+      "gap_to_oracle": 0.237
+    }
+  ],
+  "F_g1_convergence": {
+    "A0": {
+      "mean": 0.1739,
+      "worst": 0.8111
+    },
+    "G1_cap_by_k_hat_dm": {
+      "mean": 0.1499,
+      "worst": 0.5563
+    },
+    "G1_worst_field": "fxnwf",
+    "fix_a_worst_field": "fxnwf",
+    "same_worst_value": true,
+    "catastrophic_fields": {
+      "euqef": {
+        "k_true": 1,
+        "k_hat_dm": 3,
+        "A0_der": 0.8111,
+        "G1_der": 0.4119
+      },
+      "zztbo": {
+        "k_true": 1,
+        "k_hat_dm": 2,
+        "A0_der": 0.8046,
+        "G1_der": 0.1616
+      },
+      "neiye": {
+        "k_true": 1,
+        "k_hat_dm": 2,
+        "A0_der": 0.6871,
+        "G1_der": 0.0272
+      }
+    },
+    "note": "两条独立路线（按 K_hat_dm 封顶 / 修表达能力）落在同一 worst 值 => 残差同源，均为 (b)"
+  },
+  "G_separation_statistic": {
+    "definition": "fit_distance_mixture 的 separation=(mu_diff-mu_same)/pooled；现役只取 weight[0] 反推 k_hat",
+    "corr_separation_k_true": 0.3552,
+    "auc_single_vs_multi": 0.8778,
+    "median_sep_single": 1.1753,
+    "median_sep_multi": 2.9924,
+    "corr_duration_k_true": -0.0528,
+    "corr_duration_separation": 0.0174,
+    "partial_corr_separation_k_true_given_duration": 0.3567,
+    "note": "回归口径无信息（与 §5.12 P1 一致）；二元口径有信息；偏相关排除时长伪信号"
+  },
+  "H_threshold_cost": {
+    "baseline_vc": {
+      "mean": 0.1739,
+      "worst": 0.8111
+    },
+    "baseline_ami": {
+      "mean": 0.454,
+      "worst": 0.7016
+    },
+    "ami_if_all_forced_to_k1": {
+      "mean": 0.6248,
+      "worst": 0.7417,
+      "n": 16
+    },
+    "scan": {
+      "0.75": {
+        "vc": {
+          "mean": 0.1373,
+          "worst": 0.8111,
+          "caught_single_fields": 5,
+          "false_positive_multi_fields": 1
+        },
+        "ami": {
+          "mean": 0.454,
+          "worst": 0.7016,
+          "triggers_all_false_positive": 0
+        }
+      },
+      "1.0": {
+        "vc": {
+          "mean": 0.1373,
+          "worst": 0.8111,
+          "caught_single_fields": 6,
+          "false_positive_multi_fields": 3
+        },
+        "ami": {
+          "mean": 0.454,
+          "worst": 0.7016,
+          "triggers_all_false_positive": 0
+        }
+      },
+      "1.25": {
+        "vc": {
+          "mean": 0.1376,
+          "worst": 0.8111,
+          "caught_single_fields": 8,
+          "false_positive_multi_fields": 4
+        },
+        "ami": {
+          "mean": 0.454,
+          "worst": 0.7016,
+          "triggers_all_false_positive": 1
+        }
+      },
+      "1.5": {
+        "vc": {
+          "mean": 0.1248,
+          "worst": 0.5563,
+          "caught_single_fields": 11,
+          "false_positive_multi_fields": 5
+        },
+        "ami": {
+          "mean": 0.4534,
+          "worst": 0.7016,
+          "triggers_all_false_positive": 3
+        }
+      },
+      "2.0": {
+        "vc": {
+          "mean": 0.1307,
+          "worst": 0.5692,
+          "caught_single_fields": 14,
+          "false_positive_multi_fields": 11
+        },
+        "ami": {
+          "mean": 0.4539,
+          "worst": 0.7016,
+          "triggers_all_false_positive": 4
+        }
+      }
+    },
+    "note": "AMI 16 场全为 3-4 人 => 每一次触发都是假阳性；T=1.5 处 AMI 代价近乎为零属阈值落点运气，不是安全保证——见 all_forced 一行"
+  }
+}
