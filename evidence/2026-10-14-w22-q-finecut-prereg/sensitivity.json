@@ -1,0 +1,117 @@
+{
+  "M5": {
+    "kf=24,s=0.05": {
+      "tuning_margin": 0.0876,
+      "judged": {
+        "mean_T": 0.1844,
+        "worst_T": 0.5179,
+        "mean_F": 0.202,
+        "worst_F": 0.5179
+      }
+    },
+    "kf=32,s=0.05": {
+      "tuning_margin": 0.0876,
+      "judged": {
+        "mean_T": 0.2275,
+        "worst_T": 0.6189,
+        "mean_F": 0.2442,
+        "worst_F": 0.6189
+      }
+    },
+    "kf=24,s=0.02": {
+      "tuning_margin": 0.0678,
+      "judged": {
+        "mean_T": 0.1696,
+        "worst_T": 0.6495,
+        "mean_F": 0.1866,
+        "worst_F": 0.6495
+      }
+    },
+    "kf=40,s=0.05": {
+      "tuning_margin": 0.0515,
+      "judged": {
+        "mean_T": 0.2381,
+        "worst_T": 0.6122,
+        "mean_F": 0.255,
+        "worst_F": 0.6122
+      }
+    },
+    "kf=48,s=0.05": {
+      "tuning_margin": 0.0515,
+      "judged": {
+        "mean_T": 0.2683,
+        "worst_T": 0.603,
+        "mean_F": 0.2835,
+        "worst_F": 0.603
+      }
+    }
+  },
+  "NC4": {
+    "incumbent_max_mean": 0.2508,
+    "best_const_K": 5,
+    "best_const_mean": 0.2688,
+    "incumbent_also_beats_const": true
+  },
+  "NC5": {
+    "passable_on_ami_test": 5,
+    "top5": [
+      [
+        "kf=40,s=0.10",
+        {
+          "passable": true,
+          "margin": 0.0796,
+          "mean_T": 0.2577,
+          "worst_T": 0.4345,
+          "mean_F": 0.3204,
+          "worst_F": 0.504
+        }
+      ],
+      [
+        "kf=48,s=0.10",
+        {
+          "passable": true,
+          "margin": 0.0748,
+          "mean_T": 0.2629,
+          "worst_T": 0.4345,
+          "mean_F": 0.3252,
+          "worst_F": 0.4956
+        }
+      ],
+      [
+        "kf=40,s=0.05",
+        {
+          "passable": true,
+          "margin": 0.0677,
+          "mean_T": 0.2671,
+          "worst_T": 0.5073,
+          "mean_F": 0.3294,
+          "worst_F": 0.5323
+        }
+      ],
+      [
+        "kf=48,s=0.05",
+        {
+          "passable": true,
+          "margin": 0.0643,
+          "mean_T": 0.2738,
+          "worst_T": 0.5082,
+          "mean_F": 0.3357,
+          "worst_F": 0.5331
+        }
+      ],
+      [
+        "kf=40,s=0.02",
+        {
+          "passable": true,
+          "margin": 0.0305,
+          "mean_T": 0.299,
+          "worst_T": 0.5465,
+          "mean_F": 0.3601,
+          "worst_F": 0.5695
+        }
+      ]
+    ],
+    "dev_choice": "kf=24,s=0.05",
+    "dev_choice_margin_on_ami_test": -0.0157
+  }
+}

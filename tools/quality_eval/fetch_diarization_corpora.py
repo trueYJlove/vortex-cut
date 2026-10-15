@@ -47,6 +47,15 @@ AMI_TEST = [
     "IS1009a", "IS1009b", "IS1009c", "IS1009d",
     "TS3003a", "TS3003b", "TS3003c", "TS3003d",
 ]
+# AMI **dev**（18 场，全部 K=4）：ADR-0008 D3-a 指定的**定参集**。
+# 本仓此前只接触过 test，故 dev 是干净的参数选择集。
+# ⚠️ 它的职责只是"把参数冻结下来"——**不得**用它判定（判定集另有其物）。
+AMI_DEV = [
+    "ES2011a", "ES2011b", "ES2011c", "ES2011d",
+    "IB4001", "IB4002", "IB4003", "IB4004", "IB4010", "IB4011",
+    "IS1008a", "IS1008b", "IS1008c", "IS1008d",
+    "TS3004a", "TS3004b", "TS3004c", "TS3004d",
+]
 A4_TEST = [
     "L_R003S01C02", "L_R003S02C02", "L_R003S03C02", "L_R003S04C02",
     "L_R004S01C01", "L_R004S02C01", "L_R004S03C01", "L_R004S06C01",
@@ -156,7 +165,7 @@ def fetch_file(url: str, dest: Path, *, proxy: str, streams: int, chunk_mb: int)
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--corpus", choices=["ami", "aishell4", "both"], default="both")
+    ap.add_argument("--corpus", choices=["ami", "ami-dev", "aishell4", "both"], default="both")
     ap.add_argument("--root", default=".tmp", help="仓外语料根（默认 .tmp）")
     ap.add_argument("--streams", type=int, default=8)
     ap.add_argument("--chunk-mb", type=int, default=8)
@@ -174,6 +183,10 @@ def main() -> int:
     jobs: list[tuple[str, str, Path, str]] = []  # (corpus, meeting, dest, url)
     if args.corpus in ("ami", "both"):
         for m in AMI_TEST:
+            jobs.append(("ami", m, root / "ami" / "audio" / f"{m}.Mix-Headset.wav",
+                         f"{AMI_BASE}{m}/audio/{m}.Mix-Headset.wav"))
+    if args.corpus == "ami-dev":
+        for m in AMI_DEV:
             jobs.append(("ami", m, root / "ami" / "audio" / f"{m}.Mix-Headset.wav",
                          f"{AMI_BASE}{m}/audio/{m}.Mix-Headset.wav"))
     if args.corpus in ("aishell4", "both"):
