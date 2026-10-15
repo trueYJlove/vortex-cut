@@ -1,0 +1,37 @@
+{
+  "rows": 36,
+  "total_blob_bytes": 40909824,
+  "columns": [
+    "id",
+    "asset_id",
+    "source_fingerprint",
+    "algorithm_version",
+    "status",
+    "reason",
+    "speaker_count",
+    "turns_json",
+    "windows_json",
+    "embeddings_blob",
+    "embedding_model",
+    "model_revision",
+    "vad_model",
+    "threshold",
+    "threshold_strategy",
+    "sample_rate",
+    "created_at",
+    "updated_at",
+    "finished_at"
+  ],
+  "n_windows_range": [
+    527,
+    2109
+  ],
+  "db_empty_bytes": 30965760,
+  "db_filled_bytes": 71958528,
+  "backup_seconds": 0.2426,
+  "restore_seconds": 0.215,
+  "backup_bytes": 42283008,
+  "integrity": "ok",
+  "restored_rows": 36,
+  "restored_blob_bytes": 40909824
+}

@@ -1,0 +1,800 @@
+{
+  "harness_note": "decode via window_pcm_args only (first version double-specified output -> invalid)",
+  "starts": [
+    60,
+    140,
+    220,
+    300,
+    380,
+    460,
+    540,
+    620,
+    700,
+    780,
+    860,
+    940
+  ],
+  "groups": {
+    "EN2002a/far-arrays": {
+      "note": "不同阵列（≈两机位，硬件同步）",
+      "expect": "accept",
+      "n": 12,
+      "ready": 10,
+      "dual_min": 0.0,
+      "dual_p50": 312.5,
+      "dual_max": 36437.5,
+      "conf_min": 0.2276,
+      "conf_p50": 0.42845,
+      "conf_max": 0.7392,
+      "rows": [
+        {
+          "start": 60,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.5409,
+          "dual_delta_us": 270.8,
+          "offset_us": 667
+        },
+        {
+          "start": 140,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.3535,
+          "dual_delta_us": 1104.2,
+          "offset_us": 1104
+        },
+        {
+          "start": 220,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.7392,
+          "dual_delta_us": 916.7,
+          "offset_us": 1562
+        },
+        {
+          "start": 300,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.3338,
+          "dual_delta_us": 250.0,
+          "offset_us": 1458
+        },
+        {
+          "start": 380,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.438,
+          "dual_delta_us": 41.7,
+          "offset_us": 2542
+        },
+        {
+          "start": 460,
+          "status": "unavailable",
+          "reason": "dual_window_inconsistent",
+          "confidence": 0.4189,
+          "dual_delta_us": 36437.5,
+          "offset_us": null
+        },
+        {
+          "start": 540,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.5666,
+          "dual_delta_us": 2062.5,
+          "offset_us": -833
+        },
+        {
+          "start": 620,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.5343,
+          "dual_delta_us": 104.2,
+          "offset_us": 625
+        },
+        {
+          "start": 700,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.3392,
+          "dual_delta_us": 125.0,
+          "offset_us": 3000
+        },
+        {
+          "start": 780,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.3765,
+          "dual_delta_us": 354.2,
+          "offset_us": 1292
+        },
+        {
+          "start": 860,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.6043,
+          "dual_delta_us": 0.0,
+          "offset_us": 1104
+        },
+        {
+          "start": 940,
+          "status": "unavailable",
+          "reason": "dual_window_inconsistent",
+          "confidence": 0.2276,
+          "dual_delta_us": 6354.2,
+          "offset_us": null
+        }
+      ]
+    },
+    "ES2004a/far-arrays": {
+      "note": "不同阵列（≈两机位，硬件同步）",
+      "expect": "accept",
+      "n": 12,
+      "ready": 10,
+      "dual_min": 0.0,
+      "dual_p50": 114.55000000000001,
+      "dual_max": 7687.5,
+      "conf_min": 0.2388,
+      "conf_p50": 0.4577,
+      "conf_max": 0.7705,
+      "rows": [
+        {
+          "start": 60,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.7705,
+          "dual_delta_us": 833.3,
+          "offset_us": 1375
+        },
+        {
+          "start": 140,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.5126,
+          "dual_delta_us": 0.0,
+          "offset_us": 521
+        },
+        {
+          "start": 220,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.4531,
+          "dual_delta_us": 312.5,
+          "offset_us": 375
+        },
+        {
+          "start": 300,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.4623,
+          "dual_delta_us": 208.3,
+          "offset_us": 146
+        },
+        {
+          "start": 380,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.2388,
+          "dual_delta_us": 2833.3,
+          "offset_us": -6562
+        },
+        {
+          "start": 460,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.4137,
+          "dual_delta_us": 0.0,
+          "offset_us": 375
+        },
+        {
+          "start": 540,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.5579,
+          "dual_delta_us": 20.8,
+          "offset_us": 1375
+        },
+        {
+          "start": 620,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.3561,
+          "dual_delta_us": 20.8,
+          "offset_us": 708
+        },
+        {
+          "start": 700,
+          "status": "unavailable",
+          "reason": "dual_window_inconsistent",
+          "confidence": 0.3365,
+          "dual_delta_us": 7687.5,
+          "offset_us": null
+        },
+        {
+          "start": 780,
+          "status": "unavailable",
+          "reason": "dual_window_inconsistent",
+          "confidence": 0.39,
+          "dual_delta_us": 6937.5,
+          "offset_us": null
+        },
+        {
+          "start": 860,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.7195,
+          "dual_delta_us": 20.8,
+          "offset_us": 750
+        },
+        {
+          "start": 940,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.5313,
+          "dual_delta_us": 20.8,
+          "offset_us": 2833
+        }
+      ]
+    },
+    "ES2004a/same-near": {
+      "note": "同阵列相邻单元",
+      "expect": "accept",
+      "n": 12,
+      "ready": 12,
+      "dual_min": 0.0,
+      "dual_p50": 0.0,
+      "dual_max": 62.5,
+      "conf_min": 0.8709,
+      "conf_p50": 0.96545,
+      "conf_max": 0.9828,
+      "rows": [
+        {
+          "start": 60,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.9781,
+          "dual_delta_us": 0.0,
+          "offset_us": 125
+        },
+        {
+          "start": 140,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.9686,
+          "dual_delta_us": 0.0,
+          "offset_us": -21
+        },
+        {
+          "start": 220,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.9828,
+          "dual_delta_us": 0.0,
+          "offset_us": 104
+        },
+        {
+          "start": 300,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.9705,
+          "dual_delta_us": 20.8,
+          "offset_us": 83
+        },
+        {
+          "start": 380,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.9047,
+          "dual_delta_us": 62.5,
+          "offset_us": -104
+        },
+        {
+          "start": 460,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.9299,
+          "dual_delta_us": 0.0,
+          "offset_us": -21
+        },
+        {
+          "start": 540,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.9623,
+          "dual_delta_us": 0.0,
+          "offset_us": -21
+        },
+        {
+          "start": 620,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.8709,
+          "dual_delta_us": 0.0,
+          "offset_us": -21
+        },
+        {
+          "start": 700,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.9255,
+          "dual_delta_us": 0.0,
+          "offset_us": -21
+        },
+        {
+          "start": 780,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.9705,
+          "dual_delta_us": 0.0,
+          "offset_us": 0
+        },
+        {
+          "start": 860,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.9587,
+          "dual_delta_us": 0.0,
+          "offset_us": -146
+        },
+        {
+          "start": 940,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.969,
+          "dual_delta_us": 0.0,
+          "offset_us": 0
+        }
+      ]
+    },
+    "ES2004b/far-arrays": {
+      "note": "不同阵列（≈两机位，硬件同步）",
+      "expect": "accept",
+      "n": 12,
+      "ready": 9,
+      "dual_min": 41.7,
+      "dual_p50": 187.5,
+      "dual_max": 66500.0,
+      "conf_min": 0.2699,
+      "conf_p50": 0.43079999999999996,
+      "conf_max": 0.6443,
+      "rows": [
+        {
+          "start": 60,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.527,
+          "dual_delta_us": 1020.8,
+          "offset_us": 1833
+        },
+        {
+          "start": 140,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.44,
+          "dual_delta_us": 208.3,
+          "offset_us": 938
+        },
+        {
+          "start": 220,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.536,
+          "dual_delta_us": 145.8,
+          "offset_us": 354
+        },
+        {
+          "start": 300,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.3817,
+          "dual_delta_us": 62.5,
+          "offset_us": 750
+        },
+        {
+          "start": 380,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.4072,
+          "dual_delta_us": 62.5,
+          "offset_us": 500
+        },
+        {
+          "start": 460,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.4693,
+          "dual_delta_us": 41.7,
+          "offset_us": 417
+        },
+        {
+          "start": 540,
+          "status": "unavailable",
+          "reason": "dual_window_inconsistent",
+          "confidence": 0.4522,
+          "dual_delta_us": 66500.0,
+          "offset_us": null
+        },
+        {
+          "start": 620,
+          "status": "unavailable",
+          "reason": "dual_window_inconsistent",
+          "confidence": 0.4216,
+          "dual_delta_us": 8187.5,
+          "offset_us": null
+        },
+        {
+          "start": 700,
+          "status": "unavailable",
+          "reason": "dual_window_inconsistent",
+          "confidence": 0.3936,
+          "dual_delta_us": 7937.5,
+          "offset_us": null
+        },
+        {
+          "start": 780,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.6443,
+          "dual_delta_us": 41.7,
+          "offset_us": 708
+        },
+        {
+          "start": 860,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.2699,
+          "dual_delta_us": 4854.2,
+          "offset_us": -2125
+        },
+        {
+          "start": 940,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.4038,
+          "dual_delta_us": 166.7,
+          "offset_us": 3042
+        }
+      ]
+    },
+    "IS1009a/far-arrays": {
+      "note": "不同阵列（≈两机位，硬件同步）",
+      "expect": "accept",
+      "n": 10,
+      "ready": 7,
+      "dual_min": 0.0,
+      "dual_p50": 927.1,
+      "dual_max": 14041.7,
+      "conf_min": 0.2694,
+      "conf_p50": 0.38215,
+      "conf_max": 0.5687,
+      "rows": [
+        {
+          "start": 60,
+          "status": "unavailable",
+          "reason": "dual_window_inconsistent",
+          "confidence": 0.3526,
+          "dual_delta_us": 6708.3,
+          "offset_us": null
+        },
+        {
+          "start": 140,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.4712,
+          "dual_delta_us": 20.8,
+          "offset_us": 1938
+        },
+        {
+          "start": 220,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.2694,
+          "dual_delta_us": 0.0,
+          "offset_us": 3833
+        },
+        {
+          "start": 300,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.5354,
+          "dual_delta_us": 187.5,
+          "offset_us": -3188
+        },
+        {
+          "start": 380,
+          "status": "unavailable",
+          "reason": "dual_window_inconsistent",
+          "confidence": 0.4467,
+          "dual_delta_us": 8187.5,
+          "offset_us": null
+        },
+        {
+          "start": 460,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.3182,
+          "dual_delta_us": 20.8,
+          "offset_us": 2792
+        },
+        {
+          "start": 540,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.3823,
+          "dual_delta_us": 1708.3,
+          "offset_us": 2729
+        },
+        {
+          "start": 620,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.3011,
+          "dual_delta_us": 1666.7,
+          "offset_us": 4646
+        },
+        {
+          "start": 700,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.5687,
+          "dual_delta_us": 20.8,
+          "offset_us": 2542
+        },
+        {
+          "start": 780,
+          "status": "unavailable",
+          "reason": "dual_window_inconsistent",
+          "confidence": 0.382,
+          "dual_delta_us": 14041.7,
+          "offset_us": null
+        }
+      ]
+    },
+    "TS3003a/far-arrays": {
+      "note": "不同阵列（≈两机位，硬件同步）",
+      "expect": "accept",
+      "n": 12,
+      "ready": 10,
+      "dual_min": 41.7,
+      "dual_p50": 312.5,
+      "dual_max": 18875.0,
+      "conf_min": 0.2457,
+      "conf_p50": 0.29935,
+      "conf_max": 0.5601,
+      "rows": [
+        {
+          "start": 60,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.3814,
+          "dual_delta_us": 458.3,
+          "offset_us": 6833
+        },
+        {
+          "start": 140,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.2457,
+          "dual_delta_us": 145.8,
+          "offset_us": 7292
+        },
+        {
+          "start": 220,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.5601,
+          "dual_delta_us": 145.8,
+          "offset_us": -13354
+        },
+        {
+          "start": 300,
+          "status": "unavailable",
+          "reason": "dual_window_inconsistent",
+          "confidence": 0.3076,
+          "dual_delta_us": 5979.2,
+          "offset_us": null
+        },
+        {
+          "start": 380,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.4303,
+          "dual_delta_us": 166.7,
+          "offset_us": -6583
+        },
+        {
+          "start": 460,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.2911,
+          "dual_delta_us": 41.7,
+          "offset_us": -6458
+        },
+        {
+          "start": 540,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.2766,
+          "dual_delta_us": 1645.8,
+          "offset_us": 1104
+        },
+        {
+          "start": 620,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.2695,
+          "dual_delta_us": 2916.7,
+          "offset_us": 7208
+        },
+        {
+          "start": 700,
+          "status": "unavailable",
+          "reason": "dual_window_inconsistent",
+          "confidence": 0.2795,
+          "dual_delta_us": 18875.0,
+          "offset_us": null
+        },
+        {
+          "start": 780,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.3601,
+          "dual_delta_us": 2062.5,
+          "offset_us": 7917
+        },
+        {
+          "start": 860,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.2807,
+          "dual_delta_us": 125.0,
+          "offset_us": 6604
+        },
+        {
+          "start": 940,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.3789,
+          "dual_delta_us": 62.5,
+          "offset_us": 5938
+        }
+      ]
+    },
+    "NEG/cross-meeting": {
+      "note": "跨会议无关（伪峰）",
+      "expect": "reject",
+      "n": 4,
+      "ready": 0,
+      "dual_min": 336250.0,
+      "dual_p50": 509135.4,
+      "dual_max": 1474229.2,
+      "conf_min": 0.0253,
+      "conf_p50": 0.041800000000000004,
+      "conf_max": 0.1081,
+      "rows": [
+        {
+          "start": 60,
+          "status": "unavailable",
+          "reason": "low_confidence",
+          "confidence": 0.1081,
+          "dual_delta_us": 563458.3,
+          "offset_us": null
+        },
+        {
+          "start": 140,
+          "status": "unavailable",
+          "reason": "low_confidence",
+          "confidence": 0.0358,
+          "dual_delta_us": 454812.5,
+          "offset_us": null
+        },
+        {
+          "start": 220,
+          "status": "unavailable",
+          "reason": "low_confidence",
+          "confidence": 0.0253,
+          "dual_delta_us": 1474229.2,
+          "offset_us": null
+        },
+        {
+          "start": 300,
+          "status": "unavailable",
+          "reason": "low_confidence",
+          "confidence": 0.0478,
+          "dual_delta_us": 336250.0,
+          "offset_us": null
+        }
+      ]
+    },
+    "BOUND/diff-device": {
+      "note": "头戴混合 vs 阵列（边界）",
+      "expect": "boundary",
+      "n": 4,
+      "ready": 4,
+      "dual_min": 83.3,
+      "dual_p50": 750.0,
+      "dual_max": 1645.8,
+      "conf_min": 0.2026,
+      "conf_p50": 0.31545,
+      "conf_max": 0.472,
+      "rows": [
+        {
+          "start": 60,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.2658,
+          "dual_delta_us": 83.3,
+          "offset_us": 2854
+        },
+        {
+          "start": 140,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.472,
+          "dual_delta_us": 1645.8,
+          "offset_us": 2688
+        },
+        {
+          "start": 220,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.2026,
+          "dual_delta_us": 1354.2,
+          "offset_us": 2333
+        },
+        {
+          "start": 300,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.3651,
+          "dual_delta_us": 145.8,
+          "offset_us": 2604
+        }
+      ]
+    },
+    "NEG/6s-displaced": {
+      "note": "真实信号 + 错误对齐（成员窗右移 6 s）",
+      "expect": "reject",
+      "n": 4,
+      "rows": [
+        {
+          "start": 60,
+          "shift_s": 6.0,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.484,
+          "dual_delta_us": 62.5,
+          "offset_us": -5999188
+        },
+        {
+          "start": 140,
+          "shift_s": 6.0,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.8801,
+          "dual_delta_us": 20.8,
+          "offset_us": -5999146
+        },
+        {
+          "start": 220,
+          "shift_s": 6.0,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.2643,
+          "dual_delta_us": 3000.0,
+          "offset_us": -5997146
+        },
+        {
+          "start": 300,
+          "shift_s": 6.0,
+          "status": "ready",
+          "reason": null,
+          "confidence": 0.4973,
+          "dual_delta_us": 41.7,
+          "offset_us": -5953000
+        }
+      ],
+      "dual_min": 20.8,
+      "dual_max": 3000.0
+    }
+  }
+}
