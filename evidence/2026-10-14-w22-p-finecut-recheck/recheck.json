@@ -1,0 +1,197 @@
+{
+  "purpose": "ADR-0008 Q1/Q2: is the fine-cut+share-merge partition a dendrogram cut?",
+  "corpus": "ami",
+  "condition": "silero_vad",
+  "rule": "fine cut Kf<=40 + share merge s=0.10 (guard: anchor largest)",
+  "summary": {
+    "n": 16,
+    "base_mean": 0.454,
+    "base_worst": 0.7016,
+    "family_mean": 0.2577,
+    "family_worst": 0.4345,
+    "best_cut_any_k_mean": 0.2196,
+    "best_cut_any_k_worst": 0.3905,
+    "best_cut_in_domain_mean": 0.3407,
+    "best_cut_in_domain_worst": 0.6882,
+    "gap_closed_vs_any_cut_oracle": 0.8374,
+    "family_beats_best_any_cut": 7
+  },
+  "per_meeting": {
+    "EN2002a": {
+      "k_true": 4,
+      "base": 0.611,
+      "family": 0.3797,
+      "family_k": 3,
+      "best_cut_any_k": 0.2935,
+      "best_cut_any_k_star": 71,
+      "best_cut_in_domain": 0.611,
+      "best_cut_in_domain_k": 3,
+      "family_beats_best_any_cut": false
+    },
+    "EN2002b": {
+      "k_true": 4,
+      "base": 0.5868,
+      "family": 0.2705,
+      "family_k": 3,
+      "best_cut_any_k": 0.2565,
+      "best_cut_any_k_star": 65,
+      "best_cut_in_domain": 0.5761,
+      "best_cut_in_domain_k": 7,
+      "family_beats_best_any_cut": false
+    },
+    "EN2002c": {
+      "k_true": 3,
+      "base": 0.6761,
+      "family": 0.1599,
+      "family_k": 3,
+      "best_cut_any_k": 0.171,
+      "best_cut_any_k_star": 23,
+      "best_cut_in_domain": 0.4174,
+      "best_cut_in_domain_k": 6,
+      "family_beats_best_any_cut": true
+    },
+    "EN2002d": {
+      "k_true": 4,
+      "base": 0.7016,
+      "family": 0.2486,
+      "family_k": 3,
+      "best_cut_any_k": 0.2478,
+      "best_cut_any_k_star": 17,
+      "best_cut_in_domain": 0.6882,
+      "best_cut_in_domain_k": 5,
+      "family_beats_best_any_cut": false
+    },
+    "ES2004a": {
+      "k_true": 4,
+      "base": 0.4172,
+      "family": 0.2991,
+      "family_k": 3,
+      "best_cut_any_k": 0.244,
+      "best_cut_any_k_star": 10,
+      "best_cut_in_domain": 0.3013,
+      "best_cut_in_domain_k": 6,
+      "family_beats_best_any_cut": false
+    },
+    "ES2004b": {
+      "k_true": 4,
+      "base": 0.2621,
+      "family": 0.138,
+      "family_k": 4,
+      "best_cut_any_k": 0.1435,
+      "best_cut_any_k_star": 10,
+      "best_cut_in_domain": 0.2621,
+      "best_cut_in_domain_k": 5,
+      "family_beats_best_any_cut": true
+    },
+    "ES2004c": {
+      "k_true": 4,
+      "base": 0.6501,
+      "family": 0.1497,
+      "family_k": 4,
+      "best_cut_any_k": 0.1552,
+      "best_cut_any_k_star": 8,
+      "best_cut_in_domain": 0.1552,
+      "best_cut_in_domain_k": 8,
+      "family_beats_best_any_cut": true
+    },
+    "ES2004d": {
+      "k_true": 4,
+      "base": 0.6948,
+      "family": 0.4345,
+      "family_k": 2,
+      "best_cut_any_k": 0.3905,
+      "best_cut_any_k_star": 9,
+      "best_cut_in_domain": 0.3905,
+      "best_cut_in_domain_k": 8,
+      "family_beats_best_any_cut": false
+    },
+    "IS1009a": {
+      "k_true": 4,
+      "base": 0.3694,
+      "family": 0.3358,
+      "family_k": 3,
+      "best_cut_any_k": 0.1466,
+      "best_cut_any_k_star": 13,
+      "best_cut_in_domain": 0.1819,
+      "best_cut_in_domain_k": 6,
+      "family_beats_best_any_cut": false
+    },
+    "IS1009b": {
+      "k_true": 4,
+      "base": 0.0509,
+      "family": 0.0462,
+      "family_k": 4,
+      "best_cut_any_k": 0.0509,
+      "best_cut_any_k_star": 8,
+      "best_cut_in_domain": 0.0509,
+      "best_cut_in_domain_k": 8,
+      "family_beats_best_any_cut": true
+    },
+    "IS1009c": {
+      "k_true": 4,
+      "base": 0.0542,
+      "family": 0.047,
+      "family_k": 4,
+      "best_cut_any_k": 0.0542,
+      "best_cut_any_k_star": 5,
+      "best_cut_in_domain": 0.0542,
+      "best_cut_in_domain_k": 5,
+      "family_beats_best_any_cut": true
+    },
+    "IS1009d": {
+      "k_true": 4,
+      "base": 0.2759,
+      "family": 0.2647,
+      "family_k": 2,
+      "best_cut_any_k": 0.1211,
+      "best_cut_any_k_star": 13,
+      "best_cut_in_domain": 0.2751,
+      "best_cut_in_domain_k": 8,
+      "family_beats_best_any_cut": false
+    },
+    "TS3003a": {
+      "k_true": 4,
+      "base": 0.3739,
+      "family": 0.3504,
+      "family_k": 2,
+      "best_cut_any_k": 0.3643,
+      "best_cut_any_k_star": 1,
+      "best_cut_in_domain": 0.3739,
+      "best_cut_in_domain_k": 2,
+      "family_beats_best_any_cut": true
+    },
+    "TS3003b": {
+      "k_true": 4,
+      "base": 0.6762,
+      "family": 0.2621,
+      "family_k": 3,
+      "best_cut_any_k": 0.2782,
+      "best_cut_any_k_star": 22,
+      "best_cut_in_domain": 0.4095,
+      "best_cut_in_domain_k": 8,
+      "family_beats_best_any_cut": true
+    },
+    "TS3003c": {
+      "k_true": 4,
+      "base": 0.2437,
+      "family": 0.3319,
+      "family_k": 3,
+      "best_cut_any_k": 0.2437,
+      "best_cut_any_k_star": 4,
+      "best_cut_in_domain": 0.2437,
+      "best_cut_in_domain_k": 4,
+      "family_beats_best_any_cut": false
+    },
+    "TS3003d": {
+      "k_true": 4,
+      "base": 0.6203,
+      "family": 0.4059,
+      "family_k": 4,
+      "best_cut_any_k": 0.3531,
+      "best_cut_any_k_star": 10,
+      "best_cut_in_domain": 0.4601,
+      "best_cut_in_domain_k": 7,
+      "family_beats_best_any_cut": false
+    }
+  }
+}
