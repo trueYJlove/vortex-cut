@@ -45,11 +45,24 @@ SPEAKER_ALGORITHM_VERSION = 1
 DEFAULT_SAMPLE_RATE = 16000
 MIN_DURATION_S = 1.0
 
+# --- 降级交付（Design Gate 2026-10-14，D3）-------------------------------------
+# S3 判精度门三项全不过（门 §5.20），且 §5.21 实测否决了「只交付高置信区间」
+# （欠分割场的 margin 最大 ⇒ 置信度在最该报警处给最高分）。
+# ⇒ 采纳 D3：**输出不变，只标注**。字段机器可读，因为下游（W2.3 机位切换）
+# 必须在**代码里**拒绝；靠文档的约束会腐烂。
+QUALITY_GATE_BASIS = "gate:mean_le_0.40,worst_en_le_0.60,worst_cn_le_0.55"
+# 未通过精度门 = 本包当前状态；将来精度门通过后改为 validated 即解除下游约束
+# （下游按**取值**检查而非版本号，故升级无需改下游代码）。
+QUALITY_STATUS_UNVALIDATED = "unvalidated"
+# 允许的用途。**multicam_switch 恒不在其中**——本门最硬的下游约束。
+USABLE_FOR_REFERENCE_ONLY = '["reference"]'
+
 # 摘要投影：**显式标量列**（BLOB 不在其中——见模块 docstring）
 SUMMARY_COLUMNS = (
     "id,asset_id,source_fingerprint,algorithm_version,status,reason,speaker_count,"
     "turns_json,windows_json,embedding_model,model_revision,vad_model,threshold,"
-    "threshold_strategy,sample_rate,created_at,updated_at,finished_at"
+    "threshold_strategy,sample_rate,quality_status,quality_basis,usable_for,"
+    "created_at,updated_at,finished_at"
 )
 
 # 推理会话计数（测试用：钉死"重聚类不重跑推理"；生产路径只增不减）
@@ -268,8 +281,9 @@ class SpeakerDiarizationService:
                 "INSERT INTO speaker_diarizations(id,asset_id,source_fingerprint,"
                 "algorithm_version,status,reason,speaker_count,turns_json,windows_json,"
                 "embeddings_blob,embedding_model,model_revision,vad_model,threshold,"
-                "threshold_strategy,sample_rate,created_at,updated_at,finished_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "threshold_strategy,sample_rate,quality_status,quality_basis,usable_for,"
+                "created_at,updated_at,finished_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     row_id, asset_id, source_fingerprint, SPEAKER_ALGORITHM_VERSION,
                     status, reason, speaker_count,
@@ -282,6 +296,11 @@ class SpeakerDiarizationService:
                     chosen_threshold,
                     threshold_strategy,
                     sample_rate,
+                    # 降级交付标注（D3）：**每次落库都写**，不依赖列默认值——
+                    # 默认值是迁移的安全网，不是写入路径的省事手段。
+                    QUALITY_STATUS_UNVALIDATED,
+                    QUALITY_GATE_BASIS,
+                    USABLE_FOR_REFERENCE_ONLY,
                     now, now, now,
                 ),
             )
@@ -340,12 +359,15 @@ class SpeakerDiarizationService:
                 "INSERT INTO speaker_diarizations(id,asset_id,source_fingerprint,"
                 "algorithm_version,status,reason,speaker_count,turns_json,windows_json,"
                 "embeddings_blob,embedding_model,model_revision,vad_model,threshold,"
-                "threshold_strategy,sample_rate,created_at,updated_at,finished_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "threshold_strategy,sample_rate,quality_status,quality_basis,usable_for,"
+                "created_at,updated_at,finished_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     row_id, asset_id, source_fingerprint, SPEAKER_ALGORITHM_VERSION,
                     status, reason, None, json_dumps(turns), json_dumps(windows), blob,
                     None, None, VAD_MODEL_ID, threshold, strategy, sample_rate,
+                    QUALITY_STATUS_UNVALIDATED, QUALITY_GATE_BASIS,
+                    USABLE_FOR_REFERENCE_ONLY,
                     now, now, now,
                 ),
             )
@@ -397,6 +419,10 @@ class SpeakerDiarizationService:
             "window_count": len(json_loads(row["windows_json"] or "[]")),
             "threshold": row["threshold"],
             "threshold_strategy": row["threshold_strategy"],
+            # 降级交付标注必须**透出到摘要**（只存表里等于下游看不见）
+            "quality_status": row["quality_status"],
+            "quality_basis": row["quality_basis"],
+            "usable_for": json_loads(row["usable_for"] or '["reference"]'),
             "algorithm_version": str(row["algorithm_version"]),
             "embedding_model": row["embedding_model"],
             "vad_model": row["vad_model"],

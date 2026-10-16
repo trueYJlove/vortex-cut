@@ -99,6 +99,8 @@ class TestMigrationShape:
             "reason", "speaker_count", "turns_json", "windows_json", "embeddings_blob",
             "embedding_model", "model_revision", "vad_model", "threshold",
             "threshold_strategy", "sample_rate", "created_at", "updated_at", "finished_at",
+            # v38（降级交付 D3）：质量标注三列
+            "quality_status", "quality_basis", "usable_for",
         }
         assert expected <= columns
         assert {"idx_speaker_diarizations_asset", "idx_speaker_diarizations_ready"} <= indexes
