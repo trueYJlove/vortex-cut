@@ -1,0 +1,234 @@
+{
+  "per_meeting": [
+    {
+      "meeting": "atgpi",
+      "k_true": 1,
+      "k_hat": 2,
+      "der_T": 0.0099,
+      "der_F": 0.0099,
+      "scored_frames_T": 0
+    },
+    {
+      "meeting": "hycgx",
+      "k_true": 2,
+      "k_hat": 3,
+      "der_T": 0.0139,
+      "der_F": 0.0208,
+      "scored_frames_T": 0
+    },
+    {
+      "meeting": "ikgcq",
+      "k_true": 2,
+      "k_hat": 2,
+      "der_T": 0.0611,
+      "der_F": 0.0679,
+      "scored_frames_T": 0
+    },
+    {
+      "meeting": "imtug",
+      "k_true": 2,
+      "k_hat": 2,
+      "der_T": 0.0182,
+      "der_F": 0.0226,
+      "scored_frames_T": 0
+    },
+    {
+      "meeting": "kklpv",
+      "k_true": 2,
+      "k_hat": 2,
+      "der_T": 0.0057,
+      "der_F": 0.0091,
+      "scored_frames_T": 0
+    },
+    {
+      "meeting": "mekog",
+      "k_true": 2,
+      "k_hat": 2,
+      "der_T": 0.0164,
+      "der_F": 0.0269,
+      "scored_frames_T": 0
+    },
+    {
+      "meeting": "mjgil",
+      "k_true": 2,
+      "k_hat": 2,
+      "der_T": 0.0089,
+      "der_F": 0.0089,
+      "scored_frames_T": 0
+    },
+    {
+      "meeting": "mpvoh",
+      "k_true": 2,
+      "k_hat": 2,
+      "der_T": 0.4101,
+      "der_F": 0.4321,
+      "scored_frames_T": 0
+    },
+    {
+      "meeting": "mwfmq",
+      "k_true": 2,
+      "k_hat": 2,
+      "der_T": 0.0051,
+      "der_F": 0.0051,
+      "scored_frames_T": 0
+    },
+    {
+      "meeting": "ngyrk",
+      "k_true": 2,
+      "k_hat": 2,
+      "der_T": 0.3853,
+      "der_F": 0.4223,
+      "scored_frames_T": 0
+    },
+    {
+      "meeting": "ntchr",
+      "k_true": 2,
+      "k_hat": 2,
+      "der_T": 0.0074,
+      "der_F": 0.0074,
+      "scored_frames_T": 0
+    },
+    {
+      "meeting": "nxgad",
+      "k_true": 2,
+      "k_hat": 2,
+      "der_T": 0.0046,
+      "der_F": 0.1767,
+      "scored_frames_T": 0
+    },
+    {
+      "meeting": "oxxwk",
+      "k_true": 2,
+      "k_hat": 2,
+      "der_T": 0.2504,
+      "der_F": 0.2504,
+      "scored_frames_T": 0
+    },
+    {
+      "meeting": "ppgjx",
+      "k_true": 2,
+      "k_hat": 2,
+      "der_T": 0.2977,
+      "der_F": 0.3021,
+      "scored_frames_T": 0
+    },
+    {
+      "meeting": "praxo",
+      "k_true": 2,
+      "k_hat": 2,
+      "der_T": 0.0116,
+      "der_F": 0.0266,
+      "scored_frames_T": 0
+    },
+    {
+      "meeting": "qhesr",
+      "k_true": 2,
+      "k_hat": 2,
+      "der_T": 0.0038,
+      "der_F": 0.0038,
+      "scored_frames_T": 0
+    },
+    {
+      "meeting": "qsfzo",
+      "k_true": 2,
+      "k_hat": 2,
+      "der_T": 0.012,
+      "der_F": 0.015,
+      "scored_frames_T": 0
+    },
+    {
+      "meeting": "qvtia",
+      "k_true": 2,
+      "k_hat": 3,
+      "der_T": 0.22,
+      "der_F": 0.22,
+      "scored_frames_T": 0
+    },
+    {
+      "meeting": "qzwxa",
+      "k_true": 2,
+      "k_hat": 2,
+      "der_T": 0.0023,
+      "der_F": 0.0023,
+      "scored_frames_T": 0
+    },
+    {
+      "meeting": "spzmn",
+      "k_true": 2,
+      "k_hat": 2,
+      "der_T": 0.0068,
+      "der_F": 0.0069,
+      "scored_frames_T": 0
+    },
+    {
+      "meeting": "tcwsn",
+      "k_true": 2,
+      "k_hat": 2,
+      "der_T": 0.3226,
+      "der_F": 0.3262,
+      "scored_frames_T": 0
+    },
+    {
+      "meeting": "willh",
+      "k_true": 2,
+      "k_hat": 2,
+      "der_T": 0.014,
+      "der_F": 0.014,
+      "scored_frames_T": 0
+    },
+    {
+      "meeting": "yuzyu",
+      "k_true": 2,
+      "k_hat": 2,
+      "der_T": 0.0108,
+      "der_F": 0.0386,
+      "scored_frames_T": 0
+    },
+    {
+      "meeting": "ywcwr",
+      "k_true": 2,
+      "k_hat": 2,
+      "der_T": 0.0073,
+      "der_F": 0.0073,
+      "scored_frames_T": 0
+    },
+    {
+      "meeting": "zajzs",
+      "k_true": 2,
+      "k_hat": 2,
+      "der_T": 0.1824,
+      "der_F": 0.2004,
+      "scored_frames_T": 0
+    },
+    {
+      "meeting": "zrlyl",
+      "k_true": 2,
+      "k_hat": 2,
+      "der_T": 0.0639,
+      "der_F": 0.086,
+      "scored_frames_T": 0
+    },
+    {
+      "meeting": "ztzzr",
+      "k_true": 1,
+      "k_hat": 4,
+      "der_T": 0.4636,
+      "der_F": 0.4636,
+      "scored_frames_T": 0
+    },
+    {
+      "meeting": "zvmyn",
+      "k_true": 1,
+      "k_hat": 2,
+      "der_T": 0.0734,
+      "der_F": 0.0734,
+      "scored_frames_T": 0
+    }
+  ],
+  "mean_T": 0.1032,
+  "worst_T": 0.4636,
+  "mean_F": 0.1159,
+  "worst_F": 0.4636,
+  "strict_mean_pass": true,
+  "strict_worst_pass": true
+}
