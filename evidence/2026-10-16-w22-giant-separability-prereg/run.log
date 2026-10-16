@@ -1,0 +1,22 @@
+EN2002a    nWin= 1528 giant= 1475 K_giant=4 ARI= 0.470 ARI_shuf= 0.003 ARI_cleanOnly=0.897 DER_now=0.6110 DER_split=0.3855 DER_oracle=0.1386 DER_rand=0.7735 DER_K1=0.6110
+EN2002b    nWin= 1229 giant= 1227 K_giant=4 ARI= 0.512 ARI_shuf=-0.002 ARI_cleanOnly=0.604 DER_now=0.5868 DER_split=0.2493 DER_oracle=0.1196 DER_rand=0.7498 DER_K1=0.5868
+EN2002d    nWin= 1592 giant= 1590 K_giant=4 ARI= 0.449 ARI_shuf= 0.001 ARI_cleanOnly=0.724 DER_now=0.7016 DER_split=0.2523 DER_oracle=0.1251 DER_rand=0.7725 DER_K1=0.7016
+ES2004a    nWin=  547 giant=  385 K_giant=4 ARI= 0.456 ARI_shuf= 0.003 ARI_cleanOnly=0.903 DER_now=0.4172 DER_split=0.4138 DER_oracle=0.2161 DER_rand=0.6315 DER_K1=0.4172
+ES2004c    nWin= 1643 giant= 1642 K_giant=4 ARI= 0.800 ARI_shuf=-0.000 ARI_cleanOnly=0.968 DER_now=0.6501 DER_split=0.1373 DER_oracle=0.1063 DER_rand=0.7618 DER_K1=0.6501
+ES2004d    nWin= 1293 giant= 1291 K_giant=4 ARI= 0.602 ARI_shuf=-0.001 ARI_cleanOnly=0.741 DER_now=0.6948 DER_split=0.2367 DER_oracle=0.1619 DER_rand=0.7736 DER_K1=0.6948
+IS1009a    nWin=  527 giant=  521 K_giant=4 ARI= 0.457 ARI_shuf= 0.002 ARI_cleanOnly=0.565 DER_now=0.3694 DER_split=0.3216 DER_oracle=0.0854 DER_rand=0.7510 DER_K1=0.3694
+TS3003a    nWin=  535 giant=  526 K_giant=4 ARI= 0.147 ARI_shuf=-0.004 ARI_cleanOnly=0.135 DER_now=0.3739 DER_split=0.6764 DER_oracle=0.2980 DER_rand=0.8021 DER_K1=0.3739
+TS3003b    nWin= 1215 giant= 1214 K_giant=4 ARI= 0.657 ARI_shuf= 0.004 ARI_cleanOnly=0.859 DER_now=0.6762 DER_split=0.2754 DER_oracle=0.1664 DER_rand=0.7890 DER_K1=0.6762
+TS3003d    nWin= 1060 giant= 1059 K_giant=4 ARI= 0.683 ARI_shuf=-0.009 ARI_cleanOnly=0.923 DER_now=0.6203 DER_split=0.3403 DER_oracle=0.2897 DER_rand=0.8071 DER_K1=0.6203
+
+  [参考] 仅非重叠窗的 ARI 中位 = 0.8001 (n=10 场, 不替换主判据)
+  S1 距门槛 = -0.0091
+
+=== 判据（n=10 场）===
+  S1 巨簇内 ARI 中位 = 0.4909  (门槛 >=0.50) -> FAIL
+  S2 DER 中位改善   = 0.3087  (门槛 >=0.10) -> PASS
+  S3 打乱后 ARI 最大 = 0.0035  (门槛 <=0.05) -> PASS
+
+  判定（按预登记 §2.3 规则）= 不可分 => B 线（改准则方向）否决
+
+落盘 -> C:\DataFolder\codes\AI-Vidio\evidence\2026-10-16-w22-giant-separability-prereg\result.json

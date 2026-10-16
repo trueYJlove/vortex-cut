@@ -1,0 +1,212 @@
+[
+  {
+    "meeting": "EN2002a",
+    "n_windows": 1528,
+    "giant_windows": 1475,
+    "k_giant": 4,
+    "ari_median": 0.4701,
+    "ari_seeds": [
+      0.3363,
+      0.4701,
+      0.4743,
+      0.4699,
+      0.4743
+    ],
+    "ari_clean_windows_only": 0.8968,
+    "ari_shuffled": 0.0028,
+    "der_current": 0.611,
+    "der_split": 0.3855,
+    "der_oracle": 0.1386,
+    "der_random": 0.7735,
+    "der_k1": 0.611
+  },
+  {
+    "meeting": "EN2002b",
+    "n_windows": 1229,
+    "giant_windows": 1227,
+    "k_giant": 4,
+    "ari_median": 0.5116,
+    "ari_seeds": [
+      0.5109,
+      0.5109,
+      0.5124,
+      0.5124,
+      0.5116
+    ],
+    "ari_clean_windows_only": 0.6035,
+    "ari_shuffled": -0.0022,
+    "der_current": 0.5868,
+    "der_split": 0.2493,
+    "der_oracle": 0.1196,
+    "der_random": 0.7498,
+    "der_k1": 0.5868
+  },
+  {
+    "meeting": "EN2002d",
+    "n_windows": 1592,
+    "giant_windows": 1590,
+    "k_giant": 4,
+    "ari_median": 0.4492,
+    "ari_seeds": [
+      0.4492,
+      0.4492,
+      0.4492,
+      0.4492,
+      0.4492
+    ],
+    "ari_clean_windows_only": 0.7236,
+    "ari_shuffled": 0.0015,
+    "der_current": 0.7016,
+    "der_split": 0.2523,
+    "der_oracle": 0.1251,
+    "der_random": 0.7725,
+    "der_k1": 0.7016
+  },
+  {
+    "meeting": "ES2004a",
+    "n_windows": 547,
+    "giant_windows": 385,
+    "k_giant": 4,
+    "ari_median": 0.4556,
+    "ari_seeds": [
+      0.4556,
+      0.4556,
+      0.4566,
+      0.455,
+      0.4566
+    ],
+    "ari_clean_windows_only": 0.903,
+    "ari_shuffled": 0.0027,
+    "der_current": 0.4172,
+    "der_split": 0.4138,
+    "der_oracle": 0.2161,
+    "der_random": 0.6315,
+    "der_k1": 0.4172
+  },
+  {
+    "meeting": "ES2004c",
+    "n_windows": 1643,
+    "giant_windows": 1642,
+    "k_giant": 4,
+    "ari_median": 0.7998,
+    "ari_seeds": [
+      0.7998,
+      0.7998,
+      0.7998,
+      0.7998,
+      0.7998
+    ],
+    "ari_clean_windows_only": 0.9679,
+    "ari_shuffled": -0.0,
+    "der_current": 0.6501,
+    "der_split": 0.1373,
+    "der_oracle": 0.1063,
+    "der_random": 0.7618,
+    "der_k1": 0.6501
+  },
+  {
+    "meeting": "ES2004d",
+    "n_windows": 1293,
+    "giant_windows": 1291,
+    "k_giant": 4,
+    "ari_median": 0.6019,
+    "ari_seeds": [
+      0.6014,
+      0.6019,
+      0.6035,
+      0.6019,
+      0.6035
+    ],
+    "ari_clean_windows_only": 0.7407,
+    "ari_shuffled": -0.0013,
+    "der_current": 0.6948,
+    "der_split": 0.2367,
+    "der_oracle": 0.1619,
+    "der_random": 0.7736,
+    "der_k1": 0.6948
+  },
+  {
+    "meeting": "IS1009a",
+    "n_windows": 527,
+    "giant_windows": 521,
+    "k_giant": 4,
+    "ari_median": 0.4567,
+    "ari_seeds": [
+      0.4604,
+      0.4567,
+      0.4567,
+      0.4567,
+      0.4567
+    ],
+    "ari_clean_windows_only": 0.5646,
+    "ari_shuffled": 0.0023,
+    "der_current": 0.3694,
+    "der_split": 0.3216,
+    "der_oracle": 0.0854,
+    "der_random": 0.751,
+    "der_k1": 0.3694
+  },
+  {
+    "meeting": "TS3003a",
+    "n_windows": 535,
+    "giant_windows": 526,
+    "k_giant": 4,
+    "ari_median": 0.147,
+    "ari_seeds": [
+      0.1503,
+      0.1581,
+      0.1424,
+      0.147,
+      0.1301
+    ],
+    "ari_clean_windows_only": 0.1352,
+    "ari_shuffled": -0.0041,
+    "der_current": 0.3739,
+    "der_split": 0.6764,
+    "der_oracle": 0.298,
+    "der_random": 0.8021,
+    "der_k1": 0.3739
+  },
+  {
+    "meeting": "TS3003b",
+    "n_windows": 1215,
+    "giant_windows": 1214,
+    "k_giant": 4,
+    "ari_median": 0.6568,
+    "ari_seeds": [
+      0.6568,
+      0.6568,
+      0.6044,
+      0.5929,
+      0.6568
+    ],
+    "ari_clean_windows_only": 0.8595,
+    "ari_shuffled": 0.0035,
+    "der_current": 0.6762,
+    "der_split": 0.2754,
+    "der_oracle": 0.1664,
+    "der_random": 0.789,
+    "der_k1": 0.6762
+  },
+  {
+    "meeting": "TS3003d",
+    "n_windows": 1060,
+    "giant_windows": 1059,
+    "k_giant": 4,
+    "ari_median": 0.6832,
+    "ari_seeds": [
+      0.6832,
+      0.6818,
+      0.6859,
+      0.6785,
+      0.6832
+    ],
+    "ari_clean_windows_only": 0.9235,
+    "ari_shuffled": -0.0085,
+    "der_current": 0.6203,
+    "der_split": 0.3403,
+    "der_oracle": 0.2897,
+    "der_random": 0.8071,
+    "der_k1": 0.6203
+  }
+]
