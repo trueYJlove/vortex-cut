@@ -1,0 +1,9 @@
+=== G1 璐熷悜瀵圭収鐙珛澶嶇幇 ===
+鏃ユ湡: 2026-10-16  HEAD: dd3dffd
+
+=== G1 负向对照独立复现（补丁 -> 跑测试 -> 回滚）===
+基线（未打补丁）: 31 passed in 24.06s
+NC1 去 INSERT 三列            -> 2 failed, 29 passed in 22.48s
+NC2 去摘要 DTO 三字段          -> 2 failed, 29 passed in 29.43s
+NC3 usable_for 加 multicam_switch -> 3 failed, 28 passed in 39.75s
+回滚后基线: 31 passed in 48.76s

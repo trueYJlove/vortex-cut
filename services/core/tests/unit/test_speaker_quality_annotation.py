@@ -16,9 +16,11 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from aivs_core.database import Database, json_dumps, utc_now
 from aivs_core.media import speaker_service as svc
@@ -91,17 +93,24 @@ class TestQualityAnnotation:
         assert summary["quality_status"] != "validated"
 
     def test_quality_status_check_constraint_rejects_unknown_value(self, tmp_path: Path) -> None:
-        """结构锁：`quality_status` 只接受两个取值（防拼写漂移）。"""
+        """结构锁：`quality_status` 只接受两个取值（防拼写漂移）。
+
+        ⚠️ 本用例的初版**恒真**（2026-10-16 修正）：它用 `raise AssertionError` 表达
+        "INSERT 不该成功"，却把该断言交给同一个 `except Exception` 捕获——
+        于是"CHECK 被移除"这一失败模式反而让用例**通过**（实测：移除 CHECK 后
+        `'bogus'` 可入库、用例仍绿）。现改为 `pytest.raises(sqlite3.IntegrityError)`：
+        约束缺失时**异常类型不符**，用例必红（复验见实施记录 §4）。
+        """
         db, _ = _service(tmp_path)
         now = utc_now()
         with db.connection() as con:
-            try:
+            with pytest.raises(sqlite3.IntegrityError) as excinfo:
                 con.execute(
                     "INSERT INTO speaker_diarizations(id,asset_id,source_fingerprint,"
                     "algorithm_version,status,turns_json,windows_json,quality_status,"
                     "created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
                     ("r2", "a1", "fp", 1, "ready", "[]", "[]", "bogus", now, now),
                 )
-                raise AssertionError("CHECK 未拦住非法 quality_status")
-            except Exception as exc:  # sqlite3.IntegrityError
-                assert "quality_status" in str(exc) or "CHECK" in str(exc).upper()
+        # 断言的是**约束名**，不是"message 里恰好出现 quality_status"——
+        # 后者会把任何提到该列的错误都算通过。
+        assert "quality_status" in str(excinfo.value)
