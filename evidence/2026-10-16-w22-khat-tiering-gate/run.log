@@ -1,0 +1,41 @@
+验证集（剩余未读）: 38 场
+  [1/38] abjxc    K_true=1 K̂=8 DER_T=0.4964 DER_F=0.4964 oracle=0.011 dur=68s
+  [2/38] akthc    K_true=2 K̂=2 DER_T=0.0230 DER_F=0.0230 oracle=0.023 dur=115s
+  [3/38] bkwns    K_true=2 K̂=2 DER_T=0.0062 DER_F=0.0062 oracle=0.0062 dur=68s
+  [4/38] bwzyf    K_true=4 K̂=2 DER_T=0.1546 DER_F=0.1546 oracle=0.0421 dur=80s
+  [5/38] cobal    K_true=2 K̂=2 DER_T=0.0107 DER_F=0.0107 oracle=0.0097 dur=76s
+  [6/38] exymw    K_true=5 K̂=6 DER_T=0.0507 DER_F=0.0507 oracle=0.0496 dur=116s
+  [7/38] fxgvy    K_true=2 K̂=2 DER_T=0.0090 DER_F=0.0139 oracle=0.0 dur=54s
+  [8/38] gwtwd    K_true=4 K̂=8 DER_T=0.0904 DER_F=0.1576 oracle=0.0022 dur=53s
+  [9/38] hiyis    K_true=2 K̂=2 DER_T=0.0008 DER_F=0.0008 oracle=0.0008 dur=87s
+  [10/38] hqyok    K_true=1 K̂=8 DER_T=0.7868 DER_F=0.7868 oracle=0.0364 dur=22s
+  [11/38] iqtde    K_true=4 K̂=4 DER_T=0.0019 DER_F=0.0019 oracle=0.0019 dur=110s
+  [12/38] jiqvr    K_true=3 K̂=2 DER_T=0.1249 DER_F=0.1593 oracle=0.0283 dur=84s
+  [13/38] jsmbi    K_true=5 K̂=5 DER_T=0.0432 DER_F=0.0432 oracle=0.0205 dur=112s
+  [14/38] jyirt    K_true=4 K̂=2 DER_T=0.1492 DER_F=0.1492 oracle=0.0225 dur=85s
+  [15/38] kctgl    K_true=2 K̂=2 DER_T=0.0288 DER_F=0.0289 oracle=0.0182 dur=106s
+  [16/38] lknjp    K_true=5 K̂=8 DER_T=0.1300 DER_F=0.1300 oracle=0.0155 dur=102s
+  [17/38] mevkw    K_true=3 K̂=2 DER_T=0.1482 DER_F=0.4005 oracle=0.0137 dur=102s
+  [18/38] oenox    K_true=2 K̂=2 DER_T=0.0038 DER_F=0.0038 oracle=0.0038 dur=77s
+  [19/38] plbbw    K_true=2 K̂=2 DER_T=0.0289 DER_F=0.0289 oracle=0.0233 dur=87s
+  [20/38] pqmho    K_true=1 K̂=7 DER_T=0.8387 DER_F=0.8387 oracle=0.127 dur=139s
+  [21/38] qppll    K_true=1 K̂=2 DER_T=0.0680 DER_F=0.0680 oracle=0.005 dur=70s
+  [22/38] qpylu    K_true=2 K̂=2 DER_T=0.0432 DER_F=0.0432 oracle=0.0432 dur=45s
+  [23/38] qrzjk    K_true=1 K̂=7 DER_T=0.4271 DER_F=0.4271 oracle=0.0 dur=40s
+  [24/38] qydmg    K_true=1 K̂=2 DER_T=0.0090 DER_F=0.0090 oracle=0.0 dur=113s
+  [25/38] rtvuw    K_true=3 K̂=4 DER_T=0.2821 DER_F=0.3715 oracle=0.0389 dur=57s
+  [26/38] sikkm    K_true=1 K̂=7 DER_T=0.3556 DER_F=0.3556 oracle=0.0 dur=90s
+  [27/38] syiwe    K_true=3 K̂=4 DER_T=0.0494 DER_F=0.0494 oracle=0.0153 dur=69s
+  [28/38] szsyz    K_true=3 K̂=2 DER_T=0.0228 DER_F=0.0336 oracle=0.002 dur=49s
+  [29/38] tfvyr    K_true=1 K̂=7 DER_T=0.7346 DER_F=0.7346 oracle=0.0269 dur=28s
+  [30/38] tucrg    K_true=3 K̂=2 DER_T=0.8010 DER_F=0.8010 oracle=0.5306 dur=26s
+  [31/38] usbgm    K_true=1 K̂=2 DER_T=0.0177 DER_F=0.0177 oracle=0.0048 dur=58s
+  [32/38] vysqj    K_true=1 K̂=3 DER_T=0.1905 DER_F=0.1905 oracle=0.0 dur=89s
+  [33/38] whmpa    K_true=2 K̂=2 DER_T=0.0038 DER_F=0.0088 oracle=0.0038 dur=54s
+  [34/38] wjhgf    K_true=5 K̂=8 DER_T=0.3757 DER_F=0.5083 oracle=0.0214 dur=92s
+  [35/38] wmori    K_true=2 K̂=2 DER_T=0.0142 DER_F=0.0142 oracle=0.0142 dur=120s
+  [36/38] xiglo    K_true=3 K̂=3 DER_T=0.0247 DER_F=0.0273 oracle=0.0247 dur=111s
+  [37/38] ysgbf    K_true=1 K̂=2 DER_T=0.0725 DER_F=0.0725 oracle=0.0725 dur=120s
+  [38/38] zfkap    K_true=4 K̂=4 DER_T=0.0019 DER_F=0.0019 oracle=0.0019 dur=106s
+
+完成 38 场 -> C:\DataFolder\codes\AI-Vidio\evidence\2026-10-16-w22-khat-tiering-gate\result.json

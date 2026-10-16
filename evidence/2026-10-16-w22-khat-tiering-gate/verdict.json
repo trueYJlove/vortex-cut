@@ -1,0 +1,58 @@
+{
+  "n": 38,
+  "n_khat_le2": 21,
+  "n_khat_ge3": 17,
+  "V1": true,
+  "V2": false,
+  "V3": true,
+  "V4": false,
+  "N2": false,
+  "N3": false,
+  "mean_T_lo": 0.0829,
+  "worst_T_lo": 0.801,
+  "mean_F_lo": 0.0975,
+  "worst_F_lo": 0.801,
+  "mean_T_hi": 0.287,
+  "worst_T_hi": 0.8387,
+  "N1_multi_share_in_lowk": 0.2857,
+  "N1_detail": [
+    {
+      "meeting": "bwzyf",
+      "k_true": 4,
+      "der_T": 0.1546,
+      "der_F": 0.1546
+    },
+    {
+      "meeting": "jiqvr",
+      "k_true": 3,
+      "der_T": 0.1249,
+      "der_F": 0.1593
+    },
+    {
+      "meeting": "jyirt",
+      "k_true": 4,
+      "der_T": 0.1492,
+      "der_F": 0.1492
+    },
+    {
+      "meeting": "mevkw",
+      "k_true": 3,
+      "der_T": 0.1482,
+      "der_F": 0.4005
+    },
+    {
+      "meeting": "szsyz",
+      "k_true": 3,
+      "der_T": 0.0228,
+      "der_F": 0.0336
+    },
+    {
+      "meeting": "tucrg",
+      "k_true": 3,
+      "der_T": 0.801,
+      "der_F": 0.801
+    }
+  ],
+  "N2_over_0.60_count": 1,
+  "verdict": "分档不可立门"
+}
