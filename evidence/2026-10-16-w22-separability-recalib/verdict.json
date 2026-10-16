@@ -1,0 +1,28 @@
+{
+  "n_total": 45,
+  "n_valid": 39,
+  "n_skipped_k_giant_1": 6,
+  "skipped": [
+    "rxgun",
+    "tguxv",
+    "tlprc",
+    "uvnmy",
+    "xvllq",
+    "zyffh"
+  ],
+  "T1_worst_split": 0.4009,
+  "T1_threshold": 0.6,
+  "T1_pass": true,
+  "T2_mean_split": 0.1791,
+  "T2_threshold": 0.4,
+  "T2_pass": true,
+  "nc1_mean_not_split": 0.1886,
+  "nc1_worst_not_split": 0.5497,
+  "oracle_mean": 0.0253,
+  "oracle_worst": 0.1843,
+  "improved": 22,
+  "equal": 0,
+  "worse": 17,
+  "median_improvement": 0.0323,
+  "verdict": "可分且可产品化"
+}
