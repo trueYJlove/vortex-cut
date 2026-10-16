@@ -31,7 +31,7 @@
 
 | # | 门 §3 验收项 | 落实 | 证据（可复现命令） |
 |---|---|---|---|
-| **A1** | 三字段随每次落库写出 | ✅ **成立** | `test_annotation_is_written_on_every_insert`；负向对照 NC1 见 §3 |
+| **A1** | 三字段随每次落库写出 | ✅ **成立** | `test_annotation_is_written_on_every_insert`；负向对照 NC1 见 §3（⚠️ **口径**：NC1 的 2 红中 1 红属 A3 的用例，**A1 的净对照只有 1 红**） |
 | **A2** | 标注**不可静默缺省**（历史行回填安全侧） | ✅ **成立** | `test_annotation_default_is_safe_side_for_existing_rows`（**绕过服务的裸 INSERT**，断言列默认值 = `unvalidated`） |
 | **A3** | 摘要/DTO **必须带出**（不得只存在于表里） | ✅ **成立** | `test_annotation_is_surfaced_in_summary`；负向对照 NC2 见 §3 |
 | **A4** | **下游拒绝有测试** | ❌ **未落地（本门只登记约束）** | **已独立登记为 `STATUS.md` §4 P132**——门 §2/§7 明确该项随 **W2.3 立项门**落地；⚠️ 在 P132 关闭前，**W2.3 不得开工消费 turn** |
@@ -77,10 +77,19 @@ Rule 3「验收项必须可追踪」的落点——埋在已完成行里的未�
 `pytest.raises(sqlite3.IntegrityError)` 并断言约束名；复验：**移除 CHECK ⇒ 1 failed**
 （`evidence/.../verify_check_fix.txt`）。
 
-**同类模式扫描**：全仓 `raise AssertionError` + `except Exception` 共 **2 处**——
-本处（已修）与 `test_projects_sync_paths.py:83`（**不同型**：其断言是「应抛 DomainError」，
+**同类模式扫描**（严格 AST 扫描，非 grep）：全仓排除 `.venv/.tmp/node_modules` 后，
+满足「`try` 块内 `raise AssertionError` **且**被宽泛 `except Exception/BaseException` 捕获」
+的共 **2 处**——本处（**已修**）与 `test_projects_sync_paths.py:81`。
+
+> ⚠️ **口径说明（2026-10-16 复核修正）**：曾有一版复核报告称"全仓共 3 处"，并把
+> `test_stage4c_shot_list_api.py:232,241` 列为漏报。**经核实该判定不成立**——
+> 那两处的 `raise AssertionError` 位于 `try/except/else` 的 **`else:` 分支**（即"未抛异常时
+> 才断言"），这恰是**正确写法**，异常不会被吞。该假阳性源于用 grep 匹配而非 AST 解析。
+> 本文件以**严格 AST 扫描**（独立复现，输出 1 处残留）为准。
+
+`test_projects_sync_paths.py:81` 属**不同型**：其断言是「应抛 DomainError」，
 而后续 `assert exc.code == ...` 才是真判据，异常类型错时属性缺失会失败 ⇒ 未判定为缺陷，
-本轮不改，仅记录以便后续复核）。
+本轮不改，仅记录以便后续复核。
 
 **影响面**：仅测试，零生产代码行为变化。
 
@@ -88,11 +97,17 @@ Rule 3「验收项必须可追踪」的落点——埋在已完成行里的未�
 
 ## 5. 回归与边界
 
-| 项 | 读数 |
+| 项 | 读数（口径已注明） |
 |---|---|
-| 说话人四套件 + 一致性 | **41 passed**（本轮复现，22.33 s） |
+| **说话人四套件**（quality_annotation + storage + algorithm + vad） | **67 passed**（25.7 s） |
+| **一致性 + 上述四套件** | **77 passed**（26.3 s） |
+| **一致性 + 说话人前两套件**（与实现时口径同） | **41 passed**（22.3 s） |
 | NC 复现脚本回滚后 | **31 passed**（工作树逐字节等于 HEAD） |
 | 集成套件 `test_speaker_api.py` | **2 passed + 8 errors** ⇒ ⚠️ **既有环境缺字体资产**（`.venv/.../_internal/fonts/bundle.json` 缺失 → `RENDER_FONT_MISSING`），**与本次改动无关**（未打补丁时同样 8 errors）；**如实记录，未修**（属环境/打包面，不属本切片） |
+
+> ⚠️ **口径更正（2026-10-16）**：本表初版把 `41` 写成"说话人四套件 + 一致性"，**该表述错误**——
+> `41` 实为"一致性 + 说话人**前两**套件"；四套件是 `67`、四套件 + 一致性是 `77`。
+> 三个数字均已由独立复核逐项复跑确认，现按各自口径分别列出。
 
 **边界（如实）**：
 - 本切片**零算法改动、零契约破坏性变更、零 egress**；`usable_for` 为新增字段，向后兼容；

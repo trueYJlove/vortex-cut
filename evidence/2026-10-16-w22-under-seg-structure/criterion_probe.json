@@ -1,0 +1,146 @@
+[
+  {
+    "meeting": "EN2002a",
+    "k_hat": 2,
+    "k_true": 4,
+    "sil_curve": {
+      "2": 0.2886,
+      "3": 0.2802,
+      "5": 0.1981,
+      "6": 0.1965
+    },
+    "argmax_k": 2,
+    "dom_share": 0.9653,
+    "big_cluster_mean_dist": 0.451
+  },
+  {
+    "meeting": "EN2002b",
+    "k_hat": 2,
+    "k_true": 4,
+    "sil_curve": {
+      "2": 0.428,
+      "3": 0.3224,
+      "4": 0.2648,
+      "6": 0.2195,
+      "7": 0.1887
+    },
+    "argmax_k": 2,
+    "dom_share": 0.9984,
+    "big_cluster_mean_dist": 0.4341
+  },
+  {
+    "meeting": "EN2002d",
+    "k_hat": 2,
+    "k_true": 4,
+    "sil_curve": {
+      "2": 0.3741,
+      "3": 0.2378,
+      "5": 0.1661,
+      "6": 0.1531,
+      "7": 0.1367
+    },
+    "argmax_k": 2,
+    "dom_share": 0.9987,
+    "big_cluster_mean_dist": 0.4654
+  },
+  {
+    "meeting": "ES2004a",
+    "k_hat": 2,
+    "k_true": 4,
+    "sil_curve": {
+      "2": 0.2915,
+      "3": 0.2467,
+      "6": 0.257,
+      "8": 0.2266
+    },
+    "argmax_k": 2,
+    "dom_share": 0.7038,
+    "big_cluster_mean_dist": 0.4011
+  },
+  {
+    "meeting": "ES2004c",
+    "k_hat": 2,
+    "k_true": 4,
+    "sil_curve": {
+      "2": 0.3708,
+      "3": 0.3249,
+      "4": 0.2881,
+      "6": 0.3007,
+      "8": 0.3309
+    },
+    "argmax_k": 2,
+    "dom_share": 0.9994,
+    "big_cluster_mean_dist": 0.4286
+  },
+  {
+    "meeting": "ES2004d",
+    "k_hat": 2,
+    "k_true": 4,
+    "sil_curve": {
+      "2": 0.323,
+      "3": 0.3141,
+      "5": 0.2546,
+      "6": 0.2207,
+      "7": 0.2254,
+      "8": 0.217
+    },
+    "argmax_k": 2,
+    "dom_share": 0.9985,
+    "big_cluster_mean_dist": 0.4364
+  },
+  {
+    "meeting": "IS1009a",
+    "k_hat": 2,
+    "k_true": 4,
+    "sil_curve": {
+      "2": 0.2841,
+      "3": 0.2222,
+      "4": 0.215,
+      "6": 0.2031
+    },
+    "argmax_k": 2,
+    "dom_share": 0.9886,
+    "big_cluster_mean_dist": 0.5535
+  },
+  {
+    "meeting": "TS3003a",
+    "k_hat": 2,
+    "k_true": 4,
+    "sil_curve": {
+      "2": 0.3324,
+      "5": 0.1321,
+      "6": 0.122,
+      "7": 0.0899
+    },
+    "argmax_k": 2,
+    "dom_share": 0.9832,
+    "big_cluster_mean_dist": 0.2718
+  },
+  {
+    "meeting": "TS3003b",
+    "k_hat": 2,
+    "k_true": 4,
+    "sil_curve": {
+      "2": 0.3204,
+      "4": 0.1452,
+      "7": 0.1671,
+      "8": 0.1401
+    },
+    "argmax_k": 2,
+    "dom_share": 0.9992,
+    "big_cluster_mean_dist": 0.3021
+  },
+  {
+    "meeting": "TS3003d",
+    "k_hat": 2,
+    "k_true": 4,
+    "sil_curve": {
+      "2": 0.2183,
+      "3": 0.1618,
+      "7": 0.0857
+    },
+    "argmax_k": 2,
+    "dom_share": 0.9991,
+    "big_cluster_mean_dist": 0.4125
+  }
+]

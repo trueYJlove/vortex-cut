@@ -1,0 +1,28 @@
+AMI 欠分割场: 10
+
+meeting    Khat  Ktru    sil@2   sil@Kt  argmaxK     dom  bigCluD
+-----------------------------------------------------------------
+EN2002a       2     4   0.2886      nan        2  0.9653   0.4510
+EN2002b       2     4   0.4280   0.2648        2  0.9984   0.4341
+EN2002d       2     4   0.3741      nan        2  0.9987   0.4654
+ES2004a       2     4   0.2915      nan        2  0.7038   0.4011
+ES2004c       2     4   0.3708   0.2881        2  0.9994   0.4286
+ES2004d       2     4   0.3230      nan        2  0.9985   0.4364
+IS1009a       2     4   0.2841   0.2150        2  0.9886   0.5535
+TS3003a       2     4   0.3324      nan        2  0.9832   0.2718
+TS3003b       2     4   0.3204   0.1452        2  0.9992   0.3021
+TS3003d       2     4   0.2183      nan        2  0.9991   0.4125
+
+落盘 10 行 -> C:\DataFolder\codes\AI-Vidio\evidence\2026-10-16-w22-under-seg-structure\criterion_probe.json
+
+准则方向检查：sil(2) > sil(K_true) 的场次 = 10/10
+   EN2002a: sil(2)=0.2886 > sil(K_true=4)=None
+   EN2002b: sil(2)=0.428 > sil(K_true=4)=0.2648
+   EN2002d: sil(2)=0.3741 > sil(K_true=4)=None
+   ES2004a: sil(2)=0.2915 > sil(K_true=4)=None
+   ES2004c: sil(2)=0.3708 > sil(K_true=4)=0.2881
+   ES2004d: sil(2)=0.323 > sil(K_true=4)=None
+   IS1009a: sil(2)=0.2841 > sil(K_true=4)=0.215
+   TS3003a: sil(2)=0.3324 > sil(K_true=4)=None
+   TS3003b: sil(2)=0.3204 > sil(K_true=4)=0.1452
+   TS3003d: sil(2)=0.2183 > sil(K_true=4)=None
