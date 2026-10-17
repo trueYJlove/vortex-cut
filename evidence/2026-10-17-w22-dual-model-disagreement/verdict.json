@@ -1,0 +1,33 @@
+{
+  "n_pos": 9,
+  "n_neg": 26,
+  "signals": {
+    "gap": {
+      "auc": 0.6282,
+      "best_threshold": 5,
+      "best_recall": 0.3333333333333333,
+      "best_fpr": 0.11538461538461539
+    },
+    "flip": {
+      "auc": 0.547,
+      "best_threshold": null,
+      "best_recall": null,
+      "best_fpr": null
+    },
+    "gap_norm": {
+      "auc": 0.6346,
+      "best_threshold": 0.7142857142857143,
+      "best_recall": 0.3333333333333333,
+      "best_fpr": 0.11538461538461539
+    }
+  },
+  "baseline_kcam_le2": {
+    "recall": 0.3333,
+    "fpr": 0.6154
+  },
+  "D1": false,
+  "D2": false,
+  "D3": true,
+  "D4": false,
+  "verdict": "VETO"
+}
