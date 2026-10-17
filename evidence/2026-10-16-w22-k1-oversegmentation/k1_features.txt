@@ -1,0 +1,29 @@
+K_true=1: n=11   K_true=2: n=11
+
+=== 各信号在两组上的分布（看是否重叠）===
+
+  Sa_silhouette_k2
+    Kt=1: min=  0.1112 中位=  0.1907 max=  0.4137
+    Kt=2: min=  0.1307 中位=  0.3718 max=  0.5676
+    分布重叠: True
+
+  Sb_centroid_dist
+    Kt=1: min=  0.0619 中位=  0.1101 max=  0.2700
+    Kt=2: min=  0.0672 中位=  0.3258 max=  0.5958
+    分布重叠: True
+
+  Sc_share_ratio
+    Kt=1: min=  0.5000 中位=  0.7222 max=  0.9655
+    Kt=2: min=  0.2241 中位=  0.7586 max=  0.9231
+    分布重叠: True
+
+  Sd_n_windows
+    Kt=1: min= 12.0000 中位= 62.0000 max=112.0000
+    Kt=2: min= 27.0000 中位= 74.0000 max=107.0000
+    分布重叠: True
+
+=== 若硬取单一阈值，最佳可能的区分（仍会重叠）===
+  Sa_silhouette_k2: 最佳 = 命中 10/11, 假阳 4, 阈值=0.2376
+  Sc_share_ratio: 最佳 = 命中 3/11, 假阳 1, 阈值=0.9375
+
+落盘 -> k1_features.json
