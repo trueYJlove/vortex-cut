@@ -1,0 +1,42 @@
+配对场次: 37（窗集合直接复用 P136 落库值）
+  campplus: dim=192
+  resnet34: dim=256
+  [1/37] abjxc    Kt=1 CAM++: K̂=8 DER=0.4964 | RES: K̂=2 DER=0.1268
+  [2/37] akthc    Kt=2 CAM++: K̂=2 DER=0.023 | RES: K̂=2 DER=0.1546
+  [3/37] bkwns    Kt=2 CAM++: K̂=2 DER=0.0062 | RES: K̂=2 DER=0.0062
+  [4/37] bwzyf    Kt=4 CAM++: K̂=2 DER=0.1546 | RES: K̂=4 DER=0.2848
+  [5/37] cobal    Kt=2 CAM++: K̂=2 DER=0.0107 | RES: K̂=2 DER=0.1705
+  [6/37] exymw    Kt=5 CAM++: K̂=6 DER=0.0507 | RES: K̂=2 DER=0.727
+  [7/37] fxgvy    Kt=2 CAM++: K̂=2 DER=0.009 | RES: K̂=2 DER=0.4096
+  [8/37] gwtwd    Kt=4 CAM++: K̂=8 DER=0.0904 | RES: K̂=2 DER=0.4441
+  [9/37] hiyis    Kt=2 CAM++: K̂=2 DER=0.0008 | RES: K̂=3 DER=0.0245
+  [10/37] hqyok    Kt=1 CAM++: K̂=8 DER=0.7868 | RES: K̂=2 DER=0.1133
+  [11/37] iqtde    Kt=4 CAM++: K̂=4 DER=0.0019 | RES: K̂=5 DER=0.3569
+  [12/37] jiqvr    Kt=3 CAM++: K̂=2 DER=0.1249 | RES: K̂=2 DER=0.3346
+  [13/37] jsmbi    Kt=5 CAM++: K̂=5 DER=0.0432 | RES: K̂=4 DER=0.5504
+  [14/37] jyirt    Kt=4 CAM++: K̂=2 DER=0.1492 | RES: K̂=2 DER=0.4036
+  [15/37] kctgl    Kt=2 CAM++: K̂=2 DER=0.0288 | RES: K̂=2 DER=0.465
+  [16/37] lknjp    Kt=5 CAM++: K̂=8 DER=0.13 | RES: K̂=2 DER=0.6641
+  [17/37] mevkw    Kt=3 CAM++: K̂=2 DER=0.1482 | RES: K̂=3 DER=0.185
+  [18/37] oenox    Kt=2 CAM++: K̂=2 DER=0.0038 | RES: K̂=3 DER=0.0336
+  [19/37] plbbw    Kt=2 CAM++: K̂=2 DER=0.0289 | RES: K̂=2 DER=0.0372
+  [20/37] pqmho    Kt=1 CAM++: K̂=7 DER=0.8387 | RES: K̂=7 DER=0.8013
+  [21/37] qppll    Kt=1 CAM++: K̂=2 DER=0.068 | RES: K̂=6 DER=0.2887
+  [22/37] qpylu    Kt=2 CAM++: K̂=2 DER=0.0432 | RES: K̂=3 DER=0.2218
+  [23/37] qrzjk    Kt=1 CAM++: K̂=7 DER=0.4271 | RES: K̂=2 DER=0.0947
+  [24/37] qydmg    Kt=1 CAM++: K̂=2 DER=0.009 | RES: K̂=None DER=None
+  [25/37] rtvuw    Kt=3 CAM++: K̂=4 DER=0.2821 | RES: K̂=2 DER=0.4446
+  [26/37] sikkm    Kt=1 CAM++: K̂=7 DER=0.3556 | RES: K̂=3 DER=0.0502
+  [27/37] syiwe    Kt=3 CAM++: K̂=4 DER=0.0494 | RES: K̂=2 DER=0.597
+  [28/37] szsyz    Kt=3 CAM++: K̂=2 DER=0.0228 | RES: K̂=2 DER=0.0228
+  [29/37] tfvyr    Kt=1 CAM++: K̂=7 DER=0.7346 | RES: K̂=None DER=None
+  [30/37] usbgm    Kt=1 CAM++: K̂=2 DER=0.0177 | RES: K̂=2 DER=0.0177
+  [31/37] vysqj    Kt=1 CAM++: K̂=3 DER=0.1905 | RES: K̂=2 DER=0.1547
+  [32/37] whmpa    Kt=2 CAM++: K̂=2 DER=0.0038 | RES: K̂=2 DER=0.3422
+  [33/37] wjhgf    Kt=5 CAM++: K̂=8 DER=0.3757 | RES: K̂=2 DER=0.4833
+  [34/37] wmori    Kt=2 CAM++: K̂=2 DER=0.0142 | RES: K̂=2 DER=0.4512
+  [35/37] xiglo    Kt=3 CAM++: K̂=3 DER=0.0247 | RES: K̂=2 DER=0.1414
+  [36/37] ysgbf    Kt=1 CAM++: K̂=2 DER=0.0725 | RES: K̂=2 DER=0.0725
+  [37/37] zfkap    Kt=4 CAM++: K̂=4 DER=0.0019 | RES: K̂=8 DER=0.0823
+
+完成 37 场 -> result.json

@@ -1,0 +1,22 @@
+{
+  "n_paired": 35,
+  "all": {
+    "campplus_mean": 0.145,
+    "campplus_worst": 0.8387,
+    "resnet34_mean": 0.2788,
+    "resnet34_worst": 0.8013,
+    "delta_mean": -0.1338,
+    "better": 6,
+    "worse": 25,
+    "equal": 4
+  },
+  "k1_overseg_campplus": 6,
+  "k1_overseg_resnet34": 3,
+  "k1_n": 9,
+  "ktrue1": {
+    "campplus_mean": 0.3615,
+    "campplus_worst": 0.8387,
+    "resnet34_mean": 0.1911,
+    "resnet34_worst": 0.8013
+  }
+}

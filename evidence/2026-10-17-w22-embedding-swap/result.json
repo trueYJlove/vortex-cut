@@ -1,0 +1,557 @@
+[
+  {
+    "meeting": "abjxc",
+    "k_true": 1,
+    "n_windows": 62,
+    "campplus": {
+      "k": 8,
+      "der": 0.4964,
+      "tau": 0.42
+    },
+    "resnet34": {
+      "k": 2,
+      "der": 0.1268,
+      "tau": 0.28
+    }
+  },
+  {
+    "meeting": "akthc",
+    "k_true": 2,
+    "n_windows": 107,
+    "campplus": {
+      "k": 2,
+      "der": 0.023,
+      "tau": 0.54
+    },
+    "resnet34": {
+      "k": 2,
+      "der": 0.1546,
+      "tau": 0.26
+    }
+  },
+  {
+    "meeting": "bkwns",
+    "k_true": 2,
+    "n_windows": 48,
+    "campplus": {
+      "k": 2,
+      "der": 0.0062,
+      "tau": 0.4
+    },
+    "resnet34": {
+      "k": 2,
+      "der": 0.0062,
+      "tau": 0.24
+    }
+  },
+  {
+    "meeting": "bwzyf",
+    "k_true": 4,
+    "n_windows": 65,
+    "campplus": {
+      "k": 2,
+      "der": 0.1546,
+      "tau": 0.66
+    },
+    "resnet34": {
+      "k": 4,
+      "der": 0.2848,
+      "tau": 0.32
+    }
+  },
+  {
+    "meeting": "cobal",
+    "k_true": 2,
+    "n_windows": 74,
+    "campplus": {
+      "k": 2,
+      "der": 0.0107,
+      "tau": 0.5
+    },
+    "resnet34": {
+      "k": 2,
+      "der": 0.1705,
+      "tau": 0.24
+    }
+  },
+  {
+    "meeting": "exymw",
+    "k_true": 5,
+    "n_windows": 88,
+    "campplus": {
+      "k": 6,
+      "der": 0.0507,
+      "tau": 0.6
+    },
+    "resnet34": {
+      "k": 2,
+      "der": 0.727,
+      "tau": 0.3
+    }
+  },
+  {
+    "meeting": "fxgvy",
+    "k_true": 2,
+    "n_windows": 51,
+    "campplus": {
+      "k": 2,
+      "der": 0.009,
+      "tau": 0.54
+    },
+    "resnet34": {
+      "k": 2,
+      "der": 0.4096,
+      "tau": 0.24
+    }
+  },
+  {
+    "meeting": "gwtwd",
+    "k_true": 4,
+    "n_windows": 52,
+    "campplus": {
+      "k": 8,
+      "der": 0.0904,
+      "tau": 0.46
+    },
+    "resnet34": {
+      "k": 2,
+      "der": 0.4441,
+      "tau": 0.32
+    }
+  },
+  {
+    "meeting": "hiyis",
+    "k_true": 2,
+    "n_windows": 85,
+    "campplus": {
+      "k": 2,
+      "der": 0.0008,
+      "tau": 0.44
+    },
+    "resnet34": {
+      "k": 3,
+      "der": 0.0245,
+      "tau": 0.28
+    }
+  },
+  {
+    "meeting": "hqyok",
+    "k_true": 1,
+    "n_windows": 20,
+    "campplus": {
+      "k": 8,
+      "der": 0.7868,
+      "tau": 0.28
+    },
+    "resnet34": {
+      "k": 2,
+      "der": 0.1133,
+      "tau": 0.2
+    }
+  },
+  {
+    "meeting": "iqtde",
+    "k_true": 4,
+    "n_windows": 108,
+    "campplus": {
+      "k": 4,
+      "der": 0.0019,
+      "tau": 0.54
+    },
+    "resnet34": {
+      "k": 5,
+      "der": 0.3569,
+      "tau": 0.2
+    }
+  },
+  {
+    "meeting": "jiqvr",
+    "k_true": 3,
+    "n_windows": 76,
+    "campplus": {
+      "k": 2,
+      "der": 0.1249,
+      "tau": 0.6
+    },
+    "resnet34": {
+      "k": 2,
+      "der": 0.3346,
+      "tau": 0.28
+    }
+  },
+  {
+    "meeting": "jsmbi",
+    "k_true": 5,
+    "n_windows": 102,
+    "campplus": {
+      "k": 5,
+      "der": 0.0432,
+      "tau": 0.56
+    },
+    "resnet34": {
+      "k": 4,
+      "der": 0.5504,
+      "tau": 0.22
+    }
+  },
+  {
+    "meeting": "jyirt",
+    "k_true": 4,
+    "n_windows": 83,
+    "campplus": {
+      "k": 2,
+      "der": 0.1492,
+      "tau": 0.66
+    },
+    "resnet34": {
+      "k": 2,
+      "der": 0.4036,
+      "tau": 0.42
+    }
+  },
+  {
+    "meeting": "kctgl",
+    "k_true": 2,
+    "n_windows": 97,
+    "campplus": {
+      "k": 2,
+      "der": 0.0288,
+      "tau": 0.6
+    },
+    "resnet34": {
+      "k": 2,
+      "der": 0.465,
+      "tau": 0.22
+    }
+  },
+  {
+    "meeting": "lknjp",
+    "k_true": 5,
+    "n_windows": 67,
+    "campplus": {
+      "k": 8,
+      "der": 0.13,
+      "tau": 0.48
+    },
+    "resnet34": {
+      "k": 2,
+      "der": 0.6641,
+      "tau": 0.36
+    }
+  },
+  {
+    "meeting": "mevkw",
+    "k_true": 3,
+    "n_windows": 90,
+    "campplus": {
+      "k": 2,
+      "der": 0.1482,
+      "tau": 0.56
+    },
+    "resnet34": {
+      "k": 3,
+      "der": 0.185,
+      "tau": 0.28
+    }
+  },
+  {
+    "meeting": "oenox",
+    "k_true": 2,
+    "n_windows": 71,
+    "campplus": {
+      "k": 2,
+      "der": 0.0038,
+      "tau": 0.42
+    },
+    "resnet34": {
+      "k": 3,
+      "der": 0.0336,
+      "tau": 0.28
+    }
+  },
+  {
+    "meeting": "plbbw",
+    "k_true": 2,
+    "n_windows": 75,
+    "campplus": {
+      "k": 2,
+      "der": 0.0289,
+      "tau": 0.4
+    },
+    "resnet34": {
+      "k": 2,
+      "der": 0.0372,
+      "tau": 0.2
+    }
+  },
+  {
+    "meeting": "pqmho",
+    "k_true": 1,
+    "n_windows": 12,
+    "campplus": {
+      "k": 7,
+      "der": 0.8387,
+      "tau": 0.24
+    },
+    "resnet34": {
+      "k": 7,
+      "der": 0.8013,
+      "tau": 0.24
+    }
+  },
+  {
+    "meeting": "qppll",
+    "k_true": 1,
+    "n_windows": 66,
+    "campplus": {
+      "k": 2,
+      "der": 0.068,
+      "tau": 0.44
+    },
+    "resnet34": {
+      "k": 6,
+      "der": 0.2887,
+      "tau": 0.24
+    }
+  },
+  {
+    "meeting": "qpylu",
+    "k_true": 2,
+    "n_windows": 27,
+    "campplus": {
+      "k": 2,
+      "der": 0.0432,
+      "tau": 0.42
+    },
+    "resnet34": {
+      "k": 3,
+      "der": 0.2218,
+      "tau": 0.2
+    }
+  },
+  {
+    "meeting": "qrzjk",
+    "k_true": 1,
+    "n_windows": 38,
+    "campplus": {
+      "k": 7,
+      "der": 0.4271,
+      "tau": 0.32
+    },
+    "resnet34": {
+      "k": 2,
+      "der": 0.0947,
+      "tau": 0.2
+    }
+  },
+  {
+    "meeting": "qydmg",
+    "k_true": 1,
+    "n_windows": 112,
+    "campplus": {
+      "k": 2,
+      "der": 0.009,
+      "tau": 0.42
+    },
+    "resnet34": {
+      "k": null,
+      "der": null,
+      "tau": null
+    }
+  },
+  {
+    "meeting": "rtvuw",
+    "k_true": 3,
+    "n_windows": 53,
+    "campplus": {
+      "k": 4,
+      "der": 0.2821,
+      "tau": 0.46
+    },
+    "resnet34": {
+      "k": 2,
+      "der": 0.4446,
+      "tau": 0.24
+    }
+  },
+  {
+    "meeting": "sikkm",
+    "k_true": 1,
+    "n_windows": 62,
+    "campplus": {
+      "k": 7,
+      "der": 0.3556,
+      "tau": 0.36
+    },
+    "resnet34": {
+      "k": 3,
+      "der": 0.0502,
+      "tau": 0.24
+    }
+  },
+  {
+    "meeting": "syiwe",
+    "k_true": 3,
+    "n_windows": 61,
+    "campplus": {
+      "k": 4,
+      "der": 0.0494,
+      "tau": 0.6
+    },
+    "resnet34": {
+      "k": 2,
+      "der": 0.597,
+      "tau": 0.22
+    }
+  },
+  {
+    "meeting": "szsyz",
+    "k_true": 3,
+    "n_windows": 48,
+    "campplus": {
+      "k": 2,
+      "der": 0.0228,
+      "tau": 0.5
+    },
+    "resnet34": {
+      "k": 2,
+      "der": 0.0228,
+      "tau": 0.22
+    }
+  },
+  {
+    "meeting": "tfvyr",
+    "k_true": 1,
+    "n_windows": 26,
+    "campplus": {
+      "k": 7,
+      "der": 0.7346,
+      "tau": 0.24
+    },
+    "resnet34": {
+      "k": null,
+      "der": null,
+      "tau": null
+    }
+  },
+  {
+    "meeting": "usbgm",
+    "k_true": 1,
+    "n_windows": 57,
+    "campplus": {
+      "k": 2,
+      "der": 0.0177,
+      "tau": 0.42
+    },
+    "resnet34": {
+      "k": 2,
+      "der": 0.0177,
+      "tau": 0.22
+    }
+  },
+  {
+    "meeting": "vysqj",
+    "k_true": 1,
+    "n_windows": 84,
+    "campplus": {
+      "k": 3,
+      "der": 0.1905,
+      "tau": 0.48
+    },
+    "resnet34": {
+      "k": 2,
+      "der": 0.1547,
+      "tau": 0.24
+    }
+  },
+  {
+    "meeting": "whmpa",
+    "k_true": 2,
+    "n_windows": 44,
+    "campplus": {
+      "k": 2,
+      "der": 0.0038,
+      "tau": 0.48
+    },
+    "resnet34": {
+      "k": 2,
+      "der": 0.3422,
+      "tau": 0.26
+    }
+  },
+  {
+    "meeting": "wjhgf",
+    "k_true": 5,
+    "n_windows": 83,
+    "campplus": {
+      "k": 8,
+      "der": 0.3757,
+      "tau": 0.44
+    },
+    "resnet34": {
+      "k": 2,
+      "der": 0.4833,
+      "tau": 0.4
+    }
+  },
+  {
+    "meeting": "wmori",
+    "k_true": 2,
+    "n_windows": 88,
+    "campplus": {
+      "k": 2,
+      "der": 0.0142,
+      "tau": 0.5
+    },
+    "resnet34": {
+      "k": 2,
+      "der": 0.4512,
+      "tau": 0.32
+    }
+  },
+  {
+    "meeting": "xiglo",
+    "k_true": 3,
+    "n_windows": 93,
+    "campplus": {
+      "k": 3,
+      "der": 0.0247,
+      "tau": 0.52
+    },
+    "resnet34": {
+      "k": 2,
+      "der": 0.1414,
+      "tau": 0.22
+    }
+  },
+  {
+    "meeting": "ysgbf",
+    "k_true": 1,
+    "n_windows": 103,
+    "campplus": {
+      "k": 2,
+      "der": 0.0725,
+      "tau": 0.56
+    },
+    "resnet34": {
+      "k": 2,
+      "der": 0.0725,
+      "tau": 0.24
+    }
+  },
+  {
+    "meeting": "zfkap",
+    "k_true": 4,
+    "n_windows": 99,
+    "campplus": {
+      "k": 4,
+      "der": 0.0019,
+      "tau": 0.54
+    },
+    "resnet34": {
+      "k": 8,
+      "der": 0.0823,
+      "tau": 0.24
+    }
+  }
+]

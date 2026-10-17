@@ -1,0 +1,35 @@
+配对场次 = 35 / 37
+
+=== 全部 (n=35) ===
+  CAM++   : 均值=0.1450 最差=0.8387
+  RESNET34: 均值=0.2788 最差=0.8013
+  delta(mean)=-0.1338 (>0 表示 ResNet34 更好)
+  逐场: 改善=6 持平=4 退化=25
+
+=== K_true=1（过分割重灾区） (n=9) ===
+  CAM++   : 均值=0.3615 最差=0.8387
+  RESNET34: 均值=0.1911 最差=0.8013
+  delta(mean)=+0.1704 (>0 表示 ResNet34 更好)
+  逐场: 改善=6 持平=2 退化=1
+
+=== K_true>=2 (n=26) ===
+  CAM++   : 均值=0.0701 最差=0.3757
+  RESNET34: 均值=0.3092 最差=0.7270
+  delta(mean)=-0.2391 (>0 表示 ResNet34 更好)
+  逐场: 改善=0 持平=2 退化=24
+
+=== 关键：K_true=1 场的 K̂ 是否变好？ ===
+  abjxc    CAM++ K̂=8  DER=0.4964 | RES K̂=2  DER=0.1268
+  hqyok    CAM++ K̂=8  DER=0.7868 | RES K̂=2  DER=0.1133
+  pqmho    CAM++ K̂=7  DER=0.8387 | RES K̂=7  DER=0.8013
+  qppll    CAM++ K̂=2  DER=0.0680 | RES K̂=6  DER=0.2887
+  qrzjk    CAM++ K̂=7  DER=0.4271 | RES K̂=2  DER=0.0947
+  sikkm    CAM++ K̂=7  DER=0.3556 | RES K̂=3  DER=0.0502
+  usbgm    CAM++ K̂=2  DER=0.0177 | RES K̂=2  DER=0.0177
+  vysqj    CAM++ K̂=3  DER=0.1905 | RES K̂=2  DER=0.1547
+  ysgbf    CAM++ K̂=2  DER=0.0725 | RES K̂=2  DER=0.0725
+
+=== 判别力摘要（若换模型能区分 K=1，应在此体现）===
+  K_true=1 中被过度分割(K̂>2): CAM++ 6/9  RESNET34 3/9
+
+落盘 -> verdict.json
