@@ -79,6 +79,7 @@ class JobService:
         cv_signal_runner: WaveformRunner | None = None,
         beat_runner: WaveformRunner | None = None,
         angle_sync_runner: WaveformRunner | None = None,
+        semantic_runner: WaveformRunner | None = None,
         speaker_runner: WaveformRunner | None = None,
         render_runner: RenderRunner | None = None,
         planning_runner: PlanningRunner | None = None,
@@ -108,6 +109,7 @@ class JobService:
         self.cv_signal_runner = cv_signal_runner
         self.beat_runner = beat_runner
         self.angle_sync_runner = angle_sync_runner
+        self.semantic_runner = semantic_runner
         self.speaker_runner = speaker_runner
         self.render_runner = render_runner
         self.planning_runner = planning_runner
@@ -1046,6 +1048,21 @@ class JobService:
             if self.beat_runner is None:
                 raise RuntimeError("RENDER_FAILED")
             result = await self.beat_runner(
+                row, cancel_event,
+                lambda value: self._set_progress(job_id, value),
+                lambda value: self._set_stage(job_id, value),
+            )
+            with self.db.connection() as db:
+                db.execute(
+                    "UPDATE jobs SET result_json=?,updated_at=? WHERE id=?",
+                    (json_dumps(result), utc_now(), job_id),
+                )
+            return
+        if row["kind"] == "semantic_index":
+            # W3.1 素材池语义检索：抽帧 → CLIP 双塔编码 → asset_semantic_index
+            if self.semantic_runner is None:
+                raise RuntimeError("RENDER_FAILED")
+            result = await self.semantic_runner(
                 row, cancel_event,
                 lambda value: self._set_progress(job_id, value),
                 lambda value: self._set_stage(job_id, value),

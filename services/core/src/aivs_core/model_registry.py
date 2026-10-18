@@ -31,17 +31,20 @@ class ModelError(ValueError):
 
 # AI-2：受信 provider 白名单（曾硬编码 faster-whisper）。新增 provider 须
 # 同时登记安装根目录与运行时探测模块——三表一处维护。
-MODEL_PROVIDERS = ("faster-whisper", "onnx-cv", "onnx-speaker")
+MODEL_PROVIDERS = ("faster-whisper", "onnx-cv", "onnx-speaker", "onnx-clip")
 MODEL_PROVIDER_DIRECTORIES = {
     "faster-whisper": "asr",
     "onnx-cv": "cv",
     # W2.2 说话人 embedding（CAM++）——独立目录，与 CV 模型不混装
     "onnx-speaker": "speaker",
+    # W3.1 语义检索双塔（CLIP vision + text）——独立目录
+    "onnx-clip": "clip",
 }
 MODEL_PROVIDER_RUNTIME_MODULES = {
     "faster-whisper": "faster_whisper",
     "onnx-cv": "onnxruntime",
     "onnx-speaker": "onnxruntime",
+    "onnx-clip": "onnxruntime",
 }
 
 

@@ -1,0 +1,57 @@
+{
+  "manifest_version": 1,
+  "model_id": "clip-vit-base-patch32",
+  "provider": "onnx-clip",
+  "revision": "xenova-clip-vit-base-patch32",
+  "display_name": "CLIP ViT-B/32 (Xenova ONNX, vision + text towers)",
+  "purpose": "Local image-text embedding for asset-pool semantic search (W3.1)",
+  "download_url": "https://www.modelscope.cn/models/Xenova/clip-vit-base-patch32/resolve/master/onnx/vision_model.onnx",
+  "trusted_source_id": "modelscope-xenova-clip-vit-base-patch32",
+  "size_bytes": 351685709,
+  "installed_size_bytes": 608166615,
+  "sha256": "fd6e1402a588279d1723c7534d4bcba5bc0b14b47dfab0e46f8c47b8270d7d40",
+  "supports_word_timestamps": false,
+  "runtime_version": "onnxruntime>=1.18,<2",
+  "license": {
+    "id": "mit",
+    "name": "MIT License (CLIP ViT-B/32 original weights are MIT; Xenova ONNX conversion)",
+    "url": "https://opensource.org/licenses/MIT",
+    "attribution": "OpenAI CLIP ViT-B/32, ONNX conversion by Xenova, mirrored via ModelScope",
+    "acceptance_required": false
+  },
+  "supported_languages": [
+    "en"
+  ],
+  "runtime_requirements": {
+    "python": ">=3.12,<3.14",
+    "onnxruntime": ">=1.18"
+  },
+  "files": [
+    {
+      "path": "vision_model.onnx",
+      "size_bytes": 351685709,
+      "sha256": "fd6e1402a588279d1723c7534d4bcba5bc0b14b47dfab0e46f8c47b8270d7d40"
+    },
+    {
+      "path": "text_model.onnx",
+      "size_bytes": 254058553,
+      "sha256": "3f6571f5bad13a97c469c1622e1cfc4d9aef78b79fdbfcff804ca357bfada8cc"
+    },
+    {
+      "path": "tokenizer.json",
+      "size_bytes": 2224119,
+      "sha256": "f7f3b7af117d467b58374797691a6438d3e6b9e9cef800dfd5dced7f697a90cd"
+    },
+    {
+      "path": "config.json",
+      "size_bytes": 4524,
+      "sha256": "493ef57ff783e42d1530c91b53469b7fdf8db8a9c1408e86998fcb7899a4f495"
+    },
+    {
+      "path": "preprocessor_config.json",
+      "size_bytes": 520,
+      "sha256": "6f638fb9401a6d6296feff533ee7efe657b787c49f954f82f5906b36ef2a1b1f"
+    }
+  ],
+  "created_at": "2026-10-18T00:00:00.000Z"
+}

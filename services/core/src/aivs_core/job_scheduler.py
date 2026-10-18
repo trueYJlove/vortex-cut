@@ -63,6 +63,8 @@ KIND_POLICIES: dict[str, JobPolicy] = {
     "waveform": JobPolicy("waveform", ("light",), 2),
     # Wave1 L2：BGM 节拍分析（卡点面板触发即用户视野，同波形档）
     "beat_analysis": JobPolicy("beat_analysis", ("light",), 2),
+    # W3.1：语义索引（离线派生，ONNX 单线程，与节拍/波形同档）
+    "semantic_index": JobPolicy("semantic_index", ("light",), 2),
     # W2.1：机位同步（面板触发即用户视野，同波形/节拍档）
     "angle_sync": JobPolicy("angle_sync", ("light",), 2),
     # W2.2：说话人分离（离线派生，与节拍/波形同档；ONNX 单线程、CPU 亲和）

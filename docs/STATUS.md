@@ -21,7 +21,7 @@
 ```json
 {
   "protocol_version": 1,
-  "latest_migration": 38,
+  "latest_migration": 39,
   "patch_operations": 37,
   "ai_patch_operations": 23,
   "cv_algorithm_version": 3

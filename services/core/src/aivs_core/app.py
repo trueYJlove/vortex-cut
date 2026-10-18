@@ -130,6 +130,25 @@ class BeatAnalysisRequest(BaseModel):
     generate: bool = False
 
 
+class SemanticSearchRequest(BaseModel):
+    """W3.1 语义检索请求：自然语言 → CLIP 文本塔 → 项目内余弦检索。
+
+    **命中率不承诺**：门 §3 A8 显式留空（见 P142——现有评测语料为合成
+    纯色块，无法验证画面语义）。本端点保证的是**链路可用**。
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(min_length=1, max_length=512)
+    limit: int = 20
+
+
+class SemanticIndexRequest(BaseModel):
+    """W3.1 索引请求（generate=True 登记索引作业）。"""
+    model_config = ConfigDict(extra="forbid")
+
+    generate: bool = False
+
+
 class SpeakerDiarizationRequest(BaseModel):
     """W2.2：说话人分离（generate=True 登记分析作业）。
 
@@ -898,6 +917,14 @@ class CoreState:
         # model_manager 注入 → YuNet 人脸通道，模型未就绪 partial）；
         # 此处只回填 job runner。
         self.jobs.cv_signal_runner = self.cv_signals.run_analysis_job
+        # W3.1 素材池语义检索：抽帧 → CLIP 双塔 ONNX → asset_semantic_index。
+        # 全本地零 egress（ADR-0003 D4）；模型未安装 ⇒ unavailable，不静默降级。
+        from .media.semantic_service import SemanticIndexService
+
+        self.semantic = SemanticIndexService(
+            self.db, settings.ffmpeg, model_manager=self.model_manager
+        )
+        self.jobs.semantic_runner = self.semantic.run_index_job
         # B15：分块 PCM（48000Hz 双声道 f32le、2 秒/块；同步内联生成——
         # 低延迟任务不排 jobs 队列，begin_build single-flight 防并发重复）。
         self.pcm_chunks = PcmChunkService(
@@ -2572,6 +2599,56 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             }
         except DomainError as exc:
             raise _domain(exc) from exc
+
+    # ── W3.1 素材池语义检索（只产元数据，不写任何时间线 op）──
+
+    @app.post("/api/v1/projects/{project_id}/assets/{asset_id}/semantic-index")
+    async def post_asset_semantic_index(
+        project_id: str, asset_id: str, request: SemanticIndexRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """素材语义索引摘要；generate=True 且无 ready/在途时登记索引作业。
+
+        模型未安装 ⇒ status=unavailable(reason=model_not_installed)，
+        **不静默降级**（与本仓既有 AI-2/W2.2 同一纪律）。
+        """
+        asset_row = _preview_source_asset_row(state, project_id, asset_id)
+        try:
+            summary = state.semantic.index_summary(asset_row)
+            job_id: str | None = None
+            status = (summary or {}).get("status")
+            if request.generate and status not in {"ready", "queued", "running", "unavailable"}:
+                resolved_path = state.projects.resolve_asset_path(asset_id)
+                job_id = state.semantic.create_index_job(
+                    project_id, asset_row, resolved_path["path"])
+                status = "queued"
+            return {
+                "index_id": (summary or {}).get("index_id"),
+                "status": status,
+                "job_id": job_id,
+                "frame_count": (summary or {}).get("frame_count"),
+                "algorithm_version": (summary or {}).get("algorithm_version"),
+                "model_id": (summary or {}).get("model_id"),
+                "reason": (summary or {}).get("reason"),
+            }
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/semantic-search")
+    async def post_semantic_search(
+        project_id: str, request: SemanticSearchRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """项目内自然语言检索（**绝不跨项目**）。
+
+        绑定约束（门 §3 A8）：返回的是**相似度排序**，不是可信命中的承诺。
+        """
+        state.projects._require_project_row(project_id)  # noqa: SLF001 归属校验
+        try:
+            hits = state.semantic.search_text(project_id, request.query, request.limit)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+        return {"query": request.query, "hits": hits}
 
     # ── W2.2 说话人分离（只产元数据，不写任何时间线 op）──
 
