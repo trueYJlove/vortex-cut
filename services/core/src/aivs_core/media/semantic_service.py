@@ -19,6 +19,7 @@ import numpy as np
 from ..database import Database, json_dumps, json_loads, utc_now
 from ..ids import new_id
 from ..projects import DomainError
+from .clip_tokenizer import load_tokenizer
 from .semantic import (
     DEFAULT_SEARCH_K,
     INDEX_ALGORITHM_VERSION,
@@ -115,28 +116,14 @@ class ClipEncoder:
 
 
 def clip_tokenize(text: str, tokenizer_path: str | Path, max_len: int = 77) -> tuple[np.ndarray, np.ndarray]:
-    """最小 CLIP BPE 分词 → (input_ids, attention_mask)。
+    """CLIP 真实 BPE 分词（`clip_tokenizer.ClipTokenizer` 的薄转发）。
 
-    **TODO(切片2)**：当前为**确定性降级实现**（word-prefix 哈希到词表区间的
-    伪 token），只保证形状/接口正确与可单测；真实 BPE 需解析 tokenizer.json。
-
-    这不是「能用」的实现，是本切片**刻意冻结的边界**：门 §3 的 A4 只验
-    「检索链路可用」，**A8（命中率）已显式留空**（见 P142）——把伪分词
-    说成可用检索，正是本仓反复记录的失败模式。
+    与参考实现（`tokenizers` 库）**逐 token 一致**，含超长截断边界
+    （先截 body 再补 EOT）。质量前提由此具备，但**语料前提仍未具备**
+    （见 P142：评测语料为合成纯色块，A8 命中率仍留空）。
     """
-    tokens = [w for w in str(text).strip().split() if w][: max_len - 2]
-    ids = [49406]  # <|startoftext|>
-    for tok in tokens:
-        # 稳定哈希到 [1000, 40000)，避免依赖未解析的词表
-        ids.append(1000 + (abs(hash(tok)) % 39000))
-    ids.append(49407)  # <|endoftext|>
-    ids = ids[:max_len]
-    mask = [1] * len(ids)
-    pad = max_len - len(ids)
-    if pad > 0:
-        ids += [0] * pad
-        mask += [0] * pad
-    return np.asarray([ids], dtype=np.int64), np.asarray([mask], dtype=np.int64)
+    tokenizer = load_tokenizer(str(tokenizer_path))
+    return tokenizer.encode(str(text), max_len)
 
 
 class SemanticIndexService:
