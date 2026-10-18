@@ -170,7 +170,11 @@ stop and link to STATUS.md instead. Restating state is the origin of drift.
 
 ### Enforcement
 
-- **Rule 2** — enforced by test (CI).
+- **Rule 2** — enforced by test `services/core/tests/unit/test_status_doc_consistency.py`.
+  **Not yet wired into an automated pipeline**: this repository has no CI configuration, and the
+  root `pnpm ci` script covers only lint / typecheck / Desktop tests / build — it runs **no Python
+  tests**, so this check never fires automatically. Run it explicitly:
+  `pytest services/core/tests/unit/test_status_doc_consistency.py`.
 - **Rules 1, 3, 4, 5** — verified at the Verification Gate by LiuKeAi, who checks that
   STATUS.md §1 matches code, §4 reflects every open commitment, and no new state restatement
   has appeared elsewhere.
