@@ -1781,6 +1781,58 @@ export function isAngleGroup(value: unknown): value is AngleGroup {
   if (typeof value.created_at !== "string" || typeof value.updated_at !== "string") return false;
   return Array.isArray(value.angles) && value.angles.length > 0 && value.angles.every(isAngleSyncAngle);
 }
+export interface SemanticIndexSummary {
+  index_id: string | null;
+  status: string | null;
+  job_id: string | null;
+  frame_count: number | null;
+  algorithm_version: number | null;
+  model_id: string | null;
+  reason: string | null;
+}
+
+export interface SemanticSearchHit {
+  asset_id: string;
+  score: number;
+}
+
+export interface SemanticSearchResponse {
+  query: string;
+  hits: SemanticSearchHit[];
+}
+
+export function parseSemanticIndexSummary(value: unknown): SemanticIndexSummary {
+  if (!isRecord(value)) throw new ContractValidationError("SemanticIndexSummary");
+  const num = (v: unknown) => v === null || typeof v === "number";
+  const str = (v: unknown) => v === null || typeof v === "string";
+  if (!str(value.index_id) || !str(value.status) || !str(value.job_id)) {
+    throw new ContractValidationError("SemanticIndexSummary");
+  }
+  if (!num(value.frame_count) || !num(value.algorithm_version)) {
+    throw new ContractValidationError("SemanticIndexSummary");
+  }
+  if (!str(value.model_id) || !str(value.reason)) {
+    throw new ContractValidationError("SemanticIndexSummary");
+  }
+  return value as unknown as SemanticIndexSummary;
+}
+
+export function parseSemanticSearchResponse(value: unknown): SemanticSearchResponse {
+  if (!isRecord(value) || typeof value.query !== "string") {
+    throw new ContractValidationError("SemanticSearchResponse");
+  }
+  if (!Array.isArray(value.hits)) throw new ContractValidationError("SemanticSearchResponse");
+  for (const hit of value.hits) {
+    if (!isRecord(hit) || !isId(hit.asset_id)) {
+      throw new ContractValidationError("SemanticSearchResponse");
+    }
+    if (typeof hit.score !== "number" || !Number.isFinite(hit.score)) {
+      throw new ContractValidationError("SemanticSearchResponse");
+    }
+  }
+  return value as unknown as SemanticSearchResponse;
+}
+
 export function parseAngleGroup(value: unknown): AngleGroup {
   if (!isAngleGroup(value)) throw new ContractValidationError("AngleGroup");
   return value;

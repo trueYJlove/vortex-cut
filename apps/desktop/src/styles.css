@@ -2102,3 +2102,24 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 .angle-sync-modal .angle-status.unavailable,
 .angle-sync-modal .angle-status.failed,
 .angle-sync-modal .angle-status.stale { color: var(--dlg-warn); }
+
+/* ── W3.1 素材语义检索面板 ── */
+.modal.semantic-search .semantic-search-form { display: flex; gap: 8px; margin-bottom: 10px; }
+.modal.semantic-search .semantic-search-form input { flex: 1; min-width: 0; }
+.modal.semantic-search .semantic-search-error {
+  margin-top: 8px; padding: 9px; border-left: 3px solid #d16055;
+  background: #2e211f; color: #eec4be; font-size: var(--dlg-fs-body);
+}
+.modal.semantic-search .semantic-search-hits {
+  margin: 10px 0 0; padding: 0; list-style: none;
+  max-height: 46vh; overflow-y: auto;
+}
+.modal.semantic-search .semantic-search-hits li {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 7px 0; border-bottom: 1px solid #303b40;
+}
+.modal.semantic-search .hit-name { overflow-wrap: anywhere; }
+.modal.semantic-search .hit-score {
+  flex: none; color: #d1a453; font-size: var(--dlg-fs-label);
+  font-variant-numeric: tabular-nums;
+}

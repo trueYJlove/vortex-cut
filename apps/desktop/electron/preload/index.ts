@@ -19,11 +19,14 @@ import type {
   CaptionsProviderEgressPreview,
   CaptionsProviderGeneration,
   CaptionsProviderCreateResponse,
-  CaptionsProviderProposal
+  CaptionsProviderProposal,
+  SemanticIndexSummary,
+  SemanticSearchResponse
 } from "@aivideo/contracts";
 import type {
   Asset,
   AssetAvailability,
+  AssetId,
   AssetKind,
   AssetPage,
   AssetPresentationPage,
@@ -214,6 +217,8 @@ export interface DesktopApi {
   syncAngleGroup: (input: { project_id: ProjectId; group_id: AngleGroupId; generate: boolean }) => Promise<AngleSyncResponse>;
   setAngleOffset: (input: { project_id: ProjectId; group_id: AngleGroupId; asset_id: string; offset_us: number }) => Promise<AngleGroup>;
   deleteAngleGroup: (input: { project_id: ProjectId; group_id: AngleGroupId }) => Promise<{ group_id: AngleGroupId; deleted: boolean }>;
+  indexSemanticAsset: (input: { project_id: ProjectId; asset_id: AssetId; generate: boolean }) => Promise<SemanticIndexSummary>;
+  searchSemantic: (input: { project_id: ProjectId; query: string; limit?: number }) => Promise<SemanticSearchResponse>;
   // W1.1 剪辑语法层（零 egress）
   listEditingGrammarPlanners: (projectId: ProjectId) => Promise<{ items: EditingGrammarTool[] }>;
   prepareEditingGrammar: (input: { project_id: ProjectId; base_revision_id: TimelineRevisionId; planner: string; params: Record<string, unknown> }) => Promise<EditingGrammarPrepareResult>;
@@ -412,6 +417,8 @@ const api: DesktopApi = {
   syncAngleGroup: input => ipcRenderer.invoke("angle-sync:sync", input),
   setAngleOffset: input => ipcRenderer.invoke("angle-sync:offset", input),
   deleteAngleGroup: input => ipcRenderer.invoke("angle-sync:delete", input),
+  indexSemanticAsset: input => ipcRenderer.invoke("semantic:index", input),
+  searchSemantic: input => ipcRenderer.invoke("semantic:search", input),
   listEditingGrammarPlanners: projectId => ipcRenderer.invoke("editing-grammar:planners", projectId),
   prepareEditingGrammar: input => ipcRenderer.invoke("editing-grammar:prepare", input),
   listWorklists: projectId => ipcRenderer.invoke("worklist:list", projectId),

@@ -22,7 +22,9 @@ import {
   parseCaptionsProviderCreateResponse,
   parseCaptionsProviderProposal,
   parseAngleGroup,
-  parseAngleSyncResponse
+  parseAngleSyncResponse,
+  parseSemanticIndexSummary,
+  parseSemanticSearchResponse
 } from "@aivideo/contracts";
 
 type RequestInitLike = { method?: string; body?: string };
@@ -295,6 +297,28 @@ export function registerStage2bIpc(deps: Stage2bIpcDependencies): void {
       { method: "POST", body: JSON.stringify({ offset_us: value.offset_us }) }
     );
     return parseAngleGroup(stage2bRendererSafe(response));
+  });
+  // W3.1 素材池语义检索（只读元数据；DTO 无路径字段）。
+  // A8 命中率显式留空（P142：评测语料为合成纯色块），本通道只保证链路可用。
+  deps.handle("semantic:index", async (_event, input) => {
+    const value = record(input, ["project_id", "asset_id", "generate"], "semantic index");
+    if (typeof value.generate !== "boolean") throw new Error("Invalid semantic index input");
+    const response = await fetchSafe(
+      `${API_PREFIX}/projects/${id(value.project_id, "project_id")}/assets/${id(value.asset_id, "asset_id")}/semantic-index`,
+      { method: "POST", body: JSON.stringify({ generate: value.generate }) }
+    );
+    return parseSemanticIndexSummary(stage2bRendererSafe(response));
+  });
+  deps.handle("semantic:search", async (_event, input) => {
+    const value = record(input, ["project_id", "query", "limit"], "semantic search");
+    if (typeof value.query !== "string" || value.query.trim().length < 1 || value.query.length > 512) throw new Error("Invalid semantic query");
+    const limit = typeof value.limit === "number" && Number.isInteger(value.limit) ? value.limit : 20;
+    if (limit < 1 || limit > 100) throw new Error("Invalid semantic limit");
+    const response = await fetchSafe(
+      `${API_PREFIX}/projects/${id(value.project_id, "project_id")}/semantic-search`,
+      { method: "POST", body: JSON.stringify({ query: value.query.trim(), limit }) }
+    );
+    return parseSemanticSearchResponse(stage2bRendererSafe(response));
   });
   // 阶段 C 稳定性包：CV 信号样本（sparkline 可视化数据）。
   deps.handle("cv-samples:list", async (_event, input) => {
