@@ -1,0 +1,104 @@
+{
+  "N": 9,
+  "hit3": 0.5555555555555556,
+  "random": 0.1111111111111111,
+  "insertion": 0.3333333333333333,
+  "details": [
+    {
+      "file": "Beni_Mellal_city_at_night.webm",
+      "topic": "city street night",
+      "top3": [
+        "Roma_Vs._Feijenoord_association_football_match_(2022)_riots,_Rotterdam-Centrum,_Rotterdam_(2022)_video_02.webm",
+        "Roma_Vs._Feijenoord_association_football_match_(2022)_riots,_Rotterdam-Centrum,_Rotterdam_(2022)_video_03.webm",
+        "Beni_Mellal_city_at_night.webm"
+      ],
+      "hit": false
+    },
+    {
+      "file": "Black_and_white_cat_drinks_from_a_puddle.ogv",
+      "topic": "cat",
+      "top3": [
+        "Black_and_white_cat_drinks_from_a_puddle.ogv",
+        "Cat_lapping_water_off_ground_in_slow_motion.gk.webm",
+        "Cat_birth_2.ogv"
+      ],
+      "hit": true
+    },
+    {
+      "file": "Cat_birth_2.ogv",
+      "topic": "cat",
+      "top3": [
+        "Black_and_white_cat_drinks_from_a_puddle.ogv",
+        "Cat_lapping_water_off_ground_in_slow_motion.gk.webm",
+        "Cat_birth_2.ogv"
+      ],
+      "hit": true
+    },
+    {
+      "file": "Cat_lapping_water_off_ground_in_slow_motion.gk.webm",
+      "topic": "cat",
+      "top3": [
+        "Black_and_white_cat_drinks_from_a_puddle.ogv",
+        "Cat_lapping_water_off_ground_in_slow_motion.gk.webm",
+        "Cat_birth_2.ogv"
+      ],
+      "hit": true
+    },
+    {
+      "file": "Cute_Bird_Drinking_Water_from_Bottle_Cap_offered_by_Woman.webm",
+      "topic": "bird",
+      "top3": [
+        "Cute_Bird_Drinking_Water_from_Bottle_Cap_offered_by_Woman.webm",
+        "Water_wheel_on_Buna_River_in_Buna_settlement_(2026)-bs.webm",
+        "Cat_lapping_water_off_ground_in_slow_motion.gk.webm"
+      ],
+      "hit": false
+    },
+    {
+      "file": "Rice_Cooking_on_a_gas_stove.webm",
+      "topic": "cooking food",
+      "top3": [
+        "Rice_Cooking_on_a_gas_stove.webm",
+        "Cat_birth_2.ogv",
+        "Cat_lapping_water_off_ground_in_slow_motion.gk.webm"
+      ],
+      "hit": false
+    },
+    {
+      "file": "Roma_Vs._Feijenoord_association_football_match_(2022)_riots,_Rotterdam-Centrum,_Rotterdam_(2022)_video_02.webm",
+      "topic": "football match",
+      "top3": [
+        "Roma_Vs._Feijenoord_association_football_match_(2022)_riots,_Rotterdam-Centrum,_Rotterdam_(2022)_video_03.webm",
+        "Roma_Vs._Feijenoord_association_football_match_(2022)_riots,_Rotterdam-Centrum,_Rotterdam_(2022)_video_02.webm",
+        "Cat_birth_2.ogv"
+      ],
+      "hit": true
+    },
+    {
+      "file": "Roma_Vs._Feijenoord_association_football_match_(2022)_riots,_Rotterdam-Centrum,_Rotterdam_(2022)_video_03.webm",
+      "topic": "football match",
+      "top3": [
+        "Roma_Vs._Feijenoord_association_football_match_(2022)_riots,_Rotterdam-Centrum,_Rotterdam_(2022)_video_03.webm",
+        "Roma_Vs._Feijenoord_association_football_match_(2022)_riots,_Rotterdam-Centrum,_Rotterdam_(2022)_video_02.webm",
+        "Cat_birth_2.ogv"
+      ],
+      "hit": true
+    },
+    {
+      "file": "Water_wheel_on_Buna_River_in_Buna_settlement_(2026)-bs.webm",
+      "topic": "river",
+      "top3": [
+        "Beni_Mellal_city_at_night.webm",
+        "Water_wheel_on_Buna_River_in_Buna_settlement_(2026)-bs.webm",
+        "Black_and_white_cat_drinks_from_a_puddle.ogv"
+      ],
+      "hit": false
+    }
+  ],
+  "nc1_top3": [
+    "Roma_Vs._Feijenoord_association_football_match_(2022)_riots,_Rotterdam-Centrum,_Rotterdam_(2022)_video_03.webm",
+    "Roma_Vs._Feijenoord_association_football_match_(2022)_riots,_Rotterdam-Centrum,_Rotterdam_(2022)_video_02.webm",
+    "Water_wheel_on_Buna_River_in_Buna_settlement_(2026)-bs.webm"
+  ],
+  "reproducible": true
+}
