@@ -27,12 +27,16 @@ from .providers import (
     candidate_adapter_supported,
     validate_candidate_output_value,
 )
+from . import signal_fusion
 from .timeline import CAPTION_PRESETS, LAYOUTS, TimelineService
 
 VARIANTS = ("balanced", "compact", "bold")
 # AI-2 阶段三（ADR-0003 D3 Layer 0）：召回来源。"transcript" = 既有链路；
 # "auto" = 有可用转录用之、否则 CV 场景段；"cv" = 强制 CV。
-CANDIDATE_SOURCES = ("auto", "transcript", "cv")
+# W4.2（D1 裁决 = A）：新增 "fused"，旧三值语义**逐字节不变**。
+# "auto" 仍是缺省值且仍是「择一」——改它必然改变旧客户端行为，
+# 与总纲「旧客户端不传新字段时行为不变」冲突（门 §1）。
+CANDIDATE_SOURCES = ("auto", "transcript", "cv", "fused")
 # CV 场景段参数（阶段三首版）：最小场景段 2s、召回上限对齐转录路径。
 CV_MIN_SCENE_US = 2_000_000
 CV_MAX_SCENES = 160
@@ -332,6 +336,7 @@ class PlanningService:
         pending_store: PendingCandidateEgressStore | None = None,
         generation_store: CandidateGenerationPayloadStore | None = None,
         cv_signals: Any = None,
+        beats: Any = None,
     ) -> None:
         self.db, self.recipes, self.providers, self.vault, self.timelines = (
             db,
@@ -345,6 +350,8 @@ class PlanningService:
         self.generation_store = generation_store or CandidateGenerationPayloadStore()
         # AI-2 阶段三：CV 信号服务（可空——无 CV 链路时 cv/auto 回退受限）。
         self.cv_signals = cv_signals
+        # W4.2：节拍服务（可空——无节拍网格时 fused 的 beat 分项整体缺席）。
+        self.beats = beats
 
     @staticmethod
     def _candidate_supported(provider: dict[str, Any]) -> bool:
@@ -628,21 +635,32 @@ class PlanningService:
                         (transcript_id,),
                     ).fetchall()
                 )
-        use_transcript = source in {"auto", "transcript"} and bool(selected)
-        use_cv = source == "cv" or (source == "auto" and not selected)
-        if use_cv:
-            cv_scenes = self._cv_scenes(project_id)
-            if not cv_scenes:
-                raise DomainError(
-                    "PLANNING_NO_SEGMENTS",
-                    "所选素材无可用 CV 信号分析（需先完成视频分析）",
-                )
-        elif not use_transcript:
-            # auto 但 transcript_ids 为空且无 CV：显式报错而非静默空召回。
-            raise DomainError("PLANNING_INVALID", "转录选择无效")
+        # W4.2（D1=A）：fused 是**独立分支**，不参与下面的旧语义推导，
+        # 以保证 auto/transcript/cv 的走向逐字节不变（F4 回归锁）。
+        stats_extra: dict[str, Any] = {}
+        fused_mode = source == "fused"
+        if fused_mode:
+            use_transcript = False
+            use_cv = False
+        else:
+            use_transcript = source in {"auto", "transcript"} and bool(selected)
+            use_cv = source == "cv" or (source == "auto" and not selected)
+        if not fused_mode:
+            if use_cv:
+                cv_scenes = self._cv_scenes(project_id)
+                if not cv_scenes:
+                    raise DomainError(
+                        "PLANNING_NO_SEGMENTS",
+                        "所选素材无可用 CV 信号分析（需先完成视频分析）",
+                    )
+            elif not use_transcript:
+                # auto 但 transcript_ids 为空且无 CV：显式报错而非静默空召回。
+                raise DomainError("PLANNING_INVALID", "转录选择无效")
         segments = self._select(brief, selected) if use_transcript else []
         if use_transcript and not segments:
             raise DomainError("PLANNING_NO_SEGMENTS", "预筛未得到可用片段")
+        if fused_mode:
+            cv_scenes = []
         # 载荷与白名单：转录段与 CV 场景段统一为 provider 可见的段列表
         # （CV 段无 text——payload 里 text 置空串，sent_fields 增量登记）。
         payload_segments: list[dict[str, Any]] = []
@@ -685,6 +703,10 @@ class PlanningService:
                         "features": scene["features"],
                     }
                 )
+        if fused_mode:
+            payload_segments, whitelist, stats_extra = self._fused_candidates(
+                project_id, brief, selected, transcript_ids
+            )
         payload = {
             "brief": {
                 k: v
@@ -755,6 +777,7 @@ class PlanningService:
                             "estimated_tokens": max(1, sum(len(x["text"]) for x in payload_segments) // 4),
                             "cv_scene_count": len(cv_scenes),
                             "candidate_source": source,
+                            **stats_extra,
                         }
                     ),
                     expiry,
@@ -806,8 +829,152 @@ class PlanningService:
                 "estimated_tokens": max(1, sum(len(x["text"]) for x in payload_segments) // 4),
                 "cv_scene_count": len(cv_scenes),
                 "candidate_source": source,
+                **stats_extra,
             },
         }
+
+    def _fused_candidates(
+        self,
+        project_id: str,
+        brief: dict[str, Any],
+        selected: list[dict[str, Any]],
+        transcript_ids: list[str],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+        """W4.2（D1=A）：转录 + CV + 节拍 三源融合召回。
+
+        与旧路径的关系：**完全独立**，不读也不改 use_transcript/use_cv 的走向，
+        以保证 auto/transcript/cv 逐字节不变（门 §4 F4）。
+
+        缺失源语义（门 §3.2）：某源无数据 ⇒ 该源**整体缺席**并重新归一权重，
+        而不是补 0（补 0 会系统性压低「只有 1 源」的候选）。
+        """
+        # ---- 转录候选（复用既有 _select 的排序口径，但不依赖其上限）----
+        tr_rows: list[dict[str, Any]] = []
+        if selected:
+            keys = set(
+                (brief["topic"] + " " + brief["narrative_goal"] + " " + " ".join(brief["must_keep"]))
+                .lower()
+                .split()
+            )
+            for row in selected:
+                hits = sum(1 for k in keys if k in (row["text"] or "").lower())
+                tr_rows.append(
+                    {
+                        "key": str(row["id"]),
+                        "start_us": int(row["start_us"]),
+                        "end_us": int(row["end_us"]),
+                        "text": row["text"],
+                        "transcript_id": row["transcript_id"],
+                        "parts": {
+                            "transcript": {
+                                "match": (hits / len(keys)) if keys else 0.0,
+                                "confidence": float(row.get("confidence") or 0.0),
+                            }
+                        },
+                    }
+                )
+
+        # ---- CV 候选 ----
+        cv_rows: list[dict[str, Any]] = []
+        for scene in self._cv_scenes(project_id) if self.cv_signals else []:
+            cv_rows.append(
+                {
+                    "key": scene["scene_id"],
+                    "asset_id": scene["asset_id"],
+                    "start_us": int(scene["start_us"]),
+                    "end_us": int(scene["end_us"]),
+                    "text": "",
+                    "features": scene["features"],
+                    "parts": {"cv": {"features": scene["features"]}},
+                }
+            )
+
+        # ---- 节拍分项：给**所有**候选打分（节拍是时间属性，不独立产候选）----
+        beats_us: list[int] = []
+        if self.beats is not None:
+            with self.db.connection() as db:
+                assets = db.execute(
+                    "SELECT id,fingerprint,availability FROM assets WHERE project_id=? AND kind='video'",
+                    (project_id,),
+                ).fetchall()
+            for asset in assets:
+                if asset["availability"] != "available":
+                    continue
+                summary = self.beats.beat_summary(dict(asset))
+                if not summary or summary.get("status") != "ready":
+                    continue
+                grid = self.beats.latest_beat_grid(asset["id"])
+                if grid:
+                    beats_us.extend(json_loads(grid.get("beats_json") or "[]"))
+            beats_us = sorted({int(b) for b in beats_us})
+
+        candidates = tr_rows + cv_rows
+        if beats_us:
+            for cand in candidates:
+                cand["parts"]["beat"] = {
+                    "hit": signal_fusion.beat_hit_score(cand["start_us"], beats_us)
+                }
+
+        if not candidates:
+            raise DomainError("PLANNING_NO_SEGMENTS", "融合召回未得到任何候选")
+
+        ranked = signal_fusion.fuse_scores(candidates, ("transcript", "cv", "beat"))
+        present = sorted({s for c in candidates for s in c["parts"]})
+        stats = {
+            "fusion_weights_version": signal_fusion.FUSION_WEIGHTS_VERSION,
+            "fusion_sources_present": present,
+            "fusion_candidate_count": len(ranked),
+            "fusion_beat_count": len(beats_us),
+        }
+
+        payload_segments: list[dict[str, Any]] = []
+        whitelist: list[dict[str, Any]] = []
+        for n, item in enumerate(ranked[:160]):
+            ref = f"s{n + 1}"
+            if "transcript" in item["parts"]:
+                payload_segments.append(
+                    {
+                        "segment_ref": ref,
+                        "transcript_ref": f"t{transcript_ids.index(item['transcript_id']) + 1}",
+                        "start_us": item["start_us"],
+                        "end_us": item["end_us"],
+                        "text": item["text"],
+                        "fusion_score": round(item["score"], 6),
+                    }
+                )
+                whitelist.append(
+                    {
+                        "segment_ref": ref,
+                        "segment_id": item["key"],
+                        "source": "transcript",
+                        "fusion_score": round(item["score"], 6),
+                    }
+                )
+            else:
+                payload_segments.append(
+                    {
+                        "segment_ref": ref,
+                        "transcript_ref": None,
+                        "start_us": item["start_us"],
+                        "end_us": item["end_us"],
+                        "text": "",
+                        "cv_features": item["features"],
+                        "fusion_score": round(item["score"], 6),
+                    }
+                )
+                whitelist.append(
+                    {
+                        "segment_ref": ref,
+                        "segment_id": item["key"],
+                        "source": "cv",
+                        "asset_id": item["asset_id"],
+                        "start_us": item["start_us"],
+                        "end_us": item["end_us"],
+                        "features": item["features"],
+                        "fusion_score": round(item["score"], 6),
+                    }
+                )
+        return payload_segments, whitelist, stats
 
     def _cv_scenes(self, project_id: str) -> list[dict[str, Any]]:
         """CV 场景段召回（阶段三首版）：项目全部视频素材的 ready 分析 →
