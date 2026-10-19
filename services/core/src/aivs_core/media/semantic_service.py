@@ -20,6 +20,7 @@ from ..database import Database, json_dumps, json_loads, utc_now
 from ..ids import new_id
 from ..projects import DomainError
 from .clip_tokenizer import load_tokenizer
+from .wordpiece_tokenizer import load_wordpiece_tokenizer
 from .semantic import (
     DEFAULT_SEARCH_K,
     INDEX_ALGORITHM_VERSION,
@@ -34,6 +35,16 @@ from .semantic import (
 MODEL_ID = "clip-vit-base-patch32"
 VISION_FILE = "vision_model.onnx"
 TEXT_FILE = "text_model.onnx"
+
+# W3.1 中文优先（用户 2026-10-19 裁决）：中文 CLIP ViT-B/16。
+# 与现役英文 CLIP 的关键差异（P150–P153 实测）：
+#   - 分词器：BERT WordPiece（中文单字有真实语义 id）vs 手写 BPE（中文走字节回退）
+#   - context length：52 vs 77
+#   - 视觉塔：ViT-B/16（196 token）vs B/32（49 token）⇒ 视觉推理慢约 3.9×，
+#     但 D2 索引门限实测仍有约 2× 余量（推算 14.9 vs 门限 30 s/源分钟）
+# 效果：中文词查询 top1 0.30→1.00、中文句查询 0.62→1.00（P151/P152）
+ZH_MODEL_ID = "chinese-clip-vit-base-patch16"
+ZH_CONTEXT_LEN = 52
 
 # CLIP 标准输入（ViT-B/32）：224×224 RGB、像素归一到 [-1,1]。
 CLIP_IMAGE_SIZE = 224
@@ -115,13 +126,29 @@ class ClipEncoder:
         return l2_normalize(np.asarray(out, dtype=np.float64).reshape(-1))
 
 
-def clip_tokenize(text: str, tokenizer_path: str | Path, max_len: int = 77) -> tuple[np.ndarray, np.ndarray]:
-    """CLIP 真实 BPE 分词（`clip_tokenizer.ClipTokenizer` 的薄转发）。
+def _tokenizer_kind(tokenizer_path: str | Path) -> str:
+    """从 tokenizer.json 读 model.type（'BPE' / 'WordPiece'）。
 
-    与参考实现（`tokenizers` 库）**逐 token 一致**，含超长截断边界
-    （先截 body 再补 EOT）。质量前提由此具备，但**语料前提仍未具备**
-    （见 P142：评测语料为合成纯色块，A8 命中率仍留空）。
+    为什么按文件内容而非模型常量分派：分词器与模型同目录落地，
+    类型就写在 tokenizer.json 里；读它比维护一张「模型→分词器」映射表
+    更不容易漂移（新增模型只要清单随之落地即自动正确）。
     """
+    data = json.loads(Path(tokenizer_path).read_text(encoding="utf-8"))
+    return str((data.get("model") or {}).get("type") or "")
+
+
+def clip_tokenize(text: str, tokenizer_path: str | Path, max_len: int = 77) -> tuple[np.ndarray, np.ndarray]:
+    """CLIP 分词（按 tokenizer.json 的 model.type 分派）。
+
+    - `BPE`（现役英文 CLIP）：`clip_tokenizer.ClipTokenizer`，词尾 `</w>` 后缀；
+    - `WordPiece`（中文 CLIP，W3.1 中文优先）：`wordpiece_tokenizer.WordPieceTokenizer`，
+      `[CLS]/[SEP]/[PAD]` + `##` 续接前缀。
+
+    两者均与参考实现（`tokenizers` 库）**逐 token 一致**，含超长截断边界。
+    """
+    kind = _tokenizer_kind(tokenizer_path)
+    if kind == "WordPiece":
+        return load_wordpiece_tokenizer(str(tokenizer_path)).encode(str(text), max_len)
     tokenizer = load_tokenizer(str(tokenizer_path))
     return tokenizer.encode(str(text), max_len)
 
@@ -172,7 +199,11 @@ class SemanticIndexService:
         if text_path is None:
             raise SemanticError("SEMANTIC_MODEL_NOT_INSTALLED", "语义模型尚未安装")
         tokenizer = text_path.parent / "tokenizer.json"
-        input_ids, mask = clip_tokenize(query, tokenizer)
+        # context length 必须与**导出该塔时**一致：现役英文 CLIP 77，
+        # 中文 CLIP 52（其 text 塔 ONNX 的 sequence_length 是固定维度，
+        # 传错长度会直接抛 shape 错误 —— 见 P151 实测）。
+        context_len = ZH_CONTEXT_LEN if _tokenizer_kind(tokenizer) == "WordPiece" else 77
+        input_ids, mask = clip_tokenize(query, tokenizer, context_len)
         encoder = ClipEncoder(vision, text_path)  # type: ignore[arg-type]
         query_vec = encoder.encode_text(input_ids, mask)
         return self.search(project_id, query_vec, limit)
