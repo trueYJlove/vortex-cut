@@ -95,3 +95,55 @@ def test_worklist_active_is_project_scoped_and_duplicate_apply_rejected(tmp_path
     # A different project has its own active-worklist namespace; a missing base is rejected independently.
     with pytest.raises(DomainError, match="Timeline 基线已变化"):
         service.prepare("p2", _request(revision_id))
+
+
+def _insert_worklist_with_steps(db: Database, worklist_id: str, revision_id: str, kinds: list[str]) -> None:
+    # prepare() 会先拒绝未实现的 kind，故 create/_start_next_step 两处守卫只能靠直接落库触达。
+    # 数据库 CHECK 允许四种 kind（database_v27.py:24），因此这样才能走到运行路径的守卫。
+    with db.connection() as conn:
+        conn.execute(
+            "INSERT INTO worklists(id,project_id,base_revision_id,base_document_sha256,status,current_step_ordinal,step_count,max_steps,token_budget,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (worklist_id, "p1", revision_id, "sha256:" + "c" * 64, "prepared", 0, len(kinds), len(kinds), 100, "n", "n"),
+        )
+        for ordinal, kind in enumerate(kinds):
+            conn.execute(
+                "INSERT INTO worklist_steps(id,worklist_id,ordinal,kind,planner_id,params_json,status,created_at) VALUES (?,?,?,?,?,?,?,?)",
+                (f"{worklist_id}-step-{ordinal}", worklist_id, ordinal, kind, "planner-x", "{}", "pending", "n"),
+            )
+
+
+@pytest.mark.parametrize("kind", ["roughcut", "style"])
+def test_worklist_prepare_rejects_unimplemented_step_kinds(tmp_path: Path, kind: str) -> None:
+    db, timelines, revision_id = _setup(tmp_path)
+    service = WorklistService(db, timelines, FakeEditing())  # type: ignore[arg-type]
+    request = {"base_revision_id": revision_id, "steps": [{"kind": kind, "planner": "p", "params": {}}], "max_steps": 1, "token_budget": 1}
+    with pytest.raises(DomainError) as excinfo:
+        service.prepare("p1", request)
+    assert excinfo.value.code == "WORKLIST_STEP_UNAVAILABLE"
+
+
+@pytest.mark.parametrize("kind", ["roughcut", "style"])
+def test_worklist_create_rejects_unimplemented_step_kinds(tmp_path: Path, kind: str) -> None:
+    db, timelines, revision_id = _setup(tmp_path)
+    service = WorklistService(db, timelines, FakeEditing())  # type: ignore[arg-type]
+    _insert_worklist_with_steps(db, "wl-create", revision_id, [kind])
+    with pytest.raises(DomainError) as excinfo:
+        service.create("p1", {"worklist_id": "wl-create", "base_revision_id": revision_id})
+    assert excinfo.value.code == "WORKLIST_STEP_UNAVAILABLE"
+    # 拒单零副作用：设计门 :162 要求「不得产生 job 副作用」。
+    unchanged = service.get("p1", "wl-create")
+    assert unchanged["status"] == "prepared"
+    assert unchanged["steps"][0]["status"] == "pending"
+
+
+@pytest.mark.parametrize("kind", ["roughcut", "style"])
+def test_worklist_step_advance_rejects_unimplemented_step_kinds(tmp_path: Path, kind: str) -> None:
+    db, timelines, revision_id = _setup(tmp_path)
+    service = WorklistService(db, timelines, FakeEditing())  # type: ignore[arg-type]
+    _insert_worklist_with_steps(db, "wl-advance", revision_id, ["editing_grammar", kind])
+    running = service.create("p1", {"worklist_id": "wl-advance", "base_revision_id": revision_id})
+    assert running["status"] == "waiting_for_apply"
+    with pytest.raises(DomainError) as excinfo:
+        service.apply("p1", "wl-advance", running["steps"][0]["id"], {"base_revision_id": revision_id, "proposed_document_sha256": "sha256:" + "d" * 64})
+    assert excinfo.value.code == "WORKLIST_STEP_UNAVAILABLE"
+
