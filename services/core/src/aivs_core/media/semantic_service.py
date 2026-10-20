@@ -41,8 +41,11 @@ TEXT_FILE = "text_model.onnx"
 # 与现役英文 CLIP 的关键差异（P150–P153 实测）：
 #   - 分词器：BERT WordPiece（中文单字有真实语义 id）vs 手写 BPE（中文走字节回退）
 #   - context length：52 vs 77
-#   - 视觉塔：ViT-B/16（196 token）vs B/32（49 token）⇒ 视觉推理慢约 3.9×，
-#     但 D2 索引门限实测仍有约 2× 余量（推算 14.9 vs 门限 30 s/源分钟）
+#   - 视觉塔：ViT-B/16（196 token）vs B/32（49 token）⇒ 索引编码更慢。
+#     **2026-10-20 实测（P159），原「推算 3.9× / 14.9 s / 约 2× 余量」已作废**：
+#     fp32 双塔 17.8 s/源分钟 vs quantized 单塔 11.6（只计编码；含抽帧 20.1 vs 13.9），
+#     对门限 30 的余量是 1.7× 而非 2×。检索侧方向相反：fp32 107 ms 快于
+#     quantized 317 ms——双塔查询只跑文本塔，单塔每次都要带整个合并模型。
 # 效果：中文词查询 top1 0.30→1.00、中文句查询 0.62→1.00（P151/P152）
 ZH_MODEL_ID = "chinese-clip-vit-base-patch16"
 ZH_CONTEXT_LEN = 52
