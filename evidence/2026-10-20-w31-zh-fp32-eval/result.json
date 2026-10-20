@@ -1,0 +1,1417 @@
+{
+ "experiment": "2026-10-20-w31-zh-fp32-eval",
+ "question": "fp32 双塔（754MB）vs quantized 单塔（190MB）中文检索效果差多少",
+ "preregistration": "PRE_REGISTRATION.md",
+ "dataset": {
+  "catalog": "evidence\\2026-10-19-w31-zh-query-eval\\catalog.json",
+  "images_dir": ".tmp\\zh-eval\\img",
+  "n_images": 57,
+  "n_topics": 10,
+  "n_queries_per_group": 10,
+  "context_len": 52,
+  "image_size": 224
+ },
+ "models": {
+  "quantized_single_tower": {
+   "path": ".tmp/cc-model/model_quantized.onnx",
+   "bytes": 190842404,
+   "io": "pixel_values+input_ids+attention_mask -> image_embeds/text_embeds"
+  },
+  "fp32_two_tower": {
+   "vision": ".tmp/cc-export/out/vision_model.onnx",
+   "vision_bytes": 345198002,
+   "text": ".tmp/cc-export/out/text_model.onnx",
+   "text_bytes": 408500272,
+   "io": "pixel_values -> image_embeds | input_ids -> text_embeds (seq fixed 52)"
+  }
+ },
+ "groups": {
+  "A_quantized_zh": {
+   "model": "merged model_quantized.onnx",
+   "language": "zh",
+   "n_queries": 10,
+   "n_images": 57,
+   "top1": 1.0,
+   "top3": 1.0,
+   "hits_top1": 10,
+   "hits_top3": 10,
+   "diagnostics": {
+    "mean_margin": 0.0674,
+    "min_margin": 0.0137,
+    "mean_rank_same_topic": 3.387,
+    "mean_images_per_query": 5.7
+   },
+   "determinism": {
+    "images_allclose_atol_1e-9": true,
+    "texts_allclose_atol_1e-9": true,
+    "rankings_identical": true,
+    "max_abs_image_diff": 0.0,
+    "max_abs_text_diff": 0.0,
+    "pass": true
+   },
+   "second_run": {
+    "top1": 1.0,
+    "top3": 1.0,
+    "hits_top1": 10,
+    "hits_top3": 10,
+    "identical_to_first": true
+   }
+  },
+  "B_fp32_zh": {
+   "model": "two-tower vision=vision_model.onnx text=text_model.onnx",
+   "language": "zh",
+   "n_queries": 10,
+   "n_images": 57,
+   "top1": 1.0,
+   "top3": 1.0,
+   "hits_top1": 10,
+   "hits_top3": 10,
+   "diagnostics": {
+    "mean_margin": 0.0713,
+    "min_margin": 0.0284,
+    "mean_rank_same_topic": 3.37,
+    "mean_images_per_query": 5.7
+   },
+   "determinism": {
+    "images_allclose_atol_1e-9": true,
+    "texts_allclose_atol_1e-9": true,
+    "rankings_identical": true,
+    "max_abs_image_diff": 0.0,
+    "max_abs_text_diff": 0.0,
+    "pass": true
+   },
+   "second_run": {
+    "top1": 1.0,
+    "top3": 1.0,
+    "hits_top1": 10,
+    "hits_top3": 10,
+    "identical_to_first": true
+   }
+  },
+  "C_quantized_en": {
+   "model": "merged model_quantized.onnx",
+   "language": "en",
+   "n_queries": 10,
+   "n_images": 57,
+   "top1": 1.0,
+   "top3": 1.0,
+   "hits_top1": 10,
+   "hits_top3": 10,
+   "diagnostics": {
+    "mean_margin": 0.0686,
+    "min_margin": 0.0175,
+    "mean_rank_same_topic": 3.575,
+    "mean_images_per_query": 5.7
+   },
+   "determinism": {
+    "images_allclose_atol_1e-9": true,
+    "texts_allclose_atol_1e-9": true,
+    "rankings_identical": true,
+    "max_abs_image_diff": 0.0,
+    "max_abs_text_diff": 0.0,
+    "pass": true
+   },
+   "second_run": {
+    "top1": 1.0,
+    "top3": 1.0,
+    "hits_top1": 10,
+    "hits_top3": 10,
+    "identical_to_first": true
+   }
+  },
+  "D_fp32_en": {
+   "model": "two-tower vision=vision_model.onnx text=text_model.onnx",
+   "language": "en",
+   "n_queries": 10,
+   "n_images": 57,
+   "top1": 1.0,
+   "top3": 1.0,
+   "hits_top1": 10,
+   "hits_top3": 10,
+   "diagnostics": {
+    "mean_margin": 0.0807,
+    "min_margin": 0.0215,
+    "mean_rank_same_topic": 3.367,
+    "mean_images_per_query": 5.7
+   },
+   "determinism": {
+    "images_allclose_atol_1e-9": true,
+    "texts_allclose_atol_1e-9": true,
+    "rankings_identical": true,
+    "max_abs_image_diff": 0.0,
+    "max_abs_text_diff": 0.0,
+    "pass": true
+   },
+   "second_run": {
+    "top1": 1.0,
+    "top3": 1.0,
+    "hits_top1": 10,
+    "hits_top3": 10,
+    "identical_to_first": true
+   }
+  }
+ },
+ "per_query": {
+  "A_quantized_zh": [
+   {
+    "query": "猫",
+    "expected_topic": "cat",
+    "top1_file": "cat_04.jpg",
+    "top1_topic": "cat",
+    "top1_score": 0.453942,
+    "top3": [
+     {
+      "file": "cat_04.jpg",
+      "topic": "cat",
+      "score": 0.453942
+     },
+     {
+      "file": "cat_00.jpg",
+      "topic": "cat",
+      "score": 0.449924
+     },
+     {
+      "file": "cat_01.jpg",
+      "topic": "cat",
+      "score": 0.448037
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 6,
+    "margin": 0.069638,
+    "mean_rank_same_topic": 3.5,
+    "worst_rank_same_topic": 6
+   },
+   {
+    "query": "狗",
+    "expected_topic": "dog",
+    "top1_file": "dog_08.jpg",
+    "top1_topic": "dog",
+    "top1_score": 0.438538,
+    "top3": [
+     {
+      "file": "dog_08.jpg",
+      "topic": "dog",
+      "score": 0.438538
+     },
+     {
+      "file": "dog_06.jpg",
+      "topic": "dog",
+      "score": 0.423778
+     },
+     {
+      "file": "dog_11.jpg",
+      "topic": "dog",
+      "score": 0.420898
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 6,
+    "margin": 0.04085,
+    "mean_rank_same_topic": 3.5,
+    "worst_rank_same_topic": 6
+   },
+   {
+    "query": "马",
+    "expected_topic": "horse",
+    "top1_file": "horse_14.jpg",
+    "top1_topic": "horse",
+    "top1_score": 0.450016,
+    "top3": [
+     {
+      "file": "horse_14.jpg",
+      "topic": "horse",
+      "score": 0.450016
+     },
+     {
+      "file": "horse_17.jpg",
+      "topic": "horse",
+      "score": 0.448649
+     },
+     {
+      "file": "horse_12.jpg",
+      "topic": "horse",
+      "score": 0.440289
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 6,
+    "margin": 0.068166,
+    "mean_rank_same_topic": 3.5,
+    "worst_rank_same_topic": 6
+   },
+   {
+    "query": "自行车",
+    "expected_topic": "bicycle",
+    "top1_file": "bicycle_22.jpg",
+    "top1_topic": "bicycle",
+    "top1_score": 0.401658,
+    "top3": [
+     {
+      "file": "bicycle_22.jpg",
+      "topic": "bicycle",
+      "score": 0.401658
+     },
+     {
+      "file": "bicycle_21.jpg",
+      "topic": "bicycle",
+      "score": 0.400743
+     },
+     {
+      "file": "bicycle_18.jpg",
+      "topic": "bicycle",
+      "score": 0.397975
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 6,
+    "margin": 0.013738,
+    "mean_rank_same_topic": 3.6667,
+    "worst_rank_same_topic": 7
+   },
+   {
+    "query": "飞机",
+    "expected_topic": "airplane",
+    "top1_file": "airplane_27.jpg",
+    "top1_topic": "airplane",
+    "top1_score": 0.447161,
+    "top3": [
+     {
+      "file": "airplane_27.jpg",
+      "topic": "airplane",
+      "score": 0.447161
+     },
+     {
+      "file": "airplane_25.jpg",
+      "topic": "airplane",
+      "score": 0.446839
+     },
+     {
+      "file": "airplane_29.jpg",
+      "topic": "airplane",
+      "score": 0.413369
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 6,
+    "margin": 0.090765,
+    "mean_rank_same_topic": 3.5,
+    "worst_rank_same_topic": 6
+   },
+   {
+    "query": "帆船",
+    "expected_topic": "sailboat",
+    "top1_file": "sailboat_31.jpg",
+    "top1_topic": "sailboat",
+    "top1_score": 0.445257,
+    "top3": [
+     {
+      "file": "sailboat_31.jpg",
+      "topic": "sailboat",
+      "score": 0.445257
+     },
+     {
+      "file": "sailboat_32.jpg",
+      "topic": "sailboat",
+      "score": 0.436598
+     },
+     {
+      "file": "sailboat_30.jpg",
+      "topic": "sailboat",
+      "score": 0.435828
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 6,
+    "margin": 0.061006,
+    "mean_rank_same_topic": 3.5,
+    "worst_rank_same_topic": 6
+   },
+   {
+    "query": "向日葵",
+    "expected_topic": "sunflower",
+    "top1_file": "sunflower_41.jpg",
+    "top1_topic": "sunflower",
+    "top1_score": 0.449657,
+    "top3": [
+     {
+      "file": "sunflower_41.jpg",
+      "topic": "sunflower",
+      "score": 0.449657
+     },
+     {
+      "file": "sunflower_38.jpg",
+      "topic": "sunflower",
+      "score": 0.448509
+     },
+     {
+      "file": "sunflower_39.jpg",
+      "topic": "sunflower",
+      "score": 0.444977
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 6,
+    "margin": 0.090602,
+    "mean_rank_same_topic": 3.5,
+    "worst_rank_same_topic": 6
+   },
+   {
+    "query": "蘑菇",
+    "expected_topic": "mushroom",
+    "top1_file": "mushroom_42.jpg",
+    "top1_topic": "mushroom",
+    "top1_score": 0.444282,
+    "top3": [
+     {
+      "file": "mushroom_42.jpg",
+      "topic": "mushroom",
+      "score": 0.444282
+     },
+     {
+      "file": "mushroom_44.jpg",
+      "topic": "mushroom",
+      "score": 0.426225
+     },
+     {
+      "file": "mushroom_46.jpg",
+      "topic": "mushroom",
+      "score": 0.397818
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 4,
+    "margin": 0.094664,
+    "mean_rank_same_topic": 2.5,
+    "worst_rank_same_topic": 4
+   },
+   {
+    "query": "灯塔",
+    "expected_topic": "lighthouse",
+    "top1_file": "lighthouse_48.jpg",
+    "top1_topic": "lighthouse",
+    "top1_score": 0.47125,
+    "top3": [
+     {
+      "file": "lighthouse_48.jpg",
+      "topic": "lighthouse",
+      "score": 0.47125
+     },
+     {
+      "file": "lighthouse_51.jpg",
+      "topic": "lighthouse",
+      "score": 0.466487
+     },
+     {
+      "file": "lighthouse_52.jpg",
+      "topic": "lighthouse",
+      "score": 0.436809
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 5,
+    "margin": 0.054888,
+    "mean_rank_same_topic": 3.2,
+    "worst_rank_same_topic": 6
+   },
+   {
+    "query": "风车",
+    "expected_topic": "windmill",
+    "top1_file": "windmill_54.jpg",
+    "top1_topic": "windmill",
+    "top1_score": 0.478177,
+    "top3": [
+     {
+      "file": "windmill_54.jpg",
+      "topic": "windmill",
+      "score": 0.478177
+     },
+     {
+      "file": "windmill_55.jpg",
+      "topic": "windmill",
+      "score": 0.462938
+     },
+     {
+      "file": "windmill_58.jpg",
+      "topic": "windmill",
+      "score": 0.460881
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 6,
+    "margin": 0.089376,
+    "mean_rank_same_topic": 3.5,
+    "worst_rank_same_topic": 6
+   }
+  ],
+  "B_fp32_zh": [
+   {
+    "query": "猫",
+    "expected_topic": "cat",
+    "top1_file": "cat_00.jpg",
+    "top1_topic": "cat",
+    "top1_score": 0.442806,
+    "top3": [
+     {
+      "file": "cat_00.jpg",
+      "topic": "cat",
+      "score": 0.442806
+     },
+     {
+      "file": "cat_01.jpg",
+      "topic": "cat",
+      "score": 0.441663
+     },
+     {
+      "file": "cat_04.jpg",
+      "topic": "cat",
+      "score": 0.441038
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 6,
+    "margin": 0.047947,
+    "mean_rank_same_topic": 3.5,
+    "worst_rank_same_topic": 6
+   },
+   {
+    "query": "狗",
+    "expected_topic": "dog",
+    "top1_file": "dog_08.jpg",
+    "top1_topic": "dog",
+    "top1_score": 0.447647,
+    "top3": [
+     {
+      "file": "dog_08.jpg",
+      "topic": "dog",
+      "score": 0.447647
+     },
+     {
+      "file": "dog_11.jpg",
+      "topic": "dog",
+      "score": 0.429408
+     },
+     {
+      "file": "dog_09.jpg",
+      "topic": "dog",
+      "score": 0.42462
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 6,
+    "margin": 0.061141,
+    "mean_rank_same_topic": 3.5,
+    "worst_rank_same_topic": 6
+   },
+   {
+    "query": "马",
+    "expected_topic": "horse",
+    "top1_file": "horse_14.jpg",
+    "top1_topic": "horse",
+    "top1_score": 0.453296,
+    "top3": [
+     {
+      "file": "horse_14.jpg",
+      "topic": "horse",
+      "score": 0.453296
+     },
+     {
+      "file": "horse_13.jpg",
+      "topic": "horse",
+      "score": 0.434914
+     },
+     {
+      "file": "horse_17.jpg",
+      "topic": "horse",
+      "score": 0.432378
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 6,
+    "margin": 0.076077,
+    "mean_rank_same_topic": 3.5,
+    "worst_rank_same_topic": 6
+   },
+   {
+    "query": "自行车",
+    "expected_topic": "bicycle",
+    "top1_file": "bicycle_23.jpg",
+    "top1_topic": "bicycle",
+    "top1_score": 0.398276,
+    "top3": [
+     {
+      "file": "bicycle_23.jpg",
+      "topic": "bicycle",
+      "score": 0.398276
+     },
+     {
+      "file": "bicycle_22.jpg",
+      "topic": "bicycle",
+      "score": 0.397476
+     },
+     {
+      "file": "bicycle_18.jpg",
+      "topic": "bicycle",
+      "score": 0.397334
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 6,
+    "margin": 0.028359,
+    "mean_rank_same_topic": 3.5,
+    "worst_rank_same_topic": 6
+   },
+   {
+    "query": "飞机",
+    "expected_topic": "airplane",
+    "top1_file": "airplane_27.jpg",
+    "top1_topic": "airplane",
+    "top1_score": 0.442727,
+    "top3": [
+     {
+      "file": "airplane_27.jpg",
+      "topic": "airplane",
+      "score": 0.442727
+     },
+     {
+      "file": "airplane_29.jpg",
+      "topic": "airplane",
+      "score": 0.426787
+     },
+     {
+      "file": "airplane_28.jpg",
+      "topic": "airplane",
+      "score": 0.425577
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 6,
+    "margin": 0.077862,
+    "mean_rank_same_topic": 3.5,
+    "worst_rank_same_topic": 6
+   },
+   {
+    "query": "帆船",
+    "expected_topic": "sailboat",
+    "top1_file": "sailboat_31.jpg",
+    "top1_topic": "sailboat",
+    "top1_score": 0.453482,
+    "top3": [
+     {
+      "file": "sailboat_31.jpg",
+      "topic": "sailboat",
+      "score": 0.453482
+     },
+     {
+      "file": "sailboat_34.jpg",
+      "topic": "sailboat",
+      "score": 0.44362
+     },
+     {
+      "file": "sailboat_33.jpg",
+      "topic": "sailboat",
+      "score": 0.440652
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 6,
+    "margin": 0.078452,
+    "mean_rank_same_topic": 3.5,
+    "worst_rank_same_topic": 6
+   },
+   {
+    "query": "向日葵",
+    "expected_topic": "sunflower",
+    "top1_file": "sunflower_40.jpg",
+    "top1_topic": "sunflower",
+    "top1_score": 0.455452,
+    "top3": [
+     {
+      "file": "sunflower_40.jpg",
+      "topic": "sunflower",
+      "score": 0.455452
+     },
+     {
+      "file": "sunflower_38.jpg",
+      "topic": "sunflower",
+      "score": 0.448194
+     },
+     {
+      "file": "sunflower_41.jpg",
+      "topic": "sunflower",
+      "score": 0.446182
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 6,
+    "margin": 0.103298,
+    "mean_rank_same_topic": 3.5,
+    "worst_rank_same_topic": 6
+   },
+   {
+    "query": "蘑菇",
+    "expected_topic": "mushroom",
+    "top1_file": "mushroom_42.jpg",
+    "top1_topic": "mushroom",
+    "top1_score": 0.446302,
+    "top3": [
+     {
+      "file": "mushroom_42.jpg",
+      "topic": "mushroom",
+      "score": 0.446302
+     },
+     {
+      "file": "mushroom_44.jpg",
+      "topic": "mushroom",
+      "score": 0.43087
+     },
+     {
+      "file": "mushroom_46.jpg",
+      "topic": "mushroom",
+      "score": 0.417823
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 4,
+    "margin": 0.099611,
+    "mean_rank_same_topic": 2.5,
+    "worst_rank_same_topic": 4
+   },
+   {
+    "query": "灯塔",
+    "expected_topic": "lighthouse",
+    "top1_file": "lighthouse_48.jpg",
+    "top1_topic": "lighthouse",
+    "top1_score": 0.470155,
+    "top3": [
+     {
+      "file": "lighthouse_48.jpg",
+      "topic": "lighthouse",
+      "score": 0.470155
+     },
+     {
+      "file": "lighthouse_51.jpg",
+      "topic": "lighthouse",
+      "score": 0.461099
+     },
+     {
+      "file": "lighthouse_53.jpg",
+      "topic": "lighthouse",
+      "score": 0.446817
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 5,
+    "margin": 0.04604,
+    "mean_rank_same_topic": 3.2,
+    "worst_rank_same_topic": 6
+   },
+   {
+    "query": "风车",
+    "expected_topic": "windmill",
+    "top1_file": "windmill_54.jpg",
+    "top1_topic": "windmill",
+    "top1_score": 0.478831,
+    "top3": [
+     {
+      "file": "windmill_54.jpg",
+      "topic": "windmill",
+      "score": 0.478831
+     },
+     {
+      "file": "windmill_55.jpg",
+      "topic": "windmill",
+      "score": 0.466753
+     },
+     {
+      "file": "windmill_58.jpg",
+      "topic": "windmill",
+      "score": 0.462025
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 6,
+    "margin": 0.094705,
+    "mean_rank_same_topic": 3.5,
+    "worst_rank_same_topic": 6
+   }
+  ],
+  "C_quantized_en": [
+   {
+    "query": "cat",
+    "expected_topic": "cat",
+    "top1_file": "cat_00.jpg",
+    "top1_topic": "cat",
+    "top1_score": 0.4647,
+    "top3": [
+     {
+      "file": "cat_00.jpg",
+      "topic": "cat",
+      "score": 0.4647
+     },
+     {
+      "file": "cat_01.jpg",
+      "topic": "cat",
+      "score": 0.459694
+     },
+     {
+      "file": "cat_04.jpg",
+      "topic": "cat",
+      "score": 0.457021
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 6,
+    "margin": 0.103783,
+    "mean_rank_same_topic": 3.5,
+    "worst_rank_same_topic": 6
+   },
+   {
+    "query": "dog",
+    "expected_topic": "dog",
+    "top1_file": "dog_09.jpg",
+    "top1_topic": "dog",
+    "top1_score": 0.447201,
+    "top3": [
+     {
+      "file": "dog_09.jpg",
+      "topic": "dog",
+      "score": 0.447201
+     },
+     {
+      "file": "dog_06.jpg",
+      "topic": "dog",
+      "score": 0.444468
+     },
+     {
+      "file": "dog_07.jpg",
+      "topic": "dog",
+      "score": 0.440559
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 6,
+    "margin": 0.017535,
+    "mean_rank_same_topic": 3.8333,
+    "worst_rank_same_topic": 7
+   },
+   {
+    "query": "horse",
+    "expected_topic": "horse",
+    "top1_file": "horse_16.jpg",
+    "top1_topic": "horse",
+    "top1_score": 0.455969,
+    "top3": [
+     {
+      "file": "horse_16.jpg",
+      "topic": "horse",
+      "score": 0.455969
+     },
+     {
+      "file": "horse_12.jpg",
+      "topic": "horse",
+      "score": 0.449183
+     },
+     {
+      "file": "horse_14.jpg",
+      "topic": "horse",
+      "score": 0.449023
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 6,
+    "margin": 0.058504,
+    "mean_rank_same_topic": 3.5,
+    "worst_rank_same_topic": 6
+   },
+   {
+    "query": "bicycle",
+    "expected_topic": "bicycle",
+    "top1_file": "bicycle_22.jpg",
+    "top1_topic": "bicycle",
+    "top1_score": 0.426025,
+    "top3": [
+     {
+      "file": "bicycle_22.jpg",
+      "topic": "bicycle",
+      "score": 0.426025
+     },
+     {
+      "file": "bicycle_19.jpg",
+      "topic": "bicycle",
+      "score": 0.42071
+     },
+     {
+      "file": "bicycle_21.jpg",
+      "topic": "bicycle",
+      "score": 0.40964
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 6,
+    "margin": 0.066545,
+    "mean_rank_same_topic": 3.5,
+    "worst_rank_same_topic": 6
+   },
+   {
+    "query": "airplane",
+    "expected_topic": "airplane",
+    "top1_file": "airplane_27.jpg",
+    "top1_topic": "airplane",
+    "top1_score": 0.462397,
+    "top3": [
+     {
+      "file": "airplane_27.jpg",
+      "topic": "airplane",
+      "score": 0.462397
+     },
+     {
+      "file": "airplane_25.jpg",
+      "topic": "airplane",
+      "score": 0.451657
+     },
+     {
+      "file": "airplane_28.jpg",
+      "topic": "airplane",
+      "score": 0.442686
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 6,
+    "margin": 0.083719,
+    "mean_rank_same_topic": 3.5,
+    "worst_rank_same_topic": 6
+   },
+   {
+    "query": "sailboat",
+    "expected_topic": "sailboat",
+    "top1_file": "sailboat_32.jpg",
+    "top1_topic": "sailboat",
+    "top1_score": 0.488938,
+    "top3": [
+     {
+      "file": "sailboat_32.jpg",
+      "topic": "sailboat",
+      "score": 0.488938
+     },
+     {
+      "file": "sailboat_31.jpg",
+      "topic": "sailboat",
+      "score": 0.468741
+     },
+     {
+      "file": "sailboat_35.jpg",
+      "topic": "sailboat",
+      "score": 0.449384
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 6,
+    "margin": 0.072614,
+    "mean_rank_same_topic": 3.5,
+    "worst_rank_same_topic": 6
+   },
+   {
+    "query": "sunflower",
+    "expected_topic": "sunflower",
+    "top1_file": "sunflower_38.jpg",
+    "top1_topic": "sunflower",
+    "top1_score": 0.458318,
+    "top3": [
+     {
+      "file": "sunflower_38.jpg",
+      "topic": "sunflower",
+      "score": 0.458318
+     },
+     {
+      "file": "sunflower_37.jpg",
+      "topic": "sunflower",
+      "score": 0.454421
+     },
+     {
+      "file": "sunflower_41.jpg",
+      "topic": "sunflower",
+      "score": 0.439745
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 6,
+    "margin": 0.069756,
+    "mean_rank_same_topic": 3.5,
+    "worst_rank_same_topic": 6
+   },
+   {
+    "query": "mushroom",
+    "expected_topic": "mushroom",
+    "top1_file": "mushroom_42.jpg",
+    "top1_topic": "mushroom",
+    "top1_score": 0.454966,
+    "top3": [
+     {
+      "file": "mushroom_42.jpg",
+      "topic": "mushroom",
+      "score": 0.454966
+     },
+     {
+      "file": "mushroom_44.jpg",
+      "topic": "mushroom",
+      "score": 0.4106
+     },
+     {
+      "file": "mushroom_43.jpg",
+      "topic": "mushroom",
+      "score": 0.39801
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 4,
+    "margin": 0.057109,
+    "mean_rank_same_topic": 2.75,
+    "worst_rank_same_topic": 5
+   },
+   {
+    "query": "lighthouse",
+    "expected_topic": "lighthouse",
+    "top1_file": "lighthouse_51.jpg",
+    "top1_topic": "lighthouse",
+    "top1_score": 0.523173,
+    "top3": [
+     {
+      "file": "lighthouse_51.jpg",
+      "topic": "lighthouse",
+      "score": 0.523173
+     },
+     {
+      "file": "lighthouse_53.jpg",
+      "topic": "lighthouse",
+      "score": 0.480043
+     },
+     {
+      "file": "lighthouse_48.jpg",
+      "topic": "lighthouse",
+      "score": 0.478792
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 5,
+    "margin": 0.110704,
+    "mean_rank_same_topic": 3.0,
+    "worst_rank_same_topic": 5
+   },
+   {
+    "query": "windmill",
+    "expected_topic": "windmill",
+    "top1_file": "windmill_54.jpg",
+    "top1_topic": "windmill",
+    "top1_score": 0.461954,
+    "top3": [
+     {
+      "file": "windmill_54.jpg",
+      "topic": "windmill",
+      "score": 0.461954
+     },
+     {
+      "file": "windmill_58.jpg",
+      "topic": "windmill",
+      "score": 0.458793
+     },
+     {
+      "file": "windmill_56.jpg",
+      "topic": "windmill",
+      "score": 0.437487
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 6,
+    "margin": 0.045466,
+    "mean_rank_same_topic": 5.1667,
+    "worst_rank_same_topic": 14
+   }
+  ],
+  "D_fp32_en": [
+   {
+    "query": "cat",
+    "expected_topic": "cat",
+    "top1_file": "cat_00.jpg",
+    "top1_topic": "cat",
+    "top1_score": 0.453364,
+    "top3": [
+     {
+      "file": "cat_00.jpg",
+      "topic": "cat",
+      "score": 0.453364
+     },
+     {
+      "file": "cat_01.jpg",
+      "topic": "cat",
+      "score": 0.4509
+     },
+     {
+      "file": "cat_04.jpg",
+      "topic": "cat",
+      "score": 0.444895
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 6,
+    "margin": 0.085325,
+    "mean_rank_same_topic": 3.5,
+    "worst_rank_same_topic": 6
+   },
+   {
+    "query": "dog",
+    "expected_topic": "dog",
+    "top1_file": "dog_06.jpg",
+    "top1_topic": "dog",
+    "top1_score": 0.45018,
+    "top3": [
+     {
+      "file": "dog_06.jpg",
+      "topic": "dog",
+      "score": 0.45018
+     },
+     {
+      "file": "dog_09.jpg",
+      "topic": "dog",
+      "score": 0.445127
+     },
+     {
+      "file": "dog_08.jpg",
+      "topic": "dog",
+      "score": 0.441451
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 6,
+    "margin": 0.021479,
+    "mean_rank_same_topic": 3.6667,
+    "worst_rank_same_topic": 7
+   },
+   {
+    "query": "horse",
+    "expected_topic": "horse",
+    "top1_file": "horse_14.jpg",
+    "top1_topic": "horse",
+    "top1_score": 0.462114,
+    "top3": [
+     {
+      "file": "horse_14.jpg",
+      "topic": "horse",
+      "score": 0.462114
+     },
+     {
+      "file": "horse_16.jpg",
+      "topic": "horse",
+      "score": 0.445529
+     },
+     {
+      "file": "horse_13.jpg",
+      "topic": "horse",
+      "score": 0.443996
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 6,
+    "margin": 0.084752,
+    "mean_rank_same_topic": 3.5,
+    "worst_rank_same_topic": 6
+   },
+   {
+    "query": "bicycle",
+    "expected_topic": "bicycle",
+    "top1_file": "bicycle_22.jpg",
+    "top1_topic": "bicycle",
+    "top1_score": 0.418484,
+    "top3": [
+     {
+      "file": "bicycle_22.jpg",
+      "topic": "bicycle",
+      "score": 0.418484
+     },
+     {
+      "file": "bicycle_19.jpg",
+      "topic": "bicycle",
+      "score": 0.406569
+     },
+     {
+      "file": "bicycle_18.jpg",
+      "topic": "bicycle",
+      "score": 0.404533
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 6,
+    "margin": 0.067284,
+    "mean_rank_same_topic": 3.5,
+    "worst_rank_same_topic": 6
+   },
+   {
+    "query": "airplane",
+    "expected_topic": "airplane",
+    "top1_file": "airplane_27.jpg",
+    "top1_topic": "airplane",
+    "top1_score": 0.456534,
+    "top3": [
+     {
+      "file": "airplane_27.jpg",
+      "topic": "airplane",
+      "score": 0.456534
+     },
+     {
+      "file": "airplane_29.jpg",
+      "topic": "airplane",
+      "score": 0.439726
+     },
+     {
+      "file": "airplane_28.jpg",
+      "topic": "airplane",
+      "score": 0.437238
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 6,
+    "margin": 0.085693,
+    "mean_rank_same_topic": 3.5,
+    "worst_rank_same_topic": 6
+   },
+   {
+    "query": "sailboat",
+    "expected_topic": "sailboat",
+    "top1_file": "sailboat_32.jpg",
+    "top1_topic": "sailboat",
+    "top1_score": 0.483332,
+    "top3": [
+     {
+      "file": "sailboat_32.jpg",
+      "topic": "sailboat",
+      "score": 0.483332
+     },
+     {
+      "file": "sailboat_31.jpg",
+      "topic": "sailboat",
+      "score": 0.472982
+     },
+     {
+      "file": "sailboat_33.jpg",
+      "topic": "sailboat",
+      "score": 0.458687
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 6,
+    "margin": 0.09241,
+    "mean_rank_same_topic": 3.5,
+    "worst_rank_same_topic": 6
+   },
+   {
+    "query": "sunflower",
+    "expected_topic": "sunflower",
+    "top1_file": "sunflower_37.jpg",
+    "top1_topic": "sunflower",
+    "top1_score": 0.474076,
+    "top3": [
+     {
+      "file": "sunflower_37.jpg",
+      "topic": "sunflower",
+      "score": 0.474076
+     },
+     {
+      "file": "sunflower_38.jpg",
+      "topic": "sunflower",
+      "score": 0.469771
+     },
+     {
+      "file": "sunflower_40.jpg",
+      "topic": "sunflower",
+      "score": 0.458808
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 6,
+    "margin": 0.093567,
+    "mean_rank_same_topic": 3.5,
+    "worst_rank_same_topic": 6
+   },
+   {
+    "query": "mushroom",
+    "expected_topic": "mushroom",
+    "top1_file": "mushroom_42.jpg",
+    "top1_topic": "mushroom",
+    "top1_score": 0.467496,
+    "top3": [
+     {
+      "file": "mushroom_42.jpg",
+      "topic": "mushroom",
+      "score": 0.467496
+     },
+     {
+      "file": "mushroom_44.jpg",
+      "topic": "mushroom",
+      "score": 0.422372
+     },
+     {
+      "file": "mushroom_43.jpg",
+      "topic": "mushroom",
+      "score": 0.414056
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 4,
+    "margin": 0.082598,
+    "mean_rank_same_topic": 2.5,
+    "worst_rank_same_topic": 4
+   },
+   {
+    "query": "lighthouse",
+    "expected_topic": "lighthouse",
+    "top1_file": "lighthouse_51.jpg",
+    "top1_topic": "lighthouse",
+    "top1_score": 0.526049,
+    "top3": [
+     {
+      "file": "lighthouse_51.jpg",
+      "topic": "lighthouse",
+      "score": 0.526049
+     },
+     {
+      "file": "lighthouse_48.jpg",
+      "topic": "lighthouse",
+      "score": 0.485424
+     },
+     {
+      "file": "lighthouse_53.jpg",
+      "topic": "lighthouse",
+      "score": 0.484561
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 5,
+    "margin": 0.109463,
+    "mean_rank_same_topic": 3.0,
+    "worst_rank_same_topic": 5
+   },
+   {
+    "query": "windmill",
+    "expected_topic": "windmill",
+    "top1_file": "windmill_54.jpg",
+    "top1_topic": "windmill",
+    "top1_score": 0.491786,
+    "top3": [
+     {
+      "file": "windmill_54.jpg",
+      "topic": "windmill",
+      "score": 0.491786
+     },
+     {
+      "file": "windmill_58.jpg",
+      "topic": "windmill",
+      "score": 0.476241
+     },
+     {
+      "file": "windmill_56.jpg",
+      "topic": "windmill",
+      "score": 0.465792
+     }
+    ],
+    "hit1": true,
+    "hit3": true,
+    "n_same": 6,
+    "margin": 0.084706,
+    "mean_rank_same_topic": 3.5,
+    "worst_rank_same_topic": 6
+   }
+  ]
+ },
+ "negative_control": {
+  "method": "catalog topic 用 np.random.default_rng(20261020) 打乱，图不变",
+  "groups": {
+   "A_quantized_zh": {
+    "top1": 0.0,
+    "top3": 0.1,
+    "hits_top1": 0,
+    "hits_top3": 1,
+    "diagnostics": {
+     "mean_margin": -0.0873,
+     "min_margin": -0.12,
+     "mean_rank_same_topic": 30.57,
+     "mean_images_per_query": 5.7
+    }
+   },
+   "B_fp32_zh": {
+    "top1": 0.0,
+    "top3": 0.1,
+    "hits_top1": 0,
+    "hits_top3": 1,
+    "diagnostics": {
+     "mean_margin": -0.0916,
+     "min_margin": -0.123,
+     "mean_rank_same_topic": 31.773,
+     "mean_images_per_query": 5.7
+    }
+   },
+   "C_quantized_en": {
+    "top1": 0.0,
+    "top3": 0.0,
+    "hits_top1": 0,
+    "hits_top3": 0,
+    "diagnostics": {
+     "mean_margin": -0.0985,
+     "min_margin": -0.1922,
+     "mean_rank_same_topic": 30.632,
+     "mean_images_per_query": 5.7
+    }
+   },
+   "D_fp32_en": {
+    "top1": 0.0,
+    "top3": 0.1,
+    "hits_top1": 0,
+    "hits_top3": 1,
+    "diagnostics": {
+     "mean_margin": -0.109,
+     "min_margin": -0.1754,
+     "mean_rank_same_topic": 30.283,
+     "mean_images_per_query": 5.7
+    }
+   }
+  }
+ }
+}
