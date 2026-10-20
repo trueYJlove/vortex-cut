@@ -13,6 +13,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { AssetId, AssetPresentation, JobId, ProjectId, SemanticIndexSummary } from "@aivideo/contracts";
 
+import { Dialog } from "../Dialog.js";
+
 export interface SemanticSearchPanelProps {
   projectId: ProjectId | null;
   assetNames: Record<string, string>;
@@ -132,7 +134,7 @@ export function SemanticSearchPanel({ projectId, assetNames, assets, onClose }: 
   const modelMissing = Object.values(indexStates).some(summary => summary.reason === "model_not_installed");
 
   return (
-    <div className="modal semantic-search" role="dialog" aria-label="素材语义检索">
+    <Dialog label="素材语义检索" onClose={onClose} className="semantic-search">
       <header className="modal-header">
         <h2>素材语义检索</h2>
         <button type="button" className="icon-btn" onClick={onClose} aria-label="关闭素材语义检索">×</button>
@@ -215,6 +217,6 @@ export function SemanticSearchPanel({ projectId, assetNames, assets, onClose }: 
       <footer className="modal-actions">
         <button type="button" onClick={onClose}>关闭</button>
       </footer>
-    </div>
+    </Dialog>
   );
 }

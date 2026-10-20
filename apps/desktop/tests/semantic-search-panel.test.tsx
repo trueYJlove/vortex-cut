@@ -127,6 +127,19 @@ describe("SemanticSearchPanel", () => {
     await waitFor(() => expect(screen.getAllByText("排队中").length).toBe(2));
   });
 
+  it("必须是居中弹窗：走 Dialog 的 modal-backdrop，不能裸渲染 .modal", () => {
+    // 回归锁（2026-10-20 真实缺陷）：面板最初直接返回 <div className="modal">，
+    // 而居中完全由 .modal-backdrop（position: fixed; inset: 0; place-items: center）提供
+    // ⇒ 实际 UI 被挤到窗口左下角。当时 9 条测试全绿，因为都不检查 DOM 结构。
+    // 这里钉住「弹窗必须被 backdrop 包裹」，防止再次裸渲染。
+    mount();
+    const dialog = screen.getByRole("dialog", { name: "素材语义检索" });
+    expect(dialog.className).toContain("modal");
+    expect(dialog.parentElement?.className).toContain("modal-backdrop");
+    // aria-modal 只有 Dialog 会设：裸 div 没有
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+  });
+
   it("模型未安装：建索引给出可读提示而不是崩掉", async () => {
     const desktop = mount({
       indexSemanticAsset: vi.fn().mockResolvedValue(

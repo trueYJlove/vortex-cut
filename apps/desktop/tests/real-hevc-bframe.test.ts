@@ -1,12 +1,26 @@
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { demuxRange, MemoryRangeSource } from "../src/app/preview/bmff-demux.js";
 import { buildSampleIndex, locateByPts } from "../src/app/preview/sample-index.js";
 
-const REAL = "C:/Users/trueY/Videos/fdf0f0e269126269ed686f208b3063e3.mp4";
+// 真机素材不入库（13MB），只存在于开发者本机 ⇒ 位置不固定。
+// 原先硬编码单一绝对路径，素材一挪目录（整理进子文件夹）本测试就 ENOENT 变红，
+// 而它要验证的是 demux/PTS 网格逻辑，不是文件在哪。改为按候选路径探测，
+// 全部缺失时显式 skip 并说明原因——避免"素材没放对 ⇒ 看起来像代码坏了"。
+const CANDIDATES = [
+  "C:/Users/trueY/Videos/fdf0f0e269126269ed686f208b3063e3.mp4",
+  "C:/Users/trueY/Videos/20261020/fdf0f0e269126269ed686f208b3063e3.mp4",
+];
+const REAL = CANDIDATES.find(candidate => existsSync(candidate));
 
 describe("real fdf0f0e2 HEVC", () => {
   it("demux + PTS 网格 + B 帧 cts", async () => {
+    if (!REAL) {
+      // 真机素材需本机自备：缺它就跳过，不以红代偿。
+      console.warn("[skip] 未找到 fdf0f0e2 真机素材，候选路径：" + CANDIDATES.join(" | "));
+      return;
+    }
     const buf = await readFile(REAL);
     const data = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
     const r = await demuxRange(new MemoryRangeSource(data));
