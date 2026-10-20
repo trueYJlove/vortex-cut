@@ -1,0 +1,228 @@
+{
+  "fp32_754MB": {
+    "rows": [
+      {
+        "query": "红色的儿童滑梯",
+        "kind": "物体",
+        "accept": [
+          "playground_slide"
+        ],
+        "rank": 1,
+        "top": "playground_slide",
+        "top_score": 0.4469
+      },
+      {
+        "query": "有人在敲机械键盘",
+        "kind": "物体",
+        "accept": [
+          "keyboard_desk"
+        ],
+        "rank": 1,
+        "top": "keyboard_desk",
+        "top_score": 0.4495
+      },
+      {
+        "query": "汽车方向盘和导航屏幕",
+        "kind": "物体",
+        "accept": [
+          "car_driving"
+        ],
+        "rank": 1,
+        "top": "car_driving",
+        "top_score": 0.39
+      },
+      {
+        "query": "郁金香花海",
+        "kind": "物体",
+        "accept": [
+          "tulip_flowers"
+        ],
+        "rank": 1,
+        "top": "tulip_flowers",
+        "top_score": 0.4226
+      },
+      {
+        "query": "机器人在广场上跳舞",
+        "kind": "物体",
+        "accept": [
+          "robot_performance"
+        ],
+        "rank": 1,
+        "top": "robot_performance",
+        "top_score": 0.4775
+      },
+      {
+        "query": "小朋友在推小推车",
+        "kind": "口语",
+        "accept": [
+          "indoor_pets"
+        ],
+        "rank": 1,
+        "top": "indoor_pets",
+        "top_score": 0.5
+      },
+      {
+        "query": "一群小朋友在户外玩",
+        "kind": "口语",
+        "accept": [
+          "kids_hula_hoop",
+          "playground_slide"
+        ],
+        "rank": 1,
+        "top": "kids_hula_hoop",
+        "top_score": 0.4115
+      },
+      {
+        "query": "小孩在攀爬架上玩",
+        "kind": "口语",
+        "accept": [
+          "climbing_frame"
+        ],
+        "rank": 3,
+        "top": "playground_slide",
+        "top_score": 0.4111
+      },
+      {
+        "query": "妈妈抱着小朋友拍照",
+        "kind": "口语",
+        "accept": [
+          "tulip_flowers"
+        ],
+        "rank": 1,
+        "top": "tulip_flowers",
+        "top_score": 0.442
+      },
+      {
+        "query": "周末带孩子去游乐场",
+        "kind": "口语",
+        "accept": [
+          "indoor_pets",
+          "playground_slide"
+        ],
+        "rank": 1,
+        "top": "indoor_pets",
+        "top_score": 0.4898
+      }
+    ],
+    "top1": 0.9,
+    "top3": 1.0
+  },
+  "quantized_190MB": {
+    "rows": [
+      {
+        "query": "红色的儿童滑梯",
+        "kind": "物体",
+        "accept": [
+          "playground_slide"
+        ],
+        "rank": 1,
+        "top": "playground_slide",
+        "top_score": 0.4721
+      },
+      {
+        "query": "有人在敲机械键盘",
+        "kind": "物体",
+        "accept": [
+          "keyboard_desk"
+        ],
+        "rank": 1,
+        "top": "keyboard_desk",
+        "top_score": 0.4603
+      },
+      {
+        "query": "汽车方向盘和导航屏幕",
+        "kind": "物体",
+        "accept": [
+          "car_driving"
+        ],
+        "rank": 1,
+        "top": "car_driving",
+        "top_score": 0.4078
+      },
+      {
+        "query": "郁金香花海",
+        "kind": "物体",
+        "accept": [
+          "tulip_flowers"
+        ],
+        "rank": 1,
+        "top": "tulip_flowers",
+        "top_score": 0.4299
+      },
+      {
+        "query": "机器人在广场上跳舞",
+        "kind": "物体",
+        "accept": [
+          "robot_performance"
+        ],
+        "rank": 1,
+        "top": "robot_performance",
+        "top_score": 0.4756
+      },
+      {
+        "query": "小朋友在推小推车",
+        "kind": "口语",
+        "accept": [
+          "indoor_pets"
+        ],
+        "rank": 1,
+        "top": "indoor_pets",
+        "top_score": 0.4914
+      },
+      {
+        "query": "一群小朋友在户外玩",
+        "kind": "口语",
+        "accept": [
+          "kids_hula_hoop",
+          "playground_slide"
+        ],
+        "rank": 1,
+        "top": "kids_hula_hoop",
+        "top_score": 0.4155
+      },
+      {
+        "query": "小孩在攀爬架上玩",
+        "kind": "口语",
+        "accept": [
+          "climbing_frame"
+        ],
+        "rank": 4,
+        "top": "playground_slide",
+        "top_score": 0.4336
+      },
+      {
+        "query": "妈妈抱着小朋友拍照",
+        "kind": "口语",
+        "accept": [
+          "tulip_flowers"
+        ],
+        "rank": 1,
+        "top": "tulip_flowers",
+        "top_score": 0.4529
+      },
+      {
+        "query": "周末带孩子去游乐场",
+        "kind": "口语",
+        "accept": [
+          "indoor_pets",
+          "playground_slide"
+        ],
+        "rank": 1,
+        "top": "playground_slide",
+        "top_score": 0.4811
+      }
+    ],
+    "top1": 0.9,
+    "top3": 0.9
+  },
+  "items": [
+    "playground_slide",
+    "indoor_pets",
+    "keyboard_desk",
+    "kids_hula_hoop",
+    "climbing_frame",
+    "car_driving",
+    "robot_performance",
+    "tulip_flowers"
+  ]
+}
