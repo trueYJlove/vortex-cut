@@ -273,10 +273,16 @@ class SemanticIndexService:
     def search_text(self, project_id: str, query: str, limit: int = DEFAULT_SEARCH_K) -> list[dict[str, Any]]:
         """自然语言查询入口：分词 → 文本塔编码 → 项目内余弦检索。
 
-        ⚠️ **本切片的分词是占位实现**（`clip_tokenize` 的 TODO）。因此：
-        - 链路（HTTP → 编码 → 检索 → DTO）真实可用，可端到端断言；
-        - **检索质量不可用**，且本门 A8 已显式留空 —— 不得据此宣称命中率。
-        替换为真实 BPE 后无需改动本方法签名。
+        分词是**真实实现**：`clip_tokenize` 按 `tokenizer.json` 的 `model.type`
+        分派 —— `BPE`（英文 CLIP）/ `WordPiece`（中文 CLIP），两者均与
+        `tokenizers` 库逐 token 一致（含超长截断边界）。context length 由
+        **active model** 决定（中文 52 / 英文 77，见 `ActiveModel`）：两个文本塔
+        的 ONNX 输入维度不同，传错直接抛 shape 错误。
+
+        ⚠️ **但门 §3 A8（C2 命中率）仍显式留空** —— 原因是**评测语料限制**
+        （P142 语料无语义、P143 中文端到端未测），不是管线缺陷。因此：
+        - 链路（HTTP → 分词 → 编码 → 检索 → DTO）真实可用，可端到端断言；
+        - **不得据本方法宣称命中率**：管线可用 ≠ 能力达标，两者不能互相冒充。
         """
         active = self._require_active_model()
         tokenizer = active.text_path.parent / "tokenizer.json"

@@ -1050,3 +1050,53 @@ describe("AI 字幕优化（转录页发起）", () => {
     expect(screen.queryByText(/请稍后重试/)).not.toBeInTheDocument();
   });
 });
+
+describe("W3.1 素材语义检索入口", () => {
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+  async function semanticEntry(): Promise<HTMLElement> {
+    fireEvent.click(screen.getByRole("button", { name: "工具" }));
+    return await screen.findByRole("menuitem", { name: /素材语义检索/ });
+  }
+
+  it("从「工具」菜单能打开语义检索面板，并能关闭", async () => {
+    window.desktop = desktopApi();
+    render(<App />);
+    const entry = await semanticEntry();
+    await waitFor(() => expect(entry).toBeEnabled());
+    fireEvent.click(entry);
+    expect(await screen.findByRole("dialog", { name: "素材语义检索" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "素材语义检索" })).not.toBeInTheDocument());
+  });
+
+  it("未选择项目时入口禁用", async () => {
+    const api = desktopApi();
+    api.listProjects = vi.fn().mockResolvedValue({ items: [], next_cursor: null });
+    window.desktop = api;
+    render(<App />);
+    const entry = await semanticEntry();
+    expect(entry).toBeDisabled();
+    expect(screen.queryByRole("dialog", { name: "素材语义检索" })).not.toBeInTheDocument();
+  });
+
+  it("面板按素材显示名列出建索引入口，并用 generate: true 调用", async () => {
+    const api = desktopApi();
+    api.indexSemanticAsset = vi.fn().mockResolvedValue({
+      index_id: null, status: "queued", job_id: "job_semantic_1", frame_count: null,
+      algorithm_version: null, model_id: null, reason: null
+    });
+    window.desktop = api;
+    render(<App />);
+    await expectSwitcherName("演示项目");
+    fireEvent.click(await semanticEntry());
+    const panel = await screen.findByRole("dialog", { name: "素材语义检索" });
+    // 显示名来自 AssetPresentation.asset.display_name（不是 asset_id 切片）。
+    await waitFor(() => expect(within(panel).getByText(video.display_name)).toBeVisible());
+    fireEvent.click(within(panel).getByRole("button", { name: "为此项目建索引" }));
+    await waitFor(() => expect(api.indexSemanticAsset).toHaveBeenCalledWith({
+      project_id: project.project_id, asset_id: video.asset_id, generate: true
+    }));
+  });
+});
+

@@ -17,6 +17,7 @@ import { CaptionsProviderPanel } from "./captions-provider/CaptionsProviderPanel
 import { ProviderSettingsDialog } from "./provider-settings/ProviderSettingsDialog.js";
 import { EditingToolsPanel } from "./editing-grammar/EditingToolsPanel.js";
 import { AngleSyncPanel } from "./angle-sync/AngleSyncPanel.js";
+import { SemanticSearchPanel } from "./semantic-search/SemanticSearchPanel.js";
 import { Dialog } from "./Dialog.js";
 import { errorCode, safeErrorMessage, safeTaskErrorMessage } from "./safeErrors.js";
 import { formatLocalStamp } from "./localTime.js";
@@ -173,6 +174,11 @@ export function App() {
   const [assetView] = useState<"list" | "grid">("list");
   // 素材箱双击预览：仅播放素材，不加入时间线。任何时间线交互都会退出该模式。
   const [libraryPreviewId, setLibraryPreviewId] = useState<string | null>(null);
+  // W3.1 语义检索命中只带 asset_id，显示名由素材列表派生（字段是 asset.display_name）。
+  const semanticAssetNames = useMemo(
+    () => Object.fromEntries(assets.map(item => [item.asset.asset_id, item.asset.display_name])),
+    [assets]
+  );
   const visibleAssets = useMemo(() => assets.filter(item => {
     const matchesQuery = item.asset.display_name.toLocaleLowerCase().includes(assetQuery.trim().toLocaleLowerCase());
     const matchesKind = assetFilter === "all" || item.asset.kind === assetFilter;
@@ -282,6 +288,7 @@ export function App() {
   const [worklistOpen, setWorklistOpen] = useState(false);
   const [editingGrammarOpen, setEditingGrammarOpen] = useState(false);
   const [angleSyncOpen, setAngleSyncOpen] = useState(false);
+  const [semanticSearchOpen, setSemanticSearchOpen] = useState(false);
   const [editingToolsTool, setEditingToolsTool] = useState<"remove_pauses" | "beat_sync" | "lj_cut" | null>(null);
   const [editingToolsClipId, setEditingToolsClipId] = useState<string | null>(null);
   const openEditingTools = (tool: "remove_pauses" | "beat_sync" | "lj_cut", clipId?: string | null) => {
@@ -2545,7 +2552,7 @@ export function App() {
     编辑: [{ label: "撤销", icon: Undo2, action: () => void undoRedo("undo"), disabled: Boolean(commandDisabledReason("timeline.undo")) }, { label: "重做", icon: Redo2, action: () => void undoRedo("redo"), disabled: Boolean(commandDisabledReason("timeline.redo")) }],
     时间线: [{ label: "创建空时间线", icon: SquarePlus, action: () => void createTimeline({ kind: "empty" }), disabled: Boolean(commandDisabledReason("timeline.create")) }, { divider: true }, { label: "拆分所选片段", icon: Scissors, action: () => runCommand("timeline.split"), disabled: Boolean(commandDisabledReason("timeline.split")) }, { label: "生成预览", icon: MonitorPlay, action: () => runCommand("preview.generate"), disabled: Boolean(commandDisabledReason("preview.generate")) }, { label: "导出", icon: Upload, action: () => runCommand("export.open"), disabled: Boolean(commandDisabledReason("export.open")) }],
     界面: [{ label: "恢复默认布局", icon: LayoutPanelLeft, action: () => { setLeftWidth(280); setRightWidth(300); setTimelineHeight(230); } }, { label: "命令搜索", icon: CommandIcon, action: () => setCommandSearchOpen(true) }, { label: "快捷键设置", icon: Keyboard, action: () => setShortcutsOpen(true) }],
-    工具: [{ group: "AI" }, { label: "Provider 设置", icon: FolderCog, action: () => setProviderSettingsOpen(true) }, { label: "AI 助手", icon: WandSparkles, action: () => setAgentOpen(true), disabled: !project }, { label: "AI 工作单", icon: WandSparkles, action: () => setWorklistOpen(true), disabled: !project }, { label: "AI 粗剪", icon: Sparkles, action: () => void openAi(), disabled: Boolean(commandDisabledReason("ai.open")) }, { label: "AI 修改", icon: WandSparkles, action: () => void openPatch(), disabled: Boolean(commandDisabledReason("ai.revise")) }, { label: "剪辑手法", icon: Scissors, action: () => openEditingTools("remove_pauses"), disabled: !project }, { label: "机位同步", icon: Video, action: () => setAngleSyncOpen(true), disabled: !project }, { label: "剪辑语法（高级）", icon: Scissors, action: () => { setEditingToolsTool(null); setEditingGrammarOpen(true); }, disabled: !project }, { label: "版本比较", icon: GitCompare, action: () => void openRevisionCompare(), disabled: Boolean(commandDisabledReason("tools.compare")) }, { divider: true }, { label: "镜头需求", icon: Clapperboard, action: () => setShotRequirementsOpen(true), disabled: Boolean(commandDisabledReason("tools.shots")) }, { label: "生成验证（模拟）", icon: FlaskConical, action: () => setGenerationOpen(true), disabled: Boolean(commandDisabledReason("tools.verify")) }, { label: "真实图片生成", icon: ImageIcon, action: () => setProviderImageGenerationOpen(true), disabled: Boolean(commandDisabledReason("tools.imageGen")) }],
+    工具: [{ group: "AI" }, { label: "Provider 设置", icon: FolderCog, action: () => setProviderSettingsOpen(true) }, { label: "AI 助手", icon: WandSparkles, action: () => setAgentOpen(true), disabled: !project }, { label: "AI 工作单", icon: WandSparkles, action: () => setWorklistOpen(true), disabled: !project }, { label: "AI 粗剪", icon: Sparkles, action: () => void openAi(), disabled: Boolean(commandDisabledReason("ai.open")) }, { label: "AI 修改", icon: WandSparkles, action: () => void openPatch(), disabled: Boolean(commandDisabledReason("ai.revise")) }, { label: "剪辑手法", icon: Scissors, action: () => openEditingTools("remove_pauses"), disabled: !project }, { label: "机位同步", icon: Video, action: () => setAngleSyncOpen(true), disabled: !project }, { label: "素材语义检索", icon: Search, action: () => setSemanticSearchOpen(true), disabled: !project }, { label: "剪辑语法（高级）", icon: Scissors, action: () => { setEditingToolsTool(null); setEditingGrammarOpen(true); }, disabled: !project }, { label: "版本比较", icon: GitCompare, action: () => void openRevisionCompare(), disabled: Boolean(commandDisabledReason("tools.compare")) }, { divider: true }, { label: "镜头需求", icon: Clapperboard, action: () => setShotRequirementsOpen(true), disabled: Boolean(commandDisabledReason("tools.shots")) }, { label: "生成验证（模拟）", icon: FlaskConical, action: () => setGenerationOpen(true), disabled: Boolean(commandDisabledReason("tools.verify")) }, { label: "真实图片生成", icon: ImageIcon, action: () => setProviderImageGenerationOpen(true), disabled: Boolean(commandDisabledReason("tools.imageGen")) }],
     帮助: [{ label: "用户使用手册", icon: BookOpen, action: () => showNotice("请查看 docs/VORTEX_CUT_USER_MANUAL.md", "info") }]
   };
   return <main className="editor-shell" style={{ "--left-width": `${leftWidth}px`, "--right-width": `${rightWidth}px`, "--timeline-height": `${timelineHeight}px` } as React.CSSProperties} onClick={() => activeMenu && setActiveMenu(null)}>
@@ -2739,6 +2746,12 @@ export function App() {
       assets={assets}
       onClose={() => setAngleSyncOpen(false)}
       onNotify={message => showNotice(message, "success")}
+    />}
+    {semanticSearchOpen && project && <SemanticSearchPanel
+      projectId={project.project_id}
+      assetNames={semanticAssetNames}
+      assets={assets}
+      onClose={() => setSemanticSearchOpen(false)}
     />}
     {editingGrammarOpen && project && !editingToolsTool && <EditingGrammarPanel
       projectId={project.project_id}

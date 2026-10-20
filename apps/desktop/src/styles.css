@@ -2123,3 +2123,31 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
   flex: none; color: #d1a453; font-size: var(--dlg-fs-label);
   font-variant-numeric: tabular-nums;
 }
+
+/* ── 语义索引（检索面板内建索引入口） ── */
+.modal.semantic-search .semantic-index {
+  margin-top: 14px; padding-top: 12px; border-top: 1px solid #303b40;
+}
+.modal.semantic-search .semantic-index-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-bottom: 6px;
+}
+.modal.semantic-search .semantic-index-list {
+  margin: 8px 0 0; padding: 0; list-style: none;
+  max-height: 30vh; overflow-y: auto;
+}
+.modal.semantic-search .semantic-index-list li {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+  padding: 6px 0; border-bottom: 1px solid #303b40;
+}
+.modal.semantic-search .index-name { overflow-wrap: anywhere; }
+.modal.semantic-search .index-status { flex: none; color: #8b9aa1; font-size: var(--dlg-fs-label); }
+.modal.semantic-search .index-status.ready { color: var(--dlg-primary); }
+.modal.semantic-search .index-status.unavailable,
+.modal.semantic-search .index-status.failed,
+.modal.semantic-search .index-status.stale { color: var(--dlg-warn); }
+.modal.semantic-search .index-hint { flex-basis: 100%; color: var(--dlg-warn); }
+.modal.semantic-search .semantic-index-hint {
+  margin: 8px 0 0; color: var(--dlg-warn); font-size: var(--dlg-fs-body);
+}
+

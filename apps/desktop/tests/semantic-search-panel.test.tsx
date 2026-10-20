@@ -1,22 +1,41 @@
 /**
  * W3.1 语义检索面板测试。
  *
- * 重点不是「能渲染」，而是钉住三条纪律：
+ * 重点不是「能渲染」，而是钉住这些纪律：
  * 1) A8 留空 ⇒ UI 不得出现命中率/准确率话术（P142）；
  * 2) 模型未装 ⇒ 给人话出路，不抛内部错误串；
- * 3) 空结果与失败是不同状态（不把失败显示成「没有匹配」）。
+ * 3) 空结果与失败是不同状态（不把失败显示成「没有匹配」）；
+ * 4) 索引是检索的前提 ⇒ 面板必须给出建索引入口，且调用时 generate: true。
  */
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ProjectId } from "@aivideo/contracts";
+import type { AssetPresentation, ProjectId } from "@aivideo/contracts";
 import { SemanticSearchPanel } from "../src/app/semantic-search/SemanticSearchPanel.js";
 
 const PROJECT = "project_1" as ProjectId;
+const now = "2026-08-11T00:00:00.000Z";
 
-function mount(overrides: Record<string, unknown> = {}) {
+const asset = (id: string, displayName: string, kind: "video" | "image" | "audio") => ({
+  asset: {
+    asset_id: id, project_id: PROJECT, kind, storage_mode: "external", display_name: displayName,
+    fingerprint: "a".repeat(64), size_bytes: 10, modified_at: now, availability: "available",
+    media_info: null, created_at: now, updated_at: now,
+  },
+  media_url: null,
+}) as unknown as AssetPresentation;
+
+const ASSETS = [asset("asset_1", "素材一.mp4", "video"), asset("asset_2", "海报.png", "image")];
+
+const indexSummary = (overrides: Record<string, unknown> = {}) => ({
+  index_id: null, status: null, job_id: null, frame_count: null,
+  algorithm_version: null, model_id: null, reason: null, ...overrides,
+});
+
+function mount(overrides: Record<string, unknown> = {}, props: Record<string, unknown> = {}) {
   const desktop = {
     searchSemantic: vi.fn().mockResolvedValue({ query: "car", hits: [] }),
-    indexSemanticAsset: vi.fn(),
+    indexSemanticAsset: vi.fn().mockResolvedValue(indexSummary()),
+    subscribeJob: vi.fn().mockReturnValue(() => undefined),
     ...overrides
   };
   (window as unknown as { desktop: unknown }).desktop = desktop;
@@ -24,7 +43,9 @@ function mount(overrides: Record<string, unknown> = {}) {
     <SemanticSearchPanel
       projectId={PROJECT}
       assetNames={{ asset_1: "素材一" }}
+      assets={ASSETS}
       onClose={() => {}}
+      {...props}
     />
   );
   return desktop;
@@ -80,5 +101,53 @@ describe("SemanticSearchPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "检索" }));
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("请输入"));
     expect(desktop.searchSemantic).not.toHaveBeenCalled();
+  });
+
+  it("建索引入口以 generate: true 逐条调用，且只针对画面素材", async () => {
+    const desktop = mount({
+      indexSemanticAsset: vi.fn().mockResolvedValue(indexSummary({ status: "queued", job_id: "job_1" }))
+    });
+    // 音频素材不该出现：Core 对无画面轨的素材只会落 unavailable。
+    expect(document.body.textContent).not.toMatch(/旁白\.mp3/);
+    fireEvent.click(screen.getByRole("button", { name: "为此项目建索引" }));
+    await waitFor(() => expect(desktop.indexSemanticAsset).toHaveBeenCalledTimes(2));
+    expect(desktop.indexSemanticAsset).toHaveBeenCalledWith({
+      project_id: PROJECT, asset_id: "asset_1", generate: true
+    });
+    expect(desktop.indexSemanticAsset).toHaveBeenCalledWith({
+      project_id: PROJECT, asset_id: "asset_2", generate: true
+    });
+  });
+
+  it("建索引后显示排队状态与素材名", async () => {
+    mount({
+      indexSemanticAsset: vi.fn().mockResolvedValue(indexSummary({ status: "queued", job_id: "job_1" }))
+    });
+    fireEvent.click(screen.getByRole("button", { name: "为此项目建索引" }));
+    await waitFor(() => expect(screen.getAllByText("排队中").length).toBe(2));
+  });
+
+  it("模型未安装：建索引给出可读提示而不是崩掉", async () => {
+    const desktop = mount({
+      indexSemanticAsset: vi.fn().mockResolvedValue(
+        indexSummary({ status: "unavailable", reason: "model_not_installed" })
+      )
+    });
+    fireEvent.click(screen.getByRole("button", { name: "为此项目建索引" }));
+    await waitFor(() => expect(document.body.textContent).toContain("语义模型尚未安装，请先在设置中下载 CLIP 模型"));
+    expect(document.body.textContent).not.toContain("model_not_installed");
+    expect(desktop.indexSemanticAsset).toHaveBeenCalledTimes(2);
+    // 面板仍在（没有抛异常炸掉整棵树）。
+    expect(screen.getByRole("dialog", { name: "素材语义检索" })).toBeInTheDocument();
+  });
+
+  it("建索引抛 SEMANTIC_MODEL_NOT_INSTALLED：给可操作提示而非内部错误串", async () => {
+    mount({
+      indexSemanticAsset: vi.fn().mockRejectedValue(new Error("SEMANTIC_MODEL_NOT_INSTALLED"))
+    });
+    fireEvent.click(screen.getByRole("button", { name: "为此项目建索引" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("CLIP 模型"));
+    expect(screen.getByRole("alert").textContent).not.toContain("SEMANTIC_MODEL_NOT_INSTALLED");
+    expect(screen.getByRole("dialog", { name: "素材语义检索" })).toBeInTheDocument();
   });
 });
