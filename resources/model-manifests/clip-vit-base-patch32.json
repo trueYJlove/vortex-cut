@@ -7,7 +7,7 @@
   "purpose": "Local image-text embedding for asset-pool semantic search (W3.1)",
   "download_url": "https://www.modelscope.cn/models/Xenova/clip-vit-base-patch32/resolve/master/onnx/vision_model.onnx",
   "trusted_source_id": "modelscope-xenova-clip-vit-base-patch32",
-  "size_bytes": 351685709,
+  "size_bytes": 607973425,
   "installed_size_bytes": 608166615,
   "sha256": "fd6e1402a588279d1723c7534d4bcba5bc0b14b47dfab0e46f8c47b8270d7d40",
   "supports_word_timestamps": false,

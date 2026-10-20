@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +47,24 @@ TEXT_FILE = "text_model.onnx"
 ZH_MODEL_ID = "chinese-clip-vit-base-patch16"
 ZH_CONTEXT_LEN = 52
 
+EN_CONTEXT_LEN = 77
+
+# 模型选择顺序 = 「中文优先」（用户 2026-10-19 裁决）：中文 ready 则用它，
+# 否则回退英文；两者都不可用 ⇒ 未安装。
+#
+# 为什么要有这张表：修复前模型 id / revision / context length 分散在三处
+# （`_model_paths()` 写死英文 MODEL_ID、`_persist()` 写死英文 revision、
+# `search_text()` 按分词器类型猜 context length），三套判据各自漂移，
+# 结果是「装了中文模型也不会被使用」且索引永远记成英文模型。
+_MODEL_PREFERENCE: tuple[str, ...] = (ZH_MODEL_ID, MODEL_ID)
+_MODEL_CONTEXT_LENGTH = {ZH_MODEL_ID: ZH_CONTEXT_LEN, MODEL_ID: EN_CONTEXT_LEN}
+# 受信清单不可达时的兜底 revision（正常路径读清单：ready 校验本就按清单
+# revision 做，写死一份等于允许两者漂移）。
+_MODEL_REVISION_FALLBACK = {
+    ZH_MODEL_ID: "zh-export-2026-10-19",
+    MODEL_ID: "xenova-clip-vit-base-patch32",
+}
+
 # CLIP 标准输入（ViT-B/32）：224×224 RGB、像素归一到 [-1,1]。
 CLIP_IMAGE_SIZE = 224
 # ImageNet 统计量——CLIP 官方 preprocessor_config.json 同值。
@@ -59,6 +78,22 @@ DEFAULT_SAMPLE_INTERVAL_S = 2.0
 class SemanticError(DomainError):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(code, message)
+
+
+@dataclass(frozen=True)
+class ActiveModel:
+    """当前生效的语义模型（模型选择收敛于此，唯一来源）。
+
+    model_id / revision 决定索引行归属与检索过滤：两个模型的 embedding
+    **同为 512 维**，混排不会抛 shape 错误，只会静默地把两个向量空间的
+    向量做 cosine —— 所以归属必须显式携带，不能靠维度区分。
+    """
+
+    model_id: str
+    revision: str
+    context_len: int
+    vision_path: Path
+    text_path: Path
 
 
 def rgb_frames_args(input_path: str, interval_s: float = DEFAULT_SAMPLE_INTERVAL_S) -> list[str]:
@@ -161,7 +196,38 @@ class SemanticIndexService:
 
     # ---------------------------------------------------------------- 查询
 
-    def latest_index(self, asset_id: str) -> dict[str, Any] | None:
+    def latest_index(
+        self, asset_id: str, *, active: ActiveModel | None = None
+    ) -> dict[str, Any] | None:
+        """该素材在**当前 active model** 下的最新索引行；模型切换后旧行不再返回。
+
+        为什么要按 model_id / model_revision 过滤：两个模型的 embedding 同为
+        512 维，混在一起不会抛 shape 错误，只会**静默地**把两个向量空间的向量
+        做 cosine —— 返回一堆看似正常、实际无意义的排序。
+
+        active 为 None（无模型可用）时不加过滤：此时无从归属，调用方（摘要）
+        需要看到既有行才能报告「未安装」，检索侧另有守卫。
+
+        ⚠️ 不传 `active` 时本方法会自己解析模型：解析要校验大文件 sha256，
+        批量调用方（摘要）请显式传入以免重复解析。
+        """
+        if active is None:
+            active = self._active_model()
+        sql = (
+            "SELECT * FROM asset_semantic_index WHERE asset_id=? AND algorithm_version=? "
+            "AND status IN ('ready','unavailable')"
+        )
+        params: list[Any] = [asset_id, INDEX_ALGORITHM_VERSION]
+        if active is not None:
+            sql += " AND model_id=? AND model_revision=?"
+            params.extend([active.model_id, active.revision])
+        sql += " ORDER BY created_at DESC LIMIT 1"
+        with self.db.connection() as db:
+            row = db.execute(sql, tuple(params)).fetchone()
+        return dict(row) if row else None
+
+    def _latest_any_model_index(self, asset_id: str) -> dict[str, Any] | None:
+        """任一模型的最近索引行（仅用于「别的模型产的索引」失鲜上报）。"""
         with self.db.connection() as db:
             row = db.execute(
                 "SELECT * FROM asset_semantic_index WHERE asset_id=? AND algorithm_version=? "
@@ -171,13 +237,30 @@ class SemanticIndexService:
         return dict(row) if row else None
 
     def index_summary(self, asset_row: dict[str, Any]) -> dict[str, Any] | None:
-        row = self.latest_index(str(asset_row["id"]))
-        if not row:
-            return None
-        stale = str(row.get("source_fingerprint") or "") != str(asset_row.get("fingerprint") or "")
+        """端点摘要。**别的模型产的索引一律报 stale**（不可用，不是可比较的）。
+
+        stale 是本仓既有的读时状态词汇（`cv_signals.analysis_summary` :1244、
+        `speaker_service.summary` :411、契约 `TranscriptStatus`），而 `asset_semantic_index`
+        的 status CHECK 集合不含 stale —— 与指纹失鲜一样，只在读侧计算。
+        """
+        asset_id = str(asset_row["id"])
+        active = self._active_model()
+        row = self.latest_index(asset_id, active=active)
+        owned = row is not None
+        if row is None:
+            row = self._latest_any_model_index(asset_id)
+            if row is None:
+                return None
+        status = str(row["status"])
+        if active is not None and not owned:
+            status = "stale"
+        elif status == "ready" and str(row.get("source_fingerprint") or "") != str(
+            asset_row.get("fingerprint") or ""
+        ):
+            status = "stale"
         return {
             "index_id": row["id"],
-            "status": "stale" if stale and row["status"] == "ready" else row["status"],
+            "status": status,
             "reason": row.get("reason"),
             "frame_count": row.get("frame_count") or 0,
             "algorithm_version": row.get("algorithm_version"),
@@ -195,33 +278,48 @@ class SemanticIndexService:
         - **检索质量不可用**，且本门 A8 已显式留空 —— 不得据此宣称命中率。
         替换为真实 BPE 后无需改动本方法签名。
         """
-        vision, text_path = self._model_paths()
-        if text_path is None:
-            raise SemanticError("SEMANTIC_MODEL_NOT_INSTALLED", "语义模型尚未安装")
-        tokenizer = text_path.parent / "tokenizer.json"
-        # context length 必须与**导出该塔时**一致：现役英文 CLIP 77，
-        # 中文 CLIP 52（其 text 塔 ONNX 的 sequence_length 是固定维度，
-        # 传错长度会直接抛 shape 错误 —— 见 P151 实测）。
-        context_len = ZH_CONTEXT_LEN if _tokenizer_kind(tokenizer) == "WordPiece" else 77
-        input_ids, mask = clip_tokenize(query, tokenizer, context_len)
-        encoder = ClipEncoder(vision, text_path)  # type: ignore[arg-type]
+        active = self._require_active_model()
+        tokenizer = active.text_path.parent / "tokenizer.json"
+        # context length 由模型决定，与 id 同源（见 ActiveModel）：中文 CLIP 的
+        # text 塔 sequence_length 是固定维度 52，传错直接抛 shape 错误（P151 实测）。
+        input_ids, mask = clip_tokenize(query, tokenizer, active.context_len)
+        encoder = ClipEncoder(active.vision_path, active.text_path)
         query_vec = encoder.encode_text(input_ids, mask)
-        return self.search(project_id, query_vec, limit)
+        return self.search(project_id, query_vec, limit, active=active)
 
     def search(
         self,
         project_id: str,
         query_vec: np.ndarray,
         limit: int = DEFAULT_SEARCH_K,
+        *,
+        active: ActiveModel | None = None,
     ) -> list[dict[str, Any]]:
-        """项目内语义检索：只读已 ready 的索引行，**绝不跨项目**。"""
+        """项目内语义检索：只读已 ready 且属于 **active model** 的索引行，绝不跨项目。
+
+        ⚠️ 这里的 model_id / model_revision 过滤是**静默错误的唯一防线**：英文与
+        中文 CLIP 的 embedding 同为 512 维，缺了它不会报错、不会丢行，只会把两个
+        向量空间的向量做 cosine —— 返回一堆看似正常、实际无意义的排序。
+
+        active model 解析不出来时无从过滤（此时不存在「active」可言）；唯一调用方
+        `search_text()` 已在编码前抛 SEMANTIC_MODEL_NOT_INSTALLED。
+
+        `active` 由调用方传入（`search_text()` 已解析过）：模型解析要校验大文件
+        的 sha256，一次检索不应解析两遍。
+        """
+        if active is None:
+            active = self._active_model()
+        sql = (
+            "SELECT i.asset_id, i.embeddings_blob, i.embedding_dim, i.frames_json "
+            "FROM asset_semantic_index i JOIN assets a ON a.id = i.asset_id "
+            "WHERE a.project_id = ? AND i.algorithm_version = ? AND i.status = 'ready'"
+        )
+        params: list[Any] = [project_id, INDEX_ALGORITHM_VERSION]
+        if active is not None:
+            sql += " AND i.model_id = ? AND i.model_revision = ?"
+            params.extend([active.model_id, active.revision])
         with self.db.connection() as db:
-            rows = db.execute(
-                "SELECT i.asset_id, i.embeddings_blob, i.embedding_dim, i.frames_json "
-                "FROM asset_semantic_index i JOIN assets a ON a.id = i.asset_id "
-                "WHERE a.project_id = ? AND i.algorithm_version = ? AND i.status = 'ready'",
-                (project_id, INDEX_ALGORITHM_VERSION),
-            ).fetchall()
+            rows = db.execute(sql, tuple(params)).fetchall()
 
         candidates: list[tuple[str, np.ndarray]] = []
         for row in rows:
@@ -297,15 +395,19 @@ class SemanticIndexService:
         stage: Any = None,
     ) -> dict[str, Any]:
         """解码抽帧 → 编码 → 落库。模型缺失 ⇒ unavailable（显式降级，非崩溃）。"""
-        vision, text = self._model_paths()
-        if vision is None or text is None:
+        active = self._active_model()
+        # 索引行的 model_id / model_revision 必须与**产生这些向量的模型**一致，
+        # 否则检索侧按 active model 过滤时会把它们当作别人的行静默排除。
+        if active is None:
             return self._persist(asset_id, source_fingerprint, "unavailable",
-                                 reason="model_not_installed", frames=[], matrix=None)
+                                 reason="model_not_installed", frames=[], matrix=None,
+                                 active=None)
 
         frames_bytes = await self._decode_frames(input_path, cancel_event)
         if frames_bytes is None:
             return self._persist(asset_id, source_fingerprint, "unavailable",
-                                 reason="no_video_stream", frames=[], matrix=None)
+                                 reason="no_video_stream", frames=[], matrix=None,
+                                 active=active)
         if stage:
             stage("semantic:encode")
 
@@ -314,36 +416,74 @@ class SemanticIndexService:
         if picked:
             frames_bytes = [frames_bytes[i] for i in picked]
 
-        encoder = ClipEncoder(vision, text)
+        encoder = ClipEncoder(active.vision_path, active.text_path)
         batch = np.stack([preprocess_image(f)[0] for f in frames_bytes]) if frames_bytes else np.zeros((0, 3, CLIP_IMAGE_SIZE, CLIP_IMAGE_SIZE), dtype=np.float32)
         matrix = encoder.encode_image(batch) if len(batch) else np.zeros((0, 0))
         if matrix.size == 0:
             return self._persist(asset_id, source_fingerprint, "unavailable",
-                                 reason="no_frames", frames=[], matrix=None)
+                                 reason="no_frames", frames=[], matrix=None,
+                                 active=active)
         return self._persist(asset_id, source_fingerprint, "ready", reason=None,
-                             frames=list(range(len(frames_bytes))), matrix=matrix)
+                             frames=list(range(len(frames_bytes))), matrix=matrix,
+                             active=active)
 
     # ---------------------------------------------------------------- 内部
 
-    def _model_paths(self) -> tuple[Path | None, Path | None]:
-        """经 model_manager 解析安装目录；未就绪返回 (None, None)。
+    def _active_model(self) -> ActiveModel | None:
+        """按「中文优先」解析当前应使用的模型；都不可用返回 None。
 
-        走 registry 而不是自己拼路径：受信清单/目录约定/就绪标记集中一处，
-        与 faster-whisper / CAM++ 同一条路径。
+        **模型选择的唯一来源**：模型 id、revision、context length、双塔路径
+        全部从这里取，不允许调用方各自写死或按分词器类型另判一套。
+
+        走 model_manager.ready_path 而不是自己拼路径：受信清单 / 目录约定 /
+        就绪标记集中一处，与 faster-whisper / CAM++ 同一条路径。ready_path
+        已返回该模型的安装目录（models/clip/<model_id>/），不可再拼一层——
+        曾在此多拼一次导致「模型已装却报未安装」。
         """
         if self.model_manager is None:
-            return None, None
+            return None
+        for model_id in _MODEL_PREFERENCE:
+            try:
+                root = Path(self.model_manager.ready_path(model_id))
+            except Exception:
+                continue
+            vision = root / VISION_FILE
+            text = root / TEXT_FILE
+            if not (vision.is_file() and text.is_file()):
+                continue
+            return ActiveModel(
+                model_id=model_id,
+                revision=self._model_revision(model_id),
+                context_len=_MODEL_CONTEXT_LENGTH[model_id],
+                vision_path=vision,
+                text_path=text,
+            )
+        return None
+
+    def _model_revision(self, model_id: str) -> str:
+        """该模型受信清单里的 revision（索引行的归属凭据之一）。
+
+        读清单而不是写死：ready 判定本就按清单 revision 做，写死一份等于允许
+        两者漂移。清单不可达时退回兜底常量（宁可记录得粗，也不要整个检索崩）。
+        """
+        registry = getattr(self.model_manager, "registry", None)
         try:
-            # ready_path 已返回**该模型的安装目录**（models/clip/<model_id>/），
-            # 不可再拼一层——曾在此多拼一次导致「模型已装却报未安装」。
-            root = Path(self.model_manager.ready_path(MODEL_ID))
+            return str(registry.get(model_id).revision)
         except Exception:
+            return _MODEL_REVISION_FALLBACK.get(model_id, "")
+
+    def _require_active_model(self) -> ActiveModel:
+        active = self._active_model()
+        if active is None:
+            raise SemanticError("SEMANTIC_MODEL_NOT_INSTALLED", "语义模型尚未安装")
+        return active
+
+    def _model_paths(self) -> tuple[Path | None, Path | None]:
+        """active model 的双塔路径；未就绪返回 (None, None)。"""
+        active = self._active_model()
+        if active is None:
             return None, None
-        vision = root / VISION_FILE
-        text = root / TEXT_FILE
-        if vision.is_file() and text.is_file():
-            return vision, text
-        return None, None
+        return active.vision_path, active.text_path
 
     async def _decode_frames(self, input_path: Path, cancel_event: asyncio.Event | None) -> list[np.ndarray] | None:
         """单遍 FFmpeg 抽帧到 stdout；无视频流 ⇒ None。"""
@@ -372,7 +512,17 @@ class SemanticIndexService:
     def _persist(
         self, asset_id: str, source_fingerprint: str, status: str, *,
         reason: str | None, frames: list[int], matrix: np.ndarray | None,
+        active: ActiveModel | None,
     ) -> dict[str, Any]:
+        """落一行索引。model_id / model_revision 取自 active model（唯一来源）。
+
+        不可用时 active 为 None：行仍要落（availability 是显式降级信号），归属
+        记 None —— 检索侧按 model_id 过滤，NULL 不会与任何 active model 相等。
+
+        `active` 由 index_path 传入（它已解析过，不重复解析——解析要校验大文件 sha256）。
+        """
+        model_id = active.model_id if active is not None else None
+        model_revision = active.revision if active is not None else None
         index_id = new_id()
         now = utc_now()
         dim = int(matrix.shape[1]) if matrix is not None and matrix.ndim == 2 and matrix.shape[1] else 0
@@ -386,7 +536,7 @@ class SemanticIndexService:
                 (
                     index_id, asset_id, source_fingerprint, INDEX_ALGORITHM_VERSION,
                     status, reason, len(frames), dim, json_dumps(frames), blob,
-                    MODEL_ID, "xenova-clip-vit-base-patch32", now, now, now,
+                    model_id, model_revision, now, now, now,
                 ),
             )
         return {"index_id": index_id, "status": status, "reason": reason, "frames": frames}

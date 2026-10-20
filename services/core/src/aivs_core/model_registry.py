@@ -5,6 +5,8 @@ import hashlib
 import importlib.util
 import json
 import math
+import os
+import re
 import shutil
 import urllib.error
 import urllib.request
@@ -15,6 +17,12 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .database import Database, utc_now
+
+_WINDOWS_DRIVE = re.compile(r"^[A-Za-z]:")
+# os.path.expandvars 只认名字、不认未定义变量，残留的两种写法同为"未设置"。
+_UNEXPANDED_VAR = re.compile(
+    r"[$]{([A-Za-z_][A-Za-z0-9_]*)}|[$]([A-Za-z_][A-Za-z0-9_]*)|%([A-Za-z_][A-Za-z0-9_]*)%"
+)
 
 _HTTP_USER_AGENT = (
     "Mozilla/5.0 (aivideo-core model download; "
@@ -368,11 +376,20 @@ class ModelManager:
             url = manifest.download_url.rstrip("/") + "/" + model_file.path
         else:
             raise ModelError("MODEL_DOWNLOAD_FAILED", "模型下载失败")
+        # 本地来源按机器可配置：清单写
+        #   file:///${AIVS_MODEL_SOURCE_ROOT}/chinese-clip-vit-base-patch16/vision_model.onnx
+        # 由环境变量指出产物在本机的落点（754MB 导出产物不入库，见
+        # tools/model_export/）。展开必须在 urlparse 之前做，否则变量名会被
+        # 当成 netloc；展开后仍残留的变量引用正是"变量未设置"，交给
+        # _local_source_url 转成可操作的报错并返回规范化 URL。
+        url = os.path.expanduser(os.path.expandvars(url))
         parsed = urlparse(url)
         if parsed.scheme != "https" and parsed.scheme not in {"file", "http"}:
             raise ModelError("MODEL_DOWNLOAD_FAILED", "模型下载失败")
         if parsed.scheme == "http" and parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
             raise ModelError("MODEL_DOWNLOAD_FAILED", "模型下载失败")
+        if parsed.scheme == "file":
+            return _local_source_url(parsed, model_file)
         return url
 
     def _installation(self, model_id: str) -> Any:
@@ -643,6 +660,78 @@ def _relative_path(value: Any) -> str:
     if path.is_absolute() or ".." in path.parts or "\\" in value:
         raise ValueError("manifest path must be relative")
     return str(path)
+
+
+def _local_source_url(parsed: Any, model_file: ModelFile) -> str:
+    """校验本地来源，并返回规范化的 file:// URL。
+
+    为什么返回重写后的 URL 而不是原串：`_download_file` 会自己再
+    `urlparse` 一次并只取 `parsed.path`。清单写成
+    `file://${VAR}/...` 时，展开后盘符落进了 netloc（Windows），原串透传
+    会让 `parsed.path` 变成 `/vision_model.onnx`——悄悄读错文件。
+    改成 `Path.as_uri()` 产出的 `file:///C:/...` 形式两边都认，顺带把空格/中文正确转义。
+
+    为什么复用 MODEL_DOWNLOAD_FAILED 而不新增错误码：MODEL_* 是
+    docs/STAGE1B_CONTRACT_FREEZE.md:283-291 冻结的稳定码集合，
+    packages/contracts/src/index.ts:116-118 同步维护同一集合；
+    app.py:1148 只按 code 选 HTTP 状态、message 原样透出。对调用方而言
+    "本地来源没准备好"与"下载失败"是同一件事（都要先备好来源再重试），
+    因此只把 message 写成本机可执行的指引。
+    """
+    path = _local_source_path(parsed)
+    if path is None:
+        raise ModelError(
+            "MODEL_DOWNLOAD_FAILED",
+            f"模型下载失败：本地来源路径无法解析（{model_file.path}）。"
+            "请确认清单里的 file:// 来源是绝对路径。",
+        )
+    missing = _unexpanded_vars(str(path))
+    if missing:
+        raise ModelError(
+            "MODEL_DOWNLOAD_FAILED",
+            "模型下载失败：环境变量 "
+            + "、".join(missing)
+            + " 未设置，无法定位本地模型产物。请先运行 "
+            "tools/model_export/export_chinese_clip_onnx.py 导出产物，"
+            "再把它设为产物所在目录后重试。",
+        )
+    if not path.is_file():
+        raise ModelError(
+            "MODEL_DOWNLOAD_FAILED",
+            f"模型下载失败：本地来源不存在文件 {path}。请先运行 "
+            "tools/model_export/export_chinese_clip_onnx.py 导出产物，"
+            "并确认 AIVS_MODEL_SOURCE_ROOT 指向该产物目录"
+            f"（当前解析为 {path.parent}）。",
+        )
+    return path.resolve().as_uri()
+
+
+def _local_source_path(parsed: Any) -> Path | None:
+    """把已展开的 file:// URL 还原成本机路径（盘符 / UNC / POSIX）。
+
+    urlparse 对 file://C:/dir/x 把盘符归到 netloc，对 file:///C:/dir/x
+    把前导斜杠并进 path——两种写法都要能还原，否则 Windows 上清单写成
+    file:// + 变量（展开后 netloc 带盘符）会被拼成相对路径，悄悄读不到文件。
+    """
+    netloc, path = parsed.netloc, parsed.path
+    if not path:
+        return None
+    if netloc:
+        joined = netloc + path if _WINDOWS_DRIVE.match(netloc) else "//" + netloc + path
+    else:
+        joined = path
+    resolved = urllib.request.url2pathname(joined)
+    if not resolved:
+        return None
+    return Path(resolved)
+
+
+def _unexpanded_vars(value: str) -> list[str]:
+    """列出 expandvars 之后仍残留的变量名（环境里没设的那些）。"""
+    found: list[str] = []
+    for match in _UNEXPANDED_VAR.finditer(value):
+        found.extend(group for group in match.groups() if group)
+    return sorted(set(found))
 
 
 def _file_sha256(path: Path) -> str:
