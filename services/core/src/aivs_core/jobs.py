@@ -80,6 +80,7 @@ class JobService:
         beat_runner: WaveformRunner | None = None,
         angle_sync_runner: WaveformRunner | None = None,
         semantic_runner: WaveformRunner | None = None,
+        keyframe_runner: WaveformRunner | None = None,
         speaker_runner: WaveformRunner | None = None,
         render_runner: RenderRunner | None = None,
         planning_runner: PlanningRunner | None = None,
@@ -110,6 +111,7 @@ class JobService:
         self.beat_runner = beat_runner
         self.angle_sync_runner = angle_sync_runner
         self.semantic_runner = semantic_runner
+        self.keyframe_runner = keyframe_runner
         self.speaker_runner = speaker_runner
         self.render_runner = render_runner
         self.planning_runner = planning_runner
@@ -1063,6 +1065,22 @@ class JobService:
             if self.semantic_runner is None:
                 raise RuntimeError("RENDER_FAILED")
             result = await self.semantic_runner(
+                row, cancel_event,
+                lambda value: self._set_progress(job_id, value),
+                lambda value: self._set_stage(job_id, value),
+            )
+            with self.db.connection() as db:
+                db.execute(
+                    "UPDATE jobs SET result_json=?,updated_at=? WHERE id=?",
+                    (json_dumps(result), utc_now(), job_id),
+                )
+            return
+        if row["kind"] == "keyframe_tagging":
+            # W3.3 Layer 2 关键帧理解：claim → 真实 vision 调用 → 落 asset_frame_tags。
+            # 本分派**必须先经 claim**（I-1）：runner 拿不到 claim 就不得外传。
+            if self.keyframe_runner is None:
+                raise RuntimeError("RENDER_FAILED")
+            result = await self.keyframe_runner(
                 row, cancel_event,
                 lambda value: self._set_progress(job_id, value),
                 lambda value: self._set_stage(job_id, value),

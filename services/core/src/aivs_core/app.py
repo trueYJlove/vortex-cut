@@ -65,6 +65,7 @@ from .shot_requirement_timeline_assembly import ShotRequirementTimelineAssemblyS
 from .shot_requirement_timeline_batch_assembly import ShotRequirementTimelineBatchAssemblyService
 from .shot_requirements import ShotRequirementService
 from .timeline import TimelineService
+from . import frame_tags as frame_tags_module
 from .agent_session import AgentSessionService
 from .timeline_planning import TimelinePatchPlanningService
 from .transcription import TranscriptionError, TranscriptRepository
@@ -141,6 +142,27 @@ class SemanticSearchRequest(BaseModel):
     query: str = Field(min_length=1, max_length=512)
     limit: int = 20
 
+
+class KeyframePreviewRequest(BaseModel):
+    """W3.3 帧级外传预览请求（prepare，**无网络**）。"""
+    model_config = ConfigDict(extra="forbid")
+
+    provider_config_id: str
+    interval_us: int | None = None
+
+
+class KeyframeExcludeRequest(BaseModel):
+    """逐张移除：只增不改（D4 审计）。"""
+    model_config = ConfigDict(extra="forbid")
+
+    frame_indices: list[int]
+
+
+class KeyframeCreateRequest(BaseModel):
+    """建 consent + generation。哈希必须与预览当前状态一致。"""
+    model_config = ConfigDict(extra="forbid")
+
+    payload_sha256: str
 
 class SemanticIndexRequest(BaseModel):
     """W3.1 索引请求（generate=True 登记索引作业）。"""
@@ -925,6 +947,24 @@ class CoreState:
             self.db, settings.ffmpeg, model_manager=self.model_manager
         )
         self.jobs.semantic_runner = self.semantic.run_index_job
+        # W3.3 Layer 2 关键帧理解：帧级外传预览（S2b）。
+        # 本层**零网络**——prepare/exclude 只产本地预览与载荷文件；
+        # 真正外传须经 create → claim（I-1：claim 是唯一放行点）。
+        from .frame_tags import FrameTagService
+        from .keyframe_egress import KeyframeEgressService
+        from .keyframe_orchestration import KeyframeOrchestrator
+
+        self.keyframe_egress = KeyframeEgressService(self.db)
+        # S5a：逐帧标签**只读**端点（写侧属 S4，需真实网关）。
+        self.frame_tags = FrameTagService(self.db)
+        self.keyframe = KeyframeOrchestrator(
+            self.db, self.keyframe_egress, settings.ffmpeg
+        )
+        # 启动期清一次过期载荷（R10/R16：独立目录只有本清理者，不会被 LRU 代删）。
+        try:
+            self.keyframe_egress.purge_expired()
+        except Exception:  # noqa: BLE001 启动期清理失败不得阻断服务启动
+            pass
         # B15：分块 PCM（48000Hz 双声道 f32le、2 秒/块；同步内联生成——
         # 低延迟任务不排 jobs 队列，begin_build single-flight 防并发重复）。
         self.pcm_chunks = PcmChunkService(
@@ -2649,6 +2689,92 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except DomainError as exc:
             raise _domain(exc) from exc
         return {"query": request.query, "hits": hits}
+
+    # ── W3.3 Layer 2 关键帧理解（帧级外传预览；本组端点**零网络**）──
+
+    @app.post("/api/v1/projects/{project_id}/assets/{asset_id}/keyframe-preview")
+    async def post_keyframe_preview(
+        project_id: str, asset_id: str, request: KeyframePreviewRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """读切点 → 抽样 → 编码 → 落预览。**不发任何网络请求**。"""
+        asset_row = _preview_source_asset_row(state, project_id, asset_id)
+        try:
+            from .keyframe_orchestration import ensure_video_asset
+
+            ensure_video_asset(asset_row)
+            provider = state.providers.require(project_id, request.provider_config_id)
+            resolved = state.projects.resolve_asset_path(asset_id)
+            detail = state.ffprobe.probe(resolved["path"])
+            duration_us = int(detail.duration_us)
+            kwargs: dict[str, Any] = {}
+            if request.interval_us is not None:
+                kwargs["interval_us"] = request.interval_us
+            return await state.keyframe.prepare_preview(
+                project_id, asset_row, provider,
+                Path(resolved["path"]), duration_us, **kwargs,
+            )
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/keyframe-preview/{preview_id}/exclude")
+    async def post_keyframe_exclude(
+        project_id: str, preview_id: str, request: KeyframeExcludeRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """逐张移除（只增不改）。重算 payload 哈希。**零网络**。"""
+        state.projects._require_project_row(project_id)  # noqa: SLF001 归属校验
+        if not request.frame_indices:
+            raise _error("VALIDATION_ERROR", "至少指定一帧", 400)
+        try:
+            return state.keyframe_egress.exclude_frames(
+                project_id, preview_id, request.frame_indices)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/projects/{project_id}/keyframe-preview/{preview_id}/create")
+    async def post_keyframe_create(
+        project_id: str, preview_id: str, request: KeyframeCreateRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """建 consent + generation。**仍不发网络**——外传须经 claim（I-1）。"""
+        state.projects._require_project_row(project_id)  # noqa: SLF001 归属校验
+        try:
+            return state.keyframe_egress.create(
+                project_id, preview_id, request.payload_sha256)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    # ── W3.3 关键帧打标结果读取（S5a；只读，不发网络）──
+
+    @app.get("/api/v1/projects/{project_id}/assets/{asset_id}/frame-tags")
+    async def get_asset_frame_tags(
+        project_id: str, asset_id: str, label: str | None = None,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """该素材的逐帧标签。label 非空时只返回含该标签的帧。"""
+        asset_row = _preview_source_asset_row(state, project_id, asset_id)
+        try:
+            cleaned = frame_tags_module.validate_label(label) if label is not None else None
+            return state.frame_tags.summary(asset_row, label=cleaned)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/projects/{project_id}/frame-tags")
+    async def get_project_frame_tags(
+        project_id: str, label: str = "", limit: int = 100,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """项目内按标签过滤（D1）。**绝不跨项目**；空标签拒绝而非返回全部。"""
+        state.projects._require_project_row(project_id)  # noqa: SLF001 归属校验
+        if limit < 1 or limit > 500:
+            raise _error("VALIDATION_ERROR", "limit 超出范围", 400)
+        try:
+            cleaned = frame_tags_module.validate_label(label)
+            hits = state.frame_tags.by_label(project_id, cleaned, limit=limit)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+        return {"label": cleaned, "hits": hits}
 
     # ── W2.2 说话人分离（只产元数据，不写任何时间线 op）──
 
