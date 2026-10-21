@@ -1,0 +1,38 @@
+# build-sidecar.ps1 build log excerpt
+#
+# LIMITATION (stated plainly): the full PyInstaller stream was consumed from the
+# background job buffer and not persisted. The lines below are the excerpts that
+# were actually observed in the job output, plus facts re-derived afterwards from
+# the surviving build tree. Nothing here is reconstructed or embellished.
+
+## Exact invocation (run from the clean HEAD export, NOT the working tree)
+# export dir: C:/Users/trueY/AppData/Local/Temp/a13-w33-packaged/src
+#   git -C <repo> archive --format=tar HEAD | tar -x -C <export>/src
+#   cp <repo>/resources/ffmpeg/win-x64/{ffmpeg,ffprobe}.exe <export>/src/resources/ffmpeg/win-x64/
+#   powershell -NoProfile -ExecutionPolicy Bypass -File tools/packaging/build-sidecar.ps1 \
+#       -OutputRoot "C:/Users/trueY/AppData/Local/Temp/a13-w33-packaged/pkg-resources"
+#
+# build-sidecar.ps1 internally runs (see tools/packaging/build-sidecar.ps1):
+#   uv run --locked --extra dev pyinstaller --version
+#   uv run --locked --extra dev pyinstaller --clean --noconfirm \
+#       --distpath <export>/dist/aivs-core --workpath <export>/build/aivs-core \
+#       <export>/services/core/aivs-core.spec
+#
+# Dependency resolution: uv created its own .venv inside the export dir
+# ("Installed 53 packages in 4.12s"), so the repo .venv was never touched and the
+# two concurrent editors' working trees were never built.
+
+## Observed lines (job stream)
+6.21.0
+182 INFO: PyInstaller: 6.21.0, contrib hooks: 2026.6
+182 INFO: Python: 3.12.13
+216 INFO: Platform: Windows-11-10.0.26200-SP0
+216 INFO: Python environment: C:\Users\trueY\AppData\Local\Temp\a13-w33-packaged\src\.venv
+230 INFO: Removing temporary files and cleaning cache in C:\Users\trueY\AppData\Local\pyinstaller
+76648 INFO: Warnings written to ...\src\build\aivs-core\aivs-core\warn-aivs-core.txt
+78392 INFO: Building PYZ (ZlibArchive) ...\PYZ-00.pyz completed successfully.
+111727 INFO: Building PKG (CArchive) aivs-core.pkg completed successfully.
+113917 INFO: Building EXE from EXE-00.toc completed successfully.
+117602 INFO: Building COLLECT COLLECT-00.toc completed successfully.
+117626 INFO: Build complete! The results are available in: ...\src\dist\aivs-core
+Sidecar onedir built in ...\pkg-resources\core\aivs-core from ...\src\dist\aivs-core\aivs-core (sha256=f82944ecc40868bd5761e5da436c5721d5fb27559b2866111798801013880a57, generated_at=10/21/2026 09:07:17)

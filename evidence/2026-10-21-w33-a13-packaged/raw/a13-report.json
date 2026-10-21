@@ -1,0 +1,406 @@
+{
+  "pkg_root": "C:\\Users\\trueY\\AppData\\Local\\Temp\\a13-w33-packaged\\pkg-resources",
+  "artifact": {
+    "ffmpeg.exe": {
+      "path": "C:\\Users\\trueY\\AppData\\Local\\Temp\\a13-w33-packaged\\pkg-resources\\ffmpeg\\win-x64\\ffmpeg.exe",
+      "exists": true,
+      "bytes": 169719296,
+      "sha256": "a9eb7fb296bb7a7d140038f65064feb7a71fd79911f3341071c0fa8250db93ad"
+    },
+    "ffprobe.exe": {
+      "path": "C:\\Users\\trueY\\AppData\\Local\\Temp\\a13-w33-packaged\\pkg-resources\\ffmpeg\\win-x64\\ffprobe.exe",
+      "exists": true,
+      "bytes": 169523200,
+      "sha256": "08bae3206890afd5bd0a57f1e17c3d00527f464276f217f70d2625521f9adf52"
+    },
+    "matches_source_ffmpeg": true
+  },
+  "encoders": {
+    "returncode": 0,
+    "total_lines": 237,
+    "mjpeg_lines": [
+      " VFS..D mjpeg                MJPEG (Motion JPEG)",
+      " V..... mjpeg_qsv            MJPEG (Intel Quick Sync Video acceleration) (codec mjpeg)",
+      " V....D mjpeg_vaapi          MJPEG (VAAPI) (codec mjpeg)"
+    ],
+    "exact_mjpeg_encoder_line": [
+      " VFS..D mjpeg                MJPEG (Motion JPEG)"
+    ]
+  },
+  "fixtures": [
+    {
+      "fixture": "C:\\DataFolder\\codes\\AI-Vidio\\test-assets\\test-faststart.mp4",
+      "fixture_bytes": 255341,
+      "fixture_sha256": "50d233ae26719246c35fc4bd8fd7f8c2923758c2ecc60264cbc416a992af850c",
+      "streams": [
+        {
+          "index": 0,
+          "codec_name": "h264",
+          "codec_type": "video",
+          "width": 640,
+          "height": 360
+        }
+      ],
+      "has_audio": false,
+      "encode": {
+        "500000us": {
+          "variants": {
+            "packaged": {
+              "returncode": 0,
+              "stderr_tail": "",
+              "bytes": 28695,
+              "sha256": "109d9435fb07999d2f23e8b5469abb425b15b39534ed11fbcefab75e95c676d0",
+              "dims": [
+                768,
+                432
+              ],
+              "long_edge": 768,
+              "long_edge_ok": true,
+              "soi_ok": true,
+              "eoi_ok": true
+            },
+            "source_tree": {
+              "returncode": 0,
+              "stderr_tail": "",
+              "bytes": 28695,
+              "sha256": "109d9435fb07999d2f23e8b5469abb425b15b39534ed11fbcefab75e95c676d0",
+              "dims": [
+                768,
+                432
+              ],
+              "long_edge": 768,
+              "long_edge_ok": true,
+              "soi_ok": true,
+              "eoi_ok": true
+            }
+          },
+          "byte_identical": true
+        },
+        "1500000us": {
+          "variants": {
+            "packaged": {
+              "returncode": 0,
+              "stderr_tail": "",
+              "bytes": 28413,
+              "sha256": "00957ee5ebe35e9f3485f70d1983e9b8e2b004f620acc16b3dc79e6cd0410d61",
+              "dims": [
+                768,
+                432
+              ],
+              "long_edge": 768,
+              "long_edge_ok": true,
+              "soi_ok": true,
+              "eoi_ok": true
+            },
+            "source_tree": {
+              "returncode": 0,
+              "stderr_tail": "",
+              "bytes": 28413,
+              "sha256": "00957ee5ebe35e9f3485f70d1983e9b8e2b004f620acc16b3dc79e6cd0410d61",
+              "dims": [
+                768,
+                432
+              ],
+              "long_edge": 768,
+              "long_edge_ok": true,
+              "soi_ok": true,
+              "eoi_ok": true
+            }
+          },
+          "byte_identical": true
+        }
+      },
+      "video_decode_nv12": {
+        "returncode": 0,
+        "bytes": 1728000,
+        "stderr_tail": "",
+        "frame_wh": [
+          640,
+          360
+        ],
+        "frame_bytes": 345600,
+        "expected_bytes": 1728000,
+        "nv12_bytes_match": true,
+        "frames_decoded": 5
+      },
+      "video_decode_png": {
+        "returncode": 0,
+        "bytes": 48158,
+        "stderr_tail": "",
+        "png_signature_ok": true,
+        "ihdr_dims": [
+          640,
+          360
+        ],
+        "dims_match_stream": true
+      },
+      "audio_decode_pcm": {
+        "returncode": 4294967274,
+        "bytes": 0,
+        "stderr_tail": "[out#0/s16le @ 000001f077bef280] Output file does not contain any stream\r\nError opening output file -.\r\nError opening output files: Invalid argument\r\n"
+      }
+    },
+    {
+      "fixture": "C:\\DataFolder\\codes\\AI-Vidio\\test-assets\\generated\\cfr-landscape-av.mp4",
+      "fixture_bytes": 1060910,
+      "fixture_sha256": "83db6bd24276c60153f90e46b304ffa26d26da02b83762892d2a6b83050319b3",
+      "streams": [
+        {
+          "index": 0,
+          "codec_name": "h264",
+          "codec_type": "video",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "index": 1,
+          "codec_name": "aac",
+          "codec_type": "audio",
+          "sample_rate": "48000",
+          "channels": 1
+        }
+      ],
+      "has_audio": true,
+      "encode": {
+        "500000us": {
+          "variants": {
+            "packaged": {
+              "returncode": 0,
+              "stderr_tail": "",
+              "bytes": 29082,
+              "sha256": "776ffd2cb748b9e38bb11cc1b8da62a2674b2b0e4845ac9f831c26ed2029063d",
+              "dims": [
+                768,
+                432
+              ],
+              "long_edge": 768,
+              "long_edge_ok": true,
+              "soi_ok": true,
+              "eoi_ok": true
+            },
+            "source_tree": {
+              "returncode": 0,
+              "stderr_tail": "",
+              "bytes": 29082,
+              "sha256": "776ffd2cb748b9e38bb11cc1b8da62a2674b2b0e4845ac9f831c26ed2029063d",
+              "dims": [
+                768,
+                432
+              ],
+              "long_edge": 768,
+              "long_edge_ok": true,
+              "soi_ok": true,
+              "eoi_ok": true
+            }
+          },
+          "byte_identical": true
+        },
+        "1500000us": {
+          "variants": {
+            "packaged": {
+              "returncode": 0,
+              "stderr_tail": "",
+              "bytes": 28997,
+              "sha256": "aa055a91038ccbf5331602ebe8d8132a73be7360ffa605b4fc8f95a765010d94",
+              "dims": [
+                768,
+                432
+              ],
+              "long_edge": 768,
+              "long_edge_ok": true,
+              "soi_ok": true,
+              "eoi_ok": true
+            },
+            "source_tree": {
+              "returncode": 0,
+              "stderr_tail": "",
+              "bytes": 28997,
+              "sha256": "aa055a91038ccbf5331602ebe8d8132a73be7360ffa605b4fc8f95a765010d94",
+              "dims": [
+                768,
+                432
+              ],
+              "long_edge": 768,
+              "long_edge_ok": true,
+              "soi_ok": true,
+              "eoi_ok": true
+            }
+          },
+          "byte_identical": true
+        }
+      },
+      "video_decode_nv12": {
+        "returncode": 0,
+        "bytes": 1728000,
+        "stderr_tail": "",
+        "frame_wh": [
+          640,
+          360
+        ],
+        "frame_bytes": 345600,
+        "expected_bytes": 1728000,
+        "nv12_bytes_match": true,
+        "frames_decoded": 5
+      },
+      "video_decode_png": {
+        "returncode": 0,
+        "bytes": 52012,
+        "stderr_tail": "",
+        "png_signature_ok": true,
+        "ihdr_dims": [
+          640,
+          360
+        ],
+        "dims_match_stream": true
+      },
+      "audio_decode_pcm": {
+        "returncode": 0,
+        "bytes": 288768,
+        "stderr_tail": "",
+        "sample_rate": 48000,
+        "duration_s": 0.0,
+        "expected_bytes_approx": 0,
+        "decoded_seconds": 3.008,
+        "pcm_nonempty": true
+      }
+    },
+    {
+      "fixture": "C:\\Users\\trueY\\AppData\\Local\\Temp\\a13-w33-packaged\\audio-fixture\\av-440hz.mp4",
+      "fixture_bytes": 275090,
+      "fixture_sha256": "70cdd2b323e17506c9a50b029814f4741f803e31c7fa9d80ae47963ffdff9ac2",
+      "streams": [
+        {
+          "index": 0,
+          "codec_name": "h264",
+          "codec_type": "video",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "index": 1,
+          "codec_name": "aac",
+          "codec_type": "audio",
+          "sample_rate": "48000",
+          "channels": 1
+        }
+      ],
+      "has_audio": true,
+      "encode": {
+        "500000us": {
+          "variants": {
+            "packaged": {
+              "returncode": 0,
+              "stderr_tail": "",
+              "bytes": 28695,
+              "sha256": "109d9435fb07999d2f23e8b5469abb425b15b39534ed11fbcefab75e95c676d0",
+              "dims": [
+                768,
+                432
+              ],
+              "long_edge": 768,
+              "long_edge_ok": true,
+              "soi_ok": true,
+              "eoi_ok": true
+            },
+            "source_tree": {
+              "returncode": 0,
+              "stderr_tail": "",
+              "bytes": 28695,
+              "sha256": "109d9435fb07999d2f23e8b5469abb425b15b39534ed11fbcefab75e95c676d0",
+              "dims": [
+                768,
+                432
+              ],
+              "long_edge": 768,
+              "long_edge_ok": true,
+              "soi_ok": true,
+              "eoi_ok": true
+            }
+          },
+          "byte_identical": true
+        },
+        "1500000us": {
+          "variants": {
+            "packaged": {
+              "returncode": 0,
+              "stderr_tail": "",
+              "bytes": 28413,
+              "sha256": "00957ee5ebe35e9f3485f70d1983e9b8e2b004f620acc16b3dc79e6cd0410d61",
+              "dims": [
+                768,
+                432
+              ],
+              "long_edge": 768,
+              "long_edge_ok": true,
+              "soi_ok": true,
+              "eoi_ok": true
+            },
+            "source_tree": {
+              "returncode": 0,
+              "stderr_tail": "",
+              "bytes": 28413,
+              "sha256": "00957ee5ebe35e9f3485f70d1983e9b8e2b004f620acc16b3dc79e6cd0410d61",
+              "dims": [
+                768,
+                432
+              ],
+              "long_edge": 768,
+              "long_edge_ok": true,
+              "soi_ok": true,
+              "eoi_ok": true
+            }
+          },
+          "byte_identical": true
+        }
+      },
+      "video_decode_nv12": {
+        "returncode": 0,
+        "bytes": 1728000,
+        "stderr_tail": "",
+        "frame_wh": [
+          640,
+          360
+        ],
+        "frame_bytes": 345600,
+        "expected_bytes": 1728000,
+        "nv12_bytes_match": true,
+        "frames_decoded": 5
+      },
+      "video_decode_png": {
+        "returncode": 0,
+        "bytes": 48158,
+        "stderr_tail": "",
+        "png_signature_ok": true,
+        "ihdr_dims": [
+          640,
+          360
+        ],
+        "dims_match_stream": true
+      },
+      "audio_decode_pcm": {
+        "returncode": 0,
+        "bytes": 192512,
+        "stderr_tail": "",
+        "sample_rate": 48000,
+        "duration_s": 0.0,
+        "expected_bytes_approx": 0,
+        "decoded_seconds": 2.005,
+        "pcm_nonempty": true
+      }
+    }
+  ],
+  "summary": {
+    "artifact_present": true,
+    "bundled_ffmpeg_matches_pin": true,
+    "packaged_has_mjpeg_encoder": true,
+    "all_encodes_byte_identical": true,
+    "all_encodes_long_edge_768": true,
+    "all_video_decode_nv12_exact": true,
+    "all_png_decode_ok": true,
+    "audio_fixtures_tested": [
+      "C:\\DataFolder\\codes\\AI-Vidio\\test-assets\\generated\\cfr-landscape-av.mp4",
+      "C:\\Users\\trueY\\AppData\\Local\\Temp\\a13-w33-packaged\\audio-fixture\\av-440hz.mp4"
+    ],
+    "audio_decode_all_ok": true
+  }
+}

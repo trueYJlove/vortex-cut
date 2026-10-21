@@ -1,0 +1,3 @@
+a9eb7fb296bb7a7d140038f65064feb7a71fd79911f3341071c0fa8250db93ad *C:/Users/trueY/AppData/Local/Temp/a13-w33-packaged/pkg-resources/ffmpeg/win-x64/ffmpeg.exe
+08bae3206890afd5bd0a57f1e17c3d00527f464276f217f70d2625521f9adf52 *C:/Users/trueY/AppData/Local/Temp/a13-w33-packaged/pkg-resources/ffmpeg/win-x64/ffprobe.exe
+f82944ecc40868bd5761e5da436c5721d5fb27559b2866111798801013880a57 *C:/Users/trueY/AppData/Local/Temp/a13-w33-packaged/pkg-resources/core/aivs-core/aivs-core.exe

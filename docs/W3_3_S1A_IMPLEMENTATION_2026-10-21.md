@@ -3,6 +3,7 @@
 > **切片**：S1a（Design Gate §7 首切片，**纯本地、零 egress**）
 > **上游**：规划门（已批准）D7/D8 / Design Gate（已批准）§3.1、§8
 > **日期**：2026-10-21
+> **验收归属**：本文的 A6/A13 结果由 **`W3_3_VERIFICATION_GATE_2026-10-21.md`** 汇总复核；A13 的打包产物证据见 `evidence/2026-10-21-w33-a13-packaged/EVIDENCE.md`。
 
 ---
 
