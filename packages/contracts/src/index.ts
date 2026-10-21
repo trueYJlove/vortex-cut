@@ -2808,6 +2808,40 @@ export function parseKeyframeEgressCreateResponse(value: unknown): KeyframeEgres
   return value as unknown as KeyframeEgressCreateResponse;
 }
 
+const KEYFRAME_GENERATION_STATES = ["queued", "running", "succeeded", "failed", "cancelled"] as const;
+export type KeyframeGenerationState = (typeof KEYFRAME_GENERATION_STATES)[number];
+
+/** create 之后的生成状态（Core `GET .../keyframe-generations/{id}` 的响应）。
+ *
+ * 键集合是**冻结契约**：Core 与桌面端按同一组键对齐，多一个或少一个都算破坏，
+ * 因此解析器同时校验 onlyKeys 与每个键的可空性（缺键 ⇒ 必失败）。
+ */
+export interface KeyframeGenerationStatus {
+  keyframe_generation_id: KeyframeGenerationId;
+  status: KeyframeGenerationState;
+  frame_count: number | null;
+  vocabulary_violations: number | null;
+  vocabulary_version: number | null;
+  error_code: string | null;
+}
+
+export function parseKeyframeGenerationStatus(value: unknown): KeyframeGenerationStatus {
+  if (!isRecord(value)) throw new ContractValidationError("KeyframeGenerationStatus");
+  if (!onlyKeys(value, [
+    "keyframe_generation_id", "status", "frame_count",
+    "vocabulary_violations", "vocabulary_version", "error_code",
+  ])) throw new ContractValidationError("KeyframeGenerationStatus");
+  if (!isId(value.keyframe_generation_id) || !oneOf(KEYFRAME_GENERATION_STATES, value.status)) {
+    throw new ContractValidationError("KeyframeGenerationStatus");
+  }
+  // 可空数值：null 合法，缺键（undefined）不合法——键集合因此是精确的。
+  for (const key of ["frame_count", "vocabulary_violations", "vocabulary_version"] as const) {
+    if (value[key] !== null && !isInteger(value[key])) throw new ContractValidationError("KeyframeGenerationStatus");
+  }
+  if (!isNullableString(value.error_code)) throw new ContractValidationError("KeyframeGenerationStatus");
+  return value as unknown as KeyframeGenerationStatus;
+}
+
 export interface FrameTagHit extends FrameTag {
   asset_id: AssetId;
 }

@@ -25,6 +25,7 @@ import type {
   AssetFrameTagsSummary,
   KeyframeEgressPreview,
   KeyframeEgressCreateResponse,
+  KeyframeGenerationStatus,
   FrameTagFilterResponse
 } from "@aivideo/contracts";
 import type {
@@ -226,6 +227,7 @@ export interface DesktopApi {
   prepareKeyframePreview: (input: { project_id: ProjectId; asset_id: AssetId; provider_config_id: string }) => Promise<KeyframeEgressPreview>;
   excludeKeyframeFrames: (input: { project_id: ProjectId; preview_id: string; frame_indices: number[] }) => Promise<KeyframeEgressPreview>;
   createKeyframeGeneration: (input: { project_id: ProjectId; preview_id: string; payload_sha256: string }) => Promise<KeyframeEgressCreateResponse>;
+  getKeyframeGeneration: (input: { project_id: ProjectId; generation_id: string }) => Promise<KeyframeGenerationStatus>;
   getFrameTags: (input: { project_id: ProjectId; asset_id: AssetId; label?: string }) => Promise<AssetFrameTagsSummary>;
   filterFramesByLabel: (input: { project_id: ProjectId; label: string; limit?: number }) => Promise<FrameTagFilterResponse>;
   // W1.1 剪辑语法层（零 egress）
@@ -431,6 +433,7 @@ const api: DesktopApi = {
   prepareKeyframePreview: input => ipcRenderer.invoke("keyframe:preview", input),
   excludeKeyframeFrames: input => ipcRenderer.invoke("keyframe:exclude", input),
   createKeyframeGeneration: input => ipcRenderer.invoke("keyframe:create", input),
+  getKeyframeGeneration: input => ipcRenderer.invoke("keyframe:generation", input),
   getFrameTags: input => ipcRenderer.invoke("keyframe:frame-tags", input),
   filterFramesByLabel: input => ipcRenderer.invoke("keyframe:filter-by-label", input),
   listEditingGrammarPlanners: projectId => ipcRenderer.invoke("editing-grammar:planners", projectId),

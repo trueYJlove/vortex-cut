@@ -27,6 +27,7 @@ import {
   parseSemanticSearchResponse,
   parseKeyframeEgressPreview,
   parseKeyframeEgressCreateResponse,
+  parseKeyframeGenerationStatus,
   parseAssetFrameTagsSummary
 } from "@aivideo/contracts";
 
@@ -358,6 +359,17 @@ export function registerStage2bIpc(deps: Stage2bIpcDependencies): void {
       { method: "POST", body: JSON.stringify({ payload_sha256: value.payload_sha256 }) }
     );
     return parseKeyframeEgressCreateResponse(stage2bRendererSafe(response));
+  });
+  // create 之后唯一的状态出口：面板按它轮询到终态。
+  // 入参两键都做白名单校验（record + id），响应过 parseKeyframeGenerationStatus
+  // ——键集合是冻结契约，Core 多带字段在这里立即失败而不是悄悄流进 Renderer。
+  deps.handle("keyframe:generation", async (_event, input) => {
+    const value = record(input, ["project_id", "generation_id"], "keyframe generation");
+    const response = await fetchSafe(
+      `${API_PREFIX}/projects/${id(value.project_id, "project_id")}/keyframe-generations/${id(value.generation_id, "generation_id")}`,
+      undefined
+    );
+    return parseKeyframeGenerationStatus(stage2bRendererSafe(response));
   });
   // W3.3 S5a：逐帧标签读取（只读；写侧属 S4，需真实网关）。
   deps.handle("keyframe:frame-tags", async (_event, input) => {

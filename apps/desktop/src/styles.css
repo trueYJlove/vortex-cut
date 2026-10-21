@@ -709,6 +709,10 @@ input, select, textarea { font-size: var(--dlg-fs-body); }
 .keyframe-row button { padding: 2px 8px; border: 1px solid var(--vc-border-2, #4b585e); border-radius: 5px; background: transparent; color: var(--vc-text-2, #aeb9bd); font-size: var(--dlg-fs-label); cursor: pointer; }
 .keyframe-row button:hover { color: var(--vc-text, #e6eaec); border-color: var(--vc-accent, #25d3ac); }
 
+/* W3.3 关键帧外传审阅：提交后的结果行（成功/失败共用，靠 tone 区分颜色） */
+.keyframe-result { margin: 0; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--vc-border, #3b474d); color: var(--vc-text, #e6eaec); font-size: var(--dlg-fs-body); }
+.keyframe-result.error { border-color: #b4534b; color: #f0b3ad; }
+
 /* M2 B3: 时间线关键帧色点 */
 .timeline-keyframe-dot { border: 1px solid rgba(0, 0, 0, .7); border-radius: 50%; cursor: ew-resize; z-index: 3; }
 .timeline-keyframe-dot:hover { box-shadow: 0 0 0 2px rgba(255, 255, 255, .5); }

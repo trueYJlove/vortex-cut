@@ -14,7 +14,7 @@ function setup() {
 describe("Stage2B IPC", () => {
   it("只注册冻结白名单并精确转发 prepare/create", async () => {
     const { handlers, fetchWithUi } = setup();
-    expect([...handlers.keys()]).toEqual(["planning-patch:prepare", "planning-patch:test-provider-capability", "planning-patch:create", "planning-patch:generation-get", "planning-patch:proposal-list", "planning-patch:proposal-get", "planning-patch:proposal-apply", "captions-provider:test-capability", "captions-provider:prepare", "captions-provider:create", "captions-provider:get", "captions-provider:proposal-apply", "captions-provider:proposal-get", "captions-provider:proposal-from-generation", "worklist:list", "worklist:prepare", "worklist:create", "worklist:cancel", "worklist:apply", "timeline:revision-diff", "agent-session:prepare", "agent-session:create", "agent-session:list", "agent-session:get", "cv-analysis:get", "beat-analysis:get", "angle-sync:groups", "angle-sync:create", "angle-sync:get", "angle-sync:sync", "angle-sync:delete", "angle-sync:offset", "semantic:index", "semantic:search", "keyframe:preview", "keyframe:exclude", "keyframe:create", "keyframe:frame-tags", "keyframe:filter-by-label", "cv-samples:list", "editing-grammar:planners", "editing-grammar:prepare", "editing-grammar:propose", "editing-grammar:proposal-list", "editing-grammar:proposal-get", "editing-grammar:proposal-apply"]);
+    expect([...handlers.keys()]).toEqual(["planning-patch:prepare", "planning-patch:test-provider-capability", "planning-patch:create", "planning-patch:generation-get", "planning-patch:proposal-list", "planning-patch:proposal-get", "planning-patch:proposal-apply", "captions-provider:test-capability", "captions-provider:prepare", "captions-provider:create", "captions-provider:get", "captions-provider:proposal-apply", "captions-provider:proposal-get", "captions-provider:proposal-from-generation", "worklist:list", "worklist:prepare", "worklist:create", "worklist:cancel", "worklist:apply", "timeline:revision-diff", "agent-session:prepare", "agent-session:create", "agent-session:list", "agent-session:get", "cv-analysis:get", "beat-analysis:get", "angle-sync:groups", "angle-sync:create", "angle-sync:get", "angle-sync:sync", "angle-sync:delete", "angle-sync:offset", "semantic:index", "semantic:search", "keyframe:preview", "keyframe:exclude", "keyframe:create", "keyframe:generation", "keyframe:frame-tags", "keyframe:filter-by-label", "cv-samples:list", "editing-grammar:planners", "editing-grammar:prepare", "editing-grammar:propose", "editing-grammar:proposal-list", "editing-grammar:proposal-get", "editing-grammar:proposal-apply"]);
     fetchWithUi.mockResolvedValueOnce({ timeline_patch_egress_preview_id: "preview_1", provider: { display_name: "Provider", origin: "https://provider.test", model: "model" }, prompt_template_version: "timeline-patch-v1", output_schema_version: "timeline-patch-output-v1", sent_fields: ["instruction"], payload_sha256: hash, character_count: 10, estimated_tokens: 3, clip_count: 1, caption_count: 0, locked_count: 0, expires_at: now });
     await handlers.get("planning-patch:prepare")?.({}, { project_id: "project_1", base_revision_id: "revision_1", provider_config_id: "provider_1", instruction: "缩短开头" });
     expect(fetchWithUi).toHaveBeenCalledWith("/api/v1/projects/project_1/timeline-patch-generations/prepare", { method: "POST", body: JSON.stringify({ base_revision_id: "revision_1", provider_config_id: "provider_1", instruction: "缩短开头" }) });
@@ -182,6 +182,50 @@ describe("Stage2B IPC", () => {
     await expect(handlers.get("planning-patch:test-provider-capability")?.({}, "provider_1")).resolves.toEqual({ timeline_patch_capability_status: "unsupported", timeline_patch_response_adapter_id: null, timeline_patch_probe_protocol_version: null, timeline_patch_capability_tested_at: now, timeline_patch_capability_failure_code: "PROVIDER_SCHEMA_MISMATCH", timeline_patch_capability_probe_sha256: hash });
     expect(fetchWithUi).toHaveBeenCalledWith("/api/v1/providers/provider_1/timeline-patch-capability-test", { method: "POST" });
     await expect(handlers.get("planning-patch:test-provider-capability")?.({}, { provider_config_id: "provider_1" })).rejects.toThrow();
+  });
+
+  it("keyframe:generation：GET 精确转发，响应键集合冻结（多键/缺键都拒绝）", async () => {
+    const { handlers, fetchWithUi } = setup();
+    const status = {
+      keyframe_generation_id: "generation_1", status: "succeeded",
+      frame_count: 12, vocabulary_violations: 0, vocabulary_version: 3, error_code: null,
+    };
+    fetchWithUi.mockResolvedValueOnce(status);
+    await expect(handlers.get("keyframe:generation")?.({}, {
+      project_id: "project_1", generation_id: "generation_1",
+    })).resolves.toEqual(status);
+    expect(fetchWithUi).toHaveBeenCalledWith(
+      "/api/v1/projects/project_1/keyframe-generations/generation_1", undefined);
+
+    // Core 多带一个**非敏感**字段：属于契约破坏，必须在这里失败而不是悄悄流进 Renderer。
+    fetchWithUi.mockResolvedValueOnce({ ...status, provider_extras: "x" });
+    await expect(handlers.get("keyframe:generation")?.({}, {
+      project_id: "project_1", generation_id: "generation_1",
+    })).rejects.toThrow();
+
+    // 敏感键（raw_response）先被 stage2bRendererSafe 裁掉，因此解析能过——
+    // 这是既有裁剪设计，不是本通道的守卫；这里只断言它确实没流进 Renderer。
+    fetchWithUi.mockResolvedValueOnce({ ...status, raw_response: "provider body" });
+    await expect(handlers.get("keyframe:generation")?.({}, {
+      project_id: "project_1", generation_id: "generation_1",
+    })).resolves.toEqual(status);
+
+    // 缺键（error_code 缺失）同样不算合法响应。
+    const { error_code: _dropped, ...missing } = status;
+    fetchWithUi.mockResolvedValueOnce(missing);
+    await expect(handlers.get("keyframe:generation")?.({}, {
+      project_id: "project_1", generation_id: "generation_1",
+    })).rejects.toThrow();
+
+    // 入参白名单：多余键、非法 id 一律拒绝且不 fetch。
+    const before = fetchWithUi.mock.calls.length;
+    await expect(handlers.get("keyframe:generation")?.({}, {
+      project_id: "project_1", generation_id: "bad id",
+    })).rejects.toThrow();
+    await expect(handlers.get("keyframe:generation")?.({}, {
+      project_id: "project_1", generation_id: "generation_1", extra: true,
+    })).rejects.toThrow();
+    expect(fetchWithUi.mock.calls.length).toBe(before);
   });
 
   it("拒绝多余键、非法 hash、空指令和超长指令", async () => {

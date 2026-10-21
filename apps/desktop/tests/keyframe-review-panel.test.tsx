@@ -43,23 +43,57 @@ function preview(excluded: number[] = []) {
   };
 }
 
+function generationStatus(overrides: Record<string, unknown> = {}) {
+  return {
+    keyframe_generation_id: "gen_1",
+    status: "queued",
+    frame_count: null,
+    vocabulary_violations: null,
+    vocabulary_version: null,
+    error_code: null,
+    ...overrides,
+  };
+}
+
 function setup(overrides: Record<string, unknown> = {}) {
   const prepareKeyframePreview = vi.fn().mockResolvedValue(preview());
   const excludeKeyframeFrames = vi.fn().mockResolvedValue(preview([1]));
   const createKeyframeGeneration = vi.fn().mockResolvedValue({
     keyframe_generation_id: "gen_1", status: "queued", consent_id: "c_1",
   });
+  const getKeyframeGeneration = vi.fn().mockResolvedValue(generationStatus());
   const listProviders = vi.fn().mockResolvedValue({
     items: [{
       provider_config_id: "prov_1", display_name: "本地网关", model: "vision-model",
       enabled: true, credential_status: "configured",
     }],
   });
-  (window as unknown as { desktop: Record<string, unknown> }).desktop = {
-    prepareKeyframePreview, excludeKeyframeFrames, createKeyframeGeneration, listProviders,
-    ...overrides,
+  const base = {
+    prepareKeyframePreview, excludeKeyframeFrames, createKeyframeGeneration,
+    getKeyframeGeneration, listProviders,
   };
-  return { prepareKeyframePreview, excludeKeyframeFrames, createKeyframeGeneration, listProviders };
+  // 用合并后的对象回填 window 并**原样返回**：若返回合并前的局部 spy，
+  // 断言会打在没人调用的替身上（区分力归零），这是本文件曾经的坑。
+  const desktop = { ...base, ...overrides } as unknown as typeof base;
+  (window as unknown as { desktop: Record<string, unknown> }).desktop = desktop;
+  return desktop;
+}
+
+/** 走到「已生成预览 + 已勾选同意」，此时「确认外传」可点。 */
+async function readyToSubmit() {
+  const view = renderPanel();
+  fireEvent.click(await screen.findByRole("button", { name: "生成关键帧预览" }));
+  await screen.findByText("#0");
+  fireEvent.click(screen.getByRole("checkbox"));
+  await waitFor(() => {
+    expect((screen.getByRole("button", { name: "确认外传" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+  return view;
+}
+
+/** 提交按钮会随相位改名（确认外传 → 提交中 → 已提交），按同一位置取。 */
+function submitButton(): HTMLButtonElement {
+  return screen.getByRole("button", { name: /^(确认外传|提交中…|已提交)$/ }) as HTMLButtonElement;
 }
 
 function renderPanel(onClose = () => {}) {
@@ -164,5 +198,135 @@ describe("KeyframeReviewPanel（D4 逐张审阅）", () => {
 
     expect(await screen.findByText(/没有可用的关键帧/)).toBeTruthy();
     expect(screen.queryByText(/secret/)).toBeNull();
+  });
+});
+
+/**
+ * W3.3 收口：「用户同意 → create → generation」。
+ *
+ * 这组用例守着当前真实缺陷的形态：按钮原本写的是 `onClick={onClose}`，
+ * 只关弹窗、从不调用 createKeyframeGeneration，链路在界面上是断的。
+ * 把按钮改回 onClose，下面第一条必须变红。
+ */
+describe("KeyframeReviewPanel（同意即外传）", () => {
+  beforeEach(() => { setup(); });
+
+  it("点「确认外传」只调用一次 createKeyframeGeneration，入参取自预览", async () => {
+    const { createKeyframeGeneration } = setup();
+    await readyToSubmit();
+
+    fireEvent.click(screen.getByRole("button", { name: "确认外传" }));
+
+    await waitFor(() => expect(createKeyframeGeneration).toHaveBeenCalledTimes(1));
+    expect(createKeyframeGeneration).toHaveBeenCalledWith({
+      project_id: projectId,
+      preview_id: "kp_1",
+      payload_sha256: "c".repeat(64),
+    });
+    // 提交过就不许再点第二下（重复提交等于二次外传）。
+    await waitFor(() => expect(submitButton().disabled).toBe(true));
+    expect(submitButton().textContent).toBe("已提交");
+    fireEvent.click(submitButton());
+    expect(createKeyframeGeneration).toHaveBeenCalledTimes(1);
+  });
+
+  it("轮询到 succeeded 后展示帧数与词表违规数（0 也要显示）", async () => {
+    const { getKeyframeGeneration } = setup({
+      getKeyframeGeneration: vi.fn()
+        .mockResolvedValueOnce(generationStatus({ status: "queued" }))
+        .mockResolvedValueOnce(generationStatus({
+          status: "succeeded", frame_count: 12, vocabulary_violations: 0, vocabulary_version: 3,
+        })),
+    });
+    await readyToSubmit();
+    fireEvent.click(screen.getByRole("button", { name: "确认外传" }));
+
+    // 第一次返回 queued ⇒ 必须继续轮询，否则这里永远等不到结果。
+    expect(await screen.findByText(/生成完成/, {}, { timeout: 5000 })).toBeTruthy();
+    expect(screen.getByText(/共 12 帧/)).toBeTruthy();
+    expect(screen.getByText(/词表违规 0 处/)).toBeTruthy();
+    expect(getKeyframeGeneration).toHaveBeenCalledWith({
+      project_id: projectId, generation_id: "gen_1",
+    });
+  });
+
+  it("轮询到 failed 只给稳定文案与可操作提示，不把上游原文送上屏", async () => {
+    setup({
+      getKeyframeGeneration: vi.fn().mockResolvedValue(generationStatus({
+        status: "failed",
+        error_code: "PROVIDER_AUTH_FAILED",
+      })),
+    });
+    await readyToSubmit();
+    fireEvent.click(screen.getByRole("button", { name: "确认外传" }));
+
+    expect(await screen.findByText(/Provider 认证失败/)).toBeTruthy();
+    // 错误码本身不上屏：它可能携带上游原文片段。
+    expect(screen.queryByText(/PROVIDER_AUTH_FAILED/)).toBeNull();
+  });
+
+  it("未登记的错误码退回稳定文案，上游原文一个字都不出现", async () => {
+    setup({
+      getKeyframeGeneration: vi.fn().mockResolvedValue(generationStatus({
+        status: "failed",
+        // Core 透传的上游原文：路径 + 内部标识，绝不能上屏。
+        error_code: "Error: 500 vision backend at C:/secret/db.sqlite",
+      })),
+    });
+    await readyToSubmit();
+    fireEvent.click(screen.getByRole("button", { name: "确认外传" }));
+
+    expect(await screen.findByText(/关键帧理解未完成/)).toBeTruthy();
+    expect(screen.queryByText(/secret/)).toBeNull();
+    expect(screen.queryByText(/vision backend/)).toBeNull();
+  });
+
+  it("提交成功后禁止再改动这批关键帧（exclude 禁用）", async () => {
+    const { excludeKeyframeFrames } = setup();
+    await readyToSubmit();
+    fireEvent.click(screen.getByRole("button", { name: "确认外传" }));
+
+    const remove = await screen.findByRole("button", { name: "移除第 1 帧" }) as HTMLButtonElement;
+    await waitFor(() => expect(remove.disabled).toBe(true));
+    fireEvent.click(remove);
+    expect(excludeKeyframeFrames).not.toHaveBeenCalled();
+  });
+
+  it("切换到别的项目时预览与结果一并清空（旧预览不能带过去 create）", async () => {
+    setup({
+      getKeyframeGeneration: vi.fn().mockResolvedValue(generationStatus({
+        status: "succeeded", frame_count: 3, vocabulary_violations: 1, vocabulary_version: 2,
+      })),
+    });
+    const view = await readyToSubmit();
+    fireEvent.click(screen.getByRole("button", { name: "确认外传" }));
+    expect(await screen.findByText(/生成完成/, {}, { timeout: 5000 })).toBeTruthy();
+
+    view.rerender(
+      <KeyframeReviewPanel
+        projectId={"project_2" as never}
+        assetId={assetId}
+        assetName={"素材乙"}
+        onClose={() => {}}
+      />,
+    );
+
+    await waitFor(() => expect(screen.queryByText("#0")).toBeNull());
+    expect(screen.queryByText(/生成完成/)).toBeNull();
+    expect(screen.getByRole("button", { name: "生成关键帧预览" })).toBeTruthy();
+  });
+
+  it("卸载后不再轮询、不再 setState", async () => {
+    const getKeyframeGeneration = vi.fn().mockResolvedValue(generationStatus({ status: "queued" }));
+    setup({ getKeyframeGeneration });
+    const view = await readyToSubmit();
+    fireEvent.click(screen.getByRole("button", { name: "确认外传" }));
+    // 让第一次轮询真的发生，确认轮询是活的（否则下面「不再调用」没有区分力）。
+    await waitFor(() => expect(getKeyframeGeneration).toHaveBeenCalledTimes(1));
+
+    view.unmount();
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    // React 卸载后再 setState 会告警；这里同时断言轮询确实停了。
+    expect(getKeyframeGeneration).toHaveBeenCalledTimes(1);
   });
 });
