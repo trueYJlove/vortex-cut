@@ -957,6 +957,23 @@ class CoreState:
         self.keyframe_egress = KeyframeEgressService(self.db)
         # S5a：逐帧标签**只读**端点（写侧属 S4，需真实网关）。
         self.frame_tags = FrameTagService(self.db)
+        # S4 写侧：打标执行体。此前该类从未被实例化——create 产出的
+        # generation 因没有任何执行者而永远停在 queued（runner 槽位空着，
+        # 就算有作业也只会抛 RENDER_FAILED）。
+        from .keyframe_tagging import KeyframeTaggingService
+
+        self.keyframe_tagging = KeyframeTaggingService(
+            self.db, self.keyframe_egress, self.providers, self.provider_secrets,
+        )
+        self.jobs.keyframe_runner = self.keyframe_tagging.run_tagging_job
+        # S3：vision 能力探测。探测**本身也是网络调用**，因此走同一条
+        # prepare→create→claim 三段式（Design Gate §3.2 I-1 / §5.1）。
+        # 这里只装配；探测用例用假 client，不烧真实额度。
+        from .vision_probe import VisionProbeService
+
+        self.vision_probe = VisionProbeService(
+            self.db, self.keyframe_egress, self.providers, self.provider_secrets,
+        )
         self.keyframe = KeyframeOrchestrator(
             self.db, self.keyframe_egress, settings.ffmpeg
         )
@@ -1031,6 +1048,12 @@ class CoreState:
             transcript_stale=self.transcripts.mark_asset_stale,
             purge_asset_clips=self.timelines.purge_asset_clips,
             transcript_revalidate=self.transcripts.revalidate_for_fingerprint,
+            # 关键帧外传预览对 assets 是 NO ACTION：不先 detach，删素材会被
+            # FK 拒绝并报成「素材被镜头需求或生成记录引用」（P102 原样重演）。
+            # 传闭包转发调用方的连接：detach 必须与 DELETE 同事务。
+            detach_keyframe_previews=(
+                lambda db, asset_id: self.keyframe_egress.detach_asset(asset_id, db)
+            ),
         )
 
     def _build_render_stack(self, settings: Settings) -> None:
@@ -1330,6 +1353,7 @@ def _domain(exc: DomainError) -> HTTPException:
         "STAGE6_BATCH_NOT_FOUND",
         "DERIVED_NOT_FOUND",
         "SPEAKER_NOT_FOUND",
+        "KEYFRAME_GENERATION_NOT_FOUND",
     }:
         status = 404
     return _error(exc.code, exc.message, status)
@@ -2737,11 +2761,44 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         project_id: str, preview_id: str, request: KeyframeCreateRequest,
         _: CoreState = Depends(require_ui),
     ) -> dict[str, Any]:
-        """建 consent + generation。**仍不发网络**——外传须经 claim（I-1）。"""
+        """建 consent + generation + 作业。**仍不发网络**——外传须经 claim（I-1）。
+
+        传 jobs 是必须的：不传则生成记录落库后没有任何执行者，
+        永远停在 queued（这正是 W3.3 收口前生产链路的断点）。
+        """
         state.projects._require_project_row(project_id)  # noqa: SLF001 归属校验
         try:
             return state.keyframe_egress.create(
-                project_id, preview_id, request.payload_sha256)
+                project_id, preview_id, request.payload_sha256, state.jobs)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/providers/{provider_id}/vision-capability")
+    async def post_vision_capability(
+        provider_id: str, project_id: str, _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """vision 能力探测（S3）。**这是唯一会发网络的探测端点**。
+
+        必须带 `project_id`：探测走 prepare→create→claim 三段式（I-1 / 评审 #4），
+        而 `keyframe_egress_previews.project_id` 是 NOT NULL 外键——没有项目就
+        没有预览行，也就没有可消费的 consent。设计门 §5.1 只冻结了路径与
+        「必须先 prepare→create→claim」，未规定 project 如何传入；此处取
+        query 参数，并在报告里标注这一处对门的下沉细节。
+        """
+        state.projects._require_project_row(project_id)  # noqa: SLF001 归属校验
+        try:
+            return await state.vision_probe.probe(project_id, provider_id)
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.get("/api/v1/projects/{project_id}/keyframe-generations/{generation_id}")
+    async def get_keyframe_generation(
+        project_id: str, generation_id: str, _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """生成状态（S5b）。零网络、只读；跨项目一律 404。"""
+        state.projects._require_project_row(project_id)  # noqa: SLF001 归属校验
+        try:
+            return state.keyframe_egress.generation_status(project_id, generation_id)
         except DomainError as exc:
             raise _domain(exc) from exc
 

@@ -246,6 +246,14 @@ class ProviderRepository:
         # 调用审计与请求档案同样引用 provider_configs。
         "provider_image_invocations",
         "provider_image_request_profiles",
+        # W3.3 Layer 2 关键帧域（v40）：同一把回归锁再次抓出的遗漏——
+        # v40 加了三张引用 provider_configs 的表，却没登记进本清单。
+        # 漏登记的后果不只是测试红，而是**删除路径的失败形态错了**：删一个已被
+        # 关键帧外传预览/打标结果引用的 Provider 时不会得到可操作的
+        # PROVIDER_IN_USE，而是直接撞 FK 变成 500 / 误导文案（P67 / P102 同族）。
+        "keyframe_egress_previews",
+        "keyframe_generations",
+        "asset_frame_tags",
     )
 
     def delete(self, provider_id: str) -> None:
@@ -321,6 +329,15 @@ class ProviderRepository:
             "candidate_capability_tested_at": row["candidate_capability_tested_at"],
             "candidate_capability_failure_code": row["candidate_capability_failure_code"],
             "candidate_capability_probe_sha256": row["candidate_capability_probe_sha256"],
+            # W3.3 vision 能力六列（v41）。**只出现在 _dto 的返回里**，不进
+            # create() 的字段白名单——否则外部就能直接写入探测结果，
+            # 绕开「先探测、后放行」这条 I-1/A4 的判据（那是旁路）。
+            "vision_capability_status": row["vision_capability_status"],
+            "vision_capability_tested_at": row["vision_capability_tested_at"],
+            "vision_response_adapter_id": row["vision_response_adapter_id"],
+            "vision_probe_protocol_version": row["vision_probe_protocol_version"],
+            "vision_capability_failure_code": row["vision_capability_failure_code"],
+            "vision_capability_probe_sha256": row["vision_capability_probe_sha256"],
         }
 
 

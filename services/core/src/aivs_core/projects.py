@@ -47,6 +47,7 @@ class ProjectAssetService:
         transcript_stale: Callable[[str, str | None], None] | None = None,
         purge_asset_clips: Callable[[sqlite3.Connection, str], dict[str, int]] | None = None,
         transcript_revalidate: Callable[[str, str], None] | None = None,
+        detach_keyframe_previews: Callable[[sqlite3.Connection, str], int] | None = None,
     ) -> None:
         self.db = db
         self.data_dir = data_dir
@@ -54,6 +55,7 @@ class ProjectAssetService:
         self.transcript_stale = transcript_stale
         self.purge_asset_clips = purge_asset_clips
         self.transcript_revalidate = transcript_revalidate
+        self.detach_keyframe_previews = detach_keyframe_previews
 
     _DEFAULT_CANVAS = {"width": 1080, "height": 1920, "fps_num": 30, "fps_den": 1}
 
@@ -436,6 +438,14 @@ class ProjectAssetService:
                     (asset_id,),
                 )
                 db.execute("DELETE FROM cv_analyses WHERE asset_id=?", (asset_id,))
+                # 关键帧外传预览对 assets 是 NO ACTION：不先断开引用，下面的
+                # DELETE 必被 FK 拒绝并被报成「素材被镜头需求或生成记录引用」
+                # ——原因错且无出路（做过一次关键帧预览的素材永远删不掉，
+                # 即 P102 原样重演）。预览行是**外传审计**，不能 CASCADE 掉，
+                # 故只置空引用并留 detached_at。与 DELETE 同事务：半删状态下
+                # 素材还在、预览还指向它，下次删除会再次被拒。
+                if self.detach_keyframe_previews:
+                    self.detach_keyframe_previews(db, asset_id)
                 try:
                     db.execute("DELETE FROM assets WHERE id=?", (asset_id,))
                 except sqlite3.IntegrityError as exc:

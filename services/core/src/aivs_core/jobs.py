@@ -505,6 +505,49 @@ class JobService:
             ),
         )
 
+    @staticmethod
+    def insert_keyframe_tagging_job(
+        db: Any,
+        job_id: str,
+        now: str,
+        project_id: str,
+        generation_id: str,
+        asset_id: str | None,
+    ) -> None:
+        """Queue a keyframe tagging generation inside the caller's transaction.
+
+        Kept in the caller's transaction so consent, generation and job become
+        visible atomically (mirrors insert_captions_provider_job). Before this
+        existed the create path wrote consent + generation and nothing ever
+        dispatched them: the generation stayed queued forever.
+        """
+        db.execute(
+            "INSERT INTO jobs(id,project_id,asset_id,kind,type,status,stage,progress,"
+            "input_json,resource_class,attempt,created_at,updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                job_id,
+                project_id,
+                asset_id,
+                "keyframe_tagging",
+                "keyframe_tagging",
+                "queued",
+                "queued",
+                0,
+                json_dumps(
+                    {
+                        "keyframe_generation_id": generation_id,
+                        "project_id": project_id,
+                        "asset_id": asset_id,
+                    }
+                ),
+                "light",
+                1,
+                now,
+                now,
+            ),
+        )
+
     def delete_queued(self, job_id: str) -> None:
         with self.db.connection() as db:
             db.execute("DELETE FROM jobs WHERE id=? AND status='queued'", (job_id,))

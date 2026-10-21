@@ -71,6 +71,10 @@ KIND_POLICIES: dict[str, JobPolicy] = {
     "speaker_diarization": JobPolicy("speaker_diarization", ("light",), 2),
     # AI-2 Layer 0：CV 信号分析（关键帧采样——当前项目级）
     "cv_analysis": JobPolicy("cv_analysis", ("light",), 3),
+    # W3.3 Layer 2：关键帧打标（面板触发即用户视野，与波形/节拍同档）。
+    # 不登记会让它落 unknown ⇒ 保守独占 heavy 单槽：一次打标会挡住导出，
+    # 而它其实只等 provider 限流、不占 CPU/GPU/磁盘。
+    "keyframe_tagging": JobPolicy("keyframe_tagging", ("light",), 2),
     # 3 级：当前项目代理（B11 全源代理）
     "proxy": JobPolicy("proxy", ("light",), 3),
     # 4 级：导出/ASR/后台生成

@@ -23,6 +23,7 @@ from .database import Database, json_dumps, json_loads, utc_now
 from .ids import new_id
 from .media.keyframe_encode import EncodedFrame, total_payload_bytes
 from .media.keyframe_sampling import SamplingPlan
+from .media.vision_adapter import vision_adapter_supported
 from .projects import DomainError
 
 # 预览有效期。与既有 captions egress 的 15 分钟同量级：足够审阅，
@@ -178,9 +179,29 @@ class KeyframeEgressService:
         return digest.hexdigest()
 
     def create(self, project_id: str, preview_id: str, payload_sha256: str,
-               jobs: Any = None) -> dict[str, Any]:
-        """校验哈希与时效后建 consent + generation。无网络。"""
+               jobs: Any = None, *, allow_unprobed: bool = False) -> dict[str, Any]:
+        """校验哈希、时效与 vision 能力后建 consent + generation（+ 作业行）。无网络。
+
+        `jobs` 非空时，作业行与 consent/generation 在**同一事务**内落库
+        （设计门 §3.2）：否则进程在两句之间崩溃会留下「已签同意书、永远
+        排队」的生成记录——用户重新审阅一次，代价是一整轮抽帧编码。
+        传 None 时退化为只写 consent + generation（兼容无 JobService 的调用方）。
+
+        **fail-closed（A4）**：Provider 未通过 vision 能力探测时一律拒绝，且
+        拒绝发生在写 consent/generation **之前**——所以「零字节外传」里连
+        同意书都不会签。判据只读 provider_configs 的六列，不读 Provider DTO
+        （`_dto` 曾不含这六列，靠 DTO 会让门禁恒假）。
+
+        **allow_unprobed 是探测自举，不是通用旁路**：vision 能力探测本身要走
+        prepare→create→claim（I-1），而那一刻 Provider 状态还是 untested——
+        若不放行，探测永远无法开始。该参数**仅**由 `VisionProbeService.probe`
+        传 True，且是 keyword-only；HTTP 路由的调用点不含它（有测试锁住，
+        见 test_vision_probe.py::test_create_route_does_not_accept_allow_unprobed
+        与 test_only_probe_path_passes_allow_unprobed）。
+        """
         row = self._require_preview(project_id, preview_id)
+        if not allow_unprobed:
+            self._require_vision_capable(row["provider_config_id"])
         if row["payload_sha256"] != payload_sha256:
             raise DomainError("KEYFRAME_PREVIEW_EXPIRED", "预览内容已变化，请重新审阅")
         if row["payloads_purged_at"] is not None:
@@ -188,21 +209,77 @@ class KeyframeEgressService:
         now = utc_now()
         consent_id = f"keyframe_consent_{new_id()}"
         generation_id = f"keyframe_gen_{new_id()}"
+        job_id = f"job_{new_id()}"
         with self.db.connection() as db:
-            db.execute(
-                "INSERT INTO keyframe_egress_consents VALUES (?,?,?,?,?)",
-                (consent_id, preview_id, payload_sha256, now, None),
-            )
-            db.execute(
-                "INSERT INTO keyframe_generations VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (
-                    generation_id, project_id, preview_id, consent_id,
-                    row["provider_config_id"], row["source_fingerprint"],
-                    "queued", payload_sha256, now, None,
-                ),
-            )
+            db.execute("BEGIN")
+            try:
+                db.execute(
+                    "INSERT INTO keyframe_egress_consents VALUES (?,?,?,?,?)",
+                    (consent_id, preview_id, payload_sha256, now, None),
+                )
+                db.execute(
+                    "INSERT INTO keyframe_generations VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        generation_id, project_id, preview_id, consent_id,
+                        row["provider_config_id"], row["source_fingerprint"],
+                        "queued", payload_sha256, now, None,
+                    ),
+                )
+                self._insert_job(
+                    db, jobs, job_id, now, project_id, generation_id, row["asset_id"],
+                )
+                db.execute("COMMIT")
+            except Exception:
+                db.execute("ROLLBACK")
+                raise
         return {"keyframe_generation_id": generation_id, "status": "queued",
                 "consent_id": consent_id}
+
+    def _require_vision_capable(self, provider_config_id: str) -> None:
+        """fail-closed：Provider 必须已探测为 supported 才允许外传。
+
+        判据**只读库**（provider_configs 的六列），理由有二：
+          1. ProviderRepository._dto 的字段集不归本模块管，依赖它会让门禁
+             在 DTO 缺列时**恒假**——那是「看起来有守卫、实际恒拒」的另一种
+             不可观测形态；
+          2. 六列是 v41 迁移的物理事实，直读是唯一不经过投影的判据。
+
+        四条都查而不是只查 status（对齐 captions 的 _require_capable 先例）：
+        status=supported 但缺 tested_at 或适配器不可用时，runner 拿不到可选
+        档位，下一步就会用未探测的适配器发请求。
+        """
+        with self.db.connection() as db:
+            provider = db.execute(
+                "SELECT enabled,vision_capability_status,vision_capability_tested_at,"
+                "vision_response_adapter_id FROM provider_configs WHERE id=?",
+                (provider_config_id,),
+            ).fetchone()
+        if provider is None:
+            raise DomainError("PROVIDER_NOT_FOUND", "Provider 不存在")
+        if (
+            not provider["enabled"]
+            or provider["vision_capability_status"] != "supported"
+            or not provider["vision_capability_tested_at"]
+            or not vision_adapter_supported(provider["vision_response_adapter_id"])
+        ):
+            raise DomainError(
+                "VISION_PROVIDER_UNSUPPORTED",
+                "Provider 未通过 vision 能力探测；请先对该 Provider 做 vision 能力探测",
+            )
+
+    @staticmethod
+    def _insert_job(db: Any, jobs: Any, job_id: str, now: str, project_id: str,
+                    generation_id: str, asset_id: str | None) -> None:
+        """在调用方事务内落 keyframe_tagging 作业行。
+
+        没有这一步，create 产出的 generation 永远停在 queued：全仓只有
+        jobs._run 认得这个 kind，却没有任何代码创建它。
+        """
+        if jobs is None or not hasattr(jobs, "insert_keyframe_tagging_job"):
+            return
+        jobs.insert_keyframe_tagging_job(
+            db, job_id, now, project_id, generation_id, asset_id,
+        )
 
     def claim_for_runner(self, project_id: str, generation_id: str) -> dict[str, Any]:
         """原子消费 consent 并把 generation 置 running。
@@ -273,6 +350,50 @@ class KeyframeEgressService:
             "expires_at": row["expires_at"],
         }
 
+    def generation_status(self, project_id: str, generation_id: str) -> dict[str, Any]:
+        """生成状态（S5b：Desktop 只读轮询）。零网络、**绝不跨项目**。
+
+        键集合是冻结契约（packages/contracts 的 KeyframeGenerationStatus 逐键校验
+        onlyKeys）：缺键即失败，所以缺值一律给 None 而不是省略该键。
+
+        frame_count / vocabulary_* 从 asset_frame_tags 反推而不是另建计数列：
+        同一事实存两处必然漂移。素材被删后标签行随 ON DELETE CASCADE 消失，
+        此时三项如实返回 None（「不知道」比「0」诚实——0 会被读成「打了 0 帧」）。
+        error_code 取自作业行：keyframe_generations 没有该列，而加列要新迁移，
+        作业行的 error_code 正是失败码的唯一出处。
+        """
+        with self.db.connection() as db:
+            row = db.execute(
+                "SELECT id,status FROM keyframe_generations WHERE id=? AND project_id=?",
+                (generation_id, project_id),
+            ).fetchone()
+            if row is None:
+                # 与「不存在」同一响应：跨项目探测不该能区分二者（防枚举）。
+                raise DomainError("KEYFRAME_GENERATION_NOT_FOUND", "生成记录不存在")
+            counted = db.execute(
+                "SELECT COUNT(*) AS frames, COUNT(notes) AS violations, "
+                "MAX(vocabulary_version) AS vocabulary_version "
+                "FROM asset_frame_tags WHERE generation_id=?",
+                (generation_id,),
+            ).fetchone()
+            job = db.execute(
+                "SELECT error_code FROM jobs WHERE kind=? AND input_json LIKE ? "
+                "ORDER BY created_at DESC LIMIT 1",
+                ("keyframe_tagging", f"%{generation_id}%"),
+            ).fetchone()
+        frames = int(counted["frames"]) if counted else 0
+        has_tags = frames > 0
+        return {
+            "keyframe_generation_id": str(row["id"]),
+            "status": str(row["status"]),
+            "frame_count": frames if has_tags else None,
+            "vocabulary_violations": int(counted["violations"]) if has_tags else None,
+            "vocabulary_version": (
+                int(counted["vocabulary_version"]) if has_tags else None
+            ),
+            "error_code": (job["error_code"] if job and job["error_code"] else None),
+        }
+
     def purge_expired(self) -> int:
         """到期后真删载荷字节，保留元数据与哈希（A14 / R10）。
 
@@ -300,17 +421,24 @@ class KeyframeEgressService:
             purged += 1
         return purged
 
-    def detach_asset(self, asset_id: str) -> int:
+    def detach_asset(self, asset_id: str, db: Any = None) -> int:
         """素材删除前调用：断开引用但保留审计行（R17 / P102 反向陷阱）。
 
         若改用 ON DELETE CASCADE，外传审计记录会随素材消失（与 A12 追溯冲突）；
         若用 NO ACTION，则 DELETE FROM assets 会被 FK 拒绝（P102 原样重演）。
         显式 detach 是同时满足两者的唯一做法。
+
+        `db` 非空时复用调用方的连接与事务——delete_asset 必须让 detach 与
+        `DELETE FROM assets` 同生共死，否则崩在两句之间会留下「素材已删、
+        预览仍指向它」的半删状态，而那个状态正是 FK 拒绝的来源。
         """
         now = utc_now()
-        with self.db.connection() as db:
-            return db.execute(
-                "UPDATE keyframe_egress_previews SET asset_id=NULL, detached_at=?,"
-                "updated_at=? WHERE asset_id=? AND detached_at IS NULL",
-                (now, now, asset_id),
-            ).rowcount
+        sql = (
+            "UPDATE keyframe_egress_previews SET asset_id=NULL, detached_at=?,"
+            "updated_at=? WHERE asset_id=? AND detached_at IS NULL"
+        )
+        params = (now, now, asset_id)
+        if db is not None:
+            return db.execute(sql, params).rowcount
+        with self.db.connection() as connection:
+            return connection.execute(sql, params).rowcount
