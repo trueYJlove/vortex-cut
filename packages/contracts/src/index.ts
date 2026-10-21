@@ -78,6 +78,7 @@ export type JobKind =
   | "media_generation"
   | "waveform"
   | "agent_session"
+  | "keyframe_tagging"
   | "cv_analysis"
   | "beat_analysis"
   | "angle_sync";
@@ -151,6 +152,7 @@ export const ERROR_CODES = [
   "AGENT_SESSION_EGRESS_EXPIRED", "AGENT_SESSION_EGRESS_MISMATCH",
   "AGENT_SESSION_PROVIDER_UNTESTED", "AGENT_SESSION_PROVIDER_UNSUPPORTED",
   "AGENT_SESSION_STEP_LIMIT", "AGENT_SESSION_BUDGET_EXCEEDED", "AGENT_SESSION_BASE_DRIFT"
+  , "VISION_PROVIDER_UNSUPPORTED", "VISION_FRAMES_UNMAPPED", "KEYFRAME_PREVIEW_EXPIRED", "KEYFRAME_EGRESS_CONSENT_REQUIRED", "VISION_VOCABULARY_VIOLATION"
 ] as const;
 export type ErrorCode = typeof ERROR_CODES[number] | (string & {});
 
@@ -1422,7 +1424,7 @@ export class ContractValidationError extends Error {
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const JOB_STATUSES: JobStatus[] = ["queued", "running", "succeeded", "failed", "cancelling", "cancelled", "interrupted"];
-const JOB_KINDS: JobKind[] = ["asset_probe", "asset_fingerprint", "proxy", "portrait_sample", "vertical_sample", "model_download", "transcription", "candidate_generation", "timeline_patch_generation", "captions_provider_generation", "authoritative_preview", "final_export", "media_generation", "waveform", "agent_session", "cv_analysis", "beat_analysis", "angle_sync"];
+const JOB_KINDS: JobKind[] = ["asset_probe", "asset_fingerprint", "proxy", "portrait_sample", "vertical_sample", "model_download", "transcription", "candidate_generation", "timeline_patch_generation", "captions_provider_generation", "authoritative_preview", "final_export", "media_generation", "waveform", "agent_session", "cv_analysis", "beat_analysis", "angle_sync", "keyframe_tagging"];
 const PROJECT_STATUSES: ProjectStatus[] = ["active", "archived", "missing"];
 const ASSET_KINDS: AssetKind[] = ["video", "audio", "image", "text"];
 const ASSET_AVAILABILITIES: AssetAvailability[] = ["available", "missing", "changed", "unsupported"];
@@ -2678,6 +2680,189 @@ export function parseProviderImageGenerationCreateResponse(value: unknown): Prov
 export function parseProviderImageGenerationRequestPage(value: unknown): ProviderImageGenerationRequestPage { if (!isProviderImageGenerationRequestPage(value)) throw new ContractValidationError("ProviderImageGenerationRequestPage"); return value; }
 export function parseProviderImageGenerationTaskPage(value: unknown): ProviderImageGenerationTaskPage { if (!isProviderImageGenerationTaskPage(value)) throw new ContractValidationError("ProviderImageGenerationTaskPage"); return value; }
 export function parseProviderImageGenerationRetryPrepareInput(value: unknown): ProviderImageGenerationRetryPrepareInput { if (!isProviderImageGenerationRetryPrepareInput(value)) throw new ContractValidationError("ProviderImageGenerationRetryPrepareInput"); return value; }
+
+
+// ── W3.3 Layer 2 关键帧理解（S2b）────────────────────────────────────────
+// 设计门 §4。全部为**增量**：新增类型与新增 JobKind 成员，
+// 既有类型/成员零变更（A8 回归锁）。
+
+export type KeyframeEgressPreviewId = string & { readonly __brand: "keyframe_egress_preview_id" };
+export type KeyframeGenerationId = string & { readonly __brand: "keyframe_generation_id" };
+
+export type KeyframeSamplingMode = "scene_cut" | "interval_only";
+export type KeyframeSourceReason = "scene_cut" | "interval";
+
+/** 逐帧元数据。
+ *
+ * 刻意分成 payload_* 与 thumbnail_* 两套（规划门 §3.2 / A12）：
+ * payload_* 描述**将外传给 Provider 的字节**，thumbnail_* 只用于界面呈现。
+ * 若只给一套字段，就无法表达「用户看到的 ≠ 发出去的」，审计保真形同虚设。
+ */
+export interface KeyframePreviewFrame {
+  frame_index: number;
+  timestamp_us: number;
+  source_reason: KeyframeSourceReason;
+  payload_width: number;
+  payload_height: number;
+  payload_bytes: number;
+  payload_sha256: string;
+  thumbnail_width: number;
+  thumbnail_height: number;
+  thumbnail_bytes: number;
+  thumbnail_sha256: string;
+}
+
+export interface KeyframeEgressPreview {
+  keyframe_egress_preview_id: KeyframeEgressPreviewId;
+  frames: KeyframePreviewFrame[];
+  excluded_frames: number[];
+  sampling_mode: KeyframeSamplingMode;
+  covered_scene_cuts: number;
+  /** 实测外传字节合计（A6 要求实测，不是推算 token）。 */
+  total_frame_bytes: number;
+  payload_sha256: string;
+  expires_at: string;
+}
+
+export interface KeyframeEgressCreateInput {
+  payload_sha256: string;
+}
+
+export interface KeyframeEgressCreateResponse {
+  keyframe_generation_id: KeyframeGenerationId;
+  status: string;
+  consent_id: string;
+}
+
+export interface KeyframeEgressExcludeInput {
+  frame_indices: number[];
+}
+
+export interface FrameTag {
+  frame_index: number;
+  timestamp_us: number;
+  labels: string[];
+  notes: string | null;
+}
+
+export interface AssetFrameTagsSummary {
+  asset_id: AssetId;
+  status: "ready" | "unavailable" | "failed" | "stale" | null;
+  reason: string | null;
+  vocabulary_version: number | null;
+  tags: FrameTag[];
+  /** 词表外标签计数（规划门 §3.4：一律改道 notes，不阻断落库）。 */
+  vocabulary_violations: number;
+}
+
+export function parseKeyframePreviewFrame(value: unknown): KeyframePreviewFrame {
+  if (!isRecord(value)) throw new ContractValidationError("KeyframePreviewFrame");
+  if (!isInteger(value.frame_index) || !isInteger(value.timestamp_us)) {
+    throw new ContractValidationError("KeyframePreviewFrame");
+  }
+  if (value.source_reason !== "scene_cut" && value.source_reason !== "interval") {
+    throw new ContractValidationError("KeyframePreviewFrame");
+  }
+  for (const key of ["payload_width", "payload_height", "payload_bytes",
+                     "thumbnail_width", "thumbnail_height", "thumbnail_bytes"] as const) {
+    if (!isInteger(value[key], 1)) throw new ContractValidationError("KeyframePreviewFrame");
+  }
+  if (!isSha256(value.payload_sha256) || !isSha256(value.thumbnail_sha256)) {
+    throw new ContractValidationError("KeyframePreviewFrame");
+  }
+  return value as unknown as KeyframePreviewFrame;
+}
+
+export function parseKeyframeEgressPreview(value: unknown): KeyframeEgressPreview {
+  if (!isRecord(value)) throw new ContractValidationError("KeyframeEgressPreview");
+  if (!isId(value.keyframe_egress_preview_id)) {
+    throw new ContractValidationError("KeyframeEgressPreview");
+  }
+  if (!Array.isArray(value.frames) || value.frames.length === 0) {
+    throw new ContractValidationError("KeyframeEgressPreview");
+  }
+  for (const frame of value.frames) parseKeyframePreviewFrame(frame);
+  if (!Array.isArray(value.excluded_frames)) {
+    throw new ContractValidationError("KeyframeEgressPreview");
+  }
+  for (const index of value.excluded_frames) {
+    if (!isInteger(index)) throw new ContractValidationError("KeyframeEgressPreview");
+  }
+  if (value.sampling_mode !== "scene_cut" && value.sampling_mode !== "interval_only") {
+    throw new ContractValidationError("KeyframeEgressPreview");
+  }
+  if (!isInteger(value.covered_scene_cuts) || !isInteger(value.total_frame_bytes)) {
+    throw new ContractValidationError("KeyframeEgressPreview");
+  }
+  if (!isSha256(value.payload_sha256) || !isTime(value.expires_at)) {
+    throw new ContractValidationError("KeyframeEgressPreview");
+  }
+  return value as unknown as KeyframeEgressPreview;
+}
+
+export function parseKeyframeEgressCreateResponse(value: unknown): KeyframeEgressCreateResponse {
+  if (!isRecord(value)) throw new ContractValidationError("KeyframeEgressCreateResponse");
+  if (!isId(value.keyframe_generation_id) || !isString(value.status) || !isId(value.consent_id)) {
+    throw new ContractValidationError("KeyframeEgressCreateResponse");
+  }
+  return value as unknown as KeyframeEgressCreateResponse;
+}
+
+export interface FrameTagHit extends FrameTag {
+  asset_id: AssetId;
+}
+
+export interface FrameTagFilterResponse {
+  label: string;
+  hits: FrameTagHit[];
+}
+
+export function parseFrameTagFilterResponse(value: unknown): FrameTagFilterResponse {
+  if (!isRecord(value) || !isString(value.label) || !Array.isArray(value.hits)) {
+    throw new ContractValidationError("FrameTagFilterResponse");
+  }
+  for (const hit of value.hits) {
+    if (!isRecord(hit) || !isId(hit.asset_id)) {
+      throw new ContractValidationError("FrameTagFilterResponse");
+    }
+    if (!isInteger(hit.frame_index) || !isInteger(hit.timestamp_us)) {
+      throw new ContractValidationError("FrameTagFilterResponse");
+    }
+    if (!Array.isArray(hit.labels) || !hit.labels.every(isString)) {
+      throw new ContractValidationError("FrameTagFilterResponse");
+    }
+    if (!isNullableString(hit.notes)) {
+      throw new ContractValidationError("FrameTagFilterResponse");
+    }
+  }
+  return value as unknown as FrameTagFilterResponse;
+}
+
+export function parseAssetFrameTagsSummary(value: unknown): AssetFrameTagsSummary {
+  if (!isRecord(value) || !isId(value.asset_id)) {
+    throw new ContractValidationError("AssetFrameTagsSummary");
+  }
+  const statuses = ["ready", "unavailable", "failed", "stale", null];
+  if (!statuses.includes(value.status as never)) {
+    throw new ContractValidationError("AssetFrameTagsSummary");
+  }
+  if (!Array.isArray(value.tags)) throw new ContractValidationError("AssetFrameTagsSummary");
+  for (const tag of value.tags) {
+    if (!isRecord(tag) || !isInteger(tag.frame_index) || !isInteger(tag.timestamp_us)) {
+      throw new ContractValidationError("AssetFrameTagsSummary");
+    }
+    if (!Array.isArray(tag.labels) || !tag.labels.every(isString)) {
+      throw new ContractValidationError("AssetFrameTagsSummary");
+    }
+    if (!isNullableString(tag.notes)) {
+      throw new ContractValidationError("AssetFrameTagsSummary");
+    }
+  }
+  if (!isInteger(value.vocabulary_violations)) {
+    throw new ContractValidationError("AssetFrameTagsSummary");
+  }
+  return value as unknown as AssetFrameTagsSummary;
+}
 
 export * from "./stage4e.js";
 export * from "./stage5.js";

@@ -24,7 +24,10 @@ import {
   parseAngleGroup,
   parseAngleSyncResponse,
   parseSemanticIndexSummary,
-  parseSemanticSearchResponse
+  parseSemanticSearchResponse,
+  parseKeyframeEgressPreview,
+  parseKeyframeEgressCreateResponse,
+  parseAssetFrameTagsSummary
 } from "@aivideo/contracts";
 
 type RequestInitLike = { method?: string; body?: string };
@@ -319,6 +322,73 @@ export function registerStage2bIpc(deps: Stage2bIpcDependencies): void {
       { method: "POST", body: JSON.stringify({ query: value.query.trim(), limit }) }
     );
     return parseSemanticSearchResponse(stage2bRendererSafe(response));
+  });
+  // W3.3 Layer 2 关键帧理解（S2b）：帧级外传预览。
+  // 本组通道**不发任何网络请求**——prepare/exclude 只产本地预览与载荷文件；
+  // 真正外传必须经 create → claim（I-1：claim 是唯一放行点），后续切片实现。
+  deps.handle("keyframe:preview", async (_event, input) => {
+    const value = record(input, ["project_id", "asset_id", "provider_config_id"], "keyframe preview");
+    const response = await fetchSafe(
+      `${API_PREFIX}/projects/${id(value.project_id, "project_id")}/assets/${id(value.asset_id, "asset_id")}/keyframe-preview`,
+      { method: "POST", body: JSON.stringify({ provider_config_id: value.provider_config_id }) }
+    );
+    return parseKeyframeEgressPreview(stage2bRendererSafe(response));
+  });
+  deps.handle("keyframe:exclude", async (_event, input) => {
+    const value = record(input, ["project_id", "preview_id", "frame_indices"], "keyframe exclude");
+    if (!Array.isArray(value.frame_indices) || value.frame_indices.length === 0) {
+      throw new Error("Invalid keyframe exclude input");
+    }
+    if (!value.frame_indices.every((i: unknown) => typeof i === "number" && Number.isInteger(i) && i >= 0)) {
+      throw new Error("Invalid keyframe exclude frame index");
+    }
+    const response = await fetchSafe(
+      `${API_PREFIX}/projects/${id(value.project_id, "project_id")}/keyframe-preview/${id(value.preview_id, "preview_id")}/exclude`,
+      { method: "POST", body: JSON.stringify({ frame_indices: value.frame_indices }) }
+    );
+    return parseKeyframeEgressPreview(stage2bRendererSafe(response));
+  });
+  deps.handle("keyframe:create", async (_event, input) => {
+    const value = record(input, ["project_id", "preview_id", "payload_sha256"], "keyframe create");
+    if (typeof value.payload_sha256 !== "string" || value.payload_sha256.length !== 64) {
+      throw new Error("Invalid keyframe create payload hash");
+    }
+    const response = await fetchSafe(
+      `${API_PREFIX}/projects/${id(value.project_id, "project_id")}/keyframe-preview/${id(value.preview_id, "preview_id")}/create`,
+      { method: "POST", body: JSON.stringify({ payload_sha256: value.payload_sha256 }) }
+    );
+    return parseKeyframeEgressCreateResponse(stage2bRendererSafe(response));
+  });
+  // W3.3 S5a：逐帧标签读取（只读；写侧属 S4，需真实网关）。
+  deps.handle("keyframe:frame-tags", async (_event, input) => {
+    const value = record(input, ["project_id", "asset_id", "label"], "frame tags");
+    if (value.label !== undefined && typeof value.label !== "string") {
+      throw new Error("Invalid frame tags label");
+    }
+    if (typeof value.label === "string" && value.label.trim().length === 0) {
+      throw new Error("Invalid frame tags label");
+    }
+    const suffix = typeof value.label === "string"
+      ? `?label=${encodeURIComponent(value.label.trim())}`
+      : "";
+    const response = await fetchSafe(
+      `${API_PREFIX}/projects/${id(value.project_id, "project_id")}/assets/${id(value.asset_id, "asset_id")}/frame-tags${suffix}`,
+      undefined
+    );
+    return parseAssetFrameTagsSummary(stage2bRendererSafe(response));
+  });
+  deps.handle("keyframe:filter-by-label", async (_event, input) => {
+    const value = record(input, ["project_id", "label", "limit"], "frame filter");
+    if (typeof value.label !== "string" || value.label.trim().length === 0) {
+      throw new Error("Invalid frame filter label");
+    }
+    const limit = typeof value.limit === "number" && Number.isInteger(value.limit) ? value.limit : 100;
+    if (limit < 1 || limit > 500) throw new Error("Invalid frame filter limit");
+    const response = await fetchSafe(
+      `${API_PREFIX}/projects/${id(value.project_id, "project_id")}/frame-tags?label=${encodeURIComponent(value.label.trim())}&limit=${limit}`,
+      undefined
+    );
+    return stage2bRendererSafe(response);
   });
   // 阶段 C 稳定性包：CV 信号样本（sparkline 可视化数据）。
   deps.handle("cv-samples:list", async (_event, input) => {

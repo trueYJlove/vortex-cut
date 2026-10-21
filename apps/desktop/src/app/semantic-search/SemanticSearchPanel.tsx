@@ -11,7 +11,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { AssetId, AssetPresentation, JobId, ProjectId, SemanticIndexSummary } from "@aivideo/contracts";
+import type { AssetId, AssetPresentation, FrameTagHit, JobId, ProjectId, SemanticIndexSummary } from "@aivideo/contracts";
 
 import { Dialog } from "../Dialog.js";
 
@@ -44,6 +44,14 @@ function indexHint(summary: SemanticIndexSummary): string | null {
   if (summary.reason === "no_video_stream") return "该素材没有画面轨，无法建立语义索引";
   if (summary.reason === "no_frames") return "未能从该素材抽到可用画面，换一段素材再试";
   return null;
+}
+
+/** 时间码格式化：面板里显示的是「第几帧 / 第几秒」，不是墙钟时间。 */
+function formatTimestamp(timestampUs: number): string {
+  const totalSeconds = Math.max(0, timestampUs) / 1_000_000;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds - minutes * 60;
+  return `${minutes}:${seconds.toFixed(2).padStart(5, "0")}`;
 }
 
 export function SemanticSearchPanel({ projectId, assetNames, assets, onClose }: SemanticSearchPanelProps) {
@@ -133,6 +141,34 @@ export function SemanticSearchPanel({ projectId, assetNames, assets, onClose }: 
   // 那两种说「模型未安装」是错误归因。
   const modelMissing = Object.values(indexStates).some(summary => summary.reason === "model_not_installed");
 
+  // ── S5a：按画面标签过滤（D1）──
+  // 与上面的「语义索引」并列但独立：索引需要 CLIP 模型，标签需要 Layer 2 外传，
+  // 两者的失败原因不同，混在一个区块里会给出错误的出路指引。
+  const [labelInput, setLabelInput] = useState("");
+  const [labelHits, setLabelHits] = useState<FrameTagHit[]>([]);
+  const [labelBusy, setLabelBusy] = useState(false);
+  const [labelError, setLabelError] = useState<string | null>(null);
+  const [labelSearched, setLabelSearched] = useState(false);
+
+  const runLabelFilter = useCallback(async () => {
+    if (!projectId) { setLabelError("未打开项目"); return; }
+    const label = labelInput.trim();
+    // 空标签在 UI 侧就拦下：服务端也会拒，但前端先拦能省一次往返，
+    // 也避免用户把「空 = 全部」误解成功能。
+    if (!label) { setLabelError("请输入标签"); return; }
+    setLabelBusy(true); setLabelError(null);
+    try {
+      const res = await window.desktop.filterFramesByLabel({ project_id: projectId, label, limit: 100 });
+      setLabelHits(res.hits);
+      setLabelSearched(true);
+    } catch {
+      setLabelError("过滤失败，请稍后重试");
+    } finally {
+      setLabelBusy(false);
+    }
+  }, [projectId, labelInput]);
+
+
   return (
     <Dialog label="素材语义检索" onClose={onClose} className="semantic-search">
       <header className="modal-header">
@@ -212,6 +248,48 @@ export function SemanticSearchPanel({ projectId, assetNames, assets, onClose }: 
             </ul>
           )}
           {indexError ? <p className="semantic-search-error" role="alert">{indexError}</p> : null}
+        </section>
+        <section className="semantic-frame-tags" aria-label="按画面标签过滤">
+          <div className="semantic-index-head">
+            <strong>按画面标签过滤</strong>
+          </div>
+          <p className="readonly-note">
+            标签来自云端关键帧理解（Layer 2）。<strong>需要你显式开启并逐张审阅</strong>后才会产生；
+            未开启时此处恒为空，属正常。
+          </p>
+          <form
+            className="semantic-search-form"
+            onSubmit={(e) => { e.preventDefault(); void runLabelFilter(); }}
+          >
+            <input
+              type="text"
+              value={labelInput}
+              maxLength={64}
+              placeholder="例如：人物"
+              onChange={(e) => setLabelInput(e.target.value)}
+              aria-label="画面标签"
+            />
+            <button type="submit" disabled={labelBusy}>
+              {labelBusy ? "过滤中…" : "按标签过滤"}
+            </button>
+          </form>
+          {labelError ? <p className="semantic-search-error" role="alert">{labelError}</p> : null}
+          {labelSearched && labelHits.length === 0 && !labelBusy ? (
+            <p className="readonly-note">没有帧带该标签。标签订阅需精确匹配（「人」不会命中「人物」）。</p>
+          ) : null}
+          {labelHits.length > 0 ? (
+            <ul className="semantic-index-list">
+              {labelHits.map(hit => (
+                <li key={`${hit.asset_id}-${hit.frame_index}`}>
+                  <span className="index-name">{assetNames[hit.asset_id] ?? hit.asset_id}</span>
+                  <span className="index-status ready">
+                    #{hit.frame_index} · {formatTimestamp(hit.timestamp_us)}
+                  </span>
+                  <small className="index-hint">{hit.labels.join("、")}</small>
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </section>
       </div>
       <footer className="modal-actions">
