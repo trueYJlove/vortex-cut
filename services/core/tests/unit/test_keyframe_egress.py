@@ -47,9 +47,16 @@ def service(tmp_path: Path):
              "fp_1", 100, "available", now, now),
         )
         conn.execute(
+            # create 自 A4 起 fail-closed：未探测的 Provider 一律拒。夹具显式
+            # 置 supported（照 captions 测试做法），不放宽生产门禁。
             "INSERT INTO provider_configs (id,kind,display_name,base_url,model,"
-            "enabled,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
-            ("prov_1", "openai_compatible_text", "P", "https://x", "m", 1, now, now),
+            "enabled,created_at,updated_at,vision_capability_status,"
+            "vision_capability_tested_at,vision_response_adapter_id,"
+            "vision_probe_protocol_version,vision_capability_failure_code,"
+            "vision_capability_probe_sha256) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("prov_1", "openai_compatible_text", "P", "https://x", "m", 1, now, now,
+             "supported", now,
+             "openai_chat_completions_image_url_v1", "1", None, "sha256:" + "0" * 64),
         )
     svc = KeyframeEgressService(db, cache_root=tmp_path / "cache")
     yield svc, db, project_id

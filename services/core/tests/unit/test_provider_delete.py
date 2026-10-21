@@ -124,3 +124,86 @@ def test_delete_keeps_other_providers_intact(tmp_path: Path) -> None:
 
     assert repo.get(keep_id)["provider_config_id"] == keep_id
     assert vault.status(keep_id) == "configured"
+
+
+def test_delete_rejects_provider_referenced_by_keyframe_preview(tmp_path: Path) -> None:
+    """行为级：**关键帧外传预览**引用时必须是 PROVIDER_IN_USE，而不是裸 FK 错误。
+
+    与 test_delete_fails_closed_when_referenced 同族，但覆盖 v40 新加的表。
+    schema 推导回归锁只证明「名字在清单里」，本用例证明「名字在清单里
+    **确实产生正确的失败形态**」。二者不可互相替代：清单对了但 delete()
+    的循环没查它，锁仍然绿。
+    """
+    repo, db, vault = _repo(tmp_path)
+    provider_id = _seed(repo, vault)
+    now = "2026-10-21T00:00:00.000Z"
+    with db.connection() as conn:
+        conn.execute(
+            "INSERT INTO keyframe_egress_previews"
+            "(id,project_id,asset_id,provider_config_id,source_fingerprint,"
+            "payload_sha256,frames_json,excluded_frames_json,sampling_mode,"
+            "covered_scene_cuts,total_frame_bytes,expires_at,created_at,updated_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("kp_1", "p1", None, provider_id, "fp_1", "sha256:" + "a" * 64,
+             "[]", "[]", "interval_only", 0, 0, now, now, now),
+        )
+
+    with pytest.raises(DomainError) as raised:
+        repo.delete(provider_id)
+    assert raised.value.code == "PROVIDER_IN_USE"
+    assert repo.get(provider_id)["provider_config_id"] == provider_id
+    assert vault.status(provider_id) == "configured"
+
+
+def test_delete_rejects_provider_referenced_only_by_keyframe_generation(
+    tmp_path: Path,
+) -> None:
+    """行为级：**只有生成记录**引用时也必须 PROVIDER_IN_USE。
+
+    构造上让 preview 行属于**另一个** Provider，于是「被查到」的唯一来源
+    就是 keyframe_generations——否则本用例会被 previews 那条路径顺带满足，
+    测不出 generations 这一条是否真的在清单里（"只登记了 previews 也算过"
+    的假绿）。
+    """
+    repo, db, vault = _repo(tmp_path)
+    target_id = _seed(repo, vault, "target")
+    owner_id = _seed(repo, vault, "owner")
+    now = "2026-10-21T00:00:00.000Z"
+    with db.connection() as conn:
+        conn.execute(
+            "INSERT INTO keyframe_egress_previews"
+            "(id,project_id,asset_id,provider_config_id,source_fingerprint,"
+            "payload_sha256,frames_json,excluded_frames_json,sampling_mode,"
+            "covered_scene_cuts,total_frame_bytes,expires_at,created_at,updated_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("kp_2", "p1", None, owner_id, "fp_2", "sha256:" + "b" * 64,
+             "[]", "[]", "interval_only", 0, 0, now, now, now),
+        )
+        conn.execute(
+            "INSERT INTO keyframe_egress_consents"
+            "(id,egress_preview_id,payload_sha256,created_at) VALUES (?,?,?,?)",
+            ("kc_2", "kp_2", "sha256:" + "b" * 64, now),
+        )
+        conn.execute(
+            "INSERT INTO keyframe_generations"
+            "(id,project_id,egress_preview_id,egress_consent_id,provider_config_id,"
+            "source_fingerprint,status,payload_sha256,created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            ("kg_2", "p1", "kp_2", "kc_2", target_id, "fp_2", "queued",
+             "sha256:" + "b" * 64, now),
+        )
+
+    with pytest.raises(DomainError) as raised:
+        repo.delete(target_id)
+    assert raised.value.code == "PROVIDER_IN_USE"
+
+    # 反证 1：owner 被 kp_2 引用，删它也必须是 PROVIDER_IN_USE——
+    # 证明 target 的红不是「查询把两行串了」的偶然结果，而是各行按其引用判定。
+    with pytest.raises(DomainError) as owner_raised:
+        repo.delete(owner_id)
+    assert owner_raised.value.code == "PROVIDER_IN_USE"
+
+    # 反证 2：真正无引用的 Provider 仍可删除——证明上面两条红不是
+    # 「凡是带关键帧行的库全拒」这种过度拒绝。
+    free_id = _seed(repo, vault, "free")
+    repo.delete(free_id)
