@@ -56,6 +56,7 @@
 | **AI 能力线** | **进行中（当前主投入）** | AI-1 多步 agent 会话、AI-2 本地 CV 信号层（Layer 0）已合入；总纲与 ADR-0004 已立 |
 | **W2.2 说话人层** | **停在降级交付（D3）形态 = 长期态** | 精度门未过（S3），七轮方法研究全部否证，且已无可盲测素材 ⇒ **ADR-0009** 收口。以 `quality_status='unvalidated'` / `usable_for=['reference']` 交付 |
 | **W2.3 机位切换** | **❄️ 冻结（不立项/不实现/零代码）** | 依赖 W2.2 turn 且准入未满足 ⇒ ADR-0009 D1 冻结；解冻条件见 **ADR-0009 §3 的 U1–U3** |
+| **W3.1 素材池语义检索** | **代码链路已交付；分发未闭环（P161）** | 中文 CLIP 双塔本地 embedding + 抽帧索引 + 项目内余弦检索，零 egress；用户 2026-10-19 裁决「中文优先」后接入 Chinese CLIP ViT-B/16（WordPiece 分词 + context 52），效果实测真实素材 top1 **0.90**（随机 0.12，P160）、物体描述类 5/5。**⚠️ 对最终用户仍不可用**：模型由本仓自行导出、无 https 托管点，装机用户装不上（P161）；许可为 `upstream-undeclared` |
 
 - **主干**：`master`——只接收**已完成的开发分支**（快进或合并），代表"最全最新"的可发布状态
 - **开发分支（固定）**：`liuwei-dev`——日常开发一律在此分支；开工前先变基到最新 `master`（2026-10-10 起，替代 `ai/stability-polish`）
@@ -82,9 +83,11 @@ PiP 自由定位、A1 音频混音、权威预览（代理为**可选加速项**
   基线漂移中止），每步落不可变 Revision，Desktop 面板含每步 diff 浏览与费用聚合；
 - **本地 CV 信号层**（AI-2 Layer 0，迁移 v21）：镜头边界 / 运动能量 / 清晰度 / 亮度 /
   音频能量 / YuNet 人脸；`skip_frame` 混合自适应采样（算法版本 3）；
-- **素材池语义检索**（W3.1，迁移 v39）：CLIP 双塔本地 embedding + 抽帧索引 + 项目内余弦检索；
-  模型按需下载、不随包分发，零 egress；中文优先模型（Chinese CLIP ViT-B/16）的接入状态
-  与限定见 §4 P153/P154；
+- **素材池语义检索**（W3.1，迁移 v39）：CLIP 双塔本地 embedding + 抽帧索引 + 项目内余弦检索，零 egress；
+  中文优先模型（Chinese CLIP ViT-B/16）已接入（WordPiece 分词 + context 52），
+  真实素材实测 top1 **0.90**（随机 0.12，P160）。**⚠️ 模型分发未闭环**：英文 CLIP 走受信清单按需下载；
+  **中文模型由本仓自行导出、无 https 托管点，装机用户无法安装**（§4 P161）——因此本能力当前
+  **只在自建/开发者环境可用**，不作为对最终用户的已交付承诺。
 - **工作单编排**（W4.1，迁移 v27）：固定步骤链 + 逐步 Diff/Apply + 取消/基线漂移/项目隔离；
   当前切片只实现 `editing_grammar` / `captions` 两类步骤，`roughcut` / `style` 返回
   `WORKLIST_STEP_UNAVAILABLE`（设计门有意延后，见 §4 P149）；
@@ -286,6 +289,7 @@ PiP 自由定位、A1 音频混音、权威预览（代理为**可选加速项**
 | json_schema 适配器被网关拒 | provider 兼容面窄于设计，script 类适配器为唯一通路 | `AI_VALIDATION_REPORT_2026-09-20.md` §实验 B |
 | Provider 域独立工作单 | 代理与探测总预算**均已交付**；本条保留用于跟踪 provider 域后续 | — |
 | Wave1 剪辑手法收尾 | **L1/L2 已核销（2026-10-10）**：L1 词戳自动拉取 = Core `_signals_for` 注入（既有）+ 面板词戳来源徽标（新）；L2 = 注入半边既有，**产出半边补齐**（此前 `BeatGridService` 零调用方、`beat_grids` 生产永远为空 → 卡点必失败）——新增 `POST …/assets/{a}/beat-analysis`（generate 登记作业）+ jobs `beat_analysis` 派发（waveform 同型）+ 面板「分析节拍」按钮与轮询 + `_signals_for` 补 algorithm_version 过滤；测试 单元 8（含 110BPM 真实素材全链 + 负向对照）+ API 5 + 面板 5。**L3 真机手测**：机器可判定部分已由自动化执行并留证（P78；执行中发现并修复 P74–P77），**人工签字项（听感/审美）待用户**——清单 `WAVE1_MANUAL_CHECKLIST_2026-10-10.md`、证据 `WAVE1_L3_AUTOMATION_EVIDENCE_2026-10-10.md` | `DESKTOP_WAVE1_EDITING_TOOLS_2026-09-25.md` §4 |
+| **中文模型分发与许可（W3.1）** | fp32 中文双塔 719 MB 无托管点、`download_url: null` ⇒ 装机用户无法安装；许可 `upstream-undeclared` 对外分发风险未确认。详见 §4 **P161** | P161 / P144 追记 |
 
 ---
 
