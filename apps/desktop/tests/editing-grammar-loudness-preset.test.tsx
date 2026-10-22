@@ -34,7 +34,15 @@ function setup() {
     proposeEditingGrammar: vi.fn(),
   };
   (window as unknown as { desktop: Record<string, unknown> }).desktop = desktop;
-  render(<EditingGrammarPanel projectId={projectId} baseRevisionId={baseRevisionId} onClose={() => {}} />);
+  render(
+    <EditingGrammarPanel
+      projectId={projectId}
+      baseRevisionId={baseRevisionId}
+      onClose={() => {}}
+      onApplied={() => {}}
+      onNotify={() => {}}
+    />,
+  );
   return { prepareEditingGrammar, desktop };
 }
 
