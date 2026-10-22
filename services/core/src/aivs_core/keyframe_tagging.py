@@ -95,10 +95,53 @@ class KeyframeTaggingService:
         except Exception as exc:
             code = getattr(exc, "code", None) or "INTERNAL_ERROR"
             self.mark_failed(project_id, generation_id, code)
+            # 失败路径同样清理：载荷字节的唯一用途是外传，而外传已经发生过
+            # （claim 在此之前完成）。留着不删只会在磁盘上多躺 15 分钟到一个
+            # 启动周期。不破坏重试语义——理由见 _purge_payloads 的 docstring。
+            self._purge_payloads(generation_id)
             raise
+        self._purge_payloads(generation_id)
         if progress:
             progress(1.0)
         return result
+
+    def _purge_payloads(self, generation_id: str) -> int:
+        """打标收尾清理该 generation 的预览载荷字节（成功与失败都调）。
+
+        **清理点选在 run_tagging_job 而不是 _persist 之后**：_persist 只在
+        成功路径上跑，失败路径（Provider 400、预算耗尽、用户取消）会带着
+        载荷字节退出——那批字节已经外传过了（claim 已完成），没有任何理由
+        再留在盘上。放在 run_tagging_job 里、两条路径的汇合处，是同时覆盖
+        「打标成功」与「打标失败」的唯一一处。
+
+        失败路径清理会破坏「重试」吗？不会，而且这是核实过的：
+          · jobs.retry 只把**作业行**置回 queued，keyframe_generations 保持 failed；
+          · 重跑作业会重新 claim 同一份 consent，而 claim_for_runner 对已消费
+            consent 直接抛 KEYFRAME_EGRESS_CONSENT_REQUIRED——载荷在与不在都跑不通；
+          · 桌面面板没有重试按钮，失败后给的是「重新生成预览并再次确认」，
+            即全新 prepare + create（新 preview_id、新载荷）。
+        也就是说：失败后唯有重新走一次用户同意才能再次外传，与字节是否留在
+        盘上无关；留着只多一份泄露面，不增加可恢复性。
+
+        清理自身绝不抛：它跑在作业收尾处，抛出去会把一次**已经成功落库**的
+        打标变成 failed（状态谎报）。启动期 purge 的容错口径与此一致
+        （app.py:981-984 同样吞异常）。
+        """
+        try:
+            preview_id = self._preview_id_for(generation_id)
+            if not preview_id:
+                return 0
+            return self.egress.purge_preview(preview_id)
+        except Exception:  # noqa: BLE001 清理失败不得改写打标结果
+            return 0
+
+    def _preview_id_for(self, generation_id: str) -> str:
+        with self.db.connection() as db:
+            row = db.execute(
+                "SELECT egress_preview_id FROM keyframe_generations WHERE id=?",
+                (generation_id,),
+            ).fetchone()
+        return str(row["egress_preview_id"]) if row else ""
 
     def mark_failed(self, project_id: str, generation_id: str, code: str) -> bool:
         """把**仍在 running** 的 generation 落终态；已终态的不覆盖。

@@ -81,11 +81,20 @@ class KeyframeEgressService:
         return self.cache_root / preview_id
 
     def _write_payloads(self, preview_id: str, frames: list[EncodedFrame]) -> None:
+        """只写 payload_*：那是唯一会外传的那份字节。
+
+        缩略图**不落盘**（W3.3 收口）：全仓没有任何读取方——审阅面板渲染的是
+        frames_json 里的 thumbnail_width/height/bytes/sha256 元数据，Core 也没有
+        按 preview 取图的端点（app.py 无 StaticFiles/FileResponse 且不挂
+        keyframe-cache）。既然无人读，写它就是纯泄露面。
+
+        元数据**照留**：A12 靠 payload_* 与 thumbnail_* 两组元数据不相等来证明
+        「呈现的字节就是外传的字节」，那只需要哈希与尺寸，不需要缩略图本身留盘。
+        """
         directory = self._preview_dir(preview_id)
         directory.mkdir(parents=True, exist_ok=True)
         for index, frame in enumerate(frames):
             (directory / f"payload_{index:03d}.jpg").write_bytes(frame.payload_bytes)
-            (directory / f"thumb_{index:03d}.jpg").write_bytes(frame.thumbnail_bytes)
 
     def payload_dir_bytes(self, preview_id: str) -> int:
         """该预览在磁盘上的载荷字节数（A14 断言用）。"""
@@ -394,6 +403,31 @@ class KeyframeEgressService:
             "error_code": (job["error_code"] if job and job["error_code"] else None),
         }
 
+    def purge_preview(self, preview_id: str) -> int:
+        """清理**单个**预览的载荷字节（purge_expired 的单条版本）。
+
+        语义与 purge_expired 逐条相同：删目录字节、置 payloads_purged_at、
+        **保留 frames_json 元数据与全部哈希**。幂等：已清理过的再调返回 0；
+        未知 preview_id 也返回 0 而不抛——清理是收尾动作，不该因为记录已被
+        删掉而把一次成功的打标变成失败。
+
+        为什么要单条版本：promise 是「打标后不再留存原始 JPEG」，而
+        purge_expired 只在启动期跑一次，跨进程就等于把字节留到下次启动。
+        真正知道「这批字节已经用完」的只有打标执行体，它需要能立刻清。
+
+        置 payloads_purged_at 顺带把 create 的门关掉（见 create 的检查）：
+        字节没了，任何后续 create 都只能发出空图，必须重新 prepare。
+        """
+        directory = self._preview_dir(preview_id)
+        if directory.exists():
+            shutil.rmtree(directory, ignore_errors=True)
+        with self.db.connection() as db:
+            return db.execute(
+                "UPDATE keyframe_egress_previews SET payloads_purged_at=?,updated_at=? "
+                "WHERE id=? AND payloads_purged_at IS NULL",
+                (utc_now(), utc_now(), preview_id),
+            ).rowcount
+
     def purge_expired(self) -> int:
         """到期后真删载荷字节，保留元数据与哈希（A14 / R10）。
 
@@ -407,19 +441,7 @@ class KeyframeEgressService:
                 "WHERE expires_at < ? AND payloads_purged_at IS NULL",
                 (now,),
             ).fetchall()
-        purged = 0
-        for row in rows:
-            directory = self._preview_dir(row["id"])
-            if directory.exists():
-                shutil.rmtree(directory, ignore_errors=True)
-            with self.db.connection() as db:
-                db.execute(
-                    "UPDATE keyframe_egress_previews SET payloads_purged_at=? "
-                    "WHERE id=? AND payloads_purged_at IS NULL",
-                    (now, row["id"]),
-                )
-            purged += 1
-        return purged
+        return sum(self.purge_preview(row["id"]) for row in rows)
 
     def detach_asset(self, asset_id: str, db: Any = None) -> int:
         """素材删除前调用：断开引用但保留审计行（R17 / P102 反向陷阱）。
