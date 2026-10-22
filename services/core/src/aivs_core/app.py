@@ -2742,10 +2742,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             from .keyframe_orchestration import ensure_video_asset
 
             ensure_video_asset(asset_row)
-            provider = state.providers.require(project_id, request.provider_config_id)
+            # 按 id 取即可：provider_configs 没有 project_id 列（Provider 是
+            # 进程级配置，见 database.py 建表），所以「本项目是否用过该
+            # Provider」在库里无对象可查。全仓其它取用点（1523、
+            # keyframe_tagging._require_provider、vision_probe、
+            # captions_provider_egress）同样只按 id 取，此处保持一致。
+            # prepare 只要 DTO 形状（provider_config_id + model），get() 返回
+            # 的正是 _dto(row)。未探测/停用的门禁不在这里：prepare 零网络，
+            # 放行判据在 create 的 _require_vision_capable（A4）。
+            provider = state.providers.get(request.provider_config_id)
             resolved = state.projects.resolve_asset_path(asset_id)
-            detail = state.ffprobe.probe(resolved["path"])
-            duration_us = int(detail.duration_us)
+            # 这一行有三处必须同时对上，缺一个都是装配级错误（单测走服务层
+            # 时看不见）：probe 是 async ⇒ 要 await；入参是 Path ⇒ 不能传
+            # resolved["path"] 的 str（probe 内部会 path.stat()）；返回的是
+            # dict ⇒ 不能按属性读 duration_us。
+            detail = await state.ffprobe.probe(Path(resolved["path"]))
+            duration_us = int(detail["duration_us"])
             kwargs: dict[str, Any] = {}
             if request.interval_us is not None:
                 kwargs["interval_us"] = request.interval_us
