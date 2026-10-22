@@ -851,8 +851,16 @@ class CoreState:
         )
         # W1.1：剪辑语法层（P-A，零 egress，无 provider/consent）。
         from .editing_grammar import EditingGrammarService
+        from .media.loudness import LoudnessProbe
 
-        self.editing_grammar = EditingGrammarService(self.db, self.timelines)
+        # E8：响度测量探针（随包 ffmpeg 的 EBU R128；每次现测、不落库）。
+        # resolve_asset_path 经闭包延后取——_wire_projects() 在本行之后才跑。
+        self.loudness_probe = LoudnessProbe(
+            settings.ffmpeg, lambda asset_id: self.projects.resolve_asset_path(asset_id)
+        )
+        self.editing_grammar = EditingGrammarService(
+            self.db, self.timelines, loudness=self.loudness_probe
+        )
         from .worklist import WorklistService
         self.worklists = WorklistService(self.db, self.timelines, self.editing_grammar, self.captions_provider_egress)
         # AI-1：多步 agent 会话（emit 传入以发 agent_session.updated 事件）。

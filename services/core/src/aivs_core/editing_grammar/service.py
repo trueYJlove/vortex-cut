@@ -12,6 +12,7 @@ from typing import Any
 from ..database import Database, json_dumps, json_loads, utc_now
 from ..ids import new_id
 from ..media.beat_grid import BEAT_ALGORITHM_VERSION
+from ..media.loudness import LoudnessProbe
 from ..planning import sha256
 from ..projects import DomainError
 from ..timeline import TimelineService, timeline_diff
@@ -28,10 +29,14 @@ class EditingGrammarService:
         db: Database,
         timelines: TimelineService,
         registry: PlannerRegistry | None = None,
+        loudness: LoudnessProbe | None = None,
     ) -> None:
         self.db = db
         self.timelines = timelines
         self.registry = registry or default_registry()
+        # E8：响度测量注入（零 egress，随包 ffmpeg 现测）。None = 该规划器
+        # 拿不到实测 ⇒ 规划器将其标为「无法测量」而不是返回 0 dB。
+        self.loudness = loudness
 
     def list_planners(self) -> dict[str, Any]:
         return {"items": self.registry.list_tools()}
@@ -54,8 +59,20 @@ class EditingGrammarService:
         - remove_pauses：CV 音频能量样本
         - beat_sync：beat_grids 的 beats_us/downbeats_us
         - lj_cut：transcript_words（params.words 为空时）
+        - unify_loudness：随包 ffmpeg 的 EBU R128 实测（每片段现测，不落库）
         """
         signals: dict[str, Any] = {}
+        if planner == "unify_loudness":
+            if self.loudness is None:
+                # 未注入探针：不给实测 ⇒ 规划器如实标「无法测量」，绝不填 0。
+                signals["loudness"] = {"algorithm_version": None, "items": []}
+                return signals
+            from .unify_loudness import scope_clips
+
+            signals["loudness"] = self.loudness.measure_clips(
+                scope_clips(document, params)
+            )
+            return signals
         if planner == "remove_pauses":
             clip_id = params.get("clip_id")
             if not isinstance(clip_id, str):

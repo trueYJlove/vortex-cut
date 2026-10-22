@@ -8,6 +8,7 @@ from .lj_cut import LjCutPlanner
 from .planners import DropShortClipsPlanner
 from .protocol import Planner
 from .silence import RemovePausesPlanner
+from .unify_loudness import UnifyLoudnessPlanner
 
 
 class PlannerRegistry:
@@ -38,4 +39,5 @@ def default_registry() -> PlannerRegistry:
     registry.register(RemovePausesPlanner())
     registry.register(BeatSyncPlanner())
     registry.register(LjCutPlanner())
+    registry.register(UnifyLoudnessPlanner())
     return registry

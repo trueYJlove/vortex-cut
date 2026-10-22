@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { Archive, FileText, Lock, RotateCcw, Save } from "lucide-react";
-import type { CaptionPresetId, Project, TimelineCaption, TimelineClip, TimelineDiff, TimelineDocument, TimelineLayout, TimelinePatchOperation, TimelineTransition } from "@aivideo/contracts";
+import type { CaptionPresetId, EditingGrammarPrepareResult, EditingGrammarProposal, Project, TimelineCaption, TimelineClip, TimelineDiff, TimelineDocument, TimelineLayout, TimelinePatchOperation, TimelineState, TimelineTransition } from "@aivideo/contracts";
 import type { AuthoritativePreviewPresentation } from "../../electron/preload/index.js";
 import { PanelTabs, SubTabs, PGroup, PSep, PRow, Switch, Seg, SoonBadge, PNote, NumberField, RangeRow } from "./PropertyControls.js";
+import { errorCode } from "./safeErrors.js";
 
 type SaveState = "已保存" | "保存中" | "保存失败" | "草稿冲突";
 const captionPresets: { value: CaptionPresetId; label: string }[] = [{ value: "default-bottom", label: "默认底部" }, { value: "game-safe-bottom", label: "游戏安全区" }, { value: "high-contrast", label: "高对比" }];
@@ -33,7 +34,71 @@ const keyframePropertyLabels: Array<{ property: "position" | "scale" | "rotate" 
  * 视频/图片：画面（基础·抠像·蒙版）/ 音频 / 变速（含倒放）/ 动画；音频素材：基础 / 换音色 / 声音效果 / 变速。
  * 仅重组 UI，patch 操作与字段语义与 v1 完全一致；「规划中」为静态占位。
  */
-export function ClipProperties({ clip, working, locked, onPatch, onDraft, playheadUs, onOpenEditingTools }: { clip: TimelineClip; working: TimelineDocument; locked: boolean; onPatch: (ops: TimelinePatchOperation[], summary: string) => Promise<void>; onDraft: (doc: TimelineDocument) => void; playheadUs?: number; onOpenEditingTools?: (tool: "remove_pauses" | "beat_sync" | "lj_cut") => void }) {
+/** 一键统一音量（E8）的 UI 状态机：预览 → 提案 → 显式采纳。 */
+type UnifyLoudnessState =
+  | { phase: "idle" }
+  | { phase: "preparing" }
+  | { phase: "prepared"; preview: EditingGrammarPrepareResult }
+  | { phase: "proposing"; preview: EditingGrammarPrepareResult }
+  | { phase: "proposed"; proposal: EditingGrammarProposal }
+  | { phase: "applying"; proposal: EditingGrammarProposal }
+  | { phase: "applied"; revisionId: string }
+  | { phase: "error"; message: string };
+
+/** 规划器失败的业务码 → 可操作提示（不吞掉原因，也不一律「操作失败」）。 */
+const LOUDNESS_FAILURE_LABELS: Record<string, string> = {
+  EDITING_GRAMMAR_BASE_CONFLICT: "时间线已变化，请重新打开属性面板后重试。",
+  EDITING_GRAMMAR_PARAMS_INVALID: "响度归一参数不合法，请重新选择片段。",
+  EDITING_GRAMMAR_PLANNER_NOT_FOUND: "响度归一步骤不存在，请重启应用后重试。",
+  EDITING_GRAMMAR_PROPOSAL_APPLIED: "该提案已应用过，请重新发起。",
+  EDITING_GRAMMAR_PROPOSAL_CONFLICT: "提案与当前时间线不一致，请重新发起。",
+};
+
+function loudnessErrorText(caught: unknown): string {
+  const code = errorCode(caught);
+  if (LOUDNESS_FAILURE_LABELS[code]) return LOUDNESS_FAILURE_LABELS[code];
+  const raw = caught instanceof Error ? caught.message : "";
+  return raw ? `响度归一失败：${raw.slice(0, 160)}` : "响度归一失败，请重试。";
+}
+
+const loudnessBusy = (state: UnifyLoudnessState) =>
+  state.phase === "preparing" || state.phase === "proposing" || state.phase === "applying";
+
+function loudnessStatusText(state: UnifyLoudnessState): string {
+  switch (state.phase) {
+    case "preparing": return "测量中…";
+    case "prepared": return "已测量";
+    case "proposing": return "生成提案…";
+    case "proposed": return "待采纳";
+    case "applying": return "应用中…";
+    case "applied": return "已应用";
+    case "error": return "失败";
+    default: return "";
+  }
+}
+
+function loudnessButtonTitle(state: UnifyLoudnessState, ready: boolean): string {
+  if (!ready) return "时间线尚未就绪";
+  if (loudnessBusy(state)) return "正在处理…";
+  if (state.phase === "prepared") return "生成提案（采纳后才写时间线）";
+  return "测量本片段响度并生成统一音量提案";
+}
+
+/** rationale 里的实测值/目标值：只读展示，缺失时如实标注。 */
+function loudnessMeasured(preview: EditingGrammarPrepareResult): string {
+  const clips = preview.rationale.clips;
+  const list = Array.isArray(clips) ? clips as Array<Record<string, unknown>> : [];
+  const values = list.map(item => item.measured_lufs).filter((value): value is number => typeof value === "number");
+  return values.length ? values.map(value => value.toFixed(1)).join(" / ") : "无法测量";
+}
+
+function loudnessTarget(preview: EditingGrammarPrepareResult): string {
+  const params = preview.rationale.params;
+  const target = params && typeof params === "object" ? (params as Record<string, unknown>).target_lufs : undefined;
+  return typeof target === "number" ? target.toFixed(0) : "—";
+}
+
+export function ClipProperties({ clip, working, baseRevisionId, locked, onPatch, onDraft, playheadUs, onOpenEditingTools, onAppliedTimeline }: { clip: TimelineClip; working: TimelineDocument; baseRevisionId?: string | null; locked: boolean; onPatch: (ops: TimelinePatchOperation[], summary: string) => Promise<void>; onDraft: (doc: TimelineDocument) => void; playheadUs?: number; onOpenEditingTools?: (tool: "remove_pauses" | "beat_sync" | "lj_cut") => void; onAppliedTimeline?: (state: TimelineState) => void }) {
   const isVideo = clip.asset_kind === "video";
   const isImage = clip.asset_kind === "image";
   const isAudioClip = clip.asset_kind === "audio";
@@ -75,6 +140,33 @@ export function ClipProperties({ clip, working, locked, onPatch, onDraft, playhe
   // 等比缩放：可点开关（原型交互）。当前版本缩放恒为等比，开关仅承载视觉状态。
   const [ratioOn, setRatioOn] = useState(true);
   const RatioSwitch = () => <Switch on={ratioOn} onToggle={() => setRatioOn(v => !v)} title="当前版本仅支持等比缩放" />;
+
+  // ---- E8 响度统一：干跑 → 提案 → 显式采纳（三段式，绝不直接改文档） ----
+  // 实测由 Core 的随包 ffmpeg（EBU R128）现测；面板只发起请求与呈现象。
+  const [loudness, setLoudness] = useState<UnifyLoudnessState>({ phase: "idle" });
+  const runLoudnessPrepare = () => {
+    if (!baseRevisionId) { setLoudness({ phase: "error", message: "时间线尚未就绪，请稍后重试。" }); return; }
+    setLoudness({ phase: "preparing" });
+    void window.desktop.prepareEditingGrammar({ project_id: working.project_id, base_revision_id: baseRevisionId as never, planner: "unify_loudness", params: { clip_ids: [clip.clip_id] } })
+      .then(preview => { setLoudness({ phase: "prepared", preview }); })
+      .catch(caught => { setLoudness({ phase: "error", message: loudnessErrorText(caught) }); });
+  };
+  const runLoudnessPropose = () => {
+    if (loudness.phase !== "prepared" || !baseRevisionId) return;
+    const preview = loudness.preview;
+    setLoudness({ phase: "proposing", preview });
+    void window.desktop.proposeEditingGrammar({ project_id: working.project_id, base_revision_id: baseRevisionId as never, planner: "unify_loudness", params: preview.params })
+      .then(proposal => { setLoudness({ phase: "proposed", proposal }); })
+      .catch(caught => { setLoudness({ phase: "error", message: loudnessErrorText(caught) }); });
+  };
+  const runLoudnessApply = () => {
+    if (loudness.phase !== "proposed") return;
+    const proposal = loudness.proposal;
+    setLoudness({ phase: "applying", proposal });
+    void window.desktop.applyEditingGrammarProposal({ project_id: working.project_id, proposal_id: proposal.editing_grammar_proposal_id, base_revision_id: proposal.base_revision_id, proposed_document_sha256: proposal.proposed_document_sha256 })
+      .then(state => { setLoudness({ phase: "applied", revisionId: state.current_revision.timeline_revision_id }); onAppliedTimeline?.(state); })
+      .catch(caught => { setLoudness({ phase: "error", message: loudnessErrorText(caught) }); });
+  };
 
   // ---- 画面 → 基础 ----
   const picBasic = <>
@@ -212,7 +304,25 @@ export function ClipProperties({ clip, working, locked, onPatch, onDraft, playhe
         onCommit={v => void onPatch([{ op: "set_audio", clip_id: clip.clip_id, enabled: clip.audio.enabled, gain_db: v }], "调整音频增益")} />
       <PRow label="淡入时长" dim><input type="range" className="pp-range" disabled min={0} max={50} value={0} aria-label="淡入时长（规划中）" /><SoonBadge /></PRow>
       <PRow label="淡出时长" dim><input type="range" className="pp-range" disabled min={0} max={50} value={0} aria-label="淡出时长（规划中）" /><SoonBadge /></PRow>
-      <PRow label="响度统一" dim><Switch on={false} onToggle={() => {}} disabled /><SoonBadge /></PRow>
+      <PRow label="响度统一" tail={<span className="pp-tailtext">{loudnessStatusText(loudness)}</span>}>
+        <Switch on={loudness.phase === "prepared" || loudness.phase === "proposed" || loudness.phase === "applying"}
+          disabled={loudnessBusy(loudness) || !baseRevisionId}
+          title={loudnessButtonTitle(loudness, Boolean(baseRevisionId))}
+          onToggle={() => { if (loudness.phase === "prepared") runLoudnessPropose(); else { setLoudness({ phase: "idle" }); runLoudnessPrepare(); } }} />
+      </PRow>
+      {loudness.phase === "prepared" && loudness.preview && <div className="pp-loudness" data-testid="pp-loudness-preview">
+        <p className="pp-loudness-line">{loudness.preview.summary}</p>
+        <p className="pp-loudness-line">实测 {loudnessMeasured(loudness.preview)} → 目标 {loudnessTarget(loudness.preview)} LUFS</p>
+        <button type="button" className="pp-btn" onClick={runLoudnessPropose}>生成提案</button>
+      </div>}
+      {loudness.phase === "proposed" && loudness.proposal && <div className="pp-loudness" data-testid="pp-loudness-proposal">
+        <p className="pp-loudness-line">{loudness.proposal.patch.summary}</p>
+        <p className="pp-loudness-line">待采纳 {loudness.proposal.patch.operations.length} 项改动</p>
+        <button type="button" className="pp-btn" onClick={runLoudnessApply}>应用提案</button>
+      </div>}
+      {loudness.phase === "applying" && <PNote>正在应用提案…</PNote>}
+      {loudness.phase === "applied" && <PNote>已应用为新的正式 Revision（{loudness.revisionId.slice(0, 12)}…）。</PNote>}
+      {loudness.phase === "error" && <PNote warn>{loudness.message}</PNote>}
     </PGroup>
     <PSep />
     <PGroup title="素材修剪">

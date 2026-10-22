@@ -7,6 +7,7 @@ from .protocol import PlanResult, Planner, ToolDescription
 from .registry import PlannerRegistry, default_registry
 from .service import EditingGrammarService
 from .silence import RemovePausesPlanner
+from .unify_loudness import UnifyLoudnessPlanner
 
 __all__ = [
     "BeatSyncPlanner",
@@ -18,5 +19,6 @@ __all__ = [
     "PlannerRegistry",
     "RemovePausesPlanner",
     "ToolDescription",
+    "UnifyLoudnessPlanner",
     "default_registry",
 ]
