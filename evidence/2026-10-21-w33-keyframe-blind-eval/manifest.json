@@ -1,0 +1,70 @@
+{
+  "note": "评分完成前不要查看本文件（会破坏盲评）。",
+  "samples": [
+    {
+      "sample_id": "sample-01",
+      "asset_id": "asset_0122f56779ca43ac98515a0bf701b36a",
+      "frame_index": 0,
+      "timestamp_us": 0
+    },
+    {
+      "sample_id": "sample-02",
+      "asset_id": "asset_0122f56779ca43ac98515a0bf701b36a",
+      "frame_index": 1,
+      "timestamp_us": 2000000
+    },
+    {
+      "sample_id": "sample-03",
+      "asset_id": "asset_0122f56779ca43ac98515a0bf701b36a",
+      "frame_index": 2,
+      "timestamp_us": 4000000
+    },
+    {
+      "sample_id": "sample-04",
+      "asset_id": "asset_20f89c8cf0504128914f01736a2358bb",
+      "frame_index": 0,
+      "timestamp_us": 0
+    },
+    {
+      "sample_id": "sample-05",
+      "asset_id": "asset_20f89c8cf0504128914f01736a2358bb",
+      "frame_index": 1,
+      "timestamp_us": 2000000
+    },
+    {
+      "sample_id": "sample-06",
+      "asset_id": "asset_20f89c8cf0504128914f01736a2358bb",
+      "frame_index": 2,
+      "timestamp_us": 4000000
+    },
+    {
+      "sample_id": "sample-07",
+      "asset_id": "asset_5c52c29def9040e7b69d0ca02d28bcdd",
+      "frame_index": 0,
+      "timestamp_us": 0
+    },
+    {
+      "sample_id": "sample-08",
+      "asset_id": "asset_5c52c29def9040e7b69d0ca02d28bcdd",
+      "frame_index": 1,
+      "timestamp_us": 2000000
+    },
+    {
+      "sample_id": "sample-09",
+      "asset_id": "asset_5c52c29def9040e7b69d0ca02d28bcdd",
+      "frame_index": 2,
+      "timestamp_us": 4000000
+    }
+  ],
+  "excluded": [
+    {
+      "asset_id": "asset_34c928546b8242b89dea458d5cbde176",
+      "frame_index": -1,
+      "timestamp_us": 0,
+      "reason": "duplicate_asset_content",
+      "duplicate_of": "asset_20f89c8cf0504128914f01736a2358bb",
+      "frames_skipped": 3
+    }
+  ],
+  "excluded_count": 1
+}
