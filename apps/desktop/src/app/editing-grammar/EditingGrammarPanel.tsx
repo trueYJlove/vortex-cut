@@ -30,7 +30,10 @@ const PARAM_PRESETS: Record<string, string> = {
   drop_short_clips: '{\n  "min_duration_us": 500000\n}',
   remove_pauses: '{\n  "clip_id": "clip_xxx"\n}',
   beat_sync: '{\n  "target_duration_us": 15000000,\n  "beats_per_shot": 2,\n  "segments": []\n}',
-  lj_cut: '{\n  "mode": "j",\n  "picture_cut_us": 2000000,\n  "words": [],\n  "clip_start_us": 0,\n  "clip_end_us": 5000000,\n  "offset_us": 400000\n}'
+  lj_cut: '{\n  "mode": "j",\n  "picture_cut_us": 2000000,\n  "words": [],\n  "clip_start_us": 0,\n  "clip_end_us": 5000000,\n  "offset_us": 400000\n}',
+  // E8：**省略 clip_ids = 全片**（规划器把缺省当作「所有有音轨潜力的片段」）。
+  // 这是「一键统一音量」的入口——片段属性面板只能逐片段，这里是全片。
+  unify_loudness: '{\n  "target_lufs": -16\n}'
 };
 
 /**
