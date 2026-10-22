@@ -30,8 +30,17 @@ class FakeWorkletNode {
   disconnect() { this.connected = false; }
 }
 
+/** 假 GainNode：增益包络现在走自动化 API（setValueAtTime/linearRamp），
+ *  fake 必须忠实实现，否则淡变调度在 tick 里抛错（真 GainNode 恒有这三个方法）。 */
+class FakeGainParam {
+  value = 1;
+  setValueAtTime(value: number) { this.value = value; }
+  linearRampToValueAtTime(value: number) { this.value = value; }
+  cancelScheduledValues() { /* no-op */ }
+}
+
 class FakeGain {
-  gain = { value: 1 };
+  gain = new FakeGainParam();
   connected = false;
   connect() { this.connected = true; }
   disconnect() { this.connected = false; }

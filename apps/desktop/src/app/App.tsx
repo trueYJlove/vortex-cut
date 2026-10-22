@@ -1169,8 +1169,12 @@ export function App() {
     [project?.project_id],
   );
   useEffect(() => () => { waveformCache?.dispose(); }, [waveformCache]);
+  // 片段音频透传：增益 + 淡变（fade_* 与导出侧 afade 同口径；缺省 = 不淡）。
   const syntheticAudioByClip = useMemo(
-    () => new Map((working?.clips ?? []).flatMap(clip => clip.audio ? [[clip.clip_id, { enabled: isClipAudible(clip), gainDb: clip.audio.gain_db }] as const] : [])),
+    () => new Map((working?.clips ?? []).flatMap(clip => clip.audio ? [[clip.clip_id, {
+      enabled: isClipAudible(clip), gainDb: clip.audio.gain_db,
+      fadeInUs: clip.audio.fade_in_us, fadeOutUs: clip.audio.fade_out_us,
+    }] as const] : [])),
     [working, isClipAudible],
   );
   const syntheticPipClips = useMemo(

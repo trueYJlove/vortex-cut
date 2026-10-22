@@ -29,9 +29,12 @@ import type { DecodeResidencyInfo } from "./decode-worker.js";
 import type { DecodedFrame, MediaDecoder, MediaDecoderFactory, MediaDecoderFactoryInput } from "./media-decoder.js";
 import { MediaDecoderFactoryImpl, probeDecodeCapability } from "./decode-capability.js";
 import { VARISPEED_WORKLET_NAME, createVarispeedWorkletUrl } from "./varispeed-worklet.js";
+import { planGainAutomation, resolveAudioFade, type AudioFadeSpan } from "./audio-fade.js";
 
-/** 片段音频配置（编辑态：App 从时间线文档透传）。 */
-export interface SegmentAudioConfig { enabled: boolean; gainDb: number }
+/** 片段音频配置（编辑态：App 从时间线文档透传）。
+ *  fadeInUs/fadeOutUs = 段内淡入/淡出时长（微秒，可选；0/缺省 = 不淡）——
+ *  与导出侧 afade 同口径，语义见 audio-fade.ts。 */
+export interface SegmentAudioConfig { enabled: boolean; gainDb: number; fadeInUs?: number; fadeOutUs?: number }
 
 /** 片段音频装备：worklet = 变速不变调（OLA 时域拉伸，M3-2.2 验收"声音变了"
  *  对齐项——交互预览 HTMLMediaElement preservesPitch 默认 true，合成预览
@@ -60,6 +63,9 @@ interface AudioRig {
   streamGeneration: number;
   /** 流式已喂入 worklet 的块（start_sample 集合，避免重复 append）。 */
   streamFed: Set<number>;
+  /** 已调度的淡变/增益标识（配置不变则不重排 GainNode 自动化，免得每 tick
+   *  cancel+重排；见 scheduleAudioGain）。 */
+  gateKey: string;
 }
 
 export interface PreviewSessionMetrics {
@@ -161,7 +167,7 @@ function makeAudioRig(speed: number): AudioRig {
   return {
     buffer: null, worklet: null, workletBuffer: false, workletActive: false,
     workletFailed: false, source: null, gain: null, startedAt: 0, startOffset: 0, speed,
-    streaming: false, streamGeneration: 0, streamFed: new Set<number>(),
+    streaming: false, streamGeneration: 0, streamFed: new Set<number>(), gateKey: "",
   };
 }
 
@@ -256,6 +262,8 @@ export class PreviewSession {
   private streamUnderruns = 0;
   /** 音频漂移硬校正阈值（秒）：WebAudio 自身不漂，只有时钟重锚才触达。 */
   private static readonly AUDIO_REANCHOR_S = 0.08;
+  /** 播放中改增益/淡变的过渡时长：足够听不出台阶，又短到滑块拖动像"实时"。 */
+  private static readonly AUDIO_GAIN_SETTLE_S = 0.02;
   /** A02 音频预热窗口（微秒）：播放态预取未来 2s 内入窗段；暂停态为 0。 */
   private static readonly AUDIO_WARMUP_US = 2_000_000;
   /** 自然播放到片尾时回调（UI 复位播放按钮；会话已内部 pause）。 */
@@ -616,13 +624,18 @@ export class PreviewSession {
     return this.playing;
   }
 
-  /** 编辑态音频配置更新（静音/增益实时生效；增益直接写 GainNode，无重建）。 */
+  /** 编辑态音频配置更新（静音/增益/淡变实时生效）。
+   *  **不重建音源**：只重排 GainNode 自动化（setValueAtTime + linearRamp）——
+   *  进行中的音源继续播，播放中的修改从当前音量 20ms 滑到新包络，不跳变；
+   *  淡变只对**尚未播到的部分**生效（已播过的位置不再回放 ramp）。 */
   setAudioByClip(audioByClip: Map<string, SegmentAudioConfig> | null): void {
     this.audioByClip = audioByClip;
     if (!this.audioCtx) return;
+    const segmentOf = new Map(this.ir.segments.map(segment => [segment.clip_id, segment] as const));
     for (const [clipId, rig] of this.audioRigs) {
       const cfg = audioByClip?.get(clipId);
-      if (rig.gain && cfg) rig.gain.gain.value = Math.pow(10, cfg.gainDb / 20);
+      const segment = segmentOf.get(clipId);
+      if (rig.gain && cfg && segment) this.scheduleAudioGain(rig, cfg, segment, true);
       if ((rig.source || rig.workletActive) && (!cfg || !cfg.enabled)) this.stopAudioSource(rig);
     }
   }
@@ -1500,27 +1513,28 @@ export class PreviewSession {
    *  worklet 路径 = 变速不变调（play 消息重定位，OLA 累加器清零 → ~W/2 静音
    *  过渡，仅入场/时钟重锚触达）；legacy 路径 = AudioBufferSourceNode
    *  playbackRate 直调（变调，AudioWorklet 不可用时的回退）。 */
-  private startAudioSource(rig: AudioRig, gainDb: number, offset: number, speed: number): void {
+  private startAudioSource(rig: AudioRig, cfg: SegmentAudioConfig, segment: Ir["segments"][number], offset: number, speed: number): void {
     if (!this.audioCtx) return;
     this.stopAudioSource(rig);
+    // 位置模型先落定（含淡变调度的段内位置基准），三条路径共用：
+    // startedAt/startOffset/speed 一经写入即为本段发声的权威锚点。
+    rig.startedAt = this.audioCtx.currentTime;
+    rig.startOffset = offset;
+    rig.speed = speed;
     // B15 流式路径：worklet stream 模式（块按需喂入；缺口静默+underrun 观测）
     if (rig.streaming) {
       if (!rig.worklet && !this.ensureStreamingWorklet(rig, this.assetOfRig(rig))) return;
       if (!rig.worklet) return;
       rig.gain ??= this.audioCtx.createGain();
-      rig.gain.gain.value = Math.pow(10, gainDb / 20);
       rig.worklet.port.postMessage({ type: "play", position: Math.max(0, offset), speed });
       rig.workletActive = true;
       rig.source = null;
-      rig.startedAt = this.audioCtx.currentTime;
-      rig.startOffset = offset;
-      rig.speed = speed;
+      this.scheduleAudioGain(rig, cfg, segment, false);
       this.feedStreamingChunks(rig, this.assetOfRig(rig));
       return;
     }
     const useWorklet = rig.workletBuffer || this.ensureWorkletNode(rig);
     if (useWorklet && rig.worklet) {
-      rig.gain!.gain.value = Math.pow(10, gainDb / 20);
       rig.worklet.port.postMessage({ type: "play", position: Math.max(0, offset), speed });
       rig.workletActive = true;
       rig.source = null;
@@ -1530,7 +1544,6 @@ export class PreviewSession {
       source.buffer = rig.buffer;
       source.playbackRate.value = speed;
       rig.gain ??= this.audioCtx.createGain();
-      rig.gain.gain.value = Math.pow(10, gainDb / 20);
       source.connect(rig.gain);
       rig.gain.connect(this.audioCtx.destination);
       source.start(0, Math.max(0, offset));
@@ -1538,9 +1551,62 @@ export class PreviewSession {
       rig.workletActive = false;
       source.onended = () => { if (rig.source === source) rig.source = null; };
     }
-    rig.startedAt = this.audioCtx.currentTime;
-    rig.startOffset = offset;
-    rig.speed = speed;
+
+    // 起播即按"当前段内位置"排包络：seek 到段中间不会重新从 0 淡入
+    // （planGainAutomation 只排 now 之后的部分，首步是把现值 set 成此刻包络）。
+    this.scheduleAudioGain(rig, cfg, segment, false);
+  }
+
+  /** 段内淡变窗口：时长 = `timeline_end_us - timeline_start_us`，与导出侧
+   *  `_fade_chain(segment, duration_us)` 传进去的 `duration_us` **逐字同式**
+   *  （转场借用只整体平移输出窗口，不改段长，所以两种口径的时长相同——
+   *  这里直接取导出侧那条式子，免得日后解释差异）。生效包络 =
+   *  resolveAudioFade(...)，与 `ffmpeg.py::_fade_us` 是同一份算术
+   *  （parity 由 preview-audio-fade 测试现场对拍 Python）。 */
+  private audioFadeOf(cfg: SegmentAudioConfig, segment: Ir["segments"][number]): { span: AudioFadeSpan; durationUs: number } {
+    const durationUs = Math.max(0, segment.timeline_end_us - segment.timeline_start_us);
+    return { span: resolveAudioFade(cfg.fadeInUs, cfg.fadeOutUs, durationUs), durationUs };
+  }
+
+  /** 片段已播的**段内**位置（微秒；输出时间轴口径 = afade 的 st/d 同一时间域）。
+   *  源域 offset 换算：段内 = (offset − source_start) / speed + 墙钟增量。
+   *  speed 由音源自身消耗（worklet 拉伸 / playbackRate），所以段内时间与墙钟
+   *  1:1 推进——按墙钟排 ramp 得到的就是段内包络，与导出侧「先 atempo 再
+   *  afade」的时间域一致。 */
+  private segmentPositionUs(rig: AudioRig, segment: Ir["segments"][number]): number {
+    if (!this.audioCtx) return 0;
+    const sourceStartS = segment.source_start_us / 1_000_000;
+    const speed = rig.speed || 1;
+    const elapsedS = (rig.startOffset - sourceStartS) / speed + (this.audioCtx.currentTime - rig.startedAt);
+    return Math.max(0, elapsedS * 1_000_000);
+  }
+
+  /** 按"当前段内位置"给 rig.gain 排包络——**只排 now 之后的部分**。
+   *  glide=true（播放中改设置）：先用极短斜坡把当前音量滑到新包络值，不硬跳；
+   *  glide=false（起播/重锚）：音源与包络同时从 0 起算，直接硬设。
+   *  同一配置 + 同一位置锚点重复调用不重排（否则每 tick 的 cancel 会打断 ramp）。 */
+  private scheduleAudioGain(rig: AudioRig, cfg: SegmentAudioConfig, segment: Ir["segments"][number], glide: boolean): void {
+    const param = rig.gain?.gain;
+    const ctx = this.audioCtx;
+    if (!param || !ctx) return;
+    const { span, durationUs } = this.audioFadeOf(cfg, segment);
+    const level = Math.pow(10, cfg.gainDb / 20);
+    const key = [level, span.fadeInUs, span.fadeOutUs, durationUs, rig.startedAt, rig.startOffset, rig.speed].join("|");
+    if (rig.gateKey === key) return;
+    rig.gateKey = key;
+    const steps = planGainAutomation({
+      span, durationUs, level,
+      positionUs: this.segmentPositionUs(rig, segment),
+      fromValue: param.value,
+      settleS: glide ? PreviewSession.AUDIO_GAIN_SETTLE_S : 0,
+    });
+    const now = ctx.currentTime;
+    param.cancelScheduledValues(now);
+    for (const step of steps) {
+      const at = now + Math.max(0, step.atS);
+      if (step.kind === "set") param.setValueAtTime(step.value, at);
+      else param.linearRampToValueAtTime(step.value, at);
+    }
   }
 
   /** rig → asset_id（IR 段表反查；流式喂块用）。 */
@@ -1551,6 +1617,7 @@ export class PreviewSession {
   }
 
   private stopAudioSource(rig: AudioRig): void {
+    rig.gateKey = ""; // 停声即作废已排的包络：下次起播必定重排
     if (rig.workletActive && rig.worklet) {
       rig.workletActive = false;
       rig.worklet.port.postMessage({ type: "stop" });
@@ -1624,11 +1691,14 @@ export class PreviewSession {
           if (rig.workletActive) rig.worklet!.port.postMessage({ type: "speed", value: speed });
           else rig.source!.playbackRate.value = speed;
         }
-        rig.gain!.gain.value = Math.pow(10, cfg.gainDb / 20);
+        // 增益/淡变：配置与锚点未变时 scheduleAudioGain 直接返回（不打断 ramp）；
+        // 变了（例如 speed 变更连带重排）就走滑动过渡，避免任何硬台阶。
+        this.scheduleAudioGain(rig, cfg, segment, true);
         continue;
       }
       // 无音源（入场/解码完成/出段后重入）或实质漂移（时钟重锚）→ 对齐重启。
-      this.startAudioSource(rig, cfg.gainDb, expected, speed);
+      // 重启按新 offset 重算段内位置，淡变进度由位置决定 ⇒ 不重放淡入。
+      this.startAudioSource(rig, cfg, segment, expected, speed);
     }
     for (const [clipId, rig] of this.audioRigs) {
       if (!active.has(clipId) && (rig.source || rig.workletActive)) this.stopAudioSource(rig);
