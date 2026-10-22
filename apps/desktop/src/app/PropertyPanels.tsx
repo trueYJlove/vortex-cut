@@ -22,6 +22,18 @@ export type { SaveState };
 const speedPresets = [250, 500, 750, 1000, 1250, 1500, 2000, 4000];
 const speedLabel = (speed: number) => `${(speed / 1000).toFixed(speed % 1000 === 0 ? 0 : 2).replace(/\.?0+$/, "")}x`;
 
+/**
+ * set_audio 的淡变字段：set_audio 是「整段覆盖」操作，未带的字段保留旧值——
+ * 但用户在滑块上把值改回 0 时必须**显式写 0**（Core 归一为清除键），否则
+ * 保留旧值会让"拖回 0 秒"看起来没反应。
+ */
+function audioFadeOf(clip: TimelineClip, field: "fade_in_us" | "fade_out_us", seconds: number): Partial<Record<"fade_in_us" | "fade_out_us", number>> {
+  const us = Math.max(0, Math.round(seconds * 1_000_000));
+  const other = field === "fade_in_us" ? "fade_out_us" : "fade_in_us";
+  const carried = clip.audio[other];
+  return { [field]: us, ...(carried === undefined ? {} : { [other]: carried }) };
+}
+
 const keyframePropertyLabels: Array<{ property: "position" | "scale" | "rotate" | "opacity"; label: string }> = [
   { property: "position", label: "位置" },
   { property: "scale", label: "缩放" },
@@ -302,8 +314,12 @@ export function ClipProperties({ clip, working, baseRevisionId, locked, onPatch,
       <RangeRow label="音量" value={clip.audio.gain_db} min={-60} max={12} step={0.5} unit="dB" decimals={1} ariaLabel="音频增益"
         onDraft={v => updateLocal({ audio: { ...clip.audio, gain_db: v } })}
         onCommit={v => void onPatch([{ op: "set_audio", clip_id: clip.clip_id, enabled: clip.audio.enabled, gain_db: v }], "调整音频增益")} />
-      <PRow label="淡入时长" dim><input type="range" className="pp-range" disabled min={0} max={50} value={0} aria-label="淡入时长（规划中）" /><SoonBadge /></PRow>
-      <PRow label="淡出时长" dim><input type="range" className="pp-range" disabled min={0} max={50} value={0} aria-label="淡出时长（规划中）" /><SoonBadge /></PRow>
+      <RangeRow label="淡入时长" value={(clip.audio.fade_in_us ?? 0) / 1_000_000} min={0} max={50} step={0.1} unit="s" decimals={1} ariaLabel="淡入时长"
+        onDraft={v => updateLocal({ audio: { ...clip.audio, fade_in_us: Math.round(v * 1_000_000) } })}
+        onCommit={v => void onPatch([{ op: "set_audio", clip_id: clip.clip_id, enabled: clip.audio.enabled, gain_db: clip.audio.gain_db, ...audioFadeOf(clip, "fade_in_us", v) }], "调整淡入时长")} />
+      <RangeRow label="淡出时长" value={(clip.audio.fade_out_us ?? 0) / 1_000_000} min={0} max={50} step={0.1} unit="s" decimals={1} ariaLabel="淡出时长"
+        onDraft={v => updateLocal({ audio: { ...clip.audio, fade_out_us: Math.round(v * 1_000_000) } })}
+        onCommit={v => void onPatch([{ op: "set_audio", clip_id: clip.clip_id, enabled: clip.audio.enabled, gain_db: clip.audio.gain_db, ...audioFadeOf(clip, "fade_out_us", v) }], "调整淡出时长")} />
       <PRow label="响度统一" tail={<span className="pp-tailtext">{loudnessStatusText(loudness)}</span>}>
         <Switch on={loudness.phase === "prepared" || loudness.phase === "proposed" || loudness.phase === "applying"}
           disabled={loudnessBusy(loudness) || !baseRevisionId}

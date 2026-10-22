@@ -760,7 +760,8 @@ export interface TimelineCanvas extends ProjectCanvas { background_color: string
 /** 轨道类型：视频（主轨/覆盖轨）、文本（字幕/文字）、音频。 */
 export type TimelineTrackKind = "video" | "text" | "audio";
 export interface TimelineTrack { id: string; kind: TimelineTrackKind; locked: boolean; hidden: boolean; muted: boolean; solo: boolean; }
-export interface TimelineClipAudio { enabled: boolean; gain_db: number; }
+/** 可选淡入/淡出时长（微秒，>=0）；缺省 = 不淡，行为与该字段不存在时完全一致。 */
+export interface TimelineClipAudio { enabled: boolean; gain_db: number; fade_in_us?: number; fade_out_us?: number; }
 /** 帧率分子*1000；1000 = 1x。 */
 export type TimelineClipSpeedMilli = number & { readonly __brand: "timeline_clip_speed_milli" };
 export interface TimelineClip {
@@ -965,7 +966,7 @@ export type TimelinePatchOperation =
   | { op: "split_clip"; clip_id: TimelineClipId; source_time_us: number }
   | { op: "split_edit"; clip_id: TimelineClipId; source_time_us: number; audio_delta_us: number }
   | { op: "set_layout"; clip_id: TimelineClipId; layout: TimelineLayout }
-  | { op: "set_audio"; clip_id: TimelineClipId; enabled: boolean; gain_db: number }
+  | { op: "set_audio"; clip_id: TimelineClipId; enabled: boolean; gain_db: number; fade_in_us?: number; fade_out_us?: number }
   | { op: "add_transition"; after_clip_id: TimelineClipId; kind: TransitionKind; duration_us: number }
   | { op: "update_transition"; transition_id: TimelineTransitionId; kind?: TransitionKind; duration_us?: number }
   | { op: "remove_transition"; transition_id: TimelineTransitionId }
@@ -1949,7 +1950,10 @@ export function isTimelineClip(value: unknown): value is TimelineClip {
   if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["clip_id", "track_id", "order_index", "asset_id", "asset_kind", "source_start_us", "source_end_us", "timeline_start_us", "timeline_end_us", "layout", "audio", "speed_milli", "reverse_playback", "keyframes", "transform", "mask", "keying", "link_group_id"])) return false;
   if (!isId(value.clip_id) || !oneOf(["V1", "A1"] as const, value.track_id) || !isInteger(value.order_index) || !isId(value.asset_id) || !oneOf(["video", "image", "audio"] as const, value.asset_kind) ||
     !isInteger(value.timeline_start_us) || !isInteger(value.timeline_end_us, 1) || value.timeline_end_us <= value.timeline_start_us || !isTimelineLayout(value.layout) || !isRecord(value.audio) ||
-    !onlyKeys(value.audio, ["enabled", "gain_db"]) || typeof value.audio.enabled !== "boolean" || !isFiniteNumber(value.audio.gain_db) || value.audio.gain_db < -60 || value.audio.gain_db > 12) return false;
+    !onlyKeys(value.audio, ["enabled", "gain_db", "fade_in_us", "fade_out_us"]) || typeof value.audio.enabled !== "boolean" || !isFiniteNumber(value.audio.gain_db) || value.audio.gain_db < -60 || value.audio.gain_db > 12) return false;
+  // 可选淡入/淡出：出现时必须为非负整数微秒；缺省 = 不淡（老文档无此键仍合法）。
+  if (value.audio.fade_in_us !== undefined && !isInteger(value.audio.fade_in_us)) return false;
+  if (value.audio.fade_out_us !== undefined && !isInteger(value.audio.fade_out_us)) return false;
   // 可选变速/倒放字段：出现时必须合法；speed 250–4000（0.25x–4x），倒放仅视频。
   if (value.speed_milli !== undefined && (!isInteger(value.speed_milli, 250) || value.speed_milli > 4000)) return false;
   if (value.reverse_playback !== undefined && (typeof value.reverse_playback !== "boolean" || (value.reverse_playback && value.asset_kind !== "video"))) return false;
@@ -2165,7 +2169,7 @@ export function isTimelinePatchOperation(value: unknown): value is TimelinePatch
     case "split_clip": return onlyKeys(value, ["op", "clip_id", "source_time_us"]) && id("clip_id") && us("source_time_us", 1);
     case "split_edit": return onlyKeys(value, ["op", "clip_id", "source_time_us", "audio_delta_us"]) && id("clip_id") && us("source_time_us", 1) && isInteger(value.audio_delta_us);
     case "set_layout": return onlyKeys(value, ["op", "clip_id", "layout"]) && id("clip_id") && isTimelineLayout(value.layout);
-    case "set_audio": return onlyKeys(value, ["op", "clip_id", "enabled", "gain_db"]) && id("clip_id") && typeof value.enabled === "boolean" && isFiniteNumber(value.gain_db) && value.gain_db >= -60 && value.gain_db <= 12;
+    case "set_audio": return onlyKeys(value, ["op", "clip_id", "enabled", "gain_db", "fade_in_us", "fade_out_us"]) && id("clip_id") && typeof value.enabled === "boolean" && isFiniteNumber(value.gain_db) && value.gain_db >= -60 && value.gain_db <= 12 && (value.fade_in_us === undefined || us("fade_in_us")) && (value.fade_out_us === undefined || us("fade_out_us"));
     case "add_transition": return onlyKeys(value, ["op", "after_clip_id", "kind", "duration_us"]) && id("after_clip_id") && oneOf(TRANSITION_IDS, value.kind) && us("duration_us", 100_000) && Number(value.duration_us) <= 2_000_000;
     case "update_transition": return onlyKeys(value, ["op", "transition_id", "kind", "duration_us"]) && id("transition_id") && (value.kind === undefined || oneOf(TRANSITION_IDS, value.kind)) && (value.duration_us === undefined || (us("duration_us", 100_000) && Number(value.duration_us) <= 2_000_000)) && (value.kind !== undefined || value.duration_us !== undefined);
     case "remove_transition": return onlyKeys(value, ["op", "transition_id"]) && id("transition_id");

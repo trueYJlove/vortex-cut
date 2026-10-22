@@ -1338,6 +1338,7 @@ class TimelineService:
             clip["timeline_end_us"] = split_timeline
             right["timeline_start_us"] = split_timeline
             right["timeline_end_us"] = old_timeline_end
+            _split_fade_pair(clip, right)
             # B3：关键帧按拆分点切分归两侧。
             split_t_us = split_timeline - clip["timeline_start_us"]
             _split_clip_keyframes(clip, right, split_t_us)
@@ -1386,6 +1387,7 @@ class TimelineService:
             clip["timeline_end_us"] = split_timeline
             right["timeline_start_us"] = split_timeline
             right["timeline_end_us"] = old_timeline_end
+            _split_fade_pair(clip, right)
             _split_clip_keyframes(clip, right, split_timeline - clip["timeline_start_us"])
             self._split_bound_captions(
                 document, clip["clip_id"], right["clip_id"], split_timeline
@@ -1437,7 +1439,9 @@ class TimelineService:
                     "timeline_end_us": clip["timeline_start_us"]
                     + max(0, audio_cut - clip["source_start_us"]),
                     "layout": "fit",
-                    "audio": {"enabled": True, "gain_db": gain},
+                    "audio": _fade_carried(
+                        {"enabled": True, "gain_db": gain}, clip["audio"], "in"
+                    ),
                     "speed_milli": 1000,
                 }
                 right_audio = {
@@ -1452,7 +1456,10 @@ class TimelineService:
                     "timeline_end_us": right["timeline_start_us"]
                     + max(0, right["source_end_us"] - audio_cut),
                     "layout": "fit",
-                    "audio": {"enabled": True, "gain_db": gain},
+                    # 淡出取**右段**的 audio：_split_fade_pair 已把淡出归给右段。
+                    "audio": _fade_carried(
+                        {"enabled": True, "gain_db": gain}, right["audio"], "out"
+                    ),
                     "speed_milli": 1000,
                 }
                 # 时间线长度对齐源音频段（speed=1000）
@@ -1502,7 +1509,15 @@ class TimelineService:
                 "timeline_start_us": clip["timeline_start_us"],
                 "timeline_end_us": clip["timeline_end_us"],
                 "layout": "fit",
-                "audio": {"enabled": True, "gain_db": clip["audio"].get("gain_db", 0.0)},
+                "audio": {
+                    **{
+                        field: clip["audio"][field]
+                        for field in ("fade_in_us", "fade_out_us")
+                        if field in clip["audio"]
+                    },
+                    "enabled": True,
+                    "gain_db": clip["audio"].get("gain_db", 0.0),
+                },
                 "speed_milli": clip.get("speed_milli", 1000),
             }
             group_id = clip.get("link_group_id") or f"link_{new_id()}"
@@ -1536,7 +1551,11 @@ class TimelineService:
                 operation.get("layout"), LAYOUTS, "布局不合法"
             )
         elif op == "set_audio":
-            _exact_keys(operation, {"op", "clip_id", "enabled", "gain_db"})
+            _exact_keys(
+                operation,
+                {"op", "clip_id", "enabled", "gain_db", "fade_in_us", "fade_out_us"},
+                optional={"fade_in_us", "fade_out_us"},
+            )
             clip = _clip(document, operation.get("clip_id"))
             enabled = operation.get("enabled")
             gain_db = _float_value(operation.get("gain_db"), "音频增益不合法")
@@ -1544,7 +1563,18 @@ class TimelineService:
                 raise DomainError("TIMELINE_INVALID", "音频设置不合法")
             if clip["asset_kind"] == "image" and enabled:
                 raise DomainError("TIMELINE_INVALID", "图片片段不能启用音频")
-            clip["audio"] = {"enabled": enabled, "gain_db": gain_db}
+            # 淡入/淡出为可选字段：出现时必须是非负整数微秒。缺省 = 保留原值
+            # （响度统一等既有 op 只写 enabled/gain_db，不能悄悄清掉用户设的淡变）。
+            audio = {"enabled": enabled, "gain_db": gain_db}
+            for field in ("fade_in_us", "fade_out_us"):
+                if field in operation:
+                    # 显式 0 = 清除该淡变：归一为「键不存在」，与老文档同形。
+                    value = _fade_value(operation.get(field), "音频淡入淡出时长不合法")
+                    if value > 0:
+                        audio[field] = value
+                elif field in clip["audio"]:
+                    audio[field] = clip["audio"][field]
+            clip["audio"] = audio
         elif op == "set_speed":
             _exact_keys(operation, {"op", "clip_id", "speed_milli"})
             clip = _clip(document, operation.get("clip_id"))
@@ -2509,10 +2539,18 @@ class TimelineService:
             audio = clip.get("audio")
             if not isinstance(audio, dict) or not isinstance(audio.get("enabled"), bool):
                 raise DomainError("TIMELINE_INVALID", "Clip 音频设置不合法")
-            _exact_keys(audio, {"enabled", "gain_db"})
+            _exact_keys(
+                audio,
+                {"enabled", "gain_db", "fade_in_us", "fade_out_us"},
+                optional={"fade_in_us", "fade_out_us"},
+            )
             gain = _float_value(audio.get("gain_db"), "Clip 音频增益不合法")
             if not -60 <= gain <= 12:
                 raise DomainError("TIMELINE_INVALID", "Clip 音频增益不合法")
+            # 可选淡入/淡出：出现时必须合法；缺省保持（老文档无此键仍通过校验）。
+            for field in ("fade_in_us", "fade_out_us"):
+                if field in audio:
+                    _fade_value(audio[field], "Clip 音频淡入淡出时长不合法")
             speed = clip.get("speed_milli", 1000)
             if (
                 isinstance(speed, bool)
@@ -3032,6 +3070,38 @@ def _float_value(value: Any, message: str) -> float:
     if not _number(value):
         raise DomainError("TIMELINE_INVALID", message)
     return float(value)
+
+
+def _split_fade_pair(left: dict[str, Any], right: dict[str, Any]) -> None:
+    """拆分后：淡入属于前半段、淡出属于后半段。
+
+    deepcopy 会让两半都带齐两个淡变——那会在切点处凭空多出两次渐变
+    （前半淡出 + 后半淡入），与用户看到的"片段开头淡入、结尾淡出"不符。
+    """
+    for clip, drop in ((left, "fade_out_us"), (right, "fade_in_us")):
+        audio = clip.get("audio")
+        if isinstance(audio, dict):
+            audio.pop(drop, None)
+
+
+def _fade_carried(
+    base: dict[str, Any], source: dict[str, Any], side: str
+) -> dict[str, Any]:
+    """拆剪辑派生 A1 段时，淡入只留在前半段、淡出只留在后半段。
+
+    两段都带齐会把一次淡变变成中间两次突兀的渐变（切点处各淡一半）。
+    """
+    keep = "fade_in_us" if side == "in" else "fade_out_us"
+    if keep in source:
+        base[keep] = source[keep]
+    return base
+
+
+def _fade_value(value: Any, message: str) -> int:
+    """音频淡入/淡出时长：非负整数微秒（bool 是 int 子类，必须排除）。"""
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise DomainError("TIMELINE_INVALID", message)
+    return value
 
 
 def _enum(value: Any, allowed: set[str], message: str) -> str:

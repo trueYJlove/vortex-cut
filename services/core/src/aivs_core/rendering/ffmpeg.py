@@ -441,7 +441,8 @@ def build_timeline_args(
             filters.append(
                 f"[{item['input_index']}:a:0]atrim=start={start}:end={end},asetpts=PTS-STARTPTS,"
                 "aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
-                f"{tempo_chain}volume={gain:.3f}dB,apad,atrim=duration={duration}[a{position}]"
+                f"{tempo_chain}volume={gain:.3f}dB{_fade_chain(segment, duration_us)},"
+                f"apad,atrim=duration={duration}[a{position}]"
             )
         elif segment["asset_kind"] == "video" and has_audio and segment["audio_enabled"]:
             # 倒放片段的音频暂不支持：以静音占位，保证轨长与混流正确。
@@ -593,18 +594,22 @@ def build_timeline_args(
                 factors.append(remaining)
                 tempo_chain = ",".join(f"atempo={factor:.6f}" for factor in factors) + ","
             delay_ms = int(segment["timeline_start_us"]) // 1000
+            a1_duration_us = int(segment["timeline_end_us"]) - int(segment["timeline_start_us"])
             if segment.get("reverse_playback") or not probe.get("audio_streams"):
                 # 倒放/无音轨：静音占位（保证 amix 输入数稳定）。
                 filters.append(
                     "anullsrc=channel_layout=stereo:sample_rate=48000,"
-                    f"atrim=duration={_seconds(int(segment['timeline_end_us']) - int(segment['timeline_start_us']))},"
+                    f"atrim=duration={_seconds(a1_duration_us)},"
                     f"asetpts=PTS-STARTPTS[a1s{mix_index}]"
                 )
             else:
+                # 淡入/淡出插在 volume 之后、apad 之前：afade 的 st/d 以本段
+                # 时间轴为准，apad 补长与 atrim 钉死都不改变已成的包络。
                 filters.append(
                     f"[{index}:a:0]atrim=start={start}:end={end},asetpts=PTS-STARTPTS,"
                     "aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
-                    f"{tempo_chain}volume={gain:.3f}dB,apad,atrim=duration={_seconds(int(segment['timeline_end_us']) - int(segment['timeline_start_us']))},"
+                    f"{tempo_chain}volume={gain:.3f}dB{_fade_chain(segment, a1_duration_us)},"
+                    f"apad,atrim=duration={_seconds(a1_duration_us)},"
                     f"adelay={delay_ms}:all=1[a1s{mix_index}]"
                 )
             mix_inputs.append(f"[a1s{mix_index}]")
@@ -1211,3 +1216,40 @@ class _StderrRing:
 
 def _seconds(value_us: int) -> str:
     return f"{int(value_us) / 1_000_000:.6f}"
+
+
+def _fade_us(segment: dict[str, Any], duration_us: int) -> tuple[int, int]:
+    """段的淡入/淡出时长（微秒），已按段时长夹住。
+
+    超限处置：fade_in + fade_out > 段时长时**按比例收缩到恰好占满整段**
+    （fade_in 向下取整，fade_out 吃掉余数，保证两者之和 == 段时长）。理由：
+    afade 的 st 为负会直接让整条导出失败，而"把用户设的 5s 淡入丢给只有 2s
+    的片段"是编辑器里最普通的操作（先设淡变、再裁短），不该变成导出错误。
+    收缩只发生在**图构造期**，文档里的用户意图原样保留——把片段拉回原长，
+    淡变自动恢复。0/缺省 ⇒ (0, 0)，调用方据此完全不生成 afade（默认路径不变）。
+    """
+    try:
+        fade_in = max(int(segment.get("fade_in_us") or 0), 0)
+        fade_out = max(int(segment.get("fade_out_us") or 0), 0)
+    except (TypeError, ValueError):
+        return (0, 0)
+    duration = int(duration_us)
+    if (fade_in == 0 and fade_out == 0) or duration <= 0:
+        return (0, 0)
+    if fade_in + fade_out > duration:
+        fade_in = int(fade_in * duration / (fade_in + fade_out))
+        fade_out = duration - fade_in
+    return (fade_in, fade_out)
+
+
+def _fade_chain(segment: dict[str, Any], duration_us: int) -> str:
+    """afade 滤镜片段（前导逗号）；无淡变时返回空串，链与旧版逐字节一致。"""
+    fade_in, fade_out = _fade_us(segment, duration_us)
+    clauses: list[str] = []
+    if fade_in > 0:
+        clauses.append(f"afade=t=in:st=0:d={_seconds(fade_in)}")
+    if fade_out > 0:
+        clauses.append(
+            f"afade=t=out:st={_seconds(int(duration_us) - fade_out)}:d={_seconds(fade_out)}"
+        )
+    return "".join(f",{clause}" for clause in clauses)

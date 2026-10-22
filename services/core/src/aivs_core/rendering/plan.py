@@ -387,6 +387,13 @@ class RenderPlanCompiler:
                 and not track_muted
                 and not (any_solo and not track_solo)
             )
+            # 淡入/淡出（可选）：仅在真有值时透传，0/缺省不写键——保证既有
+            # 时间线的渲染图与指纹逐字节不变（默认路径零变化）。
+            fade = {
+                field: int(clip["audio"][field])
+                for field in ("fade_in_us", "fade_out_us")
+                if int(clip["audio"].get(field) or 0) > 0
+            }
             segments.append(
                 {
                     "clip_id": clip["clip_id"],
@@ -401,6 +408,7 @@ class RenderPlanCompiler:
                     "layout": clip["layout"],
                     "audio_enabled": audio_effective,
                     "gain_db": float(clip["audio"]["gain_db"]),
+                    **fade,
                     "speed_milli": int(clip.get("speed_milli", 1000)),
                     "reverse_playback": bool(clip.get("reverse_playback", False)),
                     "keyframes": clip.get("keyframes"),

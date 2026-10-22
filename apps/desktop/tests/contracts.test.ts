@@ -135,6 +135,27 @@ describe("Stage 0 contract", () => {
     expect(isTimelineState({ project_id: "project_1", current_revision: revision, draft: null, can_undo: false, can_redo: false, current_preview: null })).toBe(true);
     expect(isTimelineState({ project_id: "project_1", current_revision: { ...revision, path: "C:\\private\\timeline.json" }, draft: null, can_undo: false, can_redo: false, current_preview: null })).toBe(false);
   });
+  it("accepts optional audio fade fields and keeps old documents valid (backward compatible)", () => {
+    const clipOf = (audio: Record<string, unknown>) => ({ clip_id: "clip_1", track_id: "V1", order_index: 0, asset_id: "asset_1", asset_kind: "video", source_start_us: 0, source_end_us: 1_000_000, timeline_start_us: 0, timeline_end_us: 1_000_000, layout: "fit", audio });
+    const oldAudio = { enabled: true, gain_db: 0 };
+    const document = { schema_version: 1, project_id: "project_1", canvas: { width: 1080, height: 1920, fps_num: 30, fps_den: 1, background_color: "#000000" }, tracks: [{ id: "C1", kind: "text", locked: false, hidden: false, muted: false, solo: false }, { id: "V1", kind: "video", locked: false, hidden: false, muted: false, solo: false }, { id: "A1", kind: "audio", locked: false, hidden: false, muted: false, solo: false }], clips: [clipOf(oldAudio)], captions: [], provenance: { created_by: "user", source_transcript_ids: [] } };
+    // 老文档（无 fade 键）仍然合法 —— 新字段是纯增量，不是新必填项。
+    expect(isTimelineDocument(document)).toBe(true);
+    expect(Object.keys(oldAudio)).toEqual(["enabled", "gain_db"]);
+    expect(isTimelineDocument({ ...document, clips: [clipOf({ enabled: true, gain_db: 0, fade_in_us: 500_000, fade_out_us: 250_000 })] })).toBe(true);
+    expect(isTimelineDocument({ ...document, clips: [clipOf({ enabled: true, gain_db: 0, fade_in_us: 0, fade_out_us: 0 })] })).toBe(true);
+    // 非法值拒绝：负数 / 非整数 / 非数字 / 未知键。
+    expect(isTimelineDocument({ ...document, clips: [clipOf({ enabled: true, gain_db: 0, fade_in_us: -1 })] })).toBe(false);
+    expect(isTimelineDocument({ ...document, clips: [clipOf({ enabled: true, gain_db: 0, fade_out_us: 1.5 })] })).toBe(false);
+    expect(isTimelineDocument({ ...document, clips: [clipOf({ enabled: true, gain_db: 0, fade_in_us: "500000" })] })).toBe(false);
+    expect(isTimelineDocument({ ...document, clips: [clipOf({ enabled: true, gain_db: 0, fade_secs: 1 })] })).toBe(false);
+    // set_audio op：不带 fade 的旧形态不变；带 fade 合法；非法拒绝。
+    expect(isTimelinePatchOperation({ op: "set_audio", clip_id: "clip_1", enabled: true, gain_db: 0 })).toBe(true);
+    expect(isTimelinePatchOperation({ op: "set_audio", clip_id: "clip_1", enabled: true, gain_db: 0, fade_in_us: 500_000 })).toBe(true);
+    expect(isTimelinePatchOperation({ op: "set_audio", clip_id: "clip_1", enabled: true, gain_db: 0, fade_in_us: 500_000, fade_out_us: 0 })).toBe(true);
+    expect(isTimelinePatchOperation({ op: "set_audio", clip_id: "clip_1", enabled: true, gain_db: 0, fade_in_us: -5 })).toBe(false);
+    expect(isTimelinePatchOperation({ op: "set_audio", clip_id: "clip_1", enabled: true, gain_db: 0, fade_out_us: 2.5 })).toBe(false);
+  });
   it("validates Stage2B egress metadata, generation, proposal and diff without body leakage", () => {
     const hash = `sha256:${"a".repeat(64)}`;
     const diff = { schema_version: 1, project_id: "project_1", base_revision_id: "revision_1", target_revision_id: null, base_document_sha256: hash, target_document_sha256: hash, summary: { clip_changes: 1, caption_changes: 0, lock_changes: 0, transition_changes: 0 }, duration_delta_us: -1000, clip_changes: [{ type: "trimmed", clip_id: "clip_1" }], caption_changes: [], lock_changes: [], indirect_locked_timing_shifts: [], transition_changes: [] };
