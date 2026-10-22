@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, cast
 
+import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
@@ -968,11 +969,17 @@ class CoreState:
         self.jobs.keyframe_runner = self.keyframe_tagging.run_tagging_job
         # S3：vision 能力探测。探测**本身也是网络调用**，因此走同一条
         # prepare→create→claim 三段式（Design Gate §3.2 I-1 / §5.1）。
-        # 这里只装配；探测用例用假 client，不烧真实额度。
+        #
+        # client_factory **必须在这里给**：探测服务自身不像 KeyframeTaggingService
+        # 那样有 `or (lambda **kw: httpx.Client(**kw))` 默认值，缺了它 _call_provider
+        # 会恒抛 VISION_PROBE_UNSUPPORTED ⇒ Provider 永远 untested ⇒ create 的
+        # fail-closed 永远拒绝 ⇒ 打标链路在生产里一次都跑不通。这正是「一处在 app
+        # 装配、一处在服务默认值」的不一致，故两处口径必须相同（同一句式）。
         from .vision_probe import VisionProbeService
 
         self.vision_probe = VisionProbeService(
             self.db, self.keyframe_egress, self.providers, self.provider_secrets,
+            client_factory=lambda **kw: httpx.Client(**kw),
         )
         self.keyframe = KeyframeOrchestrator(
             self.db, self.keyframe_egress, settings.ffmpeg

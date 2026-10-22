@@ -19,20 +19,24 @@
 """
 from __future__ import annotations
 
+import base64
 import hashlib
+import io
 from pathlib import Path
 
 import pytest
+from PIL import Image as PILImage
 
 from aivs_core.database import Database, utc_now
 from aivs_core.keyframe_egress import KeyframeEgressService
-from aivs_core.media.keyframe_encode import EncodedFrame
+from aivs_core.media.keyframe_encode import EncodedFrame, jpeg_dimensions
 from aivs_core.media.keyframe_sampling import MODE_SCENE_CUT, SamplingPlan
 from aivs_core.planning import ProviderRepository
 from aivs_core.projects import DomainError
 from aivs_core.providers import ProviderSecretVault
 from aivs_core.vision_probe import (
     CAPABILITY_COLUMNS,
+    PROBE_JPEG,
     VISION_PROBE_SCHEMA_MISMATCH,
     VISION_PROBE_UNSUPPORTED,
     VisionProbeService,
@@ -40,18 +44,10 @@ from aivs_core.vision_probe import (
     probe_plan,
 )
 
-# 8x8 纯色 JPEG（真实字节，可被 PIL 解码）。用固定字节而不是临时生成：
-# 探测哈希要可复现，随机字节会让 probe_sha256 每次不同而无法断言"稳定"。
-PROBE_JPEG = bytes.fromhex(
-    "ffd8ffe000104a46494600010100000100010000ffdb0043001b12141714111b1716171e1c"
-    "1b2028422b28252528513a3d3042605565645f555d5b6a7899816a7190735b5d85b586909e"
-    "a3abadab6780bcc9baa6c799a8aba4ffdb0043011c1e1e2823284e2b2b4ea46e5d6ea4a4a4"
-    "a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4"
-    "a4a4a4a4a4ffc00011080008000803012200021101031101ffc400150001010000000000"
-    "00000000000000000004ffc40014100100000000000000000000000000000000ffc40015"
-    "010101000000000000000000000000000405ffc400141101000000000000000000000000"
-    "00000000ffda000c03010002110311003f008401d61fffd9"
-)
+# 探测 JPEG **从生产模块导入，不在此处复制一份**。
+# 复制过的后果是实测到的：本地副本没跟着换，所有探测用例就都在用旧的畸形
+# 字节，而断言照样绿——缺陷 (b) 正是这样在测试全绿的情况下进的产线。
+# 单一定义源才有区分力；合法性由 test_probe_jpeg_* 三条守着。
 
 
 class FakeResponse:
@@ -170,6 +166,150 @@ def _create_preview(egress: KeyframeEgressService) -> dict:
 
 
 # ── 1. 探测成功 ⇒ 六列逐列正确 ──
+
+
+# ── (a) 生产装配：探测必须真的能发请求 ──
+#
+# 与 `test_app_state_wires_keyframe_runner_and_detach_callback` 同类：组件各自
+# 正确、装配处漏传时单测全绿而生产链路一次都跑不通。这里锁的就是那一行装配。
+
+
+def _build_probed_app(tmp_path: Path):
+    """真实 create_app（不跑 lifespan，零 ffmpeg 依赖）。"""
+    from aivs_core.app import create_app
+    from aivs_core.config import Settings
+
+    app = create_app(
+        Settings(
+            data_dir=tmp_path / "data",
+            ffmpeg=Path("ffmpeg-x"),
+            ffprobe=Path("ffprobe-x"),
+        )
+    )
+    state = app.state.core
+    state.db.initialize()
+    return state
+
+
+def _seed_provider(state, tmp_path: Path) -> None:
+    now = utc_now()
+    with state.db.connection() as conn:
+        conn.execute(
+            "INSERT INTO projects (id,name,status,canvas_json,root_dir,root_dir_name,"
+            "created_at,updated_at,last_opened_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            ("proj_1", "P", "active", "{}", str(tmp_path), "p", now, now, now),
+        )
+        conn.execute(
+            "INSERT INTO provider_configs (id,kind,display_name,base_url,model,"
+            "enabled,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
+            ("prov_1", "openai_compatible_text", "P", "https://provider.test/v1",
+             "vision-model", 1, now, now),
+        )
+    state.provider_secrets.set("prov_1", "secret-token")
+
+
+def test_app_state_wires_vision_probe_client_factory(tmp_path: Path) -> None:
+    """create_app 装配的 vision_probe 必须带**可用的** client 工厂。
+
+    漏传的后果链是完整的：探测恒抛 VISION_PROBE_UNSUPPORTED ⇒ Provider 永远
+    untested ⇒ egress.create 的 fail-closed 永远拒绝 ⇒ 打标在生产里一次都跑不通。
+    所以断言不停在「参数不是 None」，而是**真的拿到一个已就绪的 client**。
+    """
+    state = _build_probed_app(tmp_path)
+    factory = state.vision_probe._client_factory
+    assert factory is not None, "vision_probe 未接 client 工厂：探测会恒抛 VISION_PROBE_UNSUPPORTED"
+
+    with factory(timeout=5.0, trust_env=False) as client:
+        assert hasattr(client, "post"), f"工厂必须产出发得出请求的 client，实得 {client!r}"
+        assert client.is_closed is False
+
+
+async def test_app_wired_probe_reaches_supported_without_extra_wiring(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """装配来的服务必须能**探测成功**，而不只是「参数存在」。
+
+    做法：只替换 app 模块里的 httpx（把网络换成假回复），**不改装配**。
+    于是这条用例同时证明两件事：
+      1. 装配给的工厂确实被 _call_provider 用到（假 client 收到了请求）；
+      2. 漏传工厂时链路会红——因为那时 _client_factory 是 None，
+         _call_provider 在发请求之前就抛，六列会落 unsupported。
+    """
+    import aivs_core.app as app_module
+
+    client = FakeClient(_ok_response())
+    monkeypatch.setattr(
+        app_module, "httpx",
+        type("StubHttpx", (), {"Client": staticmethod(lambda **kw: client)}),
+    )
+    state = _build_probed_app(tmp_path)
+    _seed_provider(state, tmp_path)
+
+    result = await state.vision_probe.probe("proj_1", "prov_1")
+
+    assert result["vision_capability_status"] == "supported", (
+        f"装配后的探测应 supported，实得 {result['vision_capability_status']} "
+        f"(failure_code={result['vision_capability_failure_code']})"
+    )
+    assert len(client.calls) == 1, f"探测必须发出且只发出一次请求，实得 {len(client.calls)}"
+    # 请求里带的必须是新的合法 JPEG（缺陷 (b) 与 (a) 的交汇点）。
+    url = client.calls[0]["body"]["messages"][0]["content"][1]["image_url"]["url"]
+    sent = base64.b64decode(url.split(",", 1)[1])
+    assert sent == PROBE_JPEG
+    assert jpeg_dimensions(sent) == (64, 64)
+
+
+# ── (b) PROBE_JPEG 必须是**真能解**的 JPEG ──
+#
+# 旧常量 278 字节、头尾 SOI/EOI 齐全却缺 SOF 段：jpeg_dimensions 抛
+# KeyframeEncodeError，PIL 抛 UnidentifiedImageError，网关回 400
+# unsupported_content。后果不是「探测失败」而是「错误归因」——图坏了被记成
+# 「模型不支持视觉」，用户据此换 Provider。所以合法性必须有用例守着：
+# 光看头尾对不对是抓不到这个缺陷的。
+
+
+def test_probe_jpeg_is_a_decodable_image() -> None:
+    """`jpeg_dimensions` 与 PIL **双解**：两条独立解析器都认，才算合法。"""
+    from aivs_core.media.keyframe_encode import jpeg_dimensions
+
+    width, height = jpeg_dimensions(PROBE_JPEG)
+    assert (width, height) == (64, 64), f"探测图尺寸应为 64x64，实得 {width}x{height}"
+
+    image = PILImage.open(io.BytesIO(PROBE_JPEG))
+    image.load()  # 只有 load() 才真正解码；open() 成功不代表像素能解出来
+    assert image.size == (width, height), (
+        f"PIL 与 jpeg_dimensions 必须给同一尺寸，实得 {image.size} vs {(width, height)}"
+    )
+    assert image.mode == "RGB"
+
+
+def test_probe_jpeg_passes_pil_verify() -> None:
+    """`verify()` 检查的是段结构完整性（SOI/SOF/DQT/DHT/SOS/EOI 齐全）。
+
+    与上一条不重复：`load()` 对某些缺段文件仍能容忍，`verify()` 不能。
+    旧常量正是「头尾对、结构缺」的形态，故两条都要有。
+    """
+    image = PILImage.open(io.BytesIO(PROBE_JPEG))
+    image.verify()  # 结构不合法会抛，不需要断言返回值
+
+
+def test_probe_jpeg_hash_is_pinned() -> None:
+    """字节必须与记录的 sha256 一致——常量被手改时立刻红。
+
+    探测哈希的可比性依赖「同一判据」；顺手改字节而不同步声明，
+    会让历史 probe_sha256 失去参考意义。
+    """
+    assert hashlib.sha256(PROBE_JPEG).hexdigest() == (
+        "0f8f822baca4447b44a90ba5bebc7a82e8f6172d6bec6ae26d754786bf675a84"
+    )
+    assert len(PROBE_JPEG) == 1025
+
+
+def test_probe_frame_carries_the_legal_bytes_unchanged() -> None:
+    """走 prepare 的载荷就是这段字节本身（不是被截断/替换的占位）。"""
+    frame = probe_frame(PROBE_JPEG)
+    assert frame.payload_bytes == PROBE_JPEG
+    assert frame.payload_sha256 == hashlib.sha256(PROBE_JPEG).hexdigest()
 
 
 async def test_probe_success_persists_all_six_columns(env) -> None:

@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -125,6 +126,24 @@ def build_body(
     }
 
 
+# 围栏剥离只认这两种包裹（三引号 json / 三引号），且**必须**覆盖整个内容：
+# 前后除空白外不得有别的字符。放宽成"全文搜一个围栏子串"会把
+# 「说明文字 + 围栏 + 更多说明」也当合法，那已经不是改编码而是猜意图。
+_FENCE_PATTERN = re.compile(
+    r"\A\s*```(?:json)?\s*\n?(.*?)\n?\s*```\s*\Z", re.DOTALL
+)
+
+
+def _strip_json_fence(content: str) -> str | None:
+    """内容整体被围栏包裹时返回内层文本，否则返回 None。
+
+    **本函数只在原样 `json.loads` 失败后才被调用**（见 parse_tag_response）：
+    合规响应不经过任何正则处理，避免"正常响应被改写"这类静默风险。
+    """
+    match = _FENCE_PATTERN.match(content)
+    return match.group(1) if match else None
+
+
 def parse_tag_response(value: dict[str, Any], allowed: tuple[str, ...]) -> dict[str, Any]:
     """解析一条 chat completion 响应。
 
@@ -153,7 +172,21 @@ def parse_tag_response(value: dict[str, Any], allowed: tuple[str, ...]) -> dict[
     try:
         parsed = json.loads(content)
     except json.JSONDecodeError as exc:
-        raise ValueError(f"provider content is not JSON: {exc}") from exc
+        # 顺序本身是判据的一部分：**先原样解析，失败才剥围栏**。反过来的话
+        # 每个合规响应都会被正则过一遍，「没被改写」就无法证明。
+        inner = _strip_json_fence(content)
+        if inner is None:
+            raise ValueError(f"provider content is not JSON: {exc}") from exc
+        try:
+            parsed = json.loads(inner)
+        except json.JSONDecodeError as fenced_exc:
+            # 区分两种失败：调用方诊断时要能看出「网关额外加了围栏」与
+            # 「模型乱答」不是同一件事。失败**不重试**——同一请求同一响应，
+            # 重试只会烧额度（确定性失败，不是偶发撞顶）。
+            raise ValueError(
+                "provider content is not JSON even after stripping a fenced "
+                f"block: {fenced_exc}"
+            ) from fenced_exc
     if not isinstance(parsed, dict):
         raise ValueError("provider content is not a JSON object")
 
