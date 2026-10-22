@@ -113,3 +113,33 @@ A4 的「此后 create 被拒且**零字节外传**」原先只在**外层服务
 2. `POST /providers/{id}/vision-capability` 需 `project_id` query 参数——设计门未规定，属实现下沉细节。
 3. **A13 未覆盖安装器级**（未打 NSIS、未跑 Electron 端到端）——本记录只证 PyInstaller 产物。
 4. `VisionProbeService.create_generation` 与 `egress.create` 门禁重复，须同步演进。
+
+---
+
+## 9. 收口后追加：R1/P163 的「承诺 vs 实现」复核
+
+收口复核时逐条核 R1 的四条对策，发现**两条与实现不符**——这正是本门 §1 记下的同型失败（声明与证据脱节）：
+
+| 对策 | 实现实况 | 处置 |
+|---|---|---|
+| ① 项目级显式 opt-in，默认关闭 | **代码中从未存在**（`opt_in`/`keyframe_enabled` 全仓零命中） | **按现状核销**：实际是逐次同意（必须勾选 + 逐张可移除）+ `create` fail-closed（Provider 必须探测为 `supported`），**比项目级开关更严**。不再叠一层开关（过度设计） |
+| ② 每张可见 | ✅ 已实现（面板逐帧列出，无「共 N 张」汇总） | — |
+| ③ 明写「这不是匿名化」 | ✅ 已实现（UI 常量文本 + 负向对照） | — |
+| ④ 打标后拒存原始 JPEG | **原先只有「TTL 15 分钟 + 启动期清理」**，打标完成后无任何清理调用 ⇒ 外传过的原始帧至少多留 15 分钟 | **已改实现**，见下 |
+
+### 9.1 ④ 的修法
+
+- 新增 `KeyframeEgressService.purge_preview(preview_id)`（`purge_expired` 的单条版本），`purge_expired` 改为复用；
+- 清理点在 **`run_tagging_job`**，不是 `_persist` 之后——`_persist` 只在成功路径跑，**失败路径（Provider 400 / 预算耗尽 / 取消）的字节同样已经外传过**（claim 在更早完成），而 `run_tagging_job` 是两条路径的唯一汇合处；
+- **失败后重试语义未被破坏**，三条已核实的事实：`jobs.retry` 只重置作业行、consent 已消费故重跑必抛 `KEYFRAME_EGRESS_CONSENT_REQUIRED`、面板无重试按钮（失败文案是「重新生成预览并再次确认」）⇒ 失败后唯有重新走用户同意，与字节是否留盘无关；
+- **缩略图不再落盘**：核实全仓零读取方（无静态端点、面板只渲染数字），`thumbnail_*` 元数据保留以支撑 A12；`test_presentation_bytes_are_not_thumbnail` 仍绿（它断言元数据不相等 + payload 与磁盘一致，不依赖 thumb 文件）。
+
+### 9.2 负向对照（5 组，各自独立变红）
+
+成功路径 / 失败路径 / 幂等 / **隔离**（清 A 不得清 B）/ 缩略图写入各一条，分开做以避免互相兜出假绿。
+
+**调度方独立复跑**：去掉成功路径的清理调用 ⇒ 4 failed / 4 passed（含隔离用例——因为它先断言 A 被清空作为场景前提）；恢复后 8 passed。
+
+### 9.3 已知缺口（不谎称有守卫）
+
+清理点只在 `run_tagging_job`；**直接调 `tag_generation` 会绕过清理**。该缺口被写成一个**显式断言**（`test_direct_tag_generation_call_bypasses_purge`），若将来把清理下沉到 `tag_generation`，该用例会红——届时应当**删掉它**（缺口填上了），而不是放宽它。生产调用方当前只有一处（`app.py` 的 `keyframe_runner` 槽位）。
