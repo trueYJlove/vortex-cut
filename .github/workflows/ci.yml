@@ -12,8 +12,10 @@
 name: CI
 
 on:
+  # 所有分支都触发：本库默认分支是 master，开发在 liuwei-dev 等特性分支上进行。
+  # 若限定为 [main]，推送到 liuwei-dev 时工作流**根本不会启动**——2026-10-23 实测踩中：
+  # push 成功后 gh workflow list 里仍只有 Dependency Graph，CI 从未运行。
   push:
-    branches: [main]
   pull_request:
   workflow_dispatch:
 
