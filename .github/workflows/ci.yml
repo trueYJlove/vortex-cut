@@ -107,3 +107,49 @@ jobs:
           name: pytest-junit
           path: .tmp/ci/pytest-junit.xml
           if-no-files-found: warn
+
+  # ── Desktop / 契约侧门 ────────────────────────────────────────────────
+  # 为什么需要这个 job：上面 python-unit 只跑 Python。而根 pnpm ci 是
+  #   lint && typecheck && test && test:python && build
+  # —— 也就是说 lint / typecheck / Desktop vitest / build 这四步此前**从不在
+  # CI 上跑**，等于「接进 CI」只接了一半，Desktop 侧仍在靠人记得跑。
+  #
+  # 与 python-unit 并行、互不重复：本 job 不含 test:python（那个在 python-unit 里）。
+  # 两者合起来才等于完整的 pnpm ci。
+  #
+  # 超时按**本机实测**定（2026-10-23，非拍脑袋）：
+  #   lint 12s / typecheck 14s / test(vitest) 75s / build 6s = 约 1m47s
+  # runner 经验上慢 1.5–3 倍，加取依赖约 4 分钟 => 约 8–10 分钟。
+  # 取 30 分钟：约 3 倍余量。（教训：P190 里曾因拿本机 18m54s 定 30 分钟预算
+  # 而被真实 27m49s 的 runner 打爆，故此处明确留足倍数并在首跑后校正。）
+  desktop:
+    name: Desktop lint / typecheck / vitest / build
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install Node dependencies
+        run: pnpm install --frozen-lockfile
+
+      # 每一步独立成 step：失败时能一眼看出是哪一环红的，
+      # 而不是一个 "pnpm ci" 大黑箱。
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Desktop unit tests (vitest)
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build

@@ -175,10 +175,14 @@ stop and link to STATUS.md instead. Restating state is the origin of drift.
   script (`uv run --locked --extra dev pytest services/core/tests/unit`), so the check now fires
   without anyone remembering to run it. Run it directly with:
   `uv run --locked --extra dev pytest services/core/tests/unit/test_status_doc_consistency.py`.
-- **Python unit tests** — `pnpm ci` covers lint / typecheck / Desktop tests / **Python unit
-  tests** / build; `pnpm ci:release` adds the Electron e2e suite. What the Python step covers and
-  excludes, and its closeout status, are declared in `docs/STATUS.md` §4 **P190** — reference it
-  (Rule 5), do not restate it. In particular `services/core/tests/integration` is **not** in the
+- **Python unit tests** — `pnpm run ci` covers lint / typecheck / Desktop tests / **Python unit
+  tests** / build; `pnpm run ci:release` adds the Electron e2e suite.
+  **必须写 `pnpm run ci`，不能写 `pnpm ci`**：`ci` 是 pnpm 的内置命令（`ERR_PNPM_CI_NOT_IMPLEMENTED`），
+  直接 `pnpm ci` 会**报错退出而根本不执行本仓脚本**（2026-10-23 实测踩中——此前本节写的就是
+  `pnpm ci`，属「写了个无法执行的命令」）。CI 侧由 `.github/workflows/ci.yml` 的两个 job 覆盖：
+  `python-unit`（`pnpm test:python`）与 `desktop`（lint / typecheck / vitest / build）。
+  What the Python step covers and excludes, and its closeout status, are declared in
+  `docs/STATUS.md` §4 **P190** — reference it (Rule 5), do not restate it. In particular `services/core/tests/integration` is **not** in the
   pipeline: a route-level regression living there will not be caught — check P190 before relying
   on one.
 - **Rules 1, 3, 4, 5** — verified at the Verification Gate by LiuKeAi, who checks that
