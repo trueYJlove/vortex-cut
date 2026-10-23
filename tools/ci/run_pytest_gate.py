@@ -39,6 +39,9 @@ EXTRA_TARGET_GLOBS = [
 ]
 
 JUNIT_PATH = REPO_ROOT / ".tmp" / "ci" / "pytest-junit.xml"
+# 单轮运行的临时根：固定在仓库内（.gitignore 已忽略 /.tmp/），
+# 避免落到系统 %TEMP% 并跨轮累积 —— 见下方 --basetemp 处的事故记录。
+BASETEMP = REPO_ROOT / ".tmp" / "ci" / "pytest-tmp"
 CHECKER = REPO_ROOT / "tools" / "ci" / "check_pytest_skips.py"
 
 
@@ -81,6 +84,12 @@ def main() -> int:
         # xunit1 才有 testcase 的 file 属性，check_pytest_skips.py 按 file 建白名单。
         "-o",
         "junit_family=xunit1",
+        # 固定 basetemp：默认策略会保留最近 3 次全量运行的临时目录，而本仓集成测试
+        # 会生成真实媒体夹具（pyproject.toml 注释记录单次 10+GB）。实测 2026-10-23
+        # 本门连续跑两轮就把系统盘写满两次（ENOSPC 直接打断 pytest，连 junit 都写不出，
+        # 表现为一片假的 F/E —— 那是盘满，不是用例红）。固定到仓库内 .tmp 后，
+        # 每轮运行开头 pytest 会自行清空它，不会跨轮累积。
+        f"--basetemp={BASETEMP}",
         f"--junitxml={JUNIT_PATH}",
     ]
     print(f"[pytest-gate] run: {' '.join(cmd[1:])}")

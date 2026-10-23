@@ -27,7 +27,12 @@ jobs:
   python-unit:
     name: Python unit tests + skip gate
     runs-on: windows-latest
-    timeout-minutes: 30
+    # 60 而非 30：本地实测 unit 全量 18m54s，但真实 runner 实测 **27m49s**
+    # （1560 passed / 30 skipped，见 run 39909080154），加上前面取 ffmpeg 与装依赖
+    # 约 4 分钟，总计约 32 分钟 —— 30 分钟那次正是因此被 job 超时杀掉
+    # （pytest 其实已全过、skip 守卫也已判 OK，只是被 cancel）。
+    # 教训：不要用本机耗时去定远端预算。
+    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v4

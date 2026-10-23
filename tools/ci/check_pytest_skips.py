@@ -32,11 +32,18 @@ for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
         _stream.reconfigure(encoding="utf-8", errors="backslashreplace")
 
-# 收集/通过下限。实测（2026-10-23，unit 全量 + integration/test_*_routes.py，
-# 本地带全部资产）：收集 1590 / 通过 1589 / skip 1 / 0 failed，耗时 1586s。
-# floor 取 1500：留出正常用例增删的余量，但足以拦住"0 collected"
-# 和"整个测试包被漏收集"这两类静默变绿（1590 → 1500 掉 90 条就会红）。
+# 收集/通过下限。两套实测读数（2026-10-23）：
+#   本地（带全部资产）：收集 1590 / 通过 1589 / skip 1 / 0 failed
+#   GitHub windows-latest（干净环境）：收集 1590 / 通过 1560 / skip 30 / 0 failed
+# **收集数在两处完全一致（1590）**——这是本行最想钉住的事实：干净环境缺的是
+# "跳过"而不是"少收集"，Pillow 之类的缺失会以 collection error 直接红，不会静默。
+# 干净环境多出的 29 个跳过全部来自 CLIP/WordPiece tokenizer 对拍（需手工下载的
+# 开发期资产，.gitignore 忽略 .tmp/），已在下方白名单内并写明理由。
+# floor 取 1500：留出正常用例增删的余量，但足以拦住"0 collected"与
+# "整个测试包被漏收集"（1590 → 1500 掉 90 条就会红）。
 MIN_COLLECTED = 1500
+# 通过数上限按**干净环境**取（1560），而不是本地的 1589：floor 必须能在
+# CI 上成立，否则门会恒红。1450 相对 1560 留 110 条余量。
 MIN_PASSED = 1450
 
 # 允许的跳过：只有"在新克隆的仓库里本来就跑不了"的用例可以进来。
