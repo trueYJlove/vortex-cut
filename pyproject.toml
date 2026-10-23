@@ -22,6 +22,11 @@ dev = [
   "ruff>=0.8,<1",
   "pyright>=1.1.390,<2",
   "pyinstaller>=6.11,<7",
+  # 仅测试依赖：PIL 在生产代码里零使用（services/core/src 下 0 处 from PIL），
+  # 但 tests/unit/test_vision_probe.py 在**收集阶段**就 import，且 integration 的
+  # test_b4_bubble_fx_render_real.py 也用。此前未声明 ⇒ 开发者本机装了 Pillow 才绿，
+  # 干净环境（CI）直接 collection error 中断整个套件（2026-10-23 CI 首次真实运行抓到）。
+  "pillow>=11,<13",
 ]
 
 [tool.pytest.ini_options]
