@@ -26,8 +26,16 @@ const root = resolve(currentDir, "..", "..", "..");
 const desktop = resolve(currentDir, "..");
 const resources = join(root, "resources");
 const realUserAsset = "C:/Users/trueY/Videos/fdf0f0e269126269ed686f208b3063e3.mp4";
+// 长度前提（不是性能问题）：覆盖轨片段窗口 OVERLAY_WINDOW_S=5s 必须真实落在素材内。
+// 3s 的通用夹具 cfr-landscape-av.mp4 上，下方 patch(insert_asset_clip,
+// source_end_us=5s) 会被 Core 判为 [TIMELINE_SOURCE_INVALID] 视频源范围无效——
+// 那是夹具太短，不是 overlay-only 缺陷。故 3s 通用夹具之前先取 60s 长夹具；
+// 用户真机素材仍最优先（真机复测口径不变），长夹具只是回落到「够长且可用」的那一档。
+const longFixture = join(root, "test-assets", "generated", "h264-1080p-60s-g30-nobf.mp4");
 const fallbackFixture = join(root, "test-assets", "generated", "cfr-landscape-av.mp4");
-const fixture = existsSync(realUserAsset) ? realUserAsset : fallbackFixture;
+const fixture = existsSync(realUserAsset) ? realUserAsset
+  : existsSync(longFixture) ? longFixture
+    : fallbackFixture;
 /** 覆盖轨片段源窗口（秒）：足够长以判定推进，又不拖慢回归。 */
 const OVERLAY_WINDOW_S = 5;
 

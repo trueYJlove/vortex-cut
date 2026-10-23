@@ -26,10 +26,17 @@ const desktop = resolve(currentDir, "..");
 const resources = join(root, "resources");
 const userEofFixture = join(root, "test-assets", "generated", "user-eof-bframe.mp4");
 const realUserAsset = "C:/Users/trueY/Videos/fdf0f0e269126269ed686f208b3063e3.mp4";
+// 长度前提（不是性能问题）：六档跳转的最后一档 ratio=0.82 之后仍要观测到「暂停」
+// 按钮（该控件只在播放中存在）。3s 的通用夹具在 0.82 档（≈2.46s）已播到片尾自然
+// 结束，按钮回落成「播放」，:249 的暂停定位必然超时——那是夹具太短造成的观测失败，
+// 不是 seek→play 的推进缺陷（六档推进断言本身全部通过）。故在 3s 通用夹具之前先取
+// 60s 长夹具；用户真机素材与仓内 EOF 夹具的优先级不变（真机复测口径不变）。
+const longFixture = join(root, "test-assets", "generated", "h264-1080p-60s-g30-nobf.mp4");
 const fallbackFixture = join(root, "test-assets", "generated", "cfr-landscape-av.mp4");
 const fixture = existsSync(realUserAsset) ? realUserAsset
   : existsSync(userEofFixture) ? userEofFixture
-    : fallbackFixture;
+    : existsSync(longFixture) ? longFixture
+      : fallbackFixture;
 
 /**
  * **L8 已核销（2026-10-10，复现消失模式）**：`test.fixme` 摘除后同构建
