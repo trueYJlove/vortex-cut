@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "pnpm --filter @aivideo/desktop dev",
     "build": "pnpm --filter @aivideo/desktop build",
-    "lint": "pnpm --filter @aivideo/desktop lint",
+    "lint": "pnpm --filter @aivideo/contracts build && pnpm --filter @aivideo/desktop lint",
     "typecheck": "pnpm --filter @aivideo/contracts build && pnpm --filter @aivideo/desktop typecheck",
     "test": "pnpm --filter @aivideo/contracts build && pnpm --filter @aivideo/desktop test",
     "test:e2e": "pnpm --filter @aivideo/desktop test:e2e",
