@@ -17,7 +17,7 @@ const root = resolve(currentDir, "../../..");
 const desktop = resolve(currentDir, "..");
 const resources = join(root, "resources");
 const python = join(root, ".venv", "Scripts", "python.exe");
-const ffmpeg = join(root, "dist", "sidecar", "ffmpeg", "win-x64", "ffmpeg.exe");
+const ffmpeg = join(resources, "ffmpeg", "win-x64", "ffmpeg.exe");
 
 function isWithin(candidate: string, parent: string): boolean {
   const path = relative(parent, candidate);
@@ -127,13 +127,37 @@ test("Stage2C 受控 Electron Provider 先探测 Candidate capability 再生成�
       return { project, asset: imported.asset, provider };
     }, { baseUrl: `http://127.0.0.1:${address.port}`, providerSecret });
     // 凭据保存后，由 Renderer 明确调用唯一的 Candidate capability IPC 入口。
+    // 期望协议版本 "2" 的依据：services/core/src/aivs_core/providers.py:43
+    // CANDIDATE_PROBE_PROTOCOL_VERSION = "2"（探测放宽为结构校验，提交 09da544
+    // 「探测协议 v1→v2」落地），且 database_v22.py 触发器要求 status=supported 时
+    // 该列必须为 '2'。此处的 "1" 是 v2 之前的陈旧期望，不是被测行为变更。
     const capability = await page.evaluate(id => window.desktop.testCandidateProviderCapability(id), setup.provider.provider_config_id);
-    expect(capability).toMatchObject({ candidate_capability_status: "supported", candidate_response_adapter_id: "openai_chat_completions_candidatescript_v1", candidate_probe_protocol_version: "1", candidate_capability_failure_code: null });
+    expect(capability).toMatchObject({ candidate_capability_status: "supported", candidate_response_adapter_id: "openai_chat_completions_candidatescript_v1", candidate_probe_protocol_version: "2", candidate_capability_failure_code: null });
+    // 探测阶梯 6 次的推导（自 Core 代码得出，非照抄实测）：
+    //   ① 阶梯顺序 = CANDIDATE_ADAPTER_IDS（providers.py:37-42）：
+    //      responses+json_schema / responses+candidatescript /
+    //      chat+json_schema / chat+candidatescript。
+    //   ② structured 由 providers.py:1174-1196 决定：responses 分支仅在非 script 时写
+    //      body["text"]，chat 分支仅在非 script 时写 body["response_format"]
+    //      ⇒ 四个 adapter 的 (endpoint, structured) 依次为 (responses,true)、
+    //      (responses,false)、(chat,true)、(chat,false)——与下方后四项一致。
+    //   ③ 首条 adapter 被重试 3 次：planning.py:442 的 for attempt in range(3)；
+    //      本 spec 的受控 Provider 对前若干次探测返回 422，而 providers.py:1225
+    //      status_code >= 300 将其映射为 PROVIDER_UNAVAILABLE，该码属于
+    //      providers.py:33-36 的 RETRYABLE_PROVIDER_ERRORS ⇒ 同一条 adapter 重试到
+    //      预算耗尽（3 次）才换下一条。故真实序列 = 首条 ×3 + 其余各 1 次 = 6 次。
+    //   ④ 恒等式佐证：(responses, structured=true) 只对应首条 adapter，出现 3 次
+    //      即该 adapter 的 3 次尝试，其余三条各 1 次。
+    // 存疑（另案，不在本包范围）：planning.py:440-441 注释称「schema 错误不重试」，
+    // 但 422 无专属错误码，被 >=300 归入可重试的 PROVIDER_UNAVAILABLE，与该注释存在
+    // 语义缺口——本断言按现行实现记录真实阶梯，不代为裁决该缺口。
     expect(probeCalls).toEqual([
-      { endpoint: "responses", structured: true },
-      { endpoint: "responses", structured: false },
-      { endpoint: "chat", structured: true },
-      { endpoint: "chat", structured: false }
+      { endpoint: "responses", structured: true },  // 首条 adapter 第 1 次
+      { endpoint: "responses", structured: true },  // 首条 adapter 重试 1
+      { endpoint: "responses", structured: true },  // 首条 adapter 重试 2
+      { endpoint: "responses", structured: false }, // 第 2 条 adapter
+      { endpoint: "chat", structured: true },       // 第 3 条 adapter
+      { endpoint: "chat", structured: false }       // 第 4 条 adapter → supported
     ]);
     expect(businessGenerationRequestCount).toBe(0);
 
@@ -141,7 +165,7 @@ test("Stage2C 受控 Electron Provider 先探测 Candidate capability 再生成�
     await page.reload();
     await page.waitForFunction(() => Boolean(window.desktop?.getRuntime));
     await selectProject(page, setup.project.project_id);
-    await page.locator(".tabs button").filter({ hasText: "转录" }).click();
+    await page.getByRole("tab", { name: "转录", exact: true }).click();
     await expect.poll(async () => page.evaluate(id => window.desktop.listTranscripts(id as never), setup.asset.asset_id), { timeout: 10_000 }).toMatchObject({ items: [{ transcript_id: "transcript_e2e_primary" }] });
     await page.getByRole("button", { name: "AI 粗剪" }).click();
     const recipePage = await page.evaluate(() => window.desktop.listRecipes?.());

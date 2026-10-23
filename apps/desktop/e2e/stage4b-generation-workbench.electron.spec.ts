@@ -165,7 +165,9 @@ test("Gate 4B-4 真实 Electron/安装版本模拟工作台、取消重试与重
     await openProjectManagement(page);
     await page.getByLabel("新项目名称").fill("Stage 4B Real Acceptance");
     await page.getByRole("button", { name: "创建项目" }).click();
-    await page.getByRole("button", { name: "导入video" }).click();
+    // aria-label 由 App.tsx:2605 的 `导入${assetKindLabels[kind]}` 生成，video → "导入视频"。
+    // 原写法 "导入video" 在 DOM 中不存在（同类失效共 3 处，见 P192）。
+    await page.getByRole("button", { name: "导入视频" }).click();
     await expect(page.locator(".asset-row").filter({ hasText: assetName })).toBeVisible({ timeout: 30_000 });
     const setup = await page.evaluate(async () => {
       const projects = await window.desktop.listProjects({ limit: 100 });

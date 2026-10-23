@@ -231,7 +231,8 @@ test("Gate 4C-4 真实 Electron/安装版本 Shot List、v11 升级与重启恢�
       }, mode);
     }
 
-    await page.getByRole("button", { name: "导入video" }).click();
+    // 同 stage4b：aria-label 是 "导入视频"（App.tsx:2605 + assetKindLabels.video="视频"）。
+    await page.getByRole("button", { name: "导入视频" }).click();
     const assetName = sourceVideo.split(/[\\/]/).at(-1)!;
     await expect(page.locator(".asset-row").filter({ hasText: assetName })).toBeVisible({ timeout: 30_000 });
     assetId = await page.evaluate(async id => (await window.desktop.listAssets({ project_id: id as never, limit: 100 })).items[0]!.asset.asset_id, projectId);

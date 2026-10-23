@@ -47,6 +47,17 @@ const speechSource = process.env.AIVS_WAVE1_SPEECH ?? join(home, "Videos", "fdf0
 const musicSource = process.env.AIVS_WAVE1_MUSIC ?? join(home, "Desktop", "慢慢后退.mp3");
 const modelRoot = join(home, "AppData", "Roaming", "@aivideo", "desktop", "data-v2", "models", "asr", "faster-whisper-tiny");
 const evidenceRoot = join(root, "test-results", "wave1-manual-evidence");
+/**
+ * 真机资产前提：口播素材 / 音乐素材 / 本地 ASR 权重都不随仓库分发（体积、版权、机器绑定），
+ * 缺失时显式 skip 并逐项列出缺什么——不删掉素材依赖假装通过。skip 条件是「资产缺失」，
+ * 三项齐备时 missings 为空、下方断言照常完整执行。
+ */
+const requiredMachineAssets = [
+  { label: "口播素材（去停顿 / ASR / L-J 用）", path: speechSource, override: "AIVS_WAVE1_SPEECH" },
+  { label: "音乐素材（节拍检测用）", path: musicSource, override: "AIVS_WAVE1_MUSIC" },
+  { label: "本地 ASR 模型权重 faster-whisper-tiny", path: modelRoot, override: "" }
+];
+const missingMachineAssets = requiredMachineAssets.filter(asset => !existsSync(asset.path));
 
 type ItemStatus = "pass" | "fail" | "observe";
 type Item = { id: string; title: string; status: ItemStatus; detail: string };
@@ -186,6 +197,12 @@ async function cvPeek(page: Page, projectId: string, assetId: string): Promise<a
 
 test("Wave1 剪辑手法 L3 手测清单自动化（去停顿 / 卡点 / L-J / 通用）", async () => {
   test.setTimeout(1_500_000);
+  test.skip(
+    missingMachineAssets.length > 0,
+    "缺少真机资产（不随仓库分发，需在本机准备）：" + missingMachineAssets
+      .map(asset => asset.label + " → " + asset.path + (asset.override ? "（可用 " + asset.override + " 覆盖）" : ""))
+      .join("；")
+  );
   await mkdir(evidenceRoot, { recursive: true });
   const run = join(evidenceRoot, "run-" + process.pid + "-" + Date.now());
   const userData = join(run, "user-data");
