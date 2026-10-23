@@ -23,8 +23,10 @@
     "package:win": "pnpm --filter @aivideo/desktop package:win",
     "package:verify": "pnpm --filter @aivideo/desktop package:verify",
     "package:verify:real": "pnpm --filter @aivideo/desktop package:verify:real",
-    "ci": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
-    "ci:verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+    "test:python": "uv run --locked --extra dev python tools/ci/run_pytest_gate.py",
+    "ci": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:python && pnpm build",
+    "ci:release": "pnpm ci && pnpm test:e2e",
+    "ci:verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:python && pnpm build"
   },
   "devDependencies": {
     "typescript": "^5.8.3"

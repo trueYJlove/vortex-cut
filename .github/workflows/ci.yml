@@ -1,0 +1,102 @@
+# Python 单测 + skip 数的机器门。
+#
+# 为什么需要独立工作流：根 pnpm test（Desktop）与 build 都不跑任何 Python
+# 测试，Python 侧此前完全没有自动化关卡。本工作流让「unit 测试 + 跳过数」成为
+# 可拦截的门，且与本地 `pnpm test:python` **完全共用同一条命令**——本地绿而 CI 红
+# （或反之）这种漂移不该存在。
+#
+# 为什么必须 windows-latest：随包 ffmpeg 不入库，测试把路径硬编码为
+# resources/ffmpeg/win-x64/ffmpeg.exe（见 tests/unit/test_keyframe_encode.py:30、
+# test_loudness_measurement.py:19）。没有该二进制时调 ffmpeg 的用例会**静默跳过**，
+# 流水线照样绿。所以下面先用真实步骤按 ffmpeg-manifest.json 的 sha256 取回它。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python-unit:
+    name: Python unit tests + skip gate
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── 1. 取回随包 ffmpeg（必须先于 pytest）────────────────────────────
+      # prepare-ffmpeg.ps1 不是幂等的"下载器"：它只校验并解压**已存在**的归档，
+      # AIVS_FFMPEG_ARCHIVE 必须指向本地文件，否则抛错并以退出码 1 结束
+      # （实测：缺环境变量/路径不存在/sha256 不符 三种情形均 exit=1）。
+      # 因此这里显式下载 manifest 的 source_url，再交给脚本按 sha256 校验解压。
+      - name: Download FFmpeg archive
+        shell: pwsh
+        env:
+          MANIFEST: tools/dependencies/ffmpeg-manifest.json
+        run: |
+          $m = Get-Content -Raw $env:MANIFEST | ConvertFrom-Json
+          if ($m.release_blocked_until_pinned) { throw "FFmpeg manifest is release-blocked." }
+          New-Item -ItemType Directory -Force -Path .deps-download | Out-Null
+          $archive = Join-Path (Get-Location) ".deps-download/ffmpeg-lgpl-8.0.zip"
+          Write-Host "Downloading $($m.source_url)"
+          Invoke-WebRequest -Uri $m.source_url -OutFile $archive -UseBasicParsing
+          $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
+          Write-Host "archive sha256=$actual"
+          if ($actual -ne $m.archive_sha256.ToLowerInvariant()) {
+            throw "FFmpeg archive SHA-256 mismatch: expected $($m.archive_sha256), actual $actual"
+          }
+
+      - name: Prepare bundled FFmpeg
+        shell: pwsh
+        run: |
+          $archive = Join-Path (Get-Location) ".deps-download/ffmpeg-lgpl-8.0.zip"
+          $env:AIVS_FFMPEG_ARCHIVE = $archive
+          powershell -NoProfile -ExecutionPolicy Bypass -File tools/dependencies/prepare-ffmpeg.ps1
+          if ($LASTEXITCODE -ne 0) { throw "FFmpeg preparation failed (exit $LASTEXITCODE)." }
+          foreach ($f in @("ffmpeg.exe", "ffprobe.exe")) {
+            $p = Join-Path (Get-Location) "resources/ffmpeg/win-x64/$f"
+            if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { throw "Missing $p after preparation." }
+          }
+          & ./resources/ffmpeg/win-x64/ffmpeg.exe -hide_banner -version
+
+      # ── 2. 工具链 ──────────────────────────────────────────────────────
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.12.3"
+          enable-cache: true
+
+      - name: Install Python dependencies
+        run: uv sync --locked --extra dev
+
+      - name: Install Node dependencies
+        run: pnpm install --frozen-lockfile
+
+      # ── 3. 门 ──────────────────────────────────────────────────────────
+      # 与本地完全相同的一条命令：pytest（unit 全量 + integration/test_*_routes.py）
+      # 之后紧跟 tools/ci/check_pytest_skips.py 的收集数/skip 白名单断言。
+      # 断言写在 test:python 内部，所以本地与 CI 共用同一道门。
+      - name: Python unit tests + skip gate
+        run: pnpm test:python
+
+      # pytest 在失败时也可能留下部分 junitxml；留档便于定位。
+      - name: Upload pytest junit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-junit
+          path: .tmp/ci/pytest-junit.xml
+          if-no-files-found: warn

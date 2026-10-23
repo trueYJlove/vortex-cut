@@ -170,11 +170,17 @@ stop and link to STATUS.md instead. Restating state is the origin of drift.
 
 ### Enforcement
 
-- **Rule 2** — enforced by test `services/core/tests/unit/test_status_doc_consistency.py`.
-  **Not yet wired into an automated pipeline**: this repository has no CI configuration, and the
-  root `pnpm ci` script covers only lint / typecheck / Desktop tests / build — it runs **no Python
-  tests**, so this check never fires automatically. Run it explicitly:
-  `pytest services/core/tests/unit/test_status_doc_consistency.py`.
+- **Rule 2** — enforced by test `services/core/tests/unit/test_status_doc_consistency.py`,
+  which the CI workflow `.github/workflows/ci.yml` executes through the root `pnpm test:python`
+  script (`uv run --locked --extra dev pytest services/core/tests/unit`), so the check now fires
+  without anyone remembering to run it. Run it directly with:
+  `uv run --locked --extra dev pytest services/core/tests/unit/test_status_doc_consistency.py`.
+- **Python unit tests** — `pnpm ci` covers lint / typecheck / Desktop tests / **Python unit
+  tests** / build; `pnpm ci:release` adds the Electron e2e suite. What the Python step covers and
+  excludes, and its closeout status, are declared in `docs/STATUS.md` §4 **P190** — reference it
+  (Rule 5), do not restate it. In particular `services/core/tests/integration` is **not** in the
+  pipeline: a route-level regression living there will not be caught — check P190 before relying
+  on one.
 - **Rules 1, 3, 4, 5** — verified at the Verification Gate by LiuKeAi, who checks that
   STATUS.md §1 matches code, §4 reflects every open commitment, and no new state restatement
   has appeared elsewhere.
