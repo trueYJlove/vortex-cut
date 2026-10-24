@@ -28,7 +28,11 @@ const resources = join(root, "resources");
 // 环境变量指向本机路径）→ 仓内复刻夹具（不存在则跳过生成）→ 通用 H.264 夹具。
 // H.264 无 B 帧重排，EOF 回卷语义对所有素材一致但针对性弱——仅兜底。
 const userEofFixture = join(root, "test-assets", "generated", "user-eof-bframe.mp4");
-const realUserAsset = "C:/Users/trueY/Videos/fdf0f0e269126269ed686f208b3063e3.mp4";
+// 真机用户素材实际位置（子目录 20261020/，原写死路径缺子目录故永不命中）。
+// 用户素材不入库（test-assets/generated/ 已 gitignore），故本机有则用、缺失则回落；
+// AIVS_E2E_USER_EOF_ASSET 可显式指向其他位置（CI/他人机器由此提供）。
+const realUserAsset = process.env.AIVS_E2E_USER_EOF_ASSET
+  ?? "C:/Users/trueY/Videos/20261020/fdf0f0e269126269ed686f208b3063e3.mp4";
 const fallbackFixture = join(root, "test-assets", "generated", "cfr-landscape-av.mp4");
 const fixture = existsSync(userEofFixture) ? userEofFixture
   : existsSync(realUserAsset) ? realUserAsset

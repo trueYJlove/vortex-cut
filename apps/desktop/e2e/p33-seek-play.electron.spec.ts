@@ -25,7 +25,11 @@ const root = resolve(currentDir, "..", "..", "..");
 const desktop = resolve(currentDir, "..");
 const resources = join(root, "resources");
 const userEofFixture = join(root, "test-assets", "generated", "user-eof-bframe.mp4");
-const realUserAsset = "C:/Users/trueY/Videos/fdf0f0e269126269ed686f208b3063e3.mp4";
+// 真机用户素材实际位置（子目录 20261020/，原写死路径缺子目录故永不命中）。
+// 用户素材不入库（test-assets/generated/ 已 gitignore），故本机有则用、缺失则回落；
+// AIVS_E2E_USER_EOF_ASSET 可显式指向其他位置（CI/他人机器由此提供）。
+const realUserAsset = process.env.AIVS_E2E_USER_EOF_ASSET
+  ?? "C:/Users/trueY/Videos/20261020/fdf0f0e269126269ed686f208b3063e3.mp4";
 // 长度前提（不是性能问题）：六档跳转的最后一档 ratio=0.82 之后仍要观测到「暂停」
 // 按钮（该控件只在播放中存在）。3s 的通用夹具在 0.82 档（≈2.46s）已播到片尾自然
 // 结束，按钮回落成「播放」，:249 的暂停定位必然超时——那是夹具太短造成的观测失败，
