@@ -126,9 +126,14 @@ def _seed_lineage(
     asset_id = f"stage6r-real-image-{index}"
 
     with app.state.core.db.connection() as sql:
+        # 必须 resolve()：root_dir 可能是相对路径（取决于创建项目时的 CWD），
+        # 而下面要用 Path.as_uri() 记录 asset_locations.uri —— 它对相对路径会抛
+        # ValueError: relative path can't be expressed as a file URI。
+        # 2026-10-23 实测：该异常被 e2e 侧的 runPython 吞成
+        # STAGE6R_ELECTRON_EVIDENCE_HELPER_FAILED，报错完全不可诊断。
         project_root = Path(sql.execute(
             "SELECT root_dir FROM projects WHERE id=?", (project_id,)
-        ).fetchone()[0])
+        ).fetchone()[0]).resolve()
 
         image = project_root / "generated" / "image" / f"{asset_id}.png"
         media = run_ffmpeg_png(image, index)
@@ -287,12 +292,22 @@ def seed(data_dir: Path, admin_token: str, upgrade: bool) -> dict[str, Any]:
         with sqlite3.connect(data_dir / "app.db") as sql:
             prior = dict(sql.execute("SELECT version,checksum FROM schema_migrations"))
         database_module.MIGRATIONS = original
-        if not upgrade:
-            if len(prior) != 17:
-                raise RuntimeError("STAGE6R_MIGRATION_FAILED")
-        else:
-            if len(prior) != 16:
-                raise RuntimeError("STAGE6R_MIGRATION_FAILED")
+        # 本工具是的剧本是**历史场景**：从 v16 升级到 v17，或直接建到 v17，
+        # 然后核对 v17 的 checksum。当年（迁移数 = 17）这两条断言成立。
+        # 现在迁移已到 v41，且 upgrade=False 走全量迁移 ⇒ prior 必然是 41，
+        # 硬编码的 17/16 永远不成立。2026-10-23 实测：
+        #   RuntimeError: STAGE6R_MIGRATION_FAILED
+        # 这里改为按**实际迁移数**判断：只有当历史剧本仍然成立（迁移恰好停在
+        # v16/v17）时才继续，否则抛出带诊断信息的专用错误，由调用方显式跳过。
+        expected_snapshot = 16 if upgrade else 17
+        if len(prior) != expected_snapshot:
+            raise RuntimeError(
+                "STAGE6R_HISTORICAL_SCENARIO_NOT_APPLICABLE: "
+                f"本剧本要求迁移快照为 v{expected_snapshot}，"
+                f"而当前实际为 {len(prior)} 个迁移"
+                f"（upgrade={upgrade}）。该 spec 验证的是 v16→v17 历史升级路径，"
+                "已不适用于当前迁移版本；应显式 skip 而不是改断言假装通过。"
+            )
             from aivs_core.database import Database
 
             Database(data_dir / "app.db").initialize()

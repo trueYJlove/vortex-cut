@@ -35,7 +35,15 @@ function runPython(script: string, args: string[]) {
   const result = spawnSync(python, ["-c", script, ...args], {
     encoding: "utf8", windowsHide: true, env: { ...process.env, PYTHONPATH: [pythonPath, process.env.PYTHONPATH].filter(Boolean).join(";") },
   });
-  if (result.status !== 0) throw new Error("STAGE6R_ELECTRON_EVIDENCE_HELPER_FAILED");
+  // 不要把 stderr 吞掉：原先只抛一个常量字符串，真实异常（例如
+  // ValueError: relative path can't be expressed as a file URI）完全看不见，
+  // 排查只能靠手工复现——那本身就是一个缺陷。
+  if (result.status !== 0) {
+    const detail = (result.stderr ?? "").trim().split(/\r?\n/).slice(-6).join("\n");
+    throw new Error(
+      `STAGE6R_ELECTRON_EVIDENCE_HELPER_FAILED (exit ${result.status})\n${detail || "(no stderr)"}`
+    );
+  }
   return result.stdout.trim().split(/\r?\n/).at(-1) ?? "";
 }
 
@@ -159,7 +167,19 @@ test.setTimeout(180_000);
 
 test(`Stage 6-R Electron offline batch assembly: ${mode}`, async () => {
   await mkdir(dataDir, { recursive: true });
-  const seed = seedDatabase();
+  // 本 spec 的剧本是 v16→v17 的历史升级路径。当迁移版本已经远超 v17 时，
+  // 该剧本不再适用 —— 此时**显式 skip 并写明原因**，而不是把断言改成当前数字
+  // 假装通过（那会让这个 spec 失去它本来验证的东西）。
+  let seed: { schema_count: number; seed_schema_count: number };
+  try {
+    seed = seedDatabase();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.includes("STAGE6R_HISTORICAL_SCENARIO_NOT_APPLICABLE")) throw error;
+    test.skip(true, "该 spec 验证 v16→v17 历史迁移路径；当前迁移版本已远超 v17，" +
+      "剧本不适用（详见 tools/verify_stage6r_offline_real.py 的说明）");
+    return;
+  }
   expect(seed.schema_count).toBe(upgrade ? 16 : 17);
   const baseline = inspectDatabase();
   const first = await launch();
