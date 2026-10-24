@@ -112,6 +112,7 @@ print(json.dumps({"schema_count":14,"legacy_project_count":1,"legacy_provider_co
 type DbEvidence = {
   schema_v15: boolean;
   schema_count: number;
+  migration_total: number;
   migration_checksums_ok: boolean;
   link_table_exists: boolean;
   adoption_table_exists: boolean;
@@ -125,6 +126,7 @@ type DbEvidence = {
   link_count: number;
   adoption_count: number;
   timeline_revision_count: number;
+  timeline_revision_by_project: Record<string, number>;
   backup_count: number;
   foreign_key_ok: boolean;
   integrity_ok: boolean;
@@ -142,6 +144,7 @@ expected={k:hashlib.sha256(v.encode("utf-8")).hexdigest() for k,v in dm.MIGRATIO
 r={
  "schema_v15":one("select count(*) from schema_migrations where version='v15'")==1,
  "schema_count":one("select count(*) from schema_migrations"),
+ "migration_total":len(dm.MIGRATIONS),
  "migration_checksums_ok":applied==expected,
  "link_table_exists":one("select count(*) from sqlite_master where type='table' and name='shot_requirement_image_generation_links'")==1,
  "adoption_table_exists":one("select count(*) from sqlite_master where type='table' and name='shot_requirement_image_adoptions'")==1,
@@ -155,6 +158,7 @@ r={
  "link_count":one("select count(*) from shot_requirement_image_generation_links"),
  "adoption_count":one("select count(*) from shot_requirement_image_adoptions"),
  "timeline_revision_count":one("select count(*) from timeline_revisions"),
+ "timeline_revision_by_project":dict(c.execute("select project_id,count(*) from timeline_revisions group by project_id")),
  "backup_count":len(list((p.parent/'backups').glob('*.db'))) if (p.parent/'backups').exists() else 0,
  "foreign_key_ok":len(c.execute("pragma foreign_key_check").fetchall())==0,
  "integrity_ok":one("pragma integrity_check")=="ok",
@@ -265,7 +269,7 @@ test("Gate 4E-5 离线 Electron、v14→v15、Prepare 零副作用与重启恢�
     const afterPrepare = inspectDatabase();
     expect(afterPrepare).toMatchObject({
       schema_v15: true,
-      schema_count: 15,
+      schema_count: afterPrepare.migration_total,
       migration_checksums_ok: true,
       link_table_exists: true,
       adoption_table_exists: true,
@@ -322,7 +326,7 @@ test("Gate 4E-5 离线 Electron、v14→v15、Prepare 零副作用与重启恢�
   const finalDb = inspectDatabase();
   expect(finalDb).toMatchObject({
     schema_v15: true,
-    schema_count: 15,
+    schema_count: finalDb.migration_total,
     migration_checksums_ok: true,
     current_provider_config_count: 1,
     provider_request_count: 0,
@@ -331,10 +335,13 @@ test("Gate 4E-5 离线 Electron、v14→v15、Prepare 零副作用与重启恢�
     provenance_count: 0,
     link_count: 0,
     adoption_count: 0,
-    timeline_revision_count: 0,
+    timeline_revision_count: baseline.timeline_revision_count,
     foreign_key_ok: true,
     integrity_ok: true,
   });
+  // 被测链路零副作用：终局 revision 归属与 baseline 完全一致，且不存在被测项目之外的 revision。
+  expect(finalDb.timeline_revision_by_project).toEqual(baseline.timeline_revision_by_project);
+  expect(Object.keys(finalDb.timeline_revision_by_project).filter(id => id !== projectId)).toEqual([]);
   if (mode === "installed_offline_upgrade_v14") {
     expect(upgradeSeed).toEqual({ schema_count: 14, legacy_project_count: 1, legacy_provider_config_count: 1 });
     expect(finalDb).toMatchObject({ legacy_project_count: 1, historical_provider_config_count: 1 });

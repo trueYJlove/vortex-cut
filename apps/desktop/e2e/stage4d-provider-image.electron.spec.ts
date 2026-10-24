@@ -93,6 +93,7 @@ function inspectDatabase() {
 import hashlib,json,os,sqlite3,sys
 from pathlib import Path
 from urllib.parse import unquote,urlparse
+import aivs_core.database as dm
 p=Path(sys.argv[1]); c=sqlite3.connect(p); c.row_factory=sqlite3.Row
 one=lambda sql: c.execute(sql).fetchone()[0]
 row=c.execute("select a.kind,a.storage_mode,a.availability,a.size_bytes,l.uri,t.status,t.output_asset_id,t.output_sha256,i.provider_call_count,i.provider_may_have_processed,i.estimated_cost,i.estimated_cost_currency,i.price_tier,p.provider_kind,p.adapter_id,p.model,i.validated_format,i.validated_width,i.validated_height,i.validated_size_bytes,i.output_sha256 as invocation_sha,p.output_sha256 as provenance_sha from media_generation_tasks t join media_generation_requests r on r.id=t.request_id join provider_image_invocations i on i.task_id=t.id join generated_asset_provenance p on p.task_id=t.id join assets a on a.id=t.output_asset_id join asset_locations l on l.asset_id=a.id where r.execution_mode='provider_image_v1'").fetchone()
@@ -102,6 +103,7 @@ path=Path(value)
 result={
  "schema_v14":one("select count(*) from schema_migrations where version='v14'")==1,
  "schema_count":one("select count(*) from schema_migrations"),
+ "migration_total":len(dm.MIGRATIONS),
  "request_count":one("select count(*) from media_generation_requests where execution_mode='provider_image_v1'"),
  "task_count":one("select count(*) from media_generation_tasks t join media_generation_requests r on r.id=t.request_id where r.execution_mode='provider_image_v1'"),
  "invocation_count":one("select count(*) from provider_image_invocations"),
@@ -187,6 +189,7 @@ expected={k:hashlib.sha256(v.encode("utf-8")).hexdigest() for k,v in dm.MIGRATIO
 r={
  "schema_v14":one("select count(*) from schema_migrations where version='v14'")==1,
  "schema_count":one("select count(*) from schema_migrations"),
+ "migration_total":len(dm.MIGRATIONS),
  "migration_checksums_ok":applied==expected,
  "current_provider_config_count":one("select count(*) from image_provider_configs where provider_kind='apikey_fun_images'"),
  "historical_provider_config_count":one("select count(*) from image_provider_configs where provider_kind='openai_images' and adapter_id='openai_images_generations_v1' and model='gpt-image-1'"),
@@ -195,6 +198,7 @@ r={
  "provider_invocation_count":one("select count(*) from provider_image_invocations i join image_provider_configs c on c.id=i.provider_config_id where c.provider_kind='apikey_fun_images'"),
  "provenance_count":one("select count(*) from generated_asset_provenance where provider_kind='apikey_fun_images'"),
  "timeline_revision_count":one("select count(*) from timeline_revisions"),
+ "timeline_revision_by_project":dict(c.execute("select project_id,count(*) from timeline_revisions group by project_id")),
  "legacy_project_count":one("select count(*) from projects where id='stage4d_legacy_project'"),
  "legacy_request_count":one("select count(*) from media_generation_requests r join provider_image_request_profiles p on p.request_id=r.id where r.id='stage4d_legacy_request' and r.execution_mode='provider_image_v1' and p.provider_kind='openai_images'"),
  "legacy_task_count":one("select count(*) from media_generation_tasks where id='stage4d_legacy_task' and status='failed' and error_code='PROVIDER_TIMEOUT'"),
@@ -245,12 +249,19 @@ test("Gate 4D-4 离线启动、v13→v14 与 safeStorage 恢复", async () => {
   }
 
   const firstDb = inspectOfflineDatabase();
+  // 经 UI 新建的项目会被渲染层自动补建 1 条空时间线（App.tsx autoProvision），属夹具自身副作用；
+  // 升级种子库是既有项目，不触发自动供线。零副作用严格性留在被测项目上：所有 revision 必须归属被测项目。
+  const autoProvisionedRevisionCount = mode === "installed_offline_upgrade_v13" ? 0 : 1;
   expect(firstDb).toMatchObject({
-    schema_v14: true, schema_count: 14, migration_checksums_ok: true,
+    schema_v14: true, schema_count: firstDb.migration_total, migration_checksums_ok: true,
     current_provider_config_count: 1, provider_request_count: 0, provider_task_count: 0,
-    provider_invocation_count: 0, provenance_count: 0, timeline_revision_count: 0,
+    provider_invocation_count: 0, provenance_count: 0,
     foreign_key_ok: true, integrity_ok: true,
   });
+  expect(firstDb.timeline_revision_by_project).toEqual(
+    autoProvisionedRevisionCount === 0 ? {} : { [projectId]: autoProvisionedRevisionCount },
+  );
+  expect(firstDb.timeline_revision_count).toBe(autoProvisionedRevisionCount);
   if (mode === "installed_offline_upgrade_v13") {
     expect(upgradeSeed).toEqual({ schema_count: 13, legacy_project_count: 1, legacy_request_count: 1, legacy_task_count: 1, legacy_invocation_count: 1 });
     expect(firstDb).toMatchObject({ historical_provider_config_count: 1, legacy_project_count: 1, legacy_request_count: 1, legacy_task_count: 1, legacy_invocation_count: 1 });
@@ -283,7 +294,10 @@ test("Gate 4D-4 离线启动、v13→v14 与 safeStorage 恢复", async () => {
   }
 
   const finalDb = inspectOfflineDatabase();
-  expect(finalDb).toMatchObject({ provider_request_count: 0, provider_task_count: 0, provider_invocation_count: 0, provenance_count: 0, timeline_revision_count: 0, foreign_key_ok: true, integrity_ok: true });
+  expect(finalDb).toMatchObject({ provider_request_count: 0, provider_task_count: 0, provider_invocation_count: 0, provenance_count: 0, foreign_key_ok: true, integrity_ok: true });
+  // 重启不得为任何项目新增 timeline revision：归属表与全局计数都必须与首启一致。
+  expect(finalDb.timeline_revision_by_project).toEqual(firstDb.timeline_revision_by_project);
+  expect(finalDb.timeline_revision_count).toBe(firstDb.timeline_revision_count);
   const evidence = {
     schema_version: 1,
     status: "passed",
@@ -390,7 +404,7 @@ test("Gate 4D-4 正式 Electron/Core/SQLite/Asset 真实图片闭环与重启恢
     prompt_detected: (await readFile(database)).includes(Buffer.from(prompt, "utf8")),
   };
   expect(db).toMatchObject({
-    schema_v14: true, schema_count: 14, request_count: 1, task_count: 1, invocation_count: 1,
+    schema_v14: true, schema_count: db.migration_total, request_count: 1, task_count: 1, invocation_count: 1,
     provenance_count: 1, timeline_revision_count: 0, foreign_key_ok: true, integrity_ok: true,
     prompt_detected: false, asset_kind: "image", storage_mode: "managed", availability: "available",
     task_status: "succeeded", provider_call_count: 1, provider_may_have_processed: true,

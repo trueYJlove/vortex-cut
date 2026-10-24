@@ -66,12 +66,13 @@ function inspectDatabase() {
   const script = String.raw`
 import json,sqlite3,sys
 from pathlib import Path
+import aivs_core.database as dm
 p=Path(sys.argv[1]); data=p.parent
 with sqlite3.connect(p) as c:
  checksums=dict(c.execute('select version,checksum from schema_migrations'))
  tables={row[0] for row in c.execute("select name from sqlite_master where type='table'")}
  count=lambda name: c.execute(f'select count(*) from {name}').fetchone()[0] if name in tables else 0
- value={'schema_count':len(checksums),'migration_checksums':checksums,
+ value={'schema_count':len(checksums),'migration_total':len(dm.MIGRATIONS),'migration_checksums':checksums,
  'request_count':c.execute('select count(*) from media_generation_requests').fetchone()[0],
  'task_count':c.execute('select count(*) from media_generation_tasks').fetchone()[0],
  'generation_job_count':c.execute("select count(*) from jobs where kind='media_generation'").fetchone()[0],
@@ -199,8 +200,9 @@ function priorPreserved(seed: any, final: any) {
 test(`Stage 5 Electron offline assembly: ${mode}`, async () => {
   await mkdir(dataDir, { recursive: true });
   const seed = seedDatabase();
-  expect(seed.schema_count).toBe(upgrade ? 15 : 17);
   const baseline = inspectDatabase();
+  // 升级剧本把迁移集截断到 v15（对话式前提事实，不是 HEAD）；非升级路径必须等于代码定义的迁移总数。
+  expect(seed.schema_count).toBe(upgrade ? 15 : baseline.migration_total);
   const first = await launch();
   let afterPrepare: any;
   let afterApply: any;
@@ -256,7 +258,8 @@ test(`Stage 5 Electron offline assembly: ${mode}`, async () => {
     await second.close().catch(() => undefined);
   }
   const final = inspectDatabase();
-  expect(final).toMatchObject({ schema_count: 17, foreign_key_ok: true, integrity_ok: true });
+  // 断言库已应用当前 HEAD 的全部迁移；不在 spec 写死版本号，避免每加一条迁移就腐化。
+  expect(final).toMatchObject({ schema_count: final.migration_total, foreign_key_ok: true, integrity_ok: true });
   expect(generationSnapshot(final)).toEqual(generationSnapshot(baseline));
   expect(final.timeline_revision_count).toBe(baseline.timeline_revision_count + 1);
   expect(final.assembly_preview_count).toBe(baseline.assembly_preview_count + 1);

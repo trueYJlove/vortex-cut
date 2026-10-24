@@ -105,6 +105,7 @@ print(json.dumps({"schema_count":11,"legacy_project_count":1},separators=(",",":
 type DbEvidence = {
   schema_v12: boolean;
   schema_count: number;
+  migration_total: number;
   migration_checksums_ok: boolean;
   shot_list_count: number;
   revision_count: number;
@@ -115,11 +116,13 @@ type DbEvidence = {
   job_count: number;
   asset_count: number;
   timeline_revision_count: number;
+  timeline_revision_by_project: Record<string, number>;
   generated_asset_count: number;
   generation_artifact_count: number;
   foreign_key_ok: boolean;
   integrity_ok: boolean;
   backup_count: number;
+  project_count: number;
   legacy_project_count: number;
 };
 
@@ -135,6 +138,7 @@ expected={k:hashlib.sha256(v.encode("utf-8")).hexdigest() for k,v in dm.MIGRATIO
 r={
  "schema_v12":one("select count(*) from schema_migrations where version='v12'")==1,
  "schema_count":one("select count(*) from schema_migrations"),
+ "migration_total":len(dm.MIGRATIONS),
  "migration_checksums_ok":applied==expected,
  "shot_list_count":one("select count(*) from shot_lists"),
  "revision_count":one("select count(*) from shot_list_revisions"),
@@ -145,16 +149,22 @@ r={
  "job_count":one("select count(*) from jobs"),
  "asset_count":one("select count(*) from assets"),
  "timeline_revision_count":one("select count(*) from timeline_revisions"),
+ "timeline_revision_by_project":dict(c.execute("select project_id,count(*) from timeline_revisions group by project_id")),
  "generated_asset_count":one("select count(*) from media_generation_tasks where output_asset_id is not null"),
  "generation_artifact_count":one("select count(*) from artifacts a join jobs j on j.id=a.job_id where j.kind='media_generation'"),
  "foreign_key_ok":c.execute("pragma foreign_key_check").fetchall()==[],
  "integrity_ok":one("pragma integrity_check")=="ok",
  "backup_count":len(list((p.parent/'backups').glob('app-*.db'))) if (p.parent/'backups').exists() else 0,
+ "project_count":one("select count(*) from projects"),
  "legacy_project_count":one("select count(*) from projects where id='stage4c_legacy_project'"),
 }
 print(json.dumps(r,separators=(",",":")))
 `;
   return JSON.parse(runPython(script, [database]));
+}
+
+function timelineRevisionsFor(value: DbEvidence, projectId: string): number {
+  return value.timeline_revision_by_project[projectId] ?? 0;
 }
 
 async function generatedMediaCount(path: string): Promise<number> {
@@ -352,9 +362,10 @@ test("Gate 4C-4 真实 Electron/安装版本 Shot List、v11 升级与重启恢�
   }
 
   const finalDb = inspectDatabase();
+  // 断言库已应用当前 HEAD 的全部迁移；不在 spec 写死版本号，避免每加一条迁移就腐化。
   expect(finalDb).toMatchObject({
     schema_v12: true,
-    schema_count: 12,
+    schema_count: finalDb.migration_total,
     migration_checksums_ok: true,
     shot_list_count: 1,
     revision_count: 3,
@@ -367,7 +378,11 @@ test("Gate 4C-4 真实 Electron/安装版本 Shot List、v11 升级与重启恢�
   expect(finalDb.task_count - baseline.task_count).toBe(0);
   expect(finalDb.job_count - baseline.job_count).toBe(0);
   expect(finalDb.asset_count - baseline.asset_count).toBe(0);
-  expect(finalDb.timeline_revision_count - baseline.timeline_revision_count).toBe(0);
+  // 严格性留在被测项目上：shot-requirement 链路本身不得产生任何时间线修订。
+  expect(timelineRevisionsFor(finalDb, projectId) - timelineRevisionsFor(baseline, projectId)).toBe(0);
+  // 全局增量只允许来自「新建项目自动补建空时间线」（App.tsx:731，产品有意设计）：
+  // 按本次新增的项目数自我推导，不写死数字。
+  expect(finalDb.timeline_revision_count - baseline.timeline_revision_count).toBe(finalDb.project_count - baseline.project_count);
   expect(finalDb.generated_asset_count - baseline.generated_asset_count).toBe(0);
   expect(finalDb.generation_artifact_count - baseline.generation_artifact_count).toBe(0);
   expect(await generatedMediaCount(userData)).toBe(mediaBaseline);
