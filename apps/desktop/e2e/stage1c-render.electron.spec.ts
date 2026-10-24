@@ -51,6 +51,20 @@ test("1C-Render 真实 Electron 权威预览、Artifact Ticket 与最终导出",
     });
     await expectCurrentProject(page, "1C Render E2E");
     await selectProject(page, setup.project_id);
+    // 装配竞态（不是选择器脱节）：上面 createProject/createTimeline 走 IPC，
+    // 而 App 的项目装配 effect 只依赖 project_id（App.tsx:708-744）。启动后的
+    // 轮询若在 createProject 与 createTimeline 之间认领了这个项目，首个
+    // getTimeline 就返回 TIMELINE_NOT_FOUND，此后同一 project_id 不再触发装配 →
+    // renderer 的 timeline 永久为空 → renderDisabledReason = "时间线为空"
+    // （App.tsx:2197）恒成立。reload 重跑一次装配即可取全项目数据
+    // （实测约 150ms 内出现片段按钮），与 m2-b1-speed.electron.spec.ts:70 的既有做法一致。
+    await page.reload();
+    await page.waitForFunction(() => Boolean(window.desktop?.getRuntime));
+    await page.evaluate(() => window.desktop.getRuntime());
+    await expectCurrentProject(page, "1C Render E2E");
+    // 时间线真正装载的判据：无障碍片段列表由 clips 渲染（TimelineCanvas.tsx:3592），
+    // 它出现即证明 renderer 拿到了带片段的 Revision，而非仍在空窗期。
+    await expect(page.locator(".timeline-a11y-clips button[aria-label^='Clip ']").first()).toBeAttached({ timeout: 30_000 });
     await expect(page.getByRole("button", { name: "生成权威预览" })).toBeEnabled({ timeout: 30_000 });
     await page.getByLabel("编码模式").selectOption("software");
     await page.getByRole("button", { name: "生成权威预览" }).click();
@@ -69,7 +83,16 @@ test("1C-Render 真实 Electron 权威预览、Artifact Ticket 与最终导出",
     // 模式切换已移除（Phase 2）：生成请求后当前 Revision 的权威预览就绪即自动进入核验观看。
     await expect(page.getByLabel("权威预览视频")).toBeVisible({ timeout: 30_000 });
 
+    // 「导出正式视频」只打开剪映式导出弹窗（App.tsx:2676 ProjectProperties →
+    // onCreateExport = openExportDialog，App.tsx:1943），真的 createExport 由弹窗里
+    // 的「导出」按钮触发（ExportDialog.tsx:254 → submit → onExport）。
+    // AIVS_E2E_EXPORT_PATH 已指向 destination，chooseExportDestination 直接回该路径
+    // （electron/main/index.ts:782-798），文件名取项目名（ExportDialog.tsx:97），
+    // 故这里改填期望的文件名，走真实弹窗提交。
     await page.getByRole("button", { name: "导出正式视频" }).click();
+    await expect(page.getByLabel("导出文件名")).toBeVisible({ timeout: 30_000 });
+    await page.getByLabel("导出文件名").fill("最终导出");
+    await page.getByRole("button", { name: "导出", exact: true }).click();
     await expect.poll(async () => page.evaluate(async projectId => {
       const jobs = await window.desktop.listJobs({ project_id: projectId as never, limit: 100 });
       const job = jobs.items.find(item => item.kind === "final_export");

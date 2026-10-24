@@ -52,12 +52,11 @@ test("设置流：持久化代理随 sidecar 启动透传，重启内核后生�
     expect(pending.saved.proxy_mode).toBe("direct");
     expect(pending.effective.proxy_mode).toBe("custom");
     expect(pending.pending_restart).toBe(true);
-    await page.evaluate(() => {
-      const button = [...document.querySelectorAll("button")].find(item => item.textContent?.includes("设置"));
-      if (!button) throw new Error("设置入口未找到");
-      (button as HTMLElement).click();
-    });
-    await page.waitForSelector("#settings-title");
+    // 打开「设置」：页脚 actions 同时存在「Provider 设置」与「设置」，按包含匹配
+    // 扫描会先命中前者（打开的是 provider-settings-title，不是 settings-title）。
+    // 这里按 role + 精确名称定位页脚那颗「应用设置」按钮（App.tsx:2697 → setSettingsOpen）。
+    await page.getByRole("button", { name: "设置", exact: true }).click();
+    await expect(page.locator("#settings-title")).toBeVisible({ timeout: 30_000 });
     // 重启前生效仍是 custom（保存的 direct 待重启生效）——两态行如实呈现差异。
     await expect(page.locator(".settings-effective")).toContainText("自定义代理 · http://127.0.0.1:10809");
     await expect(page.locator(".settings-effective")).toContainText("有已保存未生效的更改");
