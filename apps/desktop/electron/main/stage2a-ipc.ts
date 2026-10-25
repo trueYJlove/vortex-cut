@@ -129,14 +129,23 @@ export function registerStage2aIpc(deps: Stage2aIpcDependencies): void {
   ).then(rendererSafe));
   deps.handle("planning:test-provider-capability", (_event, providerId) => safeFetch(`${API_PREFIX}/providers/${encodeURIComponent(id(providerId, "provider_config_id"))}/candidate-planning-capability-test`, { method: "POST" }).then(value => parseProviderCapabilityTestResult(rendererSafe(value))));
   deps.handle("planning:prepare", async (_event, input) => {
-    const value = record(input, ["project_id", "provider_config_id", "recipe_id", "transcript_ids"], "planning prepare");
+    // AI-2 阶段三：candidate_source 为**可选**字段。record() 要求字段数与白名单
+    // **完全相等**，故不能直接把它并入白名单（会让不带该字段的旧调用失败），
+    // 也不能只留白名单不动（带该字段的调用会被拒，且下方永远读不到它）。
+    // 正确做法：先将“未提供”归一为 undefined（不计入字段数），再按两种合法形态分别校验。
+    const raw = (input !== null && typeof input === "object" && !Array.isArray(input))
+      ? { ...(input as Record<string, unknown>) }
+      : input;
+    const hasSource = Boolean(raw && typeof raw === "object" && "candidate_source" in (raw as Record<string, unknown>)
+      && (raw as Record<string, unknown>).candidate_source !== undefined);
+    const value = record(raw, hasSource
+      ? ["project_id", "provider_config_id", "recipe_id", "transcript_ids", "candidate_source"]
+      : ["project_id", "provider_config_id", "recipe_id", "transcript_ids"], "planning prepare");
     if (!Array.isArray(value.transcript_ids) || value.transcript_ids.length < 1 || value.transcript_ids.length > 20) throw new Error("Invalid transcript_ids");
     const transcriptIds = value.transcript_ids.map(item => id(item, "transcript_id"));
     if (new Set(transcriptIds).size !== transcriptIds.length) throw new Error("Invalid transcript_ids");
-    // AI-2 阶段三：candidate_source 可选透传（缺省 auto = 旧行为）。
-    const source = typeof (value as Record<string, unknown>).candidate_source === "string"
-      ? (value as Record<string, unknown>).candidate_source
-      : undefined;
+    const source = typeof value.candidate_source === "string" ? value.candidate_source : undefined;
+    if (hasSource && source === undefined) throw new Error("Invalid candidate_source");
     return safeFetch(`${API_PREFIX}/projects/${id(value.project_id, "project_id")}/candidate-generations/prepare`, { method: "POST", body: JSON.stringify({ provider_config_id: id(value.provider_config_id, "provider_config_id"), recipe_id: id(value.recipe_id, "recipe_id"), transcript_ids: transcriptIds, ...(source ? { candidate_source: source } : {}) }) }).then(rendererSafe);
   });
   deps.handle("planning:create", async (_event, input) => {

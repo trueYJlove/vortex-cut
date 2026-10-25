@@ -179,14 +179,20 @@ test("Stage2C 受控 Electron Provider 先探测 Candidate capability 再生成�
     await page.getByLabel("就绪转录").selectOption("transcript_e2e_primary");
     await expect(page.locator(".ai-roughcut select").nth(1)).toContainText("AI 粗剪可用");
 
+    // capability 阶段结束后的探测基准（不写死具体次数，避免随重试预算腐化）
+    const probeCountBeforePrepare = probeCalls.length;
+    expect(probeCountBeforePrepare).toBeGreaterThan(0);
     await page.getByRole("button", { name: "准备外传确认" }).click();
     await expect(page.getByText("确认发送的精确内容")).toBeVisible();
     // prepare 为零业务外传，且不会重新探测或改变已认证 adapter。
-    expect(probeCalls).toHaveLength(4);
+    // 重点在「不重新探测」：探测总数在 capability 阶段已由 :158 的六项阶梯锁死；
+    // 此处若再写死数字，将随重试预算变动而腐化（原值 4 就是 2f3de00a
+    // 引入重试前的旧值，未同步至今）。故改为「prepare 不新增探测」的前后不变式。
+    expect(probeCalls).toHaveLength(probeCountBeforePrepare);
     expect(businessGenerationRequestCount).toBe(0);
     await page.getByRole("button", { name: "我确认发送以上内容" }).click();
     await expect(page.getByText("稳妥版")).toBeVisible({ timeout: 60_000 });
-    expect(probeCalls).toHaveLength(4);
+    expect(probeCalls).toHaveLength(probeCountBeforePrepare);
     expect(businessGenerationRequestCount).toBe(1);
 
     const candidates = await page.evaluate(id => window.desktop.listCandidatePlans?.(id as never), setup.project.project_id);
