@@ -113,3 +113,22 @@ export AIVS_MODEL_CDN=https://github.com/<owner>/<repo>/releases/download/<tag>
 **许可风险（已知，用户 2026-10-19 明确决定承担）**：上游 Chinese CLIP 未声明许可
 （清单 `license.id = upstream-undeclared`），公开分发存在合规不确定性。
 本仓按用户裁决**继续提供下载**，并在安装确认流程中要求 `acceptance_required`。
+
+### 3.1 Private 仓库的限制（实测 2026-10-25）
+
+若托管在 **Private** 仓库的 GitHub Release，`AIVS_MODEL_CDN` 拼出的
+`https://github.com/<owner>/<repo>/releases/download/<tag>/<file>` 会返回 **404**
+（带 token 也不行）。Private 仓库的资产只能走 API：
+
+```
+GET https://api.github.com/repos/<owner>/<repo>/releases/assets/<asset_id>
+    Authorization: token <token>
+    Accept: application/octet-stream
+```
+
+该方式要求**每个下载者持有仓库访问 token**，对装机用户不现实。
+因此 **Private Release 只适合异地备份与团队内部获取**，不是面向最终用户的分发形态。
+
+面向最终用户时，应把 `AIVS_MODEL_CDN` 指向**公开可读**的 https 基址
+（对象存储公开桶 / 公开 CDN / 转 Public 后的 Release 直链）。**迁移只需改环境变量，
+不需要改代码**，也不会动清单。
