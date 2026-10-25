@@ -368,7 +368,15 @@ class ModelManager:
             raise ModelError("MODEL_DOWNLOAD_FAILED", "模型下载失败") from exc
 
     def _file_url(self, manifest: ModelManifest, model_file: ModelFile) -> str:
-        if model_file.url:
+        # P161：中文 CLIP 产物 719MB 不入库，也不打包进安装包（避免全体用
+        # 户为少数使用者的功能付 719MB）。manifest 默认仍写 file://，
+        # 保持本机导出路径兜底；若设置 AIVS_MODEL_CDN，则优先从该 https
+        # 基址下载（路径形式与 manifest files[].path 一致）。这是分配策略的可配置化：
+        # 不锁定托管方（GitHub Releases / 自建对象存储皆可），也不影响已导出产物的本机用户。
+        cdn_base = (os.environ.get("AIVS_MODEL_CDN") or "").strip()
+        if cdn_base:
+            url = cdn_base.rstrip("/") + "/" + model_file.path
+        elif model_file.url:
             url = model_file.url
         elif manifest.download_url and len(manifest.files) == 1:
             url = manifest.download_url

@@ -230,3 +230,63 @@ def test_ready_dir_with_matching_files_but_wrong_aggregate_is_corrupt(
         (ready_dir / name).read_bytes() == content for name, content in FILES.items()
     ), "逐文件内容应与清单一致（本测试只让聚合值不符）"
     assert ModelManager._is_ready(manifest, ready_dir) is False
+
+
+# ── P161：https 分发通道（AIVS_MODEL_CDN）─────────────────────────────────
+# 为什么需要这组：754MB 产物既不入库、也不宜打进安装包（全体用户为少数人的
+# 功能付 719MB）。manifest 默认仍写 file:// 兜底本机导出；设置 AIVS_MODEL_CDN
+# 后优先从该 https 基址下载。分配渠道（GitHub Releases / 对象存储）因此变成
+# 配置项而非代码改动。
+
+
+def test_cdn_env_overrides_file_source(monkeypatch, tmp_path: Path) -> None:
+    """设置 AIVS_MODEL_CDN 时，来源变成 <base>/<files[].path>（https）。"""
+    monkeypatch.delenv(SOURCE_VAR, raising=False)
+    monkeypatch.setenv("AIVS_MODEL_CDN", "https://example.test/releases/v1")
+    manager = make_manager(tmp_path, build_manifest())
+    manifest = manager.registry.get("chinese-clip-vit-base-patch16")
+
+    url = ModelManager._file_url(manager, manifest, manifest.files[0])
+    assert url == "https://example.test/releases/v1/" + manifest.files[0].path
+    assert url.startswith("https://")
+
+
+def test_cdn_trailing_slash_is_normalized(monkeypatch, tmp_path: Path) -> None:
+    """基址带不带尾斜杠结果一致，不会拼出双斜杠。"""
+    monkeypatch.delenv(SOURCE_VAR, raising=False)
+    manager = make_manager(tmp_path, build_manifest())
+    manifest = manager.registry.get("chinese-clip-vit-base-patch16")
+
+    monkeypatch.setenv("AIVS_MODEL_CDN", "https://example.test/releases/v1")
+    without = ModelManager._file_url(manager, manifest, manifest.files[0])
+    monkeypatch.setenv("AIVS_MODEL_CDN", "https://example.test/releases/v1/")
+    with_slash = ModelManager._file_url(manager, manifest, manifest.files[0])
+    assert without == with_slash
+    assert "//" not in without.split("://", 1)[1]
+
+
+def test_cdn_absent_keeps_local_file_fallback(monkeypatch, tmp_path: Path) -> None:
+    """不设 CDN 时行为不变：仍走 file:// 本地来源（产物缺失则给可操作报错）。"""
+    monkeypatch.delenv("AIVS_MODEL_CDN", raising=False)
+    source_root = tmp_path / "source"
+    write_source(source_root)
+    monkeypatch.setenv(SOURCE_VAR, str(source_root))
+    manager = make_manager(tmp_path, build_manifest())
+    manifest = manager.registry.get("chinese-clip-vit-base-patch16")
+
+    url = ModelManager._file_url(manager, manifest, manifest.files[0])
+    assert url.startswith("file://")
+
+
+@pytest.mark.parametrize("scheme_url", ["ftp://evil.test/x", "http://evil.test/x"])
+def test_cdn_rejects_non_https_and_plain_http(
+    monkeypatch, tmp_path: Path, scheme_url: str
+) -> None:
+    """既有来源白名单不被 CDN 变量绕过：非 https，或指向远程明文的 http，一律拒绝。"""
+    monkeypatch.delenv(SOURCE_VAR, raising=False)
+    monkeypatch.setenv("AIVS_MODEL_CDN", scheme_url)
+    manager = make_manager(tmp_path, build_manifest())
+    manifest = manager.registry.get("chinese-clip-vit-base-patch16")
+
+    with pytest.raises(ModelError):
+        ModelManager._file_url(manager, manifest, manifest.files[0])

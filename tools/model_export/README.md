@@ -86,3 +86,30 @@ export AIVS_MODEL_SOURCE_ROOT=C:/DataFolder/codes/AI-Vidio/.tmp/cc-export
 - 全量重导出**会改变** `vision_model.onnx` / `text_model.onnx` 的字节（取决于
   torch/onnx 版本），因此重导后必须重跑 `--update-manifest`，否则清单立刻失真。
 - `tokenizer.json` 生成是逐字节确定的（只依赖 cn_clip 自带 `vocab.txt`）。
+
+## 3. https 分发通道（AIVS_MODEL_CDN，P161）
+
+产物默认走 `file://` 本机来源。若要面向用户分发（而不是让每台机器自己导出），
+设置 `AIVS_MODEL_CDN` 为 https 基址即可，**无需改清单、无需改代码**：
+
+```bash
+export AIVS_MODEL_CDN=https://github.com/<owner>/<repo>/releases/download/<tag>
+```
+
+下载 URL = `<基址>/<files[].path>`，例如
+`https://.../vision_model.onnx`。因此托管端只需**按 `files[].path` 的原样文件名**
+放三个文件（不要把整个 `chinese-clip-vit-base-patch16/` 目录压成一层以外的结构）。
+
+| 场景 | 行为 |
+|---|---|
+| 未设 `AIVS_MODEL_CDN` | 保持原样：走清单的 `file://`，需要本机先导出 |
+| 设了 https 基址 | 优先从该基址下载（逐文件 sha256 校验不变） |
+| 设成非 https（ftp 等） | **拒绝** |
+| 设成指向远程的明文 http | **拒绝**（既有白名单：http 仅允许 loopback） |
+
+**为什么不做进安装包**：三个文件共 754MB。打包会让全体用户为「少数人使用的
+语义检索」承担 719MB 下载与更新成本；而 https 按需下载只在启用该能力时发生。
+
+**许可风险（已知，用户 2026-10-19 明确决定承担）**：上游 Chinese CLIP 未声明许可
+（清单 `license.id = upstream-undeclared`），公开分发存在合规不确定性。
+本仓按用户裁决**继续提供下载**，并在安装确认流程中要求 `acceptance_required`。
