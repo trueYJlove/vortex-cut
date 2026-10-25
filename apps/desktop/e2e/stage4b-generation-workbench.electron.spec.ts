@@ -124,6 +124,8 @@ result={
  "generation_output_asset_count": one("select count(*) from media_generation_tasks where output_asset_id is not null"),
  "generation_artifact_count": one("select count(*) from artifacts a join jobs j on j.id=a.job_id where j.kind='media_generation'"),
  "timeline_revision_count": one("select count(*) from timeline_revisions"),
+ "timeline_revision_by_project": dict(c.execute("select project_id,count(*) from timeline_revisions group by project_id")),
+ "project_count": one("select count(*) from projects"),
  "asset_count": one("select count(*) from assets"),
  "prompt_bytes_detected": any(x.encode('utf-8').lower() in raw for x in prompts),
  "generation_payload_path_detected": source_path in " ".join(str(x or "").lower() for row in c.execute("select r.input_refs_json,r.parameters_json,j.input_json from media_generation_requests r join media_generation_tasks t on t.request_id=r.id join jobs j on j.id=t.job_id") for x in row),
@@ -258,11 +260,21 @@ test("Gate 4B-4 真实 Electron/安装版本模拟工作台、取消重试与重
     provider_invocation_count: 0,
     generation_output_asset_count: 0,
     generation_artifact_count: 0,
-    timeline_revision_count: 0,
     asset_count: 1,
     prompt_bytes_detected: false,
     generation_payload_path_detected: false,
   });
+  // 装配期自动补建空时间线（App.tsx:731，剪映式有意设计）：测试经 UI 
+  // 共建 2 个项目（Stage 4B Real Acceptance + Stage 4B Switch Target），
+  // 各自落 1 条空时间线修订。严格性留在被测项目上。
+  const timelineRevisionsFor = (value: Record<string, number>, id: string) => value[id] ?? 0;
+  // 被测链路（生成链）不得为被测项目之外的任何项目产生修订；
+  // 被测项目自身的时间线修订只能来自自动补建（每项目 1 条）。
+  expect(Object.keys(databaseEvidence.timeline_revision_by_project).sort()).toEqual(
+    [...new Set([saved.projectId, ...Object.keys(databaseEvidence.timeline_revision_by_project)])].sort(),
+  );
+  expect(databaseEvidence.timeline_revision_count).toBe(databaseEvidence.project_count);
+  expect(timelineRevisionsFor(databaseEvidence.timeline_revision_by_project, saved.projectId)).toBe(1);
   expect(databaseEvidence.cancelled_count).toBeGreaterThanOrEqual(1);
   expect(databaseEvidence.retry_count).toBeGreaterThanOrEqual(1);
   expect(databaseEvidence.succeeded_count).toBeGreaterThanOrEqual(3);
