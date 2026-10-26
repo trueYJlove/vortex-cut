@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "task": "PERFORMANCE_MANIFEST_IR_DISK_CACHE gate §3.3 — cold vs warm manifest request",
+  "recorded_at": "2026-10-24",
+  "branch": "liuwei-dev",
+  "commit": "d0752ca",
+  "environment": {
+    "os": "windows",
+    "python": "3.13.1",
+    "httpx": "0.28.1",
+    "ffmpeg": "resources/ffmpeg/win-x64 (bundled)"
+  },
+  "method": {
+    "endpoint": "GET /api/v1/projects/proj-taskd/preview-ir-v2/manifest",
+    "client": "fastapi.testclient.TestClient (in-process Core, real Settings)",
+    "project": {
+      "assets": 100,
+      "clips": 100,
+      "total_frames": 6000,
+      "clip_seconds": "2.00-2.99"
+    },
+    "cold_definition": "data_dir/cache/preview-ir absent",
+    "warm_definition": "same data_dir, NEW process, cache retained",
+    "note": "warm must be a new process: v2 in-process LRU would otherwise serve the request"
+  },
+  "rounds": [
+    {
+      "round": "cold",
+      "elapsed_ms": 9410.7,
+      "pre_cache_entries": 0,
+      "post_cache_entries": 1,
+      "post_cache_bytes": 1861226
+    },
+    {
+      "round": "warm",
+      "elapsed_ms": 39.8,
+      "pre_cache_entries": 1,
+      "post_cache_entries": 1,
+      "post_cache_bytes": 1861226
+    },
+    {
+      "round": "warm-repeat-2",
+      "elapsed_ms": 39.4,
+      "pre_cache_entries": 1,
+      "post_cache_entries": 1
+    },
+    {
+      "round": "warm-repeat-3",
+      "elapsed_ms": 42.6,
+      "pre_cache_entries": 1,
+      "post_cache_entries": 1
+    },
+    {
+      "round": "warm-repeat-4",
+      "elapsed_ms": 43.9,
+      "pre_cache_entries": 1,
+      "post_cache_entries": 1
+    },
+    {
+      "round": "warm-after-restore",
+      "elapsed_ms": 41.2,
+      "pre_cache_entries": 1,
+      "post_cache_entries": 1
+    }
+  ],
+  "negative_controls": [
+    {
+      "control": "A_same_db_cache_deleted",
+      "elapsed_ms": 8701.4,
+      "pre_cache_entries": 0,
+      "meaning": "same DB, only cache removed -> slow again; DB/OS caching is not the cause"
+    },
+    {
+      "control": "B_cache_restored",
+      "elapsed_ms": 41.2,
+      "pre_cache_entries": 1,
+      "meaning": "reversible"
+    },
+    {
+      "control": "C_projector_version_bumped",
+      "elapsed_ms": 8798,
+      "pre_cache_entries": 1,
+      "meaning": "stale entry invalidated by version key; not consumed"
+    }
+  ],
+  "gate": {
+    "criterion": "warm (hit) manifest request < 100ms",
+    "observed_ms": 39.8,
+    "margin": "~2.5x",
+    "verdict": "PASS"
+  },
+  "not_proven": [
+    "end-to-end Electron ready segment timing (not executed: needs full App launch)",
+    "F02 scene assembly (this run uses a 100-asset project, not the F02 900s scene)",
+    "real-app first-frame timing",
+    "multi-machine / multi-run statistics",
+    "disk LRU eviction at 8 entries under real data (unit-tested only)"
+  ]
+}
