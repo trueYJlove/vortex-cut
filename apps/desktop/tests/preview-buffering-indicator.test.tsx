@@ -170,6 +170,173 @@ describe("P196 会话缓冲观测（边沿触发 + 300ms 延迟）", () => {
   });
 });
 
+/** 纹理半场（本次补的另一半）：**帧对象在、但纹理没进槽**同样让合成跳过绘制
+ *  （compose 的 sourceOf 返回 null），用户看到的是同一款定格。P196 前半只堵了
+ *  「帧取不到」那条路，这条路径上画面冻着、UI 全程无声。
+ *
+ * 这里守两件事，方向相反、必须同时成立：
+ *  1. 纹理**永远不就绪** → 300ms 后出提示（补上的那一半）；
+ *  2. 纹理**逐帧短暂不就绪**（正常解码/上传 churn）→ 提示一次都不许出。
+ * 第 2 条才是真门槛：把 frameReady 接进判定最容易写成的形状就是"纹理不在 ⇒
+ * 立即算缓冲"，那会在普通播放里把指示条点成常亮；300ms 去抖是唯一防线，而
+ * 只有当每次不就绪都在几十毫秒内闭合它才成立——本用例就是钉这条的。
+ */
+describe("P196 纹理层未就绪（帧在、纹理不在）", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    ScriptedWorker.instances = [];
+    installWorkers();
+    stubOffscreenCanvas();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    cleanup();
+    document.body.innerHTML = "";
+  });
+
+  /** 单输入视频 IR：main 是真实片段（→ frameReady 要求 in_1 的环槽命中），
+   *  帧对象由下面的帧源提供（帧永远取得到，纹理由测试脚本决定何时到位）。 */
+  function videoIr(totalFrames = 900): Ir {
+    const ir = JSON.parse(JSON.stringify(fixturePreviewIr())) as Ir;
+    ir.frames = Array.from({ length: totalFrames }, (_, n) => ({
+      n,
+      t_us: Math.round((n * 1_000_000) / 30),
+      main: {
+        kind: "segment" as const, clip_id: "clip_1", input_id: "in_1", src_n: n,
+        src_t_us: Math.round((n * 1_000_000) / 30),
+        content: { x: 0, y: 0, w: 1080, h: 1920 },
+        shift: { dx: 0, dy: 0 }, alpha: 1,
+      },
+      overlays: [], captions: [],
+    })) as Ir["frames"];
+    ir.canvas = { ...ir.canvas, duration_frames: totalFrames, duration_us: Math.round((totalFrames * 1_000_000) / 30) };
+    return ir;
+  }
+
+  /** 帧永远在场、**帧源层恒不缓冲**——把判定逼到纹理层（这一半的唯一来源）。
+   *  注意必须返回 IR 里的**真实片段帧**：帧对象的 main 决定 frameReady 要看
+   *  哪个输入的纹理，用黑帧会把它变成恒真（假绿——初版即栽在这里）。 */
+  function alwaysPresentSource(ir: Ir): FrameSource {
+    return {
+      frameCount: ir.frames.length,
+      getFrame: (n: number) => (n >= 0 && n < ir.frames.length ? ir.frames[n] : undefined),
+      isBuffering: () => false,
+      ensureRange: () => Promise.resolve(),
+      dispose: () => undefined,
+    };
+  }
+
+  /** decode 立即回帧；**upload 何时 ack = 纹理何时到位**，由测试脚本决定：
+   *  hold = 全部悬挂（上传卡死）；holdFor(ms) = 每笔悬挂 ms 后 ack（churn）。 */
+  function wireTextureControl(options: { holdMs?: number | null } = {}): { hold: () => void; release: () => void } {
+    const compositor = ScriptedWorker.instances[0]!;
+    const ack = (message: any) => queueMicrotask(() => compositor.reply(message.type === "upload"
+      ? { type: "uploaded", seq: message.seq, copyToMs: 0, texMs: 0 }
+      : { type: "uploadedShadow", seq: message.seq, copyToMs: 0, texMs: 0 }));
+    let holdMs = options.holdMs ?? null; // null = 立即 ack
+    const held: any[] = [];
+    const post = compositor.postMessage.bind(compositor);
+    compositor.postMessage = (message: any) => {
+      if (message.type === "upload" || message.type === "uploadShadow") {
+        if (holdMs === Infinity) { held.push(message); return; }
+        if (holdMs && holdMs > 0) { setTimeout(() => ack(message), holdMs); return; }
+        ack(message);
+        return;
+      }
+      post(message);
+    };
+    const decode = ScriptedWorker.instances[1]!;
+    const decodePost = decode.postMessage.bind(decode);
+    decode.postMessage = (message: any) => {
+      decode.messages.push(message);
+      if (message.type === "decode") {
+        queueMicrotask(() => decode.reply({
+          type: "frame", id: message.id, frameN: message.frameN, fromCache: true,
+          frame: { close: () => undefined },
+        }));
+        return;
+      }
+      if (message.type !== "init") decodePost(message);
+    };
+    return {
+      hold: () => { holdMs = Infinity; },
+      release: () => { holdMs = 0; for (const message of held.splice(0)) ack(message); },
+    };
+  }
+
+  const tick = async (ms: number): Promise<void> => { await vi.advanceTimersByTimeAsync(ms); };
+
+  it("纹理永远不就绪（上传卡死）：帧对象在场也必须在 ~300ms 后出提示、纹理到位后消失", async () => {
+    const ir = videoIr();
+    const session = await PreviewSession.create(newContainer(), ir, TICKETS, undefined, undefined, null, undefined, null, alwaysPresentSource(ir));
+    const onBuffering = vi.fn();
+    session.onBuffering = onBuffering;
+    const texture = wireTextureControl();
+    texture.hold(); // 上传永不 ack：帧在、纹理永远不在
+
+    void session.seekToFrame(5);
+    await tick(200);
+    expect(onBuffering).not.toHaveBeenCalled(); // 阈值内静默（与缺帧同口径）
+    await tick(150);
+    expect(onBuffering.mock.calls).toEqual([[true]]); // 旧实现这里恒为空
+
+    texture.release(); // 纹理到位 → 立即恢复
+    await tick(10);
+    void session.seekToFrame(5);
+    await tick(10);
+    expect(onBuffering.mock.calls).toEqual([[true], [false]]);
+    session.dispose();
+  });
+
+  it("纹理逐帧短暂不就绪（正常播放上传 churn）：指示条一次都不许出", async () => {
+    const ir = videoIr();
+    const session = await PreviewSession.create(newContainer(), ir, TICKETS, undefined, undefined, null, undefined, null, alwaysPresentSource(ir));
+    const onBuffering = vi.fn();
+    session.onBuffering = onBuffering;
+    // 正常 churn：**每帧**纹理都要缺席 ~40ms 才到位（解码→上传的真实形态），
+    // 缺席窗口远短于 300ms。这就是"frameReady false ⇒ 缓冲"最容易被点亮的
+    // 形状——若去抖或判定写错，下面 2s 里会亮成常亮。
+    wireTextureControl({ holdMs: 40 });
+    // 反空转锁：判定**确实**在此期间反复取到 true（纹理缺席），否则本用例只是
+    // 在断言"什么都没发生"，不能证明去抖在起作用。实测约 120 次 true。
+    const session_ = session as unknown as { targetBuffering(target: number): boolean };
+    const judge = session_.targetBuffering.bind(session_);
+    let sawNotReady = 0;
+    session_.targetBuffering = (target: number) => {
+      const value = judge(target);
+      if (value) sawNotReady += 1;
+      return value;
+    };
+
+    session.play();
+    await tick(2_000); // ~60 帧正常播放
+    expect(sawNotReady).toBeGreaterThan(20); // 判定确实反复看到"纹理未就绪"
+    expect(onBuffering).not.toHaveBeenCalled(); // 但一次提示都不许出
+    session.pause();
+    session.dispose();
+  });
+
+  it("持续播放中纹理卡死：指示条必须出现（播放 tick 路径，非 seek）", async () => {
+    const ir = videoIr();
+    const session = await PreviewSession.create(newContainer(), ir, TICKETS, undefined, undefined, null, undefined, null, alwaysPresentSource(ir));
+    const onBuffering = vi.fn();
+    session.onBuffering = onBuffering;
+    const texture = wireTextureControl();
+    texture.hold(); // 上传永不 ack：画面从第一帧起就画不出来
+
+    session.play();
+    await tick(200);
+    expect(onBuffering).not.toHaveBeenCalled(); // 阈值内静默
+    await tick(400);
+    expect(onBuffering.mock.calls).toEqual([[true]]); // 起播卡死从 tick 发声
+    session.pause();
+    session.dispose();
+  });
+});
+
 describe("P196 缓冲指示组件落地", () => {
   const SHA = "b".repeat(64);
   const manifestId = "sha256:" + SHA + "@rev@test";

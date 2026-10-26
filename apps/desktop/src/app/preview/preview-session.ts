@@ -1177,24 +1177,50 @@ export class PreviewSession {
     return -1;
   }
 
-  /** 目标帧全部输入是否就绪（环形槽/影子槽/静图）。 */
+  /** 纹理就绪判定：ring 槽位 / 影子槽 / 静图。**「这一帧能不能画」只在这里
+   *  定义一次**——frameReady（门槛）与 compose 的 sourceOf（取槽位）都走它。
+   *  两处各写一份同样的条件必然漂移，而漂移的代价是：门槛说"能画"、compose
+   *  说"没纹理"→ 静默跳过绘制，用户看到画面定格却没有任何解释（P196 前半
+   *  只堵了帧源层，纹理层正是这条漂移留下的缝）。 */
+  private textureReady(inputId: string, srcN: number, shadow: boolean): boolean {
+    const rig = this.rigs.get(inputId);
+    if (!rig) return false;
+    if (rig.kind === "image") return true;
+    return shadow ? rig.shadowUploaded === srcN : this.ringSlotIndex(rig, srcN) >= 0;
+  }
+
+  /** 纹理来源解析：未就绪返回 null（调用方跳过绘制）。 */
+  private sourceOf(inputId: string, srcN: number, shadow: boolean): DrawCommand | null {
+    if (!this.textureReady(inputId, srcN, shadow)) return null;
+    const rig = this.rigs.get(inputId);
+    if (rig?.kind === "image") return { op: "draw", inputId, image: true };
+    if (shadow) return { op: "draw", inputId, shadow: true };
+    return { op: "draw", inputId, slot: this.ringSlotIndex(rig!, srcN) };
+  }
+
+  /** 目标帧全部输入是否就绪（环形槽/影子槽/静图）——注意它只回答"纹理在不在"，
+   *  不回答"帧在不在"：帧源层的缺帧由 targetBuffering 单独判定。 */
   private frameReady(frame: IrFrame): boolean {
     const needs: Array<[string, number, boolean]> = [...mainNeeds(frame)];
     for (const [inputId, srcN] of overlayNeeds(frame)) needs.push([inputId, srcN, false]);
-    return needs.every(([inputId, srcN, shadow]) => {
-      const rig = this.rigs.get(inputId);
-      if (!rig) return false;
-      if (rig.kind === "image") return true;
-      return shadow ? rig.shadowUploaded === srcN : this.ringSlotIndex(rig, srcN) >= 0;
-    });
+    return needs.every(([inputId, srcN, shadow]) => this.textureReady(inputId, srcN, shadow));
   }
 
-  /** P196：目标帧是否「真正在缓冲」——帧源显式判定（v2 = 目标窗未就绪且
-   *  不在途；v1 全量在场恒 false，缺帧只可能是越界）。取不到帧对象时一并
-   *  视为未就绪：此时画面停在上一帧，用户看到的就是卡住。 */
+  /** P196：目标帧是否「真正在缓冲」。**两种"没东西可画"，都归到这里**——
+   *  否则其中一半的定格在 UI 上永远无声：
+   *  1. **帧不在**（源层）：取不到帧对象。帧源显式判定（v2 = 目标窗未就绪且
+   *     不在途；v1 全量在场恒 false，缺帧只可能是越界）。画面停在上一帧。
+   *  2. **纹理不在**（解码/上传层）：帧对象在，但它要的输入纹理没进环槽/影子
+   *     槽。compose 的 sourceOf 因此返回 null → 跳过绘制，症状与 (1) 完全相同
+   *     （定格、无解释），只是代码路径不同。判据复用 frameReady，不另写一份。
+   *  为什么要靠 300ms 去抖兜住「正常上传抖动」：逐帧解码上传期间
+   *  frameReady 短暂 false 是常态（每帧都要走一次），但每次都在几十毫秒内
+   *  闭合，落不到阈值上；只有真的停住不动才攒满 300ms。 */
   private targetBuffering(target: number): boolean {
     const n = Math.max(0, Math.min(target, this.frames.frameCount - 1));
-    if (!this.frames.getFrame(n)) return true;
+    const frame = this.frames.getFrame(n);
+    if (!frame) return true;
+    if (!this.frameReady(frame)) return true; // 纹理层未就绪（同帧源的"帧不在"同款症状）
     return this.frames.isBuffering ? this.frames.isBuffering(n) : false;
   }
 
@@ -1227,9 +1253,13 @@ export class PreviewSession {
         this.bufferingShown = false;
         handler(false);
       }
+      // 恢复后直接返回：**不要**在这里用传入的 target 再判一次。播放 tick 的
+      // target 每拍前进，它的纹理此刻常常刚被请求、还没上传完——拿它判会让
+      // 判定一直留在"缓冲中"，普通播放里指示条反而不灭。这正是"恢复只认锁定
+      // 帧"这条设计的用途。
       return;
     }
-    if (!this.targetBuffering(target)) return; // 帧就绪：无事发生
+    if (!this.targetBuffering(target)) return; // 就绪：无事发生
     this.bufferingFrame = Math.max(0, Math.min(target, this.frames.frameCount - 1));
     // 起点不立即回调：短于阈值的缺帧在此被静默丢弃（抗闪烁的全部意义）。
     this.bufferingTimer = setTimeout(() => {
@@ -1792,17 +1822,8 @@ export class PreviewSession {
     if (!compositor || this.disposed) return;
     const cmds: DrawCommand[] = [];
     const main = frame.main;
-    /** 纹理来源解析：ring 槽位 / 影子槽 / 静图；未就绪返回 null（跳过绘制）。 */
-    const sourceOf = (inputId: string, srcN: number, shadow: boolean): DrawCommand | null => {
-      const rig = this.rigs.get(inputId);
-      if (!rig) return null;
-      if (rig.kind === "image") return { op: "draw", inputId, image: true };
-      if (shadow) {
-        return rig.shadowUploaded === srcN ? { op: "draw", inputId, shadow: true } : null;
-      }
-      const index = this.ringSlotIndex(rig, srcN);
-      return index >= 0 ? { op: "draw", inputId, slot: index } : null;
-    };
+    const sourceOf = (inputId: string, srcN: number, shadow: boolean): DrawCommand | null =>
+      this.sourceOf(inputId, srcN, shadow);
     if (main.kind === "segment") {
       const source = sourceOf(main.input_id, main.src_n, false);
       if (source) {
@@ -1931,6 +1952,11 @@ export class PreviewSession {
       return -1;
     }
     if (epoch !== this.seekEpoch) return -1; // 已被更新的 seek 取代
+    // P196（纹理半场）：上传落定后再判一次。上方第一次判定发生在**发起上传
+    // 之前**——那一帧的纹理此刻必然还没进槽（未就绪），计时已经起跑；没有
+    // 这一次收尾判定，每次普通 seek 都会在 300ms 后凭空点亮指示条。此处的
+    // "恢复"同时也是纹理真的到位的时刻。
+    this.observeBuffering(index);
     this.lastSeekMs = performance.now() - now;
     editorPerf.record("seek", this.lastSeekMs, this.perfId, epoch, epoch, index);
     if (this.frameReady(frame)) this.compose(frame);
