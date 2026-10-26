@@ -59,15 +59,16 @@ test("1C-Editor 在 1024x720 下约束长文件名、长字幕和时间线布局
     const page = await app.firstWindow(); await page.waitForFunction(() => Boolean(window.desktop?.getRuntime)); await app.evaluate(({ BrowserWindow }: any) => BrowserWindow.getAllWindows()[0].setContentSize(1024, 720)); await page.waitForFunction(() => innerWidth === 1024 && innerHeight === 720); await page.evaluate(() => window.desktop.getRuntime());
     const longCaption = "这是用于验证一千零二十四乘七百二十窗口布局的超长中文字幕。".repeat(6);
     await page.evaluate(async ({ longCaption }) => { const project = await window.desktop.createProject({ name: "1C Layout E2E" }); const imported = await window.desktop.importAsset({ project_id: project.project_id, kind: "video" }); if (!imported) throw new Error("fixture import cancelled"); const created = await window.desktop.createTimeline({ project_id: project.project_id, timeline: { schema_version: 1, source: { kind: "full_asset", asset_id: imported.asset.asset_id }, default_layout: "blurred_background", caption_preset_id: "default-bottom" } }); await window.desktop.patchTimeline({ project_id: project.project_id, patch: { schema_version: 1, base_revision_id: created.current_revision.timeline_revision_id, operations: [{ op: "add_caption", start_us: 0, end_us: 3_000_000, text: longCaption, preset_id: "high-contrast", source_clip_id: null }], summary: "布局压力测试" } }); }, { longCaption });
-    // 装配 + 预览模式，两处都在 e2e 侧补齐，产品源码不动：
-    // (a) reload 重跑项目装配——与 stage1c-render 同源的装配竞态（App 只在
-    //     project_id 变化时 getTimeline，App.tsx:708-744）。
+    // 预览模式在 e2e 侧补齐，产品源码不动：
+    // (a) 装配竞态（App 只在 project_id 变化时装配时间线与资产列表）曾靠一次
+    //     reload 重跑装配；P195（时间线）与 P199（资产集合对账）已从产品侧修掉，
+    //     故不再 reload——留着它只会把要防的缺陷一起盖住。
     // (b) .caption-overlay 只在交互预览渲染（App.tsx:2636），而 previewMode 默认
     //     "synthetic"（App.tsx:253，0357c98「合成预览设为默认」的有意变更）。UI 上
     //     唯一的切换入口是素材箱的「预览播放」（App.tsx:1621 previewFromLibrary →
     //     setPreviewMode("interactive")）：点击后立刻暂停，播放头停住，字幕不随
     //     播放走出 0-3s 区间。不使用 page.evaluate 改 React state。
-    await page.reload(); await page.waitForFunction(() => Boolean(window.desktop?.getRuntime)); await page.evaluate(() => window.desktop.getRuntime());
+    await page.evaluate(() => window.desktop.getRuntime());
     await expectCurrentProject(page, "1C Layout E2E"); await expect(page.locator(".timeline-a11y-clips button[aria-label^='Clip ']").first()).toBeAttached({ timeout: 30_000 });
     const previewButton = page.getByRole("button", { name: `预览播放 ${longName}` });
     await page.locator(".asset-row").first().hover();

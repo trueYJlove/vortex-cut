@@ -138,6 +138,14 @@ const formatRelativeTime = (iso: string) => {
 // 中文；未知值原样透出兜底。导出不受影响，仅是编码器选择的补充说明。
 const fallbackReasonLabel = (reason: string) => reason === "hardware encoder smoke test failed; fell back to software" ? "硬件编码不可用，已用软件编码完成" : reason;
 const isTranscribable = (asset: Asset) => (asset.kind === "video" || asset.kind === "audio") && asset.availability === "available";
+/** P199 资产集合签名（对账端点用）：只看组成，不看时间戳。素材导入不推进
+ *  projects.updated_at（Core projects.py 只有改名/归档/重开 UPDATE projects），
+ *  所以 P195 的时间线键在这里不可用——集合变了才是重新装载的唯一信号。
+ *  用 sort 后拼串而不是逐位比较：Core 每次 list 返回的列表是服务端顺序。 */
+const assetCollectionSignature = (items: AssetPresentation[]) =>
+  items.map(item => String(item.asset.asset_id)).sort().join("|");
+/** 对账只取第一页，条数与 loadProjectData 的首屏一致（Core 默认 50、上限 100）。 */
+const assetReconcilePageLimit = 50;
 type RenditionTarget = { key: string; platform_preset_id: string; rendition_preset_id: string; layout_policy: LayoutPolicy };
 type ReframeAnchor = Pick<RenditionReframeAdjustment, "horizontal_anchor" | "vertical_anchor">;
 type ReframeSelections = Record<string, Record<string, ReframeAnchor>>;
@@ -172,6 +180,11 @@ export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [project, setProject] = useState<Project>();
   const [assets, setAssets] = useState<AssetPresentation[]>([]);
+  // P199：资产对账要读"界面此刻到底有哪些素材"。直接用 state 镜像而不是另存一份
+  // "上次看到的签名"——装载、UI 导入的乐观追加、刷新素材库都写同一个 state，
+  // 另存一份就会和真实显示的集合走散，比对结果也就失去意义。
+  const assetsRef = useRef<AssetPresentation[]>([]);
+  assetsRef.current = assets;
   const [assetQuery, setAssetQuery] = useState("");
   const [assetFilter, setAssetFilter] = useState<AssetFilter>("all");
   const [assetView] = useState<"list" | "grid">("list");
@@ -910,6 +923,47 @@ export function App() {
         if (signature === exportsSignature.value) return false;
         exportsSignature.value = signature;
         setExports(page.items);
+        return true;
+      },
+    });
+    // 资产集合对账（P199）：装配只在 project_id 变化时跑一次，素材导入却不推进
+    // projects.updated_at——首次 listAssets 若在 createProject 与 importAsset 之间
+    // 认领到空项目（启动轮询恰好在此刻换了项目），界面就永久停在「没有素材」，
+    // 直到用户手动刷新素材库或切项目。这里轮询集合组成，漏掉的导入由它补上。
+    // 只看 id 集合（不看 updated_at/created_at）：要的信号是"多了一条/少了一条"。
+    scheduler.register({
+      key: "assets",
+      // 首轮属于装配 effect（它才做完整翻页）：此刻本地集合可能还是空的（装载在途），
+      // 拿它做基准只会误判一次"变了"并再发起一轮完整翻页。对账从第二轮起接管——
+      // 那不是"等一会儿再说"，而是"等首次装载有了结果再对账"。
+      enabled: () => pollInstanceRef.current === instance && scheduler.stats.cycles > 0,
+      fetch: async () => {
+        if (!project) return { items: [], next_cursor: null };
+        // 每轮只发一次（不翻页）：这里只负责"发现集合变了"，完整装载由
+        // loadProjectData 做。单页口径与它一致（Core 默认 50，取第一页）。
+        // 不足：超过一页的老项目，删除一条落在第二页及以后的素材不会改变首页
+        // 签名——宁可漏报也不在轮询里翻页（每轮最多一次请求是这层的前提）。
+        return window.desktop.listAssets({ project_id: project.project_id, limit: assetReconcilePageLimit });
+      },
+      apply: (page) => {
+        if (pollInstanceRef.current !== instance) return false;
+        // 项目未定（启动瞬间/项目被删）时无事可对账：返回空页也必须短路，不报错。
+        const selected = projectRef.current;
+        if (!selected) return false;
+        // 只看首页组成（Core 按 created_at DESC 列出，新导入必定落在首页），并且
+        // 只和界面**当前**列表的同长度前缀比：装载、UI 导入的乐观追加、刷新素材库
+        // 都写同一个 assets state，另存一份"上次见到的签名"必然和真实集合走散；
+        // 而拿单页去比整个集合又会在"本地有 200 条、首页只有 1 条"时每轮都判成
+        // 变了——那就是每轮重载 200 页的自激（GAP-LIST-ASSETS-PAGING 用例会当场
+        // 抓到这个环）。长度不同 = 组成变了；同长度比 id。
+        const signature = assetCollectionSignature(page.items);
+        if (signature === assetCollectionSignature(assetsRef.current.slice(0, page.items.length))) return false;
+        // 集合变了：走完整装载而不是直接 setAssets——后者会覆盖掉本地等着的
+        // 一次 UI 导入乐观追加（App.importAsset），而 loadProjectData 还带着
+        // jobs/转录摘要的既有副作用。
+        // 不自我循环的**不变量**：loadProjectData 把同一集合写进 assets，下一轮
+        // 轮询第一行比较即相等并短路——每轮最多触发一次装载，不会每轮重载成环。
+        void loadProjectData(selected).catch(() => undefined);
         return true;
       },
     });
