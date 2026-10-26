@@ -337,6 +337,229 @@ describe("P196 纹理层未就绪（帧在、纹理不在）", () => {
   });
 });
 
+
+/** 暂停态兜底采样（本轮补的第三半）：**暂停 + 无人操作 + 上传卡死**。
+ *
+ * 缺陷形态：判定只在三处采样——seek 落定、recomposeSoon、播放 tick。前者要用户
+ * 动作、中者全是手势、后者只在播放时跑（rAF 循环）。于是"暂停着、没人碰、后台
+ * 上传却卡死"这条路上，画面定格而 onBuffering 一次都不会被调用——用户看到的是
+ * 完全无声的冻结。
+ *
+ * 修法是**只在有在途上传时才跑**的兜底采样 timer：暂停态卡住的唯一物理原因就是
+ * 还有东西在路上；零在途时没有任何东西"还可能到"，再采样只会得到同一结论，故
+ * 不挂常驻心跳（第 3 条用例专门钉这个边界）。
+ *
+ * 三条用例的分工（方向各不相同，缺一条就会写成"永远有个 timer"或"timer 永不
+ * 停"这两种回归）：
+ *  1. 在途上传永不落定 → ~300ms 后必须出提示（本轮的正面路径）；
+ *  2. 上传很快落定 → 一次提示都不许出，**且采样必须自己停**（不空转）；
+ *  3. 从头到尾没有上传 → **timer 根本不存在**（零开销边界）。
+ */
+describe("P196 暂停态在途上传兜底采样", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    ScriptedWorker.instances = [];
+    installWorkers();
+    stubOffscreenCanvas();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    cleanup();
+    document.body.innerHTML = "";
+  });
+
+  /** 单输入视频 IR：main 是真实片段（frameReady 要求 in_1 的环槽命中）。 */
+  function videoIr(totalFrames = 900): Ir {
+    const ir = JSON.parse(JSON.stringify(fixturePreviewIr())) as Ir;
+    ir.frames = Array.from({ length: totalFrames }, (_, n) => ({
+      n,
+      t_us: Math.round((n * 1_000_000) / 30),
+      main: {
+        kind: "segment" as const, clip_id: "clip_1", input_id: "in_1", src_n: n,
+        src_t_us: Math.round((n * 1_000_000) / 30),
+        content: { x: 0, y: 0, w: 1080, h: 1920 },
+        shift: { dx: 0, dy: 0 }, alpha: 1,
+      },
+      overlays: [], captions: [],
+    })) as Ir["frames"];
+    ir.canvas = { ...ir.canvas, duration_frames: totalFrames, duration_us: Math.round((totalFrames * 1_000_000) / 30) };
+    return ir;
+  }
+
+  /** 帧永远在场、帧源层恒不缓冲：把判定逼到纹理层。 */
+  function alwaysPresentSource(ir: Ir): FrameSource {
+    return {
+      frameCount: ir.frames.length,
+      getFrame: (n: number) => (n >= 0 && n < ir.frames.length ? ir.frames[n] : undefined),
+      isBuffering: () => false,
+      ensureRange: () => Promise.resolve(),
+      dispose: () => undefined,
+    };
+  }
+
+  /** decode 立即回帧；upload 何时 ack = 纹理何时到位，由测试脚本控制。
+   *  hold() = 此后所有上传永不 ack（卡死形态）。 */
+  function wireTextureControl(options: { ackDelayMs?: number } = {}): { hold: () => void; release: () => void } {
+    const ackDelayMs = options.ackDelayMs ?? 0;
+    const held: any[] = [];
+    const compositor = ScriptedWorker.instances[0]!;
+    const ack = (message: any) => queueMicrotask(() => compositor.reply(message.type === "upload"
+      ? { type: "uploaded", seq: message.seq, copyToMs: 0, texMs: 0 }
+      : { type: "uploadedShadow", seq: message.seq, copyToMs: 0, texMs: 0 }));
+    let hold = false;
+    const post = compositor.postMessage.bind(compositor);
+    compositor.postMessage = (message: any) => {
+      if (message.type === "upload" || message.type === "uploadShadow") {
+        if (hold) { held.push(message); return; } // 永不 ack（unless released）
+        if (ackDelayMs > 0) { setTimeout(() => ack(message), ackDelayMs); return; }
+        ack(message);
+        return;
+      }
+      post(message);
+    };
+    const decode = ScriptedWorker.instances[1]!;
+    const decodePost = decode.postMessage.bind(decode);
+    decode.postMessage = (message: any) => {
+      decode.messages.push(message);
+      if (message.type === "decode") {
+        queueMicrotask(() => decode.reply({
+          type: "frame", id: message.id, frameN: message.frameN, fromCache: true,
+          frame: { close: () => undefined },
+        }));
+        return;
+      }
+      if (message.type !== "init") decodePost(message);
+    };
+    return {
+      hold: () => { hold = true; },
+      release: () => { hold = false; for (const message of held.splice(0)) ack(message); },
+    };
+  }
+
+  /** 采样观测桩：数 observeBuffering 的实际调用次数（它对每一笔采样都恰好一次，
+   *  与"是否报告 true"无关）——用它判定采样在跑/已停，而不去窥探 timer 句柄
+   *  （句柄是实现细节，重构即碎）。 */
+  function countSamples(session: PreviewSession): { count: () => number } {
+    const target = session as unknown as { observeBuffering(target: number): void };
+    const original = target.observeBuffering.bind(target);
+    let count = 0;
+    target.observeBuffering = (frame: number) => {
+      count += 1;
+      original(frame);
+    };
+    return { count: () => count };
+  }
+
+  it("暂停 + 在途上传永不落定：无任何用户操作也必须在 ~300ms 后出提示", async () => {
+    const ir = videoIr();
+    const session = await PreviewSession.create(newContainer(), ir, TICKETS, undefined, undefined, null, undefined, null, alwaysPresentSource(ir));
+    const onBuffering = vi.fn();
+    session.onBuffering = onBuffering;
+    // 停止态：每笔上传 40ms 才 ack——在途长期非空（这正是"暂停时还有东西在
+    // 路上"的真机形态：用户刚落定就暂停，预读链的上传仍在飞）。
+    wireTextureControl({ ackDelayMs: 40 });
+    const chain = session as unknown as { pump(target: number): void; targetBuffering(target: number): boolean };
+
+    // 1) 暂停态 seek 到第 5 帧并落定：画面就绪、无提示。（这一次 seek 自己也
+    //    会判定，所以它给不出"新增覆盖"的证据——证据在下一段。）
+    //    上传要 40ms 才 ack，故不能直接 await（假时钟不会自己走）。
+    const settled = session.seekToFrame(5);
+    await vi.advanceTimersByTimeAsync(300);
+    await settled;
+    expect(onBuffering).not.toHaveBeenCalled();
+    expect(chain.targetBuffering(5)).toBe(false); // 停留帧纹理就在环内
+
+    // 2) **此后没有任何用户动作**（无 seek / 无手势 / 无 play）。在途的上传
+    //    继续把预读环槽往前推，12 槽轮转把停留帧 5 的纹理冲掉：frameReady
+    //    变假 → compose 的 sourceOf 返回 null → 跳过绘制，画面定格。
+    //    而暂停态没有播放 tick、没有 seek、没有 recompose——既有三处采样
+    //    一个都不会再发生，唯一能出声的就是在途兜底采样。
+    for (let i = 0; i < 10; i++) {
+      chain.pump(20 + i * 4);
+      await vi.advanceTimersByTimeAsync(120);
+    }
+    expect(chain.targetBuffering(5)).toBe(true); // 前提成立：停留帧纹理已被冲掉
+    // 唯一能出声的就是在途兜底采样：本轮之前这里恒为空（无声冻结）。
+    expect(onBuffering.mock.calls).toEqual([[true]]);
+    // 长时间保持：边沿触发，不得随采样次数重复报。
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(onBuffering).toHaveBeenCalledTimes(1);
+    session.dispose();
+  });
+
+  it("暂停 + 上传很快落定：一次提示都不许出，且采样必须自己停（不空转）", async () => {
+    const ir = videoIr();
+    const session = await PreviewSession.create(newContainer(), ir, TICKETS, undefined, undefined, null, undefined, null, alwaysPresentSource(ir));
+    const onBuffering = vi.fn();
+    session.onBuffering = onBuffering;
+    const samples = countSamples(session);
+    wireTextureControl(); // decode 立即回帧、upload 立即 ack（正常快路径）
+
+    // 正常暂停 seek：上传立即 ack，纹理几十毫秒内到位（远短于 300ms）
+    await session.seekToFrame(5);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(onBuffering).not.toHaveBeenCalled();
+
+    // 在途排空后采样必须停下。取一段"足够跑很多个采样周期"的窗口：
+    // 若 timer 没停（空转），这段里采样次数会持续增长。
+    await vi.advanceTimersByTimeAsync(120);
+    const settled = samples.count();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(samples.count()).toBe(settled); // 排空后不再有任何一次采样
+    expect(onBuffering).not.toHaveBeenCalled(); // 且全程静默
+    session.dispose();
+  });
+
+  it("暂停 + 上传在 300ms 门槛内赶上：提示不得闪出（去抖口径不变），且排空后采样自行停止", async () => {
+    const ir = videoIr();
+    const session = await PreviewSession.create(newContainer(), ir, TICKETS, undefined, undefined, null, undefined, null, alwaysPresentSource(ir));
+    const onBuffering = vi.fn();
+    session.onBuffering = onBuffering;
+    const texture = wireTextureControl();
+    const samples = countSamples(session);
+
+    // 暂停 seek 到 5，但**悬挂**上传：seek 自己的判定起跑 300ms 计时。
+    texture.hold();
+    void session.seekToFrame(5);
+    await vi.advanceTimersByTimeAsync(250); // 门槛未到
+
+    // 250ms 放行：纹理到位、在途排空——远早于 300ms。这就是"快速 seek 的
+    // 取窗 ~50ms"的同款形态放大版；提示一次都不许出。
+    texture.release();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(onBuffering).not.toHaveBeenCalled();
+
+    // 排空后采样必须自己停（不空转）。
+    const settled = samples.count();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(samples.count()).toBe(settled);
+    session.dispose();
+  });
+
+
+  it("全程没有任何上传：暂停会话根本不创建采样 timer（零开销边界）", async () => {
+    const ir = videoIr();
+    const session = await PreviewSession.create(newContainer(), ir, TICKETS, undefined, undefined, null, undefined, null, alwaysPresentSource(ir));
+    const onBuffering = vi.fn();
+    session.onBuffering = onBuffering;
+    const samples = countSamples(session);
+
+    // 会话装配完成后不做任何 seek/play/pump：没有任何上传，也就没有任何
+    // 需要等待的东西。这段窗口足以跑几十个采样周期。
+    const baseline = samples.count();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(samples.count()).toBe(baseline); // 一次采样都没有
+    expect(onBuffering).not.toHaveBeenCalled();
+    session.dispose();
+  });
+});
+
+
+
+
 describe("P196 缓冲指示组件落地", () => {
   const SHA = "b".repeat(64);
   const manifestId = "sha256:" + SHA + "@rev@test";

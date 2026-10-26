@@ -287,6 +287,18 @@ export class PreviewSession {
    *  计时重来"，300ms 永远攒不满。锁定帧号后判定单调，语义也更直白：
    *  画面要动的下一帧到了，卡顿才算结束。 */
   private bufferingFrame = -1;
+  /** P196：暂停态上传兜底采样的周期。300ms 门槛只可能被"上一次采样到门槛
+   *  到点"之间这段空白推迟，故周期取门槛的 2/5（提示落在 300~420ms 之间）；
+   *  再密就只是给每一笔上传多付采样开销，并不会让用户更早看到提示。 */
+  private static readonly UPLOAD_SAMPLE_MS = 120;
+  /** 兜底采样 timer（null = 未运行）。只在有在途上传时存在：见
+   *  startBufferingSampleTimer 的收摊条件。 */
+  private bufferingSampleTimer: ReturnType<typeof setInterval> | null = null;
+  /** 在途上传笔数（**全部调用方**：pump、链预热、剧本 seek 直发、影子槽）。
+   *  必须自己记账而不能只看 rig.inFlight：seekToFrame 的直发上传**不经过**
+   *  pump 的在途登记，只看那张表会把 seek 起的一笔上传误判成"无在途"，
+   *  timer 在第一次采样后立刻收摊——正是"暂停态卡死永远无声"的原形态。 */
+  private uploadDepth = 0;
 
   /** 视口适配（等比 contain）：IR 画布 → 后备缓冲（会话侧权威，resize 下发 worker）。 */
   private fitX = 0;
@@ -1078,6 +1090,7 @@ export class PreviewSession {
 
   private uploadRing(rig: InputRig, inputId: string, srcN: number): Promise<void> {
     if (!rig.worker || rig.decoderRecreate) return Promise.reject(new Error(`no worker for input`));
+    this.beginUpload(); // P196：一笔上传开始 = 采样 timer 起（落定时收）
     const slotIndex = rig.ringSeq % this.ringDepth;
     rig.ringSeq += 1;
     const epoch = this.seekEpoch;
@@ -1136,12 +1149,13 @@ export class PreviewSession {
     };
     const run = rig.uploadTail.then(task, task);
     rig.uploadTail = run.then(() => undefined, () => undefined);
-    return run;
+    return this.endUploadWhenSettled(run);
   }
 
   /** 影子槽上传（转场共享输入第二帧；单槽，同样 ack 后就绪）。过期作废同上。 */
   private uploadShadow(rig: InputRig, inputId: string, srcN: number): Promise<void> {
     if (!rig.worker) return Promise.reject(new Error(`no worker for input`));
+    this.beginUpload(); // P196：影子槽在途同样算"还在路上"
     const epoch = this.seekEpoch;
     const generation = rig.chainGeneration;
     const task = async (): Promise<void> => {
@@ -1166,7 +1180,7 @@ export class PreviewSession {
     };
     const run = rig.uploadTail.then(task, task);
     rig.uploadTail = run.then(() => undefined, () => undefined);
-    return run;
+    return this.endUploadWhenSettled(run);
   }
 
   /** 环形簿记中查找已就绪槽位的索引（-1 = 未就绪）。 */
@@ -1268,6 +1282,76 @@ export class PreviewSession {
       this.bufferingShown = true;
       this.onBuffering?.(true);
     }, PreviewSession.BUFFERING_NOTICE_MS);
+  }
+
+  /** P196：**在途上传期间的兜底采样**。这是"暂停 + 无人操作 + 上传卡死"
+   *  这条路径上唯一还能出声的东西。
+   *
+   *  为什么必须存在：现有三处采样（seek 落定 / recomposeSoon / 播放 tick）全是
+   *  **事件驱动**的——暂停态静止时一个都不发生。若此时有一笔上传卡死（解码器
+   *  不返回 / GL 上传不 ack），画面停在上一帧、onBuffering 永远收不到判定，
+   *  用户看到的是无声冻结。播放态由 tick 每帧采样兜住，暂停态没有。
+   *
+   *  为什么"只在有在途上传时跑"：暂停态卡住的唯一物理原因就是还有东西在路上。
+   *  已经没有任何在途上传时，没有任何东西"还可能到"，帧/纹理此刻是什么就永远
+   *  是什么——再采样也只会得到同一个结论，于是没有任何可等待的对象，也就没有
+   *  出提示的理由（真出了提示也永远不会消失）。零在途 = 零 timer、零工作量，
+   *  不给空转的会话挂一个常驻心跳。
+   *
+   *  复用 observeBuffering：300ms 去抖、锁定帧判定、边沿触发全部不变——这里
+   *  只负责"在对的时候给一次采样"，判定逻辑一份都不复制。 */
+  private startBufferingSampleTimer(): void {
+    if (this.bufferingSampleTimer || this.disposed) return;
+    // 未订阅：无从出声，采样纯属空转。
+    if (!this.onBuffering) return;
+    this.bufferingSampleTimer = setInterval(() => {
+      if (this.disposed) { this.stopBufferingSampleTimer(); return; }
+      // 顺序不可交换：**先采样、后判排空**。排空那一拍正好是"卡顿刚解除"的
+      // 时刻（纹理刚进槽），先判排空就会跳过这次恢复判定，已点亮的提示从此
+      // 没人收回。多跑一拍（≤120ms）换"提示一定灭得掉"。
+      this.observeBuffering(this.latestTarget);
+      // 收摊：已经没有任何上传在路上。判据是"在途簿记为空"而**不是**
+      // uploadTail——uploadTail 是串行队列的尾 promise，排空后仍是一个已决
+      // 的 promise（恒非 null），拿它判定会让 timer 永远停不下来。
+      if (!this.anyUploadInFlight()) this.stopBufferingSampleTimer();
+    }, PreviewSession.UPLOAD_SAMPLE_MS);
+  }
+
+  private stopBufferingSampleTimer(): void {
+    if (!this.bufferingSampleTimer) return;
+    clearInterval(this.bufferingSampleTimer);
+    this.bufferingSampleTimer = null;
+  }
+
+  /** 是否还有任何上传在路上。两路信号缺一不可：
+   *  - uploadDepth：uploadRing/uploadShadow 自己记的笔数，**涵盖 seek 直发**
+   *    （那条路径不登记 rig.inFlight）；
+   *  - rig.inFlight / shadowInFlight：pump 的在途登记，覆盖"已登记但 upload
+   *    尚未走进入口"的瞬间，也让判据与既有簿记保持一致。 */
+  private anyUploadInFlight(): boolean {
+    if (this.uploadDepth > 0) return true;
+    for (const [, rig] of this.rigs) {
+      if (rig.inFlight.size > 0 || rig.shadowInFlight !== null) return true;
+    }
+    return false;
+  }
+
+  /** 一笔上传进入在途（随之开启兜底采样，已在跑则无操作）。 */
+  private beginUpload(): void {
+    this.uploadDepth += 1;
+    this.startBufferingSampleTimer();
+  }
+
+  /** 一笔上传落定（成功/失败/作废同待遇）：只退出在途记账。
+   *  **不在这里停 timer**：让定时器自己下一拍先采样、再判排空（见
+   *  startBufferingSampleTimer）。这个顺序是有意为之——排空那一瞬间往往正是
+   *  卡顿解除的时刻（纹理刚进槽），若在排空时抢先收摊，这次"恢复"就再没人
+   *  判定，已点亮的指示条会永久挂着（把无声冻结换成永久误报）。代价只是
+   *  多跑一拍（≤120ms）。 */
+  private endUploadWhenSettled(run: Promise<void>): Promise<void> {
+    return run.finally(() => {
+      this.uploadDepth = Math.max(0, this.uploadDepth - 1);
+    });
   }
 
   /** P33 起播追赶：在 (from, to] 中找「洞后第一个就绪帧」。洞 = 某帧的展示
@@ -2194,6 +2278,8 @@ export class PreviewSession {
     this.disposed = true;
     this.seekEpoch++;
     if (this.prefetchTimer) { clearTimeout(this.prefetchTimer); this.prefetchTimer = null; }
+    // P196：兜底采样随会话终结（销毁后不得再有 observeBuffering 调用）
+    this.stopBufferingSampleTimer();
     this.lifetime.abort();
     this.poolDispose(); // B13：池输入释放（worker 纹理删除 + 簿记清零）
     this.onTimeUs = null;
