@@ -874,6 +874,26 @@ def validate_timeline_patch_value(value: Any) -> dict[str, Any]:
     }
 
 
+def _network_error_message(proxy: str | None) -> str:
+    """PROVIDER_NETWORK_ERROR 的文案：有代理才加代理上下文。
+
+    为什么按有无代理分支：代理指向不可用端口（这是 PROXY_SUPPORT 规划门 §4 点名的
+    首要风险）与"本来就没配代理、直连不通"是两种完全不同的用户动作。前者要去改
+    代理设置，后者要去查网络/API 地址。两者混成一句"网络请求失败"，用户只能瞎猜。
+    无代理时必须逐字等于历史文案——既有诊断/测试与用户既有认知都锚在这句话上。
+    """
+    if proxy:
+        return f"Provider 网络请求失败（经代理 {proxy} 连接失败）"
+    return "Provider 网络请求失败"
+
+
+def _network_error_message_en(proxy: str | None) -> str:
+    """_network_error_message 的英文对应（适配器路径沿用英文文案，不混语言）。"""
+    if proxy:
+        return f"Provider network request failed (connect failed via proxy {proxy})"
+    return "Provider network request failed"
+
+
 def normalized_base_url(value: str) -> str:
     parsed = urlparse(value)
     host = parsed.hostname
@@ -897,9 +917,15 @@ def normalized_base_url(value: str) -> str:
 
 class OpenAICompatibleTextProvider:
     def __init__(
-        self, client_factory: Callable[..., httpx.AsyncClient] = httpx.AsyncClient
+        self,
+        client_factory: Callable[..., httpx.AsyncClient] = httpx.AsyncClient,
+        proxy_display: str | None = None,
     ) -> None:
         self._client_factory = client_factory
+        # 已脱敏的代理回显值（scheme://host:port）——**只用于出错文案**，不参与
+        # 出网。代理本身经 client_factory 注入：本类不持有、也无法还原代理凭据，
+        # 因此错误消息即使进 DTO/落库也不可能泄出 URL 凭据段。
+        self._proxy_display = proxy_display
 
     async def generate(
         self, request: StructuredTextRequest, cancel_event: asyncio.Event
@@ -998,9 +1024,13 @@ class OpenAICompatibleTextProvider:
                 cause = cause.__cause__
             if "certificate" in str(exc).lower() or "tls" in str(exc).lower():
                 raise ProviderError("PROVIDER_TLS_ERROR", "Provider TLS 连接失败") from exc
-            raise ProviderError("PROVIDER_NETWORK_ERROR", "Provider 网络请求失败") from exc
+            raise ProviderError(
+                "PROVIDER_NETWORK_ERROR", _network_error_message(self._proxy_display)
+            ) from exc
         except httpx.TransportError as exc:
-            raise ProviderError("PROVIDER_NETWORK_ERROR", "Provider 网络请求失败") from exc
+            raise ProviderError(
+                "PROVIDER_NETWORK_ERROR", _network_error_message(self._proxy_display)
+            ) from exc
         if len(content) > MAX_RESPONSE_BYTES:
             raise ProviderError("PROVIDER_RESPONSE_TOO_LARGE", "Provider 响应过大")
         if response.status_code in {401, 403}:
@@ -1213,7 +1243,7 @@ class OpenAICompatibleTextProvider:
             raise ProviderError("PROVIDER_TIMEOUT", "Provider request timed out") from exc
         except httpx.TransportError as exc:
             raise ProviderError(
-                "PROVIDER_NETWORK_ERROR", "Provider network request failed"
+                "PROVIDER_NETWORK_ERROR", _network_error_message_en(self._proxy_display)
             ) from exc
         if len(content) > MAX_RESPONSE_BYTES:
             raise ProviderError("PROVIDER_RESPONSE_TOO_LARGE", "Provider response too large")

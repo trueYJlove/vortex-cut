@@ -806,11 +806,14 @@ class CoreState:
         self.recipes = RecipeRegistry(settings.recipe_dir)
         # PROXY_SUPPORT（2026-09-20 裁决）：三级回退解析代理 → provider factory
         # 注入（trust_env=False 保持，代理只来自显式配置链）。None = 直连。
-        from .config import resolve_provider_proxy
+        from .config import proxy_display_value, resolve_provider_proxy
 
         self.provider_proxy = resolve_provider_proxy(settings)
         from .providers import OpenAICompatibleTextProvider
         import httpx as _httpx
+
+        # 脱敏回显值只喂错误文案（scheme://host:port）；出网代理本体走下面的 factory。
+        _proxy_display = proxy_display_value(self.provider_proxy)
 
         if self.provider_proxy:
             _proxy = self.provider_proxy
@@ -821,11 +824,20 @@ class CoreState:
                         kwargs.pop("trust_env", None)
                         return _httpx.AsyncClient(proxy=_proxy, trust_env=False, **kwargs)
 
-                    super().__init__(client_factory=factory)
+                    super().__init__(client_factory=factory, proxy_display=_proxy_display)
 
             self._text_provider_factory: Any = _ProxiedTextProvider
         else:
             self._text_provider_factory = OpenAICompatibleTextProvider
+        # 图片 Provider 与文本 Provider 共用同一条代理决策（PROXY_SUPPORT 规划门
+        # §1 第 3 条「注入点统一」）——此前只接了文本侧，系统代理开着的用户
+        # 文本可用、图片必失败。trust_env=False 保持一致：代理只来自显式配置链。
+        from .provider_images import image_client_factory_for_proxy
+
+        self._image_client_factory: Any = (
+            image_client_factory_for_proxy(self.provider_proxy) if self.provider_proxy else None
+        )
+        self._image_proxy_display = _proxy_display
         # AI-2 阶段三：CV 信号服务先行构建（planning 注入召回汇合点）。
         from .media.cv_signals import CvSignalService
 
@@ -1082,7 +1094,12 @@ class CoreState:
             self.db, self.image_provider_secrets
         )
         image_provider = (
-            ApiKeyFunImagesProvider() if settings.image_provider_network_enabled else None
+            ApiKeyFunImagesProvider(
+                client_factory=self._image_client_factory,
+                proxy_display=self._image_proxy_display,
+            )
+            if settings.image_provider_network_enabled
+            else None
         )
         self.provider_image_generation = ProviderImageGenerationService(
             self.db,

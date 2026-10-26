@@ -358,10 +358,64 @@ class FailOnCallImageProvider:
         raise ProviderImageError("IMAGE_PROVIDER_CALL_DISABLED", "当前环境未启用真实图片调用")
 
 
-class ApiKeyFunImagesProvider:
-    """Fixed third-party SSE endpoint; one dispatch, no redirects, retries, or env proxy."""
+def _default_image_client(**kwargs: Any) -> httpx.AsyncClient:
+    """默认出网 client factory：与注入前逐字节相同（不重定向、不读环境代理、超时 900/15）。
 
-    def __init__(self) -> None:
+    抽成工厂的**唯一目的**是让代理可注入——图片 Provider 此前与文本 Provider 行为
+    不一致（文本侧早已注入代理，图片侧没有），系统代理开着的用户文本可用、图片必失败。
+    语义不变是硬约束：默认路径必须与本模块历史上的内联构造完全等价。
+    """
+    return httpx.AsyncClient(
+        follow_redirects=False,
+        trust_env=False,
+        timeout=httpx.Timeout(900, connect=15),
+        **kwargs,
+    )
+
+
+def image_client_factory_for_proxy(proxy: str) -> Callable[[], httpx.AsyncClient]:
+    """装配侧代理注入用的工厂构造器（PROXY_SUPPORT：图片 Provider 同款 client 模式）。
+
+    超时/不重定向/trust_env=False 只在 _default_image_client 定义一次——装配侧
+    复制这些常量就会与图片 Provider 默认路径漂移，故此处只负责补 proxy。
+    """
+
+    def factory() -> httpx.AsyncClient:
+        return _default_image_client(proxy=proxy)
+
+    return factory
+
+
+def _image_network_message(proxy: str | None, direct: str) -> str:
+    """网络类错误文案：有代理才追加代理上下文，无代理逐字返回历史文案。
+
+    ConnectError（"无法连接 Provider"）与 TransportError（"Provider 网络请求
+    失败"）是两条既有区分，不能合并——前者定位"连不上"，后者定位"连上后传输
+    中断"。这里只做**追加**，不改写原有措辞：无代理时输出与改动前逐字节相同。
+    """
+    if proxy:
+        return f"{direct}（经代理 {proxy} 连接失败）"
+    return direct
+
+
+class ApiKeyFunImagesProvider:
+    """固定第三方 SSE 端点；一次派发、不重定向、不重试。
+
+    代理只来自**显式配置注入**（app 装配按三级回退解析后传入 client_factory），
+    绝不读环境变量（trust_env=False 保持——出网路径完全显式是既有安全取舍）。
+    """
+
+    def __init__(
+        self,
+        client_factory: Callable[..., httpx.AsyncClient] | None = None,
+        proxy_display: str | None = None,
+    ) -> None:
+        # None = 默认工厂（行为与注入前逐字节相同）；注入 = 装配侧的代理/测试替身。
+        self._client_factory: Callable[..., httpx.AsyncClient] = (
+            client_factory or _default_image_client
+        )
+        # 已脱敏代理回显值（scheme://host:port）——只用于出错文案，不参与出网。
+        self._proxy_display = proxy_display
         self._protocol_diagnostics: dict[str, dict[str, Any]] = {}
 
     def take_protocol_diagnostic(self, diagnostic_id: str) -> dict[str, Any] | None:
@@ -399,11 +453,8 @@ class ApiKeyFunImagesProvider:
         }
         on_dispatch()
         try:
-            async with httpx.AsyncClient(
-                follow_redirects=False,
-                trust_env=False,
-                timeout=httpx.Timeout(900, connect=15),
-            ) as client:
+            # 经注入的工厂构造（默认工厂语义逐字节不变；代理只走显式配置链）。
+            async with self._client_factory() as client:
                 async with client.stream(
                     "POST",
                     IMAGE_ENDPOINT,
@@ -501,13 +552,19 @@ class ApiKeyFunImagesProvider:
             diagnostic["outcome"] = "failed"
             diagnostic["failure_stage"] = "connect"
             self._store_protocol_diagnostic(request.diagnostic_id, diagnostic)
-            raise ProviderImageError("PROVIDER_NETWORK_ERROR", "无法连接 Provider", True) from exc
+            raise ProviderImageError(
+                "PROVIDER_NETWORK_ERROR",
+                _image_network_message(self._proxy_display, "无法连接 Provider"),
+                True,
+            ) from exc
         except httpx.TransportError as exc:
             diagnostic["outcome"] = "failed"
             diagnostic["failure_stage"] = "transport"
             self._store_protocol_diagnostic(request.diagnostic_id, diagnostic)
             raise ProviderImageError(
-                "PROVIDER_NETWORK_ERROR", "Provider 网络请求失败", True
+                "PROVIDER_NETWORK_ERROR",
+                _image_network_message(self._proxy_display, "Provider 网络请求失败"),
+                True,
             ) from exc
         except (ValueError, TypeError, json.JSONDecodeError, UnicodeDecodeError) as exc:
             diagnostic["outcome"] = "failed"
