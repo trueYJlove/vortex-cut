@@ -4,6 +4,7 @@ import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlparse
 
 from . import __version__
 
@@ -103,6 +104,30 @@ def admin_token_from_environment() -> str:
     return token
 
 
+def proxy_display_value(proxy: str | None) -> str | None:
+    """代理 URL → 可安全回显的 scheme://host:port（其余一律丢弃）。
+
+    为什么需要清洗：出错消息要带代理上下文（PROXY_SUPPORT 规划门 §4——"代理
+    指向不可用端口"与"直连失败"必须让用户能区分），但这些消息会落库
+    （provider_image_invocations.error_message / jobs.error_message）并进入 Core
+    DTO，因此只能回显 scheme+host+port：url 里的凭据段（user:pass@）、查询串、
+    路径都不是可回显内容（认证代理本就是 v1 明确不做项，见门 §1）。解析不出
+    host 时返回 None——宁可丢上下文，也不原样回显未校验字符串。
+    """
+    if not proxy:
+        return None
+    try:
+        parsed = urlparse(proxy)
+        host = parsed.hostname
+        if not host:
+            return None
+        scheme = parsed.scheme or "http"
+        return f"{scheme}://{host}:{parsed.port}" if parsed.port else f"{scheme}://{host}"
+    except ValueError:
+        # 端口段非法（.port 在非数字/越界时抛 ValueError）
+        return None
+
+
 def resolve_provider_proxy(settings: "Settings") -> str | None:
     """Provider 代理三级回退（PROXY_SUPPORT 规划门 §1）。
 
@@ -129,13 +154,21 @@ def resolve_provider_proxy(settings: "Settings") -> str | None:
                 if "=" not in server and server:
                     # 形如 127.0.0.1:10809（无协议前缀）——httpx 需要 scheme
                     return f"http://{server}"
-                # 形如 http=...;https=... 取 https 段
-                for part in server.split(";"):
-                    if part.startswith("https="):
-                        return part[6:]
-                    if part.startswith("http="):
-                        return part[5:]
-                return f"http://{server}" if server else None
+                # 形如 http=...;https=...：**先**取 https 段。此前按分号顺序逐段匹配并
+                # 立即返回，第一段就是 http 段，于是 https 段永远取不到——而 Provider
+                # 出网是 HTTPS，走了 http 段等于白绕一圈（多数代理仍会 CONNECT，
+                # 所以表现为偶发超时而非明确报错，最难查）。
+                segments = dict(
+                    part.split("=", 1) for part in server.split(";") if "=" in part
+                )
+                chosen = segments.get("https") or segments.get("http")
+                if not chosen:
+                    return f"http://{server}" if server else None
+                # 这里必须补 scheme。旧写法直接返回分段值（127.0.0.1:10809），而
+                # httpx.AsyncClient(proxy=...) 对无 scheme 的值抛 ValueError，且该
+                # 异常发生在 Provider 调用时、不在 providers.py 捕获的网络异常家族
+                # 里——用户看到的是 500 内部错误而非网络错误，根因（代理）彻底丢失。
+                return chosen if "://" in chosen else f"http://{chosen}"
         except OSError:
             return None
     return None
