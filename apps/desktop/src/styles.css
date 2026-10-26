@@ -122,6 +122,11 @@ textarea { min-height: 92px; padding: 8px; resize: vertical; }
 .synthetic-metrics { position: absolute; left: 8px; bottom: 8px; padding: 3px 8px; border-radius: 5px; background: rgba(10, 14, 17, .72); color: #8fa0a8; font-size: var(--dlg-fs-label); font-family: Consolas, monospace; pointer-events: none; z-index: 4; white-space: nowrap; }
 .synthetic-metrics.err { color: #ff8a7a; }
 .synthetic-loading { color: #6f7d83; font-size: var(--dlg-fs-body); }
+/* P196 缓冲指示：与 .synthetic-metrics 同族（同一底色/字号/绝对定位），只换成
+   顶部居中 + 更小尺寸——它是"画面暂时不动"的旁注，不该抢指标行的位置。
+   pointer-events:none 是硬约束：画布上的 PiP 手势不能被这块标签吃掉。 */
+.synthetic-buffering { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 5px; background: rgba(10, 14, 17, .72); color: #8fa0a8; font-size: var(--dlg-fs-label); white-space: nowrap; pointer-events: none; z-index: 5; }
+.synthetic-buffering-dot { width: 6px; height: 6px; border-radius: 50%; background: #8fa0a8; }
 .preview-canvas { position: relative; overflow: hidden; background: #000; box-shadow: 0 0 0 1px #1f1f2a, 0 8px 28px rgba(0, 0, 0, .45); border-radius: 3px; }
 .preview-frame { display: grid; place-items: center; }
 .preview-frame.ratio-fit .preview-canvas { width: 100%; height: 100%; }

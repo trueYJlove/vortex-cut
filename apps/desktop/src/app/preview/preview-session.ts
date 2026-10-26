@@ -268,6 +268,25 @@ export class PreviewSession {
   private static readonly AUDIO_WARMUP_US = 2_000_000;
   /** 自然播放到片尾时回调（UI 复位播放按钮；会话已内部 pause）。 */
   onEnded: (() => void) | null = null;
+  /** P196：缓冲状态通道（**边沿触发**）——目标帧持续未就绪超过
+   *  BUFFERING_NOTICE_MS 才回调一次 true，恢复时立即回调一次 false。
+   *  判定挂在既有 compose/seek 路径上，不新增轮询；未订阅（null）的会话
+   *  行为与引入前逐字节一致：全路径 `?.` 调用，本字段不参与任何分支。 */
+  onBuffering: ((buffering: boolean) => void) | null = null;
+  /** 缓冲提示延迟（用户裁决 2026-10-24）：一次快速 seek 的取窗 ~50ms、
+   *  拖动/连点风暴里缺帧成串出现——立即提示会让指示条持续闪烁（比没有更差）。
+   *  只有连续缺帧超过该时长才算"用户真的在等画面"。 */
+  private static readonly BUFFERING_NOTICE_MS = 300;
+  /** 延迟计时中的 timer（null = 未在计时）；恢复/销毁都必须清掉。 */
+  private bufferingTimer: ReturnType<typeof setTimeout> | null = null;
+  /** true = 已向订阅方报告过"缓冲中"（恢复时必须补一次 false，且不重复报）。 */
+  private bufferingShown = false;
+  /** 本次卡顿的判定帧（-1 = 无）。恢复只认**这一帧**的窗口是否到位：
+   *  各路径送来的 target 会前后抖动（tick 目标、seek 索引、重锚回跳），拿
+   *  "最近一次传入的 target" 判定会出现"3xx 窗内的旧帧就绪 → 误报恢复 →
+   *  计时重来"，300ms 永远攒不满。锁定帧号后判定单调，语义也更直白：
+   *  画面要动的下一帧到了，卡顿才算结束。 */
+  private bufferingFrame = -1;
 
   /** 视口适配（等比 contain）：IR 画布 → 后备缓冲（会话侧权威，resize 下发 worker）。 */
   private fitX = 0;
@@ -951,6 +970,10 @@ export class PreviewSession {
       this.recomposeRaf = 0;
       const frame = this.frames.getFrame(Math.min(this.currentFrame, this.frames.frameCount - 1));
       if (frame && this.frameReady(frame)) this.compose(frame);
+      // P196：窗口装配完成会走 recomposeSoon——这里给出"恢复"结论。判的是
+      // **目标帧**而不是当前停留帧：卡顿期间画面正停在上一帧（它是"就绪"的），
+      // 拿它判定会在每个 tick 报一次恢复，300ms 计时永远攒不起来。
+      this.observeBuffering(this.latestTarget);
     });
   }
 
@@ -1164,6 +1187,57 @@ export class PreviewSession {
       if (rig.kind === "image") return true;
       return shadow ? rig.shadowUploaded === srcN : this.ringSlotIndex(rig, srcN) >= 0;
     });
+  }
+
+  /** P196：目标帧是否「真正在缓冲」——帧源显式判定（v2 = 目标窗未就绪且
+   *  不在途；v1 全量在场恒 false，缺帧只可能是越界）。取不到帧对象时一并
+   *  视为未就绪：此时画面停在上一帧，用户看到的就是卡住。 */
+  private targetBuffering(target: number): boolean {
+    const n = Math.max(0, Math.min(target, this.frames.frameCount - 1));
+    if (!this.frames.getFrame(n)) return true;
+    return this.frames.isBuffering ? this.frames.isBuffering(n) : false;
+  }
+
+  /** P196：缓冲观测（边沿触发 + 延迟确认）。调用点全是既有路径（seek 落定 /
+   *  播放 tick / 重新合成），因此不引入新的轮询或 rAF。
+   *
+   *  为什么三条路径都要调用：停留帧不再经过合成时若得不到判定，300ms 的
+   *  timer 就永远等不到"恢复"结论（提示必须能自己消失）；反过来漏掉
+   *  "开始时"的判定会让计时起点凭空晚 300ms。
+   *
+   *  抗风暴：连续缺帧期间只保留**一个** timer、只报一次 true——拖动/连点
+   *  风暴里每次 seek 都会进来，但不会叠加回调。 */
+  private observeBuffering(target: number): void {
+    const handler = this.onBuffering;
+    if (!handler) {
+      // 未订阅（也是订阅后又取消的收尾）：不留 timer、不留状态，
+      // 否则下次订阅会因 bufferingShown 仍为 true 而永远静默。
+      if (this.bufferingTimer) { clearTimeout(this.bufferingTimer); this.bufferingTimer = null; }
+      this.bufferingShown = false;
+      this.bufferingFrame = -1;
+      return;
+    }
+    if (this.bufferingTimer || this.bufferingShown) {
+      // 卡顿进行中：只问"锁定的那一帧到了没"，不受传入 target 抖动影响。
+      if (this.targetBuffering(this.bufferingFrame)) return; // 仍在缓冲：不叠加回调
+      // 恢复：立即生效（用户裁决"恢复立刻消失"，不设迟滞）
+      if (this.bufferingTimer) { clearTimeout(this.bufferingTimer); this.bufferingTimer = null; }
+      this.bufferingFrame = -1;
+      if (this.bufferingShown) {
+        this.bufferingShown = false;
+        handler(false);
+      }
+      return;
+    }
+    if (!this.targetBuffering(target)) return; // 帧就绪：无事发生
+    this.bufferingFrame = Math.max(0, Math.min(target, this.frames.frameCount - 1));
+    // 起点不立即回调：短于阈值的缺帧在此被静默丢弃（抗闪烁的全部意义）。
+    this.bufferingTimer = setTimeout(() => {
+      this.bufferingTimer = null;
+      if (this.disposed || this.bufferingShown) return;
+      this.bufferingShown = true;
+      this.onBuffering?.(true);
+    }, PreviewSession.BUFFERING_NOTICE_MS);
   }
 
   /** P33 起播追赶：在 (from, to] 中找「洞后第一个就绪帧」。洞 = 某帧的展示
@@ -1809,6 +1883,11 @@ export class PreviewSession {
     this.dragMode = now - this.lastSeekWall < 250;
     this.lastSeekWall = now;
     const index = Math.max(0, Math.min(target, this.frames.frameCount - 1));
+    // P196：取窗发起前先判定一次——窗口请求若悬挂不返回（网络/磁盘卡死），
+    // await 之后的判定永远到不了，画面会无声冻结。提前这一次让"用户真的在
+    // 等"照样能出提示；快取窗（~50-70ms）在下方 await 后立刻被判回"恢复"，
+    // 300ms 阈值内不会亮。
+    this.observeBuffering(index);
     // C20 v2：目标帧所在窗口可能未就绪——先取窗（abort 语义 = 会话生命周期；
     // 单窗 IPC ~50-70ms，拖拽快速档由 epoch latest-wins 兜住）。
     const ensure = this.frames.ensureRange?.(index, index + 1, this.lifetime.signal);
@@ -1821,6 +1900,8 @@ export class PreviewSession {
       if (this.disposed) throw new Error("session disposed");
     }
     const frame = this.frames.getFrame(index);
+    // P196：缓冲判定放在取窗落定之后（此刻的"缺帧"才是用户真的在等）
+    this.observeBuffering(index);
     if (!frame) return -1;
     this.currentFrame = index;
     this.latestTarget = index;
@@ -1911,6 +1992,7 @@ export class PreviewSession {
       const now = performance.now();
       const target = Math.min(last, Math.floor(this.anchorFrame + (now - this.anchorWall) / frameDur));
       this.latestTarget = target;
+      this.observeBuffering(target); // P196：起播/卡顿的提示来源（饿了也得出声）
       this.pump(target);
       // 音频以**墙钟目标**驱动（音频线程自行推进，合成滞后不拖累音频）：
       // 时钟目标 µs = anchorFrame × 1e6/fps + 墙钟增量。
@@ -2090,6 +2172,11 @@ export class PreviewSession {
     this.poolDispose(); // B13：池输入释放（worker 纹理删除 + 簿记清零）
     this.onTimeUs = null;
     this.onEnded = null;
+    // P196：销毁后不得再回调——先停 timer 再清订阅（顺序保证回调不会再发生）
+    if (this.bufferingTimer) { clearTimeout(this.bufferingTimer); this.bufferingTimer = null; }
+    this.bufferingShown = false;
+    this.bufferingFrame = -1;
+    this.onBuffering = null;
     this.pause();
     for (const [, rig] of this.audioRigs) {
       this.stopAudioSource(rig);

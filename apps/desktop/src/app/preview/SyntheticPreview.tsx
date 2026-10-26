@@ -105,6 +105,13 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
   }
   const [load, setLoad] = useState<LoadState>({ status: "loading", message: "正在加载合成预览" });
   const [metrics, setMetrics] = useState<PreviewSessionMetrics | null>(null);
+  // P196：会话的缓冲提示（已按 300ms 延迟边沿触发的布尔量，1Hz 指标轮询
+  // 太慢、也不该把提示混进诊断口径，故单开一道状态）。
+  const [buffering, setBuffering] = useState(false);
+  const bufferingShown = useRef(false);
+  /** 组件侧同一份"已显示"判定的 ref 镜像：会话换装/重建时用它判断是否需要
+   *  补一次复位（stale 的旧会话可能已 dispose，不会再发 false）。 */
+  useEffect(() => { bufferingShown.current = buffering; }, [buffering]);
   // GAP-PIP-FLASH：换表/取窗瞬间 pipBoxes() 可能短暂为空（新 IR 帧窗口未装配），
   // 卸载 PiP 层 = 选中框消失 + click 穿透到画布误选主轨片段。保留最近一次
   // 非空 boxes 作为兜底（纯视觉占位；数据恢复后立即被真实值覆盖）。
@@ -276,6 +283,11 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
             onTimeUs(lastReportedUs.current);
             onEnded?.();
           };
+          // P196：缓冲提示（会话侧已延迟 300ms 且边沿触发，这里只做状态落地）。
+          // 换会话时旧会话可能已 dispose、不会再补 false——装配前若提示仍亮着，
+          // 先复位，免得新会话的好画面顶着上一条提示。
+          session.onBuffering = (value: boolean) => { if (!stale()) setBuffering(value); };
+          if (bufferingShown.current) setBuffering(false);
           sessionRefLocal.current = session;
           sessionProjectRef.current = projectId;
           boxObserverRef.current?.observe(container);
@@ -331,6 +343,9 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
           onTimeUs(lastReportedUs.current); // 结束时冲齐最终播放头
           onEnded?.();
         };
+        // P196：同上（v1 帧源恒不缓冲，订阅只为"会话两态一致"，不产生回调）
+        session.onBuffering = (value: boolean) => { if (!stale()) setBuffering(value); };
+        if (bufferingShown.current) setBuffering(false);
         sessionRefLocal.current = session;
         sessionProjectRef.current = projectId;
         boxObserverRef.current?.observe(container);
@@ -491,6 +506,14 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
           />
         );
       })()}
+      {/* P196：缓冲指示（延迟 300ms 才出现、恢复立刻消失——判定在会话侧）。
+          不参与布局、不吃指针事件：合成画布上的 PiP 手势必须照常穿透。
+          色点用 CSS 画，不带动画循环（一次卡顿不该再叠一份 CPU 负担）。 */}
+      {load.status === "ready" && buffering && (
+        <div className="synthetic-buffering" role="status" aria-live="polite" aria-label="缓冲中">
+          <span className="synthetic-buffering-dot" aria-hidden="true" />缓冲中
+        </div>
+      )}
       {load.status !== "ready" && <div className="synthetic-loading">{load.message || "…"}</div>}
       {load.status === "ready" && metrics && (
         <div className={`synthetic-metrics${metrics.last_error ? " err" : ""}`}>
