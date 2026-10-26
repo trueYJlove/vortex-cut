@@ -76,6 +76,19 @@ interface WindowEntry {
 
 const DEFAULT_CACHE_BYTES = 8 * 1024 * 1024;
 const DEFAULT_MAX_IN_FLIGHT = 2;
+/** 在途窗口判定为「已悬挂」的阈值（毫秒）。
+ *
+ * 为什么是 3s（而不是更小或更大）：
+ * - 正常一次窗口取数 = 单次 IPC + 已 parse 的投影结果，实测 ~50-70ms
+ *   （preview-session.ts seek 路径同口径注释），3s 已是 40 倍开外；
+ * - 在途上限默认只有 2，一个窗口悬挂就吃掉半数并发预算，其余 seek 会被
+ *   直接拒绝排队（loadWindow 的在途上限分支）——所以"数秒不返回"不是
+ *   "慢"，而是病态：解码/磁盘/IPC 已经卡死，等到地老天荒也不会自己好；
+ * - 又不取更小值（如 1s）：整机抖动（GC、杀毒扫描、磁盘忙）会让个别窗口
+ *   真的慢到几百毫秒，误报会把指示条点成常亮，比"没有提示"更糟。
+ * 计时起点 = fetchWindow 发起的那一刻（不是首次被问到的时刻），因此判定
+ * 与采样频率无关：采样得稀也不会让结论提前或推迟。 */
+const WINDOW_IN_FLIGHT_STALL_MS = 3_000;
 /** 帧估算兜底字节（无 frameBytes 时的保守常数；真实帧多为小对象，宁多记）。 */
 const FALLBACK_FRAME_BYTES = 4096;
 
@@ -88,7 +101,8 @@ const FALLBACK_FRAME_BYTES = 4096;
  *   ensureRange 仅等待既有请求（不排队第三个——seek 优先当前目标）；
  * - manifest_id 失配的响应整体丢弃（不进入当前帧源）；
  * - getFrame 未就绪返回 undefined（不伪造空帧），isBuffering 报告
- *   "既不在缓存也不在途"的帧区间；
+ *   "既不在缓存也不在途"的帧区间；在途但**已悬挂超过阈值**同样算 buffering
+ *   （见 WINDOW_IN_FLIGHT_STALL_MS：请求永不兑现 = 和没有请求同等的无声定格）；
  * - 已 abort 的 ensureRange 取消**未发出**的请求；已发出的请求照常
  *   完成（响应仍可入缓存——合法数据，只是调用方已不等待）。
  */
@@ -102,7 +116,17 @@ export function windowedFrameSource(
   const maxInFlight = options.maxInFlight ?? DEFAULT_MAX_IN_FLIGHT;
   const frameBytesOf = options.frameBytes ?? (() => FALLBACK_FRAME_BYTES);
   const cache = new Map<number, WindowEntry>(); // LRU：Map 迭代序 = 最旧在前
-  const inFlight = new Map<number, Promise<void>>();
+  /** 在途窗口：startFrame -> { promise, startedAt }。
+   *
+   *  **为什么把时间戳放进条目、而不是另开一张 startFrame -> timestamp 表**：
+   *  悬挂判定要的是"在途**多久**"，而 inFlight 原本只回答"在途与否"。两张表
+   *  看起来更省事，但它们的生命周期必须严格同步，而同步点有两处（.finally 落定、
+   *  dispose）——任一处漏删就是一类缺陷：
+   *   - 漏删时间戳 ⇒ 窗口重取时带着旧起点，一次正常取窗立刻被判成悬挂（误报）；
+   *   - 漏删 inFlight ⇒ 原缺陷本身（悬挂记录永存，还占并发额度）。
+   *  合成一条记录后，"加入/移除在途"与"记录/遗忘起点"是**同一个操作**，
+   *  上述漂移在结构上不可能发生——不靠纪律，靠类型。 */
+  const inFlight = new Map<number, { promise: Promise<void>; startedAt: number }>();
   const abortedStarts = new Set<number>();
   let disposed = false;
   let totalBytes = 0;
@@ -140,9 +164,10 @@ export function windowedFrameSource(
   evictIfNeeded();
 
   const loadWindow = (startFrame: number, signal?: AbortSignal): Promise<void> => {
-    if (disposed || cache.has(startFrame) || inFlight.has(startFrame)) {
-      return inFlight.get(startFrame) ?? Promise.resolve();
-    }
+    if (disposed || cache.has(startFrame)) return Promise.resolve();
+    // single-flight：同一窗口的第二次请求复用既有在途 promise（不重复发起）。
+    const existing = inFlight.get(startFrame);
+    if (existing) return existing.promise;
     if (signal?.aborted) return Promise.resolve();
     if (inFlight.size >= maxInFlight) {
       // 在途已满：不为该窗口排队（seek 优先当前目标；调用方下次 ensureRange 重试）。
@@ -179,8 +204,11 @@ export function windowedFrameSource(
       .catch(() => {
         editorPerf.record("window_fetch", performance.now() - fetchStart, 3, startFrame, 0, startFrame);
       }) // 3 = fetch 失败（网络/契约）
+      // 落定收摊：条目连同其中的起点一并消失（单条记录 ⇒ 不存在"删一半"）。
+      // 漏了这一行会让该窗口永久停留在"在途"，既占并发额度，又在超过阈值后
+      // 恒报 buffering——已到达的窗口反而显示"缓冲中"。
       .finally(() => { inFlight.delete(startFrame); });
-    inFlight.set(startFrame, promise);
+    inFlight.set(startFrame, { promise, startedAt: fetchStart });
     return promise;
   };
 
@@ -194,7 +222,16 @@ export function windowedFrameSource(
     isBuffering: (frame: number): boolean => {
       if (frame < 0 || frame >= totalFrames) return false;
       const start = windowStartOf(frame);
-      return !cache.has(start) && !inFlight.has(start);
+      if (cache.has(start)) return false; // 已就绪：无论别处怎样都不算缓冲
+      // 在途窗口分两种，必须分开判：
+      // - 刚发起（< WINDOW_IN_FLIGHT_STALL_MS）：正常的取窗在途，画面马上就来，
+      //   报 buffering 会让每次普通 seek 都闪一下指示条（抗闪烁口径）；
+      // - 久未返回（≥ 阈值）：请求已悬挂，它永远不会自己兑现，此时"在途"与
+      //   "根本没有请求"对用户是同一件事——都是画面停住、且没有任何东西在
+      //   路上能把它救回来。这正是"冻结但无声"的成因，必须报 true。
+      const entry = inFlight.get(start);
+      if (entry) return performance.now() - entry.startedAt >= WINDOW_IN_FLIGHT_STALL_MS;
+      return true; // 既不在缓存也不在途：窗口未就绪（既有语义）
     },
     ensureRange: (startFrame: number, endFrameExclusive: number, signal?: AbortSignal): Promise<void> => {
       if (disposed || endFrameExclusive <= startFrame) return Promise.resolve();
@@ -220,7 +257,7 @@ export function windowedFrameSource(
     dispose: (): void => {
       disposed = true;
       cache.clear();
-      inFlight.clear();
+      inFlight.clear(); // 条目内含起点：清空即无残留（销毁后不得留下任何悬挂记录）
       abortedStarts.clear();
       totalBytes = 0;
     },
