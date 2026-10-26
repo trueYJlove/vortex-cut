@@ -133,6 +133,112 @@ describe("窗口请求悬挂判定（在途时长阈值）", () => {
   });
 });
 
+/** 在途额度回收（吞吐修复）：悬挂窗口放弃后腾出 maxInFlight 名额。
+ *
+ * 缺陷形态：fetchWindow 永不落定 ⇒ .finally 永不执行 ⇒ 该条目永久占着
+ * maxInFlight（默认仅 2）。之后每次 loadWindow 都在"在途已满"分支被直接
+ * 拒绝排队——一个悬挂窗口就把整条预览的取窗能力削掉一半，且越积越死。
+ * 本组用例钉住的是：**只有**在"新请求需要名额"且"既有条目已超过
+ * WINDOW_IN_FLIGHT_STALL_MS"时才放弃；正常流量一律不动（第 3 条）。 */
+function controllableSource(totalFrames: number, opts: { maxInFlight?: number; cacheBytes?: number } = {}) {
+  const calls: number[] = [];
+  /** start -> 该窗口历次尝试的兑现句柄（同一窗口可能被放弃后重发）。 */
+  const attempts = new Map<number, Array<() => void>>();
+  const source = windowedFrameSource(MANIFEST, totalFrames, {
+    maxInFlight: opts.maxInFlight,
+    cacheBytes: opts.cacheBytes,
+    fetchWindow: (start, count) => {
+      calls.push(start);
+      return new Promise(resolve => {
+        const settle = () => resolve({
+          manifest_id: MANIFEST,
+          start_frame: start,
+          frame_count: count,
+          frames: Array.from({ length: count }, (_, i) => {
+            const n = start + i;
+            return { n, t_us: n * 33_333, main: { kind: "black" }, overlays: [], captions: [] } as unknown as Record<string, unknown>;
+          }),
+        });
+        const list = attempts.get(start);
+        if (list) list.push(settle);
+        else attempts.set(start, [settle]);
+      });
+    },
+  });
+  /** 兑现某窗口的第 index 次尝试，并把 .then/.finally 链跑干净。 */
+  const settle = async (start: number, index = 0): Promise<void> => {
+    attempts.get(start)?.[index]?.();
+    await vi.advanceTimersByTimeAsync(0);
+  };
+  return { source, calls, settle };
+}
+
+describe("在途额度回收（悬挂窗口放弃，正常流量不动）", () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("悬挂超过阈值后不再占用在途额度：新窗口请求仍能发出（吞吐修复）", async () => {
+    const { source, calls } = controllableSource(3 * W, { maxInFlight: 2 });
+    void source.ensureRange!(0, W); // 窗 0 发起后悬挂
+    void source.ensureRange!(W, 2 * W); // 窗 W 发起后悬挂 —— 在途 2/2 已满
+    expect(calls).toEqual([0, W]);
+
+    // 阈值内：第三笔一律被拒（既有语义：不排队，seek 优先当前目标）
+    void source.ensureRange!(2 * W, 3 * W);
+    expect(calls).toEqual([0, W]);
+
+    // 越过阈值：两个已悬挂的窗口在"新请求需要名额"时可被放弃，额度回收
+    await vi.advanceTimersByTimeAsync(STALL_MS);
+    void source.ensureRange!(2 * W, 3 * W);
+    expect(calls).toEqual([0, W, 2 * W]); // 改动前恒为 [0, W]：一个悬挂窗口即饿死后续请求
+  });
+
+  it("被放弃窗口的迟到响应不入缓存（迟到投影不得污染更新数据）", async () => {
+    const { source, calls, settle } = controllableSource(3 * W, { maxInFlight: 2 });
+    void source.ensureRange!(0, W); // 窗 0 第 1 次尝试：悬挂
+    void source.ensureRange!(W, 2 * W); // 在途拉满
+    await vi.advanceTimersByTimeAsync(STALL_MS);
+    void source.ensureRange!(2 * W, 3 * W); // 需要名额 ⇒ 窗 0 被放弃
+    expect(calls).toEqual([0, W, 2 * W]);
+
+    // 迟到响应此刻才到：条目已被放弃，绝不可入缓存
+    await settle(0, 0);
+    expect(source.getFrame(0)).toBeUndefined();
+    expect(source.buffered()).toEqual([]);
+
+    // 放弃后该窗口仍可正常重取（额度已回收，第 2 次尝试照常）
+    void source.ensureRange!(0, 1);
+    expect(calls.filter(start => start === 0)).toHaveLength(2);
+    await settle(0, 1);
+    expect(source.getFrame(0)).toBeDefined(); // 新响应照常入缓存 —— 只丢被放弃那一笔
+    expect(source.buffered()).toEqual([[0, W]]);
+  });
+
+  it("正常快速取窗一律不被放弃（回归闸门）：满载下的普通突发流量全部入缓存", async () => {
+    const { source, calls, settle } = controllableSource(3 * W, { maxInFlight: 2, cacheBytes: 32 * 1024 * 1024 });
+    // 第一段：在途被两条**年轻**条目占满（远未到阈值）。第三笔被拒是既有语义，
+    // 关键在于这两条年轻条目**不得**被当作可放弃对象丢掉。
+    void source.ensureRange!(0, W);
+    void source.ensureRange!(W, 2 * W);
+    void source.ensureRange!(2 * W, 3 * W); // 满载被拒（不排队）
+    expect(calls).toEqual([0, W]);
+    await vi.advanceTimersByTimeAsync(50); // 实测正常取窗 ~50-70ms
+    await settle(0);
+    await settle(W);
+    expect(source.getFrame(0)).toBeDefined(); // 年轻条目照常落缓存（无一被放弃）
+    expect(source.getFrame(W)).toBeDefined();
+
+    // 第二段：额度回来后第三笔照常发出并入缓存
+    void source.ensureRange!(2 * W, 3 * W);
+    expect(calls).toEqual([0, W, 2 * W]);
+    await settle(2 * W);
+    expect(source.getFrame(2 * W)).toBeDefined();
+    // 每窗恰好一笔请求：正常路径没有发生任何"放弃 ⇒ 重发"
+    expect(calls).toEqual([0, W, 2 * W]);
+    expect(source.buffered()).toEqual([[0, 3 * W]]);
+  });
+});
+
 /** 端到端：暂停态 + 目标窗口请求悬挂。会话侧 targetBuffering 对"取不到帧"
  *  直接判 true（getFrame 缺失分支），300ms 去抖后点亮指示条——这条用例证明
  *  悬挂窗口在**暂停、无人操作**时也不会无声冻结，且窗口到达后提示自行消失。

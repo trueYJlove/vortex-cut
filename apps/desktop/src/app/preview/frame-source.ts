@@ -74,6 +74,28 @@ interface WindowEntry {
   estimatedBytes: number;
 }
 
+/** 一笔在途窗口请求 = 一次**尝试**（C20：悬挂放弃的判定单位）。
+ *
+ * 为什么把起点、abandoned 标记和 promise 合成一条记录，而不是另开一张
+ * "已放弃窗口"表：放弃之后同一窗口可以立刻重发，于是同一 startFrame 上会
+ * 同时存在两条**活着的**尝试——旧那条仍在主进程里跑（撤不回来），新那条
+ * 才是要用的。若按 startFrame 记"已放弃"，新尝试的**正常**响应会被当成迟到
+ * 响应丢掉，而旧尝试的**陈旧**响应反倒落进缓存——两个方向都错。把 abandoned
+ * 挂在尝试上，判定永远落在"这一笔"而不是"这个窗口"。
+ * 合成一条记录也延续了下面 inFlight 注释里的同一条纪律：加入/移除在途、
+ * 记录/遗忘起点、标记/清除放弃，必须是**同一个操作**。
+ * 与既有的 abortedStarts 集合**并存**且理由不同：那份按 startFrame 记"这一窗
+ * 被 abort 过"，abort 是调用方意图，与在途时长无关；abandoned 记的是"这一笔
+ * 请求的并发额度已被回收"，只由悬挂阈值触发。两个判定位都必须在入缓存之前。 */
+interface InFlightAttempt {
+  startFrame: number;
+  /** 发起时刻（performance.now()）：isBuffering 与放弃判定共用同一计时起点。 */
+  startedAt: number;
+  /** 已放弃：迟到响应不得入缓存（见 loadWindow 的 then 分支）。 */
+  abandoned: boolean;
+  promise: Promise<void>;
+}
+
 const DEFAULT_CACHE_BYTES = 8 * 1024 * 1024;
 const DEFAULT_MAX_IN_FLIGHT = 2;
 /** 在途窗口判定为「已悬挂」的阈值（毫秒）。
@@ -104,7 +126,13 @@ const FALLBACK_FRAME_BYTES = 4096;
  *   "既不在缓存也不在途"的帧区间；在途但**已悬挂超过阈值**同样算 buffering
  *   （见 WINDOW_IN_FLIGHT_STALL_MS：请求永不兑现 = 和没有请求同等的无声定格）；
  * - 已 abort 的 ensureRange 取消**未发出**的请求；已发出的请求照常
- *   完成（响应仍可入缓存——合法数据，只是调用方已不等待）。
+ *   完成（响应仍可入缓存——合法数据，只是调用方已不等待）。abort 本身
+ *   **不**释放该请求占的在途名额——名额由下面那条悬挂放弃回收；
+ * - 悬挂放弃（见 WINDOW_IN_FLIGHT_STALL_MS）：在途超过阈值**且**新窗口请求
+ *   正需要名额时，那一笔在途记录作废——名额当场释放，其迟到响应一律丢弃、
+ *   不入缓存（陈旧投影覆盖更新数据比缺帧危险得多）。放弃只作用于渲染侧的
+ *   簿记：IPC 无取消通道，主进程那次取数撤不回来，它照常跑完、结果被扔掉。
+ *   正常流量（实测 ~50-70ms/窗，阈值 40 倍开外）永远不满足放弃条件。
  */
 export function windowedFrameSource(
   manifestId: string,
@@ -116,7 +144,7 @@ export function windowedFrameSource(
   const maxInFlight = options.maxInFlight ?? DEFAULT_MAX_IN_FLIGHT;
   const frameBytesOf = options.frameBytes ?? (() => FALLBACK_FRAME_BYTES);
   const cache = new Map<number, WindowEntry>(); // LRU：Map 迭代序 = 最旧在前
-  /** 在途窗口：startFrame -> { promise, startedAt }。
+  /** 在途窗口：startFrame -> 该窗口**当前**那一笔尝试。
    *
    *  **为什么把时间戳放进条目、而不是另开一张 startFrame -> timestamp 表**：
    *  悬挂判定要的是"在途**多久**"，而 inFlight 原本只回答"在途与否"。两张表
@@ -125,8 +153,14 @@ export function windowedFrameSource(
    *   - 漏删时间戳 ⇒ 窗口重取时带着旧起点，一次正常取窗立刻被判成悬挂（误报）；
    *   - 漏删 inFlight ⇒ 原缺陷本身（悬挂记录永存，还占并发额度）。
    *  合成一条记录后，"加入/移除在途"与"记录/遗忘起点"是**同一个操作**，
-   *  上述漂移在结构上不可能发生——不靠纪律，靠类型。 */
-  const inFlight = new Map<number, { promise: Promise<void>; startedAt: number }>();
+   *  上述漂移在结构上不可能发生——不靠纪律，靠类型。
+   *  放弃后同一窗口可立刻重发（见 InFlightAttempt）：那次重发会覆盖本表里的
+   *  条目，于是旧尝试收摊时必须**按身份**删（见 forgetAttempt），否则会把
+   *  新尝试的在途记录一起抹掉——又是一类"删了一半"。 */
+  const inFlight = new Map<number, InFlightAttempt>();
+  /** 既有语义（与悬挂放弃**正交**，两者都判在响应入缓存之前）：abort 时对
+   *  "尚未发出"的窗口留一个标记，这些窗口此前若有请求在途、其响应到达后
+   *  不入缓存。保留原样——本次收紧的是"在途名额回收"，不动 escape 语义。 */
   const abortedStarts = new Set<number>();
   let disposed = false;
   let totalBytes = 0;
@@ -163,14 +197,50 @@ export function windowedFrameSource(
   }
   evictIfNeeded();
 
+  /** 收摊：只摘**这一笔**尝试。旧尝试被放弃后该窗口可能已重发，此时表里
+   *  的条目属于新尝试——按身份（而非 startFrame）删，才不会把新尝试的在途
+   *  记录一起抹掉。 */
+  const forgetAttempt = (attempt: InFlightAttempt): void => {
+    if (inFlight.get(attempt.startFrame) === attempt) inFlight.delete(attempt.startFrame);
+  };
+
+  /** 让出名额：放弃**最老**的悬挂在途尝试（> WINDOW_IN_FLIGHT_STALL_MS）。
+   *
+   * **为什么只在"新请求需要名额"时放弃**：eager 放弃会让任何一次慢窗口
+   * 丢掉自己刚发起的请求——重发一遍，白白多一次 IPC，还可能把马上就到的好
+   * 数据扔掉。放弃的动作因此绑在"此刻确实挤不进去"这一刻，其余时间一律不动。
+   * **为什么只挑最老的**：在途上限只有 2，腾出**一个**名额就够当前请求进来；
+   * 一次放弃两笔会让画面同时丢掉两个窗口的在途，收益为零、损失翻倍。
+   * 返回是否有名额被释放。
+   * 遥测 request=4（放弃，duration=悬挂时长）、5（被放弃尝试的迟到响应）：
+   * 与既有 -1/1/2/3 并列，方便回放里把"因满载拒绝"和"因悬挂放弃"分开看。 */
+  const abandonStalledAttempt = (): boolean => {
+    const now = performance.now();
+    let oldest: InFlightAttempt | undefined;
+    for (const attempt of inFlight.values()) {
+      // 阈值内的一律不碰：正常取窗 ~50-70ms，40 倍开外；只有真的悬挂
+      // （解码/磁盘/IPC 已卡死，等到地老天荒也不会自己好）才进入候选。
+      if (now - attempt.startedAt < WINDOW_IN_FLIGHT_STALL_MS) continue;
+      if (!oldest || attempt.startedAt < oldest.startedAt) oldest = attempt;
+    }
+    if (!oldest) return false;
+    // 名额当场释放：条目脱离在途簿记 ⇒ 不再计入 maxInFlight，也不再被
+    // single-flight 复用（该窗口下一次请求会发一笔**新**尝试）。
+    oldest.abandoned = true;
+    forgetAttempt(oldest);
+    editorPerf.record("window_fetch", now - oldest.startedAt, 4, oldest.startFrame, 0, oldest.startFrame);
+    return true;
+  };
+
   const loadWindow = (startFrame: number, signal?: AbortSignal): Promise<void> => {
     if (disposed || cache.has(startFrame)) return Promise.resolve();
     // single-flight：同一窗口的第二次请求复用既有在途 promise（不重复发起）。
     const existing = inFlight.get(startFrame);
     if (existing) return existing.promise;
     if (signal?.aborted) return Promise.resolve();
-    if (inFlight.size >= maxInFlight) {
-      // 在途已满：不为该窗口排队（seek 优先当前目标；调用方下次 ensureRange 重试）。
+    if (inFlight.size >= maxInFlight && !abandonStalledAttempt()) {
+      // 在途已满且**没有**可放弃的悬挂条目：不为该窗口排队
+      // （seek 优先当前目标；调用方下次 ensureRange 重试）。
       // 遥测 request=-1 标记"拒绝在途"（回放分析用：停滞窗口是否因在途满载未发起）。
       editorPerf.record("window_fetch", 0, 0, -1, 0, startFrame);
       return Promise.resolve();
@@ -178,9 +248,21 @@ export function windowedFrameSource(
     const count = Math.min(windowFrames, totalFrames - startFrame);
     if (count < 1) return Promise.resolve();
     const fetchStart = performance.now();
-    const promise = options.fetchWindow(startFrame, count, signal ?? new AbortController().signal)
+    // 先立记录、后接 promise：.then/.finally 闭包捕获的是**这一笔**尝试本身
+    // （而不是事后按 startFrame 查表回来的"此刻那条"）——放弃与重发交错时，
+    // 判定才落在"这一笔"上。promise 字段先占位，下一行立即覆盖。
+    const attempt: InFlightAttempt = { startFrame, startedAt: fetchStart, abandoned: false, promise: Promise.resolve() };
+    attempt.promise = options.fetchWindow(startFrame, count, signal ?? new AbortController().signal)
       .then(response => {
         if (disposed) return;
+        // 已放弃的尝试：迟到响应一律丢弃。**必须在入缓存之前判**——陈旧投影
+        // 覆盖更新数据（撤销/重做、快速 seek 后旧窗口晚到）比缺帧危险得多，
+        // 画面会停在一份再也刷不新的旧结果上。判定落在**这一笔尝试**而不是
+        // startFrame：放弃后该窗口可能已重发，那一笔的响应必须照常入缓存。
+        if (attempt.abandoned) {
+          editorPerf.record("window_fetch", performance.now() - fetchStart, 5, startFrame, 0, startFrame);
+          return;
+        }
         if (response.manifest_id !== manifestId) {
           editorPerf.record("window_fetch", performance.now() - fetchStart, 1, startFrame, 0, startFrame);
           return; // 失配丢弃
@@ -207,9 +289,9 @@ export function windowedFrameSource(
       // 落定收摊：条目连同其中的起点一并消失（单条记录 ⇒ 不存在"删一半"）。
       // 漏了这一行会让该窗口永久停留在"在途"，既占并发额度，又在超过阈值后
       // 恒报 buffering——已到达的窗口反而显示"缓冲中"。
-      .finally(() => { inFlight.delete(startFrame); });
-    inFlight.set(startFrame, { promise, startedAt: fetchStart });
-    return promise;
+      .finally(() => { forgetAttempt(attempt); });
+    inFlight.set(startFrame, attempt);
+    return attempt.promise;
   };
 
   return {
@@ -248,6 +330,9 @@ export function windowedFrameSource(
       const pending = [...starts]
         .filter(start => !cache.has(start))
         .sort((a, b) => Math.abs(a - first) - Math.abs(b - first)); // 目标优先
+      // 已 abort：未发出的请求直接不发（既有语义）。已发出的请求照常跑完
+      // （IPC 无取消通道），其响应是否入缓存由那份 abortedStarts 标记与
+      // 那一笔尝试自身的 abandoned 标记分别决定——两者互不替代。
       if (signal?.aborted) {
         for (const start of pending) if (!inFlight.has(start)) abortedStarts.add(start);
         return Promise.resolve();
