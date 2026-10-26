@@ -51,6 +51,8 @@ const projectCanvasPresets: Record<string, { width: number; height: number; fps_
   "34": { width: 1080, height: 1440, fps_num: 30, fps_den: 1 },
 };
 const presets: { value: CaptionPresetId; label: string }[] = [{ value: "default-bottom", label: "默认底部" }, { value: "game-safe-bottom", label: "游戏安全区" }, { value: "high-contrast", label: "高对比" }];
+/** P195：时间线装载瞬时失败的退避序列（下标即第几次重试）——首次 + 2 次，之后如实报错。 */
+const timelineRetryDelaysMs = [1000, 4000];
 const formatTime = (us: number) => {
   const totalSeconds = us / 1_000_000;
   const hours = Math.floor(totalSeconds / 3600);
@@ -388,6 +390,13 @@ export function App() {
   const projectNameProjectId = useRef<Project["project_id"] | undefined>(undefined);
   const projectNameDirty = useRef(false);
   const timelineLoadEpoch = useRef(0);
+  // P195：「装载在途作废」的专用代次，与 timelineLoadEpoch（草稿/Revision 作废）
+  // 故意分开：updated_at 会被改名/归档/重开等与时间线无关的写入推进
+  // （projects.py 的 UPDATE projects），若共用代次，排队中的草稿会在这些
+  // 时刻被当成"内容已取代"静默丢弃。
+  const timelineFetchSeq = useRef(0);
+  // P195：时间线装载的瞬时失败重试预算，按项目重置（切项目再来一轮 1s/4s）。
+  const timelineRetryRef = useRef<{ projectId: Project["project_id"] | undefined; attempts: number }>({ projectId: undefined, attempts: 0 });
   // 新建项目自动补建空时间线（剪映/喵影式：项目即有时间线，无需手动创建）。
   // 仅对新建项目生效——存量无时间线项目仍走菜单「创建空时间线」。
   const autoProvisionProjectId = useRef<Project["project_id"] | undefined>(undefined);
@@ -716,7 +725,9 @@ export function App() {
     closePatch(); setRevisionOpen(false); setRevisionDiff(undefined);
     setReframeSelections({}); setReframePreviews({}); setReframePending({}); setReframePlayback(undefined); setReframeDirectoryGrant(undefined); setActiveReframeBatch(undefined); setReframeError("");
     let active = true;
-    const epoch = ++timelineLoadEpoch.current;
+    // 项目边界推进装载代次：在途时间线装载（见下方独立 effect）与挂起草稿
+    // 都按代次作废，避免旧项目的返回写进新项目。
+    timelineLoadEpoch.current += 1;
     // A08：切项目推进转录队列代次——在途 getTranscript 的旧返回不再写入
     // 新项目状态（viewTranscript 按 epoch 丢弃）；已缓存正文随项目清空。
     transcriptQueueRef.current?.advanceGeneration();
@@ -725,23 +736,67 @@ export function App() {
     setViewingTranscript(undefined);
     void loadProjectData(project).catch(error => active && showNotice(safeErrorMessage(error, "项目数据加载失败，请刷新后重试。")));
     void loadRenderData(project).catch(error => active && showNotice(safeErrorMessage(error, "渲染记录加载失败，请刷新后重试。")));
-    void window.desktop.getTimeline(project.project_id).then(value => { if (active && epoch === timelineLoadEpoch.current) { setTimeline(value); setWorking(value.current_revision.document); setSelection(null); } }).catch(async error => {
-      if (!active || epoch !== timelineLoadEpoch.current) return;
-      const code = errorCode(error);
-      // 新建项目尚未有时间线：自动补建空时间线（剪映/喵影式，项目即有时间线），无需手动创建。
-      if (autoProvisionProjectId.current === project.project_id && (code.includes("TIMELINE_NOT_FOUND") || code.includes("404"))) {
-        autoProvisionProjectId.current = undefined;
-        try {
-          const value = await window.desktop.createTimeline({ project_id: project.project_id, timeline: { schema_version: 1, source: { kind: "empty" }, default_layout: "blurred_background", caption_preset_id: "default-bottom" } });
-          if (active && epoch === timelineLoadEpoch.current) { setTimeline(value); setWorking(value.current_revision.document); setSelection(null); }
-        } catch { if (active && epoch === timelineLoadEpoch.current) showNotice(safeErrorMessage(error, "时间线加载失败，请刷新后重试。")); }
-        return;
-      }
-      setTimeline(undefined); setWorking(undefined);
-      if (!code.includes("TIMELINE_NOT_FOUND") && !code.includes("404")) showNotice(safeErrorMessage(error, "时间线加载失败，请刷新后重试。"));
-    });
     return () => { active = false; };
   }, [project?.project_id]);
+  // P195：时间线装载独立成 effect，键为 project_id + updated_at。
+  // 为什么不并进上面的装配 effect：那里带着整套项目级清理与 assets 重拉，而
+  // 每写一次时间线 Revision 都会推进 projects.updated_at（Core timeline.py 的
+  // UPDATE projects）——并进去会让每次保存都清空界面、打断正在编辑的草稿与
+  // 选区。独立 effect 只用 updated_at 做「该重新对账了」的信号。
+  // 为什么需要 updated_at：旧装配只在 project_id 变化时 getTimeline，首个
+  // 装载若返回 TIMELINE_NOT_FOUND（轮询在 createProject 与 createTimeline
+  // 之间认领了新项目）就再没有机会重载，界面永久停在「时间线为空」。
+  useEffect(() => {
+    if (!project) return;
+    const projectId = project.project_id;
+    let active = true;
+    // 只推进装载代次：同项目内 updated_at 变化即作废旧的在途装载；
+    // 项目切换另由 cleanup 的 active=false 兜住。
+    const seq = ++timelineFetchSeq.current;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    // 重试预算按项目重置：换项目就是新一轮 1s / 4s 退避。
+    if (timelineRetryRef.current.projectId !== projectId) timelineRetryRef.current = { projectId, attempts: 0 };
+    const load = async () => {
+      try {
+        const value = await window.desktop.getTimeline(projectId);
+        if (!active || seq !== timelineFetchSeq.current) return;
+        timelineRetryRef.current.attempts = 0;
+        // 幂等短路：updated_at 推进同样会重入本 effect，内容没变就不能写 state
+        // （否则保存一次 Revision 就把本地 working 覆盖回服务端版本，编辑中断）。
+        const current = timelineRef.current;
+        if (current?.project_id === projectId && current.current_revision.timeline_revision_id === value.current_revision.timeline_revision_id) return;
+        setTimeline(value); setWorking(value.current_revision.document); setSelection(null);
+      } catch (error) {
+        if (!active || seq !== timelineFetchSeq.current) return;
+        const code = errorCode(error);
+        const notFound = code.includes("TIMELINE_NOT_FOUND") || code.includes("404");
+        // 新建项目尚未有时间线：自动补建空时间线（剪映/喵影式，项目即有时间线），无需手动创建。
+        if (notFound && autoProvisionProjectId.current === projectId) {
+          autoProvisionProjectId.current = undefined;
+          try {
+            const value = await window.desktop.createTimeline({ project_id: projectId, timeline: { schema_version: 1, source: { kind: "empty" }, default_layout: "blurred_background", caption_preset_id: "default-bottom" } });
+            if (active && seq === timelineFetchSeq.current) { setTimeline(value); setWorking(value.current_revision.document); setSelection(null); }
+          } catch { if (active && seq === timelineFetchSeq.current) showNotice(safeErrorMessage(error, "时间线加载失败，请刷新后重试。")); }
+          return;
+        }
+        // 时间线确实还不存在：清空后不做定时重试——它被建出来时 projects.updated_at
+        // 会推进，本 effect 自然重入，那就是愈合路径。
+        if (notFound) { setTimeline(undefined); setWorking(undefined); return; }
+        // 瞬时失败：限次退避重试（1s、4s），耗尽后才如实清空并报错——
+        // 旧实现首次失败就清空，一次抖动等于整条时间线从界面消失。
+        const attempts = timelineRetryRef.current.attempts;
+        if (attempts < timelineRetryDelaysMs.length) {
+          timelineRetryRef.current.attempts = attempts + 1;
+          retryTimer = setTimeout(() => { void load(); }, timelineRetryDelaysMs[attempts]);
+          return;
+        }
+        setTimeline(undefined); setWorking(undefined);
+        showNotice(safeErrorMessage(error, "时间线加载失败，请刷新后重试。"));
+      }
+    };
+    void load();
+    return () => { active = false; if (retryTimer !== undefined) clearTimeout(retryTimer); };
+  }, [project?.project_id, project?.updated_at]);
   useEffect(() => {
     if (!runtimeReady) return;
     // A08：轮询改「上次请求结束后再 setTimeout」（RequestScheduler）：
@@ -1237,7 +1292,10 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [previewMode, syntheticNotice, syntheticTicketsReady, project?.project_id, syntheticMediaUrls]);
 
-  const acceptState = (next: TimelineState) => { timelineLoadEpoch.current += 1; setTimeline(next); setWorking(next.current_revision.document); setSaveState("已保存"); setNotice(""); };
+  // 代次推进 + 装载代次一并推进：既作废排队中的草稿（patch 已涵盖其内容），
+  // 也作废在途装载——否则一次在 patch 之前发出的 getTimeline 晚到，会把这
+  // 刚被接受的新 Revision 回滚成它取到的旧 Revision。
+  const acceptState = (next: TimelineState) => { timelineLoadEpoch.current += 1; timelineFetchSeq.current += 1; setTimeline(next); setWorking(next.current_revision.document); setSaveState("已保存"); setNotice(""); };
   // 提示条统一入口：显式分级（默认错误红色），并在数秒后自动消失；连续提示会重置计时。
   const showNotice = useCallback((text: string, tone: NoticeTone = "error") => { setNotice(text ? { text, tone } : ""); }, []);
   useEffect(() => {

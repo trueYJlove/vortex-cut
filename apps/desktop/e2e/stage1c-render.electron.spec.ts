@@ -51,17 +51,9 @@ test("1C-Render 真实 Electron 权威预览、Artifact Ticket 与最终导出",
     });
     await expectCurrentProject(page, "1C Render E2E");
     await selectProject(page, setup.project_id);
-    // 装配竞态（不是选择器脱节）：上面 createProject/createTimeline 走 IPC，
-    // 而 App 的项目装配 effect 只依赖 project_id（App.tsx:708-744）。启动后的
-    // 轮询若在 createProject 与 createTimeline 之间认领了这个项目，首个
-    // getTimeline 就返回 TIMELINE_NOT_FOUND，此后同一 project_id 不再触发装配 →
-    // renderer 的 timeline 永久为空 → renderDisabledReason = "时间线为空"
-    // （App.tsx:2197）恒成立。reload 重跑一次装配即可取全项目数据
-    // （实测约 150ms 内出现片段按钮），与 m2-b1-speed.electron.spec.ts:70 的既有做法一致。
-    await page.reload();
-    await page.waitForFunction(() => Boolean(window.desktop?.getRuntime));
-    await page.evaluate(() => window.desktop.getRuntime());
-    await expectCurrentProject(page, "1C Render E2E");
+    // P195：装配竞态的规避（reload 重跑一次装配）已移除——时间线装载现在是
+    // 独立 effect，键为 project_id + updated_at；createTimeline 会推进
+    // projects.updated_at，因此首个 TIMELINE_NOT_FOUND 之后会自动愈合。
     // 时间线真正装载的判据：无障碍片段列表由 clips 渲染（TimelineCanvas.tsx:3592），
     // 它出现即证明 renderer 拿到了带片段的 Revision，而非仍在空窗期。
     await expect(page.locator(".timeline-a11y-clips button[aria-label^='Clip ']").first()).toBeAttached({ timeout: 30_000 });
