@@ -1,0 +1,42 @@
+{
+ "control": {
+  "total_us": 41378005,
+  "expected_frames": 1241,
+  "reached_end": true,
+  "dropped": 0,
+  "rate": 0,
+  "decode_p50": 3,
+  "decode_p95": 6.7,
+  "seg_output_p95": 22.3,
+  "window_fetch_n": 2,
+  "wf_p50": 24,
+  "wf_p95": 24,
+  "wf_max": 29,
+  "compose_n": 1220,
+  "gap_p50": 33.5,
+  "gap_p95": 33.1,
+  "gaps_ge100": 0,
+  "gaps_ge1000": 0,
+  "span_s": 40.6
+ },
+ "max": {
+  "total_us": 869417007,
+  "expected_frames": 26083,
+  "reached_end": false,
+  "dropped": 6086,
+  "rate": 23.333,
+  "decode_p50": 0.4,
+  "decode_p95": 95.4,
+  "seg_output_p95": 245.6,
+  "window_fetch_n": 46,
+  "wf_p50": 2394,
+  "wf_p95": 6592,
+  "wf_max": 10847,
+  "compose_n": 8359,
+  "gap_p50": 33,
+  "gap_p95": 33.4,
+  "gaps_ge100": 283,
+  "gaps_ge1000": 277,
+  "span_s": 925.9
+ }
+}

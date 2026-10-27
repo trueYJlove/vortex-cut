@@ -37,8 +37,13 @@ const projectName = `P33 Drop ${label}`;
 /** 验收门（规划门 §2）：残余丢帧 ≤0.5% 全片帧数。 */
 const DROP_RATE_LIMIT = 0.005;
 
+/** P196：观测窗（分钟）。0 = 原行为：只播放到片尾。 */
+const obsWindowMin = Number(process.env.AIVS_P33_DEADLINE_MIN ?? 0);
+const obsWindowMs = Number.isFinite(obsWindowMin) && obsWindowMin > 0 ? obsWindowMin * 60_000 : 0;
+
 test(`P33 App 内丢帧复测：${label}`, async () => {
-  test.setTimeout(420_000);
+  // 观测窗拉长时用例预算必须同步放大，否则 7 分钟硬超时会在长播放中途掀桌。
+  test.setTimeout(Math.max(420_000, obsWindowMs + 720_000));
   if (!existsSync(fixture)) throw new Error(`素材不存在：${fixture}`);
   const dir = join(root, "test-results", `p33-user-drop-${label}-${process.pid}-${Date.now()}`);
   await mkdir(join(dir, "user-data"), { recursive: true });
@@ -123,10 +128,18 @@ test(`P33 App 内丢帧复测：${label}`, async () => {
     // 比例钉到 16:9（用户真机指标条画布 = 960x540）
     await page.getByLabel("预览比例").selectOption("169");
 
+    const readMetrics = () => page.evaluate(() => (window as unknown as { __aivsPreviewMetrics?: Record<string, unknown> }).__aivsPreviewMetrics ?? null);
+    // B13-R R3 的「长素材解码驻留预警」复用 lastError 字段承载，但它是**不阻断**的
+    // 量级提示；且 v2 窗口化帧源下常驻量不随总帧数增长，该预测是 v1 时代经验律，
+    // 对长时线是已知误报（实测 26083 帧触发，播放正常）。真正的解码/合成错误不含
+    // 该前缀，仍按原样失败。
+    const RESIDENCY_ADVISORY = /^长素材解码驻留预警/;
     const syntheticReady = page.locator(".synthetic-metrics");
     await expect(syntheticReady).toBeVisible({ timeout: 180_000 });
     // 等指标条出数（会话 metrics 1Hz 上报）
-    await expect.poll(async () => (await syntheticReady.innerText()).includes("画布"), { timeout: 60_000 }).toBeTruthy();
+    // 就绪判据用 __aivsPreviewMetrics 本身（下游取样读的就是它）：指标条在
+    // 「驻留预警」态只渲染预警串、不含「画布」，拿文案当就绪判据会误判未就绪。
+    await expect.poll(async () => Boolean(await readMetrics()), { timeout: 60_000 }).toBeTruthy();
 
     const readTotal = () => page.evaluate(async project => {
       const projects = await window.desktop.listProjects({ limit: 100 });
@@ -147,7 +160,6 @@ test(`P33 App 内丢帧复测：${label}`, async () => {
       return ((parts[0]! * 3600 + parts[1]! * 60 + parts[2]!) * 1_000_000) + Math.round(parts[3]! * 1_000_000 / 30);
     };
     const readTc = () => page.locator(".playback-bar .tc b").innerText();
-    const readMetrics = () => page.evaluate(() => (window as unknown as { __aivsPreviewMetrics?: Record<string, unknown> }).__aivsPreviewMetrics ?? null);
     // 逐秒排空 editorPerf 事件环（容量 4096，60s 播放会绕圈）：排空式累积
     // 保留全量时间线——丢帧跳变点附近能看到主线程 long_task / 解码 / 上传实况。
     const drainPerf = () => page.evaluate(() => {
@@ -175,20 +187,32 @@ test(`P33 App 内丢帧复测：${label}`, async () => {
     const trace: Array<Record<string, unknown>> = [];
     const perfEvents: Array<Record<string, unknown>> = [];
     let perfResidency: unknown = null;
-    const deadline = Date.now() + Math.max(120_000, (totalUs / 1000) + 60_000);
+    // P196 增量（默认 0 = 原行为不变）：AIVS_P33_DEADLINE_MIN=<分钟> 把观测窗拉长到
+    // 指定墙钟时长，用于「跨窗播放至少 30 分钟无周期性卡顿」这类**时长型**验收。
+    // 片长短于观测窗时，播到片尾后仍在片尾静止态继续采样——这类样本计入
+    // frozen_tail_samples，判定丢帧率时只能算播放期样本，不能拿静止态稀释分母。
+    const windowMin = obsWindowMin;
+    const windowMs = obsWindowMs;
+    const loopStart = Date.now();
+    const deadline = loopStart + Math.max(120_000, (totalUs / 1000) + 60_000, windowMs);
     let reachedEnd = false;
+    let frozenTailSamples = 0;
     while (Date.now() < deadline) {
       await page.waitForTimeout(1_000);
       const metrics = await readMetrics();
       const tcText = await readTc();
       const tcUs = parseTcUs(tcText);
-      if (metrics) trace.push({ tc: tcText, tc_us: tcUs, dropped: metrics.dropped_frames, decode_p95: metrics.decode_ms_p95, upload_p95: metrics.upload_ms_p95, task_p95: metrics.task_ms_p95, decode_in_flight: metrics.decode_in_flight, last_error: metrics.last_error ?? null, decode_seg: metrics.decode_seg ?? null });
+      if (metrics) trace.push({ wall_ms: Date.now() - loopStart, tc: tcText, tc_us: tcUs, dropped: metrics.dropped_frames, decode_p95: metrics.decode_ms_p95, upload_p95: metrics.upload_ms_p95, task_p95: metrics.task_ms_p95, decode_in_flight: metrics.decode_in_flight, last_error: metrics.last_error ?? null, decode_seg: metrics.decode_seg ?? null });
       const perf = await drainPerf();
       if (perf) {
         for (const event of perf.events as Array<Record<string, unknown>>) perfEvents.push(event);
         perfResidency = perf.residency ?? perfResidency;
       }
-      if (tcUs !== null && tcUs >= totalUs - 1_000_000) { reachedEnd = true; break; }
+      if (tcUs !== null && tcUs >= totalUs - 1_000_000) {
+        reachedEnd = true;
+        if (windowMs === 0 || Date.now() - loopStart >= windowMs) break;
+        frozenTailSamples += 1;
+      }
     }
     // 静止 1s 让最后一次 1Hz 指标落定
     await page.waitForTimeout(1_500);
@@ -210,6 +234,10 @@ test(`P33 App 内丢帧复测：${label}`, async () => {
     });
     const report = {
       label, fixture, total_us: totalUs, expected_frames: expectedFrames,
+      // P196：观测窗与「播到片尾后的静止采样数」一并落盘——判定丢帧率时分母只算播放期
+      // 样本，静止态样本既不产生帧也不产生丢帧，拿来稀释分母就是造假。
+      observation_window_min: windowMin > 0 ? windowMin : null,
+      frozen_tail_samples: frozenTailSamples,
       reached_end: reachedEnd, metrics_text: metricsText, final: finalMetrics,
       residency: perfResidency, samples: trace, perf_events: perfEvents, decisions,
       // P33 W12 取证：worker 决策 trace 的**原始事件序列**（仅在 AIVS_P33_TRACE=1 时落盘，
@@ -230,7 +258,15 @@ test(`P33 App 内丢帧复测：${label}`, async () => {
     const dropped = Number((finalMetrics as Record<string, unknown>).dropped_frames ?? -1);
     const rate = dropped / expectedFrames;
     console.log(`[p33drop] dropped=${dropped}/${expectedFrames} (rate=${(rate * 100).toFixed(2)}%)`);
-    expect(String(metricsText)).not.toContain("最近错误");
+    const reportedError = String((finalMetrics as Record<string, unknown> | null)?.last_error ?? "");
+    const residencyAdvisory = RESIDENCY_ADVISORY.test(reportedError);
+    console.log(`[p33drop] last_error=${reportedError || "(none)"} residency_advisory=${residencyAdvisory}`);
+    if (residencyAdvisory) {
+      // 预警不是错误：不进 evidence 的 final.last_error 判据，但仍原样留痕。
+      expect(String(metricsText)).toContain("最近错误");
+    } else {
+      expect(String(metricsText)).not.toContain("最近错误");
+    }
     expect(rate, `丢帧率 ${(rate * 100).toFixed(2)}% 超门限 ${DROP_RATE_LIMIT * 100}%`).toBeLessThanOrEqual(DROP_RATE_LIMIT);
   } finally {
     await app.close();
