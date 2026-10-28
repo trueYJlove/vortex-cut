@@ -158,12 +158,12 @@ AIVS_P33_MEDIA=<tmp>/p196-max21.mp4 AIVS_P33_LABEL=p196-crosswindow-max AIVS_P33
 
 证据文件：
 - `app-drop-p196-analysis-ab.json`（**已入库**；上面的 A/B 汇总）
-- `app-drop-p196-crosswindow-max.json`（主跑，3.4 MB；逐帧 decode/upload 事件已裁剪，1Hz 聚合留在 samples）—— **当前未入库**（工作区未跟踪）
-- `app-drop-p196-control-short.json`（41.4s 对照，0.83 MB）—— **当前未入库**（工作区未跟踪）
+- `app-drop-p196-crosswindow-max.json`（主跑，3.4 MB；逐帧 decode/upload 事件已裁剪，1Hz 聚合留在 samples）
+- `app-drop-p196-control-short.json`（41.4s 对照，0.83 MB）
 
-> **⚠️ 2026-10-27 更正**：上面两个原始 JSON 原本写成「证据文件」而读起来像已归档，实际**不在仓库里**。
-> 本文所有数字均可由它们复核，故未入库即削弱可复查性（同类 `app-drop-*` 已有 37 个入库、最大 7.5 MB，
-> 体积不构成理由）。是否补归档见 `docs/STATUS.md` §4 **P200** 的补记②。
+> **✅ 2026-10-27 已补归档**：上面两个原始 JSON 曾一度**未入库**（本文最初把它们写成「证据文件」，
+> 读起来像已归档，实际不在仓库里），已按仓内惯例补入（同类 `app-drop-*` 已有 37 个入库、最大 7.5 MB，
+> 体积不构成理由）。现在本文所有数字**均可复核**。处置记录见 `docs/STATUS.md` §4 **P200** 补记②。
 
 **分位数口径（引用本文数字前必读）**：本文与 `analysis-ab` 的分位数用 `floor(q*(n-1))`；
 App 自身 `metrics()`（`preview-session.ts:2213`）用 `floor(q*n)`。n=46 时两法分别给出
