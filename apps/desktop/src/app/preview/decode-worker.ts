@@ -111,7 +111,11 @@ export class DecodeWorker {
         return;
       }
       if ((data as { type?: string; event?: string }).type === "trace") {
-        (window as unknown as { __TRACE?: unknown[] }).__TRACE?.push(data);
+        // P200：trace 本身不带时间戳（worker 只在 detail 里给业务字段），而
+        // editorPerf.record 的事件带 at: performance.now()。两条通道要对齐时间轴
+        // 才能判定「重锚 → missingStuck」的因果，故在**收到的那一刻**补一个 at
+        // （与 editorPerf 同一时钟）。只加字段，不改变事件语义。
+        (window as unknown as { __TRACE?: Array<Record<string, unknown>> }).__TRACE?.push({ ...(data as unknown as Record<string, unknown>), at: performance.now() });
         return;
       }
       if (data.type === "frame" && data.id !== undefined) {
