@@ -12,6 +12,7 @@ const SAFE_STRINGS = new Set([
   "该 Provider 不支持当前 AI 修改响应格式。",
   "当前 Provider 尚未配置完成。",
   "当前 Provider 不支持此操作。",
+  "该 Provider 不支持所需的响应格式（可能静默忽略了结构化输出要求）。下一步：改用支持 JSON 结构化输出的 Provider 或模型后重试。",
   "确认已过期，请重新准备外传内容。",
   DEFAULT_FALLBACK,
   TASK_FALLBACK,
@@ -20,6 +21,15 @@ const SAFE_STRINGS = new Set([
 describe("safeErrors", () => {
   it("renders a known code from a { code, message } object", () => {
     expect(safeErrorMessage({ code: "TIMELINE_CONFLICT", message: "conflict" })).toBe("时间线已发生变化，请刷新后重试。");
+  });
+
+  it("PROVIDER_CAPABILITY_UNSUPPORTED 指向换 Provider，而不是让用户去查凭据", () => {
+    // 网关可静默忽略 response_format（实测 200 + 自由文本）。若这条退化为「检查凭据」，
+    // 用户会朝错误方向排查——文案指错方向比没有文案更糟。
+    const text = safeErrorMessage({ code: "PROVIDER_CAPABILITY_UNSUPPORTED", message: "x" });
+    expect(text).toContain("不支持所需的响应格式");
+    expect(text).toContain("Provider");
+    expect(text).not.toContain("凭据");
   });
 
   it("renders a known code carried in Error.message", () => {

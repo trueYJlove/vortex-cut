@@ -606,7 +606,7 @@ export function App() {
     if (!provider || !provider.enabled || provider.credential_status !== "configured" || provider.candidate_capability_status !== "supported") return;
     const brief: BriefInput = { schema_version: 1, topic: aiForm.topic, audience: aiForm.audience, target_platform: "generic_vertical", target_duration_us: 30_000_000, narrative_goal: aiForm.narrative_goal, style_notes: aiForm.style_notes, must_keep: [], forbidden: [], original_audio_policy: "preserve", caption_policy: "auto_from_transcript", caption_preset_id: "default-bottom", default_layout: "fit" };
     try { setAiError(""); await window.desktop.putBrief({ project_id: project.project_id, brief }); const preview = await window.desktop.preparePlanning({ project_id: project.project_id, provider_config_id: aiForm.provider_id, recipe_id: aiForm.recipe_id, transcript_ids: [aiForm.transcript_id], candidate_source: aiForm.candidate_source }); setAiPreview(preview); setAiStep("confirm"); }
-    catch { setAiError("准备失败。请检查 Brief、Provider 凭据及就绪转录后重试。"); }
+    catch (error) { setAiError(safeErrorMessage(error, "准备失败。请检查 Brief、Provider 凭据及就绪转录后重试。")); }
   };
   const createAi = async () => {
     if (!project || !aiPreview || !window.desktop.createPlanning) return;

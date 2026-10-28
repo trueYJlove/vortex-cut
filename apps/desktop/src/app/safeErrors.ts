@@ -7,6 +7,10 @@ export function safeErrorMessage(error: unknown, fallback = "操作未完成，�
     TIMELINE_PATCH_PROVIDER_UNSUPPORTED: "该 Provider 不支持当前 AI 修改响应格式。",
     PROVIDER_NOT_CONFIGURED: "当前 Provider 尚未配置完成。",
     PROVIDER_UNSUPPORTED: "当前 Provider 不支持此操作。",
+    // 2026-10-27：网关可静默忽略 response_format（实测 200 + 自由文本）。此前该码被
+    // IPC 吞成 "Core request failed"，界面只能提示「检查 Brief、凭据、转录」——把
+    // 「换 Provider」误报成「用户配置错」。指错方向的文案比没有文案更糟。
+    PROVIDER_CAPABILITY_UNSUPPORTED: "该 Provider 不支持所需的响应格式（可能静默忽略了结构化输出要求）。下一步：改用支持 JSON 结构化输出的 Provider 或模型后重试。",
     EGRESS_CONFIRMATION_EXPIRED: "确认已过期，请重新准备外传内容。",
   };
 

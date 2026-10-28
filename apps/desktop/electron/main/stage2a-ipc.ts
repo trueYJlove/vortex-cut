@@ -56,6 +56,14 @@ function safeError(): Error { return new Error("Core request failed"); }
 // P67：Provider 删除的失败码白名单——只有这两个确定性业务码允许透传到
 // 渲染端（决定 UI 文案走向），其余上游文本一律吞掉（可能含凭据）。
 const PROVIDER_DELETE_ERRORS = new Set(["PROVIDER_NOT_FOUND", "PROVIDER_IN_USE"]);
+// 2026-10-27：候选粗剪准备阶段的「能力不支持」失败码允许透传。
+// 为什么需要：网关可能**静默忽略** response_format（实测 200 + 返回自由文本，
+// 而 connection_test 不校验结构化输出 ⇒ 探测显示可用、实际每次必失败）。
+// Core 在 timeline_planning.py 把 PROVIDER_INVALID_RESPONSE 归为
+// PROVIDER_CAPABILITY_UNSUPPORTED，但该码此前不在任何白名单里 ⇒ 被 safeInvoke
+// 吞成 "Core request failed"，渲染端只能给出「请检查 Brief、Provider 凭据及就绪转录」，
+// 把「换 Provider」误报成「用户配置错」。只透传码、不透传上游文本，凭据面不变。
+const PROVIDER_CAPABILITY_ERRORS = new Set(["PROVIDER_CAPABILITY_UNSUPPORTED"]);
 async function safeInvoke<T>(operation: () => Promise<T>, providerTest = false, allowCodes?: ReadonlySet<string>): Promise<T> {
   try {
     return await operation();
@@ -72,6 +80,10 @@ async function safeInvoke<T>(operation: () => Promise<T>, providerTest = false, 
     if (code && allowCodes?.has(code)) {
       console.error(`[core] provider delete failed: ${code}`);
       throw new Error(`[${code}] Provider 删除被拒绝`);
+    }
+    if (code && PROVIDER_CAPABILITY_ERRORS.has(code)) {
+      console.error(`[core] provider capability unsupported: ${code}`);
+      throw new Error(`[${code}] Provider capability unsupported`);
     }
     console.error("[core] request failed (details withheld)");
     throw safeError();

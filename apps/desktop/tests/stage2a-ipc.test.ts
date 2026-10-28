@@ -69,6 +69,27 @@ describe("Stage2A Main IPC 安全编排", () => {
     await expect(handlers.get("provider:test")!({}, "provider_1")).rejects.toThrow("Core request failed");
   });
 
+  it("PROVIDER_CAPABILITY_UNSUPPORTED 透传码但吞掉上游文本（P67 脱敏面不变）", async () => {
+    // 为什么需要这条：网关静默忽略 response_format 时，Core 把它归为
+    // PROVIDER_CAPABILITY_UNSUPPORTED。该码此前不在白名单 ⇒ 被吞成
+    // "Core request failed"，渲染端只能提示「检查 Brief/凭据/转录」，把
+    // 「换 Provider」误报成用户配置错。既要透出方向，又不得透出上游文本。
+    const { handlers, fetchWithUi } = setup();
+    fetchWithUi.mockRejectedValueOnce(Object.assign(new Error("SENTINEL-SECRET upstream text"), { code: "PROVIDER_CAPABILITY_UNSUPPORTED" }));
+    let failure: Error | null = null;
+    try {
+      await handlers.get("planning:prepare")!({}, { project_id: "project_1", provider_config_id: "provider_1", recipe_id: "recipe_1", transcript_ids: ["transcript_1"] });
+    } catch (error) {
+      failure = error as Error;
+    }
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure!.message).toContain("[PROVIDER_CAPABILITY_UNSUPPORTED]");
+    expect(failure!.message).not.toContain("SENTINEL-SECRET");
+    // 对照：不在白名单的码仍被完全吞掉，证明这不是把 allowlist 整个打开。
+    fetchWithUi.mockRejectedValueOnce(Object.assign(new Error("SENTINEL-SECRET"), { code: "SOME_OTHER_CODE" }));
+    await expect(handlers.get("planning:prepare")!({}, { project_id: "project_1", provider_config_id: "provider_1", recipe_id: "recipe_1", transcript_ids: ["transcript_1"] })).rejects.toThrow("Core request failed");
+  });
+
   it("AI 粗剪能力测试只接受 Provider ID，固定调用候选能力端点并严格脱敏", async () => {
     const { handlers, fetchWithUi } = setup();
     fetchWithUi.mockClear();
