@@ -993,7 +993,13 @@ function decodeSamples(request: DecodeRequest): void {
     // 重复请求在预读推进后到达就是这一形态）两者都适用；只有「手里确实有近邻帧」才替代，
     // 远距 miss 与真正的回退 seek 仍走原冷启路径。
     if ((missingStuck || behindCursor) && postNearRepeatSubstitute(request, targetRank)) return;
-    trace("cold_start", { target, keyTarget, neverFed, missingStuck, farForward, behindCursor, lastFedSample, emittedRankMax, targetRank });
+    // P200：`backDistance` = 目标落后于「已吐出的最大展示序位」多少。
+    // 为什么单列：`emittedRankMax` 只增不减（:497/:538），而 `reanchor`
+    // （preview-session.ts:2147）把播放头向后归位时**不动这份台账** ⇒ 重锚后
+    // 一串请求必然 `targetRank <= emittedRankMax`。但「是否真的由重锚驱动」
+    // 只能靠把回退深度与 reanchor 事件对齐时间轴来判——所以在此记下深度本身，
+    // 而不是只留一个布尔的 missingStuck。
+    trace("cold_start", { target, keyTarget, neverFed, missingStuck, farForward, behindCursor, lastFedSample, emittedRankMax, targetRank, backDistance: emittedRankMax - targetRank });
     if (missingStuck) recoverBudgetAfterEvictedMiss(); // 窗太小 → 先把水位抬回来（见该函数注释）
     startSample = keyTarget;
     // 换代必须在 coldStart 之前且只增一次：coldStart 内的「延迟复活」要以

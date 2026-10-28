@@ -18,6 +18,9 @@
  * ⇒ 必然进冷启判定分支。短时线上 reanchor 极少（对照组 0 次），
  * 长时线上 reanchor 895 次 ⇒ 每次重锚都开启一段 missingStuck 序列。
  */
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const FPS = 30;
@@ -28,6 +31,8 @@ const NEAR_REPEAT_RANKS = 3; // decode-worker.worker.ts:858
 class RankLedger {
   emittedRankMax = -1;
   coldStarts = 0;
+  /** 每次冷启时的回退深度（emittedRankMax - targetRank），对齐产品 trace 的 backDistance。 */
+  backDistances: number[] = [];
   nearSubstitutes = 0;
   misses = 0;
 
@@ -43,6 +48,7 @@ class RankLedger {
     const donor = heldRanks.some(r => Math.abs(r - targetRank) <= NEAR_REPEAT_RANKS);
     if (donor) { this.nearSubstitutes += 1; return "substitute"; }
     this.coldStarts += 1;
+    this.backDistances.push(this.emittedRankMax - targetRank);
     this.misses += 1;
     return "cold";
   }
@@ -79,6 +85,35 @@ describe("P200：emittedRankMax 只增不减 ⇒ 回跳后永久 missingStuck", 
     for (let rank = 4901; rank <= 4910; rank++) outcomes.push(ledger.request(rank, []));
     expect(outcomes.every(o => o === "cold")).toBe(true);
     expect(ledger.coldStarts).toBe(10);
+  });
+
+  it("backDistance 记录回退深度（对齐 cold_start trace 的新字段）", () => {
+    const ledger = new RankLedger();
+    for (let rank = 4900; rank <= 5000; rank++) ledger.emit(rank);
+    // 回跳到 4950（reanchor 归位形态）——深度应为 5000-4950 = 50
+    ledger.request(4950, []);
+    expect(ledger.backDistances).toEqual([50]);
+    // 再回退更深一帧，深度递增
+    ledger.request(4940, []);
+    expect(ledger.backDistances).toEqual([50, 60]);
+  });
+
+  it("守卫产品代码：cold_start trace 必须带 backDistance，且定义为 emittedRankMax - targetRank", () => {
+    // **为什么需要这条**：上面的 RankLedger 是仿真，它测的是仿真自己。
+    // 我做过一次变异（把产品里 backDistance 改成 +1）——6 例全绿、变异存活，
+    // 证明纯语义仿真**守不住产品代码**。这条对 worker 源码设文本卡，
+    // 是让「下一手能拿到回退深度」这件事真的有人守。
+    const workerPath = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "app", "preview", "decode-worker.worker.ts");
+    const source = readFileSync(workerPath, "utf8");
+    const line = source.split(/\r?\n/).find(row => row.includes('trace("cold_start"')) ?? "";
+    expect(line, "找不到 cold_start trace 调用").not.toBe("");
+    expect(line, "cold_start trace 丢了 backDistance ⇒ 无法判定重锚与 missingStuck 的因果").toContain("backDistance");
+    // **必须精确相等，不能用 toContain**：我第一次写的是 toContain，
+    // 而变异成 `emittedRankMax - targetRank + 1` 后规范化成 `-targetRank+1`，
+    // 目标串仍是它的前缀 ⇒ toContain 通过、变异存活。改成对整字段做全等。
+    const normalized = line.replace(/\s+/g, "");
+    const field = /backDistance:([^,}]*)/.exec(normalized)?.[1] ?? "";
+    expect(field, `backDistance 定义不对：${field}`).toBe("emittedRankMax-targetRank");
   });
 
   it("决定性：**纯线性播放永不触发** —— 该机制必须由回跳驱动", () => {
