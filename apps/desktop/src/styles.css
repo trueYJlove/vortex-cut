@@ -119,8 +119,19 @@ textarea { min-height: 92px; padding: 8px; resize: vertical; }
 .empty-timeline { padding: 10px; }.empty-timeline button { width: 100%; }
 .preview-frame { position: relative; width: 100%; height: 100%; overflow: visible; background: #181c1f; }
 .synthetic-preview { background: transparent; }
-.synthetic-metrics { position: absolute; left: 8px; bottom: 8px; padding: 3px 8px; border-radius: 5px; background: rgba(10, 14, 17, .72); color: #8fa0a8; font-size: var(--dlg-fs-label); font-family: Consolas, monospace; pointer-events: none; z-index: 4; white-space: nowrap; }
+/* 指标 HUD：窄窗口必须折行而不是溢出被祖先裁掉（用户原话「有时候窗口变小就无法
+   看到完整的调试信息了」）。三件事同时成立才可读：white-space: normal 允许折行、
+   max-width 相对容器宽度（扣掉左右各 8px 的定位偏移）给出折行点、overflow-wrap
+   兜住 decode_seg 那类长串。pointer-events: none 是硬约束（画布上的 PiP 手势必须
+   穿透），max-height + 滚动会把它变成可滚区域，故只折行不滚动；信息量上限由
+   「异常/预警时性能数字让位」（SyntheticPreview）保证，不靠裁切。 */
+.synthetic-metrics { position: absolute; left: 8px; bottom: 8px; max-width: calc(100% - 16px); padding: 3px 8px; border-radius: 5px; background: rgba(10, 14, 17, .72); color: #8fa0a8; font-size: var(--dlg-fs-label); font-family: Consolas, monospace; line-height: 1.45; overflow-wrap: anywhere; pointer-events: none; z-index: 4; white-space: normal; }
 .synthetic-metrics.err { color: #ff8a7a; }
+/* 分段之间统一由 CSS 生成分隔点：性能数字块缺席（发布构建）时不会留下前导「 · 」。 */
+.synthetic-metrics > span + span::before { content: " · "; }
+.synthetic-backend-warn { color: #f0c979; }
+.synthetic-residency-warn { color: #a8b6bd; }
+.synthetic-metric-err { color: #ff8a7a; }
 .synthetic-loading { color: #6f7d83; font-size: var(--dlg-fs-body); }
 /* P196 缓冲指示：与 .synthetic-metrics 同族（同一底色/字号/绝对定位），只换成
    顶部居中 + 更小尺寸——它是"画面暂时不动"的旁注，不该抢指标行的位置。

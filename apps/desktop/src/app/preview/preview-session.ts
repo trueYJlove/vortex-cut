@@ -74,6 +74,11 @@ export interface PreviewSessionMetrics {
   dropped_frames: number;
   composed_frames: number;
   last_error: string | null;
+  /** 长素材解码驻留预警（B13-R R3 的**非阻断**量级提示，不是错误）。独立通道的理由：
+   *  曾用 last_error 承载，长时线上整行指标被这条预警替换成纯警告串、性能数字全不可见，
+   *  且 last_error 的单义（真实错误）被稀释。注意它基于 v1 全帧驻留经验律，在 v2 窗口化
+   *  帧源下常驻量不随总帧数增长——对长时线是已知误报，仅作量级参考。 */
+  residency_warning: string | null;
   /** 解码往返（请求→VideoFrame 回传）耗时分布；m3p5 播放探针与指标行消费。 */
   decode_ms_p50: number;
   decode_ms_p95: number;
@@ -343,6 +348,8 @@ export class PreviewSession {
   private forceCopyTo = false;
   /** B13-R R3：驻留平台预警一次性标志。 */
   private residencyWarned = false;
+  /** B13-R R3：预警文案（独立通道，见 PreviewSessionMetrics.residency_warning）。 */
+  private residencyWarning: string | null = null;
   /** C20-T1：seek 预取去抖窗口——拖拽/连点风暴中持续重置，落定才发起。 */
   private static readonly PREFETCH_DEBOUNCE_MS = 200;
   /** C20-T1：v2 seek 落定预取窗数（档位驱动；0 = 关闭/非 v2 帧源）。 */
@@ -623,7 +630,7 @@ export class PreviewSession {
       const budgetBytes = BUDGET_TABLES[resourceTier].textureBytesMiB * 1024 * 1024 * 8;
       if (predictedBytes > budgetBytes && !session.residencyWarned) {
         session.residencyWarned = true;
-        session.lastError = `长素材解码驻留预警：预计常驻约 ${Math.round(predictedBytes / (1024 * 1024 * 1024) * 10) / 10} GiB（${session.frames.frameCount} 帧，平台化不持续增长）`;
+        session.residencyWarning = `长素材解码驻留预警：预计常驻约 ${Math.round(predictedBytes / (1024 * 1024 * 1024) * 10) / 10} GiB（${session.frames.frameCount} 帧，平台化不持续增长）`;
       }
     }
     return session;
@@ -1033,6 +1040,8 @@ export class PreviewSession {
         rig.preferFfmpeg = false;
         rig.timeoutStrikes = 0;
         this.lastError = null; // 快路径恢复：清掉慢路径期间的错误横幅
+        // 驻留预警**不随之清空**：它是按 IR 帧数算出的量级提示，与解码走哪条路径无关；
+        // 换回快路径并不改变「预计常驻多少」这个事实，此处若一并清掉就是凭空抹证据。
         return true;
       } catch {
         rig.ffmpegSince = performance.now(); // 再等一个冷却期
@@ -2237,6 +2246,7 @@ export class PreviewSession {
       dropped_frames: this.dropped,
       composed_frames: this.taskTimes.length,
       last_error: this.lastError,
+      residency_warning: this.residencyWarning,
       // 解码后端可见化：`ffmpeg` = 已降级到 Core IPC 软解（~180ms/帧量级），
       // 是需要立刻被看见的异常态（2026-09-30 真机「越修越卡」根因即为此路径
       // 被瞬时抖动永久钉死，而界面当时没有任何提示）。

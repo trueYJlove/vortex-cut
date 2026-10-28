@@ -526,12 +526,15 @@ for (const [sceneKey, recipe] of Object.entries(RECIPES)) {
           await page.getByRole("button", { name: "暂停", exact: true }).click();
           const readyMs = Date.now() - started;
           // D11-① R3 驻留预警采集:预警在 PreviewSession.create 时按 IR 帧数
-          // 计算(不依赖实际解码量),经 lastError → .synthetic-metrics 面板
-          // 渲染。之后 decode 失败可覆盖 lastError 通道——null=未渲染(无预警
-          // 或被覆盖),如实留样,不视为运行失败(响亮失败边界不变)。
+          // 计算(不依赖实际解码量),现经独立通道 PreviewSessionMetrics.residency_warning
+          // 暴露,随 __aivsPreviewMetrics 1Hz 上报——不再读写 lastError,也不再靠
+          // .synthetic-metrics 的 textContent 反查(那条通道此前会被真实解码错误覆盖,
+          // 且长时线上整行指标被预警替换、性能数字全不可见)。null=无预警,如实留样,
+          // 不视为运行失败(响亮失败边界不变)。
           const residencyWarning = await page.evaluate(() => {
-            const text = document.querySelector(".synthetic-metrics")?.textContent ?? "";
-            return text.includes("长素材解码驻留预警") ? text : null;
+            const snapshot = (window as unknown as { __aivsPreviewMetrics?: { residency_warning?: string | null } }).__aivsPreviewMetrics ?? null;
+            const warning = snapshot?.residency_warning ?? null;
+            return typeof warning === "string" && warning.includes("长素材解码驻留预警") ? warning : null;
           });
           // C20-T2 A/B 采数:reset() 清空事件流,ready 分段(manifest/parse/
           // window/inject)在本次重载后装配期间记录,必须先于 reset 捕获。

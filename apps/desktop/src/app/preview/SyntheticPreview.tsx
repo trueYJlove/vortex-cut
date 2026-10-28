@@ -479,6 +479,27 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
     return () => window.clearInterval(timer);
   }, [load.status]);
 
+  // 诊断构建开关（与 __aivsPreviewMetrics 同一编译期常量；发布构建整段裁剪）。
+  const perfHud = import.meta.env.VITE_AIVS_PERF === "1";
+  // 异常态（任何构建都显示）：真实错误、硬解不可得、确定的 FFmpeg 软解降级。
+  const hardwareMissing = Boolean(metrics?.decode_hardware && metrics.decode_hardware !== "" && !metrics.decode_hardware.includes("prefer-hardware"));
+  const backendDegraded = Boolean(metrics?.decode_backend && metrics.decode_backend !== "webcodecs");
+  // "?" = 池驱逐瞬间 worker 暂缺（routine），不是降级；诊断构建把它一并摊开，
+  // 发布构建只报确定的 ffmpeg 软解，免得把正常驱逐刷成异常。
+  const backendIsFfmpeg = metrics?.decode_backend?.includes("ffmpeg") ?? false;
+  const anomaly = Boolean(metrics?.last_error) || hardwareMissing || backendIsFfmpeg;
+  // 驻留预警是非阻断提示，与性能数字并列显示——它当年正是靠整行替换指标文本
+  // 把性能数字挤没的，拆通道后不能再由它独占这一行。
+  const residency = metrics?.residency_warning ?? null;
+  // **预警只在诊断构建显示，不进发布版**：它按 v1 全帧驻留经验律估算，真实触发阈值
+  // 低得吓人——画布 960×540 走 unique 帧律，balanced 档（App 默认）纹理预算 2048MiB
+  // ⇒ 94s / 2820 帧就报，conservative 档 36s 就报；而同一份 P196 实测里预测 15,675MiB、
+  // 实际合成器驻留仅 75.6MiB（v2 窗口化帧源下量级差约 200 倍）。让这条已知误报在
+  // 发布版常驻，等于每条 1.5 分钟以上的时间线底部都糊一块错字——它不是异常态，
+  // 不该享受「降级必须当场可见」的豁免。诊断构建照常显示（用于对账）。
+  // 真实错误仍然压过性能数字（同一行里先答「为什么坏」，代价是这次的数字缺席）。
+  const showPerfNumbers = perfHud && !metrics?.last_error;
+
   return (
     <div className="synthetic-preview" aria-label="合成预览" style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", width: "100%", height: "100%" }}>
       <div ref={containerRef} style={{ display: load.status === "ready" ? "block" : "none", width: "100%", height: "100%" }} />
@@ -515,26 +536,36 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
         </div>
       )}
       {load.status !== "ready" && <div className="synthetic-loading">{load.message || "…"}</div>}
-      {load.status === "ready" && metrics && (
+      {/* 指标 HUD 按「诊断口径 vs 异常态」拆开，两者不共用一个开关：
+          - **诊断口径**（性能数字 p50/p95/丢帧/画布尺寸/分段 + 驻留预警）：只有
+            VITE_AIVS_PERF=1 诊断构建才有——与 :471 的 window.__aivsPreviewMetrics
+            同一个开关，一处控制。发布版对最终用户没有任何可读价值，只会常驻挡画面。
+            驻留预警之所以归这一侧而非异常态，见上方 residency 处的实测阈值。
+          - **异常态提示**（真实错误 / 硬解不可得 / 确定的 FFmpeg 软解降级）：**任何构建
+            都保留**。这条边界不许被「发布版不留 HUD」抹平：降级到 FFmpeg IPC 软解
+            ~180ms/帧、或硬解不可得而落到软解（3440x1440 ~190ms/帧、720p ~50ms/帧，
+            观感幻灯片）时用户只能看到「画面变幻灯」，必须当场给出原因，否则就只能靠
+            终端日志推断。
+          诊断口径关闭时 .synthetic-metrics 仍会在异常态出现（e2e 的就绪判据与「最近错误」
+          断言依赖这个挂点），只是它退化为一行原因说明。 */}
+      {load.status === "ready" && metrics && (perfHud || anomaly) && (
         <div className={`synthetic-metrics${metrics.last_error ? " err" : ""}`}>
-          {metrics.last_error
-            ? `最近错误：${metrics.last_error}`
-            : `合成预览 · 任务 p95 ${metrics.task_ms_p95}ms · 解码 p50 ${metrics.decode_ms_p50}ms / p95 ${metrics.decode_ms_p95}ms · 上传 p95 ${metrics.upload_ms_p95}ms · 丢帧 ${metrics.dropped_frames} · 画布 ${metrics.canvas_w}×${metrics.canvas_h} → 缓冲 ${metrics.backing_w}×${metrics.backing_h} (×${metrics.fit_scale})`}
-          {/* 解码后端/模式异常态提示（正常 = webcodecs + prefer-hardware，不显示）：
-              降级到 FFmpeg IPC 软解 ~180ms/帧，或硬解不可得而落到软解
-              （3440x1440 ~190ms/帧、720p ~50ms/帧，观感幻灯片）——两者都必须
-              当场可见，而不是靠终端日志推断。 */}
-          {metrics.decode_backend && metrics.decode_backend !== "webcodecs" && (
-            <span className="synthetic-backend-warn">{` · 解码后端 ${metrics.decode_backend}（已降级，慢路径）`}</span>
+          {showPerfNumbers && <span>{`合成预览 · 任务 p95 ${metrics.task_ms_p95}ms · 解码 p50 ${metrics.decode_ms_p50}ms / p95 ${metrics.decode_ms_p95}ms · 上传 p95 ${metrics.upload_ms_p95}ms · 丢帧 ${metrics.dropped_frames} · 画布 ${metrics.canvas_w}×${metrics.canvas_h} → 缓冲 ${metrics.backing_w}×${metrics.backing_h} (×${metrics.fit_scale})`}</span>}
+          {metrics.last_error && <span className="synthetic-metric-err">{`最近错误：${metrics.last_error}`}</span>}
+          {(perfHud ? backendDegraded : backendIsFfmpeg) && (
+            <span className="synthetic-backend-warn">{`解码后端 ${metrics.decode_backend}（已降级，慢路径）`}</span>
           )}
-          {metrics.decode_hardware && metrics.decode_hardware !== "" && !metrics.decode_hardware.includes("prefer-hardware") && (
-            <span className="synthetic-backend-warn">{` · 硬解不可用（${metrics.decode_hardware}，软件解码）`}</span>
+          {hardwareMissing && (
+            <span className="synthetic-backend-warn">{`硬解不可用（${metrics.decode_hardware}，软件解码）`}</span>
           )}
           {/* 分段计时（dev 默认开、可通过 VITE_AIVS_DECODE_TIMING=1 强制）：
               把「解码 p95 的尾巴」拆成 喂包 / 出帧 / 残差 三段——p95 高到底是
               我们喂得慢、解码器吐得慢，还是排队/传输慢，一眼可判。 */}
-          {metrics.decode_seg && (
-            <span>{` · 分段 喂包 ${metrics.decode_seg.feed_p95} / 出帧 ${metrics.decode_seg.output_p95} / 排队 ${metrics.decode_seg.queue_p95} / 残差 ${metrics.decode_seg.residual_p95}ms(p95)`}</span>
+          {perfHud && metrics.decode_seg && (
+            <span>{`分段 喂包 ${metrics.decode_seg.feed_p95} / 出帧 ${metrics.decode_seg.output_p95} / 排队 ${metrics.decode_seg.queue_p95} / 残差 ${metrics.decode_seg.residual_p95}ms(p95)`}</span>
+          )}
+          {perfHud && residency !== null && (
+            <span className="synthetic-residency-warn">{residency}</span>
           )}
         </div>
       )}
