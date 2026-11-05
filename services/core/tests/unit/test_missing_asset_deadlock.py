@@ -318,3 +318,31 @@ def test_delete_asset_rolls_back_cache_refs_when_business_record_blocks(tmp_path
             "SELECT COUNT(*) FROM derived_media_cache_refs WHERE asset_id='v2'"
         ).fetchone()[0] == 1, "被业务记录拒绝后引用行必须回滚"
 
+
+def test_delete_missing_asset_with_rerunnable_derived_jobs(tmp_path: Path) -> None:
+    """用户真实场景原样：素材文件缺失，且挂着可重算的派生作业。
+
+    真实库实测（asset_9cfad608…/asset_552da68b…）：它们没有 proxy 作业，而是
+    transcription×5+waveform×1 与 transcription×3，jobs.asset_id 又是 NO ACTION
+    ⇒ 只清 proxy 完全无效，素材永远删不掉。四类可重算派生作业都必须一并清理。
+    """
+    for kind in ("proxy", "waveform", "semantic_index", "transcription"):
+        database, _timelines, assets, _ = _harness(tmp_path / kind)
+        _mark_missing(database, ["v3"])
+        _add_job(database, "job-" + kind, "v3", kind)
+        assets.delete_asset("v3", remove_timeline_clips=True)
+        with database.connection() as db:
+            assert db.execute("SELECT COUNT(*) FROM assets WHERE id='v3'").fetchone()[0] == 0
+            assert db.execute("SELECT COUNT(*) FROM jobs WHERE asset_id='v3'").fetchone()[0] == 0
+
+
+def test_cv_analysis_job_still_blocks_asset_delete(tmp_path: Path) -> None:
+    """防线：cv_analysis 属业务记录，删素材仍须被拒（既有保护用例钉的就是这一类）。"""
+    database, _timelines, assets, _ = _harness(tmp_path)
+    _mark_missing(database, ["v3"])
+    _add_job(database, "job-cv", "v3", "cv_analysis")
+    with pytest.raises(DomainError) as exc:
+        assets.delete_asset("v3", remove_timeline_clips=True)
+    assert exc.value.code == "ASSET_IN_USE"
+    with database.connection() as db:
+        assert db.execute("SELECT COUNT(*) FROM assets WHERE id='v3'").fetchone()[0] == 1

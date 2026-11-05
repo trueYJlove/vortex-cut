@@ -443,9 +443,18 @@ class ProjectAssetService:
                 # 「素材被镜头需求或生成记录引用」——原因错且无出路。而**每次视频导入
                 # 都会自动登记一条 kind='proxy' 作业**（preview_source.create_proxy_job），
                 # 所以这不是边缘情况，是几乎所有素材都带（2026-10 用户事故实证）。
-                # 只清 kind='proxy'：代理是可重算派生数据，与 beat_grids/cv_analyses 同口径；
-                # 其余 kind（生成记录/导出/转录/模型下载等）仍由下面的 FK 拒绝保护。
-                db.execute("DELETE FROM jobs WHERE asset_id=? AND kind='proxy'", (asset_id,))
+                # 清理范围 = **可重算的派生作业**：proxy / waveform / semantic_index /
+                # transcription。四者都能对同一素材重跑（转录需要 ASR，成本高但可重来），
+                # 留着它们只会让素材永远删不掉——jobs.asset_id 是 NO ACTION。
+                # 不在这里的是**业务历史**：final_export / authoritative_preview /
+                # image_generation / candidate_generation / cv_analysis 等，仍由下面的
+                # FK 拒绝保护（test_business_record_still_blocks_asset_delete 钉的就是
+                # cv_analysis 这一类）。
+                db.execute(
+                    "DELETE FROM jobs WHERE asset_id=? AND kind IN "
+                    "('proxy','waveform','semantic_index','transcription')",
+                    (asset_id,),
+                )
                 # 派生缓存引用（代理/波形/PCM 分片）对 assets 同样是 NO ACTION
                 # （database_v18.py:27）⇒ 不清就撞 FK，被下面通用 except 报成
                 # 「素材被镜头需求或生成记录引用」——原因错且无出路，与 beat_grids /
