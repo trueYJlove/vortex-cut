@@ -443,16 +443,22 @@ class ProjectAssetService:
                 # 「素材被镜头需求或生成记录引用」——原因错且无出路。而**每次视频导入
                 # 都会自动登记一条 kind='proxy' 作业**（preview_source.create_proxy_job），
                 # 所以这不是边缘情况，是几乎所有素材都带（2026-10 用户事故实证）。
-                # 清理范围 = **可重算的派生作业**：proxy / waveform / semantic_index /
-                # transcription。四者都能对同一素材重跑（转录需要 ASR，成本高但可重来），
-                # 留着它们只会让素材永远删不掉——jobs.asset_id 是 NO ACTION。
-                # 不在这里的是**业务历史**：final_export / authoritative_preview /
-                # image_generation / candidate_generation / cv_analysis 等，仍由下面的
-                # FK 拒绝保护（test_business_record_still_blocks_asset_delete 钉的就是
-                # cv_analysis 这一类）。
+                # 清理范围的判据只有一条：**该作业的结果实体是否已被本函数删除**。
+                # 是 ⇒ 结果都没了，留作业行只会让素材永远删不掉（jobs.asset_id 是
+                # NO ACTION），最终变成「素材在、结果没了、两边都不可用」的死局。
+                # - proxy / waveform / semantic_index -> derived_media_cache_refs 已清
+                # - transcription                     -> transcripts 已清
+                # - cv_analysis                       -> cv_analyses / cv_samples 已清
+                # - beat_analysis                     -> beat_grids 已清
+                # 不在这里的是**产出即资产的业务记录**（final_export 的成片、
+                # authoritative_preview 的权威预览、image_generation /
+                # candidate_generation 的付费产物）：删了不可恢复，仍由下面的
+                # FK 拒绝保护（test_business_record_still_blocks_asset_delete 钉
+                # final_export）。
                 db.execute(
                     "DELETE FROM jobs WHERE asset_id=? AND kind IN "
-                    "('proxy','waveform','semantic_index','transcription')",
+                    "('proxy','waveform','semantic_index','transcription',"
+                    "'cv_analysis','beat_analysis')",
                     (asset_id,),
                 )
                 # 派生缓存引用（代理/波形/PCM 分片）对 assets 同样是 NO ACTION

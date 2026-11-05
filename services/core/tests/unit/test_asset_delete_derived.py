@@ -83,9 +83,16 @@ def test_delete_asset_clears_derived_analysis_rows(tmp_path: Path) -> None:
 
 
 def test_business_record_still_blocks_asset_delete(tmp_path: Path) -> None:
-    """**收窄而非关掉**保护：真实业务记录（作业历史）仍必须拒绝删除。
+    """**收窄而非关掉**保护：产出即资产的业务记录仍必须拒绝删除。
 
     若哪天有人把 `delete_asset` 的清理写成"先删所有引用行"，本用例会红。
+
+    **2026-11 换钉（原钉 cv_analysis）**：判据从"kind 白名单"改为"该作业的结果
+    实体是否已被本函数删除"。cv_analysis 的结果 cv_analyses/cv_samples 本来就被
+    delete_asset 清掉（见上一条用例 test_delete_asset_clears_derived_analysis_rows），
+    留着作业行拦住删除只会造成"分析结果没了、素材也删不掉"的死局——同一份数据
+    两套处理，属实现自相矛盾，不是保护。final_export 的产出是成片本身，
+    删了不可恢复，才是该拦的那一类。
     """
     db, service, asset_id = _seed(tmp_path)
     with db.connection() as con:
@@ -93,7 +100,7 @@ def test_business_record_still_blocks_asset_delete(tmp_path: Path) -> None:
         con.execute(
             "INSERT INTO jobs(id,project_id,asset_id,kind,type,status,input_json,"
             "created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
-            ("j1", "p1", asset_id, "cv_analysis", "cv_analysis", "succeeded", "{}", now, now),
+            ("j1", "p1", asset_id, "final_export", "final_export", "succeeded", "{}", now, now),
         )
 
     with pytest.raises(DomainError) as exc:

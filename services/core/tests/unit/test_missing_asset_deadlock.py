@@ -336,11 +336,26 @@ def test_delete_missing_asset_with_rerunnable_derived_jobs(tmp_path: Path) -> No
             assert db.execute("SELECT COUNT(*) FROM jobs WHERE asset_id='v3'").fetchone()[0] == 0
 
 
-def test_cv_analysis_job_still_blocks_asset_delete(tmp_path: Path) -> None:
-    """防线：cv_analysis 属业务记录，删素材仍须被拒（既有保护用例钉的就是这一类）。"""
+def test_analysis_jobs_cleared_because_results_already_deleted(tmp_path: Path) -> None:
+    """cv_analysis / beat_analysis 的结果实体本就被 delete_asset 清掉。
+
+    留着作业行只会造成「结果没了、素材也删不掉」的死局（真实库实测：
+    Dev Probe dev-hevc 项目的素材就是被 cv_analysis 作业行卡住的）。
+    """
+    for kind in ("cv_analysis", "beat_analysis"):
+        database, _timelines, assets, _ = _harness(tmp_path / kind)
+        _mark_missing(database, ["v3"])
+        _add_job(database, "job-" + kind, "v3", kind)
+        assets.delete_asset("v3", remove_timeline_clips=True)
+        with database.connection() as db:
+            assert db.execute("SELECT COUNT(*) FROM assets WHERE id='v3'").fetchone()[0] == 0
+
+
+def test_final_export_job_still_blocks_asset_delete(tmp_path: Path) -> None:
+    """final_export 的产出是成片本身，删了不可恢复 ⇒ 必须继续拦。"""
     database, _timelines, assets, _ = _harness(tmp_path)
     _mark_missing(database, ["v3"])
-    _add_job(database, "job-cv", "v3", "cv_analysis")
+    _add_job(database, "job-export", "v3", "final_export")
     with pytest.raises(DomainError) as exc:
         assets.delete_asset("v3", remove_timeline_clips=True)
     assert exc.value.code == "ASSET_IN_USE"
