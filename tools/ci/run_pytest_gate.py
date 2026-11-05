@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import glob
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -61,6 +62,25 @@ def _targets() -> list[str]:
     return targets
 
 
+def _cleanup_basetemp() -> None:
+    """回收 pytest 夹具（单次全量约 22GB）。
+
+    为什么必须自己做：pytest 的 tmp_path 保留策略只在其管理编号子目录时生效，
+    本仓固定 basetemp 且用默认策略，因此**从不回收**——实测两轮各留 22GB，
+    把系统盘从 23GB 打到 1.4GB，并以 ENOSPC 的形式伪装成「测试红」。
+    只在整轮通过后调用（失败要留现场），且任何 OSError 只告警不失败——
+    回收是维护动作，不该把一次通过的回归判成红。
+    """
+    if not BASETEMP.exists():
+        return
+    try:
+        shutil.rmtree(BASETEMP)
+    except OSError as exc:
+        print(f"[pytest-gate] WARN 夹具回收失败（不影响本轮判定）: {exc}", file=sys.stderr)
+        return
+    print(f"[pytest-gate] 已回收夹具 {BASETEMP}")
+
+
 def main() -> int:
     try:
         targets = _targets()
@@ -87,8 +107,13 @@ def main() -> int:
         # 固定 basetemp：默认策略会保留最近 3 次全量运行的临时目录，而本仓集成测试
         # 会生成真实媒体夹具（pyproject.toml 注释记录单次 10+GB）。实测 2026-10-23
         # 本门连续跑两轮就把系统盘写满两次（ENOSPC 直接打断 pytest，连 junit 都写不出，
-        # 表现为一片假的 F/E —— 那是盘满，不是用例红）。固定到仓库内 .tmp 后，
-        # 每轮运行开头 pytest 会自行清空它，不会跨轮累积。
+        # 表现为一片假的 F/E —— 那是盘满，不是用例红）。
+        # **更正（2026-11-04）**：此处原写「固定到仓库内 .tmp 后，每轮运行开头 pytest
+        # 会自行清空它，不会跨轮累积」——**该结论是错的**。pytest 只在启用 tmp_path
+        # 保留策略时管理 <basetemp>/pytest-N 编号子目录；本仓用固定 basetemp + 默认策略，
+        # 它既不编号也不回收。实测两轮各留下 22.06GB/21.92GB，磁盘两次降到 1.4–1.7GB
+        # （第二次同样以 ENOSPC 表现，只是发生在 junit 写入前，容易被误读成用例红）。
+        # 所以清理必须由本脚本自己做（见下方 _cleanup_basetemp），不能靠 pytest。
         f"--basetemp={BASETEMP}",
         f"--junitxml={JUNIT_PATH}",
     ]
@@ -99,7 +124,11 @@ def main() -> int:
         return code
 
     print("[pytest-gate] pytest 通过，开始 skip/收集数守卫")
-    return subprocess.call([sys.executable, str(CHECKER), "--junit", str(JUNIT_PATH)])
+    guard = subprocess.call([sys.executable, str(CHECKER), "--junit", str(JUNIT_PATH)])
+    # 仅在整轮通过后回收夹具：失败时保留现场供排查（ENOSPC 时也走不到这里）。
+    if guard == 0:
+        _cleanup_basetemp()
+    return guard
 
 
 if __name__ == "__main__":

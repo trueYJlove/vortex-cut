@@ -24,6 +24,7 @@ import { errorCode, safeErrorMessage, safeTaskErrorMessage } from "./safeErrors.
 import { formatLocalStamp } from "./localTime.js";
 import { PreviewPipOverlays, type PipOverlay, type PipTransform } from "./PreviewPipOverlays.js";
 import { SyntheticPreview } from "./preview/SyntheticPreview.js";
+import type { AssetDecodeBudget } from "./preview/preview-session.js";
 import { PreviewSourceResolver } from "./preview/source-resolver.js";
 import { syntheticFallbackNotice } from "./preview/fallback-notice.js";
 import { WaveformCache } from "./timeline/waveform-cache.js";
@@ -185,6 +186,13 @@ export function App() {
   // 另存一份就会和真实显示的集合走散，比对结果也就失去意义。
   const assetsRef = useRef<AssetPresentation[]>([]);
   assetsRef.current = assets;
+  // GAP-LIST-ASSETS-PAGING：上一次提交的镜像是否被 200 页上限**截断**。
+  // 资产集合对账（P199）的收敛证明依赖"对账触发的 loadProjectData 会把同一
+  // 集合写回 assets，于是下一轮比对相等并短路"。截断装载不满足该前提：它写回的
+  // 只是服务端集合的前缀，下次重载仍会重新截断，服务端也仍会继续变化——比对
+  // 永远不会收敛。所以触顶即把镜像标记为非完整，对账端点据此停用（见下方
+  // enabled）。真正的完整性只能由一次未触顶的装载恢复。
+  const assetsMirrorTruncatedRef = useRef(false);
   const [assetQuery, setAssetQuery] = useState("");
   const [assetFilter, setAssetFilter] = useState<AssetFilter>("all");
   const [assetView] = useState<"list" | "grid">("list");
@@ -207,6 +215,31 @@ export function App() {
   // 都必须读最新值（hasActiveWork 同理），否则会以陈旧列表误判退避/终态。
   const jobsRef = useRef<Job[]>([]);
   jobsRef.current = jobs;
+  /** 代理就绪 → 清该素材的预览源解析缓存（方案 A：下次解析走代理，不重建
+   *  当前预览会话，因此不能走 state 触发重渲染）。 */
+  const invalidateProxySourceRef = useRef<(assetId: string) => void>(() => undefined);
+  /** **已请求过代理的素材集合**（本会话唯一台账）。两个登记点共用它：
+   *  1. 导入即转（importAsset——对 4K 素材仍然正确，Core 侧幂等去重）；
+   *  2. 实测解不动（预览 1Hz 上报的 decodeBudget 判定，本次修复的触发点）。
+   *  语义有两层：①「已登记作业」——代理就绪检测只认集合里的素材的 proxy 作业，
+   *  避免把项目里的无关历史 proxy 任务当成就绪信号；②「判定过」——同一素材最
+   *  多判定一次，不每帧发请求。就绪/失败终态时移出集合（见下面的 jobs effect）
+   *  = 允许下一轮再判，同时使 A3 提示的「已就绪」口径与此集合对齐。 */
+  const proxyJobAssetIdsRef = useRef<Set<string>>(new Set());
+  /** 代理作业已到终态的素材（成功 = 已就绪，失败 = 不重试）：按需判定据此
+   *  短路，避免「每秒判一次 → 每秒白打一次已被 Core 幂等挡下的请求」，
+   *  也避免失败作业被无限重试。与上面集合的分工：那个 = 「在途/待观察」，
+   *  这个 = 「已有结论」。 */
+  const proxyJobSettledAssetIdsRef = useRef<Set<string>>(new Set());
+  /** 请求一个素材的代理（项目就绪前没有端点可调，故经 ref 由渲染期注入）。
+   *  登记一律 fire-and-forget：代理是加速项，失败（无 FFmpeg / 不支持 / IPC
+   *  报错）绝不能影响播放，也不弹错误。 */
+  const requestProxyJobRef = useRef<(assetId: string) => void>(() => undefined);
+  /** A2：代理就绪计数（单调）。递增 = 请求预览把源切到代理；SyntheticPreview
+   *  拿它当会话重建信号，只在暂停（自然切换点）时消费，不打断播放。 */
+  const [proxyReadyEpoch, setProxyReadyEpoch] = useState(0);
+  /** A2：播放中挂起的代理切换（就绪了但还没到自然切换点）。 */
+  const proxySwitchPendingRef = useRef(false);
   const [models, setModels] = useState<ModelSummary[]>([]);
   const [confirmModel, setConfirmModel] = useState<ModelDetail>();
   const [licenseAccepted, setLicenseAccepted] = useState(false);
@@ -490,19 +523,28 @@ export function App() {
     // limit=50，旧实现只取第一页——第 51+ 素材无 media ticket，合成预览回退
     // "no ticket for asset_..."，刷新素材库亦不可恢复）。200 页 = 10,000 条
     // 防病态游标环；触顶即止（行为不劣于单页现状）。
+    // 返回 {items, truncated}：truncated = 撞到 200 页上限而止（服务端还有下一页），
+    // 此时 items 只是服务端集合的前缀，不能当作"界面镜像 == 服务端集合"。
     const listAllAssets = async (projectId: Project["project_id"]) => {
       const items: Awaited<ReturnType<typeof window.desktop.listAssets>>["items"] = [];
       let cursor: string | null | undefined;
+      let truncated = false;
       for (let page = 0; page < 200; page++) {
         const assetPage = await window.desktop.listAssets({ project_id: projectId, ...(cursor ? { cursor } : {}) });
         items.push(...assetPage.items);
         if (!assetPage.next_cursor) break;
         cursor = assetPage.next_cursor;
+        // 用满 200 页仍有下一页 = 撞上限：items 只是服务端集合的前缀。
+        if (page === 199) truncated = true;
       }
-      return items;
+      return { items, truncated };
     };
-    const [assetsAll, activeJobs] = await Promise.all([listAllAssets(selected.project_id), fetchActiveJobs(selected.project_id)]);
+    const [assetsPage, activeJobs] = await Promise.all([listAllAssets(selected.project_id), fetchActiveJobs(selected.project_id)]);
+    const assetsAll = assetsPage.items;
     if (epoch !== projectDataEpochRef.current) return;
+    // 触顶的装载不是完整镜像：对账端点据此停用，避免"截断 → 判成变了 → 再截断"
+    // 的循环重载。未触顶的装载恢复完整性判定。
+    assetsMirrorTruncatedRef.current = assetsPage.truncated;
     setAssets(assetsAll); setJobs(activeJobs);
     // 转录摘要：每素材一次 listTranscripts——必须经有界队列（≤4 并发）。旧实现
     // 直接 Promise.all 对全部素材并发（100 素材 = 100 个并发 HTTP），会在项目
@@ -936,7 +978,16 @@ export function App() {
       // 首轮属于装配 effect（它才做完整翻页）：此刻本地集合可能还是空的（装载在途），
       // 拿它做基准只会误判一次"变了"并再发起一轮完整翻页。对账从第二轮起接管——
       // 那不是"等一会儿再说"，而是"等首次装载有了结果再对账"。
-      enabled: () => pollInstanceRef.current === instance && scheduler.stats.cycles > 0,
+      // 首轮跳过 ≠ 首次装载完成（首轮只是"此刻没有比对基准"）。真正的前提是
+      // 本地镜像**完整**：装配那次装载若撞上 200 页上限，镜像只是服务端集合的
+      // 前缀，比对结果不具可比性——对账触发的重载会把同一个前缀再写回来，
+      // 而服务端仍继续变化，于是每轮都判成"变了"并重发一次全量翻页（病理游标
+      // 环下实测 200 → 401 → 602 的倍增）。触顶时停用对账，把"完整镜像"作为
+      // 它的**前提**而不是事后修正：宁可暂时不对账，也不重复发起全量装载。
+      enabled: () => {
+        if (pollInstanceRef.current !== instance) return false;
+        return scheduler.stats.cycles > 0 && !assetsMirrorTruncatedRef.current;
+      },
       fetch: async () => {
         if (!project) return { items: [], next_cursor: null };
         // 每轮只发一次（不翻页）：这里只负责"发现集合变了"，完整装载由
@@ -990,9 +1041,68 @@ export function App() {
       setProjectName(project.name);
     }
   }, [project?.project_id, project?.name]);
+  // 代理就绪检测（B11 缺失的一环）：复用既有 jobs 状态与既有 listJobs 轮询，
+  // 不新开定时器、不新开 preview-source 轮询。判定 = 作业 kind 为 proxy（sample
+  // 路径同 kind，多清一次缓存无害）+ 该素材确由本次导入登记过 + 已到终态。
+  // 不写依赖数组：登记发生在 importAsset（ref，不触发 jobs 变化），只依赖 [jobs]
+  // 会漏掉「导入时作业已在列表里」这一序；此循环是 O(jobs) 早退，代价可忽略。
+  // 处理过即从登记集合移除，不会每帧反复失效缓存。
+  useEffect(() => {
+    for (const job of jobs) {
+      const assetId = job.asset_id;
+      if (job.kind !== "proxy" || !assetId || !proxyJobAssetIdsRef.current.has(assetId)) continue;
+      if (job.status !== "succeeded" && job.status !== "failed") continue;
+      proxyJobAssetIdsRef.current.delete(assetId);
+      // 终态即结论：按需判定不再对这个素材发起第二次请求（成功 = 已有代理，
+      // 失败 = 不重试——重试只会在每次打开项目时白打一遍，见上面的注释）。
+      proxyJobSettledAssetIdsRef.current.add(assetId);
+      // 失败不改行为：解析仍回退原源（与 pending 同一条路径）。
+      if (job.status === "succeeded") {
+        // 先清解析缓存：下次装配 resolve 才能拿到代理票据。
+        invalidateProxySourceRef.current(assetId);
+        // A2：清缓存只影响「下次解析」，当前会话不会自己重新解析——必须重建。
+        // 播放中绝不动会话（当场断画面/音频），挂起等到非播放时刻再提交。
+        proxySwitchPendingRef.current = true;
+        if (!playing) {
+          proxySwitchPendingRef.current = false;
+          setProxyReadyEpoch(epoch => epoch + 1);
+        }
+      }
+    }
+  });
+  // A2：自然切换点提交——播放中挂起的代理切换，在暂停那一刻读成一次重建信号。
+  // 计数单调、每素材一次：提交即清挂起标记，不会形成重建循环。
+  useEffect(() => {
+    if (playing || !proxySwitchPendingRef.current) return;
+    proxySwitchPendingRef.current = false;
+    setProxyReadyEpoch(epoch => epoch + 1);
+  }, [playing]);
   const terminalRenderJobs = jobs.filter(item => (item.kind === "authoritative_preview" || item.kind === "final_export") && ["succeeded", "failed", "cancelled", "interrupted"].includes(item.status)).map(item => `${item.job_id}:${item.status}`).sort().join("|");
   useEffect(() => { if (project && terminalRenderJobs) void loadRenderData(project).catch(error => showNotice(safeErrorMessage(error, "渲染记录加载失败，请刷新后重试。"))); }, [project?.project_id, terminalRenderJobs]);
 
+  // 代理登记的唯一入口（导入即转 + 实测解不动共用）：去重、不阻塞、失败静默。
+  // 放在渲染期赋值而不是 effect 里——importAsset 可能在首个 effect 之前就被调用。
+  requestProxyJobRef.current = (assetId: string) => {
+    if (!project) return;
+    if (proxyJobAssetIdsRef.current.has(assetId)) return; // 判定/登记每素材最多一次
+    proxyJobAssetIdsRef.current.add(assetId);
+    void window.desktop.createPreviewSourceJob({
+      project_id: project.project_id, asset_id: assetId, profile_id: "preview-1080-v1",
+    }).catch(() => undefined);
+  };
+  // 按需代理（本次修复的核心）：触发点从「导入瞬间」挪到「实测解不动」。
+  // SyntheticPreview 每秒把按 input_id 归因的耗时汇总成按 asset_id 的 p95 判定
+  // 上报（样本 <30 或 p95 ≤33.3ms 一律不转），这里只消费 over_budget 的素材。
+  // 已导入的素材走这条路 ⇒ 打开老项目也能在高清代理生成后自动切换。
+  const onDecodeBudget = useCallback((verdicts: AssetDecodeBudget[]) => {
+    for (const verdict of verdicts) {
+      if (!verdict.over_budget) continue;
+      // 已有结论（作业成功 = 代理就绪 / 失败 = 不重试）的素材不再判，免得
+      // 每秒白打一次已被 Core 幂等挡下的请求。
+      if (proxyJobSettledAssetIdsRef.current.has(verdict.asset_id)) continue;
+      requestProxyJobRef.current(verdict.asset_id);
+    }
+  }, []);
   const selectedClip = selection?.kind === "clip" ? working?.clips.find(item => item.clip_id === selection.id) : undefined;
   const selectedCaption = selection?.kind === "caption" ? working?.captions.find(item => item.caption_id === selection.id) : undefined;
   const selectedTransition = selection?.kind === "transition" ? working?.transitions?.find(item => item.transition_id === selection.id) : undefined;
@@ -1268,6 +1378,10 @@ export function App() {
     }, project.project_id) : null,
     [project],
   );
+  // 代理就绪后要清的是解析缓存（Map），不是 React state——若经 setState 触发
+  // 重渲染，SyntheticPreview 的会话重建依赖会连带重建整个预览会话，正好违反
+  // 方案 A「不打断用户」。这里用 ref 把「清缓存」动作交给 jobs 派生 effect。
+  invalidateProxySourceRef.current = assetId => previewSourceResolver?.invalidate(assetId);
   // B14：素材级持久化波形缓存（时间轴峰值来源；会话内 LRU 字节上限，
   // 切项目换实例）。Renderer 不再 fetch 整媒体 + decodeAudioData 生成波形。
   const waveformCache = useMemo(
@@ -1576,7 +1690,22 @@ export function App() {
   const createProject = async () => { if (!newProject.trim()) return; const created = await window.desktop.createProject({ name: newProject.trim(), canvas: projectCanvasPresets[newProjectRatio] }); setNewProject(""); autoProvisionProjectId.current = created.project_id; await refreshProjects(); switchProject(created); setProjectDialogOpen(false); };
   const renameProject = async () => { if (!project || !projectName.trim()) return; const updated = await window.desktop.renameProject({ project_id: project.project_id, name: projectName.trim() }); projectNameDirty.current = false; setProject(updated); setProjects(items => items.map(item => item.project_id === updated.project_id ? updated : item)); };
   const toggleArchive = async () => { if (!project) return; const updated = project.status === "archived" ? await window.desktop.reopenProject(project.project_id) : await window.desktop.archiveProject(project.project_id); setProject(updated); setProjects(items => items.map(item => item.project_id === updated.project_id ? updated : item)); };
-  const importAsset = async (kind: AssetKind) => { if (!project) return; const result = await window.desktop.importAsset({ project_id: project.project_id, kind }); if (result) setAssets(items => [...items, { asset: result.asset, media_url: result.media_url }]); };
+  const importAsset = async (kind: AssetKind) => {
+    if (!project) return;
+    const result = await window.desktop.importAsset({ project_id: project.project_id, kind });
+    if (!result) return;
+    setAssets(items => [...items, { asset: result.asset, media_url: result.media_url }]);
+    // 方案 A（B11 缺失的一环）：视频素材导入后自动在后台登记代理生成作业，
+    // 生成期间预览继续走原片（卡但能看），就绪后由下面的 jobs 派生 effect 失效
+    // 解析缓存、下次解析自动换代理。这里不 await：代理是加速项，登记失败（无
+    // FFmpeg / 不支持 / IPC 报错）绝不能影响导入成功，也不弹错误。
+    if (result.asset.kind !== "video") return;
+    // 方案 A（B11 缺失的一环）：视频素材导入后自动在后台登记代理生成作业，
+    // 生成期间预览继续走原片（卡但能看），就绪后由下面的 jobs 派生 effect 失效
+    // 解析缓存、下次解析自动换代理。导入即转对 4K 素材仍然是对的；**已导入的
+    // 老素材**由实测判定那条路补上（decodeBudget → 同一登记入口）。
+    requestProxyJobRef.current(String(result.asset.asset_id));
+  };
   // 素材库刷新：逐个让 Core 重扫本地文件；已删除的素材清理出列表
   // （无时间线引用时直接删除，仍被引用时保留并标记缺失）。
   const refreshAssets = async () => {
@@ -2740,7 +2869,7 @@ export function App() {
             {previewMode === "authoritative" && authoritativeMediaUrl && <video ref={videoRef} className="preview-foreground authoritative-video" src={authoritativeMediaUrl} aria-label={reframePlayback ? "重构图权威预览视频" : exportPlayback ? "导出视频" : "权威预览视频"} controls onEnded={() => { setPlaying(false); setExportPlayback(undefined); setReframePlayback(undefined); setPreviewMode("synthetic"); }} />}
             {/* 合成预览仅在时间线有可见片段时挂载；空时间线显示引导文案（剪映式），
                 避免对空时间线请求 preview-ir 被 Core 以 TIMELINE_EMPTY 拒绝而回退。 */}
-            {previewMode === "synthetic" && projectStateReady && project && working && timeline && working.clips.length > 0 && <SyntheticPreview key={project.project_id} outputRatio={renderRatio} projectId={project.project_id} revisionId={timeline.current_revision.timeline_revision_id} mediaUrls={syntheticMediaUrls} audioByClip={syntheticAudioByClip} pipClips={syntheticPipClips} selectedClipId={pipSelectedId} onSelectClip={clipId => setSelection({ kind: "clip", id: clipId as never })} onCommitPipTransform={(clipId, transform) => { const clip = (working?.clips ?? []).find(item => item.clip_id === clipId); commitPipTransform(clipId as never, { ...(clip?.transform ?? {}), ...transform }); }} onDraftPipMask={(clipId, mask) => draftPipMask(clipId as never, mask)} onCommitPipMask={(clipId, mask) => commitPipMask(clipId as never, mask)} onGesturePause={pausePreviewPlayback} onGestureResume={resumePreviewPlayback} playing={playing && !gestureHoldRef.current} playheadUs={playhead} playheadStore={playheadStore} onTimeUs={us => seekFromPlayback(us)} onEnded={() => setPlaying(false)} onFallback={(reason, code) => { if (!seenAnyTicketRef.current) return; setPreviewMode("interactive"); setSyntheticNotice(syntheticFallbackNotice(reason, code)); }} sourceResolver={previewSourceResolver} resourceTier={resourceTier} forceCopyTo={forceCopyTo} snapshotRef={syntheticSnapshotRef} />}
+            {previewMode === "synthetic" && projectStateReady && project && working && timeline && working.clips.length > 0 && <SyntheticPreview key={project.project_id} outputRatio={renderRatio} projectId={project.project_id} revisionId={timeline.current_revision.timeline_revision_id} mediaUrls={syntheticMediaUrls} audioByClip={syntheticAudioByClip} pipClips={syntheticPipClips} selectedClipId={pipSelectedId} onSelectClip={clipId => setSelection({ kind: "clip", id: clipId as never })} onCommitPipTransform={(clipId, transform) => { const clip = (working?.clips ?? []).find(item => item.clip_id === clipId); commitPipTransform(clipId as never, { ...(clip?.transform ?? {}), ...transform }); }} onDraftPipMask={(clipId, mask) => draftPipMask(clipId as never, mask)} onCommitPipMask={(clipId, mask) => commitPipMask(clipId as never, mask)} onGesturePause={pausePreviewPlayback} onGestureResume={resumePreviewPlayback} playing={playing && !gestureHoldRef.current} playheadUs={playhead} playheadStore={playheadStore} onTimeUs={us => seekFromPlayback(us)} onEnded={() => setPlaying(false)} onFallback={(reason, code) => { if (!seenAnyTicketRef.current) return; setPreviewMode("interactive"); setSyntheticNotice(syntheticFallbackNotice(reason, code)); }} sourceResolver={previewSourceResolver} resourceTier={resourceTier} forceCopyTo={forceCopyTo} snapshotRef={syntheticSnapshotRef} proxyEpoch={proxyReadyEpoch} onDecodeBudget={onDecodeBudget} />}
             {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "video" && <div className="preview-transform" style={mainTransformStyle}><video className="preview-background" src={previewAsset.media_url} muted aria-hidden="true" /><video ref={videoRef} className="preview-foreground" src={previewAsset.media_url} muted={!selectedClip?.audio.enabled || previewReverse || (clipAtPlayhead ? !isClipAudible(clipAtPlayhead) : false)} aria-label="交互预览视频" onTimeUpdate={event => { if (libraryPreviewId) dispatchPlayhead("external", Math.round(event.currentTarget.currentTime * 1_000_000), true); }} onEnded={handleVideoEnded} /></div>}
             {previewMode === "interactive" && audioAsset?.media_url && <audio ref={audioRef} src={audioAsset.media_url} style={{ display: "none" }} />}
             {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "image" && <div className="preview-transform" style={mainTransformStyle}><img className="preview-background" src={previewAsset.media_url} alt="" aria-hidden="true" /><img className="preview-foreground" src={previewAsset.media_url} alt={previewAsset.asset.display_name} /></div>}

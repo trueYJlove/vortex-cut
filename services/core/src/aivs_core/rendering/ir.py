@@ -22,7 +22,18 @@ from .interval_index import IntervalLookup, RegionSweep
 
 FPS = 30
 IR_SCHEMA = "preview-ir-v1"
-IR_PROJECTOR_VERSION = 4  # v4（2026-10-10）：主轨空时以可见覆盖轨终点作时长下限（对齐权威端「全程黑场+覆盖轨叠加」）；v3（2026-09-17 v0.4）：覆盖轨 mask/keying 重入（overlay 条目携带 effects）
+# **投影语义变更 ⇒ 必须升版本**：版本号是唯一的跨版本失效机制（磁盘缓存按
+# projector_version 比对）。语义变了不升，旧条目会带着旧逻辑被重新采信，
+# 表现为「改了没反应」——这不是靠人记得，而是靠这里必须动。
+# v5（2026-11-03）：输入 geometry 携带显示方向——新增 display_width/display_height/
+# rotation（width/height 仍表示解码平面尺寸，供纹理上传）；_fit_content_box 与
+# crop_fill 改为**按显示方向**计算内容盒（竖拍素材不再被当成横版铺满画布）；
+# ffprobe 旋转解析改为扫描整个 side_data_list（iPhone 的 side_data_list[0] 是
+# Dolby Vision 记录，只看 [0] 取不到 rotation）。旧条目缺 display_* ⇒ 旧布局语义，
+# 必须整体失效。
+# v4（2026-10-10）：主轨空时以可见覆盖轨终点作时长下限（对齐权威端「全程黑场+
+# 覆盖轨叠加」）；v3（2026-09-17 v0.4）：覆盖轨 mask/keying 重入（overlay 条目携带 effects）。
+IR_PROJECTOR_VERSION = 5
 MAX_IR_FRAMES = 27_000  # 15 分钟 @30fps（O2 体量护栏）
 
 ALLOWED_KEYFRAME_PROPS = {"position", "opacity", "scale", "rotate"}
@@ -169,10 +180,13 @@ def _opacity_alpha(keyframes: dict[str, Any] | None, t_seg_us: int) -> float:
 
 def _fit_content_box(geometry: dict[str, Any], width: int, height: int) -> tuple[int, int, int, int]:
     """主轨 fit 布局内容盒（复刻 _visual_filter("fit")：等比缩进 + 黑边居中）。"""
-    disp_w = geometry["width"] * geometry["sar"]
-    scale = min(width / disp_w, height / geometry["height"])
+    # 用 display_*（旋转后方向）；缺字段回落原始值（老 IR 兼容）。
+    disp_w_raw = int(geometry.get("display_width") or geometry["width"])
+    disp_h_raw = int(geometry.get("display_height") or geometry["height"])
+    disp_w = disp_w_raw * geometry["sar"]
+    scale = min(width / disp_w, height / disp_h_raw)
     content_w = int(round(disp_w * scale / 2) * 2)
-    content_h = int(round(geometry["height"] * scale / 2) * 2)
+    content_h = int(round(disp_h_raw * scale / 2) * 2)
     return (width - content_w) // 2, (height - content_h) // 2, content_w, content_h
 
 
@@ -327,11 +341,36 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
                 sar = float(num) / float(den) if float(den) > 0 else 1.0
             except ValueError:
                 sar = 1.0
-            geometry = {"width": int(stream.get("width") or 0), "height": int(stream.get("height") or 0), "sar": sar}
+            # **旋转感知 geometry**（P206/P212，2026-11-03 实测定案）：
+            # width/height = 解码平面的原始方向（合成器上传纹理用，
+            # frame_decode 的 -noautorotate 保证平面就是这个方向）；
+            # display_width/display_height = 按 display matrix 换轴后的**显示方向**
+            # （布局 fit/cover 必须用它算内容盒）。
+            # 混淆二者会导致两种真机缺陷：用原始尺寸算布局 ⇒ 竖拍素材被当成
+            # 16:9 横版铺进 9:16 画布，合成器把竖画面横向拉伸（2026-11-03 用户
+            # 截图确认）；用显示尺寸上传纹理 ⇒ 行宽错位花屏（更早踩过）。
+            raw_w = int(stream.get("width") or 0)
+            raw_h = int(stream.get("height") or 0)
+            rot = int(stream.get("rotation") or 0) % 360
+            swapped = rot in (90, 270)
+            geometry = {
+                "width": raw_w, "height": raw_h, "sar": sar, "rotation": rot,
+                "display_width": raw_h if swapped else raw_w,
+                "display_height": raw_w if swapped else raw_h,
+            }
+        # P203：HDR 标记随 input 下发。理由：前端 WebCodecs 路径解 10-bit HLG
+        # 在部分 GPU 上会产出 format=null 的坏帧并让渲染进程永久堵死，而产品
+        # 此前**连素材是不是 HDR 都不知道**，无法在点播放前提示用户。
+        # 判定只看 transfer（PQ=smpte2084 / HLG=arib-std-b67）；缺失或其它值
+        # 一律按 SDR（保守：宁可漏报，不能把 SDR 误报成 HDR 造成虚假告警）。
+        color_transfer = None if item["asset_kind"] == "audio" else (
+            ((probes.get(item["asset_id"]) or {}).get("video_streams") or [{}])[0].get("color_transfer")
+        )
         inputs.append({
             "input_id": item["input_id"], "asset_id": item["asset_id"],
             "asset_kind": item["asset_kind"], "duration_us": item["duration_us"],
             "has_audio": item["has_audio"], "geometry": geometry,
+            "hdr": color_transfer in ("smpte2084", "arib-std-b67"),
         })
         geometry_by_input[item["input_id"]] = geometry
     segment_input = {segment["clip_id"]: segment["input_id"] for segment in plan["segments"]}
@@ -481,10 +520,11 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
         # crop_fill = cover 等比放大到短边顶满、长边溢出裁切（语义对齐
         # _visual_filter("crop_fill"): force_original_aspect_ratio=increase+crop）。
         if segment.get("layout") == "crop_fill":
-            disp_w_full = geometry["width"] * geometry["sar"]
-            cover_scale = max(width / disp_w_full, height / geometry["height"])
+            disp_w_full = int(geometry.get("display_width") or geometry["width"]) * geometry["sar"]
+            disp_h_full = int(geometry.get("display_height") or geometry["height"])
+            cover_scale = max(width / disp_w_full, height / disp_h_full)
             cover_w = int(round(disp_w_full * cover_scale / 2) * 2)
-            cover_h = int(round(geometry["height"] * cover_scale / 2) * 2)
+            cover_h = int(round(disp_h_full * cover_scale / 2) * 2)
             content_x, content_y = (width - cover_w) // 2, (height - cover_h) // 2
             content_w, content_h = cover_w, cover_h
         else:

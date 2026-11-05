@@ -5,7 +5,8 @@ Core 新进程,首投影(100 素材级 ≈1.8s)照付。本模块把投影产物
 `data_dir/cache/preview-ir/`,冷启动直接装回,收益场景 = 用户重开项目。
 
 键 = manifest_id(content_fingerprint@mode@profile_id,时间线语义/模式/
-输出比例天然分区);条目内嵌失效元数据(projector_version + 素材指纹集)。
+输出比例天然分区);条目内嵌失效元数据(projector_version + 素材指纹集 +
+视觉输入 geometry 形状)。
 缓存永远只是加速:任何 OSError/解析失败静默降级为未命中,不成为正确性
 依赖。磁盘 LRU 8 条(mtime 最旧淘汰)与内存分池上限对齐。
 """
@@ -26,6 +27,43 @@ logger = logging.getLogger(__name__)
 # v1(4)+v2(2) 分池与内存对齐;单条 1-3MB → 磁盘占用上限 ≈25MB。
 MAX_DISK_ENTRIES = 8
 CACHE_DIR_NAME = "preview-ir"
+
+# **形状级失效**(v5 起):版本号之外的第二道闸。投影契约新增 display_width/
+# display_height 后,视频/图片输入的 geometry 必须携带它们;缺失即旧投影,不采信。
+# 作用:让"改了投影契约却忘了升 IR_PROJECTOR_VERSION"这一类失误自动失效,
+# 而不是再次靠人记得改常量。
+REQUIRED_GEOMETRY_FIELDS = ("display_width", "display_height")
+# 只有视觉输入受此约束。纯音频输入(asset_kind == "audio")的 geometry 是占位
+# {"width":0,"height":0,"sar":1},合成器不消费、投影也不填显示方向——一律要求
+# display_* 会把所有音频条目误丢(每次冷启动都白重投影)。
+VISUAL_ASSET_KINDS = frozenset({"video", "image"})
+
+
+def payload_shape_is_current(payload: Any) -> bool:
+    """payload 内 video/image 输入的 geometry 是否带本次契约要求的字段。
+
+    形状未知(非 dict、缺 ir、缺 inputs)一律判为不采信:缓存只是加速,
+    宁可回未命中重投影,也不要把形状不明的旧产物喂给合成器。
+    """
+    if not isinstance(payload, dict):
+        return False
+    ir = payload.get("ir")
+    if not isinstance(ir, dict):
+        return False
+    inputs = ir.get("inputs")
+    if not isinstance(inputs, list):
+        return False
+    for item in inputs:
+        if not isinstance(item, dict):
+            return False
+        if item.get("asset_kind") not in VISUAL_ASSET_KINDS:
+            continue
+        geometry = item.get("geometry")
+        if not isinstance(geometry, dict):
+            return False
+        if any(field not in geometry for field in REQUIRED_GEOMETRY_FIELDS):
+            return False
+    return True
 
 
 class PreviewIrDiskCache:
@@ -50,6 +88,11 @@ class PreviewIrDiskCache:
                 self._discard(path)
                 return None
             if sorted(meta["asset_fingerprints"]) != sorted(asset_fingerprints):
+                self._discard(path)
+                return None
+            # 形状闸:版本号相同也不足以采信——投影契约变了却没升版本时,
+            # 这道检查是唯一还会变红的环节。
+            if not payload_shape_is_current(entry["payload"]):
                 self._discard(path)
                 return None
             return entry["payload"]

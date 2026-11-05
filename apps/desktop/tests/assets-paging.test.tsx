@@ -2,7 +2,7 @@
  *  next_cursor 翻页装载全部素材——旧实现只取 Core 默认 limit=50 第一页，
  *  第 51+ 素材无 media ticket（合成预览回退 "no ticket for asset_..."，
  *  刷新素材库不可恢复）。App 级渲染断言素材库含跨页条目。 */
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DesktopApi } from "../electron/preload/index.js";
 import { buildDesktopApi } from "./fixtures/desktop-api-factory.js";
@@ -64,4 +64,33 @@ describe("W3 GAP-LIST-ASSETS-PAGING：分页装载", () => {
     await new Promise(resolve => setTimeout(resolve, 20));
     expect(calls).toBe(200);
   });
+
+  /** 上面那条只在"触顶后的 20ms 内恰好没有轮询轮次"时成立——它守的是
+   *  「这一刻没有第 201 页」，不是「不会再发起第二轮 200 页」。资产集合对账
+   *  （P199）在轮询里跑，只要它把被 200 页上限截断的本地镜像当成比对基准，
+   *  病理服务器（首页每次都变）每轮都会判成"集合变了"，于是**每轮重发一次
+   *  全量翻页**：实测调用序列 [200] → [401]（200 首次 + 200 重复 + 1 对账）。
+   *  这里主动推进一轮轮询把它变成确定性事件，不再依赖并行负载下的时序运气。 */
+  it("撞上限的装载不构成对账基准：推进一轮轮询后仍只有那 200 次（不再重发全量翻页）", async () => {
+    let calls = 0;
+    const api = buildDesktopApi({
+      overrides: {
+        listAssets: vi.fn(async () => {
+          calls += 1;
+          return { items: [{ asset: makeAsset(calls), media_url: "aivideo://media/x" }], next_cursor: `c${calls}` };
+        }),
+        getTimeline: vi.fn().mockRejectedValue(new Error("TIMELINE_NOT_FOUND 404")),
+      },
+    });
+    (window as { desktop?: DesktopApi }).desktop = api;
+    const { App } = await import("../src/app/App.js");
+    render(<App />);
+    await waitFor(() => expect(calls).toBe(200));
+    // 同 asset-collection-reconciliation 的推进通道：visibilitychange → scheduler.refresh()。
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      await new Promise(resolve => setTimeout(resolve, 60));
+    });
+    expect(calls).toBe(200);
+  }, 30_000);
 });

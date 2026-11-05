@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from aivs_core.rendering.ir import IR_PROJECTOR_VERSION
 from aivs_core.rendering.ir_disk_cache import (
     MAX_DISK_ENTRIES,
     PreviewIrDiskCache,
@@ -192,3 +193,85 @@ def test_v1_and_v2_share_disk_entry(tmp_path: Path) -> None:
     v1_payload = asyncio.run(second.preview_ir("p", None, "169"))
     assert executor.calls == 1  # 共享条目命中,无第二次投影
     assert v1_payload["ir"]["canvas"]["duration_frames"] == 30
+
+
+# --- 形状级失效（v5，P212 残留）------------------------------------------------
+# 版本号只在"人记得升"时生效；下面三条锁住的是机制本身：
+# 投影契约（geometry 带显示方向）变了，旧形状条目必须自动失效，
+# 而合法形状（含纯音频占位 geometry）不得被误丢。
+
+
+def _ir_with_inputs(*inputs: dict) -> dict:
+    """带 inputs 的极小 IR：形状闸只看 inputs[].geometry。"""
+    return {
+        "canvas": {"duration_frames": 30, "duration_us": 1_000_000},
+        "frames": [{"n": 0, "overlays": []}],
+        "inputs": list(inputs),
+        "segments": [],
+        "captions": [],
+        "caption_styles": {},
+        "transition_windows": [],
+        "known_approximations": [],
+    }
+
+
+def _video_input(geometry: dict) -> dict:
+    return {"input_id": "I0", "asset_id": "asset0", "asset_kind": "video",
+            "duration_us": 0, "has_audio": True, "geometry": geometry}
+
+
+def test_legacy_geometry_shape_invalidates_at_same_version(tmp_path: Path) -> None:
+    """旧形状（geometry 无 display_width）**版本号相同**也不得被采信。
+
+    这是 P212 的残留缺陷本体：投影语义已改成按显示方向算内容盒，但存量条目
+    仍是旧逻辑的产物。版本号若漏升，只有形状检查能拦住它——本测试就是那根锁。
+    """
+    cache = PreviewIrDiskCache(tmp_path)
+    key = "sha256:legacy@authoritative_preview@preview-916-v1"
+    legacy_geometry = {"width": 3840, "height": 2160, "sar": 1.0}  # v5 前形状
+    # store 写入的就是**当前**版本号——版本闸这次放行，只剩形状闸能拦。
+    cache.store(key, ["fp"], {"ir": _ir_with_inputs(_video_input(legacy_geometry))})
+    path = next((tmp_path / "cache" / "preview-ir").rglob("*.json"))
+    assert json.loads(path.read_text(encoding="utf-8"))["meta"]["projector_version"] == (
+        IR_PROJECTOR_VERSION
+    )
+
+    assert cache.load(key, ["fp"]) is None  # 旧形状：不采信
+    assert not path.exists()  # 且陈旧文件被删除（读时自愈）
+
+
+def test_current_geometry_shape_hits(tmp_path: Path) -> None:
+    """正证：带 display_width/display_height 的条目仍然命中。
+
+    没有这条，把形状闸写成「一律 return False」也能让上面那条变绿。
+    """
+    cache = PreviewIrDiskCache(tmp_path)
+    key = "sha256:current@authoritative_preview@preview-916-v1"
+    geometry = {"width": 3840, "height": 2160, "sar": 1.0, "rotation": 270,
+                "display_width": 2160, "display_height": 3840}
+    cache.store(key, ["fp"], {"ir": _ir_with_inputs(_video_input(geometry))})
+
+    loaded = cache.load(key, ["fp"])
+    assert loaded is not None
+    assert loaded["ir"]["inputs"][0]["geometry"]["display_width"] == 2160
+
+
+def test_audio_only_entry_still_hits(tmp_path: Path) -> None:
+    """纯音频输入的占位 geometry 不得被形状闸误判。
+
+    音频 geometry 恒为 {"width":0,"height":0,"sar":1}（合成器不消费，投影不填
+    显示方向）。一律要求 display_* 会把所有音频条目误丢 → 每次冷启动白重投影。
+    判据是形状闸显式只看 video/image。
+    """
+    cache = PreviewIrDiskCache(tmp_path)
+    key = "sha256:audio@authoritative_preview@preview-916-v1"
+    audio_input = {"input_id": "A0", "asset_id": "audio0", "asset_kind": "audio",
+                   "duration_us": 0, "has_audio": True,
+                   "geometry": {"width": 0, "height": 0, "sar": 1.0}}
+    cache.store(key, ["fp"], {"ir": _ir_with_inputs(audio_input)})
+    path = next((tmp_path / "cache" / "preview-ir").rglob("*.json"))
+
+    loaded = cache.load(key, ["fp"])
+    assert loaded is not None, "纯音频条目被形状闸误丢"
+    assert path.exists()
+    assert loaded["ir"]["inputs"][0]["geometry"]["width"] == 0

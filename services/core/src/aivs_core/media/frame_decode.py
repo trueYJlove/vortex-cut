@@ -300,6 +300,15 @@ async def decode_nv12_frames(
         raise FrameDecodeError("DECODE_FRAME_NOT_FOUND", "目标帧不在关键帧之后")
     args = [
         "-hide_banner", "-nostdin", "-y",
+        # **必须禁用自动旋转**：素材若带 display matrix 旋转（iPhone 竖拍常见
+        # `rotation=-90`），ffmpeg 默认按旋转后方向输出像素，而调用方的
+        # `width/height` 来自 `media_info_json` 的**旋转前**尺寸 ⇒ NV12 平面行宽
+        # 错位 ⇒ 画面横向条纹花屏（2026-11-01 真机复现：3840x2160 声明 vs
+        # 2160x3840 实际输出，条纹与用户截图一致）。解码层只负责把码流原样解成
+        # 平面，旋转由前端按 IR 处理。
+        # 注意：NV12 的 `w*h*1.5` 对宽高互换**恒等**，故长度断言抓不到该缺陷，
+        # 回归锁必须用**内容相关度**判据（见 tests/unit/test_frame_decode_rotation.py）。
+        "-noautorotate",
         "-ss", f"{seek_us / 1e6:.6f}",
         "-i", str(input_path),
         "-an", "-sn",
