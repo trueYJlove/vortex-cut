@@ -1,0 +1,268 @@
+{
+  "label": "ctr8b-8bit-sdr",
+  "fixture": "C:/DataFolder/codes/AI-Vidio/.tmp/hevc/hevc8bit-sdr.mp4",
+  "waitProxyMs": 0,
+  "evalCapMs": 2000,
+  "ids": {
+    "project_id": "project_86debef6db6743ecb0eca194296571fc",
+    "asset_id": "asset_4668a62d450141d085c78d47d13eb9c6"
+  },
+  "sourceAtImport": {
+    "at": 3997,
+    "heartbeats": 12,
+    "preview_source": {
+      "status": "ready",
+      "mode": "original",
+      "job_id": null,
+      "cache_key": null,
+      "profile_id": "preview-720-v1",
+      "coded_width": 2160,
+      "coded_height": 3840,
+      "rotation": 0
+    },
+    "proxy_jobs": [
+      {
+        "job_id": "6b5603f972fe4fcaa9e449d71440ab9d",
+        "status": "running",
+        "stage": "running",
+        "progress": 0,
+        "error": null,
+        "updated_at": "2026-11-05T03:36:33.924Z"
+      }
+    ]
+  },
+  "sourceBeforePlay": {
+    "at": 4287,
+    "heartbeats": 15,
+    "preview_source": {
+      "status": "ready",
+      "mode": "original",
+      "job_id": null,
+      "cache_key": null,
+      "profile_id": "preview-720-v1",
+      "coded_width": 2160,
+      "coded_height": 3840,
+      "rotation": 0
+    },
+    "proxy_jobs": [
+      {
+        "job_id": "6b5603f972fe4fcaa9e449d71440ab9d",
+        "status": "running",
+        "stage": "running",
+        "progress": 0,
+        "error": null,
+        "updated_at": "2026-11-05T03:36:33.924Z"
+      }
+    ]
+  },
+  "playSamples": [
+    {
+      "elapsedMs": 1522,
+      "evalTookMs": 6,
+      "probe": {
+        "hb": 38,
+        "metrics": false,
+        "decode_backend": null,
+        "decode_ms_p50": null,
+        "decode_ms_p95": null,
+        "dropped_frames": null,
+        "composed_frames": null,
+        "last_error": null,
+        "hdr_media": null,
+        "at": null
+      },
+      "main": [
+        {
+          "title": "hb:38|cf:-1|df:-1|be:-|hm:0",
+          "crashed": false,
+          "destroyed": false,
+          "responsive": true,
+          "url": "file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"
+        }
+      ]
+    },
+    {
+      "elapsedMs": 3038,
+      "evalTookMs": 4,
+      "probe": {
+        "hb": 53,
+        "metrics": true,
+        "decode_backend": "webcodecs",
+        "decode_ms_p50": 1.9,
+        "decode_ms_p95": 98.9,
+        "dropped_frames": 4,
+        "composed_frames": 22,
+        "last_error": null,
+        "hdr_media": false,
+        "at": 7596
+      },
+      "main": [
+        {
+          "title": "hb:53|cf:22|df:4|be:webcodecs|hm:0",
+          "crashed": false,
+          "destroyed": false,
+          "responsive": true,
+          "url": "file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"
+        }
+      ]
+    },
+    {
+      "elapsedMs": 5154,
+      "evalTookMs": 615,
+      "probe": {
+        "hb": 69,
+        "metrics": true,
+        "decode_backend": "webcodecs",
+        "decode_ms_p50": 1.4,
+        "decode_ms_p95": 283.3,
+        "dropped_frames": 12,
+        "composed_frames": 53,
+        "last_error": null,
+        "hdr_media": false,
+        "at": 9602
+      },
+      "main": [
+        {
+          "title": "hb:74|cf:53|df:12|be:webcodecs|hm:0",
+          "crashed": false,
+          "destroyed": false,
+          "responsive": true,
+          "url": "file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"
+        }
+      ]
+    },
+    {
+      "elapsedMs": 8738,
+      "evalTookMs": 2073,
+      "probe": "EVAL_BLOCKED",
+      "main": [
+        {
+          "title": "hb:110|cf:53|df:12|be:webcodecs|hm:0",
+          "crashed": false,
+          "destroyed": false,
+          "responsive": true,
+          "url": "file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"
+        }
+      ]
+    },
+    {
+      "elapsedMs": 12245,
+      "evalTookMs": 2002,
+      "probe": "EVAL_BLOCKED",
+      "main": [
+        {
+          "title": "hb:145|cf:53|df:12|be:webcodecs|hm:0",
+          "crashed": false,
+          "destroyed": false,
+          "responsive": true,
+          "url": "file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"
+        }
+      ]
+    },
+    {
+      "elapsedMs": 15758,
+      "evalTookMs": 2009,
+      "probe": "EVAL_BLOCKED",
+      "main": [
+        {
+          "title": "hb:180|cf:53|df:12|be:webcodecs|hm:0",
+          "crashed": false,
+          "destroyed": false,
+          "responsive": true,
+          "url": "file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"
+        }
+      ]
+    },
+    {
+      "elapsedMs": 19265,
+      "evalTookMs": 2003,
+      "probe": "EVAL_BLOCKED",
+      "main": [
+        {
+          "title": "hb:215|cf:53|df:12|be:webcodecs|hm:0",
+          "crashed": false,
+          "destroyed": false,
+          "responsive": true,
+          "url": "file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"
+        }
+      ]
+    },
+    {
+      "elapsedMs": 22790,
+      "evalTookMs": 2005,
+      "probe": "EVAL_BLOCKED",
+      "main": [
+        {
+          "title": "hb:251|cf:53|df:12|be:webcodecs|hm:0",
+          "crashed": false,
+          "destroyed": false,
+          "responsive": true,
+          "url": "file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"
+        }
+      ]
+    },
+    {
+      "elapsedMs": 26317,
+      "evalTookMs": 2019,
+      "probe": "EVAL_BLOCKED",
+      "main": [
+        {
+          "title": "hb:286|cf:53|df:12|be:webcodecs|hm:0",
+          "crashed": false,
+          "destroyed": false,
+          "responsive": true,
+          "url": "file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"
+        }
+      ]
+    },
+    {
+      "elapsedMs": 29853,
+      "evalTookMs": 2030,
+      "probe": "EVAL_BLOCKED",
+      "main": [
+        {
+          "title": "hb:321|cf:53|df:12|be:webcodecs|hm:0",
+          "crashed": false,
+          "destroyed": false,
+          "responsive": true,
+          "url": "file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"
+        }
+      ]
+    },
+    {
+      "elapsedMs": 33429,
+      "evalTookMs": 2073,
+      "probe": "EVAL_BLOCKED",
+      "main": [
+        {
+          "title": "hb:357|cf:53|df:12|be:webcodecs|hm:0",
+          "crashed": false,
+          "destroyed": false,
+          "responsive": true,
+          "url": "file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"
+        }
+      ]
+    },
+    {
+      "elapsedMs": 37026,
+      "evalTookMs": 2083,
+      "probe": "EVAL_BLOCKED",
+      "main": [
+        {
+          "title": "hb:393|cf:53|df:12|be:webcodecs|hm:0",
+          "crashed": false,
+          "destroyed": false,
+          "responsive": true,
+          "url": "file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"
+        }
+      ]
+    }
+  ],
+  "clickResult": "clicked",
+  "finalMetrics": "EVAL_BLOCKED",
+  "sourceAfterPlay": "EVAL_BLOCKED",
+  "heartbeats": {
+    "before": 23,
+    "after": "EVAL_BLOCKED"
+  }
+}

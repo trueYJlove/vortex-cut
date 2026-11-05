@@ -1,0 +1,171 @@
+{
+  "label": "ctr8-8bit-sdr",
+  "fixture": "C:/DataFolder/codes/AI-Vidio/.tmp/hevc/hevc8bit-sdr.mp4",
+  "waitProxyMs": 0,
+  "evalCapMs": 2000,
+  "ids": {
+    "project_id": "project_1e2d34948f7b4f6883dd5381e2e79e87",
+    "asset_id": "asset_2922f534644644a09b33b68f092181fd"
+  },
+  "sourceAtImport": {
+    "at": 4242,
+    "heartbeats": 12,
+    "preview_source": {
+      "status": "ready",
+      "mode": "original",
+      "job_id": null,
+      "cache_key": null,
+      "profile_id": "preview-720-v1",
+      "coded_width": 2160,
+      "coded_height": 3840,
+      "rotation": 0
+    },
+    "proxy_jobs": [
+      {
+        "job_id": "41a39dbf432047daafefbb56a7aefbc4",
+        "status": "running",
+        "stage": "running",
+        "progress": 0,
+        "error": null,
+        "updated_at": "2026-11-05T03:33:56.792Z"
+      }
+    ]
+  },
+  "sourceBeforePlay": {
+    "at": 4570,
+    "heartbeats": 16,
+    "preview_source": {
+      "status": "ready",
+      "mode": "original",
+      "job_id": null,
+      "cache_key": null,
+      "profile_id": "preview-720-v1",
+      "coded_width": 2160,
+      "coded_height": 3840,
+      "rotation": 0
+    },
+    "proxy_jobs": [
+      {
+        "job_id": "41a39dbf432047daafefbb56a7aefbc4",
+        "status": "running",
+        "stage": "running",
+        "progress": 0,
+        "error": null,
+        "updated_at": "2026-11-05T03:33:56.792Z"
+      }
+    ]
+  },
+  "playSamples": [
+    {
+      "elapsedMs": 1530,
+      "evalTookMs": 10,
+      "probe": {
+        "hb": 40,
+        "metrics": false,
+        "decode_backend": null,
+        "decode_ms_p50": null,
+        "decode_ms_p95": null,
+        "dropped_frames": null,
+        "composed_frames": null,
+        "last_error": null,
+        "hdr_media": null,
+        "at": null
+      }
+    },
+    {
+      "elapsedMs": 3050,
+      "evalTookMs": 13,
+      "probe": {
+        "hb": 55,
+        "metrics": true,
+        "decode_backend": "webcodecs",
+        "decode_ms_p50": 1.8,
+        "decode_ms_p95": 110.5,
+        "dropped_frames": 1,
+        "composed_frames": 25,
+        "last_error": null,
+        "hdr_media": false,
+        "at": 8365
+      }
+    },
+    {
+      "elapsedMs": 4567,
+      "evalTookMs": 4,
+      "probe": {
+        "hb": 70,
+        "metrics": true,
+        "decode_backend": "webcodecs",
+        "decode_ms_p50": 1.8,
+        "decode_ms_p95": 262.9,
+        "dropped_frames": 4,
+        "composed_frames": 49,
+        "last_error": null,
+        "hdr_media": false,
+        "at": 9365
+      }
+    },
+    {
+      "elapsedMs": 6916,
+      "evalTookMs": 847,
+      "probe": {
+        "hb": 85,
+        "metrics": true,
+        "decode_backend": "webcodecs",
+        "decode_ms_p50": 1.6,
+        "decode_ms_p95": 278.4,
+        "dropped_frames": 4,
+        "composed_frames": 61,
+        "last_error": null,
+        "hdr_media": false,
+        "at": 11372
+      }
+    },
+    {
+      "elapsedMs": 10443,
+      "evalTookMs": 2019,
+      "probe": "EVAL_BLOCKED"
+    },
+    {
+      "elapsedMs": 13960,
+      "evalTookMs": 2001,
+      "probe": "EVAL_BLOCKED"
+    },
+    {
+      "elapsedMs": 17464,
+      "evalTookMs": 2001,
+      "probe": "EVAL_BLOCKED"
+    },
+    {
+      "elapsedMs": 20984,
+      "evalTookMs": 2007,
+      "probe": "EVAL_BLOCKED"
+    },
+    {
+      "elapsedMs": 24506,
+      "evalTookMs": 2005,
+      "probe": "EVAL_BLOCKED"
+    },
+    {
+      "elapsedMs": 28037,
+      "evalTookMs": 2002,
+      "probe": "EVAL_BLOCKED"
+    },
+    {
+      "elapsedMs": 31586,
+      "evalTookMs": 2001,
+      "probe": "EVAL_BLOCKED"
+    },
+    {
+      "elapsedMs": 35098,
+      "evalTookMs": 2004,
+      "probe": "EVAL_BLOCKED"
+    }
+  ],
+  "clickResult": "clicked",
+  "finalMetrics": "EVAL_BLOCKED",
+  "sourceAfterPlay": "EVAL_BLOCKED",
+  "heartbeats": {
+    "before": 25,
+    "after": "EVAL_BLOCKED"
+  }
+}

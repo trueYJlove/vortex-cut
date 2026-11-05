@@ -1,0 +1,53 @@
+npm warn Unknown user config "auto-install-peers". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+Running 1 test using 1 worker
+
+[1/1] e2e\diag-p203-hang.electron.spec.ts:24:1 › diag: ctr8-8bit-sdr
+e2e\diag-p203-hang.electron.spec.ts:24:1 › diag: ctr8-8bit-sdr
+[diag] ids = {"project_id":"project_1e2d34948f7b4f6883dd5381e2e79e87","asset_id":"asset_2922f534644644a09b33b68f092181fd"}
+
+[diag] source@import = {"at":4242,"heartbeats":12,"preview_source":{"status":"ready","mode":"original","job_id":null,"cache_key":null,"profile_id":"preview-720-v1","coded_width":2160,"coded_height":3840,"rotation":0},"proxy_jobs":[{"job_id":"41a39dbf432047daafefbb56a7aefbc4","status":"running","stage":"running","progress":0,"error":null,"updated_at":"2026-11-05T03:33:56.792Z"}]}
+
+[diag] metrics ready before play = false
+
+[diag] source@before-play = {"at":4570,"heartbeats":16,"preview_source":{"status":"ready","mode":"original","job_id":null,"cache_key":null,"profile_id":"preview-720-v1","coded_width":2160,"coded_height":3840,"rotation":0},"proxy_jobs":[{"job_id":"41a39dbf432047daafefbb56a7aefbc4","status":"running","stage":"running","progress":0,"error":null,"updated_at":"2026-11-05T03:33:56.792Z"}]}
+
+[diag] heartbeats before click = 25
+
+[diag] +1.5s probe = {"hb":40,"metrics":false,"decode_backend":null,"decode_ms_p50":null,"decode_ms_p95":null,"dropped_frames":null,"composed_frames":null,"last_error":null,"hdr_media":null,"at":null}
+
+[diag] +3s probe = {"hb":55,"metrics":true,"decode_backend":"webcodecs","decode_ms_p50":1.8,"decode_ms_p95":110.5,"dropped_frames":1,"composed_frames":25,"last_error":null,"hdr_media":false,"at":8365}
+
+[diag] +4.5s probe = {"hb":70,"metrics":true,"decode_backend":"webcodecs","decode_ms_p50":1.8,"decode_ms_p95":262.9,"dropped_frames":4,"composed_frames":49,"last_error":null,"hdr_media":false,"at":9365}
+
+[diag] +6s probe = {"hb":85,"metrics":true,"decode_backend":"webcodecs","decode_ms_p50":1.6,"decode_ms_p95":278.4,"dropped_frames":4,"composed_frames":61,"last_error":null,"hdr_media":false,"at":11372}
+
+[diag] +7.5s probe = "EVAL_BLOCKED"
+
+[diag] +9s probe = "EVAL_BLOCKED"
+
+[diag] +10.5s probe = "EVAL_BLOCKED"
+
+[diag] +12s probe = "EVAL_BLOCKED"
+
+[diag] +13.5s probe = "EVAL_BLOCKED"
+
+[diag] +15s probe = "EVAL_BLOCKED"
+
+[diag] +16.5s probe = "EVAL_BLOCKED"
+
+[diag] +18s probe = "EVAL_BLOCKED"
+
+[diag] click result = clicked
+
+[diag] finalMetrics = "EVAL_BLOCKED"
+
+[diag] source@after-play = "EVAL_BLOCKED"
+
+[diag] heartbeats after = "EVAL_BLOCKED"
+
+[diag] console lines captured = 35285; saved to C:\DataFolder\codes\AI-Vidio\test-results\diag-ctr8-8bit-sdr-20600\console.log
+
+[diag] evidence saved to C:\DataFolder\codes\AI-Vidio\test-results\diag-ctr8-8bit-sdr-20600\probe.json
+
+  1 passed (1.1m)

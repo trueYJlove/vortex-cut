@@ -1,0 +1,426 @@
+{
+  "label": "tenbit-noproxy",
+  "fixture": "C:/DataFolder/codes/AI-Vidio/.tmp/hevc/raw-remux.mp4",
+  "waitProxyMs": 0,
+  "evalCapMs": 2000,
+  "ids": {
+    "project_id": "project_cc6187a9ece34af8b0676506a36661ad",
+    "asset_id": "asset_c4217957735840ac80d299461201ce55"
+  },
+  "sourceAtImport": {
+    "at": 4948,
+    "heartbeats": 19,
+    "preview_source": {
+      "status": "ready",
+      "mode": "original",
+      "job_id": null,
+      "cache_key": null,
+      "profile_id": "preview-720-v1",
+      "coded_width": 3840,
+      "coded_height": 2160,
+      "rotation": 270
+    },
+    "proxy_jobs": [
+      {
+        "job_id": "6f1bb1a809904a9fbaf20390659b9942",
+        "status": "running",
+        "stage": "running",
+        "progress": 0,
+        "error": null,
+        "updated_at": "2026-11-05T03:39:34.642Z"
+      }
+    ]
+  },
+  "sourceBeforePlay": {
+    "at": 5365,
+    "heartbeats": 23,
+    "preview_source": {
+      "status": "ready",
+      "mode": "original",
+      "job_id": null,
+      "cache_key": null,
+      "profile_id": "preview-720-v1",
+      "coded_width": 3840,
+      "coded_height": 2160,
+      "rotation": 270
+    },
+    "proxy_jobs": [
+      {
+        "job_id": "6f1bb1a809904a9fbaf20390659b9942",
+        "status": "running",
+        "stage": "running",
+        "progress": 0,
+        "error": null,
+        "updated_at": "2026-11-05T03:39:34.642Z"
+      }
+    ]
+  },
+  "playSamples": [
+    {
+      "elapsedMs": 1521,
+      "evalTookMs": 9,
+      "probe": {
+        "hb": 47,
+        "metrics": false,
+        "decode_backend": null,
+        "decode_ms_p50": null,
+        "decode_ms_p95": null,
+        "dropped_frames": null,
+        "composed_frames": null,
+        "last_error": null,
+        "hdr_media": null,
+        "at": null
+      },
+      "main": [
+        {
+          "title": "hb:47|cf:-1|df:-1|be:-|hm:0",
+          "crashed": false,
+          "destroyed": false,
+          "responsive": true,
+          "url": "file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"
+        }
+      ]
+    },
+    {
+      "elapsedMs": 3037,
+      "evalTookMs": 10,
+      "probe": {
+        "hb": 62,
+        "metrics": false,
+        "decode_backend": null,
+        "decode_ms_p50": null,
+        "decode_ms_p95": null,
+        "dropped_frames": null,
+        "composed_frames": null,
+        "last_error": null,
+        "hdr_media": null,
+        "at": null
+      },
+      "main": [
+        {
+          "title": "hb:62|cf:-1|df:-1|be:-|hm:0",
+          "crashed": false,
+          "destroyed": false,
+          "responsive": true,
+          "url": "file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"
+        }
+      ]
+    },
+    {
+      "elapsedMs": 4568,
+      "evalTookMs": 22,
+      "probe": {
+        "hb": 77,
+        "metrics": false,
+        "decode_backend": null,
+        "decode_ms_p50": null,
+        "decode_ms_p95": null,
+        "dropped_frames": null,
+        "composed_frames": null,
+        "last_error": null,
+        "hdr_media": null,
+        "at": null
+      },
+      "main": [
+        {
+          "title": "hb:77|cf:-1|df:-1|be:-|hm:0",
+          "crashed": false,
+          "destroyed": false,
+          "responsive": true,
+          "url": "file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"
+        }
+      ]
+    },
+    {
+      "elapsedMs": 6113,
+      "evalTookMs": 23,
+      "probe": {
+        "hb": 93,
+        "metrics": false,
+        "decode_backend": null,
+        "decode_ms_p50": null,
+        "decode_ms_p95": null,
+        "dropped_frames": null,
+        "composed_frames": null,
+        "last_error": null,
+        "hdr_media": null,
+        "at": null
+      },
+      "main": [
+        {
+          "title": "hb:93|cf:-1|df:-1|be:-|hm:0",
+          "crashed": false,
+          "destroyed": false,
+          "responsive": true,
+          "url": "file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"
+        }
+      ]
+    },
+    {
+      "elapsedMs": 7825,
+      "evalTookMs": 198,
+      "probe": {
+        "hb": 109,
+        "metrics": false,
+        "decode_backend": null,
+        "decode_ms_p50": null,
+        "decode_ms_p95": null,
+        "dropped_frames": null,
+        "composed_frames": null,
+        "last_error": null,
+        "hdr_media": null,
+        "at": null
+      },
+      "main": [
+        {
+          "title": "hb:109|cf:-1|df:-1|be:-|hm:0",
+          "crashed": false,
+          "destroyed": false,
+          "responsive": true,
+          "url": "file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"
+        }
+      ]
+    },
+    {
+      "elapsedMs": 10418,
+      "evalTookMs": 1086,
+      "probe": {
+        "hb": 123,
+        "metrics": false,
+        "decode_backend": null,
+        "decode_ms_p50": null,
+        "decode_ms_p95": null,
+        "dropped_frames": null,
+        "composed_frames": null,
+        "last_error": null,
+        "hdr_media": null,
+        "at": null
+      },
+      "main": [
+        {
+          "title": "hb:124|cf:-1|df:-1|be:-|hm:0",
+          "crashed": false,
+          "destroyed": false,
+          "responsive": true,
+          "url": "file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"
+        }
+      ]
+    },
+    {
+      "elapsedMs": 11945,
+      "evalTookMs": 9,
+      "probe": {
+        "hb": 139,
+        "metrics": true,
+        "decode_backend": "ffmpeg",
+        "decode_ms_p50": 14.5,
+        "decode_ms_p95": 42.9,
+        "dropped_frames": 0,
+        "composed_frames": 27,
+        "last_error": null,
+        "hdr_media": true,
+        "at": 17689
+      },
+      "main": [
+        {
+          "title": "hb:139|cf:27|df:0|be:ffmpeg|hm:1",
+          "crashed": false,
+          "destroyed": false,
+          "responsive": true,
+          "url": "file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"
+        }
+      ]
+    },
+    {
+      "elapsedMs": 13479,
+      "evalTookMs": 26,
+      "probe": {
+        "hb": 154,
+        "metrics": true,
+        "decode_backend": "ffmpeg",
+        "decode_ms_p50": 14.5,
+        "decode_ms_p95": 42.9,
+        "dropped_frames": 0,
+        "composed_frames": 27,
+        "last_error": null,
+        "hdr_media": true,
+        "at": 19685
+      },
+      "main": [
+        {
+          "title": "hb:155|cf:27|df:0|be:ffmpeg|hm:1",
+          "crashed": false,
+          "destroyed": false,
+          "responsive": true,
+          "url": "file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"
+        }
+      ]
+    },
+    {
+      "elapsedMs": 15003,
+      "evalTookMs": 21,
+      "probe": {
+        "hb": 170,
+        "metrics": true,
+        "decode_backend": "ffmpeg",
+        "decode_ms_p50": 14.5,
+        "decode_ms_p95": 42.9,
+        "dropped_frames": 0,
+        "composed_frames": 27,
+        "last_error": null,
+        "hdr_media": true,
+        "at": 20685
+      },
+      "main": [
+        {
+          "title": "hb:170|cf:27|df:0|be:ffmpeg|hm:1",
+          "crashed": false,
+          "destroyed": false,
+          "responsive": true,
+          "url": "file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"
+        }
+      ]
+    },
+    {
+      "elapsedMs": 16597,
+      "evalTookMs": 89,
+      "probe": {
+        "hb": 185,
+        "metrics": true,
+        "decode_backend": "ffmpeg",
+        "decode_ms_p50": 14.5,
+        "decode_ms_p95": 42.9,
+        "dropped_frames": 0,
+        "composed_frames": 27,
+        "last_error": null,
+        "hdr_media": true,
+        "at": 22685
+      },
+      "main": [
+        {
+          "title": "hb:186|cf:27|df:0|be:ffmpeg|hm:1",
+          "crashed": false,
+          "destroyed": false,
+          "responsive": true,
+          "url": "file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"
+        }
+      ]
+    },
+    {
+      "elapsedMs": 18135,
+      "evalTookMs": 28,
+      "probe": {
+        "hb": 201,
+        "metrics": true,
+        "decode_backend": "ffmpeg",
+        "decode_ms_p50": 14.5,
+        "decode_ms_p95": 42.9,
+        "dropped_frames": 0,
+        "composed_frames": 27,
+        "last_error": null,
+        "hdr_media": true,
+        "at": 23685
+      },
+      "main": [
+        {
+          "title": "hb:201|cf:27|df:0|be:ffmpeg|hm:1",
+          "crashed": false,
+          "destroyed": false,
+          "responsive": true,
+          "url": "file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"
+        }
+      ]
+    },
+    {
+      "elapsedMs": 19703,
+      "evalTookMs": 59,
+      "probe": {
+        "hb": 217,
+        "metrics": true,
+        "decode_backend": "ffmpeg",
+        "decode_ms_p50": 14.5,
+        "decode_ms_p95": 42.9,
+        "dropped_frames": 0,
+        "composed_frames": 27,
+        "last_error": null,
+        "hdr_media": true,
+        "at": 25685
+      },
+      "main": [
+        {
+          "title": "hb:217|cf:27|df:0|be:ffmpeg|hm:1",
+          "crashed": false,
+          "destroyed": false,
+          "responsive": true,
+          "url": "file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"
+        }
+      ]
+    }
+  ],
+  "clickResult": "clicked",
+  "finalMetrics": {
+    "hb": 217,
+    "decode_backend": "ffmpeg",
+    "decode_hardware": "",
+    "decode_ms_p50": 14.5,
+    "decode_ms_p95": 42.9,
+    "dropped_frames": 0,
+    "composed_frames": 27,
+    "last_error": null,
+    "hdr_media": true,
+    "hdr_decodable": false,
+    "task_ms_p50": 0.1,
+    "task_ms_p95": 0.2,
+    "chain": {
+      "I0": {
+        "fed": 30,
+        "inFlight": [
+          28,
+          29,
+          30
+        ],
+        "ring": [
+          24,
+          25,
+          26,
+          27,
+          20,
+          21,
+          22,
+          23
+        ],
+        "shadow": -1,
+        "last_decode": null
+      }
+    },
+    "at": 25685
+  },
+  "sourceAfterPlay": {
+    "at": 26001,
+    "heartbeats": 218,
+    "preview_source": {
+      "status": "ready",
+      "mode": "original",
+      "job_id": null,
+      "cache_key": null,
+      "profile_id": "preview-720-v1",
+      "coded_width": 3840,
+      "coded_height": 2160,
+      "rotation": 270
+    },
+    "proxy_jobs": [
+      {
+        "job_id": "6f1bb1a809904a9fbaf20390659b9942",
+        "status": "running",
+        "stage": "proxy:libopenh264:fallback",
+        "progress": 0.13700058734466353,
+        "error": null,
+        "updated_at": "2026-11-05T03:39:55.883Z"
+      }
+    ]
+  },
+  "heartbeats": {
+    "before": 32,
+    "after": 227
+  }
+}

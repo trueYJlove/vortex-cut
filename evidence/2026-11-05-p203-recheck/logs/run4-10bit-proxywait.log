@@ -1,0 +1,38 @@
+npm warn Unknown user config "auto-install-peers". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+Running 1 test using 1 worker
+
+[1/1] e2e\diag-p203-hang.electron.spec.ts:24:1 › diag: tenbit-proxywait
+e2e\diag-p203-hang.electron.spec.ts:24:1 › diag: tenbit-proxywait
+[diag] ids = {"project_id":"project_d02df2ad1c6f4f2ab989bf0034224632","asset_id":"asset_c88c30f286aa45858501f3d12f3e2373"}
+
+[diag] source@import = {"at":15543,"heartbeats":64,"preview_source":{"status":"ready","mode":"original","job_id":null,"cache_key":null,"profile_id":"preview-720-v1","coded_width":3840,"coded_height":2160,"rotation":270},"proxy_jobs":[{"job_id":"9a5a32255b8e43588d9bd6f47befa4b2","status":"running","stage":"running","progress":0,"error":null,"updated_at":"2026-11-05T03:41:21.167Z"}]}
+
+[diag] metrics ready before play = false
+
+[diag] source@wait0 = {"at":17458,"heartbeats":83,"preview_source":{"status":"ready","mode":"original","job_id":null,"cache_key":null,"profile_id":"preview-720-v1","coded_width":3840,"coded_height":2160,"rotation":270},"proxy_jobs":[{"job_id":"9a5a32255b8e43588d9bd6f47befa4b2","status":"running","stage":"running","progress":0,"error":null,"updated_at":"2026-11-05T03:41:21.167Z"}]}
+
+[diag] source@wait1 = "EVAL_BLOCKED"
+
+[diag] source@wait2 = "EVAL_BLOCKED"
+
+[diag] source@wait3 = "EVAL_BLOCKED"
+
+[diag] source@wait4 = "EVAL_BLOCKED"
+
+[diag] source@wait5 = "EVAL_BLOCKED"
+
+[diag] source@wait6 = "EVAL_BLOCKED"
+
+[diag] source@wait7 = "EVAL_BLOCKED"
+
+[diag] source@wait8 = "EVAL_BLOCKED"
+
+[diag] source@wait9 = "EVAL_BLOCKED"
+
+[diag] source@wait10 = "EVAL_BLOCKED"
+
+[diag] source@wait11 = "EVAL_BLOCKED"
+
+[diag] source@wait12 = "EVAL_BLOCKED"
+

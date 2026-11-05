@@ -1,0 +1,79 @@
+npm warn Unknown user config "auto-install-peers". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+Running 1 test using 1 worker
+
+[1/1] e2e\diag-p203-hang.electron.spec.ts:24:1 › diag: ctr8b-8bit-sdr
+e2e\diag-p203-hang.electron.spec.ts:24:1 › diag: ctr8b-8bit-sdr
+[diag] ids = {"project_id":"project_86debef6db6743ecb0eca194296571fc","asset_id":"asset_4668a62d450141d085c78d47d13eb9c6"}
+
+[diag] source@import = {"at":3997,"heartbeats":12,"preview_source":{"status":"ready","mode":"original","job_id":null,"cache_key":null,"profile_id":"preview-720-v1","coded_width":2160,"coded_height":3840,"rotation":0},"proxy_jobs":[{"job_id":"6b5603f972fe4fcaa9e449d71440ab9d","status":"running","stage":"running","progress":0,"error":null,"updated_at":"2026-11-05T03:36:33.924Z"}]}
+
+[diag] metrics ready before play = false
+
+[diag] source@before-play = {"at":4287,"heartbeats":15,"preview_source":{"status":"ready","mode":"original","job_id":null,"cache_key":null,"profile_id":"preview-720-v1","coded_width":2160,"coded_height":3840,"rotation":0},"proxy_jobs":[{"job_id":"6b5603f972fe4fcaa9e449d71440ab9d","status":"running","stage":"running","progress":0,"error":null,"updated_at":"2026-11-05T03:36:33.924Z"}]}
+
+[diag] heartbeats before click = 23
+
+[diag] main before click = [{"title":"hb:23|cf:-1|df:-1|be:-|hm:0","crashed":false,"destroyed":false,"responsive":true,"url":"file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"}]
+
+[diag] +1.5s probe = {"hb":38,"metrics":false,"decode_backend":null,"decode_ms_p50":null,"decode_ms_p95":null,"dropped_frames":null,"composed_frames":null,"last_error":null,"hdr_media":null,"at":null}
+
+[diag] +1.5s main  = [{"title":"hb:38|cf:-1|df:-1|be:-|hm:0","crashed":false,"destroyed":false,"responsive":true,"url":"file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"}]
+
+[diag] +3s probe = {"hb":53,"metrics":true,"decode_backend":"webcodecs","decode_ms_p50":1.9,"decode_ms_p95":98.9,"dropped_frames":4,"composed_frames":22,"last_error":null,"hdr_media":false,"at":7596}
+
+[diag] +3s main  = [{"title":"hb:53|cf:22|df:4|be:webcodecs|hm:0","crashed":false,"destroyed":false,"responsive":true,"url":"file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"}]
+
+[diag] +4.5s probe = {"hb":69,"metrics":true,"decode_backend":"webcodecs","decode_ms_p50":1.4,"decode_ms_p95":283.3,"dropped_frames":12,"composed_frames":53,"last_error":null,"hdr_media":false,"at":9602}
+
+[diag] +4.5s main  = [{"title":"hb:74|cf:53|df:12|be:webcodecs|hm:0","crashed":false,"destroyed":false,"responsive":true,"url":"file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"}]
+
+[diag] +6s probe = "EVAL_BLOCKED"
+
+[diag] +6s main  = [{"title":"hb:110|cf:53|df:12|be:webcodecs|hm:0","crashed":false,"destroyed":false,"responsive":true,"url":"file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"}]
+
+[diag] +7.5s probe = "EVAL_BLOCKED"
+
+[diag] +7.5s main  = [{"title":"hb:145|cf:53|df:12|be:webcodecs|hm:0","crashed":false,"destroyed":false,"responsive":true,"url":"file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"}]
+
+[diag] +9s probe = "EVAL_BLOCKED"
+
+[diag] +9s main  = [{"title":"hb:180|cf:53|df:12|be:webcodecs|hm:0","crashed":false,"destroyed":false,"responsive":true,"url":"file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"}]
+
+[diag] +10.5s probe = "EVAL_BLOCKED"
+
+[diag] +10.5s main  = [{"title":"hb:215|cf:53|df:12|be:webcodecs|hm:0","crashed":false,"destroyed":false,"responsive":true,"url":"file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"}]
+
+[diag] +12s probe = "EVAL_BLOCKED"
+
+[diag] +12s main  = [{"title":"hb:251|cf:53|df:12|be:webcodecs|hm:0","crashed":false,"destroyed":false,"responsive":true,"url":"file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"}]
+
+[diag] +13.5s probe = "EVAL_BLOCKED"
+
+[diag] +13.5s main  = [{"title":"hb:286|cf:53|df:12|be:webcodecs|hm:0","crashed":false,"destroyed":false,"responsive":true,"url":"file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"}]
+
+[diag] +15s probe = "EVAL_BLOCKED"
+
+[diag] +15s main  = [{"title":"hb:321|cf:53|df:12|be:webcodecs|hm:0","crashed":false,"destroyed":false,"responsive":true,"url":"file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"}]
+
+[diag] +16.5s probe = "EVAL_BLOCKED"
+
+[diag] +16.5s main  = [{"title":"hb:357|cf:53|df:12|be:webcodecs|hm:0","crashed":false,"destroyed":false,"responsive":true,"url":"file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"}]
+
+[diag] +18s probe = "EVAL_BLOCKED"
+
+[diag] +18s main  = [{"title":"hb:393|cf:53|df:12|be:webcodecs|hm:0","crashed":false,"destroyed":false,"responsive":true,"url":"file:///C:/DataFolder/codes/AI-Vidio/apps/desktop/"}]
+
+[diag] click result = clicked
+
+[diag] finalMetrics = "EVAL_BLOCKED"
+
+[diag] source@after-play = "EVAL_BLOCKED"
+
+[diag] heartbeats after = "EVAL_BLOCKED"
+
+[diag] console lines captured = 33842; saved to C:\DataFolder\codes\AI-Vidio\test-results\diag-ctr8b-8bit-sdr-5720\console.log
+
+[diag] evidence saved to C:\DataFolder\codes\AI-Vidio\test-results\diag-ctr8b-8bit-sdr-5720\probe.json
+
+  1 passed (1.1m)

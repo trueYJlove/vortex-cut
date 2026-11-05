@@ -1,0 +1,23 @@
+[warning] %cElectron Security Warning (Insecure Content-Security-Policy) font-weight: bold; This renderer process has either no Content Security
+  Policy set or a policy with "unsafe-eval" enabled. This exposes users of
+  this app to unnecessary security risks.
+
+For more information and help, consult
+https://electronjs.org/docs/tutorial/security.
+This warning will not show up
+once the app is packaged.
+[log] [trace] sample_index_built {"count":3526,"timescale":19200,"srcSampleCount":3526,"first10":[0,41667,83333,125000,166667,208333,250000,291667,333333,375000],"last3":[146816667,146858333,146900000],"firstPtsUs":0,"medianGapApprox":41667}
+[log] [trace] hold_cap_init {"cap":8,"backstep":6}
+[log] [trace] budget_init {"codec":"hvc1.2.4.L150.B0","budget":8,"width":3840,"height":2160}
+[log] [trace] enqueue {"id":0,"frameN":0,"target":0,"samplePtsUs":0}
+[log] [trace] decodeSamples {"target":0,"keyTarget":0,"sameGop":false,"lastFedSample":-1,"lastTargetKey":-1}
+[log] [trace] cold_start {"target":0,"keyTarget":0,"neverFed":true,"missingStuck":false,"farForward":false,"behindCursor":false,"lastFedSample":-1,"emittedRankMax":-1,"targetRank":0,"backDistance":-1}
+[log] [trace] decoder_reset {"start":0,"gen":1,"held":0}
+[log] [trace] feed {"index":0,"batchEnd":3,"gen":1,"dq":1,"stash":0}
+[log] [trace] feed {"index":1,"batchEnd":3,"gen":1,"dq":2,"stash":0}
+[log] [trace] feed {"index":2,"batchEnd":3,"gen":1,"dq":3,"stash":0}
+[log] [trace] feed {"index":3,"batchEnd":3,"gen":1,"dq":4,"stash":0}
+[log] [trace] feed {"index":4,"batchEnd":4,"gen":1,"dq":1,"stash":0}
+[log] [trace] output_enter {"pts":0,"fmt":null,"decoded":0}
+[log] [trace] bad_frame_format {"pts":0,"coded":"3840x2160","streak":1}
+[log] [trace] stall_exit {"tick":4,"why":"request-changed","dq":0}
