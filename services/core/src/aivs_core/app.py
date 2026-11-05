@@ -2536,7 +2536,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             generate_allowed = (
                 request.generate
                 and request.mode == "proxy"
-                and proxy_status not in {"ready", "building", "queued", "failed"}
+                # failed 允许重登记（显式 retry/重进视口）；ready/building/queued 幂等短路
+                and proxy_status not in {"ready", "building", "queued"}
             )
             if generate_allowed:
                 resolved_path = state.projects.resolve_asset_path(asset_id)
@@ -2570,7 +2571,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             state.preview_source.proxy_params(profile)
             entry = state.preview_source.proxy_entry(asset_row, profile)
             entry_status = (entry or {}).get("status")
-            if entry_status in {"ready", "building", "failed"}:
+            # failed 允许重登记（显式 retry/重进视口）；ready/building/queued 幂等短路
+            if entry_status in {"ready", "building", "queued"}:
                 return {"job_id": None, "cache_key": (entry or {}).get("cache_key"),
                         "status": entry_status}
             resolved_path = state.projects.resolve_asset_path(asset_id)

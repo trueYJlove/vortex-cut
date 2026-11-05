@@ -76,6 +76,9 @@ export class DecodeWorker {
   width = 0;
   height = 0;
   hasBFrames = false;
+  /** P203：素材是否为 HDR（由 demux 的 colr 盒判定）。客户端据此在环境不支持
+   *  该编码路径时提示用户，而不是让界面静默堵死。 */
+  hdr = false;
   lastFrameInfo: DecodeFrameInfo | null = null;
   /** P33 分段计时环形样本（decodeTiming 开启时填充；容量 512）。 */
   timingSamples: DecodeTimingSample[] = [];
@@ -212,6 +215,7 @@ export class DecodeWorker {
       instance.width = data.width ?? 0;
       instance.height = data.height ?? 0;
       instance.hasBFrames = Boolean((data as { hasBFrames?: boolean }).hasBFrames);
+      instance.hdr = Boolean((data as { hdr?: boolean }).hdr);
       return instance;
     } catch (error) { instance.terminate(); throw error; }
   }

@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -181,12 +182,50 @@ class TestPreviewSourceEndpoint:
         assert job["status"] in {"queued", "running", "failed"}
         if job["status"] == "failed":
             assert job["error"]["code"] in {"FFMPEG_NOT_FOUND", "MEDIA_UNSUPPORTED"}
-        # 幂等：building/failed 状态下再请求不重复登记（同 cache_key 短路）
+        # 等失败落成 failed 条目：这是下面「failed 可重登记」的语义前提
+        # （只看 job_id 是否为 None 会在条目未落库时假绿——那样变异验证不成立）
+        state = client.app.state.core
+        asset_row = state.derived_media._asset_row(asset_id)  # noqa: SLF001 测试直访
+        profile_id = payload["profile_id"]
+
+        def _entry_status() -> str | None:
+            entry = state.preview_source.proxy_entry(asset_row, profile_id)
+            return (entry or {}).get("status")
+
+        def _wait_failed() -> None:
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
+                if _entry_status() == "failed":
+                    return
+                time.sleep(0.05)
+
+        _wait_failed()
+        assert _entry_status() == "failed"
+        # 幂等：building/queued 再请求不重复登记（同 cache_key 短路）；failed
+        # 不短路——失败后必须能重新登记（与 waveform 路由一致），否则该素材
+        # 该档位永久无代理、且没有任何重试入口。
         response = client.post(
             f"/api/v1/projects/{project_id}/assets/{asset_id}/preview-source",
             json={"mode": "proxy", "generate": True}, headers=_ui(client),
         )
-        assert response.json()["job_id"] is None  # 已有条目行短路
+        retry = response.json()
+        assert retry["job_id"] is not None  # failed 可重登记（修复前此处恒 None）
+        assert retry["job_id"] != payload["job_id"]  # 新作业，非旧 job_id 回显
+        # 重新登记后作业重新经 jobs 流可见（状态可被再次推进）
+        retried = client.get(
+            f"/api/v1/jobs/{retry['job_id']}", headers=_ui(client)
+        ).json()
+        assert retried["kind"] == "proxy"
+        assert retried["status"] in {"queued", "running", "failed"}
+        # 显式作业端点（/preview-source/jobs）同一语义：failed 也可重登记
+        _wait_failed()
+        assert _entry_status() == "failed"
+        explicit = client.post(
+            f"/api/v1/projects/{project_id}/assets/{asset_id}/preview-source/jobs",
+            json={"profile_id": profile_id}, headers=_ui(client),
+        ).json()
+        assert explicit["job_id"] is not None  # 同一缺陷的第二个门
+        assert explicit["status"] == "queued"
 
     def test_invalid_profile_and_mode(self, client: TestClient, tmp_path: Path) -> None:
         project_id, asset_id = _seed_asset(client, tmp_path)

@@ -39,7 +39,11 @@ def display_size(width: int, height: int, sar: float, rotation: int) -> tuple[in
     if width <= 0 or height <= 0:
         return 0, 0
     disp_w = width * (sar if sar > 0 else 1.0)
-    if rotation in (90, 270):
+    # **归一化到 0..359 再判断**（P206）：ffprobe 的 rotation 是带符号的
+    # 「逆时针多少度才正向」，iPhone 竖拍实测为 **-90**（不是 270）。直接拿
+    # 原始值比对 (90, 270) 会让 -90 落空 ⇒ 竖拍素材被按横版算尺寸，代理输出
+    # 1920x1080 横版并被 scale 拉变形（2026-11-03 实测确认）。
+    if rotation % 360 in (90, 270):
         return int(round(height)), int(round(disp_w))
     return int(round(disp_w)), int(round(height))
 
@@ -108,6 +112,17 @@ def proxy_args(
     尺寸计算失败（无视频流）抛 ValueError，调用方拒绝生成。
     """
     w, h = coded_size(profile_id, width, height, sar, rotation)
+    # **旋转交给 ffmpeg 的 autorotate 处理，不要自己 transpose**（2026-11-03 实测）。
+    #
+    # 两种做法都试过，差别在**输出元数据**：
+    # - `-noautorotate` + `transpose=N`：物理像素确实转正了，但 ffmpeg 仍把源的
+    #   display matrix（rotation=-90）写进输出 ⇒ 播放器再转一次 ⇒ 画面躺倒
+    #   （实测代理 width=1080/height=1920 却显示 1920x1080 侧躺）。
+    #   `-metadata:s:v:0 rotate=0` 剥不掉它。
+    # - **不加 `-noautorotate`**：ffmpeg 按 display matrix 自动转正并**不写**旋转
+    #   元数据，输出即最终显示方向（实测 1080x1920 竖版、方向正确、无残留旋转）。
+    #
+    # `coded_size` 已按显示方向换轴算出 w×h，与 autorotate 之后的像素方向一致。
     scale_filter = (
         f"scale={w}:{h}:force_original_aspect_ratio=disable:"
         f"force_divisible_by=2,fps={OUTPUT_FPS}"

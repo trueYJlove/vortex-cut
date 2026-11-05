@@ -21,6 +21,7 @@ import type { CompositorWorkerClient } from "./compositor-worker.js";
 import type { DrawCommand, FrameResidency } from "./compositor-worker.worker.js";
 import type { Ir, IrContent, IrFrame, IrOverlay } from "./ir.js";
 import type { PreviewSourceResolver } from "./source-resolver.js";
+import type { PreviewSourceDescription } from "@aivideo/contracts";
 import { PREVIEW_IR_V2_MAX_WINDOW_FRAMES, PCM_CHUNK_SAMPLE_RATE } from "@aivideo/contracts";
 import { BUDGET_TABLES, ringDepthFor, predictResidencyBytes, windowSourceBudget } from "./resource-budget.js";
 import { InputPool } from "./input-pool.js";
@@ -68,6 +69,29 @@ interface AudioRig {
   gateKey: string;
 }
 
+/** **30fps 实时预算 = 33.3ms/帧**（1000/30）。来源：合成预览按 30fps 播放，
+ *  一帧的时间只够分给解码这么多——超过它，这一帧就赶不上播放时钟（掉帧/卡顿）。
+ *  实测本机：4K 10-bit 源 64.1ms/帧（超预算 192%）→ 必须转代理；1080p 代理
+ *  14.3ms、540p 代理 5.6ms → 都在预算内，转了纯属浪费磁盘。 */
+export const REALTIME_FRAME_BUDGET_MS = 1000 / 30;
+/** 判定样本门槛：至少累计 **30 个非缓存解码样本**才下结论。理由：起播前几帧
+ *  要冷启 + GOP 重喂，单帧耗时抖动可达数倍；30 样本（≈1s@30fps）之后 p95 才
+ *  稳定。缓存命中的样本不算——它没走解码路径。 */
+export const DECODE_BUDGET_MIN_SAMPLES = 30;
+
+/** 一个素材的实测解码预算判定（decodeBudget() 的返回值）。 */
+export interface AssetDecodeBudget {
+  asset_id: string;
+  /** 该素材在本 IR 里的全部 input_id（多片段/多轨：按素材汇总，不是按输入）。 */
+  input_ids: string[];
+  /** 累计非缓存解码样本数（各输入之和）。 */
+  samples: number;
+  /** 该素材各输入 p95 的最大值（毫秒）。 */
+  p95_ms: number;
+  /** p95 超实时预算 **且** 样本够门槛——只有它为真才该为这个素材登记代理。 */
+  over_budget: boolean;
+}
+
 export interface PreviewSessionMetrics {
   task_ms_p50: number;
   task_ms_p95: number;
@@ -95,6 +119,15 @@ export interface PreviewSessionMetrics {
    *  = **软解**（3440x1440 上 ~190ms/帧、720p 上 ~50ms/帧，观感幻灯片）；
    *  空串 = 尚未握手。用于把「GPU/硬解不可用」这类环境问题当场暴露出来。 */
   decode_hardware: string;
+  /** P203：当前输入中是否有 HDR 素材（demux 由 colr 盒判定，多输入任一为真）。
+   *  与 `hdr_decodable` 配对使用：前者是素材属性，后者是环境能力。
+   *  两者组合才决定是否该提示用户——**不能只看其一**：
+   *  SDR 环境 + SDR 素材 正常；SDR 环境 + HDR 素材 才是问题。 */
+  hdr_media: boolean;
+  /** P203：当前显示环境是否能呈现 HDR（`matchMedia("(dynamic-range: high)")`）。
+   *  **false 且 `hdr_media` 为 true 时**，Chromium 136 的 WebCodecs HEVC 路径
+   *  会产出 format=null 坏帧并让渲染进程永久堵死，必须提前提示用户。 */
+  hdr_decodable: boolean;
   /** 纹理上传往返（postMessage+GL+ack）耗时 p95：worker 化后的负载口径。 */
   upload_ms_p95: number;
   /** GAP-RATIO-SWAP 诊断：IR 画布与后备缓冲尺寸（比例切换后应同步换算）。 */
@@ -167,6 +200,15 @@ function shiftedRect(rect: IrContent, shift: { dx: number; dy: number }): IrCont
 
 const clamp = (value: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, value));
 
+/** 分位数（最近秩，**不复制不改写入参**）。与 metrics() 内的同名计算同口径：
+ *  取 floor(q * n) 处的样本。按需代理判定与指标条必须用同一个 p95 定义，
+ *  否则「指标条说 30ms、代理却说超预算」这种自相矛盾就无法对账。 */
+function percentile(sortedOrNot: readonly number[], q: number): number {
+  if (sortedOrNot.length === 0) return 0;
+  const sorted = [...sortedOrNot].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))]!;
+}
+
 /** A02：音频 rig 工厂（create 与 syncAudio 入段共用同一形状）。 */
 function makeAudioRig(speed: number): AudioRig {
   return {
@@ -190,6 +232,17 @@ export function assertHardwareRenderer(adapter: string): { hardware: boolean; so
 
 export class PreviewSession {
   private container: HTMLElement | null = null;
+  /** P203：显示环境是否支持 HDR（构造时求值一次——显示器能力在会话内不变）。
+   *  `matchMedia` 在非浏览器环境（单测 jsdom）可能缺失，故做存在性保护并默认 false
+   *  （保守：宁可当「不支持」提示用户，也不要假装支持后静默堵死）。 */
+  private readonly hdrDisplayCapable: boolean = (() => {
+    try {
+      return typeof globalThis.matchMedia === "function"
+        && globalThis.matchMedia("(dynamic-range: high)").matches === true;
+    } catch {
+      return false;
+    }
+  })();
   private canvasEl: HTMLCanvasElement | null = null;
   private compositor: CompositorWorkerClient | null = null;
   private readonly rigs = new Map<string, InputRig>();
@@ -203,6 +256,11 @@ export class PreviewSession {
   private latestTarget = 0;
   private taskTimes: number[] = [];
   private decodeTimes: number[] = [];
+  /** 按 **input_id** 分开的解码耗时簿记（decodeTimes 保留不动，维持既有指标
+   *  口径）。decodeTimes 是会话级聚合、不带归属，无法回答「哪个素材慢」——
+   *  按需代理必须把耗时归因到具体素材才能决定为谁转。容量与 decodeTimes
+   *  同档（每输入 600），防长会话无界增长。 */
+  private readonly decodeTimesByInput = new Map<string, number[]>();
   private uploadTimes: number[] = [];
   private decodeInFlight = 0;
   private dropped = 0;
@@ -251,6 +309,10 @@ export class PreviewSession {
   }
   onTimeUs: ((us: number) => void) | null = null;
   private tickets: Map<string, string> | null = null;
+  /** 本会话实际走代理解码的 asset_id（P211）：HDR 提示必须按**真正在解的源**判定，
+   *  而不是按原片——代理是 8-bit H.264 SDR，拿原片的 HDR 标记去提示是本素材
+   *  2026-11-03 的误报来源（画面明明正常，却弹「环境不支持 HDR」）。 */
+  private proxyDecodedAssets = new Set<string>();
   private audioByClip: Map<string, SegmentAudioConfig> | null = null;
   private audioCtx: AudioContext | null = null;
   /** 变速不变调 worklet 模块是否已装入本 AudioContext（失败 → 全片段 legacy 回退）。 */
@@ -430,6 +492,8 @@ export class PreviewSession {
     session.audioByClip = audioByClip ?? null;
     // B11：预览源解析（视频输入优先代理票据；失败/未 ready 回退原源票据。
     // 源描述与 IR geometry 分离——代理只替换解码输入，逻辑坐标不变）。
+    // asset_id → 实际生效的代理描述（下面建合成器时要用它的编码尺寸）。
+    const resolvedSources = new Map<string, PreviewSourceDescription>();
     if (sourceResolver) {
       for (const input of ir.inputs) {
         if (input.asset_kind !== "video") continue;
@@ -442,6 +506,8 @@ export class PreviewSession {
         if (resolved && resolved.isProxy) {
           tickets = new Map(tickets);
           tickets.set(input.asset_id, resolved.url);
+          resolvedSources.set(input.asset_id, resolved.description);
+          session.proxyDecodedAssets.add(input.asset_id);
         }
       }
     }
@@ -457,12 +523,36 @@ export class PreviewSession {
     const { CompositorWorkerClient } = await import("./compositor-worker.js");
     throwIfAborted(signal);
     const client = await CompositorWorkerClient.create(canvas, {
-      inputs: ir.inputs.filter(input => input.asset_kind !== "audio").map(input => ({
-        inputId: input.input_id,
-        sourceWidth: input.geometry.width || 1920,
-        width: input.geometry.width || 16,
-        height: input.geometry.height || 9,
-      })),
+      // **上传尺寸必须解码源的真实宽度，不能用 IR 的原片几何**（P211，2026-11-03）：
+      // 代理只替换解码输入，IR geometry 仍是原片（本素材 3840×2160），而代理帧是
+      // 720×1280。合成器用 sourceWidth 算缩放着色器的 LOD
+      // （compositor-worker.worker.ts:574 的 log2(sourceWidth/rect.w)），源宽报大
+      // 5.3 倍 ⇒ 采样层级算错、画面只画出左侧一条 + 其余纯黑（真机复现）。
+      // 故这里取「实际会解码的那份源」的宽度：代理就绪用代理编码尺寸，否则原片。
+      inputs: ir.inputs.filter(input => input.asset_kind !== "audio").map(input => {
+        const proxy = resolvedSources.get(input.asset_id);
+        const srcW = proxy?.coded_width ?? input.geometry.width ?? 1920;
+        const srcH = proxy?.coded_height ?? input.geometry.height ?? 9;
+        // 源平面方向 vs 内容盒方向相差 90° ⇒ 合成时交换采样 UV 轴（P206/P212）。
+        // 代理已把旋转烘焙进编码帧（rotation=0，无需交换）；原片则需按
+        // display matrix 换轴——用 IR geometry 判断（display_* 与 width/height
+        // 互换即代表相差 90°）。
+        const geom = input.geometry;
+        const planeSwapped = geom.display_width !== undefined
+          && geom.display_height !== undefined
+          && geom.display_width === geom.height
+          && geom.display_height === geom.width
+          && geom.width !== geom.height;
+        const texSwap = proxy ? false : planeSwapped;
+        return {
+          inputId: input.input_id,
+          sourceWidth: srcW,
+          // width/height 只用作 0 值兜底（真实几何来自 drawRect）；同源取真值为宜。
+          width: srcW || 16,
+          height: srcH || 9,
+          texSwap,
+        };
+      }),
       ringDepth: session.ringDepth,
       canvasWidth: ir.canvas.width,
       canvasHeight: ir.canvas.height,
@@ -1023,7 +1113,15 @@ export class PreviewSession {
     const message = error instanceof Error ? error.message : String(error);
     // 已自恢复的单帧停摆：不计入降级判据（见上）。
     if (/FRAME_UNREACHABLE/.test(message)) return false;
-    if (!/timeout|watchdog|key frame is required/i.test(message)) return false;
+    // P203：`DECODE_FRAME_FORMAT_NULL` = 解码器产出 format=null 的不可用帧。
+    // 本机 Intel Iris Xe 的 D3D11 对 P010（10-bit HEVC 输出格式）只有 SOFTWARE
+    // 叠加支持（`getGPUInfo().auxAttributes.overlayInfo.p010OverlaySupport`），
+    // WebCodecs 硬解接受配置却产不出可用帧——**这是确定性失败，同一素材每次复现**，
+    // 重试无意义。FFmpeg 后端（纯软 hevc 解码）实测可正常解该素材且 HDR→SDR
+    // 色彩正确，故应立即降级而非等到两次超时。
+    // 旧正则只认 timeout/watchdog/key frame ⇒ 该错误永不触发降级，用户看到的是
+    // 「点播放后整个界面失去响应且无任何解释」。
+    if (!/timeout|watchdog|key frame is required|DECODE_FRAME_FORMAT_NULL/i.test(message)) return false;
     // 已在 FFmpeg 路径：超过冷却期允许一次回到 WebCodecs（快路径）的尝试。
     if (rig.preferFfmpeg) {
       if (performance.now() - (rig.ffmpegSince ?? 0) < PreviewSession.FFMPEG_RETRY_COOLDOWN_MS) return false;
@@ -1049,7 +1147,9 @@ export class PreviewSession {
       }
     }
     rig.timeoutStrikes = (rig.timeoutStrikes ?? 0) + 1;
-    if (rig.timeoutStrikes < 2) return false;
+    // 坏帧是确定性失败：首次即降级（超时类保留两次门槛，避免瞬态抖动钉死慢路径）。
+    const deterministic = /DECODE_FRAME_FORMAT_NULL/i.test(message);
+    if (!deterministic && rig.timeoutStrikes < 2) return false;
     const retry = rig.decoderRetry;
     const factory = this.decoderFactory;
     if (!retry || !factory || !retry.decodeFrames) return false;
@@ -1138,8 +1238,10 @@ export class PreviewSession {
             decoded = await rig.worker!.decode(srcN, this.ir.canvas.fps);
           }
         }
-        this.decodeTimes.push(performance.now() - decodeStart);
-        editorPerf.record("decode", performance.now() - decodeStart, this.perfId, perfRequest, epoch, srcN, perfInput);
+        const decodeMs = performance.now() - decodeStart;
+        this.decodeTimes.push(decodeMs);
+        this.recordDecodeTime(inputId, decodeMs);
+        editorPerf.record("decode", decodeMs, this.perfId, perfRequest, epoch, srcN, perfInput);
         if (this.decodeTimes.length > 600) this.decodeTimes.splice(0, this.decodeTimes.length - 600);
         rig.timeoutStrikes = 0; // 成功解码：连续超时计数清零（偶发抖动不累积降级）
       } finally {
@@ -1175,8 +1277,10 @@ export class PreviewSession {
       this.decodeInFlight += 1;
       try {
         const decoded = await rig.worker!.decode(srcN, this.ir.canvas.fps);
-        this.decodeTimes.push(performance.now() - decodeStart);
-        editorPerf.record("decode", performance.now() - decodeStart, this.perfId, perfRequest, epoch, srcN, perfInput);
+        const decodeMs = performance.now() - decodeStart;
+        this.decodeTimes.push(decodeMs);
+        this.recordDecodeTime(inputId, decodeMs);
+        editorPerf.record("decode", decodeMs, this.perfId, perfRequest, epoch, srcN, perfInput);
         if (this.decodeTimes.length > 600) this.decodeTimes.splice(0, this.decodeTimes.length - 600);
         if (epoch !== this.seekEpoch || generation !== rig.chainGeneration) { decoded.release(); return; }
         await this.compositor!.uploadShadowDecoded(inputId, srcN, decoded);
@@ -1192,6 +1296,14 @@ export class PreviewSession {
     return this.endUploadWhenSettled(run);
   }
 
+  /** 解码耗时的**归属记录**：与 decodeTimes 同源同值，只多带一个 input_id。
+   *  上限与 decodeTimes 同档（600/输入）——p95 只要尾部一个窗口，长会话不留全史。 */
+  private recordDecodeTime(inputId: string, ms: number): void {
+    let list = this.decodeTimesByInput.get(inputId);
+    if (!list) { list = []; this.decodeTimesByInput.set(inputId, list); }
+    list.push(ms);
+    if (list.length > 600) list.splice(0, list.length - 600);
+  }
   /** 环形簿记中查找已就绪槽位的索引（-1 = 未就绪）。 */
   private ringSlotIndex(rig: InputRig, srcN: number): number {
     for (let index = 0; index < rig.ring.length; index++) {
@@ -2206,6 +2318,48 @@ export class PreviewSession {
     this.pauseAudio();
   }
 
+  /** **按需代理的判据**：把实测解码耗时归因到素材，回答「这个素材 p95 是多少、
+   *  超没超实时预算」。
+   *
+   *  为什么不是 decodeTimes（会话级聚合）：它不分输入，一旦时间线里既有 4K 源
+   *  又有轻量代理/1080p，聚合 p95 就被稀释——既可能漏掉该转的素材，也可能
+   *  连累本来流畅的素材一起转（磁盘预算 10GiB 经不起预转全部）。所以簿记在
+   *  decodeTimesByInput 里按 input_id 分开记，这里再按 **asset_id** 汇总：同一
+   *  素材多片段 = 多个 input，取各输入 p95 的最大值（任一输入解不动就该转）。
+   *
+   *  为什么不用 rig.worker.timingSamples：那是 VITE_AIVS_DECODE_TIMING/DEV 才填充
+   *  的诊断通道（发布构建为空表），拿它当产品判据在发布版恒不成立。
+   *
+   *  装配期（rigs 未建好）返回空表，调用方按 asset_id 去重后逐个消费即可。 */
+  decodeBudget(): AssetDecodeBudget[] {
+    const inputIdsByAsset = new Map<string, string[]>();
+    for (const input of this.ir.inputs) {
+      if (input.asset_kind === "image" || input.asset_kind === "audio") continue;
+      if (!this.rigs.has(input.input_id)) continue;
+      const list = inputIdsByAsset.get(input.asset_id);
+      if (list) list.push(input.input_id);
+      else inputIdsByAsset.set(input.asset_id, [input.input_id]);
+    }
+    const verdicts: AssetDecodeBudget[] = [];
+    for (const [assetId, inputIds] of inputIdsByAsset) {
+      const samples: number[] = [];
+      let p95 = 0;
+      for (const inputId of inputIds) {
+        const times = this.decodeTimesByInput.get(inputId);
+        if (!times || times.length === 0) continue;
+        samples.push(...times);
+        p95 = Math.max(p95, percentile(times, 0.95));
+      }
+      verdicts.push({
+        asset_id: assetId,
+        input_ids: inputIds,
+        samples: samples.length,
+        p95_ms: Math.round(p95 * 1000) / 1000,
+        over_budget: samples.length >= DECODE_BUDGET_MIN_SAMPLES && p95 > REALTIME_FRAME_BUDGET_MS,
+      });
+    }
+    return verdicts;
+  }
   metrics(): PreviewSessionMetrics {
     const times = [...this.taskTimes].sort((a, b) => a - b);
     const decodes = [...this.decodeTimes].sort((a, b) => a - b);
@@ -2252,6 +2406,20 @@ export class PreviewSession {
       // 被瞬时抖动永久钉死，而界面当时没有任何提示）。
       decode_backend: [...this.rigs.values()].map(rig => rig.preferFfmpeg ? "ffmpeg" : (rig.worker?.backend ?? "?")).join(","),
       decode_hardware: [...this.rigs.values()].map(rig => rig.worker?.hardware ?? "").join(","),
+      // P203：素材侧（demux 判定）与环境侧（浏览器能力）分开报，二者组合才决定提示。
+      // 环境侧在构造时求值一次：显示器 HDR 状态在会话生命周期内不会变。
+      // 锁存：worker 被降级替换后 `hdr` 会丢失，故一旦判定为 true 就保持。
+      // **来源是 IR（Core ffprobe 判定），不是 worker**。
+      // 原因：本机该素材直接走 FFmpeg 后端，而 `FfmpegMediaDecoder` 没有 `hdr`
+      // 属性 ⇒ 从 worker 读会恒为 false（本轮实测踩过：hdr_media 一直是 false
+      // 导致提示从不显示）。IR 的 hdr 由 Core 在 ffprobe 阶段判定，与后端无关。
+      // **走代理的素材不算 HDR**（P211）：代理是 8-bit H.264 SDR，10-bit 早已在
+      // 生成阶段转掉。原片的 hdr 标记只用来说明「素材本身是 HDR」，不能代表
+      // 「当前在解这个 HDR 流」——否则代理生效后仍弹「环境不支持 HDR」误报。
+      hdr_media: this.ir.inputs.some(
+        input => input.hdr === true && !this.proxyDecodedAssets.has(input.asset_id),
+      ),
+      hdr_decodable: this.hdrDisplayCapable,
       decode_ms_p50: p(decodes, 0.5),
       decode_ms_p95: p(decodes, 0.95),
       decode_seg: decodeSeg,

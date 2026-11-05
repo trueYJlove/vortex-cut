@@ -127,6 +127,15 @@ textarea { min-height: 92px; padding: 8px; resize: vertical; }
    「异常/预警时性能数字让位」（SyntheticPreview）保证，不靠裁切。 */
 .synthetic-metrics { position: absolute; left: 8px; bottom: 8px; max-width: calc(100% - 16px); padding: 3px 8px; border-radius: 5px; background: rgba(10, 14, 17, .72); color: #8fa0a8; font-size: var(--dlg-fs-label); font-family: Consolas, monospace; line-height: 1.45; overflow-wrap: anywhere; pointer-events: none; z-index: 4; white-space: normal; }
 .synthetic-metrics.err { color: #ff8a7a; }
+/* P203：HDR 环境提示。**刻意保持极简**——本机 GPU（Intel Iris Xe，P010 仅 SOFTWARE
+   支持）对合成层极敏感：实测用内联 position:absolute + rgba 背景会让渲染进程在
+   2-4 秒内崩溃，改为普通文档流 + 纯色背景则稳定。改这条样式前请先跑
+   e2e/open-existing.electron.spec.ts 确认不触发崩溃。 */
+.synthetic-hdr-notice { margin: 6px 8px 0; padding: 4px 8px; border-radius: 5px; background: #4a3a12; color: #ffd77a; font-size: var(--dlg-fs-label); line-height: 1.45; overflow-wrap: anywhere; }
+/* A3：代理就绪弱提示。**复用 .synthetic-hdr-notice 的安全范式**（普通文档流 + 纯色
+   背景 + CSS 类），只换配色——2026-11-01 实测内联 position:absolute + 半透明背景的
+   组合会让渲染进程在 2-4 秒内崩溃（Intel Iris Xe，P010 仅 SOFTWARE）。 */
+.synthetic-proxy-notice { background: #16323a; color: #8fd2c4; }
 /* 分段之间统一由 CSS 生成分隔点：性能数字块缺席（发布构建）时不会留下前导「 · 」。 */
 .synthetic-metrics > span + span::before { content: " · "; }
 .synthetic-backend-warn { color: #f0c979; }

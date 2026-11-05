@@ -39,6 +39,11 @@ uniform float u_yuv_mode;        // 1 = NV12 平面 + BT.709 limited→full
 uniform float u_chroma_phase_x;  // 色度采样相位（源色度坐标偏移）
 uniform float u_chroma_phase_y;
 uniform float u_lod;             // 显式纹理层级 = log2(源尺寸/内容盒尺寸)
+// 纹理方向修正（P206/P212）：源平面方向与内容盒方向相差 90° 时为 1——
+// 此时交换采样 UV 的 x/y 轴，把「横版平面」正确映射进「竖向盒子」。
+// **不能用 u_rotation 代替**：那是绕画布中心旋转（盒外变黑），语义是
+// rotate 关键帧特效，不是方向修正。
+uniform float u_tex_swap;
 // IR v0.4 覆盖轨 alpha 效果：mask（kind/几何/旋转/软边/反转）+ keying（色/相似度/blend）。
 // u_mask_kind：0=无 1=linear 2=rect 3=ellipse；语义镜像 effects.ts（权威端 _mask_alpha_expr）。
 uniform float u_mask_kind;
@@ -119,6 +124,7 @@ void main() {
   } else {
     norm = vec2(v_box.x, 1.0 - v_box.y);
   }
+  if (u_tex_swap > 0.5) norm = vec2(norm.y, norm.x);
   vec4 tex = samplePixel(norm);
   float a = tex.a * u_alpha;
   if (u_mask_kind > 0.5) a *= maskAlpha();
@@ -130,7 +136,11 @@ type TexPair = { y: WebGLTexture; uv: WebGLTexture };
 
 interface RingSlot { y: WebGLTexture; uv: WebGLTexture }
 
-interface InitInputs { inputId: string; sourceWidth: number; width: number; height: number }
+interface InitInputs {
+  inputId: string; sourceWidth: number; width: number; height: number;
+  /** 源平面方向与显示方向相差 90°（P206/P212）：采样时交换 UV 轴。 */
+  texSwap?: boolean;
+}
 
 export interface DrawCommand {
   op: "fill" | "draw" | "captions";
@@ -225,6 +235,8 @@ const state = {
   shadowUV: new Map<string, WebGLTexture>(),
   scratch: new Map<string, ArrayBuffer>(),
   sourceWidth: new Map<string, number>(),
+  /** input_id → 是否需要交换采样 UV 轴（源平面与内容盒方向相差 90°）。 */
+  texSwap: new Map<string, boolean>(),
   geometry: new Map<string, { width: number; height: number }>(),
   captionCanvas: null as OffscreenCanvas | null,
   captionCtx: null as OffscreenCanvasRenderingContext2D | null,
@@ -294,7 +306,7 @@ function buildProgram(gl: WebGL2RenderingContext): { program: WebGLProgram; unif
     throw new Error(`program link failed: ${gl.getProgramInfoLog(program)}`);
   }
   gl.useProgram(program);
-  const names = ["u_rect", "u_canvas", "u_fit", "u_tex", "u_tex_y", "u_tex_uv", "u_yuv_mode", "u_chroma_phase_x", "u_chroma_phase_y", "u_lod", "u_alpha", "u_rotation", "u_premultiplied", "u_mask_kind", "u_mask_geom", "u_mask_extra", "u_box_size", "u_key_mode", "u_key_params", "u_key_blend"];
+  const names = ["u_rect", "u_canvas", "u_fit", "u_tex", "u_tex_y", "u_tex_uv", "u_yuv_mode", "u_chroma_phase_x", "u_chroma_phase_y", "u_lod", "u_alpha", "u_rotation", "u_tex_swap", "u_premultiplied", "u_mask_kind", "u_mask_geom", "u_mask_extra", "u_box_size", "u_key_mode", "u_key_params", "u_key_blend"];
   const uniforms: Record<string, WebGLUniformLocation | null> = {};
   for (const name of names) uniforms[name] = gl.getUniformLocation(program, name);
   return { program, uniforms };
@@ -339,6 +351,7 @@ function handleInit(message: WorkerInit): void {
   });
   for (const input of message.inputs) {
     state.sourceWidth.set(input.inputId, input.sourceWidth);
+    state.texSwap.set(input.inputId, input.texSwap === true);
     state.geometry.set(input.inputId, { width: input.width, height: input.height });
     state.inputGenerations.set(input.inputId, 1); // B13：init 输入 = 第 1 代
     state.ring.set(input.inputId, Array.from({ length: state.ringDepth }, () => ({ y: createYuvTexture(gl), uv: createYuvTexture(gl) })));
@@ -557,7 +570,7 @@ function uploadPlanesToTextures(
 
 function drawRect(textureY: WebGLTexture, textureUV: WebGLTexture | null, textureRgba: WebGLTexture | null,
                   rect: IrContent, alpha: number, rotationDeg: number, premultiplied: boolean, sourceWidth = 1920,
-                  mask?: IrEffectMask, keying?: IrEffectKeying): void {
+                  mask?: IrEffectMask, keying?: IrEffectKeying, texSwap = false): void {
   const gl = state.gl!;
   const u = state.uniforms!;
   const target = state.targetOverride ?? { width: state.backing.width, height: state.backing.height, fitX: state.fit.x, fitY: state.fit.y, fitScale: state.fit.scale };
@@ -583,6 +596,7 @@ function drawRect(textureY: WebGLTexture, textureUV: WebGLTexture | null, textur
   gl.uniform4f(u.u_fit, target.fitX, target.fitY, target.fitScale, target.fitScale);
   gl.uniform1f(u.u_alpha, alpha);
   gl.uniform1f(u.u_rotation, -(rotationDeg * Math.PI) / 180);
+  gl.uniform1f(u.u_tex_swap, texSwap ? 1 : 0);
   gl.uniform1f(u.u_premultiplied, premultiplied ? 1 : 0);
   // v0.4 覆盖轨 alpha 效果（语义镜像 effects.ts；无效果走 0 快路径）。
   if (mask) {
@@ -917,7 +931,9 @@ function executeCompose(payload: ComposePayload): void {
     if (cmd.op === "fill") { drawBlurredFill(inputId, pair.y, uv, cmd.alpha ?? 1); continue; }
     const sourceWidth = image ? (state.geometry.get(inputId)?.width ?? 1920) : (state.sourceWidth.get(inputId) ?? 1920);
     const rect = cmd.rect ?? { x: 0, y: 0, w: state.canvasWidth, h: state.canvasHeight };
-    drawRect(pair.y, uv, rgba, rect, cmd.alpha ?? 1, cmd.rotationDeg ?? 0, false, sourceWidth, cmd.mask, cmd.keying);
+    // 静图/直传 RGBA 不做方向交换（其纹理已是显示方向）；只有 YUV 平面需要。
+    const texSwap = !rgbaMode && state.texSwap.get(inputId) === true;
+    drawRect(pair.y, uv, rgba, rect, cmd.alpha ?? 1, cmd.rotationDeg ?? 0, false, sourceWidth, cmd.mask, cmd.keying, texSwap);
   }
   gl.flush();
 }

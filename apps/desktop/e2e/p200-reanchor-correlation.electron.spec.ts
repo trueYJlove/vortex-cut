@@ -1,17 +1,22 @@
 /**
- * P200 验证：reanchor 与 missingStuck 的时间相关性。
+ * P200 验证：reanchor 与 cold_start 的时间相关性。
  *
- * 待验假说（结构上已成立，见 docs/STATUS.md §4 P200 第三轮）：
- *   `emittedRankMax` 只增不减（decode-worker.worker.ts:497/:538），而 `reanchor`
- *   （preview-session.ts:2147）把播放头向后归位时**不动这份台账** ⇒ 重锚后一串
- *   请求必然 `targetRank <= emittedRankMax` ⇒ 判 `missingStuck` ⇒ 冷启整 GOP。
+ * **⚠️ 原假说已被否证（2026-10-28 第五轮）**：`backDistance` 量到的**不是**重锚回退
+ * 距离，而是解码器管线深度 / 回扫窗宽度——`emittedRankMax` 在实测中恒等于
+ * `lastFedSample`（18/20），且 71.9% 的重锚根本没移动播放头。
+ * 真机主因是暂存帧被自身容量驱逐。见 `ATTRIBUTION_ROUND5.md`。
+ * **因此本 spec 不再宣称能验证因果关系**，它现在的用途是：
+ * 把两个量测出来，并**与零基线对照**，使数字可被解读。
  *
- * 判据：观察窗内 `cold_start` 事件中 `backDistance > 0` 者，有多少落在某个
- * `reanchor` 之后的 REANCHOR_WINDOW_MS 内。本 spec **只回答是/否**，不主张定量结论。
+ * **为什么必须带零基线**（本 spec 第一版的缺陷）：重锚间隔实测 p50=1000ms，
+ * 若窗口取 2000ms，任取一时刻落在某次重锚之后的概率就有 **77.9%**
+ * ⇒ 「相关性」会在随机时序下自动报 ~78%，数字读不出任何结论。
+ * 故此处同时输出 `null_baseline_ratio`（对同一时间轴做均匀采样、不看 cold_start），
+ * 并与 `correlated_ratio` 并列——**只有显著高于零基线才有信息量**。
+ * 默认窗口因此收紧到 250ms（零基线约 22.5%）。
  *
  * 两条通道的时间轴对齐：`reanchor` 走 editorPerf（带 at: performance.now()），
- * `cold_start` 走 worker trace（原本不带时间戳）。已在 decode-worker.ts 的 trace
- * 落点补 at（同一时钟），故两者可直接比较。
+ * `cold_start` 走 worker trace（`decode-worker.ts` 落点补 at，同一时钟）。
  */
 import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -33,7 +38,8 @@ const resources = join(root, "resources");
 const fixture = process.env.AIVS_P33_MEDIA ?? "";
 const label = process.env.AIVS_P33_LABEL ?? "p200-trace";
 const observeMs = Number(process.env.AIVS_P200_OBSERVE_MS ?? 120_000);
-const REANCHOR_WINDOW_MS = Number(process.env.AIVS_P200_WINDOW_MS ?? 2000);
+// 零基线随窗口变化（P196 实测 n=17,976）：2000ms→77.9% / 500ms→39.7% / 250ms→22.5% / 100ms→10.0%
+const REANCHOR_WINDOW_MS = Number(process.env.AIVS_P200_WINDOW_MS ?? 250);
 
 test(`P200 trace：reanchor → missingStuck 相关性（${label}）`, async () => {
   test.setTimeout(observeMs + 480_000);
@@ -138,6 +144,22 @@ test(`P200 trace：reanchor → missingStuck 相关性（${label}）`, async () 
     const windowed = positives.filter(t => typeof t.at === "number"
       && reanchors.some(r => t.at! >= r.at && t.at! - r.at <= REANCHOR_WINDOW_MS));
 
+    // **零基线**（本 spec 第一版缺这一步，导致数字不可解读）：沿同一时间轴均匀采样，
+    // 统计"落在某次 reanchor 之后 W 内"的比例——它**与 cold_start 无关**，只反映重锚
+    // 自身的密度。correlated_ratio 只有显著高于它才有信息量。
+    const reanchorAts = reanchors.map(r => r.at).sort((a, b) => a - b);
+    const nullBaselineRatio = (() => {
+      if (reanchorAts.length < 2) return null;
+      const lo = reanchorAts[0], hi = reanchorAts[reanchorAts.length - 1];
+      const step = Math.max(10, (hi - lo) / 20_000);
+      let covered = 0, total = 0;
+      for (let t = lo; t < hi; t += step) {
+        total += 1;
+        if (reanchorAts.some(a => t >= a && t - a <= REANCHOR_WINDOW_MS)) covered += 1;
+      }
+      return total > 0 ? covered / total : null;
+    })();
+
     const summary = {
       label,
       observe_ms: observeMs,
@@ -148,6 +170,9 @@ test(`P200 trace：reanchor → missingStuck 相关性（${label}）`, async () 
       cold_start_with_positive_depth: positives.length,
       reanchor_total: reanchors.length,
       correlated_within_window: windowed.length,
+      // 两个比率并列才有意义；null_baseline_ratio = 重锚自密度（与 cold_start 无关）
+      correlated_ratio: positives.length ? windowed.length / positives.length : null,
+      null_baseline_ratio: nullBaselineRatio,
       max_back_distance: depths.length ? Math.max(...depths) : null,
       // 诊断：__TRACE 里真实的事件类型分布（判断"没触发"还是"链路不通"）
       trace_event_kinds: Object.fromEntries(
@@ -163,9 +188,21 @@ test(`P200 trace：reanchor → missingStuck 相关性（${label}）`, async () 
     await writeFile(join(dir, "p200-trace-raw.json"), JSON.stringify({ coldStarts, reanchors }, null, 1), "utf8");
     console.log(`[p200] ${JSON.stringify(summary)}`);
 
-    // 只断言"遥测生效"：没有一条带 backDistance 就说明链路没通，测了也没意义。
-    // 「是否由 reanchor 驱动」由 correlated_within_window 回答，不在本 spec 内断言为真。
+    // 断言只覆盖"链路与判据可用"，**不断言因果**（原假说已被否证，见文件头）。
+    // ① 遥测生效：一条带 backDistance 的 cold_start 都没有，后面全是空转。
     expect(summary.cold_start_with_back_distance, "没有任何 cold_start 带 backDistance ⇒ 遥测未生效").toBeGreaterThan(0);
+    // ② 判据可用：重锚太少时零基线无意义，此时 correlated_ratio 不可解读，
+    //    必须显式失败而不是给出一个看似成功的数字。
+    expect(reanchors.length, "reanchor 事件过少（<20）⇒ 零基线无统计意义，本次测量不可解读").toBeGreaterThanOrEqual(20);
+    expect(nullBaselineRatio, "无法计算零基线 ⇒ 相关性数字不可解读").not.toBeNull();
+    // ③ 把结论写成一行，避免下一个人只看到 correlated_within_window 就下结论。
+    const ratio = summary.correlated_ratio;
+    const verdict = ratio === null || nullBaselineRatio === null
+      ? "不可判定"
+      : ratio > nullBaselineRatio + 0.25
+        ? "相关性显著高于零基线（可作为线索，仍需独立证据支持因果）"
+        : "相关性未显著高于零基线 ⇒ 本数据不支持「重锚驱动冷启」";
+    console.log(`[p200] correlated_ratio=${ratio} null_baseline=${nullBaselineRatio?.toFixed(3)} ⇒ ${verdict}`);
   } finally {
     await app.close();
   }

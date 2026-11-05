@@ -44,6 +44,9 @@ export interface MediaDecoder {
   readonly height: number;
   /** 实际解码模式（诊断呈现用，不参与后端决策）；对齐现 worker 值。 */
   readonly hardware: WebCodecsDecodeMode | null;
+  /** P203：素材是否为 HDR（demux 由 colr 盒判定；ffmpeg 后端可为 undefined）。
+   *  客户端据此在「环境解不了 HDR」时提示用户，而不是静默堵死。 */
+  readonly hdr?: boolean;
   /** 诊断：最近一次解码回执（webcodecs 路径有值；ffmpeg 路径可为 null）。 */
   readonly lastFrameInfo?: DecodeFrameInfo | null;
   /** P33 分段计时样本（VITE_AIVS_DECODE_TIMING=1 时填充；ffmpeg 后端无）。

@@ -24,7 +24,7 @@ interface Sample {
 
 
 type Outbound =
-  | { type: "ready"; sampleCount: number; durationUs: number; timescale: number; keyframes: number[]; width: number; height: number; hardware: string | null; cacheEnabled: boolean; cacheCap: number; hasBFrames: boolean }
+  | { type: "ready"; sampleCount: number; durationUs: number; timescale: number; keyframes: number[]; width: number; height: number; hardware: string | null; cacheEnabled: boolean; cacheCap: number; hasBFrames: boolean; hdr: boolean; colorTransfer: number | null }
   | { type: "frame"; id: number; frameN: number; timestampUs: number; fromCache: boolean; samplesFed: number; fromKeyframe: number; allocationSize: number; timing: DecodeTiming | null; frame: VideoFrame }
   | { type: "done"; id: number | null; note: string }
   | { type: "error"; id: number | null; message: string }
@@ -182,6 +182,14 @@ function armActiveRequestTimer(request: DecodeRequest): void {
 let fedIndex = -1; // 最近一次**请求目标**（顺序判定用；勿与已喂采样游标混用）
 /** 已喂入解码器的最大采样索引（含 B 帧 lookahead；顺序请求从 lastFedSample+1 续喂）。 */
 let lastFedSample = -1;
+/** P203：连续「解码器产出 format=null 坏帧」的计数（仅用于诊断埋点）。
+ *
+ *  **不用于熔断**：曾试过「超过阈值即熔断 + 拒绝后续请求」，实测无效——
+ *  熔断后客户端仍在 `maybeFallBackToFfmpeg` 后重试 `decode()`，`enqueue`
+ *  反而涨到 57,898 次，主线程依旧 100% 堵死。根因在客户端重试路径，
+ *  不在 worker 计数，故此处只保留计数供诊断。 */
+let badFrameStreak = 0;
+
 /** 喂包代际（并发守卫）：feedSamples 是异步批循环（网络读/批间让步点
  *  多处 await），本请求匹配完成后 pumpQueue 会立即启动下一请求的
  *  decodeSamples——若旧批循环不终止，两个喂包流会交错喂同一解码器，
@@ -517,6 +525,41 @@ let decodeTiming = false;
 function createDecoder(): VideoDecoder {
   return new VideoDecoder({
     output: (frame: VideoFrame) => {
+      // P203 诊断（保留）：输出回调入口。10-bit HEVC 在吐出首帧后回调不再触发，
+      // 且 `frame.format` 为 null——`fmt` 字段是识别该形态的唯一线索，
+      // 故长期保留（VERIFY_TRACE 门控，生产零开销）。
+      trace("output_enter", { pts: frame.timestamp, fmt: frame.format, decoded: resDecoded });
+      // P203 修复（治标，见 docs/STATUS.md §4 P203）：**坏帧检测**。
+      // 10-bit HEVC 硬解会产出 `format === null` 的 VideoFrame——尺寸正确但
+      // 任何像素 API 不可用（`allocationSize()` 直接抛「Operation is not
+      // supported when format is null」）。旧实现不检查该字段，坏帧被当作
+      // 正常帧走完回调链，随后解码器静默停止且不触发 `error`，最终表现为
+      // **渲染进程主线程永久堵死**（实测 18s 内 page.evaluate 全部超时）。
+      //
+      // 本检查把「静默挂死」降级为「明确失败」：关闭坏帧、走既有 decoder.error
+      // 同一恢复路径（reset + 报错 + 由 preview-session 的降级闸门切 FFmpeg B 后端）。
+      // **它治标不治本**：不解决 10-bit 解码本身，只保证可感知、可降级。
+      if (frame.format === null) {
+        badFrameStreak += 1;
+        trace("bad_frame_format", { pts: frame.timestamp, coded: `${frame.codedWidth}x${frame.codedHeight}`, streak: badFrameStreak });
+        try { frame.close(); } catch { /* 已关闭 */ }
+        const request = activeRequest;
+        activeRequest = null;
+        clearActiveRequestTimer();
+        try {
+          decoder?.reset();
+          decoder?.configure(decoderConfig as VideoDecoderConfig);
+        } catch { /* reset 失败则后续请求自行暴露 */ }
+        intermediateRing.length = 0;
+        fedIndex = -1;
+        lastFedSample = -1;
+        lastTargetKey = -1;
+        const msg = `DECODE_FRAME_FORMAT_NULL: 解码器产出 format=null 的帧（10-bit HEVC 硬解已知缺陷，${frame.codedWidth}x${frame.codedHeight}）`;
+        if (request) post({ type: "error", id: request.id, message: msg });
+        pumpQueue();
+        return;
+      }
+      badFrameStreak = 0; // 正常帧即清零（连续坏帧才算风暴）
       resDecoded += 1;
       const request = activeRequest;
       trace("output", { pts: frame.timestamp, active: request ? request.samplePtsUs : null });
@@ -681,6 +724,25 @@ async function init(url: string, cacheFrames: number, hasTicketRefresh: boolean,
   const demuxed = demuxResult;
   sampleIndex = buildSampleIndex(demuxed.samples, demuxed.timescale); // A03：一次性索引
   ptsCursor = -1;
+  // P204 诊断（VERIFY_TRACE 门控，生产零开销）：导出索引前若干项与 timescale。
+  // **为什么需要**：客户端报 `no sample for frame 0 (best diff 625000us)` 时，
+  // 无法区分「索引里 PTS 起点非 0」「索引为空/极少样本」「索引正常而请求算错」
+  // 三种情形——只看客户端错误码会得出相反结论（本项目已两次据此写错根因）。
+  trace("sample_index_built", {
+    count: sampleIndex.count,
+    timescale: demuxed.timescale,
+    srcSampleCount: demuxed.samples.length,
+    first10: Array.from(sampleIndex.sortedPtsUs.slice(0, 10)).map(v => Math.round(v)),
+    last3: Array.from(sampleIndex.sortedPtsUs.slice(-3)).map(v => Math.round(v)),
+    firstPtsUs: sampleIndex.sortedPtsUs.length ? Math.round(sampleIndex.sortedPtsUs[0]!) : null,
+    medianGapApprox: (() => {
+      if (sampleIndex.sortedPtsUs.length < 2) return null;
+      const g: number[] = [];
+      for (let k = 1; k < Math.min(200, sampleIndex.sortedPtsUs.length); k++) g.push(sampleIndex.sortedPtsUs[k]! - sampleIndex.sortedPtsUs[k - 1]!);
+      g.sort((a, b) => a - b);
+      return Math.round(g[Math.floor(g.length / 2)]!);
+    })(),
+  });
   // 重排深度（呈现序回跳距离）：B 帧素材的显示序请求流会周期性回跳——已喂
   // 游标（含 LOOKAHEAD）到下一个待请求目标之间最多隔这么多个采样。暂存窗
   // 容量不足会 FIFO 驱逐即将被请求的输出（真机素材 ctts 回跳 6/旧容量 4 丢帧
@@ -773,6 +835,10 @@ async function init(url: string, cacheFrames: number, hasTicketRefresh: boolean,
   const last = demuxed.samples.at(-1)!;
   post({
     type: "ready",
+    // P203：HDR 标记随 ready 上抛。客户端据此在「素材是 HDR 且当前环境解不了」
+    // 时提示用户，而不是让界面静默堵死。
+    hdr: demuxed.hdr,
+    colorTransfer: demuxed.colorTransfer,
     sampleCount: demuxed.samples.length,
     durationUs: Math.round(((last.dts + last.ctsOffset) / demuxed.timescale) * 1e6),
     timescale: demuxed.timescale,
@@ -1182,18 +1248,23 @@ async function feedSamples(
       const waitStart = lastOutputAt;
       let backedUp = false;
       let shrunk = false;
+      // P203 诊断：循环轮次与退出原因（VERIFY_TRACE 门控）。挂起时这条是
+      // 唯一能区分「在等解码器」与「跳出后卡在别处」的证据。
+      let waitTicks = 0;
       for (;;) {
         await new Promise<void>(resolve => setTimeout(resolve, 5));
-        if (generation !== feedGeneration) return;
-        if (activeRequest?.id !== request.id) return;
+        waitTicks += 1;
+        if (generation !== feedGeneration) { trace("stall_exit", { tick: waitTicks, why: "generation" }); return; }
+        if (activeRequest?.id !== request.id) { trace("stall_exit", { tick: waitTicks, why: "request-changed", dq: decoder?.decodeQueueSize ?? -1 }); return; }
         const now = performance.now();
         if (resDecoded !== lastOutputCount) { lastOutputCount = resDecoded; lastOutputAt = now; }
         if (now - lastOutputAt < STALL_MS) continue; // (a) 仍在吐
         backedUp = (decoder?.decodeQueueSize ?? 0) > 0;
-        if (!backedUp) break; // (c) 真饿着 → 延伸
+        if (!backedUp) { trace("stall_exit", { tick: waitTicks, why: "starved", held: heldFrameCount() }); break; } // (c) 真饿着 → 延伸
         // (b) 输入积压 = 表面池告急：先把持有帧让出去（收缩预算），再等排空。
         if (!shrunk) { shrunk = true; shrinkForBackpressure(); }
         if (now - waitStart < BACKPRESSURE_WAIT_MS) continue;
+        trace("stall_exit", { tick: waitTicks, why: "backpressure-timeout", dq: decoder?.decodeQueueSize ?? -1, held: heldFrameCount() });
         break;
       }
       if (backedUp) trace("feed_backpressure_wait", { target: request.sampleIndex, fed, dq: decoder?.decodeQueueSize ?? -1, held: heldFrameCount(), budget: unclosedBudget });
@@ -1281,11 +1352,17 @@ async function feedSamples(
         decoder?.reset();
         decoder?.configure(decoderConfig as VideoDecoderConfig);
       } catch { /* 实例已坏死：下个请求会再撞同一路径并再次尝试 */ }
+      // **必须先快照再重置**：下面三行会把 lastFedSample 置 -1，若在重置后再取值，
+      // 错误消息只会恒报 -1。历史实现更糟——直接写成字面量 `lastFedSample=1776`，
+      // 使这条诊断**始终是假值**（2026-11-01 我据此误判过一次：把夹具只有一个
+      // 关键帧的问题当成产品缺陷）。诊断字段造假比缺字段更有害：它看起来可信。
+      const stalledAt = lastFedSample;
+      const stalledTarget = request.sampleIndex;
       fedIndex = -1;
       lastFedSample = -1;
       lastTargetKey = -1;
-      trace("stall_recovered", { target: request.sampleIndex, held: heldFrameCount() });
-      post({ type: "error", id: request.id, message: `FRAME_UNREACHABLE: 单帧停摆兜底（已重置解码器恢复）frame ${request.frameN} 尾 GOP 重排输出滞留（pts=${request.samplePtsUs}）；已喂至文件尾 lastFedSample=1776` });
+      trace("stall_recovered", { target: stalledTarget, at: stalledAt, held: heldFrameCount() });
+      post({ type: "error", id: request.id, message: `FRAME_UNREACHABLE: 单帧停摆兜底（已重置解码器恢复）frame ${request.frameN} 尾 GOP 重排输出滞留（pts=${request.samplePtsUs}）；已喂至 lastFedSample=${stalledAt}（共 ${samples.length} 个采样）` });
       pumpQueue();
       return;
     }

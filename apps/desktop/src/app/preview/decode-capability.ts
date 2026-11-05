@@ -119,6 +119,10 @@ class WebCodecsMediaDecoder implements MediaDecoder {
   get lastFrameInfo() { return this.worker.lastFrameInfo; }
   get timingSamples() { return this.worker.timingSamples; }
   get hasBFrames(): boolean { return this.worker.hasBFrames; }
+  /** P203：HDR 标记必须显式透传——本类是对 DecodeWorker 的包装，漏了 getter
+   *  会让上层恒读到 undefined，提示逻辑永远不触发（本轮真机验证即栽在这里：
+   *  编译过、单测过，但 UI 没有提示）。 */
+  get hdr(): boolean { return this.worker.hdr; }
 
   async decode(frameN: number, fps: number, signal?: AbortSignal): Promise<DecodedFrame> {
     if (this.disposed) throw new Error("media decoder disposed");

@@ -9,7 +9,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { parseIr, type Ir } from "./ir.js";
 import { windowedFrameSource, type FrameSource } from "./frame-source.js";
-import { PreviewSession, type PreviewSessionMetrics, type SegmentAudioConfig } from "./preview-session.js";
+import { PreviewSession, type AssetDecodeBudget, type PreviewSessionMetrics, type SegmentAudioConfig } from "./preview-session.js";
 import { PreviewSourceResolver } from "./source-resolver.js";
 import { SyntheticPipLayer } from "./SyntheticPipLayer.js";
 import { windowSourceBudget } from "./resource-budget.js";
@@ -67,6 +67,15 @@ export interface SyntheticPreviewProps {
    *  snapshotPng 转发函数、卸载时清空——App 经此 ref 在合成模式下取帧
    *  （无 video 元素可 drawImage，v1 静态路径无合成器时返回 null）。 */
   snapshotRef?: { current: (() => Promise<{ buffer: ArrayBuffer; contentX: number; contentY: number; contentW: number; contentH: number } | null>) | null };
+  /** A2/A3：代理就绪计数（App 递增；不提供 = 行为与旧版完全一致）。
+   *  变化 = 「把预览源切到代理」的请求：播放中只挂起，等到暂停（自然切换点）
+   *  才提交并重建会话一次——解析只在会话装配时跑一次，不重建就换不了源。 */
+  proxyEpoch?: number;
+  /** 按需代理（方案 A 改造）：预览**跑起来之后**每秒上报一次实测解码预算判定
+   *  ——按 p95 回答「哪个素材解不动」，由 App 决定为谁登记代理作业。触发点
+   *  从「导入瞬间」挪到这里，所以早已导入的素材同样生效。
+   *  不提供 = 行为与旧版完全一致（不判定、不上报）。 */
+  onDecodeBudget?: (verdicts: AssetDecodeBudget[]) => void;
 }
 
 interface LoadState {
@@ -75,7 +84,11 @@ interface LoadState {
 }
 
 export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactElement {
-  const { projectId, revisionId, mediaUrls, audioByClip, pipClips, selectedClipId, onSelectClip, onCommitPipTransform, onDraftPipMask, onCommitPipMask, onGesturePause, onGestureResume, playing, playheadUs, onTimeUs, onEnded, onFallback, outputRatio, playheadStore, sourceResolver, resourceTier, forceCopyTo, snapshotRef } = props;
+  const { projectId, revisionId, mediaUrls, audioByClip, pipClips, selectedClipId, onSelectClip, onCommitPipTransform, onDraftPipMask, onCommitPipMask, onGesturePause, onGestureResume, playing, playheadUs, onTimeUs, onEnded, onFallback, outputRatio, playheadStore, sourceResolver, resourceTier, forceCopyTo, snapshotRef, proxyEpoch, onDecodeBudget } = props;
+  // 判定回调经 ref 读最新值：指标轮询 effect 只依赖 load.status，不该因为父组件
+  // 每次重渲染换了函数身份就重建定时器（重建会漏掉一轮采样）。
+  const onDecodeBudgetRef = useRef(onDecodeBudget);
+  onDecodeBudgetRef.current = onDecodeBudget;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const sessionRef = useRef<PreviewSession | null>(null);
   // C20c-1：v2 外部帧源所有权在本组件（session.dispose 不释放外部帧源）——
@@ -86,6 +99,13 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
   const frameManifestRef = useRef<PreviewIrV2Manifest | null>(null);
   const generationRef = useRef(0);
   const sessionProjectRef = useRef<string | null>(null);
+  /** A2：代理切换台账。props.proxyEpoch（请求）只在「非播放」时刻提交成
+   *  proxyCommitEpoch（会话重建计数）——播放中重建会 dispose 当前会话，
+   *  画面与音频当场中断。两者不等 = 已就绪但尚未切换（A3 提示的依据）。 */
+  const [proxyCommitEpoch, setProxyCommitEpoch] = useState(0);
+  const proxyAppliedEpoch = useRef<number>(proxyEpoch ?? 0);
+  /** 提交后要求下一次装配「整会话重建」，而不是 replaceIr 就地换表。 */
+  const proxyForceRebuild = useRef(false);
   const lastReportedUs = useRef<number>(playheadUs);
   const lastReportWall = useRef<number>(0);
   // 预览框观察器：组件级单例（吸收路径早退不销毁，避免观察器泄漏）
@@ -117,6 +137,19 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
   // 非空 boxes 作为兜底（纯视觉占位；数据恢复后立即被真实值覆盖）。
   const lastPipBoxesRef = useRef<import("./SyntheticPipLayer.js").PipBoxItem[] | null>(null);
 
+  // A2：代理就绪（proxyEpoch 变化）→ 挑自然切换点提交，绝不打断播放。
+  // 播放中只挂起不提交；暂停（或其它非播放时刻）提交一次——计数单调、每素材
+  // 一次，不会形成重建循环。提交置 proxyForceRebuild，让装配走整会话重建：
+  // 换表路径（replaceIr）会保留旧源，正好绕过 resolve 这唯一的换源点。
+  useEffect(() => {
+    const requested = proxyEpoch ?? 0;
+    if (requested === proxyAppliedEpoch.current) return;
+    if (playing) return;
+    proxyAppliedEpoch.current = requested;
+    proxyForceRebuild.current = true;
+    setProxyCommitEpoch(epoch => epoch + 1);
+  }, [proxyEpoch, playing]);
+
   // IR 加载 + 会话创建（revision 变更时重建；手势提交的变更被吸收、会话保活）。
   useEffect(() => {
     const generation = ++generationRef.current;
@@ -129,7 +162,10 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
     // 同输入 revision 变更（transform/关键帧/时间编辑）→ 会话就地换 IR：
     // worker/GL 全保留，零黑屏。输入变化或无会话 → 走完整重建。
     let existing = sessionRefLocal.current;
-    if (sessionProjectRef.current !== projectId) {
+    // A2：代理切换提交后必须整会话重建——sourceResolver.resolve 只在装配时
+    // 跑一次，换表（replaceIr）会保留旧源，正好绕过唯一的换源点。
+    if (sessionProjectRef.current !== projectId || proxyForceRebuild.current) {
+      proxyForceRebuild.current = false;
       existing?.dispose(); existing = null; sessionRefLocal.current = null;
       // C20c-1：外部帧源所有权在组件——项目切换一并释放（既有缺口闭合）
       frameSourceRef.current?.dispose?.(); frameSourceRef.current = null;
@@ -407,7 +443,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
     // （2026-09-15 F04 100 素材复测暴露）。playhead 仅挂载时取初值；
     // playheadStore 稳定（App useRef 持有），不参与会话重建——只影响上报通道。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, revisionId, outputRatio, mediaUrls]);
+  }, [projectId, revisionId, outputRatio, mediaUrls, proxyCommitEpoch]);
 
   // 卸载：销毁会话（含画布元素）+ 外部帧源 + 断开观察器（StrictMode 双挂载各自动一次，安全）。
   useEffect(() => () => {
@@ -464,6 +500,13 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
       if (!session) return;
       const snapshot = session.metrics();
       setMetrics(snapshot);
+      // 按需代理判据（与指标同一轮 1Hz 采样）：实测解码耗时归因到素材后上报。
+      // 判定本身是同步的纯计算（≤600 样本/输入取 p95），登记动作在 App 侧
+      // fire-and-forget——这里绝不 await，也不让异常冒出来影响预览。
+      const reportBudget = onDecodeBudgetRef.current;
+      if (reportBudget) {
+        try { reportBudget(session.decodeBudget()); } catch { /* 判定是加速项，失败静默 */ }
+      }
       // 真机取证通道（VITE_AIVS_PERF=1 诊断构建才存在；发布构建无此全局）：
       // e2e/真机复测读 window.__aivsPreviewMetrics 拿到与指标条同源的数值
       //（含 decode_seg 分段与链状态），免去"探针 0 丢帧、App 丢帧"两张皮的
@@ -487,7 +530,18 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
   // "?" = 池驱逐瞬间 worker 暂缺（routine），不是降级；诊断构建把它一并摊开，
   // 发布构建只报确定的 ffmpeg 软解，免得把正常驱逐刷成异常。
   const backendIsFfmpeg = metrics?.decode_backend?.includes("ffmpeg") ?? false;
+  // P203：**HDR 素材 + 环境不支持** 才提示，两个条件缺一不可：素材属性单独出现无害
+  // （HDR 素材在支持 HDR 的环境正常），环境属性单独出现也无害（SDR 素材在 SDR 显示器
+  // 完全正常）。只有组合才是问题——Chromium 136 的 WebCodecs HEVC 路径解 10-bit HLG
+  // 会产出 format=null 坏帧，随后渲染进程**永久堵死且无提示**。剪映在同环境下会弹窗
+  // 告知并降级到 SDR（检测/告知/降级三步），本产品三件都没有；本提示补上前两件。
+  const hdrBlocked = Boolean(metrics?.hdr_media) && metrics?.hdr_decodable === false;
   const anomaly = Boolean(metrics?.last_error) || hardwareMissing || backendIsFfmpeg;
+  // **P203 教训（2026-11-01）：不要把 hdrBlocked 放进 anomaly**。
+  // 实测：anomaly 一旦为 true（无论由 hdrBlocked 还是恒真触发），指标条渲染
+  // 后约 2-4 秒**渲染进程必崩**（生产构建下）。这是既有缺陷（生产构建此前从未
+  // 显示过指标条，故未被发现），与 HDR 无关——`anomaly = true` 同样崩。
+  // 故 HDR 提示改走**独立通道**（见下方 hdrNotice 渲染），不依赖 anomaly。
   // 驻留预警是非阻断提示，与性能数字并列显示——它当年正是靠整行替换指标文本
   // 把性能数字挤没的，拆通道后不能再由它独占这一行。
   const residency = metrics?.residency_warning ?? null;
@@ -548,10 +602,38 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
             终端日志推断。
           诊断口径关闭时 .synthetic-metrics 仍会在异常态出现（e2e 的就绪判据与「最近错误」
           断言依赖这个挂点），只是它退化为一行原因说明。 */}
+      {/* P203：HDR 提示走**独立通道**，不进指标条。
+          原因（实测）：指标条在生产构建渲染后约 2-4 秒必崩渲染进程（既有缺陷，
+          anomaly=true 恒真同样崩），而本提示的价值恰恰是「用户点播放前就知道
+          原因」，不能依附于一条会崩的通道。
+          定位：absolute 覆盖在预览区顶部，不参与指标条布局。 */}
+      {/* P203：HDR 提示。
+          **绝不能用内联 `position:absolute` + 背景色的组合**：实测该写法会让渲染
+          进程在 2-4 秒内崩溃（本机 P010 仅 SOFTWARE 支持、合成器脆弱，独立合成层
+          触发 GPU 崩溃）。改用普通文档流 + CSS 类，等价信息、零合成层。
+          同理也不放进 `.synthetic-metrics`（那条通道同样会崩，见 anomaly 注释）。 */}
+      {load.status === "ready" && hdrBlocked && (
+        <div className="synthetic-hdr-notice" role="status">
+          当前显示环境不支持 HDR，该素材为 HDR（10-bit）。实时预览可能无法播放或卡顿。建议先转码为 SDR，或使用支持 HDR 的显示环境。
+        </div>
+      )}
+      {/* A3：代理已就绪、当前会话还没切过去（播放中挂起）→ 弱提示给知情权，
+          不打断、不刺眼。样式复用 .synthetic-hdr-notice 的安全范式（普通文档流
+          + 纯色背景 + CSS 类）：2026-11-01 实测内联 position:absolute + 半透明
+          背景会让渲染进程在 2-4 秒内崩溃，故此处绝不自带内联定位。 */}
+      {load.status === "ready" && proxyEpoch !== undefined && proxyEpoch !== proxyAppliedEpoch.current && (
+        <div className="synthetic-hdr-notice synthetic-proxy-notice" role="status">
+          高清代理已就绪，暂停后自动切换
+        </div>
+      )}
       {load.status === "ready" && metrics && (perfHud || anomaly) && (
         <div className={`synthetic-metrics${metrics.last_error ? " err" : ""}`}>
           {showPerfNumbers && <span>{`合成预览 · 任务 p95 ${metrics.task_ms_p95}ms · 解码 p50 ${metrics.decode_ms_p50}ms / p95 ${metrics.decode_ms_p95}ms · 上传 p95 ${metrics.upload_ms_p95}ms · 丢帧 ${metrics.dropped_frames} · 画布 ${metrics.canvas_w}×${metrics.canvas_h} → 缓冲 ${metrics.backing_w}×${metrics.backing_h} (×${metrics.fit_scale})`}</span>}
           {metrics.last_error && <span className="synthetic-metric-err">{`最近错误：${metrics.last_error}`}</span>}
+          {/* P203：HDR 素材在当前环境不可解码——**必须在用户点播放前就可见**，
+              否则表现就是「点播放 → 整个界面失去响应 → 没有任何解释」。
+              文案对齐剪映的做法（明确说是环境问题 + 给出可操作建议），
+              避免用户误以为是素材损坏或软件故障。 */}
           {(perfHud ? backendDegraded : backendIsFfmpeg) && (
             <span className="synthetic-backend-warn">{`解码后端 ${metrics.decode_backend}（已降级，慢路径）`}</span>
           )}

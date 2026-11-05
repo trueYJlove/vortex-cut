@@ -31,6 +31,15 @@ export interface DemuxResult {
   codec: string;
   /** 存在非零 ctsOffset（B 帧重排）。WebCodecs 对 iPhone HEVC 不稳时工厂可改走 FFmpeg。 */
   hasBFrames: boolean;
+  /** 该视频轨是否为 HDR（由 `colr` 盒的 transfer characteristics 判定）。
+   *
+   *  **为什么需要**：Chromium 136 的 WebCodecs HEVC 路径在解 10-bit HLG 素材时
+   *  会产出 `format === null` 的不可用帧，并使渲染进程永久堵死（P203）。产品此前
+   *  连「这是 HDR 素材」都不知道，无法提示用户。判据：transfer = `smpte2084`（PQ）
+   *  或 `arib-std-b67`（HLG）。缺失 `colr` 盒时按 SDR 处理（保守，不误报）。 */
+  hdr: boolean;
+  /** `colr` 盒声明的 transfer characteristics 原值（诊断用；无 colr 时为 null）。 */
+  colorTransfer: number | null;
 }
 
 /** 防御上限：超过即明确回退（不冒充支持、不 OOM）。 */
@@ -183,6 +192,27 @@ export async function demuxRange(
 }
 
 /** moov payload 解析（findBox 复用既有逻辑，限定在 moov 缓冲内）。 */
+/** 读取该 trak 的 `edts/elst` 首条 `media_time`（媒体 timescale 单位，可负）。
+ *
+ * **只返回可用于平移的单一值**：无 `elst` / 版本不支持 / `entry_count !== 1` /
+ * `media_time <= 0`（含 `-1` empty edit）一律返回 0（= 不平移，保持原行为）。
+ *
+ * **为什么保守**：`elst` 的多 entry 语义是「剪辑序列」（可拼接、可空白、可重复），
+ * 把它压成单一偏移会静默产生错误时间轴——那比现在「不处理」更危险。
+ * 本轮只有单 entry 的真实夹具，故只实现该形态。 */
+function readEditListMediaTime(view: DataView, trakStart: number, trakEnd: number): number {
+  const elst = findBox(view, trakStart, trakEnd, ["edts", "elst"])[0];
+  if (!elst) return 0;
+  const version = view.getUint8(elst.start);
+  const entryCount = view.getUint32(elst.start + 4);
+  if (entryCount !== 1 || (version !== 0 && version !== 1)) return 0;
+  // version 0: segment_duration(u32) media_time(i32)；version 1: u64 + i64
+  const mediaTime = version === 1
+    ? Number(view.getBigInt64(elst.start + 16))
+    : view.getInt32(elst.start + 12);
+  return Number.isFinite(mediaTime) ? mediaTime : 0;
+}
+
 function parseMoov(u8: Uint8Array, view: DataView): DemuxResult {
   const moovEnd = u8.byteLength;
   const trak = findBox(view, 0, moovEnd, ["trak"]);
@@ -342,13 +372,66 @@ function parseMoov(u8: Uint8Array, view: DataView): DemuxResult {
       }
     }
   }
+  // P204：应用 edit list（`edts/elst`）的 `media_time` 偏移。
+  //
+  // **为什么必须做**：stbl 里的 `dts+ctsOffset` 是**媒体时间轴**原始值；播放器
+  // 呈现时间还要按 `elst` 裁掉片头。含非零 `media_time` 的素材（iPhone 拍的、
+  // 或被 x265/libkvazaar 转码引入 B 帧重排的）若不减，索引首帧 PTS 就不是 0——
+  // 客户端从 0 请求时 `locateByPts` 全部 miss，表现为全帧 `no sample for frame N`
+  // 且时间码永远不动（实测首帧 PTS 625000us vs 请求 0）。
+  //
+  // **范围与保守性**（YAGNI + 可解释）：
+  // - 只处理**单 entry** 且 `media_time > 0` 的常见形态；多 entry / `media_time === -1`
+  //   （empty edit）/ 更复杂剪辑序列**不处理也不猜测**，保持原行为。
+  //   这些形态本轮无夹具、无实测，按「宁可少收，不可误伤」留待有证据时再做。
+  // - 偏移以**本 trak 的 media timescale** 为单位换算（`elst.media_time` 就是该单位）。
+  // - 偏移只作用于 `dts`（`ctsOffset` 是相对量，不参与平移），与全仓 7 处
+  //   `dts + ctsOffset` 的统一算法保持单一真源。
+  const editMediaTime = readEditListMediaTime(view, chosen.start, chosen.end);
+  const dtsShift = editMediaTime > 0 ? editMediaTime : 0;
+
+  // P203：读取 `colr` 盒判定 HDR。ISO/IEC 14496-12 ColourInformationBox：
+  // colour_type='nclx'/'nclc' 后跟 primaries(u16) transfer(u16) matrix(u16)，
+  // 全部大端（'nclx' 另有 1 字节 full_range，本处不需要）。
+  // HDR 判定只看 transfer：16 = PQ (SMPTE ST 2084)、18 = HLG (ARIB STD-B67)。
+  // 缺失/不可解析一律按 SDR（保守：宁可漏报，不能把 SDR 误报成 HDR）。
+  let colorTransfer: number | null = null;
+  {
+    // **colr 在 sample entry（hvc1/avc1）内部，不在 stsd 的 body 顶层**。
+    // 层级：stsd(8B 头 + 4B version/flags + 4B entry_count) → sample entry
+    // （8B 头 + 78B VisualSampleEntry 固定字段）→ colr。
+    // stsd.start 指向 body（findBox 已跳过盒头），故：
+    //   entryCount 在 stsd.start+4；首个 entry 头在 stsd.start+8；
+    //   entry body 在 stsd.start+16；VisualSampleEntry 固定 78 字节后才是子盒。
+    const entryCount = view.getUint32(stsd.start + 4);
+    if (entryCount > 0) {
+      const entryStart = stsd.start + 8;
+      const entryBody = entryStart + 8 + 78; // 8=box header, 78=VisualSampleEntry
+      const entryEnd = Math.min(stsd.end, entryStart + view.getUint32(entryStart));
+      if (entryBody < entryEnd) {
+        const colr = findBox(view, entryBody, entryEnd, ["colr"])[0];
+        if (colr) {
+          try {
+            const type = String.fromCharCode(
+              view.getUint8(colr.start), view.getUint8(colr.start + 1),
+              view.getUint8(colr.start + 2), view.getUint8(colr.start + 3));
+            if ((type === "nclx" || type === "nclc") && colr.end - colr.start >= 10) {
+              colorTransfer = view.getUint16(colr.start + 6);
+            }
+          } catch { colorTransfer = null; }
+        }
+      }
+    }
+  }
   const samples: DemuxSample[] = [];
   for (let index = 0; index < sampleCount; index++) {
-    samples.push({ offset: offsets[index]!, size: sizes[index]!, dts: dts[index]!, ctsOffset: ctsOffsets[index]!, sync: syncSet.has(index) });
+    samples.push({ offset: offsets[index]!, size: sizes[index]!, dts: dts[index]! - dtsShift, ctsOffset: ctsOffsets[index]!, sync: syncSet.has(index) });
   }
   return {
     samples, timescale, width, height, description, codec,
     hasBFrames: samples.some(s => s.ctsOffset !== 0),
+    hdr: colorTransfer === 16 || colorTransfer === 18,
+    colorTransfer,
   };
 }
 

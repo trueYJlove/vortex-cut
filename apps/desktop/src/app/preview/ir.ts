@@ -1,6 +1,16 @@
 /** M3-0 中立 IR 草案类型（schema 见 tools/m3_0/ir_projector.py，不冻结、不进契约）。 */
 
-export interface IrGeometry { width: number; height: number; sar: number }
+export interface IrGeometry {
+  width: number;
+  height: number;
+  sar: number;
+  /** 按 display matrix 换轴后的**显示方向**尺寸（P206/P212）。布局 fit/cover
+   *  必须用它算内容盒；缺字段时回落 width/height（老 IR 兼容）。 */
+  display_width?: number;
+  display_height?: number;
+  /** 显示矩阵旋转（0/90/180/270）。width/height 是**旋转前**的解码平面方向。 */
+  rotation?: number;
+}
 
 export interface IrInput {
   input_id: string;
@@ -9,6 +19,9 @@ export interface IrInput {
   duration_us: number;
   has_audio: boolean;
   geometry: IrGeometry;
+  /** P203：该输入是否为 HDR 素材（Core 侧由 ffprobe 的 color_transfer 判定）。
+   *  **默认 false**：老 IR 或非视频输入没有该字段，按 SDR 处理（保守，不误报）。 */
+  hdr?: boolean;
 }
 
 export interface IrContent { x: number; y: number; w: number; h: number }
