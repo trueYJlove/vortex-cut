@@ -12,6 +12,12 @@ export function safeErrorMessage(error: unknown, fallback = "操作未完成，�
     // 「换 Provider」误报成「用户配置错」。指错方向的文案比没有文案更糟。
     PROVIDER_CAPABILITY_UNSUPPORTED: "该 Provider 不支持所需的响应格式（可能静默忽略了结构化输出要求）。下一步：改用支持 JSON 结构化输出的 Provider 或模型后重试。",
     EGRESS_CONFIRMATION_EXPIRED: "确认已过期，请重新准备外传内容。",
+    // 2026-10 真实事故：用户删掉两个素材文件后，删片段/删素材两条路全失败，
+    // 却都只显示兜底文案「…请刷新后重试」——刷新永远解决不了，用户被指向
+    // 一个无效动作。这三条码此前全部落到兜底分支。
+    TIMELINE_SOURCE_INVALID: "时间线上有素材的本地文件已缺失或已变化，导致这次修改被拒绝。请把文件恢复到原位置（或用「刷新素材库」重新定位）后再操作。",
+    ASSET_IN_USE: "该素材仍被时间线片段或生成记录引用，无法删除。请先从时间线移除相关片段后再删除。",
+    ASSET_MISSING: "该素材的本地文件已缺失。请把文件恢复到原位置后刷新素材库。",
   };
 
   return messages[errorCode(error)] ?? fallback;

@@ -438,6 +438,14 @@ class ProjectAssetService:
                     (asset_id,),
                 )
                 db.execute("DELETE FROM cv_analyses WHERE asset_id=?", (asset_id,))
+                # 派生代理作业对 assets 是 NO ACTION（jobs.asset_id 由 v2 兼容迁移
+                # ALTER 补列，database.py:1120）⇒ 不清就撞 FK，被下面通用 except 报成
+                # 「素材被镜头需求或生成记录引用」——原因错且无出路。而**每次视频导入
+                # 都会自动登记一条 kind='proxy' 作业**（preview_source.create_proxy_job），
+                # 所以这不是边缘情况，是几乎所有素材都带（2026-10 用户事故实证）。
+                # 只清 kind='proxy'：代理是可重算派生数据，与 beat_grids/cv_analyses 同口径；
+                # 其余 kind（生成记录/导出/转录/模型下载等）仍由下面的 FK 拒绝保护。
+                db.execute("DELETE FROM jobs WHERE asset_id=? AND kind='proxy'", (asset_id,))
                 # 关键帧外传预览对 assets 是 NO ACTION：不先断开引用，下面的
                 # DELETE 必被 FK 拒绝并被报成「素材被镜头需求或生成记录引用」
                 # ——原因错且无出路（做过一次关键帧预览的素材永远删不掉，

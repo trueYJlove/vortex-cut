@@ -574,7 +574,8 @@ class TimelineService:
                 operation = _mapping(raw_operation, "Patch 操作不合法")
                 self._apply_operation(db, project_id, document, operation)
             _drop_empty_link_groups(document)
-            self._normalize_and_validate(db, document)
+            # 传基线文档：缺失素材上的既有引用必须放行，否则「删片段自救」被挡住。
+            self._normalize_and_validate(db, document, previous_document=current["document"])
             db.execute("BEGIN")
             try:
                 latest = db.execute(
@@ -582,7 +583,7 @@ class TimelineService:
                 ).fetchone()
                 if latest is None or latest[0] != base_revision_id:
                     raise DomainError("TIMELINE_CONFLICT", "时间线已被其他操作修改")
-                self._normalize_and_validate(db, document)
+                self._normalize_and_validate(db, document, previous_document=current["document"])
                 revision = self._insert_revision(
                     db, project_id, base_revision_id, document, summary, "user"
                 )
@@ -635,7 +636,7 @@ class TimelineService:
                     _patch_failure_field(exc),
                 )
         _drop_empty_link_groups(result)
-        self._normalize_and_validate(db, result)
+        self._normalize_and_validate(db, result, previous_document=document)
         if require_non_empty and not result["clips"]:
             raise DomainError("TIMELINE_PATCH_PROPOSAL_INVALID", "AI Patch 不得产生空时间线")
         return result
@@ -2397,7 +2398,27 @@ class TimelineService:
             if isinstance(item, dict) and item.get("after_clip_id") in valid_anchors
         ]
 
-    def _normalize_and_validate(self, db: sqlite3.Connection, document: dict[str, Any]) -> None:
+    def _normalize_and_validate(
+        self,
+        db: sqlite3.Connection,
+        document: dict[str, Any],
+        previous_document: dict[str, Any] | None = None,
+    ) -> None:
+        """校验文档；previous_document 为基线文档（patch 类路径必须传）。
+
+        区分「保留既有引用」与「引入新引用」：素材文件缺失时，若 clip 在基线里
+        已存在且 asset_id 未变，则放行——否则「删除坏引用」这个唯一能自救的
+        操作会被校验自己挡住（2026-10 事故：删片段被拒 ⇒ 素材仍被引用 ⇒
+        素材删不掉，项目永久不可操作）。新增 clip 或改动 asset_id 仍按新引用
+        fail-closed 校验。
+        """
+        retained_assets: dict[str, str] = {}
+        if previous_document is not None:
+            retained_assets = {
+                clip["clip_id"]: clip.get("asset_id")
+                for clip in previous_document.get("clips") or []
+                if isinstance(clip, dict) and isinstance(clip.get("clip_id"), str)
+            }
         _exact_keys(
             document,
             {
@@ -2515,7 +2536,15 @@ class TimelineService:
             if clip_id in clip_ids:
                 raise DomainError("TIMELINE_INVALID", "Clip ID 重复")
             clip_ids.add(clip_id)
-            asset = self._asset(db, document["project_id"], clip.get("asset_id"))
+            asset = self._asset(
+                db,
+                document["project_id"],
+                clip.get("asset_id"),
+                allow_unavailable=(
+                    previous_document is not None
+                    and retained_assets.get(clip_id) == clip.get("asset_id")
+                ),
+            )
             if asset["kind"] != clip.get("asset_kind"):
                 # as_audio 派生片段白名单（M3-3）：视频素材取音轨铺 A1——
                 # clip.asset_kind=audio 但源素材是 video；audio.enabled=true
@@ -3028,15 +3057,40 @@ class TimelineService:
         return row
 
     @staticmethod
-    def _asset(db: sqlite3.Connection, project_id: str, asset_id: Any) -> sqlite3.Row:
+    def _asset(
+        db: sqlite3.Connection,
+        project_id: str,
+        asset_id: Any,
+        *,
+        allow_unavailable: bool = False,
+    ) -> sqlite3.Row:
+        """取素材行并校验可用于 Timeline。
+
+        allow_unavailable：仅在调用方已证明该 clip 的引用是**基线里原样保留**的
+        既有引用时为 True。此时跳过 availability 门槛（类型/归属仍校验）——
+        否则素材文件一缺失，连「删掉这个坏片段」都会被拒，项目永久不可操作。
+        新引用（新片段、或改过 asset_id）永远走严格分支。
+        """
         asset_id = _identifier(asset_id, "素材 ID 不合法")
         row = db.execute("SELECT * FROM assets WHERE id=?", (asset_id,)).fetchone()
         if row is None:
             raise DomainError("TIMELINE_SOURCE_INVALID", "素材不存在")
         if row["project_id"] != project_id:
             raise DomainError("TIMELINE_SOURCE_INVALID", "素材不属于当前项目")
-        if row["kind"] not in {"video", "image", "audio"} or row["availability"] != "available":
-            raise DomainError("TIMELINE_SOURCE_INVALID", "素材不可用于 Timeline")
+        if row["kind"] not in {"video", "image", "audio"}:
+            raise DomainError(
+                "TIMELINE_SOURCE_INVALID",
+                f"素材「{row['display_name']}」（{asset_id}）"
+                f"的类型 {row['kind']} 不能用于 Timeline",
+            )
+        if row["availability"] != "available" and not allow_unavailable:
+            # 必须点名是哪一条素材：项目里通常有多个素材，笼统一句「素材不可用」
+            # 让用户无法定位该恢复哪个文件（2026-10 事故实证的痛点）。
+            raise DomainError(
+                "TIMELINE_SOURCE_INVALID",
+                f"素材「{row['display_name']}」（{asset_id}）不可用于 Timeline："
+                f"当前状态为 {row['availability']}",
+            )
         return row
 
 

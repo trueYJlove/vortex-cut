@@ -53,6 +53,23 @@ describe("safeErrors", () => {
     expect(errorCode(new Error("[EDITING_GRAMMAR_NO_WORDS] 缺少词级时间戳"))).toBe("EDITING_GRAMMAR_NO_WORDS");
   });
 
+  it("缺失素材相关的错误码不再落到兜底文案，且不误导用户去刷新", () => {
+    // 2026-10 事故：删片段/删素材两条路都会抛这三个码，此前全部落到
+    // 「操作未完成，请刷新后重试」——刷新根本解决不了，把用户指向无效动作。
+    const sourceInvalid = safeErrorMessage({ code: "TIMELINE_SOURCE_INVALID", message: "x" });
+    expect(sourceInvalid).not.toBe(DEFAULT_FALLBACK);
+    expect(sourceInvalid).toContain("缺失");
+    expect(sourceInvalid).not.toContain("刷新后重试");
+
+    const inUse = safeErrorMessage({ code: "ASSET_IN_USE", message: "x" });
+    expect(inUse).not.toBe(DEFAULT_FALLBACK);
+    expect(inUse).toContain("引用");
+
+    const missing = safeErrorMessage({ code: "ASSET_MISSING", message: "x" });
+    expect(missing).not.toBe(DEFAULT_FALLBACK);
+    expect(missing).toContain("缺失");
+  });
+
   it("falls back for an unknown error", () => {
     expect(safeErrorMessage(new Error("SOME_OTHER_THING"))).toBe(DEFAULT_FALLBACK);
   });
