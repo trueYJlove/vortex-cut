@@ -213,3 +213,108 @@ def test_non_proxy_job_still_blocks_asset_delete(tmp_path: Path) -> None:
         assert db.execute("SELECT COUNT(*) FROM assets WHERE id='v2'").fetchone()[0] == 1
         assert db.execute("SELECT COUNT(*) FROM jobs WHERE id='job-export'").fetchone()[0] == 1
 
+
+def _add_cache_ref(database: Database, cache_key: str, asset_id: str, project_id: str = "p1",
+                   size_bytes: int = 1024, kind: str = "waveform") -> None:
+    """登记一条派生缓存实体 + 该素材对它的引用行（真实结构：refs -> cache_key 外键）。"""
+    with database.connection() as db:
+        # 实体按 cache_key 唯一：多素材共享同一实体 ⇒ OR IGNORE（这正是要锁的语义）
+        db.execute(
+            "INSERT OR IGNORE INTO derived_media_cache(cache_key,asset_fingerprint,kind,"
+            "params_json,schema_version,toolchain_fingerprint,relative_path,size_bytes,status,"
+            "created_at,last_accessed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (cache_key, "sha256:" + cache_key, kind, "{}", 1, "tc", "p/" + cache_key,
+             size_bytes, "ready", "now", "now"),
+        )
+        db.execute(
+            "INSERT INTO derived_media_cache_refs(cache_key,project_id,asset_id,"
+            "created_at,last_accessed_at) VALUES (?,?,?,?,?)",
+            (cache_key, project_id, asset_id, "now", "now"),
+        )
+
+
+def test_delete_missing_asset_with_derived_cache_refs(tmp_path: Path) -> None:
+    """本任务动因原样：源文件缺失 + 属于某项目 + 无 jobs 行 + 有派生缓存引用。
+
+    derived_media_cache_refs.asset_id 对 assets 是 ON DELETE NO ACTION
+    （database_v18.py:27）⇒ 不清引用就撞 FK，被 delete_asset 的通用 except 报成
+    「素材被镜头需求或生成记录引用」——原因错且无出路。用户真实库里 15/18 个素材
+    都挂着引用行，这不是边缘情况。
+    """
+    database, timelines, assets, _ = _harness(tmp_path)
+    _mark_missing(database, ["v2"])
+    for index in range(3):
+        _add_cache_ref(database, f"sha256:v2-chunk-{index}", "v2")
+
+    with database.connection() as db:
+        assert db.execute(
+            "SELECT COUNT(*) FROM derived_media_cache_refs WHERE asset_id='v2'"
+        ).fetchone()[0] == 3
+
+    counts = assets.delete_asset("v2", remove_timeline_clips=True)
+
+    assert counts["removed_clips"] == 2
+    with database.connection() as db:
+        assert db.execute("SELECT COUNT(*) FROM assets WHERE id='v2'").fetchone()[0] == 0
+        assert db.execute(
+            "SELECT COUNT(*) FROM derived_media_cache_refs WHERE asset_id='v2'"
+        ).fetchone()[0] == 0
+    assert _clip_ids(timelines.get_state("p1")) == ["v1", "v3"]
+
+
+def test_delete_asset_keeps_derived_cache_entities_and_other_assets_refs(tmp_path: Path) -> None:
+    """只删该素材的引用行：缓存实体行与别的素材的引用必须原样保留。
+
+    实体按资产指纹寻址、可被多素材/多项目共享；本任务只清引用（可重算的授权行），
+    不回收实体行及其磁盘文件。若谁把删除写成清空 derived_media_cache，本用例立刻变红。
+    """
+    database, _, assets, _ = _harness(tmp_path)
+    _mark_missing(database, ["v2"])
+    _add_cache_ref(database, "sha256:shared", "v2")
+    _add_cache_ref(database, "sha256:shared", "v1")
+    _add_cache_ref(database, "sha256:v2-only", "v2")
+
+    assets.delete_asset("v2", remove_timeline_clips=True)
+
+    with database.connection() as db:
+        assert db.execute("SELECT COUNT(*) FROM derived_media_cache_refs WHERE asset_id='v2'"
+                          ).fetchone()[0] == 0
+        assert db.execute("SELECT COUNT(*) FROM derived_media_cache_refs WHERE asset_id='v1'"
+                          ).fetchone()[0] == 1
+        keys = {r[0] for r in db.execute("SELECT cache_key FROM derived_media_cache")}
+        assert keys == {"sha256:shared", "sha256:v2-only"}
+
+
+def test_derived_cache_refs_do_not_bypass_business_record_protection(tmp_path: Path) -> None:
+    """清引用不得顺带放宽业务保护：有非 proxy 作业行时仍须拒绝删除。
+
+    与 test_non_proxy_job_still_blocks_asset_delete 的区别是同时存在派生缓存引用
+    ——锁住「清了引用就以为能删」这个新引入的误判。
+    """
+    database, _, assets, _ = _harness(tmp_path)
+    _add_cache_ref(database, "sha256:v2-chunk", "v2")
+    _add_job(database, "job-export", "v2", "final_export")
+
+    with pytest.raises(DomainError) as exc:
+        assets.delete_asset("v2", remove_timeline_clips=True)
+
+    assert exc.value.code == "ASSET_IN_USE"
+    with database.connection() as db:
+        assert db.execute("SELECT COUNT(*) FROM assets WHERE id='v2'").fetchone()[0] == 1
+        assert db.execute("SELECT COUNT(*) FROM jobs WHERE id='job-export'").fetchone()[0] == 1
+
+
+def test_delete_asset_rolls_back_cache_refs_when_business_record_blocks(tmp_path: Path) -> None:
+    """拒绝删除时必须整体回滚：引用行不能被先删掉一半而留下半删状态。"""
+    database, _, assets, _ = _harness(tmp_path)
+    _add_cache_ref(database, "sha256:v2-chunk", "v2")
+    _add_job(database, "job-export", "v2", "final_export")
+
+    with pytest.raises(DomainError):
+        assets.delete_asset("v2", remove_timeline_clips=True)
+
+    with database.connection() as db:
+        assert db.execute(
+            "SELECT COUNT(*) FROM derived_media_cache_refs WHERE asset_id='v2'"
+        ).fetchone()[0] == 1, "被业务记录拒绝后引用行必须回滚"
+

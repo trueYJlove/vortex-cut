@@ -446,6 +446,15 @@ class ProjectAssetService:
                 # 只清 kind='proxy'：代理是可重算派生数据，与 beat_grids/cv_analyses 同口径；
                 # 其余 kind（生成记录/导出/转录/模型下载等）仍由下面的 FK 拒绝保护。
                 db.execute("DELETE FROM jobs WHERE asset_id=? AND kind='proxy'", (asset_id,))
+                # 派生缓存引用（代理/波形/PCM 分片）对 assets 同样是 NO ACTION
+                # （database_v18.py:27）⇒ 不清就撞 FK，被下面通用 except 报成
+                # 「素材被镜头需求或生成记录引用」——原因错且无出路，与 beat_grids /
+                # cv_analyses 是同一类缺陷。引用行只表示「该素材授权使用该缓存条目」，
+                # 属可重算派生数据，故同口径清理；**不删 derived_media_cache 实体行及其
+                # 磁盘文件**：实体按资产指纹寻址、可被多个素材/项目共享，且在用户库实测
+                # 该素材可独占回收的条目为 0（删除两个卡死素材的 119 条引用仅新增 1 个
+                # 12 字节孤儿条目），回收牵涉磁盘清理与并发，不在删除路径里做。
+                db.execute("DELETE FROM derived_media_cache_refs WHERE asset_id=?", (asset_id,))
                 # 关键帧外传预览对 assets 是 NO ACTION：不先断开引用，下面的
                 # DELETE 必被 FK 拒绝并被报成「素材被镜头需求或生成记录引用」
                 # ——原因错且无出路（做过一次关键帧预览的素材永远删不掉，
