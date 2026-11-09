@@ -152,3 +152,41 @@
 5. **保持真实状态可访问**：hover、focus、selected、disabled 与 destructive 都有一致语义，键盘焦点不能被视觉样式吞没。
 6. **以工具密度而非营销视觉为导向**：不使用发光渐变、装饰光晕、超大胶囊、层层嵌套卡片或为每个标签配置图标。
 7. **实现后按两档桌面窗口复核**：检查文字不缩小、底栏可达、滚动不横向溢出、双栏关系清晰，并验证真实业务状态不被预览状态替代。
+
+
+## 9. 结构族稿（第 2 期，原型未覆盖的 23 个弹窗）
+
+`index.html` 只定义了 5 个弹窗（导出、Provider、删除确认、剪辑手法、命令搜索），
+且这 5 个已全部实现并逐元素对齐。**剩余 23 个弹窗在原型里没有稿**，因此不能
+「照着改」——需要先按解剖结构出结构稿，否则取值只能靠猜，会重演 P217 记录里
+「高度/列数/对齐取值错误全部漏到真机」的教训。
+
+23 个弹窗按解剖结构只落在 5 个族：
+
+| 族 | 特征 | 成员 | 稿 |
+|---|---|---|---|
+| A 纯表单 | `fieldset` 分组、无分栏 | Settings、Cover、Shortcuts | 复用 Provider 稿 |
+| B 步骤流 | 步骤条 + 表单 | AgentSession、EditingGrammar、Worklist | 待出 |
+| **C 列表型** | 行列表 / 表格 / 状态行 | KeyframeReview、SemanticSearch、CaptionsProvider、AngleSync、Transcript、RevisionCompare、Render、CV-density、ProjectMgmt | **`prototype-list-family.html`（已出）** |
+| D 三步确认 | 表单 → 确认外传 → 结果 | AI 粗剪、AI 修改 | 待出 |
+| E 双栏工作台 | 页签 + 左参数 + 右预览 | MediaGen、ShotWorkbench、ProviderImage、ExportBatch、三个 ShotRequirement | 复用剪辑手法稿 |
+
+### 9.1 C 族契约（`prototype-list-family.html`）
+
+三种形态各自固定，不允许按弹窗重新发明：
+
+| 形态 | 用于 | 关键取值（稿内实测） |
+|---|---|---|
+| 检索 + 行列表 | KeyframeReview、SemanticSearch、Transcript、RevisionCompare | 行内边距 `9px 12px`、行间距 `6px`、行高 63 |
+| 数据表格 | AngleSync | 表头 10.5px、单元格 `9px 8px`、行高 39、数字列右对齐 + `tabular-nums` |
+| 状态行 + 表单 | CaptionsProvider、Render、CV-density、ProjectMgmt | 状态行 `11px 13px`、下边距 14、表单 14px 网格 |
+
+共同约束：
+
+- 弹窗骨架沿用 §4（header 86 / footer 65 / 内容区唯一滚动）。
+- 选中态**不能只靠颜色**：行选中同时有强调色描边（§3.1 既有要求）。
+- 需要「左列表右详情」时才升到 860 档，左列 240、gap 24，与工作台同一契约；
+  900px 以下堆叠为单栏。
+- 空态 / 加载 / 错误三种状态必须占据与正常态相同的内容区高度区间，避免切换时
+  弹窗高度跳变（Provider 开关那次「反复开关整窗上下跳」即同类问题）；
+  空态文案必须给出下一步动作，不能只说「无数据」。
