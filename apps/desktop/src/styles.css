@@ -3599,7 +3599,18 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
    背景：Core 的 delete() 对被审计表引用的 Provider fail-closed（审计链不可
    断），正确出路是「删除密钥 + 停用」。但此前 UI 没有停用入口，
    这条出路是断的。此处补齐：停用后 enabled=false，AI 功能下拉按
-   enabled 过滤，历史记录原样保留。                                     */
+   enabled 过滤，历史记录原样保留。
+
+   开关必须逐项压过 .modal button —— 它是一条给普通按钮用的宽规则：
+   · min-height  .modal button (0,1,1) 声明 min-height:var(--dlg-ctl-h)=34px，
+     height:22px 无从生效，轨高被钳成 34px。38×34 的胶囊配 999px 圆角看着
+     就是个圆环，16px 圆钮被顶到上沿（实测 knobTop 3 / knobBottom 15）。
+   · hover      .modal button:hover:not(:disabled) (0,3,1) 高于 .modal .switch.on
+     (0,3,0)：开启态薄荷青底在指针移上去的瞬间消失，且 border 被打成 0，
+     圆钮同时横移 1px（knobL 19→18、knobTop 3→2）。
+   因此：min-height 写在 .modal .switch (0,2,0) 自身；两条 :hover 分别以
+   (0,4,0) / (0,5,0) 重述 background+border。改这段前先读
+   apps/desktop/tests/provider-switch-style.test.ts。 */
 .modal .enabled-row {
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
   padding: 11px 13px;
@@ -3612,7 +3623,7 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 .modal .enabled-row .field-hint { color: var(--dlg-text-3); font-size: 10.5px; line-height: 1.55; }
 
 .modal .switch {
-  flex: none; width: 38px; height: 22px; padding: 0;
+  flex: none; width: 38px; height: 22px; min-height: 22px; padding: 0;
   border-radius: 999px; border: 1px solid var(--dlg-line);
   background: var(--ctl-bg); position: relative; cursor: pointer;
   transition: background .15s, border-color .15s;
@@ -3625,5 +3636,9 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 }
 .modal .switch.on { background: var(--dlg-accent-dim); border-color: rgba(53, 214, 174, .45); }
 .modal .switch.on > span { transform: translateX(16px); background: var(--dlg-primary); }
+/* 悬停态在开关自身重述 background + border：缺任一条，
+   .modal button:hover:not(:disabled) (0,3,1) 就会清掉开启态底色、抹掉边框。 */
+.modal .switch:hover:not(:disabled) { background: var(--ctl-bg); border: 1px solid var(--dlg-line); }
+.modal .switch.on:hover:not(:disabled) { background: var(--dlg-accent-dim); border-color: rgba(53, 214, 174, .45); }
 .modal .switch:disabled { opacity: .5; cursor: not-allowed; }
 .modal .switch:focus-visible { outline: 2px solid var(--dlg-primary); outline-offset: 2px; }
