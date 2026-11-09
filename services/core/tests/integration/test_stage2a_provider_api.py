@@ -171,8 +171,14 @@ def _wait(client: TestClient, ui: dict[str, str], job_id: str) -> dict:
 def test_provider_delete_api_removes_unreferenced_and_refuses_referenced(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """P67：DELETE /api/v1/providers/{id}——未引用 204 且列表消失；
-    被调用历史引用 409 PROVIDER_IN_USE（行保持原样）；未知 404。"""
+    """DELETE /api/v1/providers/{id}——未引用与被引用都 204 且列表消失；未知 404。
+
+    **v42 语义变更（2026-11-09 用户裁决）**：旧断言要求「被调用历史引用 ⇒ 409
+    PROVIDER_IN_USE」，该行为已推翻——用户指出「我用的所有软件添加的 provider
+    都是可以删除的」。审计行自带 provider_name/model 快照，删除只把指针置空
+    （ON DELETE SET NULL），审计链不断。本用例守新契约：两种 Provider 都删得掉，
+    且被引用者删除后其审计行仍在、指针为空。
+    """
     monkeypatch.setenv("AIVS_ADMIN_TOKEN", "admin-del")
     app = create_app(Settings(data_dir=tmp_path, ffmpeg=Path("missing"), ffprobe=Path("missing")))
     client = TestClient(app)
@@ -212,9 +218,21 @@ def test_provider_delete_api_removes_unreferenced_and_refuses_referenced(
         ]
         assert unreferenced not in remaining and referenced in remaining
 
-        conflict = client.delete(f"/api/v1/providers/{referenced}", headers=ui)
-        assert conflict.status_code == 409
-        assert conflict.json()["error"]["code"] == "PROVIDER_IN_USE"
+        # v42：被历史引用同样可删（旧语义 409 PROVIDER_IN_USE 已推翻）
+        assert client.delete(f"/api/v1/providers/{referenced}", headers=ui).status_code == 204
+        remaining_after = [
+            item["provider_config_id"]
+            for item in client.get("/api/v1/providers", headers=ui).json()["items"]
+        ]
+        assert unreferenced not in remaining_after and referenced not in remaining_after
+        # 审计行保留，指针被 SET NULL
+        with app.state.core.db.connection() as conn:
+            audit = conn.execute(
+                "SELECT provider_config_id,provider_name,model FROM provider_invocations WHERE id='inv_del'"
+            ).fetchone()
+        assert audit is not None, "删除 Provider 不得连带删除审计行"
+        assert audit["provider_config_id"] is None
+        assert audit["provider_name"] == "p" and audit["model"] == "m"
 
         missing = client.delete("/api/v1/providers/provider_none", headers=ui)
         assert missing.status_code == 404

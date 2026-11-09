@@ -39,6 +39,7 @@ from .database_v38 import V38_SQL
 from .database_v39 import V39_SQL
 from .database_v40 import V40_SQL
 from .database_v41 import V41_SQL
+from .database_v42 import V42_SQL
 from .performance import measured
 
 
@@ -91,6 +92,7 @@ V38_VERSION = "v38"
 V39_VERSION = "v39"
 V40_VERSION = "v40"
 V41_VERSION = "v41"
+V42_VERSION = "v42"
 V1_SQL = """
 CREATE TABLE IF NOT EXISTS media_inputs (
   id TEXT PRIMARY KEY, path TEXT NOT NULL, display_name TEXT NOT NULL,
@@ -966,6 +968,7 @@ MIGRATIONS: dict[str, str] = {
     V39_VERSION: V39_SQL,
     V40_VERSION: V40_SQL,
     V41_VERSION: V41_SQL,
+    V42_VERSION: V42_SQL,
 }
 
 
@@ -1009,7 +1012,7 @@ class Database:
                     continue
                 self.last_backup = self._backup()
                 try:
-                    if version in {V13_VERSION, V14_VERSION}:
+                    if version in {V13_VERSION, V14_VERSION, V42_VERSION}:
                         self._apply_rebuild(db, version, sql, checksum)
                         continue
                     db.execute("BEGIN")

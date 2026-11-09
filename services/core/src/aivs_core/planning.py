@@ -229,9 +229,19 @@ class ProviderRepository:
             )
         return self.get(provider_id)
 
-    # 引用 provider_configs 的历史表（外发预览/生成/调用审计，ADR-0003 D2 不可变）。
-    # 任何一张有行即 fail-closed：审计链不得静默断链（对齐 P51 转录删除语义）。
-    _REFERENCING_TABLES = (
+    # 曾被当作「历史引用 ⇒ 不可删」的拦截清单。v42 之后取消拦截，原因见 delete()。
+    #
+    # 保留这个名字与内容是有意的：它现在只用于**回归锁**（证明删除路径不再读它），
+    # 以及记录这段判断为什么被推翻。原注释里的两处「schema 推导回归锁抓出的遗漏」
+    # 说明了当年漏登记的代价——是**失败形态错了**（撞裸 FK 变 500 而非可操作错误）。
+    # 而 v42 之后的正确失败形态是「根本不该失败」。
+    #
+    # 一处独立缺陷在本次核对中被发现并修掉：provider_image_invocations /
+    # provider_image_request_profiles 的外键指向 **image_provider_configs**，
+    # 不是 provider_configs。它们曾被人手加进这份清单，于是删除文本 Provider 时
+    # 会去查一张不相干的表——查不到行就静默放过（本次误判的来源），
+    # 查到了则拦错对象。已移出。
+    _LEGACY_REFERENCING_TABLES = (
         "candidate_generations",
         "egress_previews",
         "provider_invocations",
@@ -242,15 +252,6 @@ class ProviderRepository:
         "agent_session_egress_previews",
         "captions_provider_egress_previews",
         "captions_provider_generations",
-        # 图像 Provider 域（v13/v14）：schema 推导回归锁抓出的遗漏——
-        # 调用审计与请求档案同样引用 provider_configs。
-        "provider_image_invocations",
-        "provider_image_request_profiles",
-        # W3.3 Layer 2 关键帧域（v40）：同一把回归锁再次抓出的遗漏——
-        # v40 加了三张引用 provider_configs 的表，却没登记进本清单。
-        # 漏登记的后果不只是测试红，而是**删除路径的失败形态错了**：删一个已被
-        # 关键帧外传预览/打标结果引用的 Provider 时不会得到可操作的
-        # PROVIDER_IN_USE，而是直接撞 FK 变成 500 / 误导文案（P67 / P102 同族）。
         "keyframe_egress_previews",
         "keyframe_generations",
         "asset_frame_tags",
@@ -259,9 +260,24 @@ class ProviderRepository:
     def delete(self, provider_id: str) -> None:
         """删除 Provider 配置（含内存库中的密钥）。
 
-        仅允许删除从未进入外发/生成历史的 Provider：被任一审计表引用时
-        PROVIDER_IN_USE 拒绝——此时出路是「删除密钥 + 停用」（密钥删除
-        已有独立入口，UI 按 enabled 过滤后停用条目不再出现在 AI 功能里）。
+        **v42 起不再被历史引用拦截。** 用户裁决（2026-11-09）：「不能删除无论如何
+        都是有问题的，我用的所有软件添加的 provider 都是可以删除的。」
+
+        为什么删得掉又不断审计链——审计行自带身份，不依赖 provider_configs 那一行：
+
+        * provider_invocations 自带 provider_name / model；
+        * *_egress_previews 自带 provider_snapshot_json / provider_config_sha256。
+
+        真实库实测 28 条历史行 **0 行缺身份**。v42 把 13 张表的 provider_config_id
+        改为可空 + ON DELETE SET NULL，删除只把指针置空，行内字段一个不动，
+        「谁在何时把什么发给了哪个模型、花了多少钱」依然可查。
+
+        不可变触发器保护的是**审计行不可改写**，不是**配置行不可删除**——两者不冲突。
+        判据沿用本仓既有三次同型修复（1cf5cab / 6d3bbf2 / ce6ceee）：
+        记录本身自足，就不该拦住删除。
+
+        历史行的可追溯性由行内快照保证，而不是由这里的外键保证；因此本方法不再
+        做存在性以外的任何前置检查。
         """
         with self.db.connection() as db:
             row = db.execute(
@@ -269,16 +285,7 @@ class ProviderRepository:
             ).fetchone()
             if not row:
                 raise DomainError("PROVIDER_NOT_FOUND", "Provider 不存在")
-            for table in self._REFERENCING_TABLES:
-                referenced = db.execute(
-                    f"SELECT 1 FROM {table} WHERE provider_config_id=? LIMIT 1",
-                    (provider_id,),
-                ).fetchone()
-                if referenced:
-                    raise DomainError(
-                        "PROVIDER_IN_USE",
-                        "Provider 已被外发/生成历史引用，不可删除；可删除密钥并停用",
-                    )
+            # ON DELETE SET NULL 在 13 张审计表上把指针置空，行本身保留。
             db.execute("DELETE FROM provider_configs WHERE id=?", (provider_id,))
         # 行删除成功后同步清内存库（加密文件条目由 Electron 侧 removeProviderSecret 处理）。
         self.vault.delete(provider_id)

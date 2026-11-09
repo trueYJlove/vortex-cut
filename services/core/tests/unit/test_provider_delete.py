@@ -1,10 +1,24 @@
-"""Provider 配置删除（P67，2026-10-09 用户实测缺陷）。
+"""Provider 配置删除（P67 2026-10-09 → v42 2026-11-09 语义变更）。
 
-废弃 Provider 条目此前全链路无删除能力：Core 无 DELETE 路由、UI 无入口，
-条目一旦创建便永久留在所有 Provider 下拉里。本文件锁定删除语义：
-- 未被历史引用 → 硬删（行 + 内存库密钥）；
-- 被任一外发/生成/调用审计表引用 → fail-closed PROVIDER_IN_USE
-  （审计链不可静默断链，对齐 P51 转录删除语义；出路是删密钥 + 停用）。
+**v42 起删除不再被历史引用拦截。** 用户裁决（2026-11-09）：
+
+    不能删除无论如何都是有问题的，我用的所有软件添加的 provider 都是可以删除的。
+
+旧语义（本文件曾锁定）：被任一外发/生成/调用审计表引用 → fail-closed
+PROVIDER_IN_USE，出路是「删密钥 + 停用」。该语义被**推翻**，因为它把
+「审计行不可改写」误当成「配置行不可删除」，而审计行其实自带身份：
+
+  * provider_invocations 自带 provider_name / model；
+  * *_egress_previews 自带 provider_snapshot_json / provider_config_sha256。
+
+真实库实测 28 条历史行 **0 行缺身份**。v42 把 13 张表的 provider_config_id
+改为可空 + ON DELETE SET NULL，删除只把指针置空、行内字段一个不动，
+故「谁在何时把什么发给了哪个模型、花了多少钱」依然可查。
+
+**本文件现在的职责**：
+1. 锁住新语义——有引用也能删，且删完审计行仍在、身份快照仍可读；
+2. 锁住 v42 迁移的覆盖面——schema 里每张含 provider_config_id 的表都必须
+   是 ON DELETE SET NULL，否则删除会在运行期撞裸 FK（本仓 P67/P102 同族）。
 """
 from __future__ import annotations
 
@@ -65,11 +79,13 @@ def test_delete_removes_row_and_vault_entry(tmp_path: Path) -> None:
     assert raised.value.code == "PROVIDER_NOT_FOUND"
 
 
-def test_delete_fails_closed_when_referenced(tmp_path: Path) -> None:
-    """被审计表（以 provider_invocations 为代表）引用 → PROVIDER_IN_USE。
+def test_delete_succeeds_when_referenced_by_invocation(tmp_path: Path) -> None:
+    """被 provider_invocations 引用**仍可删除**，且审计行原样保留。
 
-    行与密钥都保持原样；各引用表的行为由同一段循环保证，清单覆盖面
-    由下方 schema 推导回归锁独立钉死。
+    这是 v42 推翻的核心行为。用例三重断言，缺一不可：
+      · 删除本身成功（用户诉求）；
+      · 审计行数不变（一条都不能少）；
+      · 指针置空后 identity 快照仍可读（审计链未断）。
     """
     repo, db, vault = _repo(tmp_path)
     provider_id = _seed(repo, vault)
@@ -79,33 +95,57 @@ def test_delete_fails_closed_when_referenced(tmp_path: Path) -> None:
             "(id,provider_config_id,capability,provider_name,model,"
             "prompt_template_version,output_schema_version,input_sha256,status,created_at)"
             " VALUES (?,?,?,?,?,?,?,?,?,'n')",
-            ("inv_1", provider_id, "cap", "p", "m", "1", "1", "sha256:" + "a" * 64, "succeeded"),
+            ("inv_1", provider_id, "cap", "审计用名称", "audit-model", "1", "1",
+             "sha256:" + "a" * 64, "succeeded"),
         )
+        before = conn.execute("SELECT COUNT(*) FROM provider_invocations").fetchone()[0]
 
-    with pytest.raises(DomainError) as raised:
-        repo.delete(provider_id)
-    assert raised.value.code == "PROVIDER_IN_USE"
-    assert repo.get(provider_id)["provider_config_id"] == provider_id
-    assert vault.status(provider_id) == "configured"
+    repo.delete(provider_id)
+
+    with db.connection() as conn:
+        after = conn.execute("SELECT COUNT(*) FROM provider_invocations").fetchone()[0]
+        row = conn.execute(
+            "SELECT provider_config_id,provider_name,model FROM provider_invocations WHERE id='inv_1'"
+        ).fetchone()
+    assert after == before, "删除 Provider 不得连带删除审计行"
+    assert row["provider_config_id"] is None, "外键应被 ON DELETE SET NULL 置空"
+    assert row["provider_name"] == "审计用名称"
+    assert row["model"] == "audit-model"
+    assert vault.status(provider_id) == "missing"
 
 
-def test_referencing_tables_cover_schema(tmp_path: Path) -> None:
-    """回归锁：schema 中所有含 provider_config_id 列的表必须在删除检查清单里。
+def test_all_provider_referencing_tables_use_set_null(tmp_path: Path) -> None:
+    """回归锁：schema 中每张含 provider_config_id 且外键指向 provider_configs 的表，
+    都必须是 ON DELETE SET NULL。
 
-    从 sqlite_master 推导而非硬编码对拍（P45 教训：硬编码清单会腐烂）——
-    未来迁移新增引用表而漏更 _REFERENCING_TABLES → 删除检查出现旁路 → 红。
+    从 sqlite_master / PRAGMA 推导而非硬编码对拍（P45 教训：硬编码清单会腐烂）。
+    未来迁移若新增引用表却忘了 SET NULL → 删除时会在运行期撞裸 FK，
+    失败形态变成 500 / 误导文案（P67 / P102 同族）→ 本用例变红。
+
+    **方向已反转**：v42 之前它检查「表在拦截清单里」，现在检查「表已放行」。
+    只改断言不改推导——推导本身是这条锁的价值所在。
     """
     repo, db, _vault = _repo(tmp_path)
     with db.connection() as conn:
         tables = [row[0] for row in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table'"
         ).fetchall()]
-        referencing = {
-            name for name in tables
-            if "provider_config_id" in {row[1] for row in conn.execute(f"PRAGMA table_info({name})")}
-        }
-    missing = referencing - set(repo._REFERENCING_TABLES)
-    assert not missing, f"这些表含 provider_config_id 但不在删除检查清单：{sorted(missing)}"
+        offenders: dict[str, str] = {}
+        checked = 0
+        for name in tables:
+            fks = [r for r in conn.execute(f"PRAGMA foreign_key_list({name})")
+                   if r[2] == "provider_configs"]
+            if not fks:
+                continue
+            checked += 1
+            rule = fks[0][6]
+            if rule != "SET NULL":
+                offenders[name] = rule
+    assert checked >= 13, f"应至少有 13 张表引用 provider_configs，实际 {checked}"
+    assert not offenders, (
+        "这些表引用 provider_configs 但不是 ON DELETE SET NULL，"
+        f"删除会在运行期撞裸 FK：{offenders}"
+    )
 
 
 def test_delete_unknown_provider_is_not_found(tmp_path: Path) -> None:
@@ -126,13 +166,10 @@ def test_delete_keeps_other_providers_intact(tmp_path: Path) -> None:
     assert vault.status(keep_id) == "configured"
 
 
-def test_delete_rejects_provider_referenced_by_keyframe_preview(tmp_path: Path) -> None:
-    """行为级：**关键帧外传预览**引用时必须是 PROVIDER_IN_USE，而不是裸 FK 错误。
+def test_delete_succeeds_when_referenced_by_keyframe_preview(tmp_path: Path) -> None:
+    """行为级：**关键帧外传预览**引用时同样可删，且预览行保留、指针置空。
 
-    与 test_delete_fails_closed_when_referenced 同族，但覆盖 v40 新加的表。
-    schema 推导回归锁只证明「名字在清单里」，本用例证明「名字在清单里
-    **确实产生正确的失败形态**」。二者不可互相替代：清单对了但 delete()
-    的循环没查它，锁仍然绿。
+    覆盖 v40 新增的表——证明 SET NULL 不只对老表生效。
     """
     repo, db, vault = _repo(tmp_path)
     provider_id = _seed(repo, vault)
@@ -148,22 +185,23 @@ def test_delete_rejects_provider_referenced_by_keyframe_preview(tmp_path: Path) 
              "[]", "[]", "interval_only", 0, 0, now, now, now),
         )
 
-    with pytest.raises(DomainError) as raised:
-        repo.delete(provider_id)
-    assert raised.value.code == "PROVIDER_IN_USE"
-    assert repo.get(provider_id)["provider_config_id"] == provider_id
-    assert vault.status(provider_id) == "configured"
+    repo.delete(provider_id)
+
+    with db.connection() as conn:
+        row = conn.execute(
+            "SELECT provider_config_id,payload_sha256 FROM keyframe_egress_previews WHERE id='kp_1'"
+        ).fetchone()
+    assert row is not None, "外发预览行必须保留"
+    assert row["provider_config_id"] is None
+    assert row["payload_sha256"] == "sha256:" + "a" * 64
 
 
-def test_delete_rejects_provider_referenced_only_by_keyframe_generation(
-    tmp_path: Path,
-) -> None:
-    """行为级：**只有生成记录**引用时也必须 PROVIDER_IN_USE。
+def test_delete_succeeds_when_only_generation_references(tmp_path: Path) -> None:
+    """行为级：**只有生成记录**引用时也可删。
 
-    构造上让 preview 行属于**另一个** Provider，于是「被查到」的唯一来源
+    构造上让 preview 行属于**另一个** Provider，于是「被置空」的唯一来源
     就是 keyframe_generations——否则本用例会被 previews 那条路径顺带满足，
-    测不出 generations 这一条是否真的在清单里（"只登记了 previews 也算过"
-    的假绿）。
+    测不出 generations 这一条是否真的也已 SET NULL（假绿）。
     """
     repo, db, vault = _repo(tmp_path)
     target_id = _seed(repo, vault, "target")
@@ -193,17 +231,43 @@ def test_delete_rejects_provider_referenced_only_by_keyframe_generation(
              "sha256:" + "b" * 64, now),
         )
 
-    with pytest.raises(DomainError) as raised:
-        repo.delete(target_id)
-    assert raised.value.code == "PROVIDER_IN_USE"
+    repo.delete(target_id)
 
-    # 反证 1：owner 被 kp_2 引用，删它也必须是 PROVIDER_IN_USE——
-    # 证明 target 的红不是「查询把两行串了」的偶然结果，而是各行按其引用判定。
-    with pytest.raises(DomainError) as owner_raised:
-        repo.delete(owner_id)
-    assert owner_raised.value.code == "PROVIDER_IN_USE"
+    with db.connection() as conn:
+        gen = conn.execute(
+            "SELECT provider_config_id FROM keyframe_generations WHERE id='kg_2'"
+        ).fetchone()
+        preview = conn.execute(
+            "SELECT provider_config_id FROM keyframe_egress_previews WHERE id='kp_2'"
+        ).fetchone()
+    assert gen is not None and gen["provider_config_id"] is None
+    # 反证：没有删到别的 Provider 的引用行
+    assert preview is not None and preview["provider_config_id"] == owner_id
 
-    # 反证 2：真正无引用的 Provider 仍可删除——证明上面两条红不是
-    # 「凡是带关键帧行的库全拒」这种过度拒绝。
-    free_id = _seed(repo, vault, "free")
-    repo.delete(free_id)
+
+def test_legacy_blocking_list_no_longer_gates_delete(tmp_path: Path) -> None:
+    """回归锁：delete() 不再读那份旧的拦截清单。
+
+    v42 之前 _REFERENCING_TABLES 是删除的判据；现在它只剩历史记录价值。
+    若有人把拦截逻辑加回去，本用例立刻变红——而「加回去」正是这次变更
+    最可能被无意回滚的方式（它看起来像一道安全防线）。
+    """
+    repo, db, vault = _repo(tmp_path)
+    provider_id = _seed(repo, vault)
+    with db.connection() as conn:
+        conn.execute(
+            "INSERT INTO provider_invocations"
+            "(id,provider_config_id,capability,provider_name,model,"
+            "prompt_template_version,output_schema_version,input_sha256,status,created_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,'n')",
+            ("inv_2", provider_id, "cap", "p", "m", "1", "1", "sha256:" + "a" * 64, "failed"),
+        )
+    # 该表确实在旧清单里（证明构造有效）
+    assert "provider_invocations" in repo._LEGACY_REFERENCING_TABLES
+
+    repo.delete(provider_id)
+
+    with db.connection() as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM provider_invocations WHERE id='inv_2'"
+        ).fetchone()[0] == 1

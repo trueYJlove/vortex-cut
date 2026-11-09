@@ -11,13 +11,29 @@ from aivs_core.database import MIGRATIONS, V15_SQL, Database, MigrationError
 
 
 def _seed_v14(path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
+    """把库推进到 **v14 状态**：只应用 v1..v14。
+
+    原实现是「从 MIGRATIONS 里删掉 v15」——那等于假设「v15 是最后一版」。
+    这个假设在 v42 落地后失效：删掉 v15 后 v16..v42 照跑，于是 v16 建的触发器
+    引用了 v15 本该创建的 shot_requirement_image_adoptions（表不存在），
+    v42 重建表触发 schema 重解析时炸掉。
+
+    改为按版本号前缀过滤，语义与原意一致（构造 v14 快照），且不再依赖
+    「谁是最后一版」这个易腐假设。
+    """
     import aivs_core.database as database_module
 
     original = database_module.MIGRATIONS
     monkeypatch.setattr(
         database_module,
         "MIGRATIONS",
-        {key: value for key, value in original.items() if key != "v15"},
+        {
+            key: value
+            for key, value in original.items()
+            if key.startswith("v")
+            and key[1:].isdigit()
+            and int(key[1:]) <= 14
+        },
     )
     Database(path).initialize()
     with sqlite3.connect(path) as sql:
@@ -313,7 +329,17 @@ def test_v14_to_v15_is_append_only_and_preserves_checksums(
         history = dict(
             sql.execute("SELECT version,checksum FROM schema_migrations WHERE version<>'v15'")
         )
-        assert history == old_checksums
+        # 断言的是「v14 已有的版本，其校验和不得被后续迁移改写」（append-only 的本质）。
+        # 不能直接比全集：v42 之后 history 还会包含 v16..v42 这些**新增**版本，
+        # 它们本来就该出现。只按 old_checksums 的键逐一比对，新增项不参与。
+        for version, checksum in old_checksums.items():
+            assert history.get(version) == checksum, (
+                f"迁移 {version} 的校验和被改写了：{history.get(version)} != {checksum}"
+            )
+        assert set(old_checksums) <= set(history), "既有迁移版本不得消失"
+        assert "v15" in {
+            row[0] for row in sql.execute("SELECT version FROM schema_migrations")
+        }
         assert (
             sql.execute("SELECT checksum FROM schema_migrations WHERE version='v15'").fetchone()[0]
             == hashlib.sha256(V15_SQL.encode()).hexdigest()
