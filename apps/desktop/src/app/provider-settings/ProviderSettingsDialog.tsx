@@ -46,6 +46,8 @@ export function ProviderSettingsDialog({
   const createSecretRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
+  // 开关专用反馈：只进 sr-only live region，不参与内容区布局（见 toggleEnabled）。
+  const [toggleNotice, setToggleNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<ProviderConfig | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -87,7 +89,7 @@ export function ProviderSettingsDialog({
     if (!window.desktop.createProvider) { setError("创建 Provider 不可用。"); return; }
     const secret = createSecretRef.current?.value.trim() ?? "";
     if (createSecretRef.current) createSecretRef.current.value = "";
-    setBusy(true); setError(""); setStatus("");
+    setBusy(true); setError(""); setStatus(""); setToggleNotice("");
     try {
       const created = await window.desktop.createProvider({
         kind: "openai_compatible_text",
@@ -126,7 +128,7 @@ export function ProviderSettingsDialog({
     const input = secretRef.current;
     const secret = input?.value ?? "";
     if (!secret) { setError("请先输入密钥。"); return; }
-    setBusy(true); setError(""); setStatus("");
+    setBusy(true); setError(""); setStatus(""); setToggleNotice("");
     try {
       await window.desktop.setProviderSecret({ provider_config_id: selectedId, secret });
       if (input) input.value = "";
@@ -161,7 +163,7 @@ export function ProviderSettingsDialog({
 
   const deleteSecret = async () => {
     if (!window.desktop.deleteProviderSecret || !selectedId) return;
-    setBusy(true); setError(""); setStatus("");
+    setBusy(true); setError(""); setStatus(""); setToggleNotice("");
     try {
       await window.desktop.deleteProviderSecret(selectedId);
       publish(items.map(item => item.provider_config_id === selectedId ? { ...item, credential_status: "missing" } : item));
@@ -202,7 +204,7 @@ export function ProviderSettingsDialog({
 
   const testConnection = async () => {
     if (!window.desktop.testProvider || !selectedId) return;
-    setBusy(true); setError(""); setStatus("");
+    setBusy(true); setError(""); setStatus(""); setToggleNotice("");
     try {
       await window.desktop.testProvider(selectedId);
       setStatus("连接测试通过。仍可在具体 AI 功能中测试兼容性。");
@@ -229,7 +231,7 @@ export function ProviderSettingsDialog({
   const toggleEnabled = async () => {
     if (!selected) return;
     if (!window.desktop.updateProvider) { setError("停用功能不可用。"); return; }
-    setBusy(true); setError(""); setStatus("");
+    setBusy(true); setError(""); setStatus(""); setToggleNotice("");
     try {
       const updated = await window.desktop.updateProvider({ provider_config_id: selected.provider_config_id, patch: { enabled: !selected.enabled } });
       // 必须先更新本地 items，否则 selected 仍取旧值、开关视觉不跟随实际状态
@@ -237,7 +239,10 @@ export function ProviderSettingsDialog({
       const nextItems = items.map(item => item.provider_config_id === updated.provider_config_id ? updated : item);
       setItems(nextItems);
       onProvidersChange(nextItems);
-      setStatus(updated.enabled ? "已启用：该 Provider 会重新出现在 AI 功能中。" : "已停用：该 Provider 不再出现在 AI 功能中，历史记录保留。");
+      // 开关反馈不进内容区：提示条插在首位会把整张表单往下推（实测 58px），
+      // 反复开关就在 0 / 44px 之间来回跳，整窗上下抖。改为只写常驻的
+      // sr-only live region——读屏照常播报，布局零影响。
+      setToggleNotice(updated.enabled ? "已启用：该 Provider 会重新出现在 AI 功能中。" : "已停用：该 Provider 不再出现在 AI 功能中，历史记录保留。");
     } catch (caught) {
       setError(safeErrorMessage(caught, "切换启用状态失败。"));
     } finally { setBusy(false); }
@@ -263,6 +268,12 @@ export function ProviderSettingsDialog({
       <p className="confirm-object">确定要删除「<strong>{pendingDelete.display_name}</strong>」吗？</p>
       <div className="warning"><svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" /></svg><span>该 Provider 的配置与本机加密存储中的密钥将一并删除，此操作不可撤销。若其已被外发/生成历史引用，删除会被拒绝——此时请改为删除密钥并停用。</span></div>
     </Dialog>}
+      {/* 开关反馈不进入内容区布局：提示条是内容区首个子元素，插入时会把整张
+          表单往下推（实测 58px），反复开关就在 0 / 44px 之间来回跳，整窗上下抖。
+          关掉的只是"重复提示"——开关自身的开/关态，加上下方那行静态说明
+          （"停用后不再出现在…；历史记录保留"）已经把后果说全了。
+          这里保留一个常驻 live region：读屏仍能听到状态变化，但它对布局零影响。 */}
+      <span className="sr-only" aria-live="polite" aria-atomic="true">{toggleNotice}</span>
       {error && <div className="alert alert-danger" role="alert"><svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" /></svg><div><strong>无法完成操作</strong><span>{error}</span></div></div>}
       {status && <div className="alert alert-ok" role="status"><div><span>{status}</span></div></div>}
       {loading && <p className="ps-hint">正在加载…</p>}

@@ -268,6 +268,47 @@ describe("Provider 停用开关", () => {
     expect(await screen.findByText(/已停用：该 Provider 不再出现在 AI 功能中，历史记录保留/)).toBeInTheDocument();
   });
 
+  /**
+   * 反复开关不能让弹窗抖动（用户实测：观感很差）。
+   *
+   * 失效方式：开关反馈走的是【内容区首个子元素的提示条】。提示条一出现就把整张
+   * 表单往下推（Chromium 实测 58px），关掉又收回去——反复开关就是整窗上下跳。
+   * jsdom 不做布局计算（getBoundingClientRect 恒为 0），所以这里不断言像素，
+   * 只断言根因：内容区首个子节点不随开关状态改变（提示条不得插在流内）。
+   */
+  it("反复开关不改变内容区首个子节点（提示条不入流）", async () => {
+    const { desktop } = setup([provider()]);
+    const dialog = await screen.findByRole("dialog", { name: "Provider 设置" });
+    const body = dialog.querySelector(".ps-body")!;
+    const firstBefore = body.firstElementChild;
+    const tagBefore = firstBefore?.tagName;
+    const classBefore = firstBefore?.className;
+
+    for (let i = 0; i < 3; i += 1) {
+      // 每次切换后 enabled 在 true/false 之间翻转，名字随之变为「停用/启用该 Provider」
+      const toggle = within(dialog).getByRole("switch");
+      const expected = toggle.getAttribute("aria-checked") === "true" ? "false" : "true";
+      fireEvent.click(toggle);
+      await waitFor(() => expect(within(dialog).getByRole("switch")).toHaveAttribute("aria-checked", expected));
+      // 每次切换后，内容区首个子节点必须仍是同一个节点、同一类名
+      expect(body.firstElementChild?.tagName, "开关反馈插到了内容区首个位置，会把表单整体推下").toBe(tagBefore);
+      expect(body.firstElementChild?.className, "开关反馈插到了内容区首个位置，会把表单整体推下").toBe(classBefore);
+    }
+    expect(desktop.updateProvider).toHaveBeenCalledTimes(3);
+  });
+
+  it("开关状态变化仍会写进常驻 live region（读屏可播报）", async () => {
+    setup([provider()]);
+    const toggle = await screen.findByRole("switch", { name: "停用该 Provider" });
+    fireEvent.click(toggle);
+    const live = await waitFor(() => {
+      const node = document.querySelector('.ps-body [aria-live="polite"]');
+      expect(node).not.toBeNull();
+      return node!;
+    });
+    await waitFor(() => expect(live.textContent).toMatch(/已停用：该 Provider 不再出现在 AI 功能中/));
+  });
+
   it("删除被拒时给出可操作的两步指引", async () => {
     const { desktop } = setup([provider()]);
     (desktop.deleteProvider as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("PROVIDER_IN_USE"));
