@@ -3697,3 +3697,62 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 .modal .switch.on:hover:not(:disabled) { background: var(--dlg-accent-dim); border-color: rgba(53, 214, 174, .45); }
 .modal .switch:disabled { opacity: .5; cursor: not-allowed; }
 .modal .switch:focus-visible { outline: 2px solid var(--dlg-primary); outline-offset: 2px; }
+
+/* ── C 族「列表型」· 形态 1（关键帧外传审阅）─────────────────────
+   结构稿：docs/ui-mockups/dialog-system-v2/prototype-list-family.html
+   既往问题：.keyframe-frame-list 等类名从来没有专属样式，实际用的是浏览器
+   默认 <ul>（圆点 + 缩进），行内元素靠默认排版挤在一起。此处按稿落地。
+
+   三条不能用眼睛判断、只能量出来的约束：
+   1. 徽章列固定 62px —— 否则「待外传/已移除」宽度不同会把按钮推着左右跑；
+   2. 行内三列对齐用 flex + 固定列宽，不用 grid 自动列；
+   3. 行高由内容撑开（内边距 9px 12px），不写死 height。 */
+.modal.keyframe-review .kf-toolbar {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 12px;
+  color: var(--dlg-text-3); font-size: var(--dlg-fs-caption);
+}
+.modal.keyframe-review .kf-toolbar-note strong { color: var(--dlg-text-2); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.modal.keyframe-review .kf-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+
+.modal.keyframe-review .kf-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 9px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--r-ctl);
+  background: var(--dlg-raise);
+  transition: background .15s, border-color .15s;
+}
+.modal.keyframe-review .kf-row:hover { background: var(--ctl-bg); border-color: var(--dlg-line); }
+.modal.keyframe-review .kf-row.excluded { opacity: .55; }
+.modal.keyframe-review .kf-row.excluded .kf-title { text-decoration: line-through; }
+
+.modal.keyframe-review .kf-main { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.modal.keyframe-review .kf-title {
+  font-size: 12.5px; color: var(--dlg-text);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.modal.keyframe-review .kf-title { display: flex; align-items: baseline; gap: 8px; }
+.modal.keyframe-review .kf-index { color: var(--dlg-text-2); font-weight: 600; }
+.modal.keyframe-review .kf-time { color: var(--dlg-text); }
+.modal.keyframe-review .kf-meta { font-size: 10px; color: var(--dlg-text-3); font-variant-numeric: tabular-nums; }
+
+/* 固定 62px：宽度随文案变化会让同行按钮左缘参差（本稿实测过 33 vs 52 的位移）。 */
+.modal.keyframe-review .kf-badge {
+  flex: none; width: 62px;
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 18px; border-radius: 999px;
+  background: var(--dlg-accent-dim); color: var(--dlg-primary);
+  font-size: 9.5px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.modal.keyframe-review .kf-badge.muted { background: var(--ctl-bg); color: var(--dlg-text-3); }
+
+.modal.keyframe-review .kf-row > .btn { flex: none; }
+.modal.keyframe-review .kf-start { display: grid; gap: 14px; }
+
+@media (max-width: 720px) {
+  .modal.keyframe-review .kf-badge { display: none; }
+}

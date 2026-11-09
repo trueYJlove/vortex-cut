@@ -297,10 +297,10 @@ export function KeyframeReviewPanel({
         </p>
 
         {!preview ? (
-          <div className="keyframe-review-start">
+          <div className="kf-start">
             <p className="readonly-note">素材：{assetName}</p>
-            <label className="keyframe-provider">
-              发送给：
+            <label className="field">
+              <span className="field-label">发送给</span>
               <select
                 value={providerId}
                 onChange={(e) => setProviderId(e.target.value)}
@@ -325,33 +325,45 @@ export function KeyframeReviewPanel({
 
         {preview ? (
           <>
-            <ul className="keyframe-frame-list" aria-label="待外传关键帧">
+            {/* C 族形态 1：工具栏 + 行列表。行内布局固定为
+                「主信息（可伸缩） | 状态徽章（固定列宽） | 操作按钮」，
+                徽章列宽固定是必需的——否则「已移除/待审阅」宽度不同会把按钮推着左右跑。 */}
+            <div className="kf-toolbar">
+              <div className="kf-toolbar-note">
+                <strong>{remaining.length}</strong> / {preview.frames.length} 张将外传 · 合计{" "}
+                <strong>{humanBytes(remainingBytes)}</strong>（实测字节，非估算）
+              </div>
+            </div>
+            <ul className="kf-list" aria-label="待外传关键帧">
               {preview.frames.map((frame) => {
                 const isExcluded = preview.excluded_frames.includes(frame.frame_index);
                 return (
-                  <li key={frame.frame_index} className={isExcluded ? "keyframe-frame excluded" : "keyframe-frame"}>
-                    <span className="keyframe-frame-index">#{frame.frame_index}</span>
-                    <span className="keyframe-frame-time">{formatStamp(frame.timestamp_us)}</span>
-                    <span className="keyframe-frame-size">
-                      {frame.payload_width}×{frame.payload_height} · {humanBytes(frame.payload_bytes)}
+                  <li key={frame.frame_index} className={isExcluded ? "kf-row excluded" : "kf-row"}>
+                    <div className="kf-main">
+                      <span className="kf-title">
+                        <span className="kf-index">#{frame.frame_index}</span>
+                        <span className="kf-time">{formatStamp(frame.timestamp_us)}</span>
+                      </span>
+                      <span className="kf-meta">
+                        {frame.payload_width}×{frame.payload_height} · {humanBytes(frame.payload_bytes)}
+                      </span>
+                    </div>
+                    <span className={isExcluded ? "kf-badge muted" : "kf-badge"}>
+                      {isExcluded ? "已移除" : "待外传"}
                     </span>
                     <button
                       type="button"
-                      className="icon-btn"
+                      className="btn small"
                       onClick={() => void exclude(frame.frame_index)}
                       disabled={isExcluded || busy || submitted}
                       aria-label={isExcluded ? `第 ${frame.frame_index} 帧已移除` : `移除第 ${frame.frame_index} 帧`}
                     >
-                      {isExcluded ? "已移除" : "移除"}
+                      移除
                     </button>
                   </li>
                 );
               })}
             </ul>
-            <p className="readonly-note">
-              将外传 <strong>{remaining.length}</strong> 张，合计 <strong>{humanBytes(remainingBytes)}</strong>
-              （实测字节，非估算）。
-            </p>
             <label className="keyframe-confirm">
               <input
                 type="checkbox"
