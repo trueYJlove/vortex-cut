@@ -2138,51 +2138,94 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 .angle-sync-modal .angle-status.stale { color: var(--dlg-warn); }
 
 /* ── W3.1 素材语义检索面板 ── */
-.modal.semantic-search .semantic-search-form { display: flex; gap: 8px; margin-bottom: 10px; }
+/* C 族「列表型」· 组合态（素材语义检索）。
+   结构稿：prototype-list-family.html
+
+   改造前的问题（实测，不是观感）：
+   1. 本段有 8 处硬编码色值（#d16055 / #2e211f / #eec4be / #303b40 ×3 /
+      #d1a453 / #8b9aa1），完全绕过 Graphite 令牌——改令牌或换主题时这段不跟随；
+   2. 列表行只有下划线分隔，与 C 族「卡片行 + 圆角 + 6px 间距」不一致；
+   3. 状态是纯文字，宽度随文案变化——与 keyframe 同一个缺陷（右缘会漂）。 */
+.modal.semantic-search .semantic-search-form { display: flex; gap: 8px; margin-bottom: 12px; }
 .modal.semantic-search .semantic-search-form input { flex: 1; min-width: 0; }
+
 .modal.semantic-search .semantic-search-error {
-  margin-top: 8px; padding: 9px; border-left: 3px solid #d16055;
-  background: #2e211f; color: #eec4be; font-size: var(--dlg-fs-body);
+  margin: 10px 0 0; padding: 11px 13px;
+  border: 1px solid rgba(227, 93, 98, .32); border-radius: var(--r-box);
+  background: var(--dlg-danger-dim); color: var(--dlg-text-2);
+  font-size: var(--dlg-fs-caption); line-height: 1.7;
 }
+
+/* 命中列表：C 族行形态——卡片行、6px 间距 */
 .modal.semantic-search .semantic-search-hits {
-  margin: 10px 0 0; padding: 0; list-style: none;
+  margin: 0 0 4px; padding: 0; list-style: none;
+  display: grid; gap: 6px;
   max-height: 46vh; overflow-y: auto;
 }
 .modal.semantic-search .semantic-search-hits li {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 7px 0; border-bottom: 1px solid #303b40;
+  display: flex; align-items: center; gap: 12px;
+  padding: 9px 12px;
+  border: 1px solid transparent; border-radius: var(--r-ctl);
+  background: var(--dlg-raise);
+  transition: background .15s, border-color .15s;
 }
-.modal.semantic-search .hit-name { overflow-wrap: anywhere; }
+.modal.semantic-search .semantic-search-hits li:hover {
+  background: var(--ctl-bg); border-color: var(--dlg-line);
+}
+.modal.semantic-search .hit-name {
+  flex: 1; min-width: 0; overflow-wrap: anywhere;
+  color: var(--dlg-text); font-size: 12.5px;
+}
+/* 分数列固定 56px：与徽章同理，「0.912」与「0.5」位数不同会把右缘推歪。 */
 .modal.semantic-search .hit-score {
-  flex: none; color: #d1a453; font-size: var(--dlg-fs-label);
+  flex: none; width: 56px; text-align: right;
+  color: var(--dlg-primary); font-size: var(--dlg-fs-caption); font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
 /* ── 语义索引（检索面板内建索引入口） ── */
 .modal.semantic-search .semantic-index {
-  margin-top: 14px; padding-top: 12px; border-top: 1px solid #303b40;
+  margin-top: 16px; padding-top: 14px;
+  border-top: 1px solid var(--dlg-line);
 }
 .modal.semantic-search .semantic-index-head {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   margin-bottom: 6px;
 }
+.modal.semantic-search .semantic-index-head strong {
+  color: var(--dlg-text-2); font-size: var(--dlg-fs-label); font-weight: 600;
+}
 .modal.semantic-search .semantic-index-list {
-  margin: 8px 0 0; padding: 0; list-style: none;
+  margin: 10px 0 0; padding: 0; list-style: none;
+  display: grid; gap: 6px;
   max-height: 30vh; overflow-y: auto;
 }
 .modal.semantic-search .semantic-index-list li {
-  display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
-  padding: 6px 0; border-bottom: 1px solid #303b40;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid transparent; border-radius: var(--r-ctl);
+  background: var(--dlg-raise);
 }
-.modal.semantic-search .index-name { overflow-wrap: anywhere; }
-.modal.semantic-search .index-status { flex: none; color: #8b9aa1; font-size: var(--dlg-fs-label); }
-.modal.semantic-search .index-status.ready { color: var(--dlg-primary); }
+.modal.semantic-search .index-name {
+  flex: 1; min-width: 0; overflow-wrap: anywhere;
+  color: var(--dlg-text); font-size: 12.5px;
+}
+/* 状态徽章固定 62px —— 与 keyframe 行同一契约，宽度不随文案漂移。 */
+.modal.semantic-search .index-status {
+  flex: none; width: 62px;
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 18px; border-radius: 999px;
+  background: var(--ctl-bg); color: var(--dlg-text-3);
+  font-size: 9.5px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.modal.semantic-search .index-status.ready { background: var(--dlg-accent-dim); color: var(--dlg-primary); }
 .modal.semantic-search .index-status.unavailable,
 .modal.semantic-search .index-status.failed,
-.modal.semantic-search .index-status.stale { color: var(--dlg-warn); }
-.modal.semantic-search .index-hint { flex-basis: 100%; color: var(--dlg-warn); }
-.modal.semantic-search .semantic-index-hint {
-  margin: 8px 0 0; color: var(--dlg-warn); font-size: var(--dlg-fs-body);
+.modal.semantic-search .index-status.stale { background: var(--dlg-warn-dim); color: var(--dlg-warn); }
+.modal.semantic-search .index-hint {
+  flex-basis: 100%; color: var(--dlg-warn);
+  font-size: var(--dlg-fs-caption); line-height: 1.6;
 }
 
 
