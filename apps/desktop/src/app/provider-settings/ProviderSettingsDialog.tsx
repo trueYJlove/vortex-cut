@@ -192,7 +192,7 @@ export function ProviderSettingsDialog({
     } catch (caught) {
       const code = errorCode(caught);
       setError(code === "PROVIDER_IN_USE"
-        ? "该 Provider 已被外发/生成历史引用，不可删除（历史审计不可断链）。可先「删除密钥」并停用，使其不再出现在 AI 功能中。"
+        ? "该 Provider 已被外发/生成历史引用，无法删除——外发与费用记录必须可追溯，删除会断开审计链。请改用：① 删除密钥让它无法再被调用；② 关闭下方「在 AI 功能中启用」。两条做完后，它不会再出现在任何 AI 功能中。"
         : code === "PROVIDER_NOT_FOUND"
         ? "该 Provider 已不存在，请刷新列表。"
         : safeErrorMessage(caught, "删除 Provider 失败。"));
@@ -223,6 +223,23 @@ export function ProviderSettingsDialog({
         : code === "PROVIDER_TIMEOUT"
         ? "Provider 响应超时。请检查网络或稍后重试。"
         : "连接测试失败，请检查 Provider、网络和凭据。");
+    } finally { setBusy(false); }
+  };
+
+  const toggleEnabled = async () => {
+    if (!selected) return;
+    if (!window.desktop.updateProvider) { setError("停用功能不可用。"); return; }
+    setBusy(true); setError(""); setStatus("");
+    try {
+      const updated = await window.desktop.updateProvider({ provider_config_id: selected.provider_config_id, patch: { enabled: !selected.enabled } });
+      // 必须先更新本地 items，否则 selected 仍取旧值、开关视觉不跟随实际状态
+      // （2026-11-06 真机实测：已停用但开关仍显示为开启）。
+      const nextItems = items.map(item => item.provider_config_id === updated.provider_config_id ? updated : item);
+      setItems(nextItems);
+      onProvidersChange(nextItems);
+      setStatus(updated.enabled ? "已启用：该 Provider 会重新出现在 AI 功能中。" : "已停用：该 Provider 不再出现在 AI 功能中，历史记录保留。");
+    } catch (caught) {
+      setError(safeErrorMessage(caught, "切换启用状态失败。"));
     } finally { setBusy(false); }
   };
 
@@ -279,6 +296,21 @@ export function ProviderSettingsDialog({
           </div>
           {selected && <>
             <dl className="detail-panel span-2"><dt>API 地址</dt><dd>{selected.base_url}</dd><dt>模型 ID</dt><dd>{selected.model}</dd><dt>密钥状态</dt><dd>{selected.credential_status === "configured" ? "密钥已配置" : "缺少密钥"}</dd></dl>
+            <div className="field span-2 enabled-row">
+              <div>
+                <label>在 AI 功能中启用</label>
+                <span className="field-hint">停用后不再出现在 AI 粗剪、AI 修改等下拉中；历史记录保留。</span>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={selected.enabled}
+                aria-label={selected.enabled ? "停用该 Provider" : "启用该 Provider"}
+                className={`switch${selected.enabled ? " on" : ""}`}
+                disabled={busy}
+                onClick={() => void toggleEnabled()}
+              ><span /></button>
+            </div>
             <div className="field span-2">
               <label>API 密钥</label>
               <input key={selectedId} ref={secretRef} aria-label="Provider 密钥" type="password" autoComplete="off" disabled={busy} placeholder="仅输入新密钥，留空保留已保存密钥" />

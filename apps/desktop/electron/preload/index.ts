@@ -182,6 +182,8 @@ export interface DesktopApi {
   createProvider?: (input: Record<string, unknown>) => Promise<ProviderConfig>;
   setProviderSecret?: (input: { provider_config_id: string; secret: string }) => Promise<{ provider_config_id: string; credential_status: "configured" }>;
   deleteProviderSecret?: (providerId: string) => Promise<{ provider_config_id: string; credential_status: "missing" }>;
+  /** 更新 Provider 配置（含 enabled 停用/启用）。Core 只接受非空字段。 */
+  updateProvider?: (input: { provider_config_id: string; patch: { display_name?: string; base_url?: string; model?: string; enabled?: boolean } }) => Promise<ProviderConfig>;
   /** 删除 Provider 配置；被外发/生成历史引用时由 Core 拒绝（PROVIDER_IN_USE）。 */
   deleteProvider?: (providerId: string) => Promise<{ provider_config_id: string; deleted: boolean }>;
   testProvider?: (providerId: string) => Promise<{ ok?: boolean; message?: string }>;
@@ -392,6 +394,7 @@ const api: DesktopApi = {
   createProvider: input => ipcRenderer.invoke("provider:create", input),
   setProviderSecret: input => ipcRenderer.invoke("provider:set-secret", input),
   deleteProviderSecret: providerId => ipcRenderer.invoke("provider:delete-secret", providerId),
+  updateProvider: input => ipcRenderer.invoke("provider:update", input),
   deleteProvider: providerId => ipcRenderer.invoke("provider:delete", providerId),
   testProvider: providerId => ipcRenderer.invoke("provider:test", providerId),
   testCandidateProviderCapability: providerId => ipcRenderer.invoke("planning:test-provider-capability", providerId),

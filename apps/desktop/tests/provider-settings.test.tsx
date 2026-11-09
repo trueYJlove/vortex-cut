@@ -48,6 +48,8 @@ function setup(items: ProviderConfig[]) {
     setProviderSecret: vi.fn().mockResolvedValue({ provider_config_id: "provider_1", credential_status: "configured" }),
     deleteProviderSecret: vi.fn().mockResolvedValue({ provider_config_id: "provider_1", credential_status: "missing" }),
     deleteProvider: vi.fn().mockResolvedValue({ provider_config_id: "provider_1", deleted: true }),
+    updateProvider: vi.fn().mockImplementation((input: { patch: { enabled?: boolean } }) =>
+      Promise.resolve(provider({ enabled: input.patch.enabled ?? true }))),
     testProvider: vi.fn().mockResolvedValue({ status: "succeeded" }),
     createProvider: vi.fn(),
   };
@@ -236,5 +238,42 @@ describe("Provider 设置：删除配置（P67）", () => {
     const reported = onProvidersChange.mock.calls.at(-1)![0] as ProviderConfig[];
     expect(reported).toHaveLength(0);
     await waitFor(() => expect(within(dialog).getByRole("button", { name: "创建 Provider" })).toBeVisible());
+  });
+});
+
+/**
+ * P217 第二批：停用开关。
+ * 背景：Core 的 delete() 对被审计表引用的 Provider fail-closed，正确出路是
+ * 「删除密钥 + 停用」。此前 UI 没有停用入口，这条出路是断的（用户实测提出）。
+ */
+describe("Provider 停用开关", () => {
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+  it("管理视图渲染启用开关，初始状态取自 enabled", async () => {
+    // 有 Provider 时初始即管理视图（ProviderSettingsDialog.tsx:44）。
+    setup([provider()]);
+    const toggle = await screen.findByRole("switch", { name: "停用该 Provider" });
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("点击后调用 updateProvider 并回报停用状态", async () => {
+    const { desktop, onProvidersChange } = setup([provider()]);
+    const toggle = await screen.findByRole("switch", { name: "停用该 Provider" });
+    fireEvent.click(toggle);
+    await waitFor(() => expect(desktop.updateProvider).toHaveBeenCalledWith({
+      provider_config_id: "provider_1",
+      patch: { enabled: false },
+    }));
+    await waitFor(() => expect(onProvidersChange).toHaveBeenCalled());
+    expect(await screen.findByText(/已停用：该 Provider 不再出现在 AI 功能中，历史记录保留/)).toBeInTheDocument();
+  });
+
+  it("删除被拒时给出可操作的两步指引", async () => {
+    const { desktop } = setup([provider()]);
+    (desktop.deleteProvider as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("PROVIDER_IN_USE"));
+    fireEvent.click(await screen.findByRole("button", { name: "删除配置" }));
+    fireEvent.click(await screen.findByRole("button", { name: "删除 Provider" }));
+    expect(await screen.findByText(/删除会断开审计链/)).toBeInTheDocument();
+    expect(await screen.findByText(/关闭下方「在 AI 功能中启用」/)).toBeInTheDocument();
   });
 });

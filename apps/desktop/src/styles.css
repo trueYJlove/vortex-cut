@@ -3594,3 +3594,36 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
   border-color: rgba(227, 93, 98, .55);
   color: #f0a1a5;
 }
+
+/* ── Provider 启用开关（P217 第二批）─────────────────────────────────
+   背景：Core 的 delete() 对被审计表引用的 Provider fail-closed（审计链不可
+   断），正确出路是「删除密钥 + 停用」。但此前 UI 没有停用入口，
+   这条出路是断的。此处补齐：停用后 enabled=false，AI 功能下拉按
+   enabled 过滤，历史记录原样保留。                                     */
+.modal .enabled-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 11px 13px;
+  background: var(--dlg-raise);
+  border: 1px solid var(--dlg-line);
+  border-radius: var(--r-box);
+}
+.modal .enabled-row > div { display: grid; gap: 3px; min-width: 0; }
+.modal .enabled-row > div > label { display: block; color: var(--dlg-text-2); font-size: 12px; line-height: 17px; }
+.modal .enabled-row .field-hint { color: var(--dlg-text-3); font-size: 10.5px; line-height: 1.55; }
+
+.modal .switch {
+  flex: none; width: 38px; height: 22px; padding: 0;
+  border-radius: 999px; border: 1px solid var(--dlg-line);
+  background: var(--ctl-bg); position: relative; cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.modal .switch > span {
+  position: absolute; top: 2px; left: 2px;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--dlg-text-3);
+  transition: transform .15s, background .15s;
+}
+.modal .switch.on { background: var(--dlg-accent-dim); border-color: rgba(53, 214, 174, .45); }
+.modal .switch.on > span { transform: translateX(16px); background: var(--dlg-primary); }
+.modal .switch:disabled { opacity: .5; cursor: not-allowed; }
+.modal .switch:focus-visible { outline: 2px solid var(--dlg-primary); outline-offset: 2px; }
