@@ -116,6 +116,37 @@ describe("机位同步表格：数字列右对齐", () => {
   });
 });
 
+describe("机位同步表格：表头与数据同对齐（表格的基本契约）", () => {
+  /**
+   * 用户实测指出：「左对齐还是右对齐还是中间对齐，需要和其他弹窗统一起来」。
+   *
+   * 实测到的问题：状态列表头是 left，而 td 内是定宽 62px 居中的徽章——
+   * 视觉上表头偏左 22px，看着就是错位。
+   *
+   * 表格的基本契约是「表头与它管辖的数据同对齐方式」。这里逐列断言，
+   * 而不是只看一眼截图：新增列时若忘了对齐，这条会红。
+   */
+  const ALIGN_CASES: Array<[string, number, string]> = [
+    ["机位", 1, "left"],
+    ["状态", 2, "center"],
+    ["偏移", 3, "right"],
+    ["置信度", 4, "right"],
+    ["来源", 5, "left"],
+    ["手填", 6, "left"],
+  ];
+
+  it.each(ALIGN_CASES)("第 %s 列：表头与数据同为 %s", (_label, col, align) => {
+    const th = T + " th:nth-child(" + col + ")";
+    const td = T + " td:nth-child(" + col + ")";
+    // 注意：.angle-sync-table td 的基样式是 left，右/中列必须有专属规则；
+    // 只改 th 不改 td（或反之）正是本次的缺陷形态。
+    const thAlign = effective(th, "text-align") ?? effective(T + " th", "text-align");
+    const tdAlign = effective(td, "text-align") ?? effective(T + " td", "text-align");
+    expect(thAlign, `第 ${col} 列表头应为 ${align}`).toBe(align);
+    expect(tdAlign, `第 ${col} 列数据应为 ${align}`).toBe(align);
+  });
+});
+
 describe("机位同步表格：布局不塌陷", () => {
   it("显式 table-layout:fixed，避免剩余宽度摊给状态列", () => {
     // 实测：auto 布局把状态列撑到 144px，内部只有 62px 徽章 → 出现大段空白

@@ -2183,6 +2183,14 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 }
 .angle-sync-modal .angle-sync-table td small:empty { display: none; }
 
+/* 状态列的表头必须与它管辖的数据对齐。
+   实测：表头「状态」文字左缘 455，徽章左缘 477 —— 差 22px，看着就是错位。
+   根因：徽章定宽 62px 且居中，表头却按列左缘左对齐。
+   修法让表头居中（与徽章一致），而不是把徽章改左对齐——定宽居中是
+   keyframe / 语义检索 / 机位同步三个弹窗共用的契约，不为一张表破例。 */
+.angle-sync-modal .angle-sync-table th:nth-child(2),
+.angle-sync-modal .angle-sync-table td:nth-child(2) { text-align: center; }
+
 /* 状态徽章：固定 62px，与 keyframe / 语义检索同一契约。
    纯色文字会让「可用」与「不可用」宽度不同，把后面的偏移列推歪。 */
 .angle-sync-modal .angle-status {
