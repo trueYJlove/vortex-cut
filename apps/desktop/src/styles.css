@@ -112,9 +112,19 @@ textarea { min-height: 92px; padding: 8px; resize: vertical; }
 /* 转录页操作行：追加片段 + AI 字幕优化并排（两者共用同一份勾选状态）。 */
 .transcript-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .transcript-actions .append-btn { margin-top: 9px; }
-.captions-provider-diff { margin: 8px 0 0; padding-left: 18px; max-height: 220px; overflow: auto; font-size: var(--dlg-fs-label); color: #cfd8dd; }
+/* 提案 diff 列表。原来三行样式里有两处硬编码色值（#cfd8dd 正文、#8fa0a8 代码），
+   与 C 族其他弹窗一样全部令牌化 —— 否则改令牌或换主题时这一段不跟随。 */
+.captions-provider-diff {
+  margin: 10px 0 0; padding-left: 18px;
+  max-height: 220px; overflow: auto;
+  font-size: var(--dlg-fs-label); color: var(--dlg-text-2);
+}
 .captions-provider-diff li { margin-bottom: 5px; overflow-wrap: anywhere; }
-.captions-provider-diff code { color: #8fa0a8; font-family: Consolas, monospace; font-size: var(--dlg-fs-caption); }
+.captions-provider-diff code {
+  color: var(--dlg-text-3);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: var(--dlg-fs-caption);
+}
 .segment-row { padding: 7px 0; display: grid; grid-template-columns: 18px 78px 1fr; gap: 5px; border-top: 1px solid #1f2931; font-size: var(--dlg-fs-label); color: #a3aeb5; line-height: 1.55; }.segment-row input { width: 13px; height: 13px; accent-color: #12b998; }.segment-row span { color: #25d3ac; font-family: Consolas, monospace; font-size: var(--dlg-fs-caption); }.segment-row p { margin: 0; overflow-wrap: anywhere; }
 .empty-timeline { padding: 10px; }.empty-timeline button { width: 100%; }
 .preview-frame { position: relative; width: 100%; height: 100%; overflow: visible; background: #181c1f; }
@@ -3894,3 +3904,58 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
   line-height: 1.7;
 }
 .modal .readonly-note--plain strong { color: var(--dlg-text-2); font-weight: 600; }
+
+/* ── C 族「列表型」· 形态 3（AI 字幕优化）────────────────────────
+   结构稿：prototype-list-family.html
+
+   分级改完（说明类降中性小字）之后，这个面板暴露了三个先前被色块掩盖的问题：
+
+   1. .readonly-note--plain 里的 <ul> 仍是浏览器默认（padding-left 40px、
+      list-style disc、margin 10.5px 0）——底色一去掉，这些默认值就裸奔了，
+      列表左缘比说明文字缩进 40px，与其他内容对不齐；
+   2. 状态行是 flex + space-between，但它 stretch 到 body 全宽后，
+      「测试字幕兼容性」按钮右缘与下方 select 的右缘对不齐（内边距不同）；
+   3. 字段用 <label> 直接包裹控件，label 与控件的间距由浏览器默认行盒决定，
+      相邻字段之间没有统一节奏。
+
+   注意：本段只作用于 .modal.captions-provider，不碰全局 .readonly-note，
+   也不改 .readonly-note--plain 的通用定义（那会影响 33 处）。 */
+.modal.captions-provider .readonly-note--plain ul {
+  margin: 6px 0 4px;
+  padding-left: 16px;
+  list-style: disc;
+}
+.modal.captions-provider .readonly-note--plain li {
+  margin-bottom: 3px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.modal.captions-provider .readonly-note--plain li:last-child { margin-bottom: 0; }
+.modal.captions-provider .readonly-note--plain small {
+  display: block; margin-top: 2px;
+  color: var(--dlg-text-4); font-size: 10px;
+}
+.modal.captions-provider .readonly-note--plain strong {
+  color: var(--dlg-text); font-weight: 600;
+}
+
+/* 字段节奏：label 包控件时，label 自身是 flex 列，间距统一 7px。
+   直接写 .modal.captions-provider label 会波及 checkbox 等行内 label，
+   因此只选「直接含 select / input 的 label」。 */
+.modal.captions-provider .modal-body > label {
+  display: grid; gap: 7px;
+  color: var(--dlg-text-2); font-size: var(--dlg-fs-label);
+}
+
+/* 状态行：按钮右缘与下方 select 右缘对齐 —— 两者左右内边距必须相同。
+   实测改前：状态行 padding 7px 10px，而 select 撑满 body 宽度 ⇒ 右缘差 10px。 */
+.modal.captions-provider .captions-provider-status-row {
+  padding: 9px 12px;
+  border: 1px solid var(--dlg-line);
+  border-radius: var(--r-box);
+  background: var(--dlg-raise);
+  font-size: var(--dlg-fs-caption);
+  color: var(--dlg-text-2);
+}
+.modal.captions-provider .captions-provider-status-row > span { min-width: 0; overflow-wrap: anywhere; }
+.modal.captions-provider .captions-provider-status-row button { flex: none; }
