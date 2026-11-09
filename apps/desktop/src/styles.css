@@ -3799,3 +3799,29 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 @media (max-width: 720px) {
   .modal.keyframe-review .kf-badge { display: none; }
 }
+
+/* ── 说明类提示降为中性小字（2026-11-09，用户裁决「分级」）─────────
+   现状：.readonly-note 是薄荷青淡底 + 描边的色块，全仓 47 处都在用。
+   问题：8 个弹窗把它叠放 ≥3 条（CaptionsProvider 8、SemanticSearch 7、
+   AgentSession 5…），一屏里四五个同色块，强调色失去稀有性——这与
+   DESIGN.md §3.1「薄荷青作为有限的语义强调，不铺成大面积发光背景」冲突。
+
+   分级不是一刀切：
+   · 安全类（外发什么内容 / 花多少钱 / 不可逆操作）**保留色块**——
+     这些提示一旦被忽略，后果是金钱或隐私，必须抢注意力。共 14 处；
+   · 说明类（进度 / 空态 / 一般规则 / 计数）降为中性小字。共 33 处。
+
+   实现上**不改 .readonly-note 本身**：它已有 10 条互相覆盖的规则链，
+   且 dialog-graphite-style.test.ts 锁死了它的 border-radius 与
+   border-left-width。改它等于动一批已验收契约。改为新增修饰类
+   .readonly-note--plain，只覆盖配色与排版，不影响既有断言。 */
+.modal .readonly-note--plain,
+.modal > *:not(.modal-heading):not(.modal-actions).readonly-note--plain {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--dlg-text-3);
+  font-size: var(--dlg-fs-caption);
+  line-height: 1.7;
+}
+.modal .readonly-note--plain strong { color: var(--dlg-text-2); font-weight: 600; }

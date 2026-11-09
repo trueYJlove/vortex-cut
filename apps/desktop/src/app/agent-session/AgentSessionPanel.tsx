@@ -155,7 +155,7 @@ export function AgentSessionPanel({ projectId, baseRevisionId, providers, onClos
         <option value="">选择已配置 Provider</option>
         {eligible.map(item => <option value={item.provider_config_id} key={item.provider_config_id}>{item.display_name} · {item.model}</option>)}
       </select></label>
-      {eligible.length === 0 && <p className="readonly-note">尚无支持的 Provider：请先在 AI 修改中完成"测试 AI 修改兼容性"（多步会话与 AI 修改使用同一能力门）。</p>}
+      {eligible.length === 0 && <p className="readonly-note readonly-note--plain">尚无支持的 Provider：请先在 AI 修改中完成"测试 AI 修改兼容性"（多步会话与 AI 修改使用同一能力门）。</p>}
       <p className="readonly-note">一次确认覆盖整个会话：会话中每一步的失败反馈会作为上下文再次外发，具体字段在下一步确认页明示。</p>
       {history.length > 0 && <fieldset>
         <legend>历史会话</legend>
@@ -193,7 +193,7 @@ export function AgentSessionPanel({ projectId, baseRevisionId, providers, onClos
     </>}
     {step === "done" && session && <>
       <h3>{session.status === "succeeded" ? "会话完成" : session.status === "failed" ? "会话失败" : "会话已取消"}</h3>
-      {session.status === "succeeded" && <p className="readonly-note">每个成功步骤都已落为版本；使用"版本比较"查看会话轨迹，或撤销回退到任意一步。</p>}
+      {session.status === "succeeded" && <p className="readonly-note readonly-note--plain">每个成功步骤都已落为版本；使用"版本比较"查看会话轨迹，或撤销回退到任意一步。</p>}
       {session.status === "failed" && <p>共执行 {(session.steps ?? []).filter(item => item.status === "succeeded").length} 个成功步骤（已保留），失败步骤不产生修改。</p>}
       {session.token_usage && <p className="readonly-note">费用估算：{session.token_usage.total_tokens} tokens · {session.token_usage.provider_calls} 次 Provider 调用 · ≈{session.token_usage.estimated_cost.toFixed(4)} 元（按 Provider 配置单价估算，最终以服务商账单为准）。</p>}
       <ol className="agent-session-steps">

@@ -207,7 +207,7 @@ export function ShotRequirementTimelineBatchAssemblyPanel({
 
   return (
     <section className="stage6r-batch-assembly" aria-label="已采用图片批量时间线装配">
-      <p className="readonly-note">
+      <p className="readonly-note readonly-note--plain">
         仅对当前已采用且可用的图片执行本地确定性批量装配；Provider 调用、网络外传和费用增量均为
         0。整批 all-or-nothing：任一条失败则全部不装配。
       </p>

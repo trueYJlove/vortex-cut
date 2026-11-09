@@ -269,12 +269,12 @@ export function CaptionsProviderPanel({
     {error && <p className="ai-status" role="status">{error}</p>}
 
     {step === "form" && <>
-      <div className="readonly-note">
+      <div className="readonly-note readonly-note--plain">
         <strong>已选 {segmentIds.length} 段</strong> · 共 {characterCount} 字
         <ul>{segmentIds.slice(0, 6).map(id => <li key={id}>{textById.get(String(id)) ?? id}</li>)}</ul>
         {segmentIds.length > 6 && <small>另有 {segmentIds.length - 6} 段未展开。</small>}
       </div>
-      <p className="readonly-note">
+      <p className="readonly-note readonly-note--plain">
         前置条件：这些片段需已“追加所选片段”到时间线并生成字幕，否则 Provider 改写的文本无法对应到字幕。
       </p>
       <label>Provider
@@ -288,7 +288,7 @@ export function CaptionsProviderPanel({
           </option>)}
         </select>
       </label>
-      {merged.length === 0 && <p className="readonly-note">
+      {merged.length === 0 && <p className="readonly-note readonly-note--plain">
         尚无已配置 Provider。下一步：打开「Provider 设置」（工具菜单或设置里），新建 Provider 并保存密钥，然后回到这里。
       </p>}
       {current && <div className="captions-provider-status-row">
@@ -325,12 +325,12 @@ export function CaptionsProviderPanel({
       <h3>正在生成字幕文本</h3>
       <p>{GENERATION_STATUS_LABELS[generation?.status ?? "queued"] ?? "执行中"}</p>
       <progress max={1} value={generation?.status === "succeeded" ? 1 : 0} aria-label="字幕生成进度" />
-      <p className="readonly-note">生成期间可关闭面板；结果会保留，稍后可从工作单继续处理。</p>
+      <p className="readonly-note readonly-note--plain">生成期间可关闭面板；结果会保留，稍后可从工作单继续处理。</p>
     </>}
 
     {step === "proposal" && proposal && <>
       <h3>字幕改写提案</h3>
-      <p className="readonly-note">{proposal.patch.summary} · 共 {proposal.patch.operations.length} 处文本变化</p>
+      <p className="readonly-note readonly-note--plain">{proposal.patch.summary} · 共 {proposal.patch.operations.length} 处文本变化</p>
       <ul className="captions-provider-diff">
         {proposal.patch.operations.map(operation => <li key={operation.caption_id}>
           <code>{operation.caption_id}</code> → <strong>{operation.text}</strong>
@@ -341,7 +341,7 @@ export function CaptionsProviderPanel({
 
     {step === "applied" && <>
       <h3>已应用</h3>
-      <p className="readonly-note">字幕文本已更新为新的 Revision。可使用撤销回退。</p>
+      <p className="readonly-note readonly-note--plain">字幕文本已更新为新的 Revision。可使用撤销回退。</p>
     </>}
   </Dialog>;
 }

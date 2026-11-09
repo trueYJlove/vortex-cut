@@ -200,7 +200,7 @@ export function AngleSyncPanel({
     footer={<button type="button" onClick={onClose}>关闭</button>}>
 
     {error && <p className="ai-status" role="status">{error}</p>}
-    {inFlight && <p className="readonly-note" role="status" aria-live="polite">机位同步分析中…（完成后自动刷新）</p>}
+    {inFlight && <p className="readonly-note readonly-note--plain" role="status" aria-live="polite">机位同步分析中…（完成后自动刷新）</p>}
 
     <div className="angle-sync-create">
       <label>组名<input value={name} onChange={event => setName(event.target.value)} /></label>
@@ -269,7 +269,7 @@ export function AngleSyncPanel({
       </tbody>
     </table>}
 
-    <p className="readonly-note">偏移为正 = 该机位晚于参考机位；置信度不足或素材变化时会如实标为「不可用 / 素材已变化」，不会给出看似合理的数值。帧级对齐还需打板/时码锚点。</p>
+    <p className="readonly-note readonly-note--plain">偏移为正 = 该机位晚于参考机位；置信度不足或素材变化时会如实标为「不可用 / 素材已变化」，不会给出看似合理的数值。帧级对齐还需打板/时码锚点。</p>
 
   </Dialog>;
 }

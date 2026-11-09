@@ -74,7 +74,7 @@ export function ShotRequirementTimelineAssemblyPanel({
   if (readOnly) return assemblies.length ? <p>历史装配：{assemblies.length} 条（只读）</p> : null;
   return <section className="stage5-assembly" aria-label="已采用图片时间线装配">
     <header><strong>装配到时间线</strong><button disabled={busy} onClick={() => void load()}>刷新时间线</button></header>
-    <p className="readonly-note">仅本地确定性装配；Provider 调用、网络外传和费用增量均为 0。不会自动预览、渲染或导出。</p>
+    <p className="readonly-note readonly-note--plain">仅本地确定性装配；Provider 调用、网络外传和费用增量均为 0。不会自动预览、渲染或导出。</p>
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
     {!available ? <p>当前采用图片不可用，不能装配。</p> : !timelineRevisionId ? <p>项目尚无可用时间线。</p> : <>
       <div className="stage5-assembly-fields">

@@ -188,14 +188,14 @@ export function SemanticSearchPanel({ projectId, assetNames, assets, onClose }: 
             {busy ? "检索中…" : "检索"}
           </button>
         </form>
-        <p className="readonly-note">
+        <p className="readonly-note readonly-note--plain">
           按画面语义相似度排序。当前模型为英文 CLIP，中文查询效果未验证。
           分数仅表示相似度排序，<strong>不构成</strong>对识别准确性或可用性的承诺。
         </p>
         {error ? <p className="semantic-search-error" role="alert">{error}</p> : null}
-        {busy ? <p className="readonly-note">正在编码查询并检索…</p> : null}
+        {busy ? <p className="readonly-note readonly-note--plain">正在编码查询并检索…</p> : null}
         {!busy && searched && hits.length === 0 ? (
-          <p className="readonly-note">没有匹配素材。若从未索引过，请先对素材建立语义索引。</p>
+          <p className="readonly-note readonly-note--plain">没有匹配素材。若从未索引过，请先对素材建立语义索引。</p>
         ) : null}
         {hits.length > 0 ? (
           <ol className="semantic-search-hits">
@@ -218,14 +218,14 @@ export function SemanticSearchPanel({ projectId, assetNames, assets, onClose }: 
               {indexBusy ? "建立中…" : "为此项目建索引"}
             </button>
           </div>
-          <p className="readonly-note">
+          <p className="readonly-note readonly-note--plain">
             检索前需要先建立索引；索引只保存画面语义向量，不写时间线，也不随素材自动更新。
           </p>
           {modelMissing ? (
             <p className="semantic-index-hint">语义模型尚未安装，请先在设置中下载 CLIP 模型</p>
           ) : null}
           {indexable.length === 0 ? (
-            <p className="readonly-note">当前项目没有可建立索引的视频或图片素材。</p>
+            <p className="readonly-note readonly-note--plain">当前项目没有可建立索引的视频或图片素材。</p>
           ) : (
             <ul className="semantic-index-list">
               {indexable.map(item => {
@@ -271,7 +271,7 @@ export function SemanticSearchPanel({ projectId, assetNames, assets, onClose }: 
           </form>
           {labelError ? <p className="semantic-search-error" role="alert">{labelError}</p> : null}
           {labelSearched && labelHits.length === 0 && !labelBusy ? (
-            <p className="readonly-note">没有帧带该标签。标签订阅需精确匹配（「人」不会命中「人物」）。</p>
+            <p className="readonly-note readonly-note--plain">没有帧带该标签。标签订阅需精确匹配（「人」不会命中「人物」）。</p>
           ) : null}
           {labelHits.length > 0 ? (
             <ul className="semantic-index-list">

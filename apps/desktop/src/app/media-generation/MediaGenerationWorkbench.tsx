@@ -370,7 +370,7 @@ export function MediaGenerationWorkbench({ project, assets, onClose }: Props) {
             <label>声音验证预设<input aria-label="声音验证预设" value={ttsForm.voicePresetId} onChange={event => { invalidatePrepared(); setTtsForm(value => ({ ...value, voicePresetId: event.target.value })); }} /></label>
             <label>语言<select aria-label="TTS 语言" value={ttsForm.language} onChange={event => { invalidatePrepared(); setTtsForm(value => ({ ...value, language: event.target.value as TtsForm["language"] })); }}><option value="zh-CN">zh-CN</option><option value="en-US">en-US</option></select></label>
             <label>速度（千分比）<input aria-label="TTS 速度" type="number" min={500} max={2000} value={ttsForm.speedMilli} onChange={event => { invalidatePrepared(); setTtsForm(value => ({ ...value, speedMilli: event.target.value })); }} /></label>
-            <p className="readonly-note">以上仅为参数验证，不会合成或试听真实声音。</p>
+            <p className="readonly-note readonly-note--plain">以上仅为参数验证，不会合成或试听真实声音。</p>
           </div>}
         </> : <div className="generation-confirm">
           <h3>确认模拟验证请求</h3>

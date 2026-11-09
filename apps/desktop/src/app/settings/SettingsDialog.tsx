@@ -100,10 +100,10 @@ export function SettingsDialog({ onClose, onNotify, onOpenProviderSettings }: { 
           <button disabled={busy || !proxyUrlValid || (state.saved.proxy_mode === mode && (state.saved.provider_proxy ?? "") === (mode === "custom" ? proxyUrl.trim() : ""))} onClick={() => void save()}>保存</button>
         </div>
       </fieldset>
-      <p className="settings-effective"><strong>当前生效：</strong>{effectiveLabel}{state.pending_restart && <span className="readonly-note">（有已保存未生效的更改）</span>}</p>
+      <p className="settings-effective"><strong>当前生效：</strong>{effectiveLabel}{state.pending_restart && <span className="readonly-note readonly-note--plain">（有已保存未生效的更改）</span>}</p>
       <fieldset>
         <legend>Provider 配置</legend>
-        <p className="readonly-note">AI 粗剪、AI 修改、AI 助手与 AI 字幕优化共用的 Provider（地址、模型、密钥）。</p>
+        <p className="readonly-note readonly-note--plain">AI 粗剪、AI 修改、AI 助手与 AI 字幕优化共用的 Provider（地址、模型、密钥）。</p>
         <div className="modal-actions">
           <button onClick={() => { onOpenProviderSettings(); onClose(); }}>打开 Provider 设置</button>
         </div>

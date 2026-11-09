@@ -208,7 +208,7 @@ export function ShotRequirementImageFulfillmentPanel({ projectId, revisionId, re
 
   return <section className="shot-fulfillment" aria-label={`${requirement.title} 图片履约`}>
     <header><div><strong>{requirement.title}</strong><small>{state ? lifecycleLabel[state.lifecycle] : "载入中"}</small></div><button disabled={busy} onClick={() => void load()}>刷新履约状态</button></header>
-    {readOnly && <p className="readonly-note">历史 Revision 仅供查看，不能 Prepare、Create、Retry、Cancel 或 Adopt。</p>}
+    {readOnly && <p className="readonly-note readonly-note--plain">历史 Revision 仅供查看，不能 Prepare、Create、Retry、Cancel 或 Adopt。</p>}
     {error && <p role="alert">{error}</p>}
     {resultNotice && <p role="status">{resultNotice}</p>}
 

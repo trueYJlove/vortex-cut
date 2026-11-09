@@ -186,14 +186,14 @@ export function EditingGrammarPanel({
           {planners.map(item => <option key={item.name} value={item.name}>{item.title}</option>)}
         </select>
       </label>
-      {planner && <p className="readonly-note">{planner.description}</p>}
+      {planner && <p className="readonly-note readonly-note--plain">{planner.description}</p>}
       <label>参数（JSON）
         <textarea aria-label="规划器参数" rows={8} value={paramsText} onChange={event => setParamsText(event.target.value)} spellCheck={false} />
       </label>
       {preview && <section aria-label="干跑结果">
         <h3>干跑结果</h3>
         <p>{preview.summary}</p>
-        <p className="readonly-note">操作 {preview.operations_count} 条{preview.noop ? " · 空操作（可提案，不可采纳）" : ""}</p>
+        <p className="readonly-note readonly-note--plain">操作 {preview.operations_count} 条{preview.noop ? " · 空操作（可提案，不可采纳）" : ""}</p>
         {preview.operations.length > 0 && <ol className="agent-session-steps">
           {preview.operations.slice(0, 12).map((op, index) => <li key={index}><code>{op.op}</code></li>)}
         </ol>}
@@ -220,7 +220,7 @@ export function EditingGrammarPanel({
       </dl>
       <TimelineDiffView diff={proposal.diff} />
       {proposal.base_revision_id !== baseRevisionId && (
-        <p className="readonly-note">基线已变化：请返回后基于当前版本重新规划。</p>
+        <p className="readonly-note readonly-note--plain">基线已变化：请返回后基于当前版本重新规划。</p>
       )}
     </>}
   </Dialog>;

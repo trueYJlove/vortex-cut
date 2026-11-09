@@ -298,7 +298,7 @@ export function KeyframeReviewPanel({
 
         {!preview ? (
           <div className="kf-start">
-            <p className="readonly-note">素材：{assetName}</p>
+            <p className="readonly-note readonly-note--plain">素材：{assetName}</p>
             <label className="field">
               <span className="field-label">发送给</span>
               <select
@@ -374,7 +374,7 @@ export function KeyframeReviewPanel({
               我已逐张审阅上述关键帧，同意发送给 Provider
             </label>
             {remaining.length === 0 ? (
-              <p className="readonly-note">所有帧都已被移除，没有内容会被外传。</p>
+              <p className="readonly-note readonly-note--plain">所有帧都已被移除，没有内容会被外传。</p>
             ) : null}
             {phase === "running" ? (
               <p className="keyframe-result" role="status">已提交，正在生成关键帧理解…</p>
@@ -385,7 +385,7 @@ export function KeyframeReviewPanel({
               </p>
             ) : null}
             {submitted ? (
-              <p className="readonly-note">本次外传已发起，不再接受对这批关键帧的改动。</p>
+              <p className="readonly-note readonly-note--plain">本次外传已发起，不再接受对这批关键帧的改动。</p>
             ) : null}
           </>
         ) : null}
