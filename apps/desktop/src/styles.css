@@ -2128,14 +2128,75 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 .angle-sync-modal .angle-sync-members { display: grid; gap: 4px; max-height: 160px; overflow: auto; }
 .angle-sync-modal .angle-sync-member { display: flex; gap: 6px; align-items: center; }
 .angle-sync-modal .angle-sync-groups { display: flex; gap: 8px; align-items: flex-end; margin-top: 10px; }
-.angle-sync-modal .angle-sync-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-.angle-sync-modal .angle-sync-table th,
-.angle-sync-modal .angle-sync-table td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--ctl-bg); }
+/* C 族「列表型」· 形态 2（机位同步的表格）。
+   结构稿：prototype-list-family.html
+
+   改造前的实测问题（Chromium 量出，不是读代码猜的）：
+   1. 表头 13px —— 与正文同号，表头与数据分不出层级（稿：10.5px）；
+   2. 单元格内边距 4px 6px —— 过挤，行高 43 但内容贴边；
+   3. 偏移/置信度是数字列却全部左对齐 —— 位数不同的数字无法纵向比较，
+      而这张表的用途恰恰是「一眼看出各机位差多少」；
+   4. 分隔线用 var(--ctl-bg)（控件底色）当线色 —— 令牌层级用错，
+      稿里是 var(--dlg-line)（发丝线）。 */
+.angle-sync-modal .angle-sync-table {
+  width: 100%; border-collapse: collapse; margin-top: 12px;
+  font-size: 12px;
+  /* 显式列宽。auto 布局会把剩余宽度摊给「最宽那列」，实测状态列被撑到
+     144px 而内部只有 62px 的徽章 —— 机位与数字列之间裂开一大段空白。
+     这张表是 6 列固定语义的检视表，不需要自适应；给机位列吃掉剩余空间即可。 */
+  table-layout: fixed;
+}
+.angle-sync-modal .angle-sync-table th:nth-child(1) { width: auto; }
+.angle-sync-modal .angle-sync-table th:nth-child(2) { width: 92px; }
+.angle-sync-modal .angle-sync-table th:nth-child(3) { width: 84px; }
+.angle-sync-modal .angle-sync-table th:nth-child(4) { width: 72px; }
+.angle-sync-modal .angle-sync-table th:nth-child(5) { width: 64px; }
+.angle-sync-modal .angle-sync-table th:nth-child(6) { width: 176px; }
+.angle-sync-modal .angle-sync-table th {
+  text-align: left; padding: 0 8px 8px;
+  color: var(--dlg-text-3); font-size: var(--dlg-fs-caption); font-weight: 500;
+  border-bottom: 1px solid var(--dlg-line);
+}
+.angle-sync-modal .angle-sync-table td {
+  text-align: left; padding: 9px 8px;
+  color: var(--dlg-text-2);
+  border-bottom: 1px solid var(--dlg-line);
+  font-variant-numeric: tabular-nums;
+}
+.angle-sync-modal .angle-sync-table tr:last-child td { border-bottom: 0; }
+.angle-sync-modal .angle-sync-table tbody tr:hover td { background: var(--dlg-raise); }
+/* 数字列右对齐：偏移与置信度需要纵向比较；左对齐时位数不同看不出大小关系。
+   列序：机位 | 状态 | 偏移 | 置信度 | 来源 | 手填。 */
+.angle-sync-modal .angle-sync-table th:nth-child(3),
+.angle-sync-modal .angle-sync-table td:nth-child(3),
+.angle-sync-modal .angle-sync-table th:nth-child(4),
+.angle-sync-modal .angle-sync-table td:nth-child(4) {
+  text-align: right;
+}
 .angle-sync-modal .angle-sync-table input { width: 72px; }
-.angle-sync-modal .angle-status.ready { color: var(--dlg-primary); }
+/* 状态单元格是「徽章 + 原因」的组合。92px 列宽下两者放不下一行，
+   让原因整行换到徽章下方，而不是把「· 音频损坏」挤成一个孤零零的换行。 */
+.angle-sync-modal .angle-sync-table td:nth-child(2) { white-space: normal; }
+.angle-sync-modal .angle-sync-table td small {
+  display: block; margin-top: 3px;
+  color: var(--dlg-text-3); font-size: 10px; line-height: 1.4;
+}
+.angle-sync-modal .angle-sync-table td small:empty { display: none; }
+
+/* 状态徽章：固定 62px，与 keyframe / 语义检索同一契约。
+   纯色文字会让「可用」与「不可用」宽度不同，把后面的偏移列推歪。 */
+.angle-sync-modal .angle-status {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 62px; height: 18px; border-radius: 999px;
+  background: var(--ctl-bg); color: var(--dlg-text-3);
+  font-size: 9.5px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  vertical-align: middle;
+}
+.angle-sync-modal .angle-status.ready { background: var(--dlg-accent-dim); color: var(--dlg-primary); }
 .angle-sync-modal .angle-status.unavailable,
 .angle-sync-modal .angle-status.failed,
-.angle-sync-modal .angle-status.stale { color: var(--dlg-warn); }
+.angle-sync-modal .angle-status.stale { background: var(--dlg-warn-dim); color: var(--dlg-warn); }
 
 /* ── W3.1 素材语义检索面板 ── */
 /* C 族「列表型」· 组合态（素材语义检索）。

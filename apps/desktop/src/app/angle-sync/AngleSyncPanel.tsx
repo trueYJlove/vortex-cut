@@ -249,7 +249,7 @@ export function AngleSyncPanel({
             <td>{nameOf(String(angle.asset_id))}{angle.is_reference ? "（参考）" : ""}</td>
             <td>
               <span className={"angle-status " + angle.status}>{STATUS_LABEL[angle.status]}</span>
-              {angle.reason && <small> · {REASON_LABEL[angle.reason] ?? angle.reason}</small>}
+              {angle.reason && <small>{REASON_LABEL[angle.reason] ?? angle.reason}</small>}
             </td>
             <td>{fmtMs(angle.offset_us)}</td>
             <td>{angle.confidence === null ? "—" : (angle.confidence * 100).toFixed(0) + "%"}</td>
