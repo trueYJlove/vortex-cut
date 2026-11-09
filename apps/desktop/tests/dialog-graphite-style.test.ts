@@ -650,10 +650,32 @@ describe("专用面：工作台双栏与页签分段", () => {
     expect(declaredBy(".modal.editing-tools", "row-gap")).toBe("0");
   });
 
-  it("工作台页签与模式页签是分段控件", () => {
+  it("生成页签与模式页签是分段控件", () => {
     expect(declaredBy(".modal .generation-tabs", "border-radius")).toBe("var(--r-box)");
     expect(declaredBy(".modal .provider-mode-tabs", "border-radius")).toBe("var(--r-box)");
-    expect(declaredBy(".modal.editing-tools .et-tabs", "border-radius")).toBe("var(--r-box)");
+  });
+
+  /**
+   * 工作台页签**不是**分段控件。原型 .workbench-tabs 是通栏三等分、无描边、
+   * 选中态靠底部 2px 强调线（index.html 的 .workbench-tab.active::after），
+   * 与「分段控件」（圆角外壳 + 内嵌小块）是两种不同控件。
+   *
+   * 本条原写作「工作台页签与模式页签是分段控件」，把两者混为一谈；实测旧实现
+   * 因此缩成 fit-content 的小卡片（326px），与原型 858px 通栏差一个数量级。
+   */
+  it("工作台页签是通栏三等分，不是分段控件", () => {
+    expect(declaredBy(".modal.editing-tools .et-tabs", "border-radius")).toBe("0");
+    expect(declaredBy(".modal.editing-tools .et-tabs", "grid-template-columns")).toContain("repeat(3");
+    expect(declaredBy(".modal.editing-tools .et-tabs", "width")).toBe("100%");
+  });
+
+  it("工作台上下文行与页面同宽且高 37px", () => {
+    expect(declaredBy(".modal.editing-tools .et-ctx", "height")).toBe("37px");
+    expect(declaredBy(".modal.editing-tools .et-ctx", "padding")).toContain("24px");
+  });
+
+  it("工作台左参数列为 240px（原型 .workbench-grid 第一列）", () => {
+    expect(declaredBy(".modal.editing-tools .et-shell", "grid-template-columns")).toContain("240px");
   });
 
   it("小高度窗口收紧标题区与底栏高度", () => {

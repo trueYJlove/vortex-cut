@@ -2673,41 +2673,96 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 .modal .exd-ratio-card { border-radius: var(--r-box); border-color: var(--dlg-line); background: var(--dlg-raise); }
 .modal .exd-divider { border-top: 1px solid var(--dlg-line); }
 
-.modal.editing-tools .et-wrap { padding-left: 24px; padding-right: 24px; display: grid; gap: 12px; }
+/* 页签与上下文行**通栏**：原型把它们放在 dialog-body 的 padding 之外
+   （.workbench-tabs 无左右内边距，直接顶到弹窗边缘），只有参数区受 24px 缩进。
+   旧实现把两者都塞进 et-wrap 的 padding 里，于是页签条缩成 fit-content 的小卡片、
+   只占三分之一宽，与原型「三等分通栏」相差一个数量级（实测 326 vs 858）。 */
+.modal.editing-tools > div.modal-body:not(.modal-heading):not(.modal-actions) {
+  padding-left: 0; padding-right: 0;
+}
+.modal.editing-tools .et-wrap { display: grid; gap: 0; padding-left: 0; padding-right: 0; }
 .modal.editing-tools .et-tabs {
-  display: inline-flex;
-  gap: 3px;
-  padding: 3px;
-  width: fit-content;
-  border: 1px solid var(--dlg-line);
-  border-radius: var(--r-box);
-  background: #101416;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0;
+  padding: 0;
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  border-top: 1px solid var(--dlg-line);
+  border-bottom: 1px solid var(--dlg-line);
+  background: #121619;
 }
 .modal.editing-tools .et-tabs button {
-  min-width: 104px;
-  height: 30px;
-  min-height: 30px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  /* 压过旧规则 .editing-tools .et-tabs button 的 flex-direction: column
+     （它把 strong/span 叠成两行，与原型「同一行并列」不符）。 */
+  flex-direction: row;
+  height: 47px;
+  min-height: 47px;
   padding: 0 12px;
-  border-radius: 5px;
+  border: 0;
+  border-radius: 0;
   background: transparent;
   color: var(--dlg-text-3);
-  font-size: 11.5px;
+  font-size: var(--dlg-fs-body);
 }
-.modal.editing-tools .et-tabs button strong { font-size: 12px; font-weight: 500; color: var(--dlg-text-2); }
+.modal.editing-tools .et-tabs button strong { font-size: var(--dlg-fs-body); font-weight: 500; color: var(--dlg-text-2); }
+.modal.editing-tools .et-tabs button span { font-size: var(--dlg-fs-caption); color: var(--dlg-text-3); }
 .modal.editing-tools .et-tabs button:hover:not(:disabled) { background: rgba(255, 255, 255, .03); color: var(--dlg-text); }
-.modal.editing-tools .et-tabs button.on { background: var(--dlg-raise); color: var(--dlg-text); box-shadow: 0 1px 2px rgba(0, 0, 0, .15); }
+/* 选中态用「底部 2px 强调线 + 文字提亮」，不用卡片底色：原型 .workbench-tab.active
+   只加下划线；状态不靠颜色单通道（DESIGN.md §3.1「状态不能只靠颜色」）。 */
+.modal.editing-tools .et-tabs button.on { background: transparent; color: var(--dlg-text); }
 .modal.editing-tools .et-tabs button.on strong { color: var(--dlg-text); }
 .modal.editing-tools .et-tabs button.on span { color: var(--dlg-primary); }
+.modal.editing-tools .et-tabs button.on::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 2px;
+  background: var(--dlg-primary);
+}
+.modal.editing-tools .et-ctx {
+  padding: 0 24px;
+  height: 37px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  border-bottom: 1px solid var(--dlg-line);
+  font-size: 9.5px;
+}
+/* 参数区恢复 24px 缩进；双栏是「左参数 240px + 右预览」，不是卡片分栏
+   （原型 .workbench-grid 无边框无底色，仅两列）。 */
 .modal.editing-tools .et-shell {
   display: grid;
-  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
-  border: 1px solid var(--dlg-line);
-  border-radius: var(--r-box);
-  background: var(--dlg-raise);
-  overflow: hidden;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 24px;
+  padding: 19px 24px 20px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow: auto;
+  min-height: 0;
 }
-.modal.editing-tools .et-col { padding: 14px; gap: 12px; }
-.modal.editing-tools .et-col + .et-col { border-left: 1px solid var(--dlg-line); }
+.modal.editing-tools .et-col { padding: 0; gap: 15px; }
+.modal.editing-tools .et-col + .et-col { border-left: 0; }
+/* 窄屏单栏：必须写在上面几条之后——本层新增的 .et-shell 规则位置晚于
+   文件上方的 @media (max-width: 900px)，同权重下会把那里的单栏覆盖回双栏
+   （实测 820px 仍渲染 240 + 546 两列）。此处在层内重新声明，保证窄屏堆叠。 */
+@media (max-width: 900px) {
+  .modal.editing-tools .et-shell {
+    grid-template-columns: 1fr;
+    padding: 15px 16px 16px;
+  }
+  .modal.editing-tools .et-ctx { padding: 0 16px; gap: 10px; }
+  .modal.editing-tools .et-tabs button { height: 44px; min-height: 44px; }
+}
 .modal.editing-tools .et-seg { border-radius: var(--r-ctl); border-color: var(--dlg-line); background: var(--ctl-bg); }
 .modal.editing-tools .et-seg button { height: 26px; min-height: 26px; border-radius: 5px; }
 .modal.editing-tools .et-preview,
