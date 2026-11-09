@@ -419,14 +419,24 @@ export function EditingToolsPanel({
     ? pictureCutUs / 1e6
     : range ? (range.start + range.end) / 2 / 1e6 : 39;
 
-  return <Dialog titleId="editing-tools-title" label="剪辑手法" onClose={onClose} className="editing-tools">
-    <div className="modal-heading">
-      <div>
-        <h2 id="editing-tools-title">剪辑手法</h2>
-        <p>{meta.desc}</p>
-      </div>
-      <button type="button" className="icon-btn" aria-label="关闭剪辑手法" onClick={onClose}>×</button>
-    </div>
+  return <Dialog title="剪辑手法" subtitle={meta.desc} closeLabel="关闭剪辑手法" onClose={onClose} className="editing-tools"
+    footer={<>
+      {proposal ? <>
+        <button type="button" onClick={() => setProposal(null)}>返回</button>
+        {!proposal.applied_revision_id && proposal.patch.operations.length > 0 && (
+          <button
+            type="button"
+            disabled={busy || adopted || !baseRevisionId || proposal.base_revision_id !== baseRevisionId}
+            onClick={() => void applyProposal()}
+          >
+            采纳为正式 Timeline
+          </button>
+        )}
+      </> : <>
+        <button type="button" disabled={busy || !baseRevisionId} onClick={() => void runPrepare()}>干跑预览</button>
+        <button type="button" disabled={busy || !baseRevisionId} onClick={() => void runPropose()}>生成提案</button>
+      </>}
+    </>}>
 
     <div className="et-wrap">
       <div className="et-tabs" role="tablist" aria-label="手法页签">
@@ -652,22 +662,5 @@ export function EditingToolsPanel({
       </div>}
     </div>
 
-    <div className="modal-actions">
-      {proposal ? <>
-        <button type="button" onClick={() => setProposal(null)}>返回</button>
-        {!proposal.applied_revision_id && proposal.patch.operations.length > 0 && (
-          <button
-            type="button"
-            disabled={busy || adopted || !baseRevisionId || proposal.base_revision_id !== baseRevisionId}
-            onClick={() => void applyProposal()}
-          >
-            采纳为正式 Timeline
-          </button>
-        )}
-      </> : <>
-        <button type="button" disabled={busy || !baseRevisionId} onClick={() => void runPrepare()}>干跑预览</button>
-        <button type="button" disabled={busy || !baseRevisionId} onClick={() => void runPropose()}>生成提案</button>
-      </>}
-    </div>
   </Dialog>;
 }

@@ -44,6 +44,7 @@ import {
   Video,
   Volume2,
   VolumeX,
+  X,
 } from "lucide-react";
 import type {
   TimelineCaption,
@@ -3858,23 +3859,41 @@ export function TimelinePanel({
             );
           })()}
         </div>
-        {/* B2: 添加转场浮层——点击两片段边界后出现；样式见 styles.css 万兴喵影弹窗层 */}
+        {/* B2: 添加转场浮层——点击两片段边界后出现。
+            与共享 Dialog 同骨架：标题区 / 内容区 / 关闭钮，补齐 aria-modal、
+            初始焦点、Escape 与焦点返回；点击背幕关闭的既有语义保留。 */}
         {addTransitionAnchor && (
           <div
-            className="add-transition-popover"
-            role="dialog"
-            aria-label="添加转场"
+            className="modal-backdrop add-transition-popover"
             onClick={() => setAddTransitionAnchor(null)}
           >
-            <div
-              className="add-transition-card"
+            <section
+              className="modal add-transition-card"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="add-transition-title"
+              tabIndex={-1}
+              ref={(element) => {
+                if (!element) return;
+                const active = window.document.activeElement;
+                if (active !== element && !element.contains(active)) element.focus();
+              }}
               onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setAddTransitionAnchor(null);
+                }
+              }}
             >
-              <div className="add-transition-hd">
-                在此处添加转场
-                <button aria-label="关闭添加转场" onClick={() => setAddTransitionAnchor(null)}>✕</button>
+              <div className="modal-heading">
+                <div><h2 id="add-transition-title">在此处添加转场</h2></div>
+                <button type="button" className="icon-btn" aria-label="关闭添加转场" title="关闭 · Esc" onClick={() => setAddTransitionAnchor(null)}>
+                  <X size={15} />
+                </button>
               </div>
-              <div className="add-transition-body">
+              <div className="modal-body">
                 <div className="add-transition-kinds">
                   {TRANSITION_KINDS.map((kind) => (
                     <button
@@ -3892,9 +3911,9 @@ export function TimelinePanel({
                     </button>
                   ))}
                 </div>
-                <small>默认 0.5s，添加后可在属性面板调整时长；仅权威预览渲染转场效果。</small>
+                <p className="modal-caption">默认 0.5s，添加后可在属性面板调整时长；仅权威预览渲染转场效果。</p>
               </div>
-            </div>
+            </section>
           </div>
         )}
         </div>

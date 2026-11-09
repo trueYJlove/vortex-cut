@@ -105,6 +105,29 @@ describe("命令注册表", () => {
     await waitFor(() => expect(api.undoTimeline).toHaveBeenCalled());
   });
 
+  it("命令面板获得焦点即落在搜索框：Esc 关闭，Enter 执行选中命令", async () => {
+    // 共享 Dialog 会聚焦第一个可聚焦元素；带标题区之后那是右上关闭钮，
+    // 于是 ↑↓/Enter 会作用在关闭钮上（Enter 变成关闭而不是执行命令）。
+    const api = desktopApi();
+    window.desktop = api;
+    render(<App />);
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    const input = await screen.findByRole("searchbox", { name: "命令搜索" });
+    const dialog = screen.getByRole("dialog", { name: "命令搜索" });
+    expect(document.activeElement).toBe(input);
+
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "命令搜索" })).not.toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    const reopened = await screen.findByRole("searchbox", { name: "命令搜索" });
+    expect(document.activeElement).toBe(reopened);
+    fireEvent.change(reopened, { target: { value: "撤销" } });
+    fireEvent.keyDown(reopened, { key: "Enter" });
+    await waitFor(() => expect(api.undoTimeline).toHaveBeenCalled());
+    expect(screen.queryByRole("dialog", { name: "命令搜索" })).not.toBeInTheDocument();
+  });
+
   it("does not fire timeline shortcuts while the command search input is focused", async () => {
     const api = desktopApi();
     window.desktop = api;

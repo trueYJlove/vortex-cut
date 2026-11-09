@@ -134,8 +134,20 @@ export function AgentSessionPanel({ projectId, baseRevisionId, providers, onClos
 
   const canPrepare = !busy && instruction.trim().length > 0 && [...instruction].length <= 4000 && providerId !== "" && baseRevisionId !== null;
 
-  return <Dialog titleId="agent-session-title" label="AI 助手" onClose={onClose} className="agent-session">
-    <div className="modal-heading"><div><h2 id="agent-session-title">AI 助手</h2><p>多步任务会话：每一步都会先校验再落为版本，失败步骤不产生任何修改。</p></div><button className="icon-button" aria-label="关闭 AI 助手" onClick={onClose}>×</button></div>
+  const footer = step === "form" ? <>
+    <button disabled={!canPrepare} onClick={() => void prepare()}>准备外传确认</button>
+  </> : step === "confirm" && preview ? <>
+    <button onClick={() => { setPreview(undefined); setStep("form"); }}>返回修改</button>
+    <button disabled={busy} onClick={() => void create()}>确认并开始会话</button>
+  </> : step === "running" && session ? <>
+    <button onClick={onClose}>后台等待（关闭面板）</button>
+  </> : step === "done" && session ? <>
+    <button onClick={() => { setSession(undefined); setInstruction(""); setStepDiffs({}); setStep("form"); }}>发起新会话</button>
+    <button onClick={onClose}>关闭</button>
+  </> : undefined;
+
+  return <Dialog title="AI 助手" subtitle="多步任务会话：每一步都会先校验再落为版本，失败步骤不产生任何修改。"
+    closeLabel="关闭 AI 助手" onClose={onClose} className="agent-session" footer={footer}>
     {error && <p className="ai-status" role="status">{error}</p>}
     {step === "form" && <>
       <label>任务指令<textarea aria-label="会话指令" maxLength={4000} value={instruction} onChange={event => setInstruction(event.target.value)} placeholder="例如：把视频剪短到 30 秒左右，并为关键画面加字幕" /></label>
@@ -145,7 +157,6 @@ export function AgentSessionPanel({ projectId, baseRevisionId, providers, onClos
       </select></label>
       {eligible.length === 0 && <p className="readonly-note">尚无支持的 Provider：请先在 AI 修改中完成"测试 AI 修改兼容性"（多步会话与 AI 修改使用同一能力门）。</p>}
       <p className="readonly-note">一次确认覆盖整个会话：会话中每一步的失败反馈会作为上下文再次外发，具体字段在下一步确认页明示。</p>
-      <div className="modal-actions"><button disabled={!canPrepare} onClick={() => void prepare()}>准备外传确认</button></div>
       {history.length > 0 && <fieldset>
         <legend>历史会话</legend>
         <ul className="agent-session-history">
@@ -171,10 +182,6 @@ export function AgentSessionPanel({ projectId, baseRevisionId, providers, onClos
         <dt>有效期</dt><dd>{preview.expires_at}</dd>
       </dl>
       <p className="readonly-note">费用最终以 Provider 账单为准；会话每步成功即落一个版本，可随时撤销。</p>
-      <div className="modal-actions">
-        <button onClick={() => { setPreview(undefined); setStep("form"); }}>返回修改</button>
-        <button disabled={busy} onClick={() => void create()}>确认并开始会话</button>
-      </div>
     </>}
     {step === "running" && session && <>
       <h3>会话进行中</h3>
@@ -183,7 +190,6 @@ export function AgentSessionPanel({ projectId, baseRevisionId, providers, onClos
       <ol className="agent-session-steps">
         {(session.steps ?? []).map(item => <li key={item.ordinal}><strong>第 {item.ordinal} 步</strong> · {stepStageLabel(item)}{item.summary ? <span> · {item.summary}</span> : null}{item.duration_ms !== null ? <small> · {(item.duration_ms / 1000).toFixed(1)}s</small> : null}</li>)}
       </ol>
-      <div className="modal-actions"><button onClick={onClose}>后台等待（关闭面板）</button></div>
     </>}
     {step === "done" && session && <>
       <h3>{session.status === "succeeded" ? "会话完成" : session.status === "failed" ? "会话失败" : "会话已取消"}</h3>
@@ -204,10 +210,6 @@ export function AgentSessionPanel({ projectId, baseRevisionId, providers, onClos
           <TimelineDiffView diff={stepDiffs[item.ordinal] as TimelineDiff} />
         </section>
       ))}
-      <div className="modal-actions">
-        <button onClick={() => { setSession(undefined); setInstruction(""); setStepDiffs({}); setStep("form"); }}>发起新会话</button>
-        <button onClick={onClose}>关闭</button>
-      </div>
     </>}
   </Dialog>;
 }

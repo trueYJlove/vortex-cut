@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ProviderConfig } from "@aivideo/contracts";
+import { LockKeyhole } from "lucide-react";
 import { Dialog } from "../Dialog.js";
 import { errorCode, safeErrorMessage } from "../safeErrors.js";
 
@@ -231,65 +232,65 @@ export function ProviderSettingsDialog({
     setError(""); setStatus(""); setView(next);
   };
 
-  return <Dialog titleId="provider-settings-title" label="Provider 设置" onClose={onClose} className="provider-settings">
-    {pendingDelete && <Dialog titleId="provider-delete-title" label="删除 Provider" onClose={() => setPendingDelete(null)} className="asset-delete-modal">
-      <div className="modal-heading"><div><h2 id="provider-delete-title">删除 Provider</h2></div></div>
-      <p>确定要删除「{pendingDelete.display_name}」吗？</p>
-      <div className="delete-warning">该 Provider 的配置与本机加密存储中的密钥将一并删除，此操作不可撤销。若其已被外发/生成历史引用，删除会被拒绝——此时请改为删除密钥并停用。</div>
-      <div className="modal-actions">
+  return <Dialog titleId="provider-settings-title" title="Provider 设置" subtitle="管理 AI 模型连接 · 密钥只提交、不回显" closeLabel="关闭 Provider 设置" bodyClassName="ps-body" footer={<>{view === "create" ? <>
+        {items.length > 0 && <button className="footer-link" disabled={busy} onClick={() => switchView("manage")}>已有配置</button>}
+        <button className="btn ghost" disabled={busy} onClick={onClose}>取消</button><button className="btn primary" disabled={!canCreate} onClick={() => void create()}>{busy ? "正在创建…" : "创建 Provider"}</button>
+      </> : <>
+        <button className="footer-link" disabled={busy} onClick={() => switchView("create")}>＋ 新建 Provider</button>
+        <button className="btn ghost" disabled={busy} onClick={onClose}>关闭</button><button className="btn primary" disabled={busy || !selected} onClick={() => void testConnection()}>{busy ? "处理中…" : "连接测试"}</button>
+      </>}</>} label="Provider 设置" onClose={onClose} className="provider-settings">
+    {pendingDelete && <Dialog titleId="provider-delete-title" title="删除 Provider" footer={<>
         <button disabled={deleteBusy} onClick={() => setPendingDelete(null)}>取消</button>
         <button className="danger" disabled={deleteBusy} onClick={() => void deleteProvider(pendingDelete)}>{deleteBusy ? "删除中…" : "删除 Provider"}</button>
-      </div>
+      </>} label="删除 Provider" onClose={() => setPendingDelete(null)} className="asset-delete-modal">
+      <p className="confirm-object">确定要删除「<strong>{pendingDelete.display_name}</strong>」吗？</p>
+      <div className="warning"><svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" /></svg><span>该 Provider 的配置与本机加密存储中的密钥将一并删除，此操作不可撤销。若其已被外发/生成历史引用，删除会被拒绝——此时请改为删除密钥并停用。</span></div>
     </Dialog>}
-    <div className="modal-heading">
-      <div><h2 id="provider-settings-title">Provider 设置</h2><p>管理 AI 模型连接 · 密钥只提交、不回显</p></div>
-      <button className="icon-button" aria-label="关闭 Provider 设置" onClick={onClose}>×</button>
-    </div>
-    <div className="ps-body">
-      {error && <p className="ps-feedback ps-error" role="alert">{error}</p>}
-      {status && <p className="ps-feedback" role="status">{status}</p>}
+      {error && <div className="alert alert-danger" role="alert"><svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" /></svg><div><strong>无法完成操作</strong><span>{error}</span></div></div>}
+      {status && <div className="alert alert-ok" role="status"><div><span>{status}</span></div></div>}
       {loading && <p className="ps-hint">正在加载…</p>}
       {view === "create" ? <>
-        <div className="provider-mode-tabs" role="tablist" aria-label="Provider 类型">
-          <button disabled={busy} className={providerMode === "preset" ? "active" : ""} role="tab" aria-selected={providerMode === "preset"} onClick={() => setProviderMode("preset")}>第三方模型提供商</button>
-          <button disabled={busy} className={providerMode === "custom" ? "active" : ""} role="tab" aria-selected={providerMode === "custom"} onClick={() => setProviderMode("custom")}>自定义模型 API</button>
+        <div className="mode-tabs" role="tablist" aria-label="Provider 类型">
+          <button disabled={busy} className={providerMode === "preset" ? "mode-tab active" : "mode-tab"} role="tab" aria-selected={providerMode === "preset"} onClick={() => setProviderMode("preset")}>第三方模型提供商</button>
+          <button disabled={busy} className={providerMode === "custom" ? "mode-tab active" : "mode-tab"} role="tab" aria-selected={providerMode === "custom"} onClick={() => setProviderMode("custom")}>自定义模型 API</button>
         </div>
-        <p className="ps-hint">{!loading && !items.length ? "尚无 Provider。" : ""}连接兼容 OpenAI 的服务，填写地址、密钥和模型即可。</p>
-        <div className="ps-form" aria-label="新建 Provider">
-          {providerMode === "preset" && <label>提供商预设<select aria-label="提供商预设" disabled={busy} value={selectedPreset} onChange={event => {
+        <p className="privacy-line"><LockKeyhole className="icon" size={13} aria-hidden="true" />{!loading && !items.length ? "尚无 Provider。" : ""}连接兼容 OpenAI 的服务，填写地址、密钥和模型即可。</p>
+        <div className="form-grid" aria-label="新建 Provider">
+          {providerMode === "preset" && <div className="field span-2"><label>提供商预设</label><select aria-label="提供商预设" disabled={busy} value={selectedPreset} onChange={event => {
             const preset = PROVIDER_PRESETS.find(item => item.id === event.target.value);
             setSelectedPreset(event.target.value);
             if (preset) setDraft({ display_name: preset.name, base_url: preset.base_url, model: preset.model });
-          }}><option value="">选择提供商</option>{PROVIDER_PRESETS.map(preset => <option key={preset.id} value={preset.id}>{preset.name}</option>)}</select></label>}
-          <label>显示名称<input disabled={busy} aria-label="Provider 名称" value={draft.display_name} onChange={event => setDraft(value => ({ ...value, display_name: event.target.value }))} placeholder="例如：我的网关" /></label>
-          <label>API 地址<input disabled={busy} aria-label="Provider 地址" value={draft.base_url} onChange={event => setDraft(value => ({ ...value, base_url: event.target.value }))} placeholder="https://api.example.com/v1" /></label>
-          <label>API 协议<select aria-label="API 协议" disabled value="openai"><option value="openai">OpenAI Chat Completions</option></select></label>
-          <label>API 密钥<input ref={createSecretRef} aria-label="新建 Provider 密钥" disabled={busy} type="password" autoComplete="off" placeholder="输入 API 密钥（可稍后配置）" /></label>
-          <label>模型 ID<input disabled={busy} aria-label="Provider 模型" value={draft.model} onChange={event => setDraft(value => ({ ...value, model: event.target.value }))} placeholder="例如：gpt-4o-mini" /></label>
+          }}><option value="">选择提供商</option>{PROVIDER_PRESETS.map(preset => <option key={preset.id} value={preset.id}>{preset.name}</option>)}</select></div>}
+          <div className="field span-2"><label>显示名称</label><input disabled={busy} aria-label="Provider 名称" value={draft.display_name} onChange={event => setDraft(value => ({ ...value, display_name: event.target.value }))} placeholder="例如：我的网关" /></div>
+          <div className="field span-2"><label>API 地址</label><input disabled={busy} aria-label="Provider 地址" value={draft.base_url} onChange={event => setDraft(value => ({ ...value, base_url: event.target.value }))} placeholder="https://api.example.com/v1" /></div>
+          <div className="field"><label>API 协议</label><select aria-label="API 协议" disabled value="openai"><option value="openai">OpenAI Chat Completions</option></select></div>
+          <div className="field"><label>模型 ID</label><input disabled={busy} aria-label="Provider 模型" value={draft.model} onChange={event => setDraft(value => ({ ...value, model: event.target.value }))} placeholder="例如：gpt-4o-mini" /></div>
+          <div className="field span-2"><label>API 密钥 <span className="field-hint">密钥只提交、不回显</span></label><input ref={createSecretRef} aria-label="新建 Provider 密钥" disabled={busy} type="password" autoComplete="off" placeholder="输入 API 密钥（可稍后配置）" /></div>
         </div>
-        <small className="ps-hint">密钥仅保存在本机；能力兼容性在各 AI 功能中测试。</small>
+        <p className="provider-note"><LockKeyhole className="icon" size={13} aria-hidden="true" />密钥仅保存在本机；能力兼容性在各 AI 功能中测试。</p>
       </> : <>
-        <label>已有 Provider<select aria-label="已有 Provider" disabled={busy} value={selectedId} onChange={event => {
-          if (secretRef.current) secretRef.current.value = "";
-          setSelectedId(event.target.value); setError(""); setStatus("");
-        }}>{items.map(item => <option key={item.provider_config_id} value={item.provider_config_id}>{item.display_name} · {item.model}</option>)}</select></label>
-        {selected && <>
-          <dl className="ps-details"><dt>API 地址</dt><dd>{selected.base_url}</dd><dt>模型 ID</dt><dd>{selected.model}</dd><dt>密钥状态</dt><dd>{selected.credential_status === "configured" ? "密钥已配置" : "缺少密钥"}</dd></dl>
-          <label>API 密钥<input key={selectedId} ref={secretRef} aria-label="Provider 密钥" type="password" autoComplete="off" disabled={busy} placeholder="仅输入新密钥，留空保留已保存密钥" /></label>
-          <div className="ps-secret-actions"><button disabled={busy} onClick={() => void saveSecret()}>安全保存密钥</button><button disabled={busy || selected.credential_status !== "configured"} onClick={() => void deleteSecret()}>删除密钥</button></div>
-          <div className="ps-secret-actions"><button className="danger" disabled={busy || deleteBusy} onClick={() => { setError(""); setStatus(""); setPendingDelete(selected); }}>删除配置</button></div>
-          <small className="ps-hint">连接测试不发送项目内容；能力兼容性在各 AI 功能中测试。</small>
-        </>}
+        <div className="form-grid" role="group" aria-label="管理已有 Provider">
+          <div className="field span-2">
+            <label>已有 Provider</label>
+            <select aria-label="已有 Provider" disabled={busy} value={selectedId} onChange={event => {
+              if (secretRef.current) secretRef.current.value = "";
+              setSelectedId(event.target.value); setError(""); setStatus("");
+            }}>{items.map(item => <option key={item.provider_config_id} value={item.provider_config_id}>{item.display_name} · {item.model}</option>)}</select>
+          </div>
+          {selected && <>
+            <dl className="detail-panel span-2"><dt>API 地址</dt><dd>{selected.base_url}</dd><dt>模型 ID</dt><dd>{selected.model}</dd><dt>密钥状态</dt><dd>{selected.credential_status === "configured" ? "密钥已配置" : "缺少密钥"}</dd></dl>
+            <div className="field span-2">
+              <label>API 密钥</label>
+              <input key={selectedId} ref={secretRef} aria-label="Provider 密钥" type="password" autoComplete="off" disabled={busy} placeholder="仅输入新密钥，留空保留已保存密钥" />
+            </div>
+            <div className="field span-2 secret-actions">
+              <button className="btn" disabled={busy} onClick={() => void saveSecret()}>安全保存密钥</button>
+              <button className="btn" disabled={busy || selected.credential_status !== "configured"} onClick={() => void deleteSecret()}>删除密钥</button>
+              <button className="btn danger-quiet" disabled={busy || deleteBusy} onClick={() => { setError(""); setStatus(""); setPendingDelete(selected); }}>删除配置</button>
+            </div>
+          </>}
+        </div>
+        <p className="provider-note"><LockKeyhole className="icon" size={13} aria-hidden="true" />连接测试不发送项目内容；能力兼容性在各 AI 功能中测试。</p>
       </>}
-    </div>
-    <div className="modal-actions ps-footer">
-      {view === "create" ? <>
-        {items.length > 0 && <button className="ps-back" disabled={busy} onClick={() => switchView("manage")}>已有配置</button>}
-        <button disabled={busy} onClick={onClose}>取消</button><button disabled={!canCreate} onClick={() => void create()}>{busy ? "正在创建…" : "创建 Provider"}</button>
-      </> : <>
-        <button className="ps-back" disabled={busy} onClick={() => switchView("create")}>＋ 新建 Provider</button>
-        <button disabled={busy} onClick={onClose}>关闭</button><button disabled={busy || !selected} onClick={() => void testConnection()}>{busy ? "处理中…" : "连接测试"}</button>
-      </>}
-    </div>
   </Dialog>;
 }

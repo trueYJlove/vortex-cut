@@ -79,8 +79,7 @@ export function SettingsDialog({ onClose, onNotify, onOpenProviderSettings }: { 
 
   const effectiveLabel = state?.effective ? EFFECTIVE_LABELS[state.effective.proxy_mode] + (state.effective.proxy_mode === "custom" && state.effective.provider_proxy ? ` · ${state.effective.provider_proxy}` : "") : "内核尚未启动";
 
-  return <Dialog titleId="settings-title" label="设置" onClose={onClose} className="settings-dialog">
-    <div className="modal-heading"><div><h2 id="settings-title">设置</h2><p>Provider 出网与本地分析行为。</p></div><button className="icon-button" aria-label="关闭设置" onClick={onClose}>×</button></div>
+  return <Dialog titleId="settings-title" title="设置" subtitle="Provider 出网与本地分析行为。" closeLabel="关闭设置" footer={state !== undefined ? <button disabled={restarting || !state.pending_restart} title={state.pending_restart ? "重启本地内核以应用新代理设置" : "没有待生效的设置"} onClick={() => void restartCore()}>{restarting ? "正在重启内核…" : confirmRestart ? "再次点击确认重启" : "重启内核使设置生效"}</button> : undefined} label="设置" onClose={onClose} className="settings-dialog">
     {error && <p className="ai-status" role="status">{error}</p>}
     {state && <>
       <fieldset>
@@ -110,9 +109,6 @@ export function SettingsDialog({ onClose, onNotify, onOpenProviderSettings }: { 
         </div>
       </fieldset>
       {confirmRestart && <p className="ai-status" role="alert">重启将中断进行中的任务（转录/生成/导出等），确认继续吗？<button onClick={() => { setConfirmRestart(false); void restartCore(); }}>确认重启</button><button onClick={() => setConfirmRestart(false)}>取消</button></p>}
-      <div className="modal-actions">
-        <button disabled={restarting || !state.pending_restart} title={state.pending_restart ? "重启本地内核以应用新代理设置" : "没有待生效的设置"} onClick={() => void restartCore()}>{restarting ? "正在重启内核…" : confirmRestart ? "再次点击确认重启" : "重启内核使设置生效"}</button>
-      </div>
     </>}
   </Dialog>;
 }

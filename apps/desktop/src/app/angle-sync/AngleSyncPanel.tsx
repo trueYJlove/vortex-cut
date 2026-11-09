@@ -195,14 +195,9 @@ export function AngleSyncPanel({
     } finally { setBusy(false); }
   };
 
-  return <Dialog titleId="angle-sync-title" label="机位同步" onClose={onClose} className="angle-sync-modal">
-    <div className="modal-heading">
-      <div>
-        <h2 id="angle-sync-title">机位同步</h2>
-        <p>本地音频互相关对齐（零外传）：算出每个机位相对参考机位的时间偏移，供多机位剪辑复用。</p>
-      </div>
-      <button type="button" className="icon-btn" aria-label="关闭机位同步" onClick={onClose}>×</button>
-    </div>
+  return <Dialog title="机位同步" subtitle="本地音频互相关对齐（零外传）：算出每个机位相对参考机位的时间偏移，供多机位剪辑复用。"
+    closeLabel="关闭机位同步" onClose={onClose} className="angle-sync-modal"
+    footer={<button type="button" onClick={onClose}>关闭</button>}>
 
     {error && <p className="ai-status" role="status">{error}</p>}
     {inFlight && <p className="readonly-note" role="status" aria-live="polite">机位同步分析中…（完成后自动刷新）</p>}
@@ -276,8 +271,5 @@ export function AngleSyncPanel({
 
     <p className="readonly-note">偏移为正 = 该机位晚于参考机位；置信度不足或素材变化时会如实标为「不可用 / 素材已变化」，不会给出看似合理的数值。帧级对齐还需打板/时码锚点。</p>
 
-    <div className="modal-actions">
-      <button type="button" onClick={onClose}>关闭</button>
-    </div>
   </Dialog>;
 }

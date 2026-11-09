@@ -301,17 +301,16 @@ export function ShotRequirementTimelineBatchAssemblyPanel({
               </button>
             )}
             {preview && (
-              <Dialog label="确认批量时间线装配" onClose={() => setPreview(undefined)} className="compact-dialog">
+              <Dialog title="确认批量时间线装配" onClose={() => setPreview(undefined)} className="compact-dialog" footer={<>
+                  <button onClick={() => setPreview(undefined)}>返回修改</button>
+                  <button disabled={busy} onClick={() => void apply()}>显式确认批量装配</button>
+                </>}>
                 <p>
                   将以一个事务装配 {preview.item_count} 个图片 Clip；任一条失败则全部不装配。现有 Clip
                   {preview.clip_count_before} 个，装配后 {preview.clip_count_after} 个，位移
                   {preview.shifted_clip_count} 个，字幕位移 {preview.shifted_caption_count} 个。
                 </p>
                 <p>总时长：{preview.duration_before_us / 1_000_000}s → {preview.duration_after_us / 1_000_000}s</p>
-                <div className="modal-actions">
-                  <button onClick={() => setPreview(undefined)}>返回修改</button>
-                  <button disabled={busy} onClick={() => void apply()}>显式确认批量装配</button>
-                </div>
               </Dialog>
             )}
           </>}

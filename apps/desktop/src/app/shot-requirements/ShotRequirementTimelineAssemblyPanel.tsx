@@ -83,7 +83,7 @@ export function ShotRequirementTimelineAssemblyPanel({
         <label>布局<select aria-label="装配图片布局" value={layout} onChange={event => setLayout(event.target.value as TimelineLayout)}><option value="fit">适应</option><option value="crop_fill">裁切填充</option><option value="blurred_background">模糊背景</option></select></label>
       </div>
       {!preview && <button disabled={busy || !valid} onClick={() => void prepare()}>准备时间线装配</button>}
-      {preview && <Dialog label="确认时间线装配" onClose={() => setPreview(undefined)} className="compact-dialog"><p>将新增 1 个图片 Clip；现有 Clip {preview.clip_count_before} 个，位移 {preview.shifted_clip_count} 个，字幕位移 {preview.shifted_caption_count} 个。</p><p>总时长：{preview.duration_before_us / 1_000_000}s → {preview.duration_after_us / 1_000_000}s</p><div className="modal-actions"><button onClick={() => setPreview(undefined)}>返回修改</button><button disabled={busy} onClick={() => void apply()}>显式确认装配</button></div></Dialog>}
+      {preview && <Dialog title="确认时间线装配" onClose={() => setPreview(undefined)} className="compact-dialog" footer={<><button onClick={() => setPreview(undefined)}>返回修改</button><button disabled={busy} onClick={() => void apply()}>显式确认装配</button></>}><p>将新增 1 个图片 Clip；现有 Clip {preview.clip_count_before} 个，位移 {preview.shifted_clip_count} 个，字幕位移 {preview.shifted_caption_count} 个。</p><p>总时长：{preview.duration_before_us / 1_000_000}s → {preview.duration_after_us / 1_000_000}s</p></Dialog>}
     </>}
     {assemblies.length > 0 && <p>已记录 {assemblies.length} 条不可变装配事实。</p>}
   </section>;

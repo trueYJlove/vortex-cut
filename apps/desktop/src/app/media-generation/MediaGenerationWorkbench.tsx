@@ -328,11 +328,15 @@ export function MediaGenerationWorkbench({ project, assets, onClose }: Props) {
 
   const selectedRequest = requests.find(item => item.request_id === selectedRequestId);
 
-  return <Dialog titleId="generation-workbench-title" label="生成验证" onClose={onClose} className="generation-workbench">
-      <div className="modal-heading">
-        <div><h2 id="generation-workbench-title">生成验证（模拟）</h2><p>验证生成请求、任务状态和恢复链路，不执行真实生成。</p></div>
-        <button className="icon-btn" aria-label="关闭生成验证" onClick={close}>×</button>
-      </div>
+  const footer = view === "create" ? (!prepared ? <>
+    <button disabled={!draft || busy !== null} onClick={() => void prepare()}>{busy === "prepare" ? "准备中…" : "准备验证"}</button>
+  </> : <>
+    <button disabled={busy !== null} onClick={() => setPrepared(undefined)}>返回修改</button>
+    <button disabled={busy !== null} onClick={() => void create()}>{busy === "create" ? "创建中…" : "确认并创建验证任务"}</button>
+  </>) : undefined;
+
+  return <Dialog title="生成验证（模拟）" subtitle="验证生成请求、任务状态和恢复链路，不执行真实生成。"
+      closeLabel="关闭生成验证" onClose={close} className="generation-workbench" footer={footer}>
       <p className="simulation-notice">{SIMULATION_NOTICE}</p>
       <div className="generation-tabs" role="tablist" aria-label="生成验证视图">
         <button role="tab" aria-selected={view === "create"} className={view === "create" ? "active" : ""} onClick={() => setView("create")}>新建验证</button>
@@ -368,7 +372,6 @@ export function MediaGenerationWorkbench({ project, assets, onClose }: Props) {
             <label>速度（千分比）<input aria-label="TTS 速度" type="number" min={500} max={2000} value={ttsForm.speedMilli} onChange={event => { invalidatePrepared(); setTtsForm(value => ({ ...value, speedMilli: event.target.value })); }} /></label>
             <p className="readonly-note">以上仅为参数验证，不会合成或试听真实声音。</p>
           </div>}
-          <div className="modal-actions"><button disabled={!draft || busy !== null} onClick={() => void prepare()}>{busy === "prepare" ? "准备中…" : "准备验证"}</button></div>
         </> : <div className="generation-confirm">
           <h3>确认模拟验证请求</h3>
           <p className="simulation-notice">{SIMULATION_NOTICE}</p>
@@ -381,7 +384,6 @@ export function MediaGenerationWorkbench({ project, assets, onClose }: Props) {
             <dt>参数</dt><dd><code>{JSON.stringify(prepared.value.parameters)}</code></dd>
             <dt>Request hash</dt><dd>{prepared.value.request_sha256}</dd>
           </dl>
-          <div className="modal-actions"><button disabled={busy !== null} onClick={() => setPrepared(undefined)}>返回修改</button><button disabled={busy !== null} onClick={() => void create()}>{busy === "create" ? "创建中…" : "确认并创建验证任务"}</button></div>
         </div>}
       </div>}
 

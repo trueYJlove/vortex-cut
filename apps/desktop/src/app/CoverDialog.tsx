@@ -5,7 +5,6 @@
  *  持久化由调用方负责（onChange 回调 + localStorage，键
  *  vortex-cut.cover.<projectId>），本组件只管编辑与会话内预览。 */
 import { useRef, useState } from "react";
-import { X } from "lucide-react";
 import { Dialog } from "./Dialog.js";
 
 const MAX_COVER_EDGE = 540;
@@ -70,15 +69,10 @@ export function CoverDialog({ coverUrl, onClose, onCapture, onChange }: {
   };
 
   return (
-    <Dialog titleId="cover-title" label="设置项目封面" onClose={onClose} className="cover-modal">
-      <div className="modal-heading">
-        <div>
-          <h2 id="cover-title">设置项目封面</h2>
-          <p>用于项目列表与导出信息展示 · 本机持久化</p>
-        </div>
-        <button type="button" className="icon-btn" title="关闭封面弹窗" aria-label="关闭封面弹窗" onClick={onClose}><X size={15} /></button>
-      </div>
-      <div className="cov-body">
+    <Dialog titleId="cover-title" title="设置项目封面" subtitle="用于项目列表与导出信息展示 · 本机持久化" closeLabel="关闭封面弹窗" bodyClassName="cov-body" footer={<>
+        <button type="button" disabled={!coverUrl} onClick={() => onChange(null)}>移除封面</button>
+        <button type="button" onClick={onClose}>完成</button>
+      </>} label="设置项目封面" onClose={onClose} className="cover-modal">
         {coverUrl
           ? <img className="cov-preview" src={coverUrl} alt="当前封面预览" />
           : <div className="cov-preview cov-preview-empty">暂无封面（16:9）</div>}
@@ -89,11 +83,6 @@ export function CoverDialog({ coverUrl, onClose, onCapture, onChange }: {
             onChange={event => void pickFile(event.target.files?.[0])} />
         </div>
         {error && <p className="cov-error" role="status">{error}</p>}
-      </div>
-      <div className="modal-actions">
-        <button type="button" disabled={!coverUrl} onClick={() => onChange(null)}>移除封面</button>
-        <button type="button" onClick={onClose}>完成</button>
-      </div>
     </Dialog>
   );
 }

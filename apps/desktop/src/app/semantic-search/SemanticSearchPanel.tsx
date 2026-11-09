@@ -170,12 +170,8 @@ export function SemanticSearchPanel({ projectId, assetNames, assets, onClose }: 
 
 
   return (
-    <Dialog label="素材语义检索" onClose={onClose} className="semantic-search">
-      <header className="modal-header">
-        <h2>素材语义检索</h2>
-        <button type="button" className="icon-btn" onClick={onClose} aria-label="关闭素材语义检索">×</button>
-      </header>
-      <div className="modal-body">
+    <Dialog title="素材语义检索" closeLabel="关闭素材语义检索" onClose={onClose} className="semantic-search"
+      footer={<button type="button" onClick={onClose}>关闭</button>}>
         <form
           className="semantic-search-form"
           onSubmit={(e) => { e.preventDefault(); void run(); }}
@@ -291,10 +287,6 @@ export function SemanticSearchPanel({ projectId, assetNames, assets, onClose }: 
             </ul>
           ) : null}
         </section>
-      </div>
-      <footer className="modal-actions">
-        <button type="button" onClick={onClose}>关闭</button>
-      </footer>
     </Dialog>
   );
 }

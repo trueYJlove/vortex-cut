@@ -279,12 +279,18 @@ export function KeyframeReviewPanel({
   const submitted = phase !== "idle";
 
   return (
-    <Dialog label="关键帧外传审阅" onClose={onClose} className="keyframe-review">
-      <header className="modal-header">
-        <h2>关键帧外传审阅</h2>
-        <button type="button" className="icon-btn" onClick={onClose} aria-label="关闭关键帧外传审阅">×</button>
-      </header>
-      <div className="modal-body">
+    <Dialog title="关键帧外传审阅" closeLabel="关闭关键帧外传审阅" onClose={onClose} className="keyframe-review"
+      footer={<>
+        <button type="button" onClick={onClose}>取消</button>
+        <button
+          type="button"
+          className="primary"
+          disabled={!preview || !confirmed || busy || remaining.length === 0 || submitted}
+          onClick={() => void submit()}
+        >
+          {submitted ? "已提交" : busy ? "提交中…" : "确认外传"}
+        </button>
+      </>}>
         <p className="readonly-note">
           这些关键帧将被发送给你配置的云端 Provider。<strong>这不是匿名化</strong>：
           768 像素下人物面部、室内空间等仍可辨认。请逐张确认后再继续。
@@ -371,18 +377,6 @@ export function KeyframeReviewPanel({
             ) : null}
           </>
         ) : null}
-      </div>
-      <footer className="modal-actions">
-        <button type="button" onClick={onClose}>取消</button>
-        <button
-          type="button"
-          className="primary"
-          disabled={!preview || !confirmed || busy || remaining.length === 0 || submitted}
-          onClick={() => void submit()}
-        >
-          {submitted ? "已提交" : busy ? "提交中…" : "确认外传"}
-        </button>
-      </footer>
     </Dialog>
   );
 }

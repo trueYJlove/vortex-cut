@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="graphite">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Vortex Cut · 对话框系统设计预览</title>
+<style>
+:root{
+  --page:#0d1012;--sidebar:#111518;--page-text:#e7ecea;--page-muted:#7f8b88;--page-line:rgba(255,255,255,.075);
+  --d-surface:#171b1e;--d-raise:#1d2326;--d-input:#22292c;--d-input-hover:#293235;--d-footer:#15191c;
+  --d-text:#edf1ef;--d-text-2:#b5bfbc;--d-muted:#85918e;--d-faint:#64716e;
+  --d-line:rgba(255,255,255,.075);--d-edge:rgba(255,255,255,.12);
+  --accent:#35d6ae;--accent-hover:#59e1bf;--accent-ink:#07251e;--accent-dim:rgba(53,214,174,.11);
+  --danger:#e35d62;--danger-hover:#ee7377;--danger-dim:rgba(227,93,98,.09);--warning:#d8b06a;
+  --radius:12px;--control-radius:7px;--shadow:0 26px 70px rgba(0,0,0,.52),0 5px 20px rgba(0,0,0,.3);
+  font-family:"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;color-scheme:dark;
+}
+html[data-theme="soft"]{
+  --page:#151817;--sidebar:#1a1e1d;--page-text:#eef1ec;--page-muted:#969f97;--page-line:rgba(255,255,255,.085);
+  --d-surface:#242927;--d-raise:#2b312e;--d-input:#313835;--d-input-hover:#39413d;--d-footer:#202522;
+  --d-text:#f0f2ed;--d-text-2:#c2c9c1;--d-muted:#98a29a;--d-faint:#758078;
+  --d-line:rgba(255,255,255,.09);--d-edge:rgba(255,255,255,.105);
+  --accent:#35d6ae;--accent-hover:#59e1bf;--accent-ink:#07251e;--accent-dim:rgba(53,214,174,.1);
+  --shadow:0 24px 58px rgba(0,0,0,.36),0 4px 16px rgba(0,0,0,.2);
+}
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;background:var(--page);color:var(--page-text)}
+body{font-size:13px;overflow:hidden}button,input,select,textarea{font:inherit}button{cursor:pointer}button:disabled{cursor:not-allowed;opacity:.42}
+button,input,select,textarea{outline:none}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button{touch-action:manipulation}svg{display:block}.icon{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none}
+[hidden]{display:none!important}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.gallery{height:100vh;display:grid;grid-template-columns:220px minmax(0,1fr)}
+.sidebar{position:relative;z-index:5;display:flex;flex-direction:column;min-height:0;background:var(--sidebar);border-right:1px solid var(--page-line);padding:25px 16px 18px}
+.brand{display:flex;align-items:center;gap:11px;padding:0 8px 25px}.brand-mark{width:31px;height:31px;color:var(--accent)}
+.brand-name{font-size:13px;font-weight:700;letter-spacing:2.1px;line-height:1.25}.brand-sub{font-size:9px;color:var(--page-muted);letter-spacing:1.55px;margin-top:5px}
+.preview-kicker{display:flex;align-items:center;gap:7px;margin:0 8px 24px;color:var(--page-muted);font-size:10px;letter-spacing:.5px}
+.preview-kicker:before{content:"";width:5px;height:5px;border-radius:50%;background:var(--accent)}
+.nav-label{padding:0 10px;margin:0 0 9px;color:var(--page-muted);font-size:10px;font-weight:600;letter-spacing:1.2px}
+.category-nav{display:grid;gap:4px}.nav-item{position:relative;width:100%;min-height:54px;display:grid;grid-template-columns:28px 1fr 18px;align-items:center;gap:8px;padding:8px 9px;border:0;border-radius:8px;background:transparent;color:var(--page-muted);text-align:left;transition:background .16s,color .16s}
+.nav-item:hover{background:rgba(255,255,255,.035);color:var(--page-text)}.nav-item.active{background:var(--accent-dim);color:var(--page-text)}
+.nav-item.active:before{content:"";position:absolute;left:-16px;top:14px;bottom:14px;width:2px;background:var(--accent)}
+.nav-item .icon{width:17px;height:17px;justify-self:center}.nav-item.active .icon{color:var(--accent)}
+.nav-name{display:block;font-size:12px;font-weight:550;line-height:1.35}.nav-en{display:block;font-size:9px;letter-spacing:.35px;color:var(--page-muted);margin-top:3px}
+.nav-num{font-size:9px;font-variant-numeric:tabular-nums;color:var(--page-muted);align-self:start;margin-top:3px}.nav-item.active .nav-num{color:var(--accent)}
+.reference-nav{margin-top:23px;padding-top:20px;border-top:1px solid var(--page-line)}
+.sidebar-bottom{margin-top:auto;padding:18px 8px 0}.direction-caption{display:flex;align-items:center;gap:8px;font-size:10px;color:var(--page-muted);margin-bottom:7px}.direction-caption i{width:6px;height:6px;background:var(--accent);border-radius:50%}
+.direction-name{font-size:11px;color:var(--page-text);letter-spacing:.1px}.direction-note{margin:6px 0 0;font-size:10px;line-height:1.6;color:var(--page-muted)}
+.main{height:100vh;min-width:0;display:flex;flex-direction:column;overflow:hidden}
+.topbar{height:70px;flex:none;display:flex;align-items:center;justify-content:space-between;gap:20px;padding:0 28px;border-bottom:1px solid var(--page-line)}
+.study-id{display:flex;align-items:center;gap:11px;min-width:0}.study-id .index{font:10px/1 Consolas,monospace;color:var(--accent);letter-spacing:.6px}.study-id h1{font-size:13px;font-weight:600;margin:0;white-space:nowrap}.study-id .slash{color:var(--page-muted)}
+.offline{display:flex;align-items:center;gap:6px;color:var(--page-muted);font-size:10px;white-space:nowrap}.offline .icon{width:13px;height:13px}
+.top-actions{display:flex;align-items:center;gap:18px}.theme-switch{display:flex;padding:3px;background:rgba(0,0,0,.18);border:1px solid var(--page-line);border-radius:9px;gap:2px}
+.theme-btn{height:36px;display:flex;align-items:center;gap:8px;padding:0 11px;border:0;border-radius:6px;background:transparent;color:var(--page-muted);text-align:left;white-space:nowrap}
+.theme-btn:hover{color:var(--page-text);background:rgba(255,255,255,.035)}.theme-btn.active{background:var(--d-raise);color:var(--page-text);box-shadow:0 1px 2px rgba(0,0,0,.18)}
+.theme-dot{width:12px;height:12px;border-radius:3px;background:#171b1e;border:1px solid #53605c;position:relative;flex:none}.theme-dot:after{content:"";position:absolute;right:1px;bottom:1px;width:4px;height:4px;background:var(--accent);border-radius:1px}.theme-dot.soft{background:#313835;border-color:#78837b}
+.theme-copy{font-size:10px;font-weight:550}.theme-copy small{display:block;font-size:8px;font-weight:400;color:var(--page-muted);margin-top:2px;letter-spacing:.2px}.recommend{font-size:8px;color:var(--accent);margin-left:2px}
+.intro{height:84px;flex:none;display:flex;align-items:center;justify-content:space-between;gap:20px;padding:0 28px}
+.intro h2{font-size:21px;line-height:1.3;font-weight:560;letter-spacing:-.35px;margin:0 0 7px}.intro p{margin:0;color:var(--page-muted);font-size:11px;line-height:1.5}
+.category-step{display:flex;align-items:center;gap:5px}.step-count{font:10px/1 Consolas,monospace;color:var(--page-muted);margin-right:10px}.step-count b{font-weight:500;color:var(--page-text)}
+.step-btn{width:31px;height:31px;display:grid;place-items:center;border:1px solid var(--page-line);border-radius:6px;background:transparent;color:var(--page-muted)}.step-btn:hover{background:var(--d-raise);color:var(--page-text)}.step-btn .icon{width:14px;height:14px}
+.workspace{flex:1;min-height:0;display:flex;flex-direction:column;padding:0 28px}
+.stage-head{height:43px;flex:none;display:flex;align-items:center;justify-content:space-between;gap:14px;border:1px solid var(--page-line);border-bottom:0;border-radius:11px 11px 0 0;background:var(--sidebar);padding:0 14px 0 17px}
+.stage-id{display:flex;align-items:center;gap:10px;min-width:0}.stage-number{font:10px/1 Consolas,monospace;color:var(--accent)}.stage-title{font-size:11px;font-weight:600;white-space:nowrap}.stage-tag{font-size:9px;color:var(--page-muted);padding-left:10px;border-left:1px solid var(--page-line);white-space:nowrap}
+.stage-actions{display:flex;align-items:center;gap:12px}.placement-hint{font-size:9px;color:var(--page-muted);white-space:nowrap}.placement-hint b{font-weight:500;color:var(--page-text)}
+.reopen-top{height:26px;display:flex;align-items:center;gap:6px;padding:0 9px;border:0;border-radius:5px;background:var(--d-raise);color:var(--page-text);font-size:10px}.reopen-top:hover{background:var(--d-input-hover)}.reopen-top .icon{width:12px;height:12px}
+.stage{position:relative;isolation:isolate;flex:1;min-height:0;overflow:hidden;border:1px solid var(--page-line);border-radius:0 0 11px 11px;background:#0b0e10}
+.editor{position:absolute;inset:0;display:grid;grid-template-columns:42px minmax(0,1fr) 174px;grid-template-rows:34px minmax(0,1fr) 157px;background:#101417;color:#79817f;pointer-events:none;user-select:none;filter:saturate(.72)}
+.editor-menu{grid-column:1/-1;display:flex;align-items:center;gap:18px;padding:0 13px;border-bottom:1px solid #292e30;background:#171b1e;font-size:8px}.editor-logo{color:#35d6ae;margin-right:4px}.editor-menu .spacer{flex:1}.editor-rev{font:8px Consolas,monospace;color:#8c9692}
+.editor-rail{display:flex;flex-direction:column;align-items:center;gap:17px;padding-top:15px;border-right:1px solid #292e30;background:#15191c}.editor-rail .icon{width:15px;height:15px}.editor-rail .on{color:#35d6ae}
+.editor-view{min-width:0;min-height:0;display:flex;flex-direction:column;background:#0e1214}.editor-view-head{height:33px;display:flex;align-items:center;justify-content:space-between;padding:0 15px;font-size:8px}.transport{display:flex;align-items:center;gap:10px}.transport .icon{width:11px;height:11px}.timecode{font:8px Consolas,monospace;color:#a0aaa6}
+.editor-screen{flex:1;min-height:0;display:grid;place-items:center;padding:0 32px 18px}.editor-screen svg{width:100%;height:100%;max-height:280px;background:#090c0d}
+.editor-inspector{border-left:1px solid #292e30;background:#15191c;padding:13px 12px;font-size:8px}.inspector-title{color:#a5aeaa;margin-bottom:14px}.inspector-row{display:flex;justify-content:space-between;margin:11px 0}.fake-control{height:18px;border-radius:3px;background:#23292c;margin:-4px 0 8px}.fake-line{height:1px;background:#292e30;margin:13px 0}
+.editor-timeline{grid-column:2/-1;min-width:0;border-top:1px solid #292e30;background:#131719;padding:0 12px}.timeline-tools{height:29px;display:flex;align-items:center;gap:12px;font-size:8px}.timeline-tools .icon{width:11px;height:11px}.timeline-tools .spacer{flex:1}.ruler{height:17px;display:flex;justify-content:space-between;font:7px Consolas,monospace;border-bottom:1px solid #252b2d}.track{height:37px;display:grid;grid-template-columns:50px 1fr;align-items:center;gap:8px}.track-name{font-size:7px}.clips{height:27px;display:flex;gap:3px}.clip{position:relative;overflow:hidden;border-radius:3px;background:#30403d;border-top:1px solid #527168}.clip:nth-child(2n){background:#343d43;border-color:#5e6971}.clip:after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(90deg,transparent 0 18px,rgba(255,255,255,.06) 18px 19px)}.clip.audio{background:#263c38;border-color:#3a6a5d}.clip.caption{background:#3d3830;border-color:#746448;height:17px}.editor-playhead{position:absolute;left:43%;top:34px;bottom:0;width:1px;background:#35d6ae;opacity:.55}
+.stage-shade{position:absolute;inset:0;background:rgba(5,8,9,.65);z-index:1}
+.dialog-host{position:absolute;inset:0;z-index:2;display:flex;align-items:center;justify-content:center;padding:22px}
+.dialog{width:min(var(--dialog-width,640px),calc(100% - 32px));max-height:100%;display:flex;flex-direction:column;overflow:hidden;container-type:inline-size;background:var(--d-surface);color:var(--d-text);border:1px solid var(--d-edge);border-radius:var(--radius);box-shadow:var(--shadow);font-size:13px;animation:dialog-in .18s ease-out}
+@keyframes dialog-in{from{opacity:0;transform:translateY(5px) scale(.995)}to{opacity:1;transform:none}}
+.dialog-header{flex:none;display:flex;align-items:flex-start;justify-content:space-between;gap:18px;padding:21px 24px 18px}.dialog-title{margin:0;font-size:18px;line-height:26px;font-weight:600;letter-spacing:-.2px}.dialog-subtitle{margin:4px 0 0;color:var(--d-muted);font-size:11.5px;line-height:17px;max-width:650px}
+.icon-button{width:28px;height:28px;min-width:28px;display:grid;place-items:center;border:0;border-radius:6px;background:transparent;color:var(--d-muted)}.icon-button:hover{background:var(--d-input);color:var(--d-text)}.icon-button .icon{width:15px;height:15px}
+.dialog-body{min-height:0;overflow:auto;padding:0 24px 22px;scrollbar-width:thin;scrollbar-color:var(--d-input-hover) transparent}.dialog-body::-webkit-scrollbar{width:7px}.dialog-body::-webkit-scrollbar-thumb{background:var(--d-input-hover);border-radius:5px}
+.dialog-footer{flex:none;min-height:65px;display:flex;align-items:center;justify-content:flex-end;gap:10px;padding:14px 24px;border-top:1px solid var(--d-line);background:var(--d-footer)}
+.footer-note{margin-right:auto;color:var(--d-muted);font-size:10.5px;line-height:1.6;display:flex;align-items:center;gap:7px;max-width:330px}.footer-note .icon{width:13px;height:13px}.footer-link{margin-right:auto;padding:0;border:0;background:transparent;color:var(--d-muted);font-size:12px}.footer-link:hover{color:var(--accent)}
+.btn{height:34px;min-height:34px;display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:0 16px;border:1px solid transparent;border-radius:var(--control-radius);background:var(--d-raise);color:var(--d-text);font-size:12.5px;font-weight:500;white-space:nowrap;transition:background .15s,border-color .15s,color .15s}.btn:hover{background:var(--d-input-hover)}.btn.secondary{border-color:var(--d-line)}.btn.ghost{background:transparent;color:var(--d-text-2)}.btn.ghost:hover{background:var(--d-input);color:var(--d-text)}
+.btn.primary{background:var(--accent);color:var(--accent-ink);font-weight:650;padding:0 20px}.btn.primary:hover{background:var(--accent-hover)}.btn.danger{background:var(--danger);color:#fff;font-weight:600;padding:0 18px}.btn.danger:hover{background:var(--danger-hover)}
+.btn.small{height:28px;min-height:28px;padding:0 11px;font-size:11.5px}.btn .icon{width:14px;height:14px}
+.field{display:grid;gap:7px;min-width:0}.field>label,.field>.field-label{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--d-text-2);font-size:12px;line-height:17px}.field-hint{color:var(--d-muted);font-size:10px;font-weight:400}.field-value{font:11px Consolas,monospace;color:var(--accent)}
+input[type="text"],input[type="password"],input[type="search"],select,textarea{width:100%;height:34px;padding:0 11px;border:1px solid var(--d-line);border-radius:var(--control-radius);background-color:var(--d-input);color:var(--d-text);font-size:12.5px;transition:background .15s,border-color .15s}textarea{height:auto;min-height:78px;padding:9px 11px;resize:vertical;line-height:1.6}
+input:hover:not(:focus):not(:disabled),select:hover:not(:focus):not(:disabled),textarea:hover:not(:focus):not(:disabled){background-color:var(--d-input-hover)}input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-dim)}input:disabled,select:disabled{opacity:.58}input::placeholder,textarea::placeholder{color:var(--d-faint)}
+select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23939f9b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;padding-right:30px}
+input[type="range"]{width:100%;height:16px;margin:2px 0 0;accent-color:var(--accent);cursor:pointer}input[type="checkbox"]{width:14px;height:14px;margin:0;accent-color:var(--accent)}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:15px 16px}.span-2{grid-column:1/-1}.helper{margin:0;color:var(--d-muted);font-size:10.5px;line-height:1.65}.section-label{display:flex;align-items:center;justify-content:space-between;margin:0 0 13px;color:var(--d-text-2);font-size:11px;font-weight:600;letter-spacing:.35px}.section-label span{font:9px Consolas,monospace;color:var(--d-muted);letter-spacing:.3px}
+/* Export */
+.export-dialog{--dialog-width:640px}.project-strip{display:grid;grid-template-columns:112px minmax(0,1fr);gap:17px;align-items:center;margin-bottom:20px}.project-cover{position:relative;width:112px;height:70px;padding:0;overflow:hidden;border:0;border-radius:7px;background:#27332f;color:#fff}.project-cover svg{width:100%;height:100%}.project-cover span{position:absolute;inset:auto 0 0;padding:5px;background:rgba(7,12,11,.74);font-size:9px;text-align:center}.project-cover:hover span{background:rgba(7,12,11,.9);color:var(--accent)}
+.project-name{font-size:13px;font-weight:550;margin-bottom:7px}.project-stats{display:flex;gap:15px;color:var(--d-muted);font-size:10.5px;margin-bottom:11px}.project-stats b{color:var(--d-text-2);font-weight:500;margin-left:4px}.filename{display:grid;grid-template-columns:minmax(0,1fr) 42px;align-items:center}.filename input{border-radius:7px 0 0 7px}.file-ext{height:34px;display:grid;place-items:center;border:1px solid var(--d-line);border-left:0;border-radius:0 7px 7px 0;background:var(--d-raise);color:var(--d-muted);font:10px Consolas,monospace}
+.export-grid{display:grid;grid-template-columns:minmax(0,1fr) 126px;gap:20px}.ratio-panel{align-self:start;background:var(--d-raise);border-radius:8px;padding:13px;text-align:center}.ratio-frame{height:68px;display:grid;place-items:center;background:#111617;border:1px solid var(--d-line);border-radius:4px;color:var(--d-text-2);font:12px Consolas,monospace;margin-bottom:10px}.ratio-name{font-size:11px;color:var(--d-text-2)}.ratio-dim{font:10px Consolas,monospace;color:var(--d-muted);margin-top:5px}.ratio-sub{font-size:9px;color:var(--d-muted);margin-top:8px;line-height:1.5}
+.path-control{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px}.path-value{height:34px;display:flex;align-items:center;gap:7px;padding:0 10px;border-radius:7px;background:var(--d-input);color:var(--d-muted);font-size:10.5px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.path-value .icon{width:13px;height:13px}
+/* Provider */
+.provider-dialog{--dialog-width:640px}.mode-tabs{display:flex;gap:3px;padding:3px;background:#101416;border:1px solid var(--d-line);border-radius:8px;margin-bottom:12px}.mode-tab{flex:1;height:31px;border:0;border-radius:5px;background:transparent;color:var(--d-muted);font-size:12px}.mode-tab:hover{color:var(--d-text);background:rgba(255,255,255,.03)}.mode-tab.active{background:var(--d-raise);color:var(--d-text);box-shadow:0 1px 2px rgba(0,0,0,.15)}.mode-tab.active:before{content:"";display:inline-block;width:5px;height:5px;margin-right:7px;border-radius:50%;background:var(--accent);vertical-align:2px}
+.privacy-line{display:flex;align-items:flex-start;gap:8px;margin:0 0 17px;color:var(--d-muted);font-size:10.5px;line-height:1.65}.privacy-line .icon{width:13px;height:13px;margin-top:1px;color:var(--accent)}.provider-note{display:flex;align-items:center;gap:7px;margin:15px 0 0;padding-top:13px;border-top:1px solid var(--d-line);color:var(--d-muted);font-size:10.5px}.provider-note .icon{width:13px;height:13px}
+/* Destructive */
+.confirm-dialog{--dialog-width:440px}.confirm-dialog .dialog-header{padding-bottom:13px}.confirm-object{margin:0 0 13px;color:var(--d-text-2);line-height:1.75}.confirm-object strong{color:var(--d-text);font-weight:550}.warning{display:flex;gap:10px;padding:12px 13px;border-radius:8px;background:var(--danger-dim);color:#d9b4b4;font-size:11.5px;line-height:1.75}.warning .icon{width:15px;height:15px;color:var(--danger);margin-top:2px}.sample-caption{margin:13px 0 0;color:var(--d-faint);font-size:9.5px}
+/* Editing workbench */
+.workbench-dialog{--dialog-width:860px}.workbench-dialog .dialog-header{padding-bottom:14px}.workbench-dialog .dialog-body{padding:0}.workbench-tabs{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--d-line);border-bottom:1px solid var(--d-line);background:#121619}.workbench-tab{position:relative;display:flex;align-items:baseline;justify-content:center;gap:8px;height:47px;border:0;background:transparent;color:var(--d-muted)}.workbench-tab strong{font-size:12.5px;font-weight:500}.workbench-tab span{font:9px Consolas,monospace;color:var(--d-faint)}.workbench-tab:hover{background:rgba(255,255,255,.025);color:var(--d-text)}.workbench-tab.active{background:var(--d-raise);color:var(--d-text)}.workbench-tab.active:after{content:"";position:absolute;left:24px;right:24px;bottom:-1px;height:2px;background:var(--accent)}.workbench-tab.active strong{color:var(--accent)}
+.context-line{height:37px;display:flex;align-items:center;gap:20px;padding:0 24px;border-bottom:1px solid var(--d-line);color:var(--d-muted);font-size:9.5px}.context-line b{margin-left:5px;color:var(--d-text-2);font-weight:500}.context-line .sample{margin-left:auto;color:var(--d-faint)}
+.workbench-grid{display:grid;grid-template-columns:240px minmax(0,1fr);gap:24px;padding:19px 24px 20px;overflow:auto;min-height:0}.parameter-column{display:grid;align-content:start;gap:15px}.parameter-column .field{gap:5px}.advanced{border-top:1px solid var(--d-line);padding-top:10px;margin-top:1px}.advanced summary{cursor:pointer;color:var(--d-muted);font-size:10.5px;list-style:none}.advanced summary:before{content:"+";display:inline-block;width:15px;color:var(--d-text-2)}.advanced[open] summary:before{content:"−"}.advanced-content{display:grid;gap:9px;margin-top:11px}.advanced input{height:29px;font:9.5px Consolas,monospace;color:var(--d-muted)}
+.timeline-preview{align-self:start;min-width:0;background:#111517;border-radius:8px;padding:15px 16px 13px}.preview-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:15px}.preview-heading h3{margin:0;font-size:11.5px;font-weight:550;color:var(--d-text-2)}.legend{display:flex;gap:11px;color:var(--d-muted);font-size:9px}.legend span{display:flex;align-items:center;gap:5px}.legend i{width:6px;height:6px;border-radius:1px;background:var(--accent)}.legend i.neutral{background:#3a4446}.legend i.white{background:var(--d-text)}.legend i.warn{background:var(--warning)}
+.mini-ruler{display:flex;justify-content:space-between;padding:0 0 6px 37px;color:var(--d-faint);font:8px Consolas,monospace}.edit-track{display:grid;grid-template-columns:31px minmax(0,1fr);gap:6px;align-items:center;height:49px}.edit-track-label{font-size:8px;color:var(--d-muted)}.track-canvas{position:relative;height:36px;background:#1b2224;border-radius:3px;overflow:hidden}.segment{position:absolute;top:0;bottom:0;display:grid;place-items:center;background:var(--accent-dim);border-top:1px solid var(--accent);color:#8eb8aa;font-size:8px}.segment.silence{background:#252d2f;border-top-color:#465154;color:#778380}.segment.s1{left:0;width:30%}.segment.sil1{left:30%;width:var(--silence,8%)}.segment.s2{left:38%;width:27%}.segment.sil2{left:65%;width:var(--silence,8%)}.segment.s3{left:73%;right:0}.edit-playhead{position:absolute;top:-5px;bottom:0;left:43%;width:1px;background:var(--d-text)}.edit-playhead:before{content:"";position:absolute;top:0;left:-3px;border-left:3px solid transparent;border-right:3px solid transparent;border-top:5px solid var(--d-text)}
+.waveform{position:absolute;inset:5px 0;display:flex;align-items:center;gap:2px;opacity:.44;padding:0 4px}.waveform i{display:block;flex:1;min-width:1px;background:var(--accent)}.preview-foot{display:flex;justify-content:space-between;gap:10px;padding-top:11px;margin-top:8px;border-top:1px solid var(--d-line);color:var(--d-faint);font-size:9px;line-height:1.5}.preview-foot strong{font-weight:400;color:var(--d-muted)}
+.beat-canvas{position:relative;height:137px;padding-top:12px}.beat-row{position:relative;height:37px;margin-bottom:14px;background:#1c2425;border-radius:3px}.beat-shot{position:absolute;top:5px;bottom:5px;width:21%;background:#2c3938;border-left:1px solid #68867d;border-radius:2px}.beat-shot:nth-child(2){left:25%}.beat-shot:nth-child(3){left:50%}.beat-shot:nth-child(4){left:75%}.beat-shot:first-child{left:0}.beat-line{position:absolute;top:0;bottom:0;width:1px;background:var(--accent)}.beat-line:after{content:"";position:absolute;top:-3px;left:-2px;width:5px;height:5px;background:var(--accent);border-radius:50%}.cut-line{position:absolute;top:42px;bottom:4px;width:1px;background:var(--d-text)}
+.lj-canvas{position:relative;height:137px}.lj-row{position:relative;height:37px;margin:13px 0 24px 34px;background:#202729;border-radius:3px}.lj-row:before{position:absolute;left:-34px;top:11px;color:var(--d-muted);font-size:8px}.lj-row.video:before{content:"画面"}.lj-row.audio:before{content:"声音"}.lj-block{position:absolute;top:4px;bottom:4px;left:8%;width:39%;background:#35413f;border-left:1px solid var(--d-text);border-radius:2px}.lj-block.second{left:51%;width:40%;border-left-color:#596461}.lj-row.audio .lj-block{background:#283c37;border-left-color:var(--warning)}.lj-row.audio .lj-block.second{border-left-color:var(--warning)}.word-anchor{position:absolute;top:-8px;width:5px;height:5px;background:var(--accent);border-radius:50%}
+.shot-checks{display:grid;gap:7px}.check-line{display:flex;align-items:center;gap:8px;color:var(--d-text-2);font-size:11px}.status-copy{padding:9px 10px;background:var(--d-raise);border-radius:6px;color:var(--d-muted);font-size:10px;line-height:1.6}.local-action{justify-self:start}.direction-seg{display:flex;padding:2px;background:#111517;border-radius:6px}.direction-seg button{flex:1;height:27px;border:0;border-radius:4px;background:transparent;color:var(--d-muted);font-size:10.5px}.direction-seg button.active{background:var(--d-raise);color:var(--accent)}
+/* Command */
+.command-dialog{--dialog-width:640px}.command-dialog .dialog-header{padding-bottom:14px}.command-dialog .dialog-body{padding-bottom:14px}.search-wrap{position:relative;margin-bottom:10px}.search-wrap .icon{position:absolute;left:12px;top:12px;width:16px;height:16px;color:var(--d-muted)}.search-wrap input{height:40px;padding-left:38px;font-size:13px;background:#111517;border-color:var(--d-edge)}.command-list{list-style:none;margin:0;padding:0;max-height:315px;overflow:auto}.command-group{padding:9px 10px 5px;color:var(--d-faint);font-size:9px;font-weight:600;letter-spacing:.8px}.command-option{width:100%;height:39px;display:grid;grid-template-columns:20px minmax(0,1fr) auto auto;align-items:center;gap:9px;padding:0 11px;border:0;border-radius:6px;background:transparent;color:var(--d-text-2);text-align:left}.command-option .icon{width:14px;height:14px;color:var(--d-muted)}.command-option:hover{background:var(--d-raise);color:var(--d-text)}.command-option.active{background:var(--accent-dim);color:var(--d-text)}.command-option.active .icon{color:var(--accent)}.command-option kbd{font:9px Consolas,monospace;color:var(--d-muted);padding:2px 5px;border:1px solid var(--d-line);border-radius:4px}.command-state{font-size:9px;color:var(--d-faint);min-width:22px;text-align:right}.command-option.active .command-state{color:var(--accent)}.command-empty{padding:30px;text-align:center;color:var(--d-muted)}
+.command-footer{justify-content:flex-start;min-height:44px;padding-top:10px;padding-bottom:10px}.key-hints{display:flex;gap:16px;color:var(--d-muted);font-size:9.5px}.key-hints span{display:flex;align-items:center;gap:5px}.key-hints kbd{font:9px Consolas,monospace;color:var(--d-text-2)}.key-hints .preview-only{margin-left:auto;color:var(--d-faint)}
+/* Closed state */
+.closed-state{position:absolute;inset:0;z-index:3;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(8,11,12,.38);text-align:center}.closed-mark{width:38px;height:38px;display:grid;place-items:center;border:1px solid var(--d-edge);border-radius:10px;background:var(--d-surface);color:var(--d-muted);margin-bottom:14px}.closed-state h3{margin:0 0 7px;font-size:15px;font-weight:550}.closed-state p{margin:0 0 18px;color:#98a29f;font-size:11px}.closed-state small{margin-top:13px;color:#77827f;font-size:9px}
+.stage-meta{height:37px;flex:none;display:flex;align-items:center;justify-content:space-between;gap:16px;color:var(--page-muted);font-size:9.5px}.meta-left,.meta-right{display:flex;align-items:center;gap:8px}.sample-badge{padding:2px 5px;border:1px solid var(--page-line);border-radius:4px;color:var(--page-text);font-size:8px;letter-spacing:.3px}.meta-dot{width:3px;height:3px;border-radius:50%;background:var(--page-muted)}#demo-status{color:var(--accent)}
+/* Reference */
+.reference-page{position:absolute;inset:0;overflow:auto;padding:26px 30px 30px;background:var(--d-surface);color:var(--d-text)}.reference-header{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;padding-bottom:19px;border-bottom:1px solid var(--d-line)}.reference-header h2{font-size:19px;font-weight:580;margin:0 0 7px}.reference-header p{margin:0;color:var(--d-muted);font-size:11px;line-height:1.6}.spec-version{font:9px Consolas,monospace;color:var(--accent);white-space:nowrap;padding-top:6px}
+.reference-grid{display:grid;grid-template-columns:1fr 1.15fr;gap:30px;margin-top:22px}.spec-section+.spec-section{margin-top:23px}.spec-title{display:flex;align-items:center;gap:8px;margin:0 0 13px;font-size:11px;font-weight:600;letter-spacing:.5px}.spec-title:before{content:"";width:3px;height:11px;background:var(--accent);border-radius:1px}
+.swatches{display:grid;grid-template-columns:repeat(3,1fr);gap:11px 14px}.swatch{display:grid;grid-template-columns:27px 1fr;align-items:center;gap:8px;min-width:0}.swatch-color{width:27px;height:27px;border-radius:6px;border:1px solid var(--d-edge);background:var(--swatch)}.swatch-name{font-size:9.5px;color:var(--d-text-2)}.swatch-value{display:block;margin-top:3px;font:8px Consolas,monospace;color:var(--d-muted)}
+.type-table{border-top:1px solid var(--d-line)}.type-row{display:grid;grid-template-columns:70px 1fr auto;align-items:center;min-height:36px;border-bottom:1px solid var(--d-line);gap:10px}.type-row span:first-child{color:var(--d-muted);font-size:10px}.type-sample{color:var(--d-text)}.type-row code{font:8.5px Consolas,monospace;color:var(--d-muted)}
+.width-tiers{display:grid;gap:11px}.tier{display:grid;grid-template-columns:75px 1fr 46px;align-items:center;gap:10px;color:var(--d-muted);font-size:9.5px}.tier-bar{height:22px;border:1px solid var(--d-edge);border-radius:4px;background:var(--d-raise);position:relative;max-width:var(--tier)}.tier-bar:after{content:"";position:absolute;left:10px;right:10px;top:9px;height:1px;background:var(--d-line)}.tier b{font:9px Consolas,monospace;color:var(--d-text-2);font-weight:400;text-align:right}
+.rule-list{margin:0;padding:0;list-style:none;display:grid;gap:10px}.rule-list li{position:relative;padding-left:15px;color:var(--d-text-2);font-size:10.5px;line-height:1.7}.rule-list li:before{content:"";position:absolute;left:0;top:7px;width:4px;height:4px;background:var(--accent);border-radius:50%}.rule-list strong{color:var(--d-text);font-weight:550}
+.footer-anatomy{padding:13px 14px;border:1px solid var(--d-line);border-radius:8px;background:var(--d-footer)}.anatomy-label{font-size:9px;color:var(--d-muted);margin-bottom:10px}.anatomy-row{display:flex;align-items:center;gap:8px}.anatomy-row .note{margin-right:auto;font-size:9px;color:var(--d-muted)}.anatomy-row .btn{height:28px;min-height:28px;font-size:10px}.anatomy-divider{height:1px;background:var(--d-line);margin:14px 0}.placement-note{margin:10px 0 0;color:var(--d-muted);font-size:9.5px;line-height:1.65}
+/* Responsive */
+@media(max-width:1150px){.gallery{grid-template-columns:184px minmax(0,1fr)}.sidebar{padding-left:12px;padding-right:12px}.nav-item.active:before{left:-12px}.topbar,.intro{padding-left:22px;padding-right:22px}.workspace{padding:0 22px}.theme-copy small{display:none}.theme-btn{height:32px}.offline{display:none}.placement-hint{display:none}.workbench-grid{grid-template-columns:215px minmax(0,1fr);gap:18px}.dialog-host{padding:18px}.dialog{width:min(var(--dialog-width,640px),calc(100% - 16px))}}
+@media(max-height:780px){.topbar{height:62px}.intro{height:70px}.intro h2{font-size:19px;margin-bottom:5px}.brand{padding-bottom:18px}.preview-kicker{margin-bottom:17px}.nav-item{min-height:48px}.reference-nav{margin-top:15px;padding-top:14px}.sidebar-bottom{padding-top:12px}.stage-head{height:39px}.stage-meta{height:33px}.dialog-header{padding-top:17px;padding-bottom:14px}.dialog-body{padding-bottom:18px}.dialog-footer{min-height:59px;padding-top:11px;padding-bottom:11px}.project-strip{margin-bottom:16px}.dialog-host{padding:16px}.form-grid{gap:12px 15px}.workbench-grid{padding-top:15px;padding-bottom:16px}.command-list{max-height:270px}}
+@media(max-width:820px){.gallery{grid-template-columns:68px minmax(0,1fr)}.sidebar{padding:20px 9px 14px}.brand{justify-content:center;padding:0 0 22px}.brand>div,.preview-kicker,.nav-label,.nav-copy,.nav-num,.sidebar-bottom{display:none}.nav-item{display:grid;grid-template-columns:1fr;place-items:center;min-height:44px;padding:8px}.nav-item.active:before{left:-9px}.reference-nav{margin-top:16px;padding-top:13px}.top-actions{gap:8px}.study-id .slash,.study-id .study-section{display:none}.theme-copy{font-size:9px}.theme-btn{padding:0 8px}.theme-dot{display:none}.intro p{max-width:380px}.stage-tag{display:none}.workbench-grid{grid-template-columns:190px minmax(0,1fr)}.reference-grid{grid-template-columns:1fr}.stage-meta .meta-right{display:none}}
+@container(max-width:570px){.export-grid{grid-template-columns:1fr}.ratio-panel{display:none}.workbench-grid{grid-template-columns:1fr}.timeline-preview{min-height:200px}.form-grid{grid-template-columns:1fr}.span-2{grid-column:auto}.footer-note{display:none}.workbench-tab span{display:none}.context-line{gap:10px}.context-line .sample{display:none}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+ <defs>
+  <symbol id="i-logo" viewBox="0 0 32 32"><path d="M16 4a12 12 0 1 0 12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M16 9a7 7 0 1 0 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M16 14a2 2 0 1 0 2 2" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
+  <symbol id="i-export" viewBox="0 0 24 24"><path d="M12 15V3m0 0L7.5 7.5M12 3l4.5 4.5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></symbol>
+  <symbol id="i-provider" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M6 14v6"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6M14 11v6"/></symbol>
+  <symbol id="i-cut" viewBox="0 0 24 24"><circle cx="6" cy="7" r="3"/><circle cx="6" cy="17" r="3"/><path d="m8.5 8.5 11 7.5M8.5 15.5 20 8M13 12l2 1.2"/></symbol>
+  <symbol id="i-command" viewBox="0 0 24 24"><path d="M9 6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6Z"/></symbol>
+  <symbol id="i-tokens" viewBox="0 0 24 24"><path d="M4 4h16v16H4zM4 10h16M10 10v10"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+  <symbol id="i-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+  <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-rotate" viewBox="0 0 24 24"><path d="M4 10a8 8 0 1 1 1 7M4 4v6h6"/></symbol>
+  <symbol id="i-offline" viewBox="0 0 24 24"><path d="M8 8h8v8H8zM4 10V8a4 4 0 0 1 4-4h2M20 14v2a4 4 0 0 1-4 4h-2M10 4V2M14 4V2M10 22v-2M14 22v-2M4 10H2M4 14H2M22 10h-2M22 14h-2"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6Z"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 4.1 2.7 17.3A2 2 0 0 0 4.4 20h15.2a2 2 0 0 0 1.7-2.7L13.7 4.1a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></symbol>
+  <symbol id="i-film" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4M7 12h10"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="m21 15-5-5L5 20"/></symbol>
+  <symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V5l11-2v13M9 8l11-2"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></symbol>
+  <symbol id="i-type" viewBox="0 0 24 24"><path d="M4 6V4h16v2M12 4v16M8 20h8"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7V5Z"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 13.5v-3l-2-.7a7 7 0 0 0-.7-1.7l.9-1.9-2.1-2.1-1.9.9a7 7 0 0 0-1.7-.7L10.5 2h-3l-.7 2a7 7 0 0 0-1.7.7l-1.9-.9-2.1 2.1.9 1.9a7 7 0 0 0-.7 1.7l-2 .7v3l2 .7a7 7 0 0 0 .7 1.7l-.9 1.9 2.1 2.1 1.9-.9a7 7 0 0 0 1.7.7l.7 2h3l.7-2a7 7 0 0 0 1.7-.7l1.9.9 2.1-2.1-.9-1.9a7 7 0 0 0 .7-1.7l2-.7Z" transform="translate(3) scale(.75)"/></symbol>
+  <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 7 4 12l5 5M4 12h9a6 6 0 0 1 6 6"/></symbol>
+  <symbol id="i-redo" viewBox="0 0 24 24"><path d="m15 7 5 5-5 5M20 12h-9a6 6 0 0 0-6 6"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="m12 3 1.5 5.5L19 10l-5.5 1.5L12 17l-1.5-5.5L5 10l5.5-1.5L12 3ZM19 16l.7 2.3L22 19l-2.3.7L19 22l-.7-2.3L16 19l2.3-.7L19 16Z"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+ </defs>
+</svg>
+<div class="gallery">
+<aside class="sidebar">
+ <div class="brand"><svg class="brand-mark" aria-hidden="true"><use href="#i-logo"/></svg><div><div class="brand-name">VORTEX CUT</div><div class="brand-sub">DIALOGUE SYSTEM</div></div></div>
+ <div class="preview-kicker">交互设计预览 · V2</div>
+ <p class="nav-label">对话场景 / 05</p>
+ <nav class="category-nav" aria-label="对话框类别">
+  <button class="nav-item active" data-category="export" aria-current="page"><svg class="icon"><use href="#i-export"/></svg><span class="nav-copy"><span class="nav-name">导出视频</span><span class="nav-en">EXPORT & OUTPUT</span></span><span class="nav-num">01</span></button>
+  <button class="nav-item" data-category="provider"><svg class="icon"><use href="#i-provider"/></svg><span class="nav-copy"><span class="nav-name">Provider 设置</span><span class="nav-en">AI CONNECTION</span></span><span class="nav-num">02</span></button>
+  <button class="nav-item" data-category="confirm"><svg class="icon"><use href="#i-trash"/></svg><span class="nav-copy"><span class="nav-name">破坏性确认</span><span class="nav-en">DESTRUCTIVE</span></span><span class="nav-num">03</span></button>
+  <button class="nav-item" data-category="workbench"><svg class="icon"><use href="#i-cut"/></svg><span class="nav-copy"><span class="nav-name">剪辑工作台</span><span class="nav-en">EDITING GRAMMAR</span></span><span class="nav-num">04</span></button>
+  <button class="nav-item" data-category="command"><svg class="icon"><use href="#i-command"/></svg><span class="nav-copy"><span class="nav-name">命令搜索</span><span class="nav-en">COMMAND PALETTE</span></span><span class="nav-num">05</span></button>
+ </nav>
+ <nav class="reference-nav" aria-label="设计规范">
+  <p class="nav-label">系统参考</p>
+  <button class="nav-item" data-category="tokens"><svg class="icon"><use href="#i-tokens"/></svg><span class="nav-copy"><span class="nav-name">令牌与规则</span><span class="nav-en">TOKENS & ANATOMY</span></span><span class="nav-num">06</span></button>
+ </nav>
+ <div class="sidebar-bottom"><div class="direction-caption"><i></i>当前视觉方向</div><div class="direction-name" id="direction-name">Graphite Precision</div><p class="direction-note" id="direction-note">清晰边缘与石墨层级，强调专业工具的精确感。</p></div>
+</aside>
+<main class="main">
+ <header class="topbar">
+  <div class="study-id"><span class="index">DS / 02</span><span class="slash">/</span><h1 class="study-section">桌面对话框系统</h1></div>
+  <div class="top-actions"><span class="offline"><svg class="icon"><use href="#i-offline"/></svg>独立 HTML · 离线可用</span>
+   <div class="theme-switch" role="group" aria-label="视觉方向">
+    <button class="theme-btn active" data-theme-choice="graphite" aria-pressed="true"><span class="theme-dot"></span><span class="theme-copy">Graphite Precision<small>石墨精确 · 推荐</small></span><span class="recommend">推荐</span></button>
+    <button class="theme-btn" data-theme-choice="soft" aria-pressed="false"><span class="theme-dot soft"></span><span class="theme-copy">Soft Studio<small>柔和工作室</small></span></button>
+   </div>
+  </div>
+ </header>
+ <section class="intro"><div><h2>一致的结构，精确的节奏。</h2><p>本地优先的 AI 剪辑工具，以克制层级承接复杂创作。</p></div>
+  <div class="category-step"><span class="step-count"><b id="step-current">01</b> / <span id="step-total">05</span></span><button class="step-btn" id="prev-category" aria-label="上一个类别"><svg class="icon"><use href="#i-left"/></svg></button><button class="step-btn" id="next-category" aria-label="下一个类别"><svg class="icon"><use href="#i-right"/></svg></button></div>
+ </section>
+ <section class="workspace" aria-label="设计预览工作区">
+  <div class="stage-head"><div class="stage-id"><span class="stage-number" id="stage-number">01</span><span class="stage-title" id="stage-title">导出视频</span><span class="stage-tag" id="stage-tag">标准对话框 · 640 px</span></div><div class="stage-actions"><span class="placement-hint" id="placement-hint">辅助信息居左 · <b>主操作右下</b></span><button class="reopen-top" id="reopen-top" hidden><svg class="icon"><use href="#i-rotate"/></svg>重新打开</button></div></div>
+  <div class="stage" id="stage">
+   <div class="editor" id="editor" aria-hidden="true">
+    <div class="editor-menu"><span class="editor-logo">V</span><span>项目</span><span>编辑</span><span>工具</span><span>帮助</span><span class="spacer"></span><span class="editor-rev">REV 018 · 已保存到本机</span></div>
+    <div class="editor-rail"><svg class="icon on"><use href="#i-film"/></svg><svg class="icon"><use href="#i-image"/></svg><svg class="icon"><use href="#i-music"/></svg><svg class="icon"><use href="#i-type"/></svg><svg class="icon"><use href="#i-spark"/></svg></div>
+    <div class="editor-view"><div class="editor-view-head"><span>时间线预览</span><div class="transport"><svg class="icon"><use href="#i-play"/></svg><span class="timecode">00:00:18:12 / 00:00:42:00</span></div><span>适应</span></div><div class="editor-screen">
+     <svg viewBox="0 0 640 300" preserveAspectRatio="xMidYMid meet"><rect width="640" height="300" fill="#151c1d"/><rect y="174" width="640" height="126" fill="#222b29"/><path d="M0 189 105 93l66 58 84-101 128 124 77-69 180 100v95H0Z" fill="#2d3834"/><path d="m0 216 118-58 84 36 98-79 97 55 78-31 165 82v79H0Z" fill="#36423c"/><path d="M240 300c30-66 94-87 134-111 27-17 37-30 49-49-1 36-21 64-47 81-38 25-66 43-80 79Z" fill="#727a68"/><circle cx="505" cy="68" r="24" fill="#a2a58d" opacity=".55"/><path d="M54 216h123v4H54z" fill="#a5b5a9" opacity=".35"/></svg>
+    </div></div>
+    <div class="editor-inspector"><div class="inspector-title">片段属性</div><div class="inspector-row"><span>变换</span><span>重置</span></div><div class="fake-control"></div><div class="inspector-row"><span>缩放</span><span>100%</span></div><div class="fake-control"></div><div class="inspector-row"><span>位置 X</span><span>0.0</span></div><div class="fake-line"></div><div class="inspector-row"><span>不透明度</span><span>100%</span></div><div class="fake-control"></div><div class="fake-line"></div><div class="inspector-row"><span>色彩</span><span>自然</span></div></div>
+    <div class="editor-timeline"><div class="timeline-tools"><svg class="icon"><use href="#i-cut"/></svg><svg class="icon"><use href="#i-undo"/></svg><span>V1</span><span>A1</span><span class="spacer"></span><span>00:00:18:12</span></div><div class="ruler"><span>00:00</span><span>00:08</span><span>00:16</span><span>00:24</span><span>00:32</span><span>00:40</span></div><div class="track"><span class="track-name">视频 1</span><div class="clips"><span class="clip" style="width:24%"></span><span class="clip" style="width:18%"></span><span class="clip" style="width:30%"></span><span class="clip" style="width:24%"></span></div></div><div class="track"><span class="track-name">音频 1</span><div class="clips"><span class="clip audio" style="width:43%"></span><span class="clip audio" style="width:53%"></span></div></div><div class="track"><span class="track-name">字幕</span><div class="clips"><span class="clip caption" style="width:19%"></span><span class="clip caption" style="width:26%"></span><span class="clip caption" style="width:35%"></span></div></div></div>
+    <div class="editor-playhead"></div>
+   </div>
+   <div class="stage-shade" id="stage-shade"></div>
+   <div class="dialog-host" id="dialog-host">
+    <section class="dialog export-dialog" data-dialog="export" role="dialog" aria-modal="true" aria-labelledby="export-title">
+     <header class="dialog-header"><div><h2 class="dialog-title" id="export-title">导出视频</h2><p class="dialog-subtitle">当前 Revision · 画面内容与权威预览一致</p></div><button class="icon-button close-dialog" aria-label="关闭导出弹窗" title="关闭 · Esc"><svg class="icon"><use href="#i-x"/></svg></button></header>
+     <div class="dialog-body">
+      <div class="project-strip"><button class="project-cover preview-action" data-action="设置封面" title="设计预览：不打开封面设置"><svg viewBox="0 0 160 100" preserveAspectRatio="xMidYMid slice"><rect width="160" height="100" fill="#1c2827"/><path d="M0 76 40 25l28 36 28-45 64 66v18H0Z" fill="#53635a"/><path d="M0 86 49 54l35 19 34-26 42 30v23H0Z" fill="#75806d"/><path d="M67 100c5-22 21-32 36-44-9 20-15 26-19 44Z" fill="#b2b398"/></svg><span>设置封面</span></button><div><div class="project-name">项目：山野之间 · 品牌短片</div><div class="project-stats"><span>时长 <b>00:00:42</b></span><span>片段 <b>08</b></span><span>字幕 <b>12</b></span></div><div class="filename"><input type="text" aria-label="导出文件名" value="山野之间_最终版" maxlength="120"><span class="file-ext">.mp4</span></div></div></div>
+      <h3 class="section-label">输出设置 <span>H.264 / MP4</span></h3>
+      <div class="export-grid"><div class="form-grid">
+       <div class="field"><label for="export-resolution">分辨率 <span class="field-hint">输出像素尺寸</span></label><select id="export-resolution" data-export="resolution"><option value="1920 × 1080">原始 · 1920 × 1080</option><option value="1920 × 1080">1080p · 1920 × 1080</option><option value="1280 × 720">720p · 1280 × 720</option></select></div>
+       <div class="field"><label for="export-fps">帧率 <span class="field-hint">恒定帧率</span></label><select id="export-fps" data-export="fps"><option>24 fps</option><option>25 fps</option><option selected>30 fps</option><option>60 fps</option></select></div>
+       <div class="field"><label for="export-quality">画质 <span class="field-hint">码率分层</span></label><select id="export-quality" data-export="quality"><option>高画质 · ≈12 Mbps</option><option selected>均衡 · ≈8 Mbps</option><option>小体积 · ≈4 Mbps</option></select></div>
+       <div class="field"><label for="export-codec">编码 <span class="field-hint">硬件失败自动回退</span></label><select id="export-codec" data-export="codec"><option>H.264 · 自动（硬件优先）</option><option>H.264 · 软件编码</option></select></div>
+       <div class="field span-2"><label>保存位置 <span class="field-hint">完整路径预览</span></label><div class="path-control"><div class="path-value"><svg class="icon"><use href="#i-folder"/></svg>尚未选择——导出时将弹出保存对话框</div><button class="btn small secondary preview-action" data-action="选择保存位置">选择…</button></div></div>
+      </div><aside class="ratio-panel"><div class="ratio-frame">16:9</div><div class="ratio-name">横向 · 16:9</div><div class="ratio-dim" id="ratio-dim">1920 × 1080</div><div class="ratio-sub" id="ratio-sub">30fps · H.264<br>≈8 Mbps</div></aside></div>
+     </div>
+     <footer class="dialog-footer"><span class="footer-note"><svg class="icon"><use href="#i-info"/></svg>导出完成后可在「渲染与导出」面板查看进度与产物</span><button class="btn primary preview-action" data-action="导出"><svg class="icon"><use href="#i-export"/></svg>导出</button></footer>
+    </section>
+
+    <section class="dialog provider-dialog" data-dialog="provider" role="dialog" aria-modal="true" aria-labelledby="provider-title" hidden>
+     <header class="dialog-header"><div><h2 class="dialog-title" id="provider-title">Provider 设置</h2><p class="dialog-subtitle">管理 AI 模型连接 · 密钥只提交、不回显</p></div><button class="icon-button close-dialog" aria-label="关闭 Provider 设置" title="关闭 · Esc"><svg class="icon"><use href="#i-x"/></svg></button></header>
+     <div class="dialog-body">
+      <div class="mode-tabs" role="tablist" aria-label="Provider 类型"><button class="mode-tab active" role="tab" aria-selected="true" data-provider-mode="preset">第三方模型提供商</button><button class="mode-tab" role="tab" aria-selected="false" data-provider-mode="custom">自定义模型 API</button></div>
+      <p class="privacy-line"><svg class="icon"><use href="#i-lock"/></svg>连接兼容 OpenAI 的服务，填写地址、密钥和模型即可。</p>
+      <div class="form-grid" aria-label="新建 Provider">
+       <div class="field span-2" id="preset-field"><label for="provider-preset">提供商预设</label><select id="provider-preset"><option value="">选择提供商</option><option selected>OpenAI</option><option>其他中转 / 网关</option></select></div>
+       <div class="field span-2"><label for="provider-name">显示名称</label><input id="provider-name" type="text" value="OpenAI" placeholder="例如：我的网关"></div>
+       <div class="field span-2"><label for="provider-url">API 地址</label><input id="provider-url" type="text" value="https://api.openai.com/v1" placeholder="https://api.example.com/v1"></div>
+       <div class="field"><label for="provider-protocol">API 协议</label><select id="provider-protocol" disabled><option>OpenAI Chat Completions</option></select></div>
+       <div class="field"><label for="provider-model">模型 ID</label><input id="provider-model" type="text" value="gpt-4o-mini" placeholder="例如：gpt-4o-mini"></div>
+       <div class="field span-2"><label for="provider-key">API 密钥 <span class="field-hint">示例字段 · 请勿填写真实密钥</span></label><input id="provider-key" type="password" autocomplete="off" placeholder="输入 API 密钥（可稍后配置）"></div>
+      </div>
+      <p class="provider-note"><svg class="icon"><use href="#i-lock"/></svg>密钥仅保存在本机；能力兼容性在各 AI 功能中测试。</p>
+     </div>
+     <footer class="dialog-footer"><button class="footer-link preview-action" data-action="已有配置">已有配置</button><button class="btn ghost close-dialog">取消</button><button class="btn primary preview-action" data-action="创建 Provider">创建 Provider</button></footer>
+    </section>
+
+    <section class="dialog confirm-dialog" data-dialog="confirm" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-desc" hidden>
+     <header class="dialog-header"><div><h2 class="dialog-title" id="confirm-title">删除素材</h2></div><button class="icon-button close-dialog" aria-label="关闭删除素材确认" title="关闭 · Esc"><svg class="icon"><use href="#i-x"/></svg></button></header>
+     <div class="dialog-body"><p class="confirm-object">确定要删除素材「<strong>A03_山野访谈.mp4</strong>」吗？</p><div class="warning" id="confirm-desc"><svg class="icon"><use href="#i-alert"/></svg><span>如果该素材已添加到时间线，其相关片段（含关联字幕与转场）将一并删除，此操作不可撤销。</span></div><p class="sample-caption">示例素材名称 · 仅用于确认场景视觉评审</p></div>
+     <footer class="dialog-footer"><button class="btn ghost close-dialog">取消</button><button class="btn danger preview-action" data-action="删除素材"><svg class="icon"><use href="#i-trash"/></svg>删除素材</button></footer>
+    </section>
+
+    <section class="dialog workbench-dialog" data-dialog="workbench" role="dialog" aria-modal="true" aria-labelledby="workbench-title" hidden>
+     <header class="dialog-header"><div><h2 class="dialog-title" id="workbench-title">剪辑手法</h2><p class="dialog-subtitle" id="workbench-desc">选中口播视频片段 → 识别静音 → 保留有声段并闭合时间轴。提案只读，采纳后才写正式 Timeline。</p></div><button class="icon-button close-dialog" aria-label="关闭剪辑手法" title="关闭 · Esc"><svg class="icon"><use href="#i-x"/></svg></button></header>
+     <div class="workbench-tabs" role="tablist" aria-label="手法页签"><button class="workbench-tab active" role="tab" aria-selected="true" data-tool="remove"><strong>去停顿</strong><span>remove_pauses</span></button><button class="workbench-tab" role="tab" aria-selected="false" data-tool="beat"><strong>卡点</strong><span>beat_sync</span></button><button class="workbench-tab" role="tab" aria-selected="false" data-tool="lj"><strong>L/J cut</strong><span>lj_cut</span></button></div>
+     <div class="context-line"><span>目标 <b id="context-target">去停顿</b></span><span>素材 <b>clip_a03…</b></span><span>基线 <b>rev_018</b></span><span class="sample">示例 Revision</span></div>
+     <div class="dialog-body"><div class="workbench-grid">
+      <div class="parameter-column" data-tool-panel="remove">
+       <div class="field"><label for="pause-clip">目标片段</label><select id="pause-clip"><option>clip_a03… · 0:42.0</option><option>clip_b01… · 0:28.5</option></select></div>
+       <div class="field"><label for="pause-threshold">能量阈值 <span class="field-value" id="threshold-value">0.05</span></label><input id="pause-threshold" type="range" min="0.01" max="0.3" step="0.01" value="0.05"></div>
+       <div class="field"><label for="pause-silence">最短静音（ms） <span class="field-value" id="silence-value">400</span></label><input id="pause-silence" type="range" min="100" max="2000" step="50" value="400"></div>
+       <div class="field"><label for="pause-pad">保留边距 pad（ms） <span class="field-value" id="pad-value">120</span></label><input id="pause-pad" type="range" min="0" max="300" step="10" value="120"></div>
+       <details class="advanced"><summary>高级 · 与 Core 参数对齐</summary><div class="advanced-content"><div class="field"><label>energy_threshold 默认</label><input type="text" readonly value="DEFAULT_ENERGY_THRESHOLD = 0.05"></div><p class="helper">源：editing_grammar/silence.py · 空操作可提案、不可采纳</p></div></details>
+      </div>
+      <div class="parameter-column" data-tool-panel="beat" hidden>
+       <div class="field"><label for="beat-audio">BGM / 音频轨</label><select id="beat-audio"><option>audio_bgm… · audio</option><option>audio_ambient… · audio</option></select></div>
+       <div class="field"><span class="field-label">节拍网格（Wave1 L2）</span><div class="status-copy">无节拍网格 —— 干跑会失败，请先分析。</div><button class="btn small secondary local-action preview-action" data-action="分析节拍">分析节拍</button></div>
+       <div class="field"><label for="beat-duration">目标成片时长（s） <span class="field-value" id="duration-value">24.0</span></label><input id="beat-duration" type="range" min="5" max="60" step="0.5" value="24"></div>
+       <div class="field"><label for="beat-shot">每镜头拍数 <span class="field-value" id="beats-value">4</span></label><input id="beat-shot" type="range" min="1" max="8" step="1" value="4"></div>
+       <div class="field"><span class="field-label">镜头段（可多选）</span><div class="shot-checks"><label class="check-line"><input type="checkbox" checked>clip_a03…</label><label class="check-line"><input type="checkbox" checked>clip_b01…</label><label class="check-line"><input type="checkbox">clip_c02…</label></div></div>
+      </div>
+      <div class="parameter-column" data-tool-panel="lj" hidden>
+       <div class="field"><label for="lj-clip">目标片段</label><select id="lj-clip"><option>clip_a03… · 0:00.0</option><option>clip_b01… · 0:12.0</option></select></div>
+       <div class="field"><span class="field-label">词戳来源（Wave1 L1）</span><div class="status-copy">ASR 词级转录 ✓ —— Core 自动拉取 words（面板无需填写）</div></div>
+       <div class="field"><label for="lj-cut">画面切点</label><select id="lj-cut"><option>片段中点（默认）</option><option>0:13.4 · 与静音/切换对齐</option><option>0:27.7 · 第二处切换</option></select></div>
+       <div class="field"><span class="field-label">方向 mode</span><div class="direction-seg" role="group" aria-label="LJ 方向"><button class="active" data-lj-mode="auto">自动</button><button data-lj-mode="j">J · 声先入</button><button data-lj-mode="l">L · 声延后</button></div></div>
+       <div class="field"><label for="lj-offset">偏移 offset（ms） <span class="field-value" id="offset-value">400</span></label><input id="lj-offset" type="range" min="300" max="500" step="10" value="400"><p class="helper">Core 窗口 [300, 500] · 默认 400</p></div>
+      </div>
+      <div class="timeline-preview" data-preview-panel="remove"><div class="preview-heading"><h3>时间轴预览 · 静音 / 保留</h3><div class="legend"><span><i></i>保留有声</span><span><i class="neutral"></i>静音（将删除）</span></div></div><div class="mini-ruler"><span>0:00</span><span>0:08</span><span>0:16</span><span>0:24</span><span>0:32</span><span>0:40</span></div><div class="edit-track"><span class="edit-track-label">V1</span><div class="track-canvas"><div class="segment s1">保留</div><div class="segment silence sil1">静音</div><div class="segment s2">保留</div><div class="segment silence sil2">静音</div><div class="segment s3">保留</div><div class="edit-playhead"></div></div></div><div class="edit-track"><span class="edit-track-label">A1</span><div class="track-canvas"><div class="waveform" data-wave></div><div class="edit-playhead"></div></div></div><div class="preview-foot"><span>示例预览 · 非真实分析结果</span><strong>调整参数不会修改时间线</strong></div></div>
+      <div class="timeline-preview" data-preview-panel="beat" hidden><div class="preview-heading"><h3>时间轴预览 · beat 与切点</h3><div class="legend"><span><i></i>beat</span><span><i class="white"></i>切点</span></div></div><div class="mini-ruler"><span>0:00</span><span>0:06</span><span>0:12</span><span>0:18</span><span>0:24</span></div><div class="beat-canvas"><div class="beat-row" id="beat-row"><span class="beat-shot"></span><span class="beat-shot"></span><span class="beat-shot"></span><span class="beat-shot"></span></div><div class="beat-row"><span class="cut-line" style="left:25%"></span><span class="cut-line" style="left:50%"></span><span class="cut-line" style="left:75%"></span></div></div><div class="preview-foot"><span>示例节拍 · 非真实分析结果</span><strong>强拍优先 · 镜头切点</strong></div></div>
+      <div class="timeline-preview" data-preview-panel="lj" hidden><div class="preview-heading"><h3>声画错位预览</h3><div class="legend"><span><i class="white"></i>画面切线</span><span><i class="warn"></i>音频切线</span><span><i></i>词锚</span></div></div><div class="mini-ruler"><span>0:00</span><span>0:08</span><span>0:16</span><span>0:24</span><span>0:32</span></div><div class="lj-canvas" id="lj-canvas"><div class="lj-row video"><span class="lj-block"></span><span class="lj-block second"></span></div><div class="lj-row audio"><span class="lj-block"></span><span class="lj-block second"></span><i class="word-anchor" style="left:22%"></i><i class="word-anchor" style="left:34%"></i><i class="word-anchor" style="left:68%"></i></div></div><div class="preview-foot"><span id="lj-mode-label">自动 · 声画偏移 400 ms</span><strong>示例预览 · 提案只读</strong></div></div>
+     </div></div>
+     <footer class="dialog-footer"><span class="footer-note">全局操作 · 基于当前 Revision</span><button class="btn secondary preview-action" data-action="干跑预览">干跑预览</button><button class="btn primary preview-action" data-action="生成提案">生成提案</button></footer>
+    </section>
+
+    <section class="dialog command-dialog" data-dialog="command" role="dialog" aria-modal="true" aria-labelledby="command-title" hidden>
+     <header class="dialog-header"><div><h2 class="dialog-title" id="command-title">命令搜索</h2><p class="dialog-subtitle">输入命令名过滤；↑↓ 选择 · Enter 执行 · Esc 关闭。</p></div><button class="icon-button close-dialog" aria-label="关闭命令搜索" title="关闭 · Esc"><svg class="icon"><use href="#i-x"/></svg></button></header>
+     <div class="dialog-body"><div class="search-wrap"><svg class="icon"><use href="#i-search"/></svg><input id="command-search" type="search" aria-label="命令搜索" aria-controls="command-list" placeholder="输入命令名称…" autocomplete="off"></div>
+      <ul class="command-list" id="command-list" role="listbox" aria-label="命令列表">
+       <li class="command-group" data-group="项目">项目</li>
+       <li><button class="command-option active" role="option" aria-selected="true" data-command="项目管理"><svg class="icon"><use href="#i-folder"/></svg><span>项目管理</span><kbd></kbd><span class="command-state">可用</span></button></li>
+       <li><button class="command-option" role="option" aria-selected="false" data-command="刷新项目"><svg class="icon"><use href="#i-rotate"/></svg><span>刷新项目</span><kbd></kbd><span class="command-state">可用</span></button></li>
+       <li class="command-group" data-group="编辑">编辑</li>
+       <li><button class="command-option" role="option" aria-selected="false" data-command="撤销"><svg class="icon"><use href="#i-undo"/></svg><span>撤销</span><kbd>Ctrl+Z</kbd><span class="command-state">可用</span></button></li>
+       <li><button class="command-option" role="option" aria-selected="false" data-command="重做"><svg class="icon"><use href="#i-redo"/></svg><span>重做</span><kbd>Ctrl+Shift+Z</kbd><span class="command-state">可用</span></button></li>
+       <li><button class="command-option" role="option" aria-selected="false" data-command="恢复默认布局"><svg class="icon"><use href="#i-tokens"/></svg><span>恢复默认布局</span><kbd></kbd><span class="command-state">可用</span></button></li>
+       <li class="command-group" data-group="工具">工具</li>
+       <li><button class="command-option" role="option" aria-selected="false" data-command="Provider 设置"><svg class="icon"><use href="#i-provider"/></svg><span>Provider 设置</span><kbd></kbd><span class="command-state">可用</span></button></li>
+       <li><button class="command-option" role="option" aria-selected="false" data-command="AI 粗剪"><svg class="icon"><use href="#i-spark"/></svg><span>AI 粗剪</span><kbd></kbd><span class="command-state">可用</span></button></li>
+       <li><button class="command-option" role="option" aria-selected="false" data-command="AI 修改"><svg class="icon"><use href="#i-spark"/></svg><span>AI 修改</span><kbd></kbd><span class="command-state">可用</span></button></li>
+       <li><button class="command-option" role="option" aria-selected="false" data-command="剪辑手法"><svg class="icon"><use href="#i-cut"/></svg><span>剪辑手法</span><kbd></kbd><span class="command-state">可用</span></button></li>
+       <li class="command-empty" id="command-empty" hidden>没有匹配的命令</li>
+      </ul>
+     </div>
+     <footer class="dialog-footer command-footer"><div class="key-hints"><span><kbd>↑↓</kbd>选择</span><span><kbd>↵</kbd>执行</span><span><kbd>esc</kbd>关闭</span><span class="preview-only">设计预览不会执行命令</span></div></footer>
+    </section>
+   </div>
+   <div class="closed-state" id="closed-state" hidden><div class="closed-mark"><svg class="icon"><use href="#i-x"/></svg></div><h3>对话框已关闭</h3><p id="closed-copy">当前场景：导出视频</p><button class="btn primary" id="reopen-main"><svg class="icon"><use href="#i-rotate"/></svg>重新打开对话框</button><small>也可按 Enter 重新打开 · Esc 保持关闭</small></div>
+   <section class="reference-page" id="reference-page" aria-labelledby="reference-title" hidden>
+    <header class="reference-header"><div><h2 id="reference-title">设计令牌与放置规则</h2><p>以少量令牌维持密度、层级和节奏；两套方向只替换表面与文字色。</p></div><span class="spec-version">V2 / SYSTEM REFERENCE</span></header>
+    <div class="reference-grid"><div>
+     <section class="spec-section"><h3 class="spec-title">表面与语义色</h3><div class="swatches">
+      <div class="swatch"><span class="swatch-color" style="--swatch:var(--d-surface)"></span><div class="swatch-name">对话框表面<span class="swatch-value" data-token="--d-surface">#171b1e</span></div></div>
+      <div class="swatch"><span class="swatch-color" style="--swatch:var(--d-raise)"></span><div class="swatch-name">次级层级<span class="swatch-value" data-token="--d-raise">#1d2326</span></div></div>
+      <div class="swatch"><span class="swatch-color" style="--swatch:var(--d-input)"></span><div class="swatch-name">输入控件<span class="swatch-value" data-token="--d-input">#22292c</span></div></div>
+      <div class="swatch"><span class="swatch-color" style="--swatch:var(--d-text)"></span><div class="swatch-name">主要文字<span class="swatch-value" data-token="--d-text">#edf1ef</span></div></div>
+      <div class="swatch"><span class="swatch-color" style="--swatch:var(--d-muted)"></span><div class="swatch-name">辅助文字<span class="swatch-value" data-token="--d-muted">#85918e</span></div></div>
+      <div class="swatch"><span class="swatch-color" style="--swatch:var(--accent)"></span><div class="swatch-name">薄荷青<span class="swatch-value" data-token="--accent">#35d6ae</span></div></div>
+     </div></section>
+     <section class="spec-section"><h3 class="spec-title">文字阶梯</h3><div class="type-table"><div class="type-row"><span>窗口标题</span><span class="type-sample" style="font-size:18px;font-weight:600">导出视频</span><code>18 / 26 · 600</code></div><div class="type-row"><span>正文 / 控件</span><span class="type-sample" style="font-size:13px">均衡 · ≈8 Mbps</span><code>13 / 20 · 400</code></div><div class="type-row"><span>字段标签</span><span class="type-sample" style="font-size:12px;color:var(--d-text-2)">分辨率</span><code>12 / 17 · 400</code></div><div class="type-row"><span>辅助信息</span><span class="type-sample" style="font-size:10.5px;color:var(--d-muted)">密钥仅保存在本机</span><code>10.5 / 17 · 400</code></div></div></section>
+     <section class="spec-section"><h3 class="spec-title">三档宽度</h3><div class="width-tiers"><div class="tier"><span>紧凑 / 确认</span><span class="tier-bar" style="--tier:88px"></span><b>440</b></div><div class="tier"><span>标准 / 表单</span><span class="tier-bar" style="--tier:128px"></span><b>640</b></div><div class="tier"><span>复杂 / 工作台</span><span class="tier-bar" style="--tier:172px"></span><b>860</b></div></div></section>
+    </div><div>
+     <section class="spec-section"><h3 class="spec-title">统一骨架</h3><ul class="rule-list"><li><strong>标题区：</strong>18px 标题、必要说明、右上关闭；21 / 24 / 18px 内边距。</li><li><strong>内容区：</strong>24px 水平内边距，独立滚动；优先用留白与表面层级分组。</li><li><strong>固定底栏：</strong>细分隔线，65px 最小高度；滚动时不遮挡操作。</li><li><strong>控件：</strong>34px 高、7px 圆角；hover 提亮，focus 使用 2px 薄荷青轮廓。</li></ul></section>
+     <section class="spec-section"><h3 class="spec-title">按钮放置 / 实际示例</h3><div class="footer-anatomy"><div class="anatomy-label">辅助信息居左，取消先于主操作</div><div class="anatomy-row"><span class="note">说明或只读元信息</span><button class="btn ghost demo-placement" data-note="取消为次级动作，位于主操作之前。">取消</button><button class="btn primary demo-placement" data-note="全局主操作固定右下，使用唯一薄荷青实色按钮。">创建 Provider</button></div><div class="anatomy-divider"></div><div class="anatomy-label">局部次级操作与破坏性操作</div><div class="anatomy-row"><button class="btn small secondary demo-placement" data-note="局部操作留在所属字段或预览区，不进入全局底栏。">分析节拍</button><span class="note">仅当前分析上下文</span><button class="btn ghost demo-placement" data-note="破坏性确认仍允许取消。">取消</button><button class="btn danger demo-placement" data-note="红色仅用于不可撤销或高影响确认。">删除素材</button></div></div><p class="placement-note">工作台「干跑预览 → 生成提案」保持次级到主级的顺序。单动作场景不为视觉对称新增取消按钮。</p></section>
+     <section class="spec-section"><h3 class="spec-title">约束</h3><ul class="rule-list"><li>图标只服务熟悉动作与状态，不为每个标签配图。</li><li>无发光渐变、无装饰光晕、无超大胶囊、无层层嵌套卡片。</li><li>小窗使用弹性宽度与内容滚动，不压缩字体，不隐藏底栏。</li></ul></section>
+    </div></div>
+   </section>
+  </div>
+  <div class="stage-meta"><div class="meta-left"><span class="sample-badge">设计预览</span><span>示例数据</span><span class="meta-dot"></span><span id="demo-status">仅演示视觉与控件状态，不执行任何业务操作</span></div><div class="meta-right"><span>← → 切换</span><span class="meta-dot"></span><span>Esc 关闭</span></div></div>
+ </section>
+</main>
+</div>
+<script>
+(function(){
+  'use strict';
+  var categories=['export','provider','confirm','workbench','command'];
+  var meta={
+    export:{number:'01',title:'导出视频',tag:'标准对话框 · 640 px',hint:'辅助信息居左 · 主操作右下'},
+    provider:{number:'02',title:'Provider 设置',tag:'标准对话框 · 640 px',hint:'局部链接居左 · 取消 → 创建'},
+    confirm:{number:'03',title:'破坏性确认',tag:'紧凑对话框 · 440 px',hint:'取消 → 危险操作 · 红色仅限此处'},
+    workbench:{number:'04',title:'剪辑工作台',tag:'复杂工作台 · 860 px',hint:'干跑预览 → 生成提案 · 固定底栏'},
+    command:{number:'05',title:'命令搜索',tag:'标准对话框 · 640 px',hint:'键盘优先 · 无业务主按钮'},
+    tokens:{number:'06',title:'令牌与放置规则',tag:'设计系统参考',hint:'结构统一 · 方向仅换肤'}
+  };
+  var current='export',isOpen=true,commandIndex=0,ljMode='auto';
+  var stage=document.getElementById('stage'),host=document.getElementById('dialog-host');
+  var closed=document.getElementById('closed-state'),reference=document.getElementById('reference-page');
+  var editor=document.getElementById('editor'),shade=document.getElementById('stage-shade');
+  var status=document.getElementById('demo-status'),defaultStatus=status.textContent;
+  function iconFocus(){
+    if(current==='command'){document.getElementById('command-search').focus();return;}
+    var active=document.querySelector('[data-dialog="'+current+'"]');
+    if(active){var close=active.querySelector('.close-dialog');if(close)close.focus();}
+  }
+  function setCategory(name,focus){
+    if(!meta[name])return;
+    current=name;isOpen=true;status.textContent=defaultStatus;
+    document.querySelectorAll('[data-category]').forEach(function(btn){var active=btn.dataset.category===name;btn.classList.toggle('active',active);if(active)btn.setAttribute('aria-current','page');else btn.removeAttribute('aria-current');});
+    var isTokens=name==='tokens';
+    reference.hidden=!isTokens;host.hidden=isTokens;editor.hidden=isTokens;shade.hidden=isTokens;closed.hidden=true;
+    document.querySelectorAll('[data-dialog]').forEach(function(dialog){dialog.hidden=dialog.dataset.dialog!==name;});
+    document.getElementById('stage-number').textContent=meta[name].number;
+    document.getElementById('stage-title').textContent=meta[name].title;
+    document.getElementById('stage-tag').textContent=meta[name].tag;
+    document.getElementById('placement-hint').textContent=meta[name].hint;
+    document.getElementById('step-current').textContent=meta[name].number;
+    document.getElementById('step-total').textContent=isTokens?'06':'05';
+    document.getElementById('reopen-top').hidden=true;
+    if(name==='command'){filterCommands();}
+    if(focus!==false&& !isTokens){setTimeout(iconFocus,0);}
+  }
+  function closeDialog(){
+    if(current==='tokens')return;
+    isOpen=false;host.hidden=true;closed.hidden=false;document.getElementById('reopen-top').hidden=false;
+    document.getElementById('closed-copy').textContent='当前场景：'+meta[current].title;
+    status.textContent='仅关闭预览，不影响任何编辑器状态';
+    document.getElementById('reopen-main').focus();
+  }
+  function reopenDialog(){
+    if(current==='tokens')return;
+    isOpen=true;closed.hidden=true;host.hidden=false;document.getElementById('reopen-top').hidden=true;
+    status.textContent=defaultStatus;iconFocus();
+  }
+  document.querySelectorAll('[data-category]').forEach(function(btn){btn.addEventListener('click',function(){setCategory(btn.dataset.category,true);});});
+  document.getElementById('prev-category').addEventListener('click',function(){var list=categories.concat('tokens'),i=list.indexOf(current);setCategory(list[(i-1+list.length)%list.length],true);});
+  document.getElementById('next-category').addEventListener('click',function(){var list=categories.concat('tokens'),i=list.indexOf(current);setCategory(list[(i+1)%list.length],true);});
+  document.querySelectorAll('.close-dialog').forEach(function(btn){btn.addEventListener('click',closeDialog);});
+  document.getElementById('reopen-main').addEventListener('click',reopenDialog);
+  document.getElementById('reopen-top').addEventListener('click',reopenDialog);
+  document.querySelectorAll('[data-theme-choice]').forEach(function(btn){btn.addEventListener('click',function(){
+    var theme=btn.dataset.themeChoice;document.documentElement.dataset.theme=theme;
+    document.querySelectorAll('[data-theme-choice]').forEach(function(item){var active=item===btn;item.classList.toggle('active',active);item.setAttribute('aria-pressed',String(active));});
+    document.getElementById('direction-name').textContent=theme==='soft'?'Soft Studio':'Graphite Precision';
+    document.getElementById('direction-note').textContent=theme==='soft'?'温暖中灰与柔和表面，保留相同密度与清晰焦点。':'清晰边缘与石墨层级，强调专业工具的精确感。';
+    document.querySelectorAll('[data-token]').forEach(function(el){el.textContent=getComputedStyle(document.documentElement).getPropertyValue(el.dataset.token).trim();});
+    status.textContent=theme==='soft'?'Soft Studio · 仅替换色彩与阴影，布局保持不变':'Graphite Precision · 推荐方向';
+  });});
+  document.querySelectorAll('.preview-action').forEach(function(btn){btn.addEventListener('click',function(){status.textContent='设计预览 ·「'+btn.dataset.action+'」不会执行，也未发送任何数据';});});
+  document.querySelectorAll('.demo-placement').forEach(function(btn){btn.addEventListener('click',function(){status.textContent=btn.dataset.note;});});
+  document.querySelectorAll('[data-provider-mode]').forEach(function(btn){btn.addEventListener('click',function(){
+    document.querySelectorAll('[data-provider-mode]').forEach(function(item){var active=item===btn;item.classList.toggle('active',active);item.setAttribute('aria-selected',String(active));});
+    var custom=btn.dataset.providerMode==='custom';document.getElementById('preset-field').hidden=custom;
+    if(custom){document.getElementById('provider-name').value='';document.getElementById('provider-url').value='';document.getElementById('provider-model').value='';document.getElementById('provider-name').placeholder='例如：我的网关';}
+    else{document.getElementById('provider-name').value='OpenAI';document.getElementById('provider-url').value='https://api.openai.com/v1';document.getElementById('provider-model').value='gpt-4o-mini';}
+    status.textContent='Provider 类型：'+btn.textContent+' · 仅切换表单模式';
+  });});
+  document.querySelectorAll('[data-export]').forEach(function(select){select.addEventListener('change',function(){
+    var res=document.getElementById('export-resolution'),fps=document.getElementById('export-fps'),quality=document.getElementById('export-quality');
+    document.getElementById('ratio-dim').textContent=res.value;
+    var kbps=quality.value.indexOf('12')>-1?'12':quality.value.indexOf('4')>-1?'4':'8';
+    document.getElementById('ratio-sub').innerHTML=fps.value.replace(' fps','')+'fps · H.264<br>≈'+kbps+' Mbps';
+    status.textContent='导出参数已更新 · 仅示例控件的本地回显';
+  });});
+  var toolMeta={
+    remove:{target:'去停顿',desc:'选中口播视频片段 → 识别静音 → 保留有声段并闭合时间轴。提案只读，采纳后才写正式 Timeline。'},
+    beat:{target:'卡点',desc:'BGM 节拍网格吸附镜头切点，强拍优先放高运动/人脸镜头。前置：BGM 已分析节拍。'},
+    lj:{target:'L/J cut',desc:'画面切点不变，声音提前（J）或延后（L）。词戳优先 ASR，缺失时能量代理。'}
+  };
+  document.querySelectorAll('[data-tool]').forEach(function(btn){btn.addEventListener('click',function(){
+    var tool=btn.dataset.tool;
+    document.querySelectorAll('[data-tool]').forEach(function(item){var active=item===btn;item.classList.toggle('active',active);item.setAttribute('aria-selected',String(active));});
+    document.querySelectorAll('[data-tool-panel]').forEach(function(panel){panel.hidden=panel.dataset.toolPanel!==tool;});
+    document.querySelectorAll('[data-preview-panel]').forEach(function(panel){panel.hidden=panel.dataset.previewPanel!==tool;});
+    document.getElementById('workbench-desc').textContent=toolMeta[tool].desc;
+    document.getElementById('context-target').textContent=toolMeta[tool].target;
+    status.textContent='手法页签：'+toolMeta[tool].target+' · 参数与时间轴预览同步切换';
+  });});
+  function bindRange(id,out,format){var input=document.getElementById(id);input.addEventListener('input',function(){document.getElementById(out).textContent=format(input.value);});}
+  bindRange('pause-threshold','threshold-value',function(v){return Number(v).toFixed(2);});
+  bindRange('pause-silence','silence-value',function(v){return v;});
+  bindRange('pause-pad','pad-value',function(v){return v;});
+  bindRange('beat-duration','duration-value',function(v){return Number(v).toFixed(1);});
+  bindRange('beat-shot','beats-value',function(v){return v;});
+  bindRange('lj-offset','offset-value',function(v){updateLj();return v;});
+  function updateLj(){var modeText=ljMode==='auto'?'自动':ljMode==='j'?'J · 声先入':'L · 声延后';document.getElementById('lj-mode-label').textContent=modeText+' · 声画偏移 '+document.getElementById('lj-offset').value+' ms';}
+  document.querySelectorAll('[data-lj-mode]').forEach(function(btn){btn.addEventListener('click',function(){ljMode=btn.dataset.ljMode;document.querySelectorAll('[data-lj-mode]').forEach(function(item){item.classList.toggle('active',item===btn);});updateLj();});});
+  var wave=document.querySelector('[data-wave]');
+  for(var i=0;i<94;i++){var bar=document.createElement('i'),height=5+Math.abs(Math.sin(i*.72)*18)+Math.abs(Math.cos(i*.23)*9);bar.style.height=Math.round(height)+'px';wave.appendChild(bar);}
+  var beatRow=document.getElementById('beat-row');for(var b=0;b<17;b++){var line=document.createElement('i');line.className='beat-line';line.style.left=(b*6.25)+'%';beatRow.appendChild(line);}
+  var search=document.getElementById('command-search');
+  function visibleCommands(){return Array.prototype.slice.call(document.querySelectorAll('.command-option')).filter(function(btn){return !btn.parentElement.hidden;});}
+  function selectCommand(index){var visible=visibleCommands();if(!visible.length)return;commandIndex=(index+visible.length)%visible.length;document.querySelectorAll('.command-option').forEach(function(btn){var active=btn===visible[commandIndex];btn.classList.toggle('active',active);btn.setAttribute('aria-selected',String(active));});visible[commandIndex].scrollIntoView({block:'nearest'});}
+  function filterCommands(){var query=search.value.trim().toLowerCase();document.querySelectorAll('.command-option').forEach(function(btn){btn.parentElement.hidden=btn.dataset.command.toLowerCase().indexOf(query)===-1;});document.querySelectorAll('[data-group]').forEach(function(group){var next=group.nextElementSibling,has=false;while(next&&!next.hasAttribute('data-group')){if(next.querySelector&&next.querySelector('.command-option')&&!next.hidden)has=true;next=next.nextElementSibling;}group.hidden=!has;});document.getElementById('command-empty').hidden=visibleCommands().length>0;commandIndex=0;selectCommand(0);}
+  search.addEventListener('input',filterCommands);
+  search.addEventListener('keydown',function(event){
+    if(event.key==='ArrowDown'){event.preventDefault();selectCommand(commandIndex+1);}
+    if(event.key==='ArrowUp'){event.preventDefault();selectCommand(commandIndex-1);}
+    if(event.key==='Enter'){event.preventDefault();var visible=visibleCommands();if(visible.length)status.textContent='设计预览 ·「'+visible[commandIndex].dataset.command+'」不会执行，也未修改项目';}
+  });
+  document.querySelectorAll('.command-option').forEach(function(btn){btn.addEventListener('click',function(){var visible=visibleCommands();selectCommand(visible.indexOf(btn));status.textContent='已选择「'+btn.dataset.command+'」· Enter 仅演示，不执行命令';});});
+  document.addEventListener('keydown',function(event){
+    var tag=document.activeElement&&document.activeElement.tagName;
+    var editing=tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT';
+    if(event.key==='Escape'){event.preventDefault();if(isOpen)closeDialog();return;}
+    if(!isOpen&&event.key==='Enter'){event.preventDefault();reopenDialog();return;}
+    if(!editing&&(event.key==='ArrowRight'||event.key==='ArrowLeft')){event.preventDefault();document.getElementById(event.key==='ArrowRight'?'next-category':'prev-category').click();}
+  });
+  shade.addEventListener('click',function(){if(current!=='tokens')closeDialog();});
+  setCategory('export',false);
+})();
+</script>
+</body>
+</html>

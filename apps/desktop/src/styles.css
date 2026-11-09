@@ -2185,3 +2185,1412 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
   margin: 8px 0 0; color: var(--dlg-warn); font-size: var(--dlg-fs-body);
 }
 
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Graphite Precision · 对话框视觉语言（docs/ui-mockups/dialog-system-v2）
+   契约：DESIGN.md §3.1-3.3 / §4-§5（第 34-126、146-154 行）与参考 CSS
+   index.html 第 7-131 行。本段追加在文件末尾，按级联覆盖上方历史弹窗
+   规则；class 名、DOM 结构与 TSX 全部不变。框架 .modal 同时服务两种结构：
+     (A) 共享 <Dialog>：.modal > .modal-heading|.modal-body|.modal-actions
+     (B) 迁移中的业务节点直排弹窗：.modal > 业务节点（旧缩进规则继续生效）
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── LAYER 1 · 令牌重定义（仅弹窗语义，主界面 chrome 色不动） ───────── */
+
+/* ── LAYER 1 · 框架：单一滚动内容区 + 固定底栏 ─────────────────────── */
+.modal {
+  width: min(640px, 100%);
+  display: flex;
+  flex-direction: column;
+  row-gap: 0;
+  padding: 0;
+  overflow: hidden;
+  max-height: calc(100dvh - 48px);
+  border: 1px solid var(--dlg-border);
+  border-radius: var(--r-dlg);
+  background: var(--dlg-bg);
+  color: var(--dlg-text);
+  font-size: var(--dlg-fs-body);
+  /* 环境层 + 近景层，无发光（DESIGN.md §3.2）。 */
+  box-shadow: 0 26px 70px rgba(0, 0, 0, .52), 0 5px 20px rgba(0, 0, 0, .3);
+  scrollbar-width: thin;
+  scrollbar-color: var(--ctl-bg-hover) transparent;
+}
+.modal::-webkit-scrollbar { width: 8px; }
+.modal::-webkit-scrollbar-thumb { background: var(--ctl-bg-hover); border-radius: 4px; border: 2px solid var(--dlg-bg); }
+.modal::-webkit-scrollbar-track { background: transparent; }
+
+.modal > .modal-heading {
+  position: static;
+  z-index: auto;
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: var(--dlg-head-pad);
+  background: transparent;
+}
+.modal > .modal-heading > div { min-width: 0; }
+.modal > .modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  padding: 0 24px 22px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ctl-bg-hover) transparent;
+}
+/* 自带节奏的内容区保持自己的 display/gap（exd- 块流、cov- 与 ps- 的 14px 网格）。 */
+.modal > .modal-body.exd-body { display: block; }
+.modal > .modal-body.cov-body,
+.modal > .modal-body.ps-body { gap: 14px; }
+/* 覆盖块：内边距必须高于通用 :not() 规则的 (0,3,0)，否则内容列被推入
+   双倍留白；滚动契约在这里重复一次，保证自带 gap 的内容区变体同样成立。 */
+.modal > div.modal-body:not(.modal-heading):not(.modal-actions) {
+  min-height: 0;
+  overflow-y: auto;
+  padding-left: 24px;
+  padding-right: 24px;
+  padding-bottom: 22px;
+}
+.modal > .modal-body::-webkit-scrollbar { width: 7px; }
+.modal > .modal-body::-webkit-scrollbar-thumb { background: var(--ctl-bg-hover); border-radius: 4px; }
+.modal > .modal-actions {
+  position: static;
+  z-index: auto;
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-height: var(--dlg-foot-min);
+  padding: var(--dlg-foot-pad);
+  border-top: 1px solid var(--dlg-line);
+  background: var(--dlg-footer);
+}
+.modal > .modal-actions > .exd-foot-info { margin-right: auto; }
+/* 旧结构（业务节点直排）保留 24px 盒式缩进与 12px 行距，并继续整体滚动。 */
+.modal > *:not(.modal-heading):not(.modal-actions) {
+  padding-left: 24px;
+  padding-right: 24px;
+}
+.modal:not(:has(> .modal-body)) { row-gap: 12px; overflow-y: auto; }
+
+/* 小高度窗口：只收紧外周留白，内容区独立滚动，底栏不消失。 */
+@media (max-height: 780px) {
+  .modal > .modal-heading { padding: 17px 24px 14px; }
+  .modal > .modal-actions { min-height: 59px; }
+}
+/* 窄窗：水平内边距收到 16px。 */
+@media (max-width: 760px) {
+  .modal > .modal-heading { padding-left: 16px; padding-right: 16px; }
+  .modal > .modal-body { padding-left: 16px; padding-right: 16px; }
+  .modal > div.modal-body:not(.modal-heading):not(.modal-actions) { padding-left: 16px; padding-right: 16px; }
+  .modal > *:not(.modal-heading):not(.modal-actions) { padding-left: 16px; padding-right: 16px; }
+  .modal > .modal-actions { padding-left: 16px; padding-right: 16px; }
+  .modal fieldset,
+  .modal fieldset:not(.locked-fieldset) { margin-left: 0; margin-right: 0; }
+}
+
+/* ── LAYER 2 · 三档宽度（紧凑 440 / 标准 640 / 工作台 860） ─────────── */
+.modal.compact-dialog,
+.modal.asset-delete-modal,
+.modal.cover-modal,
+.modal.add-transition-card { width: min(440px, calc(100vw - 48px)); }
+
+.modal,
+.modal.export-modal,
+.modal.settings-dialog,
+.modal.command-palette,
+.modal.shortcuts-dialog,
+.modal.transcript-viewer,
+.modal.revision-compare,
+.modal.render-panel-dialog,
+.modal.ai-roughcut,
+.modal.planning-patch,
+.modal.captions-provider,
+.modal.semantic-search,
+.modal.keyframe-review,
+.modal.agent-session,
+.modal.angle-sync-modal,
+.modal.editing-grammar,
+.modal.worklist,
+.modal.project-management-modal,
+.modal.cv-density { width: min(640px, calc(100vw - 48px)); }
+
+.modal.editing-tools,
+.modal.generation-workbench,
+.modal.provider-image-modal,
+.modal.shot-workbench,
+.modal.export-batch-modal { width: min(860px, calc(100vw - 48px)); }
+
+/* Provider 弹窗保留自身高度契约（provider-dialog-layout.test.ts 锁定旧块）。 */
+/* 工作台弹窗的历史 row-gap: 12px（0,2,0）会盖掉框架的 row-gap: 0；
+   间距由使用方自己的 .et-wrap / .modal-body gap 表达。 */
+.modal.editing-tools { row-gap: 0; }
+
+.modal.provider-settings {
+  width: min(640px, calc(100vw - 48px));
+  max-height: min(600px, 80dvh, calc(100dvh - 80px));
+  overflow: hidden;
+  row-gap: 0;
+}
+.modal.provider-settings > .modal-heading { padding: var(--dlg-head-pad); background: transparent; position: static; }
+.modal.provider-settings > .ps-body { padding: 0 24px 22px; }
+.modal.provider-settings > .ps-footer { padding: 14px 24px; min-height: var(--dlg-foot-min); gap: 10px; }
+.modal.provider-settings > .modal-actions { position: static; padding: var(--dlg-foot-pad); min-height: var(--dlg-foot-min); border-top: 1px solid var(--dlg-line); background: var(--dlg-footer); }
+@media (max-height: 780px) {
+  .modal.provider-settings > .modal-heading { padding: 17px 24px 14px; }
+  .modal.provider-settings > .modal-actions { min-height: 59px; }
+  .modal.provider-settings > .ps-footer { min-height: 59px; }
+}
+
+/* ── LAYER 3 · 控件：输入 / 下拉 / 文本域 / 按钮 ─────────────────────── */
+.modal input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+.modal select,
+.modal textarea {
+  height: var(--dlg-ctl-h);
+  min-height: var(--dlg-ctl-h);
+  padding: 0 11px;
+  background: var(--ctl-bg);
+  border: 1px solid transparent;
+  border-radius: var(--r-ctl);
+  color: var(--dlg-text);
+  font-size: 12.5px;
+  outline: none;
+  transition: background .15s, border-color .15s, box-shadow .15s;
+}
+.modal textarea { height: auto; min-height: 78px; padding: 9px 11px; line-height: 1.6; resize: vertical; }
+.modal input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):hover:not(:focus):not(:disabled),
+.modal select:hover:not(:focus):not(:disabled),
+.modal textarea:hover:not(:focus):not(:disabled) { background: var(--ctl-bg-hover); }
+.modal input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus,
+.modal select:focus,
+.modal textarea:focus {
+  background: var(--ctl-bg);
+  border-color: var(--dlg-primary);
+  box-shadow: 0 0 0 2px var(--dlg-accent-dim);
+}
+.modal input::placeholder, .modal textarea::placeholder { color: var(--dlg-text-4); }
+.modal input:disabled, .modal select:disabled, .modal textarea:disabled { opacity: .58; }
+.modal input[type="checkbox"], .modal input[type="radio"], .modal input[type="range"] { accent-color: var(--dlg-primary); }
+.modal > input[type="search"] { margin: 0; height: var(--dlg-ctl-h); }
+
+.modal button {
+  height: var(--dlg-ctl-h);
+  min-height: var(--dlg-ctl-h);
+  padding: 0 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid transparent;
+  border-radius: var(--r-ctl);
+  background: var(--btn-bg);
+  color: var(--dlg-text);
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.modal button:hover:not(:disabled) { background: var(--btn-bg-hover); }
+.modal button:disabled { opacity: .42; cursor: not-allowed; }
+.modal button:focus-visible { outline: 2px solid var(--dlg-primary); outline-offset: 2px; }
+
+/* 旧全局「最后一个按钮即主操作」规则只认 .modal-actions 祖先，会把内容区
+   里的局部操作行、嵌套操作行一起染成薄荷青。此处同权重写后覆盖为中性，
+   再把主操作资格收窄到「直系底栏的最后一个按钮」。 */
+.modal .modal-actions button:last-child:not(.danger) { background: var(--btn-bg); color: var(--dlg-text); font-weight: 500; }
+.modal .modal-actions button:last-child:not(.danger):hover:not(:disabled) { background: var(--btn-bg-hover); color: var(--dlg-text); }
+.modal > .modal-actions button:last-child:not(.danger):not(:only-child) {
+  background: var(--dlg-primary);
+  color: var(--dlg-primary-text);
+  font-weight: 600;
+  padding: 0 20px;
+}
+.modal > .modal-actions button:last-child:not(.danger):not(:only-child):hover:not(:disabled) {
+  background: var(--dlg-primary-hover);
+  color: var(--dlg-primary-text);
+}
+/* 唯一按钮的底栏保持中性：不做假主操作。 */
+.modal > .modal-actions button:only-child:not(.danger) { background: var(--btn-bg); color: var(--dlg-text); font-weight: 500; }
+.modal > .modal-actions button:only-child:not(.danger):hover:not(:disabled) { background: var(--btn-bg-hover); }
+/* 危险操作永远红，不受「最后一个」规则影响。 */
+.modal button.danger, .modal .modal-actions .danger {
+  background: var(--dlg-danger);
+  border: 1px solid transparent;
+  color: #fff;
+  font-weight: 600;
+  padding: 0 18px;
+}
+.modal button.danger:hover:not(:disabled), .modal .modal-actions .danger:hover:not(:disabled) { background: #ee7377; color: #fff; }
+/* 内容区的动作行收回中性；tinted 局部操作另走 accent-dim（非主操作填充）。 */
+.modal .project-management-section .modal-actions button:last-child:not(.danger),
+.modal .reframe-batch-actions .modal-actions button:last-child:not(.danger),
+.modal .batch-status .modal-actions button:last-child:not(.danger) { background: var(--btn-bg); color: var(--dlg-text); font-weight: 500; }
+/* 「创建项目」是分组内的局部动作：用 tinted 次级表达，不做填充主色
+   （旧规则 `.modal section.project-management-section:first-of-type ...
+   .compact-command` 是 (0,5,1)，这里提到 (0,5,2) 并覆盖两种结构）。 */
+.modal > section.project-management-section:first-of-type .project-form-row button.compact-command,
+.modal > div.modal-body section.project-management-section:first-of-type .project-form-row button.compact-command {
+  background: var(--dlg-accent-dim);
+  color: var(--dlg-primary);
+  font-weight: 600;
+  border-color: rgba(53, 214, 174, .28);
+}
+.modal > section.project-management-section:first-of-type .project-form-row button.compact-command:hover:not(:disabled),
+.modal > div.modal-body section.project-management-section:first-of-type .project-form-row button.compact-command:hover:not(:disabled) {
+  background: rgba(53, 214, 174, .17);
+  color: var(--dlg-primary-hover);
+}
+.modal .append-btn,
+.modal .cov-actions .cov-accent {
+  height: var(--dlg-ctl-h);
+  min-height: var(--dlg-ctl-h);
+  background: var(--dlg-accent-dim);
+  color: var(--dlg-primary);
+  border: 1px solid rgba(53, 214, 174, .28);
+  font-weight: 600;
+}
+.modal .append-btn:hover:not(:disabled),
+.modal .cov-actions .cov-accent:hover:not(:disabled) { background: rgba(53, 214, 174, .17); color: var(--dlg-primary-hover); }
+/* 局部小按钮 28px；关闭钮 28×28 透明。 */
+.modal .compact-command,
+.modal .mini-btn,
+.modal .provider-capability-list button,
+.modal .target-actions button,
+.modal .generation-task-actions button,
+.modal .shot-card-heading button,
+.modal .shot-toolbar button,
+.modal .generation-history-toolbar button,
+.modal .ai-inline button,
+.modal details > button,
+.modal .shot-history-detail button,
+.modal .stage5-assembly > header button,
+.modal .shot-fulfillment button,
+.modal .generation-create fieldset button,
+.modal .provider-image-configs button,
+.modal .captions-provider-status-row button,
+.modal .transcript-viewer-toolbar .mini-btn,
+.modal .exd-dest-change {
+  height: var(--dlg-ctl-sm);
+  min-height: var(--dlg-ctl-sm);
+  padding: 0 11px;
+  font-size: 11.5px;
+}
+.modal .modal-body button.icon-btn,
+.modal .modal-body button.icon-button,
+.modal .render-job .icon-btn,
+.modal .export-record .icon-btn { width: 28px; min-width: 28px; height: 28px; min-height: 28px; padding: 0; }
+.modal .icon-btn,
+.modal .icon-button {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--dlg-text-3);
+  font-size: 15px;
+  line-height: 1;
+}
+.modal .icon-btn svg, .modal .icon-button svg { width: 15px; height: 15px; }
+.modal .icon-btn:hover:not(:disabled), .modal .icon-button:hover:not(:disabled) { background: var(--ctl-bg); color: var(--dlg-text); }
+.modal > .modal-heading .icon-btn,
+.modal > .modal-heading .icon-button,
+.modal > .modal-heading > button { width: 28px; min-width: 28px; height: 28px; min-height: 28px; padding: 0; }
+.modal > .modal-heading > button:not(.icon-btn) { width: auto; min-width: 28px; padding: 0 10px; }
+.modal input:focus-visible, .modal select:focus-visible, .modal textarea:focus-visible { outline: none; }
+
+/* ── LAYER 4 · 排版与分组 ───────────────────────────────────────────── */
+.modal h2 {
+  margin: 0;
+  font-size: var(--dlg-fs-title);
+  line-height: var(--dlg-lh-title);
+  font-weight: 600;
+  letter-spacing: -.2px;
+  color: var(--dlg-text);
+}
+.modal .modal-heading p,
+.modal > .modal-heading > div > p {
+  margin: 4px 0 0;
+  max-width: 65ch;
+  font-size: var(--dlg-fs-subtitle);
+  line-height: var(--dlg-lh-subtitle);
+  font-weight: 400;
+  color: var(--dlg-text-3);
+}
+.modal .modal-heading small { font-size: var(--dlg-fs-subtitle); line-height: var(--dlg-lh-subtitle); color: var(--dlg-text-3); }
+/* h3 = 分组标签：小字重 + 字距，不再冒充正文标题。 */
+.modal h3 {
+  margin: 0 0 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  font-weight: 600;
+  letter-spacing: .5px;
+  color: var(--dlg-text-2);
+}
+/* 内容区里的 h3 与基础规则同权，写在后面统一成「分组标签」；
+   工作台预览标题（.et-ph h3，0,3,1）更高权，保持自己的尺寸。 */
+.modal .modal-body h3 {
+  margin: 0 0 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  font-weight: 600;
+  letter-spacing: .5px;
+  color: var(--dlg-text-2);
+}
+/* 旧结构的分组容器同样把 h3 变成标签（历史规则 (0,2,1) 钉在正文档，
+   这里同权写后覆盖）。 */
+.modal .project-management-section h3,
+.modal .batch-status h3,
+.modal .reframe-batch-actions h3 {
+  margin: 0 0 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  font-weight: 600;
+  letter-spacing: .5px;
+  color: var(--dlg-text-2);
+}
+.modal h4 { margin: 0 0 6px; font-size: 10.5px; font-weight: 600; letter-spacing: .6px; color: var(--dlg-text-3); }
+.modal p { font-size: var(--dlg-fs-body); line-height: var(--dlg-lh-body); color: var(--dlg-text-2); overflow-wrap: anywhere; }
+.modal small { font-size: var(--dlg-fs-caption); line-height: var(--dlg-lh-caption); color: var(--dlg-text-3); }
+.modal strong { color: var(--dlg-text); font-weight: 600; }
+.modal label,
+.modal .exd-field > label,
+.modal .et-field > label {
+  font-size: var(--dlg-fs-label);
+  line-height: var(--dlg-lh-label);
+  color: var(--dlg-text-2);
+}
+.modal legend { font-size: var(--dlg-fs-label); letter-spacing: .4px; color: var(--dlg-text-3); }
+.modal code, .modal dd code { font-family: Consolas, monospace; font-size: var(--dlg-fs-caption); color: var(--dlg-primary); }
+
+/* dl：分组摘要（raise 底 + 8px 圆角 + 发丝线）。 */
+.modal dl,
+.modal [role="dialog"] dl,
+.modal .shot-fulfillment-confirmation dl {
+  display: grid;
+  grid-template-columns: minmax(88px, max-content) minmax(0, 1fr);
+  gap: 8px 16px;
+  margin: 0;
+  padding: 13px 14px;
+  background: var(--dlg-raise);
+  border: 1px solid var(--dlg-line);
+  border-radius: var(--r-box);
+  font-size: var(--dlg-fs-label);
+  line-height: var(--dlg-lh-label);
+}
+.modal dt { color: var(--dlg-text-3); font-size: var(--dlg-fs-label); }
+.modal dd { margin: 0; color: var(--dlg-text); font-size: var(--dlg-fs-label); overflow-wrap: anywhere; }
+
+/* 提示盒：柔和底色 + 8px 圆角，去掉左侧 3px 色条。 */
+.modal .readonly-note,
+.modal .delete-warning,
+.modal .simulation-notice,
+.modal .shot-zero-notice,
+.modal .locked-note,
+.modal .provider-cost-notice,
+.modal .ai-status,
+.modal .generation-safe-error,
+.modal .semantic-search .semantic-search-error,
+.modal .generation-parameters .readonly-note {
+  margin: 0;
+  padding: 11px 13px;
+  border: 1px solid var(--dlg-line);
+  border-left-width: 1px;
+  border-left-color: var(--dlg-line);
+  border-radius: var(--r-box);
+  background: var(--dlg-raise);
+  color: var(--dlg-text-2);
+  font-size: var(--dlg-fs-caption);
+  line-height: 1.75;
+}
+.modal .readonly-note,
+.modal .simulation-notice,
+.modal .shot-zero-notice,
+.modal .generation-parameters .readonly-note {
+  border-color: rgba(53, 214, 174, .22);
+  background: var(--dlg-accent-dim);
+}
+.modal .delete-warning,
+.modal .generation-safe-error,
+.modal .semantic-search .semantic-search-error {
+  border-color: rgba(227, 93, 98, .3);
+  background: var(--dlg-danger-dim);
+  color: #f0bcbe;
+}
+.modal .locked-note,
+.modal .provider-cost-notice,
+.modal .ai-status {
+  border-color: rgba(216, 176, 106, .28);
+  background: var(--dlg-warn-dim);
+}
+.modal .provider-cost-notice strong { color: var(--dlg-warn); }
+
+/* fieldset：发丝分隔替代嵌套描边卡片。 */
+.modal fieldset,
+.modal fieldset:not(.locked-fieldset) {
+  min-width: 0;
+  margin: 0;
+  padding: 12px 0 0;
+  display: grid;
+  gap: 10px;
+  border: 0;
+  border-top: 1px solid var(--dlg-line);
+  border-radius: 0;
+  background: transparent;
+}
+.modal fieldset > legend { padding: 0 0 8px; }
+.modal .shot-card fieldset { padding: 10px 0 0; }
+
+/* ── LAYER 5 · 专用面：exd-* / et-* / 工作台 / 页签 ─────────────────── */
+.modal .exd-body { padding: 0 24px 22px; }
+.modal .exd-hero { gap: 18px; padding: 0 0 16px; }
+.modal .exd-cover { border-radius: var(--r-box); }
+.modal .exd-filename-input {
+  height: var(--dlg-ctl-h);
+  border-radius: var(--r-ctl);
+  border-color: transparent;
+  background: var(--ctl-bg);
+  font-size: 12.5px;
+  color: var(--dlg-text);
+}
+.modal .exd-filename-input:focus { border-color: var(--dlg-primary); box-shadow: 0 0 0 2px var(--dlg-accent-dim); }
+.modal .exd-ext-chip { height: var(--dlg-ctl-h); border-radius: 0 var(--r-ctl) var(--r-ctl) 0; border-color: transparent; background: var(--dlg-raise); }
+.modal .exd-dest-row { height: var(--dlg-ctl-h); border-radius: var(--r-ctl); border-color: transparent; background: var(--ctl-bg); }
+.modal .exd-dest-row:hover { background: var(--ctl-bg-hover); }
+.modal .exd-dest-change { height: var(--dlg-ctl-sm); border-radius: var(--r-ctl); background: var(--btn-bg); color: var(--dlg-text-2); font-size: 11.5px; }
+.modal .exd-dest-change:hover:not(:disabled) { background: var(--btn-bg-hover); }
+.modal .exd-ratio-card { border-radius: var(--r-box); border-color: var(--dlg-line); background: var(--dlg-raise); }
+.modal .exd-divider { border-top: 1px solid var(--dlg-line); }
+
+.modal.editing-tools .et-wrap { padding-left: 24px; padding-right: 24px; display: grid; gap: 12px; }
+.modal.editing-tools .et-tabs {
+  display: inline-flex;
+  gap: 3px;
+  padding: 3px;
+  width: fit-content;
+  border: 1px solid var(--dlg-line);
+  border-radius: var(--r-box);
+  background: #101416;
+}
+.modal.editing-tools .et-tabs button {
+  min-width: 104px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dlg-text-3);
+  font-size: 11.5px;
+}
+.modal.editing-tools .et-tabs button strong { font-size: 12px; font-weight: 500; color: var(--dlg-text-2); }
+.modal.editing-tools .et-tabs button:hover:not(:disabled) { background: rgba(255, 255, 255, .03); color: var(--dlg-text); }
+.modal.editing-tools .et-tabs button.on { background: var(--dlg-raise); color: var(--dlg-text); box-shadow: 0 1px 2px rgba(0, 0, 0, .15); }
+.modal.editing-tools .et-tabs button.on strong { color: var(--dlg-text); }
+.modal.editing-tools .et-tabs button.on span { color: var(--dlg-primary); }
+.modal.editing-tools .et-shell {
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  border: 1px solid var(--dlg-line);
+  border-radius: var(--r-box);
+  background: var(--dlg-raise);
+  overflow: hidden;
+}
+.modal.editing-tools .et-col { padding: 14px; gap: 12px; }
+.modal.editing-tools .et-col + .et-col { border-left: 1px solid var(--dlg-line); }
+.modal.editing-tools .et-seg { border-radius: var(--r-ctl); border-color: var(--dlg-line); background: var(--ctl-bg); }
+.modal.editing-tools .et-seg button { height: 26px; min-height: 26px; border-radius: 5px; }
+.modal.editing-tools .et-preview,
+.modal.editing-tools .et-proposal { border-radius: var(--r-box); border-color: var(--dlg-line); background: var(--dlg-bg); }
+.modal.editing-tools .et-av-row,
+.modal.editing-tools .et-cell { border-radius: var(--r-ctl); border-color: var(--dlg-line); }
+.modal.editing-tools .et-timeline { border-radius: var(--r-ctl); border-color: var(--dlg-line); }
+.modal.editing-tools .et-hist button { height: var(--dlg-ctl-sm); min-height: var(--dlg-ctl-sm); }
+
+/* 模式页签 / 工作台页签：分段控件观感（容器凹陷 + 选中块抬升）。 */
+.modal .generation-tabs {
+  display: inline-flex;
+  justify-content: flex-start;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--dlg-line);
+  border-radius: var(--r-box);
+  background: #101416;
+}
+.modal .generation-tabs button {
+  height: 30px;
+  min-height: 30px;
+  padding: 0 14px;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dlg-text-3);
+  font-size: 12px;
+}
+.modal .generation-tabs button:hover:not(:disabled) { background: rgba(255, 255, 255, .03); color: var(--dlg-text); }
+.modal .generation-tabs button.active,
+.modal .generation-tabs button[aria-selected="true"] {
+  background: var(--dlg-raise);
+  color: var(--dlg-text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .15);
+}
+.modal .provider-mode-tabs {
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--dlg-line);
+  border-radius: var(--r-box);
+  background: #101416;
+}
+.modal .provider-mode-tabs button {
+  flex: 1;
+  height: 30px;
+  min-height: 30px;
+  padding: 0 8px;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dlg-text-3);
+  font-size: 12px;
+}
+.modal .provider-mode-tabs button:hover:not(:disabled) { background: rgba(255, 255, 255, .03); color: var(--dlg-text); }
+.modal .provider-mode-tabs button.active { background: var(--dlg-raise); color: var(--dlg-text); }
+
+/* 列表容器 / 命令面板 / 快捷键表沿用同一表面与分隔。 */
+.modal kbd, .modal .command-shortcut {
+  font-family: Consolas, monospace;
+  font-size: 10.5px;
+  color: var(--dlg-text-2);
+  background: var(--ctl-bg);
+  border: 1px solid var(--dlg-line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 2px 6px;
+  line-height: 1.3;
+}
+.modal .command-list,
+.modal .shortcuts-list,
+.modal .readonly-segments,
+.modal .provider-capability-list,
+.modal .generation-request-list,
+.modal .generation-task-list,
+.modal .shot-history-list,
+.modal .shot-history-detail {
+  border-radius: var(--r-box);
+  border: 1px solid var(--dlg-line);
+  background: var(--dlg-raise);
+}
+.modal .instruction-preview,
+.modal .egress-text { border-radius: var(--r-box); border: 1px solid var(--dlg-line); background: #101417; }
+.modal .readonly-segments > div { grid-template-columns: 108px 1fr; border-bottom: 1px solid var(--dlg-line); }
+
+/* 进度条、步骤条跟随新令牌。 */
+.modal .project-steps span { height: 30px; border-radius: var(--r-ctl); background: var(--ctl-bg); color: var(--dlg-text-3); font-size: 12px; }
+.modal .project-steps span.active { background: var(--dlg-accent-dim); color: var(--dlg-primary); }
+.modal .project-steps span.active i { background: var(--dlg-primary); color: var(--dlg-primary-text); }
+
+/* 主界面浮卡（非 .modal 骨架）跟随令牌表面，结构不变。 */
+.ai-job-progress { border-radius: var(--r-dlg); background: var(--dlg-bg); border: 1px solid var(--dlg-border); box-shadow: 0 18px 50px rgba(0, 0, 0, .6); }
+
+/* ── 工作台双栏：宽时两栏，900px 以下堆叠 ───────────────────────────── */
+@media (max-width: 900px) {
+  .modal.editing-tools .et-shell { grid-template-columns: 1fr; }
+  .modal.editing-tools .et-col + .et-col { border-left: 0; border-top: 1px solid var(--dlg-line); }
+  .modal .exd-hero { grid-template-columns: minmax(0, 1fr); }
+  .modal .exd-settings { grid-template-columns: minmax(0, 1fr); }
+  .modal .exd-ratio-card { justify-self: start; }
+}
+
+/* ── 盒式缩进保底：提示盒 / 容器按 24px margin 缩进（≥ 通用 :not() 的
+      (0,3,0)，dialog-box-indent.test.ts 的计算基线）。 ─────────────── */
+.modal > *:not(.modal-heading):not(.modal-actions).readonly-note,
+.modal > *:not(.modal-heading):not(.modal-actions).delete-warning,
+.modal > *:not(.modal-heading):not(.modal-actions).ai-status,
+.modal > *:not(.modal-heading):not(.modal-actions).simulation-notice,
+.modal > *:not(.modal-heading):not(.modal-actions).locked-note,
+.modal > *:not(.modal-heading):not(.modal-actions).provider-cost-notice,
+.modal > *:not(.modal-heading):not(.modal-actions).instruction-preview,
+.modal > *:not(.modal-heading):not(.modal-actions).egress-text,
+.modal > *:not(.modal-heading):not(.modal-actions).readonly-segments,
+.modal > *:not(.modal-heading):not(.modal-actions).provider-capability-list,
+.modal > *:not(.modal-heading):not(.modal-actions).reframe-batch-actions,
+.modal > *:not(.modal-heading):not(.modal-actions).batch-status {
+  margin-left: 24px;
+  margin-right: 24px;
+}
+.modal > *:not(.modal-heading):not(.modal-actions).readonly-note,
+.modal > *:not(.modal-heading):not(.modal-actions).delete-warning,
+.modal > *:not(.modal-heading):not(.modal-actions).ai-status,
+.modal > *:not(.modal-heading):not(.modal-actions).simulation-notice,
+.modal > *:not(.modal-heading):not(.modal-actions).locked-note,
+.modal > *:not(.modal-heading):not(.modal-actions).provider-cost-notice,
+.modal > *:not(.modal-heading):not(.modal-actions).instruction-preview,
+.modal > *:not(.modal-heading):not(.modal-actions).egress-text {
+  padding-left: 13px;
+  padding-right: 13px;
+}
+.modal > *:not(.modal-heading):not(.modal-actions).readonly-segments,
+.modal > *:not(.modal-heading):not(.modal-actions).provider-capability-list {
+  padding-left: 2px;
+  padding-right: 2px;
+}
+/* 旧结构里的分组卡片同样是整宽盒子：改 margin 缩进，避免边框贴弹窗边缘
+   （与上方 batch-status / reframe-batch-actions 同一口径）。 */
+.modal > *:not(.modal-heading):not(.modal-actions).project-management-section {
+  margin-left: 24px;
+  margin-right: 24px;
+  padding: 14px;
+}
+
+/* 无底栏弹窗：底部留白交给 .modal-body（关闭钮在标题行，末行不贴边）。 */
+.modal.render-panel-dialog,
+.modal.export-batch-modal,
+.modal.transcript-viewer,
+.modal.captions-provider:not(:has(> .modal-actions)) { padding-bottom: 0; }
+.modal.render-panel-dialog > .modal-body,
+.modal.export-batch-modal > .modal-body,
+.modal.transcript-viewer > .modal-body,
+.modal.captions-provider:not(:has(> .modal-actions)) > .modal-body { padding-bottom: 22px; }
+.modal.transcript-viewer .readonly-segments { max-height: min(52vh, 460px); overflow: auto; }
+
+@media (max-width: 760px) {
+  .modal > *:not(.modal-heading):not(.modal-actions).readonly-note,
+  .modal > *:not(.modal-heading):not(.modal-actions).delete-warning,
+  .modal > *:not(.modal-heading):not(.modal-actions).ai-status,
+  .modal > *:not(.modal-heading):not(.modal-actions).simulation-notice,
+  .modal > *:not(.modal-heading):not(.modal-actions).locked-note,
+  .modal > *:not(.modal-heading):not(.modal-actions).provider-cost-notice,
+  .modal > *:not(.modal-heading):not(.modal-actions).instruction-preview,
+  .modal > *:not(.modal-heading):not(.modal-actions).egress-text,
+  .modal > *:not(.modal-heading):not(.modal-actions).readonly-segments,
+  .modal > *:not(.modal-heading):not(.modal-actions).provider-capability-list,
+  .modal > *:not(.modal-heading):not(.modal-actions).reframe-batch-actions,
+  .modal > *:not(.modal-heading):not(.modal-actions).batch-status { margin-left: 16px; margin-right: 16px; }
+  .modal > *:not(.modal-heading):not(.modal-actions).project-management-section { margin-left: 16px; margin-right: 16px; }
+  .modal.render-panel-dialog > .modal-body,
+  .modal.export-batch-modal > .modal-body,
+  .modal.transcript-viewer > .modal-body,
+  .modal.captions-provider:not(:has(> .modal-actions)) > .modal-body { padding-bottom: 16px; }
+  .modal.transcript-viewer .readonly-segments { max-height: min(46vh, 380px); }
+}
+
+/* ── LAYER 6 · 分步弹窗：末个正文操作行吸底（2026-11-06 真机测量发现） ──
+   分步弹窗（AI 粗剪 / AI 修改 / 字幕优化等）把每一步的操作放在步骤内容末尾，
+   没有 Dialog 级 footer。旧结构下 .modal 整体滚动，按钮随内容滚走会失去可达性：
+   1024×720 实测 body clientH 592 / scrollH 848，底栏为 null，主操作在视野外。
+   这里让「正文最后一个 .modal-actions」吸在滚动区底部，保持与 Dialog 底栏
+   一致的表面与分隔线，且不改任何 TSX 结构或业务判断。 */
+.modal > .modal-body > .modal-actions:last-child {
+  position: sticky;
+  bottom: -22px;
+  z-index: 2;
+  margin: 0 -24px -22px;
+  padding: 14px 24px;
+  min-height: 65px;
+  background: var(--dlg-footer);
+  border-top: 1px solid var(--dlg-line);
+}
+/* 该行是该步骤的真正主操作，恢复主按钮权重（只此一处，不外溢到局部操作行）。 */
+/* 分步弹窗的这一步就是主操作，单按钮也应当是主按钮（区别于
+   归档/恢复默认那类「唯一但非主操作」按钮，后者不在 .modal-body 内）。 */
+.modal > .modal-body > .modal-actions:last-child > button:last-child:not(.danger) {
+  background: var(--dlg-primary);
+  color: var(--dlg-primary-text);
+  font-weight: 600;
+  padding: 0 20px;
+}
+.modal > .modal-body > .modal-actions:last-child > button:last-child:not(.danger):hover:not(:disabled) {
+  background: var(--dlg-primary-hover);
+}
+@media (max-height: 780px) {
+  .modal > .modal-body > .modal-actions:last-child {
+    bottom: -18px;
+    margin-bottom: -18px;
+    padding: 11px 24px;
+    min-height: 59px;
+  }
+}
+@media (max-width: 760px) {
+  .modal > .modal-body > .modal-actions:last-child {
+    margin-left: -16px;
+    margin-right: -16px;
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+}
+
+/* ── LAYER 7 · 正文内的局部操作行：从「第二个底栏」降为分组附属操作 ──
+   设置弹窗等把作用于单个分组（fieldset）的操作留在正文里，这是正确的信息架构
+   （DESIGN.md §4.2：局部操作跟随所属内容）。但它们此前复用完整底栏样式
+   （--dlg-footer 背景 + 上分隔线 + 右对齐按钮），与真正的底部操作区在视觉上
+   完全等价，看起来像弹窗里有好几个底栏——正是「按钮一会儿在这、一会儿在那」
+   的观感来源。这里只做视觉降级：不铺底、不画分隔线、按钮吸附到分组右下、
+   保持 28px 次级尺寸，与固定底栏形成明确的主次与作用域差。 */
+.modal > .modal-body .modal-actions:not(:last-child) {
+  background: transparent;
+  border-top: 0;
+  min-height: 0;
+  padding: 0;
+  margin: 0;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.modal > .modal-body .modal-actions:not(:last-child) > button {
+  height: var(--dlg-ctl-sm);
+  min-height: var(--dlg-ctl-sm);
+  padding: 0 12px;
+  background: var(--ctl-bg);
+  color: var(--dlg-text-2);
+  font-weight: 500;
+}
+.modal > .modal-body .modal-actions:not(:last-child) > button:hover:not(:disabled) {
+  background: var(--ctl-bg-hover);
+  color: var(--dlg-text);
+}
+/* 分组内的操作行不要再继承上一次的薄荷青主操作权重。 */
+.modal > .modal-body .modal-actions:not(:last-child) > button:last-child:not(.danger) {
+  background: var(--ctl-bg);
+  color: var(--dlg-text-2);
+  font-weight: 500;
+}
+.modal > .modal-body .modal-actions:not(:last-child) > button:last-child:not(.danger):hover:not(:disabled) {
+  background: var(--ctl-bg-hover);
+  color: var(--dlg-text);
+}
+
+/* ── LAYER 8 · Provider「管理」视图（2026-11-06 用户实测补齐） ────────
+   缺口来源：本轮只统一了「新建」形态；管理视图的三类元素仍是旧样式——
+   ① .ps-details 沿用 70px 标签列的旧网格，与规范的分组摘要卡不一致；
+   ② .ps-secret-actions 里的「删除配置」是整块红色实心按钮，且与
+      「安全保存密钥」并排堆叠，在弹窗中部形成第二个、更抢眼的操作区；
+   ③ 密钥保存/删除成组按钮没有主次，读起来像两组主操作。
+   处理：摘要卡统一为规范的分组容器；密钥操作降为 28px 次级按钮，
+   危险动作改为「红字次级」而非实心红块——危险语义由颜色与文案表达，
+   强度让位给底栏主操作。 */
+/* 特异性必须压过历史规则 .modal.provider-settings .ps-details（0,3,0）。 */
+.modal.provider-settings .ps-details {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 9px 14px;
+  margin: 0;
+  padding: 13px 14px;
+  background: var(--dlg-raise);
+  border: 1px solid var(--dlg-line);
+  border-radius: var(--r-box);
+  font-size: 12.5px;
+}
+.modal.provider-settings .ps-details dt { color: var(--dlg-text-3); font-size: 12px; }
+.modal.provider-settings .ps-details dd { margin: 0; color: var(--dlg-text); overflow-wrap: anywhere; }
+
+.modal .ps-secret-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+.modal .ps-secret-actions > button {
+  height: var(--dlg-ctl-sm);
+  min-height: var(--dlg-ctl-sm);
+  padding: 0 12px;
+  border-radius: var(--r-ctl);
+  background: var(--ctl-bg);
+  color: var(--dlg-text-2);
+  font-size: 12px;
+  font-weight: 500;
+}
+.modal .ps-secret-actions > button:hover:not(:disabled) {
+  background: var(--ctl-bg-hover);
+  color: var(--dlg-text);
+}
+/* 危险动作保持可辨识，但不再以实心红块压过主操作。 */
+.modal .ps-secret-actions > button.danger {
+  background: transparent;
+  border: 1px solid rgba(227, 93, 98, .34);
+  color: #e88b8f;
+  font-weight: 500;
+  margin-left: auto;
+}
+.modal .ps-secret-actions > button.danger:hover:not(:disabled) {
+  background: var(--dlg-danger-dim);
+  border-color: rgba(227, 93, 98, .55);
+  color: #f0a1a5;
+}
+/* 一行只放一个危险动作时不要把它推到最右，避免与上下字段错位。 */
+.modal .ps-secret-actions:has(> button.danger:only-child) > button.danger { margin-left: 0; }
+
+/* ═══════════════════════════════════════════════════════════════════
+   LAYER 9 · 原型内容级组件（2026-11-06 用户指出：只换了外壳，内容没做）
+   来源：docs/ui-mockups/dialog-system-v2/index.html 原型 CSS
+   令牌映射：--d-surface→--dlg-bg / --d-raise→--dlg-raise /
+             --d-input→--ctl-bg / --d-muted→--dlg-text-3 /
+             --d-text-2→--dlg-text-2 / --control-radius→var(--r-ctl)
+   这些是弹窗"内部"的组件：分组标题、字段辅助、项目条、画幅卡、路径控件。
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── 分组标题 ───────────────────────────────────────────────── */
+.modal .section-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 0 13px;
+  color: var(--dlg-text-2);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .35px;
+}
+.modal .section-label span { font: 9px Consolas, monospace; color: var(--dlg-text-3); letter-spacing: .3px; }
+
+/* ── 字段：标签在上、辅助文字在右 ────────────────────────────── */
+.modal .field { display: grid; gap: 7px; min-width: 0; }
+.modal .field > label,
+.modal .field > .field-label {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  color: var(--dlg-text-2); font-size: 12px; line-height: 17px;
+}
+.modal .field-hint { color: var(--dlg-text-3); font-size: 10px; font-weight: 400; }
+.modal .field-value { color: var(--dlg-text); font-size: 12.5px; }
+.modal .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px 16px; }
+.modal .span-2 { grid-column: 1 / -1; }
+
+/* ── 项目摘要条（导出弹窗） ──────────────────────────────────── */
+.modal .project-strip {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 17px;
+  align-items: center;
+  margin-bottom: 20px;
+}
+.modal .project-cover {
+  position: relative; width: 112px; height: 70px; padding: 0;
+  overflow: hidden; border: 0; border-radius: 7px;
+  background: #27332f; color: #fff; cursor: pointer;
+}
+.modal .project-cover img, .modal .project-cover svg { width: 100%; height: 100%; object-fit: cover; display: block; }
+.modal .project-cover span {
+  position: absolute; inset: auto 0 0; padding: 5px;
+  background: rgba(7, 12, 11, .74); font-size: 9px; text-align: center; color: #fff;
+}
+.modal .project-cover:hover span { background: rgba(7, 12, 11, .9); color: var(--dlg-primary); }
+.modal .project-name { font-size: 13px; font-weight: 550; margin-bottom: 7px; color: var(--dlg-text); }
+.modal .project-stats { display: flex; gap: 15px; color: var(--dlg-text-3); font-size: 10.5px; margin-bottom: 11px; }
+.modal .project-stats b { color: var(--dlg-text-2); font-weight: 500; margin-left: 4px; }
+.modal .filename { display: grid; grid-template-columns: minmax(0, 1fr) 42px; align-items: center; }
+.modal .filename input { border-radius: 7px 0 0 7px; }
+.modal .file-ext {
+  height: 34px; display: grid; place-items: center;
+  border: 1px solid var(--dlg-line); border-left: 0; border-radius: 0 7px 7px 0;
+  background: var(--dlg-raise); color: var(--dlg-text-3); font: 10px Consolas, monospace;
+}
+
+/* ── 导出：表单 + 画幅卡 ─────────────────────────────────────── */
+.modal .export-grid { display: grid; grid-template-columns: minmax(0, 1fr) 126px; gap: 20px; }
+.modal .ratio-panel { align-self: start; background: var(--dlg-raise); border-radius: 8px; padding: 13px; text-align: center; }
+.modal .ratio-frame {
+  height: 68px; display: grid; place-items: center;
+  background: #111617; border: 1px solid var(--dlg-line); border-radius: 4px;
+  color: var(--dlg-text-2); font: 12px Consolas, monospace; margin-bottom: 10px;
+}
+.modal .ratio-name { font-size: 11px; color: var(--dlg-text-2); }
+.modal .ratio-dim { font: 10px Consolas, monospace; color: var(--dlg-text-3); margin-top: 5px; }
+.modal .ratio-sub { font-size: 9px; color: var(--dlg-text-3); margin-top: 8px; line-height: 1.5; }
+
+/* ── 路径控件 ───────────────────────────────────────────────── */
+.modal .path-control { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; }
+.modal .path-value {
+  height: 34px; display: flex; align-items: center; gap: 7px; padding: 0 10px;
+  border-radius: 7px; background: var(--ctl-bg); color: var(--dlg-text-3);
+  font-size: 10.5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.modal .path-value .icon { width: 13px; height: 13px; flex: none; }
+.modal .path-value > span { overflow: hidden; text-overflow: ellipsis; }
+
+/* ── 按钮族（原型语义：primary / secondary / ghost / danger / small） ── */
+.modal .btn {
+  height: 34px; min-height: 34px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  padding: 0 16px; border: 1px solid transparent; border-radius: var(--r-ctl);
+  background: var(--dlg-raise); color: var(--dlg-text);
+  font-size: 12.5px; font-weight: 500; white-space: nowrap;
+}
+.modal .btn:hover:not(:disabled) { background: var(--ctl-bg-hover); }
+.modal .btn.secondary { border-color: var(--dlg-line); }
+.modal .btn.ghost { background: transparent; color: var(--dlg-text-2); }
+.modal .btn.ghost:hover:not(:disabled) { background: var(--ctl-bg); color: var(--dlg-text); }
+.modal .btn.primary { background: var(--dlg-primary); color: var(--dlg-primary-text); font-weight: 650; padding: 0 20px; }
+.modal .btn.primary:hover:not(:disabled) { background: var(--dlg-primary-hover); }
+.modal .btn.danger { background: var(--dlg-danger); color: #fff; font-weight: 600; padding: 0 18px; }
+.modal .btn.small { height: 28px; min-height: 28px; padding: 0 11px; font-size: 11.5px; }
+.modal .btn .icon { width: 14px; height: 14px; }
+
+/* ── 底栏说明文字 ───────────────────────────────────────────── */
+.modal .footer-note {
+  margin-right: auto; display: flex; align-items: center; gap: 7px;
+  max-width: 330px; color: var(--dlg-text-3); font-size: 10.5px; line-height: 1.6;
+}
+.modal .footer-note .icon { width: 13px; height: 13px; flex: none; }
+.modal .footer-note .warn { color: var(--dlg-warn); }
+
+/* 宽屏收窄：画幅卡移出侧栏，改单列（原型同款降级） */
+@media (max-width: 1180px) {
+  .modal .project-strip { margin-bottom: 16px; }
+  .modal .form-grid { gap: 12px 15px; }
+}
+@media (max-width: 760px) {
+  .modal .export-grid { grid-template-columns: 1fr; }
+  .modal .ratio-panel { display: none; }
+  .modal .form-grid { grid-template-columns: 1fr; }
+  .modal .span-2 { grid-column: auto; }
+  .modal .project-strip { grid-template-columns: 84px minmax(0, 1fr); gap: 12px; }
+  .modal .project-cover { width: 84px; height: 54px; }
+}
+
+/* ── 命令搜索：搜索框 / 分组标题 / 行 / 状态 / 键位提示（原型 §05） ── */
+.modal .search-wrap { position: relative; margin-bottom: 10px; }
+.modal .search-wrap .icon { position: absolute; left: 12px; top: 12px; width: 16px; height: 16px; color: var(--dlg-text-3); pointer-events: none; }
+.modal .search-wrap input {
+  height: 40px; padding-left: 38px;
+  background: #111517; border: 1px solid var(--dlg-edge, var(--dlg-border));
+  border-radius: var(--r-ctl); font-size: 13px; width: 100%;
+}
+.modal .search-wrap input:focus { border-color: var(--dlg-primary); box-shadow: 0 0 0 2px var(--dlg-accent-dim); }
+
+.modal .command-list {
+  list-style: none; margin: 0; padding: 0;
+  max-height: 315px; overflow-y: auto;
+  background: transparent; border: 0;
+}
+.modal .command-group {
+  padding: 9px 10px 5px;
+  color: var(--dlg-text-4, var(--dlg-text-3));
+  font-size: 9px; font-weight: 600; letter-spacing: .8px;
+  list-style: none;
+}
+.modal .command-list li { list-style: none; }
+.modal .command-list li + li { border-top: 0; }
+.modal .command-option {
+  width: 100%; height: 39px;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center; gap: 9px;
+  padding: 0 11px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--dlg-text-2); text-align: left;
+  font-size: 12.5px;
+}
+.modal .command-option:hover:not(:disabled) { background: var(--dlg-raise); color: var(--dlg-text); }
+.modal .command-option:disabled { opacity: .55; }
+.modal li.active .command-option { background: var(--dlg-accent-dim); color: var(--dlg-text); }
+.modal .command-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.modal .command-shortcut {
+  font: 9px Consolas, monospace; color: var(--dlg-text-3);
+  padding: 2px 5px; border: 1px solid var(--dlg-line); border-radius: 4px;
+  min-width: 12px; text-align: center;
+}
+.modal .command-shortcut:empty { border: 0; padding: 0; }
+.modal .command-state { font-size: 9px; color: var(--dlg-text-3); min-width: 22px; text-align: right; }
+.modal li.active .command-state { color: var(--dlg-primary); }
+.modal .command-reason { font-size: 9px; color: var(--dlg-text-4, var(--dlg-text-3)); text-align: right; }
+.modal .command-empty { padding: 30px; text-align: center; color: var(--dlg-text-3); list-style: none; }
+
+/* 底栏键位提示（命令面板无业务主按钮，底栏只放操作提示） */
+.modal .command-footer { justify-content: flex-start; }
+.modal .key-hints { display: flex; align-items: center; gap: 14px; color: var(--dlg-text-3); font-size: 10px; }
+.modal .key-hints span { display: inline-flex; align-items: center; gap: 5px; }
+.modal .key-hints kbd {
+  font: 9px Consolas, monospace; color: var(--dlg-text-2);
+  padding: 2px 5px; border: 1px solid var(--dlg-line); border-radius: 4px; background: var(--dlg-raise);
+}
+.modal .key-hints .preview-only { margin-left: auto; color: var(--dlg-text-4, var(--dlg-text-3)); }
+
+.modal .field-error { margin: 4px 0 0; font-size: 10.5px; color: var(--dlg-danger); }
+
+/* ── 保真修正（2026-11-06）：与原型逐属性对齐，不再「大体一致」 ──────
+   对照 docs/ui-mockups/dialog-system-v2/index.html 实测值：
+   命令面板 640px / 搜索框 40px / 行 3 列（图标·标签·快捷键·状态）/
+   底栏左对齐键位提示。此前写的是 520px、34px、2 列、右对齐（右图即缺陷态）。 */
+.modal.command-palette { width: min(640px, calc(100vw - 48px)); }
+
+.modal .search-wrap input {
+  height: 40px; min-height: 40px;
+  padding: 0 12px 0 38px;
+  font-size: 13px;
+  background: #111517;
+  border: 1px solid var(--dlg-line);
+}
+.modal .search-wrap .icon { top: 12px; }
+
+.modal .command-option {
+  grid-template-columns: 20px minmax(0, 1fr) auto auto;
+  gap: 9px;
+  padding: 0 11px;
+}
+.modal .command-option > .icon {
+  width: 14px; height: 14px;
+  color: var(--dlg-text-3);
+  justify-self: center;
+}
+.modal .command-option:hover:not(:disabled) > .icon,
+.modal li.active .command-option > .icon { color: var(--dlg-primary); }
+
+/* 底栏：键位提示左对齐（原型 .command-footer 是 flex-start，不是主操作右置） */
+.modal > .modal-actions.command-footer { justify-content: flex-start; }
+.modal .key-hints { gap: 14px; }
+.modal .key-hints kbd { padding: 2px 5px; font-size: 9px; }
+
+/* ── 保真修正 v2：压过历史 max-width / 旧搜索框 / 底栏对齐 ───────────
+   实测发现三处旧规则仍在赢（用户截图右图即缺陷态）：
+   ① 第 239 行 .command-palette{max-width:520px} 的 max-width 未被覆盖；
+   ② 第 3248 行 .modal .command-footer 匹配不到真实元素（底栏是
+      .modal > .modal-actions，command-footer 是它的子元素）；
+   ③ 搜索框规则被 (0,2,1) 的旧 input[type=search] 规则压过。 */
+.modal.command-palette { max-width: none; width: min(640px, calc(100vw - 48px)); }
+.modal.command-palette input[type="search"] {
+  height: 40px; min-height: 40px;
+  padding: 0 12px 0 38px;
+  font-size: 13px;
+  margin: 0;
+  background: #111517;
+  border: 1px solid var(--dlg-line);
+  border-radius: var(--r-ctl);
+}
+.modal .search-wrap { margin-bottom: 10px; }
+/* 底栏本身带了 command-footer 子元素时整体左对齐 */
+.modal > .modal-actions:has(> .command-footer) { justify-content: flex-start; }
+
+/* 搜索框最终值：特异性 (0,3,1) 压过旧 .command-palette input[type="search"] (0,2,1)。 */
+.modal.command-palette .search-wrap input[type="search"] {
+  height: 40px; min-height: 40px;
+  padding: 0 12px 0 38px;
+  font-size: 13px;
+  margin: 0;
+  background: #111517;
+  border: 1px solid var(--dlg-line);
+  border-radius: var(--r-ctl);
+}
+.modal.command-palette .search-wrap input[type="search"]:focus {
+  border-color: var(--dlg-primary);
+  box-shadow: 0 0 0 2px var(--dlg-accent-dim);
+}
+
+
+/* ── 令牌终值：必须位于文件最末，否则后续追加的层会反超 ────────── */
+:root {
+  --dlg-bg: #171b1e;
+  --dlg-raise: #1d2326;
+  --dlg-border: rgba(255, 255, 255, .12);
+  --dlg-line: rgba(255, 255, 255, .075);
+  --dlg-text: #edf1ef;
+  --dlg-text-2: #b5bfbc;
+  --dlg-text-3: #85918e;
+  --dlg-text-4: #64716e;
+  --ctl-bg: #22292c;
+  --ctl-bg-hover: #293235;
+  --btn-bg: #1d2326;
+  --btn-bg-hover: #293235;
+  --tab-active: #22292c;
+  --dlg-primary: #35d6ae;
+  --dlg-primary-hover: #59e1bf;
+  --dlg-primary-text: #07251e;
+  --dlg-danger: #e35d62;
+  --dlg-danger-dim: rgba(227, 93, 98, .09);
+  --dlg-warn: #d8b06a;
+  --dlg-warn-dim: rgba(216, 176, 106, .1);
+  --dlg-accent-dim: rgba(53, 214, 174, .11);
+  --dlg-footer: #15191c;
+  --r-dlg: 12px;
+  --r-box: 8px;
+  --r-ctl: 7px;
+  /* 字号阶梯（DESIGN.md §3.2）：title 18/26 600 · subtitle 11.5/17 ·
+     body 13/20 · label 12/17 · caption 10.5/17。 */
+  --dlg-fs-title: 18px;
+  --dlg-fs-subtitle: 11.5px;
+  --dlg-fs-body: 13px;
+  --dlg-fs-label: 12px;
+  --dlg-fs-caption: 10.5px;
+  --dlg-lh-title: 26px;
+  --dlg-lh-subtitle: 17px;
+  --dlg-lh-body: 20px;
+  --dlg-lh-label: 17px;
+  --dlg-lh-caption: 17px;
+  --dlg-hpad: 24px;
+  --dlg-head-pad: 21px 24px 18px;
+  --dlg-foot-pad: 14px 24px;
+  --dlg-foot-min: 65px;
+  --dlg-ctl-h: 34px;
+  --dlg-ctl-sm: 28px;
+}
+
+/* ── 保真修正 v3（2026-11-06）：原型逐元素高度对照后的残差 ──────────
+   基准（原型实测，1440×900）：
+     弹窗 640×510 · header 86 · body 357 · footer 65
+     项目条 83 / 分组标题 16.5 + mb13 / 导出网格 204
+   实测残差：弹窗 532.5（+22.5）、body 379.5（+22.5）、
+             section-label mb 10（应为 13）、footerNote 294（应 261.5）、
+             footer 按钮 67（应 88）。
+   根因：正文被写成了 display:grid + gap:12px，与子元素自身 margin 叠加，
+   原型是普通块布局、间距只由 margin 表达。 */
+.modal > .modal-body.exd-body,
+.modal > .modal-body:has(> .project-strip) {
+  display: block;
+  gap: 0;
+}
+/* .section-label 是 h3，会被 .modal h3 的 margin:0 0 10px 压住，需更高特异性。 */
+.modal h3.section-label { margin: 0 0 13px; }
+.modal .project-strip { margin-bottom: 20px; }
+/* 导出底栏：说明文字宽度与按钮内边距按原型收紧 */
+.modal .footer-note { max-width: 262px; }
+.modal > .modal-actions .btn.primary { padding: 0 20px; min-width: 88px; }
+
+/* 底栏说明单行：原型 261.5×16.8（单行）。宽度约束后不允许折行。 */
+.modal .footer-note { max-width: 262px; white-space: nowrap; }
+
+/* ── 命令面板高度保真（原型实测 footer 仅 44px，非通用 65px） ────────
+   原型 .command-footer 是「键位提示条」，不是一个操作底栏：
+   高 44px、padding 10px 24px、字号 9.5px、gap 16px。
+   我此前套用了通用底栏（65px / 14px padding），所以整体偏高 21px。 */
+.modal > .modal-actions:has(> .command-footer) {
+  min-height: 44px;
+  padding: 10px 24px;
+  justify-content: flex-start;
+}
+.modal .command-footer { width: 100%; }
+.modal .key-hints { gap: 16px; font-size: 9.5px; }
+.modal .key-hints kbd { font-size: 9px; }
+.modal .command-list { max-height: 315px; }
+.modal .command-option { font-size: 13px; padding: 0 11px; }
+.modal .command-option > .icon { justify-self: start; }
+
+/* ── 命令面板专属内边距与行布局（原型实测，非通用值） ──────────────
+   原型 .command-dialog 单独覆盖了间距：
+     header padding 21px 24px 14px（通用是 18px 底）
+     body   padding 0 24px 14px   （通用是 22px 底）
+     option display:grid          （通用按钮被我写成了 flex）
+   这两处 padding 差正是整体高 8px + 20px 的来源。 */
+.modal.command-palette > .modal-heading { padding: 21px 24px 14px; }
+.modal.command-palette > .modal-body { padding: 0 24px 14px; }
+.modal.command-palette .command-group { padding: 9px 10px 5px; }
+.modal.command-palette .command-option {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 9px;
+  height: 39px;
+  min-height: 39px;
+  padding: 0 11px;
+  font-size: 13px;
+}
+.modal.command-palette .command-option > .icon { width: 14px; height: 14px; justify-self: start; }
+.modal.command-palette .key-hints { width: auto; height: 12px; align-items: center; }
+
+/* 特异性补齐：通用规则是 .modal > div.modal-body:not(:not...)（0,3,1），
+   故命令面板必须用同等或更高的选择器才能覆盖 padding 与 display。 */
+.modal.command-palette > div.modal-body:not(.modal-heading):not(.modal-actions) {
+  padding: 0 24px 14px;
+  display: block;
+  row-gap: 0;
+  gap: 0;
+}
+.modal > .modal-body.ps-body { gap: 14px; }
+
+/* ── Provider 设置：原型解剖（mode-tabs / privacy-line / form-grid / note） ──
+   原型实测 640×620 = header 86 + body 467 + footer 65
+   body 子元素：mode-tabs 39(mb12) / privacy-line 17.3(mb17) /
+                form-grid 350 / provider-note 28                    */
+.modal .mode-tabs {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 3px;
+  padding: 3px; margin-bottom: 12px;
+  background: #101416; border: 1px solid var(--dlg-line); border-radius: 8px;
+}
+.modal .mode-tab {
+  height: 31px; min-height: 31px; padding: 0 12px;
+  border: 0; border-radius: 5px; background: transparent;
+  color: var(--dlg-text-3); font-size: 12px; font-weight: 400;
+}
+.modal .mode-tab:hover:not(:disabled) { color: var(--dlg-text); background: rgba(255,255,255,.03); }
+.modal .mode-tab.active { background: var(--dlg-raise); color: var(--dlg-text); font-weight: 500; box-shadow: 0 1px 2px rgba(0,0,0,.15); }
+.modal .mode-tab.active::before {
+  content: ""; display: inline-block; width: 5px; height: 5px; margin-right: 7px;
+  border-radius: 50%; background: var(--dlg-primary); vertical-align: 2px;
+}
+
+.modal .privacy-line {
+  display: flex; align-items: center; gap: 7px;
+  margin: 0 0 17px; color: var(--dlg-text-3); font-size: 10.5px; line-height: 17px;
+}
+.modal .privacy-line .icon { width: 13px; height: 13px; color: var(--dlg-primary); flex: none; }
+
+.modal .provider-note {
+  display: flex; align-items: center; gap: 7px;
+  margin: 12px 0 0; color: var(--dlg-text-3); font-size: 10.5px; line-height: 1.55;
+}
+.modal .provider-note .icon { width: 13px; height: 13px; flex: none; }
+
+.modal .footer-link {
+  margin-right: auto; height: auto; min-height: 0; padding: 0;
+  background: transparent; border: 0;
+  color: var(--dlg-text-3); font-size: 12px; font-weight: 400;
+}
+.modal .footer-link:hover:not(:disabled) { background: transparent; color: var(--dlg-text); }
+
+/* Provider 正文回到块级布局，间距由各子元素 margin 表达（原型做法） */
+.modal.provider-settings > div.modal-body:not(.modal-heading):not(.modal-actions) {
+  display: block; padding: 0 24px 22px; gap: 0;
+}
+.modal .provider-settings .form-grid { gap: 15px 16px; }
+.modal.provider-settings .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px 16px; }
+
+/* Provider note 原型是两行（28px），单行 16.3px 会整体偏矮；
+   同时正文底部内边距与 form-grid 行距按原型收紧。 */
+.modal .provider-note { max-width: 100%; align-items: flex-start; }
+.modal .provider-settings .form-grid { gap: 15px 16px; }
+.modal.provider-settings .form-grid > .field { gap: 7px; }
+.modal.provider-settings .form-grid > .field > label { min-height: 17px; }
+.modal.provider-settings .form-grid input,
+.modal.provider-settings .form-grid select { height: 34px; }
+
+/* ── 破坏性确认：原型解剖（confirm-object / warning / sample-caption） ──
+   原型实测 440×276 = header 62 + body 147 + footer 65
+   header padding 21px 24px 13px（比通用 18px 少 5px，因无副标题）。   */
+.modal.compact-dialog > .modal-heading,
+.modal.asset-delete-modal > .modal-heading { padding: 21px 24px 13px; }
+
+.modal .confirm-object {
+  margin: 0 0 13px; color: var(--dlg-text-2); font-size: 13px; line-height: 1.75;
+}
+.modal .confirm-object strong { color: var(--dlg-text); font-weight: 550; }
+
+.modal .warning {
+  display: flex; gap: 10px;
+  padding: 12px 13px; border-radius: 8px;
+  background: var(--dlg-danger-dim);
+  border: 0;
+  color: #d9b4b4; font-size: 11.5px; line-height: 1.75;
+}
+.modal .warning .icon { width: 15px; height: 15px; color: var(--dlg-danger); margin-top: 2px; flex: none; }
+.modal .warning > span { min-width: 0; }
+
+.modal .sample-caption { margin: 13px 0 0; color: var(--dlg-text-4, var(--dlg-text-3)); font-size: 9.5px; }
+
+/* 确认弹窗正文块级布局 */
+.modal.asset-delete-modal > div.modal-body:not(.modal-heading):not(.modal-actions),
+.modal.compact-dialog > div.modal-body:not(.modal-heading):not(.modal-actions) {
+  display: block; padding: 0 24px 22px; gap: 0;
+}
+
+/* ── Provider 管理视图：并入原型组件体系（2026-11-06 用户截图指出） ──
+   此前管理视图仍是旧结构：dl 用 70px 标签列、密钥按钮堆在 ps-secret-actions、
+   「删除配置」是孤立红块，与新建视图两套语言。现统一到 form-grid / field /
+   provider-note，危险动作降为描边红字。                              */
+.modal .ps-details {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 9px 14px;
+  margin: 0;
+  padding: 13px 14px;
+  background: var(--dlg-raise);
+  border: 1px solid var(--dlg-line);
+  border-radius: var(--r-box);
+  font-size: 12.5px;
+}
+.modal .ps-details dt { color: var(--dlg-text-3); font-size: 12px; }
+.modal .ps-details dd { margin: 0; color: var(--dlg-text); overflow-wrap: anywhere; }
+
+.modal .ps-secret-actions {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  margin: 0;
+}
+.modal .ps-secret-actions > .btn {
+  height: 28px; min-height: 28px; padding: 0 12px;
+  font-size: 11.5px; font-weight: 500;
+  background: var(--ctl-bg); color: var(--dlg-text-2); border: 1px solid transparent;
+}
+.modal .ps-secret-actions > .btn:hover:not(:disabled) { background: var(--ctl-bg-hover); color: var(--dlg-text); }
+/* 危险动作：描边红字，不做实心块，避免压过底栏主操作 */
+.modal .ps-secret-actions > .btn.danger-outline {
+  margin-left: auto;
+  background: transparent;
+  border-color: rgba(227, 93, 98, .34);
+  color: #e88b8f;
+}
+.modal .ps-secret-actions > .btn.danger-outline:hover:not(:disabled) {
+  background: var(--dlg-danger-dim);
+  border-color: rgba(227, 93, 98, .55);
+  color: #f0a1a5;
+}
+
+/* ── 提示条层级：错误必须显著高于普通状态（2026-11-06 用户反馈） ────
+   旧 .ps-feedback 与普通提示盒同款弱底，用户「删除被拒」这类阻断性
+   信息几乎看不见。错误改为：红色描边 + 12% 红底 + 图标 + 加粗标题。 */
+.modal .alert {
+  display: flex; gap: 10px; align-items: flex-start;
+  margin: 0 0 14px; padding: 11px 13px;
+  border-radius: 8px; border: 1px solid transparent;
+  font-size: 12px; line-height: 1.7;
+}
+.modal .alert > .icon { width: 15px; height: 15px; flex: none; margin-top: 2px; }
+.modal .alert > div { display: grid; gap: 2px; min-width: 0; }
+.modal .alert strong { font-size: 12px; font-weight: 650; color: var(--dlg-text); }
+.modal .alert span { color: var(--dlg-text-2); overflow-wrap: anywhere; }
+
+.modal .alert-danger {
+  background: rgba(227, 93, 98, .12);
+  border-color: rgba(227, 93, 98, .42);
+  color: #f0a1a5;
+}
+.modal .alert-danger > .icon { color: var(--dlg-danger); }
+.modal .alert-danger span { color: #edb9bb; }
+
+.modal .alert-ok {
+  background: var(--dlg-accent-dim);
+  border-color: rgba(53, 214, 174, .28);
+}
+.modal .alert-ok span { color: var(--dlg-text-2); }
+
+/* ── Provider 管理视图（原型未覆盖，按已确认风格补充设计） ──────────
+   结构：已有 Provider 选择 → 只读摘要卡 → 密钥编辑区 → 危险操作区。
+   摘要卡用面板底 + 细边 = 规范里的「信息分组」；危险操作独立成行并
+   靠右，与密钥操作拉开距离，避免误触。 */
+.modal .detail-panel {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 9px 14px;
+  margin: 0;
+  padding: 13px 14px;
+  background: var(--dlg-raise);
+  border: 1px solid var(--dlg-line);
+  border-radius: var(--r-box);
+  font-size: 12.5px;
+}
+.modal .detail-panel dt { color: var(--dlg-text-3); font-size: 12px; }
+.modal .detail-panel dd { margin: 0; color: var(--dlg-text); overflow-wrap: anywhere; }
+
+.modal .secret-actions {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  margin: 0;
+}
+.modal .secret-actions > .btn {
+  height: 28px; min-height: 28px; padding: 0 12px;
+  font-size: 11.5px; font-weight: 500;
+  background: var(--ctl-bg); color: var(--dlg-text-2); border: 1px solid transparent;
+}
+.modal .secret-actions > .btn:hover:not(:disabled) { background: var(--ctl-bg-hover); color: var(--dlg-text); }
+
+/* 危险操作：与密钥操作隔一段距离，描边红字，不抢主操作 */
+.modal .secret-actions > .btn.danger-quiet {
+  margin-left: auto;
+  background: transparent;
+  border-color: rgba(227, 93, 98, .34);
+  color: #e88b8f;
+}
+.modal .secret-actions > .btn.danger-quiet:hover:not(:disabled) {
+  background: var(--dlg-danger-dim);
+  border-color: rgba(227, 93, 98, .55);
+  color: #f0a1a5;
+}

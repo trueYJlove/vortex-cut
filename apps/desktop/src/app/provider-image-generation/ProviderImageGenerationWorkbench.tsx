@@ -150,8 +150,15 @@ export function ProviderImageGenerationWorkbench({ project, assets, onClose }: P
     finally { setBusy(false); }
   };
 
-  return <Dialog titleId="provider-image-title" label="真实图片生成" onClose={onClose} className="generation-modal provider-image-modal">
-    <div className="modal-heading"><div><h2 id="provider-image-title">真实图片生成（受控）</h2><p>纯文本生成单张 PNG；成功后仅注册为项目受管图片素材，不写入 Timeline。</p></div><button aria-label="关闭真实图片生成" onClick={onClose}>✕</button></div>
+  const footer = view === "create" ? (!confirmation ? <>
+    <button disabled={busy || !providerConfigId || !prompt.trim() || !selectedConfig?.enabled} onClick={() => void prepare()}>{busy ? "准备中…" : "准备付费调用确认"}</button>
+  </> : <>
+    <button disabled={busy} onClick={() => setConfirmation(undefined)}>返回修改</button>
+    <button disabled={busy} onClick={() => void confirmCreate()}>{busy ? "创建中…" : confirmation.retryTaskId ? "确认重试并再次调用" : "确认发送并创建任务"}</button>
+  </>) : undefined;
+
+  return <Dialog title="真实图片生成（受控）" subtitle="纯文本生成单张 PNG；成功后仅注册为项目受管图片素材，不写入 Timeline。"
+    closeLabel="关闭真实图片生成" onClose={onClose} className="generation-modal provider-image-modal" footer={footer}>
     <div className="generation-tabs"><button className={view === "create" ? "active" : ""} onClick={() => setView("create")}>创建</button><button className={view === "history" ? "active" : ""} onClick={() => setView("history")}>历史</button><button className={view === "providers" ? "active" : ""} onClick={() => setView("providers")}>Provider</button></div>
     <p className="provider-cost-notice"><strong>外部调用与费用提示：</strong>Prompt 会发送给外部 Provider，可能产生费用。一次确认对应每个 Task 最多一次调用；失败或超时后 Provider 仍可能已处理。重试会再次调用并可能再次收费。</p>
     {error && <p className="generation-safe-error" role="alert">{error}</p>}
@@ -161,11 +168,9 @@ export function ProviderImageGenerationWorkbench({ project, assets, onClose }: P
       <label>请求尺寸<select aria-label="生成图片尺寸" value={size} onChange={event => setSize(event.target.value as ProviderImageSize)}><option value="1024x1024">1024 × 1024（1K 请求意图）</option></select></label>
       <label>Prompt<textarea aria-label="图片生成 Prompt" value={prompt} maxLength={4000} rows={8} onChange={event => setPrompt(event.target.value)} placeholder="仅在当前表单和短期确认期间保留；历史不会显示正文。" /></label>
       <p className="readonly-note">Prompt 明文不写入数据库、Job、日志或历史记录；不要粘贴密钥、隐私数据或字幕/转写正文。</p>
-      <div className="modal-actions"><button disabled={busy || !providerConfigId || !prompt.trim() || !selectedConfig?.enabled} onClick={() => void prepare()}>{busy ? "准备中…" : "准备付费调用确认"}</button></div>
     </div> : <div className="generation-confirm">
       <h3>{confirmation.retryTaskId ? "确认再次调用并可能再次收费" : "确认外部图片调用"}</h3>
       <dl><dt>Provider</dt><dd>{confirmation.preview.provider.provider_kind}</dd><dt>模型</dt><dd>{confirmation.preview.provider.model}</dd><dt>请求尺寸</dt><dd>{confirmation.preview.size}（实际输出以 Provider 返回为准）</dd><dt>图片数</dt><dd>1</dd><dt>Prompt</dt><dd>正文不回显；SHA-256：{confirmation.preview.prompt_sha256}</dd><dt>估算费用</dt><dd>{confirmation.preview.estimated_cost === null ? "未配置" : `${confirmation.preview.estimated_cost_currency} ${confirmation.preview.estimated_cost.toFixed(2)} · ${confirmation.preview.price_tier}`}</dd><dt>确认有效期</dt><dd>{confirmation.preview.expires_at}</dd></dl>
-      <div className="modal-actions"><button disabled={busy} onClick={() => setConfirmation(undefined)}>返回修改</button><button disabled={busy} onClick={() => void confirmCreate()}>{busy ? "创建中…" : confirmation.retryTaskId ? "确认重试并再次调用" : "确认发送并创建任务"}</button></div>
     </div>)}
 
     {view === "providers" && <div className="provider-image-configs">

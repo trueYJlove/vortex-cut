@@ -9,7 +9,6 @@
  *  点导出时强制 flush 待发的 rename（失败则中止导出）；无授权时文件名仅
  *  作为保存对话框 defaultPath。 */
 import { useEffect, useState } from "react";
-import { X } from "lucide-react";
 import { Dialog } from "./Dialog.js";
 import { safeErrorMessage } from "./safeErrors.js";
 import type { DestinationGrant, EncoderMode, ExportFrameRate, ExportQuality, ExportResolution, OutputRatio, ProjectId } from "@aivideo/contracts";
@@ -166,95 +165,82 @@ export function ExportDialog({ projectId, projectName, durationUs, clipCount, ca
   };
 
   return (
-    <Dialog titleId="export-video-title" label="导出视频" onClose={onClose} className="export-modal">
-      <div className="modal-heading">
-        <div>
-          <h2 id="export-video-title">导出视频</h2>
-          <p>当前 Revision · {previewReady ? "画面内容与权威预览一致" : "画面内容以时间线为准"}</p>
-        </div>
-        <button type="button" className="icon-btn" title="关闭导出弹窗" aria-label="关闭导出弹窗" onClick={onClose}><X size={15} /></button>
-      </div>
-      <div className="exd-body">
-        <div className="exd-hero">
-          <button type="button" className="exd-cover" title="点击设置项目封面" onClick={onOpenCover}>
-            {coverUrl ? <img src={coverUrl} alt="项目封面" /> : <span className="exd-cover-ph">项目封面</span>}
-            <span className="exd-cover-chip">✎ 设置封面</span>
+    <Dialog titleId="export-video-title" title="导出视频" subtitle={<>当前 Revision · {previewReady ? "画面内容与权威预览一致" : "画面内容以时间线为准"}</>} closeLabel="关闭导出弹窗" footer={<>
+        <span className="footer-note">
+          {previewReady
+            ? "导出完成后可在「渲染与导出」面板查看进度与产物"
+            : <span className="warn">权威预览尚未生成——画面以时间线为准，建议先预览确认效果</span>}
+        </span>
+        <button type="button" className="btn primary" disabled={busy || submitting || !sanitize(fileName)} onClick={() => void submit()}>
+          {busy || submitting ? "提交中…" : "导出"}
+        </button>
+      </>} label="导出视频" onClose={onClose} className="export-modal">
+        <div className="project-strip">
+          <button type="button" className="project-cover" title="点击设置项目封面" onClick={onOpenCover}>
+            {coverUrl ? <img src={coverUrl} alt="项目封面" /> : <svg viewBox="0 0 160 100" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><rect width="160" height="100" fill="#1c2827" /><path d="M0 76 40 25l28 36 28-45 64 66v18H0Z" fill="#53635a" /><path d="M0 86 49 54l35 19 34-26 42 30v23H0Z" fill="#75806d" /></svg>}
+            <span>设置封面</span>
           </button>
-          <div className="exd-hero-right">
-            <div className="exd-proj-name">项目：{projectName}</div>
-            <div className="exd-proj-stats">
+          <div>
+            <div className="project-name">项目：{projectName}</div>
+            <div className="project-stats">
               <span>时长 <b>{hh}:{mm}:{ss}</b></span>
               <span>片段 <b>{clipCount}</b></span>
               <span>字幕 <b>{captionCount}</b></span>
             </div>
-            <div className="exd-filename-block">
-              <label htmlFor="exd-filename-input">导出文件名</label>
-              <div className="exd-filename-line">
-                <input id="exd-filename-input" className="exd-filename-input" value={fileName} maxLength={120}
-                  onChange={event => setFileName(event.target.value)} />
-                <span className="exd-ext-chip">.mp4</span>
-              </div>
+            <div className="filename">
+              <input id="export-filename-input" aria-label="导出文件名" value={fileName} maxLength={120} onChange={event => setFileName(event.target.value)} />
+              <span className="file-ext">.mp4</span>
             </div>
           </div>
         </div>
-        <hr className="exd-divider" />
-        <div className="exd-settings">
-          <div className="exd-settings-left">
-            <div className="exd-field">
-              <label>分辨率 <span className="exd-hint">输出像素尺寸</span></label>
+
+        <h3 className="section-label">输出设置 <span>H.264 / MP4</span></h3>
+        <div className="export-grid">
+          <div className="form-grid">
+            <div className="field">
+              <label>分辨率 <span className="field-hint">输出像素尺寸</span></label>
               <select aria-label="导出分辨率" value={resolution} onChange={event => onResolutionChange(event.target.value as ExportResolution)}>
                 {RESOLUTION_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label} · {resolutionHint(option.value)}</option>)}
               </select>
             </div>
-            <div className="exd-field">
-              <label>帧率 <span className="exd-hint">恒定帧率</span></label>
+            <div className="field">
+              <label>帧率 <span className="field-hint">恒定帧率</span></label>
               <select aria-label="导出帧率" value={frameRate} onChange={event => onFrameRateChange(Number(event.target.value) as ExportFrameRate)}>
                 {[24, 25, 30, 60].map(rate => <option key={rate} value={rate}>{rate} fps</option>)}
               </select>
             </div>
-            <div className="exd-field">
-              <label>画质 <span className="exd-hint">码率分层</span></label>
+            <div className="field">
+              <label>画质 <span className="field-hint">码率分层</span></label>
               <select aria-label="导出画质" value={quality} onChange={event => onQualityChange(event.target.value as ExportQuality)}>
                 {QUALITY_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label} · ≈{Math.round(bitrate / QUALITY_MULTIPLIER[quality] * QUALITY_MULTIPLIER[option.value])} Mbps</option>)}
               </select>
             </div>
-            <div className="exd-field">
-              <label>编码 <span className="exd-hint">硬件失败自动回退</span></label>
+            <div className="field">
+              <label>编码 <span className="field-hint">硬件失败自动回退</span></label>
               <select aria-label="导出编码" value={encoderMode} onChange={event => onEncoderModeChange(event.target.value as EncoderMode)}>
                 <option value="auto">H.264 · 自动（硬件优先）</option>
                 <option value="software">H.264 · 软件编码</option>
               </select>
             </div>
-            <div className="exd-field exd-wide">
-              <label>保存位置 <span className="exd-hint">完整路径预览</span></label>
-              <div className="exd-dest-row">
-                <div className="exd-dest-path">
-                  <span className="exd-dest-icon" aria-hidden>📁</span>
-                  {grant ? <>{grant.directory_display ? `${grant.directory_display}\\` : ""}<span className="exd-dest-fname">{grant.display_name}</span></> : <span className="exd-dest-none">尚未选择——导出时将弹出保存对话框</span>}
+            <div className="field span-2">
+              <label>保存位置 <span className="field-hint">完整路径预览</span></label>
+              <div className="path-control">
+                <div className="path-value">
+                  <svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></svg>
+                  {grant ? <>{grant.directory_display ? `${grant.directory_display}\\` : ""}<span>{grant.display_name}</span></> : <span>尚未选择——导出时将弹出保存对话框</span>}
                 </div>
-                <button type="button" className="exd-dest-change" disabled={choosing} onClick={() => void chooseDestination()}>{grant ? "更换" : "选择…"}</button>
+                <button type="button" className="btn small secondary" disabled={choosing} onClick={() => void chooseDestination()}>{grant ? "更换" : "选择…"}</button>
               </div>
-              {renameError && <p className="exd-dest-error" role="status">{renameError}</p>}
+              {renameError && <p className="field-error" role="status">{renameError}</p>}
             </div>
           </div>
-          <div className="exd-ratio-card">
-            <div className={`exd-ratio-canvas${outW >= outH ? " landscape" : " portrait"}`}>{ratioLabelText(ratio, dims).split(" ")[0]}</div>
-            <div className="exd-ratio-name">{ratioLabelText(ratio, dims)}</div>
-            <div className="exd-ratio-dim">{outW} × {outH}</div>
-            <div className="exd-ratio-sub">{frameRate}fps · H.264 · ≈{bitrate} Mbps</div>
-          </div>
+          <aside className="ratio-panel">
+            <div className="ratio-frame">{ratioLabelText(ratio, dims).split(" ")[0]}</div>
+            <div className="ratio-name">{ratioLabelText(ratio, dims)}</div>
+            <div className="ratio-dim">{outW} × {outH}</div>
+            <div className="ratio-sub">{frameRate}fps · H.264<br />≈{bitrate} Mbps</div>
+          </aside>
         </div>
-      </div>
-      <div className="modal-actions">
-        <span className="exd-foot-info">
-          {previewReady
-            ? "导出完成后可在「渲染与导出」面板查看进度与产物"
-            : <span className="exd-warn">权威预览尚未生成——画面以时间线为准，建议先预览确认效果</span>}
-        </span>
-        <button type="button" disabled={busy || submitting || !sanitize(fileName)} onClick={() => void submit()}>
-          {busy || submitting ? "提交中…" : "导出"}
-        </button>
-      </div>
     </Dialog>
   );
 }

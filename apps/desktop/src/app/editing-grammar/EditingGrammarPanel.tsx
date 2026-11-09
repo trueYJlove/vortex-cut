@@ -160,14 +160,20 @@ export function EditingGrammarPanel({
     } finally { setBusy(false); }
   };
 
-  return <Dialog titleId="editing-grammar-title" label="剪辑语法" onClose={onClose} className="editing-grammar">
-    <div className="modal-heading">
-      <div>
-        <h2 id="editing-grammar-title">剪辑语法</h2>
-        <p>本地确定性规划：零外传。提案不会自动修改正式 Timeline，采纳后才落新 Revision。</p>
-      </div>
-      <button className="icon-button" aria-label="关闭剪辑语法" onClick={onClose}>×</button>
-    </div>
+  const footer = !proposal ? <>
+    <button disabled={busy || !plannerName || !baseRevisionId} onClick={() => void runPrepare()}>干跑预览</button>
+    <button disabled={busy || !plannerName || !baseRevisionId} onClick={() => void runPropose()}>生成提案</button>
+  </> : <>
+    <button onClick={() => { setProposal(undefined); }}>返回</button>
+    {!proposal.applied_revision_id && proposal.patch.operations.length > 0 && (
+      <button disabled={busy || !baseRevisionId || proposal.base_revision_id !== baseRevisionId} onClick={() => void applyProposal()}>
+        采纳为正式 Timeline
+      </button>
+    )}
+  </>;
+
+  return <Dialog title="剪辑语法" subtitle="本地确定性规划：零外传。提案不会自动修改正式 Timeline，采纳后才落新 Revision。"
+    closeLabel="关闭剪辑语法" onClose={onClose} className="editing-grammar" footer={footer}>
     {error && <p className="ai-status" role="status">{error}</p>}
 
     {!proposal && <>
@@ -184,10 +190,6 @@ export function EditingGrammarPanel({
       <label>参数（JSON）
         <textarea aria-label="规划器参数" rows={8} value={paramsText} onChange={event => setParamsText(event.target.value)} spellCheck={false} />
       </label>
-      <div className="modal-actions">
-        <button disabled={busy || !plannerName || !baseRevisionId} onClick={() => void runPrepare()}>干跑预览</button>
-        <button disabled={busy || !plannerName || !baseRevisionId} onClick={() => void runPropose()}>生成提案</button>
-      </div>
       {preview && <section aria-label="干跑结果">
         <h3>干跑结果</h3>
         <p>{preview.summary}</p>
@@ -217,14 +219,6 @@ export function EditingGrammarPanel({
         <dt>文档哈希</dt><dd>{proposal.proposed_document_sha256}</dd>
       </dl>
       <TimelineDiffView diff={proposal.diff} />
-      <div className="modal-actions">
-        <button onClick={() => { setProposal(undefined); }}>返回</button>
-        {!proposal.applied_revision_id && proposal.patch.operations.length > 0 && (
-          <button disabled={busy || !baseRevisionId || proposal.base_revision_id !== baseRevisionId} onClick={() => void applyProposal()}>
-            采纳为正式 Timeline
-          </button>
-        )}
-      </div>
       {proposal.base_revision_id !== baseRevisionId && (
         <p className="readonly-note">基线已变化：请返回后基于当前版本重新规划。</p>
       )}

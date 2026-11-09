@@ -250,14 +250,22 @@ export function CaptionsProviderPanel({
     } finally { setBusy(false); }
   };
 
-  return <Dialog titleId="captions-provider-title" label="AI 字幕优化" onClose={onClose} className="captions-provider">
-    <div className="modal-heading">
-      <div>
-        <h2 id="captions-provider-title">AI 字幕优化</h2>
-        <p>把选中的转录文本改写成更短的字幕；时间码与字幕归属由本地决定，Provider 只能改文字。</p>
-      </div>
-      <button className="icon-button" aria-label="关闭 AI 字幕优化" onClick={onClose}>×</button>
-    </div>
+  const footer = step === "form" ? <>
+    <button disabled={!canPrepare} onClick={() => void prepare()}>准备外传确认</button>
+  </> : step === "confirm" && preview ? <>
+    <button onClick={() => { setPreview(undefined); setStep("form"); }}>返回修改</button>
+    <button disabled={busy} onClick={() => void create()}>确认并生成</button>
+  </> : step === "running" ? <>
+    <button onClick={onClose}>关闭面板</button>
+  </> : step === "proposal" && proposal ? <>
+    <button onClick={onClose}>稍后处理</button>
+    <button disabled={busy} onClick={() => void apply()}>应用为新的 Revision</button>
+  </> : step === "applied" ? <>
+    <button onClick={onClose}>关闭</button>
+  </> : undefined;
+
+  return <Dialog title="AI 字幕优化" subtitle="把选中的转录文本改写成更短的字幕；时间码与字幕归属由本地决定，Provider 只能改文字。"
+    closeLabel="关闭 AI 字幕优化" onClose={onClose} className="captions-provider" footer={footer}>
     {error && <p className="ai-status" role="status">{error}</p>}
 
     {step === "form" && <>
@@ -298,9 +306,6 @@ export function CaptionsProviderPanel({
         <input aria-label="每条字幕最大字数" type="number" min={1} max={200} value={maxChars}
           onChange={event => setMaxChars(Number(event.target.value))} />
       </label>
-      <div className="modal-actions">
-        <button disabled={!canPrepare} onClick={() => void prepare()}>准备外传确认</button>
-      </div>
     </>}
 
     {step === "confirm" && preview && <>
@@ -314,10 +319,6 @@ export function CaptionsProviderPanel({
         <dt>有效期</dt><dd>{preview.expires_at}</dd>
       </dl>
       <p className="readonly-note">只发送文本与片段标识，不发送时间码与画面。改写结果会先作为提案展示，不会自动修改时间线。</p>
-      <div className="modal-actions">
-        <button onClick={() => { setPreview(undefined); setStep("form"); }}>返回修改</button>
-        <button disabled={busy} onClick={() => void create()}>确认并生成</button>
-      </div>
     </>}
 
     {step === "running" && <>
@@ -325,9 +326,6 @@ export function CaptionsProviderPanel({
       <p>{GENERATION_STATUS_LABELS[generation?.status ?? "queued"] ?? "执行中"}</p>
       <progress max={1} value={generation?.status === "succeeded" ? 1 : 0} aria-label="字幕生成进度" />
       <p className="readonly-note">生成期间可关闭面板；结果会保留，稍后可从工作单继续处理。</p>
-      <div className="modal-actions">
-        <button onClick={onClose}>关闭面板</button>
-      </div>
     </>}
 
     {step === "proposal" && proposal && <>
@@ -339,16 +337,11 @@ export function CaptionsProviderPanel({
         </li>)}
       </ul>
       <p className="readonly-note">仅在你明确点击下方按钮后应用；应用会创建一个新的 Revision。</p>
-      <div className="modal-actions">
-        <button onClick={onClose}>稍后处理</button>
-        <button disabled={busy} onClick={() => void apply()}>应用为新的 Revision</button>
-      </div>
     </>}
 
     {step === "applied" && <>
       <h3>已应用</h3>
       <p className="readonly-note">字幕文本已更新为新的 Revision。可使用撤销回退。</p>
-      <div className="modal-actions"><button onClick={onClose}>关闭</button></div>
     </>}
   </Dialog>;
 }
