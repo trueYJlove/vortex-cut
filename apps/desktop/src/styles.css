@@ -4097,3 +4097,91 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 .modal.project-management-modal .project-form-row .tb-field select { width: 100%; }
 .modal.project-management-modal .project-form-row input { flex: 1; min-width: 0; }
 .modal.project-management-modal .project-form-row .compact-command { flex: none; }
+
+
+/* ── B 族「步骤流」· 步骤记录列表（2026-11-09）──────────────────
+   结构稿：docs/ui-mockups/dialog-system-v2/prototype-step-family.html
+
+   **改造前这里是零规则**：.agent-session-steps 在样式表里一条都没有，
+   三个弹窗（AgentSession / EditingGrammar / Worklist）共用它，实际用的是
+   浏览器默认 <ol>。Chromium 实测：padding-left 40px、list-style decimal
+   （与「第 N 步」文案**重复编号**）、li 内边距 0、行高 17/28 不一致、无分隔线。
+
+   设计要点：
+   · 去掉默认序号 —— 内容里已有「第 N 步」，再显示 1./2./3. 是重复编号；
+   · 定宽序号列用 <strong> 自然承接（不改 JSX），靠 padding + 分隔线成行；
+   · 行间用发丝线分隔但首行不加（首行靠容器上边界）；
+   · 行高由内容撑开，不写死 —— 带「查看此步差异」按钮的行会自然更高。 */
+.modal .agent-session-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0;
+  background: var(--dlg-raise);
+  border: 1px solid var(--dlg-line);
+  border-radius: var(--r-box);
+  overflow: hidden;
+}
+.modal .agent-session-steps > li {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 11px 13px;
+  color: var(--dlg-text-2);
+  font-size: var(--dlg-fs-body);
+  line-height: 1.7;
+}
+.modal .agent-session-steps > li + li { border-top: 1px solid var(--dlg-line); }
+.modal .agent-session-steps > li > strong {
+  flex: none;
+  color: var(--dlg-text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+/* 摘要段（「· 识别 12 个镜头」）比步骤名低一档，避免整行同级抢读 */
+.modal .agent-session-steps > li > span { color: var(--dlg-text-3); font-size: var(--dlg-fs-caption); }
+/* 操作按钮靠右，不与文字混排 */
+.modal .agent-session-steps > li .mini-btn { margin-left: auto; flex: none; }
+.modal .agent-session-steps code {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: var(--dlg-fs-caption);
+  color: var(--dlg-text);
+  background: var(--ctl-bg);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+/* 差异加载中的提示同样低一档 */
+.modal .agent-session-steps > li > small { color: var(--dlg-text-4); font-size: var(--dlg-fs-caption); }
+
+/* 进行中的进度块（AgentSession running）—— 与结果态列表区分开：
+   进行中只给「到哪了 + 还要多久」，不铺历史。 */
+.modal .agent-session-progress {
+  display: grid; gap: 8px;
+  padding: 11px 13px;
+  background: var(--dlg-raise);
+  border: 1px solid var(--dlg-line);
+  border-radius: var(--r-box);
+}
+/* running 态：<progress> 直接排在 <p> 与 <ol> 之间，没有包裹容器。
+   用相邻选择器定位，不改 JSX（改 JSX 要动 .tsx，风险高于收益）。 */
+.modal.agent-session progress[aria-label="会话步数进度"] {
+  width: 100%;
+  height: 4px;
+  margin: 2px 0 4px;
+  appearance: none;
+  border: 0;
+  border-radius: 2px;
+  background: var(--ctl-bg);
+  overflow: hidden;
+}
+.modal.agent-session progress[aria-label="会话步数进度"]::-webkit-progress-bar {
+  background: var(--ctl-bg);
+  border-radius: 2px;
+}
+.modal.agent-session progress[aria-label="会话步数进度"]::-webkit-progress-value {
+  background: var(--dlg-primary);
+  border-radius: 2px;
+  transition: width .3s ease-out;
+}
