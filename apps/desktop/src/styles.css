@@ -1054,7 +1054,8 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 .modal.shot-workbench { width: min(860px, 100%); }
 .modal.provider-image-modal { width: min(860px, 100%); }
 .modal.export-batch-modal { width: min(860px, 100%); }
-.modal.transcript-viewer { width: min(620px, 100%); }
+/* transcript-viewer 的宽度由 640 档统一规则给出（见后文 .modal.transcript-viewer, ... ）。此处原有 width: min(620px,100%) 是**死代码**：被更高特异性的 640 档规则覆盖，实测渲染恒为 640，
+   且与 dialog-graphite-style.test.ts 的 640 档登记自相矛盾。删掉以免误导。 */
 /* AI 字幕优化（Slice 5）：与 AI 修改同档宽度；确认页 dl 与外发字段需要横向空间。 */
 .modal.captions-provider { width: min(680px, 100%); }
 /* Provider：单任务表单，主体独立滚动；非全屏窗口保持外围留白。 */
