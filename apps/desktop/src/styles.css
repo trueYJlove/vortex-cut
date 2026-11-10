@@ -90,7 +90,7 @@ textarea { min-height: 92px; padding: 8px; resize: vertical; }
 .mini-btn { height: 24px; flex: none; padding: 0 10px; border: 1px solid #263038; border-radius: 6px; background: none; color: #a3aeb5; font-size: var(--dlg-fs-label); }
 .mini-btn:hover:not(:disabled) { color: #e8edf0; border-color: #33404a; }
 .mini-btn:disabled { opacity: .4; }
-.badge { font-size: 9.5px; border-radius: 999px; padding: 1px 8px; flex: none; white-space: nowrap; }
+.badge { font-size: 10.5px; border-radius: 999px; padding: 1px 8px; flex: none; white-space: nowrap; }
 .badge.ok { color: #7fd1a8; border: 1px solid rgba(127, 209, 168, .4); }
 .badge.run { color: #25d3ac; border: 1px solid rgba(37, 211, 172, .4); }
 .badge.warn { color: #d9b36a; border: 1px solid rgba(217, 179, 106, .4); }
@@ -188,7 +188,7 @@ textarea { min-height: 92px; padding: 8px; resize: vertical; }
 .pip-overlay { position: absolute; cursor: move; overflow: hidden; border-radius: 4px; box-shadow: 0 3px 14px rgba(0,0,0,.5); background:#000; z-index: 6; touch-action:none; user-select:none; }
 .pip-overlay.selected { outline: 2px solid rgba(138,162,255,.95); z-index: 8; }
 .pip-overlay .pip-media { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
-.pip-badge { position:absolute; left:0; top:0; background:rgba(0,0,0,.7); color:#cfe0ff; font-size:9px; padding:2px 6px; border-radius:0 0 6px 0; pointer-events:none; z-index:2; }
+.pip-badge { position:absolute; left:0; top:0; background:rgba(0,0,0,.7); color:#cfe0ff; font-size: 10.5px; padding:2px 6px; border-radius:0 0 6px 0; pointer-events:none; z-index:2; }
 .pip-handle { position:absolute; width:11px; height:11px; background:#fff; border:1.5px solid #25d3ac; border-radius:50%; z-index:3; }
 .pip-handle.h-nw { left:-6px; top:-6px; cursor:nwse-resize; }
 .pip-handle.h-n { left:50%; top:-6px; margin-left:-6px; cursor:ns-resize; }
@@ -600,7 +600,7 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--vc-accent); }
 .text-style-flags button.active { border-color: #12b5a6; color: #12b5a6; }
 .alignment-grid { display: inline-flex; flex-direction: column; gap: 2px; }
 .alignment-row { display: inline-flex; gap: 2px; }
-.alignment-row button { min-width: 26px; min-height: 20px; padding: 0; font-size: 9px; color: #93a3ac; }
+.alignment-row button { min-width: 26px; min-height: 20px; padding: 0; font-size: 10.5px; color: #93a3ac; }
 .alignment-row button.active { border-color: #12b5a6; color: #12b5a6; }
 
 .timeline-canvas-container { flex: 1; min-width: 0; position: relative; overflow: hidden; flex-shrink: 0; }
@@ -841,19 +841,19 @@ input, select, textarea { font-size: var(--dlg-fs-body); }
 .pp-panel .pp-tab:hover { color: var(--pp-text); }
 .pp-panel .pp-tab.pp-active { color: var(--pp-accent); font-weight: 600; }
 .pp-panel .pp-tab.pp-active::after { content: ""; position: absolute; bottom: -1px; left: 50%; transform: translateX(-50%); width: 26px; height: 2.5px; border-radius: 2px; background: var(--pp-accent); }
-.pp-panel .pp-tab .soon { font-size: 8.5px; color: var(--pp-warn); line-height: 1.4; font-weight: 400; }
+.pp-panel .pp-tab .soon { font-size: 10.5px; color: var(--pp-warn); line-height: 1.4; font-weight: 400; }
 .pp-panel .pp-subtabs { display: flex; gap: 4px; padding: 12px 14px 4px; flex: none; }
 .pp-panel .pp-sub { flex: 1; padding: 5px 0; display: flex; flex-direction: column; align-items: center; gap: 1px; border-radius: 7px; font-size: var(--dlg-fs-body); color: var(--pp-text-2); cursor: pointer; border: 1px solid transparent; transition: .15s; line-height: 1.25; user-select: none; }
 .pp-panel .pp-sub:hover { color: var(--pp-text); }
 .pp-panel .pp-sub.pp-active { background: #232d35; color: #fff; border-color: #2e3a44; font-weight: 600; }
-.pp-panel .pp-sub .soon { font-size: 8.5px; color: var(--pp-warn); line-height: 1.4; }
+.pp-panel .pp-sub .soon { font-size: 10.5px; color: var(--pp-warn); line-height: 1.4; }
 /* ---- 内容区 ---- */
 .pp-panel .pp-body { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 16px 24px; background: #181c1f; }
 .pp-panel .pp-body::-webkit-scrollbar { width: 8px; }
 .pp-panel .pp-body::-webkit-scrollbar-thumb { background: #2a343c; border-radius: 4px; }
 .pp-panel .pp-gh { display: flex; align-items: center; gap: 6px; margin: 16px 0 10px; font-size: 13px; font-weight: 600; color: var(--pp-text); }
 .pp-panel .pp-gh:first-child { margin-top: 10px; }
-.pp-panel .pp-gh .chev { color: var(--pp-text-3); font-size: 9px; transition: transform .15s; }
+.pp-panel .pp-gh .chev { color: var(--pp-text-3); font-size: 10.5px; transition: transform .15s; }
 .pp-panel .pp-gh.coll { cursor: pointer; }
 .pp-panel .pp-gh.coll.closed .chev { transform: rotate(-90deg); }
 .pp-panel .pp-gh .tail { font-size: var(--dlg-fs-label); color: var(--pp-text-3); font-weight: 400; }
@@ -908,7 +908,7 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 .pp-panel .pp-btn.danger:hover { background: rgba(224, 138, 138, .08); }
 .pp-panel .pp-btn.ghost { border-color: var(--pp-border); background: none; color: var(--pp-text-2); font-weight: 400; }
 .pp-panel .pp-btn.ghost:hover { color: var(--pp-text); border-color: var(--pp-border-2); background: rgba(255, 255, 255, .03); }
-.pp-panel .pp-badge { font-size: 9.5px; color: var(--pp-warn); border: 1px solid rgba(217, 179, 106, .4); border-radius: 999px; padding: 1px 8px; flex: none; white-space: nowrap; }
+.pp-panel .pp-badge { font-size: 10.5px; color: var(--pp-warn); border: 1px solid rgba(217, 179, 106, .4); border-radius: 999px; padding: 1px 8px; flex: none; white-space: nowrap; }
 .pp-panel .pp-note { font-size: var(--dlg-fs-label); color: var(--pp-text-3); line-height: 1.75; background: #10161b; border: 1px solid #1f2931; border-radius: 7px; padding: 10px 12px; margin: 10px 0 0; }
 .pp-panel .pp-note b { color: var(--pp-text-2); font-weight: 600; }
 .pp-panel .pp-note em { color: var(--pp-accent); font-style: normal; }
@@ -2186,7 +2186,7 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 .angle-sync-modal .angle-sync-table td:nth-child(2) { white-space: normal; }
 .angle-sync-modal .angle-sync-table td small {
   display: block; margin-top: 3px;
-  color: var(--dlg-text-3); font-size: 10px; line-height: 1.4;
+  color: var(--dlg-text-3); font-size: 10.5px; line-height: 1.4;
 }
 .angle-sync-modal .angle-sync-table td small:empty { display: none; }
 
@@ -2204,7 +2204,7 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
   display: inline-flex; align-items: center; justify-content: center;
   width: 62px; height: 18px; border-radius: 999px;
   background: var(--ctl-bg); color: var(--dlg-text-3);
-  font-size: 9.5px; font-weight: 600;
+  font-size: 10.5px; font-weight: 600;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   vertical-align: middle;
 }
@@ -2292,7 +2292,7 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
   display: inline-flex; align-items: center; justify-content: center;
   height: 18px; border-radius: 999px;
   background: var(--ctl-bg); color: var(--dlg-text-3);
-  font-size: 9.5px; font-weight: 600;
+  font-size: 10.5px; font-weight: 600;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .modal.semantic-search .index-status.ready { background: var(--dlg-accent-dim); color: var(--dlg-primary); }
@@ -2854,7 +2854,7 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
   align-items: center;
   gap: 20px;
   border-bottom: 1px solid var(--dlg-line);
-  font-size: 9.5px;
+  font-size: 10.5px;
 }
 /* 参数区恢复 24px 缩进；双栏是「左参数 240px + 右预览」，不是卡片分栏
    （原型 .workbench-grid 无边框无底色，仅两列）。 */
@@ -3221,7 +3221,7 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
   font-weight: 600;
   letter-spacing: .35px;
 }
-.modal .section-label span { font: 9px Consolas, monospace; color: var(--dlg-text-3); letter-spacing: .3px; }
+.modal .section-label span { font: 10.5px Consolas, monospace; color: var(--dlg-text-3); letter-spacing: .3px; }
 
 /* ── 字段：标签在上、辅助文字在右 ────────────────────────────── */
 .modal .field { display: grid; gap: 7px; min-width: 0; }
@@ -3230,7 +3230,7 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   color: var(--dlg-text-2); font-size: 12px; line-height: 17px;
 }
-.modal .field-hint { color: var(--dlg-text-3); font-size: 10px; font-weight: 400; }
+.modal .field-hint { color: var(--dlg-text-3); font-size: 10.5px; font-weight: 400; }
 .modal .field-value { color: var(--dlg-text); font-size: 12.5px; }
 .modal .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px 16px; }
 .modal .span-2 { grid-column: 1 / -1; }
@@ -3251,7 +3251,7 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 .modal .project-cover img, .modal .project-cover svg { width: 100%; height: 100%; object-fit: cover; display: block; }
 .modal .project-cover span {
   position: absolute; inset: auto 0 0; padding: 5px;
-  background: rgba(7, 12, 11, .74); font-size: 9px; text-align: center; color: var(--dlg-ink);
+  background: rgba(7, 12, 11, .74); font-size: 10.5px; text-align: center; color: var(--dlg-ink);
 }
 .modal .project-cover:hover span { background: rgba(7, 12, 11, .9); color: var(--dlg-primary); }
 .modal .project-name { font-size: 13px; font-weight: 550; margin-bottom: 7px; color: var(--dlg-text); }
@@ -3262,7 +3262,7 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 .modal .file-ext {
   height: 34px; display: grid; place-items: center;
   border: 1px solid var(--dlg-line); border-left: 0; border-radius: 0 7px 7px 0;
-  background: var(--dlg-raise); color: var(--dlg-text-3); font: 10px Consolas, monospace;
+  background: var(--dlg-raise); color: var(--dlg-text-3); font: 10.5px Consolas, monospace;
 }
 
 /* ── 导出：表单 + 画幅卡 ─────────────────────────────────────── */
@@ -3274,8 +3274,8 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
   color: var(--dlg-text-2); font: 12px Consolas, monospace; margin-bottom: 10px;
 }
 .modal .ratio-name { font-size: 11px; color: var(--dlg-text-2); }
-.modal .ratio-dim { font: 10px Consolas, monospace; color: var(--dlg-text-3); margin-top: 5px; }
-.modal .ratio-sub { font-size: 9px; color: var(--dlg-text-3); margin-top: 8px; line-height: 1.5; }
+.modal .ratio-dim { font: 10.5px Consolas, monospace; color: var(--dlg-text-3); margin-top: 5px; }
+.modal .ratio-sub { font-size: 10.5px; color: var(--dlg-text-3); margin-top: 8px; line-height: 1.5; }
 
 /* ── 路径控件 ───────────────────────────────────────────────── */
 .modal .path-control { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; }
@@ -3345,7 +3345,7 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 .modal .command-group {
   padding: 9px 10px 5px;
   color: var(--dlg-text-4, var(--dlg-text-3));
-  font-size: 9px; font-weight: 600; letter-spacing: .8px;
+  font-size: 10.5px; font-weight: 600; letter-spacing: .8px;
   list-style: none;
 }
 .modal .command-list li { list-style: none; }
@@ -3363,22 +3363,22 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 .modal li.active .command-option { background: var(--dlg-accent-dim); color: var(--dlg-text); }
 .modal .command-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .modal .command-shortcut {
-  font: 9px Consolas, monospace; color: var(--dlg-text-3);
+  font: 10.5px Consolas, monospace; color: var(--dlg-text-3);
   padding: 2px 5px; border: 1px solid var(--dlg-line); border-radius: 4px;
   min-width: 12px; text-align: center;
 }
 .modal .command-shortcut:empty { border: 0; padding: 0; }
-.modal .command-state { font-size: 9px; color: var(--dlg-text-3); min-width: 22px; text-align: right; }
+.modal .command-state { font-size: 10.5px; color: var(--dlg-text-3); min-width: 22px; text-align: right; }
 .modal li.active .command-state { color: var(--dlg-primary); }
-.modal .command-reason { font-size: 9px; color: var(--dlg-text-4, var(--dlg-text-3)); text-align: right; }
+.modal .command-reason { font-size: 10.5px; color: var(--dlg-text-4, var(--dlg-text-3)); text-align: right; }
 .modal .command-empty { padding: 30px; text-align: center; color: var(--dlg-text-3); list-style: none; }
 
 /* 底栏键位提示（命令面板无业务主按钮，底栏只放操作提示） */
 .modal .command-footer { justify-content: flex-start; }
-.modal .key-hints { display: flex; align-items: center; gap: 14px; color: var(--dlg-text-3); font-size: 10px; }
+.modal .key-hints { display: flex; align-items: center; gap: 14px; color: var(--dlg-text-3); font-size: 10.5px; }
 .modal .key-hints span { display: inline-flex; align-items: center; gap: 5px; }
 .modal .key-hints kbd {
-  font: 9px Consolas, monospace; color: var(--dlg-text-2);
+  font: 10.5px Consolas, monospace; color: var(--dlg-text-2);
   padding: 2px 5px; border: 1px solid var(--dlg-line); border-radius: 4px; background: var(--dlg-raise);
 }
 .modal .key-hints .preview-only { margin-left: auto; color: var(--dlg-text-4, var(--dlg-text-3)); }
@@ -3416,7 +3416,7 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 /* 底栏：键位提示左对齐（原型 .command-footer 是 flex-start，不是主操作右置） */
 .modal > .modal-actions.command-footer { justify-content: flex-start; }
 .modal .key-hints { gap: 14px; }
-.modal .key-hints kbd { padding: 2px 5px; font-size: 9px; }
+.modal .key-hints kbd { padding: 2px 5px; font-size: 10.5px; }
 
 /* ── 保真修正 v2：压过历史 max-width / 旧搜索框 / 底栏对齐 ───────────
    实测发现三处旧规则仍在赢（用户截图右图即缺陷态）：
@@ -3535,8 +3535,8 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
   justify-content: flex-start;
 }
 .modal .command-footer { width: 100%; }
-.modal .key-hints { gap: 16px; font-size: 9.5px; }
-.modal .key-hints kbd { font-size: 9px; }
+.modal .key-hints { gap: 16px; font-size: 10.5px; }
+.modal .key-hints kbd { font-size: 10.5px; }
 .modal .command-list { max-height: 315px; }
 .modal .command-option { font-size: 13px; padding: 0 11px; }
 .modal .command-option > .icon { justify-self: start; }
@@ -3650,7 +3650,7 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 .modal .warning .icon { width: 15px; height: 15px; color: var(--dlg-danger); margin-top: 2px; flex: none; }
 .modal .warning > span { min-width: 0; }
 
-.modal .sample-caption { margin: 13px 0 0; color: var(--dlg-text-4, var(--dlg-text-3)); font-size: 9.5px; }
+.modal .sample-caption { margin: 13px 0 0; color: var(--dlg-text-4, var(--dlg-text-3)); font-size: 10.5px; }
 
 /* 确认弹窗正文块级布局 */
 .modal.asset-delete-modal > div.modal-body:not(.modal-heading):not(.modal-actions),
@@ -3856,7 +3856,7 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 .modal.keyframe-review .kf-title { display: flex; align-items: baseline; gap: 8px; }
 .modal.keyframe-review .kf-index { color: var(--dlg-text-2); font-weight: 600; }
 .modal.keyframe-review .kf-time { color: var(--dlg-text); }
-.modal.keyframe-review .kf-meta { font-size: 10px; color: var(--dlg-text-3); font-variant-numeric: tabular-nums; }
+.modal.keyframe-review .kf-meta { font-size: 10.5px; color: var(--dlg-text-3); font-variant-numeric: tabular-nums; }
 
 /* 固定 62px：宽度随文案变化会让同行按钮左缘参差（本稿实测过 33 vs 52 的位移）。 */
 .modal.keyframe-review .kf-badge {
@@ -3864,7 +3864,7 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
   display: inline-flex; align-items: center; justify-content: center;
   height: 18px; border-radius: 999px;
   background: var(--dlg-accent-dim); color: var(--dlg-primary);
-  font-size: 9.5px; font-weight: 600;
+  font-size: 10.5px; font-weight: 600;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .modal.keyframe-review .kf-badge.muted { background: var(--ctl-bg); color: var(--dlg-text-3); }
@@ -3930,7 +3930,7 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 .modal.captions-provider .readonly-note--plain li:last-child { margin-bottom: 0; }
 .modal.captions-provider .readonly-note--plain small {
   display: block; margin-top: 2px;
-  color: var(--dlg-text-4); font-size: 10px;
+  color: var(--dlg-text-4); font-size: 10.5px;
 }
 .modal.captions-provider .readonly-note--plain strong {
   color: var(--dlg-text); font-weight: 600;
@@ -4314,3 +4314,38 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
   animation: pulse 1.2s ease-in-out infinite;
 }
 .modal .shortcut-row .compact-command { flex: none; }
+
+
+/* ── 命令搜索：kbd 与状态列固定宽度（2026-11-09，用户红框指出）──────
+   实测问题：grid 第 3/4 列都是 auto ⇒ 列宽随内容变。
+   kbd 左缘出现 3 种值（838/826/763）、右缘 2 种（868/805）；
+   状态徽章左缘 2 种（877/814）。只有最右缘 924 是齐的。
+
+   这是「快捷键列没有右对齐」——用户红框指出的正是这里。
+
+   修法：第 3 列固定 64px 且右对齐（键位靠右贴状态列），第 4 列固定 88px
+   左对齐（状态文案起点一致）。第 4 列要放「没有可重做的操作」这类
+   8 字长文案，88px 在 10.5px 字号下刚好容纳，超出用省略号。 */
+.modal.command-palette .command-option {
+  /* 第 4 列 112px：实测「没有可重做的操作」在 10.5px 下需要 110px，
+     88px 会截断。宁可让名称列窄一点，也不截断状态文案——
+     状态是"为什么不能执行"的唯一解释，被裁掉等于没说。 */
+  grid-template-columns: 20px minmax(0, 1fr) 64px 112px;
+}
+.modal.command-palette .command-option > kbd,
+.modal.command-palette .command-option > .command-shortcut {
+  justify-self: end;
+  width: 100%;
+  max-width: 64px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.modal.command-palette .command-option > .command-ok,
+.modal.command-palette .command-option > .command-state {
+  justify-self: start;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
