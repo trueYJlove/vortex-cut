@@ -1047,8 +1047,6 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 }
 
 /* 弹窗宽度档位（设计稿 §04-§19） */
-.modal.ai-roughcut { width: min(720px, 100%); }
-.modal.planning-patch { width: min(680px, 100%); }
 /* revision-compare 的宽度由 640 档统一规则给出（见后文 .modal.revision-compare, ...）。
    此处原有 width: min(720px,100%) 是**死代码**：被更高特异性的 640 档规则覆盖，实测恒为 640，
    且与 dialog-graphite-style.test.ts 的 640 档登记矛盾。删掉以免误导。 */
@@ -1059,9 +1057,8 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 /* transcript-viewer 的宽度由 640 档统一规则给出（见后文 .modal.transcript-viewer, ... ）。此处原有 width: min(620px,100%) 是**死代码**：被更高特异性的 640 档规则覆盖，实测渲染恒为 640，
    且与 dialog-graphite-style.test.ts 的 640 档登记自相矛盾。删掉以免误导。 */
 /* AI 字幕优化（Slice 5）：与 AI 修改同档宽度；确认页 dl 与外发字段需要横向空间。 */
-.modal.captions-provider { width: min(680px, 100%); }
 /* Provider：单任务表单，主体独立滚动；非全屏窗口保持外围留白。 */
-.modal.provider-settings { width: min(480px, calc(100vw - 64px)); max-height: min(600px, 80dvh, calc(100dvh - 80px)); overflow: hidden; row-gap: 0; }
+.modal.provider-settings { max-height: min(600px, 80dvh, calc(100dvh - 80px)); overflow: hidden; row-gap: 0; }
 .modal.provider-settings > .modal-heading { padding: 18px 22px 14px; position: static; }
 .modal.provider-settings > .ps-body { min-height: 0; overflow-y: auto; scrollbar-width: thin; padding: 0 22px 16px; display: grid; gap: 14px; }
 .modal.provider-settings .ps-form { display: grid; gap: 12px; }
@@ -1086,11 +1083,7 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
   .modal.provider-settings > .ps-body { gap: 10px; }
   .modal.provider-settings .ps-form { gap: 9px; }
 }
-.modal.command-palette { width: min(600px, 100%); }
-.modal.shortcuts-dialog { width: min(620px, 100%); }
-.modal.render-panel-dialog { width: min(780px, 100%); }
 .modal.asset-delete-modal { width: min(440px, 100%); }
-.modal.compact-dialog { width: min(420px, 100%); }
 
 /* ── 标题区 ─────────────────────────────────────────────────── */
 .modal h2 { margin: 0; font-size: var(--dlg-fs-title); font-weight: 650; letter-spacing: .2px; color: var(--dlg-text); }
@@ -1529,8 +1522,8 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 
 /* ═══ 剪映式导出弹窗 + 封面设置弹窗（2026-09-23 · v5 设计稿 docs/ui-mockups/export-dialog.html）═══
    字号全部走 --dlg-fs-* 令牌阶梯；颜色走 --dlg-* 色板；零裸数字字号。 */
-.modal.export-modal { width: min(620px, 100%); row-gap: 0; }
-.modal.cover-modal { width: min(420px, 100%); row-gap: 0; }
+.modal.export-modal { row-gap: 0; }
+.modal.cover-modal { row-gap: 0; }
 .exd-body { padding: 0 var(--dlg-hpad); }
 .exd-hero { display: grid; grid-template-columns: 224px 1fr; gap: 18px; padding: 18px 0 16px; }
 /* .modal button { height:30px } 特异性 (0,1,1) 高于 .exd-cover (0,1,0)，会把
@@ -1727,7 +1720,6 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 
 /* ===== Wave 1 剪辑手法面板（对齐 export-dialog v5 / --dlg-* 令牌） ===== */
 .modal.editing-tools {
-  width: min(1100px, 100%);
   row-gap: 12px;
 }
 .editing-tools .et-wrap {
