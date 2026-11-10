@@ -1049,7 +1049,9 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 /* 弹窗宽度档位（设计稿 §04-§19） */
 .modal.ai-roughcut { width: min(720px, 100%); }
 .modal.planning-patch { width: min(680px, 100%); }
-.modal.revision-compare { width: min(720px, 100%); }
+/* revision-compare 的宽度由 640 档统一规则给出（见后文 .modal.revision-compare, ...）。
+   此处原有 width: min(720px,100%) 是**死代码**：被更高特异性的 640 档规则覆盖，实测恒为 640，
+   且与 dialog-graphite-style.test.ts 的 640 档登记矛盾。删掉以免误导。 */
 .modal.generation-workbench { width: min(860px, 100%); }
 .modal.shot-workbench { width: min(860px, 100%); }
 .modal.provider-image-modal { width: min(860px, 100%); }
@@ -1330,7 +1332,9 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 .modal .diff-groups h4 { margin: 0 0 6px; color: var(--dlg-text-3); }
 .modal .diff-groups p { margin: 4px 0; font-family: Consolas, monospace; font-size: var(--dlg-fs-label); color: var(--dlg-text-2); }
 .modal .diff-groups .diff-added { color: var(--dlg-primary); }
-.modal .diff-groups .diff-removed { color: #f2797d; }
+/* 原来写死 #f2797d，而同组的 .diff-added 用的是 var(--dlg-primary) ——
+   同一组语义两个来源。减号改走 --dlg-danger，换主题时才一起变。 */
+.modal .diff-groups .diff-removed { color: var(--dlg-danger); }
 .modal .diff-groups .diff-moved, .modal .diff-groups .diff-updated, .modal .diff-groups .diff-trimmed { color: var(--dlg-warn); }
 
 /* ── 命令搜索 ───────────────────────────────────────────────── */

@@ -151,6 +151,28 @@ td 仍是 left，定宽徽章靠自身居中"伪装"成居中，这也是我第�
 
 ---
 
+## 6 · 版本比较（`revision-compare-before.png` / `revision-compare-after.png`）
+
+与「原始转录」同型：结构健康，只发现两处真缺陷。
+
+| 项 | 改前 | 改后 |
+|---|---|---|
+| 宽度 | `min(720px,100%)` 死代码（被 640 档覆盖，实测恒为 640） | 删除，只留 640 档 |
+| diff 减号色 | 硬编码 `#f2797d` | `var(--dlg-danger)` |
+
+**第二处值得单独说**：同一组语义里，**加号用的是 `var(--dlg-primary)`，减号却是字面色值**。
+换主题时加号会变、减号不变——这类"部分令牌化"比整体未令牌化更难发现，
+因为肉眼看颜色都对，只有改令牌时才暴露。
+
+> 影响范围说明：`.diff-groups` 是共享组件 `TimelineDiffView` 的样式，被 4 个面板使用
+> （RevisionCompare / AgentSession / EditingGrammar / EditingTools）。令牌化会同时
+> 影响这 4 处——这是有意的，它们本来就该是同一个颜色语义。
+
+**审计结论（未改动项）**：基线/目标两列为等宽 290/290；窄屏（760px 以下）堆叠单列；
+`.diff-groups section` 内边距 10px 12px、`h4` 10.5px——均无需改。
+
+---
+
 ## 一处遗留（未在本轮范围）
 
 `tests/shot-requirement-workbench.test.tsx` 在全量并行跑时偶发失败 1 次。
