@@ -4185,3 +4185,55 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
   border-radius: 2px;
   transition: width .3s ease-out;
 }
+
+
+/* ── D 族「三步确认」· 外发确认页（2026-11-09）──────────────────
+   结构稿：docs/ui-mockups/dialog-system-v2/prototype-egress-confirm-family.html
+
+   改造前：两个弹窗的确认页把 8 项元数据平铺在同一个 dl 里，没有分组、
+   **没有勾选框**、主按钮用普通主色。外发是不可逆动作，却是全仓唯一
+   没有二次确认的破坏性操作（删除素材、删除 Provider 都有确认弹窗）。
+
+   本段补齐三件事：
+   1. .egress-meta  —— 元数据按「给谁 / 发什么 / 规模 / 费用 / 凭据」分组；
+   2. .egress-confirm —— 勾选框紧贴内容预览（不与底栏混排，混排会被跳过）；
+   3. 底栏主按钮 danger 色 —— 不可逆外发不是普通「下一步」。 */
+.modal .egress-meta { margin: 0; }
+.modal .egress-meta dd.egress-cost { color: var(--dlg-warn); }
+.modal .egress-meta dd.egress-hash {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  color: var(--dlg-text-3);
+  overflow-wrap: anywhere;
+}
+
+/* 确认区：与提示盒同一层级，但用危险色描边强调「不可逆」 */
+.modal .egress-confirm {
+  display: grid;
+  gap: 10px;
+  padding: 13px 14px;
+  border: 1px solid rgba(227, 93, 98, .32);
+  border-radius: var(--r-box);
+  background: var(--dlg-danger-dim);
+}
+.modal .egress-confirm .egress-warn {
+  margin: 0;
+  color: var(--dlg-danger-calm);
+  font-size: var(--dlg-fs-caption);
+  line-height: 1.75;
+}
+.modal .egress-confirm label {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  color: var(--dlg-text-2);
+  font-size: var(--dlg-fs-label);
+  line-height: 1.6;
+  cursor: pointer;
+}
+.modal .egress-confirm input[type="checkbox"] {
+  width: 16px; height: 16px;
+  margin: 1px 0 0;
+  flex: none;
+  accent-color: var(--dlg-primary);
+}

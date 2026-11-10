@@ -641,7 +641,12 @@ describe("Stage 2A AI 粗剪", () => {
     expect(api.createPlanning).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "准备外传确认" }));
     await screen.findByText("确认发送的精确内容"); expect(api.preparePlanning).toHaveBeenCalled(); expect(api.createPlanning).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "我确认发送以上内容" }));
+    // 外发是不可逆动作：未勾选时主按钮必须禁用（D 族结构稿 §9.3）。
+    const sendBtn = screen.getByRole("button", { name: "我确认发送以上内容" }) as HTMLButtonElement;
+    expect(sendBtn.disabled, "未勾选时不应可发送").toBe(true);
+    fireEvent.click(screen.getByLabelText("我已核对以上外发内容"));
+    await waitFor(() => expect(sendBtn.disabled).toBe(false));
+    fireEvent.click(sendBtn);
     await waitFor(() => expect(api.createPlanning).toHaveBeenCalledWith({ project_id: "project_1", egress_preview_id: "preview_1", payload_sha256: `sha256:${"b".repeat(64)}` }));
   });
   it("Provider 设置是独立入口：可创建 Provider 并保存密钥且不回显", async () => {
@@ -705,7 +710,7 @@ describe("Stage 2A AI 粗剪", () => {
     await screen.findByRole("note", { name: "合成预览回退提示" }, { timeout: 10_000 }); // 等回退落定再交互（见"必须先 prepare"用例注释）
     fireEvent.click(screen.getByRole("button", { name: "AI 粗剪" }));
     fireEvent.change(await screen.findByLabelText("主题"), { target: { value: "游戏高光" } }); fireEvent.change(screen.getByLabelText("受众"), { target: { value: "玩家" } }); fireEvent.change(screen.getByLabelText("叙事目标"), { target: { value: "展示操作" } }); fireEvent.change(screen.getByLabelText("制作配方"), { target: { value: "balanced-narrative-v1" } }); fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "provider_1" } }); fireEvent.change(screen.getByLabelText("就绪转录"), { target: { value: "transcript_1" } });
-    fireEvent.click(screen.getByRole("button", { name: "准备外传确认" })); await screen.findByText("确认发送的精确内容"); fireEvent.click(screen.getByRole("button", { name: "我确认发送以上内容" }));
+    fireEvent.click(screen.getByRole("button", { name: "准备外传确认" })); await screen.findByText("确认发送的精确内容"); fireEvent.click(screen.getByLabelText("我已核对以上外发内容")); fireEvent.click(screen.getByRole("button", { name: "我确认发送以上内容" }));
     expect(await screen.findByRole("button", { name: "取消生成" })).toBeVisible(); fireEvent.click(screen.getByRole("button", { name: "取消生成" })); expect(api.cancelJob).toHaveBeenCalledWith("job_created");
     expect(listener).toBeTypeOf("function"); listener?.({ ...createdJob, status, stage: status, progress: 0, error: { code: `JOB_${status.toUpperCase()}`, message: status } });
     expect(await screen.findByRole("button", { name: "准备外传确认" })).toBeVisible(); expect(screen.queryByText("确认发送的精确内容")).not.toBeInTheDocument(); expect(api.createPlanning).toHaveBeenCalledTimes(1);
@@ -737,7 +742,7 @@ describe("Stage 2B AI 修改", () => {
 
   it("成功生成展示分组 Diff，应用显式创建正式 Revision", async () => {
     const api = desktopApi(); let listener: ((job: Job) => void) | undefined; api.subscribeJob = vi.fn((_id, next) => { listener = next; return () => undefined; }); vi.mocked(api.listTimelinePatchProposals).mockResolvedValue({ items: [proposal] });
-    window.desktop = api; render(<App />); const entry = await screen.findByRole("button", { name: "AI 修改" }); await waitFor(() => expect(entry).toBeEnabled()); fireEvent.click(entry); fireEvent.change(await screen.findByLabelText("修改指令"), { target: { value: "缩短片段" } }); fireEvent.click(screen.getByRole("button", { name: "准备外传确认" })); fireEvent.click(await screen.findByRole("button", { name: "确认并发送一次" })); await waitFor(() => expect(listener).toBeTypeOf("function"));
+    window.desktop = api; render(<App />); const entry = await screen.findByRole("button", { name: "AI 修改" }); await waitFor(() => expect(entry).toBeEnabled()); fireEvent.click(entry); fireEvent.change(await screen.findByLabelText("修改指令"), { target: { value: "缩短片段" } }); fireEvent.click(screen.getByRole("button", { name: "准备外传确认" })); fireEvent.click(await screen.findByLabelText("我已核对以上外发内容")); fireEvent.click(await screen.findByRole("button", { name: "确认并发送一次" })); await waitFor(() => expect(listener).toBeTypeOf("function"));
     await act(async () => { listener?.({ ...createdJob, kind: "timeline_patch_generation", status: "succeeded", stage: "completed", progress: 1 }); await Promise.resolve(); }); await waitFor(() => expect(api.listTimelinePatchProposals).toHaveBeenCalled()); expect(await screen.findByText("提案差异")).toBeVisible(); expect(screen.getByText(/trimmed/)).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "应用修改" })); await waitFor(() => expect(api.applyTimelinePatchProposal).toHaveBeenCalledWith({ project_id: "project_1", proposal_id: "proposal_1", base_revision_id: "revision_1", proposed_document_sha256: `sha256:${"b".repeat(64)}` }));
   });
