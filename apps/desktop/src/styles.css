@@ -239,7 +239,7 @@ textarea { min-height: 92px; padding: 8px; resize: vertical; }
 footer { padding: 0 12px; border-top: 1px solid var(--vc-border); color: #6f7b82; font-size: var(--dlg-fs-label); overflow: hidden; white-space: nowrap; display: flex; align-items: center; gap: 8px; }.footer-status { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; min-width: 0; }.footer-sep { width: 1px; height: 14px; background: var(--vc-border); flex: none; }.footer-tasks { display: flex; align-items: center; justify-content: center; gap: 10px; flex: 1 1 auto; min-width: 0; }.tasks-summary { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; height: 20px; /* min-height 显式压回：全局 button{min-height:32px} 优先于 height，会把胶囊撑出 28px footer 行被裁剪 */ min-height: 20px; padding: 0 10px; border: 1px solid rgba(37, 211, 172, .35); border-radius: 999px; background: rgba(37, 211, 172, .08); color: #25d3ac; font-size: var(--dlg-fs-label); cursor: default; overflow: hidden; }.tasks-summary:hover { background: rgba(37, 211, 172, .16); }.tasks-spinner { width: 8px; height: 8px; flex: none; border-radius: 50%; border: 1.5px solid rgba(37, 211, 172, .3); border-top-color: #25d3ac; animation: sb-spin .9s linear infinite; }@keyframes sb-spin { to { transform: rotate(360deg); } }.tasks-idle { color: #556067; font-size: var(--dlg-fs-label); }.footer-actions { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; min-width: 0; overflow: hidden; }.footer-version { margin-left: auto; flex: 0 0 auto; max-width: 320px; color: #6f7b82; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 footer .ai-entry { min-height: 22px; padding: 0 7px; border: 1px solid #263038; border-radius: 6px; background: none; color: #a3aeb5; font-size: var(--dlg-fs-label); display: inline-flex; align-items: center; gap: 5px; } footer .ai-entry:hover:not(:disabled) { color: #e8edf0; border-color: #33404a; background: rgba(255, 255, 255, .03); } footer .ai-entry svg { width: 12px; height: 12px; }
 .modal-backdrop { position: fixed; inset: 0; z-index: 20; padding: 24px; display: grid; place-items: center; overflow: auto; background: rgba(4,7,8,.82); }.modal-heading { display: flex; align-items: start; justify-content: space-between; gap: 12px; }.modal h2, .modal h3 { margin: 0 0 10px; }.modal p { overflow-wrap: anywhere; }.modal dl { display: grid; grid-template-columns: 90px 1fr; gap: 8px; font-size: var(--dlg-fs-body); }.modal dd { margin: 0; overflow-wrap: anywhere; }.check-line { display: flex; align-items: center; gap: 7px; font-size: var(--dlg-fs-body); }.check-line input { width: 16px; height: 16px; }.modal-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 7px; margin-top: 16px; }.delete-warning { margin-top: 4px; padding: 9px; border-left: 3px solid #d16055; background: #2e211f; color: #eec4be; font-size: var(--dlg-fs-body); }.readonly-note { padding: 9px; border-left: 3px solid #8fc5aa; background: #1d2a26; color: #aad0bd; font-size: var(--dlg-fs-body); }.readonly-segments > div { padding: 10px 0; display: grid; grid-template-columns: 100px 1fr; gap: 8px; border-bottom: 1px solid #303b40; }.readonly-segments span { color: #d1a453; font-size: var(--dlg-fs-label); }.readonly-segments p { margin: 0; overflow-wrap: anywhere; }
-.ai-roughcut { width: min(900px, 100%); display: grid; gap: 10px; }.ai-roughcut label { display: grid; gap: 5px; font-size: var(--dlg-fs-body); }.ai-roughcut fieldset { display: grid; grid-template-columns: 1fr 1.4fr 1fr auto; gap: 6px; border: 1px solid #3b474d; }.ai-inline { display: flex; gap: 6px; }.ai-inline input { flex: 1; }.ai-status { padding: 8px; border-left: 3px solid #d1a453; background: #29251a; font-size: var(--dlg-fs-body); }.egress-text { max-height: 220px; overflow: auto; padding: 8px; border: 1px solid #303b40; background: var(--dlg-inset-5); font-size: var(--dlg-fs-body); }.egress-text p { margin: 0 0 8px; white-space: pre-wrap; overflow-wrap: anywhere; }.candidate-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }.candidate-columns > section { min-width: 0; padding: 10px; border: 1px solid #3b474d; background: #141b1f; }.candidate-columns h4 { margin: 0 0 8px; color: #d1a453; }.candidate-columns strong, .candidate-columns p { overflow-wrap: anywhere; }.candidate-columns small { color: #9eabb1; }.candidate-clip { margin: 8px 0; padding-top: 7px; border-top: 1px solid #303b40; font-size: var(--dlg-fs-label); }.candidate-clip span { color: #d1a453; margin-right: 6px; }.candidate-clip p { margin: 5px 0; }.candidate-player { width: min(420px, 100%); max-height: 42vh; background: #000; }
+.ai-roughcut { display: grid; gap: 10px; }.ai-roughcut label { display: grid; gap: 5px; font-size: var(--dlg-fs-body); }.ai-roughcut fieldset { display: grid; grid-template-columns: 1fr 1.4fr 1fr auto; gap: 6px; border: 1px solid #3b474d; }.ai-inline { display: flex; gap: 6px; }.ai-inline input { flex: 1; }.ai-status { padding: 8px; border-left: 3px solid #d1a453; background: #29251a; font-size: var(--dlg-fs-body); }.egress-text { max-height: 220px; overflow: auto; padding: 8px; border: 1px solid #303b40; background: var(--dlg-inset-5); font-size: var(--dlg-fs-body); }.egress-text p { margin: 0 0 8px; white-space: pre-wrap; overflow-wrap: anywhere; }.candidate-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }.candidate-columns > section { min-width: 0; padding: 10px; border: 1px solid #3b474d; background: #141b1f; }.candidate-columns h4 { margin: 0 0 8px; color: #d1a453; }.candidate-columns strong, .candidate-columns p { overflow-wrap: anywhere; }.candidate-columns small { color: #9eabb1; }.candidate-clip { margin: 8px 0; padding-top: 7px; border-top: 1px solid #303b40; font-size: var(--dlg-fs-label); }.candidate-clip span { color: #d1a453; margin-right: 6px; }.candidate-clip p { margin: 5px 0; }.candidate-player { width: min(420px, 100%); max-height: 42vh; background: #000; }
 .ai-job-progress { position: fixed; right: 28px; bottom: 38px; z-index: 21; width: min(360px, calc(100vw - 56px)); display: grid; gap: 7px; padding: 12px; border: 1px solid #d1a453; background: #2c2c2c; box-shadow: 0 8px 30px rgba(0,0,0,.35); font-size: var(--dlg-fs-body); }.ai-job-progress progress { width: 100%; height: 8px; }.ai-job-progress button { justify-self: end; }
 .locked-fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }.locked-fieldset:disabled { opacity: 1; }.locked-fieldset:disabled label { opacity: .52; }.locked-note { display: flex; align-items: center; gap: 6px; margin: 0; padding: 8px; border-left: 3px solid #d1a453; background: #29251a; color: #e4bc72; font-size: var(--dlg-fs-label); }.locked-note svg { width: 14px; }
 .clip-block.locked, .caption-block.locked { border-style: dashed; }.clip-block.locked { background: #343943; }.caption-block.locked { background: #453b2a; }.clip-block > svg { float: left; margin-right: 4px; }
@@ -262,7 +262,7 @@ footer .ai-entry { min-height: 22px; padding: 0 7px; border: 1px solid #263038; 
 @media (max-width: 760px) { .revision-selectors, .diff-groups { grid-template-columns: 1fr; } }
 
 /* Stage 4B simulation-only media generation workbench */
-.generation-workbench { width: min(940px, 100%); }
+
 .simulation-notice { padding: 9px 10px; border: 1px solid #6c5935; background: #29251a; color: #e4bc72; font-size: var(--dlg-fs-body); }
 .generation-tabs { display: flex; gap: 7px; margin: 12px 0; border-bottom: 1px solid #3b474d; }
 .generation-tabs button { padding: 0 12px; }
@@ -295,7 +295,7 @@ footer .ai-entry { min-height: 22px; padding: 0 7px; border: 1px solid #263038; 
 @media (max-width: 760px) { .generation-history-grid, .generation-parameters { grid-template-columns: 1fr; } }
 
 /* Stage 4C structured shot requirement workbench */
-.shot-workbench { width: min(1040px, 100%); }
+
 .shot-zero-notice { padding: 9px 10px; border: 1px solid #456451; background: #18251e; color: #9ed0b4; font-size: var(--dlg-fs-body); }
 .shot-editor { display: grid; gap: 12px; }
 .shot-editor > .generation-field textarea { min-height: 70px; }
@@ -320,7 +320,7 @@ footer .ai-entry { min-height: 22px; padding: 0 7px; border: 1px solid #263038; 
 .shot-history-detail p { white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 760px) { .shot-card, .shot-history { grid-template-columns: 1fr; }.shot-card > label:nth-of-type(2), .shot-card-heading { grid-column: 1; } }
 /* Stage 4D controlled provider image generation */
-.provider-image-modal { width: min(980px, 100%); }
+
 .provider-cost-notice { padding: 10px; border: 1px solid #80603a; background: #2b2419; color: #e8c386; font-size: var(--dlg-fs-body); }
 .generation-create-form, .provider-image-configs { display: grid; gap: 12px; }
 .generation-create-form > label, .provider-image-configs label { display: grid; gap: 6px; font-size: var(--dlg-fs-body); }
@@ -366,7 +366,7 @@ footer .ai-entry { min-height: 22px; padding: 0 7px; border: 1px solid #263038; 
 .project-summary { min-width: 0; flex: 1 1 280px; gap: 8px; }
 .project-summary .project-label { flex: 0 0 auto; }.project-summary select { width: min(190px, 20vw); }.project-summary .compact-command { flex: 0 0 auto; }
 .save-state-group { gap: 10px; flex: 0 0 auto; }.top-actions { flex: 0 0 auto; }.top-actions-edit, .top-actions-output { padding-left: 9px; border-left: 1px solid #303b40; }
-.action-group-label { white-space: nowrap; }.project-management-modal { width: min(620px, 100%); }.project-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin: 14px 0; }.project-steps span { padding: 7px 5px; border-bottom: 2px solid #3b474d; color: #89989f; font-size: var(--dlg-fs-caption); text-align: center; }.project-steps span.active { border-color: #d1a453; color: #f3d79d; }.project-management-section { margin-top: 12px; padding: 12px; border: 1px solid #3b474d; background: #141b1f; }.project-management-section h3 { margin: 0 0 9px; color: #d1a453; font-size: 13px; }.project-form-row { display: flex; gap: 7px; }.project-form-row input { flex: 1; }.project-current-name { margin: 0 0 9px; color: #c8d0d3; font-size: var(--dlg-fs-body); }
+.action-group-label { white-space: nowrap; }.project-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin: 14px 0; }.project-steps span { padding: 7px 5px; border-bottom: 2px solid #3b474d; color: #89989f; font-size: var(--dlg-fs-caption); text-align: center; }.project-steps span.active { border-color: #d1a453; color: #f3d79d; }.project-management-section { margin-top: 12px; padding: 12px; border: 1px solid #3b474d; background: #141b1f; }.project-management-section h3 { margin: 0 0 9px; color: #d1a453; font-size: 13px; }.project-form-row { display: flex; gap: 7px; }.project-form-row input { flex: 1; }.project-current-name { margin: 0 0 9px; color: #c8d0d3; font-size: var(--dlg-fs-body); }
 .draggable-asset { cursor: grab; }.draggable-asset:active { cursor: grabbing; }.draggable-asset:hover { border-color: #d1a453; }.track-content { position: relative; align-items: stretch; min-height: 58px; overflow-x: auto; overflow-y: hidden; }.track-content.drop-active { background: #1b2c30; }.timeline-clip-slot { display: flex; align-items: stretch; min-width: 0; }.timeline-drop-zone { width: 10px; flex: 0 0 10px; min-height: 42px; border: 1px dashed transparent; border-radius: 2px; }.timeline-drop-zone.active { border-color: #d1a453; background: rgba(209,164,83,.22); }.timeline-empty-drop { min-width: 100%; min-height: 42px; display: grid; place-items: center; padding: 10px; border: 1px dashed #53636a; color: #aeb9bd; font-size: var(--dlg-fs-label); }
 
 /* Stage 9 editor shell */
@@ -1158,10 +1158,10 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 
 
 /* 例外：归档项目 / 恢复默认 / 删除凭据 保持次级灰（specificity 需压过 last-child 主按钮规则） */
-.modal .project-management-modal .modal-actions button:only-child,
+.modal.project-management-modal .modal-actions button:only-child,
 .modal .shortcuts-dialog .modal-actions button:only-child,
 .modal .provider-image-modal .modal-actions button:last-child:nth-child(2) { background: var(--btn-bg); color: var(--dlg-text); font-weight: 500; }
-.modal .project-management-modal .modal-actions button:only-child:hover:not(:disabled),
+.modal.project-management-modal .modal-actions button:only-child:hover:not(:disabled),
 .modal .shortcuts-dialog .modal-actions button:only-child:hover:not(:disabled),
 .modal .provider-image-modal .modal-actions button:last-child:nth-child(2):hover:not(:disabled) { background: var(--btn-bg-hover); }
 /* 行内小按钮 */
@@ -3940,7 +3940,9 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
    直接写 .modal.captions-provider label 会波及 checkbox 等行内 label，
    因此只选「直接含 select / input 的 label」。 */
 .modal.captions-provider .modal-body > label {
-  display: grid; gap: 7px;
+  /* 字段间距对齐基线 .modal label 的 6px（本仓 .modal 内 label 的 gap 有
+     5/6/7/8 四种取值，基线是 6px）。上一轮此处写 7px 反而制造了新的不一致。 */
+  display: grid; gap: 6px;
   color: var(--dlg-text-2); font-size: var(--dlg-fs-label);
 }
 
@@ -4078,3 +4080,20 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 }
 .modal .project-cover { color: var(--dlg-ink); }
 .modal .project-cover span { color: var(--dlg-ink); }
+
+/* ── 项目管理弹窗：步骤条与卡片内容的左缘对齐（2026-11-09）─────────
+   实测问题：.project-steps 的盒子与 .project-management-section 同宽同 x
+   （都是 345 / 590），**但视觉左缘差 15px**——因为 section 有 14px 内边距，
+   其内部 h3 从 360 开始；而步骤条第一格直接贴 345。
+
+   两处修正：
+   1. 步骤条补上与卡片相同的水平内边距，使其格子与卡片内容对齐；
+   2. 「画布」下拉在 flex 行里被压成 9:1（实测 select 宽度不足，选项文本被截），
+      给它一个 flex-basis 下限，保证「竖屏 9:16」这类选项完整显示。 */
+/* 用 margin 而非 padding：padding 会让盒子在 590px 宽度里再向外撑，
+   导致步骤条右缘超出卡片（实测 1209 vs 1239）。margin 只内缩盒子本身。 */
+.modal.project-management-modal .project-steps { margin-left: 14px; margin-right: 14px; }
+.modal.project-management-modal .project-form-row .tb-field { flex: none; min-width: 132px; }
+.modal.project-management-modal .project-form-row .tb-field select { width: 100%; }
+.modal.project-management-modal .project-form-row input { flex: 1; min-width: 0; }
+.modal.project-management-modal .project-form-row .compact-command { flex: none; }

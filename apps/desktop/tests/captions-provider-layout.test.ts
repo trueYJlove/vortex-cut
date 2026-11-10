@@ -104,9 +104,12 @@ describe("AI 字幕优化：说明文字里的列表不再裸奔", () => {
 });
 
 describe("AI 字幕优化：字段节奏与状态行对齐", () => {
-  it("字段 label 是 grid + 7px 间距（不是默认行盒）", () => {
+  it("字段 label 是 grid + 6px 间距（对齐基线，不是默认行盒）", () => {
+    // 上一轮此处写的是 7px，但基线 .modal label 是 6px —— 本仓 .modal 内
+    // label 的 gap 有 5/6/7/8 四种取值，基线是 6px。写 7px 等于给这一个
+    // 弹窗单独造了第五种取值，反而破坏一致性。已改回 6px。
     expect(effective(P + " .modal-body > label", "display")).toBe("grid");
-    expect(effective(P + " .modal-body > label", "gap")).toBe("7px");
+    expect(effective(P + " .modal-body > label", "gap")).toBe("6px");
   });
 
   /**

@@ -84,12 +84,21 @@ const nominal = (w: string): number | null => {
   return m ? Number(m[1]) : null;
 };
 
-/** 收集所有 .modal.X 形式的单类选择器。 */
+/**
+ * 收集所有弹窗单类选择器。
+ *
+ * **2026-11-09 补漏**：原实现只匹配 `.modal.X`，漏掉了不带 .modal 前缀的写法，
+ * 例如 `.project-management-modal { width: min(620px,100%) }`——它同样被后文
+ * 640 档规则覆盖，却从未被扫描到。后者按 `-modal` / `-dialog` / `-card` 后缀识别。
+ */
 const dialogClasses = new Set<string>();
+const MODAL_SUFFIX = /-(modal|dialog|card)$/;
 for (const r of RULES) {
   for (const s of r.sels) {
-    const m = /^\.modal\.([\w-]+)$/.exec(s);
-    if (m) dialogClasses.add(m[1]);
+    const prefixed = /^\.modal\.([\w-]+)$/.exec(s);
+    if (prefixed) { dialogClasses.add(prefixed[1]); continue; }
+    const bare = /^\.([\w-]+)$/.exec(s);
+    if (bare && MODAL_SUFFIX.test(bare[1])) dialogClasses.add(bare[1]);
   }
 }
 
@@ -97,10 +106,11 @@ describe("弹窗宽度：声明的名义宽度必须等于实际生效的", () =
   it("扫描全表，不存在被更高优先级规则顶掉的宽度声明", () => {
     const misleading: string[] = [];
     for (const name of dialogClasses) {
-      const sel = ".modal." + name;
+      // 一个弹窗可能同时有 .X 与 .modal.X 两种写法，都要纳入候选
+      const sels = [".modal." + name, "." + name];
       const candidates = RULES
-        .filter(r => !r.inMedia && r.sels.includes(sel))
-        .map(r => ({ width: widthOf(r.body), spec: spec(sel), order: r.order }))
+        .filter(r => !r.inMedia && sels.some(s => r.sels.includes(s)))
+        .map(r => ({ width: widthOf(r.body), spec: spec(sels.find(s => r.sels.includes(s))!), order: r.order }))
         .filter((c): c is { width: string; spec: [number, number, number]; order: number } => c.width !== null);
       if (candidates.length < 2) continue;
 

@@ -210,6 +210,53 @@ td 仍是 left，定宽徽章靠自身居中"伪装"成居中，这也是我第�
 
 ---
 
+## 8 · C 族收尾：最后 3 个弹窗（`project-mgmt-before.png` / `-after.png`）
+
+### 8.1 渲染与导出（render-panel-dialog）· AI 信号分析（cv-density）
+
+**审计结论：健康，未做视觉改动。**
+
+| 弹窗 | 实测 | 判定 |
+|---|---|---|
+| render-panel-dialog | 640 档，8 条规则，0 处硬编码 | 无需改 |
+| cv-density | 640 档，label 与 input 同宽 590、input 高 34、label grid + 6px | 无需改 |
+
+这两个弹窗本身就是「状态行 + 表单」的标准形态，没有发现可改进项。
+如实记录，便于日后核对"确实看过"而不是漏查。
+
+### 8.2 项目管理（project-management-modal）
+
+发现三个缺陷：
+
+| 项 | 改前 | 改后 |
+|---|---|---|
+| 步骤条与卡片左缘 | **差 15px**（步骤条格子贴容器边缘 345，卡片内容从 360 起） | 差 1px（section 边框所致） |
+| 「画布」下拉 | 被 flex 压成约 9:1，选项文本被截断 | flex-basis 132px 下限，完整显示 |
+| 字段间距 | 该弹窗用了 7px，与基线 6px 不符 | 对齐基线 6px |
+
+**顺带修掉一个"哑火选择器"**：我第一版写成 `.modal .project-management-modal`
+（0,2,0），但 `project-management-modal` 是弹窗**自身**的 class、不是后代，
+该选择器一条也不会命中。本仓 dialog-graphite-style.test.ts 里专门有一条
+测试警告过这个问题，我仍然踩了，共 7 处。改为 `.modal.project-management-modal`
+后生效。
+
+### 8.3 顺带补上的扫描器缺口
+
+宽度死代码扫描器原先只匹配 `.modal.X`，漏掉了**不带 .modal 前缀**的写法，
+例如 `.project-management-modal { width: min(620px,100%) }`。补全后一次又找出 **5 个**：
+
+| 弹窗 | 声明 | 实际 |
+|---|---|---|
+| project-management-modal | 620 | 640 |
+| provider-image-modal | 980 | 860 |
+| generation-workbench | 940 | 860 |
+| shot-workbench | 1040 | 860 |
+| ai-roughcut | 900 | 640 |
+
+已一并清理。
+
+---
+
 ## 一处遗留（未在本轮范围）
 
 `tests/shot-requirement-workbench.test.tsx` 在全量并行跑时偶发失败 1 次。
