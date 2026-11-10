@@ -156,6 +156,18 @@
 
 ## 9. 结构族稿（第 2 期，原型未覆盖的 23 个弹窗）
 
+> **进度（2026-11-09）**：C 族 10 个弹窗**已全部实现并逐元素实测对齐**，
+> 证据见 `evidence/2026-11-09-dialog-family-c/`（8 对 before/after + 取值对照表）。
+> B / D 两族仍需出稿后才能实现。A / E 两族复用现有稿，可直接实现。
+>
+> **实施中确立的两条验收方法**（后续族沿用）：
+> 1. **关系断言**：除断言"某元素取值"外，还要断言"两元素是否对齐"
+>    （如状态行与 select 左右缘一致、表头与数据 text-align 相同）。
+>    单点断言测不出对齐问题——C 族三次返工都出在这里。
+> 2. **改前改后逐元素比色**：批量替换色值后，必须逐元素比对
+>    `color`/`background` 的计算值；纯重构应当产生**逐像素一致**的截图
+>    （C 族 danger 与 transcript 两组证据即为文件大小完全相同）。
+
 `index.html` 只定义了 5 个弹窗（导出、Provider、删除确认、剪辑手法、命令搜索），
 且这 5 个已全部实现并逐元素对齐。**剩余 23 个弹窗在原型里没有稿**，因此不能
 「照着改」——需要先按解剖结构出结构稿，否则取值只能靠猜，会重演 P217 记录里
@@ -167,7 +179,7 @@
 |---|---|---|---|
 | A 纯表单 | `fieldset` 分组、无分栏 | Settings、Cover、Shortcuts | 复用 Provider 稿 |
 | B 步骤流 | 步骤条 + 表单 | AgentSession、EditingGrammar、Worklist | 待出 |
-| **C 列表型** | 行列表 / 表格 / 状态行 | KeyframeReview、SemanticSearch、CaptionsProvider、AngleSync、Transcript、RevisionCompare、Render、CV-density、ProjectMgmt | **`prototype-list-family.html`（已出）** |
+| **C 列表型** | 行列表 / 表格 / 状态行 | KeyframeReview、SemanticSearch、CaptionsProvider、AngleSync、Transcript、RevisionCompare、Render、CV-density、ProjectMgmt | **`prototype-list-family.html`（已出）· 实现已完成 10/10（2026-11-09）** |
 | D 三步确认 | 表单 → 确认外传 → 结果 | AI 粗剪、AI 修改 | 待出 |
 | E 双栏工作台 | 页签 + 左参数 + 右预览 | MediaGen、ShotWorkbench、ProviderImage、ExportBatch、三个 ShotRequirement | 复用剪辑手法稿 |
 
