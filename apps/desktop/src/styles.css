@@ -4237,3 +4237,80 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
   flex: none;
   accent-color: var(--dlg-primary);
 }
+
+
+/* ── A 族「纯表单」· Settings / Cover / Shortcuts（2026-11-09）──────
+   契约复用 Provider 稿的 fieldset 分组形态：发丝线分隔、不用描边卡片，
+   label 纵排 + 6px 间距（对齐 .modal label 基线）。
+
+   改造前实测：
+   · .settings-dialog 只有 1 条规则（仅宽度档位），.settings-radio 与
+     .settings-effective **零规则** —— 单选组与「当前生效」行用的是浏览器默认；
+   · .shortcuts-dialog 只有 3 条（2 条是按钮例外 + 1 条宽度），
+     快捷键行 .shortcut-row 住在旧的 .vc-* 令牌体系里（line 756 起），
+     与 Graphite 令牌不是一套。 */
+.modal .settings-radio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  color: var(--dlg-text-2);
+  font-size: var(--dlg-fs-body);
+  cursor: pointer;
+}
+.modal .settings-radio input[type="radio"] {
+  width: 16px; height: 16px; margin: 0; flex: none;
+  accent-color: var(--dlg-primary);
+}
+/* 「当前生效」是状态行而不是段落：给底色 + 圆角，与内容分层 */
+.modal .settings-effective {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--dlg-line);
+  border-radius: var(--r-box);
+  background: var(--dlg-raise);
+  color: var(--dlg-text-2);
+  font-size: var(--dlg-fs-label);
+  line-height: 1.7;
+}
+.modal .settings-effective strong { color: var(--dlg-text); font-weight: 600; }
+
+/* ── 快捷键列表：迁到 Graphite 令牌（原来用 .vc-* 体系） ────────────
+   行结构与 C 族一致：标签可伸缩 + 键位定宽 + 操作按钮靠右。 */
+.modal .shortcuts-list { display: grid; gap: 6px; }
+.modal .shortcut-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--r-ctl);
+  background: var(--dlg-raise);
+  transition: background .15s, border-color .15s;
+}
+.modal .shortcut-row:hover { background: var(--ctl-bg); border-color: var(--dlg-line); }
+.modal .shortcut-row .shortcut-label {
+  flex: 1; min-width: 0;
+  color: var(--dlg-text);
+  font-size: 12.5px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.modal .shortcut-row kbd {
+  flex: none; min-width: 72px;
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 24px; padding: 0 8px;
+  border: 1px solid var(--dlg-line);
+  border-radius: 5px;
+  background: var(--ctl-bg);
+  color: var(--dlg-text-2);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.modal .shortcut-row kbd.shortcut-recording {
+  border-color: var(--dlg-primary);
+  color: var(--dlg-primary);
+  background: var(--dlg-accent-dim);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+.modal .shortcut-row .compact-command { flex: none; }
