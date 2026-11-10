@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>对话框结构稿 · B 族「步骤流」</title>
+<style>
+:root{
+  --page:#0d1012;--page-text:#e7ecea;--page-muted:#7f8b88;--page-line:rgba(255,255,255,.075);
+  --d-surface:#171b1e;--d-raise:#1d2326;--d-input:#22292c;--d-input-hover:#293235;--d-footer:#15191c;
+  --d-text:#edf1ef;--d-text-2:#b5bfbc;--d-muted:#85918e;--d-faint:#64716e;
+  --d-line:rgba(255,255,255,.075);--d-edge:rgba(255,255,255,.12);
+  --accent:#35d6ae;--accent-hover:#59e1bf;--accent-ink:#07251e;--accent-dim:rgba(53,214,174,.11);
+  --danger:#e35d62;--danger-dim:rgba(227,93,98,.09);--warning:#d8b06a;--warn-dim:rgba(216,176,106,.1);
+  --radius:12px;--control-radius:7px;--shadow:0 26px 70px rgba(0,0,0,.52),0 5px 20px rgba(0,0,0,.3);
+  font-family:"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--page-text);padding:40px 32px 80px;font-size:13px;line-height:20px}
+.specnav{position:fixed;left:0;top:0;bottom:0;width:196px;padding:22px 14px;background:#111518;border-right:1px solid var(--page-line);overflow:auto}
+.specnav h1{margin:0 0 4px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+.specnav p{margin:0 0 18px;font-size:10.5px;line-height:1.6;color:var(--page-muted)}
+.specnav button{display:block;width:100%;text-align:left;margin-bottom:3px;padding:7px 9px;border:0;border-radius:6px;background:none;color:var(--page-muted);font:inherit;font-size:11.5px;cursor:pointer}
+.specnav button[aria-current="true"]{background:var(--accent-dim);color:var(--accent)}
+main{margin-left:236px}
+.case{margin-bottom:64px}
+.case>h2{margin:0 0 6px;font-size:14px;font-weight:600}
+.case>p.note{margin:0 0 16px;max-width:860px;font-size:11px;line-height:1.75;color:var(--page-muted)}
+.case>p.note b{color:var(--page-text)}
+.stage{display:flex;justify-content:center;padding:24px;border:1px solid var(--page-line);border-radius:12px;background:#0a0d0f}
+.measure{margin-top:10px;font:10.5px/1.7 ui-monospace,Consolas,monospace;color:var(--page-muted)}
+
+/* 骨架 */
+.dialog{width:min(var(--dialog-width,640px),100%);display:flex;flex-direction:column;overflow:hidden;
+  background:var(--d-surface);color:var(--d-text);border:1px solid var(--d-edge);border-radius:var(--radius);box-shadow:var(--shadow)}
+.dialog-header{flex:none;display:flex;align-items:flex-start;justify-content:space-between;gap:18px;padding:21px 24px 18px}
+.dialog-title{margin:0;font-size:18px;line-height:26px;font-weight:600;letter-spacing:-.2px}
+.dialog-subtitle{margin:4px 0 0;color:var(--d-muted);font-size:11.5px;line-height:17px;max-width:650px}
+.icon-button{width:28px;height:28px;display:grid;place-items:center;flex:none;border:0;border-radius:7px;background:transparent;color:var(--d-muted);cursor:pointer;font-size:15px}
+.dialog-body{min-height:0;overflow:auto;padding:0 24px 22px;display:grid;gap:14px}
+.dialog-footer{flex:none;min-height:65px;display:flex;align-items:center;justify-content:flex-end;gap:10px;padding:14px 24px;border-top:1px solid var(--d-line);background:var(--d-footer)}
+.footer-note{margin-right:auto;font-size:10.5px;color:var(--d-muted)}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:34px;min-height:34px;padding:0 16px;
+  border:1px solid transparent;border-radius:var(--control-radius);background:var(--d-raise);color:var(--d-text);font-size:12.5px;font-weight:500;white-space:nowrap;cursor:pointer}
+.btn:hover{background:var(--d-input-hover)}
+.btn.ghost{background:transparent;color:var(--d-text-2)}
+.btn.ghost:hover{background:var(--d-input);color:var(--d-text)}
+.btn.primary{background:var(--accent);color:var(--accent-ink);font-weight:650}
+.btn.primary:hover{background:var(--accent-hover)}
+.btn.small{height:28px;min-height:28px;padding:0 11px;font-size:11.5px}
+.btn:disabled{opacity:.42;cursor:not-allowed}
+.field{display:grid;gap:6px;min-width:0}
+.field>label{color:var(--d-text-2);font-size:12px;line-height:17px}
+input[type=text],select,textarea{height:34px;padding:0 11px;border:1px solid transparent;border-radius:var(--control-radius);background:var(--d-input);color:var(--d-text);font:inherit;font-size:12.5px}
+textarea{height:auto;padding:9px 11px;line-height:1.7}
+.helper{margin:0;color:var(--d-muted);font-size:10.5px;line-height:1.7}
+.badge{display:inline-flex;align-items:center;justify-content:center;height:18px;border-radius:999px;background:var(--accent-dim);color:var(--accent);font-size:9.5px;font-weight:600;white-space:nowrap}
+.status-line{display:flex;gap:10px;padding:11px 13px;border:1px solid var(--d-line);border-radius:8px;background:var(--d-raise);font-size:11.5px;line-height:1.7;color:var(--d-text-2)}
+.progress{height:4px;border-radius:2px;background:var(--d-input);overflow:hidden}
+.progress>i{display:block;height:100%;background:var(--accent);border-radius:2px;transition:width .3s}
+
+/* ── 本族的核心：步骤流 ────────────────────────────────── */
+/* 三种载体必须有明确分工，不能混用：
+   1. .step-progress —— 会话进行中：线性进度条 + 当前步摘要
+   2. .step-list     —— 会话结果：逐步骤记录（成功/失败/取消），可展开差异
+   3. .step-tabs     —— 与 .project-steps 同一契约（已在项目管理使用），
+                        表示「流程阶段」而非「执行历史」 */
+.step-progress{display:grid;gap:10px;padding:13px 14px;border:1px solid var(--d-line);border-radius:8px;background:var(--d-raise)}
+.step-progress-head{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--d-text-2)}
+.step-progress-head strong{color:var(--d-text);font-weight:600}
+.step-progress-head .badge{margin-left:auto}
+
+/* 步骤记录列表：定宽序号列 + 可伸缩内容 + 定宽操作列。
+   实测旧实现是浏览器默认 <ol>：padding-left 40px、list-style decimal（与
+   「第 N 步」文案重复编号）、li 无内边距、行高 17/28 不一致、无分隔线。 */
+.step-list{list-style:none;margin:0;padding:0;display:grid;gap:2px}
+.step-list li{display:grid;grid-template-columns:28px minmax(0,1fr) auto;align-items:start;gap:12px;
+  padding:11px 12px;border-radius:7px;background:transparent;transition:background .15s}
+.step-list li:hover{background:var(--d-raise)}
+.step-list li+li{border-top:1px solid var(--d-line)}
+.step-idx{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--d-input);color:var(--d-muted);font-size:10.5px;font-weight:600;font-variant-numeric:tabular-nums}
+.step-list li[data-state="ok"] .step-idx{background:var(--accent-dim);color:var(--accent)}
+.step-list li[data-state="bad"] .step-idx{background:var(--danger-dim);color:var(--danger)}
+.step-main{display:grid;gap:3px;min-width:0}
+.step-name{font-size:12.5px;color:var(--d-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.step-meta{font-size:10px;color:var(--d-muted)}
+.step-actions{display:flex;align-items:center;gap:8px;flex:none}
+.step-state{width:62px;flex:none}   /* 与 C 族徽章同一契约：固定列宽 */
+/* 状态徽章按行状态变色。实测缺陷：失败行的徽章也是绿色——因为 .badge 是固定色，
+   而 li[data-state] 只改了序号圆点。徽章是「状态」的主载体，必须跟着变。 */
+.step-list li[data-state="ok"] .step-state{background:var(--accent-dim);color:var(--accent)}
+.step-list li[data-state="bad"] .step-state{background:var(--danger-dim);color:var(--danger)}
+
+
+/* 步骤差异：与记录列表视觉分层（记录是行，差异是块） */
+.step-diff{border:1px solid var(--d-line);border-radius:8px;background:var(--d-raise);padding:12px 14px}
+.step-diff h4{margin:0 0 8px;font-size:11px;font-weight:600;color:var(--d-text-3)}
+.diff-row{display:grid;grid-template-columns:70px minmax(0,1fr);gap:10px;font-size:12px;padding:3px 0}
+.diff-row dt{color:var(--d-muted);font-size:10.5px}
+.diff-row dd{margin:0;color:var(--d-text-2);font-variant-numeric:tabular-nums}
+.diff-added{color:var(--accent)}
+.diff-removed{color:var(--danger)}
+
+.empty{padding:26px 16px;text-align:center;color:var(--d-muted);font-size:11.5px;line-height:1.8}
+</style>
+</head>
+<body>
+<nav class="specnav">
+  <h1>B 族 · 步骤流</h1>
+  <p>覆盖 AgentSession / EditingGrammar / Worklist。三个载体分工明确。</p>
+  <button aria-current="true" data-go="b1">载体 1 · 进行中进度</button>
+  <button data-go="b2">载体 2 · 步骤记录</button>
+  <button data-go="b3">载体 3 · 阶段页签</button>
+  <button data-go="b4">组合 · 完整会话结果</button>
+  <button data-go="b5">空态 / 失败 / 取消</button>
+</nav>
+
+<main>
+  <section class="case" id="b1">
+    <h2>载体 1 · 进行中进度</h2>
+    <p class="note">覆盖 <b>AgentSession 的 running 步骤</b>。规则：一条进度条 + 一行当前步摘要，
+      <b>不铺列表</b>——进行中用户只需要「到哪了、还要多久」，逐步骤历史属于结果态。
+      进度条高 <b>4px</b>、圆角 2px；头部与进度条间距 <b>10px</b>。</p>
+    <div class="stage">
+      <section class="dialog" data-case="progress">
+        <header class="dialog-header"><div><h2 class="dialog-title">AI 助手</h2>
+          <p class="dialog-subtitle">多步任务会话：每一步都会先校验再落为版本，失败步骤不产生任何修改。</p></div>
+          <button class="icon-button" aria-label="关闭">✕</button></header>
+        <div class="dialog-body">
+          <div class="step-progress">
+            <div class="step-progress-head"><strong>正在执行第 3 步</strong><span>共 5 步</span><span class="badge">运行中</span></div>
+            <div class="progress"><i style="width:60%"></i></div>
+            <p class="helper">校验时间码 · 已用 12s · 预计还需 8s</p>
+          </div>
+          <div class="status-line"><span>每一步成功后立即落为版本，可随时撤销回退到任意一步。</span></div>
+        </div>
+        <footer class="dialog-footer"><span class="footer-note">会话进行中 · 费用按实际调用结算</span>
+          <button class="btn ghost">取消会话</button></footer>
+      </section>
+    </div>
+    <p class="measure" data-m></p>
+  </section>
+
+  <section class="case" id="b2">
+    <h2>载体 2 · 步骤记录（本族核心）</h2>
+    <p class="note">覆盖 <b>AgentSession done / EditingGrammar 操作列表 / Worklist</b>。
+      这是当前<b>最严重的缺口</b>：<code>.agent-session-steps</code> 在样式表里<b>零规则</b>，
+      实测用的是浏览器默认 <code>&lt;ol&gt;</code>——<code>padding-left 40px</code>、
+      <code>list-style: decimal</code>（与「第 N 步」文案<b>重复编号</b>）、li 内边距 0、
+      行高 17/28 不一致、无分隔线。<br>
+      规则：三列固定（序号 28 / 内容 1fr / 操作 auto）；序号为圆形徽章，按状态变色；
+      行间分隔线但<b>首行不加</b>；状态徽章固定 62px（与 C 族同一契约）。</p>
+    <div class="stage">
+      <section class="dialog" data-case="list">
+        <header class="dialog-header"><div><h2 class="dialog-title">AI 助手</h2>
+          <p class="dialog-subtitle">多步任务会话：每一步都会先校验再落为版本。</p></div>
+          <button class="icon-button" aria-label="关闭">✕</button></header>
+        <div class="dialog-body">
+          <ol class="step-list">
+            <li data-state="ok"><span class="step-idx">1</span>
+              <div class="step-main"><span class="step-name">分析素材</span><span class="step-meta">识别 12 个镜头 · 3.2s</span></div>
+              <div class="step-actions"><button class="btn small">查看差异</button><span class="step-state badge">成功</span></div></li>
+            <li data-state="ok"><span class="step-idx">2</span>
+              <div class="step-main"><span class="step-name">生成剪辑点</span><span class="step-meta">8 处 · 5.1s</span></div>
+              <div class="step-actions"><button class="btn small">查看差异</button><span class="step-state badge">成功</span></div></li>
+            <li data-state="ok"><span class="step-idx">3</span>
+              <div class="step-main"><span class="step-name">校验时间码</span><span class="step-meta">全部通过 · 1.4s</span></div>
+              <div class="step-actions"><span class="step-state badge">成功</span></div></li>
+            <li data-state="bad"><span class="step-idx">4</span>
+              <div class="step-main"><span class="step-name">应用转场</span><span class="step-meta">转场类型不被当前 Provider 支持</span></div>
+              <div class="step-actions"><span class="step-state badge">失败</span></div></li>
+          </ol>
+          <p class="helper">第 4 步失败未产生任何修改；前 3 步已各自落为版本，可单独撤销。</p>
+        </div>
+        <footer class="dialog-footer"><span class="footer-note">3 / 4 步成功</span>
+          <button class="btn ghost">关闭</button><button class="btn primary">查看版本比较</button></footer>
+      </section>
+    </div>
+    <p class="measure" data-m></p>
+  </section>
+
+  <section class="case" id="b3">
+    <h2>载体 3 · 阶段页签</h2>
+    <p class="note">覆盖 <b>Worklist / EditingGrammar 的阶段指示</b>。与项目管理弹窗的
+      <code>.project-steps</code> <b>同一契约</b>（等宽四格、高 30、圆角 7、当前格 accent-dim），
+      不再新造一套。区别只在语义：这里是「流程阶段」而非「执行历史」。</p>
+    <div class="stage">
+      <section class="dialog" data-case="tabs">
+        <header class="dialog-header"><div><h2 class="dialog-title">AI 工作单</h2>
+          <p class="dialog-subtitle">当前切片只启用本地剪辑语法步骤；每一步需显式应用。</p></div>
+          <button class="icon-button" aria-label="关闭">✕</button></header>
+        <div class="dialog-body">
+          <div style="display:flex;gap:8px">
+            <span style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:30px;border-radius:7px;background:var(--accent-dim);color:var(--accent);font-size:12px;font-weight:600">① 剪辑语法</span>
+            <span style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:30px;border-radius:7px;background:var(--d-input);color:var(--d-muted);font-size:12px">② 字幕优化</span>
+            <span style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:30px;border-radius:7px;background:var(--d-input);color:var(--d-muted);font-size:12px">③ 导出</span>
+          </div>
+          <div class="status-line"><span>当前阶段只做本地确定性规划，零外传。</span></div>
+        </div>
+        <footer class="dialog-footer"><button class="btn ghost">关闭</button><button class="btn primary">应用当前阶段</button></footer>
+      </section>
+    </div>
+    <p class="measure" data-m></p>
+  </section>
+
+  <section class="case" id="b4">
+    <h2>组合 · 完整会话结果</h2>
+    <p class="note">真实场景是三者叠加：<b>结果摘要 + 步骤记录 + 展开的差异</b>。
+      顺序固定——先结论（成/败/取消），再逐步骤，最后差异详情。
+      差异块与记录列表<b>必须视觉分层</b>（记录是行、差异是块），否则用户分不清「哪层是哪层」。</p>
+    <div class="stage">
+      <section class="dialog" data-case="combo">
+        <header class="dialog-header"><div><h2 class="dialog-title">AI 助手</h2>
+          <p class="dialog-subtitle">多步任务会话。</p></div>
+          <button class="icon-button" aria-label="关闭">✕</button></header>
+        <div class="dialog-body">
+          <h3 style="margin:0;font-size:13px;font-weight:600">会话完成</h3>
+          <p class="helper">每个成功步骤都已落为版本；使用「版本比较」查看会话轨迹，或撤销回退到任意一步。</p>
+          <ol class="step-list">
+            <li data-state="ok"><span class="step-idx">1</span>
+              <div class="step-main"><span class="step-name">分析素材</span><span class="step-meta">12 个镜头</span></div>
+              <div class="step-actions"><button class="btn small">收起差异</button><span class="step-state badge">成功</span></div></li>
+            <li data-state="ok"><span class="step-idx">2</span>
+              <div class="step-main"><span class="step-name">生成剪辑点</span><span class="step-meta">8 处</span></div>
+              <div class="step-actions"><button class="btn small">查看差异</button><span class="step-state badge">成功</span></div></li>
+          </ol>
+          <div class="step-diff">
+            <h4>第 1 步差异</h4>
+            <dl style="margin:0">
+              <div class="diff-row"><dt>片段</dt><dd><span class="diff-added">+ clip_b01</span> · <span class="diff-removed">− clip_a03</span></dd></div>
+              <div class="diff-row"><dt>字幕</dt><dd>2 处文本更新</dd></div>
+              <div class="diff-row"><dt>锁定</dt><dd>0</dd></div>
+            </dl>
+          </div>
+        </div>
+        <footer class="dialog-footer"><span class="footer-note">2 / 2 步成功</span>
+          <button class="btn ghost">关闭</button><button class="btn primary">版本比较</button></footer>
+      </section>
+    </div>
+    <p class="measure" data-m></p>
+  </section>
+
+  <section class="case" id="b5">
+    <h2>空态 / 失败 / 取消</h2>
+    <p class="note">三态都必须给出<b>下一步动作</b>，不能只陈述事实。失败态要明示
+      <b>「失败步骤不产生修改」</b>——这是用户最关心的一点（会话是多步的，
+      中间失败时前面的步骤是否已生效必须说清）。</p>
+    <div class="stage" style="gap:20px;flex-wrap:wrap">
+      <section class="dialog" style="--dialog-width:440px">
+        <header class="dialog-header"><div><h2 class="dialog-title">空态</h2></div></header>
+        <div class="dialog-body"><div class="empty">还没有会话记录。<br>在下方选择素材与步骤后开始。</div></div>
+        <footer class="dialog-footer"><button class="btn ghost">关闭</button><button class="btn primary">开始会话</button></footer>
+      </section>
+      <section class="dialog" style="--dialog-width:440px">
+        <header class="dialog-header"><div><h2 class="dialog-title">失败态</h2></div></header>
+        <div class="dialog-body">
+          <div class="status-line" style="border-color:rgba(227,93,98,.32);background:var(--danger-dim)">
+            <span>第 4 步失败：转场类型不被当前 Provider 支持。<b>失败步骤未产生任何修改</b>，前 3 步已落为版本。</span>
+          </div>
+        </div>
+        <footer class="dialog-footer"><button class="btn ghost">关闭</button><button class="btn primary">查看版本比较</button></footer>
+      </section>
+    </div>
+  </section>
+</main>
+
+<script>
+function box(el){const b=el.getBoundingClientRect();return {w:Math.round(b.width),h:Math.round(b.height)}}
+document.querySelectorAll('section.case').forEach(c=>{
+  const dlg=c.querySelector('.dialog');
+  const out=c.querySelector('.measure');
+  if(!dlg||!out) return;
+  const parts=[];
+  const h=dlg.querySelector('.dialog-header'), b=dlg.querySelector('.dialog-body'), f=dlg.querySelector('.dialog-footer');
+  parts.push('弹窗 '+box(dlg).w+'×'+box(dlg).h, 'header '+box(h).h, 'body '+box(b).h, 'footer '+box(f).h);
+  const lis=[...dlg.querySelectorAll('.step-list li')];
+  if(lis.length) parts.push('步骤行 '+box(lis[0]).h+'（共 '+lis.length+'）');
+  const idx=[...dlg.querySelectorAll('.step-idx')];
+  if(idx.length) parts.push('序号列 '+box(idx[0]).w+'×'+box(idx[0]).h);
+  out.textContent=parts.join(' · ');
+});
+document.querySelectorAll('.specnav button').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    document.querySelectorAll('.specnav button').forEach(b=>b.setAttribute('aria-current','false'));
+    btn.setAttribute('aria-current','true');
+    document.getElementById(btn.dataset.go).scrollIntoView({behavior:'smooth',block:'start'});
+  });
+});
+</script>
+</body>
+</html>

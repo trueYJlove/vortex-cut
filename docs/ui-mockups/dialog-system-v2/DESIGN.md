@@ -156,7 +156,7 @@
 
 ## 9. 结构族稿（第 2 期，原型未覆盖的 23 个弹窗）
 
-> **进度（2026-11-09）**：C 族 10 个弹窗**已全部实现并逐元素实测对齐**，
+> **进度（2026-11-09）**：B / D / C 三族结构稿**均已出**（C 族已实现）。C 族 10 个弹窗**已全部实现并逐元素实测对齐**，
 > 证据见 `evidence/2026-11-09-dialog-family-c/`（8 对 before/after + 取值对照表）。
 > B / D 两族仍需出稿后才能实现。A / E 两族复用现有稿，可直接实现。
 >
@@ -178,9 +178,9 @@
 | 族 | 特征 | 成员 | 稿 |
 |---|---|---|---|
 | A 纯表单 | `fieldset` 分组、无分栏 | Settings、Cover、Shortcuts | 复用 Provider 稿 |
-| B 步骤流 | 步骤条 + 表单 | AgentSession、EditingGrammar、Worklist | 待出 |
+| **B 步骤流** | 步骤条 + 步骤记录 | AgentSession、EditingGrammar、Worklist | **`prototype-step-family.html`（已出 2026-11-09）** |
 | **C 列表型** | 行列表 / 表格 / 状态行 | KeyframeReview、SemanticSearch、CaptionsProvider、AngleSync、Transcript、RevisionCompare、Render、CV-density、ProjectMgmt | **`prototype-list-family.html`（已出）· 实现已完成 10/10（2026-11-09）** |
-| D 三步确认 | 表单 → 确认外传 → 结果 | AI 粗剪、AI 修改 | 待出 |
+| **D 三步确认** | 表单 → 确认外传 → 结果 | AI 粗剪、AI 修改 | **`prototype-egress-confirm-family.html`（已出 2026-11-09）** |
 | E 双栏工作台 | 页签 + 左参数 + 右预览 | MediaGen、ShotWorkbench、ProviderImage、ExportBatch、三个 ShotRequirement | 复用剪辑手法稿 |
 
 ### 9.1 C 族契约（`prototype-list-family.html`）
@@ -202,3 +202,44 @@
 - 空态 / 加载 / 错误三种状态必须占据与正常态相同的内容区高度区间，避免切换时
   弹窗高度跳变（Provider 开关那次「反复开关整窗上下跳」即同类问题）；
   空态文案必须给出下一步动作，不能只说「无数据」。
+
+
+### 9.2 B 族契约（`prototype-step-family.html`）
+
+**三个载体分工明确，不许混用**——这是本族的核心约束：
+
+| 载体 | 用于 | 关键取值（稿内实测） |
+|---|---|---|
+| `.step-progress` | 会话**进行中** | 进度条高 4px；头部与条间距 10px；不铺列表 |
+| `.step-list` | 会话**结果** / 操作记录 | 三列 `28px minmax(0,1fr) auto`；行高 65；序号 22×22 圆形；状态徽章固定 62px |
+| `.step-bar` | **流程阶段**指示 | 等宽格、高 30、圆角 7、当前格 accent-dim（与 `.project-steps` 同一契约） |
+
+**为什么必须分开**：进行中的用户只需要「到哪了、还要多久」；结果态才需要逐步骤历史。
+把两者混成同一个列表，会让进行中的弹窗塞满已完成的历史，而结果态的差异详情又无处安放。
+
+**已修复的实测缺陷**：`.agent-session-steps` 在样式表里**零规则**，实际用的是浏览器
+默认 `<ol>`——`padding-left:40px`、`list-style:decimal`（与「第 N 步」文案**重复编号**）、
+`li` 内边距 0、行高 17/28 不一致、无分隔线。
+
+**状态不只靠颜色**：序号圆点 + 徽章 + 文案三重表达；徽章必须随行状态变色
+（稿内第一版失败行徽章仍是绿色，已修正）。
+
+### 9.3 D 族契约（`prototype-egress-confirm-family.html`）
+
+**确认外发是隐私边界，信息层次固定为五段，不许按弹窗重排**：
+
+| 序 | 段 | 内容 |
+|---|---|---|
+| ① | 发什么 | 字段清单 + 内容预览（`.egress` 限高 180px） |
+| ② | 发给谁 | Provider / 模型 / 目标 |
+| ③ | 花多少 | Token 估算 + 费用口径（明示「以服务商账单为准」） |
+| ④ | 凭什么可信 | payload 哈希 / 确认有效期 |
+| ⑤ | 确认动作 | 勾选框 + 按钮 |
+
+两条关键取舍：
+
+1. **勾选框放在内容区、紧贴预览**，不与底栏按钮混排——混排时用户会跳过勾选直接点按钮。
+2. **底栏主按钮用 danger 色而非薄荷青**——它是不可逆外发，不是普通「下一步」。
+   全站唯一强调色留给常规主操作，这里刻意破例。
+
+另：缺前置条件时**不渲染不可用表单**，直接给拦截说明 + 出路（而非禁用按钮让用户猜原因）。

@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>对话框结构稿 · D 族「三步确认（外发）」</title>
+<style>
+:root{
+  --page:#0d1012;--page-text:#e7ecea;--page-muted:#7f8b88;--page-line:rgba(255,255,255,.075);
+  --d-surface:#171b1e;--d-raise:#1d2326;--d-input:#22292c;--d-input-hover:#293235;--d-footer:#15191c;
+  --d-text:#edf1ef;--d-text-2:#b5bfbc;--d-muted:#85918e;--d-faint:#64716e;
+  --d-line:rgba(255,255,255,.075);--d-edge:rgba(255,255,255,.12);
+  --accent:#35d6ae;--accent-hover:#59e1bf;--accent-ink:#07251e;--accent-dim:rgba(53,214,174,.11);
+  --danger:#e35d62;--danger-dim:rgba(227,93,98,.09);--warn:#d8b06a;--warn-dim:rgba(216,176,106,.1);
+  --radius:12px;--control-radius:7px;--shadow:0 26px 70px rgba(0,0,0,.52),0 5px 20px rgba(0,0,0,.3);
+  font-family:"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--page-text);padding:40px 32px 80px;font-size:13px;line-height:20px}
+.specnav{position:fixed;left:0;top:0;bottom:0;width:200px;padding:22px 14px;background:#111518;border-right:1px solid var(--page-line);overflow:auto}
+.specnav h1{margin:0 0 4px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+.specnav p{margin:0 0 18px;font-size:10.5px;line-height:1.6;color:var(--page-muted)}
+.specnav button{display:block;width:100%;text-align:left;margin-bottom:3px;padding:7px 9px;border:0;border-radius:6px;background:none;color:var(--page-muted);font:inherit;font-size:11.5px;cursor:pointer}
+.specnav button[aria-current="true"]{background:var(--accent-dim);color:var(--accent)}
+main{margin-left:240px}
+.case{margin-bottom:64px}
+.case>h2{margin:0 0 6px;font-size:14px;font-weight:600}
+.case>p.note{margin:0 0 16px;max-width:880px;font-size:11px;line-height:1.75;color:var(--page-muted)}
+.case>p.note b{color:var(--page-text)}
+.stage{display:flex;justify-content:center;padding:24px;border:1px solid var(--page-line);border-radius:12px;background:#0a0d0f}
+.measure{margin-top:10px;font:10.5px/1.7 ui-monospace,Consolas,monospace;color:var(--page-muted)}
+
+.dialog{width:min(var(--dialog-width,640px),100%);display:flex;flex-direction:column;overflow:hidden;
+  background:var(--d-surface);color:var(--d-text);border:1px solid var(--d-edge);border-radius:var(--radius);box-shadow:var(--shadow)}
+.dialog-header{flex:none;display:flex;align-items:flex-start;justify-content:space-between;gap:18px;padding:21px 24px 18px}
+.dialog-title{margin:0;font-size:18px;line-height:26px;font-weight:600;letter-spacing:-.2px}
+.dialog-subtitle{margin:4px 0 0;color:var(--d-muted);font-size:11.5px;line-height:17px;max-width:650px}
+.icon-button{width:28px;height:28px;display:grid;place-items:center;flex:none;border:0;border-radius:7px;background:transparent;color:var(--d-muted);cursor:pointer;font-size:15px}
+.dialog-body{min-height:0;overflow:auto;padding:0 24px 22px;display:grid;gap:14px}
+.dialog-footer{flex:none;min-height:65px;display:flex;align-items:center;justify-content:flex-end;gap:10px;padding:14px 24px;border-top:1px solid var(--d-line);background:var(--d-footer)}
+.footer-note{margin-right:auto;font-size:10.5px;color:var(--d-muted)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:34px;min-height:34px;padding:0 16px;
+  border:1px solid transparent;border-radius:var(--control-radius);background:var(--d-raise);color:var(--d-text);font-size:12.5px;font-weight:500;white-space:nowrap;cursor:pointer}
+.btn.ghost{background:transparent;color:var(--d-text-2)}
+.btn.primary{background:var(--accent);color:var(--accent-ink);font-weight:650}
+.btn.danger{background:var(--danger);color:#fff;font-weight:600}
+.btn[disabled]{opacity:.42;cursor:not-allowed}
+.field{display:grid;gap:6px;min-width:0}
+.field>label{color:var(--d-text-2);font-size:12px;line-height:17px}
+input[type=text],select,textarea{height:34px;padding:0 11px;border:1px solid transparent;border-radius:var(--control-radius);background:var(--d-input);color:var(--d-text);font:inherit;font-size:12.5px}
+textarea{height:auto;padding:9px 11px;line-height:1.7}
+.helper{margin:0;color:var(--d-muted);font-size:10.5px;line-height:1.7}
+.badge{display:inline-flex;align-items:center;justify-content:center;height:18px;padding:0 8px;border-radius:999px;background:var(--accent-dim);color:var(--accent);font-size:9.5px;font-weight:600;white-space:nowrap}
+.progress{height:4px;border-radius:2px;background:var(--d-input);overflow:hidden}
+.progress>i{display:block;height:100%;background:var(--accent);border-radius:2px}
+
+/* ── 本族核心：外发确认 ───────────────────────────────────
+   三步固定：form（填表）→ confirm（确认外发）→ result（结果）
+   confirm 是隐私边界，它的信息层次必须固定，不许按弹窗重排：
+   ① 发什么（字段清单 + 内容预览）
+   ② 发给谁（Provider / 模型 / 目标）
+   ③ 花多少（Token 估算 + 费用口径）
+   ④ 凭什么可信（哈希 / 有效期）
+   ⑤ 确认动作（勾选 + 按钮） */
+.step-bar{display:flex;align-items:center;gap:8px;margin:0 0 2px}
+.step-bar span{flex:1;display:flex;align-items:center;justify-content:center;height:30px;border-radius:7px;background:var(--d-input);color:var(--d-muted);font-size:12px}
+.step-bar span.on{background:var(--accent-dim);color:var(--accent);font-weight:600}
+.step-bar span.done{background:var(--d-raise);color:var(--d-text-2)}
+
+/* 元数据表：两列固定（92px + 1fr），与产品现有 .modal dl 同一契约 */
+.meta{display:grid;grid-template-columns:92px minmax(0,1fr);gap:7px 14px;padding:12px 14px;margin:0;
+  background:var(--d-raise);border:1px solid var(--d-line);border-radius:8px;font-size:12.5px}
+.meta dt{color:var(--d-muted);font-size:12px}
+.meta dd{margin:0;color:var(--d-text);overflow-wrap:anywhere}
+.meta dd.mono{font-family:ui-monospace,Consolas,monospace;font-size:11px;color:var(--d-text-2)}
+.meta dd.cost{color:var(--warn)}
+.meta dd.critical{color:var(--d-text);font-weight:600}
+
+/* 外发内容预览：可滚动、等宽、限高。高度上限比「全文铺开」重要——
+   确认页的价值是让用户看清"发的是什么"，不是让他读完全文。 */
+.egress{max-height:180px;overflow:auto;padding:12px 14px;margin:0;
+  background:var(--d-raise);border:1px solid var(--d-line);border-radius:8px;
+  font-size:12px;line-height:1.8;color:var(--d-text-2)}
+.egress p{margin:0 0 6px}
+.egress p:last-child{margin-bottom:0}
+.egress .ref{color:var(--d-muted);font-size:10px;margin-right:6px;font-family:ui-monospace,Consolas,monospace}
+
+/* 确认动作区：与底栏分开——勾选属于"确认语义"的一部分，必须紧贴内容，
+   不能和底栏按钮混在一起（混在一起用户会跳过勾选直接点按钮）。 */
+.confirm-box{display:grid;gap:10px;padding:13px 14px;border:1px solid rgba(227,93,98,.32);
+  border-radius:8px;background:var(--danger-dim)}
+.confirm-box .warn-text{margin:0;font-size:11.5px;line-height:1.75;color:#d9b4b4}
+.confirm-box label{display:flex;gap:9px;align-items:flex-start;font-size:12px;color:var(--d-text-2);cursor:pointer}
+.confirm-box input[type=checkbox]{width:16px;height:16px;margin:2px 0 0;accent-color:var(--accent);flex:none}
+
+.section-title{margin:0;font-size:11px;font-weight:600;color:var(--d-text-3);letter-spacing:.02em}
+.empty{padding:26px 16px;text-align:center;color:var(--d-muted);font-size:11.5px;line-height:1.8}
+</style>
+</head>
+<body>
+<nav class="specnav">
+  <h1>D 族 · 三步确认</h1>
+  <p>覆盖 AI 粗剪 / AI 修改。外发确认是隐私边界，信息层次固定。</p>
+  <button aria-current="true" data-go="d1">步骤 1 · 填写</button>
+  <button data-go="d2">步骤 2 · 确认外发（核心）</button>
+  <button data-go="d3">步骤 3 · 执行中</button>
+  <button data-go="d4">步骤 4 · 结果</button>
+  <button data-go="d5">拦截态 · 无可用 Provider</button>
+</nav>
+
+<main>
+  <section class="case" id="d1">
+    <h2>步骤 1 · 填写</h2>
+    <p class="note">规则：阶段条在顶部（与 <code>.project-steps</code> 同契约）；
+      表单字段 <b>6px</b> 间距（对齐基线）；底栏主操作是「准备外传确认」而不是「发送」——
+      <b>这一步不产生任何外发</b>，按钮文案必须让用户知道。</p>
+    <div class="stage">
+      <section class="dialog">
+        <header class="dialog-header"><div><h2 class="dialog-title">AI 粗剪</h2>
+          <p class="dialog-subtitle">仅在确认外传内容后调用 Provider。</p></div>
+          <button class="icon-button" aria-label="关闭">✕</button></header>
+        <div class="dialog-body">
+          <div class="step-bar"><span class="on">① 填写</span><span>② 确认外发</span><span>③ 结果</span></div>
+          <div class="field"><label>主题</label><input type="text" placeholder="例如：山野访谈剪辑思路"></div>
+          <div class="field"><label>Provider</label>
+            <select><option>xkiro · z-ai/glm-5.3-flash · AI 粗剪可用</option></select></div>
+          <div class="field"><label>制作配方</label>
+            <select><option>口播节奏 · 3 秒切点</option></select></div>
+          <p class="helper">这一步只在本机校验参数，不会发出任何请求。</p>
+        </div>
+        <footer class="dialog-footer"><span class="footer-note">尚未外传</span>
+          <button class="btn ghost">取消</button><button class="btn primary">准备外传确认</button></footer>
+      </section>
+    </div>
+    <p class="measure" data-m></p>
+  </section>
+
+  <section class="case" id="d2">
+    <h2>步骤 2 · 确认外发（本族核心）</h2>
+    <p class="note">这是<b>隐私边界</b>，信息层次固定为五段，不许按弹窗重排：<br>
+      ① <b>发什么</b>（字段清单 + 内容预览）② <b>发给谁</b>（Provider / 模型 / 目标）
+      ③ <b>花多少</b>（Token 估算 + 费用口径）④ <b>凭什么可信</b>（哈希 / 有效期）
+      ⑤ <b>确认动作</b>（勾选 + 按钮）。<br>
+      关键取舍：<b>勾选框放在内容区、紧贴预览</b>，不和底栏按钮混排——
+      混排时用户会跳过勾选直接点按钮。底栏主按钮用 <b>danger</b> 色而非薄荷青，
+      因为它是「不可逆外发」而不是普通前进。</p>
+    <div class="stage">
+      <section class="dialog">
+        <header class="dialog-header"><div><h2 class="dialog-title">AI 粗剪</h2>
+          <p class="dialog-subtitle">仅在确认外传内容后调用 Provider。</p></div>
+          <button class="icon-button" aria-label="关闭">✕</button></header>
+        <div class="dialog-body">
+          <div class="step-bar"><span class="done">① 填写</span><span class="on">② 确认外发</span><span>③ 结果</span></div>
+          <h3 class="section-title">① 将发送以下精确内容</h3>
+          <dl class="meta">
+            <dt>字段</dt><dd class="critical">主题、配方规则、段落文本（不含画面、不含时间码）</dd>
+            <dt>段落/字符</dt><dd>12 段 / 1,842 字</dd>
+            <dt>估算 Token</dt><dd>≈ 2,410</dd>
+          </dl>
+          <div class="egress">
+            <p><span class="ref">#seg_01</span>今天我们来聊一个关于剪辑工作流的话题……</p>
+            <p><span class="ref">#seg_02</span>先从素材的整理开始，我会把同一场景的镜头归到一起……</p>
+            <p><span class="ref">#seg_03</span>接下来是切点，口播类内容一般按语义断句，不按固定秒数……</p>
+          </div>
+          <h3 class="section-title">② 发送给谁</h3>
+          <dl class="meta">
+            <dt>Provider</dt><dd>xkiro · https://api.xkiro.com/v1</dd>
+            <dt>模型</dt><dd>z-ai/glm-5.3-flash</dd>
+            <dt>目标</dt><dd>候选剪辑方案（候选结果写回本机，不直接改 Timeline）</dd>
+          </dl>
+          <h3 class="section-title">③ 费用</h3>
+          <dl class="meta">
+            <dt>单价</dt><dd>配置单价 ¥0.5 / 百万输入 Token</dd>
+            <dt>估算</dt><dd class="cost">≈ ¥0.0012 · 最终以服务商账单为准</dd>
+          </dl>
+          <h3 class="section-title">④ 凭据</h3>
+          <dl class="meta">
+            <dt>哈希</dt><dd class="mono">sha256:9f2a…c71e</dd>
+            <dt>有效期</dt><dd>本次确认 10 分钟内有效</dd>
+          </dl>
+          <div class="confirm-box">
+            <p class="warn-text">这不是匿名化：Provider 会看到上述全部文本。画面与时间码不会离开本机。</p>
+            <label><input type="checkbox">我已核对以上内容，同意发送给该 Provider</label>
+          </div>
+        </div>
+        <footer class="dialog-footer"><span class="footer-note">尚未发出任何请求</span>
+          <button class="btn ghost">返回修改</button><button class="btn danger">我确认发送</button></footer>
+      </section>
+    </div>
+    <p class="measure" data-m></p>
+  </section>
+
+  <section class="case" id="d3">
+    <h2>步骤 3 · 执行中</h2>
+    <p class="note">规则：进度条 + 一行状态，<b>不铺历史列表</b>（与 B 族载体 1 同契约）。
+      提供<b>取消</b>，并明示「取消不保证已发生的计费被撤销」——这是诚实的边界。</p>
+    <div class="stage">
+      <section class="dialog">
+        <header class="dialog-header"><div><h2 class="dialog-title">AI 粗剪</h2>
+          <p class="dialog-subtitle">仅在确认外传内容后调用 Provider。</p></div>
+          <button class="icon-button" aria-label="关闭">✕</button></header>
+        <div class="dialog-body">
+          <div class="step-bar"><span class="done">① 填写</span><span class="done">② 确认外发</span><span class="on">③ 结果</span></div>
+          <div style="display:grid;gap:10px;padding:13px 14px;border:1px solid var(--d-line);border-radius:8px;background:var(--d-raise)">
+            <div style="display:flex;align-items:center;gap:10px;font-size:12px;color:var(--d-text-2)">
+              <strong style="color:var(--d-text)">正在生成候选方案</strong><span>阶段：调用 Provider</span><span class="badge">运行中</span>
+            </div>
+            <div class="progress"><i style="width:45%"></i></div>
+            <p class="helper">已用 6s · 取消不会撤销已产生的 Provider 计费</p>
+          </div>
+        </div>
+        <footer class="dialog-footer"><button class="btn ghost">取消生成</button></footer>
+      </section>
+    </div>
+    <p class="measure" data-m></p>
+  </section>
+
+  <section class="case" id="d4">
+    <h2>步骤 4 · 结果</h2>
+    <p class="note">规则：结果先给<b>结论与去向</b>（写回哪里），再给可执行动作。
+      「采纳」才是修改正式 Timeline 的动作，必须与「关闭」在视觉上分开权重。</p>
+    <div class="stage">
+      <section class="dialog">
+        <header class="dialog-header"><div><h2 class="dialog-title">AI 粗剪</h2>
+          <p class="dialog-subtitle">仅在确认外传内容后调用 Provider。</p></div>
+          <button class="icon-button" aria-label="关闭">✕</button></header>
+        <div class="dialog-body">
+          <div class="step-bar"><span class="done">① 填写</span><span class="done">② 确认外发</span><span class="on">③ 结果</span></div>
+          <h3 style="margin:0;font-size:13px;font-weight:600">已生成 3 个候选方案</h3>
+          <p class="helper">候选只读，采纳后才会写入正式 Timeline 并产生新 Revision。</p>
+          <dl class="meta">
+            <dt>实际费用</dt><dd>¥0.0011</dd>
+            <dt>耗时</dt><dd>8.4s</dd>
+            <dt>写入位置</dt><dd>本机候选区（尚未修改 Timeline）</dd>
+          </dl>
+        </div>
+        <footer class="dialog-footer"><span class="footer-note">候选未采纳</span>
+          <button class="btn ghost">关闭</button><button class="btn primary">采纳为正式 Timeline</button></footer>
+      </section>
+    </div>
+    <p class="measure" data-m></p>
+  </section>
+
+  <section class="case" id="d5">
+    <h2>拦截态 · 无可用 Provider</h2>
+    <p class="note">规则：缺前置条件时<b>不渲染不可用的表单</b>，直接给拦截说明与出路。
+      这与「禁用按钮」不同——禁用按钮让用户猜原因，拦截说明直接告诉他下一步做什么。</p>
+    <div class="stage">
+      <section class="dialog" style="--dialog-width:440px">
+        <header class="dialog-header"><div><h2 class="dialog-title">AI 粗剪</h2></div></header>
+        <div class="dialog-body">
+          <div class="confirm-box" style="border-color:var(--warn-dim);background:var(--warn-dim)">
+            <p class="warn-text" style="color:#d8b06a">尚无通过「AI 粗剪兼容性测试」的 Provider。
+              下一步：打开 Provider 设置 → 选择 Provider → 测试 AI 粗剪兼容性。</p>
+          </div>
+        </div>
+        <footer class="dialog-footer"><button class="btn ghost">关闭</button><button class="btn primary">打开 Provider 设置</button></footer>
+      </section>
+    </div>
+  </section>
+</main>
+
+<script>
+function box(el){const b=el.getBoundingClientRect();return {w:Math.round(b.width),h:Math.round(b.height)}}
+document.querySelectorAll('section.case').forEach(c=>{
+  const dlg=c.querySelector('.dialog'); const out=c.querySelector('.measure');
+  if(!dlg||!out) return;
+  const parts=[];
+  const h=dlg.querySelector('.dialog-header'), b=dlg.querySelector('.dialog-body'), f=dlg.querySelector('.dialog-footer');
+  parts.push('弹窗 '+box(dlg).w+'×'+box(dlg).h, 'header '+box(h).h, 'body '+box(b).h, 'footer '+box(f).h);
+  const meta=dlg.querySelector('.meta');
+  if(meta) parts.push('元数据表 '+box(meta).w+'×'+box(meta).h);
+  const eg=dlg.querySelector('.egress');
+  if(eg) parts.push('内容预览 '+box(eg).w+'×'+box(eg).h);
+  const bar=dlg.querySelector('.step-bar span');
+  if(bar) parts.push('阶段格 '+box(bar).w+'×'+box(bar).h);
+  out.textContent=parts.join(' · ');
+});
+document.querySelectorAll('.specnav button').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    document.querySelectorAll('.specnav button').forEach(b=>b.setAttribute('aria-current','false'));
+    btn.setAttribute('aria-current','true');
+    document.getElementById(btn.dataset.go).scrollIntoView({behavior:'smooth',block:'start'});
+  });
+});
+</script>
+</body>
+</html>
