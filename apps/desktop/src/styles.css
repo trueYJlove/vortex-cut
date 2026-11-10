@@ -1204,7 +1204,7 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 .modal .ai-status { padding: 9px 12px; border: 1px solid rgba(232, 180, 90, .3); background: var(--dlg-warn-dim); color: var(--dlg-text-2); font-size: var(--dlg-fs-body); line-height: 1.7; border-radius: var(--r-ctl); }
 .modal .generation-safe-error { padding: 9px 12px; border: 1px solid rgba(229, 72, 77, .35); background: var(--dlg-danger-dim); color: #f2b8b5; font-size: var(--dlg-fs-body); line-height: 1.7; border-radius: var(--r-ctl); }
 .modal .generation-success, .modal .generation-create-result { color: var(--vc-accent, #25d3ac); font-size: var(--dlg-fs-body); }
-.modal .stage5-assembly [role="alert"] { color: #f2797d; }
+.modal .stage5-assembly [role="alert"] { color: var(--dlg-danger); }
 .modal .stage5-assembly [role="status"] { color: var(--vc-accent, #25d3ac); }
 
 /* ── 页签（居中胶囊） ───────────────────────────────────────── */
@@ -3956,3 +3956,40 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 }
 .modal.captions-provider .captions-provider-status-row > span { min-width: 0; overflow-wrap: anywhere; }
 .modal.captions-provider .captions-provider-status-row button { flex: none; }
+
+
+/* ── 危险语义令牌（2026-11-09）─────────────────────────────────
+   背景：.modal 作用域内「危险/错误」语义用了 **9 种红色**，全部硬编码：
+     #f0a1a5 / #e88b8f / #f0b9b2 / #f2b8b5 / #edb9bb / #d9b4b4 /
+     #f2797d / #f05a5f / #ee7377
+   同一个语义九种红，改一处配色要翻九个地方，且改漏了也没人发现。
+
+   先试过用 color-mix() 从 --dlg-danger 推导，**失败**：反解配比时
+   #f2b8b5 需要 132%、#f0b9b2 需要 128%（超出 0–100%），说明这些色
+   与主色不是线性混合关系，是各自挑的。硬推导会改变视觉。
+
+   所以改为**语义令牌**：值保持原样（视觉零变化），但把来源收敛到
+   一处命名。以后调危险色只改这里。 */
+:root {
+  --dlg-danger-text: #f0a1a5;       /* 错误正文（最亮一档） */
+  --dlg-danger-text-soft: #edb9bb;  /* 错误说明文字，比正文淡 */
+  --dlg-danger-strong: #e88b8f;     /* 描边危险按钮的字色 */
+  --dlg-danger-muted: #f0b9b2;      /* 危险状态徽章/作业状态 */
+  --dlg-danger-warm: #f2b8b5;       /* 警示框正文（偏暖） */
+  --dlg-danger-calm: #d9b4b4;       /* 大段警示文字（低饱和，避免刺眼） */
+}
+
+/* 危险色统一从令牌取值。逐条按原值映射，视觉零变化。 */
+.modal .warning { color: var(--dlg-danger-calm); }
+.modal .alert-danger { color: var(--dlg-danger-text); }
+.modal .alert-danger span { color: var(--dlg-danger-text-soft); }
+.modal .delete-warning { color: var(--dlg-danger-warm); }
+.modal .generation-safe-error { color: var(--dlg-danger-warm); }
+.modal .render-job-state.bad { color: var(--dlg-danger-muted); }
+.modal .stage5-assembly [role="alert"] { color: var(--dlg-danger); }
+.modal .ps-secret-actions > button.danger { color: var(--dlg-danger-strong); }
+.modal .ps-secret-actions > button.danger:hover:not(:disabled) { color: var(--dlg-danger-text); }
+.modal .ps-secret-actions > .btn.danger-outline { color: var(--dlg-danger-strong); }
+.modal .ps-secret-actions > .btn.danger-outline:hover:not(:disabled) { color: var(--dlg-danger-text); }
+.modal .secret-actions > .btn.danger-quiet { color: var(--dlg-danger-strong); }
+.modal .secret-actions > .btn.danger-quiet:hover:not(:disabled) { color: var(--dlg-danger-text); }
