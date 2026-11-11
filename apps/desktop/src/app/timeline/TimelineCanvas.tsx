@@ -27,21 +27,19 @@ import {
   ChevronUp,
   Eye,
   EyeOff,
+  Film,
   Lock,
   LockOpen,
   Magnet,
   Minus,
   MoreHorizontal,
-  Music,
   ImagePlus,
   Plus,
   Redo2,
   ScanSearch,
   Scissors,
   Trash2,
-  Type as TypeIcon,
   Undo2,
-  Video,
   Volume2,
   VolumeX,
   X,
@@ -75,6 +73,8 @@ import {
   type TrimEdge,
 } from "./types.js";
 import { TimelinePlayheadLayer } from "./TimelinePlayheadLayer.js";
+import { MarkerLane } from "./MarkerLane.js";
+import { formatRange, normalizeRange, rangeDuration, MIN_RANGE_US, type TimeRange } from "./time-range.js";
 import { createPlayheadStore, type PlayheadStore } from "./playhead-store.js";
 import { ThumbnailLoader, defaultFilmstripSourceFactory } from "./thumbnail-loader.js";
 import { OVERSCAN_ROWS, filterVisibleRects } from "./viewport-index.js";
@@ -98,6 +98,7 @@ import {
   computeClipRects,
   computeTrackRows,
   computeTransitionRects,
+  TRACK_VIEW_PAD,
   dragEdgeAutoScrollStep,
   fitZoomPps,
   ghostPosition,
@@ -449,16 +450,33 @@ function drawDragTooltip(
 
 // ── 标尺外观常量（drawTimeline 与固定标尺覆盖层 drawRulerStrip 共享，
 //    保证两条绘制路径像素级一致）──────────────────────────────────────────
-const RULER_DEAD_BG = "#181c1f"; // 素材终点外的死区底色（= 没有轨道的地方）
-const RULER_BG_TOP = "#222629"; // 标尺带渐变顶（中性灰，衔接工具栏 #181c1f 与轨道 #202427）
-const RULER_BG_BOTTOM = "#1a1e21"; // 标尺带渐变底
+/* 画布颜色改为从 CSS 变量读取（2026-11-10）：主题切换时画布也要跟随，
+   否则浅色主题下时间线仍是一整块深色（实测截图确认）。
+   取不到变量时回退到原深色常量，保证独立渲染（测试/离屏）不依赖样式表。 */
+const cssColor = (name: string, fallback: string): string => {
+  if (typeof window === "undefined" || typeof document === "undefined") return fallback;
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value || fallback;
+};
+const RULER_DEAD_BG = () => cssColor("--tl-dead-bg", "#181c1f"); // 素材终点外的死区底色
+const RULER_BG_TOP = () => cssColor("--tl-ruler-top", "#222629"); // 标尺带渐变顶
+const RULER_BG_BOTTOM = () => cssColor("--tl-ruler-bottom", "#1a1e21"); // 标尺带渐变底
 const RULER_END_EDGE = "#3d4a5c"; // 素材终点竖标线
-const RULER_TICK_MAJOR = "#8a95a5";
-const RULER_TICK_MINOR = "#596372";
-const RULER_LABEL_COLOR = "#b9c4d1";
+const RULER_TICK_MAJOR = () => cssColor("--tl-tick-major", "#8a95a5");
+const RULER_TICK_MINOR = () => cssColor("--tl-tick-minor", "#596372");
+const RULER_LABEL_COLOR = () => cssColor("--tl-label", "#b9c4d1");
 const RULER_LABEL_FONT = "10px sans-serif";
-const RANGE_BAR_TOP = "#14b58f"; // 素材范围条渐变
-const RANGE_BAR_BOTTOM = "#3fe0bd";
+// 标尺刻度几何（2026-11-11，对齐 OpenFilm Timeline.tsx 的 tickMarks）：
+//   小刻度自标尺上沿 9px 处往下垂到标尺底（OpenFilm top-[9px]）；
+//   主刻度文字顶部对齐、距刻度线 4px（OpenFilm top-0 pl-1、leading-[14px]）。
+const RULER_MINOR_TICK_TOP = 9;
+const RULER_LABEL_PAD_X = 4;
+const RULER_LABEL_TOP = 1;
+// 素材范围条：标尺顶那条 3px 条。它标的是「内容从哪到哪」，属背景性刻度信息，
+// 不是可操作对象——用青色会让它成为整个时间线最亮的元素，抢走播放头与选中片的注意。
+// 改为中性灰：存在感足够，不与任何状态色竞争。
+const RANGE_BAR_TOP = "#3a4147";
+const RANGE_BAR_BOTTOM = "#4b545b";
 const HOVER_CHIP_BG = "rgba(9, 12, 24, 0.88)";
 const HOVER_CHIP_EDGE = "rgba(37, 211, 172, 0.45)";
 const HOVER_CHIP_TEXT = "#d6e1ff";
@@ -482,19 +500,23 @@ function drawRulerFace(
     hoverText: string;
     contentRange: { fromUs: number; toUs: number } | null;
     xAt: (us: number) => number;
+    /** 当前选中：用于在标尺上高亮所选片段对应区段。 */
+    selection?: TimelineSelection;
+    /** 片段像素矩形：取选中片段的时间范围铺在标尺带上。 */
+    clipRects?: ClipRenderRect[];
   },
 ) {
-  const { bandX, width, height, xOffset, ticks, hoverUs, hoverText, contentRange, xAt } = opts;
+  const { bandX, width, height, xOffset, ticks, hoverUs, hoverText, contentRange, xAt, selection, clipRects: faceClipRects } = opts;
   const endX = Math.max(bandX, Math.min(width, opts.endX));
 
   // 带底：纵向微渐变；素材终点外压平为死区，并以竖标线收尾。
   const grad = ctx.createLinearGradient(0, 0, 0, height);
-  grad.addColorStop(0, RULER_BG_TOP);
-  grad.addColorStop(1, RULER_BG_BOTTOM);
+  grad.addColorStop(0, RULER_BG_TOP());
+  grad.addColorStop(1, RULER_BG_BOTTOM());
   ctx.fillStyle = grad;
   ctx.fillRect(bandX, 0, Math.max(0, endX - bandX), height);
   if (endX < width) {
-    ctx.fillStyle = RULER_DEAD_BG;
+    ctx.fillStyle = RULER_DEAD_BG();
     ctx.fillRect(endX, 0, width - endX, height);
     ctx.strokeStyle = RULER_END_EDGE;
     ctx.lineWidth = 1;
@@ -517,26 +539,54 @@ function drawRulerFace(
     }
   }
 
-  // 刻度：主刻度贯通、小刻度下半段短线；一律不越过素材终点。
-  ctx.textBaseline = "bottom";
+  // 刻度：主刻度贯通、小刻度自上沿下垂短线；一律不越过素材终点。
+  // 2026-11-11 对齐 OpenFilm 的刻度画法（Timeline.tsx tickMarks）：
+  //   主刻度 span 用 border-l 贯通整条标尺，标签顶部对齐（top-0 pl-1）；
+  //   小刻度 span 从 top-[9px] 起，即从标尺上沿往下挂一小段。
+  // 我们原来是「小刻度从中段起」+「标签贴底基线」，两处都与参照相反：
+  // 贴底的文字被顶部内容条、贯通主刻度、标尺下边框围成一个方框，
+  // 看起来像输入框而不是刻度文字——这是录屏对比里最直观的一处差异。
+  ctx.textBaseline = "top";
   ctx.font = RULER_LABEL_FONT;
   for (const tick of ticks) {
     const tickX = Math.round(tick.x + xOffset) + 0.5;
     if (tickX < bandX - 1 || tickX > endX + 1) continue;
-    ctx.strokeStyle = tick.major ? RULER_TICK_MAJOR : RULER_TICK_MINOR;
+    ctx.strokeStyle = tick.major ? RULER_TICK_MAJOR() : RULER_TICK_MINOR();
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(tickX, tick.major ? 0 : Math.round(height * 0.45) + 0.5);
+    // 小刻度自上沿下垂；主刻度贯通。
+    ctx.moveTo(tickX, tick.major ? 0 : RULER_MINOR_TICK_TOP);
     ctx.lineTo(tickX, height);
     ctx.stroke();
   }
-  // 主刻度时间标签（紧贴刻度右侧，后画避免被刻度线压住）。
-  ctx.fillStyle = RULER_LABEL_COLOR;
+  // 主刻度时间标签：顶部对齐、刻度右侧留 4px（OpenFilm pl-1）。
+  ctx.fillStyle = RULER_LABEL_COLOR();
   for (const tick of ticks) {
     if (!tick.major) continue;
     const tickX = Math.round(tick.x + xOffset) + 0.5;
     if (tickX < bandX - 1 || tickX > endX + 1) continue;
-    ctx.fillText(tick.label, tickX + 5, height - 2);
+    ctx.fillText(tick.label, tickX + RULER_LABEL_PAD_X, RULER_LABEL_TOP);
+  }
+
+  // 选中片段在标尺上的对应区段：实心强调色块（2026-11-10，对齐 OpenFilm）。
+  // 原来标尺只传达"素材有多长"（下方内容范围条），不表达"我选中了哪段"——
+  // 拖片段时视线要来回于画布与标尺之间。这里把选中片段的时间范围直接铺在
+  // 标尺带上，让"选中 → 它占标尺上哪一段"一眼可读。
+  // 画在内容范围条之前：内容条是全局基准，选中块是叠加信息。
+  if (faceClipRects && faceClipRects.length > 0) {
+    const selected = faceClipRects.filter((rect: ClipRenderRect) => selection?.kind === "clip" && selection.id === rect.clip.clip_id);
+    for (const rect of selected) {
+      const selLeft = Math.max(bandX, rect.x + xOffset);
+      const selRight = Math.min(endX, rect.x + xOffset + rect.width);
+      if (selRight - selLeft > 1) {
+        ctx.fillStyle = "rgba(53, 214, 174, 0.28)";
+        ctx.fillRect(selLeft, 0, selRight - selLeft, height);
+        // 上下两条描边把区段与刻度线区分开
+        ctx.fillStyle = "rgba(53, 214, 174, 0.75)";
+        ctx.fillRect(selLeft, 0, selRight - selLeft, 1.5);
+        ctx.fillRect(selLeft, height - 1.5, selRight - selLeft, 1.5);
+      }
+    }
   }
 
   // 内容范围条：标尺顶 3px 圆角渐变条（素材最左/最右为界，剪映式）。
@@ -595,9 +645,9 @@ function drawScrollbar(
   const thumbX =
     view.headerWidth + (view.scrollX / maxScrollX) * (trackWidth - thumbWidth);
   const trackY = height - SCROLLBAR_HEIGHT_PX;
-  ctx.fillStyle = "rgba(255, 255, 255, 0.05)";
+  ctx.fillStyle = cssColor("--tl-grid-line", "rgba(255, 255, 255, 0.05)");
   ctx.fillRect(view.headerWidth, trackY, trackWidth, SCROLLBAR_HEIGHT_PX - 1);
-  ctx.fillStyle = "rgba(255, 255, 255, 0.22)";
+  ctx.fillStyle = cssColor("--tl-grid-line-strong", "rgba(255, 255, 255, 0.22)");
   ctx.beginPath();
   ctx.roundRect(thumbX, trackY, thumbWidth, SCROLLBAR_HEIGHT_PX - 1, 3);
   ctx.fill();
@@ -648,7 +698,8 @@ function drawTimeline(
   ctx.clearRect(0, topY, width, height);
 
   // Background（没有轨道的地方；内容空间全画布）
-  ctx.fillStyle = "#181c1f";
+  // 2026-11-10：改读主题变量，否则浅色主题下空白区仍是一整块深色。
+  ctx.fillStyle = cssColor("--tl-canvas-bg", "#181c1f");
   ctx.fillRect(0, topY, width, height);
 
   // 素材终点（多条片段取最靠后的结束点）：标尺/行背景/网格一律到此为止，
@@ -673,14 +724,16 @@ function drawTimeline(
           }
         : null,
     xAt: (us) => timeToX(us, view),
+    selection,
+    clipRects,
   });
 
   // Track backgrounds（素材未覆盖部分：视频/文本轨 #202427、音频轨 #24272b）。
   for (const row of trackRows) {
     const fill =
       row.track.kind === "audio"
-        ? "#24272b"
-        : "#202427";
+        ? cssColor("--tl-row-audio", "#24272b")
+        : cssColor("--tl-row", "#202427");
     ctx.fillStyle = fill;
     ctx.fillRect(view.headerWidth, row.y, Math.max(0, contentEndX - view.headerWidth), row.height);
   }
@@ -1515,6 +1568,7 @@ function drawRulerStrip(
   ticks: TickMark[],
   rulerHoverUs: number | null | undefined,
   clipRects: ClipRenderRect[],
+  selection: TimelineSelection | undefined,
 ) {
   const dpr = window.devicePixelRatio || 1;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -1561,6 +1615,8 @@ function drawRulerStrip(
           }
         : null,
     xAt: (us) => timeToX(us, view) + headW,
+    selection,
+    clipRects,
   });
 
   // 播放头（含手柄）由独立 DOM 覆盖层 TimelinePlayheadLayer 绘制（A06）。
@@ -1582,6 +1638,7 @@ export function TimelinePanel({
   waveformCache,
   playheadStore,
   onSeek,
+  onSeekCommit,
   onCommand,
   coverUrl,
   onCaptureCover,
@@ -1605,6 +1662,8 @@ export function TimelinePanel({
   playheadStore?: PlayheadStore;
   /** Optional seek callback invoked when the playhead is dragged or a caption is clicked. */
   onSeek?: (timeUs: number) => void;
+  /** 擦洗结束的精确落点（拖动中 onSeek 走节流，松手用这个收尾）。 */
+  onSeekCommit?: (timeUs: number) => void;
   /** Optional editor command runner (copy/paste context-menu actions). */
   onCommand?: (id: EditorCommand["id"]) => void;
   /** 项目封面（本地截帧持久化），有值时封面入口显示缩略图。 */
@@ -1621,6 +1680,18 @@ export function TimelinePanel({
   }
   const activePlayheadStore = playheadStore ?? localPlayheadStoreRef.current!;
   const [view, setView] = useState<TimelineViewState>(DEFAULT_VIEW_STATE);
+  /** 主题版本号：切换主题时自增，强制画布重绘。
+   *  画布用 ctx.fillStyle 绘制，不吃 CSS 选择器——颜色虽已改为从 CSS 变量读取，
+   *  但不重绘就仍是旧填充色（实测：浅色主题下时间线仍是一整块深色）。
+   *  用 window.document 避开模块内 TimelineDocument 类型参数对本文件 document 的遮蔽。 */
+  const [themeEpoch, setThemeEpoch] = useState(0);
+  useEffect(() => {
+    const doc = window.document;
+    const observer = new MutationObserver(() => setThemeEpoch(value => value + 1));
+    observer.observe(doc.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => observer.disconnect();
+  }, []);
+
   // Synchronous view mirror so the auto-scroll rAF loop reads fresh values.
   const viewRef = useRef<TimelineViewState>(view);
   viewRef.current = view;  const [dropIndex, setDropIndex] = useState<number | null>(null);
@@ -1705,12 +1776,24 @@ export function TimelinePanel({
 
   // Compute geometry：轨道行自上而下排列，行高固定（不随窗口大小压缩）；
   // 轨道过多时时间线区域纵向滚动。
+  // 行数少、面板有余量时，行组在轨道区内垂直居中（2026-11-11，对齐 OpenFilm
+  // 的 padTop：面板拉高后行组跟着居中，而不是贴着标尺、底下空一大片）。
+  // 传入的高度是轨道区自身高度（扣掉工具栏与标尺）。
   const trackRows = useMemo(
-    () => computeTrackRows(tracks, view.rulerHeight, view.trackHeight),
-    [tracks, view.rulerHeight, view.trackHeight],
+    () => computeTrackRows(tracks, view.rulerHeight, view.trackHeight, Math.max(0, canvasSize.height - view.rulerHeight)),
+    [tracks, view.rulerHeight, view.trackHeight, canvasSize.height],
   );
-  // 内容总高（标尺 + 全部固定行 + 横向滚动条条带）；画布与左栏同步按此伸展。
-  const contentHeight = view.rulerHeight + trackRowsTotalHeight(trackRows) + SCROLLBAR_HEIGHT_PX;
+  // 内容总高（标尺 + 行组 + 行间隙 + 横向滚动条条带）；画布与左栏同步按此伸展。
+  // 行组居中后首行起点会下移（padTop），所以按「末行底边」算而不是把行高相加——
+  // 否则居中的行会掉到内容区之外，canvas 不绘制它。
+  // 下限取可视高度：行数少时内容仍铺满面板，底下那片空白才是可点击的轨道区。
+  const rowsBottom = trackRows.reduce((max, row) => Math.max(max, row.y + row.height), view.rulerHeight);
+  // 末行之下同样留 TRACK_VIEW_PAD（OpenFilm 的 paddingBottom: TL_VPAD）：
+  // 下边距不是装饰——最后一轨贴住滚动条或被面板底边切掉都读不出来。
+  const contentHeight = Math.max(
+    rowsBottom + TRACK_VIEW_PAD + SCROLLBAR_HEIGHT_PX,
+    canvasSize.height,
+  );
   // 几何输出改为 useMemo 稳定引用（A06）：hover/播放头等无关状态更新不再
   // 重算 clipRects/captionRects/ticks，绘制 effect 依赖也随之稳定。
   const clipRects = useMemo(
@@ -2004,11 +2087,22 @@ export function TimelinePanel({
     // playheadUs 刻意不在依赖里：播放头绘制已拆到独立覆盖层，caption
     // 高亮按交互语义改由 selection/hover 驱动；播放期间主画布零重绘。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canvasSize, view, trackRows, contentHeight, clipRects, captionRects, captions, ticks, selection, interaction, hover, totalUs, thumbnailVersion, waveformVersion, rulerHoverUs, clipNames, frameRate, pendingKeep, scrollTop, canvasTopY, canvasViewportHeight]);
+    // themeEpoch：主题切换迫使画布重绘（颜色来自 CSS 变量，不重绘不会变）
+  }, [canvasSize, view, trackRows, contentHeight, clipRects, captionRects, captions, ticks, selection, interaction, hover, totalUs, thumbnailVersion, waveformVersion, rulerHoverUs, clipNames, frameRate, pendingKeep, scrollTop, canvasTopY, canvasViewportHeight, themeEpoch]);
 
   // 固定标尺条带：绘制到覆盖层 Canvas（随纵向滚动钉在可视区顶部）。
   const rulerCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const rulerScrubbingRef = useRef(false);
+  /** 擦洗态（镜像 rulerScrubbingRef，供旋钮实心/空心渲染）。
+   *  ref 用于事件路径同步判断，state 只用于把"按住"这件事画出来。 */
+  const [scrubbing, setScrubbing] = useState(false);
+  /** 标记悬停/拖动时的贯穿引导线（null = 无）。 */
+  const [markerGuide, setMarkerGuide] = useState<{ timeUs: number; color: string; held: boolean } | null>(null);
+  /** 时间区间选取（Shift + 在标尺上拖动）：只做视觉，不接任何操作。
+   *  与播放头擦洗共用同一标尺，用 Shift 区分意图——标尺拖动本身是擦洗，
+   *  加 Shift 才是框选，两者不抢同一个手势。 */
+  const [timeRange, setTimeRange] = useState<TimeRange | null>(null);
+  const rangeDragRef = useRef<{ anchorUs: number } | null>(null);
   useEffect(() => {
     const canvas = rulerCanvasRef.current;
     if (!canvas) return;
@@ -2022,8 +2116,8 @@ export function TimelinePanel({
     if (canvas.style.height !== `${view.rulerHeight}px`) canvas.style.height = `${view.rulerHeight}px`;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    drawRulerStrip(ctx, width, view.rulerHeight, view, ticks, rulerHoverUs, clipRects);
-  }, [view, canvasSize, ticks, rulerHoverUs, clipRects]);
+    drawRulerStrip(ctx, width, view.rulerHeight, view, ticks, rulerHoverUs, clipRects, selection);
+  }, [view, canvasSize, ticks, rulerHoverUs, clipRects, selection, themeEpoch]);
 
   // 纵向滚动时把覆盖层钉在滚动容器可视区顶部（直接写样式，避免重渲染）。
   const rulerPinTimeAt = (event: React.MouseEvent<HTMLCanvasElement>) => {
@@ -2035,16 +2129,40 @@ export function TimelinePanel({
   const handleRulerPinMove = (event: React.MouseEvent<HTMLCanvasElement>) => {
     const timeUs = clampRulerTime(rulerPinTimeAt(event));
     setRulerHoverUs(timeUs);
+    const rangeDrag = rangeDragRef.current;
+    if (rangeDrag) {
+      setTimeRange(normalizeRange({ startUs: rangeDrag.anchorUs, endUs: timeUs }, totalUs));
+      return;
+    }
     if (rulerScrubbingRef.current) onSeek?.(timeUs);
   };
   const handleRulerPinDown = (event: React.MouseEvent<HTMLCanvasElement>) => {
     if (event.button !== 0) return;
+    // Shift + 拖动 = 框选时间区间（不擦洗、不动播放头）。
+    // 与普通拖动的区别只在 Shift，因此不会误触。
+    if (event.shiftKey) {
+      const anchorUs = clampRulerTime(rulerPinTimeAt(event));
+      rangeDragRef.current = { anchorUs };
+      setTimeRange({ startUs: anchorUs, endUs: anchorUs });
+      return;
+    }
     rulerScrubbingRef.current = true;
+    setScrubbing(true);
     event.currentTarget.style.cursor = "col-resize";
     onSeek?.(clampRulerTime(rulerPinTimeAt(event)));
   };
   const handleRulerPinUp = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    if (rangeDragRef.current) {
+      rangeDragRef.current = null;
+      // 拖得太短视为误触：清掉，不留一个看不清的细条
+      setTimeRange(current => (current && rangeDuration(current) >= MIN_RANGE_US ? current : null));
+      return;
+    }
+    // 松手提交精确值：拖动过程走节流（画面跟手但不逐事件提交），
+    // 最终位置必须落在指针实际所指处，否则会停在一个节流近似值上。
+    if (rulerScrubbingRef.current) onSeekCommit?.(clampRulerTime(rulerPinTimeAt(event)));
     rulerScrubbingRef.current = false;
+    setScrubbing(false);
     event.currentTarget.style.cursor = "default";
   };
   const handleRulerPinLeave = (event: React.MouseEvent<HTMLCanvasElement>) => {
@@ -3325,6 +3443,9 @@ export function TimelinePanel({
           >
             <Minus />
           </button>
+          {/* 已走过部分点亮的轨道（对齐 OpenFilm 的 .tl-zoom）：把当前百分比
+              经 --pos 传给 CSS，轨道用 accent 渐变到 --pos 处切换成灰。
+              原来轨道是纯灰，看不出"当前处于整条缩放区间的哪一段"。 */}
           <input
             className="timeline-zoom-slider"
             type="range"
@@ -3333,6 +3454,7 @@ export function TimelinePanel({
             max={100}
             step={1}
             value={Math.round(ppsToZoomPct(view.pixelsPerSecond))}
+            style={{ "--pos": Math.round(ppsToZoomPct(view.pixelsPerSecond)) / 100 } as React.CSSProperties}
             onChange={(event) =>
               setPpsAnchored(zoomPctToPps(Number(event.target.value)))
             }
@@ -3432,8 +3554,12 @@ export function TimelinePanel({
                 data-track-id={row.track.id}
                 style={{ top: row.y, height: row.height }}
               >
+                {/* 2026-11-11 对齐 OpenFilm 的 LaneMark（Timeline.tsx:295）：
+                   轨道头左侧是**纯文字轨号**，没有图标、没有色块底、没有方块边框。
+                   原来是「图标 + 轨号」的小徽章，在 119px 的头列里占了 30px，
+                   且带一层与图标同色的小方框；参照软件里这一格只是个 10.5px
+                   的灰字，左侧留白、右侧才是开关图标列。 */}
                 <span className="timeline-track-badge" title={`${row.track.id} ${kind === "video" ? "视频" : kind === "text" ? "文本" : "音频"}轨道`}>
-                  {kind === "video" ? <Video size={11} /> : kind === "text" ? <TypeIcon size={11} /> : <Music size={11} />}
                   <small>{row.track.id}</small>
                 </span>
                 {hasClips && (
@@ -3717,6 +3843,10 @@ export function TimelinePanel({
             </div>
           )}
           {clips.length === 0 && (
+            // 空态提示（2026-11-11 对齐 OpenFilm 的 data-timeline-empty）：
+            // 虚线框铺满整个轨道区，而不是只占首行一条带。参照软件里这块虚线
+            // 就是「整片区域都能接住拖放」的视觉承诺；只框住一行时，用户会以为
+            // 只有那一行能放。内缩 10px 上下留白，与行组的 TL_VPAD 一致。
             <div
               className="timeline-empty-drop"
               style={{
@@ -3724,13 +3854,15 @@ export function TimelinePanel({
                 left: view.headerWidth,
                 top: view.rulerHeight,
                 right: 0,
-                height: view.trackHeight,
+                bottom: SCROLLBAR_HEIGHT_PX,
+                margin: TRACK_VIEW_PAD,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 pointerEvents: "none",
               }}
             >
+              <Film size={15} aria-hidden="true" style={{ marginRight: 8, flex: "0 0 auto", color: "var(--tl-label)" }} />
               将视频或图片拖到这里开始剪辑
             </div>
           )}
@@ -3931,12 +4063,62 @@ export function TimelinePanel({
         />
         {/* 播放头覆盖层（A06）：与固定标尺同坐标系（timeline-body 原点 +
             2*headerWidth 偏移），预览每帧直写 store——播放期间零主画布重绘。 */}
+        {/* 标记行：浮在轨道区顶部，不占布局高度（OpenFilm 同款做法），
+            因此增删标记不会让轨道跳动。只在有标记时渲染。 */}
+        <MarkerLane
+          projectId={document?.project_id ?? ""}
+          view={{ ...view, headerWidth: view.headerWidth * 2 }}
+          totalUs={totalUs}
+          playheadUs={activePlayheadStore.get()}
+          snapUs={valueUs => (prefs.snappingEnabled ? snapValue(valueUs, [...snapCandidates(clipRects, activePlayheadStore.get(), new Set()), ...gridSnapCandidates(view, totalUs, frameRate)], (SNAP_PX / view.pixelsPerSecond) * 1_000_000) : valueUs)}
+          onGuide={guide => setMarkerGuide(guide)}
+        />
+        {/* 时间区间选取（Shift + 标尺拖动）：只做视觉，不接操作。
+            标尺段实心 + 贯穿全线的淡填充 + 两端把手，Shift 已由标尺拖动处理。 */}
+        {timeRange && (() => {
+          const rangeView = { ...view, headerWidth: view.headerWidth * 2 };
+          const x1 = timeToX(timeRange.startUs, rangeView);
+          const x2 = timeToX(timeRange.endUs, rangeView);
+          const left = Math.min(x1, x2);
+          const width = Math.abs(x2 - x1);
+          return (
+            <>
+              <div className="timeline-range-band" style={{ transform: `translateX(${left}px)`, width: `${width}px` }} aria-hidden="true">
+                <span className="timeline-range-ruler" />
+                <span className="timeline-range-edge start" />
+                <span className="timeline-range-edge end" />
+                <span className="timeline-range-label">{formatRange(timeRange)}</span>
+              </div>
+              <button
+                type="button"
+                className="timeline-range-clear"
+                aria-label="清除时间区间"
+                title="清除时间区间"
+                onClick={() => setTimeRange(null)}
+              >×</button>
+            </>
+          );
+        })()}
+        {markerGuide && (
+          <span
+            className="timeline-marker-guide"
+            style={{ transform: `translateX(${timeToX(markerGuide.timeUs, { ...view, headerWidth: view.headerWidth * 2 })}px)`, color: markerGuide.color, opacity: markerGuide.held ? 1 : .55 }}
+            aria-hidden="true"
+          />
+        )}
         <TimelinePlayheadLayer
           store={activePlayheadStore}
           view={{ ...view, headerWidth: view.headerWidth * 2 }}
           totalUs={totalUs}
           contentHeight={contentHeight}
+          scrubbing={scrubbing}
         />
+        {/* 吸附提示线（2026-11-10，对齐 OpenFilm 的吸附引导）：拖动片段被吸到
+            某条边/播放头/网格时，在那个时间点画一条贯穿轨道区的竖向虚线，
+            让"为什么停在这里"可见。未吸附时不渲染。
+            用独立 DOM 层而非画布绘制：不必给 drawTimeline 增加位置参数
+            （它已有 20+ 个），也避免每次拖动都触发整画布重绘。 */}
+
       </div>
     </section>
   );

@@ -119,8 +119,14 @@ def _validate_whitelist(plan: dict[str, Any]) -> None:
             raise _fail(clip_id, "reverse_playback（倒放）")
         if segment.get("track_hidden"):
             raise _fail(clip_id, "track_hidden（隐藏轨）")
-        if segment["asset_kind"] not in ("video", "audio"):
-            raise _fail(clip_id, f"asset_kind={segment['asset_kind']}（图片素材暂不支持实时合成预览）")
+        # 2026-11-10：图片素材放行实时合成。
+        # 依据：桌面渲染侧早已具备静图通路（preview-session 为 image 建独立 rig、
+        # 不占解码保温、纹理按 ffprobe 给出的 width/height 上传），此前仅因
+        # 导入侧不给图片 probe 几何、且这里白名单只写 video/audio 而被卡住。
+        # 两处都修好后，含图片的时间线不再回退交互预览。
+        # text 仍拒绝：文本素材是「插入到时间线的字幕行」，不走画面纹理通路。
+        if segment["asset_kind"] not in ("video", "audio", "image"):
+            raise _fail(clip_id, f"asset_kind={segment['asset_kind']}（该素材类型不支持实时合成预览）")
         keyframes = segment.get("keyframes")
         if isinstance(keyframes, dict) and keyframes:
             if segment["track_id"] != "V1":

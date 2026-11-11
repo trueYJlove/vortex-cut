@@ -66,7 +66,8 @@ describe("Timeline Round 4 — 磁吸开关", () => {
     expect(magnet).toHaveAttribute("aria-pressed", "false");
     expect(
       JSON.parse(window.localStorage.getItem("vortex-cut.timeline.prefs.v1") ?? "{}"),
-    ).toEqual({ snappingEnabled: false, trackHeight: 80, waveformRatio: 0.4 });
+      // trackHeight 默认值 2026-11-10 起为 56（对齐 OpenFilm 的 TRACK_H.visual）。
+    ).toEqual({ snappingEnabled: false, trackHeight: 56, waveformRatio: 0.4 });
   });
 
   it("从 localStorage 恢复上次的状态", () => {

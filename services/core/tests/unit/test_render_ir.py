@@ -428,9 +428,25 @@ def test_audio_output_window_shifted_by_transition_borrow() -> None:
     assert by_id["a1"]["output_end_us"] == 39 * US
 
 
-def test_whitelist_still_rejects_image_assets() -> None:
+def test_whitelist_accepts_image_assets() -> None:
+    """图片素材放行实时合成（2026-11-10）。
+
+    原测试名为 ..._still_rejects_image_assets——"still" 记录的是当时的临时限制：
+    桌面渲染侧已有静图通路，只是导入侧没给几何、白名单也只写 video/audio。
+    两处修好后，图片应能进入实时合成，否则含图片的时间线必然回退交互预览。
+    """
     plan = _plan([_segment("img", 0, 2 * US, 0, 2 * US, asset_kind="image")])
     plan["inputs"][0]["asset_kind"] = "image"
+    result = project_preview_ir(plan, _probe(plan))
+    assert result["inputs"], "图片输入应出现在 IR 里"
+    assert result["inputs"][0]["asset_kind"] == "image"
+    assert result["inputs"][0]["geometry"]["width"] > 0
+
+
+def test_whitelist_still_rejects_text_assets() -> None:
+    """文本素材仍拒绝：它是「插入到时间线的字幕行」，不走画面纹理通路。"""
+    plan = _plan([_segment("txt", 0, 2 * US, 0, 2 * US, asset_kind="text")])
+    plan["inputs"][0]["asset_kind"] = "text"
     with pytest.raises(DomainError) as exc:
         project_preview_ir(plan, _probe(plan))
     assert exc.value.code == "PREVIEW_IR_UNSUPPORTED"

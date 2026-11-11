@@ -1,1 +1,18 @@
-<!doctype html><html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="icon" href="./favicon.ico" sizes="any" /><link rel="icon" type="image/png" href="./icons/32.png" /><title>Vortex Cut</title></head><body><div id="root"></div><script type="module" src="./main.tsx"></script></body></html>
+<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="icon" href="./favicon.ico" sizes="any" /><link rel="icon" type="image/png" href="./icons/32.png" /><title>Vortex Cut</title><script>
+      /* 首帧前应用主题（2026-11-10）。与 src/app/theme.ts 保持同一套规则：
+         键 vortexcut.theme，值 light|dark|system，默认 dark，system 按系统外观解析。
+         这段脚本必须在样式表求值前执行，否则会先画一帧深色再切浅色（闪白/闪黑）。 */
+      (function () {
+        try {
+          var saved = localStorage.getItem("vortexcut.theme");
+          var mode = saved === "light" || saved === "system" ? saved : "dark";
+          var resolved = mode === "system"
+            ? (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+            : mode;
+          var root = document.documentElement;
+          root.dataset.theme = resolved;
+          root.dataset.themeMode = mode;
+          root.style.colorScheme = resolved;
+        } catch (e) { /* 存储不可用：保持默认深色，不阻断渲染 */ }
+      })();
+    </script></head><body><div id="root"></div><script type="module" src="./main.tsx"></script></body></html>

@@ -36,6 +36,7 @@ import { RequestScheduler, BoundedTaskQueue } from "./request-scheduling.js";
 import { parseSubtitleFile } from "./subtitleImport.js";
 import { ClipProperties, CaptionProperties, ProjectProperties, TimelineDiffView, TransitionProperties } from "./PropertyPanels.js";
 import { JobEta } from "./JobEta.js";
+import { WorkspaceFooter } from "./workspace/WorkspaceFooter.js";
 
 type SaveState = "已保存" | "保存中" | "保存失败" | "草稿冲突";
 type NoticeTone = "success" | "warning" | "error" | "info";
@@ -54,6 +55,11 @@ const projectCanvasPresets: Record<string, { width: number; height: number; fps_
 const presets: { value: CaptionPresetId; label: string }[] = [{ value: "default-bottom", label: "默认底部" }, { value: "game-safe-bottom", label: "游戏安全区" }, { value: "high-contrast", label: "高对比" }];
 /** P195：时间线装载瞬时失败的退避序列（下标即第几次重试）——首次 + 2 次，之后如实报错。 */
 const timelineRetryDelaysMs = [1000, 4000];
+/** 时间线面板默认高度：视口高的 34%（参照 OpenFilm 录屏 490/1440 ≈ 34%）。
+ *  固定值在窗口缩放后就与参照脱节，所以由调用方在窗口 resize 时重算。
+ *  下限 220 保证 1080 高以下的窗口里轨道区仍放得下两条轨 + 标尺。 */
+const defaultTimelineHeight = (): number =>
+  typeof window === "undefined" ? 320 : Math.round(Math.max(220, window.innerHeight * 0.34));
 const formatTime = (us: number) => {
   const totalSeconds = us / 1_000_000;
   const hours = Math.floor(totalSeconds / 3600);
@@ -235,6 +241,21 @@ export function App() {
    *  登记一律 fire-and-forget：代理是加速项，失败（无 FFmpeg / 不支持 / IPC
    *  报错）绝不能影响播放，也不弹错误。 */
   const requestProxyJobRef = useRef<(assetId: string) => void>(() => undefined);
+  /** 播放类桌面设置（导入即生成代理 / 代理分辨率档位）。默认值与桌面端
+   *  DEFAULT_SETTINGS 一致，读取失败时按默认值走——设置是优化项，不能阻塞编辑。 */
+  const [playbackSettings, setPlaybackSettings] = useState<{ auto: boolean; quality: "auto" | "540" | "720" | "1080" }>({ auto: true, quality: "auto" });
+  useEffect(() => {
+    let active = true;
+    void window.desktop.getSettings().then(state => {
+      if (!active) return;
+      // 防御：旧版本配置文件/旧夹具可能没有这两个字段，缺省按默认值走，
+      // 否则 undefined 会让「自动生成代理」被静默关掉。
+      const auto = typeof state.saved.preview_proxy_auto === "boolean" ? state.saved.preview_proxy_auto : true;
+      const quality = state.saved.preview_proxy_quality ?? "auto";
+      setPlaybackSettings({ auto, quality });
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, []);
   /** A2：代理就绪计数（单调）。递增 = 请求预览把源切到代理；SyntheticPreview
    *  拿它当会话重建信号，只在暂停（自然切换点）时消费，不打断播放。 */
   const [proxyReadyEpoch, setProxyReadyEpoch] = useState(0);
@@ -385,7 +406,13 @@ export function App() {
   const menuActionRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [leftWidth, setLeftWidth] = useState(280);
   const [rightWidth, setRightWidth] = useState(336);
-  const [timelineHeight, setTimelineHeight] = useState(230);
+  // 时间线面板高度默认按视口比例给（2026-11-11）：参照 OpenFilm 录屏实测
+  // 490px / 1440px ≈ 34%。固定 230px 在 1440 高窗口上只占 16%，轨道区一屏
+  // 只能看到两轨半，与参照软件"时间线是画面下方一整块工作区"的观感差一倍。
+  // 比例随窗口重算（下面的 effect）；用户一旦拖过，就以用户值为准。
+  const [timelineHeight, setTimelineHeight] = useState(() => defaultTimelineHeight());
+  // 用户是否亲手调过时间线高度。调过之后窗口缩放不再覆盖用户的选择。
+  const timelineHeightPinnedRef = useRef(false);
   const resizeRef = useRef<{ kind: "left" | "right" | "timeline"; start: number; value: number } | undefined>(undefined);
   // C3：快捷键自定义（注册表 + localStorage 持久化 + 面板录制状态）。
   const [shortcuts, setShortcuts] = useState<Record<ShortcutCommandId, ShortcutEntry>>(() => loadShortcuts());
@@ -468,6 +495,15 @@ export function App() {
       window.clearInterval(keepAlive);
     };
   }, [playing, progressDragging]);
+  // 时间线高度跟随窗口比例：窗口缩放（含最大化）时重算，除非用户拖过。
+  useEffect(() => {
+    const onResize = () => {
+      if (timelineHeightPinnedRef.current) return;
+      setTimelineHeight(defaultTimelineHeight());
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
   useEffect(() => {
     const move = (event: PointerEvent) => {
       const resize = resizeRef.current;
@@ -483,6 +519,8 @@ export function App() {
   }, []);
   const beginResize = (kind: "left" | "right" | "timeline", event: React.PointerEvent) => {
     event.preventDefault();
+    // 用户开始拖时间线高度：从此这个高度归用户，窗口缩放不再重算。
+    if (kind === "timeline") timelineHeightPinnedRef.current = true;
     resizeRef.current = { kind, start: kind === "timeline" ? event.clientY : event.clientX, value: kind === "left" ? leftWidth : kind === "right" ? rightWidth : timelineHeight };
     document.body.classList.add("is-resizing");
   };
@@ -1088,10 +1126,18 @@ export function App() {
   // 放在渲染期赋值而不是 effect 里——importAsset 可能在首个 effect 之前就被调用。
   requestProxyJobRef.current = (assetId: string) => {
     if (!project) return;
+    // 用户在设置里关掉「为大体素材生成代理」时不自动登记（显式重试路径仍可用）。
+    if (!playbackSettings.auto) return;
     if (proxyJobAssetIdsRef.current.has(assetId)) return; // 判定/登记每素材最多一次
     proxyJobAssetIdsRef.current.add(assetId);
+    // 档位：auto 交给 Core 按素材显示短边选（≤540→540，≤720→720，更大→1080），
+    // 用户在设置里选固定档位则显式指定。写死 1080 会让 4K 源按 1080 代理，
+    // 解码量翻倍、反而更卡。
+    const profile = playbackSettings.quality === "auto"
+      ? undefined
+      : (`preview-${playbackSettings.quality}-v1` as "preview-540-v1" | "preview-720-v1" | "preview-1080-v1");
     void window.desktop.createPreviewSourceJob({
-      project_id: project.project_id, asset_id: assetId, profile_id: "preview-1080-v1",
+      project_id: project.project_id, asset_id: assetId, ...(profile ? { profile_id: profile } : {}),
     }).catch(() => undefined);
   };
   // 按需代理（本次修复的核心）：触发点从「导入瞬间」挪到「实测解不动」。
@@ -1304,10 +1350,45 @@ export function App() {
    *  新的用户命令到达前被 10Hz 节流合并。播放中 seek = 暂停 + 跳转（剪映
    *  语义）：合成预览在 playing 时忽略外部 seek（防自身上报回环）、交互
    *  预览的 100ms 播放时钟会把播放头拉回播放轨道——不先暂停则点击被吞。 */
-  const seekFromUser = useCallback((timeUs: number) => {
+  /** 擦洗分层（2026-11-10，对齐 OpenFilm 的 scrub 设计）：
+   *
+   *  这三件事的节奏必须分开，否则拖动要么糊、要么卡：
+   *   1. 播放头线条   —— 每帧跟随（本地立刻写 store，覆盖层 rAF 消费）；
+   *   2. 预览画面 seek —— 约 15ms 一次（拖动中最贵的一步，串行化会拖尾）；
+   *   3. React 提交   —— 约 100ms 一次（其余 UI 不必跟着抖）。
+   *
+   *  改造前：一次指针移动 = setPlaying + dispatchPlayhead(commit=true)，
+   *  即每帧提交整棵 App 树（实测 dev 下单次提交 ~36ms）。拖动时指针事件
+   *  比 rAF 更密，于是主线程被提交占满，表现为"画面跟不上手指"。 */
+  const scrubToldAt = useRef(0);
+  const SCRUB_PICTURE_MS = 15;
+  const SCRUB_STATE_MS = 100;
+  /** 拖动/擦洗中的即时跳转：线条每帧走，画面与状态按上表节流。
+   *
+   *  注意：预览画面的 seek 由 `playheadUs` **prop** 驱动（SyntheticPreview 的
+   *  seekToFrame 取的就是它），不是订阅 store。所以画面要跟手，就必须在
+   *  SCRUB_PICTURE_MS 节流内真的提交 playheadUs——只写 store 画面不会动。 */
+  const seekWhileScrubbing = useCallback((timeUs: number) => {
+    // 线条立刻走（覆盖层 rAF 消费 store）。
+    dispatchPlayhead("user", timeUs, false);
+    // 画面也立刻走：预览侧已按"目标帧"去重（SyntheticPreview 的
+    // lastSeekedFrame），同一帧不会重复 seek，所以这里不需要再节流。
+    // 实测教训：早先在这里按 15ms 节流，而擦洗期间指针事件与 React 提交
+    // 本就有延迟，两层节流叠加后 16 次拖动只出 6 个不同画面——节流应当
+    // 只保留在最贵的一层（解码），不能每层都设一道闸。
+    setPlayhead(timeUs);
+    scrubToldAt.current = performance.now();
+  }, [dispatchPlayhead]);
+  /** 一次擦洗结束（松手/键盘跳转）：落到精确值并提交 React。 */
+  const commitScrub = useCallback((timeUs: number) => {
     setPlaying(false);
     dispatchPlayhead("user", timeUs, true);
+    scrubToldAt.current = 0;
+    lastReactTimeReport.current = 0;
   }, [dispatchPlayhead]);
+  const seekFromUser = useCallback((timeUs: number) => {
+    commitScrub(timeUs);
+  }, [commitScrub]);
   /** 预览播放回传：只写 store（覆盖层命令式跟随）+ 节流 React。
    *
    *  P33 W10（dev 流畅度收口）：**播放期间不再提交 React** —— 时间码/进度条的
@@ -1324,6 +1405,22 @@ export function App() {
   /** 播放中播放头 DOM 直写（时间码 / 进度气泡 / 填充 / aria-valuenow）。
    *  每次渲染重新赋值 → 闭包内始终是当前 totalUs/previewFps/refs。 */
   const playheadDomRef = useRef<(us: number) => void>(() => undefined);
+  /* 播放直线（2026-11-10，对齐 OpenFilm 的 PlaybackClock.line）：
+     开始播放时广播一条 (t0, at0, rate) 直线，播放头覆盖层按它自行外推；
+     整段播放期间不再逐帧通知 store。暂停/seek 时收线并保留此刻时间。
+     只在合成预览（synthetic）下启用——交互预览走 HTMLMediaElement 自身的
+     100ms 时钟，那条路径的语义不同（由媒体元素驱动）。
+     缓动：rate 取 1000（1.0×）。变速片段由预览侧自行处理，
+     这里只描述"播放头沿时间线前进"这一件事。 */
+  useEffect(() => {
+    if (previewMode !== "synthetic" || libraryPreviewId) return;
+    if (playing) {
+      playheadStore.startLine({ tUs: playheadStore.get(), atMs: performance.now(), rate: 1000 });
+    } else {
+      playheadStore.stopLine();
+    }
+  }, [playing, previewMode, libraryPreviewId, playheadStore]);
+
   const seekFromPlayback = useCallback((timeUs: number) => {
     const now = performance.now();
     if (playingRef.current) {
@@ -2392,6 +2489,14 @@ export function App() {
   };
   // 播放态 ref 镜像（会话回调经它读最新值）
   playingRef.current = playing && !gestureHoldRef.current;
+  /** 进度条拖动中：走分层节流（画面 15ms / 状态 100ms / 线条每帧）。 */
+  const scrubFromProgress = (clientX: number) => {
+    const element = progressRef.current;
+    if (!element) return;
+    const rect = element.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    seekWhileScrubbing(Math.round(ratio * Math.max(totalUs, 1)));
+  };
   const seekFromProgressRatio = (ratio: number) => {
     exitLibraryPreview();
     const value = Math.round(ratio * Math.max(totalUs, 1));
@@ -2899,7 +3004,7 @@ export function App() {
           {!overlayClipSelected && <div className="sel-box" ref={selBoxRef} onClick={event => event.stopPropagation()} aria-hidden="true"><i className="sel-border" /><span className="sel-dims">{selDimsText || `${Math.round((canvasRef.current?.offsetWidth ?? 0))} × ${Math.round((canvasRef.current?.offsetHeight ?? 0))}`}</span><span className="h h-nw" data-dir="nw" title="等比缩放（左上）" onPointerDown={beginSelDrag("nw")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-n" data-dir="n" title="单轴缩放（上）" onPointerDown={beginSelDrag("n")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-ne" data-dir="ne" title="等比缩放（右上）" onPointerDown={beginSelDrag("ne")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-e" data-dir="e" title="单轴缩放（右）" onPointerDown={beginSelDrag("e")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-se" data-dir="se" title="等比缩放（右下）" onPointerDown={beginSelDrag("se")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-s" data-dir="s" title="单轴缩放（下）" onPointerDown={beginSelDrag("s")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-sw" data-dir="sw" title="等比缩放（左下）" onPointerDown={beginSelDrag("sw")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-w" data-dir="w" title="单轴缩放（左）" onPointerDown={beginSelDrag("w")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /></div>}
         </div>
           <span className={`interactive-label ${previewIsStale && previewMode === "authoritative" && !exportPlayback ? "stale" : ""}`}>{previewMode === "interactive" ? "交互预览 · 非权威" : previewMode === "synthetic" ? "合成预览 · 实时（非权威）" : reframePlayback ? "静态焦点重构图 · 权威预览" : exportPlayback ? `导出 · ${exportPlayback.export_record.destination_display_name}` : previewIsStale ? "权威预览 · 已过期" : "权威预览 · 当前 Revision"}</span><span role="status" aria-label="预览状态" className={`preview-context ${previewMode === "authoritative" ? "authoritative" : previewMode === "synthetic" ? "synthetic" : "interactive"}${previewIsStale ? " stale" : ""}`}>{previewMode === "authoritative" ? (previewIsStale ? "权威预览已过期" : authoritativePreview ? "权威预览" : "尚未生成权威预览") : previewMode === "synthetic" ? "合成预览" : "交互预览"}</span>{syntheticNotice && <span role="note" aria-label="合成预览回退提示" className="synthetic-note">{syntheticNotice}<button className="synthetic-note-retry" onClick={() => { setSyntheticNotice(null); setPreviewMode("synthetic"); }}>重试合成预览</button></span>}
-          <div className={`progress${progressDragging ? " dragging" : ""}`} ref={progressRef} role="slider" tabIndex={0} aria-label="时间线播放头" aria-valuemin={0} aria-valuemax={Math.max(totalUs, 1)} aria-valuenow={Math.min(playhead, totalUs)} onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); setProgressDragging(true); seekFromProgress(event.clientX); }} onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) seekFromProgress(event.clientX); }} onPointerUp={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); setProgressDragging(false); }} onKeyDown={event => { if (event.key === "ArrowLeft") { event.preventDefault(); seekFromProgressRatio(Math.max(0, playhead / Math.max(totalUs, 1) - 1 / 300)); } else if (event.key === "ArrowRight") { event.preventDefault(); seekFromProgressRatio(Math.min(1, playhead / Math.max(totalUs, 1) + 1 / 300)); } else if (event.key === "Home") { event.preventDefault(); seekFromProgressRatio(0); } else if (event.key === "End") { event.preventDefault(); seekFromProgressRatio(1); } }}>
+          <div className={`progress${progressDragging ? " dragging" : ""}`} ref={progressRef} role="slider" tabIndex={0} aria-label="时间线播放头" aria-valuemin={0} aria-valuemax={Math.max(totalUs, 1)} aria-valuenow={Math.min(playhead, totalUs)} onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); setProgressDragging(true); seekFromProgress(event.clientX); }} onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) scrubFromProgress(event.clientX); }} onPointerUp={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) { const rect = event.currentTarget.getBoundingClientRect(); event.currentTarget.releasePointerCapture(event.pointerId); commitScrub(Math.round(Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)) * Math.max(totalUs, 1))); } setProgressDragging(false); }} onKeyDown={event => { if (event.key === "ArrowLeft") { event.preventDefault(); seekFromProgressRatio(Math.max(0, playhead / Math.max(totalUs, 1) - 1 / 300)); } else if (event.key === "ArrowRight") { event.preventDefault(); seekFromProgressRatio(Math.min(1, playhead / Math.max(totalUs, 1) + 1 / 300)); } else if (event.key === "Home") { event.preventDefault(); seekFromProgressRatio(0); } else if (event.key === "End") { event.preventDefault(); seekFromProgressRatio(1); } }}>
             <div className="pg-bubble" ref={pgBubbleRef} style={{ left: `${progressPct}%` }}>{formatSmpteTimecode(playhead, previewFps)}</div>
             <div className="pg-rail"><div className="pg-fill" ref={pgFillRef} style={{ width: `${progressPct}%` }}><i className="pg-dot" /></div></div>
           </div>
@@ -2935,27 +3040,26 @@ export function App() {
       <aside className="properties-pane" aria-label="上下文属性" role="region">{selectedClip ? <ClipProperties clip={selectedClip} locked={Boolean(working?.locked_elements?.includes(selectedClip.clip_id))} onPatch={patchTimeline} onDraft={queueDraft} working={working!} playheadUs={playhead} onOpenEditingTools={tool => openEditingTools(tool, selectedClip.clip_id)} baseRevisionId={timeline?.current_revision.timeline_revision_id ?? null} onAppliedTimeline={acceptState} /> : selectedCaption ? <CaptionProperties caption={selectedCaption} locked={Boolean(selectedCaption.source_clip_id && working?.locked_elements?.includes(selectedCaption.source_clip_id))} onPatch={patchTimeline} onDraft={queueDraft} working={working!} /> : selectedTransition ? <TransitionProperties transition={selectedTransition} onPatch={patchTimeline} /> : <ProjectProperties project={project} saveState={saveState} authoritativePreview={authoritativePreview} previewIsStale={previewIsStale} renderDisabledReason={renderDisabledReason} onGeneratePreview={() => void generatePreview()} onCreateExport={openExportDialog} onOpenProjectDialog={() => setProjectDialogOpen(true)} />}</aside>
     </section>
     <div className="timeline-resize-handle" role="separator" aria-label="调整时间线高度" onPointerDown={event => beginResize("timeline", event)} />
-    <TimelinePanel document={working} selection={selection} setSelection={(sel) => { setSelection(sel); exitLibraryPreview(); }} onPatch={patchTimeline} onDropAsset={dropAsset} coverUrl={coverUrl} onCaptureCover={() => setCoverDialogOpen(true)} canUndo={Boolean(timeline?.can_undo)} canRedo={Boolean(timeline?.can_redo)} onUndo={() => void undoRedo("undo")} onRedo={() => void undoRedo("redo")} assetMedia={timelineAssetMedia} waveformCache={waveformCache} playheadStore={playheadStore} onSeek={(timeUs) => { exitLibraryPreview(); seekFromUser(timeUs); const clip = sortedClips.find(c => timeUs >= c.timeline_start_us && timeUs < c.timeline_end_us); if (clip && videoRef.current) { const sourceStart = (clip.source_start_us ?? 0) / 1_000_000; const elapsed = (timeUs - clip.timeline_start_us) / 1_000_000 * ((clip.speed_milli ?? 1000) / 1000); pendingSeekRef.current = sourceStart + elapsed; videoRef.current.currentTime = pendingSeekRef.current; } else if (videoRef.current) { videoRef.current.currentTime = timeUs / 1_000_000; } }} onCommand={(id) => runCommand(id)} />
-    <footer>
-      <div className="footer-status">
-        <div role="status" aria-label="保存状态" className={`save-state ${saveState === "保存失败" || saveState === "草稿冲突" ? "error" : ""}`} title={saveState === "草稿冲突" ? "检测到冲突草稿，请在顶部提示中处理" : undefined}><Save />{saveState}</div>
-        <div className="footer-sep" aria-hidden="true" />
-        <div className="job-state" role="status" aria-label="Core 连接状态"><span className={`core-dot ${runtimeReady ? "on" : ""}`} />{runtimeReady ? "Core 已连接" : "Core 连接中"}</div>
-        {previewIsStale && <button className="status-chip stale" disabled={Boolean(renderDisabledReason)} title={renderDisabledReason ?? "点击立即生成权威预览"} onClick={() => runCommand("preview.generate")}><span className="chip-dot" aria-hidden="true" />权威预览已过期</button>}
-      </div>
-      <div className="footer-tasks">
-        {renderActivity > 0 ? (
-          <button className="tasks-summary" onClick={() => setTab("jobs")} title="点击查看任务列表">
-            <span className="tasks-spinner" aria-hidden="true" />
-            {renderActivity} 个任务进行中{runningProgressText ? ` · ${runningProgressText}` : ""}
-          </button>
-        ) : (
-          <span className="tasks-idle">后台空闲</span>
-        )}
-      </div>
-      <div className="footer-actions"><button className="ai-entry" disabled={!project || !timeline} onClick={() => void openExportBatch()}><Download size={12} />多平台导出</button><button className="ai-entry" disabled={!project} onClick={() => void openAi()}>AI 粗剪</button><button className="ai-entry" disabled={!timeline} onClick={() => void openPatch()}><Sparkles size={12} />AI 修改</button><button className="ai-entry" disabled={!timeline} onClick={() => void openRevisionCompare()}><History size={12} />版本比较</button><button className="ai-entry" title="管理 Provider、密钥与连接测试" onClick={() => setProviderSettingsOpen(true)}>Provider 设置</button><button className="ai-entry" title="应用设置" onClick={() => setSettingsOpen(true)}>设置</button></div>
-      <span className="footer-version" title="权威预览与最终导出均由冻结 Timeline Revision 生成。">{CONTRACT_VERSION}</span>
-    </footer>
+    <TimelinePanel document={working} selection={selection} setSelection={(sel) => { setSelection(sel); exitLibraryPreview(); }} onPatch={patchTimeline} onDropAsset={dropAsset} coverUrl={coverUrl} onCaptureCover={() => setCoverDialogOpen(true)} canUndo={Boolean(timeline?.can_undo)} canRedo={Boolean(timeline?.can_redo)} onUndo={() => void undoRedo("undo")} onRedo={() => void undoRedo("redo")} assetMedia={timelineAssetMedia} waveformCache={waveformCache} playheadStore={playheadStore} onSeek={(timeUs) => { if (libraryPreviewId) exitLibraryPreview(); seekWhileScrubbing(timeUs); const clip = sortedClips.find(c => timeUs >= c.timeline_start_us && timeUs < c.timeline_end_us); if (clip && videoRef.current) { const sourceStart = (clip.source_start_us ?? 0) / 1_000_000; const elapsed = (timeUs - clip.timeline_start_us) / 1_000_000 * ((clip.speed_milli ?? 1000) / 1000); pendingSeekRef.current = sourceStart + elapsed; videoRef.current.currentTime = pendingSeekRef.current; } else if (videoRef.current) { videoRef.current.currentTime = timeUs / 1_000_000; } }} onSeekCommit={timeUs => { exitLibraryPreview(); commitScrub(timeUs); }} onCommand={(id) => runCommand(id)} />
+    <WorkspaceFooter
+      saveState={saveState}
+      runtimeReady={runtimeReady}
+      previewIsStale={previewIsStale}
+      renderDisabledReason={renderDisabledReason}
+      renderActivity={renderActivity}
+      runningProgressText={runningProgressText}
+      hasProject={Boolean(project)}
+      hasTimeline={Boolean(timeline)}
+      contractVersion={CONTRACT_VERSION}
+      onGeneratePreview={() => runCommand("preview.generate")}
+      onOpenJobs={() => setTab("jobs")}
+      onOpenExportBatch={() => void openExportBatch()}
+      onOpenAi={() => void openAi()}
+      onOpenPatch={() => void openPatch()}
+      onOpenRevisionCompare={() => void openRevisionCompare()}
+      onOpenProviderSettings={() => setProviderSettingsOpen(true)}
+      onOpenSettings={() => setSettingsOpen(true)}
+    />
      {exportDialogOpen && project && working && timeline && <ExportDialog
         projectId={project.project_id} projectName={project.name}
         durationUs={working.clips.reduce((max, item) => Math.max(max, item.timeline_end_us), 0)}

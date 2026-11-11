@@ -46,6 +46,14 @@ export function buildDesktopApi(options: { timeline?: TimelineState | null; mode
     getShotRequirementImageFulfillment: vi.fn(), listShotRequirementImageFulfillmentLinks: vi.fn(), listShotRequirementImageFulfillmentAdoptions: vi.fn(), prepareShotRequirementImageFulfillment: vi.fn(), createShotRequirementImageFulfillment: vi.fn(), adoptShotRequirementImageFulfillment: vi.fn(),
     prepareShotRequirementTimelineAssembly: vi.fn(), applyShotRequirementTimelineAssembly: vi.fn(), getShotRequirementTimelineAssemblyPreview: vi.fn(), getShotRequirementTimelineAssembly: vi.fn(), listShotRequirementTimelineAssemblies: vi.fn().mockResolvedValue({ items: [], next_cursor: null }),
     updateEditorLoad: vi.fn().mockResolvedValue(undefined), getPreviewIrV2Manifest: vi.fn().mockRejectedValue(new Error("unsupported")), getPreviewIrV2Window: vi.fn().mockRejectedValue(new Error("unsupported")),
+    // 播放设置：默认开代理 + 自动档位。App 在挂载时读取它来决定是否登记代理作业，
+    // 缺省会让「导入即生成代理」的既有行为在测试里被静默关掉。
+    getSettings: vi.fn().mockResolvedValue({
+      saved: { proxy_mode: "system", provider_proxy: null, preview_proxy_auto: true, preview_proxy_quality: "auto" },
+      effective: { proxy_mode: "system", provider_proxy: null, preview_proxy_auto: true, preview_proxy_quality: "auto" },
+      pending_restart: false,
+    }),
+    setSettings: vi.fn().mockResolvedValue({ proxy_mode: "system", provider_proxy: null, preview_proxy_auto: true, preview_proxy_quality: "auto" }),
     ...(options.overrides ?? {}),
   } as unknown as DesktopApi;
   return base;

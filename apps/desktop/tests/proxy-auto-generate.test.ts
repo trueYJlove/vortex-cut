@@ -110,14 +110,16 @@ afterEach(() => {
 });
 
 describe("素材导入后自动登记代理生成作业（方案 A）", () => {
-  it("视频素材导入后登记 preview-1080-v1 档位的代理作业", async () => {
+  it("视频素材导入后登记代理作业（档位由 Core 自动选择）", async () => {
     const { createPreviewSourceJob } = setup();
     render(React.createElement(App));
     await waitFor(() => expect(importButton("视频")).not.toBeDisabled());
     fireEvent.click(importButton("视频"));
     await waitFor(() => expect(createPreviewSourceJob).toHaveBeenCalledTimes(1));
+    // 档位不再写死：默认 auto 由 Core 按素材显示短边选档，因此这里不传 profile_id。
+    // （写死 1080 会让 4K 源按 1080 代理，解码量翻倍、反而更卡。）
     expect(createPreviewSourceJob).toHaveBeenCalledWith({
-      project_id: project.project_id, asset_id: importedVideo.asset_id, profile_id: "preview-1080-v1",
+      project_id: project.project_id, asset_id: importedVideo.asset_id,
     });
   }, 30_000);
 

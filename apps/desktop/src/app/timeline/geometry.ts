@@ -56,7 +56,11 @@ export interface TrackRowLayout {
 }
 
 /** 非主轨道行的相对高度（剪映式：主视频轨始终比其他轨道更高）。 */
-const SECONDARY_ROW_RATIO = 0.7;
+/* 次轨高度比例（2026-11-10，对齐 OpenFilm）：它的轨道不分主次，
+   视觉/文本/字幕轨同为 TRACK_H.visual = 56px。原来按 0.7 缩放成 39px，
+   导致同一类轨道（都是画面轨）在不同位置长得不一样，行高跳动。
+   设为 1 后次轨与主轨等高，只在音频轨处降为 44px。 */
+const SECONDARY_ROW_RATIO = 1;
 
 /**
  * 由轨道数组构建行布局（y 自标尺底部开始累计）。
@@ -64,21 +68,44 @@ const SECONDARY_ROW_RATIO = 0.7;
  * 影响）；其余轨道（动态视频轨/文本轨）为其约 70%，随滑条联动、可动态
  * 增删与移动。
  */
+/**
+ * 行间间隙（2026-11-10，对齐 OpenFilm 的 `GAP = 2`）。
+ * 相邻两轨之间露出 2px 面板底色，才读得出"这是两条轨"而不是"一整块区域"。
+ * 只在**行与行之间**加，不占首行之前与末行之后——上下留白由调用方负责。
+ */
+export const TRACK_GAP = 2;
+
+/**
+ * 行组在轨道区内的上内边距（2026-11-11，对齐 OpenFilm 的 TL_VPAD = 10）。
+ * 至少留 10px：行贴着标尺下沿或面板底边都像被切掉一截。
+ */
+export const TRACK_VIEW_PAD = 10;
+
 export function computeTrackRows(
   tracks: TimelineTrack[],
   rulerHeight: number,
   rowHeight: number,
+  /** 可视区高度（标尺以下的部分）。给出时行组在其中垂直居中，与 OpenFilm 的
+   *  `padTop = max(MARKER_ROW_H+2, (view.height - tracksH)/2)` 一致：面板拉高后
+   *  行组跟着居中，而不是全部贴着顶部、底下空出一大片（实测截图差异）。
+   *  不给则按老行为从标尺下沿开始排——测试与离屏渲染不依赖居中。 */
+  viewportHeight?: number,
 ): TrackRowLayout[] {
-  let y = rulerHeight;
-  return tracks.map((track) => {
-    const height =
-      track.kind === "audio"
-        ? 64
-        : track.id === "V1"
-          ? rowHeight
-          : Math.max(32, Math.round(rowHeight * SECONDARY_ROW_RATIO));
-    const row: TrackRowLayout = { track, y, height };
-    y += height;
+  const heights = tracks.map((track) =>
+    track.kind === "audio" ? 44 : track.id === "V1" ? rowHeight : Math.max(32, Math.round(rowHeight * SECONDARY_ROW_RATIO)),
+  );
+  const tracksH = heights.reduce((sum, h) => sum + h, 0) + Math.max(0, tracks.length - 1) * TRACK_GAP;
+  const padTop =
+    viewportHeight === undefined
+      ? 0
+      : Math.max(TRACK_VIEW_PAD, Math.floor((viewportHeight - tracksH) / 2));
+  let y = rulerHeight + padTop;
+  return tracks.map((track, index) => {
+    const height = heights[index];
+    // 首行贴 padTop 之后，之后每行之前留一道间隙
+    const gap = index === 0 ? 0 : TRACK_GAP;
+    const row: TrackRowLayout = { track, y: y + gap, height };
+    y += gap + height;
     return row;
   });
 }
@@ -288,16 +315,34 @@ export function snapValue(
   candidates: number[],
   thresholdUs: number,
 ): number {
+  return snapResult(valueUs, candidates, thresholdUs).valueUs;
+}
+
+/**
+ * 同 snapValue，但同时告诉调用方**吸附到了哪条线**（没吸上时为 null）。
+ *
+ * 2026-11-10：画布需要在拖动时画出那条提示线（对齐 OpenFilm 的吸附引导）。
+ * 原 snapValue 只回报结果值，调用方无从得知"是哪个候选赢的"——于是只能
+ * 靠结果是否等于原值来猜，而候选恰好等于原值时就会误判。
+ * 这里把命中候选一并带出，语义唯一。
+ */
+export function snapResult(
+  valueUs: number,
+  candidates: number[],
+  thresholdUs: number,
+): { valueUs: number; snappedTo: number | null } {
   let best = valueUs;
   let bestDistance = thresholdUs;
+  let snappedTo: number | null = null;
   for (const candidate of candidates) {
     const distance = Math.abs(candidate - valueUs);
     if (distance <= bestDistance) {
       bestDistance = distance;
       best = candidate;
+      snappedTo = candidate;
     }
   }
-  return best;
+  return { valueUs: best, snappedTo };
 }
 
 /**

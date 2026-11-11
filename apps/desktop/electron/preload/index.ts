@@ -349,7 +349,12 @@ export interface DesktopApi {
   subscribeJob: (jobId: JobId, listener: (job: Job) => void) => () => void;
   // DESK-1/DESK-2/DESK-3：桌面设置 + 内核重启（代理生效语义 = 重启）
   getSettings: () => Promise<SettingsState>;
-  setSettings: (input: { proxy_mode: "system" | "custom" | "direct"; provider_proxy?: string | null }) => Promise<DesktopSettings>;
+  setSettings: (input: {
+    proxy_mode?: "system" | "custom" | "direct";
+    provider_proxy?: string | null;
+    preview_proxy_auto?: boolean;
+    preview_proxy_quality?: "auto" | "540" | "720" | "1080";
+  }) => Promise<DesktopSettings>;
   restartCore: () => Promise<void>;
   diagnostics: () => Promise<CoreHealth>;
 }

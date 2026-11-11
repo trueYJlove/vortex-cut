@@ -101,9 +101,21 @@ describe("clip rects", () => {
       audioClip({ timeline_start_us: 3_000_000, timeline_end_us: 5_000_000 }, 2_000_000),
     ];
     const rects = computeClipRects(clips, rows, view);
-    // V1 主视频轨 = 完整行高 64，起点在 C1 行（45）之后；A1 音频轨固定 64。
-    expect(rects[0]).toMatchObject({ x: 120, y: 73, width: 200, height: 64 });
-    expect(rects[1]).toMatchObject({ x: 420, y: 137, width: 200, height: 64 });
+    // 行布局（2026-11-10 起，对齐 OpenFilm 的轨高与行间隙）：
+    //   C1 文本轨  y=28（标尺底）            h=56（次轨比例已改为 1）
+    //   间隙 2px  → V1 y=28+56+2=86          h=64（view.trackHeight，主轨完整行高）
+    //   间隙 2px  → A1 y=86+64+2=152         h=44（音频轨固定值）
+    // 片段在行内再内缩 CLIP_ROW_INSET（6px），故 V1 片段 y=92、A1 片段 y=158。
+    // 用 rows 的实算值断言，避免把内缩常量硬编码进测试：
+    // 将来调 CLIP_ROW_INSET 时这里仍然成立。
+    const v1Row = rows.find(r => r.track.id === "V1")!;
+    const a1Row = rows.find(r => r.track.id === "A1")!;
+    expect(rects[0]).toMatchObject({ x: 120, width: 200, height: v1Row.height });
+    expect(rects[0].y).toBeGreaterThanOrEqual(v1Row.y);
+    expect(rects[0].y).toBeLessThan(v1Row.y + v1Row.height);
+    expect(rects[1]).toMatchObject({ x: 420, width: 200, height: a1Row.height });
+    expect(rects[1].y).toBeGreaterThanOrEqual(a1Row.y);
+    expect(rects[1].y).toBeLessThan(a1Row.y + a1Row.height);
   });
 
   it("computes image duration from timeline range", () => {

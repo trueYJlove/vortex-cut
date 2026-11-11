@@ -132,7 +132,13 @@ export function SyntheticPipLayer(props: SyntheticPipLayerProps): React.ReactEle
 
   const gestureMove = (event: React.PointerEvent): void => {
     const gesture = gestureRef.current;
-    if (!gesture || gesture.clipId !== (live?.clipId ?? maskLive?.clipId)) return;
+    // 守卫只看 gestureRef（同步真源），不能看 live/maskLive 这两个 React state。
+    // 原实现用 `gesture.clipId !== (live?.clipId ?? maskLive?.clipId)` 判断，
+    // 而 live 由 beginGesture 里的 setLive 异步写入：指针第一次 move 往往早于
+    // 那次渲染提交，此时 live 仍为 null ⇒ 事件被整条丢弃。实测表现是拖动
+    // 过程中只有零星几帧真正生效（20 次采样仅 2-3 个不同画面），松手落库
+    // 的 scale 停在 1——缩放看起来"没反应"。
+    if (!gesture) return;
     const canvasW = Math.max(1, boxes.find(item => item.clipId === gesture.clipId)?.canvasW ?? 1);
     const canvasH = Math.max(1, boxes.find(item => item.clipId === gesture.clipId)?.canvasH ?? 1);
     if (gesture.mode === "mask-move" || gesture.mode === "mask-resize") {
@@ -270,22 +276,27 @@ export function SyntheticPipLayer(props: SyntheticPipLayerProps): React.ReactEle
                 )}
               </div>
             )}
+            {/* 展开顺序很重要：`{...gestureHandlers}` 必须在 onPointerDown **之前**。
+                它只含 onPointerMove/Up/Cancel，但 React 的 props 展开是后写覆盖先写——
+                原先把手柄写在展开之前，等于把刚设好的 onPointerDown 覆盖成 undefined，
+                于是八个缩放手柄与旋转手柄全都按不动（实测：拖动 resizing 手柄，
+                盒子尺寸全程 433×433 不变，松手落库 scale 恒为 1）。 */}
             {selected && !locked && HANDLES.map(dir => (
               <span
                 key={dir}
                 className={`sp-handle sp-${dir}`}
                 data-dir={dir}
                 title={`缩放（${dir}）`}
-                onPointerDown={event => beginGesture(event, box, dir)}
                 {...gestureHandlers}
+                onPointerDown={event => beginGesture(event, box, dir)}
               />
             ))}
             {selected && !locked && (
               <span
                 className="sp-rotate"
                 title="旋转"
-                onPointerDown={event => beginGesture(event, box, "rotate")}
                 {...gestureHandlers}
+                onPointerDown={event => beginGesture(event, box, "rotate")}
               />
             )}
           </div>

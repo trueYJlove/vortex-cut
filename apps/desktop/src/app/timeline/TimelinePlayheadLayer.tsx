@@ -10,7 +10,7 @@
  *  0 丢帧）。现在订阅只改 `style.transform` / `style.height` / `display`：
  *  播放期零 React 提交，覆盖层跟随精度不变（仍是 store 通知驱动）。
  *  pointer-events: none——拖拽命中仍由标尺/空白区原有命中测试提供。 */
-import { memo, useEffect, useRef } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import type { PlayheadStore } from "./playhead-store.js";
 import { timeToX } from "./geometry.js";
 import type { TimelineViewState } from "./types.js";
@@ -23,6 +23,10 @@ export interface TimelinePlayheadLayerProps {
   totalUs: number;
   /** 主画布内容高度（px）——竖线高度。 */
   contentHeight: number;
+  /** 正在擦洗（按住播放头/标尺拖动）：旋钮由空心变实心。
+   *  参照 OpenFilm 的 PlayheadKnob(filled)——按下实心、松开空心，
+   *  让"我正在拖它"这件事在指针下就有反馈，不必等时间码变化。 */
+  scrubbing?: boolean;
 }
 
 /** 与旧 Canvas 绘制相同的可视判据：线段起点钳制在头列右缘。 */
@@ -33,19 +37,20 @@ function TimelinePlayheadLayerImpl({
   view,
   totalUs,
   contentHeight,
+  scrubbing = false,
 }: TimelinePlayheadLayerProps): React.ReactElement {
   const layerRef = useRef<HTMLDivElement | null>(null);
   const lineRef = useRef<HTMLSpanElement | null>(null);
   const handleRef = useRef<HTMLSpanElement | null>(null);
 
   useEffect(() => {
-    const apply = (): void => {
+    /** 画到某个时间点（µs）——所有跟随路径的公共出口。 */
+    const paint = (rawUs: number): void => {
       const layer = layerRef.current;
-      const line = lineRef.current;
+      const lineEl = lineRef.current;
       const handle = handleRef.current;
-      if (!layer || !line || !handle) return;
-      const raw = store.get();
-      const clampedUs = totalUs > 0 ? Math.min(raw, totalUs) : raw;
+      if (!layer || !lineEl || !handle) return;
+      const clampedUs = totalUs > 0 ? Math.min(rawUs, totalUs) : rawUs;
       const x = timeToX(clampedUs, view);
       if (!isVisible(x, view.headerWidth)) {
         // 可视判据不满足：隐藏（保留节点，避免进出视区时反复挂载/卸载）。
@@ -53,12 +58,37 @@ function TimelinePlayheadLayerImpl({
         return;
       }
       layer.style.display = "";
-      line.style.height = `${contentHeight}px`;
-      line.style.transform = `translateX(${x}px)`;
+      lineEl.style.height = `${contentHeight}px`;
+      lineEl.style.transform = `translateX(${x}px)`;
       handle.style.transform = `translateX(${x}px)`;
     };
+
+    /** 订阅回调：store 变更时按"此刻该在哪"重画。
+     *  有直线时 store.get() 已按直线外推，因此这里无需区分两种表示。 */
+    const apply = (): void => paint(store.get());
+
     apply(); // 首帧：立即跟随当前时间（订阅只在变更时回调）
-    return store.subscribe(apply);
+
+    const unsubscribe = store.subscribe(apply);
+    // 有播放直线时，额外挂一个 rAF 循环自行外推：
+    // OpenFilm 的播放头就是这么跟的——整段播放期间 store 只通知一次，
+    // 之后靠本地 rAF 按 anchorTime 推进，避免每帧走"微任务合并 + 通知订阅者"。
+    let raf = 0;
+    const followLine = (): void => {
+      const activeLine = store.getLine();
+      if (!activeLine) { raf = 0; return; }
+      paint(Math.max(0, activeLine.tUs + Math.max(0, performance.now() - activeLine.atMs) * activeLine.rate));
+      raf = requestAnimationFrame(followLine);
+    };
+    // 订阅回调里若检测到直线启动/结束，负责起停 rAF
+    const sync = (): void => {
+      apply();
+      if (store.getLine()) { if (!raf) raf = requestAnimationFrame(followLine); }
+      else if (raf) { cancelAnimationFrame(raf); raf = 0; }
+    };
+    const unsubSync = store.subscribe(sync);
+
+    return () => { unsubscribe(); unsubSync(); if (raf) cancelAnimationFrame(raf); };
     // view/totalUs/contentHeight 变化（缩放/滚动/换片）→ 重算并重订阅
   }, [store, view, totalUs, contentHeight]);
 
@@ -66,7 +96,20 @@ function TimelinePlayheadLayerImpl({
     <div className="timeline-playhead-layer" aria-hidden="true" ref={layerRef}>
       <span className="timeline-playhead-line" ref={lineRef} />
       {/* 手柄带与固定标尺同高（钉在可视区顶部）：绝对定位，translateX 跟随。 */}
-      <span className="timeline-playhead-handle" ref={handleRef} style={{ top: 3 }} />
+      {/* 旋钮：12x17 图钉形状（与 OpenFilm 同形），空心态=常态、实心态=按住拖动。
+          命中区 24x20 比图形本身大——人手瞄准的是那根线，差几像素就抓不到。
+          图形固定在水平中心，由外层 translateX 跟随；缩放时父层 transform 不放大它。 */}
+      <span className="timeline-playhead-handle" ref={handleRef}>
+        <svg width="12" height="17" viewBox="0 0 12 17" aria-hidden="true">
+          <path
+            d="M1.9 3.4a2 2 0 0 1 2-2h4.2a2 2 0 0 1 2 2v5.3a4.1 4.1 0 0 1-8.2 0z"
+            fill={scrubbing ? "var(--tl-playhead-fill, #f65d55)" : "var(--tl-playhead-rest, #14171a)"}
+            stroke="var(--tl-playhead-stroke, #f65d55)"
+            strokeWidth="1.9"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </span>
     </div>
   );
 }

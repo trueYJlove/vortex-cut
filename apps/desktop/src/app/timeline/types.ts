@@ -188,9 +188,14 @@ export interface TimelineHover {
 export const DEFAULT_VIEW_STATE: TimelineViewState = {
   pixelsPerSecond: 60,
   scrollX: 0,
-  trackHeight: 80,
+  // 56px（2026-11-10，对齐 OpenFilm 的 TRACK_H.visual）。
+  // 原 80px 偏高：一屏只放得下三轨，长项目要频繁滚动；56px 在同样高度里
+  // 多容纳一轨，且片段信息条（名称+时长）与缩略带仍放得下。
+  trackHeight: 56,
   headerWidth: 120,
-  rulerHeight: 16,
+  // 20px（对齐 OpenFilm 的 RULER_H）。原 16px 放不下 10.5px 的刻度文字
+  // 与 3px 的内容范围条，实际渲染时文字被裁。
+  rulerHeight: 20,
 };
 
 /** 最小缩放：10s 一格（剪映最小档的刻度密度，图1）。 */
@@ -210,7 +215,8 @@ export interface TimelineRuntimePrefs {
 
 export const DEFAULT_RUNTIME_PREFS: TimelineRuntimePrefs = {
   snappingEnabled: true,
-  trackHeight: 80,
+  // 与 DEFAULT_VIEW_STATE.trackHeight 保持一致（56，对齐 OpenFilm）。
+  trackHeight: 56,
   /** 剪映默认 40% 波形占比。 */
   waveformRatio: 0.4,
 };

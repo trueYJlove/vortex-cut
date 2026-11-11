@@ -310,15 +310,16 @@ describe("按需代理：实测解不动才登记（App 侧）", () => {
     delete (window as { desktop?: unknown }).desktop;
   });
 
-  it("a. 超预算 ⇒ 为正确的 asset_id 登记一次 preview-1080-v1", async () => {
+  it("a. 超预算 ⇒ 为正确的 asset_id 登记一次代理作业（档位自动）", async () => {
     const { createPreviewSourceJob, listJobs } = setup();
     render(React.createElement(App));
     const report = await waitForSink();
 
     report([verdict("asset_a", true)]);
     await waitFor(() => expect(createPreviewSourceJob).toHaveBeenCalledTimes(1));
+    // 档位不再写死 1080：默认 auto 交给 Core 按素材尺寸选档。
     expect(createPreviewSourceJob).toHaveBeenCalledWith({
-      project_id: appProject.project_id, asset_id: "asset_a", profile_id: "preview-1080-v1",
+      project_id: appProject.project_id, asset_id: "asset_a",
     });
     // 没有导入动作（素材早已在库里）：这条登记只可能来自实测判定。
     expect(listJobs).toHaveBeenCalled();

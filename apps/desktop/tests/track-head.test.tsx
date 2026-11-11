@@ -58,10 +58,14 @@ describe("轨道属性头", () => {
     expect(entry).not.toBeNull();
     const top = parseFloat(entry!.style.top);
     const height = parseFloat(entry!.style.height);
-    // 默认视图：rulerHeight=16，V2/T1/C1 均为 0.7×80=56px 行高 → V1 y=184。
-    expect(top).toBe(16 + 3 * 56 + 2);
-    // V1 是主轨：全行高 80（不受 0.7 副行比影响）→ 入口高 = 80-4。
-    expect(height).toBe(80 - 4);
+    // 断言的意图是「封面跟随 V1 行」，不是某个写死的像素值：直接取 V1 轨道头
+    // 的实际 top 作基准。行组在轨道区内垂直居中（2026-11-11，对齐 OpenFilm 的
+    // padTop）之后，绝对位置会随面板高度变，写死常数会把测试变成几何快照。
+    const v1Head = document.querySelector('[data-track-id="V1"]') as HTMLElement | null;
+    expect(v1Head).not.toBeNull();
+    expect(top).toBe(parseFloat(v1Head!.style.top) + 2);
+    // V1 是主轨：入口高 = 行高 - 4（上下各内缩 2px，与行内片段对齐）。
+    expect(height).toBe(parseFloat(v1Head!.style.height) - 4);
     fireEvent.click(entry!);
     expect(onCaptureCover).toHaveBeenCalled();
   });

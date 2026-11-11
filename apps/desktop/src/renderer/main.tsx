@@ -2,7 +2,11 @@ import { Profiler, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "../styles.css";
 import { editorPerf, installEditorDiagnostics } from "../app/preview/perf-metrics.js";
+import { initTheme } from "../app/theme.js";
 installEditorDiagnostics();
+// 主题：index.html 的内联脚本已在首帧前写过一次，这里幂等兜底
+// （内联脚本被 CSP 或构建改写时，仍能保证 DOM 与存储一致）。
+initTheme();
 
 /**
  * 渲染入口（§7.1 四层隔离 · 第 2 层）：

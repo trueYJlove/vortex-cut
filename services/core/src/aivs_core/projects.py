@@ -655,7 +655,18 @@ class ProjectAssetService:
                 raise DomainError("ASSET_UNSUPPORTED", "文本素材必须为 UTF-8 编码") from exc
             return {"format_name": path.suffix.lower().lstrip("."), "duration_us": 0}
         if kind == "image":
-            return {"format_name": path.suffix.lower().lstrip("."), "duration_us": 0}
+            # 图片也要 probe：合成预览的实时 IR 要求每个非音频输入都有几何
+            # （ir.py 的 "缺少输入流几何" 检查），没有 width/height 就意味着
+            # 含图片的时间线必然回退到交互预览——画布拖动、播放全部降级。
+            # ffprobe 把 PNG/JPEG 等报为 codec_type=video 的单帧流，能给出
+            # 正确的 width/height/pix_fmt，这里直接复用它。
+            # duration_us 仍按 0（静图无固有长度，时长由片段的 duration_us 决定）。
+            try:
+                probed = await self.probe(path, require_video=False)
+            except (RuntimeError, TypeError):
+                # probe 失败不阻断导入：退回只有格式的旧行为，预览侧自行回退。
+                return {"format_name": path.suffix.lower().lstrip("."), "duration_us": 0}
+            return {**probed, "duration_us": 0}
         try:
             result = await self.probe(path, require_video=kind == "video")
         except TypeError:

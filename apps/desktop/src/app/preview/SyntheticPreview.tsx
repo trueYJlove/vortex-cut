@@ -482,11 +482,26 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
   // 外部播放头跳转（暂停态）：偏差 >0.5s 视为外部 seek；播放中自身上报的时间不回环。
   // 连续快速跳转走拖拽快速档（主轨优先），停止 250ms 后全量精修（M3-2）。
   const settleTimer = useRef<number>(0);
+  /** 最近一次真正下发的目标帧：按帧去重，保证擦洗每一步都送达预览。 */
+  const lastSeekedFrame = useRef<number>(-1);
   useEffect(() => {
     const session = sessionRef.current;
     if (!session || load.status !== "ready" || playing) return;
-    if (Math.abs(playheadUs - lastReportedUs.current) > 500_000) {
-      void session.seekToFrame(Math.max(0, Math.floor((playheadUs / 1e6) * session.ir.canvas.fps)));
+    // 2026-11-10：阈值判定必须"两边都记账"，否则连续擦洗会被全部丢弃。
+    // 原实现只在 >0.5s 跳变时才 seek，且 seek 之后**不更新** lastReportedUs：
+    // 用户用标尺小步拖动（每次位移 <0.5s）时，每个新位置与那个陈旧的基准
+    // 比较都不够大 ⇒ 画面几乎不动。实测：擦洗 16 次采样只产生 3 个不同画面，
+    // 时间码已经走到 00:00:01:04。
+    // 改为：每次 seek 后把 lastReportedUs 同步到该位置，使下一次比较基于
+    // 真实画面所在时间；阈值本身保留（它挡的是播放回传与环境噪声导致的回环）。
+    // 阈值只用于"这一帧要不要动"的粗筛，不能既筛又不清基准——否则小步擦洗
+    // 永远追不上。这里改为按**帧**比较：只要目标帧与当前帧不同就 seek。
+    // 帧级比较天然过滤播放回传的抖动（同一帧不重复 seek），又不会丢弃擦洗。
+    const targetFrame = Math.max(0, Math.floor((playheadUs / 1e6) * session.ir.canvas.fps));
+    if (targetFrame !== lastSeekedFrame.current) {
+      lastSeekedFrame.current = targetFrame;
+      lastReportedUs.current = playheadUs;
+      void session.seekToFrame(targetFrame);
       window.clearTimeout(settleTimer.current);
       settleTimer.current = window.setTimeout(() => void session.refineAfterDrag(), 250);
     }
