@@ -24,11 +24,11 @@ const media = () =>
 function savedMode(): ThemeMode {
   try {
     const value = window.localStorage.getItem(THEME_STORAGE_KEY);
-    if (value === "light" || value === "system") return value;
+    if (value === "light" || value === "dark" || value === "system") return value;
   } catch {
-    /* 隐私模式/存储被禁：按默认深色，不抛 */
+    /* 隐私模式/存储被禁：按默认跟随系统，不抛 */
   }
-  return "dark";
+  return "system";
 }
 
 /** 实际生效的外观（把 system 解析成 light/dark）。 */
@@ -74,7 +74,7 @@ export function useThemeMode(): [ThemeMode, (mode: ThemeMode) => void] {
   const mode = useSyncExternalStore(
     on => { listeners.add(on); return () => { listeners.delete(on); }; },
     savedMode,
-    () => "dark" as ThemeMode,
+    () => "system" as ThemeMode,
   );
   return [mode, setThemeMode];
 }

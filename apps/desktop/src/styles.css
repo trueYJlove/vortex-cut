@@ -537,7 +537,7 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--vc-accent); }
    主画布内容自 2*headW 起——与 drawRulerStrip 的屏幕对齐规则一致）；
    线 + 手柄只做 translateX，不参与命中测试（拖拽由标尺/空白区提供）。 */
 .timeline-playhead-layer { position: absolute; inset: 0; z-index: 7; pointer-events: none; }
-.timeline-playhead-line { position: absolute; left: 0; top: 0; width: 1.5px; margin-left: -0.75px; background: #f65d55; will-change: transform; }
+.timeline-playhead-line { position: absolute; left: 0; top: 0; width: 1.5px; margin-left: -0.75px; background: var(--tl-playhead-stroke, #f65d55); will-change: transform; }
 /* 播放头旋钮（2026-11-10，对齐 OpenFilm 的 PlayheadKnob）：
    12x17 图钉形状的 SVG 承载在 24x20 的命中区里——人手瞄准的是线，
    差几像素就抓不到，所以命中区比图形大。图形本身不参与 pointer 命中
@@ -555,6 +555,14 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--vc-accent); }
   --tl-playhead-stroke: #f65d55;
   --tl-playhead-rest: #14171a;
   --tl-playhead-fill: #f65d55;
+}
+/* 浅色播放头（对齐 OpenFilm：白底上用深墨线）：
+   令牌定义在本元素上，元素自身声明胜过继承——浅色覆盖必须用同元素选择器
+   （更高优先级）才能生效，[data-theme] 祖先级覆盖无效。 */
+[data-theme="light"] .timeline-playhead-layer {
+  --tl-playhead-stroke: #161619;
+  --tl-playhead-rest: #ffffff;
+  --tl-playhead-fill: #161619;
 }
 .timeline-scroll { flex: 1; min-height: 0; display: flex; overflow-y: auto; overflow-x: hidden; align-items: flex-start; position: relative; }
 .timeline-scroll::-webkit-scrollbar { width: 8px; }
@@ -580,7 +588,7 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--vc-accent); }
 .timeline-add-track-menu button:hover { background: #27333b; }
 /* 显示设置（…菜单）：轨道高度滑杆 + 波形占比三档 */
 .timeline-display-wrap { position: relative; display: inline-flex; margin-left: 6px; }
-.timeline-display-menu { position: absolute; top: 36px; right: 0; z-index: 40; display: flex; flex-direction: column; gap: 12px; min-width: 240px; padding: 14px 12px; background: #2c2c2c; border: 1px solid #3a464e; border-radius: 8px; box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45); }
+.timeline-display-menu { position: absolute; top: 36px; right: 0; z-index: 40; display: flex; flex-direction: column; gap: 12px; min-width: 240px; padding: 14px 12px; background: var(--vc-panel-2, #2c2c2c); border: 1px solid var(--vc-border, #3a464e); border-radius: 8px; box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45); }
 /* 两行共用同一栅格：56px 标签 + 150px 内容列；滑条与图标组都铺满内容列，
    图标组 justify-content: space-between → 首尾图标与滑条两端对齐、等距。 */
 .timeline-display-menu .display-row { display: grid; grid-template-columns: 56px 150px; align-items: center; gap: 10px; }
@@ -588,20 +596,20 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--vc-accent); }
 .timeline-display-menu .display-slider { width: 150px; }
 /* 剪映式细滑条（2px 轨道 + 12px 圆形滑块）：轨道高度与时间线缩放共用。 */
 .track-height-slider { height: 12px; appearance: none; -webkit-appearance: none; background: transparent; cursor: pointer; }
-.track-height-slider::-webkit-slider-runnable-track { height: 2px; border-radius: 1px; background: #4a565e; }
-.track-height-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 12px; height: 12px; margin-top: -5px; border-radius: 50%; background: #eef4f6; border: none; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5); }
-.track-height-slider::-moz-range-track { height: 2px; border-radius: 1px; background: #4a565e; }
-.track-height-slider::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: #eef4f6; border: none; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5); }
+.track-height-slider::-webkit-slider-runnable-track { height: 2px; border-radius: 1px; background: var(--vc-border-2, #4a565e); }
+.track-height-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 12px; height: 12px; margin-top: -5px; border-radius: 50%; background: var(--vc-panel-2, #eef4f6); border: none; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5); }
+.track-height-slider::-moz-range-track { height: 2px; border-radius: 1px; background: var(--vc-border-2, #4a565e); }
+.track-height-slider::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: var(--vc-panel-2, #eef4f6); border: none; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5); }
 /* 波形占比图标（剪映式）：深色示波卡 + 波形柱；选中 = 青色描边 + 微亮底
    （不用实底吞掉图标，保持可读）。hover 提示具体比例。 */
 .timeline-display-menu .ratio-group { display: inline-flex; align-items: center; justify-content: space-between; width: 150px; }
 .ratio-icon { min-width: 0; min-height: 0; width: 32px; height: 24px; display: grid; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 6px; background: transparent; cursor: pointer; }
-.ratio-icon:hover { background: rgba(255, 255, 255, 0.08); }
-.ratio-icon.active { border-color: #12b5a6; background: rgba(18, 181, 166, 0.16); }
-.ratio-icon-card { display: flex; align-items: flex-end; justify-content: center; gap: 1.5px; width: 18px; height: 13px; padding: 2px 2.5px; box-sizing: border-box; border: 1px solid #cfd8dd; border-radius: 2px; overflow: hidden; }
-.ratio-icon-card i { width: 2px; background: #e6edef; }
-.ratio-icon.active .ratio-icon-card { border-color: #7fe8dd; }
-.ratio-icon.active .ratio-icon-card i { background: #7fe8dd; }
+.ratio-icon:hover { background: var(--ctl-bg-hover, rgba(255, 255, 255, 0.08)); }
+.ratio-icon.active { border-color: var(--vc-accent, #12b5a6); background: var(--vc-accent-soft, rgba(18, 181, 166, 0.16)); }
+.ratio-icon-card { display: flex; align-items: flex-end; justify-content: center; gap: 1.5px; width: 18px; height: 13px; padding: 2px 2.5px; box-sizing: border-box; border: 1px solid var(--vc-border-2, #cfd8dd); border-radius: 2px; overflow: hidden; }
+.ratio-icon-card i { width: 2px; background: var(--vc-text, #e6edef); }
+.ratio-icon.active .ratio-icon-card { border-color: var(--vc-accent, #7fe8dd); }
+.ratio-icon.active .ratio-icon-card i { background: var(--vc-accent, #7fe8dd); }
 /* 轨道头：内容贴行顶，不随行高居中（2026-11-11 对齐 OpenFilm 的 head 网格）。
    原来是 align-items:center——行高 56、内容 18 时，轨号与开关落在行的垂直中段；
    参照软件里这一排始终贴着行顶，与片段的名称条同一水平线。行拉高后差别明显。 */
@@ -3502,9 +3510,9 @@ html[data-theme="light"] .modal-backdrop { background: rgba(16, 16, 24, .28); }
 [data-theme="light"] {
   --tl-ruler-top: #f2f2f4;
   --tl-ruler-bottom: #e8e8ea;
-  --tl-dead-bg: #ededef;
-  --tl-row: #f4f4f6;
-  --tl-row-audio: #eef0f1;
+  --tl-dead-bg: #ececee;
+  --tl-row: #f0f0f3;
+  --tl-row-audio: #ededef;
 }
 
 
@@ -3567,11 +3575,11 @@ html[data-theme="light"] {
   --tl-label: #b9c4d1;
 }
 html[data-theme="light"] {
-  --tl-canvas-bg: #f0f0f2;
+  --tl-canvas-bg: #e7e7ea;
   --tl-grid-line: rgba(16, 16, 24, 0.06);
   --tl-grid-line-strong: rgba(16, 16, 24, 0.20);
-  --tl-tick-major: #8a8a93;
-  --tl-tick-minor: #b5b5bd;
+  --tl-tick-major: #6a6a72;
+  --tl-tick-minor: #a2a2ab;
   --tl-label: #5a5a63;
 }
 
@@ -4659,10 +4667,12 @@ body { background:#141416; }
   --ws-accent-ink:#ffffff;
   --ws-accent-dim:rgba(15,158,134,.12);
   --ws-accent-line:rgba(15,158,134,.45);
-  --tl-playhead-stroke:#c0392b;
-  --tl-playhead-rest:#ffffff;
-  --tl-playhead-fill:#c0392b;
 }
+
+/* 浅色下轨号徽章换深色调（深色值是为深底调的中間調，浅底上对比不足） */
+[data-theme="light"] .timeline-track-head[data-track-kind="video"] .timeline-track-badge { color: #2e5a80; }
+[data-theme="light"] .timeline-track-head[data-track-kind="text"] .timeline-track-badge { color: #8a5a1e; }
+[data-theme="light"] .timeline-track-head[data-track-kind="audio"] .timeline-track-badge { color: #1e6a3e; }
 
 
 /* 浅色下的页面底与滚动条 */
