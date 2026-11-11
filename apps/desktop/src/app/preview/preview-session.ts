@@ -283,6 +283,17 @@ export class PreviewSession {
   private anchorFrame = 0;
   private currentFrame = 0;
   private latestTarget = 0;
+  /** 拖拽快速档上一次目标帧（Win3 方向判定用；非拖拽态无语义）。 */
+  private dragTarget = 0;
+  /** 用户拖拽风暴显式标志：由 App 在拖动开始/结束经 scrub handle 置位/清零。
+   *  引擎侧 dragMode（250ms 内多次 seek）是启发式——装配/换装轮的连续 seek 也会
+   *  命中它，曾击穿 C20c 的取窗数契约；显式标志只由真实拖动驱动。 */
+  private scrubStorm = false;
+
+  /** 拖动开始：允许方向性窗口预取（Win3）。 */
+  beginScrubStorm(): void { this.scrubStorm = true; this.dragTarget = -1; }
+  /** 拖动结束：停用预取。 */
+  endScrubStorm(): void { this.scrubStorm = false; }
   private taskTimes: number[] = [];
   private decodeTimes: number[] = [];
   /** 按 **input_id** 分开的解码耗时簿记（decodeTimes 保留不动，维持既有指标
@@ -422,6 +433,9 @@ export class PreviewSession {
   private static readonly LAG_REANCHOR = 4;
   /** 合成时向历史回溯的最大帧数（starving 后取最近就绪帧）。 */
   private static readonly BACKSCAN = 15;
+  /** scrub 快进（Win1）：被取代 seek 的已完成解码，落在新目标 ±N 帧内则仍入环。
+   *  快速拖动 ~60-120px/30ms 步进 ≈ 每步几十帧，±48 覆盖一次拖动步的真实邻域。 */
+  private static readonly SCRUB_ADMIT_SPAN = 48;
 
   ir: Ir;
   /** C20a：帧数据访问层（v1 = 全量数组零拷贝适配；v2 窗口化接入点）。 */
@@ -1324,7 +1338,19 @@ export class PreviewSession {
       } finally {
         this.decodeInFlight -= 1;
       }
-      if (epoch !== this.seekEpoch || generation !== rig.chainGeneration) { this.skippedUploads += 1; decoded.release(); return; }
+      // 2026-11-11 scrub 快进（Stage B-Win1）：seek 被更新者取代时，**已完成解码**
+      //  不再无条件丢弃——若 srcN 落在新目标附近（±SCRUB_ADMIT_SPAN 帧），仍入环：
+      //  快速拖动是空间上相邻的 seek 风暴，被作废的那次解码大概率正是下一个
+      //  seek 要的帧。入环即重armed ±1 零解码快径，拖动中环从"永不填上"变
+      //  "边拖边填"。上传语义不变（uploadDecoded 幂等，槽位覆盖即可）。
+      if (epoch !== this.seekEpoch || generation !== rig.chainGeneration) {
+        // Win1 修订（实测 538ms 尾刺）：拖拽风暴中**不**收留过期解码——收留会让
+        // 上传与下一个 seek 的解码抢 GPU/上传通道，尾部 p99 反超基线近 13 倍。
+        // 收留仅在非拖拽态生效（refine 落定后的过期解码仍可入环）。
+        const liveTarget = this.dragMode ? -1 : this.latestTarget;
+        const near = liveTarget >= 0 && Math.abs(srcN - liveTarget) <= PreviewSession.SCRUB_ADMIT_SPAN;
+        if (!near || this.disposed) { this.skippedUploads += 1; decoded.release(); return; }
+      }
       const uploadStart = performance.now();
       await this.compositor!.uploadDecoded(inputId, slotIndex, srcN, decoded);
       if (this.disposed || epoch !== this.seekEpoch || generation !== rig.chainGeneration) return;
@@ -1408,6 +1434,13 @@ export class PreviewSession {
     if (rig?.kind === "image") return { op: "draw", inputId, image: true };
     if (shadow) return { op: "draw", inputId, shadow: true };
     return { op: "draw", inputId, slot: this.ringSlotIndex(rig!, srcN) };
+  }
+
+  /** 拖拽快速档就绪门槛：只要主轨（PiP overlay 拖动中不阻塞合成，Win2）。
+   *  与 frameReady 同构但只收 mainNeeds——sourceOf 对缺纹理 overlay 返回 null
+   *  跳过绘制，画面不完整但不冻结。 */
+  private mainReady(frame: IrFrame): boolean {
+    return mainNeeds(frame).every(([inputId, srcN, shadow]) => this.textureReady(inputId, srcN, shadow));
   }
 
   /** 目标帧全部输入是否就绪（环形槽/影子槽/静图）——注意它只回答"纹理在不在"，
@@ -2201,6 +2234,10 @@ export class PreviewSession {
     this.dragMode = now - this.lastSeekWall < 250;
     this.lastSeekWall = now;
     const index = Math.max(0, Math.min(target, this.frames.frameCount - 1));
+    // 2026-11-11 scrub 快进（Stage B-Win3）：拖拽快速档首 seek 即向拖动方向
+    // 预取下一窗口的帧元数据（fire-and-forget）——scheduleWindowPrefetch 只在
+    // 落定后 200ms 才发，快速拖动越窗时 50-70ms 的 IPC 取窗固定停顿无处可躲。
+    // 方向 = 拖动方向（本次 target 与上次 dragTarget 差值符号）。
     // P196：取窗发起前先判定一次——窗口请求若悬挂不返回（网络/磁盘卡死），
     // await 之后的判定永远到不了，画面会无声冻结。提前这一次让"用户真的在
     // 等"照样能出提示；快取窗（~50-70ms）在下方 await 后立刻被判回"恢复"，
@@ -2209,6 +2246,17 @@ export class PreviewSession {
     // C20 v2：目标帧所在窗口可能未就绪——先取窗（abort 语义 = 会话生命周期；
     // 单窗 IPC ~50-70ms，拖拽快速档由 epoch latest-wins 兜住）。
     const ensure = this.frames.ensureRange?.(index, index + 1, this.lifetime.signal);
+    // Win3（方向性预取）：拖拽快速档首 seek 即向拖动方向预取下一窗口帧元数据。
+    // 隔离复测曾疑其引发 p99 尾刺，后证尾刺在 pristine 代码同样出现（环境固有），
+    // 与本预取无关。fire-and-forget 不阻塞 seek 主路径。
+    if (this.scrubStorm && this.externalFrames) {
+      const dir = Math.sign(index - this.dragTarget);
+      if (dir !== 0) {
+        const next = Math.max(0, Math.min(index + dir * Math.max(1, this.prefetchSpan) * PREVIEW_IR_V2_MAX_WINDOW_FRAMES, this.frames.frameCount - 1));
+        void this.frames.ensureRange?.(next, next + 1, this.lifetime.signal);
+      }
+      this.dragTarget = index;
+    }
     if (ensure) {
       // 窗口就绪后增量并入 pip 索引（游标扫描,与播放 pump 路径同型——
       // C20-T2 装配并行化后 create 时窗口可能未就绪,这里补齐首窗索引）
@@ -2249,6 +2297,12 @@ export class PreviewSession {
       return -1;
     }
     if (epoch !== this.seekEpoch) return -1; // 已被更新的 seek 取代
+    // 2026-11-11 scrub 快进（Stage B-Win2）：拖拽快速档就绪门槛放宽为主轨——
+    // dragMode 本就跳过 overlay 上传（争抢解码器实测 seek p95 翻倍），但
+    // frameReady 仍要求 overlay 纹理 → 带 PiP 的项目拖动中整帧冻结到 refine。
+    // 改为拖动中只等主轨（compose 的 sourceOf 对缺纹理 overlay 本就跳过，
+    // :1405-1411），PiP 画布在拖动中跟随主画面而非冻结；落定（refine）即恢复
+    // 完整门槛。
     // P196（纹理半场）：上传落定后再判一次。上方第一次判定发生在**发起上传
     // 之前**——那一帧的纹理此刻必然还没进槽（未就绪），计时已经起跑；没有
     // 这一次收尾判定，每次普通 seek 都会在 300ms 后凭空点亮指示条。此处的
@@ -2256,7 +2310,8 @@ export class PreviewSession {
     this.observeBuffering(index);
     this.lastSeekMs = performance.now() - now;
     editorPerf.record("seek", this.lastSeekMs, this.perfId, epoch, epoch, index);
-    if (this.frameReady(frame)) this.compose(frame);
+    const readyInDrag = this.dragMode ? this.mainReady(frame) : this.frameReady(frame);
+    if (readyInDrag) this.compose(frame);
     this.onTimeUs?.(frame.t_us);
     this.poolDrive(frame); // B13：seek 后立即驱动（pin/换源语义）
     // 暂停态预热预读链：预解码后续 LEAD 帧——再按播放即有热跑道

@@ -33,6 +33,10 @@ export interface SyntheticPreviewProps {
   revisionId: string | null;
   /** 画布比例（169/916/11/43/34），App 按项目画布解析。 */
   outputRatio: string;
+  /** 会话句柄上抛（2026-11-11 scrub 直通）：App 在拖拽风暴中用它绕过 React 提交
+   *  直接 seekToFrame（dev 下全树提交 ~36ms 是拖动卡顿的主因）；null = 会话
+   *  重建/卸载。App 必须在会话 null 后停止直呼。 */
+  onSession?: (session: { seekToFrame(target: number): Promise<number>; beginScrubStorm(): void; endScrubStorm(): void } | null) => void;
   /** asset_id → aivideo:// 票据 URL（App 既有素材通道）。 */
   mediaUrls: Map<string, string>;
   /** clip_id → 片段音频配置（编辑态透传；未提供则合成预览静音）。 */
@@ -88,7 +92,7 @@ interface LoadState {
 }
 
 export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactElement {
-  const { projectId, revisionId, mediaUrls, audioByClip, pipClips, selectedClipId, onSelectClip, onCommitPipTransform, onDraftPipMask, onCommitPipMask, onGesturePause, onGestureResume, playing, playheadUs, onTimeUs, onEnded, onFallback, outputRatio, playheadStore, sourceResolver, resourceTier, forceCopyTo, playbackRate, snapshotRef, proxyEpoch, onDecodeBudget } = props;
+  const { projectId, revisionId, mediaUrls, audioByClip, pipClips, selectedClipId, onSelectClip, onCommitPipTransform, onDraftPipMask, onCommitPipMask, onGesturePause, onGestureResume, playing, playheadUs, onTimeUs, onEnded, onFallback, outputRatio, playheadStore, sourceResolver, resourceTier, forceCopyTo, playbackRate, snapshotRef, proxyEpoch, onDecodeBudget, onSession } = props;
   // 判定回调经 ref 读最新值：指标轮询 effect 只依赖 load.status，不该因为父组件
   // 每次重渲染换了函数身份就重建定时器（重建会漏掉一轮采样）。
   const onDecodeBudgetRef = useRef(onDecodeBudget);
@@ -299,6 +303,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
           if (existingSession) {
             existingSession.dispose();
             sessionRefLocal.current = null;
+            onSession?.(null);
           }
           frameSourceRef.current?.dispose?.();
           frameSourceRef.current = null;
@@ -329,6 +334,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
           session.onBuffering = (value: boolean) => { if (!stale()) setBuffering(value); };
           if (bufferingShown.current) setBuffering(false);
           sessionRefLocal.current = session;
+          onSession?.(session);
           sessionProjectRef.current = projectId;
           boxObserverRef.current?.observe(container);
           // C20-T2：字体已在装配头部并行预取；首窗就绪后再 seek（seekToFrame
@@ -362,6 +368,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
         }
         existing?.dispose();
         sessionRefLocal.current = null;
+        onSession?.(null);
         // 画布元素由会话自建（transferControlToOffscreen 每元素仅一次），
         // 后备缓冲随预览框（contain 居中，见 session.resize）；初始以 IR 画布尺寸起底
         const session = await PreviewSession.create(container, ir, mediaUrls, audioByClip, controller.signal, sourceResolver ?? null, resourceTier, typeof projectId === "string" ? projectId : null, undefined, forceCopyTo);
@@ -387,6 +394,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
         session.onBuffering = (value: boolean) => { if (!stale()) setBuffering(value); };
         if (bufferingShown.current) setBuffering(false);
         sessionRefLocal.current = session;
+        onSession?.(session);
         sessionProjectRef.current = projectId;
         boxObserverRef.current?.observe(container);
         const fontEntries = await (window.desktop.captionFontUrls
@@ -411,7 +419,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
         if (playing) session.play();
       } catch (error) {
         creating?.dispose();
-        if (sessionRefLocal.current === creating) sessionRefLocal.current = null;
+        if (sessionRefLocal.current === creating) { sessionRefLocal.current = null; onSession?.(null); }
         if (stale()) return;
         const message = error instanceof Error ? error.message : String(error);
         // 域错误码经 Main safeInvoke 原码透传（IPC 包装可能带前缀，按子串识别）。

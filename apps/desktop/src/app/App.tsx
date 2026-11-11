@@ -433,6 +433,11 @@ export function App() {
   const [uiRate, setUiRate] = useState(1);
   const [ratePopOpen, setRatePopOpen] = useState(false);
   const ratePopRef = useRef<HTMLDivElement | null>(null);
+  // scrub 直通（2026-11-11）：拖拽风暴中绕过 React 提交直接驱动预览会话——
+  // dev 构建下每次 setPlayhead 触发整树提交（实测 ~36ms/次）是「拖动像快进
+  // 卡顿」的主因。prod 下提交便宜，此通道同样减少主线程抖动。
+  const previewSessionRef = useRef<{ seekToFrame(target: number): Promise<number>; beginScrubStorm(): void; endScrubStorm(): void } | null>(null);
+  const lastDirectSeekFrameRef = useRef(-1);
   const volumeRef = useRef(volume);
   const [progressDragging, setProgressDragging] = useState(false);
   const [previewZoom, setPreviewZoom] = useState<number | "fit">("fit");
@@ -1378,20 +1383,38 @@ export function App() {
   const seekWhileScrubbing = useCallback((timeUs: number) => {
     // 线条立刻走（覆盖层 rAF 消费 store）。
     dispatchPlayhead("user", timeUs, false);
-    // 画面也立刻走：预览侧已按"目标帧"去重（SyntheticPreview 的
-    // lastSeekedFrame），同一帧不会重复 seek，所以这里不需要再节流。
-    // 实测教训：早先在这里按 15ms 节流，而擦洗期间指针事件与 React 提交
-    // 本就有延迟，两层节流叠加后 16 次拖动只出 6 个不同画面——节流应当
-    // 只保留在最贵的一层（解码），不能每层都设一道闸。
+    // 画面直通：拖拽风暴中不再 setPlayhead（全树提交），改由会话句柄直接
+    // seekToFrame（内部按目标帧去重 + dragMode latest-wins）。React 状态按
+    // 100ms 节流提交（属性面板/其余 UI 不需要逐帧跟随）；松手 commitScrub
+    // 落定精确值。交互预览（HTMLMediaElement）无会话句柄——走原 setPlayhead
+    // 路径（videoRef.currentTime 由其 effect 消费）。
+    const session = previewSessionRef.current;
+    if (session && previewMode === "synthetic" && !libraryPreviewId) {
+      session.beginScrubStorm();
+      const fps = working?.canvas.fps_num && working.canvas.fps_den ? working.canvas.fps_num / working.canvas.fps_den : 30;
+      const targetFrame = Math.max(0, Math.floor((timeUs / 1e6) * fps));
+      if (targetFrame !== lastDirectSeekFrameRef.current) {
+        lastDirectSeekFrameRef.current = targetFrame;
+        void session.seekToFrame(targetFrame);
+      }
+      if (performance.now() - scrubToldAt.current >= SCRUB_STATE_MS) {
+        setPlayhead(timeUs);
+        scrubToldAt.current = performance.now();
+      }
+      return;
+    }
+    // 非 synthetic（interactive/库预览）：原路径——画面由 playheadUs prop 驱动。
     setPlayhead(timeUs);
     scrubToldAt.current = performance.now();
-  }, [dispatchPlayhead]);
+  }, [dispatchPlayhead, previewMode, libraryPreviewId, working?.canvas.fps_num, working?.canvas.fps_den]);
   /** 一次擦洗结束（松手/键盘跳转）：落到精确值并提交 React。 */
   const commitScrub = useCallback((timeUs: number) => {
     setPlaying(false);
     dispatchPlayhead("user", timeUs, true);
     scrubToldAt.current = 0;
     lastReactTimeReport.current = 0;
+    lastDirectSeekFrameRef.current = -1;
+    previewSessionRef.current?.endScrubStorm();
   }, [dispatchPlayhead]);
   const seekFromUser = useCallback((timeUs: number) => {
     commitScrub(timeUs);
@@ -3010,7 +3033,7 @@ export function App() {
             {previewMode === "authoritative" && authoritativeMediaUrl && <video ref={videoRef} className="preview-foreground authoritative-video" src={authoritativeMediaUrl} aria-label={reframePlayback ? "重构图权威预览视频" : exportPlayback ? "导出视频" : "权威预览视频"} controls onEnded={() => { setPlaying(false); setExportPlayback(undefined); setReframePlayback(undefined); setPreviewMode("synthetic"); }} />}
             {/* 合成预览仅在时间线有可见片段时挂载；空时间线显示引导文案（剪映式），
                 避免对空时间线请求 preview-ir 被 Core 以 TIMELINE_EMPTY 拒绝而回退。 */}
-            {previewMode === "synthetic" && projectStateReady && project && working && timeline && working.clips.length > 0 && <SyntheticPreview key={project.project_id} outputRatio={renderRatio} projectId={project.project_id} revisionId={timeline.current_revision.timeline_revision_id} mediaUrls={syntheticMediaUrls} audioByClip={syntheticAudioByClip} pipClips={syntheticPipClips} selectedClipId={pipSelectedId} onSelectClip={clipId => setSelection({ kind: "clip", id: clipId as never })} onCommitPipTransform={(clipId, transform) => { const clip = (working?.clips ?? []).find(item => item.clip_id === clipId); commitPipTransform(clipId as never, { ...(clip?.transform ?? {}), ...transform }); }} onDraftPipMask={(clipId, mask) => draftPipMask(clipId as never, mask)} onCommitPipMask={(clipId, mask) => commitPipMask(clipId as never, mask)} onGesturePause={pausePreviewPlayback} onGestureResume={resumePreviewPlayback} playing={playing && !gestureHoldRef.current} playheadUs={playhead} playheadStore={playheadStore} playbackRate={uiRate} onTimeUs={us => seekFromPlayback(us)} onEnded={handlePreviewEnded} onFallback={(reason, code) => { if (!seenAnyTicketRef.current) return; setPreviewMode("interactive"); setSyntheticNotice(syntheticFallbackNotice(reason, code)); }} sourceResolver={previewSourceResolver} resourceTier={resourceTier} forceCopyTo={forceCopyTo} snapshotRef={syntheticSnapshotRef} proxyEpoch={proxyReadyEpoch} onDecodeBudget={onDecodeBudget} />}
+            {previewMode === "synthetic" && projectStateReady && project && working && timeline && working.clips.length > 0 && <SyntheticPreview key={project.project_id} outputRatio={renderRatio} projectId={project.project_id} revisionId={timeline.current_revision.timeline_revision_id} mediaUrls={syntheticMediaUrls} audioByClip={syntheticAudioByClip} pipClips={syntheticPipClips} selectedClipId={pipSelectedId} onSelectClip={clipId => setSelection({ kind: "clip", id: clipId as never })} onCommitPipTransform={(clipId, transform) => { const clip = (working?.clips ?? []).find(item => item.clip_id === clipId); commitPipTransform(clipId as never, { ...(clip?.transform ?? {}), ...transform }); }} onDraftPipMask={(clipId, mask) => draftPipMask(clipId as never, mask)} onCommitPipMask={(clipId, mask) => commitPipMask(clipId as never, mask)} onGesturePause={pausePreviewPlayback} onGestureResume={resumePreviewPlayback} playing={playing && !gestureHoldRef.current} playheadUs={playhead} playheadStore={playheadStore} playbackRate={uiRate} onTimeUs={us => seekFromPlayback(us)} onEnded={handlePreviewEnded} onFallback={(reason, code) => { if (!seenAnyTicketRef.current) return; setPreviewMode("interactive"); setSyntheticNotice(syntheticFallbackNotice(reason, code)); }} sourceResolver={previewSourceResolver} resourceTier={resourceTier} forceCopyTo={forceCopyTo} snapshotRef={syntheticSnapshotRef} proxyEpoch={proxyReadyEpoch} onDecodeBudget={onDecodeBudget} onSession={session => { if (!session) previewSessionRef.current?.endScrubStorm(); previewSessionRef.current = session; }} />}
             {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "video" && <div className="preview-transform" style={mainTransformStyle}><video className="preview-background" src={previewAsset.media_url} muted aria-hidden="true" /><video ref={videoRef} className="preview-foreground" src={previewAsset.media_url} muted={!selectedClip?.audio.enabled || previewReverse || (clipAtPlayhead ? !isClipAudible(clipAtPlayhead) : false)} aria-label="交互预览视频" onTimeUpdate={event => { if (libraryPreviewId) dispatchPlayhead("external", Math.round(event.currentTarget.currentTime * 1_000_000), true); }} onEnded={handleVideoEnded} /></div>}
             {previewMode === "interactive" && audioAsset?.media_url && <audio ref={audioRef} src={audioAsset.media_url} style={{ display: "none" }} />}
             {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "image" && <div className="preview-transform" style={mainTransformStyle}><img className="preview-background" src={previewAsset.media_url} alt="" aria-hidden="true" /><img className="preview-foreground" src={previewAsset.media_url} alt={previewAsset.asset.display_name} /></div>}
