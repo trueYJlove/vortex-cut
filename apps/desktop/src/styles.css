@@ -177,17 +177,17 @@ textarea { min-height: 92px; padding: 8px; resize: vertical; }
 /* 选中框：白色 1.5px 边框包裹画面 + 8 向拖拽手柄（角 = 小 L 形，边 = 横/竖短线居中在边框线），缩放时随画面一起缩放；选中片段时显示。 */
 .sel-box { position: absolute; left: 0; top: 0; z-index: 9; display: none; pointer-events: none; }
 .preview-frame.selected .sel-box { display: block; }
-.sel-box .h { position: absolute; background: #fff; border-radius: 1.5px; box-shadow: 0 0 3px rgba(0,0,0,.6); pointer-events: auto; z-index: 5; touch-action: none; }
+.sel-box .h { position: absolute; background: #fff; border: 1px solid #0fa596; box-sizing: border-box; border-radius: 1.5px; box-shadow: 0 0 3px rgba(0,0,0,.6); pointer-events: auto; z-index: 5; touch-action: none; }
 .sel-box .h.h-n { left: 50%; top: -0.75px; width: 14px; height: 3px; margin-left: -7px; cursor: ns-resize; }
 .sel-box .h.h-s { left: 50%; bottom: -0.75px; width: 14px; height: 3px; margin-left: -7px; cursor: ns-resize; }
 .sel-box .h.h-w { left: -0.75px; top: 50%; width: 3px; height: 14px; margin-top: -7px; cursor: ew-resize; }
 .sel-box .h.h-e { right: -0.75px; top: 50%; width: 3px; height: 14px; margin-top: -7px; cursor: ew-resize; }
-.sel-box .h.h-nw { left: -2px; top: -2px; width: 6px; height: 6px; border-radius: 0; box-shadow: none; border-top: 2px solid #fff; border-left: 2px solid #fff; cursor: nwse-resize; }
-.sel-box .h.h-ne { right: -2px; top: -2px; width: 6px; height: 6px; border-radius: 0; box-shadow: none; border-top: 2px solid #fff; border-right: 2px solid #fff; cursor: nesw-resize; }
-.sel-box .h.h-sw { left: -2px; bottom: -2px; width: 6px; height: 6px; border-radius: 0; box-shadow: none; border-bottom: 2px solid #fff; border-left: 2px solid #fff; cursor: nesw-resize; }
-.sel-box .h.h-se { right: -2px; bottom: -2px; width: 6px; height: 6px; border-radius: 0; box-shadow: none; border-bottom: 2px solid #fff; border-right: 2px solid #fff; cursor: nwse-resize; }
-.sel-border { position: absolute; inset: 0; border: 1.5px solid #fff; border-radius: 2px; pointer-events: none; }
-.sel-dims { position: absolute; left: 50%; top: -30px; transform: translateX(-50%); padding: 3px 8px; border: 1px solid rgba(255,255,255,.12); border-radius: 5px; background: rgba(12,12,18,.92); color: #fff; font: 11px ui-monospace, Consolas, monospace; white-space: nowrap; pointer-events: none; }
+.sel-box .h.h-nw { left: -4px; top: -4px; width: 8px; height: 8px; border-radius: 0; box-shadow: 0 0 0 .5px rgba(0,0,0,.08); border: 1px solid #0fa596; cursor: nwse-resize; }
+.sel-box .h.h-ne { right: -4px; top: -4px; width: 8px; height: 8px; border-radius: 0; box-shadow: 0 0 0 .5px rgba(0,0,0,.08); border: 1px solid #0fa596; cursor: nesw-resize; }
+.sel-box .h.h-sw { left: -4px; bottom: -4px; width: 8px; height: 8px; border-radius: 0; box-shadow: 0 0 0 .5px rgba(0,0,0,.08); border: 1px solid #0fa596; cursor: nesw-resize; }
+.sel-box .h.h-se { right: -4px; bottom: -4px; width: 8px; height: 8px; border-radius: 0; box-shadow: 0 0 0 .5px rgba(0,0,0,.08); border: 1px solid #0fa596; cursor: nwse-resize; }
+.sel-border { position: absolute; inset: 0; border: 1px solid #0fa596; border-radius: 2px; pointer-events: none; }
+.sel-dims { position: absolute; left: 50%; top: -24px; transform: translateX(-50%); padding: 1px 7px; border-radius: 3px; background: #0fa596; color: #fff; font: 500 10px/14px ui-monospace, Consolas, monospace; white-space: nowrap; pointer-events: none; }
 .preview-frame video, .preview-frame img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }.preview-background { display: none; }.preview-foreground { z-index: 2; }.preview-frame.fit .preview-foreground, .preview-frame.fit .preview-background { object-fit: contain; }.preview-frame.crop_fill .preview-foreground { object-fit: cover; }.preview-frame.blurred_background .preview-foreground { object-fit: contain; }.preview-frame.blurred_background .preview-background { display: block; z-index: 1; object-fit: cover; filter: blur(18px); transform: scale(1.08); opacity: .62; }.preview-empty { height: 100%; display: grid; place-items: center; padding: 30px; color: #6f7d83; text-align: center; }
 .interactive-label { position: absolute; z-index: 5; top: 18px; left: 18px; max-width: calc(100% - 36px); padding: 4px 6px; background: rgba(0,0,0,.78); color: #c8d0d3; font-size: var(--dlg-fs-caption); white-space: nowrap; }
 .interactive-label.stale { border: 1px solid #d1a453; color: #f0c979; }
@@ -827,10 +827,10 @@ input, select, textarea { font-size: var(--dlg-fs-body); }
 .pb-center { display: flex; align-items: center; justify-content: center; }
 .pb-right { position: relative; display: flex; justify-content: flex-end; align-items: center; gap: 2px; }
 /* 剪映式 SMPTE 时间码：当前时间白色加粗、分隔与总时长灰色弱化（非等宽 tabular-nums）。 */
-.tc { font: 500 11px "Segoe UI", Inter, "Microsoft YaHei", sans-serif; font-variant-numeric: tabular-nums; letter-spacing: 0; line-height: 1; white-space: nowrap; }
-.tc b { font-weight: 400; color: #f5f6fa; }
-.tc i { font-style: normal; color: rgba(255,255,255,.34); padding: 0 1px; }
-.tc .tot { color: rgba(255,255,255,.34); }
+.tc { font: 400 12px "Segoe UI", Inter, "Microsoft YaHei", sans-serif; font-variant-numeric: tabular-nums; letter-spacing: 0; line-height: 1; white-space: nowrap; }
+.tc b { font-weight: 500; color: var(--ws-text, #f5f6fa); }
+.tc i { font-style: normal; color: var(--ws-text-3, rgba(255,255,255,.34)); padding: 0 1px; font-size: 11px; }
+.tc .tot { color: var(--ws-text-3, rgba(255,255,255,.34)); font-size: 11px; }
 /* 电平表：两根 2.5px 细条随播放实时跳动。 */
 .vu { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; flex: 0 0 auto; }
 .vu i { width: 2.5px; height: 30%; border-radius: 1.5px; background: #3a3f4c; transition: height .09s ease-out, background .2s; }
@@ -3500,7 +3500,25 @@ html[data-theme="light"] .modal-backdrop { background: rgba(16, 16, 24, .28); }
    画布用 ctx.fillStyle 绘制，不吃 CSS 选择器，因此主题切换必须通过
    变量传进去（TimelineCanvas 的 cssColor() 读取这些名字）。
    深色值即原来硬编码的常量，视觉零变化；浅色值给浅底深字。 */
+/* 片段配色（对齐 OpenFilm KIND_COLOR）：深色为默认，浅色在主题覆盖块给出。 */
 :root {
+  --clip-video: #354f6a;
+  --clip-image: #2e5363;
+  --clip-page: #504472;
+  --clip-text: #7f4d28;
+  --clip-sticker: #24603e;
+  --clip-filter: #4b3f96;
+  --clip-effect: #74365f;
+  --clip-audio: #1c5757;
+  --tl-select: #161619;
+  --tl-snap: #0098a3;
+  --tl-row-hover: rgba(255, 255, 255, 0.07);
+  --tl-track-head-bg: #12181c;
+  --tl-end-edge: #3d4a5c;
+  --tl-range-top: #3a4147;
+  --tl-range-bottom: #4b545b;
+  --tl-chip-bg: rgba(9, 12, 24, 0.88);
+  --tl-chip-edge: rgba(37, 211, 172, 0.45);
   --tl-ruler-top: #222629;
   --tl-ruler-bottom: #1a1e21;
   --tl-dead-bg: #181c1f;
@@ -3508,6 +3526,23 @@ html[data-theme="light"] .modal-backdrop { background: rgba(16, 16, 24, .28); }
   --tl-row-audio: #24272b;
 }
 [data-theme="light"] {
+  --clip-video: #54789d;
+  --clip-image: #497c93;
+  --clip-page: #7968a8;
+  --clip-text: #b5703d;
+  --clip-sticker: #3d8a5c;
+  --clip-filter: #6a5bbf;
+  --clip-effect: #a8538a;
+  --clip-audio: #318383;
+  --tl-select: #161619;
+  --tl-snap: #0098a3;
+  --tl-row-hover: rgba(16, 16, 24, 0.06);
+  --tl-track-head-bg: #e9e9eb;
+  --tl-end-edge: #b9b9c0;
+  --tl-range-top: #b5b5bd;
+  --tl-range-bottom: #8a8a93;
+  --tl-chip-bg: rgba(24, 24, 30, 0.92);
+  --tl-chip-edge: rgba(15, 158, 134, 0.5);
   --tl-ruler-top: #f2f2f4;
   --tl-ruler-bottom: #e8e8ea;
   --tl-dead-bg: #ececee;
@@ -3582,6 +3617,25 @@ html[data-theme="light"] {
   --tl-tick-minor: #a2a2ab;
   --tl-label: #5a5a63;
 }
+
+/* 播放设置弹层（2026-11-11 对齐 OpenFilm PlaybackMenu）：循环开关 + 倍速分段。
+   面板规格取 OpenFilm：w-60(224px)、rounded-[14px]、shadow 0 18px 48px、行 13px。 */
+.rate-anchor { position: relative; display: inline-flex; }
+.rate-btn { position: relative; }
+.rate-dot { position: absolute; top: 3px; right: 3px; width: 5px; height: 5px; border-radius: 50%; background: var(--ws-accent, #35d6ae); }
+.rate-pop { position: absolute; top: calc(100% + 8px); right: 0; z-index: 60; min-width: 224px; padding: 10px; background: var(--dlg-bg, #171b1e); border: 1px solid var(--dlg-border, rgba(255,255,255,.12)); border-radius: 14px; box-shadow: 0 18px 48px -12px rgba(0, 0, 0, .45); opacity: 0; transform: translateY(-4px); pointer-events: none; transition: opacity .14s ease, transform .14s ease; }
+.rate-pop.open { opacity: 1; transform: translateY(0); pointer-events: auto; }
+.rate-pop .rp-head { padding: 2px 6px 8px; font-size: 11px; color: var(--dlg-text-3, #85918e); }
+.rate-pop .rp-row { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 7px; font-size: 13px; color: var(--dlg-text, #edf1ef); cursor: pointer; }
+.rate-pop .rp-row:hover { background: var(--ctl-bg-hover, #293235); }
+.rate-pop .rp-row svg { width: 14px; height: 14px; color: var(--dlg-text-2, #b5bfbc); }
+.rate-pop .rp-row input[type="checkbox"] { margin-left: auto; width: 15px; height: 15px; accent-color: var(--dlg-primary, #35d6ae); }
+.rate-pop .rp-speed { cursor: default; color: var(--dlg-text-2, #b5bfbc); }
+.rate-pop .rp-speed:hover { background: transparent; }
+.rate-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 2px 4px 4px; }
+.rate-opt { min-height: 28px; padding: 0 4px; border: 0; border-radius: 7px; background: transparent; color: var(--dlg-text-2, #b5bfbc); font-size: 12.5px; cursor: pointer; }
+.rate-opt:hover { background: var(--ctl-bg-hover, #293235); color: var(--dlg-text, #edf1ef); }
+.rate-opt.active { background: var(--dlg-accent-dim, rgba(53, 214, 174, .11)); color: var(--dlg-primary, #35d6ae); }
 
 /* ── 令牌终值：必须位于文件最末，否则后续追加的层会反超 ────────── */
 :root {
@@ -4602,7 +4656,7 @@ body { background:#141416; }
 /* 工具栏 40px（对齐 OpenFilm 的 TOOLBAR_H）：原 padding 6px + 内容 ~33px
    实测 45px，比标尺还高，视觉上把时间线切成两段。固定 40px 后工具栏
    与标尺（20px）合计 60px，与右侧预览栏的高度节奏一致。 */
-.editor-shell .timeline-toolbar { height:40px; min-height:40px; background:var(--ws-shell); border-bottom-color:var(--ws-line); padding:0 12px; }
+.editor-shell .timeline-toolbar { height:34px; min-height:34px; background:var(--ws-shell); border-bottom-color:var(--ws-line); padding:0 12px; }
 .editor-shell .timeline-ruler, .editor-shell .timeline-left, .editor-shell .timeline-left-corner, .editor-shell .timeline-track-head { background:var(--ws-inset); border-color:var(--ws-line); }
 .editor-shell .timeline-left-track { border-bottom-color:var(--ws-line); }
 .editor-shell .timeline-resize-handle { height:7px; background:transparent; border-top:1px solid var(--ws-line); }

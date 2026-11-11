@@ -369,22 +369,20 @@ const WAVEFORM_PEAK_COUNT_MAX = 4096;
 const CLIP_RADIUS = 3;
 /** 片段在轨道行内的上下留白（px）——相邻轨道片段之间形成剪映式缝隙。 */
 const CLIP_ROW_INSET = 2;
-/** 片段配色（剪映取色）：名称条与原声带底色 rgb(0,77,82)，波形 rgb(0,119,126)。
- *  选中不变色——只叠加白色描边 + 四角手柄。 */
-const CLIP_PALETTE = {
-  video: {
-    body: "#10161b",
-    header: "#004d52",
-    band: "#004d52",
-    wave: "#00777e",
-  },
-  audio: {
-    body: "#0e3058",
-    header: "#1d4d8f",
-    band: "#0e4888",
-    wave: "rgb(14, 129, 179)",
-  },
-} as const;
+/** 片段配色（2026-11-11 对齐 OpenFilm 的 KIND_COLOR 令牌，globals.css:87-94/163-170）：
+ *  按素材类别取色（video/image/page/text/sticker/filter/effect/audio），浅深双主题各一套。
+ *  画布不吃 CSS 选择器——cssColor() 运行期读 [data-theme] 命中的变量值。
+ *  选中不变色——只叠加外扩描边。 */
+const KIND_COLOR_VARS: Record<string, { body: string; header: string; band: string; wave: string }> = {
+  video:   { body: "--clip-video",  header: "--clip-video",  band: "--clip-video",  wave: "--clip-video" },
+  image:   { body: "--clip-image",  header: "--clip-image",  band: "--clip-image",  wave: "--clip-image" },
+  page:    { body: "--clip-page",   header: "--clip-page",   band: "--clip-page",   wave: "--clip-page" },
+  text:    { body: "--clip-text",   header: "--clip-text",   band: "--clip-text",   wave: "--clip-text" },
+  sticker: { body: "--clip-sticker", header: "--clip-sticker", band: "--clip-sticker", wave: "--clip-sticker" },
+  filter:  { body: "--clip-filter", header: "--clip-filter", band: "--clip-filter", wave: "--clip-filter" },
+  effect:  { body: "--clip-effect", header: "--clip-effect", band: "--clip-effect", wave: "--clip-effect" },
+  audio:   { body: "--clip-audio",  header: "--clip-audio",  band: "--clip-audio",  wave: "--clip-audio" },
+};
 
 // ── Runtime prefs (magnetic snapping) ────────────────────────────────────────
 
@@ -461,7 +459,7 @@ const cssColor = (name: string, fallback: string): string => {
 const RULER_DEAD_BG = () => cssColor("--tl-dead-bg", "#181c1f"); // 素材终点外的死区底色
 const RULER_BG_TOP = () => cssColor("--tl-ruler-top", "#222629"); // 标尺带渐变顶
 const RULER_BG_BOTTOM = () => cssColor("--tl-ruler-bottom", "#1a1e21"); // 标尺带渐变底
-const RULER_END_EDGE = "#3d4a5c"; // 素材终点竖标线
+const RULER_END_EDGE = () => cssColor("--tl-end-edge", "#3d4a5c"); // 素材终点竖标线（主题令牌）
 const RULER_TICK_MAJOR = () => cssColor("--tl-tick-major", "#8a95a5");
 const RULER_TICK_MINOR = () => cssColor("--tl-tick-minor", "#596372");
 const RULER_LABEL_COLOR = () => cssColor("--tl-label", "#b9c4d1");
@@ -475,10 +473,10 @@ const RULER_LABEL_TOP = 1;
 // 素材范围条：标尺顶那条 3px 条。它标的是「内容从哪到哪」，属背景性刻度信息，
 // 不是可操作对象——用青色会让它成为整个时间线最亮的元素，抢走播放头与选中片的注意。
 // 改为中性灰：存在感足够，不与任何状态色竞争。
-const RANGE_BAR_TOP = "#3a4147";
-const RANGE_BAR_BOTTOM = "#4b545b";
-const HOVER_CHIP_BG = "rgba(9, 12, 24, 0.88)";
-const HOVER_CHIP_EDGE = "rgba(37, 211, 172, 0.45)";
+const RANGE_BAR_TOP = () => cssColor("--tl-range-top", "#3a4147");
+const RANGE_BAR_BOTTOM = () => cssColor("--tl-range-bottom", "#4b545b");
+const HOVER_CHIP_BG = () => cssColor("--tl-chip-bg", "rgba(9, 12, 24, 0.88)");
+const HOVER_CHIP_EDGE = () => cssColor("--tl-chip-edge", "rgba(37, 211, 172, 0.45)");
 const HOVER_CHIP_TEXT = "#d6e1ff";
 // 播放头线/手柄已拆为独立 DOM 覆盖层（A06，TimelinePlayheadLayer），
 // 外观常量与绘制函数不再在 Canvas 路径保留。
@@ -518,7 +516,7 @@ function drawRulerFace(
   if (endX < width) {
     ctx.fillStyle = RULER_DEAD_BG();
     ctx.fillRect(endX, 0, width - endX, height);
-    ctx.strokeStyle = RULER_END_EDGE;
+    ctx.strokeStyle = RULER_END_EDGE();
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(Math.round(endX) + 0.5, 0);
@@ -530,7 +528,7 @@ function drawRulerFace(
   if (hoverUs !== null && hoverUs !== undefined) {
     const hx = xAt(hoverUs);
     if (hx >= bandX && hx <= endX) {
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.22)";
+      ctx.strokeStyle = cssColor("--tl-tick-major", "#8a95a5");
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(hx, 0);
@@ -595,8 +593,8 @@ function drawRulerFace(
     const barRight = Math.min(endX, xAt(contentRange.toUs));
     if (barRight - barLeft > 2) {
       const barGrad = ctx.createLinearGradient(0, 0, 0, 3);
-      barGrad.addColorStop(0, RANGE_BAR_TOP);
-      barGrad.addColorStop(1, RANGE_BAR_BOTTOM);
+      barGrad.addColorStop(0, RANGE_BAR_TOP());
+      barGrad.addColorStop(1, RANGE_BAR_BOTTOM());
       ctx.fillStyle = barGrad;
       ctx.beginPath();
       ctx.roundRect(barLeft, 0, barRight - barLeft, 3, 1.5);
@@ -613,8 +611,8 @@ function drawRulerFace(
       const chipH = Math.min(14, Math.max(10, height - 2));
       const cx = hx > width - chipW - 10 ? hx - chipW - 4 : hx + 4;
       const cy = Math.max(1, height - chipH - 1);
-      ctx.fillStyle = HOVER_CHIP_BG;
-      ctx.strokeStyle = HOVER_CHIP_EDGE;
+      ctx.fillStyle = HOVER_CHIP_BG();
+      ctx.strokeStyle = HOVER_CHIP_EDGE();
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.roundRect(cx, cy, chipW, chipH, 4);
@@ -739,7 +737,7 @@ function drawTimeline(
   }
 
   // Grid lines between tracks（同样截断在素材终点）。
-  ctx.strokeStyle = "#14171a";
+  ctx.strokeStyle = cssColor("--tl-grid-line-strong", "rgba(255, 255, 255, 0.22)");
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(view.headerWidth, view.rulerHeight);
@@ -754,7 +752,7 @@ function drawTimeline(
   if (rulerHoverUs !== null && rulerHoverUs !== undefined) {
     const hx = timeToX(rulerHoverUs, view);
     if (hx >= view.headerWidth && hx <= Math.min(width, contentEndX)) {
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.18)";
+      ctx.strokeStyle = cssColor("--tl-snap", "#0098a3");
       ctx.lineWidth = 1;
       ctx.beginPath();
       // B17：画布 viewport 化——引导线画到画布覆盖的内容底（topY+height），
@@ -852,7 +850,14 @@ function drawTimeline(
     const clipKind = rect.clip.asset_kind;
     const isAudioClip = clipKind === "audio";
     const isVisualClip = clipKind === "video" || clipKind === "image";
-    const palette = isAudioClip ? CLIP_PALETTE.audio : CLIP_PALETTE.video;
+    const kindKey = String((rect.clip as unknown as { asset_kind?: string }).asset_kind ?? (isAudioClip ? "audio" : "video"));
+    const vars = KIND_COLOR_VARS[kindKey] ?? (isAudioClip ? KIND_COLOR_VARS.audio : KIND_COLOR_VARS.video);
+    const palette = {
+      body: cssColor(vars.body, isAudioClip ? "#318383" : "#54789d"),
+      header: cssColor(vars.header, isAudioClip ? "#1c5757" : "#354f6a"),
+      band: cssColor(vars.band, isAudioClip ? "#1c5757" : "#354f6a"),
+      wave: cssColor(vars.wave, isAudioClip ? "#318383" : "#54789d"),
+    };
     const headerH = rect.width > 36 ? CLIP_HEADER_H : 0;
     // 音频区域（剪映式）：视频 = 底部原声带（高度 = 占比 × 名称条以下区域），
     // 纯音频 = 名称条以下全部（占比只作用于波形振幅）。
@@ -1035,42 +1040,31 @@ function drawTimeline(
       ctx.fillText("🔒", rect.x + rect.width - 14, rect.y + rect.height / 2);
     } else if (hover.clipId === rect.clip.clip_id && !isSelected) {
       // 悬停高亮（非边框）。
-      ctx.fillStyle = "rgba(255, 255, 255, 0.07)";
+      ctx.fillStyle = cssColor("--tl-row-hover", "rgba(255, 255, 255, 0.07)");
       ctx.fillRect(rect.x, rect.y + 2, rect.width, rect.height - 4);
     }
     ctx.restore();
 
-    // 5) 选中效果（剪映式 1:1）：白色圆角描边包住整段片段 + 四角圆形手柄。
-    //    拖动途中不画（片段已"提起来"，落位意图由灰色预览剪影表达，
-    //    白框只属于"选中"语义）。
+    // 5) 选中效果（2026-11-11 对齐 OpenFilm SelectFrame）：描边画在片段**外侧**
+    //    （SELECT_X=3 / SELECT_Y=1），左右 3px 实线、上下 1px @70%，radius 3px。
+    //    拖动途中不画（片段已"提起来"，落位意图由预览剪影表达）。
     if (isSelected && !isMovingClip) {
-      const inset = 0.75;
-      ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth = 1.5;
+      const sx = 3, sy = 1;
+      const frame = cssColor("--tl-select", "#161619");
+      ctx.save();
+      ctx.translate(rect.x - sx, rect.y - sy);
       ctx.beginPath();
-      ctx.roundRect(
-        rect.x + inset,
-        rect.y + inset,
-        rect.width - inset * 2,
-        rect.height - inset * 2,
-        CLIP_RADIUS,
-      );
-      ctx.stroke();
-      const corners: Array<[number, number]> = [
-        [rect.x + inset, rect.y + inset],
-        [rect.x + rect.width - inset, rect.y + inset],
-        [rect.x + inset, rect.y + rect.height - inset],
-        [rect.x + rect.width - inset, rect.y + rect.height - inset],
-      ];
-      for (const [handleX, handleY] of corners) {
-        ctx.beginPath();
-        ctx.arc(handleX, handleY, 3.2, 0, Math.PI * 2);
-        ctx.fillStyle = "#ffffff";
-        ctx.fill();
-        ctx.strokeStyle = "rgba(0, 0, 0, 0.35)";
-        ctx.lineWidth = 1;
-        ctx.stroke();
-      }
+      ctx.roundRect(0, 0, rect.width + sx * 2, rect.height + sy * 2, CLIP_RADIUS);
+      // 左右实线 3px；上下以 70% alpha 细线（OpenFilm 的 color-mix 70% 等效）。
+      ctx.globalAlpha = 0.7;
+      ctx.fillStyle = frame;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      // 左右两条 3px 实边盖在已填充的 70% 框上
+      ctx.fillStyle = frame;
+      ctx.fillRect(0, sy, sx, rect.height);                          // 左
+      ctx.fillRect(rect.width + sx, sy, sx, rect.height);            // 右
+      ctx.restore();
     }
 
     // 6) 分贝线（剪映式）：1px 横线贯穿音频区域、左端圆点；常态 rgb(66,155,159)，
@@ -1293,7 +1287,7 @@ function drawTimeline(
       const panelHeight = props.length * KEYFRAME_LANE_HEIGHT + 4;
       ctx.save();
       ctx.fillStyle = "rgba(10, 14, 20, 0.92)";
-      ctx.strokeStyle = "#5a6a72";
+      ctx.strokeStyle = cssColor("--tl-snap", "#0098a3");
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.roundRect(rect.x, panelTop, rect.width, panelHeight, 4);
@@ -1358,7 +1352,7 @@ function drawTimeline(
         if (!rect || targetUs === undefined) continue;
         const gw = Math.max(2, (clipDuration(rect.clip) / 1_000_000) * view.pixelsPerSecond);
         const gx = timeToX(targetUs, view);
-        ctx.fillStyle = rect.clip.asset_kind === "audio" ? CLIP_PALETTE.audio.body : CLIP_PALETTE.video.band;
+        ctx.fillStyle = cssColor(KIND_COLOR_VARS[String(rect.clip.asset_kind ?? "video")]?.band ?? "--clip-video", "#354f6a");
         ctx.fillRect(gx, rect.y + 2, gw, view.trackHeight - 4);
         ctx.strokeStyle = "#2fc9a5";
         ctx.lineWidth = 1.5;
@@ -1427,7 +1421,7 @@ function drawTimeline(
       const gw = Math.max(2, ((ghostEndUs - ghostStartUs) / 1_000_000) * view.pixelsPerSecond);
       ctx.save();
       ctx.globalAlpha = 0.55;
-      ctx.fillStyle = clip.asset_kind === "audio" ? CLIP_PALETTE.audio.body : CLIP_PALETTE.video.band;
+      ctx.fillStyle = cssColor(KIND_COLOR_VARS[String(clip.asset_kind ?? "video")]?.band ?? "--clip-video", "#354f6a");
       ctx.fillRect(gx, gy + 2, gw, gh - 4);
       ctx.strokeStyle = "#ffd76e";
       ctx.lineWidth = 1.5;
@@ -1581,11 +1575,13 @@ function drawRulerStrip(
   const headW = view.headerWidth;
   const stripW = headW;
   const rulerX = headW + stripW;
-  ctx.fillStyle = "#12181c";
+  // 主题令牌：角区 = 轨道头底、封面条带 = 画布底，分隔线走网格线令牌
+  //（2026-11-11 浅色修复——此前硬编码，浅色下角区仍是一块深色）。
+  ctx.fillStyle = cssColor("--tl-track-head-bg", "#12181c");
   ctx.fillRect(0, 0, headW, height);
-  ctx.fillStyle = "#181c1f";
+  ctx.fillStyle = cssColor("--tl-canvas-bg", "#181c1f");
   ctx.fillRect(headW, 0, stripW, height);
-  ctx.strokeStyle = "#14171a";
+  ctx.strokeStyle = cssColor("--tl-grid-line-strong", "rgba(255, 255, 255, 0.22)");
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(rulerX - 0.5, 0);

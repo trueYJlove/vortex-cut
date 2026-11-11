@@ -71,11 +71,11 @@ function installCanvas2DStub(counter?: { clipBodyDraws: number }): void {
           return Reflect.get(obj, prop);
         },
         set(obj, prop, value) {
-          // clip 体底色（palette.body：视频 #10161b / 音频 #0e3058）——每可见
-          // clip 恰好一次（名称条/波形用其他色，不重复计数）。
+          // clip 体底色（palette.body：OpenFilm KIND_COLOR 令牌，视频 #354f6a /
+          // 音频 #1c5757 的深色值）——每可见 clip 恰好一次（名称条/波形用其他色）。
           if (
             counter && prop === "fillStyle"
-            && (value === "#10161b" || value === "#0e3058")
+            && (value === "#354f6a" || value === "#1c5757")
           ) {
             counter.clipBodyDraws += 1;
           }

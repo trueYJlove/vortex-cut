@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Archive, AudioLines, BookOpen, Captions, ChevronDown, ChevronLeft, ChevronRight, Clapperboard, Command as CommandIcon, Download, Eye, FileAudio, FileText, FlaskConical, FolderCog, FolderOpen, FolderPlus, GitCompare, History, Image as ImageIcon, ImagePlus, Keyboard, LayoutPanelLeft, Lock, LockOpen, MapPin, Maximize, Minimize, Monitor, MonitorPlay, Music, Pause, Play, Plus, Redo2, RefreshCw, RotateCcw, Save, Scissors, Search, Sparkles, Square, SquarePlus, Trash2, Type as TypeIcon2, Type, Undo2, Upload, Video, Volume2, VolumeX, WandSparkles, Minus, ZoomIn } from "lucide-react";
+import { Archive, AudioLines, BookOpen, Captions, ChevronDown, ChevronLeft, ChevronRight, Clapperboard, Command as CommandIcon, Download, Eye, FileAudio, FileText, FlaskConical, FolderCog, FolderOpen, FolderPlus, GitCompare, History, Image as ImageIcon, ImagePlus, Keyboard, LayoutPanelLeft, Lock, LockOpen, MapPin, Maximize, Minimize, Monitor, MonitorPlay, Music, Pause, Play, Plus, Redo2, RefreshCw, RotateCcw, Save, Scissors, Search, Sparkles, Repeat, Square, SquarePlus, Settings2, Trash2, Type as TypeIcon2, Type, Undo2, Upload, Video, Volume2, VolumeX, WandSparkles, Minus, ZoomIn } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { Asset, AssetId, AssetKind, AssetPresentation, BriefInput, CaptionPresetId, CvAnalysisSummary, CvSample, DestinationGrant, DirectoryGrant, EncoderMode, EgressPreview, ExportBatch, ExportFrameRate, ExportQuality, ExportResolution, HorizontalAnchor, Job, LayoutPolicy, MediaInfo, ModelDetail, ModelSummary, OutputRatio, PlatformPreset, Project, ProviderConfig, ReframeExportBatch, RenditionPreset, RenditionReframeAdjustment, TimelineCaption, TimelineClip, TimelineDiff, TimelineDocument, TimelineLayout, TimelinePatchEgressPreview, TimelinePatchOperation, TimelinePatchProposal, TimelineRevisionId, TimelineRevisionSummary, TimelineState, Transcript, TranscriptSegment, TranscriptSummary, VerticalAnchor } from "@aivideo/contracts";
 import { ExportDialog, type ExportSettings } from "./ExportDialog.js";
@@ -426,6 +426,13 @@ export function App() {
   const [volPopOpen, setVolPopOpen] = useState(false);
   const volPopRef = useRef<HTMLDivElement | null>(null);
   const [volume, setVolume] = useState(80);
+  // 播放设置（2026-11-11 对齐 OpenFilm PlaybackMenu）：循环 + 全局倍速。
+  // uiRate 只作用于预览播放节奏（交互时钟步长 / 媒体 playbackRate / 播放头直线），
+  // 不写进时间线文档——它是播放器属性，不是剪辑属性。
+  const [loopPlayback, setLoopPlayback] = useState(false);
+  const [uiRate, setUiRate] = useState(1);
+  const [ratePopOpen, setRatePopOpen] = useState(false);
+  const ratePopRef = useRef<HTMLDivElement | null>(null);
   const volumeRef = useRef(volume);
   const [progressDragging, setProgressDragging] = useState(false);
   const [previewZoom, setPreviewZoom] = useState<number | "fit">("fit");
@@ -1202,12 +1209,12 @@ export function App() {
     if (media) {
       if (pendingSeekRef.current !== null) { media.currentTime = pendingSeekRef.current; pendingSeekRef.current = null; }
       // 交互预览跟随片段变速（倒放无法反向播放，仅回退原速）。
-      media.playbackRate = previewReverse ? 1 : Math.max(0.25, Math.min(4, (previewSpeedMilli ?? 1000) / 1000));
+      media.playbackRate = previewReverse ? 1 : Math.max(0.25, Math.min(4, ((previewSpeedMilli ?? 1000) / 1000) * uiRate));
       if (!libraryPreviewId && clipAtPlayhead) {
         // 标尺跟随校正：播放头是唯一时钟，媒体时间与标尺偏差 >0.18s 时对齐——
         // 防止内容错位（标尺在 A 片段却播着 B 片段内容）。
         const sourceStart = (clipAtPlayhead.source_start_us ?? 0) / 1_000_000;
-        const speed = previewReverse ? 1 : Math.max(0.25, Math.min(4, (previewSpeedMilli ?? 1000) / 1000));
+        const speed = previewReverse ? 1 : Math.max(0.25, Math.min(4, ((previewSpeedMilli ?? 1000) / 1000) * uiRate));
         const expected = sourceStart + ((playhead - clipAtPlayhead.timeline_start_us) / 1_000_000) * speed;
         if (media.readyState >= 1 && Math.abs(media.currentTime - expected) > 0.18) media.currentTime = Math.max(0, expected);
       }
@@ -1235,7 +1242,7 @@ export function App() {
         audio.pause();
       }
     }
-  }, [playing, previewMode, previewAsset?.media_url, audioAsset?.media_url, playhead, previewSpeedMilli, previewReverse, audioClipAtPlayhead, isClipAudible]);
+  }, [playing, previewMode, previewAsset?.media_url, audioAsset?.media_url, playhead, previewSpeedMilli, previewReverse, audioClipAtPlayhead, isClipAudible, uiRate]);
   // 音量动画（电平表）：挂接预览视频的实时输出电平，左右声道各一根跳动条。
   // MediaElementAudioSourceNode 对同一元素只能创建一次且会接管出声路由，
   // 因此音频图为按元素缓存的持久结构：暂停只停轮询，不销毁图（销毁会让元素永久失声）。
@@ -1415,11 +1422,11 @@ export function App() {
   useEffect(() => {
     if (previewMode !== "synthetic" || libraryPreviewId) return;
     if (playing) {
-      playheadStore.startLine({ tUs: playheadStore.get(), atMs: performance.now(), rate: 1000 });
+      playheadStore.startLine({ tUs: playheadStore.get(), atMs: performance.now(), rate: Math.round(1000 * uiRate) });
     } else {
       playheadStore.stopLine();
     }
-  }, [playing, previewMode, libraryPreviewId, playheadStore]);
+  }, [playing, previewMode, libraryPreviewId, playheadStore, uiRate]);
 
   const seekFromPlayback = useCallback((timeUs: number) => {
     const now = performance.now();
@@ -1432,6 +1439,15 @@ export function App() {
     dispatchPlayhead("playback", timeUs, commit);
     if (commit) lastReactTimeReport.current = now;
   }, [dispatchPlayhead]);
+
+  // 循环播放（播放设置项）：到尾自动回卷续播。合成预览的会话在 EOF 停住——
+  // 先回零、下一拍续播；交互预览的循环在时钟 interval 内完成，不经过这里。
+  const handlePreviewEnded = useCallback(() => {
+    if (!loopPlayback) { setPlaying(false); return; }
+    dispatchPlayhead("user", 0, true);
+    setPlaying(false);
+    window.setTimeout(() => setPlaying(true), 60);
+  }, [loopPlayback, dispatchPlayhead]);
   // 时间线驱动播放：播放头是唯一时钟（100ms 步进推进，媒体元素跟随标尺——
   // 所见即所得：标尺在哪个片段，播放的就是那个片段的内容）。
   // 到达时间线末尾：停在末尾（不回跳、不自动续播），再次播放从头开始。
@@ -1441,8 +1457,9 @@ export function App() {
       // 交互预览的 100ms 时钟：直接派发 playback 源（store + React 同步——
       // 本 interval 本身就是 10Hz，节流层不再叠加延迟）。
       const ph = playheadStore.get();
-      const next = ph + 100_000;
+      const next = ph + Math.round(100_000 * uiRate);
       if (timelineEndUs > 0 && next >= timelineEndUs) {
+        if (loopPlayback) { dispatchPlayhead("playback", 0, true); return; }
         dispatchPlayhead("playback", timelineEndUs, true);
         setPlaying(false);
         return;
@@ -1450,7 +1467,7 @@ export function App() {
       dispatchPlayhead("playback", next, true);
     }, 100);
     return () => window.clearInterval(timer);
-  }, [playing, previewMode, libraryPreviewId, timelineEndUs, playheadStore, dispatchPlayhead]);
+  }, [playing, previewMode, libraryPreviewId, timelineEndUs, playheadStore, dispatchPlayhead, uiRate, loopPlayback]);
   const handleVideoEnded = () => {
     // 素材箱预览只有一个媒体源，ended 才代表本次播放结束。时间线交互
     // 预览的 video 只是当前片段的源窗口：源文件 EOF 不等于时间线 EOF，
@@ -2744,14 +2761,15 @@ export function App() {
   }, [activeMenu, dropdownIndex]);
 
   useEffect(() => {
-    if (!zoomPopOpen && !volPopOpen) return;
+    if (!zoomPopOpen && !volPopOpen && !ratePopOpen) return;
     const listener = (event: MouseEvent) => {
       if (zoomPopRef.current && !zoomPopRef.current.contains(event.target as Node)) setZoomPopOpen(false);
       if (volPopRef.current && !volPopRef.current.contains(event.target as Node)) setVolPopOpen(false);
+      if (ratePopRef.current && !ratePopRef.current.contains(event.target as Node)) setRatePopOpen(false);
     };
     window.addEventListener("mousedown", listener);
     return () => window.removeEventListener("mousedown", listener);
-  }, [zoomPopOpen, volPopOpen]);
+  }, [zoomPopOpen, volPopOpen, ratePopOpen]);
   // 全屏：跟随浏览器全屏状态（Esc 退出时按钮图标同步复原）。
   useEffect(() => {
     const listener = () => setIsFullscreen(Boolean(document.fullscreenElement));
@@ -2992,7 +3010,7 @@ export function App() {
             {previewMode === "authoritative" && authoritativeMediaUrl && <video ref={videoRef} className="preview-foreground authoritative-video" src={authoritativeMediaUrl} aria-label={reframePlayback ? "重构图权威预览视频" : exportPlayback ? "导出视频" : "权威预览视频"} controls onEnded={() => { setPlaying(false); setExportPlayback(undefined); setReframePlayback(undefined); setPreviewMode("synthetic"); }} />}
             {/* 合成预览仅在时间线有可见片段时挂载；空时间线显示引导文案（剪映式），
                 避免对空时间线请求 preview-ir 被 Core 以 TIMELINE_EMPTY 拒绝而回退。 */}
-            {previewMode === "synthetic" && projectStateReady && project && working && timeline && working.clips.length > 0 && <SyntheticPreview key={project.project_id} outputRatio={renderRatio} projectId={project.project_id} revisionId={timeline.current_revision.timeline_revision_id} mediaUrls={syntheticMediaUrls} audioByClip={syntheticAudioByClip} pipClips={syntheticPipClips} selectedClipId={pipSelectedId} onSelectClip={clipId => setSelection({ kind: "clip", id: clipId as never })} onCommitPipTransform={(clipId, transform) => { const clip = (working?.clips ?? []).find(item => item.clip_id === clipId); commitPipTransform(clipId as never, { ...(clip?.transform ?? {}), ...transform }); }} onDraftPipMask={(clipId, mask) => draftPipMask(clipId as never, mask)} onCommitPipMask={(clipId, mask) => commitPipMask(clipId as never, mask)} onGesturePause={pausePreviewPlayback} onGestureResume={resumePreviewPlayback} playing={playing && !gestureHoldRef.current} playheadUs={playhead} playheadStore={playheadStore} onTimeUs={us => seekFromPlayback(us)} onEnded={() => setPlaying(false)} onFallback={(reason, code) => { if (!seenAnyTicketRef.current) return; setPreviewMode("interactive"); setSyntheticNotice(syntheticFallbackNotice(reason, code)); }} sourceResolver={previewSourceResolver} resourceTier={resourceTier} forceCopyTo={forceCopyTo} snapshotRef={syntheticSnapshotRef} proxyEpoch={proxyReadyEpoch} onDecodeBudget={onDecodeBudget} />}
+            {previewMode === "synthetic" && projectStateReady && project && working && timeline && working.clips.length > 0 && <SyntheticPreview key={project.project_id} outputRatio={renderRatio} projectId={project.project_id} revisionId={timeline.current_revision.timeline_revision_id} mediaUrls={syntheticMediaUrls} audioByClip={syntheticAudioByClip} pipClips={syntheticPipClips} selectedClipId={pipSelectedId} onSelectClip={clipId => setSelection({ kind: "clip", id: clipId as never })} onCommitPipTransform={(clipId, transform) => { const clip = (working?.clips ?? []).find(item => item.clip_id === clipId); commitPipTransform(clipId as never, { ...(clip?.transform ?? {}), ...transform }); }} onDraftPipMask={(clipId, mask) => draftPipMask(clipId as never, mask)} onCommitPipMask={(clipId, mask) => commitPipMask(clipId as never, mask)} onGesturePause={pausePreviewPlayback} onGestureResume={resumePreviewPlayback} playing={playing && !gestureHoldRef.current} playheadUs={playhead} playheadStore={playheadStore} onTimeUs={us => seekFromPlayback(us)} onEnded={handlePreviewEnded} onFallback={(reason, code) => { if (!seenAnyTicketRef.current) return; setPreviewMode("interactive"); setSyntheticNotice(syntheticFallbackNotice(reason, code)); }} sourceResolver={previewSourceResolver} resourceTier={resourceTier} forceCopyTo={forceCopyTo} snapshotRef={syntheticSnapshotRef} proxyEpoch={proxyReadyEpoch} onDecodeBudget={onDecodeBudget} />}
             {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "video" && <div className="preview-transform" style={mainTransformStyle}><video className="preview-background" src={previewAsset.media_url} muted aria-hidden="true" /><video ref={videoRef} className="preview-foreground" src={previewAsset.media_url} muted={!selectedClip?.audio.enabled || previewReverse || (clipAtPlayhead ? !isClipAudible(clipAtPlayhead) : false)} aria-label="交互预览视频" onTimeUpdate={event => { if (libraryPreviewId) dispatchPlayhead("external", Math.round(event.currentTarget.currentTime * 1_000_000), true); }} onEnded={handleVideoEnded} /></div>}
             {previewMode === "interactive" && audioAsset?.media_url && <audio ref={audioRef} src={audioAsset.media_url} style={{ display: "none" }} />}
             {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "image" && <div className="preview-transform" style={mainTransformStyle}><img className="preview-background" src={previewAsset.media_url} alt="" aria-hidden="true" /><img className="preview-foreground" src={previewAsset.media_url} alt={previewAsset.asset.display_name} /></div>}
@@ -3013,6 +3031,26 @@ export function App() {
           <div className="pb-left"><span className="tc"><b ref={tcTimeRef}>{formatSmpteTimecode(playhead, previewFps)}</b><i> / </i><span className="tot">{formatSmpteTimecode(totalUs, previewFps)}</span></span><span className={`vu${playing ? " active" : ""}`} aria-hidden="true"><i ref={vuBarLRef} /><i ref={vuBarRRef} /></span></div>
           <div className="pb-center"><button className="pb-play" aria-label={playing ? "暂停" : "播放"} title={playing ? "暂停" : "播放"} onClick={togglePlayback}>{playing ? <Pause /> : <Play />}</button></div>
           <div className="pb-right" role="group" aria-label="播放器控制">
+            <span className="rate-anchor">
+              <button className="pb-icon rate-btn" aria-haspopup="dialog" aria-expanded={ratePopOpen} title="播放设置（循环 / 倍速）" aria-label="播放设置" onClick={event => { event.stopPropagation(); setRatePopOpen(value => !value); setVolPopOpen(false); setZoomPopOpen(false); }}>
+                <Settings2 />
+                {(loopPlayback || uiRate !== 1) && <span className="rate-dot" aria-hidden="true" />}
+              </button>
+              <div className={`rate-pop${ratePopOpen ? " open" : ""}`} ref={ratePopRef} onClick={event => event.stopPropagation()}>
+                <div className="rp-head">播放设置</div>
+                <label className="rp-row">
+                  <Repeat />
+                  <span>循环播放</span>
+                  <input type="checkbox" role="switch" checked={loopPlayback} onChange={event => setLoopPlayback(event.target.checked)} aria-label="循环播放" />
+                </label>
+                <div className="rp-row rp-speed" aria-hidden="true"><span>倍速</span></div>
+                <div className="rate-grid" role="group" aria-label="播放倍速">
+                  {([0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4] as const).map(r => (
+                    <button key={r} className={`rate-opt${uiRate === r ? " active" : ""}`} aria-pressed={uiRate === r} onClick={() => setUiRate(r)}>{`${r}×`}</button>
+                  ))}
+                </div>
+              </div>
+            </span>
             <span className="vol-anchor">
               <button className="pb-icon" aria-haspopup="dialog" aria-expanded={volPopOpen} title={`音量 ${volume}%`} aria-label="音量" onClick={event => { event.stopPropagation(); setVolPopOpen(value => !value); setZoomPopOpen(false); }}>{volume === 0 ? <VolumeX /> : <Volume2 />}</button>
               <div className={`vol-pop${volPopOpen ? " open" : ""}`} ref={volPopRef} onClick={event => event.stopPropagation()}>
