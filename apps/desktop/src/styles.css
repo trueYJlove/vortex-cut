@@ -1,4 +1,9 @@
-:root { font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif; color: #e9eef0; background: var(--dlg-inset-5); font-synthesis: none; }
+/* 表单控件主题色跟随品牌（OpenFilm 的 --switch-on 语义）。 */
+:root { accent-color: var(--dlg-primary, #35d6ae);
+  /* 字体栈对齐 OpenFilm globals.css:26-29：西文 Inter + 系统 UI，CJK 逐级回退。 */
+  font-family: Inter, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  color: #e9eef0; background: var(--dlg-inset-5); font-synthesis: none;
+  -webkit-font-smoothing: antialiased; }
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 1024px; min-height: 720px; overflow: hidden; background: var(--dlg-inset-5); }
 button, input, select, textarea { font: inherit; color: inherit; }
@@ -516,14 +521,14 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--vc-accent); }
 .timeline-zoom-slider::-webkit-slider-runnable-track {
   height: 3px; border-radius: 999px;
   background: linear-gradient(to right,
-    #35d6ae 0,
-    #35d6ae calc(var(--pos, 0) * 100%),
-    #4a565e calc(var(--pos, 0) * 100%),
-    #4a565e 100%);
+    var(--ws-accent, #35d6ae) 0,
+    var(--ws-accent, #35d6ae) calc(var(--pos, 0) * 100%),
+    var(--vc-border-2, #4a565e) calc(var(--pos, 0) * 100%),
+    var(--vc-border-2, #4a565e) 100%);
 }
-.timeline-zoom-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 12px; height: 12px; margin-top: -5px; border-radius: 50%; background: #eef4f6; border: none; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5); }
-.timeline-zoom-slider::-moz-range-track { height: 2px; border-radius: 1px; background: #4a565e; }
-.timeline-zoom-slider::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: #eef4f6; border: none; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5); }
+.timeline-zoom-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 12px; height: 12px; margin-top: -5px; border-radius: 50%; background: var(--vc-panel-2, #eef4f6); border: none; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5); }
+.timeline-zoom-slider::-moz-range-track { height: 2px; border-radius: 1px; background: var(--vc-border-2, #4a565e); }
+.timeline-zoom-slider::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: var(--vc-panel-2, #eef4f6); border: none; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5); }
 .timeline-zoom-value { font-size: var(--dlg-fs-label); color: var(--vc-text-2); min-width: 48px; text-align: right; font-family: monospace; }
 
 /* 面板高度由用户拖拽决定；内容（轨道行）始终按自身高度渲染，
@@ -3617,6 +3622,10 @@ html[data-theme="light"] {
   --tl-tick-minor: #a2a2ab;
   --tl-label: #5a5a63;
 }
+
+/* 焦点环（对齐 OpenFilm globals.css:322-326）：2px accent + 2px offset，
+   只在 Tab 键盘导航时出现（pointer focus 不画环）。 */
+:focus-visible { outline: 2px solid var(--dlg-primary, #35d6ae); outline-offset: 2px; border-radius: 7px; }
 
 /* 播放设置弹层（2026-11-11 对齐 OpenFilm PlaybackMenu）：循环开关 + 倍速分段。
    面板规格取 OpenFilm：w-60(224px)、rounded-[14px]、shadow 0 18px 48px、行 13px。 */
