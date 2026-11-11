@@ -41,7 +41,9 @@ export interface SegmentAudioConfig { enabled: boolean; gainDb: number; fadeInUs
  *  对齐项——交互预览 HTMLMediaElement preservesPitch 默认 true，合成预览
  *  playbackRate 直调变调）；legacy = playbackRate 直调（AudioWorklet 不可用
  *  时的回退，变调）。两路径共用 startedAt/startOffset/speed 位置模型：
- *  position = startOffset + 墙钟增量×speed（worklet 输出域消耗速率相同）。 */
+ *  position = startOffset + 墙钟增量×speed（worklet 输出域消耗速率相同）。
+ *  speed = 段速 × 全局播放倍速（effectiveRigSpeed）——音源域消耗速率；
+ *  时间轴域的推进由 tick 目标承担（playAudioTargetUs 已按 playRate 缩放）。 */
 interface AudioRig {
   /** 解码完成的整段音频（worklet 路径 transfer 后置 null 释放主线程内存）。 */
   buffer: AudioBuffer | null;
@@ -218,6 +220,29 @@ function makeAudioRig(speed: number): AudioRig {
   };
 }
 
+/** 全局播放倍速的合法域与夹取：与段速 speed_milli 同口径 [0.25, 4]；非数值
+ *  归 1（常速）——倍速控件可能传 undefined/NaN 强转值，兜底不许炸时钟。 */
+export function clampPlayRate(rate: number): number {
+  if (!Number.isFinite(rate)) return 1;
+  return Math.min(4, Math.max(0.25, rate));
+}
+
+/** 播放 tick 的墙钟目标帧（纯函数）：anchorFrame 起按 fps × playRate 帧/秒推进。
+ *  playRate = 1 时与旧式 `Math.floor(anchorFrame + wallDelta / (1000 / fps))`
+ *  逐位同式（fps × 1 精确等于 fps，除法无浮点扰动——常速零漂移红线）。 */
+export function playTickTarget(anchorFrame: number, wallDeltaMs: number, fps: number, playRate: number): number {
+  const frameDur = 1000 / (fps * playRate);
+  return Math.floor(anchorFrame + wallDeltaMs / frameDur);
+}
+
+/** 播放 tick 的音频墙钟目标 µs（纯函数）：视频锚点换算 µs + 墙钟增量 × playRate。
+ *  音频图跟随同一份缩放时钟；段速仍由音源自身消耗（effectiveRigSpeed），
+ *  expected = 段速 ×（缩放时间轴经过量）——两侧对墙钟的推进速率恒一致。
+ *  playRate = 1 时与旧式逐位同式（×1 精确）。 */
+export function playAudioTargetUs(anchorFrame: number, wallDeltaMs: number, fps: number, playRate: number): number {
+  return Math.round(anchorFrame * (1e6 / fps) + wallDeltaMs * playRate * 1000);
+}
+
 /** B15 流式阈值：素材时长 ≥30 秒走分块 PCM（A02 整段模式保留为小素材
  *  回退——计划"30 秒且预计 PCM ≤32MiB"；48k 双声道 30 秒 ≈ 11MiB 在限内）。 */
 const STREAMING_THRESHOLD_US = 30_000_000;
@@ -250,6 +275,10 @@ export class PreviewSession {
   private playing = false;
   /** B13-R：上次驻留取样墙钟（1Hz 限流）。 */
   private lastResidencySampleAt = 0;
+  /** 全局播放倍速（倍速菜单驱动，clampPlayRate 夹取 0.25–4，1 = 常速）。只能经
+   *  setPlayRate 改：播放态先把时钟锚定回「当前帧 × 当前墙钟」再换率（已播时间
+   *  不被新速率重算）；暂停态仅存储，下次 play() 的锚点直接按新速率推进。 */
+  private playRate = 1;
   private anchorWall = 0;
   private anchorFrame = 0;
   private currentFrame = 0;
@@ -701,7 +730,9 @@ export class PreviewSession {
       }
       for (const segment of ir.segments) {
         if (!audioByClip.get(segment.clip_id)?.enabled) continue;
-        session.audioRigs.set(segment.clip_id, makeAudioRig(Math.max(0.25, Math.min(4, segment.speed_milli / 1000))));
+        // 装配时全局倍速恒为 1（setPlayRate 只在会话就绪后到来）——
+        // effectiveRigSpeed 此时与段速相等，写法统一便于换率路径复用。
+        session.audioRigs.set(segment.clip_id, makeAudioRig(session.effectiveRigSpeed(Math.max(0.25, Math.min(4, segment.speed_milli / 1000)))));
       }
     }
     throwIfAborted(signal);
@@ -768,6 +799,52 @@ export class PreviewSession {
     }
   }
 
+  /** 全局播放倍速（倍速菜单驱动）。播放态：先重锚时钟（anchorFrame = 当前帧、
+   *  anchorWall = 当前墙钟）再换率——已播过的墙钟时间不被新速率重算，换率瞬间
+   *  目标帧与音频时钟连续无跳变；暂停态：仅存储，下次 play() 的锚点直接按新
+   *  速率推进。同率调用是无操作（不重锚：重锚会清 lastAdvanceWall 并重排音频
+   *  自动化，常速下菜单每秒重复一次调用就会引入抖动）。 */
+  setPlayRate(rate: number): void {
+    const next = clampPlayRate(rate);
+    if (next === this.playRate) return;
+    if (this.playing) {
+      this.anchorFrame = this.currentFrame;
+      this.anchorWall = performance.now();
+    }
+    this.playRate = next;
+    this.reapplyAudioRigSpeeds();
+  }
+
+  /** 音源域消耗速率：段速 × 全局倍速（段速先夹取 [0.25,4]，playRate 恒已夹取）。
+   *  时间轴域推进由 tick 的缩放时钟承担（playAudioTargetUs），两侧对墙钟的
+   *  速率恒相等——drift 判定与 1x 同构。 */
+  private effectiveRigSpeed(segmentSpeed: number): number {
+    return this.playRate * segmentSpeed;
+  }
+
+  /** 播放中换全局倍速：把全部音频 rig 的源域消耗速率刷成 effectiveRigSpeed。
+   *  正在发声的 rig 用「先停后按当前位置重启」换率（漂移重锚的既有语义：源域
+   *  位置连续、无毛刺，音源节点原位换速率）；空闲 rig 只换速率待下个 syncAudio
+   *  节拍。同速 rig 不触碰——常速会话零额外重启。 */
+  private reapplyAudioRigSpeeds(): void {
+    if (!this.audioCtx) return;
+    const segmentOf = new Map(this.ir.segments.map(segment => [segment.clip_id, segment] as const));
+    for (const [clipId, rig] of this.audioRigs) {
+      const segment = segmentOf.get(clipId);
+      const cfg = this.audioByClip?.get(clipId);
+      if (!segment || !cfg || !cfg.enabled) continue;
+      const segmentSpeed = Math.max(0.25, Math.min(4, segment.speed_milli / 1000));
+      const target = this.effectiveRigSpeed(segmentSpeed);
+      if (rig.speed === target) continue;
+      const activeSource = rig.workletActive || rig.source !== null;
+      if (!activeSource || !this.playing) { rig.speed = target; continue; }
+      // 正在发声：按旧速率算出的当前源域位置连续换率（先停后重启）
+      const positionS = rig.startOffset + (this.audioCtx.currentTime - rig.startedAt) * rig.speed;
+      const clamped = clamp(positionS, segment.source_start_us / 1e6, segment.source_end_us / 1e6);
+      this.startAudioSource(rig, cfg, segment, clamped, target);
+    }
+  }
+
   /** 当前帧画中画几何（IR 画布坐标）——合成画布手势层消费。 */
   pipBoxes(): Array<{ clipId: string; x: number; y: number; w: number; h: number }> {
     const frame = this.frames.getFrame(Math.min(this.currentFrame, this.frames.frameCount - 1));
@@ -828,7 +905,7 @@ export class PreviewSession {
         this.stopAudioSource(rig);
         rig.startedAt = 0;
         rig.startOffset = 0;
-        rig.speed = Math.max(0.25, Math.min(4, next.speed_milli / 1000));
+        rig.speed = this.effectiveRigSpeed(Math.max(0.25, Math.min(4, next.speed_milli / 1000)));
         // buffer 可能来自旧窗口：worklet 路径需重定位（play 消息按新窗口下发），
         // legacy 路径 buffer 引用不变（解码内容与窗口无关，按 expected 起播）。
       }
@@ -1878,16 +1955,23 @@ export class PreviewSession {
   }
 
   /** 片段已播的**段内**位置（微秒；输出时间轴口径 = afade 的 st/d 同一时间域）。
-   *  源域 offset 换算：段内 = (offset − source_start) / speed + 墙钟增量。
-   *  speed 由音源自身消耗（worklet 拉伸 / playbackRate），所以段内时间与墙钟
-   *  1:1 推进——按墙钟排 ramp 得到的就是段内包络，与导出侧「先 atempo 再
-   *  afade」的时间域一致。 */
+   *  源域 offset 换算：段内 = (offset − source_start) / rigSpeed + 时间轴增量；
+   *  rigSpeed = 段速 × playRate（effectiveRigSpeed），由音源自身消耗（worklet
+   *  拉伸 / playbackRate）。时间轴域与墙钟只差全局倍速系数（playAudioTargetUs
+   *  的缩放），墙钟增量 ÷ playRate = 时间轴增量——段内时间由此与时间轴 1:1，
+   *  按时间轴排 ramp 得到的就是段内包络，与导出侧「先 atempo 再 afade」的
+   *  时间域一致（playRate = 1 时时间轴增量 = 墙钟增量，与旧式逐位同式）。 */
   private segmentPositionUs(rig: AudioRig, segment: Ir["segments"][number]): number {
     if (!this.audioCtx) return 0;
     const sourceStartS = segment.source_start_us / 1_000_000;
-    const speed = rig.speed || 1;
-    const elapsedS = (rig.startOffset - sourceStartS) / speed + (this.audioCtx.currentTime - rig.startedAt);
-    return Math.max(0, elapsedS * 1_000_000);
+    const rigSpeed = rig.speed || 1;
+    const globalRate = this.playRate;
+    // 段速 = 合速 ÷ 全局倍速：源域 offset 的段内跨度只由段速决定（与全局倍速
+    // 无关）；锚后的段内推进 = 墙钟增量 ÷ 全局倍速（时间轴域 1:1）。
+    const segmentSpeed = rigSpeed / globalRate;
+    const elapsedTimelineS = (rig.startOffset - sourceStartS) / segmentSpeed
+      + (this.audioCtx.currentTime - rig.startedAt) / globalRate;
+    return Math.max(0, elapsedTimelineS * 1_000_000);
   }
 
   /** 按"当前段内位置"给 rig.gain 排包络——**只排 now 之后的部分**。
@@ -1944,7 +2028,10 @@ export class PreviewSession {
    *  由合成 tick 以**墙钟目标时间**驱动节拍（合成滞后不影响音频推进）。
    * 段窗口用 IR 的 output_*（转场借用重映射后的输出时间轴）；速度：worklet
    * 路径下发 speed 消息（下一颗粒生效，输入位置连续不变调）；legacy 路径直接
-   * 写 playbackRate；gainDb → 线性增益（无 1.0 上限）。 */
+   * 写 playbackRate；gainDb → 线性增益（无 1.0 上限）。
+   * 全局倍速：音源按 effectiveRigSpeed（段速 × playRate）消耗源域；时间轴目标
+   * µs 由 tick 按 playAudioTargetUs 缩放（墙钟增量 × playRate）——时间轴推进
+   * 与源域消耗速率恒相等，drift 判定与 1x 完全同构（80ms 重锚阈值不变）。 */
   private syncAudio(tUs: number): void {
     if (!this.audioByClip || !this.audioCtx) return;
     const active = new Set<string>();
@@ -1972,7 +2059,7 @@ export class PreviewSession {
       active.add(segment.clip_id);
       const speed = Math.max(0.25, Math.min(4, segment.speed_milli / 1000));
       let rig = this.audioRigs.get(segment.clip_id);
-      if (!rig) { rig = makeAudioRig(speed); this.audioRigs.set(segment.clip_id, rig); }
+      if (!rig) { rig = makeAudioRig(this.effectiveRigSpeed(speed)); this.audioRigs.set(segment.clip_id, rig); }
       // B15 流式分派：长素材走块（不触发整段解码；loader 窗口请求）
       if (!rig.buffer && !rig.workletBuffer && this.useStreamingFor(
           this.ir.inputs.find(item => item.input_id === segment.input_id))) {
@@ -1990,6 +2077,9 @@ export class PreviewSession {
       if (rig.streaming && rig.workletActive) {
         this.feedStreamingChunks(rig, this.assetOfRig(rig));
       }
+      // expected（源域）：段速 × 时间轴域经过量。tUs 已按 playAudioTargetUs
+      // 缩放（墙钟增量 × playRate），时间轴经过量已含全局倍速——这里只用段速，
+      // 全局倍速不许重复乘（否则 2x 全局 + 2x 段速会算成 4x）。
       const expected = clamp(segment.source_start_us / 1e6 + ((tUs - startUs) / 1e6) * speed, segment.source_start_us / 1e6, segment.source_end_us / 1e6);
       const activeSource = rig.workletActive || rig.source !== null;
       const position = activeSource ? rig.startOffset + (this.audioCtx.currentTime - rig.startedAt) * rig.speed : null;
@@ -2007,7 +2097,9 @@ export class PreviewSession {
       }
       // 无音源（入场/解码完成/出段后重入）或实质漂移（时钟重锚）→ 对齐重启。
       // 重启按新 offset 重算段内位置，淡变进度由位置决定 ⇒ 不重放淡入。
-      this.startAudioSource(rig, cfg, segment, expected, speed);
+      // 源域消耗速率 = effectiveRigSpeed（startAudioSource 的 speed 即
+      // rig.speed，音源按它消耗源域；时间轴域推进由缩放后的 tUs 承担）。
+      this.startAudioSource(rig, cfg, segment, expected, this.effectiveRigSpeed(speed));
     }
     for (const [clipId, rig] of this.audioRigs) {
       if (!active.has(clipId) && (rig.source || rig.workletActive)) this.stopAudioSource(rig);
@@ -2213,21 +2305,26 @@ export class PreviewSession {
     if (this.currentFrame >= last) { this.currentFrame = 0; this.resetChains(); }
     this.playing = true;
     this.dropped = 0; // 丢帧口径 = 本次播放段（拖拽/seek 冷启尖峰不跨段累计）
+    // 锚点 = 起播帧 × 当前墙钟：全局倍速在暂停态先行换率，从起播那一刻就按
+    // 新速率推进（playTickTarget/playAudioTargetUs 只读 playRate，无需再锚）。
     this.anchorWall = performance.now();
     this.anchorFrame = this.currentFrame;
     this.lastAdvanceWall = this.anchorWall;
     void this.audioCtx?.resume().catch(() => undefined); // 自动播放策略：用户手势链内恢复
-    const frameDur = 1000 / this.ir.canvas.fps;
+    const fps = this.ir.canvas.fps;
     const tick = () => {
       if (!this.playing || this.disposed) return;
       const now = performance.now();
-      const target = Math.min(last, Math.floor(this.anchorFrame + (now - this.anchorWall) / frameDur));
+      // 逐 tick 读当前倍率：setPlayRate 的重锚把 anchorFrame/anchorWall 归到
+      // 「当前帧 × 当前墙钟」，下一 tick 起即按新速率推进（无需重启 rAF）。
+      const rate = this.playRate;
+      const target = Math.min(last, playTickTarget(this.anchorFrame, now - this.anchorWall, fps, rate));
       this.latestTarget = target;
       this.observeBuffering(target); // P196：起播/卡顿的提示来源（饿了也得出声）
       this.pump(target);
       // 音频以**墙钟目标**驱动（音频线程自行推进，合成滞后不拖累音频）：
-      // 时钟目标 µs = anchorFrame × 1e6/fps + 墙钟增量。
-      this.syncAudio(Math.round(this.anchorFrame * (1e6 / this.ir.canvas.fps) + (now - this.anchorWall) * 1000));
+      // 时钟目标 µs = anchorFrame × 1e6/fps + 墙钟增量 × 全局倍速。
+      this.syncAudio(playAudioTargetUs(this.anchorFrame, now - this.anchorWall, fps, rate));
       // 合成 ≤ 目标的最新就绪帧：已就绪帧绝不丢弃；starving 时保持最后画面。
       // 同帧不重复合成（命令下发幂等，60Hz tick 对 30fps 内容时减半主线程负载）。
       let composed = -1;

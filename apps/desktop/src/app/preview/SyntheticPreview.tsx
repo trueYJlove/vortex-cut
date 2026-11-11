@@ -63,6 +63,10 @@ export interface SyntheticPreviewProps {
   resourceTier?: "conservative" | "balanced" | "high";
   /** B13-R 判别诊断开关：强制 copyTo 上传（perf 诊断构建经 runtime 注入）。 */
   forceCopyTo?: boolean;
+  /** 全局播放倍速（倍速菜单驱动）：会话内 clampPlayRate 夹取 0.25–4，缺省 1
+   *  （常速）。转发给活会话（setPlayRate）：播放态先重锚时钟再换率，暂停态
+   *  存储待起播；未提供或 1 = 与旧版逐位同式。 */
+  playbackRate?: number;
   /** 合成画面截帧通道（项目封面取帧用）：组件挂载时写入当前会话的
    *  snapshotPng 转发函数、卸载时清空——App 经此 ref 在合成模式下取帧
    *  （无 video 元素可 drawImage，v1 静态路径无合成器时返回 null）。 */
@@ -84,7 +88,7 @@ interface LoadState {
 }
 
 export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactElement {
-  const { projectId, revisionId, mediaUrls, audioByClip, pipClips, selectedClipId, onSelectClip, onCommitPipTransform, onDraftPipMask, onCommitPipMask, onGesturePause, onGestureResume, playing, playheadUs, onTimeUs, onEnded, onFallback, outputRatio, playheadStore, sourceResolver, resourceTier, forceCopyTo, snapshotRef, proxyEpoch, onDecodeBudget } = props;
+  const { projectId, revisionId, mediaUrls, audioByClip, pipClips, selectedClipId, onSelectClip, onCommitPipTransform, onDraftPipMask, onCommitPipMask, onGesturePause, onGestureResume, playing, playheadUs, onTimeUs, onEnded, onFallback, outputRatio, playheadStore, sourceResolver, resourceTier, forceCopyTo, playbackRate, snapshotRef, proxyEpoch, onDecodeBudget } = props;
   // 判定回调经 ref 读最新值：指标轮询 effect 只依赖 load.status，不该因为父组件
   // 每次重渲染换了函数身份就重建定时器（重建会漏掉一轮采样）。
   const onDecodeBudgetRef = useRef(onDecodeBudget);
@@ -478,6 +482,14 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
     audioByClipRef.current = audioByClip;
     sessionRef.current?.setAudioByClip(audioByClip ?? null);
   }, [audioByClip, load.status]);
+
+  // 全局播放倍速（倍速菜单）：转发给活会话。会话换装/重建（load.status 变化）
+  // 时也必须补发——新会话以 1 起步，不能继承上次会话的倍率记忆。未提供 prop
+  // 时不转发（与旧版完全一致：无 prop 的调用方零行为变化）。
+  useEffect(() => {
+    if (playbackRate === undefined) return;
+    sessionRef.current?.setPlayRate(playbackRate);
+  }, [playbackRate, load.status]);
 
   // 外部播放头跳转（暂停态）：偏差 >0.5s 视为外部 seek；播放中自身上报的时间不回环。
   // 连续快速跳转走拖拽快速档（主轨优先），停止 250ms 后全量精修（M3-2）。
