@@ -16,6 +16,12 @@ packages/*/dist/
 test-assets/generated/
 dist/
 
+# 临时产物（截图、探针输出、vitest --outputFile 等）。
+# 我两次把 apps/.tmp/vitest.json 误提交进仓，根因是这里没有规则、只能靠记得。
+# 记性靠不住，就写进规则。
+.tmp/
+apps/.tmp/
+
 # Local build, packaging and dependency staging outputs
 .deps-download/
 build/
