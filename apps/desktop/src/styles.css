@@ -546,11 +546,16 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--vc-accent); }
 /* Timeline — Canvas + DOM hybrid architecture */
 .timeline-pane { min-width: 0; border-top: 1px solid var(--line-1-b); display: flex; flex-direction: column; background: var(--surface-2); overflow: hidden; }
 .timeline-toolbar { padding: 5px 12px; border-bottom: 1px solid var(--line-1-b); display: flex; align-items: center; gap: 7px; flex-shrink: 0; background: var(--surface-2); }
+/* 工具栏中段状态区（参照 Timeline.tsx:4130）：flex:1 居中对齐，
+   把左侧工具与右侧开关组推到两端——这是参照工具栏的阅读节奏。 */
+.timeline-toolbar .toolbar-status { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 6px; }
 .timeline-toolbar button { background: transparent; border: none; color: var(--vc-text-2); cursor: pointer; padding: 4px 6px; border-radius: 4px; display: flex; align-items: center; justify-content: center; }
 .timeline-toolbar button:hover:not(:disabled) { background: var(--rgba-34); color: var(--vc-text); }
 .timeline-toolbar button:disabled { opacity: 0.35; cursor: default; }
 .toolbar-sep { width: 1px; height: 18px; background: var(--line-1-b); margin: 0 4px; }
-.timeline-zoom { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+/* 缩放组不再 margin-left:auto——中段状态区（.toolbar-status，flex:1）负责把
+   左右两段推开；两者同时 auto 会把状态区挤成 0 宽而失效。 */
+.timeline-zoom { display: flex; align-items: center; gap: 6px; }
 .timeline-zoom button { background: transparent; border: none; color: var(--vc-text-2); cursor: pointer; padding: 2px 4px; border-radius: 3px; display: flex; align-items: center; }
 .timeline-zoom button:hover { background: var(--rgba-34); color: var(--vc-text); }
 .timeline-zoom-slider { width: 80px; height: 12px; appearance: none; -webkit-appearance: none; background: transparent; cursor: pointer; margin: 0; }

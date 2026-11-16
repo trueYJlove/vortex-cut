@@ -3473,6 +3473,10 @@ export function TimelinePanel({
         >
           <Trash2 />
         </IconButton>
+        {/* 中段状态区（参照 Timeline.tsx:4130-4168）：工具栏中央留给状态，
+            不把「正在应用 / 出错了」放进工具堆里，否则读起来像一个按钮。
+            我们暂无长任务态，先占位——三段工具围绕它分布，这是参照的阅读节奏。 */}
+        <div className="toolbar-status" aria-live="polite" />
         <span className="toolbar-sep" aria-hidden="true" />
         <button
           className="icon-btn"
