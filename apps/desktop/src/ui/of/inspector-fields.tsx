@@ -594,7 +594,15 @@ export function SliderField({
             setSlide(n);
             onPreview?.(n, () => n);
           }}
-          onPointerUp={() => settle(slide)}
+          /* 松手提交：**从 DOM 取当前值**，而不是闭包里的 slide。
+             slide 是 React state，同一帧内 change→pointerUp 时它还是旧值
+             （真实拖拽里中间有渲染所以看不出来，但脚本驱动的 change+pointerUp
+             会读到旧值，导致「松手没提交」）。读 DOM 对两种驱动方式都对。 */
+          onPointerUp={(e) => {
+            const raw = Number((e.target as HTMLInputElement).value);
+            setSlide(null);
+            onCommit(Number.isFinite(raw) ? raw : shown, () => raw);
+          }}
           onKeyUp={() => {
             if (keyTimer.current) clearTimeout(keyTimer.current);
             const n = slide;

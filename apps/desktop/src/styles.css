@@ -1060,6 +1060,8 @@ input, select, textarea { font-size: var(--dlg-fs-body); }
 /* 移植来的 FIELD 是 w-full（参照的行是网格列，宽度天然受限）；我们的 .pp-row 是 flex，
    不设界会把两个数值框撑出面板（实测横向溢出）。
    .pp-num 作为数值框的宿主，负责给宽度并在同一行内均分。 */
+/* 滑杆行宿主：参照 SliderField 自带三列网格，这里只负责在 flex 行里取得宽度 */
+.pp-panel .pp-slider { flex: 1 1 0; min-width: 0; }
 .pp-panel .pp-num { flex: 1 1 0; min-width: 0; }
 .pp-panel .pp-num.w66 { flex: 0 0 66px; }
 .pp-panel .pp-row > .pp-num + .pp-num { flex: 1 1 0; }

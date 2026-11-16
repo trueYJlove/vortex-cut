@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 // 移植自 OpenFilm 的数值框（src/ui/of）：左端字母拖拽标记、无 ▲▼ 步进器。
-import { NumField, Section } from "../ui/of/inspector-fields.js";
+import { NumField, Section, SliderField } from "../ui/of/inspector-fields.js";
 
 /**
  * 属性面板 v2 控件集（页签容器 + 行/步进器/滑杆/开关/分段/徽章）。
@@ -202,8 +202,14 @@ export function NumberField({ value, min, max, step = 1, unit = "", decimals, w6
 }
 
 /**
- * 滑杆行：3px 轨道（填充色随值）+ 右侧步进器，draft/commit 与值域完全一致，
- * 两者任一改动都反映到另一个（受控值来自父级）。
+ * 滑杆行 —— **换成移植来的参照 SliderField**（src/ui/of/inspector-fields.tsx:536）。
+ *
+ * 参照形态与我们的旧实现差别最大的几处（都已随这次替换生效）：
+ * - 轨道 3px，填充色是 --text-muted（中性），**中性位有一条 1px 刻度**；
+ * - 滑块 12px 圆形，--bg-panel 底 + 0 0 0 1px --border-strong 描边（我们原来没有刻度、滑块样式也不同）；
+ * - 三列网格 64px 标签 / 1fr 滑轨 / 56px 数值，数值框是 NumField bare（无拖拽标记）；
+ * - 双击回到中性值。
+ * 我们的 onDraft ↔ 参照 onPreview（拖动期间不落 Revision），onCommit 提交单条 patch。
  */
 export function RangeRow({ label, value, min, max, step = 1, unit = "", decimals, w66, onDraft, onCommit, disabled, dim, badge, tail, ariaLabel }: {
   label: string;
@@ -222,20 +228,23 @@ export function RangeRow({ label, value, min, max, step = 1, unit = "", decimals
   tail?: string;
   ariaLabel?: string;
 }) {
-  const pct = Math.max(0, Math.min(100, ((value - min) / (max - min)) * 100));
+  void decimals;
   return (
-    <div className={`pp-row${dim ? " dim" : ""}`}>
-      <label>{label}</label>
-      <input type="range" className="pp-range" min={min} max={max} step={step} value={value} disabled={disabled}
-        aria-label={ariaLabel ?? label}
-        style={{ background: `linear-gradient(90deg, var(--pp-accent-2, #12b998) ${pct}%, #2b353d ${pct}%)` }}
-        onChange={e => onDraft(Number(e.target.value))}
-        onPointerUp={e => onCommit(Number((e.target as HTMLInputElement).value))}
-        onKeyUp={e => onCommit(Number((e.target as HTMLInputElement).value))} />
-      <NumberField value={value} min={min} max={max} step={step} unit={unit} decimals={decimals} w66={w66} disabled={disabled}
-        bare ariaLabel={ariaLabel ?? label} onDraft={onDraft} onCommit={onCommit} />
+    <div className={`pp-slider${dim ? " dim" : ""}`} aria-label={ariaLabel ?? label}>
+      <SliderField
+        label={label}
+        value={value}
+        min={min}
+        max={max}
+        step={step}
+        unit={unit || undefined}
+        fieldWidth={w66 ? 66 : 56}
+        disabled={disabled}
+        onPreview={(n: number) => onDraft(n)}
+        onCommit={(n: number) => onCommit(n)}
+      />
       {badge}
-      {tail && <span className="tail">{tail}</span>}
+      {tail && <span className="pp-tail">{tail}</span>}
     </div>
   );
 }
