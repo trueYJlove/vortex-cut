@@ -192,7 +192,8 @@ export const DEFAULT_VIEW_STATE: TimelineViewState = {
   // 原 80px 偏高：一屏只放得下三轨，长项目要频繁滚动；56px 在同样高度里
   // 多容纳一轨，且片段信息条（名称+时长）与缩略带仍放得下。
   trackHeight: 56,
-  headerWidth: 120,
+  // 轨道头列宽（2026-11-16 对齐 OpenFilm HEAD_W = 108，Timeline.tsx:179）；原 120。
+  headerWidth: 108,
   // 20px（对齐 OpenFilm 的 RULER_H）。原 16px 放不下 10.5px 的刻度文字
   // 与 3px 的内容范围条，实际渲染时文字被裁。
   rulerHeight: 20,

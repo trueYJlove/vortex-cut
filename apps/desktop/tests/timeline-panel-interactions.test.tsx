@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { TimelineDocument } from "@aivideo/contracts";
 import { TimelinePanel } from "../src/app/timeline/TimelineCanvas.js";
+import { DEFAULT_VIEW_STATE } from "../src/app/timeline/types.js";
 
 const doc = (overrides: Partial<TimelineDocument> = {}): TimelineDocument => ({
   schema_version: 1,
@@ -119,10 +120,15 @@ describe("Timeline Round 4 — 右键菜单", () => {
     const props = baseProps();
     render(<TimelinePanel document={doc()} {...props} />);
     const canvas = document.querySelector("canvas") as HTMLCanvasElement;
-    // 空区 x 500 → 时间 ((500-120)/60)s ≈ 6.333s。
+    /* 时间 = (x − headerWidth) / pps。**不要写死 headerWidth**：
+       它已按参照从 120 改为 108（OpenFilm HEAD_W），写死字面量会让
+       「改了轨道头宽度」表现为「定位播放头算错了」——错误信息指错方向。
+       从默认视图状态取，跟随常量。 */
+    const headerW = DEFAULT_VIEW_STATE.headerWidth;
+    const pps = DEFAULT_VIEW_STATE.pixelsPerSecond;
     fireEvent.contextMenu(canvas, { clientX: 500, clientY: 124 });
     fireEvent.click(screen.getByRole("menuitem", { name: "定位播放头" }));
-    expect(props.onSeek).toHaveBeenCalledWith(expect.closeTo(6_333_333, 0));
+    expect(props.onSeek).toHaveBeenCalledWith(expect.closeTo(((500 - headerW) / pps) * 1_000_000, 0));
   });
 });
 

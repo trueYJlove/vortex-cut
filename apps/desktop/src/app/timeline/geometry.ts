@@ -23,7 +23,8 @@ export const SNAP_PX = 8;
 /** Width of the hoverable trim handle zone in pixels. */
 export const TRIM_HANDLE_PX = 6;
 /** Height of the bottom scrollbar strip drawn on the canvas. */
-export const SCROLLBAR_HEIGHT_PX = 8;
+// 横向滚动条高（2026-11-16 对齐 OpenFilm H_SCROLL_H = 10，Timeline.tsx:202）；原 8。
+export const SCROLLBAR_HEIGHT_PX = 10;
 /** Pointer distance from the canvas edge that triggers drag auto-scroll. */
 export const EDGE_AUTOSCROLL_ZONE_PX = 32;
 /** Drag auto-scroll speed cap, in pixels per frame. */
@@ -81,6 +82,11 @@ export const TRACK_GAP = 2;
  */
 export const TRACK_VIEW_PAD = 10;
 
+/* 参照的行高常量（openfilm lib/track-heights.ts:24-26）：
+   主轨比其他轨高一档；覆盖轨是矮的。 */
+export const MAIN_TRACK_H = 76;
+export const OVERLAY_TRACK_H = 30;
+
 export function computeTrackRows(
   tracks: TimelineTrack[],
   rulerHeight: number,
@@ -91,9 +97,22 @@ export function computeTrackRows(
    *  不给则按老行为从标尺下沿开始排——测试与离屏渲染不依赖居中。 */
   viewportHeight?: number,
 ): TrackRowLayout[] {
-  const heights = tracks.map((track) =>
-    track.kind === "audio" ? 44 : track.id === "V1" ? rowHeight : Math.max(32, Math.round(rowHeight * SECONDARY_ROW_RATIO)),
-  );
+  /* 行高分级（2026-11-16 对齐 OpenFilm lib/track-heights.ts）：
+     参照不是「一律同高」，而是按轨道角色给三档——
+       MAIN_TRACK_H = 76（主轨 V1，比其他轨高）
+       TRACK_SIZES.medium = { visual: 64, audio: 44 }
+       OVERLAY_TRACK_H = 30（贴片类覆盖轨）
+     我们原来是「音频 44 / V1 = rowHeight(56) / 其余 56×0.72≈40」，
+     于是五条轨叠起来只有 ~244px，而参照是 ~372px——整条时间线在垂直方向被压扁约三分之一，
+     这是「面板高度对了但还是不像」的主因。
+     rowHeight 仍作为「用户拖动/预设」的基准保留：非主轨、非音频仍按它的比例走，
+     只有主轨与音频取参照的绝对值。 */
+  const heights = tracks.map((track) => {
+    if (track.kind === "audio") return 44;
+    if (track.id === "V1") return Math.max(MAIN_TRACK_H, rowHeight);
+    // 覆盖轨（贴纸/特效类）在参照里是矮的；我们没有单独标记，按比例压到 overlay 档
+    return Math.max(OVERLAY_TRACK_H, Math.round(rowHeight * SECONDARY_ROW_RATIO));
+  });
   const tracksH = heights.reduce((sum, h) => sum + h, 0) + Math.max(0, tracks.length - 1) * TRACK_GAP;
   const padTop =
     viewportHeight === undefined
