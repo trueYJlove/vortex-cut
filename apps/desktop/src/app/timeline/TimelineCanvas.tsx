@@ -1,5 +1,6 @@
 import { editorPerf } from "../preview/perf-metrics.js";
 import { ToolButton } from "../../ui/of/ToolButton.js";
+import { ModePicker, type TimelineMode } from "../../ui/of/ModePicker.js";
 /**
  * Timeline — Canvas + DOM hybrid timeline component.
  *
@@ -2126,6 +2127,10 @@ export function TimelinePanel({
   /** 擦洗态（镜像 rulerScrubbingRef，供旋钮实心/空心渲染）。
    *  ref 用于事件路径同步判断，state 只用于把"按住"这件事画出来。 */
   const [scrubbing, setScrubbing] = useState(false);
+  /* 时间线模式（参照 Timeline.tsx:4797 ModePicker）。
+     当前只承载**视觉与状态**：选择模式 = 现有行为，分割模式暂不改变点击语义
+     （「点击即分割」是全局交互变更，需单独确认后再接）。 */
+  const [scrubMode, setScrubMode] = useState<TimelineMode>("select");
   /** 标记悬停/拖动时的贯穿引导线（null = 无）。 */
   const [markerGuide, setMarkerGuide] = useState<{ timeUs: number; color: string; held: boolean } | null>(null);
   /** 时间区间选取（Shift + 在标尺上拖动）：只做视觉，不接任何操作。
@@ -3350,6 +3355,11 @@ export function TimelinePanel({
     <section className="timeline-pane" aria-label="时间线">
       {/* Toolbar (DOM) */}
       <div className="timeline-toolbar">
+        {/* 参照工具栏最左侧是模式切换（选择 / 分割）+ 1px 竖分隔（Timeline.tsx:4081-4084）。
+            主操作在最靠左、其余工具随后，这是时间线工具栏的统一阅读起点。
+            我们此前没有这个入口，工具栏从「添加轨道」开始。 */}
+        <ModePicker mode={scrubMode} onPick={setScrubMode} />
+        <span className="toolbar-sep" aria-hidden="true" />
         <div className="timeline-add-track-wrap">
           <IconButton
             label="添加轨道"
