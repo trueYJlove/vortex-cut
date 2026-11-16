@@ -559,14 +559,22 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--vc-accent); }
 .timeline-zoom-slider::-webkit-slider-runnable-track {
   height: 3px; border-radius: 999px;
   background: linear-gradient(to right,
-    var(--ws-accent, var(--brand-b)) 0,
-    var(--ws-accent, var(--brand-b)) calc(var(--pos, 0) * 100%),
-    var(--vc-border-2, #4a565e) calc(var(--pos, 0) * 100%),
-    var(--vc-border-2, #4a565e) 100%);
+    var(--accent) 0,
+    var(--accent) calc(var(--pos, 0) * 100%),
+    var(--border) calc(var(--pos, 0) * 100%),
+    var(--border) 100%);
 }
-.timeline-zoom-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 12px; height: 12px; margin-top: -5px; border-radius: 50%; background: var(--vc-panel-2, #eef4f6); border: none; box-shadow: 0 1px 3px var(--rgba-35); }
-.timeline-zoom-slider::-moz-range-track { height: 2px; border-radius: 1px; background: var(--vc-border-2, #4a565e); }
-.timeline-zoom-slider::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: var(--vc-panel-2, #eef4f6); border: none; box-shadow: 0 1px 3px var(--rgba-35); }
+/* 滑块 = **6×13 圆角 2px 的竖条、强调色填充**（参照 globals.css:462-470 .tl-zoom）。
+   原来是 12×12 白色圆形 + 阴影 —— 与参照是完全不同的形态：
+   参照用「细长条 + 强调色」表达「这是一根刻度尺上的游标」，而不是一个通用圆形滑块。 */
+.timeline-zoom-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 6px; height: 13px; margin-top: -5px; border-radius: 2px; background: var(--accent); border: none; cursor: pointer; }
+.timeline-zoom-slider::-moz-range-track {
+  height: 3px; border-radius: 999px;
+  background: linear-gradient(to right,
+    var(--accent) 0, var(--accent) calc(var(--pos, 0) * 100%),
+    var(--border) calc(var(--pos, 0) * 100%), var(--border) 100%);
+}
+.timeline-zoom-slider::-moz-range-thumb { width: 6px; height: 12px; border: 0; border-radius: 2px; background: var(--text-muted); cursor: pointer; }
 .timeline-zoom-value { font-size: var(--dlg-fs-label); color: var(--vc-text-2); min-width: 48px; text-align: right; font-family: monospace; }
 
 /* 面板高度由用户拖拽决定；内容（轨道行）始终按自身高度渲染，
@@ -667,11 +675,25 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--vc-accent); }
    V2 行 y 1176..1239 中心 1207.5，字形落在 1200..1219 中心 1209.5。
    两者相差 2px 以内，即 OpenFilm 的 head 用 items-center（Timeline.tsx:2753）。
    用户截图指出"之前是居中的，现在置顶了"——观察正确，故改回。 */
-.timeline-track-head { position: absolute; left: 0; right: 0; display: flex; align-items: center; gap: 2px; padding: 0 6px; border-bottom: 1px solid var(--line-1-e); background: var(--surface-1-c); overflow: hidden; }
+/* 轨道头 —— 改成参照的网格（Timeline.tsx:2770）：
+   `24px 4px repeat(3, minmax(0,1fr))` = [轨号 24px][4px 空档][三个等分开关列]。
+   原来是 flex + 依次排列：轨号先被 padding 挤、开关再被 overflow 裁掉，
+   表现为「最左侧图标被挡住」（用户截图指出）。
+   网格让每一列有明确宽度，轨号定宽、开关三等分，任何宽度下都不再重叠。 */
+.timeline-track-head {
+  position: absolute; left: 0; right: 0;
+  display: grid; grid-template-columns: 24px 4px repeat(3, minmax(0, 1fr));
+  align-items: center; padding: 0 2px;
+  border-bottom: 1px solid var(--line-1-e); background: var(--surface-1-c); overflow: hidden;
+}
 .timeline-track-head[data-track-kind="video"] .timeline-track-badge { color: var(--ink-track-video); }
 .timeline-track-head[data-track-kind="text"] .timeline-track-badge { color: var(--ink-track-text); }
 .timeline-track-head[data-track-kind="audio"] .timeline-track-badge { color: var(--ink-track-audio); }
-.timeline-track-badge { display: inline-flex; align-items: center; gap: 3px; flex: 0 0 auto; min-width: 30px; }
+/* 轨号：参照 LaneMark 是 21×14、10.5px 纯文字、text-faint（Timeline.tsx:295）。
+   原来 min-width:30px 比网格第一列的 24px 还宽 —— 这正是「最左侧图标被挡住」的直接原因
+   （内容溢出列宽后被相邻列压住）。改为 21px 并与网格列同宽。 */
+.timeline-track-badge { display: inline-flex; align-items: center; justify-content: center; gap: 0; flex: 0 0 auto; min-width: 0; width: 21px; }
+.timeline-track-badge small { font-size: 10.5px; font-weight: 500; line-height: 1; font-variant-numeric: tabular-nums; }
 .timeline-track-badge small { font-size: var(--dlg-fs-caption); color: var(--vc-text-2, #9fb3bd); }
 /* 锁定/隐藏/静音/独奏：与最左侧轨道类型标识同级的紧凑小图标；
    hover 是刚好包住图标的正圆（剪映式）。显式覆盖全局 button 的 min-height，
@@ -3771,8 +3793,16 @@ html[data-theme="light"] {
 .rate-anchor { position: relative; display: inline-flex; }
 .rate-btn { position: relative; }
 .rate-dot { position: absolute; top: 3px; right: 3px; width: 5px; height: 5px; border-radius: 50%; background: var(--ws-accent, var(--brand-b)); }
-.rate-pop { position: absolute; top: calc(100% + 8px); right: 0; z-index: 60; min-width: 224px; padding: 10px; background: var(--dlg-bg, #171b1e); border: 1px solid var(--dlg-border, rgba(255,255,255,.12)); border-radius: 14px; box-shadow: 0 18px 48px -12px var(--rgba-14); opacity: 0; transform: translateY(-4px); pointer-events: none; transition: opacity .14s ease, transform .14s ease; }
+/* 播放设置弹层**向上弹**：播放条贴在窗口底部，向下弹会被时间线整块盖住
+   （用户截图指出「点开内容被遮挡」）。
+   参照 PlaybackMenu.tsx:74-82 就是按「锚点在触发器的上方」算位置的
+   （bottom = innerHeight − rect.top + 6），并且 portal 到 body 以免被面板 overflow 裁切。
+   这里改向上弹；z-index 抬到 200 让它压过时间线与底栏。 */
+.rate-pop { position: absolute; bottom: calc(100% + 8px); top: auto; right: 0; z-index: 200; min-width: 240px; padding: 6px; background: var(--bg-raised); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-lg); opacity: 0; transform: translateY(4px); pointer-events: none; transition: opacity .14s ease, transform .14s ease; }
 .rate-pop.open { opacity: 1; transform: translateY(0); pointer-events: auto; }
+/* 音量 / 缩放弹层本来就已经向上弹（见上方 .vol-pop/.zoom-pop 定义），
+   只是 z-index 60 会被时间线/底栏压住，一并抬到 200。 */
+.vol-pop, .zoom-pop { z-index: 200; }
 .rate-pop .rp-head { padding: 2px 6px 8px; font-size: 11px; color: var(--dlg-text-3, var(--ink-3-b)); }
 .rate-pop .rp-row { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 7px; font-size: 13px; color: var(--dlg-text, var(--ink-1-c)); cursor: pointer; }
 .rate-pop .rp-row:hover { background: var(--ctl-bg-hover, #293235); }
@@ -5320,7 +5350,11 @@ body { background:var(--surface-body); }
 .editor-shell .properties-project .properties-actions button:last-child:not(:first-child) { background:transparent; border-color:transparent; color:var(--ws-text-3); }
 
 /* 预览工作台：更深的画布井，让画面浮起来 */
-.editor-shell .stage-pane { background:var(--ws-shell); padding:14px; }
+/* 预览区外边距收窄：用户指出「播放条应更贴近时间线工具栏」。
+   参照的画面区上下是 40px 铬框、**四周没有额外面板内边距**（ProjectView.tsx:4638 起，
+   PANE 本身无 padding，只有画面区内部 px-3 py-2.5）。
+   原来 14px 的四周内边距把播放条整体推离时间线，实测差 14px。 */
+.editor-shell .stage-pane { background:var(--ws-shell); padding:0; }
 /* 预览区（2026-11-16 复刻 OpenFilm 舞台）：参照的画面是**一个纯黑方块浮在面板面上**——
    无圆角、无描边、无阴影（openfilm globals.css:530-541 实测 .stage/.stage-box 均无
    border-radius；--bg-viewer 与面板同色）。

@@ -552,10 +552,16 @@ function drawRulerFace(
   // 看起来像输入框而不是刻度文字——这是录屏对比里最直观的一处差异。
   ctx.textBaseline = "top";
   ctx.font = RULER_LABEL_FONT;
+  /* 刻度线宽一律 1px（参照 Timeline.tsx:3565 的 tick 是 `border-l`，没有加粗）：
+     主刻度与小刻度的区别在**长度**（主贯通、小从上沿下垂 11px）和**颜色**
+     （主 --border、小 --border-strong），不在线宽。
+     我们原来给主刻度更大的对比色（#8a95a5 vs #596372），视觉上像「加粗」了。 */
   for (const tick of ticks) {
     const tickX = Math.round(tick.x + xOffset) + 0.5;
     if (tickX < bandX - 1 || tickX > endX + 1) continue;
-    ctx.strokeStyle = tick.major ? RULER_TICK_MAJOR() : RULER_TICK_MINOR();
+    ctx.strokeStyle = tick.major
+      ? cssColor("--border", "rgba(16, 16, 24, 0.085)")
+      : cssColor("--border-strong", "rgba(16, 16, 24, 0.16)");
     ctx.lineWidth = 1;
     ctx.beginPath();
     // 小刻度自上沿下垂；主刻度贯通。
@@ -563,6 +569,14 @@ function drawRulerFace(
     ctx.lineTo(tickX, height);
     ctx.stroke();
   }
+  /* 标尺下沿那条细线（参照：标尺容器 border-b，Timeline.tsx:4285 的 border-b border-[var(--border)]）。
+     它把「刻度区」与「轨道区」分开——我们此前没有，于是刻度直接压到轨道上。 */
+  ctx.strokeStyle = cssColor("--border", "rgba(16, 16, 24, 0.085)");
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(bandX, height - 0.5);
+  ctx.lineTo(Math.min(endX, bandX + width), height - 0.5);
+  ctx.stroke();
   // 主刻度时间标签：顶部对齐、刻度右侧留 4px（OpenFilm pl-1）。
   ctx.fillStyle = RULER_LABEL_COLOR();
   for (const tick of ticks) {
@@ -1848,9 +1862,14 @@ export function TimelinePanel({
     () => computeTransitionRects(clips, transitions, trackRows, view),
     [clips, transitions, trackRows, view],
   );
+  /* 空时间线不画刻度（用户指出：参照在没有素材时不显示刻度，有素材才显示）。
+     手工建一条空时间线时，主轨上还没有任何片段——此时标尺只是一条干净的带子，
+     刻度出现即暗示「这里有内容可以对齐」，实际没有。 */
   const ticks = useMemo(
-    () => computeTicks(totalUs, view.pixelsPerSecond, view.headerWidth, frameRate, view.scrollX, canvasSize.width),
-    [totalUs, view.pixelsPerSecond, view.headerWidth, frameRate, view.scrollX, canvasSize.width],
+    () => (clips.length === 0
+      ? []
+      : computeTicks(totalUs, view.pixelsPerSecond, view.headerWidth, frameRate, view.scrollX, canvasSize.width)),
+    [clips.length, totalUs, view.pixelsPerSecond, view.headerWidth, frameRate, view.scrollX, canvasSize.width],
   );
   // Content-space clip rects (scrollX=0) for marquee selection hit testing.
   const contentClipRects = useMemo(
@@ -2365,6 +2384,11 @@ export function TimelinePanel({
         const next: TimelineInteraction = { kind: "playhead", startX: x };
         interactionRef.current = next;
         setInteraction(next);
+        // 擦洗态必须在这里也置位：本路径是「在标尺区按下开始拖播放头」，
+        // 与 handleRulerPinDown 是两条入口。此前只在后者里 setScrubbing(true)，
+        // 于是一路拖动时旋钮一直是空心的（参照：按住实心、松开空心）。
+        rulerScrubbingRef.current = true;
+        setScrubbing(true);
         canvas.style.cursor = "col-resize";
         return;
       }
@@ -2563,6 +2587,9 @@ export function TimelinePanel({
         const scrub: TimelineInteraction = { kind: "playhead", startX: x };
         interactionRef.current = scrub;
         setInteraction(scrub);
+        // 同上：空区按下拖动播放头也要进擦洗态，否则旋钮全程空心。
+        rulerScrubbingRef.current = true;
+        setScrubbing(true);
         canvas.style.cursor = "col-resize";
         return;
       }
@@ -3044,6 +3071,11 @@ export function TimelinePanel({
     interactionRef.current = null;
     setInteraction(null);
     lastPointerRef.current = null;
+    // 松手必须退出擦洗态，旋钮才会从实心变回空心（参照 PlayheadKnob: 按住实心、松开空心）。
+    // 此前只在 handleRulerPinUp 里复位，画布内的拖动路径没有复位点，
+    // 于是旋钮一旦变实心就再也不回去了（或如实测那样全程空心）。
+    rulerScrubbingRef.current = false;
+    setScrubbing(false);
     if (canvas) canvas.style.cursor = "default";
     // 依赖里含 clips：文档更新（补丁生效）后本回调重建，但 pendingKeep 已在
     // 下面的 effect 中消费完毕，不会残留。
