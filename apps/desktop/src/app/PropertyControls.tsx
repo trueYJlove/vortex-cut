@@ -1,5 +1,7 @@
 import { useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
+// 移植自 OpenFilm 的数值框（src/ui/of）：左端字母拖拽标记、无 ▲▼ 步进器。
+import { NumField, Section } from "../ui/of/inspector-fields.js";
 
 /**
  * 属性面板 v2 控件集（页签容器 + 行/步进器/滑杆/开关/分段/徽章）。
@@ -47,7 +49,13 @@ export function SubTabs({ tabs, active, onChange }: { tabs: TabItem[]; active: s
   );
 }
 
-/** 分组标题：13px/600 + 悬停重置；chev 显示静态 ▼（如「位置大小」）；collapsible 用于占位组（默认折叠降噪）。 */
+/**
+ * 分组 —— **换成移植来的参照 Section**（src/ui/of/inspector-fields.tsx:88）。
+ *
+ * 保留调用签名（title/tail/onReset/collapsible/defaultClosed/chev），30 处调用点不动。
+ * 观感随之变成参照的：12px/600 标题、11px 折角、分隔线走**分组底边**、折叠状态可记忆。
+ * 参照用 chevron 图标而非我们原来的 ▼ 字符，这里交给 Section 自己画。
+ */
 export function PGroup({ title, tail, onReset, resetTitle = "重置", collapsible, defaultClosed, chev, children }: {
   title: string;
   tail?: ReactNode;
@@ -58,22 +66,24 @@ export function PGroup({ title, tail, onReset, resetTitle = "重置", collapsibl
   chev?: boolean;
   children: ReactNode;
 }) {
-  const [closed, setClosed] = useState(Boolean(defaultClosed));
-  const showChev = collapsible || chev;
+  /* 参照的 Section 自带折叠（closedByDefault），但**默认展开**且不可禁用折叠；
+     我们的 chev/collapsible 语义是「有折角 / 可折叠」两种。
+     映射：collapsible → 可折叠；chev 仅表示有个静态折角（传 true 也不折叠）。
+     为保持「不可折叠时点击标题无反应」，collapsible=false 时默认展开即可——
+     Section 总是可折叠，这是参照行为，接受。 */
+  void chev;
   return (
-    <>
-      <div className={`pp-gh${collapsible ? " coll" : ""}${closed ? " closed" : ""}`}
-        onClick={collapsible ? () => setClosed(c => !c) : undefined}>
-        {showChev && <span className="chev" aria-hidden="true">▼</span>}
-        <span>{title}</span>
-        {tail}
-        {onReset && (
-          <button type="button" className="rst" title={resetTitle}
-            onClick={e => { e.stopPropagation(); onReset(); }}>⟲</button>
-        )}
-      </div>
-      {(!collapsible || !closed) && children}
-    </>
+    <Section
+      id={title}
+      title={title}
+      closedByDefault={collapsible ? Boolean(defaultClosed) : false}
+      aside={onReset ? (
+        <button type="button" className="pp-reset" title={resetTitle} aria-label={resetTitle}
+          onClick={e => { e.stopPropagation(); onReset(); }}>⟲</button>
+      ) : (tail ? <span className="pp-tail">{tail}</span> : undefined)}
+    >
+      {children}
+    </Section>
   );
 }
 
@@ -136,6 +146,19 @@ export function Seg({ options, value, onChange, columns }: { options: Array<{ va
  *
  * mark 省略时退回标签首字（参照同款规则：prefix ?? 标签首字 ?? 整词）。
  */
+/**
+ * 数值框 —— **实现已换成移植来的参照 NumField**（2026-11-16，src/ui/of/inspector-fields.tsx:191）。
+ *
+ * 保留本函数的对外签名，是为了让 30 处调用点零改动；但观感与交互完全由参照实现决定：
+ * 左侧 22px 字母标记即拖拽手柄（ew-resize）、11px tabular-nums、单位是框内 10.5px 后缀、
+ * **没有 ▲▼ 步进器**。此前我们自己写的那版带右侧箭头，那是 HUD 形态而非设计工具形态。
+ *
+ * 语义映射（关键，别改错）：
+ * - onPreview ↔ 我们的 onDraft：拖动/输入期间只改本地草稿，不落 Revision；
+ * - onCommit  ↔ 我们的 onCommit：松手/失焦/回车提交单条 patch。
+ * 参照的 onCommit 还会给一个 apply 函数（多选时逐项换算），我们这里是单值面板，
+ * 直接忽略 apply 用 (n) 即可。
+ */
 export function NumberField({ value, min, max, step = 1, unit = "", decimals, w66, placeholder, disabled, ariaLabel, mark, bare, onDraft, onCommit }: {
   value?: number;
   min: number;
@@ -149,95 +172,32 @@ export function NumberField({ value, min, max, step = 1, unit = "", decimals, w6
   ariaLabel?: string;
   /** 左端 22px 拖拽标记上的字（W / H / X / Y / ° …）。 */
   mark?: string;
-  /** 无标记模式：滑杆右侧的数字框用它（参照 NumField bare，inspector-fields.tsx:612-625）——
-   *  值已经由滑杆直接拖，再给一个拖拽标记会同时出现两个手柄，且标记字是中文标签首字
-   *  （「缩」「不」）落在 10.5px 上非常难看。 */
+  /** 无标记模式：滑杆右侧的数字框用它（参照 NumField bare）。 */
   bare?: boolean;
   onDraft?: (v: number) => void;
   onCommit: (v: number) => void;
 }) {
-  const dec = decimals ?? (step < 1 ? 2 : 0);
-  /* 值里不带单位：单位由控件作为 10.5px 后缀单独渲染（参照同款）。 */
-  const fmt = (v: number) => `${parseFloat(v.toFixed(4)).toFixed(dec)}`;
-  const clampSnap = (v: number) => {
-    const c = Math.min(max, Math.max(min, v));
-    return parseFloat((Math.round(c / step) * step).toFixed(4));
-  };
-  const [editing, setEditing] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const shown = editing ?? (value === undefined || Number.isNaN(value) ? "" : fmt(value));
-  const commitText = (raw: string) => {
-    const parsed = parseFloat(raw);
-    if (Number.isFinite(parsed)) onCommit(clampSnap(parsed));
-    setEditing(null);
-  };
-  const bump = (dir: 1 | -1) => {
-    const parsed = editing !== null ? parseFloat(editing) : value;
-    const base = Number.isFinite(parsed) ? (parsed as number) : min;
-    const v = clampSnap(base + dir * step);
-    setEditing(null);
-    onCommit(v);
-  };
-  const scrub = useRef<{ sx: number; sv: number; active: boolean; last: number } | null>(null);
-  const onPointerDown = (e: ReactPointerEvent<HTMLSpanElement>) => {
-    if (disabled || (e.target as HTMLElement).closest("button")) return;
-    const v0 = Number.isFinite(value ?? NaN) ? (value as number) : min;
-    scrub.current = { sx: e.clientX, sv: v0, active: false, last: v0 };
-    const move = (ev: PointerEvent) => {
-      const s = scrub.current;
-      if (!s) return;
-      if (!s.active && Math.abs(ev.clientX - s.sx) < 4) return;
-      if (!s.active) {
-        s.active = true;
-        document.body.classList.add("pp-scrubbing");
-        inputRef.current?.blur();
-      }
-      const v = clampSnap(s.sv + Math.round((ev.clientX - s.sx) / 3) * step);
-      s.last = v;
-      setEditing(fmt(v));
-      onDraft?.(v);
-    };
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      document.body.classList.remove("pp-scrubbing");
-      const s = scrub.current;
-      scrub.current = null;
-      if (s?.active) {
-        setEditing(null);
-        onCommit(s.last);
-      }
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-  };
-  /* 值里不含单位：数字与单位分开渲染（参照 inspector-fields.tsx:386-388）。
-     自己已经在值里打了单位符号时不再补后缀，避免 "0.00°°"。 */
-  const hasOwnUnit = /[a-z%°×:]$/i.test(shown);
+  /* decimals 在我们的语义里是「显示保留几位」，参照用 format 回调表达同一件事。
+     两者都要保住，否则 0.00° 会变成 0°。 */
+  const format = decimals === undefined ? undefined : (n: number) => n.toFixed(decimals);
   return (
-    <span className={`pp-field${w66 ? " w66" : ""}${disabled ? " is-disabled" : ""}`}>
-      {/* 22px 标记 = 拖拽手柄。cursor:ew-resize 就是「这里可以横向搓」的提示，
-         参照没有别的暗示物。键盘用户走输入框（↑↓）与 aria-label，不依赖指针。 */}
-      {bare
-        ? <span className="mark-spacer" aria-hidden="true" />
-        : <span className="mark" onPointerDown={onPointerDown} aria-hidden="true">{mark ?? ""}</span>}
-      <input ref={inputRef} value={shown} placeholder={placeholder} disabled={disabled} aria-label={ariaLabel}
-        onChange={e => {
-          setEditing(e.target.value);
-          const p = parseFloat(e.target.value);
-          if (Number.isFinite(p)) onDraft?.(p);
-        }}
-        onBlur={() => { if (editing !== null) commitText(editing); }}
-        onKeyDown={e => {
-          if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-            e.preventDefault();
-            bump(e.key === "ArrowUp" ? 1 : -1);
-          } else if (e.key === "Enter") {
-            (e.target as HTMLInputElement).blur();
-          }
-        }} />
-      {unit && !hasOwnUnit && <span className="unit" aria-hidden="true">{unit}</span>}
-    </span>
+    <div className={w66 ? "pp-num w66" : "pp-num"}>
+      <NumField
+        label={ariaLabel ?? ""}
+        prefix={mark}
+        bare={bare}
+        value={disabled ? undefined : value}
+        step={step}
+        min={min}
+        max={max}
+        unit={unit || undefined}
+        placeholder={placeholder}
+        disabled={disabled}
+        format={format}
+        onPreview={onDraft ? (n: number) => onDraft(n) : undefined}
+        onCommit={(n: number) => onCommit(n)}
+      />
+    </div>
   );
 }
 

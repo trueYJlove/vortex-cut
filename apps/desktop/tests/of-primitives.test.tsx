@@ -11,7 +11,7 @@ describe("移植后的 OpenFilm 原语可用性（P2 验证）", () => {
   });
 
   it("NumField 渲染左端标记（而非 ▲▼ 步进器）", () => {
-    const { container } = render(<NumField value={100} onChange={() => undefined} label="宽度" prefix="W" />);
+    const { container } = render(<NumField value={100} onCommit={() => undefined} label="宽度" prefix="W" />);
     const text = container.textContent ?? "";
     expect(text).toContain("W");
     // 参照没有步进器：不应出现增大/减小的按钮

@@ -1056,7 +1056,13 @@ input, select, textarea { font-size: var(--dlg-fs-body); }
 .pp-panel .pp-gh:hover .rst { visibility: visible; }
 .pp-panel .pp-gh .rst:hover { background: var(--ctl-bg-hover, var(--surface-3-b)); color: var(--pp-accent); }
 .pp-panel .pp-sep { height: 1px; background: var(--pp-sep); margin: 14px 0 2px; }
-.pp-panel .pp-row { display: flex; align-items: center; gap: 10px; min-height: 32px; margin-bottom: 7px; }
+.pp-panel .pp-row { display: flex; align-items: center; gap: 10px; min-height: 32px; margin-bottom: 7px; min-width: 0; }
+/* 移植来的 FIELD 是 w-full（参照的行是网格列，宽度天然受限）；我们的 .pp-row 是 flex，
+   不设界会把两个数值框撑出面板（实测横向溢出）。
+   .pp-num 作为数值框的宿主，负责给宽度并在同一行内均分。 */
+.pp-panel .pp-num { flex: 1 1 0; min-width: 0; }
+.pp-panel .pp-num.w66 { flex: 0 0 66px; }
+.pp-panel .pp-row > .pp-num + .pp-num { flex: 1 1 0; }
 .pp-panel .pp-row > label { width: 56px; flex: none; font-size: var(--dlg-fs-body); color: var(--pp-text-2); }
 .pp-panel .pp-row .tail { font-size: var(--dlg-fs-label); color: var(--pp-text-3); }
 .pp-panel .pp-row.dim, .pp-panel .pp-dim { opacity: .42; }
