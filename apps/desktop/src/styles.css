@@ -698,7 +698,6 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--vc-accent); }
 .track-row-actions button:disabled { opacity: 0.35; cursor: default; }
 
 /* 左栏页签的基础形态（工作区内的 .editor-shell 覆盖见后：40px / 11.5px /
-   激活强调色 + 强调底，无下划线，与 .pp-tab 同构）。这里的高度 44px 只对
    非工作区上下文生效，工作区内一律被下面的覆盖规则接管。 */
 .left-seg { display: flex; height: 44px; flex: none; padding: 0 8px; background: transparent; border-bottom: 1px solid var(--line-1-d); }
 .left-seg button { position: relative; flex: 1; display: flex; align-items: center; justify-content: center; padding: 0; color: var(--ink-2); font-size: 13px; border: 0; background: transparent; transition: color .15s; }
@@ -995,21 +994,12 @@ input, select, textarea { font-size: var(--dlg-fs-body); }
   --pp-sep: rgba(16, 16, 24, .08);
 }
 [data-theme="light"] .pp-panel .pp-body { background: #f7f7f8; }
-[data-theme="light"] .pp-panel .pp-sub.pp-active { background: var(--ctl-bg-hover, #e8e8ea); color: var(--pp-text); border-color: var(--pp-border-2); }
-[data-theme="light"] .pp-panel input.pp-range::-webkit-slider-thumb { background: var(--vc-panel-2, var(--fixed-white)); }
-[data-theme="light"] .pp-panel .pp-field .chev button:hover { background: var(--ctl-bg-hover, #e8e8ea); }
-[data-theme="light"] .pp-panel .pp-field .chev button:active { background: var(--ctl-bg, #f1f1f3); }
-[data-theme="light"] .pp-panel .pp-field .chev .up i { border-bottom-color: var(--pp-text-3); }
-[data-theme="light"] .pp-panel .pp-field .chev .dn i { border-top-color: var(--pp-text-3); }
 [data-theme="light"] .pp-panel .pp-sw::after { background: var(--vc-panel-2, var(--fixed-white)); }
-[data-theme="light"] .pp-panel .pp-seg { border-color: var(--pp-border-2); }
-[data-theme="light"] .pp-panel .pp-seg.pp-active { background: var(--dlg-accent-dim, rgba(0, 152, 163, .12)); }
 [data-theme="light"] .pp-panel .pp-btn.danger { color: #b0302a; }
 [data-theme="light"] .pp-panel .pp-note { background: var(--dlg-inset, #f0f0f2); border-color: var(--pp-sep); }
 [data-theme="light"] .pp-panel .pp-loudness { background: var(--dlg-inset, #f0f0f2); border-color: var(--pp-sep); }
 [data-theme="light"] .pp-panel .pp-aligngrid button.pp-active,
 [data-theme="light"] .pp-panel .text-style-flags button.pp-active { background: var(--dlg-accent-dim, rgba(0, 152, 163, .12)); }
-[data-theme="light"] .pp-panel .pp-gh .rst:hover { background: var(--ctl-bg-hover, #e8e8ea); }
 [data-theme="light"] .pp-panel .pp-body::-webkit-scrollbar-thumb { background: #c9c9cf; }
 .pp-panel :where(button) { min-height: 0; height: auto; margin: 0; padding: 0; background: none; border: none; border-radius: 0; box-shadow: none; color: inherit; font: inherit; line-height: inherit; }
 .pp-panel :where(button):hover:not(:disabled) { background: none; border-color: transparent; }
@@ -1018,25 +1008,15 @@ input, select, textarea { font-size: var(--dlg-fs-body); }
 /* ---- 页签 ---- */
 /* 分类条 40px：与左栏 .left-seg 同值。两个分类条在同一屏并排出现，
    高度不一致（曾 44 vs 40）会让它们看起来属于两套系统。 */
-.pp-panel .pp-tabs { display: flex; height: 40px; flex: none; border-bottom: 1px solid var(--pp-border); padding: 0 8px; }
 /* 分类页签（2026-11-16 复刻 OpenFilm InspectorWorkspace 分类条）：
    选中态是「强调色 + 600」本身，**不是填充胶囊**；11.5px；
    40px 条高、6px 圆角、6px 垂直外边距、12ms 颜色过渡
    （InspectorWorkspace.module.css:4-8）。 */
-.pp-panel .pp-tab { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; margin: 6px 0; border-radius: 6px; font-size: 11.5px; font-weight: 500; color: var(--pp-text-2); cursor: pointer; position: relative; transition: color .12s, background-color .12s; user-select: none; line-height: 1.25; }
-.pp-panel .pp-tab:hover { color: var(--pp-text); }
 /* 参照的选中态没有下划线（那条 26px 强调下划线是我们自己的发明）。
    选中态的第二线索是**字重 500 → 600**——与颜色无关，色觉障碍下依然可辨
    （独立复核已按色觉模拟验证）。那层强调底只是强化，实测对面板仅 1.13–1.20:1，
    **不足以单独充当线索**，不要把它写成「颜色之外的第二线索」。 */
-.pp-panel .pp-tab.pp-active { color: var(--pp-accent); font-weight: 600; background: var(--dlg-accent-dim, var(--rgba-11)); }
-.pp-panel .pp-tab:focus-visible { box-shadow: inset 0 0 0 1.5px var(--ws-focus, var(--pp-accent)); outline: none; }
-.pp-panel .pp-tab .soon { font-size: 10.5px; color: var(--pp-warn); line-height: 1.4; font-weight: 400; }
 .pp-panel .pp-subtabs { display: flex; gap: 4px; padding: 12px 14px 4px; flex: none; }
-.pp-panel .pp-sub { flex: 1; padding: 5px 0; display: flex; flex-direction: column; align-items: center; gap: 1px; border-radius: 7px; font-size: var(--dlg-fs-body); color: var(--pp-text-2); cursor: pointer; border: 1px solid transparent; transition: .15s; line-height: 1.25; user-select: none; }
-.pp-panel .pp-sub:hover { color: var(--pp-text); }
-.pp-panel .pp-sub.pp-active { background: var(--ctl-bg-hover, var(--surface-3-b)); color: var(--pp-text); border-color: var(--pp-border-2); font-weight: 600; }
-.pp-panel .pp-sub .soon { font-size: 10.5px; color: var(--pp-warn); line-height: 1.4; }
 /* ---- 内容区 ---- */
 .pp-panel .pp-body { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 16px 24px; background: var(--pp-inset); }
 .pp-panel .pp-body::-webkit-scrollbar { width: 8px; }
@@ -1046,15 +1026,6 @@ input, select, textarea { font-size: var(--dlg-fs-body); }
    13/12、左右 10——参照的分组靠「间隙 + 底部发丝线」分段，
    不靠上边距堆叠（openfilm InspectorWorkspace.module.css:11-16
    覆盖了组件自带的 border-t，实测生效的是 border-bottom）。 */
-.pp-panel .pp-gh { display: flex; align-items: center; gap: 5px; min-height: 25px; margin: 0; padding-top: 9px; font-size: 12px; font-weight: 600; color: var(--pp-text); }
-.pp-panel .pp-gh:first-child { margin-top: 10px; }
-.pp-panel .pp-gh .chev { color: var(--pp-text-3); font-size: 10.5px; transition: transform .15s; }
-.pp-panel .pp-gh.coll { cursor: pointer; }
-.pp-panel .pp-gh.coll.closed .chev { transform: rotate(-90deg); }
-.pp-panel .pp-gh .tail { font-size: var(--dlg-fs-label); color: var(--pp-text-3); font-weight: 400; }
-.pp-panel .pp-gh .rst { margin-left: auto; display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 6px; color: var(--pp-text-2); cursor: pointer; font-size: var(--dlg-fs-body); visibility: hidden; }
-.pp-panel .pp-gh:hover .rst { visibility: visible; }
-.pp-panel .pp-gh .rst:hover { background: var(--ctl-bg-hover, var(--surface-3-b)); color: var(--pp-accent); }
 .pp-panel .pp-sep { height: 1px; background: var(--pp-sep); margin: 14px 0 2px; }
 .pp-panel .pp-row { display: flex; align-items: center; gap: 10px; min-height: 32px; margin-bottom: 7px; min-width: 0; }
 /* 移植来的 FIELD 是 w-full（参照的行是网格列，宽度天然受限）；我们的 .pp-row 是 flex，
@@ -1079,38 +1050,18 @@ input, select, textarea { font-size: var(--dlg-fs-body); }
 .pp-panel .pp-subtext { color: var(--pp-text-3); font-size: var(--dlg-fs-label); }
 .pp-panel .pp-tailtext { margin-left: auto; font-size: var(--dlg-fs-label); color: var(--pp-text-3); font-weight: 400; }
 /* ---- 滑杆 ---- */
-.pp-panel input.pp-range { -webkit-appearance: none; appearance: none; flex: 1; height: 3px; min-height: 0; border-radius: 2px; border: none; background: var(--dlg-track); outline: none; cursor: pointer; padding: 0; margin: 0; min-width: 0; }
-.pp-panel input.pp-range::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--vc-panel-2, var(--ink-1)); transition: box-shadow .15s; }
-.pp-panel input.pp-range:hover::-webkit-slider-thumb { box-shadow: 0 0 0 4px var(--rgba-58); }
-.pp-panel input.pp-range:disabled { opacity: .35; cursor: not-allowed; }
 /* ---- 数字步进器 ---- */
 /* 数值框（2026-11-16 复刻 OpenFilm FIELD，inspector-fields.tsx:31）：
    26px 高 / 5px 圆角 / **静止态无描边**（只有一层半透明填充），
    悬停浮出发丝环，聚焦才出现 1.5px 强调环并把底换成面板色。
    原来是 28px 高 + 常驻 1px 描边——每个框都自带轮廓，整列读起来像表格。 */
-.pp-panel .pp-field { display: flex; align-items: center; height: 26px; width: 86px; flex: none; background: var(--pp-inset); border: 1px solid transparent; border-radius: 5px; transition: border-color .15s, background-color .15s; touch-action: none; }
-.pp-panel .pp-field.w66 { width: 66px; }
-.pp-panel .pp-field:hover { border-color: var(--pp-border-2); }
-.pp-panel .pp-field:focus-within { border-color: var(--pp-accent); background: var(--ws-panel); }
 /* 输入框：11px + 等宽数字（参照 INPUT = text-[11px] tabular-nums）。
    原来是 13px——设计工具的数值密度靠小字号 + tabular-nums 维持，
    13px 会让每个数字框看起来像表单而像仪表。 */
-.pp-panel .pp-field input { flex: 1; min-width: 0; height: 100%; background: none; border: none; outline: none; color: var(--pp-text); font-size: 11px; font-variant-numeric: tabular-nums; text-align: right; padding: 0 4px 0 2px; }
 /* 左端 22px 拖拽标记（参照 PREFIX = w-[22px] text-[10.5px] text-faint）。
    它取代了原来的 ▲▼ 步进器：ew-resize 光标即提示。 */
-.pp-panel .pp-field .mark { width: 22px; flex: none; align-self: stretch; display: flex; align-items: center; justify-content: center; font-size: 10.5px; color: var(--pp-text-3); cursor: ew-resize; user-select: none; touch-action: none; }
-.pp-panel .pp-field .mark:hover { color: var(--pp-text); }
 /* 无标记模式（滑杆右侧的数字）：留 8px 而不是 22px，参照 NumField bare 用 w-2 占位 */
-.pp-panel .pp-field .mark-spacer { width: 8px; flex: none; }
-.pp-panel .pp-field.is-disabled .mark { cursor: default; color: var(--pp-text-3); opacity: .5; }
 /* 单位后缀：框内 10.5px 淡色，不拼进值里 */
-.pp-panel .pp-field .unit { flex: none; padding-right: 6px; font-size: 10.5px; color: var(--pp-text-3); pointer-events: none; }
-.pp-panel .pp-field .chev button:active { background: var(--ctl-bg, #33414e); }
-.pp-panel .pp-field .chev button i { display: block; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; }
-.pp-panel .pp-field .chev .up i { border-bottom: 5px solid var(--pp-text-3); }
-.pp-panel .pp-field .chev .dn i { border-top: 5px solid var(--pp-text-3); }
-.pp-panel .pp-field .chev button:hover .up i { border-bottom-color: var(--pp-accent); }
-.pp-panel .pp-field .chev button:hover .dn i { border-top-color: var(--pp-accent); }
 body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-select: none; }
 /* ---- 开关 / 复选 / 分段 / 按钮 / 徽章 / 注释 ---- */
 .pp-panel .pp-sw { position: relative; display: inline-block; width: 32px; height: 18px; border-radius: 9px; background: var(--dlg-track); cursor: pointer; flex: none; transition: background .18s; }
@@ -1122,9 +1073,6 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 .pp-panel .pp-chk { display: flex; align-items: center; gap: 9px; font-size: var(--dlg-fs-body); cursor: pointer; min-height: 30px; color: var(--pp-text); }
 .pp-panel .pp-chk input { width: 15px; height: 15px; accent-color: var(--pp-accent-2); cursor: pointer; }
 .pp-panel .pp-segset { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
-.pp-panel .pp-seg { flex: 1; min-width: 56px; height: 30px; border: 1px solid var(--pp-border-2); border-radius: 6px; color: var(--pp-text-2); font-size: var(--dlg-fs-body); cursor: pointer; transition: .15s; padding: 0 4px; }
-.pp-panel .pp-seg:hover { color: var(--pp-text); border-color: var(--pp-border-2); }
-.pp-panel .pp-seg.pp-active { background: var(--dlg-accent-dim, #243040); border-color: var(--pp-accent); color: var(--pp-accent); font-weight: 600; }
 .pp-panel .pp-btn { width: 100%; height: 34px; border-radius: 7px; border: 1px solid var(--pp-accent); background: var(--rgba-11); color: var(--pp-accent); font-size: var(--dlg-fs-body); font-weight: 600; cursor: pointer; transition: .15s; }
 .pp-panel .pp-btn:hover { background: var(--rgba-12); }
 .pp-panel .pp-btn.danger { border-color: var(--rgba-8); background: none; color: var(--dlg-danger-text, var(--danger-c)); }
