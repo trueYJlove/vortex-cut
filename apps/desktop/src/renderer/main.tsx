@@ -1,5 +1,8 @@
 import { Profiler, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+// 顺序有意义：Tailwind 在前（含 preflight），遗留样式表在后——
+// 未分层 CSS 优先级高于 @layer，故 legacy 规则仍能压住工具类（见 tailwind.css 注释）。
+import "../tailwind.css";
 import "../styles.css";
 import { editorPerf, installEditorDiagnostics } from "../app/preview/perf-metrics.js";
 import { initTheme } from "../app/theme.js";

@@ -537,7 +537,8 @@ export function dragEdgeAutoScrollStep(pointerX: number, viewportWidth: number):
 // ── 剪映式片段布局 ────────────────────────────────────────────────────────────
 
 /** 剪映式片段顶部名称条高度（px）：名称 + 时长码。绘制与命中测试共用。 */
-export const CLIP_HEADER_H = 16;
+// 参照名称条 15px（openfilm Timeline.tsx:227 INFO_H = 15）；原 16px。
+export const CLIP_HEADER_H = 15;
 
 /**
  * 片段内音频（波形/分贝线）所在区域：

@@ -366,7 +366,8 @@ const WAVEFORM_PEAK_COUNT_MAX = 4096;
 
 // ── 剪映式片段外观（1:1 复刻参考） ────────────────────────────────────────────
 /** 片段圆角半径（px）。 */
-const CLIP_RADIUS = 3;
+// 参照片段圆角 4px（openfilm Timeline.tsx:3247 rounded-[4px]）；原 3px。
+const CLIP_RADIUS = 4;
 /** 片段在轨道行内的上下留白（px）——相邻轨道片段之间形成剪映式缝隙。 */
 const CLIP_ROW_INSET = 2;
 /** 片段配色（2026-11-11 对齐 OpenFilm 的 KIND_COLOR 令牌，globals.css:87-94/163-170）：
@@ -456,9 +457,9 @@ const cssColor = (name: string, fallback: string): string => {
   const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   return value || fallback;
 };
-const RULER_DEAD_BG = () => cssColor("--tl-dead-bg", "#181c1f"); // 素材终点外的死区底色
-const RULER_BG_TOP = () => cssColor("--tl-ruler-top", "#222629"); // 标尺带渐变顶
-const RULER_BG_BOTTOM = () => cssColor("--tl-ruler-bottom", "#1a1e21"); // 标尺带渐变底
+const RULER_DEAD_BG = () => cssColor("--tl-dead-bg", "#161618"); // 素材终点外的死区底色
+const RULER_BG_TOP = () => cssColor("--tl-ruler-top", "#1c1c1f"); // 标尺带渐变顶
+const RULER_BG_BOTTOM = () => cssColor("--tl-ruler-bottom", "#17171a"); // 标尺带渐变底
 const RULER_END_EDGE = () => cssColor("--tl-end-edge", "#3d4a5c"); // 素材终点竖标线（主题令牌）
 const RULER_TICK_MAJOR = () => cssColor("--tl-tick-major", "#8a95a5");
 const RULER_TICK_MINOR = () => cssColor("--tl-tick-minor", "#596372");
@@ -476,7 +477,7 @@ const RULER_LABEL_TOP = 1;
 const RANGE_BAR_TOP = () => cssColor("--tl-range-top", "#3a4147");
 const RANGE_BAR_BOTTOM = () => cssColor("--tl-range-bottom", "#4b545b");
 const HOVER_CHIP_BG = () => cssColor("--tl-chip-bg", "rgba(9, 12, 24, 0.88)");
-const HOVER_CHIP_EDGE = () => cssColor("--tl-chip-edge", "rgba(37, 211, 172, 0.45)");
+const HOVER_CHIP_EDGE = () => cssColor("--tl-chip-edge", "rgba(0, 193, 205, 0.45)");
 const HOVER_CHIP_TEXT = "#d6e1ff";
 // 播放头线/手柄已拆为独立 DOM 覆盖层（A06，TimelinePlayheadLayer），
 // 外观常量与绘制函数不再在 Canvas 路径保留。
@@ -577,10 +578,10 @@ function drawRulerFace(
       const selLeft = Math.max(bandX, rect.x + xOffset);
       const selRight = Math.min(endX, rect.x + xOffset + rect.width);
       if (selRight - selLeft > 1) {
-        ctx.fillStyle = "rgba(53, 214, 174, 0.28)";
+        ctx.fillStyle = "rgba(0, 193, 205, 0.28)";
         ctx.fillRect(selLeft, 0, selRight - selLeft, height);
         // 上下两条描边把区段与刻度线区分开
-        ctx.fillStyle = "rgba(53, 214, 174, 0.75)";
+        ctx.fillStyle = "rgba(0, 193, 205, 0.75)";
         ctx.fillRect(selLeft, 0, selRight - selLeft, 1.5);
         ctx.fillRect(selLeft, height - 1.5, selRight - selLeft, 1.5);
       }
@@ -697,7 +698,7 @@ function drawTimeline(
 
   // Background（没有轨道的地方；内容空间全画布）
   // 2026-11-10：改读主题变量，否则浅色主题下空白区仍是一整块深色。
-  ctx.fillStyle = cssColor("--tl-canvas-bg", "#181c1f");
+  ctx.fillStyle = cssColor("--tl-canvas-bg", "#161618");
   ctx.fillRect(0, topY, width, height);
 
   // 素材终点（多条片段取最靠后的结束点）：标尺/行背景/网格一律到此为止，
@@ -726,27 +727,29 @@ function drawTimeline(
     clipRects,
   });
 
-  // Track backgrounds（素材未覆盖部分：视频/文本轨 #202427、音频轨 #24272b）。
+  // 轨道带（2026-11-16 复刻 OpenFilm Lane 模型）：
+  //   参照里每条轨道是「一条自己的带子」，铺满整个时间线宽度、靠 2px 的面板底色
+  //   间隙彼此分开，带子本身是**半透明的行色**（--tl-row 3% alpha），被选中的
+  //   轨道再深一档（--tl-lane-on）——没有分隔线，结构由间隙与色阶表达
+  //   （openfilm Timeline.tsx:282-289 laneTone / :3048 行 marginTop GAP）。
+  //   我们原来是两件事都不对：实色不透明带 + 1px 强分隔线，且都截断在素材终点，
+  //   于是「轨道」读起来像表格行而不是时间线泳道。
+  const laneTone = (row: (typeof trackRows)[number]): string => {
+    // 被选中片段所在的轨道深一档：选中这件事既落在片段上，也落在它所在的泳道上
+    // （OpenFilm laneTone 的 picked 分支，Timeline.tsx:286）。
+    const picked =
+      selection?.kind === "clip" &&
+      clipRects.some((r) => r.clip.clip_id === selection.id && r.y >= row.y && r.y < row.y + row.height);
+    if (picked) return cssColor("--tl-lane-on", "rgba(240, 240, 255, 0.085)");
+    return row.track.kind === "audio"
+      ? cssColor("--tl-row-audio", "rgba(240, 240, 255, 0.035)")
+      : cssColor("--tl-row", "rgba(240, 240, 255, 0.035)");
+  };
+  // 带子铺满画布宽度（不是到素材终点）：泳道的长度感来自标尺与死区，不来自色带。
   for (const row of trackRows) {
-    const fill =
-      row.track.kind === "audio"
-        ? cssColor("--tl-row-audio", "#24272b")
-        : cssColor("--tl-row", "#202427");
-    ctx.fillStyle = fill;
-    ctx.fillRect(view.headerWidth, row.y, Math.max(0, contentEndX - view.headerWidth), row.height);
+    ctx.fillStyle = laneTone(row);
+    ctx.fillRect(view.headerWidth, row.y, Math.max(0, width - view.headerWidth), row.height);
   }
-
-  // Grid lines between tracks（同样截断在素材终点）。
-  ctx.strokeStyle = cssColor("--tl-grid-line-strong", "rgba(255, 255, 255, 0.22)");
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(view.headerWidth, view.rulerHeight);
-  ctx.lineTo(contentEndX, view.rulerHeight);
-  for (const row of trackRows) {
-    ctx.moveTo(view.headerWidth, row.y + row.height);
-    ctx.lineTo(contentEndX, row.y + row.height);
-  }
-  ctx.stroke();
 
   // Ruler hover guide (Round 5)：标尺带下方的整高淡引导线（时间胶囊在标尺面内）。
   if (rulerHoverUs !== null && rulerHoverUs !== undefined) {
@@ -1007,7 +1010,9 @@ function drawTimeline(
       );
       ctx.fillStyle = palette.header;
       ctx.fillRect(rect.x, rect.y, rect.width, headerH);
-      ctx.font = "11px sans-serif";
+      // 参照信息条文字：10px / medium / white 90%；时长 white 55%（openfilm Timeline.tsx:3285-3292）。
+      // 原来是 11px 纯白——字号大 1px 且纯白，让名称条比画面更抢眼。
+      ctx.font = "500 10px sans-serif";
       ctx.textBaseline = "middle";
       ctx.textAlign = "left";
       const textY = rect.y + headerH / 2 + 0.5;
@@ -1022,10 +1027,10 @@ function drawTimeline(
         }
         name += "…";
       }
-      ctx.fillStyle = "#eef4f6";
+      ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
       ctx.fillText(name, rect.x + 6, textY);
       if (showDur) {
-        ctx.fillStyle = "rgba(238, 244, 246, 0.8)";
+        ctx.fillStyle = "rgba(255, 255, 255, 0.55)";
         ctx.fillText(durText, rect.x + 6 + ctx.measureText(name).width + 8, textY);
       }
     }
@@ -1354,7 +1359,11 @@ function drawTimeline(
         const gx = timeToX(targetUs, view);
         ctx.fillStyle = cssColor(KIND_COLOR_VARS[String(rect.clip.asset_kind ?? "video")]?.band ?? "--clip-video", "#354f6a");
         ctx.fillRect(gx, rect.y + 2, gw, view.trackHeight - 4);
-        ctx.strokeStyle = "#2fc9a5";
+        // 描边走强调令牌（原 #2fc9a5 是旧青绿，色相与新强调色差 30°，且落在自己的填充上只有 1.05:1）。
+        // 必须用 :root 上真实存在的令牌：cssColor() 读的是 documentElement 的计算样式，
+        // 而 --ws-accent-text 只声明在 .editor-shell 上 ⇒ 永远取不到、恒走兜底值
+        // （实测深色因此从 8.62:1 掉到 2.43:1，属回归）。--brand-b 才是挂在 :root 的那一个。
+        ctx.strokeStyle = cssColor("--tl-canvas-accent", "#00c1cd");
         ctx.lineWidth = 1.5;
         ctx.strokeRect(gx, rect.y + 2, gw, view.trackHeight - 4);
         if (!firstRect) firstRect = { x: gx, y: rect.y, width: gw };
@@ -1528,9 +1537,10 @@ function drawTimeline(
       interaction.currentX,
       interaction.currentY,
     );
-    ctx.fillStyle = "rgba(37, 211, 172, 0.10)";
+    ctx.fillStyle = "rgba(0, 193, 205, 0.10)";
     ctx.fillRect(rect.x - view.scrollX, rect.y, rect.width, rect.height);
-    ctx.strokeStyle = "#2fc9a5";
+    // 同上：框选描边用 :root 上的 --brand-b，不用旧青绿字面量
+    ctx.strokeStyle = cssColor("--tl-canvas-accent", "#00c1cd");
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 3]);
     ctx.strokeRect(rect.x - view.scrollX, rect.y, rect.width, rect.height);
@@ -1577,9 +1587,9 @@ function drawRulerStrip(
   const rulerX = headW + stripW;
   // 主题令牌：角区 = 轨道头底、封面条带 = 画布底，分隔线走网格线令牌
   //（2026-11-11 浅色修复——此前硬编码，浅色下角区仍是一块深色）。
-  ctx.fillStyle = cssColor("--tl-track-head-bg", "#12181c");
+  ctx.fillStyle = cssColor("--tl-track-head-bg", "#101012");
   ctx.fillRect(0, 0, headW, height);
-  ctx.fillStyle = cssColor("--tl-canvas-bg", "#181c1f");
+  ctx.fillStyle = cssColor("--tl-canvas-bg", "#161618");
   ctx.fillRect(headW, 0, stripW, height);
   ctx.strokeStyle = cssColor("--tl-grid-line-strong", "rgba(255, 255, 255, 0.22)");
   ctx.lineWidth = 1;
@@ -3828,7 +3838,7 @@ export function TimelinePanel({
                 top: view.rulerHeight,
                 right: 0,
                 bottom: 0,
-                background: "rgba(37, 211, 172, 0.12)",
+                background: "rgba(0, 193, 205, 0.12)",
                 pointerEvents: "none",
                 display: "flex",
                 alignItems: "center",

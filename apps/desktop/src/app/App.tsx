@@ -405,7 +405,8 @@ export function App() {
   const menuButtonRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const menuActionRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [leftWidth, setLeftWidth] = useState(280);
-  const [rightWidth, setRightWidth] = useState(336);
+  // 参照 DEFAULT_INSPECTOR = 360（openfilm PaneDivider.tsx:50）；原 336 是自定值。
+  const [rightWidth, setRightWidth] = useState(360);
   // 时间线面板高度默认按视口比例给（2026-11-11）：参照 OpenFilm 录屏实测
   // 490px / 1440px ≈ 34%。固定 230px 在 1440 高窗口上只占 16%，轨道区一屏
   // 只能看到两轨半，与参照软件"时间线是画面下方一整块工作区"的观感差一倍。

@@ -124,11 +124,19 @@ export function Seg({ options, value, onChange, columns }: { options: Array<{ va
 }
 
 /**
- * 数字步进器：显示值 + 单位（如 46%、0.0dB）；三种操作路径——
- * ① 点击大命中区上下箭头；② 按住数值左右拖动搓值（每 3px 一步，ew-resize 光标）；
- * ③ 聚焦后键盘 ↑↓ / 直接输入。拖动与输入走 onDraft，箭头/松手/失焦/回车走 onCommit。
+ * 数值框（2026-11-16 按 OpenFilm NumField 复刻，inspector-fields.tsx:31-33,320-332,386-388）：
+ * **左边 22px 是一个字母/符号标记（W/H/X/Y/°），它本身就是拖拽手柄**——
+ * 横向拖动改值（ew-resize），不是点击箭头。参照里**全表面没有一个 ▲▼ 步进器**，
+ * 原来我们每个框右侧一对箭头，那是 HUD 而非设计工具的形态，也是这一栏读起来
+ * 最不像参照的地方。
+ *
+ * 结构 = [22px 标记][输入框][单位后缀 10.5px 淡色]
+ * 单位是框内后缀而非拼进值里：参照规则是「值里不含单位，单位由控件渲染」。
+ * 键盘 ↑↓ / 直接输入照旧；拖动与输入走 onDraft，松手/失焦/回车走 onCommit。
+ *
+ * mark 省略时退回标签首字（参照同款规则：prefix ?? 标签首字 ?? 整词）。
  */
-export function NumberField({ value, min, max, step = 1, unit = "", decimals, w66, placeholder, disabled, ariaLabel, onDraft, onCommit }: {
+export function NumberField({ value, min, max, step = 1, unit = "", decimals, w66, placeholder, disabled, ariaLabel, mark, bare, onDraft, onCommit }: {
   value?: number;
   min: number;
   max: number;
@@ -139,11 +147,18 @@ export function NumberField({ value, min, max, step = 1, unit = "", decimals, w6
   placeholder?: string;
   disabled?: boolean;
   ariaLabel?: string;
+  /** 左端 22px 拖拽标记上的字（W / H / X / Y / ° …）。 */
+  mark?: string;
+  /** 无标记模式：滑杆右侧的数字框用它（参照 NumField bare，inspector-fields.tsx:612-625）——
+   *  值已经由滑杆直接拖，再给一个拖拽标记会同时出现两个手柄，且标记字是中文标签首字
+   *  （「缩」「不」）落在 10.5px 上非常难看。 */
+  bare?: boolean;
   onDraft?: (v: number) => void;
   onCommit: (v: number) => void;
 }) {
   const dec = decimals ?? (step < 1 ? 2 : 0);
-  const fmt = (v: number) => `${parseFloat(v.toFixed(4)).toFixed(dec)}${unit}`;
+  /* 值里不带单位：单位由控件作为 10.5px 后缀单独渲染（参照同款）。 */
+  const fmt = (v: number) => `${parseFloat(v.toFixed(4)).toFixed(dec)}`;
   const clampSnap = (v: number) => {
     const c = Math.min(max, Math.max(min, v));
     return parseFloat((Math.round(c / step) * step).toFixed(4));
@@ -196,8 +211,16 @@ export function NumberField({ value, min, max, step = 1, unit = "", decimals, w6
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   };
+  /* 值里不含单位：数字与单位分开渲染（参照 inspector-fields.tsx:386-388）。
+     自己已经在值里打了单位符号时不再补后缀，避免 "0.00°°"。 */
+  const hasOwnUnit = /[a-z%°×:]$/i.test(shown);
   return (
-    <span className={`pp-field${w66 ? " w66" : ""}`} onPointerDown={onPointerDown}>
+    <span className={`pp-field${w66 ? " w66" : ""}${disabled ? " is-disabled" : ""}`}>
+      {/* 22px 标记 = 拖拽手柄。cursor:ew-resize 就是「这里可以横向搓」的提示，
+         参照没有别的暗示物。键盘用户走输入框（↑↓）与 aria-label，不依赖指针。 */}
+      {bare
+        ? <span className="mark-spacer" aria-hidden="true" />
+        : <span className="mark" onPointerDown={onPointerDown} aria-hidden="true">{mark ?? ""}</span>}
       <input ref={inputRef} value={shown} placeholder={placeholder} disabled={disabled} aria-label={ariaLabel}
         onChange={e => {
           setEditing(e.target.value);
@@ -213,10 +236,7 @@ export function NumberField({ value, min, max, step = 1, unit = "", decimals, w6
             (e.target as HTMLInputElement).blur();
           }
         }} />
-      <span className="chev">
-        <button type="button" className="up" tabIndex={-1} aria-label="增大" onClick={() => bump(1)}><i /></button>
-        <button type="button" className="dn" tabIndex={-1} aria-label="减小" onClick={() => bump(-1)}><i /></button>
-      </span>
+      {unit && !hasOwnUnit && <span className="unit" aria-hidden="true">{unit}</span>}
     </span>
   );
 }
@@ -253,7 +273,7 @@ export function RangeRow({ label, value, min, max, step = 1, unit = "", decimals
         onPointerUp={e => onCommit(Number((e.target as HTMLInputElement).value))}
         onKeyUp={e => onCommit(Number((e.target as HTMLInputElement).value))} />
       <NumberField value={value} min={min} max={max} step={step} unit={unit} decimals={decimals} w66={w66} disabled={disabled}
-        ariaLabel={ariaLabel ?? label} onDraft={onDraft} onCommit={onCommit} />
+        bare ariaLabel={ariaLabel ?? label} onDraft={onDraft} onCommit={onCommit} />
       {badge}
       {tail && <span className="tail">{tail}</span>}
     </div>

@@ -416,7 +416,7 @@ describe("控件层：仅直系底栏的最后一个按钮是主操作", () => {
   };
 
   const tealBackground = (value: string | null) =>
-    value !== null && /var\(--dlg-primary\)|#35d6ae|#2bd8b0|#25d3ac/i.test(value);
+    value !== null && /var\(--dlg-primary\)|#00c1cd|#14c9d4|#0098a3/i.test(value);
 
   const winningBackground = (chain: ChainNode[]): { selector: string; value: string } | null => {
     let best: { selector: string; value: string; spec: [number, number, number] } | null = null;
@@ -559,9 +559,9 @@ describe("令牌与排版", () => {
       ["--dlg-text-2", "#b5bfbc"],
       ["--dlg-text-3", "#85918e"],
       ["--dlg-text-4", "#64716e"],
-      ["--dlg-primary", "#35d6ae"],
-      ["--dlg-primary-hover", "#59e1bf"],
-      ["--dlg-primary-text", "#07251e"],
+      ["--dlg-primary", "#00c1cd"],
+      ["--dlg-primary-hover", "#33d1da"],
+      ["--dlg-primary-text", "#00262a"],
       ["--dlg-danger", "#e35d62"],
       ["--dlg-warn", "#d8b06a"],
       ["--r-dlg", "12px"],
@@ -588,7 +588,7 @@ describe("令牌与排版", () => {
   it("分档与线色令牌符合契约", () => {
     expect(raw).toContain("--dlg-line: rgba(255, 255, 255, .075)");
     expect(raw).toContain("--dlg-border: rgba(255, 255, 255, .12)");
-    expect(raw).toContain("--dlg-accent-dim: rgba(53, 214, 174, .11)");
+    expect(raw).toContain("--dlg-accent-dim: rgba(0, 193, 205, .11)");
     expect(raw).toContain("--dlg-foot-min: 65px");
     expect(raw).toContain("--dlg-ctl-h: 34px");
     expect(raw).toContain("--dlg-ctl-sm: 28px");

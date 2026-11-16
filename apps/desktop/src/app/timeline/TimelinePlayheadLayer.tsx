@@ -103,8 +103,8 @@ function TimelinePlayheadLayerImpl({
         <svg width="12" height="17" viewBox="0 0 12 17" aria-hidden="true">
           <path
             d="M1.9 3.4a2 2 0 0 1 2-2h4.2a2 2 0 0 1 2 2v5.3a4.1 4.1 0 0 1-8.2 0z"
-            fill={scrubbing ? "var(--tl-playhead-fill, #f65d55)" : "var(--tl-playhead-rest, #14171a)"}
-            stroke="var(--tl-playhead-stroke, #f65d55)"
+            fill={scrubbing ? "var(--tl-playhead-fill, #ffffff)" : "var(--tl-playhead-rest, #18181b)"}
+            stroke="var(--tl-playhead-stroke, #ffffff)"
             strokeWidth="1.9"
             strokeLinejoin="round"
           />

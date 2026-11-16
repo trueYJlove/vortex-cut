@@ -188,15 +188,15 @@ export function ClipProperties({ clip, working, baseRevisionId, locked, onPatch,
         onCommit={v => setTransform({ scale: v / 100 }, `调整画中画缩放 ${Math.round(v)}%`)} />
       <PRow label="等比缩放"><RatioSwitch /></PRow>
       <PRow label="位置" tail="X / Y（中心偏移）">
-        <NumberField value={Math.round((fixedTf.x - 0.5) * 200)} min={-100} max={100} step={1} ariaLabel="位置 X"
+        <NumberField value={Math.round((fixedTf.x - 0.5) * 200)} min={-100} max={100} step={1} ariaLabel="位置 X" mark="X"
           onDraft={v => updateLocal({ transform: { ...clip.transform, x: 0.5 + v / 200 } })}
           onCommit={v => setTransform({ x: 0.5 + v / 200 }, "调整画中画水平位置")} />
-        <NumberField value={Math.round((fixedTf.y - 0.5) * 200)} min={-100} max={100} step={1} ariaLabel="位置 Y"
+        <NumberField value={Math.round((fixedTf.y - 0.5) * 200)} min={-100} max={100} step={1} ariaLabel="位置 Y" mark="Y"
           onDraft={v => updateLocal({ transform: { ...clip.transform, y: 0.5 + v / 200 } })}
           onCommit={v => setTransform({ y: 0.5 + v / 200 }, "调整画中画垂直位置")} />
       </PRow>
       <PRow label="旋转">
-        <NumberField value={fixedTf.rotate} min={-180} max={180} step={1} unit="°" decimals={2} ariaLabel="旋转"
+        <NumberField value={fixedTf.rotate} min={-180} max={180} step={1} unit="°" decimals={2} ariaLabel="旋转" mark="∠"
           onDraft={v => updateLocal({ transform: { ...clip.transform, rotate: v } })}
           onCommit={v => setTransform({ rotate: v }, "调整画中画旋转")} />
       </PRow>
@@ -220,7 +220,7 @@ export function ClipProperties({ clip, working, baseRevisionId, locked, onPatch,
       <PSep />
       <PGroup title="素材时长">
         <PRow label="时长">
-          <NumberField value={(clip.timeline_end_us - clip.timeline_start_us) / 1_000_000} min={0.5} max={30} step={0.5} unit="s" decimals={1} ariaLabel="图片时长"
+          <NumberField value={(clip.timeline_end_us - clip.timeline_start_us) / 1_000_000} min={0.5} max={30} step={0.5} unit="s" decimals={1} ariaLabel="图片时长" mark="⏱"
             onDraft={v => updateLocal({ timeline_end_us: clip.timeline_start_us + Math.round(v * 1_000_000) })}
             onCommit={v => void onPatch([{ op: "set_image_duration", clip_id: clip.clip_id, duration_us: Math.round(v * 1_000_000) }], "调整图片时长")} />
         </PRow>
@@ -278,7 +278,7 @@ export function ClipProperties({ clip, working, baseRevisionId, locked, onPatch,
           onDraft={v => draftMask({ y: v })} onCommit={v => applyMask({ y: v }, "调整蒙版中心 Y")} />
         {clip.mask.kind === "linear" ? <>
           <PRow label="方向">
-            <NumberField value={clip.mask.rotation ?? 0} min={-180} max={180} step={1} unit="°" decimals={0} ariaLabel="蒙版方向"
+            <NumberField value={clip.mask.rotation ?? 0} min={-180} max={180} step={1} unit="°" decimals={0} ariaLabel="蒙版方向" mark="∠"
               onDraft={v => draftMask({ rotation: v })} onCommit={v => applyMask({ rotation: v }, "调整蒙版方向")} />
           </PRow>
           <RangeRow label="软边带宽" value={clip.mask.feather ?? 0.1} min={0} max={1} step={0.01} w66 ariaLabel="蒙版软边带宽"
@@ -289,7 +289,7 @@ export function ClipProperties({ clip, working, baseRevisionId, locked, onPatch,
           <RangeRow label="高" value={clip.mask.height ?? 0.5} min={0.01} max={1} step={0.01} w66 ariaLabel="蒙版高"
             onDraft={v => draftMask({ height: v })} onCommit={v => applyMask({ height: v }, "调整蒙版高")} />
           <PRow label="旋转">
-            <NumberField value={clip.mask.rotation ?? 0} min={-180} max={180} step={1} unit="°" decimals={0} ariaLabel="蒙版旋转"
+            <NumberField value={clip.mask.rotation ?? 0} min={-180} max={180} step={1} unit="°" decimals={0} ariaLabel="蒙版旋转" mark="∠"
               onDraft={v => draftMask({ rotation: v })} onCommit={v => applyMask({ rotation: v }, "调整蒙版旋转")} />
           </PRow>
           <RangeRow label="羽化" value={clip.mask.feather ?? 0} min={0} max={1} step={0.01} w66 ariaLabel="蒙版羽化"

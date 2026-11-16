@@ -61,7 +61,11 @@ interface FakeCanvas2D {
 function installCanvas2DStub(): FakeCanvas2D {
   const state: FakeCanvas2D = { drawCount: 0, widthSetCount: 0, heightSetCount: 0 };
   const stub = {
-    setTransform: () => undefined,
+    /* 「一次绘制」按 setTransform 计数：drawTimeline 每次绘制的第一件事就是它，
+       与配色无关。原来靠比对画布底色的字面量 "#181c1f" 判定——那是脆的，
+       一次纯粹的颜色令牌调整（2026-11-16 把偏蓝的画布底中性化为 #161618）
+       就让计数恒为 0，测试报「没有绘制」而不是「颜色变了」（实测踩中）。 */
+    setTransform: () => { state.drawCount += 1; },
     clearRect: () => undefined,
     fillRect: () => undefined,
     measureText: () => ({ width: 10 }) as TextMetrics,
@@ -91,7 +95,6 @@ function installCanvas2DStub(): FakeCanvas2D {
       const target = this;
       return new Proxy(stub as unknown as CanvasRenderingContext2D, {
         set(obj, prop, value) {
-          if (prop === "fillStyle" && value === "#181c1f") state.drawCount += 1;
           return Reflect.set(obj, prop, value);
         },
         get(obj, prop) {

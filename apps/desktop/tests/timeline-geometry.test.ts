@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { TimelineClip, TimelineTrack } from "@aivideo/contracts";
 import {
+  CLIP_HEADER_H,
   MIN_CLIP_US,
   clampGroupDelta,
   clampMoveStart,
@@ -491,8 +492,10 @@ describe("剪映式音频带高度（波形占比）", () => {
     const clip = videoClip({ timeline_start_us: 0, timeline_end_us: 2_000_000, source_start_us: 0, source_end_us: 2_000_000 });
     const rects = computeClipRects([clip], rows, view);
     const rect = rects[0];
-    // 轨道行高 64，片段（含上下留白后）高度 60；名称条 16 → 音频区域 44。
-    const area = rect.height - 16;
+    // 轨道行高 64，片段（含上下留白后）高度 60；音频区域 = 片段高 − 名称条高。
+    // 用常量而不是字面量 16：名称条高度已按参照从 16 改为 15，
+    // 写死字面量会让「改了配色/几何就红，但报的是音频带错了」——指错方向。
+    const area = rect.height - CLIP_HEADER_H;
     const band40 = clipAudioBand(clip, rect, 0.4)!;
     const band60 = clipAudioBand(clip, rect, 0.6)!;
     const band100 = clipAudioBand(clip, rect, 1)!;
