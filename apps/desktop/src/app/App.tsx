@@ -1254,6 +1254,22 @@ export function App() {
   // 因此音频图为按元素缓存的持久结构：暂停只停轮询，不销毁图（销毁会让元素永久失声）。
   // 电平值直接写 DOM 高度，避免 60fps 触发整棵组件树重渲。
   type VuGraph = { ctx: AudioContext; analyserL: AnalyserNode; analyserR: AnalyserNode; dataL: Uint8Array<ArrayBuffer>; dataR: Uint8Array<ArrayBuffer>; raf: number };
+  /* 参照 AudioMeters 要的是**时域**样本（算 peak/RMS），而现有 VU 用的是频域平均。
+     这里另开两块时域缓冲给电平表用，两者并存、互不影响。 */
+  const meterTimeL = useRef<Float32Array | null>(null);
+  const meterTimeR = useRef<Float32Array | null>(null);
+  /** 供 ui/of/AudioMeters 采样：返回左右两声道时域样本（−1…1），无图时返回 null。 */
+  const meterLevels = useCallback((): readonly [Float32Array, Float32Array] | null => {
+    const entry = vuGraphRef.current;
+    if (!entry) return null;
+    if (!meterTimeL.current || meterTimeL.current.length !== entry.graph.analyserL.fftSize) {
+      meterTimeL.current = new Float32Array(entry.graph.analyserL.fftSize);
+      meterTimeR.current = new Float32Array(entry.graph.analyserR.fftSize);
+    }
+    entry.graph.analyserL.getFloatTimeDomainData(meterTimeL.current);
+    entry.graph.analyserR.getFloatTimeDomainData(meterTimeR.current!);
+    return [meterTimeL.current, meterTimeR.current!] as const;
+  }, []);
   const vuGraphRef = useRef<{ el: HTMLMediaElement; graph: VuGraph } | null>(null);
   const vuBarLRef = useRef<HTMLElement | null>(null);
   const vuBarRRef = useRef<HTMLElement | null>(null);
@@ -3102,7 +3118,7 @@ export function App() {
       <aside className="properties-pane" aria-label="上下文属性" role="region">{selectedClip ? <ClipProperties clip={selectedClip} locked={Boolean(working?.locked_elements?.includes(selectedClip.clip_id))} onPatch={patchTimeline} onDraft={queueDraft} working={working!} playheadUs={playhead} onOpenEditingTools={tool => openEditingTools(tool, selectedClip.clip_id)} baseRevisionId={timeline?.current_revision.timeline_revision_id ?? null} onAppliedTimeline={acceptState} /> : selectedCaption ? <CaptionProperties caption={selectedCaption} locked={Boolean(selectedCaption.source_clip_id && working?.locked_elements?.includes(selectedCaption.source_clip_id))} onPatch={patchTimeline} onDraft={queueDraft} working={working!} /> : selectedTransition ? <TransitionProperties transition={selectedTransition} onPatch={patchTimeline} /> : <ProjectProperties project={project} saveState={saveState} authoritativePreview={authoritativePreview} previewIsStale={previewIsStale} renderDisabledReason={renderDisabledReason} onGeneratePreview={() => void generatePreview()} onCreateExport={openExportDialog} onOpenProjectDialog={() => setProjectDialogOpen(true)} />}</aside>
     </section>
     <div className="timeline-resize-handle" role="separator" aria-label="调整时间线高度" onPointerDown={event => beginResize("timeline", event)} />
-    <TimelinePanel document={working} selection={selection} setSelection={(sel) => { setSelection(sel); exitLibraryPreview(); }} onPatch={patchTimeline} onDropAsset={dropAsset} coverUrl={coverUrl} onCaptureCover={() => setCoverDialogOpen(true)} canUndo={Boolean(timeline?.can_undo)} canRedo={Boolean(timeline?.can_redo)} onUndo={() => void undoRedo("undo")} onRedo={() => void undoRedo("redo")} assetMedia={timelineAssetMedia} waveformCache={waveformCache} playheadStore={playheadStore} onSeek={(timeUs) => { if (libraryPreviewId) exitLibraryPreview(); seekWhileScrubbing(timeUs); const clip = sortedClips.find(c => timeUs >= c.timeline_start_us && timeUs < c.timeline_end_us); if (clip && videoRef.current) { const sourceStart = (clip.source_start_us ?? 0) / 1_000_000; const elapsed = (timeUs - clip.timeline_start_us) / 1_000_000 * ((clip.speed_milli ?? 1000) / 1000); pendingSeekRef.current = sourceStart + elapsed; videoRef.current.currentTime = pendingSeekRef.current; } else if (videoRef.current) { videoRef.current.currentTime = timeUs / 1_000_000; } }} onSeekCommit={timeUs => { exitLibraryPreview(); commitScrub(timeUs); }} onCommand={(id) => runCommand(id)} />
+    <TimelinePanel document={working} selection={selection} setSelection={(sel) => { setSelection(sel); exitLibraryPreview(); }} onPatch={patchTimeline} onDropAsset={dropAsset} coverUrl={coverUrl} onCaptureCover={() => setCoverDialogOpen(true)} canUndo={Boolean(timeline?.can_undo)} canRedo={Boolean(timeline?.can_redo)} onUndo={() => void undoRedo("undo")} onRedo={() => void undoRedo("redo")} assetMedia={timelineAssetMedia} waveformCache={waveformCache} playheadStore={playheadStore} onSeek={(timeUs) => { if (libraryPreviewId) exitLibraryPreview(); seekWhileScrubbing(timeUs); const clip = sortedClips.find(c => timeUs >= c.timeline_start_us && timeUs < c.timeline_end_us); if (clip && videoRef.current) { const sourceStart = (clip.source_start_us ?? 0) / 1_000_000; const elapsed = (timeUs - clip.timeline_start_us) / 1_000_000 * ((clip.speed_milli ?? 1000) / 1000); pendingSeekRef.current = sourceStart + elapsed; videoRef.current.currentTime = pendingSeekRef.current; } else if (videoRef.current) { videoRef.current.currentTime = timeUs / 1_000_000; } }} onSeekCommit={timeUs => { exitLibraryPreview(); commitScrub(timeUs); }} onCommand={(id) => runCommand(id)} meterLevels={meterLevels} playing={playing} />
     <WorkspaceFooter
       saveState={saveState}
       runtimeReady={runtimeReady}

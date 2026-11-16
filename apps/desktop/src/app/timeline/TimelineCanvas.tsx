@@ -1,6 +1,7 @@
 import { editorPerf } from "../preview/perf-metrics.js";
 import { ToolButton } from "../../ui/of/ToolButton.js";
 import { ModePicker, type TimelineMode } from "../../ui/of/ModePicker.js";
+import { AudioMeters } from "../../ui/of/AudioMeters.js";
 /**
  * Timeline — Canvas + DOM hybrid timeline component.
  *
@@ -1668,6 +1669,8 @@ export function TimelinePanel({
   onCommand,
   coverUrl,
   onCaptureCover,
+  meterLevels,
+  playing,
 }: {
   document?: TimelineDocument;
   selection: TimelineSelection;
@@ -1686,6 +1689,10 @@ export function TimelinePanel({
    *  不传则组件内部自建，行为自洽）。预览每帧写入 store，播放头绘制走
    *  独立 DOM 覆盖层，播放期间不再触发主画布全量重绘。 */
   playheadStore?: PlayheadStore;
+  /** 音频电平表的样本供给（参照 AudioMeters 的数据入口）；不传则不显示电平表。 */
+  meterLevels?: () => readonly [Float32Array, Float32Array] | null;
+  /** 是否在播放（电平表据此决定是否逐帧重绘、停下后回落）。 */
+  playing?: boolean;
   /** Optional seek callback invoked when the playhead is dragged or a caption is clicked. */
   onSeek?: (timeUs: number) => void;
   /** 擦洗结束的精确落点（拖动中 onSeek 走节流，松手用这个收尾）。 */
@@ -3581,6 +3588,10 @@ export function TimelinePanel({
 
       {/* Body: 冻结标尺（滚动区外，零抖动）+ 滚动区（轨道头列/封面条带/片段区）。
           标尺画布绝对定位覆盖滚动视口顶部（见 .timeline-ruler-pin），主画布仍是第一个 canvas。 */}
+      {/* 时间线主体 + 右侧 44px 音频电平表（参照 ProjectView.tsx:4926/4995：
+          电平表在时间线右缘独占一列，时间线内容 inset 掉 METERS_W）。
+          我们此前只有一个 12px 的两点 VU，且在播放条里——与参照的位置和形态都不同。 */}
+      <div className="timeline-body-row">
       <div className="timeline-body">
         <div ref={scrollRef} className="timeline-scroll" onScroll={onTimelineScroll}>
         {/* Left gutter (DOM)：每条轨道一个属性头
@@ -4172,6 +4183,10 @@ export function TimelinePanel({
             用独立 DOM 层而非画布绘制：不必给 drawTimeline 增加位置参数
             （它已有 20+ 个），也避免每次拖动都触发整画布重绘。 */}
 
+      </div>
+      {/* 右侧音频电平表列（参照 METERS_W = 44）：只在有数据源时渲染，
+          避免测试与独立使用场景出现一根空的白条。 */}
+      {meterLevels ? <AudioMeters levels={meterLevels} playing={Boolean(playing)} /> : null}
       </div>
     </section>
   );

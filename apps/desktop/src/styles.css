@@ -582,6 +582,10 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--vc-accent); }
 /* 冻结标尺：.timeline-body 相对定位，标尺覆盖层绝对钉在滚动视口顶部
    （主画布自带的标尺带恰好被盖住，轨道纵向滚动时从固定标尺下穿过）；
    .timeline-scroll 为纵向滚动区（头列 + 画布区两列）。 */
+/* 时间线主体行：内容 + 右侧 44px 电平表列（参照 ProjectView.tsx:4926/4995）。
+   电平表在右缘独占一列，内容区不再被它覆盖。 */
+.timeline-body-row { flex: 1; min-height: 0; display: flex; align-items: stretch; overflow: hidden; }
+.timeline-body-row > .timeline-body { flex: 1 1 auto; min-width: 0; }
 .timeline-body { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; overflow: hidden; }
 .timeline-ruler-pin { position: absolute; top: 0; left: 0; z-index: 6; display: block; }
 /* 播放头独立覆盖层（A06）：与固定标尺同坐标系（timeline-body 顶部原点，
