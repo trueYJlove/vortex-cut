@@ -3651,7 +3651,10 @@ html[data-theme="light"] .modal-backdrop { background: var(--rgba-90); }
   --clip-filter: #4b3f96;
   --clip-effect: #74365f;
   --clip-audio: #1c5757;
-  --tl-select: #161619;
+  /* 选中框颜色（深色）：参照 --tl-select = #ffffff（openfilm globals.css:176）。
+     这里原来是 #161619 —— 近黑压在深色画布上，选中框**几乎看不见**。
+     重名令牌在移植时被我们已有的同名定义挡住，是 P224 记过的同一形态。 */
+  --tl-select: #ffffff;
   --tl-snap: #0098a3;
   --tl-row-hover: rgba(255, 255, 255, 0.07);
   --tl-track-head-bg: #101012;
@@ -5725,3 +5728,144 @@ body { background:var(--surface-body); }
 }
 .timeline-range-clear:hover { background: var(--ws-raise, #202024); color: var(--ws-text, #e9e9ec); }
 
+
+/* ═══════════════════════════════════════════════════════════════
+   OpenFilm 设计令牌层（2026-11-16 整块移植）
+
+   来源：openfilm packages/openfilm/studio/ui/src/globals.css:41-222（MIT）。
+   **这是颜色/字体/圆角/间距的唯一基准**——移植后不再有「我算的色值」与
+   「参照原值」两个版本。命名与取值逐字保留，便于日后与上游对照。
+
+   移植时与仓内同名令牌的冲突处理（14 个）：
+   - 12 个值本就完全一致（--clip-* 八个、--tl-row/--tl-lane-on/--tl-playhead）→
+     保留仓内那份，不重复定义（重复定义会让「谁生效」取决于书写顺序）；
+   - --ok / --warn：仓内零引用，且参照值更亮 → 采用参照值；
+   - --tl-select：仓内深浅两套都写成 #161619（深色下黑框压黑底，看不见）→
+     已按参照改为 深 #ffffff / 浅 #161619。这是重名遮蔽造成的既有缺陷，
+     与 P224 记录的「令牌重名抢走取色」同一形态。
+   ═══════════════════════════════════════════════════════════════ */
+
+:root,
+[data-theme='light'] {
+  color-scheme: light;
+
+  --bg-app: #e4e4e8;
+  --bg-titlebar: var(--bg-app);
+  --bg-panel: #fbfbfc;
+  --bg-raised: #ffffff;
+  /* the viewer's pane, round the picture: the panels' own white (rgb 251, 251, 252) */
+  --bg-viewer: #fbfbfc;
+  /* the one-pixel lines between the panes and under the top bar (the board under them showing through) */
+  --dock-line: #d2d2d8;
+  --bg-field: rgba(16, 16, 24, 0.055);
+  --bg-hover: rgba(16, 16, 24, 0.05);
+  --bg-pressed: rgba(16, 16, 24, 0.09);
+  --bg-selected: rgba(0, 163, 174, 0.13);
+
+  --text: #161619;
+  --text-muted: #5d5d63;
+  --text-faint: #8b8b92;
+
+  --border: rgba(16, 16, 24, 0.085);
+  --border-strong: rgba(16, 16, 24, 0.16);
+
+  --primary: #161619;
+  --primary-hover: #2e2e33;
+  --on-primary: #ffffff;
+
+  --accent: #0098a3;
+  --accent-soft: rgba(0, 163, 174, 0.12);
+  --on-accent: #ffffff;
+  /* a switch turned on: the accent a step quieter, so a page of them does not glare */
+  --switch-on: #26b0ba;
+  /* what is picked among choices (tabs, a rail, a list): the accent's words on the accent's own tint, never a grey
+     that reads as merely pointed at */
+  --bg-picked: rgba(0, 163, 174, 0.14);
+  /* words selected in a field */
+  --text-selection: rgba(0, 163, 174, 0.24);
+
+  --err: #d1342f;
+
+  --shadow-sm: 0 1px 2px rgba(16, 16, 24, 0.05), 0 1px 3px rgba(16, 16, 24, 0.05);
+  --shadow-lg: 0 12px 32px rgba(16, 16, 24, 0.1), 0 4px 8px rgba(16, 16, 24, 0.05);
+
+
+  /* the timeline's own: a well (meters), the playhead and the frame of a picked clip, and waveforms drawn lighter
+     over a clip's own color (canvas reads these back from the element) */
+  --tl-lane: #f1f1f3;
+  /* a track's band, the ground seen in the gaps between two (the panel itself), and the track of a picked clip: the
+     panel a quiet step darker (lighter in dark), the picked one a step further */
+  --tl-gap: var(--bg-panel);
+  --tl-wave: rgba(255, 255, 255, 0.5);
+  --tl-wave-band: rgba(255, 255, 255, 0.4);
+  /* the part of a waveform a clip's volume pushes past full scale: it will distort */
+  --tl-wave-clip: var(--err);
+
+  --folder-back: #c9c9c9;
+  --folder-front: #dedede;
+  --folder-front-hi: #ececec;
+
+  --brand-wind-from: #2f9e63;
+  --brand-wind-mid: #3cbc93;
+  --brand-wind-to: #55bfd0;
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* the window's ground (rgb 20): what shows between the panes; every pane's inside, its top bars, the viewer round
+     the picture and the canvas's board among them, the panels' (rgb 24) */
+  --bg-app: #141414;
+  --bg-titlebar: #202020;
+  --bg-panel: #181818;
+  --bg-raised: #202020;
+  --bg-viewer: #181818;
+  --dock-line: #000000;
+  --bg-field: rgba(255, 255, 255, 0.08);
+  --bg-hover: rgba(255, 255, 255, 0.06);
+  --bg-pressed: rgba(255, 255, 255, 0.12);
+  --bg-selected: rgba(0, 193, 205, 0.16);
+
+  --text: #e6e6e6;
+  --text-muted: #a3a3a3;
+  --text-faint: #717177;
+
+  --border: rgba(240, 240, 255, 0.075);
+  --border-strong: rgba(240, 240, 255, 0.15);
+
+  --primary: #ebebed;
+  --primary-hover: #ffffff;
+  --on-primary: #0a0a0c;
+
+  /* what is picked: words in this cyan, plainly apart from the others' white */
+  --accent: #00c1cd;
+  --accent-soft: rgba(0, 193, 205, 0.14);
+  --on-accent: #00262a;
+  --switch-on: #009aa4;
+  --bg-picked: rgba(0, 193, 205, 0.16);
+  --text-selection: rgba(0, 193, 205, 0.3);
+
+  --err: #f2665f;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.5), 0 4px 10px rgba(0, 0, 0, 0.3);
+
+
+  --tl-lane: #151518;
+  --tl-gap: var(--bg-panel);
+  --tl-wave: rgba(255, 255, 255, 0.4);
+  --tl-wave-band: rgba(255, 255, 255, 0.32);
+  --tl-wave-clip: var(--err);
+
+  --folder-back: #3a3a3a;
+  --folder-front: #4d4d4d;
+  --folder-front-hi: #5a5a5a;
+
+  --brand-wind-from: #5ecb92;
+  --brand-wind-mid: #66d8b8;
+  --brand-wind-to: #7fd3e4;
+}
+
+/* 上面两个块只覆盖参照自己的命名空间（--bg-* / --text-* / --accent / --clip-* /
+   --tl-* 等 38 个），不触碰仓内 --ws-* / --dlg-* / --pp-* 体系。
+   整块替换某个区域时，该区域的组件直接消费这些令牌，旧 --ws-* 覆盖随之删除。 */

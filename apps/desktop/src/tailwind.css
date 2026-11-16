@@ -2,17 +2,20 @@
  * Tailwind 入口（2026-11-16 引入，为整块移植 OpenFilm 组件）。
  *
  * **为什么单独一个文件而不是塞进 styles.css**：
- * ① CSS 规范要求 @import 先于其它规则，塞进 styles.css 就得放在最顶上；
- *    而 styles.css 的前几行有仓库自己的规则解析器守卫（theme-token-coverage、
- *    font-floor-and-command-columns 等按 `{` 切分规则），@import 的行会把
- *    紧随其后的 :root 前导文本一起吃掉，导致守卫误报（实测踩中：字体栈断言红）。
- * ② 分层纪律要在**一个地方**声明清楚：Tailwind 的输出落在 theme/base/utilities 层，
- *    而 styles.css 是未分层 CSS——未分层优先级**高于任何 @layer**。
- *    所以顺序必须是：先 Tailwind（含 preflight），再 styles.css，
- *    让遗留样式表在需要时仍能压住工具类；新移植的组件则整块改用工具类、并把
- *    对应的旧 CSS 删掉，不依赖层叠去覆盖。
+ * ① CSS 规范要求 @import 先于其它规则；而 styles.css 有多个规则解析型守卫
+ *    （font-floor / theme-token-coverage 等按 `{` 切分规则），@import 会把紧随的
+ *    :root 前导文本一起吃掉，导致守卫误报（实测踩中：字体栈断言红）。
+ * ② 分层纪律集中一处声明：Tailwind 输出落在 @layer theme/base/utilities，
+ *    而 styles.css 是**未分层** CSS——未分层优先级高于任何 @layer。
+ *    顺序因此是 Tailwind 先、styles.css 后，遗留规则仍能压住工具类；
+ *    新移植的组件整块用工具类，并**删掉对应旧 CSS**，不靠层叠互相覆盖。
  */
 @import "tailwindcss";
+
+/* 源码扫描范围：本文件所在目录（apps/desktop/src）下全部 ts/tsx。
+   Tailwind v4 默认从 CSS 所在目录向上找源码，实测漏扫 src/app/**
+   （h-[26px] 等类没有生成），故显式声明。 */
+@source "./**/*.{ts,tsx}";
 
 /* 深色变体跟随 <html data-theme>（与 OpenFilm globals.css:6 同款），
    而不是跟随系统 prefers-color-scheme——两者不一致时会画错一侧。 */
