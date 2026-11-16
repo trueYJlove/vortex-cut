@@ -342,6 +342,8 @@ export interface DesktopApi {
   decodeCapability?: () => Promise<{ decoders: Record<string, boolean>; probed_at: string; ffmpeg_fingerprint: string }>;
   // B16b 编辑器负载：playing/scrubbing/idle 推送（Main 侧 lease 心跳消费）
   updateEditorLoad: (mode: "playing" | "scrubbing" | "idle") => Promise<{ status: string }>;
+  /** 原生窗口按钮（最小化/最大化/关闭）颜色跟随主题。CSS 管不到这组系统绘制的按钮。 */
+  setWindowTheme: (theme: "light" | "dark") => Promise<{ status: string }>;
   captionFontUrl: () => Promise<string>;
   captionFontUrls: () => Promise<Array<{ family: string; media_url: string }>>;
   openArtifact: (artifactId: string) => Promise<void>;
@@ -546,6 +548,7 @@ const api: DesktopApi = {
   decodeFrames: input => ipcRenderer.invoke("decode-frames", input),
   decodeCapability: () => ipcRenderer.invoke("decode-capability"),
   updateEditorLoad: (mode: "playing" | "scrubbing" | "idle") => ipcRenderer.invoke("editor-load:update", mode),
+  setWindowTheme: (theme: "light" | "dark") => ipcRenderer.invoke("window:set-theme", theme),
   captionFontUrl: () => ipcRenderer.invoke("media:caption-font-url"),
   captionFontUrls: () => ipcRenderer.invoke("media:caption-font-urls"),
   openArtifact: artifactId => ipcRenderer.invoke("artifact:open", artifactId),

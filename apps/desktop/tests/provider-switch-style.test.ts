@@ -210,7 +210,10 @@ describe("Provider 启用开关：hover 不吞噬状态色", () => {
       "实际生效来源：" + (hoverBg?.selector ?? "无"),
     ).toContain("--dlg-accent-dim");
     expect(hoverBg?.selector).toContain(".switch.on");
-    expect(effective(track, HOVER, "border-color")?.value).toContain("53, 214, 174");
+    // 2026-11-11 令牌化：边框色改走 var(--rgba-93)（深色值即原来的 rgba(53,214,174,.45)），
+    // 断言改为「指向同一个品牌色令牌」而不是字面色值——本测试的意图是
+    //「hover 不把薄荷青边框吞成中性色」，不是锁死一个 rgb 三元组。
+    expect(effective(track, HOVER, "border-color")?.value).toMatch(/--rgba-93|--dlg-primary|--brand/);
   });
 
   it("关闭态 hover 保持中性轨道，不跳成主按钮色", () => {

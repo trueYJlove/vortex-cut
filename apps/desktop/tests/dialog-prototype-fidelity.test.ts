@@ -223,7 +223,9 @@ describe("Provider 三处用户反馈修正（2026-11-06）", () => {
   it("错误提示是显著警示块，不再与普通状态同款", () => {
     expect(providerSource).toContain('className="alert alert-danger"');
     expect(providerSource).toContain("无法完成操作");
-    expect(css).toMatch(/\.modal \.alert-danger \{[\s\S]{0,200}?border-color: rgba\(227, 93, 98/);
+    // 2026-11-11 令牌化：边框色改走 var(--rgba-92)（深色值即原 rgba(227,93,98,.42)）。
+    // 断言改为「border-color 指向该令牌」，意图（错误提示是带危险边框的显著块）不变。
+    expect(css).toMatch(/\.modal \.alert-danger \{[\s\S]{0,200}?border-color: var\(--rgba-92\)/);
     expect(css).toMatch(/\.modal \.alert-danger > \.icon \{ color: var\(--dlg-danger\)/);
   });
 

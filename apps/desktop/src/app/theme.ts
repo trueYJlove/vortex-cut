@@ -44,7 +44,20 @@ function apply(mode: ThemeMode): void {
   document.documentElement.dataset.themeMode = mode;
   // 让浏览器原生控件（滚动条、表单）跟随
   document.documentElement.style.colorScheme = resolved;
+  // 原生窗口按钮（右上角最小化/最大化/关闭）由系统绘制，CSS 改不到它们。
+  // 浅色主题下若不同步，符号色仍是写死的浅灰，落在浅色标题栏上等于看不见
+  // （2026-11-11 用户截图）。这里只在主题真的变化时通知主进程，避免每次
+  // apply 都白跑一趟 IPC。
+  const changed = lastResolvedTheme !== resolved;
+  lastResolvedTheme = resolved;
+  if (!changed && !needsInitialWindowTheme) return;
+  needsInitialWindowTheme = false;
+  void (window as unknown as { desktop?: { setWindowTheme?: (t: "light" | "dark") => Promise<unknown> } })
+    .desktop?.setWindowTheme?.(resolved)?.catch?.(() => undefined);
 }
+/** 上一次真正应用的外观；首次 apply 必须通知一次主进程（窗口可能是按深色建的）。 */
+let lastResolvedTheme: "light" | "dark" | null = null;
+let needsInitialWindowTheme = true;
 
 const listeners = new Set<() => void>();
 const emit = () => { for (const listener of listeners) listener(); };

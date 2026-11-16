@@ -401,6 +401,27 @@ function registerIpc(): void {
     editorLease?.updateMode(mode as EditorLoadMode);
     return { status: "ok" };
   });
+  // 原生窗口按钮（右上角最小化/最大化/关闭）的颜色跟随主题（2026-11-11）。
+  // 这组按钮由系统绘制（titleBarOverlay），CSS 完全管不到：浅色主题下
+  // symbolColor 仍是写死的 #e6eaec 浅灰，落在浅色标题栏上等于看不见
+  // （用户截图：「最小化/关闭按钮等看不见」）。
+  // 渲染侧切换主题后调这里重设 overlay；SetTitleBarOverlay 是 Electron 的
+  // 运行时接口，用可选调用避免旧版本/其他平台报错。
+  ipcMain.handle("window:set-theme", (_event, theme: unknown) => {
+    if (theme !== "light" && theme !== "dark") throw new Error("Invalid theme");
+    const win = windowRef;
+    if (!win || win.isDestroyed()) return { status: "ok" };
+    const setOverlay = (win as unknown as { setTitleBarOverlay?: (o: { color: string; symbolColor: string; height: number }) => void }).setTitleBarOverlay;
+    if (process.platform === "win32" && typeof setOverlay === "function") {
+      setOverlay.call(win, {
+        color: "#00000000",
+        // 深色标题栏用浅色符号，浅色标题栏用深色符号——这是这组按钮唯一的可读性来源。
+        symbolColor: theme === "light" ? "#1a1a1f" : "#e6eaec",
+        height: 36,
+      });
+    }
+    return { status: "ok" };
+  });
   ipcMain.handle("diagnostics:get", async () => rendererHealth(await requireCore().health()));
   ipcMain.handle("media:choose", async () => {
     const selectedPath = await chooseAssetPath(undefined, "选择媒体");
