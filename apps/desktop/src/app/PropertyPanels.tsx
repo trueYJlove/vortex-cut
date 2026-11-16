@@ -190,6 +190,14 @@ export function ClipProperties({ clip, working, baseRevisionId, locked, onPatch,
      表达同一件事，并在 aria-label 上写明，避免假装是像素。
      教训：`//` 与 `/* *\/` 都不能直接写在 JSX 表达式容器里——会被当成文本渲染。
      注释要么放在 JSX 外面（像这里），要么用 {`{/* ... *\/}`} 包起来。 */
+  /* 「淡入淡出」独立成组（参照 inspector-look.tsx:1106 把它做成效果组里的独立段落）：
+     两个并排数值框 grid-cols-2，不是两条滑杆。原来它混在「音频」分组里、以两条滑杆出现，
+     与参照的分组归属和控件形态都不同。 */
+  /* 「裁剪与填充」按参照 inspector-look.tsx:142 的段落结构：
+     段控（适应 / 填充 / 拉伸）→ 四边数值 → 比例芯片。
+     我们是「完整适配 / 裁切填满 / 模糊背景」三选一（我们的布局语义，比参照多一档模糊背景）。
+     四边裁切与比例芯片我们还没有对应的数据（Core 没有 crop 四边与 clip-path 的 patch 操作），
+     故这一段只做段控 + 分组标题与重置入口——**不摆不能改的假控件**，比摆出来更不容易误导。 */
   const picBasic = <>
     <PGroup title="位置与大小" chev onReset={() => void onPatch([{ op: "set_clip_transform", clip_id: clip.clip_id, transform: {} }], "重置画面变换")}>
       <AlignBar />
@@ -227,7 +235,7 @@ export function ClipProperties({ clip, working, baseRevisionId, locked, onPatch,
       <PRow label="画质增强" dim><Switch on={false} onToggle={() => {}} disabled /></PRow>
     </PGroup>
     <PSep />
-    <PGroup title="画面布局">
+    <PGroup title="裁剪与填充" onReset={() => void onPatch([{ op: "set_layout", clip_id: clip.clip_id, layout: "fit" as TimelineLayout }], "重置裁剪与填充")}>
       <Seg value={clip.layout}
         options={[{ value: "fit", label: "完整适配" }, { value: "crop_fill", label: "裁切填满" }, { value: "blurred_background", label: "模糊背景" }]}
         onChange={v => void onPatch([{ op: "set_layout", clip_id: clip.clip_id, layout: v as TimelineLayout }], "调整布局")} />
@@ -330,12 +338,7 @@ export function ClipProperties({ clip, working, baseRevisionId, locked, onPatch,
       <RangeRow label="音量" value={clip.audio.gain_db} min={-60} max={12} step={0.5} unit="dB" decimals={1} ariaLabel="音频增益"
         onDraft={v => updateLocal({ audio: { ...clip.audio, gain_db: v } })}
         onCommit={v => void onPatch([{ op: "set_audio", clip_id: clip.clip_id, enabled: clip.audio.enabled, gain_db: v }], "调整音频增益")} />
-      <RangeRow label="淡入时长" value={(clip.audio.fade_in_us ?? 0) / 1_000_000} min={0} max={50} step={0.1} unit="s" decimals={1} ariaLabel="淡入时长"
-        onDraft={v => updateLocal({ audio: { ...clip.audio, fade_in_us: Math.round(v * 1_000_000) } })}
-        onCommit={v => void onPatch([{ op: "set_audio", clip_id: clip.clip_id, enabled: clip.audio.enabled, gain_db: clip.audio.gain_db, ...audioFadeOf(clip, "fade_in_us", v) }], "调整淡入时长")} />
-      <RangeRow label="淡出时长" value={(clip.audio.fade_out_us ?? 0) / 1_000_000} min={0} max={50} step={0.1} unit="s" decimals={1} ariaLabel="淡出时长"
-        onDraft={v => updateLocal({ audio: { ...clip.audio, fade_out_us: Math.round(v * 1_000_000) } })}
-        onCommit={v => void onPatch([{ op: "set_audio", clip_id: clip.clip_id, enabled: clip.audio.enabled, gain_db: clip.audio.gain_db, ...audioFadeOf(clip, "fade_out_us", v) }], "调整淡出时长")} />
+
       <PRow label="响度统一" tail={<span className="pp-tailtext">{loudnessStatusText(loudness)}</span>}>
         <Switch on={loudness.phase === "prepared" || loudness.phase === "proposed" || loudness.phase === "applying"}
           disabled={loudnessBusy(loudness) || !baseRevisionId}
@@ -355,6 +358,17 @@ export function ClipProperties({ clip, working, baseRevisionId, locked, onPatch,
       {loudness.phase === "applying" && <PNote>正在应用提案…</PNote>}
       {loudness.phase === "applied" && <PNote>已应用为新的正式 Revision（{loudness.revisionId.slice(0, 12)}…）。</PNote>}
       {loudness.phase === "error" && <PNote warn>{loudness.message}</PNote>}
+    </PGroup>
+    <PSep />
+    <PGroup title="淡入淡出">
+      <div className="pp-grid2">
+        <NumberField value={(clip.audio.fade_in_us ?? 0) / 1_000_000} min={0} max={50} step={0.1} unit="s" decimals={1} ariaLabel="淡入时长" mark="入"
+          onDraft={v => updateLocal({ audio: { ...clip.audio, fade_in_us: Math.round(v * 1_000_000) } })}
+          onCommit={v => void onPatch([{ op: "set_audio", clip_id: clip.clip_id, enabled: clip.audio.enabled, gain_db: clip.audio.gain_db, ...audioFadeOf(clip, "fade_in_us", v) }], "调整淡入时长")} />
+        <NumberField value={(clip.audio.fade_out_us ?? 0) / 1_000_000} min={0} max={50} step={0.1} unit="s" decimals={1} ariaLabel="淡出时长" mark="出"
+          onDraft={v => updateLocal({ audio: { ...clip.audio, fade_out_us: Math.round(v * 1_000_000) } })}
+          onCommit={v => void onPatch([{ op: "set_audio", clip_id: clip.clip_id, enabled: clip.audio.enabled, gain_db: clip.audio.gain_db, ...audioFadeOf(clip, "fade_out_us", v) }], "调整淡出时长")} />
+      </div>
     </PGroup>
     <PSep />
     <PGroup title="素材修剪">

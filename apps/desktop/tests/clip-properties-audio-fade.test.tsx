@@ -73,23 +73,33 @@ function setup(audio: Partial<TimelineClip["audio"]> = {}) {
   fireEvent.click(screen.getByRole("tab", { name: /音频/ }));
   return { onPatch, onDraft, value };
 }
-
-/** 滑杆本体：RangeRow 把同一个 aria-label 同时给了 range 与数字步进器，按 type 唯一定位。 */
-function slider(ariaLabel: string): HTMLInputElement {
+/**
+ * 淡入/淡出输入框：参照 NumField 把这个 aria-label 给文本框（不是滑杆）。
+ * 2026-11-16 起「淡入淡出」独立成组、用参照的并排数值框（grid-cols-2），
+ * 不再是两条 3px 滑杆——所以这里按 text input 定位，驱动方式随之改为
+ * 输入 + 失焦（参照的提交时机：失焦 / 回车）。
+ */
+function fadeInput(ariaLabel: string): HTMLInputElement {
   const found = screen.getAllByLabelText(ariaLabel).filter(
-    element => (element as HTMLInputElement).type === "range",
+    element => (element as HTMLInputElement).type === "text",
   );
   expect(found).toHaveLength(1);
   return found[0] as HTMLInputElement;
 }
 
-describe("音频淡入/淡出滑块：真控件", () => {
+/** 输入一个值并失焦提交（参照 NumField 的提交路径）。 */
+function typeAndCommit(el: HTMLInputElement, value: string): void {
+  fireEvent.change(el, { target: { value } });
+  fireEvent.blur(el);
+}
+
+describe("音频淡入/淡出输入框：真控件", () => {
   afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
-  it("滑块可用（不是规划占位），初始值来自 clip.audio", () => {
+  it("可用（不是规划占位），初始值来自 clip.audio", () => {
     setup({ fade_in_us: 1_200_000, fade_out_us: 800_000 });
-    const fadeIn = slider("淡入时长");
-    const fadeOut = slider("淡出时长");
+    const fadeIn = fadeInput("淡入时长");
+    const fadeOut = fadeInput("淡出时长");
     expect(fadeIn).toBeEnabled();
     expect(fadeOut).toBeEnabled();
     // 单位与既有 UI 一致：秒（1.2s / 0.8s）。
@@ -97,20 +107,18 @@ describe("音频淡入/淡出滑块：真控件", () => {
     expect(fadeOut.value).toBe("0.8");
   });
 
-  it("拖动只改本地草稿，不发 patch（onCommit 才写时间线）", () => {
+  it("输入只改本地草稿，不发 patch（提交才写时间线）", () => {
     const { onPatch, onDraft } = setup();
-    fireEvent.change(slider("淡入时长"), { target: { value: "2.5" } });
+    fireEvent.change(fadeInput("淡入时长"), { target: { value: "2.5" } });
     expect(onPatch).not.toHaveBeenCalled();
     expect(onDraft).toHaveBeenCalledTimes(1);
     const draft = onDraft.mock.calls[0]![0] as TimelineDocument;
     expect(draft.clips[0]!.audio.fade_in_us).toBe(2_500_000);
   });
 
-  it("松手发 set_audio（含 fade_in_us），走既有 onPatch 通道", () => {
+  it("失焦发 set_audio（含 fade_in_us），走既有 onPatch 通道", () => {
     const { onPatch } = setup({ fade_out_us: 400_000 });
-    const fadeIn = slider("淡入时长");
-    fireEvent.change(fadeIn, { target: { value: "3" } });
-    fireEvent.pointerUp(fadeIn);
+    typeAndCommit(fadeInput("淡入时长"), "3");
 
     expect(onPatch).toHaveBeenCalledTimes(1);
     const [ops, summary] = onPatch.mock.calls[0]!;
@@ -123,9 +131,7 @@ describe("音频淡入/淡出滑块：真控件", () => {
 
   it("淡出同理，且带上已设的淡入（互相不覆盖）", () => {
     const { onPatch } = setup({ fade_in_us: 500_000 });
-    const fadeOut = slider("淡出时长");
-    fireEvent.change(fadeOut, { target: { value: "1" } });
-    fireEvent.pointerUp(fadeOut);
+    typeAndCommit(fadeInput("淡出时长"), "1");
 
     const [ops, summary] = onPatch.mock.calls[0]!;
     expect(summary).toBe("调整淡出时长");
@@ -135,11 +141,9 @@ describe("音频淡入/淡出滑块：真控件", () => {
     });
   });
 
-  it("拖回 0 必须显式写 0（否则 set_audio 会保留旧值，等于拖不动）", () => {
+  it("改回 0 必须显式写 0（否则 set_audio 会保留旧值，等于改不动）", () => {
     const { onPatch } = setup({ fade_in_us: 2_000_000 });
-    const fadeIn = slider("淡入时长");
-    fireEvent.change(fadeIn, { target: { value: "0" } });
-    fireEvent.pointerUp(fadeIn);
+    typeAndCommit(fadeInput("淡入时长"), "0");
 
     const [ops] = onPatch.mock.calls[0]!;
     expect(ops[0].fade_in_us).toBe(0);
