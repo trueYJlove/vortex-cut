@@ -900,7 +900,10 @@ input, select, textarea { font-size: var(--dlg-fs-body); }
 @keyframes pulse { 50% { opacity: .55; } }
 
 /* UI 打磨：播放控制栏三段布局（参考剪映） */
-.playback-bar { height: 40px; flex: 0 0 auto; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; }
+/* 三列 minmax(0,1fr) auto minmax(0,1fr)（OpenFilm ViewerBar.tsx:51）：
+   1fr 不会缩到内容以下，而两个完整时间码有 25 字符 —— 窄面板下播放键会被顶到
+   时间码上。minmax(0,1fr) 允许列收缩并裁切。这是参照刻意做的选择，注释里写明了原因。 */
+.playback-bar { height: 40px; flex: 0 0 auto; display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); align-items: center; gap: 8px; }
 .pb-left { display: flex; justify-content: flex-start; align-items: center; gap: 8px; min-width: 0; }
 .pb-center { display: flex; align-items: center; justify-content: center; }
 .pb-right { position: relative; display: flex; justify-content: flex-end; align-items: center; gap: 2px; }
