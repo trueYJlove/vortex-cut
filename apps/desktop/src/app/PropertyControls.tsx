@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 // 移植自 OpenFilm 的数值框（src/ui/of）：左端字母拖拽标记、无 ▲▼ 步进器。
-import { NumField, Section, SliderField } from "../ui/of/inspector-fields.js";
+import { NumField, Section, Segmented, SliderField } from "../ui/of/inspector-fields.js";
 
 /**
  * 属性面板 v2 控件集（页签容器 + 行/步进器/滑杆/开关/分段/徽章）。
@@ -121,14 +121,23 @@ export function Switch({ on, onToggle, title, disabled }: { on: boolean; onToggl
   );
 }
 
-/** 分段选择（布局/蒙版形状/倍速预设 …）；columns 指定每行列数（如倍速 4 列网格，对齐原型）。 */
+/**
+ * 分段选择 —— **换成移植来的参照 Segmented**（src/ui/of/inspector-fields.tsx:632）。
+ *
+ * 参照形态：26px 高、--bg-field 底、1px 内边距、项圆角 4px；
+ * 选中项是 --bg-picked 底 + 强调色字 + 600（不是我们原来的边框强调）。
+ * 语义仍是 radiogroup + aria-checked，只换外观。
+ */
 export function Seg({ options, value, onChange, columns }: { options: Array<{ value: string; label: string }>; value: string; onChange: (v: string) => void; columns?: number }) {
+  void columns;
   return (
-    <div className="pp-segset" style={columns ? { display: "grid", gridTemplateColumns: `repeat(${columns}, 1fr)` } : undefined}>
-      {options.map(o => (
-        <button key={o.value} type="button" className={`pp-seg${value === o.value ? " pp-active" : ""}`}
-          onClick={() => onChange(o.value)}>{o.label}</button>
-      ))}
+    <div className="pp-segwrap">
+      <Segmented
+        label=""
+        value={value}
+        options={options.map(o => ({ value: o.value, label: o.label }))}
+        onChange={onChange}
+      />
     </div>
   );
 }

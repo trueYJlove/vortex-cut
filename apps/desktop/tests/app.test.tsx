@@ -591,7 +591,9 @@ describe("Stage 1C Editor", () => {
   });
 
   it("支持片段与字幕编辑", async () => {
-    const api = desktopApi(); window.desktop = api; render(<App />); fireEvent.click(await screen.findByRole("button", { name: /video 5.00s/ })); fireEvent.click(screen.getByRole("button", { name: "拆分片段" })); await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledWith(expect.objectContaining({ patch: expect.objectContaining({ operations: [expect.objectContaining({ op: "split_clip" })] }) }))); fireEvent.click(screen.getByRole("button", { name: "裁切填满" })); await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledWith(expect.objectContaining({ patch: expect.objectContaining({ operations: [expect.objectContaining({ op: "set_layout", layout: "crop_fill" })] }) }))); fireEvent.click(screen.getByRole("button", { name: /这是一条很长/ })); fireEvent.change(screen.getByLabelText("文本"), { target: { value: "修正字幕" } }); fireEvent.blur(screen.getByLabelText("文本")); await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledWith(expect.objectContaining({ patch: expect.objectContaining({ operations: [expect.objectContaining({ op: "update_caption", text: "修正字幕" })] }) })));
+    const api = desktopApi(); window.desktop = api; render(<App />); fireEvent.click(await screen.findByRole("button", { name: /video 5.00s/ })); fireEvent.click(screen.getByRole("button", { name: "拆分片段" })); await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledWith(expect.objectContaining({ patch: expect.objectContaining({ operations: [expect.objectContaining({ op: "split_clip" })] }) }))); /* 分段控件换成参照 Segmented 后，语义是 radiogroup > radio（ARIA 更准确：
+   一组互斥选项就是 radio，不是 3 个独立按钮）。定位随之改为 radio。 */
+    fireEvent.click(screen.getByRole("radio", { name: "裁切填满" })); await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledWith(expect.objectContaining({ patch: expect.objectContaining({ operations: [expect.objectContaining({ op: "set_layout", layout: "crop_fill" })] }) }))); fireEvent.click(screen.getByRole("button", { name: /这是一条很长/ })); fireEvent.change(screen.getByLabelText("文本"), { target: { value: "修正字幕" } }); fireEvent.blur(screen.getByLabelText("文本")); await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledWith(expect.objectContaining({ patch: expect.objectContaining({ operations: [expect.objectContaining({ op: "update_caption", text: "修正字幕" })] }) })));
   });
 
   it("创建空时间线后忽略迟到的 404，并以冻结契约追加素材与转录", async () => {
@@ -726,7 +728,7 @@ describe("Stage 2B AI 修改", () => {
     const lockedState = { ...state, current_revision: { ...state.current_revision, document: { ...timelineDocument, locked_elements: ["clip_1" as never] } } };
     const api = desktopApi({ timeline: lockedState }); window.desktop = api; render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /video 5.00s/ }));
-    expect(screen.getByText(/此 Clip 已锁定/)).toBeVisible(); expect(screen.getByRole("button", { name: "裁切填满" })).toBeDisabled(); expect(screen.getByRole("button", { name: "拆分片段" })).toBeDisabled();
+    expect(screen.getByText(/此 Clip 已锁定/)).toBeVisible(); expect(screen.getByRole("radio", { name: "裁切填满" })).toBeDisabled(); expect(screen.getByRole("button", { name: "拆分片段" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: /这是一条很长/ })); expect(screen.getByText(/关联 Clip 已锁定/)).toBeVisible(); expect(screen.getByLabelText("文本")).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: /video 5.00s/ }));
     fireEvent.click(screen.getByRole("button", { name: "解锁片段" })); await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledWith(expect.objectContaining({ patch: expect.objectContaining({ operations: [{ op: "set_clip_locked", clip_id: "clip_1", locked: false }] }) })));
