@@ -1,0 +1,285 @@
+{
+  "light-editor": {
+    "lowContrast": [],
+    "darkSurfaces": [
+      {
+        "cls": "preview-canvas",
+        "tag": "DIV",
+        "bg": "rgb(0, 0, 0)",
+        "w": 205,
+        "h": 365,
+        "text": "缓冲中"
+      }
+    ]
+  },
+  "light-project-dropdown": {
+    "lowContrast": [],
+    "darkSurfaces": [
+      {
+        "cls": "preview-canvas",
+        "tag": "DIV",
+        "bg": "rgb(0, 0, 0)",
+        "w": 205,
+        "h": 365,
+        "text": "缓冲中"
+      }
+    ]
+  },
+  "light-project-mgmt": {
+    "lowContrast": [],
+    "darkSurfaces": []
+  },
+  "light-command": {
+    "lowContrast": [],
+    "darkSurfaces": []
+  },
+  "light-provider": {
+    "lowContrast": [],
+    "darkSurfaces": []
+  },
+  "light-export": {
+    "lowContrast": [],
+    "darkSurfaces": []
+  },
+  "light-settings": {
+    "lowContrast": [],
+    "darkSurfaces": []
+  },
+  "dark-editor": {
+    "lowContrast": [],
+    "darkSurfaces": [
+      {
+        "cls": "editor-shell",
+        "tag": "MAIN",
+        "bg": "rgb(20, 20, 22)",
+        "w": 1440,
+        "h": 900,
+        "text": "Vortex Cut项目编辑时间"
+      },
+      {
+        "cls": "editor-titlebar",
+        "tag": "DIV",
+        "bg": "rgb(20, 20, 22)",
+        "w": 1440,
+        "h": 36,
+        "text": "Vortex Cut项目编辑时间"
+      },
+      {
+        "cls": "titlebar-project-switcher-toggle",
+        "tag": "BUTTON",
+        "bg": "rgb(16, 16, 18)",
+        "w": 140,
+        "h": 32,
+        "text": "对照项目活跃"
+      },
+      {
+        "cls": "editor-grid",
+        "tag": "SECTION",
+        "bg": "rgb(20, 20, 22)",
+        "w": 1440,
+        "h": 523,
+        "text": "素材转录模型任务视频音频图片默认"
+      },
+      {
+        "cls": "library-pane",
+        "tag": "SECTION",
+        "bg": "rgb(24, 24, 27)",
+        "w": 280,
+        "h": 523,
+        "text": "素材转录模型任务视频音频图片默认"
+      },
+      {
+        "cls": "",
+        "tag": "BUTTON",
+        "bg": "rgb(32, 32, 36)",
+        "w": 77,
+        "h": 60,
+        "text": "音频"
+      },
+      {
+        "cls": "",
+        "tag": "INPUT",
+        "bg": "rgb(16, 16, 18)",
+        "w": 151,
+        "h": 30,
+        "text": ""
+      },
+      {
+        "cls": "",
+        "tag": "SELECT",
+        "bg": "rgb(16, 16, 18)",
+        "w": 56,
+        "h": 30,
+        "text": "全部视频音频图片文本"
+      },
+      {
+        "cls": "icon-btn",
+        "tag": "BUTTON",
+        "bg": "rgb(16, 16, 18)",
+        "w": 28,
+        "h": 30,
+        "text": ""
+      },
+      {
+        "cls": "asset-item asset-row  draggable-asset",
+        "tag": "DIV",
+        "bg": "rgb(32, 32, 36)",
+        "w": 247,
+        "h": 60,
+        "text": "h264-1080p-60s-g"
+      },
+      {
+        "cls": "asset-thumb",
+        "tag": "DIV",
+        "bg": "rgb(16, 20, 23)",
+        "w": 64,
+        "h": 40,
+        "text": ""
+      },
+      {
+        "cls": "stage-pane",
+        "tag": "SECTION",
+        "bg": "rgb(20, 20, 22)",
+        "w": 824,
+        "h": 523,
+        "text": "比例适应16:99:161:14"
+      },
+      {
+        "cls": "render-panel-toggle",
+        "tag": "BUTTON",
+        "bg": "rgb(32, 32, 36)",
+        "w": 84,
+        "h": 32,
+        "text": "渲染与导出"
+      },
+      {
+        "cls": "stage-view",
+        "tag": "DIV",
+        "bg": "rgb(13, 13, 15)",
+        "w": 716,
+        "h": 391,
+        "text": "缓冲中205 × 365合成预览"
+      },
+      {
+        "cls": "preview-frame fit ratio-916",
+        "tag": "DIV",
+        "bg": "rgb(24, 28, 31)",
+        "w": 690,
+        "h": 365,
+        "text": "缓冲中205 × 365"
+      },
+      {
+        "cls": "preview-canvas",
+        "tag": "DIV",
+        "bg": "rgb(0, 0, 0)",
+        "w": 205,
+        "h": 365,
+        "text": "缓冲中"
+      },
+      {
+        "cls": "synthetic-buffering",
+        "tag": "DIV",
+        "bg": "rgba(10, 14, 17, 0.72)",
+        "w": 63,
+        "h": 22,
+        "text": "缓冲中"
+      },
+      {
+        "cls": "interactive-label ",
+        "tag": "SPAN",
+        "bg": "rgb(27, 27, 37)",
+        "w": 136,
+        "h": 22,
+        "text": "合成预览 · 实时（非权威）"
+      },
+      {
+        "cls": "preview-context synthetic",
+        "tag": "SPAN",
+        "bg": "rgb(27, 27, 37)",
+        "w": 56,
+        "h": 24,
+        "text": "合成预览"
+      },
+      {
+        "cls": "playback-bar",
+        "tag": "DIV",
+        "bg": "rgb(24, 24, 27)",
+        "w": 716,
+        "h": 40,
+        "text": "00:00:00:00 / 00"
+      },
+      {
+        "cls": "properties-pane",
+        "tag": "ASIDE",
+        "bg": "rgb(24, 24, 27)",
+        "w": 336,
+        "h": 523,
+        "text": "项目概览项目名称对照项目状态活动"
+      },
+      {
+        "cls": "property-block",
+        "tag": "SECTION",
+        "bg": "rgb(32, 32, 36)",
+        "w": 303,
+        "h": 150,
+        "text": "项目概览项目名称对照项目状态活动"
+      },
+      {
+        "cls": "timeline-pane",
+        "tag": "SECTION",
+        "bg": "rgb(20, 20, 22)",
+        "w": 1440,
+        "h": 306,
+        "text": "V2SC1V1SA1封面"
+      },
+      {
+        "cls": "timeline-toolbar",
+        "tag": "DIV",
+        "bg": "rgb(20, 20, 22)",
+        "w": 1440,
+        "h": 34,
+        "text": ""
+      },
+      {
+        "cls": "timeline-left",
+        "tag": "DIV",
+        "bg": "rgb(16, 16, 18)",
+        "w": 120,
+        "h": 272,
+        "text": "V2SC1V1SA1"
+      },
+      {
+        "cls": "timeline-left-corner",
+        "tag": "DIV",
+        "bg": "rgb(16, 16, 18)",
+        "w": 119,
+        "h": 20,
+        "text": ""
+      },
+      {
+        "cls": "timeline-track-head",
+        "tag": "DIV",
+        "bg": "rgb(16, 16, 18)",
+        "w": 119,
+        "h": 56,
+        "text": "V2S"
+      },
+      {
+        "cls": "timeline-cover-entry",
+        "tag": "BUTTON",
+        "bg": "rgb(16, 16, 18)",
+        "w": 112,
+        "h": 52,
+        "text": "封面"
+      },
+      {
+        "cls": "",
+        "tag": "FOOTER",
+        "bg": "rgb(20, 20, 22)",
+        "w": 1440,
+        "h": 28,
+        "text": "已保存Core 已连接后台空闲多"
+      }
+    ]
+  }
+}

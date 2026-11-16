@@ -77,13 +77,18 @@ ffmpeg -i 录屏.mp4 -frames:v 1 -f image2 -vcodec ppm `  # 单帧 PPM，供像�
 **改动**：
 - `TimelineCanvas.tsx` 轨道头 JSX 去掉 `<Video/>`/`<TypeIcon/>`/`<Music/>`
 - 删除随之不再使用的 3 个 lucide 导入
-- `styles.css` `align-items: center` → `flex-start`，`padding: 0 6px` → `5px 6px 0`
+- `styles.css` 的 `align-items:center` / `padding:0 6px` **保持原样**
 
-**为什么改 align-items**：行高 56、内容 18 时，居中会把轨号与开关放到行的
-垂直中段；参照软件里这一排贴着行顶，与片段名称条同一水平线。行拉高后差别明显
-（这是改完 2.1 才暴露的——面板变高后行变高，问题才看得见）。
+**关于垂直对齐（当日曾误改，已回退）**：本轮一度以「与片段名称条同线」为由把
+`align-items` 改成 `flex-start`，**那是错的**。事后对录屏逐像素复核：
+t=40.5s 处 V3 行 y 1110..1173 中心 **1141.5**、字形 1130..1149 中心 **1139.5**；
+V2 行中心 **1207.5**、字形中心 **1209.5**，误差 ≤2px —— 参照软件是**行内居中**
+（OpenFilm `Timeline.tsx:2753` 为 `items-center`）。用户当场指出「之前是居中的吧？
+现在是置顶了？」，与像素结论一致。已改回 `align-items:center`，并在 CSS 注释里
+写明这条误判的依据，避免再被同一理由翻动。
 
-**证据**：`.tmp/ba3/head-before.png` vs `head-after.png`（同 4× 放大）。
+**证据**：`.tmp/ba3/head-before.png` vs `head-after.png`（同 4× 放大）——
+只保留「图标徽章 → 纯文字轨号」这一处真实差异，垂直对齐两侧一致。
 
 ### 2.4 行组：贴顶排列 → 垂直居中 + 上下 10px 内边距
 
