@@ -3,6 +3,7 @@ import { Archive, FileText, Lock, RotateCcw, Save } from "lucide-react";
 import type { CaptionPresetId, EditingGrammarPrepareResult, EditingGrammarProposal, Project, TimelineCaption, TimelineClip, TimelineDiff, TimelineDocument, TimelineLayout, TimelinePatchOperation, TimelineState, TimelineTransition } from "@aivideo/contracts";
 import type { AuthoritativePreviewPresentation } from "../../electron/preload/index.js";
 import { PanelTabs, SubTabs, PGroup, PSep, PRow, Switch, Seg, SoonBadge, PNote, NumberField, RangeRow } from "./PropertyControls.js";
+import { MenuSelect } from "../ui/of/MenuSelect.js";
 import { errorCode } from "./safeErrors.js";
 
 type SaveState = "已保存" | "保存中" | "保存失败" | "草稿冲突";
@@ -676,5 +677,10 @@ function assToRgb(ass: string): string {
 
 export function TransitionProperties({ transition, onPatch }: { transition: TimelineTransition; onPatch: (ops: TimelinePatchOperation[], summary: string) => Promise<void> }) {
   const update = (ops: TimelinePatchOperation[], summary: string) => void onPatch(ops, summary);
-  return <fieldset className="property-form"><h2>转场属性</h2><label>类型<select value={transition.kind} onChange={event => update([{ op: "update_transition", transition_id: transition.transition_id, kind: event.target.value as typeof transition.kind }], `转场类型 ${event.target.value}`)}>{transitionKinds.map(kind => <option key={kind} value={kind}>{kind}</option>)}</select></label><label>时长（秒）<input type="number" min={0.1} max={2} step={0.1} value={transition.duration_us / 1_000_000} onChange={event => { const parsed = Number(event.target.value); if (Number.isFinite(parsed) && parsed >= 0.1 && parsed <= 2) update([{ op: "update_transition", transition_id: transition.transition_id, duration_us: Math.round(parsed * 1_000_000) }], `转场时长 ${parsed}s`); }} /></label><div className="properties-actions"><button onClick={() => update([{ op: "remove_transition", transition_id: transition.transition_id }], "删除转场")}>删除转场</button></div><p className="properties-muted">转场仅在权威预览与最终导出中渲染；交互预览直接切换片段。</p></fieldset>;
+  return <fieldset className="property-form"><h2>转场属性</h2><label>类型<MenuSelect
+    label="转场类型"
+    value={transition.kind}
+    groups={[{ choices: transitionKinds.map(kind => ({ value: kind, label: kind })) }]}
+    onPick={kind => update([{ op: "update_transition", transition_id: transition.transition_id, kind: kind as typeof transition.kind }], `转场类型 ${kind}`)}
+  /></label><label>时长（秒）<input type="number" min={0.1} max={2} step={0.1} value={transition.duration_us / 1_000_000} onChange={event => { const parsed = Number(event.target.value); if (Number.isFinite(parsed) && parsed >= 0.1 && parsed <= 2) update([{ op: "update_transition", transition_id: transition.transition_id, duration_us: Math.round(parsed * 1_000_000) }], `转场时长 ${parsed}s`); }} /></label><div className="properties-actions"><button onClick={() => update([{ op: "remove_transition", transition_id: transition.transition_id }], "删除转场")}>删除转场</button></div><p className="properties-muted">转场仅在权威预览与最终导出中渲染；交互预览直接切换片段。</p></fieldset>;
 }
