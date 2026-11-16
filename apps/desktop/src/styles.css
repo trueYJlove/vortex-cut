@@ -5392,10 +5392,22 @@ body { background:var(--surface-body); }
 .editor-shell .pb-play:hover:not(:disabled) { background:var(--ws-hover); color:var(--ws-text); }
 .editor-shell .pb-play:focus-visible { outline:2px solid var(--ws-focus); outline-offset:2px; }
 .editor-shell .pb-play svg { width:14px; height:14px; fill:currentColor; }
-.editor-shell .pb-icon:hover { background:var(--rgba-95); color:var(--ws-text); }
-.editor-shell .tc { font-size:12px; }
-.editor-shell .tc b { color:var(--ws-text); font-weight:600; }
-.editor-shell .tc i, .editor-shell .tc .tot { color:var(--ws-text-3); }
+/* 右侧工具按钮：与主播放键同一套盒子（参照 PANE_BTN = 22×22 / 图标 14 /
+   圆角 6 / muted 字色 / hover 用 --bg-hover + --text）。
+   原来这里是 28×28 / 图标 15，且 hover 用的是 --rgba-95（自造色），
+   于是同一条播放条上主键与工具键尺寸、悬停色都不一致。 */
+.editor-shell .pb-icon { width:22px; height:22px; border-radius:6px; color:var(--text-muted); transition:background-color .15s, color .15s; }
+/* 带文字的工具键（缩放「适应」/ 倍速）：参照用 !w-auto min-w-[22px] gap-1 px-1 —— 
+   固定 22px 宽会把中文挤成竖排（实测「适应」被拆成两行）。 */
+.editor-shell .pb-icon.zoom-btn, .editor-shell .pb-icon.rate-btn { width:auto; min-width:22px; padding:0 4px; gap:3px; }
+.editor-shell .zoom-label, .editor-shell .rate-txt { white-space:nowrap; font-size:12px; font-variant-numeric:tabular-nums; }
+.editor-shell .pb-icon svg { width:14px; height:14px; }
+.editor-shell .pb-icon:hover { background:var(--bg-hover); color:var(--text); }
+.editor-shell .pb-icon:focus-visible { outline:2px solid var(--ws-focus); outline-offset:2px; }
+/* 时间码：参照是 12px 正文色 + 11px 更淡的时长（ViewerBar.tsx:54-58） */
+.editor-shell .tc { font-size:12px; color:var(--text); }
+.editor-shell .tc b { color:var(--text); font-weight:400; }
+.editor-shell .tc i, .editor-shell .tc .tot { color:var(--text-faint); font-size:11px; }
 
 /* 时间线：统一深色、静止态只留发丝线 */
 .editor-shell .timeline-pane { background:var(--ws-shell); border-top-color:var(--ws-line); }
