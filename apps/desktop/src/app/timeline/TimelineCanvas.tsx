@@ -1,4 +1,5 @@
 import { editorPerf } from "../preview/perf-metrics.js";
+import { ToolButton } from "../../ui/of/ToolButton.js";
 /**
  * Timeline — Canvas + DOM hybrid timeline component.
  *
@@ -191,17 +192,21 @@ function IconButton({
   onClick: () => void;
   children: React.ReactNode;
 }) {
+  /* 实现换成参照的 ToolButton（2026-11-16 移植，ui/of/ToolButton.tsx）。
+     19 处调用点签名不变，但行为与观感随之变成参照的：
+     28×28 / 圆角 6 / muted 字色 / hover 走 --bg-hover / 按下态强调色+柔底；
+     鼠标点击不留焦点（否则下一次空格会去按按钮而不是播放）；
+     用 aria-disabled 而非原生 disabled（原生 disabled 会吞掉提示，而「为什么不能点」
+     恰恰是 disabled 时最需要的）。
+     注意：expanded 是 aria-expanded（菜单开合），ToolButton 的 active 是 aria-pressed，
+     两者语义不同，故 expanded 单独透传。 */
+  void title;
   return (
-    <button
-      className="icon-btn"
-      title={title ?? label}
-      aria-label={label}
-      aria-expanded={expanded}
-      disabled={disabled}
-      onClick={onClick}
-    >
-      {children}
-    </button>
+    <span aria-expanded={expanded} style={{ display: "inline-flex" }}>
+      <ToolButton label={label} disabled={disabled} active={Boolean(expanded)} onClick={onClick}>
+        {children}
+      </ToolButton>
+    </span>
   );
 }
 
