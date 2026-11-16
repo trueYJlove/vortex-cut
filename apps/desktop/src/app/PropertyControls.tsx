@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 // 移植自 OpenFilm 的数值框（src/ui/of）：左端字母拖拽标记、无 ▲▼ 步进器。
 import { NumField, Section, Segmented, SliderField } from "../ui/of/inspector-fields.js";
+import iwStyles from "../ui/of/InspectorWorkspace.module.css";
 
 /**
  * 属性面板 v2 控件集（页签容器 + 行/步进器/滑杆/开关/分段/徽章）。
@@ -19,30 +20,37 @@ import { NumField, Section, Segmented, SliderField } from "../ui/of/inspector-fi
 
 export type TabItem = { id: string; label: string; soon?: boolean };
 
-/** 顶层页签（画面/音频/变速/动画 …）；soon 项在页签内显示「规划中」小字（对齐音频素材原型）。 */
+/**
+ * 顶层页签 —— **直接用参照的 InspectorWorkspace.module.css**（随 P2 移植进来）。
+ *
+ * 复用参照的类名（styles.tabs / styles.selectedTab）而不是再仿写一遍：
+ * 40px 条高、11.5px、选中 = 强调色 + 600、无下划线、横向可滚且隐藏滚动条。
+ * 这是「抄参照实现本身」而非「照参照的样子重写」的差别所在。
+ */
 export function PanelTabs({ tabs, active, onChange }: { tabs: TabItem[]; active: string; onChange: (id: string) => void }) {
   return (
-    <div className="pp-tabs" role="tablist">
+    <div className={iwStyles.tabs} role="tablist">
       {tabs.map(t => (
         <button key={t.id} type="button" role="tab" aria-selected={active === t.id}
-          className={`pp-tab${active === t.id ? " pp-active" : ""}`} onClick={() => onChange(t.id)}>
+          className={active === t.id ? iwStyles.selectedTab : undefined} onClick={() => onChange(t.id)}>
           {t.label}
-          {t.soon && <span className="soon">规划中</span>}
+          {t.soon && <span className="pp-soon">规划中</span>}
         </button>
       ))}
     </div>
   );
 }
 
-/** 子页签（基础/抠像/蒙版 …），soon 项显示「规划中」小字但保持可点（占位内容）。 */
+/** 子页签（基础/抠像/蒙版 …）：与顶层页签共用参照的同一套页签样式，
+ *  只多一层左侧缩进把它们分成二级（参照里二级用 Section 承载，我们保留页签形态）。 */
 export function SubTabs({ tabs, active, onChange }: { tabs: TabItem[]; active: string; onChange: (id: string) => void }) {
   return (
-    <div className="pp-subtabs" role="tablist">
+    <div className={`pp-subtabs ${iwStyles.tabs}`} role="tablist" style={{ height: 34 }}>
       {tabs.map(t => (
         <button key={t.id} type="button" role="tab" aria-selected={active === t.id}
-          className={`pp-sub${active === t.id ? " pp-active" : ""}`} onClick={() => onChange(t.id)}>
+          className={active === t.id ? iwStyles.selectedTab : undefined} onClick={() => onChange(t.id)}>
           {t.label}
-          {t.soon && <span className="soon">规划中</span>}
+          {t.soon && <span className="pp-soon">规划中</span>}
         </button>
       ))}
     </div>

@@ -1064,6 +1064,11 @@ input, select, textarea { font-size: var(--dlg-fs-body); }
 .pp-panel .pp-slider { flex: 1 1 0; min-width: 0; }
 /* 分段控件宿主：参照 Segmented 是 w-full，同样需要在 flex 行里取得宽度 */
 .pp-panel .pp-segwrap { flex: 1 1 0; min-width: 0; display: flex; }
+/* 页签上的「规划中」小字（参照页面没有这个形态，是我们自己的占位说明） */
+/* 字号必须 ≥10.5px：DESIGN.md §3.2 把 10.5px 定为辅助信息下限，
+   font-floor 守卫会拦（我第一版写了 10px，被它抓到）。 */
+.pp-panel .pp-soon, .pp-panel .pp-subtabs .pp-soon { margin-left: 4px; font-size: 10.5px; font-weight: 400; color: var(--warn); }
+.pp-panel .pp-subtabs { padding-left: 8px; }
 .pp-panel .pp-num { flex: 1 1 0; min-width: 0; }
 .pp-panel .pp-num.w66 { flex: 0 0 66px; }
 .pp-panel .pp-row > .pp-num + .pp-num { flex: 1 1 0; }
