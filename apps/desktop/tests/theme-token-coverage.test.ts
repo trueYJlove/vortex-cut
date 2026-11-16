@@ -129,6 +129,83 @@ describe("主题令牌覆盖率", () => {
     ).toEqual([]);
   });
 
+  it("悬停底不得与它所在容器的底色同色（否则深色下 hover 完全不可见）", () => {
+    // 真实缺陷（2026-11-15 用户截图）：项目下拉列表鼠标滑动时浅色有 hover、
+    // 深色看不见。实测根因：.project-switcher-dropdown > button:hover 用
+    // --ws-raise，而 --ws-raise 正是该下拉面板自己的底色
+    // （.editor-shell .project-switcher-dropdown { background: var(--ws-raise) }）
+    // ⇒ 深色下 hover 前后同为 rgb(32,32,36)，对比 1.00，等于没有 hover。
+    // 浅色下"正常"纯属巧合：[data-theme="light"] button:hover:not(:disabled)
+    // 抢先把底色改成 --ctl-bg-hover(#e8e8ea)，才让它碰巧可见。
+    //
+    // 判据（精确到容器祖先，不做全局"面板"猜测）：
+    //   对每条含 :hover 的规则，取它的基本选择器（去掉 :hover 及其后的
+    //   伪类/状态），若基本选择器形如「容器 > 元素」，取「容器」；否则取
+    //   选择器最后一段之前的部分作为容器。再在样式表里找"以该容器结尾"的
+    //   非 hover 规则，若它与 hover 用的是同一个 background 令牌，即判失败。
+    //
+    // 两个写错会导致守卫恒真的坑，都踩过：
+    //  1. 拿 ":hover" 去匹配 rule.body（选择器不在 body 里）——恒空；
+    //  2. 用「选择器里含 panel/dropdown 字样」当容器判据——会把
+    //     .pp-panel .pp-sub.pp-active 这类「选中态底色」误判成面板底色，
+    //     于是 --ctl-bg-hover 全表命中，守卫变成满地假红。
+    const bgToken = (body: string): string | null => {
+      const m = body.match(/(?:^|;)\s*background(?:-color)?\s*:\s*var\((--[a-z0-9-]+)/);
+      return m ? m[1] : null;
+    };
+    const splitSelectors = (sel: string) =>
+      sel.split(",").map((s) => s.trim()).filter(Boolean);
+
+    /** 由 hover 规则的某个选择器推出它所在的容器选择器尾巴。 */
+    const containerOf = (sel: string): string | null => {
+      const base = sel.replace(/:hover.*$/, "").trim();
+      if (!base) return null;
+      const gt = base.lastIndexOf(">");
+      if (gt > 0) return base.slice(0, gt).trim();
+      const parts = base.split(/\s+/).filter(Boolean);
+      if (parts.length < 2) return null;
+      return parts.slice(0, -1).join(" ");
+    };
+
+    /** 容器尾巴 -> 该容器用到的背景令牌集合。 */
+    const containerTokens = new Map<string, Set<string>>();
+    for (const rule of all) {
+      if (rule.selector.includes(":hover")) continue;
+      const token = bgToken(rule.body);
+      if (!token) continue;
+      for (const sel of splitSelectors(rule.selector)) {
+        if (!containerTokens.has(sel)) containerTokens.set(sel, new Set());
+        containerTokens.get(sel)!.add(token);
+      }
+    }
+    expect(containerTokens.size, "未收集到任何容器背景令牌（判据本身失效）").toBeGreaterThan(0);
+
+    const offenders: string[] = [];
+    for (const rule of all) {
+      if (!rule.selector.includes(":hover")) continue;
+      const token = bgToken(rule.body);
+      if (!token) continue;
+      for (const sel of splitSelectors(rule.selector)) {
+        if (!sel.includes(":hover")) continue;
+        const container = containerOf(sel);
+        if (!container) continue;
+        const tail = container.split(/\s+/).pop()!;
+        for (const [cSel, tokens] of containerTokens) {
+          if (!tokens.has(token)) continue;
+          if (!cSel.split(/\s+/).pop()!.replace(/,/g, "").endsWith(tail)) continue;
+          if (cSel === sel.replace(/:hover.*$/, "").trim()) continue;
+          offenders.push(
+            `L${rule.line}  ${sel.slice(0, 60)}  ::  hover 底 ${token} 与容器 ${cSel.slice(0, 46)} 相同`,
+          );
+        }
+      }
+    }
+    expect(
+      [...new Set(offenders)],
+      `这些 :hover 规则的底色与它所在容器的底色是同一个令牌，悬停前后没有视觉变化：\n${offenders.join("\n")}`,
+    ).toEqual([]);
+  });
+
   it("深色与浅色令牌一一配对（不许只定义深色）", () => {
     const tokenNames = (block: string): Set<string> => {
       const names = new Set<string>();

@@ -773,10 +773,16 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--vc-accent); }
 /* 下拉项用令牌，不吃主题切换时的硬编码（2026-11-11）。
    原来按钮底色/文字都是写死的深色值，而 .editor-shell 的令牌已把面板刷成浅色，
    浅色主题下就变成「浅底 + var(--ink-1) 近白字」——选中项几乎读不出来（用户截图）。
-   文字改用 --ws-text，hover 用 --ws-raise，选中的强调底/描边用 --ws-accent-*。 */
+   文字改用 --ws-text，选中的强调底/描边用 --ws-accent-*。
+   注意 hover 不能用 --ws-raise：那正是本下拉面板自己的底色，深色下会完全看不见
+   （2026-11-15 用户截图），改用专门的 --ws-hover。 */
 .project-switcher-dropdown > button { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 32px; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; color: var(--ws-text, var(--ink-1)); font-size: var(--dlg-fs-body); cursor: default; text-align: left; }
-.project-switcher-dropdown > button:hover { background: var(--ws-raise, var(--surface-3-b)); }
-.project-switcher-dropdown > button.active { background: var(--ws-accent-dim, var(--rgba-2)); box-shadow: inset 0 0 0 1px var(--ws-accent-line, var(--rgba-47)); }
+.project-switcher-dropdown > button:hover { background: var(--ws-hover, var(--ws-raise, var(--surface-3-b))); }
+/* 选中项在悬停时必须仍是「选中」的样子：浅色下有 [data-theme="light"] button:hover
+   (0,3,1) 会盖掉 .active (0,2,1)，实测选中行悬停后从 rgba(15,158,134,.12) 变成灰底，
+   看起来像没选中。这里用同特异性的 :hover 显式锁回强调底。 */
+.project-switcher-dropdown > button.active,
+.project-switcher-dropdown > button.active:hover { background: var(--ws-accent-dim, var(--rgba-2)); box-shadow: inset 0 0 0 1px var(--ws-accent-line, var(--rgba-47)); }
 .project-switcher-dropdown > button.active .project-switcher-state { color: var(--ws-accent, var(--brand)); }
 .project-switcher-name { flex: 1; min-width: 0; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .project-switcher-state { flex: none; font-size: var(--dlg-fs-caption); color: var(--ink-3); }
@@ -5167,6 +5173,12 @@ html[data-theme="light"] {
   --ws-shell:#141416;    /* 窗口底 / 顶栏 / 时间线 */
   --ws-panel:#18181b;    /* 左右面板 */
   --ws-raise:#202024;    /* 卡片 / 控件 / 属性分组 */
+  /* 悬停底：必须比它所在的面更高一档。曾直接用 --ws-raise 当悬停底，
+     而 --ws-raise 正是下拉面板自己的底色 ⇒ 深色下 hover 与面板同色、
+     完全看不见（浅色下侥幸可见，是被 [data-theme="light"] button:hover
+     那条通用规则抢先覆盖成 #e8e8ea，属于巧合而非设计）。
+     取值与浅色档对齐：对面板的对比 1.22（#2b2b31 只有 1.15，肉眼偏弱）。 */
+  --ws-hover:#2f2f35;
   --ws-inset:#101012;    /* 输入框 / 凹陷底 */
   /* 分隔：一条发丝线即可，静止态不画第二层 */
   --ws-line:rgba(245,245,255,.08); --ws-line-2:rgba(245,245,255,.15);
@@ -5208,6 +5220,11 @@ body { background:var(--surface-body); }
 .editor-shell .library-toolbar button:first-child { border-color:var(--ws-accent-line); background:var(--ws-accent-dim); color:var(--ws-accent); }
 .editor-shell .library-toolbar button:first-child .lib-card-ico { color:var(--ws-accent); }
 .editor-shell .library-toolbar button:hover:not(:disabled) { border-color:var(--ws-accent-line); background:var(--ws-raise); color:var(--ws-text); }
+/* 选中页签悬停时必须仍是选中态：上面这条 hover 的 background:var(--ws-raise) 会把
+   :first-child 的强调底(rgba 12%)冲成普通卡面，实测深色 rgba(53,214,174,.12) →
+   rgb(32,32,36)、浅色 rgba(15,158,134,.12) → rgb(255,255,255)，看起来像「点掉了」。
+   特异性 (0,5,1) 压过 hover 的 (0,4,1)。 */
+.editor-shell .library-toolbar button:first-child:hover:not(:disabled) { background:var(--ws-accent-dim); color:var(--ws-accent); }
 .editor-shell .library-toolbar .lib-card-ico svg { width:18px; height:18px; }
 .editor-shell .text-materials { gap:8px; padding:8px 16px 0; }
 .editor-shell .text-materials button { color:var(--ws-text-3); font-size:12px; height:30px; }
@@ -5323,6 +5340,9 @@ body { background:var(--surface-body); }
   --ws-shell:#ececed;
   --ws-panel:#f7f7f8;
   --ws-raise:#ffffff;
+  /* 与浅色下既有观感一致（原本由 [data-theme="light"] button:hover 的
+     --ctl-bg-hover #e8e8ea 提供），此处只是把它显式化，视觉零变化。 */
+  --ws-hover:#e8e8ea;
   --ws-inset:#e9e9eb;
   --ws-line:rgba(16,16,24,.10);
   --ws-line-2:rgba(16,16,24,.18);

@@ -49,3 +49,21 @@
 **深色基线 28→29 的差值是噪声**：预览区「缓冲中」徽标在两次截图里出现时机不同。
 为此单独测了同构建连续两次截图的噪声底 = **25,781 像素（1.989%）**，
 而"改前 vs 改后"深色逐像素 diff 只有 **1,387 像素（0.107%）**，全部落在预览画布内。
+
+## 追加：深色下项目下拉没有 hover（2026-11-15）
+
+| 文件 | 内容 |
+|---|---|
+| `hover-dark-before.png` / `hover-dark-after.png` | 深色：鼠标停在第 2 行（`proj-b`）时的下拉 |
+| `hover-dark-noHover-before.png` / `hover-dark-noHover-after.png` | 同界面鼠标移开后的对照 |
+| `hover-light-before.png` / `hover-light-after.png` | 浅色同场景（**前后逐像素完全相同，0 / 74892 差异**，确认零回归） |
+| `hover-light-noHover-before.png` / `hover-light-noHover-after.png` | 浅色鼠标移开的对照 |
+
+`before` 用「hover 底 = `--ws-raise`」（缺陷态）重新构建拍摄，`after` 用
+新增的 `--ws-hover` 拍摄；**除该令牌外无其他变量**。
+
+深色改前 hover 前后同为 `rgb(32,32,36)`（对比 1.00，看不见），改后为
+`rgb(47,47,53)`（对比 1.22，与浅色的 1.22 对齐）。浅色前后一致。
+
+**测量前提**：窗口未聚焦时 `:hover` 不触发，必须先 `show()` + `focus()`，
+否则整批读数都是 `false`（第一版就栽在这）。

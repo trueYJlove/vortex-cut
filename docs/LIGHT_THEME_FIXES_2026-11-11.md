@@ -222,3 +222,82 @@ TimelineCanvas.tsx:463  cssColor("--tl-tick-major", ...)     ← 画布这么读
 `vitest.config.ts` 已把 `testTimeout` 放宽到 20s，但**固定 sleep 后的状态断言
 放宽超时救不了**。本轮用 `--no-file-parallelism` 串行跑作为验收口径，
 **不把"串行跑绿"当作"没有偶发问题"**——这笔账登记进 STATUS。
+---
+
+## 8. 追加（2026-11-15）：深色下项目下拉没有 hover
+
+**用户反馈**：「项目下拉列表鼠标上下滑动时，有一个 hover 效果，浅色模式下正常，
+深色模式下看不到」。
+
+**实测根因**（不是"颜色太淡"，是**同一个值**）：
+
+```
+.project-switcher-dropdown > button:hover { background: var(--ws-raise); }   /* 777 */
+.editor-shell .project-switcher-dropdown  { background: var(--ws-raise); }   /* 5191 */
+```
+
+悬停色与下拉面板自身底色**是同一个令牌**。深色下两者都解析成 `rgb(32,32,36)`，
+对比度 **1.00**——hover 确实发生了，只是画在同一颜色上。
+
+**浅色下"正常"是巧合，不是设计**：
+
+| 主题 | 面板底 | 悬停底 | 悬停是否可见 |
+|---|---|---|---|
+| 深色 | `#202024` | `#202024` | ❌ 对比 1.00 |
+| 浅色 | `#ffffff` | `#e8e8ea` | ✅ 对比 1.22 |
+
+浅色那 1.22 来自 `[data-theme="light"] button:hover:not(:disabled)`
+（`:15`）这条**全局通用规则**抢先覆盖 —— 它比 `.project-switcher-dropdown > button:hover`
+特异性更高。也就是说浅色靠的是另一条规则的副作用，规则本身在两种主题下都是错的。
+
+**修法**：新增 `--ws-hover` 令牌，与 `--ws-raise`（面板底）分开：
+
+```
+深色  --ws-hover:#2f2f35   （对面板 #202024 对比 1.22）
+浅色  --ws-hover:#e8e8ea   （对面板 #ffffff 对比 1.22）
+```
+
+两档**对比度取同一个值 1.22**，是照浅色既有观感（`#e8e8ea`）标定的，
+深色不再"更淡或更重"。浅色侧取值与原观感完全相同，**视觉零变化**。
+
+### 8.1 同源缺陷一：选中项悬停后"看起来没选中"
+
+`.active` 的强调底会被 `[data-theme="light"] button:hover`（特异性 0,3,1）
+盖掉 `.active`（0,2,1），实测选中行悬停后从 `rgba(15,158,134,.12)` 变灰底。
+加 `.project-switcher-dropdown > button.active:hover` 显式锁回强调底。
+
+### 8.2 同源缺陷二：素材库选中页签悬停后掉色
+
+`.editor-shell .library-toolbar button:hover` 把 `background` 设成
+`var(--ws-raise)`，冲掉了 `:first-child` 的强调底。实测：
+深色 `rgba(53,214,174,.12) → rgb(32,32,36)`、浅色 `rgba(15,158,134,.12) → rgb(255,255,255)`。
+补 `:first-child:hover`（特异性 0,5,1）锁回。
+
+### 8.3 新增第三道守卫
+
+`theme-token-coverage.test.ts` 增加一条：**悬停底色不得与它所在容器的底色同色**。
+对每条含 `:hover` 的规则推出其容器选择器，若容器背景用了同一个令牌即失败。
+
+**这条守卫写错过两次，都是"恒真"型错误，记下来**：
+
+1. 拿 `:hover` 去匹配 `rule.body` —— 选择器不在 body 里，结果恒空；
+2. 改用"选择器含 panel/dropdown 字样"当容器判据 —— 把
+   `.pp-panel .pp-sub.pp-active` 这类**选中态底色**误判成面板底色，
+   `--ctl-bg-hover` 全表命中，满地假红。
+
+最终改为**从 hover 选择器自身推导容器**（去掉 `:hover` 及其后、取 `>` 左侧或
+最后一段之前），只精确比对那一个容器。变异验证：把 hover 改回 `--ws-raise` →
+**红**且只报 L777 这一条；恢复 → 绿。
+
+### 8.4 证据
+
+`docs/evidence/2026-11-11-light-theme/`：
+
+| 文件 | 内容 |
+|---|---|
+| `hover-dark-before.png` / `hover-dark-after.png` | 深色：鼠标停在第 2 行（`proj-b`）时的下拉。改前整片同色，改后该行浮起 |
+| `hover-dark-noHover-before.png` / `hover-dark-noHover-after.png` | 同界面鼠标移开后的对照 |
+| `hover-light-before.png` / `hover-light-after.png` | 浅色同场景（前后一致，确认无回归） |
+
+**测量方式**：真实 Electron、窗口聚焦（未聚焦时 `:hover` 不触发，第一版量不到）、
+1440×900、同项目同视口。
