@@ -190,6 +190,10 @@ export function ClipProperties({ clip, working, baseRevisionId, locked, onPatch,
      表达同一件事，并在 aria-label 上写明，避免假装是像素。
      教训：`//` 与 `/* *\/` 都不能直接写在 JSX 表达式容器里——会被当成文本渲染。
      注释要么放在 JSX 外面（像这里），要么用 {`{/* ... *\/}`} 包起来。 */
+  /* 「外观」独立成组（参照 inspector-look.tsx:625 appearance = 不透明度 + 圆角 + 混合模式）。
+     原来不透明度混在「位置与大小」里，与参照的分组归属不同。
+     圆角与混合模式我们暂无 patch 通道（Core 没有对应操作），故本组只放不透明度，
+     不摆改不动的控件——与「裁剪与填充」的处理一致。 */
   /* 「淡入淡出」独立成组（参照 inspector-look.tsx:1106 把它做成效果组里的独立段落）：
      两个并排数值框 grid-cols-2，不是两条滑杆。原来它混在「音频」分组里、以两条滑杆出现，
      与参照的分组归属和控件形态都不同。 */
@@ -224,10 +228,12 @@ export function ClipProperties({ clip, working, baseRevisionId, locked, onPatch,
           onCommit={v => setTransform({ rotate: v }, "调整画中画旋转")} />
         <span />
       </div>
+  </PGroup>
+    <PGroup title="外观">
       <RangeRow label="不透明度" value={fixedTf.opacity * 100} min={0} max={100} step={1} unit="%" decimals={0} w66
         onDraft={v => updateLocal({ transform: { ...clip.transform, opacity: v / 100 } })}
         onCommit={v => setTransform({ opacity: v / 100 }, "调整画中画不透明度")} />
-  </PGroup>
+    </PGroup>
     <PGroup title="更多画面能力" collapsible defaultClosed tail={<SoonBadge />}>
       <PRow label="混合模式" dim><Switch on={false} onToggle={() => {}} disabled /></PRow>
       <PRow label="变形" dim><Switch on={false} onToggle={() => {}} disabled /></PRow>
