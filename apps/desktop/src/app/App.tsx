@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Archive, AudioLines, BookOpen, Captions, ChevronDown, ChevronLeft, ChevronRight, Clapperboard, Command as CommandIcon, Download, Eye, FileAudio, FileText, FlaskConical, FolderCog, FolderOpen, FolderPlus, GitCompare, History, Image as ImageIcon, ImagePlus, Keyboard, LayoutPanelLeft, Lock, LockOpen, MapPin, Maximize, Minimize, Monitor, MonitorPlay, Music, Pause, Play, Plus, Redo2, RefreshCw, RotateCcw, Save, Scissors, Search, Sparkles, Repeat, Square, SquarePlus, Settings2, Trash2, Type as TypeIcon2, Type, Undo2, Upload, Video, Volume2, VolumeX, WandSparkles, Minus, ZoomIn } from "lucide-react";
+import { Archive, AudioLines, BookOpen, Captions, ChevronDown, ChevronLeft, ChevronRight, Clapperboard, Command as CommandIcon, Download, Eye, FileAudio, FileText, FlaskConical, FolderCog, FolderOpen, FolderPlus, GitCompare, History, Image as ImageIcon, ImagePlus, Keyboard, LayoutPanelLeft, Lock, LockOpen, MapPin, Maximize, Minimize, Monitor, MonitorPlay, Music, Pause, Play, Plus, Redo2, RefreshCw, RotateCcw, Save, Scissors, Search, Sparkles, Repeat, Square, SquarePlus, Settings2, Trash2, Type as TypeIcon2, Type, Undo2, Upload, Video, Volume2, VolumeX, WandSparkles, Minus, ZoomIn, SlidersHorizontal } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { Asset, AssetId, AssetKind, AssetPresentation, BriefInput, CaptionPresetId, CvAnalysisSummary, CvSample, DestinationGrant, DirectoryGrant, EncoderMode, EgressPreview, ExportBatch, ExportFrameRate, ExportQuality, ExportResolution, HorizontalAnchor, Job, LayoutPolicy, MediaInfo, ModelDetail, ModelSummary, OutputRatio, PlatformPreset, Project, ProviderConfig, ReframeExportBatch, RenditionPreset, RenditionReframeAdjustment, TimelineCaption, TimelineClip, TimelineDiff, TimelineDocument, TimelineLayout, TimelinePatchEgressPreview, TimelinePatchOperation, TimelinePatchProposal, TimelineRevisionId, TimelineRevisionSummary, TimelineState, Transcript, TranscriptSegment, TranscriptSummary, VerticalAnchor } from "@aivideo/contracts";
 import { ExportDialog, type ExportSettings } from "./ExportDialog.js";
@@ -3036,13 +3036,27 @@ export function App() {
       <div className="resize-handle resize-handle-left" role="separator" aria-label="调整左侧面板宽度" onPointerDown={event => beginResize("left", event)} />
       <section ref={stagePaneRef} className={`stage-pane${isFullscreen ? " fullscreen" : ""}`} aria-label="项目预览">
         <div className="stage-column" ref={stageColumnRef}>
-          <div className="preview-toolbar">
-            <div className="tb-right">
-              <label className="tb-field">比例<select aria-label="预览比例" value={effectiveRatio} onChange={event => changePreviewRatio(event.target.value)}>{previewRatios.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label>
-              <span className="tb-sep" aria-hidden="true" />
-              <label className="tb-field">编码<select aria-label="编码模式" value={encoderMode} onChange={event => setEncoderMode(event.target.value as EncoderMode)}><option value="auto">自动</option><option value="software">软件</option></select></label>
-              <button className="render-panel-toggle" onClick={() => setRenderPanelOpen(true)}>渲染与导出{renderActivity ? <span className="render-badge" aria-hidden="true">{renderActivity}</span> : null}</button>
-            </div>
+          {/* 预览窗格栏（2026-11-16 按参照 ProjectView.tsx:4639 的 PANE_BAR 形态）：
+              参照这里是 40px 高、**只有图标按钮**（图层/属性面板开关），没有带文字的控件。
+              我们原来塞了「比例 select / 编码 select / 渲染与导出 按钮」三个带文字的控件，
+              于是画面上方出现一条参照里不存在的工具条——这是预览区结构差最大的一处。
+              功能不删：三项收进右侧图标按钮（比例与编码仍是可访问的 select，只是外观走
+              参照的 28×28 图标盒 + tooltip 说明），渲染与导出同理。 */}
+          <div className="pane-bar">
+            <span className="pane-bar-title">预览</span>
+            <span className="pane-bar-spacer" />
+            <label className="pane-bar-field" title="预览比例">
+              <span className="sr-only">预览比例</span>
+              <select aria-label="预览比例" value={effectiveRatio} onChange={event => changePreviewRatio(event.target.value)}>{previewRatios.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}</select>
+            </label>
+            <label className="pane-bar-field" title="编码模式">
+              <span className="sr-only">编码模式</span>
+              <select aria-label="编码模式" value={encoderMode} onChange={event => setEncoderMode(event.target.value as EncoderMode)}><option value="auto">自动</option><option value="software">软件</option></select>
+            </label>
+            <button className="pane-bar-btn" onClick={() => setRenderPanelOpen(true)} aria-label="渲染与导出" title="渲染与导出">
+              <SlidersHorizontal size={14} aria-hidden="true" />
+              {renderActivity ? <span className="render-badge" aria-hidden="true">{renderActivity}</span> : null}
+            </button>
           </div>
           <div className="stage-view">
             <div className={`preview-frame ${previewClass}${previewSelected ? " selected" : ""}`} style={previewZoom === "fit" ? undefined : { transform: `scale(${previewZoom})` }} role="button" tabIndex={0} aria-label="选中播放头处的片段" title="点击选中播放头处的片段" onClick={selectClipAtPlayhead} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectClipAtPlayhead(); } }}>

@@ -5378,6 +5378,19 @@ body { background:var(--surface-body); }
    原来的 6px 圆角 + 大投影 + 1px 环，是「卡片里放视频」的观感；
    参照是「视频本身就是那块黑」——这层阴影是两者观感差得最远的地方之一。 */
 .editor-shell .preview-canvas { box-shadow:none; border-radius:0; }
+/* 预览窗格栏（参照 dock-pane-bar.ts:8-13 的 PANE_BAR / PANE_BTN / PANE_TOGGLE）：
+   40px 高、左右 padding 6px、gap 4px；按钮 28×28（PANE_TOGGLE）；
+   标题 12px medium 的 --text-muted；不带文字的控件一律收进图标盒 + tooltip。 */
+.editor-shell .pane-bar { display: flex; align-items: center; gap: 4px; height: 40px; flex: 0 0 auto; padding: 0 6px; }
+.editor-shell .pane-bar-title { flex: none; font-size: 12px; font-weight: 500; color: var(--text-muted); }
+.editor-shell .pane-bar-spacer { flex: 1 1 auto; min-width: 0; }
+.editor-shell .pane-bar-btn { display: flex; align-items: center; justify-content: center; position: relative; width: 28px; height: 28px; min-height: 0; border: 0; border-radius: 6px; background: none; color: var(--text-muted); cursor: pointer; transition: background-color .15s, color .15s; }
+.editor-shell .pane-bar-btn:hover { background: var(--bg-hover); color: var(--text); }
+.editor-shell .pane-bar-field { display: inline-flex; align-items: center; }
+.editor-shell .pane-bar-field select { height: 26px; padding: 0 4px; border: 1px solid transparent; border-radius: 5px; background: var(--bg-field); color: var(--text); font-size: 11px; cursor: pointer; }
+.editor-shell .pane-bar-field select:hover { border-color: var(--border); }
+.editor-shell .pane-bar .render-badge { position: absolute; top: 3px; right: 3px; }
+
 /* 预览上下铬框对称 40px（参照 dock-pane-bar.ts:8 顶栏 h-10 与 ViewerBar.tsx:51 h-10）。
    原来上面 44、下面 40——差 4px 会让画面在视觉上偏下，这正是「不像」的细处来源之一。 */
 .editor-shell .preview-toolbar { height:40px; }
