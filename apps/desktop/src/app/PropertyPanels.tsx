@@ -3,6 +3,7 @@ import { Archive, FileText, Lock, RotateCcw, Save } from "lucide-react";
 import type { CaptionPresetId, EditingGrammarPrepareResult, EditingGrammarProposal, Project, TimelineCaption, TimelineClip, TimelineDiff, TimelineDocument, TimelineLayout, TimelinePatchOperation, TimelineState, TimelineTransition } from "@aivideo/contracts";
 import type { AuthoritativePreviewPresentation } from "../../electron/preload/index.js";
 import { PanelTabs, SubTabs, PGroup, PSep, PRow, Switch, Seg, SoonBadge, PNote, NumberField, RangeRow } from "./PropertyControls.js";
+import { AlignBar } from "../ui/of/AlignBar.js";
 import { MenuSelect } from "../ui/of/MenuSelect.js";
 import { errorCode } from "./safeErrors.js";
 
@@ -182,25 +183,39 @@ export function ClipProperties({ clip, working, baseRevisionId, locked, onPatch,
   };
 
   // ---- 画面 → 基础 ----
+  /* 「位置与大小」按参照 FilmInspector.tsx:2378 的结构重排：
+     对齐条 → X/Y 一行 → W/H + 锁一行 → 旋转一行。
+     原来我们把「缩放」放成滑杆、没有对齐条、没有 W/H、没有锁——第一屏就看得出结构不同。
+     参照的 W/H 是舞台像素，我们目前只有 scale，故 W/H 用「相对舞台的百分比」
+     表达同一件事，并在 aria-label 上写明，避免假装是像素。
+     教训：`//` 与 `/* *\/` 都不能直接写在 JSX 表达式容器里——会被当成文本渲染。
+     注释要么放在 JSX 外面（像这里），要么用 {`{/* ... *\/}`} 包起来。 */
   const picBasic = <>
-    <PGroup title="位置大小" chev onReset={() => void onPatch([{ op: "set_clip_transform", clip_id: clip.clip_id, transform: {} }], "重置画面变换")}>
-      <RangeRow label="缩放" value={fixedTf.scale * 100} min={5} max={500} step={1} unit="%" decimals={0}
-        onDraft={v => updateLocal({ transform: { ...clip.transform, scale: v / 100 } })}
-        onCommit={v => setTransform({ scale: v / 100 }, `调整画中画缩放 ${Math.round(v)}%`)} />
-      <PRow label="等比缩放"><RatioSwitch /></PRow>
-      <PRow label="位置" tail="X / Y（中心偏移）">
+    <PGroup title="位置与大小" chev onReset={() => void onPatch([{ op: "set_clip_transform", clip_id: clip.clip_id, transform: {} }], "重置画面变换")}>
+      <AlignBar />
+      <div className="pp-grid2">
         <NumberField value={Math.round((fixedTf.x - 0.5) * 200)} min={-100} max={100} step={1} ariaLabel="位置 X" mark="X"
           onDraft={v => updateLocal({ transform: { ...clip.transform, x: 0.5 + v / 200 } })}
           onCommit={v => setTransform({ x: 0.5 + v / 200 }, "调整画中画水平位置")} />
         <NumberField value={Math.round((fixedTf.y - 0.5) * 200)} min={-100} max={100} step={1} ariaLabel="位置 Y" mark="Y"
           onDraft={v => updateLocal({ transform: { ...clip.transform, y: 0.5 + v / 200 } })}
           onCommit={v => setTransform({ y: 0.5 + v / 200 }, "调整画中画垂直位置")} />
-      </PRow>
-      <PRow label="旋转">
+      </div>
+      <div className="pp-grid2-lock">
+        <NumberField value={Math.round(fixedTf.scale * 100)} min={5} max={500} step={1} unit="%" ariaLabel="宽度（相对舞台）" mark="W"
+          onDraft={v => updateLocal({ transform: { ...clip.transform, scale: v / 100 } })}
+          onCommit={v => setTransform({ scale: v / 100 }, `调整画面宽度 ${Math.round(v)}%`)} />
+        <NumberField value={Math.round(fixedTf.scale * 100)} min={5} max={500} step={1} unit="%" ariaLabel="高度（相对舞台）" mark="H"
+          onDraft={v => updateLocal({ transform: { ...clip.transform, scale: v / 100 } })}
+          onCommit={v => setTransform({ scale: v / 100 }, `调整画面高度 ${Math.round(v)}%`)} />
+        <RatioSwitch />
+      </div>
+      <div className="pp-grid2">
         <NumberField value={fixedTf.rotate} min={-180} max={180} step={1} unit="°" decimals={2} ariaLabel="旋转" mark="∠"
           onDraft={v => updateLocal({ transform: { ...clip.transform, rotate: v } })}
           onCommit={v => setTransform({ rotate: v }, "调整画中画旋转")} />
-      </PRow>
+        <span />
+      </div>
       <RangeRow label="不透明度" value={fixedTf.opacity * 100} min={0} max={100} step={1} unit="%" decimals={0} w66
         onDraft={v => updateLocal({ transform: { ...clip.transform, opacity: v / 100 } })}
         onCommit={v => setTransform({ opacity: v / 100 }, "调整画中画不透明度")} />
