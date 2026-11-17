@@ -48,6 +48,10 @@ def test_kind_policies_cover_plan_tiers() -> None:
     # captions Provider 生成与其它 Provider 生成同档（network，优先级 4）
     assert policy_for("captions_provider_generation").resources == ("network",)
     assert policy_for("captions_provider_generation").priority == 4
+    # WP-P232：filmstrip 必须登记为 light。未登记 = unknown ⇒ 保守独占
+    # cpu+gpu+disk heavy 单槽，一条「导入即抽」的缩略图作业会把导出全部挡住。
+    assert policy_for("filmstrip").resources == ("light",)
+    assert policy_for("filmstrip").priority == 3
 
 
 def test_unknown_kind_conservative_exclusive() -> None:

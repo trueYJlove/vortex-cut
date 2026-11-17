@@ -215,6 +215,128 @@ function IconButton({
   );
 }
 
+// ── WP-P232 预抽 sprite 装载（可测的调度体） ────────────────────────────────
+
+/** 单素材退避档（ms）：首查几乎立刻（已 ready 的素材零延迟），生成中拉到 2s。
+ *  真机大素材 filmstrip 作业需 6~75s（ffmpeg tile 单 pass 解码全片），
+ *  20 次 ≈ 30s 足够覆盖主流素材；超长素材由画布运行时补抽兜底。 */
+export const SPRITE_RETRY_BACKOFF_MS = [250, 500, 1000, 2000, 2000, 2000, 2000, 2000, 2000, 2000] as const;
+
+export interface FilmstripLoadDeps {
+  loader: {
+    registerSprite(assetId: string, entry: {
+      bitmap: ImageBitmap; stepMs: number; cellW: number; cellH: number; count: number;
+    }): void;
+  };
+  /** 当前项目 id（Core 路由用；null = 尚未加载，整轮跳过）。 */
+  projectId: () => string | null;
+  /** 已登记/已放弃的素材（跨 effect 轮次存活，来自 ref）。 */
+  isDone: (assetId: string) => boolean;
+  markLoaded: (assetId: string) => void;
+  markSkipped: (assetId: string) => void;
+  unmarkLoaded: (assetId: string) => void;
+  onLoaded: () => void;
+  /** 注入点（测试用）；生产留空走 window.desktop / fetch / createImageBitmap。 */
+  stepMs?: number;
+  backoffMs?: readonly number[];
+  desktopApi?: {
+    ensureFilmstrip(input: { project_id: string; asset_id: string; step_ms: number; generate: boolean }): Promise<{ status: string } | null>;
+    filmstripMediaUrl(input: { project_id: string; asset_id: string; step_ms: number }): Promise<{
+      media_url: string; step_ms: number; cell_w: number; cell_h: number; count: number;
+    }>;
+  };
+  fetchImpl?: (url: string) => Promise<{ ok: boolean; status: number; blob(): Promise<Blob> }>;
+  createBitmap?: (blob: Blob) => Promise<ImageBitmap>;
+  scheduleTimer?: (callback: () => void, ms: number) => number;
+  cancelTimer?: (handle: number) => void;
+}
+
+/**
+ * 装载素材缩略图 sprite，直到 ready 或放弃；返回取消函数。
+ *
+ * 为什么不是「查一次就好」（P232 真机缺陷）：导入 → 拖上轨道只隔几百毫秒，
+ * 此刻 filmstrip 作业还在 queued/running，filmstripMediaUrl 必抛「未就绪」。
+ * 旧实现把 assetId 一次性写进「已装载」集合再 catch 静默，sprite 永不登记
+ * ——预抽链路整体失效，只剩运行时补抽兜底（档位不同即空格）。
+ *
+ * 语义：ensure 报非 ready（queued/building）→ 退避重试，永不取件（必 404）；
+ * ensure 报 failed / 无视频流（MEDIA_NO_VIDEO）→ 立即放弃并负缓存；
+ * 取件/解码瞬时失败 → 退避重试，耗尽即放弃。
+ */
+export function loadFilmstripsOnce(
+  assetMedia: Array<{ asset_id: string; kind?: string }>,
+  deps: FilmstripLoadDeps,
+): () => void {
+  const backoff = deps.backoffMs ?? SPRITE_RETRY_BACKOFF_MS;
+  const stepMs = deps.stepMs ?? 1000;
+  const timer = deps.scheduleTimer ?? ((callback, ms) => setTimeout(callback, ms) as unknown as number);
+  const cancel = deps.cancelTimer ?? ((handle) => clearTimeout(handle));
+  const handles = new Set<number>();
+  let cancelled = false;
+
+  const api = deps.desktopApi ?? (window as unknown as { desktop: FilmstripLoadDeps["desktopApi"] }).desktop!;
+  const doFetch = deps.fetchImpl ?? ((url: string) => fetch(url));
+  const makeBitmap = deps.createBitmap ?? ((blob: Blob) => createImageBitmap(blob));
+
+  const schedule = (fn: () => void, ms: number): void => {
+    const handle = timer(() => { handles.delete(handle); if (!cancelled) fn(); }, ms);
+    handles.add(handle);
+  };
+
+  const run = (assetId: string, attempt: number): void => {
+    if (cancelled) return;
+    const retryOrGiveUp = (): void => {
+      if (cancelled) return;
+      const next = attempt + 1;
+      if (next >= backoff.length) { deps.markSkipped(assetId); return; }
+      schedule(() => run(assetId, next), backoff[next]);
+    };
+    void (async () => {
+      const projectId = deps.projectId();
+      if (!projectId) { deps.unmarkLoaded(assetId); return; }
+      try {
+        const ensured = await api.ensureFilmstrip({
+          project_id: projectId, asset_id: assetId, step_ms: stepMs, generate: true,
+        });
+        const status = ensured?.status;
+        if (status !== "ready") {
+          // failed = 作业真失败（无视频流/素材变化）：不再重试。
+          if (status === "failed") { deps.markSkipped(assetId); return; }
+          retryOrGiveUp();
+          return;
+        }
+        const sprite = await api.filmstripMediaUrl({
+          project_id: projectId, asset_id: assetId, step_ms: stepMs,
+        });
+        const response = await doFetch(sprite.media_url);
+        if (!response.ok) { retryOrGiveUp(); return; }
+        const bitmap = await makeBitmap(await response.blob());
+        if (cancelled) { bitmap.close(); return; }
+        deps.loader.registerSprite(assetId, {
+          bitmap, stepMs: sprite.step_ms, cellW: sprite.cell_w, cellH: sprite.cell_h, count: sprite.count,
+        });
+        deps.markLoaded(assetId);
+        deps.onLoaded();
+      } catch {
+        retryOrGiveUp();
+      }
+    })();
+  };
+
+  for (const media of assetMedia) {
+    if (!media.asset_id || deps.isDone(media.asset_id)) continue;
+    if (media.kind && media.kind !== "video") { deps.markSkipped(media.asset_id); continue; }
+    deps.markLoaded(media.asset_id); // 本轮单飞占位（成功后保持，失败由 markSkipped 落负缓存）
+    run(media.asset_id, 0);
+  }
+
+  return () => {
+    cancelled = true;
+    for (const handle of handles) cancel(handle);
+    handles.clear();
+  };
+}
+
 // ── Thumbnail frame computation（剪映式：抽帧铺满片段） ──────────────────────
 
 /** 帧数档位：缩放时量化到最近档，小幅缩放直接复用已抽帧（不重抽）。
@@ -224,6 +346,40 @@ function IconButton({
  *  （11.8s 片段 @~94pps：剪映 22 格，旧 56px/粗档只有 18 格），格间距越小
  *  硬切场景的采样错位越不易被察觉。 */
 const FRAME_COUNT_STEPS = [1, 2, 3, 4, 5, 6, 8, 10, 13, 16, 20, 24, 29, 35, 42, 50, 58, 64];
+/** 缩略格目标宽（px）：请求侧、绘制侧、档位清理侧必须同源。
+ *  T8 参照 BlockThumbs.tsx:21 THUMB_CELL_PX=80。任一处写死不同数值都会
+ *  让缓存键与档位集合对不上（历史缺陷：清理侧残留 44）。 */
+export const THUMB_CELL_PX = 80;
+
+/** 片段在给定缩放下占多少缩略格（档位）。**唯一真源**——请求侧（缓存键）、
+ *  绘制侧（铺格）与档位清理侧必须都走这里。
+ *
+ *  历史缺陷（P232 真机空白）：档位清理侧曾单独写死 /44，而请求与绘制是 /80。
+ *  两侧算法一致但常数不同 ⇒ 清理侧算出的档位永远对不上实际缓存键的档位，
+ *  每轮 effect 都判成「陈旧档」，3 轮（≈600ms）后把帧全清掉——表现为缩略图
+ *  短暂出现后整条片段变空白，且缩放一次就复现。 */
+export function frameTierFor(clipDurationUs: number, pixelsPerSecond: number): number {
+  if (clipDurationUs <= 0) return 1;
+  return quantizeFrameCount(Math.round(((clipDurationUs / 1_000_000) * pixelsPerSecond) / THUMB_CELL_PX));
+}
+
+/** 当前视口下"仍在使用"的档位集合（键 `clipId:tier`）。
+ *  与 computeFrameRequests 的缓存键同源（都走 frameTierFor）——这是档位清理
+ *  不误删帧的前提，故独立成纯函数并单测。 */
+export function currentFrameTiers(
+  clipRects: Array<{ clip: { clip_id: string; asset_kind: string; timeline_start_us: number; timeline_end_us: number } }>,
+  pixelsPerSecond: number,
+): Set<string> {
+  const tiers = new Set<string>();
+  for (const rect of clipRects) {
+    const kind = rect.clip.asset_kind;
+    const durationUs = rect.clip.timeline_end_us - rect.clip.timeline_start_us;
+    if ((kind === "video" || kind === "image") && durationUs > 0) {
+      tiers.add(`${rect.clip.clip_id}:${frameTierFor(durationUs, pixelsPerSecond)}`);
+    }
+  }
+  return tiers;
+}
 export function quantizeFrameCount(raw: number): number {
   const capped = Math.max(1, Math.min(64, raw));
   let best = FRAME_COUNT_STEPS[0];
@@ -236,6 +392,33 @@ export function quantizeFrameCount(raw: number): number {
     }
   }
   return best;
+}
+
+/** 第 i 个缩略格的**源时刻**（秒）——请求侧与绘制侧共用的唯一映射。
+ *  格位由片段的【时间线】时长均匀切分，取格中心；含变速/倒放：
+ *  源时刻 = source_start + 时间线偏移 × speed（倒放从 source_end 反向）。
+ *
+ *  独立成函数的原因：绘制侧要在缓存未命中时同步查 sprite 表（P232 预抽），
+ *  必须算出与请求侧**逐位相同**的时刻，否则查到的格子内容与位置对不上。 */
+export function cellSourceTimeSec(
+  clip: {
+    timeline_start_us: number; timeline_end_us: number;
+    source_start_us?: number | null; source_end_us?: number | null;
+    speed_milli?: number | null; reverse_playback?: boolean | null;
+  },
+  index: number,
+  frameCount: number,
+): number {
+  const timelineDurUs = clip.timeline_end_us - clip.timeline_start_us;
+  const count = Math.max(1, frameCount);
+  const fromUs = clip.timeline_start_us + (index * timelineDurUs) / count;
+  const toUs = clip.timeline_start_us + ((index + 1) * timelineDurUs) / count;
+  const offsetUs = (fromUs + toUs) / 2 - clip.timeline_start_us;
+  const speed = (clip.speed_milli ?? 1000) / 1000;
+  const srcUs = clip.reverse_playback
+    ? (clip.source_end_us ?? 0) - offsetUs * speed
+    : (clip.source_start_us ?? 0) + offsetUs * speed;
+  return Math.max(0, srcUs) / 1_000_000;
 }
 
 /** Compute (mediaUrl, seek time) pairs for a clip's filmstrip frames.
@@ -255,20 +438,12 @@ export function computeFrameRequests(
   const timelineDurUs = clip.timeline_end_us - clip.timeline_start_us;
   if (timelineDurUs <= 0) return [];
   // T8 修正：格宽与绘制侧同步 80px（原 44——两侧不一致时缓存键对不上，缩略图空白）
-  const count = quantizeFrameCount(Math.round(((timelineDurUs / 1_000_000) * pps) / 80));
-  const sourceStartUs = clip.source_start_us ?? 0;
-  const sourceEndUs = clip.source_end_us ?? 0;
-  const speed = (clip.speed_milli ?? 1000) / 1000;
+  const count = frameTierFor(timelineDurUs, pps);
   const frames: Array<{ url: string; timeSec: number; fromUs: number; toUs: number }> = [];
   for (let i = 0; i < count; i += 1) {
     const fromUs = clip.timeline_start_us + (i * timelineDurUs) / count;
     const toUs = clip.timeline_start_us + ((i + 1) * timelineDurUs) / count;
-    const centerUs = (fromUs + toUs) / 2;
-    const offsetUs = centerUs - clip.timeline_start_us;
-    const srcUs = clip.reverse_playback
-      ? sourceEndUs - offsetUs * speed
-      : sourceStartUs + offsetUs * speed;
-    frames.push({ url: mediaUrl, timeSec: Math.max(0, srcUs) / 1_000_000, fromUs, toUs });
+    frames.push({ url: mediaUrl, timeSec: cellSourceTimeSec(clip, i, count), fromUs, toUs });
   }
   return frames;
 }
@@ -696,6 +871,9 @@ function drawTimeline(
     displaced?: { clipId: TimelineClipId; trackId: string; startUs: number };
   } | null,
   thumbnailCache?: Map<string, HTMLCanvasElement>,
+  /** WP-P232：预抽 sprite 同步取格（assetId, 源时刻秒）→ canvas；未登记返回 null。
+   *  绘制路径直接查它，使 sprite 迟到就绪后下一帧就铺满，不依赖请求 effect 重跑。 */
+  spriteLookup?: (assetId: string, timeSec: number) => HTMLCanvasElement | null,
   waveformCache?: WaveformCache | null,
   waveformRatio?: number,
   /** 面板可视高度（画布可能高于面板——纵向滚动时滚动条仍钉在可视区底部）。 */
@@ -908,7 +1086,7 @@ function drawTimeline(
       const clipDurUs = rect.clip.timeline_end_us - rect.clip.timeline_start_us;
       if (clipDurUs > 0) {
         // T8 参照 BlockThumbs.tsx:21：THUMB_CELL_PX=80 固定格宽（原 44，密度差一倍）
-        const frameCount = quantizeFrameCount(Math.round(((clipDurUs / 1_000_000) * view.pixelsPerSecond) / 80));
+        const frameCount = frameTierFor(clipDurUs, view.pixelsPerSecond);
         const clipRight = rect.x + rect.width;
         // 帧只画在名称条以下的体内；cover 的垂直溢出由该矩形裁掉。
         ctx.save();
@@ -921,9 +1099,18 @@ function drawTimeline(
           const cellX = timeToX(cellFromUs, view);
           if (cellX >= clipRight) break;
           const cellW = Math.max(1, timeToX(cellToUs, view) - cellX);
-          const frame =
+          let frame: HTMLCanvasElement | undefined =
             thumbnailCache.get(`${rect.clip.clip_id}:${frameCount}:${fi}`) ??
             thumbnailCache.get(`${rect.clip.clip_id}:any:${frameCount}:${fi}`);
+          // WP-P232 预抽 sprite 兜底：缓存未命中时直接查素材级 sprite 表（同步、
+          // 零解码，只是 drawImage 源矩形裁切）。为什么要在这一层做——预抽作业
+          // 是异步的（真机 6~75s），而请求 effect 只在视口/缩放变化时重跑；
+          // sprite 迟到登记后，先前失败的格没有任何东西会去重新请求，于是
+          // 「sprite 明明 ready 了格子还是空」。在此处同步取格，下一帧重绘即
+          // 全部铺满，不依赖 effect 重跑时序。
+          if ((!frame || frame.height <= 0 || frame.width <= 0) && spriteLookup) {
+            frame = spriteLookup(rect.clip.asset_id, cellSourceTimeSec(rect.clip, fi, frameCount)) ?? undefined;
+          }
           if (!frame || frame.height <= 0 || frame.width <= 0) continue; // 未抽好，到达后补上
           const scale = Math.max(cellW / frame.width, bodyH / frame.height);
           const drawW = frame.width * scale;
@@ -1954,35 +2141,85 @@ export function TimelinePanel({
   // WP-P232：预抽 sprite 装载——素材出现在时间线时查 Core 条目，ready 则取
   // sprite（Main 换票）→ ImageBitmap 一次解码 → registerSprite；此后该素材的
   // 缩略格全部查表命中（零解码），运行时路径只兜底未预抽档位。
+  //
+  // P232 修复（真机复现「拖上时间线仍不显示抽帧」的根因）：旧实现把素材 id
+  // 一次性记进 spriteLoadedRef 就再也不试——而导入→拖上轨道通常只隔几百毫秒，
+  // 那时 filmstrip 作业还在 queued/running（实测真机大素材 6~75s 才 ready）。
+  // 首次 filmstripMediaUrl 抛「未就绪」后 catch 静默、ref 已置位，sprite 永不
+  // 登记，整条预抽链路等于没生效（只能靠运行时补抽兜底，档位不对就空格）。
+  // 现在：只有真登记成功才置位；未就绪按退避重试（与 WaveformCache 同形态），
+  // 作业 failed 或无视频流（ensure 报 MEDIA_NO_VIDEO）才放弃。
   const spriteLoadedRef = useRef<Set<string>>(new Set());
+  /** 已放弃的素材（无视频流/作业失败/超时）——负缓存，防 effect 反复空转。 */
+  const spriteSkippedRef = useRef<Set<string>>(new Set());
+  /** 每素材在途装载的取消器：effect 重跑只取消「已不再需要」的素材，
+   *  而不是把所有在途装载一起掐掉。旧写法在 cleanup 里无条件 cancel：
+   *  assetMedia 每次引用变化（导入/选中/切轨都会重建数组）就重跑 effect，
+   *  于是退避重试链被反复打断，sprite 永远等不到 ready —— 与「只试一次」
+   *  是同一个症状的两种写法。 */
+  const spriteInflightRef = useRef<Map<string, () => void>>(new Map());
+  /** 已解码 sprite 的权威库（跨 loader 换代存活）：loader 只是消费端，
+   *  换代时由下面的 effect 把库里所有条目重新登记进去。 */
+  const spriteStoreRef = useRef<Map<string, {
+    bitmap: ImageBitmap; stepMs: number; cellW: number; cellH: number; count: number;
+  }>>(new Map());
+  /** 当前 loader 的实时引用（装载链异步完成时用它投递，而非捕获启动时的实例）。 */
+  const thumbnailLoaderRef = useRef<ThumbnailLoader | null>(null);
+  useEffect(() => { thumbnailLoaderRef.current = thumbnailLoader; }, [thumbnailLoader]);
   useEffect(() => {
     if (!thumbnailLoader) return;
-    for (const media of assetMedia) {
-      if (!media.asset_id || spriteLoadedRef.current.has(media.asset_id)) continue;
-      spriteLoadedRef.current.add(media.asset_id);
-      void (async () => {
-        try {
-          // 先 ensure（登记缺档生成；fire-and-forget），再取件（ready 才有票）
-          await window.desktop.ensureFilmstrip({
-            project_id: (projectIdRef.current ?? "") as never, asset_id: media.asset_id,
-            step_ms: 1000, generate: true,
-          }).catch(() => undefined);
-          const sprite = await window.desktop.filmstripMediaUrl({
-            project_id: (projectIdRef.current ?? "") as never, asset_id: media.asset_id, step_ms: 1000,
-          });
-          const response = await fetch(sprite.media_url);
-          if (!response.ok) return;
-          const blob = await response.blob();
-          const bitmap = await createImageBitmap(blob);
-          thumbnailLoader.registerSprite(media.asset_id, {
-            bitmap, stepMs: sprite.step_ms, cellW: sprite.cell_w,
-            cellH: sprite.cell_h, count: sprite.count,
-          });
-          setThumbnailVersion(v => v + 1);
-        } catch { /* 未就绪/非视频素材：静默，运行时路径兜底 */ }
-      })();
+    const assetIds = new Set(assetMedia.map(media => media.asset_id));
+    // 素材已离开时间线：取消其装载（减少无谓请求），但保留已登记的 sprite。
+    for (const [assetId, cancel] of [...spriteInflightRef.current]) {
+      if (!assetIds.has(assetId)) { cancel(); spriteInflightRef.current.delete(assetId); }
     }
+    // 仍在途的素材不再重复起链（每素材单飞）。
+    const pending = assetMedia.filter(media =>
+      media.asset_id
+      && !spriteInflightRef.current.has(media.asset_id)
+      && !spriteLoadedRef.current.has(media.asset_id)
+      && !spriteSkippedRef.current.has(media.asset_id),
+    );
+    if (pending.length === 0) return;
+    for (const media of pending) {
+      const cancel = loadFilmstripsOnce([media], {
+        loader: {
+          // 落库 + 投给"当前"loader：装载链可能跨越 loader 换代（StrictMode
+          // 重挂载、面板重建），只把 bitmap 交给启动时捕获的实例会让新实例
+          // 查表永远 miss——真机表现「sprite 明明 ready 了，格子还是空」。
+          registerSprite: (assetId, entry) => {
+            spriteStoreRef.current.set(assetId, entry);
+            thumbnailLoaderRef.current?.registerSprite(assetId, entry);
+          },
+        },
+        projectId: () => projectIdRef.current,
+        isDone: () => false,
+        markLoaded: () => spriteLoadedRef.current.add(media.asset_id),
+        markSkipped: () => spriteSkippedRef.current.add(media.asset_id),
+        unmarkLoaded: () => undefined,
+        onLoaded: () => setThumbnailVersion(v => v + 1),
+      });
+      spriteInflightRef.current.set(media.asset_id, cancel);
+    }
+    // 注意：不返回清理函数——在途链跨 effect 轮次存活，由上面的差集取消。
   }, [assetMedia, thumbnailLoader]);
+
+  // 卸载时取消全部在途装载：退避定时器若继续跑，会在组件消失后仍发 IPC/fetch，
+  // 测试环境里表现为「上一个用例的定时器打断下一个用例」（已实测）。
+  useEffect(() => () => {
+    for (const cancel of spriteInflightRef.current.values()) cancel();
+    spriteInflightRef.current.clear();
+  }, []);
+
+  // sprite 库 → 当前 loader：loader 换代后把已解码的 sprite 重新登记进去
+  // （ImageBitmap 可重复登记，格采样只是 drawImage 源矩形裁切）。
+  useEffect(() => {
+    if (!thumbnailLoader) return;
+    for (const [assetId, entry] of spriteStoreRef.current) {
+      thumbnailLoader.registerSprite(assetId, entry);
+    }
+    if (spriteStoreRef.current.size > 0) setThumbnailVersion(v => v + 1);
+  }, [thumbnailLoader]);
 
   useEffect(() => {
     const loader = new ThumbnailLoader({
@@ -2085,14 +2322,9 @@ export function TimelinePanel({
       // 档位收敛【按轮次计票】：连续 N 轮（3 轮 ≈ 600ms）都未成为当前档位的
       // 键才淘汰——缩放是连续动画（每轮 pps 都在变），按"单轮非当前"清理会把
       // 抽了一半的新档位帧删掉（实测：缩放后抽帧消失只剩一帧的根因）。
-      const currentTiers = new Set<string>();
-      for (const rect of clipRects) {
-        if ((rect.clip.asset_kind === "video" || rect.clip.asset_kind === "image")
-          && (rect.clip.timeline_end_us - rect.clip.timeline_start_us) > 0) {
-          const count = quantizeFrameCount(Math.round((((rect.clip.timeline_end_us - rect.clip.timeline_start_us) / 1_000_000) * view.pixelsPerSecond) / 44));
-          currentTiers.add(`${rect.clip.clip_id}:${count}`);
-        }
-      }
+      // 档位集合必须与请求侧缓存键同源（都经 frameTierFor / THUMB_CELL_PX）：
+      // 写死不同格宽基准时清理侧永远认不出当前档位，3 轮后清空全部帧。
+      const currentTiers = currentFrameTiers(clipRects, view.pixelsPerSecond);
       const tierStaleRounds = tierStaleRoundsRef.current;
       for (const tier of [...tierStaleRounds.keys()]) {
         if (currentTiers.has(tier)) tierStaleRounds.delete(tier);
@@ -2117,7 +2349,12 @@ export function TimelinePanel({
       }
     }, 200);
     return () => window.clearTimeout(timer);
-  }, [clipRects, assetMedia, view.pixelsPerSecond, clips, view, canvasSize.width, thumbnailLoader]);
+    // thumbnailVersion 入依赖：sprite 迟到登记（预抽作业 6~75s 才 ready）后，
+    // 本 effect 必须再跑一轮——先前失败的格不在 cache 里，只有重新请求才能
+    // 命中刚登记的 sprite 表。收敛性：请求成功的格写入 cache 后 cache.has 为真，
+    // 下一轮直接跳过、不再 bump 版本（两轮内静止）；预抽后端为同步查表，
+    // 不产生解码负载。
+  }, [clipRects, assetMedia, view.pixelsPerSecond, clips, view, canvasSize.width, thumbnailLoader, thumbnailVersion]);
 
   // B14：素材级持久化波形。Renderer 不再 fetch 整媒体 + decodeAudioData——
   // 峰值来自 Core 派生缓存（kind=waveform 金字塔产物，票据 URL 取件）。
@@ -2187,6 +2424,24 @@ export function TimelinePanel({
       frameRate,
       pendingKeep,
       thumbnailCache.current,
+      // WP-P232：绘制期同步查 sprite 表（见 drawTimeline 的 spriteLookup 注释）。
+      (assetId, timeSec) => {
+        const sprite = spriteStoreRef.current.get(assetId);
+        if (!sprite || sprite.count <= 0 || sprite.cellH <= 0) return null;
+        const stepS = sprite.stepMs / 1000;
+        if (stepS <= 0) return null;
+        const index = Math.max(0, Math.min(sprite.count - 1, Math.round(timeSec / stepS)));
+        const canvas = window.document.createElement("canvas");
+        canvas.width = sprite.cellW;
+        canvas.height = sprite.cellH;
+        const cctx = canvas.getContext("2d");
+        if (!cctx) return null;
+        try {
+          cctx.drawImage(sprite.bitmap, 0, index * sprite.cellH, sprite.cellW, sprite.cellH,
+            0, 0, sprite.cellW, sprite.cellH);
+        } catch { return null; }
+        return canvas;
+      },
       waveformCache ?? null,
       prefs.waveformRatio,
       canvasSize.height,

@@ -77,6 +77,7 @@ export type JobKind =
   | "final_export"
   | "media_generation"
   | "waveform"
+  | "filmstrip"
   | "agent_session"
   | "keyframe_tagging"
   | "cv_analysis"

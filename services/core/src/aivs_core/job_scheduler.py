@@ -61,6 +61,11 @@ class JobPolicy:
 KIND_POLICIES: dict[str, JobPolicy] = {
     # 2 级：用户视野派生（波形——时间轴可见即触发）
     "waveform": JobPolicy("waveform", ("light",), 2),
+    # WP-P232：素材级缩略图预抽。不登记会落 unknown ⇒ 保守独占 cpu+gpu+disk
+    # heavy 单槽（priority 5）：一条「导入即抽」的缩略图作业就把导出全挡住，
+    # 而它只是 ffmpeg 单 pass 解码。语义对齐参照的「导入即抽 + 低优先批量」：
+    # light 资源（与波形/代理同档）、priority 3（低于用户在看的波形，同 proxy）。
+    "filmstrip": JobPolicy("filmstrip", ("light",), 3),
     # Wave1 L2：BGM 节拍分析（卡点面板触发即用户视野，同波形档）
     "beat_analysis": JobPolicy("beat_analysis", ("light",), 2),
     # W3.1：语义索引（离线派生，ONNX 单线程，与节拍/波形同档）

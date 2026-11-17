@@ -23,9 +23,9 @@ function clip(overrides: Partial<TimelineClip> = {}): TimelineClip {
 
 describe("filmstrip frame requests — 时间对位（所见即所得）", () => {
   it("格位由时间线时长均匀切分，帧时刻=格中心，含格位边界", () => {
-    // 10s 片段 @ 60pps → 600px → 档位 13 帧。
+    // 10s 片段 @ 60pps → 600px → 档位随格宽（T8：80px，参照 BlockThumbs THUMB_CELL_PX）。
     const frames = computeFrameRequests("aivideo://media/x", clip(), 60);
-    expect(frames.length).toBe(quantizeFrameCount(Math.round(600 / 44)));
+    expect(frames.length).toBe(quantizeFrameCount(Math.round(600 / 80)));
     const count = frames.length;
     const step = 10_000_000 / count;
     for (let i = 0; i < count; i++) {
@@ -74,5 +74,96 @@ describe("filmstrip frame requests — 时间对位（所见即所得）", () =>
   it("空媒体/空时长返回空数组", () => {
     expect(computeFrameRequests(null, clip(), 60)).toEqual([]);
     expect(computeFrameRequests("aivideo://media/x", clip({ timeline_end_us: 0 }), 60)).toEqual([]);
+  });
+});
+
+describe("WP-P232/T8 缩略格档位单源（frameTierFor）", () => {
+  // 真机缺陷：档位清理侧曾写死 /44，而请求/绘制侧是 /80。两侧不同常数时
+  // 清理侧算出的档位永远不等于实际缓存键里的档位 → 3 轮后帧被当陈旧档清空。
+  it("请求侧与清理侧用同一函数算档位（11.9s@60pps = 8 格）", async () => {
+    const { frameTierFor, computeFrameRequests, THUMB_CELL_PX } = await import("../src/app/timeline/TimelineCanvas.js");
+    const durUs = 11_900_000;
+    const pps = 60;
+    const tier = frameTierFor(durUs, pps);
+    const frames = computeFrameRequests("aivideo://m/x", clip({ timeline_end_us: durUs }), pps);
+    // 缓存键里的档位 = frames.length；必须与清理侧算的档位一致。
+    expect(frames.length).toBe(tier);
+    expect(THUMB_CELL_PX).toBe(80);
+    // 反证：旧 /44 算法给出的档位不同——正是这一差异导致误清。
+    const legacy = quantizeFrameCount(Math.round(((durUs / 1_000_000) * pps) / 44));
+    expect(legacy).not.toBe(tier);
+  });
+
+  it("绘制侧用的格数 = 请求侧（两侧同源，不会画空格）", async () => {
+    const { frameTierFor, computeFrameRequests } = await import("../src/app/timeline/TimelineCanvas.js");
+    for (const durUs of [3_000_000, 11_900_000, 30_000_000, 95_000_000]) {
+      for (const pps of [30, 60, 120, 240]) {
+        const frames = computeFrameRequests("aivideo://m/x", clip({ timeline_end_us: durUs }), pps);
+        expect(frames.length).toBe(frameTierFor(durUs, pps));
+      }
+    }
+  });
+});
+
+describe("WP-P232 档位清理不得误删在用帧（currentFrameTiers 与缓存键同源）", () => {
+  it("清理侧档位集合与请求侧缓存键的档位逐条一致", async () => {
+    const { currentFrameTiers, computeFrameRequests } = await import("../src/app/timeline/TimelineCanvas.js");
+    const cases = [
+      { durUs: 3_000_000, pps: 30 },
+      { durUs: 11_900_000, pps: 60 },
+      { durUs: 11_900_000, pps: 240 },
+      { durUs: 95_000_000, pps: 45 },
+    ];
+    for (const { durUs, pps } of cases) {
+      const c = clip({ clip_id: "clip_x" as never, timeline_end_us: durUs });
+      const frames = computeFrameRequests("aivideo://m/x", c, pps);
+      const tiers = currentFrameTiers([{ clip: c }], pps);
+      // 缓存键形 = clipId:frameCount:fi —— 档位就是 frames.length。
+      expect(tiers.has(`clip_x:${frames.length}`)).toBe(true);
+      expect(tiers.size).toBe(1);
+    }
+  });
+
+  it("非可视素材（音频）不进档位集合（避免误留/误删）", async () => {
+    const { currentFrameTiers } = await import("../src/app/timeline/TimelineCanvas.js");
+    const audio = clip({ clip_id: "a1" as never, asset_kind: "audio" });
+    expect(currentFrameTiers([{ clip: audio }], 60).size).toBe(0);
+  });
+
+  it("零时长片段不进集合（守卫除零档位）", async () => {
+    const { currentFrameTiers } = await import("../src/app/timeline/TimelineCanvas.js");
+    const zero = clip({ clip_id: "z1" as never, timeline_end_us: 0 });
+    expect(currentFrameTiers([{ clip: zero }], 60).size).toBe(0);
+  });
+});
+
+describe("WP-P232 绘制期 sprite 兜底（cellSourceTimeSec 与请求侧同源）", () => {
+  // 绘制侧在缓存未命中时同步查 sprite 表——它算的源时刻必须与请求侧
+  // computeFrameRequests 逐位一致，否则「查到的格子内容与位置对不上」。
+  it("格源时刻与 computeFrameRequests 完全一致（含变速/倒放）", async () => {
+    const { cellSourceTimeSec, computeFrameRequests, frameTierFor } = await import("../src/app/timeline/TimelineCanvas.js");
+    const cases = [
+      clip({ timeline_start_us: 0, timeline_end_us: 11_900_000 }),
+      clip({ timeline_start_us: 2_000_000, timeline_end_us: 9_000_000, source_start_us: 5_000_000, source_end_us: 15_000_000 }),
+      clip({ timeline_start_us: 0, timeline_end_us: 8_000_000, source_start_us: 0, source_end_us: 4_000_000, speed_milli: 2000 as never }),
+      clip({ timeline_start_us: 0, timeline_end_us: 8_000_000, source_start_us: 2_000_000, source_end_us: 10_000_000, reverse_playback: true }),
+    ];
+    for (const c of cases) {
+      const pps = 60;
+      const frames = computeFrameRequests("aivideo://m/x", c, pps);
+      const count = frameTierFor(c.timeline_end_us - c.timeline_start_us, pps);
+      expect(frames.length).toBe(count);
+      for (let i = 0; i < count; i += 1) {
+        expect(cellSourceTimeSec(c, i, count)).toBeCloseTo(frames[i].timeSec, 9);
+      }
+    }
+  });
+
+  it("源时刻钳在 0 以上（倒放越过源起点不产生负时刻）", async () => {
+    const { cellSourceTimeSec } = await import("../src/app/timeline/TimelineCanvas.js");
+    const c = clip({ timeline_start_us: 0, timeline_end_us: 10_000_000, source_start_us: 0, source_end_us: 2_000_000, reverse_playback: true });
+    for (let i = 0; i < 5; i += 1) {
+      expect(cellSourceTimeSec(c, i, 5)).toBeGreaterThanOrEqual(0);
+    }
   });
 });
