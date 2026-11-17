@@ -350,13 +350,34 @@ class RenderPlanCompiler:
         }
         for clip in document["clips"]:
             asset = db.execute("SELECT * FROM assets WHERE id=?", (clip["asset_id"],)).fetchone()
+            # WP-P229（2026-11-17 真机缺陷）：as_audio 落轨的片段 asset_kind='audio'
+            # 而素材行 kind 保持 'video'（M3-3 语义——素材本体不变，消费视角变化）。
+            # 本闸门原样比较两者 → 「以音轨形式加入」之后一切预览/导出永久
+            # RENDER_INPUT_CHANGED（真机 test1102 复现：07:28 加音轨 → 07:28-08:54
+            # 全部 manifest/window 500 → 08:54 删光片段后"自愈"）。放宽：audio 视角
+            # 片段允许引用 video 素材（其余组合维持 fail-closed），且要求素材
+            # 确有音轨——无声视频取音轨在 timeline 层已被 TIMELINE_INVALID 拒绝，
+            # 这里复核是防数据被旁路写入时下游 a1 混音静默产出空轨。
+            kind_matches = (
+                asset is not None
+                and asset["kind"] == clip["asset_kind"]
+                or (
+                    asset is not None
+                    and clip["asset_kind"] == "audio"
+                    and asset["kind"] == "video"
+                )
+            )
             if (
                 asset is None
                 or asset["project_id"] != document["project_id"]
                 or asset["availability"] != "available"
-                or asset["kind"] != clip["asset_kind"]
+                or not kind_matches
             ):
                 raise DomainError("RENDER_INPUT_CHANGED", "Timeline 引用的素材不可用或已变化")
+            if clip["asset_kind"] == "audio" and asset["kind"] == "video":
+                _audio_gate = json_loads(asset["media_info_json"]).get("audio_streams") if asset["media_info_json"] else None
+                if not _audio_gate:
+                    raise DomainError("RENDER_INPUT_CHANGED", "视频素材没有音轨，不能作为音频片段渲染")
             media_info = json_loads(asset["media_info_json"]) if asset["media_info_json"] else {}
             if mode == "final_export" and resolution == "original":
                 for stream in media_info.get("video_streams") or []:
