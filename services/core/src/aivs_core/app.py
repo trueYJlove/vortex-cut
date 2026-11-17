@@ -121,6 +121,21 @@ class WaveformRequest(BaseModel):
     generate: bool = False
 
 
+class FilmstripRequest(BaseModel):
+    """WP-P232 缩略图请求（step_ms 由调用方按缩放档位传；generate=True 登记）。"""
+    model_config = ConfigDict(extra="forbid")
+
+    step_ms: int = Field(ge=1, le=3_600_000)
+    generate: bool = False
+
+
+class FilmstripMediaRequest(BaseModel):
+    """WP-P232 Main 内部解析请求（step_ms 档位定位条目）。"""
+    model_config = ConfigDict(extra="forbid")
+
+    step_ms: int = Field(ge=1, le=3_600_000)
+
+
 class BeatAnalysisRequest(BaseModel):
     """Wave1 L2：BGM 节拍分析请求（generate=True 登记分析作业）。
 
@@ -932,6 +947,18 @@ class CoreState:
             ffmpeg_build=_sync_tool_build(settings.ffmpeg),
         )
         self.jobs.waveform_runner = self.waveform.run_waveform_job
+        # WP-P232：素材级缩略图预抽（filmstrip sprite；ffmpeg tile 单 pass →
+        # B10 派生缓存 kind="filmstrip"；导入/转录完成即登记，低优先级批量）。
+        from .media.filmstrip import FilmstripService
+
+        self.filmstrips = FilmstripService(
+            self.db,
+            self.derived_cache,
+            settings.ffmpeg,
+            self.ffprobe,
+            ffmpeg_build=_sync_tool_build(settings.ffmpeg),
+        )
+        self.jobs.filmstrip_runner = self.filmstrips.run_filmstrip_job
         # Wave1 L2：BGM 节拍网格（PCM → numpy 检测 → beat_grids；卡点面板
         # 触发即用户视野，与 waveform 同档轻作业）。此前 BeatGridService 无
         # 任何调用方——beat_grids 在生产环境永远为空，beat_sync 必失败。
@@ -2661,6 +2688,47 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except DomainError as exc:
             raise _domain(exc) from exc
 
+    # ---- WP-P232：素材级缩略图预抽（filmstrip sprite） ----
+
+    @app.post("/api/v1/projects/{project_id}/assets/{asset_id}/filmstrip")
+    async def ensure_asset_filmstrip(
+        project_id: str, asset_id: str, request: FilmstripRequest,
+        _: CoreState = Depends(require_ui),
+    ) -> dict[str, Any]:
+        """WP-P232：缩略图条目查询/登记（Renderer 可见；无路径字段）。
+
+        step_ms 由调用方按当前缩放档位传入（ladderStepMs 语义——档位内
+        幂等）。generate=True 且无 ready/building/queued 条目时登记生成作业
+        （ffmpeg tile → sprite JPEG，B10 派生缓存）。
+        """
+        asset_row = _preview_source_asset_row(state, project_id, asset_id)
+        try:
+            media_info = json_loads(asset_row["media_info_json"] or "{}")
+            if not (media_info.get("video_streams") or []):
+                raise _domain(DomainError(
+                    "MEDIA_NO_VIDEO", "素材无视频流，不生成缩略条"))
+            step_ms = state.filmstrips.nearest_step(request.step_ms)
+            entry = state.filmstrips.filmstrip_entry(asset_row, step_ms)
+            job_id: str | None = None
+            status = (entry or {}).get("status")
+            if (
+                request.generate
+                and status not in {"ready", "building", "queued"}
+            ):
+                resolved_path = state.projects.resolve_asset_path(asset_id)
+                job_id = state.filmstrips.create_filmstrip_job(
+                    project_id, asset_row, resolved_path["path"], step_ms)
+                status = "queued"
+            return {
+                "cache_key": state.filmstrips.filmstrip_cache_key(asset_row["fingerprint"], step_ms),
+                "step_ms": step_ms,
+                "status": status,
+                "job_id": job_id,
+                "size_bytes": (entry or {}).get("size_bytes"),
+            }
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
     @app.post("/api/v1/projects/{project_id}/assets/{asset_id}/beat-analysis")
     async def get_asset_beat_analysis(
         project_id: str, asset_id: str, request: BeatAnalysisRequest,
@@ -3160,6 +3228,44 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     }
                     for s in samples
                 ],
+            }
+        except DomainError as exc:
+            raise _domain(exc) from exc
+
+    @app.post("/api/v1/internal/projects/{project_id}/assets/{asset_id}/filmstrip/media")
+    async def resolve_asset_filmstrip_media(
+        project_id: str, asset_id: str, request: FilmstripMediaRequest,
+        _: CoreState = Depends(require_admin),
+    ) -> dict[str, Any]:
+        """WP-P232：Main 内部解析 sprite 文件（admin 通道）——绝对路径供
+        Main 换 restricted-media 票据；Renderer 永远拿不到 path。"""
+        asset_row = _preview_source_asset_row(state, project_id, asset_id)
+        try:
+            step_ms = state.filmstrips.nearest_step(request.step_ms)
+            key = state.filmstrips.filmstrip_cache_key(asset_row["fingerprint"], step_ms)
+            entry = state.derived_cache.lookup(key)
+            if entry is None:
+                raise _error("DERIVED_NOT_FOUND", "缩略图条目不存在或未就绪", 404)
+            state.derived_cache.add_reference(key, project_id, asset_id)
+            from .media.derived_cache import DerivedCacheError
+
+            try:
+                path = state.derived_cache.resolved_path(entry)
+            except DerivedCacheError as exc:
+                raise _error("DERIVED_CACHE_UNSAFE", exc.message, 500)
+            meta_path = path.parent / (path.stem + ".json")
+            meta = json_loads(meta_path.read_text(encoding="utf-8")) if meta_path.is_file() else {}
+            return {
+                "cache_key": key,
+                "kind": "filmstrip",
+                "status": "ready",
+                "path": str(path),
+                "size_bytes": entry.size_bytes,
+                "step_ms": step_ms,
+                "cell_w": meta.get("cell_w") or 160,
+                "cell_h": meta.get("cell_h") or 90,
+                "count": meta.get("count") or 0,
+                "duration_us": meta.get("duration_us") or 0,
             }
         except DomainError as exc:
             raise _domain(exc) from exc

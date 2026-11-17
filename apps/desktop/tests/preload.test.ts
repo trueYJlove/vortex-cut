@@ -55,7 +55,7 @@ describe("Desktop preload 白名单", () => {
       ["getRenderArtifact", ["artifact_1"]], ["openArtifact", ["artifact_1"]], ["openArtifactFolder", ["artifact_1"]],
       ["lookupDerivedMedia", [{}]], ["derivedMediaStats", ["project_1"]], ["derivedMediaUrl", [{}]],
       ["getPreviewSource", [{}]], ["createPreviewSourceJob", [{}]], ["previewSourceMediaUrl", [{}]],
-      ["getWaveform", [{}]], ["waveformMediaUrl", [{}]],
+      ["getWaveform", [{}]], ["waveformMediaUrl", [{}]], ["ensureFilmstrip", [{ project_id: "", asset_id: "", step_ms: 1000, generate: false }]], ["filmstripMediaUrl", [{ project_id: "", asset_id: "", step_ms: 1000 }]],
       ["ensurePcmChunk", [{}]], ["pcmChunkMediaUrl", [{}]],
       ["getPreviewIrV2Manifest", [{}]], ["getPreviewIrV2Window", [{}]],
       ["updateEditorLoad", ["playing"]], ["diagnostics", []]

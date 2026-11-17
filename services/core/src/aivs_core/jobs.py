@@ -76,6 +76,7 @@ class JobService:
         retry_validator: Callable[[Any], None] | None = None,
         preview_source_runner: PreviewSourceRunner | None = None,
         waveform_runner: WaveformRunner | None = None,
+        filmstrip_runner: WaveformRunner | None = None,
         cv_signal_runner: WaveformRunner | None = None,
         beat_runner: WaveformRunner | None = None,
         angle_sync_runner: WaveformRunner | None = None,
@@ -1078,6 +1079,21 @@ class JobService:
             if self.waveform_runner is None:
                 raise RuntimeError("RENDER_FAILED")
             result = await self.waveform_runner(
+                row, cancel_event,
+                lambda value: self._set_progress(job_id, value),
+                lambda value: self._set_stage(job_id, value),
+            )
+            with self.db.connection() as db:
+                db.execute(
+                    "UPDATE jobs SET result_json=?,updated_at=? WHERE id=?",
+                    (json_dumps(result), utc_now(), job_id),
+                )
+            return
+        if row["kind"] == "filmstrip":
+            # WP-P232 缩略图预抽：ffmpeg tile → sprite JPEG + 元数据（B10 派生缓存）
+            if self.filmstrip_runner is None:
+                raise RuntimeError("RENDER_FAILED")
+            result = await self.filmstrip_runner(
                 row, cancel_event,
                 lambda value: self._set_progress(job_id, value),
                 lambda value: self._set_stage(job_id, value),

@@ -334,6 +334,10 @@ export interface DesktopApi {
   // B14 素材级持久化波形：描述（generate 登记作业）+ 票据化文件 URL
   getWaveform: (input: { project_id: ProjectId; asset_id: string; generate?: boolean }) => Promise<WaveformDescription>;
   waveformMediaUrl: (input: { project_id: ProjectId; asset_id: string }) => Promise<WaveformMediaResponse>;
+  /** WP-P232：缩略图条目查询/登记。 */
+  ensureFilmstrip: (input: { project_id: ProjectId; asset_id: string; step_ms: number; generate: boolean }) => Promise<{ cache_key: string; step_ms: number; status: string; job_id: string | null; size_bytes: number | null }>;
+  /** WP-P232：缩略图 sprite 取件。 */
+  filmstripMediaUrl: (input: { project_id: ProjectId; asset_id: string; step_ms: number }) => Promise<{ media_url: string; cache_key: string; step_ms: number; cell_w: number; cell_h: number; count: number; duration_us: number; size_bytes: number }>;
   // B15 分块 PCM：块确保（网格对齐）+ 票据化块文件 URL
   ensurePcmChunk: (input: { project_id: ProjectId; asset_id: string; start_sample: number }) => Promise<PcmChunkDescription>;
   pcmChunkMediaUrl: (input: { project_id: ProjectId; asset_id: string; start_sample: number }) => Promise<PcmChunkMediaResponse>;
@@ -543,6 +547,10 @@ const api: DesktopApi = {
   previewSourceMediaUrl: input => ipcRenderer.invoke("preview-source:media", input),
   getWaveform: input => ipcRenderer.invoke("waveform:get", input),
   waveformMediaUrl: input => ipcRenderer.invoke("waveform:media", input),
+  /** WP-P232：缩略图条目查询/登记（step_ms 档位；generate=true 登记作业）。 */
+  ensureFilmstrip: input => ipcRenderer.invoke("filmstrip:ensure", input),
+  /** WP-P232：缩略图 sprite 取件（Main 换票）。 */
+  filmstripMediaUrl: input => ipcRenderer.invoke("filmstrip:media", input),
   ensurePcmChunk: input => ipcRenderer.invoke("pcm-chunk:ensure", input),
   pcmChunkMediaUrl: input => ipcRenderer.invoke("pcm-chunk:media", input),
   decodeFrames: input => ipcRenderer.invoke("decode-frames", input),

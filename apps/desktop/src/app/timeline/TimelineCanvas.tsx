@@ -1949,6 +1949,41 @@ export function TimelinePanel({
   const [thumbnailLoader, setThumbnailLoader] = useState<ThumbnailLoader | null>(null);
   // 档位淘汰计票（问题3修复）：tier → 连续未成为当前档位的轮数。
   const tierStaleRoundsRef = useRef<Map<string, number>>(new Map());
+  const projectIdRef = useRef<string | null>(document?.project_id ?? null);
+  useEffect(() => { projectIdRef.current = document?.project_id ?? null; }, [document?.project_id]);
+  // WP-P232：预抽 sprite 装载——素材出现在时间线时查 Core 条目，ready 则取
+  // sprite（Main 换票）→ ImageBitmap 一次解码 → registerSprite；此后该素材的
+  // 缩略格全部查表命中（零解码），运行时路径只兜底未预抽档位。
+  const spriteLoadedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!thumbnailLoader) return;
+    for (const media of assetMedia) {
+      if (!media.asset_id || spriteLoadedRef.current.has(media.asset_id)) continue;
+      spriteLoadedRef.current.add(media.asset_id);
+      void (async () => {
+        try {
+          // 先 ensure（登记缺档生成；fire-and-forget），再取件（ready 才有票）
+          await window.desktop.ensureFilmstrip({
+            project_id: (projectIdRef.current ?? "") as never, asset_id: media.asset_id,
+            step_ms: 1000, generate: true,
+          }).catch(() => undefined);
+          const sprite = await window.desktop.filmstripMediaUrl({
+            project_id: (projectIdRef.current ?? "") as never, asset_id: media.asset_id, step_ms: 1000,
+          });
+          const response = await fetch(sprite.media_url);
+          if (!response.ok) return;
+          const blob = await response.blob();
+          const bitmap = await createImageBitmap(blob);
+          thumbnailLoader.registerSprite(media.asset_id, {
+            bitmap, stepMs: sprite.step_ms, cellW: sprite.cell_w,
+            cellH: sprite.cell_h, count: sprite.count,
+          });
+          setThumbnailVersion(v => v + 1);
+        } catch { /* 未就绪/非视频素材：静默，运行时路径兜底 */ }
+      })();
+    }
+  }, [assetMedia, thumbnailLoader]);
+
   useEffect(() => {
     const loader = new ThumbnailLoader({
       // 抽帧源：首选 filmstrip worker（WebCodecs 硬解，FIFO 出队 = 源时间

@@ -739,6 +739,7 @@ function registerIpc(): void {
     resolveDerived: input => requireCore().resolveDerivedMedia(input),
     resolvePreviewSourceMedia: input => requireCore().resolvePreviewSourceMedia(input),
     resolveWaveformMedia: input => requireCore().resolveWaveformMedia(input),
+    resolveFilmstripMedia: input => requireCore().resolveFilmstripMedia(input),
     resolvePcmChunkMedia: input => requireCore().resolvePcmChunkMedia(input),
     registerDerivedMedia: (cacheKey, path) => {
       if (!restrictedMedia.registeredPath(cacheKey, "proxy")) {

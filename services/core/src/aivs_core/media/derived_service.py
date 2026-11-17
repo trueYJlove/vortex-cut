@@ -18,7 +18,7 @@ from ..projects import DomainError
 from .derived_cache import DerivedCacheError, DerivedMediaCache, derived_cache_key
 
 ALGORITHM_VERSION = 1
-KINDS = ("video_proxy", "waveform", "audio_pcm_chunk", "reverse_chunk")
+KINDS = ("video_proxy", "waveform", "audio_pcm_chunk", "reverse_chunk", "filmstrip")
 MAX_PARAMS = 8
 PARAM_KEY_CHARS = set("abcdefghijklmnopqrstuvwxyz0123456789_")
 PARAM_VALUE_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:-")

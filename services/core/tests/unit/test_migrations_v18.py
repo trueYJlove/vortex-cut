@@ -31,8 +31,12 @@ def _seed_v17(path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
     import aivs_core.database as database_module
 
     original = database_module.MIGRATIONS
+    # WP-P232（v44）：v44 重建 derived_media_cache（v18 建）——本测试把它
+    # 排除以模拟 v17 库，v44 的 RENAME 会因表不存在而炸。一并排除 v44：
+    # 本测试目标是 v18 迁移本身，v44 的行为由 v44 专项测试覆盖。
     monkeypatch.setattr(
-        database_module, "MIGRATIONS", {k: v for k, v in original.items() if k != "v18"}
+        database_module, "MIGRATIONS",
+        {k: v for k, v in original.items() if k not in ("v18", "v44")},
     )
     Database(path).initialize()
     with sqlite3.connect(path) as sql:
@@ -81,7 +85,7 @@ def test_v17_to_v18_is_append_only_and_preserves_checksums(
     assert database.last_backup is not None and database.last_backup.exists()
     with database.connection() as sql:
         history = dict(
-            sql.execute("SELECT version,checksum FROM schema_migrations WHERE version<>'v18'")
+            sql.execute("SELECT version,checksum FROM schema_migrations WHERE version<>'v18' AND version<>'v44'")
         )
         assert history == old
         assert (

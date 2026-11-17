@@ -24,7 +24,7 @@ from typing import Any
 
 from ..database import Database, json_dumps, utc_now
 
-KINDS = ("video_proxy", "waveform", "audio_pcm_chunk", "reverse_chunk")
+KINDS = ("video_proxy", "waveform", "audio_pcm_chunk", "reverse_chunk", "filmstrip")
 DEFAULT_DISK_BUDGET_BYTES = 10 * 1024**3
 MIN_FREE_BYTES = 2 * 1024**3
 _PIN_TIMEOUT_S = 600.0

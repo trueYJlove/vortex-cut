@@ -93,6 +93,10 @@ function setup(options: { createPreviewSourceJob?: ReturnType<typeof vi.fn> } = 
       listProjects: vi.fn().mockResolvedValue({ items: [project], next_cursor: null }),
       listAssets: vi.fn().mockImplementation(async () => ({ items: [...importedAssets], next_cursor: null })),
       listJobs, importAsset, createPreviewSourceJob,
+      // WP-P232：导入 hook 现在还会登记缩略图预抽（fire-and-forget）——
+      // 桩缺该通道会在导入路径上抛 TypeError，打断其后的代理登记断言。
+      ensureFilmstrip: vi.fn().mockResolvedValue({ cache_key: "fs", step_ms: 1000, status: "queued", job_id: "job_fs_1", size_bytes: null }),
+      filmstripMediaUrl: vi.fn().mockResolvedValue({ media_url: "aivideo://media/fs", cache_key: "fs", step_ms: 1000, cell_w: 160, cell_h: 90, count: 1, duration_us: 0, size_bytes: 0 }),
     },
   });
   return { listJobs, importAsset, createPreviewSourceJob };

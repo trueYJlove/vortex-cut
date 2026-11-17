@@ -75,7 +75,7 @@ function desktopApi(options: { timeline?: TimelineState | null; models?: ModelDe
     getShotRequirementImageFulfillment: vi.fn(), listShotRequirementImageFulfillmentLinks: vi.fn(), listShotRequirementImageFulfillmentAdoptions: vi.fn(), prepareShotRequirementImageFulfillment: vi.fn(), createShotRequirementImageFulfillment: vi.fn(), adoptShotRequirementImageFulfillment: vi.fn(),
     prepareShotRequirementTimelineAssembly: vi.fn(), applyShotRequirementTimelineAssembly: vi.fn(), getShotRequirementTimelineAssemblyPreview: vi.fn(), getShotRequirementTimelineAssembly: vi.fn(), listShotRequirementTimelineAssemblies: vi.fn().mockResolvedValue({ items: [], next_cursor: null }),
     prepareShotRequirementTimelineBatchAssembly: vi.fn(), applyShotRequirementTimelineBatchAssembly: vi.fn(), getShotRequirementTimelineBatchAssemblyPreview: vi.fn(), getShotRequirementTimelineBatchAssembly: vi.fn(), listShotRequirementTimelineBatches: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), listShotRequirementTimelineBatchAssemblyItems: vi.fn().mockResolvedValue({ items: [], next_cursor: null }),
-    openArtifact: vi.fn(), openArtifactFolder: vi.fn(), subscribeJob: vi.fn().mockReturnValue(() => undefined), getPreviewSource: vi.fn(), createPreviewSourceJob: vi.fn(), previewSourceMediaUrl: vi.fn(), getWaveform: vi.fn(), waveformMediaUrl: vi.fn(), ensurePcmChunk: vi.fn(), pcmChunkMediaUrl: vi.fn(), decodeFrames: vi.fn(), getPreviewIrV2Manifest: vi.fn(), getPreviewIrV2Window: vi.fn(), updateEditorLoad: vi.fn().mockResolvedValue({ status: "ok" }), setWindowTheme: vi.fn().mockResolvedValue({ status: "ok" }), getSettings: vi.fn().mockResolvedValue({ saved: { proxy_mode: "system", provider_proxy: null }, effective: { proxy_mode: "system", provider_proxy: null }, pending_restart: false }), setSettings: vi.fn().mockResolvedValue({ proxy_mode: "system", provider_proxy: null }), restartCore: vi.fn().mockResolvedValue(undefined), diagnostics: vi.fn()
+    openArtifact: vi.fn(), openArtifactFolder: vi.fn(), subscribeJob: vi.fn().mockReturnValue(() => undefined), getPreviewSource: vi.fn(), createPreviewSourceJob: vi.fn(), previewSourceMediaUrl: vi.fn(), getWaveform: vi.fn(), waveformMediaUrl: vi.fn(), ensureFilmstrip: vi.fn().mockResolvedValue({ cache_key: "fs", step_ms: 1000, status: "ready", job_id: null, size_bytes: 0 }), filmstripMediaUrl: vi.fn().mockResolvedValue({ media_url: "aivideo://media/x", cache_key: "fs", step_ms: 1000, cell_w: 160, cell_h: 90, count: 1, duration_us: 0, size_bytes: 0 }), ensurePcmChunk: vi.fn(), pcmChunkMediaUrl: vi.fn(), decodeFrames: vi.fn(), getPreviewIrV2Manifest: vi.fn(), getPreviewIrV2Window: vi.fn(), updateEditorLoad: vi.fn().mockResolvedValue({ status: "ok" }), setWindowTheme: vi.fn().mockResolvedValue({ status: "ok" }), getSettings: vi.fn().mockResolvedValue({ saved: { proxy_mode: "system", provider_proxy: null }, effective: { proxy_mode: "system", provider_proxy: null }, pending_restart: false }), setSettings: vi.fn().mockResolvedValue({ proxy_mode: "system", provider_proxy: null }), restartCore: vi.fn().mockResolvedValue(undefined), diagnostics: vi.fn()
   } as DesktopApi;
 }
 
@@ -587,7 +587,7 @@ describe("Stage 1C Editor", () => {
   afterEach(() => cleanup());
 
   it("渲染固定编辑工作台且不暴露敏感字段", async () => {
-    render(<App />); await expectSwitcherName("演示项目"); await screen.findByText(video.display_name); expect(screen.getByText("V1")).toBeVisible(); expect(screen.getByText("C1")).toBeVisible(); expect(screen.getByText(/非权威/)).toBeVisible(); expect(document.body.textContent).not.toContain("C:\\");
+    render(<App />); await expectSwitcherName("演示项目"); await screen.findByText(video.display_name); expect(screen.getByText("V1")).toBeVisible(); expect(screen.getByText("C1")).toBeVisible(); expect(await screen.findByRole("note", { name: "合成预览回退提示" })).toBeVisible(); expect(document.body.textContent).not.toContain("C:\\");
   });
 
   it("支持片段与字幕编辑", async () => {
@@ -598,7 +598,7 @@ describe("Stage 1C Editor", () => {
 
   it("创建空时间线后忽略迟到的 404，并以冻结契约追加素材与转录", async () => {
     let rejectTimeline!: (reason: unknown) => void; const pendingTimeline = new Promise<TimelineState>((_, reject) => { rejectTimeline = reject; }); const api = desktopApi({ timeline: null }); api.getTimeline = vi.fn().mockReturnValue(pendingTimeline); window.desktop = api; render(<App />); fireEvent.click(await screen.findByRole("button", { name: "创建空时间线" })); await screen.findByRole("button", { name: /video 5.00s/ }); rejectTimeline(new Error("TIMELINE_NOT_FOUND 404"));
-    fireEvent.dragOver(screen.getByLabelText("时间线画布"), { dataTransfer: { getData: () => video.asset_id, dropEffect: "copy" } }); fireEvent.drop(screen.getByLabelText("时间线画布"), { dataTransfer: { getData: () => video.asset_id, dropEffect: "copy" } }); await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledWith(expect.objectContaining({ patch: expect.objectContaining({ operations: [expect.objectContaining({ op: "insert_asset_clip" })] }) })));
+    fireEvent.dragOver(screen.getByLabelText("时间线画布"), { dataTransfer: { getData: () => video.asset_id, dropEffect: "copy" } }); fireEvent.drop(screen.getByLabelText("时间线画布"), { dataTransfer: { getData: () => video.asset_id, dropEffect: "copy" } }); /* ②拖到空白自动建轨（参照 Timeline.tsx:361-370 newTrack）：drop 无坐标落空白 → add_track+insert_asset_clip 两条 op。 */ await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledWith(expect.objectContaining({ patch: expect.objectContaining({ operations: [expect.objectContaining({ op: "add_track", kind: "video" }), expect.objectContaining({ op: "insert_asset_clip" })] }) })));
     fireEvent.click(screen.getAllByRole("button", { name: /^转录$/ })[0]);
     // 勾选转录片段的界面在"转录"子标签下：切换后操作。A08：转录正文不再
     // 全量预取——先点"查看转录"按需加载（并发队列 + 代次作废），再勾选。
@@ -728,10 +728,15 @@ describe("Stage 2B AI 修改", () => {
     const lockedState = { ...state, current_revision: { ...state.current_revision, document: { ...timelineDocument, locked_elements: ["clip_1" as never] } } };
     const api = desktopApi({ timeline: lockedState }); window.desktop = api; render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /video 5.00s/ }));
-    expect(screen.getByText(/此 Clip 已锁定/)).toBeVisible(); expect(screen.getByRole("radio", { name: "裁切填满" })).toBeDisabled(); expect(screen.getByRole("button", { name: "拆分片段" })).toBeDisabled();
+    expect(screen.getByText(/此轨道已锁定/)).toBeVisible(); expect(screen.getByRole("radio", { name: "裁切填满" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: /这是一条很长/ })); expect(screen.getByText(/关联 Clip 已锁定/)).toBeVisible(); expect(screen.getByLabelText("文本")).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: /video 5.00s/ }));
-    fireEvent.click(screen.getByRole("button", { name: "解锁片段" })); await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledWith(expect.objectContaining({ patch: expect.objectContaining({ operations: [{ op: "set_clip_locked", clip_id: "clip_1", locked: false }] }) })));
+    // T2：工具栏锁定键收进右键菜单（参照条目语义）。解锁走画布右键菜单
+    // （片段 pill 无 contextMenu 绑定；canvas 坐标 V1 行内片段中部）。
+    const canvasEl = document.querySelector("canvas") as HTMLCanvasElement;
+    fireEvent.contextMenu(canvasEl, { clientX: 150, clientY: 124 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "解锁片段" }));
+    await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledWith(expect.objectContaining({ patch: expect.objectContaining({ operations: [{ op: "set_clip_locked", clip_id: "clip_1", locked: false }] }) })));
   });
 
   it("prepare 确认只显示当前本地指令，Core 意外正文不进入 DOM，关闭会清理", async () => {
@@ -790,6 +795,8 @@ describe("Stage 1C Render", () => {
     await expectSwitcherName("演示项目");
     const previewButton = screen.getByRole("button", { name: "生成权威预览" });
     await waitFor(() => expect(previewButton).toBeEnabled());
+    // P4：编码模式收进窗格栏「预览设置」弹层。
+    fireEvent.click(screen.getByRole("button", { name: "预览设置" }));
     fireEvent.change(screen.getByLabelText("编码模式"), { target: { value: "software" } });
     fireEvent.click(previewButton);
     await waitFor(() => expect(api.createPreview).toHaveBeenCalledWith({ project_id: project.project_id, preview: { timeline_revision_id: state.current_revision.timeline_revision_id, encoder_mode: "software", output_ratio: "916" } }));

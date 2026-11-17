@@ -16,6 +16,7 @@ function setup() {
   const resolveDerived = vi.fn();
   const resolvePreviewSourceMedia = vi.fn();
   const resolveWaveformMedia = vi.fn();
+  const resolveFilmstripMedia = vi.fn().mockResolvedValue({ cache_key: "fs", status: "ready", path: "C:/x/filmstrip.jpg", size_bytes: 0, step_ms: 1000, cell_w: 160, cell_h: 90, count: 16, duration_us: 16000000 });
   const resolvePcmChunkMedia = vi.fn();
   const registerDerivedMedia = vi.fn(() => "aivideo://media/ticket-url-value");
   registerPerformanceIpc({
@@ -24,14 +25,15 @@ function setup() {
     resolveDerived,
     resolvePreviewSourceMedia,
     resolveWaveformMedia,
+    resolveFilmstripMedia,
     resolvePcmChunkMedia,
     registerDerivedMedia,
   });
-  return { handlers, fetchWithUi, resolveDerived, resolvePreviewSourceMedia, resolveWaveformMedia, resolvePcmChunkMedia, registerDerivedMedia };
+  return { handlers, fetchWithUi, resolveDerived, resolvePreviewSourceMedia, resolveWaveformMedia, resolveFilmstripMedia, resolvePcmChunkMedia, registerDerivedMedia };
 }
 
 describe("B10 derived media IPC", () => {
-  it("只注册十二个白名单 channel（B10×3 + B11×3 + B14×2 + B15×2 + C20×2）", () => {
+  it("只注册白名单 channel（B10×3 + B11×3 + B14×2 + B15×2 + C20×2 + P232×2）", () => {
     const { handlers } = setup();
     expect([...handlers.keys()]).toEqual([
       "derived-media:lookup",
@@ -40,7 +42,9 @@ describe("B10 derived media IPC", () => {
       "preview-source:get",
       "preview-source:jobs",
       "preview-source:media",
+      "filmstrip:ensure",
       "waveform:get",
+      "filmstrip:media",
       "waveform:media",
       "pcm-chunk:ensure",
       "pcm-chunk:media",

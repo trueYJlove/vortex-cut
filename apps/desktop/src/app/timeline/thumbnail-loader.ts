@@ -399,10 +399,57 @@ export class ThumbnailLoader {
     }, this.sourceIdleMs);
   }
 
+  /** WP-P232：预抽 sprite 表（assetId → { bitmap, stepMs, cellW, cellH, count }）。
+   *  Sprite = 单列 JPEG（Core ffmpeg tile 产物）经 ImageBitmap 一次性解码常驻；
+   *  格采样 = drawImage 源矩形裁切，零解码成本。 */
+  private readonly sprites = new Map<string, {
+    bitmap: ImageBitmap; stepMs: number; cellW: number; cellH: number; count: number;
+  }>();
+  private readonly spritePending = new Set<string>();
+
+  /** 登记一张已解码 sprite（由 TimelineCanvas 装载后注入）。 */
+  registerSprite(assetId: string, entry: { bitmap: ImageBitmap; stepMs: number; cellW: number; cellH: number; count: number }): void {
+    this.sprites.set(assetId, entry);
+  }
+
+  disposeSprite(assetId: string): void {
+    const entry = this.sprites.get(assetId);
+    if (entry) { entry.bitmap.close(); this.sprites.delete(assetId); }
+  }
+
+  /** sprite 命中：格位 = timeSec 对齐到 stepMs 网格（最近格，OpenFilm thumb-pick
+   *  语义——格显示最近已抽时刻）。越界/未登记 → null（走常规路径）。 */
+  private sampleSprite(job: ThumbnailRequest): ThumbnailFrame | null {
+    const sprite = this.sprites.get(job.assetId);
+    if (!sprite || sprite.count <= 0 || sprite.cellH <= 0) return null;
+    const stepS = sprite.stepMs / 1000;
+    if (stepS <= 0) return null;
+    let index = Math.round(job.timeSec / stepS);
+    index = Math.max(0, Math.min(sprite.count - 1, index));
+    const canvas = document.createElement("canvas");
+    canvas.width = sprite.cellW;
+    canvas.height = sprite.cellH;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    try {
+      ctx.drawImage(sprite.bitmap,
+        0, index * sprite.cellH, sprite.cellW, sprite.cellH,
+        0, 0, sprite.cellW, sprite.cellH);
+    } catch { return null; }
+    return { canvas, width: sprite.cellW, height: sprite.cellH };
+  }
+
   /** 取（或创建）素材帧源并执行请求。同步序言直达 loadFrame（video 回退
    *  路径的事件监听必须在 pump 的同步栈内注册——测试/真实 load 事件都依赖
    *  "请求发出后、事件到达前监听就绪"）；filmstrip 源创建才走异步。 */
   private runJob(job: QueueItem): Promise<ThumbnailFrame | null> {
+    // WP-P232：sprite 查表优先——命中即返回（零解码），未命中走常规路径。
+    const spriteFrame = this.sampleSprite(job);
+    if (spriteFrame) {
+      this.stats.completed += 1;
+      this.scheduleBatchNotify(job.key);
+      return Promise.resolve(spriteFrame);
+    }
     // P230-②a 修复v2：busy 分支上移到 pump 主循环（重排队 + continue），
     // runJob 到达时源必然空闲——此处保留兜底断言（不应到达）。
     const entry = this.sources.get(job.assetId);

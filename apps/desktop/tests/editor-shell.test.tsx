@@ -61,7 +61,7 @@ function desktopApi(options: { timeline?: TimelineState | null; models?: ModelDe
     getShotRequirementImageFulfillment: vi.fn(), listShotRequirementImageFulfillmentLinks: vi.fn(), listShotRequirementImageFulfillmentAdoptions: vi.fn(), prepareShotRequirementImageFulfillment: vi.fn(), createShotRequirementImageFulfillment: vi.fn(), adoptShotRequirementImageFulfillment: vi.fn(),
     prepareShotRequirementTimelineAssembly: vi.fn(), applyShotRequirementTimelineAssembly: vi.fn(), getShotRequirementTimelineAssemblyPreview: vi.fn(), getShotRequirementTimelineAssembly: vi.fn(), listShotRequirementTimelineAssemblies: vi.fn().mockResolvedValue({ items: [], next_cursor: null }),
     prepareShotRequirementTimelineBatchAssembly: vi.fn(), applyShotRequirementTimelineBatchAssembly: vi.fn(), getShotRequirementTimelineBatchAssemblyPreview: vi.fn(), getShotRequirementTimelineBatchAssembly: vi.fn(), listShotRequirementTimelineBatches: vi.fn().mockResolvedValue({ items: [], next_cursor: null }), listShotRequirementTimelineBatchAssemblyItems: vi.fn().mockResolvedValue({ items: [], next_cursor: null }),
-    openArtifact: vi.fn(), openArtifactFolder: vi.fn(), subscribeJob: vi.fn().mockReturnValue(() => undefined), getPreviewSource: vi.fn(), createPreviewSourceJob: vi.fn(), previewSourceMediaUrl: vi.fn(), getWaveform: vi.fn(), waveformMediaUrl: vi.fn(), ensurePcmChunk: vi.fn(), pcmChunkMediaUrl: vi.fn(), decodeFrames: vi.fn(), getPreviewIrV2Manifest: vi.fn(), getPreviewIrV2Window: vi.fn(), updateEditorLoad: vi.fn().mockResolvedValue({ status: "ok" }), setWindowTheme: vi.fn().mockResolvedValue({ status: "ok" }), getSettings: vi.fn().mockResolvedValue({ saved: { proxy_mode: "system", provider_proxy: null }, effective: { proxy_mode: "system", provider_proxy: null }, pending_restart: false }), setSettings: vi.fn().mockResolvedValue({ proxy_mode: "system", provider_proxy: null }), restartCore: vi.fn().mockResolvedValue(undefined), diagnostics: vi.fn()
+    openArtifact: vi.fn(), openArtifactFolder: vi.fn(), subscribeJob: vi.fn().mockReturnValue(() => undefined), getPreviewSource: vi.fn(), createPreviewSourceJob: vi.fn(), previewSourceMediaUrl: vi.fn(), getWaveform: vi.fn(), waveformMediaUrl: vi.fn(), ensureFilmstrip: vi.fn().mockResolvedValue({ cache_key: "fs", step_ms: 1000, status: "ready", job_id: null, size_bytes: 0 }), filmstripMediaUrl: vi.fn().mockResolvedValue({ media_url: "aivideo://media/x", cache_key: "fs", step_ms: 1000, cell_w: 160, cell_h: 90, count: 1, duration_us: 0, size_bytes: 0 }), ensurePcmChunk: vi.fn(), pcmChunkMediaUrl: vi.fn(), decodeFrames: vi.fn(), getPreviewIrV2Manifest: vi.fn(), getPreviewIrV2Window: vi.fn(), updateEditorLoad: vi.fn().mockResolvedValue({ status: "ok" }), setWindowTheme: vi.fn().mockResolvedValue({ status: "ok" }), getSettings: vi.fn().mockResolvedValue({ saved: { proxy_mode: "system", provider_proxy: null }, effective: { proxy_mode: "system", provider_proxy: null }, pending_restart: false }), setSettings: vi.fn().mockResolvedValue({ proxy_mode: "system", provider_proxy: null }), restartCore: vi.fn().mockResolvedValue(undefined), diagnostics: vi.fn()
   } as DesktopApi;
 }
 
@@ -90,9 +90,12 @@ describe("Editor shell 基线", () => {
     expect(await screen.findByText("已保存")).toBeInTheDocument();
     // 默认进入合成预览；jsdom 无 WebGL2 → 自动回退交互预览并留下内联提示。
     await screen.findByRole("note", { name: "合成预览回退提示" }, { timeout: 10_000 });
-    expect(screen.getByText(/交互预览|权威预览/, { selector: ".preview-context" })).toBeInTheDocument();
+    // P9：常驻模式胶囊已删（参照画面上只有瞬态通知）。预览上下文的承载改为窗格栏的属性面板开关。
+    expect(screen.getByRole("button", { name: "属性面板开关" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("status", { name: "保存状态" })).toHaveTextContent("已保存");
-    expect(screen.getByRole("status", { name: "预览状态" })).toHaveTextContent("交互预览");
+    // P9：常驻「预览状态」胶囊已删（参照画面上只有瞬态通知）；预览模式的可辨性由
+    // 窗格栏开关 + 瞬态标签（stale/导出/重构时）承担。
+    expect(screen.queryByRole("status", { name: "预览状态" })).toBeNull();
     expect(screen.getByRole("status", { name: "Core 连接状态" })).toBeInTheDocument();
     // 重试合成预览：提示清除 → 再次尝试 → 环境不变则再次回退并重新提示。
     fireEvent.click(screen.getByRole("button", { name: "重试合成预览" }));
@@ -109,7 +112,8 @@ describe("Editor shell 基线", () => {
     const undoButton = screen.getByRole("button", { name: "撤销" });
     await waitFor(() => expect(undoButton).toBeEnabled());
     fireEvent.click(undoButton);
-    expect(await screen.findByText("保存中")).toBeInTheDocument();
+    // I4 面板重排后「保存中」同时出现在标题栏状态与影片信息行：断言至少一处可见（意图不变）。
+    expect((await screen.findAllByText("保存中")).length).toBeGreaterThan(0);
     expect(screen.getByRole("status", { name: "保存状态" })).toHaveTextContent("保存中");
   });
 
@@ -142,7 +146,8 @@ describe("Editor shell 基线", () => {
     // 状态徽标随 stale 语义显示"权威预览已过期"。
     vi.mocked(window.desktop.createPreview!).mockResolvedValue({ job: null, preview: stalePreview, reused: true });
     fireEvent.click(screen.getByRole("button", { name: "生成权威预览" }));
-    await waitFor(() => expect(screen.getByText("权威预览已过期", { selector: ".preview-context" })).toBeInTheDocument());
+    // P9：瞬态标签条件 = stale && authoritative && 非导出/重构播放；生成（复用产物）后三者不变，提示仍在。
+    await waitFor(() => { expect(screen.getByText("权威预览已过期")).toBeInTheDocument(); expect(document.querySelector(".interactive-label")).not.toBeNull(); });
   });
 
   it("filters visible assets without changing project data", async () => {
@@ -164,7 +169,9 @@ describe("Editor shell 基线", () => {
   it("shows project-level properties when nothing is selected", async () => {
     render(<App />);
     expect(await screen.findByRole("region", { name: "上下文属性" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "项目概览" })).toBeInTheDocument();
+    // I4：属性栏空态改为参照 FilmPanel 形态（影片信息为 bare 段无标题，aria-label 承载；「项目操作」有标题），项目管理入口不变。
+    expect(screen.getByLabelText("影片信息")).toBeInTheDocument();
+    expect(screen.getByText("项目操作")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "打开项目管理" })).toBeInTheDocument();
   });
 
@@ -179,6 +186,8 @@ describe("Editor shell 基线", () => {
 
   it("exposes a preview ratio selector defaulting to the project canvas", async () => {
     render(<App />);
+    // P4：比例选择收进窗格栏「预览设置」弹层。
+    fireEvent.click(await screen.findByRole("button", { name: "预览设置" }));
     const ratio = await screen.findByRole("combobox", { name: "预览比例" });
     await waitFor(() => expect(ratio).toHaveValue("916")); // 项目画布 1080x1920 → 比例真源（异步加载后生效）
     fireEvent.change(ratio, { target: { value: "169" } });
@@ -236,7 +245,8 @@ describe("Editor shell 基线", () => {
 
   it("opens the render panel from the preview toolbar action", async () => {
     render(<App />);
-    await screen.findByRole("button", { name: "渲染与导出" });
+    // P4：渲染与导出走「预览设置」弹层的动作行。
+    fireEvent.click(await screen.findByRole("button", { name: "预览设置" }));
     fireEvent.click(screen.getByRole("button", { name: "渲染与导出" }));
     expect(await screen.findByRole("dialog", { name: "渲染与导出" })).toBeInTheDocument();
   });

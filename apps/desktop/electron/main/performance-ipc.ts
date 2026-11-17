@@ -89,6 +89,8 @@ export interface DerivedMediaIpcDeps {
   /** B14：admin 通道解析波形文件（waveform/media 端点；无请求体——
    * 波形参数由服务端算法常量唯一决定）。 */
   resolveWaveformMedia: (input: { project_id: string; asset_id: string }) => Promise<{ cache_key: string; status: string; path: string; size_bytes: number }>;
+  /** WP-P232：admin 通道解析缩略图 sprite（filmstrip/media 端点）。 */
+  resolveFilmstripMedia: (input: { project_id: string; asset_id: string; step_ms: number }) => Promise<{ cache_key: string; status: string; path: string; size_bytes: number; step_ms: number; cell_w: number; cell_h: number; count: number; duration_us: number }>;
   /** B15：admin 通道解析 PCM 块文件（pcm-chunks/media 端点）。 */
   resolvePcmChunkMedia: (input: { project_id: string; asset_id: string; start_sample: number }) => Promise<{ cache_key: string; status: string; path: string; size_bytes: number }>;
   /** restricted-media 注册（purpose="proxy"）+ 票据签发。 */
@@ -125,7 +127,7 @@ async function safeInvoke<T>(operation: () => Promise<T>): Promise<T> {
   }
 }
 
-export function registerPerformanceIpc({ ipc, fetchWithUi, resolveDerived, resolvePreviewSourceMedia, resolveWaveformMedia, resolvePcmChunkMedia, registerDerivedMedia }: DerivedMediaIpcDeps & { ipc: Registrar }): void {
+export function registerPerformanceIpc({ ipc, fetchWithUi, resolveDerived, resolvePreviewSourceMedia, resolveWaveformMedia, resolveFilmstripMedia, resolvePcmChunkMedia, registerDerivedMedia }: DerivedMediaIpcDeps & { ipc: Registrar }): void {
   const fetchSafe = (path: string, init?: RequestInit) =>
     safeInvoke(() => fetchWithUi(path, init));
 
@@ -234,6 +236,23 @@ export function registerPerformanceIpc({ ipc, fetchWithUi, resolveDerived, resol
     });
   });
 
+  // ---- WP-P232：素材级缩略图预抽（filmstrip） ----
+
+  ipc.handle("filmstrip:ensure", async (_event, value) => {
+    const input = asRecord(value, ["project_id", "asset_id", "step_ms", "generate"], "filmstrip ensure");
+    if (typeof input.step_ms !== "number" || !Number.isFinite(input.step_ms) || input.step_ms < 1) {
+      throw new Error("Invalid filmstrip step_ms");
+    }
+    const body = JSON.stringify({ step_ms: Math.round(input.step_ms), generate: input.generate === true });
+    const entry = rendererSafe(await fetchSafe(
+      `/api/v1/projects/${asId(input.project_id, "project_id")}/assets/${asId(input.asset_id, "asset_id")}/filmstrip`,
+      { method: "POST", body },
+    ));
+    // path 泄漏防御（同 waveform 口径）
+    if (JSON.stringify(entry).includes("path")) throw new Error("Invalid FilmstripEntry");
+    return entry;
+  });
+
   // ---- B14：素材级持久化波形 ----
 
   ipc.handle("waveform:get", async (_event, value) => {
@@ -252,6 +271,33 @@ export function registerPerformanceIpc({ ipc, fetchWithUi, resolveDerived, resol
     return parseWaveformDescription(description);
   });
 
+  /** WP-P232：缩略图 sprite 取件（Main 换 restricted-media 票据；Renderer
+   *  只收票据 URL + 格元数据）。 */
+  ipc.handle("filmstrip:media", async (_event, value) => {
+    const input = asRecord(value, ["project_id", "asset_id", "step_ms"], "filmstrip media");
+    if (typeof input.step_ms !== "number" || !Number.isFinite(input.step_ms) || input.step_ms < 1) {
+      throw new Error("Invalid filmstrip step_ms");
+    }
+    const stepMs: number = Math.round(input.step_ms);
+    const resolved = await resolveFilmstripMedia({
+      project_id: asId(input.project_id, "project_id"),
+      asset_id: asId(input.asset_id, "asset_id"),
+      step_ms: stepMs,
+    });
+    if (resolved.status !== "ready" || typeof resolved.path !== "string") {
+      throw new Error("DERIVED_NOT_FOUND");
+    }
+    return {
+      media_url: registerDerivedMedia(resolved.cache_key, resolved.path),
+      cache_key: resolved.cache_key,
+      step_ms: resolved.step_ms,
+      cell_w: resolved.cell_w,
+      cell_h: resolved.cell_h,
+      count: resolved.count,
+      duration_us: resolved.duration_us,
+      size_bytes: resolved.size_bytes,
+    };
+  });
   ipc.handle("waveform:media", async (_event, value) => {
     const input = asRecord(value, ["project_id", "asset_id"], "waveform media");
     const request = parseWaveformRequestInput({

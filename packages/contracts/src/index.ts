@@ -1425,7 +1425,7 @@ export class ContractValidationError extends Error {
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const JOB_STATUSES: JobStatus[] = ["queued", "running", "succeeded", "failed", "cancelling", "cancelled", "interrupted"];
-const JOB_KINDS: JobKind[] = ["asset_probe", "asset_fingerprint", "proxy", "portrait_sample", "vertical_sample", "model_download", "transcription", "candidate_generation", "timeline_patch_generation", "captions_provider_generation", "authoritative_preview", "final_export", "media_generation", "waveform", "agent_session", "cv_analysis", "beat_analysis", "angle_sync", "keyframe_tagging"];
+const JOB_KINDS: JobKind[] = ["asset_probe", "asset_fingerprint", "proxy", "portrait_sample", "vertical_sample", "model_download", "transcription", "candidate_generation", "timeline_patch_generation", "captions_provider_generation", "authoritative_preview", "final_export", "media_generation", "waveform", "filmstrip", "agent_session", "cv_analysis", "beat_analysis", "angle_sync", "keyframe_tagging"];
 const PROJECT_STATUSES: ProjectStatus[] = ["active", "archived", "missing"];
 const ASSET_KINDS: AssetKind[] = ["video", "audio", "image", "text"];
 const ASSET_AVAILABILITIES: AssetAvailability[] = ["available", "missing", "changed", "unsupported"];
@@ -2906,3 +2906,27 @@ export * from "./stage4e.js";
 export * from "./stage5.js";
 export * from "./stage6r.js";
 export * from "./performance.js";
+
+
+// WP-P232：素材级缩略图预抽（filmstrip sprite）
+export interface FilmstripEntryResponse {
+  cache_key: string;
+  step_ms: number;
+  status: "queued" | "building" | "ready" | "failed" | null;
+  job_id: string | null;
+  size_bytes: number | null;
+}
+export interface FilmstripEntryRequest {
+  step_ms: number;
+  generate: boolean;
+}
+export interface FilmstripMediaResponse {
+  media_url: string;
+  cache_key: string;
+  step_ms: number;
+  cell_w: number;
+  cell_h: number;
+  count: number;
+  duration_us: number;
+  size_bytes: number;
+}

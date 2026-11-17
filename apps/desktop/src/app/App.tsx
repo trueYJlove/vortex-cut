@@ -1501,6 +1501,17 @@ export function App() {
     () => assets.map(item => ({ asset_id: item.asset.asset_id, media_url: item.media_url, kind: item.asset.kind, display_name: item.asset.display_name })),
     [assets],
   );
+  // WP-P232：素材缩略图预抽登记（导入/项目加载后 fire-and-forget）。
+  // 档位 = 当前时间线 80px 格宽 × 常用 pps 的阶梯粗估（1s 步长起步；
+  // 画布端跨档未命中时走运行时补抽并按需登记更细档）。
+  const ensureFilmstripForAsset = useCallback((assetId: string) => {
+    if (!project) return;
+    void window.desktop.ensureFilmstrip({
+      project_id: project.project_id, asset_id: assetId,
+      step_ms: 1000, generate: true,
+    }).catch(() => undefined);
+  }, [project]);
+
   const syntheticMediaUrls = useMemo(
     () => new Map(assets.flatMap(item => item.media_url ? [[item.asset.asset_id, item.media_url] as const] : [])),
     [assets],
@@ -1836,6 +1847,9 @@ export function App() {
     // 生成期间预览继续走原片（卡但能看），就绪后由下面的 jobs 派生 effect 失效
     // 解析缓存、下次解析自动换代理。这里不 await：代理是加速项，登记失败（无
     // FFmpeg / 不支持 / IPC 报错）绝不能影响导入成功，也不弹错误。
+    // WP-P232：视频素材导入即登记缩略图预抽（低优先级批量；fire-and-forget，
+    // 与代理登记同一韧性语义——失败静默，不影响导入成功）。
+    ensureFilmstripForAsset(String(result.asset.asset_id));
     if (result.asset.kind !== "video") return;
     // 方案 A（B11 缺失的一环）：视频素材导入后自动在后台登记代理生成作业，
     // 生成期间预览继续走原片（卡但能看），就绪后由下面的 jobs 派生 effect 失效

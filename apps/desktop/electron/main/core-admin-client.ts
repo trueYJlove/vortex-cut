@@ -106,6 +106,14 @@ export class CoreAdminClient {
     );
   }
 
+  /** WP-P232：缩略图 sprite Main 内部解析（admin 通道）。 */
+  resolveFilmstripMedia(input: { project_id: string; asset_id: string; step_ms: number }) {
+    return this.request<{ cache_key: string; status: string; path: string; size_bytes: number; step_ms: number; cell_w: number; cell_h: number; count: number; duration_us: number }>(
+      `/api/v1/internal/projects/${encodeURIComponent(input.project_id)}/assets/${encodeURIComponent(input.asset_id)}/filmstrip/media`,
+      { method: "POST", body: JSON.stringify({ step_ms: input.step_ms }) },
+    );
+  }
+
   /** B15：PCM 块文件 Main 内部解析（admin 通道）。 */
   resolvePcmChunkMedia(input: { project_id: string; asset_id: string; start_sample: number }) {
     return this.request<{ cache_key: string; status: string; path: string; size_bytes: number }>(
