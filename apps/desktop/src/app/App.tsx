@@ -77,7 +77,10 @@ const formatSmpteTimecode = (us: number, fps: number) => {
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = Math.floor(totalSeconds % 60);
   const frames = Math.min(Math.round(safeFps) - 1, Math.floor((totalSeconds - Math.floor(totalSeconds)) * safeFps));
-  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}:${String(frames).padStart(2, "0")}`;
+  // 参照 timecode.ts:143-145：<1h 的影片省略小时位（00:05:12），≥1h 才补回并保持宽度稳定。
+  const hh = `${String(hours).padStart(2, "0")}:`;
+  const head = us >= 3_600_000_000 ? hh : "";
+  return `${head}${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}:${String(frames).padStart(2, "0")}`;
 };
 const duration = (document?: TimelineDocument) => document?.clips.reduce((max, clip) => Math.max(max, clip.timeline_end_us), 0) ?? 0;
 const formatRulerTime = (us: number) => {
@@ -405,6 +408,10 @@ export function App() {
   const menuButtonRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const menuActionRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [leftWidth, setLeftWidth] = useState(280);
+  // P4 参照窗格栏（ProjectView.tsx:4639-4661）的 layers/inspector 开关：映射为左素材池/右属性栏显隐。
+  const [leftPaneOpen, setLeftPaneOpen] = useState(true);
+  const [rightPaneOpen, setRightPaneOpen] = useState(true);
+  const [paneSettingsOpen, setPaneSettingsOpen] = useState(false);
   // 参照 DEFAULT_INSPECTOR = 360（openfilm PaneDivider.tsx:50）；原 336 是自定值。
   const [rightWidth, setRightWidth] = useState(360);
   // 时间线面板高度默认按视口比例给（2026-11-11）：参照 OpenFilm 录屏实测
@@ -437,7 +444,7 @@ export function App() {
   // scrub 直通（2026-11-11）：拖拽风暴中绕过 React 提交直接驱动预览会话——
   // dev 构建下每次 setPlayhead 触发整树提交（实测 ~36ms/次）是「拖动像快进
   // 卡顿」的主因。prod 下提交便宜，此通道同样减少主线程抖动。
-  const previewSessionRef = useRef<{ seekToFrame(target: number): Promise<number>; beginScrubStorm(): void; endScrubStorm(): void } | null>(null);
+  const previewSessionRef = useRef<{ seekToFrame(target: number): Promise<number>; beginScrubStorm(): void; endScrubStorm(): void; getMeterSamples?(): readonly [Float32Array, Float32Array] | null } | null>(null);
   const lastDirectSeekFrameRef = useRef(-1);
   const volumeRef = useRef(volume);
   const [progressDragging, setProgressDragging] = useState(false);
@@ -643,6 +650,11 @@ export function App() {
     if (epoch !== renderDataEpochRef.current || projectRef.current?.project_id !== selected.project_id) return;
     setPreviews(previewPage.items);
     setExports(exportPage.items);
+    // P9（参照行为）：刷新/切项目后若当前 Revision 已有就绪的权威预览，直接回到核验观看，
+    // stale 与否由瞬态标签承担（参照画面无常驻模式胶囊）。不打断导出/重构播放。
+    const current = previewPage.items.find(item => item.preview.timeline_revision_id === selected.current_timeline_revision_id)
+      ?? (previewPage.items[0]?.preview.timeline_revision_id === timelineRef.current?.current_revision.timeline_revision_id ? previewPage.items[0] : undefined);
+    if (current?.preview.status === "ready" && !exportPlayback && !reframePlayback) setPreviewMode("authoritative");
   };
   const switchProject = (next: Project) => {
     if (next.project_id === projectRef.current?.project_id) return;
@@ -1258,8 +1270,12 @@ export function App() {
      这里另开两块时域缓冲给电平表用，两者并存、互不影响。 */
   const meterTimeL = useRef<Float32Array | null>(null);
   const meterTimeR = useRef<Float32Array | null>(null);
-  /** 供 ui/of/AudioMeters 采样：返回左右两声道时域样本（−1…1），无图时返回 null。 */
+  /** 供 ui/of/AudioMeters 采样：返回左右两声道时域样本（−1…1），无图时返回 null。
+   *  ③电平表没动的根因：合成预览（用户主用模式）的音频在 PreviewSession 的音频图里，
+   *  而 vuGraphRef 挂的是权威预览 videoRef——合成模式下永远 null。改为优先读会话母线。 */
   const meterLevels = useCallback((): readonly [Float32Array, Float32Array] | null => {
+    const sessionSamples = previewSessionRef.current?.getMeterSamples?.() ?? null;
+    if (sessionSamples) return sessionSamples;
     const entry = vuGraphRef.current;
     if (!entry) return null;
     if (!meterTimeL.current || meterTimeL.current.length !== entry.graph.analyserL.fftSize) {
@@ -1271,13 +1287,9 @@ export function App() {
     return [meterTimeL.current, meterTimeR.current!] as const;
   }, []);
   const vuGraphRef = useRef<{ el: HTMLMediaElement; graph: VuGraph } | null>(null);
-  const vuBarLRef = useRef<HTMLElement | null>(null);
-  const vuBarRRef = useRef<HTMLElement | null>(null);
   const stopVuPolling = useCallback(() => {
     const entry = vuGraphRef.current;
     if (entry) cancelAnimationFrame(entry.graph.raf);
-    if (vuBarLRef.current) vuBarLRef.current.style.height = "30%";
-    if (vuBarRRef.current) vuBarRRef.current.style.height = "30%";
   }, []);
   useEffect(() => {
     if (!playing) { stopVuPolling(); return; }
@@ -1318,44 +1330,11 @@ export function App() {
       }
     };
     const entryGraph = attach();
-    // 模拟电平：无真实音频图（AudioContext 不可用 / 挂接失败 / 媒体无声音轨）时，
-    // 用当前音量值驱动两条跳动，保证播放中每帧都有动画 —— 杜绝"点了播放却一动不动"。
-    const paintVu = (levelL: number, levelR: number) => {
-      if (vuBarLRef.current) vuBarLRef.current.style.height = `${(30 + levelL * 70).toFixed(1)}%`;
-      if (vuBarRRef.current) vuBarRRef.current.style.height = `${(30 + levelR * 70).toFixed(1)}%`;
-    };
-    if (!entryGraph) {
-      let simL = 0.3, simR = 0.3, tL = 0.3, tR = 0.3, raf = 0;
-      const tick = () => {
-        simL += (tL - simL) * 0.3; simR += (tR - simR) * 0.3;
-        if (Math.random() < 0.35) { tL = 0.3 + Math.random() * 0.7; tR = 0.3 + Math.random() * 0.7; }
-        const amp = Math.max(0.2, volumeRef.current / 100);
-        paintVu(simL * amp, simR * amp);
-        raf = requestAnimationFrame(tick);
-      };
-      raf = requestAnimationFrame(tick);
-      return () => cancelAnimationFrame(raf);
-    }
+    if (!entryGraph) return;
+    // 音频图只为 meterLevels（时间线右缘电平表）提供时域样本；
+    // 播放条内已无 VU（参照 ViewerBar 无电平显示，电平表在时间线右缘）。
     void entryGraph.ctx.resume().catch(() => undefined);
-    const avg = (data: Uint8Array<ArrayBuffer>) => data.reduce((sum, value) => sum + value, 0) / (data.length * 255);
-    const tick = () => {
-      const entry = vuGraphRef.current;
-      if (!entry || entry.graph !== entryGraph) return;
-      entry.graph.analyserL.getByteFrequencyData(entry.graph.dataL);
-      entry.graph.analyserR.getByteFrequencyData(entry.graph.dataR);
-      const levelL = Math.min(1, avg(entry.graph.dataL) * 1.6);
-      const levelR = Math.min(1, avg(entry.graph.dataR) * 1.6);
-      // 真实音频无声（电平均为 0）时也退化为音量模拟，保证有可见动画。
-      if (levelL + levelR < 0.02) {
-        const amp = Math.max(0.2, volumeRef.current / 100);
-        paintVu((0.3 + Math.random() * 0.5) * amp, (0.3 + Math.random() * 0.5) * amp);
-      } else {
-        paintVu(levelL, levelR);
-      }
-      entry.graph.raf = requestAnimationFrame(tick);
-    };
-    entryGraph.raf = requestAnimationFrame(tick);
-    return stopVuPolling;
+    entryGraph.raf = requestAnimationFrame(() => undefined);
   }, [playing, previewAsset?.media_url, previewMode, vuEpoch, stopVuPolling]);
   const visibleCaption = working?.captions.find(item => playhead >= item.start_us && playhead < item.end_us) ?? selectedCaption;
   const totalUs = duration(working);
@@ -3015,8 +2994,8 @@ export function App() {
       </div>
     </div>
     <div className="banner-stack">{notice !== "" && <div className={`notice notice-${notice.tone}`} role="alert">{notice.text}</div>}{timeline?.draft && <div className="draft-banner"><span>{timeline.draft.conflict ? "检测到冲突草稿" : "检测到上次未恢复草稿"}</span><button disabled={timeline.draft.conflict} onClick={() => { setWorking(timeline.draft!.document); setSaveState("已保存"); }}>恢复</button><button onClick={() => void (async () => { await window.desktop.deleteTimelineDraft(project!.project_id); setTimeline({ ...timeline, draft: null }); })()}>丢弃</button></div>}</div>
-    <section className="editor-grid">
-      <section className="library-pane" aria-label="媒体库">
+    <div className="editor-workspace">
+      <section className={"library-pane" + (leftPaneOpen ? "" : " pane-closed")} aria-label="媒体库" hidden={!leftPaneOpen}>
         <div className="left-seg" role="tablist" aria-label="工作区分区">
           <button role="tab" aria-selected={tab === "assets"} className={tab === "assets" ? "active" : ""} onClick={() => setTab("assets")}>素材</button>
           <button role="tab" aria-selected={tab === "transcripts"} className={tab === "transcripts" ? "active" : ""} onClick={() => setTab("transcripts")}>转录</button>
@@ -3033,7 +3012,9 @@ export function App() {
         : <div className="jobs-page"><p className="panel-hint">转录、权威预览与导出的后台进度会显示在这里；运行中的任务可取消，失败的转录可重试。</p>{jobs.length === 0 && <p className="panel-hint">暂无任务。</p>}{(() => { const activeJobs = jobs.filter(job => ["running", "cancelling"].includes(job.status)); const queuedJobs = jobs.filter(job => job.status === "queued"); const doneJobs = jobs.filter(job => ["succeeded", "failed", "cancelled", "interrupted"].includes(job.status)); const renderJobRow = (job: Job) => { const badgeClass = job.status === "succeeded" ? "ok" : job.status === "failed" ? "bad" : job.status === "running" ? "run" : "dim"; const phaseText = job.phase ? (jobPhaseLabels[job.phase] ?? job.phase) : null; const phasePct = phaseText && job.phase_progress !== null && job.phase_progress !== undefined ? ` ${Math.round(job.phase_progress * 100)}%` : ""; return <div className="job-row" key={job.job_id}><div className="jmain"><div className="jhead"><strong>{jobKindLabels[job.kind] ?? job.kind}</strong><span className={`badge ${badgeClass}`}>{jobStatusLabels[job.status]}</span><span className="jpct">{job.progress !== null ? `${Math.round(job.progress * 100)}%` : "—"}</span></div>{job.progress !== null && <div className="jbar"><i style={{ width: `${Math.round(job.progress * 100)}%` }} /></div>}<div className="jmeta"><span>{jobDetailText(job, assets.find(item => item.asset.asset_id === job.asset_id)?.asset.display_name)}{phaseText || job.stage ? ` · ${phaseText ? `${phaseText}${phasePct}` : job.stage}` : ""}{job.error ? ` · ${safeTaskErrorMessage(job.error)}` : ""}</span>{job.status === "running" && <JobEta job={job} />}</div><div className="jops">{job.kind === "transcription" && (job.status === "failed" || job.status === "interrupted") && <button className="mini-btn" onClick={() => void retryTranscription(job)}>重试转录</button>}{["queued", "running", "cancelling"].includes(job.status) && <button className="mini-btn" onClick={() => void cancelJob(job)}>取消</button>}{["succeeded", "failed", "cancelled", "interrupted"].includes(job.status) && <button className="mini-btn danger-ghost" aria-label={`删除任务 ${job.job_id}`} title="从列表移除这条任务记录" onClick={() => void deleteJob(job)}>删除</button>}</div></div></div>; }; return <>{activeJobs.length > 0 && <div className="jobs-group">进行中</div>}{activeJobs.map(renderJobRow)}{queuedJobs.length > 0 && <div className="jobs-group">排队</div>}{queuedJobs.map(renderJobRow)}{doneJobs.length > 0 && <div className="jobs-group">已完成 / 失败</div>}{doneJobs.map(renderJobRow)}</>; })()}</div>}
         {!timeline && project && <div className="empty-timeline"><button onClick={() => void createTimeline({ kind: "empty" })}>创建空时间线</button></div>}
       </section>
-      <div className="resize-handle resize-handle-left" role="separator" aria-label="调整左侧面板宽度" onPointerDown={event => beginResize("left", event)} />
+    <div className="editor-stack">
+    <section className="editor-grid editor-grid-nolib">
+      {leftPaneOpen && <div className="resize-handle resize-handle-left" role="separator" aria-label="调整左侧面板宽度" onPointerDown={event => beginResize("left", event)} />}
       <section ref={stagePaneRef} className={`stage-pane${isFullscreen ? " fullscreen" : ""}`} aria-label="项目预览">
         <div className="stage-column" ref={stageColumnRef}>
           {/* 预览窗格栏（2026-11-16 按参照 ProjectView.tsx:4639 的 PANE_BAR 形态）：
@@ -3042,21 +3023,30 @@ export function App() {
               于是画面上方出现一条参照里不存在的工具条——这是预览区结构差最大的一处。
               功能不删：三项收进右侧图标按钮（比例与编码仍是可访问的 select，只是外观走
               参照的 28×28 图标盒 + tooltip 说明），渲染与导出同理。 */}
+          {/* P4 参照 ProjectView.tsx:4639-4661：窗格栏 = 左侧 layers/inspector 两个 28×28 图标开关，
+              无标题、无带文字控件。ours 映射：图层图标→左素材池显隐；检查器图标→右属性栏显隐；
+              比例/编码/渲染导出（ours 功能）收进最右「预览设置」图标弹层，功能一项不删。 */}
           <div className="pane-bar">
-            <span className="pane-bar-title">预览</span>
+            <button type="button" className={`pane-bar-btn${leftPaneOpen ? " on" : ""}`} aria-pressed={leftPaneOpen} aria-label="媒体库面板开关" title={leftPaneOpen ? "收起媒体库" : "展开媒体库"} onClick={() => setLeftPaneOpen(value => !value)}><LayoutPanelLeft size={16} aria-hidden="true" /></button>
             <span className="pane-bar-spacer" />
-            <label className="pane-bar-field" title="预览比例">
-              <span className="sr-only">预览比例</span>
-              <select aria-label="预览比例" value={effectiveRatio} onChange={event => changePreviewRatio(event.target.value)}>{previewRatios.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}</select>
-            </label>
-            <label className="pane-bar-field" title="编码模式">
-              <span className="sr-only">编码模式</span>
-              <select aria-label="编码模式" value={encoderMode} onChange={event => setEncoderMode(event.target.value as EncoderMode)}><option value="auto">自动</option><option value="software">软件</option></select>
-            </label>
-            <button className="pane-bar-btn" onClick={() => setRenderPanelOpen(true)} aria-label="渲染与导出" title="渲染与导出">
-              <SlidersHorizontal size={14} aria-hidden="true" />
-              {renderActivity ? <span className="render-badge" aria-hidden="true">{renderActivity}</span> : null}
-            </button>
+            {/* P4 顺序修正（ProjectView.tsx:4640-4661）：layers 左端、inspector 右端，ours 的预览设置在其右。 */}
+            <button type="button" className={`pane-bar-btn${rightPaneOpen ? " on" : ""}`} aria-pressed={rightPaneOpen} aria-label="属性面板开关" title={rightPaneOpen ? "收起属性面板" : "展开属性面板"} onClick={() => setRightPaneOpen(value => !value)}><SlidersHorizontal size={16} aria-hidden="true" /></button>
+            <span className="pane-settings-anchor">
+              <button type="button" className={`pane-bar-btn${paneSettingsOpen ? " on" : ""}`} aria-haspopup="true" aria-expanded={paneSettingsOpen} aria-label="预览设置" title="预览设置（比例 / 编码）" onClick={event => { event.stopPropagation(); setPaneSettingsOpen(value => !value); }}><Settings2 size={16} aria-hidden="true" /></button>
+              {paneSettingsOpen && <div className="pane-settings-pop" role="group" aria-label="预览设置" onClick={event => event.stopPropagation()}>
+                <div className="pane-settings-row">
+                  <label>
+                    <span className="sr-only">预览比例</span>
+                    <select aria-label="预览比例" value={effectiveRatio} onChange={event => changePreviewRatio(event.target.value)}>{previewRatios.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}</select>
+                  </label>
+                  <label>
+                    <span className="sr-only">编码模式</span>
+                    <select aria-label="编码模式" value={encoderMode} onChange={event => setEncoderMode(event.target.value as EncoderMode)}><option value="auto">自动</option><option value="software">软件</option></select>
+                  </label>
+                </div>
+                <button type="button" className="pane-settings-action" onClick={() => { setPaneSettingsOpen(false); setRenderPanelOpen(true); }} aria-label="渲染与导出">渲染与导出{renderActivity ? <span className="render-badge" aria-hidden="true">{renderActivity}</span> : null}</button>
+              </div>}
+            </span>
           </div>
           <div className="stage-view">
             <div className={`preview-frame ${previewClass}${previewSelected ? " selected" : ""}`} style={previewZoom === "fit" ? undefined : { transform: `scale(${previewZoom})` }} role="button" tabIndex={0} aria-label="选中播放头处的片段" title="点击选中播放头处的片段" onClick={selectClipAtPlayhead} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectClipAtPlayhead(); } }}>
@@ -3073,16 +3063,22 @@ export function App() {
             {previewMode === "interactive" && overlayPips.length > 0 && <PreviewPipOverlays items={overlayPips} selectedClipId={pipSelectedId} locked={pipLocked} onSelect={clipId => setSelection({ kind: "clip", id: clipId })} onDraftTransform={draftPipTransform} onCommitTransform={commitPipTransform} onDraftMask={draftPipMask} onCommitMask={commitPipMask} onGesturePause={pausePreviewPlayback} onGestureResume={resumePreviewPlayback} playheadUs={playhead} playing={playing} />}
           </div>
           {/* 选中框：白色边框 + 8 向拖拽手柄，缩放时随画面一起缩放；仅选中片段时可见。 */}
-          {!overlayClipSelected && <div className="sel-box" ref={selBoxRef} onClick={event => event.stopPropagation()} aria-hidden="true"><i className="sel-border" /><span className="sel-dims">{selDimsText || `${Math.round((canvasRef.current?.offsetWidth ?? 0))} × ${Math.round((canvasRef.current?.offsetHeight ?? 0))}`}</span><span className="h h-nw" data-dir="nw" title="等比缩放（左上）" onPointerDown={beginSelDrag("nw")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-n" data-dir="n" title="单轴缩放（上）" onPointerDown={beginSelDrag("n")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-ne" data-dir="ne" title="等比缩放（右上）" onPointerDown={beginSelDrag("ne")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-e" data-dir="e" title="单轴缩放（右）" onPointerDown={beginSelDrag("e")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-se" data-dir="se" title="等比缩放（右下）" onPointerDown={beginSelDrag("se")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-s" data-dir="s" title="单轴缩放（下）" onPointerDown={beginSelDrag("s")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-sw" data-dir="sw" title="等比缩放（左下）" onPointerDown={beginSelDrag("sw")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-w" data-dir="w" title="单轴缩放（左）" onPointerDown={beginSelDrag("w")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /></div>}
+          {!overlayClipSelected && <div className="sel-box" ref={selBoxRef} onClick={event => event.stopPropagation()} aria-hidden="true"><i className="sel-border" />{/* P6 修正：参照标签 = 手势实时值（StageTransformFrame.tsx:224-244 常驻 Label 属 layer；
+    ours 无 layer，常态显示画布全尺寸有误导——只在拖拽中显示（selDimsText 非空） */}
+<span className="sel-dims" style={selDimsText ? undefined : { display: "none" }}>{selDimsText}</span><span className="h h-nw" data-dir="nw" title="等比缩放（左上）" onPointerDown={beginSelDrag("nw")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-n" data-dir="n" title="单轴缩放（上）" onPointerDown={beginSelDrag("n")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-ne" data-dir="ne" title="等比缩放（右上）" onPointerDown={beginSelDrag("ne")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-e" data-dir="e" title="单轴缩放（右）" onPointerDown={beginSelDrag("e")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-se" data-dir="se" title="等比缩放（右下）" onPointerDown={beginSelDrag("se")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-s" data-dir="s" title="单轴缩放（下）" onPointerDown={beginSelDrag("s")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-sw" data-dir="sw" title="等比缩放（左下）" onPointerDown={beginSelDrag("sw")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-w" data-dir="w" title="单轴缩放（左）" onPointerDown={beginSelDrag("w")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /></div>}
         </div>
-          <span className={`interactive-label ${previewIsStale && previewMode === "authoritative" && !exportPlayback ? "stale" : ""}`}>{previewMode === "interactive" ? "交互预览 · 非权威" : previewMode === "synthetic" ? "合成预览 · 实时（非权威）" : reframePlayback ? "静态焦点重构图 · 权威预览" : exportPlayback ? `导出 · ${exportPlayback.export_record.destination_display_name}` : previewIsStale ? "权威预览 · 已过期" : "权威预览 · 当前 Revision"}</span><span role="status" aria-label="预览状态" className={`preview-context ${previewMode === "authoritative" ? "authoritative" : previewMode === "synthetic" ? "synthetic" : "interactive"}${previewIsStale ? " stale" : ""}`}>{previewMode === "authoritative" ? (previewIsStale ? "权威预览已过期" : authoritativePreview ? "权威预览" : "尚未生成权威预览") : previewMode === "synthetic" ? "合成预览" : "交互预览"}</span>{syntheticNotice && <span role="note" aria-label="合成预览回退提示" className="synthetic-note">{syntheticNotice}<button className="synthetic-note-retry" onClick={() => { setSyntheticNotice(null); setPreviewMode("synthetic"); }}>重试合成预览</button></span>}
+          {/* P9 参照 ProjectView.tsx:4699-4741：画面上只有瞬态通知，无常驻模式胶囊。
+     interactive-label 仅在 stale（权威预览过期）或导出/重构播放这类瞬态时显示；
+     常驻的 preview-context 已删——模式信息收进窗格栏（见窗格栏 title/弹层）。 */}
+{(previewIsStale && previewMode === "authoritative" && !exportPlayback) || exportPlayback || reframePlayback ? <span className={`interactive-label ${previewIsStale && previewMode === "authoritative" && !exportPlayback ? "stale" : ""}`}>{previewMode === "interactive" ? "交互预览 · 非权威" : previewMode === "synthetic" ? "合成预览 · 实时（非权威）" : reframePlayback ? "静态焦点重构图 · 权威预览" : exportPlayback ? `导出 · ${exportPlayback.export_record.destination_display_name}` : previewIsStale ? "权威预览 · 已过期" : "权威预览 · 当前 Revision"}</span> : null}
+{syntheticNotice && <span role="note" aria-label="合成预览回退提示" className="synthetic-note">{syntheticNotice}<button className="synthetic-note-retry" onClick={() => { setSyntheticNotice(null); setPreviewMode("synthetic"); }}>重试合成预览</button></span>}
           <div className={`progress${progressDragging ? " dragging" : ""}`} ref={progressRef} role="slider" tabIndex={0} aria-label="时间线播放头" aria-valuemin={0} aria-valuemax={Math.max(totalUs, 1)} aria-valuenow={Math.min(playhead, totalUs)} onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); setProgressDragging(true); seekFromProgress(event.clientX); }} onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) scrubFromProgress(event.clientX); }} onPointerUp={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) { const rect = event.currentTarget.getBoundingClientRect(); event.currentTarget.releasePointerCapture(event.pointerId); commitScrub(Math.round(Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)) * Math.max(totalUs, 1))); } setProgressDragging(false); }} onKeyDown={event => { if (event.key === "ArrowLeft") { event.preventDefault(); seekFromProgressRatio(Math.max(0, playhead / Math.max(totalUs, 1) - 1 / 300)); } else if (event.key === "ArrowRight") { event.preventDefault(); seekFromProgressRatio(Math.min(1, playhead / Math.max(totalUs, 1) + 1 / 300)); } else if (event.key === "Home") { event.preventDefault(); seekFromProgressRatio(0); } else if (event.key === "End") { event.preventDefault(); seekFromProgressRatio(1); } }}>
             <div className="pg-bubble" ref={pgBubbleRef} style={{ left: `${progressPct}%` }}>{formatSmpteTimecode(playhead, previewFps)}</div>
             <div className="pg-rail"><div className="pg-fill" ref={pgFillRef} style={{ width: `${progressPct}%` }}><i className="pg-dot" /></div></div>
           </div>
         </div>
         <div className="playback-bar">
-          <div className="pb-left"><span className="tc"><b ref={tcTimeRef}>{formatSmpteTimecode(playhead, previewFps)}</b><i> / </i><span className="tot">{formatSmpteTimecode(totalUs, previewFps)}</span></span><span className={`vu${playing ? " active" : ""}`} aria-hidden="true"><i ref={vuBarLRef} /><i ref={vuBarRRef} /></span></div>
+          <div className="pb-left"><span className="tc"><b ref={tcTimeRef}>{formatSmpteTimecode(playhead, previewFps)}</b><i> / </i><span className="tot">{formatSmpteTimecode(totalUs, previewFps)}</span></span></div>
           <div className="pb-center"><button className="pb-play" aria-label={playing ? "暂停" : "播放"} title={playing ? "暂停" : "播放"} onClick={togglePlayback}>{playing ? <Pause /> : <Play />}</button></div>
           <div className="pb-right" role="group" aria-label="播放器控制">
             <span className="rate-anchor">
@@ -3092,17 +3088,20 @@ export function App() {
               </button>
               <div className={`rate-pop${ratePopOpen ? " open" : ""}`} ref={ratePopRef} onClick={event => event.stopPropagation()}>
                 <div className="rp-head">播放设置</div>
-                <label className="rp-row">
+                {/* P12/P13 参照 PlaybackMenu.tsx:86-137：循环=整行 switch（自绘 18×30 ink 开关）、
+                    倍速=两行×4 的 segmented（滑动选中标记、role=radiogroup）。速度集合保 ours 域 0.25–4×。 */}
+                <button type="button" role="switch" aria-checked={loopPlayback} aria-label="循环播放" className="rp-row rp-loop" onClick={() => setLoopPlayback(value => !value)}>
                   <Repeat />
-                  <span>循环播放</span>
-                  <input type="checkbox" role="switch" checked={loopPlayback} onChange={event => setLoopPlayback(event.target.checked)} aria-label="循环播放" />
-                </label>
+                  <span className="rp-loop-label">循环播放</span>
+                  <span aria-hidden className={`rp-switch${loopPlayback ? " on" : ""}`}><i /></span>
+                </button>
                 <div className="rp-row rp-speed" aria-hidden="true"><span>倍速</span></div>
-                <div className="rate-grid" role="group" aria-label="播放倍速">
-                  {([0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4] as const).map(r => (
-                    <button key={r} className={`rate-opt${uiRate === r ? " active" : ""}`} aria-pressed={uiRate === r} onClick={() => setUiRate(r)}>{`${r}×`}</button>
+                {(() => { const speeds = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4] as const; const perRow = 4; const at = Math.max(0, speeds.indexOf(uiRate as typeof speeds[number]) === -1 ? speeds.findIndex(s => s > uiRate) : speeds.indexOf(uiRate as typeof speeds[number])); return <div className="rate-grid" role="radiogroup" aria-label="播放倍速">
+                  <span aria-hidden className="rate-mark" style={{ width: `calc((100% - 4px) / ${perRow})`, height: `calc((100% - 4px) / 2)`, transform: `translate(${(at % perRow) * 100}%, ${Math.floor(at / perRow) * 100}%)` }} />
+                  {speeds.map((r, i) => (
+                    <button key={r} type="button" role="radio" aria-checked={i === at} className={`rate-opt${i === at ? " active" : ""}`} onClick={() => setUiRate(r)}>{`${r}×`}</button>
                   ))}
-                </div>
+                </div>; })()}
               </div>
             </span>
             <span className="vol-anchor">
@@ -3128,11 +3127,13 @@ export function App() {
         </div>
         </div>
       </section>
-      <div className="resize-handle resize-handle-right" role="separator" aria-label="调整右侧面板宽度" onPointerDown={event => beginResize("right", event)} />
-      <aside className="properties-pane" aria-label="上下文属性" role="region">{selectedClip ? <ClipProperties clip={selectedClip} locked={Boolean(working?.locked_elements?.includes(selectedClip.clip_id))} onPatch={patchTimeline} onDraft={queueDraft} working={working!} playheadUs={playhead} onOpenEditingTools={tool => openEditingTools(tool, selectedClip.clip_id)} baseRevisionId={timeline?.current_revision.timeline_revision_id ?? null} onAppliedTimeline={acceptState} /> : selectedCaption ? <CaptionProperties caption={selectedCaption} locked={Boolean(selectedCaption.source_clip_id && working?.locked_elements?.includes(selectedCaption.source_clip_id))} onPatch={patchTimeline} onDraft={queueDraft} working={working!} /> : selectedTransition ? <TransitionProperties transition={selectedTransition} onPatch={patchTimeline} /> : <ProjectProperties project={project} saveState={saveState} authoritativePreview={authoritativePreview} previewIsStale={previewIsStale} renderDisabledReason={renderDisabledReason} onGeneratePreview={() => void generatePreview()} onCreateExport={openExportDialog} onOpenProjectDialog={() => setProjectDialogOpen(true)} />}</aside>
+      {rightPaneOpen && <div className="resize-handle resize-handle-right" role="separator" aria-label="调整右侧面板宽度" onPointerDown={event => beginResize("right", event)} />}
+      <aside className={"properties-pane" + (rightPaneOpen ? "" : " pane-closed")} aria-label="上下文属性" role="region" hidden={!rightPaneOpen}>{selectedClip ? <ClipProperties clip={selectedClip} locked={Boolean(working?.locked_elements?.includes(selectedClip.clip_id))} onPatch={patchTimeline} onDraft={queueDraft} working={working!} playheadUs={playhead} onOpenEditingTools={tool => openEditingTools(tool, selectedClip.clip_id)} baseRevisionId={timeline?.current_revision.timeline_revision_id ?? null} onAppliedTimeline={acceptState} /> : selectedCaption ? <CaptionProperties caption={selectedCaption} locked={Boolean(selectedCaption.source_clip_id && working?.locked_elements?.includes(selectedCaption.source_clip_id))} onPatch={patchTimeline} onDraft={queueDraft} working={working!} /> : selectedTransition ? <TransitionProperties transition={selectedTransition} onPatch={patchTimeline} /> : <ProjectProperties project={project} saveState={saveState} authoritativePreview={authoritativePreview} previewIsStale={previewIsStale} renderDisabledReason={renderDisabledReason} onGeneratePreview={() => void generatePreview()} onCreateExport={openExportDialog} onOpenProjectDialog={() => setProjectDialogOpen(true)} />}</aside>
     </section>
     <div className="timeline-resize-handle" role="separator" aria-label="调整时间线高度" onPointerDown={event => beginResize("timeline", event)} />
     <TimelinePanel document={working} selection={selection} setSelection={(sel) => { setSelection(sel); exitLibraryPreview(); }} onPatch={patchTimeline} onDropAsset={dropAsset} coverUrl={coverUrl} onCaptureCover={() => setCoverDialogOpen(true)} canUndo={Boolean(timeline?.can_undo)} canRedo={Boolean(timeline?.can_redo)} onUndo={() => void undoRedo("undo")} onRedo={() => void undoRedo("redo")} assetMedia={timelineAssetMedia} waveformCache={waveformCache} playheadStore={playheadStore} onSeek={(timeUs) => { if (libraryPreviewId) exitLibraryPreview(); seekWhileScrubbing(timeUs); const clip = sortedClips.find(c => timeUs >= c.timeline_start_us && timeUs < c.timeline_end_us); if (clip && videoRef.current) { const sourceStart = (clip.source_start_us ?? 0) / 1_000_000; const elapsed = (timeUs - clip.timeline_start_us) / 1_000_000 * ((clip.speed_milli ?? 1000) / 1000); pendingSeekRef.current = sourceStart + elapsed; videoRef.current.currentTime = pendingSeekRef.current; } else if (videoRef.current) { videoRef.current.currentTime = timeUs / 1_000_000; } }} onSeekCommit={timeUs => { exitLibraryPreview(); commitScrub(timeUs); }} onCommand={(id) => runCommand(id)} meterLevels={meterLevels} playing={playing} />
+    </div>
+    </div>
     <WorkspaceFooter
       saveState={saveState}
       runtimeReady={runtimeReady}

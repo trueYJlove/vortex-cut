@@ -1,6 +1,7 @@
 import { editorPerf } from "../preview/perf-metrics.js";
 import { ToolButton } from "../../ui/of/ToolButton.js";
 import { ModePicker, type TimelineMode } from "../../ui/of/ModePicker.js";
+import { ContextMenu } from "../../ui/of/ContextMenu.js";
 import { AudioMeters } from "../../ui/of/AudioMeters.js";
 /**
  * Timeline — Canvas + DOM hybrid timeline component.
@@ -54,6 +55,7 @@ import type {
   TimelineDocument,
   TimelinePatchOperation,
   TimelineTrack,
+  TimelineTransition,
 } from "@aivideo/contracts";
 import type { EditorCommand } from "../editorCommands.js";
 import {
@@ -118,6 +120,7 @@ import {
   snapCandidates,
   snapValue,
   timeToX,
+  trimHitPx,
   trackRowAt,
   trackRowOf,
   trackRowsTotalHeight,
@@ -251,7 +254,8 @@ export function computeFrameRequests(
   if (!isVisual) return [];
   const timelineDurUs = clip.timeline_end_us - clip.timeline_start_us;
   if (timelineDurUs <= 0) return [];
-  const count = quantizeFrameCount(Math.round(((timelineDurUs / 1_000_000) * pps) / 44));
+  // T8 修正：格宽与绘制侧同步 80px（原 44——两侧不一致时缓存键对不上，缩略图空白）
+  const count = quantizeFrameCount(Math.round(((timelineDurUs / 1_000_000) * pps) / 80));
   const sourceStartUs = clip.source_start_us ?? 0;
   const sourceEndUs = clip.source_end_us ?? 0;
   const speed = (clip.speed_milli ?? 1000) / 1000;
@@ -304,53 +308,49 @@ function computeTicks(
   scrollX: number,
   viewportWidth = 800,
 ): TickMark[] {
-  const frameSecs = 1 / Math.max(1, frameRate);
-  // 目标：主刻度间隔 ≥ 90px。候选间隔（秒）：帧级 → 秒级 → 分钟级逐级放大，
-  // 取第一个满足的；f 标签只在帧级间隔（< 1s）时出现。
-  const candidates: Array<{ secs: number; majorEvery: number; frame?: boolean }> = [
-    { secs: frameSecs, majorEvery: 2, frame: true },
-    { secs: 2 * frameSecs, majorEvery: 5, frame: true },
-    { secs: 0.5, majorEvery: 5 },
-    { secs: 1, majorEvery: 5 },
-    { secs: 2, majorEvery: 5 },
-    { secs: 5, majorEvery: 4 },
-    { secs: 10, majorEvery: 5 },
-    { secs: 30, majorEvery: 6 },
-    { secs: 60, majorEvery: 5 },
-    { secs: 300, majorEvery: 5 },
-    { secs: 600, majorEvery: 6 },
-    { secs: 1800, majorEvery: 6 },
-    { secs: 3600, majorEvery: 5 },
-  ];
-  const minMajorPx = 90;
-  const pick =
-    candidates.find((c) => c.secs * pps * c.majorEvery >= minMajorPx) ??
-    candidates[candidates.length - 1];
-  const intervalUs = pick.secs * 1_000_000;
-  const majorUs = intervalUs * pick.majorEvery;
+  /* T6 参照 timeline-layout.ts:238-306：标签阶梯（≥96px）与刻度阶梯（≥12px）独立推导，
+     刻度步整除标签步（标签必须落在刻度上）；帧级步取「秒帧数的因子」（每一秒的刻度
+     落点一致）。秒级以上步长 1/2/3/5×10ⁿ（SECOND_STEPS）。标尺画过素材终点——
+     参照的标尺不随素材截断（Timeline.tsx:3565-3581 绘制按可视范围）。 */
+  const perSec = Math.max(1, Math.round(frameRate));
+  const frameSecs = 1 / perSec;
+  const pxPerFrame = frameSecs * pps;
+  const SECOND_STEPS = [1, 2, 3, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
+  // 秒内帧因子（整除秒帧数的），从 2 开始做标签档、1 起做刻度档。
+  const frameFactors = (from: number): number[] => {
+    const list: number[] = [];
+    for (let n = from; n < perSec; n += 1) if (perSec % n === 0) list.push(n);
+    return list;
+  };
+  const labelLadder = [...frameFactors(2).map(n => n * frameSecs), ...SECOND_STEPS.map(s => s * frameSecs)];
+  const tickLadder = [...frameFactors(1).map(n => n * frameSecs), ...SECOND_STEPS.map(s => s * frameSecs)];
+  const pickLabel = labelLadder.find(secs => secs * pps >= 96) ?? labelLadder[labelLadder.length - 1];
+  const wantedTick = tickLadder.find(secs => secs * pps >= 12) ?? tickLadder[tickLadder.length - 1];
+  // 刻度步整除标签步：不整除则向上找更粗的；找不到就只画标签档。
+  const pickTick = Math.abs(pickLabel % wantedTick) < 1e-9
+    ? wantedTick
+    : tickLadder.find(secs => secs >= wantedTick && Math.abs(pickLabel % secs) < 1e-9) ?? pickLabel;
+  const labelFrame = Math.abs(pickLabel / frameSecs);
+  const frameLevel = pickLabel < 1; // 帧级标签（2f/4f…）只在 <1s 档出现
+  const intervalUs = pickTick * 1_000_000;
+  const majorUs = pickLabel * 1_000_000;
   const pxToUs = 1_000_000 / pps;
-  // 可视时间范围（含左右余量），再对齐到主刻度边界。
   const viewStartUs = Math.max(0, (scrollX - headerWidth) * pxToUs - majorUs);
   const viewEndUs = (scrollX - headerWidth + viewportWidth) * pxToUs + majorUs;
-  // 标尺不越过素材终点：有素材时主刻度只生成到 totalUs；
-  // 空时间线（totalUs=0）保持整宽标尺，便于首次拖入素材。
-  const rulerEndUs = totalUs > 0 ? Math.min(viewEndUs, totalUs) : viewEndUs;
   const firstMajor = Math.floor(viewStartUs / majorUs);
-  const lastMajor = Math.floor(rulerEndUs / majorUs);
+  const lastMajor = Math.floor(viewEndUs / majorUs);
   const ticks: TickMark[] = [];
   for (let m = firstMajor; m <= lastMajor; m += 1) {
     const majorUsValue = m * majorUs;
     if (majorUsValue < 0) continue;
     const majorX = headerWidth + (majorUsValue / 1_000_000) * pps - scrollX;
-    // 主刻度：竖线 + 剪映式 "|时间" 标签；t=0 显示 00:00，帧级显示 Nf。
-    const majorLabel = pick.frame
+    const majorLabel = frameLevel
       ? m === 0
         ? formatRulerTime(0)
-        : `${m * pick.majorEvery}f`
+        : `${Math.round(m * labelFrame)}f`
       : formatRulerTime(majorUsValue);
     ticks.push({ x: majorX, label: majorLabel, major: true });
-    // 小刻度：主刻度之间均分，长度为主刻度的一半。
-    for (let s = 1; s < pick.majorEvery; s += 1) {
+    for (let s = 1; s * intervalUs < majorUs - 1; s += 1) {
       const minorUsValue = majorUsValue + s * intervalUs;
       const minorX = headerWidth + (minorUsValue / 1_000_000) * pps - scrollX;
       ticks.push({ x: minorX, label: "", major: false });
@@ -478,11 +478,6 @@ const RULER_LABEL_FONT = "10px sans-serif";
 const RULER_MINOR_TICK_TOP = 9;
 const RULER_LABEL_PAD_X = 4;
 const RULER_LABEL_TOP = 1;
-// 素材范围条：标尺顶那条 3px 条。它标的是「内容从哪到哪」，属背景性刻度信息，
-// 不是可操作对象——用青色会让它成为整个时间线最亮的元素，抢走播放头与选中片的注意。
-// 改为中性灰：存在感足够，不与任何状态色竞争。
-const RANGE_BAR_TOP = () => cssColor("--tl-range-top", "#3a4147");
-const RANGE_BAR_BOTTOM = () => cssColor("--tl-range-bottom", "#4b545b");
 const HOVER_CHIP_BG = () => cssColor("--tl-chip-bg", "rgba(9, 12, 24, 0.88)");
 const HOVER_CHIP_EDGE = () => cssColor("--tl-chip-edge", "rgba(0, 193, 205, 0.45)");
 const HOVER_CHIP_TEXT = "#d6e1ff";
@@ -515,15 +510,12 @@ function drawRulerFace(
   const { bandX, width, height, xOffset, ticks, hoverUs, hoverText, contentRange, xAt, selection, clipRects: faceClipRects } = opts;
   const endX = Math.max(bandX, Math.min(width, opts.endX));
 
-  // 带底：纵向微渐变；素材终点外压平为死区，并以竖标线收尾。
-  const grad = ctx.createLinearGradient(0, 0, 0, height);
-  grad.addColorStop(0, RULER_BG_TOP());
-  grad.addColorStop(1, RULER_BG_BOTTOM());
-  ctx.fillStyle = grad;
-  ctx.fillRect(bandX, 0, Math.max(0, endX - bandX), height);
+  // ④修正：标尺面 = 纯平 var(--bg-panel)（参照 Timeline.tsx:273 TL.ruler——无渐变）。
+  // 原「纵向微渐变」顶色偏亮，在工具栏 border-bottom 之下叠出用户指认的「加粗顶边」。
+  // 死区同底色；素材终点竖标线保留（参照 endX 也有收尾线）。
+  ctx.fillStyle = cssColor("--bg-panel", "#181818");
+  ctx.fillRect(bandX, 0, Math.max(0, width - bandX), height);
   if (endX < width) {
-    ctx.fillStyle = RULER_DEAD_BG();
-    ctx.fillRect(endX, 0, width - endX, height);
     ctx.strokeStyle = RULER_END_EDGE();
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -542,6 +534,21 @@ function drawRulerFace(
       ctx.moveTo(hx, 0);
       ctx.lineTo(hx, height);
       ctx.stroke();
+      // ⑥修正：hover 时间胶囊（参照标尺 hover 的可拖提示——黑底白字圆角小签，
+      // 文本 hoverText 由调用方传入；胶囊跟随竖线、贴标尺顶部）。
+      if (hoverText) {
+        ctx.font = RULER_LABEL_FONT;
+        const tw = ctx.measureText(hoverText).width + 10;
+        const bubbleX = Math.min(Math.max(hx - tw / 2, bandX), endX - tw);
+        ctx.fillStyle = "rgba(0, 0, 0, 0.82)";
+        ctx.beginPath();
+        ctx.roundRect(bubbleX, 1, tw, 15, 4);
+        ctx.fill();
+        ctx.fillStyle = "rgba(255, 255, 255, 0.92)";
+        ctx.textBaseline = "middle";
+        ctx.fillText(hoverText, bubbleX + 5, 9);
+        ctx.textBaseline = "top";
+      }
     }
   }
 
@@ -609,20 +616,10 @@ function drawRulerFace(
     }
   }
 
-  // 内容范围条：标尺顶 3px 圆角渐变条（素材最左/最右为界，剪映式）。
-  if (contentRange) {
-    const barLeft = Math.max(bandX, xAt(contentRange.fromUs));
-    const barRight = Math.min(endX, xAt(contentRange.toUs));
-    if (barRight - barLeft > 2) {
-      const barGrad = ctx.createLinearGradient(0, 0, 0, 3);
-      barGrad.addColorStop(0, RANGE_BAR_TOP());
-      barGrad.addColorStop(1, RANGE_BAR_BOTTOM());
-      ctx.fillStyle = barGrad;
-      ctx.beginPath();
-      ctx.roundRect(barLeft, 0, barRight - barLeft, 3, 1.5);
-      ctx.fill();
-    }
-  }
+  // P230-③（2026-11-17）：内容范围条已删除——参照标尺无此元素
+  // （Timeline.tsx:4284-4316：标尺 = 平底 + tickMarks + border-b，别无长条）。
+  // 它是用户指认的「刻度上方粗线」：素材最左到最右的一条 3px 渐变条常驻在
+  // 刻度上方，读起来像一条加粗的顶边。素材范围信息已由泳道带与死区表达。
 
   // 悬停时间胶囊（圆角底 + 描边，保证任何刻度上都可读）。
   if (hoverUs !== null && hoverUs !== undefined) {
@@ -686,6 +683,7 @@ function drawTimeline(
   selection: TimelineSelection,
   interaction: TimelineInteraction | null,
   hover: TimelineHover,
+  playheadUs: number,
   totalUs: number,
   lockedElements: string[],
   rulerHoverUs: number | null,
@@ -755,6 +753,7 @@ function drawTimeline(
   //   （openfilm Timeline.tsx:282-289 laneTone / :3048 行 marginTop GAP）。
   //   我们原来是两件事都不对：实色不透明带 + 1px 强分隔线，且都截断在素材终点，
   //   于是「轨道」读起来像表格行而不是时间线泳道。
+
   const laneTone = (row: (typeof trackRows)[number]): string => {
     // 被选中片段所在的轨道深一档：选中这件事既落在片段上，也落在它所在的泳道上
     // （OpenFilm laneTone 的 picked 分支，Timeline.tsx:286）。
@@ -908,7 +907,8 @@ function drawTimeline(
     if (thumbnailCache && isVisualClip && rect.width > 10) {
       const clipDurUs = rect.clip.timeline_end_us - rect.clip.timeline_start_us;
       if (clipDurUs > 0) {
-        const frameCount = quantizeFrameCount(Math.round(((clipDurUs / 1_000_000) * view.pixelsPerSecond) / 44));
+        // T8 参照 BlockThumbs.tsx:21：THUMB_CELL_PX=80 固定格宽（原 44，密度差一倍）
+        const frameCount = quantizeFrameCount(Math.round(((clipDurUs / 1_000_000) * view.pixelsPerSecond) / 80));
         const clipRight = rect.x + rect.width;
         // 帧只画在名称条以下的体内；cover 的垂直溢出由该矩形裁掉。
         ctx.save();
@@ -956,25 +956,27 @@ function drawTimeline(
       }, Math.min(WAVEFORM_PEAK_COUNT_MAX, pxWidthForPeaks * 2));
       if (peaks && peaks.length > 0) {
         if (!isAudioClip) {
-          ctx.fillStyle = palette.band;
+          // T7 修正（Timeline.tsx:3350）：视频原声带底 = rgba(0,0,0,0.22)（非令牌色）
+          ctx.fillStyle = cssColor("--tl-band-bg", "rgba(0,0,0,0.22)");
           ctx.fillRect(rect.x, band.top, rect.width, band.height);
         }
         const baseline = band.top + band.height;
-        // 纯音频片段固定 100% 高度（不随轨道高度/波形占比设置变化，剪映式）；
-        // 视频片段原声带按占比档位缩放。
-        const maxH = Math.max(2, band.height * (isAudioClip ? 1 : Math.max(0.1, Math.min(1, waveformRatio ?? 0.4))));
+        // T7 参照 Timeline.tsx:241,3145 + globals.css:96-109：视频原声带固定 AUDIO_BAND_H=15px；
+        // 纯音频片段仍占满轨高。
+        const AUDIO_BAND_H = 15;
+        const maxH = Math.max(2, isAudioClip ? band.height : Math.min(band.height, AUDIO_BAND_H));
         // 剪映「一体感」来源：整条波形是一块连续剪影（单 path 填充 + 顶边
         // 二次曲线），而不是一排 fillRect 密柱。密柱即使高度连续，边缘仍是
         // 折线/接缝，读起来会“碎”。
         const drawLeft = rect.x + 1;
         const pxWidth = Math.max(1, Math.floor(rect.width - 2));
-        const shapeAmp = (v: number): number => {
-          const gained = Math.min(1, Math.max(0, v) * WAVEFORM_GAIN);
-          return Math.pow(gained, 0.72);
-        };
+        // T7 修正（对齐 BlockWaveform.tsx 注释 + waveBarPx）：无造形曲线——柱高 = peak × 音量（线性），
+        // 音量 = 10^(gain_db/20)（0dB=1）；削波 cap 在带顶并把削波部分染 --tl-wave-clip。静音片段 = 1px 线。
+        const volumeLin = Math.max(0, Math.pow(10, (rect.clip.audio.gain_db ?? 0) / 20));
         // 剪映「毛刺」感：保留高频瞬态——像素内取 max，且不做邻域抹平。
         // 线性插值 + 平滑会把尖刺吃掉，只剩光滑山脊。
         const heights: number[] = new Array(pxWidth);
+        const clipPx: number[] = new Array(pxWidth);
         for (let px = 0; px < pxWidth; px += 1) {
           const t0 = pxWidth === 1 ? 0 : px / pxWidth;
           const t1 = pxWidth === 1 ? 1 : (px + 1) / pxWidth;
@@ -983,13 +985,16 @@ function drawTimeline(
           const i1 = Math.min(peaks.length - 1, Math.max(i0, Math.ceil(t1 * peaks.length) - 1));
           let peak = 0;
           for (let k = i0; k <= i1; k += 1) {
-            const v = shapeAmp(peaks[k]);
+            const v = peaks[k];
             if (v > peak) peak = v;
           }
-          heights[px] = maxH * peak;
+          // waveBarPx：柱高 = peak × volume 线性 cap 带顶；削波部分（顶部）染 clip 色。
+          const level = Math.max(0, peak) * volumeLin;
+          heights[px] = Math.max(1, Math.min(1, level) * maxH);
+          clipPx[px] = level > 1 ? Math.min(heights[px], Math.max(2, Math.min(maxH / 3, (1 - 1 / level) * maxH))) : 0;
         }
         // 单路径剪影 + 纯折线顶边：微尖刺全部保留（无二次曲线、无平滑）。
-        const topY = (px: number): number => baseline - Math.max(1, heights[px]);
+        const topY = (px: number): number => baseline - heights[px];
         const topX = (px: number): number => drawLeft + px;
         ctx.beginPath();
         ctx.moveTo(topX(0), baseline);
@@ -999,24 +1004,15 @@ function drawTimeline(
         }
         ctx.lineTo(topX(pxWidth - 1), baseline);
         ctx.closePath();
-        ctx.fillStyle = palette.wave;
+        // 波形色：纯音轨主波形 --tl-wave；视频原声带 --tl-wave-band（Timeline.tsx:3353）。
+        ctx.fillStyle = cssColor(isAudioClip ? "--tl-wave" : "--tl-wave-band", "rgba(255,255,255,.4)");
         ctx.fill();
-        // 偶发峰值点：2px 橙点落在剪影顶端（点缀，不切开主体）。
-        ctx.fillStyle = "rgb(233, 150, 68)";
-        for (let px = 2; px < pxWidth - 2; px += 1) {
-          const h = heights[px];
-          const isLocalPeak =
-            h / maxH > 0.55 &&
-            h >= heights[px - 1] && h >= heights[px + 1] &&
-            h > heights[px - 2] + maxH * 0.06 &&
-            h > heights[px + 2] + maxH * 0.06;
-          if (isLocalPeak) {
-            ctx.fillRect(topX(px), topY(px), 1.5, Math.min(2.5, h));
-          }
+        // 削波部分染 --tl-wave-clip（waveBarPx 的 clipPx：至少 2px、至多带高 1/3）。
+        const clipColor = cssColor("--tl-wave-clip", "#f2665f");
+        ctx.fillStyle = clipColor;
+        for (let px = 0; px < pxWidth; px += 1) {
+          if (clipPx[px] > 0) ctx.fillRect(topX(px), topY(px), 1, clipPx[px]);
         }
-        // 基线：带底 1px 亮线（压在剪影下沿，不抢一体感）。
-        ctx.fillStyle = "rgba(150, 224, 221, 0.45)";
-        ctx.fillRect(drawLeft, Math.round(baseline) + 0.5 - 1, pxWidth, 1);
       }
     }
 
@@ -1025,10 +1021,9 @@ function drawTimeline(
       const headerText =
         clipNames.get(rect.clip.clip_id) ??
         (isAudioClip ? `音频 ${rect.clip.order_index + 1}` : `片段 ${rect.clip.order_index + 1}`);
-      const durText = formatTimecode(
-        rect.clip.timeline_end_us - rect.clip.timeline_start_us,
-        frameRate,
-      );
+      // T8 参照 Timeline.tsx:3291-3294：时长 "N.Ns"（<1s 两位小数）
+      const durUs = rect.clip.timeline_end_us - rect.clip.timeline_start_us;
+      const durText = `${(durUs / 1_000_000).toFixed(durUs < 1_000_000 ? 2 : 1)}s`;
       ctx.fillStyle = palette.header;
       ctx.fillRect(rect.x, rect.y, rect.width, headerH);
       // 参照信息条文字：10px / medium / white 90%；时长 white 55%（openfilm Timeline.tsx:3285-3292）。
@@ -1071,30 +1066,30 @@ function drawTimeline(
     }
     ctx.restore();
 
-    // 5) 选中效果（2026-11-11 对齐 OpenFilm SelectFrame）：描边画在片段**外侧**
-    //    （SELECT_X=3 / SELECT_Y=1），左右 3px 实线、上下 1px @70%，radius 3px。
-    //    拖动途中不画（片段已"提起来"，落位意图由预览剪影表达）。
+    // 5) 选中效果（P230-②b 2026-11-17 修正为参照 SelectFrame 的**纯描边**）：
+    //    旧实现先以 70% alpha 整面填充外扩矩形再压左右实边——等价于给片段罩了
+    //    一圈半透明「背景板」（用户指认的选中背景异常）。参照是 border-box 描边：
+    //    borderColor = `Y X`（上/下 70%、左/右 实色）， borderWidth = `1px 3px`，
+    //    盒子外扩到片段外 3px/1px，内部完全透明。
     if (isSelected && !isMovingClip) {
       const sx = 3, sy = 1;
       const frame = cssColor("--tl-select", "#161619");
       ctx.save();
-      ctx.translate(rect.x - sx, rect.y - sy);
-      ctx.beginPath();
-      ctx.roundRect(0, 0, rect.width + sx * 2, rect.height + sy * 2, CLIP_RADIUS);
-      // 左右实线 3px；上下以 70% alpha 细线（OpenFilm 的 color-mix 70% 等效）。
+      // 外框 = 片段矩形外扩 (sx, sy)。逐边画，绝不填充内部：
+      //   上/下：1px @70%（color-mix 70% 等效——globalAlpha 只作用这两条）
+      //   左/右：3px 实色
       ctx.globalAlpha = 0.7;
       ctx.fillStyle = frame;
-      ctx.fill();
+      ctx.fillRect(rect.x - sx, rect.y - sy, rect.width + sx * 2, sy);                    // 上
+      ctx.fillRect(rect.x - sx, rect.y + rect.height, rect.width + sx * 2, sy);           // 下
       ctx.globalAlpha = 1;
-      // 左右两条 3px 实边盖在已填充的 70% 框上
-      ctx.fillStyle = frame;
-      ctx.fillRect(0, sy, sx, rect.height);                          // 左
-      ctx.fillRect(rect.width + sx, sy, sx, rect.height);            // 右
+      ctx.fillRect(rect.x - sx, rect.y - sy, sx, rect.height + sy * 2);                   // 左
+      ctx.fillRect(rect.x + rect.width, rect.y - sy, sx, rect.height + sy * 2);           // 右
       ctx.restore();
     }
 
-    // 6) 分贝线（剪映式）：1px 横线贯穿音频区域、左端圆点；常态 rgb(66,155,159)，
-    //    hover 到片段（非 hover 线本身）即变 rgb(222,237,238)；拖动时黄色高亮。
+    // 6) 分贝线——T11 参照 Timeline.tsx:3427-3444：1px #fff（30% 常态→60% hover），
+    //    两端内缩 trimHit(w)（不再固定 6px）；拖动高亮 = 全亮白。
     const volBand = clipAudioBand(rect.clip, rect, waveformRatio);
     if (volBand && rect.width > 30) {
       const draggingVolume =
@@ -1105,23 +1100,28 @@ function drawTimeline(
         : rect.clip.audio.gain_db;
       const shownY = volumeToY(gainDb, volBand);
       ctx.save();
+      const volInset = trimHitPx(rect.width);
       ctx.strokeStyle = draggingVolume
-        ? "#ffd76e"
+        ? "rgba(255, 255, 255, 1)"
         : isLocked
-          ? "rgba(66, 155, 159, 0.4)"
+          ? "rgba(255, 255, 255, 0.2)"
           : hoveredClip
-            ? "rgb(222, 237, 238)"
-            : "rgb(66, 155, 159)";
+            ? "rgba(255, 255, 255, 0.6)"
+            : "rgba(255, 255, 255, 0.3)";
       // 0.5 对齐：DPR 缩放下让 1px 线落在单设备像素上（避免被取整成 2px）。
       const lineY = Math.round(shownY) + 0.5;
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(rect.x + 6, lineY);
-      ctx.lineTo(rect.x + rect.width - 6, lineY);
+      ctx.moveTo(rect.x + volInset, lineY);
+      ctx.lineTo(rect.x + rect.width - volInset, lineY);
       ctx.stroke();
       ctx.beginPath();
-      ctx.arc(rect.x + 12, lineY, 3, 0, Math.PI * 2);
-      ctx.fillStyle = draggingVolume ? "#ffd76e" : hoveredClip ? "rgb(222, 237, 238)" : "rgb(66, 155, 159)";
+      ctx.arc(rect.x + volInset + 6, lineY, 3, 0, Math.PI * 2);
+      ctx.fillStyle = draggingVolume
+        ? "rgba(255, 255, 255, 1)"
+        : hoveredClip
+          ? "rgba(255, 255, 255, 0.6)"
+          : "rgba(255, 255, 255, 0.3)";
       ctx.fill();
       if (draggingVolume || hoveredClip) {
         const label = `${gainDb >= 0 ? "+" : ""}${gainDb.toFixed(1)}dB`;
@@ -1535,18 +1535,15 @@ function drawTimeline(
   if (snapUs !== null && snapUs !== undefined) {
     const sx = timeToX(snapUs, view);
     if (sx >= view.headerWidth && sx <= width) {
-      ctx.strokeStyle = "#ffd76e";
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([5, 4]);
+      // T12 参照 Timeline.tsx:4391-4403：吸附线 = 1px 实线 --accent，无时间标签；
+      // 吸附到播放头时不画（ref：候选命中播放头则跳过 guide）。
+      if (Math.abs(sx - timeToX(playheadUs, view)) < 0.5) return;
+      ctx.strokeStyle = cssColor("--accent", "#00c1cd");
+      ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(sx, 0);
       ctx.lineTo(sx, height);
       ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = "#ffd76e";
-      ctx.font = "10px monospace";
-      ctx.textBaseline = "top";
-      ctx.fillText(formatRulerTime(snapUs), sx + 4, view.rulerHeight + 4);
     }
   }
 
@@ -1558,14 +1555,12 @@ function drawTimeline(
       interaction.currentX,
       interaction.currentY,
     );
-    ctx.fillStyle = "rgba(0, 193, 205, 0.10)";
+    // T12 参照 Timeline.tsx:4502-4515：框选 = 实线边 + accent 18% 填充 + r2
+    ctx.fillStyle = cssColor("--accent-soft", "rgba(0,193,205,.14)");
     ctx.fillRect(rect.x - view.scrollX, rect.y, rect.width, rect.height);
-    // 同上：框选描边用 :root 上的 --brand-b，不用旧青绿字面量
-    ctx.strokeStyle = cssColor("--tl-canvas-accent", "#00c1cd");
+    ctx.strokeStyle = cssColor("--accent", "#00c1cd");
     ctx.lineWidth = 1;
-    ctx.setLineDash([4, 3]);
     ctx.strokeRect(rect.x - view.scrollX, rect.y, rect.width, rect.height);
-    ctx.setLineDash([]);
   }
 
   // 播放头已拆为独立 DOM 覆盖层（A06：TimelinePlayheadLayer + playhead-store），
@@ -1713,6 +1708,42 @@ export function TimelinePanel({
   }
   const activePlayheadStore = playheadStore ?? localPlayheadStoreRef.current!;
   const [view, setView] = useState<TimelineViewState>(DEFAULT_VIEW_STATE);
+  // T3 参照 Timeline.tsx:2090-2110：分割模式刀线。直写 DOM style（每 move 一帧，不走 React state 防重渲卡顿）。
+  const bladeRef = useRef<HTMLDivElement | null>(null);
+  const hideBlade = useCallback(() => {
+    const line = bladeRef.current;
+    if (line) line.style.display = "none";
+  }, []);
+  const aimBlade = useCallback((x: number, y: number, hitClip: { y: number; height: number } | null) => {
+    const line = bladeRef.current;
+    if (!line) return;
+    // 仅当指针悬在**可分割片段**上才画线（看见线 = 这里会切）：无命中或命中点
+    // 落在片段边缘 trim 带内都不画（与点击判定同规则）。
+    if (!hitClip) { line.style.display = "none"; return; }
+    line.style.display = "block";
+    line.style.transform = `translateX(${x}px)`;
+    line.style.top = `${hitClip.y}px`;
+    line.style.height = `${hitClip.height}px`;
+  }, []);
+  // T9 参照 Timeline.tsx:3518-3526 的左右 6px 拖条：拖动改转场时长，pointerup 提交一条 update_transition。
+  const transitionResizeRef = useRef<{ transition: TimelineTransition; side: "start" | "end"; startX: number; baseUs: number; nextUs?: number } | null>(null);
+  const beginTransitionResize = (transition: TimelineTransition, side: "start" | "end", event: React.PointerEvent) => {
+    event.preventDefault();
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    transitionResizeRef.current = { transition, side, startX: event.clientX, baseUs: transition.duration_us };
+  };
+  const moveTransitionResize = (event: React.PointerEvent) => {
+    const drag = transitionResizeRef.current;
+    if (!drag) return;
+    const deltaUs = Math.round(((event.clientX - drag.startX) * (drag.side === "end" ? 1 : -1) / Math.max(0.001, view.pixelsPerSecond)) * 1_000_000);
+    drag.nextUs = Math.max(100_000, Math.min(2_000_000, drag.baseUs + deltaUs));
+  };
+  const endTransitionResize = () => {
+    const drag = transitionResizeRef.current;
+    transitionResizeRef.current = null;
+    if (!drag?.nextUs || drag.nextUs === drag.baseUs) return;
+    void onPatch([{ op: "update_transition", transition_id: drag.transition.transition_id, duration_us: drag.nextUs }], `转场时长 ${(drag.nextUs / 1_000_000).toFixed(2)}s`);
+  };
   /** 主题版本号：切换主题时自增，强制画布重绘。
    *  画布用 ctx.fillStyle 绘制，不吃 CSS 选择器——颜色虽已改为从 CSS 变量读取，
    *  但不重绘就仍是旧填充色（实测：浅色主题下时间线仍是一整块深色）。
@@ -1790,7 +1821,6 @@ export function TimelinePanel({
       | { kind: "empty" };
     timeUs: number;
   } | null>(null);
-  const contextMenuRef = useRef<HTMLDivElement>(null);
 
   const clips = document?.clips ?? [];
   const captions = document?.captions ?? [];
@@ -1820,6 +1850,8 @@ export function TimelinePanel({
   // 行组居中后首行起点会下移（padTop），所以按「末行底边」算而不是把行高相加——
   // 否则居中的行会掉到内容区之外，canvas 不绘制它。
   // 下限取可视高度：行数少时内容仍铺满面板，底下那片空白才是可点击的轨道区。
+  // T1 参照 Timeline.tsx:2767 的 solo 分支：任一轨 solo 激活即整条进入 solo 形态（头列 108+24）。
+  const anySolo = trackRows.some(row => Boolean(row.track.solo));
   const rowsBottom = trackRows.reduce((max, row) => Math.max(max, row.y + row.height), view.rulerHeight);
   // 末行之下同样留 TRACK_VIEW_PAD（OpenFilm 的 paddingBottom: TL_VPAD）：
   // 下边距不是装饰——最后一轨贴住滚动条或被面板底边切掉都读不出来。
@@ -2108,6 +2140,7 @@ export function TimelinePanel({
       selection,
       interaction,
       hover,
+      activePlayheadStore.get(),
       totalUs,
       document?.locked_elements ?? [],
       rulerHoverUs,
@@ -2138,6 +2171,8 @@ export function TimelinePanel({
      当前只承载**视觉与状态**：选择模式 = 现有行为，分割模式暂不改变点击语义
      （「点击即分割」是全局交互变更，需单独确认后再接）。 */
   const [scrubMode, setScrubMode] = useState<TimelineMode>("select");
+  // T3：离开分割模式即隐藏刀线（mode 切换发生在 ModePicker onPick）。
+  useEffect(() => { if (scrubMode !== "split") hideBlade(); }, [scrubMode, hideBlade]);
   /** 标记悬停/拖动时的贯穿引导线（null = 无）。 */
   const [markerGuide, setMarkerGuide] = useState<{ timeUs: number; color: string; held: boolean } | null>(null);
   /** 时间区间选取（Shift + 在标尺上拖动）：只做视觉，不接任何操作。
@@ -2462,6 +2497,17 @@ export function TimelinePanel({
         if (isClipLocked(clipId)) return;
         const clip = clips.find((c) => c.clip_id === clipId);
         if (!clip) return;
+        // T3 参照 Timeline.tsx:2066-2110：分割模式下点击即分割（沿播放头时间。
+        // 参照按指针时刻切，但 ours 的 split_clip 走 source_time_us=播放头处源时刻——
+        // 与工具栏既有「拆分片段」同一语义，行为一致可预期。
+        if (scrubMode === "split") {
+          const cutUs = clampRulerTime(xToTime(x, view));
+          if (cutUs <= clip.timeline_start_us || cutUs >= clip.timeline_end_us) return;
+          const rel = (cutUs - clip.timeline_start_us) * ((clip.speed_milli ?? 1000) / 1000);
+          void onPatch([{ op: "split_clip", clip_id: clip.clip_id, source_time_us: (clip.source_start_us ?? 0) + Math.round(rel) }], "分割片段");
+          hideBlade();
+          return;
+        }
         // Round 5: Shift+click toggles the clip in/out of a multi-selection
         // without starting a drag (standard NLE behaviour).
         if (event.shiftKey) {
@@ -2590,23 +2636,10 @@ export function TimelinePanel({
         return;
       }
 
-      // 空白区域（鼠标未在素材上）：默认拖动播放头（剪映式）；
-      // Shift + 拖拽保留框选。
-      if (!event.shiftKey) {
-        setSelection(null);
-        const timeUs = clampRulerTime(xToTime(x, view));
-        onSeek?.(timeUs);
-        const scrub: TimelineInteraction = { kind: "playhead", startX: x };
-        interactionRef.current = scrub;
-        setInteraction(scrub);
-        // 同上：空区按下拖动播放头也要进擦洗态，否则旋钮全程空心。
-        rulerScrubbingRef.current = true;
-        setScrubbing(true);
-        canvas.style.cursor = "col-resize";
-        return;
-      }
-      setSelection(null);
-      shiftClickRef.current = true;
+      // T13 参照 Timeline.tsx:1869-1935：空白按下即起框选（≥5px 成框，未成框的单击
+      // 在松手时定位播放头——见 marquee 终点分支）；⇧/⌘ = 加选（旧选区保留合并）。
+      setSelection(event.shiftKey || event.metaKey || event.ctrlKey ? selection : null);
+      shiftClickRef.current = event.shiftKey || event.metaKey || event.ctrlKey;
       const next: TimelineInteraction = {
         kind: "marquee",
         startX: x + view.scrollX,
@@ -2629,6 +2662,12 @@ export function TimelinePanel({
       if (!coords) return;
       const { x, y } = coords;
 
+      // T3：分割模式下刀线跟随指针（直写 DOM）。
+      if (!interactionRef.current && scrubMode === "split") {
+        const clipId = hitTestClips(x, y, clipRects);
+        const rect = clipId ? clipRects.find(r => r.clip.clip_id === clipId) : null;
+        aimBlade(x, y, rect ? { y: rect.y, height: rect.height } : null);
+      }
       const active = interactionRef.current;
       if (active) {
         lastPointerRef.current = { x, y };
@@ -3070,7 +3109,10 @@ export function TimelinePanel({
         if (rect.width >= 4 && rect.height >= 4) {
           // Marquee rect is content-space; compare against content-space rects.
           const ids = clipsInRect(rect, contentClipRects);
-          setSelection(ids.length > 0 ? { kind: "clips", ids } : null);
+          // T13 参照：⇧ 加选——并入框选前的旧选区（旧选区是 clips 才可并）。
+          const prev = shiftClickRef.current && selection?.kind === "clips" ? selection.ids : [];
+          const merged = Array.from(new Set([...prev, ...ids]));
+          setSelection(merged.length > 0 ? { kind: "clips", ids: merged } : null);
         } else {
           // Plain click on empty area → move the playhead there (Round 4)，
           // 寻址同样钳制在素材终点内。
@@ -3235,25 +3277,13 @@ export function TimelinePanel({
     [view, transitionRects, clipRects, captionRects, setSelection],
   );
 
-  // Close the context menu on outside mousedown / Escape / scroll.
+  // Close the context menu on scroll（T10：外点关闭与 Esc 已由参照 ContextMenu 自带）。
   const hasContextMenu = contextMenu !== null;
   useEffect(() => {
     if (!hasContextMenu) return;
-    const handlePointerDown = (event: MouseEvent) => {
-      if (contextMenuRef.current && !contextMenuRef.current.contains(event.target as Node)) {
-        setContextMenu(null);
-      }
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setContextMenu(null);
-    };
     const handleWheelClose = () => setContextMenu(null);
-    window.addEventListener("mousedown", handlePointerDown);
-    window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("wheel", handleWheelClose, { passive: true });
     return () => {
-      window.removeEventListener("mousedown", handlePointerDown);
-      window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("wheel", handleWheelClose);
     };
   }, [hasContextMenu]);
@@ -3273,17 +3303,16 @@ export function TimelinePanel({
     const assetId = readAssetId(event);
     setDropIndex(null);
     if (!assetId) return;
-    // 落点意图：轨道行 id（App 校验类型兼容）；上部空白区 = "new"（自动建
-    // 视频轨）；其余空白 = undefined（追加主轨）。
+    // 落点意图：轨道行 id（App 校验类型兼容）；**任何空白区（轨行之外）= "new"（自动建轨）**——
+    // 参照 Timeline.tsx:361-370 的 laneAt：落点超出全部轨行即 newTrack:true。原实现只有
+    // 上部空白 = new，拖到 A1 之下的大片空白只追加主轨，用户指认「自动加轨没了」。
     const coords = canvasCoords(event);
     const row = coords ? trackRowAt(trackRows, coords.x, coords.y) : null;
     let intent: string | "new" | undefined;
     if (row) {
       intent = row.track.id;
     } else if (coords) {
-      const captionRow = trackRowOf(trackRows, "C1");
-      const upperBound = captionRow?.y ?? view.rulerHeight;
-      intent = coords.y < upperBound ? "new" : undefined;
+      intent = "new";
     }
     onDropAsset(assetId, index, intent);
   };
@@ -3367,25 +3396,6 @@ export function TimelinePanel({
             我们此前没有这个入口，工具栏从「添加轨道」开始。 */}
         <ModePicker mode={scrubMode} onPick={setScrubMode} />
         <span className="toolbar-sep" aria-hidden="true" />
-        <div className="timeline-add-track-wrap">
-          <IconButton
-            label="添加轨道"
-            expanded={addTrackMenuOpen}
-            onClick={() => setAddTrackMenuOpen((value) => !value)}
-          >
-            <Plus />
-          </IconButton>
-          {addTrackMenuOpen && (
-            <div className="timeline-add-track-menu" role="menu" aria-label="新增轨道">
-              <button role="menuitem" onClick={() => { addTrack("video"); setAddTrackMenuOpen(false); }}>
-                视频轨道
-              </button>
-              <button role="menuitem" onClick={() => { addTrack("text"); setAddTrackMenuOpen(false); }}>
-                文本轨道
-              </button>
-            </div>
-          )}
-        </div>
         <IconButton label="撤销" disabled={!canUndo} onClick={onUndo}>
           <Undo2 />
         </IconButton>
@@ -3393,24 +3403,8 @@ export function TimelinePanel({
           <Redo2 />
         </IconButton>
         <span className="toolbar-sep" aria-hidden="true" />
-        <IconButton
-          label={allSelectedLocked ? "解锁片段" : "锁定片段"}
-          disabled={selectedClips.length === 0}
-          onClick={() =>
-            void onPatch(
-              selectedClips
-                .filter((c) => (allSelectedLocked ? isClipLocked(c.clip_id) : !isClipLocked(c.clip_id)))
-                .map((c) => ({
-                  op: "set_clip_locked" as const,
-                  clip_id: c.clip_id,
-                  locked: !allSelectedLocked,
-                })),
-              allSelectedLocked ? "解锁片段" : "锁定片段",
-            )
-          }
-        >
-          {allSelectedLocked ? <LockOpen /> : <Lock />}
-        </IconButton>
+        {/* T2 参照次序（Timeline.tsx:4075-4225）：模式｜分隔｜撤销/重做｜分割｜细移｜中段状态｜
+            开关/缩放。锁定入口收进右键菜单（每片段语义更贴切）；ours 独有的「添加轨道」放最右。 */}
         <IconButton
           label="向前移动"
           title="向前移动一帧（自由定位，拖动片段可留空隙）"
@@ -3588,6 +3582,26 @@ export function TimelinePanel({
             </div>
           )}
         </div>
+        {/* T2：ours 独有的「添加轨道」放工具栏最右（参照三段之外的功能位）。 */}
+        <div className="timeline-add-track-wrap">
+          <IconButton
+            label="添加轨道"
+            expanded={addTrackMenuOpen}
+            onClick={() => setAddTrackMenuOpen((value) => !value)}
+          >
+            <Plus />
+          </IconButton>
+          {addTrackMenuOpen && (
+            <div className="timeline-add-track-menu" role="menu" aria-label="新增轨道">
+              <button role="menuitem" onClick={() => { addTrack("video"); setAddTrackMenuOpen(false); }}>
+                视频轨道
+              </button>
+              <button role="menuitem" onClick={() => { addTrack("text"); setAddTrackMenuOpen(false); }}>
+                文本轨道
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Body: 冻结标尺（滚动区外，零抖动）+ 滚动区（轨道头列/封面条带/片段区）。
@@ -3600,7 +3614,7 @@ export function TimelinePanel({
         <div ref={scrollRef} className="timeline-scroll" onScroll={onTimelineScroll}>
         {/* Left gutter (DOM)：每条轨道一个属性头
             [类型标识] [锁定] [隐藏(视频/文本)] [静音(视频/音频)] [独奏(视频/音频)] */}
-        <div className="timeline-left" style={{ width: view.headerWidth, height: contentHeight, position: "relative" }}>
+        <div className="timeline-left" data-scrolled={view.scrollX > 0 ? "1" : undefined} style={{ width: view.headerWidth, height: contentHeight, position: "relative" }}>
           <div className="timeline-left-corner" style={{ height: view.rulerHeight }} />
           {trackRows.map((row) => {
             // 兼容旧文档/旧 core 的轨道 kind（visual→video、caption→text）。
@@ -3620,6 +3634,8 @@ export function TimelinePanel({
                 className="timeline-track-head"
                 data-track-kind={kind}
                 data-track-id={row.track.id}
+                data-flag-cols={kind === "video" ? "4" : kind === "audio" ? "3" : "2"}
+                data-lane-picked={trackRows.some(r => selection?.kind === "clip" && clips.some(c => c.clip_id === selection.id && c.track_id === row.track.id)) ? "1" : undefined}
                 style={{ top: row.y, height: row.height }}
               >
                 {/* 2026-11-11 对齐 OpenFilm 的 LaneMark（Timeline.tsx:295）：
@@ -3630,6 +3646,8 @@ export function TimelinePanel({
                 <span className="timeline-track-badge" title={`${row.track.id} ${kind === "video" ? "视频" : kind === "text" ? "文本" : "音频"}轨道`}>
                   <small>{row.track.id}</small>
                 </span>
+                {/* T1 参照 Timeline.tsx:2780：badge 与开关之间是一条 4px 占位列（网格第 2 列） */}
+                <span aria-hidden />
                 {hasClips && (
                   <>
                     <button
@@ -3712,9 +3730,12 @@ export function TimelinePanel({
         <div
           ref={containerRef}
           className="timeline-canvas-container"
+          data-mode={scrubMode}
           style={{ flex: 1, position: "relative", height: contentHeight }}
           onWheel={handleWheel}
         >
+          {/* T3 参照 Timeline.tsx:2090-2110：分割模式刀线，直写 DOM 防每 move 重渲。 */}
+          <div ref={bladeRef} className="tl-blade-line" style={{ display: "none" }} aria-hidden="true" />
           <canvas
             ref={canvasRef}
             aria-label="时间线画布"
@@ -3818,28 +3839,50 @@ export function TimelinePanel({
             const isSelected =
               selection?.kind === "transition" &&
               selection.id === rect.transition.transition_id;
+            // T9 参照 Timeline.tsx:3489-3526：16px 高芯片、行垂直居中（不低于信息条）、
+            // 未选 rgba(255,255,255,.88)+#1b1e25、选中 accent、X 交叉线 1.2px、>70px 显示名、左右 6px 拖条。
+            const chipTop = Math.max(rect.y + 16, rect.y + Math.round(rect.height / 2) - 8);
+            const chipW = Math.max(10, rect.width);
             return (
-              <button
+              <div
                 key={rect.transition.transition_id}
+                role="button"
+                tabIndex={-1}
                 className={`timeline-transition-marker${isSelected ? " selected" : ""}`}
+                data-transition={rect.transition.kind}
                 style={{
                   position: "absolute",
                   left: rect.x,
-                  top: rect.y + 4,
-                  width: rect.width,
-                  height: Math.min(28, rect.height - 8),
+                  top: chipTop,
+                  width: chipW,
+                  height: 16,
                   pointerEvents: "auto",
                 }}
-                title={`转场 ${rect.transition.kind} · ${(rect.transition.duration_us / 1_000_000).toFixed(1)}s`}
-                aria-label={`转场 ${rect.transition.kind} ${(rect.transition.duration_us / 1_000_000).toFixed(1)}秒`}
+                title={`转场 ${rect.transition.kind} · ${(rect.transition.duration_us / 1_000_000).toFixed(2)}s`}
+                aria-label={`转场 ${rect.transition.kind} ${(rect.transition.duration_us / 1_000_000).toFixed(2)}秒`}
                 aria-pressed={isSelected}
                 onClick={(event) => {
                   event.stopPropagation();
                   setSelection({ kind: "transition", id: rect.transition.transition_id });
                 }}
               >
-                ◈
-              </button>
+                <svg aria-hidden className="transition-x" viewBox="0 0 100 16" preserveAspectRatio="none">
+                  <path d="M0 15 L100 1" vectorEffect="non-scaling-stroke" fill="none" />
+                  <path d="M0 1 L100 15" vectorEffect="non-scaling-stroke" fill="none" />
+                </svg>
+                {chipW > 70 ? <span className="transition-name">{rect.transition.kind}</span> : null}
+                {(["start", "end"] as const).map(side => (
+                  <span key={side} role="presentation" className={`transition-edge ${side}`}
+                    aria-label={`调整转场时长 ${side === "start" ? "起点" : "终点"}`}
+                    onPointerDown={event => {
+                      event.stopPropagation();
+                      beginTransitionResize(rect.transition, side, event);
+                    }}
+                    onPointerMove={moveTransitionResize}
+                    onPointerUp={endTransitionResize}
+                    onPointerCancel={endTransitionResize} />
+                ))}
+              </div>
             );
           })}
           {/* B3/Round5: keyframe dots on selected clips, laid out in the expanded lanes */}
@@ -3934,42 +3977,24 @@ export function TimelinePanel({
               将视频或图片拖到这里开始剪辑
             </div>
           )}
-          {/* Round 4: canvas context menu (flips up near the bottom edge) */}
-          {contextMenu && (() => {
-            const menuHeight = contextMenu.target.kind === "clip" ? 175 : contextMenu.target.kind === "empty" ? 115 : 80;
-            // B17：可视区底（内容空间）= scrollTop + 视口高——菜单上翻判定。
-            const viewportBottomY = scrollTopRef.current + canvasSize.height;
-            const menuTop =
-              contextMenu.y + menuHeight > viewportBottomY
-                ? Math.max(2, contextMenu.y - menuHeight)
-                : contextMenu.y;
-            return (
-            <div
-              ref={contextMenuRef}
-              role="menu"
-              aria-label="时间线右键菜单"
-              className="timeline-context-menu"
-              style={{
-                left: Math.max(2, Math.min(contextMenu.x, canvasSize.width - 170)),
-                top: Math.max(2, Math.min(menuTop, Math.max(2, viewportBottomY - menuHeight))),
-              }}
-            >
-              {(() => {
-                const close = (action: () => void) => () => {
-                  action();
-                  setContextMenu(null);
-                };
+          {/* T10 参照 Timeline.tsx:3771-3960 + ContextMenu.tsx：body portal 菜单（键盘导航/
+              翻边定位/danger/hint）。条目只接已有 op；删除类 danger；禁用项留原因。 */}
+          {contextMenu && (
+            <ContextMenu
+              x={contextMenu.x}
+              y={contextMenu.y}
+              onClose={() => setContextMenu(null)}
+              items={(() => {
                 const target = contextMenu.target;
+                const close = (fn: () => void) => () => { fn(); setContextMenu(null); };
                 if (target.kind === "clip") {
                   const clip = clips.find((c) => c.clip_id === target.clipId);
-                  if (!clip) return null;
+                  if (!clip) return [];
                   const locked = isClipLocked(clip.clip_id);
-                  const speedFactor = (clip.speed_milli ?? 1000) / 1000;
-                  // 右键菜单打开瞬间读取播放头即时值（store 直读，不触发重渲染）。
                   const playheadNowUs = activePlayheadStore.get();
+                  const speedFactor = (clip.speed_milli ?? 1000) / 1000;
                   const playheadSourceUs =
-                    (clip.source_start_us ?? 0) +
-                    (playheadNowUs - clip.timeline_start_us) * speedFactor;
+                    (clip.source_start_us ?? 0) + (playheadNowUs - clip.timeline_start_us) * speedFactor;
                   const canSplitAtPlayhead =
                     clip.asset_kind === "video" &&
                     !locked &&
@@ -3978,86 +4003,36 @@ export function TimelinePanel({
                     playheadSourceUs > (clip.source_start_us ?? 0) + 1000 &&
                     playheadSourceUs < (clip.source_end_us ?? 0) - 1000;
                   return [
-                    <button key="split" role="menuitem" disabled={!canSplitAtPlayhead}
-                      onClick={close(() => void onPatch(
-                        [{
-                          op: "split_clip",
-                          clip_id: clip.clip_id,
-                          source_time_us: Math.round(playheadSourceUs),
-                        }],
-                        "拆分片段",
-                      ))}
-                    >
-                      在播放头处拆分
-                    </button>,
-                    <button key="copy" role="menuitem" disabled={locked}
-                      onClick={close(() => onCommand?.("timeline.copy"))}
-                    >
-                      复制
-                    </button>,
-                    <button key="lock" role="menuitem"
-                      onClick={close(() => void onPatch(
-                        [{ op: "set_clip_locked", clip_id: clip.clip_id, locked: !locked }],
-                        locked ? "解锁片段" : "锁定片段",
-                      ))}
-                    >
-                      {locked ? "解锁片段" : "锁定片段"}
-                    </button>,
-                    <button key="del" role="menuitem" disabled={locked}
-                      onClick={close(() => void onPatch(
-                        [{ op: "remove_clip", clip_id: clip.clip_id }],
-                        "删除片段",
-                      ))}
-                    >
-                      删除片段
-                    </button>,
-                    <div key="sep" role="separator" className="menu-sep" />,
-                    <button key="seek" role="menuitem" onClick={close(() => onSeek?.(contextMenu.timeUs))}>
-                      定位播放头
-                    </button>,
+                    { id: "split", label: "在播放头处拆分", disabled: !canSplitAtPlayhead, hint: canSplitAtPlayhead ? undefined : locked ? "片段已锁定" : "播放头不在片段内或不可分割", onSelect: close(() => void onPatch([{ op: "split_clip", clip_id: clip.clip_id, source_time_us: Math.round(playheadSourceUs) }], "拆分片段")) },
+                    { id: "copy", label: "复制", disabled: locked, hint: locked ? "片段已锁定" : undefined, onSelect: close(() => onCommand?.("timeline.copy")) },
+                    { id: "lock", label: locked ? "解锁片段" : "锁定片段", onSelect: close(() => void onPatch([{ op: "set_clip_locked", clip_id: clip.clip_id, locked: !locked }], locked ? "解锁片段" : "锁定片段")) },
+                    { id: "sep1", separator: true },
+                    { id: "del", label: "删除片段", danger: true, disabled: locked, hint: locked ? "片段已锁定" : undefined, onSelect: close(() => void onPatch([{ op: "remove_clip", clip_id: clip.clip_id }], "删除片段")) },
+                    { id: "sep2", separator: true },
+                    { id: "seek", label: "定位播放头", onSelect: close(() => onSeek?.(contextMenu.timeUs)) },
                   ];
                 }
                 if (target.kind === "caption") {
                   return [
-                    <button key="del" role="menuitem" onClick={close(() => void onPatch(
-                      [{ op: "remove_caption", caption_id: target.captionId as never }],
-                      "删除字幕",
-                    ))}
-                    >
-                      删除字幕
-                    </button>,
-                    <div key="sep" role="separator" className="menu-sep" />,
-                    <button key="seek" role="menuitem" onClick={close(() => onSeek?.(contextMenu.timeUs))}>
-                      定位播放头
-                    </button>,
+                    { id: "del", label: "删除字幕", danger: true, onSelect: close(() => void onPatch([{ op: "remove_caption", caption_id: target.captionId as never }], "删除字幕")) },
+                    { id: "sep", separator: true },
+                    { id: "seek", label: "定位播放头", onSelect: close(() => onSeek?.(contextMenu.timeUs)) },
                   ];
                 }
                 if (target.kind === "transition") {
                   return [
-                    <button key="del" role="menuitem" onClick={close(() => void onPatch(
-                      [{ op: "remove_transition", transition_id: target.transitionId as never }],
-                      "删除转场",
-                    ))}
-                    >
-                      删除转场
-                    </button>,
+                    { id: "del", label: "删除转场", danger: true, onSelect: close(() => void onPatch([{ op: "remove_transition", transition_id: target.transitionId as never }], "删除转场")) },
                   ];
                 }
                 return [
-                  <button key="paste" role="menuitem" onClick={close(() => onCommand?.("timeline.paste"))}>
-                    粘贴到播放头
-                  </button>,
-                  <button key="seek" role="menuitem" onClick={close(() => onSeek?.(contextMenu.timeUs))}>
-                    定位播放头
-                  </button>,
-                  <button key="clear" role="menuitem" onClick={close(() => setSelection(null))}>
-                    取消选择
-                  </button>,
+                  { id: "paste", label: "粘贴到播放头", onSelect: close(() => onCommand?.("timeline.paste")) },
+                  { id: "sep1", separator: true },
+                  { id: "seek", label: "定位播放头", onSelect: close(() => onSeek?.(contextMenu.timeUs)) },
+                  { id: "clear", label: "取消选择", onSelect: close(() => setSelection(null)) },
                 ];
               })()}
-            </div>
-            );
-          })()}
+            />
+          )}
         </div>
         {/* B2: 添加转场浮层——点击两片段边界后出现。
             与共享 Dialog 同骨架：标题区 / 内容区 / 关闭钮，补齐 aria-modal、

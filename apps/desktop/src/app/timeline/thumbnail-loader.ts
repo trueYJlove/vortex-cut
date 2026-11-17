@@ -429,12 +429,41 @@ export class ThumbnailLoader {
     return this.invokeSource(job, entry);
   }
 
+  /** P230-②a：filmstrip 帧级连续失败计数（每素材）。真机回归形态：demux/
+   *  解码/票据在运行期失败 → loadFrame 静默 null → 缩略图永久空白且**无兜底**
+   *  （旧实现只对 init 失败降级）。连续 3 次失败（3 个不同请求）→ 判定该素材
+   *  filmstrip 不可用，降级 video seek 并记忆（会话级，与 degradedAssets 同语义）。
+   *  成功即清零——瞬时抖动不触发降级。 */
+  private readonly filmstripFailures = new Map<string, number>();
+  private static readonly FILMSTRIP_FAIL_LIMIT = 3;
+
+  private noteFilmstripResult(assetId: string, ok: boolean): void {
+    if (ok) { this.filmstripFailures.delete(assetId); return; }
+    const count = (this.filmstripFailures.get(assetId) ?? 0) + 1;
+    this.filmstripFailures.set(assetId, count);
+    if (count >= ThumbnailLoader.FILMSTRIP_FAIL_LIMIT) {
+      diagWarn(`filmstrip failed ${count}× asset=${assetId} → 降级 video seek`);
+      this.filmstripFailures.delete(assetId);
+      this.degradedAssets.add(assetId);
+      const entry = this.sources.get(assetId);
+      if (entry) {
+        if (entry.idleTimerCancel) entry.idleTimerCancel();
+        if (!entry.busy) { entry.source.dispose(); this.sources.delete(assetId); }
+      }
+    }
+  }
+
   /** 源互斥执行：同素材串行（解码器状态机约束）。loadFrame 在本异步函数的
    *  同步序言内调用（见 runJob 注释）。 */
   private async invokeSource(job: QueueItem, entry: SourceEntry): Promise<ThumbnailFrame | null> {
     entry.busy = true;
     try {
       const canvas = await entry.source.loadFrame(job.timeSec);
+      // P230-②a：只有 filmstrip 源计入失败统计（video seek 失败有自己的
+      // timeout 统计，且不应升级降级——它已是兜底）。
+      if (!(entry.source instanceof VideoSeekFrameSource)) {
+        this.noteFilmstripResult(job.assetId, canvas !== null);
+      }
       return canvas ? { canvas, width: Math.max(2, canvas.width), height: Math.max(2, canvas.height) } : null;
     } finally {
       entry.busy = false;
