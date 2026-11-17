@@ -5496,13 +5496,18 @@ body { background:var(--surface-body); }
    实测 45px，比标尺还高，视觉上把时间线切成两段。固定 40px 后工具栏
    与标尺（20px）合计 60px，与右侧预览栏的高度节奏一致。 */
 .editor-shell .timeline-toolbar { height:34px; min-height:34px; background:var(--ws-shell); border-bottom-color:var(--ws-line); padding:0 12px; }
-/* P230-①（2026-11-17）：轨头列底色必须与画布泳道带同源——参照里轨头地面
-   就是 --tl-gap（=--bg-panel，Timeline.tsx:4243-4246），泳道带从轨头一直铺到
-   画布右缘，2px 间隙才读成「两条轨」。原 --ws-inset(#101012) 比面板(24)和
-   泳道带(≈31.6)都深，带子在轨头处断裂，分隔感消失。轨头=面板底、行色带由
-   画布层铺（含 data-lane-picked 深一档走 --tl-lane-on，与画布 laneTone 同步）。 */
-.editor-shell .timeline-ruler, .editor-shell .timeline-left, .editor-shell .timeline-left-corner, .editor-shell .timeline-track-head { background:var(--bg-panel); border-color:var(--ws-line); }
+/* P230-① 修复v2（2026-11-17 二次修正）：参照轨头行（Timeline.tsx:2731-2759
+   heads map）自己 paint laneTone(track, lit)——轨头行 = 泳道色的延伸，
+   行间 marginTop GAP=2 露出列地面 --tl-gap(=--bg-panel)。上一轮把轨头改成
+   --bg-panel 恰好抹掉了行与缝的差（轨头与缝同色 = 无分隔）。正确形态：
+   列容器/地面 = --bg-panel；轨头行 = --tl-row（画布泳道带同令牌）；
+   选中行 = --tl-lane-on。这样 2px 缝与轨头的亮度差 = 画布区泳道带与缝的差，
+   左右两列的分隔节奏一致。 */
+.editor-shell .timeline-ruler, .editor-shell .timeline-left, .editor-shell .timeline-left-corner { background:var(--bg-panel); border-color:var(--ws-line); }
+.editor-shell .timeline-track-head { background:var(--tl-row); border-color:var(--ws-line); }
 .editor-shell .timeline-track-head[data-lane-picked="1"] { background:var(--tl-lane-on); }
+/* 深浅两主题的 --tl-row 都是半透明行色：半透明叠在轨头列的 --bg-panel 地上
+   与叠在画布容器 --tl-gap（同为 --bg-panel）上合成结果一致——左右等亮。 */
 .editor-shell .timeline-left-track { border-bottom-color:var(--ws-line); }
 .editor-shell .timeline-resize-handle { height:7px; background:transparent; border-top:1px solid var(--ws-line); }
 /* 衔接处拖拽提示：不要整条高亮。悬停时只把 7px 命中区染成一层极淡的中性色，

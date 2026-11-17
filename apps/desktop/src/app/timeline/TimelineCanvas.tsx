@@ -1998,11 +1998,15 @@ export function TimelinePanel({
         const mediaUrl = assetMedia.find((m) => m.asset_id === rect.clip.asset_id)?.media_url ?? null;
         const frames = computeFrameRequests(mediaUrl, rect.clip, view.pixelsPerSecond);
         for (let fi = 0; fi < frames.length; fi++) {
-          // 可视区优先：只抽当前视口（±160px 余量）覆盖的格；平移/缩放后
+          // 可视区优先：只抽当前视口（±400px 余量）覆盖的格；平移/缩放后
           // effect 重跑，新进入视野的格按需补抽——seek 负载不随片段总长膨胀。
+          // P230-②a 修复v2：余量 160→400。快速拖时间线时旧余量几乎每次
+          // advanceViewport 都把刚排队的格取消（epoch 失配），新请求重排——
+          // 用户看到的就是「拖动中缩略图时有时无」。400px ≈ 一屏的 1/3，
+          // 拖动节奏下队列项大都在余量内存活；seek 负载仍不随总长膨胀。
           const cellLeft = timeToX(frames[fi].fromUs, view);
           const cellRight = timeToX(frames[fi].toUs, view);
-          if (cellRight < -160 || cellLeft > canvasSize.width + 160) continue;
+          if (cellRight < -400 || cellLeft > canvasSize.width + 400) continue;
           // 键含档位帧数：档位变化 → 重新抽帧（时间点不同）；旧帧保留兜底。
           const key = `${rect.clip.clip_id}:${frames.length}:${fi}`;
           if (cache.has(key) || pendingImageKeys.current.has(`${key}:img`)) continue;
@@ -2023,7 +2027,7 @@ export function TimelinePanel({
             img.onerror = () => pendingImageKeys.current.delete(`${key}:img`);
             continue;
           }
-          // 视口内（priority 0）优先，预读余量内（±160px）为 1。
+          // 视口内（priority 0）优先，预读余量内（±400px）为 1。
           const inCoreViewport = cellLeft >= 0 && cellRight <= canvasSize.width;
           void thumbnailLoader.request({
             key,

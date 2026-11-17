@@ -322,37 +322,50 @@ export class ThumbnailLoader {
   }
 
   private async pump(): Promise<void> {
-    if (this.busy || this.disposed) return;
-    // 出队顺序：优先级低值优先；同优先级 FIFO。
-    this.queue.sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0));
-    const job = this.queue.shift();
-    if (!job) return;
-    if (job.viewportEpoch !== this.viewportEpoch) {
-      // 排队期间视口已滚动：尚未开始的任务取消（陈旧返回 null）。
-      this.pendingKeys.delete(job.key);
-      this.stats.cancelledStale += 1;
-      job.resolve(null);
-      void this.pump();
-      return;
-    }
-    this.busy = true;
-    this.activeJob = job;
-    try {
-      const frame = await this.runJob(job);
-      if (frame) {
-        this.cache.set(job.key, frame);
-        this.evictOverLimit();
-        this.stats.completed += 1;
-        this.scheduleBatchNotify(job.key);
-      } else {
-        this.stats.failed += 1;
+    // P230-②a 修复v2：pump 改为主循环——「同素材 busy」的请求重新入队后
+    // 立即继续出队下一项（旧实现递归 void this.pump() 且在 runJob 内丢弃，
+    // 丢弃路径 pendingKeys 被误删 + 该帧永不重试）。
+    while (!this.busy && !this.disposed) {
+      // 出队顺序：优先级低值优先；同优先级 FIFO。
+      this.queue.sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0));
+      const job = this.queue.shift();
+      if (!job) return;
+      if (job.viewportEpoch !== this.viewportEpoch) {
+        // 排队期间视口已滚动：尚未开始的任务取消（陈旧返回 null）。
+        this.pendingKeys.delete(job.key);
+        this.stats.cancelledStale += 1;
+        job.resolve(null);
+        continue;
       }
-      job.resolve(frame);
-    } finally {
-      this.activeJob = null;
-      this.pendingKeys.delete(job.key);
-      this.busy = false;
-      void this.pump();
+      // 同素材源在途：重新入队并继续下一项（本项保留 pendingKeys 等待执行；
+      // 若它是队尾唯一一项且源一直 busy，循环空转——用一轮 yield 打断）。
+      const entry = this.sources.get(job.assetId);
+      if (entry?.busy) {
+        this.queue.push(job);
+        if (this.queue.every(item => this.sources.get(item.assetId)?.busy)) {
+          // 全部排队项的源都在途：本轮无事可做，等在途完成的 finally 续泵。
+          return;
+        }
+        continue;
+      }
+      this.busy = true;
+      this.activeJob = job;
+      try {
+        const frame = await this.runJob(job);
+        if (frame) {
+          this.cache.set(job.key, frame);
+          this.evictOverLimit();
+          this.stats.completed += 1;
+          this.scheduleBatchNotify(job.key);
+        } else {
+          this.stats.failed += 1;
+        }
+        job.resolve(frame);
+      } finally {
+        this.activeJob = null;
+        this.pendingKeys.delete(job.key);
+        this.busy = false;
+      }
     }
   }
 
@@ -390,9 +403,14 @@ export class ThumbnailLoader {
    *  路径的事件监听必须在 pump 的同步栈内注册——测试/真实 load 事件都依赖
    *  "请求发出后、事件到达前监听就绪"）；filmstrip 源创建才走异步。 */
   private runJob(job: QueueItem): Promise<ThumbnailFrame | null> {
+    // P230-②a 修复v2：busy 分支上移到 pump 主循环（重排队 + continue），
+    // runJob 到达时源必然空闲——此处保留兜底断言（不应到达）。
     const entry = this.sources.get(job.assetId);
     if (entry) {
-      if (entry.busy) return Promise.resolve(null); // 同素材上一帧仍在途：丢弃本轮（effect 重跑会补）
+      if (entry.busy) {
+        this.queue.push(job);
+        return Promise.resolve(null);
+      }
       return this.invokeSource(job, entry);
     }
     if (this.degradedAssets.has(job.assetId) || !this.createFilmstripSource) {
