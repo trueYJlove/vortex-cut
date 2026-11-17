@@ -219,7 +219,10 @@ export interface FrameResidency {
   uploadsOk: number;
   uploadsErr: number;
   closedOnErr: number;
-  uploadMode: "probe" | "direct" | "copyTo";
+  /** WP-P227 Slice 2：WebGPU 后端扩展 "external"（importExternalTexture 直绑）
+   *  与 "extFail"（copyExternalImageToTexture 回退）。WebGL2 worker 只产生
+   *  原有三值——联合变宽是纯增量，两后端的消息面不变。 */
+  uploadMode: "probe" | "direct" | "copyTo" | "external" | "extFail";
   textureBytes: number;
 }
 

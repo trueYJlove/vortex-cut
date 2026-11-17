@@ -10,6 +10,11 @@ export interface CompositorClientInit {
   ringDepth: number;
   canvasWidth: number;
   canvasHeight: number;
+  /** WP-P227 Slice 2：合成器后端。"webgpu" = 尝试 WebGPU 零拷贝路径
+   *  （importExternalTexture；worker 内 init 失败自动回退 WebGL2，见 create），
+   *  "webgl2" = 既有路径（缺省，发布构建行为与 HEAD 完全一致）。
+   *  门控来自 VITE_AIVS_GPU（诊断构建显式开启），非用户可选项。 */
+  backend?: "webgl2" | "webgpu";
   captionStyles: Record<string, { font_size: number; primary_rgb: [number, number, number]; outline_rgb: [number, number, number]; outline: number; shadow: number; border_style: number; margin_v: number; font_family?: string }>;
   captionOverrideStyles: Record<string, Partial<{ font_size: number; primary_rgb: [number, number, number]; outline_rgb: [number, number, number]; outline: number; shadow: number; border_style: number; margin_v: number; letter_spacing: number; bold: boolean; italic: boolean; underline: boolean; alignment: number; back_rgb: [number, number, number]; fx_preset: string }>>;
   /** B13-R 判别诊断开关：强制 copyTo（perf 诊断构建经 runtime 注入）。 */
@@ -39,11 +44,15 @@ export class CompositorWorkerClient {
   lastResidency: FrameResidency | null = null;
   private lastResidencyAt = 0;
 
-  private constructor(canvas: HTMLCanvasElement) {
+  private constructor(canvas: HTMLCanvasElement, backend: "webgl2" | "webgpu") {
     // transferControlToOffscreen 每元素仅可一次，由 create() 统一调用；
     // jsdom 无此 API → 抛错（合成预览回退路径，测试环境确定性）。
     this.canvas = canvas;
-    this.worker = new Worker(new URL("./compositor-worker.worker.ts", import.meta.url), { type: "module" });
+    if (backend === "webgpu") {
+      this.worker = new Worker(new URL("./compositor-webgpu.worker.ts", import.meta.url), { type: "module" });
+    } else {
+      this.worker = new Worker(new URL("./compositor-worker.worker.ts", import.meta.url), { type: "module" });
+    }
     this.worker.addEventListener("message", this.onMessage);
     this.worker.addEventListener("error", this.onError);
     this.worker.addEventListener("messageerror", this.onMessageError);
@@ -133,7 +142,31 @@ export class CompositorWorkerClient {
    *  transferControlToOffscreen 每元素仅可一次：canvas 由会话新建并随会话销毁。 */
   static async create(canvas: HTMLCanvasElement, init: CompositorClientInit, signal?: AbortSignal): Promise<CompositorWorkerClient> {
     throwIfAborted(signal);
-    const client = new CompositorWorkerClient(canvas);
+    // WP-P227 Slice 2：backend="webgpu" 先建 WebGPU worker；init 失败
+    // （initError = 驱动/上下文不可得）→ 关闭之并回退 WebGL2 worker 重建。
+    // 回退是整体性的（同 init 参数、同命令面），会话侧无感知——与现有
+    // contextLost→重建链路同构，不新增会话状态。
+    if (init.backend === "webgpu") {
+      try {
+        return await CompositorWorkerClient.createWithWorkerFile(
+          canvas, init, "webgpu", signal);
+      } catch (error) {
+        // WebGPU 不可得：记日志性诊断（gpuInfo 保留 webgl 回退值）并回退。
+        void error;
+      }
+    }
+    return await CompositorWorkerClient.createWithWorkerFile(
+      canvas, init, "webgl2", signal);
+  }
+
+  private static async createWithWorkerFile(
+    canvas: HTMLCanvasElement,
+    init: CompositorClientInit,
+    backend: "webgl2" | "webgpu",
+    signal?: AbortSignal,
+  ): Promise<CompositorWorkerClient> {
+    throwIfAborted(signal);
+    const client = new CompositorWorkerClient(canvas, backend);
     try {
       const info = await workerReady<GpuInfo>(client.worker, data => {
         if (data.type === "initError") throw new Error(data.message);

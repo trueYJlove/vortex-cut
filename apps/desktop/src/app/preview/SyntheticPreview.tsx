@@ -36,7 +36,7 @@ export interface SyntheticPreviewProps {
   /** 会话句柄上抛（2026-11-11 scrub 直通）：App 在拖拽风暴中用它绕过 React 提交
    *  直接 seekToFrame（dev 下全树提交 ~36ms 是拖动卡顿的主因）；null = 会话
    *  重建/卸载。App 必须在会话 null 后停止直呼。 */
-  onSession?: (session: { seekToFrame(target: number): Promise<number>; beginScrubStorm(): void; endScrubStorm(): void } | null) => void;
+  onSession?: (session: { seekToFrame(target: number): Promise<number>; beginScrubStorm(): void; endScrubStorm(): void; getMeterSamples?(): readonly [Float32Array, Float32Array] | null } | null) => void;
   /** asset_id → aivideo:// 票据 URL（App 既有素材通道）。 */
   mediaUrls: Map<string, string>;
   /** clip_id → 片段音频配置（编辑态透传；未提供则合成预览静音）。 */
@@ -571,7 +571,11 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
   // 会产出 format=null 坏帧，随后渲染进程**永久堵死且无提示**。剪映在同环境下会弹窗
   // 告知并降级到 SDR（检测/告知/降级三步），本产品三件都没有；本提示补上前两件。
   const hdrBlocked = Boolean(metrics?.hdr_media) && metrics?.hdr_decodable === false;
-  const anomaly = Boolean(metrics?.last_error) || hardwareMissing || backendIsFfmpeg;
+  // WP-P227 Slice 3：「假硬解」形态——配置成功但实测超预算。与 hardwareMissing
+  // （显式软解）互斥分支：请求已发出却解不动，文案必须区分，否则用户拿到
+  // 「硬解不可用」会误以为是环境问题而无法行动（实际该做的是转代理）。
+  const suspectedSoftware = metrics?.suspected_software_decode === true;
+  const anomaly = Boolean(metrics?.last_error) || hardwareMissing || backendIsFfmpeg || suspectedSoftware;
   // **P203 教训（2026-11-01）：不要把 hdrBlocked 放进 anomaly**。
   // 实测：anomaly 一旦为 true（无论由 hdrBlocked 还是恒真触发），指标条渲染
   // 后约 2-4 秒**渲染进程必崩**（生产构建下）。这是既有缺陷（生产构建此前从未
@@ -674,6 +678,9 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
           )}
           {hardwareMissing && (
             <span className="synthetic-backend-warn">{`硬解不可用（${metrics.decode_hardware}，软件解码）`}</span>
+          )}
+          {suspectedSoftware && !hardwareMissing && (
+            <span className="synthetic-backend-warn">{`硬解请求已发出但实测解码超预算（p95 ${metrics.decode_ms_p95}ms > ${33.3}ms），疑似实际软解——建议生成代理素材`}</span>
           )}
           {/* 分段计时（dev 默认开、可通过 VITE_AIVS_DECODE_TIMING=1 强制）：
               把「解码 p95 的尾巴」拆成 喂包 / 出帧 / 残差 三段——p95 高到底是

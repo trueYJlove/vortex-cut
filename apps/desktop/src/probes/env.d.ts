@@ -7,6 +7,8 @@ interface ImportMetaEnvProbe {
   readonly VITE_AIVS_FORCE_SW_DECODE?: string;
   /** P33 解码 RTT 分段计时（=1 开启；默认关，生产零开销）。 */
   readonly VITE_AIVS_DECODE_TIMING?: string;
+  /** WP-P227 Slice 2：WebGPU 合成器后端门控（诊断构建=1 启用；缺省/0=WebGL2）。 */
+  readonly VITE_AIVS_GPU?: string;
   readonly PROD: boolean;
   readonly MODE: string;
 }

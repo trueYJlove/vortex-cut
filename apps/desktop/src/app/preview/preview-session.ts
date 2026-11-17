@@ -121,6 +121,11 @@ export interface PreviewSessionMetrics {
    *  = **软解**（3440x1440 上 ~190ms/帧、720p 上 ~50ms/帧，观感幻灯片）；
    *  空串 = 尚未握手。用于把「GPU/硬解不可用」这类环境问题当场暴露出来。 */
   decode_hardware: string;
+  /** WP-P227 Slice 3：「假硬解」推断（prefer-hardware 请求成功但实测 p95 超
+   *  实时预算、样本 ≥30）。true 时 UI 提示「疑似实际软解，建议生成代理」。
+   *  判据与 decodeBudget 同源（REALTIME_FRAME_BUDGET_MS / DECODE_BUDGET_MIN_SAMPLES）；
+   *  不自动降级——降级治「解不动」，代理治「解得慢」，两个失败模式不同。 */
+  suspected_software_decode: boolean;
   /** P203：当前输入中是否有 HDR 素材（demux 由 colr 盒判定，多输入任一为真）。
    *  与 `hdr_decodable` 配对使用：前者是素材属性，后者是环境能力。
    *  两者组合才决定是否该提示用户——**不能只看其一**：
@@ -355,6 +360,17 @@ export class PreviewSession {
   private proxyDecodedAssets = new Set<string>();
   private audioByClip: Map<string, SegmentAudioConfig> | null = null;
   private audioCtx: AudioContext | null = null;
+  /** 电平表母线：主输出前插的 analyser（audioCtx 建立时创建；失败为 null 直连）。 */
+  masterAnalyser: AnalyserNode | null = null;
+  private masterSamples: Float32Array | null = null;
+  /** 供时间线右缘 AudioMeters 采样：返回当前母线时域样本（−1…1）；无图返回 null。 */
+  getMeterSamples(): readonly [Float32Array, Float32Array] | null {
+    if (!this.masterAnalyser || !this.masterSamples) return null;
+    this.masterAnalyser.getFloatTimeDomainData(this.masterSamples);
+    // 母线是合流信号（单声道语义）：同一 buffer 复用为双通道输入，电平表按
+    // 通道读同一包络——参照 player 的输出表也按主输出计。
+    return [this.masterSamples, this.masterSamples] as const;
+  }
   /** 变速不变调 worklet 模块是否已装入本 AudioContext（失败 → 全片段 legacy 回退）。 */
   private audioWorkletReady = false;
   private readonly audioRigs = new Map<string, AudioRig>();
@@ -451,6 +467,12 @@ export class PreviewSession {
   private poolWarned = false;
   /** B13-R 判别诊断开关：强制 copyTo 上传路径（perf 诊断构建注入）。 */
   private forceCopyTo = false;
+  /** WP-P227 Slice 2：合成器后端门控（诊断构建显式开启；缺省 webgl2 与
+   *  HEAD 行为逐字节一致）。会话构造时求值一次，生命周期内不变。 */
+  private gpuBackend: "webgl2" | "webgpu" = (() => {
+    try { return import.meta.env.VITE_AIVS_GPU === "1" ? "webgpu" : "webgl2"; }
+    catch { return "webgl2"; }
+  })();
   /** B13-R R3：驻留平台预警一次性标志。 */
   private residencyWarned = false;
   /** B13-R R3：预警文案（独立通道，见 PreviewSessionMetrics.residency_warning）。 */
@@ -566,6 +588,7 @@ export class PreviewSession {
     const { CompositorWorkerClient } = await import("./compositor-worker.js");
     throwIfAborted(signal);
     const client = await CompositorWorkerClient.create(canvas, {
+      backend: session.gpuBackend,
       // **上传尺寸必须解码源的真实宽度，不能用 IR 的原片几何**（P211，2026-11-03）：
       // 代理只替换解码输入，IR geometry 仍是原片（本素材 3840×2160），而代理帧是
       // 720×1280。合成器用 sourceWidth 算缩放着色器的 LOD
@@ -708,6 +731,15 @@ export class PreviewSession {
     // 入窗段），暂停态仅当前段（A02 止血语义，整段解码仍会发生——见已知限制）。
     if (audioByClip && audioByClip.size && typeof window !== "undefined" && "AudioContext" in window) {
       session.audioCtx = new AudioContext();
+      // 电平表母线（参照 player 的输出表）：主输出前插 analyser，供时间线右缘
+      // AudioMeters 读取时域样本（参照 AudioMeters 的数据入口同形）。
+      try {
+        const analyser = session.audioCtx.createAnalyser();
+        analyser.fftSize = 1024;
+        analyser.connect(session.audioCtx.destination);
+        session.masterAnalyser = analyser;
+        session.masterSamples = new Float32Array(analyser.fftSize);
+      } catch { session.masterAnalyser = null; }
       // 变速不变调 worklet 装载（Blob URL；失败静默回退 playbackRate 直调路径）。
       try {
         await session.audioCtx.audioWorklet.addModule(createVarispeedWorkletUrl());
@@ -1822,7 +1854,7 @@ export class PreviewSession {
       // 单声道：一份频道数据，worklet 侧双输出复用同引用（只读）。
       node.port.postMessage({ type: "set-buffer", channels }, channels.map(data => data.buffer));
       node.connect(rig.gain ??= this.audioCtx.createGain());
-      rig.gain.connect(this.audioCtx.destination);
+      if (this.masterAnalyser) { rig.gain.connect(this.masterAnalyser); rig.gain.connect(this.audioCtx.destination); } else { rig.gain.connect(this.audioCtx.destination); }
       rig.worklet = node;
       rig.workletBuffer = true;
       rig.buffer = null; // PCM 已迁入 worklet（slice 副本 transfer），释放主线程持有
@@ -1874,7 +1906,7 @@ export class PreviewSession {
         // drained：段末/EOF——syncAudio 出段停声已覆盖，无需额外动作
       };
       node.connect(rig.gain ??= this.audioCtx.createGain());
-      rig.gain.connect(this.audioCtx.destination);
+      if (this.masterAnalyser) { rig.gain.connect(this.masterAnalyser); rig.gain.connect(this.audioCtx.destination); } else { rig.gain.connect(this.audioCtx.destination); }
       rig.worklet = node;
       rig.streaming = true;
       rig.workletBuffer = true; // 流式 rig：worklet 就绪（buffer 语义复用出声判定）
@@ -1964,7 +1996,7 @@ export class PreviewSession {
       source.playbackRate.value = speed;
       rig.gain ??= this.audioCtx.createGain();
       source.connect(rig.gain);
-      rig.gain.connect(this.audioCtx.destination);
+      if (this.masterAnalyser) { rig.gain.connect(this.masterAnalyser); rig.gain.connect(this.audioCtx.destination); } else { rig.gain.connect(this.audioCtx.destination); }
       source.start(0, Math.max(0, offset));
       rig.source = source;
       rig.workletActive = false;
@@ -2558,6 +2590,18 @@ export class PreviewSession {
       // 被瞬时抖动永久钉死，而界面当时没有任何提示）。
       decode_backend: [...this.rigs.values()].map(rig => rig.preferFfmpeg ? "ffmpeg" : (rig.worker?.backend ?? "?")).join(","),
       decode_hardware: [...this.rigs.values()].map(rig => rig.worker?.hardware ?? "").join(","),
+      // WP-P227 Slice 3：「假硬解」推断——decode_hardware=prefer-hardware 只说明
+      // 配置被接受（请求≠承诺），实测 p95 持续超预算且样本充足时按「疑似实际
+      // 软解」上报（真机 192ms 形态：显式 no-preference 提示对此失明）。
+      // 判据保守：任一视频输入 over_budget 即报（decodeBudget 同源），不自动
+      // 降级、不改 preferFfmpeg——降级治「解不动」，代理治「解得慢」。
+      suspected_software_decode: [...this.rigs.entries()].some(([inputId, rig]) => {
+        if (rig.kind !== "video" || rig.preferFfmpeg) return false;
+        if (rig.worker?.hardware !== "prefer-hardware") return false;
+        const times = this.decodeTimesByInput.get(inputId);
+        if (!times || times.length < DECODE_BUDGET_MIN_SAMPLES) return false;
+        return percentile(times, 0.95) > REALTIME_FRAME_BUDGET_MS;
+      }),
       // P203：素材侧（demux 判定）与环境侧（浏览器能力）分开报，二者组合才决定提示。
       // 环境侧在构造时求值一次：显示器 HDR 状态在会话生命周期内不会变。
       // 锁存：worker 被降级替换后 `hdr` 会丢失，故一旦判定为 true 就保持。
