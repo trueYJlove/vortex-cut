@@ -23,6 +23,16 @@ const MESSAGES: Record<string, string> = {
   // 属性面板
   "inspector.trackLocked": "此轨道已锁定，编辑已禁用。",
   "inspector.workspace.categories": "属性分类",
+  // 分类条页签（参照 zh-CN.ts:1281-1291）
+  "inspector.workspace.tabs.text": "文本",
+  "inspector.workspace.tabs.wordart": "艺术字",
+  "inspector.workspace.tabs.motion": "动画",
+  "inspector.workspace.tabs.properties": "属性",
+  "inspector.workspace.tabs.adjust": "调节",
+  "inspector.workspace.tabs.effects": "效果",
+  "inspector.workspace.tabs.sound": "声音",
+  "inspector.workspace.tabs.advanced": "高级",
+  "inspector.workspace.tabs.info": "信息",
 };
 
 /** 取文案；未配的 key 回退为 path 本身（与参照一致，不会渲染成空）。 */
