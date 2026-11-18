@@ -292,9 +292,10 @@ export function SyntheticPipLayer(props: SyntheticPipLayerProps): React.ReactEle
               />
             ))}
             {selected && !locked && (
+              // P11 参照 StageTransformFrame.tsx:174-193：旋转 = 角外 20×20 隐形热区（自定义光标由 CSS 提供）。
               <span
                 className="sp-rotate"
-                title="旋转"
+                aria-label="旋转画中画"
                 {...gestureHandlers}
                 onPointerDown={event => beginGesture(event, box, "rotate")}
               />
