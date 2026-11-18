@@ -105,9 +105,9 @@ function setup(options: {
   return { desktop, onAppliedTimeline };
 }
 
-/** 打开「音频」页签（视频片段才有）。 */
+/** 打开「声音」分类页签（I1 IA 重构后音频组归「声音」，参照 zh-CN tab 名）。 */
 function openAudioTab(): void {
-  fireEvent.click(screen.getByRole("tab", { name: /音频/ }));
+  fireEvent.click(screen.getByRole("tab", { name: /声音/ }));
 }
 
 function loudnessRow(): HTMLElement {

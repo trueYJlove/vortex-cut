@@ -70,7 +70,7 @@ function setup(audio: Partial<TimelineClip["audio"]> = {}) {
   const onPatch = vi.fn().mockResolvedValue(undefined);
   const onDraft = vi.fn();
   render(<Harness initial={value} onPatch={onPatch} onDraft={onDraft} />);
-  fireEvent.click(screen.getByRole("tab", { name: /音频/ }));
+  fireEvent.click(screen.getByRole("tab", { name: /声音/ }));
   return { onPatch, onDraft, value };
 }
 /**
@@ -102,9 +102,9 @@ describe("音频淡入/淡出输入框：真控件", () => {
     const fadeOut = fadeInput("淡出时长");
     expect(fadeIn).toBeEnabled();
     expect(fadeOut).toBeEnabled();
-    // 单位与既有 UI 一致：秒（1.2s / 0.8s）。
-    expect(fadeIn.value).toBe("1.2");
-    expect(fadeOut.value).toBe("0.8");
+    // 单位与既有 UI 一致：秒。I9 后步长=1/fps（帧对齐），显示 2 位小数（1.20s / 0.80s）。
+    expect(fadeIn.value).toBe("1.20");
+    expect(fadeOut.value).toBe("0.80");
   });
 
   it("输入只改本地草稿，不发 patch（提交才写时间线）", () => {
