@@ -5,6 +5,9 @@ import type { AuthoritativePreviewPresentation } from "../../electron/preload/in
 import { PanelTabs, SubTabs, PGroup, PSep, PRow, Switch, Seg, SoonBadge, PNote, NumberField, RangeRow } from "./PropertyControls.js";
 import { AlignBar } from "../ui/of/AlignBar.js";
 import { MenuSelect } from "../ui/of/MenuSelect.js";
+import { InspectorWorkspace, InspectorReadOnly } from "../ui/of/InspectorWorkspace.js";
+import type { InspectorKind } from "../ui/of/inspector-sections.js";
+import { Section, NumField } from "../ui/of/inspector-fields.js";
 import { errorCode } from "./safeErrors.js";
 
 type SaveState = "已保存" | "保存中" | "保存失败" | "草稿冲突";
@@ -116,7 +119,9 @@ export function ClipProperties({ clip, working, baseRevisionId, locked, onPatch,
   const isVideo = clip.asset_kind === "video";
   const isImage = clip.asset_kind === "image";
   const isAudioClip = clip.asset_kind === "audio";
-  const overlay = clip.track_id !== "V1" && clip.track_id !== "A1";
+  // P231 Q2：统一盒模型后全视觉轨同语义（mask/keying/动画全段生效），
+  // overlay 门控已无意义——恒 false（保留变量以免下游 JSX 大改）。
+  const overlay = false;
   const updateLocal = (next: Partial<TimelineClip>) => onDraft({ ...working, clips: working.clips.map(item => item.clip_id === clip.clip_id ? { ...item, ...next } : item) });
   const speed = clip.speed_milli ?? 1000;
   const setSpeed = (value: number) => void onPatch([{ op: "set_speed", clip_id: clip.clip_id, speed_milli: value }], value === 1000 ? "恢复原速" : `调整速度 ${speedLabel(value)}`);
@@ -141,16 +146,6 @@ export function ClipProperties({ clip, working, baseRevisionId, locked, onPatch,
   const applyKey = (patch: Partial<NonNullable<TimelineClip["keying"]>>, summary: string) => void onPatch([{ op: "set_clip_keying", clip_id: clip.clip_id, keying: { ...clip.keying, ...patch } }], summary);
   const draftKey = (patch: Partial<NonNullable<TimelineClip["keying"]>>) => updateLocal({ keying: { ...clip.keying, ...patch } });
 
-  // ---- 页签状态（跨片段选择持久；按素材类型回退到首个可用页签） ----
-  const topTabs = isAudioClip
-    ? [{ id: "basic", label: "基础" }, { id: "voice", label: "换音色", soon: true }, { id: "fx", label: "声音效果", soon: true }, { id: "speed", label: "变速" }, { id: "tools", label: "手法" }]
-    : isVideo
-      ? [{ id: "pic", label: "画面" }, { id: "aud", label: "音频" }, { id: "speed", label: "变速" }, { id: "anim", label: "动画" }, { id: "tools", label: "手法" }]
-      : [{ id: "pic", label: "画面" }, { id: "speed", label: "变速" }, { id: "anim", label: "动画" }];
-  const [tab, setTab] = useState<string>(isAudioClip ? "basic" : "pic");
-  const [picSub, setPicSub] = useState("basic");
-  const [audSub, setAudSub] = useState("abasic");
-  const activeTab = topTabs.some(t => t.id === tab) ? tab : topTabs[0].id;
   // 等比缩放：可点开关（原型交互）。当前版本缩放恒为等比，开关仅承载视觉状态。
   const [ratioOn, setRatioOn] = useState(true);
   const RatioSwitch = () => <Switch on={ratioOn} onToggle={() => setRatioOn(v => !v)} title="当前版本仅支持等比缩放" />;
@@ -202,66 +197,71 @@ export function ClipProperties({ clip, working, baseRevisionId, locked, onPatch,
      我们是「完整适配 / 裁切填满 / 模糊背景」三选一（我们的布局语义，比参照多一档模糊背景）。
      四边裁切与比例芯片我们还没有对应的数据（Core 没有 crop 四边与 clip-path 的 patch 操作），
      故这一段只做段控 + 分组标题与重置入口——**不摆不能改的假控件**，比摆出来更不容易误导。 */
-  const picBasic = <>
-    <PGroup title="位置与大小" chev onReset={() => void onPatch([{ op: "set_clip_transform", clip_id: clip.clip_id, transform: {} }], "重置画面变换")}>
-      <AlignBar />
-      <div className="pp-grid2">
-        <NumberField value={Math.round((fixedTf.x - 0.5) * 200)} min={-100} max={100} step={1} ariaLabel="位置 X" mark="X"
-          onDraft={v => updateLocal({ transform: { ...clip.transform, x: 0.5 + v / 200 } })}
-          onCommit={v => setTransform({ x: 0.5 + v / 200 }, "调整画中画水平位置")} />
-        <NumberField value={Math.round((fixedTf.y - 0.5) * 200)} min={-100} max={100} step={1} ariaLabel="位置 Y" mark="Y"
-          onDraft={v => updateLocal({ transform: { ...clip.transform, y: 0.5 + v / 200 } })}
-          onCommit={v => setTransform({ y: 0.5 + v / 200 }, "调整画中画垂直位置")} />
-      </div>
-      <div className="pp-grid2-lock">
-        <NumberField value={Math.round(fixedTf.scale * 100)} min={5} max={500} step={1} unit="%" ariaLabel="宽度（相对舞台）" mark="W"
-          onDraft={v => updateLocal({ transform: { ...clip.transform, scale: v / 100 } })}
-          onCommit={v => setTransform({ scale: v / 100 }, `调整画面宽度 ${Math.round(v)}%`)} />
-        <NumberField value={Math.round(fixedTf.scale * 100)} min={5} max={500} step={1} unit="%" ariaLabel="高度（相对舞台）" mark="H"
-          onDraft={v => updateLocal({ transform: { ...clip.transform, scale: v / 100 } })}
-          onCommit={v => setTransform({ scale: v / 100 }, `调整画面高度 ${Math.round(v)}%`)} />
-        <RatioSwitch />
-      </div>
-      <div className="pp-grid2">
-        <NumberField value={fixedTf.rotate} min={-180} max={180} step={1} unit="°" decimals={2} ariaLabel="旋转" mark="∠"
-          onDraft={v => updateLocal({ transform: { ...clip.transform, rotate: v } })}
-          onCommit={v => setTransform({ rotate: v }, "调整画中画旋转")} />
-        <span />
-      </div>
-  </PGroup>
-    <PGroup title="外观">
-      <RangeRow label="不透明度" value={fixedTf.opacity * 100} min={0} max={100} step={1} unit="%" decimals={0} w66
-        onDraft={v => updateLocal({ transform: { ...clip.transform, opacity: v / 100 } })}
-        onCommit={v => setTransform({ opacity: v / 100 }, "调整画中画不透明度")} />
-    </PGroup>
-    <PGroup title="更多画面能力" collapsible defaultClosed tail={<SoonBadge />}>
-      <PRow label="混合模式" dim><Switch on={false} onToggle={() => {}} disabled /></PRow>
-      <PRow label="变形" dim><Switch on={false} onToggle={() => {}} disabled /></PRow>
-      <PRow label="视频防抖" dim><Switch on={false} onToggle={() => {}} disabled /></PRow>
-      <PRow label="画质增强" dim><Switch on={false} onToggle={() => {}} disabled /></PRow>
-    </PGroup>
-    <PSep />
-    <PGroup title="裁剪与填充" onReset={() => void onPatch([{ op: "set_layout", clip_id: clip.clip_id, layout: "fit" as TimelineLayout }], "重置裁剪与填充")}>
-      <Seg value={clip.layout}
-        options={[{ value: "fit", label: "完整适配" }, { value: "crop_fill", label: "裁切填满" }, { value: "blurred_background", label: "模糊背景" }]}
-        onChange={v => void onPatch([{ op: "set_layout", clip_id: clip.clip_id, layout: v as TimelineLayout }], "调整布局")} />
-    </PGroup>
+  /* I1：原 picBasic 的 PGroup 壳上移为 Section（骨架处），此处只保留分组内层。 */
+  const picBasicInner = <>
+    <AlignBar />
+    <div className="pp-grid2">
+      <NumberField value={Math.round((fixedTf.x - 0.5) * 200)} min={-100} max={100} step={1} ariaLabel="位置 X" mark="X"
+        onDraft={v => updateLocal({ transform: { ...clip.transform, x: 0.5 + v / 200 } })}
+        onCommit={v => setTransform({ x: 0.5 + v / 200 }, "调整画中画水平位置")} />
+      <NumberField value={Math.round((fixedTf.y - 0.5) * 200)} min={-100} max={100} step={1} ariaLabel="位置 Y" mark="Y"
+        onDraft={v => updateLocal({ transform: { ...clip.transform, y: 0.5 + v / 200 } })}
+        onCommit={v => setTransform({ y: 0.5 + v / 200 }, "调整画中画垂直位置")} />
+    </div>
+    <div className="pp-grid2-lock">
+      <NumberField value={Math.round(fixedTf.scale * 100)} min={5} max={500} step={1} unit="%" ariaLabel="宽度（相对舞台）" mark="W"
+        onDraft={v => updateLocal({ transform: { ...clip.transform, scale: v / 100 } })}
+        onCommit={v => setTransform({ scale: v / 100 }, `调整画面宽度 ${Math.round(v)}%`)} />
+      <NumberField value={Math.round(fixedTf.scale * 100)} min={5} max={500} step={1} unit="%" ariaLabel="高度（相对舞台）" mark="H"
+        onDraft={v => updateLocal({ transform: { ...clip.transform, scale: v / 100 } })}
+        onCommit={v => setTransform({ scale: v / 100 }, `调整画面高度 ${Math.round(v)}%`)} />
+      <RatioSwitch />
+    </div>
+    <div className="pp-grid2">
+      <NumberField value={fixedTf.rotate} min={-180} max={180} step={1} unit="°" decimals={2} ariaLabel="旋转" mark="∠"
+        onDraft={v => updateLocal({ transform: { ...clip.transform, rotate: v } })}
+        onCommit={v => setTransform({ rotate: v }, "调整画中画旋转")} />
+      <span />
+    </div>
     {isImage && <>
-      <PSep />
-      <PGroup title="素材时长">
-        <PRow label="时长">
+      <div className="pp-row">
+        <label>图片时长</label>
+        <span className="pp-num">
           <NumberField value={(clip.timeline_end_us - clip.timeline_start_us) / 1_000_000} min={0.5} max={30} step={0.5} unit="s" decimals={1} ariaLabel="图片时长" mark="⏱"
             onDraft={v => updateLocal({ timeline_end_us: clip.timeline_start_us + Math.round(v * 1_000_000) })}
             onCommit={v => void onPatch([{ op: "set_image_duration", clip_id: clip.clip_id, duration_us: Math.round(v * 1_000_000) }], "调整图片时长")} />
-        </PRow>
-      </PGroup>
+        </span>
+      </div>
     </>}
     <PNote>对齐工具条（九宫格摆放）为规划占位，落地后显示在此处。</PNote>
   </>;
+  /* I6 参照 inspector-look.tsx:638-646：外观组 = 不透明度 + 圆角 + 混合模式。
+     圆角/混合模式暂无 patch 通道——按参照形态摆 disabled 控件（AlignBar disabled 先例），版面完整但不误导。 */
+  const picAppearance = <>
+    <RangeRow label="不透明度" value={fixedTf.opacity * 100} min={0} max={100} step={1} unit="%" decimals={0} w66
+      onDraft={v => updateLocal({ transform: { ...clip.transform, opacity: v / 100 } })}
+      onCommit={v => setTransform({ opacity: v / 100 }, "调整画中画不透明度")} />
+    <div className="pp-row">
+      <label>圆角</label>
+      <span className="pp-num"><NumberField min={0} max={0} placeholder="规划中" ariaLabel="圆角（规划中）" disabled onCommit={() => {}} /></span>
+    </div>
+    <div className="pp-row">
+      <label>混合模式</label>
+      <span className="pp-num"><NumberField min={0} max={0} placeholder="规划中" ariaLabel="混合模式（规划中）" disabled onCommit={() => {}} /></span>
+    </div>
+  </>;
+  const morePicture = <>
+    <PRow label="变形" dim><Switch on={false} onToggle={() => {}} disabled /><SoonBadge /></PRow>
+    <PRow label="视频防抖" dim><Switch on={false} onToggle={() => {}} disabled /><SoonBadge /></PRow>
+    <PRow label="画质增强" dim><Switch on={false} onToggle={() => {}} disabled /><SoonBadge /></PRow>
+  </>;
+  const picCropFill = <Seg value={clip.layout}
+    options={[{ value: "fit", label: "完整适配" }, { value: "crop_fill", label: "裁切填满" }, { value: "blurred_background", label: "模糊背景" }]}
+    onChange={v => void onPatch([{ op: "set_layout", clip_id: clip.clip_id, layout: v as TimelineLayout }], "调整布局")} />;
 
   // ---- 画面 → 抠像 ----
   const picKey = <>
-    {!overlay && <PNote warn>抠像当前仅覆盖轨（画中画）片段参与成片渲染；主轨片段的抠像待后续支持。</PNote>}
+    {/* P231：抠像全视觉轨生效（统一盒模型），警告文案已移除。 */}
     <PGroup title="色度抠像" tail={<span className="tail">绿幕 / 纯色背景</span>}>
       {!clip.keying ? <>
         <button type="button" className="pp-btn"
@@ -293,7 +293,7 @@ export function ClipProperties({ clip, working, baseRevisionId, locked, onPatch,
 
   // ---- 画面 → 蒙版 ----
   const picMask = <>
-    {!overlay && <PNote warn>蒙版当前仅覆盖轨（画中画）片段参与成片渲染；主轨片段的蒙版待后续支持。</PNote>}
+    {/* P231：蒙版全视觉轨生效（统一盒模型），警告文案已移除。 */}
     <PGroup title="蒙版形状">
       <Seg value={clip.mask?.kind ?? "none"}
         options={[{ value: "none", label: "无" }, { value: "linear", label: "线性" }, { value: "rect", label: "矩形" }, { value: "ellipse", label: "椭圆" }]}
@@ -334,98 +334,110 @@ export function ClipProperties({ clip, working, baseRevisionId, locked, onPatch,
     <PNote>画布上<b>虚线框 = 蒙版边界</b>（相对本片段画面）：拖动平移、拖白点缩放；区域外透出下层画面。羽化向内柔化边界（0 = 硬边），预览与成片一致。</PNote>
   </>;
 
-  // ---- 音频 → 基础（视频片段音频 / 音频素材共用） ----
+  /* ---- 声音组（I1：PGroup 壳上移为 Section；I9：淡入淡出 max 随片段时长、step=1/fps） ---- */
+  const fadeMaxS = (clip.timeline_end_us - clip.timeline_start_us) / 1_000_000;
+  const fadeStep = (() => { const f = working.canvas.fps_num && working.canvas.fps_den ? working.canvas.fps_num / working.canvas.fps_den : 30; return 1 / Math.max(1, Math.min(120, f)); })();
+  const audioFadeSection = <>
+    <div className="pp-grid2">
+      <NumberField value={(clip.audio.fade_in_us ?? 0) / 1_000_000} min={0} max={fadeMaxS} step={fadeStep} unit="s" decimals={2} ariaLabel="淡入时长" mark="入"
+        onDraft={v => updateLocal({ audio: { ...clip.audio, fade_in_us: Math.round(v * 1_000_000) } })}
+        onCommit={v => void onPatch([{ op: "set_audio", clip_id: clip.clip_id, enabled: clip.audio.enabled, gain_db: clip.audio.gain_db, ...audioFadeOf(clip, "fade_in_us", v) }], "调整淡入时长")} />
+      <NumberField value={(clip.audio.fade_out_us ?? 0) / 1_000_000} min={0} max={fadeMaxS} step={fadeStep} unit="s" decimals={2} ariaLabel="淡出时长" mark="出"
+        onDraft={v => updateLocal({ audio: { ...clip.audio, fade_out_us: Math.round(v * 1_000_000) } })}
+        onCommit={v => void onPatch([{ op: "set_audio", clip_id: clip.clip_id, enabled: clip.audio.enabled, gain_db: clip.audio.gain_db, ...audioFadeOf(clip, "fade_out_us", v) }], "调整淡出时长")} />
+    </div>
+    <PNote>时长上限为片段时长；步长按画布帧率对齐（1/fps）。</PNote>
+  </>;
+  /* ---- 时间组（I2 参照 FilmInspector.tsx:1594-1741 TimingSection + SpeedField）：
+     开始/入点/时长 + 倍速 + 倒放。开始=position_clip（timeline_start_us，真实通道）；
+     入点/出点=trim_clip（源端点）；时长无直接 op（trim 源端点间接改变）→只读展示；
+     倍速保持 Core 域 0.25–4×（参照滑杆停靠点形态，域不动——红线）。 ---- */
+  const timingSection = <>
+    <div className="pp-grid2">
+      <NumberField value={clip.timeline_start_us / 1_000_000} min={0} max={36_000} step={0.1} unit="s" decimals={2} ariaLabel="开始时刻" mark="始"
+        onDraft={v => updateLocal({ timeline_start_us: Math.max(0, Math.round(v * 1_000_000)) })}
+        onCommit={v => void onPatch([{ op: "position_clip", clip_id: clip.clip_id, timeline_start_us: Math.max(0, Math.round(v * 1_000_000)) }], "调整开始时刻")} />
+      <NumberField value={(clip.timeline_end_us - clip.timeline_start_us) / 1_000_000} min={0} max={36_000} step={0.1} unit="s" decimals={2} ariaLabel="时长（只读）" mark="长" disabled onCommit={() => {}} />
+    </div>
+    <div className="pp-grid2">
+      <NumberField value={clip.source_start_us! / 1_000_000} min={0} max={clip.source_end_us! / 1_000_000} step={0.1} unit="s" decimals={2} ariaLabel="入点（源起点）" mark="入"
+        onDraft={v => updateLocal({ source_start_us: Math.round(v * 1_000_000) })}
+        onCommit={v => void onPatch([{ op: "trim_clip", clip_id: clip.clip_id, source_start_us: Math.round(v * 1_000_000), source_end_us: clip.source_end_us! }], "微调片段起点")} />
+      <NumberField value={clip.source_end_us! / 1_000_000} min={clip.source_start_us! / 1_000_000} max={36_000} step={0.1} unit="s" decimals={2} ariaLabel="出点（源终点）" mark="出"
+        onDraft={v => updateLocal({ source_end_us: Math.round(v * 1_000_000) })}
+        onCommit={v => void onPatch([{ op: "trim_clip", clip_id: clip.clip_id, source_start_us: clip.source_start_us!, source_end_us: Math.round(v * 1_000_000) }], "微调片段终点")} />
+    </div>
+    <Seg value={String(speed)} columns={4} options={speedPresets.map(p => ({ value: String(p), label: speedLabel(p) }))}
+      onChange={v => setSpeed(Number(v))} />
+    <PRow label="自定义">
+      <NumberField value={speed / 1000} min={0.25} max={4} step={0.05} decimals={2} ariaLabel="自定义倍速"
+        onDraft={v => updateLocal({ speed_milli: Math.round(v * 1000) as TimelineClip["speed_milli"] })}
+        onCommit={v => setSpeed(Math.round(v * 1000))} />
+      <span className="tail">0.25 – 4.0</span>
+    </PRow>
+    {isVideo && <div className="pp-chk">
+      <input type="checkbox" checked={clip.reverse_playback ?? false} onChange={event => void onPatch([{ op: "set_reverse_playback", clip_id: clip.clip_id, reverse_playback: event.target.checked }], event.target.checked ? "开启倒放" : "关闭倒放")} />
+      <span>倒放<span className="pp-subtext">（权威预览生效；音频静音）</span></span>
+    </div>}
+    <PNote>音频随画面同变速；当前版本倒放片段以静音占位保证轨长正确。时长由入点/出点间接决定，此处只读。</PNote>
+  </>;
   const audioBasics = <>
-    <PGroup title="基础">
-      <PRow label="启用音频">
-        <Switch on={clip.audio.enabled} title={clip.audio.enabled ? "关闭音频" : "启用音频"}
-          onToggle={() => void onPatch([{ op: "set_audio", clip_id: clip.clip_id, enabled: !clip.audio.enabled, gain_db: clip.audio.gain_db }], clip.audio.enabled ? "关闭音频" : "启用音频")} />
-      </PRow>
-      <RangeRow label="音量" value={clip.audio.gain_db} min={-60} max={12} step={0.5} unit="dB" decimals={1} ariaLabel="音频增益"
-        onDraft={v => updateLocal({ audio: { ...clip.audio, gain_db: v } })}
-        onCommit={v => void onPatch([{ op: "set_audio", clip_id: clip.clip_id, enabled: clip.audio.enabled, gain_db: v }], "调整音频增益")} />
-
-      <PRow label="响度统一" tail={<span className="pp-tailtext">{loudnessStatusText(loudness)}</span>}>
-        <Switch on={loudness.phase === "prepared" || loudness.phase === "proposed" || loudness.phase === "applying"}
-          disabled={loudnessBusy(loudness) || !baseRevisionId}
-          title={loudnessButtonTitle(loudness, Boolean(baseRevisionId))}
-          onToggle={() => { if (loudness.phase === "prepared") runLoudnessPropose(); else { setLoudness({ phase: "idle" }); runLoudnessPrepare(); } }} />
-      </PRow>
-      {loudness.phase === "prepared" && loudness.preview && <div className="pp-loudness" data-testid="pp-loudness-preview">
-        <p className="pp-loudness-line">{loudness.preview.summary}</p>
-        <p className="pp-loudness-line">实测 {loudnessMeasured(loudness.preview)} → 目标 {loudnessTarget(loudness.preview)} LUFS</p>
-        <button type="button" className="pp-btn" onClick={runLoudnessPropose}>生成提案</button>
-      </div>}
-      {loudness.phase === "proposed" && loudness.proposal && <div className="pp-loudness" data-testid="pp-loudness-proposal">
-        <p className="pp-loudness-line">{loudness.proposal.patch.summary}</p>
-        <p className="pp-loudness-line">待采纳 {loudness.proposal.patch.operations.length} 项改动</p>
-        <button type="button" className="pp-btn" onClick={runLoudnessApply}>应用提案</button>
-      </div>}
-      {loudness.phase === "applying" && <PNote>正在应用提案…</PNote>}
-      {loudness.phase === "applied" && <PNote>已应用为新的正式 Revision（{loudness.revisionId.slice(0, 12)}…）。</PNote>}
-      {loudness.phase === "error" && <PNote warn>{loudness.message}</PNote>}
-    </PGroup>
-    <PSep />
-    <PGroup title="淡入淡出">
-      <div className="pp-grid2">
-        <NumberField value={(clip.audio.fade_in_us ?? 0) / 1_000_000} min={0} max={50} step={0.1} unit="s" decimals={1} ariaLabel="淡入时长" mark="入"
-          onDraft={v => updateLocal({ audio: { ...clip.audio, fade_in_us: Math.round(v * 1_000_000) } })}
-          onCommit={v => void onPatch([{ op: "set_audio", clip_id: clip.clip_id, enabled: clip.audio.enabled, gain_db: clip.audio.gain_db, ...audioFadeOf(clip, "fade_in_us", v) }], "调整淡入时长")} />
-        <NumberField value={(clip.audio.fade_out_us ?? 0) / 1_000_000} min={0} max={50} step={0.1} unit="s" decimals={1} ariaLabel="淡出时长" mark="出"
-          onDraft={v => updateLocal({ audio: { ...clip.audio, fade_out_us: Math.round(v * 1_000_000) } })}
-          onCommit={v => void onPatch([{ op: "set_audio", clip_id: clip.clip_id, enabled: clip.audio.enabled, gain_db: clip.audio.gain_db, ...audioFadeOf(clip, "fade_out_us", v) }], "调整淡出时长")} />
-      </div>
-    </PGroup>
-    <PSep />
-    <PGroup title="素材修剪">
-      <PRow label="源起点">
-        <NumberField value={clip.source_start_us! / 1_000_000} min={0} max={clip.source_end_us! / 1_000_000} step={0.1} unit="s" decimals={1} ariaLabel="源起点"
-          onDraft={v => updateLocal({ source_start_us: Math.round(v * 1_000_000) })}
-          onCommit={v => void onPatch([{ op: "trim_clip", clip_id: clip.clip_id, source_start_us: Math.round(v * 1_000_000), source_end_us: clip.source_end_us! }], "微调片段起点")} />
-      </PRow>
-      <PRow label="源终点">
-        <NumberField value={clip.source_end_us! / 1_000_000} min={clip.source_start_us! / 1_000_000} max={36_000} step={0.1} unit="s" decimals={1} ariaLabel="源终点"
-          onDraft={v => updateLocal({ source_end_us: Math.round(v * 1_000_000) })}
-          onCommit={v => void onPatch([{ op: "trim_clip", clip_id: clip.clip_id, source_start_us: clip.source_start_us!, source_end_us: Math.round(v * 1_000_000) }], "微调片段终点")} />
-      </PRow>
-    </PGroup>
+    <PRow label="启用音频">
+      <Switch on={clip.audio.enabled} title={clip.audio.enabled ? "关闭音频" : "启用音频"}
+        onToggle={() => void onPatch([{ op: "set_audio", clip_id: clip.clip_id, enabled: !clip.audio.enabled, gain_db: clip.audio.gain_db }], clip.audio.enabled ? "关闭音频" : "启用音频")} />
+    </PRow>
+    <RangeRow label="音量" value={clip.audio.gain_db} min={-60} max={12} step={0.5} unit="dB" decimals={1} ariaLabel="音频增益"
+      onDraft={v => updateLocal({ audio: { ...clip.audio, gain_db: v } })}
+      onCommit={v => void onPatch([{ op: "set_audio", clip_id: clip.clip_id, enabled: clip.audio.enabled, gain_db: v }], "调整音频增益")} />
+    <PRow label="响度统一" tail={<span className="pp-tailtext">{loudnessStatusText(loudness)}</span>}>
+      <Switch on={loudness.phase === "prepared" || loudness.phase === "proposed" || loudness.phase === "applying"}
+        disabled={loudnessBusy(loudness) || !baseRevisionId}
+        title={loudnessButtonTitle(loudness, Boolean(baseRevisionId))}
+        onToggle={() => { if (loudness.phase === "prepared") runLoudnessPropose(); else { setLoudness({ phase: "idle" }); runLoudnessPrepare(); } }} />
+    </PRow>
+    {loudness.phase === "prepared" && loudness.preview && <div className="pp-loudness" data-testid="pp-loudness-preview">
+      <p className="pp-loudness-line">{loudness.preview.summary}</p>
+      <p className="pp-loudness-line">实测 {loudnessMeasured(loudness.preview)} → 目标 {loudnessTarget(loudness.preview)} LUFS</p>
+      <button type="button" className="pp-btn" onClick={runLoudnessPropose}>生成提案</button>
+    </div>}
+    {loudness.phase === "proposed" && loudness.proposal && <div className="pp-loudness" data-testid="pp-loudness-proposal">
+      <p className="pp-loudness-line">{loudness.proposal.patch.summary}</p>
+      <p className="pp-loudness-line">待采纳 {loudness.proposal.patch.operations.length} 项改动</p>
+      <button type="button" className="pp-btn" onClick={runLoudnessApply}>应用提案</button>
+    </div>}
+    {loudness.phase === "applying" && <PNote>正在应用提案…</PNote>}
+    {loudness.phase === "applied" && <PNote>已应用为新的正式 Revision（{loudness.revisionId.slice(0, 12)}…）。</PNote>}
+    {loudness.phase === "error" && <PNote warn>{loudness.message}</PNote>}
   </>;
 
-  const voiceSoon = <PGroup title="换音色" tail={<SoonBadge />}>
+  const voiceSoon = <>
     <PNote>变声 / 音色模板，布局对齐剪映（音色列表 + 参数）。当前版本未实现，仅占位。</PNote>
-  </PGroup>;
+  </>;
 
-  const fxSoon = <PGroup title="声音效果">
+  const fxSoon = <>
     <PRow label="音频降噪" dim><Switch on={false} onToggle={() => {}} disabled /><SoonBadge /></PRow>
     <PRow label="人声美化" dim><Switch on={false} onToggle={() => {}} disabled /><SoonBadge /></PRow>
     <PRow label="声音分离" dim><Switch on={false} onToggle={() => {}} disabled /><SoonBadge /></PRow>
     <PRow label="变调" dim><Switch on={false} onToggle={() => {}} disabled /><SoonBadge /></PRow>
     <PRow label="立体声平衡" dim><Switch on={false} onToggle={() => {}} disabled /><SoonBadge /></PRow>
     <PRow label="声道配置" dim><Switch on={false} onToggle={() => {}} disabled /><SoonBadge /></PRow>
-  </PGroup>;
-
-  // ---- 变速（含倒放，对齐剪映归属） ----
-  const speedSection = <>
-    <PGroup title="倍速">
-      <Seg value={String(speed)} columns={4} options={speedPresets.map(p => ({ value: String(p), label: speedLabel(p) }))}
-        onChange={v => setSpeed(Number(v))} />
-      <PRow label="自定义">
-        <NumberField value={speed / 1000} min={0.25} max={4} step={0.05} decimals={2} ariaLabel="自定义倍速"
-          onDraft={v => updateLocal({ speed_milli: Math.round(v * 1000) as TimelineClip["speed_milli"] })}
-          onCommit={v => setSpeed(Math.round(v * 1000))} />
-        <span className="tail">0.25 – 4.0</span>
-      </PRow>
-      {isVideo && <div className="pp-chk">
-        <input type="checkbox" checked={clip.reverse_playback ?? false} onChange={event => void onPatch([{ op: "set_reverse_playback", clip_id: clip.clip_id, reverse_playback: event.target.checked }], event.target.checked ? "开启倒放" : "关闭倒放")} />
-        <span>倒放<span className="pp-subtext">（权威预览生效；音频静音）</span></span>
-      </div>}
-    </PGroup>
-    <PNote>音频随画面同变速；当前版本倒放片段以静音占位保证轨长正确。</PNote>
   </>;
 
-  // ---- 动画（关键帧打点，逻辑不变） ----
+  /* 剪辑手法（ours 独有，I1：落「高级」分类；原「手法」页签整组迁来，功能不减） */
+  const toolsSection = <>
+    <PNote>本地确定性规划 · 零外传。提案不自动改 Timeline，采纳后落新 Revision。</PNote>
+    <div className="properties-actions" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <button type="button" disabled={!onOpenEditingTools} onClick={() => onOpenEditingTools?.("remove_pauses")}>去停顿</button>
+      <button type="button" disabled={!onOpenEditingTools} onClick={() => onOpenEditingTools?.("beat_sync")}>卡点</button>
+      {isVideo && <button type="button" disabled={!onOpenEditingTools} onClick={() => onOpenEditingTools?.("lj_cut")}>L/J cut</button>}
+      {!isVideo && <PNote>音频片段可先用于卡点 BGM；去停顿 / L-J 需视频片段。</PNote>}
+    </div>
+  </>;
+
+  /* ---- 动画（关键帧打点，逻辑不变；I1 壳上移为 Section） ---- */
   const animSection = isVideo && clipRelativeUs !== undefined
-    ? <PGroup title="关键帧动画" tail={<span className="pp-tailtext">播放头 {formatTime(clipRelativeUs)}</span>}>
+    ? <>
+      <span className="pp-tailtext">播放头 {formatTime(clipRelativeUs)}</span>
       <div className="pp-kfrows">
         {keyframePropertyLabels.map(({ property, label }) => {
           const track = clip.keyframes?.[property];
@@ -440,56 +452,36 @@ export function ClipProperties({ clip, working, baseRevisionId, locked, onPatch,
           </div>;
         })}
       </div>
-      <PNote>按播放头位置打点；随片段变速等比重映射；动画仅权威预览渲染。{overlay && "覆盖轨片段的动画渲染待支持（见设计文档 §6）。"}</PNote>
-    </PGroup>
-    : <PGroup title="关键帧动画"><PNote>动画当前仅支持视频片段。</PNote></PGroup>;
+      <PNote>按播放头位置打点；随片段变速等比重映射；动画全视觉轨生效（P231 统一盒模型）。</PNote>
+    </>
+    : <PNote>动画当前仅支持视频片段。</PNote>;
 
-  return <fieldset className="pp-panel locked-fieldset" aria-label="片段属性" disabled={locked}>
-    {locked && <p className="locked-note"><Lock />此 Clip 已锁定，直接编辑和关联 Caption 编辑已禁用。</p>}
-    <PanelTabs tabs={topTabs} active={activeTab} onChange={setTab} />
-    {isAudioClip ? (
-      <div className="pp-body">
-        {activeTab === "basic" && audioBasics}
-        {activeTab === "voice" && voiceSoon}
-        {activeTab === "fx" && fxSoon}
-        {activeTab === "speed" && speedSection}
-      </div>
-    ) : (
-      <>
-        {activeTab === "pic" && <>
-          <SubTabs tabs={[{ id: "basic", label: "基础" }, { id: "key", label: "抠像" }, { id: "mask", label: "蒙版" }]} active={picSub} onChange={setPicSub} />
-          <div className="pp-body">
-            {picSub === "key" ? picKey : picSub === "mask" ? picMask : picBasic}
-          </div>
-        </>}
-        {activeTab === "aud" && <>
-          <SubTabs tabs={[{ id: "abasic", label: "基础" }, { id: "voice", label: "换音色", soon: true }, { id: "fx", label: "声音效果", soon: true }]} active={audSub} onChange={setAudSub} />
-          <div className="pp-body">
-            {audSub === "voice" ? voiceSoon : audSub === "fx" ? fxSoon : audioBasics}
-          </div>
-        </>}
-        {activeTab === "speed" && <div className="pp-body">{speedSection}</div>}
-        {activeTab === "anim" && <div className="pp-body">{animSection}</div>}
-        {activeTab === "tools" && <div className="pp-body">
-          <PGroup title="剪辑手法">
-            <PNote>本地确定性规划 · 零外传。提案不自动改 Timeline，采纳后落新 Revision。</PNote>
-            <div className="properties-actions" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <button type="button" disabled={!onOpenEditingTools} onClick={() => onOpenEditingTools?.("remove_pauses")}>去停顿</button>
-              <button type="button" disabled={!onOpenEditingTools} onClick={() => onOpenEditingTools?.("beat_sync")}>卡点</button>
-              <button type="button" disabled={!onOpenEditingTools} onClick={() => onOpenEditingTools?.("lj_cut")}>L/J cut</button>
-            </div>
-          </PGroup>
-        </div>}
-      </>
-    )}
-    {isAudioClip && activeTab === "tools" && <div className="pp-body">
-      <PGroup title="剪辑手法">
-        <PNote>音频片段可先用于卡点 BGM；去停顿 / L-J 需视频片段。</PNote>
-        <div className="properties-actions">
-          <button type="button" disabled={!onOpenEditingTools} onClick={() => onOpenEditingTools?.("beat_sync")}>卡点</button>
-        </div>
-      </PGroup>
-    </div>}
+  /* I1 IA 重构（参照 FilmInspector/InspectorWorkspace）：双级固定页签 → 单条分类条 + 分组垂直流。
+     分类条由 Section 注册动态派生（inspector-sections.ts 的 categories 映射）；
+     「属性」页默认选中并承载 位置→淡入淡出→裁剪→时间 的垂直流（参照次序 FilmInspector.tsx:1475-1525）；
+     ours 独有组（更多画面能力/剪辑手法/换音色/声音效果）落「高级」页签——功能一项不删。
+     InspectorReadOnly 提供锁定语义（导航仍可用，控件禁用），替换原 fieldset disabled。 */
+  const kind: InspectorKind = isAudioClip ? "audio" : isImage ? "image" : "video";
+  return <fieldset className="pp-panel locked-fieldset" aria-label="片段属性">
+    <InspectorReadOnly.Provider value={locked}>
+      <InspectorWorkspace kind={kind} label="片段属性">
+        <Section id="transform" title="位置与大小" aside={<button type="button" className="pp-mini" title="重置画面变换" onClick={() => void onPatch([{ op: "set_clip_transform", clip_id: clip.clip_id, transform: {} }], "重置画面变换")}><RotateCcw size={11} /></button>}>
+          {picBasicInner}
+        </Section>
+        {!isAudioClip && <Section id="appearance" title="外观">{picAppearance}</Section>}
+        {!isAudioClip && <Section id="crop-fill" title="裁剪与填充" aside={<button type="button" className="pp-mini" title="重置裁剪与填充" onClick={() => void onPatch([{ op: "set_layout", clip_id: clip.clip_id, layout: "fit" as TimelineLayout }], "重置裁剪与填充")}><RotateCcw size={11} /></button>}>{picCropFill}</Section>}
+        {!isAudioClip && <Section id="mask" title="蒙版">{picMask}</Section>}
+        {!isAudioClip && <Section id="keying" title="抠像">{picKey}</Section>}
+        <Section id="fade" title="淡入淡出">{audioFadeSection}</Section>
+        <Section id="timing" title="时间">{timingSection}</Section>
+        <Section id="sound" title="声音">{audioBasics}</Section>
+        <Section id="motion" title="关键帧动画">{animSection}</Section>
+        <Section id="more-picture" title="更多画面能力" closedByDefault>{morePicture}</Section>
+        <Section id="voice" title="换音色" closedByDefault>{voiceSoon}</Section>
+        <Section id="sound-fx" title="声音效果" closedByDefault>{fxSoon}</Section>
+        <Section id="tools" title="剪辑手法" closedByDefault>{toolsSection}</Section>
+      </InspectorWorkspace>
+    </InspectorReadOnly.Provider>
   </fieldset>;
 }
 
@@ -674,10 +666,27 @@ export function ProjectProperties({ project, saveState, authoritativePreview, pr
   onCreateExport: () => void;
   onOpenProjectDialog: () => void;
 }) {
-  return <div className="properties-project">
-    <section className="property-block" aria-label="项目概览"><h2>项目概览</h2>{project ? <><div className="property-line"><span>项目名称</span><strong>{project.name}</strong></div><div className="property-line"><span>状态</span><strong>{project.status === "active" ? "活动" : project.status === "archived" ? "已归档" : "目录缺失"}</strong></div><div className="property-line"><span>画布</span><strong>{project.canvas.width}×{project.canvas.height} · {project.canvas.fps_num}fps</strong></div></> : <p className="properties-muted">未选择项目。</p>}</section>
-    <section className="property-block" aria-label="保存/预览检查"><h2>保存/预览检查</h2><div className="properties-status">保存状态：{saveState}</div><div className="properties-status">权威预览：{authoritativePreview ? (previewIsStale ? "已过期" : "已就绪") : "尚未生成"}</div></section>
-    <section className="property-block" aria-label="下一步动作"><h2>下一步动作</h2><div className="properties-actions"><button disabled={Boolean(renderDisabledReason)} title={renderDisabledReason} onClick={onGeneratePreview}>生成权威预览</button><button disabled={Boolean(renderDisabledReason)} title={renderDisabledReason} onClick={onCreateExport}>导出正式视频</button><button onClick={onOpenProjectDialog}>打开项目管理</button></div></section>
+  /* I4 参照 FilmPanel（FilmInspector.tsx:418-535）：未选中素材时属性栏 = 影片面板（舞台信息/影片信息/空态）。
+     ours 的项目操作三按钮是真实工作流入口——保留为底部「项目操作」Section，形态走参照按钮。 */
+  const filmInfo = project
+    ? <>
+      <div className="pp-row"><label>项目名称</label><span className="pp-tailtext">{project.name}</span></div>
+      <div className="pp-row"><label>画布</label><span className="pp-tailtext">{project.canvas.width}×{project.canvas.height} · {project.canvas.fps_num}fps</span></div>
+      <div className="pp-row"><label>保存状态</label><span className="pp-tailtext">{saveState}</span></div>
+      <div className="pp-row"><label>权威预览</label><span className="pp-tailtext">{authoritativePreview ? (previewIsStale ? "已过期" : "已就绪") : "尚未生成"}</span></div>
+    </>
+    : <PNote>未选择项目。</PNote>;
+  return <div className="pp-panel">
+    {/* film-info 映射到 info 页签（inspector-sections.ts），但空态只有两段——参照 FilmPanel 单页直排，
+        影片信息用 bare（无标题无折叠），与「项目操作」同页直排；id 换成无映射的避免落到 info 页签隐藏。 */}
+    <Section id="film-panel-info" title="影片信息" bare>{filmInfo}</Section>
+    <Section id="project-actions" title="项目操作">
+      <div className="properties-actions">
+        <button type="button" className="pp-btn" disabled={Boolean(renderDisabledReason)} title={renderDisabledReason} onClick={onGeneratePreview}>生成权威预览</button>
+        <button type="button" className="pp-btn" disabled={Boolean(renderDisabledReason)} title={renderDisabledReason} onClick={onCreateExport}>导出正式视频</button>
+        <button type="button" className="pp-btn" onClick={onOpenProjectDialog}>打开项目管理</button>
+      </div>
+    </Section>
   </div>;
 }
 
@@ -712,10 +721,38 @@ function assToRgb(ass: string): string {
 
 export function TransitionProperties({ transition, onPatch }: { transition: TimelineTransition; onPatch: (ops: TimelinePatchOperation[], summary: string) => Promise<void> }) {
   const update = (ops: TimelinePatchOperation[], summary: string) => void onPatch(ops, summary);
-  return <fieldset className="property-form"><h2>转场属性</h2><label>类型<MenuSelect
-    label="转场类型"
-    value={transition.kind}
-    groups={[{ choices: transitionKinds.map(kind => ({ value: kind, label: kind })) }]}
-    onPick={kind => update([{ op: "update_transition", transition_id: transition.transition_id, kind: kind as typeof transition.kind }], `转场类型 ${kind}`)}
-  /></label><label>时长（秒）<input type="number" min={0.1} max={2} step={0.1} value={transition.duration_us / 1_000_000} onChange={event => { const parsed = Number(event.target.value); if (Number.isFinite(parsed) && parsed >= 0.1 && parsed <= 2) update([{ op: "update_transition", transition_id: transition.transition_id, duration_us: Math.round(parsed * 1_000_000) }], `转场时长 ${parsed}s`); }} /></label><div className="properties-actions"><button onClick={() => update([{ op: "remove_transition", transition_id: transition.transition_id }], "删除转场")}>删除转场</button></div><p className="properties-muted">转场仅在权威预览与最终导出中渲染；交互预览直接切换片段。</p></fieldset>;
+  // I5 参照 TransitionPanel（FilmInspector.tsx:2295-2317）：InspectorWorkspace + Section + NumField + 整宽移除按钮。
+  // NumField 的 onDraft/onCommit 语义 = 参照 onPreview/onCommit（草稿不落 Revision，失焦/Enter 提交单条 patch）。
+  return <fieldset className="pp-panel locked-fieldset" aria-label="转场属性">
+    <InspectorWorkspace kind="transition" label="转场属性">
+      <Section id="transition" title="转场" bare>
+        <div className="pp-row">
+          <label>类型</label>
+          <MenuSelect
+            label="转场类型"
+            value={transition.kind}
+            groups={[{ choices: transitionKinds.map(kind => ({ value: kind, label: kind })) }]}
+            onPick={kind => update([{ op: "update_transition", transition_id: transition.transition_id, kind: kind as typeof transition.kind }], `转场类型 ${kind}`)}
+          />
+        </div>
+        <div className="pp-row">
+          <label>时长（秒）</label>
+          <span className="pp-num">
+            <NumField
+              label="转场时长（秒）"
+              word
+              value={transition.duration_us / 1_000_000}
+              min={0.1}
+              max={2}
+              step={0.1}
+              unit="s"
+              onCommit={v => { const s = Math.min(2, Math.max(0.1, v)); update([{ op: "update_transition", transition_id: transition.transition_id, duration_us: Math.round(s * 1_000_000) }], `转场时长 ${s}s`); }}
+            />
+          </span>
+        </div>
+        <button type="button" className="pp-btn danger" onClick={() => update([{ op: "remove_transition", transition_id: transition.transition_id }], "删除转场")}>删除转场</button>
+        <p className="pp-note">转场仅在权威预览与最终导出中渲染；交互预览直接切换片段。</p>
+      </Section>
+    </InspectorWorkspace>
+  </fieldset>;
 }
