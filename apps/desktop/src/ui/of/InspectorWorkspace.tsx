@@ -66,7 +66,8 @@ export function InspectorWorkspace({ kind, children, label }: {
   const choose = (tab: InspectorTab) => {
     setPreferred(tab);
     rememberedTabs.set(kind, tab);
-    scroll.current?.scrollTo({ top: 0 });
+    // jsdom 的元素没有 scrollTo（真实浏览器恒有）：guard 而不是假设。
+    scroll.current?.scrollTo?.({ top: 0 });
   };
   React.useEffect(() => {
     const reveal = (section: string) => {
@@ -77,7 +78,7 @@ export function InspectorWorkspace({ kind, children, label }: {
       rememberedTabs.set(kind, category);
       requestAnimationFrame(() => {
         [...(scroll.current?.querySelectorAll<HTMLElement>('[data-section]') ?? [])]
-          .find((element) => element.dataset.section === section)?.scrollIntoView({ block: 'nearest' });
+          .find((element) => element.dataset.section === section)?.scrollIntoView?.({ block: 'nearest' });
       });
     };
     sectionRequests.add(reveal);
