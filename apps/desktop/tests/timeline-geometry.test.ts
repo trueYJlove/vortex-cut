@@ -135,7 +135,9 @@ describe("hit testing", () => {
 
   it("finds the clip under the pointer", () => {
     expect(hitTestClips(130, 100, rects)).toBe(clips[0].clip_id);
-    expect(hitTestClips(420, 180, rects)).toBe(clips[1].clip_id);
+    // T4：C1 窄行（26px）后行 y 整体上移——A1 行内 y 用实算值，不再硬编码 180。
+    const a1RowT = rows.find(r => r.track.id === "A1")!;
+    expect(hitTestClips(420, a1RowT.y + 20, rects)).toBe(clips[1].clip_id);
     expect(hitTestClips(50, 100, rects)).toBeNull(); // header gutter
     expect(hitTestClips(130, 10, rects)).toBeNull(); // ruler
     expect(hitTestClips(130, 40, rects)).toBeNull(); // C1 row (no caption clips)
@@ -144,8 +146,11 @@ describe("hit testing", () => {
   it("detects trim handles only on trimmable clip edges", () => {
     expect(hitTestTrimHandle(120, 100, rects)).toEqual({ clipId: clips[0].clip_id, edge: "left" });
     expect(hitTestTrimHandle(320, 100, rects)).toEqual({ clipId: clips[0].clip_id, edge: "right" });
-    expect(hitTestTrimHandle(327, 100, rects)).toBeNull(); // outside handle zone (320+6=326)
-    expect(hitTestTrimHandle(420, 180, rects)).toEqual({ clipId: clips[1].clip_id, edge: "left" });
+    // T11：命中带 trimHit=min(8,max(2,w/4))，200px 片段=8px → 右缘外是 320+8=328。
+    expect(hitTestTrimHandle(329, 100, rects)).toBeNull(); // outside handle zone
+    // T4 行上移后 A1 行内 y 用实算值。
+    const a1RowTrim = rows.find(r => r.track.id === "A1")!;
+    expect(hitTestTrimHandle(420, a1RowTrim.y + 20, rects)).toEqual({ clipId: clips[1].clip_id, edge: "left" });
     const imageRects = computeClipRects([imageClip()], rows, view);
     expect(hitTestTrimHandle(120, 100, imageRects)).toBeNull(); // images not trimmable
   });

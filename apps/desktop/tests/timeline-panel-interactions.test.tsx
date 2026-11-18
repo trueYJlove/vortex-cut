@@ -89,13 +89,14 @@ describe("Timeline Round 4 — 右键菜单", () => {
     // 片段 rect：x [120, 240]、V1 行 y [92, 156]（默认 60pps、2s 片段；
     // 多轨道布局 C1=0 行、V1=1 行、A1=2 行）。
     fireEvent.contextMenu(canvas, { clientX: 150, clientY: 124 });
-    expect(screen.getByRole("menu", { name: "时间线右键菜单" })).toBeInTheDocument();
+    // T10：参照 ContextMenu 的 role=menu 无 aria-label（aria-orientation 承担），按角色定位。
+    expect(screen.getByRole("menu")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("menuitem", { name: "删除片段" }));
     expect(props.onPatch).toHaveBeenCalledWith(
       [{ op: "remove_clip", clip_id: "clip_1" }],
       "删除片段",
     );
-    expect(screen.queryByRole("menu", { name: "时间线右键菜单" })).toBeNull();
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 
   it("右键空区弹出粘贴/定位菜单，复制走编辑器命令", () => {
@@ -111,9 +112,10 @@ describe("Timeline Round 4 — 右键菜单", () => {
     render(<TimelinePanel document={doc()} {...baseProps()} />);
     const canvas = document.querySelector("canvas") as HTMLCanvasElement;
     fireEvent.contextMenu(canvas, { clientX: 150, clientY: 124 });
-    expect(screen.getByRole("menu", { name: "时间线右键菜单" })).toBeInTheDocument();
-    fireEvent.mouseDown(document.body);
-    expect(screen.queryByRole("menu", { name: "时间线右键菜单" })).toBeNull();
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    // T10：参照菜单自带 pointerdown capture 关闭（mouseDown 事件不算——监听的是 pointerdown）。
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 
   it("右键菜单的定位播放头使用点击位置", () => {
