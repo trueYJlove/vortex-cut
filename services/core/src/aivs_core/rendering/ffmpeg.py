@@ -165,11 +165,11 @@ def build_timeline_args(
     segments = plan["segments"]
     if len(segments) != len(segment_paths) or len(segments) != len(segment_probes):
         raise DomainError("RENDER_PLAN_INVALID", "渲染输入数量不一致")
-    # 多轨道（剪映式）：当前渲染图为"主视频轨（V1）"单视觉轨语义——只消费
-    # V1 上可见的片段，按 timeline_start_us 排序；相邻段之间的空隙插入黑底
-    # 填充段（lavfi color），保证 concat 图的输出长度与时间线总长一致。
-    # 主轨被隐藏（或为空）时输出全程黑场。其他视频轨（覆盖轨）与 A1 音频
-    # 混音为后续工作（audio 段缺视频流，旧实现会让整图失败，这里显式跳过）。
+    # P231 统一盒模型：全部非音频非隐藏段进入视觉装配层（不再按
+    # track_id == "V1" 二分），按 timeline_start_us 排序；相邻段之间的空隙
+    # 插入黑底填充段（lavfi color），保证 concat 图的输出长度与时间线总长一致。
+    # z 序 = 轨道序（上层盖下层）——见下方 overlay 链（按 segments 列表序
+    # = 轨道数组序逐层叠加）。audio 段缺视频流，显式跳过（走 A1 混音）。
     timeline_total_us = max(
         (int(segment["timeline_end_us"]) for segment in segments),
         default=0,
@@ -179,7 +179,6 @@ def build_timeline_args(
         for index, segment in enumerate(segments)
         if (
             segment["asset_kind"] != "audio"
-            and segment.get("track_id", "V1") == "V1"
             and not segment.get("track_hidden", False)
         )
     ]
@@ -209,7 +208,8 @@ def build_timeline_args(
         )
         cursor_us = max(cursor_us, int(segment["timeline_end_us"]))
     if not graph_items and timeline_total_us > 0:
-        # 主轨隐藏/为空但时间线有内容：输出全程黑场（音频保持各段静音占位）。
+        # 无可见视觉段但时间线有内容（纯音频/全隐藏）：输出全程黑场
+        # （音频保持各段静音占位）。
         graph_items.append({"kind": "black", "duration_us": timeline_total_us})
 
     # B3：position/opacity 动画需要一个黑底 lavfi 输入（blend/overlay 用）。
@@ -560,8 +560,8 @@ def build_timeline_args(
 
     # A1 音频混音（M3-3 第一段）：纯音频段（asset_kind=audio）此前被整图
     # 跳过——预览侧 syncAudio 对 A1 出声而导出无声（预览≠导出）。各 A1 段
-    # 构造与 V1 视频段同构的音频链（atrim/aresample/atempo/volume；倒放段
-    # 静音占位），adelay 平移到时间线起点后与 V1 混音轨 amix（normalize=0
+    # 构造与视觉段同构的音频链（atrim/aresample/atempo/volume；倒放段
+    # 静音占位），adelay 平移到时间线起点后与基底混音轨 amix（normalize=0
     # 直接相加——与预览 WebAudio 多 rig 并存的 sum 语义同构；削波由素材级
     # gain_db 控制）。混音结果 atrim 回视觉轨总长：成片时长口径 =
     # _rendered_duration_us（validation ±83ms 硬门），音频尾超出部分裁掉
@@ -620,21 +620,38 @@ def build_timeline_args(
     else:
         filters.append("[acat]anull[aout]")
     video_label = "vcat"
-    # P1 覆盖轨（画中画）合成：V1 之外的视频/图片覆盖帧，按时间窗以不透明
-    # 实心浮层叠到主画面上（PIP 语义），并持久复用 [MAINPIP] 标签供逐段叠加。
+    # P231 统一盒模型：所有可见视觉段按**轨道序**（segments 列表序 = 轨道
+    # 数组序，上层在前）逐层叠加到时间序基底上——上层轨道盖下层（剪映/
+    # OpenFilm 同语义）。首段时间序基底已在 concat 图中装配（vcat），其余
+    # 段以 [MAINPIP] 链式 overlay 叠加；首段本身也带 transform/mask/keying
+    # 时同样走 overlay 链（盒语义全段统一）。
+    #
+    # 例外：首段（时间序第一个视觉段）若无 transform/mask/keying，直通
+    # concat 路径（旧图逐字节不变，回归锁）；否则首段也进 overlay 链
+    # （其 concat [vN] 悬空由 visual_chain 仍生成保证标签存在）。
     overlay_segments = [
         (index, segment)
         for index, segment in enumerate(segments)
         if (
             segment["asset_kind"] != "audio"
-            and segment.get("track_id", "V1") != "V1"
             and not segment.get("track_hidden", False)
         )
     ]
     if overlay_segments:
         main_label = "MAINPIP"
         filters.append(f"[vcat]null[{main_label}]")
+        first_visual_clip = graph_items[0]["segment"]["clip_id"] if graph_items and graph_items[0]["kind"] == "segment" else None
         for index, segment in overlay_segments:
+            # 首段（时间序首段）无 transform/mask/keying → 已在 concat 基底
+            # 中绘制，跳过 overlay 链（避免画两遍）。
+            is_first_plain = (
+                segment["clip_id"] == first_visual_clip
+                and not isinstance(segment.get("transform"), dict)
+                and not isinstance(segment.get("mask"), dict)
+                and not isinstance(segment.get("keying"), dict)
+            )
+            if is_first_plain:
+                continue
             pip_window = (
                 input_windows[index]
                 if input_windows is not None and index < len(input_windows)

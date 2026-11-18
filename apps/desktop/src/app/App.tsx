@@ -1193,10 +1193,15 @@ export function App() {
   const sortedClips = useMemo(() => [...(working?.clips ?? [])].sort((a, b) => a.order_index - b.order_index), [working?.clips]);
   // 时间线终点（所有片段最大 timeline_end）：播放到达即停，标尺停在末尾。
   const timelineEndUs = useMemo(() => sortedClips.reduce((max, c) => Math.max(max, c.timeline_end_us), 0), [sortedClips]);
-  const v1Clips = useMemo(() => sortedClips.filter(c => c.track_id === "V1"), [sortedClips]);
-  const a1Clips = useMemo(() => sortedClips.filter(c => c.track_id === "A1"), [sortedClips]);
   const tracksAtPlayhead = working?.tracks ?? [];
   const trackById = useMemo(() => new Map(tracksAtPlayhead.map(track => [track.id, track])), [tracksAtPlayhead]);
+  // P231：全视觉轨片段（含 V1）用于粘贴位置序号（Q2 裁决：copy/cut/paste
+  // 扩展到全视觉轨）。a1Clips 保留（音频轨独立语义）。
+  const visualClips = useMemo(() => sortedClips.filter(c => {
+    const track = trackById.get(c.track_id);
+    return track?.kind === "video";
+  }), [sortedClips, trackById]);
+  const a1Clips = useMemo(() => sortedClips.filter(c => c.track_id === "A1"), [sortedClips]);
   const anySoloTrack = tracksAtPlayhead.some(track => track.solo);
   /** 轨道级声音开关：静音关闭；存在独奏轨道时仅独奏轨出声。 */
   const isClipAudible = useCallback((clip: TimelineClip) => {
@@ -1204,12 +1209,20 @@ export function App() {
     if (!track) return clip.audio.enabled;
     return clip.audio.enabled && !track.muted && (!anySoloTrack || track.solo);
   }, [trackById, anySoloTrack]);
-  // 预览背景 = 主轨（V1）片段（画中画合成语义：V2+ 一律以浮层叠加）。
-  // V1 空档 → 背景留黑（浮层悬浮于黑底之上，对齐剪映）；**禁止回退到上层片段
-  // 当全幅背景**——否则覆盖轨内容既当背景又当浮层，拖拽时"满屏不动 + 盒子飘"。
+  // P231 统一盒模型：预览背景 = 播放头处的**最上层视觉轨**片段（OpenFilm
+  // 语义：画布内容跟随主视觉内容）；空档 → 背景留黑（浮层悬浮于黑底之上，
+  // 对齐剪映）。Q1 裁决：取最上层视觉轨首片段（track 数组序 = z 序，上层在前）。
+  const visualTracksAtPlayhead = useMemo(
+    () => tracksAtPlayhead.filter(t => t.kind === "video" && !t.hidden),
+    [tracksAtPlayhead],
+  );
   const clipAtPlayhead = useMemo(() => {
-    return sortedClips.find(c => c.track_id === "V1" && playhead >= c.timeline_start_us && playhead < c.timeline_end_us);
-  }, [sortedClips, playhead]);
+    for (const track of visualTracksAtPlayhead) {
+      const clip = sortedClips.find(c => c.track_id === track.id && playhead >= c.timeline_start_us && playhead < c.timeline_end_us);
+      if (clip) return clip;
+    }
+    return undefined;
+  }, [visualTracksAtPlayhead, sortedClips, playhead]);
   const audioClipAtPlayhead = a1Clips.length > 0 ? a1Clips.find(c => playhead >= c.timeline_start_us && playhead < c.timeline_end_us) : undefined;
   const previewSpeedMilli = clipAtPlayhead?.speed_milli ?? (libraryPreviewId ? undefined : 1000);
   const previewReverse = Boolean(clipAtPlayhead?.reverse_playback);
@@ -1548,9 +1561,10 @@ export function App() {
     }] as const] : [])),
     [working, isClipAudible],
   );
+  // P231 Q2：全视觉轨片段均可上 PIP 手势层（不再排除 V1/A1——A1 音频仍排除）。
   const syntheticPipClips = useMemo(
-    () => (working?.clips ?? []).filter(clip => clip.track_id !== "V1" && clip.track_id !== "A1" && clip.asset_kind !== "audio").map(clip => ({ clipId: clip.clip_id, transform: { x: clip.transform?.x, y: clip.transform?.y, scale: clip.transform?.scale, rotate: clip.transform?.rotate, opacity: clip.transform?.opacity }, mask: clip.mask ?? undefined })),
-    [working],
+    () => (working?.clips ?? []).filter(clip => clip.asset_kind !== "audio" && trackById.get(clip.track_id)?.kind === "video").map(clip => ({ clipId: clip.clip_id, transform: { x: clip.transform?.x, y: clip.transform?.y, scale: clip.transform?.scale, rotate: clip.transform?.rotate, opacity: clip.transform?.opacity }, mask: clip.mask ?? undefined })),
+    [working, trackById],
   );
   // GAP-LIST-ASSETS-PAGING 后续（2026-09-15 F04 复测暴露）：100 素材翻页装载
   // 时窗内 working/timeline 先到位 → SyntheticPreview 以空 mediaUrls 建会话
@@ -1717,7 +1731,8 @@ export function App() {
   const overlayPips = useMemo<PipOverlay[]>(() => {
     if (previewMode !== "interactive" || !working) return [];
     const result: PipOverlay[] = [];
-    const selectedOverlay = selectedClip && selectedClip.track_id !== "V1" && selectedClip.track_id !== "A1" && selectedClip.asset_kind !== "audio" ? selectedClip : undefined;
+    // P231 Q2：全视觉轨片段均可选中上 PIP 手势层（不再排除 V1/A1——A1 音频仍排除）。
+    const selectedOverlay = selectedClip && selectedClip.asset_kind !== "audio" && trackById.get(selectedClip.track_id)?.kind === "video" ? selectedClip : undefined;
     const canvasW = canvasSize?.w || canvasRef.current?.clientWidth || 540;
     const canvasH = canvasSize?.h || canvasRef.current?.clientHeight || 960;
     // 内容适配尺寸：等比适配进画布（未知尺寸回退满画布）。
@@ -1731,8 +1746,9 @@ export function App() {
       const fit = Math.min(canvasW / codedW, canvasH / codedH);
       return { w: Math.max(2, Math.round(codedW * fit)), h: Math.max(2, Math.round(codedH * fit)) };
     };
+    // P231 Q2：全视觉轨片段均可上 PIP 手势层（不再排除 V1/A1——A1 音频轨 kind=audio 已排除）。
     for (const track of tracksAtPlayhead) {
-      if (track.kind !== "video" || track.hidden || track.id === "V1" || track.id === "A1") continue;
+      if (track.kind !== "video" || track.hidden) continue;
       const clip = selectedOverlay?.track_id === track.id
         ? (sortedClips.find(c => c.clip_id === selectedOverlay.clip_id) ?? selectedOverlay)
         : sortedClips.find(c => c.track_id === track.id && playhead >= c.timeline_start_us && playhead < c.timeline_end_us);
@@ -1768,9 +1784,10 @@ export function App() {
   const pausePreviewPlayback = () => { gestureHoldRef.current = true; const video = videoRef.current; if (video && !video.paused) { video.pause(); return true; } return false; };
   const resumePreviewPlayback = (wasPlaying: boolean) => { gestureHoldRef.current = false; if (wasPlaying) void videoRef.current?.play().catch(() => {}); };
   const pipSelectedId = selectedClip?.clip_id ?? null;
-  // 覆盖轨片段选中时隐藏「画布尺寸框」（白框贴合整个画布，会盖过浮层自己的
-  // 内容选中框）；浮层的选中框 + 8 向手柄由 PreviewPipOverlays 提供。
-  const overlayClipSelected = Boolean(selectedClip && selectedClip.track_id !== "V1" && selectedClip.track_id !== "A1");
+  // P231 Q2：任意视觉轨片段选中时隐藏「画布尺寸框」（白框贴合整个画布，会盖过
+  // 浮层自己的内容选中框）；浮层的选中框 + 8 向手柄由 PreviewPipOverlays 提供。
+  // A1 音频片段不显示浮层盒子，保留画布尺寸框。
+  const overlayClipSelected = Boolean(selectedClip && selectedClip.asset_kind !== "audio" && trackById.get(selectedClip.track_id)?.kind === "video");
   const showSelBox = !overlayClipSelected;
   const pipLocked = pipSelectedId ? Boolean(working?.locked_elements?.includes(pipSelectedId)) : false;
   const insertAsset = (item: AssetPresentation, atIndex = working?.clips.length ?? 0, trackId?: string | "new") => {
@@ -2477,11 +2494,11 @@ export function App() {
   const effectiveRatio: OutputRatio = (previewRatioTouched ? previewRatio : autoRatio) as OutputRatio;
   // 比例语义（剪映式，下拉随时改渲染画幅；项目画布只是新建时的默认值）：
   // - 选具体比例码 → 渲染画幅 = 该比例（权威预览/导出/合成预览同步切换）。
-  // - "适应"（原画）→ 渲染画幅 = **当前主轨首片段素材的原始比例**（剪映"原画"）：
-  //   从素材 media_info.video_streams[0] 宽高推比例码；无素材/无法判定时回退
-  //   项目画布比例。切素材后"适应"随之跟随。
+  // - "适应"（原画）→ 渲染画幅 = **最上层视觉轨首片段素材的原始比例**（剪映"原画"，
+  //   P231 Q1 裁决）：从素材 media_info.video_streams[0] 宽高推比例码；无素材/无法
+  //   判定时回退项目画布比例。切素材后"适应"随之跟随。
   const assetOriginalRatio = useMemo((): OutputRatio => {
-    const firstVideo = (working?.clips ?? []).find(clip => clip.track_id === "V1" && clip.asset_kind === "video");
+    const firstVideo = visualClips.find(clip => clip.asset_kind === "video");
     const asset = firstVideo ? assets.find(item => item.asset.asset_id === firstVideo.asset_id)?.asset : undefined;
     const stream = (asset?.media_info && "video_streams" in asset.media_info ? (asset.media_info as { video_streams?: Array<{ width?: number; height?: number }> }).video_streams?.[0] : undefined);
     if (!stream?.width || !stream?.height) return autoRatio === "fit" ? "169" : (autoRatio as OutputRatio);
@@ -2492,15 +2509,16 @@ export function App() {
       : Math.abs(ratio - 4 / 3) < 0.02 ? "43"
       : Math.abs(ratio - 3 / 4) < 0.02 ? "34"
       : "169"; // 非标准比例就近归入 16:9（渲染档位只有五档）
-  }, [working, assets, autoRatio]);
+  }, [working, assets, autoRatio, visualClips]);
   const renderRatio: OutputRatio = effectiveRatio === "fit" ? assetOriginalRatio : effectiveRatio;
   // "适应"显示模式：预览框按渲染画幅比例约束（原画比例即素材比例），画布内容
   // 等比 contain 居中；选具体比例 = 显式切换渲染画幅并按该比例约束预览框。
   const previewClass = `${previewLayout} ratio-${renderRatio}`;
   // 时间码帧率：优先画布帧率，缺省 30fps。
-  // 比例切换（剪映式）：选具体比例时主轨布局切为 crop_fill（裁切填满——等比
-  // 放大到短边顶满、长边溢出裁剪，剪映同款默认）；blurred_background 模糊垫底
-  // 是竖版包装风格，不随比例切换自动套用。切回"适应"不动时间线布局。
+  // 比例切换（剪映式）：选具体比例时**全视觉轨**布局切为 crop_fill（裁切填满——
+  // 等比放大到短边顶满、长边溢出裁剪，剪映同款默认，P231 Q3 裁决：全轨一致）；
+  // blurred_background 模糊垫底是竖版包装风格，不随比例切换自动套用。切回"适应"
+  // 不动时间线布局。
   const changePreviewRatio = (value: string) => {
     setPreviewRatio(value);
     setPreviewRatioTouched(true);
@@ -2508,9 +2526,9 @@ export function App() {
     if (canvasRef.current) { canvasRef.current.style.width = ""; canvasRef.current.style.height = ""; }
     if (value !== "fit" && working) {
       const layoutOps = working.clips
-        .filter(clip => clip.track_id === "V1" && clip.layout === "blurred_background" && (clip.asset_kind === "video" || clip.asset_kind === "image"))
+        .filter(clip => clip.layout === "blurred_background" && (clip.asset_kind === "video" || clip.asset_kind === "image") && trackById.get(clip.track_id)?.kind === "video")
         .map(clip => ({ op: "set_layout" as const, clip_id: clip.clip_id, layout: "crop_fill" as const }));
-      if (layoutOps.length > 0) void patchTimeline(layoutOps, "切换比例：主轨裁切填满");
+      if (layoutOps.length > 0) void patchTimeline(layoutOps, "切换比例：全视觉轨裁切填满");
     }
   };
   const previewFps = working?.canvas.fps_num && working.canvas.fps_den ? working.canvas.fps_num / working.canvas.fps_den : 30;
@@ -2650,8 +2668,9 @@ export function App() {
         if (selectedClip) void patchTimeline([{ op: "split_clip", clip_id: selectedClip.clip_id, source_time_us: selectedClip.source_start_us! + Math.floor((selectedClip.source_end_us! - selectedClip.source_start_us!) / 2) }], "拆分片段");
         break;
       case "timeline.copy": {
+        // P231 Q2：复制扩展到全视觉轨（不再限定 V1）。
         const snapshot = selectedClips
-          .filter(item => item.track_id === "V1" && (item.asset_kind === "video" || item.asset_kind === "image"))
+          .filter(item => (item.asset_kind === "video" || item.asset_kind === "image") && trackById.get(item.track_id)?.kind === "video")
           .map(item => ({
             asset_id: item.asset_id,
             asset_kind: item.asset_kind as "video" | "image",
@@ -2667,8 +2686,9 @@ export function App() {
       }
       case "timeline.cut": {
         // 复用复制快照逻辑后按删除路径移除（撤销可恢复）。
+        // P231 Q2：剪切扩展到全视觉轨（不再限定 V1）。
         const snapshot = selectedClips
-          .filter(item => item.track_id === "V1" && (item.asset_kind === "video" || item.asset_kind === "image") && !working?.locked_elements?.includes(item.clip_id))
+          .filter(item => (item.asset_kind === "video" || item.asset_kind === "image") && trackById.get(item.track_id)?.kind === "video" && !working?.locked_elements?.includes(item.clip_id))
           .map(item => ({
             asset_id: item.asset_id,
             asset_kind: item.asset_kind as "video" | "image",
@@ -2689,10 +2709,11 @@ export function App() {
         if (!project || !timeline || !insertable.length) return;
         // 粘贴位置：播放头处片段的 V1 序号（无片段则取播放头前序，末端追加为兜底）。
         const pasteIndex = (() => {
-          const atHead = v1Clips.findIndex(c => playhead >= c.timeline_start_us && playhead < c.timeline_end_us);
+          // P231 Q2：粘贴位置按全视觉轨序号（不再限定 V1）。
+          const atHead = visualClips.findIndex(c => playhead >= c.timeline_start_us && playhead < c.timeline_end_us);
           if (atHead >= 0) return atHead + 1;
-          const before = v1Clips.filter(c => c.timeline_end_us <= playhead).length;
-          return Math.min(before, v1Clips.length);
+          const before = visualClips.filter(c => c.timeline_end_us <= playhead).length;
+          return Math.min(before, visualClips.length);
         })();
         let cursor = pasteIndex;
         const operations: TimelinePatchOperation[] = insertable.map(snapshot => ({

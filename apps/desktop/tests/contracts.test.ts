@@ -130,6 +130,13 @@ describe("Stage 0 contract", () => {
     expect(isTimelineDocument({ ...document, locked_elements: ["clip_1"] })).toBe(true);
     expect(isTimelineDocument({ ...document, locked_elements: ["clip_1", "clip_1"] })).toBe(false);
     expect(isTimelineDocument({ ...document, locked_elements: ["missing_clip"] })).toBe(false);
+    // P231 S4 负向对照：track_id 放宽后任意 video 轨上的图片/视频片段合法；
+    // 音频仍限 A1；未知轨道/类型不匹配仍拒绝。
+    const v2Tracks = [{ id: "V2", kind: "video", locked: false, hidden: false, muted: false, solo: false }, ...document.tracks];
+    expect(isTimelineDocument({ ...document, tracks: v2Tracks, clips: [{ ...document.clips[0], clip_id: "clip_2", track_id: "V2", timeline_start_us: 2_000_000, timeline_end_us: 3_000_000 }] })).toBe(true);
+    expect(isTimelineDocument({ ...document, tracks: v2Tracks, clips: [{ ...document.clips[0], clip_id: "clip_2", track_id: "V2", asset_kind: "image", source_start_us: null, source_end_us: null, timeline_start_us: 2_000_000, timeline_end_us: 5_000_000 }] })).toBe(true);
+    expect(isTimelineDocument({ ...document, tracks: v2Tracks, clips: [{ ...document.clips[0], clip_id: "clip_2", track_id: "V2", asset_kind: "audio" }] })).toBe(false);
+    expect(isTimelineDocument({ ...document, clips: [{ ...document.clips[0], clip_id: "clip_2", track_id: "V9", timeline_start_us: 2_000_000, timeline_end_us: 3_000_000 }] })).toBe(false);
     expect(isTimelineCreateInput({ schema_version: 1, source: { kind: "transcript_selection", transcript_id: "transcript_1", segment_ids: ["segment_1"], padding_before_us: 0, padding_after_us: 0, create_captions: true }, default_layout: "fit", caption_preset_id: "default-bottom" })).toBe(true);
     const revision = { timeline_revision_id: "revision_1", project_id: "project_1", parent_revision_id: null, document_sha256: "a".repeat(64), summary: "创建", created_by: "user", created_at: "2026-08-11T00:00:00.000Z", schema_version: 1, document };
     expect(isTimelineState({ project_id: "project_1", current_revision: revision, draft: null, can_undo: false, can_redo: false, current_preview: null })).toBe(true);

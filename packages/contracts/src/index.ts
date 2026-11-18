@@ -1949,7 +1949,9 @@ function isTimelineCanvas(value: unknown): value is TimelineCanvas {
 }
 export function isTimelineClip(value: unknown): value is TimelineClip {
   if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["clip_id", "track_id", "order_index", "asset_id", "asset_kind", "source_start_us", "source_end_us", "timeline_start_us", "timeline_end_us", "layout", "audio", "speed_milli", "reverse_playback", "keyframes", "transform", "mask", "keying", "link_group_id"])) return false;
-  if (!isId(value.clip_id) || !oneOf(["V1", "A1"] as const, value.track_id) || !isInteger(value.order_index) || !isId(value.asset_id) || !oneOf(["video", "image", "audio"] as const, value.asset_kind) ||
+  // P231：track_id 不再限定 V1/A1——任意轨道 id（存在性/类型匹配由
+  // isTimelineDocument 逐片段对照 tracks 数组校验，见下方 clip-track 兼容检查）。
+  if (!isId(value.clip_id) || !isString(value.track_id) || !value.track_id.length || !isInteger(value.order_index) || !isId(value.asset_id) || !oneOf(["video", "image", "audio"] as const, value.asset_kind) ||
     !isInteger(value.timeline_start_us) || !isInteger(value.timeline_end_us, 1) || value.timeline_end_us <= value.timeline_start_us || !isTimelineLayout(value.layout) || !isRecord(value.audio) ||
     !onlyKeys(value.audio, ["enabled", "gain_db", "fade_in_us", "fade_out_us"]) || typeof value.audio.enabled !== "boolean" || !isFiniteNumber(value.audio.gain_db) || value.audio.gain_db < -60 || value.audio.gain_db > 12) return false;
   // 可选淡入/淡出：出现时必须为非负整数微秒；缺省 = 不淡（老文档无此键仍合法）。
@@ -1976,7 +1978,9 @@ export function isTimelineClip(value: unknown): value is TimelineClip {
   if (value.keying !== undefined && !isTimelineClipKeying(value.keying)) return false;
   // W0.3 可选链接组：出现时必须为非空 id 形字符串。
   if (value.link_group_id !== undefined && (!isString(value.link_group_id) || value.link_group_id.length === 0)) return false;
-  if (value.asset_kind === "image") return value.track_id === "V1" && value.source_start_us === null && value.source_end_us === null && value.timeline_end_us - value.timeline_start_us >= 500_000 && value.timeline_end_us - value.timeline_start_us <= 30_000_000;
+  // P231：图片片段可落任意 video 轨（不再限定 V1）——轨道存在性/类型由
+  // isTimelineDocument 校验。时长约束不变。
+  if (value.asset_kind === "image") return value.source_start_us === null && value.source_end_us === null && value.timeline_end_us - value.timeline_start_us >= 500_000 && value.timeline_end_us - value.timeline_start_us <= 30_000_000;
   // 视频/音频：timeline 时长 = 源范围时长 / 速度（四舍五入到微秒；原速时严格相等）。
   const speed = typeof value.speed_milli === "number" ? value.speed_milli : 1000;
   const sourceSpan = (value.source_end_us as number) - (value.source_start_us as number);

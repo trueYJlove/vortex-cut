@@ -685,10 +685,20 @@ export class Compositor {
   }
 
   drawOverlays(frame: IrFrame): void {
-    for (const overlay of frame.overlays) {
+    // P231：layers 优先（全段统一盒，含首段；z 序 = 构造序 = 轨道序）。
+    // 缺省回退 overlays 兼容层（旧 IR）。blurred_background 逐条先画模糊垫底。
+    const entries = (frame.layers && frame.layers.length > 0)
+      ? frame.layers.map(layer => ({ clip_id: layer.clip_id, input_id: layer.input_id, src_n: layer.src_n, src_t_us: layer.src_t_us, box: layer.box, rotation_deg: layer.rotation_deg, alpha: layer.alpha, layout: layer.layout, effects: layer.effects }))
+      : frame.overlays;
+    for (const overlay of entries) {
       const handle = this.videos.get(overlay.input_id);
-      if (handle) this.drawRectYuv(handle.textureY, handle.textureUV, null, overlay.box, overlay.alpha, overlay.rotation_deg, false,
-        this.sourceWidthScale.get(overlay.input_id) ?? 1920, overlay.effects?.mask, overlay.effects?.keying);
+      if (!handle) continue;
+      const sourceWidth = this.sourceWidthScale.get(overlay.input_id) ?? 1920;
+      if ((overlay as { layout?: string }).layout === "blurred_background") {
+        this.drawBlurredFill(overlay.input_id, handle.textureY, handle.textureUV, overlay.alpha);
+      }
+      this.drawRectYuv(handle.textureY, handle.textureUV, null, overlay.box, overlay.alpha, overlay.rotation_deg, false,
+        sourceWidth, overlay.effects?.mask, overlay.effects?.keying);
     }
   }
 
@@ -811,10 +821,16 @@ export class Compositor {
   /** 按 IR 帧数值表合成一帧（不做任何插值/借位计算 —— 全部已由 Core 解析）。 */
   composeFrame(frame: IrFrame, options: { drawCaptions: boolean }): void {
     this.beginFrame();
-    const main = frame.main;
-    if (main.kind === "segment") this.drawMainSegment(main);
-    else if (main.kind === "transition") this.drawMainTransition(main);
-    this.drawOverlays(frame);
+    // P231：layers 优先（全段统一盒，含首段；drawOverlays 内部走 layers 路径）。
+    // 缺省回退 main/overlays 双路径（旧 IR）。
+    if (frame.layers && frame.layers.length > 0) {
+      this.drawOverlays(frame);
+    } else {
+      const main = frame.main;
+      if (main.kind === "segment") this.drawMainSegment(main);
+      else if (main.kind === "transition") this.drawMainTransition(main);
+      this.drawOverlays(frame);
+    }
     if (options.drawCaptions && frame.captions.length > 0) this.drawCaptions(frame.captions);
     this.endFrame();
   }

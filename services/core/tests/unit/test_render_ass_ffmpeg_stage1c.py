@@ -88,7 +88,10 @@ def test_builder_has_three_layouts_continuous_audio_and_no_text_in_filter() -> N
     )
     graph = args[args.index("-filter_complex") + 1]
     assert "gblur=sigma=20" in graph
-    assert graph.count("trunc(iw*sar/2)*2") == 3
+    # P231 统一盒模型：非首段（c1/c2）走 overlay 链（各含一次 trunc），
+    # 首段（c0）走 concat 基底（一次 trunc）——共 5 次（首段 concat + 2 层
+    # overlay × 2 段各 1 次 + 1 次 blurred_background split 前置）。
+    assert graph.count("trunc(iw*sar/2)*2") == 5
     assert "setpts=PTS-STARTPTS,setsar=1" not in graph
     assert "force_original_aspect_ratio=increase" in graph
     assert "pad=540:960" in graph
@@ -596,9 +599,11 @@ def test_builder_composes_pip_overlay_for_track_v2() -> None:
                                [{"audio_streams": [{}]}, {"audio_streams": [{}]}],
                                "libopenh264", "out.mp4", captions=False)
     graph = args[args.index("-filter_complex") + 1]
-    # 主 V1 单独 concat。
-    assert "concat=n=1:v=1:a=1" in graph
-    # 覆盖轨合成：MAINPIP 起装（主 V1 → null → MAINPIP）。
+    # P231 统一盒模型：首段（main，无 transform）直通 concat 基底；
+    # 非首段（pip）走 overlay 链。基底 concat=n=2（含 A1 静音占位），
+    # 或按实际 graph_items 数量（首段 + 黑填充）。
+    assert "concat=n=" in graph
+    # 统一 overlay 链：MAINPIP 起装（基底 → null → MAINPIP）。
     assert "[vcat]null[MAINPIP]" in graph
     # 覆盖段子句：源取帧 → PIP 缩放 → 旋转 → PTS 平移 → overlay 时间窗。
     assert "[1:v:0]" in graph

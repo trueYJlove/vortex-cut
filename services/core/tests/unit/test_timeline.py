@@ -1105,6 +1105,35 @@ def test_transition_requires_video_anchor_with_video_successor(tmp_path: Path) -
     assert audio_anchor.value.code == "TIMELINE_TRANSITION_INVALID"
 
 
+def test_transition_same_track_adjacency_p231(tmp_path: Path) -> None:
+    """P231 S3 负向对照：转场同轨邻接——V2 轨内相邻段可加转场，跨轨段不可加。"""
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
+    # 新建 V2 轨 + 两段 V2 片段（首尾相接）。
+    state = _patch(service, state, [{"op": "add_track", "kind": "video"}])
+    state = _patch(service, state, [
+        {"op": "insert_asset_clip", "asset_id": "v2", "at_index": 0, "track_id": "V2",
+         "source_start_us": 0, "source_end_us": 1_000_000},
+    ])
+    state = _patch(service, state, [
+        {"op": "insert_asset_clip", "asset_id": "v2", "at_index": 1, "track_id": "V2",
+         "source_start_us": 1_000_000, "source_end_us": 2_000_000},
+    ])
+    v2_clips = [c for c in state["current_revision"]["document"]["clips"] if c["track_id"] == "V2"]
+    assert len(v2_clips) == 2
+    left_id, right_id = v2_clips[0]["clip_id"], v2_clips[1]["clip_id"]
+    # 同轨邻接（V2 内）：可加转场。
+    state = _patch(service, state, [{"op": "add_transition", "after_clip_id": left_id, "kind": "fade", "duration_us": 300_000}])
+    transitions = state["current_revision"]["document"]["transitions"]
+    assert any(t["after_clip_id"] == left_id for t in transitions)
+    # 跨轨（V2 锚点 → V1 后继）：不可加（后继须同轨）。
+    v1_id = next(c["clip_id"] for c in state["current_revision"]["document"]["clips"] if c["track_id"] == "V1")
+    with pytest.raises(DomainError) as cross_track:
+        _patch(service, state, [{"op": "add_transition", "after_clip_id": right_id, "kind": "fade", "duration_us": 300_000}])
+    assert cross_track.value.code == "TIMELINE_TRANSITION_INVALID"
+    _ = v1_id
+
+
 def test_transition_locked_clip_rejected(tmp_path: Path) -> None:
     service, _ = _service(tmp_path)
     state = _create(service, {"kind": "full_asset", "asset_id": "v1"})

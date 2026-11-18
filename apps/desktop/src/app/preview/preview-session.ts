@@ -186,6 +186,10 @@ interface InputRig {
 
 /** 主轨（段或转场左右）所需的 (输入, 源帧, 是否影子槽)。 */
 function mainNeeds(frame: IrFrame): Array<[string, number, boolean]> {
+  // P231：layers 优先（全段盒子，含首段）；缺省回退 main 链（旧 IR）。
+  if (frame.layers && frame.layers.length > 0) {
+    return frame.layers.map(layer => [layer.input_id, layer.src_n, false] as [string, number, boolean]);
+  }
   const main = frame.main;
   if (main.kind === "segment") return [[main.input_id, main.src_n, false]];
   if (main.kind !== "transition") return []; // black
@@ -198,6 +202,10 @@ function mainNeeds(frame: IrFrame): Array<[string, number, boolean]> {
 
 /** overlay 所需的 (输入, 源帧)。 */
 function overlayNeeds(frame: IrFrame): Array<[string, number]> {
+  // P231：layers 优先（全段盒子）；缺省回退 overlays 兼容层（旧 IR）。
+  if (frame.layers && frame.layers.length > 0) {
+    return frame.layers.map(layer => [layer.input_id, layer.src_n] as [string, number]);
+  }
   return frame.overlays.map(overlay => [overlay.input_id, overlay.src_n] as [string, number]);
 }
 
@@ -895,6 +903,10 @@ export class PreviewSession {
   pipBoxes(): Array<{ clipId: string; x: number; y: number; w: number; h: number }> {
     const frame = this.frames.getFrame(Math.min(this.currentFrame, this.frames.frameCount - 1));
     if (!frame) return [];
+    // P231：layers 优先（全段盒子）；缺省回退 overlays 兼容层。
+    if (frame.layers && frame.layers.length > 0) {
+      return frame.layers.map(layer => ({ clipId: layer.clip_id, x: layer.box.x, y: layer.box.y, w: layer.box.w, h: layer.box.h }));
+    }
     return frame.overlays.map(overlay => ({ clipId: overlay.clip_id, ...overlay.box }));
   }
 
@@ -987,7 +999,11 @@ export class PreviewSession {
     for (let n = 0; n < this.frames.frameCount; n++) {
       const frame = this.frames.getFrame(n);
       if (!frame) continue;
-      for (const overlay of frame.overlays) {
+      // P231：layers 优先（全段盒子，含首段）；缺省回退 overlays 兼容层。
+      const entries = (frame.layers && frame.layers.length > 0)
+        ? frame.layers.map(layer => ({ clip_id: layer.clip_id, input_id: layer.input_id, src_n: layer.src_n, src_t_us: layer.src_t_us, box: layer.box, rotation_deg: layer.rotation_deg, alpha: layer.alpha, effects: layer.effects }))
+        : frame.overlays;
+      for (const overlay of entries) {
         let list = index.get(overlay.clip_id);
         if (!list) { list = []; index.set(overlay.clip_id, list); }
         list.push(overlay);
@@ -1007,7 +1023,11 @@ export class PreviewSession {
     for (let n = Math.max(this.pipIndexCoveredUpTo + 1, fromFrame); n < toFrameExclusive; n++) {
       const frame = this.frames.getFrame(n);
       if (!frame) continue;
-      for (const overlay of frame.overlays) {
+      // P231：layers 优先（全段盒子，含首段）；缺省回退 overlays 兼容层。
+      const entries = (frame.layers && frame.layers.length > 0)
+        ? frame.layers.map(layer => ({ clip_id: layer.clip_id, input_id: layer.input_id, src_n: layer.src_n, src_t_us: layer.src_t_us, box: layer.box, rotation_deg: layer.rotation_deg, alpha: layer.alpha, effects: layer.effects }))
+        : frame.overlays;
+      for (const overlay of entries) {
         let list = this.pipOverlayIndex.get(overlay.clip_id);
         if (!list) { list = []; this.pipOverlayIndex.set(overlay.clip_id, list); }
         list.push(overlay);
@@ -2183,9 +2203,38 @@ export class PreviewSession {
     const compositor = this.compositor;
     if (!compositor || this.disposed) return;
     const cmds: DrawCommand[] = [];
-    const main = frame.main;
     const sourceOf = (inputId: string, srcN: number, shadow: boolean): DrawCommand | null =>
       this.sourceOf(inputId, srcN, shadow);
+    // P231：layers 优先（全段统一盒，含首段；z 序 = 构造序 = 轨道序，上层在前、
+    // 后绘制覆盖先绘制）。blurred_background 逐条先画模糊垫底。缺省回退
+    // main/overlays 双路径（旧 IR）。
+    if (frame.layers && frame.layers.length > 0) {
+      for (const layer of frame.layers) {
+        const source = sourceOf(layer.input_id, layer.src_n, false);
+        if (!source) continue;
+        if (layer.layout === "blurred_background") {
+          cmds.push({ ...source, op: "fill", alpha: layer.alpha });
+        }
+        cmds.push({
+          ...source,
+          rect: { x: layer.box.x + (layer.shift?.dx ?? 0), y: layer.box.y + (layer.shift?.dy ?? 0), w: layer.box.w, h: layer.box.h },
+          alpha: layer.alpha,
+          rotationDeg: layer.rotation_deg ?? 0,
+          mask: layer.effects?.mask,
+          keying: layer.effects?.keying,
+        });
+      }
+      if (frame.captions.length > 0) {
+        const items = frame.captions.map(captionId => {
+          const entry = this.ir.captions.find(item => item.caption_id === captionId);
+          return entry ? { caption_id: entry.caption_id, text: entry.text, preset_id: entry.preset_id } : null;
+        }).filter((item): item is { caption_id: string; text: string; preset_id: string } => item !== null);
+        cmds.push({ op: "captions", items });
+      }
+      compositor.compose(cmds, this.seekEpoch, frame.n);
+      return;
+    }
+    const main = frame.main;
     if (main.kind === "segment") {
       const source = sourceOf(main.input_id, main.src_n, false);
       if (source) {

@@ -66,6 +66,25 @@ export interface IrOverlay {
   };
 }
 
+/** P231 统一盒条目（layers）：全视觉段（含首段）逐条带 box/transform/effects。
+ *  构造序 = 轨道数组序（z 序：上层在前、后绘制覆盖先绘制）。 */
+export interface IrLayer {
+  clip_id: string;
+  input_id: string;
+  src_n: number;
+  src_t_us: number;
+  box: IrContent;
+  /** 关键帧 position 平移（画布像素，作用于 box 之外的整体偏移）。 */
+  shift?: { dx: number; dy: number };
+  rotation_deg: number;
+  alpha: number;
+  layout?: string;
+  effects?: {
+    mask?: import("./effects.js").IrEffectMask;
+    keying?: import("./effects.js").IrEffectKeying;
+  };
+}
+
 export interface IrCaptionItem {
   caption_id: string;
   start_us: number;
@@ -98,6 +117,10 @@ export interface IrFrame {
   n: number;
   t_us: number;
   main: IrMain;
+  /** P231 统一盒条目（全视觉段，含首段），按轨道序（上层在前）。
+   *  缺省（旧 IR）= 由 main/overlays 派生（兼容回退）。 */
+  layers?: IrLayer[];
+  /** 兼容层：非首段的旧形状条目（首段由 main 承载）。旧 IR 恒有此字段。 */
   overlays: IrOverlay[];
   captions: string[];
 }
@@ -141,9 +164,13 @@ export function parseIr(value: string | Record<string, unknown>): Ir {
   return ir;
 }
 
-/** 帧活动输入集合（主轨 + 覆盖轨）。 */
+/** 帧活动输入集合（layers 优先，缺省回退 main + overlays）。 */
 export function activeInputIds(frame: IrFrame): Set<string> {
   const ids = new Set<string>();
+  if (frame.layers && frame.layers.length > 0) {
+    for (const layer of frame.layers) ids.add(layer.input_id);
+    return ids;
+  }
   const main = frame.main;
   if (main.kind === "segment") ids.add(main.input_id);
   if (main.kind === "transition") { ids.add(main.left.input_id); ids.add(main.right.input_id); }
@@ -151,8 +178,13 @@ export function activeInputIds(frame: IrFrame): Set<string> {
   return ids;
 }
 
-/** 输入在指定帧的源帧号（转场左/右各自取帧）。 */
+/** 输入在指定帧的源帧号（layers 优先；转场左/右各自取帧）。 */
 export function sourceFrameAt(frame: IrFrame, inputId: string): number | null {
+  if (frame.layers && frame.layers.length > 0) {
+    for (const layer of frame.layers) {
+      if (layer.input_id === inputId) return layer.src_n;
+    }
+  }
   const main = frame.main;
   if (main.kind === "segment" && main.input_id === inputId) return main.src_n;
   if (main.kind === "transition") {

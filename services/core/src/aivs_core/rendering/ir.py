@@ -31,9 +31,20 @@ IR_SCHEMA = "preview-ir-v1"
 # ffprobe 旋转解析改为扫描整个 side_data_list（iPhone 的 side_data_list[0] 是
 # Dolby Vision 记录，只看 [0] 取不到 rotation）。旧条目缺 display_* ⇒ 旧布局语义，
 # 必须整体失效。
+# v6（2026-11-17 P231）：统一盒模型——visual/overlays 按 track_id=="V1" 二分
+# 改为全视觉段 layers（V1 降级为普通盒子）；mask/keying/关键帧/转场白名单三处
+# V1 特权移除；layers 条目带 box/shift/rotation/alpha/effects（opacity 全段生效，
+# 移除「PiP overlay 忽略 transform.opacity」近似）。main/overlays 保留为兼容
+# 字段（main = 时间序首段或 black；overlays = 非首段旧形状条目）。
+# v5（2026-11-03）：输入 geometry 携带显示方向——新增 display_width/display_height/
+# rotation（width/height 仍表示解码平面尺寸，供纹理上传）；_fit_content_box 与
+# crop_fill 改为**按显示方向**计算内容盒（竖拍素材不再被当成横版铺满画布）；
+# ffprobe 旋转解析改为扫描整个 side_data_list（iPhone 的 side_data_list[0] 是
+# Dolby Vision 记录，只看 [0] 取不到 rotation）。旧条目缺 display_* ⇒ 旧布局语义，
+# 必须整体失效。
 # v4（2026-10-10）：主轨空时以可见覆盖轨终点作时长下限（对齐权威端「全程黑场+
 # 覆盖轨叠加」）；v3（2026-09-17 v0.4）：覆盖轨 mask/keying 重入（overlay 条目携带 effects）。
-IR_PROJECTOR_VERSION = 5
+IR_PROJECTOR_VERSION = 6
 MAX_IR_FRAMES = 27_000  # 15 分钟 @30fps（O2 体量护栏）
 
 ALLOWED_KEYFRAME_PROPS = {"position", "opacity", "scale", "rotate"}
@@ -106,13 +117,10 @@ def _split_overlapped_inputs(
 def _validate_whitelist(plan: dict[str, Any]) -> None:
     for segment in plan["segments"]:
         clip_id = segment["clip_id"]
-        # v0.4 重入：覆盖轨 mask/keying 放行（合成器 shader 内逐像素算 alpha，
-        # 语义对齐 _mask_alpha_expr / colorkey）；主轨（V1）权威端不消费这两个
-        # 字段，保持拒绝并明示原因。
-        if segment.get("mask") and segment["track_id"] == "V1":
-            raise _fail(clip_id, "主轨蒙版（蒙版仅覆盖轨支持实时合成）")
-        if segment.get("keying") and segment["track_id"] == "V1":
-            raise _fail(clip_id, "主轨抠像（抠像仅覆盖轨支持实时合成）")
+        # P231：mask/keying 全视觉段放行（统一盒模型后主轨/覆盖轨同语义，
+        # 合成器 shader 逐像素算 alpha；权威端 _pip_overlay_chain/visual_chain
+        # 同构消费）。v0.4 曾按 track_id == "V1" 拒绝主轨——该门控已随
+        # P231 盒模型移除。
         if segment.get("reframe"):
             raise _fail(clip_id, "reframe（重构图）")
         if segment.get("reverse_playback"):
@@ -129,16 +137,13 @@ def _validate_whitelist(plan: dict[str, Any]) -> None:
             raise _fail(clip_id, f"asset_kind={segment['asset_kind']}（该素材类型不支持实时合成预览）")
         keyframes = segment.get("keyframes")
         if isinstance(keyframes, dict) and keyframes:
-            if segment["track_id"] != "V1":
-                raise _fail(clip_id, "非 V1 轨关键帧（权威端覆盖轨链路不叠加动画）")
+            # P231：关键帧全视觉段放行（统一盒模型后主轨/覆盖轨同语义）。
             unknown = set(keyframes) - ALLOWED_KEYFRAME_PROPS
             if unknown:
                 raise _fail(clip_id, f"关键帧属性 {sorted(unknown)}")
         if segment.get("transition_in"):
             if segment["transition_in"]["kind"] not in ALLOWED_TRANSITIONS:
                 raise _fail(clip_id, f"转场 {segment['transition_in']['kind']}")
-            if segment["track_id"] != "V1":
-                raise _fail(clip_id, "覆盖轨转场（权威端仅 V1 相邻段）")
     for caption in plan["captions"]["items"]:
         # B4 收官后预览子集放开 style_override：数值样式随 per-caption 覆盖
         # 解析（_caption_override_style），合成器 Canvas 消费——预览=导出。
@@ -219,6 +224,81 @@ def _pip_box(segment: dict[str, Any], geometry: dict[str, Any], width: int, heig
     pip_w = max(2, int(round(content_w * scale_val / 2) * 2))
     pip_h = max(2, int(round(content_h * scale_val / 2) * 2))
     return cx * width - pip_w / 2, cy * height - pip_h / 2, pip_w, pip_h, rotate_val
+
+
+def _layer_entry(segment: dict[str, Any], input_id: str, geometry: dict[str, Any],
+                 width: int, height: int, t_exact_us: float) -> dict[str, Any]:
+    """统一盒条目（P231 layers）：内容盒 × transform × 关键帧 + effects。
+
+    复用 _fit_content_box / _pip_box 的坐标语义（内容盒等比适配、transform
+    中心点归一化、scale×内容盒），与权威端 _pip_overlay_chain/visual_chain
+    对齐。alpha = opacity 关键帧 × 静态 opacity（P231 后全段生效）。
+    """
+    keyframes = segment.get("keyframes") if isinstance(segment.get("keyframes"), dict) else None
+    transform = segment.get("transform") if isinstance(segment.get("transform"), dict) else {}
+    try:
+        scale_val = min(max(float(transform.get("scale", 1.0)), 0.05), 5.0)
+    except (TypeError, ValueError):
+        scale_val = 1.0
+    try:
+        cx = min(max(float(transform.get("x", 0.5)), 0.0), 1.0)
+        cy = min(max(float(transform.get("y", 0.5)), 0.0), 1.0)
+    except (TypeError, ValueError):
+        cx, cy = 0.5, 0.5
+    try:
+        rotate_val = float(transform.get("rotate", 0.0))
+    except (TypeError, ValueError):
+        rotate_val = 0.0
+    try:
+        static_alpha = min(max(float(transform.get("opacity", 1.0)), 0.0), 1.0)
+    except (TypeError, ValueError):
+        static_alpha = 1.0
+    # 内容盒：fit/blurred_background = 等比适配（_fit_content_box）；
+    # crop_fill = cover 放大到短边顶满（与 segment_frame 同式）。
+    if segment.get("layout") == "crop_fill":
+        disp_w_full = int(geometry.get("display_width") or geometry["width"]) * geometry["sar"]
+        disp_h_full = int(geometry.get("display_height") or geometry["height"])
+        cover_scale = max(width / disp_w_full, height / disp_h_full)
+        cover_w = int(round(disp_w_full * cover_scale / 2) * 2)
+        cover_h = int(round(disp_h_full * cover_scale / 2) * 2)
+        content_x, content_y = (width - cover_w) // 2, (height - cover_h) // 2
+        content_w, content_h = cover_w, cover_h
+    else:
+        content_x, content_y, content_w, content_h = _fit_content_box(geometry, width, height)
+    if scale_val != 1.0 or cx != 0.5 or cy != 0.5:
+        content_w = max(2, int(round(content_w * scale_val / 2) * 2))
+        content_h = max(2, int(round(content_h * scale_val / 2) * 2))
+        content_x = int(cx * width - content_w / 2)
+        content_y = int(cy * height - content_h / 2)
+    # 关键帧：position 平移（shift）、rotate 叠加、opacity 乘入 alpha。
+    t_seg_us = max(0, t_exact_us - int(segment["timeline_start_us"]))
+    shift_dx = shift_dy = 0.0
+    rotation_deg = rotate_val
+    if keyframes and "position" in keyframes:
+        x = _lerp_channel(keyframes["position"]["frames"], t_seg_us, "x")
+        y = _lerp_channel(keyframes["position"]["frames"], t_seg_us, "y")
+        shift_dx = x * (width / 2) * scale_val
+        shift_dy = y * (height / 2) * scale_val
+    if keyframes and "rotate" in keyframes:
+        rotation_deg += _lerp_channel(keyframes["rotate"]["frames"], t_seg_us, "v")
+    effects: dict[str, Any] = {}
+    if isinstance(segment.get("mask"), dict) and segment["mask"]:
+        effects["mask"] = segment["mask"]
+    if isinstance(segment.get("keying"), dict) and segment["keying"]:
+        effects["keying"] = segment["keying"]
+    src_n = _source_frame_n(segment, t_exact_us, 0)
+    return {
+        "clip_id": segment["clip_id"],
+        "input_id": input_id,
+        "src_n": src_n,
+        "src_t_us": int(src_n * 1_000_000 / FPS),
+        "box": {"x": round(content_x, 3), "y": round(content_y, 3), "w": content_w, "h": content_h},
+        "shift": {"dx": round(shift_dx, 3), "dy": round(shift_dy, 3)},
+        "rotation_deg": round(rotation_deg, 4),
+        "alpha": round(_opacity_alpha(keyframes, t_seg_us) * static_alpha, 6),
+        "layout": segment.get("layout", "fit"),
+        **({"effects": effects} if effects else {}),
+    }
 
 
 def _source_frame_n(segment: dict[str, Any], t_exact_us: float, offset_from_us: float) -> int:
@@ -392,15 +472,21 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
     segment_input = _split_overlapped_inputs(plan, inputs, segment_input, geometry_by_input)
 
     segments = plan["segments"]
+    # P231 统一盒模型：全部非音频非隐藏段进入帧装配层（layers），
+    # 不再按 track_id == "V1" 二分。z 序 = 轨道序（上层盖下层），
+    # 同轨按 timeline_start_us 排序。main/overlays 保留为兼容字段
+    # （main = 时间序首段或 black；overlays = 其余段的旧形状条目），
+    # 最终态（后续门）删除兼容字段、layers 成为唯一来源。
     visual = [
         (index, segment)
         for index, segment in enumerate(segments)
-        if segment["asset_kind"] != "audio" and segment.get("track_id", "V1") == "V1" and not segment.get("track_hidden")
+        if segment["asset_kind"] != "audio" and not segment.get("track_hidden")
     ]
     visual.sort(key=lambda item: int(item[1]["timeline_start_us"]))
+    # overlays 兼容层：非首段的可见段（保持旧 overlays 条目形状，供旧消费者）。
     overlays = [
         segment for segment in segments
-        if segment["asset_kind"] != "audio" and segment.get("track_id", "V1") != "V1" and not segment.get("track_hidden")
+        if segment["asset_kind"] != "audio" and not segment.get("track_hidden")
     ]
 
     # 图项序列：黑底填充 + 段；转场仅在时间序后继首尾相接时激活（休眠转场 = 无转场）
@@ -552,24 +638,21 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
             "layout": segment.get("layout", "fit"),
         }
 
-    # 输出时长：可视化区段终点与 A1 纯音频窗口终点取大——音频长于画面时以
-    # 黑场延长输出（前端合成器对越界帧渲染黑场，音频照常调度）。
-    # 主轨为空（V1 无可见视频段）时以**可见覆盖轨终点**作时长下限：权威端对
-    # 同形态输出「全程黑场 + 覆盖轨照常叠加」（ffmpeg.py 空主轨黑场分支，
-    # 时长 = 全时间线，含覆盖轨终点），预览必须同语义——缺失时 total_frames=0
-    # → play() 首个 tick 即结束、静默无任何提示（W2.6 末条登记缺陷）。
-    # V1 非空时不取覆盖轨终点：权威端视频长度 = 主轨链长，覆盖轨窗口超出
-    # 主画面的部分被 overlay 主输入时长截断，预览保持一致。
+    # P231 输出时长：全部可见视觉段（统一盒模型后无主轨/覆盖轨之分）的
+    # 输出窗口终点与 A1 纯音频窗口终点取大——音频长于画面时以黑场延长
+    # 输出（前端合成器对越界帧渲染黑场，音频照常调度）。空时间线（无视觉段
+    # 无音频段）total_us = 0。旧「主轨空时取覆盖轨终点」特判已随二分取消。
     audio_tail_end = max(
         (_output_window(segment)[1] for segment in segments
          if segment["asset_kind"] == "audio" and not segment.get("track_hidden")),
         default=0,
     )
-    overlay_tail_end = (
-        max((int(segment["timeline_end_us"]) for segment in overlays), default=0)
-        if not visual else 0
+    visual_tail_end = max(
+        (_output_window(seg)[1] for _idx, seg in visual
+         if seg["asset_kind"] != "audio"),
+        default=0,
     )
-    total_us = max(regions[-1]["t1"] if regions else 0, audio_tail_end, overlay_tail_end)
+    total_us = max(regions[-1]["t1"] if regions else 0, audio_tail_end, visual_tail_end)
     total_frames = -(-int(total_us) * FPS // 1_000_000)
     # O2 体量护栏（M3-2）：全量逐帧数值表按帧数线性增长，超长时间线先拒绝，
     # 分页/按需投影留待后续增量（设计 §7-O2）。
@@ -583,6 +666,8 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
     # A04 扫线索引（投影开始时建一次）：主轨 region 扫线（半开 + 倒序命中
     # 语义 + 锚点预映射）；overlays/captions 含端 lookup（输出保持原顺序）。
     region_sweep = RegionSweep(regions)
+    # P231：layers 查找表覆盖全部可见段（含首段），构造序 = segments 列表序
+    # = 轨道数组序（z 序：上层盖下层）。overlays 兼容层从同一表派生。
     overlay_lookup = IntervalLookup([
         (int(segment["timeline_start_us"]), int(segment["timeline_end_us"]), (order, segment))
         for order, segment in enumerate(overlays)
@@ -615,35 +700,28 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
             else:
                 main_entry = {"kind": "segment", **segment_frame(segment, t_exact_us, region["phase"], head_us=region.get("head_us", 0),
                                                                  content_origin_us=region["t0"])}
-        overlay_entries = []
+        # P231 layers：全部活跃可见段（含首段）统一盒条目，按轨道序（上→下）。
+        # IntervalLookup 保持构造原顺序 = segments 列表序 = 轨道数组顺序
+        # （plan.segments 由 timeline 按轨道数组序展开），故 next_batch 输出
+        # 即 z 序（上层在前、后绘制覆盖先绘制）。
+        layer_entries = []
         for segment in overlay_lookup.next_batch(t_exact_us):
-            box_x, box_y, pip_w, pip_h, rotation = _pip_box(
-                segment, geometry_by_input[segment_input[segment["clip_id"]]], width, height)
-            entry = {
-                "clip_id": segment["clip_id"],
-                "input_id": segment_input[segment["clip_id"]],
-                "src_n": _source_frame_n(segment, t_exact_us, 0),
-                "src_t_us": int(_source_frame_n(segment, t_exact_us, 0) * 1_000_000 / FPS),
-                "box": {"x": round(box_x, 3), "y": round(box_y, 3), "w": pip_w, "h": pip_h},
-                "rotation_deg": rotation,
-                # 权威端 _pip_overlay_chain 不消费 transform.opacity（已知近似清单）
-                "alpha": 1.0,
-            }
-            # v0.4：覆盖轨 mask/keying 静态参数随 overlay 条目携带（不随帧变化，
-            # 合成器 shader 内逐像素算 alpha）。字段原样透传（白名单校验已确认
-            # schema），合成器端按 _mask_alpha_expr / colorkey 同构语义消费。
-            effects: dict[str, Any] = {}
-            if isinstance(segment.get("mask"), dict) and segment["mask"]:
-                effects["mask"] = segment["mask"]
-            if isinstance(segment.get("keying"), dict) and segment["keying"]:
-                effects["keying"] = segment["keying"]
-            if effects:
-                entry["effects"] = effects
-            overlay_entries.append(entry)
+            layer_entries.append(_layer_entry(
+                segment,
+                segment_input[segment["clip_id"]],
+                geometry_by_input[segment_input[segment["clip_id"]]],
+                width, height, t_exact_us))
+        # overlays 兼容层（旧形状）：非首段的条目（首段由 main 承载，避免旧
+        # 消费者把同一段画两遍）。首段判定 = main_entry 携带的 clip_id。
+        main_clip_id = main_entry.get("clip_id") if main_entry.get("kind") == "segment" else None
+        overlay_entries = [
+            entry for entry in layer_entries if entry["clip_id"] != main_clip_id
+        ]
         active_captions = [
             caption["caption_id"] for caption in caption_lookup.next_batch(t_exact_us)
         ]
         frames.append({"n": n, "t_us": t_us, "main": main_entry,
+                       "layers": layer_entries,
                        "overlays": overlay_entries, "captions": active_captions})
 
     return {
@@ -686,9 +764,8 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
         "known_approximations": [
             "opacity 关键帧 = fade=alpha=1:st=0:d=末关键帧t 整体渐入近似（权威端实际行为，非 lerp）",
             "scale 关键帧 = 无视觉效果（逐帧 scale 被静态归一化 scale=min(iw,W)+pad 完全抵消；M3-0 实证 bbox 恒全画布）——IR 与合成器一致忽略",
-            "PiP overlay 忽略 transform.opacity（_pip_overlay_chain 未消费）",
             "字幕帧文本光栅化 libass vs 浏览器（单独口径：bbox IoU + diff 比率）",
-            "A1 音频窗口按段起点取借用位移；跨越主轨转场借用点的音频段不做分段重映射",
+            "A1 音频窗口按段起点取借用位移；跨越转场借用点的音频段不做分段重映射",
             "blurred_background 垫底 = 两级降采样(÷4→÷16)线性放大近似 gblur sigma=20",
             "keying.invert 权威端 alpha 链不消费——合成器同语义忽略（蒙版 invert 正常生效）",
         ],

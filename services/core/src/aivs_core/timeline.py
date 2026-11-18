@@ -163,7 +163,7 @@ MIN_SPEED_MILLI = 250
 MAX_SPEED_MILLI = 4000
 MIN_TRANSITION_US = 100_000
 MAX_TRANSITION_US = 2_000_000
-# 转场只作用于 V1 相邻的这两类片段。
+# 转场作用于同轨相邻的这两类片段（P231：任意视觉轨，V1 轨 = 同轨特例）。
 TRANSITIONABLE_KINDS = ("video", "image")
 TRANSITION_KINDS = {
     "fade", "fadeblack", "dissolve", "wipeleft", "wiperight",
@@ -702,7 +702,7 @@ class TimelineService:
         - 移除引用该素材的片段（保持其余片段的 timeline_start_us，自由定位
           模型下不推移、留空隙）；
         - 移除其 source_clip_id 指向被删片段的字幕；
-        - 移除以被删片段为锚点、或以其“被删后 V1 时间序直接后继”为锚点的转场；
+        - 移除以被删片段为锚点、或以其“被删后同轨时间序直接后继”为锚点的转场（P231 同轨邻接）；
         - 按轨道顺序重排 order_index，并执行失去时间序后继的转场 GC；
         - 重算 document_sha256（文档内容已变化）。
 
@@ -794,13 +794,22 @@ class TimelineService:
         transitions = document.get("transitions")
         if isinstance(transitions, list) and transitions:
             # 被删片段的“直接后继”锚点转场一并移除（相邻关系已不存在）。
+            # P231：同轨邻接——被删片段的「同轨时间序直接后继」为锚的转场
+            # 一并移除（该相邻关系已不存在）。
             successors: set[str] = set()
             for clip_id, start in removed_starts.items():
+                removed_clip = next(
+                    (c for c in document["clips"] if isinstance(c, dict) and c.get("clip_id") == clip_id),
+                    None,
+                )
+                removed_track = removed_clip.get("track_id") if isinstance(removed_clip, dict) else None
                 successor = next(
                     (
                         clip["clip_id"]
                         for clip in sorted(
-                            (c for c in document["clips"] if isinstance(c, dict) and c.get("track_id") == "V1" and isinstance(c.get("timeline_start_us"), int)),
+                            (c for c in document["clips"]
+                             if isinstance(c, dict) and c.get("track_id") == removed_track
+                             and isinstance(c.get("timeline_start_us"), int)),
                             key=lambda c: c["timeline_start_us"],
                         )
                         if isinstance(start, int) and clip_id is not None and c["timeline_start_us"] >= start
@@ -1072,18 +1081,20 @@ class TimelineService:
                     c for c in captions if c["source_clip_id"] != target["clip_id"]
                 ]
                 if document.get("transitions"):
-                    v1_left = sorted(
+                    # P231：同轨邻接——被删片段的同轨时间序直接后继为锚的
+                    # 转场一并移除（该相邻关系已不存在）。
+                    same_track_left = sorted(
                         (
                             c
                             for c in clips
-                            if c.get("track_id") == "V1" and c is not target
+                            if c.get("track_id") == target.get("track_id") and c is not target
                         ),
                         key=lambda c: c["timeline_start_us"],
                     )
                     successor_id = next(
                         (
                             c["clip_id"]
-                            for c in v1_left
+                            for c in same_track_left
                             if c["timeline_start_us"] >= target["timeline_start_us"]
                         ),
                         None,
@@ -1099,18 +1110,19 @@ class TimelineService:
             # 级联删除涉及该片段的转场：作为锚点的转场直接删；时间序中
             # "被删片段的直接后继"为锚的转场也删（该相邻关系已不存在）。
             if document.get("transitions"):
-                v1_left = sorted(
+                # P231：同轨邻接——被删片段的同轨时间序直接后继为锚的转场一并删。
+                same_track_left = sorted(
                     (
                         c
                         for c in clips
-                        if c.get("track_id") == "V1" and c is not clip
+                        if c.get("track_id") == clip.get("track_id") and c is not clip
                     ),
                     key=lambda c: c["timeline_start_us"],
                 )
                 successor_id = next(
                     (
                         c["clip_id"]
-                        for c in v1_left
+                        for c in same_track_left
                         if c["timeline_start_us"] >= clip["timeline_start_us"]
                     ),
                     None,
@@ -1626,8 +1638,9 @@ class TimelineService:
                 raise DomainError("TIMELINE_INVALID", "图片时长需为 0.5-30 秒")
             old_duration = clip["timeline_end_us"] - clip["timeline_start_us"]
             clip["timeline_end_us"] = clip["timeline_start_us"] + duration
-            if clip["track_id"] == "V1":
-                self._ripple_track_right(clips, captions, clip)
+            # P231：涟漪按轨——任意视觉轨的图片片段时长变化均涟漪右推
+            # 同轨后续片段（V1 轨 = 同轨特例，行为不变）。
+            self._ripple_track_right(clips, captions, clip)
             _remap_clip_keyframes(clip, old_duration, duration)
         elif op == "add_caption":
             _exact_keys(
@@ -2060,8 +2073,10 @@ class TimelineService:
         self, clips: list[dict[str, Any]], after_clip_id: Any
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         anchor = _clip({"clips": clips}, after_clip_id)
-        if anchor.get("track_id") != "V1" or anchor.get("asset_kind") not in TRANSITIONABLE_KINDS:
-            raise DomainError("TIMELINE_TRANSITION_INVALID", "转场只能加在 V1 视频/图片片段之后")
+        # P231：转场锚定放宽为同轨邻接（任意视觉轨的视频/图片片段均可作锚点，
+        # 后继须同轨且首尾相接）。V1 轨 = 同轨特例，行为不变。
+        if anchor.get("asset_kind") not in TRANSITIONABLE_KINDS:
+            raise DomainError("TIMELINE_TRANSITION_INVALID", "转场只能加在视频/图片片段之后")
         successor = _transition_successor(clips, anchor)
         if successor.get("asset_kind") not in TRANSITIONABLE_KINDS:
             raise DomainError("TIMELINE_TRANSITION_INVALID", "转场后继必须是视频/图片片段")
@@ -2377,21 +2392,18 @@ class TimelineService:
         clips = document.get("clips")
         if not transitions or not isinstance(clips, list):
             return
-        v1 = sorted(
-            (
-                clip
-                for clip in clips
-                if isinstance(clip, dict) and clip.get("track_id") == "V1"
-            ),
-            key=lambda clip: clip.get("timeline_start_us") or 0,
-        )
-        valid_anchors = {
-            clip["clip_id"]
-            for index, clip in enumerate(v1)
-            if clip.get("asset_kind") in TRANSITIONABLE_KINDS
-            and index + 1 < len(v1)
-            and v1[index + 1].get("asset_kind") in TRANSITIONABLE_KINDS
-        }
+        # P231：转场 GC 按同轨邻接判定（每条视觉轨独立时间序）。
+        by_track: dict[str, list] = {}
+        for clip in clips:
+            if isinstance(clip, dict) and isinstance(clip.get("track_id"), str):
+                by_track.setdefault(clip["track_id"], []).append(clip)
+        valid_anchors: set[str] = set()
+        for track_clips in by_track.values():
+            ordered = sorted(track_clips, key=lambda clip: clip.get("timeline_start_us") or 0)
+            for index, clip in enumerate(ordered):
+                if clip.get("asset_kind") in TRANSITIONABLE_KINDS and index + 1 < len(ordered) \
+                        and ordered[index + 1].get("asset_kind") in TRANSITIONABLE_KINDS:
+                    valid_anchors.add(clip["clip_id"])
         document["transitions"] = [
             item
             for item in transitions
@@ -2815,19 +2827,23 @@ class TimelineService:
             duration = _integer(transition.get("duration_us"), "转场时长不合法")
             if not MIN_TRANSITION_US <= duration <= MAX_TRANSITION_US:
                 raise DomainError("TIMELINE_INVALID", "转场时长需为 0.1-2 秒")
-        # 引用完整性：锚点必须是 V1 可转场片段且时间序中存在 V1 后继。
+        # 引用完整性：锚点必须是可转场片段且同轨时间序中存在后继。
         # 不要求首尾相接：留有空隙的转场休眠（渲染/UI 跳过），重新相接后恢复。
-        v1 = sorted(
-            (c for c in clips if c["track_id"] == "V1"),
-            key=lambda c: c["timeline_start_us"],
-        )
+        # P231：同轨邻接（V1 轨 = 同轨特例）。
+        by_track: dict[str, list] = {}
+        for c in clips:
+            by_track.setdefault(c["track_id"], []).append(c)
         for transition in transitions:
-            anchor = next((c for c in v1 if c["clip_id"] == transition["after_clip_id"]), None)
+            anchor = next((c for c in clips if c["clip_id"] == transition["after_clip_id"]), None)
             if anchor is None or anchor["asset_kind"] not in TRANSITIONABLE_KINDS:
-                raise DomainError("TIMELINE_INVALID", "转场锚点必须是 V1 视频/图片片段")
-            index = v1.index(anchor)
-            if index + 1 >= len(v1) or v1[index + 1]["asset_kind"] not in TRANSITIONABLE_KINDS:
-                raise DomainError("TIMELINE_INVALID", "转场后继必须是 V1 视频/图片片段")
+                raise DomainError("TIMELINE_INVALID", "转场锚点必须是视频/图片片段")
+            same_track = sorted(
+                by_track.get(anchor["track_id"], []),
+                key=lambda c: c["timeline_start_us"],
+            )
+            index = same_track.index(anchor)
+            if index + 1 >= len(same_track) or same_track[index + 1]["asset_kind"] not in TRANSITIONABLE_KINDS:
+                raise DomainError("TIMELINE_INVALID", "转场后继必须是视频/图片片段")
 
     def _normalize_timing(self, document: dict[str, Any], old_starts: dict[str, int]) -> None:
         clips = document.get("clips")
@@ -3204,18 +3220,21 @@ def _transition(document: dict[str, Any], transition_id: Any) -> dict[str, Any]:
 def _transition_successor(
     clips: list[dict[str, Any]], anchor: dict[str, Any]
 ) -> dict[str, Any]:
-    """V1 时间序中 anchor 的直接后继；转场要求其为同轨可转场片段。
+    """同轨时间序中 anchor 的直接后继；转场要求其为同轨可转场片段。
 
-    自由定位下列表顺序不再等于时间顺序，后继按 timeline_start_us 排序取。
+    P231：转场锚定从「V1 邻接」放宽为「同轨邻接」——每条视觉轨内部独立
+    判定时间序后继（V1 轨 = 同轨特例，行为不变）。自由定位下列表顺序不再
+    等于时间顺序，后继按 timeline_start_us 排序取。
     """
-    v1 = sorted(
-        (c for c in clips if c.get("track_id") == "V1"),
+    track_id = anchor.get("track_id")
+    same_track = sorted(
+        (c for c in clips if c.get("track_id") == track_id),
         key=lambda c: c["timeline_start_us"],
     )
-    index = v1.index(anchor)
-    if index + 1 >= len(v1):
+    index = same_track.index(anchor)
+    if index + 1 >= len(same_track):
         raise DomainError("TIMELINE_TRANSITION_INVALID", "转场需要一个后继片段")
-    return v1[index + 1]
+    return same_track[index + 1]
 
 
 def _validate_keyframe_track(

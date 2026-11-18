@@ -20,8 +20,12 @@ import { ZOOM_MAX_PPS, ZOOM_MIN_PPS } from "./types.js";
 export const MIN_CLIP_US = 100_000;
 /** Snap threshold in canvas pixels. */
 export const SNAP_PX = 8;
-/** Width of the hoverable trim handle zone in pixels. */
+/** Width of the hoverable trim handle zone in pixels.
+ *  T11 参照 Timeline.tsx:790-791：trimHit = min(8, max(2, w/4))——窄片段收缩，宽片段更易命中。 */
 export const TRIM_HANDLE_PX = 6;
+export function trimHitPx(clipWidthPx: number): number {
+  return Math.min(8, Math.max(2, Math.round(clipWidthPx / 4)));
+}
 /** Height of the bottom scrollbar strip drawn on the canvas. */
 // 横向滚动条高（2026-11-16 对齐 OpenFilm H_SCROLL_H = 10，Timeline.tsx:202）；原 8。
 export const SCROLLBAR_HEIGHT_PX = 10;
@@ -86,6 +90,10 @@ export const TRACK_VIEW_PAD = 10;
    主轨比其他轨高一档；覆盖轨是矮的。 */
 export const MAIN_TRACK_H = 76;
 export const OVERLAY_TRACK_H = 30;
+/* T4 参照 Timeline.tsx:311,323-325：字幕/文本轨窄行 */
+export const CAPTION_ROW_H = 26;
+/* T5 参照 Timeline.tsx:1239：标记行 16px 浮层 + 2px 呼吸 = 首行之上至少让出 18px */
+export const MARKER_ROW_PAD = 18;
 
 export function computeTrackRows(
   tracks: TimelineTrack[],
@@ -109,6 +117,7 @@ export function computeTrackRows(
      只有主轨与音频取参照的绝对值。 */
   const heights = tracks.map((track) => {
     if (track.kind === "audio") return 44;
+    if (track.kind === "text") return CAPTION_ROW_H; // T4 参照 Timeline.tsx:311,323-325 字幕/文本窄行（caption→text 兼容映射在组件层）
     if (track.id === "V1") return Math.max(MAIN_TRACK_H, rowHeight);
     // 覆盖轨（贴纸/特效类）在参照里是矮的；我们没有单独标记，按比例压到 overlay 档
     return Math.max(OVERLAY_TRACK_H, Math.round(rowHeight * SECONDARY_ROW_RATIO));
@@ -117,7 +126,8 @@ export function computeTrackRows(
   const padTop =
     viewportHeight === undefined
       ? 0
-      : Math.max(TRACK_VIEW_PAD, Math.floor((viewportHeight - tracksH) / 2));
+      // T5 参照 Timeline.tsx:1239：标记行 16px 浮在首行上方，padTop 至少让出 18px
+      : Math.max(MARKER_ROW_PAD, Math.floor((viewportHeight - tracksH) / 2));
   let y = rulerHeight + padTop;
   return tracks.map((track, index) => {
     const height = heights[index];
@@ -187,7 +197,8 @@ export function hitTestClips(
   return null;
 }
 
-/** V1（主轨）首尾相接处（无空隙）的转场标记矩形（居中于锚点片段的终点）。
+/** 同轨首尾相接处（无空隙）的转场标记矩形（居中于锚点片段的终点）。
+ *  P231 Q5：转场同轨邻接（每条视觉轨独立判定；V1 轨 = 同轨特例）。
  *  自由定位下留有空隙的转场休眠：不渲染标记。 */
 export function computeTransitionRects(
   clips: TimelineClip[],
@@ -197,26 +208,38 @@ export function computeTransitionRects(
 ): TransitionRenderRect[] {
   const transitionable = (clip: TimelineClip) =>
     clip.asset_kind === "video" || clip.asset_kind === "image";
-  const sorted = [...clips]
-    .filter((clip) => clip.track_id === "V1")
-    .sort((a, b) => a.timeline_start_us - b.timeline_start_us);
+  // P231 Q5：转场同轨邻接（每条视觉轨独立时间序；V1 轨 = 同轨特例）。
+  const byTrack = new Map<string, TimelineClip[]>();
+  for (const clip of clips) {
+    const list = byTrack.get(clip.track_id);
+    if (list) list.push(clip);
+    else byTrack.set(clip.track_id, [clip]);
+  }
   const flushAnchorIds = new Set<string>();
-  for (let index = 0; index < sorted.length - 1; index += 1) {
-    const left = sorted[index];
-    const right = sorted[index + 1];
-    if (transitionable(left) && transitionable(right) && right.timeline_start_us === left.timeline_end_us) {
-      flushAnchorIds.add(left.clip_id);
+  const anchorRowId = new Map<string, string>();
+  for (const [trackId, trackClips] of byTrack) {
+    const sorted = [...trackClips].sort((a, b) => a.timeline_start_us - b.timeline_start_us);
+    for (let index = 0; index < sorted.length - 1; index += 1) {
+      const left = sorted[index];
+      const right = sorted[index + 1];
+      if (transitionable(left) && transitionable(right) && right.timeline_start_us === left.timeline_end_us) {
+        flushAnchorIds.add(left.clip_id);
+        anchorRowId.set(left.clip_id, trackId);
+      }
     }
   }
-  const mainRow = trackRowOf(rows, "V1");
-  const rowY = mainRow?.y ?? view.rulerHeight;
-  const rowHeight = mainRow?.height ?? view.trackHeight;
+  const rowOfTrack = (trackId: string) => {
+    const row = trackRowOf(rows, trackId);
+    return { y: row?.y ?? view.rulerHeight, height: row?.height ?? view.trackHeight };
+  };
   const endById = new Map(clips.map((clip) => [clip.clip_id, clip.timeline_end_us]));
   return transitions
     .map((transition) => {
       if (!flushAnchorIds.has(transition.after_clip_id)) return null;
       const anchorEndUs = endById.get(transition.after_clip_id);
       if (anchorEndUs === undefined) return null;
+      // P231：转场标记钉在锚点所属轨道行（不再固定 V1 行）。
+      const { y: rowY, height: rowHeight } = rowOfTrack(anchorRowId.get(transition.after_clip_id) ?? "V1");
       const centerX = timeToX(anchorEndUs, view);
       const width = Math.max(
         6,
@@ -248,9 +271,9 @@ export function hitTestTransitions(
 }
 
 /**
- * (x, y) 落在两个首尾相接的 V1 视频/图片片段的边界容差内时，返回左侧片段
+ * (x, y) 落在两个首尾相接的同轨视频/图片片段的边界容差内时，返回左侧片段
  * id（转场锚点），否则 null。自由定位下片段间可能有空隙：只有两侧贴齐的
- * 边界才提供"添加转场"热点。
+ * 边界才提供"添加转场"热点。P231 Q5：转场同轨邻接。
  */
 export function hitTestTransitionGap(
   x: number,
@@ -258,19 +281,26 @@ export function hitTestTransitionGap(
   clipRects: ClipRenderRect[],
   tolerancePx = 8,
 ): TimelineClipId | null {
-  const v1 = clipRects
-    .filter((rect) => rect.clip.track_id === "V1")
-    .sort((a, b) => a.x - b.x);
+  // P231 Q5：转场同轨邻接（每条视觉轨独立判定；V1 轨 = 同轨特例）。
+  const byTrack = new Map<string, typeof clipRects>();
+  for (const rect of clipRects) {
+    const list = byTrack.get(rect.clip.track_id);
+    if (list) list.push(rect);
+    else byTrack.set(rect.clip.track_id, [rect]);
+  }
   const transitionable = (clip: TimelineClip) =>
     clip.asset_kind === "video" || clip.asset_kind === "image";
-  for (let index = 0; index < v1.length - 1; index += 1) {
-    const left = v1[index];
-    const right = v1[index + 1];
-    if (!transitionable(left.clip) || !transitionable(right.clip)) continue;
-    const boundary = left.x + left.width;
-    if (Math.abs(right.x - boundary) > tolerancePx) continue; // 有空隙：不是相邻边界
-    if (Math.abs(x - boundary) <= tolerancePx && y >= left.y && y <= left.y + left.height) {
-      return left.clip.clip_id;
+  for (const trackRects of byTrack.values()) {
+    const v1 = [...trackRects].sort((a, b) => a.x - b.x);
+    for (let index = 0; index < v1.length - 1; index += 1) {
+      const left = v1[index];
+      const right = v1[index + 1];
+      if (!transitionable(left.clip) || !transitionable(right.clip)) continue;
+      const boundary = left.x + left.width;
+      if (Math.abs(right.x - boundary) > tolerancePx) continue; // 有空隙：不是相邻边界
+      if (Math.abs(x - boundary) <= tolerancePx && y >= left.y && y <= left.y + left.height) {
+        return left.clip.clip_id;
+      }
     }
   }
   return null;
@@ -290,10 +320,12 @@ export function hitTestTrimHandle(
     if (!trimmable) continue;
     const withinY = y >= rect.y && y <= rect.y + rect.height;
     if (!withinY) continue;
-    if (x >= rect.x - TRIM_HANDLE_PX && x <= rect.x + TRIM_HANDLE_PX) {
+    // T11 参照 Timeline.tsx:790-791,863-871：命中带宽随片段宽自适应（窄片段收缩防重叠）。
+    const hit = trimHitPx(rect.width);
+    if (x >= rect.x - hit && x <= rect.x + hit) {
       return { clipId: rect.clip.clip_id, edge: "left" };
     }
-    if (x >= rect.x + rect.width - TRIM_HANDLE_PX && x <= rect.x + rect.width + TRIM_HANDLE_PX) {
+    if (x >= rect.x + rect.width - hit && x <= rect.x + rect.width + hit) {
       return { clipId: rect.clip.clip_id, edge: "right" };
     }
   }
@@ -583,8 +615,8 @@ export function clipAudioBand(
 /** Gain range (dB) exposed by the draggable clip volume line. */
 export const VOLUME_MIN_DB = -30;
 export const VOLUME_MAX_DB = 12;
-/** Tolerance for grabbing the volume line, in pixels. */
-export const VOLUME_HIT_PX = 4;
+/** Tolerance for grabbing the volume line, in pixels. T11 参照 Timeline.tsx:3434：7px 命中带。 */
+export const VOLUME_HIT_PX = 7;
 /** 音量线上下留白（px），保证线/点不贴 band 边缘。 */
 const VOLUME_BAND_PAD = 4;
 
