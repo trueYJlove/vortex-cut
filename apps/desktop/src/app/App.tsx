@@ -27,6 +27,8 @@ import { SyntheticPreview } from "./preview/SyntheticPreview.js";
 import type { AssetDecodeBudget } from "./preview/preview-session.js";
 import { PreviewSourceResolver } from "./preview/source-resolver.js";
 import { syntheticFallbackNotice } from "./preview/fallback-notice.js";
+import { FIT_VIEW, ZOOM_SETTLE_MS, createScrubTellGate, createWheelCoalescer, createZoomSettle, fittedSize, isFit, panBy, wheelPx, wheelZoomFactor, zoomAt, zoomLayout, zoomMax, type ViewerView } from "./preview/viewer-zoom.js";
+import { IDLE_PRESS, pickTopmostBox, reducePreviewPress, selectionFromOutcome, type HitBox, type PreviewPress } from "./preview/stage-interaction.js";
 import { WaveformCache } from "./timeline/waveform-cache.js";
 import { editorCommands, type EditorCommand } from "./editorCommands.js";
 import { bindingLabel, findConflict, loadShortcuts, matchesBinding, normalizeRecordedBinding, saveShortcuts, DEFAULT_SHORTCUTS, type ShortcutCommandId, type ShortcutEntry } from "./shortcuts.js";
@@ -43,7 +45,7 @@ type NoticeTone = "success" | "warning" | "error" | "info";
 type Notice = { text: string; tone: NoticeTone } | "";
 type Selection = { kind: "clip"; id: string } | { kind: "clips"; ids: string[] } | { kind: "caption"; id: string } | { kind: "transition"; id: string } | null;
 const layouts: { value: TimelineLayout; label: string }[] = [{ value: "blurred_background", label: "模糊背景" }, { value: "crop_fill", label: "裁切填满" }, { value: "fit", label: "完整适配" }];
-const previewRatios: { value: string; label: string; ratio: number | null }[] = [{ value: "fit", label: "适应", ratio: null }, { value: "169", label: "16:9", ratio: 16 / 9 }, { value: "916", label: "9:16", ratio: 9 / 16 }, { value: "11", label: "1:1", ratio: 1 }, { value: "43", label: "4:3", ratio: 4 / 3 }, { value: "34", label: "3:4", ratio: 3 / 4 }];
+const previewRatios: { value: string; label: string; ratio: number | null }[] = [{ value: "fit", label: "原始", ratio: null }, { value: "169", label: "16:9", ratio: 16 / 9 }, { value: "916", label: "9:16", ratio: 9 / 16 }, { value: "11", label: "1:1", ratio: 1 }, { value: "43", label: "4:3", ratio: 4 / 3 }, { value: "34", label: "3:4", ratio: 3 / 4 }];
 /** 新建项目画布预设（比例真源 = 项目画布）：PlayRes 基准 1080 短边，@30fps。 */
 const projectCanvasPresets: Record<string, { width: number; height: number; fps_num: number; fps_den: number }> = {
   "169": { width: 1920, height: 1080, fps_num: 30, fps_den: 1 },
@@ -449,6 +451,17 @@ export function App() {
   const volumeRef = useRef(volume);
   const [progressDragging, setProgressDragging] = useState(false);
   const [previewZoom, setPreviewZoom] = useState<number | "fit">("fit");
+  const [viewerView, setViewerView] = useState<ViewerView>(FIT_VIEW);
+  const [zoomDrawn, setZoomDrawn] = useState(1);
+  const [stageMarquee, setStageMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const frameRatioRef = useRef({ w: 16, h: 9 });
+  const viewerViewRef = useRef(viewerView);
+  viewerViewRef.current = viewerView;
+  const previewPressRef = useRef<PreviewPress>(IDLE_PRESS);
+  const previewClickGuardRef = useRef(false);
+  const pressRafRef = useRef(0);
+  const previewFrameRef = useRef<HTMLDivElement | null>(null);
+  const scrubTellGate = useRef(createScrubTellGate(15, () => performance.now()));
   const [isFullscreen, setIsFullscreen] = useState(false);
   const stagePaneRef = useRef<HTMLElement | null>(null);
   const stageColumnRef = useRef<HTMLDivElement | null>(null);
@@ -1191,6 +1204,13 @@ export function App() {
     .map(id => working?.clips.find(item => item.clip_id === id))
     .filter((item): item is TimelineClip => Boolean(item));
   const sortedClips = useMemo(() => [...(working?.clips ?? [])].sort((a, b) => a.order_index - b.order_index), [working?.clips]);
+  /** S8：zRank 唯一来源 = working.tracks 数组索引（0=最上层），与 Core layers
+   *  下层先画/上层后画的绘制序同源；绝不按 document.clips / order_index 取 z 序。 */
+  const trackIndexByClipId = useMemo(() => {
+    const tracks = working?.tracks ?? [];
+    const rank = new Map(tracks.map((track, index) => [track.id, index]));
+    return new Map((working?.clips ?? []).map(clip => [clip.clip_id, rank.get(clip.track_id) ?? tracks.length]));
+  }, [working?.tracks, working?.clips]);
   // 时间线终点（所有片段最大 timeline_end）：播放到达即停，标尺停在末尾。
   const timelineEndUs = useMemo(() => sortedClips.reduce((max, c) => Math.max(max, c.timeline_end_us), 0), [sortedClips]);
   const tracksAtPlayhead = working?.tracks ?? [];
@@ -1384,6 +1404,19 @@ export function App() {
   const scrubToldAt = useRef(0);
   const SCRUB_PICTURE_MS = 15;
   const SCRUB_STATE_MS = 100;
+  /** S7：15ms 门控只用于 interactive HTMLMediaElement 的 pendingSeek 写入；
+   *  synthetic session.seekToFrame 保留自身目标帧去重，绝不再叠第二层节流。
+   *  :1241 的 effect 是 videoRef.currentTime 的唯一写入者。 */
+  const tellMediaSeek = useCallback((timeUs: number, clip?: TimelineClip) => {
+    if (!videoRef.current || !scrubTellGate.current.allow()) return;
+    if (clip) {
+      const sourceStart = (clip.source_start_us ?? 0) / 1_000_000;
+      const elapsed = (timeUs - clip.timeline_start_us) / 1_000_000 * ((clip.speed_milli ?? 1000) / 1000);
+      pendingSeekRef.current = sourceStart + elapsed;
+    } else {
+      pendingSeekRef.current = timeUs / 1_000_000;
+    }
+  }, []);
   /** 拖动/擦洗中的即时跳转：线条每帧走，画面与状态按上表节流。
    *
    *  注意：预览画面的 seek 由 `playheadUs` **prop** 驱动（SyntheticPreview 的
@@ -1399,6 +1432,7 @@ export function App() {
     // 路径（videoRef.currentTime 由其 effect 消费）。
     const session = previewSessionRef.current;
     if (session && previewMode === "synthetic" && !libraryPreviewId) {
+      scrubTellGate.current.reset();
       session.beginScrubStorm();
       const fps = working?.canvas.fps_num && working.canvas.fps_den ? working.canvas.fps_num / working.canvas.fps_den : 30;
       const targetFrame = Math.max(0, Math.floor((timeUs / 1e6) * fps));
@@ -1412,10 +1446,13 @@ export function App() {
       }
       return;
     }
-    // 非 synthetic（interactive/库预览）：原路径——画面由 playheadUs prop 驱动。
+    // 非 synthetic（interactive/库预览）：画面由 playheadUs prop 驱动；
+    // 媒体时间只经 pendingSeekRef（15ms 门控）交给 :1241 单点写入。
+    const clip = sortedClips.find(c => timeUs >= c.timeline_start_us && timeUs < c.timeline_end_us);
+    tellMediaSeek(timeUs, clip);
     setPlayhead(timeUs);
     scrubToldAt.current = performance.now();
-  }, [dispatchPlayhead, previewMode, libraryPreviewId, working?.canvas.fps_num, working?.canvas.fps_den]);
+  }, [dispatchPlayhead, previewMode, libraryPreviewId, working?.canvas.fps_num, working?.canvas.fps_den, tellMediaSeek, sortedClips]);
   /** 一次擦洗结束（松手/键盘跳转）：落到精确值并提交 React。 */
   const commitScrub = useCallback((timeUs: number) => {
     setPlaying(false);
@@ -1423,6 +1460,7 @@ export function App() {
     scrubToldAt.current = 0;
     lastReactTimeReport.current = 0;
     lastDirectSeekFrameRef.current = -1;
+    scrubTellGate.current.reset();
     previewSessionRef.current?.endScrubStorm();
   }, [dispatchPlayhead]);
   const seekFromUser = useCallback((timeUs: number) => {
@@ -1640,8 +1678,9 @@ export function App() {
       if (project) acceptState(await window.desktop.getTimeline(project.project_id));
     } else { setSaveState("保存失败"); showNotice(safeErrorMessage(error, "时间线保存失败，请刷新后重试。")); }
   };
-  const patchTimeline = async (operations: TimelinePatchOperation[], summary: string) => {
-    if (!project || !timeline) return;
+  /** 返回是否落库成功（S6 手势失败回滚用）；既有 void 调用方无需改动。 */
+  const patchTimeline = async (operations: TimelinePatchOperation[], summary: string): Promise<boolean> => {
+    if (!project || !timeline) return false;
     setSaveState("保存中");
     try {
       const next = await window.desktop.patchTimeline({ project_id: project.project_id, patch: { schema_version: 1, base_revision_id: timeline.current_revision.timeline_revision_id, operations, summary } });
@@ -1649,8 +1688,10 @@ export function App() {
       pendingDraftRef.current = null;
       if (draftTimer.current) clearTimeout(draftTimer.current);
       acceptState(next);
+      setSaveState("已保存");
+      return true;
     }
-    catch (error) { await handleConflict(error); }
+    catch (error) { await handleConflict(error); return false; }
   };
   // 文本素材（剪映式）：默认文本 = 在播放头处插入 3s 手工字幕；
   // 导入本地字幕 = 解析 SRT/ASS/SSA/LRC 为条目批量落库（可替换旧手工字幕）。
@@ -1768,9 +1809,10 @@ export function App() {
   const draftPipTransform = (clipId: TimelineClip["clip_id"], transform: PipTransform) => {
     setWorking(doc => doc ? { ...doc, clips: doc.clips.map(c => c.clip_id === clipId ? { ...c, transform: { ...c.transform, ...transform } } : c) } : doc);
   };
-  const commitPipTransform = (clipId: TimelineClip["clip_id"], transform: PipTransform) => {
-    void patchTimeline([{ op: "set_clip_transform", clip_id: clipId, transform }], "画中画画布局");
-  };
+  const commitPipTransform = (clipId: TimelineClip["clip_id"], transform: PipTransform): Promise<boolean> =>
+    patchTimeline([{ op: "set_clip_transform", clip_id: clipId, transform }], "画中画画布局");
+  /** 既有 props 契约是 Promise<void>；布尔结果只给手势回滚通道用。 */
+  const patchTimelineVoid = async (operations: TimelinePatchOperation[], summary: string): Promise<void> => { await patchTimeline(operations, summary); };
   // P2 画布蒙版边界：draft 走本地文档，pointerup 提交 set_clip_mask（与属性面板同一 op）。
   const draftPipMask = (clipId: TimelineClip["clip_id"], mask: NonNullable<TimelineClip["mask"]>) => {
     setWorking(doc => doc ? { ...doc, clips: doc.clips.map(c => c.clip_id === clipId ? { ...c, mask } : c) } : doc);
@@ -2198,7 +2240,13 @@ export function App() {
     title: isDraggableAsset(item.asset.kind) ? "拖到 V1 时间线以插入；双击在预览播放" : undefined,
   });
   // 点击预览画面：选中播放头处的片段（剪映式选中），无片段时清空选择。
+  // P231 修复：合成模式由 sp-layer 的 S3/S4 状态机全权负责选择（盒子点击选盒、
+  // 空白 release 清选/框选）——这里的 onClick 只服务 interactive 模式，
+  // 否则空白点击的清选会被冒泡 click 立即用「播放头片段」覆盖回去。
   const selectClipAtPlayhead = () => {
+    if (previewMode === "synthetic") return;
+    // S4：release 已判定过 click/marquee，pointerup 后浏览器补发的 click 不得覆盖。
+    if (previewClickGuardRef.current) { previewClickGuardRef.current = false; return; }
     exitLibraryPreview();
     setSelection(clipAtPlayhead ? { kind: "clip", id: clipAtPlayhead.clip_id } : null);
   };
@@ -2474,7 +2522,6 @@ export function App() {
     catch (error) { setReframeError(safeErrorMessage(error, "重试重构图批次失败。")); }
   };
 
-  const previewLayout = selectedClip?.layout ?? working?.clips[0]?.layout ?? "fit";
   // 预览/导出比例真源 = 项目画布（所见即所得；素材比例不再反客为主）。
   // 旧实现按素材原生分辨率解析：横版素材 + 竖版项目时下拉显示 16:9、导出/预览
   // 却与项目画布相悖，且播放头进入无片段区间时退化为 "fit"（合成预览拉取 IR
@@ -2492,32 +2539,23 @@ export function App() {
       : "fit")
     : "fit"; // 挂载由 working/timeline 门控，此分支仅理论可达
   const effectiveRatio: OutputRatio = (previewRatioTouched ? previewRatio : autoRatio) as OutputRatio;
-  // 比例语义（剪映式，下拉随时改渲染画幅；项目画布只是新建时的默认值）：
+  // 比例语义（2026-11-18 用户裁决，推翻 P231 Q1 的「跟随素材原画」）：
   // - 选具体比例码 → 渲染画幅 = 该比例（权威预览/导出/合成预览同步切换）。
-  // - "适应"（原画）→ 渲染画幅 = **最上层视觉轨首片段素材的原始比例**（剪映"原画"，
-  //   P231 Q1 裁决）：从素材 media_info.video_streams[0] 宽高推比例码；无素材/无法
-  //   判定时回退项目画布比例。切素材后"适应"随之跟随。
-  const assetOriginalRatio = useMemo((): OutputRatio => {
-    const firstVideo = visualClips.find(clip => clip.asset_kind === "video");
-    const asset = firstVideo ? assets.find(item => item.asset.asset_id === firstVideo.asset_id)?.asset : undefined;
-    const stream = (asset?.media_info && "video_streams" in asset.media_info ? (asset.media_info as { video_streams?: Array<{ width?: number; height?: number }> }).video_streams?.[0] : undefined);
-    if (!stream?.width || !stream?.height) return autoRatio === "fit" ? "169" : (autoRatio as OutputRatio);
-    const ratio = stream.width / stream.height;
-    return Math.abs(ratio - 16 / 9) < 0.02 ? "169"
-      : Math.abs(ratio - 9 / 16) < 0.02 ? "916"
-      : Math.abs(ratio - 1) < 0.02 ? "11"
-      : Math.abs(ratio - 4 / 3) < 0.02 ? "43"
-      : Math.abs(ratio - 3 / 4) < 0.02 ? "34"
-      : "169"; // 非标准比例就近归入 16:9（渲染档位只有五档）
-  }, [working, assets, autoRatio, visualClips]);
-  const renderRatio: OutputRatio = effectiveRatio === "fit" ? assetOriginalRatio : effectiveRatio;
-  // "适应"显示模式：预览框按渲染画幅比例约束（原画比例即素材比例），画布内容
+  // - 「原始」→ 渲染画幅 = **16:9 恒定**（同类型软件的「原始」即 16:9）。
+  //   黑框（预览画布）比例 = 渲染画幅，二者永不分叉——黑色区域整体就是
+  //   排版/裁剪范围，不再出现内容 letterbox 死区。
+  const renderRatio: OutputRatio = effectiveRatio === "fit" ? "169" : effectiveRatio;
+  // 「原始」显示模式：预览框按渲染画幅比例约束（恒 16:9），画布内容
   // 等比 contain 居中；选具体比例 = 显式切换渲染画幅并按该比例约束预览框。
-  const previewClass = `${previewLayout} ratio-${renderRatio}`;
+  const previewClass = `ratio-${renderRatio}`;
+  frameRatioRef.current = renderRatio === "916" || renderRatio === "34" ? { w: 9, h: 16 }
+    : renderRatio === "11" ? { w: 1, h: 1 }
+      : renderRatio === "43" ? { w: 4, h: 3 }
+        : { w: 16, h: 9 };
   // 时间码帧率：优先画布帧率，缺省 30fps。
   // 比例切换（剪映式）：选具体比例时**全视觉轨**布局切为 crop_fill（裁切填满——
   // 等比放大到短边顶满、长边溢出裁剪，剪映同款默认，P231 Q3 裁决：全轨一致）；
-  // blurred_background 模糊垫底是竖版包装风格，不随比例切换自动套用。切回"适应"
+  // blurred_background 模糊垫底是竖版包装风格，不随比例切换自动套用。切回"原始"
   // 不动时间线布局。
   const changePreviewRatio = (value: string) => {
     setPreviewRatio(value);
@@ -2570,13 +2608,9 @@ export function App() {
     const value = Math.round(ratio * Math.max(totalUs, 1));
     seekFromUser(value);
     const clip = sortedClips.find(c => value >= c.timeline_start_us && value < c.timeline_end_us);
-    if (clip && videoRef.current) {
-      const sourceStart = (clip.source_start_us ?? 0) / 1_000_000;
-      const elapsed = (value - clip.timeline_start_us) / 1_000_000 * ((clip.speed_milli ?? 1000) / 1000);
-      videoRef.current.currentTime = sourceStart + elapsed;
-    } else if (videoRef.current) {
-      videoRef.current.currentTime = value / 1_000_000;
-    }
+    // S7：单次 seek 只经 tellMediaSeek → pendingSeekRef → :1241 写一次媒体时间。
+    scrubTellGate.current.reset();
+    tellMediaSeek(value, clip);
   };
   const seekFromProgress = (clientX: number) => {
     const el = progressRef.current;
@@ -2859,8 +2893,133 @@ export function App() {
     if (videoRef.current) videoRef.current.volume = vol;
     if (audioRef.current) audioRef.current.volume = vol;
   }, [volume, previewAsset?.media_url, audioAsset?.media_url]);
-  // 画面选中框：8 向手柄拖拽改画面大小（角 = 等比保持比例，边 = 单轴）；缩放时随 frame 一起缩放。
-  const selZoomFactor = previewZoom === "fit" ? 1 : previewZoom;
+  // S1/S2：预览缩放 = 布局尺寸（不用 transform:scale，手柄恒为屏幕 px）。
+  const zoomZValue = previewZoom === "fit" ? viewerView.z : (typeof previewZoom === "number" ? previewZoom : viewerView.z);
+  useEffect(() => {
+    const el = previewFrameRef.current;
+    if (!el) return;
+    const coalescer = createWheelCoalescer(
+      fn => requestAnimationFrame(fn),
+      id => cancelAnimationFrame(id),
+      (factor, dx, dy, anchor) => {
+        const viewer = { w: el.clientWidth || 1, h: el.clientHeight || 1 };
+        const fitted = fittedSize(viewer, frameRatioRef.current);
+        let next = viewerViewRef.current;
+        if (factor !== 1) next = zoomAt(next, factor, anchor, viewer, fitted, zoomMax(fitted.w / frameRatioRef.current.w));
+        if (dx || dy) next = panBy(next, dx, dy, fitted);
+        if (next !== viewerViewRef.current) { viewerViewRef.current = next; setViewerView(next); setPreviewZoom(next.z); }
+      },
+    );
+    const onWheel = (event: WheelEvent) => {
+      if (!(event.ctrlKey || event.metaKey)) return;
+      // 负向对照：Ctrl/⌘ wheel 必须 preventDefault（浏览器页面缩放不得接管）。
+      event.preventDefault();
+      const rect = el.getBoundingClientRect();
+      coalescer.pushZoom(wheelZoomFactor(wheelPx(event, event.deltaY)), { x: event.clientX - rect.left, y: event.clientY - rect.top });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => { el.removeEventListener("wheel", onWheel); coalescer.dispose(); };
+  }, []);
+  /** 缩放静止 ZOOM_SETTLE_MS 后才真正重绘画面（预览框尺寸即时跟随）。
+   *  onSession 运行时上抛的是完整 PreviewSession：resize() 会下发 worker
+   *  compositor.resize + recomposeSoon（rAF 合帧，一次缩放只重绘一次）。
+   *  连续 wheel/滑杆变化不断取消重排定时器，故静止前不会提前重绘。 */
+  const zoomSettleRef = useRef(createZoomSettle(
+    ZOOM_SETTLE_MS,
+    (fn, ms) => window.setTimeout(fn, ms),
+    id => clearTimeout(id),
+    () => {
+      // 触发一次布局同步（React 侧），实际像素重绘由 session.resize 下发。
+      setZoomDrawn(value => value + 1);
+      const canvas = canvasRef.current;
+      const session = previewSessionRef.current as (typeof previewSessionRef.current & { resize?: (cssWidth: number, cssHeight: number) => void }) | null;
+      if (session?.resize && canvas) {
+        const cssWidth = canvas.clientWidth || 1;
+        const cssHeight = canvas.clientHeight || 1;
+        session.resize(cssWidth, cssHeight);
+      }
+    },
+  ));
+  useEffect(() => {
+    // 初始 fitted 视图无需重绘；只有真实缩放变化才排队。
+    if (zoomZValue === 1 && previewZoom === "fit") return;
+    zoomSettleRef.current.schedule();
+    return () => zoomSettleRef.current.dispose();
+  }, [zoomZValue, previewZoom]);
+  /** 布局尺寸：显式 width/height（不是 transform）。
+   *  P231 比例守恒：黑框（.preview-canvas）尺寸恒 = fittedSize(viewer, 比例)——
+   *  「原始/具体比例」时也精确按容器内最大等比尺寸摆放，不再交给 CSS
+   *  aspect-ratio 兜底（height:100% 曾把 16:9 拉成容器形状，width:auto
+   *  又塌回 canvas intrinsic 300×150，两条路都实测失败）。
+   *  缩放（滚轮/滑条）= 在 fitted 基础上乘 viewerView.z，仍由布局尺寸表达。 */
+  useEffect(() => {
+    const el = previewFrameRef.current;
+    const canvas = canvasRef.current;
+    if (!el || !canvas) return;
+    const viewer = { w: el.clientWidth || 1, h: el.clientHeight || 1 };
+    const fitted = fittedSize(viewer, frameRatioRef.current);
+    const z = viewerViewRef.current.z;
+    const layout = { w: fitted.w * z, h: fitted.h * z };
+    canvas.style.width = `${layout.w}px`;
+    canvas.style.height = `${layout.h}px`;
+    setCanvasSize({ w: Math.round(layout.w), h: Math.round(layout.h) });
+  }, [viewerView, previewZoom, previewClass, zoomDrawn]);
+  /** S4：空白按下 → rAF move → release 判定 click/marquee；绝不定位播放头。 */
+  const stageBoxesForPress = useCallback((): HitBox[] => {
+    if (previewMode === "synthetic") return [];
+    return overlayPips.map((item, index) => ({
+      clipId: item.clip.clip_id,
+      x: (item.clip.transform?.x ?? 0.5) * (canvasSize?.w ?? 0) - item.fit_w * (item.clip.transform?.scale ?? 1) / 2,
+      y: (item.clip.transform?.y ?? 0.5) * (canvasSize?.h ?? 0) - item.fit_h * (item.clip.transform?.scale ?? 1) / 2,
+      w: item.fit_w * (item.clip.transform?.scale ?? 1),
+      h: item.fit_h * (item.clip.transform?.scale ?? 1),
+      rotate: item.clip.transform?.rotate ?? 0,
+      renderOrder: index,
+    }));
+  }, [previewMode, overlayPips, canvasSize]);
+  const rankForPress = useCallback((box: HitBox) => {
+    const clip = (working?.clips ?? []).find(item => item.clip_id === box.clipId);
+    return clip ? tracksAtPlayhead.findIndex(track => track.id === clip.track_id) : tracksAtPlayhead.length;
+  }, [working?.clips, tracksAtPlayhead]);
+  const onPreviewPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    // 合成层自有 S3/S4 命中状态机；此处只处理 interactive 空白画布。
+    // target 排除只挡「盒子/手柄自身」的按下（它们有自己的 begin/beginSelDrag）——
+    // 黑区在 .preview-canvas 子层上，target !== currentTarget 若一刀切，
+    // interactive 的框选/清选在黑区永远不触发（S4 语义缺口，实测）。
+    if (previewMode === "synthetic") return;
+    const onInteractiveOverlay = (event.target as HTMLElement).closest(".pip-overlay, .sel-box");
+    if (onInteractiveOverlay) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const point = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    const boxes = stageBoxesForPress();
+    const hit = pickTopmostBox(boxes, point, rankForPress);
+    previewPressRef.current = reducePreviewPress(IDLE_PRESS, { type: "down", x: point.x, y: point.y, additive: event.shiftKey || event.metaKey || event.ctrlKey, hitClipId: hit?.clipId ?? null }).state;
+  };
+  const onPreviewPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (previewPressRef.current.phase !== "press") return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = event.clientX - rect.left, y = event.clientY - rect.top;
+    const result = reducePreviewPress(previewPressRef.current, { type: "move", x, y });
+    previewPressRef.current = result.state;
+    if (pressRafRef.current) cancelAnimationFrame(pressRafRef.current);
+    pressRafRef.current = requestAnimationFrame(() => { pressRafRef.current = 0; setStageMarquee(result.marquee); });
+  };
+  const onPreviewPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (previewPressRef.current.phase !== "press") return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const result = reducePreviewPress(previewPressRef.current, { type: "up", x: event.clientX - rect.left, y: event.clientY - rect.top });
+    previewPressRef.current = IDLE_PRESS;
+    previewClickGuardRef.current = true;
+    setStageMarquee(null);
+    if (!result.outcome) return;
+    const ids = selectionFromOutcome(result.outcome, stageBoxesForPress(), rankForPress, selectedClipIds);
+    if (result.outcome.kind === "marquee") setSelection(ids.length ? { kind: "clips", ids } : null);
+    else if (ids.length === 1) setSelection({ kind: "clip", id: ids[0] });
+    else setSelection(null);
+  };
+  // 画面选中框：8 向手柄拖拽改画面大小（角 = 等比保持比例，边 = 单轴）；布局尺寸缩放。
+  const selZoomFactor = 1;
   const beginSelDrag = (dir: string) => (event: React.PointerEvent<HTMLElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -3084,18 +3243,19 @@ export function App() {
             </span>
           </div>
           <div className="stage-view">
-            <div className={`preview-frame ${previewClass}${previewSelected ? " selected" : ""}`} style={previewZoom === "fit" ? undefined : { transform: `scale(${previewZoom})` }} role="button" tabIndex={0} aria-label="选中播放头处的片段" title="点击选中播放头处的片段" onClick={selectClipAtPlayhead} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectClipAtPlayhead(); } }}>
+            <div ref={previewFrameRef} className={`preview-frame ${previewClass}${previewSelected ? " selected" : ""}`} role="button" tabIndex={0} aria-label="选中播放头处的片段" title="点击选中播放头处的片段" onPointerDown={onPreviewPointerDown} onPointerMove={onPreviewPointerMove} onPointerUp={onPreviewPointerUp} onPointerCancel={() => { previewPressRef.current = IDLE_PRESS; setStageMarquee(null); }} onClick={selectClipAtPlayhead} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectClipAtPlayhead(); } }}>
+          {stageMarquee && <div className="preview-marquee" aria-hidden="true" style={{ left: stageMarquee.x, top: stageMarquee.y, width: stageMarquee.w, height: stageMarquee.h }} />}
           <div className="preview-canvas" ref={canvasRef}>
             {previewMode === "authoritative" && authoritativeMediaUrl && <video ref={videoRef} className="preview-foreground authoritative-video" src={authoritativeMediaUrl} aria-label={reframePlayback ? "重构图权威预览视频" : exportPlayback ? "导出视频" : "权威预览视频"} controls onEnded={() => { setPlaying(false); setExportPlayback(undefined); setReframePlayback(undefined); setPreviewMode("synthetic"); }} />}
             {/* 合成预览仅在时间线有可见片段时挂载；空时间线显示引导文案（剪映式），
                 避免对空时间线请求 preview-ir 被 Core 以 TIMELINE_EMPTY 拒绝而回退。 */}
-            {previewMode === "synthetic" && projectStateReady && project && working && timeline && working.clips.length > 0 && <SyntheticPreview key={project.project_id} outputRatio={renderRatio} projectId={project.project_id} revisionId={timeline.current_revision.timeline_revision_id} mediaUrls={syntheticMediaUrls} audioByClip={syntheticAudioByClip} pipClips={syntheticPipClips} selectedClipId={pipSelectedId} onSelectClip={clipId => setSelection({ kind: "clip", id: clipId as never })} onCommitPipTransform={(clipId, transform) => { const clip = (working?.clips ?? []).find(item => item.clip_id === clipId); commitPipTransform(clipId as never, { ...(clip?.transform ?? {}), ...transform }); }} onDraftPipMask={(clipId, mask) => draftPipMask(clipId as never, mask)} onCommitPipMask={(clipId, mask) => commitPipMask(clipId as never, mask)} onGesturePause={pausePreviewPlayback} onGestureResume={resumePreviewPlayback} playing={playing && !gestureHoldRef.current} playheadUs={playhead} playheadStore={playheadStore} playbackRate={uiRate} onTimeUs={us => seekFromPlayback(us)} onEnded={handlePreviewEnded} onFallback={(reason, code) => { if (!seenAnyTicketRef.current) return; setPreviewMode("interactive"); setSyntheticNotice(syntheticFallbackNotice(reason, code)); }} sourceResolver={previewSourceResolver} resourceTier={resourceTier} forceCopyTo={forceCopyTo} snapshotRef={syntheticSnapshotRef} proxyEpoch={proxyReadyEpoch} onDecodeBudget={onDecodeBudget} onSession={session => { if (!session) previewSessionRef.current?.endScrubStorm(); previewSessionRef.current = session; }} />}
+            {previewMode === "synthetic" && projectStateReady && project && working && timeline && working.clips.length > 0 && <SyntheticPreview key={project.project_id} outputRatio={renderRatio} projectId={project.project_id} revisionId={timeline.current_revision.timeline_revision_id} mediaUrls={syntheticMediaUrls} audioByClip={syntheticAudioByClip} pipClips={syntheticPipClips} lockedClipIds={working.locked_elements} selectedClipId={pipSelectedId} onSelectClip={clipId => setSelection(clipId ? { kind: "clip", id: clipId as never } : null)} onSelectClips={ids => setSelection(ids.length ? { kind: "clips", ids } : null)} trackIndexByClipId={trackIndexByClipId} onCommitPipTransform={async (clipId, transform) => { const clip = (working?.clips ?? []).find(item => item.clip_id === clipId); return commitPipTransform(clipId as never, { ...(clip?.transform ?? {}), ...transform }); }} onDraftPipMask={(clipId, mask) => draftPipMask(clipId as never, mask)} onCommitPipMask={(clipId, mask) => commitPipMask(clipId as never, mask)} onGesturePause={pausePreviewPlayback} onGestureResume={resumePreviewPlayback} playing={playing && !gestureHoldRef.current} playheadUs={playhead} playheadStore={playheadStore} playbackRate={uiRate} onTimeUs={us => seekFromPlayback(us)} onEnded={handlePreviewEnded} onFallback={(reason, code) => { if (!seenAnyTicketRef.current) return; setPreviewMode("interactive"); setSyntheticNotice(syntheticFallbackNotice(reason, code)); }} sourceResolver={previewSourceResolver} resourceTier={resourceTier} forceCopyTo={forceCopyTo} snapshotRef={syntheticSnapshotRef} proxyEpoch={proxyReadyEpoch} onDecodeBudget={onDecodeBudget} onSession={session => { if (!session) previewSessionRef.current?.endScrubStorm(); previewSessionRef.current = session; }} />}
             {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "video" && <div className="preview-transform" style={mainTransformStyle}><video className="preview-background" src={previewAsset.media_url} muted aria-hidden="true" /><video ref={videoRef} className="preview-foreground" src={previewAsset.media_url} muted={!selectedClip?.audio.enabled || previewReverse || (clipAtPlayhead ? !isClipAudible(clipAtPlayhead) : false)} aria-label="交互预览视频" onTimeUpdate={event => { if (libraryPreviewId) dispatchPlayhead("external", Math.round(event.currentTarget.currentTime * 1_000_000), true); }} onEnded={handleVideoEnded} /></div>}
             {previewMode === "interactive" && audioAsset?.media_url && <audio ref={audioRef} src={audioAsset.media_url} style={{ display: "none" }} />}
             {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "image" && <div className="preview-transform" style={mainTransformStyle}><img className="preview-background" src={previewAsset.media_url} alt="" aria-hidden="true" /><img className="preview-foreground" src={previewAsset.media_url} alt={previewAsset.asset.display_name} /></div>}
             {(previewMode === "interactive" || (previewMode === "synthetic" && (!working || working.clips.length === 0))) && !previewAsset?.media_url && overlayPips.length === 0 && <div className="preview-empty">选择或追加素材以开始编辑</div>}
             {previewMode === "interactive" && visibleCaption && <div className={`caption-overlay ${visibleCaption.preset_id}`}>{visibleCaption.text}</div>}
-            {previewMode === "interactive" && overlayPips.length > 0 && <PreviewPipOverlays items={overlayPips} selectedClipId={pipSelectedId} locked={pipLocked} onSelect={clipId => setSelection({ kind: "clip", id: clipId })} onDraftTransform={draftPipTransform} onCommitTransform={commitPipTransform} onDraftMask={draftPipMask} onCommitMask={commitPipMask} onGesturePause={pausePreviewPlayback} onGestureResume={resumePreviewPlayback} playheadUs={playhead} playing={playing} />}
+            {previewMode === "interactive" && overlayPips.length > 0 && <PreviewPipOverlays items={overlayPips} tracks={tracksAtPlayhead} selectedClipId={pipSelectedId} locked={pipLocked} onSelect={clipId => setSelection({ kind: "clip", id: clipId })} onDraftTransform={draftPipTransform} onCommitTransform={commitPipTransform} onDraftMask={draftPipMask} onCommitMask={commitPipMask} onGesturePause={pausePreviewPlayback} onGestureResume={resumePreviewPlayback} playheadUs={playhead} playing={playing} />}
           </div>
           {/* 选中框：白色边框 + 8 向拖拽手柄，缩放时随画面一起缩放；仅选中片段时可见。 */}
           {!overlayClipSelected && <div className="sel-box" ref={selBoxRef} onClick={event => event.stopPropagation()} aria-hidden="true"><i className="sel-border" />{/* P6 修正：参照标签 = 手势实时值（StageTransformFrame.tsx:224-244 常驻 Label 属 layer；
@@ -3151,10 +3311,10 @@ export function App() {
             <button className="pb-icon zoom-btn" aria-haspopup="dialog" aria-expanded={zoomPopOpen} title="预览缩放" onClick={event => { event.stopPropagation(); setZoomPopOpen(value => !value); setVolPopOpen(false); }}><ZoomIn /><span className="zoom-label">{previewZoom === "fit" ? "适应" : `${Math.round(previewZoom * 100)}%`}</span></button>
             <div className={`zoom-pop${zoomPopOpen ? " open" : ""}`} ref={zoomPopRef} onClick={event => event.stopPropagation()}>
               <div className="zp-head">
-                <button className={`zp-fit${previewZoom === "fit" ? " on" : ""}`} onClick={() => setPreviewZoom("fit")}>{previewZoom === "fit" ? "✓ 适应画布" : "适应画布"}</button>
-                <span className="zp-val">{previewZoom === "fit" ? "适应" : `${Math.round(previewZoom * 100)}%`}</span>
+                <button className={`zp-fit${previewZoom === "fit" ? " on" : ""}`} onClick={() => { viewerViewRef.current = FIT_VIEW; setViewerView(FIT_VIEW); setPreviewZoom("fit"); }}>{previewZoom === "fit" ? "✓ 适应画布" : "适应画布"}</button>
+                <span className="zp-val">{previewZoom === "fit" ? "原始" : `${Math.round(previewZoom * 100)}%`}</span>
               </div>
-              <input type="range" min={0} max={1000} value={previewZoom === "fit" ? zoomT(1) : zoomT(previewZoom)} onChange={event => setPreviewZoom(Math.round(zoomZ(Number(event.target.value)) * 100) / 100)} aria-label="预览缩放百分比" />
+              <input type="range" min={0} max={1000} value={previewZoom === "fit" ? zoomT(1) : zoomT(previewZoom)} onChange={event => { const z = Math.round(zoomZ(Number(event.target.value)) * 100) / 100; const next = { ...viewerViewRef.current, z }; viewerViewRef.current = next; setViewerView(next); setPreviewZoom(z); }} aria-label="预览缩放百分比" />
               <div className="zp-scale"><span>25%</span><span>100%</span><span>500%</span></div>
             </div>
             <button className="pb-icon" aria-label={isFullscreen ? "退出全屏" : "全屏"} title={isFullscreen ? "退出全屏" : "全屏"} onClick={() => void toggleFullscreen()}>{isFullscreen ? <Minimize /> : <Maximize />}</button>
@@ -3163,10 +3323,10 @@ export function App() {
         </div>
       </section>
       {rightPaneOpen && <div className="resize-handle resize-handle-right" role="separator" aria-label="调整右侧面板宽度" onPointerDown={event => beginResize("right", event)} />}
-      <aside className={"properties-pane" + (rightPaneOpen ? "" : " pane-closed")} aria-label="上下文属性" role="region" hidden={!rightPaneOpen}>{selectedClip ? <ClipProperties clip={selectedClip} locked={Boolean(working?.locked_elements?.includes(selectedClip.clip_id))} onPatch={patchTimeline} onDraft={queueDraft} working={working!} playheadUs={playhead} onOpenEditingTools={tool => openEditingTools(tool, selectedClip.clip_id)} baseRevisionId={timeline?.current_revision.timeline_revision_id ?? null} onAppliedTimeline={acceptState} /> : selectedCaption ? <CaptionProperties caption={selectedCaption} locked={Boolean(selectedCaption.source_clip_id && working?.locked_elements?.includes(selectedCaption.source_clip_id))} onPatch={patchTimeline} onDraft={queueDraft} working={working!} /> : selectedTransition ? <TransitionProperties transition={selectedTransition} onPatch={patchTimeline} /> : <ProjectProperties project={project} saveState={saveState} authoritativePreview={authoritativePreview} previewIsStale={previewIsStale} renderDisabledReason={renderDisabledReason} onGeneratePreview={() => void generatePreview()} onCreateExport={openExportDialog} onOpenProjectDialog={() => setProjectDialogOpen(true)} />}</aside>
+      <aside className={"properties-pane" + (rightPaneOpen ? "" : " pane-closed")} aria-label="上下文属性" role="region" hidden={!rightPaneOpen}>{selectedClip ? <ClipProperties clip={selectedClip} locked={Boolean(working?.locked_elements?.includes(selectedClip.clip_id))} onPatch={patchTimelineVoid} onDraft={queueDraft} working={working!} playheadUs={playhead} onOpenEditingTools={tool => openEditingTools(tool, selectedClip.clip_id)} baseRevisionId={timeline?.current_revision.timeline_revision_id ?? null} onAppliedTimeline={acceptState} /> : selectedCaption ? <CaptionProperties caption={selectedCaption} locked={Boolean(selectedCaption.source_clip_id && working?.locked_elements?.includes(selectedCaption.source_clip_id))} onPatch={patchTimelineVoid} onDraft={queueDraft} working={working!} /> : selectedTransition ? <TransitionProperties transition={selectedTransition} onPatch={patchTimelineVoid} /> : <ProjectProperties project={project} saveState={saveState} authoritativePreview={authoritativePreview} previewIsStale={previewIsStale} renderDisabledReason={renderDisabledReason} onGeneratePreview={() => void generatePreview()} onCreateExport={openExportDialog} onOpenProjectDialog={() => setProjectDialogOpen(true)} />}</aside>
     </section>
     <div className="timeline-resize-handle" role="separator" aria-label="调整时间线高度" onPointerDown={event => beginResize("timeline", event)} />
-    <TimelinePanel document={working} selection={selection} setSelection={(sel) => { setSelection(sel); exitLibraryPreview(); }} onPatch={patchTimeline} onDropAsset={dropAsset} coverUrl={coverUrl} onCaptureCover={() => setCoverDialogOpen(true)} canUndo={Boolean(timeline?.can_undo)} canRedo={Boolean(timeline?.can_redo)} onUndo={() => void undoRedo("undo")} onRedo={() => void undoRedo("redo")} assetMedia={timelineAssetMedia} waveformCache={waveformCache} playheadStore={playheadStore} onSeek={(timeUs) => { if (libraryPreviewId) exitLibraryPreview(); seekWhileScrubbing(timeUs); const clip = sortedClips.find(c => timeUs >= c.timeline_start_us && timeUs < c.timeline_end_us); if (clip && videoRef.current) { const sourceStart = (clip.source_start_us ?? 0) / 1_000_000; const elapsed = (timeUs - clip.timeline_start_us) / 1_000_000 * ((clip.speed_milli ?? 1000) / 1000); pendingSeekRef.current = sourceStart + elapsed; videoRef.current.currentTime = pendingSeekRef.current; } else if (videoRef.current) { videoRef.current.currentTime = timeUs / 1_000_000; } }} onSeekCommit={timeUs => { exitLibraryPreview(); commitScrub(timeUs); }} onCommand={(id) => runCommand(id)} meterLevels={meterLevels} playing={playing} />
+    <TimelinePanel document={working} selection={selection} setSelection={(sel) => { setSelection(sel); exitLibraryPreview(); }} onPatch={patchTimelineVoid} onDropAsset={dropAsset} coverUrl={coverUrl} onCaptureCover={() => setCoverDialogOpen(true)} canUndo={Boolean(timeline?.can_undo)} canRedo={Boolean(timeline?.can_redo)} onUndo={() => void undoRedo("undo")} onRedo={() => void undoRedo("redo")} assetMedia={timelineAssetMedia} waveformCache={waveformCache} playheadStore={playheadStore} onSeek={(timeUs) => { if (libraryPreviewId) exitLibraryPreview(); seekWhileScrubbing(timeUs); }} onSeekCommit={timeUs => { exitLibraryPreview(); commitScrub(timeUs); }} onCommand={(id) => runCommand(id)} meterLevels={meterLevels} playing={playing} />
     </div>
     </div>
     <WorkspaceFooter

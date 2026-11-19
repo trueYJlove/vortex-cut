@@ -19,7 +19,7 @@ import { arrayFrameSource, windowPrefetchStarts, type FrameSource } from "./fram
  * - seek（暂停态）仍走并行解码后合成，同样经环形/影子槽位 ack，并同步链游标。 */
 import type { CompositorWorkerClient } from "./compositor-worker.js";
 import type { DrawCommand, FrameResidency } from "./compositor-worker.worker.js";
-import type { Ir, IrContent, IrFrame, IrOverlay } from "./ir.js";
+import type { Ir, IrContent, IrFrame, IrLayer, IrOverlay } from "./ir.js";
 import type { PreviewSourceResolver } from "./source-resolver.js";
 import type { PreviewSourceDescription } from "@aivideo/contracts";
 import { PREVIEW_IR_V2_MAX_WINDOW_FRAMES, PCM_CHUNK_SAMPLE_RATE } from "@aivideo/contracts";
@@ -187,7 +187,7 @@ interface InputRig {
 /** 主轨（段或转场左右）所需的 (输入, 源帧, 是否影子槽)。 */
 function mainNeeds(frame: IrFrame): Array<[string, number, boolean]> {
   // P231：layers 优先（全段盒子，含首段）；缺省回退 main 链（旧 IR）。
-  if (frame.layers && frame.layers.length > 0) {
+  if (frame.layers !== undefined) {
     return frame.layers.map(layer => [layer.input_id, layer.src_n, false] as [string, number, boolean]);
   }
   const main = frame.main;
@@ -203,7 +203,7 @@ function mainNeeds(frame: IrFrame): Array<[string, number, boolean]> {
 /** overlay 所需的 (输入, 源帧)。 */
 function overlayNeeds(frame: IrFrame): Array<[string, number]> {
   // P231：layers 优先（全段盒子）；缺省回退 overlays 兼容层（旧 IR）。
-  if (frame.layers && frame.layers.length > 0) {
+  if (frame.layers !== undefined) {
     return frame.layers.map(layer => [layer.input_id, layer.src_n] as [string, number]);
   }
   return frame.overlays.map(overlay => [overlay.input_id, overlay.src_n] as [string, number]);
@@ -904,7 +904,7 @@ export class PreviewSession {
     const frame = this.frames.getFrame(Math.min(this.currentFrame, this.frames.frameCount - 1));
     if (!frame) return [];
     // P231：layers 优先（全段盒子）；缺省回退 overlays 兼容层。
-    if (frame.layers && frame.layers.length > 0) {
+    if (frame.layers !== undefined) {
       return frame.layers.map(layer => ({ clipId: layer.clip_id, x: layer.box.x, y: layer.box.y, w: layer.box.w, h: layer.box.h }));
     }
     return frame.overlays.map(overlay => ({ clipId: overlay.clip_id, ...overlay.box }));
@@ -988,20 +988,22 @@ export class PreviewSession {
    *  一次遍历 O(总 overlay)；手势期每 move 只遍历该 clip 的 overlay 列表。
    *  v2 窗口帧源下"总 overlay"以已就绪帧为准（全帧表不在 Renderer）——
    *  ensureRange 装配新窗口后由 markFramesAvailable 增量并入。 */
-  private pipOverlayIndex: Map<string, IrOverlay[]> = new Map();
+  /** P231：layers 与 overlays 需按各自原始对象引用索引，拖拽补丁才生效。 */
+  private pipOverlayIndex: Map<string, Array<IrOverlay | IrLayer>> = new Map();
   /** pip 索引已覆盖的最大帧号（v2 增量构建游标；v1 全量后与 frameCount-1 相等）。 */
   private pipIndexCoveredUpTo = -1;
   /** v2 外部帧源标记（replaceIr 时决定帧源重建责任方）。 */
   private externalFrames = false;
 
   private rebuildPipOverlayIndex(): void {
-    const index = new Map<string, IrOverlay[]>();
+    const index = new Map<string, Array<IrOverlay | IrLayer>>();
     for (let n = 0; n < this.frames.frameCount; n++) {
       const frame = this.frames.getFrame(n);
       if (!frame) continue;
-      // P231：layers 优先（全段盒子，含首段）；缺省回退 overlays 兼容层。
-      const entries = (frame.layers && frame.layers.length > 0)
-        ? frame.layers.map(layer => ({ clip_id: layer.clip_id, input_id: layer.input_id, src_n: layer.src_n, src_t_us: layer.src_t_us, box: layer.box, rotation_deg: layer.rotation_deg, alpha: layer.alpha, effects: layer.effects }))
+      // P231：直接保留 frame.layers 原始对象引用；setPipGeometry 改的就是
+      // compose() 读取的同一对象，拖拽画面当场跟随（副本会让画面停在旧位置）。
+      const entries: Array<IrOverlay | IrLayer> = (frame.layers !== undefined)
+        ? frame.layers
         : frame.overlays;
       for (const overlay of entries) {
         let list = index.get(overlay.clip_id);
@@ -1023,9 +1025,9 @@ export class PreviewSession {
     for (let n = Math.max(this.pipIndexCoveredUpTo + 1, fromFrame); n < toFrameExclusive; n++) {
       const frame = this.frames.getFrame(n);
       if (!frame) continue;
-      // P231：layers 优先（全段盒子，含首段）；缺省回退 overlays 兼容层。
-      const entries = (frame.layers && frame.layers.length > 0)
-        ? frame.layers.map(layer => ({ clip_id: layer.clip_id, input_id: layer.input_id, src_n: layer.src_n, src_t_us: layer.src_t_us, box: layer.box, rotation_deg: layer.rotation_deg, alpha: layer.alpha, effects: layer.effects }))
+      // P231：与 rebuild 同口径——layers 原对象引用，空数组仍视为 v6。
+      const entries: Array<IrOverlay | IrLayer> = (frame.layers !== undefined)
+        ? frame.layers
         : frame.overlays;
       for (const overlay of entries) {
         let list = this.pipOverlayIndex.get(overlay.clip_id);
@@ -2208,11 +2210,15 @@ export class PreviewSession {
     // P231：layers 优先（全段统一盒，含首段；z 序 = 构造序 = 轨道序，上层在前、
     // 后绘制覆盖先绘制）。blurred_background 逐条先画模糊垫底。缺省回退
     // main/overlays 双路径（旧 IR）。
-    if (frame.layers && frame.layers.length > 0) {
-      for (const layer of frame.layers) {
+    if (frame.layers !== undefined) {
+      // P231：blurred_background 的全屏垫底只由最底层承担；逐层 fill 会让
+      // 上层模糊背景盖掉已画好的下层内容（A6 z 序破坏）。
+      const blurBase = frame.layers.findIndex(layer => layer.layout === "blurred_background");
+      for (let index = 0; index < frame.layers.length; index += 1) {
+        const layer = frame.layers[index];
         const source = sourceOf(layer.input_id, layer.src_n, false);
         if (!source) continue;
-        if (layer.layout === "blurred_background") {
+        if (layer.layout === "blurred_background" && index === blurBase) {
           cmds.push({ ...source, op: "fill", alpha: layer.alpha });
         }
         cmds.push({

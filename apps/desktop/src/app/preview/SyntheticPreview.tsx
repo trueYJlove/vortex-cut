@@ -43,9 +43,17 @@ export interface SyntheticPreviewProps {
   audioByClip?: Map<string, SegmentAudioConfig>;
   /** 画中画片段（编辑态：合成画布手势层的数据源与提交负载）。 */
   pipClips?: SyntheticPipClip[];
+  /** P231：锁定片段在合成预览也不得手势编辑（与交互预览同语义）。 */
+  lockedClipIds?: readonly string[];
   selectedClipId?: string | null;
-  onSelectClip?: (clipId: string) => void;
-  onCommitPipTransform?: (clipId: string, transform: PipTransformCommit) => void;
+  /** S4：点击空处清选；框选多选。 */
+  onSelectClip?: (clipId: string | null) => void;
+  onSelectClips?: (clipIds: string[]) => void;
+  selectedClipIds?: readonly string[];
+  /** S8：working.tracks 数组索引派生的 zRank（0=最上层）。 */
+  trackIndexByClipId?: ReadonlyMap<string, number>;
+  /** S6：返回 false = 补丁失败，手势层恢复起始几何。 */
+  onCommitPipTransform?: (clipId: string, transform: PipTransformCommit) => boolean | Promise<boolean>;
   /** 蒙版手势（合成器不渲染蒙版：实时仅边界示意，提交走 set_clip_mask）。 */
   onDraftPipMask?: (clipId: string, mask: import("@aivideo/contracts").TimelineClipMask) => void;
   onCommitPipMask?: (clipId: string, mask: import("@aivideo/contracts").TimelineClipMask) => void;
@@ -92,7 +100,7 @@ interface LoadState {
 }
 
 export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactElement {
-  const { projectId, revisionId, mediaUrls, audioByClip, pipClips, selectedClipId, onSelectClip, onCommitPipTransform, onDraftPipMask, onCommitPipMask, onGesturePause, onGestureResume, playing, playheadUs, onTimeUs, onEnded, onFallback, outputRatio, playheadStore, sourceResolver, resourceTier, forceCopyTo, playbackRate, snapshotRef, proxyEpoch, onDecodeBudget, onSession } = props;
+  const { projectId, revisionId, mediaUrls, audioByClip, pipClips, selectedClipId, onSelectClip, onSelectClips, selectedClipIds, trackIndexByClipId, onCommitPipTransform, onDraftPipMask, onCommitPipMask, onGesturePause, onGestureResume, playing, playheadUs, onTimeUs, onEnded, onFallback, outputRatio, playheadStore, sourceResolver, resourceTier, forceCopyTo, playbackRate, snapshotRef, proxyEpoch, onDecodeBudget, onSession } = props;
   // 判定回调经 ref 读最新值：指标轮询 effect 只依赖 load.status，不该因为父组件
   // 每次重渲染换了函数身份就重建定时器（重建会漏掉一轮采样）。
   const onDecodeBudgetRef = useRef(onDecodeBudget);
@@ -601,7 +609,12 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
         const cw = live.ir.canvas.width;
         const ch = live.ir.canvas.height;
         const transformOf = (clipId: string) => pipClips.find(item => item.clipId === clipId)?.transform;
-        const boxes = live.pipBoxes().map(box => ({ ...box, canvasW: cw, canvasH: ch, scale: transformOf(box.clipId)?.scale ?? 1, rotate: transformOf(box.clipId)?.rotate ?? 0, mask: pipClips.find(item => item.clipId === box.clipId)?.mask }));
+        // frame.layers 下层先画、上层后画：renderOrder 取 Core 绘制序；
+        // zRank 由 working.tracks 数组索引派生，两者彼此独立。
+        const boxes = live.pipBoxes().map((box, index) => ({ ...box, canvasW: cw, canvasH: ch,
+          scale: transformOf(box.clipId)?.scale ?? 1, rotate: transformOf(box.clipId)?.rotate ?? 0,
+          mask: pipClips.find(item => item.clipId === box.clipId)?.mask,
+          zRank: trackIndexByClipId?.get(box.clipId), renderOrder: index }));
         if (boxes.length > 0) lastPipBoxesRef.current = boxes;
         const displayBoxes = boxes.length > 0 ? boxes : (lastPipBoxesRef.current ?? []).filter(box => pipClips.some(item => item.clipId === box.clipId));
         return (
@@ -609,10 +622,13 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
             boxes={displayBoxes}
             view={live.pipView()}
             selectedClipId={selectedClipId ?? null}
-            locked={false}
+            locked={(props.lockedClipIds ?? []).includes(selectedClipId ?? "")}
             onSelect={clipId => onSelectClip?.(clipId)}
+            onSelectClips={ids => onSelectClips?.(ids)}
+            selectedClipIds={selectedClipIds}
             onLiveGeometry={(clipId, geometry) => { live.setPipGeometry(clipId, { cx: geometry.cx, cy: geometry.cy, w: geometry.w, h: geometry.h, rotation: geometry.rotate }); }}
-            onCommitTransform={(clipId, transform) => onCommitPipTransform?.(clipId, transform)}
+            onRestoreGeometry={(clipId, geometry) => { live.setPipGeometry(clipId, { cx: geometry.cx, cy: geometry.cy, w: geometry.w, h: geometry.h, rotation: geometry.rotate }); }}
+            onCommitTransform={(clipId, transform) => onCommitPipTransform?.(clipId, transform) ?? false}
             onDraftMask={(clipId, mask) => onDraftPipMask?.(clipId, mask)}
             onCommitMask={(clipId, mask) => onCommitPipMask?.(clipId, mask)}
             onGestureStart={() => onGesturePause?.() ?? false}

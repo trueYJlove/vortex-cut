@@ -215,10 +215,13 @@ textarea { min-height: 92px; padding: 8px; resize: vertical; }
 .preview-frame.ratio-11 .preview-canvas,
 .preview-frame.ratio-43 .preview-canvas,
 .preview-frame.ratio-34 .preview-canvas {
-  height: 100%;
-  width: auto;
-  max-width: 100%;
+  /* 比例守恒基准：aspect-ratio + 双向 max。JS 布局 effect 会内联写入
+     精确像素（fittedSize），此处规则仅作无 JS 兜底。height:100% 已删——
+     它会在容器有确定高度时压过 aspect-ratio（实测 16:9 被拉成 752×463）。 */
+  width: 100%;
+  height: auto;
   max-height: 100%;
+  max-width: 100%;
 }
 .preview-frame.ratio-169 .preview-canvas { aspect-ratio: 16 / 9; }
 .preview-frame.ratio-916 .preview-canvas { aspect-ratio: 9 / 16; }
@@ -229,16 +232,21 @@ textarea { min-height: 92px; padding: 8px; resize: vertical; }
 /* P8 选框色已入令牌层（--sel-frame，两主题同值） */
 .sel-box { position: absolute; left: 0; top: 0; z-index: 9; display: none; pointer-events: none; }
 .preview-frame.selected .sel-box { display: block; }
-.sel-box .h { position: absolute; background: var(--fixed-white); border: 1px solid var(--sel-frame); box-sizing: border-box; border-radius: 1.5px; box-shadow: 0 0 3px var(--rgba-15); pointer-events: auto; z-index: 5; touch-action: none; }
-/* P7 参照边条 StageTransformFrame.tsx:151-172：白色 rounded-full 14×4/4×14、1px #0fa596 边 */
-.sel-box .h.h-n { left: 50%; top: -2px; width: 14px; height: 4px; margin-left: -7px; border-radius: 999px; border: 1px solid var(--sel-frame); cursor: ns-resize; }
-.sel-box .h.h-s { left: 50%; bottom: -2px; width: 14px; height: 4px; margin-left: -7px; border-radius: 999px; border: 1px solid var(--sel-frame); cursor: ns-resize; }
-.sel-box .h.h-w { left: -2px; top: 50%; width: 4px; height: 14px; margin-top: -7px; border-radius: 999px; border: 1px solid var(--sel-frame); cursor: ew-resize; }
-.sel-box .h.h-e { right: -2px; top: 50%; width: 4px; height: 14px; margin-top: -7px; border-radius: 999px; border: 1px solid var(--sel-frame); cursor: ew-resize; }
-.sel-box .h.h-nw { left: -4px; top: -4px; width: 8px; height: 8px; border-radius: 0; box-shadow: 0 0 0 .5px var(--rgba-16); border: 1px solid var(--sel-frame); cursor: nwse-resize; }
-.sel-box .h.h-ne { right: -4px; top: -4px; width: 8px; height: 8px; border-radius: 0; box-shadow: 0 0 0 .5px var(--rgba-16); border: 1px solid var(--sel-frame); cursor: nesw-resize; }
-.sel-box .h.h-sw { left: -4px; bottom: -4px; width: 8px; height: 8px; border-radius: 0; box-shadow: 0 0 0 .5px var(--rgba-16); border: 1px solid var(--sel-frame); cursor: nesw-resize; }
-.sel-box .h.h-se { right: -4px; bottom: -4px; width: 8px; height: 8px; border-radius: 0; box-shadow: 0 0 0 .5px var(--rgba-16); border: 1px solid var(--sel-frame); cursor: nwse-resize; }
+/* S5：命中格 14×14（屏幕 px 恒定），内部视觉 8×8 白方 / 14×4 边条由 ::before 画。
+   父层按布局尺寸缩放（无 transform:scale），手柄不随 z 缩放。 */
+.sel-box .h { position: absolute; width: 14px; height: 14px; box-sizing: border-box; pointer-events: auto; z-index: 5; touch-action: none; }
+.sel-box .h::before { content: ""; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 8px; height: 8px; background: var(--fixed-white); border: 1px solid var(--sel-frame); border-radius: 0; box-shadow: 0 0 0 .5px var(--rgba-16); }
+.sel-box .h.h-n, .sel-box .h.h-s, .sel-box .h.h-w, .sel-box .h.h-e { background: transparent; }
+.sel-box .h.h-n::before, .sel-box .h.h-s::before { width: 14px; height: 4px; border-radius: 999px; }
+.sel-box .h.h-w::before, .sel-box .h.h-e::before { width: 4px; height: 14px; border-radius: 999px; }
+.sel-box .h.h-n { left: 50%; top: -4px; margin-left: -7px; cursor: ns-resize; }
+.sel-box .h.h-s { left: 50%; bottom: -4px; margin-left: -7px; cursor: ns-resize; }
+.sel-box .h.h-w { left: -4px; top: 50%; margin-top: -7px; cursor: ew-resize; }
+.sel-box .h.h-e { right: -4px; top: 50%; margin-top: -7px; cursor: ew-resize; }
+.sel-box .h.h-nw { left: -7px; top: -7px; cursor: nwse-resize; }
+.sel-box .h.h-ne { right: -7px; top: -7px; cursor: nesw-resize; }
+.sel-box .h.h-sw { left: -7px; bottom: -7px; cursor: nesw-resize; }
+.sel-box .h.h-se { right: -7px; bottom: -7px; cursor: nwse-resize; }
 .sel-border { position: absolute; inset: 0; border: 1px solid var(--brand-deep); border-radius: 2px; pointer-events: none; }
 /* P6 参照尺寸标签 StageTransformFrame.tsx:224-244：框下方 6px、10px/14px、px-1 py-[1px]、rounded-[3px]、白字 FRAME_COLOR 底 */
 .sel-dims { position: absolute; left: 50%; bottom: -22px; top: auto; transform: translateX(-50%); padding: 1px 4px; border-radius: 3px; background: var(--sel-frame); color: var(--fixed-white); font: 500 10px/14px inherit; white-space: nowrap; pointer-events: none; }
@@ -251,15 +259,20 @@ textarea { min-height: 92px; padding: 8px; resize: vertical; }
 .pip-overlay.selected { outline: 2px solid var(--rgba-19); z-index: 8; }
 .pip-overlay .pip-media { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
 .pip-badge { position:absolute; left:0; top:0; background:var(--rgba-20); color:var(--ink-cool); font-size: 10.5px; padding:2px 6px; border-radius:0 0 6px 0; pointer-events:none; z-index:2; }
-.pip-handle { position:absolute; width:11px; height:11px; background:var(--fixed-white); border:1.5px solid var(--brand); border-radius:50%; z-index:3; }
-.pip-handle.h-nw { left:-6px; top:-6px; cursor:nwse-resize; }
-.pip-handle.h-n { left:50%; top:-6px; margin-left:-6px; cursor:ns-resize; }
-.pip-handle.h-ne { right:-6px; top:-6px; cursor:nesw-resize; }
-.pip-handle.h-e { right:-6px; top:50%; margin-top:-6px; cursor:ew-resize; }
-.pip-handle.h-se { right:-6px; bottom:-6px; cursor:nwse-resize; }
-.pip-handle.h-s { left:50%; bottom:-6px; margin-left:-6px; cursor:ns-resize; }
-.pip-handle.h-sw { left:-6px; bottom:-6px; cursor:nesw-resize; }
-.pip-handle.h-w { left:-6px; top:50%; margin-top:-6px; cursor:ew-resize; }
+.pip-handle { position:absolute; width:14px; height:14px; background:transparent; box-sizing:border-box; z-index:3; touch-action:none; }
+.pip-handle::before { content:""; position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:8px; height:8px; background:var(--fixed-white); border:1px solid var(--sel-frame); }
+.pip-handle.h-n::before, .pip-handle.h-s::before, .pip-handle.h-e::before, .pip-handle.h-w::before { display:none; }
+.pip-handle.h-n.marked::before, .pip-handle.h-s.marked::before { display:block; width:14px; height:4px; border-radius:999px; }
+.pip-handle.h-e.marked::before, .pip-handle.h-w.marked::before { display:block; width:4px; height:14px; border-radius:999px; }
+.pip-handle.h-nw { left:-7px; top:-7px; }
+.pip-handle.h-n { left:50%; top:-7px; margin-left:-7px; }
+.pip-handle.h-ne { right:-7px; top:-7px; }
+.pip-handle.h-e { right:-7px; top:50%; margin-top:-7px; }
+.pip-handle.h-se { right:-7px; bottom:-7px; }
+.pip-handle.h-s { left:50%; bottom:-7px; margin-left:-7px; }
+.pip-handle.h-sw { left:-7px; bottom:-7px; }
+.pip-handle.h-w { left:-7px; top:50%; margin-top:-7px; }
+.pip-rotate { position:absolute; width:20px; height:20px; background:transparent; z-index:3; touch-action:none; }
 /* 合成预览画中画手势层（SyntheticPipLayer）：盒子贴 IR 几何，手柄语义与
  * 交互层 .pip-handle 一致（白底青边圆点），旋转手柄在顶边中点上方。 */
 /* P10 参照 FilmStageSelect.tsx:1518-1523：未选中不画框；hover 描边提示可交互 */
@@ -267,22 +280,28 @@ textarea { min-height: 92px; padding: 8px; resize: vertical; }
 .sp-box:hover { border-color: var(--rgba-21); }
 .sp-box.selected { border: 1px solid var(--sel-frame); }
 /* P11 参照 StageTransformFrame.tsx:194-216：8×8 白方形柄、1px #0fa596 边、14×14 命中格 */
-.sp-handle { position: absolute; width: 8px; height: 8px; background: var(--fixed-white); border: 1px solid var(--sel-frame); border-radius: 0; box-shadow: 0 0 0 0.5px var(--handle-ring); z-index: 3; }
-.sp-handle.sp-nw { left: -6px; top: -6px; cursor: nwse-resize; }
-.sp-handle.sp-n { left: 50%; top: -6px; margin-left: -6px; cursor: ns-resize; }
-.sp-handle.sp-ne { right: -6px; top: -6px; cursor: nesw-resize; }
-.sp-handle.sp-e { right: -6px; top: 50%; margin-top: -6px; cursor: ew-resize; }
-.sp-handle.sp-se { right: -6px; bottom: -6px; cursor: nwse-resize; }
-.sp-handle.sp-s { left: 50%; bottom: -6px; margin-left: -6px; cursor: ns-resize; }
-.sp-handle.sp-sw { left: -6px; bottom: -6px; cursor: nesw-resize; }
-.sp-handle.sp-w { left: -6px; top: 50%; margin-top: -6px; cursor: ew-resize; }
+/* S5：14×14 命中格（内联 left/top/width/height 由纯函数算出），
+   ::before 画 8×8 白方（角）或 14×4/4×14 圆角条（边，且仅 marked 时显示）。 */
+.sp-handle { position: absolute; width: 14px; height: 14px; background: transparent; box-sizing: border-box; z-index: 3; touch-action: none; }
+.sp-handle::before { content: ""; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 8px; height: 8px; background: var(--fixed-white); border: 1px solid var(--sel-frame); border-radius: 0; box-shadow: 0 0 0 0.5px var(--handle-ring); }
+.sp-handle.sp-n::before, .sp-handle.sp-s::before, .sp-handle.sp-e::before, .sp-handle.sp-w::before { display: none; }
+.sp-handle.sp-n.marked::before, .sp-handle.sp-s.marked::before { display: block; width: 14px; height: 4px; border-radius: 999px; }
+.sp-handle.sp-e.marked::before, .sp-handle.sp-w.marked::before { display: block; width: 4px; height: 14px; border-radius: 999px; }
 /* 2026-11-10：旋转手柄上移让位。
    原先它画在 top:-26px，而北向缩放手柄在 top:-6px，两者都水平居中于盒子上边：
    旋转手柄直径 14px（覆盖 -26..-12），N 手柄 11px（覆盖 -11..0），实测
    elementsFromPoint 里 sp-rotate 压在 sp-handle sp-n 之上，N 手柄点不到。
    再上移 8px（到 -34..-20），两者不再相交；连接线同步延长以保持视觉连接。 */
 /* P11 参照 StageTransformFrame.tsx:174-193：旋转 = 角外 20×20 隐形热区，自定义弧形光标（此处用 grab 简化） */
-.sp-rotate { position: absolute; left: 50%; top: -26px; margin-left: -10px; width: 20px; height: 20px; border-radius: 50%; background: transparent; cursor: grab; z-index: 3; }
+/* S5：四角外 20×20 隐形旋转格（内联 left/top 由 rotateCellRect 算出），
+   不与 14×14 角缩放格相交；计算式弧形光标由内联 style 提供。 */
+.sp-rotate { position: absolute; width: 20px; height: 20px; background: transparent; z-index: 3; touch-action: none; }
+/* S6 手势提示：left=x+14, top=y+16, rgba(30,30,30,.92), 10.5px/15px。 */
+.sp-gesture-hint { position: absolute; z-index: 8; pointer-events: none; white-space: nowrap; border-radius: 4px; padding: 2px 6px; line-height: 15px; font-weight: 500; color: var(--fixed-white); font-variant-numeric: tabular-nums; box-shadow: 0 1px 4px var(--rgba-15); }
+/* S4 框选草稿：1px 实线 accent 边 + 18% 填充，只在 release 前可见。 */
+.preview-marquee { position: absolute; z-index: 7; pointer-events: none; border: 1px solid var(--sel-frame); background: var(--accent-soft); border-radius: 2px; }
+/* S2：布局尺寸缩放；父层不做 transform:scale，手柄恒为屏幕 px。 */
+.preview-frame.zoomed { overflow: auto; }
 /* 合成层蒙版边界：合成器不渲染蒙版，实时预览仅边界示意（效果以权威预览为准）。 */
 .sp-mask { position: absolute; border: 1.5px dashed var(--rgba-23); touch-action: none; user-select: none; }
 .sp-mask.kind-ellipse { border-radius: 50%; }

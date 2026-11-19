@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import type { TimelineClip } from "@aivideo/contracts";
 import { HANDLES, pipResizeFromHandle, type HandleDir } from "./pipResizeGeometry.js";
+import { CORNERS, resizeCursor, rotateCellRect, rotateCursor, showEdgeMark, zRankByTracks, type CornerDir } from "./preview/stage-interaction.js";
 
 /**
  * P1 画中画（PIP）：在交互预览画布上显示覆盖轨（V2+）片段的可视框。
@@ -51,6 +52,8 @@ type Props = {
   /** 播放头（时间线唯一时钟）与播放状态：浮层媒体跟随标尺同步播放。 */
   playheadUs: number;
   playing: boolean;
+  /** S8：轨道数组序（0=最上层）作为命中与绘制的唯一 z 序来源。 */
+  tracks?: readonly { id: string }[];
 };
 
 /** 画中画媒体：跟随播放头同步（时间线驱动，非自由播放）——所见即所得。 */
@@ -91,6 +94,13 @@ function maskClipPath(mask: PipMask): string | undefined {
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
+const CORNER_ANGLE: Record<CornerDir, number> = { nw: 45, ne: 135, se: 45, sw: 135 };
+const EDGE_ANGLE: Record<"n" | "s" | "e" | "w", number> = { n: 90, s: 90, e: 0, w: 0 };
+const ROTATE_AT: Record<CornerDir, number> = { ne: 0, se: 90, sw: 180, nw: 270 };
+const resizeCursorForCorner = (corner: CornerDir, rotate: number) => resizeCursor(CORNER_ANGLE[corner] + rotate);
+const resizeCursorForEdge = (edge: "n" | "s" | "e" | "w", rotate: number) => resizeCursor(EDGE_ANGLE[edge] + rotate);
+const rotateAt = (corner: CornerDir) => ROTATE_AT[corner];
 
 /** 手势期间直接写盒子 DOM（绕过 React，零延迟跟手）。 */
 function applyPipTransformStyles(el: HTMLElement | null, tf: Required<PipTransform>, fitW: number, fitH: number) {
@@ -138,11 +148,17 @@ export function PreviewPipOverlays({
   onGestureResume,
   playheadUs,
   playing,
+  tracks = [],
 }: Props) {
-  const gesture = useRef<{ clipId: TimelineClip["clip_id"]; mode: "move" | HandleDir; startX: number; startY: number; cw: number; ch: number; latest: Required<PipTransform>; el: HTMLElement; fitW: number; fitH: number; wasPlaying: boolean } | null>(null);
+  /** 下层先画、上层后画：DOM 顺序按 zRank 降序，最后一个兄弟即最上层。
+   *  与 Core layers 的下层先画/上层后画顺序同源；绝不按 document.clips 序。 */
+  const rankedItems = items.map((item, index) => ({ item, index, rank: zRankByTracks(tracks, item.clip.track_id) }))
+    .sort((a, b) => b.rank - a.rank || a.index - b.index)
+    .map(entry => entry.item);
+  const gesture = useRef<{ clipId: TimelineClip["clip_id"]; mode: "move" | "rotate" | HandleDir; startX: number; startY: number; cw: number; ch: number; latest: Required<PipTransform>; el: HTMLElement; fitW: number; fitH: number; wasPlaying: boolean; startAngle: number; centerX: number; centerY: number } | null>(null);
   const maskGesture = useRef<{ clipId: TimelineClip["clip_id"]; mode: "move" | "resize"; startX: number; startY: number; box: DOMRect; start: { x: number; y: number; width: number; height: number }; latest: PipMask; maskEl: HTMLElement; mediaEl: HTMLElement | null; wasPlaying: boolean } | null>(null);
 
-  const begin = (item: PipOverlay, mode: "move" | HandleDir, e: ReactPointerEvent<HTMLElement>) => {
+  const begin = (item: PipOverlay, mode: "move" | "rotate" | HandleDir, e: ReactPointerEvent<HTMLElement>) => {
     if (locked) return;
     onSelect(item.clip.clip_id);
     e.preventDefault();
@@ -158,6 +174,9 @@ export function PreviewPipOverlays({
     const el = e.currentTarget as HTMLElement;
     try { el.setPointerCapture(e.pointerId); } catch { /* 指针可能已释放 */ }
     const start = defaults(item.clip);
+    // 旋转：以盒子中心为原点的起始方位角（客户 px 空间）。
+    const centerX = (rect?.left ?? 0) + start.x * cw;
+    const centerY = (rect?.top ?? 0) + start.y * ch;
     gesture.current = {
       clipId: item.clip.clip_id,
       mode,
@@ -170,6 +189,9 @@ export function PreviewPipOverlays({
       fitW: item.fit_w,
       fitH: item.fit_h,
       wasPlaying,
+      startAngle: Math.atan2(e.clientY - centerY, e.clientX - centerX),
+      centerX,
+      centerY,
     };
     const onMove = (ev: PointerEvent) => {
       const g = gesture.current;
@@ -180,6 +202,12 @@ export function PreviewPipOverlays({
         const dy = (ev.clientY - g.startY) / g.ch;
         g.latest.x = clamp(g.latest.x + dx, 0, 1);
         g.latest.y = clamp(g.latest.y + dy, 0, 1);
+      } else if (g.mode === "rotate") {
+        const angle = Math.atan2(ev.clientY - g.centerY, ev.clientX - g.centerX);
+        let deg = defaults(item.clip).rotate + ((angle - g.startAngle) * 180) / Math.PI;
+        deg = ((deg % 360) + 540) % 360 - 180;
+        if (Math.abs(deg) < 2) deg = 0;
+        g.latest.rotate = deg;
       } else {
         // 8 向手柄：对侧锚定（被拖方向的对边/对角保持不动），内拉缩小、外拉放大。
         const resized = pipResizeFromHandle(g.mode, { x: ev.clientX, y: ev.clientY }, start, g.cw, g.ch);
@@ -267,7 +295,7 @@ export function PreviewPipOverlays({
 
   return (
     <>
-      {items.map((item) => {
+      {rankedItems.map((item) => {
         // 手势中的片段读 gesture ref（任何重渲染也保持手势值，避免回跳）。
         const gesturing = gesture.current?.clipId === item.clip.clip_id ? gesture.current : null;
         const tf = gesturing ? gesturing.latest : defaults(item.clip);
@@ -334,10 +362,38 @@ export function PreviewPipOverlays({
                 )}
               </div>
             )}
-            {selected &&
-              HANDLES.map((dir) => (
-                <span key={dir} className={`pip-handle h-${dir}`} data-dir={dir} onPointerDown={(e) => begin(item, dir, e)} />
-              ))}
+            {selected && !locked &&
+              HANDLES.map((dir) => {
+                const corner = CORNERS.includes(dir as CornerDir) ? dir as CornerDir : null;
+                const rotate = tf.rotate;
+                const cursor = corner
+                  ? resizeCursorForCorner(corner, rotate)
+                  : resizeCursorForEdge(dir as "n" | "s" | "e" | "w", rotate);
+                const mark = corner ? null : showEdgeMark(dir as "n" | "s" | "e" | "w", boxW, boxH);
+                return (
+                  <span
+                    key={dir}
+                    className={`pip-handle h-${dir}${mark ? " marked" : ""}`}
+                    data-dir={dir}
+                    style={{ width: 14, height: 14, cursor }}
+                    title={`缩放（${dir}）`}
+                    onPointerDown={(e) => begin(item, dir, e)}
+                  />
+                );
+              })}
+            {selected && !locked && CORNERS.map(corner => {
+              const cell = rotateCellRect(corner, { x: 0, y: 0, w: boxW, h: boxH });
+              return (
+                <span
+                  key={`rotate-${corner}`}
+                  className={`pip-rotate pip-rotate-${corner}`}
+                  data-dir={corner}
+                  aria-label={`旋转画中画 ${corner}`}
+                  style={{ left: cell.x, top: cell.y, width: 20, height: 20, cursor: rotateCursor(rotateAt(corner) + tf.rotate) }}
+                  onPointerDown={(e) => begin(item, "rotate", e)}
+                />
+              );
+            })}
           </div>
         );
       })}

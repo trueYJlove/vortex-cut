@@ -687,17 +687,23 @@ export class Compositor {
   drawOverlays(frame: IrFrame): void {
     // P231：layers 优先（全段统一盒，含首段；z 序 = 构造序 = 轨道序）。
     // 缺省回退 overlays 兼容层（旧 IR）。blurred_background 逐条先画模糊垫底。
-    const entries = (frame.layers && frame.layers.length > 0)
-      ? frame.layers.map(layer => ({ clip_id: layer.clip_id, input_id: layer.input_id, src_n: layer.src_n, src_t_us: layer.src_t_us, box: layer.box, rotation_deg: layer.rotation_deg, alpha: layer.alpha, layout: layer.layout, effects: layer.effects }))
+    const entries = (frame.layers !== undefined)
+      ? frame.layers.map(layer => ({ clip_id: layer.clip_id, input_id: layer.input_id, src_n: layer.src_n, src_t_us: layer.src_t_us, box: layer.box, shift: layer.shift, rotation_deg: layer.rotation_deg, alpha: layer.alpha, layout: layer.layout, effects: layer.effects }))
       : frame.overlays;
-    for (const overlay of entries) {
+    const blurBase = entries.findIndex(entry => (entry as { layout?: string }).layout === "blurred_background");
+    for (let index = 0; index < entries.length; index += 1) {
+      const overlay = entries[index];
       const handle = this.videos.get(overlay.input_id);
       if (!handle) continue;
       const sourceWidth = this.sourceWidthScale.get(overlay.input_id) ?? 1920;
-      if ((overlay as { layout?: string }).layout === "blurred_background") {
+      if ((overlay as { layout?: string }).layout === "blurred_background" && index === blurBase) {
         this.drawBlurredFill(overlay.input_id, handle.textureY, handle.textureUV, overlay.alpha);
       }
-      this.drawRectYuv(handle.textureY, handle.textureUV, null, overlay.box, overlay.alpha, overlay.rotation_deg, false,
+      const shift = (overlay as { shift?: { dx?: number; dy?: number } }).shift;
+      const box = shift
+        ? { x: overlay.box.x + (shift.dx ?? 0), y: overlay.box.y + (shift.dy ?? 0), w: overlay.box.w, h: overlay.box.h }
+        : overlay.box;
+      this.drawRectYuv(handle.textureY, handle.textureUV, null, box, overlay.alpha, overlay.rotation_deg, false,
         sourceWidth, overlay.effects?.mask, overlay.effects?.keying);
     }
   }
@@ -823,7 +829,7 @@ export class Compositor {
     this.beginFrame();
     // P231：layers 优先（全段统一盒，含首段；drawOverlays 内部走 layers 路径）。
     // 缺省回退 main/overlays 双路径（旧 IR）。
-    if (frame.layers && frame.layers.length > 0) {
+    if (frame.layers !== undefined) {
       this.drawOverlays(frame);
     } else {
       const main = frame.main;

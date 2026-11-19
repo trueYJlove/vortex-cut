@@ -167,7 +167,7 @@ export function parseIr(value: string | Record<string, unknown>): Ir {
 /** 帧活动输入集合（layers 优先，缺省回退 main + overlays）。 */
 export function activeInputIds(frame: IrFrame): Set<string> {
   const ids = new Set<string>();
-  if (frame.layers && frame.layers.length > 0) {
+  if (frame.layers !== undefined) {
     for (const layer of frame.layers) ids.add(layer.input_id);
     return ids;
   }
@@ -180,7 +180,7 @@ export function activeInputIds(frame: IrFrame): Set<string> {
 
 /** 输入在指定帧的源帧号（layers 优先；转场左/右各自取帧）。 */
 export function sourceFrameAt(frame: IrFrame, inputId: string): number | null {
-  if (frame.layers && frame.layers.length > 0) {
+  if (frame.layers !== undefined) {
     for (const layer of frame.layers) {
       if (layer.input_id === inputId) return layer.src_n;
     }
