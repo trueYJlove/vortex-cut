@@ -573,6 +573,53 @@ def test_rendered_duration_accounts_for_gaps_and_dormant_transitions() -> None:
     assert _rendered_duration_us(plan["segments"]) == 8_500_000
 
 
+def test_p231_cross_track_overlap_is_not_concatenated() -> None:
+    """P231 A2 负向对照：V1/V2 同时段只进一次 concat，上层经 overlay 盒叠加。"""
+    plan = {
+        "segments": [
+            {"clip_id": "v2", "input_id": "I0", "track_id": "V2", "track_index": 0,
+             "asset_kind": "video", "source_start_us": 0, "source_end_us": 1_000_000,
+             "timeline_start_us": 0, "timeline_end_us": 1_000_000,
+             "layout": "fit", "audio_enabled": False, "gain_db": 0.0},
+            {"clip_id": "v1", "input_id": "I1", "track_id": "V1", "track_index": 1,
+             "asset_kind": "video", "source_start_us": 0, "source_end_us": 1_000_000,
+             "timeline_start_us": 0, "timeline_end_us": 1_000_000,
+             "layout": "fit", "audio_enabled": False, "gain_db": 0.0},
+        ],
+        "captions": {"items": []},
+        "output": {"width": 540, "height": 960},
+    }
+    probes = [{"video_streams": [{"width": 540, "height": 960, "sample_aspect_ratio": "1:1"}]}] * 2
+    args = build_timeline_args(plan, [Path("a.mp4"), Path("b.mp4")], probes,
+                               "libopenh264", "out.mp4", captions=False)
+    graph = args[args.index("-filter_complex") + 1]
+    # 基底只含最下层 V1 一段；V2 走 overlay 链，不得 concat=n=2。
+    assert "concat=n=1:v=1:a=1" in graph
+    assert "concat=n=2:v=1:a=1" not in graph
+    assert "overlay=" in graph
+    # z 序：先画/I1(V1 基底)，再叠/I0(V2 上层)；overlay 链只出现 V2 的源。
+    assert graph.index("[1:v:0]") < graph.index("[0:v:0]") or "MAINPIP" in graph
+
+
+def test_rendered_duration_all_visual_tracks_and_same_track_borrow() -> None:
+    """P231 A10 负向对照：V1 不再独占输出时长；跨轨转场不扣减。"""
+    from aivs_core.rendering.service import _rendered_duration_us
+
+    v1 = {"clip_id": "a", "track_id": "V1", "asset_kind": "video",
+          "timeline_start_us": 0, "timeline_end_us": 2_000_000}
+    v2 = {"clip_id": "p", "track_id": "V2", "asset_kind": "video",
+          "timeline_start_us": 10_000_000, "timeline_end_us": 12_000_000}
+    assert _rendered_duration_us([v1, v2]) == 12_000_000
+    # 转场锚在左段尾部（B2 after_clip_id 语义），右段挂 transition_in 不生效。
+    v2["transition_in"] = {"transition_id": "t", "kind": "fade", "duration_us": 300_000}
+    v1["timeline_end_us"] = 10_000_000
+    assert _rendered_duration_us([v1, v2]) == 12_000_000
+    # 同轨相邻 + 锚在左段 ⇒ 扣减借用量。
+    v2["track_id"] = "V1"
+    v1["transition_in"] = {"transition_id": "t", "kind": "fade", "duration_us": 300_000}
+    assert _rendered_duration_us([v1, v2]) == 11_700_000
+
+
 def test_builder_composes_pip_overlay_for_track_v2() -> None:
     """P1 画中画：V1 之上新增 V2 覆盖段，应生成 overlay 时间窗叠加且继承 transform。"""
     plan = {

@@ -2087,7 +2087,9 @@ export function isTimelineClipKeying(value: unknown): value is TimelineClipKeyin
 const TRANSITION_DOC_MAX = 50;
 export function isTimelineTrack(value: unknown): value is TimelineTrack {
   if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["id", "kind", "locked", "hidden", "muted", "solo"]) || !isString(value.id) || !value.id.length || !oneOf(["video", "text", "audio"], value.kind)) return false;
-  return value.locked === false && value.hidden === false && value.muted === false && value.solo === false;
+  // P231：hidden/muted/solo/locked 是 Core 已支持的轨道状态，不能要求恒 false；
+  // 否则 set_track_flags 产出的合法文档会被校验器拒绝。
+  return ["locked", "hidden", "muted", "solo"].every(key => value[key] === undefined || typeof value[key] === "boolean");
 }
 export function isTimelineDocument(value: unknown): value is TimelineDocument {
   if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["schema_version", "project_id", "canvas", "tracks", "clips", "captions", "locked_elements", "transitions", "provenance"]) || value.schema_version !== 1 || !isId(value.project_id) || !isTimelineCanvas(value.canvas) || !Array.isArray(value.tracks) || value.tracks.length < 2 || !value.tracks.every(isTimelineTrack) || !Array.isArray(value.clips) || !value.clips.every(isTimelineClip) || !Array.isArray(value.captions) || !value.captions.every(isTimelineCaption) || !isRecord(value.provenance)) return false;

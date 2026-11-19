@@ -343,6 +343,14 @@ class RenderPlanCompiler:
             for track in document.get("tracks", [])
             if isinstance(track, dict) and track.get("id")
         }
+        # P231 修复：z 序 = tracks 数组序（0 = 最上层），与 document.clips 的
+        # 插入顺序无关。显式写入索引，供 IR/ffmpeg 统一排序；旧计划（单测夹具）
+        # 没有 tracks 时按出现次序兜底，不破坏既有语义。
+        track_order: dict[str, int] = {
+            track["id"]: index
+            for index, track in enumerate(document.get("tracks", []))
+            if isinstance(track, dict) and track.get("id")
+        }
         any_solo = any(bool(track.get("solo")) for track in tracks_by_id.values())
         # B2：转场锚定在片段尾部——按 after_clip_id 索引，编译段时挂到对应段。
         transition_by_anchor: dict[str, dict[str, Any]] = {
@@ -419,6 +427,7 @@ class RenderPlanCompiler:
                 {
                     "clip_id": clip["clip_id"],
                     "track_id": clip.get("track_id", "V1"),
+                    "track_index": track_order.get(clip.get("track_id", "V1"), len(track_order)),
                     "track_hidden": bool(track.get("hidden")) if track else False,
                     "input_id": input_id,
                     "asset_kind": clip["asset_kind"],

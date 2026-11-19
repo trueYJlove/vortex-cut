@@ -165,11 +165,10 @@ def build_timeline_args(
     segments = plan["segments"]
     if len(segments) != len(segment_paths) or len(segments) != len(segment_probes):
         raise DomainError("RENDER_PLAN_INVALID", "渲染输入数量不一致")
-    # P231 统一盒模型：全部非音频非隐藏段进入视觉装配层（不再按
-    # track_id == "V1" 二分），按 timeline_start_us 排序；相邻段之间的空隙
-    # 插入黑底填充段（lavfi color），保证 concat 图的输出长度与时间线总长一致。
-    # z 序 = 轨道序（上层盖下层）——见下方 overlay 链（按 segments 列表序
-    # = 轨道数组序逐层叠加）。audio 段缺视频流，显式跳过（走 A1 混音）。
+    # P231 统一盒模型：全部非音频非隐藏段都进入盒叠加（overlay 链），
+    # 但时间轴 concat/xfade 基底只由最下层视觉轨的同轨时间链构成；
+    # 跨轨同时段片段不再被串联播放。z 序 = track_index 降序
+    # （下层先画、上层后画），与 IR layers 同一顺序。audio 段走 A1 混音。
     timeline_total_us = max(
         (int(segment["timeline_end_us"]) for segment in segments),
         default=0,
@@ -182,6 +181,13 @@ def build_timeline_args(
             and not segment.get("track_hidden", False)
         )
     ]
+    # P231 修复：时间轴基底只走最下层视觉轨的同轨时间链；其它轨经下方
+    # overlay 盒链按真实时间窗叠加。旧实现把跨轨同时段一起串进 concat，
+    # 输出时长会翻倍且与 IR 合成帧不一致（A2）。无 track_index 的旧夹具
+    # 保持单链逐字节兼容。
+    if any(int(segment.get("track_index", 0)) != 0 for _index, segment in visual_items):
+        bottom_index = max(int(segment.get("track_index", 0)) for _index, segment in visual_items)
+        visual_items = [item for item in visual_items if int(item[1].get("track_index", 0)) == bottom_index]
     visual_items.sort(key=lambda item: int(item[1]["timeline_start_us"]))
 
     # 图项序列：黑底填充（kind=black）与视觉段（kind=segment）交错；段的
@@ -196,7 +202,9 @@ def build_timeline_args(
         transition = segment.get("transition_in")
         if isinstance(transition, dict) and position + 1 < len(visual_items):
             successor = visual_items[position + 1][1]
-            if int(successor["timeline_start_us"]) == int(segment["timeline_end_us"]):
+            # P231 Q5：与 IR 同口径——转场仅同轨邻接（首尾相接）。
+            if (successor.get("track_id") == segment.get("track_id")
+                    and int(successor["timeline_start_us"]) == int(segment["timeline_end_us"])):
                 active_transition = transition
         graph_items.append(
             {
@@ -620,11 +628,10 @@ def build_timeline_args(
     else:
         filters.append("[acat]anull[aout]")
     video_label = "vcat"
-    # P231 统一盒模型：所有可见视觉段按**轨道序**（segments 列表序 = 轨道
-    # 数组序，上层在前）逐层叠加到时间序基底上——上层轨道盖下层（剪映/
-    # OpenFilm 同语义）。首段时间序基底已在 concat 图中装配（vcat），其余
-    # 段以 [MAINPIP] 链式 overlay 叠加；首段本身也带 transform/mask/keying
-    # 时同样走 overlay 链（盒语义全段统一）。
+    # P231 统一盒模型：所有可见视觉段按**轨道序**（下层先画、上层后画）
+    # 逐层叠加到时间序基底上——上层轨道盖下层（剪映/OpenFilm 同语义）。
+    # 时间序基底（concat/xfade）只由最下层视觉轨构成；其余轨以及带
+    # transform/mask/keying 的基底段走 [MAINPIP] 链式 overlay。
     #
     # 例外：首段（时间序第一个视觉段）若无 transform/mask/keying，直通
     # concat 路径（旧图逐字节不变，回归锁）；否则首段也进 overlay 链
@@ -636,6 +643,26 @@ def build_timeline_args(
             segment["asset_kind"] != "audio"
             and not segment.get("track_hidden", False)
         )
+    ]
+    # P231 修复：与 IR layers 同一 z 序——track_index 降序（下层先画、
+    # 上层后画），同轨按时间排序；overlay 链后叠加的段覆盖先叠加的段。
+    overlay_segments.sort(
+        key=lambda item: (
+            -int(item[1].get("track_index", 0)),
+            int(item[1]["timeline_start_us"]),
+        )
+    )
+    # P231 修复：基底轨里「无 transform/mask/keying、且不是转场左右段」的
+    # 段已由 concat/xfade 直画，不再进 overlay 链——旧实现会对同一段画两遍，
+    # 且两条链的盒坐标/alpha 口径不同（A2 破）。
+    multi_track = any(int(segment.get("track_index", 0)) != 0 for _index, segment in visual_items)
+    base_indices = {index for index, _segment in visual_items} if multi_track else set()
+    overlay_segments = [
+        (index, segment) for index, segment in overlay_segments
+        if index not in base_indices
+        or isinstance(segment.get("transform"), dict)
+        or isinstance(segment.get("mask"), dict)
+        or isinstance(segment.get("keying"), dict)
     ]
     if overlay_segments:
         main_label = "MAINPIP"

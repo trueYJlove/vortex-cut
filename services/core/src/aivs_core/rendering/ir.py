@@ -44,7 +44,10 @@ IR_SCHEMA = "preview-ir-v1"
 # 必须整体失效。
 # v4（2026-10-10）：主轨空时以可见覆盖轨终点作时长下限（对齐权威端「全程黑场+
 # 覆盖轨叠加」）；v3（2026-09-17 v0.4）：覆盖轨 mask/keying 重入（overlay 条目携带 effects）。
-IR_PROJECTOR_VERSION = 6
+# v7（P231 复核修复）：统一盒模型真正落地——跨轨重叠不再串成 concat 时间链、
+# z 序显式由 tracks 数组序决定、转场仅同轨邻接、兼容层不再按时间序首段分裂。
+# v6 缓存条目包含错误的时长与层顺序，必须整体失效。
+IR_PROJECTOR_VERSION = 7
 MAX_IR_FRAMES = 27_000  # 15 分钟 @30fps（O2 体量护栏）
 
 ALLOWED_KEYFRAME_PROPS = {"position", "opacity", "scale", "rotate"}
@@ -477,21 +480,57 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
     # 同轨按 timeline_start_us 排序。main/overlays 保留为兼容字段
     # （main = 时间序首段或 black；overlays = 其余段的旧形状条目），
     # 最终态（后续门）删除兼容字段、layers 成为唯一来源。
-    visual = [
+    all_visual = [
         (index, segment)
         for index, segment in enumerate(segments)
         if segment["asset_kind"] != "audio" and not segment.get("track_hidden")
     ]
+    # P231 修复：统一盒模型下时间轴基底只走「最下层视觉轨」的同轨时间链；
+    # 其余视觉轨的段按各自真实时间窗经 layers 盒叠加，不再被串进 concat。
+    # 旧实现把全部轨按 timeline_start_us 排成一条链，同时段跨轨段会被依次
+    # 播放（1s + 1s 重叠 = 2s 输出），既拉长时长又错位画面。
+    # 无 track_index 的旧夹具（单轨）原样保留，逐字节兼容既有测试。
+    if any(int(segment.get("track_index", 0)) != 0 for _index, segment in all_visual):
+        bottom_index = max(int(segment.get("track_index", 0)) for _index, segment in all_visual)
+        visual = [item for item in all_visual if int(item[1].get("track_index", 0)) == bottom_index]
+    else:
+        visual = list(all_visual)
     visual.sort(key=lambda item: int(item[1]["timeline_start_us"]))
-    # overlays 兼容层：非首段的可见段（保持旧 overlays 条目形状，供旧消费者）。
+    # P231 修复：统一盒模型的 z 序由 tracks 数组序单点决定（0 = 最上层）。
+    # 合成器按数组顺序绘制、后画覆盖先画，因此这里必须「下层在前、上层在后」；
+    # 旧实现直接沿用 document.clips 插入序，反转插入顺序就会让下层盖住上层。
+    # 同轨按时间排序；无 track_index 的旧夹具按原列表次序稳定兜底。
     overlays = [
         segment for segment in segments
         if segment["asset_kind"] != "audio" and not segment.get("track_hidden")
     ]
+    overlays.sort(
+        key=lambda segment: (
+            -int(segment.get("track_index", 0)),
+            int(segment["timeline_start_us"]),
+        )
+    )
 
     # 图项序列：黑底填充 + 段；转场仅在时间序后继首尾相接时激活（休眠转场 = 无转场）
     graph_items: list[dict[str, Any]] = []
+    # P231 Q5：借用窗口按每条视觉轨独立计算（同轨邻接），再汇总成全时间轴
+    # 的阶跃前移表；跨轨转场不激活。旧实现只看基底轨，会漏掉上层轨转场。
     borrow_points: list[tuple[int, int]] = []  # (输入时间轴借用点 = 左段终点, 借用量)
+    track_keys = sorted({(str(seg.get("track_id", "V1")), int(seg.get("track_index", 0)))
+                         for _idx, seg in all_visual})
+    for track_id, track_index in track_keys:
+        chain = sorted(
+            (seg for _idx, seg in all_visual
+             if str(seg.get("track_id", "V1")) == track_id
+             and int(seg.get("track_index", 0)) == track_index),
+            key=lambda seg: int(seg["timeline_start_us"]),
+        )
+        for index, segment in enumerate(chain[:-1]):
+            transition = segment.get("transition_in")
+            successor = chain[index + 1]
+            if (isinstance(transition, dict)
+                    and int(successor["timeline_start_us"]) == int(segment["timeline_end_us"])):
+                borrow_points.append((int(segment["timeline_end_us"]), int(transition["duration_us"])))
     cursor_us = 0
     for position, (input_index, segment) in enumerate(visual):
         start_us = int(segment["timeline_start_us"])
@@ -501,9 +540,11 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
         transition = segment.get("transition_in")
         if isinstance(transition, dict) and position + 1 < len(visual):
             successor = visual[position + 1][1]
-            if int(successor["timeline_start_us"]) == int(segment["timeline_end_us"]):
+            # P231 Q5：转场仅同轨邻接。旧实现按全局时间序取后继，跨轨段
+            # 会误激活转场，或让另一轨的段插队抑制合法的同轨转场。
+            if (successor.get("track_id") == segment.get("track_id")
+                    and int(successor["timeline_start_us"]) == int(segment["timeline_end_us"])):
                 active_transition = transition
-                borrow_points.append((int(segment["timeline_end_us"]), int(transition["duration_us"])))
         graph_items.append({
             "kind": "segment", "input_index": input_index, "segment": segment,
             "transition_in": active_transition,
@@ -648,7 +689,7 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
         default=0,
     )
     visual_tail_end = max(
-        (_output_window(seg)[1] for _idx, seg in visual
+        (_output_window(seg)[1] for _idx, seg in all_visual
          if seg["asset_kind"] != "audio"),
         default=0,
     )
@@ -669,7 +710,7 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
     # P231：layers 查找表覆盖全部可见段（含首段），构造序 = segments 列表序
     # = 轨道数组序（z 序：上层盖下层）。overlays 兼容层从同一表派生。
     overlay_lookup = IntervalLookup([
-        (int(segment["timeline_start_us"]), int(segment["timeline_end_us"]), (order, segment))
+        (_output_window(segment)[0], _output_window(segment)[1], (order, segment))
         for order, segment in enumerate(overlays)
     ])
     caption_lookup = IntervalLookup([
@@ -700,10 +741,9 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
             else:
                 main_entry = {"kind": "segment", **segment_frame(segment, t_exact_us, region["phase"], head_us=region.get("head_us", 0),
                                                                  content_origin_us=region["t0"])}
-        # P231 layers：全部活跃可见段（含首段）统一盒条目，按轨道序（上→下）。
-        # IntervalLookup 保持构造原顺序 = segments 列表序 = 轨道数组顺序
-        # （plan.segments 由 timeline 按轨道数组序展开），故 next_batch 输出
-        # 即 z 序（上层在前、后绘制覆盖先绘制）。
+        # P231 layers：全部活跃可见段（含首段）统一盒条目。overlays 已在上面
+        # 按「下层在前、上层在后」排序；IntervalLookup 保持构造序，
+        # 合成器后画覆盖先画 ⇒ 最后画出的就是最上层轨道。
         layer_entries = []
         for segment in overlay_lookup.next_batch(t_exact_us):
             layer_entries.append(_layer_entry(
@@ -711,11 +751,18 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
                 segment_input[segment["clip_id"]],
                 geometry_by_input[segment_input[segment["clip_id"]]],
                 width, height, t_exact_us))
-        # overlays 兼容层（旧形状）：非首段的条目（首段由 main 承载，避免旧
-        # 消费者把同一段画两遍）。首段判定 = main_entry 携带的 clip_id。
-        main_clip_id = main_entry.get("clip_id") if main_entry.get("kind") == "segment" else None
+        # overlays 兼容层（旧形状）：旧消费者先画 main 再按数组序画
+        # overlays，因此这里必须保持与 layers 相同的「下层在前、上层在后」
+        # 顺序，且只排除 main 真正承载的段；转场帧 main 携带左右两段，
+        # 两条都要排除，否则旧端重影。
+        main_clip_ids: set[str] = set()
+        if main_entry.get("kind") == "segment":
+            main_clip_ids.add(str(main_entry.get("clip_id")))
+        elif main_entry.get("kind") == "transition":
+            main_clip_ids.add(str(main_entry.get("left", {}).get("clip_id")))
+            main_clip_ids.add(str(main_entry.get("right", {}).get("clip_id")))
         overlay_entries = [
-            entry for entry in layer_entries if entry["clip_id"] != main_clip_id
+            entry for entry in layer_entries if entry["clip_id"] not in main_clip_ids
         ]
         active_captions = [
             caption["caption_id"] for caption in caption_lookup.next_batch(t_exact_us)
@@ -757,9 +804,27 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
             for caption in plan["captions"]["items"]
             if (style := caption_override_style(caption)) is not None
         },
+        # P231 Q5：窗口列表覆盖所有视觉轨的同轨转场，不只是基底链。
+        # 每条轨独立取同轨时间序后继；跨轨段不参与。
         "transition_windows": [
-            {"clip_id": region["item"]["segment"]["clip_id"], **region["blend"]}
-            for region in regions if region.get("blend")
+            {"clip_id": segment["clip_id"],
+             "kind": transition["kind"],
+             "offset_us": int(segment["timeline_end_us"]),
+             "duration_us": int(transition["duration_us"])}
+            for track_id, track_index in track_keys
+            for segment, successor in zip(
+                sorted((seg for _idx, seg in all_visual
+                        if str(seg.get("track_id", "V1")) == track_id
+                        and int(seg.get("track_index", 0)) == track_index),
+                       key=lambda seg: int(seg["timeline_start_us"]))[:-1],
+                sorted((seg for _idx, seg in all_visual
+                        if str(seg.get("track_id", "V1")) == track_id
+                        and int(seg.get("track_index", 0)) == track_index),
+                       key=lambda seg: int(seg["timeline_start_us"]))[1:],
+            )
+            for transition in [segment.get("transition_in")]
+            if (isinstance(transition, dict)
+                and int(successor["timeline_start_us"]) == int(segment["timeline_end_us"]))
         ],
         "known_approximations": [
             "opacity 关键帧 = fade=alpha=1:st=0:d=末关键帧t 整体渐入近似（权威端实际行为，非 lerp）",

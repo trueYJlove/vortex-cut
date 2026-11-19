@@ -107,16 +107,11 @@ def _window_for(
         return legacy("倒放段")
     if isinstance(segment.get("keyframes"), dict) and segment["keyframes"]:
         return legacy("关键帧动画（复杂时域滤镜）")
-    if (
-        isinstance(segment.get("transform"), dict)
-        and segment["transform"]
-        and segment.get("track_id", "V1") == "V1"
-    ):
-        # 主轨段上的 transform 会引入 color+overlay 复合链（黑底时长按
-        # 窗口算术换算）——保守不与深定位组合。覆盖轨（PiP）段的
-        # transform 是浮层元素语义的一部分（_pip_overlay_chain 内建处理
-        # 缩放/旋转/透明度，不产生额外时间域滤镜），放行。
-        return legacy("静态变换（主轨保守不放行）")
+    if isinstance(segment.get("transform"), dict) and segment["transform"]:
+        # P231 统一盒模型：任意视觉轨的 transform 都走同一条复合/盒链，
+        # 深定位窗口的源坐标换算对全轨一致；保守地对所有带 transform 段
+        # 不放行，避免非 V1 段被错误深定位而错帧。
+        return legacy("静态变换（盒模型保守不放行）")
     if segment.get("reframe") or segment.get("mask") or segment.get("keying"):
         return legacy("重构图/蒙版/抠像")
     seekable, reason = _stream_seekable(probe)

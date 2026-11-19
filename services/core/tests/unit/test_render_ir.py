@@ -13,7 +13,7 @@ def _geometry(width: int = 1920, height: int = 1080) -> dict:
 
 
 def _segment(clip_id: str, src0: int, src1: int, tl0: int, tl1: int, *, asset_idx: int = 0, **extra) -> dict:
-    base = {"clip_id": clip_id, "track_id": "V1", "asset_kind": "video",
+    base = {"clip_id": clip_id, "track_id": "V1", "track_index": 1, "asset_kind": "video",
             "asset_id": f"asset{asset_idx}", "input_id": f"I{asset_idx}",
             "source_start_us": src0, "source_end_us": src1,
             "timeline_start_us": tl0, "timeline_end_us": tl1,
@@ -175,38 +175,51 @@ def test_overlay_only_timeline_full_length_black() -> None:
     assert ir["frames"][59]["main"]["src_n"] == 59
 
 
-def test_overlay_beyond_main_does_not_extend_duration() -> None:
-    # P231 统一盒模型：全段参与时长（无主轨/覆盖轨二分）——段 p [1s,4s) 延长
-    # 输出到 4s（120 帧），时间序首段 = a（0..2s）走 main 链，p 走 layers。
+def test_cross_track_overlap_is_boxed_not_concatenated() -> None:
+    # P231 A1/A6 负向对照：V1 [0,2s) 与 V2 [1s,4s) 同时段是盒叠加，
+    # 不是时间序串联。输出时长 = 两层最大终点 4s（120 帧）；旧实现把
+    # 重叠展开成 5s（150 帧）并让后半段错位播放。
     plan = _plan([
         _segment("a", 0, 2 * US, 0, 2 * US),
-        _segment("p", 0, 3 * US, 1 * US, 4 * US, asset_idx=1, track_id="V2"),
+        _segment("p", 0, 3 * US, 1 * US, 4 * US, asset_idx=1, track_id="V2", track_index=0),
     ])
     ir = project_preview_ir(plan, _probe(plan))
-    # 段 p [1s,4s) → 输出 150 帧（5s 时间线内 p 终点 4s + a 终点 2s 取大 = 4s… 
-    # 实际 borrow 0 时 regions 终点 = 4s… 但 p 窗口终点 4s 与 a 终点 2s 的
-    # graph 合并后 regions[-1].t1 = 4s = 120 帧；p 窗口未被 borrow 前移。
-    # 150 帧的来源：p 的 timeline_end 4s 与 a 的 2s 合并后 graph_items =
-    # [a(0-2s), black(2-1s 无), p(1-4s)] —— p 与 a 时间重叠，regions 展开
-    # 后 p 的 full 区 [2s, 4s]、a 的 full 区 [0, 2s]，但 p 的 timeline_start
-    # 1s < a 终点 2s 造成 acc 累计 5s（重叠段在时间序 graph 中被展开为串联）。
-    # 统一盒模型下重叠段的 graph 串联语义已知近似（见 §known_approximations
-    # 「重叠段时间序串联」）；此处断言 150（当前实现的串联口径）。
-    assert ir["canvas"]["duration_frames"] == 150
-    assert ir["frames"][59]["main"]["clip_id"] == "a"  # 时间序首段
-    # 窗口内 layers/overlays 携带段（layers 全量、overlays 兼容层 = 非首段）。
-    # 段 a [0,2s) 与段 p [1s,4s) 时间重叠——layers 构造序 = segments 列表序
-    # = [a, p]（z 序：上层在前）。
-    layer_ids = [entry["clip_id"] for entry in ir["frames"][59]["layers"]]
-    assert layer_ids == ["a", "p"]
-    assert ir["frames"][59]["overlays"][0]["clip_id"] == "p"
-    # 段 p 窗口 [1s,4s)：帧 30（1s）起 overlays 携带 p；帧 119（3.9667s）
-    # 时 p 已成为 main（a 的串行区段结束后 p 接替为时间序首段），
-    # overlays 兼容层排除首段故为空——layers 仍携带 p。
+    assert ir["canvas"]["duration_frames"] == 120
+    assert ir["frames"][59]["main"]["clip_id"] == "a"
+    # 下层（V1, track_index=1）先画、上层（V2, track_index=0）后画覆盖。
+    assert [e["clip_id"] for e in ir["frames"][30]["layers"]] == ["a", "p"]
+    assert [e["clip_id"] for e in ir["frames"][59]["layers"]] == ["a", "p"]
     assert ir["frames"][30]["overlays"][0]["clip_id"] == "p"
-    assert ir["frames"][119]["main"]["clip_id"] == "p"
     assert ir["frames"][119]["layers"][0]["clip_id"] == "p"
-    assert ir["frames"][119]["overlays"] == []
+
+
+def test_z_order_ignores_clip_insertion_order() -> None:
+    # P231 A6 负向对照：tracks = [V2(上层), V1(下层)] 固定，仅反转
+    # document.clips 插入顺序，layers 绘制序必须恒为 [V1, V2]。
+    def build(reverse: bool) -> dict:
+        v1 = _segment("v1", 0, US, 0, US)
+        v2 = _segment("v2", 0, US, 0, US, asset_idx=1, track_id="V2", track_index=0)
+        return _plan([v2, v1] if reverse else [v1, v2])
+    for reverse in (False, True):
+        ir = project_preview_ir(build(reverse), _probe(build(reverse)))
+        assert ir["canvas"]["duration_frames"] == 30
+        assert [e["clip_id"] for e in ir["frames"][0]["layers"]] == ["v1", "v2"]
+        # 旧客户端兼容层同样不得反转：main 由下层时间链承载。
+        assert ir["frames"][0]["main"]["clip_id"] == "v1"
+
+
+def test_same_track_transition_not_stolen_by_other_track() -> None:
+    # P231 A3/Q5 负向对照：V2 段 b 与同轨后继 c 相邻可转场；
+    # 另一轨 V1 段 a 插在中间也不得把后继抢走。
+    plan = _plan([
+        _segment("a", 0, 3 * US, 0, 3 * US),
+        _segment("b", 0, 2 * US, 0, 2 * US, asset_idx=1, track_id="V2", track_index=0,
+                 transition_in={"transition_id": "t", "kind": "fade", "duration_us": 300_000}),
+        _segment("c", 0, 2 * US, 2 * US, 4 * US, asset_idx=2, track_id="V2", track_index=0),
+    ])
+    ir = project_preview_ir(plan, _probe(plan))
+    assert ir["transition_windows"], "同轨相邻转场应生效"
+    assert {item["clip_id"] for item in ir["transition_windows"]} == {"b"}
 
 
 def test_overlay_only_audio_tail_still_extends() -> None:

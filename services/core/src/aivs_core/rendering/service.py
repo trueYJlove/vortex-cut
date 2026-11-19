@@ -1394,11 +1394,11 @@ class RenderService:
 
 
 def _rendered_duration_us(segments: list[dict[str, Any]]) -> int:
-    """渲染产物时长 = 主视频轨时间线总长（含空隙黑底填充）− 生效转场区间总和。
+    """渲染产物时长 = 可见视觉段时间线总长（含空隙黑底填充）− 生效转场区间总和。
 
-    多轨道语义：只统计主视频轨（V1）上可见的片段；主轨隐藏/为空时输出为
-    全程黑场，时长取全部片段的最大终点。转场只在锚点与其时间序后继首尾
-    相接时生效（B2 借用式重叠语义）。
+    P231 统一盒模型：全部非音频非隐藏视觉轨都参与输出时长（V1 不再是主轨
+    特权）；跨轨同时段片段是盒叠加、不串接，故时长取全部可见段的最大终点。
+    转场只在同轨相邻段首尾相接时生效（B2 借用式重叠语义）。
     """
     if not segments:
         return 0
@@ -1408,7 +1408,6 @@ def _rendered_duration_us(segments: list[dict[str, Any]]) -> int:
             for segment in segments
             if (
                 segment.get("asset_kind") != "audio"
-                and segment.get("track_id", "V1") == "V1"
                 and not segment.get("track_hidden", False)
             )
         ),
@@ -1422,7 +1421,10 @@ def _rendered_duration_us(segments: list[dict[str, Any]]) -> int:
         transition = visual[index].get("transition_in")
         if not isinstance(transition, dict):
             continue
-        if int(visual[index + 1]["timeline_start_us"]) == int(visual[index]["timeline_end_us"]):
+        successor = visual[index + 1]
+        # P231 Q5：与 IR/ffmpeg 同口径，转场借用只在同轨邻接时计入时长。
+        if (successor.get("track_id") == visual[index].get("track_id")
+                and int(successor["timeline_start_us"]) == int(visual[index]["timeline_end_us"])):
             transition_total += int(transition["duration_us"])
     return max(1, total - transition_total)
 
