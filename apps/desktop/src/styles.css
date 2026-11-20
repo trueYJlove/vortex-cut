@@ -544,7 +544,7 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--vc-accent); }
 .menu-item-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .menu-item > button, .menu-dropdown button { cursor: default; }
 .menu-item-shortcut { margin-left: auto; flex: none; padding: 2px 5px; border: 1px solid var(--vc-border-2, var(--line-1-d)); border-radius: 4px; background: var(--ctl-bg, var(--surface-1)); color: var(--dlg-text-3, var(--ink-3)); font-size: var(--dlg-fs-caption); line-height: 1; font-family: Consolas, monospace; letter-spacing: .2px; }
-/* 图标精确尺寸：覆盖全局 button svg 16px 规则，与 docs/ui-mockups/titlebar-library-unify.html 一致。 */
+/* 图标精确尺寸：覆盖全局 button svg 16px 规则，与 docs/design/ui-mockups/titlebar-library-unify.html 一致。 */
 .menu-item-ico svg { width: 14px; height: 14px; }
 .asset-actions .icon-btn svg { width: 13px; height: 13px; }
 .library-filter-toolbar .icon-btn svg { width: 13px; height: 13px; }
@@ -1238,7 +1238,7 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 .pip-badge.key { left: auto; right: 0; border-radius: 0 0 0 6px; color: var(--ink-ok-c); }
 
 /* ═══════════════════════════════════════════════════════════════════
-   万兴喵影风格弹窗层（docs/ui-mockups/dialogs-filmora-style.html 落地）
+   万兴喵影风格弹窗层（docs/design/ui-mockups/dialogs-filmora-style.html 落地）
    令牌：弹窗面板 #121417 · 容器 #1b2024 · 控件 #23282c · 主按钮 var(--brand-d)
    圆角：弹窗12 / 容器8 / 控件6 · 控件高 30(sm 26) · 页签居中胶囊 28
    字号：--dlg-fs-* 令牌阶梯（全部弹窗统一，禁止裸数字；2026-09-23 起）
@@ -1760,7 +1760,7 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 .modal .reframe-batch-actions h3 { margin: 0 0 5px; color: var(--dlg-text-2, var(--ink-2-h)); }
 .modal .reframe-batch-actions { border-top-color: var(--dlg-line, var(--rgba-95)); }
 
-/* ═══ 剪映式导出弹窗 + 封面设置弹窗（2026-09-23 · v5 设计稿 docs/ui-mockups/export-dialog.html）═══
+/* ═══ 剪映式导出弹窗 + 封面设置弹窗（2026-09-23 · v5 设计稿 docs/design/ui-mockups/export-dialog.html）═══
    字号全部走 --dlg-fs-* 令牌阶梯；颜色走 --dlg-* 色板；零裸数字字号。 */
 .modal.export-modal { row-gap: 0; }
 .modal.cover-modal { row-gap: 0; }
@@ -2546,7 +2546,7 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 
 
 /* ═══════════════════════════════════════════════════════════════════════
-   Graphite Precision · 对话框视觉语言（docs/ui-mockups/dialog-system-v2）
+   Graphite Precision · 对话框视觉语言（docs/design/ui-mockups/dialog-system-v2）
    契约：DESIGN.md §3.1-3.3 / §4-§5（第 34-126、146-154 行）与参考 CSS
    index.html 第 7-131 行。本段追加在文件末尾，按级联覆盖上方历史弹窗
    规则；class 名、DOM 结构与 TSX 全部不变。框架 .modal 同时服务两种结构：
@@ -3443,7 +3443,7 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 
 /* ═══════════════════════════════════════════════════════════════════
    LAYER 9 · 原型内容级组件（2026-11-06 用户指出：只换了外壳，内容没做）
-   来源：docs/ui-mockups/dialog-system-v2/index.html 原型 CSS
+   来源：docs/design/ui-mockups/dialog-system-v2/index.html 原型 CSS
    令牌映射：--d-surface→--dlg-bg / --d-raise→--dlg-raise /
              --d-input→--ctl-bg / --d-muted→--dlg-text-3 /
              --d-text-2→--dlg-text-2 / --control-radius→var(--r-ctl)
@@ -3626,7 +3626,7 @@ body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-sele
 .modal .field-error { margin: 4px 0 0; font-size: 10.5px; color: var(--dlg-danger); }
 
 /* ── 保真修正（2026-11-06）：与原型逐属性对齐，不再「大体一致」 ──────
-   对照 docs/ui-mockups/dialog-system-v2/index.html 实测值：
+   对照 docs/design/ui-mockups/dialog-system-v2/index.html 实测值：
    命令面板 640px / 搜索框 40px / 行 3 列（图标·标签·快捷键·状态）/
    底栏左对齐键位提示。此前写的是 520px、34px、2 列、右对齐（右图即缺陷态）。 */
 .modal.command-palette { width: min(640px, calc(100vw - 48px)); }
@@ -4781,7 +4781,7 @@ html[data-theme="light"] {
 .modal .switch:focus-visible { outline: 2px solid var(--dlg-primary); outline-offset: 2px; }
 
 /* ── C 族「列表型」· 形态 1（关键帧外传审阅）─────────────────────
-   结构稿：docs/ui-mockups/dialog-system-v2/prototype-list-family.html
+   结构稿：docs/design/ui-mockups/dialog-system-v2/prototype-list-family.html
    既往问题：.keyframe-frame-list 等类名从来没有专属样式，实际用的是浏览器
    默认 <ul>（圆点 + 缩进），行内元素靠默认排版挤在一起。此处按稿落地。
 
@@ -5063,7 +5063,7 @@ html[data-theme="light"] {
 
 
 /* ── B 族「步骤流」· 步骤记录列表（2026-11-09）──────────────────
-   结构稿：docs/ui-mockups/dialog-system-v2/prototype-step-family.html
+   结构稿：docs/design/ui-mockups/dialog-system-v2/prototype-step-family.html
 
    **改造前这里是零规则**：.agent-session-steps 在样式表里一条都没有，
    三个弹窗（AgentSession / EditingGrammar / Worklist）共用它，实际用的是
@@ -5151,7 +5151,7 @@ html[data-theme="light"] {
 
 
 /* ── D 族「三步确认」· 外发确认页（2026-11-09）──────────────────
-   结构稿：docs/ui-mockups/dialog-system-v2/prototype-egress-confirm-family.html
+   结构稿：docs/design/ui-mockups/dialog-system-v2/prototype-egress-confirm-family.html
 
    改造前：两个弹窗的确认页把 8 项元数据平铺在同一个 dl 里，没有分组、
    **没有勾选框**、主按钮用普通主色。外发是不可逆动作，却是全仓唯一

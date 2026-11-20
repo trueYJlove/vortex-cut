@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 /**
  * C 族「列表型」· 组合态（素材语义检索）回归（2026-11-09）。
  *
- * 结构稿：docs/ui-mockups/dialog-system-v2/prototype-list-family.html
+ * 结构稿：docs/design/ui-mockups/dialog-system-v2/prototype-list-family.html
  *
  * 改造前本段有 **8 处硬编码色值**（#d16055 / #2e211f / #eec4be / #303b40×3 /
  * #d1a453 / #8b9aa1），完全绕过 Graphite 令牌。这类漏网最难发现：真机上看着

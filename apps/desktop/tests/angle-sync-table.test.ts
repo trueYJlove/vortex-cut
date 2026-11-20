@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 /**
  * C 族「列表型」· 形态 2（机位同步表格）回归（2026-11-09）。
  *
- * 结构稿：docs/ui-mockups/dialog-system-v2/prototype-list-family.html
+ * 结构稿：docs/design/ui-mockups/dialog-system-v2/prototype-list-family.html
  *
  * 改造前实测到的四个问题（Chromium 量出，不是读代码猜的）：
  *  1. 表头 13px —— 与正文同号，表头与数据分不出层级；

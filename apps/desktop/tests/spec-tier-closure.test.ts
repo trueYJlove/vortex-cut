@@ -23,7 +23,7 @@ import { describe, expect, it } from "vitest";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const css = readFileSync(resolve(root, "src/styles.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
-const design = readFileSync(resolve(root, "../../docs/ui-mockups/dialog-system-v2/DESIGN.md"), "utf8");
+const design = readFileSync(resolve(root, "../../docs/design/ui-mockups/dialog-system-v2/DESIGN.md"), "utf8");
 
 type Rule = { sels: string[]; body: string; inMedia: boolean };
 function parseRules(source: string): Rule[] {

@@ -1,6 +1,6 @@
 # W2.2 方向裁决 —— 失败拆因（2026-10-14）
 
-> 支撑 `docs/adr/0006-w22-speaker-direction-ruling.md`。
+> 支撑 `docs/design/adr/0006-w22-speaker-direction-ruling.md`。
 > **全部输入为已归档证据**（不依赖 `.tmp` 工作副本），故任何机器可复算。
 
 ## 一句话

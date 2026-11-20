@@ -19,7 +19,7 @@ import { describe, expect, it } from "vitest";
 
 const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const root = resolve(desktopRoot, "../..");
-const prototype = readFileSync(resolve(root, "docs/ui-mockups/dialog-system-v2/index.html"), "utf8");
+const prototype = readFileSync(resolve(root, "docs/design/ui-mockups/dialog-system-v2/index.html"), "utf8");
 const css = readFileSync(resolve(desktopRoot, "src/styles.css"), "utf8");
 const appSource = readFileSync(resolve(desktopRoot, "src/app/App.tsx"), "utf8");
 

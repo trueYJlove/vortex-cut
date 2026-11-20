@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 /**
  * B 族「步骤流」· 步骤记录列表（2026-11-09）。
  *
- * 结构稿：docs/ui-mockups/dialog-system-v2/prototype-step-family.html
+ * 结构稿：docs/design/ui-mockups/dialog-system-v2/prototype-step-family.html
  *
  * ## 改造前的状态：零规则
  *

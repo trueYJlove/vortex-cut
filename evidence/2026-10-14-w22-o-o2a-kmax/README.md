@@ -1,7 +1,7 @@
 # 门 §10 O2 裁决实验：`k_max` 与最小簇份额（2026-10-14）
 
 > 预登记：`PRE_REGISTRATION.md`（**看数之前写定**）。
-> 依据：`docs/adr/0007-w22-a-path-recheck.md` **D2**（O2-a 的验证实验）。
+> 依据：`docs/design/adr/0007-w22-a-path-recheck.md` **D2**（O2-a 的验证实验）。
 
 ## 一句话
 

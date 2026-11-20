@@ -1,7 +1,7 @@
 # W2.2 (a) 表达能力 spike —— 单分支候选（2026-10-14）
 
 > 预登记：`PRE_REGISTRATION.md`（**看数之前写定**）。裁决依据：ADR-0006 **D5**。
-> 判据引用 `docs/W2_2_SPEAKER_LAYER_DESIGN_GATE_2026-10-11.md` §5.6③ / §5.10 / §5.11 / §5.13。
+> 判据引用 `docs/design/W2_2_SPEAKER_LAYER_DESIGN_GATE_2026-10-11.md` §5.6③ / §5.10 / §5.11 / §5.13。
 
 ## 一句话
 

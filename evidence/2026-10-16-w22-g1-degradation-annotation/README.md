@@ -1,6 +1,6 @@
 # G1 降级交付 —— 独立复核证据（2026-10-16）
 
-对应实施记录：`docs/W2_2_DEGRADATION_IMPLEMENTATION_2026-10-16.md`
+对应实施记录：`docs/design/records/W2_2_DEGRADATION_IMPLEMENTATION_2026-10-16.md`
 对应登记：`docs/STATUS.md` §4 P130（本切片）/ P132（A4 下游拒绝测试）
 
 ## 为什么有这份证据

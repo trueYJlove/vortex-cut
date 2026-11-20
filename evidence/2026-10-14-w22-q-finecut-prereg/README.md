@@ -1,6 +1,6 @@
 # W2.2 「细切 + 按份额合并」预登记实验（ADR-0008 D2-a / D3-a）
 
-> 预登记（**看数之前写定**）：`PRE_REGISTRATION.md`。裁决：`docs/adr/0008-w22-o2-rerecheck.md`。
+> 预登记（**看数之前写定**）：`PRE_REGISTRATION.md`。裁决：`docs/design/adr/0008-w22-o2-rerecheck.md`。
 
 ## ⚠️ 证据地位
 

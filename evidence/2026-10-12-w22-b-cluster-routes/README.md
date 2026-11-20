@@ -1,6 +1,6 @@
 # W2.2 后续步骤 ①+② —— 中文侧诊断 + 「不偷看真值 K」的聚类族替换（2026-10-12）
 
-> 点时间证据。门限与升级判据引用 `docs/W2_2_SPEAKER_LAYER_DESIGN_GATE_2026-10-11.md`。
+> 点时间证据。门限与升级判据引用 `docs/design/W2_2_SPEAKER_LAYER_DESIGN_GATE_2026-10-11.md`。
 > **本目录只放派生结果**；音频与 embedding 缓存在仓外 `.tmp/`。
 
 ## 背景与要回答的问题

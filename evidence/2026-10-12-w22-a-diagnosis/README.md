@@ -1,6 +1,6 @@
 # W2.2 方案 A —— AMI 在阈值 τ **之前**的瓶颈定位（2026-10-12）
 
-> 点时间证据。口径与门限引用 `docs/W2_2_SPEAKER_LAYER_DESIGN_GATE_2026-10-11.md`。
+> 点时间证据。口径与门限引用 `docs/design/W2_2_SPEAKER_LAYER_DESIGN_GATE_2026-10-11.md`。
 > **本目录只放派生结果**；音频与 embedding 缓存在仓外 `.tmp/`。
 
 ## 要回答的问题

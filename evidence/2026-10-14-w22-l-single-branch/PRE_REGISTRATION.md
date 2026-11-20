@@ -1,8 +1,8 @@
 # W2.2 (a) 表达能力 spike —— **预登记**（看数之前定死）
 
 > 2026-10-14。**本文件在运行任何候选之前写定。**
-> 依据：`docs/adr/0006-w22-speaker-direction-ruling.md` **D5**（下一步做 (a) 的预登记候选实验）。
-> 判据引用 `docs/W2_2_SPEAKER_LAYER_DESIGN_GATE_2026-10-11.md` §5.6③/§5.10/§5.11/§5.13。
+> 依据：`docs/design/adr/0006-w22-speaker-direction-ruling.md` **D5**（下一步做 (a) 的预登记候选实验）。
+> 判据引用 `docs/design/W2_2_SPEAKER_LAYER_DESIGN_GATE_2026-10-11.md` §5.6③/§5.10/§5.11/§5.13。
 
 ## 0. 为什么做这个（ADR-0006 D5）
 

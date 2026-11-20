@@ -1,7 +1,7 @@
 # W2.2 S0 —— 评测仪器常设化 + 全场语料（2026-10-11）
 
 > 点时间证据。状态口径引用 `docs/STATUS.md`；口径与验收线引用
-> `docs/W2_2_SPEAKER_LAYER_DESIGN_GATE_2026-10-11.md` §5/§6。
+> `docs/design/W2_2_SPEAKER_LAYER_DESIGN_GATE_2026-10-11.md` §5/§6。
 > **本目录只放派生结果与哈希，不含第三方音频**（语料在仓外 `.tmp/`，属主自备）。
 
 ## 为什么需要 S0

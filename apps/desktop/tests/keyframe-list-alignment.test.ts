@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 /**
  * C 族「列表型」行对齐的级联回归（2026-11-09）。
  *
- * 结构稿：docs/ui-mockups/dialog-system-v2/prototype-list-family.html
+ * 结构稿：docs/design/ui-mockups/dialog-system-v2/prototype-list-family.html
  *
  * 为什么要锁「徽章固定列宽」：行内三列是
  *   主信息（可伸缩） | 状态徽章 | 操作按钮

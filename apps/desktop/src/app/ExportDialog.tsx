@@ -1,4 +1,4 @@
-/** 剪映式导出弹窗（2026-09-23 · v5 设计稿 docs/ui-mockups/export-dialog.html）。
+/** 剪映式导出弹窗（2026-09-23 · v5 设计稿 docs/design/ui-mockups/export-dialog.html）。
  *  Hero 组（封面 + 项目信息 + 文件名）/ 设置组（分辨率 × 帧率 × 画质 × 编码 +
  *  保存位置）/ 右侧比例结果卡 / 底栏警示行。
  *

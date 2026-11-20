@@ -1,7 +1,7 @@
 """W3.3 Layer 2：关键帧 JPEG 编码（S1a，**纯本地、零 egress**）。
 
-设计门：`docs/W3_3_KEYFRAME_UNDERSTANDING_DESIGN_GATE_2026-10-21.md` §3.1。
-规划门：`docs/W3_3_KEYFRAME_UNDERSTANDING_PLANNING_GATE_2026-10-21.md` D7/D8。
+设计门：`docs/design/W3_3_KEYFRAME_UNDERSTANDING_DESIGN_GATE_2026-10-21.md` §3.1。
+规划门：`docs/requirements/W3_3_KEYFRAME_UNDERSTANDING_PLANNING_GATE_2026-10-21.md` D7/D8。
 
 分层纪律（与 semantic_service / cv_signals 同款）：
 - 本模块只管「解码一帧 → JPEG 字节」，不做抽样决策（S1b）、不碰数据库、不发网络；

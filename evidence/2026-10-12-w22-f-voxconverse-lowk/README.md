@@ -1,6 +1,6 @@
 # O6 定案：低人数档语料（VoxConverse）上的规则实测与**闸门检验**（2026-10-12）
 
-> 点时间证据。门限与判据引用 `docs/W2_2_SPEAKER_LAYER_DESIGN_GATE_2026-10-11.md`。
+> 点时间证据。门限与判据引用 `docs/design/W2_2_SPEAKER_LAYER_DESIGN_GATE_2026-10-11.md`。
 > **本目录只放派生结果**；音频缓存在仓外 `.tmp/voxconverse/`。
 
 ## 一句话

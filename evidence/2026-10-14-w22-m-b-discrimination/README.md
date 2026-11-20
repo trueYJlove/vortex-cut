@@ -1,7 +1,7 @@
 # W2.2 (b) 判别能力 spike —— 选到 K\*（2026-10-14）
 
 > 预登记：`PRE_REGISTRATION.md`（**看数之前写定**）。
-> 设计依据：`docs/W2_2_B_DISCRIMINATION_PLANNING_GATE_2026-10-14.md`。
+> 设计依据：`docs/requirements/W2_2_B_DISCRIMINATION_PLANNING_GATE_2026-10-14.md`。
 > 承接：ADR-0006 **D5**（(a) 已执行并**未判定**）。
 
 ## 一句话

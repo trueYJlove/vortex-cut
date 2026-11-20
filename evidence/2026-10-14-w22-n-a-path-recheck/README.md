@@ -1,6 +1,6 @@
 # ADR-0007 证据核查：A 路径否决的三条理由（2026-10-14）
 
-> 支撑 `docs/adr/0007-w22-a-path-recheck.md`（**部分反转 ADR-0006 D2**）。
+> 支撑 `docs/design/adr/0007-w22-a-path-recheck.md`（**部分反转 ADR-0006 D2**）。
 > **输入全部可复算**：纯归档读取部分任何机器可跑；精确 K\* 部分需窗 embedding 缓存
 > （公开语料的派生数据，由 `diarization_diagnose.py` 重建）。
 

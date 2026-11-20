@@ -1,6 +1,6 @@
 # W2.2 「细切 + 按份额合并」预登记实验 —— 结果
 
-> 预登记：`PRE_REGISTRATION.md`（**判据在看数之前写定**）。裁决：`docs/adr/0008-w22-o2-rerecheck.md`（D2-a/D3-a）。
+> 预登记：`PRE_REGISTRATION.md`（**判据在看数之前写定**）。裁决：`docs/design/adr/0008-w22-o2-rerecheck.md`（D2-a/D3-a）。
 > 产物：`tuning-freeze.json`（定参）/ `judging.json`（判定）/ `sensitivity.json`（M5 + NC4/NC5）。
 
 ## 0. 一句话

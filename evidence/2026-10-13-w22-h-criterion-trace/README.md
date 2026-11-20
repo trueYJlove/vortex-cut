@@ -1,6 +1,6 @@
 # 溯源：现行选择准则在低人数档上失败在哪里（2026-10-13）
 
-> 点时间证据。判据引用 `docs/W2_2_SPEAKER_LAYER_DESIGN_GATE_2026-10-11.md` §5.6/§5.9。
+> 点时间证据。判据引用 `docs/design/W2_2_SPEAKER_LAYER_DESIGN_GATE_2026-10-11.md` §5.6/§5.9。
 > 语料：VoxConverse **test** 集 K≤3 子集（63 场有效），派生数据见
 > `evidence/2026-10-13-w22-g-voxconverse-test-lowk/`。
 

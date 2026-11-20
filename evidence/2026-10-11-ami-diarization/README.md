@@ -1,7 +1,7 @@
 # W2.2 精度轴 —— AMI 公开带标注语料实测（2026-10-11）
 
 > 点时间证据。状态口径引用 `docs/STATUS.md`（P88 ⑩ / P89 / P91 / P93）；
-> 方法与冻结口径引用 `docs/W2_2_SPEAKER_LAYER_SPIKE_PLANNING_GATE_2026-10-10.md` §2.7。
+> 方法与冻结口径引用 `docs/requirements/W2_2_SPEAKER_LAYER_SPIKE_PLANNING_GATE_2026-10-10.md` §2.7。
 > **本目录只放派生结果与哈希，不含第三方音频**（音频在仓外 `.tmp/ami/audio/`，属主自备）。
 
 ## 为什么用公开语料

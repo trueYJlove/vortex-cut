@@ -1,7 +1,7 @@
 # W2.2 说话人层 spike —— 证据（2026-10-10）
 
 > 点时间证据。状态口径引用 `docs/STATUS.md`（§4 P88–P92）；方法与被冻结的口径引用
-> `docs/W2_2_SPEAKER_LAYER_SPIKE_PLANNING_GATE_2026-10-10.md`。
+> `docs/requirements/W2_2_SPEAKER_LAYER_SPIKE_PLANNING_GATE_2026-10-10.md`。
 > harness：`tools/spikes/w22_speaker/`（**非生产代码**）。
 
 ## 环境

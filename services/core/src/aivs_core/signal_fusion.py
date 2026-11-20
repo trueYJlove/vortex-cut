@@ -1,6 +1,6 @@
 """W4.2 信号融合 —— 纯算法层（零 I/O、零数据库，可单测）。
 
-规划门：`docs/W4_2_SIGNAL_FUSION_PLANNING_GATE_2026-10-19.md`。
+规划门：`docs/requirements/W4_2_SIGNAL_FUSION_PLANNING_GATE_2026-10-19.md`。
 裁决：D1=A（新增 `fused`，旧值不变）、D2=排除说话人、D3=等权起步且**未调优**。
 
 分层纪律（照抄 `media/semantic.py` / `editing_grammar/beat_grid`）：

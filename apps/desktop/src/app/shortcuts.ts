@@ -40,7 +40,7 @@ export interface ShortcutEntry {
 
 const STORAGE_KEY = "vortex-cut.shortcuts.v1";
 
-/** 路线图 §C3 默认键位 + 主菜单快捷键（与 docs/ui-mockups/titlebar-library-unify.html 绑定表一致）。 */
+/** 路线图 §C3 默认键位 + 主菜单快捷键（与 docs/design/ui-mockups/titlebar-library-unify.html 绑定表一致）。 */
 export const DEFAULT_SHORTCUTS: Record<ShortcutCommandId, ShortcutEntry> = {
   "timeline.split": { label: "拆分所选片段", binding: { key: "b", ctrl: true, shift: false } },
   "timeline.delete": { label: "删除所选对象", binding: { key: "delete", ctrl: false, shift: false } },

@@ -1,7 +1,7 @@
 /**
  * WP-P227 Slice 2/3：合成器后端门控与「假硬解」推断。
  *
- * 验收映射（docs/PREVIEW_SMOOTHNESS_PLANNING_GATE_2026-11-17.md §3.4/§4.2）：
+ * 验收映射（docs/requirements/PREVIEW_SMOOTHNESS_PLANNING_GATE_2026-11-17.md §3.4/§4.2）：
  * - a) backend 缺省 = webgl2 worker（发布构建行为与 HEAD 一致）；
  * - b) init.backend="webgpu" 且 WebGPU init 失败 → 回退 webgl2 worker（同参重建）；
  * - c) suspected_software_decode 判据：prefer-hardware + 实测超预算 + 样本足 → true；

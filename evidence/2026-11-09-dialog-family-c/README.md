@@ -6,7 +6,7 @@
 ## 这份证据为什么存在
 
 用户在 2026-11-09 指出：这三个弹窗**没有单独的原型稿**，只有一份覆盖「形态」的
-结构稿（`docs/ui-mockups/dialog-system-v2/prototype-list-family.html`），
+结构稿（`docs/design/ui-mockups/dialog-system-v2/prototype-list-family.html`），
 所以没法验收我改的是否满足要求。
 
 这份目录补的就是这个缺口：**每个弹窗一对 before/after 截图 + 一份取值对照表**。

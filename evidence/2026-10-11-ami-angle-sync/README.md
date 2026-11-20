@@ -1,7 +1,7 @@
 # W2.1 机位同步 —— AMI 真实多设备音频取证（2026-10-11）
 
 > 点时间证据。状态口径引用 `docs/STATUS.md`（P93 / P94）；W2.1 冻结口径见
-> `docs/W2_1_CAMERA_SYNC_PLANNING_GATE_2026-10-10.md`。
+> `docs/requirements/W2_1_CAMERA_SYNC_PLANNING_GATE_2026-10-10.md`。
 > **本目录只放派生结果与哈希，不含第三方音频**（音频在仓外 `.tmp/ami/audio/`）。
 
 ## 为什么能做这件事

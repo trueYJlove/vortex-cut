@@ -1,5 +1,5 @@
 /**
- * Wave1 剪辑手法 L3 真机手测清单自动化（docs/WAVE1_MANUAL_CHECKLIST_2026-10-10.md 测试 1–4）。
+ * Wave1 剪辑手法 L3 真机手测清单自动化（docs/requirements/WAVE1_MANUAL_CHECKLIST_2026-10-10.md 测试 1–4）。
  *
  * 目的：把「必须人手点一遍」的清单项在**真实 App**（真实 Electron + 真实 Python Core
  * sidecar + 真实 ffmpeg/ASR/节拍检测）里逐项跑通并留证：

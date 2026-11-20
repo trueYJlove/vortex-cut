@@ -1,6 +1,6 @@
 # O6 定案（第二批）：VoxConverse **test 集**低人数档实测（2026-10-13）
 
-> 点时间证据。判据与门限引用 `docs/W2_2_SPEAKER_LAYER_DESIGN_GATE_2026-10-11.md`。
+> 点时间证据。判据与门限引用 `docs/design/W2_2_SPEAKER_LAYER_DESIGN_GATE_2026-10-11.md`。
 > **本目录只放派生结果**；音频缓存在仓外 `.tmp/voxconverse/test_lowk/`。
 > 前一批（dev 集）见 `evidence/2026-10-12-w22-f-voxconverse-lowk/`。
 

@@ -269,7 +269,7 @@ test("P33 seek→play：跳转后点播放必须正常推进", async () => {
     // 「看门狗级错误」一项的历史语义是「卡死到 45s 看门狗」——该形态已随 W5
     // 全局持有帧预算根修消失（探针 + App 双侧：冷启不再静默停摆）。剩余形态是
     // **单帧级**停摆兜底（实测 6 档跳转风暴中 0~2 次、每次 1 帧、播放继续），
-    // 已作为 L8 登记在 docs/PREVIEW_SMOOTHNESS_IMPLEMENTATION_2026-09-29.md §4；
+    // 已作为 L8 登记在 docs/design/records/PREVIEW_SMOOTHNESS_IMPLEMENTATION_2026-09-29.md §4；
     // 这里按 worker 决策 trace 的**真实事件计数**钉成「有界」而非「恒为零」，
     // 不用放松 UI 文案断言来掩盖回归。
     const metricsText = await syntheticReady.innerText();
