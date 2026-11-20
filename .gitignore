@@ -81,6 +81,11 @@ evidence/performance/**/*.jsonl
 !evidence/performance/preview-smoothness-baseline/app-drop-user-h264-3440-timing-r1.json
 !evidence/performance/preview-smoothness-baseline/app-drop-w12-dance-trace2-r6t.json
 
+# Local visual acceptance captures; conclusions and measurements are in docs/design/records.
+/evidence/2026-11-11-light-theme/
+/evidence/2026-11-11-timeline-parity/
+/evidence/2026-11-18-p231-preview-canvas/
+
 # Test-time model download cache (sha256-verified per test fixture)
 resources/.test-model-cache/
 .validation/
