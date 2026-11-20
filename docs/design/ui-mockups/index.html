@@ -1,0 +1,97 @@
+<!-- AI生成 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>UI/UX 原型目录 · Vortex Cut</title>
+<link rel="stylesheet" href="wave1-editing-tools/styles.css" />
+<style>
+  .folder{margin:28px 0 12px;font-size:12px;color:var(--text3);letter-spacing:.04em;text-transform:uppercase}
+  .list{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+  .item{
+    display:block;background:var(--panel);border:1px solid var(--border);border-radius:12px;
+    padding:14px 16px;color:var(--text);text-decoration:none;transition:.15s;
+  }
+  .item:hover{border-color:var(--accent);transform:translateY(-2px);text-decoration:none}
+  .item .t{font-weight:700;font-size:13px;margin-bottom:4px}
+  .item .d{font-size:11.5px;color:var(--text2);line-height:1.65}
+  .item .p{margin-top:8px;font-family:Consolas,monospace;font-size:10.5px;color:var(--text3)}
+</style>
+</head>
+<body>
+<p data-aigc-mark="1" style="margin:0 0 8px;font-size:10px;line-height:1.3;color:#6b6560;font-weight:400;">AI生成</p>
+
+<div class="topbar">
+  <div class="brand">Vortex Cut</div>
+  <span class="chip">UI/UX 原型目录</span>
+  <span class="chip ghost">docs/design/ui-mockups/</span>
+  <div class="spacer"></div>
+  <span class="hint">原 docs/uiux/ 已并入本目录</span>
+</div>
+<div class="wrap">
+  <h1>高保真原型目录</h1>
+  <p class="sub">
+    统一存放可点击 HTML 原型（纯静态、不连真实数据）。实现前以本目录为设计确认源；
+    新增手法/面板请建子目录 + <code>DESIGN.md</code>，并在本页登记。
+  </p>
+
+  <div class="folder">Wave 1 · 剪辑手法（当前待确认）</div>
+  <div class="list">
+    <a class="item" href="wave1-editing-tools/index.html">
+      <div class="t">设计总览 · 去停顿 / 卡点 / L/J</div>
+      <div class="d">三页统一壳层、入口与待确认点。</div>
+      <div class="p">wave1-editing-tools/index.html</div>
+    </a>
+    <a class="item" href="wave1-editing-tools/remove-pauses.html">
+      <div class="t">去停顿</div>
+      <div class="d">静音/保留时间轴 · 阈值实时预览 · 提案采纳。</div>
+      <div class="p">wave1-editing-tools/remove-pauses.html</div>
+    </a>
+    <a class="item" href="wave1-editing-tools/beat-sync.html">
+      <div class="t">卡点</div>
+      <div class="d">beat 刻度 · 镜头吸附 · beats_per_shot。</div>
+      <div class="p">wave1-editing-tools/beat-sync.html</div>
+    </a>
+    <a class="item" href="wave1-editing-tools/lj-cut.html">
+      <div class="t">L/J cut</div>
+      <div class="d">声画错位 · 词锚 · 自动/J/L 方向。</div>
+      <div class="p">wave1-editing-tools/lj-cut.html</div>
+    </a>
+  </div>
+
+  <div class="folder">面板 / 画布</div>
+  <div class="list">
+    <a class="item" href="property-panel/index.html">
+      <div class="t">右侧属性面板重构</div>
+      <div class="d">视频/音频/文本 IA 与视觉规格（已落地分页签）。</div>
+      <div class="p">property-panel/</div>
+    </a>
+    <a class="item" href="plugins-pip-mask-key/index.html">
+      <div class="t">PiP / 蒙版 / 抠像画布</div>
+      <div class="d">画布交互原型三件套。</div>
+      <div class="p">plugins-pip-mask-key/</div>
+    </a>
+  </div>
+
+  <div class="folder">对话框系统（设计评审）</div>
+  <div class="list">
+    <a class="item" href="dialog-system-v2/index.html"><div class="t">对话框系统 V2 · 双视觉方向</div><div class="d">统一标题、滚动内容与固定操作区；五类代表弹窗，Graphite / Soft 可切换。</div><div class="p">dialog-system-v2/</div></a>
+  </div>
+
+  <div class="folder">探索稿（历史）</div>
+  <div class="list">
+    <a class="item" href="left-panel-designs.html"><div class="t">左栏 IA 方案 v2</div><div class="p">left-panel-designs.html</div></a>
+    <a class="item" href="titlebar-library-unify.html"><div class="t">标题栏 / 素材库统一</div><div class="p">titlebar-library-unify.html</div></a>
+    <a class="item" href="player-stage-redesign.html"><div class="t">播放舞台重设计</div><div class="p">player-stage-redesign.html</div></a>
+    <a class="item" href="header-hierarchy-designs.html"><div class="t">顶栏层级方案</div><div class="p">header-hierarchy-designs.html</div></a>
+    <a class="item" href="export-dialog.html"><div class="t">导出对话框</div><div class="p">export-dialog.html</div></a>
+    <a class="item" href="filmora-style-design.html"><div class="t">Filmora 风格对照</div><div class="p">filmora-style-design.html</div></a>
+    <a class="item" href="dialogs-filmora-style.html"><div class="t">对话框 · Filmora 风格</div><div class="p">dialogs-filmora-style.html</div></a>
+    <a class="item" href="dialogs-impl-check.html"><div class="t">对话框实现核对</div><div class="p">dialogs-impl-check.html</div></a>
+    <a class="item" href="gold-sweep-check.html"><div class="t">金色扫光核对</div><div class="p">gold-sweep-check.html</div></a>
+    <a class="item" href="focus-check.html"><div class="t">焦点态核对</div><div class="p">focus-check.html</div></a>
+  </div>
+</div>
+</body>
+</html>

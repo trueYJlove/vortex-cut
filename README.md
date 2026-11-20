@@ -11,7 +11,7 @@ Vortex Cut 是 Vortex 旗下的本地优先、AI 驱动的视频剪辑与多平�
 > 「Documentation Sync Discipline」）。
 >
 > **历史教训**：本节曾长期写着"项目当前处于 Stage 2C 实现与验收阶段 / Stage 3 尚未实现"。
-> 该表述自 Stage 3B 起即已过期（`docs/STAGE3B_DETAILED_DESIGN.md` 当时已记录并搁置），
+> 该表述自 Stage 3B 起即已过期（`docs/design/STAGE3B_DETAILED_DESIGN.md` 当时已记录并搁置），
 > 直到 2026-09-24 文档审计才修正——期间它使 README 读者低估项目约六个 Stage。
 
 可选外部 Provider 只会在用户明确触发的受控流程中调用；常规开发、单元测试、静态验证与受控 loopback 测试不需要真实 Provider。
@@ -58,4 +58,4 @@ pnpm package:verify:real
 
 ## 品牌与安装身份
 
-品牌基线、兼容标识和本次不迁移旧开发安装数据的边界见 [docs/BRAND_BASELINE.md](docs/BRAND_BASELINE.md)。当前工作树的 Windows Builder 配置已使用新安装身份 `io.github.trueyjlove.vortexcut`、产品名 `Vortex Cut` 和产物名 `VortexCut-Setup-${version}-x64.exe`。真实 Windows 包的独立验收仍待 LiuKeAi 执行，当前不将其表述为已验收通过。
+品牌基线、兼容标识和本次不迁移旧开发安装数据的边界见 [docs/requirements/BRAND_BASELINE.md](docs/requirements/BRAND_BASELINE.md)。当前工作树的 Windows Builder 配置已使用新安装身份 `io.github.trueyjlove.vortexcut`、产品名 `Vortex Cut` 和产物名 `VortexCut-Setup-${version}-x64.exe`。真实 Windows 包的独立验收仍待 LiuKeAi 执行，当前不将其表述为已验收通过。

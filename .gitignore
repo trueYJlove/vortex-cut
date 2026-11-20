@@ -66,10 +66,20 @@ evidence/m3_0/**/gl_nocap/
 evidence/m3_0/**/step0/
 evidence/m3_0/**/assets.manifest*.json
 
-# B00 performance evidence: retain JSON/text, not media or isolated user state.
+# Performance evidence: keep compact manifests/configs and human-readable summaries;
+# generated per-frame/run traces are reproducible and stay local to the workspace.
 evidence/performance/**/*.mp4
 evidence/performance/**/*.png
 evidence/performance/**/user-data/
+evidence/performance/**/results-*.json
+evidence/performance/**/results.json
+evidence/performance/**/run-*/result.json
+evidence/performance/**/app-drop-*.json
+evidence/performance/**/*.jsonl
+!evidence/performance/preview-smoothness-baseline/app-drop-p200-*.json
+!evidence/performance/preview-smoothness-baseline/app-drop-p196-*.json
+!evidence/performance/preview-smoothness-baseline/app-drop-user-h264-3440-timing-r1.json
+!evidence/performance/preview-smoothness-baseline/app-drop-w12-dance-trace2-r6t.json
 
 # Test-time model download cache (sha256-verified per test fixture)
 resources/.test-model-cache/

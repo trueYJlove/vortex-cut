@@ -1,6 +1,6 @@
 # 质量评测集（W0.4）
 
-对应 `docs/QUALITY_EVAL_PLANNING_GATE_2026-09-24.md`（开放问题裁决见其 §5）。
+对应 `docs/requirements/QUALITY_EVAL_PLANNING_GATE_2026-09-24.md`（开放问题裁决见其 §5）。
 
 ## 布局
 

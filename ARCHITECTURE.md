@@ -518,7 +518,7 @@ docs/
 | 顶层 `python/{domain,application,infrastructure,media,jobs}` | **不存在** | 领域代码位于 `services/core/src/aivs_core/`，**平铺单层**，未按本节分层。此为 `ADR-0002` R2 登记的结构债，采用"增量分层"渐进偿还 |
 | 「前端类型从 **OpenAPI 契约生成**」 | **与现状相反** | `packages/contracts/src/` 为**手写** TypeScript（`index.ts` 约 2300 行 + `performance.ts`/`stage4e.ts`/`stage5.ts`/`stage6r.ts`），仓库内无 OpenAPI 产物；根 `package.json` 的 `contracts:generate` 实为 `contracts build`，**不是** OpenAPI 生成。契约的单一来源由手写 + 契约守卫测试保证，而非生成器 |
 
-**仍然成立**：`apps/desktop/`、`services/core/`、`packages/contracts/`、`resources/`、`docs/adr/` 的位置与职责描述；以及"Python 领域层不得导入 FastAPI、Electron 或具体 Provider SDK"——该约束由代码证据支持（`ADR-0002` 评审结论：领域层纯净）。
+**仍然成立**：`apps/desktop/`、`services/core/`、`packages/contracts/`、`resources/`、`docs/design/adr/` 的位置与职责描述；以及"Python 领域层不得导入 FastAPI、Electron 或具体 Provider SDK"——该约束由代码证据支持（`ADR-0002` 评审结论：领域层纯净）。
 
 ## 18. 分阶段实施计划
 
@@ -526,7 +526,7 @@ docs/
 
 ### 阶段 0：技术验证（1-2 周）
 
-实施依据：[阶段 0 技术验证详细设计](docs/STAGE0_DETAILED_DESIGN.md)
+实施依据：[阶段 0 技术验证详细设计](docs/design/STAGE0_DETAILED_DESIGN.md)
 
 - Electron 启动、认证和关闭 Python Sidecar。
 - FFprobe 读取常见游戏录像，FFmpeg 生成代理和竖屏样片。
@@ -537,7 +537,7 @@ docs/
 
 ### 阶段 1：可用剪辑基础（4-6 周）
 
-实施依据：[阶段 1 可用剪辑基础详细设计](docs/STAGE1_DETAILED_DESIGN.md)
+实施依据：[阶段 1 可用剪辑基础详细设计](docs/design/STAGE1_DETAILED_DESIGN.md)
 
 - 项目、素材、SQLite 迁移和本地任务系统。
 - 代理、缩略图、波形、转录和场景切分。
