@@ -25,7 +25,7 @@ import { Dialog } from "./Dialog.js";
 import { ContextMenu, type ContextMenuItem } from "../ui/of/ContextMenu.js";
 import { pickMedia } from "../ui/of/media-selection.js";
 import { ProjectTabStrip } from "./workspace/ProjectTabStrip.js";
-import { ASSET_BATCH_DRAG, ASSET_DRAG, draggedAssetIds, planAssetDrop } from "./timeline/asset-drop.js";
+import { ASSET_BATCH_DRAG, ASSET_DRAG, draggedAssetIds, planAssetDrop, setActiveDraggedAssetIds } from "./timeline/asset-drop.js";
 import { alignmentBox, alignmentPreviewSize, groupFrameBounds, planFrameAlignment, planFrameDistribution, planGroupBoundsEdit, type GroupBoundsField } from "./timeline/frame-alignment.js";
 import type { AlignDistribution, AlignEdge } from "../ui/of/AlignBar.js";
 import { errorCode, safeErrorMessage, safeTaskErrorMessage } from "./safeErrors.js";
@@ -1702,7 +1702,7 @@ export function App() {
   // Map 改为 useMemo——播放头 10Hz 更新不再重建这些 props，下游 memo 化的
   // 子组件不再整树重渲（此前每次 App 渲染都 new Map/new array）。
   const timelineAssetMedia = useMemo(
-    () => assets.map(item => ({ asset_id: item.asset.asset_id, media_url: item.media_url, kind: item.asset.kind, display_name: item.asset.display_name })),
+    () => assets.map(item => ({ asset_id: item.asset.asset_id, media_url: item.media_url, kind: item.asset.kind, display_name: item.asset.display_name, duration_us: typeof item.asset.media_info?.duration_us === "number" ? item.asset.media_info.duration_us : null })),
     [assets],
   );
   // WP-P232：素材缩略图预抽登记（导入/项目加载后 fire-and-forget）。
@@ -1995,7 +1995,7 @@ export function App() {
     const asset = assets.find(candidate => candidate.asset.asset_id === item.asset_id);
     return Boolean(asset && (item.asset_kind === "image" || asset.asset.availability === "available"));
   });
-  const dropAsset = async (ids: string[], atIndex: number, trackId?: string) => {
+  const dropAsset = async (ids: string[], atIndex: number, trackId?: string, edit?: { mode: "overwrite"; atUs: number }) => {
     const byId = new Map(assets.map(({ asset }) => [asset.asset_id as string, asset]));
     const incoming: Asset[] = [];
     for (const id of ids) {
@@ -2018,7 +2018,13 @@ export function App() {
     const base = timeline ?? await createTimeline({ kind: "empty" });
     if (!base || projectRef.current?.project_id !== project?.project_id) return;
     const tracks = (working ?? base.current_revision.document).tracks;
-    const operations = planAssetDrop(incoming, tracks, atIndex, trackId);
+    let operations: TimelinePatchOperation[];
+    try {
+      operations = planAssetDrop(incoming, tracks, atIndex, trackId, edit?.mode === "overwrite" ? { atUs: edit.atUs } : undefined);
+    } catch (error) {
+      showNotice(error instanceof Error ? error.message : "无法规划素材覆盖。", "warning");
+      return;
+    }
     if (operations.length > 100) {
       showNotice("这组素材超出单次时间线操作上限，请分批拖入。", "warning");
       return;
@@ -2403,10 +2409,12 @@ export function App() {
     onDragStart: (event: React.DragEvent) => {
       if (!isDraggableAsset(item.asset.kind) || item.asset.availability !== "available") { event.preventDefault(); return; }
       const ids = draggedAssetIds(item.asset.asset_id, visibleAssetOrder, selectedAssetIds);
+      setActiveDraggedAssetIds(ids);
       if (ids.length > 1) event.dataTransfer.setData(ASSET_BATCH_DRAG, JSON.stringify(ids));
       else event.dataTransfer.setData(ASSET_DRAG, ids[0]);
       event.dataTransfer.effectAllowed = "copy";
     },
+    onDragEnd: () => setActiveDraggedAssetIds([]),
     title: isDraggableAsset(item.asset.kind) ? "拖到 V1 时间线以插入；双击在预览播放" : undefined,
   });
   // 点击预览画面：选中播放头处的片段（剪映式选中），无片段时清空选择。

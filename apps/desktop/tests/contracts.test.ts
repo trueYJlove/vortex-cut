@@ -74,17 +74,22 @@ describe("Stage 0 contract", () => {
     const operations = [
       { op: "insert_asset_clip", asset_id: "asset_1", at_index: 0, duration_us: 3_000_000 },
       { op: "insert_transcript_segments", transcript_id: "transcript_1", segment_ids: ["segment_1"], at_index: 0, padding_before_us: 0, padding_after_us: 300_000, create_captions: true },
-      { op: "remove_clip", clip_id: "clip_1" }, { op: "move_clip", clip_id: "clip_1", to_index: 0 }, { op: "trim_clip", clip_id: "clip_1", source_start_us: 0, source_end_us: 100_000 }, { op: "split_clip", clip_id: "clip_1", source_time_us: 100_000 }, { op: "set_layout", clip_id: "clip_1", layout: "fit" }, { op: "set_audio", clip_id: "clip_1", enabled: false, gain_db: -3 }, { op: "set_image_duration", clip_id: "clip_1", duration_us: 500_000 }, { op: "add_caption", start_us: 0, end_us: 200_000, text: "字幕", preset_id: "default-bottom", source_clip_id: null }, { op: "remove_caption", caption_id: "caption_1" }, { op: "update_caption", caption_id: "caption_1", text: "修改" }, { op: "set_caption_timing", caption_id: "caption_1", start_us: 0, end_us: 200_000 }, { op: "set_caption_preset", caption_id: "caption_1", preset_id: "game-safe-bottom" },
+      { op: "remove_clip", clip_id: "clip_1" }, { op: "move_clip", clip_id: "clip_1", to_index: 0 }, { op: "trim_clip", clip_id: "clip_1", source_start_us: 0, source_end_us: 100_000 }, { op: "set_clip_source_window", clip_id: "clip_1", source_start_us: 100_000, source_end_us: 200_000, anchor: "timeline" }, { op: "split_clip", clip_id: "clip_1", source_time_us: 100_000 }, { op: "set_layout", clip_id: "clip_1", layout: "fit" }, { op: "set_audio", clip_id: "clip_1", enabled: false, gain_db: -3 }, { op: "set_image_duration", clip_id: "clip_1", duration_us: 500_000 }, { op: "add_caption", start_us: 0, end_us: 200_000, text: "字幕", preset_id: "default-bottom", source_clip_id: null }, { op: "remove_caption", caption_id: "caption_1" }, { op: "update_caption", caption_id: "caption_1", text: "修改" }, { op: "set_caption_timing", caption_id: "caption_1", start_us: 0, end_us: 200_000 }, { op: "set_caption_preset", caption_id: "caption_1", preset_id: "game-safe-bottom" },
       { op: "position_clip", clip_id: "clip_1", timeline_start_us: 1_000_000, track_id: "V2" },
       { op: "add_track", kind: "video" }, { op: "remove_track", track_id: "V2" }, { op: "move_track", track_id: "V2", to_index: 0 }, { op: "set_track_flags", track_id: "V2", muted: true, solo: false }
     ];
     expect(operations.every(isTimelinePatchOperation)).toBe(true);
     expect(isTimelinePatch({ schema_version: 1, base_revision_id: "revision_1", operations, summary: "完整编辑" })).toBe(true);
     expect(isTimelinePatchOperation({ op: "insert_asset_clip", asset_id: "asset_1", to_index: 0 })).toBe(false);
+    expect(isTimelinePatchOperation({ op: "insert_asset_clip", asset_id: "asset_1", at_index: 0, timeline_start_us: 1_000_000, edit_mode: "overwrite" })).toBe(true);
+    expect(isTimelinePatchOperation({ op: "insert_asset_clip", asset_id: "asset_1", at_index: 0, edit_mode: "overwrite" })).toBe(false);
+    expect(isTimelinePatchOperation({ op: "insert_asset_clip", asset_id: "asset_1", at_index: 0, timeline_start_us: 1_000_000, edit_mode: "ripple" })).toBe(false);
+    expect(isTimelinePatchOperation({ op: "insert_asset_clip", asset_id: "asset_1", at_index: 0, timeline_start_us: 1_000_000 })).toBe(false);
     expect(isTimelinePatchOperation({ ...operations[1], padding_after_us: 300_001 })).toBe(false);
     expect(isTimelinePatchOperation({ op: "add_track", kind: "audio" })).toBe(false);
     expect(isTimelinePatchOperation({ op: "set_track_flags", track_id: "V2" })).toBe(false);
     expect(isTimelinePatchOperation({ op: "set_track_flags", track_id: "V2", hidden: "yes" })).toBe(false);
+    expect(isTimelinePatchOperation({ op: "set_clip_source_window", clip_id: "clip_1", source_start_us: 0, source_end_us: 500_000, anchor: "outside" })).toBe(false);
   });
   it("严格校验 Stage3A 预设、目录授权与批次输入", () => {
     const hash = `sha256:${"a".repeat(64)}`;

@@ -245,9 +245,9 @@ describe("Editor shell 基线", () => {
     const dataTransfer = { getData: (type: string) => (type === "application/x-vortex-cut-asset" ? video.asset_id : ""), setData: vi.fn(), dropEffect: "copy", effectAllowed: "copy" };
     const canvas = document.querySelector(".timeline-canvas-container canvas") as HTMLElement;
     fireEvent.dragOver(canvas, { dataTransfer });
-    expect(screen.getByText("释放以追加到时间线")).toBeInTheDocument();
+    expect(screen.getByText("释放以插入到时间线（同轨后续片段顺延）")).toBeInTheDocument();
     fireEvent.drop(canvas, { dataTransfer });
-    expect(screen.queryByText("释放以追加到时间线")).not.toBeInTheDocument();
+    expect(screen.queryByText("释放以插入到时间线（同轨后续片段顺延）")).not.toBeInTheDocument();
   });
 
   it("clears the drop highlight when dragging away", async () => {
@@ -256,9 +256,9 @@ describe("Editor shell 基线", () => {
     const dataTransfer = { getData: (type: string) => (type === "application/x-vortex-cut-asset" ? video.asset_id : ""), setData: vi.fn(), dropEffect: "copy", effectAllowed: "copy" };
     const canvas = document.querySelector(".timeline-canvas-container canvas") as HTMLElement;
     fireEvent.dragOver(canvas, { dataTransfer });
-    expect(screen.getByText("释放以追加到时间线")).toBeInTheDocument();
+    expect(screen.getByText("释放以插入到时间线（同轨后续片段顺延）")).toBeInTheDocument();
     fireEvent.dragLeave(canvas, { dataTransfer });
-    expect(screen.queryByText("释放以追加到时间线")).not.toBeInTheDocument();
+    expect(screen.queryByText("释放以插入到时间线（同轨后续片段顺延）")).not.toBeInTheDocument();
   });
 
   it("keeps the toolbar row compact with only status output", async () => {

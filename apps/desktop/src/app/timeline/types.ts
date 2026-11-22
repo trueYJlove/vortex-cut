@@ -4,6 +4,7 @@
  */
 import type { TimelineClip, TimelineCaption, TimelineClipId, TimelineDocument, AssetKind, TimelineTransition, TimelineTransitionId } from "@aivideo/contracts";
 import type { MoveTargetResolution } from "./geometry.js";
+import type { AdvancedEditMode, AdvancedEditTarget } from "./advanced-edit.js";
 
 /** Viewport / view state for the timeline canvas. */
 export interface TimelineViewState {
@@ -61,6 +62,7 @@ export interface AssetMediaEntry {
   kind: AssetKind;
   /** 素材文件名（剪映式片段名称条显示用）。 */
   display_name: string;
+  duration_us?: number | null;
 }
 
 /** Selection state (mirrors App.tsx Selection type). */
@@ -131,6 +133,16 @@ export type TimelineInteraction =
       originalEndUs: number;
       targetStartUs: number;
       targetEndUs: number;
+      snapUs: number | null;
+    }
+  | {
+      kind: "edge-edit";
+      mode: AdvancedEditMode;
+      clipIds: TimelineClipId[];
+      startX: number;
+      deltaUs: number;
+      targets: AdvancedEditTarget[];
+      operations: import("@aivideo/contracts").TimelinePatchOperation[];
       snapUs: number | null;
     }
   | {

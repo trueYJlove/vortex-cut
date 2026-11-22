@@ -3,6 +3,16 @@ import type { Asset, TimelineDocument, TimelinePatchOperation } from "@aivideo/c
 export const ASSET_DRAG = "application/x-vortex-cut-asset";
 export const ASSET_BATCH_DRAG = "application/x-vortex-cut-assets";
 
+let activeDraggedIds: string[] = [];
+
+export function setActiveDraggedAssetIds(ids: readonly string[]): void {
+  activeDraggedIds = [...ids];
+}
+
+export function getActiveDraggedAssetIds(): readonly string[] {
+  return activeDraggedIds;
+}
+
 /** OpenFilm uses the current selection when a selected tile starts the drag. */
 export function draggedAssetIds<T extends string>(id: T, order: readonly T[], selected: ReadonlySet<T>): T[] {
   return selected.has(id) && selected.size > 1 ? order.filter(item => selected.has(item)) : [id];
@@ -27,7 +37,8 @@ export function hasAssetDrag(transfer: DataTransfer): boolean {
 }
 
 export function planAssetDrop(
-  assets: readonly Asset[], tracks: TimelineDocument["tracks"], slot: number, target?: string
+  assets: readonly Asset[], tracks: TimelineDocument["tracks"], slot: number, target?: string,
+  overwrite?: { atUs: number }
 ): TimelinePatchOperation[] {
   const row = tracks.find(track => track.id === target);
   const wantsNewTrack = target === "new" || row?.kind === "text" ||
@@ -42,15 +53,23 @@ export function planAssetDrop(
     operations.push({ op: "add_track", kind: "video" });
   }
   let index = wantsNewTrack ? 0 : slot;
+  let overwriteCursorUs = overwrite?.atUs ?? 0;
   for (const asset of assets) {
     const asAudio = asset.kind === "video" && row?.kind === "audio";
     const audio = asAudio || asset.kind === "audio";
+    const durationUs = asset.kind === "image" ? 3_000_000 :
+      typeof asset.media_info?.duration_us === "number" ? asset.media_info.duration_us : null;
+    if (overwrite && (!Number.isInteger(durationUs) || !durationUs || durationUs < 1)) {
+      throw new Error(`无法读取素材“${asset.display_name}”的准确时长，覆盖模式已取消。`);
+    }
     operations.push({
       op: "insert_asset_clip", asset_id: asset.asset_id, at_index: audio ? 0 : index++,
       ...(audio ? {} : { track_id: visualTrackId }),
       ...(asAudio ? { as_audio: true } : {}),
-      ...(asset.kind === "image" ? { duration_us: 3_000_000 } : {})
+      ...(asset.kind === "image" ? { duration_us: 3_000_000 } : {}),
+      ...(overwrite ? { timeline_start_us: overwriteCursorUs, edit_mode: "overwrite" as const } : {})
     });
+    if (overwrite) overwriteCursorUs += durationUs!;
   }
   return operations;
 }

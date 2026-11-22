@@ -205,6 +205,37 @@ def test_all_clip_patch_operations_and_normalization(tmp_path: Path) -> None:
     assert len(state["current_revision"]["document"]["clips"]) == 3
 
 
+def test_roll_and_slip_source_windows_preserve_their_timeline_anchors(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
+    first = state["current_revision"]["document"]["clips"][0]
+    state = _patch(service, state, [{"op": "split_clip", "clip_id": first["clip_id"], "source_time_us": 2_500_000}])
+    left, right = state["current_revision"]["document"]["clips"]
+
+    state = _patch(service, state, [
+        {"op": "set_clip_source_window", "clip_id": left["clip_id"], "source_start_us": 0, "source_end_us": 3_500_000, "anchor": "start"},
+        {"op": "set_clip_source_window", "clip_id": right["clip_id"], "source_start_us": 3_500_000, "source_end_us": 5_000_000, "anchor": "end"},
+    ])
+    left, right = state["current_revision"]["document"]["clips"]
+    assert (left["timeline_start_us"], left["timeline_end_us"]) == (0, 3_500_000)
+    assert (right["timeline_start_us"], right["timeline_end_us"]) == (3_500_000, 5_000_000)
+
+    state = _patch(service, state, [{
+        "op": "set_clip_source_window", "clip_id": left["clip_id"],
+        "source_start_us": 500_000, "source_end_us": 4_000_000, "anchor": "timeline",
+    }])
+    left = state["current_revision"]["document"]["clips"][0]
+    assert (left["source_start_us"], left["source_end_us"]) == (500_000, 4_000_000)
+    assert (left["timeline_start_us"], left["timeline_end_us"]) == (0, 3_500_000)
+
+    with pytest.raises(DomainError) as outside_asset:
+        _patch(service, state, [{
+            "op": "set_clip_source_window", "clip_id": left["clip_id"],
+            "source_start_us": 500_000, "source_end_us": 5_500_000, "anchor": "start",
+        }])
+    assert outside_asset.value.code == "TIMELINE_SOURCE_INVALID"
+
+
 def test_caption_operations_and_clip_linkage(tmp_path: Path) -> None:
     service, _ = _service(tmp_path)
     state = _create(
@@ -585,6 +616,72 @@ def test_track_management_add_remove_move_and_flags(tmp_path: Path) -> None:
     rebuilt_ids = [track["id"] for track in state["current_revision"]["document"]["tracks"]]
     # 新文本轨编号递增（不复用已删 id），插入到 V1 之前。
     assert rebuilt_ids[-3].startswith("T") and rebuilt_ids[-2:] == ["V1", "A1"]
+
+
+def test_alt_overwrite_replaces_the_range_and_preserves_uncovered_video_and_audio(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
+    original_id = state["current_revision"]["document"]["clips"][0]["clip_id"]
+    state = _patch(service, state, [{
+        "op": "insert_asset_clip", "asset_id": "v2", "at_index": 0,
+        "track_id": "V1", "timeline_start_us": 2_000_000, "edit_mode": "overwrite",
+    }])
+    clips = state["current_revision"]["document"]["clips"]
+    video = sorted((clip for clip in clips if clip["track_id"] == "V1"), key=lambda clip: clip["timeline_start_us"])
+    assert [(clip["timeline_start_us"], clip["timeline_end_us"]) for clip in video] == [
+        (0, 2_000_000), (2_000_000, 4_000_000), (4_000_000, 5_000_000),
+    ]
+    assert [clip["order_index"] for clip in video] == [0, 1, 2]
+    assert video[0]["clip_id"] == original_id
+    assert (video[0]["source_start_us"], video[0]["source_end_us"]) == (0, 2_000_000)
+    assert (video[2]["source_start_us"], video[2]["source_end_us"]) == (4_000_000, 5_000_000)
+    assert video[1]["asset_id"] == "v2"
+
+    # A1 uses the same overwrite range semantics and keeps the uncovered left side.
+    state = _patch(service, state, [{"op": "insert_asset_clip", "asset_id": "a1", "at_index": 0}])
+    state = _patch(service, state, [{
+        "op": "insert_asset_clip", "asset_id": "a1", "at_index": 0,
+        "timeline_start_us": 2_000_000, "edit_mode": "overwrite",
+    }])
+    audio = sorted(
+        (clip for clip in state["current_revision"]["document"]["clips"] if clip["track_id"] == "A1"),
+        key=lambda clip: clip["timeline_start_us"],
+    )
+    assert [(clip["timeline_start_us"], clip["timeline_end_us"]) for clip in audio] == [
+        (0, 2_000_000), (2_000_000, 10_000_000),
+    ]
+
+
+def test_alt_overwrite_refuses_locked_linked_and_transition_bound_content(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service, {"kind": "full_asset", "asset_id": "v1"})
+    clip_id = state["current_revision"]["document"]["clips"][0]["clip_id"]
+    replacement = {"op": "insert_asset_clip", "asset_id": "v2", "at_index": 0,
+                   "track_id": "V1", "timeline_start_us": 1_000_000, "edit_mode": "overwrite"}
+
+    locked = _patch(service, state, [{"op": "set_clip_locked", "clip_id": clip_id, "locked": True}])
+    with pytest.raises(DomainError) as locked_error:
+        _patch(service, locked, [replacement])
+    assert locked_error.value.code == "TIMELINE_LOCKED"
+
+    linked = _patch(service, locked, [
+        {"op": "set_clip_locked", "clip_id": clip_id, "locked": False},
+        {"op": "detach_audio", "clip_id": clip_id},
+    ])
+    with pytest.raises(DomainError) as linked_error:
+        _patch(service, linked, [replacement])
+    assert linked_error.value.code == "TIMELINE_LINKED"
+
+    unlinked = _patch(service, linked, [{"op": "clear_clip_link", "clip_id": clip_id}])
+    adjacent = _patch(service, unlinked, [
+        {"op": "insert_asset_clip", "asset_id": "i1", "at_index": 1, "duration_us": 1_000_000},
+    ])
+    with_transition = _patch(service, adjacent, [
+        {"op": "add_transition", "after_clip_id": clip_id, "kind": "fade", "duration_us": 500_000},
+    ])
+    with pytest.raises(DomainError) as transition_error:
+        _patch(service, with_transition, [replacement])
+    assert transition_error.value.code == "TIMELINE_TRANSITION_INVALID"
 
 
 def test_audio_insert_appends_to_a1_with_free_positions(tmp_path: Path) -> None:

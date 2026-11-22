@@ -11,6 +11,7 @@ const electron = playwright._electron;
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const root = resolve(currentDir, "../../.."); const desktop = resolve(currentDir, ".."); const resources = join(root, "resources");
 const pythonSidecar = join(root, ".venv", "Scripts", "python.exe"); const packagedSidecar = join(resources, "core", "aivs-core", "aivs-core.exe");
+const sourceVideo = process.env.AIVS_M6_SOURCE_VIDEO ?? join(root, "test-assets", "generated", "cfr-landscape-av.mp4");
 const sidecarExecutable = process.env.AIVS_SIDECAR_EXECUTABLE ?? (existsSync(pythonSidecar) ? pythonSidecar : packagedSidecar);
 const sidecarArgs = process.env.AIVS_SIDECAR_EXECUTABLE_ARGS ?? (existsSync(pythonSidecar) ? JSON.stringify(["-m", "aivs_core.bootstrap"]) : JSON.stringify([]));
 
@@ -31,7 +32,7 @@ test("多轨道：新增视频/文本轨、跨轨拖动与轨道属性", async (
   const run = join(root, "test-results", `m6-multi-track-${process.pid}-${Date.now()}`);
   const userData = join(run, "user-data"); const video = join(run, "素材.mp4");
   await mkdir(run, { recursive: true });
-  await copyFile(join(root, "test-assets", "generated", "cfr-landscape-av.mp4"), video);
+  await copyFile(sourceVideo, video);
   const app = await launch(userData, video);
   try {
     const page = await app.firstWindow();
@@ -42,17 +43,20 @@ test("多轨道：新增视频/文本轨、跨轨拖动与轨道属性", async (
       const project = await window.desktop.createProject({ name: "M6 Multi Track E2E" });
       const imported = await window.desktop.importAsset({ project_id: project.project_id, kind: "video" });
       if (!imported) throw new Error("fixture import cancelled");
-      const created = await window.desktop.createTimeline({ project_id: project.project_id, timeline: { schema_version: 1, source: { kind: "full_asset", asset_id: imported.asset.asset_id }, default_layout: "blurred_background", caption_preset_id: "default-bottom" } });
+      const created = await window.desktop.createTimeline({ project_id: project.project_id, timeline: { schema_version: 1, source: { kind: "full_asset", asset_id: imported.asset.asset_id }, default_layout: "fit", caption_preset_id: "default-bottom" } });
       const firstClipId = created.current_revision.document.clips[0].clip_id;
       await window.desktop.patchTimeline({ project_id: project.project_id, patch: { schema_version: 1, base_revision_id: created.current_revision.timeline_revision_id, operations: [
         { op: "trim_clip", clip_id: firstClipId as never, source_start_us: 0, source_end_us: 2_000_000 },
+        { op: "set_layout", clip_id: firstClipId as never, layout: "fit" },
       ], summary: "两秒" } });
       return { project_id: project.project_id, asset_id: imported.asset.asset_id };
     });
+    await page.evaluate(() => window.localStorage.setItem("vortexcut.theme", "dark"));
     await page.reload();
     await page.waitForFunction(() => Boolean(window.desktop?.getRuntime));
     await page.evaluate(() => window.desktop.getRuntime());
     await expect(page.getByText(/Core 已连接/)).toBeVisible({ timeout: 30_000 });
+    await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe("dark");
     await expect(page.getByRole("button", { name: /Clip .* video/ })).toHaveCount(1, { timeout: 30_000 });
 
     const canvas = page.locator(".timeline-canvas-container canvas");
@@ -66,15 +70,15 @@ test("多轨道：新增视频/文本轨、跨轨拖动与轨道属性", async (
       return Math.round(head.y - currentCanvas.y + 8);
     };
     // HTML5 拖放模拟：向画布指定行位置派发 dragover/drop。
-    const dispatchDrop = (assetId: string, x: number, y: number) => page.evaluate(({ x: px, y: py, assetId: aid }: { x: number; y: number; assetId: string }) => {
+    const dispatchDrop = (assetId: string, x: number, y: number, altKey = false) => page.evaluate(({ x: px, y: py, assetId: aid, alt }: { x: number; y: number; assetId: string; alt: boolean }) => {
       const canvas = document.querySelector(".timeline-canvas-container canvas") as HTMLCanvasElement;
       const rect = canvas.getBoundingClientRect();
       const dt = new DataTransfer();
       dt.setData("application/x-vortex-cut-asset", aid);
-      const opts = { bubbles: true, cancelable: true, clientX: rect.left + px, clientY: rect.top + py, dataTransfer: dt };
+      const opts = { bubbles: true, cancelable: true, clientX: rect.left + px, clientY: rect.top + py, dataTransfer: dt, altKey: alt };
       canvas.dispatchEvent(new DragEvent("dragover", opts));
       canvas.dispatchEvent(new DragEvent("drop", opts));
-    }, { x, y, assetId } as never);
+    }, { x, y, assetId, alt: altKey } as never);
 
     // 1. 新增视频轨（"+"按钮 → 菜单）。
     await page.getByRole("button", { name: "添加轨道" }).click();
@@ -97,6 +101,10 @@ test("多轨道：新增视频/文本轨、跨轨拖动与轨道属性", async (
     expect(movedTrackId).toBe("V2");
 
     // 2b. 拖入新视频素材到 V2 行（HTML5 drop 模拟）→ 素材加入 V2。
+    const beforeDropIds = await page.evaluate(async (id: string) => {
+      const state = await window.desktop.getTimeline(id as never);
+      return state.current_revision.document.clips.map(clip => clip.clip_id as string);
+    }, setup.project_id);
     await dispatchDrop(setup.asset_id, 320, await rowDragY("V2"));
     await expect.poll(async () => await page.evaluate(async (id: string) => {
       const state = await window.desktop.getTimeline(id as never);
@@ -107,6 +115,47 @@ test("多轨道：新增视频/文本轨、跨轨拖动与轨道属性", async (
       return state.current_revision.document.clips[1].track_id as string;
     }, setup.project_id);
     expect(secondClipTrack).toBe("V2");
+
+    // 2c. OpenFilm Alt-drop overwrites the target range at the pointer instead of rippling.
+    const insertedClipId = await page.evaluate(async ({ id, before }: { id: string; before: string[] }) => {
+      const state = await window.desktop.getTimeline(id as never);
+      return state.current_revision.document.clips.find(clip => !before.includes(clip.clip_id as string))?.clip_id as string | undefined;
+    }, { id: setup.project_id, before: beforeDropIds });
+    if (!insertedClipId) throw new Error("未找到普通插入创建的片段");
+    const insertedRange = await page.evaluate(async ({ id, clipId }: { id: string; clipId: string }) => {
+      const state = await window.desktop.getTimeline(id as never);
+      const clip = state.current_revision.document.clips.find(item => item.clip_id === clipId);
+      return clip ? { start: clip.timeline_start_us, end: clip.timeline_end_us } : null;
+    }, { id: setup.project_id, clipId: insertedClipId });
+    if (!insertedRange) throw new Error("普通插入片段已消失");
+    const v2Y = await rowDragY("V2");
+    await page.evaluate(({ x, y, assetId }: { x: number; y: number; assetId: string }) => {
+      const canvas = document.querySelector(".timeline-canvas-container canvas") as HTMLCanvasElement;
+      const rect = canvas.getBoundingClientRect();
+      const dt = new DataTransfer();
+      dt.setData("application/x-vortex-cut-asset", assetId);
+      canvas.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, clientX: rect.left + x, clientY: rect.top + y, dataTransfer: dt, altKey: true }));
+    }, { x: 260, y: v2Y, assetId: setup.asset_id } as never);
+    const overwriteHint = page.locator(".drop-hint").filter({ hasText: "Alt 覆盖" });
+    await expect(overwriteHint).toBeVisible();
+    const overwriteTime = Number((await overwriteHint.innerText()).match(/从\s+([\d.]+)s/)?.[1]) * 1_000_000;
+    if (!Number.isFinite(overwriteTime)) throw new Error("覆盖提示中没有时间落点");
+    await dispatchDrop(setup.asset_id, 260, v2Y, true);
+    await expect.poll(async () => await page.evaluate(async ({ id, clipId, expectedEnd, originalEnd }: { id: string; clipId: string; expectedEnd: number; originalEnd: number }) => {
+      const state = await window.desktop.getTimeline(id as never);
+      const clip = state.current_revision.document.clips.find(item => item.clip_id === clipId);
+      return Boolean(clip && clip.timeline_end_us < originalEnd && Math.abs(clip.timeline_end_us - expectedEnd) < 70_000);
+    }, { id: setup.project_id, clipId: insertedClipId, expectedEnd: overwriteTime, originalEnd: insertedRange.end })).toBe(true);
+    await expect.poll(async () => await page.evaluate(async (id: string) => {
+      const state = await window.desktop.getTimeline(id as never);
+      return state.current_revision.document.clips.length;
+    }, setup.project_id)).toBe(3);
+    const overwriteStart = await page.evaluate(async ({ id, fromUs }: { id: string; fromUs: number }) => {
+      const state = await window.desktop.getTimeline(id as never);
+      return state.current_revision.document.clips.find(clip => clip.track_id === "V2" && clip.timeline_start_us >= fromUs - 70_000)?.timeline_start_us;
+    }, { id: setup.project_id, fromUs: overwriteTime });
+    expect(overwriteStart).toBeDefined();
+    expect(Math.abs(overwriteStart! - overwriteTime)).toBeLessThan(70_000);
 
     // 3. 轨道属性开关：隐藏与静音（视频轨全量）。
     await page.getByRole("button", { name: "隐藏轨道 V2" }).click();
@@ -134,7 +183,7 @@ test("多轨道：新增视频/文本轨、跨轨拖动与轨道属性", async (
     await expect.poll(() => trackIds(page, setup.project_id)).toEqual(["V2", "T1", "V3", "C1", "V1", "A1"]);
     const thirdClipTrack = await page.evaluate(async (id: string) => {
       const state = await window.desktop.getTimeline(id as never);
-      return state.current_revision.document.clips[2].track_id as string;
+      return state.current_revision.document.clips.find(clip => clip.track_id === "V3")?.track_id as string | undefined;
     }, setup.project_id);
     expect(thirdClipTrack).toBe("V3");
 
@@ -161,6 +210,31 @@ test("多轨道：新增视频/文本轨、跨轨拖动与轨道属性", async (
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "锁定轨道 V2" }).click();
     await expect.poll(async () => (await trackFlags(page, setup.project_id, "V2"))?.locked).toBe(false);
+    // Park V3 after the V2 sequence so the preview shows a single active clip, not a PIP stack.
+    const currentCanvas = await canvas.boundingBox();
+    if (!currentCanvas) throw new Error("no current canvas box");
+    const v3Y = await rowDragY("V3");
+    await page.mouse.move(currentCanvas.x + 150, currentCanvas.y + v3Y);
+    await page.mouse.down();
+    await page.mouse.move(currentCanvas.x + 570, currentCanvas.y + v3Y, { steps: 10 });
+    await page.mouse.up();
+    await expect.poll(async () => await page.evaluate(async (id: string) => {
+      const state = await window.desktop.getTimeline(id as never);
+      return state.current_revision.document.clips.find(clip => clip.track_id === "V3")?.timeline_start_us ?? -1;
+    }, setup.project_id)).toBeGreaterThan(5_500_000);
+    // Restore a base-track shot at playhead 0 after proving cross-track dragging.
+    const v2YAfterOrder = await rowDragY("V2");
+    const v1Y = await rowDragY("V1");
+    await page.mouse.move(currentCanvas.x + 150, currentCanvas.y + v2YAfterOrder);
+    await page.mouse.down();
+    await page.mouse.move(currentCanvas.x + 150, currentCanvas.y + v1Y, { steps: 10 });
+    await page.mouse.up();
+    await expect.poll(async () => await page.evaluate(async (id: string) => {
+      const state = await window.desktop.getTimeline(id as never);
+      return state.current_revision.document.clips.some(clip => clip.track_id === "V1");
+    }, setup.project_id)).toBe(true);
+    // Keep a reproducible full-window artifact for the real-media multi-track acceptance.
+    await page.screenshot({ path: join(run, "multi-track-real-media.png"), fullPage: true });
     await v2Head.click({ button: "right" });
     await page.getByRole("menuitem", { name: "删除轨道" }).click();
     await expect.poll(() => trackIds(page, setup.project_id)).toEqual(["T1", "V3", "C1", "V1", "A1"]);
@@ -168,7 +242,9 @@ test("多轨道：新增视频/文本轨、跨轨拖动与轨道属性", async (
       const state = await window.desktop.getTimeline(id as never);
       return state.current_revision.document.clips.map(clip => clip.track_id as string);
     }, setup.project_id);
-    expect(remaining).toEqual(["V3"]);
+    expect(remaining).toContain("V1");
+    expect(remaining).toContain("V3");
+    expect(remaining).not.toContain("V2");
   } finally {
     await app.close();
   }
