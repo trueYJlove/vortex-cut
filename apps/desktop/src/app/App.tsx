@@ -1,6 +1,8 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Archive, AudioLines, BookOpen, Captions, ChevronDown, ChevronLeft, ChevronRight, Clapperboard, Command as CommandIcon, Download, Eye, FileAudio, FileText, FlaskConical, FolderCog, FolderOpen, FolderPlus, GitCompare, History, Image as ImageIcon, ImagePlus, Keyboard, LayoutPanelLeft, Lock, LockOpen, MapPin, Maximize, Minimize, Monitor, MonitorPlay, Music, Pause, Play, Plus, Redo2, RefreshCw, RotateCcw, Save, Scissors, Search, Sparkles, Repeat, Square, SquarePlus, Settings2, Trash2, Type as TypeIcon2, Type, Undo2, Upload, Video, Volume2, VolumeX, WandSparkles, Minus, ZoomIn, SlidersHorizontal } from "lucide-react";
+import { Archive, AudioLines, BookOpen, Captions, ChevronDown, ChevronLeft, ChevronRight, Clapperboard, Command as CommandIcon, Download, Eye, FileText, FlaskConical, FolderCog, FolderOpen, FolderPlus, GitCompare, History, Image as ImageIcon, ImagePlus, Keyboard, LayoutPanelLeft, Lock, LockOpen, MapPin, Maximize, Minimize, MonitorPlay, Pause, Play, Plus, Redo2, RefreshCw, RotateCcw, Save, Scissors, Search, Sparkles, Repeat, Square, SquarePlus, Settings2, Trash2, Type as TypeIcon2, Type, Undo2, Upload, Video, Volume2, VolumeX, WandSparkles, Minus, ZoomIn, SlidersHorizontal } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { ArrowUpDown, LayoutGrid, List } from "lucide-react";
+import { Star } from "lucide-react";
 import type { Asset, AssetId, AssetKind, AssetPresentation, BriefInput, CaptionPresetId, CvAnalysisSummary, CvSample, DestinationGrant, DirectoryGrant, EncoderMode, EgressPreview, ExportBatch, ExportFrameRate, ExportQuality, ExportResolution, HorizontalAnchor, Job, LayoutPolicy, MediaInfo, ModelDetail, ModelSummary, OutputRatio, PlatformPreset, Project, ProviderConfig, ReframeExportBatch, RenditionPreset, RenditionReframeAdjustment, TimelineCaption, TimelineClip, TimelineDiff, TimelineDocument, TimelineLayout, TimelinePatchEgressPreview, TimelinePatchOperation, TimelinePatchProposal, TimelineRevisionId, TimelineRevisionSummary, TimelineState, Transcript, TranscriptSegment, TranscriptSummary, VerticalAnchor } from "@aivideo/contracts";
 import { ExportDialog, type ExportSettings } from "./ExportDialog.js";
 import { CoverDialog } from "./CoverDialog.js";
@@ -20,6 +22,12 @@ import { AngleSyncPanel } from "./angle-sync/AngleSyncPanel.js";
 import { SemanticSearchPanel } from "./semantic-search/SemanticSearchPanel.js";
 import { KeyframeReviewPanel } from "./keyframe-review/KeyframeReviewPanel.js";
 import { Dialog } from "./Dialog.js";
+import { ContextMenu, type ContextMenuItem } from "../ui/of/ContextMenu.js";
+import { pickMedia } from "../ui/of/media-selection.js";
+import { ProjectTabStrip } from "./workspace/ProjectTabStrip.js";
+import { ASSET_BATCH_DRAG, ASSET_DRAG, draggedAssetIds, planAssetDrop } from "./timeline/asset-drop.js";
+import { alignmentBox, alignmentPreviewSize, groupFrameBounds, planFrameAlignment, planFrameDistribution, planGroupBoundsEdit, type GroupBoundsField } from "./timeline/frame-alignment.js";
+import type { AlignDistribution, AlignEdge } from "../ui/of/AlignBar.js";
 import { errorCode, safeErrorMessage, safeTaskErrorMessage } from "./safeErrors.js";
 import { formatLocalStamp } from "./localTime.js";
 import { PreviewPipOverlays, type PipOverlay, type PipTransform } from "./PreviewPipOverlays.js";
@@ -34,9 +42,13 @@ import { editorCommands, type EditorCommand } from "./editorCommands.js";
 import { bindingLabel, findConflict, loadShortcuts, matchesBinding, normalizeRecordedBinding, saveShortcuts, DEFAULT_SHORTCUTS, type ShortcutCommandId, type ShortcutEntry } from "./shortcuts.js";
 import { TimelinePanel } from "./timeline/TimelineCanvas.js";
 import { createPlayheadStore, type PlayheadStore } from "./timeline/playhead-store.js";
+import { splitSelectionAt } from "./timeline/split-point.js";
+import { removeLinkedClips } from "./timeline/linked-clips.js";
+import { planMagneticDelete, readTimelineBehaviorPrefs } from "./timeline/magnetic-plan.js";
+import type { TimeRange } from "./timeline/time-range.js";
 import { RequestScheduler, BoundedTaskQueue } from "./request-scheduling.js";
 import { parseSubtitleFile } from "./subtitleImport.js";
-import { ClipProperties, CaptionProperties, ProjectProperties, TimelineDiffView, TransitionProperties } from "./PropertyPanels.js";
+import { AssetSelectionProperties, ClipGroupAlignmentProperties, ClipProperties, CaptionProperties, ProjectProperties, TimelineDiffView, TransitionProperties } from "./PropertyPanels.js";
 import { JobEta } from "./JobEta.js";
 import { WorkspaceFooter } from "./workspace/WorkspaceFooter.js";
 
@@ -44,6 +56,15 @@ type SaveState = "已保存" | "保存中" | "保存失败" | "草稿冲突";
 type NoticeTone = "success" | "warning" | "error" | "info";
 type Notice = { text: string; tone: NoticeTone } | "";
 type Selection = { kind: "clip"; id: string } | { kind: "clips"; ids: string[] } | { kind: "caption"; id: string } | { kind: "transition"; id: string } | null;
+function reconcileTimelineSelection(selection: Selection, document: TimelineDocument): Selection {
+  if (!selection) return null;
+  if (selection.kind === "clip") return document.clips.some(clip => clip.clip_id === selection.id) ? selection : null;
+  if (selection.kind === "caption") return document.captions.some(caption => caption.caption_id === selection.id) ? selection : null;
+  if (selection.kind === "transition") return document.transitions?.some(transition => transition.transition_id === selection.id) ? selection : null;
+  const ids = selection.ids.filter(id => document.clips.some(clip => clip.clip_id === id));
+  if (ids.length === selection.ids.length) return selection;
+  return ids.length > 1 ? { kind: "clips", ids } : ids.length === 1 ? { kind: "clip", id: ids[0] } : null;
+}
 const layouts: { value: TimelineLayout; label: string }[] = [{ value: "blurred_background", label: "模糊背景" }, { value: "crop_fill", label: "裁切填满" }, { value: "fit", label: "完整适配" }];
 const previewRatios: { value: string; label: string; ratio: number | null }[] = [{ value: "fit", label: "原始", ratio: null }, { value: "169", label: "16:9", ratio: 16 / 9 }, { value: "916", label: "9:16", ratio: 9 / 16 }, { value: "11", label: "1:1", ratio: 1 }, { value: "43", label: "4:3", ratio: 4 / 3 }, { value: "34", label: "3:4", ratio: 3 / 4 }];
 /** 新建项目画布预设（比例真源 = 项目画布）：PlayRes 基准 1080 短边，@30fps。 */
@@ -170,6 +191,42 @@ function IconButton({ label, disabled, onClick, children }: { label: string; dis
   return <button className="icon-btn" title={label} aria-label={label} disabled={disabled} onClick={onClick}>{children}</button>;
 }
 
+function storedAssetView(projectId: string): "grid" | "list" {
+  try {
+    return localStorage.getItem(`vortex.asset-view.${projectId}`) === "list" ? "list" : "grid";
+  } catch {
+    return "grid";
+  }
+}
+
+function navigateAssetLibrary(event: React.KeyboardEvent<HTMLButtonElement>, view: "grid" | "list") {
+  const { key, currentTarget } = event;
+  if (!["ArrowLeft", "ArrowUp", "ArrowRight", "ArrowDown", "Home", "End"].includes(key)) return;
+  const list = currentTarget.closest(".asset-list");
+  if (!list) return;
+  const buttons = Array.from(list.querySelectorAll<HTMLButtonElement>(".asset-select"));
+  const index = buttons.indexOf(currentTarget);
+  const gridColumns = getComputedStyle(list).gridTemplateColumns.trim();
+  const columns = view === "grid" && gridColumns ? gridColumns.split(/\s+/).length : 1;
+  const steps: Record<string, number> = { ArrowLeft: -1, ArrowUp: -columns, ArrowRight: 1, ArrowDown: columns };
+  const target = key === "Home" ? 0 : key === "End" ? buttons.length - 1 : index + steps[key];
+  event.preventDefault();
+  event.stopPropagation();
+  const next = buttons[Math.max(0, Math.min(buttons.length - 1, target))];
+  next?.focus();
+  return next?.dataset.assetId as AssetId | undefined;
+}
+
+const ASSET_FAVORITES_KEY = "vortexcut.asset-favorites";
+function readAssetFavorites(): AssetId[] {
+  try {
+    const saved: unknown = JSON.parse(localStorage.getItem(ASSET_FAVORITES_KEY) ?? "[]");
+    return Array.isArray(saved) ? saved.filter((id): id is AssetId => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 function ReframeTargetEditor({ clips, selections, preview, pending, onSelect, onGenerate, onPlay }: {
   clips: TimelineClip[];
   selections: Record<string, ReframeAnchor>;
@@ -191,6 +248,10 @@ function ReframeTargetEditor({ clips, selections, preview, pending, onSelect, on
 export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [project, setProject] = useState<Project>();
+  const [openProjectIds, setOpenProjectIds] = useState<Project["project_id"][]>([]);
+  useEffect(() => {
+    if (project) setOpenProjectIds(ids => ids.includes(project.project_id) ? ids : [...ids, project.project_id]);
+  }, [project?.project_id]);
   const [assets, setAssets] = useState<AssetPresentation[]>([]);
   // P199：资产对账要读"界面此刻到底有哪些素材"。直接用 state 镜像而不是另存一份
   // "上次看到的签名"——装载、UI 导入的乐观追加、刷新素材库都写同一个 state，
@@ -206,7 +267,24 @@ export function App() {
   const assetsMirrorTruncatedRef = useRef(false);
   const [assetQuery, setAssetQuery] = useState("");
   const [assetFilter, setAssetFilter] = useState<AssetFilter>("all");
-  const [assetView] = useState<"list" | "grid">("list");
+  const [libraryScope, setLibraryScope] = useState<"import" | "favorites">("import");
+  const [assetFavorites, setAssetFavorites] = useState(readAssetFavorites);
+  const favoriteAssetIds = useMemo(() => new Set(assetFavorites), [assetFavorites]);
+  useEffect(() => {
+    try { localStorage.setItem(ASSET_FAVORITES_KEY, JSON.stringify(assetFavorites)); } catch { /* In-memory favorites remain usable. */ }
+  }, [assetFavorites]);
+  const [assetViews, setAssetViews] = useState<Record<string, "list" | "grid">>({});
+  const projectAssetKey = project?.project_id ?? "";
+  const assetView = assetViews[projectAssetKey] ?? storedAssetView(projectAssetKey);
+  const changeAssetView = (view: "grid" | "list") => {
+    setAssetViews(current => ({ ...current, [projectAssetKey]: view }));
+    try {
+      localStorage.setItem(`vortex.asset-view.${projectAssetKey}`, view);
+    } catch {
+      // The current session still keeps its view when storage is unavailable.
+    }
+  };
+  const [assetSortByName, setAssetSortByName] = useState(false);
   // 素材箱双击预览：仅播放素材，不加入时间线。任何时间线交互都会退出该模式。
   const [libraryPreviewId, setLibraryPreviewId] = useState<string | null>(null);
   // W3.1 语义检索命中只带 asset_id，显示名由素材列表派生（字段是 asset.display_name）。
@@ -214,11 +292,16 @@ export function App() {
     () => Object.fromEntries(assets.map(item => [item.asset.asset_id, item.asset.display_name])),
     [assets]
   );
-  const visibleAssets = useMemo(() => assets.filter(item => {
-    const matchesQuery = item.asset.display_name.toLocaleLowerCase().includes(assetQuery.trim().toLocaleLowerCase());
-    const matchesKind = assetFilter === "all" || item.asset.kind === assetFilter;
-    return matchesQuery && matchesKind;
-  }), [assetQuery, assetFilter, assets]);
+  const visibleAssets = useMemo(() => {
+    const query = assetQuery.trim().toLocaleLowerCase();
+    const filtered = assets.filter(({ asset }) =>
+      asset.display_name.toLocaleLowerCase().includes(query) &&
+      (libraryScope !== "favorites" || favoriteAssetIds.has(asset.asset_id)) &&
+      (assetFilter === "all" || asset.kind === assetFilter)
+    );
+    if (assetSortByName) filtered.sort((a, b) => a.asset.display_name.localeCompare(b.asset.display_name, undefined, { numeric: true }));
+    return filtered;
+  }, [assetQuery, assetFilter, assetSortByName, assets, favoriteAssetIds, libraryScope]);
   const [transcripts, setTranscripts] = useState<Record<string, Transcript[]>>({});
   const [transcriptSummaries, setTranscriptSummaries] = useState<Record<string, TranscriptSummary[]>>({});
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -272,7 +355,21 @@ export function App() {
   const [transcriptionAsset, setTranscriptionAsset] = useState<Asset>();
   // 素材删除确认（应用内弹窗，替代原生 confirm）；pendingDeleteAsset 显示警告文案。
   const [pendingDeleteAsset, setPendingDeleteAsset] = useState<Asset>();
-  const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
+  const [pickedAssetIds, setPickedAssetIds] = useState<AssetId[]>([]);
+  const assetAnchor = useRef<AssetId | null>(null);
+  const visibleAssetOrder = useMemo(() => visibleAssets.map(item => item.asset.asset_id), [visibleAssets]);
+  const visibleAssetSet = useMemo(() => new Set(visibleAssetOrder), [visibleAssetOrder]);
+  const selectedAssetIds = useMemo(() => new Set(pickedAssetIds.filter(id => visibleAssetSet.has(id))), [pickedAssetIds, visibleAssetSet]);
+  const selectedAssetId = selectedAssetIds.size === 1 ? [...selectedAssetIds][0] : null;
+  const resetAssetSelection = () => { assetAnchor.current = null; setPickedAssetIds([]); setAssetMenu(null); };
+  const selectAsset = (id: AssetId, mods: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean } = {}) => {
+    const anchor = assetAnchor.current;
+    if (!mods.shiftKey) assetAnchor.current = id;
+    setPickedAssetIds(current => pickMedia(current.filter(item => visibleAssetSet.has(item)), id, visibleAssetOrder, anchor,
+      { toggle: Boolean(mods.ctrlKey || mods.metaKey), range: Boolean(mods.shiftKey) }));
+  };
+  const [assetMenu, setAssetMenu] = useState<{ id: AssetId; x: number; y: number; trigger: HTMLButtonElement } | null>(null);
+  const menuAsset = assetMenu && visibleAssets.find(item => item.asset.asset_id === assetMenu.id);
   // 项目封面：截取当前播放头画面（本地持久化，per-project）。
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -409,7 +506,7 @@ export function App() {
   const [dropdownIndex, setDropdownIndex] = useState(0);
   const menuButtonRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const menuActionRefs = useRef<(HTMLButtonElement | null)[]>([]);
-  const [leftWidth, setLeftWidth] = useState(280);
+  const [leftWidth, setLeftWidth] = useState(320);
   // P4 参照窗格栏（ProjectView.tsx:4639-4661）的 layers/inspector 开关：映射为左素材池/右属性栏显隐。
   const [leftPaneOpen, setLeftPaneOpen] = useState(true);
   const [rightPaneOpen, setRightPaneOpen] = useState(true);
@@ -440,13 +537,25 @@ export function App() {
   // uiRate 只作用于预览播放节奏（交互时钟步长 / 媒体 playbackRate / 播放头直线），
   // 不写进时间线文档——它是播放器属性，不是剪辑属性。
   const [loopPlayback, setLoopPlayback] = useState(false);
+  const [playbackRange, setPlaybackRange] = useState<TimeRange | null>(null);
+  const loopRestartTimer = useRef<number | null>(null);
+  const loopSeekEpoch = useRef(0);
+  const loopSeekPending = useRef(false);
+  const cancelLoopRestart = () => {
+    loopSeekEpoch.current += 1;
+    loopSeekPending.current = false;
+    if (loopRestartTimer.current !== null) window.clearTimeout(loopRestartTimer.current);
+    loopRestartTimer.current = null;
+  };
+  useEffect(() => () => cancelLoopRestart(), [project?.project_id]);
   const [uiRate, setUiRate] = useState(1);
   const [ratePopOpen, setRatePopOpen] = useState(false);
   const ratePopRef = useRef<HTMLDivElement | null>(null);
   // scrub 直通（2026-11-11）：拖拽风暴中绕过 React 提交直接驱动预览会话——
   // dev 构建下每次 setPlayhead 触发整树提交（实测 ~36ms/次）是「拖动像快进
   // 卡顿」的主因。prod 下提交便宜，此通道同样减少主线程抖动。
-  const previewSessionRef = useRef<{ seekToFrame(target: number): Promise<number>; beginScrubStorm(): void; endScrubStorm(): void; getMeterSamples?(): readonly [Float32Array, Float32Array] | null } | null>(null);
+  const previewSessionRef = useRef<{ seekToFrame(target: number): Promise<number>; play(): void; pause(): void; beginScrubStorm(): void; endScrubStorm(): void; getMeterSamples?(): readonly [Float32Array, Float32Array] | null } | null>(null);
+  const preparePreviewPlaybackRef = useRef<(() => void) | null>(null);
   const lastDirectSeekFrameRef = useRef(-1);
   const volumeRef = useRef(volume);
   const [progressDragging, setProgressDragging] = useState(false);
@@ -683,7 +792,8 @@ export function App() {
     transcriptSummaryQueueRef.current?.advanceGeneration();
     setAssets([]); setJobs([]); setTimeline(undefined); setWorking(undefined); setSelection(null);
     setTranscripts({}); setTranscriptSummaries({}); setViewingTranscript(undefined);
-    setPreviews([]); setExports([]); setLibraryPreviewId(null); setSelectedAssetId(null);
+    setPreviews([]); setExports([]); setLibraryPreviewId(null); resetAssetSelection();
+    setAssetQuery(""); setAssetFilter("all"); setLibraryScope("import");
     setPlaying(false); setSyntheticNotice(null); setPreviewMode("synthetic");
     setExportPlayback(undefined); setReframePlayback(undefined); setCoverUrl(null);
     setCvSummaries({}); setCvSparkAssetId(null); setCvSparkSamples(null); setCvBusy(null);
@@ -695,6 +805,7 @@ export function App() {
     setDeleteBusy(false); setRefreshingAssets(false);
     seenAnyTicketRef.current = false; noTicketRetryRef.current = 0; noTicketFinalRetryRef.current = false;
     if (autoProvisionProjectId.current !== next.project_id) autoProvisionProjectId.current = undefined;
+    setOpenProjectIds(ids => ids.includes(next.project_id) ? ids : [...ids, next.project_id]);
     setProject(next);
   };
   // 移除一条文件已缺失的导出记录（问题2：成品文件在系统层被删后，记录
@@ -854,7 +965,7 @@ export function App() {
     // 防御性清理：直接由外部状态驱动项目变化时，也不能保留上一项目数据。
     setAssets([]); setJobs([]); setTimeline(undefined); setWorking(undefined); setSelection(null);
     setTranscripts({}); setTranscriptSummaries({}); setViewingTranscript(undefined);
-    setPreviews([]); setExports([]); setLibraryPreviewId(null); setSelectedAssetId(null);
+    setPreviews([]); setExports([]); setLibraryPreviewId(null); resetAssetSelection();
     setPlaying(false); setSyntheticNotice(null); setPreviewMode("synthetic"); setExportPlayback(undefined); setReframePlayback(undefined); setCoverUrl(null);
     seenAnyTicketRef.current = false; noTicketRetryRef.current = 0; noTicketFinalRetryRef.current = false;
     closePatch(); setRevisionOpen(false); setRevisionDiff(undefined);
@@ -900,7 +1011,9 @@ export function App() {
         // （否则保存一次 Revision 就把本地 working 覆盖回服务端版本，编辑中断）。
         const current = timelineRef.current;
         if (current?.project_id === projectId && current.current_revision.timeline_revision_id === value.current_revision.timeline_revision_id) return;
-        setTimeline(value); setWorking(value.current_revision.document); setSelection(null);
+        setTimeline(value);
+        setWorking(value.current_revision.document);
+        setSelection(previous => reconcileTimelineSelection(previous, value.current_revision.document));
       } catch (error) {
         if (!active || seq !== timelineFetchSeq.current) return;
         const code = errorCode(error);
@@ -1373,7 +1486,25 @@ export function App() {
   const totalUs = duration(working);
   // 播放/暂停统一入口：播放头停在时间线末尾时，再次播放从头开始。
   const togglePlayback = () => {
-    if (!playing && timelineEndUs > 0 && playhead >= timelineEndUs) setPlayhead(0);
+    cancelLoopRestart();
+    if (!playing && loopPlayback && playbackRange && !libraryPreviewId &&
+        (playheadStore.get() < playbackRange.startUs || playheadStore.get() >= playbackRange.endUs)) {
+      playheadStore.dispatch({ source: "user", timeUs: playbackRange.startUs });
+      const session = previewMode === "synthetic" ? previewSessionRef.current : null;
+      if (session) {
+        const epoch = ++loopSeekEpoch.current;
+        preparePreviewPlaybackRef.current?.();
+        const fps = working?.canvas.fps_num && working.canvas.fps_den ? working.canvas.fps_num / working.canvas.fps_den : 30;
+        void session.seekToFrame(Math.floor(playbackRange.startUs / 1_000_000 * fps)).then(frame => {
+          if (frame >= 0 && epoch === loopSeekEpoch.current && previewSessionRef.current === session) {
+            setPlayhead(playbackRange.startUs);
+            setPlaying(true);
+          }
+        }).catch(() => setPlaying(false));
+        return;
+      }
+      setPlayhead(playbackRange.startUs);
+    } else if (!playing && timelineEndUs > 0 && playhead >= timelineEndUs) setPlayhead(0);
     setPlaying(value => !value);
   };
   // ── 播放头命令通道（A06）──────────────────────────────────────────────────
@@ -1455,6 +1586,7 @@ export function App() {
   }, [dispatchPlayhead, previewMode, libraryPreviewId, working?.canvas.fps_num, working?.canvas.fps_den, tellMediaSeek, sortedClips]);
   /** 一次擦洗结束（松手/键盘跳转）：落到精确值并提交 React。 */
   const commitScrub = useCallback((timeUs: number) => {
+    cancelLoopRestart();
     setPlaying(false);
     dispatchPlayhead("user", timeUs, true);
     scrubToldAt.current = 0;
@@ -1501,6 +1633,24 @@ export function App() {
   const seekFromPlayback = useCallback((timeUs: number) => {
     const now = performance.now();
     if (playingRef.current) {
+      if (loopPlayback && playbackRange && !libraryPreviewId && timeUs >= playbackRange.endUs) {
+        const session = previewSessionRef.current;
+        if (!session || loopSeekPending.current) return;
+        loopSeekPending.current = true;
+        const epoch = ++loopSeekEpoch.current;
+        session.pause();
+        playheadStore.stopLine();
+        dispatchPlayhead("user", playbackRange.startUs, true);
+        const fps = working?.canvas.fps_num && working.canvas.fps_den ? working.canvas.fps_num / working.canvas.fps_den : 30;
+        void session.seekToFrame(Math.floor(playbackRange.startUs / 1_000_000 * fps)).then(frame => {
+          if (epoch !== loopSeekEpoch.current || previewSessionRef.current !== session || !playingRef.current) return;
+          loopSeekPending.current = false;
+          if (frame < 0) { setPlaying(false); return; }
+          playheadStore.startLine({ tUs: playbackRange.startUs, atMs: performance.now(), rate: Math.round(1000 * uiRate) });
+          session.play();
+        }).catch(() => { if (epoch === loopSeekEpoch.current) { loopSeekPending.current = false; setPlaying(false); } });
+        return;
+      }
       playheadDomRef.current(timeUs); // 播放中：零 React 提交
       lastReactTimeReport.current = now;
       return;
@@ -1508,16 +1658,18 @@ export function App() {
     const commit = now - lastReactTimeReport.current >= PLAYBACK_COMMIT_INTERVAL_MS;
     dispatchPlayhead("playback", timeUs, commit);
     if (commit) lastReactTimeReport.current = now;
-  }, [dispatchPlayhead]);
+  }, [dispatchPlayhead, loopPlayback, playbackRange, libraryPreviewId, playheadStore, working, uiRate]);
 
   // 循环播放（播放设置项）：到尾自动回卷续播。合成预览的会话在 EOF 停住——
   // 先回零、下一拍续播；交互预览的循环在时钟 interval 内完成，不经过这里。
   const handlePreviewEnded = useCallback(() => {
+    if (loopSeekPending.current) return;
     if (!loopPlayback) { setPlaying(false); return; }
-    dispatchPlayhead("user", 0, true);
+    dispatchPlayhead("user", playbackRange?.startUs ?? 0, true);
     setPlaying(false);
-    window.setTimeout(() => setPlaying(true), 60);
-  }, [loopPlayback, dispatchPlayhead]);
+    cancelLoopRestart();
+    loopRestartTimer.current = window.setTimeout(() => { loopRestartTimer.current = null; setPlaying(true); }, 60);
+  }, [loopPlayback, playbackRange, dispatchPlayhead]);
   // 时间线驱动播放：播放头是唯一时钟（100ms 步进推进，媒体元素跟随标尺——
   // 所见即所得：标尺在哪个片段，播放的就是那个片段的内容）。
   // 到达时间线末尾：停在末尾（不回跳、不自动续播），再次播放从头开始。
@@ -1528,8 +1680,9 @@ export function App() {
       // 本 interval 本身就是 10Hz，节流层不再叠加延迟）。
       const ph = playheadStore.get();
       const next = ph + Math.round(100_000 * uiRate);
-      if (timelineEndUs > 0 && next >= timelineEndUs) {
-        if (loopPlayback) { dispatchPlayhead("playback", 0, true); return; }
+      const endUs = loopPlayback && playbackRange ? playbackRange.endUs : timelineEndUs;
+      if (endUs > 0 && next >= endUs) {
+        if (loopPlayback) { dispatchPlayhead("playback", playbackRange?.startUs ?? 0, true); return; }
         dispatchPlayhead("playback", timelineEndUs, true);
         setPlaying(false);
         return;
@@ -1537,7 +1690,7 @@ export function App() {
       dispatchPlayhead("playback", next, true);
     }, 100);
     return () => window.clearInterval(timer);
-  }, [playing, previewMode, libraryPreviewId, timelineEndUs, playheadStore, dispatchPlayhead, uiRate, loopPlayback]);
+  }, [playing, previewMode, libraryPreviewId, timelineEndUs, playheadStore, dispatchPlayhead, uiRate, loopPlayback, playbackRange]);
   const handleVideoEnded = () => {
     // 素材箱预览只有一个媒体源，ended 才代表本次播放结束。时间线交互
     // 预览的 video 只是当前片段的源窗口：源文件 EOF 不等于时间线 EOF，
@@ -1679,11 +1832,12 @@ export function App() {
     } else { setSaveState("保存失败"); showNotice(safeErrorMessage(error, "时间线保存失败，请刷新后重试。")); }
   };
   /** 返回是否落库成功（S6 手势失败回滚用）；既有 void 调用方无需改动。 */
-  const patchTimeline = async (operations: TimelinePatchOperation[], summary: string): Promise<boolean> => {
-    if (!project || !timeline) return false;
+  const patchTimeline = async (operations: TimelinePatchOperation[], summary: string, base = timeline): Promise<boolean> => {
+    if (!project || !base) return false;
     setSaveState("保存中");
     try {
-      const next = await window.desktop.patchTimeline({ project_id: project.project_id, patch: { schema_version: 1, base_revision_id: timeline.current_revision.timeline_revision_id, operations, summary } });
+      const next = await window.desktop.patchTimeline({ project_id: project.project_id, patch: { schema_version: 1, base_revision_id: base.current_revision.timeline_revision_id, operations, summary } });
+      if (projectRef.current?.project_id !== project.project_id) return false;
       // patch 已包含草稿内容：作废挂起草稿，防止用过期 base 触发 409。
       pendingDraftRef.current = null;
       if (draftTimer.current) clearTimeout(draftTimer.current);
@@ -1691,7 +1845,10 @@ export function App() {
       setSaveState("已保存");
       return true;
     }
-    catch (error) { await handleConflict(error); return false; }
+    catch (error) {
+      if (projectRef.current?.project_id === project.project_id) await handleConflict(error);
+      return false;
+    }
   };
   // 文本素材（剪映式）：默认文本 = 在播放头处插入 3s 手工字幕；
   // 导入本地字幕 = 解析 SRT/ASS/SSA/LRC 为条目批量落库（可替换旧手工字幕）。
@@ -1756,15 +1913,15 @@ export function App() {
   const createTimeline = async (source: Parameters<typeof window.desktop.createTimeline>[0]["timeline"]["source"]) => {
     if (!project) return;
     setSaveState("保存中");
-    try { acceptState(await window.desktop.createTimeline({ project_id: project.project_id, timeline: { schema_version: 1, source, default_layout: "blurred_background", caption_preset_id: "default-bottom" } })); }
-    catch (error) { await handleConflict(error); }
+    try {
+      const created = await window.desktop.createTimeline({ project_id: project.project_id, timeline: { schema_version: 1, source, default_layout: "blurred_background", caption_preset_id: "default-bottom" } });
+      if (projectRef.current?.project_id !== project.project_id) return;
+      acceptState(created);
+      return created;
+    } catch (error) {
+      if (projectRef.current?.project_id === project.project_id) await handleConflict(error);
+    }
   };
-  const nextVideoTrackId = useCallback(() => {
-    const used = new Set((working?.tracks ?? []).map(track => track.id));
-    let number = 2;
-    while (used.has(`V${number}`)) number += 1;
-    return `V${number}`;
-  }, [working?.tracks]);
   // P1 画中画：交互预览画布上展示覆盖轨片段（V2+，轨道未隐藏）。
   // 播放头区间内的片段常驻；**被选中的覆盖轨片段无论播放头在哪都显示**——
   // 否则在时间线上选中片段调属性时，画布上没有盒子可看（"调了没效果"）。
@@ -1832,61 +1989,43 @@ export function App() {
   const overlayClipSelected = Boolean(selectedClip && selectedClip.asset_kind !== "audio" && trackById.get(selectedClip.track_id)?.kind === "video");
   const showSelBox = !overlayClipSelected;
   const pipLocked = pipSelectedId ? Boolean(working?.locked_elements?.includes(pipSelectedId)) : false;
-  const insertAsset = (item: AssetPresentation, atIndex = working?.clips.length ?? 0, trackId?: string | "new") => {
-    if (!timeline) return void createTimeline({ kind: "full_asset", asset_id: item.asset.asset_id });
-    const isVisual = item.asset.kind === "video" || item.asset.kind === "image";
-    // 自动建轨（剪映式）：视频/图片素材落到上部空白区（"new"）或文本轨上时，
-    // 先新建一条视频轨再把素材放进去；音频素材固定 A1。
-    if (isVisual && trackId === "new") {
-      const newTrackId = nextVideoTrackId();
-      void patchTimeline([
-        { op: "add_track", kind: "video" },
-        { op: "insert_asset_clip", asset_id: item.asset.asset_id, at_index: 0, track_id: newTrackId, ...(item.asset.kind === "image" ? { duration_us: 3_000_000 } : {}) },
-      ], `新增视频轨并放入 ${item.asset.display_name}`);
-      return;
-    }
-    // 目标轨道类型校验：视频/图片素材可落入任意视频轨（默认主轨 V1）。
-    let targetTrackId: string | undefined;
-    if (isVisual && trackId) {
-      const target = working?.tracks.find(track => track.id === trackId);
-      if (target?.kind === "video") targetTrackId = target.id;
-    }
-    void patchTimeline([{
-      op: "insert_asset_clip",
-      asset_id: item.asset.asset_id,
-      at_index: atIndex,
-      ...(item.asset.kind === "image" ? { duration_us: 3_000_000 } : {}),
-      ...(targetTrackId ? { track_id: targetTrackId } : {}),
-    }], `追加素材 ${item.asset.display_name}`);
-  };
   // 应用内剪贴板（M2 A3）：复制 V1 视频片段快照，粘贴回放到播放头。
   const clipboardClips = useRef<Array<{ asset_id: AssetId; asset_kind: "video" | "image"; source_start_us: number | null; source_end_us: number | null; speed_milli: number; reverse_playback: boolean; layout: TimelineLayout }>>([]);
   const insertableClipboardAssets = (snapshots: typeof clipboardClips.current) => snapshots.filter(item => {
     const asset = assets.find(candidate => candidate.asset.asset_id === item.asset_id);
     return Boolean(asset && (item.asset_kind === "image" || asset.asset.availability === "available"));
   });
-  const dropAsset = (assetId: string, atIndex: number, trackId?: string | "new") => {
-    const item = assets.find(candidate => candidate.asset.asset_id === assetId);
-    if (!item || item.asset.availability !== "available") { showNotice("该素材当前不可用，无法加入时间线。", "warning"); return; }
-    if (item.asset.kind !== "video" && item.asset.kind !== "image" && item.asset.kind !== "audio") { showNotice("该素材类型暂不支持拖入时间线。", "warning"); return; }
-    // 视频素材落到 A1 音频轨：取其音轨作为音频片段（M3-3 as_audio 语义）。
-    if (item.asset.kind === "video" && trackId === "A1") {
-      void patchTimeline([{
-        op: "insert_asset_clip",
-        asset_id: item.asset.asset_id,
-        at_index: atIndex,
-        as_audio: true,
-      }], `以音轨形式加入音频轨 ${item.asset.display_name}`).catch(() => undefined);
+  const dropAsset = async (ids: string[], atIndex: number, trackId?: string) => {
+    const byId = new Map(assets.map(({ asset }) => [asset.asset_id as string, asset]));
+    const incoming: Asset[] = [];
+    for (const id of ids) {
+      const asset = byId.get(id);
+      if (!asset || asset.availability !== "available" || !isDraggableAsset(asset.kind)) {
+        showNotice("所选素材中有不可用或不支持的文件，无法放入时间线。", "warning");
+        return;
+      }
+      incoming.push(asset);
+    }
+    if (!incoming.length) return;
+    if (!timeline && incoming.length === 1) {
+      await createTimeline({ kind: "full_asset", asset_id: incoming[0].asset_id });
       return;
     }
-    // 视频/图片素材落到文本轨上：同样自动新建视频轨（剪映式）。
-    let resolvedTrackId: string | "new" | undefined = trackId;
-    const isVisual = item.asset.kind === "video" || item.asset.kind === "image";
-    if (isVisual && typeof trackId === "string" && trackId !== "new") {
-      const target = working?.tracks.find(track => track.id === trackId);
-      if (target && target.kind !== "video") resolvedTrackId = "new";
+    if (incoming.length > 100 || (incoming.length === 100 && trackId === "new")) {
+      showNotice("这组素材超出单次时间线操作上限，请分批拖入。", "warning");
+      return;
     }
-    insertAsset(item, atIndex, resolvedTrackId);
+    const base = timeline ?? await createTimeline({ kind: "empty" });
+    if (!base || projectRef.current?.project_id !== project?.project_id) return;
+    const tracks = (working ?? base.current_revision.document).tracks;
+    const operations = planAssetDrop(incoming, tracks, atIndex, trackId);
+    if (operations.length > 100) {
+      showNotice("这组素材超出单次时间线操作上限，请分批拖入。", "warning");
+      return;
+    }
+    if (await patchTimeline(operations, incoming.length > 1 ? `批量放入 ${incoming.length} 项素材` : `放入 ${incoming[0].display_name}`, base)) {
+      exitLibraryPreview();
+    }
   };
   const insertSegments = (transcript: Transcript) => {
     const ids = selectedSegments[transcript.transcript_id] ?? [];
@@ -1925,9 +2064,11 @@ export function App() {
     setRefreshingAssets(true);
     try {
       const current = assets;
-      const refreshed = await Promise.all(current.map(async item => {
-        try { return await window.desktop.refreshAsset(item.asset.asset_id); } catch { return item; }
+      const results = await Promise.all(current.map(async item => {
+        try { return { item: await window.desktop.refreshAsset(item.asset.asset_id), failed: false }; }
+        catch { return { item, failed: true }; }
       }));
+      const refreshed = results.map(result => result.item);
       const missing = refreshed.filter(item => item.asset.availability === "missing");
       const removedIds = new Set<string>();
       for (const item of missing) {
@@ -1936,10 +2077,17 @@ export function App() {
       const kept = refreshed.filter(item => !removedIds.has(item.asset.asset_id));
       if (projectRef.current?.project_id !== projectId || projectDataEpochRef.current !== epoch) return;
       setAssets(kept);
-      if (removedIds.size > 0) {
+      const failed = results.filter(result => result.failed).length;
+      const unavailable = kept.filter(item => item.asset.availability !== "available").length;
+      if (failed || unavailable) {
+        const detail = [
+          removedIds.size && `已清理 ${removedIds.size} 项`,
+          unavailable && `${unavailable} 项不可用，已保留`,
+          failed && `${failed} 项未能检查，可重试`
+        ].filter(Boolean).join("，");
+        showNotice(`已刷新素材库：${detail}。`, "warning");
+      } else if (removedIds.size > 0) {
         showNotice(`已刷新素材库：清理了 ${removedIds.size} 个本地文件已删除的素材。`, "success");
-      } else if (missing.length > 0) {
-        showNotice(`已刷新素材库：${missing.length} 个素材本地文件缺失（仍被时间线引用，已保留）。`, "warning");
       } else {
         showNotice("已刷新素材库：所有素材文件均正常。", "success");
       }
@@ -2070,7 +2218,7 @@ export function App() {
     }
   };
   const previewFromLibrary = (item: AssetPresentation) => {
-    if (!item.media_url) return;
+    if (!item.media_url || item.asset.availability !== "available") return;
     setLibraryPreviewId(item.asset.asset_id);
     setPreviewMode("interactive");
     setExportPlayback(undefined);
@@ -2083,30 +2231,47 @@ export function App() {
     if (previewMode === "interactive" && !syntheticNotice) setPreviewMode("synthetic");
   };
   const isDraggableAsset = (kind: AssetKind) => kind === "video" || kind === "image" || kind === "audio";
-  // 素材类型图标（列表行的类型标识，替代文字标签——剪映式）。
-  const assetKindIcon = (kind: AssetKind) =>
-    kind === "video" ? <Video /> : kind === "audio" ? <FileAudio /> : kind === "image" ? <ImagePlus /> : <FileText />;
   const assetThumb = (item: AssetPresentation) => (
-    <div className="asset-thumb">
+    <span className="asset-thumb">
       {item.asset.kind === "image"
         ? <img src={item.media_url ?? undefined} alt="" loading="lazy" />
         : item.asset.kind === "video"
           ? <video src={item.media_url ?? undefined} muted preload="metadata" aria-hidden="true" />
-          : <FileAudio className="asset-thumb-icon" aria-hidden="true" />}
+          : item.asset.kind === "audio"
+            ? <AudioLines className="asset-thumb-icon" aria-hidden="true" />
+            : <FileText className="asset-thumb-icon" aria-hidden="true" />}
       {/* 仅异常态显示角标（缺失/已变更/不支持）；可用是常态，不占视觉。 */}
       {item.asset.availability !== "available" && <span className={`availability ${item.asset.availability}`}>{availabilityLabels[item.asset.availability]}</span>}
-    </div>
+    </span>
   );
-  const assetActions = (item: AssetPresentation) => (
-    <div className="asset-actions">
-      <IconButton label={`预览播放 ${item.asset.display_name}`} disabled={item.asset.availability !== "available"} onClick={() => previewFromLibrary(item)}><Play size={13} /></IconButton>
-      {isTranscribable(item.asset) && <IconButton label="转录" onClick={() => startTranscription(item.asset)}><FileText size={13} /></IconButton>}
-      {item.asset.kind === "video" && item.asset.availability === "available" && <IconButton label="剪辑手法" disabled={cvBusy !== null} onClick={() => openEditingTools("remove_pauses")}><Scissors size={13} /></IconButton>}
-      {item.asset.kind === "video" && item.asset.availability === "available" && <IconButton label="AI 信号分析" disabled={cvBusy !== null} onClick={() => { setCvOptionsAsset(item); setCvOptionsOpen(true); setCvTargetGapS(""); setCvBudgetPerMin(""); }}><Sparkles size={13} /></IconButton>}
-      <IconButton label={`打开 ${item.asset.display_name} 所在文件夹`} onClick={() => void revealAsset(item.asset)}><FolderOpen size={13} /></IconButton>
-      <IconButton label={`删除 ${item.asset.display_name}`} onClick={() => setPendingDeleteAsset(item.asset)}><Trash2 size={13} /></IconButton>
-    </div>
-  );
+  const usedAssetIds = useMemo(() => new Set(working?.clips.map(clip => clip.asset_id)), [working?.clips]);
+  const assetActionItems = (item: AssetPresentation) => {
+    const { asset } = item;
+    const actions: (ContextMenuItem & { onSelect: () => void })[] = [{
+      id: "preview", label: `预览播放 ${asset.display_name}`, icon: <Play size={13} />,
+      disabled: asset.availability !== "available" || !item.media_url,
+      onSelect: () => previewFromLibrary(item)
+    }];
+    if (isTranscribable(asset)) {
+      actions.push({ id: "transcribe", label: "转录", icon: <FileText size={13} />, onSelect: () => startTranscription(asset) });
+    }
+    if (asset.kind === "video" && asset.availability === "available") {
+      actions.push(
+        { id: "edit", label: "剪辑手法", icon: <Scissors size={13} />, disabled: cvBusy !== null, onSelect: () => openEditingTools("remove_pauses") },
+        {
+          id: "analyze", label: "AI 信号分析", icon: <Sparkles size={13} />, disabled: cvBusy !== null,
+          onSelect: () => { setCvOptionsAsset(item); setCvOptionsOpen(true); setCvTargetGapS(""); setCvBudgetPerMin(""); }
+        }
+      );
+    }
+    actions.push(
+      { id: "favorite", label: favoriteAssetIds.has(asset.asset_id) ? "取消收藏" : "收藏素材", icon: <Star size={13} />,
+        onSelect: () => setAssetFavorites(ids => ids.includes(asset.asset_id) ? ids.filter(id => id !== asset.asset_id) : [...ids, asset.asset_id]) },
+      { id: "reveal", label: `打开 ${asset.display_name} 所在文件夹`, icon: <FolderOpen size={13} />, onSelect: () => void revealAsset(asset) },
+      { id: "delete", label: `删除 ${asset.display_name}`, icon: <Trash2 size={13} />, danger: true, onSelect: () => setPendingDeleteAsset(asset) }
+    );
+    return actions;
+  };
   // AI-2：CV 摘要文本行（视频条目副标题下方；状态 + 采样数 + 场景切换数 + 密度）。
   const cvSummaryText = (asset: Asset): string | undefined => {
     const summary = cvSummaries[asset.asset_id];
@@ -2142,7 +2307,6 @@ export function App() {
   // 素材元信息行：视频=高度p · 帧率fps · 体积；音频=编码 · 体积；图片=体积（时长单独展示在行尾）。
   const assetMediaInfo = (asset: Asset): MediaInfo | undefined => (asset.media_info && typeof asset.media_info === "object" && "video_streams" in asset.media_info ? asset.media_info as MediaInfo : undefined);
   const formatAssetSize = (bytes: number) => bytes >= 1_073_741_824 ? `${(bytes / 1_073_741_824).toFixed(1)} GB` : bytes >= 1_048_576 ? `${Math.round(bytes / 1_048_576)} MB` : `${Math.max(1, Math.round(bytes / 1_024))} KB`;
-  const assetMetaIcon = (asset: Asset) => asset.kind === "audio" ? <Music size={12} /> : <Monitor size={12} />;
   const assetMetaText = (asset: Asset) => {
     const info = assetMediaInfo(asset);
     const size = formatAssetSize(asset.size_bytes);
@@ -2235,8 +2399,14 @@ export function App() {
     return maxShort > 0 ? Math.min(maxShort, 2160) : null;
   }, [assets]);
   const assetDragProps = (item: AssetPresentation) => ({
-    draggable: isDraggableAsset(item.asset.kind),
-    onDragStart: (event: React.DragEvent) => { if (isDraggableAsset(item.asset.kind)) { event.dataTransfer.setData("application/x-vortex-cut-asset", item.asset.asset_id); event.dataTransfer.effectAllowed = "copy"; } },
+    draggable: isDraggableAsset(item.asset.kind) && item.asset.availability === "available",
+    onDragStart: (event: React.DragEvent) => {
+      if (!isDraggableAsset(item.asset.kind) || item.asset.availability !== "available") { event.preventDefault(); return; }
+      const ids = draggedAssetIds(item.asset.asset_id, visibleAssetOrder, selectedAssetIds);
+      if (ids.length > 1) event.dataTransfer.setData(ASSET_BATCH_DRAG, JSON.stringify(ids));
+      else event.dataTransfer.setData(ASSET_DRAG, ids[0]);
+      event.dataTransfer.effectAllowed = "copy";
+    },
     title: isDraggableAsset(item.asset.kind) ? "拖到 V1 时间线以插入；双击在预览播放" : undefined,
   });
   // 点击预览画面：选中播放头处的片段（剪映式选中），无片段时清空选择。
@@ -2668,7 +2838,7 @@ export function App() {
       case "play.pause": return previewAsset?.media_url ? undefined : "需要预览素材";
       case "timeline.undo": return timeline?.can_undo ? undefined : "没有可撤销的操作";
       case "timeline.redo": return timeline?.can_redo ? undefined : "没有可重做的操作";
-      case "timeline.split": if (!timeline) return "需要时间线"; if (!selectedClip) return "请先选择时间线片段"; return undefined;
+      case "timeline.split": if (!selectedClips.length) return "请先选择时间线片段"; return splitSelectionAt(selectedClips, playheadStore.get(), working).length ? undefined : "请把播放头移到可拆分的选中视频片段内";
       case "timeline.copy": if (!timeline) return "需要时间线"; if (selectedClips.length === 0) return "请先选择要复制的片段"; return undefined;
       case "timeline.cut": if (!timeline) return "需要时间线"; if (selectedClips.length === 0 && !selectedCaption) return "请先选择要剪切的片段"; return undefined;
       case "timeline.paste": if (!clipboardClips.current.length) return "剪贴板为空，请先复制片段"; if (!project || !timeline) return "需要项目和时间线"; return insertableClipboardAssets(clipboardClips.current).length === clipboardClips.current.length ? undefined : "部分素材不可用或类型不支持粘贴";
@@ -2698,9 +2868,11 @@ export function App() {
       case "play.pause": togglePlayback(); break;
       case "timeline.undo": void undoRedo("undo"); break;
       case "timeline.redo": void undoRedo("redo"); break;
-      case "timeline.split":
-        if (selectedClip) void patchTimeline([{ op: "split_clip", clip_id: selectedClip.clip_id, source_time_us: selectedClip.source_start_us! + Math.floor((selectedClip.source_end_us! - selectedClip.source_start_us!) / 2) }], "拆分片段");
+      case "timeline.split": {
+        const operations = splitSelectionAt(selectedClips, playheadStore.get(), working);
+        if (operations.length) void patchTimeline(operations, "在播放头处拆分");
         break;
+      }
       case "timeline.copy": {
         // P231 Q2：复制扩展到全视觉轨（不再限定 V1）。
         const snapshot = selectedClips
@@ -2719,6 +2891,10 @@ export function App() {
         break;
       }
       case "timeline.cut": {
+        if (selectedClips.some(item => item.link_group_id)) {
+          showNotice("链接片段暂不支持剪切粘贴，请先取消链接。", "info");
+          break;
+        }
         // 复用复制快照逻辑后按删除路径移除（撤销可恢复）。
         // P231 Q2：剪切扩展到全视觉轨（不再限定 V1）。
         const snapshot = selectedClips
@@ -2732,10 +2908,14 @@ export function App() {
             reverse_playback: item.reverse_playback ?? false,
             layout: item.layout,
           }));
-        const deletable = selectedClips.filter(item => !working?.locked_elements?.includes(item.clip_id));
-        if (!deletable.length) break;
+        const prefs = readTimelineBehaviorPrefs();
+        const cutPlan = prefs.mainTrackMagnet && working && selectedClips.some(clip => clip.track_id === "V1")
+          ? planMagneticDelete(working, selectedClips, prefs.linkageEnabled)
+          : { operations: removeLinkedClips(selectedClips, working) };
+        const deletable = cutPlan.operations;
+        if (!deletable.length) { if (cutPlan.reason) showNotice(cutPlan.reason, "info"); break; }
         clipboardClips.current = snapshot;
-        void patchTimeline(deletable.map(item => ({ op: "remove_clip", clip_id: item.clip_id })), "剪切片段").then(() => showNotice(`已剪切 ${deletable.length} 个片段（Cttable.length} 个片段（Ctrl+V 粘贴）。`));
+        void patchTimeline(deletable, prefs.mainTrackMagnet ? "主轨磁吸剪切" : "剪切片段").then(() => showNotice(`已剪切 ${deletable.length} 组片段（Ctrl+V 粘贴）。`));
         break;
       }
       case "timeline.paste": {
@@ -2764,8 +2944,12 @@ export function App() {
       case "timeline.delete":
         if (selectedCaption) void patchTimeline([{ op: "remove_caption", caption_id: selectedCaption.caption_id }], "删除字幕");
         else if (selectedClips.length > 0) {
-          const deletable = selectedClips.filter(item => !working?.locked_elements?.includes(item.clip_id));
-          if (deletable.length > 0) void patchTimeline(deletable.map(item => ({ op: "remove_clip", clip_id: item.clip_id })), "删除片段");
+          const prefs = readTimelineBehaviorPrefs();
+          const plan = prefs.mainTrackMagnet && working && selectedClips.some(clip => clip.track_id === "V1")
+            ? planMagneticDelete(working, selectedClips, prefs.linkageEnabled)
+            : { operations: removeLinkedClips(selectedClips, working) };
+          if (plan.operations.length > 0) void patchTimeline(plan.operations, prefs.mainTrackMagnet ? "主轨磁吸删除" : "删除片段");
+          else if (plan.reason) showNotice(plan.reason, "info");
         }
         break;
       case "preview.generate": void generatePreview(); break;
@@ -2775,7 +2959,7 @@ export function App() {
       case "project.manage": setProjectDialogOpen(true); break;
       case "project.refresh": void refreshProjects(); break;
       case "timeline.create": void createTimeline({ kind: "empty" }); break;
-      case "ui.resetLayout": setLeftWidth(280); setRightWidth(300); setTimelineHeight(230); break;
+      case "ui.resetLayout": setLeftWidth(320); setRightWidth(300); setTimelineHeight(230); break;
       case "ui.shortcuts": setShortcutsOpen(true); break;
       case "tools.compare": void openRevisionCompare(); break;
       case "tools.shots": setShotRequirementsOpen(true); break;
@@ -2813,7 +2997,16 @@ export function App() {
     const inTimeline = Boolean(target?.closest?.(".timeline-pane"));
     // C3：固定别名（不进自定义表）——Ctrl+Shift+Z 重做、Backspace/Delete 删除。
     if ((event.ctrlKey || event.metaKey) && event.shiftKey && key === "z") { event.preventDefault(); runCommand("timeline.redo"); return; }
-    if (!(event.ctrlKey || event.metaKey) && (key === "backspace" || key === "delete") && inTimeline) { event.preventDefault(); runCommand("timeline.delete"); return; }
+    if (!(event.ctrlKey || event.metaKey) && (key === "backspace" || key === "delete") && inTimeline) {
+      event.preventDefault();
+      if (event.shiftKey && working) {
+        if (!selectedClips.some(clip => clip.track_id === "V1")) { showNotice("请选择主轨片段后波纹删除。", "info"); return; }
+        const plan = planMagneticDelete(working, selectedClips, readTimelineBehaviorPrefs().linkageEnabled);
+        if (plan.operations.length) void patchTimeline(plan.operations, "主轨波纹删除");
+        else if (plan.reason) showNotice(plan.reason, "info");
+      } else runCommand("timeline.delete");
+      return;
+    }
     // 方向键逐帧步进（C1）：1 帧，Shift 加速 5 帧。
     if (!(event.ctrlKey || event.metaKey) && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
       if (inTimeline) {
@@ -3152,10 +3345,73 @@ export function App() {
     项目: [{ label: "项目管理", icon: FolderCog, action: () => setProjectDialogOpen(true) }, { label: "刷新项目", icon: RefreshCw, action: () => void refreshProjects() }],
     编辑: [{ label: "撤销", icon: Undo2, action: () => void undoRedo("undo"), disabled: Boolean(commandDisabledReason("timeline.undo")) }, { label: "重做", icon: Redo2, action: () => void undoRedo("redo"), disabled: Boolean(commandDisabledReason("timeline.redo")) }],
     时间线: [{ label: "创建空时间线", icon: SquarePlus, action: () => void createTimeline({ kind: "empty" }), disabled: Boolean(commandDisabledReason("timeline.create")) }, { divider: true }, { label: "拆分所选片段", icon: Scissors, action: () => runCommand("timeline.split"), disabled: Boolean(commandDisabledReason("timeline.split")) }, { label: "生成预览", icon: MonitorPlay, action: () => runCommand("preview.generate"), disabled: Boolean(commandDisabledReason("preview.generate")) }, { label: "导出", icon: Upload, action: () => runCommand("export.open"), disabled: Boolean(commandDisabledReason("export.open")) }],
-    界面: [{ label: "恢复默认布局", icon: LayoutPanelLeft, action: () => { setLeftWidth(280); setRightWidth(300); setTimelineHeight(230); } }, { label: "命令搜索", icon: CommandIcon, action: () => setCommandSearchOpen(true) }, { label: "快捷键设置", icon: Keyboard, action: () => setShortcutsOpen(true) }],
+    界面: [{ label: "恢复默认布局", icon: LayoutPanelLeft, action: () => { setLeftWidth(320); setRightWidth(300); setTimelineHeight(230); } }, { label: "命令搜索", icon: CommandIcon, action: () => setCommandSearchOpen(true) }, { label: "快捷键设置", icon: Keyboard, action: () => setShortcutsOpen(true) }],
     工具: [{ group: "AI" }, { label: "Provider 设置", icon: FolderCog, action: () => setProviderSettingsOpen(true) }, { label: "AI 助手", icon: WandSparkles, action: () => setAgentOpen(true), disabled: !project }, { label: "AI 工作单", icon: WandSparkles, action: () => setWorklistOpen(true), disabled: !project }, { label: "AI 粗剪", icon: Sparkles, action: () => void openAi(), disabled: Boolean(commandDisabledReason("ai.open")) }, { label: "AI 修改", icon: WandSparkles, action: () => void openPatch(), disabled: Boolean(commandDisabledReason("ai.revise")) }, { label: "剪辑手法", icon: Scissors, action: () => openEditingTools("remove_pauses"), disabled: !project }, { label: "机位同步", icon: Video, action: () => setAngleSyncOpen(true), disabled: !project }, { label: "素材语义检索", icon: Search, action: () => setSemanticSearchOpen(true), disabled: !project }, { label: "关键帧外传审阅", icon: ImageIcon, action: () => setKeyframeReviewOpen(true), disabled: !project || !selectedAssetId }, { label: "剪辑语法（高级）", icon: Scissors, action: () => { setEditingToolsTool(null); setEditingGrammarOpen(true); }, disabled: !project }, { label: "版本比较", icon: GitCompare, action: () => void openRevisionCompare(), disabled: Boolean(commandDisabledReason("tools.compare")) }, { divider: true }, { label: "镜头需求", icon: Clapperboard, action: () => setShotRequirementsOpen(true), disabled: Boolean(commandDisabledReason("tools.shots")) }, { label: "生成验证（模拟）", icon: FlaskConical, action: () => setGenerationOpen(true), disabled: Boolean(commandDisabledReason("tools.verify")) }, { label: "真实图片生成", icon: ImageIcon, action: () => setProviderImageGenerationOpen(true), disabled: Boolean(commandDisabledReason("tools.imageGen")) }],
     帮助: [{ label: "用户使用手册", icon: BookOpen, action: () => showNotice("请查看 docs/requirements/VORTEX_CUT_USER_MANUAL.md", "info") }]
   };
+  const openProjects = openProjectIds.flatMap(id => {
+    const item = id === project?.project_id ? project : projects.find(candidate => candidate.project_id === id);
+    return item ? [item] : [];
+  });
+  const closeProjectTab = (item: Project) => {
+    const index = openProjects.indexOf(item);
+    const next = openProjects[index + 1] ?? openProjects[index - 1];
+    if (item.project_id === project?.project_id && !next) return;
+    setOpenProjectIds(ids => ids.filter(id => id !== item.project_id));
+    if (next && item.project_id === project?.project_id) switchProject(next);
+  };
+  const changeLibraryScope = (scope: typeof libraryScope, kind: AssetFilter = "all") => {
+    resetAssetSelection();
+    setLibraryScope(scope);
+    setAssetFilter(kind);
+    setAssetQuery("");
+  };
+  const alignmentCanvas = working && alignmentPreviewSize[renderRatio];
+  const alignmentSubjects = alignmentCanvas ? selectedClips.flatMap(clip => {
+    const source = assets.find(({ asset }) => asset.asset_id === clip.asset_id)?.asset;
+    const box = alignmentBox(clip, source, alignmentCanvas);
+    return box ? [{ clip, box }] : [];
+  }) : [];
+  const alignmentHint = selectedClips.some(clip => clip.asset_kind === "audio")
+    ? "仅支持视频和图片片段对齐。"
+    : selectedClips.some(clip => working?.locked_elements?.includes(clip.clip_id) || trackById.get(clip.track_id)?.locked)
+      ? "选中片段或所在轨道已锁定。"
+      : selectedClips.some(clip => clip.keyframes?.position || clip.keyframes?.scale || clip.keyframes?.rotate)
+        ? "带位置、缩放或旋转关键帧的片段暂不支持静态对齐。"
+        : alignmentSubjects.length !== selectedClips.length ? "素材尺寸尚未就绪。" : undefined;
+  const visualSelectedCount = selectedClips.filter(clip => clip.asset_kind !== "audio").length;
+  const alignSelectedFrames = (edge: AlignEdge) => {
+    if (!alignmentCanvas || alignmentHint) return;
+    const operations = planFrameAlignment(edge, alignmentCanvas, alignmentSubjects);
+    if (operations === null || operations.length > 100) {
+      showNotice("这组片段无法一次对齐，请调整缩放或减少选择。", "warning");
+    } else if (operations.length) {
+      void patchTimeline(operations, alignmentSubjects.length === 1 ? "对齐到画布" : "对齐选中片段");
+    }
+  };
+  const distributeSelectedFrames = (axis: AlignDistribution) => {
+    if (!alignmentCanvas || alignmentHint || visualSelectedCount < 3) return;
+    const operations = planFrameDistribution(axis, alignmentCanvas, alignmentSubjects);
+    if (operations === null || operations.length > 100) {
+      showNotice("这组片段无法一次等距分布，请调整缩放或减少选择。", "warning");
+    } else if (operations.length) {
+      void patchTimeline(operations, axis === "horizontal" ? "水平等距分布选中片段" : "垂直等距分布选中片段");
+    }
+  };
+  const selectionBounds = alignmentCanvas && !alignmentHint ? groupFrameBounds(alignmentSubjects) : null;
+  const groupBounds = alignmentCanvas && selectionBounds
+    ? { ...selectionBounds, canvasWidth: alignmentCanvas.width, canvasHeight: alignmentCanvas.height }
+    : undefined;
+  const editGroupBounds = (field: GroupBoundsField, value: number) => {
+    if (!alignmentCanvas || !groupBounds) return;
+    const operations = planGroupBoundsEdit(field, value, alignmentCanvas, alignmentSubjects);
+    if (!operations || operations.length > 100) {
+      showNotice("选区超出可用的移动或缩放范围，请调整数值或减少选择。", "warning");
+    } else if (operations.length) {
+      void patchTimeline(operations, field === "x" || field === "y" ? "移动选中画面" : "等比缩放选中画面");
+    }
+  };
+
   return <main className="editor-shell" style={{ "--left-width": `${leftWidth}px`, "--right-width": `${rightWidth}px`, "--timeline-height": `${timelineHeight}px` } as React.CSSProperties} onClick={() => activeMenu && setActiveMenu(null)}>
     <div className="editor-titlebar">
       <div className="custom-titlebar-drag">
@@ -3163,6 +3419,8 @@ export function App() {
           <span className="brand-mark"><img src="./icons/256.png" alt="" /></span>
           <strong>Vortex Cut</strong>
         </div>
+        <ProjectTabStrip projects={openProjects} current={project} onSelect={switchProject} onClose={closeProjectTab}
+          onNew={() => setProjectDialogOpen(true)} />
         <nav className="menu-bar" aria-label="主菜单" onKeyDown={handleMenuBarKeyDown}>
           {Object.keys(menuItems).map((menu, menuPosition) => <div className="menu-item" key={menu}>
             <button ref={element => { menuButtonRefs.current[menuPosition] = element; }} aria-haspopup="menu" aria-expanded={activeMenu === menu} aria-controls={activeMenu === menu ? `menu-${menu}` : undefined} onClick={event => { event.stopPropagation(); setActiveMenu(activeMenu === menu ? null : menu); setDropdownIndex(0); }} onMouseEnter={() => { if (activeMenu) { setActiveMenu(menu); setDropdownIndex(0); } }}>{menu}</button>
@@ -3191,24 +3449,152 @@ export function App() {
     <div className="editor-workspace">
       <section className={"library-pane" + (leftPaneOpen ? "" : " pane-closed")} aria-label="媒体库" hidden={!leftPaneOpen}>
         <div className="left-seg" role="tablist" aria-label="工作区分区">
-          <button role="tab" aria-selected={tab === "assets"} className={tab === "assets" ? "active" : ""} onClick={() => setTab("assets")}>素材</button>
-          <button role="tab" aria-selected={tab === "transcripts"} className={tab === "transcripts" ? "active" : ""} onClick={() => setTab("transcripts")}>转录</button>
-          <button role="tab" aria-selected={tab === "models"} className={tab === "models" ? "active" : ""} onClick={() => setTab("models")}>模型</button>
-          <button role="tab" aria-selected={tab === "jobs"} className={tab === "jobs" ? "active" : ""} onClick={() => setTab("jobs")}>任务</button>
+          <button role="tab" aria-selected={tab === "assets"} className={tab === "assets" ? "active" : ""} onClick={() => setTab("assets")}><Clapperboard size={15} aria-hidden="true" />素材</button>
+          <button role="tab" aria-selected={tab === "transcripts"} className={tab === "transcripts" ? "active" : ""} onClick={() => setTab("transcripts")}><Captions size={15} aria-hidden="true" />转录</button>
+          <button role="tab" aria-selected={tab === "models"} className={tab === "models" ? "active" : ""} onClick={() => setTab("models")}><Archive size={15} aria-hidden="true" />模型</button>
+          <button role="tab" aria-selected={tab === "jobs"} className={tab === "jobs" ? "active" : ""} onClick={() => setTab("jobs")}><History size={15} aria-hidden="true" />任务</button>
         </div>
-        {tab === "assets" ? <>
+        {tab === "assets" ? <div className="asset-drawer">
+        <nav className="asset-category-rail" aria-label="素材分类">
+          <button type="button" aria-pressed={libraryScope === "import" && assetFilter === "all"} onClick={() => changeLibraryScope("import")}>导入</button>
+          <button type="button" aria-pressed={libraryScope === "favorites"} onClick={() => changeLibraryScope("favorites")}>收藏</button>
+          {assetKinds.map(kind => <button type="button" key={kind} aria-pressed={libraryScope === "import" && assetFilter === kind}
+            onClick={() => changeLibraryScope("import", kind)}>{assetKindLabels[kind]}</button>)}
+        </nav>
+        <div className="asset-drawer-content">
+        {libraryScope === "import" && <>
         <div className="library-toolbar">{["video", "audio", "image"].map(kind => <button key={kind} disabled={!project || project.status !== "active"} onClick={() => void importAsset(kind as AssetKind)} title={`导入${assetKindLabels[kind as AssetKind]}素材`} aria-label={`导入${assetKindLabels[kind as AssetKind]}`}><span className="lib-card-ico">{kind === "video" ? <Video size={17} /> : kind === "audio" ? <AudioLines size={17} /> : <ImagePlus size={17} />}</span><span>{assetKindLabels[kind as AssetKind]}</span></button>)}</div>
         <div className="text-materials" aria-label="文本素材"><button disabled={!project || project.status !== "active"} onClick={() => void insertDefaultText()} title="插入到播放头处（3 秒）"><Type size={13} />默认文本</button><button disabled={!project || project.status !== "active"} onClick={() => void importSubtitleFile()} title="支持 SRT / ASS / SSA / LRC"><Captions size={13} />导入字幕</button></div>
-        <div className="library-filter-toolbar"><input role="searchbox" type="search" aria-label="搜索素材" placeholder="搜索素材" value={assetQuery} onChange={event => setAssetQuery(event.target.value)} /><select aria-label="素材类型" value={assetFilter} onChange={event => setAssetFilter(event.target.value as AssetFilter)}><option value="all">全部</option>{assetKinds.map(kind => <option value={kind} key={kind}>{assetKindLabels[kind]}</option>)}</select><IconButton label="刷新素材库" disabled={refreshingAssets || !project} onClick={() => void refreshAssets()}><RefreshCw size={13} className={refreshingAssets ? "spin" : ""} /></IconButton></div>
-        <div className="asset-list asset-table">{visibleAssets.map(item => <div className={`asset-item asset-row ${selectedAssetId === item.asset.asset_id ? "sel" : ""} ${isDraggableAsset(item.asset.kind) ? "draggable-asset" : ""}`} key={item.asset.asset_id} onClick={() => setSelectedAssetId(item.asset.asset_id)} onDoubleClick={() => previewFromLibrary(item)} {...assetDragProps(item)}><div className="asset-thumb">{item.asset.kind === "image" ? <img src={item.media_url ?? undefined} alt="" loading="lazy" /> : item.asset.kind === "video" ? <video src={item.media_url ?? undefined} muted preload="metadata" aria-hidden="true" /> : <FileAudio className="asset-thumb-icon" />}</div><div className="asset-name"><strong title={item.asset.display_name}>{item.asset.display_name}</strong><small>{assetMetaIcon(item.asset)}{assetMetaText(item.asset)}{cvSummaryText(item.asset) ? ` · ${cvSummaryText(item.asset)}` : ""}</small>{item.asset.kind === "video" && cvSummaries[item.asset.asset_id]?.status === "ready" && <button className="cv-spark-toggle" aria-label={`展开 ${item.asset.display_name} 的信号曲线`} onClick={event => { event.stopPropagation(); toggleCvSpark(item.asset); }}>{cvSparkAssetId === item.asset.asset_id ? "收起信号" : "信号曲线"}</button>}{cvSparkAssetId === item.asset.asset_id && item.asset.asset_id === cvSparkAssetId && <div className="cv-spark" onClick={event => event.stopPropagation()}>{cvSparkSamples === null ? <small>加载中…</small> : cvSparkSamples.length < 2 ? <small>暂无样本数据</small> : <><svg viewBox="0 0 100 1" preserveAspectRatio="none" aria-label="CV 信号曲线"><path d={cvSparkPath(cvSparkSamples, "motion_energy")} fill="none" stroke="#7aa2f7" strokeWidth="0.02" /><path d={cvSparkPath(cvSparkSamples, "audio_energy")} fill="none" stroke="#9ece6a" strokeWidth="0.02" opacity="0.7" />{cvSparkSamples.filter(s => s.scene_cut).map((s, i) => <line key={i} x1={(s.timestamp_us / (cvSparkSamples[cvSparkSamples.length - 1]?.timestamp_us || 1)) * 100} y1={0} x2={(s.timestamp_us / (cvSparkSamples[cvSparkSamples.length - 1]?.timestamp_us || 1)) * 100} y2={1} stroke="#f7768e" strokeWidth={0.03} />)}</svg><small className="cv-spark-legend"><span style={{ color: "#7aa2f7" }}>运动能量</span> · <span style={{ color: "#9ece6a" }}>音频能量</span> · <span style={{ color: "#f7768e" }}>场景切换</span></small></>}</div>}</div><div className="asset-side"><span className="asset-dur">{assetDurationLabel(item.asset)}</span>{assetActions(item)}</div></div>)}</div>
-      </> : tab === "transcripts" ? <div className="transcript-list"><p className="panel-hint">只读展示语音识别结果；点开一条记录后勾选片段，可追加到时间线并生成字幕。</p>{transcriptRows.length === 0 && <p className="panel-hint">尚未生成转录：在"素材"页对视频/音频素材点击"转录"按钮后，结果会出现在这里。</p>}{transcriptRows.map(({ summary, assetName }) => { const loaded = loadedTranscript(summary.transcript_id); return <div className="transcript-item" key={summary.transcript_id}><div className="transcript-item-head"><button className="transcript-open-button" aria-label={`查看转录 ${summary.transcript_id}`} onClick={() => void viewTranscript(summary)} title="查看并选择转录片段"><strong title={assetName}>{assetName}</strong><small>{transcriptStatusLabels[summary.status]} · {summary.language}{loaded ? ` · ${loaded.segments.length} 段` : ""} · 点击查看内容与操作</small></button><IconButton label={`删除转录 ${summary.transcript_id}`} onClick={() => openDeleteTranscriptDialog(summary)}><Trash2 size={13} /></IconButton></div></div>; })}</div>
+        </>}
+        <div className="library-filter-toolbar">
+          <label className="asset-search">
+            <Search size={14} aria-hidden="true" />
+            <input type="search" aria-label="搜索素材" placeholder="搜索" value={assetQuery} onChange={event => setAssetQuery(event.target.value)} />
+          </label>
+          <button type="button" className="icon-btn" aria-label={assetView === "grid" ? "切换到列表视图" : "切换到网格视图"}
+            title={assetView === "grid" ? "切换到列表视图" : "切换到网格视图"} onClick={() => changeAssetView(assetView === "grid" ? "list" : "grid")}>
+            {assetView === "grid" ? <List size={15} aria-hidden="true" /> : <LayoutGrid size={15} aria-hidden="true" />}
+          </button>
+          <select aria-label="素材类型" value={assetFilter} onChange={event => setAssetFilter(event.target.value as AssetFilter)}>
+            <option value="all">全部</option>
+            {assetKinds.map(kind => <option value={kind} key={kind}>{assetKindLabels[kind]}</option>)}
+          </select>
+          <button type="button" className="icon-btn" aria-label="按名称排序" aria-pressed={assetSortByName}
+            title={assetSortByName ? "恢复默认排序" : "按名称排序"} onClick={() => setAssetSortByName(value => !value)}>
+            <ArrowUpDown size={15} aria-hidden="true" />
+          </button>
+          <IconButton label={refreshingAssets ? "正在刷新素材库" : "刷新素材库"} disabled={refreshingAssets || !project} onClick={() => void refreshAssets()}>
+            <RefreshCw size={15} className={refreshingAssets ? "spin" : ""} />
+          </IconButton>
+        </div>
+        <div className="asset-library-status" role="status">
+          {refreshingAssets ? "正在检查本地素材…" : `${libraryScope === "favorites" ? "收藏" : assetFilter === "all" ? "全部" : assetKindLabels[assetFilter]} · ${visibleAssets.length} 项${selectedAssetIds.size > 1 ? ` · 已选 ${selectedAssetIds.size} 项` : ""}`}
+        </div>
+        {visibleAssets.length === 0 && <div className="asset-library-empty">
+          <Clapperboard size={22} aria-hidden="true" />
+          <span>{!project ? "请先打开项目" : assetQuery.trim() || assetFilter !== "all" ? "没有匹配的素材" : libraryScope === "favorites" ? "还没有收藏的素材" : "还没有素材，请先导入"}</span>
+          {(assetQuery.trim() || assetFilter !== "all") && <button type="button" onClick={() => { setAssetQuery(""); setAssetFilter("all"); }}>清除筛选</button>}
+        </div>}
+        <div className={`asset-list asset-table asset-view-${assetView}`} aria-label="项目素材">
+          {visibleAssets.map(item => {
+            const { asset } = item;
+            const selected = selectedAssetIds.has(asset.asset_id);
+            const duration = assetDurationLabel(asset);
+            const cvSummary = cvSummaryText(asset);
+            const sparkOpen = cvSparkAssetId === asset.asset_id;
+            const openAssetMenu = (trigger: HTMLButtonElement, x: number, y: number) => {
+              if (!selected) selectAsset(asset.asset_id);
+              setAssetMenu({ id: asset.asset_id, trigger, x, y });
+            };
+            return <div className={`asset-item asset-row${selected ? " sel" : ""}${isDraggableAsset(asset.kind) ? " draggable-asset" : ""}`}
+              key={asset.asset_id} {...assetDragProps(item)}
+              onDoubleClick={event => {
+                const target = event.target as Element;
+                if (target === event.currentTarget || target.closest(".asset-select")) previewFromLibrary(item);
+              }}
+              onContextMenu={event => {
+                const trigger = event.currentTarget.querySelector<HTMLButtonElement>(".asset-select");
+                if (trigger) {
+                  event.preventDefault();
+                  openAssetMenu(trigger, event.clientX, event.clientY);
+                }
+              }}
+              onKeyDown={event => {
+                if (event.key === "Escape" && event.currentTarget.querySelector(".asset-actions")?.contains(event.target as Node)) {
+                  event.stopPropagation();
+                  event.currentTarget.querySelector<HTMLButtonElement>(".asset-select")?.focus();
+                }
+              }}>
+              <button type="button" className="asset-select" data-asset-id={asset.asset_id} aria-pressed={selected} aria-haspopup="menu"
+                aria-label={`${asset.display_name}，${assetKindLabels[asset.kind]}${asset.availability === "available" ? "" : `，${availabilityLabels[asset.availability]}`}`}
+                title={asset.display_name} onClick={event => selectAsset(asset.asset_id, event)}
+                onKeyDown={event => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    selectAsset(asset.asset_id);
+                    previewFromLibrary(item);
+                  } else if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    openAssetMenu(event.currentTarget, rect.left, rect.bottom);
+                  } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setPickedAssetIds(visibleAssetOrder);
+                  } else if (event.key === "Escape") {
+                    event.stopPropagation();
+                    resetAssetSelection();
+                  } else {
+                    const next = navigateAssetLibrary(event, assetView);
+                    if (next) selectAsset(next, event);
+                  }
+                }}>
+                <span className="asset-select-media">
+                  {assetThumb(item)}
+                  {usedAssetIds.has(asset.asset_id) && <span className="asset-used">已添加</span>}
+                  {favoriteAssetIds.has(asset.asset_id) && <span className="asset-favorite-mark"><Star size={11} fill="currentColor" aria-label="已收藏" /></span>}
+                  {duration !== "—" && <span className="asset-time-badge">{duration}</span>}
+                </span>
+                <span className="asset-filename">{asset.display_name}</span>
+                <span className="asset-row-meta" title={assetMetaText(asset)}>{assetMetaText(asset)}</span>
+                <span className="asset-row-time">{duration}</span>
+              </button>
+              <div className="asset-actions">
+                {assetActionItems(item).map(action => <IconButton key={action.id} label={action.label} disabled={action.disabled}
+                  onClick={action.onSelect}>{action.icon}</IconButton>)}
+              </div>
+              {cvSummary && <div className="asset-cv-summary" title={cvSummary}>{cvSummary}</div>}
+              {asset.kind === "video" && cvSummaries[asset.asset_id]?.status === "ready" &&
+                <button type="button" className="cv-spark-toggle" aria-expanded={sparkOpen} aria-label={`${sparkOpen ? "收起" : "展开"} ${asset.display_name} 的信号曲线`}
+                  onClick={() => toggleCvSpark(asset)}>{sparkOpen ? "收起信号" : "信号曲线"}</button>}
+              {sparkOpen && <div className="cv-spark">
+                {cvSparkSamples === null ? <small role="status">加载中…</small> : cvSparkSamples.length < 2 ? <small>暂无样本数据</small> : <>
+                  <svg viewBox="0 0 100 1" preserveAspectRatio="none" aria-label="CV 信号曲线">
+                    <path d={cvSparkPath(cvSparkSamples, "motion_energy")} fill="none" stroke="#7aa2f7" strokeWidth="0.02" />
+                    <path d={cvSparkPath(cvSparkSamples, "audio_energy")} fill="none" stroke="#9ece6a" strokeWidth="0.02" opacity="0.7" />
+                    {cvSparkSamples.filter(sample => sample.scene_cut).map((sample, index) => {
+                      const x = sample.timestamp_us / (cvSparkSamples.at(-1)?.timestamp_us || 1) * 100;
+                      return <line key={index} x1={x} x2={x} y1={0} y2={1} stroke="#f7768e" strokeWidth="0.03" />;
+                    })}
+                  </svg>
+                  <small className="cv-spark-legend"><span style={{ color: "#7aa2f7" }}>运动能量</span> · <span style={{ color: "#9ece6a" }}>音频能量</span> · <span style={{ color: "#f7768e" }}>场景切换</span></small>
+                </>}
+              </div>}
+            </div>;
+          })}
+        </div>
+        {assetMenu && menuAsset && <ContextMenu x={assetMenu.x} y={assetMenu.y} items={assetActionItems(menuAsset)}
+          onClose={() => { setAssetMenu(null); assetMenu.trigger.focus({ preventScroll: true }); }} />}
+      </div></div> : tab === "transcripts" ? <div className="transcript-list"><p className="panel-hint">只读展示语音识别结果；点开一条记录后勾选片段，可追加到时间线并生成字幕。</p>{transcriptRows.length === 0 && <p className="panel-hint">尚未生成转录：在"素材"页对视频/音频素材点击"转录"按钮后，结果会出现在这里。</p>}{transcriptRows.map(({ summary, assetName }) => { const loaded = loadedTranscript(summary.transcript_id); return <div className="transcript-item" key={summary.transcript_id}><div className="transcript-item-head"><button className="transcript-open-button" aria-label={`查看转录 ${summary.transcript_id}`} onClick={() => void viewTranscript(summary)} title="查看并选择转录片段"><strong title={assetName}>{assetName}</strong><small>{transcriptStatusLabels[summary.status]} · {summary.language}{loaded ? ` · ${loaded.segments.length} 段` : ""} · 点击查看内容与操作</small></button><IconButton label={`删除转录 ${summary.transcript_id}`} onClick={() => openDeleteTranscriptDialog(summary)}><Trash2 size={13} /></IconButton></div></div>; })}</div>
         : tab === "models" ? <div className="model-page"><p className="panel-hint">本地语音识别模型：下载后可在视频/音频素材上发起转录，生成带时间戳的字幕底稿；下载中可取消，失败可重试。</p>{models.map(model => { const dl = ["queued", "downloading", "verifying", "paused"].includes(model.status); const pct = model.progress !== null && model.progress !== undefined ? `${Math.round(model.progress * 100)}%` : "—"; return <div className={`model-row${dl ? " dl" : ""}`} key={model.model_id}><div className="model-ico"><FileText size={14} /></div><div className="model-main"><div className="model-head"><strong title={model.display_name}>{model.display_name}</strong><span className={`badge ${model.status === "ready" ? "ok" : dl ? "run" : model.status === "failed" || model.status === "corrupt" ? "bad" : "dim"}`}>{modelBadgeLabels[model.status]}</span>{dl && <span className="mpct">{pct}</span>}</div>{dl && <div className="model-down"><progress className="model-progress" max={1} value={model.progress ?? 0} /><button className="mini-btn" title="取消模型下载" onClick={() => void cancelModel(model)}>取消下载</button></div>}<small className="model-sub">{modelStatusLabels[model.status]} · {model.provider}</small></div>{!dl && ["unavailable", "failed", "cancelled", "paused", "corrupt"].includes(model.status) && <button className="mini-btn" onClick={() => void openModel(model)}>{model.status === "failed" ? "重试下载" : model.status === "corrupt" ? "重新下载" : model.status === "paused" ? "继续下载" : "下载模型"}</button>}</div>; })}</div>
         : <div className="jobs-page"><p className="panel-hint">转录、权威预览与导出的后台进度会显示在这里；运行中的任务可取消，失败的转录可重试。</p>{jobs.length === 0 && <p className="panel-hint">暂无任务。</p>}{(() => { const activeJobs = jobs.filter(job => ["running", "cancelling"].includes(job.status)); const queuedJobs = jobs.filter(job => job.status === "queued"); const doneJobs = jobs.filter(job => ["succeeded", "failed", "cancelled", "interrupted"].includes(job.status)); const renderJobRow = (job: Job) => { const badgeClass = job.status === "succeeded" ? "ok" : job.status === "failed" ? "bad" : job.status === "running" ? "run" : "dim"; const phaseText = job.phase ? (jobPhaseLabels[job.phase] ?? job.phase) : null; const phasePct = phaseText && job.phase_progress !== null && job.phase_progress !== undefined ? ` ${Math.round(job.phase_progress * 100)}%` : ""; return <div className="job-row" key={job.job_id}><div className="jmain"><div className="jhead"><strong>{jobKindLabels[job.kind] ?? job.kind}</strong><span className={`badge ${badgeClass}`}>{jobStatusLabels[job.status]}</span><span className="jpct">{job.progress !== null ? `${Math.round(job.progress * 100)}%` : "—"}</span></div>{job.progress !== null && <div className="jbar"><i style={{ width: `${Math.round(job.progress * 100)}%` }} /></div>}<div className="jmeta"><span>{jobDetailText(job, assets.find(item => item.asset.asset_id === job.asset_id)?.asset.display_name)}{phaseText || job.stage ? ` · ${phaseText ? `${phaseText}${phasePct}` : job.stage}` : ""}{job.error ? ` · ${safeTaskErrorMessage(job.error)}` : ""}</span>{job.status === "running" && <JobEta job={job} />}</div><div className="jops">{job.kind === "transcription" && (job.status === "failed" || job.status === "interrupted") && <button className="mini-btn" onClick={() => void retryTranscription(job)}>重试转录</button>}{["queued", "running", "cancelling"].includes(job.status) && <button className="mini-btn" onClick={() => void cancelJob(job)}>取消</button>}{["succeeded", "failed", "cancelled", "interrupted"].includes(job.status) && <button className="mini-btn danger-ghost" aria-label={`删除任务 ${job.job_id}`} title="从列表移除这条任务记录" onClick={() => void deleteJob(job)}>删除</button>}</div></div></div>; }; return <>{activeJobs.length > 0 && <div className="jobs-group">进行中</div>}{activeJobs.map(renderJobRow)}{queuedJobs.length > 0 && <div className="jobs-group">排队</div>}{queuedJobs.map(renderJobRow)}{doneJobs.length > 0 && <div className="jobs-group">已完成 / 失败</div>}{doneJobs.map(renderJobRow)}</>; })()}</div>}
         {!timeline && project && <div className="empty-timeline"><button onClick={() => void createTimeline({ kind: "empty" })}>创建空时间线</button></div>}
       </section>
+      {leftPaneOpen && <div className="resize-handle resize-handle-left" role="separator" aria-label="调整左侧面板宽度" onPointerDown={event => beginResize("left", event)} />}
     <div className="editor-stack">
     <section className="editor-grid editor-grid-nolib">
-      {leftPaneOpen && <div className="resize-handle resize-handle-left" role="separator" aria-label="调整左侧面板宽度" onPointerDown={event => beginResize("left", event)} />}
       <section ref={stagePaneRef} className={`stage-pane${isFullscreen ? " fullscreen" : ""}`} aria-label="项目预览">
         <div className="stage-column" ref={stageColumnRef}>
           {/* 预览窗格栏（2026-11-16 按参照 ProjectView.tsx:4639 的 PANE_BAR 形态）：
@@ -3249,7 +3635,7 @@ export function App() {
             {previewMode === "authoritative" && authoritativeMediaUrl && <video ref={videoRef} className="preview-foreground authoritative-video" src={authoritativeMediaUrl} aria-label={reframePlayback ? "重构图权威预览视频" : exportPlayback ? "导出视频" : "权威预览视频"} controls onEnded={() => { setPlaying(false); setExportPlayback(undefined); setReframePlayback(undefined); setPreviewMode("synthetic"); }} />}
             {/* 合成预览仅在时间线有可见片段时挂载；空时间线显示引导文案（剪映式），
                 避免对空时间线请求 preview-ir 被 Core 以 TIMELINE_EMPTY 拒绝而回退。 */}
-            {previewMode === "synthetic" && projectStateReady && project && working && timeline && working.clips.length > 0 && <SyntheticPreview key={project.project_id} outputRatio={renderRatio} projectId={project.project_id} revisionId={timeline.current_revision.timeline_revision_id} mediaUrls={syntheticMediaUrls} audioByClip={syntheticAudioByClip} pipClips={syntheticPipClips} lockedClipIds={working.locked_elements} selectedClipId={pipSelectedId} onSelectClip={clipId => setSelection(clipId ? { kind: "clip", id: clipId as never } : null)} onSelectClips={ids => setSelection(ids.length ? { kind: "clips", ids } : null)} trackIndexByClipId={trackIndexByClipId} onCommitPipTransform={async (clipId, transform) => { const clip = (working?.clips ?? []).find(item => item.clip_id === clipId); return commitPipTransform(clipId as never, { ...(clip?.transform ?? {}), ...transform }); }} onDraftPipMask={(clipId, mask) => draftPipMask(clipId as never, mask)} onCommitPipMask={(clipId, mask) => commitPipMask(clipId as never, mask)} onGesturePause={pausePreviewPlayback} onGestureResume={resumePreviewPlayback} playing={playing && !gestureHoldRef.current} playheadUs={playhead} playheadStore={playheadStore} playbackRate={uiRate} onTimeUs={us => seekFromPlayback(us)} onEnded={handlePreviewEnded} onFallback={(reason, code) => { if (!seenAnyTicketRef.current) return; setPreviewMode("interactive"); setSyntheticNotice(syntheticFallbackNotice(reason, code)); }} sourceResolver={previewSourceResolver} resourceTier={resourceTier} forceCopyTo={forceCopyTo} snapshotRef={syntheticSnapshotRef} proxyEpoch={proxyReadyEpoch} onDecodeBudget={onDecodeBudget} onSession={session => { if (!session) previewSessionRef.current?.endScrubStorm(); previewSessionRef.current = session; }} />}
+            {previewMode === "synthetic" && projectStateReady && project && working && timeline && working.clips.length > 0 && <SyntheticPreview preparePlaybackRef={preparePreviewPlaybackRef} key={project.project_id} outputRatio={renderRatio} projectId={project.project_id} revisionId={timeline.current_revision.timeline_revision_id} mediaUrls={syntheticMediaUrls} audioByClip={syntheticAudioByClip} pipClips={syntheticPipClips} lockedClipIds={working.locked_elements} selectedClipId={pipSelectedId} selectedClipIds={selection?.kind === "clips" ? selection.ids : undefined} onSelectClip={clipId => setSelection(clipId ? { kind: "clip", id: clipId as never } : null)} onSelectClips={ids => setSelection(ids.length ? { kind: "clips", ids } : null)} trackIndexByClipId={trackIndexByClipId} onCommitPipTransform={async (clipId, transform) => { const clip = (working?.clips ?? []).find(item => item.clip_id === clipId); return commitPipTransform(clipId as never, { ...(clip?.transform ?? {}), ...transform }); }} onDraftPipMask={(clipId, mask) => draftPipMask(clipId as never, mask)} onCommitPipMask={(clipId, mask) => commitPipMask(clipId as never, mask)} onGesturePause={pausePreviewPlayback} onGestureResume={resumePreviewPlayback} playing={playing && !gestureHoldRef.current} playheadUs={playhead} playheadStore={playheadStore} playbackRate={uiRate} onTimeUs={us => seekFromPlayback(us)} onEnded={handlePreviewEnded} onFallback={(reason, code) => { if (!seenAnyTicketRef.current) return; setPreviewMode("interactive"); setSyntheticNotice(syntheticFallbackNotice(reason, code)); }} sourceResolver={previewSourceResolver} resourceTier={resourceTier} forceCopyTo={forceCopyTo} snapshotRef={syntheticSnapshotRef} proxyEpoch={proxyReadyEpoch} onDecodeBudget={onDecodeBudget} onSession={session => { if (!session) previewSessionRef.current?.endScrubStorm(); previewSessionRef.current = session; }} />}
             {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "video" && <div className="preview-transform" style={mainTransformStyle}><video className="preview-background" src={previewAsset.media_url} muted aria-hidden="true" /><video ref={videoRef} className="preview-foreground" src={previewAsset.media_url} muted={!selectedClip?.audio.enabled || previewReverse || (clipAtPlayhead ? !isClipAudible(clipAtPlayhead) : false)} aria-label="交互预览视频" onTimeUpdate={event => { if (libraryPreviewId) dispatchPlayhead("external", Math.round(event.currentTarget.currentTime * 1_000_000), true); }} onEnded={handleVideoEnded} /></div>}
             {previewMode === "interactive" && audioAsset?.media_url && <audio ref={audioRef} src={audioAsset.media_url} style={{ display: "none" }} />}
             {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "image" && <div className="preview-transform" style={mainTransformStyle}><img className="preview-background" src={previewAsset.media_url} alt="" aria-hidden="true" /><img className="preview-foreground" src={previewAsset.media_url} alt={previewAsset.asset.display_name} /></div>}
@@ -3267,7 +3653,7 @@ export function App() {
      常驻的 preview-context 已删——模式信息收进窗格栏（见窗格栏 title/弹层）。 */}
 {(previewIsStale && previewMode === "authoritative" && !exportPlayback) || exportPlayback || reframePlayback ? <span className={`interactive-label ${previewIsStale && previewMode === "authoritative" && !exportPlayback ? "stale" : ""}`}>{previewMode === "interactive" ? "交互预览 · 非权威" : previewMode === "synthetic" ? "合成预览 · 实时（非权威）" : reframePlayback ? "静态焦点重构图 · 权威预览" : exportPlayback ? `导出 · ${exportPlayback.export_record.destination_display_name}` : previewIsStale ? "权威预览 · 已过期" : "权威预览 · 当前 Revision"}</span> : null}
 {syntheticNotice && <span role="note" aria-label="合成预览回退提示" className="synthetic-note">{syntheticNotice}<button className="synthetic-note-retry" onClick={() => { setSyntheticNotice(null); setPreviewMode("synthetic"); }}>重试合成预览</button></span>}
-          <div className={`progress${progressDragging ? " dragging" : ""}`} ref={progressRef} role="slider" tabIndex={0} aria-label="时间线播放头" aria-valuemin={0} aria-valuemax={Math.max(totalUs, 1)} aria-valuenow={Math.min(playhead, totalUs)} onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); setProgressDragging(true); seekFromProgress(event.clientX); }} onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) scrubFromProgress(event.clientX); }} onPointerUp={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) { const rect = event.currentTarget.getBoundingClientRect(); event.currentTarget.releasePointerCapture(event.pointerId); commitScrub(Math.round(Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)) * Math.max(totalUs, 1))); } setProgressDragging(false); }} onKeyDown={event => { if (event.key === "ArrowLeft") { event.preventDefault(); seekFromProgressRatio(Math.max(0, playhead / Math.max(totalUs, 1) - 1 / 300)); } else if (event.key === "ArrowRight") { event.preventDefault(); seekFromProgressRatio(Math.min(1, playhead / Math.max(totalUs, 1) + 1 / 300)); } else if (event.key === "Home") { event.preventDefault(); seekFromProgressRatio(0); } else if (event.key === "End") { event.preventDefault(); seekFromProgressRatio(1); } }}>
+          <div className={`progress${!libraryPreviewId && !isFullscreen ? " project-progress" : ""}${progressDragging ? " dragging" : ""}`} ref={progressRef} role="slider" tabIndex={0} aria-label="时间线播放头" aria-valuemin={0} aria-valuemax={Math.max(totalUs, 1)} aria-valuenow={Math.min(playhead, totalUs)} onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); setProgressDragging(true); seekFromProgress(event.clientX); }} onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) scrubFromProgress(event.clientX); }} onPointerUp={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) { const rect = event.currentTarget.getBoundingClientRect(); event.currentTarget.releasePointerCapture(event.pointerId); commitScrub(Math.round(Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)) * Math.max(totalUs, 1))); } setProgressDragging(false); }} onKeyDown={event => { if (event.key === "ArrowLeft") { event.preventDefault(); seekFromProgressRatio(Math.max(0, playhead / Math.max(totalUs, 1) - 1 / 300)); } else if (event.key === "ArrowRight") { event.preventDefault(); seekFromProgressRatio(Math.min(1, playhead / Math.max(totalUs, 1) + 1 / 300)); } else if (event.key === "Home") { event.preventDefault(); seekFromProgressRatio(0); } else if (event.key === "End") { event.preventDefault(); seekFromProgressRatio(1); } }}>
             <div className="pg-bubble" ref={pgBubbleRef} style={{ left: `${progressPct}%` }}>{formatSmpteTimecode(playhead, previewFps)}</div>
             <div className="pg-rail"><div className="pg-fill" ref={pgFillRef} style={{ width: `${progressPct}%` }}><i className="pg-dot" /></div></div>
           </div>
@@ -3278,16 +3664,16 @@ export function App() {
           <div className="pb-right" role="group" aria-label="播放器控制">
             <span className="rate-anchor">
               <button className="pb-icon rate-btn" aria-haspopup="dialog" aria-expanded={ratePopOpen} title="播放设置（循环 / 倍速）" aria-label="播放设置" onClick={event => { event.stopPropagation(); setRatePopOpen(value => !value); setVolPopOpen(false); setZoomPopOpen(false); }}>
-                <Settings2 />
-                {(loopPlayback || uiRate !== 1) && <span className="rate-dot" aria-hidden="true" />}
+                {loopPlayback && <Repeat size={14} aria-hidden="true" />}
+                <span aria-hidden="true">{`${uiRate}×`}</span>
               </button>
               <div className={`rate-pop${ratePopOpen ? " open" : ""}`} ref={ratePopRef} onClick={event => event.stopPropagation()}>
                 <div className="rp-head">播放设置</div>
                 {/* P12/P13 参照 PlaybackMenu.tsx:86-137：循环=整行 switch（自绘 18×30 ink 开关）、
                     倍速=两行×4 的 segmented（滑动选中标记、role=radiogroup）。速度集合保 ours 域 0.25–4×。 */}
-                <button type="button" role="switch" aria-checked={loopPlayback} aria-label="循环播放" className="rp-row rp-loop" onClick={() => setLoopPlayback(value => !value)}>
+                <button type="button" role="switch" aria-checked={loopPlayback} aria-label="循环播放" className="rp-row rp-loop" onClick={() => { if (!loopSeekPending.current) cancelLoopRestart(); setLoopPlayback(value => !value); }}>
                   <Repeat />
-                  <span className="rp-loop-label">循环播放</span>
+                  <span className="rp-loop-label">{playbackRange ? "循环播放区间" : "循环播放"}</span>
                   <span aria-hidden className={`rp-switch${loopPlayback ? " on" : ""}`}><i /></span>
                 </button>
                 <div className="rp-row rp-speed" aria-hidden="true"><span>倍速</span></div>
@@ -3302,7 +3688,13 @@ export function App() {
             <span className="vol-anchor">
               <button className="pb-icon" aria-haspopup="dialog" aria-expanded={volPopOpen} title={`音量 ${volume}%`} aria-label="音量" onClick={event => { event.stopPropagation(); setVolPopOpen(value => !value); setZoomPopOpen(false); }}>{volume === 0 ? <VolumeX /> : <Volume2 />}</button>
               <div className={`vol-pop${volPopOpen ? " open" : ""}`} ref={volPopRef} onClick={event => event.stopPropagation()}>
-                <div className="vol-rail" ref={volRailRef} onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); seekVolumeFrom(event.clientY); }} onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) seekVolumeFrom(event.clientY); }} onPointerUp={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }}>
+                <div className="vol-rail" ref={volRailRef} role="slider" tabIndex={0} aria-label="预览音量" aria-orientation="vertical" aria-valuemin={0} aria-valuemax={100} aria-valuenow={volume} aria-valuetext={`${volume}%`} onKeyDown={event => {
+                  const delta = event.key === "ArrowUp" || event.key === "ArrowRight" ? 5 : event.key === "ArrowDown" || event.key === "ArrowLeft" ? -5 : 0;
+                  if (delta || event.key === "Home" || event.key === "End") {
+                    event.preventDefault(); event.stopPropagation();
+                    setVolume(event.key === "Home" ? 0 : event.key === "End" ? 100 : Math.max(0, Math.min(100, volume + delta)));
+                  }
+                }} onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); seekVolumeFrom(event.clientY); }} onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) seekVolumeFrom(event.clientY); }} onPointerUp={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }}>
                   <div className="vol-fill" style={{ height: `${volume}%` }} />
                   <div className="vol-thumb" style={{ bottom: `${volume}%` }} />
                 </div>
@@ -3323,10 +3715,10 @@ export function App() {
         </div>
       </section>
       {rightPaneOpen && <div className="resize-handle resize-handle-right" role="separator" aria-label="调整右侧面板宽度" onPointerDown={event => beginResize("right", event)} />}
-      <aside className={"properties-pane" + (rightPaneOpen ? "" : " pane-closed")} aria-label="上下文属性" role="region" hidden={!rightPaneOpen}>{selectedClip ? <ClipProperties clip={selectedClip} locked={Boolean(working?.locked_elements?.includes(selectedClip.clip_id))} onPatch={patchTimelineVoid} onDraft={queueDraft} working={working!} playheadUs={playhead} onOpenEditingTools={tool => openEditingTools(tool, selectedClip.clip_id)} baseRevisionId={timeline?.current_revision.timeline_revision_id ?? null} onAppliedTimeline={acceptState} /> : selectedCaption ? <CaptionProperties caption={selectedCaption} locked={Boolean(selectedCaption.source_clip_id && working?.locked_elements?.includes(selectedCaption.source_clip_id))} onPatch={patchTimelineVoid} onDraft={queueDraft} working={working!} /> : selectedTransition ? <TransitionProperties transition={selectedTransition} onPatch={patchTimelineVoid} /> : <ProjectProperties project={project} saveState={saveState} authoritativePreview={authoritativePreview} previewIsStale={previewIsStale} renderDisabledReason={renderDisabledReason} onGeneratePreview={() => void generatePreview()} onCreateExport={openExportDialog} onOpenProjectDialog={() => setProjectDialogOpen(true)} />}</aside>
+      <aside className={"properties-pane" + (rightPaneOpen ? "" : " pane-closed")} aria-label="上下文属性" role="region" hidden={!rightPaneOpen}>{selectedClip ? <ClipProperties clip={selectedClip} clipName={semanticAssetNames[selectedClip.asset_id]} locked={Boolean(working?.locked_elements?.includes(selectedClip.clip_id) || trackById.get(selectedClip.track_id)?.locked)} onAlign={alignmentHint ? undefined : alignSelectedFrames} alignmentHint={alignmentHint} onPatch={patchTimelineVoid} onDraft={queueDraft} working={working!} playheadUs={playhead} onOpenEditingTools={tool => openEditingTools(tool, selectedClip.clip_id)} baseRevisionId={timeline?.current_revision.timeline_revision_id ?? null} onAppliedTimeline={acceptState} /> : selectedCaption ? <CaptionProperties caption={selectedCaption} locked={Boolean(selectedCaption.source_clip_id && working?.locked_elements?.includes(selectedCaption.source_clip_id))} onPatch={patchTimelineVoid} onDraft={queueDraft} working={working!} /> : selectedTransition ? <TransitionProperties transition={selectedTransition} onPatch={patchTimelineVoid} /> : selectedClips.length > 1 ? <ClipGroupAlignmentProperties count={selectedClips.length} hint={alignmentHint} onAlign={alignmentHint ? undefined : alignSelectedFrames} onDistribute={visualSelectedCount >= 3 ? distributeSelectedFrames : undefined} distributionDisabled={Boolean(alignmentHint)} groupBounds={groupBounds} onEditBounds={editGroupBounds} /> : selectedAssetIds.size > 0 ? <AssetSelectionProperties entries={visibleAssets.filter(({ asset }) => selectedAssetIds.has(asset.asset_id)).map(({ asset }) => ({ id: asset.asset_id, name: asset.display_name, kind: assetKindLabels[asset.kind], meta: assetMetaText(asset), duration: assetDurationLabel(asset), status: availabilityLabels[asset.availability] }))} /> : <ProjectProperties project={project} saveState={saveState} authoritativePreview={authoritativePreview} previewIsStale={previewIsStale} renderDisabledReason={renderDisabledReason} onGeneratePreview={() => void generatePreview()} onCreateExport={openExportDialog} onOpenProjectDialog={() => setProjectDialogOpen(true)} />}</aside>
     </section>
     <div className="timeline-resize-handle" role="separator" aria-label="调整时间线高度" onPointerDown={event => beginResize("timeline", event)} />
-    <TimelinePanel document={working} selection={selection} setSelection={(sel) => { setSelection(sel); exitLibraryPreview(); }} onPatch={patchTimelineVoid} onDropAsset={dropAsset} coverUrl={coverUrl} onCaptureCover={() => setCoverDialogOpen(true)} canUndo={Boolean(timeline?.can_undo)} canRedo={Boolean(timeline?.can_redo)} onUndo={() => void undoRedo("undo")} onRedo={() => void undoRedo("redo")} assetMedia={timelineAssetMedia} waveformCache={waveformCache} playheadStore={playheadStore} onSeek={(timeUs) => { if (libraryPreviewId) exitLibraryPreview(); seekWhileScrubbing(timeUs); }} onSeekCommit={timeUs => { exitLibraryPreview(); commitScrub(timeUs); }} onCommand={(id) => runCommand(id)} meterLevels={meterLevels} playing={playing} />
+    <TimelinePanel document={working} selection={selection} setSelection={(sel) => { setSelection(sel); exitLibraryPreview(); }} onPatch={patchTimelineVoid} onDropAsset={dropAsset} coverUrl={coverUrl} onCaptureCover={() => setCoverDialogOpen(true)} canUndo={Boolean(timeline?.can_undo)} canRedo={Boolean(timeline?.can_redo)} onUndo={() => void undoRedo("undo")} onRedo={() => void undoRedo("redo")} assetMedia={timelineAssetMedia} waveformCache={waveformCache} playheadStore={playheadStore} onSeek={(timeUs) => { if (libraryPreviewId) exitLibraryPreview(); seekWhileScrubbing(timeUs); }} onSeekCommit={timeUs => { exitLibraryPreview(); commitScrub(timeUs); }} onRangeChange={setPlaybackRange} onCommand={(id) => runCommand(id)} meterLevels={meterLevels} playing={playing} />
     </div>
     </div>
     <WorkspaceFooter

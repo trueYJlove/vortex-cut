@@ -3,12 +3,14 @@ import { Archive, FileText, Lock, RotateCcw, Save } from "lucide-react";
 import type { CaptionPresetId, EditingGrammarPrepareResult, EditingGrammarProposal, Project, TimelineCaption, TimelineClip, TimelineDiff, TimelineDocument, TimelineLayout, TimelinePatchOperation, TimelineState, TimelineTransition } from "@aivideo/contracts";
 import type { AuthoritativePreviewPresentation } from "../../electron/preload/index.js";
 import { PanelTabs, SubTabs, PGroup, PSep, PRow, Switch, Seg, SoonBadge, PNote, NumberField, RangeRow } from "./PropertyControls.js";
-import { AlignBar } from "../ui/of/AlignBar.js";
+import { AlignBar, type AlignEdge } from "../ui/of/AlignBar.js";
+import type { FrameBounds, GroupBoundsField } from "./timeline/frame-alignment.js";
 import { MenuSelect } from "../ui/of/MenuSelect.js";
 import { InspectorWorkspace, InspectorReadOnly } from "../ui/of/InspectorWorkspace.js";
 import type { InspectorKind } from "../ui/of/inspector-sections.js";
 import { Section, NumField } from "../ui/of/inspector-fields.js";
 import { errorCode } from "./safeErrors.js";
+import { planMagneticSpeed, readTimelineBehaviorPrefs } from "./timeline/magnetic-plan.js";
 
 type SaveState = "已保存" | "保存中" | "保存失败" | "草稿冲突";
 const captionPresets: { value: CaptionPresetId; label: string }[] = [{ value: "default-bottom", label: "默认底部" }, { value: "game-safe-bottom", label: "游戏安全区" }, { value: "high-contrast", label: "高对比" }];
@@ -115,7 +117,7 @@ function loudnessTarget(preview: EditingGrammarPrepareResult): string {
   return typeof target === "number" ? target.toFixed(0) : "—";
 }
 
-export function ClipProperties({ clip, working, baseRevisionId, locked, onPatch, onDraft, playheadUs, onOpenEditingTools, onAppliedTimeline }: { clip: TimelineClip; working: TimelineDocument; baseRevisionId?: string | null; locked: boolean; onPatch: (ops: TimelinePatchOperation[], summary: string) => Promise<void>; onDraft: (doc: TimelineDocument) => void; playheadUs?: number; onOpenEditingTools?: (tool: "remove_pauses" | "beat_sync" | "lj_cut") => void; onAppliedTimeline?: (state: TimelineState) => void }) {
+export function ClipProperties({ clip, clipName, working, baseRevisionId, locked, onAlign, alignmentHint, onPatch, onDraft, playheadUs, onOpenEditingTools, onAppliedTimeline }: { clip: TimelineClip; clipName?: string; working: TimelineDocument; baseRevisionId?: string | null; locked: boolean; onAlign?: (edge: AlignEdge) => void; alignmentHint?: string; onPatch: (ops: TimelinePatchOperation[], summary: string) => Promise<void>; onDraft: (doc: TimelineDocument) => void; playheadUs?: number; onOpenEditingTools?: (tool: "remove_pauses" | "beat_sync" | "lj_cut") => void; onAppliedTimeline?: (state: TimelineState) => void }) {
   const isVideo = clip.asset_kind === "video";
   const isImage = clip.asset_kind === "image";
   const isAudioClip = clip.asset_kind === "audio";
@@ -124,7 +126,12 @@ export function ClipProperties({ clip, working, baseRevisionId, locked, onPatch,
   const overlay = false;
   const updateLocal = (next: Partial<TimelineClip>) => onDraft({ ...working, clips: working.clips.map(item => item.clip_id === clip.clip_id ? { ...item, ...next } : item) });
   const speed = clip.speed_milli ?? 1000;
-  const setSpeed = (value: number) => void onPatch([{ op: "set_speed", clip_id: clip.clip_id, speed_milli: value }], value === 1000 ? "恢复原速" : `调整速度 ${speedLabel(value)}`);
+  const setSpeed = (value: number) => {
+    const prefs = readTimelineBehaviorPrefs();
+    const plan = planMagneticSpeed(working, clip, value, prefs.mainTrackMagnet, prefs.linkageEnabled);
+    const operations = plan.operations.length ? plan.operations : [{ op: "set_speed" as const, clip_id: clip.clip_id, speed_milli: value, ripple: false }];
+    void onPatch(operations, value === 1000 ? "恢复原速" : `调整速度 ${speedLabel(value)}`);
+  };
   // B3：关键帧编辑基于播放头在片段内的相对时间。
   const clipRelativeUs = playheadUs !== undefined ? Math.max(0, Math.min(clip.timeline_end_us - clip.timeline_start_us, Math.round(playheadUs - clip.timeline_start_us))) : undefined;
   const setKeyframe = (property: "position" | "scale" | "rotate" | "opacity", frames: Array<{ t_us: number; x?: number; y?: number; v?: number }>) => {
@@ -199,7 +206,8 @@ export function ClipProperties({ clip, working, baseRevisionId, locked, onPatch,
      故这一段只做段控 + 分组标题与重置入口——**不摆不能改的假控件**，比摆出来更不容易误导。 */
   /* I1：原 picBasic 的 PGroup 壳上移为 Section（骨架处），此处只保留分组内层。 */
   const picBasicInner = <>
-    <AlignBar />
+    {!isAudioClip && <AlignBar onAlign={locked ? undefined : onAlign} />}
+    {!isAudioClip && alignmentHint && <PNote>{alignmentHint}</PNote>}
     <div className="pp-grid2">
       <NumberField value={Math.round((fixedTf.x - 0.5) * 200)} min={-100} max={100} step={1} ariaLabel="位置 X" mark="X"
         onDraft={v => updateLocal({ transform: { ...clip.transform, x: 0.5 + v / 200 } })}
@@ -233,7 +241,6 @@ export function ClipProperties({ clip, working, baseRevisionId, locked, onPatch,
         </span>
       </div>
     </>}
-    <PNote>对齐工具条（九宫格摆放）为规划占位，落地后显示在此处。</PNote>
   </>;
   /* I6 参照 inspector-look.tsx:638-646：外观组 = 不透明度 + 圆角 + 混合模式。
      圆角/混合模式暂无 patch 通道——按参照形态摆 disabled 控件（AlignBar disabled 先例），版面完整但不误导。 */
@@ -465,14 +472,15 @@ export function ClipProperties({ clip, working, baseRevisionId, locked, onPatch,
   return <fieldset className="pp-panel locked-fieldset" aria-label="片段属性">
     <InspectorReadOnly.Provider value={locked}>
       <InspectorWorkspace kind={kind} label="片段属性">
+        {clipName && <Section id="clip-overview" title="属性"><PNote>{clipName}</PNote></Section>}
         <Section id="transform" title="位置与大小" aside={<button type="button" className="pp-mini" title="重置画面变换" onClick={() => void onPatch([{ op: "set_clip_transform", clip_id: clip.clip_id, transform: {} }], "重置画面变换")}><RotateCcw size={11} /></button>}>
           {picBasicInner}
         </Section>
-        {!isAudioClip && <Section id="appearance" title="外观">{picAppearance}</Section>}
+        <Section id="fade" title="淡入淡出">{audioFadeSection}</Section>
         {!isAudioClip && <Section id="crop-fill" title="裁剪与填充" aside={<button type="button" className="pp-mini" title="重置裁剪与填充" onClick={() => void onPatch([{ op: "set_layout", clip_id: clip.clip_id, layout: "fit" as TimelineLayout }], "重置裁剪与填充")}><RotateCcw size={11} /></button>}>{picCropFill}</Section>}
+        {!isAudioClip && <Section id="appearance" title="外观">{picAppearance}</Section>}
         {!isAudioClip && <Section id="mask" title="蒙版">{picMask}</Section>}
         {!isAudioClip && <Section id="keying" title="抠像">{picKey}</Section>}
-        <Section id="fade" title="淡入淡出">{audioFadeSection}</Section>
         <Section id="timing" title="时间">{timingSection}</Section>
         <Section id="sound" title="声音">{audioBasics}</Section>
         <Section id="motion" title="关键帧动画">{animSection}</Section>
@@ -676,9 +684,7 @@ export function ProjectProperties({ project, saveState, authoritativePreview, pr
       <div className="pp-row"><label>权威预览</label><span className="pp-tailtext">{authoritativePreview ? (previewIsStale ? "已过期" : "已就绪") : "尚未生成"}</span></div>
     </>
     : <PNote>未选择项目。</PNote>;
-  return <div className="pp-panel">
-    {/* film-info 映射到 info 页签（inspector-sections.ts），但空态只有两段——参照 FilmPanel 单页直排，
-        影片信息用 bare（无标题无折叠），与「项目操作」同页直排；id 换成无映射的避免落到 info 页签隐藏。 */}
+  return <div className="pp-panel"><InspectorWorkspace kind="film" label="项目属性">
     <Section id="film-panel-info" title="影片信息" bare>{filmInfo}</Section>
     <Section id="project-actions" title="项目操作">
       <div className="properties-actions">
@@ -687,6 +693,62 @@ export function ProjectProperties({ project, saveState, authoritativePreview, pr
         <button type="button" className="pp-btn" onClick={onOpenProjectDialog}>打开项目管理</button>
       </div>
     </Section>
+  </InspectorWorkspace></div>;
+}
+
+export function AssetSelectionProperties({ entries }: {
+  entries: { id: string; name: string; kind: string; meta: string; duration: string; status: string }[];
+}) {
+  const asset = entries.length === 1 ? entries[0] : null;
+  return <div className="pp-panel">
+    <InspectorWorkspace kind={asset ? "layer" : "multiple"} label="素材属性">
+      <Section id="asset-information" title={asset ? "素材信息" : `已选 ${entries.length} 项素材`}>
+        {asset ? <>
+          <PNote>{asset.name}</PNote>
+          <PRow label="类型"><span className="pp-tailtext">{asset.kind}</span></PRow>
+          <PRow label="媒体信息"><span className="pp-tailtext">{asset.meta}</span></PRow>
+          <PRow label="时长"><span className="pp-tailtext">{asset.duration}</span></PRow>
+          <PRow label="状态"><span className="pp-tailtext">{asset.status}</span></PRow>
+        </> : <ul className="inspector-picked-assets">{entries.map(item => <li key={item.id} title={item.name}>{item.name}</li>)}</ul>}
+      </Section>
+    </InspectorWorkspace>
+  </div>;
+}
+
+export function ClipGroupAlignmentProperties({
+  count, onAlign, onDistribute, distributionDisabled = false, hint, groupBounds, onEditBounds,
+}: {
+  count: number;
+  onAlign?: (edge: AlignEdge) => void;
+  onDistribute?: (axis: "horizontal" | "vertical") => void;
+  distributionDisabled?: boolean;
+  hint?: string;
+  groupBounds?: FrameBounds & { canvasWidth: number; canvasHeight: number };
+  onEditBounds: (field: GroupBoundsField, value: number) => void;
+}) {
+  return <div className="pp-panel">
+    <InspectorWorkspace kind="multiple" label="多片段属性">
+      <Section id="group-position" title="位置与大小">
+        <PNote>已选 {count} 个片段</PNote>
+        <AlignBar onAlign={onAlign} onDistribute={count >= 3 ? onDistribute : undefined} distributionDisabled={distributionDisabled} />
+        {groupBounds && <>
+          <div className="pp-grid2">
+            <NumField label="选区 X" prefix="X" unit="px" value={groupBounds.left} ctx={{ percent: groupBounds.canvasWidth }}
+              onCommit={value => onEditBounds("x", value)} />
+            <NumField label="选区 Y" prefix="Y" unit="px" value={groupBounds.top} ctx={{ percent: groupBounds.canvasHeight }}
+              onCommit={value => onEditBounds("y", value)} />
+          </div>
+          <div className="pp-grid2-lock">
+            <NumField label="选区宽度" prefix="W" unit="px" value={groupBounds.width} min={1} ctx={{ percent: groupBounds.canvasWidth }}
+              onCommit={value => onEditBounds("width", value)} />
+            <NumField label="选区高度" prefix="H" unit="px" value={groupBounds.height} min={1} ctx={{ percent: groupBounds.canvasHeight }}
+              onCommit={value => onEditBounds("height", value)} />
+            <span title="选区宽高等比缩放" aria-label="选区宽高等比缩放" role="img"><Lock size={13} aria-hidden="true" /></span>
+          </div>
+        </>}
+        {hint && <PNote>{hint}</PNote>}
+      </Section>
+    </InspectorWorkspace>
   </div>;
 }
 

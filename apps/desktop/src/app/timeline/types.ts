@@ -82,6 +82,8 @@ export type TimelineInteraction =
   | {
       kind: "move";
       clipId: TimelineClipId;
+      /** Alt-drag edits this member without moving its linked partners. */
+      ignoreLink?: boolean;
       /** Pointer x at mousedown (canvas pixels). */
       startX: number;
       /** Pointer y at mousedown (canvas pixels)——用于按片段中心判定目标轨。 */
@@ -188,9 +190,8 @@ export interface TimelineHover {
 export const DEFAULT_VIEW_STATE: TimelineViewState = {
   pixelsPerSecond: 60,
   scrollX: 0,
-  // 56px（2026-11-10，对齐 OpenFilm 的 TRACK_H.visual）。
-  // 原 80px 偏高：一屏只放得下三轨，长项目要频繁滚动；56px 在同样高度里
-  // 多容纳一轨，且片段信息条（名称+时长）与缩略带仍放得下。
+  // 56px baseline maps to OpenFilm's 52px regular visual lane; V1, text and
+  // audio use role-specific lane heights.
   trackHeight: 56,
   // 轨道头列宽（2026-11-16 对齐 OpenFilm HEAD_W = 108，Timeline.tsx:179）；原 120。
   headerWidth: 108,
@@ -208,6 +209,10 @@ export const ZOOM_MAX_PPS = 2000;
 export interface TimelineRuntimePrefs {
   /** Magnetic snapping to clip edges / playhead / grid. */
   snappingEnabled: boolean;
+  /** OpenFilm-style main track gap closing and insert behavior. */
+  mainTrackMagnet: boolean;
+  /** Move short overlays and captions together with their main-track footage. */
+  linkageEnabled: boolean;
   /** 轨道行高（px），固定不随窗口压缩；40-96。 */
   trackHeight: number;
   /** 音频波形占片段高度的比例（1 = 100%，0.6 = 60%，0.3 = 30%）。 */
@@ -216,7 +221,9 @@ export interface TimelineRuntimePrefs {
 
 export const DEFAULT_RUNTIME_PREFS: TimelineRuntimePrefs = {
   snappingEnabled: true,
-  // 与 DEFAULT_VIEW_STATE.trackHeight 保持一致（56，对齐 OpenFilm）。
+  mainTrackMagnet: true,
+  linkageEnabled: true,
+  // 与 DEFAULT_VIEW_STATE.trackHeight 保持一致；geometry maps it to role heights.
   trackHeight: 56,
   /** 剪映默认 40% 波形占比。 */
   waveformRatio: 0.4,

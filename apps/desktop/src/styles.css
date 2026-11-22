@@ -753,6 +753,10 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--vc-accent); }
    原来 min-width:30px 比网格第一列的 24px 还宽 —— 这正是「最左侧图标被挡住」的直接原因
    （内容溢出列宽后被相邻列压住）。改为 21px 并与网格列同宽。 */
 .timeline-track-badge { display: inline-flex; align-items: center; justify-content: center; gap: 0; flex: 0 0 auto; min-width: 0; width: 21px; }
+.timeline-track-head:focus-visible { outline: 2px solid var(--ws-focus); outline-offset: -2px; }
+.timeline-track-head[data-track-drop-target="true"] { box-shadow: inset 0 2px var(--brand); }
+.timeline-track-head:not([data-track-id="V1"]):not([data-track-id="A1"]) .timeline-track-badge { cursor: grab; touch-action: none; }
+.timeline-track-head:not([data-track-id="V1"]):not([data-track-id="A1"]) .timeline-track-badge:active { cursor: grabbing; }
 .timeline-track-badge small { font-size: 10.5px; font-weight: 500; line-height: 1; font-variant-numeric: tabular-nums; }
 .timeline-track-badge small { font-size: var(--dlg-fs-caption); color: var(--vc-text-2, #9fb3bd); }
 /* 锁定/隐藏/静音/独奏：与最左侧轨道类型标识同级的紧凑小图标；
@@ -772,11 +776,6 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--vc-accent); }
 [data-theme="light"] .track-flag { color: var(--text-muted); }
 [data-theme="light"] .track-flag:hover { color: var(--text); background: var(--bg-hover); }
 .track-flag.track-solo[aria-pressed="true"]:not(:disabled) { color: var(--accent); background: var(--bg-picked); }
-.track-row-actions { margin-left: auto; display: none; align-items: center; gap: 1px; background: var(--surface-1-c); }
-.timeline-track-head:hover .track-row-actions { display: inline-flex; }
-.track-row-actions button { width: 20px; height: 18px; display: grid; place-items: center; border: 0; border-radius: 3px; background: transparent; color: var(--ink-2-d); cursor: pointer; }
-.track-row-actions button:hover { background: var(--surface-3-c); color: var(--fixed-white); }
-.track-row-actions button:disabled { opacity: 0.35; cursor: default; }
 
 /* 左栏页签的基础形态（工作区内的 .editor-shell 覆盖见后：40px / 11.5px /
    非工作区上下文生效，工作区内一律被下面的覆盖规则接管。 */
@@ -1028,6 +1027,7 @@ input, select, textarea { font-size: var(--dlg-fs-body); }
 .vol-pop { position: absolute; left: 50%; transform: translateX(-50%); bottom: 40px; width: 28px; height: 118px; border: 1px solid var(--vc-border-2, #32323f); border-radius: 9px; background: var(--dlg-raise, #17171f); box-shadow: 0 10px 28px var(--rgba-18); display: none; align-items: center; justify-content: center; z-index: 60; }
 .vol-pop.open { display: flex; }
 .vol-rail { position: relative; width: 3px; height: 90px; border-radius: 2px; background: var(--rgba-54); cursor: pointer; touch-action: none; }
+.vol-rail:focus-visible { outline: 2px solid var(--brand); outline-offset: 5px; }
 .vol-fill { position: absolute; left: 0; right: 0; bottom: 0; border-radius: 2px; background: var(--vc-accent, var(--brand)); }
 .vol-thumb { position: absolute; left: 50%; width: 10px; height: 10px; border-radius: 50%; background: var(--fixed-white); transform: translate(-50%, 50%); box-shadow: 0 1px 4px var(--rgba-33); pointer-events: none; }
 /* 缩放弹层：适应开关 + 对数滑条（25%–500%）+ 刻度。 */
@@ -1047,6 +1047,8 @@ input, select, textarea { font-size: var(--dlg-fs-body); }
    层级降到与画布内容同级之下，交互交给画布；拖动进度条仍可由其 16px
    高度的可见区域触发（该条本身不透明区域在最底部 3-4px）。 */
 .progress { position: absolute; left: 10px; right: 10px; bottom: 0; height: 16px; z-index: 2; cursor: pointer; touch-action: none; }
+/* OpenFilm 的项目查看器从时间线寻址；保留键盘播放头控件并在聚焦时显示。 */
+.project-progress:not(:focus-visible) { opacity: 0; pointer-events: none; }
 .pg-rail { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--rgba-30); transition: height .12s ease; }
 .progress:hover .pg-rail, .progress.dragging .pg-rail { height: 4px; }
 .pg-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--fixed-white); border-radius: 0 2px 2px 0; }
@@ -3709,6 +3711,8 @@ html[data-theme="light"] .modal-backdrop { background: var(--rgba-90); }
    深色值即原来硬编码的常量，视觉零变化；浅色值给浅底深字。 */
 /* 片段配色（对齐 OpenFilm KIND_COLOR）：深色为默认，浅色在主题覆盖块给出。 */
 :root {
+  --vc-asset-shade: rgb(0 0 0 / 72%);
+  --vc-asset-favorite: #ffe19a;
   /* P8 参照 StageTransformFrame.tsx:17-19：选框色 #0fa596 双主题同值（ref 硬编码，这里入令牌层便于守卫配对） */
   --sel-frame: #0fa596;
   /* T9 参照 Timeline.tsx:3503-3510：转场芯片双主题同值 */
@@ -3801,6 +3805,8 @@ html[data-theme="light"] .modal-backdrop { background: var(--rgba-90); }
    只覆盖颜色令牌，不改任何选择器或尺寸——不违反「不改已完成弹窗」。
    ═══════════════════════════════════════════════════════════════ */
 html[data-theme="light"] {
+  --vc-asset-shade: rgb(0 0 0 / 72%);
+  --vc-asset-favorite: #ffe19a;
   --dlg-bg: #fbfbfc;
   --dlg-raise: #ffffff;
   --dlg-border: rgba(16, 16, 24, .14);
@@ -3873,7 +3879,7 @@ html[data-theme="light"] {
 /* 播放设置弹层（2026-11-11 对齐 OpenFilm PlaybackMenu）：循环开关 + 倍速分段。
    面板规格取 OpenFilm：w-60(224px)、rounded-[14px]、shadow 0 18px 48px、行 13px。 */
 .rate-anchor { position: relative; display: inline-flex; }
-.rate-btn { position: relative; }
+.rate-btn { position: relative; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-variant-numeric: tabular-nums; }
 .rate-dot { position: absolute; top: 3px; right: 3px; width: 5px; height: 5px; border-radius: 50%; background: var(--ws-accent, var(--brand-b)); }
 /* 播放设置弹层**向上弹**：播放条贴在窗口底部，向下弹会被时间线整块盖住
    （用户截图指出「点开内容被遮挡」）。
@@ -5332,9 +5338,9 @@ html[data-theme="light"] {
 .editor-shell {
   /* 表面：4 级，中性灰（无色相偏置） */
   --ws-canvas:#0d0d0f;   /* 预览井：最深，让画面浮起 */
-  --ws-shell:#141416;    /* 窗口底 / 顶栏 / 时间线 */
-  --ws-panel:#18181b;    /* 左右面板 */
-  --ws-raise:#202024;    /* 卡片 / 控件 / 属性分组 */
+  --ws-shell:#141414;    /* 窗口底 / 时间线 */
+  --ws-panel:#191919;    /* 左右面板 */
+  --ws-raise:#202020;    /* 顶栏 / 浮层 */
   /* 悬停底：必须比它所在的面更高一档。曾直接用 --ws-raise 当悬停底，
      而 --ws-raise 正是下拉面板自己的底色 ⇒ 深色下 hover 与面板同色、
      完全看不见（浅色下侥幸可见，是被 [data-theme="light"] button:hover
@@ -5514,7 +5520,7 @@ body { background:var(--surface-body); }
 /* 工具栏 40px（对齐 OpenFilm 的 TOOLBAR_H）：原 padding 6px + 内容 ~33px
    实测 45px，比标尺还高，视觉上把时间线切成两段。固定 40px 后工具栏
    与标尺（20px）合计 60px，与右侧预览栏的高度节奏一致。 */
-.editor-shell .timeline-toolbar { height:34px; min-height:34px; background:var(--ws-shell); border-bottom-color:var(--ws-line); padding:0 12px; }
+.editor-shell .timeline-toolbar { height:34px; min-height:34px; background:var(--bg-panel); border-bottom-color:var(--border); padding:0 8px; gap:6px; }
 /* P230-① 修复v2（2026-11-17 二次修正）：参照轨头行（Timeline.tsx:2731-2759
    heads map）自己 paint laneTone(track, lit)——轨头行 = 泳道色的延伸，
    行间 marginTop GAP=2 露出列地面 --tl-gap(=--bg-panel)。上一轮把轨头改成
@@ -5828,11 +5834,19 @@ body { background:var(--surface-body); }
 .timeline-range-edge {
   position: absolute;
   top: 0;
-  width: 2px; height: 100%;
+  width: 10px; height: var(--tl-ruler-h, 20px);
+  padding: 0; border: 0; border-radius: 0;
+  background: transparent;
+  pointer-events: auto;
+  cursor: ew-resize;
+  touch-action: none;
+}
+.timeline-range-edge.start { left: -5px; }
+.timeline-range-edge.end { right: -5px; }
+.timeline-range-edge::after {
+  content: ""; position: absolute; inset: 0 4px;
   background: var(--ws-accent, var(--brand-b));
 }
-.timeline-range-edge.start { left: -1px; }
-.timeline-range-edge.end { right: -1px; }
 .timeline-range-label {
   position: absolute;
   top: calc(var(--tl-ruler-h, 20px) + 4px);
@@ -6017,3 +6031,262 @@ body { background:var(--surface-body); }
 /* 上面两个块只覆盖参照自己的命名空间（--bg-* / --text-* / --accent / --clip-* /
    --tl-* 等 38 个），不触碰仓内 --ws-* / --dlg-* / --pp-* 体系。
    整块替换某个区域时，该区域的组件直接消费这些令牌，旧 --ws-* 覆盖随之删除。 */
+
+/* 编辑器素材浏览区：网格缩略图、列表行和工具栏共用同一套主题令牌。 */
+.editor-shell .editor-titlebar { background: var(--bg-titlebar); }
+.editor-shell .library-filter-toolbar { flex-wrap: wrap; gap: 4px; margin: 8px 10px 0; }
+.editor-shell .library-filter-toolbar .asset-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 72px;
+  min-width: 60px;
+  padding-inline: 7px;
+  border-radius: 6px;
+  background: var(--bg-field);
+  color: var(--ws-text-2);
+}
+.asset-search svg { flex: none; }
+.editor-shell .library-filter-toolbar .asset-search input {
+  padding: 0;
+  height: 28px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+}
+.editor-shell .library-filter-toolbar .asset-search:focus-within { outline: 2px solid var(--ws-focus); }
+.editor-shell .library-filter-toolbar :is(select, .icon-btn) {
+  height: 28px;
+  min-height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ws-text-2);
+  font-size: 12px;
+}
+.editor-shell .library-filter-toolbar select { background: var(--bg-field); }
+.editor-shell .library-filter-toolbar .icon-btn:hover:not(:disabled) { background: var(--bg-hover); }
+.editor-shell .library-filter-toolbar .icon-btn[aria-pressed="true"] { color: var(--ws-accent-text); background: var(--bg-selected); }
+.asset-library-status { margin: 8px 10px 0; color: var(--text); font-size: 12px; }
+.asset-library-empty {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 22px 10px;
+  color: var(--ws-text-2);
+  font-size: 12px;
+  text-align: center;
+}
+.editor-shell .asset-list.asset-table { padding: 8px 10px 20px; }
+.editor-shell .asset-view-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 104px), 1fr));
+  align-items: start;
+  gap: 10px 8px;
+}
+.editor-shell .asset-view-list { grid-template-columns: minmax(0, 1fr); gap: 1px; }
+.editor-shell .asset-table .asset-row {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+  cursor: default;
+}
+.editor-shell .asset-table .asset-select {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  text-align: start;
+  background: transparent;
+  color: var(--ws-text-2);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12px;
+}
+.asset-select-media { display: block; position: relative; min-width: 0; }
+.editor-shell .asset-table .asset-thumb { border-radius: 6px; background: var(--bg-field); }
+.editor-shell .asset-table .sel .asset-select { color: var(--text); font-weight: 600; }
+.editor-shell .asset-view-grid .sel .asset-thumb { outline: 2px solid var(--accent); outline-offset: -2px; }
+.asset-filename, .asset-row-meta, .asset-cv-summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.asset-filename { padding-inline: 2px; }
+.asset-row-meta, .asset-row-time { display: none; }
+.asset-used, .asset-time-badge {
+  position: absolute;
+  inset-block-start: 4px;
+  padding-inline: 4px;
+  border-radius: 3px;
+  color: white;
+  background: var(--vc-asset-shade);
+  line-height: 16px;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+.asset-used { inset-inline-start: 4px; }
+.asset-time-badge { inset-inline-end: 4px; }
+.editor-shell .asset-view-list .asset-select {
+  grid-template-columns: 46px minmax(0, 1fr) minmax(0, .65fr) 5ch;
+  align-items: center;
+  min-height: 34px;
+  padding: 3px 5px;
+  gap: 6px;
+}
+.editor-shell .asset-view-list .asset-select:hover { background: var(--bg-hover); }
+.editor-shell .asset-view-list .sel .asset-select { background: var(--bg-selected); }
+.editor-shell .asset-view-list .asset-thumb { height: 26px; border-radius: 4px; }
+.asset-view-list .asset-thumb-icon { width: 15px; height: 15px; }
+.asset-view-list .asset-row-meta, .asset-view-list .asset-row-time {
+  display: block;
+  color: var(--ws-text-3);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}
+.asset-view-list :is(.asset-used, .asset-time-badge) { display: none; }
+.editor-shell .asset-view-list .asset-thumb .availability {
+  width: 100%;
+  inset-inline: 0;
+  inset-block-end: 0;
+  text-align: center;
+  padding: 0;
+}
+.editor-shell .asset-table .asset-actions {
+  inset: auto 2px 22px auto;
+  transform: none;
+  max-width: calc(100% - 4px);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  pointer-events: none;
+  z-index: 1;
+  background: var(--bg-raised);
+  border-color: var(--border-strong);
+}
+.editor-shell .asset-view-list .asset-actions { inset-block: 2px auto; }
+.editor-shell .asset-table .asset-row:hover .asset-actions,
+.editor-shell .asset-table .asset-actions:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+.editor-shell .asset-table .asset-select:focus-visible,
+.editor-shell .asset-table button:focus-visible,
+.editor-shell .library-filter-toolbar :is(button, select):focus-visible {
+  outline: 2px solid var(--ws-focus);
+  outline-offset: -2px;
+}
+.asset-cv-summary { padding-inline: 2px; color: var(--ws-text-3); font-size: 11px; }
+.asset-table .cv-spark-toggle { align-self: start; font-size: 11px; }
+@container (max-width: 230px) {
+  .editor-shell .asset-view-list .asset-select { grid-template-columns: 46px minmax(0, 1fr) 5ch; }
+  .asset-view-list .asset-row-meta { display: none; }
+}
+.editor-shell .asset-drawer-content { container-type: inline-size; min-width: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .library-filter-toolbar .spin { animation: none; }
+  .asset-table .asset-row, .asset-table .asset-actions { transition: none; }
+}
+
+/* ProjectTabs and LibraryDrawer proportions follow the editor chrome. */
+.editor-shell .editor-titlebar .custom-titlebar-drag { gap: 0; padding-left: 8px; }
+.editor-shell .editor-titlebar .brand-lockup { border-right: 1px solid var(--border-strong); }
+.editor-shell .editor-titlebar .menu-bar { margin-left: auto; }
+.editor-shell .titlebar-project-switcher {
+  position: relative;
+  inset: auto;
+  transform: none;
+  flex: none;
+  margin-inline: 4px 8px;
+}
+.editor-shell .titlebar-project-switcher-toggle { max-width: 135px; }
+.editor-shell .titlebar-project-switcher .project-switcher-dropdown { left: auto; right: 0; transform: none; }
+.project-tab-strip, .project-tab-list {
+  display: flex;
+  align-items: stretch;
+  align-self: stretch;
+  min-width: 0;
+  -webkit-app-region: no-drag;
+}
+.project-tab-list { overflow-x: auto; scrollbar-width: none; }
+.project-tab {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  min-width: 120px;
+  max-width: 210px;
+  border-right: 1px solid var(--border-strong);
+  color: var(--text-muted);
+}
+.project-tab[data-active="true"] { background: var(--bg-panel); color: var(--text); }
+.project-tab:hover { background: var(--bg-hover); }
+.project-tab-strip button {
+  display: grid;
+  place-items: center;
+  flex: none;
+  background: transparent;
+  border: 0;
+  color: inherit;
+}
+.project-tab-strip .project-tab [role="tab"] {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1 1 auto;
+  min-width: 0;
+  align-self: stretch;
+  padding: 0 7px 0 11px;
+  border-radius: 0;
+  text-align: left;
+  font-size: 12px;
+}
+.project-tab [role="tab"] span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-tab-strip svg { flex: none; }
+.project-tab-strip .project-tab-add { width: 32px; color: var(--text-muted); }
+.project-tab-strip .project-tab-close { width: 19px; height: 20px; margin-inline-end: 6px; opacity: 0; }
+.project-tab:is(:hover, :focus-within, [data-active="true"]) .project-tab-close { opacity: 1; }
+.project-tab-strip :is(.project-tab-add, .project-tab-close):hover { background: var(--bg-hover); color: var(--text); }
+.project-tab-strip button:focus-visible, .asset-category-rail button:focus-visible { outline: 2px solid var(--ws-focus); outline-offset: -2px; }
+.editor-shell .left-seg button { display: grid; place-items: center; align-content: center; gap: 1px; margin-block: 2px; font-size: 10.5px; }
+.asset-drawer { display: grid; grid-template-columns: 62px minmax(0, 1fr); min-height: calc(100% - 40px); }
+.asset-category-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 9px 6px;
+  border-inline-end: 1px solid var(--border);
+}
+.asset-category-rail button {
+  min-height: 26px;
+  padding-inline: 7px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--text);
+  background: var(--bg-field);
+  text-align: start;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.asset-category-rail button:hover { background: var(--bg-pressed); }
+.asset-category-rail button[aria-pressed="true"] { color: var(--ws-accent-text); background: var(--bg-selected); }
+.asset-drawer-content .library-toolbar,
+.editor-shell .asset-drawer-content .text-materials { flex-wrap: wrap; padding-inline: 8px; }
+.asset-drawer-content .library-toolbar button { white-space: nowrap; }
+.asset-favorite-mark {
+  display: grid;
+  place-items: center;
+  position: absolute;
+  inset-inline-start: 4px;
+  inset-block-end: 4px;
+  width: 17px;
+  height: 17px;
+  border-radius: 3px;
+  background: var(--vc-asset-shade);
+  color: var(--vc-asset-favorite);
+}
+.asset-view-list .asset-favorite-mark { inset-block-end: 1px; inset-inline-start: 1px; }
+.inspector-picked-assets { margin: 0; padding-inline-start: 17px; color: var(--text-muted); }
+.inspector-picked-assets li { overflow-wrap: anywhere; margin-block: 5px; }

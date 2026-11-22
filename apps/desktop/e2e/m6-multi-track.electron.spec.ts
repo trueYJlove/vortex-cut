@@ -26,7 +26,7 @@ const trackFlags = (page: any, projectId: string, trackId: string) => page.evalu
   return state.current_revision.document.tracks.find(item => item.id === track);
 }, { id: projectId, track: trackId } as never);
 
-test("M6 多轨道：新增视频/文本轨、片段跨轨拖动、轨道属性开关、换位与删除", async () => {
+test("多轨道：新增视频/文本轨、跨轨拖动与轨道属性", async () => {
   test.setTimeout(300_000);
   const run = join(root, "test-results", `m6-multi-track-${process.pid}-${Date.now()}`);
   const userData = join(run, "user-data"); const video = join(run, "素材.mp4");
@@ -58,9 +58,13 @@ test("M6 多轨道：新增视频/文本轨、片段跨轨拖动、轨道属性�
     const canvas = page.locator(".timeline-canvas-container canvas");
     const box = await canvas.boundingBox();
     if (!box) throw new Error("no box");
-    // 固定行高（标尺 16 + 行 56）；行 y = 16 + index * 56。
-    const rowH = 56;
-    const rowDragY = (index: number) => Math.round(16 + index * rowH + 8);
+    // 轨道组可能在可用空间中垂直居中，按实际轨道头坐标定位。
+    const rowDragY = async (trackId: string) => {
+      const head = await page.locator(`.timeline-track-head[data-track-id="${trackId}"]`).boundingBox();
+      const currentCanvas = await canvas.boundingBox();
+      if (!head || !currentCanvas) throw new Error(`轨道 ${trackId} 不可见`);
+      return Math.round(head.y - currentCanvas.y + 8);
+    };
     // HTML5 拖放模拟：向画布指定行位置派发 dragover/drop。
     const dispatchDrop = (assetId: string, x: number, y: number) => page.evaluate(({ x: px, y: py, assetId: aid }: { x: number; y: number; assetId: string }) => {
       const canvas = document.querySelector(".timeline-canvas-container canvas") as HTMLCanvasElement;
@@ -81,9 +85,9 @@ test("M6 多轨道：新增视频/文本轨、片段跨轨拖动、轨道属性�
     // 2. 片段跨轨拖动：V1（行 2）→ V2（行 0），仅垂直拖动，时间位置不变。
     //    拖拽点取行顶部偏移 +8，避开行内下部的音量线。
     // 轨道顺序：V2=0, C1=1, V1=2, A1=3。
-    await page.mouse.move(box.x + 150, box.y + rowDragY(2));
+    await page.mouse.move(box.x + 150, box.y + await rowDragY("V1"));
     await page.mouse.down();
-    await page.mouse.move(box.x + 150, box.y + rowDragY(0), { steps: 8 });
+    await page.mouse.move(box.x + 150, box.y + await rowDragY("V2"), { steps: 8 });
     await page.mouse.up();
     await page.waitForTimeout(800);
     const movedTrackId = await page.evaluate(async (id: string) => {
@@ -93,7 +97,7 @@ test("M6 多轨道：新增视频/文本轨、片段跨轨拖动、轨道属性�
     expect(movedTrackId).toBe("V2");
 
     // 2b. 拖入新视频素材到 V2 行（HTML5 drop 模拟）→ 素材加入 V2。
-    await dispatchDrop(setup.asset_id, 320, rowDragY(0));
+    await dispatchDrop(setup.asset_id, 320, await rowDragY("V2"));
     await expect.poll(async () => await page.evaluate(async (id: string) => {
       const state = await window.desktop.getTimeline(id as never);
       return state.current_revision.document.clips.length;
@@ -126,7 +130,7 @@ test("M6 多轨道：新增视频/文本轨、片段跨轨拖动、轨道属性�
     await expect(page.getByRole("button", { name: "静音轨道 V2" })).toHaveCount(1);
 
     // 4b. 视频素材拖到文本轨上 → 自动新建视频轨（V3）并放入。
-    await dispatchDrop(setup.asset_id, 320, rowDragY(1));
+    await dispatchDrop(setup.asset_id, 320, await rowDragY("T1"));
     await expect.poll(() => trackIds(page, setup.project_id)).toEqual(["V2", "T1", "V3", "C1", "V1", "A1"]);
     const thirdClipTrack = await page.evaluate(async (id: string) => {
       const state = await window.desktop.getTimeline(id as never);
@@ -134,21 +138,31 @@ test("M6 多轨道：新增视频/文本轨、片段跨轨拖动、轨道属性�
     }, setup.project_id);
     expect(thirdClipTrack).toBe("V3");
 
-    // 5. 换位：锁定的轨道也允许结构性换位（V2 在动态区内下移/上移）。
-    //    行操作按钮悬停轨道头后才显示，先悬停再点击。
+    // 5. 轨道头只保留轨道属性，不暴露移动和删除入口。
     const v2Head = page.locator('.timeline-track-head[data-track-id="V2"]');
     await v2Head.hover();
-    await page.getByRole("button", { name: "下移轨道 V2" }).click();
+    await expect(page.getByRole("button", { name: /(?:上移|下移|删除)轨道/ })).toHaveCount(0);
+    const badge = v2Head.locator(".timeline-track-badge");
+    const dragTrackTo = async (targetId: string) => {
+      const from = await badge.boundingBox();
+      const to = await page.locator(`.timeline-track-head[data-track-id="${targetId}"]`).boundingBox();
+      if (!from || !to) throw new Error("轨道头不可见");
+      await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(from.x + from.width / 2, to.y + to.height / 2, { steps: 8 });
+      await page.mouse.up();
+    };
+    await dragTrackTo("T1");
     await expect.poll(() => trackIds(page, setup.project_id)).toEqual(["T1", "V2", "V3", "C1", "V1", "A1"]);
-    await v2Head.hover();
-    await page.getByRole("button", { name: "上移轨道 V2" }).click();
+    await dragTrackTo("T1");
     await expect.poll(() => trackIds(page, setup.project_id)).toEqual(["V2", "T1", "V3", "C1", "V1", "A1"]);
-
-    // 6. 解锁后删除动态轨道：其上片段级联删除（V3 及其片段保留）。
+    await v2Head.click({ button: "right" });
+    await expect(page.getByRole("menuitem", { name: "删除轨道" })).toHaveAttribute("aria-disabled", "true");
+    await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "锁定轨道 V2" }).click();
     await expect.poll(async () => (await trackFlags(page, setup.project_id, "V2"))?.locked).toBe(false);
-    await v2Head.hover();
-    await page.getByRole("button", { name: "删除轨道 V2" }).click();
+    await v2Head.click({ button: "right" });
+    await page.getByRole("menuitem", { name: "删除轨道" }).click();
     await expect.poll(() => trackIds(page, setup.project_id)).toEqual(["T1", "V3", "C1", "V1", "A1"]);
     const remaining = await page.evaluate(async (id: string) => {
       const state = await window.desktop.getTimeline(id as never);

@@ -35,11 +35,48 @@ const doc = (): TimelineDocument => ({
 
 describe("轨道属性头", () => {
   afterEach(() => cleanup());
-  it("下移轨道按钮提交 move_track patch", () => {
+  it("轨道头不提供移动或删除轨道的按钮", () => {
     const onPatch = vi.fn().mockResolvedValue(undefined);
     render(<TimelinePanel document={doc()} selection={null} setSelection={vi.fn()} onPatch={onPatch} onDropAsset={vi.fn()} canUndo={false} canRedo={false} onUndo={vi.fn()} onRedo={vi.fn()} assetMedia={[]} onSeek={vi.fn()} onCommand={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "下移轨道 V2" }));
+    expect(screen.queryByRole("button", { name: /(?:上移|下移|删除)轨道/ })).toBeNull();
+    expect(onPatch).not.toHaveBeenCalled();
+  });
+  it("轨道头右键可删除有内容的动态轨，锁定时不可删除", () => {
+    const onPatch = vi.fn().mockResolvedValue(undefined);
+    const props = { selection: null, setSelection: vi.fn(), onPatch, onDropAsset: vi.fn(), canUndo: false, canRedo: false, onUndo: vi.fn(), onRedo: vi.fn(), assetMedia: [], onSeek: vi.fn(), onCommand: vi.fn() };
+    const { rerender } = render(<TimelinePanel document={doc()} {...props} />);
+    fireEvent.contextMenu(screen.getByLabelText("轨道 V2"), { clientX: 30, clientY: 50 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "删除轨道" }));
+    expect(onPatch).toHaveBeenCalledWith([{ op: "remove_track", track_id: "V2" }], "删除轨道");
+    const lockedDoc = doc();
+    lockedDoc.locked_elements = [lockedDoc.clips[0].clip_id];
+    rerender(<TimelinePanel document={lockedDoc} {...props} />);
+    fireEvent.keyDown(screen.getByLabelText("轨道 V2"), { key: "F10", shiftKey: true });
+    expect(screen.getByRole("menuitem", { name: "删除轨道" })).toHaveAttribute("aria-disabled", "true");
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    const linkedDoc = doc();
+    const video = { ...linkedDoc.clips[0], link_group_id: "pair" };
+    const audio = { ...video, clip_id: "audio" as never, asset_kind: "audio" as const, track_id: "A1" };
+    linkedDoc.clips = [video, audio];
+    linkedDoc.locked_elements = [audio.clip_id];
+    rerender(<TimelinePanel document={linkedDoc} {...props} />);
+    fireEvent.contextMenu(screen.getByLabelText("轨道 V2"));
+    expect(screen.getByRole("menuitem", { name: "删除轨道" })).toHaveAttribute("aria-disabled", "true");
+  });
+  it("拖动轨道编号可调整动态轨顺序", () => {
+    const onPatch = vi.fn().mockResolvedValue(undefined);
+    const { container } = render(<TimelinePanel document={doc()} selection={null} setSelection={vi.fn()} onPatch={onPatch} onDropAsset={vi.fn()} canUndo={false} canRedo={false} onUndo={vi.fn()} onRedo={vi.fn()} assetMedia={[]} onSeek={vi.fn()} onCommand={vi.fn()} />);
+    for (const [index, id] of ["V2", "T1", "C1"].entries()) {
+      const head = container.querySelector(`[data-track-id="${id}"]`) as HTMLElement;
+      vi.spyOn(head, "getBoundingClientRect").mockReturnValue({ top: index * 50, bottom: index * 50 + 50, height: 50 } as DOMRect);
+    }
+    const badge = container.querySelector('[data-track-id="V2"] .timeline-track-badge')!;
+    fireEvent(badge, new MouseEvent("pointerdown", { bubbles: true, button: 0, clientY: 20 }));
+    fireEvent(badge, new MouseEvent("pointermove", { bubbles: true, clientY: 90 }));
+    fireEvent(badge, new MouseEvent("pointerup", { bubbles: true, clientY: 90 }));
     expect(onPatch).toHaveBeenCalledWith([{ op: "move_track", track_id: "V2", to_index: 1 }], "调整轨道顺序");
+    fireEvent.keyDown(screen.getByLabelText("轨道 V2"), { key: "ArrowDown", altKey: true });
+    expect(onPatch).toHaveBeenLastCalledWith([{ op: "move_track", track_id: "V2", to_index: 1 }], "调整轨道顺序");
   });
   it("锁定/隐藏按钮提交 set_track_flags patch；文本轨无静音按钮", () => {
     const onPatch = vi.fn().mockResolvedValue(undefined);

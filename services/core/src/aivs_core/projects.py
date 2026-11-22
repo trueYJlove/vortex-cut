@@ -446,7 +446,7 @@ class ProjectAssetService:
                 # 清理范围的判据只有一条：**该作业的结果实体是否已被本函数删除**。
                 # 是 ⇒ 结果都没了，留作业行只会让素材永远删不掉（jobs.asset_id 是
                 # NO ACTION），最终变成「素材在、结果没了、两边都不可用」的死局。
-                # - proxy / waveform / semantic_index -> derived_media_cache_refs 已清
+                # - proxy / waveform / filmstrip / semantic_index -> derived_media_cache_refs 随素材清理
                 # - transcription                     -> transcripts 已清
                 # - cv_analysis                       -> cv_analyses / cv_samples 已清
                 # - beat_analysis                     -> beat_grids 已清
@@ -457,7 +457,7 @@ class ProjectAssetService:
                 # final_export）。
                 db.execute(
                     "DELETE FROM jobs WHERE asset_id=? AND kind IN "
-                    "('proxy','waveform','semantic_index','transcription',"
+                    "('proxy','waveform','filmstrip','semantic_index','transcription',"
                     "'cv_analysis','beat_analysis')",
                     (asset_id,),
                 )

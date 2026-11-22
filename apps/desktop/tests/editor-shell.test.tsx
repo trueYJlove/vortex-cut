@@ -158,6 +158,30 @@ describe("Editor shell 基线", () => {
     expect(screen.getByText("海报.png")).toBeInTheDocument();
     expect(screen.queryByText("很长的中文素材文件名-第一幕.mp4")).not.toBeInTheDocument();
     expect(screen.queryByText("共 1 项")).toBeNull(); // "共 N 项"已移除
+    fireEvent.change(search, { target: { value: "没有这个文件" } });
+    expect(screen.getByText("没有匹配的素材")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "清除筛选" }));
+    expect(search).toHaveValue("");
+    expect(screen.getByText("很长的中文素材文件名-第一幕.mp4")).toBeInTheDocument();
+  });
+
+  it("moves focus and selection between assets with the keyboard", async () => {
+    render(<App />);
+    const video = await screen.findByRole("button", { name: /很长的中文素材文件名-第一幕.mp4，视频/ });
+    const image = screen.getByRole("button", { name: "海报.png，图片" });
+    video.focus();
+    fireEvent.keyDown(video, { key: "End" });
+    expect(image).toHaveFocus();
+    expect(image).toHaveAttribute("aria-pressed", "true");
+    fireEvent.keyDown(image, { key: "Home" });
+    expect(video).toHaveFocus();
+    expect(video).toHaveAttribute("aria-pressed", "true");
+    fireEvent.keyDown(video, { key: "F10", shiftKey: true });
+    const menu = screen.getByRole("menu");
+    expect(within(menu).getByRole("menuitem", { name: "转录" })).toBeInTheDocument();
+    fireEvent.keyDown(menu, { key: "Escape" });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(video).toHaveFocus();
   });
 
   it("shows contextual properties for the selected timeline object", async () => {
@@ -201,6 +225,18 @@ describe("Editor shell 基线", () => {
     fireEvent.click(clip);
     expect(clip).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("slider", { name: "时间线播放头" })).toBeInTheDocument();
+  });
+
+  it("allows preview volume adjustment with the keyboard", async () => {
+    render(<App />);
+    expect(await screen.findByRole("button", { name: "播放设置" })).toHaveTextContent("1×");
+    fireEvent.click(await screen.findByRole("button", { name: "音量" }));
+    const slider = screen.getByRole("slider", { name: "预览音量" });
+    expect(slider).toHaveAttribute("aria-valuenow", "80");
+    fireEvent.keyDown(slider, { key: "ArrowDown" });
+    expect(slider).toHaveAttribute("aria-valuenow", "75");
+    fireEvent.keyDown(slider, { key: "Home" });
+    expect(slider).toHaveAttribute("aria-valuenow", "0");
   });
 
   it("shows a drop hint while dragging an asset over the timeline and clears it on drop", async () => {

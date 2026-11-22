@@ -20,6 +20,7 @@ PATCH_OPERATIONS = {
     "remove_clip",
     "move_clip",
     "position_clip",
+    "position_clips",
     "trim_clip",
     "split_clip",
     "set_layout",
@@ -1158,6 +1159,50 @@ class TimelineService:
                 rest = [c for c in clips if c["clip_id"] not in member_ids]
                 insert_at = max(0, min(to_index, len(rest)))
                 clips[:] = rest[:insert_at] + block + rest[insert_at:]
+        elif op == "position_clips":
+            # 一次原子重排：先校验全部目标，再统一落位，避免交换/涟漪编辑
+            # 在中间状态碰到同轨重叠。每个位置显式给出，调用方负责链接组规划。
+            _exact_keys(operation, {"op", "placements"})
+            placements = operation.get("placements")
+            if not isinstance(placements, list) or not 1 <= len(placements) <= 100:
+                raise DomainError("TIMELINE_INVALID", "批量位置数量需为 1-100")
+            prepared: list[tuple[dict[str, Any], int, str]] = []
+            seen: set[str] = set()
+            track_by_id = {track["id"]: track for track in document.get("tracks", [])}
+            locked_ids = set(document.get("locked_elements", []))
+            for raw in placements:
+                item = _mapping(raw, "批量位置不合法")
+                _exact_keys(
+                    item, {"clip_id", "timeline_start_us", "track_id"}, optional={"track_id"}
+                )
+                clip = _clip(document, item.get("clip_id"))
+                if clip["clip_id"] in seen:
+                    raise DomainError("TIMELINE_INVALID", "批量位置包含重复片段")
+                seen.add(clip["clip_id"])
+                start = _integer(item.get("timeline_start_us"), "时间线开始时间不合法")
+                target_id = item.get("track_id", clip["track_id"])
+                target = track_by_id.get(target_id) if isinstance(target_id, str) else None
+                expected = "audio" if clip["asset_kind"] == "audio" else "video"
+                if start < 0 or target is None or target.get("kind") != expected:
+                    raise DomainError("TIMELINE_INVALID", "批量位置或目标轨道不合法")
+                if (
+                    clip["clip_id"] in locked_ids
+                    or track_by_id.get(clip["track_id"], {}).get("locked")
+                    or target.get("locked")
+                ):
+                    raise DomainError("TIMELINE_LOCKED", "片段或目标轨道已锁定")
+                prepared.append((clip, start, target_id))
+            for clip, start, target_id in prepared:
+                delta = start - clip["timeline_start_us"]
+                duration = clip["timeline_end_us"] - clip["timeline_start_us"]
+                if delta and clip["asset_kind"] != "audio":
+                    for caption in captions:
+                        if caption.get("source_clip_id") == clip["clip_id"]:
+                            caption["start_us"] += delta
+                            caption["end_us"] += delta
+                clip["track_id"] = target_id
+                clip["timeline_start_us"] = start
+                clip["timeline_end_us"] = start + duration
         elif op == "position_clip":
             # 自由定位：视频与音频片段都可以放在任意时间位置（同轨允许空隙）。
             # 可选 track_id：跨轨道移动（仅限同类型轨道；视频片段在视频轨之间
@@ -1589,7 +1634,7 @@ class TimelineService:
                     audio[field] = clip["audio"][field]
             clip["audio"] = audio
         elif op == "set_speed":
-            _exact_keys(operation, {"op", "clip_id", "speed_milli"})
+            _exact_keys(operation, {"op", "clip_id", "speed_milli", "ripple"}, optional={"ripple"})
             clip = _clip(document, operation.get("clip_id"))
             if clip["asset_kind"] not in ("video", "audio"):
                 raise DomainError("TIMELINE_INVALID", "只有视频/音频片段可以变速")
@@ -1609,7 +1654,8 @@ class TimelineService:
                     clip["source_start_us"], clip["source_end_us"], speed
                 )
                 clip["timeline_end_us"] = clip["timeline_start_us"] + new_duration
-                self._ripple_track_right(clips, captions, clip)
+                if operation.get("ripple", True):
+                    self._ripple_track_right(clips, captions, clip)
                 # B3：片段时长变化，关键帧时间等比重映射。
                 _remap_clip_keyframes(clip, old_duration, new_duration)
             else:
@@ -1791,6 +1837,18 @@ class TimelineService:
             removed_clip_ids = {
                 clip["clip_id"] for clip in clips if clip.get("track_id") == track_id
             }
+            if removed_clip_ids.intersection(document.get("locked_elements", [])):
+                raise DomainError("TIMELINE_LOCKED", "轨道中存在锁定的片段")
+            for clip in clips:
+                if clip["clip_id"] in removed_clip_ids and clip.get("link_group_id"):
+                    for member in _clip_link_members(document, clip):
+                        member_track = next(
+                            (t for t in tracks_list if t.get("id") == member.get("track_id")), None
+                        )
+                        if member["clip_id"] in document.get("locked_elements", []) or (
+                            member_track and member_track.get("locked")
+                        ):
+                            raise DomainError("TIMELINE_LOCKED", "轨道中存在已锁定的链接片段")
             clips[:] = [clip for clip in clips if clip.get("track_id") != track_id]
             captions[:] = [
                 caption
@@ -2040,6 +2098,32 @@ class TimelineService:
             for track in document.get("tracks", [])
             if isinstance(track, dict)
         }
+        # 链接操作会修改组内其他片段；锁定保护必须覆盖实际受影响的成员，
+        # 而不只是用户点击的那个片段。
+        affected_ids: set[str] = set()
+        if operation.get("op") == "set_clip_link" and isinstance(operation.get("clip_ids"), list):
+            affected_ids = {item for item in operation["clip_ids"] if isinstance(item, str)}
+        if affected_ids:
+            for member in document.get("clips", []):
+                if member.get("clip_id") in affected_ids:
+                    affected_ids.update(c["clip_id"] for c in _clip_link_members(document, member))
+        link_ops = {
+            "remove_clip", "move_clip", "position_clip", "trim_clip", "split_clip", "clear_clip_link",
+        }
+        affects_group = operation.get("op") in {"split_clip", "clear_clip_link"} or not operation.get(
+            "ignore_link", False
+        )
+        if isinstance(clip_id, str) and operation.get("op") in link_ops and affects_group:
+            target = next(
+                (c for c in document.get("clips", []) if c.get("clip_id") == clip_id), None
+            )
+            if target is not None:
+                affected_ids.update(c["clip_id"] for c in _clip_link_members(document, target))
+        for member in document.get("clips", []):
+            if member.get("clip_id") in affected_ids and (
+                member["clip_id"] in locked or track_locks.get(member.get("track_id"), False)
+            ):
+                raise DomainError("TIMELINE_LOCKED", "链接片段或其轨道已锁定")
         if isinstance(clip_id, str) and track_locks:
             clip = next((c for c in document.get("clips", []) if c.get("clip_id") == clip_id), None)
             if clip is not None and track_locks.get(clip.get("track_id"), False):

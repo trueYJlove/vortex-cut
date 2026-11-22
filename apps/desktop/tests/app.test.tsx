@@ -506,15 +506,26 @@ describe("Stage 1A/1B 工作流", () => {
 describe("素材箱交互", () => {
   afterEach(() => cleanup());
 
-  it("素材列表固定为列表视图（视图切换已移除）", async () => {
-    window.desktop = desktopApi(); render(<App />);
+  it("默认显示网格，切换到列表后记住项目视图并保留选中素材", async () => {
+    const viewKey = `vortex.asset-view.${project.project_id}`;
+    localStorage.removeItem(viewKey);
+    window.desktop = desktopApi();
+    const app = render(<App />);
     await screen.findByText(video.display_name);
-    expect(document.querySelector(".asset-list.asset-table")).not.toBeNull();
-    expect(screen.queryByRole("button", { name: "切换为缩略图视图" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "切换为列表视图" })).toBeNull();
-    // 重新定位操作已移除（与导入重叠）；删除走应用内确认弹窗。
-    expect(screen.queryByRole("button", { name: "重新定位" })).toBeNull();
-    expect(screen.getAllByTitle(/删除 /).length).toBeGreaterThan(0);
+    expect(document.querySelector(".asset-view-grid")).not.toBeNull();
+    const assetButton = screen.getByRole("button", { name: `${video.display_name}，视频` });
+    fireEvent.click(assetButton);
+    fireEvent.click(screen.getByRole("button", { name: "切换到列表视图" }));
+    expect(document.querySelector(".asset-view-list")).not.toBeNull();
+    expect(assetButton).toHaveAttribute("aria-pressed", "true");
+    expect(localStorage.getItem(viewKey)).toBe("list");
+    app.unmount();
+    render(<App />);
+    await screen.findByText(video.display_name);
+    expect(document.querySelector(".asset-view-list")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "切换到网格视图" }));
+    expect(document.querySelector(".asset-view-grid")).not.toBeNull();
+    localStorage.removeItem(viewKey);
   });
 
   it("提示条按级别配色（成功为绿色而非红色）", async () => {
@@ -591,14 +602,14 @@ describe("Stage 1C Editor", () => {
   });
 
   it("支持片段与字幕编辑", async () => {
-    const api = desktopApi(); window.desktop = api; render(<App />); fireEvent.click(await screen.findByRole("button", { name: /video 5.00s/ })); fireEvent.click(screen.getByRole("button", { name: "拆分片段" })); await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledWith(expect.objectContaining({ patch: expect.objectContaining({ operations: [expect.objectContaining({ op: "split_clip" })] }) }))); /* 分段控件换成参照 Segmented 后，语义是 radiogroup > radio（ARIA 更准确：
+    const api = desktopApi(); window.desktop = api; render(<App />); fireEvent.click(await screen.findByRole("button", { name: /video 5.00s/ })); fireEvent.keyDown(screen.getByRole("slider", { name: "时间线播放头" }), { key: "End" }); for (let i = 0; i < 30; i += 1) fireEvent.keyDown(screen.getByRole("slider", { name: "时间线播放头" }), { key: "ArrowLeft" }); await waitFor(() => expect(screen.getByRole("button", { name: "拆分片段" })).toBeEnabled()); fireEvent.click(screen.getByRole("button", { name: "拆分片段" })); await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledWith(expect.objectContaining({ patch: expect.objectContaining({ operations: [expect.objectContaining({ op: "split_clip" })] }) }))); /* 分段控件换成参照 Segmented 后，语义是 radiogroup > radio（ARIA 更准确：
    一组互斥选项就是 radio，不是 3 个独立按钮）。定位随之改为 radio。 */
     fireEvent.click(screen.getByRole("radio", { name: "裁切填满" })); await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledWith(expect.objectContaining({ patch: expect.objectContaining({ operations: [expect.objectContaining({ op: "set_layout", layout: "crop_fill" })] }) }))); fireEvent.click(screen.getByRole("button", { name: /这是一条很长/ })); fireEvent.change(screen.getByLabelText("文本"), { target: { value: "修正字幕" } }); fireEvent.blur(screen.getByLabelText("文本")); await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledWith(expect.objectContaining({ patch: expect.objectContaining({ operations: [expect.objectContaining({ op: "update_caption", text: "修正字幕" })] }) })));
   });
 
   it("创建空时间线后忽略迟到的 404，并以冻结契约追加素材与转录", async () => {
     let rejectTimeline!: (reason: unknown) => void; const pendingTimeline = new Promise<TimelineState>((_, reject) => { rejectTimeline = reject; }); const api = desktopApi({ timeline: null }); api.getTimeline = vi.fn().mockReturnValue(pendingTimeline); window.desktop = api; render(<App />); fireEvent.click(await screen.findByRole("button", { name: "创建空时间线" })); await screen.findByRole("button", { name: /video 5.00s/ }); rejectTimeline(new Error("TIMELINE_NOT_FOUND 404"));
-    fireEvent.dragOver(screen.getByLabelText("时间线画布"), { dataTransfer: { getData: () => video.asset_id, dropEffect: "copy" } }); fireEvent.drop(screen.getByLabelText("时间线画布"), { dataTransfer: { getData: () => video.asset_id, dropEffect: "copy" } }); /* ②拖到空白自动建轨（参照 Timeline.tsx:361-370 newTrack）：drop 无坐标落空白 → add_track+insert_asset_clip 两条 op。 */ await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledWith(expect.objectContaining({ patch: expect.objectContaining({ operations: [expect.objectContaining({ op: "add_track", kind: "video" }), expect.objectContaining({ op: "insert_asset_clip" })] }) })));
+    fireEvent.dragOver(screen.getByLabelText("时间线画布"), { dataTransfer: { getData: (type: string) => type === "application/x-vortex-cut-asset" ? video.asset_id : "", dropEffect: "copy" } }); fireEvent.drop(screen.getByLabelText("时间线画布"), { dataTransfer: { getData: (type: string) => type === "application/x-vortex-cut-asset" ? video.asset_id : "", dropEffect: "copy" } }); /* ②拖到空白自动建轨（参照 Timeline.tsx:361-370 newTrack）：drop 无坐标落空白 → add_track+insert_asset_clip 两条 op。 */ await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledWith(expect.objectContaining({ patch: expect.objectContaining({ operations: [expect.objectContaining({ op: "add_track", kind: "video" }), expect.objectContaining({ op: "insert_asset_clip" })] }) })));
     fireEvent.click(screen.getAllByRole("button", { name: /^转录$/ })[0]);
     // 勾选转录片段的界面在"转录"子标签下：切换后操作。A08：转录正文不再
     // 全量预取——先点"查看转录"按需加载（并发队列 + 代次作废），再勾选。

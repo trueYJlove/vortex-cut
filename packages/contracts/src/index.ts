@@ -956,6 +956,7 @@ export type TimelinePatchOperation =
   | { op: "remove_clip"; clip_id: TimelineClipId; ignore_link?: boolean }
   | { op: "move_clip"; clip_id: TimelineClipId; to_index: number; ignore_link?: boolean }
   | { op: "position_clip"; clip_id: TimelineClipId; timeline_start_us: number; track_id?: string; ignore_link?: boolean }
+  | { op: "position_clips"; placements: Array<{ clip_id: TimelineClipId; timeline_start_us: number; track_id?: string }> }
   | { op: "detach_audio"; clip_id: TimelineClipId }
   | { op: "set_clip_link"; clip_ids: TimelineClipId[] }
   | { op: "clear_clip_link"; clip_id: TimelineClipId }
@@ -976,7 +977,7 @@ export type TimelinePatchOperation =
   | { op: "set_clip_transform"; clip_id: TimelineClipId; transform: TimelineClipStaticTransform }
   | { op: "set_clip_mask"; clip_id: TimelineClipId; mask: TimelineClipMask | Record<string, never> }
   | { op: "set_clip_keying"; clip_id: TimelineClipId; keying: TimelineClipKeying | Record<string, never> }
-  | { op: "set_speed"; clip_id: TimelineClipId; speed_milli: number }
+  | { op: "set_speed"; clip_id: TimelineClipId; speed_milli: number; ripple?: boolean }
   | { op: "set_reverse_playback"; clip_id: TimelineClipId; reverse_playback: boolean }
   | { op: "set_image_duration"; clip_id: TimelineClipId; duration_us: number }
   | { op: "set_clip_locked"; clip_id: TimelineClipId; locked: boolean }
@@ -2168,6 +2169,7 @@ export function isTimelinePatchOperation(value: unknown): value is TimelinePatch
     case "remove_clip": return onlyKeys(value, ["op", "clip_id", "ignore_link"]) && id("clip_id") && (value.ignore_link === undefined || typeof value.ignore_link === "boolean");
     case "move_clip": return onlyKeys(value, ["op", "clip_id", "to_index", "ignore_link"]) && id("clip_id") && index("to_index") && (value.ignore_link === undefined || typeof value.ignore_link === "boolean");
     case "position_clip": return onlyKeys(value, ["op", "clip_id", "timeline_start_us", "track_id", "ignore_link"]) && id("clip_id") && us("timeline_start_us") && (value.track_id === undefined || (isString(value.track_id) && Boolean(value.track_id.length))) && (value.ignore_link === undefined || typeof value.ignore_link === "boolean");
+    case "position_clips": return onlyKeys(value, ["op", "placements"]) && Array.isArray(value.placements) && value.placements.length >= 1 && value.placements.length <= 100 && value.placements.every(item => isRecord(item) && onlyKeys(item, ["clip_id", "timeline_start_us", "track_id"]) && isId(item.clip_id) && isInteger(item.timeline_start_us, 0) && (item.track_id === undefined || (isString(item.track_id) && Boolean(item.track_id.length)))) && new Set(value.placements.map(item => item.clip_id)).size === value.placements.length;
     case "add_track": return onlyKeys(value, ["op", "kind"]) && oneOf(["video", "text"], value.kind);
     case "remove_track": return onlyKeys(value, ["op", "track_id"]) && isString(value.track_id) && Boolean(value.track_id.length);
     case "move_track": return onlyKeys(value, ["op", "track_id", "to_index"]) && isString(value.track_id) && Boolean(value.track_id.length) && index("to_index");
@@ -2185,7 +2187,7 @@ export function isTimelinePatchOperation(value: unknown): value is TimelinePatch
     case "set_clip_transform": return onlyKeys(value, ["op", "clip_id", "transform"]) && id("clip_id") && isTimelineClipStaticTransform(value.transform);
     case "set_clip_mask": return onlyKeys(value, ["op", "clip_id", "mask"]) && id("clip_id") && isTimelineClipMask(value.mask);
     case "set_clip_keying": return onlyKeys(value, ["op", "clip_id", "keying"]) && id("clip_id") && isTimelineClipKeying(value.keying);
-    case "set_speed": return onlyKeys(value, ["op", "clip_id", "speed_milli"]) && id("clip_id") && isInteger(value.speed_milli, 250) && value.speed_milli <= 4000;
+    case "set_speed": return onlyKeys(value, ["op", "clip_id", "speed_milli", "ripple"]) && id("clip_id") && isInteger(value.speed_milli, 250) && value.speed_milli <= 4000 && (value.ripple === undefined || typeof value.ripple === "boolean");
     case "set_reverse_playback": return onlyKeys(value, ["op", "clip_id", "reverse_playback"]) && id("clip_id") && typeof value.reverse_playback === "boolean";
     case "set_image_duration": return onlyKeys(value, ["op", "clip_id", "duration_us"]) && id("clip_id") && us("duration_us", 500_000) && Number(value.duration_us) <= 30_000_000;
     case "set_clip_locked": return onlyKeys(value, ["op", "clip_id", "locked"]) && id("clip_id") && typeof value.locked === "boolean";

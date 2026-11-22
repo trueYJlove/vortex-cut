@@ -328,6 +328,7 @@ export function SyntheticPipLayer(props: SyntheticPipLayerProps): React.ReactEle
       {marquee && <div className="preview-marquee" aria-hidden="true" style={{ left: marquee.x, top: marquee.y, width: marquee.w, height: marquee.h }} />}
       {renderBoxes.map(box => {
         const selected = box.clipId === selectedClipId;
+        const picked = selected || selectedClipIds.includes(box.clipId);
         const gesturing = live?.clipId === box.clipId ? live.geometry : null;
         const geometry: PipGeometry = gesturing ?? { cx: box.x + box.w / 2, cy: box.y + box.h / 2, w: box.w, h: box.h, rotate: box.rotate };
         const w = geometry.w * view.scale;
@@ -341,7 +342,7 @@ export function SyntheticPipLayer(props: SyntheticPipLayerProps): React.ReactEle
             key={box.clipId}
             role="button"
             aria-label={`画中画 ${box.clipId}`}
-            className={`sp-box${selected ? " selected" : ""}`}
+            className={`sp-box${picked ? " selected" : ""}`}
             style={{
               left: view.offsetX + (geometry.cx - geometry.w / 2) * view.scale,
               top: view.offsetY + (geometry.cy - geometry.h / 2) * view.scale,

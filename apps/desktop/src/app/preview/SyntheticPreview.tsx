@@ -36,7 +36,8 @@ export interface SyntheticPreviewProps {
   /** 会话句柄上抛（2026-11-11 scrub 直通）：App 在拖拽风暴中用它绕过 React 提交
    *  直接 seekToFrame（dev 下全树提交 ~36ms 是拖动卡顿的主因）；null = 会话
    *  重建/卸载。App 必须在会话 null 后停止直呼。 */
-  onSession?: (session: { seekToFrame(target: number): Promise<number>; beginScrubStorm(): void; endScrubStorm(): void; getMeterSamples?(): readonly [Float32Array, Float32Array] | null } | null) => void;
+  onSession?: (session: { seekToFrame(target: number): Promise<number>; play(): void; pause(): void; beginScrubStorm(): void; endScrubStorm(): void; getMeterSamples?(): readonly [Float32Array, Float32Array] | null } | null) => void;
+  preparePlaybackRef?: React.RefObject<(() => void) | null>;
   /** asset_id → aivideo:// 票据 URL（App 既有素材通道）。 */
   mediaUrls: Map<string, string>;
   /** clip_id → 片段音频配置（编辑态透传；未提供则合成预览静音）。 */
@@ -101,6 +102,10 @@ interface LoadState {
 
 export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactElement {
   const { projectId, revisionId, mediaUrls, audioByClip, pipClips, selectedClipId, onSelectClip, onSelectClips, selectedClipIds, trackIndexByClipId, onCommitPipTransform, onDraftPipMask, onCommitPipMask, onGesturePause, onGestureResume, playing, playheadUs, onTimeUs, onEnded, onFallback, outputRatio, playheadStore, sourceResolver, resourceTier, forceCopyTo, playbackRate, snapshotRef, proxyEpoch, onDecodeBudget, onSession } = props;
+  const playbackCallbacksRef = useRef({ onTimeUs, onEnded });
+  playbackCallbacksRef.current = { onTimeUs, onEnded };
+  const playbackActiveRef = useRef(playing);
+  playbackActiveRef.current = playing;
   // 判定回调经 ref 读最新值：指标轮询 effect 只依赖 load.status，不该因为父组件
   // 每次重渲染换了函数身份就重建定时器（重建会漏掉一轮采样）。
   const onDecodeBudgetRef = useRef(onDecodeBudget);
@@ -124,6 +129,8 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
   const proxyForceRebuild = useRef(false);
   const lastReportedUs = useRef<number>(playheadUs);
   const lastReportWall = useRef<number>(0);
+  const [, refreshOverlayViewport] = useState(0);
+  const overlayViewport = useRef({ width: 0, height: 0 });
   // 预览框观察器：组件级单例（吸收路径早退不销毁，避免观察器泄漏）
   const boxObserverRef = useRef<ResizeObserver | null>(null);
   if (!boxObserverRef.current) {
@@ -136,7 +143,13 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
       const rect = container.getBoundingClientRect();
       const width = rect?.width ?? 0;
       const height = rect?.height ?? 0;
-      if (width > 2 && height > 2) session.resize(width, height);
+      if (width > 2 && height > 2) {
+        session.resize(width, height);
+        if (overlayViewport.current.width !== width || overlayViewport.current.height !== height) {
+          overlayViewport.current = { width, height };
+          refreshOverlayViewport(version => version + 1);
+        }
+      }
     });
   }
   const [load, setLoad] = useState<LoadState>({ status: "loading", message: "正在加载合成预览" });
@@ -329,12 +342,12 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
             const now = performance.now();
             if (now - lastReportWall.current >= 100 || !session.isPlaying) {
               lastReportWall.current = now;
-              onTimeUs(us);
+              playbackCallbacksRef.current.onTimeUs(us);
             }
           };
           session.onEnded = () => {
-            onTimeUs(lastReportedUs.current);
-            onEnded?.();
+            playbackCallbacksRef.current.onTimeUs(lastReportedUs.current);
+            playbackCallbacksRef.current.onEnded?.();
           };
           // P196：缓冲提示（会话侧已延迟 300ms 且边沿触发，这里只做状态落地）。
           // 换会话时旧会话可能已 dispose、不会再补 false——装配前若提示仍亮着，
@@ -391,12 +404,12 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
           const now = performance.now();
           if (now - lastReportWall.current >= 100 || !session.isPlaying) {
             lastReportWall.current = now;
-            onTimeUs(us);
+            playbackCallbacksRef.current.onTimeUs(us);
           }
         };
         session.onEnded = () => {
-          onTimeUs(lastReportedUs.current); // 结束时冲齐最终播放头
-          onEnded?.();
+          playbackCallbacksRef.current.onTimeUs(lastReportedUs.current); // 结束时冲齐最终播放头
+          playbackCallbacksRef.current.onEnded?.();
         };
         // P196：同上（v1 帧源恒不缓冲，订阅只为"会话两态一致"，不产生回调）
         session.onBuffering = (value: boolean) => { if (!stale()) setBuffering(value); };
@@ -488,7 +501,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
   useEffect(() => {
     const session = sessionRef.current;
     if (!session || load.status !== "ready") return;
-    if (playing) session.play();
+    if (playing) { window.clearTimeout(settleTimer.current); session.play(); }
     else session.pause();
   }, [playing, load.status]);
 
@@ -510,6 +523,11 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
   // 外部播放头跳转（暂停态）：偏差 >0.5s 视为外部 seek；播放中自身上报的时间不回环。
   // 连续快速跳转走拖拽快速档（主轨优先），停止 250ms 后全量精修（M3-2）。
   const settleTimer = useRef<number>(0);
+  useEffect(() => {
+    if (!props.preparePlaybackRef) return;
+    props.preparePlaybackRef.current = () => window.clearTimeout(settleTimer.current);
+    return () => { if (props.preparePlaybackRef) props.preparePlaybackRef.current = null; };
+  }, [props.preparePlaybackRef]);
   /** 最近一次真正下发的目标帧：按帧去重，保证擦洗每一步都送达预览。 */
   const lastSeekedFrame = useRef<number>(-1);
   useEffect(() => {
@@ -531,7 +549,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
       lastReportedUs.current = playheadUs;
       void session.seekToFrame(targetFrame);
       window.clearTimeout(settleTimer.current);
-      settleTimer.current = window.setTimeout(() => void session.refineAfterDrag(), 250);
+      settleTimer.current = window.setTimeout(() => { if (!playbackActiveRef.current) void session.refineAfterDrag(); }, 250);
     }
   }, [playheadUs, playing, load.status]);
 

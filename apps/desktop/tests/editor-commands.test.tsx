@@ -148,6 +148,18 @@ describe("命令注册表", () => {
     await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledWith(expect.objectContaining({ patch: expect.objectContaining({ operations: [expect.objectContaining({ op: "remove_clip" })] }) })));
   });
 
+  it("uses Shift+Delete for magnetic main-track deletion", async () => {
+    const api = desktopApi();
+    window.desktop = api;
+    render(<App />);
+    const clip = await screen.findByRole("button", { name: /Clip 1/ });
+    fireEvent.click(clip);
+    fireEvent.keyDown(clip, { key: "Delete", shiftKey: true });
+    await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledWith(expect.objectContaining({
+      patch: expect.objectContaining({ summary: "主轨波纹删除", operations: [expect.objectContaining({ op: "remove_clip" })] }),
+    })));
+  });
+
   it("shows disabled reasons for commands that cannot run", async () => {
     window.desktop = desktopApi();
     render(<App />);

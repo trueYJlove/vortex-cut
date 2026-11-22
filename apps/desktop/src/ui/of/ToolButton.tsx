@@ -25,13 +25,15 @@ export function ToolButton({
   label,
   hint,
   active = false,
+  menuOpen,
   children,
 }: {
-  onClick: () => void;
+  onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
   disabled?: boolean;
   label: string;
   hint?: string;
   active?: boolean;
+  menuOpen?: boolean;
   children: React.ReactNode;
 }) {
   const title = hint ? `${label} (${hint})` : label;
@@ -39,7 +41,7 @@ export function ToolButton({
     <Tooltip side="bottom" label={label} {...(hint ? { shortcut: hint } : {})}>
       <button
         type="button"
-        onClick={() => { if (!disabled) onClick(); }}
+        onClick={event => { if (!disabled) onClick(event); }}
         onMouseDown={(e) => e.preventDefault()}
         /* 同时给原生 disabled 与 aria-disabled：
            原生 disabled 保证「不可用」对所有消费者（含 testing-library 的 toBeEnabled）
@@ -51,6 +53,8 @@ export function ToolButton({
         aria-disabled={disabled}
         aria-label={title}
         aria-pressed={active}
+        aria-haspopup={menuOpen === undefined ? undefined : "menu"}
+        aria-expanded={menuOpen}
         className={`${TOOL_BUTTON_CLASS} ${disabled ? 'cursor-default' : ''} ${active || disabled ? '' : 'hover:bg-[var(--bg-hover)]'}`}
         style={active
           ? { color: 'var(--accent)', background: 'var(--accent-soft)' }

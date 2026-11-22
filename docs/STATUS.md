@@ -22,7 +22,7 @@
 {
   "protocol_version": 1,
   "latest_migration": 44,
-  "patch_operations": 37,
+  "patch_operations": 38,
   "ai_patch_operations": 23,
   "cv_algorithm_version": 3
 }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { MARKER_COLORS, loadMarkers, saveMarkers, newMarkerId, sortMarkers, type TimelineMarker } from "./markers.js";
 import { timeToX } from "./geometry.js";
 import type { TimelineViewState } from "./types.js";
@@ -14,6 +14,7 @@ import type { TimelineViewState } from "./types.js";
  * 双击空白加标记并立即进入编辑。右键删除。
  */
 export interface MarkerLaneProps {
+  ref?: Ref<{ addAtTime: (timeUs: number) => void }>;
   projectId: string;
   view: TimelineViewState;
   totalUs: number;
@@ -23,19 +24,26 @@ export interface MarkerLaneProps {
   playheadUs: number;
   /** 标记被拖动时向外报告一条贯穿时间线的引导线；null 清除。 */
   onGuide: (guide: { timeUs: number; color: string; held: boolean } | null) => void;
+  onMarkersChange: (markers: TimelineMarker[]) => void;
+  onSeek: (timeUs: number) => void;
 }
 
-export function MarkerLane({ projectId, view, totalUs, snapUs, onGuide, playheadUs }: MarkerLaneProps) {
+export function MarkerLane({ projectId, view, totalUs, snapUs, onGuide, onMarkersChange, onSeek, playheadUs, ref }: MarkerLaneProps) {
   const [markers, setMarkers] = useState<TimelineMarker[]>(() => sortMarkers(loadMarkers(projectId)));
+  const markersRef = useRef(markers);
+  markersRef.current = markers;
   const [editing, setEditing] = useState<string | null>(null);
   const laneRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ id: string; moved: boolean } | null>(null);
+  const suppressClick = useRef(false);
 
   // 项目切换：重新载入（projectId 变化时 markers 属于另一个项目）
   useEffect(() => { setMarkers(sortMarkers(loadMarkers(projectId))); }, [projectId]);
+  useEffect(() => { onMarkersChange(markers); }, [markers, onMarkersChange]);
 
   const commit = (next: TimelineMarker[]) => {
     const sorted = sortMarkers(next);
+    markersRef.current = sorted;
     setMarkers(sorted);
     saveMarkers(projectId, sorted);
   };
@@ -53,6 +61,8 @@ export function MarkerLane({ projectId, view, totalUs, snapUs, onGuide, playhead
 
   /** 在指定时间加一个标记（用于"+ "按钮——它按播放头位置加）。 */
   const addAtTime = (timeUs: number) => {
+    const existing = markers.find(marker => Math.abs(marker.timeUs - timeUs) < 1_000);
+    if (existing) { setEditing(existing.id); return; }
     const marker: TimelineMarker = {
       id: newMarkerId(),
       timeUs,
@@ -63,17 +73,8 @@ export function MarkerLane({ projectId, view, totalUs, snapUs, onGuide, playhead
     setEditing(marker.id);
   };
 
-  const addAt = (clientX: number) => {
-    const timeUs = timeAt(clientX);
-    const marker: TimelineMarker = {
-      id: newMarkerId(),
-      timeUs,
-      color: MARKER_COLORS[markers.length % MARKER_COLORS.length],
-      label: "",
-    };
-    commit([...markers, marker]);
-    setEditing(marker.id);
-  };
+  useImperativeHandle(ref, () => ({ addAtTime }));
+  const addAt = (clientX: number) => addAtTime(timeAt(clientX));
 
   const remove = (id: string) => commit(markers.filter(m => m.id !== id));
   const recolor = (id: string, color: string) => commit(markers.map(m => (m.id === id ? { ...m, color } : m)));
@@ -86,16 +87,19 @@ export function MarkerLane({ projectId, view, totalUs, snapUs, onGuide, playhead
       if (!drag) return;
       drag.moved = true;
       const timeUs = timeAt(event.clientX);
-      setMarkers(current => current.map(m => (m.id === drag.id ? { ...m, timeUs } : m)));
-      const marker = markers.find(m => m.id === drag.id);
+      const next = markersRef.current.map(m => (m.id === drag.id ? { ...m, timeUs } : m));
+      markersRef.current = next;
+      setMarkers(next);
+      const marker = next.find(m => m.id === drag.id);
       onGuide({ timeUs, color: marker?.color ?? MARKER_COLORS[0], held: true });
     };
     const up = () => {
       const drag = dragRef.current;
       if (!drag) return;
       dragRef.current = null;
+      suppressClick.current = drag.moved;
       onGuide(null);
-      if (drag.moved) commit(sortMarkers(markers));
+      if (drag.moved) commit(markersRef.current);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
@@ -123,7 +127,7 @@ export function MarkerLane({ projectId, view, totalUs, snapUs, onGuide, playhead
             style={{ transform: `translateX(${timeToX(marker.timeUs, view)}px)` }}
             onPointerEnter={() => onGuide({ timeUs: marker.timeUs, color: marker.color, held: false })}
             onPointerLeave={() => { if (!dragRef.current) onGuide(null); }}
-            onContextMenu={event => { event.preventDefault(); remove(marker.id); }}
+            onContextMenu={event => { event.preventDefault(); event.stopPropagation(); onSeek(marker.timeUs); setEditing(marker.id); }}
           >
             <button
               type="button"
@@ -135,17 +139,26 @@ export function MarkerLane({ projectId, view, totalUs, snapUs, onGuide, playhead
                 (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
                 dragRef.current = { id: marker.id, moved: false };
               }}
+              onClick={event => {
+                event.stopPropagation();
+                if (suppressClick.current) { suppressClick.current = false; return; }
+                onSeek(marker.timeUs);
+                setEditing(marker.id);
+              }}
               onDoubleClick={() => setEditing(marker.id)}
             />
             {isEditing && (
-              <div className="timeline-marker-editor">
+              <div className="timeline-marker-editor" role="dialog" aria-label="编辑时间线标记"
+                onPointerDown={event => event.stopPropagation()}
+                onClick={event => event.stopPropagation()}
+                onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setEditing(null); }}
+                onKeyDown={event => { event.stopPropagation(); if (event.key === "Escape") setEditing(null); }}>
                 <input
                   autoFocus
                   value={marker.label}
                   placeholder="标记备注"
                   aria-label="标记备注"
                   onChange={event => relabel(marker.id, event.target.value)}
-                  onBlur={() => setEditing(null)}
                   onKeyDown={event => { if (event.key === "Enter" || event.key === "Escape") setEditing(null); }}
                 />
                 <div className="timeline-marker-colors">

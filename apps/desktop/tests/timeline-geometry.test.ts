@@ -51,6 +51,14 @@ const tracks: TimelineTrack[] = [
 ];
 const rows = computeTrackRows(tracks, view.rulerHeight, view.trackHeight);
 
+describe("OpenFilm track role heights", () => {
+  it("gives main video, regular video, text, and audio lanes their source heights", () => {
+    const dynamic = { id: "V2", kind: "video" as const, locked: false, hidden: false, muted: false, solo: false };
+    const layout = computeTrackRows([...tracks, dynamic], 20, 56);
+    expect(Object.fromEntries(layout.map(row => [row.track.id, row.height]))).toEqual({ C1: 24, V1: 68, A1: 42, V2: 52 });
+  });
+});
+
 
 /**
  * Consistent clip factory: source duration always matches the timeline range,

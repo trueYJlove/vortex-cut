@@ -13,12 +13,17 @@ const categories: Readonly<Record<string, InspectorTab>> = {
   filter: 'adjust',
   effects: 'effects',
   mask: 'effects',
+  keying: 'effects',
   sound: 'sound',
   advanced: 'advanced',
   source: 'advanced',
   'page-changes': 'advanced',
   'export-motion-blur': 'advanced',
   'advanced-properties': 'advanced',
+  'more-picture': 'advanced',
+  voice: 'advanced',
+  'sound-fx': 'advanced',
+  tools: 'advanced',
   'film-info': 'info',
 };
 

@@ -60,18 +60,10 @@ export interface TrackRowLayout {
   height: number;
 }
 
-/** 非主轨道行的相对高度（剪映式：主视频轨始终比其他轨道更高）。 */
-/* 次轨高度比例（2026-11-10，对齐 OpenFilm）：它的轨道不分主次，
-   视觉/文本/字幕轨同为 TRACK_H.visual = 56px。原来按 0.7 缩放成 39px，
-   导致同一类轨道（都是画面轨）在不同位置长得不一样，行高跳动。
-   设为 1 后次轨与主轨等高，只在音频轨处降为 44px。 */
-const SECONDARY_ROW_RATIO = 1;
-
 /**
  * 由轨道数组构建行布局（y 自标尺底部开始累计）。
- * 剪映式：主视频轨 V1 使用完整行高；音频轨固定 64px（不受轨道高度调节
- * 影响）；其余轨道（动态视频轨/文本轨）为其约 70%，随滑条联动、可动态
- * 增删与移动。
+ * OpenFilm track-heights.ts：主轨 68、普通视频 52、文本 24、音频 42；
+ * 用户调整 trackHeight 时，普通视频和主轨仍会随之缩放，字幕/音频保留专用高度。
  */
 /**
  * 行间间隙（2026-11-10，对齐 OpenFilm 的 `GAP = 2`）。
@@ -88,10 +80,10 @@ export const TRACK_VIEW_PAD = 10;
 
 /* 参照的行高常量（openfilm lib/track-heights.ts:24-26）：
    主轨比其他轨高一档；覆盖轨是矮的。 */
-export const MAIN_TRACK_H = 76;
-export const OVERLAY_TRACK_H = 30;
+export const MAIN_TRACK_H = 68;
+export const OVERLAY_TRACK_H = 28;
 /* T4 参照 Timeline.tsx:311,323-325：字幕/文本轨窄行 */
-export const CAPTION_ROW_H = 26;
+export const CAPTION_ROW_H = 24;
 /* T5 参照 Timeline.tsx:1239：标记行 16px 浮层 + 2px 呼吸 = 首行之上至少让出 18px */
 export const MARKER_ROW_PAD = 18;
 
@@ -105,22 +97,14 @@ export function computeTrackRows(
    *  不给则按老行为从标尺下沿开始排——测试与离屏渲染不依赖居中。 */
   viewportHeight?: number,
 ): TrackRowLayout[] {
-  /* 行高分级（2026-11-16 对齐 OpenFilm lib/track-heights.ts）：
-     参照不是「一律同高」，而是按轨道角色给三档——
-       MAIN_TRACK_H = 76（主轨 V1，比其他轨高）
-       TRACK_SIZES.medium = { visual: 64, audio: 44 }
-       OVERLAY_TRACK_H = 30（贴片类覆盖轨）
-     我们原来是「音频 44 / V1 = rowHeight(56) / 其余 56×0.72≈40」，
-     于是五条轨叠起来只有 ~244px，而参照是 ~372px——整条时间线在垂直方向被压扁约三分之一，
-     这是「面板高度对了但还是不像」的主因。
-     rowHeight 仍作为「用户拖动/预设」的基准保留：非主轨、非音频仍按它的比例走，
-     只有主轨与音频取参照的绝对值。 */
+  /* OpenFilm lib/track-heights.ts roles: main visual 68, regular visual 52,
+     caption/text 24, audio 42. The existing single height preference acts as
+     a compact adjustment around the 56px regular visual baseline. */
   const heights = tracks.map((track) => {
-    if (track.kind === "audio") return 44;
-    if (track.kind === "text") return CAPTION_ROW_H; // T4 参照 Timeline.tsx:311,323-325 字幕/文本窄行（caption→text 兼容映射在组件层）
-    if (track.id === "V1") return Math.max(MAIN_TRACK_H, rowHeight);
-    // 覆盖轨（贴纸/特效类）在参照里是矮的；我们没有单独标记，按比例压到 overlay 档
-    return Math.max(OVERLAY_TRACK_H, Math.round(rowHeight * SECONDARY_ROW_RATIO));
+    if (track.kind === "audio") return 42;
+    if (track.kind === "text") return CAPTION_ROW_H;
+    if (track.id === "V1") return Math.max(64, rowHeight + 12);
+    return Math.max(OVERLAY_TRACK_H, rowHeight - 4);
   });
   const tracksH = heights.reduce((sum, h) => sum + h, 0) + Math.max(0, tracks.length - 1) * TRACK_GAP;
   const padTop =

@@ -130,6 +130,112 @@ def test_remove_propagates_unless_ignore_link(tmp_path: Path) -> None:
     assert "link_group_id" not in remaining[0]
 
 
+@pytest.mark.parametrize(
+    "operation", ["remove_clip", "position_clip", "trim_clip", "split_clip", "clear_clip_link"]
+)
+def test_linked_operation_rejects_locked_member(tmp_path: Path, operation: str) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service)
+    state, video_id = _insert_video(service, state)
+    state = _patch(service, state, [{"op": "detach_audio", "clip_id": video_id}])
+    state = _patch(
+        service, state, [{"op": "set_clip_locked", "clip_id": _audio_id(state), "locked": True}]
+    )
+    op = {"op": operation, "clip_id": video_id}
+    if operation == "position_clip":
+        op["timeline_start_us"] = 1_000_000
+    elif operation == "trim_clip":
+        op.update(source_start_us=0, source_end_us=1_000_000)
+    elif operation == "split_clip":
+        op["source_time_us"] = 1_000_000
+    with pytest.raises(DomainError) as error:
+        _patch(service, state, [op])
+    assert error.value.code == "TIMELINE_LOCKED"
+
+
+def test_link_creation_rejects_locked_member(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service)
+    state, video_id = _insert_video(service, state)
+    state = _patch(service, state, [{"op": "detach_audio", "clip_id": video_id}])
+    audio_id = _audio_id(state)
+    state = _patch(service, state, [{"op": "set_clip_locked", "clip_id": audio_id, "locked": True}])
+    with pytest.raises(DomainError) as error:
+        _patch(service, state, [{"op": "set_clip_link", "clip_ids": [video_id, audio_id]}])
+    assert error.value.code == "TIMELINE_LOCKED"
+
+
+def test_removing_track_rejects_locked_clip(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service)
+    state = _patch(service, state, [{"op": "add_track", "kind": "video"}])
+    state, clip_id = _insert_video(service, state, track_id="V2")
+    state = _patch(service, state, [{"op": "set_clip_locked", "clip_id": clip_id, "locked": True}])
+    with pytest.raises(DomainError) as error:
+        _patch(service, state, [{"op": "remove_track", "track_id": "V2"}])
+    assert error.value.code == "TIMELINE_LOCKED"
+
+
+def test_removing_track_rejects_locked_linked_clip(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service)
+    state = _patch(service, state, [{"op": "add_track", "kind": "video"}])
+    state, clip_id = _insert_video(service, state, track_id="V2")
+    state = _patch(service, state, [{"op": "detach_audio", "clip_id": clip_id}])
+    state = _patch(service, state, [{"op": "set_clip_locked", "clip_id": _audio_id(state), "locked": True}])
+    with pytest.raises(DomainError) as error:
+        _patch(service, state, [{"op": "remove_track", "track_id": "V2"}])
+    assert error.value.code == "TIMELINE_LOCKED"
+
+
+def test_ignore_link_keeps_locked_member_unchanged(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service)
+    state, video_id = _insert_video(service, state)
+    state = _patch(service, state, [{"op": "detach_audio", "clip_id": video_id}])
+    audio_id = _audio_id(state)
+    state = _patch(service, state, [{"op": "set_clip_locked", "clip_id": audio_id, "locked": True}])
+    state = _patch(service, state, [{
+        "op": "position_clip", "clip_id": video_id, "timeline_start_us": 1_000_000,
+        "ignore_link": True,
+    }])
+    assert _by_id(state, video_id)["timeline_start_us"] == 1_000_000
+    assert _by_id(state, audio_id)["timeline_start_us"] == 0
+
+
+def test_atomic_positions_swap_and_respect_locks(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service)
+    state, first = _insert_video(service, state)
+    state, _ = _insert_video(service, state, at_index=1)
+    second = next(clip["clip_id"] for clip in _clips(state) if clip["clip_id"] != first)
+    state = _patch(service, state, [{
+        "op": "position_clips",
+        "placements": [
+            {"clip_id": first, "timeline_start_us": 2_000_000},
+            {"clip_id": second, "timeline_start_us": 0},
+        ],
+    }])
+    assert _by_id(state, first)["timeline_start_us"] == 2_000_000
+    assert _by_id(state, second)["timeline_start_us"] == 0
+    with pytest.raises(DomainError) as overlap:
+        _patch(service, state, [{
+            "op": "position_clips",
+            "placements": [{"clip_id": first, "timeline_start_us": 1_000_000}],
+        }])
+    assert overlap.value.code == "TIMELINE_INVALID"
+    state = _patch(service, state, [{"op": "set_clip_locked", "clip_id": second, "locked": True}])
+    with pytest.raises(DomainError) as error:
+        _patch(service, state, [{
+            "op": "position_clips",
+            "placements": [
+                {"clip_id": first, "timeline_start_us": 0},
+                {"clip_id": second, "timeline_start_us": 2_000_000},
+            ],
+        }])
+    assert error.value.code == "TIMELINE_LOCKED"
+
+
 def test_position_and_trim_propagate(tmp_path: Path) -> None:
     service, _ = _service(tmp_path)
     state = _create(service)

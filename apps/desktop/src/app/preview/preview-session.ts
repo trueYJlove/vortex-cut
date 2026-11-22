@@ -913,8 +913,8 @@ export class PreviewSession {
   /** IR 画布坐标 → 合成画布 CSS 坐标的映射（contain + 后备缓冲换算）。 */
   pipView(): { scale: number; offsetX: number; offsetY: number; width: number; height: number } {
     const el = this.canvasEl;
-    const cw = el?.clientWidth || this.backing.width;
-    const ch = el?.clientHeight || this.backing.height;
+    const cw = el?.clientWidth || this.container?.parentElement?.clientWidth || this.backing.width;
+    const ch = el?.clientHeight || this.container?.parentElement?.clientHeight || this.backing.height;
     const kx = cw / this.backing.width;
     const ky = ch / this.backing.height;
     return { scale: this.fitScale * kx, offsetX: this.fitX * kx, offsetY: this.fitY * ky, width: cw, height: ch };

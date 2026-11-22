@@ -68,6 +68,13 @@ def _seed(tmp_path: Path) -> tuple[Database, ProjectAssetService, str]:
 def test_delete_asset_clears_derived_analysis_rows(tmp_path: Path) -> None:
     """派生分析行不阻塞素材删除，且随素材一并清掉。"""
     db, service, asset_id = _seed(tmp_path)
+    with db.connection() as con:
+        now = utc_now()
+        con.execute(
+            "INSERT INTO jobs(id,project_id,asset_id,kind,type,status,input_json,"
+            "created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            ("j1", "p1", asset_id, "filmstrip", "filmstrip", "succeeded", "{}", now, now),
+        )
 
     service.delete_asset(asset_id)
 
@@ -77,6 +84,7 @@ def test_delete_asset_clears_derived_analysis_rows(tmp_path: Path) -> None:
             ("beat_grids", "asset_id='a1'"),
             ("cv_analyses", "asset_id='a1'"),
             ("cv_samples", "analysis_id='cv1'"),
+            ("jobs", "id='j1'"),
         ):
             left = con.execute(f"SELECT COUNT(*) FROM {table} WHERE {where}").fetchone()[0]
             assert left == 0, f"{table} 仍有 {left} 行未清"
