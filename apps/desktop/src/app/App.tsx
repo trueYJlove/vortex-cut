@@ -51,6 +51,7 @@ import { parseSubtitleFile } from "./subtitleImport.js";
 import { AssetSelectionProperties, ClipGroupAlignmentProperties, ClipProperties, CaptionProperties, ProjectProperties, TimelineDiffView, TransitionProperties } from "./PropertyPanels.js";
 import { JobEta } from "./JobEta.js";
 import { WorkspaceFooter } from "./workspace/WorkspaceFooter.js";
+import { ProjectLibraryDialog } from "./ProjectLibraryDialog.js";
 
 type SaveState = "已保存" | "保存中" | "保存失败" | "草稿冲突";
 type NoticeTone = "success" | "warning" | "error" | "info";
@@ -387,7 +388,6 @@ export function App() {
   const [notice, setNotice] = useState<Notice>("");
   const [newProject, setNewProject] = useState("");
   const [newProjectRatio, setNewProjectRatio] = useState("916");
-  const [projectName, setProjectName] = useState("");
   const [selectedSegments, setSelectedSegments] = useState<Record<string, string[]>>({});
   // AI 字幕优化（Slice 5）：发起入口在转录页，紧挨“追加所选片段”；
   // 记录发起时锁定的转录与片段，避免对话框打开期间勾选变化导致外传内容漂移。
@@ -498,19 +498,20 @@ export function App() {
   const [activeReframeBatch, setActiveReframeBatch] = useState<ReframeExportBatch>();
   const [reframeError, setReframeError] = useState("");
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
+  const [projectManagerRefreshing, setProjectManagerRefreshing] = useState(false);
   const [projectSwitcherOpen, setProjectSwitcherOpen] = useState(false);
   const [projectSwitcherQuery, setProjectSwitcherQuery] = useState("");
   const projectSwitcherRef = useRef<HTMLDivElement | null>(null);
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
-  const [menuIndex, setMenuIndex] = useState(0);
-  const [dropdownIndex, setDropdownIndex] = useState(0);
-  const menuButtonRefs = useRef<(HTMLButtonElement | null)[]>([]);
-  const menuActionRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const appMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const appMenuCategoryRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const appMenuPopoverRef = useRef<HTMLDivElement | null>(null);
   const [leftWidth, setLeftWidth] = useState(320);
   // P4 参照窗格栏（ProjectView.tsx:4639-4661）的 layers/inspector 开关：映射为左素材池/右属性栏显隐。
   const [leftPaneOpen, setLeftPaneOpen] = useState(true);
   const [rightPaneOpen, setRightPaneOpen] = useState(true);
   const [paneSettingsOpen, setPaneSettingsOpen] = useState(false);
+  const paneSettingsRef = useRef<HTMLSpanElement | null>(null);
   // 参照 DEFAULT_INSPECTOR = 360（openfilm PaneDivider.tsx:50）；原 336 是自定值。
   const [rightWidth, setRightWidth] = useState(360);
   // 时间线面板高度默认按视口比例给（2026-11-11）：参照 OpenFilm 录屏实测
@@ -606,8 +607,6 @@ export function App() {
   const pendingDraftRef = useRef<{ base: TimelineRevisionId; epoch: number; document: TimelineDocument } | null>(null);
   timelineRef.current = timeline;
   projectRef.current = project;
-  const projectNameProjectId = useRef<Project["project_id"] | undefined>(undefined);
-  const projectNameDirty = useRef(false);
   const timelineLoadEpoch = useRef(0);
   // P195：「装载在途作废」的专用代次，与 timelineLoadEpoch（草稿/Revision 作废）
   // 故意分开：updated_at 会被改名/归档/重开等与时间线无关的写入推进
@@ -1221,19 +1220,6 @@ export function App() {
     };
     // project 变化时重建 jobs 端点闭包（projects/models 端点与项目无关）。
   }, [runtimeReady, project?.project_id]);
-  useEffect(() => {
-    if (!project) {
-      projectNameProjectId.current = undefined;
-      projectNameDirty.current = false;
-      setProjectName("");
-      return;
-    }
-    if (projectNameProjectId.current !== project.project_id || !projectNameDirty.current) {
-      projectNameProjectId.current = project.project_id;
-      projectNameDirty.current = false;
-      setProjectName(project.name);
-    }
-  }, [project?.project_id, project?.name]);
   // 代理就绪检测（B11 缺失的一环）：复用既有 jobs 状态与既有 listJobs 轮询，
   // 不新开定时器、不新开 preview-source 轮询。判定 = 作业 kind 为 proxy（sample
   // 路径同 kind，多清一次缓存无害）+ 该素材确由本次导入登记过 + 已到终态。
@@ -2039,9 +2025,29 @@ export function App() {
     const source = { kind: "transcript_selection" as const, transcript_id: transcript.transcript_id, segment_ids: ids as never[], padding_before_us: 150_000, padding_after_us: 150_000, create_captions: true };
     if (timeline) void patchTimeline([{ op: "insert_transcript_segments", transcript_id: transcript.transcript_id, segment_ids: ids as never[], at_index: working?.clips.length ?? 0, padding_before_us: 150_000, padding_after_us: 150_000, create_captions: true, layout: "blurred_background" }], "追加转录选段"); else void createTimeline(source);
   };
-  const createProject = async () => { if (!newProject.trim()) return; const created = await window.desktop.createProject({ name: newProject.trim(), canvas: projectCanvasPresets[newProjectRatio] }); setNewProject(""); autoProvisionProjectId.current = created.project_id; await refreshProjects(); switchProject(created); setProjectDialogOpen(false); };
-  const renameProject = async () => { if (!project || !projectName.trim()) return; const updated = await window.desktop.renameProject({ project_id: project.project_id, name: projectName.trim() }); projectNameDirty.current = false; setProject(updated); setProjects(items => items.map(item => item.project_id === updated.project_id ? updated : item)); };
-  const toggleArchive = async () => { if (!project) return; const updated = project.status === "archived" ? await window.desktop.reopenProject(project.project_id) : await window.desktop.archiveProject(project.project_id); setProject(updated); setProjects(items => items.map(item => item.project_id === updated.project_id ? updated : item)); };
+  const createProject = async () => {
+    if (!newProject.trim()) return;
+    const created = await window.desktop.createProject({ name: newProject.trim(), canvas: projectCanvasPresets[newProjectRatio] });
+    setNewProject(""); autoProvisionProjectId.current = created.project_id;
+    await refreshProjects(); switchProject(created); setProjectDialogOpen(false);
+  };
+  const renameManagedProject = async (item: Project, name: string) => {
+    const updated = await window.desktop.renameProject({ project_id: item.project_id, name });
+    setProjects(items => items.map(candidate => candidate.project_id === updated.project_id ? updated : candidate));
+    if (projectRef.current?.project_id === updated.project_id) setProject(updated);
+  };
+  const toggleManagedProjectArchive = async (item: Project) => {
+    const updated = item.status === "archived"
+      ? await window.desktop.reopenProject(item.project_id)
+      : await window.desktop.archiveProject(item.project_id);
+    setProjects(items => items.map(candidate => candidate.project_id === updated.project_id ? updated : candidate));
+    if (projectRef.current?.project_id === updated.project_id) setProject(updated);
+  };
+  const refreshProjectManager = async () => {
+    setProjectManagerRefreshing(true);
+    try { await refreshProjects(); }
+    finally { setProjectManagerRefreshing(false); }
+  };
   const importAsset = async (kind: AssetKind) => {
     if (!project) return;
     const result = await window.desktop.importAsset({ project_id: project.project_id, kind });
@@ -2730,6 +2736,11 @@ export function App() {
     : renderRatio === "11" ? { w: 1, h: 1 }
       : renderRatio === "43" ? { w: 4, h: 3 }
         : { w: 16, h: 9 };
+  const framePixelSizeRef = useRef({ w: 1920, h: 1080 });
+  framePixelSizeRef.current = {
+    w: Math.max(1, working?.canvas.width ?? project?.canvas.width ?? 1920),
+    h: Math.max(1, working?.canvas.height ?? project?.canvas.height ?? 1080),
+  };
   // 时间码帧率：优先画布帧率，缺省 30fps。
   // 比例切换（剪映式）：选具体比例时**全视觉轨**布局切为 crop_fill（裁切填满——
   // 等比放大到短边顶满、长边溢出裁剪，剪映同款默认，P231 Q3 裁决：全轨一致）；
@@ -3045,9 +3056,14 @@ export function App() {
 
   useEffect(() => {
     if (!activeMenu) return;
-    const target = menuActionRefs.current[dropdownIndex];
-    if (target) target.focus();
-  }, [activeMenu, dropdownIndex]);
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (appMenuPopoverRef.current?.contains(target) || appMenuTriggerRef.current?.contains(target)) return;
+      setActiveMenu(null);
+    };
+    window.addEventListener("mousedown", onPointerDown);
+    return () => window.removeEventListener("mousedown", onPointerDown);
+  }, [activeMenu]);
 
   useEffect(() => {
     if (!zoomPopOpen && !volPopOpen && !ratePopOpen) return;
@@ -3058,6 +3074,43 @@ export function App() {
     };
     window.addEventListener("mousedown", listener);
     return () => window.removeEventListener("mousedown", listener);
+  }, [zoomPopOpen, volPopOpen, ratePopOpen]);
+  useEffect(() => {
+    if (!paneSettingsOpen) return;
+    const closeOnOutsidePointer = (event: MouseEvent) => {
+      if (!paneSettingsRef.current?.contains(event.target as Node)) setPaneSettingsOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault(); event.stopPropagation();
+      setPaneSettingsOpen(false);
+      paneSettingsRef.current?.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true });
+    };
+    window.addEventListener("mousedown", closeOnOutsidePointer);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("mousedown", closeOnOutsidePointer);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [paneSettingsOpen]);
+  useEffect(() => {
+    if (!zoomPopOpen && !volPopOpen && !ratePopOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      if (zoomPopOpen) {
+        setZoomPopOpen(false);
+        (zoomPopRef.current?.previousElementSibling as HTMLButtonElement | null)?.focus();
+      } else if (volPopOpen) {
+        setVolPopOpen(false);
+        (volPopRef.current?.previousElementSibling as HTMLButtonElement | null)?.focus();
+      } else if (ratePopOpen) {
+        setRatePopOpen(false);
+        (ratePopRef.current?.previousElementSibling as HTMLButtonElement | null)?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
   }, [zoomPopOpen, volPopOpen, ratePopOpen]);
   // 全屏：跟随浏览器全屏状态（Esc 退出时按钮图标同步复原）。
   useEffect(() => {
@@ -3075,9 +3128,10 @@ export function App() {
       const host = stagePaneRef.current;
       if (!el || !host) return;
       const isFs = document.fullscreenElement === host;
-      const availW = isFs ? window.innerWidth - 24 : host.clientWidth - 24;
-      const availH = isFs ? window.innerHeight - 24 - 40 - 40 - 16 : host.clientHeight - 24 - 40 - 40 - 16;
-      const w = Math.max(320, Math.min(availW, availH * 16 / 9));
+      const availW = Math.max(1, isFs ? window.innerWidth - 24 : host.clientWidth - 24);
+      const availH = Math.max(1, isFs ? window.innerHeight - 24 - 40 - 40 - 16 : host.clientHeight - 24 - 40 - 40 - 16);
+      // Keep the player inside the available viewport even when the app is narrower/shorter than 320px.
+      const w = Math.min(availW, availH * 16 / 9);
       el.style.width = `${w}px`;
     };
     layout();
@@ -3106,39 +3160,69 @@ export function App() {
         const viewer = { w: el.clientWidth || 1, h: el.clientHeight || 1 };
         const fitted = fittedSize(viewer, frameRatioRef.current);
         let next = viewerViewRef.current;
-        if (factor !== 1) next = zoomAt(next, factor, anchor, viewer, fitted, zoomMax(fitted.w / frameRatioRef.current.w));
+        if (factor !== 1) next = zoomAt(next, factor, anchor, viewer, fitted, zoomMax(fitted.w / framePixelSizeRef.current.w));
         if (dx || dy) next = panBy(next, dx, dy, fitted);
         if (next !== viewerViewRef.current) { viewerViewRef.current = next; setViewerView(next); setPreviewZoom(next.z); }
       },
     );
+    let stopPan = () => {};
     const onWheel = (event: WheelEvent) => {
-      if (!(event.ctrlKey || event.metaKey)) return;
-      // 负向对照：Ctrl/⌘ wheel 必须 preventDefault（浏览器页面缩放不得接管）。
+      if (event.ctrlKey || event.metaKey) {
+        // Prevent the browser page zoom; this gesture belongs to the preview canvas.
+        event.preventDefault();
+        if (event.buttons) return;
+        const rect = el.getBoundingClientRect();
+        coalescer.pushZoom(wheelZoomFactor(wheelPx(event, event.deltaY)), { x: event.clientX - rect.left, y: event.clientY - rect.top });
+        return;
+      }
+      // OpenFilm pans the picture with the ordinary wheel only after it has been enlarged.
+      if (isFit(viewerViewRef.current)) return;
       event.preventDefault();
-      const rect = el.getBoundingClientRect();
-      coalescer.pushZoom(wheelZoomFactor(wheelPx(event, event.deltaY)), { x: event.clientX - rect.left, y: event.clientY - rect.top });
+      if (event.buttons) return;
+      const sideways = event.shiftKey && !event.deltaX;
+      coalescer.pushPan(wheelPx(event, sideways ? event.deltaY : event.deltaX), sideways ? 0 : wheelPx(event, event.deltaY));
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.button !== 1 || isFit(viewerViewRef.current)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      el.dataset.panActive = "true";
+      let last = { x: event.clientX, y: event.clientY };
+      const move = (next: PointerEvent) => {
+        coalescer.pushPan(last.x - next.clientX, last.y - next.clientY);
+        last = { x: next.clientX, y: next.clientY };
+      };
+      const cleanup = () => {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", cleanup);
+        window.removeEventListener("pointercancel", cleanup);
+        el.removeAttribute("data-pan-active");
+        stopPan = () => {};
+      };
+      stopPan = cleanup;
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", cleanup);
+      window.addEventListener("pointercancel", cleanup);
     };
     el.addEventListener("wheel", onWheel, { passive: false });
-    return () => { el.removeEventListener("wheel", onWheel); coalescer.dispose(); };
+    el.addEventListener("pointerdown", onPointerDown, true);
+    return () => {
+      stopPan();
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("pointerdown", onPointerDown, true);
+      coalescer.dispose();
+    };
   }, []);
-  /** 缩放静止 ZOOM_SETTLE_MS 后才真正重绘画面（预览框尺寸即时跟随）。
-   *  onSession 运行时上抛的是完整 PreviewSession：resize() 会下发 worker
-   *  compositor.resize + recomposeSoon（rAF 合帧，一次缩放只重绘一次）。
-   *  连续 wheel/滑杆变化不断取消重排定时器，故静止前不会提前重绘。 */
+  /** 缩放静止 ZOOM_SETTLE_MS 后同步一次 DOM 几何；SyntheticPreview 的
+   *  ResizeObserver 随后按稳定后的容器尺寸重排合成缓冲并恢复暂停帧。 */
   const zoomSettleRef = useRef(createZoomSettle(
     ZOOM_SETTLE_MS,
     (fn, ms) => window.setTimeout(fn, ms),
     id => clearTimeout(id),
     () => {
-      // 触发一次布局同步（React 侧），实际像素重绘由 session.resize 下发。
+      // 触发一次布局同步；画面尺寸由 SyntheticPreview 的观察器统一处理，
+      // 避免这里与窗口尺寸变化路径重复 resize/seek。
       setZoomDrawn(value => value + 1);
-      const canvas = canvasRef.current;
-      const session = previewSessionRef.current as (typeof previewSessionRef.current & { resize?: (cssWidth: number, cssHeight: number) => void }) | null;
-      if (session?.resize && canvas) {
-        const cssWidth = canvas.clientWidth || 1;
-        const cssHeight = canvas.clientHeight || 1;
-        session.resize(cssWidth, cssHeight);
-      }
     },
   ));
   useEffect(() => {
@@ -3157,13 +3241,24 @@ export function App() {
     const el = previewFrameRef.current;
     const canvas = canvasRef.current;
     if (!el || !canvas) return;
-    const viewer = { w: el.clientWidth || 1, h: el.clientHeight || 1 };
-    const fitted = fittedSize(viewer, frameRatioRef.current);
-    const z = viewerViewRef.current.z;
-    const layout = { w: fitted.w * z, h: fitted.h * z };
-    canvas.style.width = `${layout.w}px`;
-    canvas.style.height = `${layout.h}px`;
-    setCanvasSize({ w: Math.round(layout.w), h: Math.round(layout.h) });
+    const sync = () => {
+      const viewer = { w: el.clientWidth || 1, h: el.clientHeight || 1 };
+      const fitted = fittedSize(viewer, frameRatioRef.current);
+      const layout = zoomLayout(viewerViewRef.current, fitted, viewer);
+      const fit = isFit(viewerViewRef.current);
+      canvas.style.position = fit ? "relative" : "absolute";
+      canvas.style.left = fit ? "" : `${layout.x}px`;
+      canvas.style.top = fit ? "" : `${layout.y}px`;
+      canvas.style.width = `${layout.w}px`;
+      canvas.style.height = `${layout.h}px`;
+      const nextSize = { w: Math.round(layout.w), h: Math.round(layout.h) };
+      setCanvasSize(previous => previous?.w === nextSize.w && previous.h === nextSize.h ? previous : nextSize);
+    };
+    sync();
+    const observer = new ResizeObserver(sync);
+    observer.observe(el);
+    window.addEventListener("resize", sync);
+    return () => { observer.disconnect(); window.removeEventListener("resize", sync); };
   }, [viewerView, previewZoom, previewClass, zoomDrawn]);
   /** S4：空白按下 → rAF move → release 判定 click/marquee；绝不定位播放头。 */
   const stageBoxesForPress = useCallback((): HitBox[] => {
@@ -3191,7 +3286,8 @@ export function App() {
     if (previewMode === "synthetic") return;
     const onInteractiveOverlay = (event.target as HTMLElement).closest(".pip-overlay, .sel-box");
     if (onInteractiveOverlay) return;
-    const rect = event.currentTarget.getBoundingClientRect();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const rect = canvasRef.current?.getBoundingClientRect() ?? event.currentTarget.getBoundingClientRect();
     const point = { x: event.clientX - rect.left, y: event.clientY - rect.top };
     const boxes = stageBoxesForPress();
     const hit = pickTopmostBox(boxes, point, rankForPress);
@@ -3199,16 +3295,25 @@ export function App() {
   };
   const onPreviewPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
     if (previewPressRef.current.phase !== "press") return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    const x = event.clientX - rect.left, y = event.clientY - rect.top;
+    const canvasRect = canvasRef.current?.getBoundingClientRect() ?? event.currentTarget.getBoundingClientRect();
+    const frameRect = event.currentTarget.getBoundingClientRect();
+    const x = event.clientX - canvasRect.left, y = event.clientY - canvasRect.top;
     const result = reducePreviewPress(previewPressRef.current, { type: "move", x, y });
     previewPressRef.current = result.state;
     if (pressRafRef.current) cancelAnimationFrame(pressRafRef.current);
-    pressRafRef.current = requestAnimationFrame(() => { pressRafRef.current = 0; setStageMarquee(result.marquee); });
+    pressRafRef.current = requestAnimationFrame(() => {
+      pressRafRef.current = 0;
+      setStageMarquee(result.marquee ? {
+        x: result.marquee.x + canvasRect.left - frameRect.left,
+        y: result.marquee.y + canvasRect.top - frameRect.top,
+        w: result.marquee.w,
+        h: result.marquee.h,
+      } : null);
+    });
   };
   const onPreviewPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
     if (previewPressRef.current.phase !== "press") return;
-    const rect = event.currentTarget.getBoundingClientRect();
+    const rect = canvasRef.current?.getBoundingClientRect() ?? event.currentTarget.getBoundingClientRect();
     const result = reducePreviewPress(previewPressRef.current, { type: "up", x: event.clientX - rect.left, y: event.clientY - rect.top });
     previewPressRef.current = IDLE_PRESS;
     previewClickGuardRef.current = true;
@@ -3300,43 +3405,6 @@ export function App() {
     | { group: string };
   const isMenuDivider = (entry: MenuEntry): entry is { divider: true } => "divider" in entry;
   const isMenuGroup = (entry: MenuEntry): entry is { group: string } => "group" in entry;
-  const menuActions = (menu: string) => menuItems[menu].filter((entry): entry is { label: string; action: () => void; disabled?: boolean } => !isMenuDivider(entry) && !isMenuGroup(entry));
-
-  const handleMenuBarKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    const menus = Object.keys(menuItems);
-    const currentIndex = menus.indexOf(activeMenu ?? menus[menuIndex] ?? "");
-    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-      event.preventDefault();
-      const delta = event.key === "ArrowRight" ? 1 : -1;
-      const nextIndex = activeMenu ? (currentIndex + delta + menus.length) % menus.length : menuIndex;
-      setMenuIndex(nextIndex);
-      setActiveMenu(menus[nextIndex]);
-      setDropdownIndex(0);
-    } else if (event.key === "ArrowDown" && activeMenu) {
-      event.preventDefault();
-      const count = menuActions(activeMenu).length;
-      setDropdownIndex(index => count ? (index + 1) % count : 0);
-    } else if (event.key === "ArrowUp" && activeMenu) {
-      event.preventDefault();
-      const count = menuActions(activeMenu).length;
-      setDropdownIndex(index => count ? (index - 1 + count) % count : 0);
-    } else if (event.key === "Enter" && activeMenu) {
-      event.preventDefault();
-      const item = menuActions(activeMenu)[dropdownIndex];
-      if (item && !item.disabled) { item.action(); setActiveMenu(null); }
-    } else if (event.key === "Escape") {
-      setActiveMenu(null);
-      menuButtonRefs.current[menuIndex]?.focus();
-    } else if (event.key === "Home") {
-      event.preventDefault();
-      setMenuIndex(0);
-      if (activeMenu) setDropdownIndex(0);
-    } else if (event.key === "End") {
-      event.preventDefault();
-      setMenuIndex(menus.length - 1);
-      if (activeMenu) setDropdownIndex(Math.max(0, menuActions(activeMenu).length - 1));
-    }
-  };
 
   const COMMAND_ICON_MAP: Record<string, LucideIcon> = {
     "play.pause": Play, "timeline.undo": Undo2, "timeline.redo": Redo2,
@@ -3356,6 +3424,44 @@ export function App() {
     界面: [{ label: "恢复默认布局", icon: LayoutPanelLeft, action: () => { setLeftWidth(320); setRightWidth(300); setTimelineHeight(230); } }, { label: "命令搜索", icon: CommandIcon, action: () => setCommandSearchOpen(true) }, { label: "快捷键设置", icon: Keyboard, action: () => setShortcutsOpen(true) }],
     工具: [{ group: "AI" }, { label: "Provider 设置", icon: FolderCog, action: () => setProviderSettingsOpen(true) }, { label: "AI 助手", icon: WandSparkles, action: () => setAgentOpen(true), disabled: !project }, { label: "AI 工作单", icon: WandSparkles, action: () => setWorklistOpen(true), disabled: !project }, { label: "AI 粗剪", icon: Sparkles, action: () => void openAi(), disabled: Boolean(commandDisabledReason("ai.open")) }, { label: "AI 修改", icon: WandSparkles, action: () => void openPatch(), disabled: Boolean(commandDisabledReason("ai.revise")) }, { label: "剪辑手法", icon: Scissors, action: () => openEditingTools("remove_pauses"), disabled: !project }, { label: "机位同步", icon: Video, action: () => setAngleSyncOpen(true), disabled: !project }, { label: "素材语义检索", icon: Search, action: () => setSemanticSearchOpen(true), disabled: !project }, { label: "关键帧外传审阅", icon: ImageIcon, action: () => setKeyframeReviewOpen(true), disabled: !project || !selectedAssetId }, { label: "剪辑语法（高级）", icon: Scissors, action: () => { setEditingToolsTool(null); setEditingGrammarOpen(true); }, disabled: !project }, { label: "版本比较", icon: GitCompare, action: () => void openRevisionCompare(), disabled: Boolean(commandDisabledReason("tools.compare")) }, { divider: true }, { label: "镜头需求", icon: Clapperboard, action: () => setShotRequirementsOpen(true), disabled: Boolean(commandDisabledReason("tools.shots")) }, { label: "生成验证（模拟）", icon: FlaskConical, action: () => setGenerationOpen(true), disabled: Boolean(commandDisabledReason("tools.verify")) }, { label: "真实图片生成", icon: ImageIcon, action: () => setProviderImageGenerationOpen(true), disabled: Boolean(commandDisabledReason("tools.imageGen")) }],
     帮助: [{ label: "用户使用手册", icon: BookOpen, action: () => showNotice("请查看 docs/requirements/VORTEX_CUT_USER_MANUAL.md", "info") }]
+  };
+  const menuCategories = Object.keys(menuItems);
+  const openBrandMenu = () => {
+    if (activeMenu) { setActiveMenu(null); return; }
+    setActiveMenu(menuCategories[0] ?? null);
+    requestAnimationFrame(() => appMenuCategoryRefs.current[0]?.focus({ preventScroll: true }));
+  };
+  const handleMenuCategoryKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const index = Math.max(0, menuCategories.indexOf(activeMenu ?? menuCategories[0] ?? ""));
+    if (event.key === "Escape") {
+      event.preventDefault(); event.stopPropagation(); setActiveMenu(null);
+      appMenuTriggerRef.current?.focus({ preventScroll: true });
+    } else if (["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) {
+      event.preventDefault(); event.stopPropagation();
+      const next = event.key === "Home" ? 0 : event.key === "End" ? menuCategories.length - 1
+        : (index + (event.key === "ArrowDown" ? 1 : -1) + menuCategories.length) % menuCategories.length;
+      setActiveMenu(menuCategories[next]);
+      requestAnimationFrame(() => appMenuCategoryRefs.current[next]?.focus({ preventScroll: true }));
+    } else if (event.key === "ArrowRight") {
+      event.preventDefault(); event.stopPropagation();
+      appMenuPopoverRef.current?.querySelector<HTMLButtonElement>("[role='tabpanel'] [role='menuitem']:not(:disabled)")?.focus({ preventScroll: true });
+    }
+  };
+  const handleMenuActionsKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const actions = Array.from(appMenuPopoverRef.current?.querySelectorAll<HTMLButtonElement>("[role='tabpanel'] [role='menuitem']:not(:disabled)") ?? []);
+    const current = actions.indexOf(document.activeElement as HTMLButtonElement);
+    if (event.key === "Escape") {
+      event.preventDefault(); event.stopPropagation(); setActiveMenu(null);
+      appMenuTriggerRef.current?.focus({ preventScroll: true });
+    } else if (event.key === "ArrowLeft") {
+      event.preventDefault(); event.stopPropagation();
+      appMenuCategoryRefs.current[menuCategories.indexOf(activeMenu ?? "")]?.focus({ preventScroll: true });
+    } else if (["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key) && actions.length) {
+      event.preventDefault(); event.stopPropagation();
+      const next = event.key === "Home" ? 0 : event.key === "End" ? actions.length - 1
+        : (Math.max(0, current) + (event.key === "ArrowDown" ? 1 : -1) + actions.length) % actions.length;
+      actions[next]?.focus({ preventScroll: true });
+    }
   };
   const openProjects = openProjectIds.flatMap(id => {
     const item = id === project?.project_id ? project : projects.find(candidate => candidate.project_id === id);
@@ -3424,17 +3530,33 @@ export function App() {
     <div className="editor-titlebar">
       <div className="custom-titlebar-drag">
         <div className="brand-lockup" title="Vortex Cut">
-          <span className="brand-mark"><img src="./icons/256.png" alt="" /></span>
+          <div className="brand-menu-anchor">
+            <button ref={appMenuTriggerRef} type="button" className="brand-menu-trigger" aria-label="Vortex Cut 主菜单" aria-haspopup="dialog" aria-expanded={Boolean(activeMenu)} aria-controls={activeMenu ? "brand-menu-popover" : undefined} title="主菜单" onClick={event => { event.stopPropagation(); openBrandMenu(); }}>
+              <span className="brand-mark"><img src="./icons/256.png" alt="" /></span>
+            </button>
+            {activeMenu && <div ref={appMenuPopoverRef} id="brand-menu-popover" className="brand-menu-popover" role="dialog" aria-label="Vortex Cut 主菜单" onClick={event => event.stopPropagation()} onBlur={event => {
+              const next = event.relatedTarget as Node | null;
+              if (next && !appMenuPopoverRef.current?.contains(next) && !appMenuTriggerRef.current?.contains(next)) setActiveMenu(null);
+            }}>
+              <div className="brand-menu-categories" role="tablist" aria-label="主菜单分类" onKeyDown={handleMenuCategoryKeyDown}>
+                {menuCategories.map((menu, menuPosition) => <button ref={element => { appMenuCategoryRefs.current[menuPosition] = element; }} key={menu} type="button" role="tab" id={`brand-menu-tab-${menu}`} aria-selected={activeMenu === menu} aria-controls="brand-menu-actions" tabIndex={activeMenu === menu ? 0 : -1} className={activeMenu === menu ? "active" : ""} onMouseEnter={() => setActiveMenu(menu)} onClick={() => setActiveMenu(menu)}>{menu}<ChevronRight size={13} aria-hidden="true" /></button>)}
+              </div>
+              <section className="brand-menu-content" role="tabpanel" id="brand-menu-actions" aria-labelledby={`brand-menu-tab-${activeMenu}`}>
+                <h2>{activeMenu}</h2>
+                <div className="menu-dropdown brand-menu-actions" role="menu" aria-label={`${activeMenu}菜单`} onKeyDown={handleMenuActionsKeyDown}>
+                  {menuItems[activeMenu].map((item, entryIndex) => {
+                    if (isMenuDivider(item)) return <div key={`divider-${entryIndex}`} className="menu-divider" role="separator" />;
+                    if (isMenuGroup(item)) return <div key={`group-${entryIndex}`} className="menu-group-label">{item.group}</div>;
+                    return <button key={item.label} type="button" role="menuitem" disabled={item.disabled} onClick={() => { item.action(); setActiveMenu(null); }}><span className="menu-item-ico">{item.icon && <item.icon size={14} aria-hidden="true" />}</span><span className="menu-item-label">{item.label}</span>{menuShortcut(item.label) && <kbd className="menu-item-shortcut">{menuShortcut(item.label)}</kbd>}</button>;
+                  })}
+                </div>
+              </section>
+            </div>}
+          </div>
           <strong>Vortex Cut</strong>
         </div>
         <ProjectTabStrip projects={openProjects} current={project} onSelect={switchProject} onClose={closeProjectTab}
           onNew={() => setProjectDialogOpen(true)} />
-        <nav className="menu-bar" aria-label="主菜单" onKeyDown={handleMenuBarKeyDown}>
-          {Object.keys(menuItems).map((menu, menuPosition) => <div className="menu-item" key={menu}>
-            <button ref={element => { menuButtonRefs.current[menuPosition] = element; }} aria-haspopup="menu" aria-expanded={activeMenu === menu} aria-controls={activeMenu === menu ? `menu-${menu}` : undefined} onClick={event => { event.stopPropagation(); setActiveMenu(activeMenu === menu ? null : menu); setDropdownIndex(0); }} onMouseEnter={() => { if (activeMenu) { setActiveMenu(menu); setDropdownIndex(0); } }}>{menu}</button>
-            {activeMenu === menu && <div className="menu-dropdown" id={`menu-${menu}`} role="menu" aria-label={menu}>{(() => { let actionIndex = 0; const entries: React.ReactNode[] = []; for (const item of menuItems[menu]) { if (isMenuDivider(item)) { entries.push(<div key={`divider-${entries.length}`} className="menu-divider" role="separator" />); } else if (isMenuGroup(item)) { entries.push(<div key={`group-${entries.length}`} className="menu-group-label">{item.group}</div>); } else { const currentIndex = actionIndex; entries.push(<button key={item.label} ref={element => { menuActionRefs.current[currentIndex] = element; }} role="menuitem" disabled={item.disabled} className={currentIndex === dropdownIndex ? "focused" : ""} onMouseEnter={() => setDropdownIndex(currentIndex)} onClick={() => { item.action(); setActiveMenu(null); }}><span className="menu-item-ico">{item.icon && <item.icon size={14} />}</span><span className="menu-item-label">{item.label}</span>{menuShortcut(item.label) && <kbd className="menu-item-shortcut">{menuShortcut(item.label)}</kbd>}</button>); actionIndex += 1; } } return entries; })()}</div>}
-          </div>)}
-        </nav>
       </div>
       <div className="titlebar-project-switcher" ref={projectSwitcherRef}>
         <button className="titlebar-project-switcher-toggle" aria-label="切换项目" aria-haspopup="listbox" aria-expanded={projectSwitcherOpen} onClick={event => { event.stopPropagation(); const next = !projectSwitcherOpen; setProjectSwitcherOpen(next); if (!next) setProjectSwitcherQuery(""); }}>
@@ -3454,7 +3576,7 @@ export function App() {
       </div>
     </div>
     <div className="banner-stack">{notice !== "" && <div className={`notice notice-${notice.tone}`} role="alert">{notice.text}</div>}{timeline?.draft && <div className="draft-banner"><span>{timeline.draft.conflict ? "检测到冲突草稿" : "检测到上次未恢复草稿"}</span><button disabled={timeline.draft.conflict} onClick={() => { setWorking(timeline.draft!.document); setSaveState("已保存"); }}>恢复</button><button onClick={() => void (async () => { await window.desktop.deleteTimelineDraft(project!.project_id); setTimeline({ ...timeline, draft: null }); })()}>丢弃</button></div>}</div>
-    <div className="editor-workspace">
+    <div className={`editor-workspace${leftPaneOpen ? "" : " library-closed"}`}>
       <section className={"library-pane" + (leftPaneOpen ? "" : " pane-closed")} aria-label="媒体库" hidden={!leftPaneOpen}>
         <div className="left-seg" role="tablist" aria-label="工作区分区">
           <button role="tab" aria-selected={tab === "assets"} className={tab === "assets" ? "active" : ""} onClick={() => setTab("assets")}><Clapperboard size={15} aria-hidden="true" />素材</button>
@@ -3602,7 +3724,7 @@ export function App() {
       </section>
       {leftPaneOpen && <div className="resize-handle resize-handle-left" role="separator" aria-label="调整左侧面板宽度" onPointerDown={event => beginResize("left", event)} />}
     <div className="editor-stack">
-    <section className="editor-grid editor-grid-nolib">
+    <section className={`editor-grid editor-grid-nolib${rightPaneOpen ? "" : " properties-closed"}`}>
       <section ref={stagePaneRef} className={`stage-pane${isFullscreen ? " fullscreen" : ""}`} aria-label="项目预览">
         <div className="stage-column" ref={stageColumnRef}>
           {/* 预览窗格栏（2026-11-16 按参照 ProjectView.tsx:4639 的 PANE_BAR 形态）：
@@ -3619,9 +3741,9 @@ export function App() {
             <span className="pane-bar-spacer" />
             {/* P4 顺序修正（ProjectView.tsx:4640-4661）：layers 左端、inspector 右端，ours 的预览设置在其右。 */}
             <button type="button" className={`pane-bar-btn${rightPaneOpen ? " on" : ""}`} aria-pressed={rightPaneOpen} aria-label="属性面板开关" title={rightPaneOpen ? "收起属性面板" : "展开属性面板"} onClick={() => setRightPaneOpen(value => !value)}><SlidersHorizontal size={16} aria-hidden="true" /></button>
-            <span className="pane-settings-anchor">
-              <button type="button" className={`pane-bar-btn${paneSettingsOpen ? " on" : ""}`} aria-haspopup="true" aria-expanded={paneSettingsOpen} aria-label="预览设置" title="预览设置（比例 / 编码）" onClick={event => { event.stopPropagation(); setPaneSettingsOpen(value => !value); }}><Settings2 size={16} aria-hidden="true" /></button>
-              {paneSettingsOpen && <div className="pane-settings-pop" role="group" aria-label="预览设置" onClick={event => event.stopPropagation()}>
+            <span className="pane-settings-anchor" ref={paneSettingsRef}>
+              <button type="button" className={`pane-bar-btn${paneSettingsOpen ? " on" : ""}`} aria-haspopup="dialog" aria-expanded={paneSettingsOpen} aria-label="预览设置" title="预览设置（比例 / 编码）" onClick={event => { event.stopPropagation(); setPaneSettingsOpen(value => !value); }}><Settings2 size={16} aria-hidden="true" /></button>
+              {paneSettingsOpen && <div className="pane-settings-pop" role="dialog" aria-label="预览设置" onClick={event => event.stopPropagation()}>
                 <div className="pane-settings-row">
                   <label>
                     <span className="sr-only">预览比例</span>
@@ -3637,7 +3759,18 @@ export function App() {
             </span>
           </div>
           <div className="stage-view">
-            <div ref={previewFrameRef} className={`preview-frame ${previewClass}${previewSelected ? " selected" : ""}`} role="button" tabIndex={0} aria-label="选中播放头处的片段" title="点击选中播放头处的片段" onPointerDown={onPreviewPointerDown} onPointerMove={onPreviewPointerMove} onPointerUp={onPreviewPointerUp} onPointerCancel={() => { previewPressRef.current = IDLE_PRESS; setStageMarquee(null); }} onClick={selectClipAtPlayhead} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectClipAtPlayhead(); } }}>
+            <div ref={previewFrameRef} className={`preview-frame ${previewClass}${previewSelected ? " selected" : ""}${isFit(viewerView) ? "" : " zoomed"}`} role="button" tabIndex={0} aria-label="预览画布。Ctrl 或 Command 加滚轮缩放，中键拖动画面；放大后可用方向键平移" title="Ctrl / Command + 滚轮缩放；放大后中键拖动或用方向键平移" onPointerDown={onPreviewPointerDown} onPointerMove={onPreviewPointerMove} onPointerUp={onPreviewPointerUp} onPointerCancel={() => { previewPressRef.current = IDLE_PRESS; setStageMarquee(null); }} onClick={selectClipAtPlayhead} onKeyDown={event => {
+              if (!isFit(viewerView) && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) {
+                event.preventDefault(); event.stopPropagation();
+                const viewer = { w: event.currentTarget.clientWidth || 1, h: event.currentTarget.clientHeight || 1 };
+                const fitted = fittedSize(viewer, frameRatioRef.current);
+                const step = event.shiftKey ? 80 : 32;
+                const dx = event.key === "ArrowLeft" ? -step : event.key === "ArrowRight" ? step : 0;
+                const dy = event.key === "ArrowUp" ? -step : event.key === "ArrowDown" ? step : 0;
+                const next = panBy(viewerViewRef.current, dx, dy, fitted);
+                viewerViewRef.current = next; setViewerView(next); setPreviewZoom(next.z);
+              } else if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectClipAtPlayhead(); }
+            }}>
           {stageMarquee && <div className="preview-marquee" aria-hidden="true" style={{ left: stageMarquee.x, top: stageMarquee.y, width: stageMarquee.w, height: stageMarquee.h }} />}
           <div className="preview-canvas" ref={canvasRef}>
             {previewMode === "authoritative" && authoritativeMediaUrl && <video ref={videoRef} className="preview-foreground authoritative-video" src={authoritativeMediaUrl} aria-label={reframePlayback ? "重构图权威预览视频" : exportPlayback ? "导出视频" : "权威预览视频"} controls onEnded={() => { setPlaying(false); setExportPlayback(undefined); setReframePlayback(undefined); setPreviewMode("synthetic"); }} />}
@@ -3668,14 +3801,14 @@ export function App() {
         </div>
         <div className="playback-bar">
           <div className="pb-left"><span className="tc"><b ref={tcTimeRef}>{formatSmpteTimecode(playhead, previewFps)}</b><i> / </i><span className="tot">{formatSmpteTimecode(totalUs, previewFps)}</span></span></div>
-          <div className="pb-center"><button className="pb-play" aria-label={playing ? "暂停" : "播放"} title={playing ? "暂停" : "播放"} onClick={togglePlayback}>{playing ? <Pause /> : <Play />}</button></div>
+          <div className="pb-center"><button type="button" className="pb-play" aria-label={playing ? "暂停" : "播放"} title={playing ? "暂停" : "播放"} onClick={togglePlayback}>{playing ? <Pause /> : <Play />}</button></div>
           <div className="pb-right" role="group" aria-label="播放器控制">
             <span className="rate-anchor">
               <button className="pb-icon rate-btn" aria-haspopup="dialog" aria-expanded={ratePopOpen} title="播放设置（循环 / 倍速）" aria-label="播放设置" onClick={event => { event.stopPropagation(); setRatePopOpen(value => !value); setVolPopOpen(false); setZoomPopOpen(false); }}>
                 {loopPlayback && <Repeat size={14} aria-hidden="true" />}
                 <span aria-hidden="true">{`${uiRate}×`}</span>
               </button>
-              <div className={`rate-pop${ratePopOpen ? " open" : ""}`} ref={ratePopRef} onClick={event => event.stopPropagation()}>
+              <div className={`rate-pop${ratePopOpen ? " open" : ""}`} ref={ratePopRef} role="dialog" aria-label="播放设置" onClick={event => event.stopPropagation()}>
                 <div className="rp-head">播放设置</div>
                 {/* P12/P13 参照 PlaybackMenu.tsx:86-137：循环=整行 switch（自绘 18×30 ink 开关）、
                     倍速=两行×4 的 segmented（滑动选中标记、role=radiogroup）。速度集合保 ours 域 0.25–4×。 */}
@@ -3694,8 +3827,8 @@ export function App() {
               </div>
             </span>
             <span className="vol-anchor">
-              <button className="pb-icon" aria-haspopup="dialog" aria-expanded={volPopOpen} title={`音量 ${volume}%`} aria-label="音量" onClick={event => { event.stopPropagation(); setVolPopOpen(value => !value); setZoomPopOpen(false); }}>{volume === 0 ? <VolumeX /> : <Volume2 />}</button>
-              <div className={`vol-pop${volPopOpen ? " open" : ""}`} ref={volPopRef} onClick={event => event.stopPropagation()}>
+              <button type="button" className="pb-icon" aria-haspopup="dialog" aria-expanded={volPopOpen} title={`音量 ${volume}%`} aria-label={`音量 ${volume}%`} onClick={event => { event.stopPropagation(); setVolPopOpen(value => !value); setZoomPopOpen(false); }}>{volume === 0 ? <VolumeX /> : <Volume2 />}</button>
+              <div className={`vol-pop${volPopOpen ? " open" : ""}`} ref={volPopRef} role="dialog" aria-label="音量" onClick={event => event.stopPropagation()}>
                 <div className="vol-rail" ref={volRailRef} role="slider" tabIndex={0} aria-label="预览音量" aria-orientation="vertical" aria-valuemin={0} aria-valuemax={100} aria-valuenow={volume} aria-valuetext={`${volume}%`} onKeyDown={event => {
                   const delta = event.key === "ArrowUp" || event.key === "ArrowRight" ? 5 : event.key === "ArrowDown" || event.key === "ArrowLeft" ? -5 : 0;
                   if (delta || event.key === "Home" || event.key === "End") {
@@ -3708,16 +3841,16 @@ export function App() {
                 </div>
               </div>
             </span>
-            <button className="pb-icon zoom-btn" aria-haspopup="dialog" aria-expanded={zoomPopOpen} title="预览缩放" onClick={event => { event.stopPropagation(); setZoomPopOpen(value => !value); setVolPopOpen(false); }}><ZoomIn /><span className="zoom-label">{previewZoom === "fit" ? "适应" : `${Math.round(previewZoom * 100)}%`}</span></button>
-            <div className={`zoom-pop${zoomPopOpen ? " open" : ""}`} ref={zoomPopRef} onClick={event => event.stopPropagation()}>
+            <button type="button" className="pb-icon zoom-btn" aria-haspopup="dialog" aria-expanded={zoomPopOpen} aria-label={`预览缩放，${previewZoom === "fit" ? "适应画布" : `${Math.round(previewZoom * 100)}%`}`} title="预览缩放" onClick={event => { event.stopPropagation(); setZoomPopOpen(value => !value); setVolPopOpen(false); }}><ZoomIn /><span className="zoom-label">{previewZoom === "fit" ? "适应" : `${Math.round(previewZoom * 100)}%`}</span></button>
+            <div className={`zoom-pop${zoomPopOpen ? " open" : ""}`} ref={zoomPopRef} role="dialog" aria-label="预览缩放" onClick={event => event.stopPropagation()}>
               <div className="zp-head">
-                <button className={`zp-fit${previewZoom === "fit" ? " on" : ""}`} onClick={() => { viewerViewRef.current = FIT_VIEW; setViewerView(FIT_VIEW); setPreviewZoom("fit"); }}>{previewZoom === "fit" ? "✓ 适应画布" : "适应画布"}</button>
+                <button type="button" className={`zp-fit${previewZoom === "fit" ? " on" : ""}`} aria-pressed={previewZoom === "fit"} onClick={() => { viewerViewRef.current = FIT_VIEW; setViewerView(FIT_VIEW); setPreviewZoom("fit"); }}>{previewZoom === "fit" ? "✓ 适应画布" : "适应画布"}</button>
                 <span className="zp-val">{previewZoom === "fit" ? "原始" : `${Math.round(previewZoom * 100)}%`}</span>
               </div>
-              <input type="range" min={0} max={1000} value={previewZoom === "fit" ? zoomT(1) : zoomT(previewZoom)} onChange={event => { const z = Math.round(zoomZ(Number(event.target.value)) * 100) / 100; const next = { ...viewerViewRef.current, z }; viewerViewRef.current = next; setViewerView(next); setPreviewZoom(z); }} aria-label="预览缩放百分比" />
+              <input type="range" min={0} max={1000} value={previewZoom === "fit" ? zoomT(1) : zoomT(previewZoom)} onChange={event => { const z = Math.round(zoomZ(Number(event.target.value)) * 100) / 100; const next = { ...viewerViewRef.current, z }; viewerViewRef.current = next; setViewerView(next); setPreviewZoom(z); }} aria-label="预览缩放级别" aria-valuetext={previewZoom === "fit" ? "适应画布" : `${Math.round(previewZoom * 100)}%`} />
               <div className="zp-scale"><span>25%</span><span>100%</span><span>500%</span></div>
             </div>
-            <button className="pb-icon" aria-label={isFullscreen ? "退出全屏" : "全屏"} title={isFullscreen ? "退出全屏" : "全屏"} onClick={() => void toggleFullscreen()}>{isFullscreen ? <Minimize /> : <Maximize />}</button>
+            <button type="button" className="pb-icon" aria-label={isFullscreen ? "退出全屏" : "全屏"} title={isFullscreen ? "退出全屏" : "全屏"} onClick={() => void toggleFullscreen()}>{isFullscreen ? <Minimize /> : <Maximize />}</button>
           </div>
         </div>
         </div>
@@ -3726,7 +3859,7 @@ export function App() {
       <aside className={"properties-pane" + (rightPaneOpen ? "" : " pane-closed")} aria-label="上下文属性" role="region" hidden={!rightPaneOpen}>{selectedClip ? <ClipProperties clip={selectedClip} clipName={semanticAssetNames[selectedClip.asset_id]} locked={Boolean(working?.locked_elements?.includes(selectedClip.clip_id) || trackById.get(selectedClip.track_id)?.locked)} onAlign={alignmentHint ? undefined : alignSelectedFrames} alignmentHint={alignmentHint} onPatch={patchTimelineVoid} onDraft={queueDraft} working={working!} playheadUs={playhead} onOpenEditingTools={tool => openEditingTools(tool, selectedClip.clip_id)} baseRevisionId={timeline?.current_revision.timeline_revision_id ?? null} onAppliedTimeline={acceptState} /> : selectedCaption ? <CaptionProperties caption={selectedCaption} locked={Boolean(selectedCaption.source_clip_id && working?.locked_elements?.includes(selectedCaption.source_clip_id))} onPatch={patchTimelineVoid} onDraft={queueDraft} working={working!} /> : selectedTransition ? <TransitionProperties transition={selectedTransition} onPatch={patchTimelineVoid} /> : selectedClips.length > 1 ? <ClipGroupAlignmentProperties count={selectedClips.length} hint={alignmentHint} onAlign={alignmentHint ? undefined : alignSelectedFrames} onDistribute={visualSelectedCount >= 3 ? distributeSelectedFrames : undefined} distributionDisabled={Boolean(alignmentHint)} groupBounds={groupBounds} onEditBounds={editGroupBounds} /> : selectedAssetIds.size > 0 ? <AssetSelectionProperties entries={visibleAssets.filter(({ asset }) => selectedAssetIds.has(asset.asset_id)).map(({ asset }) => ({ id: asset.asset_id, name: asset.display_name, kind: assetKindLabels[asset.kind], meta: assetMetaText(asset), duration: assetDurationLabel(asset), status: availabilityLabels[asset.availability] }))} /> : <ProjectProperties project={project} saveState={saveState} authoritativePreview={authoritativePreview} previewIsStale={previewIsStale} renderDisabledReason={renderDisabledReason} onGeneratePreview={() => void generatePreview()} onCreateExport={openExportDialog} onOpenProjectDialog={() => setProjectDialogOpen(true)} />}</aside>
     </section>
     <div className="timeline-resize-handle" role="separator" aria-label="调整时间线高度" onPointerDown={event => beginResize("timeline", event)} />
-    <TimelinePanel document={working} selection={selection} setSelection={(sel) => { setSelection(sel); exitLibraryPreview(); }} onPatch={patchTimelineVoid} onDropAsset={dropAsset} coverUrl={coverUrl} onCaptureCover={() => setCoverDialogOpen(true)} canUndo={Boolean(timeline?.can_undo)} canRedo={Boolean(timeline?.can_redo)} onUndo={() => void undoRedo("undo")} onRedo={() => void undoRedo("redo")} assetMedia={timelineAssetMedia} waveformCache={waveformCache} playheadStore={playheadStore} onSeek={(timeUs) => { if (libraryPreviewId) exitLibraryPreview(); seekWhileScrubbing(timeUs); }} onSeekCommit={timeUs => { exitLibraryPreview(); commitScrub(timeUs); }} onRangeChange={setPlaybackRange} onCommand={(id) => runCommand(id)} meterLevels={meterLevels} playing={playing} />
+    <TimelinePanel projectId={project?.project_id} document={working} selection={selection} setSelection={(sel) => { setSelection(sel); exitLibraryPreview(); }} onPatch={patchTimelineVoid} onDropAsset={dropAsset} coverUrl={coverUrl} onCaptureCover={() => setCoverDialogOpen(true)} canUndo={Boolean(timeline?.can_undo)} canRedo={Boolean(timeline?.can_redo)} onUndo={() => void undoRedo("undo")} onRedo={() => void undoRedo("redo")} assetMedia={timelineAssetMedia} waveformCache={waveformCache} playheadStore={playheadStore} onSeek={(timeUs) => { if (libraryPreviewId) exitLibraryPreview(); seekWhileScrubbing(timeUs); }} onSeekCommit={timeUs => { exitLibraryPreview(); commitScrub(timeUs); }} onRangeChange={setPlaybackRange} onCommand={(id) => runCommand(id)} meterLevels={meterLevels} playing={playing} />
     </div>
     </div>
     <WorkspaceFooter
@@ -3763,7 +3896,22 @@ export function App() {
         onExport={submitExport}
       />}
       {coverDialogOpen && <CoverDialog coverUrl={coverUrl} onClose={() => setCoverDialogOpen(false)} onCapture={() => captureCover()} onChange={applyCover} />}
-      {projectDialogOpen && <Dialog titleId="project-management-title" closeLabel="关闭项目管理" title="项目管理" subtitle="集中管理项目名称与生命周期，编辑区只保留当前项目选择。" footer={project ? <button onClick={() => void toggleArchive()}>{project.status === "archived" ? <RotateCcw /> : <Archive />} {project.status === "archived" ? "重新打开项目" : "归档项目"}</button> : undefined} label="项目管理" onClose={() => setProjectDialogOpen(false)} className="project-management-modal"><div className="project-steps"><span className="active"><i>1</i>导入素材</span><span><i>2</i>编辑时间线</span><span><i>3</i>预览检查</span><span><i>4</i>导出视频</span></div><section className="project-management-section"><h3>新建项目</h3><div className="project-form-row"><input aria-label="新项目名称" value={newProject} onChange={event => setNewProject(event.target.value)} placeholder="例如：品牌宣传片" /><label className="tb-field">画布<select aria-label="新建项目画布比例" value={newProjectRatio} onChange={event => setNewProjectRatio(event.target.value)}>{[{ value: "169", label: "16:9" }, { value: "916", label: "9:16" }, { value: "11", label: "1:1" }, { value: "43", label: "4:3" }, { value: "34", label: "3:4" }].map(option => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label><button className="compact-command" disabled={!newProject.trim()} onClick={() => void createProject()}><FolderPlus />创建项目</button></div></section><section className="project-management-section"><h3>当前项目</h3>{project ? <><p className="project-current-name">{project.name} · {project.status === "active" ? "活动" : project.status === "archived" ? "已归档" : "目录缺失"}</p><div className="project-form-row"><input aria-label="重命名项目" value={projectName} onChange={event => { projectNameProjectId.current = project.project_id; projectNameDirty.current = true; setProjectName(event.target.value); }} /><button className="compact-command" disabled={!projectName.trim()} onClick={() => void renameProject()}><Save />保存名称</button></div></> : <p>请先选择一个项目。</p>}</section></Dialog>}
+      {projectDialogOpen && <ProjectLibraryDialog
+        projects={projects}
+        activeProjectId={project?.project_id}
+        newProject={newProject}
+        newProjectRatio={newProjectRatio}
+        creating={false}
+        refreshing={projectManagerRefreshing}
+        onNewProjectChange={setNewProject}
+        onNewProjectRatioChange={setNewProjectRatio}
+        onCreateProject={createProject}
+        onRefresh={refreshProjectManager}
+        onOpen={item => { switchProject(item); setProjectDialogOpen(false); }}
+        onRename={renameManagedProject}
+        onToggleArchive={toggleManagedProjectArchive}
+        onClose={() => setProjectDialogOpen(false)}
+      />}
     {batchOpen && <Dialog titleId="export-batch-title" closeLabel="关闭多平台导出" title="多平台导出" subtitle="平台与画幅独立选择；仅同一 Revision 的权威预览可进入批次。" footer={<><button disabled={renditionTargets.length >= 8 || !platformPresets.length} onClick={addTarget}>添加目标</button><button onClick={() => void chooseBatchDirectory()}>{directoryGrant ? `输出目录：{directoryGrant.display_name}` : "选择输出目录"}</button><button disabled={!directoryGrant || !renditionTargets.length || renditionTargets.some(target => !targetPreview(target))} onClick={() => void createBatch()}>创建批次</button></>} label="多平台导出" onClose={() => setBatchOpen(false)} className="export-batch-modal">{batchError && <p className="ai-status" role="status">{batchError}</p>}<div className="rendition-targets">{renditionTargets.map(target => { const platform = platformPresets.find(item => item.platform_preset_id === target.platform_preset_id); const rendition = renditionPresets.find(item => item.rendition_preset_id === target.rendition_preset_id); const preview = targetPreview(target); return <section key={target.key} className="rendition-target"><label>平台<select aria-label="导出平台" value={target.platform_preset_id} onChange={event => { const next = platformPresets.find(item => item.platform_preset_id === event.target.value); if (next) updateTarget(target.key, { platform_preset_id: next.platform_preset_id, rendition_preset_id: next.default_rendition_id, key: `${next.platform_preset_id}:${next.default_rendition_id}` }); }}><option value="">选择平台</option>{platformPresets.map(item => <option value={item.platform_preset_id} key={item.platform_preset_id}>{item.display_name}</option>)}</select></label><label>画幅<select aria-label="导出画幅" value={target.rendition_preset_id} onChange={event => updateTarget(target.key, { rendition_preset_id: event.target.value, key: `${target.platform_preset_id}:${event.target.value}` })}>{platform?.allowed_rendition_ids.map(id => <option value={id} key={id}>{renditionPresets.find(item => item.rendition_preset_id === id)?.display_name ?? id}</option>)}</select></label><label>布局<select aria-label="目标布局策略" value={target.layout_policy} onChange={event => updateTarget(target.key, { layout_policy: event.target.value as LayoutPolicy })}>{layoutPolicies.map(item => <option value={item.value} key={item.value}>{item.label}</option>)}</select></label><div className="target-summary"><small>{rendition ? `${rendition.export.width}×${rendition.export.height} · H.264/AAC · 30fps` : "预设加载中"}</small><small>{preview ? `权威预览已就绪${preview.preview.warnings.length ? ` · ${preview.preview.warnings.join(", ")}` : ""}` : "需要本目标权威预览"}</small></div><div className="target-actions"><button onClick={() => void generateRenditionPreview(target)}>{preview ? "重新生成权威预览" : "生成权威预览"}</button><button disabled={renditionTargets.length === 1} onClick={() => setRenditionTargets(items => items.filter(item => item.key !== target.key))}>移除</button></div>{preview && <ReframeTargetEditor clips={reframeClips(target)} selections={reframeSelections[target.key] ?? {}} preview={reframePreviews[target.key]} pending={Boolean(reframePending[target.key])} onSelect={(clipId, anchor) => selectReframeAnchor(target, clipId, anchor)} onGenerate={() => void generateReframePreview(target)} onPlay={() => { setReframePlayback(reframePreviews[target.key]); setExportPlayback(undefined); setPreviewMode("authoritative"); }} />}</section>; })}</div><section className="reframe-batch-actions" aria-label="静态焦点批量导出"><h3>静态焦点批量导出</h3><p>独立于基础 Stage 3A 批次；所有目标的重构图权威预览就绪后才可创建。</p>{reframeError && <p className="ai-status" role="status">{reframeError}</p>}<div className="modal-actions"><button disabled={renditionTargets.some(target => !targetAdjustments(target).length || !reframePreviews[target.key])} onClick={() => void chooseReframeDirectory()}>{reframeDirectoryGrant ? `重构图输出目录：${reframeDirectoryGrant.display_name}` : "选择重构图输出目录"}</button><button disabled={!reframeDirectoryGrant || renditionTargets.some(target => !targetAdjustments(target).length || !reframePreviews[target.key])} onClick={() => void createReframeBatch()}>创建重构图批次</button></div></section>{activeBatch && <section className="batch-status"><h3>批次 {activeBatch.status}</h3><p>目录：{activeBatch.directory_display_name}</p>{activeBatch.items.map(item => <div key={item.export_batch_item_id}><strong>{item.rendition_snapshot.platform_preset_id} · {item.rendition_snapshot.rendition_preset_id}</strong><small>{item.status} · {item.progress === null ? "--" : `${Math.round(item.progress * 100)}%`}{item.destination_display_name ? ` · ${item.destination_display_name}` : ""}{item.error_code ? ` · ${item.error_code}` : ""}</small></div>)}<div className="modal-actions">{["queued", "running"].includes(activeBatch.status) && <button onClick={() => void window.desktop.cancelExportBatch(activeBatch.export_batch_id).then(setActiveBatch).catch(() => setBatchError("取消批次失败。"))}>取消批次</button>}{activeBatch.items.some(item => ["failed", "cancelled", "interrupted"].includes(item.status)) && <button onClick={() => void retryBatchItems()}>重新授权并重试失败项</button>}</div></section>}{activeReframeBatch && <section className="batch-status reframe-batch-status"><h3>重构图批次{activeReframeBatch.status}</h3><p>目录：{activeReframeBatch.directory_display_name}</p>{activeReframeBatch.items.map(item => <div key={item.reframe_export_batch_item_id}><strong>{item.rendition_reframe_snapshot.platform_preset_id} · {item.rendition_reframe_snapshot.rendition_preset_id}</strong><small>{item.status} · {item.progress === null ? "--" : `${Math.round(item.progress * 100)}%`}{item.destination_display_name ? ` · ${item.destination_display_name}` : ""}{item.error_code ? ` · ${item.error_code}` : ""}</small></div>)}<div className="modal-actions">{["queued", "running"].includes(activeReframeBatch.status) && <button onClick={() => void window.desktop.cancelReframeExportBatch(activeReframeBatch.reframe_export_batch_id).then(setActiveReframeBatch).catch(() => setReframeError("取消重构图批次失败。"))}>取消重构图批次</button>}{activeReframeBatch.items.some(item => ["failed", "cancelled", "interrupted"].includes(item.status)) && <button onClick={() => void retryReframeBatchItems()}>重新授权并重试重构图失败项</button>}</div></section>}</Dialog>}
     {confirmModel && <Dialog titleId="model-confirm-title" closeLabel="关闭" title="确认下载本地模型" footer={<><button onClick={() => setConfirmModel(undefined)}>暂不下载</button><button disabled={confirmModel.license.acceptance_required && !licenseAccepted} onClick={() => void downloadModel()}>确认并下载</button></>} label="确认下载本地模型" onClose={() => setConfirmModel(undefined)} className="compact-dialog"><h3>{confirmModel.display_name}</h3><p>{confirmModel.purpose}</p><dl><dt>下载大小</dt><dd>{formatBytes(confirmModel.model_size_bytes)}</dd><dt>许可证</dt><dd>{confirmModel.license.name}</dd><dt>隐私</dt><dd>模型在本机运行，不上传媒体或转录正文。</dd></dl>{confirmModel.license.acceptance_required && <label className="check-line"><input type="checkbox" checked={licenseAccepted} onChange={event => setLicenseAccepted(event.target.checked)} />我已阅读并接受该许可证</label>}</Dialog>}
     {transcriptionAsset && <Dialog titleId="transcription-title" closeLabel="关闭" title="创建本地转录" footer={<><button onClick={() => setTranscriptionAsset(undefined)}>取消</button><button onClick={() => void submitTranscription()}>开始转录</button></>} label="创建本地转录" onClose={() => setTranscriptionAsset(undefined)} className="compact-dialog"><p>{transcriptionAsset.display_name}</p><label>语言<select value={language} onChange={event => setLanguage(event.target.value)}><option value="auto">自动检测</option><option value="zh">中文</option><option value="en">English</option></select></label><label className="check-line"><input type="checkbox" checked={wordTimestamps} onChange={event => setWordTimestamps(event.target.checked)} />生成词级时间戳</label></Dialog>}

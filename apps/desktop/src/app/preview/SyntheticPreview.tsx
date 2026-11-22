@@ -131,6 +131,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
   const lastReportWall = useRef<number>(0);
   const [, refreshOverlayViewport] = useState(0);
   const overlayViewport = useRef({ width: 0, height: 0 });
+  const resizeSeekTimerRef = useRef<number>(0);
   // 预览框观察器：组件级单例（吸收路径早退不销毁，避免观察器泄漏）
   const boxObserverRef = useRef<ResizeObserver | null>(null);
   if (!boxObserverRef.current) {
@@ -144,10 +145,31 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
       const width = rect?.width ?? 0;
       const height = rect?.height ?? 0;
       if (width > 2 && height > 2) {
+        const previous = overlayViewport.current;
+        const changed = Math.abs(previous.width - width) > 0.5 || Math.abs(previous.height - height) > 0.5;
+        if (!changed) return;
+        // A real backing-size change clears the compositor surface. Recompose the
+        // held frame at the settled size; otherwise a paused viewer can stay black
+        // because its old textures were evicted while the window was resized.
         session.resize(width, height);
-        if (overlayViewport.current.width !== width || overlayViewport.current.height !== height) {
-          overlayViewport.current = { width, height };
-          refreshOverlayViewport(version => version + 1);
+        overlayViewport.current = { width, height };
+        refreshOverlayViewport(version => version + 1);
+        if (previous.width > 2 && previous.height > 2) {
+          window.clearTimeout(resizeSeekTimerRef.current);
+          const redrawHeldFrame = (remainingAttempts: number) => {
+            const active = sessionRef.current;
+            if (!active || active !== session) return;
+            if (active.isPlaying) {
+              if (remainingAttempts > 0) {
+                resizeSeekTimerRef.current = window.setTimeout(() => redrawHeldFrame(remainingAttempts - 1), 120);
+              }
+              return;
+            }
+            const fps = active.ir.canvas.fps || 30;
+            const frame = Math.max(0, Math.floor((lastReportedUs.current / 1_000_000) * fps));
+            void active.seekToFrame(frame).catch(() => undefined);
+          };
+          resizeSeekTimerRef.current = window.setTimeout(() => redrawHeldFrame(12), 180);
         }
       }
     });
@@ -481,6 +503,7 @@ export function SyntheticPreview(props: SyntheticPreviewProps): React.ReactEleme
   // 卸载：销毁会话（含画布元素）+ 外部帧源 + 断开观察器（StrictMode 双挂载各自动一次，安全）。
   useEffect(() => () => {
     boxObserverRef.current?.disconnect();
+    window.clearTimeout(resizeSeekTimerRef.current);
     sessionRef.current?.dispose();
     sessionRef.current = null;
     // C20c-1：外部帧源所有权在组件——卸载一并释放（既有缺口闭合）

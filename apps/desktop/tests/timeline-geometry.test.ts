@@ -57,6 +57,12 @@ describe("OpenFilm track role heights", () => {
     const layout = computeTrackRows([...tracks, dynamic], 20, 56);
     expect(Object.fromEntries(layout.map(row => [row.track.id, row.height]))).toEqual({ C1: 24, V1: 68, A1: 42, V2: 52 });
   });
+
+  it("applies per-track overrides while keeping the main video minimum and clamping invalid sizes", () => {
+    const dynamic = { id: "V2", kind: "video" as const, locked: false, hidden: false, muted: false, solo: false };
+    const layout = computeTrackRows([...tracks, dynamic], 20, 56, undefined, { C1: 12, V1: 32, V2: 92 });
+    expect(Object.fromEntries(layout.map(row => [row.track.id, row.height]))).toEqual({ C1: 28, V1: 64, A1: 42, V2: 92 });
+  });
 });
 
 

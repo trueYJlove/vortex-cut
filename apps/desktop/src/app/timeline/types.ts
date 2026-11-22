@@ -227,6 +227,8 @@ export interface TimelineRuntimePrefs {
   linkageEnabled: boolean;
   /** 轨道行高（px），固定不随窗口压缩；40-96。 */
   trackHeight: number;
+  /** OpenFilm-style per-track row height overrides, keyed by stable track id. */
+  trackHeights: Record<string, number>;
   /** 音频波形占片段高度的比例（1 = 100%，0.6 = 60%，0.3 = 30%）。 */
   waveformRatio: number;
 }
@@ -237,6 +239,7 @@ export const DEFAULT_RUNTIME_PREFS: TimelineRuntimePrefs = {
   linkageEnabled: true,
   // 与 DEFAULT_VIEW_STATE.trackHeight 保持一致；geometry maps it to role heights.
   trackHeight: 56,
+  trackHeights: {},
   /** 剪映默认 40% 波形占比。 */
   waveformRatio: 0.4,
 };

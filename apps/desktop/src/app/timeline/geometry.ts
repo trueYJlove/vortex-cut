@@ -96,15 +96,23 @@ export function computeTrackRows(
    *  行组跟着居中，而不是全部贴着顶部、底下空出一大片（实测截图差异）。
    *  不给则按老行为从标尺下沿开始排——测试与离屏渲染不依赖居中。 */
   viewportHeight?: number,
+  trackHeightOverrides: Readonly<Record<string, number>> = {},
 ): TrackRowLayout[] {
   /* OpenFilm lib/track-heights.ts roles: main visual 68, regular visual 52,
      caption/text 24, audio 42. The existing single height preference acts as
      a compact adjustment around the 56px regular visual baseline. */
   const heights = tracks.map((track) => {
-    if (track.kind === "audio") return 42;
-    if (track.kind === "text") return CAPTION_ROW_H;
-    if (track.id === "V1") return Math.max(64, rowHeight + 12);
-    return Math.max(OVERLAY_TRACK_H, rowHeight - 4);
+    const defaultHeight = track.kind === "audio"
+      ? 42
+      : track.kind === "text"
+        ? CAPTION_ROW_H
+        : track.id === "V1"
+          ? Math.max(64, rowHeight + 12)
+          : Math.max(OVERLAY_TRACK_H, rowHeight - 4);
+    const override = trackHeightOverrides[track.id];
+    if (!Number.isFinite(override)) return defaultHeight;
+    const minimum = track.id === "V1" ? 64 : 28;
+    return Math.max(minimum, Math.min(160, Math.round(override)));
   });
   const tracksH = heights.reduce((sum, h) => sum + h, 0) + Math.max(0, tracks.length - 1) * TRACK_GAP;
   const padTop =

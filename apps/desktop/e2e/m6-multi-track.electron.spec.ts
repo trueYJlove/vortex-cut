@@ -59,6 +59,116 @@ test("多轨道：新增视频/文本轨、跨轨拖动与轨道属性", async (
     await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe("dark");
     await expect(page.getByRole("button", { name: /Clip .* video/ })).toHaveCount(1, { timeout: 30_000 });
 
+    // The app menu now lives on the brand mark, as OpenFilm's logo menu does.
+    await page.setViewportSize({ width: 900, height: 720 });
+    const brandMenuButton = page.getByRole("button", { name: "Vortex Cut 主菜单" });
+    await brandMenuButton.click();
+    await expect(page.getByRole("dialog", { name: "Vortex Cut 主菜单" })).toBeVisible();
+    await page.keyboard.press("ArrowRight");
+    const manageProjects = page.getByRole("menuitem", { name: "项目管理" });
+    await expect(manageProjects).toBeFocused();
+    await manageProjects.click();
+    await expect(page.getByRole("dialog", { name: "项目管理" })).toBeVisible();
+    const projectManagerBox = await page.getByRole("dialog", { name: "项目管理" }).boundingBox();
+    expect(projectManagerBox?.width).toBeLessThanOrEqual(900);
+    expect(projectManagerBox?.height).toBeLessThanOrEqual(720);
+    const projectSearch = page.getByRole("searchbox", { name: "搜索项目" });
+    await projectSearch.fill("M6 Multi Track E2E");
+    const projectCard = page.locator(`.project-library-card[data-project-id="${setup.project_id}"]`);
+    await expect(projectCard).toBeVisible();
+    await page.getByRole("combobox", { name: "筛选项目状态" }).selectOption("archived");
+    await expect(page.getByText("没有匹配的项目")).toBeVisible();
+    await page.getByRole("combobox", { name: "筛选项目状态" }).selectOption("all");
+    await expect(projectCard).toBeVisible();
+    const searchFitsField = await page.locator(".project-library-search input").evaluate((input: HTMLInputElement) => {
+      const field = input.parentElement!.getBoundingClientRect(); const box = input.getBoundingClientRect();
+      return box.top >= field.top - 1 && box.bottom <= field.bottom + 1;
+    });
+    expect(searchFitsField).toBe(true);
+    await projectSearch.fill("");
+    await projectSearch.evaluate((element: HTMLInputElement) => element.blur());
+    await page.keyboard.press("Escape");
+    await page.getByText("项目库", { exact: true }).click();
+    await page.addStyleTag({ content: ".synthetic-metrics { display: none !important; }" });
+    await page.screenshot({ path: join(run, "project-manager.png"), fullPage: true });
+    await page.getByRole("button", { name: "列表视图", exact: true }).click();
+    await expect(page.locator(".project-library-grid")).toHaveClass(/list-view/);
+    await page.getByRole("button", { name: "卡片视图" }).click();
+    await expect(page.locator(".project-library-grid")).not.toHaveClass(/list-view/);
+    await page.getByRole("button", { name: "关闭项目管理" }).click();
+    await page.getByRole("button", { name: /Vortex Cut 主菜单/ }).click();
+    await page.keyboard.press("ArrowRight");
+    await page.getByRole("menuitem", { name: "项目管理" }).click();
+    await expect(page.getByRole("dialog", { name: "项目管理" })).toBeVisible();
+    const unfilteredCard = page.locator(`.project-library-card[data-project-id="${setup.project_id}"]`);
+    const renameManagedProject = async (name: string) => {
+      await unfilteredCard.getByRole("button", { name: /重命名项目/ }).click();
+      const nameInput = unfilteredCard.getByRole("textbox", { name: /项目名称/ });
+      await nameInput.fill(name);
+      await unfilteredCard.getByRole("button", { name: "保存项目名称" }).click();
+      await expect(unfilteredCard.locator("h4")).toHaveText(name);
+    };
+    await renameManagedProject("M6 Multi Track Renamed");
+    await renameManagedProject("M6 Multi Track E2E");
+    await unfilteredCard.getByRole("button", { name: "归档项目 M6 Multi Track E2E" }).click();
+    await expect(unfilteredCard.locator(".project-library-status")).toHaveText("已归档");
+    await unfilteredCard.getByRole("button", { name: "重新打开项目 M6 Multi Track E2E" }).click();
+    await expect(unfilteredCard.locator(".project-library-status")).toHaveText("本地项目");
+    await page.getByRole("textbox", { name: "新项目名称" }).fill("M6 Project Manager E2E");
+    await page.getByRole("combobox", { name: "新建项目画布比例" }).selectOption("169");
+    await page.getByRole("dialog", { name: "项目管理" }).getByRole("button", { name: "新建项目", exact: true }).click();
+    await expect(page.locator(".titlebar-project-name")).toHaveText("M6 Project Manager E2E", { timeout: 30_000 });
+    const isolatedV1 = page.locator('.timeline-track-head[data-track-id="V1"]');
+    await expect(isolatedV1).toBeVisible({ timeout: 30_000 });
+    await page.getByRole("button", { name: "添加轨道" }).click();
+    await page.getByRole("menuitem", { name: "视频轨道" }).click();
+    await expect(page.locator('.timeline-track-head[data-track-id="V2"]')).toHaveCSS("height", "52px");
+    await page.getByRole("button", { name: /Vortex Cut 主菜单/ }).click();
+    await page.keyboard.press("ArrowRight");
+    await page.getByRole("menuitem", { name: "项目管理" }).click();
+    const originalProject = page.locator(`.project-library-card[data-project-id="${setup.project_id}"]`);
+    await page.getByRole("searchbox", { name: "搜索项目" }).fill("M6 Multi Track E2E");
+    await originalProject.getByRole("button", { name: "打开项目" }).click();
+    await expect(page.locator(".titlebar-project-name")).toHaveText("M6 Multi Track E2E", { timeout: 30_000 });
+    await expect(page.getByRole("button", { name: /Clip .* video/ })).toHaveCount(1, { timeout: 30_000 });
+    await brandMenuButton.click();
+    await expect(page.getByRole("dialog", { name: "Vortex Cut 主菜单" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog", { name: "Vortex Cut 主菜单" })).toHaveCount(0);
+    await expect(brandMenuButton).toBeFocused();
+    await page.setViewportSize({ width: 1440, height: 900 });
+
+    // Pane switches must collapse their grid tracks, not leave empty columns behind.
+    const libraryPane = page.locator(".library-pane");
+    const libraryToggle = page.getByRole("button", { name: "媒体库面板开关" });
+    const stackBeforeLibraryClose = await page.locator(".editor-stack").boundingBox();
+    await libraryToggle.click();
+    await expect(libraryToggle).toHaveAttribute("aria-pressed", "false");
+    await expect(libraryPane).toBeHidden();
+    await expect.poll(async () => (await page.locator(".editor-stack").boundingBox())?.x ?? Infinity).toBeLessThan((stackBeforeLibraryClose?.x ?? 0) + 2);
+    await libraryToggle.click();
+    await expect(libraryToggle).toHaveAttribute("aria-pressed", "true");
+    await expect(libraryPane).toBeVisible();
+    const inspectorToggle = page.getByRole("button", { name: "属性面板开关" });
+    const propertiesPane = page.locator(".properties-pane");
+    const stageWidthBeforeClose = (await page.locator(".stage-pane").boundingBox())?.width ?? 0;
+    await inspectorToggle.click();
+    await expect(inspectorToggle).toHaveAttribute("aria-pressed", "false");
+    await expect(propertiesPane).toBeHidden();
+    await expect.poll(async () => (await page.locator(".stage-pane").boundingBox())?.width ?? 0).toBeGreaterThan(stageWidthBeforeClose + 100);
+    await inspectorToggle.click();
+    await expect(inspectorToggle).toHaveAttribute("aria-pressed", "true");
+    await expect(propertiesPane).toBeVisible();
+    const previewSettings = page.getByRole("button", { name: "预览设置" });
+    await previewSettings.click();
+    await expect(page.getByRole("dialog", { name: "预览设置" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog", { name: "预览设置" })).toHaveCount(0);
+    await expect(previewSettings).toBeFocused();
+    await previewSettings.click();
+    await page.locator(".preview-frame").click({ position: { x: 8, y: 8 } });
+    await expect(page.getByRole("dialog", { name: "预览设置" })).toHaveCount(0);
+
     const canvas = page.locator(".timeline-canvas-container canvas");
     const box = await canvas.boundingBox();
     if (!box) throw new Error("no box");
@@ -200,9 +310,45 @@ test("多轨道：新增视频/文本轨、跨轨拖动与轨道属性", async (
     }, setup.project_id);
     expect(thirdClipTrack).toBe("V3");
 
-    // 5. 轨道头只保留轨道属性，不暴露移动和删除入口。
+    // 5. 轨道头无独立上下移按钮；高度可逐轨调整，轨道顺序仍可拖动、删除走右键菜单。
     const v2Head = page.locator('.timeline-track-head[data-track-id="V2"]');
     await v2Head.hover();
+    const v2Resize = page.getByRole("separator", { name: "调整轨道 V2 高度" });
+    const v2HeightBefore = (await v2Head.boundingBox())?.height;
+    const resizeBox = await v2Resize.boundingBox();
+    if (v2HeightBefore === undefined || !resizeBox) throw new Error("V2 轨道高度控件不可见");
+    await page.mouse.move(resizeBox.x + resizeBox.width / 2, resizeBox.y + resizeBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(resizeBox.x + resizeBox.width / 2, resizeBox.y + resizeBox.height / 2 + 20, { steps: 4 });
+    await page.mouse.up();
+    await expect.poll(async () => (await v2Head.boundingBox())?.height ?? 0).toBeGreaterThan(v2HeightBefore + 12);
+    await v2Resize.dblclick();
+    await expect(v2Head).toHaveCSS("height", "52px");
+    await v2Resize.focus();
+    await page.keyboard.press("ArrowDown");
+    await expect(v2Head).toHaveCSS("height", "56px");
+    await expect.poll(() => page.evaluate((projectId: string) => {
+      const prefs = JSON.parse(localStorage.getItem(`vortex-cut.timeline.prefs.v1.project.${encodeURIComponent(projectId)}.track-heights`) ?? "{}");
+      return prefs.V2;
+    }, setup.project_id)).toBe(56);
+    await page.keyboard.press("Home");
+    await expect(v2Head).toHaveCSS("height", "52px");
+    await v2Resize.focus();
+    await page.keyboard.press("ArrowDown");
+    await expect(v2Head).toHaveCSS("height", "56px");
+    const projectSwitcher = page.getByRole("button", { name: "切换项目" });
+    await projectSwitcher.click();
+    await page.getByRole("option", { name: /M6 Project Manager E2E/ }).click();
+    await expect(page.locator(".titlebar-project-name")).toHaveText("M6 Project Manager E2E");
+    await expect(page.locator('.timeline-track-head[data-track-id="V2"]')).toHaveCSS("height", "52px");
+    await projectSwitcher.click();
+    await page.getByRole("option", { name: /M6 Multi Track E2E/ }).click();
+    await expect(page.locator(".titlebar-project-name")).toHaveText("M6 Multi Track E2E");
+    const restoredV2Head = page.locator('.timeline-track-head[data-track-id="V2"]');
+    await expect(restoredV2Head).toHaveCSS("height", "56px");
+    await page.getByRole("separator", { name: "调整轨道 V2 高度" }).focus();
+    await page.keyboard.press("Home");
+    await expect(restoredV2Head).toHaveCSS("height", "52px");
     await expect(page.getByRole("button", { name: /(?:上移|下移|删除)轨道/ })).toHaveCount(0);
     const badge = v2Head.locator(".timeline-track-badge");
     const dragTrackTo = async (targetId: string) => {
@@ -259,6 +405,10 @@ test("多轨道：新增视频/文本轨、跨轨拖动与轨道属性", async (
     await page.waitForFunction(() => Boolean(window.desktop?.getRuntime));
     await page.evaluate(() => window.desktop.getRuntime());
     await expect(page.getByText(/Core 已连接/)).toBeVisible({ timeout: 30_000 });
+    await page.getByRole("button", { name: "切换项目" }).click();
+    await page.getByRole("option", { name: /M6 Multi Track E2E/ }).click();
+    await expect(page.locator(".titlebar-project-name")).toHaveText("M6 Multi Track E2E");
+    await expect(page.getByRole("button", { name: /Clip .* video/ }).first()).toBeVisible({ timeout: 30_000 });
     await expect.poll(async () => {
       const track = await trackFlags(page, setup.project_id, "V2");
       return { hidden: track?.hidden, muted: track?.muted, solo: track?.solo };
@@ -274,7 +424,85 @@ test("多轨道：新增视频/文本轨、跨轨拖动与轨道属性", async (
     if (!canvasBox) throw new Error("no current canvas box");
     await page.mouse.click(canvasBox.x + 500, canvasBox.y + t1Y, { button: "right" });
     await page.getByRole("menuitem", { name: "取消选择" }).click();
+    // The preview must stay fitted at compact desktop sizes, and OpenFilm's
+    // anchor zoom + wheel/middle-button pan must move the actual picture.
+    await page.setViewportSize({ width: 1040, height: 760 });
+    const previewFrame = page.locator(".preview-frame");
+    await expect(previewFrame).toBeVisible();
+    await expect(page.locator(".synthetic-buffering")).toHaveCount(0, { timeout: 10_000 });
+    await expect.poll(() => page.evaluate(() => {
+      const pane = document.querySelector(".stage-pane")!.getBoundingClientRect();
+      const column = document.querySelector(".stage-column")!.getBoundingClientRect();
+      const frame = document.querySelector(".preview-frame")!.getBoundingClientRect();
+      const picture = document.querySelector(".preview-canvas")!.getBoundingClientRect();
+      return column.width <= pane.width + 1 && frame.width > 0 && picture.width <= frame.width + 1;
+    })).toBe(true);
+
+    const anchor = await page.evaluate(() => {
+      const frame = document.querySelector(".preview-frame")!;
+      const picture = document.querySelector(".preview-canvas")!;
+      const vr = frame.getBoundingClientRect(); const pr = picture.getBoundingClientRect();
+      const x = vr.left + vr.width * 0.64; const y = vr.top + vr.height * 0.46;
+      const before = { x: (x - pr.left) / pr.width, y: (y - pr.top) / pr.height, w: pr.width };
+      const wheel = new WheelEvent("wheel", { bubbles: true, cancelable: true, ctrlKey: true, deltaY: -100, clientX: x, clientY: y });
+      frame.dispatchEvent(wheel);
+      return { ...before, prevented: wheel.defaultPrevented };
+    });
+    expect(anchor.prevented).toBe(true);
+    await expect(previewFrame).toHaveClass(/zoomed/);
+    await expect.poll(() => page.locator(".preview-canvas").evaluate(el => el.getBoundingClientRect().width)).toBeGreaterThan(anchor.w * 1.1);
+    await expect(page.locator(".synthetic-buffering")).toHaveCount(0, { timeout: 10_000 });
+    const anchoredAfter = await page.evaluate(() => {
+      const frame = document.querySelector(".preview-frame")!;
+      const picture = document.querySelector(".preview-canvas")!;
+      const vr = frame.getBoundingClientRect(); const pr = picture.getBoundingClientRect();
+      return { x: (vr.left + vr.width * 0.64 - pr.left) / pr.width, y: (vr.top + vr.height * 0.46 - pr.top) / pr.height };
+    });
+    expect(anchoredAfter.x).toBeCloseTo(anchor.x, 2);
+    expect(anchoredAfter.y).toBeCloseTo(anchor.y, 2);
+
+    const beforeWheelPan = await page.locator(".preview-canvas").evaluate(el => {
+      const rect = el.getBoundingClientRect(); return { left: rect.left, top: rect.top };
+    });
+    const wheelPanPrevented = await page.evaluate(() => {
+      const frame = document.querySelector(".preview-frame")!;
+      const wheel = new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: 80 });
+      frame.dispatchEvent(wheel); return wheel.defaultPrevented;
+    });
+    expect(wheelPanPrevented).toBe(true);
+    await expect.poll(() => page.locator(".preview-canvas").evaluate(el => el.getBoundingClientRect().top)).not.toBe(beforeWheelPan.top);
+
+    const beforeMiddlePan = await page.locator(".preview-canvas").evaluate(el => el.getBoundingClientRect().left);
+    const viewBox = await previewFrame.boundingBox();
+    if (!viewBox) throw new Error("preview viewport is not measurable");
+    await page.mouse.move(viewBox.x + viewBox.width / 2, viewBox.y + viewBox.height / 2);
+    await page.mouse.down({ button: "middle" });
+    await page.mouse.move(viewBox.x + viewBox.width / 2 + 24, viewBox.y + viewBox.height / 2 + 12, { steps: 4 });
+    await page.mouse.up({ button: "middle" });
+    await expect.poll(() => page.locator(".preview-canvas").evaluate(el => el.getBoundingClientRect().left)).not.toBe(beforeMiddlePan);
+
+    await previewFrame.focus();
+    const beforeArrowPan = await page.locator(".preview-canvas").evaluate(el => el.getBoundingClientRect().left);
+    await page.keyboard.press("ArrowRight");
+    await expect.poll(() => page.locator(".preview-canvas").evaluate(el => el.getBoundingClientRect().left)).not.toBe(beforeArrowPan);
+    await page.locator(".zoom-btn").click();
+    await expect(page.getByRole("dialog", { name: "预览缩放" })).toBeVisible();
+    await page.getByRole("button", { name: /适应画布/ }).click();
+    await expect(previewFrame).not.toHaveClass(/zoomed/);
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".zoom-btn")).toBeFocused();
+
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect.poll(() => page.evaluate(() => {
+      const pane = document.querySelector(".stage-pane")!.getBoundingClientRect();
+      const column = document.querySelector(".stage-column")!.getBoundingClientRect();
+      return column.width <= pane.width + 1;
+    })).toBe(true);
     // Keep a reproducible full-window artifact for the real-media multi-track acceptance.
+    await expect(page.locator(".synthetic-buffering")).toHaveCount(0, { timeout: 10_000 });
+    // The E2E build enables diagnostic metrics that are absent from the release UI.
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.addStyleTag({ content: ".synthetic-metrics { display: none !important; }" });
     await page.screenshot({ path: join(run, "multi-track-real-media.png"), fullPage: true });
     await v2Head.click({ button: "right" });
     await page.getByRole("menuitem", { name: "删除轨道" }).click();

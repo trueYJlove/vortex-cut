@@ -236,6 +236,78 @@ function IconButton({
   );
 }
 
+/** OpenFilm-style track head resize target. Pointer dragging edits one row;
+ * keyboard arrows resize it too, and Home/double-click restore its role height. */
+function TrackResizeHandle({
+  trackId,
+  height,
+  onResize,
+}: {
+  trackId: string;
+  height: number;
+  onResize: (height: number | null, done: boolean) => void;
+}) {
+  const dragRef = useRef<{ pointerId: number; startY: number; startHeight: number; lastHeight: number } | null>(null);
+  const minimum = trackId === "V1" ? 64 : 28;
+  const clamp = (value: number) => Math.max(minimum, Math.min(160, Math.round(value)));
+  const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dragRef.current = { pointerId: event.pointerId, startY: event.clientY, startHeight: height, lastHeight: height };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const onPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const next = clamp(drag.startHeight + event.clientY - drag.startY);
+    if (next === drag.lastHeight) return;
+    drag.lastHeight = next;
+    onResize(next, false);
+  };
+  const onPointerEnd = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    dragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    onResize(drag.lastHeight, true);
+  };
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Home") {
+      event.preventDefault();
+      event.stopPropagation();
+      onResize(null, true);
+      return;
+    }
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    event.preventDefault();
+    event.stopPropagation();
+    const step = event.shiftKey ? 10 : 4;
+    onResize(clamp(height + (event.key === "ArrowDown" ? step : -step)), true);
+  };
+  return (
+    <div
+      className="timeline-track-resize"
+      role="separator"
+      aria-orientation="horizontal"
+      aria-label={`调整轨道 ${trackId} 高度`}
+      aria-valuemin={minimum}
+      aria-valuemax={160}
+      aria-valuenow={height}
+      aria-valuetext={`${height} 像素`}
+      aria-keyshortcuts="ArrowUp ArrowDown Shift+ArrowUp Shift+ArrowDown Home"
+      tabIndex={0}
+      title={`拖动调整轨道 ${trackId} 高度；方向键微调；Home 恢复默认`}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerEnd}
+      onPointerCancel={onPointerEnd}
+      onDoubleClick={event => { event.stopPropagation(); onResize(null, true); }}
+      onKeyDown={onKeyDown}
+    />
+  );
+}
+
 // ── WP-P232 预抽 sprite 装载（可测的调度体） ────────────────────────────────
 
 /** 单素材退避档（ms）：首查几乎立刻（已 ready 的素材零延迟），生成中拉到 2s。
@@ -590,7 +662,38 @@ const KIND_COLOR_VARS: Record<string, { body: string; header: string; band: stri
 
 // ── Runtime prefs (magnetic snapping) ────────────────────────────────────────
 
-function loadRuntimePrefs(): TimelineRuntimePrefs {
+const projectTrackHeightKey = (projectId: string) => `${TIMELINE_PREFS_STORAGE_KEY}.project.${encodeURIComponent(projectId)}.track-heights`;
+
+function parseTrackHeightOverrides(savedHeights: unknown): Record<string, number> {
+  const trackHeights: Record<string, number> = {};
+  if (!savedHeights || typeof savedHeights !== "object" || Array.isArray(savedHeights)) return trackHeights;
+  for (const [trackId, value] of Object.entries(savedHeights)) {
+    const minimum = trackId === "V1" ? 64 : 28;
+    if (Number.isFinite(value) && Number(value) >= minimum && Number(value) <= 160) {
+      trackHeights[trackId] = Math.round(Number(value));
+    }
+  }
+  return trackHeights;
+}
+
+function loadProjectTrackHeights(projectId: string): Record<string, number> {
+  try {
+    const raw = window.localStorage.getItem(projectTrackHeightKey(projectId));
+    return raw ? parseTrackHeightOverrides(JSON.parse(raw)) : {};
+  } catch { return {}; }
+}
+
+function persistRuntimePrefs(prefs: TimelineRuntimePrefs, projectId?: string) {
+  if (projectId) {
+    const { trackHeights, ...globalPrefs } = prefs;
+    window.localStorage.setItem(TIMELINE_PREFS_STORAGE_KEY, JSON.stringify(globalPrefs));
+    window.localStorage.setItem(projectTrackHeightKey(projectId), JSON.stringify(trackHeights));
+  } else {
+    window.localStorage.setItem(TIMELINE_PREFS_STORAGE_KEY, JSON.stringify(prefs));
+  }
+}
+
+function loadRuntimePrefs(projectId?: string): TimelineRuntimePrefs {
   try {
     const raw = window.localStorage.getItem(TIMELINE_PREFS_STORAGE_KEY);
     if (raw) {
@@ -604,11 +707,16 @@ function loadRuntimePrefs(): TimelineRuntimePrefs {
         const waveformRatio =
           typeof candidate.waveformRatio === "number" && [1, 0.6, 0.4].includes(candidate.waveformRatio)
             ? candidate.waveformRatio
-            : DEFAULT_RUNTIME_PREFS.waveformRatio;        return {
+            : DEFAULT_RUNTIME_PREFS.waveformRatio;
+        const trackHeights = projectId
+          ? loadProjectTrackHeights(projectId)
+          : parseTrackHeightOverrides(candidate.trackHeights);
+        return {
           snappingEnabled: candidate.snappingEnabled === true,
           mainTrackMagnet: candidate.mainTrackMagnet !== false,
           linkageEnabled: candidate.linkageEnabled !== false,
           trackHeight,
+          trackHeights,
           waveformRatio,
         };
       }
@@ -995,11 +1103,12 @@ function drawTimeline(
   const viewport = height > 0
     ? { left: 0, right: width, top: topY, bottom: topY + height }
     : null;
+  const rowOverscanPx = OVERSCAN_ROWS * trackRows.reduce((max, row) => Math.max(max, row.height), 0);
   const drawClipRects = viewport
-    ? filterVisibleRects(clipRects, viewport, OVERSCAN_ROWS * view.trackHeight)
+    ? filterVisibleRects(clipRects, viewport, rowOverscanPx)
     : [];
   const drawCaptionRects = viewport
-    ? filterVisibleRects(captionRects, viewport, OVERSCAN_ROWS * view.trackHeight)
+    ? filterVisibleRects(captionRects, viewport, rowOverscanPx)
     : [];
 
   const selectedIds =
@@ -1903,6 +2012,7 @@ function drawRulerStrip(
 // ── Component ────────────────────────────────────────────────────────────────
 
 export function TimelinePanel({
+  projectId,
   document,
   selection,
   setSelection,
@@ -1924,6 +2034,8 @@ export function TimelinePanel({
   meterLevels,
   playing,
 }: {
+  /** Track row heights follow OpenFilm's per-project timeline preference scope. */
+  projectId?: string;
   document?: TimelineDocument;
   selection: TimelineSelection;
   setSelection: (selection: TimelineSelection) => void;
@@ -2052,7 +2164,22 @@ export function TimelinePanel({
   // Round 5: hovered time on the ruler (faint guide + label), null when idle.
   const [rulerHoverUs, setRulerHoverUs] = useState<number | null>(null);
   // Round 4: persisted runtime prefs (magnetic snapping / 轨道高度 / 波形占比)。
-  const [prefs, setPrefs] = useState<TimelineRuntimePrefs>(loadRuntimePrefs);
+  const [prefs, setPrefs] = useState<TimelineRuntimePrefs>(() => loadRuntimePrefs(projectId));
+  useEffect(() => {
+    setPrefs(previous => ({ ...previous, trackHeights: projectId ? loadProjectTrackHeights(projectId) : {} }));
+  }, [projectId]);
+  const resizeTrack = useCallback((trackId: string, height: number | null, done: boolean) => {
+    setPrefs(previous => {
+      const trackHeights = { ...previous.trackHeights };
+      if (height === null) delete trackHeights[trackId];
+      else trackHeights[trackId] = height;
+      const next = { ...previous, trackHeights };
+      if (done) {
+        try { persistRuntimePrefs(next, projectId); } catch { /* Session only. */ }
+      }
+      return next;
+    });
+  }, [projectId]);
   const [toolbarFeedback, setToolbarFeedback] = useState("");
   const [markers, setMarkers] = useState<TimelineMarker[]>([]);
   // 轨道高度偏好同步到视图（行高固定，不随窗口压缩）。
@@ -2116,8 +2243,8 @@ export function TimelinePanel({
   // 的 padTop：面板拉高后行组跟着居中，而不是贴着标尺、底下空一大片）。
   // 传入的高度是轨道区自身高度（扣掉工具栏与标尺）。
   const trackRows = useMemo(
-    () => computeTrackRows(tracks, view.rulerHeight, view.trackHeight, Math.max(0, canvasSize.height - view.rulerHeight)),
-    [tracks, view.rulerHeight, view.trackHeight, canvasSize.height],
+    () => computeTrackRows(tracks, view.rulerHeight, view.trackHeight, Math.max(0, canvasSize.height - view.rulerHeight), prefs.trackHeights),
+    [tracks, view.rulerHeight, view.trackHeight, canvasSize.height, prefs.trackHeights],
   );
   // 内容总高（标尺 + 行组 + 行间隙 + 横向滚动条条带）；画布与左栏同步按此伸展。
   // 行组居中后首行起点会下移（padTop），所以按「末行底边」算而不是把行高相加——
@@ -2465,7 +2592,10 @@ export function TimelinePanel({
   // 容器高度=contentHeight），Canvas backing 仅覆盖 viewport+overscan
   // （纵向 2 轨），不分配等于所有轨道高度的大位图。画布在容器内绝对定位
   // （top 跟随 scrollTop），绘制时 ctx 平移 -canvasTopY 使内容坐标照常。
-  const OVERSCAN_Y_PX = 160; // 2 轨 × ~80px
+  const OVERSCAN_Y_PX = Math.max(
+    160,
+    OVERSCAN_ROWS * trackRows.reduce((max, row) => Math.max(max, row.height), 0),
+  );
   const canvasTopY = Math.max(0, scrollTop - OVERSCAN_Y_PX);
   const canvasViewportHeight = Math.min(
     contentHeight - canvasTopY,
@@ -2729,21 +2859,21 @@ export function TimelinePanel({
     setPrefs((prev) => {
       const next = { ...prev, snappingEnabled: !prev.snappingEnabled };
       try {
-        window.localStorage.setItem(TIMELINE_PREFS_STORAGE_KEY, JSON.stringify(next));
+        persistRuntimePrefs(next, projectId);
       } catch {
         // Storage unavailable — prefs stay session-only.
       }
       return next;
     });
-  }, []);
+  }, [projectId]);
 
   const toggleTimelinePref = useCallback((key: "mainTrackMagnet" | "linkageEnabled") => {
     setPrefs((prev) => {
       const next = { ...prev, [key]: !prev[key] };
-      try { window.localStorage.setItem(TIMELINE_PREFS_STORAGE_KEY, JSON.stringify(next)); } catch { /* Session only. */ }
+      try { persistRuntimePrefs(next, projectId); } catch { /* Session only. */ }
       return next;
     });
-  }, []);
+  }, [projectId]);
 
   // ── Pointer interactions (Phase 4) ─────────────────────────────────────────
 
@@ -4328,6 +4458,8 @@ export function TimelinePanel({
                 data-lane-picked={trackRows.some(r => selection?.kind === "clip" && clips.some(c => c.clip_id === selection.id && c.track_id === row.track.id)) ? "1" : undefined}
                 style={{ top: row.y, height: row.height }}
               >
+                <TrackResizeHandle trackId={row.track.id} height={row.height}
+                  onResize={(height, done) => resizeTrack(row.track.id, height, done)} />
                 {/* 2026-11-11 对齐 OpenFilm 的 LaneMark（Timeline.tsx:295）：
                    轨道头左侧是**纯文字轨号**，没有图标、没有色块底、没有方块边框。
                    原来是「图标 + 轨号」的小徽章，在 119px 的头列里占了 30px，
