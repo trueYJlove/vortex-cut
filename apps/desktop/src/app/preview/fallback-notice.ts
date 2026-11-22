@@ -12,7 +12,7 @@ export function syntheticFallbackNotice(reason: string, code: string | null): st
   if (code === "PREVIEW_IR_UNSUPPORTED") {
     const detail = reason.replace(/^PREVIEW_IR_UNSUPPORTED:?\s*/i, "").replace(/^Error invoking remote method[^:]*:\s*/i, "").trim();
     const why = detail && !/^PREVIEW_IR_UNSUPPORTED$/i.test(detail) ? `原因：${detail}。` : "";
-    return `当前时间线包含实时合成暂不支持的效果（如蒙版、抠像、倒放、图片素材等），已回退交互预览。${why}`;
+    return `当前时间线含实时合成暂不支持的内容，已回退交互预览。${why}`;
   }
   if (code === "BMFF_CODEC_UNSUPPORTED") {
     return "该视频编码暂不支持实时合成预览，已回退交互预览。";

@@ -40,7 +40,7 @@ test("多轨道：新增视频/文本轨、跨轨拖动与轨道属性", async (
     await page.evaluate(() => window.desktop.getRuntime());
     await expect(page.getByText(/Core 已连接/)).toBeVisible({ timeout: 30_000 });
     const setup = await page.evaluate(async () => {
-      const project = await window.desktop.createProject({ name: "M6 Multi Track E2E" });
+      const project = await window.desktop.createProject({ name: "M6 Multi Track E2E", canvas: { width: 1920, height: 1080, fps_num: 30, fps_den: 1 } });
       const imported = await window.desktop.importAsset({ project_id: project.project_id, kind: "video" });
       if (!imported) throw new Error("fixture import cancelled");
       const created = await window.desktop.createTimeline({ project_id: project.project_id, timeline: { schema_version: 1, source: { kind: "full_asset", asset_id: imported.asset.asset_id }, default_layout: "fit", caption_preset_id: "default-bottom" } });
@@ -166,6 +166,19 @@ test("多轨道：新增视频/文本轨、跨轨拖动与轨道属性", async (
     await expect.poll(async () => (await trackFlags(page, setup.project_id, "V2"))?.solo).toBe(true);
     await page.getByRole("button", { name: "锁定轨道 V2" }).click();
     await expect.poll(async () => (await trackFlags(page, setup.project_id, "V2"))?.locked).toBe(true);
+    const hiddenPreview = await page.evaluate(async (id: string) => {
+      const state = await window.desktop.getTimeline(id as never);
+      const request = { project_id: id as never, timeline_revision_id: state.current_revision.timeline_revision_id, output_ratio: "169" };
+      const [manifest, firstWindow] = await Promise.all([
+        window.desktop.getPreviewIrV2Manifest(request),
+        window.desktop.getPreviewIrV2Window({ ...request, start_frame: 0, frame_count: 1 }),
+      ]);
+      return { totalFrames: manifest.total_frames, firstFrame: firstWindow.frames[0] };
+    }, setup.project_id);
+    expect(hiddenPreview.totalFrames).toBeGreaterThan(0);
+    expect(hiddenPreview.firstFrame?.main).toEqual({ kind: "black" });
+    expect(hiddenPreview.firstFrame?.layers).toEqual([]);
+    await expect(page.getByRole("note", { name: "合成预览回退提示" })).toHaveCount(0, { timeout: 10_000 });
 
     // 4. 新增文本轨（验证头部按钮按类型增减）。
     await page.getByRole("button", { name: "添加轨道" }).click();
@@ -210,6 +223,13 @@ test("多轨道：新增视频/文本轨、跨轨拖动与轨道属性", async (
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "锁定轨道 V2" }).click();
     await expect.poll(async () => (await trackFlags(page, setup.project_id, "V2"))?.locked).toBe(false);
+    // Restore the display flags before capturing the final composition.
+    await page.getByRole("button", { name: "隐藏轨道 V2" }).click();
+    await expect.poll(async () => (await trackFlags(page, setup.project_id, "V2"))?.hidden).toBe(false);
+    await page.getByRole("button", { name: "静音轨道 V2" }).click();
+    await expect.poll(async () => (await trackFlags(page, setup.project_id, "V2"))?.muted).toBe(false);
+    await page.getByRole("button", { name: "独奏轨道 V2" }).click();
+    await expect.poll(async () => (await trackFlags(page, setup.project_id, "V2"))?.solo).toBe(false);
     // Park V3 after the V2 sequence so the preview shows a single active clip, not a PIP stack.
     const currentCanvas = await canvas.boundingBox();
     if (!currentCanvas) throw new Error("no current canvas box");
@@ -233,6 +253,27 @@ test("多轨道：新增视频/文本轨、跨轨拖动与轨道属性", async (
       const state = await window.desktop.getTimeline(id as never);
       return state.current_revision.document.clips.some(clip => clip.track_id === "V1");
     }, setup.project_id)).toBe(true);
+    // Reload from the persisted clean state so the acceptance screenshot starts
+    // with a fresh preview session and no active transform selection.
+    await page.reload();
+    await page.waitForFunction(() => Boolean(window.desktop?.getRuntime));
+    await page.evaluate(() => window.desktop.getRuntime());
+    await expect(page.getByText(/Core 已连接/)).toBeVisible({ timeout: 30_000 });
+    await expect.poll(async () => {
+      const track = await trackFlags(page, setup.project_id, "V2");
+      return { hidden: track?.hidden, muted: track?.muted, solo: track?.solo };
+    }).toEqual({ hidden: false, muted: false, solo: false });
+    const previewFallback = page.getByRole("note", { name: "合成预览回退提示" });
+    await expect(page.locator(".synthetic-preview")).toBeVisible({ timeout: 30_000 });
+    await expect(previewFallback).toHaveCount(0, { timeout: 30_000 });
+    await expect(page.locator(".synthetic-loading")).toHaveCount(0, { timeout: 30_000 });
+    // Clear the transform handles so the acceptance frame shows the composition
+    // cleanly, as a viewer would see it rather than an active geometry edit.
+    const t1Y = await rowDragY("T1");
+    const canvasBox = await canvas.boundingBox();
+    if (!canvasBox) throw new Error("no current canvas box");
+    await page.mouse.click(canvasBox.x + 500, canvasBox.y + t1Y, { button: "right" });
+    await page.getByRole("menuitem", { name: "取消选择" }).click();
     // Keep a reproducible full-window artifact for the real-media multi-track acceptance.
     await page.screenshot({ path: join(run, "multi-track-real-media.png"), fullPage: true });
     await v2Head.click({ button: "right" });

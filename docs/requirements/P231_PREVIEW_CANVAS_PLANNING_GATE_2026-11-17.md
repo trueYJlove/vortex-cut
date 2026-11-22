@@ -122,6 +122,7 @@
 | **A8** | contracts 放宽 | isTimelineClip 接受任意 video 轨上的图片/视频片段；音频仍限 A1 | contracts.test.ts |
 | **A9** | IR 缓存失效 | IR_PROJECTOR_VERSION = 6，旧缓存条目自动不采信 | pytest（ir_disk_cache） |
 | **A10** | 回归锁 | 全量 Python + Desktop 测试通过；P232 缩略图、P230 时间线 UI 不回归 | pnpm test:python + npx vitest run |
+| **A11（2026-11-22 增补）** | 隐藏视觉轨预览 | 隐藏层不进入 IR 帧 layers；仍保留时间线尾长；隐藏片段上的倒放等不可见效果不触发整条预览回退 | Core IR 单测 + Electron E2E |
 
 ---
 
@@ -153,5 +154,5 @@
 ## 6. 门禁状态与关门路径
 
 - **Planning Gate（本门）**：起草完成 → 独立评审（LiuKeAi）→ 用户批准 → Design Gate 细化切片 schema/DDL/端点 → Implementation → Verification Gate（对照 §3 逐项核验 + STATUS §4 登记/核销）。
-- **关门条件**：§3 A1–A10 全部有证据 + 负向对照已证伪 + pnpm test:python 与 npx vitest run 全绿 + 真机截图（黑底 + 全轨盒子 + z 序）。
+- **关门条件**：§3 A1–A11 全部有证据 + 负向对照已证伪 + pnpm test:python 与 npx vitest run 全绿 + 真机截图（黑底 + 全轨盒子 + z 序）。
 - **Rule 3 登记**：本门作为**一行工作包**登记 STATUS §4（P231）；风险对策 R1–R6 **逐条独立登记**。

@@ -208,6 +208,23 @@ def test_z_order_ignores_clip_insertion_order() -> None:
         assert ir["frames"][0]["main"]["clip_id"] == "v1"
 
 
+def test_hidden_visual_track_is_omitted_without_shortening_timeline() -> None:
+    # OpenFilm parity: hiding a track affects rendered pixels, not timeline time.
+    # Unsupported effects on an invisible segment must not force whole-preview fallback.
+    plan = _plan([
+        _segment("visible", 0, 2 * US, 0, 2 * US, track_index=1),
+        _segment("hidden", 0, 4 * US, 0, 4 * US, asset_idx=1,
+                 track_id="V2", track_index=0, track_hidden=True, reverse_playback=True),
+    ])
+    ir = project_preview_ir(plan, _probe(plan))
+
+    assert ir["canvas"]["duration_frames"] == 120
+    assert [layer["clip_id"] for layer in ir["frames"][0]["layers"]] == ["visible"]
+    assert ir["frames"][0]["main"]["clip_id"] == "visible"
+    assert ir["frames"][60]["main"] == {"kind": "black"}
+    assert ir["frames"][61]["layers"] == []
+
+
 def test_same_track_transition_not_stolen_by_other_track() -> None:
     # P231 A3/Q5 负向对照：V2 段 b 与同轨后继 c 相邻可转场；
     # 另一轨 V1 段 a 插在中间也不得把后继抢走。

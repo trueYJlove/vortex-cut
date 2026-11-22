@@ -46,8 +46,9 @@ IR_SCHEMA = "preview-ir-v1"
 # 覆盖轨叠加」）；v3（2026-09-17 v0.4）：覆盖轨 mask/keying 重入（overlay 条目携带 effects）。
 # v7（P231 复核修复）：统一盒模型真正落地——跨轨重叠不再串成 concat 时间链、
 # z 序显式由 tracks 数组序决定、转场仅同轨邻接、兼容层不再按时间序首段分裂。
+# v8（P231 OpenFilm parity follow-up）：隐藏视觉轨不触发整条预览回退；隐藏层不输出像素，仍保留时间线长度。
 # v6 缓存条目包含错误的时长与层顺序，必须整体失效。
-IR_PROJECTOR_VERSION = 7
+IR_PROJECTOR_VERSION = 8
 MAX_IR_FRAMES = 27_000  # 15 分钟 @30fps（O2 体量护栏）
 
 ALLOWED_KEYFRAME_PROPS = {"position", "opacity", "scale", "rotate"}
@@ -120,6 +121,10 @@ def _split_overlapped_inputs(
 def _validate_whitelist(plan: dict[str, Any]) -> None:
     for segment in plan["segments"]:
         clip_id = segment["clip_id"]
+        # 隐藏轨在预览里不渲染，子集外效果也不应迫使整条时间线回退；
+        # 时间长度仍由全部视觉段计算，故隐藏内容只变黑、不改变时间轴。
+        if segment.get("track_hidden"):
+            continue
         # P231：mask/keying 全视觉段放行（统一盒模型后主轨/覆盖轨同语义，
         # 合成器 shader 逐像素算 alpha；权威端 _pip_overlay_chain/visual_chain
         # 同构消费）。v0.4 曾按 track_id == "V1" 拒绝主轨——该门控已随
@@ -128,8 +133,6 @@ def _validate_whitelist(plan: dict[str, Any]) -> None:
             raise _fail(clip_id, "reframe（重构图）")
         if segment.get("reverse_playback"):
             raise _fail(clip_id, "reverse_playback（倒放）")
-        if segment.get("track_hidden"):
-            raise _fail(clip_id, "track_hidden（隐藏轨）")
         # 2026-11-10：图片素材放行实时合成。
         # 依据：桌面渲染侧早已具备静图通路（preview-session 为 image 建独立 rig、
         # 不占解码保温、纹理按 ffprobe 给出的 width/height 上传），此前仅因
@@ -679,8 +682,8 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
             "layout": segment.get("layout", "fit"),
         }
 
-    # P231 输出时长：全部可见视觉段（统一盒模型后无主轨/覆盖轨之分）的
-    # 输出窗口终点与 A1 纯音频窗口终点取大——音频长于画面时以黑场延长
+    # P231 输出时长：全部视觉段（包括隐藏段；隐藏只影响可见像素，不缩短
+    # 时间线）与 A1 纯音频窗口终点取大——音频长于画面时以黑场延长
     # 输出（前端合成器对越界帧渲染黑场，音频照常调度）。空时间线（无视觉段
     # 无音频段）total_us = 0。旧「主轨空时取覆盖轨终点」特判已随二分取消。
     audio_tail_end = max(
@@ -689,7 +692,7 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
         default=0,
     )
     visual_tail_end = max(
-        (_output_window(seg)[1] for _idx, seg in all_visual
+        (_output_window(seg)[1] for seg in segments
          if seg["asset_kind"] != "audio"),
         default=0,
     )

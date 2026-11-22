@@ -13,9 +13,10 @@ describe("syntheticFallbackNotice", () => {
     expect(notice).not.toContain("remote method");
   });
 
-  it("UNSUPPORTED 映射为效果子集提示（保留既有语义）", () => {
+  it("UNSUPPORTED 映射为内容子集提示（不列出已支持效果）", () => {
     const notice = syntheticFallbackNotice("段 clip_x: mask（蒙版）超出实时合成子集", "PREVIEW_IR_UNSUPPORTED");
-    expect(notice).toContain("暂不支持的效果");
+    expect(notice).toContain("实时合成暂不支持的内容");
+    expect(notice).not.toContain("图片素材");
     expect(notice).toContain("已回退交互预览");
   });
 
