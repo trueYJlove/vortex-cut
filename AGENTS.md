@@ -168,13 +168,43 @@ When superseded, add a `已被 X 取代` banner at the top **and** list the docu
 If you are about to write "当前处于…", "最新版本是…", or "尚未实现…" outside `docs/STATUS.md`,
 stop and link to STATUS.md instead. Restating state is the origin of drift.
 
+### Rule 6 — Single living doc per module (consolidate, don't multiply)
+
+Before creating a new `.md` file under `docs/requirements/` or `docs/design/`, check
+`docs/requirements/README.md` and `docs/design/README.md` to see whether an active living spec
+already covers that subsystem. Extend the existing spec with a new numbered section instead of
+creating a parallel file; only split when a single document becomes unwieldy (and register the
+new file in its directory `README.md` in the same change).
+
+### Rule 7 — Close-gate cleanup (Definition of Done)
+
+Closing a gate or work package in `docs/STATUS.md` is not complete until its doc footprint is cleaned up:
+- Merge any durable requirements, architecture, or contract decisions into the module's living spec;
+- Move closed rows out of `docs/STATUS.md` §4 into `docs/STATUS_ARCHIVE.md`;
+- Move records that must remain addressable beyond Git history (referenced by code comments or open
+  commitments) to `docs/archive/` (marking superseded docs per Rule 4 and `docs/STATUS.md` §6), and
+  delete transient validation logs, round reports, handoffs, debug screenshots, and scratch spikes
+  once merged.
+
+### Rule 8 — Active directories stay lean, indexed, and bounded
+
+Every active `.md` file directly under `docs/requirements/` or `docs/design/` must be listed in
+that directory's `README.md`. Each active directory is capped at **20** top-level spec files
+(excluding `README.md`), `docs/STATUS.md` stays under **100 KiB** with zero closed (`✅`) rows in
+§4, and process-sprawl filenames (`*_IMPLEMENTATION_*`, `*_VALIDATION_*`, `*_HANDOFF*`, `*_ROUND*`)
+are forbidden outside `docs/archive/`.
+
 ### Enforcement
 
-- **Rule 2** — enforced by test `services/core/tests/unit/test_status_doc_consistency.py`,
-  which the CI workflow `.github/workflows/ci.yml` executes through the root `pnpm test:python`
-  script (`uv run --locked --extra dev pytest services/core/tests/unit`), so the check now fires
-  without anyone remembering to run it. Run it directly with:
-  `uv run --locked --extra dev pytest services/core/tests/unit/test_status_doc_consistency.py`.
+- **Rule 2 & Rules 6–8** — enforced by `services/core/tests/unit/test_status_doc_consistency.py`,
+  which checks STATUS §1 facts against code, scans live docs (excluding `docs/archive/`) for
+  blacklisted stale claims, verifies Markdown relative links, enforces `< 100 KiB` and zero `✅`
+  rows in `STATUS.md` §4, requires every active doc to be indexed in its directory `README.md`,
+  caps `docs/requirements/` and `docs/design/` at `<= 20` active specs each, and rejects process
+  sprawl filenames in active directories. `services/core/tests/unit/test_keyframe_wording.py`
+  enforces W3.3 wording consistency across `docs/**/W3_3_*.md`. CI executes both via `pnpm test:python`
+  (`uv run --locked --extra dev pytest services/core/tests/unit`). Run directly with:
+  `uv run --locked --extra dev pytest services/core/tests/unit/test_status_doc_consistency.py services/core/tests/unit/test_keyframe_wording.py`.
 - **Python unit tests** — `pnpm run ci` covers lint / typecheck / Desktop tests / **Python unit
   tests** / build; `pnpm run ci:release` adds the Electron e2e suite.
   **必须写 `pnpm run ci`，不能写 `pnpm ci`**：`ci` 是 pnpm 的内置命令（`ERR_PNPM_CI_NOT_IMPLEMENTED`），

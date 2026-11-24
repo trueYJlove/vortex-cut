@@ -2,8 +2,8 @@
 
 > 验收人：LiuKeAi（独立，未参与任何探针实现；全部结论以本人复算为准）
 > 日期：2026-09-05
-> 验收对象：[M3-0 技术验证报告](../../docs/design/records/STAGE_M3_0_TECH_VALIDATION_REPORT.md) + [ADR-1](../../docs/design/STAGE_M3_0_ADR_1_P2_GATE.md) + [IR 契约冻结草案 v0.1](../../docs/design/STAGE_M3_0_IR_CONTRACT_DRAFT.md) + [M3 立项建议草案](../../docs/design/STAGE_M3_0_M3_INITIATION_RECOMMENDATION.md)
-> 依据：[验收包 §1.4 八项检查清单](../../docs/design/records/STAGE_M3_0_M3_0_3_ACCEPTANCE_PACKAGE.md)
+> 验收对象：`STAGE_M3_0_TECH_VALIDATION_REPORT.md` + `STAGE_M3_0_ADR_1_P2_GATE.md` + [IR 契约冻结草案 v0.1](../../../docs/archive/STAGE_M3_0_IR_CONTRACT_DRAFT.md) + `STAGE_M3_0_M3_INITIATION_RECOMMENDATION.md`
+> 依据：`STAGE_M3_0_M3_0_3_ACCEPTANCE_PACKAGE.md` §1.4 八项检查清单（已随 M3 收口归档于 Git 历史）
 > 复算工件：本目录（check1~check5 脚本与结果 JSON、p2_comparison_recompute.json、step0_recompute.json、ir_regen2.json、caption_presets.json、p1_60hz_witness/）
 > 复算环境：仓库 `.venv`（Python 3.13 + numpy）+ `resources/ffmpeg/win-x64/ffmpeg.exe`（与 baseline_manifest 记录同一二进制）；运行基线 `uiux-polish-round3` @ `fd6a407`（dd82033 之后）
 

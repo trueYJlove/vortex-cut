@@ -166,7 +166,7 @@ vision **335 MiB** + text 同量级 ⇒ 合计数百 MB，须下载（受信清�
 - **Planning Gate：已批准**（用户 2026-10-18「同意」）；
 - **D1–D5 全部裁决**，无阻塞项；
 - **本门已收口（2026-10-19）**，实施记录见
-  [`../design/records/W3_1_SEMANTIC_SEARCH_IMPLEMENTATION_2026-10-19.md`](../design/records/W3_1_SEMANTIC_SEARCH_IMPLEMENTATION_2026-10-19.md)
+  [`../archive/W3_1_SEMANTIC_SEARCH_IMPLEMENTATION_2026-10-19.md`](../archive/W3_1_SEMANTIC_SEARCH_IMPLEMENTATION_2026-10-19.md)
   ——**含门 §3 A1–A8 的验收交叉核对表**（AGENTS.md Rule 3 关门要求）；
 - **A1–A7 全部通过**；**A8 见实施记录 §4**：语义有效性已由 v2（品类词，S5 = 1.000）
   与 v3（句子级，T5 打乱 0/58）两轮真实素材评测证明，但 **C2 数值门限在总纲中从未定义**，

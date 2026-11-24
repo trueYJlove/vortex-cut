@@ -61,9 +61,9 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[4]
 DOCS = REPO / "docs"
 
-# 扫描范围：glob 全量。**不要**换成写死的文件名列表——那会让将来新增的
-# 实施记录自动逃逸，而本检查的价值全在"覆盖全量"。
-SCAN_GLOB = "W3_3_*.md"
+# 扫描范围：递归 glob 全量（覆盖 docs/requirements 与 docs/archive 等子目录）。
+# **不要**换成写死的文件名列表——那会让将来新增的实施记录自动逃逸。
+SCAN_GLOB = "**/W3_3_*.md"
 
 # 优越性表述。刻意做成一个显式枚举而不是宽泛的"更"前缀：
 # 那会误伤"更多/更快/更少"等中性的工程描述（比如"更多帧被移除"），
@@ -155,7 +155,9 @@ def test_scan_covers_all_w3_3_documents() -> None:
     """
     paths = scan_paths()
     names = {path.name for path in paths}
-    assert len(paths) >= 8, f"扫描集过小，疑似 glob 写错：{sorted(names)}"
+    # S1a–S5a 分片记录已归并入 W3_3_IMPLEMENTATION_SUMMARY_2026-10-21.md，
+    # 当前仍覆盖 Planning Gate、Design Gate 与实施汇总文档（>= 4）。
+    assert len(paths) >= 4, f"扫描集过小，疑似 glob 写错：{sorted(names)}"
     assert any("PLANNING_GATE" in name for name in names), names
     assert any("DESIGN_GATE" in name for name in names), names
     assert any("IMPLEMENTATION" in name for name in names), names
@@ -200,7 +202,7 @@ def test_a9_criterion_line_is_exempt_but_not_by_filename() -> None:
     同文件里任意一行写"质量提升明显"都会逃逸——第二段断言正好
     检验同一文件内的裸断言仍会被抓。
     """
-    gate = DOCS / "W3_3_KEYFRAME_UNDERSTANDING_PLANNING_GATE_2026-10-21.md"
+    gate = DOCS / "requirements/W3_3_KEYFRAME_UNDERSTANDING_PLANNING_GATE_2026-10-21.md"
     text = gate.read_text(encoding="utf-8")
     a9_line = next(
         line for line in text.splitlines() if line.startswith("| **A9**")

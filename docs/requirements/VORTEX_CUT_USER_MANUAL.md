@@ -3,7 +3,7 @@
 > 版本：0.0.1  
 > 适用对象：第一次使用 Vortex Cut 的普通用户  
 > 适用范围：本地视频剪辑、素材管理、本地转录、字幕编辑、预览与导出  
-> 当前文档状态：面向当前桌面端实现的操作说明
+> 当前文档状态：面向桌面端实现的操作说明；**2026-11 桌面界面已推进 OpenFilm 风格视觉与交互重构（`P225–P235`），第 4 节早期界面分区描述正在随新 UI 同步更新。最新已交付能力边界统一见 [`../STATUS.md`](../STATUS.md) §3。**
 
 ## 1. 你可以用 Vortex Cut 做什么
 
@@ -79,14 +79,12 @@ Vortex Cut 会在项目中登记素材。导入同一素材第二次时，软件
 2. 执行：
 
 ```powershell
-cd C:\DataFolder\codes\AI-Vidio
+cd <仓库根目录>
 pnpm dev
 ```
 
 3. 等待 Vortex Cut 窗口打开；
 4. 保持启动它的 PowerShell 窗口运行。
-
-当前开发窗口顶部如果暂时显示 `AIVideo Studio`，它仍然是同一套 Vortex Cut 桌面应用的旧内部显示标签，不影响本手册中的操作。
 
 ### 3.2 启动注意事项
 
@@ -579,7 +577,7 @@ pnpm dev
 5. 只执行一次：
 
 ```powershell
-cd C:\DataFolder\codes\AI-Vidio
+cd <仓库根目录>
 pnpm dev
 ```
 

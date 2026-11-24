@@ -80,22 +80,31 @@ def _status_facts() -> dict:
 
 
 def _historical_docs() -> set[Path]:
-    """STATUS.md §6 声明的历史文档（自动豁免黑名单）。"""
+    """STATUS.md §6 表格第一列声明的历史文档（自动豁免黑名单）。"""
     text = _status_text()
     marker = "## 6."
     assert marker in text, "STATUS.md 缺少 §6 历史状态文档索引"
     section = text.split(marker, 1)[1].split("## 7.", 1)[0]
-    paths = re.findall(r"`([^`]+\.md)`", section)
-    return {(REPO / p).resolve() for p in paths}
+    paths: set[Path] = set()
+    for line in section.splitlines():
+        match = re.match(r"^\|\s*`([^`]+\.md)`\s*\|", line.strip())
+        if match:
+            paths.add((REPO / match.group(1)).resolve())
+    return paths
 
 
 def _live_markdown() -> list[Path]:
     excluded = _historical_docs() | {STATUS_DOC.resolve()}
+    archive_root = (REPO / "docs/archive").resolve()
     found: dict[Path, None] = {}
     for pattern in _SCAN_GLOBS:
         for path in REPO.glob(pattern):
             resolved = path.resolve()
-            if resolved in excluded or not path.is_file():
+            if (
+                resolved in excluded
+                or archive_root in resolved.parents
+                or not path.is_file()
+            ):
                 continue
             found[resolved] = None
     return sorted(found)
@@ -256,3 +265,143 @@ def test_historical_docs_actually_exist() -> None:
 def test_status_doc_keeps_required_sections(anchor: str) -> None:
     """状态源的结构本身也是契约——缺节会让纪律无从落地。"""
     assert anchor in _status_text(), f"docs/STATUS.md 缺少必需章节：{anchor}"
+
+
+def test_live_docs_are_not_exempted_by_section6() -> None:
+    """活文档不得因 §6 脚注或交叉引用被误加入历史豁免集。"""
+    historical = _historical_docs()
+    live_docs = [
+        "README.md",
+        "ARCHITECTURE.md",
+        "docs/requirements/BRAND_BASELINE.md",
+        "docs/requirements/M2_ROADMAP.md",
+        "docs/requirements/VORTEX_CUT_USER_MANUAL.md",
+        "docs/design/AI_CAPABILITY_MASTER_PLAN_2026-09-24.md",
+    ]
+    exempted = [p for p in live_docs if (REPO / p).resolve() in historical]
+    assert not exempted, f"以下活文档被 §6 误豁免：{exempted}"
+
+
+def test_status_doc_stays_concise_and_open_only() -> None:
+    """STATUS.md 保持精简，且 §4 活性表不得滞留已核销（✅）条目。"""
+    size_bytes = STATUS_DOC.stat().st_size
+    assert size_bytes < 100 * 1024, (
+        f"docs/STATUS.md 当前大小 {size_bytes} 字节（>= 100 KiB），"
+        "请将已闭环行迁入 docs/STATUS_ARCHIVE.md 或将长篇排查日志抽离至 docs/archive/"
+    )
+    archive_doc = REPO / "docs/STATUS_ARCHIVE.md"
+    assert archive_doc.is_file(), f"缺少历史承诺归档文件：{archive_doc}"
+
+    text = _status_text()
+    sec4 = text.split("## 4.", 1)[1].split("## 5.", 1)[0]
+    closed_in_open: list[str] = []
+    for lineno, line in enumerate(sec4.splitlines(), start=1):
+        if not line.startswith("| "):
+            continue
+        if line.startswith("| # ") or line.startswith("|---"):
+            continue
+        cells = [c.strip() for c in re.split(r"(?<!\\)\|", line.strip().strip("|"))]
+        if len(cells) >= 5 and cells[-1].lstrip("*").startswith("✅"):
+            closed_in_open.append(f"§4 行 {lineno}: {cells[0]}")
+    assert not closed_in_open, (
+        "docs/STATUS.md §4 存在已核销（✅）行，请迁入 docs/STATUS_ARCHIVE.md：\n  "
+        + "\n  ".join(closed_in_open)
+    )
+
+
+def test_markdown_relative_links_exist() -> None:
+    """扫描根级、docs/ 与 evidence/ 下的 Markdown，防止相对 .md/目录链接失效。"""
+    link_re = re.compile(r"(?<!!)\[[^\]]*\]\(([^)\s]+)")
+    broken: list[str] = []
+    seen_files: set[Path] = set()
+    for pattern in ("*.md", "docs/**/*.md", "evidence/**/*.md"):
+        for path in sorted(REPO.glob(pattern)):
+            resolved_src = path.resolve()
+            if resolved_src in seen_files or not path.is_file():
+                continue
+            if any(part in {"node_modules", ".venv", ".git"} for part in path.parts):
+                continue
+            seen_files.add(resolved_src)
+            text = path.read_text(encoding="utf-8", errors="replace")
+            in_fence = False
+            for lineno, line in enumerate(text.splitlines(), start=1):
+                stripped = line.lstrip()
+                if stripped.startswith(("```", "~~~")):
+                    in_fence = not in_fence
+                    continue
+                if in_fence:
+                    continue
+                cleaned = re.sub(r"`[^`]*`", "", line)
+                for match in link_re.finditer(cleaned):
+                    raw_target = match.group(1)
+                    if raw_target.startswith((
+                        "http://",
+                        "https://",
+                        "mailto:",
+                        "file:",
+                        "conversation://",
+                        "#",
+                    )):
+                        continue
+                    target = raw_target.split("#", 1)[0]
+                    if not target:
+                        continue
+                    if not (target.endswith(".md") or target.endswith("/")):
+                        continue
+                    resolved_tgt = (path.parent / target).resolve()
+                    if not resolved_tgt.exists():
+                        rel_src = path.relative_to(REPO)
+                        broken.append(f"{rel_src}:{lineno} -> {raw_target}")
+    assert not broken, "存在失效的相对 Markdown 链接：\n  " + "\n  ".join(broken)
+
+
+_ACTIVE_SPEC_DIRS = ("docs/requirements", "docs/design")
+_MAX_ACTIVE_SPECS_PER_DIR = 20
+_PROCESS_SPRAWL_TOKENS = ("_IMPLEMENTATION_", "_VALIDATION_", "_HANDOFF", "_ROUND")
+
+
+def test_active_docs_are_all_indexed() -> None:
+    """活跃需求/设计目录下的所有顶层 Markdown 都必须在该目录 README.md 中建立索引。"""
+    missing: list[str] = []
+    for rel_dir in _ACTIVE_SPEC_DIRS:
+        spec_dir = REPO / rel_dir
+        readme = spec_dir / "README.md"
+        assert readme.is_file(), f"缺少目录索引文件：{rel_dir}/README.md"
+        readme_text = readme.read_text(encoding="utf-8")
+        for md_path in sorted(spec_dir.glob("*.md")):
+            if md_path.name == "README.md":
+                continue
+            if md_path.name not in readme_text:
+                missing.append(f"{rel_dir}/{md_path.name}")
+    assert not missing, (
+        "以下活跃文档未在对应目录 README.md 中登记索引（违反 AGENTS.md Rule 8）：\n  "
+        + "\n  ".join(missing)
+    )
+
+
+def test_active_doc_counts_within_budget() -> None:
+    """限制活跃需求/设计目录的顶层规格数量（<= 20），防止文档再次碎片化膨胀。"""
+    over: list[str] = []
+    for rel_dir in _ACTIVE_SPEC_DIRS:
+        spec_dir = REPO / rel_dir
+        specs = [p for p in spec_dir.glob("*.md") if p.name != "README.md"]
+        if len(specs) > _MAX_ACTIVE_SPECS_PER_DIR:
+            over.append(f"{rel_dir}: {len(specs)} > {_MAX_ACTIVE_SPECS_PER_DIR}")
+    assert not over, (
+        "活跃文档目录超出上限，请按 AGENTS.md Rule 6 合并同类文档或按 Rule 7 清理归档：\n  "
+        + "\n  ".join(over)
+    )
+
+
+def test_no_process_sprawl_in_active_dirs() -> None:
+    """活跃需求/设计目录不得堆放实施/验收/交接/轮次流水过程文档。"""
+    violations: list[str] = []
+    for rel_dir in _ACTIVE_SPEC_DIRS:
+        spec_dir = REPO / rel_dir
+        for md_path in sorted(spec_dir.glob("*.md")):
+            if any(token in md_path.name for token in _PROCESS_SPRAWL_TOKENS):
+                violations.append(f"{rel_dir}/{md_path.name}")
+    assert not violations, (
+        "活跃目录存在过程流水文件，应合并后删除或迁入 docs/archive/（AGENTS.md Rule 7/8）：\n  "
+        + "\n  ".join(violations)
+    )

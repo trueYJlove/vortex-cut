@@ -1,9 +1,9 @@
-# AI 视频生产工作台架构设计
+# Vortex Cut 系统架构设计
 
-> 角色：LiuWei（架构师）  
-> 状态：架构基线 v1.0  
-> 日期：2026-08-07  
-> 首发平台：Windows 10/11 64 位
+> 角色：LiuWei（架构师）
+> 状态：架构基线 v1.0（模块边界、进程模型与设计原则）
+> 首发日期：2026-08-07（首发平台：Windows 10/11 64 位）
+> **当前实现阶段、能力边界与未闭环工作统一见 [`docs/STATUS.md`](docs/STATUS.md)，本文件不单独声明最新交付状态。**
 
 ## 1. 架构结论
 
@@ -37,6 +37,8 @@
 5. 保留未来迁移到服务器部署、Web 访问和多人协作的演进路径。
 
 ### 2.2 第一阶段不做
+
+> 以下为 Stage 0–1 起步期范围约束；多轨时间线编辑、OpenFilm 风格界面对齐等后续已交付能力见 [`docs/STATUS.md`](docs/STATUS.md) §3。
 
 - 不复刻 Premiere、DaVinci Resolve 或剪映的完整专业时间线。
 - 不做完全无人值守的开放题材自动发布。
@@ -120,7 +122,7 @@ Electron 不直接访问 SQLite，不拼接 FFmpeg 命令，也不包含创作�
 
 ### 5.3 Python 核心服务
 
-建议采用 Python 3.12、FastAPI、SQLAlchemy 2、Alembic 和 Pydantic。职责包括：
+采用 Python 3.12–3.13、FastAPI、Pydantic、Uvicorn、标准库 `sqlite3`（版本化 `MIGRATIONS`）、`faster-whisper`、`onnxruntime` 与 PyAV / FFmpeg。职责包括：
 
 - 领域规则和项目生命周期。
 - 素材注册、分析、代理和资产关系。
@@ -526,7 +528,7 @@ docs/
 
 ### 阶段 0：技术验证（1-2 周）
 
-实施依据：[阶段 0 技术验证详细设计](docs/design/STAGE0_DETAILED_DESIGN.md)
+实施依据：Stage 0 历史详细设计（已收口，见 [`docs/STATUS.md`](docs/STATUS.md) §2 与 Git 历史）
 
 - Electron 启动、认证和关闭 Python Sidecar。
 - FFprobe 读取常见游戏录像，FFmpeg 生成代理和竖屏样片。
@@ -537,7 +539,7 @@ docs/
 
 ### 阶段 1：可用剪辑基础（4-6 周）
 
-实施依据：[阶段 1 可用剪辑基础详细设计](docs/design/STAGE1_DETAILED_DESIGN.md)
+实施依据：Stage 1 历史详细设计（已收口，见 [`docs/STATUS.md`](docs/STATUS.md) §2 与 Git 历史）
 
 - 项目、素材、SQLite 迁移和本地任务系统。
 - 代理、缩略图、波形、转录和场景切分。

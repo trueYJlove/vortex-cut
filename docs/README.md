@@ -1,25 +1,30 @@
 # 文档入口
 
-项目文档按两个主题查找：**需求**与**设计**。除 [STATUS.md](STATUS.md) 外，项目文档均归入这两个目录；当前状态只看 STATUS.md。可追溯的实验材料见仓库根目录的 `evidence/`。
+项目文档按**需求（`requirements/`）**与**设计（`design/`）**两类活跃目录组织；当前状态统一见 [`STATUS.md`](STATUS.md)，已核销台账归档见 [`STATUS_ARCHIVE.md`](STATUS_ARCHIVE.md)，只读历史规范与验收汇总见 [`archive/`](archive/README.md)，实验与测量依据见根目录 [`evidence/`](../evidence/README.md)。
 
 ## 新读者阅读顺序
 
-1. 仓库根目录的 [README](../README.md)：产品介绍、开发环境和常用命令。
-2. [STATUS.md](STATUS.md)：当前工作线、能力边界和未关闭承诺。先看 §2–§3；§4 未闭环项在前，已核销历史行折叠在表格下方。
-3. [系统架构](../ARCHITECTURE.md)：进程边界、核心模块和数据流。
-4. [用户手册](requirements/VORTEX_CUT_USER_MANUAL.md)：从用户视角了解编辑器操作。
-5. 按当前要做的工作再看[需求索引](requirements/README.md)和[设计索引](design/README.md)。
+1. 仓库根目录 [`README.md`](../README.md)：产品介绍、开发环境与常用命令。
+2. [`STATUS.md`](STATUS.md)：唯一当前状态源（工作线、已交付能力边界、未闭环承诺与待办）。
+3. [`ARCHITECTURE.md`](../ARCHITECTURE.md)：进程边界、核心模块、数据模型与架构原则。
+4. [`VORTEX_CUT_USER_MANUAL.md`](requirements/VORTEX_CUT_USER_MANUAL.md)：从用户视角了解编辑器操作。
+5. 按工作域查找下表专题地图，或进入 [`requirements/`](requirements/README.md) 与 [`design/`](design/README.md) 索引。
 
-通常不需要从头阅读阶段记录。只有在追溯某个决策、复核一次验收或复跑测量时，才进入[设计记录](design/records/README.md)或 `evidence/`。
+## 专题地图（Topic Map）
 
-## 两类文档
+| 主题域 | 需求规格 | 设计 / 契约 / 裁决 | 历史记录与证据 |
+|---|---|---|---|
+| **编辑核心与剪辑语法** | [M2 路线图](requirements/M2_ROADMAP.md)、[Wave 1 剪辑语法与手法](requirements/WAVE1_EDITING_TOOLS_SPEC.md)、[Wave 1 手测清单](requirements/WAVE1_MANUAL_CHECKLIST_2026-10-10.md)、[质量评测门](requirements/QUALITY_EVAL_PLANNING_GATE_2026-09-24.md) | [M2 多轨/自由定位/转场/关键帧/字幕](design/README.md#编辑核心与-m2-设计) | [Wave 1 自动化取证](archive/WAVE1_L3_AUTOMATION_EVIDENCE_2026-10-10.md)、`evidence/quality_eval/` |
+| **桌面 UI、OpenFilm 对齐与工作区** | [用户手册](requirements/VORTEX_CUT_USER_MANUAL.md)、[品牌基线](requirements/BRAND_BASELINE.md) | [P236 解耦与 Agent 工作区](design/TIMELINE_DATA_DECOUPLING_AND_AGENT_WORKSPACE_PLAN_2026-11-24.md)、[P235 OpenFilm 对齐](design/P235_OPENFILM_TIMELINE_PARITY_PLAN.md)、[界面原型](design/ui-mockups/) | [UI 改造汇总](archive/EDITOR_UI_REFRESH_2026-11_SUMMARY.md)、[P231/P233/P234 归档](archive/README.md)、`evidence/p235-openfilm-timeline-parity-*` |
+| **预览引擎、解码与性能** | [P231 画布模型](requirements/P231_PREVIEW_CANVAS_PLANNING_GATE_2026-11-17.md)、[P232 缩略图](requirements/FILMSTRIP_PRESHOOT_PLANNING_GATE_2026-11-17.md)、[预览流畅度](requirements/PREVIEW_SMOOTHNESS_PLANNING_GATE_2026-11-17.md) | [M3 IR 契约归档](archive/STAGE_M3_0_IR_CONTRACT_DRAFT.md)、[B13 驻留门归档](archive/PERFORMANCE_B13_RESIDENCY_PLANNING_GATE_2026-09-11.md) | [未闭环排查流水](archive/OPEN_ISSUES_DETAILED_LOG_2026-11.md)、[性能与 HEVC 汇总](archive/README.md)、[`evidence/performance/`](../evidence/performance/README.md) |
+| **AI 能力线与隐私** | [CV 采样与预算](requirements/CV_SAMPLING_SPEC.md)、[W2.1 同步](requirements/W2_1_CAMERA_SYNC_PLANNING_GATE_2026-10-10.md)、[W3.1 检索](requirements/W3_1_SEMANTIC_SEARCH_PLANNING_GATE_2026-10-18.md)、[W3.3 关键帧](requirements/W3_3_KEYFRAME_UNDERSTANDING_PLANNING_GATE_2026-10-21.md)、[W4.2 融合](requirements/W4_2_SIGNAL_FUSION_PLANNING_GATE_2026-10-19.md) | [AI 能力总纲](design/AI_CAPABILITY_MASTER_PLAN_2026-09-24.md)、[Worklist & Captions 设计](design/WORKLIST_AND_CAPTIONS_DESIGN.md)、[W2.1/W3.3 设计门](design/README.md#ai工作包与专项设计)、[ADR 索引](design/adr/README.md) | [W3.3 实施摘要](archive/W3_3_IMPLEMENTATION_SUMMARY_2026-10-21.md)、[W3.3 验收](archive/W3_3_VERIFICATION_GATE_2026-10-21.md)、[W3.1 验收](archive/W3_1_SEMANTIC_SEARCH_IMPLEMENTATION_2026-10-19.md) |
+| **工程治理、CI 与契约** | [`AGENTS.md`](../AGENTS.md) | [Stage 1B 错误码契约](archive/STAGE1B_CONTRACT_FREEZE.md) | [远端 CI 验证](archive/CI_REMOTE_VERIFICATION_2026-11-05.md) |
 
-- [需求](requirements/README.md)：产品目标、用户行为、边界与验收标准。
-- [设计](design/README.md)：架构、决策、交互与技术方案；实施、验收和验证快照放在设计类的记录子目录。
+## 文档维护约定
 
-## 查找约定
-
-- 设计与验收记录可能包含当时的状态快照；不要据此推断当前状态，先查 [STATUS.md](STATUS.md)。
-- `evidence/` 保存被状态、决策或验收引用的依据。清理前先核对引用与未关闭承诺。
-- `docs/requirements/` 与 `docs/design/` 是两类内容的唯一归档位置；细分目录只服务于主题查找，不增加文档大类。
-- 阶段记录经提炼后，确认无未关闭承诺、有效引用或独立证据价值，才删除。
+1. **单模块单活文档**：按模块原地更新，禁止在 `requirements/` 或 `design/` 堆积按日期/切片命名的过程稿（见 [`AGENTS.md`](../AGENTS.md) Rule 6–8）。
+2. **关门即清理**：承诺在 [`STATUS.md`](STATUS.md) §4 核销时，同提交迁入 [`STATUS_ARCHIVE.md`](STATUS_ARCHIVE.md) 并清理临时过程文件。
+3. **提交前必跑门禁**：
+   ```powershell
+   uv run --locked --extra dev pytest services/core/tests/unit/test_status_doc_consistency.py services/core/tests/unit/test_keyframe_wording.py
+   ```

@@ -52,7 +52,7 @@ Stage 2C 处于实现与验收阶段。本次评审以 `ARCHITECTURE.md`（基�
 5. **R5**：每个 Stage 收尾补一篇 ADR；优先补：迁移机制、IPC 通道划分、品牌兼容层收敛计划。
 6. **R6**：共享 client 上移为 `packages/` 内的包（如 `@aivideo/core-client`），Main 与 Renderer 同源引用。
 
-目标形态参考图：`docs/design/diagrams/vortex-cut-architecture-compare.html`（base = 当前形态，head = 目标形态）。
+目标形态参考图：原 `docs/design/diagrams/vortex-cut-architecture-compare.html`（base = 当前形态，head = 目标形态；该批 Stage 2C 生成图产物已于 2026-11-25 清理，如需查阅可从 Git 历史恢复）。
 - compare 页 Delta 清单（17 处规格变更）作为 Stage 3 准入核对表蓝本，随整改推进逐项核销。
 
 ## 影响

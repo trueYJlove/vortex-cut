@@ -3,7 +3,7 @@
 - 状态：**已批准**（用户 2026-10-17 明确选择选项 b）
 - 日期：2026-10-17
 - 记录人：LiuWei（架构师）；决策人：用户（产品负责人）
-- 关联：`docs/design/W2_2_DEGRADATION_DESIGN_GATE_2026-10-14.md` §5 / §7；
+- 关联：`docs/archive/W2_2_DEGRADATION_DESIGN_GATE_2026-10-14.md` §5 / §7；
   `docs/STATUS.md` §4 **P130/P132/P133/P134/P135/P136/P137/P138/P139**；
   `docs/design/adr/0006-w22-speaker-direction-ruling.md`、`adr/0007`、`adr/0008`
 - 证据：`evidence/2026-10-14-w22-s3-production-gate/`（S3）及

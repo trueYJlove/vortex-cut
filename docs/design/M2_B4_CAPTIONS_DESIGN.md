@@ -91,4 +91,38 @@ C1 轨字幕片段两端 8px 拖拽手柄（复用 V1 trim 的交互模式与 hi
 | ASS 标签注入 | 标签值全部为服务端校验的数值/枚举，正文仍走 escape_ass_text；单测覆盖含特殊字符正文 + 样式的组合输出 |
 | pos 比率与 PlayRes 换算错位 | 单测固定 PlayRes 1080x1920 断言换算像素 |
 | 部分覆盖与预设合并的字段遗漏 | 合并逻辑集中单函数 + 快照测试 |
-| 字体单一的限制被用户感知 | UI 展示但禁用字体选择，提示"仅内置字体" |
+| 字体单一的限制被用户感知 | 见 §8 多字体包支持 |
+
+---
+
+## 7. 气泡与花字样式覆盖（B4 收官）
+
+> 合并自原 `M2_B4_BUBBLE_FX_DESIGN_2026-09-18.md`。沿用 `per-caption style_override` + 服务端校验 + ASS 渲染范式，不引入第二类文字实体或新操作。
+
+### 7.1 `style_override` 扩展字段与校验
+
+- `border_style`: `1`（描边+阴影，默认）或 `3`（不透明底衬块，气泡模式）；
+- `back_color`: ASS `&Haabbggrr` 格式（气泡底色/阴影色，含 alpha）；
+- `shadow`: `0–10`（阴影深度 / BorderStyle=3 下底衬外扩感）；
+- `fx_preset`: `"none" | "gold-gradient" | "neon-glow" | "sticker-outline" | "soft-shadow"`（模板集交付，不开放自由参数）。
+- **互斥规则**：`fx_preset` 与 `primary_color`/`outline_color` 并存时，花字模板标签后置覆盖颜色；UI 选中花字模板时禁用基础色控件并提示。
+
+### 7.2 ASS 渲染映射与范围边界
+
+- `border_style=3` / `back_color` / `shadow`：由于 ASS Dialogue 行内无 BorderStyle 切换，`build_ass` 为含 `border_style=3` 覆盖的字幕生成确定性去重**派生 Style 行**（`{preset_id}__b3`），Dialogue 引用该派生 Style；
+- `fx_preset`：展开为固定服务端生成的行内标签前缀（无用户输入注入面），经 `test_b4_bubble_fx_render_real.py` 真渲染验证；
+- 明确不做：矢量气泡尾巴、自由花字参数编辑、字幕动画（Tab 维持 `soon`）与矩形渐变 `\clip`。
+
+---
+
+## 8. 多字体支持与字体包设计
+
+> 合并自原 `M2_B4_MULTI_FONT_DESIGN_2026-09-18.md`，解除早期单字体限制。
+
+- **字体包清单（`resources/fonts/bundle.json` v2）**：升级为 `fonts: [{ family, file, license, license_file, sha256, role: "default" | "extra" }]`（`CaptionResources` 向后兼容读取 v1 单对象）：
+  - **思源黑体 Noto Sans CJK SC**（`default`）
+  - **思源宋体 Noto Serif CJK SC**（`extra`，OFL）
+  - **霞鹜文楷 LXGW WenKai**（`extra`，OFL）
+- **Core 与校验**：`libass` 经 `fontsdir` 自动加载目录内全部字体文件；`build_ass` 保持 Style 族名，行内 `\fn` 引用注册字体；`_validate_caption_style.font_name` 白名单改为运行时注册表 `family` 集合（拒绝未注册字体名，防止预览与导出静默回退分叉）；新增 `GET /api/v1/caption-fonts` 返回 `{ fonts: [{ family, role }] }`（不含本地路径）。
+- **Desktop 预览同步**：Main IPC `media:caption-font-urls` 返回 `[{ family, media_url }]`，`SyntheticPreview` 并行加载并通过 `FontFace(family)` 按真实 family 名注册（取代早期硬编码 `AppCaptionCJK`），`compositor` 按 `override.font_name -> 预设族名 -> default family` 逐级取用。
+- **明确不做**：用户自装系统字体、在线字体下载、独立字重下拉（Variable TTF 经 bold 标签表达）。

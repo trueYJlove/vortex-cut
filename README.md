@@ -16,6 +16,14 @@ Vortex Cut 是 Vortex 旗下的本地优先、AI 驱动的视频剪辑与多平�
 
 可选外部 Provider 只会在用户明确触发的受控流程中调用；常规开发、单元测试、静态验证与受控 loopback 测试不需要真实 Provider。
 
+## 文档导航
+
+- [文档总入口](docs/README.md)：按专题查找需求、设计与研究材料。
+- [项目状态源 (`docs/STATUS.md`)](docs/STATUS.md)：唯一声明当前阶段、能力边界与未闭环承诺。
+- [系统架构](ARCHITECTURE.md)：进程边界、核心模块、数据模型与设计原则。
+- [用户使用手册](docs/requirements/VORTEX_CUT_USER_MANUAL.md)：编辑器操作说明。
+- [协作与文档纪律](AGENTS.md)：Agent 角色分工与文档同步规则。
+
 ## 本地架构
 
 ```text
@@ -45,7 +53,10 @@ pnpm dev
 pnpm lint
 pnpm typecheck
 pnpm test
+pnpm test:python
 pnpm build
+pnpm run ci
+pnpm run ci:release
 pnpm test:e2e
 pnpm contracts:generate
 pnpm sidecar:build
@@ -54,8 +65,8 @@ pnpm package:verify
 pnpm package:verify:real
 ```
 
-`package:verify:real` 是需要受控本地模型和媒体夹具的真实 Windows 包验证入口；仅在明确准备好隔离环境后执行。它不是日常开发测试，也不应在未经授权时调用真实 Provider。
+> 执行 CI 聚合检查必须写 `pnpm run ci`（或 `pnpm run ci:release`），不能写 `pnpm ci`（`ci` 为 pnpm 内置保留字）。`package:verify:real` 是需要受控本地模型和媒体夹具的真实 Windows 包验证入口；仅在明确准备好隔离环境后执行。它不是日常开发测试，也不应在未经授权时调用真实 Provider。
 
 ## 品牌与安装身份
 
-品牌基线、兼容标识和本次不迁移旧开发安装数据的边界见 [docs/requirements/BRAND_BASELINE.md](docs/requirements/BRAND_BASELINE.md)。当前工作树的 Windows Builder 配置已使用新安装身份 `io.github.trueyjlove.vortexcut`、产品名 `Vortex Cut` 和产物名 `VortexCut-Setup-${version}-x64.exe`。真实 Windows 包的独立验收仍待 LiuKeAi 执行，当前不将其表述为已验收通过。
+品牌基线、兼容标识和本次不迁移旧开发安装数据的边界见 [docs/requirements/BRAND_BASELINE.md](docs/requirements/BRAND_BASELINE.md)。当前工作树的 Windows Builder 配置已使用新安装身份 `io.github.trueyjlove.vortexcut`、产品名 `Vortex Cut` 和产物名 `VortexCut-Setup-${version}-x64.exe`。真实 Windows 包的交付与验收状态统一见 [docs/STATUS.md](docs/STATUS.md)。

@@ -81,7 +81,7 @@ evidence/performance/**/*.jsonl
 !evidence/performance/preview-smoothness-baseline/app-drop-user-h264-3440-timing-r1.json
 !evidence/performance/preview-smoothness-baseline/app-drop-w12-dance-trace2-r6t.json
 
-# Local visual acceptance captures; conclusions and measurements are in docs/design/records.
+# Local visual acceptance captures; conclusions and measurements are in docs/archive/.
 /evidence/2026-11-11-light-theme/
 /evidence/2026-11-11-timeline-parity/
 /evidence/2026-11-18-p231-preview-canvas/
@@ -92,3 +92,6 @@ resources/.test-model-cache/
 
 # Windows 文件权限诊断/修复工具的输出（含 ACL 备份与回滚脚本），非项目产物
 /.acl-recovery/
+
+# Agent / Codex 临时工具目录（匹配根级与子包下的 .codex-tmp/）
+.codex-tmp/
