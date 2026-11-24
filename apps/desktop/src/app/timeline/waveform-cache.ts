@@ -11,8 +11,8 @@
  *   失败不每帧重试，仅显式 retry()。
  * - clip 显示映射使用 source_start/end、speed、reverse（对齐
  *   computeFrameRequests 的映射公式）；同源不同 trim 各自正确取窗。
- * - 渲染端按 clip 宽度选金字塔层（每像素一桶即可——更细层无显示增益），
- *   桶采样取窗内 max(|min|,|max|)。
+ * - 渲染端按可见像素投影源峰值，保留 OpenFilm 的 max-window 与插值规则；
+ *   相同源区间/像素宽度跨画布重绘时复用有界 LRU 投影缓存。
  * - 内存记账：金字塔总字节（文件大小）计入 entries 缓存上限（MiB，
  *   默认 64MiB——B13 预算表的 PCM/波形缓存档位可由调用方注入）。
  */
@@ -108,16 +108,35 @@ export function peaksForClip(
   const speed = request.speedMilli / 1000;
   const timelineDurUs = (request.sourceEndUs - request.sourceStartUs) / (speed > 0 ? speed : 1);
   if (peakCount <= 0 || timelineDurUs <= 0 || pyramid.baseBuckets === 0) return null;
-  const level = pickLevel(pyramid, bucketSpanUs, request.sourceEndUs - request.sourceStartUs, peakCount);
-  const values = pyramid.levelData[level];
+  // OpenFilm projects the source envelope into each screen pixel with a max over
+  // the exact source window. A coarser pyramid level can pull a nearby transient
+  // into an adjacent pixel (visible as a smoother, wider waveform), so use the
+  // base buckets here. The UI cache memoizes this projection across redraws.
+  const values = pyramid.levelData[0];
   if (!values) return null;
   const buckets = values.length / 2;
   const peaks = new Float32Array(peakCount);
-  // level k 的桶跨 = base 桶跨 × 2^k。必须按该层跨度换算索引——若误用 base
-  // 跨度，选层后所有采样会挤到末桶（整段波形塌成 1px 平线，看似“没画”）。
-  const levelBucketSpanUs = bucketSpanUs * 2 ** level;
   const srcSpanUs = request.sourceEndUs - request.sourceStartUs;
+  const sourceDurationUs = Math.min(pyramid.baseBuckets, buckets) * bucketSpanUs;
+  const bucketsPerPixel = srcSpanUs / bucketSpanUs / peakCount;
   for (let i = 0; i < peakCount; i += 1) {
+    if (bucketsPerPixel < 1) {
+      // OpenFilm interpolates adjacent envelope samples when the zoom shows
+      // more than one pixel per source bucket; do the same instead of repeating
+      // each bucket across several columns.
+      const atUs = request.reverse
+        ? request.sourceEndUs - ((i + 1) / peakCount) * srcSpanUs
+        : request.sourceStartUs + (i / peakCount) * srcSpanUs;
+      const at = atUs / bucketSpanUs;
+      if (at < 0 || at >= buckets) continue;
+      const left = Math.floor(at);
+      const right = Math.min(buckets - 1, left + 1);
+      const mix = at - left;
+      const leftPeak = Math.max(Math.abs(values[left * 2]), Math.abs(values[left * 2 + 1]));
+      const rightPeak = Math.max(Math.abs(values[right * 2]), Math.abs(values[right * 2 + 1]));
+      peaks[i] = Math.min(1, leftPeak * (1 - mix) + rightPeak * mix);
+      continue;
+    }
     // 第 i 个显示柱覆盖源窗 [i/n, (i+1)/n)；倒放则时间轴正向对应源尾→头。
     // 窗内取 max（包络）——单点采样会漏掉窗内瞬时峰值，显得“缺块”。
     const t0 = i / peakCount;
@@ -131,8 +150,11 @@ export function peaksForClip(
       srcFromUs = request.sourceStartUs + t0 * srcSpanUs;
       srcToUs = request.sourceStartUs + t1 * srcSpanUs;
     }
-    const b0 = Math.min(buckets - 1, Math.max(0, Math.floor(srcFromUs / levelBucketSpanUs)));
-    const b1 = Math.min(buckets - 1, Math.max(0, Math.floor((srcToUs - 1) / levelBucketSpanUs)));
+    const clippedFromUs = Math.max(0, srcFromUs);
+    const clippedToUs = Math.min(sourceDurationUs, srcToUs);
+    if (clippedToUs <= clippedFromUs) continue;
+    const b0 = Math.min(buckets - 1, Math.max(0, Math.floor(clippedFromUs / bucketSpanUs)));
+    const b1 = Math.min(buckets - 1, Math.max(0, Math.ceil(clippedToUs / bucketSpanUs) - 1));
     let peak = 0;
     for (let b = b0; b <= b1; b += 1) {
       const min = values[b * 2];
@@ -168,6 +190,10 @@ const defaultSleep: SleepFn = (ms) => new Promise((resolve) => setTimeout(resolv
 
 export class WaveformCache {
   private readonly entries = new Map<string, CacheEntry>();
+  /** Exact pixel projections reused while the canvas redraws during pointer/zoom gestures. */
+  private readonly projections = new Map<string, Float32Array>();
+  private projectionBytes = 0;
+  private readonly maxProjectionBytes = 4 * 1024 * 1024;
   private cachedBytes = 0;
   private disposed = false;
   private nextSeq = 1;
@@ -216,7 +242,26 @@ export class WaveformCache {
     if (this.disposed) return null;
     const entry = this.entries.get(request.assetId);
     if (!entry || entry.state !== "ready" || !entry.pyramid) return null;
+    const key = [request.assetId, entry.seq, request.clipId, request.sourceStartUs, request.sourceEndUs,
+      request.speedMilli, request.reverse ? 1 : 0, peakCount].join("\0");
+    const cached = this.projections.get(key);
+    if (cached) {
+      this.projections.delete(key);
+      this.projections.set(key, cached);
+      return cached;
+    }
     const result = peaksForClip(entry.pyramid, entry.bucketSpanUs, request, peakCount);
+    if (result && result.peaks.byteLength <= this.maxProjectionBytes) {
+      while (this.projectionBytes + result.peaks.byteLength > this.maxProjectionBytes) {
+        const oldestKey = this.projections.keys().next();
+        if (oldestKey.done) break;
+        const oldest = this.projections.get(oldestKey.value);
+        if (oldest) this.projectionBytes -= oldest.byteLength;
+        this.projections.delete(oldestKey.value);
+      }
+      this.projections.set(key, result.peaks);
+      this.projectionBytes += result.peaks.byteLength;
+    }
     return result?.peaks ?? null;
   }
 
@@ -224,6 +269,7 @@ export class WaveformCache {
   retry(assetId: string): void {
     const entry = this.entries.get(assetId);
     if (!entry || entry.state === "ready") return;
+    this.clearProjections(assetId);
     if (entry.pyramid) this.cachedBytes -= entry.pyramid.totalBytes;
     this.entries.delete(assetId);
   }
@@ -232,6 +278,8 @@ export class WaveformCache {
   dispose(): void {
     this.disposed = true;
     this.entries.clear();
+    this.projections.clear();
+    this.projectionBytes = 0;
     this.cachedBytes = 0;
   }
 
@@ -315,7 +363,16 @@ export class WaveformCache {
       if (oldest.done) break;
       const entry = this.entries.get(oldest.value);
       if (entry?.pyramid) this.cachedBytes -= entry.pyramid.totalBytes;
+      this.clearProjections(oldest.value);
       this.entries.delete(oldest.value);
+    }
+  }
+
+  private clearProjections(assetId: string): void {
+    for (const [key, values] of this.projections) {
+      if (!key.startsWith(`${assetId}\0`)) continue;
+      this.projectionBytes -= values.byteLength;
+      this.projections.delete(key);
     }
   }
 }

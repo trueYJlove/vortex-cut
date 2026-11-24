@@ -9,11 +9,26 @@ from ..database import Database, json_dumps, json_loads
 from ..projects import DomainError
 from ..renditions.presets import canonical_sha256
 from ..renditions.reframe import crop_window, display_geometry
+from ..timeline import TRANSITION_MOVE_PRESET_IDS, _project_active_transitions
 
 COMPILER_VERSION = "render-plan-v1"
 REFRAME_COMPILER_VERSION = "render-plan-reframe-v1"
 PRESET_VERSION = 1
 FONT_BUNDLE_VERSION = 1
+
+# Source reviewed from OpenFilm's transitions-move catalog. None of these
+# presets is silently reduced to a plain dissolve: the current Core renderers
+# fail closed until their paired CSS motion is implemented in both paths.
+OPENFILM_MOVE_PRESET_STATUS = {
+    preset_id: "open" for preset_id in TRANSITION_MOVE_PRESET_IDS
+}
+ACTIVE_TRANSITION_RENDER_STATUS = {
+    "dissolve": "supported via picture fade facts",
+    "dip-black": "supported via picture fade facts",
+    "crossfade": "supported via audio fade facts",
+    "dip-white": "open: trusted HTML page frame service required",
+    "move": "open: paired catalog motion is not implemented",
+}
 PROFILES = {
     "authoritative_preview": {
         "profile_id": "preview-portrait-v1",
@@ -335,6 +350,7 @@ class RenderPlanCompiler:
         max_source_short_edge = 0
         inputs: list[dict[str, Any]] = []
         input_by_asset: dict[str, str] = {}
+        input_row_by_id: dict[str, dict[str, Any]] = {}
         segments: list[dict[str, Any]] = []
         # 多轨道：段落记录来源轨道与轨道标志；轨道静音/独奏直接合并进
         # audio_enabled（当前渲染图为单视觉轨 + 随段音频语义）。
@@ -352,9 +368,69 @@ class RenderPlanCompiler:
             if isinstance(track, dict) and track.get("id")
         }
         any_solo = any(bool(track.get("solo")) for track in tracks_by_id.values())
-        # B2：转场锚定在片段尾部——按 after_clip_id 索引，编译段时挂到对应段。
-        transition_by_anchor: dict[str, dict[str, Any]] = {
-            item["after_clip_id"]: item for item in document.get("transitions", [])
+        # P235-R3：clip facts 的有效转场来自最终布局 projector；兼容性
+        # TimelineTransition 则保留为独立 pair，只在保存的 incoming identity
+        # 仍与当前同轨相邻片段一致时才参与渲染。绝不以当前后继重绑旧锚点。
+        active_transitions = _project_active_transitions(document)
+        clip_by_id = {clip["clip_id"]: clip for clip in document["clips"]}
+        clip_order_by_track: dict[str, list[dict[str, Any]]] = {}
+        for item in document["clips"]:
+            clip_order_by_track.setdefault(str(item.get("track_id", "V1")), []).append(item)
+        for values in clip_order_by_track.values():
+            values.sort(key=lambda item: (int(item["timeline_start_us"]), int(item["order_index"])))
+        compatibility_transitions: list[dict[str, Any]] = []
+        transition_by_anchor: dict[str, dict[str, Any]] = {}
+        for transition in document.get("transitions", []):
+            outgoing_id = transition.get("after_clip_id")
+            incoming_id = transition.get("incoming_clip_id")
+            outgoing = clip_by_id.get(outgoing_id)
+            incoming = clip_by_id.get(incoming_id) if isinstance(incoming_id, str) else None
+            if outgoing is None or incoming is None:
+                continue
+            if outgoing.get("track_id") != incoming.get("track_id"):
+                continue
+            if int(outgoing["timeline_end_us"]) != int(incoming["timeline_start_us"]):
+                continue
+            track_clips = clip_order_by_track.get(str(outgoing.get("track_id", "V1")), [])
+            try:
+                outgoing_index = next(
+                    i for i, item in enumerate(track_clips)
+                    if item["clip_id"] == outgoing_id
+                )
+            except StopIteration:
+                continue
+            if (
+                outgoing_index + 1 >= len(track_clips)
+                or track_clips[outgoing_index + 1]["clip_id"] != incoming_id
+            ):
+                continue
+            compiled = {
+                "transition_id": transition["transition_id"],
+                "outgoing_clip_id": outgoing_id,
+                "incoming_clip_id": incoming_id,
+                "kind": transition["kind"],
+                "duration_us": int(transition["duration_us"]),
+                "start_us": int(outgoing["timeline_end_us"]) - int(transition["duration_us"]),
+                "end_us": int(outgoing["timeline_end_us"]),
+                "cut_us": int(outgoing["timeline_end_us"]),
+            }
+            compatibility_transitions.append(compiled)
+            transition_by_anchor[outgoing_id] = transition
+        # Facts-derived pair wins if an older compatibility event occupies the
+        # same cut; compiling both would double-apply its fade.
+        facts_pairs = {
+            (item["outgoing_clip_id"], item["incoming_clip_id"])
+            for item in active_transitions
+        }
+        facts_outgoing = {item["outgoing_clip_id"] for item in active_transitions}
+        compatibility_transitions = [
+            item for item in compatibility_transitions
+            if (item["outgoing_clip_id"], item["incoming_clip_id"]) not in facts_pairs
+            and item["outgoing_clip_id"] not in facts_outgoing
+        ]
+        transition_by_anchor = {
+            item["outgoing_clip_id"]: transition_by_anchor[item["outgoing_clip_id"]]
+            for item in compatibility_transitions
         }
         for clip in document["clips"]:
             asset = db.execute("SELECT * FROM assets WHERE id=?", (clip["asset_id"],)).fetchone()
@@ -364,8 +440,8 @@ class RenderPlanCompiler:
             # RENDER_INPUT_CHANGED（真机 test1102 复现：07:28 加音轨 → 07:28-08:54
             # 全部 manifest/window 500 → 08:54 删光片段后"自愈"）。放宽：audio 视角
             # 片段允许引用 video 素材（其余组合维持 fail-closed），且要求素材
-            # 确有音轨——无声视频取音轨在 timeline 层已被 TIMELINE_INVALID 拒绝，
-            # 这里复核是防数据被旁路写入时下游 a1 混音静默产出空轨。
+            # audio 视角可以引用无声视频：编译器保留 A1 时间范围，FFmpeg
+            # 用 anullsrc 补静音；是否存在源音轨由 has_audio 单独表达。
             kind_matches = (
                 asset is not None
                 and asset["kind"] == clip["asset_kind"]
@@ -382,12 +458,15 @@ class RenderPlanCompiler:
                 or not kind_matches
             ):
                 raise DomainError("RENDER_INPUT_CHANGED", "Timeline 引用的素材不可用或已变化")
-            if clip["asset_kind"] == "audio" and asset["kind"] == "video":
-                _audio_gate = json_loads(asset["media_info_json"]).get("audio_streams") if asset["media_info_json"] else None
-                if not _audio_gate:
-                    raise DomainError("RENDER_INPUT_CHANGED", "视频素材没有音轨，不能作为音频片段渲染")
             media_info = json_loads(asset["media_info_json"]) if asset["media_info_json"] else {}
-            if mode == "final_export" and resolution == "original":
+            track = tracks_by_id.get(clip.get("track_id", "V1"))
+            track_hidden = bool(track.get("hidden")) if track else False
+            if (
+                mode == "final_export"
+                and resolution == "original"
+                and clip["asset_kind"] != "audio"
+                and not track_hidden
+            ):
                 for stream in media_info.get("video_streams") or []:
                     stream_w = int(stream.get("width") or 0)
                     stream_h = int(stream.get("height") or 0)
@@ -405,10 +484,12 @@ class RenderPlanCompiler:
                         "fingerprint": asset["fingerprint"],
                         "duration_us": int(media_info.get("duration_us") or 0),
                         "has_audio": bool(media_info.get("audio_streams")),
+                        "video_required": False,
+                        "audio_required": False,
                     }
                 )
+                input_row_by_id[input_id] = inputs[-1]
             transition = transition_by_anchor.get(clip["clip_id"])
-            track = tracks_by_id.get(clip.get("track_id", "V1"))
             track_muted = bool(track.get("muted")) if track else False
             track_solo = bool(track.get("solo")) if track else False
             audio_effective = (
@@ -416,6 +497,13 @@ class RenderPlanCompiler:
                 and not track_muted
                 and not (any_solo and not track_solo)
             )
+            video_required = clip["asset_kind"] != "audio" and not track_hidden
+            has_audio = bool(media_info.get("audio_streams"))
+            audio_required = audio_effective and has_audio
+            # 多段共享 source 输入时，按所有 segment 角色求并集。每个 segment
+            # 仍保留自己的角色标志，供 FFmpeg 对 audio-role 的独立 -i 加 -vn。
+            input_row_by_id[input_id]["video_required"] |= video_required
+            input_row_by_id[input_id]["audio_required"] |= audio_required
             # 淡入/淡出（可选）：仅在真有值时透传，0/缺省不写键——保证既有
             # 时间线的渲染图与指纹逐字节不变（默认路径零变化）。
             fade = {
@@ -431,6 +519,10 @@ class RenderPlanCompiler:
                     "track_hidden": bool(track.get("hidden")) if track else False,
                     "input_id": input_id,
                     "asset_kind": clip["asset_kind"],
+                    "source_asset_kind": asset["kind"],
+                    "video_required": video_required,
+                    "audio_required": audio_required,
+                    "has_audio": has_audio,
                     "source_start_us": clip["source_start_us"],
                     "source_end_us": clip["source_end_us"],
                     "timeline_start_us": clip["timeline_start_us"],
@@ -445,6 +537,18 @@ class RenderPlanCompiler:
                     "transform": clip.get("transform"),
                     "mask": clip.get("mask"),
                     "keying": clip.get("keying"),
+                    **({"picture_fade_in_us": int(clip["picture_fade_in_us"])}
+                       if int(clip.get("picture_fade_in_us") or 0) > 0 else {}),
+                    **({"picture_fade_out_us": int(clip["picture_fade_out_us"])}
+                       if int(clip.get("picture_fade_out_us") or 0) > 0 else {}),
+                    **(
+                        {"move_in": dict(clip["move_in"])}
+                        if isinstance(clip.get("move_in"), dict) else {}
+                    ),
+                    **(
+                        {"move_out": dict(clip["move_out"])}
+                        if isinstance(clip.get("move_out"), dict) else {}
+                    ),
                     "transition_in": (
                         {
                             "transition_id": transition["transition_id"],
@@ -498,6 +602,8 @@ class RenderPlanCompiler:
             "inputs": inputs,
             "segments": segments,
             "captions": caption_items,
+            "active_transitions": active_transitions,
+            "compatibility_transitions": compatibility_transitions,
             "canvas_background_color": document["canvas"]["background_color"],
             "preset_version": PRESET_VERSION,
             "font_bundle_version": FONT_BUNDLE_VERSION,
@@ -520,6 +626,8 @@ class RenderPlanCompiler:
             "content_fingerprint": f"sha256:{digest}",
             "inputs": inputs,
             "segments": segments,
+            "active_transitions": active_transitions,
+            "compatibility_transitions": compatibility_transitions,
             "captions": {
                 "format": "ass",
                 "preset_version": PRESET_VERSION,
@@ -534,6 +642,8 @@ def content_semantics(plan: dict[str, Any]) -> dict[str, Any]:
     return {
         "inputs": plan["inputs"],
         "segments": plan["segments"],
+        "active_transitions": plan.get("active_transitions", []),
+        "compatibility_transitions": plan.get("compatibility_transitions", []),
         "captions": plan["captions"]["items"],
         "preset_version": plan["captions"]["preset_version"],
         "font_bundle_version": plan["captions"]["font_bundle_version"],

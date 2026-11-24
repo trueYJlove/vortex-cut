@@ -777,6 +777,11 @@ export interface TimelineClip {
   timeline_end_us: number;
   layout: TimelineLayout;
   audio: TimelineClipAudio;
+  /** OpenFilm picture-edge facts. Audio fades remain on `audio` above. */
+  picture_fade_in_us?: number;
+  picture_fade_out_us?: number;
+  move_in?: TimelineMoveFact;
+  move_out?: TimelineMoveFact;
   /** 可选字段：缺省按 1000（原速）处理。 */
   speed_milli?: TimelineClipSpeedMilli;
   /** 可选字段：缺省为 false（正放）。仅视频片段支持。 */
@@ -842,10 +847,39 @@ export interface TimelineCaption {
 export const TRANSITION_IDS = ["fade", "fadeblack", "dissolve", "wipeleft", "wiperight", "slideleft", "slideup", "zoomin"] as const;
 export type TransitionKind = (typeof TRANSITION_IDS)[number];
 export type TimelineTransitionId = string & { readonly __brand: "timeline_transition_id" };
+/** Motion IDs from the OpenFilm transitions-move catalog pinned for P235. */
+export const TIMELINE_MOVE_PRESET_IDS = [
+  "motions/move-push-left", "motions/move-push-right", "motions/move-push-up", "motions/move-push-down",
+  "motions/move-slide-left", "motions/move-slide-right", "motions/move-slide-up", "motions/move-slide-down",
+  "motions/move-reveal-left", "motions/move-squeeze", "motions/move-flip", "motions/move-wipe-right",
+  "motions/move-wipe-left", "motions/move-wipe-down", "motions/move-wipe-up", "motions/move-soft-wipe",
+  "motions/move-iris", "motions/move-diamond", "motions/move-split-open", "motions/move-split-across",
+  "motions/move-blur-dissolve", "motions/move-blur-rush", "motions/move-flash-dissolve",
+  "motions/move-zoom-in", "motions/move-zoom-out", "motions/move-spin",
+] as const;
+export type TimelineMovePresetId = (typeof TIMELINE_MOVE_PRESET_IDS)[number];
+export interface TimelineMoveFact { preset_id: TimelineMovePresetId; duration_us: number; }
+export type ActiveTimelineTransitionKind = "dissolve" | "crossfade" | "dip-black" | "dip-white" | "move";
+export interface ActiveTimelineTransition {
+  transition_id: TimelineTransitionId;
+  outgoing_clip_id: TimelineClipId;
+  incoming_clip_id: TimelineClipId;
+  kind: ActiveTimelineTransitionKind;
+  start_us: number;
+  end_us: number;
+  cut_us: number;
+  on_clip_id: TimelineClipId;
+  rest_clip_id?: TimelineClipId;
+  white_page_asset_id?: AssetId;
+  incoming_move_preset_id?: TimelineMovePresetId;
+  outgoing_move_preset_id?: TimelineMovePresetId;
+}
 export interface TimelineTransition {
   transition_id: TimelineTransitionId;
-  /** 转场发生在该片段与其 V1 后继之间。 */
+  /** Legacy Vortex compatibility effect's outgoing clip. */
   after_clip_id: TimelineClipId;
+  /** Fixed incoming identity; absent/null old records stay dormant and never rebind. */
+  incoming_clip_id?: TimelineClipId | null;
   kind: TransitionKind;
   duration_us: number;
 }
@@ -941,6 +975,7 @@ export interface TimelineState {
   can_undo: boolean;
   can_redo: boolean;
   current_preview: AuthoritativePreview | null;
+  active_transitions: ActiveTimelineTransition[];
 }
 export type TimelineRevisionPage = Page<TimelineRevisionSummary>;
 
@@ -951,16 +986,22 @@ export type TimelineCreateSource =
 export interface TimelineCreateInput { schema_version: 1; source: TimelineCreateSource; default_layout: TimelineLayout; caption_preset_id: CaptionPresetId; }
 
 export type TimelinePatchOperation =
-  | { op: "insert_asset_clip"; asset_id: AssetId; at_index: number; source_start_us?: number; source_end_us?: number; duration_us?: number; layout?: TimelineLayout; speed_milli?: number; reverse_playback?: boolean; track_id?: string; as_audio?: boolean; link_to_clip_id?: TimelineClipId; timeline_start_us?: number; edit_mode?: "overwrite" }
+  | { op: "insert_asset_clip"; asset_id: AssetId; at_index: number; source_start_us?: number; source_end_us?: number; duration_us?: number; layout?: TimelineLayout; speed_milli?: number; reverse_playback?: boolean; track_id?: string; as_audio?: boolean; link_to_clip_id?: TimelineClipId; timeline_start_us?: number; edit_mode?: "place" | "insert" | "overwrite"; linkage_enabled?: boolean }
   | { op: "insert_transcript_segments"; transcript_id: TranscriptId; segment_ids: TranscriptSegmentId[]; at_index: number; padding_before_us: number; padding_after_us: number; create_captions: boolean; layout?: TimelineLayout }
   | { op: "remove_clip"; clip_id: TimelineClipId; ignore_link?: boolean }
   | { op: "move_clip"; clip_id: TimelineClipId; to_index: number; ignore_link?: boolean }
   | { op: "position_clip"; clip_id: TimelineClipId; timeline_start_us: number; track_id?: string; ignore_link?: boolean }
-  | { op: "position_clips"; placements: Array<{ clip_id: TimelineClipId; timeline_start_us: number; track_id?: string }> }
+  | { op: "position_clips"; placements: Array<{ clip_id: TimelineClipId; timeline_start_us: number; track_id?: string }>; ignore_link?: boolean }
+  | { op: "split_timeline_clips"; clip_ids: TimelineClipId[]; caption_ids: TimelineCaptionId[]; timeline_time_us: number }
+  | { op: "duplicate_timeline_items"; copies: Array<
+      | { item_kind: "clip"; source_id: TimelineClipId; copy_id: TimelineClipId; timeline_start_us: number; track_id: string; snapshot?: TimelineClip }
+      | { item_kind: "caption"; source_id: TimelineCaptionId; copy_id: TimelineCaptionId; timeline_start_us: number; snapshot?: TimelineCaption }
+    > }
+  | { op: "replace_clip_source"; clip_id: TimelineClipId; asset_id: AssetId }
   | { op: "detach_audio"; clip_id: TimelineClipId }
   | { op: "set_clip_link"; clip_ids: TimelineClipId[] }
   | { op: "clear_clip_link"; clip_id: TimelineClipId }
-  | { op: "add_track"; kind: "video" | "text" }
+  | { op: "add_track"; kind: "video" | "audio" | "text"; track_id?: string; before_track_id?: string; after_track_id?: string; audio_index?: number }
   | { op: "remove_track"; track_id: string }
   | { op: "move_track"; track_id: string; to_index: number }
   | { op: "set_track_flags"; track_id: string; locked?: boolean; hidden?: boolean; muted?: boolean; solo?: boolean }
@@ -970,6 +1011,7 @@ export type TimelinePatchOperation =
   | { op: "split_edit"; clip_id: TimelineClipId; source_time_us: number; audio_delta_us: number }
   | { op: "set_layout"; clip_id: TimelineClipId; layout: TimelineLayout }
   | { op: "set_audio"; clip_id: TimelineClipId; enabled: boolean; gain_db: number; fade_in_us?: number; fade_out_us?: number }
+  | { op: "set_clip_transition_facts"; clip_id: TimelineClipId; picture_fade_in_us?: number | null; picture_fade_out_us?: number | null; move_in?: TimelineMoveFact | null; move_out?: TimelineMoveFact | null }
   | { op: "add_transition"; after_clip_id: TimelineClipId; kind: TransitionKind; duration_us: number }
   | { op: "update_transition"; transition_id: TimelineTransitionId; kind?: TransitionKind; duration_us?: number }
   | { op: "remove_transition"; transition_id: TimelineTransitionId }
@@ -1950,17 +1992,28 @@ function isTimelineCanvas(value: unknown): value is TimelineCanvas {
     isString(value.background_color) && /^#[0-9A-Fa-f]{6}$/.test(value.background_color);
 }
 export function isTimelineClip(value: unknown): value is TimelineClip {
-  if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["clip_id", "track_id", "order_index", "asset_id", "asset_kind", "source_start_us", "source_end_us", "timeline_start_us", "timeline_end_us", "layout", "audio", "speed_milli", "reverse_playback", "keyframes", "transform", "mask", "keying", "link_group_id"])) return false;
+  if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["clip_id", "track_id", "order_index", "asset_id", "asset_kind", "source_start_us", "source_end_us", "timeline_start_us", "timeline_end_us", "layout", "audio", "picture_fade_in_us", "picture_fade_out_us", "move_in", "move_out", "speed_milli", "reverse_playback", "keyframes", "transform", "mask", "keying", "link_group_id"])) return false;
   // P231：track_id 不再限定 V1/A1——任意轨道 id（存在性/类型匹配由
   // isTimelineDocument 逐片段对照 tracks 数组校验，见下方 clip-track 兼容检查）。
   if (!isId(value.clip_id) || !isString(value.track_id) || !value.track_id.length || !isInteger(value.order_index) || !isId(value.asset_id) || !oneOf(["video", "image", "audio"] as const, value.asset_kind) ||
-    !isInteger(value.timeline_start_us) || !isInteger(value.timeline_end_us, 1) || value.timeline_end_us <= value.timeline_start_us || !isTimelineLayout(value.layout) || !isRecord(value.audio) ||
+    !isInteger(value.timeline_start_us) || !isInteger(value.timeline_end_us, 1) || value.timeline_end_us > Number.MAX_SAFE_INTEGER || value.timeline_end_us <= value.timeline_start_us || !isTimelineLayout(value.layout) || !isRecord(value.audio) ||
     !onlyKeys(value.audio, ["enabled", "gain_db", "fade_in_us", "fade_out_us"]) || typeof value.audio.enabled !== "boolean" || !isFiniteNumber(value.audio.gain_db) || value.audio.gain_db < -60 || value.audio.gain_db > 12) return false;
   // 可选淡入/淡出：出现时必须为非负整数微秒；缺省 = 不淡（老文档无此键仍合法）。
   if (value.audio.fade_in_us !== undefined && !isInteger(value.audio.fade_in_us)) return false;
   if (value.audio.fade_out_us !== undefined && !isInteger(value.audio.fade_out_us)) return false;
-  // 可选变速/倒放字段：出现时必须合法；speed 250–4000（0.25x–4x），倒放仅视频。
-  if (value.speed_milli !== undefined && (!isInteger(value.speed_milli, 250) || value.speed_milli > 4000)) return false;
+  const duration = Number(value.timeline_end_us) - Number(value.timeline_start_us);
+  if (value.picture_fade_in_us !== undefined && !isSafeInteger(value.picture_fade_in_us)) return false;
+  if (value.picture_fade_out_us !== undefined && !isSafeInteger(value.picture_fade_out_us)) return false;
+  if (value.picture_fade_in_us !== undefined || value.picture_fade_out_us !== undefined || value.move_in !== undefined || value.move_out !== undefined) {
+    if (value.asset_kind === "audio") return false;
+    const fadeIn = Number(value.picture_fade_in_us ?? 0);
+    const fadeOut = Number(value.picture_fade_out_us ?? 0);
+    if (fadeIn + fadeOut > duration) return false;
+    if (value.move_in !== undefined && !isTimelineMoveFact(value.move_in, duration)) return false;
+    if (value.move_out !== undefined && !isTimelineMoveFact(value.move_out, duration)) return false;
+  }
+  // 可选变速/倒放字段：出现时必须合法；speed 100–100000（0.1x–100x），倒放仅视频。
+  if (value.speed_milli !== undefined && (!isInteger(value.speed_milli, 100) || value.speed_milli > 100_000)) return false;
   if (value.reverse_playback !== undefined && (typeof value.reverse_playback !== "boolean" || (value.reverse_playback && value.asset_kind !== "video"))) return false;
   // 可选关键帧：结构按属性校验；t_us 上界（片段时长）由 core 归一化时校验。
   if (value.keyframes !== undefined && !isTimelineClipKeyframes(value.keyframes)) return false;
@@ -1982,7 +2035,7 @@ export function isTimelineClip(value: unknown): value is TimelineClip {
   if (value.link_group_id !== undefined && (!isString(value.link_group_id) || value.link_group_id.length === 0)) return false;
   // P231：图片片段可落任意 video 轨（不再限定 V1）——轨道存在性/类型由
   // isTimelineDocument 校验。时长约束不变。
-  if (value.asset_kind === "image") return value.source_start_us === null && value.source_end_us === null && value.timeline_end_us - value.timeline_start_us >= 500_000 && value.timeline_end_us - value.timeline_start_us <= 30_000_000;
+  if (value.asset_kind === "image") return value.source_start_us === null && value.source_end_us === null && value.timeline_end_us - value.timeline_start_us >= 100_000;
   // 视频/音频：timeline 时长 = 源范围时长 / 速度（四舍五入到微秒；原速时严格相等）。
   const speed = typeof value.speed_milli === "number" ? value.speed_milli : 1000;
   const sourceSpan = (value.source_end_us as number) - (value.source_start_us as number);
@@ -2024,7 +2077,25 @@ export function isTimelineCaption(value: unknown): value is TimelineCaption {
   return value.origin === "transcript" ? value.source_clip_id !== null && value.source_segment_ids.length > 0 : value.source_segment_ids.length === 0;
 }
 export function isTimelineTransition(value: unknown): value is TimelineTransition {
-  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["transition_id", "after_clip_id", "kind", "duration_us"]) && isId(value.transition_id) && isId(value.after_clip_id) && oneOf(TRANSITION_IDS, value.kind) && isInteger(value.duration_us, 100_000) && value.duration_us <= 2_000_000;
+  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["transition_id", "after_clip_id", "incoming_clip_id", "kind", "duration_us"]) && isId(value.transition_id) && isId(value.after_clip_id) && (value.incoming_clip_id === undefined || value.incoming_clip_id === null || isId(value.incoming_clip_id)) && oneOf(TRANSITION_IDS, value.kind) && isInteger(value.duration_us, 100_000) && value.duration_us <= 2_000_000;
+}
+function isSafeInteger(value: unknown): value is number {
+  return isFiniteNumber(value) && Number.isSafeInteger(value) && value >= 0;
+}
+function isTimelineMoveFact(value: unknown, clipDurationUs: number): value is TimelineMoveFact {
+  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["preset_id", "duration_us"]) &&
+    oneOf(TIMELINE_MOVE_PRESET_IDS, value.preset_id) && isSafeInteger(value.duration_us) && value.duration_us > 0 && value.duration_us <= clipDurationUs;
+}
+const ACTIVE_TRANSITION_KINDS: readonly ActiveTimelineTransitionKind[] = ["dissolve", "crossfade", "dip-black", "dip-white", "move"];
+export function isActiveTimelineTransition(value: unknown): value is ActiveTimelineTransition {
+  if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["transition_id", "outgoing_clip_id", "incoming_clip_id", "kind", "start_us", "end_us", "cut_us", "on_clip_id", "rest_clip_id", "white_page_asset_id", "incoming_move_preset_id", "outgoing_move_preset_id"])) return false;
+  return isId(value.transition_id) && isId(value.outgoing_clip_id) && isId(value.incoming_clip_id) &&
+    oneOf(ACTIVE_TRANSITION_KINDS, value.kind) && isSafeInteger(value.start_us) && isSafeInteger(value.end_us) &&
+    value.end_us > value.start_us && isSafeInteger(value.cut_us) && isId(value.on_clip_id) &&
+    (value.rest_clip_id === undefined || isId(value.rest_clip_id)) &&
+    (value.white_page_asset_id === undefined || isId(value.white_page_asset_id)) &&
+    (value.incoming_move_preset_id === undefined || oneOf(TIMELINE_MOVE_PRESET_IDS, value.incoming_move_preset_id)) &&
+    (value.outgoing_move_preset_id === undefined || oneOf(TIMELINE_MOVE_PRESET_IDS, value.outgoing_move_preset_id));
 }
 /** B3：单属性关键帧轨道校验（范围按属性，帧升序唯一，1-32 帧）。 */
 export function isTimelineKeyframeTrack(value: unknown, property: KeyframeProperty): value is TimelineKeyframeTrack {
@@ -2098,23 +2169,28 @@ export function isTimelineDocument(value: unknown): value is TimelineDocument {
   if (value.transitions !== undefined) {
     if (!Array.isArray(value.transitions) || value.transitions.length > TRANSITION_DOC_MAX || !value.transitions.every(isTimelineTransition)) return false;
     const seen = new Set<string>();
-    for (const item of value.transitions as TimelineTransition[]) { if (seen.has(item.after_clip_id)) return false; seen.add(item.after_clip_id); }
+    const clipIds = new Set((value.clips as TimelineClip[]).map(item => item.clip_id));
+    for (const item of value.transitions as TimelineTransition[]) {
+      if (seen.has(item.after_clip_id) || !clipIds.has(item.after_clip_id)) return false;
+      seen.add(item.after_clip_id);
+      if (item.incoming_clip_id != null && (!clipIds.has(item.incoming_clip_id) || item.incoming_clip_id === item.after_clip_id)) return false;
+    }
   }
-  // 轨道结构（数组顺序 = 自上而下）：[动态视频/文本轨道...] → [C1(字幕，可删，
-  // 存在时必须紧邻 V1 之前)] → V1(主视频) → A1(音频)。
+  // 轨道结构（数组顺序 = 自上而下）：[动态视频/文本轨道...] → [C1?] →
+  // V1(主视频) → A1(默认音频) → [动态音频轨道...]。
   const tracks = value.tracks as TimelineTrack[];
-  const audioTrack = tracks[tracks.length - 1];
-  const visual = tracks[tracks.length - 2];
-  if (audioTrack?.id !== "A1" || audioTrack.kind !== "audio") return false;
-  if (visual?.id !== "V1" || visual.kind !== "video") return false;
-  const dynamic = tracks.slice(0, -2);
-  const captionIndex = dynamic.findIndex(track => track.id === "C1");
-  if (captionIndex !== -1 && captionIndex !== dynamic.length - 1) return false;
-  if (dynamic.some(track => track.id === "V1" || track.id === "A1")) return false;
+  const videoIndex = tracks.findIndex(track => track.id === "V1");
+  const audioIndex = tracks.findIndex(track => track.id === "A1");
+  if (videoIndex < 0 || audioIndex !== videoIndex + 1 || tracks[videoIndex].kind !== "video" || tracks[audioIndex].kind !== "audio") return false;
+  const captionIndex = tracks.findIndex(track => track.id === "C1");
+  if (captionIndex !== -1 && captionIndex !== videoIndex - 1) return false;
+  if (tracks.slice(0, videoIndex).some(track => track.kind !== "video" && track.kind !== "text")) return false;
+  if (tracks.slice(audioIndex).some(track => track.kind !== "audio")) return false;
+  if (tracks.slice(audioIndex + 1).some(track => track.id === "A1" || !track.id.startsWith("A"))) return false;
   const trackIds = new Set(tracks.map(track => track.id));
   if (trackIds.size !== tracks.length) return false;
   const kindOf = (id: string) => id.startsWith("V") ? "video" : id.startsWith("T") ? "text" : "audio";
-  if (dynamic.some(track => track.id !== "C1" && kindOf(track.id) !== track.kind)) return false;
+  if (tracks.some(track => track.id !== "C1" && track.id !== "V1" && track.id !== "A1" && kindOf(track.id) !== track.kind)) return false;
   if (!onlyKeys(value.provenance, ["created_by", "source_transcript_ids"]) || !isTimelineCreatedBy(value.provenance.created_by) || !Array.isArray(value.provenance.source_transcript_ids) || !value.provenance.source_transcript_ids.every(isId)) return false;
 
   // 片段必须引用存在的轨道，且类型与轨道匹配；同轨时间区间不得重叠。
@@ -2150,7 +2226,7 @@ export function isTimelineDraft(value: unknown): value is TimelineDraft {
   return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["project_id", "base_revision_id", "document", "updated_at", "conflict"]) && isId(value.project_id) && isId(value.base_revision_id) && isTimelineDocument(value.document) && value.document.project_id === value.project_id && isTime(value.updated_at) && typeof value.conflict === "boolean";
 }
 export function isTimelineState(value: unknown): value is TimelineState {
-  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["project_id", "current_revision", "draft", "can_undo", "can_redo", "current_preview"]) && isId(value.project_id) && isTimelineRevision(value.current_revision) && value.current_revision.project_id === value.project_id && (value.draft === null || isTimelineDraft(value.draft)) && typeof value.can_undo === "boolean" && typeof value.can_redo === "boolean" && (value.current_preview === null || (isAuthoritativePreview(value.current_preview) && value.current_preview.project_id === value.project_id));
+  return isRecord(value) && !hasSensitiveKey(value) && onlyKeys(value, ["project_id", "current_revision", "draft", "can_undo", "can_redo", "current_preview", "active_transitions"]) && isId(value.project_id) && isTimelineRevision(value.current_revision) && value.current_revision.project_id === value.project_id && (value.draft === null || isTimelineDraft(value.draft)) && typeof value.can_undo === "boolean" && typeof value.can_redo === "boolean" && (value.current_preview === null || (isAuthoritativePreview(value.current_preview) && value.current_preview.project_id === value.project_id)) && Array.isArray(value.active_transitions) && value.active_transitions.every(isActiveTimelineTransition);
 }
 export function isTimelineCreateInput(value: unknown): value is TimelineCreateInput {
   if (!isRecord(value) || hasSensitiveKey(value) || !onlyKeys(value, ["schema_version", "source", "default_layout", "caption_preset_id"]) || value.schema_version !== 1 || !isRecord(value.source) || !isTimelineLayout(value.default_layout) || !isCaptionPresetId(value.caption_preset_id)) return false;
@@ -2162,7 +2238,7 @@ export function isTimelinePatchOperation(value: unknown): value is TimelinePatch
   if (!isRecord(value) || hasSensitiveKey(value) || !isString(value.op)) return false;
   const index = (key: string) => isInteger(value[key]); const id = (key: string) => isId(value[key]); const us = (key: string, minimum = 0) => isInteger(value[key], minimum);
   switch (value.op) {
-    case "insert_asset_clip": return onlyKeys(value, ["op", "asset_id", "at_index", "source_start_us", "source_end_us", "duration_us", "layout", "speed_milli", "reverse_playback", "track_id", "as_audio", "link_to_clip_id", "timeline_start_us", "edit_mode"]) && id("asset_id") && index("at_index") && (value.source_start_us === undefined || us("source_start_us")) && (value.source_end_us === undefined || us("source_end_us", 1)) && (value.duration_us === undefined || us("duration_us", 500_000)) && (value.layout === undefined || isTimelineLayout(value.layout)) && (value.speed_milli === undefined || (isInteger(value.speed_milli, 250) && value.speed_milli <= 4000)) && (value.reverse_playback === undefined || typeof value.reverse_playback === "boolean") && (value.track_id === undefined || (isString(value.track_id) && Boolean(value.track_id.length))) && (value.as_audio === undefined || typeof value.as_audio === "boolean") && (value.link_to_clip_id === undefined || id("link_to_clip_id")) && (value.timeline_start_us === undefined || us("timeline_start_us")) && (value.edit_mode === undefined || value.edit_mode === "overwrite") && (value.edit_mode !== "overwrite" || value.timeline_start_us !== undefined) && (value.timeline_start_us === undefined || value.edit_mode === "overwrite");
+    case "insert_asset_clip": return onlyKeys(value, ["op", "asset_id", "at_index", "source_start_us", "source_end_us", "duration_us", "layout", "speed_milli", "reverse_playback", "track_id", "as_audio", "link_to_clip_id", "timeline_start_us", "edit_mode", "linkage_enabled"]) && id("asset_id") && index("at_index") && (value.source_start_us === undefined || us("source_start_us")) && (value.source_end_us === undefined || us("source_end_us", 1)) && (value.duration_us === undefined || us("duration_us", 100_000)) && (value.layout === undefined || isTimelineLayout(value.layout)) && (value.speed_milli === undefined || (isInteger(value.speed_milli, 100) && value.speed_milli <= 100_000)) && (value.reverse_playback === undefined || typeof value.reverse_playback === "boolean") && (value.track_id === undefined || (isString(value.track_id) && Boolean(value.track_id.length))) && (value.as_audio === undefined || typeof value.as_audio === "boolean") && (value.link_to_clip_id === undefined || id("link_to_clip_id")) && (value.timeline_start_us === undefined || us("timeline_start_us")) && (value.edit_mode === undefined || value.edit_mode === "place" || value.edit_mode === "insert" || value.edit_mode === "overwrite") && (value.edit_mode === undefined || value.timeline_start_us !== undefined) && (value.timeline_start_us === undefined || value.edit_mode !== undefined) && (value.linkage_enabled === undefined || typeof value.linkage_enabled === "boolean");
     case "detach_audio": return onlyKeys(value, ["op", "clip_id"]) && id("clip_id");
     case "set_clip_link": return onlyKeys(value, ["op", "clip_ids"]) && Array.isArray(value.clip_ids) && value.clip_ids.length >= 2 && value.clip_ids.every((item) => isId(item));
     case "clear_clip_link": return onlyKeys(value, ["op", "clip_id"]) && id("clip_id");
@@ -2170,8 +2246,16 @@ export function isTimelinePatchOperation(value: unknown): value is TimelinePatch
     case "remove_clip": return onlyKeys(value, ["op", "clip_id", "ignore_link"]) && id("clip_id") && (value.ignore_link === undefined || typeof value.ignore_link === "boolean");
     case "move_clip": return onlyKeys(value, ["op", "clip_id", "to_index", "ignore_link"]) && id("clip_id") && index("to_index") && (value.ignore_link === undefined || typeof value.ignore_link === "boolean");
     case "position_clip": return onlyKeys(value, ["op", "clip_id", "timeline_start_us", "track_id", "ignore_link"]) && id("clip_id") && us("timeline_start_us") && (value.track_id === undefined || (isString(value.track_id) && Boolean(value.track_id.length))) && (value.ignore_link === undefined || typeof value.ignore_link === "boolean");
-    case "position_clips": return onlyKeys(value, ["op", "placements"]) && Array.isArray(value.placements) && value.placements.length >= 1 && value.placements.length <= 100 && value.placements.every(item => isRecord(item) && onlyKeys(item, ["clip_id", "timeline_start_us", "track_id"]) && isId(item.clip_id) && isInteger(item.timeline_start_us, 0) && (item.track_id === undefined || (isString(item.track_id) && Boolean(item.track_id.length)))) && new Set(value.placements.map(item => item.clip_id)).size === value.placements.length;
-    case "add_track": return onlyKeys(value, ["op", "kind"]) && oneOf(["video", "text"], value.kind);
+    case "position_clips": return onlyKeys(value, ["op", "placements", "ignore_link"]) && (value.ignore_link === undefined || typeof value.ignore_link === "boolean") && Array.isArray(value.placements) && value.placements.length >= 1 && value.placements.every(item => isRecord(item) && onlyKeys(item, ["clip_id", "timeline_start_us", "track_id"]) && isId(item.clip_id) && isInteger(item.timeline_start_us, 0) && (item.track_id === undefined || (isString(item.track_id) && Boolean(item.track_id.length)))) && new Set(value.placements.map(item => item.clip_id)).size === value.placements.length;
+    case "split_timeline_clips": return onlyKeys(value, ["op", "clip_ids", "caption_ids", "timeline_time_us"]) && Array.isArray(value.clip_ids) && value.clip_ids.every(isId) && new Set(value.clip_ids).size === value.clip_ids.length && Array.isArray(value.caption_ids) && value.caption_ids.every(isId) && new Set(value.caption_ids).size === value.caption_ids.length && value.clip_ids.length + value.caption_ids.length > 0 && us("timeline_time_us", 1);
+    case "duplicate_timeline_items": return onlyKeys(value, ["op", "copies"]) && Array.isArray(value.copies) && value.copies.length > 0 && value.copies.every(item => {
+      if (!isRecord(item) || !isId(item.source_id) || !isId(item.copy_id) || !isInteger(item.timeline_start_us, 0) || item.timeline_start_us > Number.MAX_SAFE_INTEGER) return false;
+      if (item.item_kind === "clip") return onlyKeys(item, ["item_kind", "source_id", "copy_id", "timeline_start_us", "track_id", "snapshot"]) && isString(item.track_id) && item.track_id.length > 0 && (item.snapshot === undefined || isTimelineClip(item.snapshot));
+      if (item.item_kind === "caption") return onlyKeys(item, ["item_kind", "source_id", "copy_id", "timeline_start_us", "snapshot"]) && (item.snapshot === undefined || isTimelineCaption(item.snapshot));
+      return false;
+    }) && new Set(value.copies.map(item => item.copy_id)).size === value.copies.length;
+    case "replace_clip_source": return onlyKeys(value, ["op", "clip_id", "asset_id"]) && id("clip_id") && id("asset_id");
+    case "add_track": return onlyKeys(value, ["op", "kind", "track_id", "before_track_id", "after_track_id", "audio_index"]) && oneOf(["video", "audio", "text"], value.kind) && (value.track_id === undefined || id("track_id")) && (value.before_track_id === undefined || (isString(value.before_track_id) && value.before_track_id.length > 0)) && (value.after_track_id === undefined || (isString(value.after_track_id) && value.after_track_id.length > 0)) && (value.audio_index === undefined || index("audio_index")) && !(value.before_track_id !== undefined && value.after_track_id !== undefined) && !((value.before_track_id !== undefined || value.after_track_id !== undefined) && value.audio_index !== undefined) && (value.audio_index === undefined || value.kind === "audio");
     case "remove_track": return onlyKeys(value, ["op", "track_id"]) && isString(value.track_id) && Boolean(value.track_id.length);
     case "move_track": return onlyKeys(value, ["op", "track_id", "to_index"]) && isString(value.track_id) && Boolean(value.track_id.length) && index("to_index");
     case "set_track_flags": return onlyKeys(value, ["op", "track_id", "locked", "hidden", "muted", "solo"]) && isString(value.track_id) && Boolean(value.track_id.length) && (value.locked === undefined || typeof value.locked === "boolean") && (value.hidden === undefined || typeof value.hidden === "boolean") && (value.muted === undefined || typeof value.muted === "boolean") && (value.solo === undefined || typeof value.solo === "boolean") && (value.locked !== undefined || value.hidden !== undefined || value.muted !== undefined || value.solo !== undefined);
@@ -2181,6 +2265,7 @@ export function isTimelinePatchOperation(value: unknown): value is TimelinePatch
     case "split_edit": return onlyKeys(value, ["op", "clip_id", "source_time_us", "audio_delta_us"]) && id("clip_id") && us("source_time_us", 1) && isInteger(value.audio_delta_us);
     case "set_layout": return onlyKeys(value, ["op", "clip_id", "layout"]) && id("clip_id") && isTimelineLayout(value.layout);
     case "set_audio": return onlyKeys(value, ["op", "clip_id", "enabled", "gain_db", "fade_in_us", "fade_out_us"]) && id("clip_id") && typeof value.enabled === "boolean" && isFiniteNumber(value.gain_db) && value.gain_db >= -60 && value.gain_db <= 12 && (value.fade_in_us === undefined || us("fade_in_us")) && (value.fade_out_us === undefined || us("fade_out_us"));
+    case "set_clip_transition_facts": return onlyKeys(value, ["op", "clip_id", "picture_fade_in_us", "picture_fade_out_us", "move_in", "move_out"]) && id("clip_id") && ["picture_fade_in_us", "picture_fade_out_us"].every(key => value[key] === undefined || value[key] === null || (isSafeInteger(value[key]))) && ["move_in", "move_out"].every(key => value[key] === undefined || value[key] === null || isRecord(value[key]) && onlyKeys(value[key], ["preset_id", "duration_us"]) && oneOf(TIMELINE_MOVE_PRESET_IDS, value[key].preset_id) && isSafeInteger(value[key].duration_us)) && ["picture_fade_in_us", "picture_fade_out_us", "move_in", "move_out"].some(key => value[key] !== undefined);
     case "add_transition": return onlyKeys(value, ["op", "after_clip_id", "kind", "duration_us"]) && id("after_clip_id") && oneOf(TRANSITION_IDS, value.kind) && us("duration_us", 100_000) && Number(value.duration_us) <= 2_000_000;
     case "update_transition": return onlyKeys(value, ["op", "transition_id", "kind", "duration_us"]) && id("transition_id") && (value.kind === undefined || oneOf(TRANSITION_IDS, value.kind)) && (value.duration_us === undefined || (us("duration_us", 100_000) && Number(value.duration_us) <= 2_000_000)) && (value.kind !== undefined || value.duration_us !== undefined);
     case "remove_transition": return onlyKeys(value, ["op", "transition_id"]) && id("transition_id");
@@ -2189,15 +2274,15 @@ export function isTimelinePatchOperation(value: unknown): value is TimelinePatch
     case "set_clip_transform": return onlyKeys(value, ["op", "clip_id", "transform"]) && id("clip_id") && isTimelineClipStaticTransform(value.transform);
     case "set_clip_mask": return onlyKeys(value, ["op", "clip_id", "mask"]) && id("clip_id") && isTimelineClipMask(value.mask);
     case "set_clip_keying": return onlyKeys(value, ["op", "clip_id", "keying"]) && id("clip_id") && isTimelineClipKeying(value.keying);
-    case "set_speed": return onlyKeys(value, ["op", "clip_id", "speed_milli", "ripple"]) && id("clip_id") && isInteger(value.speed_milli, 250) && value.speed_milli <= 4000 && (value.ripple === undefined || typeof value.ripple === "boolean");
+    case "set_speed": return onlyKeys(value, ["op", "clip_id", "speed_milli", "ripple"]) && id("clip_id") && isInteger(value.speed_milli, 100) && value.speed_milli <= 100_000 && (value.ripple === undefined || typeof value.ripple === "boolean");
     case "set_reverse_playback": return onlyKeys(value, ["op", "clip_id", "reverse_playback"]) && id("clip_id") && typeof value.reverse_playback === "boolean";
-    case "set_image_duration": return onlyKeys(value, ["op", "clip_id", "duration_us"]) && id("clip_id") && us("duration_us", 500_000) && Number(value.duration_us) <= 30_000_000;
+    case "set_image_duration": return onlyKeys(value, ["op", "clip_id", "duration_us"]) && id("clip_id") && us("duration_us", 100_000) && Number(value.duration_us) <= Number.MAX_SAFE_INTEGER;
     case "set_clip_locked": return onlyKeys(value, ["op", "clip_id", "locked"]) && id("clip_id") && typeof value.locked === "boolean";
-    case "add_caption": return onlyKeys(value, ["op", "start_us", "end_us", "text", "preset_id", "source_clip_id"]) && us("start_us") && us("end_us", 1) && Number(value.end_us) - Number(value.start_us) >= 200_000 && isString(value.text) && value.text.trim().length > 0 && [...value.text].length <= 200 && isCaptionPresetId(value.preset_id) && value.source_clip_id === null;
-    case "import_captions": return onlyKeys(value, ["op", "entries", "preset_id", "replace_existing"]) && Array.isArray(value.entries) && value.entries.length > 0 && value.entries.length <= 2000 && (value.entries as unknown[]).every(item => isRecord(item) && onlyKeys(item, ["start_us", "end_us", "text"]) && isInteger(item.start_us, 0) && isInteger(item.end_us, 1) && Number(item.end_us) - Number(item.start_us) >= 200_000 && isString(item.text) && item.text.trim().length > 0 && [...item.text].length <= 200) && isCaptionPresetId(value.preset_id) && typeof value.replace_existing === "boolean";
+    case "add_caption": return onlyKeys(value, ["op", "start_us", "end_us", "text", "preset_id", "source_clip_id"]) && us("start_us") && us("end_us", 1) && Number(value.end_us) - Number(value.start_us) >= 100_000 && isString(value.text) && value.text.trim().length > 0 && [...value.text].length <= 200 && isCaptionPresetId(value.preset_id) && value.source_clip_id === null;
+    case "import_captions": return onlyKeys(value, ["op", "entries", "preset_id", "replace_existing"]) && Array.isArray(value.entries) && value.entries.length > 0 && value.entries.length <= 2000 && (value.entries as unknown[]).every(item => isRecord(item) && onlyKeys(item, ["start_us", "end_us", "text"]) && isInteger(item.start_us, 0) && isInteger(item.end_us, 1) && Number(item.end_us) - Number(item.start_us) >= 100_000 && isString(item.text) && item.text.trim().length > 0 && [...item.text].length <= 200) && isCaptionPresetId(value.preset_id) && typeof value.replace_existing === "boolean";
     case "remove_caption": return onlyKeys(value, ["op", "caption_id"]) && id("caption_id");
     case "update_caption": return onlyKeys(value, ["op", "caption_id", "text"]) && id("caption_id") && isString(value.text) && value.text.trim().length > 0 && [...value.text].length <= 200;
-    case "set_caption_timing": return onlyKeys(value, ["op", "caption_id", "start_us", "end_us"]) && id("caption_id") && us("start_us") && us("end_us", 1) && Number(value.end_us) - Number(value.start_us) >= 200_000;
+    case "set_caption_timing": return onlyKeys(value, ["op", "caption_id", "start_us", "end_us"]) && id("caption_id") && us("start_us") && us("end_us", 1) && Number(value.end_us) - Number(value.start_us) >= 100_000;
     case "set_caption_preset": return onlyKeys(value, ["op", "caption_id", "preset_id"]) && id("caption_id") && isCaptionPresetId(value.preset_id);
     case "set_caption_style": return onlyKeys(value, ["op", "caption_id", "style"]) && id("caption_id") && isCaptionStyleOverride(value.style);
     case "clear_caption_style": return onlyKeys(value, ["op", "caption_id"]) && id("caption_id");

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
-from aivs_core.database import Database, json_dumps
+from aivs_core.database import Database, json_dumps, json_loads
 from aivs_core.projects import DomainError
 from aivs_core.rendering.plan import RenderPlanCompiler, content_semantics
 
@@ -176,3 +177,113 @@ def test_plan_rejects_draft_empty_archived_and_changed_inputs(tmp_path: Path) ->
         db.execute("UPDATE projects SET status='archived' WHERE id='p1'")
     with pytest.raises(DomainError):
         compiler.compile("p1", revision_id, "authoritative_preview")
+
+
+def _install_fixture_timeline(
+    database: Database, fixture_document: dict, revision_id: str, parent_revision_id: str,
+) -> str:
+    with database.connection() as db:
+        row = db.execute("SELECT document_json FROM timeline_revisions WHERE id='r1'").fetchone()
+        document = json_loads(row["document_json"])
+        document["tracks"] = fixture_document["tracks"]
+        document["clips"] = json.loads(json.dumps(fixture_document["clips"]))
+        document["transitions"] = fixture_document.get("transitions", [])
+        for clip in document["clips"]:
+            clip["asset_id"] = "v1" if clip["asset_kind"] == "video" else "i1"
+            clip["layout"] = "fit"
+        db.execute(
+            "INSERT INTO timeline_revisions VALUES (?,?,?,?,?,?,?,?,?)",
+            (revision_id, "p1", parent_revision_id, 1, json_dumps(document),
+             "sha256:fixture", "fixture", "user", "now"),
+        )
+    return revision_id
+
+
+def test_render_plan_matches_shared_openfilm_active_pair_fixture(tmp_path: Path) -> None:
+    fixture_path = (
+        Path(__file__).resolve().parents[4] / "tests" / "fixtures"
+        / "openfilm_transition_projection.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    case = fixture["cases"]["cross_track_dissolve"]
+    compiler, database, revision_id = _compiler(tmp_path)
+    revision_id = _install_fixture_timeline(database, case["document"], "fixture-r2", "r1")
+
+    preview = compiler.compile("p1", revision_id, "authoritative_preview")
+    export = compiler.compile("p1", revision_id, "final_export")
+    expected = case["expected_active_transitions"]
+    assert preview["active_transitions"] == expected
+    assert export["active_transitions"] == expected
+    assert content_semantics(preview)["active_transitions"] == expected
+    assert all(segment["transition_in"] is None for segment in preview["segments"])
+    assert preview["compatibility_transitions"] == []
+
+
+def test_render_plan_dormants_fixed_legacy_pair_after_successor_moves(tmp_path: Path) -> None:
+    fixture_path = (
+        Path(__file__).resolve().parents[4] / "tests" / "fixtures"
+        / "openfilm_transition_projection.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    case = fixture["cases"]["stale_compatibility"]
+    compiler, database, revision_id = _compiler(tmp_path)
+
+    before_revision = _install_fixture_timeline(
+        database, case["before_document"], "fixture-r2", "r1"
+    )
+    before = compiler.compile("p1", before_revision, "authoritative_preview")
+    assert len(before["compatibility_transitions"]) == 1
+    assert before["compatibility_transitions"][0]["outgoing_clip_id"] == "compat-out"
+    assert before["compatibility_transitions"][0]["incoming_clip_id"] == "compat-in"
+    outgoing = next(segment for segment in before["segments"] if segment["clip_id"] == "compat-out")
+    assert outgoing["transition_in"] is not None
+
+    after_revision = _install_fixture_timeline(
+        database, case["after_document"], "fixture-r3", before_revision
+    )
+    after = compiler.compile("p1", after_revision, "authoritative_preview")
+    assert after["active_transitions"] == case["expected_after_active_transitions"]
+    assert after["compatibility_transitions"] == case["expected_after_compatibility_transitions"]
+    assert all(segment["transition_in"] is None for segment in after["segments"])
+
+    source_facts_document = json.loads(json.dumps(case["before_document"]))
+    source_facts_document["clips"][0]["picture_fade_out_us"] = 300_000
+    source_facts_document["clips"][1]["picture_fade_in_us"] = 300_000
+    facts_revision = _install_fixture_timeline(
+        database, source_facts_document, "fixture-r4", after_revision,
+    )
+    with_facts = compiler.compile("p1", facts_revision, "authoritative_preview")
+    assert len(with_facts["active_transitions"]) == 1
+    assert with_facts["active_transitions"][0]["kind"] == "dip-black"
+    assert with_facts["compatibility_transitions"] == []
+
+
+def test_unknown_duration_input_keeps_requested_preview_and_export_window(tmp_path: Path) -> None:
+    compiler, database, _ = _compiler(tmp_path)
+    with database.connection() as db:
+        db.execute(
+            "INSERT INTO assets(id,project_id,kind,storage_mode,display_name,fingerprint,"
+            "size_bytes,availability,media_info_json,created_at,updated_at) "
+            "VALUES ('unknown-video','p1','video','external','unknown','fp-unknown',"
+            "1,'available',?,'now','now')",
+            (json_dumps({"duration_us": 0, "video_streams": [{}], "audio_streams": []}),),
+        )
+        row = db.execute("SELECT document_json FROM timeline_revisions WHERE id='r1'").fetchone()
+        document = json_loads(row["document_json"])
+        clip = document["clips"][0]
+        clip["asset_id"] = "unknown-video"
+        clip["source_start_us"] = 0
+        clip["source_end_us"] = 1_000_000
+        db.execute(
+            "INSERT INTO timeline_revisions VALUES (?,?,?,?,?,?,?,?,?)",
+            ("unknown-duration-r2", "p1", "r1", 1, json_dumps(document),
+             "sha256:unknown-duration", "test", "user", "now"),
+        )
+
+    for mode in ("authoritative_preview", "final_export"):
+        plan = compiler.compile("p1", "unknown-duration-r2", mode)
+        segment = next(item for item in plan["segments"] if item["clip_id"] == clip["clip_id"])
+        source = next(item for item in plan["inputs"] if item["asset_id"] == "unknown-video")
+        assert source["duration_us"] == 0  # 元数据仍表示未知，绝不伪造 EOF 边界。
+        assert (segment["source_start_us"], segment["source_end_us"]) == (0, 1_000_000)
+        assert (segment["timeline_start_us"], segment["timeline_end_us"]) == (0, 1_000_000)

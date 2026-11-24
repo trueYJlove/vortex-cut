@@ -2,7 +2,7 @@
  *  断言核心：播放期间（store 连续写入）主画布 drawTimeline 调用次数 ≤2，
  *  播放头由独立 DOM 覆盖层跟随；canvas 尺寸未变时不重赋 backing size。 */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import type { TimelineDocument } from "@aivideo/contracts";
 import { TimelinePanel } from "../src/app/timeline/TimelineCanvas.js";
 import { TimelinePlayheadLayer } from "../src/app/timeline/TimelinePlayheadLayer.js";
@@ -55,11 +55,12 @@ const baseProps = () => ({
  *  并对 canvas backing 赋值做尺寸守卫拦截。 */
 interface FakeCanvas2D {
   drawCount: number;
+  mainDrawCount: number;
   widthSetCount: number;
   heightSetCount: number;
 }
 function installCanvas2DStub(): FakeCanvas2D {
-  const state: FakeCanvas2D = { drawCount: 0, widthSetCount: 0, heightSetCount: 0 };
+  const state: FakeCanvas2D = { drawCount: 0, mainDrawCount: 0, widthSetCount: 0, heightSetCount: 0 };
   const stub = {
     /* 「一次绘制」按 setTransform 计数：drawTimeline 每次绘制的第一件事就是它，
        与配色无关。原来靠比对画布底色的字面量 "#181c1f" 判定——那是脆的，
@@ -99,6 +100,9 @@ function installCanvas2DStub(): FakeCanvas2D {
         },
         get(obj, prop) {
           if (prop === "canvas") return target;
+          if (prop === "setTransform" && target.getAttribute("aria-label") === "时间线画布") {
+            return () => { state.mainDrawCount += 1; obj.setTransform(); };
+          }
           return Reflect.get(obj, prop);
         },
       });
@@ -140,6 +144,18 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   store = null;
+});
+
+it("redraws the ruler without repainting the tracks on pointer hover", () => {
+  const state = installCanvas2DStub();
+  const { container } = render(<TimelinePanel document={doc()} {...baseProps()} />);
+  const ruler = container.querySelector(".timeline-ruler-pin")!;
+  const before = { ...state };
+  for (let x = 230; x < 250; x++) {
+    fireEvent(ruler, new MouseEvent("pointermove", { bubbles: true, clientX: x }));
+  }
+  expect(state.drawCount).toBeGreaterThan(before.drawCount);
+  expect(state.mainDrawCount).toBe(before.mainDrawCount);
 });
 
 describe("A06 — 播放头 store", () => {

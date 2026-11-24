@@ -48,11 +48,12 @@ IR_SCHEMA = "preview-ir-v1"
 # z 序显式由 tracks 数组序决定、转场仅同轨邻接、兼容层不再按时间序首段分裂。
 # v8（P231 OpenFilm parity follow-up）：隐藏视觉轨不触发整条预览回退；隐藏层不输出像素，仍保留时间线长度。
 # v6 缓存条目包含错误的时长与层顺序，必须整体失效。
-IR_PROJECTOR_VERSION = 8
+IR_PROJECTOR_VERSION = 10
 MAX_IR_FRAMES = 27_000  # 15 分钟 @30fps（O2 体量护栏）
 
 ALLOWED_KEYFRAME_PROPS = {"position", "opacity", "scale", "rotate"}
 ALLOWED_TRANSITIONS = {"fade", "fadeblack"}
+SUPPORTED_ACTIVE_TRANSITIONS = {"dissolve", "dip-black", "crossfade"}
 ALLOWED_MAIN_LAYOUTS = {"fit", "blurred_background", "crop_fill"}
 
 
@@ -119,6 +120,19 @@ def _split_overlapped_inputs(
 
 
 def _validate_whitelist(plan: dict[str, Any]) -> None:
+    for transition in plan.get("active_transitions", []):
+        kind = transition.get("kind")
+        if kind == "move":
+            presets = [
+                transition.get("incoming_move_preset_id"),
+                transition.get("outgoing_move_preset_id"),
+            ]
+            names = ", ".join(item for item in presets if isinstance(item, str)) or "unknown preset"
+            raise _unsupported(f"OpenFilm move {names} 尚未在 preview IR 中实现；拒绝降级为普通叠化")
+        if kind == "dip-white":
+            raise _unsupported("dip-white 需要可信的 HTML page frame service；当前 Core 没有该帧源")
+        if kind not in SUPPORTED_ACTIVE_TRANSITIONS:
+            raise _unsupported(f"active transition kind={kind!r} 尚未实现")
     for segment in plan["segments"]:
         clip_id = segment["clip_id"]
         # 隐藏轨在预览里不渲染，子集外效果也不应迫使整条时间线回退；
@@ -133,6 +147,13 @@ def _validate_whitelist(plan: dict[str, Any]) -> None:
             raise _fail(clip_id, "reframe（重构图）")
         if segment.get("reverse_playback"):
             raise _fail(clip_id, "reverse_playback（倒放）")
+        for edge in ("move_in", "move_out"):
+            move = segment.get(edge)
+            if isinstance(move, dict):
+                raise _fail(
+                    clip_id,
+                    f"OpenFilm {edge} preset {move.get('preset_id', 'unknown')} 尚未实现；拒绝静默忽略",
+                )
         # 2026-11-10：图片素材放行实时合成。
         # 依据：桌面渲染侧早已具备静图通路（preview-session 为 image 建独立 rig、
         # 不占解码保温、纹理按 ffprobe 给出的 width/height 上传），此前仅因
@@ -301,7 +322,12 @@ def _layer_entry(segment: dict[str, Any], input_id: str, geometry: dict[str, Any
         "box": {"x": round(content_x, 3), "y": round(content_y, 3), "w": content_w, "h": content_h},
         "shift": {"dx": round(shift_dx, 3), "dy": round(shift_dy, 3)},
         "rotation_deg": round(rotation_deg, 4),
-        "alpha": round(_opacity_alpha(keyframes, t_seg_us) * static_alpha, 6),
+        "alpha": round(
+            _opacity_alpha(keyframes, t_seg_us)
+            * static_alpha
+            * _picture_fade_alpha(segment, t_exact_us),
+            6,
+        ),
         "layout": segment.get("layout", "fit"),
         **({"effects": effects} if effects else {}),
     }
@@ -323,6 +349,22 @@ def _source_frame_n(segment: dict[str, Any], t_exact_us: float, offset_from_us: 
     position = source_start + offset_from_us + elapsed * speed_milli / 1000.0
     position = min(max(position, source_start), max(source_start, source_end - 1_000_000 / FPS))
     return max(int(position * FPS / 1_000_000 + 1e-6), 0)
+
+
+def _picture_fade_alpha(segment: dict[str, Any], t_exact_us: float) -> float:
+    """Clip-local alpha envelope shared by OpenFilm picture transition facts."""
+    start_us = int(segment["timeline_start_us"])
+    end_us = int(segment["timeline_end_us"])
+    duration_us = max(end_us - start_us, 0)
+    elapsed_us = t_exact_us - start_us
+    alpha = 1.0
+    fade_in_us = max(int(segment.get("picture_fade_in_us") or 0), 0)
+    fade_out_us = max(int(segment.get("picture_fade_out_us") or 0), 0)
+    if fade_in_us:
+        alpha = min(alpha, min(max(elapsed_us / fade_in_us, 0.0), 1.0))
+    if fade_out_us:
+        alpha = min(alpha, min(max((duration_us - elapsed_us) / fade_out_us, 0.0), 1.0))
+    return max(0.0, min(alpha, 1.0))
 
 
 def _parse_ass_color(value: str) -> list[int]:
@@ -420,8 +462,10 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
     inputs: list[dict[str, Any]] = []
     geometry_by_input: dict[str, dict[str, Any]] = {}
     for item in plan["inputs"]:
-        # 纯音频输入（A1）：无视频流，几何占位（合成器不消费；音频走前端 WebAudio）。
-        if item["asset_kind"] == "audio":
+        video_required = bool(item.get("video_required", item["asset_kind"] != "audio"))
+        # 纯音频输入（A1）以及只作为音频消费的视频源：几何占位，绝不
+        # 要求 ffprobe 视频流几何或为它建立视觉解码链。
+        if not video_required:
             geometry = {"width": 0, "height": 0, "sar": 1.0}
         else:
             stream = ((probes.get(item["asset_id"]) or {}).get("video_streams") or [None])[0]
@@ -455,13 +499,15 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
         # 此前**连素材是不是 HDR 都不知道**，无法在点播放前提示用户。
         # 判定只看 transfer（PQ=smpte2084 / HLG=arib-std-b67）；缺失或其它值
         # 一律按 SDR（保守：宁可漏报，不能把 SDR 误报成 HDR 造成虚假告警）。
-        color_transfer = None if item["asset_kind"] == "audio" else (
+        color_transfer = None if not video_required else (
             ((probes.get(item["asset_id"]) or {}).get("video_streams") or [{}])[0].get("color_transfer")
         )
         inputs.append({
             "input_id": item["input_id"], "asset_id": item["asset_id"],
             "asset_kind": item["asset_kind"], "duration_us": item["duration_us"],
-            "has_audio": item["has_audio"], "geometry": geometry,
+            "video_required": video_required,
+            "audio_required": bool(item.get("audio_required", item.get("has_audio", False))),
+            "has_audio": bool(item.get("has_audio", False)), "geometry": geometry,
             "hdr": color_transfer in ("smpte2084", "arib-std-b67"),
         })
         geometry_by_input[item["input_id"]] = geometry
@@ -676,7 +722,12 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
             "src_t_us": int(src_n * 1_000_000 / FPS),
             "content": {"x": content_x, "y": content_y, "w": content_w, "h": content_h},
             "shift": {"dx": round(shift_dx, 3), "dy": round(shift_dy, 3)},
-            "alpha": round(_opacity_alpha(keyframes, t_seg_us) * static_alpha, 6),
+            "alpha": round(
+                _opacity_alpha(keyframes, t_seg_us)
+                * static_alpha
+                * _picture_fade_alpha(segment, t_exact_us),
+                6,
+            ),
             "rotation_deg": round(rotation_deg, 4),
             # 主轨布局（blurred_background = 模糊垫底 + fit 内容；合成器消费）。
             "layout": segment.get("layout", "fit"),
@@ -770,9 +821,28 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
         active_captions = [
             caption["caption_id"] for caption in caption_lookup.next_batch(t_exact_us)
         ]
+        active_at_time = []
+        for transition in plan.get("active_transitions", []):
+            start_us = int(transition["start_us"])
+            end_us = int(transition["end_us"])
+            if start_us <= t_exact_us < end_us:
+                active_at_time.append({
+                    **transition,
+                    "progress": round(
+                        min(
+                            max(
+                                (t_exact_us - start_us) / max(1, end_us - start_us),
+                                0.0,
+                            ),
+                            1.0,
+                        ),
+                        6,
+                    ),
+                })
         frames.append({"n": n, "t_us": t_us, "main": main_entry,
                        "layers": layer_entries,
-                       "overlays": overlay_entries, "captions": active_captions})
+                       "overlays": overlay_entries, "captions": active_captions,
+                       "active_transitions": active_at_time})
 
     return {
         "schema": IR_SCHEMA,
@@ -788,6 +858,10 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
             "background": plan.get("canvas_background_color", "#000000"),
         },
         "inputs": inputs,
+        # Pair IDs and windows are copied from the immutable render plan. The
+        # per-frame view above only adds progress; it never re-discovers pairs.
+        "active_transitions": plan.get("active_transitions", []),
+        "compatibility_transitions": plan.get("compatibility_transitions", []),
         "segments": [
             {
                 "clip_id": segment["clip_id"], "track_id": segment["track_id"],
@@ -796,6 +870,13 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
                 "timeline_start_us": segment["timeline_start_us"], "timeline_end_us": segment["timeline_end_us"],
                 "output_start_us": _output_window(segment)[0], "output_end_us": _output_window(segment)[1],
                 "layout": segment["layout"], "speed_milli": segment.get("speed_milli", 1000),
+                "video_required": bool(
+                    segment.get("video_required", segment["asset_kind"] != "audio")
+                ),
+                "audio_required": bool(
+                    segment.get("audio_required", segment.get("audio_enabled", False))
+                ),
+                "has_audio": bool(segment.get("has_audio", False)),
             }
             for segment in segments
         ],

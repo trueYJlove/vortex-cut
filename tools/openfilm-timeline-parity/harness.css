@@ -1,0 +1,7 @@
+/* Keep the browser at the planned full-window size while testing the same 380px timeline region. */
+.timeline-fixture-frame > .timeline-pane {
+  box-sizing: border-box;
+  height: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
+}

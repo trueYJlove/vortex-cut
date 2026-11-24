@@ -181,7 +181,7 @@ TIMELINE_PATCH_OPERATIONS_SCHEMA = {
         ),
         _operation_schema(
             ["clip_id", "duration_us"],
-            {"op": {"const": "set_image_duration"}, "clip_id": _STRING, "duration_us": _INTEGER},
+            {"op": {"const": "set_image_duration"}, "clip_id": _STRING, "duration_us": {**_INTEGER, "minimum": 100_000, "maximum": 9_007_199_254_740_991}},
         ),
         _operation_schema(
             ["caption_id"], {"op": {"const": "remove_caption"}, "caption_id": _STRING}
@@ -225,7 +225,7 @@ TIMELINE_PATCH_OPERATIONS_SCHEMA = {
             {
                 "op": {"const": "set_speed"},
                 "clip_id": _STRING,
-                "speed_milli": {"type": "integer", "minimum": 250, "maximum": 4000},
+                "speed_milli": {"type": "integer", "minimum": 100, "maximum": 100000},
             },
         ),
         _operation_schema(

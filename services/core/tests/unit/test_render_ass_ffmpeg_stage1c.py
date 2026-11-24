@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -105,6 +106,49 @@ def test_builder_has_three_layouts_continuous_audio_and_no_text_in_filter() -> N
     assert "shell" not in " ".join(args).lower()
 
 
+@pytest.mark.parametrize("has_audio", [False, True])
+def test_video_backed_audio_role_disables_video_decode_and_keeps_silence_fallback(
+    has_audio: bool,
+) -> None:
+    segment = {
+        "clip_id": "audio-role",
+        "input_id": "I0",
+        "asset_kind": "audio",
+        "source_asset_kind": "video",
+        "source_start_us": 0,
+        "source_end_us": 1_000_000,
+        "timeline_start_us": 0,
+        "timeline_end_us": 1_000_000,
+        "layout": "fit",
+        "audio_enabled": True,
+        "audio_required": has_audio,
+        "has_audio": has_audio,
+        "gain_db": 0.0,
+    }
+    args = build_timeline_args(
+        {
+            "segments": [segment], "captions": {"items": []},
+            "output": {"width": 1080, "height": 1920},
+        },
+        [Path("video-as-audio.mp4")],
+        [{"video_streams": [{}], "audio_streams": ([{}] if has_audio else [])}],
+        "libopenh264",
+        "output.mp4",
+        captions=False,
+    )
+    input_index = args.index("-i")
+    assert args[input_index - 1] == "-vn"
+    assert args[input_index + 1] == "video-as-audio.mp4"
+    graph = args[args.index("-filter_complex") + 1]
+    assert "[0:v]" not in graph
+    assert ("[0:a:0]" in graph) is has_audio
+    silent_a1 = (
+        "anullsrc=channel_layout=stereo:sample_rate=48000,"
+        "atrim=duration=1.000000,asetpts=PTS-STARTPTS[a1s0]"
+    )
+    assert (silent_a1 in graph) is (not has_audio)
+
+
 def test_builder_rejects_unknown_layout() -> None:
     plan = _plan()
     plan["segments"][0]["layout"] = "unknown"
@@ -181,7 +225,7 @@ def test_builder_applies_speed_and_reverse_filters() -> None:
     assert "atempo=0." not in graph.replace("atempo=0.500000", "")  # 无反向 0.25 误挂音频
 
 
-def test_builder_audio_tempo_chain_splits_beyond_single_atempo_range() -> None:
+def test_builder_audio_tempo_chain_splits_openfilm_speed_domain() -> None:
     plan = _plan()
     plan["segments"] = [
         {
@@ -210,14 +254,42 @@ def test_builder_audio_tempo_chain_splits_beyond_single_atempo_range() -> None:
             "gain_db": 0.0,
             "speed_milli": 4000,
         },
+        {
+            "clip_id": "tenth",
+            "input_id": "I2",
+            "asset_kind": "video",
+            "source_start_us": 0,
+            "source_end_us": 4_000_000,
+            "timeline_start_us": 18_000_000,
+            "timeline_end_us": 58_000_000,
+            "layout": "fit",
+            "audio_enabled": True,
+            "gain_db": 0.0,
+            "speed_milli": 100,
+        },
+        {
+            "clip_id": "hundred",
+            "input_id": "I3",
+            "asset_kind": "video",
+            "source_start_us": 0,
+            "source_end_us": 1_000_000,
+            "timeline_start_us": 58_000_000,
+            "timeline_end_us": 58_010_000,
+            "layout": "fit",
+            "audio_enabled": True,
+            "gain_db": 0.0,
+            "speed_milli": 100_000,
+        },
     ]
-    paths = [Path("a.mp4"), Path("b.mp4")]
-    probes = [{"audio_streams": [{}]}, {"audio_streams": [{}]}]
+    paths = [Path("a.mp4"), Path("b.mp4"), Path("c.mp4"), Path("d.mp4")]
+    probes = [{"audio_streams": [{}]} for _ in paths]
     args = build_timeline_args(plan, paths, probes, "libopenh264", "out.mp4", captions=False)
     graph = args[args.index("-filter_complex") + 1]
-    # 0.25x = 0.5 × 0.5 两级；4x = 2.0 × 2.0 两级。
+    # 0.25x = 0.5 × 0.5；4x = 2.0 × 2.0；0.1x 与 100x 分解为 FFmpeg atempo 支持的乘积。
     assert "atempo=0.500000,atempo=0.500000" in graph
     assert "atempo=2.000000,atempo=2.000000" in graph
+    assert "atempo=0.500000,atempo=0.500000,atempo=0.500000,atempo=0.800000" in graph
+    assert "atempo=2.000000,atempo=2.000000,atempo=2.000000,atempo=2.000000,atempo=2.000000,atempo=2.000000,atempo=1.562500" in graph
 
 
 def _two_segment_plan_with_transition() -> dict:
@@ -1092,3 +1164,116 @@ def test_fx_with_position_keeps_order() -> None:
     pos_at = line.index(r"\pos(")
     fx_at = line.index(r"\c&H20C0FF&")
     assert pos_at < fx_at
+
+
+def test_active_cross_track_dissolve_uses_parallel_layer_fades_not_serial_xfade() -> None:
+    pair = {
+        "transition_id": "facts:dissolve", "outgoing_clip_id": "out", "incoming_clip_id": "in",
+        "kind": "dissolve", "start_us": 1_000_000, "end_us": 2_000_000,
+        "cut_us": 2_000_000, "on_clip_id": "in",
+    }
+    plan = {
+        "segments": [
+            {
+                "clip_id": "out", "track_id": "V1", "track_index": 1, "asset_kind": "video",
+                "source_start_us": 0, "source_end_us": 2_000_000,
+                "timeline_start_us": 0, "timeline_end_us": 2_000_000,
+                "layout": "crop_fill", "audio_enabled": False, "gain_db": 0.0,
+                "picture_fade_out_us": 1_000_000,
+            },
+            {
+                "clip_id": "in", "track_id": "V2", "track_index": 0, "asset_kind": "video",
+                "source_start_us": 0, "source_end_us": 2_000_000,
+                "timeline_start_us": 1_000_000, "timeline_end_us": 3_000_000,
+                "layout": "fit", "audio_enabled": False, "gain_db": 0.0,
+                "picture_fade_in_us": 1_000_000,
+            },
+        ],
+        "active_transitions": [pair], "captions": {"items": []},
+        "output": {"width": 540, "height": 960, "fps_num": 30, "fps_den": 1},
+    }
+    probe_streams = [
+        {"video_streams": [{}], "audio_streams": []},
+        {"video_streams": [{}], "audio_streams": []},
+    ]
+    args = build_timeline_args(
+        plan, [Path("out.mp4"), Path("in.mp4")], probe_streams,
+        "libopenh264", "result.mp4", captions=False,
+    )
+    graph = args[args.index("-filter_complex") + 1]
+    assert "xfade=" not in graph
+    assert "concat=n=1:v=1:a=1" in graph
+    assert "fade=t=out:st=1.000000:d=1.000000:color=black" in graph
+    assert "fade=t=in:st=0:d=1.000000:alpha=1" in graph
+
+
+def test_ffmpeg_fails_closed_for_openfilm_move_preset() -> None:
+    plan = {
+        "segments": [
+            {
+                "clip_id": "out", "track_id": "V1", "track_index": 1, "asset_kind": "video",
+                "source_start_us": 0, "source_end_us": 2_000_000,
+                "timeline_start_us": 0, "timeline_end_us": 2_000_000,
+                "layout": "crop_fill", "audio_enabled": False, "gain_db": 0.0,
+            },
+            {
+                "clip_id": "in", "track_id": "V2", "track_index": 0, "asset_kind": "video",
+                "source_start_us": 0, "source_end_us": 2_000_000,
+                "timeline_start_us": 1_000_000, "timeline_end_us": 3_000_000,
+                "layout": "fit", "audio_enabled": False, "gain_db": 0.0,
+            },
+        ],
+        "active_transitions": [{
+            "transition_id": "facts:move", "outgoing_clip_id": "out", "incoming_clip_id": "in",
+            "kind": "move", "start_us": 1_000_000, "end_us": 2_000_000,
+            "cut_us": 2_000_000, "on_clip_id": "in",
+            "incoming_move_preset_id": "motions/move-push-left",
+        }],
+        "captions": {"items": []},
+        "output": {"width": 540, "height": 960, "fps_num": 30, "fps_den": 1},
+    }
+    with pytest.raises(DomainError, match="motions/move-push-left"):
+        probe_streams = [
+            {"video_streams": [{}], "audio_streams": []},
+            {"video_streams": [{}], "audio_streams": []},
+        ]
+        build_timeline_args(
+            plan, [Path("out.mp4"), Path("in.mp4")], probe_streams,
+            "libopenh264", "result.mp4", captions=False,
+        )
+
+
+def test_active_audio_crossfade_uses_pair_facts_and_fade_window() -> None:
+    fixture_path = (
+        Path(__file__).resolve().parents[4] / "tests" / "fixtures"
+        / "openfilm_transition_projection.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    case = fixture["cases"]["audio_crossfade"]
+    segments = []
+    for index, clip in enumerate(case["document"]["clips"]):
+        segments.append({
+            "clip_id": clip["clip_id"], "track_id": clip["track_id"], "track_index": index,
+            "asset_kind": "audio", "source_start_us": clip["source_start_us"],
+            "source_end_us": clip["source_end_us"],
+            "timeline_start_us": clip["timeline_start_us"],
+            "timeline_end_us": clip["timeline_end_us"],
+            "layout": "fit", "audio_enabled": True, "gain_db": 0.0,
+            "fade_in_us": clip["audio"].get("fade_in_us", 0),
+            "fade_out_us": clip["audio"].get("fade_out_us", 0),
+        })
+    plan = {
+        "segments": segments,
+        "active_transitions": case["expected_active_transitions"],
+        "captions": {"items": []},
+        "output": {"width": 540, "height": 960, "fps_num": 30, "fps_den": 1},
+    }
+    args = build_timeline_args(
+        plan, [Path("left.wav"), Path("right.wav")],
+        [{"audio_streams": [{}]}, {"audio_streams": [{}]}],
+        "libopenh264", "result.mp4", captions=False,
+    )
+    graph = args[args.index("-filter_complex") + 1]
+    assert plan["active_transitions"][0]["kind"] == "crossfade"
+    assert "afade=t=out:st=1.000000:d=1.000000" in graph
+    assert "afade=t=in:st=0:d=1.000000" in graph

@@ -22,7 +22,7 @@
 {
   "protocol_version": 1,
   "latest_migration": 44,
-  "patch_operations": 39,
+  "patch_operations": 43,
   "ai_patch_operations": 23,
   "cv_algorithm_version": 3
 }
@@ -131,6 +131,13 @@ PiP 自由定位、A1 音频混音、权威预览（代理为**可选加速项**
 
 | # | 承诺 | 出处 | 类型 | 状态 |
 |---|---|---|---|---|
+| P235 | **OpenFilm 时间线视觉/交互/功能/性能完整收口（接续 P234）** | [设计计划与可重复验收口径](design/P235_OPENFILM_TIMELINE_PARITY_PLAN.md) / P234 [阶段性取证](design/records/P234_OPENFILM_TIMELINE_2026-11-23.md) | 工作包 | 🟡 **2026-11-24 持续实现与验收，尚未收口。** 固定参照为本地 OpenFilm commit `b125a3d9`；受控 Chromium 配对夹具已改为与 Vortex 相同的 52s 片段终点，每轮从当前源码重建，视口 2130×1120、DPR 1、相同四轨八片段与本地合成媒体。最新 capture：初始缩放两侧均为 28.000000 px/s；固定标题状态两侧均为 40.000000 px/s、scrollX=133、标题 x=138/y=105；trusted wheel 覆盖对角触控板、普通垂直、Alt 垂直、Shift 横移；基础跨轨拖动 preview/commit 均落在 18s、页面错误 0；Alt+Insert 提交后 8/8 片段的轨道与开始时间和 OpenFilm 完全相等，验收容差 0µs。新增 V3-B 从 26s 拖至 60s 并延长项目的双端对照：两端均落在 59.993s、项目时长从 52s 到 72.993s，同时保持 28px/s，双端起点差 0µs；像素落点在 1px 内。本轮 Desktop 几何/拖动规划器/TimelinePanel 定向测试 178/178 通过（几何 82、规划器 37、面板 59），Desktop TypeScript noEmit 通过；时长缩放组件验收覆盖扩展/缩短/清空/空线首个短片/长项目首次载入，其中当前视图尺度规则通过 4 项组件测试；此前 Desktop 时间线几何/拖动/素材放置/编辑器回归套件 209/209、Core status/timeline/request-body limit unit 64 项通过（72.48s），本轮未重跑全套。规划器独立 10k 合成微基准（每场景 5 次预热、21 样本）p95：Place 1.48ms、Insert 3.04ms、V1 copy 2.25ms、V1 group(128) 3.32ms、10k rider carry 4.97ms；不等同于 P1 产品级性能门。最新区域像素比较共 46 区：4 个视频片段 perimeter 仍未达 99%（97.48%–98.93%），文字轮廓 33/39 通过、6 项仍失败；整体视觉接受为 failed。针对用户附件复核发现两图使用的片段/时长不同（上方多轨素材、下方含 155.5s 长片），不可作为同状态像素验收；已用相同四轨八片段受控夹具对照。修复 Place→Insert→Place 预览：后续片段跟随计划位置绘制；Insert 落点标记与 OpenFilm 同为宽 3px、x=1022，标记矩形偏差不超过 0.5px；去掉 OpenFilm 不存在的选中片段标尺色带。夹具使用真实选择状态，确保手势预览检查交互状态而非空回调。status consistency 10/10 通过；native Electron 截图未覆盖；夹具使用合成媒体且 stub filmstrip worker，不能证明真实解码或性能。完整双端手势矩阵、Core revision/undo、Replace、未知时长、素材文件放置、转场/page、冷/热/播放/解码性能与原生运行对照等仍未通过，故 P235 总包及 P235-R1–R4 继续开放；P235-R5 批量位置风险已按下行单独闭环。此前速度范围、播放合速、音频流隔离等实现细节及其定向验证仍按本计划跟踪，不作为整包通过依据。|
+| P235-R1 | **P235 Replace 语义｜无音轨 video 与未知时长** | [P235 设计计划：Replace 源码差异及 G2/F1 用例](design/P235_OPENFILM_TIMELINE_PARITY_PLAN.md) §2 / OpenFilm `clip-replace.ts` | 风险对策 | 🟡 **实现与证据未闭环**——无音轨 video 替换 sound 目标需映射为静音片段并保持 preview/export 成功；有限源时长未知时按 OpenFilm 的目标需求长度 fallback 规划，不能因探测结果缺失改变目标时长或直接拒绝；需覆盖时间线校验、预览与成片遇到源 EOF 的结果。原 HTML 拒绝边界已撤销，页面功能单列在 P235-R4。 |
+| P235-R2 | **P235 Replace 时长保留与 audio-only 导出尺寸/解码成本** | [P235 设计计划：>30s still / audio-only video 渲染规则](design/P235_OPENFILM_TIMELINE_PARITY_PLAN.md) §2–§3 / Core review 2026-11-23 | 风险对策 | 🟡 **设计经 Core/独立复审通过；实现和证据未闭环**——Vortex 原 30s image 上限会让 OpenFilm 允许的长 still Replace 失败；移除上限、统一 100ms 到 `Number.MAX_SAFE_INTEGER` 微秒且校验精确结束点，并验证 >30s still 替换保留长度。视频作为音频使用时，不得进入 `resolution="original"` 的视觉源分辨率计算，也不得产生视觉 decoded frame；RenderPlan/IR `video_required`/`audio_required` 字段、Desktop rig/source resolve 过滤、原始音频票据与 proxy 分离、FFmpeg input-side `-vn`、按 input 计数的 renderer decode submission/output 与 FFmpeg decoder-return counter、插桩/正式 binary 分开采样及配对资源数字均须实现和取证。G2/F1/P1 需验证合同、TimelineDocument、RenderPlan/IR、预览与成片结果。 |
+| P235-R3 | **OpenFilm 转场来源事实与最终布局投影** | [P235 计划：转场投影要求](design/P235_OPENFILM_TIMELINE_PARITY_PLAN.md) §2 / Independent Review 2026-11-23 | 风险对策 | 🟡 **设计架构已冻结，source facts、43rd patch op、旧 transition dormancy 与最终布局 projector 均已纳入；实现及投影测试未闭环**——active pair 必须供 Timeline、预览、RenderPlan/FFmpeg 和编辑校验共用，旧 `{after_clip_id, kind, duration}` 不得重新绑定到新后继。migration 45 只从不可变历史修订/操作快照唯一恢复原 incoming identity；不可恢复时保留 null/dormant，不能从当前邻接推断。 |
+| P235-R4 | **OpenFilm HTML page 时间线功能与隔离渲染** | [P235 计划：HTML page 功能要求](design/P235_OPENFILM_TIMELINE_PARITY_PLAN.md) §2 / OpenFilm `clip-replace.ts`、`pageframes.mjs` | 风险对策 | 🟡 **page 架构已冻结；资产 migration、导入/拖入/Replace、有限/无限时长和共用确定性帧服务尚未实现/取证**——合同包括 `asset_kind=page` 的安全源窗、OpenFilm `page_overrides[]` 校验与 Replace 清理、entrypoint 参与 bundle/cache hash；执行用户 HTML 前仍必须通过独立安全复核，覆盖 sandbox、资源白名单、网络/导航边界、超时/取消与越权负例；实时预览、authoritative preview、final export 必须使用同一页面帧源。 |
+| P235-R5 | **磁吸 planner 的批量移动上限** | [P235 计划：完整 position patch 与压力验收](design/P235_OPENFILM_TIMELINE_PARITY_PLAN.md) §2–§4 / Desktop `apps/desktop/tests/timeline-clip-drag-plan.test.ts` / Core `services/core/tests/unit/test_timeline.py::test_position_clips_over_100_commit_as_one_revision_and_undo_atomically` / `services/core/tests/unit/test_timeline_patch_body_limit.py` | 风险对策 | ✅ **2026-11-24 已按本风险范围闭环。** Desktop 规划器对 100/1k/10k clips（含 128 人 V1 group）没有 clip 数硬上限；Core 单个 `position_clips` operation 接受 103 个移动片段，JSON body 小于 4 MiB，并写入唯一一个子 revision；undo/redo 精确回到该 revision；批内加入负时间后整批拒绝且 current revision 不变。请求体中间件的 content-length/chunked 超限 413 与边界回放另有单测。更大规模产品运行、HTTP 持久化请求和 P1 原生压力证据仍属 P235/P1 门，不由本风险项覆盖。 |
+| P234 | **OpenFilm 时间线复核与修补（2026-11-23；阶段性记录）** | [定向源码对照与滚轮取证](design/records/P234_OPENFILM_TIMELINE_2026-11-23.md) | 工作包 | ⏭️ **2026-11-23 由 P235 接续**——仅记录标尺/滚轮/缩略帧/定向波纹删除及双轨四片段滚轮测量；未验证同状态视觉、完整素材移动和剩余编辑功能。原始读数保留作窄场景历史证据。 |
 | P81 | **W2.1 风险 R1｜设备时钟漂移**：单一偏移在长素材上不成立 | `W2_1_CAMERA_SYNC_PLANNING_GATE_2026-10-10.md` §4 R1 | **风险对策** | 🟡 **2026-10-10 取证已实现，分段偏移待真实素材**——远距窗口（相隔 20s）残差差 >10ms ⇒ `unavailable(clock_drift)`，**不返回两端各错一半的单值**；测试：0.1% 重采样素材（低频主导，避免宽带噪声先撞 low_confidence）+ **分支锁**（近窗一致/远窗偏 50ms ⇒ 必走 clock_drift），共 2 项。**分段偏移/线性拟合按 D4 待真实多机位素材取证后再定**；素材短于 ≈22s 时远距漂移检查**未取证**（`drift_us=None`，短视频跨度内漂移有界 ⇒ 照常 ready，属已声明限制） |
 | P84 | **W2.1 风险 R4｜无真实多机位素材** | `W2_1_CAMERA_SYNC_PLANNING_GATE_2026-10-10.md` §4 R4 | **风险对策** | ⏳ 待实施——向用户索取样片；未取得前**验收项 9** 显式标记「未取证」，禁止以合成素材顶替 |
 | P89 | **W2.2 风险 R1｜无真实多说话人素材 → 精度轴无法取证** | 同上 §4 R1 / §5 D3 | **风险对策** | 🟡 **2026-10-11 部分解除**——改用**公开带标注语料**（AMI，CC BY 4.0）取得精度轴（见 P88 ⑩）：**公开语料带官方参考标注，比"用户随手给一段没标注的素材"更能算出真 DER**。**仍未取证**：跨语言 / 重叠 / 远场单麦 / 用户自有素材。**W2.1 验收 9 的同源缺口另有替代路径**（见 P93）。原纪律保留：**禁止以合成 / 易化构造用例顶替**（本机 `eval_set` 的 `spoken-multi-*` 经核实是**纯音调夹具、不含语音**） |
@@ -367,6 +374,7 @@ PiP 自由定位、A1 音频混音、权威预览（代理为**可选加速项**
 
 | P233 | **WP-P233 OpenFilm 主界面交互对齐续项（Logo 菜单、项目库、预览窗格开关与时间线逐轨高度）** | `apps/desktop/src/app/App.tsx` / `ProjectLibraryDialog.tsx` / `timeline/TimelineCanvas.tsx` / `styles.css` / Electron E2E | 工作包 | ✅ **2026-11-22 核销**——验收交叉表与证据见 [实现记录](design/records/P233_OPENFILM_UI_FOLLOWUP_2026-11-22.md)：品牌菜单及键盘操作、项目库搜索/筛选/卡片列表/创建改名归档恢复、预览窗格真实收缩与弹层键盘反馈、逐轨高度按项目隔离保存、真实素材预览缩放/平移/尺寸恢复和窄窗布局均通过 Electron E2E；Desktop 定向测试 110 项、TypeScript 检查、E2E 构建、状态文档守卫（10 项）与 `git diff --check` 通过。整窗实机截图随记录。 |
 </details>
+
 ## 5. 已知未完成工作（**不是过期，是真实待办**）
 
 | 项 | 说明 | 出处 |
@@ -394,6 +402,7 @@ PiP 自由定位、A1 音频混音、权威预览（代理为**可选加速项**
 
 | 文档 | 性质 | 注意 |
 |---|---|---|
+| `docs/design/records/P234_OPENFILM_TIMELINE_2026-11-23.md` | P234 阶段性取证快照（已由 P235 接续） | 滚轮数字仅是双轨四片段合成缩放；不得引作整体视觉、功能或拖动对齐证据 |
 | `docs/design/records/W3_3_VERIFICATION_GATE_2026-10-21.md` | W3.3 Verification Gate 点时间记录 | A1–A14 逐项落点 + 独立复核；**A9 评分开放**，被后续运行取代时加横幅 |
 | `evidence/2026-10-21-w33-keyframe-blind-eval/RESULT.md` | A9 盲评结果（9 帧）点时间记录 | **不得**引作「质量已证」；样本 9 帧、±25pp、无对照、一次性 —— 边界见文件 §4 |
 | `evidence/2026-10-21-w33-a13-packaged/EVIDENCE.md` | A13 打包产物取证点时间记录 | 只证 PyInstaller 产物（未打 NSIS、未跑 Electron e2e）；sidecar 重建不可复现，发布前 pin 需重签 |

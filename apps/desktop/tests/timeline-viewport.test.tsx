@@ -48,9 +48,10 @@ function makeDocument(trackCount: number, clipCount: number): TimelineDocument {
 /** 最小 2D 桩（jsdom 无 canvas 2D；只求渲染不崩、可读 style/backing）。
  * 传 counter 时同时记录 clip 体底色绘制次数（draw 访问量——B17 验收：
  * 100 轨 1000 clip 滚动时 draw 访问数量随可见元素增长）。 */
-function installCanvas2DStub(counter?: { clipBodyDraws: number }): void {
+function installCanvas2DStub(counter?: { currentFrame: number; maxInFrame: number }): void {
   const stub = {
-    setTransform: () => undefined, clearRect: () => undefined, fillRect: () => undefined,
+    setTransform: () => { if (counter) counter.currentFrame = 0; },
+    clearRect: () => undefined, fillRect: () => undefined,
     measureText: () => ({ width: 10 }) as TextMetrics, fillText: () => undefined,
     beginPath: () => undefined, moveTo: () => undefined, lineTo: () => undefined,
     stroke: () => undefined, fill: () => undefined, roundRect: () => undefined,
@@ -77,7 +78,8 @@ function installCanvas2DStub(counter?: { clipBodyDraws: number }): void {
             counter && prop === "fillStyle"
             && (value === "#354f6a" || value === "#1c5757")
           ) {
-            counter.clipBodyDraws += 1;
+            counter.currentFrame += 1;
+            counter.maxInFrame = Math.max(counter.currentFrame, counter.maxInFrame);
           }
           return Reflect.set(obj, prop, value);
         },
@@ -152,18 +154,18 @@ describe("B17 画布 viewport 化", () => {
   });
 
   it("draw 访问量随可见区而非文档增长（100 轨 99 clip，视口 200px 只画 ~6 行）", () => {
-    const counter = { clipBodyDraws: 0 };
+    const counter = { currentFrame: 0, maxInFrame: 0 };
     installCanvas2DStub(counter);
     const doc = makeDocument(98, 99);
     const { container } = render(<TimelinePanel document={doc} {...baseProps()} />);
     // 初始视口高 200 + 上下 overscan 160 → 覆盖 [0, 520) ≈ 8 行 → 最多 ~9 clip
     //（视频行 56/V1 80 混合行高）；远小于 99 全量。
-    expect(counter.clipBodyDraws).toBeGreaterThan(0);
-    expect(counter.clipBodyDraws).toBeLessThanOrEqual(12);
+    expect(counter.maxInFrame).toBeGreaterThan(0);
+    expect(counter.maxInFrame).toBeLessThanOrEqual(9);
     // 滚到底部：视口 [5395..5595)（content ≈ 5595）→ 同样只画末尾几行。
     const scroll = container.querySelector(".timeline-scroll") as HTMLDivElement;
     Object.defineProperty(scroll, "scrollTop", { configurable: true, value: 5390 });
     fireEvent.scroll(scroll);
-    expect(counter.clipBodyDraws).toBeLessThanOrEqual(24); // 两次视口合计仍 ≪ 2×99
+    expect(counter.maxInFrame).toBeLessThanOrEqual(9);
   });
 });

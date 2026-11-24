@@ -4,6 +4,8 @@ import pytest
 
 from aivs_core.projects import DomainError
 from aivs_core.rendering.ir import project_preview_ir, resolved_caption_styles
+from aivs_core.rendering.plan import OPENFILM_MOVE_PRESET_STATUS
+from aivs_core.timeline import TRANSITION_MOVE_PRESET_IDS
 
 US = 1_000_000
 
@@ -23,7 +25,9 @@ def _segment(clip_id: str, src0: int, src1: int, tl0: int, tl1: int, *, asset_id
 
 
 def _plan(segments: list[dict], *, transitions: list[dict] | None = None,
-          captions: list[dict] | None = None) -> dict:
+          captions: list[dict] | None = None,
+          active_transitions: list[dict] | None = None,
+          compatibility_transitions: list[dict] | None = None) -> dict:
     return {
         "schema_version": 1, "compiler_version": "render-plan-v1",
         "content_fingerprint": "sha256:test", "mode": "authoritative_preview",
@@ -35,6 +39,8 @@ def _plan(segments: list[dict], *, transitions: list[dict] | None = None,
                     "fingerprint": f"fp{i}", "duration_us": 30_000_000, "has_audio": False}
                    for i in sorted({int(s["input_id"][1:]) for s in segments})],
         "segments": segments,
+        "active_transitions": active_transitions or [],
+        "compatibility_transitions": compatibility_transitions or [],
         "captions": {"format": "ass", "preset_version": 1, "font_bundle_version": 1,
                      "items": captions or []},
         "transitions": transitions or [],
@@ -64,6 +70,83 @@ def test_simple_timeline_frame_table() -> None:
     assert ir["frames"][30]["main"]["src_n"] == 30
     assert ir["frames"][60]["main"]["clip_id"] == "b"
     assert ir["frames"][89]["main"]["src_n"] == 29
+
+
+def test_active_cross_track_dissolve_keeps_pair_window_and_clip_fade_alpha() -> None:
+    pair = {
+        "transition_id": "facts:dissolve",
+        "outgoing_clip_id": "out",
+        "incoming_clip_id": "in",
+        "kind": "dissolve",
+        "start_us": US,
+        "end_us": 2 * US,
+        "cut_us": 2 * US,
+        "on_clip_id": "in",
+    }
+    plan = _plan([
+        _segment("out", 0, 2 * US, 0, 2 * US, asset_idx=0, track_id="V1", track_index=1,
+                 picture_fade_out_us=US),
+        _segment("in", 0, 2 * US, US, 3 * US, asset_idx=1, track_id="V2", track_index=0,
+                 picture_fade_in_us=US),
+    ], active_transitions=[pair])
+    ir = project_preview_ir(plan, _probe(plan))
+    assert ir["active_transitions"] == [pair]
+    frame = ir["frames"][45]
+    assert len(frame["active_transitions"]) == 1
+    assert frame["active_transitions"][0]["transition_id"] == pair["transition_id"]
+    assert frame["active_transitions"][0]["progress"] == 0.5
+    layers = {layer["clip_id"]: layer for layer in frame["layers"]}
+    assert set(layers) == {"out", "in"}
+    assert layers["out"]["alpha"] == 0.5
+    assert layers["in"]["alpha"] == 0.5
+    assert frame["main"]["kind"] == "segment"
+
+
+def test_openfilm_move_and_white_page_fail_closed_without_mutating_pair() -> None:
+    move = {
+        "transition_id": "facts:move",
+        "outgoing_clip_id": "a",
+        "incoming_clip_id": "b",
+        "kind": "move",
+        "start_us": US,
+        "end_us": 2 * US,
+        "cut_us": 2 * US,
+        "on_clip_id": "b",
+        "incoming_move_preset_id": "motions/move-push-left",
+    }
+    plan = _plan([
+        _segment("a", 0, 2 * US, 0, 2 * US),
+        _segment("b", 0, 2 * US, US, 3 * US, asset_idx=1),
+    ], active_transitions=[move])
+    with pytest.raises(DomainError, match="motions/move-push-left"):
+        project_preview_ir(plan, _probe(plan))
+    white = {**move, "kind": "dip-white", "white_page_asset_id": "white-system"}
+    plan["active_transitions"] = [white]
+    with pytest.raises(DomainError, match="HTML page frame service"):
+        project_preview_ir(plan, _probe(plan))
+
+
+@pytest.mark.parametrize("preset_id", sorted(OPENFILM_MOVE_PRESET_STATUS))
+def test_every_openfilm_move_preset_is_explicitly_fail_closed(preset_id: str) -> None:
+    assert set(OPENFILM_MOVE_PRESET_STATUS) == set(TRANSITION_MOVE_PRESET_IDS)
+    pair = {
+        "transition_id": "facts:move",
+        "outgoing_clip_id": "a",
+        "incoming_clip_id": "b",
+        "kind": "move",
+        "start_us": US,
+        "end_us": 2 * US,
+        "cut_us": 2 * US,
+        "on_clip_id": "b",
+        "incoming_move_preset_id": preset_id,
+    }
+    plan = _plan([
+        _segment("a", 0, 2 * US, 0, 2 * US),
+        _segment("b", 0, 2 * US, US, 3 * US, asset_idx=1),
+    ], active_transitions=[pair])
+    assert OPENFILM_MOVE_PRESET_STATUS[preset_id] == "open"
+    with pytest.raises(DomainError, match=preset_id.replace("/", r"/")):
+        project_preview_ir(plan, _probe(plan))
 
 
 def test_transition_borrowed_offset_and_blend() -> None:

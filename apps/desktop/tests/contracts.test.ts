@@ -76,6 +76,7 @@ describe("Stage 0 contract", () => {
       { op: "insert_transcript_segments", transcript_id: "transcript_1", segment_ids: ["segment_1"], at_index: 0, padding_before_us: 0, padding_after_us: 300_000, create_captions: true },
       { op: "remove_clip", clip_id: "clip_1" }, { op: "move_clip", clip_id: "clip_1", to_index: 0 }, { op: "trim_clip", clip_id: "clip_1", source_start_us: 0, source_end_us: 100_000 }, { op: "set_clip_source_window", clip_id: "clip_1", source_start_us: 100_000, source_end_us: 200_000, anchor: "timeline" }, { op: "split_clip", clip_id: "clip_1", source_time_us: 100_000 }, { op: "set_layout", clip_id: "clip_1", layout: "fit" }, { op: "set_audio", clip_id: "clip_1", enabled: false, gain_db: -3 }, { op: "set_image_duration", clip_id: "clip_1", duration_us: 500_000 }, { op: "add_caption", start_us: 0, end_us: 200_000, text: "字幕", preset_id: "default-bottom", source_clip_id: null }, { op: "remove_caption", caption_id: "caption_1" }, { op: "update_caption", caption_id: "caption_1", text: "修改" }, { op: "set_caption_timing", caption_id: "caption_1", start_us: 0, end_us: 200_000 }, { op: "set_caption_preset", caption_id: "caption_1", preset_id: "game-safe-bottom" },
       { op: "position_clip", clip_id: "clip_1", timeline_start_us: 1_000_000, track_id: "V2" },
+      { op: "position_clips", placements: [{ clip_id: "clip_1", timeline_start_us: 1_000_000 }], ignore_link: true },
       { op: "add_track", kind: "video" }, { op: "remove_track", track_id: "V2" }, { op: "move_track", track_id: "V2", to_index: 0 }, { op: "set_track_flags", track_id: "V2", muted: true, solo: false }
     ];
     expect(operations.every(isTimelinePatchOperation)).toBe(true);
@@ -86,7 +87,8 @@ describe("Stage 0 contract", () => {
     expect(isTimelinePatchOperation({ op: "insert_asset_clip", asset_id: "asset_1", at_index: 0, timeline_start_us: 1_000_000, edit_mode: "ripple" })).toBe(false);
     expect(isTimelinePatchOperation({ op: "insert_asset_clip", asset_id: "asset_1", at_index: 0, timeline_start_us: 1_000_000 })).toBe(false);
     expect(isTimelinePatchOperation({ ...operations[1], padding_after_us: 300_001 })).toBe(false);
-    expect(isTimelinePatchOperation({ op: "add_track", kind: "audio" })).toBe(false);
+    expect(isTimelinePatchOperation({ op: "add_track", kind: "audio" })).toBe(true);
+    expect(isTimelinePatchOperation({ op: "position_clips", placements: [{ clip_id: "clip_1", timeline_start_us: 1_000_000 }], ignore_link: "yes" })).toBe(false);
     expect(isTimelinePatchOperation({ op: "set_track_flags", track_id: "V2" })).toBe(false);
     expect(isTimelinePatchOperation({ op: "set_track_flags", track_id: "V2", hidden: "yes" })).toBe(false);
     expect(isTimelinePatchOperation({ op: "set_clip_source_window", clip_id: "clip_1", source_start_us: 0, source_end_us: 500_000, anchor: "outside" })).toBe(false);
@@ -122,6 +124,10 @@ describe("Stage 0 contract", () => {
   it("validates Timeline create/state DTOs and rejects renderer-sensitive fields", () => {
     const document = { schema_version: 1, project_id: "project_1", canvas: { width: 1080, height: 1920, fps_num: 30, fps_den: 1, background_color: "#000000" }, tracks: [{ id: "C1", kind: "text", locked: false, hidden: false, muted: false, solo: false }, { id: "V1", kind: "video", locked: false, hidden: false, muted: false, solo: false }, { id: "A1", kind: "audio", locked: false, hidden: false, muted: false, solo: false }], clips: [{ clip_id: "clip_1", track_id: "V1", order_index: 0, asset_id: "asset_1", asset_kind: "video", source_start_us: 0, source_end_us: 1_000_000, timeline_start_us: 0, timeline_end_us: 1_000_000, layout: "fit", audio: { enabled: true, gain_db: 0 } }], captions: [], provenance: { created_by: "user", source_transcript_ids: [] } };
     expect(isTimelineDocument(document)).toBe(true);
+    expect(isTimelineDocument({ ...document, clips: [{ ...document.clips[0], speed_milli: 100, timeline_end_us: 10_000_000 }] })).toBe(true);
+    expect(isTimelineDocument({ ...document, clips: [{ ...document.clips[0], speed_milli: 100_000, timeline_end_us: 10_000 }] })).toBe(true);
+    expect(isTimelineDocument({ ...document, clips: [{ ...document.clips[0], speed_milli: 99 }] })).toBe(false);
+    expect(isTimelineDocument({ ...document, clips: [{ ...document.clips[0], speed_milli: 100_001 }] })).toBe(false);
     // 旧 2/3 轨形状、非规范顺序、错误 kind 与未知轨道均拒绝。
     expect(isTimelineDocument({ ...document, tracks: [{ id: "V1", kind: "visual", locked: false }, { id: "C1", kind: "caption", locked: false }] })).toBe(false);
     expect(isTimelineDocument({ ...document, tracks: [{ id: "V1", kind: "video", locked: false, hidden: false, muted: false, solo: false }, { id: "C1", kind: "text", locked: false, hidden: false, muted: false, solo: false }, { id: "A1", kind: "audio", locked: false, hidden: false, muted: false, solo: false }] })).toBe(false);
@@ -144,8 +150,8 @@ describe("Stage 0 contract", () => {
     expect(isTimelineDocument({ ...document, clips: [{ ...document.clips[0], clip_id: "clip_2", track_id: "V9", timeline_start_us: 2_000_000, timeline_end_us: 3_000_000 }] })).toBe(false);
     expect(isTimelineCreateInput({ schema_version: 1, source: { kind: "transcript_selection", transcript_id: "transcript_1", segment_ids: ["segment_1"], padding_before_us: 0, padding_after_us: 0, create_captions: true }, default_layout: "fit", caption_preset_id: "default-bottom" })).toBe(true);
     const revision = { timeline_revision_id: "revision_1", project_id: "project_1", parent_revision_id: null, document_sha256: "a".repeat(64), summary: "创建", created_by: "user", created_at: "2026-08-11T00:00:00.000Z", schema_version: 1, document };
-    expect(isTimelineState({ project_id: "project_1", current_revision: revision, draft: null, can_undo: false, can_redo: false, current_preview: null })).toBe(true);
-    expect(isTimelineState({ project_id: "project_1", current_revision: { ...revision, path: "C:\\private\\timeline.json" }, draft: null, can_undo: false, can_redo: false, current_preview: null })).toBe(false);
+    expect(isTimelineState({ project_id: "project_1", current_revision: revision, draft: null, can_undo: false, can_redo: false, current_preview: null, active_transitions: [] })).toBe(true);
+    expect(isTimelineState({ project_id: "project_1", current_revision: { ...revision, path: "C:\\private\\timeline.json" }, draft: null, can_undo: false, can_redo: false, current_preview: null, active_transitions: [] })).toBe(false);
   });
   it("accepts optional audio fade fields and keeps old documents valid (backward compatible)", () => {
     const clipOf = (audio: Record<string, unknown>) => ({ clip_id: "clip_1", track_id: "V1", order_index: 0, asset_id: "asset_1", asset_kind: "video", source_start_us: 0, source_end_us: 1_000_000, timeline_start_us: 0, timeline_end_us: 1_000_000, layout: "fit", audio });

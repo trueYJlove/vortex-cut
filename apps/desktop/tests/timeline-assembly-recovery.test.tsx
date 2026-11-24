@@ -64,7 +64,7 @@ function makeTimeline(revisionId: string): TimelineState {
       document_sha256: revisionId.padEnd(64, "a"), summary: "fixture", created_by: "user", created_at: now,
       schema_version: 1, document,
     },
-    draft: null, can_undo: false, can_redo: false, current_preview: null,
+    draft: null, can_undo: false, can_redo: false, current_preview: null, active_transitions: [],
   };
 }
 

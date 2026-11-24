@@ -3,6 +3,7 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import type { TimelineClip } from "@aivideo/contracts";
 import { HANDLES, pipResizeFromHandle, type HandleDir } from "./pipResizeGeometry.js";
 import { CORNERS, resizeCursor, rotateCellRect, rotateCursor, showEdgeMark, zRankByTracks, type CornerDir } from "./preview/stage-interaction.js";
+import { clampMediaRate, mediaRateIsPlayable } from "./preview/media-rate.js";
 
 /**
  * P1 画中画（PIP）：在交互预览画布上显示覆盖轨（V2+）片段的可视框。
@@ -52,24 +53,26 @@ type Props = {
   /** 播放头（时间线唯一时钟）与播放状态：浮层媒体跟随标尺同步播放。 */
   playheadUs: number;
   playing: boolean;
+  playbackRate?: number;
   /** S8：轨道数组序（0=最上层）作为命中与绘制的唯一 z 序来源。 */
   tracks?: readonly { id: string }[];
 };
 
 /** 画中画媒体：跟随播放头同步（时间线驱动，非自由播放）——所见即所得。 */
-function PipMedia({ clip, src, clipPath, playing, playheadUs }: { clip: TimelineClip; src: string; clipPath?: string; playing: boolean; playheadUs: number }) {
+function PipMedia({ clip, src, clipPath, playing, playheadUs, playbackRate }: { clip: TimelineClip; src: string; clipPath?: string; playing: boolean; playheadUs: number; playbackRate: number }) {
   const ref = useRef<HTMLVideoElement>(null);
   useEffect(() => {
     const media = ref.current;
     if (!media || clip.asset_kind !== "video") return;
-    const speed = Math.max(0.25, Math.min(4, (clip.speed_milli ?? 1000) / 1000));
-    media.playbackRate = speed;
+    const speed = ((clip.speed_milli ?? 1000) / 1000) * playbackRate;
+    media.playbackRate = clampMediaRate(speed);
     const active = playheadUs >= clip.timeline_start_us && playheadUs < clip.timeline_end_us;
     if (!active) { if (!media.paused) media.pause(); return; }
     const expected = (clip.source_start_us ?? 0) / 1_000_000 + ((playheadUs - clip.timeline_start_us) / 1_000_000) * speed;
-    if (Math.abs(media.currentTime - expected) > 0.18) media.currentTime = Math.max(0, expected);
-    if (playing) void media.play().catch(() => {}); else if (!media.paused) media.pause();
-  }, [clip, playing, playheadUs]);
+    const threshold = mediaRateIsPlayable(speed) ? 0.18 : 1 / 30;
+    if (Math.abs(media.currentTime - expected) > threshold) media.currentTime = Math.max(0, expected);
+    if (playing && mediaRateIsPlayable(speed)) void media.play().catch(() => {}); else if (!media.paused) media.pause();
+  }, [clip, playing, playheadUs, playbackRate]);
   return <video ref={ref} className="pip-media" src={src} style={{ clipPath: clipPath ?? undefined, objectFit: "contain" }} muted playsInline aria-hidden="true" preload="auto" />;
 }
 
@@ -148,6 +151,7 @@ export function PreviewPipOverlays({
   onGestureResume,
   playheadUs,
   playing,
+  playbackRate = 1,
   tracks = [],
 }: Props) {
   /** 下层先画、上层后画：DOM 顺序按 zRank 降序，最后一个兄弟即最上层。
@@ -338,7 +342,7 @@ export function PreviewPipOverlays({
               </>
             )}
             {item.clip.asset_kind === "video" ? (
-              <PipMedia clip={item.clip} src={item.media_url} clipPath={clipPath} playing={playing} playheadUs={playheadUs} />
+              <PipMedia clip={item.clip} src={item.media_url} clipPath={clipPath} playing={playing} playheadUs={playheadUs} playbackRate={playbackRate} />
             ) : (
               <img className="pip-media" src={item.media_url} style={{ clipPath: clipPath ?? undefined, objectFit: "contain" }} alt="" draggable={false} />
             )}

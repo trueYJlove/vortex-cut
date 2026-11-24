@@ -4,9 +4,11 @@ const invoke = vi.fn();
 const expose = vi.fn();
 const on = vi.fn();
 const removeListener = vi.fn();
+const getPathForFile = vi.fn((file: File) => `C:\\sandbox\\${file.name}`);
 vi.mock("electron", () => ({
   contextBridge: { exposeInMainWorld: expose },
-  ipcRenderer: { invoke, on, removeListener }
+  ipcRenderer: { invoke, on, removeListener },
+  webUtils: { getPathForFile },
 }));
 
 await import("../electron/preload/index.js");
@@ -37,11 +39,25 @@ describe("Desktop preload 白名单", () => {
     expect(on).toHaveBeenCalledWith("job:event:job_1", expect.any(Function));
     stop(); expect(removeListener).toHaveBeenCalledWith("job:event:job_1", expect.any(Function));
   });
+  it("native File path is resolved only inside preload and never returned in import metadata", async () => {
+    const api = expose.mock.calls[0][1] as { importDroppedAssets(input: { project_id: string; files: readonly File[] }): Promise<unknown> };
+    const file = new File(["video"], "shot.mp4", { type: "video/mp4", lastModified: 10 });
+    const response = { imported: [{ asset: { asset_id: "asset_1", display_name: "shot.mp4" }, media_url: "aivideo://media/asset_1", grant: { grant_id: "grant_1" } }], failures: [] };
+    invoke.mockResolvedValueOnce(response);
+    const result = await api.importDroppedAssets({ project_id: "project_1", files: [file] });
+    expect(getPathForFile).toHaveBeenCalledWith(file);
+    expect(invoke).toHaveBeenLastCalledWith("asset:import-dropped", {
+      project_id: "project_1",
+      files: [{ path: "C:\\sandbox\\shot.mp4", name: "shot.mp4", size: 5, type: "video/mp4", last_modified: 10 }],
+    });
+    expect(result).toEqual(response);
+    expect(JSON.stringify(result)).not.toContain("C:\\sandbox");
+  });
   it("完整显式 API 表面始终只经固定 IPC channel 调用", async () => {
     const api = expose.mock.calls[0][1] as Record<string, (...args: any[]) => unknown>;
     const calls: Array<[string, unknown[]]> = [
       ["getRuntime", []], ["chooseMedia", []], ["probeMedia", ["grant_1"]], ["listProjects", [{}]], ["createProject", [{}]], ["getProject", ["project_1"]], ["renameProject", [{}]], ["archiveProject", ["project_1"]], ["reopenProject", ["project_1"]],
-      ["listAssets", [{}]], ["importAsset", [{}]], ["refreshAsset", ["asset_1"]], ["relocateAsset", [{}]], ["listJobs", [{}]], ["createJob", [{}]], ["getJob", ["job_1"]], ["cancelJob", ["job_1"]],
+      ["listAssets", [{}]], ["importAsset", [{}]], ["importDroppedAssets", [{ project_id: "project_1", files: [] }]], ["refreshAsset", ["asset_1"]], ["relocateAsset", [{}]], ["listJobs", [{}]], ["createJob", [{}]], ["getJob", ["job_1"]], ["cancelJob", ["job_1"]],
       ["listModels", [{}]], ["getModel", ["model_1"]], ["downloadModel", [{}]], ["getModelDownload", ["model_1"]], ["cancelModelDownload", ["model_1"]], ["createTranscription", [{}]], ["listTranscripts", ["asset_1"]], ["getTranscript", ["transcript_1"]],
       ["getBrief", ["project_1"]], ["putBrief", [{}]], ["listRecipes", []], ["listProviders", []], ["createProvider", [{}]], ["testProvider", ["provider_1"]], ["testCandidateProviderCapability", ["provider_1"]], ["preparePlanning", [{}]], ["createPlanning", [{}]], ["listCandidatePlans", ["project_1"]], ["adoptCandidatePlan", [{}]], ["prepareTimelinePatch", [{}]], ["testTimelinePatchProviderCapability", ["provider_1"]], ["createTimelinePatchGeneration", [{}]], ["getTimelinePatchGeneration", ["generation_1"]], ["listTimelinePatchProposals", ["project_1"]], ["getTimelinePatchProposal", ["proposal_1"]], ["applyTimelinePatchProposal", [{}]], ["compareTimelineRevisions", [{}]],
       ["createTimeline", [{}]], ["getTimeline", ["project_1"]], ["patchTimeline", [{}]], ["undoTimeline", [{}]], ["redoTimeline", [{}]], ["saveTimelineDraft", [{}]], ["deleteTimelineDraft", ["project_1"]], ["listTimelineRevisions", [{}]], ["getTimelineRevision", ["revision_1"]],
@@ -61,7 +77,7 @@ describe("Desktop preload 白名单", () => {
       ["updateEditorLoad", ["playing"]], ["diagnostics", []]
     ];
     for (const [name, args] of calls) await api[name](...args);
-    expect(invoke).toHaveBeenCalledTimes(5 + calls.length);
+    expect(invoke).toHaveBeenCalledTimes(6 + calls.length);
     expect(invoke.mock.calls.every(([channel]) => typeof channel === "string" && !channel.includes("secret:get") && !channel.includes("admin"))).toBe(true);
   });
 });

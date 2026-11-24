@@ -3,7 +3,7 @@ import { Archive, AudioLines, BookOpen, Captions, ChevronDown, ChevronLeft, Chev
 import type { LucideIcon } from "lucide-react";
 import { ArrowUpDown, LayoutGrid, List } from "lucide-react";
 import { Star } from "lucide-react";
-import type { Asset, AssetId, AssetKind, AssetPresentation, BriefInput, CaptionPresetId, CvAnalysisSummary, CvSample, DestinationGrant, DirectoryGrant, EncoderMode, EgressPreview, ExportBatch, ExportFrameRate, ExportQuality, ExportResolution, HorizontalAnchor, Job, LayoutPolicy, MediaInfo, ModelDetail, ModelSummary, OutputRatio, PlatformPreset, Project, ProviderConfig, ReframeExportBatch, RenditionPreset, RenditionReframeAdjustment, TimelineCaption, TimelineClip, TimelineDiff, TimelineDocument, TimelineLayout, TimelinePatchEgressPreview, TimelinePatchOperation, TimelinePatchProposal, TimelineRevisionId, TimelineRevisionSummary, TimelineState, Transcript, TranscriptSegment, TranscriptSummary, VerticalAnchor } from "@aivideo/contracts";
+import type { Asset, AssetId, AssetKind, AssetPresentation, ImportedAsset, BriefInput, CaptionPresetId, CvAnalysisSummary, CvSample, DestinationGrant, DirectoryGrant, EncoderMode, EgressPreview, ExportBatch, ExportFrameRate, ExportQuality, ExportResolution, HorizontalAnchor, Job, LayoutPolicy, MediaInfo, ModelDetail, ModelSummary, OutputRatio, PlatformPreset, Project, ProviderConfig, ReframeExportBatch, RenditionPreset, RenditionReframeAdjustment, TimelineCaption, TimelineClip, TimelineDiff, TimelineDocument, TimelineLayout, TimelinePatchEgressPreview, TimelinePatchOperation, TimelinePatchProposal, TimelineRevisionId, TimelineRevisionSummary, TimelineState, Transcript, TranscriptSegment, TranscriptSummary, VerticalAnchor } from "@aivideo/contracts";
 import { ExportDialog, type ExportSettings } from "./ExportDialog.js";
 import { CoverDialog } from "./CoverDialog.js";
 import type { AuthoritativePreviewPresentation, ExportRecordPresentation, RenditionPreviewPresentation, RenditionReframePreviewPresentation } from "../../electron/preload/index.js";
@@ -25,7 +25,8 @@ import { Dialog } from "./Dialog.js";
 import { ContextMenu, type ContextMenuItem } from "../ui/of/ContextMenu.js";
 import { pickMedia } from "../ui/of/media-selection.js";
 import { ProjectTabStrip } from "./workspace/ProjectTabStrip.js";
-import { ASSET_BATCH_DRAG, ASSET_DRAG, draggedAssetIds, planAssetDrop, setActiveDraggedAssetIds } from "./timeline/asset-drop.js";
+import { ASSET_BATCH_DRAG, ASSET_DRAG, SYSTEM_FILE_DROP_ID, clearSystemFileDrop, draggedAssetIds, planAssetDrop, resolveTimelineAssetDropIntent, setActiveDraggedAssetIds, takeSystemFileDrop } from "./timeline/asset-drop.js";
+import type { TimelineAssetDropIntent } from "./timeline/types.js";
 import { alignmentBox, alignmentPreviewSize, groupFrameBounds, planFrameAlignment, planFrameDistribution, planGroupBoundsEdit, type GroupBoundsField } from "./timeline/frame-alignment.js";
 import type { AlignDistribution, AlignEdge } from "../ui/of/AlignBar.js";
 import { errorCode, safeErrorMessage, safeTaskErrorMessage } from "./safeErrors.js";
@@ -33,6 +34,7 @@ import { formatLocalStamp } from "./localTime.js";
 import { PreviewPipOverlays, type PipOverlay, type PipTransform } from "./PreviewPipOverlays.js";
 import { SyntheticPreview } from "./preview/SyntheticPreview.js";
 import type { AssetDecodeBudget } from "./preview/preview-session.js";
+import { clampMediaRate, mediaRateIsPlayable } from "./preview/media-rate.js";
 import { PreviewSourceResolver } from "./preview/source-resolver.js";
 import { syntheticFallbackNotice } from "./preview/fallback-notice.js";
 import { FIT_VIEW, ZOOM_SETTLE_MS, createScrubTellGate, createWheelCoalescer, createZoomSettle, fittedSize, isFit, panBy, wheelPx, wheelZoomFactor, zoomAt, zoomLayout, zoomMax, type ViewerView } from "./preview/viewer-zoom.js";
@@ -44,7 +46,7 @@ import { TimelinePanel } from "./timeline/TimelineCanvas.js";
 import { createPlayheadStore, type PlayheadStore } from "./timeline/playhead-store.js";
 import { splitSelectionAt } from "./timeline/split-point.js";
 import { removeLinkedClips } from "./timeline/linked-clips.js";
-import { planMagneticDelete, readTimelineBehaviorPrefs } from "./timeline/magnetic-plan.js";
+import { planMagneticDelete, planRippleDelete, readTimelineBehaviorPrefs } from "./timeline/magnetic-plan.js";
 import type { TimeRange } from "./timeline/time-range.js";
 import { RequestScheduler, BoundedTaskQueue } from "./request-scheduling.js";
 import { parseSubtitleFile } from "./subtitleImport.js";
@@ -56,12 +58,14 @@ import { ProjectLibraryDialog } from "./ProjectLibraryDialog.js";
 type SaveState = "已保存" | "保存中" | "保存失败" | "草稿冲突";
 type NoticeTone = "success" | "warning" | "error" | "info";
 type Notice = { text: string; tone: NoticeTone } | "";
-type Selection = { kind: "clip"; id: string } | { kind: "clips"; ids: string[] } | { kind: "caption"; id: string } | { kind: "transition"; id: string } | null;
-function reconcileTimelineSelection(selection: Selection, document: TimelineDocument): Selection {
+type Selection = { kind: "clip"; id: string } | { kind: "clips"; ids: string[] } | { kind: "caption"; id: string } | { kind: "transition"; id: string } | { kind: "active-transition"; id: string } | null;
+function reconcileTimelineSelection(selection: Selection, state: TimelineState): Selection {
   if (!selection) return null;
+  const document = state.current_revision.document;
   if (selection.kind === "clip") return document.clips.some(clip => clip.clip_id === selection.id) ? selection : null;
   if (selection.kind === "caption") return document.captions.some(caption => caption.caption_id === selection.id) ? selection : null;
   if (selection.kind === "transition") return document.transitions?.some(transition => transition.transition_id === selection.id) ? selection : null;
+  if (selection.kind === "active-transition") return state.active_transitions.some(transition => transition.transition_id === selection.id) ? selection : null;
   const ids = selection.ids.filter(id => document.clips.some(clip => clip.clip_id === id));
   if (ids.length === selection.ids.length) return selection;
   return ids.length > 1 ? { kind: "clips", ids } : ids.length === 1 ? { kind: "clip", id: ids[0] } : null;
@@ -1012,7 +1016,7 @@ export function App() {
         if (current?.project_id === projectId && current.current_revision.timeline_revision_id === value.current_revision.timeline_revision_id) return;
         setTimeline(value);
         setWorking(value.current_revision.document);
-        setSelection(previous => reconcileTimelineSelection(previous, value.current_revision.document));
+        setSelection(previous => reconcileTimelineSelection(previous, value));
       } catch (error) {
         if (!active || seq !== timelineFetchSeq.current) return;
         const code = errorCode(error);
@@ -1345,6 +1349,8 @@ export function App() {
   const audioClipAtPlayhead = a1Clips.length > 0 ? a1Clips.find(c => playhead >= c.timeline_start_us && playhead < c.timeline_end_us) : undefined;
   const previewSpeedMilli = clipAtPlayhead?.speed_milli ?? (libraryPreviewId ? undefined : 1000);
   const previewReverse = Boolean(clipAtPlayhead?.reverse_playback);
+  const interactiveMediaRate = previewReverse ? 1 : ((previewSpeedMilli ?? 1000) / 1000) * uiRate;
+  const interactiveMediaRatePlayable = mediaRateIsPlayable(interactiveMediaRate);
   // 预览素材：素材箱预览优先；时间线交互预览只认播放头处的 V1 背景——
   // 不回退到选中片段/首片段（否则 V1 空档时覆盖轨内容被错误地满屏铺底）。
   const previewAsset = (libraryPreviewId ? assets.find(item => item.asset.asset_id === libraryPreviewId) : undefined) ?? (clipAtPlayhead ? assets.find(item => item.asset.asset_id === clipAtPlayhead.asset_id) : undefined);
@@ -1358,17 +1364,18 @@ export function App() {
     const media = videoRef.current;
     if (media) {
       if (pendingSeekRef.current !== null) { media.currentTime = pendingSeekRef.current; pendingSeekRef.current = null; }
-      // 交互预览跟随片段变速（倒放无法反向播放，仅回退原速）。
-      media.playbackRate = previewReverse ? 1 : Math.max(0.25, Math.min(4, ((previewSpeedMilli ?? 1000) / 1000) * uiRate));
+      // 交互预览跟随段速×全局速度；浏览器不支持的合速按播放头逐帧 seek。
+      media.playbackRate = clampMediaRate(interactiveMediaRate);
       if (!libraryPreviewId && clipAtPlayhead) {
         // 标尺跟随校正：播放头是唯一时钟，媒体时间与标尺偏差 >0.18s 时对齐——
         // 防止内容错位（标尺在 A 片段却播着 B 片段内容）。
         const sourceStart = (clipAtPlayhead.source_start_us ?? 0) / 1_000_000;
-        const speed = previewReverse ? 1 : Math.max(0.25, Math.min(4, ((previewSpeedMilli ?? 1000) / 1000) * uiRate));
+        const speed = interactiveMediaRate;
         const expected = sourceStart + ((playhead - clipAtPlayhead.timeline_start_us) / 1_000_000) * speed;
-        if (media.readyState >= 1 && Math.abs(media.currentTime - expected) > 0.18) media.currentTime = Math.max(0, expected);
+        const threshold = interactiveMediaRatePlayable ? 0.18 : 1 / 30;
+        if (media.readyState >= 1 && Math.abs(media.currentTime - expected) > threshold) media.currentTime = Math.max(0, expected);
       }
-      if (playing && (libraryPreviewId || clipAtPlayhead)) {
+      if (playing && (libraryPreviewId || clipAtPlayhead) && interactiveMediaRatePlayable) {
         media.play().catch(() => {
           // 预览模式切换后元素为全新挂载、媒体仍在加载：play 以 AbortError
           // （interrupted by a new load request）被打断属瞬态——播放头时钟每
@@ -1386,8 +1393,9 @@ export function App() {
         const sourceStart = (audioClipAtPlayhead.source_start_us ?? 0) / 1_000_000;
         const elapsed = (playhead - audioClipAtPlayhead.timeline_start_us) / 1_000_000;
         audio.currentTime = sourceStart + elapsed * ((audioClipAtPlayhead.speed_milli ?? 1000) / 1000);
-        audio.playbackRate = Math.max(0.25, Math.min(4, (audioClipAtPlayhead.speed_milli ?? 1000) / 1000));
-        if (playing) void audio.play().catch(() => {}); else audio.pause();
+        const speed = ((audioClipAtPlayhead.speed_milli ?? 1000) / 1000) * uiRate;
+        audio.playbackRate = clampMediaRate(speed);
+        if (playing && mediaRateIsPlayable(speed)) void audio.play().catch(() => {}); else audio.pause();
       } else {
         audio.pause();
       }
@@ -1688,7 +1696,7 @@ export function App() {
   // Map 改为 useMemo——播放头 10Hz 更新不再重建这些 props，下游 memo 化的
   // 子组件不再整树重渲（此前每次 App 渲染都 new Map/new array）。
   const timelineAssetMedia = useMemo(
-    () => assets.map(item => ({ asset_id: item.asset.asset_id, media_url: item.media_url, kind: item.asset.kind, display_name: item.asset.display_name, duration_us: typeof item.asset.media_info?.duration_us === "number" ? item.asset.media_info.duration_us : null })),
+    () => assets.map(item => ({ asset_id: item.asset.asset_id, media_url: item.media_url, kind: item.asset.kind, display_name: item.asset.display_name, duration_us: typeof item.asset.media_info?.duration_us === "number" ? item.asset.media_info.duration_us : null, has_audio: Array.isArray(item.asset.media_info?.audio_streams) && item.asset.media_info.audio_streams.length > 0 })),
     [assets],
   );
   // WP-P232：素材缩略图预抽登记（导入/项目加载后 fire-and-forget）。
@@ -1981,20 +1989,71 @@ export function App() {
     const asset = assets.find(candidate => candidate.asset.asset_id === item.asset_id);
     return Boolean(asset && (item.asset_kind === "image" || asset.asset.availability === "available"));
   });
-  const dropAsset = async (ids: string[], atIndex: number, trackId?: string, edit?: { mode: "overwrite"; atUs: number }) => {
+  const adoptImportedAsset = (result: ImportedAsset) => {
+    setAssets(items => [...items.filter(item => item.asset.asset_id !== result.asset.asset_id), { asset: result.asset, media_url: result.media_url }]);
+    ensureFilmstripForAsset(String(result.asset.asset_id));
+    if (result.asset.kind === "video") requestProxyJobRef.current(String(result.asset.asset_id));
+  };
+  const dropAsset = async (
+    ids: string[],
+    atIndex: number,
+    trackId?: string,
+    edit?: { mode: "overwrite"; atUs: number },
+    intent?: TimelineAssetDropIntent,
+    replaceTargetClipId?: string,
+  ) => {
+    const systemDrop = ids.length === 1 && ids[0] === SYSTEM_FILE_DROP_ID;
+    const files = systemDrop ? takeSystemFileDrop() : [];
+    if (systemDrop && !files.length) {
+      showNotice("没有读取到拖入的文件；请重新拖放。", "warning");
+      return;
+    }
+    const currentDocument = working ?? timeline?.current_revision.document;
+    const targetTrack = trackId && trackId !== "new" ? currentDocument?.tracks.find(track => track.id === trackId) : undefined;
+    if (trackId && trackId !== "new" && !targetTrack) {
+      showNotice("时间线目标轨道已不存在，请重新拖放。", "warning");
+      return;
+    }
+    if (targetTrack?.locked) {
+      showNotice("目标轨道已锁定，无法放入素材。", "warning");
+      return;
+    }
+    let partialImportNotice = "";
     const byId = new Map(assets.map(({ asset }) => [asset.asset_id as string, asset]));
-    const incoming: Asset[] = [];
-    for (const id of ids) {
-      const asset = byId.get(id);
-      if (!asset || asset.availability !== "available" || !isDraggableAsset(asset.kind)) {
-        showNotice("所选素材中有不可用或不支持的文件，无法放入时间线。", "warning");
+    let incoming: Asset[] = [];
+    if (systemDrop) {
+      if (!project || project.status !== "active") {
+        showNotice("请先打开一个可编辑的项目，再将文件放入时间线。", "warning");
         return;
       }
-      incoming.push(asset);
+      try {
+        const imported = await window.desktop.importDroppedAssets({ project_id: project.project_id, files });
+        imported.imported.forEach(adoptImportedAsset);
+        incoming = imported.imported.map(item => item.asset).filter(asset => asset.availability === "available" && isDraggableAsset(asset.kind));
+        if (imported.failures.length) {
+          partialImportNotice = `已导入 ${incoming.length} 项；${imported.failures.length} 个文件因格式不支持、文件无效或导入失败而跳过。`;
+        }
+      } catch (error) {
+        showNotice(safeErrorMessage(error, "系统文件导入失败；时间线未修改。"), "warning");
+        return;
+      }
+    } else {
+      for (const id of ids) {
+        const asset = byId.get(id);
+        if (!asset || asset.availability !== "available" || !isDraggableAsset(asset.kind)) {
+          showNotice("所选素材中有不可用或不支持的文件，无法放入时间线。", "warning");
+          return;
+        }
+        incoming.push(asset);
+      }
     }
-    if (!incoming.length) return;
+    if (!incoming.length) {
+      if (partialImportNotice) showNotice(partialImportNotice, "warning");
+      return;
+    }
     if (!timeline && incoming.length === 1) {
       await createTimeline({ kind: "full_asset", asset_id: incoming[0].asset_id });
+      if (partialImportNotice) showNotice(partialImportNotice, "warning");
       return;
     }
     if (incoming.length > 100 || (incoming.length === 100 && trackId === "new")) {
@@ -2003,10 +2062,81 @@ export function App() {
     }
     const base = timeline ?? await createTimeline({ kind: "empty" });
     if (!base || projectRef.current?.project_id !== project?.project_id) return;
-    const tracks = (working ?? base.current_revision.document).tracks;
+    const latestDocument = working ?? base.current_revision.document;
+    const dropPrefs = readTimelineBehaviorPrefs();
+    const tracks = latestDocument.tracks;
+    if (replaceTargetClipId) {
+      if (incoming.length !== 1 || !intent || intent.zone !== "center" || intent.targetClipId !== replaceTargetClipId) {
+        showNotice("替换目标已变化；时间线未修改。", "warning");
+        return;
+      }
+      const target = latestDocument.clips.find(clip => clip.clip_id === replaceTargetClipId);
+      const targetTrack = target ? tracks.find(track => track.id === target.track_id) : undefined;
+      if (!target || !targetTrack || targetTrack.locked || latestDocument.locked_elements?.includes(target.clip_id)) {
+        showNotice("替换目标已删除或锁定；时间线未修改。", "warning");
+        return;
+      }
+      const committed = await patchTimeline(
+        [{ op: "replace_clip_source", clip_id: target.clip_id, asset_id: incoming[0]!.asset_id }],
+        `替换素材：${incoming[0]!.display_name}`,
+        base,
+      );
+      if (committed) {
+        exitLibraryPreview();
+        if (partialImportNotice) showNotice(partialImportNotice, "warning");
+      } else if (systemDrop) {
+        showNotice(`${partialImportNotice ? `${partialImportNotice} ` : ""}成功导入的素材已保留在素材栏；时间线未修改。`, "warning");
+      }
+      return;
+    }
+    let resolvedIntent = intent;
+    if (intent) {
+      resolvedIntent = resolveTimelineAssetDropIntent({
+        hit: {
+          trackId: intent.hitTrackId,
+          band: intent.band,
+          clipId: intent.targetClipId,
+          zone: intent.boundary ?? (intent.zone === "center" ? "replace" : null),
+        },
+        clips: latestDocument.clips,
+        tracks,
+        lockedClipIds: latestDocument.locked_elements,
+        assetKinds: incoming.map(asset => asset.kind),
+        itemCount: incoming.length,
+        canReplace: true,
+        pointerUs: intent.pointerUs,
+        fpsNum: latestDocument.canvas.fps_num,
+        fpsDen: latestDocument.canvas.fps_den,
+        hasCoordinates: intent.hasCoordinates,
+        defaultSlot: atIndex,
+        altKey: intent.mode === "overwrite",
+        mainTrackMagnet: dropPrefs.mainTrackMagnet,
+        assetDurationsUs: incoming.map(asset => {
+          const duration = asset.media_info?.duration_us;
+          return asset.kind === "image" ? 4_000_000 : typeof duration === "number" ? duration : null;
+        }),
+      });
+      if (!resolvedIntent.accepts) {
+        showNotice("素材落点在导入期间发生变化或目标轨道不可用；时间线未修改。", "warning");
+        return;
+      }
+    }
     let operations: TimelinePatchOperation[];
     try {
-      operations = planAssetDrop(incoming, tracks, atIndex, trackId, edit?.mode === "overwrite" ? { atUs: edit.atUs } : undefined);
+      operations = planAssetDrop(
+        incoming,
+        tracks,
+        resolvedIntent?.slot ?? atIndex,
+        resolvedIntent?.trackId ?? trackId,
+        edit?.mode === "overwrite" ? { atUs: edit.atUs } : undefined,
+        resolvedIntent ? {
+          intent: resolvedIntent,
+          clips: latestDocument.clips,
+          linkageEnabled: dropPrefs.linkageEnabled,
+          fpsNum: latestDocument.canvas.fps_num,
+          fpsDen: latestDocument.canvas.fps_den,
+        } : undefined,
+      );
     } catch (error) {
       showNotice(error instanceof Error ? error.message : "无法规划素材覆盖。", "warning");
       return;
@@ -2015,8 +2145,12 @@ export function App() {
       showNotice("这组素材超出单次时间线操作上限，请分批拖入。", "warning");
       return;
     }
-    if (await patchTimeline(operations, incoming.length > 1 ? `批量放入 ${incoming.length} 项素材` : `放入 ${incoming[0].display_name}`, base)) {
+    const committed = await patchTimeline(operations, incoming.length > 1 ? `批量放入 ${incoming.length} 项素材` : `放入 ${incoming[0].display_name}`, base);
+    if (committed) {
       exitLibraryPreview();
+      if (partialImportNotice) showNotice(partialImportNotice, "warning");
+    } else if (systemDrop) {
+      showNotice(`${partialImportNotice ? `${partialImportNotice} ` : ""}成功导入的素材已保留在素材栏；时间线未修改。`, "warning");
     }
   };
   const insertSegments = (transcript: Transcript) => {
@@ -2052,20 +2186,18 @@ export function App() {
     if (!project) return;
     const result = await window.desktop.importAsset({ project_id: project.project_id, kind });
     if (!result) return;
-    setAssets(items => [...items, { asset: result.asset, media_url: result.media_url }]);
+    adoptImportedAsset(result);
     // 方案 A（B11 缺失的一环）：视频素材导入后自动在后台登记代理生成作业，
     // 生成期间预览继续走原片（卡但能看），就绪后由下面的 jobs 派生 effect 失效
     // 解析缓存、下次解析自动换代理。这里不 await：代理是加速项，登记失败（无
     // FFmpeg / 不支持 / IPC 报错）绝不能影响导入成功，也不弹错误。
     // WP-P232：视频素材导入即登记缩略图预抽（低优先级批量；fire-and-forget，
     // 与代理登记同一韧性语义——失败静默，不影响导入成功）。
-    ensureFilmstripForAsset(String(result.asset.asset_id));
     if (result.asset.kind !== "video") return;
     // 方案 A（B11 缺失的一环）：视频素材导入后自动在后台登记代理生成作业，
     // 生成期间预览继续走原片（卡但能看），就绪后由下面的 jobs 派生 effect 失效
     // 解析缓存、下次解析自动换代理。导入即转对 4K 素材仍然是对的；**已导入的
     // 老素材**由实测判定那条路补上（decodeBudget → 同一登记入口）。
-    requestProxyJobRef.current(String(result.asset.asset_id));
   };
   // 素材库刷新：逐个让 Core 重扫本地文件；已删除的素材清理出列表
   // （无时间线引用时直接删除，仍被引用时保留并标记缺失）。
@@ -2423,6 +2555,22 @@ export function App() {
     onDragEnd: () => setActiveDraggedAssetIds([]),
     title: isDraggableAsset(item.asset.kind) ? "拖到 V1 时间线以插入；双击在预览播放" : undefined,
   });
+  useEffect(() => {
+    const clearAbortedAssetDrop = () => {
+      clearSystemFileDrop();
+      setActiveDraggedAssetIds([]);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") clearAbortedAssetDrop();
+    };
+    window.addEventListener("dragend", clearAbortedAssetDrop, true);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.removeEventListener("dragend", clearAbortedAssetDrop, true);
+      window.removeEventListener("keydown", onKeyDown, true);
+      clearSystemFileDrop();
+    };
+  }, []);
   // 点击预览画面：选中播放头处的片段（剪映式选中），无片段时清空选择。
   // P231 修复：合成模式由 sp-layer 的 S3/S4 状态机全权负责选择（盒子点击选盒、
   // 空白 release 清选/框选）——这里的 onClick 只服务 interactive 模式，
@@ -3019,9 +3167,8 @@ export function App() {
     if (!(event.ctrlKey || event.metaKey) && (key === "backspace" || key === "delete") && inTimeline) {
       event.preventDefault();
       if (event.shiftKey && working) {
-        if (!selectedClips.some(clip => clip.track_id === "V1")) { showNotice("请选择主轨片段后波纹删除。", "info"); return; }
-        const plan = planMagneticDelete(working, selectedClips, readTimelineBehaviorPrefs().linkageEnabled);
-        if (plan.operations.length) void patchTimeline(plan.operations, "主轨波纹删除");
+        const plan = planRippleDelete(working, selectedClips, readTimelineBehaviorPrefs().linkageEnabled);
+        if (plan.operations.length) void patchTimeline(plan.operations, "波纹删除");
         else if (plan.reason) showNotice(plan.reason, "info");
       } else runCommand("timeline.delete");
       return;
@@ -3777,12 +3924,12 @@ export function App() {
             {/* 合成预览仅在时间线有可见片段时挂载；空时间线显示引导文案（剪映式），
                 避免对空时间线请求 preview-ir 被 Core 以 TIMELINE_EMPTY 拒绝而回退。 */}
             {previewMode === "synthetic" && projectStateReady && project && working && timeline && working.clips.length > 0 && <SyntheticPreview preparePlaybackRef={preparePreviewPlaybackRef} key={project.project_id} outputRatio={renderRatio} projectId={project.project_id} revisionId={timeline.current_revision.timeline_revision_id} mediaUrls={syntheticMediaUrls} audioByClip={syntheticAudioByClip} pipClips={syntheticPipClips} lockedClipIds={working.locked_elements} selectedClipId={pipSelectedId} selectedClipIds={selection?.kind === "clips" ? selection.ids : undefined} onSelectClip={clipId => setSelection(clipId ? { kind: "clip", id: clipId as never } : null)} onSelectClips={ids => setSelection(ids.length ? { kind: "clips", ids } : null)} trackIndexByClipId={trackIndexByClipId} onCommitPipTransform={async (clipId, transform) => { const clip = (working?.clips ?? []).find(item => item.clip_id === clipId); return commitPipTransform(clipId as never, { ...(clip?.transform ?? {}), ...transform }); }} onDraftPipMask={(clipId, mask) => draftPipMask(clipId as never, mask)} onCommitPipMask={(clipId, mask) => commitPipMask(clipId as never, mask)} onGesturePause={pausePreviewPlayback} onGestureResume={resumePreviewPlayback} playing={playing && !gestureHoldRef.current} playheadUs={playhead} playheadStore={playheadStore} playbackRate={uiRate} onTimeUs={us => seekFromPlayback(us)} onEnded={handlePreviewEnded} onFallback={(reason, code) => { if (!seenAnyTicketRef.current) return; setPreviewMode("interactive"); setSyntheticNotice(syntheticFallbackNotice(reason, code)); }} sourceResolver={previewSourceResolver} resourceTier={resourceTier} forceCopyTo={forceCopyTo} snapshotRef={syntheticSnapshotRef} proxyEpoch={proxyReadyEpoch} onDecodeBudget={onDecodeBudget} onSession={session => { if (!session) previewSessionRef.current?.endScrubStorm(); previewSessionRef.current = session; }} />}
-            {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "video" && <div className="preview-transform" style={mainTransformStyle}><video className="preview-background" src={previewAsset.media_url} muted aria-hidden="true" /><video ref={videoRef} className="preview-foreground" src={previewAsset.media_url} muted={!selectedClip?.audio.enabled || previewReverse || (clipAtPlayhead ? !isClipAudible(clipAtPlayhead) : false)} aria-label="交互预览视频" onTimeUpdate={event => { if (libraryPreviewId) dispatchPlayhead("external", Math.round(event.currentTarget.currentTime * 1_000_000), true); }} onEnded={handleVideoEnded} /></div>}
+            {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "video" && <div className="preview-transform" style={mainTransformStyle}><video className="preview-background" src={previewAsset.media_url} muted aria-hidden="true" /><video ref={videoRef} className="preview-foreground" src={previewAsset.media_url} muted={!selectedClip?.audio.enabled || previewReverse || !interactiveMediaRatePlayable || (clipAtPlayhead ? !isClipAudible(clipAtPlayhead) : false)} aria-label="交互预览视频" onTimeUpdate={event => { if (libraryPreviewId) dispatchPlayhead("external", Math.round(event.currentTarget.currentTime * 1_000_000), true); }} onEnded={handleVideoEnded} /></div>}
             {previewMode === "interactive" && audioAsset?.media_url && <audio ref={audioRef} src={audioAsset.media_url} style={{ display: "none" }} />}
             {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "image" && <div className="preview-transform" style={mainTransformStyle}><img className="preview-background" src={previewAsset.media_url} alt="" aria-hidden="true" /><img className="preview-foreground" src={previewAsset.media_url} alt={previewAsset.asset.display_name} /></div>}
             {(previewMode === "interactive" || (previewMode === "synthetic" && (!working || working.clips.length === 0))) && !previewAsset?.media_url && overlayPips.length === 0 && <div className="preview-empty">选择或追加素材以开始编辑</div>}
             {previewMode === "interactive" && visibleCaption && <div className={`caption-overlay ${visibleCaption.preset_id}`}>{visibleCaption.text}</div>}
-            {previewMode === "interactive" && overlayPips.length > 0 && <PreviewPipOverlays items={overlayPips} tracks={tracksAtPlayhead} selectedClipId={pipSelectedId} locked={pipLocked} onSelect={clipId => setSelection({ kind: "clip", id: clipId })} onDraftTransform={draftPipTransform} onCommitTransform={commitPipTransform} onDraftMask={draftPipMask} onCommitMask={commitPipMask} onGesturePause={pausePreviewPlayback} onGestureResume={resumePreviewPlayback} playheadUs={playhead} playing={playing} />}
+            {previewMode === "interactive" && overlayPips.length > 0 && <PreviewPipOverlays items={overlayPips} tracks={tracksAtPlayhead} selectedClipId={pipSelectedId} locked={pipLocked} onSelect={clipId => setSelection({ kind: "clip", id: clipId })} onDraftTransform={draftPipTransform} onCommitTransform={commitPipTransform} onDraftMask={draftPipMask} onCommitMask={commitPipMask} onGesturePause={pausePreviewPlayback} onGestureResume={resumePreviewPlayback} playheadUs={playhead} playing={playing} playbackRate={uiRate} />}
           </div>
           {/* 选中框：白色边框 + 8 向拖拽手柄，缩放时随画面一起缩放；仅选中片段时可见。 */}
           {!overlayClipSelected && <div className="sel-box" ref={selBoxRef} onClick={event => event.stopPropagation()} aria-hidden="true"><i className="sel-border" />{/* P6 修正：参照标签 = 手势实时值（StageTransformFrame.tsx:224-244 常驻 Label 属 layer；
@@ -3859,7 +4006,7 @@ export function App() {
       <aside className={"properties-pane" + (rightPaneOpen ? "" : " pane-closed")} aria-label="上下文属性" role="region" hidden={!rightPaneOpen}>{selectedClip ? <ClipProperties clip={selectedClip} clipName={semanticAssetNames[selectedClip.asset_id]} locked={Boolean(working?.locked_elements?.includes(selectedClip.clip_id) || trackById.get(selectedClip.track_id)?.locked)} onAlign={alignmentHint ? undefined : alignSelectedFrames} alignmentHint={alignmentHint} onPatch={patchTimelineVoid} onDraft={queueDraft} working={working!} playheadUs={playhead} onOpenEditingTools={tool => openEditingTools(tool, selectedClip.clip_id)} baseRevisionId={timeline?.current_revision.timeline_revision_id ?? null} onAppliedTimeline={acceptState} /> : selectedCaption ? <CaptionProperties caption={selectedCaption} locked={Boolean(selectedCaption.source_clip_id && working?.locked_elements?.includes(selectedCaption.source_clip_id))} onPatch={patchTimelineVoid} onDraft={queueDraft} working={working!} /> : selectedTransition ? <TransitionProperties transition={selectedTransition} onPatch={patchTimelineVoid} /> : selectedClips.length > 1 ? <ClipGroupAlignmentProperties count={selectedClips.length} hint={alignmentHint} onAlign={alignmentHint ? undefined : alignSelectedFrames} onDistribute={visualSelectedCount >= 3 ? distributeSelectedFrames : undefined} distributionDisabled={Boolean(alignmentHint)} groupBounds={groupBounds} onEditBounds={editGroupBounds} /> : selectedAssetIds.size > 0 ? <AssetSelectionProperties entries={visibleAssets.filter(({ asset }) => selectedAssetIds.has(asset.asset_id)).map(({ asset }) => ({ id: asset.asset_id, name: asset.display_name, kind: assetKindLabels[asset.kind], meta: assetMetaText(asset), duration: assetDurationLabel(asset), status: availabilityLabels[asset.availability] }))} /> : <ProjectProperties project={project} saveState={saveState} authoritativePreview={authoritativePreview} previewIsStale={previewIsStale} renderDisabledReason={renderDisabledReason} onGeneratePreview={() => void generatePreview()} onCreateExport={openExportDialog} onOpenProjectDialog={() => setProjectDialogOpen(true)} />}</aside>
     </section>
     <div className="timeline-resize-handle" role="separator" aria-label="调整时间线高度" onPointerDown={event => beginResize("timeline", event)} />
-    <TimelinePanel projectId={project?.project_id} document={working} selection={selection} setSelection={(sel) => { setSelection(sel); exitLibraryPreview(); }} onPatch={patchTimelineVoid} onDropAsset={dropAsset} coverUrl={coverUrl} onCaptureCover={() => setCoverDialogOpen(true)} canUndo={Boolean(timeline?.can_undo)} canRedo={Boolean(timeline?.can_redo)} onUndo={() => void undoRedo("undo")} onRedo={() => void undoRedo("redo")} assetMedia={timelineAssetMedia} waveformCache={waveformCache} playheadStore={playheadStore} onSeek={(timeUs) => { if (libraryPreviewId) exitLibraryPreview(); seekWhileScrubbing(timeUs); }} onSeekCommit={timeUs => { exitLibraryPreview(); commitScrub(timeUs); }} onRangeChange={setPlaybackRange} onCommand={(id) => runCommand(id)} meterLevels={meterLevels} playing={playing} />
+    <TimelinePanel projectId={project?.project_id} document={working} activeTransitions={timeline?.active_transitions ?? []} selection={selection} setSelection={(sel) => { setSelection(sel); exitLibraryPreview(); }} onPatch={patchTimelineVoid} onDropAsset={dropAsset} onReplaceAssetDrop={(ids, targetClipId, intent) => dropAsset(ids, intent.slot, intent.trackId ?? undefined, undefined, intent, targetClipId)} coverUrl={coverUrl} onCaptureCover={() => setCoverDialogOpen(true)} canUndo={Boolean(timeline?.can_undo)} canRedo={Boolean(timeline?.can_redo)} onUndo={() => void undoRedo("undo")} onRedo={() => void undoRedo("redo")} assetMedia={timelineAssetMedia} waveformCache={waveformCache} playheadStore={playheadStore} onSeek={(timeUs) => { if (libraryPreviewId) exitLibraryPreview(); seekWhileScrubbing(timeUs); }} onSeekCommit={timeUs => { exitLibraryPreview(); commitScrub(timeUs); }} onRangeChange={setPlaybackRange} onCommand={(id) => runCommand(id)} meterLevels={meterLevels} playing={playing} />
     </div>
     </div>
     <WorkspaceFooter

@@ -18,7 +18,7 @@ export interface TimelineMarker {
 }
 
 /** 预置标记色：与调色板一致的低饱和亮色，在深浅两套主题下都够亮。 */
-export const MARKER_COLORS = ["#ffd76e", "#4ec9b0", "#7aa2f7", "#e06c9f", "#f48771"] as const;
+export const MARKER_COLORS = ["#4c8dff", "#3fbf6f", "#e8c547", "#f08a3c", "#e5484d", "#a57cf0"] as const;
 
 const STORAGE_KEY = "vortex-cut.timeline.markers.v1";
 

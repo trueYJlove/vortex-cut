@@ -312,6 +312,41 @@ describe("effectiveRigSpeed 与换率重启", () => {
     expect(rig.speed).toBe(2);
     session.dispose();
   });
+
+  it("同速无漂移分支保留段速×全局倍速，不把音源降回段速", () => {
+    const ctx = new FakeCtx();
+    ctx.currentTime = 1;
+    const source = new FakeBufferSource();
+    const rig = rigWith(ctx, { source, startedAt: 0, startOffset: 0, speed: 4 });
+    source.playbackRate.value = 4;
+    const session = bareSession();
+    session.ir.segments[0]!.speed_milli = 2000;
+    attach(session, ctx, rig, CFG);
+    const internals = internalsOf(session);
+    internals.playing = true;
+    internals.playRate = 2;
+    // tUs=2s、段速=2、源域位置=4s：无漂移时仍应保持合速 4。
+    internals.syncAudio(2_000_000);
+    expect(source.stop).not.toHaveBeenCalled();
+    expect(source.playbackRate.value).toBe(4);
+    expect(rig.speed).toBe(4);
+    session.dispose();
+  });
+
+  it("段速×全局速率超出浏览器区间时停止预览音频", () => {
+    const ctx = new FakeCtx();
+    const source = new FakeBufferSource();
+    const rig = rigWith(ctx, { source, speed: 1 });
+    const session = bareSession();
+    session.ir.segments[0]!.speed_milli = 100_000;
+    attach(session, ctx, rig, CFG);
+    const internals = internalsOf(session);
+    internals.playing = true;
+    internals.syncAudio(0);
+    expect(source.stop).toHaveBeenCalledTimes(1);
+    expect(rig.source).toBeNull();
+    session.dispose();
+  });
 });
 
 // ── 4. 组件转发 ──────────────────────────────────────────────────────────

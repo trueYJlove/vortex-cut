@@ -20,6 +20,7 @@ interface Core {
   appendChunk(generation: number, start: number, valid: number, channels: Float32Array[]): void;
   releaseBefore(sample: number): void;
   mode: string;
+  speed: number;
   underruns: number;
   streamEnd: number;
   chunks: Array<{ start: number; valid: number; data: Float32Array[] }>;
@@ -155,11 +156,12 @@ describe("VarispeedStretch（线上同源码求值）", () => {
     expect(end).toBeLessThan(12000 + W + 256);
   });
 
-  it("全速度域输出有界且无 NaN；停止后静音", () => {
-    for (const speed of [0.25, 0.5, 1, 1.25, 2, 4]) {
+  it("OpenFilm 浏览器音频速度域输出有界且无 NaN；越界夹到浏览器边界", () => {
+    for (const speed of [1 / 16, 0.1, 0.25, 0.5, 1, 1.25, 2, 4, 8, 16, 32]) {
       const core = makeCore();
       core.setBuffer([sine(440, SR)]);
       core.play(0, speed);
+      expect(core.speed).toBe(Math.min(16, Math.max(1 / 16, speed)));
       const [out] = render(core, SR + 2 * W);
       let allFinite = true;
       let maxAbs = 0;

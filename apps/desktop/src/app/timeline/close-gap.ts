@@ -11,7 +11,7 @@ export function closeGapAt(document: TimelineDocument | undefined, trackId: stri
   const moving = clips.filter(clip => clip.timeline_start_us >= next.timeline_start_us);
   // Core carries linked sound with its picture. A group with more than one picture
   // needs a cross-track collision plan, so refuse it rather than break the group.
-  if (gap <= 0 || moving.length > 100 || moving.some(clip => {
+  if (gap <= 0 || moving.some(clip => {
     const members = clip.link_group_id ? document.clips.filter(item => item.link_group_id === clip.link_group_id) : [clip];
     return members.filter(item => item.asset_kind !== "audio").length > 1 || members.some(item =>
       item.timeline_start_us < gap || document.locked_elements?.includes(item.clip_id) ||
@@ -26,5 +26,7 @@ export function closeGapAt(document: TimelineDocument | undefined, trackId: stri
   const placements = document.clips.filter(clip => ids.has(clip.clip_id)).map(clip => ({
     clip_id: clip.clip_id, timeline_start_us: clip.timeline_start_us - gap,
   }));
-  return placements.length <= 100 ? [{ op: "position_clips", placements }] : [];
+  // All clip positions travel in one position_clips operation. The shared
+  // patch contract limits operations, not the number of placements inside it.
+  return placements.length ? [{ op: "position_clips", placements }] : [];
 }

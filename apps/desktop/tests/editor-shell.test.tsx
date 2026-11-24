@@ -3,6 +3,7 @@ import { afterEach, beforeEach, afterAll, describe, expect, it, vi } from "vites
 import type { Job, ModelDetail, TimelineDocument, TimelineState } from "@aivideo/contracts";
 import type { AuthoritativePreviewPresentation, DesktopApi } from "../electron/preload/index.js";
 import { App } from "../src/app/App.js";
+import { setActiveDraggedAssetIds } from "../src/app/timeline/asset-drop.js";
 import { fixturePreviewIrPresentation } from "./fixtures/preview-ir.js";
 
 const now = "2026-08-11T00:00:00.000Z";
@@ -10,7 +11,7 @@ const project = { project_id: "project_1" as never, name: "演示项目", status
 const video = { asset_id: "asset_video" as never, project_id: project.project_id, kind: "video" as const, storage_mode: "external" as const, display_name: "很长的中文素材文件名-第一幕.mp4", fingerprint: "a".repeat(64), size_bytes: 10, modified_at: now, availability: "available" as const, media_info: { duration_us: 5_000_000 }, created_at: now, updated_at: now };
 const image = { ...video, asset_id: "asset_image" as never, kind: "image" as const, display_name: "海报.png", media_info: { duration_us: 0 } };
 const timelineDocument: TimelineDocument = { schema_version: 1, project_id: project.project_id, canvas: { ...project.canvas, background_color: "#000000" }, tracks: [{ id: "C1", kind: "text", locked: false, hidden: false, muted: false, solo: false }, { id: "V1", kind: "video", locked: false, hidden: false, muted: false, solo: false }, { id: "A1", kind: "audio", locked: false, hidden: false, muted: false, solo: false }], clips: [{ clip_id: "clip_1" as never, track_id: "V1", order_index: 0, asset_id: video.asset_id, asset_kind: "video", source_start_us: 0, source_end_us: 5_000_000, timeline_start_us: 0, timeline_end_us: 5_000_000, layout: "fit", audio: { enabled: true, gain_db: 0 } }], captions: [{ caption_id: "caption_1" as never, track_id: "C1", source_clip_id: "clip_1" as never, start_us: 0, end_us: 1_000_000, text: "这是一条很长的中文字幕，用于验证编辑与布局。", preset_id: "default-bottom", origin: "transcript", edited: false, source_segment_ids: ["segment_1" as never] }], provenance: { created_by: "user", source_transcript_ids: ["transcript_1" as never] } };
-const state: TimelineState = { project_id: project.project_id, current_revision: { timeline_revision_id: "revision_1" as never, project_id: project.project_id, parent_revision_id: null, document_sha256: "a".repeat(64), summary: "创建", created_by: "user", created_at: now, schema_version: 1, document: timelineDocument }, draft: null, can_undo: true, can_redo: true, current_preview: null };
+const state: TimelineState = { project_id: project.project_id, current_revision: { timeline_revision_id: "revision_1" as never, project_id: project.project_id, parent_revision_id: null, document_sha256: "a".repeat(64), summary: "创建", created_by: "user", created_at: now, schema_version: 1, document: timelineDocument }, draft: null, can_undo: true, can_redo: true, current_preview: null, active_transitions: [] };
 const transcript = { transcript_id: "transcript_1" as never, asset_id: video.asset_id, status: "ready" as const, language: "zh", segments: [{ segment_id: "segment_1" as never, ordinal: 0, start_us: 0, end_us: 1_000_000, text: "第一句", confidence: 1, words: null }], words: null, provider: "fixture", model_id: "model_1" as never, model_revision: "v1", source_media_fingerprint: video.fingerprint, duration_us: 5_000_000, created_at: now, updated_at: now };
 const model: ModelDetail = { model_id: "model_1" as never, display_name: "本地测试模型", purpose: "本地语音转录", provider: "fixture", revision: "v1", supported_languages: ["zh", "en"], supports_word_timestamps: true, runtime_version: "1", model_size_bytes: 1024, installed_size_bytes: 2048, model_sha256: "b".repeat(64), license: { id: "license_1", name: "测试许可证", url: null, attribution: null, acceptance_required: true }, source: { kind: "trusted_manifest", display_name: "内置清单", host: null, url: null }, requires_network: true, local_only: true, status: "unavailable", provider_status: "installed", progress: null, required_disk_bytes: 4096, runtime_requirements: {}, files: [], available_disk_bytes: 8192 };
 const job: Job = { job_id: "job_1" as never, project_id: project.project_id, asset_id: video.asset_id, kind: "transcription", status: "interrupted", stage: "failed", progress: 0, attempt: 1, model_id: model.model_id, model_revision: model.revision, input_fingerprint: video.fingerprint, input: { asset_id: video.asset_id }, error: { code: "JOB_INTERRUPTED", message: "interrupted" }, created_at: now, updated_at: now, started_at: null, finished_at: now };
@@ -18,6 +19,11 @@ const runningJob = { ...job, job_id: "job_running" as never, status: "running" a
 const createdJob = { ...runningJob, job_id: "job_created" as never };
 const downloadJob = { ...runningJob, job_id: "job_download" as never, asset_id: null, kind: "model_download" as const };
 const runningRenderJob: Job = { ...runningJob, job_id: "job_render" as never, asset_id: null, kind: "final_export" as const, stage: "exporting", progress: 0.5, started_at: now, finished_at: null };
+function fireAssetDrag(target: Element, type: "dragover" | "drop" | "dragleave", dataTransfer: DataTransfer) {
+  const event = new MouseEvent(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, "dataTransfer", { value: dataTransfer });
+  fireEvent(target, event);
+}
 const stalePreview: AuthoritativePreviewPresentation = {
   preview: {
     render_artifact_id: "artifact_preview" as never,
@@ -44,7 +50,7 @@ function desktopApi(options: { timeline?: TimelineState | null; models?: ModelDe
   return {
     getRuntime: vi.fn().mockResolvedValue({ protocol_version: 1, status: "ready" }), chooseMedia: vi.fn(), probeMedia: vi.fn(),
     listProjects: vi.fn().mockResolvedValue({ items: [project], next_cursor: null }), createProject: vi.fn().mockResolvedValue({ ...project, project_id: "project_2", name: "新项目" }), getProject: vi.fn().mockResolvedValue(project), renameProject: vi.fn().mockResolvedValue({ ...project, name: "已重命名" }), archiveProject: vi.fn().mockResolvedValue({ ...project, status: "archived" }), reopenProject: vi.fn().mockResolvedValue(project),
-    listAssets: vi.fn().mockResolvedValue({ items: [{ asset: video, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGH" }, { asset: image, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGHI" }], next_cursor: null }), importAsset: vi.fn(), importAssetByFixture: vi.fn().mockResolvedValue(null).mockImplementation(async ({ kind }: { kind?: string }) => ({ grant: {}, asset: { ...image, asset_id: `import_${kind}` as never, kind: kind ?? "video", display_name: `import-${kind}` }, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGHI" })), refreshAsset: vi.fn().mockResolvedValue({ asset: video, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGH" }), assetMediaTicket: vi.fn().mockResolvedValue({ media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGH" }), relocateAsset: vi.fn().mockResolvedValue({ grant: {}, asset: video, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGH" }), importSubtitle: vi.fn().mockResolvedValue(null), deleteAsset: vi.fn().mockResolvedValue(undefined), revealAsset: vi.fn().mockResolvedValue({ status: "opened" }),
+    listAssets: vi.fn().mockResolvedValue({ items: [{ asset: video, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGH" }, { asset: image, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGHI" }], next_cursor: null }), importAsset: vi.fn(), importDroppedAssets: vi.fn().mockResolvedValue({ imported: [], failures: [] }), importAssetByFixture: vi.fn().mockResolvedValue(null).mockImplementation(async ({ kind }: { kind?: string }) => ({ grant: {}, asset: { ...image, asset_id: `import_${kind}` as never, kind: kind ?? "video", display_name: `import-${kind}` }, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGHI" })), refreshAsset: vi.fn().mockResolvedValue({ asset: video, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGH" }), assetMediaTicket: vi.fn().mockResolvedValue({ media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGH" }), relocateAsset: vi.fn().mockResolvedValue({ grant: {}, asset: video, media_url: "aivideo://media/abcdefghijklmnopqrstuvwxyzABCDEFGH" }), importSubtitle: vi.fn().mockResolvedValue(null), deleteAsset: vi.fn().mockResolvedValue(undefined), revealAsset: vi.fn().mockResolvedValue({ status: "opened" }),
     listJobs: vi.fn().mockResolvedValue({ items: options.jobs ?? [], next_cursor: null }), createJob: vi.fn(), getJob: vi.fn(), cancelJob: vi.fn().mockImplementation(async (jobId: string) => ({ ...createdJob, job_id: jobId, status: "cancelled" })), deleteJob: vi.fn().mockResolvedValue(undefined), deleteTranscript: vi.fn().mockResolvedValue(undefined), listModels: vi.fn().mockResolvedValue({ items: options.models ?? [], next_cursor: null }), getModel: vi.fn().mockResolvedValue(model), downloadModel: vi.fn().mockResolvedValue({ model: { ...model, status: "queued" }, job: downloadJob }), getModelDownload: vi.fn(), cancelModelDownload: vi.fn().mockResolvedValue({ model: { ...model, status: "cancelled" }, job: { ...downloadJob, status: "cancelled" } }), createTranscription: vi.fn().mockImplementation(async () => ({ job: { ...createdJob, job_id: `job_created_${++transcriptionSequence}` as never }, transcript: null })),
     listAngleGroups: vi.fn().mockResolvedValue({ items: [] }), createAngleGroup: vi.fn(), getAngleGroup: vi.fn(), syncAngleGroup: vi.fn(), setAngleOffset: vi.fn(), deleteAngleGroup: vi.fn(), indexSemanticAsset: vi.fn(), searchSemantic: vi.fn().mockResolvedValue({ query: "", hits: [] }), prepareKeyframePreview: vi.fn(), excludeKeyframeFrames: vi.fn(), createKeyframeGeneration: vi.fn(), getKeyframeGeneration: vi.fn(), getFrameTags: vi.fn().mockResolvedValue({ asset_id: "asset_1", status: null, reason: null, vocabulary_version: null, tags: [], vocabulary_violations: 0 }), filterFramesByLabel: vi.fn().mockResolvedValue({ label: "", hits: [] }),
     getBeatAnalysis: vi.fn().mockResolvedValue({ beat_grid_id: null, status: null, job_id: null, bpm: null, confidence: null, beat_count: null, downbeat_count: null, algorithm_version: "1", reason: null }),
@@ -152,17 +158,18 @@ describe("Editor shell 基线", () => {
 
   it("filters visible assets without changing project data", async () => {
     render(<App />);
-    const search = await screen.findByRole("searchbox", { name: "搜索素材" });
-    await screen.findByText("很长的中文素材文件名-第一幕.mp4");
+    const library = await screen.findByRole("region", { name: "媒体库" });
+    const search = within(library).getByRole("searchbox", { name: "搜索素材" });
+    await within(library).findByText("很长的中文素材文件名-第一幕.mp4");
     fireEvent.change(search, { target: { value: "海报" } });
-    expect(screen.getByText("海报.png")).toBeInTheDocument();
-    expect(screen.queryByText("很长的中文素材文件名-第一幕.mp4")).not.toBeInTheDocument();
+    expect(within(library).getByText("海报.png")).toBeInTheDocument();
+    expect(within(library).queryByText("很长的中文素材文件名-第一幕.mp4")).not.toBeInTheDocument();
     expect(screen.queryByText("共 1 项")).toBeNull(); // "共 N 项"已移除
     fireEvent.change(search, { target: { value: "没有这个文件" } });
-    expect(screen.getByText("没有匹配的素材")).toBeInTheDocument();
+    expect(within(library).getByText("没有匹配的素材")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "清除筛选" }));
     expect(search).toHaveValue("");
-    expect(screen.getByText("很长的中文素材文件名-第一幕.mp4")).toBeInTheDocument();
+    expect(within(library).getByText("很长的中文素材文件名-第一幕.mp4")).toBeInTheDocument();
   });
 
   it("moves focus and selection between assets with the keyboard", async () => {
@@ -230,7 +237,7 @@ describe("Editor shell 基线", () => {
   it("allows preview volume adjustment with the keyboard", async () => {
     render(<App />);
     expect(await screen.findByRole("button", { name: "播放设置" })).toHaveTextContent("1×");
-    fireEvent.click(await screen.findByRole("button", { name: "音量" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^音量 \d+%$/ }));
     const slider = screen.getByRole("slider", { name: "预览音量" });
     expect(slider).toHaveAttribute("aria-valuenow", "80");
     fireEvent.keyDown(slider, { key: "ArrowDown" });
@@ -242,23 +249,25 @@ describe("Editor shell 基线", () => {
   it("shows a drop hint while dragging an asset over the timeline and clears it on drop", async () => {
     render(<App />);
     await screen.findByRole("button", { name: /Clip 1/ });
-    const dataTransfer = { getData: (type: string) => (type === "application/x-vortex-cut-asset" ? video.asset_id : ""), setData: vi.fn(), dropEffect: "copy", effectAllowed: "copy" };
+    setActiveDraggedAssetIds([video.asset_id]);
+    const dataTransfer = { types: ["application/x-vortex-cut-asset"], getData: (type: string) => (type === "application/x-vortex-cut-asset" ? video.asset_id : ""), setData: vi.fn(), dropEffect: "copy", effectAllowed: "copy" } as unknown as DataTransfer;
     const canvas = document.querySelector(".timeline-canvas-container canvas") as HTMLElement;
-    fireEvent.dragOver(canvas, { dataTransfer });
-    expect(screen.getByText("释放以插入到时间线（同轨后续片段顺延）")).toBeInTheDocument();
-    fireEvent.drop(canvas, { dataTransfer });
-    expect(screen.queryByText("释放以插入到时间线（同轨后续片段顺延）")).not.toBeInTheDocument();
+    fireAssetDrag(canvas, "dragover", dataTransfer);
+    expect(document.querySelector(".drop-hint")?.textContent).toBe("释放以新建轨道并放置素材 · 0.00s");
+    fireAssetDrag(canvas, "drop", dataTransfer);
+    expect(document.querySelector(".drop-hint")).not.toBeInTheDocument();
   });
 
   it("clears the drop highlight when dragging away", async () => {
     render(<App />);
     await screen.findByRole("button", { name: /Clip 1/ });
-    const dataTransfer = { getData: (type: string) => (type === "application/x-vortex-cut-asset" ? video.asset_id : ""), setData: vi.fn(), dropEffect: "copy", effectAllowed: "copy" };
+    setActiveDraggedAssetIds([video.asset_id]);
+    const dataTransfer = { types: ["application/x-vortex-cut-asset"], getData: (type: string) => (type === "application/x-vortex-cut-asset" ? video.asset_id : ""), setData: vi.fn(), dropEffect: "copy", effectAllowed: "copy" } as unknown as DataTransfer;
     const canvas = document.querySelector(".timeline-canvas-container canvas") as HTMLElement;
-    fireEvent.dragOver(canvas, { dataTransfer });
-    expect(screen.getByText("释放以插入到时间线（同轨后续片段顺延）")).toBeInTheDocument();
-    fireEvent.dragLeave(canvas, { dataTransfer });
-    expect(screen.queryByText("释放以插入到时间线（同轨后续片段顺延）")).not.toBeInTheDocument();
+    fireAssetDrag(canvas, "dragover", dataTransfer);
+    expect(document.querySelector(".drop-hint")?.textContent).toBe("释放以新建轨道并放置素材 · 0.00s");
+    fireAssetDrag(canvas, "dragleave", dataTransfer);
+    expect(document.querySelector(".drop-hint")).not.toBeInTheDocument();
   });
 
   it("keeps the toolbar row compact with only status output", async () => {
@@ -290,15 +299,16 @@ describe("Editor shell 基线", () => {
   it("opens a dropdown with shortcut hints and supports arrow-key navigation", async () => {
     render(<App />);
     await screen.findByRole("button", { name: "切换项目" });
-    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+    fireEvent.click(screen.getByRole("button", { name: "Vortex Cut 主菜单" }));
+    fireEvent.click(screen.getByRole("tab", { name: "编辑" }));
     const undoItem = await screen.findByRole("menuitem", { name: /撤销/ });
     expect(undoItem).toBeInTheDocument();
     expect(undoItem.querySelector(".menu-item-shortcut")).toHaveTextContent("Ctrl+Z");
-    const menu = screen.getByRole("menu", { name: "编辑" });
+    const menu = screen.getByRole("menu", { name: "编辑菜单" });
     fireEvent.keyDown(menu, { key: "ArrowDown" });
-    expect(screen.getByRole("menuitem", { name: /重做/ })).toHaveClass("focused");
+    expect(screen.getByRole("menuitem", { name: /重做/ })).toHaveFocus();
     fireEvent.keyDown(menu, { key: "Escape" });
-    expect(screen.queryByRole("menu", { name: "编辑" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menu", { name: "编辑菜单" })).not.toBeInTheDocument();
   });
 
   it("blocks timeline shortcuts while an input is focused", async () => {

@@ -121,9 +121,9 @@ describe("peaksForClip 源区间映射", () => {
       speedMilli: 1000, reverse: false,
     }, 100)!;
     expect(peaks).not.toBeNull();
-    // 第 3 桶 → 0.3~0.4 区间峰值 = 1；第 7 桶 → 0.7~0.8 = 0.75
-    expect(peaks[33]).toBeCloseTo(1, 5);
-    expect(peaks[74]).toBeCloseTo(0.75, 5);
+    // OpenFilm interpolates when a source bucket spans several screen pixels.
+    expect(peaks[33]).toBeCloseTo(0.7, 5);
+    expect(peaks[70]).toBeCloseTo(0.75, 5);
     expect(peaks[10]).toBeCloseTo(0, 5);
   });
 
@@ -135,9 +135,9 @@ describe("peaksForClip 源区间映射", () => {
       speedMilli: 1000, reverse: false,
     }, 100)!;
     expect(peaks.length).toBe(100);
-    // 全窗都在第 2~3 桶内：第 3 桶脉冲落在后半段
-    expect(Math.max(...peaks.slice(50))).toBeCloseTo(1, 5);
-    expect(Math.max(...peaks.slice(0, 50))).toBeCloseTo(0, 5);
+    // Pixel 0 starts on the silent bucket; pixel 50 starts on the pulse bucket.
+    expect(peaks[0]).toBeCloseTo(0, 5);
+    expect(peaks[50]).toBeCloseTo(1, 5);
   });
 
   it("倒放：脉冲位置镜像", () => {
@@ -146,9 +146,9 @@ describe("peaksForClip 源区间映射", () => {
       sourceStartUs: 0, sourceEndUs: 10 * bucketSpanUs,
       speedMilli: 1000, reverse: true,
     }, 100)!;
-    // 倒放：第 3 桶（0.3~0.4 正放位）→ 尾部 0.6~0.7
-    expect(peaks[63]).toBeCloseTo(1, 5);
-    expect(peaks[33]).toBeCloseTo(0, 5);
+    // Reversed columns walk back across bucket 3 from its far edge to its start.
+    expect(peaks[69]).toBeCloseTo(1, 5);
+    expect(peaks[63]).toBeCloseTo(0.4, 5);
   });
 
   it("2x 速度：源窗 2 倍宽（时间轴 1s 覆盖源 2s）", () => {
@@ -159,8 +159,9 @@ describe("peaksForClip 源区间映射", () => {
       speedMilli: 2000, reverse: false,
     }, 50)!;
     expect(peaks.length).toBe(50);
-    // 第 3 桶脉冲 @2x → timeline 比例 0.3~0.4 同样位置
-    expect(peaks[16]).toBeCloseTo(1, 5);
+    // At 2x the first full pulse column moves to index 15; adjacent pixels interpolate.
+    expect(peaks[15]).toBeCloseTo(1, 5);
+    expect(peaks[16]).toBeCloseTo(0.8, 5);
   });
 
   it("静音源：全零峰值；非法区间返回 null", () => {
@@ -185,6 +186,38 @@ describe("peaksForClip 源区间映射", () => {
     expect(pickLevel(pyramid, bucketSpanUs, 10 * bucketSpanUs, 100)).toBe(0);
     // 10 桶窗 3 像素 → 每像素 ~3.3 桶 → level 2
     expect(pickLevel(pyramid, bucketSpanUs, 10 * bucketSpanUs, 3)).toBeGreaterThanOrEqual(1);
+  });
+
+  it("保持像素窗口的精确峰值，不把临近瞬态扩散到粗金字塔桶", () => {
+    const precise = buildPyramid([
+      [0, 0], [0, 0], [0, 0], [0, 1], [0, 0], [0, 0], [0, 0], [0, 0],
+    ]);
+    const pyramid: WaveformPyramid = {
+      baseBuckets: 8,
+      levels: precise.length,
+      levelData: precise.map(level => new Float32Array(level.flat())),
+      totalBytes: 128,
+    };
+    const { peaks } = peaksForClip(pyramid, bucketSpanUs, {
+      clipId: "pixel-windows", assetId: "asset", sourceStartUs: 0,
+      sourceEndUs: 8 * bucketSpanUs, speedMilli: 1000, reverse: false,
+    }, 3)!;
+    expect(Array.from(peaks)).toEqual([0, 1, 0]);
+  });
+
+  it("source EOF 之后画静音，不重复最后一个 waveform bucket", () => {
+    const precise = buildPyramid([[0, 0.5], [0, 0]]);
+    const pyramid: WaveformPyramid = {
+      baseBuckets: 2,
+      levels: precise.length,
+      levelData: precise.map(level => new Float32Array(level.flat())),
+      totalBytes: 64,
+    };
+    const { peaks } = peaksForClip(pyramid, bucketSpanUs, {
+      clipId: "source-eof", assetId: "asset", sourceStartUs: 0,
+      sourceEndUs: 4 * bucketSpanUs, speedMilli: 1000, reverse: false,
+    }, 4)!;
+    expect(Array.from(peaks)).toEqual([0.5, 0, 0, 0]);
   });
 
   it("选层后索引按该层桶跨换算（误用 base 跨度会挤到末桶）", () => {

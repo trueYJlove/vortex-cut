@@ -18,10 +18,29 @@ export interface IrInput {
   asset_kind: string;
   duration_us: number;
   has_audio: boolean;
+  /** 底层 video 是否有可见片段消费者。缺省仅为旧 IR 兼容；新 IR 必须显式提供。 */
+  video_required?: boolean;
+  /** 源有音轨且有当前音频消费者。缺省仅为旧 IR 兼容；新 IR 必须显式提供。 */
+  audio_required?: boolean;
   geometry: IrGeometry;
   /** P203：该输入是否为 HDR 素材（Core 侧由 ffprobe 的 color_transfer 判定）。
    *  **默认 false**：老 IR 或非视频输入没有该字段，按 SDR 处理（保守，不误报）。 */
   hdr?: boolean;
+}
+
+/** 视频素材可以只作音源；asset_kind 描述来源，video_required 描述解码用途。 */
+export function inputNeedsVideo(input: Pick<IrInput, "asset_kind" | "video_required">): boolean {
+  return input.asset_kind === "video" && (input.video_required ?? true);
+}
+
+/** 新 IR 显式表达音频消费者；旧 IR 仅能从纯音频来源推断。 */
+export function inputNeedsAudio(input: Pick<IrInput, "asset_kind" | "audio_required">): boolean {
+  return input.audio_required ?? (input.asset_kind === "audio");
+}
+
+/** 静图仍需上传到 compositor；视频只在有可见视觉消费者时装配。 */
+export function inputNeedsVisual(input: Pick<IrInput, "asset_kind" | "video_required">): boolean {
+  return input.asset_kind === "image" || inputNeedsVideo(input);
 }
 
 export interface IrContent { x: number; y: number; w: number; h: number }

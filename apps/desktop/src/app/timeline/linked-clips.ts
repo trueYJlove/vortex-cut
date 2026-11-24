@@ -1,4 +1,26 @@
 import type { TimelineClip, TimelineDocument, TimelinePatchOperation } from "@aivideo/contracts";
+import type { TimelineSelection } from "./types.js";
+
+/** Marquee hits include the explicit link partners, matching OpenFilm's withLinked(selection). */
+export function expandLinkedClipIds(clipIds: readonly string[], clips: readonly TimelineClip[]): TimelineClip["clip_id"][] {
+  const selected = new Set(clipIds);
+  const groups = new Set(clips.filter(clip => selected.has(clip.clip_id) && clip.link_group_id).map(clip => clip.link_group_id!));
+  return clips.flatMap(clip => selected.has(clip.clip_id) || (clip.link_group_id && groups.has(clip.link_group_id))
+    ? [clip.clip_id]
+    : []);
+}
+
+/** Merge a marquee with an existing clip selection, then include every linked partner. */
+export function mergeLinkedMarqueeSelection(
+  selection: TimelineSelection,
+  hitIds: readonly string[],
+  clips: readonly TimelineClip[],
+): TimelineClip["clip_id"][] {
+  const selectedIds = selection?.kind === "clip"
+    ? [selection.id]
+    : selection?.kind === "clips" ? selection.ids : [];
+  return expandLinkedClipIds([...selectedIds, ...hitIds], clips);
+}
 
 /** One remove operation per link group: Core removes the entire group atomically. */
 export function removeLinkedClips(clips: readonly TimelineClip[], document: TimelineDocument | undefined): TimelinePatchOperation[] {

@@ -2,14 +2,17 @@
  * Timeline Phase 1 — UI-specific rendering types.
  * Extends the canonical contract types with pixel-space computed values.
  */
-import type { TimelineClip, TimelineCaption, TimelineClipId, TimelineDocument, AssetKind, TimelineTransition, TimelineTransitionId } from "@aivideo/contracts";
-import type { MoveTargetResolution } from "./geometry.js";
+import type { ActiveTimelineTransition, TimelineClip, TimelineCaption, TimelineClipId, TimelineDocument, AssetKind, TimelineTransition, TimelineTransitionId } from "@aivideo/contracts";
+import type { MoveTargetResolution, TimelineDropHit } from "./geometry.js";
+import type { ClipDragPlan } from "./clip-drag-plan.js";
 import type { AdvancedEditMode, AdvancedEditTarget } from "./advanced-edit.js";
 
 /** Viewport / view state for the timeline canvas. */
 export interface TimelineViewState {
   /** Pixels per microsecond-second (i.e. pixels per second of timeline time). */
   pixelsPerSecond: number;
+  /** Relative project zoom: 1 fits the project, values above 1 zoom in. */
+  projectZoom: number;
   /** Horizontal scroll offset in pixels. */
   scrollX: number;
   /** Height of each track row in pixels. */
@@ -19,6 +22,27 @@ export interface TimelineViewState {
   /** Height of the ruler strip in pixels. */
   rulerHeight: number;
 }
+
+/** Geometry copied from OpenFilm's Studio timeline chrome. With Solo controls
+ *  visible, the fixed track head is 108+24=132px; the canvas owns a separate
+ *  51px cover rail. Keeping
+ *  the two dimensions independent avoids doubling the track head as a fake
+ *  cover rail, which shifted every clip and ruler label by 57px. */
+export const TIMELINE_HEAD_EXPANDED_WIDTH = 132;
+export const TIMELINE_HEAD_COLLAPSED_WIDTH = 28;
+export const TIMELINE_HEAD_EMPTY_WIDTH = 12;
+/** Expanded editor head includes the 108px control strip and 24px solo column. */
+export const TIMELINE_HEAD_WIDTH = TIMELINE_HEAD_EXPANDED_WIDTH;
+export const TIMELINE_COVER_RAIL_WIDTH = 51;
+export const TIMELINE_TOOLBAR_HEIGHT = 34;
+export const TIMELINE_RULER_HEIGHT = 20;
+export const TIMELINE_ZOOM_SLIDER_WIDTH = 78;
+export const TIMELINE_ZOOM_DEFAULT = 0.8;
+export const TIMELINE_ZOOM_STEP = 1.6;
+export const TIMELINE_MIN_VIEW_US = 1_000_000;
+export const TIMELINE_EMPTY_VIEW_US = 18_000_000;
+export const TIMELINE_MAX_VIEW_FACTOR = 4;
+export const TIMELINE_MAX_VIEW_FLOOR_US = 30_000_000;
 
 /** Computed pixel rectangle for rendering a clip on canvas. */
 export interface ClipRenderRect {
@@ -48,6 +72,17 @@ export interface TransitionRenderRect {
   transition: TimelineTransition;
 }
 
+/** Geometry for Core-projected source-fact transitions. Kept separate from
+ *  legacy compatibility transition IDs so their edits cannot reach old ops. */
+export interface ActiveTransitionRenderRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  transition: ActiveTimelineTransition;
+  editable: boolean;
+}
+
 /** A single tick mark on the time ruler. */
 export interface TickMark {
   x: number;
@@ -63,6 +98,34 @@ export interface AssetMediaEntry {
   /** 素材文件名（剪映式片段名称条显示用）。 */
   display_name: string;
   duration_us?: number | null;
+  /** Source-level audio stream availability; false suppresses empty waveform work. */
+  has_audio?: boolean;
+}
+
+/** A single, shared decision for native/library asset dragover and drop. */
+export interface TimelineAssetDropIntent {
+  targetClipId: TimelineClipId | null;
+  /** Original pointer row/band, retained so imported files can be re-planned with their probed durations. */
+  hitTrackId: string | null;
+  hasCoordinates: boolean;
+  band: "above" | "body" | "below";
+  zone: "before" | "center" | "after" | "lane";
+  boundary: "before" | "after" | null;
+  trackId: string | "new" | null;
+  newTrackKind: "video" | "audio" | null;
+  newTrackAnchorId: string | null;
+  newTrackSide: "before" | "after" | null;
+  mode: "place" | "insert" | "overwrite";
+  locked: boolean;
+  accepts: boolean;
+  /** Frame-snapped pointer time, or the exact clip edge for before/after. */
+  atUs: number;
+  /** Original pointer timeline time, used when imported media becomes available for final planning. */
+  pointerUs: number;
+  /** Total ghost length for the dropped run, using OpenFilm's placeholder duration when metadata is unknown. */
+  previewDurationUs: number;
+  /** In-lane insertion slot resolved from the same snapped time. */
+  slot: number;
 }
 
 /** Selection state (mirrors App.tsx Selection type). */
@@ -71,10 +134,22 @@ export type TimelineSelection =
   | { kind: "clips"; ids: string[] }
   | { kind: "caption"; id: string }
   | { kind: "transition"; id: string }
+  | { kind: "active-transition"; id: string }
   | null;
 
 /** Edge of a clip that can be trimmed. */
 export type TrimEdge = "left" | "right";
+
+/** A clip shown at its planned geometry while an OpenFilm speed-edge drag is active. */
+export interface SpeedPreviewTarget {
+  clipId: TimelineClipId;
+  trackId: string;
+  startUs: number;
+  endUs: number;
+  speedMilli: number;
+  originalStartUs: number;
+  originalEndUs: number;
+}
 
 /**
  * Active pointer interaction on the timeline canvas (Phase 4).
@@ -97,12 +172,26 @@ export type TimelineInteraction =
       resolution: MoveTargetResolution | null;
       /** Timeline start of the clip at mousedown (µs). */
       startUs: number;
+      /** Raw pointer-following start used by the visible clip while dragging (µs). */
+      previewStartUs: number;
       /** Current target timeline start (µs), after snapping/clamping. */
       targetStartUs: number;
       /** 跨轨拖动的目标轨道 id；null 表示保持原轨道。 */
       targetTrackId: string | null;
       /** Snap guide position (µs) when currently snapped, else null. */
       snapUs: number | null;
+      /** Alt held from pointerdown copies; later Alt changes only the Place/Insert mode. */
+      copyOnStart: boolean;
+      moveMode: "place" | "insert";
+      /** Frozen source group and destination ids captured at pointerdown. */
+      clipIds: TimelineClipId[];
+      /** Writable clips riding on V1 sources at pointerdown; used to filter snap targets when linkage is on. */
+      linkedRiderClipIds: TimelineClipId[];
+      copyIds: TimelineClipId[];
+      /** Pure final plan shared by the drop preview and commit. */
+      dragPlan: ClipDragPlan | null;
+      /** The row/clip zone under the actual pointer, not the dragged clip's center. */
+      dropHit: TimelineDropHit | null;
     }
   | {
       /** Timeline Round 4: multi-selection group move (rigid translate).
@@ -110,6 +199,7 @@ export type TimelineInteraction =
       kind: "group-move";
       clipIds: TimelineClipId[];
       startX: number;
+      startY: number;
       /** Timeline start of each member at mousedown (µs). */
       startUsByClip: Record<string, number>;
       /** Current target start of each member (µs). */
@@ -127,12 +217,39 @@ export type TimelineInteraction =
   | {
       kind: "trim";
       clipId: TimelineClipId;
+      /** Unlocked linked members shown with the same edge preview; Alt captures only the lead clip. */
+      linkedClipIds: TimelineClipId[];
+      /** Alt was held on pointerdown, so this trim must leave explicit link partners in place. */
+      ignoreLink: boolean;
       edge: TrimEdge;
       startX: number;
+      startScrollX: number;
       originalStartUs: number;
       originalEndUs: number;
       targetStartUs: number;
       targetEndUs: number;
+      originalTimelineStartUs: number;
+      originalTimelineEndUs: number;
+      targetTimelineStartUs: number;
+      targetTimelineEndUs: number;
+      snapUs: number | null;
+    }
+  | {
+      kind: "speed";
+      clipId: TimelineClipId;
+      linkedClipIds: TimelineClipId[];
+      ignoreLink: boolean;
+      edge: TrimEdge;
+      startX: number;
+      startScrollX: number;
+      originalSpeedMilli: number;
+      targetSpeedMilli: number;
+      originalTimelineStartUs: number;
+      originalTimelineEndUs: number;
+      targetTimelineStartUs: number;
+      targetTimelineEndUs: number;
+      targets: SpeedPreviewTarget[];
+      operations: import("@aivideo/contracts").TimelinePatchOperation[];
       snapUs: number | null;
     }
   | {
@@ -140,6 +257,7 @@ export type TimelineInteraction =
       mode: AdvancedEditMode;
       clipIds: TimelineClipId[];
       startX: number;
+      startScrollX: number;
       deltaUs: number;
       targets: AdvancedEditTarget[];
       operations: import("@aivideo/contracts").TimelinePatchOperation[];
@@ -151,6 +269,7 @@ export type TimelineInteraction =
       captionId: string;
       edge: TrimEdge;
       startX: number;
+      startScrollX: number;
       originalStartUs: number;
       originalEndUs: number;
       targetStartUs: number;
@@ -161,6 +280,8 @@ export type TimelineInteraction =
       kind: "caption-move";
       captionId: string;
       startX: number;
+      startScrollX: number;
+      startY: number;
       originalStartUs: number;
       originalEndUs: number;
       targetStartUs: number;
@@ -169,11 +290,12 @@ export type TimelineInteraction =
   | {
       kind: "marquee";
       startX: number;
+      startClientX: number;
       startY: number;
       currentX: number;
       currentY: number;
     }
-  | { kind: "playhead"; startX: number }
+  | { kind: "playhead"; startX: number; startTimeUs: number }
   | {
       /** Timeline Round 4: dragging the bottom scrollbar strip. */
       kind: "scrollbar";
@@ -201,15 +323,16 @@ export interface TimelineHover {
 
 export const DEFAULT_VIEW_STATE: TimelineViewState = {
   pixelsPerSecond: 60,
+  projectZoom: TIMELINE_ZOOM_DEFAULT,
   scrollX: 0,
   // 56px baseline maps to OpenFilm's 52px regular visual lane; V1, text and
   // audio use role-specific lane heights.
   trackHeight: 56,
-  // 轨道头列宽（2026-11-16 对齐 OpenFilm HEAD_W = 108，Timeline.tsx:179）；原 120。
-  headerWidth: 108,
+  // Canvas 轨道的封面条带（OpenFilm coverInset = 51px）；轨头列宽独立为 108px。
+  headerWidth: TIMELINE_COVER_RAIL_WIDTH,
   // 20px（对齐 OpenFilm 的 RULER_H）。原 16px 放不下 10.5px 的刻度文字
   // 与 3px 的内容范围条，实际渲染时文字被裁。
-  rulerHeight: 20,
+  rulerHeight: TIMELINE_RULER_HEIGHT,
 };
 
 /** 最小缩放：10s 一格（剪映最小档的刻度密度，图1）。 */
@@ -240,7 +363,7 @@ export const DEFAULT_RUNTIME_PREFS: TimelineRuntimePrefs = {
   // 与 DEFAULT_VIEW_STATE.trackHeight 保持一致；geometry maps it to role heights.
   trackHeight: 56,
   trackHeights: {},
-  /** 剪映默认 40% 波形占比。 */
-  waveformRatio: 0.4,
+  /** OpenFilm's default video sound band is max(15px, 30% of picture area). */
+  waveformRatio: 0.3,
 };
 export const TIMELINE_PREFS_STORAGE_KEY = "vortex-cut.timeline.prefs.v1";

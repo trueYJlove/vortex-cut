@@ -51,6 +51,10 @@ export interface DecodeTimingSample {
  *  「窗 < 解码器管线深度」这类状态性卡顿只能从这里当场看出来。 */
 export interface DecodeResidencyInfo {
   decoded: number;
+  /** Actual VideoDecoder.decode(chunk) calls that returned successfully, per worker/input. */
+  decode_submissions?: number;
+  /** Actual VideoDecoder output callback entries, including unusable format=null frames. */
+  output_callbacks?: number;
   posted: number;
   cached: number;
   closed: number;

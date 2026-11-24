@@ -84,7 +84,7 @@ function makeTimeline(projectId: string, revisionId: string, assetId: string): T
       timeline_revision_id: id(revisionId), project_id: id(projectId), parent_revision_id: null,
       document_sha256: revisionId.padEnd(64, "a"), summary: "fixture", created_by: "user", created_at: now,
       schema_version: 1, document,
-    }, draft: null, can_undo: false, can_redo: false, current_preview: null,
+    }, draft: null, can_undo: false, can_redo: false, current_preview: null, active_transitions: [],
   };
 }
 

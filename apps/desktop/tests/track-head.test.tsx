@@ -85,6 +85,28 @@ describe("轨道属性头", () => {
     expect(onPatch).toHaveBeenCalledWith([{ op: "set_track_flags", track_id: "V2", hidden: true }], "调整轨道属性");
     expect(screen.queryByRole("button", { name: "静音轨道 T1" })).toBeNull();
   });
+  it("音频轨道保留 OpenFilm 的隐藏开关及四列控件布局", () => {
+    const onPatch = vi.fn().mockResolvedValue(undefined);
+    const audioDocument = doc();
+    audioDocument.clips.push({
+      clip_id: "clip_a1" as never,
+      track_id: "A1",
+      order_index: 0,
+      asset_id: "audio" as never,
+      asset_kind: "audio",
+      source_start_us: 0,
+      source_end_us: 1_000_000,
+      timeline_start_us: 0,
+      timeline_end_us: 1_000_000,
+      layout: "fit",
+      audio: { enabled: true, gain_db: 0 },
+    });
+    const { container } = render(<TimelinePanel document={audioDocument} selection={null} setSelection={vi.fn()} onPatch={onPatch} onDropAsset={vi.fn()} canUndo={false} canRedo={false} onUndo={vi.fn()} onRedo={vi.fn()} assetMedia={[]} onSeek={vi.fn()} onCommand={vi.fn()} />);
+    const audioHead = container.querySelector('[data-track-id="A1"]');
+    expect(audioHead).toHaveAttribute("data-flag-cols", "4");
+    fireEvent.click(screen.getByRole("button", { name: "隐藏轨道 A1" }));
+    expect(onPatch).toHaveBeenCalledWith([{ op: "set_track_flags", track_id: "A1", hidden: true }], "调整轨道属性");
+  });
   it("封面入口钉在 V1 行（上方有 V2/T1/C1 时不再错挂首行），高度与 V1 轨道头一致", () => {
     // 剪映式：封面与 V1 轨道头（左侧图标区）同高齐平。V1 之上有动态轨时，
     // 封面必须跟随 V1 行 y——旧实现写死 top=rulerHeight+2（首行），加了
@@ -100,9 +122,9 @@ describe("轨道属性头", () => {
     // padTop）之后，绝对位置会随面板高度变，写死常数会把测试变成几何快照。
     const v1Head = document.querySelector('[data-track-id="V1"]') as HTMLElement | null;
     expect(v1Head).not.toBeNull();
-    expect(top).toBe(parseFloat(v1Head!.style.top) + 2);
-    // V1 是主轨：入口高 = 行高 - 4（上下各内缩 2px，与行内片段对齐）。
-    expect(height).toBe(parseFloat(v1Head!.style.height) - 4);
+    // OpenFilm uses a fixed 38×38 cover tile centered within the V1 head.
+    expect(height).toBe(38);
+    expect(top).toBe(parseFloat(v1Head!.style.top) + (parseFloat(v1Head!.style.height) - 38) / 2);
     fireEvent.click(entry!);
     expect(onCaptureCover).toHaveBeenCalled();
   });

@@ -1,38 +1,19 @@
-"""WP-P229：as_audio 片段（asset_kind='audio' 引用 video 素材）渲染闸门回归。
+"""P229 as_audio 素材类型回归，扩展覆盖 P235 audio-only video。
 
-## 缺陷（2026-11-17 真机 test1102 复现）
-
-「以音轨形式加入音频轨」按 M3-3 语义落轨：clip.asset_kind='audio'、
-assets.kind 保持 'video'（素材本体不变，消费视角变化）。渲染编译器
-plan.py 的输入闸门原样比较 asset["kind"] 与 clip["asset_kind"] →
-'vedio' != 'audio' 恒不匹配 → 该功能开启后**一切**预览/导出请求永久
-RENDER_INPUT_CHANGED（合成预览回退交互预览，用户只能靠删片段"自愈"）。
-
-## 修复语义（负向对照保证分辨力）
-
-- audio 视角片段 + video 素材 → **放行**（本缺陷的修复目标）；
-- audio 视角片段 + video 素材但素材无音轨 → 仍拒绝（防旁路写入让下游
-  a1 混音静默产出空轨；timeline 层已有 TIMELINE_INVALID 前置，此处复核）；
-- 其余组合维持原 fail-closed：video 片段引用 audio 素材仍拒绝（素材本体
-  无视频流，视觉编译无意义）。
-
-## 验收映射（docs/STATUS.md §4 P229）
-
-a) audio clip + video 素材（有音轨）→ compile 成功，segment.asset_kind='audio'
-b) audio clip + video 素材（无音轨）→ RENDER_INPUT_CHANGED
-c) video clip + audio 素材 → RENDER_INPUT_CHANGED（不变，fail-closed 保持）
-d) 变异验证：还原旧闸门（严格 kind 相等）→ a) 红
+P229 修复了 audio-role TimelineClip 引用 video asset 时 RenderPlan 对比素材类型
+导致的错误拒绝。P235 进一步要求无音轨视频也可被 Replace 到音轨：保留时间段、
+`audio_enabled=true`，但 `audio_required=false`、`has_audio=false`，由静音占位输出；
+这种 audio-only video 不触发视觉几何、预览解码或 original-resolution 选源。
+普通 video-role clip 引用 audio asset 仍 fail-closed。
 """
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-import pytest
-
 from aivs_core.database import Database, json_dumps
-from aivs_core.projects import DomainError
 from aivs_core.rendering.plan import RenderPlanCompiler
+from aivs_core.rendering.ir import project_preview_ir
 
 
 def _build(db_path: Path, asset_kind: str, has_audio: bool) -> RenderPlanCompiler:
@@ -87,16 +68,26 @@ def test_a_audio_clip_with_video_asset_compiles(tmp_path: Path) -> None:
     plan = compiler.compile("p1", "r1", "authoritative_preview")
     segment = plan["segments"][0]
     assert segment["asset_kind"] == "audio"  # 片段消费视角不变（下游 A1 分支依赖）
-    # inputs[] 记录素材本体视角（video）——ir.py 以此取视频流几何/探测
+    # audio-role input 保留素材本体信息，但不需要视觉解码或视频几何。
     assert plan["inputs"][0]["asset_kind"] == "video"
+    assert plan["inputs"][0]["video_required"] is False
+    assert plan["inputs"][0]["audio_required"] is True
+    ir = project_preview_ir(plan, {"v1": {"video_streams": [], "audio_streams": [{}]}})
+    assert ir["inputs"][0]["video_required"] is False
+    assert ir["inputs"][0]["audio_required"] is True
+    assert ir["inputs"][0]["geometry"] == {"width": 0, "height": 0, "sar": 1.0}
 
 
-def test_b_audio_clip_with_mute_video_asset_rejected(tmp_path: Path) -> None:
-    """b) video 素材无音轨时 audio 片段仍拒绝（防下游静默空轨）。"""
+def test_b_audio_clip_with_mute_video_asset_compiles_to_silence(tmp_path: Path) -> None:
+    """b) video 素材无音轨时保留 A1 时间范围并标记无需源音频解码。"""
     compiler = _build(tmp_path / "b.db", asset_kind="audio", has_audio=False)
-    with pytest.raises(DomainError) as exc:
-        compiler.compile("p1", "r1", "authoritative_preview")
-    assert exc.value.code == "RENDER_INPUT_CHANGED"
+    plan = compiler.compile("p1", "r1", "authoritative_preview")
+    assert plan["segments"][0]["asset_kind"] == "audio"
+    assert plan["segments"][0]["audio_enabled"] is True
+    assert plan["segments"][0]["audio_required"] is False
+    assert plan["inputs"][0]["video_required"] is False
+    assert plan["inputs"][0]["audio_required"] is False
+    assert plan["inputs"][0]["has_audio"] is False
 
 
 def test_c_video_clip_with_video_asset_still_gate_normal(tmp_path: Path) -> None:
@@ -106,12 +97,18 @@ def test_c_video_clip_with_video_asset_still_gate_normal(tmp_path: Path) -> None
     assert plan["segments"][0]["asset_kind"] == "video"
 
 
-def test_d_mutation_restoring_strict_gate_breaks_case_a(tmp_path: Path) -> None:
-    """d) 变异验证：模拟旧闸门（严格 kind 相等）→ a) 场景必红（非恒真）。"""
+def test_d_audio_only_video_does_not_raise_original_resolution(tmp_path: Path) -> None:
+    """d) audio-only video source dimensions do not affect original resolution."""
     compiler = _build(tmp_path / "d.db", asset_kind="audio", has_audio=True)
-    # 旧闸门语义复刻：asset.kind 必须等于 clip.asset_kind
-    strict_gate_passes = "video" == "audio"
-    assert strict_gate_passes is False
-    with pytest.raises(DomainError):
-        raise DomainError("RENDER_INPUT_CHANGED", "严格闸门下 audio clip 必被拒")
-    # 与 a) 同输入：修复后 compile 成功（test_a），变异体下必红——有分辨力。
+    with compiler.database.connection() as db:
+        db.execute(
+            "UPDATE assets SET media_info_json=? WHERE id='v1'",
+            (json_dumps({
+                "duration_us": 2_000_000,
+                "video_streams": [{"width": 7680, "height": 4320}],
+                "audio_streams": [{}],
+            }),),
+        )
+    plan = compiler.compile("p1", "r1", "final_export", resolution="original")
+    assert (plan["output"]["width"], plan["output"]["height"]) == (1080, 1920)
+    assert plan["inputs"][0]["video_required"] is False

@@ -20,6 +20,8 @@ export interface MarkerLaneProps {
   totalUs: number;
   /** 拖动/点击产生的吸附（与片段共用同一吸附逻辑）。 */
   snapUs: (valueUs: number) => number;
+  /** 把新标记对齐到项目帧率。 */
+  snapFrameUs: (timeUs: number) => number;
   /** 当前播放头时间（"+ "按钮按它加标记）。 */
   playheadUs: number;
   /** 标记被拖动时向外报告一条贯穿时间线的引导线；null 清除。 */
@@ -28,7 +30,7 @@ export interface MarkerLaneProps {
   onSeek: (timeUs: number) => void;
 }
 
-export function MarkerLane({ projectId, view, totalUs, snapUs, onGuide, onMarkersChange, onSeek, playheadUs, ref }: MarkerLaneProps) {
+export function MarkerLane({ projectId, view, totalUs, snapUs, snapFrameUs, onGuide, onMarkersChange, onSeek, playheadUs, ref }: MarkerLaneProps) {
   const [markers, setMarkers] = useState<TimelineMarker[]>(() => sortMarkers(loadMarkers(projectId)));
   const markersRef = useRef(markers);
   markersRef.current = markers;
@@ -61,16 +63,16 @@ export function MarkerLane({ projectId, view, totalUs, snapUs, onGuide, onMarker
 
   /** 在指定时间加一个标记（用于"+ "按钮——它按播放头位置加）。 */
   const addAtTime = (timeUs: number) => {
-    const existing = markers.find(marker => Math.abs(marker.timeUs - timeUs) < 1_000);
+    const snappedTimeUs = Math.min(totalUs, snapFrameUs(Math.max(0, timeUs)));
+    const existing = markers.find(marker => Math.abs(marker.timeUs - snappedTimeUs) < 1_000);
     if (existing) { setEditing(existing.id); return; }
     const marker: TimelineMarker = {
       id: newMarkerId(),
-      timeUs,
-      color: MARKER_COLORS[markers.length % MARKER_COLORS.length],
+      timeUs: snappedTimeUs,
+      color: MARKER_COLORS[0],
       label: "",
     };
     commit([...markers, marker]);
-    setEditing(marker.id);
   };
 
   useImperativeHandle(ref, () => ({ addAtTime }));
@@ -125,6 +127,7 @@ export function MarkerLane({ projectId, view, totalUs, snapUs, onGuide, onMarker
             key={marker.id}
             className={`timeline-marker${isEditing ? " editing" : ""}`}
             style={{ transform: `translateX(${timeToX(marker.timeUs, view)}px)` }}
+            data-marker={marker.id}
             onPointerEnter={() => onGuide({ timeUs: marker.timeUs, color: marker.color, held: false })}
             onPointerLeave={() => { if (!dragRef.current) onGuide(null); }}
             onContextMenu={event => { event.preventDefault(); event.stopPropagation(); onSeek(marker.timeUs); setEditing(marker.id); }}
@@ -132,7 +135,7 @@ export function MarkerLane({ projectId, view, totalUs, snapUs, onGuide, onMarker
             <button
               type="button"
               className="timeline-marker-pin"
-              style={{ background: marker.color }}
+              style={{ color: marker.color }}
               aria-label={`标记 ${marker.label || "未命名"} @ ${(marker.timeUs / 1_000_000).toFixed(2)}s`}
               onPointerDown={event => {
                 event.stopPropagation();
@@ -146,7 +149,16 @@ export function MarkerLane({ projectId, view, totalUs, snapUs, onGuide, onMarker
                 setEditing(marker.id);
               }}
               onDoubleClick={() => setEditing(marker.id)}
-            />
+            >
+              <svg width="9.6" height="12" viewBox="0 0 10 12.5" aria-hidden="true" className="block overflow-visible">
+                <path
+                  d="M1.2.5h7.6a.7.7 0 0 1 .7.7v6.9a.7.7 0 0 1-.26.54L5.44 11.8a.7.7 0 0 1-.88 0L.76 8.64A.7.7 0 0 1 .5 8.1V1.2a.7.7 0 0 1 .7-.7Z"
+                  fill={marker.color}
+                  stroke={isEditing ? "#fff" : "rgba(0,0,0,.4)"}
+                  strokeWidth={isEditing ? 1.4 : 0.8}
+                />
+              </svg>
+            </button>
             {isEditing && (
               <div className="timeline-marker-editor" role="dialog" aria-label="编辑时间线标记"
                 onPointerDown={event => event.stopPropagation()}

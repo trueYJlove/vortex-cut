@@ -44,3 +44,9 @@ SOFTWARE.
 ```
 
 *其它开源依赖的许可证见各 `package.json` / `pyproject.toml` 及其上游仓库。*
+
+## Inter Variable
+
+- **来源**：OpenFilm checkout 中的 `@fontsource-variable/inter` 5.3.0 字体资源（上游 https://github.com/rsms/inter）
+- **许可证**：SIL Open Font License 1.1；许可文本见 `apps/desktop/src/assets/fonts/inter/LICENSE`
+- **使用方式**：随应用提供 Latin 与 Latin Extended 可变字体，令时间线拉丁字符的字体和 OpenFilm 一致；其他文字继续使用系统字体回退。

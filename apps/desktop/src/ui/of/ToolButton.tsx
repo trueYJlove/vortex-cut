@@ -58,7 +58,7 @@ export function ToolButton({
         className={`${TOOL_BUTTON_CLASS} ${disabled ? 'cursor-default' : ''} ${active || disabled ? '' : 'hover:bg-[var(--bg-hover)]'}`}
         style={active
           ? { color: 'var(--accent)', background: 'var(--accent-soft)' }
-          : { color: disabled ? 'var(--text-faint)' : 'var(--text-muted)' }}
+          : { color: disabled ? 'var(--editor-control-disabled)' : 'var(--editor-control)' }}
       >
         {children}
       </button>

@@ -21,6 +21,9 @@ PATCH_OPERATIONS = {
     "move_clip",
     "position_clip",
     "position_clips",
+    "split_timeline_clips",
+    "duplicate_timeline_items",
+    "replace_clip_source",
     "trim_clip",
     "set_clip_source_window",
     "split_clip",
@@ -39,6 +42,7 @@ PATCH_OPERATIONS = {
     "add_transition",
     "update_transition",
     "remove_transition",
+    "set_clip_transition_facts",
     "set_clip_keyframes",
     "clear_clip_keyframes",
     "set_clip_transform",
@@ -132,8 +136,8 @@ def _drop_empty_link_groups(document: dict[str, Any]) -> None:
             del clip["link_group_id"]
 
 
-MIN_IMAGE_US = 500_000
-MAX_IMAGE_US = 30_000_000
+MIN_IMAGE_US = 100_000
+MAX_IMAGE_US = 9_007_199_254_740_991
 
 
 def _patch_failure(
@@ -159,18 +163,28 @@ def _patch_failure_field(exc: DomainError) -> str:
 
 def _patch_failure_reason(exc: DomainError) -> str:
     return exc.code
-MIN_CAPTION_US = 200_000
+MIN_CAPTION_US = 100_000
 MAX_PADDING_US = 300_000
-MIN_SPEED_MILLI = 250
-MAX_SPEED_MILLI = 4000
+MIN_SPEED_MILLI = 100
+MAX_SPEED_MILLI = 100_000
 MIN_TRANSITION_US = 100_000
 MAX_TRANSITION_US = 2_000_000
+TRANSITION_EPS_US = 1_500
 # 转场作用于同轨相邻的这两类片段（P231：任意视觉轨，V1 轨 = 同轨特例）。
 TRANSITIONABLE_KINDS = ("video", "image")
 TRANSITION_KINDS = {
     "fade", "fadeblack", "dissolve", "wipeleft", "wiperight",
     "slideleft", "slideup", "zoomin",
 }
+TRANSITION_MOVE_PRESET_IDS = frozenset({
+    "motions/move-push-left", "motions/move-push-right", "motions/move-push-up", "motions/move-push-down",
+    "motions/move-slide-left", "motions/move-slide-right", "motions/move-slide-up", "motions/move-slide-down",
+    "motions/move-reveal-left", "motions/move-squeeze", "motions/move-flip", "motions/move-wipe-right",
+    "motions/move-wipe-left", "motions/move-wipe-down", "motions/move-wipe-up", "motions/move-soft-wipe",
+    "motions/move-iris", "motions/move-diamond", "motions/move-split-open", "motions/move-split-across",
+    "motions/move-blur-dissolve", "motions/move-blur-rush", "motions/move-flash-dissolve",
+    "motions/move-zoom-in", "motions/move-zoom-out", "motions/move-spin",
+})
 MAX_TRANSITIONS = 50
 # 多轨道结构（剪映式）：tracks 数组顺序 = 自上而下
 # [动态视频/文本轨道...] → C1(字幕轨) → V1(主视频轨) → A1(音频轨)。
@@ -180,6 +194,224 @@ MAIN_TRACK_ID = "V1"
 CAPTION_TRACK_ID = "C1"
 AUDIO_TRACK_ID = "A1"
 TRACK_KINDS = ("video", "text", "audio")
+
+
+def _picture(clip: dict[str, Any]) -> bool:
+    return clip.get("asset_kind") != "audio"
+
+
+def _picture_fade(clip: dict[str, Any], edge: str) -> int:
+    value = clip.get(f"picture_fade_{edge}_us", 0)
+    return int(value) if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def _audio_fade(clip: dict[str, Any], edge: str) -> int:
+    audio = clip.get("audio")
+    value = audio.get(f"fade_{edge}_us", 0) if isinstance(audio, dict) else 0
+    return int(value) if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def _source_edge_contiguous(head: dict[str, Any], rest: dict[str, Any]) -> bool:
+    if head.get("asset_kind") == "image" or rest.get("asset_kind") == "image":
+        return head.get("asset_kind") == rest.get("asset_kind") == "image"
+    speed = _clip_speed(head)
+    if speed != _clip_speed(rest):
+        return False
+    head_start, head_end = head.get("source_start_us"), head.get("source_end_us")
+    rest_start, rest_end = rest.get("source_start_us"), rest.get("source_end_us")
+    if not all(isinstance(value, int) and not isinstance(value, bool) for value in (head_start, head_end, rest_start, rest_end)):
+        return False
+    source_tol = round(TRANSITION_EPS_US * max(1, speed / 1000))
+    if head.get("reverse_playback"):
+        return abs(rest_end - head_start) <= source_tol
+    return abs(rest_start - head_end) <= source_tol
+
+
+def _project_active_transitions(
+    document: dict[str, Any],
+    *,
+    system_white_page_asset_ids: set[str] | frozenset[str] = frozenset(),
+) -> list[dict[str, Any]]:
+    """Pure projection of OpenFilm's final-layout findTransitions rules.
+
+    The trusted white-page asset set is supplied by the owning Core/page service; a
+    user-authored clip field is deliberately not accepted as a white-page marker.
+    """
+    tracks = document.get("tracks") if isinstance(document.get("tracks"), list) else []
+    clips = document.get("clips") if isinstance(document.get("clips"), list) else []
+    track_order = {track.get("id"): index for index, track in enumerate(tracks) if isinstance(track, dict)}
+    ordered: list[dict[str, Any]] = []
+    for track_id, track_index in track_order.items():
+        lane = [clip for clip in clips if isinstance(clip, dict) and clip.get("track_id") == track_id]
+        lane.sort(key=lambda clip: (clip.get("timeline_start_us", 0), clip.get("order_index", 0)))
+        ordered.extend(lane)
+    # Keep the persisted clip order as a stable fallback for malformed/untracked inputs.
+    ordered_ids = {clip.get("clip_id") for clip in ordered}
+    ordered.extend(clip for clip in clips if isinstance(clip, dict) and clip.get("clip_id") not in ordered_ids)
+    is_white = lambda clip: clip.get("asset_id") in system_white_page_asset_ids
+    incoming = [
+        clip for clip in ordered
+        if not is_white(clip) and (
+            (_picture_fade(clip, "in") if _picture(clip) else _audio_fade(clip, "in")) > 0
+            or (isinstance(clip.get("move_in"), dict) and clip["move_in"].get("duration_us", 0) > 0)
+        )
+    ]
+    outgoing = sorted(ordered, key=lambda clip: not _picture(clip))
+    used_outgoing: set[str] = set()
+    used_incoming: set[str] = set()
+    projected: list[dict[str, Any]] = []
+
+    def duration_us(clip: dict[str, Any]) -> int:
+        return clip.get("timeline_end_us", 0) - clip.get("timeline_start_us", 0)
+
+    def find_rest(head: dict[str, Any]) -> dict[str, Any] | None:
+        group = head.get("link_group_id")
+        if not group:
+            return None
+        for candidate in ordered:
+            if candidate is head or candidate.get("track_id") == head.get("track_id"):
+                continue
+            if candidate.get("link_group_id") != group:
+                continue
+            if abs(candidate.get("timeline_start_us", 0) - head.get("timeline_end_us", 0)) > TRANSITION_EPS_US:
+                continue
+            if candidate.get("asset_kind") != head.get("asset_kind") or candidate.get("asset_id") != head.get("asset_id"):
+                continue
+            if _source_edge_contiguous(head, candidate):
+                return candidate
+        return None
+
+    for out_clip in outgoing:
+        out_id = out_clip.get("clip_id")
+        if not isinstance(out_id, str) or out_id in used_outgoing or is_white(out_clip):
+            continue
+        out_picture = _picture(out_clip)
+        out_track = track_order.get(out_clip.get("track_id"), 10**9)
+        for in_clip in incoming:
+            in_id = in_clip.get("clip_id")
+            if not isinstance(in_id, str) or in_id == out_id or in_id in used_incoming or is_white(in_clip):
+                continue
+            if _picture(in_clip) != out_picture:
+                continue
+            in_track = track_order.get(in_clip.get("track_id"), 10**9)
+            lap = out_clip.get("timeline_end_us", 0) - in_clip.get("timeline_start_us", 0)
+            move_in = in_clip.get("move_in") if isinstance(in_clip.get("move_in"), dict) else None
+            in_fade = _picture_fade(in_clip, "in") if out_picture else _audio_fade(in_clip, "in")
+            out_fade = _picture_fade(out_clip, "out") if out_picture else _audio_fade(out_clip, "out")
+            moved = bool(
+                out_picture and move_in and lap > TRANSITION_EPS_US and in_track < out_track
+                and abs(move_in.get("duration_us", -10**30) - lap) <= TRANSITION_EPS_US
+            )
+            overlap = moved or (
+                lap > TRANSITION_EPS_US
+                and in_track != out_track
+                and abs(in_fade - lap) <= TRANSITION_EPS_US
+                and (
+                    abs(out_fade - lap) <= TRANSITION_EPS_US
+                    or (out_picture and out_fade <= TRANSITION_EPS_US and in_track < out_track)
+                )
+            )
+            touch = (
+                out_fade > 0
+                and abs(in_clip.get("timeline_start_us", 0) - out_clip.get("timeline_end_us", 0)) <= TRANSITION_EPS_US
+                and in_track == out_track
+            )
+            if not overlap and not touch:
+                continue
+            if moved:
+                kind = "move"
+            elif overlap:
+                kind = "dissolve" if out_picture else "crossfade"
+            else:
+                kind = "dip-black"
+            start_us = in_clip["timeline_start_us"] if overlap else out_clip["timeline_end_us"] - out_fade
+            end_us = out_clip["timeline_end_us"] if overlap else in_clip["timeline_start_us"] + in_fade
+            white_clip = None
+            if touch and out_picture:
+                white_clip = next((
+                    candidate for candidate in ordered
+                    if is_white(candidate)
+                    and abs(candidate.get("timeline_start_us", 0) - start_us) <= TRANSITION_EPS_US
+                    and abs(candidate.get("timeline_end_us", 0) - end_us) <= TRANSITION_EPS_US
+                ), None)
+                if white_clip is not None:
+                    kind = "dip-white"
+            rest = find_rest(in_clip) if overlap else None
+            on_clip = out_clip if rest is not None or not overlap else in_clip
+            pair_key = f"{out_id}\0{in_id}"
+            item: dict[str, Any] = {
+                "transition_id": f"transition_{hashlib.sha256(pair_key.encode('utf-8')).hexdigest()[:24]}",
+                "outgoing_clip_id": out_id,
+                "incoming_clip_id": in_id,
+                "kind": kind,
+                "start_us": start_us,
+                "end_us": end_us,
+                "cut_us": out_clip["timeline_end_us"],
+                "on_clip_id": on_clip["clip_id"],
+            }
+            if rest is not None:
+                item["rest_clip_id"] = rest["clip_id"]
+            if white_clip is not None:
+                item["white_page_asset_id"] = white_clip["asset_id"]
+            if isinstance(move_in, dict):
+                item["incoming_move_preset_id"] = move_in["preset_id"]
+            move_out = out_clip.get("move_out")
+            if isinstance(move_out, dict):
+                item["outgoing_move_preset_id"] = move_out["preset_id"]
+            projected.append(item)
+            used_outgoing.add(out_id)
+            used_incoming.add(in_id)
+            break
+
+    # A linked picture transition owns its matching sound crossfade; don't show a second mark.
+    pictures = [item for item in projected if _picture(next(c for c in ordered if c["clip_id"] == item["outgoing_clip_id"]))]
+    clip_by_id = {clip.get("clip_id"): clip for clip in ordered}
+    return [
+        item for item in projected
+        if _picture(clip_by_id[item["outgoing_clip_id"]])
+        or not any(
+            clip_by_id[picture["outgoing_clip_id"]].get("link_group_id")
+            and clip_by_id[picture["outgoing_clip_id"]].get("link_group_id") == clip_by_id[item["outgoing_clip_id"]].get("link_group_id")
+            and clip_by_id[picture["incoming_clip_id"]].get("link_group_id")
+            and clip_by_id[picture["incoming_clip_id"]].get("link_group_id") == clip_by_id[item["incoming_clip_id"]].get("link_group_id")
+            for picture in pictures
+        )
+    ]
+
+
+def _normalize_transition_facts(clip: dict[str, Any]) -> None:
+    """Validate and canonicalize persisted picture transition facts in-place."""
+    duration = clip.get("timeline_end_us", 0) - clip.get("timeline_start_us", 0)
+    fields = ("picture_fade_in_us", "picture_fade_out_us", "move_in", "move_out")
+    if clip.get("asset_kind") == "audio" and any(field in clip for field in fields):
+        raise DomainError("TIMELINE_INVALID", "音频片段不能带画面转场来源事实")
+    for field in fields[:2]:
+        if field not in clip:
+            continue
+        value = _integer(clip[field], "画面淡变时长不合法")
+        if value < 0 or value > duration:
+            raise DomainError("TIMELINE_TRANSITION_INVALID", "画面淡变时长超出片段范围")
+        if value == 0:
+            clip.pop(field, None)
+        else:
+            clip[field] = value
+    for field in fields[2:]:
+        if field not in clip:
+            continue
+        value = clip[field]
+        if not isinstance(value, dict):
+            raise DomainError("TIMELINE_INVALID", "运动转场事实不合法")
+        _exact_keys(value, {"preset_id", "duration_us"})
+        preset_id = _enum(value.get("preset_id"), TRANSITION_MOVE_PRESET_IDS, "运动转场预设不合法")
+        move_duration = _integer(value.get("duration_us"), "运动转场时长不合法")
+        if move_duration < 0 or move_duration > duration:
+            raise DomainError("TIMELINE_TRANSITION_INVALID", "运动转场时长超出片段范围")
+        if move_duration == 0:
+            clip.pop(field, None)
+        else:
+            clip[field] = {"preset_id": preset_id, "duration_us": move_duration}
+    if clip.get("picture_fade_in_us", 0) + clip.get("picture_fade_out_us", 0) > duration:
+        raise DomainError("TIMELINE_TRANSITION_INVALID", "画面淡入淡出总时长不得超过片段时长")
 
 
 def _empty_track(track_id: str, kind: str) -> dict[str, Any]:
@@ -341,6 +573,51 @@ def _clip_timeline_duration_us(source_start: int | None, source_end: int | None,
     return max(1, round((source_end - source_start) * 1000 / speed_milli))
 
 
+def _round_half_up_ratio(numerator: int, denominator: int) -> int:
+    if denominator <= 0 or numerator < 0:
+        raise DomainError("TIMELINE_INVALID", "时间映射参数不合法")
+    return (2 * numerator + denominator) // (2 * denominator)
+
+
+def _source_to_timeline_us(clip: dict[str, Any], source_us: int) -> int:
+    source_start = clip.get("source_start_us")
+    source_end = clip.get("source_end_us")
+    if not isinstance(source_start, int) or not isinstance(source_end, int):
+        raise DomainError("TIMELINE_INVALID", "字幕来源片段缺少源时间范围")
+    speed = _clip_speed(clip)
+    source_delta = source_end - source_us if clip.get("reverse_playback") else source_us - source_start
+    if source_delta < 0:
+        raise DomainError("TIMELINE_INVALID", "字幕来源时间映射越界")
+    return int(clip["timeline_start_us"]) + _round_half_up_ratio(source_delta * 1000, speed)
+
+
+_CLOSING_PUNCTUATION = set("，。！？；：、）》】〕〉》」』”’!?;:,.%)」』】〕〉")
+
+
+def _caption_cut_index(text: str, ratio: float) -> int:
+    """Choose a surrogate-safe OpenFilm-like word/CJK boundary near the time ratio."""
+    if len(text) < 2:
+        raise DomainError("TIMELINE_INVALID", "字幕文本过短，无法拆分")
+    target = max(1, min(len(text) - 1, _round_half_up_ratio(int(ratio * 1_000_000), 1_000_000)))
+    boundaries: set[int] = set()
+    for index in range(1, len(text)):
+        if text[index - 1].isspace():
+            boundaries.add(index)
+        elif "\u3400" <= text[index - 1] <= "\u9fff" or "\u3400" <= text[index] <= "\u9fff":
+            boundaries.add(index)
+    legal = []
+    for boundary in boundaries:
+        candidate = boundary
+        while candidate < len(text) - 1 and text[candidate] in _CLOSING_PUNCTUATION:
+            candidate += 1
+        if 0 < candidate < len(text):
+            legal.append(candidate)
+    if legal:
+        return min(legal, key=lambda candidate: (abs(candidate - target), candidate))
+    # Python indexes Unicode code points, so this fallback cannot split a surrogate pair.
+    return target
+
+
 class TimelineService:
     def __init__(self, db: Database, *, font_families: list[str] | None = None) -> None:
         self.db = db
@@ -448,6 +725,7 @@ class TimelineService:
             "can_undo": revision["parent_revision_id"] is not None,
             "can_redo": bool(redo_stack),
             "current_preview": None,
+            "active_transitions": _project_active_transitions(revision["document"]),
         }
 
     def create_revision_from_document(
@@ -781,11 +1059,6 @@ class TimelineService:
         }
         if not removed_ids:
             return {"clips": 0, "captions": 0}
-        removed_starts = {
-            clip["clip_id"]: clip.get("timeline_start_us")
-            for clip in clips
-            if isinstance(clip, dict) and clip.get("clip_id") in removed_ids
-        }
         document["clips"] = [clip for clip in clips if not (isinstance(clip, dict) and clip.get("clip_id") in removed_ids)]
         removed_captions = len([caption for caption in captions if isinstance(caption, dict) and caption.get("source_clip_id") in removed_ids])
         document["captions"] = [
@@ -795,35 +1068,12 @@ class TimelineService:
         ]
         transitions = document.get("transitions")
         if isinstance(transitions, list) and transitions:
-            # 被删片段的“直接后继”锚点转场一并移除（相邻关系已不存在）。
-            # P231：同轨邻接——被删片段的「同轨时间序直接后继」为锚的转场
-            # 一并移除（该相邻关系已不存在）。
-            successors: set[str] = set()
-            for clip_id, start in removed_starts.items():
-                removed_clip = next(
-                    (c for c in document["clips"] if isinstance(c, dict) and c.get("clip_id") == clip_id),
-                    None,
-                )
-                removed_track = removed_clip.get("track_id") if isinstance(removed_clip, dict) else None
-                successor = next(
-                    (
-                        clip["clip_id"]
-                        for clip in sorted(
-                            (c for c in document["clips"]
-                             if isinstance(c, dict) and c.get("track_id") == removed_track
-                             and isinstance(c.get("timeline_start_us"), int)),
-                            key=lambda c: c["timeline_start_us"],
-                        )
-                        if isinstance(start, int) and clip_id is not None and c["timeline_start_us"] >= start
-                    ),
-                    None,
-                )
-                if successor:
-                    successors.add(successor)
             document["transitions"] = [
-                item
-                for item in transitions
-                if not (isinstance(item, dict) and item.get("after_clip_id") in removed_ids | successors)
+                item for item in transitions
+                if not (
+                    isinstance(item, dict)
+                    and (item.get("after_clip_id") in removed_ids or item.get("incoming_clip_id") in removed_ids)
+                )
             ]
         # 按轨道重排 order_index（与 _normalize_timing 一致：只重排，不动时间）。
         track_clips: dict[str, list[dict[str, Any]]] = {}
@@ -910,6 +1160,7 @@ class TimelineService:
                     "link_to_clip_id",
                     "timeline_start_us",
                     "edit_mode",
+                    "linkage_enabled",
                 },
                 optional={
                     "source_start_us",
@@ -923,15 +1174,19 @@ class TimelineService:
                     "link_to_clip_id",
                     "timeline_start_us",
                     "edit_mode",
+                    "linkage_enabled",
                 },
             )
             edit_mode = operation.get("edit_mode")
-            if edit_mode not in (None, "overwrite"):
+            if edit_mode not in (None, "place", "insert", "overwrite"):
                 raise DomainError("TIMELINE_INVALID", "素材落点编辑模式不合法")
-            if edit_mode == "overwrite" and "timeline_start_us" not in operation:
-                raise DomainError("TIMELINE_INVALID", "覆盖模式需要明确时间落点")
+            if edit_mode is not None and "timeline_start_us" not in operation:
+                raise DomainError("TIMELINE_INVALID", "明确的素材编辑模式需要时间落点")
             if edit_mode is None and "timeline_start_us" in operation:
-                raise DomainError("TIMELINE_INVALID", "只有覆盖模式可以指定时间落点")
+                raise DomainError("TIMELINE_INVALID", "指定时间落点需要素材编辑模式")
+            linkage_enabled = operation.get("linkage_enabled", True)
+            if not isinstance(linkage_enabled, bool):
+                raise DomainError("TIMELINE_INVALID", "链接联动状态不合法")
             # as_audio（M3-3）：视频素材取其音轨铺到 A1（音频轨拒收视频素材的
             # 既有缺口）。素材必须是 video 且确有音轨；片段按 A1 纯音频语义
             # 落轨（固定轨尾、asset_kind=audio、audio.enabled=true）。
@@ -944,7 +1199,7 @@ class TimelineService:
                 or not isinstance(speed_milli, int)
                 or not MIN_SPEED_MILLI <= speed_milli <= MAX_SPEED_MILLI
             ):
-                raise DomainError("TIMELINE_INVALID", "速度需在 0.25x-4x 之间")
+                raise DomainError("TIMELINE_INVALID", "速度需在 0.1x-100x 之间")
             reverse_playback = operation.get("reverse_playback")
             if reverse_playback is not None and not isinstance(reverse_playback, bool):
                 raise DomainError("TIMELINE_INVALID", "倒放状态不合法")
@@ -986,23 +1241,38 @@ class TimelineService:
             if op_track_id is not None:
                 if not isinstance(op_track_id, str) or not op_track_id:
                     raise DomainError("TIMELINE_INVALID", "目标轨道不合法")
-            if clip["track_id"] == AUDIO_TRACK_ID:
-                # 音频片段固定落到 A1。普通放置追加；OpenFilm Alt 覆盖落到明确时间。
-                if op_track_id is not None and op_track_id != AUDIO_TRACK_ID:
-                    raise DomainError("TIMELINE_INVALID", "音频片段只能放到音频轨道")
+            if clip["asset_kind"] == "audio":
+                target_track_id = op_track_id or clip["track_id"] or AUDIO_TRACK_ID
+                target_track = next((track for track in document.get("tracks", []) if track.get("id") == target_track_id), None)
+                if target_track is None or target_track.get("kind") != "audio":
+                    raise DomainError("TIMELINE_INVALID", "音频素材只能放到音频轨道")
+                clip["track_id"] = target_track_id
                 if edit_mode == "overwrite":
                     start = _integer(operation.get("timeline_start_us"), "时间线落点不合法")
                     duration = clip["timeline_end_us"] - clip["timeline_start_us"]
                     clip["timeline_start_us"] = start
                     clip["timeline_end_us"] = start + duration
-                    self._overwrite_track_range(document, AUDIO_TRACK_ID, start, start + duration)
-                    self._place_clip_at_time(clips, clip, AUDIO_TRACK_ID)
+                    self._overwrite_track_range(document, target_track_id, start, start + duration)
+                    self._place_clip_at_time(clips, clip, target_track_id)
+                elif edit_mode == "insert":
+                    start = _integer(operation.get("timeline_start_us"), "时间线落点不合法")
+                    duration = clip["timeline_end_us"] - clip["timeline_start_us"]
+                    self._ripple_track_from_time(document, target_track_id, start, duration, linkage_enabled)
+                    clip["timeline_start_us"] = start
+                    clip["timeline_end_us"] = start + duration
+                    self._place_clip_at_time(clips, clip, target_track_id)
+                elif edit_mode == "place":
+                    start = _integer(operation.get("timeline_start_us"), "时间线落点不合法")
+                    duration = clip["timeline_end_us"] - clip["timeline_start_us"]
+                    clip["timeline_start_us"] = start
+                    clip["timeline_end_us"] = start + duration
+                    self._place_clip_at_time(clips, clip, target_track_id)
                 else:
-                    a1_clips = [c for c in clips if c["track_id"] == AUDIO_TRACK_ID]
-                    last_end = max((c["timeline_end_us"] for c in a1_clips), default=0)
+                    audio_clips = [c for c in clips if c["track_id"] == target_track_id]
+                    last_end = max((c["timeline_end_us"] for c in audio_clips), default=0)
                     clip["timeline_start_us"] = last_end
                     clip["timeline_end_us"] = last_end + (clip["source_end_us"] - clip["source_start_us"])
-                    clip["order_index"] = len(a1_clips)
+                    clip["order_index"] = len(audio_clips)
                     clips.append(clip)
             else:
                 # 视频/图片片段：默认落主视频轨（V1），可用 track_id 指定任意
@@ -1025,6 +1295,19 @@ class TimelineService:
                     clip["timeline_start_us"] = start
                     clip["timeline_end_us"] = start + duration
                     self._overwrite_track_range(document, target_track_id, start, start + duration)
+                    self._place_clip_at_time(clips, clip, target_track_id)
+                elif edit_mode == "insert":
+                    start = _integer(operation.get("timeline_start_us"), "时间线落点不合法")
+                    duration = clip["timeline_end_us"] - clip["timeline_start_us"]
+                    self._ripple_track_from_time(document, target_track_id, start, duration, linkage_enabled)
+                    clip["timeline_start_us"] = start
+                    clip["timeline_end_us"] = start + duration
+                    self._place_clip_at_time(clips, clip, target_track_id)
+                elif edit_mode == "place":
+                    start = _integer(operation.get("timeline_start_us"), "时间线落点不合法")
+                    duration = clip["timeline_end_us"] - clip["timeline_start_us"]
+                    clip["timeline_start_us"] = start
+                    clip["timeline_end_us"] = start + duration
                     self._place_clip_at_time(clips, clip, target_track_id)
                 else:
                     self._place_clip_on_track(
@@ -1108,58 +1391,13 @@ class TimelineService:
                     c for c in captions if c["source_clip_id"] != target["clip_id"]
                 ]
                 if document.get("transitions"):
-                    # P231：同轨邻接——被删片段的同轨时间序直接后继为锚的
-                    # 转场一并移除（该相邻关系已不存在）。
-                    same_track_left = sorted(
-                        (
-                            c
-                            for c in clips
-                            if c.get("track_id") == target.get("track_id") and c is not target
-                        ),
-                        key=lambda c: c["timeline_start_us"],
-                    )
-                    successor_id = next(
-                        (
-                            c["clip_id"]
-                            for c in same_track_left
-                            if c["timeline_start_us"] >= target["timeline_start_us"]
-                        ),
-                        None,
-                    )
                     document["transitions"] = [
                         item
                         for item in document["transitions"]
-                        if item["after_clip_id"] != target["clip_id"]
-                        and item["after_clip_id"] != successor_id
+                        if item.get("after_clip_id") != target["clip_id"]
+                        and item.get("incoming_clip_id") != target["clip_id"]
                     ]
             _drop_empty_link_groups(document)
-            captions[:] = [c for c in captions if c["source_clip_id"] != clip["clip_id"]]
-            # 级联删除涉及该片段的转场：作为锚点的转场直接删；时间序中
-            # "被删片段的直接后继"为锚的转场也删（该相邻关系已不存在）。
-            if document.get("transitions"):
-                # P231：同轨邻接——被删片段的同轨时间序直接后继为锚的转场一并删。
-                same_track_left = sorted(
-                    (
-                        c
-                        for c in clips
-                        if c.get("track_id") == clip.get("track_id") and c is not clip
-                    ),
-                    key=lambda c: c["timeline_start_us"],
-                )
-                successor_id = next(
-                    (
-                        c["clip_id"]
-                        for c in same_track_left
-                        if c["timeline_start_us"] >= clip["timeline_start_us"]
-                    ),
-                    None,
-                )
-                document["transitions"] = [
-                    item
-                    for item in document["transitions"]
-                    if item["after_clip_id"] != clip["clip_id"]
-                    and item["after_clip_id"] != successor_id
-                ]
         elif op == "move_clip":
             _exact_keys(
                 operation,
@@ -1188,10 +1426,13 @@ class TimelineService:
         elif op == "position_clips":
             # 一次原子重排：先校验全部目标，再统一落位，避免交换/涟漪编辑
             # 在中间状态碰到同轨重叠。每个位置显式给出，调用方负责链接组规划。
-            _exact_keys(operation, {"op", "placements"})
+            _exact_keys(operation, {"op", "placements", "ignore_link"}, optional={"ignore_link"})
             placements = operation.get("placements")
-            if not isinstance(placements, list) or not 1 <= len(placements) <= 100:
-                raise DomainError("TIMELINE_INVALID", "批量位置数量需为 1-100")
+            if not isinstance(placements, list) or not placements:
+                raise DomainError("TIMELINE_INVALID", "批量位置不能为空")
+            ignore_link = operation.get("ignore_link", False)
+            if not isinstance(ignore_link, bool):
+                raise DomainError("TIMELINE_INVALID", "批量位置链接选项不合法")
             prepared: list[tuple[dict[str, Any], int, str]] = []
             seen: set[str] = set()
             track_by_id = {track["id"]: track for track in document.get("tracks", [])}
@@ -1218,6 +1459,32 @@ class TimelineService:
                 ):
                     raise DomainError("TIMELINE_LOCKED", "片段或目标轨道已锁定")
                 prepared.append((clip, start, target_id))
+            placement_by_id = {clip["clip_id"]: (start, target_id) for clip, start, target_id in prepared}
+            moving_ids = set(placement_by_id)
+            if not ignore_link:
+                for clip, start, _target_id in prepared:
+                    link_id = clip.get("link_group_id")
+                    if not link_id:
+                        continue
+                    remaining = [
+                        member for member in clips
+                        if member.get("link_group_id") == link_id
+                    ]
+                    missing = [
+                        member for member in remaining
+                        if member["clip_id"] not in moving_ids
+                        and member["clip_id"] not in locked_ids
+                        and not track_by_id.get(member["track_id"], {}).get("locked")
+                    ]
+                    if missing:
+                        raise DomainError("TIMELINE_LINKED", "批量移动必须包含所有未锁定的链接成员")
+                    delta = start - clip["timeline_start_us"]
+                    if any(
+                        placement_by_id[member["clip_id"]][0] - member["timeline_start_us"] != delta
+                        for member in remaining
+                        if member["clip_id"] in moving_ids
+                    ):
+                        raise DomainError("TIMELINE_LINKED", "链接组成员必须保持相同时间位移")
             for clip, start, target_id in prepared:
                 delta = start - clip["timeline_start_us"]
                 duration = clip["timeline_end_us"] - clip["timeline_start_us"]
@@ -1229,6 +1496,12 @@ class TimelineService:
                 clip["track_id"] = target_id
                 clip["timeline_start_us"] = start
                 clip["timeline_end_us"] = start + duration
+        elif op == "split_timeline_clips":
+            self._split_timeline_items(db, project_id, document, operation)
+        elif op == "duplicate_timeline_items":
+            self._duplicate_timeline_items(db, project_id, document, operation)
+        elif op == "replace_clip_source":
+            self._replace_clip_source(db, project_id, document, operation)
         elif op == "position_clip":
             # 自由定位：视频与音频片段都可以放在任意时间位置（同轨允许空隙）。
             # 可选 track_id：跨轨道移动（仅限同类型轨道；视频片段在视频轨之间
@@ -1300,42 +1573,49 @@ class TimelineService:
             new_end = _integer(operation.get("source_end_us"), "源结束时间不合法")
             old_source_start = clip["source_start_us"]
             old_source_end = clip["source_end_us"]
-            if new_start < old_source_start or new_end > old_source_end:
-                raise DomainError("TIMELINE_INVALID", "修剪范围必须位于当前片段内")
-            if clip["asset_kind"] == "audio":
-                # Audio clips are freely positioned: trimming the left edge
-                # keeps the right edge fixed (timeline_start shifts right by
-                # the trim amount); trimming the right edge keeps the left
-                # edge fixed (timeline_end shifts left).
-                old_timeline_start = clip["timeline_start_us"]
-                shift = new_start - old_source_start
-                clip["source_start_us"] = new_start
-                clip["source_end_us"] = new_end
-                clip["timeline_start_us"] = old_timeline_start + shift
-                clip["timeline_end_us"] = clip["timeline_start_us"] + (
-                    new_end - new_start
-                )
-            else:
-                speed = _clip_speed(clip)
-                retained_start = clip["timeline_start_us"] + round(
-                    (new_start - old_source_start) * 1000 / speed
-                )
-                retained_end = clip["timeline_start_us"] + round(
-                    (new_end - old_source_start) * 1000 / speed
-                )
-                clip["source_start_us"] = new_start
-                clip["source_end_us"] = new_end
-                # 自由定位：显式落位——左缘随内容右移、右缘收缩
-                # （normalize 不再重排 V1 时间）。
-                clip["timeline_start_us"] = retained_start
-                clip["timeline_end_us"] = retained_end
+            if new_start < 0 or new_end - new_start < MIN_VIDEO_US or new_end > MAX_IMAGE_US:
+                raise DomainError("TIMELINE_INVALID", "修剪范围无效或短于 100ms")
+            asset = self._asset(db, project_id, clip["asset_id"])
+            media = json_loads(asset["media_info_json"]) if asset["media_info_json"] else {}
+            source_duration = media.get("duration_us")
+            if (
+                isinstance(source_duration, int)
+                and not isinstance(source_duration, bool)
+                and source_duration > 0
+                and new_end > source_duration
+            ):
+                raise DomainError("TIMELINE_SOURCE_INVALID", "修剪范围超出原始素材时长")
+            speed = _clip_speed(clip)
+            retained_start = clip["timeline_start_us"] + round(
+                (new_start - old_source_start) * 1000 / speed
+            )
+            clip["source_start_us"] = new_start
+            clip["source_end_us"] = new_end
+            clip["timeline_start_us"] = retained_start
+            clip["timeline_end_us"] = retained_start + _clip_timeline_duration_us(
+                new_start, new_end, speed
+            )
+            if clip["asset_kind"] == "video":
                 # 绑定字幕直接钳制进新窗口（不再按"重打包回零"的位移回移）。
                 self._trim_bound_captions(
-                    document, clip["clip_id"], retained_start, retained_end, 0
+                    document, clip["clip_id"], clip["timeline_start_us"], clip["timeline_end_us"], 0
                 )
             if not _ignore_link(operation) and clip.get("link_group_id"):
+                locked_ids = set(document.get("locked_elements", []))
+                locked_tracks = {
+                    track.get("id")
+                    for track in document.get("tracks", [])
+                    if track.get("locked")
+                }
+                lead_speed = _clip_speed(clip)
+                lead_start_delta_us = round((new_start - old_source_start) * 1000 / lead_speed)
+                lead_end_delta_us = round((new_end - old_source_end) * 1000 / lead_speed)
                 for member in _clip_link_members(document, clip):
                     if member is clip:
+                        continue
+                    # OpenFilm trims every writable link partner together and leaves a locked
+                    # partner where it is; one locked follower must not block the lead trim.
+                    if member["clip_id"] in locked_ids or member["track_id"] in locked_tracks:
                         continue
                     if (
                         member.get("asset_id") != clip.get("asset_id")
@@ -1344,37 +1624,29 @@ class TimelineService:
                         raise DomainError(
                             "TIMELINE_INVALID", "链接组成员素材不一致，无法联动修剪"
                         )
-                    if (
-                        new_start < member["source_start_us"]
-                        or new_end > member["source_end_us"]
-                    ):
+                    member_speed = _clip_speed(member)
+                    old_member_start = member["source_start_us"]
+                    old_member_end = member["source_end_us"]
+                    member_start_delta_us = round(lead_start_delta_us * member_speed / 1000)
+                    member_new_start = old_member_start + member_start_delta_us
+                    member_end_delta_us = round(lead_end_delta_us * member_speed / 1000)
+                    member_new_end = old_member_end + member_end_delta_us
+                    if member_new_end - member_new_start < MIN_VIDEO_US:
                         raise DomainError(
-                            "TIMELINE_INVALID", "修剪范围必须位于链接组成员当前片段内"
+                            "TIMELINE_INVALID", "修剪后链接组成员短于 100ms"
                         )
-                    if (
-                        member["asset_kind"] == "audio"
-                    ):  # noqa: SIM108 — 与独立 trim 相同的音频边缘语义
-                        old_timeline_start = member["timeline_start_us"]
-                        shift = new_start - member["source_start_us"]
-                        member["source_start_us"] = new_start
-                        member["source_end_us"] = new_end
-                        member["timeline_start_us"] = old_timeline_start + shift
-                        member["timeline_end_us"] = member["timeline_start_us"] + (
-                            new_end - new_start
+                    retained_start = member["timeline_start_us"] + lead_start_delta_us
+                    retained_end = retained_start + _clip_timeline_duration_us(
+                        member_new_start, member_new_end, member_speed
+                    )
+                    member["source_start_us"] = member_new_start
+                    member["source_end_us"] = member_new_end
+                    member["timeline_start_us"] = retained_start
+                    member["timeline_end_us"] = retained_end
+                    if member["asset_kind"] == "video":
+                        self._trim_bound_captions(
+                            document, member["clip_id"], retained_start, retained_end, 0
                         )
-                    else:
-                        speed = _clip_speed(member)
-                        old_source_start = member["source_start_us"]
-                        retained_start = member["timeline_start_us"] + round(
-                            (new_start - old_source_start) * 1000 / speed
-                        )
-                        retained_end = member["timeline_start_us"] + round(
-                            (new_end - old_source_start) * 1000 / speed
-                        )
-                        member["source_start_us"] = new_start
-                        member["source_end_us"] = new_end
-                        member["timeline_start_us"] = retained_start
-                        member["timeline_end_us"] = retained_end
         elif op == "set_clip_source_window":
             _exact_keys(
                 operation,
@@ -1438,25 +1710,6 @@ class TimelineService:
                 or clip["source_end_us"] - split_source < MIN_VIDEO_US
             ):
                 raise DomainError("TIMELINE_INVALID", "拆分后的片段不得短于 100ms")
-            # 拆分点若落在锚定于该片段的转场区间内（距尾部 < T），拒绝。
-            transition_here = next(
-                (
-                    item
-                    for item in document.get("transitions", [])
-                    if item["after_clip_id"] == clip["clip_id"]
-                ),
-                None,
-            )
-            if transition_here is not None:
-                tail_timeline = clip["timeline_end_us"] - transition_here["duration_us"]
-                split_timeline_check = clip["timeline_start_us"] + round(
-                    (split_source - clip["source_start_us"]) * 1000 / _clip_speed(clip)
-                )
-                if split_timeline_check > tail_timeline:
-                    raise DomainError(
-                        "TIMELINE_TRANSITION_INVALID",
-                        "拆分点位于转场区间内；请先删除或缩短该转场",
-                    )
             split_timeline = clip["timeline_start_us"] + round(
                 (split_source - clip["source_start_us"]) * 1000 / _clip_speed(clip)
             )
@@ -1466,6 +1719,7 @@ class TimelineService:
             clip["source_end_us"] = split_source
             index = clips.index(clip)
             clips.insert(index + 1, right)
+            _remap_transition_outgoing_after_split(document, clip["clip_id"], right["clip_id"])
             # 自由定位模型：显式落位（左段止于拆分点、右段从拆分点起），
             # normalize 不再重排 V1 时间。
             old_timeline_end = clip["timeline_end_us"]
@@ -1517,6 +1771,7 @@ class TimelineService:
             clip["source_end_us"] = split_source
             index = clips.index(clip)
             clips.insert(index + 1, right)
+            _remap_transition_outgoing_after_split(document, clip["clip_id"], right["clip_id"])
             old_timeline_end = clip["timeline_end_us"]
             clip["timeline_end_us"] = split_timeline
             right["timeline_start_us"] = split_timeline
@@ -1709,6 +1964,50 @@ class TimelineService:
                 elif field in clip["audio"]:
                     audio[field] = clip["audio"][field]
             clip["audio"] = audio
+        elif op == "set_clip_transition_facts":
+            if not any(field in operation for field in ("picture_fade_in_us", "picture_fade_out_us", "move_in", "move_out")):
+                raise DomainError("TIMELINE_INVALID", "转场来源事实操作至少需要一个字段")
+            _exact_keys(
+                operation,
+                {"op", "clip_id", "picture_fade_in_us", "picture_fade_out_us", "move_in", "move_out"},
+                optional={"picture_fade_in_us", "picture_fade_out_us", "move_in", "move_out"},
+            )
+            clip = _clip(document, operation.get("clip_id"))
+            if clip.get("asset_kind") == "audio":
+                raise DomainError("TIMELINE_INVALID", "画面转场来源事实只能设置在视觉片段上")
+            clip_duration = clip["timeline_end_us"] - clip["timeline_start_us"]
+            for field in ("picture_fade_in_us", "picture_fade_out_us"):
+                if field not in operation:
+                    continue
+                value = operation[field]
+                if value is None:
+                    clip.pop(field, None)
+                    continue
+                duration = _integer(value, "画面淡变时长不合法")
+                if duration < 0 or duration > clip_duration:
+                    raise DomainError("TIMELINE_TRANSITION_INVALID", "画面淡变时长不得超过片段时长")
+                if duration == 0:
+                    clip.pop(field, None)
+                else:
+                    clip[field] = duration
+            for field in ("move_in", "move_out"):
+                if field not in operation:
+                    continue
+                value = operation[field]
+                if value is None:
+                    clip.pop(field, None)
+                    continue
+                _exact_keys(value, {"preset_id", "duration_us"})
+                preset_id = _enum(value.get("preset_id"), TRANSITION_MOVE_PRESET_IDS, "运动转场预设不合法")
+                duration = _integer(value.get("duration_us"), "运动转场时长不合法")
+                if duration < 0 or duration > clip_duration:
+                    raise DomainError("TIMELINE_TRANSITION_INVALID", "运动转场时长不得超过片段时长")
+                if duration == 0:
+                    clip.pop(field, None)
+                else:
+                    clip[field] = {"preset_id": preset_id, "duration_us": duration}
+            if clip.get("picture_fade_in_us", 0) + clip.get("picture_fade_out_us", 0) > clip_duration:
+                raise DomainError("TIMELINE_TRANSITION_INVALID", "画面淡入淡出总时长不得超过片段时长")
         elif op == "set_speed":
             _exact_keys(operation, {"op", "clip_id", "speed_milli", "ripple"}, optional={"ripple"})
             clip = _clip(document, operation.get("clip_id"))
@@ -1720,7 +2019,7 @@ class TimelineService:
                 or not isinstance(speed, int)
                 or not MIN_SPEED_MILLI <= speed <= MAX_SPEED_MILLI
             ):
-                raise DomainError("TIMELINE_INVALID", "速度需在 0.25x-4x 之间")
+                raise DomainError("TIMELINE_INVALID", "速度需在 0.1x-100x 之间")
             old_duration = clip["timeline_end_us"] - clip["timeline_start_us"]
             clip["speed_milli"] = speed
             if clip["asset_kind"] == "video":
@@ -1757,7 +2056,7 @@ class TimelineService:
                 raise DomainError("TIMELINE_INVALID", "只有图片片段可以设置时长")
             duration = _integer(operation.get("duration_us"), "图片时长不合法")
             if not MIN_IMAGE_US <= duration <= MAX_IMAGE_US:
-                raise DomainError("TIMELINE_INVALID", "图片时长需为 0.5-30 秒")
+                raise DomainError("TIMELINE_INVALID", "图片时长需至少为 100ms，且不得超出安全整数范围")
             old_duration = clip["timeline_end_us"] - clip["timeline_start_us"]
             clip["timeline_end_us"] = clip["timeline_start_us"] + duration
             # P231：涟漪按轨——任意视觉轨的图片片段时长变化均涟漪右推
@@ -1807,7 +2106,7 @@ class TimelineService:
                     raise DomainError("TIMELINE_INVALID", "字幕条目不合法")
                 start = _integer(entry.get("start_us"), "字幕开始时间不合法")
                 end = _integer(entry.get("end_us"), "字幕结束时间不合法")
-                if start < 0 or end - start < 200_000:
+                if start < 0 or end - start < MIN_CAPTION_US:
                     raise DomainError("TIMELINE_INVALID", "字幕条目时长不足 0.2s")
                 parsed.append((start, end, _caption_text(entry.get("text"))))
             parsed.sort(key=lambda item: item[0])
@@ -1880,25 +2179,76 @@ class TimelineService:
             elif not locked and clip_id in locked_ids:
                 locked_ids.remove(clip_id)
         elif op == "add_track":
-            # 新增动态轨道：视频轨（V2+）或文本轨（T1+），插入到 C1 之上
-            # （动态区域底部，紧贴字幕轨）。
-            _exact_keys(operation, {"op", "kind"})
-            kind = _enum(operation.get("kind"), ("video", "text"), "轨道类型不合法")
-            tracks_list = document["tracks"]
-            prefix = "V" if kind == "video" else "T"
-            existing_ids = {track.get("id") for track in tracks_list}
-            number = 2 if kind == "video" else 1
-            while f"{prefix}{number}" in existing_ids:
-                number += 1
-            caption_index = next(
-                (
-                    index
-                    for index, track in enumerate(tracks_list)
-                    if track.get("id") == CAPTION_TRACK_ID
-                ),
-                len(tracks_list),
+            _exact_keys(
+                operation,
+                {"op", "kind", "track_id", "before_track_id", "after_track_id", "audio_index"},
+                optional={"track_id", "before_track_id", "after_track_id", "audio_index"},
             )
-            tracks_list.insert(caption_index, _empty_track(f"{prefix}{number}", kind))
+            kind = _enum(operation.get("kind"), ("video", "audio", "text"), "轨道类型不合法")
+            tracks_list = document["tracks"]
+            prefix = {"video": "V", "audio": "A", "text": "T"}[kind]
+            first_number = {"video": 2, "audio": 2, "text": 1}[kind]
+            existing_ids = {track.get("id") for track in tracks_list}
+            requested_id = operation.get("track_id")
+            if requested_id is None:
+                number = first_number
+                while f"{prefix}{number}" in existing_ids:
+                    number += 1
+                requested_id = f"{prefix}{number}"
+            if (
+                not isinstance(requested_id, str)
+                or not requested_id.startswith(prefix)
+                or requested_id in existing_ids
+                or requested_id in {MAIN_TRACK_ID, AUDIO_TRACK_ID, CAPTION_TRACK_ID}
+                or not requested_id[len(prefix):].isdigit()
+                or int(requested_id[len(prefix):]) < first_number
+            ):
+                raise DomainError("TIMELINE_INVALID", "新增轨道 ID 不合法或已存在")
+            _identifier(requested_id, "新增轨道 ID 不合法")
+            before_id = operation.get("before_track_id")
+            after_id = operation.get("after_track_id")
+            audio_index = operation.get("audio_index")
+            if before_id is not None and after_id is not None:
+                raise DomainError("TIMELINE_INVALID", "新增轨道锚点不能同时指定前后位置")
+            if audio_index is not None and (before_id is not None or after_id is not None or kind != "audio"):
+                raise DomainError("TIMELINE_INVALID", "audio_index 仅适用于无锚点的新增音频轨")
+            new_track = _empty_track(requested_id, kind)
+            if kind == "audio":
+                audio_ids = [track["id"] for track in tracks_list if track.get("kind") == "audio"]
+                if audio_index is not None:
+                    if (
+                        isinstance(audio_index, bool)
+                        or not isinstance(audio_index, int)
+                        or not 0 <= audio_index <= len(audio_ids) - 1
+                    ):
+                        raise DomainError("TIMELINE_INVALID", "音频轨插入位置不合法")
+                    slot = audio_index
+                    insertion_id = audio_ids[slot + 1] if slot < len(audio_ids) - 1 else None
+                    insert_at = (
+                        next(i for i, track in enumerate(tracks_list) if track["id"] == insertion_id)
+                        if insertion_id is not None else len(tracks_list)
+                    )
+                elif before_id is not None or after_id is not None:
+                    anchor_id = before_id if before_id is not None else after_id
+                    anchor = next((i for i, track in enumerate(tracks_list) if track["id"] == anchor_id), None)
+                    if anchor is None or tracks_list[anchor].get("kind") != "audio" or anchor_id == AUDIO_TRACK_ID and before_id is not None:
+                        raise DomainError("TIMELINE_INVALID", "音频轨锚点必须是音频轨")
+                    insert_at = anchor + (1 if after_id is not None else 0)
+                else:
+                    insert_at = len(tracks_list)
+            else:
+                if before_id is not None or after_id is not None:
+                    anchor_id = before_id if before_id is not None else after_id
+                    anchor = next((i for i, track in enumerate(tracks_list) if track["id"] == anchor_id), None)
+                    if anchor is None or anchor_id == CAPTION_TRACK_ID or tracks_list[anchor].get("kind") not in ("video", "text"):
+                        raise DomainError("TIMELINE_INVALID", "视觉轨锚点必须是视频或文本轨")
+                    insert_at = anchor + (1 if after_id is not None else 0)
+                else:
+                    insert_at = next(
+                        (i for i, track in enumerate(tracks_list) if track.get("id") == CAPTION_TRACK_ID),
+                        next(i for i, track in enumerate(tracks_list) if track.get("id") == MAIN_TRACK_ID),
+                    )
+            tracks_list.insert(insert_at, new_track)
         elif op == "remove_track":
             # 删除动态轨道：其上的片段与绑定字幕一并级联删除。
             # 仅主视频轨与音频轨位置、数量固定；文本轨与其他动态轨一致可删除。
@@ -1938,8 +2288,7 @@ class TimelineService:
             ]
             tracks_list.remove(track)
         elif op == "move_track":
-            # 动态轨道换位：to_index 为动态区域内自上而下 0 起的目标位置。
-            # 仅主视频轨与音频轨固定；文本轨与其他动态轨一致可移动。
+            # to_index 是同一轨道组内的 0-based 动态位置；A1/V1/C1 保持固定。
             _exact_keys(operation, {"op", "track_id", "to_index"})
             track_id = operation.get("track_id")
             to_index = operation.get("to_index")
@@ -1949,19 +2298,39 @@ class TimelineService:
             track = next((t for t in tracks_list if t.get("id") == track_id), None)
             if track is None:
                 raise DomainError("TIMELINE_INVALID", "轨道不存在")
-            dynamic_count = sum(
-                1
-                for item in tracks_list
-                if item.get("id") not in {MAIN_TRACK_ID, AUDIO_TRACK_ID}
-            )
+            if track.get("id") in {MAIN_TRACK_ID, AUDIO_TRACK_ID, CAPTION_TRACK_ID}:
+                raise DomainError("TIMELINE_INVALID", "固定轨道不能移动")
+            fixed_track_ids = {MAIN_TRACK_ID, AUDIO_TRACK_ID, CAPTION_TRACK_ID}
+            if track.get("kind") == "audio":
+                group = [
+                    item for item in tracks_list
+                    if item.get("kind") == "audio" and item.get("id") not in fixed_track_ids
+                ]
+            else:
+                group = [
+                    item for item in tracks_list
+                    if item.get("kind") in ("video", "text") and item.get("id") not in fixed_track_ids
+                ]
+            dynamic_count = len(group)
             if (
                 not isinstance(to_index, int)
                 or isinstance(to_index, bool)
                 or not 0 <= to_index < dynamic_count
             ):
                 raise DomainError("TIMELINE_INVALID", "目标轨道位置不合法")
-            tracks_list.remove(track)
-            tracks_list.insert(to_index, track)
+            group.remove(track)
+            group.insert(to_index, track)
+            if track.get("kind") == "audio":
+                first_dynamic_audio = next(i for i, item in enumerate(tracks_list) if item.get("id") == AUDIO_TRACK_ID) + 1
+                tracks_list[:] = [item for item in tracks_list if item.get("kind") != "audio" or item.get("id") == AUDIO_TRACK_ID]
+                tracks_list[first_dynamic_audio:first_dynamic_audio] = group
+            else:
+                slots = [
+                    i for i, item in enumerate(tracks_list)
+                    if item.get("kind") in ("video", "text") and item.get("id") not in fixed_track_ids
+                ]
+                for slot, member in zip(slots, group, strict=True):
+                    tracks_list[slot] = member
         elif op == "set_track_flags":
             # 轨道属性（部分覆盖）：锁定全类型；隐藏仅视频/文本；
             # 静音/独奏仅视频/音频。
@@ -2123,6 +2492,10 @@ class TimelineService:
             _exact_keys(operation, {"op", "after_clip_id", "kind", "duration_us"})
             document.setdefault("transitions", [])
             anchor, successor = self._transition_neighbors(clips, operation.get("after_clip_id"))
+            self._require_unlocked(
+                document,
+                {"op": op, "clip_id": anchor["clip_id"], "after_clip_id": anchor["clip_id"], "incoming_clip_id": successor["clip_id"]},
+            )
             kind = _enum(operation.get("kind"), TRANSITION_KINDS, "转场类型不合法")
             duration = _integer(operation.get("duration_us"), "转场时长不合法")
             if not MIN_TRANSITION_US <= duration <= MAX_TRANSITION_US:
@@ -2135,6 +2508,7 @@ class TimelineService:
                 {
                     "transition_id": f"transition_{new_id()}",
                     "after_clip_id": anchor["clip_id"],
+                    "incoming_clip_id": successor["clip_id"],
                     "kind": kind,
                     "duration_us": duration,
                 }
@@ -2160,6 +2534,396 @@ class TimelineService:
             transition = _transition(document, operation.get("transition_id"))
             document["transitions"].remove(transition)
         self._normalize_timing(document, old_starts)
+
+    def _replace_clip_source(
+        self, db: sqlite3.Connection, project_id: str, document: dict[str, Any], operation: dict[str, Any]
+    ) -> None:
+        _exact_keys(operation, {"op", "clip_id", "asset_id"})
+        clip = _clip(document, operation.get("clip_id"))
+        target_asset_id = _identifier(operation.get("asset_id"), "Asset ID 不合法")
+        if target_asset_id == clip.get("asset_id"):
+            raise DomainError("TIMELINE_INVALID", "替换素材必须与当前素材不同")
+        self._require_unlocked(document, {"op": "replace_clip_source", "clip_id": clip["clip_id"]})
+        track = next((item for item in document["tracks"] if item.get("id") == clip.get("track_id")), None)
+        if track is None or track.get("locked"):
+            raise DomainError("TIMELINE_LOCKED", "目标轨道已锁定或不存在")
+        asset = self._asset(db, project_id, target_asset_id)
+        media = json_loads(asset["media_info_json"]) if asset["media_info_json"] else {}
+        old_duration = int(clip["timeline_end_us"]) - int(clip["timeline_start_us"])
+        start = int(clip["timeline_start_us"])
+        is_audio_target = track.get("kind") == "audio"
+        if is_audio_target:
+            if asset["kind"] not in ("audio", "video"):
+                raise DomainError("TIMELINE_INVALID", "音频轨只能替换为音频或视频素材")
+            source_kind = "audio"
+        else:
+            if asset["kind"] not in ("video", "image"):
+                raise DomainError("TIMELINE_INVALID", "视觉轨只能替换为视频或图片素材")
+            source_kind = asset["kind"]
+
+        replacement = copy.deepcopy(clip)
+        replacement["asset_id"] = target_asset_id
+        replacement["asset_kind"] = source_kind
+        replacement["layout"] = clip.get("layout", "fit")
+        if source_kind != "video":
+            replacement.pop("reverse_playback", None)
+
+        if source_kind == "image":
+            replacement["source_start_us"] = None
+            replacement["source_end_us"] = None
+            replacement.pop("speed_milli", None)
+            replacement["audio"] = {"enabled": False, "gain_db": float(clip["audio"].get("gain_db", 0.0))}
+            duration = old_duration
+        else:
+            asset_duration = media.get("duration_us")
+            if isinstance(asset_duration, bool) or (
+                asset_duration is not None
+                and not isinstance(asset_duration, int)
+            ):
+                raise DomainError("TIMELINE_SOURCE_INVALID", "替换素材缺少可校验的有限时长")
+            duration_known = asset_duration is not None and asset_duration > 0
+            if duration_known and asset_duration < MIN_VIDEO_US:
+                raise DomainError("TIMELINE_SOURCE_INVALID", "替换素材缺少可校验的有限时长")
+            speed = _clip_speed(clip)
+            needed_source = _round_half_up_ratio(old_duration * speed, 1000)
+            source_start = 0
+            source_end = (
+                min(asset_duration, needed_source)
+                if duration_known
+                else needed_source
+            )
+            if source_end > MAX_IMAGE_US - source_start:
+                raise DomainError("TIMELINE_INVALID", "替换源范围超出安全整数范围")
+            if source_end < MIN_VIDEO_US:
+                raise DomainError("TIMELINE_INVALID", "替换素材不足 100ms")
+            duration = _clip_timeline_duration_us(source_start, source_end, speed)
+            if duration < MIN_VIDEO_US:
+                raise DomainError("TIMELINE_INVALID", "替换素材不足 100ms")
+            replacement["source_start_us"] = source_start
+            replacement["source_end_us"] = source_end
+            replacement["speed_milli"] = speed
+            old_audio = clip["audio"]
+            has_audio = bool(media.get("audio_streams"))
+            if is_audio_target:
+                replacement["audio"] = {
+                    **{key: old_audio[key] for key in ("fade_in_us", "fade_out_us") if key in old_audio},
+                    "enabled": True,
+                    "gain_db": float(old_audio.get("gain_db", 0.0)),
+                }
+                if asset["kind"] == "video" and not has_audio:
+                    # Retain audio clip semantics; renderer supplies equal-length silence.
+                    pass
+            else:
+                replacement["audio"] = {
+                    **({key: old_audio[key] for key in ("fade_in_us", "fade_out_us") if key in old_audio} if has_audio else {}),
+                    "enabled": bool(old_audio.get("enabled")) and has_audio,
+                    "gain_db": float(old_audio.get("gain_db", 0.0)),
+                }
+            # A shorter source shortens the clip from its original start; a longer source
+            # is trimmed to the exact source window needed to keep the target duration.
+        end = start + duration
+        if end > MAX_IMAGE_US:
+            raise DomainError("TIMELINE_INVALID", "替换后的时间线结束点超出安全整数范围")
+        replacement["timeline_start_us"] = start
+        replacement["timeline_end_us"] = end
+        old_duration = end - start
+        if source_kind == "image":
+            replacement["timeline_end_us"] = start + duration
+        if source_kind == "audio":
+            for field in ("keyframes", "transform", "mask", "keying"):
+                replacement.pop(field, None)
+        clip.clear()
+        clip.update(replacement)
+
+    def _duplicate_timeline_items(
+        self, db: sqlite3.Connection, project_id: str, document: dict[str, Any], operation: dict[str, Any]
+    ) -> None:
+        _exact_keys(operation, {"op", "copies"})
+        copies = operation.get("copies")
+        if not isinstance(copies, list) or not copies:
+            raise DomainError("TIMELINE_INVALID", "复制列表不能为空")
+        existing_clip_ids = {item["clip_id"] for item in document["clips"]}
+        existing_caption_ids = {item["caption_id"] for item in document["captions"]}
+        copy_ids: set[str] = set()
+        prepared: list[dict[str, Any]] = []
+        track_by_id = {item["id"]: item for item in document["tracks"]}
+        for raw in copies:
+            item = _mapping(raw, "复制项不合法")
+            item_kind = item.get("item_kind")
+            required = {"item_kind", "source_id", "copy_id", "timeline_start_us"}
+            optional = {"snapshot"}
+            if item_kind == "clip":
+                required.add("track_id")
+                optional.add("track_id")
+            _exact_keys(item, required | optional, optional=optional)
+            source_id = _identifier(item.get("source_id"), "复制来源 ID 不合法")
+            copy_id = _identifier(item.get("copy_id"), "复制目标 ID 不合法")
+            start = _integer(item.get("timeline_start_us"), "复制时间不合法")
+            if not 0 <= start <= MAX_IMAGE_US or copy_id in copy_ids or copy_id in existing_clip_ids or copy_id in existing_caption_ids:
+                raise DomainError("TIMELINE_INVALID", "复制 ID 或时间不合法")
+            copy_ids.add(copy_id)
+            if item_kind == "clip":
+                source = next((clip for clip in document["clips"] if clip["clip_id"] == source_id), None)
+                snapshot = item.get("snapshot")
+                if source is None:
+                    if snapshot is None:
+                        raise DomainError("TIMELINE_CLIP_NOT_FOUND", "复制来源不存在且缺少有效快照")
+                    source = _validate_duplicate_clip_snapshot(snapshot, source_id)
+                if source_id in document.get("locked_elements", []) or track_by_id.get(source.get("track_id"), {}).get("locked"):
+                    raise DomainError("TIMELINE_LOCKED", "复制来源片段或轨道已锁定")
+                target_id = _identifier(item.get("track_id"), "复制目标轨道 ID 不合法")
+                target = track_by_id.get(target_id)
+                expected = "audio" if source.get("asset_kind") == "audio" else "video"
+                if target is None or target.get("kind") != expected or target.get("locked"):
+                    raise DomainError("TIMELINE_INVALID", "复制目标轨道类型不匹配或已锁定")
+                duration = int(source["timeline_end_us"]) - int(source["timeline_start_us"])
+                if start + duration > MAX_IMAGE_US:
+                    raise DomainError("TIMELINE_INVALID", "复制片段结束点超出安全整数范围")
+                prepared.append({"item": item, "source": source, "kind": "clip", "target": target_id, "duration": duration})
+            elif item_kind == "caption":
+                source = next((caption for caption in document["captions"] if caption["caption_id"] == source_id), None)
+                snapshot = item.get("snapshot")
+                if source is None:
+                    if snapshot is None:
+                        raise DomainError("TIMELINE_CAPTION_NOT_FOUND", "复制字幕来源不存在且缺少有效快照")
+                    source = _validate_duplicate_caption_snapshot(snapshot, source_id)
+                if track_by_id.get(CAPTION_TRACK_ID, {}).get("locked"):
+                    raise DomainError("TIMELINE_LOCKED", "字幕轨道已锁定")
+                duration = int(source["end_us"]) - int(source["start_us"])
+                if start + duration > MAX_IMAGE_US:
+                    raise DomainError("TIMELINE_INVALID", "复制字幕结束点超出安全整数范围")
+                prepared.append({"item": item, "source": source, "kind": "caption", "target": CAPTION_TRACK_ID, "duration": duration})
+            else:
+                raise DomainError("TIMELINE_INVALID", "复制项类型不合法")
+
+        copy_link_sources: dict[str, set[str]] = {}
+        for entry in prepared:
+            source = entry["source"]
+            link_id = source.get("link_group_id") if entry["kind"] == "clip" else None
+            if link_id:
+                copy_link_sources.setdefault(link_id, set()).add(source["clip_id"])
+        new_link_ids = {
+            link_id: f"link_{new_id()}"
+            for link_id, source_ids in copy_link_sources.items()
+            if len(source_ids) >= 2
+        }
+        for entry in prepared:
+            item, source = entry["item"], entry["source"]
+            start = int(item["timeline_start_us"])
+            if entry["kind"] == "clip":
+                clone = copy.deepcopy(source)
+                clone.update({
+                    "clip_id": item["copy_id"],
+                    "track_id": entry["target"],
+                    "timeline_start_us": start,
+                    "timeline_end_us": start + entry["duration"],
+                })
+                old_link = source.get("link_group_id")
+                if old_link and old_link in new_link_ids:
+                    clone["link_group_id"] = new_link_ids[old_link]
+                else:
+                    clone.pop("link_group_id", None)
+                document["clips"].append(clone)
+            else:
+                clone = copy.deepcopy(source)
+                clone.update({
+                    "caption_id": item["copy_id"],
+                    "track_id": CAPTION_TRACK_ID,
+                    "source_clip_id": None,
+                    "start_us": start,
+                    "end_us": start + entry["duration"],
+                    "origin": "user",
+                    "edited": True,
+                    "source_segment_ids": [],
+                })
+                document["captions"].append(clone)
+
+    def _split_timeline_items(
+        self, db: sqlite3.Connection, project_id: str, document: dict[str, Any], operation: dict[str, Any]
+    ) -> None:
+        _exact_keys(operation, {"op", "clip_ids", "caption_ids", "timeline_time_us"})
+        clip_ids, caption_ids = operation.get("clip_ids"), operation.get("caption_ids")
+        if (
+            not isinstance(clip_ids, list) or not isinstance(caption_ids, list)
+            or not clip_ids and not caption_ids
+            or any(not isinstance(value, str) for value in clip_ids + caption_ids)
+            or len(set(clip_ids)) != len(clip_ids) or len(set(caption_ids)) != len(caption_ids)
+        ):
+            raise DomainError("TIMELINE_INVALID", "拆分目标列表为空或含重复项")
+        cut = _integer(operation.get("timeline_time_us"), "拆分时间不合法")
+        if not 0 < cut <= MAX_IMAGE_US:
+            raise DomainError("TIMELINE_INVALID", "拆分时间超出安全整数范围")
+        clip_split: dict[str, dict[str, Any]] = {}
+        originals: dict[str, dict[str, Any]] = {}
+        locked = set(document.get("locked_elements", []))
+        tracks = {track["id"]: track for track in document["tracks"]}
+        for clip_id in clip_ids:
+            clip = _clip(document, clip_id)
+            if clip_id in locked or tracks.get(clip["track_id"], {}).get("locked"):
+                raise DomainError("TIMELINE_LOCKED", "拆分片段或轨道已锁定")
+            if clip["asset_kind"] not in ("video", "audio", "image"):
+                raise DomainError("TIMELINE_INVALID", "该素材类型不能拆分")
+            start, end = int(clip["timeline_start_us"]), int(clip["timeline_end_us"])
+            if not start < cut < end or cut - start < MIN_VIDEO_US or end - cut < MIN_VIDEO_US:
+                raise DomainError("TIMELINE_INVALID", "拆分点必须使两半都至少为 100ms")
+            original = copy.deepcopy(clip)
+            right = copy.deepcopy(clip)
+            right_id = f"clip_{new_id()}"
+            right["clip_id"] = right_id
+            split_timeline = cut
+            if clip["asset_kind"] != "image":
+                source_start, source_end = int(clip["source_start_us"]), int(clip["source_end_us"])
+                speed = _clip_speed(clip)
+                timeline_delta = cut - start
+                source_delta = _round_half_up_ratio(timeline_delta * speed, 1000)
+                source_cut = source_end - source_delta if clip.get("reverse_playback") else source_start + source_delta
+                split_timeline = _source_to_timeline_us(original, source_cut)
+                if (
+                    source_cut - source_start < MIN_VIDEO_US
+                    or source_end - source_cut < MIN_VIDEO_US
+                    or split_timeline - start < MIN_VIDEO_US
+                    or end - split_timeline < MIN_VIDEO_US
+                ):
+                    raise DomainError("TIMELINE_INVALID", "拆分源区间任一半短于 100ms")
+                if clip.get("reverse_playback"):
+                    clip["source_start_us"] = source_cut
+                    right["source_end_us"] = source_cut
+                else:
+                    clip["source_end_us"] = source_cut
+                    right["source_start_us"] = source_cut
+            clip["timeline_end_us"] = split_timeline
+            right["timeline_start_us"] = split_timeline
+            _split_fade_pair(clip, right)
+            _split_clip_keyframes(clip, right, split_timeline - start)
+            insert_at = document["clips"].index(clip) + 1
+            document["clips"].insert(insert_at, right)
+            originals[clip_id] = original
+            clip_split[clip_id] = {"right_id": right_id, "timeline_time_us": split_timeline, "right": right}
+
+        right_groups: dict[str, list[dict[str, Any]]] = {}
+        for clip_id in clip_ids:
+            clip = _clip(document, clip_id)
+            group = clip.get("link_group_id")
+            if group:
+                right_groups.setdefault(group, []).append(clip_split[clip_id]["right"])
+        for group, right_members in right_groups.items():
+            if len(right_members) >= 2:
+                new_group = f"link_{new_id()}"
+                for member in right_members:
+                    member["link_group_id"] = new_group
+            else:
+                right_members[0].pop("link_group_id", None)
+
+        for clip_id, split in clip_split.items():
+            _remap_transition_outgoing_after_split(document, clip_id, split["right_id"])
+
+        caption_id_set = set(caption_ids)
+        captions_by_id = {caption["caption_id"]: caption for caption in document["captions"]}
+        if not caption_id_set.issubset(captions_by_id):
+            raise DomainError("TIMELINE_CAPTION_NOT_FOUND", "拆分字幕不存在")
+        if tracks.get(CAPTION_TRACK_ID, {}).get("locked") and caption_id_set:
+            raise DomainError("TIMELINE_LOCKED", "字幕轨道已锁定")
+        original_captions = list(document["captions"])
+        new_captions: list[dict[str, Any]] = []
+        drop_caption_ids: set[str] = set()
+        for caption in original_captions:
+            source_clip_id = caption.get("source_clip_id")
+            linked_split = clip_split.get(source_clip_id)
+            caption_start, caption_end = int(caption["start_us"]), int(caption["end_us"])
+            should_split = caption["caption_id"] in caption_id_set or (
+                linked_split is not None and caption_start < linked_split["timeline_time_us"] < caption_end
+            )
+            if not should_split:
+                if linked_split is not None and caption_start >= linked_split["timeline_time_us"]:
+                    caption["source_clip_id"] = linked_split["right_id"]
+                continue
+            caption_cut = cut if linked_split is None else linked_split["timeline_time_us"]
+            if caption["caption_id"] in caption_id_set and not caption_start < caption_cut < caption_end:
+                raise DomainError("TIMELINE_INVALID", "字幕拆分点必须位于字幕内部")
+            left_duration, right_duration = caption_cut - caption_start, caption_end - caption_cut
+            if left_duration < MIN_CAPTION_US or right_duration < MIN_CAPTION_US:
+                raise DomainError("TIMELINE_INVALID", "字幕拆分后每半至少为 100ms")
+            source_clip = originals.get(source_clip_id) if source_clip_id in originals else next(
+                (item for item in document["clips"] if item["clip_id"] == source_clip_id), None
+            )
+            left_source_ids: list[str] = []
+            right_source_ids: list[str] = []
+            if caption.get("origin") == "transcript":
+                segment_ids = caption.get("source_segment_ids")
+                if not isinstance(segment_ids, list) or not segment_ids or source_clip is None:
+                    raise DomainError("TIMELINE_INVALID", "转录字幕来源无法映射")
+                rows = db.execute(
+                    f"SELECT id,start_us,end_us FROM transcript_segments WHERE id IN ({','.join('?' for _ in segment_ids)})",
+                    segment_ids,
+                ).fetchall()
+                by_segment = {row["id"]: row for row in rows}
+                if set(by_segment) != set(segment_ids):
+                    raise DomainError("TIMELINE_INVALID", "字幕 transcript segment 不存在")
+                for segment_id in segment_ids:
+                    row = by_segment[segment_id]
+                    source_start = int(source_clip["source_start_us"])
+                    source_end = int(source_clip["source_end_us"])
+                    seg_start, seg_end = max(source_start, int(row["start_us"])), min(source_end, int(row["end_us"]))
+                    if seg_end <= seg_start:
+                        continue
+                    midpoint = seg_start + (seg_end - seg_start) // 2
+                    mapped_midpoint = _source_to_timeline_us(source_clip, midpoint)
+                    (left_source_ids if mapped_midpoint <= caption_cut else right_source_ids).append(segment_id)
+            ratio = left_duration / (left_duration + right_duration)
+            cut_index = _caption_cut_index(caption["text"], ratio)
+            if caption.get("origin") == "transcript" and source_clip is not None:
+                words = db.execute(
+                    f"SELECT w.start_us,w.text FROM transcript_words w WHERE w.segment_id IN ({','.join('?' for _ in caption['source_segment_ids'])}) ORDER BY w.segment_id,w.ordinal",
+                    caption["source_segment_ids"],
+                ).fetchall()
+                search_from = 0
+                mapped_word_starts: list[tuple[int, int]] = []
+                for word in words:
+                    token = str(word["text"]).strip()
+                    if not token:
+                        continue
+                    source_word_start = int(word["start_us"])
+                    if not int(source_clip["source_start_us"]) <= source_word_start <= int(source_clip["source_end_us"]):
+                        continue
+                    pos = caption["text"].find(token, search_from)
+                    if pos < 0:
+                        mapped_word_starts = []
+                        break
+                    mapped_word_starts.append((_source_to_timeline_us(source_clip, source_word_start), pos))
+                    search_from = pos + len(token)
+                word_cut = next((pos for time_us, pos in mapped_word_starts if time_us >= caption_cut and pos > 0), None)
+                if word_cut is not None:
+                    cut_index = word_cut
+            left_text, right_text = caption["text"][:cut_index].strip(), caption["text"][cut_index:].strip()
+            _caption_text(left_text)
+            _caption_text(right_text)
+            left = copy.deepcopy(caption)
+            right = copy.deepcopy(caption)
+            left["end_us"] = caption_cut
+            right["caption_id"] = f"caption_{new_id()}"
+            right["start_us"] = caption_cut
+            left["text"], right["text"] = left_text, right_text
+            if caption.get("origin") == "transcript":
+                left["source_segment_ids"] = left_source_ids
+                right["source_segment_ids"] = right_source_ids
+                left_clip_id = source_clip_id
+                right_clip_id = linked_split["right_id"] if linked_split is not None else source_clip_id
+                if left_source_ids:
+                    left["source_clip_id"] = left_clip_id
+                else:
+                    left.update({"origin": "user", "source_clip_id": None, "source_segment_ids": [], "edited": True})
+                if right_source_ids:
+                    right["source_clip_id"] = right_clip_id
+                else:
+                    right.update({"origin": "user", "source_clip_id": None, "source_segment_ids": [], "edited": True})
+            else:
+                left.update({"origin": "user", "source_clip_id": None, "source_segment_ids": [], "edited": True})
+                right.update({"origin": "user", "source_clip_id": None, "source_segment_ids": [], "edited": True})
+            drop_caption_ids.add(caption["caption_id"])
+            new_captions.extend((left, right))
+        document["captions"] = [
+            caption for caption in document["captions"] if caption["caption_id"] not in drop_caption_ids
+        ] + new_captions
 
     @staticmethod
     def _require_unlocked(document: dict[str, Any], operation: dict[str, Any]) -> None:
@@ -2194,7 +2958,16 @@ class TimelineService:
                 (c for c in document.get("clips", []) if c.get("clip_id") == clip_id), None
             )
             if target is not None:
-                affected_ids.update(c["clip_id"] for c in _clip_link_members(document, target))
+                members = _clip_link_members(document, target)
+                if operation.get("op") == "trim_clip":
+                    affected_ids.update(
+                        member["clip_id"]
+                        for member in members
+                        if member["clip_id"] not in locked
+                        and not track_locks.get(member.get("track_id"), False)
+                    )
+                else:
+                    affected_ids.update(c["clip_id"] for c in members)
         for member in document.get("clips", []):
             if member.get("clip_id") in affected_ids and (
                 member["clip_id"] in locked or track_locks.get(member.get("track_id"), False)
@@ -2217,15 +2990,27 @@ class TimelineService:
             caption = _caption(document, caption_id)
             if caption.get("source_clip_id") in locked:
                 raise DomainError("TIMELINE_LOCKED", "关联 Caption 所属 Clip 已锁定")
-        # 转场操作：锚点或后继任一被锁定即拒绝。
+        # 转场事实/兼容操作：固定 pair 中任一端点锁定即拒绝。
         after_clip_id = operation.get("after_clip_id")
         if isinstance(after_clip_id, str) and after_clip_id in locked:
             raise DomainError("TIMELINE_LOCKED", "转场锚点片段已锁定")
+        incoming_clip_id = operation.get("incoming_clip_id")
+        if isinstance(incoming_clip_id, str) and incoming_clip_id in locked:
+            raise DomainError("TIMELINE_LOCKED", "转场后继片段已锁定")
+        if operation.get("op") == "set_clip_transition_facts":
+            target_id = operation.get("clip_id")
+            if isinstance(target_id, str) and target_id in locked:
+                raise DomainError("TIMELINE_LOCKED", "转场来源片段已锁定")
         transition_id = operation.get("transition_id")
         if isinstance(transition_id, str):
             for transition in document.get("transitions", []):
-                if transition["transition_id"] == transition_id and (
-                    transition["after_clip_id"] in locked
+                if transition["transition_id"] != transition_id:
+                    continue
+                endpoint_ids = {transition.get("after_clip_id"), transition.get("incoming_clip_id")}
+                endpoint_clips = [clip for clip in document.get("clips", []) if clip.get("clip_id") in endpoint_ids]
+                if any(
+                    clip.get("clip_id") in locked or track_locks.get(clip.get("track_id"), False)
+                    for clip in endpoint_clips
                 ):
                     raise DomainError("TIMELINE_LOCKED", "转场关联片段已锁定")
 
@@ -2324,7 +3109,7 @@ class TimelineService:
             raise DomainError("TIMELINE_SOURCE_INVALID", "图片不能包含源时间范围")
         duration = 3_000_000 if duration_us is None else _integer(duration_us, "图片时长不合法")
         if not MIN_IMAGE_US <= duration <= MAX_IMAGE_US:
-            raise DomainError("TIMELINE_SOURCE_INVALID", "图片时长需为 0.5-30 秒")
+            raise DomainError("TIMELINE_SOURCE_INVALID", "图片时长需至少为 100ms，且不得超出安全整数范围")
         return {
             "clip_id": f"clip_{new_id()}",
             "track_id": "V1",
@@ -2445,9 +3230,8 @@ class TimelineService:
     ) -> None:
         """Replace one track range while preserving the uncovered ends of intersecting clips.
 
-        OpenFilm's Alt-drop overwrite takes time off the destination track. Linked clips and
-        transition-bound clips are refused for now: applying a partial overwrite to only one
-        member would silently break their editing relationship.
+        OpenFilm's Alt-drop overwrite takes time off the destination track. Linked clips
+        remain protected; transitions are recomputed from the final clip facts.
         """
         if end_us <= start_us:
             raise DomainError("TIMELINE_INVALID", "覆盖区间必须大于零")
@@ -2472,30 +3256,6 @@ class TimelineService:
             raise DomainError("TIMELINE_LOCKED", "覆盖范围内有锁定片段")
         if any(clip.get("link_group_id") for clip in overlaps):
             raise DomainError("TIMELINE_LINKED", "覆盖范围内有链接片段，请先取消链接")
-        overlap_ids = {clip["clip_id"] for clip in overlaps}
-        transitions = document.get("transitions", [])
-        if any(item.get("after_clip_id") in overlap_ids for item in transitions):
-            raise DomainError("TIMELINE_TRANSITION_INVALID", "覆盖范围内有转场，请先移除转场")
-        for transition in transitions:
-            anchor = next(
-                (item for item in clips if item.get("clip_id") == transition.get("after_clip_id")),
-                None,
-            )
-            if not anchor or anchor.get("track_id") != track_id:
-                continue
-            successor = min(
-                (
-                    candidate
-                    for candidate in clips
-                    if candidate.get("track_id") == track_id
-                    and candidate["timeline_start_us"] >= anchor["timeline_end_us"]
-                ),
-                key=lambda candidate: candidate["timeline_start_us"],
-                default=None,
-            )
-            if successor and successor["clip_id"] in overlap_ids:
-                raise DomainError("TIMELINE_TRANSITION_INVALID", "覆盖范围与现有转场相邻，请先移除转场")
-
         def source_window(
             clip: dict[str, Any], segment_start: int, segment_end: int
         ) -> tuple[int, int]:
@@ -2641,6 +3401,48 @@ class TimelineService:
                     caption["start_us"] += delta
                     caption["end_us"] += delta
 
+    def _ripple_track_from_time(
+        self,
+        document: dict[str, Any],
+        track_id: str,
+        at_us: int,
+        delta_us: int,
+        linkage_enabled: bool,
+    ) -> None:
+        """Insert time on one media track and carry linked clips when linkage is enabled."""
+        if delta_us <= 0:
+            raise DomainError("TIMELINE_INVALID", "插入时长必须大于零")
+        clips = document["clips"]
+        captions = document["captions"]
+        track = next((item for item in document["tracks"] if item.get("id") == track_id), None)
+        if track is None or track.get("kind") not in {"video", "audio"}:
+            raise DomainError("TIMELINE_INVALID", "插入目标轨道不可编辑")
+        if track.get("locked"):
+            raise DomainError("TIMELINE_LOCKED", "插入目标轨道已锁定")
+        locked_ids = set(document.get("locked_elements", []))
+        target_clips = [clip for clip in clips if clip.get("track_id") == track_id]
+        if any(clip["timeline_start_us"] < at_us < clip["timeline_end_us"] for clip in target_clips):
+            raise DomainError("TIMELINE_INVALID", "素材插入点必须落在片段边界或空隙")
+        moved = {clip["clip_id"] for clip in target_clips if clip["timeline_start_us"] >= at_us}
+        if linkage_enabled:
+            groups = {clip.get("link_group_id") for clip in target_clips if clip["clip_id"] in moved and clip.get("link_group_id")}
+            moved.update(clip["clip_id"] for clip in clips if clip.get("link_group_id") in groups)
+        if moved & locked_ids:
+            raise DomainError("TIMELINE_LOCKED", "插入会移动锁定的链接片段")
+        for clip in clips:
+            if clip["clip_id"] not in moved:
+                continue
+            if clip["clip_id"] not in {item["clip_id"] for item in target_clips}:
+                linked_track = next((item for item in document["tracks"] if item.get("id") == clip.get("track_id")), None)
+                if linked_track and linked_track.get("locked"):
+                    raise DomainError("TIMELINE_LOCKED", "插入会移动锁定轨道上的链接片段")
+            clip["timeline_start_us"] += delta_us
+            clip["timeline_end_us"] += delta_us
+            for caption in captions:
+                if caption.get("source_clip_id") == clip["clip_id"]:
+                    caption["start_us"] += delta_us
+                    caption["end_us"] += delta_us
+
     def _normalize_tracks(self, document: dict[str, Any]) -> None:
         """迁移并规范化轨道数组到剪映式结构（就地修改）。
 
@@ -2669,8 +3471,8 @@ class TimelineService:
                         "solo": bool(track.get("solo", False)),
                     }
                 )
-        # 固定轨道：V1(主视频)/A1(音频) 始终存在于尾部；C1(字幕) 可被删除，
-        # 删除后不再自动补回（动态视频/文本轨在前，C1 若存在紧随其后）。
+        # 固定轨道：V1(主视频)/A1(默认音频) 始终存在；C1 可删除。
+        # 动态音频轨只出现在 A1 之后，视觉/文本动态轨位于 C1/V1 之前。
         defaults = {
             MAIN_TRACK_ID: "video",
             AUDIO_TRACK_ID: "audio",
@@ -2683,47 +3485,51 @@ class TimelineService:
             existing["kind"] = kind
             fixed[track_id] = existing
         caption = next((t for t in normalized if t.get("id") == CAPTION_TRACK_ID), None)
-        dynamic = [
+        visual_dynamic = [
             track
             for track in normalized
-            if track.get("id") not in defaults and track.get("id") != CAPTION_TRACK_ID
+            if track.get("id") not in defaults
+            and track.get("id") != CAPTION_TRACK_ID
+            and track.get("kind") in ("video", "text")
+        ]
+        audio_dynamic = [
+            track
+            for track in normalized
+            if track.get("id") not in defaults
+            and track.get("id") != CAPTION_TRACK_ID
+            and track.get("kind") == "audio"
         ]
         caption_part = [caption] if caption is not None else []
         document["tracks"] = [
-            *dynamic,
+            *visual_dynamic,
             *caption_part,
             fixed[MAIN_TRACK_ID],
             fixed[AUDIO_TRACK_ID],
+            *audio_dynamic,
         ]
 
     def _gc_unreachable_transitions(self, document: dict[str, Any]) -> None:
-        """清理失去时间序后继的转场。
+        """Normalize legacy identity and remove only effects with deleted endpoints.
 
-        自由定位下片段可以被移动/删除：锚点不再是 V1 可转场片段、或在 V1
-        时间序中不再存在后继的转场会被移除。仅留有空隙的转场保留（休眠，
-        不参与渲染与 UI，片段重新相接后自动恢复）。
+        Old records without an incoming identity remain null/dormant. Never infer a
+        successor from the current layout: a later edit must not rebind an old effect.
         """
         transitions = document.get("transitions")
         clips = document.get("clips")
         if not transitions or not isinstance(clips, list):
             return
-        # P231：转场 GC 按同轨邻接判定（每条视觉轨独立时间序）。
-        by_track: dict[str, list] = {}
-        for clip in clips:
-            if isinstance(clip, dict) and isinstance(clip.get("track_id"), str):
-                by_track.setdefault(clip["track_id"], []).append(clip)
-        valid_anchors: set[str] = set()
-        for track_clips in by_track.values():
-            ordered = sorted(track_clips, key=lambda clip: clip.get("timeline_start_us") or 0)
-            for index, clip in enumerate(ordered):
-                if clip.get("asset_kind") in TRANSITIONABLE_KINDS and index + 1 < len(ordered) \
-                        and ordered[index + 1].get("asset_kind") in TRANSITIONABLE_KINDS:
-                    valid_anchors.add(clip["clip_id"])
-        document["transitions"] = [
-            item
-            for item in transitions
-            if isinstance(item, dict) and item.get("after_clip_id") in valid_anchors
-        ]
+        clip_ids = {clip.get("clip_id") for clip in clips if isinstance(clip, dict)}
+        normalized: list[dict[str, Any]] = []
+        for item in transitions:
+            if not isinstance(item, dict) or item.get("after_clip_id") not in clip_ids:
+                continue
+            if "incoming_clip_id" not in item:
+                item["incoming_clip_id"] = None
+            incoming_id = item.get("incoming_clip_id")
+            if incoming_id is not None and incoming_id not in clip_ids:
+                continue
+            normalized.append(item)
+        document["transitions"] = normalized
 
     def _normalize_and_validate(
         self,
@@ -2778,22 +3584,29 @@ class TimelineService:
         }:
             raise DomainError("TIMELINE_INVALID", "Timeline 画布不符合 v1")
         tracks = document.get("tracks")
-        # 尾部固定：V1(主视频) → A1(音频)；C1(字幕) 可删，存在时位于 V1 之前。
-        if (
-            not isinstance(tracks, list)
-            or len(tracks) < 2
-            or [track.get("id") for track in tracks[-2:]] != [MAIN_TRACK_ID, AUDIO_TRACK_ID]
-            or [track.get("kind") for track in tracks[-2:]] != ["video", "audio"]
-        ):
+        # 固定顺序：视觉/文本动态轨、可选 C1、V1、A1、动态音频轨。
+        if not isinstance(tracks, list) or len(tracks) < 2:
             raise DomainError("TIMELINE_INVALID", "Timeline 轨道结构不合法")
         track_ids = [track.get("id") for track in tracks]
+        try:
+            video_index = track_ids.index(MAIN_TRACK_ID)
+            audio_index = track_ids.index(AUDIO_TRACK_ID)
+        except ValueError as exc:
+            raise DomainError("TIMELINE_INVALID", "Timeline 轨道结构不合法") from exc
+        caption_index = track_ids.index(CAPTION_TRACK_ID) if CAPTION_TRACK_ID in track_ids else -1
+        if (
+            audio_index != video_index + 1
+            or tracks[video_index].get("kind") != "video"
+            or tracks[audio_index].get("kind") != "audio"
+            or (caption_index != -1 and caption_index != video_index - 1)
+            or any(track.get("kind") not in ("video", "text") for track in tracks[:video_index])
+            or any(track.get("kind") != "audio" for track in tracks[audio_index:])
+        ):
+            raise DomainError("TIMELINE_INVALID", "Timeline 轨道结构不合法")
         if (
             len(set(track_ids)) != len(track_ids)
             or any(not isinstance(track_id, str) or not track_id for track_id in track_ids)
-            or any(
-                track_id in {MAIN_TRACK_ID, AUDIO_TRACK_ID}
-                for track_id in track_ids[:-2]
-            )
+            or any(track_id in {MAIN_TRACK_ID, AUDIO_TRACK_ID} for track_id in track_ids if track_ids.count(track_id) > 1)
         ):
             raise DomainError("TIMELINE_INVALID", "Timeline 轨道结构不合法")
         for track in tracks:
@@ -2802,13 +3615,17 @@ class TimelineService:
             for flag in ("locked", "hidden", "muted", "solo"):
                 if not isinstance(track.get(flag), bool):
                     raise DomainError("TIMELINE_INVALID", "Timeline 轨道标志不合法")
-        for track in tracks[:-3]:
+        for track in tracks:
             track_id = track.get("id")
+            if track_id in {MAIN_TRACK_ID, AUDIO_TRACK_ID, CAPTION_TRACK_ID}:
+                continue
             expected_kind = (
                 "video"
                 if isinstance(track_id, str) and track_id.startswith("V")
                 else "text"
                 if isinstance(track_id, str) and track_id.startswith("T")
+                else "audio"
+                if isinstance(track_id, str) and track_id.startswith("A")
                 else None
             )
             if expected_kind is None or track.get("kind") != expected_kind:
@@ -2837,6 +3654,10 @@ class TimelineService:
                     "timeline_end_us",
                     "layout",
                     "audio",
+                    "picture_fade_in_us",
+                    "picture_fade_out_us",
+                    "move_in",
+                    "move_out",
                     "speed_milli",
                     "reverse_playback",
                     "keyframes",
@@ -2853,6 +3674,10 @@ class TimelineService:
                     "mask",
                     "keying",
                     "link_group_id",
+                    "picture_fade_in_us",
+                    "picture_fade_out_us",
+                    "move_in",
+                    "move_out",
                 },
             )
             if "link_group_id" in clip and (
@@ -2863,6 +3688,11 @@ class TimelineService:
             if clip_id in clip_ids:
                 raise DomainError("TIMELINE_INVALID", "Clip ID 重复")
             clip_ids.add(clip_id)
+            timeline_start = _integer(clip.get("timeline_start_us"), "时间线开始时间不合法")
+            timeline_end = _integer(clip.get("timeline_end_us"), "时间线结束时间不合法")
+            if timeline_start < 0 or not timeline_start < timeline_end <= MAX_IMAGE_US:
+                raise DomainError("TIMELINE_INVALID", "Clip 时间范围超出安全整数范围")
+            _normalize_transition_facts(clip)
             asset = self._asset(
                 db,
                 document["project_id"],
@@ -2917,7 +3747,7 @@ class TimelineService:
             reversed_flag = clip.get("reverse_playback", False)
             if not isinstance(reversed_flag, bool):
                 raise DomainError("TIMELINE_INVALID", "Clip 倒放状态不合法")
-            duration = clip["timeline_end_us"] - clip["timeline_start_us"]
+            duration = timeline_end - timeline_start
             keyframes = clip.get("keyframes")
             if keyframes is not None:
                 if (
@@ -2986,13 +3816,17 @@ class TimelineService:
             if clip["asset_kind"] == "video":
                 media = json_loads(asset["media_info_json"]) if asset["media_info_json"] else {}
                 asset_duration = media.get("duration_us")
+                duration_known = asset_duration is not None and asset_duration != 0
                 start, end = clip.get("source_start_us"), clip.get("source_end_us")
                 if (
-                    not isinstance(start, int)
-                    or not isinstance(end, int)
-                    or not isinstance(asset_duration, int)
+                    isinstance(start, bool) or not isinstance(start, int)
+                    or isinstance(end, bool) or not isinstance(end, int)
+                    or isinstance(asset_duration, bool)
+                    or (asset_duration is not None and not isinstance(asset_duration, int))
+                    or (duration_known and asset_duration < MIN_VIDEO_US)
                     or start < 0
-                    or end > asset_duration
+                    or end > MAX_IMAGE_US
+                    or (duration_known and end > asset_duration)
                     or end - start < MIN_VIDEO_US
                     or duration != _clip_timeline_duration_us(start, end, speed)
                 ):
@@ -3000,13 +3834,17 @@ class TimelineService:
             elif clip["asset_kind"] == "audio":
                 media = json_loads(asset["media_info_json"]) if asset["media_info_json"] else {}
                 asset_duration = media.get("duration_us")
+                duration_known = asset_duration is not None and asset_duration != 0
                 start, end = clip.get("source_start_us"), clip.get("source_end_us")
                 if (
-                    not isinstance(start, int)
-                    or not isinstance(end, int)
-                    or not isinstance(asset_duration, int)
+                    isinstance(start, bool) or not isinstance(start, int)
+                    or isinstance(end, bool) or not isinstance(end, int)
+                    or isinstance(asset_duration, bool)
+                    or (asset_duration is not None and not isinstance(asset_duration, int))
+                    or (duration_known and asset_duration < MIN_VIDEO_US)
                     or start < 0
-                    or end > asset_duration
+                    or end > MAX_IMAGE_US
+                    or (duration_known and end > asset_duration)
                     or end - start < MIN_VIDEO_US
                     or duration != _clip_timeline_duration_us(start, end, speed)
                     or not audio["enabled"]
@@ -3060,6 +3898,8 @@ class TimelineService:
             caption_ids.add(caption_id)
             start = _integer(caption.get("start_us"), "字幕开始时间不合法")
             end = _integer(caption.get("end_us"), "字幕结束时间不合法")
+            if start < 0 or end > MAX_IMAGE_US:
+                raise DomainError("TIMELINE_INVALID", "字幕时间超出安全整数范围")
             # 手工/导入字幕（origin=user）允许超出素材总时长（剪映式：文本可
             # 先于素材存在，靠预览画布显示）；转录字幕仍约束在素材范围内。
             duration_limit = total_duration if caption.get("origin") == "transcript" else None
@@ -3124,7 +3964,8 @@ class TimelineService:
                 raise DomainError("TIMELINE_INVALID", "Timeline 转场不合法")
             _exact_keys(
                 transition,
-                {"transition_id", "after_clip_id", "kind", "duration_us"},
+                {"transition_id", "after_clip_id", "incoming_clip_id", "kind", "duration_us"},
+                optional={"incoming_clip_id"},
             )
             transition_id = _identifier(transition.get("transition_id"), "转场 ID 不合法")
             if transition_id in transition_ids:
@@ -3138,27 +3979,27 @@ class TimelineService:
             ):
                 raise DomainError("TIMELINE_INVALID", "转场锚点片段不合法或重复")
             transition_anchors.add(anchor_id)
+            incoming_id = transition.get("incoming_clip_id")
+            if incoming_id is not None and (
+                not isinstance(incoming_id, str)
+                or incoming_id not in clip_ids
+                or incoming_id == anchor_id
+            ):
+                raise DomainError("TIMELINE_INVALID", "转场后继片段身份不合法")
             _enum(transition.get("kind"), TRANSITION_KINDS, "转场类型不合法")
             duration = _integer(transition.get("duration_us"), "转场时长不合法")
             if not MIN_TRANSITION_US <= duration <= MAX_TRANSITION_US:
                 raise DomainError("TIMELINE_INVALID", "转场时长需为 0.1-2 秒")
-        # 引用完整性：锚点必须是可转场片段且同轨时间序中存在后继。
-        # 不要求首尾相接：留有空隙的转场休眠（渲染/UI 跳过），重新相接后恢复。
-        # P231：同轨邻接（V1 轨 = 同轨特例）。
-        by_track: dict[str, list] = {}
-        for c in clips:
-            by_track.setdefault(c["track_id"], []).append(c)
-        for transition in transitions:
-            anchor = next((c for c in clips if c["clip_id"] == transition["after_clip_id"]), None)
-            if anchor is None or anchor["asset_kind"] not in TRANSITIONABLE_KINDS:
-                raise DomainError("TIMELINE_INVALID", "转场锚点必须是视频/图片片段")
-            same_track = sorted(
-                by_track.get(anchor["track_id"], []),
-                key=lambda c: c["timeline_start_us"],
-            )
-            index = same_track.index(anchor)
-            if index + 1 >= len(same_track) or same_track[index + 1]["asset_kind"] not in TRANSITIONABLE_KINDS:
-                raise DomainError("TIMELINE_INVALID", "转场后继必须是视频/图片片段")
+            clip_by_id = {clip["clip_id"]: clip for clip in clips}
+            anchor = clip_by_id.get(anchor_id)
+            incoming = clip_by_id.get(incoming_id) if incoming_id is not None else None
+            if anchor is None or anchor.get("asset_kind") not in TRANSITIONABLE_KINDS:
+                raise DomainError("TIMELINE_INVALID", "转场来源片段必须是视频/图片")
+            if incoming is not None and incoming.get("asset_kind") not in TRANSITIONABLE_KINDS:
+                raise DomainError("TIMELINE_INVALID", "转场后继片段必须是视频/图片")
+        # Compute exactly once from the normalized final layout. Inactive source-derived
+        # pairs remain dormant; compatibility effects are validated by fixed identity only.
+        _project_active_transitions(document)
 
     def _normalize_timing(self, document: dict[str, Any], old_starts: dict[str, int]) -> None:
         clips = document.get("clips")
@@ -3458,15 +4299,30 @@ def _float_value(value: Any, message: str) -> float:
 
 
 def _split_fade_pair(left: dict[str, Any], right: dict[str, Any]) -> None:
-    """拆分后：淡入属于前半段、淡出属于后半段。
+    """Keep incoming edge facts on the left half and outgoing facts on the right.
 
-    deepcopy 会让两半都带齐两个淡变——那会在切点处凭空多出两次渐变
-    （前半淡出 + 后半淡入），与用户看到的"片段开头淡入、结尾淡出"不符。
+    A split must not synthesize fades at the internal cut. Motion-in is incoming;
+    motion-out is outgoing, matching the fade ownership.
     """
-    for clip, drop in ((left, "fade_out_us"), (right, "fade_in_us")):
-        audio = clip.get("audio")
-        if isinstance(audio, dict):
-            audio.pop(drop, None)
+    audio_left = left.get("audio")
+    if isinstance(audio_left, dict):
+        audio_left.pop("fade_out_us", None)
+    audio_right = right.get("audio")
+    if isinstance(audio_right, dict):
+        audio_right.pop("fade_in_us", None)
+    left.pop("picture_fade_out_us", None)
+    right.pop("picture_fade_in_us", None)
+    left.pop("move_out", None)
+    right.pop("move_in", None)
+
+
+def _remap_transition_outgoing_after_split(
+    document: dict[str, Any], old_clip_id: str, right_clip_id: str
+) -> None:
+    """The outgoing edge belongs to the right half; incoming identity stays left."""
+    for transition in document.get("transitions", []):
+        if isinstance(transition, dict) and transition.get("after_clip_id") == old_clip_id:
+            transition["after_clip_id"] = right_clip_id
 
 
 def _fade_carried(
@@ -3514,6 +4370,138 @@ def _caption_text(value: Any) -> str:
     if any(unicodedata.category(char) in {"Cc", "Cs"} for char in value):
         raise DomainError("TIMELINE_INVALID", "字幕文本包含非法控制字符")
     return value
+
+
+def _validate_duplicate_clip_snapshot(snapshot: Any, source_id: str) -> dict[str, Any]:
+    if not isinstance(snapshot, dict):
+        raise DomainError("TIMELINE_INVALID", "Clip 剪贴板快照必须是对象")
+    optional = {
+        "speed_milli", "reverse_playback", "keyframes", "transform", "mask", "keying",
+        "link_group_id",
+    }
+    _exact_keys(
+        snapshot,
+        {
+            "clip_id", "track_id", "order_index", "asset_id", "asset_kind",
+            "source_start_us", "source_end_us", "timeline_start_us", "timeline_end_us",
+            "layout", "audio",
+        } | optional,
+        optional=optional,
+    )
+    if _identifier(snapshot.get("clip_id"), "Clip 快照 ID 不合法") != source_id:
+        raise DomainError("TIMELINE_INVALID", "Clip 快照 ID 与来源不匹配")
+    _identifier(snapshot.get("track_id"), "Clip 快照轨道 ID 不合法")
+    _identifier(snapshot.get("asset_id"), "Clip 快照素材 ID 不合法")
+    order_index = snapshot.get("order_index")
+    if isinstance(order_index, bool) or not isinstance(order_index, int) or order_index < 0:
+        raise DomainError("TIMELINE_INVALID", "Clip 快照顺序不合法")
+    asset_kind = _enum(snapshot.get("asset_kind"), {"video", "audio", "image"}, "Clip 快照素材类型不合法")
+    timeline_start = _integer(snapshot.get("timeline_start_us"), "Clip 快照时间不合法")
+    timeline_end = _integer(snapshot.get("timeline_end_us"), "Clip 快照时间不合法")
+    if timeline_start < 0 or not timeline_start < timeline_end <= MAX_IMAGE_US:
+        raise DomainError("TIMELINE_INVALID", "Clip 快照时间范围不合法")
+    duration = timeline_end - timeline_start
+    source_start, source_end = snapshot.get("source_start_us"), snapshot.get("source_end_us")
+    if asset_kind == "image":
+        if source_start is not None or source_end is not None or duration < MIN_IMAGE_US:
+            raise DomainError("TIMELINE_INVALID", "图片 Clip 快照源区间不合法")
+    else:
+        if (
+            isinstance(source_start, bool) or not isinstance(source_start, int)
+            or isinstance(source_end, bool) or not isinstance(source_end, int)
+            or not 0 <= source_start < source_end <= MAX_IMAGE_US
+            or source_end - source_start < MIN_VIDEO_US
+        ):
+            raise DomainError("TIMELINE_INVALID", "视频/音频 Clip 快照源区间不合法")
+    _enum(snapshot.get("layout"), LAYOUTS, "Clip 快照布局不合法")
+    audio = snapshot.get("audio")
+    if not isinstance(audio, dict):
+        raise DomainError("TIMELINE_INVALID", "Clip 快照音频设置不合法")
+    _exact_keys(audio, {"enabled", "gain_db", "fade_in_us", "fade_out_us"}, optional={"fade_in_us", "fade_out_us"})
+    if not isinstance(audio.get("enabled"), bool):
+        raise DomainError("TIMELINE_INVALID", "Clip 快照音频状态不合法")
+    gain = _float_value(audio.get("gain_db"), "Clip 快照音量不合法")
+    if not -60 <= gain <= 12:
+        raise DomainError("TIMELINE_INVALID", "Clip 快照音量不合法")
+    for field in ("fade_in_us", "fade_out_us"):
+        if field in audio:
+            _fade_value(audio[field], "Clip 快照淡变时长不合法")
+    speed = _clip_speed(snapshot)
+    if not MIN_SPEED_MILLI <= speed <= MAX_SPEED_MILLI:
+        raise DomainError("TIMELINE_INVALID", "Clip 快照速度不合法")
+    reverse = snapshot.get("reverse_playback", False)
+    if not isinstance(reverse, bool) or (reverse and asset_kind != "video"):
+        raise DomainError("TIMELINE_INVALID", "Clip 快照倒放状态不合法")
+    if asset_kind in ("video", "audio"):
+        if duration != _clip_timeline_duration_us(source_start, source_end, speed):
+            raise DomainError("TIMELINE_INVALID", "Clip 快照源范围与时间线时长不匹配")
+        if asset_kind == "audio" and not audio["enabled"]:
+            raise DomainError("TIMELINE_INVALID", "音频 Clip 快照必须启用音频")
+    elif audio["enabled"] or "speed_milli" in snapshot and speed != 1000 or reverse:
+        raise DomainError("TIMELINE_INVALID", "图片 Clip 快照包含不支持的音频或速度状态")
+    if "keyframes" in snapshot:
+        keyframes = snapshot["keyframes"]
+        if not isinstance(keyframes, dict) or not keyframes or set(keyframes) - set(KEYFRAME_PROPERTIES):
+            raise DomainError("TIMELINE_INVALID", "Clip 快照关键帧结构不合法")
+        for property_name, track in keyframes.items():
+            if not isinstance(track, dict):
+                raise DomainError("TIMELINE_INVALID", "Clip 快照关键帧结构不合法")
+            _validate_keyframe_track(track.get("frames"), property_name, duration)
+    for field in ("transform", "mask", "keying"):
+        if field in snapshot and not isinstance(snapshot[field], dict):
+            raise DomainError("TIMELINE_INVALID", f"Clip 快照 {field} 字段不合法")
+    if "link_group_id" in snapshot:
+        link_id = snapshot["link_group_id"]
+        if not isinstance(link_id, str) or not link_id:
+            raise DomainError("TIMELINE_INVALID", "Clip 快照链接组 ID 不合法")
+    return snapshot
+
+
+def _validate_duplicate_caption_snapshot(snapshot: Any, source_id: str) -> dict[str, Any]:
+    if not isinstance(snapshot, dict):
+        raise DomainError("TIMELINE_INVALID", "字幕剪贴板快照必须是对象")
+    _exact_keys(
+        snapshot,
+        {
+            "caption_id", "track_id", "source_clip_id", "start_us", "end_us", "text",
+            "preset_id", "origin", "edited", "source_segment_ids", "style_override",
+        },
+        optional={"style_override"},
+    )
+    if _identifier(snapshot.get("caption_id"), "字幕快照 ID 不合法") != source_id:
+        raise DomainError("TIMELINE_INVALID", "字幕快照 ID 与来源不匹配")
+    if snapshot.get("track_id") != CAPTION_TRACK_ID:
+        raise DomainError("TIMELINE_INVALID", "字幕快照轨道不合法")
+    source_clip_id = snapshot.get("source_clip_id")
+    if source_clip_id is not None:
+        _identifier(source_clip_id, "字幕快照来源 Clip ID 不合法")
+    start = _integer(snapshot.get("start_us"), "字幕快照时间不合法")
+    end = _integer(snapshot.get("end_us"), "字幕快照时间不合法")
+    if start < 0 or not start < end <= MAX_IMAGE_US or end - start < MIN_CAPTION_US:
+        raise DomainError("TIMELINE_INVALID", "字幕快照时间范围不合法")
+    _caption_text(snapshot.get("text"))
+    _enum(snapshot.get("preset_id"), CAPTION_PRESETS, "字幕快照预设不合法")
+    origin = snapshot.get("origin")
+    if (
+        not isinstance(origin, str)
+        or origin not in {"transcript", "user"}
+        or not isinstance(snapshot.get("edited"), bool)
+    ):
+        raise DomainError("TIMELINE_INVALID", "字幕快照来源不合法")
+    segment_ids = snapshot.get("source_segment_ids")
+    if (
+        not isinstance(segment_ids, list)
+        or any(not isinstance(value, str) for value in segment_ids)
+        or len(set(segment_ids)) != len(segment_ids)
+        or origin == "transcript" and (source_clip_id is None or not segment_ids)
+        or origin == "user" and (source_clip_id is not None or segment_ids)
+    ):
+        raise DomainError("TIMELINE_INVALID", "字幕快照来源引用不合法")
+    for segment_id in segment_ids:
+        _identifier(segment_id, "字幕快照 Segment ID 不合法")
+    if "style_override" in snapshot:
+        _validate_caption_style(snapshot["style_override"])
+    return snapshot
 
 
 def _clip(document: dict[str, Any], clip_id: Any) -> dict[str, Any]:

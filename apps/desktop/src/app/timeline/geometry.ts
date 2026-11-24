@@ -6,15 +6,24 @@
  * canvas element (x already excludes the left header gutter only via the
  * view state's headerWidth).
  */
-import type { TimelineClip, TimelineClipId, TimelineTrack, TimelineTransition, TimelineTransitionId } from "@aivideo/contracts";
+import type { ActiveTimelineTransition, TimelineClip, TimelineClipId, TimelineTrack, TimelineTransition, TimelineTransitionId } from "@aivideo/contracts";
 import type {
+  ActiveTransitionRenderRect,
   ClipRenderRect,
   MarqueeRect,
+  TickMark,
   TimelineViewState,
   TransitionRenderRect,
   TrimEdge,
 } from "./types.js";
-import { ZOOM_MAX_PPS, ZOOM_MIN_PPS } from "./types.js";
+import {
+  TIMELINE_EMPTY_VIEW_US,
+  TIMELINE_MAX_VIEW_FACTOR,
+  TIMELINE_MAX_VIEW_FLOOR_US,
+  TIMELINE_MIN_VIEW_US,
+  TIMELINE_ZOOM_DEFAULT,
+  TIMELINE_ZOOM_STEP,
+} from "./types.js";
 
 /** Minimum clip duration enforced by the backend/contracts (µs). */
 export const MIN_CLIP_US = 100_000;
@@ -24,20 +33,66 @@ export const SNAP_PX = 8;
  *  T11 参照 Timeline.tsx:790-791：trimHit = min(8, max(2, w/4))——窄片段收缩，宽片段更易命中。 */
 export const TRIM_HANDLE_PX = 6;
 export function trimHitPx(clipWidthPx: number): number {
-  return Math.min(8, Math.max(2, Math.round(clipWidthPx / 4)));
+  return Math.min(8, Math.max(2, Math.floor(clipWidthPx / 4)));
 }
 /** Height of the bottom scrollbar strip drawn on the canvas. */
 // 横向滚动条高（2026-11-16 对齐 OpenFilm H_SCROLL_H = 10，Timeline.tsx:202）；原 8。
 export const SCROLLBAR_HEIGHT_PX = 10;
 /** Pointer distance from the canvas edge that triggers drag auto-scroll. */
-export const EDGE_AUTOSCROLL_ZONE_PX = 32;
-/** Drag auto-scroll speed cap, in pixels per frame. */
-export const EDGE_AUTOSCROLL_MAX_STEP_PX = 14;
+export const EDGE_AUTOSCROLL_ZONE_PX = 48;
+/** OpenFilm scrolls 6–24 CSS px per frame as the pointer moves into the edge. */
+export const EDGE_AUTOSCROLL_MIN_STEP_PX = 6;
+export const EDGE_AUTOSCROLL_MAX_STEP_PX = 24;
+
+/** Convert a captured screen-space pointer into timeline motion, including scroll accumulated mid-gesture. */
+export function timelineGestureDeltaUs(
+  pointerX: number,
+  startX: number,
+  scrollX: number,
+  startScrollX: number,
+  pixelsPerSecond: number,
+): number {
+  if (!Number.isFinite(pixelsPerSecond) || pixelsPerSecond <= 0) return 0;
+  return ((pointerX - startX + scrollX - startScrollX) / pixelsPerSecond) * 1_000_000;
+}
 
 /** Clip duration on the timeline (µs). Positions are authoritative under
  * free positioning, so the timeline span (not the source span) is canonical. */
 export function clipDuration(clip: TimelineClip): number {
   return clip.timeline_end_us - clip.timeline_start_us;
+}
+
+/**
+ * Align a clip's painted horizontal bounds to OpenFilm's content-pixel grid.
+ * Rounding before subtracting scroll keeps the same edge and width through
+ * fractional scroll positions. Hit testing and edit planning keep the original
+ * fractional geometry; the one-pixel trailing inset is paint-only. The Canvas
+ * body stays on integer rows for raster parity; the DOM label overlay keeps
+ * OpenFilm's separate half-pixel title inset.
+ */
+export function snapClipPaintRect(rect: ClipRenderRect, scrollX = 0): ClipRenderRect {
+  const contentLeft = rect.x + scrollX;
+  const x = Math.round(contentLeft) - scrollX;
+  const right = Math.round(contentLeft + rect.width) - scrollX;
+  return { ...rect, x, y: Math.ceil(rect.y), width: Math.max(2, right - x - 1), height: Math.max(4, rect.height) };
+}
+
+/** Keep a long clip's title inside the visible timeline head, as OpenFilm's
+ *  `data-pin` / `data-pin-max` label pair does while the clip is scrolled. */
+export function clipLabelPinShift(clipX: number, clipWidth: number, contentLeft: number): number {
+  return Math.min(Math.max(0, contentLeft - clipX), Math.max(0, clipWidth - 48));
+}
+
+/** Horizontal wheel input follows OpenFilm: any deltaX wins; Shift maps deltaY. */
+export function timelineWheelPanDelta(
+  deltaX: number,
+  deltaY: number,
+  deltaMode: number,
+  shiftKey: boolean,
+): number {
+  const units = deltaMode === 1 ? 16 : deltaMode === 2 ? 400 : 1;
+  const horizontal = deltaX !== 0 ? deltaX : shiftKey ? deltaY : 0;
+  return horizontal * units;
 }
 
 /**
@@ -53,11 +108,103 @@ export function xToTime(x: number, view: TimelineViewState): number {
   return Math.max(0, ((x + view.scrollX - view.headerWidth) / view.pixelsPerSecond) * 1_000_000);
 }
 
+/** Snap timeline positions to the nearest project frame using its rational frame rate. */
+export function snapTimeToFrame(timeUs: number, fpsNum: number, fpsDen: number): number {
+  const numerator = Number.isFinite(fpsNum) && fpsNum > 0 ? fpsNum : 30;
+  const denominator = Number.isFinite(fpsDen) && fpsDen > 0 ? fpsDen : 1;
+  const frame = Math.max(0, Math.round((Math.max(0, timeUs) * numerator) / (1_000_000 * denominator)));
+  return Math.round((frame * 1_000_000 * denominator) / numerator);
+}
+
 /** 一条轨道的像素布局（自上而下，顺序 = document.tracks 数组顺序）。 */
 export interface TrackRowLayout {
   track: TimelineTrack;
   y: number;
   height: number;
+}
+
+export type TimelineDropBand = "above" | "body" | "below";
+export type TimelineClipDropZone = "replace" | "above" | "below" | "before" | "after";
+
+export interface TimelineDropHit {
+  /** Index in the rendered row list; -1 and rows.length mean outside the track stack. */
+  rowIndex: number;
+  trackId: string | null;
+  band: TimelineDropBand;
+  clipId: TimelineClipId | null;
+  zone: TimelineClipDropZone | null;
+}
+
+/** Clips that OpenFilm keeps out of the destination hit test for a move gesture. */
+export function timelineDragDropExcludedClipIds(
+  movingClipIds: readonly string[],
+  linkedRiderClipIds: readonly string[],
+  linkageEnabled: boolean,
+): Set<string> {
+  return new Set(linkageEnabled ? [...movingClipIds, ...linkedRiderClipIds] : movingClipIds);
+}
+
+/** The narrow lane edge used by OpenFilm to create a lane above/below a row. */
+export function trackDropEdgePx(height: number): number {
+  return Math.min(4, height / 6);
+}
+
+/** Resolve the track and clip zone directly under the pointer, including row gaps and outer drop bands. */
+export function timelineDropHit(
+  x: number,
+  y: number,
+  rows: readonly TrackRowLayout[],
+  clipRects: readonly ClipRenderRect[],
+  excludedClipIds: ReadonlySet<string> = new Set(),
+): TimelineDropHit {
+  if (rows.length === 0 || y < rows[0]!.y) {
+    return { rowIndex: -1, trackId: null, band: "above", clipId: null, zone: null };
+  }
+
+  let rowIndex = rows.length;
+  let band: TimelineDropBand = "below";
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index]!;
+    const next = rows[index + 1];
+    if (y >= row.y && y < row.y + row.height) {
+      rowIndex = index;
+      const within = y - row.y;
+      const edge = trackDropEdgePx(row.height);
+      band = within < edge ? "above" : within >= row.height - edge ? "below" : "body";
+      break;
+    }
+    if (next && y >= row.y + row.height && y < next.y) {
+      rowIndex = index + 1;
+      band = "above";
+      break;
+    }
+  }
+
+  const row = rows[rowIndex];
+  if (!row || band !== "body") {
+    return { rowIndex, trackId: row?.track.id ?? null, band, clipId: null, zone: null };
+  }
+
+  const hit = clipRects.find((rect) =>
+    rect.clip.track_id === row.track.id &&
+    !excludedClipIds.has(rect.clip.clip_id) &&
+    x >= rect.x && x < rect.x + rect.width &&
+    y >= rect.y && y < rect.y + rect.height,
+  );
+  if (!hit) return { rowIndex, trackId: row.track.id, band, clipId: null, zone: null };
+
+  const localX = x - hit.x;
+  const localY = y - hit.y;
+  const horizontalEdge = Math.min(12, hit.width / 4);
+  let zone: TimelineClipDropZone;
+  if (localX < horizontalEdge) zone = "before";
+  else if (localX >= hit.width - horizontalEdge) zone = "after";
+  else {
+    const verticalEdge = trackDropEdgePx(hit.height);
+    zone = localY < verticalEdge ? "above" : localY >= hit.height - verticalEdge ? "below" : "replace";
+  }
+  const clipBand = zone === "above" ? "above" : zone === "below" ? "below" : "body";
+  return { rowIndex, trackId: row.track.id, band: clipBand, clipId: hit.clip.clip_id, zone };
 }
 
 /**
@@ -82,6 +229,11 @@ export const TRACK_VIEW_PAD = 10;
    主轨比其他轨高一档；覆盖轨是矮的。 */
 export const MAIN_TRACK_H = 68;
 export const OVERLAY_TRACK_H = 28;
+export const TRACK_SIZES = {
+  small: { visual: 36, audio: 30 },
+  medium: { visual: 52, audio: 42 },
+  large: { visual: 96, audio: 80 },
+} as const;
 /* T4 参照 Timeline.tsx:311,323-325：字幕/文本轨窄行 */
 export const CAPTION_ROW_H = 24;
 /* T5 参照 Timeline.tsx:1239：标记行 16px 浮层 + 2px 呼吸 = 首行之上至少让出 18px */
@@ -111,15 +263,15 @@ export function computeTrackRows(
           : Math.max(OVERLAY_TRACK_H, rowHeight - 4);
     const override = trackHeightOverrides[track.id];
     if (!Number.isFinite(override)) return defaultHeight;
-    const minimum = track.id === "V1" ? 64 : 28;
-    return Math.max(minimum, Math.min(160, Math.round(override)));
+    return Math.max(28, Math.min(160, Math.round(override)));
   });
   const tracksH = heights.reduce((sum, h) => sum + h, 0) + Math.max(0, tracks.length - 1) * TRACK_GAP;
   const padTop =
     viewportHeight === undefined
       ? 0
       // T5 参照 Timeline.tsx:1239：标记行 16px 浮在首行上方，padTop 至少让出 18px
-      : Math.max(MARKER_ROW_PAD, Math.floor((viewportHeight - tracksH) / 2));
+      // The measured OpenFilm row surface sits 1 CSS px below the prior Vortex baseline.
+      : Math.max(MARKER_ROW_PAD, Math.floor((viewportHeight - tracksH) / 2)) + 1;
   let y = rulerHeight + padTop;
   return tracks.map((track, index) => {
     const height = heights[index];
@@ -207,16 +359,14 @@ export function computeTransitionRects(
     if (list) list.push(clip);
     else byTrack.set(clip.track_id, [clip]);
   }
-  const flushAnchorIds = new Set<string>();
-  const anchorRowId = new Map<string, string>();
-  for (const [trackId, trackClips] of byTrack) {
+  const actualIncomingByOutgoing = new Map<string, TimelineClip>();
+  for (const trackClips of byTrack.values()) {
     const sorted = [...trackClips].sort((a, b) => a.timeline_start_us - b.timeline_start_us);
     for (let index = 0; index < sorted.length - 1; index += 1) {
       const left = sorted[index];
       const right = sorted[index + 1];
       if (transitionable(left) && transitionable(right) && right.timeline_start_us === left.timeline_end_us) {
-        flushAnchorIds.add(left.clip_id);
-        anchorRowId.set(left.clip_id, trackId);
+        actualIncomingByOutgoing.set(left.clip_id, right);
       }
     }
   }
@@ -227,11 +377,15 @@ export function computeTransitionRects(
   const endById = new Map(clips.map((clip) => [clip.clip_id, clip.timeline_end_us]));
   return transitions
     .map((transition) => {
-      if (!flushAnchorIds.has(transition.after_clip_id)) return null;
+      // Compatibility markers are tied to their original pair. Missing or
+      // stale incoming identities stay dormant; never rebind to a new successor.
+      if (!transition.incoming_clip_id || actualIncomingByOutgoing.get(transition.after_clip_id)?.clip_id !== transition.incoming_clip_id) return null;
       const anchorEndUs = endById.get(transition.after_clip_id);
       if (anchorEndUs === undefined) return null;
       // P231：转场标记钉在锚点所属轨道行（不再固定 V1 行）。
-      const { y: rowY, height: rowHeight } = rowOfTrack(anchorRowId.get(transition.after_clip_id) ?? "V1");
+      const anchor = clips.find(clip => clip.clip_id === transition.after_clip_id);
+      if (!anchor) return null;
+      const { y: rowY, height: rowHeight } = rowOfTrack(anchor.track_id);
       const centerX = timeToX(anchorEndUs, view);
       const width = Math.max(
         6,
@@ -246,6 +400,51 @@ export function computeTransitionRects(
       };
     })
     .filter((rect): rect is TransitionRenderRect => rect !== null);
+}
+
+/** Place Core's already-paired source-fact transition projections on their `on_clip_id` row. */
+export function computeActiveTransitionRects(
+  transitions: readonly ActiveTimelineTransition[],
+  clips: readonly TimelineClip[],
+  rows: TrackRowLayout[],
+  view: TimelineViewState,
+): ActiveTransitionRenderRect[] {
+  const clipsById = new Map(clips.map(clip => [clip.clip_id, clip]));
+  const rowsByTrack = new Map(rows.map(row => [row.track.id, row]));
+  return transitions.flatMap(transition => {
+    const onClip = clipsById.get(transition.on_clip_id);
+    if (!onClip || !Number.isFinite(transition.start_us) || !Number.isFinite(transition.end_us) || transition.end_us <= transition.start_us) return [];
+    const row = rowsByTrack.get(onClip.track_id);
+    if (!row) return [];
+    const x1 = timeToX(transition.start_us, view);
+    const x2 = timeToX(transition.end_us, view);
+    return [{
+      x: x1,
+      y: row.y,
+      width: Math.max(10, x2 - x1),
+      height: row.height,
+      transition,
+      // White dips need Core's trusted page-frame role. Move/rest resize needs
+      // OpenFilm's paired head/rest planner; audio crossfades use audio facts.
+      // Only the source-fact edits implemented by TimelineCanvas expose edges.
+      editable: transition.kind === "dissolve" || transition.kind === "dip-black",
+    }];
+  });
+}
+
+/** Active source-fact transition hit test. This returns only an active transition id. */
+export function hitTestActiveTransitions(
+  x: number,
+  y: number,
+  transitionRects: readonly ActiveTransitionRenderRect[],
+): ActiveTimelineTransition["transition_id"] | null {
+  for (let index = transitionRects.length - 1; index >= 0; index -= 1) {
+    const rect = transitionRects[index]!;
+    if (x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height) {
+      return rect.transition.transition_id;
+    }
+  }
+  return null;
 }
 
 /** Top-most transition marker under (x, y), or null. Checked before clips. */
@@ -300,7 +499,7 @@ export function hitTestTransitionGap(
 
 /**
  * Detect whether (x, y) lands on a trimmable edge of a clip.
- * Only clips with a source range (video/audio) are trimmable; images are not.
+ * Video/audio clips trim their source window; still images trim their timeline duration.
  */
 export function hitTestTrimHandle(
   x: number,
@@ -308,8 +507,11 @@ export function hitTestTrimHandle(
   clipRects: ClipRenderRect[],
 ): { clipId: TimelineClipId; edge: TrimEdge } | null {
   for (const rect of clipRects) {
-    const trimmable = rect.clip.asset_kind === "video" || rect.clip.asset_kind === "audio";
+    const trimmable = rect.clip.asset_kind === "video" || rect.clip.asset_kind === "audio" || rect.clip.asset_kind === "image";
     if (!trimmable) continue;
+    // OpenFilm only exposes edge handles when a block is wider than 6px. On
+    // narrower clips the body remains a move/select target.
+    if (rect.width <= 6) continue;
     const withinY = y >= rect.y && y <= rect.y + rect.height;
     if (!withinY) continue;
     // T11 参照 Timeline.tsx:790-791,863-871：命中带宽随片段宽自适应（窄片段收缩防重叠）。
@@ -349,6 +551,31 @@ export function snapCandidates(
   return [...times].sort((a, b) => a - b);
 }
 
+/** Build the cached move-snap list in OpenFilm's priority order: origin, playhead slot, markers, then clip edges. */
+export function orderedMoveSnapTargets(
+  clipRects: readonly ClipRenderRect[],
+  markerTimesUs: readonly number[],
+  excludeClipIds?: ReadonlySet<TimelineClipId>,
+): { times: number[]; orderByTime: ReadonlyMap<number, number> } {
+  const orderByTime = new Map<number, number>([[0, 0]]);
+  let order = 2; // the live playhead occupies priority 1 and is supplied per pointer frame
+  for (const timeUs of markerTimesUs) {
+    if (!orderByTime.has(timeUs)) orderByTime.set(timeUs, order);
+    order += 1;
+  }
+  for (const rect of clipRects) {
+    if (excludeClipIds?.has(rect.clip.clip_id)) continue;
+    for (const timeUs of [rect.clip.timeline_start_us, rect.clip.timeline_end_us]) {
+      if (!orderByTime.has(timeUs)) orderByTime.set(timeUs, order);
+      order += 1;
+    }
+  }
+  return {
+    times: [...orderByTime.keys()].sort((a, b) => a - b),
+    orderByTime,
+  };
+}
+
 /**
  * Snap `valueUs` to the closest candidate within `thresholdUs`.
  * Returns the snapped value, or the original value when nothing is close.
@@ -379,12 +606,55 @@ export function snapResult(
   let snappedTo: number | null = null;
   for (const candidate of candidates) {
     const distance = Math.abs(candidate - valueUs);
-    if (distance <= bestDistance) {
+    // OpenFilm retains the first target when two targets are equally near.
+    if (distance < bestDistance || (distance === bestDistance && snappedTo === null)) {
       bestDistance = distance;
       best = candidate;
       snappedTo = candidate;
     }
   }
+  return { valueUs: best, snappedTo };
+}
+
+/**
+ * Snap against a pre-sorted, unique candidate list in O(log n). `extraCandidateUs`
+ * is for a value that can change during a gesture (the playhead). When an
+ * OpenFilm target order is supplied, exact-distance ties use its original
+ * priority instead of numeric order.
+ */
+export function snapResultSorted(
+  valueUs: number,
+  candidates: readonly number[],
+  thresholdUs: number,
+  extraCandidateUs?: number,
+  targetOrder?: ReadonlyMap<number, number>,
+): { valueUs: number; snappedTo: number | null } {
+  let low = 0;
+  let high = candidates.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (candidates[middle]! < valueUs) low = middle + 1;
+    else high = middle;
+  }
+
+  let best = valueUs;
+  let bestDistance = thresholdUs;
+  let bestOrder = Number.POSITIVE_INFINITY;
+  let snappedTo: number | null = null;
+  const consider = (candidate: number | undefined, extra = false) => {
+    if (candidate === undefined) return;
+    const distance = Math.abs(candidate - valueUs);
+    const order = extra ? 1 : (targetOrder?.get(candidate) ?? Number.POSITIVE_INFINITY);
+    if (distance < bestDistance || (distance === bestDistance && (snappedTo === null || (targetOrder !== undefined && order < bestOrder)))) {
+      bestDistance = distance;
+      bestOrder = order;
+      best = candidate;
+      snappedTo = candidate;
+    }
+  };
+  consider(candidates[low - 1]);
+  consider(candidates[low]);
+  consider(extraCandidateUs, true);
   return { valueUs: best, snappedTo };
 }
 
@@ -452,6 +722,37 @@ export function clipsInRect(
     .map((r) => r.clip.clip_id);
 }
 
+/** OpenFilm's marquee selects blocks intersecting a horizontal time span in
+ *  the swept track rows; it does not require the drawn rectangle to have height. */
+export function clipsInTimelineMarquee(
+  rect: MarqueeRect,
+  clipRects: ClipRenderRect[],
+  rows: TrackRowLayout[],
+): TimelineClipId[] {
+  if (rect.width <= 0) return [];
+  const rowAt = (y: number): number => {
+    for (let index = 0; index < rows.length; index += 1) {
+      const row = rows[index]!;
+      const previous = rows[index - 1];
+      const gapStart = previous ? previous.y + previous.height : row.y;
+      if (y >= gapStart && y < row.y + row.height) return index;
+    }
+    return y < (rows[0]?.y ?? 0) ? -1 : rows.length;
+  };
+  const firstRow = rowAt(rect.y);
+  const lastRow = rowAt(rect.y + rect.height);
+  const fromRow = Math.min(firstRow, lastRow);
+  const toRow = Math.max(firstRow, lastRow);
+  const rowIndex = new Map(rows.map((row, index) => [row.track.id, index]));
+  return clipRects.flatMap((item) => {
+    const index = rowIndex.get(item.clip.track_id);
+    return index !== undefined && index >= fromRow && index <= toRow &&
+      item.x < rect.x + rect.width && item.x + item.width > rect.x
+      ? [item.clip.clip_id]
+      : [];
+  });
+}
+
 /**
  * Compute the visual position of a moved clip during drag.
  * 剪映式拖拽：片段 1:1 跟随鼠标（允许视觉上压过邻居），无吸附无钳制。
@@ -491,9 +792,83 @@ export function clampScrollX(scrollX: number, maxScrollX: number): number {
   return Math.max(0, Math.min(maxScrollX, scrollX));
 }
 
+/** The longest view OpenFilm allows for a project, in microseconds. */
+export function maxTimelineViewUs(totalUs: number): number {
+  return Math.max(Math.max(0, totalUs) * TIMELINE_MAX_VIEW_FACTOR, TIMELINE_MAX_VIEW_FLOOR_US);
+}
+
+/** Relative zoom limits. Empty timelines are fixed at the 18s OpenFilm opening view. */
+export function timelineZoomLimits(totalUs: number): { min: number; max: number } {
+  if (!(totalUs > 0)) return { min: 0.25, max: 0.25 };
+  const basisUs = totalUs;
+  return {
+    min: basisUs / maxTimelineViewUs(totalUs),
+    max: basisUs / TIMELINE_MIN_VIEW_US,
+  };
+}
+
+export function clampTimelineZoom(zoom: number, totalUs: number): number {
+  const { min, max } = timelineZoomLimits(totalUs);
+  return Math.max(min, Math.min(max, Number.isFinite(zoom) ? zoom : TIMELINE_ZOOM_DEFAULT));
+}
+
+export function stepTimelineZoom(zoom: number, totalUs: number, direction: -1 | 1): number {
+  return clampTimelineZoom(zoom * TIMELINE_ZOOM_STEP ** direction, totalUs);
+}
+
+/** Time displayed across the timeline viewport for a relative project zoom. */
+export function timelineViewSpanUs(totalUs: number, zoom: number): number {
+  if (!(totalUs > 0)) return TIMELINE_EMPTY_VIEW_US;
+  return Math.max(TIMELINE_MIN_VIEW_US, Math.min(maxTimelineViewUs(totalUs), totalUs / clampTimelineZoom(zoom, totalUs)));
+}
+
+/** Convert relative zoom to pixels per second. `timeWidthPx` excludes the cover rail. */
+export function timelineZoomToPps(totalUs: number, timeWidthPx: number, zoom: number): number {
+  if (!(timeWidthPx > 0)) return 0;
+  return timeWidthPx * 1_000_000 / timelineViewSpanUs(totalUs, zoom);
+}
+
+/** Inverse of timelineZoomToPps for the current project and viewport width. */
+export function timelinePpsToZoom(totalUs: number, timeWidthPx: number, pps: number): number {
+  if (!(timeWidthPx > 0) || !(pps > 0)) return TIMELINE_ZOOM_DEFAULT;
+  if (!(totalUs > 0)) return TIMELINE_ZOOM_DEFAULT;
+  return clampTimelineZoom(totalUs * pps / (timeWidthPx * 1_000_000), totalUs);
+}
+
+/** Match OpenFilm when the timeline's content span changes: preserve the
+ * visible time scale for edits to an existing timeline, and for a first clip
+ * that fits inside the empty 18s opening view. Long first loads keep the
+ * project-relative default zoom. */
+export function timelineZoomAfterDurationChange(
+  previousTotalUs: number,
+  nextTotalUs: number,
+  timeWidthPx: number,
+  projectZoom: number,
+): number {
+  if (!(nextTotalUs > 0) || !(timeWidthPx > 0)) return clampTimelineZoom(projectZoom, nextTotalUs);
+  const preserveScale = previousTotalUs >= 1_000_000
+    || (previousTotalUs <= 0 && nextTotalUs <= TIMELINE_EMPTY_VIEW_US);
+  if (!preserveScale) return clampTimelineZoom(projectZoom, nextTotalUs);
+  const previousPps = timelineZoomToPps(previousTotalUs, timeWidthPx, projectZoom);
+  return timelinePpsToZoom(nextTotalUs, timeWidthPx, previousPps);
+}
+
+export function timelineZoomToSlider(zoom: number, totalUs: number): number {
+  const limits = timelineZoomLimits(totalUs);
+  if (limits.max <= limits.min) return 0;
+  return Math.log(clampTimelineZoom(zoom, totalUs) / limits.min) / Math.log(limits.max / limits.min);
+}
+
+export function timelineSliderToZoom(position: number, totalUs: number): number {
+  const limits = timelineZoomLimits(totalUs);
+  return limits.min * (limits.max / limits.min) ** Math.max(0, Math.min(1, position));
+}
+
 /**
- * Zoom keeping the timeline time under `anchorX` fixed at the same viewport
- * position (ported from OpenCut classic's zoom-utils anchor math, MIT).
+ * Zoom keeping the timeline time under `anchorX` fixed while applying OpenFilm's
+ * project-relative zoom limits. `viewportWidth` is the canvas viewport (the
+ * fixed 132px track head is outside it); the 51px cover rail is removed once
+ * here to get the actual time width.
  */
 export function zoomAtAnchor(
   view: TimelineViewState,
@@ -503,10 +878,13 @@ export function zoomAtAnchor(
   totalUs: number,
 ): TimelineViewState {
   const anchorUs = xToTime(anchorX, view);
-  const pps = Math.max(ZOOM_MIN_PPS, Math.min(ZOOM_MAX_PPS, view.pixelsPerSecond * factor));
+  const timeWidth = Math.max(0, viewportWidth - view.headerWidth);
+  const currentZoom = timelinePpsToZoom(totalUs, timeWidth, view.pixelsPerSecond);
+  const projectZoom = clampTimelineZoom(currentZoom * factor, totalUs);
+  const pps = timelineZoomToPps(totalUs, timeWidth, projectZoom);
   const rawScrollX = view.headerWidth + (anchorUs / 1_000_000) * pps - anchorX;
   const { maxScrollX } = scrollBounds({ ...view, pixelsPerSecond: pps }, totalUs, viewportWidth);
-  return { ...view, pixelsPerSecond: pps, scrollX: clampScrollX(rawScrollX, maxScrollX) };
+  return { ...view, projectZoom, pixelsPerSecond: pps, scrollX: clampScrollX(rawScrollX, maxScrollX) };
 }
 
 /**
@@ -538,6 +916,85 @@ export function gridSnapCandidates(
   return candidates;
 }
 
+/** Build the same clock-anchored ruler grid as OpenFilm's rulerSteps/rulerMarks. */
+export function computeTimelineTicks(
+  pps: number,
+  headerWidth: number,
+  fpsNum: number,
+  fpsDen: number,
+  scrollX: number,
+  viewportWidth = 800,
+): TickMark[] {
+  if (!(pps > 0)) return [];
+  const safeNum = Number.isFinite(fpsNum) && fpsNum > 0 ? fpsNum : 30;
+  const safeDen = Number.isFinite(fpsDen) && fpsDen > 0 ? fpsDen : 1;
+  const rate = safeNum / safeDen;
+  const nominalFps = Math.max(1, Math.round(safeNum / safeDen));
+  const secondsLadder = [1, 2, 3, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
+  const frameStepLadder = (from: number): number[] => {
+    const frames: number[] = [];
+    for (let step = from; step < nominalFps; step += 1) {
+      if (nominalFps % step === 0) frames.push(step);
+    }
+    return [...frames, ...secondsLadder.map(seconds => seconds * nominalFps)];
+  };
+  const labelSteps = frameStepLadder(2).filter(frames =>
+    frames >= nominalFps || (frames / nominalFps) * pps >= 150);
+  const labelFrames = labelSteps.find(frames => (frames / nominalFps) * pps >= 96)
+    ?? labelSteps.at(-1)!;
+  const tickLadder = frameStepLadder(1);
+  const wantedTickFrames = tickLadder.find(frames => (frames / nominalFps) * pps >= 12)
+    ?? tickLadder.at(-1)!;
+  const tickFrames = labelFrames % wantedTickFrames === 0
+    ? wantedTickFrames
+    : tickLadder.find(frames => frames >= wantedTickFrames && labelFrames % frames === 0) ?? labelFrames;
+  const fromMs = Math.max(0, ((scrollX - headerWidth) / pps) * 1000);
+  const toMs = ((scrollX - headerWidth + viewportWidth) / pps) * 1000;
+  const formatTime = (ms: number): string => {
+    const totalSeconds = ms / 1000;
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = Math.floor(totalSeconds % 60);
+    return hours > 0
+      ? `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+      : `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  };
+  const formatLabel = (ms: number): string => {
+    const seconds = Math.max(0, Math.floor(ms / 1000 + 1e-6));
+    const frames = Math.round(ms * rate / 1000) - Math.ceil(seconds * rate - 1e-9);
+    return ms - seconds * 1000 >= 0.5 && frames > 0 ? `${frames}f` : formatTime(ms);
+  };
+  const ticks: TickMark[] = [];
+  const addTick = (ms: number, labeled: boolean) => {
+    ticks.push({
+      x: headerWidth + ms / 1000 * pps - scrollX,
+      label: labeled ? formatLabel(ms) : "",
+      major: labeled,
+    });
+  };
+  if (tickFrames >= nominalFps) {
+    const tickSeconds = Math.max(1, Math.round(tickFrames / nominalFps));
+    const labelSeconds = Math.max(1, Math.round(labelFrames / nominalFps));
+    for (let second = Math.floor(Math.max(0, fromMs) / 1000 / tickSeconds) * tickSeconds;
+      second * 1000 <= toMs; second += tickSeconds) {
+      addTick(second * 1000, second % labelSeconds === 0);
+    }
+  } else {
+    const labelSeconds = labelFrames >= nominalFps ? Math.max(1, Math.round(labelFrames / nominalFps)) : 0;
+    for (let second = Math.floor(Math.max(0, fromMs) / 1000); second * 1000 <= toMs; second += 1) {
+      const firstFrame = Math.ceil(second * rate - 1e-9);
+      const frameCount = Math.ceil((second + 1) * rate - 1e-9) - firstFrame;
+      for (let offset = 0; offset < frameCount; offset += tickFrames) {
+        const ms = offset === 0 ? second * 1000 : ((firstFrame + offset) * 1000) / rate;
+        if (ms < fromMs) continue;
+        if (ms > toMs) break;
+        addTick(ms, labelSeconds ? offset === 0 && second % labelSeconds === 0 : offset % labelFrames === 0);
+      }
+    }
+  }
+  return ticks;
+}
+
 /**
  * Move a group of clips by `deltaUs`, keeping relative offsets and clamping
  * the group as a whole at the timeline origin (A1 free-position semantics).
@@ -566,11 +1023,11 @@ export function dragEdgeAutoScrollStep(pointerX: number, viewportWidth: number):
   const rightDist = viewportWidth - pointerX;
   if (leftDist < EDGE_AUTOSCROLL_ZONE_PX) {
     const ratio = Math.max(0, 1 - leftDist / EDGE_AUTOSCROLL_ZONE_PX);
-    return -Math.ceil(EDGE_AUTOSCROLL_MAX_STEP_PX * ratio);
+    return -Math.ceil(EDGE_AUTOSCROLL_MIN_STEP_PX + (EDGE_AUTOSCROLL_MAX_STEP_PX - EDGE_AUTOSCROLL_MIN_STEP_PX) * ratio);
   }
   if (rightDist < EDGE_AUTOSCROLL_ZONE_PX) {
     const ratio = Math.max(0, 1 - rightDist / EDGE_AUTOSCROLL_ZONE_PX);
-    return Math.ceil(EDGE_AUTOSCROLL_MAX_STEP_PX * ratio);
+    return Math.ceil(EDGE_AUTOSCROLL_MIN_STEP_PX + (EDGE_AUTOSCROLL_MAX_STEP_PX - EDGE_AUTOSCROLL_MIN_STEP_PX) * ratio);
   }
   return 0;
 }
@@ -597,10 +1054,11 @@ export function clipAudioBand(
   const isAudio = clip.asset_kind === "audio";
   const hasBand = clip.asset_kind === "video" && clip.audio.enabled && rect.width > 20;
   if (!isAudio && !hasBand) return null;
-  const headerH = rect.width > 36 ? CLIP_HEADER_H : 0;
+  const headerH = Math.min(CLIP_HEADER_H, rect.height);
   const area = Math.max(0, rect.height - headerH);
   if (isAudio) return { top: rect.y + headerH, height: Math.max(3, area) };
-  const bandH = Math.round(area * Math.max(0.1, Math.min(1, ratio)));
+  // OpenFilm keeps a 15px minimum sound band, then grows it with the clip row.
+  const bandH = Math.max(15, Math.round(area * Math.max(0.1, Math.min(1, ratio))));
   return { top: rect.y + rect.height - bandH, height: Math.max(6, bandH) };
 }
 
@@ -766,9 +1224,7 @@ export function resolveMoveTarget(
 
 /** Pixels-per-second that fits the whole timeline into the viewport. */
 export function fitZoomPps(totalUs: number, viewportWidth: number, headerWidth: number): number {
-  if (totalUs <= 0) return ZOOM_MAX_PPS;
-  const fit = (viewportWidth - headerWidth - 40) / (totalUs / 1_000_000);
-  return Math.max(ZOOM_MIN_PPS, Math.min(ZOOM_MAX_PPS, fit));
+  return timelineZoomToPps(totalUs, Math.max(0, viewportWidth - headerWidth), TIMELINE_ZOOM_DEFAULT);
 }
 
 /** Test whether translating every member by `deltaUs` keeps the group clear

@@ -49,6 +49,8 @@ interface DecodeTiming {
  *  泄漏信号（含禁用缓存路径下被 close 的原始帧）。 */
 interface DecodeResidency {
   decoded: number;
+  decode_submissions: number;
+  output_callbacks: number;
   posted: number;
   cached: number;
   closed: number;
@@ -64,13 +66,17 @@ interface DecodeResidency {
   shrinks: number;
 }
 let resDecoded = 0;
+let resDecodeSubmissions = 0;
+let resOutputCallbacks = 0;
 let resPosted = 0;
 let resCached = 0;
 let resClosed = 0;
 let resShrinks = 0;
 function decodeResidency(): DecodeResidency {
   return {
-    decoded: resDecoded, posted: resPosted, cached: resCached, closed: resClosed,
+    decoded: resDecoded, decode_submissions: resDecodeSubmissions,
+    output_callbacks: resOutputCallbacks,
+    posted: resPosted, cached: resCached, closed: resClosed,
     live: resDecoded - resPosted - resCached - resClosed, cacheBytes, cacheSize: cache.size,
     budget: unclosedBudget, budgetCap: unclosedBudgetCap, windowCap: readyByPtsMax,
     feedAheadPeak, shrinks: resShrinks,
@@ -525,6 +531,7 @@ let decodeTiming = false;
 function createDecoder(): VideoDecoder {
   return new VideoDecoder({
     output: (frame: VideoFrame) => {
+      resOutputCallbacks += 1;
       // P203 诊断（保留）：输出回调入口。10-bit HEVC 在吐出首帧后回调不再触发，
       // 且 `frame.format` 为 null——`fmt` 字段是识别该形态的唯一线索，
       // 故长期保留（VERIFY_TRACE 门控，生产零开销）。
@@ -1215,6 +1222,7 @@ async function feedSamples(
             data: chunkData,
           });
           decoder.decode(chunk);
+          resDecodeSubmissions += 1;
           samplesFed += 1;
           lastFedSample = index;
           // 持有窗前摄扩容：**必须在输出回调之前**（输出在本函数让步点落地）——

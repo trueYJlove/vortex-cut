@@ -5,6 +5,7 @@ import json
 import os
 import platform
 import shutil
+from collections import deque
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -345,6 +346,77 @@ class TimelinePatchRequest(BaseModel):
     base_revision_id: str
     operations: list[dict[str, Any]]
     summary: str
+
+
+TIMELINE_PATCH_BODY_LIMIT = 4 * 1024 * 1024
+
+
+class TimelinePatchBodyLimitMiddleware:
+    """Reject oversized raw TimelinePatch bodies before FastAPI JSON parsing."""
+
+    def __init__(self, app: Any, limit_bytes: int = TIMELINE_PATCH_BODY_LIMIT) -> None:
+        self.app = app
+        self.limit_bytes = limit_bytes
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if (
+            scope.get("type") != "http"
+            or scope.get("method") != "POST"
+            or len(scope.get("path", "").split("/")) != 7
+            or not scope.get("path", "").startswith("/api/v1/projects/")
+            or not scope.get("path", "").endswith("/timeline/patches")
+        ):
+            await self.app(scope, receive, send)
+            return
+
+        headers = {key.lower(): value for key, value in scope.get("headers", [])}
+        content_length = headers.get(b"content-length")
+        if content_length is not None:
+            try:
+                if int(content_length) > self.limit_bytes:
+                    await self._too_large(send)
+                    return
+            except ValueError:
+                pass
+
+        messages: deque[dict[str, Any]] = deque()
+        received_bytes = 0
+        while True:
+            message = await receive()
+            if message.get("type") == "http.disconnect":
+                messages.append(message)
+                break
+            if message.get("type") == "http.request":
+                received_bytes += len(message.get("body", b""))
+                if received_bytes > self.limit_bytes:
+                    await self._too_large(send)
+                    return
+                messages.append(message)
+                if not message.get("more_body", False):
+                    break
+            else:
+                messages.append(message)
+                break
+
+        async def replay_receive() -> dict[str, Any]:
+            if messages:
+                return messages.popleft()
+            return await receive()
+
+        await self.app(scope, replay_receive, send)
+
+    @staticmethod
+    async def _too_large(send: Any) -> None:
+        body = json.dumps(
+            {"detail": {"code": "TIMELINE_PATCH_TOO_LARGE", "message": "TimelinePatch body exceeds 4 MiB"}},
+            separators=(",", ":"),
+        ).encode("utf-8")
+        await send({
+            "type": "http.response.start",
+            "status": 413,
+            "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode("ascii"))],
+        })
+        await send({"type": "http.response.body", "body": body})
 
 
 class TimelineNavigationRequest(BaseModel):
@@ -1476,6 +1548,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         state.auth.clear()
 
     app = FastAPI(title="AIVideo Core", version=__version__, lifespan=lifespan)
+    app.add_middleware(TimelinePatchBodyLimitMiddleware)
     app.state.core = state
 
     def provider_public(provider: dict[str, Any]) -> dict[str, Any]:

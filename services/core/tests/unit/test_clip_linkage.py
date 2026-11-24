@@ -131,7 +131,7 @@ def test_remove_propagates_unless_ignore_link(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "operation", ["remove_clip", "position_clip", "trim_clip", "split_clip", "clear_clip_link"]
+    "operation", ["remove_clip", "position_clip", "split_clip", "clear_clip_link"]
 )
 def test_linked_operation_rejects_locked_member(tmp_path: Path, operation: str) -> None:
     service, _ = _service(tmp_path)
@@ -151,6 +151,63 @@ def test_linked_operation_rejects_locked_member(tmp_path: Path, operation: str) 
     with pytest.raises(DomainError) as error:
         _patch(service, state, [op])
     assert error.value.code == "TIMELINE_LOCKED"
+
+
+def test_trim_leaves_locked_link_partner_and_trims_lead(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service)
+    state, video_id = _insert_video(service, state)
+    state = _patch(service, state, [{"op": "detach_audio", "clip_id": video_id}])
+    audio_id = _audio_id(state)
+    state = _patch(service, state, [{"op": "set_clip_locked", "clip_id": audio_id, "locked": True}])
+    state = _patch(service, state, [{
+        "op": "trim_clip", "clip_id": video_id,
+        "source_start_us": 0, "source_end_us": 1_500_000,
+    }])
+    assert _by_id(state, video_id)["source_end_us"] == 1_500_000
+    assert _by_id(state, audio_id)["source_end_us"] == 2_000_000
+
+
+def test_linked_trim_uses_common_timeline_edge_for_different_speeds(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service)
+    state, video_id = _insert_video(service, state)
+    state = _patch(service, state, [{"op": "detach_audio", "clip_id": video_id}])
+    audio_id = _audio_id(state)
+    state = _patch(service, state, [{"op": "set_speed", "clip_id": video_id, "speed_milli": 2000}])
+    state = _patch(service, state, [{
+        "op": "trim_clip", "clip_id": audio_id,
+        "source_start_us": 0, "source_end_us": 1_000_000, "ignore_link": True,
+    }])
+
+    state = _patch(service, state, [{
+        "op": "trim_clip", "clip_id": video_id,
+        "source_start_us": 0, "source_end_us": 3_000_000,
+    }])
+
+    video = _by_id(state, video_id)
+    audio = _by_id(state, audio_id)
+    assert video["timeline_end_us"] - video["timeline_start_us"] == 1_500_000
+    assert audio["source_start_us"] == 0
+    assert audio["source_end_us"] == 1_500_000
+    assert audio["timeline_end_us"] - audio["timeline_start_us"] == 1_500_000
+
+    service2, _ = _service(tmp_path / "audio-lead")
+    state2 = _create(service2)
+    state2, video2 = _insert_video(service2, state2)
+    state2 = _patch(service2, state2, [{"op": "detach_audio", "clip_id": video2}])
+    audio2 = _audio_id(state2)
+    state2 = _patch(service2, state2, [{"op": "set_speed", "clip_id": audio2, "speed_milli": 2000}])
+    state2 = _patch(service2, state2, [{
+        "op": "trim_clip", "clip_id": audio2,
+        "source_start_us": 0, "source_end_us": 3_000_000,
+    }])
+    video = _by_id(state2, video2)
+    audio = _by_id(state2, audio2)
+    assert video["source_end_us"] == 2_500_000
+    assert video["timeline_end_us"] == 2_500_000
+    assert audio["source_end_us"] == 3_000_000
+    assert audio["timeline_end_us"] == 2_500_000
 
 
 def test_link_creation_rejects_locked_member(tmp_path: Path) -> None:
@@ -197,6 +254,21 @@ def test_ignore_link_keeps_locked_member_unchanged(tmp_path: Path) -> None:
     state = _patch(service, state, [{"op": "set_clip_locked", "clip_id": audio_id, "locked": True}])
     state = _patch(service, state, [{
         "op": "position_clip", "clip_id": video_id, "timeline_start_us": 1_000_000,
+        "ignore_link": True,
+    }])
+    assert _by_id(state, video_id)["timeline_start_us"] == 1_000_000
+    assert _by_id(state, audio_id)["timeline_start_us"] == 0
+
+
+def test_ignore_link_allows_automatic_rider_to_move_without_unrelated_link_partner(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    state = _create(service)
+    state, video_id = _insert_video(service, state)
+    state = _patch(service, state, [{"op": "detach_audio", "clip_id": video_id}])
+    audio_id = _audio_id(state)
+    state = _patch(service, state, [{
+        "op": "position_clips",
+        "placements": [{"clip_id": video_id, "timeline_start_us": 1_000_000}],
         "ignore_link": True,
     }])
     assert _by_id(state, video_id)["timeline_start_us"] == 1_000_000

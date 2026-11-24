@@ -5,11 +5,16 @@ import {
   MIN_CLIP_US,
   clampGroupDelta,
   clampMoveStart,
+  clipLabelPinShift,
+  timelineWheelPanDelta,
+  timelineGestureDeltaUs,
   clipAudioBand,
   clipDuration,
+  clipsInTimelineMarquee,
   clipsInRect,
   clampScrollX,
   computeClipRects,
+  computeTimelineTicks,
   computeTrackRows,
   computeTransitionRects,
   contentWidthPx,
@@ -25,16 +30,32 @@ import {
   volumeToY,
   yToVolume,
   marqueeRect,
+  orderedMoveSnapTargets,
   resolveGroupMove,
   resolveMoveTarget,
   scrollBounds,
   snapCandidates,
+  snapResult,
+  snapResultSorted,
   snapValue,
+  snapClipPaintRect,
+  snapTimeToFrame,
   timeToX,
+  timelineDropHit,
+  timelineDragDropExcludedClipIds,
+  trimHitPx,
+  timelinePpsToZoom,
+  timelineSliderToZoom,
+  timelineViewSpanUs,
+  timelineZoomAfterDurationChange,
+  timelineZoomLimits,
+  timelineZoomToPps,
+  timelineZoomToSlider,
   xToTime,
   zoomAtAnchor,
 } from "../src/app/timeline/geometry.js";
-import { DEFAULT_VIEW_STATE, ZOOM_MAX_PPS, ZOOM_MIN_PPS, type TimelineViewState } from "../src/app/timeline/types.js";
+import { hasLiftedTimelineDrag } from "../src/app/timeline/drag-threshold.js";
+import { DEFAULT_VIEW_STATE, TIMELINE_EMPTY_VIEW_US, TIMELINE_HEAD_WIDTH, TIMELINE_ZOOM_DEFAULT, TIMELINE_ZOOM_STEP, type TimelineViewState } from "../src/app/timeline/types.js";
 
 const view: TimelineViewState = {
   ...DEFAULT_VIEW_STATE,
@@ -61,7 +82,65 @@ describe("OpenFilm track role heights", () => {
   it("applies per-track overrides while keeping the main video minimum and clamping invalid sizes", () => {
     const dynamic = { id: "V2", kind: "video" as const, locked: false, hidden: false, muted: false, solo: false };
     const layout = computeTrackRows([...tracks, dynamic], 20, 56, undefined, { C1: 12, V1: 32, V2: 92 });
-    expect(Object.fromEntries(layout.map(row => [row.track.id, row.height]))).toEqual({ C1: 28, V1: 64, A1: 42, V2: 92 });
+    expect(Object.fromEntries(layout.map(row => [row.track.id, row.height]))).toEqual({ C1: 28, V1: 32, A1: 42, V2: 92 });
+  });
+
+  it("keeps 2px row gaps and at least 10px row-group breathing room", () => {
+    const layout = computeTrackRows(tracks, 20, 56, 120);
+    expect(layout[0]!.y).toBeGreaterThanOrEqual(30);
+    expect(layout[1]!.y - (layout[0]!.y + layout[0]!.height)).toBe(2);
+    expect(layout[2]!.y - (layout[1]!.y + layout[1]!.height)).toBe(2);
+  });
+
+  it("centers rows against the area below the ruler and above the bottom strip", () => {
+    const rows = computeTrackRows([
+      { id: "V3", kind: "video", locked: false, hidden: false, muted: false, solo: false },
+      { id: "V2", kind: "video", locked: false, hidden: false, muted: false, solo: false },
+      { id: "V1", kind: "video", locked: false, hidden: false, muted: false, solo: false },
+      { id: "A1", kind: "audio", locked: false, hidden: false, muted: false, solo: false },
+    ], 20, 56, 316, { V3: 52, V2: 52, V1: 68, A1: 42 });
+    expect(rows.map(row => row.y)).toEqual([69, 123, 177, 247]);
+  });
+});
+
+describe("OpenFilm drop-zone hit testing", () => {
+  it("excludes linked main-track riders from drop targets only while linkage is on", () => {
+    const moving = "moving";
+    const rider = "rider";
+    expect(timelineDragDropExcludedClipIds([moving], [rider], true)).toEqual(new Set([moving, rider]));
+    expect(timelineDragDropExcludedClipIds([moving], [rider], false)).toEqual(new Set([moving]));
+  });
+
+  it("uses pointer row bands and clip edge zones with side edges taking precedence", () => {
+    const clip = videoClip({ clip_id: "drop_target" as never, timeline_start_us: 0, timeline_end_us: 1_000_000 });
+    const hitRows = computeTrackRows([
+      { id: "V2", kind: "video", locked: false, hidden: false, muted: false, solo: false },
+      { id: "V1", kind: "video", locked: false, hidden: false, muted: false, solo: false },
+    ], 20, 56);
+    const rects = computeClipRects([clip], hitRows, view);
+    const target = rects[0]!;
+    const centerY = target.y + target.height / 2;
+
+    expect(timelineDropHit(target.x + 2, centerY, hitRows, rects).zone).toBe("before");
+    expect(timelineDropHit(target.x + target.width / 2, centerY, hitRows, rects).zone).toBe("replace");
+    expect(timelineDropHit(target.x + target.width - 2, centerY, hitRows, rects).zone).toBe("after");
+    expect(timelineDropHit(target.x + target.width / 2, target.y + 1, hitRows, rects).band).toBe("above");
+    expect(timelineDropHit(target.x + target.width / 2, target.y + target.height - 1, hitRows, rects).band).toBe("below");
+  });
+
+  it("opens a lane in row gaps and outside the track stack, and ignores clips in hand", () => {
+    const clip = videoClip({ clip_id: "drop_target" as never, timeline_start_us: 0, timeline_end_us: 1_000_000 });
+    const hitRows = computeTrackRows([
+      { id: "V2", kind: "video", locked: false, hidden: false, muted: false, solo: false },
+      { id: "V1", kind: "video", locked: false, hidden: false, muted: false, solo: false },
+    ], 20, 56);
+    const rects = computeClipRects([clip], hitRows, view);
+    const first = hitRows[0]!;
+    const second = hitRows[1]!;
+    expect(timelineDropHit(400, first.y + first.height + 1, hitRows, rects)).toMatchObject({ rowIndex: 1, band: "above" });
+    expect(timelineDropHit(400, first.y - 1, hitRows, rects)).toMatchObject({ rowIndex: -1, band: "above" });
+    expect(timelineDropHit(400, second.y + second.height + 1, hitRows, rects)).toMatchObject({ rowIndex: 2, band: "below" });
+    expect(timelineDropHit(rects[0]!.x + 20, rects[0]!.y + 10, hitRows, rects, new Set([clip.clip_id])).clipId).toBeNull();
   });
 });
 
@@ -100,12 +179,79 @@ const imageClip = (overrides: Partial<TimelineClip> = {}): TimelineClip =>
   });
 
 describe("geometry time/space conversion", () => {
+  it("snaps only painted clip edges and preserves the full logical hit rectangle", () => {
+    const logical = computeClipRects([videoClip()], rows, view)[0]!;
+    const fractional = { ...logical, x: 120.6, y: 90.5, width: 100.4, height: 40.5 };
+    const painted = snapClipPaintRect(fractional);
+
+    expect(painted.x).toBe(121);
+    expect(painted.y).toBe(91);
+    expect(painted.width).toBe(99);
+    expect(painted.height).toBe(40.5);
+    expect(fractional).toMatchObject({ x: 120.6, y: 90.5, width: 100.4, height: 40.5 });
+    expect(painted).not.toBe(fractional);
+  });
+
+  it("rounds painted clip edges in content space when horizontal scroll is fractional", () => {
+    const fractional = { ...computeClipRects([videoClip()], rows, view)[0]!, x: 120.6, y: 90.5, width: 100.4, height: 40.5 };
+    const painted = snapClipPaintRect(fractional, 0.37);
+
+    expect(painted.x).toBeCloseTo(120.63, 8);
+    expect(painted.y).toBe(91);
+    expect(painted.width).toBe(99);
+    expect(painted.height).toBe(40.5);
+    expect(fractional).toMatchObject({ x: 120.6, width: 100.4 });
+  });
+
+  it("pins a long clip label to the visible content edge without crossing the clip end", () => {
+    expect(clipLabelPinShift(200, 600, 400)).toBe(200);
+    expect(clipLabelPinShift(200, 100, 400)).toBe(52);
+    expect(clipLabelPinShift(450, 100, 400)).toBe(0);
+    expect(clipLabelPinShift(200, 48, 400)).toBe(0);
+    // The cover rail is part of rect.x; pinning still targets the left edge
+    // of the full scroll viewport, before the cover rail.
+    expect(clipLabelPinShift(31, 600, 0)).toBe(0);
+    expect(clipLabelPinShift(-20, 600, 0)).toBe(20);
+  });
+
+  it("maps horizontal, Shift, and ordinary vertical wheel input like OpenFilm", () => {
+    expect(timelineWheelPanDelta(18, 43, 0, false)).toBe(18);
+    expect(timelineWheelPanDelta(0, 43, 0, true)).toBe(43);
+    expect(timelineWheelPanDelta(18, 43, 0, true)).toBe(18);
+    expect(timelineWheelPanDelta(0, 43, 0, false)).toBe(0);
+    expect(timelineWheelPanDelta(2, 3, 1, false)).toBe(32);
+    expect(timelineWheelPanDelta(0, -2, 2, true)).toBe(-800);
+  });
+
+  it("uses OpenFilm's floor quarter-width trim target for narrow clips", () => {
+    expect(trimHitPx(14)).toBe(3);
+    expect(trimHitPx(18)).toBe(4);
+    expect(trimHitPx(100)).toBe(8);
+  });
+
+  it("snaps free drag times to integer microseconds on the rational project frame grid", () => {
+    const frameOne = snapTimeToFrame(33_350, 30_000, 1_001);
+    const frameTwo = snapTimeToFrame(66_700, 30_000, 1_001);
+    expect(frameOne).toBe(33_367);
+    expect(frameTwo).toBe(66_733);
+    expect(Number.isInteger(frameOne)).toBe(true);
+    expect(Number.isInteger(frameTwo)).toBe(true);
+    expect(snapTimeToFrame(0, 30_000, 1_001)).toBe(0);
+  });
+
   it("converts time to x (including header gutter) and back", () => {
     expect(timeToX(0, view)).toBe(120);
     expect(timeToX(1_000_000, view)).toBe(220);
     expect(xToTime(120, view)).toBe(0);
     expect(xToTime(320, view)).toBe(2_000_000);
     expect(xToTime(0, view)).toBe(0); // clamped to >= 0
+  });
+
+  it("keeps the track head and OpenFilm's narrower cover rail independent", () => {
+    expect(TIMELINE_HEAD_WIDTH).toBe(132);
+    expect(DEFAULT_VIEW_STATE.headerWidth).toBe(51);
+    expect(TIMELINE_HEAD_WIDTH + timeToX(0, DEFAULT_VIEW_STATE)).toBe(183);
+    expect(TIMELINE_HEAD_WIDTH + timeToX(5_000_000, { ...DEFAULT_VIEW_STATE, pixelsPerSecond: 28 })).toBe(323);
   });
 });
 
@@ -157,7 +303,7 @@ describe("hit testing", () => {
     expect(hitTestClips(130, 40, rects)).toBeNull(); // C1 row (no caption clips)
   });
 
-  it("detects trim handles only on trimmable clip edges", () => {
+  it("detects trim handles on source-backed clips and still images", () => {
     expect(hitTestTrimHandle(120, 100, rects)).toEqual({ clipId: clips[0].clip_id, edge: "left" });
     expect(hitTestTrimHandle(320, 100, rects)).toEqual({ clipId: clips[0].clip_id, edge: "right" });
     // T11：命中带 trimHit=min(8,max(2,w/4))，200px 片段=8px → 右缘外是 320+8=328。
@@ -165,8 +311,17 @@ describe("hit testing", () => {
     // T4 行上移后 A1 行内 y 用实算值。
     const a1RowTrim = rows.find(r => r.track.id === "A1")!;
     expect(hitTestTrimHandle(420, a1RowTrim.y + 20, rects)).toEqual({ clipId: clips[1].clip_id, edge: "left" });
-    const imageRects = computeClipRects([imageClip()], rows, view);
-    expect(hitTestTrimHandle(120, 100, imageRects)).toBeNull(); // images not trimmable
+    const image = imageClip();
+    const imageRects = computeClipRects([image], rows, view);
+    expect(hitTestTrimHandle(120, 100, imageRects)).toEqual({ clipId: image.clip_id, edge: "left" });
+    expect(hitTestTrimHandle(220, 100, imageRects)).toEqual({ clipId: image.clip_id, edge: "right" });
+  });
+
+  it("does not expose trim handles on clips 6px wide or narrower", () => {
+    const narrow = videoClip({ timeline_start_us: 0, timeline_end_us: 100_000 }, 100_000);
+    const narrowRects = computeClipRects([narrow], rows, { ...view, pixelsPerSecond: 50 });
+    expect(narrowRects[0]!.width).toBeLessThanOrEqual(6);
+    expect(hitTestTrimHandle(narrowRects[0]!.x + 1, narrowRects[0]!.y + 2, narrowRects)).toBeNull();
   });
 });
 
@@ -197,6 +352,34 @@ describe("snapping", () => {
     // 8px threshold at 100pps = 80_000µs
     expect(snapValue(3_050_000, [3_000_000], 80_000)).toBe(3_000_000);
     expect(snapValue(3_200_000, [3_000_000], 80_000)).toBe(3_200_000);
+  });
+
+  it("keeps the first snap target when two targets are equally near", () => {
+    expect(snapValue(1_000_000, [2_000_000, 0], 1_000_000)).toBe(2_000_000);
+    expect(snapValue(1_500_000, [1_000_000, 2_000_000], 500_000)).toBe(1_000_000);
+  });
+
+  it("matches the linear snap rule on cached sorted targets, including ties and live playhead", () => {
+    const sorted = [0, 1_000_000, 2_000_000, 4_000_000];
+    for (const value of [0, 500_000, 1_000_000, 1_500_000, 2_000_001, 3_000_000, 5_000_000]) {
+      const expected = snapResult(value, [...sorted, 2_500_000], 500_000);
+      expect(snapResultSorted(value, sorted, 500_000, 2_500_000)).toEqual(expected);
+    }
+    expect(snapResultSorted(1_500_000, sorted, 500_000)).toEqual({
+      valueUs: 1_000_000,
+      snappedTo: 1_000_000,
+    });
+  });
+
+  it("uses OpenFilm's target priority when an edge and an earlier marker are equally close", () => {
+    const rects = computeClipRects([
+      videoClip({ clip_id: "edge" as never, timeline_start_us: 40_000_000, timeline_end_us: 50_000_000 }, 10_000_000),
+    ], rows, view);
+    const targets = orderedMoveSnapTargets(rects, [30_000_000]);
+    expect(snapResultSorted(35_000_000, targets.times, 5_000_000, undefined, targets.orderByTime)).toEqual({
+      valueUs: 30_000_000,
+      snappedTo: 30_000_000,
+    });
   });
 });
 
@@ -277,6 +460,35 @@ describe("marquee", () => {
     const none = clipsInRect(marqueeRect(100, 20, 110, 25), rects);
     expect(none).toEqual([]);
   });
+
+  it("marquee uses a horizontal time span and swept rows, including a zero-height sweep", () => {
+    const videoRow = rows.find(row => row.track.id === "V1")!;
+    const audioRow = rows.find(row => row.track.id === "A1")!;
+    const videoOnly = clipsInTimelineMarquee(
+      marqueeRect(100, videoRow.y + 6, 600, videoRow.y + 6),
+      rects,
+      rows,
+    );
+    expect(videoOnly).toEqual([clips[0].clip_id]);
+    const bothRows = clipsInTimelineMarquee(
+      marqueeRect(100, videoRow.y + 6, 600, audioRow.y + 6),
+      rects,
+      rows,
+    );
+    expect(bothRows).toEqual([clips[0].clip_id, clips[1].clip_id]);
+  });
+});
+
+describe("OpenFilm drag thresholds", () => {
+  it("matches per-gesture lift rules at the boundary", () => {
+    expect(hasLiftedTimelineDrag("move", 4, 4)).toBe(false);
+    expect(hasLiftedTimelineDrag("move", 5, 0)).toBe(true);
+    expect(hasLiftedTimelineDrag("move", 0, -5)).toBe(true);
+    expect(hasLiftedTimelineDrag("marquee", 4, 100)).toBe(false);
+    expect(hasLiftedTimelineDrag("marquee", 5, 0)).toBe(true);
+    expect(hasLiftedTimelineDrag("edge", 0, 5)).toBe(false);
+    expect(hasLiftedTimelineDrag("edge", -1, 0)).toBe(true);
+  });
 });
 
 describe("constants", () => {
@@ -288,7 +500,7 @@ describe("constants", () => {
 describe("B2 转场几何", () => {
   const left = videoClip({ clip_id: "left" as never, order_index: 0, timeline_start_us: 0, timeline_end_us: 2_000_000, source_start_us: 0, source_end_us: 2_000_000 });
   const right = videoClip({ clip_id: "right" as never, order_index: 1, timeline_start_us: 2_000_000, timeline_end_us: 5_000_000, source_start_us: 0, source_end_us: 3_000_000 });
-  const transition = { transition_id: "t1" as never, after_clip_id: "left" as never, kind: "fade" as const, duration_us: 500_000 };
+  const transition = { transition_id: "t1" as never, after_clip_id: "left" as never, incoming_clip_id: "right" as never, kind: "fade" as const, duration_us: 500_000 };
 
   it("computeTransitionRects 以锚点终点为中心，宽度受 6-80px 限幅", () => {
     const rects = computeTransitionRects([left, right], [transition], rows, view);
@@ -315,6 +527,14 @@ describe("B2 转场几何", () => {
     // 贴回后（首尾相接）转场恢复。
     const flushRight = videoClip({ clip_id: "right" as never, order_index: 1, timeline_start_us: 2_000_000, timeline_end_us: 5_000_000, source_start_us: 0, source_end_us: 3_000_000 });
     expect(computeTransitionRects([left, flushRight], [transition], rows, view)).toHaveLength(1);
+  });
+
+  it("does not rebind a legacy marker when its fixed incoming clip is missing or stale", () => {
+    const inserted = imageClip({ clip_id: "inserted" as never, order_index: 1, timeline_start_us: 2_000_000, timeline_end_us: 2_500_000 });
+    const displacedRight = videoClip({ clip_id: "right" as never, order_index: 2, timeline_start_us: 2_500_000, timeline_end_us: 5_500_000, source_start_us: 0, source_end_us: 3_000_000 });
+    expect(computeTransitionRects([left, inserted, displacedRight], [transition], rows, view)).toHaveLength(0);
+    expect(computeTransitionRects([left, right], [{ ...transition, incoming_clip_id: null }], rows, view)).toHaveLength(0);
+    expect(computeTransitionRects([left, right], [{ ...transition, incoming_clip_id: undefined }], rows, view)).toHaveLength(0);
   });
 
   it("hitTestTransitions 命中标记区域并优先于片段", () => {
@@ -385,7 +605,7 @@ describe("Round 4 — anchored zoom", () => {
     const totalUs = 20_000_000;
     // 2s sits at viewport x 320 (scrollX 0, pps 100).
     const next = zoomAtAnchor(view, 320, 800, 2, totalUs);
-    expect(next.pixelsPerSecond).toBe(200);
+    expect(next.pixelsPerSecond).toBeCloseTo(200, 10);
     expect(timeToX(2_000_000, next)).toBe(320);
   });
 
@@ -401,12 +621,12 @@ describe("Round 4 — anchored zoom", () => {
   it("clamps pps to the zoom limits and scrollX to the content range", () => {
     const totalUs = 2_000_000;
     const next = zoomAtAnchor(view, 320, 800, 1000, totalUs);
-    expect(next.pixelsPerSecond).toBe(ZOOM_MAX_PPS);
-    // anchor keeps 2s at x 320 → scrollX 3200, clamped to maxScroll 120+2000·2-800 = 3320
-    // （无右侧余量：滚动终点即素材终点）。
-    expect(next.scrollX).toBe(3320);
+    expect(next.projectZoom).toBe(2);
+    expect(next.pixelsPerSecond).toBe(680);
+    expect(next.scrollX).toBe(680);
     const out = zoomAtAnchor(view, 320, 800, 0.0001, totalUs);
-    expect(out.pixelsPerSecond).toBe(ZOOM_MIN_PPS);
+    expect(timelineViewSpanUs(totalUs, out.projectZoom)).toBe(30_000_000);
+    expect(out.scrollX).toBe(0);
   });
 });
 
@@ -453,15 +673,23 @@ describe("Round 4 — edge auto-scroll", () => {
   });
 
   it("scrolls left near the left edge, faster the closer to the edge", () => {
-    expect(dragEdgeAutoScrollStep(0, 800)).toBe(-14);
-    expect(dragEdgeAutoScrollStep(20, 800)).toBe(-6);
-    expect(Math.abs(dragEdgeAutoScrollStep(20, 800)))
+    expect(dragEdgeAutoScrollStep(0, 800)).toBe(-24);
+    expect(dragEdgeAutoScrollStep(24, 800)).toBe(-15);
+    expect(dragEdgeAutoScrollStep(47, 800)).toBe(-7);
+    expect(dragEdgeAutoScrollStep(48, 800)).toBe(0);
+    expect(Math.abs(dragEdgeAutoScrollStep(24, 800)))
       .toBeLessThan(Math.abs(dragEdgeAutoScrollStep(0, 800)));
   });
 
   it("scrolls right near the right edge", () => {
-    expect(dragEdgeAutoScrollStep(800, 800)).toBe(14);
-    expect(dragEdgeAutoScrollStep(790, 800)).toBeGreaterThan(0);
+    expect(dragEdgeAutoScrollStep(800, 800)).toBe(24);
+    expect(dragEdgeAutoScrollStep(753, 800)).toBe(7);
+  });
+
+  it("includes scroll accumulated after the pointer was captured", () => {
+    expect(timelineGestureDeltaUs(500, 500, 106, 100, 30)).toBeCloseTo(200_000);
+    expect(timelineGestureDeltaUs(512, 500, 94, 100, 30)).toBeCloseTo(200_000);
+    expect(timelineGestureDeltaUs(500, 500, 100, 100, 0)).toBe(0);
   });
 });
 
@@ -507,7 +735,7 @@ describe("Round 5 — volume line", () => {
 });
 
 describe("剪映式音频带高度（波形占比）", () => {
-  it("视频片段的原声带高度随占比缩放（40% 窄带 / 100% 撑满）", () => {
+  it("视频原声带沿用 OpenFilm 的 15px 下限与比例增长", () => {
     const clip = videoClip({ timeline_start_us: 0, timeline_end_us: 2_000_000, source_start_us: 0, source_end_us: 2_000_000 });
     const rects = computeClipRects([clip], rows, view);
     const rect = rects[0];
@@ -515,15 +743,21 @@ describe("剪映式音频带高度（波形占比）", () => {
     // 用常量而不是字面量 16：名称条高度已按参照从 16 改为 15，
     // 写死字面量会让「改了配色/几何就红，但报的是音频带错了」——指错方向。
     const area = rect.height - CLIP_HEADER_H;
+    const band30 = clipAudioBand(clip, rect, 0.3)!;
     const band40 = clipAudioBand(clip, rect, 0.4)!;
     const band60 = clipAudioBand(clip, rect, 0.6)!;
     const band100 = clipAudioBand(clip, rect, 1)!;
-    expect(band40.height).toBe(Math.round(area * 0.4));
+    expect(band30.height).toBe(Math.max(15, Math.round(area * 0.3)));
+    expect(band40.height).toBe(Math.max(15, Math.round(area * 0.4)));
     expect(band60.height).toBe(Math.round(area * 0.6));
     expect(band100.height).toBe(area);
     // 带始终贴片段底边。
+    expect(band30.top + band30.height).toBe(rect.y + rect.height);
     expect(band40.top + band40.height).toBe(rect.y + rect.height);
     expect(band100.top + band100.height).toBe(rect.y + rect.height);
+
+    const shortRect = { ...rect, height: CLIP_HEADER_H + 8 };
+    expect(clipAudioBand(clip, shortRect, 0.3)).toMatchObject({ height: 15, top: shortRect.y + shortRect.height - 15 });
   });
 });
 
@@ -568,14 +802,70 @@ describe("剪映式拖放落点解析 resolveMoveTarget", () => {
 });
 
 describe("Round 5 — fit zoom", () => {
-  it("fits the whole timeline into the viewport", () => {
-    // 4s into (1320 - 120 - 40)px → 290pps
-    expect(fitZoomPps(4_000_000, 1320, 120)).toBe(290);
+  it("uses 80% of the project as the default view and leaves tail room", () => {
+    // A 4s project uses 80% of a 1200px time viewport over a 5s span.
+    expect(fitZoomPps(4_000_000, 1320, 120)).toBe(240);
   });
 
-  it("clamps to the zoom limits", () => {
-    expect(fitZoomPps(0.1_000_000, 1320, 120)).toBe(ZOOM_MAX_PPS); // min content → max zoom
-    expect(fitZoomPps(3600_000_000, 1320, 120)).toBe(ZOOM_MIN_PPS); // hour-long → min zoom
+  it("shows 18 seconds for an empty project and applies project-relative bounds", () => {
+    expect(fitZoomPps(0, 1320, 120)).toBeCloseTo(1200 / 18);
+    expect(timelineViewSpanUs(0, TIMELINE_ZOOM_DEFAULT)).toBe(TIMELINE_EMPTY_VIEW_US);
+    expect(timelineZoomLimits(60_000_000)).toEqual({ min: 0.25, max: 60 });
+    expect(timelineZoomLimits(4_000_000).min).toBeCloseTo(4 / 30);
+  });
+
+  it("keeps relative zoom across project lengths and maps the slider logarithmically", () => {
+    const zoom = TIMELINE_ZOOM_DEFAULT;
+    const width = 1000;
+    expect(timelineZoomToPps(60_000_000, width, zoom)).toBeCloseTo(1000 * 0.8 / 60);
+    expect(timelineZoomToPps(155_500_000, width, zoom)).toBeCloseTo(1000 * 0.8 / 155.5);
+    expect(timelinePpsToZoom(60_000_000, width, timelineZoomToPps(60_000_000, width, zoom))).toBeCloseTo(zoom);
+    const stepped = zoom * TIMELINE_ZOOM_STEP;
+    expect(timelineSliderToZoom(timelineZoomToSlider(stepped, 60_000_000), 60_000_000)).toBeCloseTo(stepped);
+  });
+
+  it("preserves OpenFilm's pixels-per-second when an existing timeline grows or shrinks", () => {
+    const width = 680;
+    const beforePps = timelineZoomToPps(2_000_000, width, TIMELINE_ZOOM_DEFAULT);
+    const afterGrowthZoom = timelineZoomAfterDurationChange(2_000_000, 4_000_000, width, TIMELINE_ZOOM_DEFAULT);
+    const afterShrinkZoom = timelineZoomAfterDurationChange(4_000_000, 2_000_000, width, 1.6);
+
+    expect(afterGrowthZoom).toBeCloseTo(1.6);
+    expect(timelineZoomToPps(4_000_000, width, afterGrowthZoom)).toBeCloseTo(beforePps);
+    expect(timelineZoomToPps(2_000_000, width, afterShrinkZoom)).toBeCloseTo(beforePps);
+  });
+
+  it("keeps the empty 18s view for a first short clip, while long first loads use default fit", () => {
+    const width = 680;
+    const emptyPps = timelineZoomToPps(0, width, TIMELINE_ZOOM_DEFAULT);
+    const firstShortZoom = timelineZoomAfterDurationChange(0, 4_000_000, width, TIMELINE_ZOOM_DEFAULT);
+    const firstLongZoom = timelineZoomAfterDurationChange(0, 24_000_000, width, TIMELINE_ZOOM_DEFAULT);
+
+    expect(timelineZoomToPps(4_000_000, width, firstShortZoom)).toBeCloseTo(emptyPps);
+    expect(firstLongZoom).toBeCloseTo(TIMELINE_ZOOM_DEFAULT);
+  });
+
+  it("keeps sub-second ticks on the exact rational frame period", () => {
+    const ticks = computeTimelineTicks(3000, 51, 30_000, 1_001, 0, 800);
+    const firstFrame = ticks.find(mark => !mark.major)!;
+    expect(firstFrame.x).toBeCloseTo(51 + (1_001 / 30_000) * 3000, 8);
+    expect(firstFrame.x).not.toBeCloseTo(51 + (1 / 30) * 3000, 5);
+  });
+
+  it("keeps normal-zoom ruler labels readable at 29.97fps", () => {
+    const ticks = computeTimelineTicks(28, 51, 30_000, 1_001, 0, 2_000);
+    const majors = ticks.filter(mark => mark.major);
+    expect(majors.slice(0, 3).map(mark => mark.label)).toEqual(["00:00", "00:05", "00:10"]);
+    expect(majors[1].x - majors[0].x).toBeCloseTo(140, 5);
+    expect(ticks.find(mark => !mark.major)!.x - majors[0].x).toBeCloseTo(14.014, 5);
+  });
+
+  it("uses OpenFilm's 150px minimum spacing for frame-number labels", () => {
+    const ticks = computeTimelineTicks(250, 51, 30_000, 1_001, 0, 800);
+    const labels = ticks.filter(mark => mark.major);
+    expect(labels.length).toBeGreaterThan(1);
+    expect(labels[1]!.x - labels[0]!.x).toBeCloseTo(250, 5);
+    expect(labels.some(mark => /f$/.test(mark.label))).toBe(false);
   });
 });
 

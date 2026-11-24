@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type { DesktopSettings, SettingsState } from "../main/desktop-settings.js";
 import type {
   AgentSession,
@@ -147,6 +147,11 @@ export interface DesktopApi {
   reopenProject: (projectId: ProjectId) => Promise<Project>;
   listAssets: (input: { project_id: ProjectId; availability?: AssetAvailability; limit?: number; cursor?: string }) => Promise<AssetPresentationPage>;
   importAsset: (input: { project_id: ProjectId; kind?: AssetKind }) => Promise<ImportedAsset | null>;
+  /** Import native files received by HTML5 drop; real paths are resolved inside preload and never returned to Renderer. */
+  importDroppedAssets: (input: { project_id: ProjectId; files: readonly File[] }) => Promise<{
+    imported: ImportedAsset[];
+    failures: Array<{ name: string; reason: "unsupported" | "invalid" | "import_failed" }>;
+  }>;
   /** E2E 基准专用：从 AIVS_E2E_ASSET_PATHS_LIST 夹具表按文件名导入；非基准环境无该表则拒绝。 */
   importAssetByFixture: (input: { project_id: ProjectId; fixture_file: string }) => Promise<ImportedAsset | null>;
   refreshAsset: (assetId: string) => Promise<AssetPresentation>;
@@ -377,6 +382,16 @@ const api: DesktopApi = {
   reopenProject: projectId => ipcRenderer.invoke("project:reopen", projectId),
   listAssets: input => ipcRenderer.invoke("asset:list", input),
   importAsset: input => ipcRenderer.invoke("asset:import", input),
+  importDroppedAssets: input => {
+    const files = Array.from(input.files ?? []).map(file => ({
+      path: webUtils.getPathForFile(file),
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      last_modified: file.lastModified,
+    }));
+    return ipcRenderer.invoke("asset:import-dropped", { project_id: input.project_id, files });
+  },
   importAssetByFixture: input => ipcRenderer.invoke("asset:import-fixture", input),
   refreshAsset: assetId => ipcRenderer.invoke("asset:refresh", assetId),
   assetMediaTicket: assetId => ipcRenderer.invoke("asset:media-ticket", assetId),

@@ -19,7 +19,7 @@ import { arrayFrameSource, windowPrefetchStarts, type FrameSource } from "./fram
  * - seek（暂停态）仍走并行解码后合成，同样经环形/影子槽位 ack，并同步链游标。 */
 import type { CompositorWorkerClient } from "./compositor-worker.js";
 import type { DrawCommand, FrameResidency } from "./compositor-worker.worker.js";
-import type { Ir, IrContent, IrFrame, IrLayer, IrOverlay } from "./ir.js";
+import { inputNeedsAudio, inputNeedsVideo, inputNeedsVisual, type Ir, type IrContent, type IrFrame, type IrLayer, type IrOverlay } from "./ir.js";
 import type { PreviewSourceResolver } from "./source-resolver.js";
 import type { PreviewSourceDescription } from "@aivideo/contracts";
 import { PREVIEW_IR_V2_MAX_WINDOW_FRAMES, PCM_CHUNK_SAMPLE_RATE } from "@aivideo/contracts";
@@ -31,6 +31,7 @@ import type { DecodedFrame, MediaDecoder, MediaDecoderFactory, MediaDecoderFacto
 import { MediaDecoderFactoryImpl, probeDecodeCapability } from "./decode-capability.js";
 import { VARISPEED_WORKLET_NAME, createVarispeedWorkletUrl } from "./varispeed-worklet.js";
 import { planGainAutomation, resolveAudioFade, type AudioFadeSpan } from "./audio-fade.js";
+import { mediaRateIsPlayable } from "./media-rate.js";
 
 /** 片段音频配置（编辑态：App 从时间线文档透传）。
  *  fadeInUs/fadeOutUs = 段内淡入/淡出时长（微秒，可选；0/缺省 = 不淡）——
@@ -92,6 +93,28 @@ export interface AssetDecodeBudget {
   p95_ms: number;
   /** p95 超实时预算 **且** 样本够门槛——只有它为真才该为这个素材登记代理。 */
   over_budget: boolean;
+}
+
+/** 可供验收 harness 读取的逐输入视觉解码证据。 */
+export interface InputDecodeUsageCounters {
+  input_id: string;
+  asset_id: string;
+  video_required: boolean;
+  audio_required: boolean;
+  has_audio: boolean;
+  video_rig_created: boolean;
+  source_resolve_requests: number;
+  proxy_resolutions: number;
+  decode_requests: number;
+  ffmpeg_decode_requests: number;
+  ffmpeg_frames_returned: number;
+  webcodecs_decode_submissions: number;
+  webcodecs_output_callbacks: number;
+}
+
+interface MutableInputDecodeUsageCounters extends Omit<InputDecodeUsageCounters, "webcodecs_decode_submissions" | "webcodecs_output_callbacks"> {
+  webcodecs_decode_submissions: number;
+  webcodecs_output_callbacks: number;
 }
 
 export interface PreviewSessionMetrics {
@@ -233,8 +256,8 @@ function makeAudioRig(speed: number): AudioRig {
   };
 }
 
-/** 全局播放倍速的合法域与夹取：与段速 speed_milli 同口径 [0.25, 4]；非数值
- *  归 1（常速）——倍速控件可能传 undefined/NaN 强转值，兜底不许炸时钟。 */
+/** 全局播放倍速单独限制在 [0.25, 4]；片段段速遵循 OpenFilm 的 [0.1, 100]。
+ *  非数值归 1（常速）——倍速控件可能传 undefined/NaN 强转值，兜底不许炸时钟。 */
 export function clampPlayRate(rate: number): number {
   if (!Number.isFinite(rate)) return 1;
   return Math.min(4, Math.max(0.25, rate));
@@ -284,6 +307,8 @@ export class PreviewSession {
   private canvasEl: HTMLCanvasElement | null = null;
   private compositor: CompositorWorkerClient | null = null;
   private readonly rigs = new Map<string, InputRig>();
+  /** Input usage is per input_id because one asset can be used as both picture and sound. */
+  private readonly decodeUsageByInput = new Map<string, MutableInputDecodeUsageCounters>();
   private rafId = 0;
   private playing = false;
   /** B13-R：上次驻留取样墙钟（1Hz 限流）。 */
@@ -497,6 +522,23 @@ export class PreviewSession {
   private constructor(ir: Ir, frames?: FrameSource) {
     editorPerf.record("session_open", 0, this.perfId);
     this.ir = ir;
+    for (const input of ir.inputs) {
+      this.decodeUsageByInput.set(input.input_id, {
+        input_id: input.input_id,
+        asset_id: input.asset_id,
+        video_required: inputNeedsVideo(input),
+        audio_required: inputNeedsAudio(input),
+        has_audio: input.has_audio,
+        video_rig_created: false,
+        source_resolve_requests: 0,
+        proxy_resolutions: 0,
+        decode_requests: 0,
+        ffmpeg_decode_requests: 0,
+        ffmpeg_frames_returned: 0,
+        webcodecs_decode_submissions: 0,
+        webcodecs_output_callbacks: 0,
+      });
+    }
     // C20 第二阶段：frames 可由调用方注入（v2 窗口帧源）；缺省 = v1 全量数组
     this.frames = frames ?? arrayFrameSource(ir);
     this.externalFrames = frames !== undefined;
@@ -523,7 +565,7 @@ export class PreviewSession {
     if (forceCopyTo) session.forceCopyTo = true;
     // B13：档位 → 环深决策（保守档多输入收 5；LEAD 联动防写深覆盖）
     if (resourceTier) {
-      session.ringDepth = ringDepthFor(resourceTier, ir.inputs.filter(input => input.asset_kind === "video").length);
+      session.ringDepth = ringDepthFor(resourceTier, ir.inputs.filter(inputNeedsVideo).length);
       // C20-T1：seek 落定预取窗数（仅 v2 注入帧源时生效，见 scheduleWindowPrefetch）
       session.prefetchSpan = windowSourceBudget(resourceTier).prefetchWindows;
     }
@@ -563,23 +605,31 @@ export class PreviewSession {
     session.container = container;
     session.tickets = tickets;
     session.audioByClip = audioByClip ?? null;
+    for (const input of ir.inputs) {
+      if (inputNeedsAudio(input) && input.has_audio && !tickets.has(input.asset_id)) {
+        throw new Error(`no audio ticket for ${input.asset_id}`);
+      }
+    }
     // B11：预览源解析（视频输入优先代理票据；失败/未 ready 回退原源票据。
     // 源描述与 IR geometry 分离——代理只替换解码输入，逻辑坐标不变）。
     // asset_id → 实际生效的代理描述（下面建合成器时要用它的编码尺寸）。
-    const resolvedSources = new Map<string, PreviewSourceDescription>();
+    const resolvedSources = new Map<string, { url: string; description: PreviewSourceDescription }>();
     if (sourceResolver) {
       for (const input of ir.inputs) {
-        if (input.asset_kind !== "video") continue;
+        if (!inputNeedsVideo(input)) continue;
         const original = tickets.get(input.asset_id);
         if (!original) continue;
+        const usage = session.decodeUsageByInput.get(input.input_id);
+        if (usage) usage.source_resolve_requests += 1;
         const resolved = await sourceResolver.resolve(input.asset_id, original);
         if (session.disposed || signal?.aborted) {
           throw new DOMException("Session disposed", "AbortError");
         }
-        if (resolved && resolved.isProxy) {
-          tickets = new Map(tickets);
-          tickets.set(input.asset_id, resolved.url);
-          resolvedSources.set(input.asset_id, resolved.description);
+        if (resolved) {
+          resolvedSources.set(input.input_id, { url: resolved.url, description: resolved.description });
+        }
+        if (resolved?.isProxy) {
+          if (usage) usage.proxy_resolutions += 1;
           session.proxyDecodedAssets.add(input.asset_id);
         }
       }
@@ -603,8 +653,8 @@ export class PreviewSession {
       // （compositor-worker.worker.ts:574 的 log2(sourceWidth/rect.w)），源宽报大
       // 5.3 倍 ⇒ 采样层级算错、画面只画出左侧一条 + 其余纯黑（真机复现）。
       // 故这里取「实际会解码的那份源」的宽度：代理就绪用代理编码尺寸，否则原片。
-      inputs: ir.inputs.filter(input => input.asset_kind !== "audio").map(input => {
-        const proxy = resolvedSources.get(input.asset_id);
+      inputs: ir.inputs.filter(inputNeedsVisual).map(input => {
+        const proxy = resolvedSources.get(input.input_id)?.description;
         const srcW = proxy?.coded_width ?? input.geometry.width ?? 1920;
         const srcH = proxy?.coded_height ?? input.geometry.height ?? 9;
         // 源平面方向 vs 内容盒方向相差 90° ⇒ 合成时交换采样 UV 轴（P206/P212）。
@@ -645,9 +695,11 @@ export class PreviewSession {
       throw new Error(`software rendering detected: ${adapter}`);
     }
     for (const input of ir.inputs) {
+      if (!inputNeedsVisual(input)) continue;
       const ticket = tickets.get(input.asset_id);
       if (!ticket) throw new Error(`no ticket for ${input.asset_id}`);
-      if (input.asset_kind === "audio") continue; // 纯音频输入：无视觉装配，音频走 WebAudio
+      const videoSource = resolvedSources.get(input.input_id);
+      const visualTicket = videoSource?.url ?? ticket;
       const rig: InputRig = {
         kind: input.asset_kind === "image" ? "image" : "video",
         worker: null,
@@ -713,7 +765,7 @@ export class PreviewSession {
             }
           : undefined;
         const decoder = await factory.create({
-          mediaUrl: ticket,
+          mediaUrl: visualTicket,
           codec: "auto",
           width: input.geometry.width,
           height: input.geometry.height,
@@ -723,8 +775,10 @@ export class PreviewSession {
         }, signal);
         if (session.disposed || signal?.aborted) { decoder.dispose(); throw new DOMException("Session disposed", "AbortError"); }
         rig.worker = decoder;
+        const usage = session.decodeUsageByInput.get(input.input_id);
+        if (usage) usage.video_rig_created = true;
         rig.decoderRetry = {
-          ticket,
+          ticket: visualTicket,
           width: input.geometry.width,
           height: input.geometry.height,
           cacheCapBytes: rangeCacheBytes,
@@ -786,7 +840,7 @@ export class PreviewSession {
         if (!audioByClip.get(segment.clip_id)?.enabled) continue;
         // 装配时全局倍速恒为 1（setPlayRate 只在会话就绪后到来）——
         // effectiveRigSpeed 此时与段速相等，写法统一便于换率路径复用。
-        session.audioRigs.set(segment.clip_id, makeAudioRig(session.effectiveRigSpeed(Math.max(0.25, Math.min(4, segment.speed_milli / 1000)))));
+        session.audioRigs.set(segment.clip_id, makeAudioRig(session.effectiveRigSpeed(segment.speed_milli / 1000)));
       }
     }
     throwIfAborted(signal);
@@ -869,7 +923,8 @@ export class PreviewSession {
     this.reapplyAudioRigSpeeds();
   }
 
-  /** 音源域消耗速率：段速 × 全局倍速（段速先夹取 [0.25,4]，playRate 恒已夹取）。
+  /** 音源域消耗速率：段速 × 全局倍速（playRate 恒已夹取）；仅当合速落在浏览器
+   *  可播放区间 [1/16,16] 时才启动预览音频，超出时保持静音并由导出混音保留音轨。
    *  时间轴域推进由 tick 的缩放时钟承担（playAudioTargetUs），两侧对墙钟的
    *  速率恒相等——drift 判定与 1x 同构。 */
   private effectiveRigSpeed(segmentSpeed: number): number {
@@ -887,10 +942,15 @@ export class PreviewSession {
       const segment = segmentOf.get(clipId);
       const cfg = this.audioByClip?.get(clipId);
       if (!segment || !cfg || !cfg.enabled) continue;
-      const segmentSpeed = Math.max(0.25, Math.min(4, segment.speed_milli / 1000));
+      const segmentSpeed = segment.speed_milli / 1000;
       const target = this.effectiveRigSpeed(segmentSpeed);
       if (rig.speed === target) continue;
       const activeSource = rig.workletActive || rig.source !== null;
+      if (!mediaRateIsPlayable(target)) {
+        if (activeSource) this.stopAudioSource(rig);
+        rig.speed = target;
+        continue;
+      }
       if (!activeSource || !this.playing) { rig.speed = target; continue; }
       // 正在发声：按旧速率算出的当前源域位置连续换率（先停后重启）
       const positionS = rig.startOffset + (this.audioCtx.currentTime - rig.startedAt) * rig.speed;
@@ -931,7 +991,7 @@ export class PreviewSession {
    *  A02 音频 rigs 同步：删除移除的 clip；输入/源窗口变化的 clip 重置播放
    *  位置；未变 clip 保留（worklet 已迁移的 buffer 不回退）。 */
   replaceIr(nextIr: Ir, nextFrames?: FrameSource): boolean {
-    const sig = (ir: Ir) => JSON.stringify(ir.inputs.map(item => [item.input_id, item.asset_id, item.asset_kind, item.geometry]));
+    const sig = (ir: Ir) => JSON.stringify(ir.inputs.map(item => [item.input_id, item.asset_id, item.asset_kind, item.video_required, item.audio_required, item.geometry]));
     if (sig(this.ir) !== sig(nextIr)) return false;
     const segOf = (ir: Ir) => new Map(ir.segments.map(segment => [segment.clip_id, segment] as const));
     const oldSegs = segOf(this.ir);
@@ -963,7 +1023,7 @@ export class PreviewSession {
         this.stopAudioSource(rig);
         rig.startedAt = 0;
         rig.startOffset = 0;
-        rig.speed = this.effectiveRigSpeed(Math.max(0.25, Math.min(4, next.speed_milli / 1000)));
+        rig.speed = this.effectiveRigSpeed(next.speed_milli / 1000);
         // buffer 可能来自旧窗口：worklet 路径需重定位（play 消息按新窗口下发），
         // legacy 路径 buffer 引用不变（解码内容与窗口无关，按 expected 起播）。
       }
@@ -1099,7 +1159,7 @@ export class PreviewSession {
   private poolRegister(ir: Ir): void {
     if (!this.pool) this.pool = new InputPool(this.poolTier ?? "balanced");
     for (const input of ir.inputs) {
-      if (input.asset_kind !== "video") continue; // 静图/纯音频不占解码保温
+      if (!inputNeedsVideo(input)) continue; // 静图/音频用途视频不占解码保温
       this.pool.register({
         inputId: input.input_id,
         width: input.geometry.width || 1920,
@@ -1342,6 +1402,20 @@ export class PreviewSession {
     }
   }
 
+  /** Route one frame request and preserve per-input backend evidence. */
+  private async decodeInput(rig: InputRig, inputId: string, frameN: number): Promise<DecodedFrame> {
+    const worker = rig.worker;
+    if (!worker) throw new Error(`no worker for input ${inputId}`);
+    const usage = this.decodeUsageByInput.get(inputId);
+    if (usage) {
+      usage.decode_requests += 1;
+      if (worker.backend === "ffmpeg") usage.ffmpeg_decode_requests += 1;
+    }
+    const decoded = await worker.decode(frameN, this.ir.canvas.fps);
+    if (usage && worker.backend === "ffmpeg") usage.ffmpeg_frames_returned += 1;
+    return decoded;
+  }
+
   private uploadRing(rig: InputRig, inputId: string, srcN: number): Promise<void> {
     if (!rig.worker || rig.decoderRecreate) return Promise.reject(new Error(`no worker for input`));
     this.beginUpload(); // P196：一笔上传开始 = 采样 timer 起（落定时收）
@@ -1358,7 +1432,7 @@ export class PreviewSession {
       let decoded: DecodedFrame;
       try {
         try {
-          decoded = await rig.worker!.decode(srcN, this.ir.canvas.fps);
+          decoded = await this.decodeInput(rig, inputId, srcN);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           // **缺失帧回退到相邻帧**（播放器「定格」语义）：片尾多请求一帧
@@ -1372,7 +1446,7 @@ export class PreviewSession {
               if (fallback < 0) continue;
               if (this.disposed || epoch !== this.seekEpoch || generation !== rig.chainGeneration) break;
               try {
-                decoded = await rig.worker!.decode(fallback, this.ir.canvas.fps);
+                decoded = await this.decodeInput(rig, inputId, fallback);
                 editorPerf.record("edge_fallback", 0, this.perfId, perfRequest, epoch, srcN, perfInput);
                 break;
               } catch { /* 再试下一个邻居 */ }
@@ -1380,7 +1454,7 @@ export class PreviewSession {
           }
           if (!decoded!) {
             if (this.disposed || !(await this.maybeFallBackToFfmpeg(rig, error))) throw error;
-            decoded = await rig.worker!.decode(srcN, this.ir.canvas.fps);
+            decoded = await this.decodeInput(rig, inputId, srcN);
           }
         }
         const decodeMs = performance.now() - decodeStart;
@@ -1433,7 +1507,7 @@ export class PreviewSession {
       const perfInput = editorPerf.enabled ? this.ir.inputs.findIndex(item => item.input_id === inputId) : -1;
       this.decodeInFlight += 1;
       try {
-        const decoded = await rig.worker!.decode(srcN, this.ir.canvas.fps);
+        const decoded = await this.decodeInput(rig, inputId, srcN);
         const decodeMs = performance.now() - decodeStart;
         this.decodeTimes.push(decodeMs);
         this.recordDecodeTime(inputId, decodeMs);
@@ -1461,6 +1535,20 @@ export class PreviewSession {
     list.push(ms);
     if (list.length > 600) list.splice(0, list.length - 600);
   }
+
+  /** Decoder-level per-input counters for P235 parity/performance harnesses. */
+  async decodeUsageCounters(): Promise<InputDecodeUsageCounters[]> {
+    return Promise.all([...this.decodeUsageByInput.values()].map(async usage => {
+      const worker = this.rigs.get(usage.input_id)?.worker;
+      const residency = await worker?.residency().catch(() => null) ?? null;
+      return {
+        ...usage,
+        webcodecs_decode_submissions: worker?.backend === "webcodecs" ? residency?.decode_submissions ?? 0 : 0,
+        webcodecs_output_callbacks: worker?.backend === "webcodecs" ? residency?.output_callbacks ?? 0 : 0,
+      };
+    }));
+  }
+
   /** 环形簿记中查找已就绪槽位的索引（-1 = 未就绪）。 */
   private ringSlotIndex(rig: InputRig, srcN: number): number {
     for (let index = 0; index < rig.ring.length; index++) {
@@ -1988,6 +2076,11 @@ export class PreviewSession {
    *  playbackRate 直调（变调，AudioWorklet 不可用时的回退）。 */
   private startAudioSource(rig: AudioRig, cfg: SegmentAudioConfig, segment: Ir["segments"][number], offset: number, speed: number): void {
     if (!this.audioCtx) return;
+    if (!mediaRateIsPlayable(speed)) {
+      this.stopAudioSource(rig);
+      rig.speed = speed;
+      return;
+    }
     this.stopAudioSource(rig);
     // 位置模型先落定（含淡变调度的段内位置基准），三条路径共用：
     // startedAt/startOffset/speed 一经写入即为本段发声的权威锚点。
@@ -2128,7 +2221,7 @@ export class PreviewSession {
     if (warmupHorizonUs > 0) {
       for (const segment of this.ir.segments) {
         const cfg = this.audioByClip.get(segment.clip_id);
-        if (!cfg || !cfg.enabled) continue;
+        if (!cfg || !cfg.enabled || !mediaRateIsPlayable(this.effectiveRigSpeed(segment.speed_milli / 1000))) continue;
         const startUs = segment.output_start_us ?? segment.timeline_start_us;
         if (startUs > tUs && startUs <= tUs + warmupHorizonUs) warmups.add(segment.clip_id);
       }
@@ -2136,6 +2229,8 @@ export class PreviewSession {
     for (const segment of this.ir.segments) {
       const cfg = this.audioByClip.get(segment.clip_id);
       if (!cfg || !cfg.enabled) continue;
+      const speed = segment.speed_milli / 1000;
+      if (!mediaRateIsPlayable(this.effectiveRigSpeed(speed))) continue;
       const startUs = segment.output_start_us ?? segment.timeline_start_us;
       const endUs = segment.output_end_us ?? segment.timeline_end_us;
       if (tUs < startUs || tUs > endUs) {
@@ -2144,7 +2239,6 @@ export class PreviewSession {
         continue;
       }
       active.add(segment.clip_id);
-      const speed = Math.max(0.25, Math.min(4, segment.speed_milli / 1000));
       let rig = this.audioRigs.get(segment.clip_id);
       if (!rig) { rig = makeAudioRig(this.effectiveRigSpeed(speed)); this.audioRigs.set(segment.clip_id, rig); }
       // B15 流式分派：长素材走块（不触发整段解码；loader 窗口请求）
@@ -2171,11 +2265,12 @@ export class PreviewSession {
       const activeSource = rig.workletActive || rig.source !== null;
       const position = activeSource ? rig.startOffset + (this.audioCtx.currentTime - rig.startedAt) * rig.speed : null;
       const drift = position === null ? Infinity : position - expected;
+      const effectiveSpeed = this.effectiveRigSpeed(speed);
       if (activeSource && Math.abs(drift) <= PreviewSession.AUDIO_REANCHOR_S) {
-        if (rig.speed !== speed) {
-          rig.speed = speed;
-          if (rig.workletActive) rig.worklet!.port.postMessage({ type: "speed", value: speed });
-          else rig.source!.playbackRate.value = speed;
+        if (rig.speed !== effectiveSpeed) {
+          rig.speed = effectiveSpeed;
+          if (rig.workletActive) rig.worklet!.port.postMessage({ type: "speed", value: effectiveSpeed });
+          else rig.source!.playbackRate.value = effectiveSpeed;
         }
         // 增益/淡变：配置与锚点未变时 scheduleAudioGain 直接返回（不打断 ramp）；
         // 变了（例如 speed 变更连带重排）就走滑动过渡，避免任何硬台阶。
@@ -2186,7 +2281,7 @@ export class PreviewSession {
       // 重启按新 offset 重算段内位置，淡变进度由位置决定 ⇒ 不重放淡入。
       // 源域消耗速率 = effectiveRigSpeed（startAudioSource 的 speed 即
       // rig.speed，音源按它消耗源域；时间轴域推进由缩放后的 tUs 承担）。
-      this.startAudioSource(rig, cfg, segment, expected, this.effectiveRigSpeed(speed));
+      this.startAudioSource(rig, cfg, segment, expected, effectiveSpeed);
     }
     for (const [clipId, rig] of this.audioRigs) {
       if (!active.has(clipId) && (rig.source || rig.workletActive)) this.stopAudioSource(rig);
@@ -2573,7 +2668,7 @@ export class PreviewSession {
   decodeBudget(): AssetDecodeBudget[] {
     const inputIdsByAsset = new Map<string, string[]>();
     for (const input of this.ir.inputs) {
-      if (input.asset_kind === "image" || input.asset_kind === "audio") continue;
+      if (!inputNeedsVideo(input)) continue;
       if (!this.rigs.has(input.input_id)) continue;
       const list = inputIdsByAsset.get(input.asset_id);
       if (list) list.push(input.input_id);
@@ -2668,7 +2763,7 @@ export class PreviewSession {
       // 生成阶段转掉。原片的 hdr 标记只用来说明「素材本身是 HDR」，不能代表
       // 「当前在解这个 HDR 流」——否则代理生效后仍弹「环境不支持 HDR」误报。
       hdr_media: this.ir.inputs.some(
-        input => input.hdr === true && !this.proxyDecodedAssets.has(input.asset_id),
+        input => inputNeedsVideo(input) && input.hdr === true && !this.proxyDecodedAssets.has(input.asset_id),
       ),
       hdr_decodable: this.hdrDisplayCapable,
       decode_ms_p50: p(decodes, 0.5),

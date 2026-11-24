@@ -124,7 +124,7 @@ class VarispeedStretch {
   setSpeed(value) {
     var v = Number(value);
     if (!isFinite(v)) return;
-    this.speed = Math.min(4, Math.max(0.25, v));
+    this.speed = Math.min(16, Math.max(1 / 16, v));
   }
   play(positionSec, speed) {
     this.setSpeed(speed);

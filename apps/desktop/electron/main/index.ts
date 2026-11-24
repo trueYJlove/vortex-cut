@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, protocol, shell } from "electron";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
-import { access, readdir, readFile } from "node:fs/promises";
+import { access, lstat, readdir, readFile } from "node:fs/promises";
 import { totalmem } from "node:os";
 import { CoreAdminClient, CoreHttpError } from "./core-admin-client.js";
 import { EditorLoadLeaseHeartbeat, makeWindowOwnerId, type EditorLoadMode } from "./editor-load-lease.js";
@@ -21,6 +21,7 @@ import { registerStage5Ipc } from "./stage5-ipc.js";
 import { registerStage6rIpc } from "./stage6r-ipc.js";
 import { registerPerformanceIpc } from "./performance-ipc.js";
 import { registerFileGrant } from "./file-grants.js";
+import { MAX_DROPPED_FILE_BYTES, isDroppedFileCountAllowed, isTrustedDroppedFileInvocation, validateDroppedFileSnapshot, type ValidatedDroppedFile } from "./dropped-file.js";
 import { exportFileName, normalizeExportPath } from "./export-destination.js";
 import { defaultLogPath, appendLog, redact } from "./logging.js";
 import { SidecarSupervisor } from "./sidecar-supervisor.js";
@@ -475,6 +476,63 @@ function registerIpc(): void {
     const asset = await fetchWithUi<Asset>(`${API_PREFIX}/projects/${projectId}/assets`, { method: "POST", body: JSON.stringify({ grant_id: grant.grant_id, ...(input.kind ? { kind: input.kind } : {}) }) });
     restrictedMedia.register(asset.asset_id, selectedPath);
     return { grant, asset, media_url: await restrictedMediaUrl(asset.asset_id) };
+  });
+  ipcMain.handle("asset:import-dropped", async (event, input: { project_id: ProjectId; files: unknown[] }) => {
+    if (!isTrustedDroppedFileInvocation({
+      liveMainWindow: Boolean(windowRef && !windowRef.isDestroyed()),
+      senderMatchesWindow: Boolean(windowRef && event.sender === windowRef.webContents),
+      senderIsMainFrame: event.senderFrame === event.sender.mainFrame,
+    })) {
+      throw new Error("Untrusted renderer");
+    }
+    const projectId = asId(input?.project_id, "project_id") as ProjectId;
+    if (!Array.isArray(input?.files) || !isDroppedFileCountAllowed(input.files.length)) {
+      throw new Error("Dropped file batch size is invalid");
+    }
+    const project = await fetchWithUi<{ status: string }>(`${API_PREFIX}/projects/${projectId}`);
+    if (project.status !== "active") throw new Error("Project is not active");
+
+    const imported: Array<Awaited<ReturnType<typeof assetPresentation>> & { grant: Awaited<ReturnType<typeof registerFileGrant>> }> = [];
+    const failures: Array<{ name: string; reason: "unsupported" | "invalid" | "import_failed" }> = [];
+    const validated: ValidatedDroppedFile[] = [];
+    for (const snapshot of input.files) {
+      const name = snapshot && typeof snapshot === "object" && typeof (snapshot as { name?: unknown }).name === "string"
+        ? (snapshot as { name: string }).name.slice(0, 256) : "未命名文件";
+      try {
+        const path = snapshot && typeof snapshot === "object" ? (snapshot as { path?: unknown }).path : undefined;
+        if (typeof path !== "string") { failures.push({ name, reason: "invalid" }); continue; }
+        const facts = await lstat(path);
+        const result = validateDroppedFileSnapshot(snapshot, {
+          isFile: facts.isFile(),
+          isSymbolicLink: facts.isSymbolicLink(),
+          size: facts.size,
+          basename: basename(path),
+        });
+        if (result === "invalid") failures.push({ name, reason: "invalid" });
+        else if (result === "unsupported") failures.push({ name, reason: "unsupported" });
+        else validated.push(result);
+      } catch {
+        failures.push({ name, reason: "invalid" });
+      }
+    }
+    if (validated.reduce((sum, item) => sum + item.size, 0) > MAX_DROPPED_FILE_BYTES) {
+      throw new Error("Dropped file batch is too large");
+    }
+    for (const file of validated) {
+      try {
+        const grant = await registerFileGrant(requireCore(), file.path);
+        const asset = await fetchWithUi<Asset>(`${API_PREFIX}/projects/${projectId}/assets`, {
+          method: "POST", body: JSON.stringify({ grant_id: grant.grant_id, kind: file.kind }),
+        });
+        restrictedMedia.register(asset.asset_id, file.path);
+        imported.push({ ...await assetPresentation(asset), grant });
+      } catch {
+        // Never return/log the dropped file's real path or an error string that might contain it.
+        void appendLog(logPath, `dropped asset import failed name=${file.name.slice(0, 128)}`);
+        failures.push({ name: file.name.slice(0, 256), reason: "import_failed" });
+      }
+    }
+    return { imported, failures };
   });
   ipcMain.handle("asset:refresh", async (_event, assetId: string) => {
     const asset = await fetchWithUi<Asset>(`${API_PREFIX}/assets/${asId(assetId, "asset_id")}/refresh`, { method: "POST" });

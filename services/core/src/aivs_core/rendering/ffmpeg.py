@@ -9,6 +9,7 @@ from typing import Any
 from ..media.windows_job import WindowsKillJob
 from ..performance import measured
 from ..projects import DomainError
+from .plan import ACTIVE_TRANSITION_RENDER_STATUS, OPENFILM_MOVE_PRESET_STATUS
 
 # C23：单段倒放的 FFmpeg reverse 滤镜内存预算（字节）。实测 60s 1080p
 # 段 RSS ≈ 4.9GiB（未压缩帧驻留）；预算取 2GiB——1080p 下约 22s 段长，
@@ -165,6 +166,32 @@ def build_timeline_args(
     segments = plan["segments"]
     if len(segments) != len(segment_paths) or len(segments) != len(segment_probes):
         raise DomainError("RENDER_PLAN_INVALID", "渲染输入数量不一致")
+    for transition in plan.get("active_transitions", []):
+        kind = transition.get("kind")
+        status = ACTIVE_TRANSITION_RENDER_STATUS.get(kind, "open: unknown transition kind")
+        if not status.startswith("supported"):
+            presets = [
+                transition.get("incoming_move_preset_id"),
+                transition.get("outgoing_move_preset_id"),
+            ]
+            preset_text = ", ".join(item for item in presets if isinstance(item, str))
+            detail = f" ({preset_text})" if preset_text else ""
+            raise DomainError(
+                "RENDER_PLAN_INVALID",
+                f"active transition {kind}{detail} 未实现：{status}；拒绝静默降级",
+            )
+    for segment in segments:
+        if segment.get("track_hidden"):
+            continue
+        for edge in ("move_in", "move_out"):
+            move = segment.get(edge)
+            if isinstance(move, dict):
+                preset_id = str(move.get("preset_id") or "unknown")
+                status = OPENFILM_MOVE_PRESET_STATUS.get(preset_id, "open: unknown preset")
+                raise DomainError(
+                    "RENDER_PLAN_INVALID",
+                    f"segment {segment['clip_id']} {edge} preset {preset_id} 未实现：{status}；拒绝静默忽略",
+                )
     # P231 统一盒模型：全部非音频非隐藏段都进入盒叠加（overlay 链），
     # 但时间轴 concat/xfade 基底只由最下层视觉轨的同轨时间链构成；
     # 跨轨同时段片段不再被串联播放。z 序 = track_index 降序
@@ -254,6 +281,11 @@ def build_timeline_args(
                 )
     args = ["-hide_banner", "-nostdin", "-y"]
     for position, (segment, path) in enumerate(zip(segments, segment_paths, strict=True)):
+        # Video-backed audio clips each get an independent audio-role input.
+        # Disable video at that input so FFmpeg never submits visual frames to
+        # a decoder; a separate visual-role segment keeps its normal input/map.
+        if segment.get("asset_kind") == "audio" and segment.get("source_asset_kind") == "video":
+            args.append("-vn")
         # C21a：深定位图——eligible 输入前插 -ss（-i 前为准确 seek）；
         # legacy 输入零改动。图像输入不定位（loop 无 seek 语义）。
         if segment["asset_kind"] == "image":
@@ -377,11 +409,16 @@ def build_timeline_args(
                     f"[ppbg{label_id}][vpre{label_id}]overlay=x={cx * width - pip_w / 2:.1f}"
                     f":y={cy * height - pip_h / 2:.1f},format=yuv420p[{out_label}]"
                 )
+                if window_us is None:
+                    clauses = _picture_fade_clauses(clauses, segment, duration_us, out_label)
                 return clauses
-        return _keyframe_animation_filters(
+        clauses = _keyframe_animation_filters(
             segment, base, f"vbase{label_id}", out_label, width, height,
             black_input_index if black_input_index is not None else -1,
         )
+        if window_us is None:
+            clauses = _picture_fade_clauses(clauses, segment, duration_us, out_label)
+        return clauses
 
     for position, item in enumerate(graph_items):
         if item["kind"] == "black":
@@ -1024,6 +1061,26 @@ def _pip_overlay_chain(
     else:
         alpha_clause = []
         align_label = label
+    picture_fade_in = max(int(segment.get("picture_fade_in_us") or 0), 0)
+    picture_fade_out = max(int(segment.get("picture_fade_out_us") or 0), 0)
+    if picture_fade_in or picture_fade_out:
+        if picture_fade_in + picture_fade_out > duration_us:
+            total_fade = picture_fade_in + picture_fade_out
+            picture_fade_in = int(picture_fade_in * duration_us / total_fade)
+            picture_fade_out = duration_us - picture_fade_in
+        fade_chain = ["format=rgba"]
+        if picture_fade_in:
+            fade_chain.append(
+                f"fade=t=in:st=0:d={_seconds(picture_fade_in)}:alpha=1"
+            )
+        if picture_fade_out:
+            fade_chain.append(
+                f"fade=t=out:st={_seconds(duration_us - picture_fade_out)}:"
+                f"d={_seconds(picture_fade_out)}:alpha=1"
+            )
+        faded_label = f"{label}picturefade"
+        alpha_clause.append(f"[{align_label}]{','.join(fade_chain)}[{faded_label}]")
+        align_label = faded_label
     align = f"[{align_label}]setpts=PTS+{enable_start_us / 1_000_000:.6f}[{label}a]"
     # transform.x/y 为「中心点归一化位置」（0..1，与 contracts 注释及交互预览
     # translate(-50%,-50%) 语义一致）：overlay 左上角 = 中心点像素 − PIP 尺寸一半。
@@ -1297,3 +1354,36 @@ def _fade_chain(segment: dict[str, Any], duration_us: int) -> str:
             f"afade=t=out:st={_seconds(int(duration_us) - fade_out)}:d={_seconds(fade_out)}"
         )
     return "".join(f",{clause}" for clause in clauses)
+
+
+def _picture_fade_clauses(
+    clauses: list[str], segment: dict[str, Any], duration_us: int, output_label: str,
+) -> list[str]:
+    """Apply clip-local picture fades to a full segment stream, toward black."""
+    try:
+        fade_in = max(int(segment.get("picture_fade_in_us") or 0), 0)
+        fade_out = max(int(segment.get("picture_fade_out_us") or 0), 0)
+    except (TypeError, ValueError):
+        return clauses
+    duration = max(int(duration_us), 0)
+    if duration <= 0 or (fade_in <= 0 and fade_out <= 0):
+        return clauses
+    if fade_in + fade_out > duration:
+        fade_in = int(fade_in * duration / (fade_in + fade_out))
+        fade_out = duration - fade_in
+    terminal = f"{output_label}_pf_source"
+    clauses[-1] = clauses[-1].replace(f"[{output_label}]", f"[{terminal}]")
+    current = terminal
+    fade_specs = []
+    if fade_in > 0:
+        fade_specs.append(("in", 0, fade_in))
+    if fade_out > 0:
+        fade_specs.append(("out", duration - fade_out, fade_out))
+    for index, (direction, start, length) in enumerate(fade_specs):
+        next_label = output_label if index == len(fade_specs) - 1 else f"{output_label}_pf{index}"
+        clauses.append(
+            f"[{current}]fade=t={direction}:st={_seconds(start)}:"
+            f"d={_seconds(length)}:color=black[{next_label}]"
+        )
+        current = next_label
+    return clauses

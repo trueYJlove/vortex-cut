@@ -133,11 +133,11 @@ def test_domain_ranges_enforced_at_apply(tmp_path: Path) -> None:
                   "duration_us": 50}],
                 ai=True,
             )
-    with pytest.raises(DomainError, match="0.25x-4x"):
+    with pytest.raises(DomainError, match="0.1x-100x"):
         with service.db.connection() as db:
             service.apply_in_memory(
                 db, "p1", document,
-                [{"op": "set_speed", "clip_id": clip_id, "speed_milli": 5000}],
+                [{"op": "set_speed", "clip_id": clip_id, "speed_milli": 100_001}],
                 ai=True,
             )
 

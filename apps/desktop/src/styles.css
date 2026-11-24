@@ -1,8 +1,12 @@
+@import "./assets/fonts/inter/inter.css";
+
 /* 表单控件主题色跟随品牌（OpenFilm 的 --switch-on 语义）。 */
 :root { accent-color: var(--dlg-primary, var(--brand-b));
-  /* 字体栈对齐 OpenFilm globals.css:26-29：西文 Inter + 系统 UI，CJK 逐级回退。 */
-  font-family: Inter, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
-  color: var(--ink-1-b); background: var(--dlg-inset-5); font-synthesis: none;
+  /* OpenFilm globals.css:26-29: bundled Inter for Latin; system CJK fallbacks. */
+  font-family: "Inter Variable", Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", "Source Han Sans SC", "Heiti SC", sans-serif;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  letter-spacing: -0.006em;
+  color: var(--ink-1-b); background: var(--dlg-inset-5); font-synthesis: weight style small-caps;
   -webkit-font-smoothing: antialiased; }
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 1024px; min-height: 720px; overflow: hidden; background: var(--dlg-inset-5); }
@@ -603,28 +607,31 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--vc-accent); }
 .timeline-zoom { display: flex; align-items: center; gap: 6px; }
 .timeline-zoom button { background: transparent; border: none; color: var(--vc-text-2); cursor: pointer; padding: 2px 4px; border-radius: 3px; display: flex; align-items: center; }
 .timeline-zoom button:hover { background: var(--rgba-34); color: var(--vc-text); }
-.timeline-zoom-slider { width: 80px; height: 12px; appearance: none; -webkit-appearance: none; background: transparent; cursor: pointer; margin: 0; }
+.timeline-zoom-slider { --zoom-fill: #f0f0f0; --zoom-rail: #373737; width: 78px; height: 12px; appearance: none; -webkit-appearance: none; background: transparent; cursor: pointer; margin: 0; }
+.timeline-zoom button:disabled { opacity: .4; cursor: default; }
+.timeline-zoom-slider:disabled { opacity: .4; cursor: default; }
+.timeline-zoom-slider:focus-visible { outline: 1px solid var(--ws-focus); outline-offset: 3px; }
 /* 轨道：已走过段点亮为品牌青，未走过段灰（对齐 OpenFilm 的 .tl-zoom）。
    --pos 由组件按当前缩放百分比写入（0..1）。 */
 .timeline-zoom-slider::-webkit-slider-runnable-track {
   height: 3px; border-radius: 999px;
   background: linear-gradient(to right,
-    var(--accent) 0,
-    var(--accent) calc(var(--pos, 0) * 100%),
-    var(--border) calc(var(--pos, 0) * 100%),
-    var(--border) 100%);
+    var(--zoom-fill) 0,
+    var(--zoom-fill) calc(var(--pos, 0) * 100%),
+    var(--zoom-rail) calc(var(--pos, 0) * 100%),
+    var(--zoom-rail) 100%);
 }
 /* 滑块 = **6×13 圆角 2px 的竖条、强调色填充**（参照 globals.css:462-470 .tl-zoom）。
    原来是 12×12 白色圆形 + 阴影 —— 与参照是完全不同的形态：
    参照用「细长条 + 强调色」表达「这是一根刻度尺上的游标」，而不是一个通用圆形滑块。 */
-.timeline-zoom-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 6px; height: 13px; margin-top: -5px; border-radius: 2px; background: var(--accent); border: none; cursor: pointer; }
+.timeline-zoom-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 6px; height: 13px; margin-top: -5px; border-radius: 2px; background: var(--zoom-fill); border: none; cursor: pointer; }
 .timeline-zoom-slider::-moz-range-track {
   height: 3px; border-radius: 999px;
   background: linear-gradient(to right,
-    var(--accent) 0, var(--accent) calc(var(--pos, 0) * 100%),
-    var(--border) calc(var(--pos, 0) * 100%), var(--border) 100%);
+    var(--zoom-fill) 0, var(--zoom-fill) calc(var(--pos, 0) * 100%),
+    var(--zoom-rail) calc(var(--pos, 0) * 100%), var(--zoom-rail) 100%);
 }
-.timeline-zoom-slider::-moz-range-thumb { width: 6px; height: 12px; border: 0; border-radius: 2px; background: var(--text-muted); cursor: pointer; }
+.timeline-zoom-slider::-moz-range-thumb { width: 6px; height: 12px; border: 0; border-radius: 2px; background: var(--zoom-fill); cursor: pointer; }
 .timeline-zoom-value { font-size: var(--dlg-fs-label); color: var(--vc-text-2); min-width: 48px; text-align: right; font-family: monospace; }
 
 /* 面板高度由用户拖拽决定；内容（轨道行）始终按自身高度渲染，
@@ -637,7 +644,10 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--vc-accent); }
 .timeline-body-row { flex: 1; min-height: 0; display: flex; align-items: stretch; overflow: hidden; }
 .timeline-body-row > .timeline-body { flex: 1 1 auto; min-width: 0; }
 .timeline-body { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; overflow: hidden; }
-.timeline-ruler-pin { position: absolute; top: 0; left: 0; z-index: 6; display: block; }
+.timeline-ruler-pin { position: absolute; top: 0; left: 0; z-index: 6; display: block; touch-action: none; }
+.timeline-ruler-pin:focus { outline: none; }
+.timeline-ruler-tick-layer { position: absolute; inset: 0 0 auto; height: 20px; overflow: hidden; pointer-events: none; z-index: 7; }
+.timeline-ruler-guide { position: absolute; bottom: 0; left: 0; width: 1px; background: var(--tl-snap); pointer-events: none; z-index: 5; }
 /* 播放头独立覆盖层（A06）：与固定标尺同坐标系（timeline-body 顶部原点，
    主画布内容自 2*headW 起——与 drawRulerStrip 的屏幕对齐规则一致）；
    线 + 手柄只做 translateX，不参与命中测试（拖拽由标尺/空白区提供）。 */
@@ -679,9 +689,19 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--vc-accent); }
 /* 封面入口用令牌（2026-11-11）。原来底色写死 var(--surface-1)（深色专属），
    浅色主题下它是整条轨道头列里唯一一块深色方块——用户截图指出"背景选择框
    的背景也不对"。虚线框同理：深色边框在浅底上几乎看不见。 */
-.timeline-cover-entry { position: absolute; left: 4px; display: grid; justify-items: center; align-content: center; gap: 3px; border: 1px dashed var(--ws-line-2, #3a4650); border-radius: 6px; background: var(--ws-inset, var(--surface-1)); color: var(--ws-text-3, var(--ink-2)); font-size: var(--dlg-fs-caption); cursor: default; z-index: 4; overflow: hidden; }
-.timeline-cover-entry:hover { color: var(--ws-accent-text, var(--brand)); border-color: var(--ws-accent-line, var(--rgba-39)); background: var(--ws-accent-dim, var(--rgba-40)); }
-.timeline-cover-entry img { width: 100%; height: 100%; min-height: 0; object-fit: cover; border-radius: 3px; }
+.timeline-cover-entry { position: absolute; left: 5px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border: 1px dashed var(--border-strong); border-radius: 5px; background: var(--bg-field); color: var(--editor-control); font-size: 10px; line-height: 1; cursor: default; z-index: 4; overflow: hidden; }
+.timeline-cover-entry:hover { color: var(--accent); border-color: var(--accent); background: var(--bg-field); }
+.timeline-cover-entry svg { width: 13px; height: 13px; }
+.timeline-cover-entry:has(img) { border: 0; background: #000; color: #f0f0f0; box-shadow: 0 0 0 1px var(--border-strong); }
+.timeline-cover-entry img { width: 100%; height: auto; flex: 1 1 auto; min-height: 0; object-fit: cover; border-radius: 0; }
+.timeline-cover-entry img + span { width: 100%; height: 13px; flex: 0 0 13px; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, .75); }
+.timeline-clip-label-layer { position: absolute; inset: 0; z-index: 1; overflow: hidden; pointer-events: none; }
+.timeline-clip-label { position: absolute; overflow: hidden; border-radius: 4px; pointer-events: none; }
+.timeline-clip-label-info { display: flex; align-items: center; overflow: hidden; padding: 0 6px; white-space: nowrap; letter-spacing: -0.006em; }
+.timeline-clip-label-pin { display: flex; min-width: 0; align-items: center; gap: 4px; transform-origin: left; white-space: nowrap; }
+.timeline-clip-label-name { min-width: 0; flex: 0 1 auto; overflow: hidden; color: rgba(255, 255, 255, .9); font-size: 10px; font-weight: 500; font-synthesis: weight style small-caps; line-height: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.timeline-clip-label-speed { flex: 0 0 auto; color: rgba(255, 255, 255, .9); font-size: 10px; font-variant-numeric: tabular-nums; font-weight: 500; line-height: 10px; white-space: nowrap; }
+.timeline-clip-label-duration { flex: 0 0 auto; color: rgba(255, 255, 255, .55); font-size: 10px; font-variant-numeric: tabular-nums; font-weight: 400; line-height: 10px; }
 /* T15 修正：参照头列底 = var(--bg-panel)（Timeline.tsx:274 TL.head），与标尺同源；
    行体才是 --tl-row。边线 = --border；内容滚过头列右缘时 6px 阴影（Timeline.tsx:4237）。 */
 .timeline-left { flex-shrink: 0; display: flex; flex-direction: column; border-right: 1px solid var(--border); background: var(--bg-panel); overflow: hidden; }
@@ -697,35 +717,6 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--vc-accent); }
 .timeline-left-meta strong { font-size: var(--dlg-fs-label); color: var(--vc-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .timeline-left-meta span { font-size: var(--dlg-fs-caption); color: var(--vc-text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* ── 剪映式轨道属性头：[类型标识] [锁定] [隐藏] [静音] [独奏] ───────────── */
-.timeline-add-track-wrap { position: relative; display: inline-flex; }
-.timeline-add-track-menu { position: absolute; top: 34px; left: 0; z-index: 40; display: flex; flex-direction: column; min-width: 108px; padding: 4px; gap: 2px; background: var(--vc-panel-2, var(--surface-3)); border: 1px solid var(--vc-border, #3a464e); border-radius: 7px; box-shadow: 0 8px 22px var(--rgba-36); }
-.timeline-add-track-menu button { padding: 5px 10px; border: 0; border-radius: 4px; background: transparent; color: var(--dlg-text, #d7e2e8); font-size: var(--dlg-fs-body); text-align: left; cursor: pointer; }
-.timeline-add-track-menu button:hover { background: var(--ctl-bg-hover, var(--surface-3-c)); }
-/* 显示设置（…菜单）：轨道高度滑杆 + 波形占比三档 */
-.timeline-display-wrap { position: relative; display: inline-flex; margin-left: 6px; }
-.timeline-display-menu { position: absolute; top: 36px; right: 0; z-index: 40; display: flex; flex-direction: column; gap: 12px; min-width: 240px; padding: 14px 12px; background: var(--vc-panel-2, var(--surface-3)); border: 1px solid var(--vc-border, #3a464e); border-radius: 8px; box-shadow: 0 8px 22px var(--rgba-36); }
-/* 两行共用同一栅格：56px 标签 + 150px 内容列；滑条与图标组都铺满内容列，
-   图标组 justify-content: space-between → 首尾图标与滑条两端对齐、等距。 */
-.timeline-display-menu .display-row { display: grid; grid-template-columns: 56px 150px; align-items: center; gap: 10px; }
-.timeline-display-menu .display-row > span { font-size: var(--dlg-fs-body); color: var(--vc-text-2, var(--ink-2-b)); }
-.timeline-display-menu .display-slider { width: 150px; }
-/* 剪映式细滑条（2px 轨道 + 12px 圆形滑块）：轨道高度与时间线缩放共用。 */
-.track-height-slider { height: 12px; appearance: none; -webkit-appearance: none; background: transparent; cursor: pointer; }
-.track-height-slider::-webkit-slider-runnable-track { height: 2px; border-radius: 1px; background: var(--vc-border-2, #4a565e); }
-.track-height-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 12px; height: 12px; margin-top: -5px; border-radius: 50%; background: var(--vc-panel-2, #eef4f6); border: none; box-shadow: 0 1px 3px var(--rgba-35); }
-.track-height-slider::-moz-range-track { height: 2px; border-radius: 1px; background: var(--vc-border-2, #4a565e); }
-.track-height-slider::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: var(--vc-panel-2, #eef4f6); border: none; box-shadow: 0 1px 3px var(--rgba-35); }
-/* 波形占比图标（剪映式）：深色示波卡 + 波形柱；选中 = 青色描边 + 微亮底
-   （不用实底吞掉图标，保持可读）。hover 提示具体比例。 */
-.timeline-display-menu .ratio-group { display: inline-flex; align-items: center; justify-content: space-between; width: 150px; }
-.ratio-icon { min-width: 0; min-height: 0; width: 32px; height: 24px; display: grid; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 6px; background: transparent; cursor: pointer; }
-.ratio-icon:hover { background: var(--ctl-bg-hover, var(--rgba-34)); }
-.ratio-icon.active { border-color: var(--vc-accent, var(--brand-deep-b)); background: var(--vc-accent-soft, rgba(18, 181, 166, 0.16)); }
-.ratio-icon-card { display: flex; align-items: flex-end; justify-content: center; gap: 1.5px; width: 18px; height: 13px; padding: 2px 2.5px; box-sizing: border-box; border: 1px solid var(--vc-border-2, #cfd8dd); border-radius: 2px; overflow: hidden; }
-.ratio-icon-card i { width: 2px; background: var(--vc-text, #e6edef); }
-.ratio-icon.active .ratio-icon-card { border-color: var(--vc-accent, #7fe8dd); }
-.ratio-icon.active .ratio-icon-card i { background: var(--vc-accent, #7fe8dd); }
 /* 轨道头：内容在行内垂直居中。
    2026-11-11 我一度改成 align-items:flex-start（理由是与片段名称条对齐），
    但参照软件的轨道头是**居中**的——像素实测（录屏 t=40.5s）：
@@ -748,10 +739,12 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--vc-accent); }
 }
 .timeline-track-head[data-flag-cols="2"] { grid-template-columns: 24px 4px repeat(2, minmax(0, 1fr)); }
 .timeline-track-head[data-flag-cols="4"] { grid-template-columns: 24px 4px repeat(4, minmax(0, 1fr)); }
+.timeline-track-head[data-head-collapsed="true"] { grid-template-columns: minmax(0, 1fr); justify-items: center; padding: 0; }
+.timeline-track-head[data-head-collapsed="true"] .timeline-track-badge { display: none; }
+.timeline-track-collapsed-menu { position: absolute; left: 2px; top: 50%; z-index: 2; width: 24px; height: 24px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--vc-text-2); cursor: pointer; transform: translateY(-50%); }
+.timeline-track-collapsed-menu:hover { background: var(--rgba-34); color: var(--vc-text); }
+.timeline-track-collapsed-menu:focus-visible { outline: 2px solid var(--ws-focus); outline-offset: -1px; }
 .timeline-track-head[data-lane-picked="1"] { background: var(--tl-lane-on); }
-.timeline-track-head[data-track-kind="video"] .timeline-track-badge { color: var(--ink-track-video); }
-.timeline-track-head[data-track-kind="text"] .timeline-track-badge { color: var(--ink-track-text); }
-.timeline-track-head[data-track-kind="audio"] .timeline-track-badge { color: var(--ink-track-audio); }
 .timeline-track-resize {
   position: absolute; z-index: 3; left: 0; right: 0; bottom: 0; height: 6px;
   cursor: row-resize; touch-action: none; outline: none;
@@ -763,6 +756,9 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--vc-accent); }
 .timeline-track-resize:hover::after,
 .timeline-track-resize:focus-visible::after { background: var(--brand); }
 .timeline-track-resize:focus-visible { outline: 1px solid var(--ws-focus); outline-offset: -1px; }
+.timeline-track-head-divider { position: absolute; z-index: 6; width: 12px; height: 20px; display: grid; place-items: center; padding: 0; border: 1px solid var(--border-strong); border-radius: 4px; background: var(--bg-raised); color: var(--text); cursor: pointer; }
+.timeline-track-head-divider:hover { background: var(--bg-hover); }
+.timeline-track-head-divider:focus-visible { outline: 2px solid var(--ws-focus); outline-offset: 1px; }
 /* 轨号：参照 LaneMark 是 21×14、10.5px 纯文字、text-faint（Timeline.tsx:295）。
    原来 min-width:30px 比网格第一列的 24px 还宽 —— 这正是「最左侧图标被挡住」的直接原因
    （内容溢出列宽后被相邻列压住）。改为 21px 并与网格列同宽。 */
@@ -771,13 +767,12 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--vc-accent); }
 .timeline-track-head[data-track-drop-target="true"] { box-shadow: inset 0 2px var(--brand); }
 .timeline-track-head:not([data-track-id="V1"]):not([data-track-id="A1"]) .timeline-track-badge { cursor: grab; touch-action: none; }
 .timeline-track-head:not([data-track-id="V1"]):not([data-track-id="A1"]) .timeline-track-badge:active { cursor: grabbing; }
-.timeline-track-badge small { font-size: 10.5px; font-weight: 500; line-height: 1; font-variant-numeric: tabular-nums; }
-.timeline-track-badge small { font-size: var(--dlg-fs-caption); color: var(--vc-text-2, #9fb3bd); }
+.timeline-track-badge small { font-size: 10.5px; font-weight: 500; line-height: 1; font-variant-numeric: tabular-nums; color: var(--text-faint); }
 /* 锁定/隐藏/静音/独奏：与最左侧轨道类型标识同级的紧凑小图标；
    hover 是刚好包住图标的正圆（剪映式）。显式覆盖全局 button 的 min-height，
    否则 16×32 的按钮会让 border-radius:50% 呈现椭圆。 */
 /* 参照 TrackHeadButton：方形小钮、图标 12（HEAD_ICON_H=12）、hover 方形底 */
-.track-flag { width: 20px; height: 20px; min-height: 0; flex: 0 0 auto; display: grid; place-items: center; border: 0; border-radius: 4px; background: transparent; color: var(--text-muted); cursor: pointer; font-size: var(--dlg-fs-caption); font-weight: 700; padding: 0; line-height: 1; }
+.track-flag { width: 20px; height: 20px; min-height: 0; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; border: 0; border-radius: 4px; background: transparent; color: var(--text-muted); cursor: pointer; font-size: var(--dlg-fs-caption); font-weight: 700; font-synthesis: weight style small-caps; padding: 0; line-height: 1; }
 .track-flag svg { width: 12px; height: 12px; }
 .track-flag:hover { background: var(--bg-hover); color: var(--text); }
 /* 按下态自带底色，且必须压过全局 button:hover（2026-11-11）。
@@ -983,6 +978,12 @@ input, select, textarea { font-size: var(--dlg-fs-body); }
 .timeline-transition-marker .transition-edge { position: absolute; top: 0; bottom: 0; width: 6px; cursor: ew-resize; }
 .timeline-transition-marker .transition-edge.start { left: 0; }
 .timeline-transition-marker .transition-edge.end { right: 0; }
+.timeline-active-transition-marker { background: #136d68; color: #e8fffd; box-shadow: 0 1px 3px rgba(0, 0, 0, .45), inset 0 0 0 1px rgba(171, 255, 243, .28); }
+.timeline-active-transition-marker:hover { background: #18877f; }
+.timeline-active-transition-marker[data-transition="dip-black"] { background: #6c6030; color: #fff4c4; }
+.timeline-active-transition-marker[data-transition="move"] { background: #3d5585; color: #e7eeff; }
+.timeline-active-transition-marker.read-only { cursor: pointer; opacity: .78; }
+.timeline-active-transition-marker .transition-edge { z-index: 1; }
 
 /* M2 B3: 关键帧编辑器 */
 .keyframe-editor { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--vc-border, var(--line-1)); border-radius: 8px; background: var(--rgba-48); }
@@ -3754,6 +3755,7 @@ html[data-theme="light"] .modal-backdrop { background: var(--rgba-90); }
   --tl-snap: #0098a3;
   --tl-row-hover: rgba(255, 255, 255, 0.07);
   --tl-track-head-bg: #101012;
+  --tl-rail-bg: #191919;
   /* 素材终点标线：它是「内容到此为止」这条唯一还活着的界线（泳道带已铺满全宽），
      必须够 3:1（WCAG 1.4.11 非文本对比）。原 #3d4a5c 对死区仅 2.01:1，等于看不见。 */
   --tl-end-edge: #6f7a86;
@@ -3772,12 +3774,10 @@ html[data-theme="light"] .modal-backdrop { background: var(--rgba-90); }
   --tl-ruler-top: #1c1c1f;
   --tl-ruler-bottom: #17171a;
   --tl-dead-bg: #161618;
-  /* 泳道带（2026-11-16 复刻 OpenFilm --tl-row）：半透明行色叠在面板底上，
-     不是实色不透明块——实色会让 2px 的面板间隙失去作用，泳道之间只能靠
-     分隔线区分；半透明带 + 间隙才是参照的结构表达方式。 */
-  --tl-row: rgba(240, 240, 255, 0.035);
-  --tl-row-audio: rgba(240, 240, 255, 0.05);
-  --tl-lane-on: rgba(240, 240, 255, 0.085);
+  /* OpenFilm's dark timeline paints neutral solid lanes, separated by panel-colored 2px gaps. */
+  --tl-row: #1d1d1d;
+  --tl-row-audio: #1d1d1d;
+  --tl-lane-on: #232323;
 }
 [data-theme="light"] {
   --clip-video: #54789d;
@@ -3792,6 +3792,7 @@ html[data-theme="light"] .modal-backdrop { background: var(--rgba-90); }
   --tl-snap: #0098a3;
   --tl-row-hover: rgba(16, 16, 24, 0.06);
   --tl-track-head-bg: #e9e9eb;
+  --tl-rail-bg: #fbfbfc;
   --tl-end-edge: #86868e;
   /* 浅色画布底更亮（#e7e7ea），#0098a3 只有 2.83:1（<3，WCAG 1.4.11）；
      #007a83 = 4.14:1。 */
@@ -3803,9 +3804,9 @@ html[data-theme="light"] .modal-backdrop { background: var(--rgba-90); }
   --tl-ruler-top: #f2f2f4;
   --tl-ruler-bottom: #e8e8ea;
   --tl-dead-bg: #ececee;
-  --tl-row: rgba(16, 16, 24, 0.03);
-  --tl-row-audio: rgba(16, 16, 24, 0.045);
-  --tl-lane-on: rgba(16, 16, 24, 0.07);
+  --tl-row: #f7f7f8;
+  --tl-row-audio: #f7f7f8;
+  --tl-lane-on: #f3f3f4;
 }
 
 
@@ -3875,7 +3876,7 @@ html[data-theme="light"] {
   --tl-grid-line-strong: rgba(255, 255, 255, 0.22);
   --tl-tick-major: #8a95a5;
   --tl-tick-minor: #596372;
-  --tl-label: #b9c4d1;
+  --tl-label: #a3a3a3;
 }
 html[data-theme="light"] {
   --tl-canvas-bg: #e7e7ea;
@@ -3883,7 +3884,7 @@ html[data-theme="light"] {
   --tl-grid-line-strong: rgba(16, 16, 24, 0.20);
   --tl-tick-major: #6a6a72;
   --tl-tick-minor: #a2a2ab;
-  --tl-label: #5a5a63;
+  --tl-label: #5d5d63;
 }
 
 /* 焦点环（对齐 OpenFilm globals.css:322-326）：2px accent + 2px offset，
@@ -5530,23 +5531,43 @@ body { background:var(--surface-body); }
 .editor-shell .tc i, .editor-shell .tc .tot { color:var(--text-faint); font-size:11px; }
 
 /* 时间线：统一深色、静止态只留发丝线 */
-.editor-shell .timeline-pane { background:var(--ws-shell); border-top-color:var(--ws-line); }
-/* 工具栏 40px（对齐 OpenFilm 的 TOOLBAR_H）：原 padding 6px + 内容 ~33px
-   实测 45px，比标尺还高，视觉上把时间线切成两段。固定 40px 后工具栏
-   与标尺（20px）合计 60px，与右侧预览栏的高度节奏一致。 */
-.editor-shell .timeline-toolbar { height:34px; min-height:34px; background:var(--bg-panel); border-bottom-color:var(--border); padding:0 8px; gap:6px; }
-/* P230-① 修复v2（2026-11-17 二次修正）：参照轨头行（Timeline.tsx:2731-2759
-   heads map）自己 paint laneTone(track, lit)——轨头行 = 泳道色的延伸，
-   行间 marginTop GAP=2 露出列地面 --tl-gap(=--bg-panel)。上一轮把轨头改成
-   --bg-panel 恰好抹掉了行与缝的差（轨头与缝同色 = 无分隔）。正确形态：
-   列容器/地面 = --bg-panel；轨头行 = --tl-row（画布泳道带同令牌）；
-   选中行 = --tl-lane-on。这样 2px 缝与轨头的亮度差 = 画布区泳道带与缝的差，
-   左右两列的分隔节奏一致。 */
-.editor-shell .timeline-ruler, .editor-shell .timeline-left, .editor-shell .timeline-left-corner { background:var(--bg-panel); border-color:var(--ws-line); }
-.editor-shell .timeline-track-head { background:var(--tl-row); border-color:var(--ws-line); }
+.editor-shell .timeline-pane { --tl-panel:var(--bg-panel); --tl-gap:var(--tl-panel); --accent:#0098a3; --editor-control:#222226; --editor-control-disabled:#a6a6ad; background:var(--tl-panel); border-top:0; box-shadow:inset 0 1px 0 var(--ws-line); }
+html[data-theme="dark"] .editor-shell .timeline-pane { --tl-panel:#191919; --accent:#00bec8; --editor-control:#f0f0f0; --editor-control-disabled:#464646; }
+/* OpenFilm TOOLBAR_H = 34px; paired with its 20px ruler. */
+.editor-shell .timeline-toolbar { height:34px; min-height:34px; background:var(--tl-panel); border-bottom-color:var(--border); padding:0 8px; gap:6px; color:var(--editor-control); }
+.editor-shell .timeline-toolbar button { width:28px; min-width:28px; height:28px; min-height:28px; padding:0; border-radius:6px; }
+.editor-shell .timeline-toolbar button:disabled { opacity:1; }
+.editor-shell .timeline-toolbar button[aria-pressed="true"] { color:var(--accent); background:color-mix(in srgb,var(--accent) 14%,transparent); }
+.editor-shell .timeline-toolbar .timeline-zoom button { width:28px; min-width:28px; height:28px; min-height:28px; padding:0; border-radius:6px; }
+.editor-shell .timeline-zoom button { color:var(--editor-control); }
+.editor-shell .timeline-zoom button:disabled { opacity:1; color:var(--editor-control-disabled); }
+.editor-shell .timeline-toolbar button[aria-pressed="true"] > svg,
+.editor-shell .timeline-zoom button > svg { width:15px; height:15px; }
+.editor-shell .timeline-mode-picker-select > svg { width:12px; height:12px; }
+.editor-shell .timeline-toolbar .timeline-mode-sep { margin-left:2px; margin-right:2px; }
+.editor-shell .timeline-toolbar .toolbar-zoom-sep { height:16px; margin:0 2px; }
+/* OpenFilm paints each track head and canvas lane with the same solid row color;
+   the 2px panel-colored gap between rows remains visible in both columns. */
+.editor-shell .timeline-ruler, .editor-shell .timeline-left, .editor-shell .timeline-left-corner { background:var(--tl-panel); border-color:var(--ws-line); }
+.editor-shell .timeline-left { border-right-color:rgba(240,240,255,.075); }
+.editor-shell .timeline-ruler-tick-layer { color:var(--editor-control); }
+.editor-shell .timeline-track-head { right:-1px; background:#1e1e1e; border-color:var(--ws-line); }
+.editor-shell .timeline-track-head .track-flag { width:24px; height:24px; justify-self:center; color:var(--text); }
+.editor-shell .timeline-track-head .track-flag svg { width:12px; height:12px; }
+html[data-theme="dark"] .editor-shell .timeline-track-head .track-flag { color:#f0f0f0; }
+.editor-shell .timeline-track-head .track-solo { font-size:12px; font-weight:600; line-height:12px; }
+.editor-shell .timeline-track-head .timeline-track-badge { transform:translateX(1.5px); }
 .editor-shell .timeline-track-head[data-lane-picked="1"] { background:var(--tl-lane-on); }
-/* 深浅两主题的 --tl-row 都是半透明行色：半透明叠在轨头列的 --bg-panel 地上
-   与叠在画布容器 --tl-gap（同为 --bg-panel）上合成结果一致——左右等亮。 */
+.editor-shell .timeline-clip-label-name { color:color-mix(in oklab,#fff 90%,transparent); }
+.editor-shell .timeline-clip-label-speed { color:color-mix(in oklab,#fff 90%,transparent); }
+.editor-shell .timeline-clip-label-duration { color:color-mix(in oklab,#fff 55%,transparent); }
+html[data-theme="dark"] .editor-shell .timeline-cover-entry { color:#f0f0f0; border-color:rgba(240,240,255,.075); }
+/* Keep the Vortex-only head-collapse affordance out of the default OpenFilm
+   surface; reveal it when the head column is hovered or keyboard-focused. */
+.editor-shell .timeline-track-head-divider { opacity:0; pointer-events:none; }
+.editor-shell .timeline-left:hover .timeline-track-head-divider,
+.editor-shell .timeline-track-head-divider:focus-visible { opacity:1; pointer-events:auto; }
+/* Track head and canvas lane fills share the same opaque --tl-row token. */
 .editor-shell .timeline-left-track { border-bottom-color:var(--ws-line); }
 .editor-shell .timeline-resize-handle { height:7px; background:transparent; border-top:1px solid var(--ws-line); }
 /* 衔接处拖拽提示：不要整条高亮。悬停时只把 7px 命中区染成一层极淡的中性色，
@@ -5628,12 +5649,6 @@ body { background:var(--surface-body); }
   --ws-accent-dim:rgba(0,152,163,.12);
   --ws-accent-line:rgba(0,152,163,.45);
 }
-
-/* 浅色下轨号徽章换深色调（深色值是为深底调的中間調，浅底上对比不足） */
-[data-theme="light"] .timeline-track-head[data-track-kind="video"] .timeline-track-badge { color: #2e5a80; }
-[data-theme="light"] .timeline-track-head[data-track-kind="text"] .timeline-track-badge { color: #8a5a1e; }
-[data-theme="light"] .timeline-track-head[data-track-kind="audio"] .timeline-track-badge { color: #1e6a3e; }
-
 
 /* 浅色下的页面底与滚动条 */
 [data-theme="light"] body { background:#ececed; }
@@ -5769,13 +5784,14 @@ body { background:var(--surface-body); }
   will-change: transform;
 }
 .timeline-marker-pin {
-  width: 8px; height: 12px; min-height: 12px;
-  padding: 0; border: 0; border-radius: 2px 2px 3px 3px;
-  margin-left: -4px;
+  width: 9.6px; height: 12px; min-height: 12px;
+  padding: 0; border: 0; border-radius: 0;
+  margin-left: -4.8px;
   cursor: ew-resize;
-  box-shadow: 0 1px 2px var(--rgba-14);
+  background: transparent;
   transition: transform .1s;
 }
+.timeline-marker-pin > svg { width: 9.6px; height: 12px; }
 .timeline-marker-pin:hover { transform: scaleY(1.15); }
 
 .timeline-marker-editor {

@@ -117,7 +117,7 @@ async function measurePixelsPerSecond(page: Page, geometry: TimelineGeometry, to
   return ((trimInner + trimOuter) / 2 - geometry.headerWidth) / (totalUs / 1_000_000);
 }
 
-test("M5 时间线：音量线拖拽改 gain、V1 自由定位贴齐钳制、双击标尺适应", async () => {
+test("M5 时间线：音量拖动、自由定位、标尺与副轨波纹删除", async ({}, testInfo) => {
   test.setTimeout(300_000);
   const run = join(root, "test-results", `m5-timeline-${process.pid}-${Date.now()}`);
   const userData = join(run, "user-data"); const video = join(run, "素材.mp4");
@@ -197,7 +197,7 @@ test("M5 时间线：音量线拖拽改 gain、V1 自由定位贴齐钳制、双
 
     // 2. 几何：标尺高 / V1 行 top,height / headerWidth 全部来自内联样式（行序按 data-track-id 定位）。
     const geometry = await readGeometry(page);
-    expect(geometry.v1Height, `V1 行高 ${geometry.v1Height} 应等于轨道高度设置 ${prefs.trackHeight}`).toBe(prefs.trackHeight);
+    expect(geometry.v1Height).toBe(Math.max(64, prefs.trackHeight + 12));
     expect(geometry.v1Top, "V1 行必须在标尺之下").toBeGreaterThanOrEqual(geometry.rulerHeight);
     expect(geometry.headerWidth, "表头宽").toBeGreaterThan(0);
 
@@ -235,6 +235,8 @@ test("M5 时间线：音量线拖拽改 gain、V1 自由定位贴齐钳制、双
     expect(gains[1]).toBeGreaterThan(5); // 拖到顶部限幅 ≈ +12dB
 
     // 7. V1 自由定位：选中第二段向右拖过第三段 → 钳制到第三段右缘贴齐（[6s, 8s)）。
+    const magnet = page.getByRole("button", { name: "主轨磁吸", exact: true });
+    if (await magnet.getAttribute("aria-pressed") === "true") await magnet.click();
     //    落点自检：先证明落点在 V1 行内且不在音量带上（产品命中片段时 cursor = grab）。
     const pressY = geometry.v1Top + Math.min(12, geometry.v1Height / 2);
     const pressX = toCanvasX(second.start + secondDurationUs / 2);
@@ -274,6 +276,78 @@ test("M5 时间线：音量线拖拽改 gain、V1 自由定位贴齐钳制、双
     const after = await readZoom();
     expect(before).toBe(100);
     expect(after).toBeLessThan(100);
+
+    const ruler = page.locator(".timeline-ruler-pin");
+    const rulerBox = await ruler.boundingBox();
+    if (!rulerBox) throw new Error("Missing timeline ruler");
+    const rulerX = rulerBox.x + geometry.headerWidth * 2 + 40;
+    const rulerY = rulerBox.y + rulerBox.height / 2;
+    const filmstripVisible = () => canvas.evaluate((element: HTMLCanvasElement, { x, y }) => {
+      const dpr = window.devicePixelRatio || 1;
+      const pixels = element.getContext("2d")?.getImageData(Math.round(x * dpr), Math.round(y * dpr), Math.round(65 * dpr), 1).data;
+      if (!pixels) return false;
+      // The fixture's saturated bars are distinguishable from the blue clip background.
+      for (let i = 0; i < pixels.length; i += 4) {
+        const channels = [pixels[i], pixels[i + 1], pixels[i + 2]];
+        if (Math.max(...channels) > 190 && Math.min(...channels) < 65) return true;
+      }
+      return false;
+    }, { x: geometry.headerWidth + 5, y: geometry.v1Top + CLIP_HEADER_H + 5 });
+    await expect.poll(filmstripVisible, { timeout: 15_000 }).toBe(true);
+    await page.mouse.move(rulerX, rulerY);
+    await page.keyboard.down("Control");
+    try {
+      await page.mouse.wheel(0, -65);
+      await expect.poll(readZoom).toBeGreaterThan(after);
+      expect(await filmstripVisible()).toBe(true);
+    } finally {
+      await page.keyboard.up("Control");
+    }
+
+    await page.keyboard.down("Shift");
+    try {
+      await page.mouse.down();
+      await page.mouse.move(rulerX + 120, rulerBox.y + rulerBox.height + 10, { steps: 4 });
+      await page.mouse.up();
+    } finally {
+      await page.keyboard.up("Shift");
+    }
+    await expect(page.locator(".timeline-range-band")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".timeline-range-band")).toHaveCount(0);
+
+    const overlay = await page.evaluate(async (projectId: string) => {
+      const current = await window.desktop.getTimeline(projectId as never);
+      const withTrack = await window.desktop.patchTimeline({ project_id: projectId as never, patch: {
+        schema_version: 1, base_revision_id: current.current_revision.timeline_revision_id,
+        operations: [{ op: "add_track", kind: "video" }], summary: "副轨",
+      } });
+      const trackId = withTrack.current_revision.document.tracks.find(track => track.kind === "video" && track.id !== "V1")!.id;
+      const assetId = current.current_revision.document.clips[0].asset_id;
+      const withClips = await window.desktop.patchTimeline({ project_id: projectId as never, patch: {
+        schema_version: 1, base_revision_id: withTrack.current_revision.timeline_revision_id,
+        operations: [0, 3_000_000].map((timeline_start_us, at_index) => ({
+          op: "insert_asset_clip" as const, asset_id: assetId, at_index, track_id: trackId,
+          source_start_us: 0, source_end_us: 2_000_000, timeline_start_us, edit_mode: "overwrite" as const,
+        })), summary: "副轨两段",
+      } });
+      const clips = withClips.current_revision.document.clips;
+      const firstIndex = clips.findIndex(clip => clip.track_id === trackId && clip.timeline_start_us === 0);
+      const later = clips.find(clip => clip.track_id === trackId && clip.timeline_start_us === 3_000_000)!;
+      return { firstIndex, firstId: clips[firstIndex].clip_id, laterId: later.clip_id };
+    }, setup.project_id);
+    await page.reload();
+    await expect(page.getByRole("button", { name: /Clip .* video/ })).toHaveCount(5, { timeout: 30_000 });
+    await page.screenshot({ path: testInfo.outputPath("timeline-multitrack.png") });
+    const firstOverlay = page.getByRole("button", { name: new RegExp(`^Clip ${overlay.firstIndex + 1} video `) });
+    await firstOverlay.press("Enter");
+    await expect(firstOverlay).toHaveAttribute("aria-pressed", "true");
+    await page.keyboard.press("Shift+Delete");
+    await expect.poll(clipsOf).toEqual(expect.arrayContaining([
+      expect.objectContaining({ clip_id: overlay.laterId, start: 1_000_000 }),
+      expect.objectContaining({ clip_id: setup.order[2], start: 4_000_000 }),
+    ]));
+    expect((await clipsOf()).some(clip => clip.clip_id === overlay.firstId)).toBe(false);
 
     console.log(`[m5] 实测几何 rulerHeight=${geometry.rulerHeight} V1.top=${geometry.v1Top} V1.height=${geometry.v1Height} headerWidth=${geometry.headerWidth} trackHeight=${prefs.trackHeight} waveformRatio=${waveformRatio}(${prefs.ratioLabel}) pps=${pps.toFixed(2)} band.top=${band.top} band.height=${band.height} 0dB.y=${volumeLineY.toFixed(1)} cursor=${volumeCursor} zoom=${before}->${after}`);
   } finally {

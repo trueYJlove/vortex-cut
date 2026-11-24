@@ -1,0 +1,694 @@
+{
+  "source_commit": "b125a3d9",
+  "cases": {
+    "touch_dip_black": {
+      "document": {
+        "tracks": [
+          {
+            "id": "V1",
+            "kind": "video",
+            "locked": false,
+            "hidden": false
+          }
+        ],
+        "clips": [
+          {
+            "clip_id": "dip-out",
+            "track_id": "V1",
+            "order_index": 0,
+            "asset_id": "asset-out",
+            "asset_kind": "video",
+            "source_start_us": 0,
+            "source_end_us": 2000000,
+            "timeline_start_us": 0,
+            "timeline_end_us": 2000000,
+            "speed_milli": 1000,
+            "reverse_playback": false,
+            "link_group_id": null,
+            "audio": {
+              "enabled": true,
+              "gain_db": 0,
+              "fade_in_us": 0,
+              "fade_out_us": 0
+            },
+            "picture_fade_out_us": 500000
+          },
+          {
+            "clip_id": "dip-in",
+            "track_id": "V1",
+            "order_index": 1,
+            "asset_id": "asset-in",
+            "asset_kind": "video",
+            "source_start_us": 0,
+            "source_end_us": 2000000,
+            "timeline_start_us": 2000000,
+            "timeline_end_us": 4000000,
+            "speed_milli": 1000,
+            "reverse_playback": false,
+            "link_group_id": null,
+            "audio": {
+              "enabled": true,
+              "gain_db": 0,
+              "fade_in_us": 0,
+              "fade_out_us": 0
+            },
+            "picture_fade_in_us": 500000
+          }
+        ],
+        "transitions": []
+      },
+      "expected_active_transitions": [
+        {
+          "transition_id": "transition_1b3cbcde48436d83c0aeeea3",
+          "outgoing_clip_id": "dip-out",
+          "incoming_clip_id": "dip-in",
+          "kind": "dip-black",
+          "start_us": 1500000,
+          "end_us": 2500000,
+          "cut_us": 2000000,
+          "on_clip_id": "dip-out"
+        }
+      ]
+    },
+    "cross_track_dissolve": {
+      "document": {
+        "tracks": [
+          {
+            "id": "V2",
+            "kind": "video",
+            "locked": false,
+            "hidden": false
+          },
+          {
+            "id": "V1",
+            "kind": "video",
+            "locked": false,
+            "hidden": false
+          }
+        ],
+        "clips": [
+          {
+            "clip_id": "dissolve-out",
+            "track_id": "V1",
+            "order_index": 0,
+            "asset_id": "asset-out",
+            "asset_kind": "video",
+            "source_start_us": 0,
+            "source_end_us": 2000000,
+            "timeline_start_us": 0,
+            "timeline_end_us": 2000000,
+            "speed_milli": 1000,
+            "reverse_playback": false,
+            "link_group_id": null,
+            "audio": {
+              "enabled": true,
+              "gain_db": 0,
+              "fade_in_us": 0,
+              "fade_out_us": 0
+            },
+            "picture_fade_out_us": 1000000
+          },
+          {
+            "clip_id": "dissolve-in",
+            "track_id": "V2",
+            "order_index": 0,
+            "asset_id": "asset-in",
+            "asset_kind": "video",
+            "source_start_us": 0,
+            "source_end_us": 2000000,
+            "timeline_start_us": 1000000,
+            "timeline_end_us": 3000000,
+            "speed_milli": 1000,
+            "reverse_playback": false,
+            "link_group_id": null,
+            "audio": {
+              "enabled": true,
+              "gain_db": 0,
+              "fade_in_us": 0,
+              "fade_out_us": 0
+            },
+            "picture_fade_in_us": 1000000
+          }
+        ],
+        "transitions": []
+      },
+      "expected_active_transitions": [
+        {
+          "transition_id": "transition_2dd7f5040e62c8640250fd90",
+          "outgoing_clip_id": "dissolve-out",
+          "incoming_clip_id": "dissolve-in",
+          "kind": "dissolve",
+          "start_us": 1000000,
+          "end_us": 2000000,
+          "cut_us": 2000000,
+          "on_clip_id": "dissolve-in"
+        }
+      ]
+    },
+    "cross_track_move_rest": {
+      "document": {
+        "tracks": [
+          {
+            "id": "V2",
+            "kind": "video",
+            "locked": false,
+            "hidden": false
+          },
+          {
+            "id": "V1",
+            "kind": "video",
+            "locked": false,
+            "hidden": false
+          }
+        ],
+        "clips": [
+          {
+            "clip_id": "move-out",
+            "track_id": "V1",
+            "order_index": 0,
+            "asset_id": "asset-a",
+            "asset_kind": "video",
+            "source_start_us": 0,
+            "source_end_us": 3000000,
+            "timeline_start_us": 0,
+            "timeline_end_us": 3000000,
+            "speed_milli": 1000,
+            "reverse_playback": false,
+            "link_group_id": null,
+            "audio": {
+              "enabled": true,
+              "gain_db": 0,
+              "fade_in_us": 0,
+              "fade_out_us": 0
+            }
+          },
+          {
+            "clip_id": "move-head",
+            "track_id": "V2",
+            "order_index": 0,
+            "asset_id": "asset-b",
+            "asset_kind": "video",
+            "source_start_us": 0,
+            "source_end_us": 1000000,
+            "timeline_start_us": 2000000,
+            "timeline_end_us": 3000000,
+            "speed_milli": 1000,
+            "reverse_playback": false,
+            "link_group_id": "pair-b",
+            "audio": {
+              "enabled": true,
+              "gain_db": 0,
+              "fade_in_us": 0,
+              "fade_out_us": 0
+            },
+            "move_in": {
+              "preset_id": "motions/move-push-left",
+              "duration_us": 1000000
+            }
+          },
+          {
+            "clip_id": "move-rest",
+            "track_id": "V1",
+            "order_index": 1,
+            "asset_id": "asset-b",
+            "asset_kind": "video",
+            "source_start_us": 1000000,
+            "source_end_us": 2000000,
+            "timeline_start_us": 3000000,
+            "timeline_end_us": 4000000,
+            "speed_milli": 1000,
+            "reverse_playback": false,
+            "link_group_id": "pair-b",
+            "audio": {
+              "enabled": true,
+              "gain_db": 0,
+              "fade_in_us": 0,
+              "fade_out_us": 0
+            }
+          }
+        ],
+        "transitions": []
+      },
+      "expected_active_transitions": [
+        {
+          "transition_id": "transition_353e3fa842dc44ace6161adf",
+          "outgoing_clip_id": "move-out",
+          "incoming_clip_id": "move-head",
+          "kind": "move",
+          "start_us": 2000000,
+          "end_us": 3000000,
+          "cut_us": 3000000,
+          "on_clip_id": "move-out",
+          "rest_clip_id": "move-rest",
+          "incoming_move_preset_id": "motions/move-push-left"
+        }
+      ]
+    },
+    "linked_audio_dedupe": {
+      "document": {
+        "tracks": [
+          {
+            "id": "V2",
+            "kind": "video",
+            "locked": false,
+            "hidden": false
+          },
+          {
+            "id": "V1",
+            "kind": "video",
+            "locked": false,
+            "hidden": false
+          },
+          {
+            "id": "A1",
+            "kind": "audio",
+            "locked": false,
+            "hidden": false
+          },
+          {
+            "id": "A2",
+            "kind": "audio",
+            "locked": false,
+            "hidden": false
+          }
+        ],
+        "clips": [
+          {
+            "clip_id": "linked-picture-out",
+            "track_id": "V1",
+            "order_index": 0,
+            "asset_id": "asset-p1",
+            "asset_kind": "video",
+            "source_start_us": 0,
+            "source_end_us": 2000000,
+            "timeline_start_us": 0,
+            "timeline_end_us": 2000000,
+            "speed_milli": 1000,
+            "reverse_playback": false,
+            "link_group_id": "link-out",
+            "audio": {
+              "enabled": true,
+              "gain_db": 0,
+              "fade_in_us": 0,
+              "fade_out_us": 0
+            },
+            "picture_fade_out_us": 1000000
+          },
+          {
+            "clip_id": "linked-picture-in",
+            "track_id": "V2",
+            "order_index": 0,
+            "asset_id": "asset-p2",
+            "asset_kind": "video",
+            "source_start_us": 0,
+            "source_end_us": 2000000,
+            "timeline_start_us": 1000000,
+            "timeline_end_us": 3000000,
+            "speed_milli": 1000,
+            "reverse_playback": false,
+            "link_group_id": "link-in",
+            "audio": {
+              "enabled": true,
+              "gain_db": 0,
+              "fade_in_us": 0,
+              "fade_out_us": 0
+            },
+            "picture_fade_in_us": 1000000
+          },
+          {
+            "clip_id": "linked-audio-out",
+            "track_id": "A1",
+            "order_index": 0,
+            "asset_id": "asset-a1",
+            "asset_kind": "audio",
+            "source_start_us": 0,
+            "source_end_us": 2000000,
+            "timeline_start_us": 0,
+            "timeline_end_us": 2000000,
+            "speed_milli": 1000,
+            "reverse_playback": false,
+            "link_group_id": "link-out",
+            "audio": {
+              "enabled": true,
+              "gain_db": 0,
+              "fade_in_us": 0,
+              "fade_out_us": 1000000
+            }
+          },
+          {
+            "clip_id": "linked-audio-in",
+            "track_id": "A2",
+            "order_index": 0,
+            "asset_id": "asset-a2",
+            "asset_kind": "audio",
+            "source_start_us": 0,
+            "source_end_us": 2000000,
+            "timeline_start_us": 1000000,
+            "timeline_end_us": 3000000,
+            "speed_milli": 1000,
+            "reverse_playback": false,
+            "link_group_id": "link-in",
+            "audio": {
+              "enabled": true,
+              "gain_db": 0,
+              "fade_in_us": 1000000,
+              "fade_out_us": 0
+            }
+          }
+        ],
+        "transitions": []
+      },
+      "expected_active_transitions": [
+        {
+          "transition_id": "transition_94900130d7856c6344c9b090",
+          "outgoing_clip_id": "linked-picture-out",
+          "incoming_clip_id": "linked-picture-in",
+          "kind": "dissolve",
+          "start_us": 1000000,
+          "end_us": 2000000,
+          "cut_us": 2000000,
+          "on_clip_id": "linked-picture-in"
+        }
+      ]
+    },
+    "dip_white": {
+      "document": {
+        "tracks": [
+          {
+            "id": "V1",
+            "kind": "video",
+            "locked": false,
+            "hidden": false
+          }
+        ],
+        "clips": [
+          {
+            "clip_id": "white-out",
+            "track_id": "V1",
+            "order_index": 0,
+            "asset_id": "asset-out",
+            "asset_kind": "video",
+            "source_start_us": 0,
+            "source_end_us": 2000000,
+            "timeline_start_us": 0,
+            "timeline_end_us": 2000000,
+            "speed_milli": 1000,
+            "reverse_playback": false,
+            "link_group_id": null,
+            "audio": {
+              "enabled": true,
+              "gain_db": 0,
+              "fade_in_us": 0,
+              "fade_out_us": 0
+            },
+            "picture_fade_out_us": 500000
+          },
+          {
+            "clip_id": "white-page",
+            "track_id": "V1",
+            "order_index": 1,
+            "asset_id": "system-white-page",
+            "asset_kind": "image",
+            "source_start_us": null,
+            "source_end_us": null,
+            "timeline_start_us": 1500000,
+            "timeline_end_us": 2500000,
+            "speed_milli": 1000,
+            "reverse_playback": false,
+            "link_group_id": null,
+            "audio": {
+              "enabled": true,
+              "gain_db": 0,
+              "fade_in_us": 0,
+              "fade_out_us": 0
+            }
+          },
+          {
+            "clip_id": "white-in",
+            "track_id": "V1",
+            "order_index": 2,
+            "asset_id": "asset-in",
+            "asset_kind": "video",
+            "source_start_us": 0,
+            "source_end_us": 2000000,
+            "timeline_start_us": 2000000,
+            "timeline_end_us": 4000000,
+            "speed_milli": 1000,
+            "reverse_playback": false,
+            "link_group_id": null,
+            "audio": {
+              "enabled": true,
+              "gain_db": 0,
+              "fade_in_us": 0,
+              "fade_out_us": 0
+            },
+            "picture_fade_in_us": 500000
+          }
+        ],
+        "transitions": []
+      },
+      "trusted_white_page_asset_ids": [
+        "system-white-page"
+      ],
+      "expected_active_transitions": [
+        {
+          "transition_id": "transition_2ea8500bdac0110147a305fe",
+          "outgoing_clip_id": "white-out",
+          "incoming_clip_id": "white-in",
+          "kind": "dip-white",
+          "start_us": 1500000,
+          "end_us": 2500000,
+          "cut_us": 2000000,
+          "on_clip_id": "white-out",
+          "white_page_asset_id": "system-white-page"
+        }
+      ]
+    },
+    "stale_compatibility": {
+      "transition": {
+        "transition_id": "legacy-fade",
+        "after_clip_id": "compat-out",
+        "incoming_clip_id": "compat-in",
+        "kind": "fade",
+        "duration_us": 300000
+      },
+      "before_document": {
+        "tracks": [
+          {
+            "id": "V1",
+            "kind": "video",
+            "locked": false,
+            "hidden": false
+          }
+        ],
+        "clips": [
+          {
+            "clip_id": "compat-out",
+            "track_id": "V1",
+            "order_index": 0,
+            "asset_id": "asset-out",
+            "asset_kind": "video",
+            "source_start_us": 0,
+            "source_end_us": 1000000,
+            "timeline_start_us": 0,
+            "timeline_end_us": 1000000,
+            "speed_milli": 1000,
+            "reverse_playback": false,
+            "link_group_id": null,
+            "audio": {
+              "enabled": true,
+              "gain_db": 0,
+              "fade_in_us": 0,
+              "fade_out_us": 0
+            }
+          },
+          {
+            "clip_id": "compat-in",
+            "track_id": "V1",
+            "order_index": 1,
+            "asset_id": "asset-in",
+            "asset_kind": "video",
+            "source_start_us": 0,
+            "source_end_us": 1000000,
+            "timeline_start_us": 1000000,
+            "timeline_end_us": 2000000,
+            "speed_milli": 1000,
+            "reverse_playback": false,
+            "link_group_id": null,
+            "audio": {
+              "enabled": true,
+              "gain_db": 0,
+              "fade_in_us": 0,
+              "fade_out_us": 0
+            }
+          }
+        ],
+        "transitions": [
+          {
+            "transition_id": "legacy-fade",
+            "after_clip_id": "compat-out",
+            "incoming_clip_id": "compat-in",
+            "kind": "fade",
+            "duration_us": 300000
+          }
+        ]
+      },
+      "expected_before_pair": {
+        "outgoing_clip_id": "compat-out",
+        "incoming_clip_id": "compat-in"
+      },
+      "after_document": {
+        "tracks": [
+          {
+            "id": "V1",
+            "kind": "video",
+            "locked": false,
+            "hidden": false
+          }
+        ],
+        "clips": [
+          {
+            "clip_id": "compat-out",
+            "track_id": "V1",
+            "order_index": 0,
+            "asset_id": "asset-out",
+            "asset_kind": "video",
+            "source_start_us": 0,
+            "source_end_us": 1000000,
+            "timeline_start_us": 0,
+            "timeline_end_us": 1000000,
+            "speed_milli": 1000,
+            "reverse_playback": false,
+            "link_group_id": null,
+            "audio": {
+              "enabled": true,
+              "gain_db": 0,
+              "fade_in_us": 0,
+              "fade_out_us": 0
+            }
+          },
+          {
+            "clip_id": "inserted-between",
+            "track_id": "V1",
+            "order_index": 1,
+            "asset_id": "asset-middle",
+            "asset_kind": "image",
+            "source_start_us": null,
+            "source_end_us": null,
+            "timeline_start_us": 1000000,
+            "timeline_end_us": 1500000,
+            "speed_milli": 1000,
+            "reverse_playback": false,
+            "link_group_id": null,
+            "audio": {
+              "enabled": true,
+              "gain_db": 0,
+              "fade_in_us": 0,
+              "fade_out_us": 0
+            }
+          },
+          {
+            "clip_id": "compat-in",
+            "track_id": "V1",
+            "order_index": 2,
+            "asset_id": "asset-in",
+            "asset_kind": "video",
+            "source_start_us": 0,
+            "source_end_us": 1000000,
+            "timeline_start_us": 1500000,
+            "timeline_end_us": 2500000,
+            "speed_milli": 1000,
+            "reverse_playback": false,
+            "link_group_id": null,
+            "audio": {
+              "enabled": true,
+              "gain_db": 0,
+              "fade_in_us": 0,
+              "fade_out_us": 0
+            }
+          }
+        ],
+        "transitions": [
+          {
+            "transition_id": "legacy-fade",
+            "after_clip_id": "compat-out",
+            "incoming_clip_id": "compat-in",
+            "kind": "fade",
+            "duration_us": 300000
+          }
+        ]
+      },
+      "expected_after_compatibility_transitions": [],
+      "expected_after_active_transitions": []
+    },
+    "audio_crossfade": {
+      "document": {
+        "tracks": [
+          {
+            "id": "A1",
+            "kind": "audio",
+            "locked": false
+          },
+          {
+            "id": "A2",
+            "kind": "audio",
+            "locked": false
+          }
+        ],
+        "clips": [
+          {
+            "clip_id": "crossfade-out",
+            "track_id": "A1",
+            "order_index": 0,
+            "asset_id": "audio-out",
+            "asset_kind": "audio",
+            "source_start_us": 0,
+            "source_end_us": 2000000,
+            "timeline_start_us": 0,
+            "timeline_end_us": 2000000,
+            "speed_milli": 1000,
+            "reverse_playback": false,
+            "audio": {
+              "enabled": true,
+              "gain_db": 0,
+              "fade_in_us": 0,
+              "fade_out_us": 1000000
+            }
+          },
+          {
+            "clip_id": "crossfade-in",
+            "track_id": "A2",
+            "order_index": 0,
+            "asset_id": "audio-in",
+            "asset_kind": "audio",
+            "source_start_us": 0,
+            "source_end_us": 2000000,
+            "timeline_start_us": 1000000,
+            "timeline_end_us": 3000000,
+            "speed_milli": 1000,
+            "reverse_playback": false,
+            "audio": {
+              "enabled": true,
+              "gain_db": 0,
+              "fade_in_us": 1000000,
+              "fade_out_us": 0
+            }
+          }
+        ],
+        "transitions": []
+      },
+      "expected_active_transitions": [
+        {
+          "transition_id": "transition_3eb23f5613ae10fa50d007f9",
+          "outgoing_clip_id": "crossfade-out",
+          "incoming_clip_id": "crossfade-in",
+          "kind": "crossfade",
+          "start_us": 1000000,
+          "end_us": 2000000,
+          "cut_us": 2000000,
+          "on_clip_id": "crossfade-in"
+        }
+      ]
+    }
+  }
+}

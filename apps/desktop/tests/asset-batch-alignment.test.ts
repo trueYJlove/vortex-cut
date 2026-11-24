@@ -56,7 +56,7 @@ describe("批量素材拖放", () => {
       { op: "add_track", kind: "video" },
       { op: "insert_asset_clip", asset_id: "v", at_index: 0, track_id: "V3" },
       { op: "insert_asset_clip", asset_id: "a", at_index: 0 },
-      { op: "insert_asset_clip", asset_id: "i", at_index: 1, track_id: "V3", duration_us: 3_000_000 }
+      { op: "insert_asset_clip", asset_id: "i", at_index: 1, track_id: "V3", duration_us: 4_000_000 }
     ]);
   });
 });

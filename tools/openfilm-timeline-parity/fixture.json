@@ -1,0 +1,80 @@
+{
+  "openfilmCommit": "b125a3d9cdcd44539ba2468eb520e9753b4d5aaa",
+  "viewport": { "width": 2130, "height": 1120, "deviceScaleFactor": 1 },
+  "timelineRegion": { "x": 0, "y": 370, "width": 2130, "height": 380 },
+  "componentMasks": {
+    "acceptance": { "structuralPercent": 99, "picturePercent": 97, "waveformPercent": 97, "glyphPercent": 95 },
+    "toolbar": { "x": 0, "y": 0, "width": 2130, "height": 34 },
+    "ruler": { "x": 132, "y": 34, "width": 1998, "height": 20 },
+    "trackHeadX": 0,
+    "trackHeadWidth": 132,
+    "coverRailX": 132,
+    "coverRailWidth": 51,
+    "contentX": 183,
+    "tracks": [
+      { "id": "V3", "y": 103, "height": 52 },
+      { "id": "V2", "y": 157, "height": 52 },
+      { "id": "V1", "y": 211, "height": 68 },
+      { "id": "A1", "y": 281, "height": 42 }
+    ],
+    "clip": { "borderPx": 1, "radiusPx": 4, "titlePx": 14, "videoWaveformPx": 15, "audioTitlePx": 14 },
+    "playhead": { "timeUs": 8000000, "y": 34, "height": 338, "width": 1 },
+    "markers": [
+      { "id": "fixture-marker", "timeUs": 5000000, "y": 54, "width": 14, "height": 16 }
+    ]
+  },
+  "theme": "dark",
+  "uiState": {
+    "selectedClipIds": [],
+    "markers": [
+      { "id": "fixture-marker", "timeUs": 5000000, "color": "yellow", "label": "" }
+    ],
+    "activeTool": "select",
+    "canUndo": false,
+    "canRedo": false,
+    "snappingEnabled": true,
+    "mainTrackMagnet": true,
+    "linkageEnabled": true
+  },
+  "fps": { "num": 30000, "den": 1001 },
+  "pixelsPerSecond": 28,
+  "pinPixelsPerSecond": 40,
+  "scrollX": 0,
+  "playheadUs": 8000000,
+  "durationUs": 52000000,
+  "media": {
+    "video": {
+      "path": "tools/openfilm-timeline-parity/media/p235-timeline-video.mp4",
+      "durationUs": 21000000,
+      "sha256": "66ce0394bf7f6851e94f59e2de6b1ff7c22eed26348674d589562b83206cec67"
+    },
+    "audio": {
+      "path": "tools/openfilm-timeline-parity/media/p235-timeline-audio.wav",
+      "durationUs": 60000000,
+      "sha256": "00569d89a316f5c0aac300a17f96b0b16f7a9ec0222b3bed37145605d501344d"
+    },
+    "waveform": {
+      "path": "tools/openfilm-timeline-parity/media/p235-timeline-audio-waveform.json",
+      "bucketSpanUs": 25000,
+      "sha256": "dd8e6c180ebe6f7776098bd925c3d07e391849a9d7073f84733158008603654a"
+    },
+    "filmstripSeconds": [0, 5, 10, 15, 20],
+    "filmstripFrameSeconds": [0, 4, 10, 14, 18]
+  },
+  "tracks": [
+    { "id": "V3", "kind": "video", "height": 52 },
+    { "id": "V2", "kind": "video", "height": 52 },
+    { "id": "V1", "kind": "video", "height": 68 },
+    { "id": "A1", "kind": "audio", "height": 42 }
+  ],
+  "clips": [
+    { "id": "v3-a", "trackId": "V3", "kind": "video", "title": "blue-court.mp4", "startUs": 2000000, "endUs": 11000000 },
+    { "id": "v3-b", "trackId": "V3", "kind": "video", "title": "blue-court.mp4", "startUs": 26000000, "endUs": 39000000 },
+    { "id": "v2-a", "trackId": "V2", "kind": "video", "title": "match-cut.mp4", "startUs": 7000000, "endUs": 12000000 },
+    { "id": "v2-b", "trackId": "V2", "kind": "video", "title": "match-cut.mp4", "startUs": 43000000, "endUs": 50000000 },
+    { "id": "v1-a", "trackId": "V1", "kind": "video", "title": "main-shot.mp4", "startUs": 14000000, "endUs": 34000000 },
+    { "id": "v1-b", "trackId": "V1", "kind": "video", "title": "main-shot.mp4", "startUs": 34000000, "endUs": 52000000 },
+    { "id": "a1-a", "trackId": "A1", "kind": "audio", "title": "one-line.wav", "startUs": 1000000, "endUs": 18000000 },
+    { "id": "a1-b", "trackId": "A1", "kind": "audio", "title": "one-line.wav", "startUs": 26000000, "endUs": 48000000 }
+  ]
+}

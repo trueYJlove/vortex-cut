@@ -26,8 +26,8 @@ const formatTime = (us: number) => {
 export { formatTime };
 export type { SaveState };
 
-const speedPresets = [250, 500, 750, 1000, 1250, 1500, 2000, 4000];
-const speedLabel = (speed: number) => `${(speed / 1000).toFixed(speed % 1000 === 0 ? 0 : 2).replace(/\.?0+$/, "")}x`;
+const speedPresets = [100, 1000, 2000, 5000, 10000, 100000];
+const speedLabel = (speed: number) => `${Number((speed / 1000).toPrecision(3))}×`;
 
 /**
  * set_audio 的淡变字段：set_audio 是「整段覆盖」操作，未带的字段保留旧值——
@@ -358,7 +358,7 @@ export function ClipProperties({ clip, clipName, working, baseRevisionId, locked
   /* ---- 时间组（I2 参照 FilmInspector.tsx:1594-1741 TimingSection + SpeedField）：
      开始/入点/时长 + 倍速 + 倒放。开始=position_clip（timeline_start_us，真实通道）；
      入点/出点=trim_clip（源端点）；时长无直接 op（trim 源端点间接改变）→只读展示；
-     倍速保持 Core 域 0.25–4×（参照滑杆停靠点形态，域不动——红线）。 ---- */
+     倍速按 OpenFilm 支持 0.1–100×；数据仍以 milli-speed 精确到 0.001×。 ---- */
   const timingSection = <>
     <div className="pp-grid2">
       <NumberField value={clip.timeline_start_us / 1_000_000} min={0} max={36_000} step={0.1} unit="s" decimals={2} ariaLabel="开始时刻" mark="始"
@@ -377,10 +377,10 @@ export function ClipProperties({ clip, clipName, working, baseRevisionId, locked
     <Seg value={String(speed)} columns={4} options={speedPresets.map(p => ({ value: String(p), label: speedLabel(p) }))}
       onChange={v => setSpeed(Number(v))} />
     <PRow label="自定义">
-      <NumberField value={speed / 1000} min={0.25} max={4} step={0.05} decimals={2} ariaLabel="自定义倍速"
+      <NumberField value={speed / 1000} min={0.1} max={100} step={0.001} decimals={3} ariaLabel="自定义倍速"
         onDraft={v => updateLocal({ speed_milli: Math.round(v * 1000) as TimelineClip["speed_milli"] })}
         onCommit={v => setSpeed(Math.round(v * 1000))} />
-      <span className="tail">0.25 – 4.0</span>
+      <span className="tail">0.1 – 100</span>
     </PRow>
     {isVideo && <div className="pp-chk">
       <input type="checkbox" checked={clip.reverse_playback ?? false} onChange={event => void onPatch([{ op: "set_reverse_playback", clip_id: clip.clip_id, reverse_playback: event.target.checked }], event.target.checked ? "开启倒放" : "关闭倒放")} />
