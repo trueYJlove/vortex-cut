@@ -631,24 +631,7 @@ export function AppDialogs(props: AppDialogsProps) {
                   </div>
                 ))}
               </div>
-              <p className="readonly-note readonly-note--plain">Provider 的创建、密钥与连接测试已移至「Provider 设置」（工具菜单 / 设置）。<button className="mini-btn" onClick={() => { setProviderSettingsOpen(true); }}>打开 Provider 设置</button></p>
-              <label>
-                就绪转录
-                <select value={aiForm.transcript_id} onChange={e => setAiForm(v => ({ ...v, transcript_id: e.target.value }))}>
-                  <option value="">选择已就绪转录</option>
-                  {Object.values(transcriptSummaries).flat().filter(item => item.status === "ready").map(item => <option key={item.transcript_id} value={item.transcript_id}>{item.language} · 就绪</option>)}
-                </select>
-              </label>
-              <label>
-                召回来源
-                <select value={aiForm.candidate_source} onChange={e => setAiForm(v => ({ ...v, candidate_source: e.target.value as "auto" | "transcript" | "cv" | "fused" }))}>
-                  <option value="auto">自动（有转录用转录，否则 CV）</option>
-                  <option value="transcript">仅转录</option>
-                  <option value="cv">仅画面（CV）</option>
-                  <option value="fused">融合（转录 + 画面 + 节拍）</option>
-                </select>
-              </label>
-              <p className="readonly-note">「融合」会把转录关键词、画面特征与节拍落拍三项综合排序。<strong>权重为等权且尚未调优</strong>，不代表优劣已评测。</p>
+              <p className="readonly-note readonly-note--plain">Provider 的创建、密钥与连接测试已移至「Provider 设置」（工具菜单 / 设置）。<button className="mini-btn" onClick={() => { setProviderSettingsOpen(true); }}>打开 Provider 设置</button></p><label>就绪转录<select value={aiForm.transcript_id} onChange={e => setAiForm(v => ({ ...v, transcript_id: e.target.value }))}><option value="">选择已就绪转录</option>{Object.values(transcriptSummaries).flat().filter(item => item.status === "ready").map(item => <option key={item.transcript_id} value={item.transcript_id}>{item.language} · 就绪</option>)}</select></label><label>召回来源<select value={aiForm.candidate_source} onChange={e => setAiForm(v => ({ ...v, candidate_source: e.target.value as "auto" | "transcript" | "cv" | "fused" }))}><option value="auto">自动（有转录用转录，否则 CV）</option><option value="transcript">仅转录</option><option value="cv">仅画面（CV）</option><option value="fused">融合（转录 + 画面 + 节拍）</option></select></label><p className="readonly-note">「融合」会把转录关键词、画面特征与节拍落拍三项综合排序。<strong>权重为等权且尚未调优</strong>，不代表优劣已评测。</p>
               <div className="modal-actions">
                 <button disabled={!aiForm.topic || !aiForm.audience || !aiForm.narrative_goal || !aiForm.provider_id || !aiForm.recipe_id || !aiForm.transcript_id || aiProviders.find(item => item.provider_config_id === aiForm.provider_id)?.candidate_capability_status !== "supported" || aiProviders.find(item => item.provider_config_id === aiForm.provider_id)?.credential_status !== "configured" || !aiProviders.find(item => item.provider_config_id === aiForm.provider_id)?.enabled} onClick={() => void prepareAi()}>准备外传确认</button>
               </div>
