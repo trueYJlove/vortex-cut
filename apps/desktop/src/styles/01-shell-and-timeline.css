@@ -1,0 +1,599 @@
+/* ============================================================
+   Stage 9B — CapCut-style dark skin
+   CapCut visual language: very dark blue-tinted background,
+   restrained borders, blue accent, rounded panels, thin handles.
+   ============================================================ */
+:root {
+  --vc-bg: #0c0c11;
+  --vc-panel: #15151d;
+  --vc-panel-2: #1b1b25;
+  --vc-raised: #22222e;
+  --vc-border: #262632;
+  --vc-border-2: #32323f;
+  --vc-text: #e8e8ef;
+  --vc-text-2: #9a9aab;
+  --vc-accent: #00c1cd;
+  --vc-accent-soft: rgba(0, 193, 205, .18);
+}
+:root { background: var(--vc-bg); color: var(--vc-text); }
+body { background: var(--vc-bg); }
+
+/* Controls */
+button { border-color: var(--vc-border-2); background: var(--vc-raised); border-radius: 6px; color: var(--vc-text); }
+button:hover:not(:disabled), button.active { border-color: var(--vc-accent); background: var(--surface-hover-2); }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline-color: var(--brand); }
+input, select, textarea { background: var(--surface-input); border-color: var(--vc-border-2); border-radius: 6px; }
+input[type="range"], input[type="checkbox"] { accent-color: var(--vc-accent); }
+
+/* Scrollbars */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--surface-scroll); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--surface-scroll-hover); }
+
+/* Shell */
+.editor-shell { width: 100vw; height: 100vh; min-height: 720px; display: grid; grid-template-rows: 36px auto minmax(0, 1fr) 28px; overflow: hidden; background: var(--vc-bg); }
+/* P230-⑤（2026-11-17，参照 workspace-dock.ts defaultDockTree）：素材库是
+   最左的 x 分栏、纵贯全高（titlebar 到 footer）；预览+属性+时间线全部堆在
+   右列。原结构素材栏止于时间线上沿（时间线全宽），与参照布局不符。 */
+.editor-workspace { min-height: 0; display: grid; grid-template-columns: var(--left-width) minmax(0, 1fr); position: relative; overflow: hidden; background: var(--vc-bg); }
+.editor-stack { min-height: 0; min-width: 0; display: grid; grid-template-rows: minmax(0, 1fr) 7px var(--timeline-height); overflow: hidden; }
+.editor-topbar { position: relative; height: auto; padding: 0; border-bottom: 0; display: block; background: transparent; }
+.editor-grid { min-height: 0; display: grid; grid-template-columns: var(--left-width) minmax(0, 1fr) var(--right-width); position: relative; overflow: hidden; background: var(--vc-bg); }
+/* P230-⑤：素材栏移出编辑网格后，右栈内的网格只剩 预览+属性 两列。 */
+.editor-grid-nolib { grid-template-columns: minmax(0, 1fr) var(--right-width); }
+/* 左栏分隔把手：现在是 workspace 网格（library|stack 两列）的接缝。
+   绝对定位骑在接缝上（宽 14px，中心对齐 --left-width），不占列宽。 */
+.editor-workspace > .resize-handle-left { position: absolute; left: calc(var(--left-width) - 7px); top: 0; bottom: 0; width: 14px; z-index: 20; }
+.editor-statusbar { background: var(--surface-statusbar); border-top: 1px solid var(--vc-border); color: var(--vc-text-2); }
+
+/* Brand + menu bar（pp 同源：强调色 var(--brand) / 浮层 var(--surface-3) / kbd Consolas） */
+.brand-lockup strong { color: var(--vc-text); font-size: var(--dlg-fs-body); font-weight: 650; letter-spacing: .4px; }
+.brand-lockup span { color: var(--vc-text-2); font-size: var(--dlg-fs-label); }
+.brand-mark { width: 20px; height: 20px; flex: none; border-radius: 6px; overflow: hidden; display: grid; place-items: center; box-shadow: inset 0 0 0 1px var(--rgba-30), 0 1px 4px var(--rgba-5); }
+.brand-mark img { width: 100%; height: 100%; display: block; object-fit: contain; }
+.menu-item > button { display: flex; align-items: center; min-height: 26px; height: 26px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: var(--ink-2); font-size: var(--dlg-fs-body); position: relative; }
+.menu-item > button:hover, .menu-item > button.active { background: var(--rgba-31); border-color: transparent; color: var(--ink-1); }
+.menu-item > button[aria-expanded="true"] { background: var(--rgba-32); color: var(--brand); font-weight: 600; }
+.menu-item > button[aria-expanded="true"]::after { content: ""; position: absolute; left: 50%; transform: translateX(-50%); bottom: -5px; width: 26px; height: 2.5px; border-radius: 2px; background: var(--brand); }
+.menu-dropdown { top: 33px; min-width: 236px; padding: 5px; border: 1px solid var(--vc-border, var(--line-1-c)); border-radius: 10px; background: var(--vc-panel-2, var(--surface-3)); box-shadow: 0 14px 36px var(--rgba-33); }
+.menu-dropdown button { min-height: 28px; padding: 0 9px; border: 0; border-radius: 6px; background: transparent; color: var(--dlg-text, var(--ink-1)); font-size: var(--dlg-fs-body); display: flex; align-items: center; gap: 9px; }
+.menu-dropdown button:hover:not(:disabled), .menu-dropdown button.focused:not(:disabled) { background: var(--ctl-bg-hover, var(--surface-3-b)); }
+.menu-dropdown button:disabled { color: var(--dlg-text-4, var(--ink-4-b)); }
+.menu-dropdown button:focus-visible { outline-color: var(--brand); }
+.menu-dropdown .menu-divider { height: 1px; margin: 5px 7px; background: var(--vc-border, var(--line-2)); }
+.menu-group-label { font-size: var(--dlg-fs-caption); letter-spacing: 1.5px; color: var(--dlg-text-3, var(--ink-3)); padding: 5px 9px 3px; }
+.menu-item-ico { width: 16px; height: 16px; display: grid; place-items: center; flex: none; color: var(--dlg-text-3, var(--ink-3)); }
+.menu-dropdown button:hover:not(:disabled) .menu-item-ico, .menu-dropdown button.focused:not(:disabled) .menu-item-ico { color: var(--brand); }
+.menu-item-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.menu-item > button, .menu-dropdown button { cursor: default; }
+.menu-item-shortcut { margin-left: auto; flex: none; padding: 2px 5px; border: 1px solid var(--vc-border-2, var(--line-1-d)); border-radius: 4px; background: var(--ctl-bg, var(--surface-1)); color: var(--dlg-text-3, var(--ink-3)); font-size: var(--dlg-fs-caption); line-height: 1; font-family: Consolas, monospace; letter-spacing: .2px; }
+/* 图标精确尺寸：覆盖全局 button svg 16px 规则，与标题栏/素材库统一规范一致。 */
+.menu-item-ico svg { width: 14px; height: 14px; }
+.asset-actions .icon-btn svg { width: 13px; height: 13px; }
+.library-filter-toolbar .icon-btn svg { width: 13px; height: 13px; }
+.imp2 button svg { width: 13px; height: 13px; flex: none; }
+
+/* Project summary in topbar */
+.project-label { color: var(--vc-text-2); font-size: var(--dlg-fs-body); }
+.project-title { color: var(--vc-text); }
+.top-actions-edit, .top-actions-output { border-left-color: var(--vc-border); }
+
+/* Panels */
+.library-pane, .properties-pane { background: var(--surface-1-b); }
+.library-pane { border-right-color: var(--vc-border); }
+.properties-pane { border-left-color: var(--vc-border); }
+.tabs { border-bottom-color: var(--vc-border); }
+.tabs button { border-color: transparent; border-bottom-width: 2px; background: transparent; color: var(--vc-text-2); border-radius: 0; }
+.tabs button.active { border-bottom-color: var(--vc-accent); color: var(--vc-text); background: transparent; }
+.asset-item { background: var(--vc-panel-2); border-color: var(--vc-border); border-radius: 8px; }
+.draggable-asset:hover { border-color: var(--vc-accent); box-shadow: 0 0 0 1px var(--vc-accent-soft); }
+.transcript-item { border-color: var(--vc-border, var(--line-1-d)); border-radius: 8px; background: var(--vc-panel, var(--surface-2)); }
+.legacy-section { border-top-color: var(--vc-border); }
+
+/* Preview stage — 剪映式：基准宽列（stage-column）承载工具栏/舞台/进度条/播放条，舞台黑底圆角。 */
+.stage-pane { min-width: 0; min-height: 0; padding: 12px; display: flex; align-items: stretch; justify-content: center; overflow: hidden; background: var(--surface-2); }
+.stage-column { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; width: 100%; max-width: 100%; }
+.stage-view {
+  position: relative; flex: 1 1 auto; min-height: 0;
+  /* 2026-11-10：overflow 必须可见。
+     画中画的手柄画在盒子边界之外（.sp-handle 偏移 -6px、.sp-rotate 在顶边上方
+     26px），而盒子可以贴到画布上边——此时手柄落在 .stage-view 之外。
+     overflow:hidden 会把它们直接裁掉：实测旋转手柄 top=96 而舞台 top=104，
+     完全不在可视区，elementFromPoint 返回 stage-column，手柄既看不见也点不到。
+     改为 visible 后手柄可越界绘制；画布本身的圆角与背景仍由 .preview-canvas 保证。 */
+  overflow: visible;
+  background: var(--stage-bg); border: 1px solid var(--line-stage); border-radius: 6px; padding: 10px;
+}
+.preview-frame { transform-origin: center center; }
+.preview-frame.selected { cursor: pointer; }
+.preview-frame:focus-visible { outline: 2px solid var(--vc-accent); outline-offset: 2px; }
+
+/* Timeline — Canvas + DOM hybrid architecture */
+.timeline-pane { min-width: 0; border-top: 1px solid var(--line-1-b); display: flex; flex-direction: column; background: var(--surface-2); overflow: hidden; }
+.timeline-toolbar { padding: 5px 12px; border-bottom: 1px solid var(--line-1-b); display: flex; align-items: center; gap: 7px; flex-shrink: 0; background: var(--surface-2); }
+/* 工具栏中段状态区（参照 Timeline.tsx:4130）：flex:1 居中对齐，
+   把左侧工具与右侧开关组推到两端——这是参照工具栏的阅读节奏。 */
+.timeline-toolbar .toolbar-status { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 6px; }
+.timeline-toolbar button { background: transparent; border: none; color: var(--vc-text-2); cursor: pointer; padding: 4px 6px; border-radius: 4px; display: flex; align-items: center; justify-content: center; }
+.timeline-toolbar button:hover:not(:disabled) { background: var(--rgba-34); color: var(--vc-text); }
+.timeline-toolbar button:disabled { opacity: 0.35; cursor: default; }
+.toolbar-sep { width: 1px; height: 18px; background: var(--line-1-b); margin: 0 4px; }
+/* 缩放组不再 margin-left:auto——中段状态区（.toolbar-status，flex:1）负责把
+   左右两段推开；两者同时 auto 会把状态区挤成 0 宽而失效。 */
+.timeline-zoom { display: flex; align-items: center; gap: 6px; }
+.timeline-zoom button { background: transparent; border: none; color: var(--vc-text-2); cursor: pointer; padding: 2px 4px; border-radius: 3px; display: flex; align-items: center; }
+.timeline-zoom button:hover { background: var(--rgba-34); color: var(--vc-text); }
+.timeline-zoom-slider { width: 78px; height: 12px; appearance: none; -webkit-appearance: none; background: transparent; cursor: pointer; margin: 0; }
+.timeline-zoom button:disabled { opacity: .4; cursor: default; }
+.timeline-zoom-slider:disabled { opacity: .4; cursor: default; }
+.timeline-zoom-slider:focus-visible { outline: 1px solid var(--ws-focus); outline-offset: 3px; }
+/* 轨道：已走过段点亮为品牌青，未走过段灰（对齐 OpenFilm 的 .tl-zoom）。
+   --pos 由组件按当前缩放百分比写入（0..1）。 */
+.timeline-zoom-slider::-webkit-slider-runnable-track {
+  height: 3px; border-radius: 999px;
+  background: linear-gradient(to right,
+    var(--zoom-fill) 0,
+    var(--zoom-fill) calc(var(--pos, 0) * 100%),
+    var(--zoom-rail) calc(var(--pos, 0) * 100%),
+    var(--zoom-rail) 100%);
+}
+/* 滑块 = **6×13 圆角 2px 的竖条、强调色填充**（参照 globals.css:462-470 .tl-zoom）。
+   原来是 12×12 白色圆形 + 阴影 —— 与参照是完全不同的形态：
+   参照用「细长条 + 强调色」表达「这是一根刻度尺上的游标」，而不是一个通用圆形滑块。 */
+.timeline-zoom-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 6px; height: 13px; margin-top: -5px; border-radius: 2px; background: var(--zoom-fill); border: none; cursor: pointer; }
+.timeline-zoom-slider::-moz-range-track {
+  height: 3px; border-radius: 999px;
+  background: linear-gradient(to right,
+    var(--zoom-fill) 0, var(--zoom-fill) calc(var(--pos, 0) * 100%),
+    var(--zoom-rail) calc(var(--pos, 0) * 100%), var(--zoom-rail) 100%);
+}
+.timeline-zoom-slider::-moz-range-thumb { width: 6px; height: 12px; border: 0; border-radius: 2px; background: var(--zoom-fill); cursor: pointer; }
+.timeline-zoom-value { font-size: var(--dlg-fs-label); color: var(--vc-text-2); min-width: 48px; text-align: right; font-family: monospace; }
+
+/* 面板高度由用户拖拽决定；内容（轨道行）始终按自身高度渲染，
+   面板装不下时纵向滚动——拖拽只改变"视野"，不压缩轨道。 */
+/* 冻结标尺：.timeline-body 相对定位，标尺覆盖层绝对钉在滚动视口顶部
+   （主画布自带的标尺带恰好被盖住，轨道纵向滚动时从固定标尺下穿过）；
+   .timeline-scroll 为纵向滚动区（头列 + 画布区两列）。 */
+/* 时间线主体行：内容 + 右侧 44px 电平表列（参照 ProjectView.tsx:4926/4995）。
+   电平表在右缘独占一列，内容区不再被它覆盖。 */
+.timeline-body-row { flex: 1; min-height: 0; display: flex; align-items: stretch; overflow: hidden; }
+.timeline-body-row > .timeline-body { flex: 1 1 auto; min-width: 0; }
+.timeline-body { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; overflow: hidden; }
+.timeline-ruler-pin { position: absolute; top: 0; left: 0; z-index: 6; display: block; touch-action: none; }
+.timeline-ruler-pin:focus { outline: none; }
+.timeline-ruler-tick-layer { position: absolute; inset: 0 0 auto; height: 20px; overflow: hidden; pointer-events: none; z-index: 7; }
+.timeline-ruler-guide { position: absolute; bottom: 0; left: 0; width: 1px; background: var(--tl-snap); pointer-events: none; z-index: 5; }
+/* 播放头独立覆盖层（A06）：与固定标尺同坐标系（timeline-body 顶部原点，
+   主画布内容自 2*headW 起——与 drawRulerStrip 的屏幕对齐规则一致）；
+   线 + 手柄只做 translateX，不参与命中测试（拖拽由标尺/空白区提供）。 */
+.timeline-playhead-layer { position: absolute; inset: 0; z-index: 7; pointer-events: none; }
+/* 播放头线 1px（参照 openfilm Timeline.tsx:4468 w-px）；原 1.5px。 */
+.timeline-playhead-line { position: absolute; left: 0; top: 0; width: 1px; margin-left: -0.5px; background: var(--tl-playhead-stroke, #161619); will-change: transform; }
+/* 播放头旋钮（2026-11-10，对齐 OpenFilm 的 PlayheadKnob）：
+   12x17 图钉形状的 SVG 承载在 24x20 的命中区里——人手瞄准的是线，
+   差几像素就抓不到，所以命中区比图形大。图形本身不参与 pointer 命中
+   （覆盖层整体 pointer-events: none，拖动由标尺/空白区接管）。 */
+.timeline-playhead-handle {
+  position: absolute; left: 0; top: 0;
+  display: flex; width: 24px; height: 20px; margin-left: -12px;
+  align-items: flex-start; justify-content: center;
+  pointer-events: none;
+  will-change: transform;
+}
+.timeline-playhead-handle svg { display: block; }
+/* 旋钮配色令牌：常态空心（面板底 + 描边），按住拖动时实心。
+   深色 = 白墨（OpenFilm --tl-playhead: #ffffff）；浅色在下面覆盖成黑墨 #161619。
+   曾经是红色 #f65d55——参照里播放头是墨色，红只会与品牌强调色抢注意力。 */
+.timeline-playhead-layer {
+  --tl-playhead-stroke: #ffffff;
+  --tl-playhead-rest: #18181b;
+  --tl-playhead-fill: #ffffff;
+}
+/* 浅色播放头（对齐 OpenFilm：白底上用深墨线）：
+   令牌定义在本元素上，元素自身声明胜过继承——浅色覆盖必须用同元素选择器
+   （更高优先级）才能生效，[data-theme] 祖先级覆盖无效。 */
+[data-theme="light"] .timeline-playhead-layer {
+  --tl-playhead-stroke: #161619;
+  --tl-playhead-rest: #ffffff;
+  --tl-playhead-fill: #161619;
+}
+.timeline-scroll { flex: 1; min-height: 0; display: flex; overflow-y: auto; overflow-x: hidden; align-items: flex-start; position: relative; }
+.timeline-scroll::-webkit-scrollbar { width: 8px; }
+.timeline-scroll::-webkit-scrollbar-thumb { background: var(--surface-scroll-2); border-radius: 4px; }
+/* 主轨封面入口：钉在 V1 轨道头列，与左侧图标区同高齐平（剪映式）。 */
+/* 封面入口用令牌（2026-11-11）。原来底色写死 var(--surface-1)（深色专属），
+   浅色主题下它是整条轨道头列里唯一一块深色方块——用户截图指出"背景选择框
+   的背景也不对"。虚线框同理：深色边框在浅底上几乎看不见。 */
+.timeline-cover-entry { position: absolute; left: 5px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border: 1px dashed var(--border-strong); border-radius: 5px; background: var(--bg-field); color: var(--editor-control); font-size: 10.5px; line-height: 1; cursor: default; z-index: 4; overflow: hidden; }
+.timeline-cover-entry:hover { color: var(--accent); border-color: var(--accent); background: var(--bg-field); }
+.timeline-cover-entry svg { width: 13px; height: 13px; }
+.timeline-cover-entry:has(img) { border: 0; background: var(--fixed-black); color: var(--tl-cover-ink); box-shadow: 0 0 0 1px var(--border-strong); }
+.timeline-cover-entry img { width: 100%; height: auto; flex: 1 1 auto; min-height: 0; object-fit: cover; border-radius: 0; }
+.timeline-cover-entry img + span { width: 100%; height: 13px; flex: 0 0 13px; display: flex; align-items: center; justify-content: center; background: var(--tl-cover-caption-bg); }
+.timeline-clip-label-layer { position: absolute; inset: 0; z-index: 1; overflow: hidden; pointer-events: none; }
+.timeline-clip-label { position: absolute; overflow: hidden; border-radius: 4px; pointer-events: none; }
+.timeline-clip-label-info { display: flex; align-items: center; overflow: hidden; padding: 0 6px; white-space: nowrap; letter-spacing: -0.006em; }
+.timeline-clip-label-pin { display: flex; min-width: 0; align-items: center; gap: 4px; transform-origin: left; white-space: nowrap; }
+.timeline-clip-label-name { min-width: 0; flex: 0 1 auto; overflow: hidden; color: var(--tl-clip-ink); font-size: 10.5px; font-weight: 500; font-synthesis: weight style small-caps; line-height: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+.timeline-clip-label-speed { flex: 0 0 auto; color: var(--tl-clip-ink); font-size: 10.5px; font-variant-numeric: tabular-nums; font-weight: 500; line-height: 10.5px; white-space: nowrap; }
+.timeline-clip-label-duration { flex: 0 0 auto; color: var(--tl-clip-ink-dim); font-size: 10.5px; font-variant-numeric: tabular-nums; font-weight: 400; line-height: 10.5px; }
+/* T15 修正：参照头列底 = var(--bg-panel)（Timeline.tsx:274 TL.head），与标尺同源；
+   行体才是 --tl-row。边线 = --border；内容滚过头列右缘时 6px 阴影（Timeline.tsx:4237）。 */
+.timeline-left { flex-shrink: 0; display: flex; flex-direction: column; border-right: 1px solid var(--border); background: var(--bg-panel); overflow: hidden; }
+.timeline-canvas-container[data-scrolled="1"] ~ * .timeline-left,
+.timeline-left[data-scrolled="1"] { box-shadow: 6px 0 8px -6px var(--scroll-edge-shadow); }
+.timeline-left-corner { background: var(--bg-panel); border-bottom: 1px solid var(--border); flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+.timeline-left-track { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-bottom: 1px solid var(--line-1-e); overflow: hidden; flex-shrink: 0; }
+.timeline-left-caption { color: var(--vc-text-2); font-size: var(--dlg-fs-body); }
+.timeline-left-cover { width: 48px; height: 28px; flex: 0 0 auto; border-radius: 3px; overflow: hidden; background: var(--dlg-inset, #0c1216); display: grid; place-items: center; color: var(--dlg-text-3, #5c6a72); }
+[data-theme="light"] .timeline-left-cover { background: #e4e4e7; color: #8a8a93; }
+.timeline-left-cover img { width: 100%; height: 100%; object-fit: cover; }
+.timeline-left-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.timeline-left-meta strong { font-size: var(--dlg-fs-label); color: var(--vc-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.timeline-left-meta span { font-size: var(--dlg-fs-caption); color: var(--vc-text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 轨道头：内容在行内垂直居中。
+   2026-11-11 我一度改成 align-items:flex-start（理由是与片段名称条对齐），
+   但参照软件的轨道头是**居中**的——像素实测（录屏 t=40.5s）：
+   V3 行 y 1110..1173 中心 1141.5，字形落在 1130..1149 中心 1139.5；
+   V2 行 y 1176..1239 中心 1207.5，字形落在 1200..1219 中心 1209.5。
+   两者相差 2px 以内，即 OpenFilm 的 head 用 items-center（Timeline.tsx:2753）。
+   用户截图指出"之前是居中的，现在置顶了"——观察正确，故改回。 */
+/* 轨道头 —— 改成参照的网格（Timeline.tsx:2770）：
+   `24px 4px repeat(3, minmax(0,1fr))` = [轨号 24px][4px 空档][三个等分开关列]。
+   原来是 flex + 依次排列：轨号先被 padding 挤、开关再被 overflow 裁掉，
+   表现为「最左侧图标被挡住」（用户截图指出）。
+   网格让每一列有明确宽度，轨号定宽、开关三等分，任何宽度下都不再重叠。 */
+.timeline-track-head {
+  position: absolute; left: 0; right: 0;
+  /* T1 参照 Timeline.tsx:2767-2769：badge(24px)+spacer(4px)+N 开关列（N=该轨开关数，data-flag-cols）。
+     修正：不再用全局 solo 分支——视频轨 4 开关、音频 3、文本 2，列数不足导致开关换行溢出。 */
+  display: grid; grid-template-columns: 24px 4px repeat(3, minmax(0, 1fr));
+  align-items: center; padding: 0 2px;
+  border-bottom: none; background: var(--tl-row); overflow: hidden;
+}
+.timeline-track-head[data-flag-cols="2"] { grid-template-columns: 24px 4px repeat(2, minmax(0, 1fr)); }
+.timeline-track-head[data-flag-cols="4"] { grid-template-columns: 24px 4px repeat(4, minmax(0, 1fr)); }
+.timeline-track-head[data-head-collapsed="true"] { grid-template-columns: minmax(0, 1fr); justify-items: center; padding: 0; }
+.timeline-track-head[data-head-collapsed="true"] .timeline-track-badge { display: none; }
+.timeline-track-collapsed-menu { position: absolute; left: 2px; top: 50%; z-index: 2; width: 24px; height: 24px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--vc-text-2); cursor: pointer; transform: translateY(-50%); }
+.timeline-track-collapsed-menu:hover { background: var(--rgba-34); color: var(--vc-text); }
+.timeline-track-collapsed-menu:focus-visible { outline: 2px solid var(--ws-focus); outline-offset: -1px; }
+.timeline-track-head[data-lane-picked="1"] { background: var(--tl-lane-on); }
+.timeline-track-resize {
+  position: absolute; z-index: 3; left: 0; right: 0; bottom: 0; height: 6px;
+  cursor: row-resize; touch-action: none; outline: none;
+}
+.timeline-track-resize::after {
+  content: ""; position: absolute; left: 30px; right: 6px; top: 2px; height: 2px;
+  border-radius: 2px; background: transparent;
+}
+.timeline-track-resize:hover::after,
+.timeline-track-resize:focus-visible::after { background: var(--brand); }
+.timeline-track-resize:focus-visible { outline: 1px solid var(--ws-focus); outline-offset: -1px; }
+.timeline-track-head-divider { position: absolute; z-index: 6; width: 12px; height: 20px; display: grid; place-items: center; padding: 0; border: 1px solid var(--border-strong); border-radius: 4px; background: var(--bg-raised); color: var(--text); cursor: pointer; }
+.timeline-track-head-divider:hover { background: var(--bg-hover); }
+.timeline-track-head-divider:focus-visible { outline: 2px solid var(--ws-focus); outline-offset: 1px; }
+/* 轨号：参照 LaneMark 是 21×14、10.5px 纯文字、text-faint（Timeline.tsx:295）。
+   原来 min-width:30px 比网格第一列的 24px 还宽 —— 这正是「最左侧图标被挡住」的直接原因
+   （内容溢出列宽后被相邻列压住）。改为 21px 并与网格列同宽。 */
+.timeline-track-badge { display: inline-flex; align-items: center; justify-content: center; gap: 0; flex: 0 0 auto; min-width: 0; width: 21px; }
+.timeline-track-head:focus-visible { outline: 2px solid var(--ws-focus); outline-offset: -2px; }
+.timeline-track-head[data-track-drop-target="true"] { box-shadow: inset 0 2px var(--brand); }
+.timeline-track-head:not([data-track-id="V1"]):not([data-track-id="A1"]) .timeline-track-badge { cursor: grab; touch-action: none; }
+.timeline-track-head:not([data-track-id="V1"]):not([data-track-id="A1"]) .timeline-track-badge:active { cursor: grabbing; }
+.timeline-track-badge small { font-size: 10.5px; font-weight: 500; line-height: 1; font-variant-numeric: tabular-nums; color: var(--text-faint); }
+/* 锁定/隐藏/静音/独奏：与最左侧轨道类型标识同级的紧凑小图标；
+   hover 是刚好包住图标的正圆（剪映式）。显式覆盖全局 button 的 min-height，
+   否则 16×32 的按钮会让 border-radius:50% 呈现椭圆。 */
+/* 参照 TrackHeadButton：方形小钮、图标 12（HEAD_ICON_H=12）、hover 方形底 */
+.track-flag { width: 20px; height: 20px; min-height: 0; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; border: 0; border-radius: 4px; background: transparent; color: var(--text-muted); cursor: pointer; font-size: var(--dlg-fs-caption); font-weight: 700; font-synthesis: weight style small-caps; padding: 0; line-height: 1; }
+.track-flag svg { width: 12px; height: 12px; }
+.track-flag:hover { background: var(--bg-hover); color: var(--text); }
+/* 按下态自带底色，且必须压过全局 button:hover（2026-11-11）。
+   原来只写 background:#20293a（深色专属），浅色主题下被
+   [data-theme="light"] button:hover:not(:disabled) 的浅灰盖掉，
+   表现为「点了之后只是一块灰底 + 绿色图标」，看不出是按下（用户截图）。
+   这里同时提高特异性（.track-flag[aria-pressed] 0,2,0 → 加 :not(:disabled) 仍 0,3,0）
+   并把底色换成令牌，深浅两套都读得出「已按下」。 */
+.track-flag[aria-pressed="true"]:not(:disabled) { color: var(--accent); background: var(--bg-picked); box-shadow: none; }
+[data-theme="light"] .track-flag { color: var(--text-muted); }
+[data-theme="light"] .track-flag:hover { color: var(--text); background: var(--bg-hover); }
+.track-flag.track-solo[aria-pressed="true"]:not(:disabled) { color: var(--accent); background: var(--bg-picked); }
+
+/* 左栏页签的基础形态（工作区内的 .editor-shell 覆盖见后：40px / 11.5px /
+   非工作区上下文生效，工作区内一律被下面的覆盖规则接管。 */
+.left-seg { display: flex; height: 44px; flex: none; padding: 0 8px; background: transparent; border-bottom: 1px solid var(--line-1-d); }
+.left-seg button { position: relative; flex: 1; display: flex; align-items: center; justify-content: center; padding: 0; color: var(--ink-2); font-size: 13px; border: 0; background: transparent; transition: color .15s; }
+.left-seg button:hover { color: var(--ink-1); }
+.left-seg button.active { color: var(--brand); font-weight: 600; }
+.left-seg button.active::after { content: ""; position: absolute; left: 50%; transform: translateX(-50%); bottom: -1px; width: 26px; height: 2.5px; border-radius: 2px; background: var(--brand); }
+
+/* 媒体导入虚线仓（pp-aichip 语言）：图标在上、文字在下，hover 强调色。 */
+/* 导入区紧凑化（参照 MediaPool 工具行形态：一行小图标钮，不占大卡位） */
+.library-toolbar { display: flex; gap: 6px; padding: 10px 16px 0; }
+.library-toolbar button { min-width: 0; flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 5px 6px; font-size: var(--dlg-fs-label); color: var(--text-muted); background: var(--bg-field); border: none; border-radius: 5px; transition: .12s; }
+.library-toolbar button .lib-card-ico { display: inline-flex; }
+.library-toolbar button:hover:not(:disabled) { color: var(--text); background: var(--bg-hover); }
+.library-toolbar button:active:not(:disabled) { background: var(--bg-pressed); }
+.library-toolbar button:disabled { opacity: .4; }
+.library-toolbar .lib-card-ico { display: grid; place-items: center; color: var(--ink-3); }
+.library-toolbar button:hover:not(:disabled) .lib-card-ico { color: var(--brand); }
+.library-toolbar .lib-card-ico svg { width: 13px; height: 13px; }
+
+/* 文本素材按钮：幽灵态 hover 提亮。 */
+.text-materials { display: flex; gap: 8px; padding: 8px 16px 0; }
+.text-materials button { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; height: 28px; font-size: var(--dlg-fs-label); color: var(--ink-2); background: none; border: 0; border-radius: 6px; }
+.text-materials button:hover:not(:disabled) { color: var(--ink-1); background: var(--rgba-31); }
+
+/* 文本样式开关（B/I/U）与对齐宫格。 */
+.text-style-flags { display: inline-flex; gap: 4px; }
+.text-style-flags button { min-width: 26px; min-height: 26px; padding: 0; font-size: var(--dlg-fs-body); }
+.text-style-flags button.active { border-color: var(--brand-deep-b); color: var(--brand-deep-b); }
+.alignment-grid { display: inline-flex; flex-direction: column; gap: 2px; }
+.alignment-row { display: inline-flex; gap: 2px; }
+.alignment-row button { min-width: 26px; min-height: 20px; padding: 0; font-size: 10.5px; color: var(--ink-2-d); }
+.alignment-row button.active { border-color: var(--brand-deep-b); color: var(--brand-deep-b); }
+
+/* ①轨道分隔：参照 GAP=2px 露 --tl-gap(=--bg-panel) 底（Timeline.tsx:3048 行间 marginTop GAP）——
+   画布容器必须承载这个底色，行间 2px 间隙才能读成「两条轨」。 */
+.timeline-canvas-container { flex: 1; min-width: 0; position: relative; overflow: hidden; flex-shrink: 0; background: var(--tl-gap); }
+.timeline-canvas-container canvas { display: block; }
+.timeline-empty-drop { color: var(--vc-text-2); font-size: 13px; }
+.drop-hint { color: var(--vc-accent); font-size: var(--dlg-fs-body); font-weight: 500; }
+
+/* Dialogs / accents */
+.project-management-section { background: var(--surface-modal-inset); border-color: var(--vc-border-2); border-radius: 8px; }
+.project-management-section h3 { color: var(--vc-accent); }
+.project-steps span { border-bottom-color: var(--vc-border-2); }
+.project-steps span.active { border-color: var(--vc-accent); color: var(--ink-brand-hi); }
+.segment-row span { color: var(--brand); }
+.shot-history-list em { color: var(--vc-accent); }
+.shot-card, .generation-task, .shot-fulfillment { border-color: var(--vc-border-2); background: var(--vc-panel-2); }
+
+
+/* Stage 9C two-row topbar */
+/* titleBarOverlay(WCO) 的系统 caption 按钮覆盖在标题栏右端上方，
+   用 env(titlebar-area-*) 预留宽度，避免标题栏内容被原生按钮遮挡。 */
+.editor-titlebar { height: 36px; display: flex; align-items: stretch; background: var(--fixed-black); border-bottom: 1px solid var(--vc-border); -webkit-app-region: drag; padding-right: max(0px, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100%))); }
+
+/* Stage 9C titlebar children */
+.editor-titlebar .brand-lockup { display: flex; flex-direction: row; align-items: center; gap: 8px; min-width: 0; flex: 0 0 auto; padding-right: 12px; -webkit-app-region: drag; }
+.editor-titlebar .custom-titlebar-drag { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding-left: 12px; }
+.editor-titlebar { position: relative; }
+.titlebar-project-switcher { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); align-self: center; -webkit-app-region: no-drag; z-index: 50; }
+.titlebar-project-switcher-toggle { display: flex; align-items: center; gap: 7px; max-width: 40vw; height: 26px; padding: 0 9px; border: 1px solid var(--line-1-d); border-radius: 8px; background: var(--surface-1); font-size: var(--dlg-fs-body); color: var(--ink-1); cursor: default; transition: border-color .12s, box-shadow .12s; }
+.titlebar-project-switcher-toggle:hover { border-color: var(--line-1-c); }
+.titlebar-project-switcher-toggle[aria-expanded="true"] { border-color: var(--rgba-41); box-shadow: 0 0 0 1px var(--rgba-42); }
+.pdot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.pdot.active { background: var(--ok-b); box-shadow: 0 0 0 3px var(--rgba-43); }
+.pdot.archived { background: var(--ink-3); }
+.pdot.missing { background: var(--warn-c); }
+/* 标题栏项目名用令牌（2026-11-11）。原来写死 var(--ink-1)（近白），而标题栏底色
+   .editor-shell .editor-titlebar 已被令牌刷成浅色 ⇒ 白字配浅底，实测对比度
+   **1.01**（等于看不见），用户截图里的项目名消失即此。 */
+.titlebar-project-name { max-width: 240px; font-size: var(--dlg-fs-body); color: var(--ws-text, var(--ink-1)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-switcher-state { flex: none; font-size: var(--dlg-fs-caption); color: var(--ink-3); border-left: 1px solid var(--line-1-d); padding-left: 7px; }
+.titlebar-switcher-chevron { width: 11px; height: 11px; flex: 0 0 auto; color: var(--ink-3); }
+.project-switcher-dropdown { position: absolute; top: 34px; left: 50%; transform: translateX(-50%); width: 300px; max-height: 60vh; overflow: auto; padding: 6px; border: 1px solid var(--line-1-c); border-radius: 10px; background: var(--surface-3); box-shadow: 0 16px 40px var(--rgba-33); z-index: 30; }
+.project-switcher-head { display: flex; align-items: baseline; padding: 4px 8px 7px; font-size: var(--dlg-fs-body); font-weight: 600; color: var(--ink-1); }
+.project-switcher-head small { margin-left: auto; font-weight: 400; font-size: var(--dlg-fs-caption); color: var(--ink-3); }
+.project-switcher-search { display: flex; align-items: center; gap: 6px; height: 28px; margin: 0 4px 7px; padding: 0 9px; background: var(--surface-1); border: 1px solid var(--line-1-d); border-radius: 6px; color: var(--ink-3); cursor: text; }
+.project-switcher-search:focus-within { border-color: var(--brand); }
+.project-switcher-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; color: var(--ink-1); font-size: var(--dlg-fs-body); }
+.project-switcher-search input::placeholder { color: var(--ink-3); }
+/* 下拉项用令牌，不吃主题切换时的硬编码（2026-11-11）。
+   原来按钮底色/文字都是写死的深色值，而 .editor-shell 的令牌已把面板刷成浅色，
+   浅色主题下就变成「浅底 + var(--ink-1) 近白字」——选中项几乎读不出来（用户截图）。
+   文字改用 --ws-text，选中的强调底/描边用 --ws-accent-*。
+   注意 hover 不能用 --ws-raise：那正是本下拉面板自己的底色，深色下会完全看不见
+   （2026-11-15 用户截图），改用专门的 --ws-hover。 */
+.project-switcher-dropdown > button { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 32px; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; color: var(--ws-text, var(--ink-1)); font-size: var(--dlg-fs-body); cursor: default; text-align: left; }
+.project-switcher-dropdown > button:hover { background: var(--ws-hover, var(--ws-raise, var(--surface-3-b))); }
+/* 选中项在悬停时必须仍是「选中」的样子：浅色下有 [data-theme="light"] button:hover
+   (0,3,1) 会盖掉 .active (0,2,1)，实测选中行悬停后从 rgba(0,152,163,.12) 变成灰底，
+   看起来像没选中。这里用同特异性的 :hover 显式锁回强调底。 */
+.project-switcher-dropdown > button.active,
+.project-switcher-dropdown > button.active:hover { background: var(--ws-accent-dim, var(--rgba-2)); box-shadow: inset 0 0 0 1px var(--ws-accent-line, var(--rgba-47)); }
+.project-switcher-dropdown > button.active .project-switcher-state { color: var(--ws-accent-text, var(--brand)); }
+.project-switcher-name { flex: 1; min-width: 0; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.project-switcher-state { flex: none; font-size: var(--dlg-fs-caption); color: var(--ink-3); }
+.project-switcher-none { padding: 12px 8px; color: var(--ink-3); font-size: var(--dlg-fs-body); }
+.project-switcher-empty { padding: 12px 8px; color: var(--ink-3); font-size: var(--dlg-fs-body); }
+.project-switcher-actions { display: flex; margin-top: 5px; padding: 7px 4px 3px; border-top: 1px solid var(--line-2); }
+.project-switcher-manage { flex: 1; height: 28px; border: 1px solid var(--line-1-d); border-radius: 6px; background: none; color: var(--ink-2); font-size: var(--dlg-fs-label); cursor: default; }
+.project-switcher-manage:hover { color: var(--ink-1); border-color: var(--line-1-c); background: var(--rgba-26); }
+.editor-titlebar .menu-bar { display: flex; align-items: center; -webkit-app-region: no-drag; }
+.editor-toolbar { height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: var(--surface-toolbar); border-bottom: 1px solid var(--vc-border); overflow: hidden; }
+.toolbar-group { display: flex; align-items: center; gap: 6px; }
+.toolbar-group input { height: 26px; font-size: var(--dlg-fs-body); }
+.toolbar-group select { height: 26px; font-size: var(--dlg-fs-body); }
+.toolbar-group button { min-height: 26px; height: 26px; padding: 0 8px; font-size: var(--dlg-fs-body); }
+.mode-nav { display: flex; align-items: center; gap: 4px; }
+.mode-nav button { min-height: 26px; height: 26px; padding: 0 10px; font-size: var(--dlg-fs-body); white-space: nowrap; }
+.mode-nav button[aria-pressed="true"] { border-color: var(--vc-accent); color: var(--vc-text); background: var(--vc-accent-soft); }
+.toolbar-sep { width: 1px; height: 18px; background: var(--vc-border-2); margin: 0 4px; }
+.toolbar-spacer { flex: 1; }
+
+/* Stage 9F 渐进式模式上下文 */
+.mode-context { min-height: 40px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 6px 14px; background: var(--vc-panel-2); border-bottom: 1px solid var(--vc-border); }
+.mode-context-title { margin: 0; font-size: 13px; font-weight: 600; color: var(--vc-text); white-space: nowrap; }
+.mode-context-hint { margin: 0; font-size: var(--dlg-fs-body); color: var(--vc-text-2); white-space: nowrap; }
+.mode-context-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.mode-context-actions button { min-height: 26px; height: 26px; padding: 0 10px; font-size: var(--dlg-fs-body); border: 1px solid var(--vc-border-2); background: var(--vc-raised); color: var(--vc-text); border-radius: 6px; white-space: nowrap; }
+.mode-context-actions button:hover:not(:disabled), .mode-context-actions button:focus-visible { border-color: var(--vc-accent); }
+.mode-context-actions button:disabled { opacity: .42; cursor: not-allowed; }
+/* Font hierarchy fix */
+.project-label { font-size: var(--dlg-fs-label); }
+.project-title { font-size: 13px; }
+.pane-title, .library-pane h2, .properties-pane h2 { font-size: 13px; }
+.editor-statusbar { font-size: var(--dlg-fs-label); }
+.asset-item strong { font-size: var(--dlg-fs-body); }
+.asset-item small, .availability { font-size: var(--dlg-fs-caption); }
+button { font-size: var(--dlg-fs-body); }
+input, select, textarea { font-size: var(--dlg-fs-body); }
+
+/* Stage 9D CapCut-style stage, preview and timeline toolbar */
+.preview-toolbar { width: 100%; }
+.render-panel-toggle { height: 26px; padding: 0 11px; font-size: var(--dlg-fs-label); color: var(--vc-text, var(--ink-1-g)); background: var(--vc-raised, #22222e); border: 1px solid var(--vc-border-2, #32323f); border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.render-panel-toggle:hover { border-color: var(--vc-accent, var(--brand)); }
+.render-badge { min-width: 16px; height: 16px; padding: 0 4px; display: inline-grid; place-items: center; border-radius: 8px; background: var(--vc-accent); color: var(--ink-on-brand); font-size: var(--dlg-fs-caption); line-height: 1; }
+/* 渲染面板卡片盒式缩进/底部留白：统一收口在文件末尾「弹窗全宽盒子统一盒式
+   缩进」块（此处历史规则的 (0,2,0) 特异性压不过 :not() 通用规则 (0,3,0)）。 */
+
+/* Stage 9E 统一预览、保存和任务反馈 */
+.toolbar-output { min-width: 0; flex: 0 1 auto; }
+.footer-status .save-state { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.footer-status .job-state { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-chip.stale { flex: none; display: inline-flex; align-items: center; gap: 5px; height: 20px; min-height: 20px; /* 同 tasks-summary：压回全局 button min-height */ padding: 0 5px; border: 0; border-radius: 5px; background: none; color: var(--warn-c); font-size: var(--dlg-fs-label); white-space: nowrap; }
+.status-chip.stale::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--warn-c); flex: none; }
+.status-chip.stale:hover:not(:disabled) { background: var(--rgba-44); color: var(--warn-hi); }
+.status-chip.stale:disabled { opacity: .5; }
+.status-chip.stale:focus-visible, .tasks-summary:focus-visible, footer .ai-entry:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--brand); }
+.tasks-summary { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* P9：preview-context 常驻胶囊已删（参照画面上只有瞬态通知），模式信息收进窗格栏。合成回退提示保留。 */
+.synthetic-note { position: absolute; z-index: 5; top: 44px; left: 18px; max-width: calc(100% - 36px); padding: 4px 6px; background: var(--rgba-45); border: 1px solid var(--warn); color: var(--warn-hi); font-size: var(--dlg-fs-caption); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.synthetic-note-retry { margin-left: 6px; padding: 1px 6px; font-size: var(--dlg-fs-caption); color: var(--vc-text, var(--ink-1-g)); background: var(--rgba-24); border: 1px solid var(--rgba-46); border-radius: 4px; cursor: pointer; }
+.synthetic-note-retry:hover { background: var(--rgba-47); }
+.timeline-drop-zone .drop-hint { white-space: nowrap; font-size: var(--dlg-fs-label); color: var(--warn); pointer-events: none; }
+.timeline-drop-zone.active { width: auto; flex-basis: auto; padding: 0 8px; }
+
+/* M2 B1: 片段变速编辑器 */
+.speed-editor { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--vc-border, var(--line-1)); border-radius: 8px; background: var(--rgba-48); }
+.speed-editor-title { display: flex; align-items: center; gap: 8px; color: var(--vc-text, #e6eaec); font-size: var(--dlg-fs-body); font-weight: 600; }
+.speed-editor-title .speed-reset { margin-left: auto; padding: 2px 8px; border: 1px solid var(--vc-border-2, #4b585e); border-radius: 5px; background: transparent; color: var(--vc-text-2, var(--ink-2-b)); font-size: var(--dlg-fs-label); cursor: pointer; }
+.speed-editor-title .speed-reset:hover { color: var(--vc-text, #e6eaec); border-color: var(--vc-accent, var(--brand)); }
+.speed-presets { display: flex; flex-wrap: wrap; gap: 5px; }
+.speed-presets button { min-width: 44px; padding: 3px 6px; border: 1px solid var(--vc-border-2, #4b585e); border-radius: 5px; background: transparent; color: var(--vc-text-2, var(--ink-2-b)); font-size: var(--dlg-fs-label); cursor: pointer; }
+.speed-presets button:hover:not(:disabled) { color: var(--vc-text, #e6eaec); border-color: var(--vc-accent, var(--brand)); }
+.speed-presets button.active { border-color: var(--vc-accent, var(--brand)); background: var(--rgba-24); color: var(--brand-hi-ink); }
+.speed-custom { display: grid; grid-template-columns: auto 1fr !important; align-items: center; gap: 8px !important; }
+
+/* M2 C2: 任务剩余时间估计 */
+.job-eta { display: inline-block; margin-left: 6px; padding: 1px 6px; border: 1px solid var(--vc-border-2, #4b585e); border-radius: 4px; color: var(--vc-text-2, var(--ink-2-b)); font-size: var(--dlg-fs-label); white-space: nowrap; }
+
+/* M2 B2: 时间线转场标记 */
+/* T3 参照 globals.css:404-416：分割模式 = 28px 斜 32° 刀形光标（hotspot 9,11），
+   白身黑描边任何底色可见；刀线 = 1px accent 竖线，只在可分割片段上显示。 */
+.timeline-canvas-container[data-mode="split"],
+.timeline-canvas-container[data-mode="split"] * {
+  cursor:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Cg transform='rotate(32 14 14)' stroke='%23000' stroke-width='1.5' stroke-linejoin='round'%3E%3Crect x='8.4' y='2' width='11.2' height='24' rx='2' fill='%23fff'/%3E%3Crect x='12.2' y='8.7' width='3.6' height='10.6' rx='1.8' fill='%23000' stroke='none'/%3E%3C/g%3E%3C/svg%3E")
+      9 11,
+    crosshair !important;
+}
+.tl-blade-line { position: absolute; top: 0; width: 1px; background: var(--accent); pointer-events: none; z-index: 12; }
+/* T9 参照 Timeline.tsx:3503-3510：芯片未选 rgba(255,255,255,.88)+#1b1e25、选中 accent/on-accent */
+.timeline-transition-marker { position: absolute; z-index: 13; display: flex; align-items: center; justify-content: center; overflow: hidden; border-radius: 4px; background: var(--tl-tr-chip); color: var(--tl-tr-chip-text); font-size: 10.5px; font-weight: 500; line-height: 1; cursor: pointer; box-shadow: 0 1px 3px var(--tl-tr-chip-shadow); }
+.timeline-transition-marker:hover { background: var(--tl-tr-chip-hover); }
+.timeline-transition-marker.selected { background: var(--accent); color: var(--on-accent); box-shadow: 0 0 0 1px var(--tl-tr-chip-ring), 0 1px 4px var(--tl-tr-chip-shadow); }
+.timeline-transition-marker .transition-x { pointer-events: none; position: absolute; inset: 0; width: 100%; height: 100%; }
+.timeline-transition-marker .transition-x path { stroke: currentColor; stroke-opacity: .45; stroke-width: 1.2; }
+.timeline-transition-marker .transition-name { position: relative; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 6px; }
+.timeline-transition-marker .transition-edge { position: absolute; top: 0; bottom: 0; width: 6px; cursor: ew-resize; }
+.timeline-transition-marker .transition-edge.start { left: 0; }
+.timeline-transition-marker .transition-edge.end { right: 0; }
+.timeline-active-transition-marker { background: var(--tl-tr-active-bg); color: var(--tl-tr-active-ink); box-shadow: 0 1px 3px var(--tl-tr-active-shadow), inset 0 0 0 1px var(--tl-tr-active-ring); }
+.timeline-active-transition-marker:hover { background: var(--tl-tr-active-hover); }
+.timeline-active-transition-marker[data-transition="dip-black"] { background: var(--tl-tr-dip-bg); color: var(--tl-tr-dip-ink); }
+.timeline-active-transition-marker[data-transition="move"] { background: var(--tl-tr-move-bg); color: var(--tl-tr-move-ink); }
+.timeline-active-transition-marker.read-only { cursor: pointer; opacity: .78; }
+.timeline-active-transition-marker .transition-edge { z-index: 1; }
+
+/* M2 B3: 关键帧编辑器 */
+.keyframe-editor { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--vc-border, var(--line-1)); border-radius: 8px; background: var(--rgba-48); }
+.keyframe-rows { display: grid; gap: 5px; }
+.keyframe-row { display: flex; align-items: center; gap: 6px; }
+.keyframe-row .keyframe-label { min-width: 42px; color: var(--vc-text-2, var(--ink-2-b)); font-size: var(--dlg-fs-body); }
+.keyframe-row .keyframe-value { color: var(--vc-text-2, var(--ink-2-b)); font-size: var(--dlg-fs-label); margin-left: auto; }
+.keyframe-row button { padding: 2px 8px; border: 1px solid var(--vc-border-2, #4b585e); border-radius: 5px; background: transparent; color: var(--vc-text-2, var(--ink-2-b)); font-size: var(--dlg-fs-label); cursor: pointer; }
+.keyframe-row button:hover { color: var(--vc-text, #e6eaec); border-color: var(--vc-accent, var(--brand)); }
+
+/* W3.3 关键帧外传审阅：提交后的结果行（成功/失败共用，靠 tone 区分颜色） */
+.keyframe-result { margin: 0; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--vc-border, var(--line-1)); color: var(--vc-text, #e6eaec); font-size: var(--dlg-fs-body); }
+.keyframe-result.error { border-color: var(--line-danger-5); color: var(--ink-danger-d); }
+
+/* M2 B3: 时间线关键帧色点 */
+.timeline-keyframe-dot { border: 1px solid var(--rgba-20); border-radius: 50%; cursor: ew-resize; z-index: 3; }
+.timeline-keyframe-dot:hover { box-shadow: 0 0 0 2px var(--rgba-52); }
+
+/* M2 C3: 快捷键设置面板 */
+.shortcuts-list { display: grid; gap: 6px; }
+.shortcut-row { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border: 1px solid var(--vc-border, var(--line-1)); border-radius: 6px; }
+.shortcut-row .shortcut-label { flex: 1; color: var(--vc-text, #e6eaec); font-size: var(--dlg-fs-body); }
+.shortcut-row kbd { padding: 2px 8px; border: 1px solid var(--vc-border-2, #4b585e); border-radius: 4px; background: var(--rgba-1); color: var(--vc-text-2, var(--ink-2-b)); font-size: var(--dlg-fs-label); white-space: nowrap; }
+.shortcut-row kbd.shortcut-recording { border-color: var(--vc-accent, var(--brand)); color: var(--brand-hi-ink); animation: pulse 1s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .55; } }
+
+/* UI 打磨：播放控制栏三段布局（参考剪映） */
+/* 三列 minmax(0,1fr) auto minmax(0,1fr)（OpenFilm ViewerBar.tsx:51）：
+   1fr 不会缩到内容以下，而两个完整时间码有 25 字符 —— 窄面板下播放键会被顶到
+   时间码上。minmax(0,1fr) 允许列收缩并裁切。这是参照刻意做的选择，注释里写明了原因。 */
+.playback-bar { height: 40px; flex: 0 0 auto; display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); align-items: center; gap: 8px; }
+.pb-left { display: flex; justify-content: flex-start; align-items: center; gap: 8px; min-width: 0; }
+.pb-center { display: flex; align-items: center; justify-content: center; }
+.pb-right { position: relative; display: flex; justify-content: flex-end; align-items: center; gap: 2px; }
+/* 剪映式 SMPTE 时间码：当前时间白色加粗、分隔与总时长灰色弱化（非等宽 tabular-nums）。 */
+.tc { font: 400 12px "Segoe UI", Inter, "Microsoft YaHei", sans-serif; font-variant-numeric: tabular-nums; letter-spacing: 0; line-height: 1; white-space: nowrap; }
+.tc b { font-weight: 500; color: var(--ws-text, #f5f6fa); }
+.tc i { font-style: normal; color: var(--ws-text-3, rgba(255,255,255,.34)); padding: 0 1px; font-size: 11px; }
+.tc .tot { color: var(--ws-text-3, rgba(255,255,255,.34)); font-size: 11px; }
+/* 电平表：两根 2.5px 细条随播放实时跳动。 */
+
+/* 播放键：32px 圆形无边框。 */
+.pb-play { width: 32px; height: 32px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--ink-1-g); display: grid; place-items: center; cursor: pointer; }
+.pb-play:hover { background: var(--rgba-53); }
+.pb-play svg { width: 17px; height: 17px; }
+/* 右侧图标按钮：28px 无边框。 */
+.pb-icon { position: relative; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ink-2-g); display: grid; place-items: center; cursor: pointer; }
+.pb-icon:hover { background: var(--rgba-53); color: var(--fixed-white); }
+.pb-icon svg { width: 15px; height: 15px; }
+/* 播放条缩放按钮用令牌（2026-11-11）。原来写死 var(--ink-2-g)（浅灰紫），浅色主题下
+   落在 247,247,248 的浅底上实测对比度 1.29，"适应"两个字几乎读不出。 */
+.zoom-btn { gap: 5px; padding: 0 8px; width: auto; color: var(--ws-text-2, var(--ink-2-g)); font-size: var(--dlg-fs-label); display: inline-flex; align-items: center; }
+.zoom-btn svg { width: 14px; height: 14px; }
+/* 音量弹层：竖向细滑条，锚定音量按钮居中，覆盖属性面板 grip。 */
+.vol-anchor { position: relative; display: inline-flex; }
+.vol-pop { position: absolute; left: 50%; transform: translateX(-50%); bottom: 40px; width: 28px; height: 118px; border: 1px solid var(--vc-border-2, #32323f); border-radius: 9px; background: var(--dlg-raise, #17171f); box-shadow: 0 10px 28px var(--rgba-18); display: none; align-items: center; justify-content: center; z-index: 60; }
+.vol-pop.open { display: flex; }
+.vol-rail { position: relative; width: 3px; height: 90px; border-radius: 2px; background: var(--rgba-54); cursor: pointer; touch-action: none; }
+.vol-rail:focus-visible { outline: 2px solid var(--brand); outline-offset: 5px; }
+.vol-fill { position: absolute; left: 0; right: 0; bottom: 0; border-radius: 2px; background: var(--vc-accent, var(--brand)); }
+.vol-thumb { position: absolute; left: 50%; width: 10px; height: 10px; border-radius: 50%; background: var(--fixed-white); transform: translate(-50%, 50%); box-shadow: 0 1px 4px var(--rgba-33); pointer-events: none; }
+/* 缩放弹层：适应开关 + 对数滑条（25%–500%）+ 刻度。 */
+.zoom-pop { position: absolute; right: 0; bottom: calc(100% + 10px); width: 238px; padding: 12px 14px 10px; border: 1px solid var(--vc-border, var(--surface-sep)); border-radius: 10px; background: var(--dlg-raise, #17171f); box-shadow: 0 14px 36px var(--rgba-33); display: none; z-index: 60; }
+.zoom-pop.open { display: block; }
+.zoom-pop .zp-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.zp-fit { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--surface-sep); border-radius: 6px; background: transparent; color: var(--ink-2-g); font-size: var(--dlg-fs-label); padding: 3px 10px; cursor: pointer; }
+.zp-fit.on { border-color: var(--vc-accent, var(--brand)); color: var(--brand-hi-ink); background: var(--rgba-55); }
+.zp-val { font: 12px ui-monospace, Consolas, monospace; color: var(--ink-1-g); }
+.zoom-pop input[type="range"] { width: 100%; accent-color: var(--vc-accent, var(--brand)); cursor: pointer; height: 4px; }
+.zp-scale { display: flex; justify-content: space-between; margin-top: 6px; font-size: var(--dlg-fs-caption); color: var(--ink-3-i); font-family: ui-monospace, Consolas, monospace; }
+/* 悬浮进度条：舞台底部 3px（hover 4px），横跨基准宽。
+   2026-11-10：32px 高的命中区原先以 z-index:8 压在画布之上，而画布里的
+   缩放手柄（.sp-handle / .sp-rotate，z-index:3）一旦落到舞台底部 32px 内，
+   指针就会先命中进度条——实测 elementFromPoint 返回 .progress，
+   八个缩放手柄与旋转手柄全部按不动、松手 scale 恒为 1。
+   层级降到与画布内容同级之下，交互交给画布；拖动进度条仍可由其 16px
+   高度的可见区域触发（该条本身不透明区域在最底部 3-4px）。 */
+.progress { position: absolute; left: 10px; right: 10px; bottom: 0; height: 16px; z-index: 2; cursor: pointer; touch-action: none; }
+/* OpenFilm 的项目查看器从时间线寻址；保留键盘播放头控件并在聚焦时显示。 */
+.project-progress:not(:focus-visible) { opacity: 0; pointer-events: none; }
+.pg-rail { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--rgba-30); transition: height .12s ease; }
+.progress:hover .pg-rail, .progress.dragging .pg-rail { height: 4px; }
+.pg-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--fixed-white); border-radius: 0 2px 2px 0; }
+.pg-dot { position: absolute; right: -5px; top: 50%; width: 10px; height: 10px; border-radius: 50%; background: var(--fixed-white); transform: translateY(-50%) scale(.4); opacity: 0; transition: transform .12s ease, opacity .12s ease; box-shadow: 0 1px 6px var(--rgba-15); }
+.progress:hover .pg-dot, .progress.dragging .pg-dot { opacity: 1; transform: translateY(-50%) scale(1); }
+.pg-bubble { position: absolute; bottom: 20px; transform: translateX(-50%); padding: 3px 8px; border: 1px solid var(--rgba-56); border-radius: 5px; background: var(--rgba-57); color: var(--fixed-white); font: 11px ui-monospace, Consolas, monospace; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity .12s ease; }
+.progress:hover .pg-bubble, .progress.dragging .pg-bubble { opacity: 1; }
+/* 全屏态：预览区铺满屏幕，隐藏两侧面板与时间线。 */
+.stage-pane.fullscreen { padding: 0; background: var(--fixed-black); }
+.stage-pane.fullscreen .preview-canvas { box-shadow: none; }
+
+
+/* Timeline Round 4 — 滚动/磁吸/右键菜单（参考 OpenCut classic 交互） */
+.timeline-toolbar button[aria-pressed="true"] { color: var(--vc-accent, var(--brand)); background: var(--rgba-24); }
+/* T10：.timeline-context-menu 旧面板已由参照 ContextMenu（ui/of/ContextMenu.tsx，body portal）取代 */
+

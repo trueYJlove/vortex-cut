@@ -1,0 +1,174 @@
+/* ============================================================
+   属性面板 v2（docs/uiux/property-panel 原型 1:1）
+   色板/度量取自原型；全部选择器作用域化到 .pp-panel，
+   并以 :where 零特异性 reset 抵消全局 button/input 基础样式
+   （全局 button{min-height:32px} / input{height:32px} / button.active
+   曾导致：箭头溢出不可见、输入框偏高、选中页签带底色）。
+   ============================================================ */
+.properties-pane:has(> .pp-panel) { padding: 0; background: var(--surface-1-b); display: flex; flex-direction: column; }
+.pp-panel { --pp-accent: var(--brand); --pp-accent-2: var(--brand-c); --pp-inset: var(--surface-1); --pp-border: var(--line-1-d); --pp-border-2: var(--line-1-c); --pp-text: var(--ink-1); --pp-text-2: var(--ink-2); --pp-text-3: var(--ink-3); --pp-warn: var(--warn-c); --pp-sep: var(--line-2); flex: 1; min-height: 0; width: 100%; max-width: 100%; display: flex; flex-direction: column; font-size: 13px; line-height: 1.5; border: none; margin: 0; padding: 0; min-width: 0; }
+/* 浅色主题：pp 局部令牌整体换浅色值（2026-11-11 浅色审计）。 */
+[data-theme="light"] .pp-panel {
+  --pp-accent: #0098a3;
+  /* 开关填充用的是「非文本 3:1」口径：#00a9b5 对浅色面板只有 2.67:1。
+     #007a83 = 深色 panel 3.47 / 浅色 panel 4.77，两种主题都过。 */
+  --pp-accent-2: #007a83;
+  --pp-inset: #f0f0f2;
+  --pp-border: rgba(16, 16, 24, .10);
+  --pp-border-2: rgba(16, 16, 24, .18);
+  --pp-text: #1a1a1f;
+  --pp-text-2: #5a5a63;
+  --pp-text-3: #8a8a93;
+  --pp-warn: #9a6b1a;
+  --pp-sep: rgba(16, 16, 24, .08);
+}
+[data-theme="light"] .pp-panel .pp-body { background: #f7f7f8; }
+[data-theme="light"] .pp-panel .pp-sw::after { background: var(--vc-panel-2, var(--fixed-white)); }
+[data-theme="light"] .pp-panel .pp-btn.danger { color: #b0302a; }
+[data-theme="light"] .pp-panel .pp-note { background: var(--dlg-inset, #f0f0f2); border-color: var(--pp-sep); }
+[data-theme="light"] .pp-panel .pp-loudness { background: var(--dlg-inset, #f0f0f2); border-color: var(--pp-sep); }
+[data-theme="light"] .pp-panel .pp-aligngrid button.pp-active,
+[data-theme="light"] .pp-panel .text-style-flags button.pp-active { background: var(--dlg-accent-dim, rgba(0, 152, 163, .12)); }
+[data-theme="light"] .pp-panel .pp-body::-webkit-scrollbar-thumb { background: #c9c9cf; }
+.pp-panel :where(button) { min-height: 0; height: auto; margin: 0; padding: 0; background: none; border: none; border-radius: 0; box-shadow: none; color: inherit; font: inherit; line-height: inherit; }
+.pp-panel :where(button):hover:not(:disabled) { background: none; border-color: transparent; }
+.pp-panel :where(input), .pp-panel :where(textarea), .pp-panel :where(select) { min-height: 0; height: auto; margin: 0; border: none; border-radius: 0; background: none; padding: 0; font: inherit; color: inherit; }
+.pp-panel .locked-note { margin: 10px 14px 0; }
+/* ---- 页签 ---- */
+/* 分类条 40px：与左栏 .left-seg 同值。两个分类条在同一屏并排出现，
+   高度不一致（曾 44 vs 40）会让它们看起来属于两套系统。 */
+/* 分类页签（2026-11-16 复刻 OpenFilm InspectorWorkspace 分类条）：
+   选中态是「强调色 + 600」本身，**不是填充胶囊**；11.5px；
+   40px 条高、6px 圆角、6px 垂直外边距、12ms 颜色过渡
+   （InspectorWorkspace.module.css:4-8）。 */
+/* 参照的选中态没有下划线（那条 26px 强调下划线是我们自己的发明）。
+   选中态的第二线索是**字重 500 → 600**——与颜色无关，色觉障碍下依然可辨
+   （独立复核已按色觉模拟验证）。那层强调底只是强化，实测对面板仅 1.13–1.20:1，
+   **不足以单独充当线索**，不要把它写成「颜色之外的第二线索」。 */
+.pp-panel .pp-subtabs { display: flex; gap: 4px; padding: 12px 14px 4px; flex: none; }
+/* ---- 内容区 ---- */
+/* I12 参照宿主无水平 padding（InspectorWorkspace.module.css:9），Section 自带 px-3 py-2 */
+.pp-panel .pp-body { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 0 24px; background: var(--pp-inset); }
+.pp-panel .pp-body::-webkit-scrollbar { width: 8px; }
+.pp-panel .pp-body::-webkit-scrollbar-thumb { background: var(--pp-border-2); border-radius: 4px; }
+/* 分组标题（2026-11-16 复刻 OpenFilm Section）：12px/600、25px 行高、
+   左侧 11px 小折角、**分隔线来自分组底边而不是顶边**，分组内边距
+   13/12、左右 10——参照的分组靠「间隙 + 底部发丝线」分段，
+   不靠上边距堆叠（openfilm InspectorWorkspace.module.css:11-16
+   覆盖了组件自带的 border-t，实测生效的是 border-bottom）。 */
+.pp-panel .pp-sep { height: 1px; background: var(--pp-sep); margin: 14px 0 2px; }
+.pp-panel .pp-row { display: flex; align-items: center; gap: 10px; min-height: 32px; margin-bottom: 7px; min-width: 0; }
+/* 移植来的 FIELD 是 w-full（参照的行是网格列，宽度天然受限）；我们的 .pp-row 是 flex，
+   不设界会把两个数值框撑出面板（实测横向溢出）。
+   .pp-num 作为数值框的宿主，负责给宽度并在同一行内均分。 */
+/* 属性面板的字段网格 —— 与参照 FilmInspector 的三个具名网格一一对应：
+   · Row（inspector-fields.tsx:152）      = grid-cols-2 gap-1.5   → .pp-grid2
+   · W/H + 锁（FilmInspector.tsx:2391）   = 1fr 1fr 24px gap-1.5  → .pp-grid2-lock
+   参照的字段是「网格列」，宽度天然受限；我们原来用 flex 行 + 左标签，
+   于是标签宽度固定、字段被挤，且没有 W/H/锁这一行。 */
+.pp-panel .pp-grid2 { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 6px; align-items: center; }
+.pp-panel .pp-grid2-lock { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr) 24px; gap: 6px; align-items: center; }
+
+/* 滑杆行宿主：参照 SliderField 自带三列网格，这里只负责在 flex 行里取得宽度 */
+.pp-panel .pp-slider { flex: 1 1 0; min-width: 0; }
+/* 分段控件宿主：参照 Segmented 是 w-full，同样需要在 flex 行里取得宽度 */
+.pp-panel .pp-segwrap { flex: 1 1 0; min-width: 0; display: flex; }
+/* 页签上的「规划中」小字（参照页面没有这个形态，是我们自己的占位说明） */
+/* 字号必须 ≥10.5px：DESIGN.md §3.2 把 10.5px 定为辅助信息下限，
+   font-floor 守卫会拦（我第一版写了 10px，被它抓到）。 */
+.pp-panel .pp-soon, .pp-panel .pp-subtabs .pp-soon { margin-left: 4px; font-size: 10.5px; font-weight: 400; color: var(--warn); }
+.pp-panel .pp-subtabs { padding-left: 8px; }
+.pp-panel .pp-num { flex: 1 1 0; min-width: 0; }
+.pp-panel .pp-num.w66 { flex: 0 0 66px; }
+.pp-panel .pp-row > .pp-num + .pp-num { flex: 1 1 0; }
+.pp-panel .pp-row > label { width: 56px; flex: none; font-size: var(--dlg-fs-body); color: var(--pp-text-2); }
+.pp-panel .pp-row .tail { font-size: var(--dlg-fs-label); color: var(--pp-text-3); }
+.pp-panel .pp-row.dim, .pp-panel .pp-dim { opacity: .42; }
+.pp-panel .pp-row.dim *, .pp-panel .pp-dim * { pointer-events: none; }
+.pp-panel .pp-subtext { color: var(--pp-text-3); font-size: var(--dlg-fs-label); }
+.pp-panel .pp-tailtext { margin-left: auto; font-size: var(--dlg-fs-label); color: var(--pp-text-3); font-weight: 400; }
+/* ---- 滑杆 ---- */
+/* ---- 数字步进器 ---- */
+/* 数值框（2026-11-16 复刻 OpenFilm FIELD，inspector-fields.tsx:31）：
+   26px 高 / 5px 圆角 / **静止态无描边**（只有一层半透明填充），
+   悬停浮出发丝环，聚焦才出现 1.5px 强调环并把底换成面板色。
+   原来是 28px 高 + 常驻 1px 描边——每个框都自带轮廓，整列读起来像表格。 */
+/* 输入框：11px + 等宽数字（参照 INPUT = text-[11px] tabular-nums）。
+   原来是 13px——设计工具的数值密度靠小字号 + tabular-nums 维持，
+   13px 会让每个数字框看起来像表单而像仪表。 */
+/* 左端 22px 拖拽标记（参照 PREFIX = w-[22px] text-[10.5px] text-faint）。
+   它取代了原来的 ▲▼ 步进器：ew-resize 光标即提示。 */
+/* 无标记模式（滑杆右侧的数字）：留 8px 而不是 22px，参照 NumField bare 用 w-2 占位 */
+/* 单位后缀：框内 10.5px 淡色，不拼进值里 */
+body.pp-scrubbing, body.pp-scrubbing * { cursor: ew-resize !important; user-select: none; }
+/* ---- 开关 / 复选 / 分段 / 按钮 / 徽章 / 注释 ---- */
+.pp-panel .pp-sw { position: relative; display: inline-block; width: 32px; height: 18px; border-radius: 9px; background: var(--dlg-track); cursor: pointer; flex: none; transition: background .18s; }
+.pp-panel .pp-sw::after { content: ""; position: absolute; left: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--vc-panel-2, #cfd6da); transition: .18s; }
+.pp-panel .pp-sw.on { background: var(--pp-accent-2); }
+.pp-panel .pp-sw.on::after { transform: translateX(14px); background: var(--fixed-white); }
+.pp-panel .pp-sw:hover:not(:disabled) { background: var(--dlg-track); }
+.pp-panel .pp-sw.on:hover:not(:disabled) { background: var(--pp-accent-2); }
+.pp-panel .pp-chk { display: flex; align-items: center; gap: 9px; font-size: var(--dlg-fs-body); cursor: pointer; min-height: 30px; color: var(--pp-text); }
+.pp-panel .pp-chk input { width: 15px; height: 15px; accent-color: var(--pp-accent-2); cursor: pointer; }
+.pp-panel .pp-segset { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+.pp-panel .pp-btn { width: 100%; height: 34px; border-radius: 7px; border: 1px solid var(--pp-accent); background: var(--rgba-11); color: var(--pp-accent); font-size: var(--dlg-fs-body); font-weight: 600; cursor: pointer; transition: .15s; }
+.pp-panel .pp-btn:hover { background: var(--rgba-12); }
+.pp-panel .pp-btn.danger { border-color: var(--rgba-8); background: none; color: var(--dlg-danger-text, var(--danger-c)); }
+.pp-panel .pp-btn.danger:hover { background: var(--rgba-59); }
+.pp-panel .pp-btn.ghost { border-color: var(--pp-border); background: none; color: var(--pp-text-2); font-weight: 400; }
+.pp-panel .pp-btn.ghost:hover { color: var(--pp-text); border-color: var(--pp-border-2); background: var(--rgba-26); }
+.pp-panel .pp-badge { font-size: 10.5px; color: var(--pp-warn); border: 1px solid var(--rgba-7); border-radius: 999px; padding: 1px 8px; flex: none; white-space: nowrap; }
+/* 参照说明文字是纯文本（FilmInspector.tsx:1726 text-[10.5px] text-faint 无框无底），不是卡片 */
+.pp-panel .pp-note { font-size: var(--dlg-fs-label); color: var(--pp-text-3); line-height: 1.75; background: none; border: none; border-radius: 0; padding: 0; margin: 10px 0 0; }
+.pp-panel .pp-note b { color: var(--pp-text-2); font-weight: 600; }
+.pp-panel .pp-note em { color: var(--pp-accent); font-style: normal; }
+.pp-panel .pp-note.warn { border-color: var(--rgba-60); background: var(--rgba-61); color: var(--pp-warn); }
+/* E8 响度统一：行内态卡（实测/提案 + 显式采纳按钮），与 pp-note 同语言。 */
+.pp-panel .pp-loudness { display: grid; gap: 6px; margin: 6px 0 0; padding: 8px 10px; border-radius: 7px; background: var(--pp-inset); border: 1px solid var(--pp-sep); }
+.pp-panel .pp-loudness-line { margin: 0; font-size: var(--dlg-fs-label); color: var(--pp-text-2); line-height: 1.6; }
+.pp-panel .pp-loudness .pp-btn { height: 28px; }
+.pp-panel .pp-tailtext { font-size: var(--dlg-fs-label); color: var(--pp-text-3); white-space: nowrap; }
+/* ---- 文本面板辅助 ---- */
+.pp-panel .pp-ta { display: grid; gap: 6px; color: var(--pp-text-2); font-size: var(--dlg-fs-body); margin-bottom: 8px; }
+.pp-panel .pp-ta textarea { width: 100%; min-height: 74px; background: var(--pp-inset); border: 1px solid var(--pp-border); border-radius: 8px; color: var(--pp-text); padding: 10px 12px; font-size: 13px; resize: vertical; outline: none; line-height: 1.6; }
+.pp-panel .pp-ta textarea:focus { border-color: var(--pp-accent); }
+.pp-panel .pp-airow { display: flex; gap: 8px; margin-bottom: 4px; }
+.pp-panel .pp-aichip { flex: 1; text-align: center; font-size: var(--dlg-fs-label); color: var(--pp-text-2); border: 1px dashed var(--pp-border-2); border-radius: 7px; padding: 6px 0; }
+.pp-panel .pp-aichip b { color: var(--pp-warn); font-weight: 600; }
+.pp-panel .pp-input { flex: 1; min-width: 0; height: 28px; background: var(--pp-inset); border: 1px solid var(--pp-border); border-radius: 6px; color: var(--pp-text); padding: 0 8px; font-size: var(--dlg-fs-body); outline: none; }
+.pp-panel .pp-input:focus { border-color: var(--pp-accent); }
+.pp-panel .pp-color { position: relative; width: 44px; height: 26px; border: 1px solid var(--pp-border); border-radius: 5px; overflow: hidden; flex: none; background: none; cursor: pointer; }
+.pp-panel .pp-color input { position: absolute; inset: -8px; width: 200%; height: 200%; cursor: pointer; }
+.pp-panel .pp-inline { display: inline-flex; align-items: center; gap: 6px; font-size: var(--dlg-fs-body); color: var(--pp-text-2); margin-left: 4px; }
+.pp-panel .pp-aligngrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; flex: 1; }
+.pp-panel .pp-aligngrid button { height: 30px; border: 1px solid var(--pp-border); border-radius: 6px; color: var(--pp-text-3); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: .15s; font-size: var(--dlg-fs-body); }
+.pp-panel .pp-aligngrid button:hover { border-color: var(--pp-border-2); color: var(--pp-text-2); }
+.pp-panel .pp-aligngrid button.pp-active { background: var(--dlg-accent-dim, #243040); border-color: var(--pp-accent); color: var(--pp-accent); }
+.pp-panel .pp-presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.pp-panel .pp-preset { aspect-ratio: 1; border: 1.5px solid var(--pp-border); border-radius: 9px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 15px; cursor: pointer; background: var(--pp-inset); color: var(--pp-text); padding: 0; transition: .15s; }
+.pp-panel .pp-preset:hover { border-color: var(--pp-border-2); }
+.pp-panel .pp-preset.on { border-color: var(--pp-accent); box-shadow: 0 0 0 1px var(--pp-accent); }
+.pp-panel .pp-saverow { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.pp-panel .pp-saverow .pp-btn { flex: 1; }
+.pp-panel .pp-minirow { display: flex; gap: 4px; flex: 1; }
+.pp-panel .pp-mini { padding: 4px 10px; border: 1px solid var(--pp-border); border-radius: 6px; color: var(--pp-text-2); font-size: var(--dlg-fs-label); cursor: pointer; }
+.pp-panel .pp-mini:hover:not(:disabled) { color: var(--pp-text); border-color: var(--pp-border-2); }
+.pp-panel .pp-kfrows { display: grid; gap: 2px; }
+.pp-panel .pp-kfrow { display: flex; align-items: center; gap: 8px; min-height: 32px; font-size: var(--dlg-fs-body); }
+.pp-panel .pp-kfrow .lab { width: 52px; color: var(--pp-text-2); }
+.pp-panel .pp-kfrow .cnt { margin-left: auto; font-size: var(--dlg-fs-label); color: var(--pp-text-3); }
+.pp-panel .text-style-flags { display: inline-flex; gap: 6px; }
+.pp-panel .text-style-flags button { width: 36px; height: 30px; border: 1px solid var(--pp-border); border-radius: 6px; color: var(--pp-text); font-size: 13px; cursor: pointer; transition: .15s; }
+.pp-panel .text-style-flags button:hover:not(:disabled) { border-color: var(--pp-border-2); }
+.pp-panel .text-style-flags button.pp-active { background: var(--dlg-accent-dim, #243040); border-color: var(--pp-accent); color: var(--pp-accent); }
+
+/* ---- P1 画中画画布：蒙版边界 + 抠像棋盘格提示（Phase B） ---- */
+.preview-transform { position: absolute; inset: 0; }
+.pip-maskline { position: absolute; border: 1.5px dashed var(--rgba-62); border-radius: 50%; box-shadow: 0 0 12px var(--rgba-58); pointer-events: auto; cursor: move; touch-action: none; z-index: 5; }
+.pip-maskline.kind-rect { border-radius: 3px; }
+.pip-maskline.kind-linear { border-radius: 0; height: 2px !important; left: -10% !important; width: 120% !important; cursor: ns-resize; }
+.pip-maskline.invert { border-color: var(--rgba-63); box-shadow: 0 0 12px var(--rgba-64); }
+.pip-mask-knob { position: absolute; width: 12px; height: 12px; border-radius: 50%; background: var(--fixed-white); border: 2px solid var(--vc-accent, var(--brand)); box-shadow: 0 1px 5px var(--rgba-14); transform: translate(-50%, -50%); cursor: nwse-resize; z-index: 6; }
+.pip-key-hint { position: absolute; left: 0; right: 0; bottom: 0; height: 12px; background: repeating-conic-gradient(var(--rgba-52) 0% 25%, var(--rgba-33) 0% 50%) 50% / 8px 8px; pointer-events: none; z-index: 4; }
+.pip-badge.key { left: auto; right: 0; border-radius: 0 0 0 6px; color: var(--ink-ok-c); }
+

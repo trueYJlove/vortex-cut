@@ -1,0 +1,895 @@
+/* ── 令牌终值：必须位于文件最末，否则后续追加的层会反超 ────────── */
+:root {
+  --dlg-bg: #171b1e;
+  --dlg-raise: #1d2326;
+  --dlg-border: rgba(255, 255, 255, .12);
+  --dlg-line: rgba(255, 255, 255, .075);
+  --dlg-text: #edf1ef;
+  --dlg-text-2: #b5bfbc;
+  --dlg-text-3: #85918e;
+  --dlg-text-4: #64716e;
+  --ctl-bg: #22292c;
+  --ctl-bg-hover: #293235;
+  --btn-bg: #1d2326;
+  --btn-bg-hover: #293235;
+  --tab-active: #22292c;
+  --dlg-primary: #00c1cd;
+  --dlg-primary-hover: #33d1da;
+  --dlg-primary-text: #00262a;
+  --dlg-danger: #e35d62;
+  --dlg-danger-dim: rgba(227, 93, 98, .09);
+  --dlg-warn: #d8b06a;
+  --dlg-warn-dim: rgba(216, 176, 106, .1);
+  --dlg-accent-dim: rgba(0, 193, 205, .11);
+  --dlg-footer: #15191c;
+  --r-dlg: 12px;
+  --r-box: 8px;
+  --r-ctl: 7px;
+  /* 字号阶梯（DESIGN.md §3.2）：title 18/26 600 · subtitle 11.5/17 ·
+     body 13/20 · label 12/17 · caption 10.5/17。 */
+  --dlg-fs-title: 18px;
+  --dlg-fs-subtitle: 11.5px;
+  --dlg-fs-body: 13px;
+  --dlg-fs-label: 12px;
+  --dlg-fs-caption: 10.5px;
+  --dlg-lh-title: 26px;
+  --dlg-lh-subtitle: 17px;
+  --dlg-lh-body: 20px;
+  --dlg-lh-label: 17px;
+  --dlg-lh-caption: 17px;
+  --dlg-hpad: 24px;
+  --dlg-head-pad: 21px 24px 18px;
+  --dlg-foot-pad: 14px 24px;
+  --dlg-foot-min: 65px;
+  --dlg-ctl-h: 34px;
+  --dlg-ctl-sm: 28px;
+}
+
+/* ── 保真修正 v3（2026-11-06）：原型逐元素高度对照后的残差 ──────────
+   基准（原型实测，1440×900）：
+     弹窗 640×510 · header 86 · body 357 · footer 65
+     项目条 83 / 分组标题 16.5 + mb13 / 导出网格 204
+   实测残差：弹窗 532.5（+22.5）、body 379.5（+22.5）、
+             section-label mb 10（应为 13）、footerNote 294（应 261.5）、
+             footer 按钮 67（应 88）。
+   根因：正文被写成了 display:grid + gap:12px，与子元素自身 margin 叠加，
+   原型是普通块布局、间距只由 margin 表达。 */
+.modal > .modal-body.exd-body,
+.modal > .modal-body:has(> .project-strip) {
+  display: block;
+  gap: 0;
+}
+/* .section-label 是 h3，会被 .modal h3 的 margin:0 0 10px 压住，需更高特异性。 */
+.modal h3.section-label { margin: 0 0 13px; }
+.modal .project-strip { margin-bottom: 20px; }
+/* 导出底栏：说明文字宽度与按钮内边距按原型收紧 */
+.modal .footer-note { max-width: 262px; }
+.modal > .modal-actions .btn.primary { padding: 0 20px; min-width: 88px; }
+
+/* 底栏说明单行：原型 261.5×16.8（单行）。宽度约束后不允许折行。 */
+.modal .footer-note { max-width: 262px; white-space: nowrap; }
+
+/* ── 命令面板高度保真（原型实测 footer 仅 44px，非通用 65px） ────────
+   原型 .command-footer 是「键位提示条」，不是一个操作底栏：
+   高 44px、padding 10px 24px、字号 9.5px、gap 16px。
+   我此前套用了通用底栏（65px / 14px padding），所以整体偏高 21px。 */
+.modal > .modal-actions:has(> .command-footer) {
+  min-height: 44px;
+  padding: 10px 24px;
+  justify-content: flex-start;
+}
+.modal .command-footer { width: 100%; }
+.modal .key-hints { gap: 16px; font-size: 10.5px; }
+.modal .key-hints kbd { font-size: 10.5px; }
+.modal .command-list { max-height: 315px; }
+.modal .command-option { font-size: 13px; padding: 0 11px; }
+.modal .command-option > .icon { justify-self: start; }
+
+/* ── 命令面板专属内边距与行布局（原型实测，非通用值） ──────────────
+   原型 .command-dialog 单独覆盖了间距：
+     header padding 21px 24px 14px（通用是 18px 底）
+     body   padding 0 24px 14px   （通用是 22px 底）
+     option display:grid          （通用按钮被我写成了 flex）
+   这两处 padding 差正是整体高 8px + 20px 的来源。 */
+.modal.command-palette > .modal-heading { padding: 21px 24px 14px; }
+.modal.command-palette > .modal-body { padding: 0 24px 14px; }
+.modal.command-palette .command-group { padding: 9px 10px 5px; }
+.modal.command-palette .command-option {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 9px;
+  height: 39px;
+  min-height: 39px;
+  padding: 0 11px;
+  font-size: 13px;
+}
+.modal.command-palette .command-option > .icon { width: 14px; height: 14px; justify-self: start; }
+.modal.command-palette .key-hints { width: auto; height: 12px; align-items: center; }
+
+/* 特异性补齐：通用规则是 .modal > div.modal-body:not(:not...)（0,3,1），
+   故命令面板必须用同等或更高的选择器才能覆盖 padding 与 display。 */
+.modal.command-palette > div.modal-body:not(.modal-heading):not(.modal-actions) {
+  padding: 0 24px 14px;
+  display: block;
+  row-gap: 0;
+  gap: 0;
+}
+.modal > .modal-body.ps-body { gap: 14px; }
+
+/* ── Provider 设置：原型解剖（mode-tabs / privacy-line / form-grid / note） ──
+   原型实测 640×620 = header 86 + body 467 + footer 65
+   body 子元素：mode-tabs 39(mb12) / privacy-line 17.3(mb17) /
+                form-grid 350 / provider-note 28                    */
+.modal .mode-tabs {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 3px;
+  padding: 3px; margin-bottom: 12px;
+  background: var(--dlg-inset); border: 1px solid var(--dlg-line); border-radius: 8px;
+}
+.modal .mode-tab {
+  height: 31px; min-height: 31px; padding: 0 12px;
+  border: 0; border-radius: 5px; background: transparent;
+  color: var(--dlg-text-3); font-size: 12px; font-weight: 400;
+}
+.modal .mode-tab:hover:not(:disabled) { color: var(--dlg-text); background: var(--rgba-26); }
+.modal .mode-tab.active { background: var(--dlg-raise); color: var(--dlg-text); font-weight: 500; box-shadow: 0 1px 2px var(--rgba-85); }
+.modal .mode-tab.active::before {
+  content: ""; display: inline-block; width: 5px; height: 5px; margin-right: 7px;
+  border-radius: 50%; background: var(--dlg-primary); vertical-align: 2px;
+}
+
+.modal .privacy-line {
+  display: flex; align-items: center; gap: 7px;
+  margin: 0 0 17px; color: var(--dlg-text-3); font-size: 10.5px; line-height: 17px;
+}
+.modal .privacy-line .icon { width: 13px; height: 13px; color: var(--dlg-primary); flex: none; }
+
+.modal .provider-note {
+  display: flex; align-items: center; gap: 7px;
+  margin: 12px 0 0; color: var(--dlg-text-3); font-size: 10.5px; line-height: 1.55;
+}
+.modal .provider-note .icon { width: 13px; height: 13px; flex: none; }
+
+.modal .footer-link {
+  margin-right: auto; height: auto; min-height: 0; padding: 0;
+  background: transparent; border: 0;
+  color: var(--dlg-text-3); font-size: 12px; font-weight: 400;
+}
+.modal .footer-link:hover:not(:disabled) { background: transparent; color: var(--dlg-text); }
+
+/* Provider 正文回到块级布局，间距由各子元素 margin 表达（原型做法） */
+.modal.provider-settings > div.modal-body:not(.modal-heading):not(.modal-actions) {
+  display: block; padding: 0 24px 22px; gap: 0;
+}
+.modal .provider-settings .form-grid { gap: 15px 16px; }
+.modal.provider-settings .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px 16px; }
+
+/* Provider note 原型是两行（28px），单行 16.3px 会整体偏矮；
+   同时正文底部内边距与 form-grid 行距按原型收紧。 */
+.modal .provider-note { max-width: 100%; align-items: flex-start; }
+.modal .provider-settings .form-grid { gap: 15px 16px; }
+.modal.provider-settings .form-grid > .field { gap: 7px; }
+.modal.provider-settings .form-grid > .field > label { min-height: 17px; }
+.modal.provider-settings .form-grid input,
+.modal.provider-settings .form-grid select { height: 34px; }
+
+/* ── 破坏性确认：原型解剖（confirm-object / warning / sample-caption） ──
+   原型实测 440×276 = header 62 + body 147 + footer 65
+   header padding 21px 24px 13px（比通用 18px 少 5px，因无副标题）。   */
+.modal.compact-dialog > .modal-heading,
+.modal.asset-delete-modal > .modal-heading { padding: 21px 24px 13px; }
+
+.modal .confirm-object {
+  margin: 0 0 13px; color: var(--dlg-text-2); font-size: 13px; line-height: 1.75;
+}
+.modal .confirm-object strong { color: var(--dlg-text); font-weight: 550; }
+
+.modal .warning {
+  display: flex; gap: 10px;
+  padding: 12px 13px; border-radius: 8px;
+  background: var(--dlg-danger-dim);
+  border: 0;
+  color: var(--dlg-danger-calm); font-size: 11.5px; line-height: 1.75;
+}
+.modal .warning .icon { width: 15px; height: 15px; color: var(--dlg-danger); margin-top: 2px; flex: none; }
+.modal .warning > span { min-width: 0; }
+
+.modal .sample-caption { margin: 13px 0 0; color: var(--dlg-text-4, var(--dlg-text-3)); font-size: 10.5px; }
+
+/* 确认弹窗正文块级布局 */
+.modal.asset-delete-modal > div.modal-body:not(.modal-heading):not(.modal-actions),
+.modal.compact-dialog > div.modal-body:not(.modal-heading):not(.modal-actions) {
+  display: block; padding: 0 24px 22px; gap: 0;
+}
+
+/* ── Provider 管理视图：并入原型组件体系（2026-11-06 用户截图指出） ──
+   此前管理视图仍是旧结构：dl 用 70px 标签列、密钥按钮堆在 ps-secret-actions、
+   「删除配置」是孤立红块，与新建视图两套语言。现统一到 form-grid / field /
+   provider-note，危险动作降为描边红字。                              */
+.modal .ps-details {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 9px 14px;
+  margin: 0;
+  padding: 13px 14px;
+  background: var(--dlg-raise);
+  border: 1px solid var(--dlg-line);
+  border-radius: var(--r-box);
+  font-size: 12.5px;
+}
+.modal .ps-details dt { color: var(--dlg-text-3); font-size: 12px; }
+.modal .ps-details dd { margin: 0; color: var(--dlg-text); overflow-wrap: anywhere; }
+
+.modal .ps-secret-actions {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  margin: 0;
+}
+.modal .ps-secret-actions > .btn {
+  height: 28px; min-height: 28px; padding: 0 12px;
+  font-size: 11.5px; font-weight: 500;
+  background: var(--ctl-bg); color: var(--dlg-text-2); border: 1px solid transparent;
+}
+.modal .ps-secret-actions > .btn:hover:not(:disabled) { background: var(--ctl-bg-hover); color: var(--dlg-text); }
+/* 危险动作：描边红字，不做实心块，避免压过底栏主操作 */
+.modal .ps-secret-actions > .btn.danger-outline {
+  margin-left: auto;
+  background: transparent;
+  border-color: var(--rgba-86);
+  color: var(--dlg-danger-strong);
+}
+.modal .ps-secret-actions > .btn.danger-outline:hover:not(:disabled) {
+  background: var(--dlg-danger-dim);
+  border-color: var(--rgba-87);
+  color: var(--dlg-danger-text);
+}
+
+/* ── 提示条层级：错误必须显著高于普通状态（2026-11-06 用户反馈） ────
+   旧 .ps-feedback 与普通提示盒同款弱底，用户「删除被拒」这类阻断性
+   信息几乎看不见。错误改为：红色描边 + 12% 红底 + 图标 + 加粗标题。 */
+.modal .alert {
+  display: flex; gap: 10px; align-items: flex-start;
+  margin: 0 0 14px; padding: 11px 13px;
+  border-radius: 8px; border: 1px solid transparent;
+  font-size: 12px; line-height: 1.7;
+}
+.modal .alert > .icon { width: 15px; height: 15px; flex: none; margin-top: 2px; }
+.modal .alert > div { display: grid; gap: 2px; min-width: 0; }
+.modal .alert strong { font-size: 12px; font-weight: 650; color: var(--dlg-text); }
+.modal .alert span { color: var(--dlg-text-2); overflow-wrap: anywhere; }
+
+.modal .alert-danger {
+  background: var(--rgba-91);
+  border-color: var(--rgba-92);
+  color: var(--dlg-danger-text);
+}
+.modal .alert-danger > .icon { color: var(--dlg-danger); }
+.modal .alert-danger span { color: var(--dlg-danger-text-soft); }
+
+.modal .alert-ok {
+  background: var(--dlg-accent-dim);
+  border-color: var(--rgba-80);
+}
+.modal .alert-ok span { color: var(--dlg-text-2); }
+
+/* ── Provider 管理视图（原型未覆盖，按已确认风格补充设计） ──────────
+   结构：已有 Provider 选择 → 只读摘要卡 → 密钥编辑区 → 危险操作区。
+   摘要卡用面板底 + 细边 = 规范里的「信息分组」；危险操作独立成行并
+   靠右，与密钥操作拉开距离，避免误触。 */
+.modal .detail-panel {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 9px 14px;
+  margin: 0;
+  padding: 13px 14px;
+  background: var(--dlg-raise);
+  border: 1px solid var(--dlg-line);
+  border-radius: var(--r-box);
+  font-size: 12.5px;
+}
+.modal .detail-panel dt { color: var(--dlg-text-3); font-size: 12px; }
+.modal .detail-panel dd { margin: 0; color: var(--dlg-text); overflow-wrap: anywhere; }
+
+.modal .secret-actions {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  margin: 0;
+}
+.modal .secret-actions > .btn {
+  height: 28px; min-height: 28px; padding: 0 12px;
+  font-size: 11.5px; font-weight: 500;
+  background: var(--ctl-bg); color: var(--dlg-text-2); border: 1px solid transparent;
+}
+.modal .secret-actions > .btn:hover:not(:disabled) { background: var(--ctl-bg-hover); color: var(--dlg-text); }
+
+/* 危险操作：与密钥操作隔一段距离，描边红字，不抢主操作 */
+.modal .secret-actions > .btn.danger-quiet {
+  margin-left: auto;
+  background: transparent;
+  border-color: var(--rgba-86);
+  color: var(--dlg-danger-strong);
+}
+.modal .secret-actions > .btn.danger-quiet:hover:not(:disabled) {
+  background: var(--dlg-danger-dim);
+  border-color: var(--rgba-87);
+  color: var(--dlg-danger-text);
+}
+
+/* ── Provider 启用开关（P217 第二批）─────────────────────────────────
+   背景：Core 的 delete() 对被审计表引用的 Provider fail-closed（审计链不可
+   断），正确出路是「删除密钥 + 停用」。但此前 UI 没有停用入口，
+   这条出路是断的。此处补齐：停用后 enabled=false，AI 功能下拉按
+   enabled 过滤，历史记录原样保留。
+
+   开关必须逐项压过 .modal button —— 它是一条给普通按钮用的宽规则：
+   · min-height  .modal button (0,1,1) 声明 min-height:var(--dlg-ctl-h)=34px，
+     height:22px 无从生效，轨高被钳成 34px。38×34 的胶囊配 999px 圆角看着
+     就是个圆环，16px 圆钮被顶到上沿（实测 knobTop 3 / knobBottom 15）。
+   · hover      .modal button:hover:not(:disabled) (0,3,1) 高于 .modal .switch.on
+     (0,3,0)：开启态薄荷青底在指针移上去的瞬间消失，且 border 被打成 0，
+     圆钮同时横移 1px（knobL 19→18、knobTop 3→2）。
+   因此：min-height 写在 .modal .switch (0,2,0) 自身；两条 :hover 分别以
+   (0,4,0) / (0,5,0) 重述 background+border。改这段前先读
+   apps/desktop/tests/provider-switch-style.test.ts。 */
+.modal .enabled-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 11px 13px;
+  background: var(--dlg-raise);
+  border: 1px solid var(--dlg-line);
+  border-radius: var(--r-box);
+}
+.modal .enabled-row > div { display: grid; gap: 3px; min-width: 0; }
+.modal .enabled-row > div > label { display: block; color: var(--dlg-text-2); font-size: 12px; line-height: 17px; }
+.modal .enabled-row .field-hint { color: var(--dlg-text-3); font-size: 10.5px; line-height: 1.55; }
+
+.modal .switch {
+  flex: none; width: 38px; height: 22px; min-height: 22px; padding: 0;
+  border-radius: 999px; border: 1px solid var(--dlg-line);
+  background: var(--ctl-bg); position: relative; cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.modal .switch > span {
+  position: absolute; top: 2px; left: 2px;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--dlg-text-3);
+  transition: transform .15s, background .15s;
+}
+.modal .switch.on { background: var(--dlg-accent-dim); border-color: var(--rgba-93); }
+.modal .switch.on > span { transform: translateX(16px); background: var(--dlg-primary); }
+/* 悬停态在开关自身重述 background + border：缺任一条，
+   .modal button:hover:not(:disabled) (0,3,1) 就会清掉开启态底色、抹掉边框。 */
+.modal .switch:hover:not(:disabled) { background: var(--ctl-bg); border: 1px solid var(--dlg-line); }
+.modal .switch.on:hover:not(:disabled) { background: var(--dlg-accent-dim); border-color: var(--rgba-93); }
+.modal .switch:disabled { opacity: .5; cursor: not-allowed; }
+.modal .switch:focus-visible { outline: 2px solid var(--dlg-primary); outline-offset: 2px; }
+
+/* ── C 族「列表型」· 形态 1（关键帧外传审阅）─────────────────────
+   结构稿：docs/design/ui-mockups/dialog-system-v2/prototype-list-family.html
+   既往问题：.keyframe-frame-list 等类名从来没有专属样式，实际用的是浏览器
+   默认 <ul>（圆点 + 缩进），行内元素靠默认排版挤在一起。此处按稿落地。
+
+   三条不能用眼睛判断、只能量出来的约束：
+   1. 徽章列固定 62px —— 否则「待外传/已移除」宽度不同会把按钮推着左右跑；
+   2. 行内三列对齐用 flex + 固定列宽，不用 grid 自动列；
+   3. 行高由内容撑开（内边距 9px 12px），不写死 height。 */
+.modal.keyframe-review .kf-toolbar {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 12px;
+  color: var(--dlg-text-3); font-size: var(--dlg-fs-caption);
+}
+.modal.keyframe-review .kf-toolbar-note strong { color: var(--dlg-text-2); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.modal.keyframe-review .kf-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+
+.modal.keyframe-review .kf-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 9px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--r-ctl);
+  background: var(--dlg-raise);
+  transition: background .15s, border-color .15s;
+}
+.modal.keyframe-review .kf-row:hover { background: var(--ctl-bg); border-color: var(--dlg-line); }
+.modal.keyframe-review .kf-row.excluded { opacity: .55; }
+.modal.keyframe-review .kf-row.excluded .kf-title { text-decoration: line-through; }
+
+.modal.keyframe-review .kf-main { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.modal.keyframe-review .kf-title {
+  font-size: 12.5px; color: var(--dlg-text);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.modal.keyframe-review .kf-title { display: flex; align-items: baseline; gap: 8px; }
+.modal.keyframe-review .kf-index { color: var(--dlg-text-2); font-weight: 600; }
+.modal.keyframe-review .kf-time { color: var(--dlg-text); }
+.modal.keyframe-review .kf-meta { font-size: 10.5px; color: var(--dlg-text-3); font-variant-numeric: tabular-nums; }
+
+/* 固定 62px：宽度随文案变化会让同行按钮左缘参差（本稿实测过 33 vs 52 的位移）。 */
+.modal.keyframe-review .kf-badge {
+  flex: none; width: 62px;
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 18px; border-radius: 999px;
+  background: var(--dlg-accent-dim); color: var(--dlg-primary);
+  font-size: 10.5px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.modal.keyframe-review .kf-badge.muted { background: var(--ctl-bg); color: var(--dlg-text-3); }
+
+.modal.keyframe-review .kf-row > .btn { flex: none; }
+.modal.keyframe-review .kf-start { display: grid; gap: 14px; }
+
+@media (max-width: 720px) {
+  .modal.keyframe-review .kf-badge { display: none; }
+}
+
+/* ── 说明类提示降为中性小字（2026-11-09，用户裁决「分级」）─────────
+   现状：.readonly-note 是薄荷青淡底 + 描边的色块，全仓 47 处都在用。
+   问题：8 个弹窗把它叠放 ≥3 条（CaptionsProvider 8、SemanticSearch 7、
+   AgentSession 5…），一屏里四五个同色块，强调色失去稀有性——这与
+   DESIGN.md §3.1「薄荷青作为有限的语义强调，不铺成大面积发光背景」冲突。
+
+   分级不是一刀切：
+   · 安全类（外发什么内容 / 花多少钱 / 不可逆操作）**保留色块**——
+     这些提示一旦被忽略，后果是金钱或隐私，必须抢注意力。共 14 处；
+   · 说明类（进度 / 空态 / 一般规则 / 计数）降为中性小字。共 33 处。
+
+   实现上**不改 .readonly-note 本身**：它已有 10 条互相覆盖的规则链，
+   且 dialog-graphite-style.test.ts 锁死了它的 border-radius 与
+   border-left-width。改它等于动一批已验收契约。改为新增修饰类
+   .readonly-note--plain，只覆盖配色与排版，不影响既有断言。 */
+.modal .readonly-note--plain,
+.modal > *:not(.modal-heading):not(.modal-actions).readonly-note--plain {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--dlg-text-3);
+  font-size: var(--dlg-fs-caption);
+  line-height: 1.7;
+}
+.modal .readonly-note--plain strong { color: var(--dlg-text-2); font-weight: 600; }
+
+/* ── C 族「列表型」· 形态 3（AI 字幕优化）────────────────────────
+   结构稿：prototype-list-family.html
+
+   分级改完（说明类降中性小字）之后，这个面板暴露了三个先前被色块掩盖的问题：
+
+   1. .readonly-note--plain 里的 <ul> 仍是浏览器默认（padding-left 40px、
+      list-style disc、margin 10.5px 0）——底色一去掉，这些默认值就裸奔了，
+      列表左缘比说明文字缩进 40px，与其他内容对不齐；
+   2. 状态行是 flex + space-between，但它 stretch 到 body 全宽后，
+      「测试字幕兼容性」按钮右缘与下方 select 的右缘对不齐（内边距不同）；
+   3. 字段用 <label> 直接包裹控件，label 与控件的间距由浏览器默认行盒决定，
+      相邻字段之间没有统一节奏。
+
+   注意：本段只作用于 .modal.captions-provider，不碰全局 .readonly-note，
+   也不改 .readonly-note--plain 的通用定义（那会影响 33 处）。 */
+.modal.captions-provider .readonly-note--plain ul {
+  margin: 6px 0 4px;
+  padding-left: 16px;
+  list-style: disc;
+}
+.modal.captions-provider .readonly-note--plain li {
+  margin-bottom: 3px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.modal.captions-provider .readonly-note--plain li:last-child { margin-bottom: 0; }
+.modal.captions-provider .readonly-note--plain small {
+  display: block; margin-top: 2px;
+  color: var(--dlg-text-4); font-size: 10.5px;
+}
+.modal.captions-provider .readonly-note--plain strong {
+  color: var(--dlg-text); font-weight: 600;
+}
+
+/* 字段节奏：label 包控件时，label 自身是 flex 列，间距统一 7px。
+   直接写 .modal.captions-provider label 会波及 checkbox 等行内 label，
+   因此只选「直接含 select / input 的 label」。 */
+.modal.captions-provider .modal-body > label {
+  /* 字段间距对齐基线 .modal label 的 6px（本仓 .modal 内 label 的 gap 有
+     5/6/7/8 四种取值，基线是 6px）。上一轮此处写 7px 反而制造了新的不一致。 */
+  display: grid; gap: 6px;
+  color: var(--dlg-text-2); font-size: var(--dlg-fs-label);
+}
+
+/* 状态行：按钮右缘与下方 select 右缘对齐 —— 两者左右内边距必须相同。
+   实测改前：状态行 padding 7px 10px，而 select 撑满 body 宽度 ⇒ 右缘差 10px。 */
+.modal.captions-provider .captions-provider-status-row {
+  padding: 9px 12px;
+  border: 1px solid var(--dlg-line);
+  border-radius: var(--r-box);
+  background: var(--dlg-raise);
+  font-size: var(--dlg-fs-caption);
+  color: var(--dlg-text-2);
+}
+.modal.captions-provider .captions-provider-status-row > span { min-width: 0; overflow-wrap: anywhere; }
+.modal.captions-provider .captions-provider-status-row button { flex: none; }
+
+
+/* ── 危险语义令牌（2026-11-09）─────────────────────────────────
+   背景：.modal 作用域内「危险/错误」语义用了 **9 种红色**，全部硬编码：
+     #f0a1a5 / #e88b8f / #f0b9b2 / #f2b8b5 / #edb9bb / #d9b4b4 /
+     #f2797d / #f05a5f / #ee7377
+   同一个语义九种红，改一处配色要翻九个地方，且改漏了也没人发现。
+
+   先试过用 color-mix() 从 --dlg-danger 推导，**失败**：反解配比时
+   #f2b8b5 需要 132%、#f0b9b2 需要 128%（超出 0–100%），说明这些色
+   与主色不是线性混合关系，是各自挑的。硬推导会改变视觉。
+
+   所以改为**语义令牌**：值保持原样（视觉零变化），但把来源收敛到
+   一处命名。以后调危险色只改这里。 */
+:root {
+  --dlg-danger-text: #f0a1a5;       /* 错误正文（最亮一档） */
+  --dlg-danger-text-soft: #edb9bb;  /* 错误说明文字，比正文淡 */
+  --dlg-danger-strong: #e88b8f;     /* 描边危险按钮的字色 */
+  --dlg-danger-muted: #f0b9b2;      /* 危险状态徽章/作业状态 */
+  --dlg-danger-warm: #f2b8b5;       /* 警示框正文（偏暖） */
+  --dlg-danger-calm: #d9b4b4;       /* 大段警示文字（低饱和，避免刺眼） */
+}
+
+/* 危险色统一从令牌取值。逐条按原值映射，视觉零变化。 */
+.modal .warning { color: var(--dlg-danger-calm); }
+.modal .alert-danger { color: var(--dlg-danger-text); }
+.modal .alert-danger span { color: var(--dlg-danger-text-soft); }
+.modal .delete-warning { color: var(--dlg-danger-warm); }
+.modal .generation-safe-error { color: var(--dlg-danger-warm); }
+.modal .render-job-state.bad { color: var(--dlg-danger-muted); }
+.modal .stage5-assembly [role="alert"] { color: var(--dlg-danger); }
+.modal .ps-secret-actions > button.danger { color: var(--dlg-danger-strong); }
+.modal .ps-secret-actions > button.danger:hover:not(:disabled) { color: var(--dlg-danger-text); }
+.modal .ps-secret-actions > .btn.danger-outline { color: var(--dlg-danger-strong); }
+.modal .ps-secret-actions > .btn.danger-outline:hover:not(:disabled) { color: var(--dlg-danger-text); }
+.modal .secret-actions > .btn.danger-quiet { color: var(--dlg-danger-strong); }
+.modal .secret-actions > .btn.danger-quiet:hover:not(:disabled) { color: var(--dlg-danger-text); }
+
+
+/* ── 凹陷底（inset）语义令牌（2026-11-09）────────────────────────
+   与「9 种红」同类的第二个问题：**同一语义「输入框/页签条的凹陷底色」
+   用了 5 个几乎相同的深色**，全部硬编码：
+     #101416 ×3  #111517 ×4  #101417  #111617  #121619
+   实测渲染：generation-tabs 与 mode-tabs 都是 rgb(16,20,22)，
+   instruction-preview 是 rgb(16,20,23) —— 差 1 个色阶，肉眼无差，
+   但代码里是 5 个不同字面值，改一处配色要翻五遍。
+
+   **不合并成一个值**：它们各自确实是独立挑的（如 .et-tabs 用 #121619
+   略亮，因为上面还有一条通栏边框）。合并会改变视觉。
+   改为命名收敛，值保持原样。 */
+:root {
+  --dlg-inset: #101416;      /* 页签条 / 模式页签的凹陷底 */
+  --dlg-inset-2: #111517;    /* 搜索框底 */
+  --dlg-inset-3: #111617;    /* 比例框底（比 inset 略暖） */
+  --dlg-inset-4: #121619;    /* 工作台通栏页签条（略亮，配其上边框） */
+  --dlg-inset-5: #101417;    /* 说明块底（比 inset 暖 1 阶） */
+}
+
+.modal .generation-tabs { background: var(--dlg-inset); }
+.modal .provider-mode-tabs { background: var(--dlg-inset); }
+.modal .mode-tabs { background: var(--dlg-inset); }
+.modal.editing-tools .et-tabs { background: var(--dlg-inset-4); }
+.modal .search-wrap input { background: var(--dlg-inset-2); }
+.modal.command-palette input[type="search"] { background: var(--dlg-inset-2); }
+.modal.command-palette .search-wrap input[type="search"] { background: var(--dlg-inset-2); }
+.modal .ratio-frame { background: var(--dlg-inset-3); }
+.modal .instruction-preview, .modal .egress-text { background: var(--dlg-inset-5); }
+
+
+/* ── 滚动条滑块令牌（2026-11-09）───────────────────────────────
+   var(--surface-3-e) 在 .modal 作用域出现 5 次，全部是滚动条拇指（含 3 处列表
+   容器的 scrollbar-color）。同一语义同一个值，只是散落在 5 个地方。 */
+:root { --dlg-scroll-thumb: var(--surface-3-e); }
+
+.modal::-webkit-scrollbar-thumb { background: var(--dlg-scroll-thumb); }
+.modal .command-list { scrollbar-color: var(--dlg-scroll-thumb) transparent; }
+.modal .generation-request-list, .modal .generation-task-list { scrollbar-color: var(--dlg-scroll-thumb) transparent; }
+.modal .shot-history-list, .modal .shot-history-detail { scrollbar-color: var(--dlg-scroll-thumb) transparent; }
+.modal { scrollbar-color: var(--dlg-scroll-thumb) transparent; }
+
+
+/* ── danger 按钮 hover：两代规则取值不一致（2026-11-09）────────────
+   实测发现同一语义存在两个不同的 hover 色：
+     line 1159  background: #f05a5f   （第一代）
+     line 2550  background: #ee7377   （第二代，位置更晚 → 恒胜）
+   第二代生效，第一代是死代码。这里统一为令牌，值取实际生效的 #ee7377，
+   使「改一处」成为可能；第一代的值保留为注释，说明它曾经存在。 */
+:root { --dlg-danger-hover: #ee7377; }
+
+.modal button.danger:hover:not(:disabled),
+.modal .modal-actions .danger:hover:not(:disabled) { background: var(--dlg-danger-hover); }
+
+
+/* ── 剩余语义令牌补充（2026-11-09）────────────────────────────── */
+:root {
+  --dlg-danger-ink: #fff;          /* 危险实心按钮上的文字 */
+  --dlg-danger-deep: #f0bcbe;      /* 深一档的危险说明文字 */
+  --dlg-run-accent: #1fa886;       /* 渲染进行条填充（比主色深，避免与主操作抢） */
+  --dlg-track: #2b353d;            /* 进度条轨道 */
+  --dlg-success-soft: #9fd4a8;     /* 渲染完成状态（非主色，区别于可用态） */
+  --dlg-cover-bg: #27332f;         /* 项目封面占位底 */
+  --dlg-preview-bg: #0d1214;       /* 图片/封面预览底（比 inset 更深） */
+}
+.modal .render-job.finishing .render-job-state.run { color: var(--dlg-success-soft); }
+.modal .render-job-bar { background: var(--dlg-track); }
+.modal .render-job-bar i { background: var(--dlg-run-accent); }
+.modal .provider-image-preview { background: var(--dlg-preview-bg); }
+.modal .project-cover { background: var(--dlg-cover-bg); color: var(--dlg-danger-ink); }
+.modal .project-cover span { color: var(--dlg-danger-ink); }
+.modal .delete-warning, .modal .generation-safe-error,
+.modal .semantic-search .semantic-search-error { color: var(--dlg-danger-warm); }
+
+
+/* ── 最后一组语义令牌（2026-11-09）────────────────────────────── */
+:root {
+  --dlg-ink: #fff;                /* 深底上的纯白文字（封面占位等） */
+  --dlg-cover-a: #10282c;         /* 封面渐变起点 */
+  --dlg-cover-b: #133539;         /* 封面渐变中点 */
+  --dlg-cover-c: #0d2029;         /* 封面渐变终点 */
+}
+.modal .project-cover { color: var(--dlg-ink); }
+.modal .project-cover span { color: var(--dlg-ink); }
+
+/* ── 项目管理弹窗：步骤条与卡片内容的左缘对齐（2026-11-09）─────────
+   实测问题：.project-steps 的盒子与 .project-management-section 同宽同 x
+   （都是 345 / 590），**但视觉左缘差 15px**——因为 section 有 14px 内边距，
+   其内部 h3 从 360 开始；而步骤条第一格直接贴 345。
+
+   两处修正：
+   1. 步骤条补上与卡片相同的水平内边距，使其格子与卡片内容对齐；
+   2. 「画布」下拉在 flex 行里被压成 9:1（实测 select 宽度不足，选项文本被截），
+      给它一个 flex-basis 下限，保证「竖屏 9:16」这类选项完整显示。 */
+/* 用 margin 而非 padding：padding 会让盒子在 590px 宽度里再向外撑，
+   导致步骤条右缘超出卡片（实测 1209 vs 1239）。margin 只内缩盒子本身。 */
+.modal.project-management-modal .project-steps { margin-left: 14px; margin-right: 14px; }
+.modal.project-management-modal .project-form-row .tb-field { flex: none; min-width: 132px; }
+.modal.project-management-modal .project-form-row .tb-field select { width: 100%; }
+.modal.project-management-modal .project-form-row input { flex: 1; min-width: 0; }
+.modal.project-management-modal .project-form-row .compact-command { flex: none; }
+
+
+/* ── B 族「步骤流」· 步骤记录列表（2026-11-09）──────────────────
+   结构稿：docs/design/ui-mockups/dialog-system-v2/prototype-step-family.html
+
+   **改造前这里是零规则**：.agent-session-steps 在样式表里一条都没有，
+   三个弹窗（AgentSession / EditingGrammar / Worklist）共用它，实际用的是
+   浏览器默认 <ol>。Chromium 实测：padding-left 40px、list-style decimal
+   （与「第 N 步」文案**重复编号**）、li 内边距 0、行高 17/28 不一致、无分隔线。
+
+   设计要点：
+   · 去掉默认序号 —— 内容里已有「第 N 步」，再显示 1./2./3. 是重复编号；
+   · 定宽序号列用 <strong> 自然承接（不改 JSX），靠 padding + 分隔线成行；
+   · 行间用发丝线分隔但首行不加（首行靠容器上边界）；
+   · 行高由内容撑开，不写死 —— 带「查看此步差异」按钮的行会自然更高。 */
+.modal .agent-session-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0;
+  background: var(--dlg-raise);
+  border: 1px solid var(--dlg-line);
+  border-radius: var(--r-box);
+  overflow: hidden;
+}
+.modal .agent-session-steps > li {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 11px 13px;
+  color: var(--dlg-text-2);
+  font-size: var(--dlg-fs-body);
+  line-height: 1.7;
+}
+.modal .agent-session-steps > li + li { border-top: 1px solid var(--dlg-line); }
+.modal .agent-session-steps > li > strong {
+  flex: none;
+  color: var(--dlg-text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+/* 摘要段（「· 识别 12 个镜头」）比步骤名低一档，避免整行同级抢读 */
+.modal .agent-session-steps > li > span { color: var(--dlg-text-3); font-size: var(--dlg-fs-caption); }
+/* 操作按钮靠右，不与文字混排 */
+.modal .agent-session-steps > li .mini-btn { margin-left: auto; flex: none; }
+.modal .agent-session-steps code {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: var(--dlg-fs-caption);
+  color: var(--dlg-text);
+  background: var(--ctl-bg);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+/* 差异加载中的提示同样低一档 */
+.modal .agent-session-steps > li > small { color: var(--dlg-text-4); font-size: var(--dlg-fs-caption); }
+
+/* 进行中的进度块（AgentSession running）—— 与结果态列表区分开：
+   进行中只给「到哪了 + 还要多久」，不铺历史。 */
+.modal .agent-session-progress {
+  display: grid; gap: 8px;
+  padding: 11px 13px;
+  background: var(--dlg-raise);
+  border: 1px solid var(--dlg-line);
+  border-radius: var(--r-box);
+}
+/* running 态：<progress> 直接排在 <p> 与 <ol> 之间，没有包裹容器。
+   用相邻选择器定位，不改 JSX（改 JSX 要动 .tsx，风险高于收益）。 */
+.modal.agent-session progress[aria-label="会话步数进度"] {
+  width: 100%;
+  height: 4px;
+  margin: 2px 0 4px;
+  appearance: none;
+  border: 0;
+  border-radius: 2px;
+  background: var(--ctl-bg);
+  overflow: hidden;
+}
+.modal.agent-session progress[aria-label="会话步数进度"]::-webkit-progress-bar {
+  background: var(--ctl-bg);
+  border-radius: 2px;
+}
+.modal.agent-session progress[aria-label="会话步数进度"]::-webkit-progress-value {
+  background: var(--dlg-primary);
+  border-radius: 2px;
+  transition: width .3s ease-out;
+}
+
+
+/* ── D 族「三步确认」· 外发确认页（2026-11-09）──────────────────
+   结构稿：docs/design/ui-mockups/dialog-system-v2/prototype-egress-confirm-family.html
+
+   改造前：两个弹窗的确认页把 8 项元数据平铺在同一个 dl 里，没有分组、
+   **没有勾选框**、主按钮用普通主色。外发是不可逆动作，却是全仓唯一
+   没有二次确认的破坏性操作（删除素材、删除 Provider 都有确认弹窗）。
+
+   本段补齐三件事：
+   1. .egress-meta  —— 元数据按「给谁 / 发什么 / 规模 / 费用 / 凭据」分组；
+   2. .egress-confirm —— 勾选框紧贴内容预览（不与底栏混排，混排会被跳过）；
+   3. 底栏主按钮 danger 色 —— 不可逆外发不是普通「下一步」。 */
+.modal .egress-meta { margin: 0; }
+.modal .egress-meta dd.egress-cost { color: var(--dlg-warn); }
+.modal .egress-meta dd.egress-hash {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  color: var(--dlg-text-3);
+  overflow-wrap: anywhere;
+}
+
+/* 确认区：与提示盒同一层级，但用危险色描边强调「不可逆」 */
+.modal .egress-confirm {
+  display: grid;
+  gap: 10px;
+  padding: 13px 14px;
+  border: 1px solid var(--rgba-77);
+  border-radius: var(--r-box);
+  background: var(--dlg-danger-dim);
+}
+.modal .egress-confirm .egress-warn {
+  margin: 0;
+  color: var(--dlg-danger-calm);
+  font-size: var(--dlg-fs-caption);
+  line-height: 1.75;
+}
+.modal .egress-confirm label {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  color: var(--dlg-text-2);
+  font-size: var(--dlg-fs-label);
+  line-height: 1.6;
+  cursor: pointer;
+}
+.modal .egress-confirm input[type="checkbox"] {
+  width: 16px; height: 16px;
+  margin: 1px 0 0;
+  flex: none;
+  accent-color: var(--dlg-primary);
+}
+
+
+/* ── A 族「纯表单」· Settings / Cover / Shortcuts（2026-11-09）──────
+   契约复用 Provider 稿的 fieldset 分组形态：发丝线分隔、不用描边卡片，
+   label 纵排 + 6px 间距（对齐 .modal label 基线）。
+
+   改造前实测：
+   · .settings-dialog 只有 1 条规则（仅宽度档位），.settings-radio 与
+     .settings-effective **零规则** —— 单选组与「当前生效」行用的是浏览器默认；
+   · .shortcuts-dialog 只有 3 条（2 条是按钮例外 + 1 条宽度），
+     快捷键行 .shortcut-row 住在旧的 .vc-* 令牌体系里（line 756 起），
+     与 Graphite 令牌不是一套。 */
+.modal .settings-radio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  color: var(--dlg-text-2);
+  font-size: var(--dlg-fs-body);
+  cursor: pointer;
+}
+.modal .settings-radio input[type="radio"] {
+  width: 16px; height: 16px; margin: 0; flex: none;
+  accent-color: var(--dlg-primary);
+}
+/* 「当前生效」是状态行而不是段落：给底色 + 圆角，与内容分层 */
+.modal .settings-effective {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--dlg-line);
+  border-radius: var(--r-box);
+  background: var(--dlg-raise);
+  color: var(--dlg-text-2);
+  font-size: var(--dlg-fs-label);
+  line-height: 1.7;
+}
+.modal .settings-effective strong { color: var(--dlg-text); font-weight: 600; }
+
+/* ── 快捷键列表：迁到 Graphite 令牌（原来用 .vc-* 体系） ────────────
+   行结构与 C 族一致：标签可伸缩 + 键位定宽 + 操作按钮靠右。 */
+.modal .shortcuts-list { display: grid; gap: 6px; }
+.modal .shortcut-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--r-ctl);
+  background: var(--dlg-raise);
+  transition: background .15s, border-color .15s;
+}
+.modal .shortcut-row:hover { background: var(--ctl-bg); border-color: var(--dlg-line); }
+.modal .shortcut-row .shortcut-label {
+  flex: 1; min-width: 0;
+  color: var(--dlg-text);
+  font-size: 12.5px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.modal .shortcut-row kbd {
+  flex: none; min-width: 72px;
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 24px; padding: 0 8px;
+  border: 1px solid var(--dlg-line);
+  border-radius: 5px;
+  background: var(--ctl-bg);
+  color: var(--dlg-text-2);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.modal .shortcut-row kbd.shortcut-recording {
+  border-color: var(--dlg-primary);
+  color: var(--dlg-primary);
+  background: var(--dlg-accent-dim);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+.modal .shortcut-row .compact-command { flex: none; }
+
+
+/* ── 命令搜索：kbd 与状态列固定宽度（2026-11-09，用户红框指出）──────
+   实测问题：grid 第 3/4 列都是 auto ⇒ 列宽随内容变。
+   kbd 左缘出现 3 种值（838/826/763）、右缘 2 种（868/805）；
+   状态徽章左缘 2 种（877/814）。只有最右缘 924 是齐的。
+
+   这是「快捷键列没有右对齐」——用户红框指出的正是这里。
+
+   修法：第 3 列固定 64px 且右对齐（键位靠右贴状态列），第 4 列固定 88px
+   左对齐（状态文案起点一致）。第 4 列要放「没有可重做的操作」这类
+   8 字长文案，88px 在 10.5px 字号下刚好容纳，超出用省略号。 */
+.modal.command-palette .command-option {
+  /* 第 4 列 112px：实测「没有可重做的操作」在 10.5px 下需要 110px，
+     88px 会截断。宁可让名称列窄一点，也不截断状态文案——
+     状态是"为什么不能执行"的唯一解释，被裁掉等于没说。 */
+  grid-template-columns: 20px minmax(0, 1fr) 64px 112px;
+}
+.modal.command-palette .command-option > kbd,
+.modal.command-palette .command-option > .command-shortcut {
+  justify-self: end;
+  width: 100%;
+  max-width: 64px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.modal.command-palette .command-option > .command-ok,
+.modal.command-palette .command-option > .command-state {
+  justify-self: start;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
