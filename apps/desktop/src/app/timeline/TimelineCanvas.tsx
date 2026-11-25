@@ -126,6 +126,11 @@ import {
   TimelineInsertIndicator,
   TimelineTransitionAndKeyframeOverlays,
 } from "./canvas/TimelineOverlays.js";
+import {
+  detectCanvasHover,
+  hitTestCanvasContextMenuTarget,
+  hitTestCanvasPointerDown,
+} from "./canvas/hit-test.js";
 
 export {
   THUMB_CELL_PX,
@@ -1870,28 +1875,29 @@ export function TimelinePanel({
       const { x, y } = coords;
       const canvas = canvasRef.current;
       if (!canvas) return;
-      if (x < view.headerWidth) {
-        if (speedModeActive) setSpeedModeKey(null);
-        return;
-      }
-      let speedHandle: ReturnType<typeof hitTestTrimHandle> = null;
-      if (speedModeActive) {
-        for (const id of selectedSpeedClipIds) {
-          const candidate = clips.find(clip => clip.clip_id === id);
-          if (!candidate || !canChangeClipSpeed(candidate) || isClipLocked(candidate.clip_id)) continue;
-          const candidateRect = clipRects.find(rect => rect.clip.clip_id === id);
-          if (!candidateRect) continue;
-          speedHandle = hitTestTrimHandle(x, y, [candidateRect]);
-          if (speedHandle) break;
-        }
-        if (!speedHandle) setSpeedModeKey(null);
-      }
+      const { hit, speedHandleMiss } = hitTestCanvasPointerDown({
+        x,
+        y,
+        view,
+        totalUs,
+        canvasWidth: canvasSize.width,
+        canvasHeight: canvasSize.height,
+        scrollTop: scrollTopRef.current,
+        clips,
+        clipRects,
+        captionRects,
+        transitionRects,
+        activeTransitionRects,
+        speedModeActive,
+        selectedSpeedClipIds,
+        isClipLocked,
+        waveformRatio: prefs.waveformRatio,
+      });
+      if (speedHandleMiss) setSpeedModeKey(null);
+      if (hit.kind === "header-rail") return;
 
       // Bottom scrollbar strip → scrollbar drag (Round 4)
-      // B17：滚动条钉在可视区底部——内容空间 y 带 = scrollTop + 视口高。
-      const { maxScrollX } = scrollBounds(view, totalUs, canvasSize.width);
-      const scrollbarBandTop = scrollTopRef.current + canvasSize.height - SCROLLBAR_HEIGHT_PX;
-      if (maxScrollX > 0 && y >= scrollbarBandTop) {
+      if (hit.kind === "scrollbar") {
         const next: TimelineInteraction = {
           kind: "scrollbar",
           startX: x,
@@ -1904,38 +1910,30 @@ export function TimelinePanel({
       }
 
       // Ruler area → playhead drag（寻址钳制在素材终点内）
-      if (y <= view.rulerHeight) {
+      if (hit.kind === "ruler") {
         const startTimeUs = activePlayheadStore.get();
         const timeUs = clampRulerTime(xToTime(x, view));
         onSeek?.(timeUs);
         const next: TimelineInteraction = { kind: "playhead", startX: x, startTimeUs };
         interactionRef.current = next;
         setInteraction(next);
-        // 擦洗态必须在这里也置位：本路径是「在标尺区按下开始拖播放头」，
-        // 与 handleRulerPinDown 是两条入口。此前只在后者里 setScrubbing(true)，
-        // 于是一路拖动时旋钮一直是空心的（参照：按住实心、松开空心）。
         rulerScrubbingRef.current = true;
         setScrubbing(true);
         canvas.style.cursor = "col-resize";
         return;
       }
 
-      // Transition marker → select (checked before clips; markers overlap edges)
-      const activeTransitionId = hitTestActiveTransitions(x, y, activeTransitionRects);
-      if (activeTransitionId) {
-        setSelection({ kind: "active-transition", id: activeTransitionId });
+      if (hit.kind === "active-transition") {
+        setSelection({ kind: "active-transition", id: hit.transitionId });
         return;
       }
-      const transitionId = hitTestTransitions(x, y, transitionRects);
-      if (transitionId) {
-        setSelection({ kind: "transition", id: transitionId });
+      if (hit.kind === "transition") {
+        setSelection({ kind: "transition", id: hit.transitionId });
         return;
       }
 
-      // Trim handle → trim drag (must take priority over plain clip hit)
-      const handle = speedHandle ?? hitTestTrimHandle(x, y, clipRects);
-      if (speedHandle) {
-        const clip = clips.find(candidate => candidate.clip_id === speedHandle!.clipId);
+      if (hit.kind === "speed-handle") {
+        const clip = clips.find(candidate => candidate.clip_id === hit.clipId);
         if (!clip || isClipLocked(clip.clip_id, event.altKey)) return;
         const linkedClipIds = clip.link_group_id && !event.altKey
           ? clips.filter(member => member.link_group_id === clip.link_group_id && !isClipLocked(member.clip_id, true) && canChangeClipSpeed(member)).map(member => member.clip_id)
@@ -1948,7 +1946,7 @@ export function TimelinePanel({
           clipId: clip.clip_id,
           linkedClipIds,
           ignoreLink: event.altKey,
-          edge: speedHandle.edge,
+          edge: hit.edge,
           startX: x,
           startScrollX: view.scrollX,
           originalSpeedMilli: clip.speed_milli ?? 1_000,
@@ -1966,37 +1964,37 @@ export function TimelinePanel({
         canvas.style.cursor = "ew-resize";
         return;
       }
-      if (handle && scrubMode === "roll") {
-        const clip = clips.find((c) => c.clip_id === handle.clipId);
-        if (!clip || isClipLocked(handle.clipId)) return;
+      if (hit.kind === "trim-handle" && scrubMode === "roll") {
+        const clip = clips.find((c) => c.clip_id === hit.clipId);
+        if (!clip || isClipLocked(hit.clipId)) return;
         const adjacent = clips.find(candidate => candidate.track_id === clip.track_id &&
-          (handle.edge === "right" ? candidate.timeline_start_us === clip.timeline_end_us : candidate.timeline_end_us === clip.timeline_start_us));
+          (hit.edge === "right" ? candidate.timeline_start_us === clip.timeline_end_us : candidate.timeline_end_us === clip.timeline_start_us));
         if (!adjacent) {
           setToolbarFeedback("滚动修剪需要拖动两个首尾相接片段的公共边缘");
           return;
         }
-        const clipIds = handle.edge === "right" ? [clip.clip_id, adjacent.clip_id] : [adjacent.clip_id, clip.clip_id];
+        const clipIds = hit.edge === "right" ? [clip.clip_id, adjacent.clip_id] : [adjacent.clip_id, clip.clip_id];
         setSelection({ kind: "clips", ids: clipIds });
         beginAdvancedEdit("roll", clipIds, x, canvas);
         return;
       }
-      if (handle && (scrubMode === "slip" || scrubMode === "slide")) {
+      if (hit.kind === "trim-handle" && (scrubMode === "slip" || scrubMode === "slide")) {
         setToolbarFeedback(scrubMode === "slip" ? "滑移素材请拖动片段主体" : "滑动片段请拖动片段主体");
         return;
       }
-      if (handle && !isClipLocked(handle.clipId, true)) {
-        const clip = clips.find((c) => c.clip_id === handle.clipId);
+      if (hit.kind === "trim-handle" && !isClipLocked(hit.clipId, true)) {
+        const clip = clips.find((c) => c.clip_id === hit.clipId);
         if (clip) {
           const linkedClipIds = clip.link_group_id && !event.altKey
             ? clips.filter(member => member.link_group_id === clip.link_group_id && !isClipLocked(member.clip_id, true)).map(member => member.clip_id)
             : [clip.clip_id];
-          setSelection(event.altKey ? { kind: "clip", id: handle.clipId } : linkedSelection(clip));
+          setSelection(event.altKey ? { kind: "clip", id: hit.clipId } : linkedSelection(clip));
           const next: TimelineInteraction = {
             kind: "trim",
-            clipId: handle.clipId,
+            clipId: hit.clipId,
             linkedClipIds,
             ignoreLink: event.altKey,
-            edge: handle.edge,
+            edge: hit.edge,
             startX: x,
             startScrollX: view.scrollX,
             originalStartUs: clip.source_start_us ?? 0,
@@ -2016,15 +2014,13 @@ export function TimelinePanel({
         }
       }
 
-      // Volume line → gain drag (checked after trim handles; Round 5)
-      const volumeId = hitTestVolumeLine(x, y, clipRects, isClipLocked, prefs.waveformRatio);
-      if (volumeId) {
-        const clip = clips.find((c) => c.clip_id === volumeId);
+      if (hit.kind === "volume-line") {
+        const clip = clips.find((c) => c.clip_id === hit.clipId);
         if (clip) {
-          setSelection({ kind: "clip", id: volumeId });
+          setSelection({ kind: "clip", id: hit.clipId });
           const next: TimelineInteraction = {
             kind: "volume",
-            clipId: volumeId,
+            clipId: hit.clipId,
             startY: y,
             startGainDb: clip.audio.gain_db,
             targetGainDb: clip.audio.gain_db,
@@ -2036,9 +2032,8 @@ export function TimelinePanel({
         }
       }
 
-      // Clip body → move drag (single) or group move (multi-selection of A1)
-      const clipId = hitTestClips(x, y, clipRects);
-      if (clipId) {
+      if (hit.kind === "clip") {
+        const clipId = hit.clipId;
         // A locked linked partner is left in place (OpenFilm's writable crowd); only the grabbed clip itself blocks
         // the gesture. Alt-copy already acts on the grabbed clip alone.
         if (isClipLocked(clipId, true)) return;
@@ -2195,45 +2190,35 @@ export function TimelinePanel({
         return;
       }
 
-      // B4：字幕端点拖拽（C1 轨；±8px 边缘容差，复用 trim 交互）。
-      const CAPTION_EDGE_PX = 8;
-      const captionHit = hitTestCaptions(x, y, captionRects);
-      if (captionHit) {
-        const caption = captions.find((c) => c.caption_id === captionHit);
-        const rect = captionRects.find((r) => r.caption.caption_id === captionHit);
-        if (caption && rect) {
-          const fromLeft = x <= rect.x + CAPTION_EDGE_PX;
-          const fromRight = x >= rect.x + rect.width - CAPTION_EDGE_PX;
-          if (fromLeft || fromRight) {
-            setSelection({ kind: "caption", id: captionHit });
-            const next: TimelineInteraction = {
-              kind: "caption-trim",
-              captionId: captionHit,
-              edge: fromLeft ? "left" : "right",
-              startX: x,
-              startScrollX: view.scrollX,
-              originalStartUs: caption.start_us,
-              originalEndUs: caption.end_us,
-              targetStartUs: caption.start_us,
-              targetEndUs: caption.end_us,
-            };
-            interactionRef.current = next;
-            setInteraction(next);
-            canvas.style.cursor = "ew-resize";
-            return;
-          }
+      if (hit.kind === "caption-edge") {
+        const caption = captions.find((c) => c.caption_id === hit.captionId);
+        if (caption) {
+          setSelection({ kind: "caption", id: hit.captionId });
+          const next: TimelineInteraction = {
+            kind: "caption-trim",
+            captionId: hit.captionId,
+            edge: hit.edge,
+            startX: x,
+            startScrollX: view.scrollX,
+            originalStartUs: caption.start_us,
+            originalEndUs: caption.end_us,
+            targetStartUs: caption.start_us,
+            targetEndUs: caption.end_us,
+          };
+          interactionRef.current = next;
+          setInteraction(next);
+          canvas.style.cursor = "ew-resize";
+          return;
         }
       }
 
-      // Caption → 整体拖拽启动（B4 追加；松手提交 set_caption_timing 平移）。
-      const captionId = hitTestCaptions(x, y, captionRects);
-      if (captionId) {
-        const caption = captions.find((c) => c.caption_id === captionId);
+      if (hit.kind === "caption") {
+        const caption = captions.find((c) => c.caption_id === hit.captionId);
         if (caption) {
-          setSelection({ kind: "caption", id: captionId });
+          setSelection({ kind: "caption", id: hit.captionId });
           const next: TimelineInteraction = {
             kind: "caption-move",
-            captionId,
+            captionId: hit.captionId,
             startX: x,
             startScrollX: view.scrollX,
             startY: y,
@@ -2248,11 +2233,9 @@ export function TimelinePanel({
         }
       }
 
-      // V1 boundary gap → offer adding a transition (B2)
-      const gapAnchor = hitTestTransitionGap(x, y, clipRects);
-      if (gapAnchor) {
+      if (hit.kind === "transition-gap") {
         setSelection(null);
-        setAddTransitionAnchor(gapAnchor);
+        setAddTransitionAnchor(hit.afterClipId);
         return;
       }
 
@@ -2778,11 +2761,13 @@ export function TimelinePanel({
       }
 
       // Hover cursor + trim handle detection
-      const handle = hitTestTrimHandle(x, y, clipRects);
-      const volumeHoverId = handle ? null : hitTestVolumeLine(x, y, clipRects, isClipLocked, prefs.waveformRatio);
-      const nextHover: TimelineHover = handle
-        ? { clipId: handle.clipId, edge: handle.edge }
-        : { clipId: volumeHoverId ?? hitTestClips(x, y, clipRects), edge: null };
+      const { hover: nextHover, cursor } = detectCanvasHover({
+        x,
+        y,
+        clipRects,
+        isClipLocked,
+        waveformRatio: prefs.waveformRatio,
+      });
       setHover((prev) =>
         prev.clipId === nextHover.clipId && prev.edge === nextHover.edge ? prev : nextHover,
       );
@@ -2790,15 +2775,7 @@ export function TimelinePanel({
         const next = y <= view.rulerHeight ? clampRulerTime(xToTime(x, view)) : null;
         return prev === next ? prev : next;
       });
-      if (handle) {
-        canvas.style.cursor = "ew-resize";
-      } else if (volumeHoverId) {
-        canvas.style.cursor = "ns-resize";
-      } else {
-        const clipId = hitTestClips(x, y, clipRects);
-        const locked = clipId ? isClipLocked(clipId) : false;
-        canvas.style.cursor = clipId && !locked ? "grab" : "default";
-      }
+      canvas.style.cursor = cursor;
     },
     [view, onSeek, clipRects, clips, markers, activePlayheadStore, prefs.snappingEnabled, prefs.mainTrackMagnet, totalUs, frameRate, frameUs, fpsNum, fpsDen, assetDurationById, document, canvasSize.width, canvasSize.height, trackRows, resolveDragTargeting, scrubMode, getAdvancedEditPlan, setToolbarFeedback, clipDragPlanner],
   );
@@ -3275,23 +3252,26 @@ export function TimelinePanel({
       if (!coords) return;
       const { x, y } = coords;
       const timeUs = xToTime(x, view);
-      const transitionId = hitTestTransitions(x, y, transitionRects);
-      const clipId = hitTestClips(x, y, clipRects);
-      const captionId = hitTestCaptions(x, y, captionRects);
-      if (transitionId) {
-        setSelection({ kind: "transition", id: transitionId });
-        setContextMenu({ x, y, target: { kind: "transition", transitionId }, timeUs });
-      } else if (clipId) {
-        const clip = clips.find(item => item.clip_id === clipId);
-        const alreadySelected = selection?.kind === "clip" ? selection.id === clipId : selection?.kind === "clips" && selection.ids.includes(clipId);
+      const target = hitTestCanvasContextMenuTarget({
+        x,
+        y,
+        transitionRects,
+        clipRects,
+        captionRects,
+        trackRows,
+      });
+      if (target.kind === "transition") {
+        setSelection({ kind: "transition", id: target.transitionId });
+      } else if (target.kind === "clip") {
+        const clip = clips.find((item) => item.clip_id === target.clipId);
+        const alreadySelected = selection?.kind === "clip"
+          ? selection.id === target.clipId
+          : selection?.kind === "clips" && selection.ids.includes(target.clipId);
         if (clip && !alreadySelected) setSelection(linkedSelection(clip));
-        setContextMenu({ x, y, target: { kind: "clip", clipId }, timeUs });
-      } else if (captionId) {
-        setSelection({ kind: "caption", id: captionId });
-        setContextMenu({ x, y, target: { kind: "caption", captionId }, timeUs });
-      } else {
-        setContextMenu({ x, y, target: { kind: "empty", trackId: trackRowAt(trackRows, x, y)?.track.id ?? null }, timeUs });
+      } else if (target.kind === "caption") {
+        setSelection({ kind: "caption", id: target.captionId });
       }
+      setContextMenu({ x, y, target, timeUs });
     },
     [view, transitionRects, clipRects, captionRects, trackRows, clips, selection, setSelection],
   );
@@ -3487,21 +3467,6 @@ export function TimelinePanel({
       setToolbarFeedback("片段替换失败；时间线未修改。");
     });
   };
-
-  // ── Caption hit testing ────────────────────────────────────────────────────
-
-  function hitTestCaptions(
-    x: number,
-    y: number,
-    rects: CaptionRenderRect[],
-  ): string | null {
-    for (const rect of rects) {
-      if (x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height) {
-        return rect.caption.caption_id;
-      }
-    }
-    return null;
-  }
 
   // ── Selection helpers for the toolbar ──────────────────────────────────────
 
