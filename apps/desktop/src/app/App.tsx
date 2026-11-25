@@ -34,8 +34,6 @@ import { formatLocalStamp } from "./localTime.js";
 import { PreviewPipOverlays, type PipOverlay, type PipTransform } from "./PreviewPipOverlays.js";
 import { SyntheticPreview } from "./preview/SyntheticPreview.js";
 import { syntheticFallbackNotice } from "./preview/fallback-notice.js";
-import { FIT_VIEW, ZOOM_SETTLE_MS, createWheelCoalescer, createZoomSettle, fittedSize, isFit, panBy, wheelPx, wheelZoomFactor, zoomAt, zoomLayout, zoomMax, type ViewerView } from "./preview/viewer-zoom.js";
-import { IDLE_PRESS, pickTopmostBox, reducePreviewPress, selectionFromOutcome, type HitBox, type PreviewPress } from "./preview/stage-interaction.js";
 import { editorCommands, type EditorCommand } from "./editorCommands.js";
 import { bindingLabel, findConflict, loadShortcuts, matchesBinding, normalizeRecordedBinding, saveShortcuts, DEFAULT_SHORTCUTS, type ShortcutCommandId, type ShortcutEntry } from "./shortcuts.js";
 import { TimelinePanel } from "./timeline/TimelineCanvas.js";
@@ -97,6 +95,7 @@ import { useAiWorkflows } from "./hooks/useAiWorkflows.js";
 import { useExportAndRender } from "./hooks/useExportAndRender.js";
 import { useAssetAndMediaLibrary } from "./hooks/useAssetAndMediaLibrary.js";
 import { usePreviewPlayback } from "./hooks/usePreviewPlayback.js";
+import { useStageViewport } from "./hooks/useStageViewport.js";
 import { useProjectLifecycle } from "./hooks/useProjectLifecycle.js";
 
 export function App() {
@@ -118,8 +117,6 @@ export function App() {
   const [notice, setNotice] = useState<Notice>("");
   const [newProject, setNewProject] = useState("");
   const [newProjectRatio, setNewProjectRatio] = useState("916");
-  const [previewRatio, setPreviewRatio] = useState("fit");
-  const [previewRatioTouched, setPreviewRatioTouched] = useState(false);
   // Provider 设置独立入口：Provider 是各 AI 功能共用的前置，不再藏在 AI 粗剪里。
   const [providerSettingsOpen, setProviderSettingsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -162,26 +159,6 @@ export function App() {
   shortcutsRef.current = shortcuts;
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [recordingId, setRecordingId] = useState<ShortcutCommandId | null>(null);
-  const [previewZoom, setPreviewZoom] = useState<number | "fit">("fit");
-  const [viewerView, setViewerView] = useState<ViewerView>(FIT_VIEW);
-  const [zoomDrawn, setZoomDrawn] = useState(1);
-  const [stageMarquee, setStageMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
-  const frameRatioRef = useRef({ w: 16, h: 9 });
-  const viewerViewRef = useRef(viewerView);
-  viewerViewRef.current = viewerView;
-  const previewPressRef = useRef<PreviewPress>(IDLE_PRESS);
-  const previewClickGuardRef = useRef(false);
-  const pressRafRef = useRef(0);
-  const previewFrameRef = useRef<HTMLDivElement | null>(null);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const stagePaneRef = useRef<HTMLElement | null>(null);
-  const stageColumnRef = useRef<HTMLDivElement | null>(null);
-  // 画面选中框：白色边框 + 8 向拖拽手柄（角等比 / 边单轴），缩放时随画面一起缩放。
-  const canvasRef = useRef<HTMLDivElement | null>(null);
-  const selBoxRef = useRef<HTMLDivElement | null>(null);
-  const [canvasSize, setCanvasSize] = useState<{ w: number; h: number } | null>(null);
-  const [selDimsText, setSelDimsText] = useState("");
-  const selDragRef = useRef<{ dir: string; startX: number; startY: number; w: number; h: number; ratio: number } | null>(null);
   const applyShortcuts = (next: Record<ShortcutCommandId, ShortcutEntry>) => { setShortcuts(next); saveShortcuts(next); };
   const handleRecordKey = (event: React.KeyboardEvent, id: ShortcutCommandId) => {
     event.preventDefault();
@@ -554,6 +531,30 @@ export function App() {
       if (projectRef.current?.project_id === project.project_id) await handleConflict(error);
     }
   };
+  const overlayClipSelected = Boolean(selectedClip && selectedClip.asset_kind !== "audio" && trackById.get(selectedClip.track_id)?.kind === "video");
+  const showSelBox = !overlayClipSelected;
+  const {
+    previewRatio, previewZoom, isViewerFit,
+    stageMarquee, previewClickGuardRef, previewFrameRef,
+    isFullscreen, stagePaneRef, stageColumnRef,
+    canvasRef, selBoxRef, canvasSize, selDimsText,
+    effectiveRatio, renderRatio, previewClass,
+    changePreviewRatio, zoomT, resetZoom, applySliderZoom, toggleFullscreen,
+    onPreviewPointerDown, onPreviewPointerMove, onPreviewPointerUp, onPreviewPointerCancel, onPreviewKeyDown,
+    beginSelDrag, moveSelDrag, endSelDrag,
+  } = useStageViewport({
+    project,
+    working,
+    previewMode,
+    trackById,
+    tracksAtPlayhead,
+    selectedClipIds,
+    showSelBox,
+    getOverlayPips: () => overlayPips,
+    setSelection,
+    patchTimeline: (operations, summary) => patchTimeline(operations, summary),
+    showNotice: (text, tone) => showNotice(text, tone),
+  });
   // P1 画中画：交互预览画布上展示覆盖轨片段（V2+，轨道未隐藏）。
   // 播放头区间内的片段常驻；**被选中的覆盖轨片段无论播放头在哪都显示**——
   // 否则在时间线上选中片段调属性时，画布上没有盒子可看（"调了没效果"）。
@@ -610,11 +611,6 @@ export function App() {
     void patchTimeline([{ op: "set_clip_mask", clip_id: clipId, mask }], "画中画蒙版");
   };
   const pipSelectedId = selectedClip?.clip_id ?? null;
-  // P231 Q2：任意视觉轨片段选中时隐藏「画布尺寸框」（白框贴合整个画布，会盖过
-  // 浮层自己的内容选中框）；浮层的选中框 + 8 向手柄由 PreviewPipOverlays 提供。
-  // A1 音频片段不显示浮层盒子，保留画布尺寸框。
-  const overlayClipSelected = Boolean(selectedClip && selectedClip.asset_kind !== "audio" && trackById.get(selectedClip.track_id)?.kind === "video");
-  const showSelBox = !overlayClipSelected;
   const pipLocked = pipSelectedId ? Boolean(working?.locked_elements?.includes(pipSelectedId)) : false;
   // 应用内剪贴板（M2 A3）：复制 V1 视频片段快照，粘贴回放到播放头。
   const clipboardClips = useRef<Array<{ asset_id: AssetId; asset_kind: "video" | "image"; source_start_us: number | null; source_end_us: number | null; speed_milli: number; reverse_playback: boolean; layout: TimelineLayout }>>([]);
@@ -684,68 +680,6 @@ export function App() {
     try {
       acceptState(await window.desktop[kind === "undo" ? "undoTimeline" : "redoTimeline"]({ project_id: project.project_id, base_revision_id: timeline.current_revision.timeline_revision_id }));
     } catch (error) { await handleConflict(error); } finally { undoRedoInFlight.current = false; }
-  };
-
-  // 预览/导出比例真源 = 项目画布（所见即所得；素材比例不再反客为主）。
-  // 旧实现按素材原生分辨率解析：横版素材 + 竖版项目时下拉显示 16:9、导出/预览
-  // 却与项目画布相悖，且播放头进入无片段区间时退化为 "fit"（合成预览拉取 IR
-  // 被核心以"画布比例不合法"拒绝）。项目画布恒为五档之一，恒稳定。
-  // 注意：必须读 project.canvas 而非 working.canvas——时间线文档画布受 v1
-  // 契约钉死为 1080×1920（timeline.py _normalize_and_validate），不反映项目比例；
-  // 渲染管线的唯一比例源是 preview-ir 的 output_ratio（OUTPUT_RATIO_DIMENSIONS）。
-  const canvasInfo = project?.canvas;
-  const autoRatio = canvasInfo
-    ? (Math.abs(canvasInfo.width / canvasInfo.height - 16 / 9) < 0.02 ? "169"
-      : Math.abs(canvasInfo.width / canvasInfo.height - 9 / 16) < 0.02 ? "916"
-      : Math.abs(canvasInfo.width / canvasInfo.height - 1) < 0.02 ? "11"
-      : Math.abs(canvasInfo.width / canvasInfo.height - 4 / 3) < 0.02 ? "43"
-      : Math.abs(canvasInfo.width / canvasInfo.height - 3 / 4) < 0.02 ? "34"
-      : "fit")
-    : "fit"; // 挂载由 working/timeline 门控，此分支仅理论可达
-  const effectiveRatio: OutputRatio = (previewRatioTouched ? previewRatio : autoRatio) as OutputRatio;
-  // 比例语义（2026-11-18 用户裁决，推翻 P231 Q1 的「跟随素材原画」）：
-  // - 选具体比例码 → 渲染画幅 = 该比例（权威预览/导出/合成预览同步切换）。
-  // - 「原始」→ 渲染画幅 = **16:9 恒定**（同类型软件的「原始」即 16:9）。
-  //   黑框（预览画布）比例 = 渲染画幅，二者永不分叉——黑色区域整体就是
-  //   排版/裁剪范围，不再出现内容 letterbox 死区。
-  const renderRatio: OutputRatio = effectiveRatio === "fit" ? "169" : effectiveRatio;
-  // 「原始」显示模式：预览框按渲染画幅比例约束（恒 16:9），画布内容
-  // 等比 contain 居中；选具体比例 = 显式切换渲染画幅并按该比例约束预览框。
-  const previewClass = `ratio-${renderRatio}`;
-  frameRatioRef.current = renderRatio === "916" || renderRatio === "34" ? { w: 9, h: 16 }
-    : renderRatio === "11" ? { w: 1, h: 1 }
-      : renderRatio === "43" ? { w: 4, h: 3 }
-        : { w: 16, h: 9 };
-  const framePixelSizeRef = useRef({ w: 1920, h: 1080 });
-  framePixelSizeRef.current = {
-    w: Math.max(1, working?.canvas.width ?? project?.canvas.width ?? 1920),
-    h: Math.max(1, working?.canvas.height ?? project?.canvas.height ?? 1080),
-  };
-  // 时间码帧率：优先画布帧率，缺省 30fps。
-  // 比例切换（剪映式）：选具体比例时**全视觉轨**布局切为 crop_fill（裁切填满——
-  // 等比放大到短边顶满、长边溢出裁剪，剪映同款默认，P231 Q3 裁决：全轨一致）；
-  // blurred_background 模糊垫底是竖版包装风格，不随比例切换自动套用。切回"原始"
-  // 不动时间线布局。
-  const changePreviewRatio = (value: string) => {
-    setPreviewRatio(value);
-    setPreviewRatioTouched(true);
-    setCanvasSize(null);
-    if (canvasRef.current) { canvasRef.current.style.width = ""; canvasRef.current.style.height = ""; }
-    if (value !== "fit" && working) {
-      const layoutOps = working.clips
-        .filter(clip => clip.layout === "blurred_background" && (clip.asset_kind === "video" || clip.asset_kind === "image") && trackById.get(clip.track_id)?.kind === "video")
-        .map(clip => ({ op: "set_layout" as const, clip_id: clip.clip_id, layout: "crop_fill" as const }));
-      if (layoutOps.length > 0) void patchTimeline(layoutOps, "切换比例：全视觉轨裁切填满");
-    }
-  };
-  // 预览缩放（剪映式）：点击缩放按钮弹出滑条，对数刻度 25%–500%，缩小时以画面中心整体缩小。
-  const zoomT = (z: number) => Math.round(Math.log(z / 0.25) / Math.log(20) * 1000);
-  const zoomZ = (t: number) => 0.25 * Math.exp(Math.log(20) * t / 1000);
-  const toggleFullscreen = async () => {
-    try {
-      if (document.fullscreenElement) await document.exitFullscreen();
-      else await stagePaneRef.current?.requestFullscreen();
-    } catch { showNotice("进入全屏失败。", "warning"); }
   };
   useEffect(() => { setGenerationOpen(false); setShotRequirementsOpen(false); setCoverUrl(project?.project_id ? localStorage.getItem(`vortex-cut.cover.${project.project_id}`) : null); }, [project?.project_id]);
 
@@ -964,270 +898,6 @@ export function App() {
     return () => window.removeEventListener("keydown", listener);
   }, []);
 
-  // 全屏：跟随浏览器全屏状态（Esc 退出时按钮图标同步复原）。
-  useEffect(() => {
-    const listener = () => setIsFullscreen(Boolean(document.fullscreenElement));
-    document.addEventListener("fullscreenchange", listener);
-    return () => document.removeEventListener("fullscreenchange", listener);
-  }, []);
-  // 基准宽：工具栏 / 舞台 / 进度条 / 播放条共享 16:9 适应宽度（剪映同款），其余比例在该列内居中。
-  useEffect(() => {
-    const pane = stagePaneRef.current;
-    const col = stageColumnRef.current;
-    if (!pane || !col) return;
-    const layout = () => {
-      const el = stageColumnRef.current;
-      const host = stagePaneRef.current;
-      if (!el || !host) return;
-      const isFs = document.fullscreenElement === host;
-      const availW = Math.max(1, isFs ? window.innerWidth - 24 : host.clientWidth - 24);
-      const availH = Math.max(1, isFs ? window.innerHeight - 24 - 40 - 40 - 16 : host.clientHeight - 24 - 40 - 40 - 16);
-      // Keep the player inside the available viewport even when the app is narrower/shorter than 320px.
-      const w = Math.min(availW, availH * 16 / 9);
-      el.style.width = `${w}px`;
-    };
-    layout();
-    const ro = new ResizeObserver(layout);
-    ro.observe(pane);
-    window.addEventListener("resize", layout);
-    document.addEventListener("fullscreenchange", layout);
-    return () => { ro.disconnect(); window.removeEventListener("resize", layout); document.removeEventListener("fullscreenchange", layout); };
-  }, []);
-  // S1/S2：预览缩放 = 布局尺寸（不用 transform:scale，手柄恒为屏幕 px）。
-  const zoomZValue = previewZoom === "fit" ? viewerView.z : (typeof previewZoom === "number" ? previewZoom : viewerView.z);
-  useEffect(() => {
-    const el = previewFrameRef.current;
-    if (!el) return;
-    const coalescer = createWheelCoalescer(
-      fn => requestAnimationFrame(fn),
-      id => cancelAnimationFrame(id),
-      (factor, dx, dy, anchor) => {
-        const viewer = { w: el.clientWidth || 1, h: el.clientHeight || 1 };
-        const fitted = fittedSize(viewer, frameRatioRef.current);
-        let next = viewerViewRef.current;
-        if (factor !== 1) next = zoomAt(next, factor, anchor, viewer, fitted, zoomMax(fitted.w / framePixelSizeRef.current.w));
-        if (dx || dy) next = panBy(next, dx, dy, fitted);
-        if (next !== viewerViewRef.current) { viewerViewRef.current = next; setViewerView(next); setPreviewZoom(next.z); }
-      },
-    );
-    let stopPan = () => {};
-    const onWheel = (event: WheelEvent) => {
-      if (event.ctrlKey || event.metaKey) {
-        // Prevent the browser page zoom; this gesture belongs to the preview canvas.
-        event.preventDefault();
-        if (event.buttons) return;
-        const rect = el.getBoundingClientRect();
-        coalescer.pushZoom(wheelZoomFactor(wheelPx(event, event.deltaY)), { x: event.clientX - rect.left, y: event.clientY - rect.top });
-        return;
-      }
-      // OpenFilm pans the picture with the ordinary wheel only after it has been enlarged.
-      if (isFit(viewerViewRef.current)) return;
-      event.preventDefault();
-      if (event.buttons) return;
-      const sideways = event.shiftKey && !event.deltaX;
-      coalescer.pushPan(wheelPx(event, sideways ? event.deltaY : event.deltaX), sideways ? 0 : wheelPx(event, event.deltaY));
-    };
-    const onPointerDown = (event: PointerEvent) => {
-      if (event.button !== 1 || isFit(viewerViewRef.current)) return;
-      event.preventDefault();
-      event.stopPropagation();
-      el.dataset.panActive = "true";
-      let last = { x: event.clientX, y: event.clientY };
-      const move = (next: PointerEvent) => {
-        coalescer.pushPan(last.x - next.clientX, last.y - next.clientY);
-        last = { x: next.clientX, y: next.clientY };
-      };
-      const cleanup = () => {
-        window.removeEventListener("pointermove", move);
-        window.removeEventListener("pointerup", cleanup);
-        window.removeEventListener("pointercancel", cleanup);
-        el.removeAttribute("data-pan-active");
-        stopPan = () => {};
-      };
-      stopPan = cleanup;
-      window.addEventListener("pointermove", move);
-      window.addEventListener("pointerup", cleanup);
-      window.addEventListener("pointercancel", cleanup);
-    };
-    el.addEventListener("wheel", onWheel, { passive: false });
-    el.addEventListener("pointerdown", onPointerDown, true);
-    return () => {
-      stopPan();
-      el.removeEventListener("wheel", onWheel);
-      el.removeEventListener("pointerdown", onPointerDown, true);
-      coalescer.dispose();
-    };
-  }, []);
-  /** 缩放静止 ZOOM_SETTLE_MS 后同步一次 DOM 几何；SyntheticPreview 的
-   *  ResizeObserver 随后按稳定后的容器尺寸重排合成缓冲并恢复暂停帧。 */
-  const zoomSettleRef = useRef(createZoomSettle(
-    ZOOM_SETTLE_MS,
-    (fn, ms) => window.setTimeout(fn, ms),
-    id => clearTimeout(id),
-    () => {
-      // 触发一次布局同步；画面尺寸由 SyntheticPreview 的观察器统一处理，
-      // 避免这里与窗口尺寸变化路径重复 resize/seek。
-      setZoomDrawn(value => value + 1);
-    },
-  ));
-  useEffect(() => {
-    // 初始 fitted 视图无需重绘；只有真实缩放变化才排队。
-    if (zoomZValue === 1 && previewZoom === "fit") return;
-    zoomSettleRef.current.schedule();
-    return () => zoomSettleRef.current.dispose();
-  }, [zoomZValue, previewZoom]);
-  /** 布局尺寸：显式 width/height（不是 transform）。
-   *  P231 比例守恒：黑框（.preview-canvas）尺寸恒 = fittedSize(viewer, 比例)——
-   *  「原始/具体比例」时也精确按容器内最大等比尺寸摆放，不再交给 CSS
-   *  aspect-ratio 兜底（height:100% 曾把 16:9 拉成容器形状，width:auto
-   *  又塌回 canvas intrinsic 300×150，两条路都实测失败）。
-   *  缩放（滚轮/滑条）= 在 fitted 基础上乘 viewerView.z，仍由布局尺寸表达。 */
-  useEffect(() => {
-    const el = previewFrameRef.current;
-    const canvas = canvasRef.current;
-    if (!el || !canvas) return;
-    const sync = () => {
-      const viewer = { w: el.clientWidth || 1, h: el.clientHeight || 1 };
-      const fitted = fittedSize(viewer, frameRatioRef.current);
-      const layout = zoomLayout(viewerViewRef.current, fitted, viewer);
-      const fit = isFit(viewerViewRef.current);
-      canvas.style.position = fit ? "relative" : "absolute";
-      canvas.style.left = fit ? "" : `${layout.x}px`;
-      canvas.style.top = fit ? "" : `${layout.y}px`;
-      canvas.style.width = `${layout.w}px`;
-      canvas.style.height = `${layout.h}px`;
-      const nextSize = { w: Math.round(layout.w), h: Math.round(layout.h) };
-      setCanvasSize(previous => previous?.w === nextSize.w && previous.h === nextSize.h ? previous : nextSize);
-    };
-    sync();
-    const observer = new ResizeObserver(sync);
-    observer.observe(el);
-    window.addEventListener("resize", sync);
-    return () => { observer.disconnect(); window.removeEventListener("resize", sync); };
-  }, [viewerView, previewZoom, previewClass, zoomDrawn]);
-  /** S4：空白按下 → rAF move → release 判定 click/marquee；绝不定位播放头。 */
-  const stageBoxesForPress = useCallback((): HitBox[] => {
-    if (previewMode === "synthetic") return [];
-    return overlayPips.map((item, index) => ({
-      clipId: item.clip.clip_id,
-      x: (item.clip.transform?.x ?? 0.5) * (canvasSize?.w ?? 0) - item.fit_w * (item.clip.transform?.scale ?? 1) / 2,
-      y: (item.clip.transform?.y ?? 0.5) * (canvasSize?.h ?? 0) - item.fit_h * (item.clip.transform?.scale ?? 1) / 2,
-      w: item.fit_w * (item.clip.transform?.scale ?? 1),
-      h: item.fit_h * (item.clip.transform?.scale ?? 1),
-      rotate: item.clip.transform?.rotate ?? 0,
-      renderOrder: index,
-    }));
-  }, [previewMode, overlayPips, canvasSize]);
-  const rankForPress = useCallback((box: HitBox) => {
-    const clip = (working?.clips ?? []).find(item => item.clip_id === box.clipId);
-    return clip ? tracksAtPlayhead.findIndex(track => track.id === clip.track_id) : tracksAtPlayhead.length;
-  }, [working?.clips, tracksAtPlayhead]);
-  const onPreviewPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) return;
-    // 合成层自有 S3/S4 命中状态机；此处只处理 interactive 空白画布。
-    // target 排除只挡「盒子/手柄自身」的按下（它们有自己的 begin/beginSelDrag）——
-    // 黑区在 .preview-canvas 子层上，target !== currentTarget 若一刀切，
-    // interactive 的框选/清选在黑区永远不触发（S4 语义缺口，实测）。
-    if (previewMode === "synthetic") return;
-    const onInteractiveOverlay = (event.target as HTMLElement).closest(".pip-overlay, .sel-box");
-    if (onInteractiveOverlay) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    const rect = canvasRef.current?.getBoundingClientRect() ?? event.currentTarget.getBoundingClientRect();
-    const point = { x: event.clientX - rect.left, y: event.clientY - rect.top };
-    const boxes = stageBoxesForPress();
-    const hit = pickTopmostBox(boxes, point, rankForPress);
-    previewPressRef.current = reducePreviewPress(IDLE_PRESS, { type: "down", x: point.x, y: point.y, additive: event.shiftKey || event.metaKey || event.ctrlKey, hitClipId: hit?.clipId ?? null }).state;
-  };
-  const onPreviewPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (previewPressRef.current.phase !== "press") return;
-    const canvasRect = canvasRef.current?.getBoundingClientRect() ?? event.currentTarget.getBoundingClientRect();
-    const frameRect = event.currentTarget.getBoundingClientRect();
-    const x = event.clientX - canvasRect.left, y = event.clientY - canvasRect.top;
-    const result = reducePreviewPress(previewPressRef.current, { type: "move", x, y });
-    previewPressRef.current = result.state;
-    if (pressRafRef.current) cancelAnimationFrame(pressRafRef.current);
-    pressRafRef.current = requestAnimationFrame(() => {
-      pressRafRef.current = 0;
-      setStageMarquee(result.marquee ? {
-        x: result.marquee.x + canvasRect.left - frameRect.left,
-        y: result.marquee.y + canvasRect.top - frameRect.top,
-        w: result.marquee.w,
-        h: result.marquee.h,
-      } : null);
-    });
-  };
-  const onPreviewPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (previewPressRef.current.phase !== "press") return;
-    const rect = canvasRef.current?.getBoundingClientRect() ?? event.currentTarget.getBoundingClientRect();
-    const result = reducePreviewPress(previewPressRef.current, { type: "up", x: event.clientX - rect.left, y: event.clientY - rect.top });
-    previewPressRef.current = IDLE_PRESS;
-    previewClickGuardRef.current = true;
-    setStageMarquee(null);
-    if (!result.outcome) return;
-    const ids = selectionFromOutcome(result.outcome, stageBoxesForPress(), rankForPress, selectedClipIds);
-    if (result.outcome.kind === "marquee") setSelection(ids.length ? { kind: "clips", ids } : null);
-    else if (ids.length === 1) setSelection({ kind: "clip", id: ids[0] });
-    else setSelection(null);
-  };
-  // 画面选中框：8 向手柄拖拽改画面大小（角 = 等比保持比例，边 = 单轴）；布局尺寸缩放。
-  const selZoomFactor = 1;
-  const beginSelDrag = (dir: string) => (event: React.PointerEvent<HTMLElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    event.preventDefault();
-    event.stopPropagation();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    selDragRef.current = { dir, startX: event.clientX, startY: event.clientY, w: canvas.offsetWidth, h: canvas.offsetHeight, ratio: canvas.offsetWidth / Math.max(1, canvas.offsetHeight) };
-    setSelDimsText(`${Math.round(canvas.offsetWidth)} × ${Math.round(canvas.offsetHeight)}`);
-  };
-  const moveSelDrag = (event: React.PointerEvent<HTMLElement>) => {
-    const drag = selDragRef.current;
-    const canvas = canvasRef.current;
-    if (!drag || !canvas) return;
-    const dx = (event.clientX - drag.startX) / selZoomFactor;
-    const dy = (event.clientY - drag.startY) / selZoomFactor;
-    let w = drag.w, h = drag.h;
-    const d = drag.dir;
-    if (d.includes("e")) w = drag.w + dx;
-    if (d.includes("s")) h = drag.h + dy;
-    if (d.includes("w")) w = drag.w - dx;
-    if (d.includes("n")) h = drag.h - dy;
-    if (d === "nw" || d === "ne" || d === "sw" || d === "se") {
-      const byW = Math.abs(w - drag.w), byH = Math.abs(h - drag.h);
-      if (byW >= byH) h = w / drag.ratio; else w = h * drag.ratio;
-    }
-    w = Math.max(80, Math.min(2400, w));
-    h = Math.max(45, Math.min(1350, h));
-    canvas.style.width = `${w}px`;
-    canvas.style.height = `${h}px`;
-    setCanvasSize({ w: Math.round(w), h: Math.round(h) });
-    setSelDimsText(`${Math.round(w)} × ${Math.round(h)}`);
-  };
-  const endSelDrag = (event: React.PointerEvent<HTMLElement>) => {
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    selDragRef.current = null;
-  };
-  // 选中框同步：框贴合画面（canvas）的布局矩形；frame 的 transform 缩放会同时作用于 canvas 与框。
-  // 依赖含 showSelBox：盒子随选中切换被卸载/重挂载（V2 选中隐藏、V1 恢复显示）时
-  // 必须重新同步尺寸——否则重挂载的盒子没有写入样式，8 向手柄全部堆积在左上角（0×0）。
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const box = selBoxRef.current;
-    if (!canvas || !box) return;
-    const sync = () => {
-      box.style.left = `${canvas.offsetLeft}px`;
-      box.style.top = `${canvas.offsetTop}px`;
-      box.style.width = `${canvas.offsetWidth}px`;
-      box.style.height = `${canvas.offsetHeight}px`;
-      setSelDimsText(`${Math.round(canvas.offsetWidth)} × ${Math.round(canvas.offsetHeight)}`);
-    };
-    sync();
-    const ro = new ResizeObserver(sync);
-    ro.observe(canvas);
-    if (canvas.parentElement) ro.observe(canvas.parentElement);
-    window.addEventListener("resize", sync);
-    return () => { ro.disconnect(); window.removeEventListener("resize", sync); };
-  }, [previewClass, canvasSize, showSelBox]);
   const menuShortcut = (label: string): string | undefined => {
       const command = editorCommands.find(item => item.label === label);
       if (!command) return undefined;
@@ -1578,18 +1248,7 @@ export function App() {
             </span>
           </div>
           <div className="stage-view">
-            <div ref={previewFrameRef} className={`preview-frame ${previewClass}${previewSelected ? " selected" : ""}${isFit(viewerView) ? "" : " zoomed"}`} role="button" tabIndex={0} aria-label="预览画布。Ctrl 或 Command 加滚轮缩放，中键拖动画面；放大后可用方向键平移" title="Ctrl / Command + 滚轮缩放；放大后中键拖动或用方向键平移" onPointerDown={onPreviewPointerDown} onPointerMove={onPreviewPointerMove} onPointerUp={onPreviewPointerUp} onPointerCancel={() => { previewPressRef.current = IDLE_PRESS; setStageMarquee(null); }} onClick={selectClipAtPlayhead} onKeyDown={event => {
-              if (!isFit(viewerView) && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) {
-                event.preventDefault(); event.stopPropagation();
-                const viewer = { w: event.currentTarget.clientWidth || 1, h: event.currentTarget.clientHeight || 1 };
-                const fitted = fittedSize(viewer, frameRatioRef.current);
-                const step = event.shiftKey ? 80 : 32;
-                const dx = event.key === "ArrowLeft" ? -step : event.key === "ArrowRight" ? step : 0;
-                const dy = event.key === "ArrowUp" ? -step : event.key === "ArrowDown" ? step : 0;
-                const next = panBy(viewerViewRef.current, dx, dy, fitted);
-                viewerViewRef.current = next; setViewerView(next); setPreviewZoom(next.z);
-              } else if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectClipAtPlayhead(); }
-            }}>
+            <div ref={previewFrameRef} className={`preview-frame ${previewClass}${previewSelected ? " selected" : ""}${isViewerFit ? "" : " zoomed"}`} role="button" tabIndex={0} aria-label="预览画布。Ctrl 或 Command 加滚轮缩放，中键拖动画面；放大后可用方向键平移" title="Ctrl / Command + 滚轮缩放；放大后中键拖动或用方向键平移" onPointerDown={onPreviewPointerDown} onPointerMove={onPreviewPointerMove} onPointerUp={onPreviewPointerUp} onPointerCancel={onPreviewPointerCancel} onClick={selectClipAtPlayhead} onKeyDown={event => onPreviewKeyDown(event, selectClipAtPlayhead)}>
           {stageMarquee && <div className="preview-marquee" aria-hidden="true" style={{ left: stageMarquee.x, top: stageMarquee.y, width: stageMarquee.w, height: stageMarquee.h }} />}
           <div className="preview-canvas" ref={canvasRef}>
             {previewMode === "authoritative" && authoritativeMediaUrl && <video ref={videoRef} className="preview-foreground authoritative-video" src={authoritativeMediaUrl} aria-label={reframePlayback ? "重构图权威预览视频" : exportPlayback ? "导出视频" : "权威预览视频"} controls onEnded={() => { setPlaying(false); setExportPlayback(undefined); setReframePlayback(undefined); setPreviewMode("synthetic"); }} />}
@@ -1663,10 +1322,10 @@ export function App() {
             <button type="button" className="pb-icon zoom-btn" aria-haspopup="dialog" aria-expanded={zoomPopOpen} aria-label={`预览缩放，${previewZoom === "fit" ? "适应画布" : `${Math.round(previewZoom * 100)}%`}`} title="预览缩放" onClick={event => { event.stopPropagation(); setZoomPopOpen(value => !value); setVolPopOpen(false); }}><ZoomIn /><span className="zoom-label">{previewZoom === "fit" ? "适应" : `${Math.round(previewZoom * 100)}%`}</span></button>
             <div className={`zoom-pop${zoomPopOpen ? " open" : ""}`} ref={zoomPopRef} role="dialog" aria-label="预览缩放" onClick={event => event.stopPropagation()}>
               <div className="zp-head">
-                <button type="button" className={`zp-fit${previewZoom === "fit" ? " on" : ""}`} aria-pressed={previewZoom === "fit"} onClick={() => { viewerViewRef.current = FIT_VIEW; setViewerView(FIT_VIEW); setPreviewZoom("fit"); }}>{previewZoom === "fit" ? "✓ 适应画布" : "适应画布"}</button>
+                <button type="button" className={`zp-fit${previewZoom === "fit" ? " on" : ""}`} aria-pressed={previewZoom === "fit"} onClick={resetZoom}>{previewZoom === "fit" ? "✓ 适应画布" : "适应画布"}</button>
                 <span className="zp-val">{previewZoom === "fit" ? "原始" : `${Math.round(previewZoom * 100)}%`}</span>
               </div>
-              <input type="range" min={0} max={1000} value={previewZoom === "fit" ? zoomT(1) : zoomT(previewZoom)} onChange={event => { const z = Math.round(zoomZ(Number(event.target.value)) * 100) / 100; const next = { ...viewerViewRef.current, z }; viewerViewRef.current = next; setViewerView(next); setPreviewZoom(z); }} aria-label="预览缩放级别" aria-valuetext={previewZoom === "fit" ? "适应画布" : `${Math.round(previewZoom * 100)}%`} />
+              <input type="range" min={0} max={1000} value={previewZoom === "fit" ? zoomT(1) : zoomT(previewZoom)} onChange={event => applySliderZoom(Number(event.target.value))} aria-label="预览缩放级别" aria-valuetext={previewZoom === "fit" ? "适应画布" : `${Math.round(previewZoom * 100)}%`} />
               <div className="zp-scale"><span>25%</span><span>100%</span><span>500%</span></div>
             </div>
             <button type="button" className="pb-icon" aria-label={isFullscreen ? "退出全屏" : "全屏"} title={isFullscreen ? "退出全屏" : "全屏"} onClick={() => void toggleFullscreen()}>{isFullscreen ? <Minimize /> : <Maximize />}</button>
