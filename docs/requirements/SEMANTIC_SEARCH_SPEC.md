@@ -1,50 +1,12 @@
-# W3.1 素材池语义检索——Planning Gate
+# 本地语义检索需求规格
 
-> 起草：2026-10-18。承接 `AI_CAPABILITY_MASTER_PLAN.md` §4 U7 / §6 W3.1 / §14 DEC-5。
-> **状态口径一律引用 [`../STATUS.md`](../STATUS.md)**（AGENTS.md Rule 1/5）；本文件只声明**本门冻结什么**。
-> 前置裁决：ADR-0009（W2.2 收口）——W3.1 明确**不受其阻塞**（ADR-0009 §7 原文点名）。
+> 承接 [`AI_CAPABILITY_MASTER_PLAN.md`](../design/AI_CAPABILITY_MASTER_PLAN.md) §4 U7 / §6 W3.1 / §14 DEC-5；当前代码交付与中文模型分发边界（P161）统一见 [`../STATUS.md`](../STATUS.md)（Rule 1/5）。
 
 ---
 
-## 0. 现状走读结论（代码级，2026-10-18）
+## 1. 范围与定位
 
-**本门起草前逐项实测，不引用任何文档的现状陈述。**
-
-| 项 | 实测结果 | 取证方式 |
-|---|---|---|
-| 语义检索代码 | **零** —— `services/` + `packages/` + `apps/` 对 `semantic_search`/`image_index`/`clip_embed` **0 命中** | grep 三处根目录 |
-| `JobKind` | **无**检索/embedding 类目（现有 18 种，最接近者 `cv_analysis`） | `packages/contracts/src/index.ts:65` |
-| 契约 search 面 | **零** —— `Search`/`search` 在 `packages/contracts/src/index.ts` **0 命中** | grep |
-| 迁移版本 | 当前 **v38**；v39 **未被占用** | `aivs_core.database.MIGRATIONS` |
-| 模型注册表 | `MODEL_PROVIDERS = ("faster-whisper","onnx-cv","onnx-speaker")`，**无 CLIP 类** | `model_registry.py:34` |
-| 受信清单范式 | `resources/model-manifests/*.json`，逐文件 `sha256` + `trusted_source_id` + `license` | `campplus-speaker-embedding.json` |
-| job 范式 | `KIND_POLICIES` → `_run` → runner；`cv_analysis`/`beat_analysis` 均为 `("light",), 2` 档 | `job_scheduler.py:61` |
-| 迁移范式 | 单表 + `algorithm_version` 行化 + **指纹入部分唯一索引** + 读时 stale + `ON DELETE CASCADE` | `database_v37.py` 头注释（P102 教训） |
-| 评测指标 | `MEASURABLE_TASKS = ("cut_pr","recall_ndcg","beat_hit_rate","lj_offset_accuracy")` —— **无 image/text retrieval 类** | `tools/quality_eval/metrics.py:35` |
-
-### 0.1 网络可达性（本轮实测，决定了模型来源）
-
-| 目标 | 结果 |
-|---|---|
-| `hf-mirror.com` | **200 可达** |
-| `huggingface.co` 直连 | **超时** |
-| `huggingface.co` 经 `socks5h://127.0.0.1:10808` | **SSL_ERROR_SYSCALL** |
-| `github.com` | 200 可达 |
-
-### 0.2 模型可用性（本轮实测）
-
-| 候选 | ONNX 可取 | 体积 |
-|---|---|---|
-| `Xenova/clip-vit-base-patch32` `vision_model.onnx` | ✅ 206 | **351,685,709 B（≈335 MiB）** |
-| 同上 `text_model.onnx` | ✅ 206 | 待测（同量级） |
-| 同上 `tokenizer.json` | ✅ 200 | 1,433,600 B |
-| `OFA-Sys/chinese-clip-vit-base-patch16` | ❌ **404，无现成 ONNX** | — |
-
----
-
-## 1. 范围
-
-### 1.1 本门批准的范围（Slice 1 = ① + ②）
+### 1.1 核心能力（Slice 1）
 
 **① 索引管线**：CLIP 双塔（vision/text）接入 + 关键帧抽样 + 场景级聚合 + `v39` 存储 + job 分派 + 素材指纹联动。
 **② 检索端点**：自然语言 → 文本塔编码 → 余弦检索 → 结果 DTO。
@@ -157,19 +119,6 @@ vision **335 MiB** + text 同量级 ⇒ 合计数百 MB，须下载（受信清�
 | **D2** | **检索性能门数值**（索引 p95 s/分钟源；检索延迟 p95 ms） | ✅ **2026-10-18 已裁决（用户批准）** —— 门限取自实测基线（`W3_1_D2_PERF_MEASUREMENT_2026-10-18.md`）：**检索 p95 ≤ 500 ms**（实测 ≈70 ms，7×）；**索引 ≤30 s/源分钟（1080p）/ ≤60（4K60）**（实测 8.53–9.71 / 17.42）；**存储 ≤2 MiB/素材**（实测 ≤1 MiB）。**依据实测给数、非拍门槛**；余量按最差合法环境留 |
 | **D3** | 语义评测集的建法与来源（真实素材从何而来） | ⏳ **待裁决** —— R1 的解除条件 |
 | **D4** | 存储精度 `float32` vs `float16` | ✅ **2026-10-18 实测后裁定：维持 `float32`（不采用 float16）** —— 量化误差 max 2.44e-04、mean 4.52e-06，**存储可省 50%**，但**排序不稳定**：随机色块 embedding 上「排序完全一致 **11/20**、集合一致 16/20」；用**真实视频帧**（33 帧、1080p/4K）复核为「集合一致 **20/20**、顺序一致 **17/20**」⇒ 仍有 **3/20 次顺序翻转**。检索只消费顺序 ⇒ **收益（省一半盘）不足以交换不可预测的排名抖动**，且当前实测存储 ≤1 MiB/素材远低于 2 MiB 门限，**没有省的计划压力**。若将来素材池规模上到千级再评估 |
-| **D5** | `k_max`（单次检索返回上限） | ✅ **2026-10-18 裁定：维持 `MAX_SEARCH_K = 100`、默认 20** —— 依据：检索 p95 ≈70 ms（1000 候选）⇒ 100 条返回的排序成本可忽略（4.34 ms 实测）；上限存在的意义是**防止把整个素材池倒给 Renderer**（已由单测 `test_k_is_clamped_to_hard_cap` 钉住），不是性能约束 |
+| **D5** | `k_max`（单次检索返回上限） | ✅ **已裁定：维持 `MAX_SEARCH_K = 100`、默认 20** —— 检索排序成本可忽略，上限用于防止全量倒给 Renderer（由单测 `test_k_is_clamped_to_hard_cap` 锁定） |
 
----
-
-## 6. 门禁状态
-
-- **Planning Gate：已批准**（用户 2026-10-18「同意」）；
-- **D1–D5 全部裁决**，无阻塞项；
-- **本门已收口（2026-10-19）**，实施记录见
-  [`../archive/W3_1_SEMANTIC_SEARCH_IMPLEMENTATION_2026-10-19.md`](../archive/W3_1_SEMANTIC_SEARCH_IMPLEMENTATION_2026-10-19.md)
-  ——**含门 §3 A1–A8 的验收交叉核对表**（AGENTS.md Rule 3 关门要求）；
-- **A1–A7 全部通过**；**A8 见实施记录 §4**：语义有效性已由 v2（品类词，S5 = 1.000）
-  与 v3（句子级，T5 打乱 0/58）两轮真实素材评测证明，但 **C2 数值门限在总纲中从未定义**，
-  故**不标「达标」**——这不是缺证据，是缺尺子；
-- **R1（P142）已解除**；**R2（P143，中文）仍开放**；R3（P144）/ R4（P145）由 D2 实测核销；
-- **后续切片（未做，已登记）**：视频抽帧链路语义评测、口语化查询评测、中文适配。
+> 后续扩展与中文模型托管未闭环状态（`P161`）统一见 [`../STATUS.md`](../STATUS.md)。

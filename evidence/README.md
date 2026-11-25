@@ -1,13 +1,13 @@
 # 验证与实验证据索引（`evidence/`）
 
 本目录集中存放可追溯的实验预登记、评测结果、真机截图、性能采样与独立验收材料。
-当前项目状态与未闭环结论统一见 [`docs/STATUS.md`](../docs/STATUS.md)；历史承诺归档见 [`docs/STATUS_ARCHIVE.md`](../docs/STATUS_ARCHIVE.md)。
+当前项目状态与未闭环结论统一见 [`docs/STATUS.md`](../docs/STATUS.md)。
 
 ## 命名与存放约定
 
 - 新实验按日期命名：`YYYY-MM-DD-<topic>/`，目录内至少包含 `README.md` 或成对的 `PRE_REGISTRATION.md` + `RESULT.md`（先写预登记、后落结果）。
 - 性能采样归入 `performance/`；早期专题目录（如 `m3_0/`、`m3_2/`、`cv_sampling/`、`quality_eval/`）按原路径保留以维持引用稳定。
-- 清理或删改任何证据目录前，先核对 `docs/STATUS.md`、`docs/STATUS_ARCHIVE.md` 与 `docs/design/adr/` 中的引用。
+- 清理或删改任何证据目录前，先核对 `docs/STATUS.md` 与 `docs/design/adr/` 中的引用。
 
 ## 主要证据族导航
 

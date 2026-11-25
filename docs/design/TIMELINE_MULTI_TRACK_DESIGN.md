@@ -1,7 +1,6 @@
-# M2 — 剪映式多轨道时间线设计说明
+# 多轨道时间线设计说明
 
-状态：已实现（结构、UI、校验、渲染保护与端到端测试）
-前置：`FREE_POSITIONING_DESIGN.md`（V1 轨内自由定位）；本文把时间线升级为多轨道结构。
+> 前置：[`FREE_POSITIONING_DESIGN.md`](FREE_POSITIONING_DESIGN.md)；全视觉轨统一合成升级见 [`../requirements/PREVIEW_ENGINE_SPEC.md`](../requirements/PREVIEW_ENGINE_SPEC.md)。当前交付状态见 [`../STATUS.md`](../STATUS.md)。
 
 ## 1. 轨道结构（对齐剪映）
 
@@ -58,9 +57,8 @@ A1  音频轨（audio）                   ┘
 
 ## 7. 已知限制
 
-- 覆盖轨内容不参与成片渲染（多轨 overlay 合成为后续工作）；交互预览为"最上层可见片段"近似。
-- A1 音频混音仍未实现（同前）。
-- 轨道数超过可视高度时行高压缩至 30px 下限，极端数量需要纵向滚动（未实现）。
+- **全视觉轨统一渲染与 A1 混音升级**：后续已按 [`../requirements/PREVIEW_ENGINE_SPEC.md`](../requirements/PREVIEW_ENGINE_SPEC.md) 将 V1 与覆盖轨统一为全视觉轨盒模型并接入 A1 混音（最新边界见 [`../STATUS.md`](../STATUS.md) §3）。
+- 轨道数超过可视高度时行高压缩与纵向滚动语义见 §8 及 `docs/plans/P235_OPENFILM_TIMELINE_PARITY_PLAN.md`。
 
 ## 8. 剪映对齐细节（第二轮）
 

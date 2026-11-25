@@ -1,4 +1,4 @@
-# W4.1 工作单编排与 Captions 设计规格
+# AI 工作单编排与字幕生成设计
 
 > 本文合并原 Worklist 编排、本地 `captions`、Provider `captions` 文本生成、Egress 两阶段控制与响应适配器阶梯等 8 份规划/设计门文档。
 > 当前工作线与 `roughcut`/`style` 延后守卫状态统一见 [`../STATUS.md`](../STATUS.md) §3/§4（P149）。

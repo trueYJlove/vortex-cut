@@ -1,7 +1,6 @@
-# M2-B2 转场系统设计定案
+# 转场系统设计
 
-> 状态：设计评审稿。本文档是 B2 的实现基准；实现须拆分 PR 并引用本文档章节号。
-> 作者：LiuWei（架构）；评审：ZhangSan（core/渲染）、YeJing（桌面/UI）、LiuKeAi（验收）。
+> 当前交付边界与同轨邻接扩展见 [`../STATUS.md`](../STATUS.md) 及 [`../requirements/PREVIEW_ENGINE_SPEC.md`](../requirements/PREVIEW_ENGINE_SPEC.md)。
 
 ## 0. 目标与非目标（对齐 PRODUCT_ROADMAP（原 M2_ROADMAP）§B2）
 
@@ -155,12 +154,6 @@ remove_transition { op, transition_id }
 **E2E（真实 Electron + FFmpeg）**：两个视频片段间加 0.5s fade → 生成权威预览 → 产物时长 = (D1+D2) − 0.5s（±83ms）；UI 显示转场标记、属性面板可调时长、删除后产物恢复总时长。
 
 **手动验收（LiuKeAi）**：8 种转场逐一渲染检查视觉效果；变速片段 + 转场组合；转场 + 字幕区间提示；撤销/重做链。
-
-## 8. 实施拆分（预计 3 个 PR）
-
-1. **PR-A（core+contracts）**：类型、三操作、级联/锁定/拆分联动、校验、diff、单测——可独立合并，UI 尚不可见；
-2. **PR-B（渲染）**：plan 字段、xfade/acrossfade 滤镜图、expected_duration、渲染单测 + E2E；
-3. **PR-C（UI）**：画布标记与命中、添加浮层、属性面板、交互预览提示、E2E UI 断言。
 
 ## 9. 风险
 

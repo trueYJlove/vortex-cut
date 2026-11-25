@@ -1,7 +1,7 @@
 # Wave 1 剪辑语法与剪辑手法需求规格
 
 > 本文合并原 W0.3 声画链接、W1.1 剪辑语法层骨架、W1.2 节拍网格、W1.3 卡点规划器、W1.4 L/J Cut 与 W1.5 跳切/去停顿六份规划门；当前交付状态与剩余跟踪项统一见 [`../STATUS.md`](../STATUS.md)。
-> 关联决策：[`ADR-0004`](../design/adr/0004-ai-capability-master-plan-decisions.md)；桌面真机手测清单见 [`WAVE1_MANUAL_CHECKLIST_2026-10-10.md`](../archive/WAVE1_MANUAL_CHECKLIST_2026-10-10.md)；自动化取证见 [`WAVE1_L3_AUTOMATION_EVIDENCE_2026-10-10.md`](../archive/WAVE1_L3_AUTOMATION_EVIDENCE_2026-10-10.md)。
+> 关联决策：[`ADR-0004`](../design/adr/0004-ai-capability-master-plan-decisions.md)；桌面手测清单见 [`WAVE1_MANUAL_CHECKLIST_2026-10-10.md`](../archive/WAVE1_MANUAL_CHECKLIST_2026-10-10.md)；自动化验证见 `apps/desktop/e2e/wave1-editing-tools.electron.spec.ts`。
 
 ---
 

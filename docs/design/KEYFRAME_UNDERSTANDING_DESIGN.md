@@ -1,52 +1,11 @@
-# W3.3 Layer 2 云端关键帧理解 · Design Gate
+# 云端关键帧理解模块设计（Layer 2）
 
-> **状态**：2026-10-21 起草 → 同日独立评审「需修改后批准」→ **12 项必须修改全部修订**，**待用户批准**。
-> **评审记录**：见 §12（逐条处置）。
-> **上游**：`docs/requirements/KEYFRAME_UNDERSTANDING_SPEC.md`（已批准，D1–D8 冻结）＋ **同一文件的 §10 追加裁决 D9**（本门触发，已回填规划门）。
-> **本门冻结**：DDL、服务签名、契约增量、API/IPC、作业分派、切片、测试清单。
-> **本门不裁**：规划门 D1–D8 / A1–A13（已冻结，本门只能细化，不得收窄）。
+> **上游需求**：[`../requirements/KEYFRAME_UNDERSTANDING_SPEC.md`](../requirements/KEYFRAME_UNDERSTANDING_SPEC.md)（D1–D9 已冻结；当前状态与边界见 [`../STATUS.md`](../STATUS.md)）。
+> **涵盖范围**：帧编码路径、数据模型（v40/v41）、模块与服务签名、契约增量、API/IPC、受控词表、测试清单与风险约束。
 
 ---
 
-## 0. 本门新增的实测事实
-
-| # | 事实 | 证据 | 强度 |
-|---|---|---|---|
-| 0.1 | **随包 ffmpeg 带 mjpeg 编码器，实测可编码** | `resources/ffmpeg/win-x64/ffmpeg.exe -encoders` 全量 237 行，第 77 行 `VFS..D mjpeg`；实跑 `-c:v mjpeg -f image2@@ 产出合法 JPEG（SOI/EOI 均 True） | ✅ |
-| 0.2 | **该 ffmpeg 已被打包** | `apps/desktop/electron-builder.yml:15-19` → `to: ffmpeg/win-x64`；`electron/main/index.ts:917-918` 传路径 | ✅ |
-| 0.3 | **PyAV 已被 collect_all 收进打包链** | **构建用的是 `services/core/aivs-core.spec`**（`tools/packaging/build-sidecar.ps1:9`），其 `:13-27` 对 `av@@` 等 6 包跑 `collect_all` 并写入 `binaries`，`tests/unit/test_bootstrap.py:71` 锁定；`.venv/Lib/site-packages/av.libs/` 实有 **25 个 dll**（`avcodec-62` 等）。根目录 `/aivs-core.spec` **被 `.gitignore:40` 忽略、不参与构建** | ✅（**本门更正**） |
-| 0.4 | `ErrorCode` 是开放联合 | `packages/contracts/src/index.ts:155` `typeof ERROR_CODES[number] \| (string & {})` ⇒ 新增失败码**零契约变更** | ✅ |
-| 0.5 | `JobKind` 封闭，**且运行期另有 `JOB_KINDS` 常量数组** | `index.ts:65` union（18 成员）＋ `:1425 JOB_KINDS` ＋ `:1521 isJobKind` ＋ `:1877 parseJob` ⇒ **新增 kind 必须同时改 union 与数组**，否则 `parseJob` 直接拒绝 | ✅ |
-| 0.6 | 既有抽帧是 ffmpeg 子进程范式 | `semantic_service.py:102-118` `rgb_frames_args()`；`:497 _decode_frames` | ✅ |
-| 0.7 | v39 注册方式 | `database.py:39 / :89 / :962` | ✅ |
-| 0.8 | **既有 egress preview 一律不可变 + 无 CASCADE** | `database.py:332-333` `egress_previews_no_update/no_delete` 触发器；`:325 idx_previews_expiry`（`expires_at` 建了索引）；`database_v28.py:8/13` `provider_config_id REFERENCES provider_configs(id)` 且 `payload_sha256 NOT NULL` | ✅ |
-| 0.9 | **`provider_invocations` 无 keyframe 归属列** | `database.py:307-317` 只有 `candidate_generation_id`；`A10` 要求「`provider_invocations` 行数 = 调用次数」，须加列才能断言 | ✅ |
-| 0.10 | **`derived_cache` 的 KINDS 硬编码 4 类 + LRU 会独立删字节** | `media/derived_cache.py:27` `KINDS=("video_proxy","waveform","audio_pcm_chunk","reverse_chunk")`；`:319-340 enforce_disk_budget` 按 LRU 清理 | ✅ |
-
-### 0.11 ⚠️ 更正记录：两处「把截断/合成结果当全量结论」
-
-**其一（本门自曝）**：查 ffmpeg 编码器时用了 `-encoders | grep -iE 'mjpeg|jpeg' | head -5`，`mjpeg` 排在第 6 位被截断 ⇒ 误判「无 mjpeg」。
-
-**其二（评审查出，比其一更严重）**：事实 0.3 原写「PyAV `bundled libs=0`、spec 未声明」——但**我看的是根目录 `/aivs-core.spec`，而它被 `.gitignore:40` 忽略、根本不参与构建**。真正的构建 spec 对 av 跑 `collect_all`，`av.libs/` 有 25 个 dll。**我据此写出的 R12/A13 立论整体是错的。**
-
-**教训**：两次都是「只看了手边的那个文件/那几行，就下了全局结论」。前者是输出截断，后者是**看错了对象**。本仓同类前科：P159（注释推算当实测）、P65（正文复述绕过校验）、P116（347MB 读数当单模型占用）。
-
-**处置**：0.3 已重写；**ffmpeg 编码方案的结论不变，但理由换了**——不再是「PyAV 打包会挂」，而是「ffmpeg 已在打包链且实测可用、与既有抽帧范式一致」。
-
-### 0.12 帧字节的真实量级（更正 R3 的量级假设）
-
-| 输入 | 输出 |
-|---|---|
-| 1920×1080 → 长边 768 | **24,411 B** |
-| 1280×720 → 768×432 | **25,947 B** |
-| 1080×1920（竖屏）→ 长边 768 | **29,986 B** |
-| 纯色 64×64（合成） | 248 B（**即本门旧稿引用的数字**） |
-
-**结论**：真实关键帧约 **24–30 KB/帧**，24 帧 ≈ **0.6 MB/素材**。旧稿「24 帧 × 768px 数 MB 级」**高估一个量级**。但 **248 B 是纯色合成帧**，不代表真实素材——引用它本身是「合成结果当全量结论」的第三种形态，一并更正。
-
----
-
-## 1. 编码路径（D9，**已在规划门 §10 追加裁决**）
+## 1. 编码路径（D9 已冻结）
 
 **裁决：走 ffmpeg 子进程编码，不实现 PyAV 编码路径。**
 
@@ -320,27 +279,7 @@ export interface AssetFrameTagsSummary {
 
 ---
 
-## 7. 切片与验收映射（**评审 #3/#11 后重数**）
-
-| 切片 | 交付 | 网络 | 映射（可关门） |
-|---|---|---|---|
-| S1a | `jpeg_args` + ffmpeg 编码 + 缩略图/载荷分离 + **帧规格实测** | ❌ | A6、A13 |
-| S1b | `select_frame_timestamps` + 降级 | ❌ | A5 |
-| S2 | v40 三处 DDL + 三段式 + 契约 + 路由/IPC（mock runner）+ `purge_expired` + `detach_asset` | ❌ | A1、A2、A3、**A8**、A12、A14 |
-| S3 | `VISION_ADAPTER_IDS` + 六列探测 + 失败码 + **0.13 实测**（探测走三段式） | ✅ | A4 |
-| S4 | 打标作业（三处登记）+ 落库 + 词表 + stale + `provider_invocations` 归属列 | ✅ | A7、A10、A11 |
-| S5a | 面板标签过滤 | ❌ | A9? 否 → A10 后半 |
-| S5b | 盲评包 + 预登记 | ❌ | A9 |
-
-**口径重算（评审 #11）**：验收共 **14** 项（A1–A14）。
-- **不触网可关门：12 项**（A1–A3、A5–A9、A11–A14）
-- **需真实网关：2 项**（A4 能力探测、A10 端到端打标）
-
-A8 的落点：S2（契约与分派均为增量，回归锁在此切片断言）。
-
----
-
-## 8. 测试清单
+## 8. 测试清单（含负向对照要求）
 
 | 测试文件 | 覆盖 | 负向对照（必须真变红） |
 |---|---|---|
@@ -353,9 +292,9 @@ A8 的落点：S2（契约与分派均为增量，回归锁在此切片断言）
 | `test_vision_adapters.py` | A4 fail-closed；**探测须先 claim** | 探测失败仍放行 ⇒ 红；探测绕过 claim ⇒ 红 |
 | `test_frame_tags.py` | A7 改道+计数、A11 CASCADE + 指纹同源、A10 `provider_invocations` 归属列 | 丢弃违规标签 ⇒ 红；不加归属列 ⇒ A10 不可断言红 |
 | `test_contract_job_kinds.py` | **A8**：`JOB_KINDS` 与 union 一致、旧 kind 行为不变 | 只改 union 不改数组 ⇒ `parseJob` 拒绝新 kind 红 |
-| `test_status_doc_consistency.py` | Rule 2：`latest_migration` 39→40 | 忘改 §1 ⇒ **`test_status_facts_match_code`** 红（注：该套件共 7 个 test 函数 + 1 个 parametrize(4)，**不是「10 项独立断言」**） |
+| `test_status_doc_consistency.py` | Rule 2：`latest_migration` 与仓库一致性校验 | 忘改 §1 ⇒ **`test_status_facts_match_code`** 红 |
 
-**每条负向对照须在实施记录中给出「还原后红、恢复后绿」实跑输出。**
+**每条负向对照均需可通过还原实现触发断言变红以证明区分力。**
 
 ---
 
@@ -363,49 +302,9 @@ A8 的落点：S2（契约与分派均为增量，回归锁在此切片断言）
 
 | # | 风险 | 处置 |
 |---|---|---|
-| **R12**（**重写**） | 打包形态未证 | ~~PyAV 打包会挂~~ **该立论已证伪**（0.3）。真实处置：A13 仍要求在**打包产物**内实跑 ffmpeg 编码 + 解码不受影响；**不得以源码树通过推断** |
+| **R12** | 打包形态 ffmpeg mjpeg 验证 | A13 要求在**打包产物**内实跑 ffmpeg mjpeg 编码且音视频解码不受影响，不得仅以源码树环境推断 |
 | **R13** | 0.13 若不成立 ⇒ 词表退化后处理、违规率高 | S3 首要交付即实测；降级档显式且必报违规率 |
 | **R14** | `frames_json` 与磁盘字节双写不一致 | A12 逐帧比对；缺失即 fail-closed `VISION_FRAMES_UNMAPPED` |
 | **R15** | 迁移 v40 撞号 | 实现前重查 `MIGRATIONS`，冲突顺延并同步 STATUS §1 |
 | **R16**（新） | 独立缓存目录**不被任何 LRU 管辖** ⇒ 若不清理会无限增长 | `purge_expired` 是唯一清理者（这也是 A14 不假绿的前提）；启动期孤儿清扫兜底 |
 | **R17**（新） | 外传审计依赖 `detach_asset` 被正确调用，**漏调即阻塞素材删除** | `test_keyframe_detach.py` 锁；并在 `delete_asset` 路径显式调用（与 P102 同款回归） |
-
----
-
-## 10. 待裁决
-
-**无。** D9 已作为追加项回填规划门 §10 并获批（见该文件）。
-
----
-
-## 11. 门禁状态
-
-- **Design Gate：修订完成，待用户批准**；未批准前不得写实现代码。
-- 契约变更：**两处新增成员**（`JobKind` union + `JOB_KINDS` 数组）+ 新类型，**既有成员零变更**（A8 锁）。
-- 迁移：v40（三处：两新表 + `provider_invocations` 增列）⇒ 触发 STATUS §1 同步。
-- 新增 egress 面：一处（帧级，规划门已批准）。
-- 默认行为变更：无。
-
----
-
-## 12. 独立评审处置对照（LiuKeAi，2026-10-21）
-
-**评审结论**：需修改后批准；第 1–9 条改完可批，第 10–13 条可并入实施记录。**本轮：13 条全部处置**（未按「可延后」处理，因为其中 3 条实质改变了数据模型）。
-
-| # | 问题 | 处置 |
-|---|---|---|
-| 1 | 0.3 立论错（看了被 gitignore 的 spec） | ✅ 事实 0.3 重写；R12 重写；§0.11 记录「看错对象」教训；**ffmpeg 方案结论不变但理由更换** |
-| 2 | A13 被改弱（丢了「解码路径不受影响」） | ✅ §8 测试表恢复完整 A13 判据 |
-| 3 | **A8 整体丢失** | ✅ §7 S2 映射 + §8 `test_contract_job_kinds.py` 双处补回 |
-| 4 | I-1 被挖洞（探测不走 claim） | ✅ §5.1 表格明列「须先 claim」+ §8 负向对照 |
-| 5 | 契约缺字段，A12 无字段可变红 | ✅ §4 拆成 `payload_*` 与 `thumbnail_*` 两套 |
-| 6 | DDL 三处硬伤 | ✅ `provider_config_id` 补 FK；`expires_at` 补索引；`payload_sha256` 改 NOT NULL |
-| 7 | CASCADE 与外传审计冲突 | ✅ 取消 CASCADE，改 `detach_asset` + `detached_at`；审计持久证据落 `provider_invocations` |
-| 8 | 契约增量非纯增（漏 `JOB_KINDS`） | ✅ §3.5 三处登记 + §4 明写 + §8 专测 |
-| 9 | Rule 3 零登记 | ✅ 已在 STATUS §4 登记（P166–P169） |
-| 10 | A10 不可断言（`provider_invocations` 无归属列） | ✅ §2.3 增列 `keyframe_generation_id` |
-| 11 | §7「11 条」无口径 | ✅ 重数为 **14 项 / 不触网 12 / 需网关 2** |
-| 12 | purge 测试可假绿（LRU 抢先删） | ✅ §2.4 改用**独立目录**，不受 LRU 管辖；R16 登记 |
-| 13 | 248 字节未复算 | ✅ §0.12 实跑四组数字；**248 B 可复现但属纯色合成帧**，真实帧 24–30 KB |
-| — | D9 该回规划门追加 | ✅ 已回填规划门 §10，不在本门自行生效 |
-| — | `elif` vs `if`；`KIND_POLICIES` 未登记；测试计数 | ✅ §3.5 / §8 逐条修正 |

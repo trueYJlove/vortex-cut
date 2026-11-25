@@ -285,12 +285,10 @@ def test_live_docs_are_not_exempted_by_section6() -> None:
 def test_status_doc_stays_concise_and_open_only() -> None:
     """STATUS.md 保持精简，且 §4 活性表不得滞留已核销（✅）条目。"""
     size_bytes = STATUS_DOC.stat().st_size
-    assert size_bytes < 100 * 1024, (
-        f"docs/STATUS.md 当前大小 {size_bytes} 字节（>= 100 KiB），"
-        "请将已闭环行迁入 docs/STATUS_ARCHIVE.md 或将长篇排查日志抽离至 docs/archive/"
+    assert size_bytes < 50 * 1024, (
+        f"docs/STATUS.md 当前大小 {size_bytes} 字节（>= 50 KiB），"
+        "请将长篇排查日志抽离至 docs/archive/ 并从 §4 移除已闭环行"
     )
-    archive_doc = REPO / "docs/STATUS_ARCHIVE.md"
-    assert archive_doc.is_file(), f"缺少历史承诺归档文件：{archive_doc}"
 
     text = _status_text()
     sec4 = text.split("## 4.", 1)[1].split("## 5.", 1)[0]
@@ -304,7 +302,7 @@ def test_status_doc_stays_concise_and_open_only() -> None:
         if len(cells) >= 5 and cells[-1].lstrip("*").startswith("✅"):
             closed_in_open.append(f"§4 行 {lineno}: {cells[0]}")
     assert not closed_in_open, (
-        "docs/STATUS.md §4 存在已核销（✅）行，请迁入 docs/STATUS_ARCHIVE.md：\n  "
+        "docs/STATUS.md §4 存在已核销（✅）行，请核对后移除（由 Git 历史追溯）：\n  "
         + "\n  ".join(closed_in_open)
     )
 
@@ -427,9 +425,19 @@ def test_active_docs_follow_clean_naming() -> None:
                 reasons.append("含 M2/W*/WAVE*/P* 前缀")
             if any(tok in name for tok in _DISALLOWED_GATE_TOKENS):
                 reasons.append("含 *_GATE 后缀")
+            first_h1 = next(
+                (
+                    ln.strip()
+                    for ln in md_path.read_text(encoding="utf-8").splitlines()
+                    if ln.startswith("# ")
+                ),
+                "",
+            )
+            if first_h1.endswith(("Planning Gate", "Design Gate")):
+                reasons.append("H1 仍带过程门草稿后缀")
             if reasons:
                 bad.append(f"{rel_dir}/{name} ({', '.join(reasons)})")
     assert not bad, (
-        "以下活跃规格命名不符合 AGENTS.md Rule 8（进行中提案请放 docs/plans/）：\n  "
+        "以下活跃规格命名或标题不符合 AGENTS.md Rule 8（进行中提案请放 docs/plans/）：\n  "
         + "\n  ".join(bad)
     )

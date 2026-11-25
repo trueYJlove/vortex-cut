@@ -1,40 +1,19 @@
 # Vortex Cut AI 能力总纲（AI Capability Master Plan）
 
-> 起草：LiuWei（架构师），2026-09-24
-> 基线：分支 `ai/stability-polish`（**活跃开发分支，HEAD 持续前进**——
-> 起草时 `2f52454`，同日复核已至 `594cc5f`）。本总纲的"现状"断言以
-> **代码与提交记录为准**，不绑定具体 HEAD；引用前请自行核实。
-> AI 线合入 `88ed495`，白名单治理 `#36`。
-> 状态：**§14 九项决策已于 2026-09-24 由用户全部批准（采纳建议方案），固化于
-> `docs/design/adr/0004-ai-capability-master-plan-decisions.md`（ADR-0004）。本总纲其余部分为生效基线。**
->
-> **本文件的性质**：这是 AI 能力线的**总纲与防漂移基线**，不是工作单。它冻结
-> ①目标判定标准 ②架构不变量 ③分层边界 ④能力矩阵与差距 ⑤工作包依赖顺序。
-> 每个工作包仍须各自走 Planning Gate → 实施 → LiuKeAi 独立验收，五门流程不变。
->
-> **与 ADR-0003 的关系**：ADR-0003 定**方向与隐私硬承诺**（D1–D6，不变，本文件全部继承）；
-> 本文件定**做到什么程度、按什么顺序、以什么标准判定达标**。
+> **定位**：AI 能力线的架构基线与防漂移总纲。当前实际交付状态与未闭环工作统一见 [`../STATUS.md`](../STATUS.md)；核心隐私与架构裁决固化于 [`ADR-0003`](adr/0003-ai-direction-and-privacy-hard-commitment.md) 与 [`ADR-0004`](adr/0004-ai-capability-master-plan-decisions.md)。
 
 ---
 
-## 0. 为什么需要这份文档
+## 0. 文档定位与防漂移原则
 
-2026-09-24 的方向讨论暴露了三类漂移风险。本文件的首要作用是堵住它们。
+本文件冻结 AI 能力线的五项核心资产，具体工作包按模块规范或 `docs/plans/` 推进：
+1. **目标判定标准**（§1 C1–C7）；
+2. **架构不变量**（§3 I1–I8）；
+3. **能力矩阵与差距定义**（§4）；
+4. **分层架构与三条组合路径 P-A/P-B/P-C**（§5）；
+5. **工作包分解、依赖顺序、数据/隐私/评测基线**（§6–§14）。
 
-**漂移 1｜认知漂移：把"AI 粗剪"等价于"LLM 从转录里选段"。**
-代码现状确实如此（Stage 2A 唯一通路），但这是**五条通路里的一条**。行业成熟产品的另外几条
-（视觉叙事、卡点、多机位、声画分离）各有独立信号源与决策规则，其中多数**不需要 LLM**。
-一旦团队把现状当作定义，后续每一单都会围绕"如何让 LLM 选得更准"打转，而真正的缺口在别处。
-
-**漂移 2｜能力漂移：没有冻结的目标能力集，每单各自定义"完成"。**
-同类问题已经发生过一次：`AI_PATCH_OPERATIONS` 因"差集"写法从 13 种被动漂移到 24 种
-（已由 `AI_WHITELIST_EXPANSION_PLANNING_GATE_2026-09-22` 治理为显式冻结 + 三处同步准入）。
-能力清单若没有同样的冻结纪律，"与成熟软件对齐"会变成不可证伪的口号。
-
-**漂移 3｜阶段漂移：`docs/design/records/PROJECT_RELEASE_STATUS.md` 已失真。**
-该文档仍停在基线 `38bdcfd`、分支 `codex/stage8-post-release-planning`、"下一阶段不新增业务功能"，
-而实际分支为 `ai/stability-polish`，AI 线已合入并推进到白名单治理、AI 面板 diff 浏览、
-导出弹窗全链路。下一个接手的会话（人或 AI）会据此误判当前阶段。已登记为 W0.1。
+> 历史演进说明：起草初期（2026-09-24）存在 `AI_PATCH_OPERATIONS` 隐式漂移与旧 `PROJECT_RELEASE_STATUS` 失真问题，已由 W0.1（建立 `STATUS.md` + `AGENTS.md` 文档纪律 + CI 一致性测试）永久闭环。
 
 ---
 
@@ -61,51 +40,12 @@
 
 ---
 
-## 2. 现状走读结论（2026-09-24 代码级）
+## 2. 架构设计前提（数据与文档边界）
 
-### 2.1 已具备的资产（可直接复用，不重建）
+> 起草于 2026-09-24 时的迁移版本与视觉轨单轨限制（`v22` / 仅 V1 权威合成）**均已随后续迭代演进**——当前迁移与能力交付见 [`../STATUS.md`](../STATUS.md) §1/§3，全视觉轨统一盒模型见 [`../requirements/PREVIEW_ENGINE_SPEC.md`](../requirements/PREVIEW_ENGINE_SPEC.md)。本节仅保留长期成立的数据存储前提：
 
-| 资产 | 位置 | 复用价值 |
-|---|---|---|
-| 不可变 Revision 链 + 文档 JSON 存储 | `timeline.py`、`create_revision_from_document` | 一切 AI 产物的落盘与回退基座 |
-| TimelinePatch 操作集（37 种）+ AI 白名单（23 种显式冻结）——**数值以 `STATUS.md` §1 为准** | `timeline.py` | 剪辑语法层的**统一输出格式** |
-| 三处同步准入纪律 + 导入期 fail-fast 断言 | `timeline.py:85`、`providers.py:98/125/314` | 新增 op 的治理入口，已就绪 |
-| 提案 → 预览 → 采纳 → Revision 链路 | Stage 2A / 2B | 语法层零改动接入 |
-| Egress preview + consent（单次消费触发器） | `timeline_planning.py`、`agent_session.py` | 语法层无需使用（零 egress），LLM 路径不变 |
-| 有界多步 agent 会话（步数 ≤6 / token 预算 / 结构化失败反馈 / 基线漂移中止） | `agent_session.py`、迁移 v20 | 编排层基座，缺"工作单"语义（§2.2） |
-| CV 信号引擎（I 帧采样 + 切点/运动/清晰度/亮度/音频能量 + YuNet 人脸） | `media/cv_signals.py`、迁移 v21 | 理解层基座；**beat / embedding 可同构扩展** |
-| 信号版本化（`algorithm_version` 行化 + 指纹判 stale，不做原地重算） | `cv_analyses` / `cv_samples` | 新信号源直接照抄，勿另立范式 |
-| 本地 ASR（faster-whisper，词级时间戳） | `transcription.py`、迁移 v19 前 | L/J cut、跳切的决策依据来源 |
-| 模型注册表（受信清单 + 逐文件 sha256 + `.ready` marker） | `model_registry.py` | embedding / diarization 模型接入点 |
-| A1 混音进渲染图（`amix normalize=0`）+ `as_audio` 变体 | `rendering/ffmpeg.py:562`、`timeline.py:888` | **L/J cut 的渲染侧已通** |
-| job 骨架（KIND_POLICIES → `_run` → runner，取消/进度） | `job_scheduler.py:61` | 新分析任务照抄 waveform 模板 |
-
-### 2.2 缺口清单（本方案要解决的）
-
-| 缺口 | 证据 | 影响 |
-|---|---|---|
-| **无"剪辑语法层"** | 信号层与 LLM 之间无中间层；`prepare` 直接由 LLM 出候选 | 所有确定性手法无归属，全靠 LLM 猜 |
-| **CV 只是兜底，不是一等公民** | `candidate_source: auto` = 有转录用转录、否则 CV | CV 信号无法参与转录素材的排序与决策 |
-| **无节拍分析** | 全 core grep 无 `beat`/`bpm`/`downbeat` | 卡点完全缺失 |
-| **无说话人分离** | 全 core grep 无 `diariz`/`speaker`/`active_speaker` | 多机位、说话人驱动剪辑完全缺失 |
-| **无声画链接模型** | 全 core grep 无 `linked`/`link_group`/`group_id` | L/J cut 与多机位均受阻；后续 trim 不联动 |
-| **L/J cut 有原语无 op** | `insert_asset_clip(as_audio)` + `position_clip` 可表达，但 `insert_asset_clip` 在 AI 白名单外 | AI 做不出 L/J cut |
-| **无画面语义** | Layer 0 无任何语义信号 | 理解深度与行业头部存在结构性代差 |
-| **无质量评测 harness** | 无评测集、无基线指标快照；`_select` 权重"以测试钉死"但真实样本 3 条 | 一切权重/提示词调优无依据 |
-| **性能门 4K60 档未标定** | 1080p50 档已达标（4.3s/分，`a349866`），但 4K60 从未测量 | 高分辨率素材的现实可用性未知 |
-| **无工作单编排** | `agent_session.py` grep 无 `worklist`；仅"失败重试循环" | ADR-0003 D2 承诺的步骤链未落地 |
-| **provider 兼容面窄** | json_schema 适配器被网关 `oneOf` 拒绝 | 商业可用性风险 |
-| **文档阶段失真** | `PROJECT_RELEASE_STATUS.md` 停在 `38bdcfd` / stage8 | 后续会话误判阶段 |
-
-### 2.3 硬架构约束（写方案时必须遵守，否则会做出跑不通的设计）
-
-- **V1 是唯一权威视觉轨**（`rendering/ffmpeg.py:168`）。非 V1 视频轨一律按**画中画 overlay** 处理
-  （`rendering/ir.py:353`）。**多机位不能用"多轨切激活轨"表达。**
-- **转场只作用于 V1 相邻片段**（`timeline.py:1686`）；**关键帧只允许 V1**
-  （`rendering/ir.py:115`）。多机位必须展平到 V1，否则拿不到转场与动画能力。
-- **时间线文档是 JSON**（存在 revision 内），不是关系表。新增 clip 字段 = 文档 schema + 契约变更，
-  **不是** SQL 迁移；只有分析类数据（信号/节拍/embedding）才需要迁移。
-- **迁移已到 v22**（`database.py:911`）。新分析表从 v23 起。
+- **时间线文档为 JSON**（存在 `timeline_revisions` 内），新增 clip 字段 = 文档 schema + 契约增量变更，**不是** SQL 迁移；分析类产物（信号/节拍/embedding/关键帧标签）按 `algorithm_version` 行化存储并基于内容指纹在读取时判定 `stale`。
+- **隐私与契约基座**：Proposals → Diff Preview → 显式 Apply → 不可变 Revision 为唯一时间线修改路径，无旁路写入。
 
 ---
 
@@ -137,7 +77,7 @@
 > 未修正的其余行（U7 / U8 / E6 / E7 / O5 / D2 / E8）经同一轮实测**仍为缺口**，维持原判。
 
 > **2026-10-24 追记（W3.1/U7 状态细化）**：U7 对应的承载工作包 **W3.1 已于 2026-10-19 交付代码链路**
-> （`docs/archive/W3_1_SEMANTIC_SEARCH_IMPLEMENTATION_2026-10-19.md`，门 §3 A1–A8 逐项通过，真实素材 top1 0.90）。
+> （门 §3 A1–A8 逐项通过，真实素材 top1 0.90；详见 `STATUS.md` §3 W3.1）。
 > 但**能力对最终用户仍不可用**：中文 CLIP 模型 719 MB 由本仓自行导出、清单 `download_url: null`、
 > 无 https 托管点 ⇒ 装机用户拿不到模型（**P161**，2026-10-20 登记未解决）；许可为 `upstream-undeclared`。
 > 故本表 U7 维持 **❌ 全缺**（以「用户可用」为口径）**不改**——代码交付 ≠ 能力可用，
@@ -667,7 +607,7 @@ Wave 5 ── W5.1 总对标验收 ◀── 全部
 | [Premiere Pro Auto Rough Cut](https://cutback.video/blog/how-to-create-an-auto-rough-cut-in-premiere-pro-with-chat-based-ai-editing) | 分析转录 → 提出粗剪决策 → 人工处理重复镜头与口癖 | 行业成熟产品的粗剪也是"AI 提议 + 人工精修"（印证 D5 与 I2） |
 | [剪映 Agent 深度评测](https://ncepuee.github.io/2026/05/23/CapCut-AI-Agent-Auto-Editing-2026/) | "**目前还停留在适合粗剪的阶段**""细致到帧的剪切感做不到"；关键差异是**生成可编辑工程文件**而非一次性视频 | ①粗剪是行业共识的 AI 能力边界；②Vortex Cut 的"提案 + Revision"形态被独立验证；③CapCut 的 Vlog 叙事线索依赖画面语义 → 对应 W3.4 |
 | [自动多机位工具谱系](https://loopdesk.ai/blog/automatic-multicam-editing-tools) / [DavinciClaude Podcast Multicam](https://www.davinciclaude.com/en/podcast) | 多机位自动切换靠 **ASD 专用插件**，十机位帧级切换，$59 级定价 | 多机位不是通用模型能力而是专用能力（印证 E5 单独立项）；市场已验证存在 |
-| 本仓库 `AI_VALIDATION_REPORT_2026-09-20.md` + commit `a349866` | 报告日性能门未过（19.5s/分钟）；**次日修复落地并复测达标（4.3s/分钟）**；json_schema 适配器被网关拒；真实样本 3 条 | C5 已达标、C6/C4 仍为现实短板 |
+| 本仓库早期实测（`a349866` 等基线验证） | 报告日性能门未过（19.5s/分钟）；**次日修复落地并复测达标（4.3s/分钟）**；json_schema 适配器被网关拒；真实样本 3 条 | C5 已达标、C6/C4 仍为现实短板 |
 
 ---
 

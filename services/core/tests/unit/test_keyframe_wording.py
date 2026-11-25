@@ -159,9 +159,9 @@ def test_scan_covers_all_w3_3_documents() -> None:
     """
     paths = scan_paths()
     names = {path.name for path in paths}
-    # S1a–S5a 分片记录已归并入 W3_3_IMPLEMENTATION_SUMMARY_2026-10-21.md，
-    # 活文档已规范命名为 KEYFRAME_UNDERSTANDING_SPEC/DESIGN（>= 4）。
-    assert len(paths) >= 4, f"扫描集过小，疑似 glob 写错：{sorted(names)}"
+    # 活文档已规范命名为 KEYFRAME_UNDERSTANDING_SPEC/DESIGN，
+    # S1a–S5a 切片记录已归并入 W3_3_IMPLEMENTATION_SUMMARY_2026-10-21.md（共 3 份）。
+    assert len(paths) >= 3, f"扫描集过小，疑似 glob 写错：{sorted(names)}"
     assert "KEYFRAME_UNDERSTANDING_SPEC.md" in names, names
     assert "KEYFRAME_UNDERSTANDING_DESIGN.md" in names, names
     assert any("IMPLEMENTATION" in name for name in names), names

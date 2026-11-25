@@ -180,11 +180,8 @@ new file in its directory `README.md` in the same change).
 
 Closing a gate or work package in `docs/STATUS.md` is not complete until its doc footprint is cleaned up:
 - Merge any durable requirements, architecture, or contract decisions into the module's living spec;
-- Move closed rows out of `docs/STATUS.md` §4 into `docs/STATUS_ARCHIVE.md`;
-- Move records that must remain addressable beyond Git history (referenced by code comments or open
-  commitments) to `docs/archive/` (marking superseded docs per Rule 4 and `docs/STATUS.md` §6), and
-  delete transient validation logs, round reports, handoffs, debug screenshots, and scratch spikes
-  once merged.
+- Remove closed rows from `docs/STATUS.md` §4 once verified (relying on Git commit history for closed ticket logs; do not maintain a separate `STATUS_ARCHIVE.md`);
+- Move records that must remain addressable by code comments or open items to `docs/archive/` (marking superseded docs per Rule 4 and `docs/STATUS.md` §6), and delete transient validation logs, round reports, handoffs, debug screenshots, and scratch spikes once merged.
 
 ### Rule 8 — Active directories stay lean, indexed, bounded, and cleanly named
 
@@ -192,21 +189,22 @@ Every active `.md` file directly under `docs/requirements/`, `docs/design/`, or 
 be listed in that directory's `README.md`. `docs/requirements/` and `docs/design/` are each capped
 at **20** top-level living specs (excluding `README.md`); active in-progress/proposed plans belong
 in `docs/plans/` (deleted or moved into living specs once closed). `docs/STATUS.md` stays under
-**100 KiB** with zero closed (`✅`) rows in §4. Living spec filenames directly under
+**50 KiB** with concise open summaries and zero closed (`✅`) rows in §4. Living spec filenames directly under
 `docs/requirements/` and `docs/design/` must use stable domain names: no date stamps
 (`20XX-XX-XX`), no milestone/wave/work-package prefixes (`M2_`, `W\d`, `WAVE\d`, `P\d+`), and no
 process suffixes (`_PLANNING_GATE`, `_DESIGN_GATE`, `*_IMPLEMENTATION_*`, `*_VALIDATION_*`,
-`*_HANDOFF*`, `*_ROUND*`, which belong in `docs/archive/` only when kept for reference).
+`*_HANDOFF*`, `*_ROUND*`, which belong in `docs/archive/` only when kept for reference); H1 headings
+of living specs should also omit `Planning Gate` / `Design Gate` draft suffixes.
 
 ### Enforcement
 
 - **Rule 2 & Rules 6–8** — enforced by `services/core/tests/unit/test_status_doc_consistency.py`,
   which checks STATUS §1 facts against code, scans live docs (excluding `docs/archive/`) for
-  blacklisted stale claims, verifies Markdown relative links, enforces `< 100 KiB` and zero `✅`
+  blacklisted stale claims, verifies Markdown relative links, enforces `< 50 KiB` and zero `✅`
   rows in `STATUS.md` §4, requires every active doc under `docs/requirements/`, `docs/design/`,
   and `docs/plans/` to be indexed in its directory `README.md`, caps `docs/requirements/` and
-  `docs/design/` at `<= 20` living specs each, and rejects process sprawl, date stamps, or
-  milestone/ticket prefixes in active spec filenames. `services/core/tests/unit/test_keyframe_wording.py`
+  `docs/design/` at `<= 20` living specs each, and rejects process sprawl, date stamps, draft gate H1
+  headings, or milestone/ticket prefixes in active spec filenames. `services/core/tests/unit/test_keyframe_wording.py`
   enforces W3.3 wording consistency across `docs/**/W3_3_*.md` and `docs/**/KEYFRAME_UNDERSTANDING_*.md`.
   CI executes both via `pnpm test:python`
   (`uv run --locked --extra dev pytest services/core/tests/unit`). Run directly with:

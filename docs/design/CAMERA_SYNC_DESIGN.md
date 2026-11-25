@@ -1,8 +1,8 @@
-# W2.1 机位同步 —— Design Gate
+# 机位同步（多机位对齐）模块设计
 
-> 依据：`../requirements/CAMERA_SYNC_SPEC.md`（**修订版**：§2.1 表结构 / §2.2 PCM 与精度口径 / §3 验收 / §5 D-1~D-3）。
-> **共同冻结项不在本文件复述**（Rule 5）：数据模型、行选择规则、stale 语义、PCM 口径、精度口径一律以 Planning Gate 为准。
-> 本文件只写**实施计划**：模块划分、函数签名、切片顺序、测试清单。实施：ZhangSan（Core）+ YeJing（契约/Desktop）；验收：LiuKeAi。
+> 上游需求：[`../requirements/CAMERA_SYNC_SPEC.md`](../requirements/CAMERA_SYNC_SPEC.md)（§2.1 表结构 / §2.2 PCM 与精度口径 / §3 验收 / §5 D-1~D-3）。
+> 共同冻结项不在本文件复述（Rule 5）：数据模型、行选择规则、stale 语义、PCM 口径、精度口径以需求规格为准。
+> 本文件只写**实现设计**：模块划分、关键函数签名、实现约束与测试清单。
 
 ## 1. 模块划分（冻结）
 
@@ -63,12 +63,6 @@ class AngleSyncService:
 - **UI 入口改为「工具菜单 → 机位同步」+ 面板内选择参考/成员**（原设计写「素材箱多选」）：素材箱的选中态同时驱动属性面板与拖拽，改成多选会牵连既有交互；面板内选择语义等价且隔离风险。素材箱多选入口留作后续按需追加。
 - **IPC 白名单冻结**：新增 5 个通道（groups/create/get/sync/offset），`stage2b-ipc.test.ts` 的「只注册冻结白名单」断言同步扩张（这是既有的契约锁，必须同改）。
 - **过渡行不落库（S3 实施修订）**：Core 只落「完成行」，作业在飞时面板看不到 pending 状态。面板改为**以 jobs 行终态为轮询依据**（`getJob` 轮询 → 终态后刷新摘要），行级 queued/running 轮询作为将来的兜底保留。理由：避免过渡行残留导致 pending 卡死，且作业进度本就以 jobs 行为权威。
-
-## 6. 实施中必须回写的文档（纪律）
-
-- v36 落地 → **同改 `docs/STATUS.md` §1 `latest_migration` 35 → 36**（否则一致性测试红）；
-- 每个切片完成 → 在实施记录（已核销并收录于 `STATUS_ARCHIVE.md` / Git 历史）记「验收逐项对照表」（AGENTS.md Rule 3：无对照表不算闭环）；
-- P81–P86 核销 → 各附证据与日期；R5 的性能数据在 S1c 归档后核销。
 
 ## 7. 开放项
 
