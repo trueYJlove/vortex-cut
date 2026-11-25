@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { registerStage5Ipc } from "../electron/main/stage5-ipc.js";
+import { registerShotTimelineAssemblyIpc } from "../electron/main/ipc/shot-timeline-assembly-ipc.js";
 
 const sha = `sha256:${"a".repeat(64)}`;
 const now = "2026-08-20T00:00:00.000Z";
@@ -27,7 +27,7 @@ type Handler = (_event: unknown, value?: unknown) => Promise<unknown> | unknown;
 function setup() {
   const handlers = new Map<string, Handler>();
   const fetchWithUi = vi.fn();
-  registerStage5Ipc({
+  registerShotTimelineAssemblyIpc({
     ipc: { handle: (channel, listener) => handlers.set(channel, listener) }, fetchWithUi,
   });
   return { handlers, fetchWithUi };

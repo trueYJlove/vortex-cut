@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { registerStage4Ipc } from "../electron/main/stage4-ipc.js";
+import { registerMediaGenerationIpc } from "../electron/main/ipc/media-generation-ipc.js";
 
 const now = "2026-08-18T00:00:00.000Z";
 const hash = `sha256:${"a".repeat(64)}`;
@@ -12,7 +12,7 @@ type Handler = (_event: unknown, value?: unknown) => Promise<unknown> | unknown;
 function setup() {
   const handlers = new Map<string, Handler>();
   const fetchWithUi = vi.fn();
-  registerStage4Ipc({ ipc: { handle: (channel, listener) => handlers.set(channel, listener) }, fetchWithUi });
+  registerMediaGenerationIpc({ ipc: { handle: (channel, listener) => handlers.set(channel, listener) }, fetchWithUi });
   return { handlers, fetchWithUi };
 }
 

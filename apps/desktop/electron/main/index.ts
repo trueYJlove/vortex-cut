@@ -10,15 +10,15 @@ import { ImageProviderSecretStore, reinjectImageProviderSecrets } from "./image-
 import { issueCandidateClipMedia } from "./candidate-media.js";
 import { windowIconPath } from "./app-icons.js";
 import { destroyTray, initTray } from "./tray.js";
-import { registerStage2aIpc } from "./stage2a-ipc.js";
-import { registerStage2bIpc } from "./stage2b-ipc.js";
-import { registerStage3bIpc } from "./stage3b-ipc.js";
-import { registerStage4Ipc } from "./stage4-ipc.js";
-import { registerStage4cIpc } from "./stage4c-ipc.js";
-import { registerStage4dIpc } from "./stage4d-ipc.js";
-import { registerStage4eIpc } from "./stage4e-ipc.js";
-import { registerStage5Ipc } from "./stage5-ipc.js";
-import { registerStage6rIpc } from "./stage6r-ipc.js";
+import { registerPlanningProviderIpc } from "./ipc/planning-provider-ipc.js";
+import { registerAiEditingAnalysisIpc } from "./ipc/ai-editing-analysis-ipc.js";
+import { registerReframeExportIpc } from "./ipc/reframe-export-ipc.js";
+import { registerMediaGenerationIpc } from "./ipc/media-generation-ipc.js";
+import { registerShotListIpc } from "./ipc/shot-list-ipc.js";
+import { registerImageGenerationIpc } from "./ipc/image-generation-ipc.js";
+import { registerShotImageFulfillmentIpc } from "./ipc/shot-image-fulfillment-ipc.js";
+import { registerShotTimelineAssemblyIpc } from "./ipc/shot-timeline-assembly-ipc.js";
+import { registerShotTimelineBatchAssemblyIpc } from "./ipc/shot-timeline-batch-assembly-ipc.js";
 import { registerPerformanceIpc } from "./performance-ipc.js";
 import { registerFileGrant } from "./file-grants.js";
 import { MAX_DROPPED_FILE_BYTES, isDroppedFileCountAllowed, isTrustedDroppedFileInvocation, validateDroppedFileSnapshot, type ValidatedDroppedFile } from "./dropped-file.js";
@@ -704,7 +704,7 @@ function registerIpc(): void {
   ipcMain.handle("transcript:delete", async (_event, transcriptId: TranscriptId) => {
     await fetchWithUi<unknown>(`${API_PREFIX}/transcriptions/${encodeURIComponent(asId(transcriptId, "transcript_id"))}`, { method: "DELETE" });
   });
-  registerStage2aIpc({
+  registerPlanningProviderIpc({
     handle: ipcMain.handle.bind(ipcMain),
     fetchWithUi,
     saveSecret: async (providerConfigId, secret) => {
@@ -722,7 +722,7 @@ function registerIpc(): void {
       issueAssetTicket: restrictedMediaUrl
     }
   });
-  registerStage2bIpc({ handle: (channel, listener) => ipcMain.handle(channel, listener), fetchWithUi });
+  registerAiEditingAnalysisIpc({ handle: (channel, listener) => ipcMain.handle(channel, listener), fetchWithUi });
   ipcMain.handle("timeline:create", (_event, input: { project_id: ProjectId; timeline: TimelineCreateInput }) => fetchWithUi(`${API_PREFIX}/projects/${asId(input.project_id, "project_id")}/timelines`, { method: "POST", body: JSON.stringify(input.timeline) }).then(rendererSafe));
   ipcMain.handle("timeline:get", (_event, projectId: ProjectId) => fetchWithUi(`${API_PREFIX}/projects/${asId(projectId, "project_id")}/timeline`).then(rendererSafe));
   ipcMain.handle("timeline:patch", (_event, input: { project_id: ProjectId; patch: TimelinePatch }) => fetchWithUi(`${API_PREFIX}/projects/${asId(input.project_id, "project_id")}/timeline/patches`, { method: "POST", body: JSON.stringify(input.patch) }).then(rendererSafe));
@@ -781,14 +781,14 @@ function registerIpc(): void {
   });
   ipcMain.handle("export-batch:cancel", async (_event, batchId: ExportBatchId) => parseExportBatch(rendererSafe(await fetchWithUi(`${API_PREFIX}/export-batches/${asId(batchId, "export_batch_id")}/cancel`, { method: "POST" }))));
   ipcMain.handle("export-batch:retry", async (_event, input: { batch_id: ExportBatchId; retry: ExportBatchRetryInput }) => parseExportBatchRetryResponse(rendererSafe(await fetchWithUi(`${API_PREFIX}/export-batches/${asId(input.batch_id, "export_batch_id")}/retry`, { method: "POST", body: JSON.stringify(parseExportBatchRetryInput(input.retry)) }))));
-  registerStage3bIpc({ ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) }, fetchWithUi, previewPresentation: renditionReframePreviewPresentation });
-  registerStage4Ipc({ ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) }, fetchWithUi });
-  registerStage4cIpc({ ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) }, fetchWithUi });
+  registerReframeExportIpc({ ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) }, fetchWithUi, previewPresentation: renditionReframePreviewPresentation });
+  registerMediaGenerationIpc({ ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) }, fetchWithUi });
+  registerShotListIpc({ ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) }, fetchWithUi });
   imageProviderSecrets ??= new ImageProviderSecretStore(app.getPath("userData"));
-  registerStage4dIpc({ ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) }, fetchWithUi, getAdmin: requireCore, secrets: imageProviderSecrets });
-  registerStage4eIpc({ ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) }, fetchWithUi });
-  registerStage5Ipc({ ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) }, fetchWithUi });
-  registerStage6rIpc({ ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) }, fetchWithUi });
+  registerImageGenerationIpc({ ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) }, fetchWithUi, getAdmin: requireCore, secrets: imageProviderSecrets });
+  registerShotImageFulfillmentIpc({ ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) }, fetchWithUi });
+  registerShotTimelineAssemblyIpc({ ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) }, fetchWithUi });
+  registerShotTimelineBatchAssemblyIpc({ ipc: { handle: (channel, listener) => ipcMain.handle(channel, listener) }, fetchWithUi });
   // B10：派生媒体 IPC + B11 preview-source IPC + B14 波形 IPC + B15 PCM 块
   // IPC——lookup/stats/描述/作业 (Renderer 可见) + media(admin resolve→票据)
   registerPerformanceIpc({

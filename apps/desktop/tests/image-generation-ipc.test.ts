@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { registerStage4dIpc } from "../electron/main/stage4d-ipc.js";
+import { registerImageGenerationIpc } from "../electron/main/ipc/image-generation-ipc.js";
 
 const now = "2026-08-19T00:00:00.000Z";
 const hash = `sha256:${"a".repeat(64)}`;
@@ -34,7 +34,7 @@ function setup() {
   const admin = { setImageProviderSecret: vi.fn(), deleteImageProviderSecret: vi.fn() };
   const getAdmin = vi.fn(() => admin as never);
   const secrets = { available: vi.fn(() => true), set: vi.fn(), delete: vi.fn(), load: vi.fn().mockResolvedValue([]) };
-  registerStage4dIpc({
+  registerImageGenerationIpc({
     ipc: { handle: (channel, listener) => handlers.set(channel, listener) },
     fetchWithUi,
     getAdmin,

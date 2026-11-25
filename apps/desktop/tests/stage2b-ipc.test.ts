@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { registerStage2bIpc, stage2bRendererSafe } from "../electron/main/stage2b-ipc.js";
+import { registerAiEditingAnalysisIpc, stage2bRendererSafe } from "../electron/main/ipc/ai-editing-analysis-ipc.js";
 
 const now = "2026-08-12T00:00:00.000Z";
 const hash = `sha256:${"a".repeat(64)}`;
@@ -7,7 +7,7 @@ const hash = `sha256:${"a".repeat(64)}`;
 function setup() {
   const handlers = new Map<string, (_event: unknown, input?: unknown) => unknown>();
   const fetchWithUi = vi.fn();
-  registerStage2bIpc({ handle: (channel, listener) => handlers.set(channel, listener), fetchWithUi });
+  registerAiEditingAnalysisIpc({ handle: (channel, listener) => handlers.set(channel, listener), fetchWithUi });
   return { handlers, fetchWithUi };
 }
 

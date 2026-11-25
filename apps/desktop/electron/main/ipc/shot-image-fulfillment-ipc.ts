@@ -88,7 +88,7 @@ function basePath(input: Record<string, unknown>): string {
   return `/api/v1/projects/${projectId}/shot-requirements/${requirementId}/image-fulfillment`;
 }
 
-export function registerStage4eIpc({
+export function registerShotImageFulfillmentIpc({
   ipc,
   fetchWithUi,
 }: {

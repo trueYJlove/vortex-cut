@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { registerStage3bIpc } from "../electron/main/stage3b-ipc.js";
+import { registerReframeExportIpc } from "../electron/main/ipc/reframe-export-ipc.js";
 
 const now = "2026-08-18T00:00:00.000Z";
 const hash = "a".repeat(64);
@@ -11,7 +11,7 @@ function setup() {
   const handlers = new Map<string, Handler>();
   const fetchWithUi = vi.fn();
   const previewPresentation = vi.fn(async (safePreview: typeof preview) => ({ preview: safePreview, media_url: "aivideo://media/restricted-ticket" }));
-  registerStage3bIpc({ ipc: { handle: (channel, listener) => handlers.set(channel, listener) }, fetchWithUi, previewPresentation: previewPresentation as never });
+  registerReframeExportIpc({ ipc: { handle: (channel, listener) => handlers.set(channel, listener) }, fetchWithUi, previewPresentation: previewPresentation as never });
   return { handlers, fetchWithUi, previewPresentation };
 }
 

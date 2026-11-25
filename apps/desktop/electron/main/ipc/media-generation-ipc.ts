@@ -57,7 +57,7 @@ function pageQuery(input: Record<string, unknown>): string {
   return result ? `?${result}` : "";
 }
 
-export function registerStage4Ipc({ ipc, fetchWithUi }: { ipc: Registrar; fetchWithUi: FetchWithUi }): void {
+export function registerMediaGenerationIpc({ ipc, fetchWithUi }: { ipc: Registrar; fetchWithUi: FetchWithUi }): void {
   ipc.handle("media-generation:prepare", async (_event, value) => {
     const input = asRecord(value, ["project_id", "request"], "media generation prepare request");
     const projectId = asId(input.project_id, "project_id");

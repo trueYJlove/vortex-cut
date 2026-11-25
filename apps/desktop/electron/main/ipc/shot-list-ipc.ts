@@ -66,7 +66,7 @@ function pageQuery(input: Record<string, unknown>): string {
   return result ? `?${result}` : "";
 }
 
-export function registerStage4cIpc({ ipc, fetchWithUi }: { ipc: Registrar; fetchWithUi: FetchWithUi }): void {
+export function registerShotListIpc({ ipc, fetchWithUi }: { ipc: Registrar; fetchWithUi: FetchWithUi }): void {
   const fetchSafe = (path: string, init?: RequestInit) => safeInvoke(() => fetchWithUi(path, init));
   ipc.handle("shot-list:get", async (_event, projectId) =>
     parseShotListState(rendererSafe(await fetchSafe(`/api/v1/projects/${asId(projectId, "project_id")}/shot-list`))));

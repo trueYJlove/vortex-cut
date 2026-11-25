@@ -78,7 +78,7 @@ function pageQuery(input: Record<string, unknown>): string {
   return search.size ? `?${search.toString()}` : "";
 }
 
-export function registerStage6rIpc({ ipc, fetchWithUi }: {
+export function registerShotTimelineBatchAssemblyIpc({ ipc, fetchWithUi }: {
   ipc: Registrar;
   fetchWithUi: FetchWithUi;
 }): void {

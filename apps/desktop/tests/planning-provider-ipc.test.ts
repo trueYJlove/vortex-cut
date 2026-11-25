@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { registerStage2aIpc, rendererSafe } from "../electron/main/stage2a-ipc.js";
+import { registerPlanningProviderIpc, rendererSafe } from "../electron/main/ipc/planning-provider-ipc.js";
 import { issueCandidateClipMedia as realCandidateClipMedia } from "../electron/main/candidate-media.js";
 
 type Handler = (_event: unknown, input?: unknown) => Promise<unknown> | unknown;
@@ -15,7 +15,7 @@ function setup() {
   const saveSecret = vi.fn(async () => undefined);
   const deleteSecret = vi.fn(async () => undefined);
   const issueCandidateClipMedia = vi.fn(realCandidateClipMedia);
-  registerStage2aIpc({
+  registerPlanningProviderIpc({
     handle: (channel, handler) => handlers.set(channel, handler), fetchWithUi: fetchWithUi as never, saveSecret, deleteSecret,
     issueCandidateClipMedia: issueCandidateClipMedia as never,
     candidateMediaDependencies: {

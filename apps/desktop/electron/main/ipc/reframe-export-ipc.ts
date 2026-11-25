@@ -51,7 +51,7 @@ function pageQuery(input: Record<string, unknown>): string {
   return result ? `?${result}` : "";
 }
 
-export function registerStage3bIpc({ ipc, fetchWithUi, previewPresentation }: { ipc: Registrar; fetchWithUi: FetchWithUi; previewPresentation: PreviewPresentation }): void {
+export function registerReframeExportIpc({ ipc, fetchWithUi, previewPresentation }: { ipc: Registrar; fetchWithUi: FetchWithUi; previewPresentation: PreviewPresentation }): void {
   ipc.handle("reframe-preview:create", async (_event, value) => {
     const input = asRecord(value, ["project_id", "preview"], "reframe preview request");
     const projectId = asId(input.project_id, "project_id");

@@ -1,10 +1,10 @@
 import { parseProviderCapabilityTestResult } from "@aivideo/contracts";
-import { issueCandidateClipMedia } from "./candidate-media.js";
+import { issueCandidateClipMedia } from "../candidate-media.js";
 
 type RequestInitLike = { method?: string; body?: string };
 type IpcHandle = (channel: string, listener: (_event: unknown, input?: any) => Promise<unknown> | unknown) => void;
 
-export interface Stage2aIpcDependencies {
+export interface PlanningProviderIpcDependencies {
   handle: IpcHandle;
   fetchWithUi: <T = unknown>(path: string, init?: RequestInitLike) => Promise<T>;
   saveSecret: (providerConfigId: string, secret: string) => Promise<void>;
@@ -90,8 +90,8 @@ async function safeInvoke<T>(operation: () => Promise<T>, providerTest = false, 
   }
 }
 
-/** Stage2A's complete Renderer-facing IPC allowlist. It deliberately accepts no free-form secrets, paths, tokens, or media ranges. */
-export function registerStage2aIpc(deps: Stage2aIpcDependencies): void {
+/** Creative brief, recipe, provider, and candidate planning IPC allowlist. */
+export function registerPlanningProviderIpc(deps: PlanningProviderIpcDependencies): void {
   const safeFetch = <T = unknown>(path: string, init?: RequestInitLike) => safeInvoke(() => deps.fetchWithUi<T>(path, init));
   deps.handle("brief:get", (_event, projectId) => safeFetch(`${API_PREFIX}/projects/${id(projectId, "project_id")}/brief`).then(rendererSafe));
   deps.handle("brief:put", (_event, input) => {

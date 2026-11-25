@@ -12,9 +12,9 @@ import {
   parseProviderImageGenerationTask,
   parseProviderImageGenerationTaskPage
 } from "@aivideo/contracts";
-import type { ImageProviderSecretStore } from "./image-provider-secrets.js";
-import { removeImageProviderSecret, saveImageProviderSecret } from "./image-provider-secrets.js";
-import type { CoreAdminClient } from "./core-admin-client.js";
+import type { ImageProviderSecretStore } from "../image-provider-secrets.js";
+import { removeImageProviderSecret, saveImageProviderSecret } from "../image-provider-secrets.js";
+import type { CoreAdminClient } from "../core-admin-client.js";
 
 type Handler = (_event: unknown, value?: unknown) => Promise<unknown> | unknown;
 type Registrar = { handle(channel: string, listener: Handler): void };
@@ -41,7 +41,7 @@ function pageQuery(input: Record<string, unknown>): string {
   return search.size ? `?${search.toString()}` : "";
 }
 
-export function registerStage4dIpc({ ipc, fetchWithUi, getAdmin, secrets }: { ipc: Registrar; fetchWithUi: FetchWithUi; getAdmin: () => CoreAdminClient; secrets: ImageProviderSecretStore }): void {
+export function registerImageGenerationIpc({ ipc, fetchWithUi, getAdmin, secrets }: { ipc: Registrar; fetchWithUi: FetchWithUi; getAdmin: () => CoreAdminClient; secrets: ImageProviderSecretStore }): void {
   ipc.handle("provider-image-config:list", async (_event, value) => {
     const input = asRecord(value, ["project_id"], "image provider config list");
     return parseImageProviderConfigPage(rendererSafe(await fetchWithUi(`/api/v1/projects/${asId(input.project_id, "project_id")}/image-provider-configs`)));

@@ -34,7 +34,7 @@ import {
 type RequestInitLike = { method?: string; body?: string };
 type IpcHandle = (channel: string, listener: (_event: unknown, input?: unknown) => Promise<unknown> | unknown) => void;
 
-export interface Stage2bIpcDependencies {
+export interface AiEditingAnalysisIpcDependencies {
   handle: IpcHandle;
   fetchWithUi: <T = unknown>(path: string, init?: RequestInitLike) => Promise<T>;
 }
@@ -119,7 +119,7 @@ async function safeInvoke<T>(operation: () => Promise<T>): Promise<T> {
   }
 }
 
-export function registerStage2bIpc(deps: Stage2bIpcDependencies): void {
+export function registerAiEditingAnalysisIpc(deps: AiEditingAnalysisIpcDependencies): void {
   const fetchSafe = <T = unknown>(path: string, init?: RequestInitLike) => safeInvoke(() => deps.fetchWithUi<T>(path, init));
   deps.handle("planning-patch:prepare", async (_event, input) => {
     const value = record(input, ["project_id", "base_revision_id", "provider_config_id", "instruction"], "timeline patch prepare");
