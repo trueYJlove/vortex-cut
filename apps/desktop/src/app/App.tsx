@@ -101,14 +101,12 @@ import { useWorkspaceLayout } from "./hooks/useWorkspaceLayout.js";
 import { useAiWorkflows } from "./hooks/useAiWorkflows.js";
 import { useExportAndRender } from "./hooks/useExportAndRender.js";
 import { useAssetAndMediaLibrary } from "./hooks/useAssetAndMediaLibrary.js";
+import { useProjectLifecycle } from "./hooks/useProjectLifecycle.js";
 
 export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [project, setProject] = useState<Project>();
   const [openProjectIds, setOpenProjectIds] = useState<Project["project_id"][]>([]);
-  useEffect(() => {
-    if (project) setOpenProjectIds(ids => ids.includes(project.project_id) ? ids : [...ids, project.project_id]);
-  }, [project?.project_id]);
   // 素材箱双击预览：仅播放素材，不加入时间线。任何时间线交互都会退出该模式。
   const [libraryPreviewId, setLibraryPreviewId] = useState<string | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -167,11 +165,6 @@ export function App() {
   const [newProject, setNewProject] = useState("");
   const [newProjectRatio, setNewProjectRatio] = useState("916");
   const [playing, setPlaying] = useState(false);
-  const [runtimeReady, setRuntimeReady] = useState(false);
-  /** B13：Main 离散资源档位（getRuntime 注入；驱动会话环深/预算决策）。 */
-  const [resourceTier, setResourceTier] = useState<"conservative" | "balanced" | "high">("balanced");
-  /** B13-R 判别诊断开关（perf 诊断构建 + AIVS_FORCE_COPYTO=1 时 Main 下发）。 */
-  const [forceCopyTo, setForceCopyTo] = useState(false);
   const [playhead, setPlayhead] = useState(0);
   // 播放头命令存储（A06）：预览每帧写入（高频、不驱动 React 全树重渲染）；
   // `playhead` 10Hz 状态只喂 App 自身的时间显示/属性面板。用户 seek 统一走
@@ -303,12 +296,6 @@ export function App() {
   // （projects.py 的 UPDATE projects），若共用代次，排队中的草稿会在这些
   // 时刻被当成"内容已取代"静默丢弃。
   const timelineFetchSeq = useRef(0);
-  // P195：时间线装载的瞬时失败重试预算，按项目重置（切项目再来一轮 1s/4s）。
-  const timelineRetryRef = useRef<{ projectId: Project["project_id"] | undefined; attempts: number }>({ projectId: undefined, attempts: 0 });
-  // 新建项目自动补建空时间线（剪映/喵影式：项目即有时间线，无需手动创建）。
-  // 仅对新建项目生效——存量无时间线项目仍走菜单「创建空时间线」。
-  const autoProvisionProjectId = useRef<Project["project_id"] | undefined>(undefined);
-  const pollInstanceRef = useRef<symbol | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const pendingSeekRef = useRef<number | null>(null);
@@ -327,33 +314,7 @@ export function App() {
     };
   }, [playing, progressDragging]);
   // resize 与 timelineHeight 跟随视口已拆入 hooks/useWorkspaceLayout.ts
-
-  const refreshProjects = async () => {
-    const page = await window.desktop.listProjects({ limit: 100 });
-    setProjects(page.items);
-    const next = page.items.find(item => item.project_id === projectRef.current?.project_id) ?? page.items[0];
-    if (!next) {
-      projectDataEpochRef.current += 1;
-      setAssets([]); setTimeline(undefined); setWorking(undefined); setSelection(null); setProject(undefined);
-    } else if (next.project_id !== projectRef.current?.project_id) {
-      switchProject(next);
-    } else {
-      setProject(next);
-    }
-  };
-  const loadModels = async () => { const page = await window.desktop.listModels({ limit: 100 }); setModels(page.items); };
-  // 活跃任务拉取（初始加载与轮询共用）：按三个活跃状态各查一页合并去重。
-  // Core 的 /jobs 端点只支持单 status 过滤，历史终态任务不进 UI（会话内终态
-  // 由 trackRenderJob 维持展示）；同 job_id 多页出现时以先到者为准（mock 环境
-  // 三次查询可能回同一份列表，生产三状态互斥）。
-  const fetchActiveJobs = async (projectId: Project["project_id"]): Promise<Job[]> => {
-    const statuses = ["queued", "running", "cancelling"] as const;
-    const pages = await Promise.all(statuses.map(status => window.desktop.listJobs({ project_id: projectId, status })));
-    const seen = new Set<string>();
-    return pages.flatMap(page => page.items).filter(item => { if (seen.has(item.job_id)) return false; seen.add(item.job_id); return true; });
-  };
-  // A08：loadProjectData 摘要优先——素材/任务先落库，转录正文不再全量预取
-  // （正文由 viewTranscript 选中时加载，旧内容按项目代次作废不写入新状态）。
+  // A08：loadProjectData 摘要优先与请求代次/票据重试状态
   const projectDataEpochRef = useRef(0);
   const seenAnyTicketRef = useRef(false);
   const noTicketRetryRef = useRef(0);
@@ -401,68 +362,6 @@ export function App() {
     exitLibraryPreview: () => exitLibraryPreview(),
     showNotice: (text, tone) => showNotice(text, tone),
   });
-  const loadProjectData = async (selected: Project) => {
-    const epoch = ++projectDataEpochRef.current;
-    // GAP-LIST-ASSETS-PAGING：assets 跟随 next_cursor 翻页装载（Core 默认
-    // limit=50，旧实现只取第一页——第 51+ 素材无 media ticket，合成预览回退
-    // "no ticket for asset_..."，刷新素材库亦不可恢复）。200 页 = 10,000 条
-    // 防病态游标环；触顶即止（行为不劣于单页现状）。
-    // 返回 {items, truncated}：truncated = 撞到 200 页上限而止（服务端还有下一页），
-    // 此时 items 只是服务端集合的前缀，不能当作"界面镜像 == 服务端集合"。
-    const listAllAssets = async (projectId: Project["project_id"]) => {
-      const items: Awaited<ReturnType<typeof window.desktop.listAssets>>["items"] = [];
-      let cursor: string | null | undefined;
-      let truncated = false;
-      for (let page = 0; page < 200; page++) {
-        const assetPage = await window.desktop.listAssets({ project_id: projectId, ...(cursor ? { cursor } : {}) });
-        items.push(...assetPage.items);
-        if (!assetPage.next_cursor) break;
-        cursor = assetPage.next_cursor;
-        // 用满 200 页仍有下一页 = 撞上限：items 只是服务端集合的前缀。
-        if (page === 199) truncated = true;
-      }
-      return { items, truncated };
-    };
-    const [assetsPage, activeJobs] = await Promise.all([listAllAssets(selected.project_id), fetchActiveJobs(selected.project_id)]);
-    const assetsAll = assetsPage.items;
-    if (epoch !== projectDataEpochRef.current) return;
-    // 触顶的装载不是完整镜像：对账端点据此停用，避免"截断 → 判成变了 → 再截断"
-    // 的循环重载。未触顶的装载恢复完整性判定。
-    assetsMirrorTruncatedRef.current = assetsPage.truncated;
-    setAssets(assetsAll); setJobs(activeJobs);
-    // 转录摘要：每素材一次 listTranscripts——必须经有界队列（≤4 并发）。旧实现
-    // 直接 Promise.all 对全部素材并发（100 素材 = 100 个并发 HTTP），会在项目
-    // 装载瞬间打满本地 Core 的 accept 队列，同刻发出的 manifest 请求被
-    // ECONNREFUSED（F04 复测现场）。此处落实注释承诺的"并发受限 ≤4"。
-    const queue = transcriptSummaryQueueRef.current ??= new BoundedTaskQueue<{ items: TranscriptSummary[] }>(4);
-    // 每项结果三态：{kind:"stale"} 代次过期 / {kind:"failed"} 本次没取到 /
-    // {kind:"ok"} 已知列表。用显式判别字段而非 symbol 比较，便于收窄类型。
-    const summaries = await Promise.all(assetsAll.filter(item => isTranscribable(item.asset)).map(async item => {
-      const assetId = String(item.asset.asset_id);
-      const summaryPage = await queue.push(() => window.desktop.listTranscripts(item.asset.asset_id));
-      if (summaryPage === queue.skipped) return { assetId, kind: "stale" as const };
-      // 该素材这次没取到（网络/IPC/业务错误）：标记为未知而非空列表。
-      // 旧实现把失败也当成 items=[]，于是一次瞬时失败就把该素材的转录从
-      // 界面上抹掉，且没有重试——转录页显示"尚未生成转录"，而库里其实是
-      // ready（2026-10-08 用户现场）。未知的条目在合并时保留上一次已知值。
-      if (summaryPage === queue.failed) return { assetId, kind: "failed" as const };
-      return { assetId, kind: "ok" as const, items: summaryPage.items };
-    }));
-    if (epoch !== projectDataEpochRef.current) return; // 切项目：旧返回作废
-    // 合并语义：已知 → 覆盖；未知(failed) → 保留上一次的值（首次加载时即空）。
-    setTranscriptSummaries(previous => {
-      const next: Record<string, TranscriptSummary[]> = {};
-      for (const entry of summaries) {
-        if (entry.kind === "stale") continue;
-        if (entry.kind === "failed") {
-          if (entry.assetId in previous) next[entry.assetId] = previous[entry.assetId];
-          continue;
-        }
-        next[entry.assetId] = entry.items;
-      }
-      return next;
-    });
-  };
   const {
     coverUrl, setCoverUrl, encoderMode, setEncoderMode,
     exportQuality, setExportQuality, exportResolution, setExportResolution,
@@ -518,310 +417,68 @@ export function App() {
     setTimeline,
     setWorking,
     acceptState: state => acceptState(state),
-    loadProjectData,
+    loadProjectData: selected => loadProjectData(selected),
     loadRenderData,
     trackRenderJob,
     showNotice: (text, tone) => showNotice(text, tone),
   });
-  const switchProject = (next: Project) => {
-    if (next.project_id === projectRef.current?.project_id) return;
-    resetAiOnProjectSwitch();
-    projectDataEpochRef.current += 1;
-    resetRenderOnProjectSwitch();
-    resetAssetLibraryOnSwitch(true);
-    setJobs([]); setTimeline(undefined); setWorking(undefined); setSelection(null);
+  const resetPreviewOnProjectSwitch = () => {
     setLibraryPreviewId(null);
-    setPlaying(false); setSyntheticNotice(null); setPreviewMode("synthetic");
-    seenAnyTicketRef.current = false; noTicketRetryRef.current = 0; noTicketFinalRetryRef.current = false;
-    if (autoProvisionProjectId.current !== next.project_id) autoProvisionProjectId.current = undefined;
-    setOpenProjectIds(ids => ids.includes(next.project_id) ? ids : [...ids, next.project_id]);
-    setProject(next);
+    setPlaying(false);
+    setSyntheticNotice(null);
+    setPreviewMode("synthetic");
+    seenAnyTicketRef.current = false;
+    noTicketRetryRef.current = 0;
+    noTicketFinalRetryRef.current = false;
   };
-  useEffect(() => {
-    // The preload bridge is immutable in production, but capture it for this
-    // mounted editor instance.  This prevents a late startup continuation from
-    // an unmounted window from issuing requests through a subsequently created
-    // renderer bridge and racing its project/timeline state.
-    const desktop = window.desktop;
-    let active = true;
-    void desktop.getRuntime().then(async runtime => {
-      if (runtime?.resource_tier) setResourceTier(runtime.resource_tier);
-      if (runtime?.force_copy_to) setForceCopyTo(true);
-      const [projectPage, modelPage] = await Promise.all([
-        desktop.listProjects({ limit: 100 }),
-        desktop.listModels({ limit: 100 })
-      ]);
-      if (!active) return;
-      setRuntimeReady(true);
-      setProjects(projectPage.items);
-      const initialProject = projectPage.items[0];
-      if (initialProject) switchProject(initialProject);
-      else setProject(undefined);
-      setModels(modelPage.items);
-    }).catch(error => { if (active) showNotice(safeErrorMessage(error, "运行环境初始化失败，请刷新后重试。")); });
-    return () => { active = false; };
-  }, []);
-  useEffect(() => {
-    if (!project) return;
-    // 防御性清理：直接由外部状态驱动项目变化时，也不能保留上一项目数据。
-    setJobs([]); setTimeline(undefined); setWorking(undefined); setSelection(null);
-    setLibraryPreviewId(null);
-    setPlaying(false); setSyntheticNotice(null); setPreviewMode("synthetic");
-    seenAnyTicketRef.current = false; noTicketRetryRef.current = 0; noTicketFinalRetryRef.current = false;
-    closePatch(); setRevisionOpen(false); setRevisionDiff(undefined);
-    resetReframeOnProjectChange();
-    let active = true;
-    // 项目边界推进装载代次：在途时间线装载（见下方独立 effect）与挂起草稿
-    // 都按代次作废，避免旧项目的返回写进新项目。
-    timelineLoadEpoch.current += 1;
-    resetAssetLibraryOnSwitch(false);
-    void loadProjectData(project).catch(error => active && showNotice(safeErrorMessage(error, "项目数据加载失败，请刷新后重试。")));
-    void loadRenderData(project).catch(error => active && showNotice(safeErrorMessage(error, "渲染记录加载失败，请刷新后重试。")));
-    return () => { active = false; };
-  }, [project?.project_id]);
-  // P195：时间线装载独立成 effect，键为 project_id + updated_at。
-  // 为什么不并进上面的装配 effect：那里带着整套项目级清理与 assets 重拉，而
-  // 每写一次时间线 Revision 都会推进 projects.updated_at（Core timeline.py 的
-  // UPDATE projects）——并进去会让每次保存都清空界面、打断正在编辑的草稿与
-  // 选区。独立 effect 只用 updated_at 做「该重新对账了」的信号。
-  // 为什么需要 updated_at：旧装配只在 project_id 变化时 getTimeline，首个
-  // 装载若返回 TIMELINE_NOT_FOUND（轮询在 createProject 与 createTimeline
-  // 之间认领了新项目）就再没有机会重载，界面永久停在「时间线为空」。
-  useEffect(() => {
-    if (!project) return;
-    const projectId = project.project_id;
-    let active = true;
-    // 只推进装载代次：同项目内 updated_at 变化即作废旧的在途装载；
-    // 项目切换另由 cleanup 的 active=false 兜住。
-    const seq = ++timelineFetchSeq.current;
-    let retryTimer: ReturnType<typeof setTimeout> | undefined;
-    // 重试预算按项目重置：换项目就是新一轮 1s / 4s 退避。
-    if (timelineRetryRef.current.projectId !== projectId) timelineRetryRef.current = { projectId, attempts: 0 };
-    const load = async () => {
-      try {
-        const value = await window.desktop.getTimeline(projectId);
-        if (!active || seq !== timelineFetchSeq.current) return;
-        timelineRetryRef.current.attempts = 0;
-        // 幂等短路：updated_at 推进同样会重入本 effect，内容没变就不能写 state
-        // （否则保存一次 Revision 就把本地 working 覆盖回服务端版本，编辑中断）。
-        const current = timelineRef.current;
-        if (current?.project_id === projectId && current.current_revision.timeline_revision_id === value.current_revision.timeline_revision_id) return;
-        setTimeline(value);
-        setWorking(value.current_revision.document);
-        setSelection(previous => reconcileTimelineSelection(previous, value));
-      } catch (error) {
-        if (!active || seq !== timelineFetchSeq.current) return;
-        const code = errorCode(error);
-        const notFound = code.includes("TIMELINE_NOT_FOUND") || code.includes("404");
-        // 新建项目尚未有时间线：自动补建空时间线（剪映/喵影式，项目即有时间线），无需手动创建。
-        if (notFound && autoProvisionProjectId.current === projectId) {
-          autoProvisionProjectId.current = undefined;
-          try {
-            const value = await window.desktop.createTimeline({ project_id: projectId, timeline: { schema_version: 1, source: { kind: "empty" }, default_layout: "blurred_background", caption_preset_id: "default-bottom" } });
-            if (active && seq === timelineFetchSeq.current) { setTimeline(value); setWorking(value.current_revision.document); setSelection(null); }
-          } catch { if (active && seq === timelineFetchSeq.current) showNotice(safeErrorMessage(error, "时间线加载失败，请刷新后重试。")); }
-          return;
-        }
-        // 时间线确实还不存在：清空后不做定时重试——它被建出来时 projects.updated_at
-        // 会推进，本 effect 自然重入，那就是愈合路径。
-        if (notFound) { setTimeline(undefined); setWorking(undefined); return; }
-        // 瞬时失败：限次退避重试（1s、4s），耗尽后才如实清空并报错——
-        // 旧实现首次失败就清空，一次抖动等于整条时间线从界面消失。
-        const attempts = timelineRetryRef.current.attempts;
-        if (attempts < timelineRetryDelaysMs.length) {
-          timelineRetryRef.current.attempts = attempts + 1;
-          retryTimer = setTimeout(() => { void load(); }, timelineRetryDelaysMs[attempts]);
-          return;
-        }
-        setTimeline(undefined); setWorking(undefined);
-        showNotice(safeErrorMessage(error, "时间线加载失败，请刷新后重试。"));
-      }
-    };
-    void load();
-    return () => { active = false; if (retryTimer !== undefined) clearTimeout(retryTimer); };
-  }, [project?.project_id, project?.updated_at]);
-  useEffect(() => {
-    if (!runtimeReady) return;
-    // A08：轮询改「上次请求结束后再 setTimeout」（RequestScheduler）：
-    // - 同端点 single-flight（后端慢于间隔时不再叠加在途请求）；
-    // - 无活跃任务/后台退避 6s；前后台恢复时立即刷新一轮；
-    // - 项目/任务列表内容未变不写大 state（浅比较短路）；
-    // - 模型列表退出快频（只在模型事件/低频兜底刷新——见 modelEvents 计数）。
-    const instance = Symbol("app-poll-instance");
-    pollInstanceRef.current = instance;
-    const projectsSignature = { value: "" };
-    const jobsSignature = { value: "" };
-    const exportsSignature = { value: "" };
-    const scheduler = new RequestScheduler({
-      hasActiveWork: () => jobsRef.current.some(job => ["queued", "running", "cancelling"].includes(job.status)),
-    });
-    scheduler.register({
-      key: "projects",
-      fetch: async () => window.desktop.listProjects({ limit: 100 }),
-      apply: (page) => {
-        if (pollInstanceRef.current !== instance) return false;
-        const signature = page.items.map(item => `${item.project_id}:${item.updated_at}`).join("|");
-        if (signature === projectsSignature.value) return false;
-        projectsSignature.value = signature;
-        setProjects(page.items);
-        const next = page.items.find(item => item.project_id === projectRef.current?.project_id) ?? page.items[0];
-        if (!next) {
-          projectDataEpochRef.current += 1;
-          setAssets([]); setTimeline(undefined); setWorking(undefined); setSelection(null); setProject(undefined);
-        } else if (next.project_id !== projectRef.current?.project_id) switchProject(next);
-        else setProject(next);
-        return true;
-      },
-    });
-    scheduler.register({
-      key: "jobs",
-      enabled: () => pollInstanceRef.current === instance,
-      // 只拉活跃任务：终态任务行是会话内过程记录，历史终态不进 UI（重启即清）；
-      // 轮询结果与本地合并而非覆盖，避免把会话内失败/中断记录冲掉。
-      fetch: async () => {
-        if (!project) return { items: [], next_cursor: null };
-        return { items: await fetchActiveJobs(project.project_id), next_cursor: null };
-      },
-      apply: (page) => {
-        if (pollInstanceRef.current !== instance) return false;
-        const activeIds = new Set(page.items.map(item => item.job_id));
-        // 终态对账：订阅推送（job:event）当前未接通，活跃列表是终态的唯一
-        // 来源。本地仍活跃、但已不在服务端活跃列表的任务 = 刚进入终态——
-        // getJob 回填真实状态，否则行会永久冻结在最后一次轮询到的运行中
-        // 进度（产物实际已生成，看似卡死）。stale 数量进签名：对账请求
-        // 失败时下一轮签名不同，会重试而不是被浅比较短路。
-        const staleActive = jobsRef.current.filter(item => ["queued", "running", "cancelling"].includes(item.status) && !activeIds.has(item.job_id));
-        const signature = `${page.items.map(item => `${item.job_id}:${item.status}:${item.progress ?? ""}`).join("|")}#${staleActive.length}`;
-        if (signature === jobsSignature.value) return false;
-        jobsSignature.value = signature;
-        setJobs(items => [...page.items, ...items.filter(item => !activeIds.has(item.job_id))]);
-        for (const job of staleActive) {
-          void window.desktop.getJob(job.job_id).then(updated => {
-            if (pollInstanceRef.current !== instance) return;
-            const wasRunning = jobsRef.current.find(item => item.job_id === updated.job_id)?.status === "running";
-            setJobs(items => {
-              const current = items.find(item => item.job_id === updated.job_id);
-              if (!current || current.status === updated.status) return items;
-              // 成功收尾：最后一次可见进度与 100% 之间可能差一整个轮询
-              // 间隔（短片校验+哈希在间隔内跑完），直接跳变很突兀——
-              // 先以「收尾中」行（保留最后进度，进度条 CSS 过渡跑满）
-              // 展示 finalizingMs，再落到真实终态。
-              if (updated.status === "succeeded" && wasRunning && current.progress !== null && current.progress < 1) {
-                const finishing: Job = { ...updated, status: "running", progress: 1 };
-                setTimeout(() => {
-                  if (pollInstanceRef.current !== instance) return;
-                  setJobs(items => items.map(item => item.job_id === updated.job_id && item.status === "running" && item.progress === 1 ? updated : item));
-                }, FINALIZING_MS);
-                return [finishing, ...items.filter(item => item.job_id !== updated.job_id)];
-              }
-              return [updated, ...items.filter(item => item.job_id !== updated.job_id)];
-            });
-            // 渲染类任务终态顺带刷新产物/预览列表（导出成功立即可见）。
-            if (["succeeded", "failed", "cancelled", "interrupted"].includes(updated.status)
-              && (updated.kind === "authoritative_preview" || updated.kind === "final_export")
-              && project) {
-              void loadRenderData(project).catch(() => undefined);
-            }
-            // 转录成功必须重拉项目数据，否则转录页停在"尚未生成转录"。
-            // 注意：**不能**依赖 trackTranscriptionJob 的 subscribeJob —— 主进程
-            // 从未 emit `job:event:*`（见上方注释"订阅推送当前未接通"），那个回调
-            // 永不触发。轮询对账是终态的唯一可靠来源，刷新必须挂在这里。
-            // （2026-10-08 用户现场：lwd 项目两条转录在"任务"页显示已完成、
-            // 库里也确实 ready，转录页却始终为空。）
-            if (updated.status === "succeeded" && updated.kind === "transcription" && projectRef.current) {
-              void loadProjectData(projectRef.current).catch(() => undefined);
-            }
-          }).catch(() => undefined);
-        }
-        return true;
-      },
-    });
-    scheduler.register({
-      key: "exports",
-      enabled: () => pollInstanceRef.current === instance && renderPanelOpenRef.current,
-      // 产物列表文件存在性对账（问题2）：export_dto 每次列出都实时 stat 文件，
-      // 手动删除本地产物后 status 会变 missing——但此前只在任务终态/挂载时拉
-      // 一次，面板开着期间永远不更新。面板打开期间随轮询刷新（签名短路，
-      // 无变化不写 state；关闭面板即停，不增加常驻负载）。
-      fetch: async () => {
-        if (!project) return { items: [], next_cursor: null };
-        return window.desktop.listExports({ project_id: project.project_id, limit: 100 });
-      },
-      apply: (page) => {
-        if (pollInstanceRef.current !== instance) return false;
-        const signature = page.items.map(item => `${item.export_record.export_record_id}:${item.export_record.status}`).join("|");
-        if (signature === exportsSignature.value) return false;
-        exportsSignature.value = signature;
-        setExports(page.items);
-        return true;
-      },
-    });
-    // 资产集合对账（P199）：装配只在 project_id 变化时跑一次，素材导入却不推进
-    // projects.updated_at——首次 listAssets 若在 createProject 与 importAsset 之间
-    // 认领到空项目（启动轮询恰好在此刻换了项目），界面就永久停在「没有素材」，
-    // 直到用户手动刷新素材库或切项目。这里轮询集合组成，漏掉的导入由它补上。
-    // 只看 id 集合（不看 updated_at/created_at）：要的信号是"多了一条/少了一条"。
-    scheduler.register({
-      key: "assets",
-      // 首轮属于装配 effect（它才做完整翻页）：此刻本地集合可能还是空的（装载在途），
-      // 拿它做基准只会误判一次"变了"并再发起一轮完整翻页。对账从第二轮起接管——
-      // 那不是"等一会儿再说"，而是"等首次装载有了结果再对账"。
-      // 首轮跳过 ≠ 首次装载完成（首轮只是"此刻没有比对基准"）。真正的前提是
-      // 本地镜像**完整**：装配那次装载若撞上 200 页上限，镜像只是服务端集合的
-      // 前缀，比对结果不具可比性——对账触发的重载会把同一个前缀再写回来，
-      // 而服务端仍继续变化，于是每轮都判成"变了"并重发一次全量翻页（病理游标
-      // 环下实测 200 → 401 → 602 的倍增）。触顶时停用对账，把"完整镜像"作为
-      // 它的**前提**而不是事后修正：宁可暂时不对账，也不重复发起全量装载。
-      enabled: () => {
-        if (pollInstanceRef.current !== instance) return false;
-        return scheduler.stats.cycles > 0 && !assetsMirrorTruncatedRef.current;
-      },
-      fetch: async () => {
-        if (!project) return { items: [], next_cursor: null };
-        // 每轮只发一次（不翻页）：这里只负责"发现集合变了"，完整装载由
-        // loadProjectData 做。单页口径与它一致（Core 默认 50，取第一页）。
-        // 不足：超过一页的老项目，删除一条落在第二页及以后的素材不会改变首页
-        // 签名——宁可漏报也不在轮询里翻页（每轮最多一次请求是这层的前提）。
-        return window.desktop.listAssets({ project_id: project.project_id, limit: assetReconcilePageLimit });
-      },
-      apply: (page) => {
-        if (pollInstanceRef.current !== instance) return false;
-        // 项目未定（启动瞬间/项目被删）时无事可对账：返回空页也必须短路，不报错。
-        const selected = projectRef.current;
-        if (!selected) return false;
-        // 只看首页组成（Core 按 created_at DESC 列出，新导入必定落在首页），并且
-        // 只和界面**当前**列表的同长度前缀比：装载、UI 导入的乐观追加、刷新素材库
-        // 都写同一个 assets state，另存一份"上次见到的签名"必然和真实集合走散；
-        // 而拿单页去比整个集合又会在"本地有 200 条、首页只有 1 条"时每轮都判成
-        // 变了——那就是每轮重载 200 页的自激（GAP-LIST-ASSETS-PAGING 用例会当场
-        // 抓到这个环）。长度不同 = 组成变了；同长度比 id。
-        const signature = assetCollectionSignature(page.items);
-        if (signature === assetCollectionSignature(assetsRef.current.slice(0, page.items.length))) return false;
-        // 集合变了：走完整装载而不是直接 setAssets——后者会覆盖掉本地等着的
-        // 一次 UI 导入乐观追加（App.importAsset），而 loadProjectData 还带着
-        // jobs/转录摘要的既有副作用。
-        // 不自我循环的**不变量**：loadProjectData 把同一集合写进 assets，下一轮
-        // 轮询第一行比较即相等并短路——每轮最多触发一次装载，不会每轮重载成环。
-        void loadProjectData(selected).catch(() => undefined);
-        return true;
-      },
-    });
-    scheduler.start();
-    const handleVisibility = () => { if (!document.hidden) scheduler.refresh(); };
-    document.addEventListener("visibilitychange", handleVisibility);
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibility);
-      scheduler.dispose();
-      if (pollInstanceRef.current === instance) pollInstanceRef.current = null;
-    };
-    // project 变化时重建 jobs 端点闭包（projects/models 端点与项目无关）。
-  }, [runtimeReady, project?.project_id]);
-  // 代理就绪检测（B11 缺失的一环）：复用既有 jobs 状态与既有 listJobs 轮询，
-  // 不新开定时器、不新开 preview-source 轮询。判定 = 作业 kind 为 proxy（sample
-  // 路径同 kind，多清一次缓存无害）+ 该素材确由本次导入登记过 + 已到终态。
-  // 不写依赖数组：登记发生在 importAsset（ref，不触发 jobs 变化），只依赖 [jobs]
-  // 会漏掉「导入时作业已在列表里」这一序；此循环是 O(jobs) 早退，代价可忽略。
-  // 处理过即从登记集合移除，不会每帧反复失效缓存。
+  const {
+    runtimeReady, resourceTier, forceCopyTo, loadProjectData,
+    refreshProjects, switchProject, createProject,
+    renameManagedProject, toggleManagedProjectArchive, refreshProjectManager,
+    openProjects, closeProjectTab,
+  } = useProjectLifecycle({
+    projects,
+    setProjects,
+    project,
+    setProject,
+    projectRef,
+    openProjectIds,
+    setOpenProjectIds,
+    newProject,
+    setNewProject,
+    newProjectRatio,
+    setProjectDialogOpen,
+    setProjectManagerRefreshing,
+    setModels,
+    jobs,
+    setJobs,
+    jobsRef,
+    timelineRef,
+    setTimeline,
+    setWorking,
+    setSelection,
+    timelineLoadEpoch,
+    timelineFetchSeq,
+    projectDataEpochRef,
+    assetsRef,
+    assetsMirrorTruncatedRef,
+    setAssets,
+    setTranscriptSummaries,
+    transcriptSummaryQueueRef,
+    renderPanelOpenRef,
+    setExports,
+    loadRenderData,
+    resetAiOnProjectSwitch,
+    closePatch,
+    setRevisionOpen,
+    setRevisionDiff,
+    resetRenderOnProjectSwitch,
+    resetReframeOnProjectChange,
+    resetAssetLibraryOnSwitch,
+    resetPreviewOnProjectSwitch,
+    showNotice: (text, tone) => showNotice(text, tone),
+  });
+  // 代理就绪检测已移至下面 useEffect；loadProjectData/loadRenderData/trackRenderJob 已由生命周期和渲染 Hook 提供。
   useEffect(() => {
     for (const job of jobs) {
       const assetId = job.asset_id;
@@ -852,9 +509,6 @@ export function App() {
     proxySwitchPendingRef.current = false;
     setProxyReadyEpoch(epoch => epoch + 1);
   }, [playing]);
-  const terminalRenderJobs = jobs.filter(item => (item.kind === "authoritative_preview" || item.kind === "final_export") && ["succeeded", "failed", "cancelled", "interrupted"].includes(item.status)).map(item => `${item.job_id}:${item.status}`).sort().join("|");
-  useEffect(() => { if (project && terminalRenderJobs) void loadRenderData(project).catch(error => showNotice(safeErrorMessage(error, "渲染记录加载失败，请刷新后重试。"))); }, [project?.project_id, terminalRenderJobs]);
-
   // 代理登记的唯一入口（导入即转 + 实测解不动共用）：去重、不阻塞、失败静默。
   // 放在渲染期赋值而不是 effect 里——importAsset 可能在首个 effect 之前就被调用。
   requestProxyJobRef.current = (assetId: string) => {
@@ -1581,29 +1235,6 @@ export function App() {
     const asset = assets.find(candidate => candidate.asset.asset_id === item.asset_id);
     return Boolean(asset && (item.asset_kind === "image" || asset.asset.availability === "available"));
   });
-  const createProject = async () => {
-    if (!newProject.trim()) return;
-    const created = await window.desktop.createProject({ name: newProject.trim(), canvas: projectCanvasPresets[newProjectRatio] });
-    setNewProject(""); autoProvisionProjectId.current = created.project_id;
-    await refreshProjects(); switchProject(created); setProjectDialogOpen(false);
-  };
-  const renameManagedProject = async (item: Project, name: string) => {
-    const updated = await window.desktop.renameProject({ project_id: item.project_id, name });
-    setProjects(items => items.map(candidate => candidate.project_id === updated.project_id ? updated : candidate));
-    if (projectRef.current?.project_id === updated.project_id) setProject(updated);
-  };
-  const toggleManagedProjectArchive = async (item: Project) => {
-    const updated = item.status === "archived"
-      ? await window.desktop.reopenProject(item.project_id)
-      : await window.desktop.archiveProject(item.project_id);
-    setProjects(items => items.map(candidate => candidate.project_id === updated.project_id ? updated : candidate));
-    if (projectRef.current?.project_id === updated.project_id) setProject(updated);
-  };
-  const refreshProjectManager = async () => {
-    setProjectManagerRefreshing(true);
-    try { await refreshProjects(); }
-    finally { setProjectManagerRefreshing(false); }
-  };
   const previewFromLibrary = (item: AssetPresentation) => {
     if (!item.media_url || item.asset.availability !== "available") return;
     setLibraryPreviewId(item.asset.asset_id);
@@ -2354,17 +1985,6 @@ export function App() {
         : (Math.max(0, current) + (event.key === "ArrowDown" ? 1 : -1) + actions.length) % actions.length;
       actions[next]?.focus({ preventScroll: true });
     }
-  };
-  const openProjects = openProjectIds.flatMap(id => {
-    const item = id === project?.project_id ? project : projects.find(candidate => candidate.project_id === id);
-    return item ? [item] : [];
-  });
-  const closeProjectTab = (item: Project) => {
-    const index = openProjects.indexOf(item);
-    const next = openProjects[index + 1] ?? openProjects[index - 1];
-    if (item.project_id === project?.project_id && !next) return;
-    setOpenProjectIds(ids => ids.filter(id => id !== item.project_id));
-    if (next && item.project_id === project?.project_id) switchProject(next);
   };
   const alignmentCanvas = working && alignmentPreviewSize[renderRatio];
   const alignmentSubjects = alignmentCanvas ? selectedClips.flatMap(clip => {
