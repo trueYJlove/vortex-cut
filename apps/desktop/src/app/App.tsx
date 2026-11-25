@@ -1,97 +1,35 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Archive, AudioLines, BookOpen, Captions, ChevronDown, ChevronLeft, ChevronRight, Clapperboard, Command as CommandIcon, Download, Eye, FileText, FlaskConical, FolderCog, FolderOpen, FolderPlus, GitCompare, History, Image as ImageIcon, ImagePlus, Keyboard, LayoutPanelLeft, Lock, LockOpen, MapPin, Maximize, Minimize, MonitorPlay, Pause, Play, Plus, Redo2, RefreshCw, RotateCcw, Save, Scissors, Search, Sparkles, Repeat, Square, SquarePlus, Settings2, Trash2, Type as TypeIcon2, Type, Undo2, Upload, Video, Volume2, VolumeX, WandSparkles, Minus, ZoomIn, SlidersHorizontal } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
-import { ArrowUpDown, LayoutGrid, List } from "lucide-react";
-import { Star } from "lucide-react";
-import type { Asset, AssetId, AssetKind, AssetPresentation, ImportedAsset, BriefInput, CaptionPresetId, CvAnalysisSummary, CvSample, DestinationGrant, DirectoryGrant, EncoderMode, EgressPreview, ExportBatch, ExportFrameRate, ExportQuality, ExportResolution, HorizontalAnchor, Job, LayoutPolicy, MediaInfo, ModelDetail, ModelSummary, OutputRatio, PlatformPreset, Project, ProviderConfig, ReframeExportBatch, RenditionPreset, RenditionReframeAdjustment, TimelineCaption, TimelineClip, TimelineDiff, TimelineDocument, TimelineLayout, TimelinePatchEgressPreview, TimelinePatchOperation, TimelinePatchProposal, TimelineRevisionId, TimelineRevisionSummary, TimelineState, Transcript, TranscriptSegment, TranscriptSummary, VerticalAnchor } from "@aivideo/contracts";
-import { ExportDialog, type ExportSettings } from "./ExportDialog.js";
-import { CoverDialog } from "./CoverDialog.js";
-import type { AuthoritativePreviewPresentation, ExportRecordPresentation, RenditionPreviewPresentation, RenditionReframePreviewPresentation } from "../../electron/preload/index.js";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { BookOpen, Clapperboard, Command as CommandIcon, FlaskConical, FolderCog, GitCompare, Image as ImageIcon, Keyboard, LayoutPanelLeft, MonitorPlay, Redo2, RefreshCw, Scissors, Search, Sparkles, SquarePlus, Undo2, Upload, Video, WandSparkles } from "lucide-react";
+import type { AssetId, Job, ModelSummary, Project, TimelineClip, TimelineDocument, TimelineLayout, TimelinePatchOperation, TimelineRevisionId, TimelineState } from "@aivideo/contracts";
 import { CONTRACT_VERSION } from "@aivideo/contracts";
-import { MediaGenerationWorkbench } from "./media-generation/MediaGenerationWorkbench.js";
-import { ProviderImageGenerationWorkbench } from "./provider-image-generation/ProviderImageGenerationWorkbench.js";
-import { ShotRequirementWorkbench } from "./shot-requirements/ShotRequirementWorkbench.js";
-import { SettingsDialog } from "./settings/SettingsDialog.js";
-import { AgentSessionPanel } from "./agent-session/AgentSessionPanel.js";
-import { EditingGrammarPanel } from "./editing-grammar/EditingGrammarPanel.js";
-import { WorklistPanel } from "./worklist/WorklistPanel.js";
-import { CaptionsProviderPanel } from "./captions-provider/CaptionsProviderPanel.js";
-import { ProviderSettingsDialog } from "./provider-settings/ProviderSettingsDialog.js";
-import { EditingToolsPanel } from "./editing-grammar/EditingToolsPanel.js";
-import { AngleSyncPanel } from "./angle-sync/AngleSyncPanel.js";
-import { SemanticSearchPanel } from "./semantic-search/SemanticSearchPanel.js";
-import { KeyframeReviewPanel } from "./keyframe-review/KeyframeReviewPanel.js";
-import { Dialog } from "./Dialog.js";
-import { ContextMenu, type ContextMenuItem } from "../ui/of/ContextMenu.js";
-import { pickMedia } from "../ui/of/media-selection.js";
-import { ProjectTabStrip } from "./workspace/ProjectTabStrip.js";
-import { ASSET_BATCH_DRAG, ASSET_DRAG, SYSTEM_FILE_DROP_ID, clearSystemFileDrop, draggedAssetIds, planAssetDrop, resolveTimelineAssetDropIntent, setActiveDraggedAssetIds, takeSystemFileDrop } from "./timeline/asset-drop.js";
-import type { TimelineAssetDropIntent } from "./timeline/types.js";
 import { alignmentBox, alignmentPreviewSize, groupFrameBounds, planFrameAlignment, planFrameDistribution, planGroupBoundsEdit, type GroupBoundsField } from "./timeline/frame-alignment.js";
 import type { AlignDistribution, AlignEdge } from "../ui/of/AlignBar.js";
-import { errorCode, safeErrorMessage, safeTaskErrorMessage } from "./safeErrors.js";
-import { formatLocalStamp } from "./localTime.js";
+import { errorCode, safeErrorMessage } from "./safeErrors.js";
 import { PreviewPipOverlays, type PipOverlay, type PipTransform } from "./PreviewPipOverlays.js";
-import { SyntheticPreview } from "./preview/SyntheticPreview.js";
-import { syntheticFallbackNotice } from "./preview/fallback-notice.js";
 import { editorCommands, type EditorCommand } from "./editorCommands.js";
-import { bindingLabel, type ShortcutCommandId, type ShortcutEntry } from "./shortcuts.js";
 import { TimelinePanel } from "./timeline/TimelineCanvas.js";
 import { splitSelectionAt } from "./timeline/split-point.js";
 import { removeLinkedClips } from "./timeline/linked-clips.js";
 import { planMagneticDelete, readTimelineBehaviorPrefs } from "./timeline/magnetic-plan.js";
-import type { TimeRange } from "./timeline/time-range.js";
-import { RequestScheduler, BoundedTaskQueue } from "./request-scheduling.js";
 import { parseSubtitleFile } from "./subtitleImport.js";
-import { AssetSelectionProperties, ClipGroupAlignmentProperties, ClipProperties, CaptionProperties, ProjectProperties, TimelineDiffView, TransitionProperties } from "./PropertyPanels.js";
-import { JobEta } from "./JobEta.js";
+import { AssetSelectionProperties, ClipGroupAlignmentProperties, ClipProperties, CaptionProperties, ProjectProperties, TransitionProperties } from "./PropertyPanels.js";
 import { WorkspaceFooter } from "./workspace/WorkspaceFooter.js";
-import { ProjectLibraryDialog } from "./ProjectLibraryDialog.js";
 import {
-  ASSET_FAVORITES_KEY,
-  assetCollectionSignature,
   assetDurationLabel,
   assetKindLabels,
-  assetKinds,
   assetMetaText,
-  assetReconcilePageLimit,
   availabilityLabels,
-  cvSparkPath,
   duration,
-  fallbackReasonLabel,
-  FINALIZING_MS,
-  formatBytes,
-  formatRelativeTime,
-  formatSmpteTimecode,
-  isTranscribable,
-  jobDetailText,
   jobKindLabels,
-  jobPhaseLabels,
-  jobStatusLabels,
-  layoutPolicies,
-  modelBadgeLabels,
-  modelStatusLabels,
-  navigateAssetLibrary,
-  previewRatios,
-  projectCanvasPresets,
-  readAssetFavorites,
-  reconcileTimelineSelection,
-  storedAssetView,
-  timelineRetryDelaysMs,
-  toggle,
-  transcriptStatusLabels,
-  type AssetFilter,
   type Notice,
   type NoticeTone,
-  type ReframeAnchor,
-  type ReframeSelections,
-  type RenditionTarget,
   type SaveState,
   type Selection,
 } from "./appHelpers.js";
-import { IconButton, ReframeTargetEditor, SegmentRow } from "./layout/AppMicroComponents.js";
 import { EditorTitlebar, type MenuEntry } from "./layout/EditorTitlebar.js";
 import { LibraryPane } from "./layout/LibraryPane.js";
+import { PreviewStage } from "./layout/PreviewStage.js";
+import { AppDialogs } from "./layout/AppDialogs.js";
 import { useWorkspaceLayout } from "./hooks/useWorkspaceLayout.js";
 import { useAiWorkflows } from "./hooks/useAiWorkflows.js";
 import { useExportAndRender } from "./hooks/useExportAndRender.js";
@@ -209,31 +147,7 @@ export function App() {
     if (!track) return clip.audio.enabled;
     return clip.audio.enabled && !track.muted && (!anySoloTrack || track.solo);
   }, [trackById, anySoloTrack]);
-  const {
-    assets, setAssets, assetsRef, assetsMirrorTruncatedRef,
-    assetQuery, setAssetQuery, assetFilter, setAssetFilter,
-    libraryScope, changeLibraryScope, setAssetFavorites, favoriteAssetIds,
-    assetView, changeAssetView, assetSortByName, setAssetSortByName,
-    semanticAssetNames, visibleAssets, transcriptSummaries, setTranscriptSummaries,
-    transcriptSummaryQueueRef, confirmModel, setConfirmModel,
-    licenseAccepted, setLicenseAccepted, transcriptionAsset, setTranscriptionAsset,
-    pendingDeleteAsset, setPendingDeleteAsset, visibleAssetOrder,
-    selectedAssetIds, selectedAssetId, assetMenu, setAssetMenu, menuAsset,
-    resetAssetSelection, selectAsset, setPickedAssetIds, deleteBusy, refreshingAssets,
-    viewingTranscript, setViewingTranscript, language, setLanguage,
-    wordTimestamps, setWordTimestamps, selectedSegments, setSelectedSegments,
-    captionsOptimize, setCaptionsOptimize, pendingDeleteTranscript, setPendingDeleteTranscript,
-    deleteTranscriptBusy, cvSummaries, cvBusy, cvOptionsOpen, setCvOptionsOpen,
-    cvOptionsAsset, setCvOptionsAsset, cvTargetGapS, setCvTargetGapS,
-    cvBudgetPerMin, setCvBudgetPerMin, cvSparkAssetId, cvSparkSamples,
-    resetAssetLibraryOnSwitch, isDraggableAsset, adoptImportedAsset, dropAsset,
-    insertSegments, importAsset, refreshAssets, deleteAsset, deleteTranscript,
-    openDeleteTranscriptDialog, deleteJob, usedAssetIds, cvSummaryText, toggleCvSpark,
-    revealAsset, originalShortEdge, assetDragProps, openModel, downloadModel, cancelModel,
-    startTranscription, submitTranscription, retryTranscription, cancelJob,
-    startCvAnalysis, submitCvOptions, viewTranscript,
-    firstMediaAsset, loadedTranscript, transcriptRows,
-  } = useAssetAndMediaLibrary({
+  const assetLibrary = useAssetAndMediaLibrary({
     project,
     projectRef,
     projectDataEpochRef,
@@ -252,6 +166,23 @@ export function App() {
     exitLibraryPreview: () => exitLibraryPreview(),
     showNotice: (text, tone) => showNotice(text, tone),
   });
+  const {
+    assets, setAssets, assetsRef, assetsMirrorTruncatedRef,
+    assetQuery, setAssetQuery, assetFilter, setAssetFilter,
+    libraryScope, changeLibraryScope, setAssetFavorites, favoriteAssetIds,
+    assetView, changeAssetView, assetSortByName, setAssetSortByName,
+    semanticAssetNames, visibleAssets, setTranscriptSummaries,
+    transcriptSummaryQueueRef, visibleAssetOrder,
+    selectedAssetIds, selectedAssetId, assetMenu, setAssetMenu, menuAsset,
+    resetAssetSelection, selectAsset, setPickedAssetIds, setPendingDeleteAsset, refreshingAssets,
+    setCvOptionsOpen, setCvOptionsAsset, setCvTargetGapS, setCvBudgetPerMin,
+    cvSummaries, cvBusy, cvSparkAssetId, cvSparkSamples,
+    resetAssetLibraryOnSwitch, isDraggableAsset, dropAsset,
+    importAsset, refreshAssets, deleteJob, usedAssetIds, cvSummaryText, toggleCvSpark,
+    revealAsset, assetDragProps, openModel, cancelModel,
+    startTranscription, retryTranscription, cancelJob,
+    openDeleteTranscriptDialog, viewTranscript, loadedTranscript, transcriptRows,
+  } = assetLibrary;
   const {
     libraryPreviewId, setLibraryPreviewId,
     playbackSettings, setPlaybackSettings,
@@ -299,25 +230,7 @@ export function App() {
     loadProjectData: selected => loadProjectData(selected),
     showNotice: (text, tone) => showNotice(text, tone),
   });
-  const {
-    coverUrl, setCoverUrl, encoderMode, setEncoderMode,
-    exportQuality, setExportQuality, exportResolution, setExportResolution,
-    exportFrameRate, setExportFrameRate, exportDialogOpen, setExportDialogOpen,
-    exportBusy, coverDialogOpen, setCoverDialogOpen,
-    exports, setExports, exportPlayback, setExportPlayback,
-    batchOpen, setBatchOpen, renderPanelOpen, setRenderPanelOpen, renderPanelOpenRef,
-    platformPresets, renditionPresets, renditionTargets, setRenditionTargets,
-    activeBatch, setActiveBatch, batchError, setBatchError,
-    reframeSelections, reframePreviews, reframePending, reframePlayback, setReframePlayback,
-    reframeDirectoryGrant, directoryGrant, activeReframeBatch, setActiveReframeBatch, reframeError, setReframeError,
-    syntheticSnapshotRef, loadRenderData, resetRenderOnProjectSwitch, resetReframeOnProjectChange,
-    removeMissingExport, captureCover, applyCover, trackRenderJob, generatePreview,
-    openExportDialog, submitExport, targetPreview, openExportBatch, addTarget, updateTarget,
-    generateRenditionPreview, chooseBatchDirectory, createBatch, retryBatchItems,
-    reframeClips, targetAdjustments, selectReframeAnchor, generateReframePreview,
-    chooseReframeDirectory, createReframeBatch, retryReframeBatchItems,
-    authoritativePreview, previewIsStale, authoritativeMediaUrl, renderDisabledReason, renderActivity,
-  } = useExportAndRender({
+  const exportRender = useExportAndRender({
     project,
     projectRef,
     projectDataEpochRef,
@@ -333,20 +246,17 @@ export function App() {
     showNotice: (text, tone) => showNotice(text, tone),
   });
   const {
-    aiOpen, setAiOpen, aiStep, setAiStep, aiEgressConfirmed, setAiEgressConfirmed,
-    aiError, setAiError, aiProviders, setAiProviders, aiRecipes, aiPreview, setAiPreview,
-    aiCandidates, setAiCandidates, aiJob, setAiJob, aiCapabilityTesting,
-    aiPlayback, setAiPlayback, aiForm, setAiForm,
-    patchOpen, patchStep, setPatchStep, patchEgressConfirmed, setPatchEgressConfirmed,
-    patchInstruction, patchProviderId, setPatchProviderId, patchProviders,
-    patchPreview, setPatchPreview, patchProposal, patchJob, patchError,
-    patchCapabilityTesting, setPatchInstruction,
-    revisionOpen, setRevisionOpen, revisions, revisionPair, setRevisionPair,
-    revisionDiff, setRevisionDiff, mergedProviders, resetAiOnProjectSwitch,
-    openAi, prepareAi, createAi, testCandidateProviderCapability, playAiClip, adoptAi,
-    closePatch, openPatch, preparePatch, testPatchProviderCapability,
-    createPatch, cancelPatch, applyPatchProposal, openRevisionCompare, compareRevisions,
-  } = useAiWorkflows({
+    coverUrl, setCoverUrl, encoderMode, setEncoderMode,
+    setExportDialogOpen, setCoverDialogOpen,
+    setExports, exportPlayback, setExportPlayback,
+    setRenderPanelOpen, renderPanelOpenRef,
+    reframePlayback, setReframePlayback,
+    syntheticSnapshotRef, loadRenderData, resetRenderOnProjectSwitch, resetReframeOnProjectChange,
+    trackRenderJob, generatePreview,
+    openExportDialog, openExportBatch,
+    authoritativePreview, previewIsStale, authoritativeMediaUrl, renderDisabledReason, renderActivity,
+  } = exportRender;
+  const aiWorkflows = useAiWorkflows({
     project,
     projectRef,
     projectDataEpochRef,
@@ -359,6 +269,10 @@ export function App() {
     trackRenderJob,
     showNotice: (text, tone) => showNotice(text, tone),
   });
+  const {
+    setRevisionOpen, setRevisionDiff, resetAiOnProjectSwitch,
+    openAi, closePatch, openPatch, openRevisionCompare,
+  } = aiWorkflows;
   const {
     runtimeReady, resourceTier, forceCopyTo, loadProjectData,
     refreshProjects, switchProject, createProject,
@@ -812,17 +726,6 @@ export function App() {
     showNotice: (text, tone) => showNotice(text, tone),
   });
 
-  const COMMAND_ICON_MAP: Record<string, LucideIcon> = {
-    "play.pause": Play, "timeline.undo": Undo2, "timeline.redo": Redo2,
-    "timeline.split": Scissors, "timeline.copy": FileText, "timeline.cut": Scissors,
-    "timeline.paste": Download, "timeline.delete": Trash2, "timeline.create": SquarePlus,
-    "preview.generate": MonitorPlay, "export.open": Upload, "ai.open": Sparkles,
-    "ai.revise": WandSparkles, "project.manage": FolderCog, "project.refresh": RefreshCw,
-    "ui.resetLayout": LayoutPanelLeft, "ui.shortcuts": Keyboard, "tools.compare": GitCompare,
-    "tools.shots": Clapperboard, "tools.verify": FlaskConical, "tools.imageGen": ImageIcon,
-    "help.manual": BookOpen, "command.search": CommandIcon,
-  };
-
   const menuItems: Record<string, MenuEntry[]> = {
     项目: [{ label: "项目管理", icon: FolderCog, action: () => setProjectDialogOpen(true) }, { label: "刷新项目", icon: RefreshCw, action: () => void refreshProjects() }],
     编辑: [{ label: "撤销", icon: Undo2, action: () => void undoRedo("undo"), disabled: Boolean(commandDisabledReason("timeline.undo")) }, { label: "重做", icon: Redo2, action: () => void undoRedo("redo"), disabled: Boolean(commandDisabledReason("timeline.redo")) }],
@@ -964,125 +867,142 @@ export function App() {
       {leftPaneOpen && <div className="resize-handle resize-handle-left" role="separator" aria-label="调整左侧面板宽度" onPointerDown={event => beginResize("left", event)} />}
     <div className="editor-stack">
     <section className={`editor-grid editor-grid-nolib${rightPaneOpen ? "" : " properties-closed"}`}>
-      <section ref={stagePaneRef} className={`stage-pane${isFullscreen ? " fullscreen" : ""}`} aria-label="项目预览">
-        <div className="stage-column" ref={stageColumnRef}>
-          {/* 预览窗格栏（2026-11-16 按参照 ProjectView.tsx:4639 的 PANE_BAR 形态）：
-              参照这里是 40px 高、**只有图标按钮**（图层/属性面板开关），没有带文字的控件。
-              我们原来塞了「比例 select / 编码 select / 渲染与导出 按钮」三个带文字的控件，
-              于是画面上方出现一条参照里不存在的工具条——这是预览区结构差最大的一处。
-              功能不删：三项收进右侧图标按钮（比例与编码仍是可访问的 select，只是外观走
-              参照的 28×28 图标盒 + tooltip 说明），渲染与导出同理。 */}
-          {/* P4 参照 ProjectView.tsx:4639-4661：窗格栏 = 左侧 layers/inspector 两个 28×28 图标开关，
-              无标题、无带文字控件。ours 映射：图层图标→左素材池显隐；检查器图标→右属性栏显隐；
-              比例/编码/渲染导出（ours 功能）收进最右「预览设置」图标弹层，功能一项不删。 */}
-          <div className="pane-bar">
-            <button type="button" className={`pane-bar-btn${leftPaneOpen ? " on" : ""}`} aria-pressed={leftPaneOpen} aria-label="媒体库面板开关" title={leftPaneOpen ? "收起媒体库" : "展开媒体库"} onClick={() => setLeftPaneOpen(value => !value)}><LayoutPanelLeft size={16} aria-hidden="true" /></button>
-            <span className="pane-bar-spacer" />
-            {/* P4 顺序修正（ProjectView.tsx:4640-4661）：layers 左端、inspector 右端，ours 的预览设置在其右。 */}
-            <button type="button" className={`pane-bar-btn${rightPaneOpen ? " on" : ""}`} aria-pressed={rightPaneOpen} aria-label="属性面板开关" title={rightPaneOpen ? "收起属性面板" : "展开属性面板"} onClick={() => setRightPaneOpen(value => !value)}><SlidersHorizontal size={16} aria-hidden="true" /></button>
-            <span className="pane-settings-anchor" ref={paneSettingsRef}>
-              <button type="button" className={`pane-bar-btn${paneSettingsOpen ? " on" : ""}`} aria-haspopup="dialog" aria-expanded={paneSettingsOpen} aria-label="预览设置" title="预览设置（比例 / 编码）" onClick={event => { event.stopPropagation(); setPaneSettingsOpen(value => !value); }}><Settings2 size={16} aria-hidden="true" /></button>
-              {paneSettingsOpen && <div className="pane-settings-pop" role="dialog" aria-label="预览设置" onClick={event => event.stopPropagation()}>
-                <div className="pane-settings-row">
-                  <label>
-                    <span className="sr-only">预览比例</span>
-                    <select aria-label="预览比例" value={effectiveRatio} onChange={event => changePreviewRatio(event.target.value)}>{previewRatios.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}</select>
-                  </label>
-                  <label>
-                    <span className="sr-only">编码模式</span>
-                    <select aria-label="编码模式" value={encoderMode} onChange={event => setEncoderMode(event.target.value as EncoderMode)}><option value="auto">自动</option><option value="software">软件</option></select>
-                  </label>
-                </div>
-                <button type="button" className="pane-settings-action" onClick={() => { setPaneSettingsOpen(false); setRenderPanelOpen(true); }} aria-label="渲染与导出">渲染与导出{renderActivity ? <span className="render-badge" aria-hidden="true">{renderActivity}</span> : null}</button>
-              </div>}
-            </span>
-          </div>
-          <div className="stage-view">
-            <div ref={previewFrameRef} className={`preview-frame ${previewClass}${previewSelected ? " selected" : ""}${isViewerFit ? "" : " zoomed"}`} role="button" tabIndex={0} aria-label="预览画布。Ctrl 或 Command 加滚轮缩放，中键拖动画面；放大后可用方向键平移" title="Ctrl / Command + 滚轮缩放；放大后中键拖动或用方向键平移" onPointerDown={onPreviewPointerDown} onPointerMove={onPreviewPointerMove} onPointerUp={onPreviewPointerUp} onPointerCancel={onPreviewPointerCancel} onClick={selectClipAtPlayhead} onKeyDown={event => onPreviewKeyDown(event, selectClipAtPlayhead)}>
-          {stageMarquee && <div className="preview-marquee" aria-hidden="true" style={{ left: stageMarquee.x, top: stageMarquee.y, width: stageMarquee.w, height: stageMarquee.h }} />}
-          <div className="preview-canvas" ref={canvasRef}>
-            {previewMode === "authoritative" && authoritativeMediaUrl && <video ref={videoRef} className="preview-foreground authoritative-video" src={authoritativeMediaUrl} aria-label={reframePlayback ? "重构图权威预览视频" : exportPlayback ? "导出视频" : "权威预览视频"} controls onEnded={() => { setPlaying(false); setExportPlayback(undefined); setReframePlayback(undefined); setPreviewMode("synthetic"); }} />}
-            {/* 合成预览仅在时间线有可见片段时挂载；空时间线显示引导文案（剪映式），
-                避免对空时间线请求 preview-ir 被 Core 以 TIMELINE_EMPTY 拒绝而回退。 */}
-            {previewMode === "synthetic" && projectStateReady && project && working && timeline && working.clips.length > 0 && <SyntheticPreview preparePlaybackRef={preparePreviewPlaybackRef} key={project.project_id} outputRatio={renderRatio} projectId={project.project_id} revisionId={timeline.current_revision.timeline_revision_id} mediaUrls={syntheticMediaUrls} audioByClip={syntheticAudioByClip} pipClips={syntheticPipClips} lockedClipIds={working.locked_elements} selectedClipId={pipSelectedId} selectedClipIds={selection?.kind === "clips" ? selection.ids : undefined} onSelectClip={clipId => setSelection(clipId ? { kind: "clip", id: clipId as never } : null)} onSelectClips={ids => setSelection(ids.length ? { kind: "clips", ids } : null)} trackIndexByClipId={trackIndexByClipId} onCommitPipTransform={async (clipId, transform) => { const clip = (working?.clips ?? []).find(item => item.clip_id === clipId); return commitPipTransform(clipId as never, { ...(clip?.transform ?? {}), ...transform }); }} onDraftPipMask={(clipId, mask) => draftPipMask(clipId as never, mask)} onCommitPipMask={(clipId, mask) => commitPipMask(clipId as never, mask)} onGesturePause={pausePreviewPlayback} onGestureResume={resumePreviewPlayback} playing={playing && !gestureHoldRef.current} playheadUs={playhead} playheadStore={playheadStore} playbackRate={uiRate} onTimeUs={us => seekFromPlayback(us)} onEnded={handlePreviewEnded} onFallback={(reason, code) => { if (!seenAnyTicketRef.current) return; setPreviewMode("interactive"); setSyntheticNotice(syntheticFallbackNotice(reason, code)); }} sourceResolver={previewSourceResolver} resourceTier={resourceTier} forceCopyTo={forceCopyTo} snapshotRef={syntheticSnapshotRef} proxyEpoch={proxyReadyEpoch} onDecodeBudget={onDecodeBudget} onSession={session => { if (!session) previewSessionRef.current?.endScrubStorm(); previewSessionRef.current = session; }} />}
-            {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "video" && <div className="preview-transform" style={mainTransformStyle}><video className="preview-background" src={previewAsset.media_url} muted aria-hidden="true" /><video ref={videoRef} className="preview-foreground" src={previewAsset.media_url} muted={!selectedClip?.audio.enabled || previewReverse || !interactiveMediaRatePlayable || (clipAtPlayhead ? !isClipAudible(clipAtPlayhead) : false)} aria-label="交互预览视频" onTimeUpdate={event => { if (libraryPreviewId) dispatchPlayhead("external", Math.round(event.currentTarget.currentTime * 1_000_000), true); }} onEnded={handleVideoEnded} /></div>}
-            {previewMode === "interactive" && audioAsset?.media_url && <audio ref={audioRef} src={audioAsset.media_url} style={{ display: "none" }} />}
-            {previewMode === "interactive" && previewAsset?.media_url && previewAsset.asset.kind === "image" && <div className="preview-transform" style={mainTransformStyle}><img className="preview-background" src={previewAsset.media_url} alt="" aria-hidden="true" /><img className="preview-foreground" src={previewAsset.media_url} alt={previewAsset.asset.display_name} /></div>}
-            {(previewMode === "interactive" || (previewMode === "synthetic" && (!working || working.clips.length === 0))) && !previewAsset?.media_url && overlayPips.length === 0 && <div className="preview-empty">选择或追加素材以开始编辑</div>}
-            {previewMode === "interactive" && visibleCaption && <div className={`caption-overlay ${visibleCaption.preset_id}`}>{visibleCaption.text}</div>}
-            {previewMode === "interactive" && overlayPips.length > 0 && <PreviewPipOverlays items={overlayPips} tracks={tracksAtPlayhead} selectedClipId={pipSelectedId} locked={pipLocked} onSelect={clipId => setSelection({ kind: "clip", id: clipId })} onDraftTransform={draftPipTransform} onCommitTransform={commitPipTransform} onDraftMask={draftPipMask} onCommitMask={commitPipMask} onGesturePause={pausePreviewPlayback} onGestureResume={resumePreviewPlayback} playheadUs={playhead} playing={playing} playbackRate={uiRate} />}
-          </div>
-          {/* 选中框：白色边框 + 8 向拖拽手柄，缩放时随画面一起缩放；仅选中片段时可见。 */}
-          {!overlayClipSelected && <div className="sel-box" ref={selBoxRef} onClick={event => event.stopPropagation()} aria-hidden="true"><i className="sel-border" />{/* P6 修正：参照标签 = 手势实时值（StageTransformFrame.tsx:224-244 常驻 Label 属 layer；
-    ours 无 layer，常态显示画布全尺寸有误导——只在拖拽中显示（selDimsText 非空） */}
-<span className="sel-dims" style={selDimsText ? undefined : { display: "none" }}>{selDimsText}</span><span className="h h-nw" data-dir="nw" title="等比缩放（左上）" onPointerDown={beginSelDrag("nw")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-n" data-dir="n" title="单轴缩放（上）" onPointerDown={beginSelDrag("n")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-ne" data-dir="ne" title="等比缩放（右上）" onPointerDown={beginSelDrag("ne")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-e" data-dir="e" title="单轴缩放（右）" onPointerDown={beginSelDrag("e")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-se" data-dir="se" title="等比缩放（右下）" onPointerDown={beginSelDrag("se")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-s" data-dir="s" title="单轴缩放（下）" onPointerDown={beginSelDrag("s")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-sw" data-dir="sw" title="等比缩放（左下）" onPointerDown={beginSelDrag("sw")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /><span className="h h-w" data-dir="w" title="单轴缩放（左）" onPointerDown={beginSelDrag("w")} onPointerMove={moveSelDrag} onPointerUp={endSelDrag} onPointerCancel={endSelDrag} /></div>}
-        </div>
-          {/* P9 参照 ProjectView.tsx:4699-4741：画面上只有瞬态通知，无常驻模式胶囊。
-     interactive-label 仅在 stale（权威预览过期）或导出/重构播放这类瞬态时显示；
-     常驻的 preview-context 已删——模式信息收进窗格栏（见窗格栏 title/弹层）。 */}
-{(previewIsStale && previewMode === "authoritative" && !exportPlayback) || exportPlayback || reframePlayback ? <span className={`interactive-label ${previewIsStale && previewMode === "authoritative" && !exportPlayback ? "stale" : ""}`}>{previewMode === "interactive" ? "交互预览 · 非权威" : previewMode === "synthetic" ? "合成预览 · 实时（非权威）" : reframePlayback ? "静态焦点重构图 · 权威预览" : exportPlayback ? `导出 · ${exportPlayback.export_record.destination_display_name}` : previewIsStale ? "权威预览 · 已过期" : "权威预览 · 当前 Revision"}</span> : null}
-{syntheticNotice && <span role="note" aria-label="合成预览回退提示" className="synthetic-note">{syntheticNotice}<button className="synthetic-note-retry" onClick={() => { setSyntheticNotice(null); setPreviewMode("synthetic"); }}>重试合成预览</button></span>}
-          <div className={`progress${!libraryPreviewId && !isFullscreen ? " project-progress" : ""}${progressDragging ? " dragging" : ""}`} ref={progressRef} role="slider" tabIndex={0} aria-label="时间线播放头" aria-valuemin={0} aria-valuemax={Math.max(totalUs, 1)} aria-valuenow={Math.min(playhead, totalUs)} onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); setProgressDragging(true); seekFromProgress(event.clientX); }} onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) scrubFromProgress(event.clientX); }} onPointerUp={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) { const rect = event.currentTarget.getBoundingClientRect(); event.currentTarget.releasePointerCapture(event.pointerId); commitScrub(Math.round(Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)) * Math.max(totalUs, 1))); } setProgressDragging(false); }} onKeyDown={event => { if (event.key === "ArrowLeft") { event.preventDefault(); seekFromProgressRatio(Math.max(0, playhead / Math.max(totalUs, 1) - 1 / 300)); } else if (event.key === "ArrowRight") { event.preventDefault(); seekFromProgressRatio(Math.min(1, playhead / Math.max(totalUs, 1) + 1 / 300)); } else if (event.key === "Home") { event.preventDefault(); seekFromProgressRatio(0); } else if (event.key === "End") { event.preventDefault(); seekFromProgressRatio(1); } }}>
-            <div className="pg-bubble" ref={pgBubbleRef} style={{ left: `${progressPct}%` }}>{formatSmpteTimecode(playhead, previewFps)}</div>
-            <div className="pg-rail"><div className="pg-fill" ref={pgFillRef} style={{ width: `${progressPct}%` }}><i className="pg-dot" /></div></div>
-          </div>
-        </div>
-        <div className="playback-bar">
-          <div className="pb-left"><span className="tc"><b ref={tcTimeRef}>{formatSmpteTimecode(playhead, previewFps)}</b><i> / </i><span className="tot">{formatSmpteTimecode(totalUs, previewFps)}</span></span></div>
-          <div className="pb-center"><button type="button" className="pb-play" aria-label={playing ? "暂停" : "播放"} title={playing ? "暂停" : "播放"} onClick={togglePlayback}>{playing ? <Pause /> : <Play />}</button></div>
-          <div className="pb-right" role="group" aria-label="播放器控制">
-            <span className="rate-anchor">
-              <button className="pb-icon rate-btn" aria-haspopup="dialog" aria-expanded={ratePopOpen} title="播放设置（循环 / 倍速）" aria-label="播放设置" onClick={event => { event.stopPropagation(); setRatePopOpen(value => !value); setVolPopOpen(false); setZoomPopOpen(false); }}>
-                {loopPlayback && <Repeat size={14} aria-hidden="true" />}
-                <span aria-hidden="true">{`${uiRate}×`}</span>
-              </button>
-              <div className={`rate-pop${ratePopOpen ? " open" : ""}`} ref={ratePopRef} role="dialog" aria-label="播放设置" onClick={event => event.stopPropagation()}>
-                <div className="rp-head">播放设置</div>
-                {/* P12/P13 参照 PlaybackMenu.tsx:86-137：循环=整行 switch（自绘 18×30 ink 开关）、
-                    倍速=两行×4 的 segmented（滑动选中标记、role=radiogroup）。速度集合保 ours 域 0.25–4×。 */}
-                <button type="button" role="switch" aria-checked={loopPlayback} aria-label="循环播放" className="rp-row rp-loop" onClick={() => { if (!loopSeekPending.current) cancelLoopRestart(); setLoopPlayback(value => !value); }}>
-                  <Repeat />
-                  <span className="rp-loop-label">{playbackRange ? "循环播放区间" : "循环播放"}</span>
-                  <span aria-hidden className={`rp-switch${loopPlayback ? " on" : ""}`}><i /></span>
-                </button>
-                <div className="rp-row rp-speed" aria-hidden="true"><span>倍速</span></div>
-                {(() => { const speeds = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4] as const; const perRow = 4; const at = Math.max(0, speeds.indexOf(uiRate as typeof speeds[number]) === -1 ? speeds.findIndex(s => s > uiRate) : speeds.indexOf(uiRate as typeof speeds[number])); return <div className="rate-grid" role="radiogroup" aria-label="播放倍速">
-                  <span aria-hidden className="rate-mark" style={{ width: `calc((100% - 4px) / ${perRow})`, height: `calc((100% - 4px) / 2)`, transform: `translate(${(at % perRow) * 100}%, ${Math.floor(at / perRow) * 100}%)` }} />
-                  {speeds.map((r, i) => (
-                    <button key={r} type="button" role="radio" aria-checked={i === at} className={`rate-opt${i === at ? " active" : ""}`} onClick={() => setUiRate(r)}>{`${r}×`}</button>
-                  ))}
-                </div>; })()}
-              </div>
-            </span>
-            <span className="vol-anchor">
-              <button type="button" className="pb-icon" aria-haspopup="dialog" aria-expanded={volPopOpen} title={`音量 ${volume}%`} aria-label={`音量 ${volume}%`} onClick={event => { event.stopPropagation(); setVolPopOpen(value => !value); setZoomPopOpen(false); }}>{volume === 0 ? <VolumeX /> : <Volume2 />}</button>
-              <div className={`vol-pop${volPopOpen ? " open" : ""}`} ref={volPopRef} role="dialog" aria-label="音量" onClick={event => event.stopPropagation()}>
-                <div className="vol-rail" ref={volRailRef} role="slider" tabIndex={0} aria-label="预览音量" aria-orientation="vertical" aria-valuemin={0} aria-valuemax={100} aria-valuenow={volume} aria-valuetext={`${volume}%`} onKeyDown={event => {
-                  const delta = event.key === "ArrowUp" || event.key === "ArrowRight" ? 5 : event.key === "ArrowDown" || event.key === "ArrowLeft" ? -5 : 0;
-                  if (delta || event.key === "Home" || event.key === "End") {
-                    event.preventDefault(); event.stopPropagation();
-                    setVolume(event.key === "Home" ? 0 : event.key === "End" ? 100 : Math.max(0, Math.min(100, volume + delta)));
-                  }
-                }} onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); seekVolumeFrom(event.clientY); }} onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) seekVolumeFrom(event.clientY); }} onPointerUp={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }}>
-                  <div className="vol-fill" style={{ height: `${volume}%` }} />
-                  <div className="vol-thumb" style={{ bottom: `${volume}%` }} />
-                </div>
-              </div>
-            </span>
-            <button type="button" className="pb-icon zoom-btn" aria-haspopup="dialog" aria-expanded={zoomPopOpen} aria-label={`预览缩放，${previewZoom === "fit" ? "适应画布" : `${Math.round(previewZoom * 100)}%`}`} title="预览缩放" onClick={event => { event.stopPropagation(); setZoomPopOpen(value => !value); setVolPopOpen(false); }}><ZoomIn /><span className="zoom-label">{previewZoom === "fit" ? "适应" : `${Math.round(previewZoom * 100)}%`}</span></button>
-            <div className={`zoom-pop${zoomPopOpen ? " open" : ""}`} ref={zoomPopRef} role="dialog" aria-label="预览缩放" onClick={event => event.stopPropagation()}>
-              <div className="zp-head">
-                <button type="button" className={`zp-fit${previewZoom === "fit" ? " on" : ""}`} aria-pressed={previewZoom === "fit"} onClick={resetZoom}>{previewZoom === "fit" ? "✓ 适应画布" : "适应画布"}</button>
-                <span className="zp-val">{previewZoom === "fit" ? "原始" : `${Math.round(previewZoom * 100)}%`}</span>
-              </div>
-              <input type="range" min={0} max={1000} value={previewZoom === "fit" ? zoomT(1) : zoomT(previewZoom)} onChange={event => applySliderZoom(Number(event.target.value))} aria-label="预览缩放级别" aria-valuetext={previewZoom === "fit" ? "适应画布" : `${Math.round(previewZoom * 100)}%`} />
-              <div className="zp-scale"><span>25%</span><span>100%</span><span>500%</span></div>
-            </div>
-            <button type="button" className="pb-icon" aria-label={isFullscreen ? "退出全屏" : "全屏"} title={isFullscreen ? "退出全屏" : "全屏"} onClick={() => void toggleFullscreen()}>{isFullscreen ? <Minimize /> : <Maximize />}</button>
-          </div>
-        </div>
-        </div>
-      </section>
+      <PreviewStage
+        project={project}
+        timeline={timeline}
+        working={working}
+        selection={selection}
+        setSelection={setSelection}
+        selectedClip={selectedClip}
+        clipAtPlayhead={clipAtPlayhead}
+        audioAsset={audioAsset}
+        previewAsset={previewAsset}
+        mainTransformStyle={mainTransformStyle}
+        visibleCaption={visibleCaption}
+        tracksAtPlayhead={tracksAtPlayhead}
+        trackIndexByClipId={trackIndexByClipId}
+        isClipAudible={isClipAudible}
+        overlayPips={overlayPips}
+        overlayClipSelected={overlayClipSelected}
+        pipSelectedId={pipSelectedId}
+        pipLocked={pipLocked}
+        draftPipTransform={draftPipTransform}
+        commitPipTransform={commitPipTransform}
+        draftPipMask={draftPipMask}
+        commitPipMask={commitPipMask}
+        leftPaneOpen={leftPaneOpen}
+        setLeftPaneOpen={setLeftPaneOpen}
+        rightPaneOpen={rightPaneOpen}
+        setRightPaneOpen={setRightPaneOpen}
+        paneSettingsOpen={paneSettingsOpen}
+        setPaneSettingsOpen={setPaneSettingsOpen}
+        paneSettingsRef={paneSettingsRef}
+        effectiveRatio={effectiveRatio}
+        changePreviewRatio={changePreviewRatio}
+        encoderMode={encoderMode}
+        setEncoderMode={setEncoderMode}
+        setRenderPanelOpen={setRenderPanelOpen}
+        renderActivity={renderActivity}
+        renderRatio={renderRatio}
+        previewClass={previewClass}
+        previewSelected={previewSelected}
+        isViewerFit={isViewerFit}
+        previewZoom={previewZoom}
+        zoomT={zoomT}
+        resetZoom={resetZoom}
+        applySliderZoom={applySliderZoom}
+        stagePaneRef={stagePaneRef}
+        stageColumnRef={stageColumnRef}
+        previewFrameRef={previewFrameRef}
+        canvasRef={canvasRef}
+        selBoxRef={selBoxRef}
+        stageMarquee={stageMarquee}
+        selDimsText={selDimsText}
+        isFullscreen={isFullscreen}
+        toggleFullscreen={toggleFullscreen}
+        onPreviewPointerDown={onPreviewPointerDown}
+        onPreviewPointerMove={onPreviewPointerMove}
+        onPreviewPointerUp={onPreviewPointerUp}
+        onPreviewPointerCancel={onPreviewPointerCancel}
+        onPreviewKeyDown={onPreviewKeyDown}
+        selectClipAtPlayhead={selectClipAtPlayhead}
+        beginSelDrag={beginSelDrag}
+        moveSelDrag={moveSelDrag}
+        endSelDrag={endSelDrag}
+        previewMode={previewMode}
+        setPreviewMode={setPreviewMode}
+        authoritativeMediaUrl={authoritativeMediaUrl}
+        reframePlayback={reframePlayback}
+        setReframePlayback={setReframePlayback}
+        exportPlayback={exportPlayback}
+        setExportPlayback={setExportPlayback}
+        previewIsStale={previewIsStale}
+        syntheticNotice={syntheticNotice}
+        setSyntheticNotice={setSyntheticNotice}
+        projectStateReady={projectStateReady}
+        preparePreviewPlaybackRef={preparePreviewPlaybackRef}
+        previewSessionRef={previewSessionRef}
+        syntheticMediaUrls={syntheticMediaUrls}
+        syntheticAudioByClip={syntheticAudioByClip}
+        syntheticPipClips={syntheticPipClips}
+        previewSourceResolver={previewSourceResolver}
+        resourceTier={resourceTier}
+        forceCopyTo={forceCopyTo}
+        syntheticSnapshotRef={syntheticSnapshotRef}
+        proxyReadyEpoch={proxyReadyEpoch}
+        onDecodeBudget={onDecodeBudget}
+        seenAnyTicketRef={seenAnyTicketRef}
+        pausePreviewPlayback={pausePreviewPlayback}
+        resumePreviewPlayback={resumePreviewPlayback}
+        gestureHoldRef={gestureHoldRef}
+        playing={playing}
+        setPlaying={setPlaying}
+        playhead={playhead}
+        playheadStore={playheadStore}
+        uiRate={uiRate}
+        setUiRate={setUiRate}
+        previewReverse={previewReverse}
+        interactiveMediaRatePlayable={interactiveMediaRatePlayable}
+        libraryPreviewId={libraryPreviewId}
+        totalUs={totalUs}
+        previewFps={previewFps}
+        progressPct={progressPct}
+        progressDragging={progressDragging}
+        setProgressDragging={setProgressDragging}
+        progressRef={progressRef}
+        pgBubbleRef={pgBubbleRef}
+        pgFillRef={pgFillRef}
+        tcTimeRef={tcTimeRef}
+        volRailRef={volRailRef}
+        videoRef={videoRef}
+        audioRef={audioRef}
+        togglePlayback={togglePlayback}
+        dispatchPlayhead={dispatchPlayhead}
+        seekFromPlayback={seekFromPlayback}
+        handlePreviewEnded={handlePreviewEnded}
+        handleVideoEnded={handleVideoEnded}
+        seekFromProgress={seekFromProgress}
+        scrubFromProgress={scrubFromProgress}
+        commitScrub={commitScrub}
+        seekFromProgressRatio={seekFromProgressRatio}
+        ratePopOpen={ratePopOpen}
+        setRatePopOpen={setRatePopOpen}
+        ratePopRef={ratePopRef}
+        volPopOpen={volPopOpen}
+        setVolPopOpen={setVolPopOpen}
+        volPopRef={volPopRef}
+        zoomPopOpen={zoomPopOpen}
+        setZoomPopOpen={setZoomPopOpen}
+        zoomPopRef={zoomPopRef}
+        loopPlayback={loopPlayback}
+        setLoopPlayback={setLoopPlayback}
+        playbackRange={playbackRange}
+        loopSeekPending={loopSeekPending}
+        cancelLoopRestart={cancelLoopRestart}
+        volume={volume}
+        setVolume={setVolume}
+        seekVolumeFrom={seekVolumeFrom}
+      />
       {rightPaneOpen && <div className="resize-handle resize-handle-right" role="separator" aria-label="调整右侧面板宽度" onPointerDown={event => beginResize("right", event)} />}
       <aside className={"properties-pane" + (rightPaneOpen ? "" : " pane-closed")} aria-label="上下文属性" role="region" hidden={!rightPaneOpen}>{selectedClip ? <ClipProperties clip={selectedClip} clipName={semanticAssetNames[selectedClip.asset_id]} locked={Boolean(working?.locked_elements?.includes(selectedClip.clip_id) || trackById.get(selectedClip.track_id)?.locked)} onAlign={alignmentHint ? undefined : alignSelectedFrames} alignmentHint={alignmentHint} onPatch={patchTimelineVoid} onDraft={queueDraft} working={working!} playheadUs={playhead} onOpenEditingTools={tool => openEditingTools(tool, selectedClip.clip_id)} baseRevisionId={timeline?.current_revision.timeline_revision_id ?? null} onAppliedTimeline={acceptState} /> : selectedCaption ? <CaptionProperties caption={selectedCaption} locked={Boolean(selectedCaption.source_clip_id && working?.locked_elements?.includes(selectedCaption.source_clip_id))} onPatch={patchTimelineVoid} onDraft={queueDraft} working={working!} /> : selectedTransition ? <TransitionProperties transition={selectedTransition} onPatch={patchTimelineVoid} /> : selectedClips.length > 1 ? <ClipGroupAlignmentProperties count={selectedClips.length} hint={alignmentHint} onAlign={alignmentHint ? undefined : alignSelectedFrames} onDistribute={visualSelectedCount >= 3 ? distributeSelectedFrames : undefined} distributionDisabled={Boolean(alignmentHint)} groupBounds={groupBounds} onEditBounds={editGroupBounds} /> : selectedAssetIds.size > 0 ? <AssetSelectionProperties entries={visibleAssets.filter(({ asset }) => selectedAssetIds.has(asset.asset_id)).map(({ asset }) => ({ id: asset.asset_id, name: asset.display_name, kind: assetKindLabels[asset.kind], meta: assetMetaText(asset), duration: assetDurationLabel(asset), status: availabilityLabels[asset.availability] }))} /> : <ProjectProperties project={project} saveState={saveState} authoritativePreview={authoritativePreview} previewIsStale={previewIsStale} renderDisabledReason={renderDisabledReason} onGeneratePreview={() => void generatePreview()} onCreateExport={openExportDialog} onOpenProjectDialog={() => setProjectDialogOpen(true)} />}</aside>
     </section>
@@ -1109,185 +1029,76 @@ export function App() {
       onOpenProviderSettings={() => setProviderSettingsOpen(true)}
       onOpenSettings={() => setSettingsOpen(true)}
     />
-     {exportDialogOpen && project && working && timeline && <ExportDialog
-        projectId={project.project_id} projectName={project.name}
-        durationUs={working.clips.reduce((max, item) => Math.max(max, item.timeline_end_us), 0)}
-        clipCount={working.clips.length} captionCount={working.captions?.length ?? 0}
-        canvas={project.canvas} ratio={renderRatio} coverUrl={coverUrl}
-        previewReady={Boolean(authoritativePreview && !previewIsStale && authoritativePreview.preview.status === "ready")}
-        encoderMode={encoderMode} onEncoderModeChange={setEncoderMode}
-        quality={exportQuality} onQualityChange={setExportQuality}
-        resolution={exportResolution} onResolutionChange={setExportResolution}
-        frameRate={exportFrameRate} onFrameRateChange={setExportFrameRate}
-        originalShortEdge={originalShortEdge} busy={exportBusy}
-        onClose={() => setExportDialogOpen(false)} onOpenCover={() => setCoverDialogOpen(true)}
-        onExport={submitExport}
-      />}
-      {coverDialogOpen && <CoverDialog coverUrl={coverUrl} onClose={() => setCoverDialogOpen(false)} onCapture={() => captureCover()} onChange={applyCover} />}
-      {projectDialogOpen && <ProjectLibraryDialog
-        projects={projects}
-        activeProjectId={project?.project_id}
-        newProject={newProject}
-        newProjectRatio={newProjectRatio}
-        creating={false}
-        refreshing={projectManagerRefreshing}
-        onNewProjectChange={setNewProject}
-        onNewProjectRatioChange={setNewProjectRatio}
-        onCreateProject={createProject}
-        onRefresh={refreshProjectManager}
-        onOpen={item => { switchProject(item); setProjectDialogOpen(false); }}
-        onRename={renameManagedProject}
-        onToggleArchive={toggleManagedProjectArchive}
-        onClose={() => setProjectDialogOpen(false)}
-      />}
-    {batchOpen && <Dialog titleId="export-batch-title" closeLabel="关闭多平台导出" title="多平台导出" subtitle="平台与画幅独立选择；仅同一 Revision 的权威预览可进入批次。" footer={<><button disabled={renditionTargets.length >= 8 || !platformPresets.length} onClick={addTarget}>添加目标</button><button onClick={() => void chooseBatchDirectory()}>{directoryGrant ? `输出目录：{directoryGrant.display_name}` : "选择输出目录"}</button><button disabled={!directoryGrant || !renditionTargets.length || renditionTargets.some(target => !targetPreview(target))} onClick={() => void createBatch()}>创建批次</button></>} label="多平台导出" onClose={() => setBatchOpen(false)} className="export-batch-modal">{batchError && <p className="ai-status" role="status">{batchError}</p>}<div className="rendition-targets">{renditionTargets.map(target => { const platform = platformPresets.find(item => item.platform_preset_id === target.platform_preset_id); const rendition = renditionPresets.find(item => item.rendition_preset_id === target.rendition_preset_id); const preview = targetPreview(target); return <section key={target.key} className="rendition-target"><label>平台<select aria-label="导出平台" value={target.platform_preset_id} onChange={event => { const next = platformPresets.find(item => item.platform_preset_id === event.target.value); if (next) updateTarget(target.key, { platform_preset_id: next.platform_preset_id, rendition_preset_id: next.default_rendition_id, key: `${next.platform_preset_id}:${next.default_rendition_id}` }); }}><option value="">选择平台</option>{platformPresets.map(item => <option value={item.platform_preset_id} key={item.platform_preset_id}>{item.display_name}</option>)}</select></label><label>画幅<select aria-label="导出画幅" value={target.rendition_preset_id} onChange={event => updateTarget(target.key, { rendition_preset_id: event.target.value, key: `${target.platform_preset_id}:${event.target.value}` })}>{platform?.allowed_rendition_ids.map(id => <option value={id} key={id}>{renditionPresets.find(item => item.rendition_preset_id === id)?.display_name ?? id}</option>)}</select></label><label>布局<select aria-label="目标布局策略" value={target.layout_policy} onChange={event => updateTarget(target.key, { layout_policy: event.target.value as LayoutPolicy })}>{layoutPolicies.map(item => <option value={item.value} key={item.value}>{item.label}</option>)}</select></label><div className="target-summary"><small>{rendition ? `${rendition.export.width}×${rendition.export.height} · H.264/AAC · 30fps` : "预设加载中"}</small><small>{preview ? `权威预览已就绪${preview.preview.warnings.length ? ` · ${preview.preview.warnings.join(", ")}` : ""}` : "需要本目标权威预览"}</small></div><div className="target-actions"><button onClick={() => void generateRenditionPreview(target)}>{preview ? "重新生成权威预览" : "生成权威预览"}</button><button disabled={renditionTargets.length === 1} onClick={() => setRenditionTargets(items => items.filter(item => item.key !== target.key))}>移除</button></div>{preview && <ReframeTargetEditor clips={reframeClips(target)} selections={reframeSelections[target.key] ?? {}} preview={reframePreviews[target.key]} pending={Boolean(reframePending[target.key])} onSelect={(clipId, anchor) => selectReframeAnchor(target, clipId, anchor)} onGenerate={() => void generateReframePreview(target)} onPlay={() => { setReframePlayback(reframePreviews[target.key]); setExportPlayback(undefined); setPreviewMode("authoritative"); }} />}</section>; })}</div><section className="reframe-batch-actions" aria-label="静态焦点批量导出"><h3>静态焦点批量导出</h3><p>独立于基础 Stage 3A 批次；所有目标的重构图权威预览就绪后才可创建。</p>{reframeError && <p className="ai-status" role="status">{reframeError}</p>}<div className="modal-actions"><button disabled={renditionTargets.some(target => !targetAdjustments(target).length || !reframePreviews[target.key])} onClick={() => void chooseReframeDirectory()}>{reframeDirectoryGrant ? `重构图输出目录：${reframeDirectoryGrant.display_name}` : "选择重构图输出目录"}</button><button disabled={!reframeDirectoryGrant || renditionTargets.some(target => !targetAdjustments(target).length || !reframePreviews[target.key])} onClick={() => void createReframeBatch()}>创建重构图批次</button></div></section>{activeBatch && <section className="batch-status"><h3>批次 {activeBatch.status}</h3><p>目录：{activeBatch.directory_display_name}</p>{activeBatch.items.map(item => <div key={item.export_batch_item_id}><strong>{item.rendition_snapshot.platform_preset_id} · {item.rendition_snapshot.rendition_preset_id}</strong><small>{item.status} · {item.progress === null ? "--" : `${Math.round(item.progress * 100)}%`}{item.destination_display_name ? ` · ${item.destination_display_name}` : ""}{item.error_code ? ` · ${item.error_code}` : ""}</small></div>)}<div className="modal-actions">{["queued", "running"].includes(activeBatch.status) && <button onClick={() => void window.desktop.cancelExportBatch(activeBatch.export_batch_id).then(setActiveBatch).catch(() => setBatchError("取消批次失败。"))}>取消批次</button>}{activeBatch.items.some(item => ["failed", "cancelled", "interrupted"].includes(item.status)) && <button onClick={() => void retryBatchItems()}>重新授权并重试失败项</button>}</div></section>}{activeReframeBatch && <section className="batch-status reframe-batch-status"><h3>重构图批次{activeReframeBatch.status}</h3><p>目录：{activeReframeBatch.directory_display_name}</p>{activeReframeBatch.items.map(item => <div key={item.reframe_export_batch_item_id}><strong>{item.rendition_reframe_snapshot.platform_preset_id} · {item.rendition_reframe_snapshot.rendition_preset_id}</strong><small>{item.status} · {item.progress === null ? "--" : `${Math.round(item.progress * 100)}%`}{item.destination_display_name ? ` · ${item.destination_display_name}` : ""}{item.error_code ? ` · ${item.error_code}` : ""}</small></div>)}<div className="modal-actions">{["queued", "running"].includes(activeReframeBatch.status) && <button onClick={() => void window.desktop.cancelReframeExportBatch(activeReframeBatch.reframe_export_batch_id).then(setActiveReframeBatch).catch(() => setReframeError("取消重构图批次失败。"))}>取消重构图批次</button>}{activeReframeBatch.items.some(item => ["failed", "cancelled", "interrupted"].includes(item.status)) && <button onClick={() => void retryReframeBatchItems()}>重新授权并重试重构图失败项</button>}</div></section>}</Dialog>}
-    {confirmModel && <Dialog titleId="model-confirm-title" closeLabel="关闭" title="确认下载本地模型" footer={<><button onClick={() => setConfirmModel(undefined)}>暂不下载</button><button disabled={confirmModel.license.acceptance_required && !licenseAccepted} onClick={() => void downloadModel()}>确认并下载</button></>} label="确认下载本地模型" onClose={() => setConfirmModel(undefined)} className="compact-dialog"><h3>{confirmModel.display_name}</h3><p>{confirmModel.purpose}</p><dl><dt>下载大小</dt><dd>{formatBytes(confirmModel.model_size_bytes)}</dd><dt>许可证</dt><dd>{confirmModel.license.name}</dd><dt>隐私</dt><dd>模型在本机运行，不上传媒体或转录正文。</dd></dl>{confirmModel.license.acceptance_required && <label className="check-line"><input type="checkbox" checked={licenseAccepted} onChange={event => setLicenseAccepted(event.target.checked)} />我已阅读并接受该许可证</label>}</Dialog>}
-    {transcriptionAsset && <Dialog titleId="transcription-title" closeLabel="关闭" title="创建本地转录" footer={<><button onClick={() => setTranscriptionAsset(undefined)}>取消</button><button onClick={() => void submitTranscription()}>开始转录</button></>} label="创建本地转录" onClose={() => setTranscriptionAsset(undefined)} className="compact-dialog"><p>{transcriptionAsset.display_name}</p><label>语言<select value={language} onChange={event => setLanguage(event.target.value)}><option value="auto">自动检测</option><option value="zh">中文</option><option value="en">English</option></select></label><label className="check-line"><input type="checkbox" checked={wordTimestamps} onChange={event => setWordTimestamps(event.target.checked)} />生成词级时间戳</label></Dialog>}
-    {pendingDeleteTranscript && <Dialog titleId="transcript-delete-title" closeLabel="关闭" title="删除转录" footer={<><button className="btn ghost" disabled={deleteTranscriptBusy} onClick={() => setPendingDeleteTranscript(undefined)}>取消</button><button className="btn danger" disabled={deleteTranscriptBusy} onClick={() => void deleteTranscript(pendingDeleteTranscript)}>{deleteTranscriptBusy ? "删除中…" : "删除转录"}</button></>} label="删除转录" onClose={() => setPendingDeleteTranscript(undefined)} className="asset-delete-modal"><p className="confirm-object">确定要删除这条转录吗？</p><div className="warning" id="transcript-delete-desc"><svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" /></svg><span>该转录的片段与词级时间戳将一并删除，此操作不可撤销。若其片段已被时间线字幕引用，删除会被拒绝——请先移除相关字幕或片段。</span></div></Dialog>}    {pendingDeleteAsset && <Dialog titleId="asset-delete-title" closeLabel="关闭" title="删除素材" footer={<><button className="btn ghost" disabled={deleteBusy} onClick={() => setPendingDeleteAsset(undefined)}>取消</button><button className="btn danger" disabled={deleteBusy} onClick={() => void deleteAsset(pendingDeleteAsset)}>{deleteBusy ? "删除中…" : "删除素材"}</button></>} label="删除素材" onClose={() => setPendingDeleteAsset(undefined)} className="asset-delete-modal"><p className="confirm-object">确定要删除素材「<strong>{pendingDeleteAsset.display_name}</strong>」吗？</p><div className="warning" id="asset-delete-desc"><svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" /></svg><span>如果该素材已添加到时间线，其相关片段（含关联字幕与转场）将一并删除，此操作不可撤销。</span></div></Dialog>}
-    {viewingTranscript && <Dialog titleId="transcript-title" closeLabel="关闭" title="原始转录" subtitle={<>{viewingTranscript.language} · {viewingTranscript.provider} · {viewingTranscript.model_revision}</>} footer={<div className="transcript-viewer-actions" style={{ flex: "1 1 auto" }}><button className="append-btn" disabled={!(selectedSegments[viewingTranscript.transcript_id] ?? []).length} onClick={() => insertSegments(viewingTranscript)}>追加所选片段</button><button className="append-btn" disabled={!(selectedSegments[viewingTranscript.transcript_id] ?? []).length} title="把选中片段的字幕文本交给 Provider 改写成更短的字幕" onClick={() => { setCaptionsOptimize({ transcript: viewingTranscript, segmentIds: [...(selectedSegments[viewingTranscript.transcript_id] ?? [])] }); setViewingTranscript(undefined); }}>AI 优化字幕文本</button></div>} label="原始转录" onClose={() => setViewingTranscript(undefined)} className="transcript-viewer"><div className="readonly-note readonly-note--plain">原始 ASR 结果只读。勾选片段后，可追加到时间线或交给 AI 优化字幕文本。</div><div className="transcript-viewer-toolbar"><strong>已选 {(selectedSegments[viewingTranscript.transcript_id] ?? []).length} / {viewingTranscript.segments.length} 段</strong><button className="mini-btn" onClick={() => setSelectedSegments(state => ({ ...state, [viewingTranscript.transcript_id]: viewingTranscript.segments.map(segment => segment.segment_id) }))}>全选</button><button className="mini-btn" onClick={() => setSelectedSegments(state => ({ ...state, [viewingTranscript.transcript_id]: [] }))}>清空</button></div><div className="readonly-segments transcript-selectable-segments">{viewingTranscript.segments.map(segment => <SegmentRow key={segment.segment_id} segment={segment} selected={(selectedSegments[viewingTranscript.transcript_id] ?? []).includes(segment.segment_id)} onToggle={() => setSelectedSegments(state => ({ ...state, [viewingTranscript.transcript_id]: toggle(state[viewingTranscript.transcript_id] ?? [], segment.segment_id) }))} />)}</div></Dialog>}
-    {aiOpen && <Dialog titleId="ai-roughcut-title" closeLabel="关闭 AI 粗剪" title="AI 粗剪" subtitle="仅在确认外传内容后调用 Provider。" label="AI 粗剪" onClose={() => setAiOpen(false)} className="ai-roughcut">{aiError && <p className="ai-status" role="status">{aiError}</p>}{aiStep === "form" && <><label>主题<input value={aiForm.topic} onChange={e => setAiForm(v => ({ ...v, topic: e.target.value }))} /></label><label>受众<input value={aiForm.audience} onChange={e => setAiForm(v => ({ ...v, audience: e.target.value }))} /></label><label>叙事目标<textarea value={aiForm.narrative_goal} onChange={e => setAiForm(v => ({ ...v, narrative_goal: e.target.value }))} /></label><label>风格说明<textarea value={aiForm.style_notes} onChange={e => setAiForm(v => ({ ...v, style_notes: e.target.value }))} /></label><label>制作配方<select value={aiForm.recipe_id} onChange={e => setAiForm(v => ({ ...v, recipe_id: e.target.value }))}><option value="">选择配方</option>{aiRecipes.map(item => <option key={item.recipe_id} value={item.recipe_id}>{item.name ?? item.display_name} · {item.summary}</option>)}</select></label><label>Provider<select value={aiForm.provider_id} onChange={e => setAiForm(v => ({ ...v, provider_id: e.target.value }))}><option value="">选择 Provider</option>{aiProviders.map(item => <option key={item.provider_config_id} value={item.provider_config_id} disabled={!item.enabled || item.credential_status !== "configured" || item.candidate_capability_status !== "supported"}>{item.display_name} · {item.candidate_capability_status === "supported" ? "AI 粗剪可用" : item.candidate_capability_status === "untested" ? "未测试" : "当前 Provider 不支持 AI 粗剪"}</option>)}</select></label><div className="provider-capability-list">{aiProviders.map(item => <div key={item.provider_config_id}><span>{item.display_name} · {item.candidate_capability_status === "supported" ? "AI 粗剪可用" : item.candidate_capability_status === "untested" ? "未测试" : "当前 Provider 不支持 AI 粗剪"}</span><button disabled={aiCapabilityTesting} onClick={() => void testCandidateProviderCapability(item.provider_config_id)}>{aiCapabilityTesting ? "正在测试兼容性" : "测试 AI 粗剪兼容性"}</button></div>)}</div><p className="readonly-note readonly-note--plain">Provider 的创建、密钥与连接测试已移至「Provider 设置」（工具菜单 / 设置）。<button className="mini-btn" onClick={() => { setProviderSettingsOpen(true); }}>打开 Provider 设置</button></p><label>就绪转录<select value={aiForm.transcript_id} onChange={e => setAiForm(v => ({ ...v, transcript_id: e.target.value }))}><option value="">选择已就绪转录</option>{Object.values(transcriptSummaries).flat().filter(item => item.status === "ready").map(item => <option key={item.transcript_id} value={item.transcript_id}>{item.language} · 就绪</option>)}</select></label><label>召回来源<select value={aiForm.candidate_source} onChange={e => setAiForm(v => ({ ...v, candidate_source: e.target.value as "auto" | "transcript" | "cv" | "fused" }))}><option value="auto">自动（有转录用转录，否则 CV）</option><option value="transcript">仅转录</option><option value="cv">仅画面（CV）</option><option value="fused">融合（转录 + 画面 + 节拍）</option></select></label><p className="readonly-note">「融合」会把转录关键词、画面特征与节拍落拍三项综合排序。<strong>权重为等权且尚未调优</strong>，不代表优劣已评测。</p><div className="modal-actions"><button disabled={!aiForm.topic || !aiForm.audience || !aiForm.narrative_goal || !aiForm.provider_id || !aiForm.recipe_id || !aiForm.transcript_id || aiProviders.find(item => item.provider_config_id === aiForm.provider_id)?.candidate_capability_status !== "supported" || aiProviders.find(item => item.provider_config_id === aiForm.provider_id)?.credential_status !== "configured" || !aiProviders.find(item => item.provider_config_id === aiForm.provider_id)?.enabled} onClick={() => void prepareAi()}>准备外传确认</button></div></>}{aiStep === "confirm" && aiPreview && <><h3>确认发送的精确内容</h3>
-<dl className="egress-meta">
-  <dt>发送给谁</dt><dd>{aiPreview.provider.origin} · {aiPreview.provider.model}</dd>
-  <dt>发什么</dt><dd>{aiPreview.sent_fields.join("、")}</dd>
-  <dt>规模</dt><dd>{aiPreview.stats.segment_count} 段 / {aiPreview.stats.character_count} 字 · 估算 {aiPreview.stats.estimated_tokens} Token</dd>
-  <dt>费用</dt><dd className="egress-cost">按 Provider 配置单价估算，最终以服务商账单为准</dd>
-  <dt>凭据</dt><dd className="egress-hash">{aiPreview.payload_sha256}</dd>
-  <dt>有效期</dt><dd>{aiPreview.expires_at}</dd>
-</dl>
-<div className="egress-text">{Array.isArray(aiPreview.payload.segments) && (aiPreview.payload.segments as Array<Record<string, unknown>>).map(segment => <p key={String(segment.segment_ref)}>{String(segment.text)}</p>)}</div>
-{/* 外发是隐私边界：勾选框紧贴内容预览，不与底栏按钮混排——
-    混排时用户会跳过勾选直接点按钮。 */}
-<div className="egress-confirm">
-  <p className="egress-warn">这不是匿名化：Provider 会看到上述全部文本。画面与时间码不会离开本机。</p>
-  <label><input type="checkbox" checked={aiEgressConfirmed} onChange={event => setAiEgressConfirmed(event.target.checked)} aria-label="我已核对以上外发内容" />我已核对以上内容，同意发送给该 Provider</label>
-</div>
-<div className="modal-actions"><button onClick={() => { setAiPreview(undefined); setAiStep("form"); setAiEgressConfirmed(false); }}>返回修改</button><button className="danger" disabled={!aiEgressConfirmed} onClick={() => void createAi()}>我确认发送以上内容</button></div></>}{aiStep === "running" && <><h3>正在生成候选方案</h3><p>任务进度与取消操作沿用现有任务中心；如失败或取消，请重新准备并再次确认。</p></>}{aiStep === "candidates" && <><h3>三个候选方案</h3><div className="candidate-columns">{(["balanced", "compact", "bold"] as const).map((variant, index) => { const item = aiCandidates.find(candidate => candidate.variant === variant); const title = ["稳妥版", "紧凑版", "高能版"][index]; return <section key={variant}><h4>{title}</h4>{item ? <><strong>{String(item.title_suggestion)}</strong><p>{String(item.summary)}</p><small>{Number(item.duration_us) / 1_000_000}s · 模型参考</small>{Array.isArray(item.clips) && (item.clips as Array<Record<string, unknown>>).map(clip => <div className="candidate-clip" key={String(clip.clip_id)}><span>{Number(clip.source_start_us) / 1_000_000}s–{Number(clip.source_end_us) / 1_000_000}s</span><button onClick={() => void playAiClip(clip)}>试播片段</button><p>{String(clip.reason)}</p></div>)}<button onClick={() => void adoptAi(item)}>采用此方案</button></> : <p>等待有效响应</p>}</section>; })}</div>{aiPlayback && <video className="candidate-player" src={aiPlayback.media_url} controls autoPlay onLoadedMetadata={e => { e.currentTarget.currentTime = aiPlayback.source_start_us / 1_000_000; }} onTimeUpdate={e => { if (e.currentTarget.currentTime >= aiPlayback.source_end_us / 1_000_000) e.currentTarget.pause(); }} />}</>}</Dialog>}
-     {aiOpen && aiStep === "running" && <section className="ai-job-progress" aria-live="polite" aria-label="AI 粗剪任务进度"><strong>阶段：{aiJob?.stage ?? "queued"}</strong><span>进度：{Math.round((aiJob?.progress ?? 0) * 100)}%</span><progress aria-label="AI 粗剪进度" max="1" value={aiJob?.progress ?? 0} /><button disabled={!aiJob || !["queued", "running", "cancelling"].includes(aiJob.status)} onClick={() => { if (!aiJob) return; void window.desktop.cancelJob(aiJob.job_id).then(job => { setAiJob(job); setAiPreview(undefined); setAiCandidates([]); setAiPlayback(undefined); setAiStep("form"); setAiError("生成已取消。请重新准备外传内容并再次确认。"); }).catch(() => setAiError("取消请求失败；请等待当前任务状态刷新。")); }}>取消生成</button></section>}
-    {patchOpen && <Dialog titleId="planning-patch-title" closeLabel="关闭 AI 修改" title="AI 修改" subtitle="提案不会自动修改正式 Timeline。" label="AI 修改" onClose={closePatch} className="planning-patch">{patchError && <p className="ai-status" role="status">{patchError}</p>}{patchStep === "form" && <><label>修改指令<textarea aria-label="修改指令" maxLength={4000} value={patchInstruction} onChange={event => setPatchInstruction(event.target.value)} /></label><label>Provider<select aria-label="AI 修改 Provider" value={patchProviderId} onChange={event => setPatchProviderId(event.target.value)}><option value="">选择已配置 Provider</option>{patchProviders.map(item => <option value={item.provider_config_id} key={item.provider_config_id} disabled={item.timeline_patch_capability_status !== "supported"}>{item.display_name} · {item.model} · {item.timeline_patch_capability_status === "supported" ? "AI 修改可用" : item.timeline_patch_capability_status === "untested" ? "未测试" : "当前 Provider 不支持 AI 修改"}</option>)}</select></label><div className="provider-capability-list">{patchProviders.map(item => <div key={item.provider_config_id}><span>{item.display_name} · {item.timeline_patch_capability_status === "supported" ? "AI 修改可用" : item.timeline_patch_capability_status === "untested" ? "未测试" : "当前 Provider 不支持 AI 修改"}</span><button disabled={patchCapabilityTesting} onClick={() => void testPatchProviderCapability(item.provider_config_id)}>{patchCapabilityTesting ? "正在测试兼容性" : "测试 AI 修改兼容性"}</button></div>)}</div><div className="modal-actions"><button disabled={!patchProviderId || !patchInstruction.trim() || patchProviders.find(item => item.provider_config_id === patchProviderId)?.timeline_patch_capability_status !== "supported"} onClick={() => void preparePatch()}>准备外传确认</button></div></>}{patchStep === "confirm" && patchPreview && <><h3>确认本次外传</h3><div className="instruction-preview"><strong>你的本地指令</strong><p>{patchInstruction}</p></div><dl className="egress-meta">
-  <dt>发送给谁</dt><dd>{patchPreview.provider.display_name} · {patchPreview.provider.origin} · {patchPreview.provider.model}</dd>
-  <dt>发什么</dt><dd>{patchPreview.sent_fields.join("、")}</dd>
-  <dt>规模</dt><dd>{patchPreview.clip_count} Clip / {patchPreview.caption_count} Caption / {patchPreview.locked_count} 锁定 · {patchPreview.character_count} 字 / 估算 {patchPreview.estimated_tokens} Token</dd>
-  <dt>费用</dt><dd className="egress-cost">最终费用以 Provider 账单为准</dd>
-  <dt>凭据</dt><dd className="egress-hash">{patchPreview.payload_sha256}</dd>
-</dl>
-<p className="readonly-note">上方指令来自当前本地输入；Core 确认 DTO 不包含正文。</p>
-<div className="egress-confirm">
-  <p className="egress-warn">这不是匿名化：Provider 会看到上述字段。正文与时间码不会离开本机。</p>
-  <label><input type="checkbox" checked={patchEgressConfirmed} onChange={event => setPatchEgressConfirmed(event.target.checked)} aria-label="我已核对以上外发内容" />我已核对以上内容，同意发送给该 Provider</label>
-</div>
-<div className="modal-actions"><button onClick={() => { setPatchPreview(undefined); setPatchStep("form"); setPatchEgressConfirmed(false); }}>返回修改</button><button className="danger" disabled={!patchEgressConfirmed} onClick={() => void createPatch()}>确认并发送一次</button></div></>}{patchStep === "running" && <><h3>正在生成提案</h3><p>{patchJob?.stage ?? "queued"} · {Math.round((patchJob?.progress ?? 0) * 100)}%</p><progress max="1" value={patchJob?.progress ?? 0} /><div className="modal-actions"><button disabled={!patchJob || !["queued", "running", "cancelling"].includes(patchJob.status)} onClick={() => void cancelPatch()}>取消生成</button></div></>}{patchStep === "proposal" && patchProposal && <><h3>提案差异</h3><TimelineDiffView diff={patchProposal.diff} /><div className="modal-actions"><button onClick={closePatch}>放弃</button><button disabled={patchProposal.applied_revision_id !== null} onClick={() => void applyPatchProposal()}>应用修改</button></div></>}</Dialog>}
-    {generationOpen && project && <MediaGenerationWorkbench key={project.project_id} project={project} assets={assets} onClose={() => setGenerationOpen(false)} />}
-    {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} onNotify={message => showNotice(message, "info")} onOpenProviderSettings={() => setProviderSettingsOpen(true)} />}
-    {providerSettingsOpen && <ProviderSettingsDialog providers={mergedProviders} onProvidersChange={setAiProviders} onClose={() => setProviderSettingsOpen(false)} onNotify={message => showNotice(message, "info")} />}
-    {captionsOptimize && project && <CaptionsProviderPanel projectId={project.project_id} baseRevisionId={timeline?.current_revision.timeline_revision_id ?? null} providers={mergedProviders} transcript={captionsOptimize.transcript} segmentIds={captionsOptimize.segmentIds} onClose={() => setCaptionsOptimize(undefined)} onApplied={() => { void loadRenderData(project); }} onNotify={message => showNotice(message, "info")} />}
-    {agentOpen && project && <AgentSessionPanel projectId={project.project_id} baseRevisionId={timeline?.current_revision.timeline_revision_id ?? null} providers={mergedProviders} onClose={() => setAgentOpen(false)} onNotify={message => showNotice(message, "info")} />}
-    {worklistOpen && project && <WorklistPanel key={project.project_id} projectId={project.project_id} baseRevisionId={timeline?.current_revision.timeline_revision_id ?? null} onClose={() => setWorklistOpen(false)} onApplied={() => { void window.desktop.getTimeline(project.project_id).then(state => { acceptState(state); }); }} onNotify={message => showNotice(message, "success")} />}
-    {cvOptionsOpen && cvOptionsAsset && <Dialog titleId="cv-density-title" title="AI 信号分析" subtitle="本地零外传。可选密度旋钮：留空则用默认（目标间隔 4s、预算 10s/分钟源）。" closeLabel="关闭 AI 信号分析" footer={<>
-        <button onClick={() => { startCvAnalysis(cvOptionsAsset); setCvOptionsOpen(false); setCvOptionsAsset(null); }}>使用默认设置</button>
-        <button onClick={submitCvOptions}>按上述设置分析</button>
-      </>} label="AI 信号分析" onClose={() => { setCvOptionsOpen(false); setCvOptionsAsset(null); }} className="cv-density">
-      <label>目标采样间隔（秒，可选）<input aria-label="目标采样间隔秒" type="number" min={0.1} max={60} step={0.1} value={cvTargetGapS} onChange={event => setCvTargetGapS(event.target.value)} placeholder="默认 4" /></label>
-      <label>每分钟预算（秒，可选）<input aria-label="每分钟预算秒" type="number" min={1} max={120} step={1} value={cvBudgetPerMin} onChange={event => setCvBudgetPerMin(event.target.value)} placeholder="默认 10" /></label>
-      <p className="readonly-note readonly-note--plain">间隔越小越密；预算不足时自动退到预算内尽量密，并如实标记密度。</p>
-    </Dialog>}
-    {editingGrammarOpen && project && editingToolsTool && <EditingToolsPanel
-      projectId={project.project_id}
-      baseRevisionId={timeline?.current_revision.timeline_revision_id ?? null}
-      clips={working?.clips ?? []}
-      initialClipId={editingToolsClipId}
-      initialTool={editingToolsTool}
-      onClose={() => { setEditingGrammarOpen(false); setEditingToolsTool(null); }}
-      onApplied={state => { acceptState(state); void loadRenderData(project); }}
-      onNotify={message => showNotice(message, "success")}
-    />}
-    {angleSyncOpen && project && <AngleSyncPanel
-      projectId={project.project_id}
-      assets={assets}
-      onClose={() => setAngleSyncOpen(false)}
-      onNotify={message => showNotice(message, "success")}
-    />}
-    {semanticSearchOpen && project && <SemanticSearchPanel
-      projectId={project.project_id}
-      assetNames={semanticAssetNames}
-      assets={assets}
-      onClose={() => setSemanticSearchOpen(false)}
-    />}
-    {keyframeReviewOpen && project && <KeyframeReviewPanel
-      projectId={project.project_id}
-      assetId={(selectedAssetId ?? null) as AssetId | null}
-      assetName={semanticAssetNames[selectedAssetId ?? ""] ?? "（未在素材库中选择素材）"}
-      onClose={() => setKeyframeReviewOpen(false)}
-    />}
-    {editingGrammarOpen && project && !editingToolsTool && <EditingGrammarPanel
-      projectId={project.project_id}
-      baseRevisionId={timeline?.current_revision.timeline_revision_id ?? null}
-      onClose={() => setEditingGrammarOpen(false)}
-      onApplied={state => { acceptState(state); void loadRenderData(project); }}
-      onNotify={message => showNotice(message, "success")}
-    />}
-    {providerImageGenerationOpen && project && <ProviderImageGenerationWorkbench key={`provider-image-${project.project_id}`} project={project} assets={assets} onClose={() => setProviderImageGenerationOpen(false)} />}
-    {shotRequirementsOpen && project && <ShotRequirementWorkbench key={project.project_id} project={project} assets={assets} onClose={() => setShotRequirementsOpen(false)} />}
-    {revisionOpen && <Dialog titleId="revision-compare-title" closeLabel="关闭版本比较" title="版本比较" subtitle="只读操作，不改变当前 Revision、草稿或渲染记录。" footer={<><button disabled={!revisionPair.base || !revisionPair.target || revisionPair.base === revisionPair.target} onClick={() => void compareRevisions()}>比较</button></>} label="版本比较" onClose={() => { setRevisionOpen(false); setRevisionDiff(undefined); }} className="revision-compare"><div className="revision-selectors"><label>基线<select aria-label="基线 Revision" value={revisionPair.base} onChange={event => setRevisionPair(value => ({ ...value, base: event.target.value }))}>{revisions.map(item => <option value={item.timeline_revision_id} key={`base-${item.timeline_revision_id}`}>{item.summary} · {item.created_at}</option>)}</select></label><label>目标<select aria-label="目标 Revision" value={revisionPair.target} onChange={event => setRevisionPair(value => ({ ...value, target: event.target.value }))}>{revisions.map(item => <option value={item.timeline_revision_id} key={`target-${item.timeline_revision_id}`}>{item.summary} · {item.created_at}</option>)}</select></label></div>{revisionDiff && <TimelineDiffView diff={revisionDiff} />}</Dialog>}
-       {renderPanelOpen && <Dialog titleId="render-panel-title" closeLabel="关闭渲染与导出" title="渲染与导出" subtitle="任务为本次会话的过程记录；导出产物为持久记录，关闭后任务继续在后台推进。" label="渲染与导出" onClose={() => setRenderPanelOpen(false)} className="render-panel-dialog">
-        <section className="render-tasks-card" aria-label="任务">
-          {(() => {
-            // 任务区分组：进行中/排队 → 失败/中断（保留原因）→ 成功折叠为一行
-            // 摘要（任务行的价值在过程，终态后不再逐条占位；产物区才是结果）。
-            const panelJobs = jobs.filter(item => item.kind === "authoritative_preview" || item.kind === "final_export");
-            const activeJobs = panelJobs.filter(item => ["queued", "running", "cancelling"].includes(item.status));
-            const failedJobs = panelJobs.filter(item => ["failed", "cancelled", "interrupted"].includes(item.status));
-            const succeededCount = panelJobs.filter(item => item.status === "succeeded").length;
-            const renderJobRow = (item: Job) => {
-              const pct = item.progress === null ? null : Math.round(item.progress * 100);
-              const isActive = ["queued", "running", "cancelling"].includes(item.status);
-              // 收尾窗口：任务实际已成功，正在做 100% 平滑展示——不显示
-              // 「运行中」（误导，像还要跑很久）也不显示取消/ETA。
-              const finishing = isActive && item.progress === 1;
-              return <div className={`render-job${isActive ? " active" : ""}${finishing ? " finishing" : ""}`} key={item.job_id}>
-                <div className="render-job-main">
-                  <div className="render-job-title"><strong>{jobKindLabels[item.kind] ?? item.kind}</strong><span className={`render-job-state ${item.status === "failed" || item.status === "interrupted" ? "bad" : isActive ? "run" : "dim"}`}>{finishing ? "即将完成" : jobStatusLabels[item.status]}</span>{item.status === "running" && !finishing && <JobEta job={item} />}</div>
-                  <small>{item.phase ? `${jobPhaseLabels[item.phase] ?? item.phase}${item.phase_progress !== null && item.phase_progress !== undefined ? ` ${Math.round(item.phase_progress * 100)}%` : ""}` : ""}{item.error ? `${item.phase ? " · " : ""}${safeTaskErrorMessage(item.error)}` : ""}</small>
-                  {pct !== null && <div className="render-job-bar" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}><i style={{ width: `${pct}%` }} /></div>}
-                </div>
-                {isActive && !finishing && <IconButton label="取消渲染任务" onClick={() => void cancelJob(item)}><Square /></IconButton>}
-              </div>;
-            };
-            return <>{(activeJobs.length > 0 || failedJobs.length > 0 || succeededCount > 0) && <div className="render-group-title">任务{activeJobs.length > 0 && <span className="render-group-count">{activeJobs.length} 个进行中</span>}</div>}
-            {activeJobs.length === 0 && failedJobs.length === 0 && succeededCount === 0 && <div className="render-empty">暂无任务。{!authoritativePreview && "当前没有权威预览，仍可直接导出。"}</div>}
-            {activeJobs.map(renderJobRow)}
-            {failedJobs.length > 0 && <div className="render-group-subtitle">失败 / 中断</div>}
-            {failedJobs.map(renderJobRow)}
-            {succeededCount > 0 && <div className="render-done-summary">本轮已完成 {succeededCount} 个任务，产物见下方。</div>}</>;
-          })()}
-        </section>
-        <section className="render-products-card" aria-label="导出产物">
-          <div className="render-group-title">导出产物{exports.length > 0 && <span className="render-group-count">{exports.length} 个文件</span>}</div>
-          {exports.length === 0 && <div className="render-empty">尚无导出产物。</div>}
-          {exports.map(item => { const info = item.export_record.media_info; const dims = info ? `${info.video.width}×${info.video.height}` : null; const fps = info ? Math.round(info.video.fps_num / info.video.fps_den) : null; const missing = item.export_record.status !== "succeeded"; return <div className={`export-record${missing ? " missing" : ""}`} key={item.export_record.export_record_id}><div><strong>{item.export_record.destination_display_name}</strong><small>{formatRelativeTime(item.export_record.created_at)}{dims ? ` · ${dims}${fps ? ` · ${fps}fps` : ""}` : ""} · {formatBytes(item.export_record.size_bytes)} · {missing ? "文件缺失（本地文件已被移动或删除）" : "成功"}</small>{item.export_record.fallback_reason && <small className="render-fallback-note">{fallbackReasonLabel(item.export_record.fallback_reason)}</small>}</div><div>{missing ? <IconButton label="移除记录" onClick={() => void removeMissingExport(item)}><Trash2 /></IconButton> : <IconButton label="定位导出" onClick={() => void window.desktop.openArtifactFolder(item.export_record.render_artifact_id)}><MapPin /></IconButton>}<IconButton label="播放导出" disabled={missing} onClick={() => { setExportPlayback(item); setPreviewMode("authoritative"); }}><Play /></IconButton><IconButton label="打开导出" disabled={missing} onClick={() => void window.desktop.openArtifact(item.export_record.render_artifact_id)}><Eye /></IconButton></div></div>; })}
-        </section></Dialog>}
-    {commandSearchOpen && <Dialog titleId="command-search-title" title="命令搜索" subtitle="输入命令名过滤；↑↓ 选择 · Enter 执行 · Esc 关闭。" footer={<div className="command-footer"><div className="key-hints"><span><kbd>↑↓</kbd>选择</span><span><kbd>↵</kbd>执行</span><span><kbd>esc</kbd>关闭</span></div></div>} label="命令搜索" onClose={closeCommandSearch} className="command-palette">
-      <div className="search-wrap">
-        <Search className="icon" size={16} aria-hidden="true" />
-        <input ref={commandSearchInputRef} type="search" aria-label="命令搜索" aria-controls="command-list" aria-activedescendant={filteredCommands[commandIndex] ? `command-option-${filteredCommands[commandIndex].id}` : undefined} placeholder="输入命令名称…" value={commandQuery} onChange={event => { setCommandQuery(event.target.value); setCommandIndex(0); }} onKeyDown={handleCommandPaletteKeyDown} />
-      </div>
-      <ul role="listbox" aria-label="命令列表" id="command-list" className="command-list">
-        {filteredCommands.map((command, index) => { const reason = commandDisabledReason(command.id); const group = command.group; const shownGroup = index === 0 || filteredCommands[index - 1].group !== group; return <Fragment key={command.id}>{shownGroup && <li className="command-group" role="presentation">{group}</li>}<li id={`command-option-${command.id}`} role="option" aria-selected={index === commandIndex} className={index === commandIndex ? "active" : ""}><button className="command-option" disabled={Boolean(reason)} onClick={() => { if (!reason) { runCommand(command.id); closeCommandSearch(); } }}>{(() => { const Icon = COMMAND_ICON_MAP[command.id]; return Icon ? <Icon className="icon" size={14} aria-hidden="true" /> : <span className="icon" aria-hidden="true" />; })()}<span className="command-label">{command.label}</span>{(shortcutsRef.current as Record<string, ShortcutEntry> | undefined)?.[command.id as ShortcutCommandId] ? <kbd className="command-shortcut">{bindingLabel((shortcutsRef.current as Record<string, ShortcutEntry>)[command.id as ShortcutCommandId].binding)}</kbd> : <kbd className="command-shortcut" aria-hidden="true" />}<span className={reason ? "command-reason" : "command-state"}>{reason ?? "可用"}</span></button></li></Fragment>; })}
-        {filteredCommands.length === 0 && <li className="command-empty">没有匹配的命令</li>}
-      </ul>
-    </Dialog>}
-    {shortcutsOpen && <Dialog titleId="shortcuts-title" closeLabel="关闭快捷键设置" title="快捷键设置" subtitle={<>点击"录制"后按下新键位；Ctrl+Shift+Z（重做）与 Backspace（删除）为固定别名，不参与自定义。</>} footer={<><button onClick={resetShortcutsToDefault}>恢复默认</button></>} label="快捷键设置" onClose={() => { setShortcutsOpen(false); setRecordingId(null); }} className="shortcuts-dialog">
-      <div className="shortcuts-list">
-        {(Object.entries(shortcuts) as Array<[ShortcutCommandId, ShortcutEntry]>).map(([id, entry]) => (
-          <div className="shortcut-row" key={id}>
-            <span className="shortcut-label">{entry.label}</span>
-            {recordingId === id
-              ? <kbd className="shortcut-recording" tabIndex={0} autoFocus onKeyDown={event => handleRecordKey(event, id)}>请按键…（Esc 取消）</kbd>
-              : <kbd className="shortcut-binding">{bindingLabel(entry.binding)}</kbd>}
-            <button className="compact-command" onClick={() => setRecordingId(id)}>录制</button>
-          </div>
-        ))}
-      </div>
-    </Dialog>}
+    <AppDialogs
+      project={project}
+      projects={projects}
+      working={working}
+      timeline={timeline}
+      jobs={jobs}
+      renderRatio={renderRatio}
+      setPreviewMode={setPreviewMode}
+      acceptState={acceptState}
+      showNotice={showNotice}
+      switchProject={switchProject}
+      aiWorkflows={aiWorkflows}
+      exportRender={exportRender}
+      assetLibrary={assetLibrary}
+      newProject={newProject}
+      setNewProject={setNewProject}
+      newProjectRatio={newProjectRatio}
+      setNewProjectRatio={setNewProjectRatio}
+      projectDialogOpen={projectDialogOpen}
+      setProjectDialogOpen={setProjectDialogOpen}
+      projectManagerRefreshing={projectManagerRefreshing}
+      createProject={createProject}
+      refreshProjectManager={refreshProjectManager}
+      renameManagedProject={renameManagedProject}
+      toggleManagedProjectArchive={toggleManagedProjectArchive}
+      settingsOpen={settingsOpen}
+      setSettingsOpen={setSettingsOpen}
+      providerSettingsOpen={providerSettingsOpen}
+      setProviderSettingsOpen={setProviderSettingsOpen}
+      agentOpen={agentOpen}
+      setAgentOpen={setAgentOpen}
+      worklistOpen={worklistOpen}
+      setWorklistOpen={setWorklistOpen}
+      editingGrammarOpen={editingGrammarOpen}
+      setEditingGrammarOpen={setEditingGrammarOpen}
+      editingToolsTool={editingToolsTool}
+      setEditingToolsTool={setEditingToolsTool}
+      editingToolsClipId={editingToolsClipId}
+      angleSyncOpen={angleSyncOpen}
+      setAngleSyncOpen={setAngleSyncOpen}
+      semanticSearchOpen={semanticSearchOpen}
+      setSemanticSearchOpen={setSemanticSearchOpen}
+      keyframeReviewOpen={keyframeReviewOpen}
+      setKeyframeReviewOpen={setKeyframeReviewOpen}
+      providerImageGenerationOpen={providerImageGenerationOpen}
+      setProviderImageGenerationOpen={setProviderImageGenerationOpen}
+      shotRequirementsOpen={shotRequirementsOpen}
+      setShotRequirementsOpen={setShotRequirementsOpen}
+      generationOpen={generationOpen}
+      setGenerationOpen={setGenerationOpen}
+      commandSearchOpen={commandSearchOpen}
+      commandQuery={commandQuery}
+      setCommandQuery={setCommandQuery}
+      commandSearchInputRef={commandSearchInputRef}
+      commandIndex={commandIndex}
+      setCommandIndex={setCommandIndex}
+      filteredCommands={filteredCommands}
+      commandDisabledReason={commandDisabledReason}
+      runCommand={runCommand}
+      closeCommandSearch={closeCommandSearch}
+      handleCommandPaletteKeyDown={handleCommandPaletteKeyDown}
+      shortcuts={shortcuts}
+      shortcutsRef={shortcutsRef}
+      shortcutsOpen={shortcutsOpen}
+      setShortcutsOpen={setShortcutsOpen}
+      recordingId={recordingId}
+      setRecordingId={setRecordingId}
+      resetShortcutsToDefault={resetShortcutsToDefault}
+      handleRecordKey={handleRecordKey}
+    />
 </main>;
 }
 

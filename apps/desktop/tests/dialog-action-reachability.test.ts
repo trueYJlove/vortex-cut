@@ -19,7 +19,7 @@ import { readDesktopStyles } from "./helpers/read-styles.js";
 
 const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const css = readDesktopStyles();
-const appSource = readFileSync(resolve(desktopRoot, "src/app/App.tsx"), "utf8");
+const appSource = readFileSync(resolve(desktopRoot, "src/app/layout/AppDialogs.tsx"), "utf8");
 const projectLibrarySource = readFileSync(resolve(desktopRoot, "src/app/ProjectLibraryDialog.tsx"), "utf8");
 const dialogSource = readFileSync(resolve(desktopRoot, "src/app/Dialog.tsx"), "utf8");
 

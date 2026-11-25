@@ -22,7 +22,7 @@ const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const root = resolve(desktopRoot, "../..");
 const prototype = readFileSync(resolve(root, "docs/design/ui-mockups/dialog-system-v2/index.html"), "utf8");
 const css = readDesktopStyles();
-const appSource = readFileSync(resolve(desktopRoot, "src/app/App.tsx"), "utf8");
+const appSource = readFileSync(resolve(desktopRoot, "src/app/layout/AppDialogs.tsx"), "utf8");
 
 /** 从原型 <style> 中取某选择器块的属性值（最后一个匹配即原型最终态）。 */
 function prototypeProp(selector: string, prop: string): string | null {
