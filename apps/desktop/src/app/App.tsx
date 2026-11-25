@@ -100,6 +100,7 @@ import { IconButton, ReframeTargetEditor, SegmentRow } from "./layout/AppMicroCo
 import { useWorkspaceLayout } from "./hooks/useWorkspaceLayout.js";
 import { useAiWorkflows } from "./hooks/useAiWorkflows.js";
 import { useExportAndRender } from "./hooks/useExportAndRender.js";
+import { useAssetAndMediaLibrary } from "./hooks/useAssetAndMediaLibrary.js";
 
 export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -108,58 +109,8 @@ export function App() {
   useEffect(() => {
     if (project) setOpenProjectIds(ids => ids.includes(project.project_id) ? ids : [...ids, project.project_id]);
   }, [project?.project_id]);
-  const [assets, setAssets] = useState<AssetPresentation[]>([]);
-  // P199：资产对账要读"界面此刻到底有哪些素材"。直接用 state 镜像而不是另存一份
-  // "上次看到的签名"——装载、UI 导入的乐观追加、刷新素材库都写同一个 state，
-  // 另存一份就会和真实显示的集合走散，比对结果也就失去意义。
-  const assetsRef = useRef<AssetPresentation[]>([]);
-  assetsRef.current = assets;
-  // GAP-LIST-ASSETS-PAGING：上一次提交的镜像是否被 200 页上限**截断**。
-  // 资产集合对账（P199）的收敛证明依赖"对账触发的 loadProjectData 会把同一
-  // 集合写回 assets，于是下一轮比对相等并短路"。截断装载不满足该前提：它写回的
-  // 只是服务端集合的前缀，下次重载仍会重新截断，服务端也仍会继续变化——比对
-  // 永远不会收敛。所以触顶即把镜像标记为非完整，对账端点据此停用（见下方
-  // enabled）。真正的完整性只能由一次未触顶的装载恢复。
-  const assetsMirrorTruncatedRef = useRef(false);
-  const [assetQuery, setAssetQuery] = useState("");
-  const [assetFilter, setAssetFilter] = useState<AssetFilter>("all");
-  const [libraryScope, setLibraryScope] = useState<"import" | "favorites">("import");
-  const [assetFavorites, setAssetFavorites] = useState(readAssetFavorites);
-  const favoriteAssetIds = useMemo(() => new Set(assetFavorites), [assetFavorites]);
-  useEffect(() => {
-    try { localStorage.setItem(ASSET_FAVORITES_KEY, JSON.stringify(assetFavorites)); } catch { /* In-memory favorites remain usable. */ }
-  }, [assetFavorites]);
-  const [assetViews, setAssetViews] = useState<Record<string, "list" | "grid">>({});
-  const projectAssetKey = project?.project_id ?? "";
-  const assetView = assetViews[projectAssetKey] ?? storedAssetView(projectAssetKey);
-  const changeAssetView = (view: "grid" | "list") => {
-    setAssetViews(current => ({ ...current, [projectAssetKey]: view }));
-    try {
-      localStorage.setItem(`vortex.asset-view.${projectAssetKey}`, view);
-    } catch {
-      // The current session still keeps its view when storage is unavailable.
-    }
-  };
-  const [assetSortByName, setAssetSortByName] = useState(false);
   // 素材箱双击预览：仅播放素材，不加入时间线。任何时间线交互都会退出该模式。
   const [libraryPreviewId, setLibraryPreviewId] = useState<string | null>(null);
-  // W3.1 语义检索命中只带 asset_id，显示名由素材列表派生（字段是 asset.display_name）。
-  const semanticAssetNames = useMemo(
-    () => Object.fromEntries(assets.map(item => [item.asset.asset_id, item.asset.display_name])),
-    [assets]
-  );
-  const visibleAssets = useMemo(() => {
-    const query = assetQuery.trim().toLocaleLowerCase();
-    const filtered = assets.filter(({ asset }) =>
-      asset.display_name.toLocaleLowerCase().includes(query) &&
-      (libraryScope !== "favorites" || favoriteAssetIds.has(asset.asset_id)) &&
-      (assetFilter === "all" || asset.kind === assetFilter)
-    );
-    if (assetSortByName) filtered.sort((a, b) => a.asset.display_name.localeCompare(b.asset.display_name, undefined, { numeric: true }));
-    return filtered;
-  }, [assetQuery, assetFilter, assetSortByName, assets, favoriteAssetIds, libraryScope]);
-  const [transcripts, setTranscripts] = useState<Record<string, Transcript[]>>({});
-  const [transcriptSummaries, setTranscriptSummaries] = useState<Record<string, TranscriptSummary[]>>({});
   const [jobs, setJobs] = useState<Job[]>([]);
   // 轮询 effect 的闭包持有的是 effect 建立时的 jobs——活跃判定与终态对账
   // 都必须读最新值（hasActiveWork 同理），否则会以陈旧列表误判退避/终态。
@@ -206,32 +157,6 @@ export function App() {
   /** A2：播放中挂起的代理切换（就绪了但还没到自然切换点）。 */
   const proxySwitchPendingRef = useRef(false);
   const [models, setModels] = useState<ModelSummary[]>([]);
-  const [confirmModel, setConfirmModel] = useState<ModelDetail>();
-  const [licenseAccepted, setLicenseAccepted] = useState(false);
-  const [transcriptionAsset, setTranscriptionAsset] = useState<Asset>();
-  // 素材删除确认（应用内弹窗，替代原生 confirm）；pendingDeleteAsset 显示警告文案。
-  const [pendingDeleteAsset, setPendingDeleteAsset] = useState<Asset>();
-  const [pickedAssetIds, setPickedAssetIds] = useState<AssetId[]>([]);
-  const assetAnchor = useRef<AssetId | null>(null);
-  const visibleAssetOrder = useMemo(() => visibleAssets.map(item => item.asset.asset_id), [visibleAssets]);
-  const visibleAssetSet = useMemo(() => new Set(visibleAssetOrder), [visibleAssetOrder]);
-  const selectedAssetIds = useMemo(() => new Set(pickedAssetIds.filter(id => visibleAssetSet.has(id))), [pickedAssetIds, visibleAssetSet]);
-  const selectedAssetId = selectedAssetIds.size === 1 ? [...selectedAssetIds][0] : null;
-  const resetAssetSelection = () => { assetAnchor.current = null; setPickedAssetIds([]); setAssetMenu(null); };
-  const selectAsset = (id: AssetId, mods: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean } = {}) => {
-    const anchor = assetAnchor.current;
-    if (!mods.shiftKey) assetAnchor.current = id;
-    setPickedAssetIds(current => pickMedia(current.filter(item => visibleAssetSet.has(item)), id, visibleAssetOrder, anchor,
-      { toggle: Boolean(mods.ctrlKey || mods.metaKey), range: Boolean(mods.shiftKey) }));
-  };
-  const [assetMenu, setAssetMenu] = useState<{ id: AssetId; x: number; y: number; trigger: HTMLButtonElement } | null>(null);
-  const menuAsset = assetMenu && visibleAssets.find(item => item.asset.asset_id === assetMenu.id);
-  const [deleteBusy, setDeleteBusy] = useState(false);
-  // 素材库刷新：逐个向 Core 校验素材文件是否仍在本地。
-  const [refreshingAssets, setRefreshingAssets] = useState(false);
-  const [viewingTranscript, setViewingTranscript] = useState<Transcript>();
-  const [language, setLanguage] = useState("auto");
-  const [wordTimestamps, setWordTimestamps] = useState(true);
   const [timeline, setTimeline] = useState<TimelineState>();
   const [working, setWorking] = useState<TimelineDocument>();
   const [selection, setSelection] = useState<Selection>(null);
@@ -241,14 +166,6 @@ export function App() {
   const [notice, setNotice] = useState<Notice>("");
   const [newProject, setNewProject] = useState("");
   const [newProjectRatio, setNewProjectRatio] = useState("916");
-  const [selectedSegments, setSelectedSegments] = useState<Record<string, string[]>>({});
-  // AI 字幕优化（Slice 5）：发起入口在转录页，紧挨“追加所选片段”；
-  // 记录发起时锁定的转录与片段，避免对话框打开期间勾选变化导致外传内容漂移。
-  const [captionsOptimize, setCaptionsOptimize] = useState<{ transcript: Transcript; segmentIds: string[] }>();
-  // 转录删除确认（危险操作需显式确认；仍被时间线字幕引用时 Core 拒绝）。
-  // 只依赖 transcript_id：确认框对「摘要行」与「已加载正文」通用。
-  const [pendingDeleteTranscript, setPendingDeleteTranscript] = useState<Pick<TranscriptSummary, "transcript_id">>();
-  const [deleteTranscriptBusy, setDeleteTranscriptBusy] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [runtimeReady, setRuntimeReady] = useState(false);
   /** B13：Main 离散资源档位（getRuntime 注入；驱动会话环深/预算决策）。 */
@@ -441,9 +358,49 @@ export function App() {
   const seenAnyTicketRef = useRef(false);
   const noTicketRetryRef = useRef(0);
   const noTicketFinalRetryRef = useRef(false);
-  const transcriptQueueRef = useRef<BoundedTaskQueue<Transcript> | null>(null);
-  /** 转录摘要分页（listTranscripts）专用队列：与正文队列分开类型，同样 ≤4 并发。 */
-  const transcriptSummaryQueueRef = useRef<BoundedTaskQueue<{ items: TranscriptSummary[] }> | null>(null);
+  const {
+    assets, setAssets, assetsRef, assetsMirrorTruncatedRef,
+    assetQuery, setAssetQuery, assetFilter, setAssetFilter,
+    libraryScope, changeLibraryScope, setAssetFavorites, favoriteAssetIds,
+    assetView, changeAssetView, assetSortByName, setAssetSortByName,
+    semanticAssetNames, visibleAssets, transcriptSummaries, setTranscriptSummaries,
+    transcriptSummaryQueueRef, confirmModel, setConfirmModel,
+    licenseAccepted, setLicenseAccepted, transcriptionAsset, setTranscriptionAsset,
+    pendingDeleteAsset, setPendingDeleteAsset, visibleAssetOrder,
+    selectedAssetIds, selectedAssetId, assetMenu, setAssetMenu, menuAsset,
+    resetAssetSelection, selectAsset, setPickedAssetIds, deleteBusy, refreshingAssets,
+    viewingTranscript, setViewingTranscript, language, setLanguage,
+    wordTimestamps, setWordTimestamps, selectedSegments, setSelectedSegments,
+    captionsOptimize, setCaptionsOptimize, pendingDeleteTranscript, setPendingDeleteTranscript,
+    deleteTranscriptBusy, cvSummaries, cvBusy, cvOptionsOpen, setCvOptionsOpen,
+    cvOptionsAsset, setCvOptionsAsset, cvTargetGapS, setCvTargetGapS,
+    cvBudgetPerMin, setCvBudgetPerMin, cvSparkAssetId, cvSparkSamples,
+    resetAssetLibraryOnSwitch, isDraggableAsset, adoptImportedAsset, dropAsset,
+    insertSegments, importAsset, refreshAssets, deleteAsset, deleteTranscript,
+    openDeleteTranscriptDialog, deleteJob, usedAssetIds, cvSummaryText, toggleCvSpark,
+    revealAsset, originalShortEdge, assetDragProps, openModel, downloadModel, cancelModel,
+    startTranscription, submitTranscription, retryTranscription, cancelJob,
+    startCvAnalysis, submitCvOptions, viewTranscript,
+    firstMediaAsset, loadedTranscript, transcriptRows,
+  } = useAssetAndMediaLibrary({
+    project,
+    projectRef,
+    projectDataEpochRef,
+    timeline,
+    working,
+    models,
+    setModels,
+    setJobs,
+    setSaveState,
+    acceptState: state => acceptState(state),
+    patchTimeline: (operations, summary, base) => patchTimeline(operations, summary, base),
+    createTimeline: source => createTimeline(source),
+    loadProjectData: selected => loadProjectData(selected),
+    ensureFilmstripForAsset: assetId => ensureFilmstripForAsset(assetId),
+    requestProxyJob: assetId => requestProxyJobRef.current(assetId),
+    exitLibraryPreview: () => exitLibraryPreview(),
+    showNotice: (text, tone) => showNotice(text, tone),
+  });
   const loadProjectData = async (selected: Project) => {
     const epoch = ++projectDataEpochRef.current;
     // GAP-LIST-ASSETS-PAGING：assets 跟随 next_cursor 翻页装载（Core 默认
@@ -571,20 +528,10 @@ export function App() {
     resetAiOnProjectSwitch();
     projectDataEpochRef.current += 1;
     resetRenderOnProjectSwitch();
-    transcriptQueueRef.current?.advanceGeneration();
-    transcriptSummaryQueueRef.current?.advanceGeneration();
-    setAssets([]); setJobs([]); setTimeline(undefined); setWorking(undefined); setSelection(null);
-    setTranscripts({}); setTranscriptSummaries({}); setViewingTranscript(undefined);
-    setLibraryPreviewId(null); resetAssetSelection();
-    setAssetQuery(""); setAssetFilter("all"); setLibraryScope("import");
+    resetAssetLibraryOnSwitch(true);
+    setJobs([]); setTimeline(undefined); setWorking(undefined); setSelection(null);
+    setLibraryPreviewId(null);
     setPlaying(false); setSyntheticNotice(null); setPreviewMode("synthetic");
-    setCvSummaries({}); setCvSparkAssetId(null); setCvSparkSamples(null); setCvBusy(null);
-    setCvOptionsOpen(false); setCvOptionsAsset(null); setTranscriptionAsset(undefined); setPendingDeleteAsset(undefined);
-    // 删除/刷新是**瞬态** UI 标志：切项目时上一项目的在途请求仍会走 finally，
-    // 但若它因任何原因没有复位，卡住的「删除中…」会跨项目泄漏（用户看到
-    // "换了项目还是删不掉"）。此处一并清掉，保证新项目从干净状态开始。
-    setPendingDeleteTranscript(undefined); setDeleteTranscriptBusy(false);
-    setDeleteBusy(false); setRefreshingAssets(false);
     seenAnyTicketRef.current = false; noTicketRetryRef.current = 0; noTicketFinalRetryRef.current = false;
     if (autoProvisionProjectId.current !== next.project_id) autoProvisionProjectId.current = undefined;
     setOpenProjectIds(ids => ids.includes(next.project_id) ? ids : [...ids, next.project_id]);
@@ -617,9 +564,8 @@ export function App() {
   useEffect(() => {
     if (!project) return;
     // 防御性清理：直接由外部状态驱动项目变化时，也不能保留上一项目数据。
-    setAssets([]); setJobs([]); setTimeline(undefined); setWorking(undefined); setSelection(null);
-    setTranscripts({}); setTranscriptSummaries({}); setViewingTranscript(undefined);
-    setLibraryPreviewId(null); resetAssetSelection();
+    setJobs([]); setTimeline(undefined); setWorking(undefined); setSelection(null);
+    setLibraryPreviewId(null);
     setPlaying(false); setSyntheticNotice(null); setPreviewMode("synthetic");
     seenAnyTicketRef.current = false; noTicketRetryRef.current = 0; noTicketFinalRetryRef.current = false;
     closePatch(); setRevisionOpen(false); setRevisionDiff(undefined);
@@ -628,12 +574,7 @@ export function App() {
     // 项目边界推进装载代次：在途时间线装载（见下方独立 effect）与挂起草稿
     // 都按代次作废，避免旧项目的返回写进新项目。
     timelineLoadEpoch.current += 1;
-    // A08：切项目推进转录队列代次——在途 getTranscript 的旧返回不再写入
-    // 新项目状态（viewTranscript 按 epoch 丢弃）；已缓存正文随项目清空。
-    transcriptQueueRef.current?.advanceGeneration();
-    transcriptSummaryQueueRef.current?.advanceGeneration();
-    setTranscripts({});
-    setViewingTranscript(undefined);
+    resetAssetLibraryOnSwitch(false);
     void loadProjectData(project).catch(error => active && showNotice(safeErrorMessage(error, "项目数据加载失败，请刷新后重试。")));
     void loadRenderData(project).catch(error => active && showNotice(safeErrorMessage(error, "渲染记录加载失败，请刷新后重试。")));
     return () => { active = false; };
@@ -1640,176 +1581,6 @@ export function App() {
     const asset = assets.find(candidate => candidate.asset.asset_id === item.asset_id);
     return Boolean(asset && (item.asset_kind === "image" || asset.asset.availability === "available"));
   });
-  const adoptImportedAsset = (result: ImportedAsset) => {
-    setAssets(items => [...items.filter(item => item.asset.asset_id !== result.asset.asset_id), { asset: result.asset, media_url: result.media_url }]);
-    ensureFilmstripForAsset(String(result.asset.asset_id));
-    if (result.asset.kind === "video") requestProxyJobRef.current(String(result.asset.asset_id));
-  };
-  const dropAsset = async (
-    ids: string[],
-    atIndex: number,
-    trackId?: string,
-    edit?: { mode: "overwrite"; atUs: number },
-    intent?: TimelineAssetDropIntent,
-    replaceTargetClipId?: string,
-  ) => {
-    const systemDrop = ids.length === 1 && ids[0] === SYSTEM_FILE_DROP_ID;
-    const files = systemDrop ? takeSystemFileDrop() : [];
-    if (systemDrop && !files.length) {
-      showNotice("没有读取到拖入的文件；请重新拖放。", "warning");
-      return;
-    }
-    const currentDocument = working ?? timeline?.current_revision.document;
-    const targetTrack = trackId && trackId !== "new" ? currentDocument?.tracks.find(track => track.id === trackId) : undefined;
-    if (trackId && trackId !== "new" && !targetTrack) {
-      showNotice("时间线目标轨道已不存在，请重新拖放。", "warning");
-      return;
-    }
-    if (targetTrack?.locked) {
-      showNotice("目标轨道已锁定，无法放入素材。", "warning");
-      return;
-    }
-    let partialImportNotice = "";
-    const byId = new Map(assets.map(({ asset }) => [asset.asset_id as string, asset]));
-    let incoming: Asset[] = [];
-    if (systemDrop) {
-      if (!project || project.status !== "active") {
-        showNotice("请先打开一个可编辑的项目，再将文件放入时间线。", "warning");
-        return;
-      }
-      try {
-        const imported = await window.desktop.importDroppedAssets({ project_id: project.project_id, files });
-        imported.imported.forEach(adoptImportedAsset);
-        incoming = imported.imported.map(item => item.asset).filter(asset => asset.availability === "available" && isDraggableAsset(asset.kind));
-        if (imported.failures.length) {
-          partialImportNotice = `已导入 ${incoming.length} 项；${imported.failures.length} 个文件因格式不支持、文件无效或导入失败而跳过。`;
-        }
-      } catch (error) {
-        showNotice(safeErrorMessage(error, "系统文件导入失败；时间线未修改。"), "warning");
-        return;
-      }
-    } else {
-      for (const id of ids) {
-        const asset = byId.get(id);
-        if (!asset || asset.availability !== "available" || !isDraggableAsset(asset.kind)) {
-          showNotice("所选素材中有不可用或不支持的文件，无法放入时间线。", "warning");
-          return;
-        }
-        incoming.push(asset);
-      }
-    }
-    if (!incoming.length) {
-      if (partialImportNotice) showNotice(partialImportNotice, "warning");
-      return;
-    }
-    if (!timeline && incoming.length === 1) {
-      await createTimeline({ kind: "full_asset", asset_id: incoming[0].asset_id });
-      if (partialImportNotice) showNotice(partialImportNotice, "warning");
-      return;
-    }
-    if (incoming.length > 100 || (incoming.length === 100 && trackId === "new")) {
-      showNotice("这组素材超出单次时间线操作上限，请分批拖入。", "warning");
-      return;
-    }
-    const base = timeline ?? await createTimeline({ kind: "empty" });
-    if (!base || projectRef.current?.project_id !== project?.project_id) return;
-    const latestDocument = working ?? base.current_revision.document;
-    const dropPrefs = readTimelineBehaviorPrefs();
-    const tracks = latestDocument.tracks;
-    if (replaceTargetClipId) {
-      if (incoming.length !== 1 || !intent || intent.zone !== "center" || intent.targetClipId !== replaceTargetClipId) {
-        showNotice("替换目标已变化；时间线未修改。", "warning");
-        return;
-      }
-      const target = latestDocument.clips.find(clip => clip.clip_id === replaceTargetClipId);
-      const targetTrack = target ? tracks.find(track => track.id === target.track_id) : undefined;
-      if (!target || !targetTrack || targetTrack.locked || latestDocument.locked_elements?.includes(target.clip_id)) {
-        showNotice("替换目标已删除或锁定；时间线未修改。", "warning");
-        return;
-      }
-      const committed = await patchTimeline(
-        [{ op: "replace_clip_source", clip_id: target.clip_id, asset_id: incoming[0]!.asset_id }],
-        `替换素材：${incoming[0]!.display_name}`,
-        base,
-      );
-      if (committed) {
-        exitLibraryPreview();
-        if (partialImportNotice) showNotice(partialImportNotice, "warning");
-      } else if (systemDrop) {
-        showNotice(`${partialImportNotice ? `${partialImportNotice} ` : ""}成功导入的素材已保留在素材栏；时间线未修改。`, "warning");
-      }
-      return;
-    }
-    let resolvedIntent = intent;
-    if (intent) {
-      resolvedIntent = resolveTimelineAssetDropIntent({
-        hit: {
-          trackId: intent.hitTrackId,
-          band: intent.band,
-          clipId: intent.targetClipId,
-          zone: intent.boundary ?? (intent.zone === "center" ? "replace" : null),
-        },
-        clips: latestDocument.clips,
-        tracks,
-        lockedClipIds: latestDocument.locked_elements,
-        assetKinds: incoming.map(asset => asset.kind),
-        itemCount: incoming.length,
-        canReplace: true,
-        pointerUs: intent.pointerUs,
-        fpsNum: latestDocument.canvas.fps_num,
-        fpsDen: latestDocument.canvas.fps_den,
-        hasCoordinates: intent.hasCoordinates,
-        defaultSlot: atIndex,
-        altKey: intent.mode === "overwrite",
-        mainTrackMagnet: dropPrefs.mainTrackMagnet,
-        assetDurationsUs: incoming.map(asset => {
-          const duration = asset.media_info?.duration_us;
-          return asset.kind === "image" ? 4_000_000 : typeof duration === "number" ? duration : null;
-        }),
-      });
-      if (!resolvedIntent.accepts) {
-        showNotice("素材落点在导入期间发生变化或目标轨道不可用；时间线未修改。", "warning");
-        return;
-      }
-    }
-    let operations: TimelinePatchOperation[];
-    try {
-      operations = planAssetDrop(
-        incoming,
-        tracks,
-        resolvedIntent?.slot ?? atIndex,
-        resolvedIntent?.trackId ?? trackId,
-        edit?.mode === "overwrite" ? { atUs: edit.atUs } : undefined,
-        resolvedIntent ? {
-          intent: resolvedIntent,
-          clips: latestDocument.clips,
-          linkageEnabled: dropPrefs.linkageEnabled,
-          fpsNum: latestDocument.canvas.fps_num,
-          fpsDen: latestDocument.canvas.fps_den,
-        } : undefined,
-      );
-    } catch (error) {
-      showNotice(error instanceof Error ? error.message : "无法规划素材覆盖。", "warning");
-      return;
-    }
-    if (operations.length > 100) {
-      showNotice("这组素材超出单次时间线操作上限，请分批拖入。", "warning");
-      return;
-    }
-    const committed = await patchTimeline(operations, incoming.length > 1 ? `批量放入 ${incoming.length} 项素材` : `放入 ${incoming[0].display_name}`, base);
-    if (committed) {
-      exitLibraryPreview();
-      if (partialImportNotice) showNotice(partialImportNotice, "warning");
-    } else if (systemDrop) {
-      showNotice(`${partialImportNotice ? `${partialImportNotice} ` : ""}成功导入的素材已保留在素材栏；时间线未修改。`, "warning");
-    }
-  };
-  const insertSegments = (transcript: Transcript) => {
-    const ids = selectedSegments[transcript.transcript_id] ?? [];
-    if (!ids.length) return;
-    const source = { kind: "transcript_selection" as const, transcript_id: transcript.transcript_id, segment_ids: ids as never[], padding_before_us: 150_000, padding_after_us: 150_000, create_captions: true };
-    if (timeline) void patchTimeline([{ op: "insert_transcript_segments", transcript_id: transcript.transcript_id, segment_ids: ids as never[], at_index: working?.clips.length ?? 0, padding_before_us: 150_000, padding_after_us: 150_000, create_captions: true, layout: "blurred_background" }], "追加转录选段"); else void createTimeline(source);
-  };
   const createProject = async () => {
     if (!newProject.trim()) return;
     const created = await window.desktop.createProject({ name: newProject.trim(), canvas: projectCanvasPresets[newProjectRatio] });
@@ -1833,185 +1604,6 @@ export function App() {
     try { await refreshProjects(); }
     finally { setProjectManagerRefreshing(false); }
   };
-  const importAsset = async (kind: AssetKind) => {
-    if (!project) return;
-    const result = await window.desktop.importAsset({ project_id: project.project_id, kind });
-    if (!result) return;
-    adoptImportedAsset(result);
-    // 方案 A（B11 缺失的一环）：视频素材导入后自动在后台登记代理生成作业，
-    // 生成期间预览继续走原片（卡但能看），就绪后由下面的 jobs 派生 effect 失效
-    // 解析缓存、下次解析自动换代理。这里不 await：代理是加速项，登记失败（无
-    // FFmpeg / 不支持 / IPC 报错）绝不能影响导入成功，也不弹错误。
-    // WP-P232：视频素材导入即登记缩略图预抽（低优先级批量；fire-and-forget，
-    // 与代理登记同一韧性语义——失败静默，不影响导入成功）。
-    if (result.asset.kind !== "video") return;
-    // 方案 A（B11 缺失的一环）：视频素材导入后自动在后台登记代理生成作业，
-    // 生成期间预览继续走原片（卡但能看），就绪后由下面的 jobs 派生 effect 失效
-    // 解析缓存、下次解析自动换代理。导入即转对 4K 素材仍然是对的；**已导入的
-    // 老素材**由实测判定那条路补上（decodeBudget → 同一登记入口）。
-  };
-  // 素材库刷新：逐个让 Core 重扫本地文件；已删除的素材清理出列表
-  // （无时间线引用时直接删除，仍被引用时保留并标记缺失）。
-  const refreshAssets = async () => {
-    if (!project || refreshingAssets) return;
-    const projectId = project.project_id;
-    const epoch = projectDataEpochRef.current;
-    setRefreshingAssets(true);
-    try {
-      const current = assets;
-      const results = await Promise.all(current.map(async item => {
-        try { return { item: await window.desktop.refreshAsset(item.asset.asset_id), failed: false }; }
-        catch { return { item, failed: true }; }
-      }));
-      const refreshed = results.map(result => result.item);
-      const missing = refreshed.filter(item => item.asset.availability === "missing");
-      const removedIds = new Set<string>();
-      for (const item of missing) {
-        try { await window.desktop.deleteAsset({ asset_id: item.asset.asset_id }); removedIds.add(item.asset.asset_id); } catch { /* 仍被时间线/生成记录引用：保留在列表中 */ }
-      }
-      const kept = refreshed.filter(item => !removedIds.has(item.asset.asset_id));
-      if (projectRef.current?.project_id !== projectId || projectDataEpochRef.current !== epoch) return;
-      setAssets(kept);
-      const failed = results.filter(result => result.failed).length;
-      const unavailable = kept.filter(item => item.asset.availability !== "available").length;
-      if (failed || unavailable) {
-        const detail = [
-          removedIds.size && `已清理 ${removedIds.size} 项`,
-          unavailable && `${unavailable} 项不可用，已保留`,
-          failed && `${failed} 项未能检查，可重试`
-        ].filter(Boolean).join("，");
-        showNotice(`已刷新素材库：${detail}。`, "warning");
-      } else if (removedIds.size > 0) {
-        showNotice(`已刷新素材库：清理了 ${removedIds.size} 个本地文件已删除的素材。`, "success");
-      } else {
-        showNotice("已刷新素材库：所有素材文件均正常。", "success");
-      }
-    } catch (error) {
-      showNotice(safeErrorMessage(error, "素材库刷新失败，请稍后重试。"));
-    } finally {
-      // 同 deleteTranscript：刷新中标志不能被项目代次守卫，否则刷新期间任何
-      // 推进代次的路径都会让「刷新素材库」永久卡在禁用态。
-      setRefreshingAssets(false);
-    }
-  };
-  const deleteAsset = async (asset: Asset) => {
-    if (!project) return;
-    const projectId = project.project_id;
-    const epoch = projectDataEpochRef.current;
-    setDeleteBusy(true);
-    try {
-      const counts = await window.desktop.deleteAsset({ asset_id: asset.asset_id, remove_timeline_clips: true });
-      if (projectRef.current?.project_id !== projectId || projectDataEpochRef.current !== epoch) return;
-      setAssets(items => items.filter(item => item.asset.asset_id !== asset.asset_id));
-      setPendingDeleteAsset(undefined);
-      setSaveState("已保存");
-      // 级联删除重写了时间线 Revision：重新拉取最新时间线，保持本地状态一致。
-      // 项目尚未创建时间线时无需刷新（Core 会报 TIMELINE_NOT_FOUND，忽略即可）。
-      if (projectRef.current?.project_id === projectId && projectDataEpochRef.current === epoch && timeline) {
-        try {
-          const latest = await window.desktop.getTimeline(projectId);
-          if (projectRef.current?.project_id !== projectId || projectDataEpochRef.current !== epoch) return;
-          acceptState(latest);
-        } catch (timelineError) {
-          if (!errorCode(timelineError).includes("TIMELINE_NOT_FOUND")) throw timelineError;
-        }
-      }
-      showNotice(counts.removed_clips > 0 ? `已删除素材「${asset.display_name}」，并从时间线移除 ${counts.removed_clips} 个相关片段。` : `已删除素材「${asset.display_name}」。`, "success");
-    } catch (error) {
-      setPendingDeleteAsset(undefined);
-      showNotice(safeErrorMessage(error, "素材删除失败，请刷新后重试。"));
-    } finally {
-      // 同 deleteTranscript：busy 是纯 UI 标志，不能用项目代次守卫。删除期间
-      // 其它路径（转录终态轮询 / 缺票重取）可能已推进代次，守卫会让按钮永久
-      // 停在「删除中…」。
-      setDeleteBusy(false);
-    }
-  };
-  const deleteTranscript = async (transcript: Pick<TranscriptSummary, "transcript_id">) => {
-    const projectId = projectRef.current?.project_id;
-    const epoch = projectDataEpochRef.current;
-    setDeleteTranscriptBusy(true);
-    try {
-      if (!window.desktop.deleteTranscript) throw new Error("TRANSCRIPTION_DELETE_UNAVAILABLE");
-      await window.desktop.deleteTranscript(transcript.transcript_id);
-      if (projectRef.current?.project_id !== projectId || projectDataEpochRef.current !== epoch) return;
-      setPendingDeleteTranscript(undefined);
-      setViewingTranscript(current => current?.transcript_id === transcript.transcript_id ? undefined : current);
-      setTranscripts(current => {
-        const next = { ...current };
-        for (const assetId of Object.keys(next)) {
-          const kept = next[assetId].filter(item => item.transcript_id !== transcript.transcript_id);
-          if (kept.length) next[assetId] = kept; else delete next[assetId];
-        }
-        return next;
-      });
-      setSelectedSegments(current => {
-        if (!(transcript.transcript_id in current)) return current;
-        const next = { ...current };
-        delete next[transcript.transcript_id];
-        return next;
-      });
-      // 转录页的行来自 transcriptSummaries（不是上面的 transcripts 正文缓存），
-      // 必须**同步**摘掉，否则提示"已删除"之后记录还要在列表里停留数秒——
-      // 那几秒是 loadProjectData 的整轮往返：翻页拉全部素材 → 三状态拉任务
-      // → 再按素材经 ≤4 并发队列逐个 listTranscripts（2026-10-08 用户现场：
-      // "提示删除成功，记录还在，要好几秒才消失"）。删除已是 Core 确认的事实，
-      // 本地无需等权威列表回话就能收起该行。
-      setTranscriptSummaries(current => {
-        const next = { ...current };
-        for (const assetId of Object.keys(next)) {
-          const kept = next[assetId].filter(item => item.transcript_id !== transcript.transcript_id);
-          if (kept.length) next[assetId] = kept; else delete next[assetId];
-        }
-        return next;
-      });
-      showNotice("已删除该转录。", "success");
-      // 摘要仍以服务端权威列表为准，重拉以覆盖分页/状态细节；上面的本地摘除
-      // 只是不等这次往返。合并语义对"本次拉取失败"保留上一次已知值——被摘掉
-      // 的记录不会因一次失败而复现。
-      if (projectRef.current) void loadProjectData(projectRef.current).catch(() => undefined);
-    } catch (error) {
-      const code = errorCode(error);
-      setPendingDeleteTranscript(undefined);
-      showNotice(
-        code === "TRANSCRIPTION_IN_USE"
-          ? "该转录已被时间线字幕引用，请先移除相关字幕或片段后再删除。"
-          : safeErrorMessage(error, "转录删除失败，请刷新后重试。"),
-      );
-    } finally {
-      // busy 是纯 UI 标志，**不能**用项目代次守卫它：成功路径里的
-      // loadProjectData 在同步段就 `++projectDataEpochRef.current`，使这里捕获的
-      // epoch 立刻过期，于是 setDeleteTranscriptBusy(false) 永不执行——弹窗永久
-      // 停在「删除中…」且取消/确认都被 disabled（2026-10-08 用户现场：lwd 项目
-      // 转录"删不掉，点开就显示删除中"）。删除期间确认按钮是 disabled 的，
-      // 不存在并发删除，故直接复位即可。
-      setDeleteTranscriptBusy(false);
-    }
-  };
-  /** 打开删除确认框：先复位 busy，避免任何遗留的「删除中…」锁死本次操作。 */
-  const openDeleteTranscriptDialog = (summary: Pick<TranscriptSummary, "transcript_id">) => {
-    setDeleteTranscriptBusy(false);
-    setPendingDeleteTranscript(summary);
-  };
-  const deleteJob = async (job: Job) => {
-    const projectId = projectRef.current?.project_id;
-    const epoch = projectDataEpochRef.current;
-    try {
-      if (!window.desktop.deleteJob) throw new Error("JOB_DELETE_UNAVAILABLE");
-      await window.desktop.deleteJob(job.job_id);
-      if (projectRef.current?.project_id !== projectId || projectDataEpochRef.current !== epoch) return;
-      setJobs(items => items.filter(item => item.job_id !== job.job_id));
-    } catch (error) {
-      const code = errorCode(error);
-      showNotice(
-        code === "JOB_INVALID_STATE"
-          ? "任务仍在进行中，请先取消后再删除。"
-          : code === "JOB_REFERENCED"
-            ? "该任务被渲染产物或生成记录引用，无法删除。"
-            : safeErrorMessage(error, "任务删除失败，请刷新后重试。"),
-      );
-    }
-  };
   const previewFromLibrary = (item: AssetPresentation) => {
     if (!item.media_url || item.asset.availability !== "available") return;
     setLibraryPreviewId(item.asset.asset_id);
@@ -2025,7 +1617,6 @@ export function App() {
     // 素材预览结束回合成预览（回退过的环境保持交互预览，避免再次触发回退）。
     if (previewMode === "interactive" && !syntheticNotice) setPreviewMode("synthetic");
   };
-  const isDraggableAsset = (kind: AssetKind) => kind === "video" || kind === "image" || kind === "audio";
   const assetThumb = (item: AssetPresentation) => (
     <span className="asset-thumb">
       {item.asset.kind === "image"
@@ -2039,7 +1630,6 @@ export function App() {
       {item.asset.availability !== "available" && <span className={`availability ${item.asset.availability}`}>{availabilityLabels[item.asset.availability]}</span>}
     </span>
   );
-  const usedAssetIds = useMemo(() => new Set(working?.clips.map(clip => clip.asset_id)), [working?.clips]);
   const assetActionItems = (item: AssetPresentation) => {
     const { asset } = item;
     const actions: (ContextMenuItem & { onSelect: () => void })[] = [{
@@ -2067,85 +1657,6 @@ export function App() {
     );
     return actions;
   };
-  // AI-2：CV 摘要文本行（视频条目副标题下方；状态 + 采样数 + 场景切换数 + 密度）。
-  const cvSummaryText = (asset: Asset): string | undefined => {
-    const summary = cvSummaries[asset.asset_id];
-    if (!summary?.status) return undefined;
-    if (summary.status === "queued") return "AI 信号分析排队中";
-    if (summary.status === "running") return "AI 信号分析进行中";
-    if (summary.status === "ready" || summary.status === "stale") {
-      const density = summary.density_status === "sparse" ? "密度 sparse" : summary.density_status === "full" ? "密度 full" : null;
-      return `AI 信号${summary.status === "stale" ? "（已过期）" : ""} · 采样 ${summary.sample_count ?? 0} · 场景切换 ${summary.scene_cut_count ?? 0}${density ? ` · ${density}` : ""}`;
-    }
-    return "AI 信号分析失败";
-  };
-  // 阶段 C 稳定性包：CV 信号 sparkline——选中视频素材时懒加载样本并以
-  // 内联 SVG 折线呈现（运动能量 + 场景切换标记）；无展开状态时零请求。
-  const [cvSparkAssetId, setCvSparkAssetId] = useState<AssetId | null>(null);
-  const [cvSparkSamples, setCvSparkSamples] = useState<CvSample[] | null>(null);
-  const toggleCvSpark = (asset: Asset) => {
-    if (cvSparkAssetId === asset.asset_id) { setCvSparkAssetId(null); setCvSparkSamples(null); return; }
-    if (!project) return;
-    const projectId = project.project_id;
-    const epoch = projectDataEpochRef.current;
-    setCvSparkAssetId(asset.asset_id);
-    setCvSparkSamples(null);
-    void window.desktop.listCvSamples({ project_id: projectId, asset_id: asset.asset_id })
-      .then(page => { if (projectRef.current?.project_id === projectId && projectDataEpochRef.current === epoch) setCvSparkSamples(page.samples); })
-      .catch(() => { if (projectRef.current?.project_id === projectId && projectDataEpochRef.current === epoch) { setCvSparkSamples([]); showNotice("CV 信号样本加载失败。", "error"); } });
-  };
-
-  // 体积/元信息辅助函数已拆入 appHelpers.ts
-  // 打开素材所在文件夹：文件缺失时弹框提供 重新定位 / 移除 恢复路径（主进程完成交互）。
-  const revealAsset = async (asset: Asset) => {
-    try {
-      const result = await window.desktop.revealAsset(asset.asset_id);
-      if (result.status === "relocated" || result.status === "deleted") await refreshAssets();
-    } catch (error) {
-      showNotice(safeErrorMessage(error, "打开素材所在文件夹失败。"), "error");
-    }
-  };
-  // "原始"分辨率档：素材最大短边（与 Core plan.py 同口径：无视频流兜底 1080，8K 钳 4K）。
-  const originalShortEdge = useMemo(() => {
-    let maxShort = 0;
-    for (const item of assets) {
-      const info = item.asset.media_info as MediaInfo | null;
-      for (const stream of info?.video_streams ?? []) {
-        const w = Number(stream.width ?? 0), h = Number(stream.height ?? 0);
-        if (w > 0 && h > 0) maxShort = Math.max(maxShort, Math.min(w, h));
-      }
-    }
-    return maxShort > 0 ? Math.min(maxShort, 2160) : null;
-  }, [assets]);
-  const assetDragProps = (item: AssetPresentation) => ({
-    draggable: isDraggableAsset(item.asset.kind) && item.asset.availability === "available",
-    onDragStart: (event: React.DragEvent) => {
-      if (!isDraggableAsset(item.asset.kind) || item.asset.availability !== "available") { event.preventDefault(); return; }
-      const ids = draggedAssetIds(item.asset.asset_id, visibleAssetOrder, selectedAssetIds);
-      setActiveDraggedAssetIds(ids);
-      if (ids.length > 1) event.dataTransfer.setData(ASSET_BATCH_DRAG, JSON.stringify(ids));
-      else event.dataTransfer.setData(ASSET_DRAG, ids[0]);
-      event.dataTransfer.effectAllowed = "copy";
-    },
-    onDragEnd: () => setActiveDraggedAssetIds([]),
-    title: isDraggableAsset(item.asset.kind) ? "拖到 V1 时间线以插入；双击在预览播放" : undefined,
-  });
-  useEffect(() => {
-    const clearAbortedAssetDrop = () => {
-      clearSystemFileDrop();
-      setActiveDraggedAssetIds([]);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") clearAbortedAssetDrop();
-    };
-    window.addEventListener("dragend", clearAbortedAssetDrop, true);
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => {
-      window.removeEventListener("dragend", clearAbortedAssetDrop, true);
-      window.removeEventListener("keydown", onKeyDown, true);
-      clearSystemFileDrop();
-    };
-  }, []);
   // 点击预览画面：选中播放头处的片段（剪映式选中），无片段时清空选择。
   // P231 修复：合成模式由 sp-layer 的 S3/S4 状态机全权负责选择（盒子点击选盒、
   // 空白 release 清选/框选）——这里的 onClick 只服务 interactive 模式，
@@ -2158,100 +1669,6 @@ export function App() {
     setSelection(clipAtPlayhead ? { kind: "clip", id: clipAtPlayhead.clip_id } : null);
   };
   const previewSelected = Boolean(selectedClip && !libraryPreviewId);
-  const openModel = async (model: ModelSummary) => { const detail = await window.desktop.getModel(model.model_id); setConfirmModel(detail); setLicenseAccepted(!detail.license.acceptance_required); };
-  const downloadModel = async () => { if (!confirmModel) return; const result = await window.desktop.downloadModel({ model_id: confirmModel.model_id, license_acceptance: confirmModel.license.acceptance_required ? confirmModel.license.id : null }); setModels(items => items.map(item => item.model_id === result.model.model_id ? result.model : item)); setJobs(items => [result.job, ...items]); setConfirmModel(undefined); };
-  const cancelModel = async (model: ModelSummary) => { const result = await window.desktop.cancelModelDownload(model.model_id); setModels(items => items.map(item => item.model_id === result.model.model_id ? result.model : item)); setJobs(items => [result.job, ...items.filter(item => item.job_id !== result.job.job_id)]); };
-  const startTranscription = (asset: Asset) => { const ready = models.find(model => model.status === "ready" && model.provider_status === "installed"); if (!ready) { const candidate = models[0]; if (candidate) void openModel(candidate); else showNotice("当前没有可用的本地 ASR 模型", "warning"); return; } setTranscriptionAsset(asset); };
-  const submitTranscription = async () => { if (!transcriptionAsset) return; const model = models.find(item => item.status === "ready" && item.provider_status === "installed"); if (!model) return; const result = await window.desktop.createTranscription({ asset_id: transcriptionAsset.asset_id, model_id: model.model_id, language, word_timestamps: wordTimestamps, license_acceptance: null }); setJobs(items => [result.job, ...items]); setTranscriptionAsset(undefined); trackTranscriptionJob(result.job); };
-  // 转录完成必须刷新转录摘要，否则转录页拿的是打开项目时的旧列表——
-  // 用户点完转录在"任务"页看到成功，转录页却仍显示"尚未生成转录"
-  //（2026-10-06 现场：转录已落库 24 段，UI 却无可勾选片段）。
-  const trackTranscriptionJob = (job: Job) => {
-    const projectId = project?.project_id;
-    const epoch = projectDataEpochRef.current;
-    if (!projectId) return;
-    const unsubscribe = window.desktop.subscribeJob(job.job_id, updated => {
-      if (projectRef.current?.project_id !== projectId || projectDataEpochRef.current !== epoch) {
-        unsubscribe();
-        return;
-      }
-      setJobs(items => [updated, ...items.filter(item => item.job_id !== updated.job_id)]);
-      if (["succeeded", "failed", "cancelled", "interrupted"].includes(updated.status)) {
-        unsubscribe();
-        // 成功：重新拉取转录摘要，使转录页出现"查看转录"入口；
-        // 失败/取消：无需刷新（没有新转录产生）。
-        if (updated.status === "succeeded" && projectRef.current) {
-          void loadProjectData(projectRef.current).catch(() => undefined);
-        }
-      }
-    });
-  };
-  const retryTranscription = async (job: Job) => { if (!job.asset_id || !job.model_id) return; const result = await window.desktop.createTranscription({ asset_id: job.asset_id, model_id: job.model_id, language: "auto", word_timestamps: true, license_acceptance: null }); setJobs(items => [result.job, ...items]); trackTranscriptionJob(result.job); };
-  const cancelJob = async (job: Job) => { const updated = await window.desktop.cancelJob(job.job_id); setJobs(items => items.map(item => item.job_id === updated.job_id ? updated : item)); };
-  // AI-2（Layer 0）：素材 CV 信号分析——视频条目动作发起，完成后文本摘要展示
-  //（signal 可视化为独立小单）。generate=True 登记作业；subscribeJob 跟踪完
-  // 成后拉取一次摘要（无 generate，只读）。
-  const [cvSummaries, setCvSummaries] = useState<Partial<Record<AssetId, CvAnalysisSummary>>>({});
-  const [cvBusy, setCvBusy] = useState<AssetId | null>(null);
-  // ADR-0005 阶段 2：密度旋钮（可选高级项；空 = 默认 4s / 10s·min⁻¹）。
-  const [cvOptionsOpen, setCvOptionsOpen] = useState(false);
-  const [cvOptionsAsset, setCvOptionsAsset] = useState<AssetPresentation | null>(null);
-  const [cvTargetGapS, setCvTargetGapS] = useState("");
-  const [cvBudgetPerMin, setCvBudgetPerMin] = useState("");
-  const refreshCvSummary = useCallback(async (assetId: AssetId) => {
-    if (!project) return;
-    try { const summary = await window.desktop.getCvAnalysis({ project_id: project.project_id, asset_id: assetId, generate: false }); setCvSummaries(current => ({ ...current, [assetId]: summary })); } catch { /* 摘要拉取失败不打断素材列表 */ }
-  }, [project]);
-  const startCvAnalysis = (item: AssetPresentation, knobs?: { target_gap_us?: number; budget_per_minute_s?: number }) => {
-    const assetId = item.asset.asset_id;
-    if (!project || cvBusy) return;
-    setCvBusy(assetId);
-    void (async () => {
-      try {
-        const summary = await window.desktop.getCvAnalysis({
-          project_id: project.project_id,
-          asset_id: assetId,
-          generate: true,
-          ...(knobs?.target_gap_us ? { target_gap_us: knobs.target_gap_us } : {}),
-          ...(knobs?.budget_per_minute_s ? { budget_per_minute_s: knobs.budget_per_minute_s } : {}),
-        });
-        setCvSummaries(current => ({ ...current, [assetId]: summary }));
-        if (summary.job_id) {
-          const unsubscribe = window.desktop.subscribeJob(summary.job_id, job => {
-            if (["succeeded", "failed", "cancelled", "interrupted"].includes(job.status)) { unsubscribe(); void refreshCvSummary(assetId); }
-          });
-        } else { void refreshCvSummary(assetId); }
-      } catch (caught) { showNotice(safeErrorMessage(caught, "CV 信号分析发起失败。"), "error"); }
-      finally { setCvBusy(null); }
-    })();
-  };
-  const submitCvOptions = () => {
-    if (!cvOptionsAsset) return;
-    const gapMs = Number(cvTargetGapS);
-    const budget = Number(cvBudgetPerMin);
-    const knobs = {
-      ...(cvTargetGapS.trim() !== "" && Number.isFinite(gapMs) && gapMs > 0 ? { target_gap_us: Math.round(gapMs * 1_000_000) } : {}),
-      ...(cvBudgetPerMin.trim() !== "" && Number.isFinite(budget) && budget > 0 ? { budget_per_minute_s: budget } : {}),
-    };
-    startCvAnalysis(cvOptionsAsset, knobs);
-    setCvOptionsOpen(false);
-    setCvOptionsAsset(null);
-    setCvTargetGapS("");
-    setCvBudgetPerMin("");
-  };
-  // A08：转录正文按需加载（选中 chip 时才 getTranscript，经并发≤4 队列 +
-  // 项目代次作废——旧项目迟到结果不写入新项目）；已加载内容缓存复用。
-  const viewTranscript = async (summary: TranscriptSummary) => {
-    const cached = Object.values(transcripts).flat().find(item => item.transcript_id === summary.transcript_id);
-    if (cached) { setViewingTranscript(cached); return; }
-    const epoch = projectDataEpochRef.current;
-    const queue = transcriptQueueRef.current ??= new BoundedTaskQueue<Transcript>(4);
-    const result = await queue.push(() => window.desktop.getTranscript(summary.transcript_id));
-    if (result === queue.skipped || epoch !== projectDataEpochRef.current) return; // 已切项目：丢弃
-    const transcript = result as Transcript;
-    setViewingTranscript(transcript);
-    setTranscripts(current => ({ ...current, [transcript.asset_id]: [...(current[transcript.asset_id] ?? []), transcript] }));
-  };
   const undoRedoInFlight = useRef(false);
   const undoRedo = async (kind: "undo" | "redo") => {
     // 连按 Ctrl+Z 时 React 状态还没更新，会拿同一个 base_revision_id 发多次请求，
@@ -2379,15 +1796,6 @@ export function App() {
       else await stagePaneRef.current?.requestFullscreen();
     } catch { showNotice("进入全屏失败。", "warning"); }
   };
-  const firstMediaAsset = assets.find(item => (item.asset.kind === "video" || item.asset.kind === "image") && item.asset.availability === "available");
-  const firstTranscribableAsset = assets.find(item => isTranscribable(item.asset));
-  /** 已按需加载正文的转录（未加载时为 undefined，行内只显示摘要信息）。 */
-  const loadedTranscript = (transcriptId: string) => Object.values(transcripts).flat().find(item => item.transcript_id === transcriptId);
-  // 转录页统一列表：以服务端权威摘要（listTranscripts）为唯一数据源。
-  // 旧实现把「摘要 chip」与「已加载正文卡片」渲染成两份列表，点一次 chip 就在
-  // 下方多出一条同名记录；且未打开过的转录没有删除入口（用户实测 2026-10-08）。
-  const transcriptRows = assets.filter(item => isTranscribable(item.asset)).flatMap(assetItem =>
-    (transcriptSummaries[assetItem.asset.asset_id] ?? []).map(summary => ({ summary, assetName: assetItem.asset.display_name })));
   useEffect(() => { setGenerationOpen(false); setShotRequirementsOpen(false); setCoverUrl(project?.project_id ? localStorage.getItem(`vortex-cut.cover.${project.project_id}`) : null); }, [project?.project_id]);
 
   // 状态栏任务摘要：取第一个有进度的运行中任务展示「类型 xx%」；
@@ -2957,12 +2365,6 @@ export function App() {
     if (item.project_id === project?.project_id && !next) return;
     setOpenProjectIds(ids => ids.filter(id => id !== item.project_id));
     if (next && item.project_id === project?.project_id) switchProject(next);
-  };
-  const changeLibraryScope = (scope: typeof libraryScope, kind: AssetFilter = "all") => {
-    resetAssetSelection();
-    setLibraryScope(scope);
-    setAssetFilter(kind);
-    setAssetQuery("");
   };
   const alignmentCanvas = working && alignmentPreviewSize[renderRatio];
   const alignmentSubjects = alignmentCanvas ? selectedClips.flatMap(clip => {
