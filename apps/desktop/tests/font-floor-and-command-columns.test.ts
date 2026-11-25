@@ -1,7 +1,5 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { readDesktopStyles } from "./helpers/read-styles.js";
 
 /**
  * 字号下限与命令搜索列对齐（2026-11-09，用户以截图标出）。
@@ -29,8 +27,7 @@ import { describe, expect, it } from "vitest";
  * 即**系统默认字体栈**，Inter 只是无效占位。
  */
 
-const cssPath = resolve(dirname(fileURLToPath(import.meta.url)), "../src/styles.css");
-const raw = readFileSync(cssPath, "utf8");
+const raw = readDesktopStyles();
 const css = raw.replace(/\/\*[\s\S]*?\*\//g, "");
 
 type Rule = { sels: string[]; body: string; order: number; inMedia: boolean };

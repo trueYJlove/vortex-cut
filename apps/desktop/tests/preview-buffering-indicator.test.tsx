@@ -14,10 +14,9 @@
  * preview-lifecycle 的先例装 ScriptedWorker/OffscreenCanvas 桩——jsdom 没有
  * 真 worker。
  */
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readDesktopStyles } from "./helpers/read-styles.js";
 import { PreviewSession } from "../src/app/preview/preview-session.js";
 import { SyntheticPreview } from "../src/app/preview/SyntheticPreview.js";
 import type { FrameSource } from "../src/app/preview/frame-source.js";
@@ -640,7 +639,7 @@ describe("P196 缓冲指示组件落地", () => {
     await waitFor(() => expect(screen.queryByRole("status")).toBeNull(), { timeout: 8_000 });
     // 不挡指针是样式层保证（会话画布上的 PiP 手势必须穿透），jsdom 不加载
     // 样式表，直接对规则文本设卡。
-    const css = readFileSync(resolve(__dirname, "../src/styles.css"), "utf8");
+    const css = readDesktopStyles();
     expect(css).toMatch(/\.synthetic-buffering \{[^}]*pointer-events: none/);
   });
 

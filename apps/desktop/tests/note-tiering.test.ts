@@ -3,6 +3,7 @@ import { readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { readDesktopStyles } from "./helpers/read-styles.js";
 
 /**
  * 提示分级：安全类保留色块，说明类降为中性小字（2026-11-09 用户裁决）。
@@ -23,7 +24,7 @@ import { describe, expect, it } from "vitest";
  */
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const raw = readFileSync(resolve(root, "src/styles.css"), "utf8");
+const raw = readDesktopStyles();
 const css = raw.replace(/\/\*[\s\S]*?\*\//g, "");
 
 type Rule = { selectors: string[]; body: string; order: number; inMedia: boolean };

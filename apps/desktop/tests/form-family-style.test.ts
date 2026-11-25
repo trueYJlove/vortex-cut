@@ -1,7 +1,5 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { readDesktopStyles } from "./helpers/read-styles.js";
 
 /**
  * A 族「纯表单」· Settings / Shortcuts（2026-11-09）。
@@ -24,8 +22,7 @@ import { describe, expect, it } from "vitest";
  * **未做改动**，如实记录「看过且无需改」。
  */
 
-const cssPath = resolve(dirname(fileURLToPath(import.meta.url)), "../src/styles.css");
-const raw = readFileSync(cssPath, "utf8");
+const raw = readDesktopStyles();
 const css = raw.replace(/\/\*[\s\S]*?\*\//g, "");
 
 type Rule = { sels: string[]; body: string; order: number; inMedia: boolean };

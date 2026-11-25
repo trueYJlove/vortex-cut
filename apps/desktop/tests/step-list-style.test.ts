@@ -1,7 +1,5 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { readDesktopStyles } from "./helpers/read-styles.js";
 
 /**
  * B 族「步骤流」· 步骤记录列表（2026-11-09）。
@@ -24,8 +22,7 @@ import { describe, expect, it } from "vitest";
  * 而它的可读性直接决定「多步会话」这个功能能不能被看懂。
  */
 
-const cssPath = resolve(dirname(fileURLToPath(import.meta.url)), "../src/styles.css");
-const raw = readFileSync(cssPath, "utf8");
+const raw = readDesktopStyles();
 const css = raw.replace(/\/\*[\s\S]*?\*\//g, "");
 
 type Rule = { sels: string[]; body: string; order: number; inMedia: boolean };

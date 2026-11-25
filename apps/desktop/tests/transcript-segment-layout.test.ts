@@ -1,7 +1,5 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { readDesktopStyles } from "./helpers/read-styles.js";
 
 /**
  * 转录片段行排版回归（2026-10-08 用户实测）。
@@ -21,8 +19,7 @@ import { describe, expect, it } from "vitest";
  * 断言文本存在无法发现这个缺陷 —— 旧 CSS 里两条规则都在，只是后者输了。
  */
 
-const cssPath = resolve(dirname(fileURLToPath(import.meta.url)), "../src/styles.css");
-const css = readFileSync(cssPath, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+const css = readDesktopStyles().replace(/\/\*[\s\S]*?\*\//g, "");
 
 /** 计算选择器特异性 [id, class/attr/pseudo-class, type]（:not() 参数计入，自身不计）。 */
 function specificity(selector: string): [number, number, number] {

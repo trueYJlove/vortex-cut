@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { readDesktopStyles } from "./helpers/read-styles.js";
 
 /**
  * 原型保真度回归（2026-11-06 用户两次指出"没 1:1 实现"之后新增）。
@@ -20,7 +21,7 @@ import { describe, expect, it } from "vitest";
 const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const root = resolve(desktopRoot, "../..");
 const prototype = readFileSync(resolve(root, "docs/design/ui-mockups/dialog-system-v2/index.html"), "utf8");
-const css = readFileSync(resolve(desktopRoot, "src/styles.css"), "utf8");
+const css = readDesktopStyles();
 const appSource = readFileSync(resolve(desktopRoot, "src/app/App.tsx"), "utf8");
 
 /** 从原型 <style> 中取某选择器块的属性值（最后一个匹配即原型最终态）。 */

@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { readDesktopStyles } from "./helpers/read-styles.js";
 
 /**
  * 弹窗可操作性回归（2026-11-06 真机测量发现）。
@@ -17,7 +18,7 @@ import { describe, expect, it } from "vitest";
  */
 
 const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const css = readFileSync(resolve(desktopRoot, "src/styles.css"), "utf8");
+const css = readDesktopStyles();
 const appSource = readFileSync(resolve(desktopRoot, "src/app/App.tsx"), "utf8");
 const projectLibrarySource = readFileSync(resolve(desktopRoot, "src/app/ProjectLibraryDialog.tsx"), "utf8");
 const dialogSource = readFileSync(resolve(desktopRoot, "src/app/Dialog.tsx"), "utf8");

@@ -11,10 +11,9 @@
  *
  * jsdom 不加载样式表，窄窗口折行只能对规则文本设卡（同 .synthetic-buffering 的先例）。
  */
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readDesktopStyles } from "./helpers/read-styles.js";
 import { PreviewSession } from "../src/app/preview/preview-session.js";
 import { SyntheticPreview } from "../src/app/preview/SyntheticPreview.js";
 import type { Ir } from "../src/app/preview/ir.js";
@@ -222,7 +221,7 @@ describe("驻留预警独立通道（不再顶掉指标文本）", () => {
 
 describe("窄窗口可读性（样式层，jsdom 不加载样式表 → 对规则文本设卡）", () => {
   it(".synthetic-metrics 允许折行、限宽、长串可断，且不吃指针事件", () => {
-    const css = readFileSync(resolve(__dirname, "../src/styles.css"), "utf8");
+    const css = readDesktopStyles();
     const rule = /\.synthetic-metrics \{([^}]*)\}/.exec(css)?.[1] ?? "";
     expect(rule, "找不到 .synthetic-metrics 规则").not.toBe("");
     // 单行 nowrap + 无 max-width 是用户「窗口变小看不到完整调试信息」的直接成因。
@@ -234,7 +233,7 @@ describe("窄窗口可读性（样式层，jsdom 不加载样式表 → 对规�
   });
 
   it("没有可聚焦/可滚动的 HUD 形态（滚动会与 pointer-events:none 冲突）", () => {
-    const css = readFileSync(resolve(__dirname, "../src/styles.css"), "utf8");
+    const css = readDesktopStyles();
     const rule = /\.synthetic-metrics \{([^}]*)\}/.exec(css)?.[1] ?? "";
     expect(rule).not.toContain("overflow: auto");
     expect(rule).not.toContain("overflow-y: auto");

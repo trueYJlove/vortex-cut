@@ -1,7 +1,5 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { readDesktopStyles } from "./helpers/read-styles.js";
 
 /**
  * C 族「列表型」行对齐的级联回归（2026-11-09）。
@@ -18,8 +16,7 @@ import { describe, expect, it } from "vitest";
  * 断言某段文本存在（"写了但被更高特异性规则压掉" 正是这类缺陷最初的失效方式）。
  */
 
-const cssPath = resolve(dirname(fileURLToPath(import.meta.url)), "../src/styles.css");
-const raw = readFileSync(cssPath, "utf8");
+const raw = readDesktopStyles();
 const css = raw.replace(/\/\*[\s\S]*?\*\//g, "");
 
 type Rule = { selectors: string[]; body: string; order: number; inMedia: boolean };
