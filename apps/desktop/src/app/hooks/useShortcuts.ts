@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { TimelineClip, TimelineDocument, TimelinePatchOperation } from "@aivideo/contracts";
-import { editorCommands, type EditorCommand } from "../editorCommands.js";
+import { editorCommands } from "../editorCommands.js";
 import {
   DEFAULT_SHORTCUTS,
   bindingLabel,
@@ -12,31 +11,17 @@ import {
   type ShortcutCommandId,
   type ShortcutEntry,
 } from "../shortcuts.js";
-import { planRippleDelete, readTimelineBehaviorPrefs } from "../timeline/magnetic-plan.js";
-import type { PlayheadStore } from "../timeline/playhead-store.js";
-import { duration, type NoticeTone } from "../appHelpers.js";
+import type { NoticeTone } from "../appHelpers.js";
 
 export interface UseShortcutsParams {
-  working: TimelineDocument | undefined;
-  selectedClips: TimelineClip[];
   commandSearchOpen: boolean;
-  playheadStore: PlayheadStore;
-  runCommand: (id: EditorCommand["id"]) => void;
-  patchTimeline: (operations: TimelinePatchOperation[], summary: string) => Promise<boolean>;
-  exitLibraryPreview: () => void;
-  seekFromUser: (timeUs: number) => void;
+  dispatchCommand: (id: string, payload?: Record<string, unknown>) => Promise<unknown> | void;
   showNotice: (text: string, tone?: NoticeTone) => void;
 }
 
 export function useShortcuts({
-  working,
-  selectedClips,
   commandSearchOpen,
-  playheadStore,
-  runCommand,
-  patchTimeline,
-  exitLibraryPreview,
-  seekFromUser,
+  dispatchCommand,
   showNotice,
 }: UseShortcutsParams) {
   // C3：快捷键自定义（注册表 + localStorage 持久化 + 面板录制状态）。
@@ -80,24 +65,22 @@ export function useShortcuts({
     const key = (event.key ?? "").toLowerCase();
     const inTimeline = Boolean(target?.closest?.(".timeline-pane"));
     // C3：固定别名（不进自定义表）——Ctrl+Shift+Z 重做、Backspace/Delete 删除。
-    if ((event.ctrlKey || event.metaKey) && event.shiftKey && key === "z") { event.preventDefault(); runCommand("timeline.redo"); return; }
+    if ((event.ctrlKey || event.metaKey) && event.shiftKey && key === "z") {
+      event.preventDefault();
+      void dispatchCommand("timeline.redo");
+      return;
+    }
     if (!(event.ctrlKey || event.metaKey) && (key === "backspace" || key === "delete") && inTimeline) {
       event.preventDefault();
-      if (event.shiftKey && working) {
-        const plan = planRippleDelete(working, selectedClips, readTimelineBehaviorPrefs().linkageEnabled);
-        if (plan.operations.length) void patchTimeline(plan.operations, "波纹删除");
-        else if (plan.reason) showNotice(plan.reason, "info");
-      } else runCommand("timeline.delete");
+      void dispatchCommand("timeline.delete", event.shiftKey ? { mode: "ripple" } : {});
       return;
     }
     // 方向键逐帧步进（C1）：1 帧，Shift 加速 5 帧。
     if (!(event.ctrlKey || event.metaKey) && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
       if (inTimeline) {
         event.preventDefault();
-        const frameUs = Math.round(1_000_000 / (working?.canvas.fps_num && working.canvas.fps_den ? working.canvas.fps_num / working.canvas.fps_den : 30));
-        const step = frameUs * (event.shiftKey ? 5 : 1);
-        exitLibraryPreview();
-        seekFromUser(Math.max(0, Math.min(duration(working), playheadStore.get() + (event.key === "ArrowRight" ? step : -step))));
+        const frames = (event.shiftKey ? 5 : 1) * (event.key === "ArrowRight" ? 1 : -1);
+        void dispatchCommand("playback.stepFrames", { frames });
       }
       return;
     }
@@ -107,7 +90,7 @@ export function useShortcuts({
         // Delete/播放暂停仅在时间线聚焦时生效（防全局误触）。
         if ((commandId === "timeline.delete" || commandId === "play.pause") && !inTimeline) continue;
         event.preventDefault();
-        runCommand(commandId);
+        void dispatchCommand(commandId);
         return;
       }
     }

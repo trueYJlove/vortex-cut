@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BookOpen, Clapperboard, Command as CommandIcon, FlaskConical, FolderCog, GitCompare, Image as ImageIcon, Keyboard, LayoutPanelLeft, MonitorPlay, Redo2, RefreshCw, Scissors, Search, Sparkles, SquarePlus, Undo2, Upload, Video, WandSparkles } from "lucide-react";
-import type { AssetId, Job, ModelSummary, Project, TimelineClip, TimelineDocument, TimelineLayout, TimelinePatchOperation, TimelineRevisionId, TimelineState } from "@aivideo/contracts";
+import type { Job, ModelSummary, Project, TimelineClip, TimelineDocument, TimelinePatchOperation, TimelineRevisionId, TimelineState } from "@aivideo/contracts";
 import { CONTRACT_VERSION } from "@aivideo/contracts";
 import { alignmentBox, alignmentPreviewSize, groupFrameBounds, planFrameAlignment, planFrameDistribution, planGroupBoundsEdit, type GroupBoundsField } from "./timeline/frame-alignment.js";
 import type { AlignDistribution, AlignEdge } from "../ui/of/AlignBar.js";
 import { errorCode, safeErrorMessage } from "./safeErrors.js";
 import { PreviewPipOverlays, type PipOverlay, type PipTransform } from "./PreviewPipOverlays.js";
-import { editorCommands, type EditorCommand } from "./editorCommands.js";
+import {
+  createEditorCommandDispatcher,
+  editorCommands,
+  type ClipboardClipSnapshot,
+  type CommandRuntimeContext,
+  type EditorCommand,
+} from "./editorCommands.js";
 import { TimelinePanel } from "./timeline/TimelineCanvas.js";
-import { splitSelectionAt } from "./timeline/split-point.js";
-import { removeLinkedClips } from "./timeline/linked-clips.js";
-import { planMagneticDelete, readTimelineBehaviorPrefs } from "./timeline/magnetic-plan.js";
 import { parseSubtitleFile } from "./subtitleImport.js";
 import { AssetSelectionProperties, ClipGroupAlignmentProperties, ClipProperties, CaptionProperties, ProjectProperties, TransitionProperties } from "./PropertyPanels.js";
 import { WorkspaceFooter } from "./workspace/WorkspaceFooter.js";
@@ -19,7 +22,6 @@ import {
   assetKindLabels,
   assetMetaText,
   availabilityLabels,
-  duration,
   jobKindLabels,
   type Notice,
   type NoticeTone,
@@ -253,7 +255,7 @@ export function App() {
     reframePlayback, setReframePlayback,
     syntheticSnapshotRef, loadRenderData, resetRenderOnProjectSwitch, resetReframeOnProjectChange,
     trackRenderJob, generatePreview,
-    openExportDialog, openExportBatch,
+    openExportDialog, createExport, openExportBatch,
     authoritativePreview, previewIsStale, authoritativeMediaUrl, renderDisabledReason, renderActivity,
   } = exportRender;
   const aiWorkflows = useAiWorkflows({
@@ -341,33 +343,23 @@ export function App() {
   };
   /** 返回是否落库成功（S6 手势失败回滚用）；既有 void 调用方无需改动。 */
   const patchTimeline = async (operations: TimelinePatchOperation[], summary: string, base = timeline): Promise<boolean> => {
-    if (!project || !base) return false;
-    setSaveState("保存中");
-    try {
-      const next = await window.desktop.patchTimeline({ project_id: project.project_id, patch: { schema_version: 1, base_revision_id: base.current_revision.timeline_revision_id, operations, summary } });
-      if (projectRef.current?.project_id !== project.project_id) return false;
-      // patch 已包含草稿内容：作废挂起草稿，防止用过期 base 触发 409。
-      pendingDraftRef.current = null;
-      if (draftTimer.current) clearTimeout(draftTimer.current);
-      acceptState(next);
-      setSaveState("已保存");
-      return true;
-    }
-    catch (error) {
-      if (projectRef.current?.project_id === project.project_id) await handleConflict(error);
-      return false;
-    }
+    const result = await commandDispatcher.dispatch("timeline.patch", {
+      operations,
+      summary,
+      ...(base ? { baseRevisionId: base.current_revision.timeline_revision_id } : {}),
+    });
+    return result.ok;
   };
   // 文本素材（剪映式）：默认文本 = 在播放头处插入 3s 手工字幕；
   // 导入本地字幕 = 解析 SRT/ASS/SSA/LRC 为条目批量落库（可替换旧手工字幕）。
   const insertDefaultText = async () => {
-    if (!project) return;
-    const start = Math.round(playhead);
-    await patchTimeline(
-      [{ op: "add_caption", start_us: start, end_us: start + 3_000_000, text: "默认文本", preset_id: "default-bottom", source_clip_id: null }],
-      "添加默认文本",
-    );
-    setNotice("");
+    const result = await commandDispatcher.dispatch("timeline.addCaption", {
+      startUs: Math.round(playhead),
+      endUs: Math.round(playhead) + 3_000_000,
+      text: "默认文本",
+      presetId: "default-bottom",
+    });
+    if (result.ok) setNotice("");
   };
   const importSubtitleFile = async () => {
     if (!project) return;
@@ -376,11 +368,13 @@ export function App() {
       if (!picked) return;
       const entries = parseSubtitleFile(picked.file_name, picked.content);
       const hasManual = (working?.captions ?? []).some(caption => caption.origin === "user");
-      await patchTimeline(
-        [{ op: "import_captions", entries, preset_id: "default-bottom", replace_existing: hasManual }],
-        `导入字幕 ${picked.file_name}（${entries.length} 条）`,
-      );
-      setNotice("");
+      const result = await commandDispatcher.dispatch("timeline.importCaptions", {
+        fileName: picked.file_name,
+        entries,
+        presetId: "default-bottom",
+        replaceExisting: hasManual,
+      });
+      if (result.ok) setNotice("");
     } catch (error) {
       showNotice(safeErrorMessage(error, "字幕导入失败：仅支持 SRT / ASS / SSA / LRC。"));
     }
@@ -419,16 +413,8 @@ export function App() {
     }, 400);
   };
   const createTimeline = async (source: Parameters<typeof window.desktop.createTimeline>[0]["timeline"]["source"]) => {
-    if (!project) return;
-    setSaveState("保存中");
-    try {
-      const created = await window.desktop.createTimeline({ project_id: project.project_id, timeline: { schema_version: 1, source, default_layout: "blurred_background", caption_preset_id: "default-bottom" } });
-      if (projectRef.current?.project_id !== project.project_id) return;
-      acceptState(created);
-      return created;
-    } catch (error) {
-      if (projectRef.current?.project_id === project.project_id) await handleConflict(error);
-    }
+    const result = await commandDispatcher.dispatch("timeline.create", { source });
+    return result.ok ? (result.data as { timelineState?: TimelineState }).timelineState : undefined;
   };
   const overlayClipSelected = Boolean(selectedClip && selectedClip.asset_kind !== "audio" && trackById.get(selectedClip.track_id)?.kind === "video");
   const showSelBox = !overlayClipSelected;
@@ -512,8 +498,8 @@ export function App() {
   const pipSelectedId = selectedClip?.clip_id ?? null;
   const pipLocked = pipSelectedId ? Boolean(working?.locked_elements?.includes(pipSelectedId)) : false;
   // 应用内剪贴板（M2 A3）：复制 V1 视频片段快照，粘贴回放到播放头。
-  const clipboardClips = useRef<Array<{ asset_id: AssetId; asset_kind: "video" | "image"; source_start_us: number | null; source_end_us: number | null; speed_milli: number; reverse_playback: boolean; layout: TimelineLayout }>>([]);
-  const insertableClipboardAssets = (snapshots: typeof clipboardClips.current) => snapshots.filter(item => {
+  const clipboardClips = useRef<ClipboardClipSnapshot[]>([]);
+  const insertableClipboardAssets = (snapshots: ClipboardClipSnapshot[]) => snapshots.filter(item => {
     const asset = assets.find(candidate => candidate.asset.asset_id === item.asset_id);
     return Boolean(asset && (item.asset_kind === "image" || asset.asset.availability === "available"));
   });
@@ -526,16 +512,8 @@ export function App() {
   };
   const previewSelected = Boolean(selectedClip && !libraryPreviewId);
   const undoRedoInFlight = useRef(false);
-  const undoRedo = async (kind: "undo" | "redo") => {
-    // 连按 Ctrl+Z 时 React 状态还没更新，会拿同一个 base_revision_id 发多次请求，
-    // 第一次之后全部 409。用在途标记丢弃多余的按键，等状态回写后再撤销下一刀。
-    if (undoRedoInFlight.current || !project || !timeline) return;
-    undoRedoInFlight.current = true;
-    setSaveState("保存中");
-    try {
-      acceptState(await window.desktop[kind === "undo" ? "undoTimeline" : "redoTimeline"]({ project_id: project.project_id, base_revision_id: timeline.current_revision.timeline_revision_id }));
-    } catch (error) { await handleConflict(error); } finally { undoRedoInFlight.current = false; }
-  };
+  const undoRedo = (kind: "undo" | "redo") =>
+    commandDispatcher.dispatch(kind === "undo" ? "timeline.undo" : "timeline.redo", {});
   useEffect(() => { setGenerationOpen(false); setShotRequirementsOpen(false); setCoverUrl(project?.project_id ? localStorage.getItem(`vortex-cut.cover.${project.project_id}`) : null); }, [project?.project_id]);
 
   // 状态栏任务摘要：取第一个有进度的运行中任务展示「类型 xx%」；
@@ -552,141 +530,57 @@ export function App() {
     return q ? editorCommands.filter(command => command.label.toLocaleLowerCase().includes(q) || command.id.toLocaleLowerCase().includes(q)) : editorCommands;
   }, [commandQuery]);
 
-  const commandDisabledReason = (id: EditorCommand["id"]): string | undefined => {
-    switch (id) {
-      case "play.pause": return previewAsset?.media_url ? undefined : "需要预览素材";
-      case "timeline.undo": return timeline?.can_undo ? undefined : "没有可撤销的操作";
-      case "timeline.redo": return timeline?.can_redo ? undefined : "没有可重做的操作";
-      case "timeline.split": if (!selectedClips.length) return "请先选择时间线片段"; return splitSelectionAt(selectedClips, playheadStore.get(), working).length ? undefined : "请把播放头移到可拆分的选中视频片段内";
-      case "timeline.copy": if (!timeline) return "需要时间线"; if (selectedClips.length === 0) return "请先选择要复制的片段"; return undefined;
-      case "timeline.cut": if (!timeline) return "需要时间线"; if (selectedClips.length === 0 && !selectedCaption) return "请先选择要剪切的片段"; return undefined;
-      case "timeline.paste": if (!clipboardClips.current.length) return "剪贴板为空，请先复制片段"; if (!project || !timeline) return "需要项目和时间线"; return insertableClipboardAssets(clipboardClips.current).length === clipboardClips.current.length ? undefined : "部分素材不可用或类型不支持粘贴";
-      case "timeline.delete": if (!timeline) return "需要时间线"; if (selectedClips.length === 0 && !selectedCaption) return "请先选择要删除的对象"; return undefined;
-      case "preview.generate": return renderDisabledReason ?? undefined;
-      case "export.open": return undefined;
-      case "ai.open": return project && timeline ? undefined : "需要项目和时间线";
-      case "ai.revise": return timeline ? undefined : "需要时间线";
-      case "project.manage": return undefined;
-      case "project.refresh": return undefined;
-      case "timeline.create": return project ? timeline ? "时间线已存在" : undefined : "需要项目";
-      case "ui.resetLayout": return undefined;
-      case "ui.shortcuts": return undefined;
-      case "tools.compare": return project ? undefined : "需要项目";
-      case "tools.shots": return !project ? "需要项目" : project.status !== "active" ? "项目已归档" : undefined;
-      case "tools.verify": return !project ? "需要项目" : project.status !== "active" ? "项目已归档" : undefined;
-      case "tools.imageGen": return !project ? "需要项目" : project.status !== "active" ? "项目已归档" : undefined;
-      case "help.manual": return undefined;
-      case "command.search": return undefined;
-      default: return "未知命令";
-    }
+  const commandContextRef = useRef<CommandRuntimeContext>(null!);
+  commandContextRef.current = {
+    project,
+    isCurrentProject: projectId => projectRef.current?.project_id === projectId,
+    timeline,
+    working,
+    selectedClips,
+    selectedCaption,
+    trackById,
+    visualClips,
+    previewAssetMediaUrl: previewAsset?.media_url,
+    playhead,
+    playheadStore,
+    clipboardClips: clipboardClips.current,
+    setClipboardClips: next => { clipboardClips.current = next; },
+    areClipboardAssetsInsertable: snapshots => insertableClipboardAssets(snapshots).length === snapshots.length,
+    undoRedoInFlightRef: undoRedoInFlight,
+    acceptState,
+    clearPendingDraft: () => {
+      pendingDraftRef.current = null;
+      if (draftTimer.current) clearTimeout(draftTimer.current);
+    },
+    setSaveState,
+    handleConflict,
+    showNotice,
+    togglePlayback,
+    exitLibraryPreview,
+    seekFromUser,
+    seekWhileScrubbing,
+    renderDisabledReason,
+    generatePreview: options => generatePreview(options),
+    createExport: payload => createExport(payload),
+    openRenderPanel: () => setRenderPanelOpen(true),
+    openAi: () => openAi(),
+    openPatch: () => openPatch(),
+    openProjectManager: () => setProjectDialogOpen(true),
+    refreshProjects: () => refreshProjects(),
+    resetLayout: () => { setLeftWidth(320); setRightWidth(300); setTimelineHeight(230); },
+    openShortcuts: () => setShortcutsOpen(true),
+    openRevisionCompare: () => openRevisionCompare(),
+    openShotRequirements: () => setShotRequirementsOpen(true),
+    openGeneration: () => setGenerationOpen(true),
+    openImageGeneration: () => setProviderImageGenerationOpen(true),
+    openCommandSearch: () => setCommandSearchOpen(true),
   };
+  const commandDispatcher = useMemo(() => createEditorCommandDispatcher(() => commandContextRef.current), []);
+
+  const commandDisabledReason = (id: EditorCommand["id"]): string | undefined => commandDispatcher.disabledReason(id);
 
   const runCommand = (id: EditorCommand["id"]) => {
-    if (commandDisabledReason(id)) return;
-    switch (id) {
-      case "play.pause": togglePlayback(); break;
-      case "timeline.undo": void undoRedo("undo"); break;
-      case "timeline.redo": void undoRedo("redo"); break;
-      case "timeline.split": {
-        const operations = splitSelectionAt(selectedClips, playheadStore.get(), working);
-        if (operations.length) void patchTimeline(operations, "在播放头处拆分");
-        break;
-      }
-      case "timeline.copy": {
-        // P231 Q2：复制扩展到全视觉轨（不再限定 V1）。
-        const snapshot = selectedClips
-          .filter(item => (item.asset_kind === "video" || item.asset_kind === "image") && trackById.get(item.track_id)?.kind === "video")
-          .map(item => ({
-            asset_id: item.asset_id,
-            asset_kind: item.asset_kind as "video" | "image",
-            source_start_us: item.source_start_us,
-            source_end_us: item.source_end_us,
-            speed_milli: item.speed_milli ?? 1000,
-            reverse_playback: item.reverse_playback ?? false,
-            layout: item.layout,
-          }));
-        clipboardClips.current = snapshot;
-        if (snapshot.length) showNotice(`已复制 ${snapshot.length} 个片段（应用内剪贴板）。`, "info");
-        break;
-      }
-      case "timeline.cut": {
-        if (selectedClips.some(item => item.link_group_id)) {
-          showNotice("链接片段暂不支持剪切粘贴，请先取消链接。", "info");
-          break;
-        }
-        // 复用复制快照逻辑后按删除路径移除（撤销可恢复）。
-        // P231 Q2：剪切扩展到全视觉轨（不再限定 V1）。
-        const snapshot = selectedClips
-          .filter(item => (item.asset_kind === "video" || item.asset_kind === "image") && trackById.get(item.track_id)?.kind === "video" && !working?.locked_elements?.includes(item.clip_id))
-          .map(item => ({
-            asset_id: item.asset_id,
-            asset_kind: item.asset_kind as "video" | "image",
-            source_start_us: item.source_start_us,
-            source_end_us: item.source_end_us,
-            speed_milli: item.speed_milli ?? 1000,
-            reverse_playback: item.reverse_playback ?? false,
-            layout: item.layout,
-          }));
-        const prefs = readTimelineBehaviorPrefs();
-        const cutPlan = prefs.mainTrackMagnet && working && selectedClips.some(clip => clip.track_id === "V1")
-          ? planMagneticDelete(working, selectedClips, prefs.linkageEnabled)
-          : { operations: removeLinkedClips(selectedClips, working) };
-        const deletable = cutPlan.operations;
-        if (!deletable.length) { if (cutPlan.reason) showNotice(cutPlan.reason, "info"); break; }
-        clipboardClips.current = snapshot;
-        void patchTimeline(deletable, prefs.mainTrackMagnet ? "主轨磁吸剪切" : "剪切片段").then(() => showNotice(`已剪切 ${deletable.length} 组片段（Ctrl+V 粘贴）。`));
-        break;
-      }
-      case "timeline.paste": {
-        const insertable = insertableClipboardAssets(clipboardClips.current);
-        if (!project || !timeline || !insertable.length) return;
-        // 粘贴位置：播放头处片段的 V1 序号（无片段则取播放头前序，末端追加为兜底）。
-        const pasteIndex = (() => {
-          // P231 Q2：粘贴位置按全视觉轨序号（不再限定 V1）。
-          const atHead = visualClips.findIndex(c => playhead >= c.timeline_start_us && playhead < c.timeline_end_us);
-          if (atHead >= 0) return atHead + 1;
-          const before = visualClips.filter(c => c.timeline_end_us <= playhead).length;
-          return Math.min(before, visualClips.length);
-        })();
-        let cursor = pasteIndex;
-        const operations: TimelinePatchOperation[] = insertable.map(snapshot => ({
-          op: "insert_asset_clip",
-          asset_id: snapshot.asset_id,
-          at_index: cursor++,
-          ...(snapshot.asset_kind === "image"
-            ? { duration_us: 3_000_000 }
-            : { source_start_us: snapshot.source_start_us ?? undefined, source_end_us: snapshot.source_end_us ?? undefined, speed_milli: snapshot.speed_milli !== 1000 ? snapshot.speed_milli : undefined, reverse_playback: snapshot.reverse_playback || undefined }),
-        }));
-        void patchTimeline(operations, "粘贴片段").then(() => showNotice("已粘贴到播放头位置。", "success"));
-        break;
-      }
-      case "timeline.delete":
-        if (selectedCaption) void patchTimeline([{ op: "remove_caption", caption_id: selectedCaption.caption_id }], "删除字幕");
-        else if (selectedClips.length > 0) {
-          const prefs = readTimelineBehaviorPrefs();
-          const plan = prefs.mainTrackMagnet && working && selectedClips.some(clip => clip.track_id === "V1")
-            ? planMagneticDelete(working, selectedClips, prefs.linkageEnabled)
-            : { operations: removeLinkedClips(selectedClips, working) };
-          if (plan.operations.length > 0) void patchTimeline(plan.operations, prefs.mainTrackMagnet ? "主轨磁吸删除" : "删除片段");
-          else if (plan.reason) showNotice(plan.reason, "info");
-        }
-        break;
-      case "preview.generate": void generatePreview(); break;
-      case "export.open": setRenderPanelOpen(true); break;
-      case "ai.open": void openAi(); break;
-      case "ai.revise": void openPatch(); break;
-      case "project.manage": setProjectDialogOpen(true); break;
-      case "project.refresh": void refreshProjects(); break;
-      case "timeline.create": void createTimeline({ kind: "empty" }); break;
-      case "ui.resetLayout": setLeftWidth(320); setRightWidth(300); setTimelineHeight(230); break;
-      case "ui.shortcuts": setShortcutsOpen(true); break;
-      case "tools.compare": void openRevisionCompare(); break;
-      case "tools.shots": setShotRequirementsOpen(true); break;
-      case "tools.verify": setGenerationOpen(true); break;
-      case "tools.imageGen": setProviderImageGenerationOpen(true); break;
-      case "help.manual": showNotice("请查看 docs/requirements/VORTEX_CUT_USER_MANUAL.md", "info"); break;
-      case "command.search": setCommandSearchOpen(true); break;
-    }
+    void commandDispatcher.dispatch(id, {});
   };
 
   const closeCommandSearch = () => { setCommandSearchOpen(false); setCommandQuery(""); setCommandIndex(0); };
@@ -715,14 +609,8 @@ export function App() {
     handleRecordKey,
     menuShortcut,
   } = useShortcuts({
-    working,
-    selectedClips,
     commandSearchOpen,
-    playheadStore,
-    runCommand: id => runCommand(id),
-    patchTimeline: (operations, summary) => patchTimeline(operations, summary),
-    exitLibraryPreview: () => exitLibraryPreview(),
-    seekFromUser: timeUs => seekFromUser(timeUs),
+    dispatchCommand: (id, payload) => commandDispatcher.dispatch(id, payload),
     showNotice: (text, tone) => showNotice(text, tone),
   });
 

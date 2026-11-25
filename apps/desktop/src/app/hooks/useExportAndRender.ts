@@ -28,6 +28,7 @@ import type {
 import type { ExportSettings } from "../ExportDialog.js";
 import type { NoticeTone, ReframeAnchor, ReframeSelections, RenditionTarget } from "../appHelpers.js";
 import { safeErrorMessage } from "../safeErrors.js";
+import type { CommandResult, ExportCreatePayload, PreviewGeneratePayload } from "../commands/types.js";
 
 export interface UseExportAndRenderParams {
   project: Project | undefined;
@@ -250,19 +251,23 @@ export function useExportAndRender({
     });
   };
 
-  const generatePreview = async () => {
-    if (!project || !timeline || !working?.clips.length) return;
+  const generatePreview = async (
+    options?: PreviewGeneratePayload,
+  ): Promise<CommandResult<{ reused: boolean; previewId: string | null; jobId: string | null }>> => {
+    if (!project) return { ok: false, command: "preview.generate", code: "PROJECT_REQUIRED", message: "需要项目" };
+    if (!timeline) return { ok: false, command: "preview.generate", code: "TIMELINE_REQUIRED", message: "需要时间线" };
+    if (!working?.clips.length) return { ok: false, command: "preview.generate", code: "TIMELINE_EMPTY", message: "时间线为空，无法生成预览" };
     if (timeline.draft) {
       showNotice("请先提交或丢弃草稿，再生成权威预览。", "warning");
-      return;
+      return { ok: false, command: "preview.generate", code: "DRAFT_PRESENT", message: "请先提交或丢弃草稿，再生成权威预览。" };
     }
     try {
       const result = await window.desktop.createPreview({
         project_id: project.project_id,
         preview: {
           timeline_revision_id: timeline.current_revision.timeline_revision_id,
-          encoder_mode: encoderMode,
-          output_ratio: getRenderRatio(),
+          encoder_mode: options?.encoderMode ?? encoderMode,
+          output_ratio: options?.outputRatio ?? getRenderRatio(),
         },
       });
       setPendingVerify(true);
@@ -274,8 +279,19 @@ export function useExportAndRender({
         trackRenderJob(result.job);
         setRenderPanelOpen(true);
       }
+      return {
+        ok: true,
+        command: "preview.generate",
+        data: {
+          reused: Boolean(result.reused),
+          previewId: result.preview?.preview.render_artifact_id ?? null,
+          jobId: result.job?.job_id ?? null,
+        },
+      };
     } catch (error) {
-      showNotice(safeErrorMessage(error, "操作未完成，请刷新后重试。"));
+      const message = safeErrorMessage(error, "操作未完成，请刷新后重试。");
+      showNotice(message);
+      return { ok: false, command: "preview.generate", code: "EXECUTION_FAILED", message };
     }
   };
 
@@ -301,22 +317,36 @@ export function useExportAndRender({
     setExportDialogOpen(true);
   };
 
-  const submitExport = async (grant: DestinationGrant | null, settings: ExportSettings) => {
-    if (!project || !timeline) return;
+  const createExport = async (
+    payload: ExportCreatePayload,
+    explicitGrant?: DestinationGrant | null,
+  ): Promise<CommandResult<{ jobId: string; exportRecordId: string | null }>> => {
+    if (!project) return { ok: false, command: "export.create", code: "PROJECT_REQUIRED", message: "需要项目" };
+    if (!timeline) return { ok: false, command: "export.create", code: "TIMELINE_REQUIRED", message: "需要时间线" };
+    if (!working?.clips.length) return { ok: false, command: "export.create", code: "TIMELINE_EMPTY", message: "时间线为空，无法导出" };
+    if (timeline.draft) {
+      showNotice("请先提交或丢弃草稿，再导出正式 Revision。", "warning");
+      return { ok: false, command: "export.create", code: "DRAFT_PRESENT", message: "请先提交或丢弃草稿，再导出正式 Revision。" };
+    }
     setExportBusy(true);
     try {
-      const selected = grant ?? (await window.desktop.chooseExportDestination(project.project_id, settings.fileName));
-      if (!selected) return;
+      const grantId = payload.destinationGrantId ?? explicitGrant?.destination_grant_id;
+      const selected = grantId
+        ? { destination_grant_id: grantId as DestinationGrant["destination_grant_id"] }
+        : await window.desktop.chooseExportDestination(project.project_id, payload.fileName ?? project.name);
+      if (!selected) {
+        return { ok: false, command: "export.create", code: "CANCELLED", message: "已取消选择导出目标" };
+      }
       const result = await window.desktop.createExport({
         project_id: project.project_id,
         export: {
           timeline_revision_id: timeline.current_revision.timeline_revision_id,
           destination_grant_id: selected.destination_grant_id,
-          encoder_mode: encoderMode,
-          output_ratio: getRenderRatio(),
-          quality: settings.quality,
-          resolution: settings.resolution,
-          frame_rate: settings.frameRate,
+          encoder_mode: payload.encoderMode ?? encoderMode,
+          output_ratio: payload.outputRatio ?? getRenderRatio(),
+          quality: payload.quality ?? exportQuality,
+          resolution: payload.resolution ?? exportResolution,
+          frame_rate: payload.frameRate ?? exportFrameRate,
         },
       });
       if (result.export_record) {
@@ -328,11 +358,33 @@ export function useExportAndRender({
       trackRenderJob(result.job);
       setRenderPanelOpen(true);
       setExportDialogOpen(false);
+      return {
+        ok: true,
+        command: "export.create",
+        data: {
+          jobId: result.job.job_id,
+          exportRecordId: result.export_record?.export_record.export_record_id ?? null,
+        },
+      };
     } catch (error) {
-      showNotice(safeErrorMessage(error, "操作未完成，请刷新后重试。"));
+      const message = safeErrorMessage(error, "操作未完成，请刷新后重试。");
+      showNotice(message);
+      return { ok: false, command: "export.create", code: "EXECUTION_FAILED", message };
     } finally {
       setExportBusy(false);
     }
+  };
+
+  const submitExport = async (grant: DestinationGrant | null, settings: ExportSettings) => {
+    await createExport(
+      {
+        fileName: settings.fileName,
+        quality: settings.quality,
+        resolution: settings.resolution,
+        frameRate: settings.frameRate,
+      },
+      grant,
+    );
   };
 
   const targetPreview = (target: RenditionTarget) =>
@@ -685,6 +737,7 @@ export function useExportAndRender({
     trackRenderJob,
     generatePreview,
     openExportDialog,
+    createExport,
     submitExport,
     targetPreview,
     openExportBatch,
