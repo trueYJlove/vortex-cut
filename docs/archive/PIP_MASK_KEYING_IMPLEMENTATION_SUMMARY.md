@@ -12,4 +12,4 @@ PIP 变换、clip 蒙版与色键作为可选字段沿 TimelinePatch、IR 和 FF
 - 该轮记录的 Core 测试数为 523 passed（历史数字，不代表当前测试规模）。
 - 验收复核修正了 PIP 位置从边缘坐标统一为中心点归一化坐标，并修复覆盖轨重构图分支引用错误；这些历史实现细节见 `apps/desktop` 与 Core 测试记录。
 
-原计划 §8 的限制清单含后来被 P231 重新设计的预览语义和旧实现边界；为避免把旧结论当成现状，本摘要不继续复制该清单。需要追溯当时的规格时，可看[多轨时间线设计](../design/M2_MULTI_TRACK_TIMELINE_DESIGN.md)、[自由定位设计](../design/M2_V1_FREE_POSITIONING_DESIGN.md)和[预览画布规划门](../requirements/P231_PREVIEW_CANVAS_PLANNING_GATE_2026-11-17.md)。
+原计划 §8 的限制清单含后来被 P231 重新设计的预览语义和旧实现边界；为避免把旧结论当成现状，本摘要不继续复制该清单。需要追溯当时的规格时，可看[多轨时间线设计](../design/TIMELINE_MULTI_TRACK_DESIGN.md)、[自由定位设计](../design/FREE_POSITIONING_DESIGN.md)和[预览引擎需求规格](../requirements/PREVIEW_ENGINE_SPEC.md)。

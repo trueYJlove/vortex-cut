@@ -1,6 +1,6 @@
 """WP-P232 素材级缩略图预抽（filmstrip sprite）。
 
-契约（FILMSTRIP_PRESHOOT_PLANNING_GATE_2026-11-17.md §2）：
+契约（docs/requirements/PREVIEW_ENGINE_SPEC.md §2.2）：
 - 产物 = 单列 JPEG sprite（格宽 160px）+ 旁挂 JSON 元数据
   {step_ms, cell_w, cell_h, count, duration_us}；
 - 生成 = ffmpeg 单进程：fps 选帧（step_ms 阶梯）→ tile 拼列 → mjpeg；

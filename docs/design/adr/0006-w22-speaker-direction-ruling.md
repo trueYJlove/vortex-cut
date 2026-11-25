@@ -5,7 +5,7 @@
 - 记录人：LiuWei（架构师）
 - 决策人：用户（产品负责人）于 2026-10-14 批准（"接受。同意"）
 - 关联：`W2_2_SPEAKER_LAYER_DESIGN_GATE_2026-10-11.md` §5.9–§5.12、§10 O4/O6；
-  `docs/STATUS.md` §4 P117–P120；`AI_CAPABILITY_MASTER_PLAN_2026-09-24.md` §6 W2.2/W2.3
+  `docs/STATUS.md` §4 P117–P120；`AI_CAPABILITY_MASTER_PLAN.md` §6 W2.2/W2.3
 - 证据：`evidence/2026-10-14-w22-k-direction-ruling/`（`decompose.py` + `decomposition.json`，
   **全部输入为已归档证据**，可任何机器复算）
 - 实施：ZhangSan（Core）；验收：LiuKeAi

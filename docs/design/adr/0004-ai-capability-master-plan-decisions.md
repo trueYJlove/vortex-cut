@@ -4,12 +4,12 @@
 - 日期：2026-09-24
 - 记录人：LiuWei（架构师），基于 2026-09-24 方向讨论与代码级走读
 - 决策人：用户（产品负责人）于 2026-09-24 批准全部九项，采纳建议方案
-- 关联：ADR-0003（AI 方向与隐私硬承诺，D1–D6 不变）、`docs/design/AI_CAPABILITY_MASTER_PLAN_2026-09-24.md`（本 ADR 为其 §14 决策登记表的固化）
+- 关联：ADR-0003（AI 方向与隐私硬承诺，D1–D6 不变）、`docs/design/AI_CAPABILITY_MASTER_PLAN.md`（本 ADR 为其 §14 决策登记表的固化）
 - 执行：W0.3 由 ZhangSan（Core）实施；W1.4/W2.3 依赖本 ADR 的 D1、D2、D7
 
 ## 背景
 
-`docs/design/AI_CAPABILITY_MASTER_PLAN_2026-09-24.md` §14 登记了九项需用户裁决的架构决策。这些决策
+`docs/design/AI_CAPABILITY_MASTER_PLAN.md` §14 登记了九项需用户裁决的架构决策。这些决策
 共同约束 Wave 0–4 的全部工作包，且其中多项**改变既有行为或数据模型**，不能由实施方自行决定。
 用户于 2026-09-24 批准全部九项，均采纳总纲建议方案。本 ADR 将其固化为可引用的门禁依据。
 

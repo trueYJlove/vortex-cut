@@ -274,9 +274,9 @@ def test_live_docs_are_not_exempted_by_section6() -> None:
         "README.md",
         "ARCHITECTURE.md",
         "docs/requirements/BRAND_BASELINE.md",
-        "docs/requirements/M2_ROADMAP.md",
+        "docs/requirements/PRODUCT_ROADMAP.md",
         "docs/requirements/VORTEX_CUT_USER_MANUAL.md",
-        "docs/design/AI_CAPABILITY_MASTER_PLAN_2026-09-24.md",
+        "docs/design/AI_CAPABILITY_MASTER_PLAN.md",
     ]
     exempted = [p for p in live_docs if (REPO / p).resolve() in historical]
     assert not exempted, f"以下活文档被 §6 误豁免：{exempted}"
@@ -356,14 +356,18 @@ def test_markdown_relative_links_exist() -> None:
 
 
 _ACTIVE_SPEC_DIRS = ("docs/requirements", "docs/design")
+_INDEXED_DOC_DIRS = ("docs/requirements", "docs/design", "docs/plans")
 _MAX_ACTIVE_SPECS_PER_DIR = 20
 _PROCESS_SPRAWL_TOKENS = ("_IMPLEMENTATION_", "_VALIDATION_", "_HANDOFF", "_ROUND")
+_DISALLOWED_SPEC_PREFIX_RE = re.compile(r"^(?:M2_|W\d|WAVE\d|P\d+)")
+_DISALLOWED_SPEC_DATE_RE = re.compile(r"20\d{2}-\d{2}-\d{2}")
+_DISALLOWED_GATE_TOKENS = ("_PLANNING_GATE", "_DESIGN_GATE")
 
 
 def test_active_docs_are_all_indexed() -> None:
-    """活跃需求/设计目录下的所有顶层 Markdown 都必须在该目录 README.md 中建立索引。"""
+    """活跃需求、设计与计划目录下的所有顶层 Markdown 都必须在该目录 README.md 中建立索引。"""
     missing: list[str] = []
-    for rel_dir in _ACTIVE_SPEC_DIRS:
+    for rel_dir in _INDEXED_DOC_DIRS:
         spec_dir = REPO / rel_dir
         readme = spec_dir / "README.md"
         assert readme.is_file(), f"缺少目录索引文件：{rel_dir}/README.md"
@@ -404,4 +408,28 @@ def test_no_process_sprawl_in_active_dirs() -> None:
     assert not violations, (
         "活跃目录存在过程流水文件，应合并后删除或迁入 docs/archive/（AGENTS.md Rule 7/8）：\n  "
         + "\n  ".join(violations)
+    )
+
+
+def test_active_docs_follow_clean_naming() -> None:
+    """活跃需求/设计规格须使用稳定领域名：禁带日期戳、迭代/工单前缀与过程门后缀。"""
+    bad: list[str] = []
+    for rel_dir in _ACTIVE_SPEC_DIRS:
+        spec_dir = REPO / rel_dir
+        for md_path in sorted(spec_dir.glob("*.md")):
+            name = md_path.name
+            if name == "README.md":
+                continue
+            reasons: list[str] = []
+            if _DISALLOWED_SPEC_DATE_RE.search(name):
+                reasons.append("含日期戳")
+            if _DISALLOWED_SPEC_PREFIX_RE.match(name):
+                reasons.append("含 M2/W*/WAVE*/P* 前缀")
+            if any(tok in name for tok in _DISALLOWED_GATE_TOKENS):
+                reasons.append("含 *_GATE 后缀")
+            if reasons:
+                bad.append(f"{rel_dir}/{name} ({', '.join(reasons)})")
+    assert not bad, (
+        "以下活跃规格命名不符合 AGENTS.md Rule 8（进行中提案请放 docs/plans/）：\n  "
+        + "\n  ".join(bad)
     )

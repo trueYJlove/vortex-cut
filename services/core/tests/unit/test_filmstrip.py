@@ -1,6 +1,6 @@
 """WP-P232 filmstrip 生成纯函数 + 作业体校验（不进真实 FFmpeg）。
 
-验收映射（FILMSTRIP_PRESHOOT_PLANNING_GATE_2026-11-17.md §5）：
+验收映射（docs/requirements/PREVIEW_ENGINE_SPEC.md §2.4）：
 - a) 阶梯取整：80→100、120→200、210→250、1500→2000、0/负→1000；
 - b) ffmpeg 参数：fps=1000/step、tile=1xN、-q:v 5、mjpeg 管道；
 - c) JPEG 尺寸解析：SOF0 段读取；

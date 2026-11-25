@@ -1,6 +1,6 @@
 """W3.1 素材池语义检索——纯算法层（零 I/O、零数据库）。
 
-规划门：`docs/requirements/W3_1_SEMANTIC_SEARCH_PLANNING_GATE_2026-10-18.md` §2.3 / §2.4。
+规划门：`docs/requirements/SEMANTIC_SEARCH_SPEC.md` §2.3 / §2.4。
 
 分工：本模块只做**可单测的纯函数**（向量归一、场景聚合、余弦排序），
 解码/ONNX/落库均在 `semantic_index_service.py`——与 `beat_grid.py` /

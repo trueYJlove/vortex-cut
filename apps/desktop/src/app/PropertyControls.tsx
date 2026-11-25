@@ -7,7 +7,7 @@ import iwStyles from "../ui/of/InspectorWorkspace.module.css";
 /**
  * 属性面板 v2 控件集（页签容器 + 行/步进器/滑杆/开关/分段/徽章）。
  *
- * 信息架构与视觉规格对齐 docs/design/ui-mockups/property-panel/DESIGN.md（§1 IA、§9 视觉规范）：
+ * 信息架构与视觉规格对齐 docs/design/PROPERTY_PANEL_DESIGN.md（§1 IA、§9 视觉规范）：
  * - 顶层页签 PanelTabs（44px、激活主色 + 底部指示条）；
  * - 子页签 SubTabs（胶囊式，可带「规划中」小字）；
  * - 行 PRow（高 32、标签列 56）+ 分组 PGroup（悬停重置、可折叠占位组）；

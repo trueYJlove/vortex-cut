@@ -4,7 +4,7 @@
 - 日期：2026-09-20
 - 记录人：AI 战略会话（基于 2026-09-20 产品定位讨论与代码库现状调研）
 - 决策人：用户（产品负责人）于 2026-09-20 批准大方向与隐私硬承诺
-- 关联：ADR-0002（架构结构债）、`ARCHITECTURE.md` 阶段规划、`docs/requirements/M2_ROADMAP.md`（"所有 UI 操作必须有对应程序化接口，供 AI Agent 调用"约束）
+- 关联：ADR-0002（架构结构债）、`ARCHITECTURE.md` 阶段规划、`docs/requirements/PRODUCT_ROADMAP.md`（"所有 UI 操作必须有对应程序化接口，供 AI Agent 调用"约束）
 
 ## 背景
 

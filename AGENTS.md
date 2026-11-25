@@ -186,23 +186,29 @@ Closing a gate or work package in `docs/STATUS.md` is not complete until its doc
   delete transient validation logs, round reports, handoffs, debug screenshots, and scratch spikes
   once merged.
 
-### Rule 8 — Active directories stay lean, indexed, and bounded
+### Rule 8 — Active directories stay lean, indexed, bounded, and cleanly named
 
-Every active `.md` file directly under `docs/requirements/` or `docs/design/` must be listed in
-that directory's `README.md`. Each active directory is capped at **20** top-level spec files
-(excluding `README.md`), `docs/STATUS.md` stays under **100 KiB** with zero closed (`✅`) rows in
-§4, and process-sprawl filenames (`*_IMPLEMENTATION_*`, `*_VALIDATION_*`, `*_HANDOFF*`, `*_ROUND*`)
-are forbidden outside `docs/archive/`.
+Every active `.md` file directly under `docs/requirements/`, `docs/design/`, or `docs/plans/` must
+be listed in that directory's `README.md`. `docs/requirements/` and `docs/design/` are each capped
+at **20** top-level living specs (excluding `README.md`); active in-progress/proposed plans belong
+in `docs/plans/` (deleted or moved into living specs once closed). `docs/STATUS.md` stays under
+**100 KiB** with zero closed (`✅`) rows in §4. Living spec filenames directly under
+`docs/requirements/` and `docs/design/` must use stable domain names: no date stamps
+(`20XX-XX-XX`), no milestone/wave/work-package prefixes (`M2_`, `W\d`, `WAVE\d`, `P\d+`), and no
+process suffixes (`_PLANNING_GATE`, `_DESIGN_GATE`, `*_IMPLEMENTATION_*`, `*_VALIDATION_*`,
+`*_HANDOFF*`, `*_ROUND*`, which belong in `docs/archive/` only when kept for reference).
 
 ### Enforcement
 
 - **Rule 2 & Rules 6–8** — enforced by `services/core/tests/unit/test_status_doc_consistency.py`,
   which checks STATUS §1 facts against code, scans live docs (excluding `docs/archive/`) for
   blacklisted stale claims, verifies Markdown relative links, enforces `< 100 KiB` and zero `✅`
-  rows in `STATUS.md` §4, requires every active doc to be indexed in its directory `README.md`,
-  caps `docs/requirements/` and `docs/design/` at `<= 20` active specs each, and rejects process
-  sprawl filenames in active directories. `services/core/tests/unit/test_keyframe_wording.py`
-  enforces W3.3 wording consistency across `docs/**/W3_3_*.md`. CI executes both via `pnpm test:python`
+  rows in `STATUS.md` §4, requires every active doc under `docs/requirements/`, `docs/design/`,
+  and `docs/plans/` to be indexed in its directory `README.md`, caps `docs/requirements/` and
+  `docs/design/` at `<= 20` living specs each, and rejects process sprawl, date stamps, or
+  milestone/ticket prefixes in active spec filenames. `services/core/tests/unit/test_keyframe_wording.py`
+  enforces W3.3 wording consistency across `docs/**/W3_3_*.md` and `docs/**/KEYFRAME_UNDERSTANDING_*.md`.
+  CI executes both via `pnpm test:python`
   (`uv run --locked --extra dev pytest services/core/tests/unit`). Run directly with:
   `uv run --locked --extra dev pytest services/core/tests/unit/test_status_doc_consistency.py services/core/tests/unit/test_keyframe_wording.py`.
 - **Python unit tests** — `pnpm run ci` covers lint / typecheck / Desktop tests / **Python unit

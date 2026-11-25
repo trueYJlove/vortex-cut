@@ -1,6 +1,6 @@
 """W2.1 机位同步：音频互相关 → 机位时间偏移表（本地、零 egress）。
 
-冻结口径见 docs/requirements/W2_1_CAMERA_SYNC_PLANNING_GATE_2026-10-10.md §2.1/§2.2（评审修订版）：
+冻结口径见 docs/requirements/CAMERA_SYNC_SPEC.md §2.1/§2.2（评审修订版）：
 - PCM：48kHz / 单声道（显式下混）/ f32le / 单遍流式（不复用 audio_chunks 的块路径）；
 - 算法：包络（10ms RMS）归一化互相关粗对齐 → 按粗对齐平移后取 2s 窗做样本级归一化互相关
   → 双窗一致性 → 归一化相关峰置信度阈值；
