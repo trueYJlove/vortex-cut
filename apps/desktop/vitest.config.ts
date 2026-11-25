@@ -26,7 +26,8 @@ export default defineConfig({
         "electron/main/restricted-media.ts",
         "electron/main/export-destination.ts",
         "electron/main/logging.ts",
-        "electron/preload/index.ts"
+        "electron/preload/index.ts",
+        "electron/preload/domains/*.ts"
       ],
       exclude: ["out/**", "coverage/**", "tests/**", "e2e/**", "scripts/**", "**/*.config.*"],
       thresholds: { statements: 82, lines: 82, functions: 68, branches: 72 }
