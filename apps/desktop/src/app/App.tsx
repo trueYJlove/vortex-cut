@@ -33,17 +33,12 @@ import { errorCode, safeErrorMessage, safeTaskErrorMessage } from "./safeErrors.
 import { formatLocalStamp } from "./localTime.js";
 import { PreviewPipOverlays, type PipOverlay, type PipTransform } from "./PreviewPipOverlays.js";
 import { SyntheticPreview } from "./preview/SyntheticPreview.js";
-import type { AssetDecodeBudget } from "./preview/preview-session.js";
-import { clampMediaRate, mediaRateIsPlayable } from "./preview/media-rate.js";
-import { PreviewSourceResolver } from "./preview/source-resolver.js";
 import { syntheticFallbackNotice } from "./preview/fallback-notice.js";
-import { FIT_VIEW, ZOOM_SETTLE_MS, createScrubTellGate, createWheelCoalescer, createZoomSettle, fittedSize, isFit, panBy, wheelPx, wheelZoomFactor, zoomAt, zoomLayout, zoomMax, type ViewerView } from "./preview/viewer-zoom.js";
+import { FIT_VIEW, ZOOM_SETTLE_MS, createWheelCoalescer, createZoomSettle, fittedSize, isFit, panBy, wheelPx, wheelZoomFactor, zoomAt, zoomLayout, zoomMax, type ViewerView } from "./preview/viewer-zoom.js";
 import { IDLE_PRESS, pickTopmostBox, reducePreviewPress, selectionFromOutcome, type HitBox, type PreviewPress } from "./preview/stage-interaction.js";
-import { WaveformCache } from "./timeline/waveform-cache.js";
 import { editorCommands, type EditorCommand } from "./editorCommands.js";
 import { bindingLabel, findConflict, loadShortcuts, matchesBinding, normalizeRecordedBinding, saveShortcuts, DEFAULT_SHORTCUTS, type ShortcutCommandId, type ShortcutEntry } from "./shortcuts.js";
 import { TimelinePanel } from "./timeline/TimelineCanvas.js";
-import { createPlayheadStore, type PlayheadStore } from "./timeline/playhead-store.js";
 import { splitSelectionAt } from "./timeline/split-point.js";
 import { removeLinkedClips } from "./timeline/linked-clips.js";
 import { planMagneticDelete, planRippleDelete, readTimelineBehaviorPrefs } from "./timeline/magnetic-plan.js";
@@ -101,59 +96,18 @@ import { useWorkspaceLayout } from "./hooks/useWorkspaceLayout.js";
 import { useAiWorkflows } from "./hooks/useAiWorkflows.js";
 import { useExportAndRender } from "./hooks/useExportAndRender.js";
 import { useAssetAndMediaLibrary } from "./hooks/useAssetAndMediaLibrary.js";
+import { usePreviewPlayback } from "./hooks/usePreviewPlayback.js";
 import { useProjectLifecycle } from "./hooks/useProjectLifecycle.js";
 
 export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [project, setProject] = useState<Project>();
   const [openProjectIds, setOpenProjectIds] = useState<Project["project_id"][]>([]);
-  // 素材箱双击预览：仅播放素材，不加入时间线。任何时间线交互都会退出该模式。
-  const [libraryPreviewId, setLibraryPreviewId] = useState<string | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
   // 轮询 effect 的闭包持有的是 effect 建立时的 jobs——活跃判定与终态对账
   // 都必须读最新值（hasActiveWork 同理），否则会以陈旧列表误判退避/终态。
   const jobsRef = useRef<Job[]>([]);
   jobsRef.current = jobs;
-  /** 代理就绪 → 清该素材的预览源解析缓存（方案 A：下次解析走代理，不重建
-   *  当前预览会话，因此不能走 state 触发重渲染）。 */
-  const invalidateProxySourceRef = useRef<(assetId: string) => void>(() => undefined);
-  /** **已请求过代理的素材集合**（本会话唯一台账）。两个登记点共用它：
-   *  1. 导入即转（importAsset——对 4K 素材仍然正确，Core 侧幂等去重）；
-   *  2. 实测解不动（预览 1Hz 上报的 decodeBudget 判定，本次修复的触发点）。
-   *  语义有两层：①「已登记作业」——代理就绪检测只认集合里的素材的 proxy 作业，
-   *  避免把项目里的无关历史 proxy 任务当成就绪信号；②「判定过」——同一素材最
-   *  多判定一次，不每帧发请求。就绪/失败终态时移出集合（见下面的 jobs effect）
-   *  = 允许下一轮再判，同时使 A3 提示的「已就绪」口径与此集合对齐。 */
-  const proxyJobAssetIdsRef = useRef<Set<string>>(new Set());
-  /** 代理作业已到终态的素材（成功 = 已就绪，失败 = 不重试）：按需判定据此
-   *  短路，避免「每秒判一次 → 每秒白打一次已被 Core 幂等挡下的请求」，
-   *  也避免失败作业被无限重试。与上面集合的分工：那个 = 「在途/待观察」，
-   *  这个 = 「已有结论」。 */
-  const proxyJobSettledAssetIdsRef = useRef<Set<string>>(new Set());
-  /** 请求一个素材的代理（项目就绪前没有端点可调，故经 ref 由渲染期注入）。
-   *  登记一律 fire-and-forget：代理是加速项，失败（无 FFmpeg / 不支持 / IPC
-   *  报错）绝不能影响播放，也不弹错误。 */
-  const requestProxyJobRef = useRef<(assetId: string) => void>(() => undefined);
-  /** 播放类桌面设置（导入即生成代理 / 代理分辨率档位）。默认值与桌面端
-   *  DEFAULT_SETTINGS 一致，读取失败时按默认值走——设置是优化项，不能阻塞编辑。 */
-  const [playbackSettings, setPlaybackSettings] = useState<{ auto: boolean; quality: "auto" | "540" | "720" | "1080" }>({ auto: true, quality: "auto" });
-  useEffect(() => {
-    let active = true;
-    void window.desktop.getSettings().then(state => {
-      if (!active) return;
-      // 防御：旧版本配置文件/旧夹具可能没有这两个字段，缺省按默认值走，
-      // 否则 undefined 会让「自动生成代理」被静默关掉。
-      const auto = typeof state.saved.preview_proxy_auto === "boolean" ? state.saved.preview_proxy_auto : true;
-      const quality = state.saved.preview_proxy_quality ?? "auto";
-      setPlaybackSettings({ auto, quality });
-    }).catch(() => undefined);
-    return () => { active = false; };
-  }, []);
-  /** A2：代理就绪计数（单调）。递增 = 请求预览把源切到代理；SyntheticPreview
-   *  拿它当会话重建信号，只在暂停（自然切换点）时消费，不打断播放。 */
-  const [proxyReadyEpoch, setProxyReadyEpoch] = useState(0);
-  /** A2：播放中挂起的代理切换（就绪了但还没到自然切换点）。 */
-  const proxySwitchPendingRef = useRef(false);
   const [models, setModels] = useState<ModelSummary[]>([]);
   const [timeline, setTimeline] = useState<TimelineState>();
   const [working, setWorking] = useState<TimelineDocument>();
@@ -164,20 +118,6 @@ export function App() {
   const [notice, setNotice] = useState<Notice>("");
   const [newProject, setNewProject] = useState("");
   const [newProjectRatio, setNewProjectRatio] = useState("916");
-  const [playing, setPlaying] = useState(false);
-  const [playhead, setPlayhead] = useState(0);
-  // 播放头命令存储（A06）：预览每帧写入（高频、不驱动 React 全树重渲染）；
-  // `playhead` 10Hz 状态只喂 App 自身的时间显示/属性面板。用户 seek 统一走
-  // seekFromUser（递增 requestId，旧回传按 ID 作废），播放回传走 seekFromPlayback。
-  const playheadStoreRef = useRef<PlayheadStore | null>(null);
-  if (!playheadStoreRef.current) playheadStoreRef.current = createPlayheadStore();
-  const playheadStore = playheadStoreRef.current;
-  // 默认交互预览；合成预览经工具栏切换（Phase 2：手势层迁移完成 + 测试基建
-  // 更新后再设为默认——默认翻转需同步更新大量假设交互默认的测试）。
-  // 默认合成预览（Phase 2 主预览）：所见即所得；IR 不支持/不可用时自动回退
-  // 交互预览（onFallback → 内联 syntheticNote，不打全局告警）。
-  const [previewMode, setPreviewMode] = useState<"interactive" | "authoritative" | "synthetic">("synthetic");
-  const [syntheticNotice, setSyntheticNotice] = useState<string | null>(null);
   const [previewRatio, setPreviewRatio] = useState("fit");
   const [previewRatioTouched, setPreviewRatioTouched] = useState(false);
   // Provider 设置独立入口：Provider 是各 AI 功能共用的前置，不再藏在 AI 粗剪里。
@@ -222,31 +162,6 @@ export function App() {
   shortcutsRef.current = shortcuts;
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [recordingId, setRecordingId] = useState<ShortcutCommandId | null>(null);
-  const [volume, setVolume] = useState(80);
-  // 播放设置（2026-11-11 对齐 OpenFilm PlaybackMenu）：循环 + 全局倍速。
-  // uiRate 只作用于预览播放节奏（交互时钟步长 / 媒体 playbackRate / 播放头直线），
-  // 不写进时间线文档——它是播放器属性，不是剪辑属性。
-  const [loopPlayback, setLoopPlayback] = useState(false);
-  const [playbackRange, setPlaybackRange] = useState<TimeRange | null>(null);
-  const loopRestartTimer = useRef<number | null>(null);
-  const loopSeekEpoch = useRef(0);
-  const loopSeekPending = useRef(false);
-  const cancelLoopRestart = () => {
-    loopSeekEpoch.current += 1;
-    loopSeekPending.current = false;
-    if (loopRestartTimer.current !== null) window.clearTimeout(loopRestartTimer.current);
-    loopRestartTimer.current = null;
-  };
-  useEffect(() => () => cancelLoopRestart(), [project?.project_id]);
-  const [uiRate, setUiRate] = useState(1);
-  // scrub 直通（2026-11-11）：拖拽风暴中绕过 React 提交直接驱动预览会话——
-  // dev 构建下每次 setPlayhead 触发整树提交（实测 ~36ms/次）是「拖动像快进
-  // 卡顿」的主因。prod 下提交便宜，此通道同样减少主线程抖动。
-  const previewSessionRef = useRef<{ seekToFrame(target: number): Promise<number>; play(): void; pause(): void; beginScrubStorm(): void; endScrubStorm(): void; getMeterSamples?(): readonly [Float32Array, Float32Array] | null } | null>(null);
-  const preparePreviewPlaybackRef = useRef<(() => void) | null>(null);
-  const lastDirectSeekFrameRef = useRef(-1);
-  const volumeRef = useRef(volume);
-  const [progressDragging, setProgressDragging] = useState(false);
   const [previewZoom, setPreviewZoom] = useState<number | "fit">("fit");
   const [viewerView, setViewerView] = useState<ViewerView>(FIT_VIEW);
   const [zoomDrawn, setZoomDrawn] = useState(1);
@@ -258,19 +173,15 @@ export function App() {
   const previewClickGuardRef = useRef(false);
   const pressRafRef = useRef(0);
   const previewFrameRef = useRef<HTMLDivElement | null>(null);
-  const scrubTellGate = useRef(createScrubTellGate(15, () => performance.now()));
   const [isFullscreen, setIsFullscreen] = useState(false);
   const stagePaneRef = useRef<HTMLElement | null>(null);
   const stageColumnRef = useRef<HTMLDivElement | null>(null);
-  const progressRef = useRef<HTMLDivElement | null>(null);
-  const volRailRef = useRef<HTMLDivElement | null>(null);
   // 画面选中框：白色边框 + 8 向拖拽手柄（角等比 / 边单轴），缩放时随画面一起缩放。
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const selBoxRef = useRef<HTMLDivElement | null>(null);
   const [canvasSize, setCanvasSize] = useState<{ w: number; h: number } | null>(null);
   const [selDimsText, setSelDimsText] = useState("");
   const selDragRef = useRef<{ dir: string; startX: number; startY: number; w: number; h: number; ratio: number } | null>(null);
-  const [vuEpoch, setVuEpoch] = useState(0);
   const applyShortcuts = (next: Record<ShortcutCommandId, ShortcutEntry>) => { setShortcuts(next); saveShortcuts(next); };
   const handleRecordKey = (event: React.KeyboardEvent, id: ShortcutCommandId) => {
     event.preventDefault();
@@ -296,29 +207,46 @@ export function App() {
   // （projects.py 的 UPDATE projects），若共用代次，排队中的草稿会在这些
   // 时刻被当成"内容已取代"静默丢弃。
   const timelineFetchSeq = useRef(0);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const pendingSeekRef = useRef<number | null>(null);
-  // B16b：编辑器负载上报（playing/scrubbing/idle）——状态转换即时推送 +
-  // 1s 保活（Main 侧 lease 心跳消费；Renderer 崩溃 = 无推送 = Core TTL
-  // 过期回 idle，不永久饿死后台任务）。推送失败静默（辅助通道）。
-  useEffect(() => {
-    const mode = progressDragging ? "scrubbing" : playing ? "playing" : "idle";
-    const push = () => {
-      window.desktop.updateEditorLoad(mode).catch(() => undefined);
-    };
-    push();
-    const keepAlive = window.setInterval(push, 1_000);
-    return () => {
-      window.clearInterval(keepAlive);
-    };
-  }, [playing, progressDragging]);
   // resize 与 timelineHeight 跟随视口已拆入 hooks/useWorkspaceLayout.ts
   // A08：loadProjectData 摘要优先与请求代次/票据重试状态
   const projectDataEpochRef = useRef(0);
-  const seenAnyTicketRef = useRef(false);
-  const noTicketRetryRef = useRef(0);
-  const noTicketFinalRetryRef = useRef(false);
+  const selectedClip = selection?.kind === "clip" ? working?.clips.find(item => item.clip_id === selection.id) : undefined;
+  const selectedCaption = selection?.kind === "caption" ? working?.captions.find(item => item.caption_id === selection.id) : undefined;
+  const selectedTransition = selection?.kind === "transition" ? working?.transitions?.find(item => item.transition_id === selection.id) : undefined;
+  const selectedClipIds =
+    selection?.kind === "clip"
+      ? [selection.id]
+      : selection?.kind === "clips"
+        ? selection.ids
+        : [];
+  const selectedClips = selectedClipIds
+    .map(id => working?.clips.find(item => item.clip_id === id))
+    .filter((item): item is TimelineClip => Boolean(item));
+  const sortedClips = useMemo(() => [...(working?.clips ?? [])].sort((a, b) => a.order_index - b.order_index), [working?.clips]);
+  /** S8：zRank 唯一来源 = working.tracks 数组索引（0=最上层），与 Core layers
+   *  下层先画/上层后画的绘制序同源；绝不按 document.clips / order_index 取 z 序。 */
+  const trackIndexByClipId = useMemo(() => {
+    const tracks = working?.tracks ?? [];
+    const rank = new Map(tracks.map((track, index) => [track.id, index]));
+    return new Map((working?.clips ?? []).map(clip => [clip.clip_id, rank.get(clip.track_id) ?? tracks.length]));
+  }, [working?.tracks, working?.clips]);
+  // 时间线终点（所有片段最大 timeline_end）：播放到达即停，标尺停在末尾。
+  const timelineEndUs = useMemo(() => sortedClips.reduce((max, c) => Math.max(max, c.timeline_end_us), 0), [sortedClips]);
+  const tracksAtPlayhead = working?.tracks ?? [];
+  const trackById = useMemo(() => new Map(tracksAtPlayhead.map(track => [track.id, track])), [tracksAtPlayhead]);
+  // P231：全视觉轨片段（含 V1）用于粘贴位置序号（Q2 裁决：copy/cut/paste
+  // 扩展到全视觉轨）。a1Clips 保留（音频轨独立语义）。
+  const visualClips = useMemo(() => sortedClips.filter(c => {
+    const track = trackById.get(c.track_id);
+    return track?.kind === "video";
+  }), [sortedClips, trackById]);
+  const anySoloTrack = tracksAtPlayhead.some(track => track.solo);
+  /** 轨道级声音开关：静音关闭；存在独奏轨道时仅独奏轨出声。 */
+  const isClipAudible = useCallback((clip: TimelineClip) => {
+    const track = trackById.get(clip.track_id);
+    if (!track) return clip.audio.enabled;
+    return clip.audio.enabled && !track.muted && (!anySoloTrack || track.solo);
+  }, [trackById, anySoloTrack]);
   const {
     assets, setAssets, assetsRef, assetsMirrorTruncatedRef,
     assetQuery, setAssetQuery, assetFilter, setAssetFilter,
@@ -358,8 +286,55 @@ export function App() {
     createTimeline: source => createTimeline(source),
     loadProjectData: selected => loadProjectData(selected),
     ensureFilmstripForAsset: assetId => ensureFilmstripForAsset(assetId),
-    requestProxyJob: assetId => requestProxyJobRef.current(assetId),
+    requestProxyJob: assetId => requestProxyJob(assetId),
     exitLibraryPreview: () => exitLibraryPreview(),
+    showNotice: (text, tone) => showNotice(text, tone),
+  });
+  const {
+    libraryPreviewId, setLibraryPreviewId,
+    playbackSettings, setPlaybackSettings,
+    proxyReadyEpoch,
+    requestProxyJob, onDecodeBudget,
+    playing, setPlaying,
+    playhead, setPlayhead,
+    playheadStore,
+    previewMode, setPreviewMode,
+    syntheticNotice, setSyntheticNotice,
+    volume, setVolume, volumeRef,
+    loopPlayback, setLoopPlayback,
+    playbackRange, setPlaybackRange,
+    uiRate, setUiRate,
+    previewSessionRef, preparePreviewPlaybackRef,
+    progressDragging, setProgressDragging,
+    progressRef, volRailRef, pgBubbleRef, pgFillRef, tcTimeRef,
+    videoRef, audioRef,
+    resetPreviewOnProjectSwitch,
+    clipAtPlayhead, audioClipAtPlayhead,
+    previewAsset, mainTransformStyle, audioAsset,
+    previewReverse, interactiveMediaRatePlayable,
+    seenAnyTicketRef, loopSeekPending, cancelLoopRestart,
+    meterLevels, visibleCaption, totalUs, previewFps, progressPct,
+    togglePlayback, dispatchPlayhead, seekWhileScrubbing, commitScrub, seekFromUser, seekFromPlayback,
+    handlePreviewEnded, handleVideoEnded,
+    timelineAssetMedia, ensureFilmstripForAsset,
+    syntheticMediaUrls, projectStateReady, previewSourceResolver,
+    waveformCache, syntheticAudioByClip, syntheticPipClips,
+    gestureHoldRef, pausePreviewPlayback, resumePreviewPlayback,
+    previewFromLibrary, exitLibraryPreview,
+    scrubFromProgress, seekFromProgressRatio, seekFromProgress, seekVolumeFrom,
+  } = usePreviewPlayback({
+    project,
+    timeline,
+    working,
+    assets,
+    jobs,
+    sortedClips,
+    trackById,
+    timelineEndUs,
+    isClipAudible,
+    selectedCaption,
+    setExportPlayback: value => setExportPlayback(value),
+    loadProjectData: selected => loadProjectData(selected),
     showNotice: (text, tone) => showNotice(text, tone),
   });
   const {
@@ -422,15 +397,6 @@ export function App() {
     trackRenderJob,
     showNotice: (text, tone) => showNotice(text, tone),
   });
-  const resetPreviewOnProjectSwitch = () => {
-    setLibraryPreviewId(null);
-    setPlaying(false);
-    setSyntheticNotice(null);
-    setPreviewMode("synthetic");
-    seenAnyTicketRef.current = false;
-    noTicketRetryRef.current = 0;
-    noTicketFinalRetryRef.current = false;
-  };
   const {
     runtimeReady, resourceTier, forceCopyTo, loadProjectData,
     refreshProjects, switchProject, createProject,
@@ -478,580 +444,6 @@ export function App() {
     resetPreviewOnProjectSwitch,
     showNotice: (text, tone) => showNotice(text, tone),
   });
-  // 代理就绪检测已移至下面 useEffect；loadProjectData/loadRenderData/trackRenderJob 已由生命周期和渲染 Hook 提供。
-  useEffect(() => {
-    for (const job of jobs) {
-      const assetId = job.asset_id;
-      if (job.kind !== "proxy" || !assetId || !proxyJobAssetIdsRef.current.has(assetId)) continue;
-      if (job.status !== "succeeded" && job.status !== "failed") continue;
-      proxyJobAssetIdsRef.current.delete(assetId);
-      // 终态即结论：按需判定不再对这个素材发起第二次请求（成功 = 已有代理，
-      // 失败 = 不重试——重试只会在每次打开项目时白打一遍，见上面的注释）。
-      proxyJobSettledAssetIdsRef.current.add(assetId);
-      // 失败不改行为：解析仍回退原源（与 pending 同一条路径）。
-      if (job.status === "succeeded") {
-        // 先清解析缓存：下次装配 resolve 才能拿到代理票据。
-        invalidateProxySourceRef.current(assetId);
-        // A2：清缓存只影响「下次解析」，当前会话不会自己重新解析——必须重建。
-        // 播放中绝不动会话（当场断画面/音频），挂起等到非播放时刻再提交。
-        proxySwitchPendingRef.current = true;
-        if (!playing) {
-          proxySwitchPendingRef.current = false;
-          setProxyReadyEpoch(epoch => epoch + 1);
-        }
-      }
-    }
-  });
-  // A2：自然切换点提交——播放中挂起的代理切换，在暂停那一刻读成一次重建信号。
-  // 计数单调、每素材一次：提交即清挂起标记，不会形成重建循环。
-  useEffect(() => {
-    if (playing || !proxySwitchPendingRef.current) return;
-    proxySwitchPendingRef.current = false;
-    setProxyReadyEpoch(epoch => epoch + 1);
-  }, [playing]);
-  // 代理登记的唯一入口（导入即转 + 实测解不动共用）：去重、不阻塞、失败静默。
-  // 放在渲染期赋值而不是 effect 里——importAsset 可能在首个 effect 之前就被调用。
-  requestProxyJobRef.current = (assetId: string) => {
-    if (!project) return;
-    // 用户在设置里关掉「为大体素材生成代理」时不自动登记（显式重试路径仍可用）。
-    if (!playbackSettings.auto) return;
-    if (proxyJobAssetIdsRef.current.has(assetId)) return; // 判定/登记每素材最多一次
-    proxyJobAssetIdsRef.current.add(assetId);
-    // 档位：auto 交给 Core 按素材显示短边选（≤540→540，≤720→720，更大→1080），
-    // 用户在设置里选固定档位则显式指定。写死 1080 会让 4K 源按 1080 代理，
-    // 解码量翻倍、反而更卡。
-    const profile = playbackSettings.quality === "auto"
-      ? undefined
-      : (`preview-${playbackSettings.quality}-v1` as "preview-540-v1" | "preview-720-v1" | "preview-1080-v1");
-    void window.desktop.createPreviewSourceJob({
-      project_id: project.project_id, asset_id: assetId, ...(profile ? { profile_id: profile } : {}),
-    }).catch(() => undefined);
-  };
-  // 按需代理（本次修复的核心）：触发点从「导入瞬间」挪到「实测解不动」。
-  // SyntheticPreview 每秒把按 input_id 归因的耗时汇总成按 asset_id 的 p95 判定
-  // 上报（样本 <30 或 p95 ≤33.3ms 一律不转），这里只消费 over_budget 的素材。
-  // 已导入的素材走这条路 ⇒ 打开老项目也能在高清代理生成后自动切换。
-  const onDecodeBudget = useCallback((verdicts: AssetDecodeBudget[]) => {
-    for (const verdict of verdicts) {
-      if (!verdict.over_budget) continue;
-      // 已有结论（作业成功 = 代理就绪 / 失败 = 不重试）的素材不再判，免得
-      // 每秒白打一次已被 Core 幂等挡下的请求。
-      if (proxyJobSettledAssetIdsRef.current.has(verdict.asset_id)) continue;
-      requestProxyJobRef.current(verdict.asset_id);
-    }
-  }, []);
-  const selectedClip = selection?.kind === "clip" ? working?.clips.find(item => item.clip_id === selection.id) : undefined;
-  const selectedCaption = selection?.kind === "caption" ? working?.captions.find(item => item.caption_id === selection.id) : undefined;
-  const selectedTransition = selection?.kind === "transition" ? working?.transitions?.find(item => item.transition_id === selection.id) : undefined;
-  const selectedClipIds =
-    selection?.kind === "clip"
-      ? [selection.id]
-      : selection?.kind === "clips"
-        ? selection.ids
-        : [];
-  const selectedClips = selectedClipIds
-    .map(id => working?.clips.find(item => item.clip_id === id))
-    .filter((item): item is TimelineClip => Boolean(item));
-  const sortedClips = useMemo(() => [...(working?.clips ?? [])].sort((a, b) => a.order_index - b.order_index), [working?.clips]);
-  /** S8：zRank 唯一来源 = working.tracks 数组索引（0=最上层），与 Core layers
-   *  下层先画/上层后画的绘制序同源；绝不按 document.clips / order_index 取 z 序。 */
-  const trackIndexByClipId = useMemo(() => {
-    const tracks = working?.tracks ?? [];
-    const rank = new Map(tracks.map((track, index) => [track.id, index]));
-    return new Map((working?.clips ?? []).map(clip => [clip.clip_id, rank.get(clip.track_id) ?? tracks.length]));
-  }, [working?.tracks, working?.clips]);
-  // 时间线终点（所有片段最大 timeline_end）：播放到达即停，标尺停在末尾。
-  const timelineEndUs = useMemo(() => sortedClips.reduce((max, c) => Math.max(max, c.timeline_end_us), 0), [sortedClips]);
-  const tracksAtPlayhead = working?.tracks ?? [];
-  const trackById = useMemo(() => new Map(tracksAtPlayhead.map(track => [track.id, track])), [tracksAtPlayhead]);
-  // P231：全视觉轨片段（含 V1）用于粘贴位置序号（Q2 裁决：copy/cut/paste
-  // 扩展到全视觉轨）。a1Clips 保留（音频轨独立语义）。
-  const visualClips = useMemo(() => sortedClips.filter(c => {
-    const track = trackById.get(c.track_id);
-    return track?.kind === "video";
-  }), [sortedClips, trackById]);
-  const a1Clips = useMemo(() => sortedClips.filter(c => c.track_id === "A1"), [sortedClips]);
-  const anySoloTrack = tracksAtPlayhead.some(track => track.solo);
-  /** 轨道级声音开关：静音关闭；存在独奏轨道时仅独奏轨出声。 */
-  const isClipAudible = useCallback((clip: TimelineClip) => {
-    const track = trackById.get(clip.track_id);
-    if (!track) return clip.audio.enabled;
-    return clip.audio.enabled && !track.muted && (!anySoloTrack || track.solo);
-  }, [trackById, anySoloTrack]);
-  // P231 统一盒模型：预览背景 = 播放头处的**最上层视觉轨**片段（OpenFilm
-  // 语义：画布内容跟随主视觉内容）；空档 → 背景留黑（浮层悬浮于黑底之上，
-  // 对齐剪映）。Q1 裁决：取最上层视觉轨首片段（track 数组序 = z 序，上层在前）。
-  const visualTracksAtPlayhead = useMemo(
-    () => tracksAtPlayhead.filter(t => t.kind === "video" && !t.hidden),
-    [tracksAtPlayhead],
-  );
-  const clipAtPlayhead = useMemo(() => {
-    for (const track of visualTracksAtPlayhead) {
-      const clip = sortedClips.find(c => c.track_id === track.id && playhead >= c.timeline_start_us && playhead < c.timeline_end_us);
-      if (clip) return clip;
-    }
-    return undefined;
-  }, [visualTracksAtPlayhead, sortedClips, playhead]);
-  const audioClipAtPlayhead = a1Clips.length > 0 ? a1Clips.find(c => playhead >= c.timeline_start_us && playhead < c.timeline_end_us) : undefined;
-  const previewSpeedMilli = clipAtPlayhead?.speed_milli ?? (libraryPreviewId ? undefined : 1000);
-  const previewReverse = Boolean(clipAtPlayhead?.reverse_playback);
-  const interactiveMediaRate = previewReverse ? 1 : ((previewSpeedMilli ?? 1000) / 1000) * uiRate;
-  const interactiveMediaRatePlayable = mediaRateIsPlayable(interactiveMediaRate);
-  // 预览素材：素材箱预览优先；时间线交互预览只认播放头处的 V1 背景——
-  // 不回退到选中片段/首片段（否则 V1 空档时覆盖轨内容被错误地满屏铺底）。
-  const previewAsset = (libraryPreviewId ? assets.find(item => item.asset.asset_id === libraryPreviewId) : undefined) ?? (clipAtPlayhead ? assets.find(item => item.asset.asset_id === clipAtPlayhead.asset_id) : undefined);
-  // P1 扩展：主轨片段静态变换同样作用于交互预览（中心点语义，与渲染一致）。
-  const mainTransform = clipAtPlayhead?.transform;
-  const mainTransformStyle = mainTransform
-    ? { transform: `translate(${((mainTransform.x ?? 0.5) - 0.5) * 100}%, ${((mainTransform.y ?? 0.5) - 0.5) * 100}%) scale(${mainTransform.scale ?? 1}) rotate(${mainTransform.rotate ?? 0}deg)`, opacity: mainTransform.opacity ?? 1 }
-    : undefined;
-  const audioAsset = audioClipAtPlayhead ? assets.find(item => item.asset.asset_id === audioClipAtPlayhead.asset_id) : undefined;
-  useEffect(() => {
-    const media = videoRef.current;
-    if (media) {
-      if (pendingSeekRef.current !== null) { media.currentTime = pendingSeekRef.current; pendingSeekRef.current = null; }
-      // 交互预览跟随段速×全局速度；浏览器不支持的合速按播放头逐帧 seek。
-      media.playbackRate = clampMediaRate(interactiveMediaRate);
-      if (!libraryPreviewId && clipAtPlayhead) {
-        // 标尺跟随校正：播放头是唯一时钟，媒体时间与标尺偏差 >0.18s 时对齐——
-        // 防止内容错位（标尺在 A 片段却播着 B 片段内容）。
-        const sourceStart = (clipAtPlayhead.source_start_us ?? 0) / 1_000_000;
-        const speed = interactiveMediaRate;
-        const expected = sourceStart + ((playhead - clipAtPlayhead.timeline_start_us) / 1_000_000) * speed;
-        const threshold = interactiveMediaRatePlayable ? 0.18 : 1 / 30;
-        if (media.readyState >= 1 && Math.abs(media.currentTime - expected) > threshold) media.currentTime = Math.max(0, expected);
-      }
-      if (playing && (libraryPreviewId || clipAtPlayhead) && interactiveMediaRatePlayable) {
-        media.play().catch(() => {
-          // 预览模式切换后元素为全新挂载、媒体仍在加载：play 以 AbortError
-          // （interrupted by a new load request）被打断属瞬态——播放头时钟每
-          // 100ms 会重入本 effect 自动重试；仅真实解码错误（media.error）才停播。
-          // 此前无条件 setPlaying(false) → 权威预览切回交互后"无法播放"。
-          if (media.error) setPlaying(false);
-        });
-      } else {
-        media.pause();
-      }
-    }
-    const audio = audioRef.current;
-    if (audio) {
-      if (audioClipAtPlayhead && isClipAudible(audioClipAtPlayhead)) {
-        const sourceStart = (audioClipAtPlayhead.source_start_us ?? 0) / 1_000_000;
-        const elapsed = (playhead - audioClipAtPlayhead.timeline_start_us) / 1_000_000;
-        audio.currentTime = sourceStart + elapsed * ((audioClipAtPlayhead.speed_milli ?? 1000) / 1000);
-        const speed = ((audioClipAtPlayhead.speed_milli ?? 1000) / 1000) * uiRate;
-        audio.playbackRate = clampMediaRate(speed);
-        if (playing && mediaRateIsPlayable(speed)) void audio.play().catch(() => {}); else audio.pause();
-      } else {
-        audio.pause();
-      }
-    }
-  }, [playing, previewMode, previewAsset?.media_url, audioAsset?.media_url, playhead, previewSpeedMilli, previewReverse, audioClipAtPlayhead, isClipAudible, uiRate]);
-  // 音量动画（电平表）：挂接预览视频的实时输出电平，左右声道各一根跳动条。
-  // MediaElementAudioSourceNode 对同一元素只能创建一次且会接管出声路由，
-  // 因此音频图为按元素缓存的持久结构：暂停只停轮询，不销毁图（销毁会让元素永久失声）。
-  // 电平值直接写 DOM 高度，避免 60fps 触发整棵组件树重渲。
-  type VuGraph = { ctx: AudioContext; analyserL: AnalyserNode; analyserR: AnalyserNode; dataL: Uint8Array<ArrayBuffer>; dataR: Uint8Array<ArrayBuffer>; raf: number };
-  /* 参照 AudioMeters 要的是**时域**样本（算 peak/RMS），而现有 VU 用的是频域平均。
-     这里另开两块时域缓冲给电平表用，两者并存、互不影响。 */
-  const meterTimeL = useRef<Float32Array | null>(null);
-  const meterTimeR = useRef<Float32Array | null>(null);
-  /** 供 ui/of/AudioMeters 采样：返回左右两声道时域样本（−1…1），无图时返回 null。
-   *  ③电平表没动的根因：合成预览（用户主用模式）的音频在 PreviewSession 的音频图里，
-   *  而 vuGraphRef 挂的是权威预览 videoRef——合成模式下永远 null。改为优先读会话母线。 */
-  const meterLevels = useCallback((): readonly [Float32Array, Float32Array] | null => {
-    const sessionSamples = previewSessionRef.current?.getMeterSamples?.() ?? null;
-    if (sessionSamples) return sessionSamples;
-    const entry = vuGraphRef.current;
-    if (!entry) return null;
-    if (!meterTimeL.current || meterTimeL.current.length !== entry.graph.analyserL.fftSize) {
-      meterTimeL.current = new Float32Array(entry.graph.analyserL.fftSize);
-      meterTimeR.current = new Float32Array(entry.graph.analyserR.fftSize);
-    }
-    entry.graph.analyserL.getFloatTimeDomainData(meterTimeL.current);
-    entry.graph.analyserR.getFloatTimeDomainData(meterTimeR.current!);
-    return [meterTimeL.current, meterTimeR.current!] as const;
-  }, []);
-  const vuGraphRef = useRef<{ el: HTMLMediaElement; graph: VuGraph } | null>(null);
-  const stopVuPolling = useCallback(() => {
-    const entry = vuGraphRef.current;
-    if (entry) cancelAnimationFrame(entry.graph.raf);
-  }, []);
-  useEffect(() => {
-    if (!playing) { stopVuPolling(); return; }
-    const media = videoRef.current;
-    if (!media || media.readyState === 0) {
-      // 元素尚未加载出元数据（刚切素材就按播放）：等 canplay 后重试一次挂接。
-      if (media) {
-        const retry = () => setVuEpoch(epoch => epoch + 1);
-        media.addEventListener("canplay", retry, { once: true });
-        return () => media.removeEventListener("canplay", retry);
-      }
-      return;
-    }
-    const AudioCtx = window.AudioContext;
-    if (!AudioCtx) return;
-    const attach = (): VuGraph | null => {
-      if (vuGraphRef.current?.el === media) return vuGraphRef.current.graph;
-      const graph = vuGraphRef.current?.graph;
-      if (graph) cancelAnimationFrame(graph.raf);
-      try {
-        const ctx = new AudioCtx();
-        const source = ctx.createMediaElementSource(media);
-        const splitter = ctx.createChannelSplitter(2);
-        const analyserL = ctx.createAnalyser();
-        const analyserR = ctx.createAnalyser();
-        analyserL.fftSize = 256;
-        analyserR.fftSize = 256;
-        source.connect(splitter);
-        splitter.connect(analyserL, 0);
-        splitter.connect(analyserR, 1);
-        source.connect(ctx.destination);
-        const entry = { el: media, graph: { ctx, analyserL, analyserR, dataL: new Uint8Array(analyserL.frequencyBinCount), dataR: new Uint8Array(analyserR.frequencyBinCount), raf: 0 } };
-        vuGraphRef.current = entry;
-        return entry.graph;
-      } catch {
-        // 元素已被其他图接管（理论不可达：图按元素缓存复用）时静默降级，改用模拟电平。
-        return null;
-      }
-    };
-    const entryGraph = attach();
-    if (!entryGraph) return;
-    // 音频图只为 meterLevels（时间线右缘电平表）提供时域样本；
-    // 播放条内已无 VU（参照 ViewerBar 无电平显示，电平表在时间线右缘）。
-    void entryGraph.ctx.resume().catch(() => undefined);
-    entryGraph.raf = requestAnimationFrame(() => undefined);
-  }, [playing, previewAsset?.media_url, previewMode, vuEpoch, stopVuPolling]);
-  const visibleCaption = working?.captions.find(item => playhead >= item.start_us && playhead < item.end_us) ?? selectedCaption;
-  const totalUs = duration(working);
-  // 播放/暂停统一入口：播放头停在时间线末尾时，再次播放从头开始。
-  const togglePlayback = () => {
-    cancelLoopRestart();
-    if (!playing && loopPlayback && playbackRange && !libraryPreviewId &&
-        (playheadStore.get() < playbackRange.startUs || playheadStore.get() >= playbackRange.endUs)) {
-      playheadStore.dispatch({ source: "user", timeUs: playbackRange.startUs });
-      const session = previewMode === "synthetic" ? previewSessionRef.current : null;
-      if (session) {
-        const epoch = ++loopSeekEpoch.current;
-        preparePreviewPlaybackRef.current?.();
-        const fps = working?.canvas.fps_num && working.canvas.fps_den ? working.canvas.fps_num / working.canvas.fps_den : 30;
-        void session.seekToFrame(Math.floor(playbackRange.startUs / 1_000_000 * fps)).then(frame => {
-          if (frame >= 0 && epoch === loopSeekEpoch.current && previewSessionRef.current === session) {
-            setPlayhead(playbackRange.startUs);
-            setPlaying(true);
-          }
-        }).catch(() => setPlaying(false));
-        return;
-      }
-      setPlayhead(playbackRange.startUs);
-    } else if (!playing && timelineEndUs > 0 && playhead >= timelineEndUs) setPlayhead(0);
-    setPlaying(value => !value);
-  };
-  // ── 播放头命令通道（A06）──────────────────────────────────────────────────
-  // source 语义（计划 A06 第 4 条）：user = 用户主动 seek（拖动标尺/点字幕/
-  // 方向键），playback = 预览播放回传，external = 库预览等其余路径。
-  // 用户命令递增 requestId；播放回传按「当前请求 ID 是否仍等于发出时 ID」
-  // 判定是否作废——连续快速拖动时旧回传不再回写 UI。
-  // 两条通道都写 playheadStore（覆盖层高频跟随），React `playhead` 状态仍保持
-  // 10Hz 节流更新（App commit 频率不随 rAF 提升——A06 验收指标）。
-  const dispatchPlayhead = useCallback((source: "user" | "playback" | "external", timeUs: number, commitReact: boolean) => {
-    playheadStore.dispatch({ source, timeUs });
-    if (commitReact) setPlayhead(timeUs);
-  }, [playheadStore]);
-  /** 用户主动 seek：立即同步 React 状态（交互跟手），后续 playback 回传在
-   *  新的用户命令到达前被 10Hz 节流合并。播放中 seek = 暂停 + 跳转（剪映
-   *  语义）：合成预览在 playing 时忽略外部 seek（防自身上报回环）、交互
-   *  预览的 100ms 播放时钟会把播放头拉回播放轨道——不先暂停则点击被吞。 */
-  /** 擦洗分层（2026-11-10，对齐 OpenFilm 的 scrub 设计）：
-   *
-   *  这三件事的节奏必须分开，否则拖动要么糊、要么卡：
-   *   1. 播放头线条   —— 每帧跟随（本地立刻写 store，覆盖层 rAF 消费）；
-   *   2. 预览画面 seek —— 约 15ms 一次（拖动中最贵的一步，串行化会拖尾）；
-   *   3. React 提交   —— 约 100ms 一次（其余 UI 不必跟着抖）。
-   *
-   *  改造前：一次指针移动 = setPlaying + dispatchPlayhead(commit=true)，
-   *  即每帧提交整棵 App 树（实测 dev 下单次提交 ~36ms）。拖动时指针事件
-   *  比 rAF 更密，于是主线程被提交占满，表现为"画面跟不上手指"。 */
-  const scrubToldAt = useRef(0);
-  const SCRUB_PICTURE_MS = 15;
-  const SCRUB_STATE_MS = 100;
-  /** S7：15ms 门控只用于 interactive HTMLMediaElement 的 pendingSeek 写入；
-   *  synthetic session.seekToFrame 保留自身目标帧去重，绝不再叠第二层节流。
-   *  :1241 的 effect 是 videoRef.currentTime 的唯一写入者。 */
-  const tellMediaSeek = useCallback((timeUs: number, clip?: TimelineClip) => {
-    if (!videoRef.current || !scrubTellGate.current.allow()) return;
-    if (clip) {
-      const sourceStart = (clip.source_start_us ?? 0) / 1_000_000;
-      const elapsed = (timeUs - clip.timeline_start_us) / 1_000_000 * ((clip.speed_milli ?? 1000) / 1000);
-      pendingSeekRef.current = sourceStart + elapsed;
-    } else {
-      pendingSeekRef.current = timeUs / 1_000_000;
-    }
-  }, []);
-  /** 拖动/擦洗中的即时跳转：线条每帧走，画面与状态按上表节流。
-   *
-   *  注意：预览画面的 seek 由 `playheadUs` **prop** 驱动（SyntheticPreview 的
-   *  seekToFrame 取的就是它），不是订阅 store。所以画面要跟手，就必须在
-   *  SCRUB_PICTURE_MS 节流内真的提交 playheadUs——只写 store 画面不会动。 */
-  const seekWhileScrubbing = useCallback((timeUs: number) => {
-    // 线条立刻走（覆盖层 rAF 消费 store）。
-    dispatchPlayhead("user", timeUs, false);
-    // 画面直通：拖拽风暴中不再 setPlayhead（全树提交），改由会话句柄直接
-    // seekToFrame（内部按目标帧去重 + dragMode latest-wins）。React 状态按
-    // 100ms 节流提交（属性面板/其余 UI 不需要逐帧跟随）；松手 commitScrub
-    // 落定精确值。交互预览（HTMLMediaElement）无会话句柄——走原 setPlayhead
-    // 路径（videoRef.currentTime 由其 effect 消费）。
-    const session = previewSessionRef.current;
-    if (session && previewMode === "synthetic" && !libraryPreviewId) {
-      scrubTellGate.current.reset();
-      session.beginScrubStorm();
-      const fps = working?.canvas.fps_num && working.canvas.fps_den ? working.canvas.fps_num / working.canvas.fps_den : 30;
-      const targetFrame = Math.max(0, Math.floor((timeUs / 1e6) * fps));
-      if (targetFrame !== lastDirectSeekFrameRef.current) {
-        lastDirectSeekFrameRef.current = targetFrame;
-        void session.seekToFrame(targetFrame);
-      }
-      if (performance.now() - scrubToldAt.current >= SCRUB_STATE_MS) {
-        setPlayhead(timeUs);
-        scrubToldAt.current = performance.now();
-      }
-      return;
-    }
-    // 非 synthetic（interactive/库预览）：画面由 playheadUs prop 驱动；
-    // 媒体时间只经 pendingSeekRef（15ms 门控）交给 :1241 单点写入。
-    const clip = sortedClips.find(c => timeUs >= c.timeline_start_us && timeUs < c.timeline_end_us);
-    tellMediaSeek(timeUs, clip);
-    setPlayhead(timeUs);
-    scrubToldAt.current = performance.now();
-  }, [dispatchPlayhead, previewMode, libraryPreviewId, working?.canvas.fps_num, working?.canvas.fps_den, tellMediaSeek, sortedClips]);
-  /** 一次擦洗结束（松手/键盘跳转）：落到精确值并提交 React。 */
-  const commitScrub = useCallback((timeUs: number) => {
-    cancelLoopRestart();
-    setPlaying(false);
-    dispatchPlayhead("user", timeUs, true);
-    scrubToldAt.current = 0;
-    lastReactTimeReport.current = 0;
-    lastDirectSeekFrameRef.current = -1;
-    scrubTellGate.current.reset();
-    previewSessionRef.current?.endScrubStorm();
-  }, [dispatchPlayhead]);
-  const seekFromUser = useCallback((timeUs: number) => {
-    commitScrub(timeUs);
-  }, [commitScrub]);
-  /** 预览播放回传：只写 store（覆盖层命令式跟随）+ 节流 React。
-   *
-   *  P33 W10（dev 流畅度收口）：**播放期间不再提交 React** —— 时间码/进度条的
-   *  每个显示位在播放中由 `applyPlayheadDom` 直接写 DOM（见下），App 组件树在
-   *  整个播放段保持静止。实测依据：dev 构建下每次 App 提交 ~36ms（StrictMode
-   *  双渲染 + 未压缩协调），4Hz 提交即把主线程切成 rAF p95 ~50ms 的碎片，呈现
-   *  循环因此跳帧；生产构建每次提交便宜得多，结论同向（更多余量）。
-   *  暂停/用户 seek/片尾结束时仍走 React 提交，保证状态与 DOM 一致。 */
-  const lastReactTimeReport = useRef(0);
-  const PLAYBACK_COMMIT_INTERVAL_MS = import.meta.env.DEV ? 250 : 100;
-  /** 播放态 ref 镜像：会话回调（onTimeUs）在会话创建时只捕获一次闭包，
-   *  必须经 ref 读「此刻是否在播放」，不能依赖每次渲染新生成的闭包。 */
-  const playingRef = useRef(false);
-  /** 播放中播放头 DOM 直写（时间码 / 进度气泡 / 填充 / aria-valuenow）。
-   *  每次渲染重新赋值 → 闭包内始终是当前 totalUs/previewFps/refs。 */
-  const playheadDomRef = useRef<(us: number) => void>(() => undefined);
-  /* 播放直线（2026-11-10，对齐 OpenFilm 的 PlaybackClock.line）：
-     开始播放时广播一条 (t0, at0, rate) 直线，播放头覆盖层按它自行外推；
-     整段播放期间不再逐帧通知 store。暂停/seek 时收线并保留此刻时间。
-     只在合成预览（synthetic）下启用——交互预览走 HTMLMediaElement 自身的
-     100ms 时钟，那条路径的语义不同（由媒体元素驱动）。
-     缓动：rate 取 1000（1.0×）。变速片段由预览侧自行处理，
-     这里只描述"播放头沿时间线前进"这一件事。 */
-  useEffect(() => {
-    if (previewMode !== "synthetic" || libraryPreviewId) return;
-    if (playing) {
-      playheadStore.startLine({ tUs: playheadStore.get(), atMs: performance.now(), rate: Math.round(1000 * uiRate) });
-    } else {
-      playheadStore.stopLine();
-    }
-  }, [playing, previewMode, libraryPreviewId, playheadStore, uiRate]);
-
-  const seekFromPlayback = useCallback((timeUs: number) => {
-    const now = performance.now();
-    if (playingRef.current) {
-      if (loopPlayback && playbackRange && !libraryPreviewId && timeUs >= playbackRange.endUs) {
-        const session = previewSessionRef.current;
-        if (!session || loopSeekPending.current) return;
-        loopSeekPending.current = true;
-        const epoch = ++loopSeekEpoch.current;
-        session.pause();
-        playheadStore.stopLine();
-        dispatchPlayhead("user", playbackRange.startUs, true);
-        const fps = working?.canvas.fps_num && working.canvas.fps_den ? working.canvas.fps_num / working.canvas.fps_den : 30;
-        void session.seekToFrame(Math.floor(playbackRange.startUs / 1_000_000 * fps)).then(frame => {
-          if (epoch !== loopSeekEpoch.current || previewSessionRef.current !== session || !playingRef.current) return;
-          loopSeekPending.current = false;
-          if (frame < 0) { setPlaying(false); return; }
-          playheadStore.startLine({ tUs: playbackRange.startUs, atMs: performance.now(), rate: Math.round(1000 * uiRate) });
-          session.play();
-        }).catch(() => { if (epoch === loopSeekEpoch.current) { loopSeekPending.current = false; setPlaying(false); } });
-        return;
-      }
-      playheadDomRef.current(timeUs); // 播放中：零 React 提交
-      lastReactTimeReport.current = now;
-      return;
-    }
-    const commit = now - lastReactTimeReport.current >= PLAYBACK_COMMIT_INTERVAL_MS;
-    dispatchPlayhead("playback", timeUs, commit);
-    if (commit) lastReactTimeReport.current = now;
-  }, [dispatchPlayhead, loopPlayback, playbackRange, libraryPreviewId, playheadStore, working, uiRate]);
-
-  // 循环播放（播放设置项）：到尾自动回卷续播。合成预览的会话在 EOF 停住——
-  // 先回零、下一拍续播；交互预览的循环在时钟 interval 内完成，不经过这里。
-  const handlePreviewEnded = useCallback(() => {
-    if (loopSeekPending.current) return;
-    if (!loopPlayback) { setPlaying(false); return; }
-    dispatchPlayhead("user", playbackRange?.startUs ?? 0, true);
-    setPlaying(false);
-    cancelLoopRestart();
-    loopRestartTimer.current = window.setTimeout(() => { loopRestartTimer.current = null; setPlaying(true); }, 60);
-  }, [loopPlayback, playbackRange, dispatchPlayhead]);
-  // 时间线驱动播放：播放头是唯一时钟（100ms 步进推进，媒体元素跟随标尺——
-  // 所见即所得：标尺在哪个片段，播放的就是那个片段的内容）。
-  // 到达时间线末尾：停在末尾（不回跳、不自动续播），再次播放从头开始。
-  useEffect(() => {
-    if (!playing || previewMode !== "interactive" || libraryPreviewId) return;
-    const timer = window.setInterval(() => {
-      // 交互预览的 100ms 时钟：直接派发 playback 源（store + React 同步——
-      // 本 interval 本身就是 10Hz，节流层不再叠加延迟）。
-      const ph = playheadStore.get();
-      const next = ph + Math.round(100_000 * uiRate);
-      const endUs = loopPlayback && playbackRange ? playbackRange.endUs : timelineEndUs;
-      if (endUs > 0 && next >= endUs) {
-        if (loopPlayback) { dispatchPlayhead("playback", playbackRange?.startUs ?? 0, true); return; }
-        dispatchPlayhead("playback", timelineEndUs, true);
-        setPlaying(false);
-        return;
-      }
-      dispatchPlayhead("playback", next, true);
-    }, 100);
-    return () => window.clearInterval(timer);
-  }, [playing, previewMode, libraryPreviewId, timelineEndUs, playheadStore, dispatchPlayhead, uiRate, loopPlayback, playbackRange]);
-  const handleVideoEnded = () => {
-    // 素材箱预览只有一个媒体源，ended 才代表本次播放结束。时间线交互
-    // 预览的 video 只是当前片段的源窗口：源文件 EOF 不等于时间线 EOF，
-    // 播放头时钟会在下一个 tick 切到后续片段（或保持 V1 空档黑场）。
-    if (libraryPreviewId) setPlaying(false);
-  };
-
-  // ── 稳定依赖（A06 第 5 条）：传给 TimelinePanel / SyntheticPreview 的数组与
-  // Map 改为 useMemo——播放头 10Hz 更新不再重建这些 props，下游 memo 化的
-  // 子组件不再整树重渲（此前每次 App 渲染都 new Map/new array）。
-  const timelineAssetMedia = useMemo(
-    () => assets.map(item => ({ asset_id: item.asset.asset_id, media_url: item.media_url, kind: item.asset.kind, display_name: item.asset.display_name, duration_us: typeof item.asset.media_info?.duration_us === "number" ? item.asset.media_info.duration_us : null, has_audio: Array.isArray(item.asset.media_info?.audio_streams) && item.asset.media_info.audio_streams.length > 0 })),
-    [assets],
-  );
-  // WP-P232：素材缩略图预抽登记（导入/项目加载后 fire-and-forget）。
-  // 档位 = 当前时间线 80px 格宽 × 常用 pps 的阶梯粗估（1s 步长起步；
-  // 画布端跨档未命中时走运行时补抽并按需登记更细档）。
-  const ensureFilmstripForAsset = useCallback((assetId: string) => {
-    if (!project) return;
-    void window.desktop.ensureFilmstrip({
-      project_id: project.project_id, asset_id: assetId,
-      step_ms: 1000, generate: true,
-    }).catch(() => undefined);
-  }, [project]);
-
-  const syntheticMediaUrls = useMemo(
-    () => new Map(assets.flatMap(item => item.media_url ? [[item.asset.asset_id, item.media_url] as const] : [])),
-    [assets],
-  );
-  // B11：预览源解析器（视频输入优先代理票据；失败/未 ready 静默回退原源，
-  // 预览永不因代理缺失阻塞）。项目切换即换实例（resolver 绑定项目授权域）。
-  const projectStateReady = Boolean(project && timeline && working && timeline.project_id === project.project_id && timeline.current_revision.project_id === project.project_id && working.project_id === project.project_id);
-  const previewSourceResolver = useMemo(
-    () => project ? new PreviewSourceResolver({
-      getPreviewSource: input => window.desktop.getPreviewSource({ ...input, project_id: project.project_id }),
-      previewSourceMediaUrl: input => window.desktop.previewSourceMediaUrl({ ...input, project_id: project.project_id }),
-    }, project.project_id) : null,
-    [project],
-  );
-  // 代理就绪后要清的是解析缓存（Map），不是 React state——若经 setState 触发
-  // 重渲染，SyntheticPreview 的会话重建依赖会连带重建整个预览会话，正好违反
-  // 方案 A「不打断用户」。这里用 ref 把「清缓存」动作交给 jobs 派生 effect。
-  invalidateProxySourceRef.current = assetId => previewSourceResolver?.invalidate(assetId);
-  // B14：素材级持久化波形缓存（时间轴峰值来源；会话内 LRU 字节上限，
-  // 切项目换实例）。Renderer 不再 fetch 整媒体 + decodeAudioData 生成波形。
-  const waveformCache = useMemo(
-    () => project ? new WaveformCache({
-      getWaveform: input => window.desktop.getWaveform({ ...input, project_id: project.project_id }),
-      waveformMediaUrl: input => window.desktop.waveformMediaUrl({ ...input, project_id: project.project_id }),
-    }, project.project_id) : null,
-    [project?.project_id],
-  );
-  useEffect(() => () => { waveformCache?.dispose(); }, [waveformCache]);
-  // 片段音频透传：增益 + 淡变（fade_* 与导出侧 afade 同口径；缺省 = 不淡）。
-  const syntheticAudioByClip = useMemo(
-    () => new Map((working?.clips ?? []).flatMap(clip => clip.audio ? [[clip.clip_id, {
-      enabled: isClipAudible(clip), gainDb: clip.audio.gain_db,
-      fadeInUs: clip.audio.fade_in_us, fadeOutUs: clip.audio.fade_out_us,
-    }] as const] : [])),
-    [working, isClipAudible],
-  );
-  // P231 Q2：全视觉轨片段均可上 PIP 手势层（不再排除 V1/A1——A1 音频仍排除）。
-  const syntheticPipClips = useMemo(
-    () => (working?.clips ?? []).filter(clip => clip.asset_kind !== "audio" && trackById.get(clip.track_id)?.kind === "video").map(clip => ({ clipId: clip.clip_id, transform: { x: clip.transform?.x, y: clip.transform?.y, scale: clip.transform?.scale, rotate: clip.transform?.rotate, opacity: clip.transform?.opacity }, mask: clip.mask ?? undefined })),
-    [working, trackById],
-  );
-  // GAP-LIST-ASSETS-PAGING 后续（2026-09-15 F04 复测暴露）：100 素材翻页装载
-  // 时窗内 working/timeline 先到位 → SyntheticPreview 以空 mediaUrls 建会话
-  // → "no ticket" 回退并卸载组件，此后票据到位也无人重挂。修法 = 两段：
-  // (a) SyntheticPreview 侧 mediaUrls 进会话重建依赖（票据变更即重建）；
-  // (b) 此处对"缺票据"型回退做自动恢复——票据齐备即切回合成预览。
-  // 挂载不设门槛：门槛会把"素材库未就绪"变成永久挂起（F07 复测暴露）。
-  const syntheticTicketsReady = useMemo(
-    () => Boolean(working) && working!.clips.every(clip => syntheticMediaUrls.has(clip.asset_id)),
-    [working, syntheticMediaUrls],
-  );
-  /** 启动时序（2026-09-23 用户反馈）：getTimeline 先于 listAssets 落地时，
-   *  SyntheticPreview 以空 mediaUrls 建会话 → 回退（"no ticket"，或装载窗内
-   *  的其他瞬时错误如字体抓取失败）。这不是故障而是装载次序——首个 ticket
-   *  到达前项目数据仍在装载，回退不亮错误不切交互预览（保持 synthetic，
-   *  票据到位由 mediaUrls 依赖自动重建会话）。一旦见过任一票据（装载完成、
-   *  mediaUrls 进入稳态），后续回退即视为真实故障，走原有回退+重试链。
-   *  F07 门控教训仍有效：挂载本身不设门槛。 */
-  if (syntheticMediaUrls.size > 0) seenAnyTicketRef.current = true;
-  useEffect(() => {
-    // 静默窗：票据从未就绪（项目数据装载中）且非用户手动重试 → 不亮错误，
-    // synthetic 模式保持挂载，票据到位（mediaUrls 变化）自动重建会话。
-    if (previewMode === "synthetic" && syntheticNotice === null && !seenAnyTicketRef.current) return;
-    // 仅恢复"缺票据"回退；其余回退（子集不支持/WebGL 不可用等）保持交互预览，
-    // 否则会与真实失败形成重试环。
-    if (previewMode !== "interactive" || !syntheticNotice?.includes("no ticket")) return;
-    if (syntheticTicketsReady) {
-      setSyntheticNotice(null);
-      setPreviewMode("synthetic");
-      return;
-    }
-    // 装载窗内的回退（从未见过票据）：静默拉回合成模式——票据到位由
-    // syntheticMediaUrls 依赖自动驱动重建，重取反而打满装载中的项目数据链。
-    // 已见过票据后的缺票才走有界重签重试。
-    if (!seenAnyTicketRef.current) {
-      setSyntheticNotice(null);
-      setPreviewMode("synthetic");
-      return;
-    }
-    // 票据签发是瞬时操作，而 assetPresentation 会把失败的 resolveAsset 折成
-    // media_url=null 且不重试——缺票因此永久化（F04 复测现场）。此处重取一次
-    // 素材列表（重新签发全部票据）；有界 3 次，避免与真实失败形成重试环。
-    if (!project) return;
-    if (noTicketRetryRef.current >= 3) {
-      // 预算耗尽后一次延迟终验：前 3 次重取可能全部撞上 Core 瞬时抖动而整页
-      // 缺票；5s 后（退避覆盖抖动窗）做第 4 次也是最后一次重取，票据到位则
-      // 恢复，否则如实停在回退态（不再环）。
-      if (noTicketFinalRetryRef.current) return;
-      noTicketFinalRetryRef.current = true;
-      const timer = window.setTimeout(() => { void loadProjectData(project).catch(() => undefined); }, 5000);
-      return () => window.clearTimeout(timer);
-    }
-    noTicketRetryRef.current += 1;
-    void loadProjectData(project).catch(() => undefined);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [previewMode, syntheticNotice, syntheticTicketsReady, project?.project_id, syntheticMediaUrls]);
 
   // 代次推进 + 装载代次一并推进：既作废排队中的草稿（patch 已涵盖其内容），
   // 也作废在途装载——否则一次在 patch 之前发出的 getTimeline 晚到，会把这
@@ -1217,11 +609,6 @@ export function App() {
   const commitPipMask = (clipId: TimelineClip["clip_id"], mask: NonNullable<TimelineClip["mask"]>) => {
     void patchTimeline([{ op: "set_clip_mask", clip_id: clipId, mask }], "画中画蒙版");
   };
-  // 画中画手势期间暂停预览播放：播放头前进会越出片段区间，浮层会被移除（"弹出去"）。
-  // 注意必须冻结播放头时钟本身（interval 检查该标记），只暂停视频元素是不够的。
-  const gestureHoldRef = useRef(false);
-  const pausePreviewPlayback = () => { gestureHoldRef.current = true; const video = videoRef.current; if (video && !video.paused) { video.pause(); return true; } return false; };
-  const resumePreviewPlayback = (wasPlaying: boolean) => { gestureHoldRef.current = false; if (wasPlaying) void videoRef.current?.play().catch(() => {}); };
   const pipSelectedId = selectedClip?.clip_id ?? null;
   // P231 Q2：任意视觉轨片段选中时隐藏「画布尺寸框」（白框贴合整个画布，会盖过
   // 浮层自己的内容选中框）；浮层的选中框 + 8 向手柄由 PreviewPipOverlays 提供。
@@ -1235,19 +622,6 @@ export function App() {
     const asset = assets.find(candidate => candidate.asset.asset_id === item.asset_id);
     return Boolean(asset && (item.asset_kind === "image" || asset.asset.availability === "available"));
   });
-  const previewFromLibrary = (item: AssetPresentation) => {
-    if (!item.media_url || item.asset.availability !== "available") return;
-    setLibraryPreviewId(item.asset.asset_id);
-    setPreviewMode("interactive");
-    setExportPlayback(undefined);
-    setPlaying(true);
-  };
-  const exitLibraryPreview = () => {
-    if (!libraryPreviewId) return;
-    setLibraryPreviewId(null);
-    // 素材预览结束回合成预览（回退过的环境保持交互预览，避免再次触发回退）。
-    if (previewMode === "interactive" && !syntheticNotice) setPreviewMode("synthetic");
-  };
   const assetThumb = (item: AssetPresentation) => (
     <span className="asset-thumb">
       {item.asset.kind === "image"
@@ -1364,63 +738,9 @@ export function App() {
       if (layoutOps.length > 0) void patchTimeline(layoutOps, "切换比例：全视觉轨裁切填满");
     }
   };
-  const previewFps = working?.canvas.fps_num && working.canvas.fps_den ? working.canvas.fps_num / working.canvas.fps_den : 30;
   // 预览缩放（剪映式）：点击缩放按钮弹出滑条，对数刻度 25%–500%，缩小时以画面中心整体缩小。
   const zoomT = (z: number) => Math.round(Math.log(z / 0.25) / Math.log(20) * 1000);
   const zoomZ = (t: number) => 0.25 * Math.exp(Math.log(20) * t / 1000);
-  // 悬浮进度条：以比例换算播放头（与剪映进度条一致）。
-  const progressPct = Math.max(0, Math.min(100, (playhead / Math.max(totalUs, 1)) * 100));
-  /** 播放头 DOM 直写实现（P33 W10）：播放期间 React 不提交，时间码/气泡/填充/
-   *  aria 由这里按 store 回传逐帧更新——观感与 10Hz 提交一致（甚至更密），
-   *  但主线程不再为整棵编辑器树做协调。暂停/seek 后由 React 提交重新接管。 */
-  const pgBubbleRef = useRef<HTMLDivElement | null>(null);
-  const pgFillRef = useRef<HTMLDivElement | null>(null);
-  const tcTimeRef = useRef<HTMLElement | null>(null);
-  playheadDomRef.current = (us: number): void => {
-    const clamped = Math.max(0, Math.min(us, totalUs));
-    const pct = totalUs > 0 ? (clamped / totalUs) * 100 : 0;
-    const text = formatSmpteTimecode(clamped, previewFps);
-    if (tcTimeRef.current && tcTimeRef.current.textContent !== text) tcTimeRef.current.textContent = text;
-    if (pgBubbleRef.current) {
-      pgBubbleRef.current.textContent = text;
-      pgBubbleRef.current.style.left = `${pct}%`;
-    }
-    if (pgFillRef.current) pgFillRef.current.style.width = `${pct}%`;
-    progressRef.current?.setAttribute("aria-valuenow", String(clamped));
-  };
-  // 播放态 ref 镜像（会话回调经它读最新值）
-  playingRef.current = playing && !gestureHoldRef.current;
-  /** 进度条拖动中：走分层节流（画面 15ms / 状态 100ms / 线条每帧）。 */
-  const scrubFromProgress = (clientX: number) => {
-    const element = progressRef.current;
-    if (!element) return;
-    const rect = element.getBoundingClientRect();
-    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    seekWhileScrubbing(Math.round(ratio * Math.max(totalUs, 1)));
-  };
-  const seekFromProgressRatio = (ratio: number) => {
-    exitLibraryPreview();
-    const value = Math.round(ratio * Math.max(totalUs, 1));
-    seekFromUser(value);
-    const clip = sortedClips.find(c => value >= c.timeline_start_us && value < c.timeline_end_us);
-    // S7：单次 seek 只经 tellMediaSeek → pendingSeekRef → :1241 写一次媒体时间。
-    scrubTellGate.current.reset();
-    tellMediaSeek(value, clip);
-  };
-  const seekFromProgress = (clientX: number) => {
-    const el = progressRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    if (rect.width <= 0) return;
-    seekFromProgressRatio((clientX - rect.left) / rect.width);
-  };
-  const seekVolumeFrom = (clientY: number) => {
-    const rail = volRailRef.current;
-    if (!rail) return;
-    const rect = rail.getBoundingClientRect();
-    if (rect.height <= 0) return;
-    setVolume(Math.round(Math.max(0, Math.min(1, 1 - (clientY - rect.top) / rect.height)) * 100));
-  };
   const toggleFullscreen = async () => {
     try {
       if (document.fullscreenElement) await document.exitFullscreen();
@@ -1673,13 +993,6 @@ export function App() {
     document.addEventListener("fullscreenchange", layout);
     return () => { ro.disconnect(); window.removeEventListener("resize", layout); document.removeEventListener("fullscreenchange", layout); };
   }, []);
-  // 音量：应用到当前播放的媒体元素（0-100 → 0-1）；同时同步给 VU 模拟电平使用。
-  useEffect(() => {
-    volumeRef.current = volume;
-    const vol = Math.max(0, Math.min(1, volume / 100));
-    if (videoRef.current) videoRef.current.volume = vol;
-    if (audioRef.current) audioRef.current.volume = vol;
-  }, [volume, previewAsset?.media_url, audioAsset?.media_url]);
   // S1/S2：预览缩放 = 布局尺寸（不用 transform:scale，手柄恒为屏幕 px）。
   const zoomZValue = previewZoom === "fit" ? viewerView.z : (typeof previewZoom === "number" ? previewZoom : viewerView.z);
   useEffect(() => {

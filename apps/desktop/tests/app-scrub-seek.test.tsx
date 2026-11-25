@@ -42,23 +42,26 @@ describe("S7 scrub 15ms / S1 wheel negative control", () => {
   });
 
   it("一次 onSeek 只写一次 currentTime（源码 :1241 为唯一媒体写入者）", () => {
-    const source = readFileSync(resolve(process.cwd(), "src/app/App.tsx"), "utf8");
+    const appSource = readFileSync(resolve(process.cwd(), "src/app/App.tsx"), "utf8");
+    const playbackSource = readFileSync(resolve(process.cwd(), "src/app/hooks/usePreviewPlayback.ts"), "utf8");
     // 负向对照：onSeek 中不得再有 videoRef.current.currentTime 直写
-    expect(source).toContain("onSeek={(timeUs) => { if (libraryPreviewId) exitLibraryPreview(); seekWhileScrubbing(timeUs); }}");
-    expect(source).not.toContain("pendingSeekRef.current = sourceStart + elapsed; videoRef.current.currentTime");
+    expect(appSource).toContain("onSeek={(timeUs) => { if (libraryPreviewId) exitLibraryPreview(); seekWhileScrubbing(timeUs); }}");
+    expect(appSource).not.toContain("pendingSeekRef.current = sourceStart + elapsed; videoRef.current.currentTime");
+    expect(playbackSource).not.toContain("pendingSeekRef.current = sourceStart + elapsed; videoRef.current.currentTime");
 
-    expect(source).toContain("if (pendingSeekRef.current !== null) { media.currentTime = pendingSeekRef.current;");
-    expect(source).toContain("const SCRUB_PICTURE_MS = 15;");
-    expect(source).not.toContain("videoRef.current.currentTime = timeUs / 1_000_000");
+    expect(playbackSource).toContain("if (pendingSeekRef.current !== null) { media.currentTime = pendingSeekRef.current;");
+    expect(playbackSource).toContain("const SCRUB_PICTURE_MS = 15;");
+    expect(appSource).not.toContain("videoRef.current.currentTime = timeUs / 1_000_000");
+    expect(playbackSource).not.toContain("videoRef.current.currentTime = timeUs / 1_000_000");
   });
 
   it("commitScrub 保持精确值提交，不叠第二层节流", () => {
-    const source = readFileSync(resolve(process.cwd(), "src/app/App.tsx"), "utf8");
-    expect(source).toContain('dispatchPlayhead("user", timeUs, true)');
-    expect(source).toContain("targetFrame !== lastDirectSeekFrameRef.current");
+    const playbackSource = readFileSync(resolve(process.cwd(), "src/app/hooks/usePreviewPlayback.ts"), "utf8");
+    expect(playbackSource).toContain('dispatchPlayhead("user", timeUs, true)');
+    expect(playbackSource).toContain("targetFrame !== lastDirectSeekFrameRef.current");
     // SCRUB_PICTURE_MS 只用于 createScrubTellGate(15,...)，不得出现在 session.seekToFrame 分支
-    expect(source).toContain("createScrubTellGate(15, () => performance.now())");
-    const seekWhile = source.slice(source.indexOf("const seekWhileScrubbing"), source.indexOf("const commitScrub"));
+    expect(playbackSource).toContain("createScrubTellGate(15, () => performance.now())");
+    const seekWhile = playbackSource.slice(playbackSource.indexOf("const seekWhileScrubbing"), playbackSource.indexOf("const commitScrub"));
     expect(seekWhile).not.toContain("SCRUB_PICTURE_MS");
   });
 
