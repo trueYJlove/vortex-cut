@@ -1,4 +1,0 @@
-TypeError: blob.arrayBuffer is not a function
-    at snapshot (http://localhost:5173/@fs/C:/DataFolder/codes/AI-Vidio/apps/desktop/src/probes/m3p5.ts:8:29)
-    at async Module.runProbe (http://localhost:5173/@fs/C:/DataFolder/codes/AI-Vidio/apps/desktop/src/probes/m3p5.ts:72:5)
-    at async http://localhost:5173/main.tsx:13:7

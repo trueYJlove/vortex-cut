@@ -4,10 +4,10 @@
 
 ## Git 管理规则
 
-- Git 保留 Markdown 报告、`run-config.json`、manifest、摘要和被报告直接引用的 P196/P200 原始采样；其他被具体报告点名的原始输出按需保留。
-- 未被报告具体引用的大型逐轮输出（`results-F*.json`、`run-*/result.json`、普通 `app-drop-*.json`、`.jsonl`）由性能工具生成，不纳入 Git。它们在当前工作区仍保留；新运行输出也会被 `.gitignore` 排除。已被报告点名的少量例外通过 `.gitignore` 明确保留。
-- 复跑入口见 `tools/performance/README.md`；每份运行配置记录参数和环境，报告保存采用的汇总值。原始逐轮输出不作为仓库必需输入。
+- Git 仅保留 Markdown 报告、`run-config.json`、manifest 与小型摘要 JSON（`< 200 KB`）。
+- 原始逐轮输出（`results-F*.json`、`run-*/result.json`、`app-drop-*.json`、`app-multiclip-*.json`）、`.log`、`.jsonl` trace 及媒体/缓存目录均由 [`.gitignore`](../../.gitignore) 排除，不纳入源码仓库。
+- 复跑入口见 [`tools/performance/README.md`](../../tools/performance/README.md)；每份运行配置记录参数和环境，报告保存采用的汇总值。
 
 ## 原始数据与摘要
 
-有些报告按多轮数据计算中位数或分位数。需要复核时，在保留的配置上重新运行脚本，或使用本地未纳入 Git 的原始输出。P200 归因报告直接引用的采样文件仍纳入版本管理。
+需要复核或逐帧追溯时，按保留的配置在本地重新运行基准脚本即可，源码仓库只保存汇总结论与基线配置。

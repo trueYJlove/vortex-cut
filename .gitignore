@@ -66,25 +66,30 @@ evidence/m3_0/**/gl_nocap/
 evidence/m3_0/**/step0/
 evidence/m3_0/**/assets.manifest*.json
 
-# Performance evidence: keep compact manifests/configs and human-readable summaries;
-# generated per-frame/run traces are reproducible and stay local to the workspace.
+# Performance evidence: keep compact manifests/configs and human-readable summaries (< 200 KB);
+# generated media, raw logs, per-frame/run traces, and heavy outputs stay local.
 evidence/performance/**/*.mp4
 evidence/performance/**/*.png
+evidence/performance/**/*.log
+evidence/performance/**/*.jsonl
 evidence/performance/**/user-data/
 evidence/performance/**/results-*.json
 evidence/performance/**/results.json
 evidence/performance/**/run-*/result.json
 evidence/performance/**/app-drop-*.json
-evidence/performance/**/*.jsonl
-!evidence/performance/preview-smoothness-baseline/app-drop-p200-*.json
-!evidence/performance/preview-smoothness-baseline/app-drop-p196-*.json
-!evidence/performance/preview-smoothness-baseline/app-drop-user-h264-3440-timing-r1.json
-!evidence/performance/preview-smoothness-baseline/app-drop-w12-dance-trace2-r6t.json
+evidence/performance/**/app-multiclip-*.json
+evidence/performance/**/ir_*.json
 
-# Local visual acceptance captures; conclusions and measurements are in docs/archive/.
+# Visual acceptance captures & debug dumps; conclusions and measurements live in Markdown summaries.
+evidence/**/*.png
+evidence/**/*.mp4
+evidence/**/*.mkv
 /evidence/2026-11-11-light-theme/
 /evidence/2026-11-11-timeline-parity/
 /evidence/2026-11-18-p231-preview-canvas/
+/evidence/2026-10-08-transcript-ui/
+/evidence/m3_2/
+/evidence/p235-openfilm-timeline-parity-*/
 
 # Test-time model download cache (sha256-verified per test fixture)
 resources/.test-model-cache/
