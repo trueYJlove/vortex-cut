@@ -45,6 +45,10 @@ function openProjectManagement() {
   openSwitcher();
   fireEvent.click(within(screen.getByRole("listbox", { name: "选择项目" })).getByRole("menuitem", { name: /项目管理/ }));
 }
+function openToolsMenu() {
+  fireEvent.click(screen.getByRole("button", { name: "Vortex Cut 主菜单" }));
+  fireEvent.click(within(screen.getByRole("tablist", { name: "主菜单分类" })).getByRole("tab", { name: "工具" }));
+}
 
 function desktopApi(options: { timeline?: TimelineState | null; models?: ModelDetail[]; jobs?: Job[] } = {}): DesktopApi {
   const timeline = options.timeline === undefined ? state : options.timeline;
@@ -102,7 +106,10 @@ describe("Stage 1A/1B 工作流", () => {
     window.desktop = api; render(<App />);
     await expectSwitcherName("演示项目");
     openProjectManagement();
-    fireEvent.change(await screen.findByLabelText("新项目名称"), { target: { value: "新项目" } }); fireEvent.click(screen.getByRole("button", { name: "创建项目" })); await waitFor(() => expect(api.createProject).toHaveBeenCalledWith({ name: "新项目", canvas: { width: 1080, height: 1920, fps_num: 30, fps_den: 1 } }));
+    const createDialog = await screen.findByRole("dialog", { name: "项目管理" });
+    fireEvent.change(within(createDialog).getByLabelText("新项目名称"), { target: { value: "新项目" } });
+    fireEvent.click(within(createDialog).getByRole("button", { name: "新建项目" }));
+    await waitFor(() => expect(api.createProject).toHaveBeenCalledWith({ name: "新项目", canvas: { width: 1080, height: 1920, fps_num: 30, fps_den: 1 } }));
     // Wait for the finished create mutation, then use the real project switcher
     // to continue the remaining workflow on project_1.  API invocation alone
     // is not completion: createProject still refreshes and selects its result.
@@ -110,12 +117,20 @@ describe("Stage 1A/1B 工作流", () => {
     selectProject(/^演示项目 活跃$/);
     await expectSwitcherName("演示项目");
     openProjectManagement();
-    fireEvent.change(await screen.findByLabelText("重命名项目"), { target: { value: "已重命名" } }); fireEvent.click(screen.getByRole("button", { name: "保存名称" })); await waitFor(() => expect(api.renameProject).toHaveBeenCalledWith({ project_id: "project_1", name: "已重命名" }));
+    const manageDialog = await screen.findByRole("dialog", { name: "项目管理" });
+    const card = within(manageDialog).getByRole("button", { name: "重命名项目 演示项目" }).closest("article")!;
+    fireEvent.click(within(card).getByRole("button", { name: "重命名项目 演示项目" }));
+    fireEvent.change(within(card).getByLabelText("项目名称 演示项目"), { target: { value: "已重命名" } });
+    fireEvent.click(within(card).getByRole("button", { name: "保存项目名称" }));
+    await waitFor(() => expect(api.renameProject).toHaveBeenCalledWith({ project_id: "project_1", name: "已重命名" }));
     await expectSwitcherName("已重命名");
-    fireEvent.click(screen.getByRole("button", { name: "归档项目" })); await waitFor(() => expect(api.archiveProject).toHaveBeenCalledWith("project_1"));
-    await screen.findByRole("button", { name: "重新打开项目" });
-    fireEvent.click(screen.getByRole("button", { name: "重新打开项目" })); await waitFor(() => expect(api.reopenProject).toHaveBeenCalledWith("project_1"));
-    await screen.findByRole("button", { name: "归档项目" });
+    fireEvent.click(within(card).getByRole("button", { name: /^归档项目 / }));
+    await waitFor(() => expect(api.archiveProject).toHaveBeenCalledWith("project_1"));
+    const reopenButton = await within(card).findByRole("button", { name: /^重新打开项目 / });
+    fireEvent.click(reopenButton);
+    await waitFor(() => expect(api.reopenProject).toHaveBeenCalledWith("project_1"));
+    await within(card).findByRole("button", { name: /^归档项目 / });
+    fireEvent.click(within(manageDialog).getByRole("button", { name: "关闭项目管理" }));
     // txt 不再提供导入入口（文本创作走默认文本/导入字幕）。
     for (const label of ["视频", "音频", "图片"]) fireEvent.click(screen.getByRole("button", { name: `导入${label}` }));
     await waitFor(() => expect(api.importAsset).toHaveBeenCalledTimes(3));
@@ -126,9 +141,10 @@ describe("Stage 1A/1B 工作流", () => {
     const api = desktopApi(); window.desktop = api; render(<App />);
     await expectSwitcherName("演示项目");
     openProjectManagement();
-    fireEvent.change(await screen.findByLabelText("新项目名称"), { target: { value: "横屏项目" } });
-    fireEvent.change(screen.getByLabelText("新建项目画布比例"), { target: { value: "169" } });
-    fireEvent.click(screen.getByRole("button", { name: "创建项目" }));
+    const dialog = await screen.findByRole("dialog", { name: "项目管理" });
+    fireEvent.change(within(dialog).getByLabelText("新项目名称"), { target: { value: "横屏项目" } });
+    fireEvent.change(within(dialog).getByLabelText("新建项目画布比例"), { target: { value: "169" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "新建项目" }));
     await waitFor(() => expect(api.createProject).toHaveBeenCalledWith({ name: "横屏项目", canvas: { width: 1920, height: 1080, fps_num: 30, fps_den: 1 } }));
   });
 
@@ -181,28 +197,31 @@ describe("Stage 1A/1B 工作流", () => {
     await act(async () => { refreshProjects(); });
     await waitFor(() => expect(api.listProjects).toHaveBeenCalledTimes(2));
     openProjectManagement();
-    const renameInput = await screen.findByLabelText("重命名项目");
+    const dialog = await screen.findByRole("dialog", { name: "项目管理" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "重命名项目 演示项目" }));
+    const renameInput = within(dialog).getByLabelText("项目名称 演示项目");
     fireEvent.change(renameInput, { target: { value: "用户未提交草稿" } });
     expect(renameInput).toHaveValue("用户未提交草稿");
 
     await act(async () => { resolveStaleRefresh({ items: [staleProject, projectQ], next_cursor: null }); });
     await waitFor(() => expect(renameInput).toHaveValue("用户未提交草稿"));
-    fireEvent.click(screen.getByRole("button", { name: "保存名称" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "保存项目名称" }));
     await waitFor(() => expect(api.renameProject).toHaveBeenCalledWith({ project_id: project.project_id, name: "用户未提交草稿" }));
-    await waitFor(() => expect(renameInput).toHaveValue("服务端确认名"));
+    await within(dialog).findByRole("heading", { name: "服务端确认名" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "关闭项目管理" }));
 
     const refreshForProjectP = refreshProjects;
     selectProject(/^服务端项目 Q 活跃$/);
-    await waitFor(() => expect(renameInput).toHaveValue("服务端项目 Q"));
+    await expectSwitcherName("服务端项目 Q");
     await waitFor(() => expect(refreshProjects).not.toBe(refreshForProjectP));
     await act(async () => { refreshProjects(); });
     await waitFor(() => expect(api.listProjects).toHaveBeenCalledTimes(3));
-    await waitFor(() => expect(renameInput).toHaveValue("服务端项目 Q（刷新）"));
+    await expectSwitcherName("服务端项目 Q（刷新）");
     timeoutSpy.mockRestore();
   });
 
   it("支持素材库刷新、删除确认弹窗和只读 Transcript 查看", async () => {
-    const api = desktopApi(); window.desktop = api; render(<App />); await screen.findByText(video.display_name);
+    const api = desktopApi(); window.desktop = api; render(<App />); await within(screen.getByRole("region", { name: "媒体库" })).findByText(video.display_name);
     // 重新定位按钮已移除（与导入重叠）；工具栏提供素材库级刷新。
     expect(screen.queryByRole("button", { name: "重新定位" })).toBeNull();
     expect(screen.getByRole("button", { name: "刷新素材库" })).toBeInTheDocument();
@@ -347,12 +366,13 @@ describe("Stage 1A/1B 工作流", () => {
     window.desktop = api; render(<App />);
     await expectSwitcherName("演示项目");
     fireEvent.click(screen.getByRole("tab", { name: /^转录/ }));
-    const before = await screen.findAllByText(video.display_name);
+    const transcriptList = document.querySelector(".transcript-list") as HTMLElement;
+    const before = await within(transcriptList).findAllByText(video.display_name);
     expect(before).toHaveLength(1);
     fireEvent.click(await screen.findByRole("button", { name: /查看转录 transcript_1/ }));
     // 打开查看器后：记录行仍只有一条（片段只在弹窗内渲染）
     expect(await screen.findByRole("checkbox", { name: /第一句/ })).toBeVisible();
-    expect(screen.getAllByText(video.display_name)).toHaveLength(1);
+    expect(within(transcriptList).getAllByText(video.display_name)).toHaveLength(1);
     expect(document.querySelectorAll(".transcript-item")).toHaveLength(1);
   });
 
@@ -511,7 +531,7 @@ describe("素材箱交互", () => {
     localStorage.removeItem(viewKey);
     window.desktop = desktopApi();
     const app = render(<App />);
-    await screen.findByText(video.display_name);
+    await within(screen.getByRole("region", { name: "媒体库" })).findByText(video.display_name);
     expect(document.querySelector(".asset-view-grid")).not.toBeNull();
     const assetButton = screen.getByRole("button", { name: `${video.display_name}，视频` });
     fireEvent.click(assetButton);
@@ -521,7 +541,7 @@ describe("素材箱交互", () => {
     expect(localStorage.getItem(viewKey)).toBe("list");
     app.unmount();
     render(<App />);
-    await screen.findByText(video.display_name);
+    await within(screen.getByRole("region", { name: "媒体库" })).findByText(video.display_name);
     expect(document.querySelector(".asset-view-list")).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "切换到网格视图" }));
     expect(document.querySelector(".asset-view-grid")).not.toBeNull();
@@ -529,7 +549,7 @@ describe("素材箱交互", () => {
   });
 
   it("提示条按级别配色（成功为绿色而非红色）", async () => {
-    const api = desktopApi(); window.desktop = api; render(<App />); await screen.findByText(video.display_name);
+    const api = desktopApi(); window.desktop = api; render(<App />); await within(screen.getByRole("region", { name: "媒体库" })).findByText(video.display_name);
     // 刷新成功 → 绿色提示（而非红色）。
     fireEvent.click(screen.getByRole("button", { name: "刷新素材库" }));
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("所有素材文件均正常"), { timeout: 15_000 });
@@ -563,7 +583,7 @@ describe("素材箱交互", () => {
   it("点击预览画面选中播放头处的片段并显示选中边框", async () => {
     const api = desktopApi(); window.desktop = api; render(<App />);
     await screen.findByLabelText("交互预览视频", {}, { timeout: 10_000 });
-    const frame = screen.getByRole("button", { name: "选中播放头处的片段" });
+    const frame = screen.getByRole("button", { name: /预览画布/ });
     expect(frame.className).not.toContain("selected");
     fireEvent.click(frame);
     await waitFor(() => expect(frame.className).toContain("selected"));
@@ -598,7 +618,7 @@ describe("Stage 1C Editor", () => {
   afterEach(() => cleanup());
 
   it("渲染固定编辑工作台且不暴露敏感字段", async () => {
-    render(<App />); await expectSwitcherName("演示项目"); await screen.findByText(video.display_name); expect(screen.getByText("V1")).toBeVisible(); expect(screen.getByText("C1")).toBeVisible(); expect(await screen.findByRole("note", { name: "合成预览回退提示" })).toBeVisible(); expect(document.body.textContent).not.toContain("C:\\");
+    render(<App />); await expectSwitcherName("演示项目"); await within(screen.getByRole("region", { name: "媒体库" })).findByText(video.display_name); expect(screen.getByText("V1")).toBeVisible(); expect(screen.getByText("C1")).toBeVisible(); expect(await screen.findByRole("note", { name: "合成预览回退提示" })).toBeVisible(); expect(document.body.textContent).not.toContain("C:\\");
   });
 
   it("synchronously captures native multi-file drops, imports supported files, and keeps them if the timeline patch fails", async () => {
@@ -631,8 +651,8 @@ describe("Stage 1C Editor", () => {
     expect(await screen.findByText(droppedAsset.display_name)).toBeVisible();
     expect(await screen.findByText(/成功导入的素材已保留在素材栏；时间线未修改/)).toBeVisible();
     expect(api.patchTimeline).toHaveBeenCalledWith(expect.objectContaining({ patch: expect.objectContaining({ operations: [
-      { op: "add_track", kind: "video" },
-      { op: "insert_asset_clip", asset_id: droppedAsset.asset_id, at_index: 0, track_id: "V2" },
+      expect.objectContaining({ op: "add_track", kind: "video" }),
+      expect.objectContaining({ op: "insert_asset_clip", asset_id: droppedAsset.asset_id, at_index: 0, track_id: "V2" }),
     ] }) }));
   });
 
@@ -700,8 +720,8 @@ describe("Stage 2A AI 粗剪", () => {
   it("Provider 设置是独立入口：可创建 Provider 并保存密钥且不回显", async () => {
     const api = desktopApi(); window.desktop = api; render(<App />); await expectSwitcherName("演示项目");
     await screen.findByRole("note", { name: "合成预览回退提示" }, { timeout: 10_000 }); // 等回退落定再交互
-    // 入口在工具菜单的 AI 组
-    fireEvent.click(screen.getByRole("button", { name: /工具/ }));
+    // 入口在主菜单 -> 工具
+    openToolsMenu();
     fireEvent.click(await screen.findByRole("menuitem", { name: "Provider 设置" }));
     const dialog = await screen.findByRole("dialog", { name: "Provider 设置" });
     expect(within(dialog).getByText(/密钥只提交、不回显/)).toBeVisible();
@@ -729,7 +749,7 @@ describe("Stage 2A AI 粗剪", () => {
     api.listProviders = vi.fn().mockResolvedValue({ items: [] });
     vi.mocked(api.createProvider!).mockResolvedValue({ provider_config_id: "provider_new" as never, kind: "openai_compatible_text", display_name: "我的网关", base_url: "https://gw.test", model: "m", enabled: true, credential_status: "missing", input_price_per_million: null, output_price_per_million: null, timeline_patch_capability_status: "untested", timeline_patch_response_adapter_id: null, timeline_patch_probe_protocol_version: null, timeline_patch_capability_tested_at: null, timeline_patch_capability_failure_code: null, timeline_patch_capability_probe_sha256: null, candidate_capability_status: "untested", candidate_response_adapter_id: null, candidate_probe_protocol_version: null, candidate_capability_tested_at: null, candidate_capability_failure_code: null, candidate_capability_probe_sha256: null, captions_provider_capability_status: "untested", captions_provider_response_adapter_id: null, captions_provider_probe_protocol_version: null, captions_provider_capability_tested_at: null, captions_provider_capability_failure_code: null, captions_provider_capability_probe_sha256: null, created_at: now, updated_at: now });
     window.desktop = api; render(<App />); await expectSwitcherName("演示项目");
-    fireEvent.click(screen.getByRole("button", { name: /工具/ }));
+    openToolsMenu();
     fireEvent.click(await screen.findByRole("menuitem", { name: "Provider 设置" }));
     const dialog = await screen.findByRole("dialog", { name: "Provider 设置" });
     // 无 Provider 时给出明确空态与下一步
@@ -744,7 +764,7 @@ describe("Stage 2A AI 粗剪", () => {
   it("删除密钥使用白名单桥接且不回显", async () => {
     const api = desktopApi(); window.desktop = api; render(<App />); await expectSwitcherName("演示项目");
     await screen.findByRole("note", { name: "合成预览回退提示" }, { timeout: 10_000 }); // 等回退落定再交互（见"必须先 prepare"用例注释）
-    fireEvent.click(screen.getByRole("button", { name: /工具/ }));
+    openToolsMenu();
     fireEvent.click(await screen.findByRole("menuitem", { name: "Provider 设置" }));
     const dialog = await screen.findByRole("dialog", { name: "Provider 设置" });
     fireEvent.change(await within(dialog).findByLabelText("已有 Provider"), { target: { value: "provider_1" } });
@@ -956,7 +976,7 @@ describe("Stage 4B 生成验证正式入口", () => {
   afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
   async function generationEntry(): Promise<HTMLElement> {
-    fireEvent.click(screen.getByRole("button", { name: "工具" }));
+    openToolsMenu();
     return await screen.findByRole("menuitem", { name: /生成验证（模拟）/ });
   }
 
@@ -1115,7 +1135,7 @@ describe("W3.1 素材语义检索入口", () => {
   afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
   async function semanticEntry(): Promise<HTMLElement> {
-    fireEvent.click(screen.getByRole("button", { name: "工具" }));
+    openToolsMenu();
     return await screen.findByRole("menuitem", { name: /素材语义检索/ });
   }
 

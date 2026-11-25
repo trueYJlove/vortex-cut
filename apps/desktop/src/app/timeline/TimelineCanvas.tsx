@@ -4922,8 +4922,10 @@ export function TimelinePanel({
     if (droppedIds?.length) {
       if (droppedIds.length === 1 && droppedIds[0] === SYSTEM_FILE_DROP_ID) {
         const files = peekSystemFileDrop();
-        const kinds = files.map(file => assetDropKindFromFile(file.name, file.type));
-        return { itemCount: files.length, kinds: kinds.length && kinds.every((kind): kind is NonNullable<typeof kind> => kind !== null) ? kinds : null, durationsUs: files.map(() => null) };
+        const supportedKinds = files
+          .map(file => assetDropKindFromFile(file.name, file.type))
+          .filter((kind): kind is NonNullable<typeof kind> => kind !== null);
+        return { itemCount: supportedKinds.length, kinds: supportedKinds.length ? supportedKinds : null, durationsUs: supportedKinds.map(() => null) };
       }
       const media = droppedIds.map(id => mediaById.get(id));
       const kinds = media.map(item => item?.kind ?? null);

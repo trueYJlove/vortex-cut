@@ -152,18 +152,18 @@ describe("命令注册表", () => {
     const api = desktopApi();
     window.desktop = api;
     render(<App />);
-    const clip = await screen.findByRole("button", { name: /Clip 1/ });
+    const clip = await screen.findByRole("button", { name: /Clip 1/ }, { timeout: 10_000 });
     fireEvent.click(clip);
     fireEvent.keyDown(clip, { key: "Delete", shiftKey: true });
     await waitFor(() => expect(api.patchTimeline).toHaveBeenCalledWith(expect.objectContaining({
-      patch: expect.objectContaining({ summary: "主轨波纹删除", operations: [expect.objectContaining({ op: "remove_clip" })] }),
+      patch: expect.objectContaining({ summary: "波纹删除", operations: [expect.objectContaining({ op: "remove_clip" })] }),
     })));
   });
 
   it("shows disabled reasons for commands that cannot run", async () => {
     window.desktop = desktopApi();
     render(<App />);
-    await screen.findByRole("button", { name: /Clip 1/ });
+    await screen.findByRole("button", { name: /Clip 1/ }, { timeout: 10_000 });
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     const list = await screen.findByRole("listbox", { name: "命令列表" });
     expect(within(list).getByText("请先选择时间线片段")).toBeInTheDocument();

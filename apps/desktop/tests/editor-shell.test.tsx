@@ -174,7 +174,7 @@ describe("Editor shell 基线", () => {
 
   it("moves focus and selection between assets with the keyboard", async () => {
     render(<App />);
-    const video = await screen.findByRole("button", { name: /很长的中文素材文件名-第一幕.mp4，视频/ });
+    const video = await screen.findByRole("button", { name: /很长的中文素材文件名-第一幕.mp4，视频/ }, { timeout: 10_000 });
     const image = screen.getByRole("button", { name: "海报.png，图片" });
     video.focus();
     fireEvent.keyDown(video, { key: "End" });

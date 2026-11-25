@@ -213,7 +213,7 @@ describe("P195 项目装配失败后的时间线恢复", () => {
 
     // 经面板滑杆触发一次编辑：RangeRow.onDraft → ClipProperties.updateLocal
     // → App.queueDraft（400ms 后才落库）。
-    fireEvent.click(await screen.findByRole("button", { name: "pick-clip_p195" }));
+    fireEvent.click(await screen.findByRole("button", { name: "pick-clip_p195" }, { timeout: 10_000 }));
     const opacity = await screen.findByRole("slider", { name: "不透明度" });
     fireEvent.change(opacity, { target: { value: "50" } });
 

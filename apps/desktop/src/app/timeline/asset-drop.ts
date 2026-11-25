@@ -181,12 +181,12 @@ export function draggedAssetIds<T extends string>(id: T, order: readonly T[], se
 export function readAssetDrop(transfer: DataTransfer): string[] {
   const types = Array.from(transfer.types ?? []);
   const hasAssetPayload = types.includes(ASSET_BATCH_DRAG) || types.includes(ASSET_DRAG);
-  if (hasAssetPayload) {
+  if (hasAssetPayload || types.length === 0) {
     let batch = "";
     let single = "";
     try {
-      if (types.includes(ASSET_BATCH_DRAG)) batch = transfer.getData(ASSET_BATCH_DRAG);
-      if (!batch && types.includes(ASSET_DRAG)) single = transfer.getData(ASSET_DRAG);
+      if (hasAssetPayload ? types.includes(ASSET_BATCH_DRAG) : true) batch = transfer.getData(ASSET_BATCH_DRAG);
+      if (!batch && (hasAssetPayload ? types.includes(ASSET_DRAG) : true)) single = transfer.getData(ASSET_DRAG);
     } catch {
       return activeDraggedIds.slice(0, MAX_ASSET_DRAG_ITEMS);
     }
@@ -199,7 +199,7 @@ export function readAssetDrop(transfer: DataTransfer): string[] {
       } catch { return []; }
     }
     if (single && single.length <= 128) return [single];
-    return activeDraggedIds.slice(0, MAX_ASSET_DRAG_ITEMS);
+    if (hasAssetPayload) return activeDraggedIds.slice(0, MAX_ASSET_DRAG_ITEMS);
   }
 
   if (!types.includes("Files")) return [];

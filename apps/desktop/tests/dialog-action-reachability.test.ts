@@ -19,6 +19,7 @@ import { describe, expect, it } from "vitest";
 const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const css = readFileSync(resolve(desktopRoot, "src/styles.css"), "utf8");
 const appSource = readFileSync(resolve(desktopRoot, "src/app/App.tsx"), "utf8");
+const projectLibrarySource = readFileSync(resolve(desktopRoot, "src/app/ProjectLibraryDialog.tsx"), "utf8");
 const dialogSource = readFileSync(resolve(desktopRoot, "src/app/Dialog.tsx"), "utf8");
 
 function rules(source: string): Array<{ selector: string; body: string }> {
@@ -81,17 +82,15 @@ describe("Dialog 骨架契约", () => {
 });
 
 describe("持有全局操作的弹窗必须有真实底栏", () => {
-  it("项目管理把归档操作放在 footer，而不是正文段落里", () => {
-    const line = appSource.split("\n").find((text) => text.includes('title="项目管理"'));
-    expect(line, "找不到项目管理弹窗").toBeDefined();
-    expect(line!, "项目管理缺少 footer（归档操作只能在正文里滚走）").toMatch(/footer=\{/);
-    expect(line!).toMatch(/toggleArchive\(\)/);
+  it("项目管理通过 ProjectLibraryDialog 将归档操作放在卡片 footer，而不是正文段落里", () => {
+    expect(appSource, "App.tsx 缺少 ProjectLibraryDialog 入口").toContain("<ProjectLibraryDialog");
+    expect(projectLibrarySource, "找不到项目管理弹窗").toContain('title="项目管理"');
+    expect(projectLibrarySource, "项目管理卡片缺少 footer 操作栏").toContain('className="project-library-card-actions"');
+    expect(projectLibrarySource).toMatch(/onToggleArchive\(project\)/);
   });
 
-  it("项目管理正文里不再残留内嵌的操作行", () => {
-    const line = appSource.split("\n").find((text) => text.includes('title="项目管理"'))!;
-    const bodyPart = line.slice(line.indexOf("className=\"project-management-modal\""));
-    expect(bodyPart).not.toContain('className="modal-actions"');
+  it("项目管理正文里不再残留内嵌的 modal-actions 操作行", () => {
+    expect(projectLibrarySource).not.toContain('className="modal-actions"');
   });
 });
 

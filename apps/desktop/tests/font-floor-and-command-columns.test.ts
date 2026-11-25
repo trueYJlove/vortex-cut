@@ -55,6 +55,7 @@ function parseRules(source: string): Rule[] {
       out.push({ sels: prelude.split(",").map(s => s.replace(/\s+/g, " ").trim()).filter(Boolean), body, order, inMedia: stack.length > 0 });
       i = j; continue;
     }
+    if (ch === ";" && stack.length === 0) { buffer = ""; continue; }
     if (ch === "}") { stack.pop(); buffer = ""; continue; }
     buffer += ch;
   }
