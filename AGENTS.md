@@ -239,3 +239,9 @@ To prevent repository bloat and accidental commits of generated media or oversiz
 - Gate approvals require consensus from all relevant agents
 - Documentation must be updated in parallel with implementation (see **Documentation Sync Discipline** above)
 - Roles may be combined for smaller tasks but maintained for major features
+
+## Editor Command Layer Discipline
+
+To keep timeline/playback/render mutations deterministic and ready for future external / MCP tool integration:
+
+- **新编辑功能必须先定义可序列化 Command 再接入 UI**：所有核心时间线编辑、播放头控制、预览/导出触发等变更动作，必须先在 `apps/desktop/src/app/commands/` 中定义入参/出参均为纯 JSON 可序列化数据的 `CommandDefinition`（含结构化 `CommandResult` 与 `inputSchema`），再经 `editorCommands.ts` 统一分发器接入 UI 按钮、快捷键或右键菜单；严禁在 Command 参数中传入 React SyntheticEvent、DOM 节点或组件局部 state setter。
