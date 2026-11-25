@@ -1,7 +1,7 @@
 import { editorPerf } from "../preview/perf-metrics.js";
 import { ToolButton } from "../../ui/of/ToolButton.js";
 import { ModePicker, timelineModeFromKeyEvent, type TimelineMode } from "../../ui/of/ModePicker.js";
-import { ContextMenu, type ContextMenuEntry } from "../../ui/of/ContextMenu.js";
+import { ContextMenu } from "../../ui/of/ContextMenu.js";
 import { ASSET_BATCH_DRAG, ASSET_DRAG, SYSTEM_FILE_DROP_ID, assetDropKindFromFile, clearSystemFileDrop, getActiveDraggedAssetIds, hasAssetDrag, peekSystemFileDrop, readAssetDrop, resolveTimelineAssetDropIntent, restoreSystemFileDrop, setActiveDraggedAssetIds } from "./asset-drop.js";
 import { splitClipAt, splitSelectionAt } from "./split-point.js";
 import { expandLinkedClipIds, mergeLinkedMarqueeSelection, removeLinkedClips } from "./linked-clips.js";
@@ -27,39 +27,24 @@ import { AudioMeters } from "../../ui/of/AudioMeters.js";
  *           highlight, trim handles, snap guides, marquee, drag ghosts
  */
 import {
-  memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
-  useLayoutEffect,
   useSyncExternalStore,
 } from "react";
 import {
   ChevronLeft,
   ChevronRight,
-  Eye,
-  EyeOff,
-  Film,
-  Lock,
-  LockOpen,
-  Link2,
-  Link2Off,
   Magnet,
-  MoreHorizontal,
   Paperclip,
   PenLine,
-  PanelLeftClose,
-  PanelLeftOpen,
   Redo2,
   SeparatorVertical,
   SquareDashed,
-  Trash2,
   Undo2,
-  Volume2,
-  VolumeX,
-  X,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
@@ -108,10 +93,7 @@ import { ThumbnailLoader, defaultFilmstripSourceFactory } from "./thumbnail-load
 import { OVERSCAN_ROWS } from "./viewport-index.js";
 import type { WaveformCache } from "./waveform-cache.js";
 import {
-  CLIP_RADIUS,
   CLIP_ROW_INSET,
-  KEYFRAME_LANE_HEIGHT,
-  KEYFRAME_ORDER,
   KIND_COLOR_VARS,
   formatTimelineHoverTime,
 } from "./canvas/render/theme.js";
@@ -124,11 +106,26 @@ import {
   frameTierFor,
   quantizeFrameCount,
   thumbnailStepMs,
-  type FilmstripOverlayCell,
   type FilmstripSprite,
 } from "./canvas/render/filmstrip-index.js";
 import { drawRulerStrip } from "./canvas/render/ruler.js";
 import { drawTimelineFrame } from "./canvas/render/render-frame.js";
+import { TrackHeadColumn } from "./canvas/TrackHeadColumn.js";
+import {
+  buildCanvasContextMenuItems,
+  buildTrackContextMenuItems,
+  type TimelineCanvasContextMenuState,
+  type TrackContextMenuState,
+} from "./canvas/contextMenuBuilder.js";
+import {
+  TimelineAccessibleClipList,
+  TimelineAddTransitionDialog,
+  TimelineClipLabelsOverlay,
+  TimelineDropAndReplaceOverlays,
+  TimelineFilmstripOverlay,
+  TimelineInsertIndicator,
+  TimelineTransitionAndKeyframeOverlays,
+} from "./canvas/TimelineOverlays.js";
 
 export {
   THUMB_CELL_PX,
@@ -139,9 +136,6 @@ export {
   quantizeFrameCount,
   thumbnailStepMs,
 };
-
-/** B2 转场种类（与 core TRANSITION_KINDS 对齐）。 */
-const TRANSITION_KINDS = ["fade", "fadeblack", "dissolve", "wipeleft", "wiperight", "slideleft", "slideup", "zoomin"] as const;
 
 const canChangeClipSpeed = (clip: TimelineClip): boolean =>
   (clip.asset_kind === "video" || clip.asset_kind === "audio")
@@ -298,78 +292,6 @@ function SplitToolbarGlyph() {
   return <svg aria-hidden="true" width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="square">
     <path d="M5 4h4v16H5m14-16h-4v16h4" />
   </svg>;
-}
-
-/** OpenFilm-style track head resize target. Pointer dragging edits one row;
- * keyboard arrows resize it too, and Home/double-click restore its role height. */
-function TrackResizeHandle({
-  trackId,
-  height,
-  onResize,
-}: {
-  trackId: string;
-  height: number;
-  onResize: (height: number | null, done: boolean) => void;
-}) {
-  const dragRef = useRef<{ pointerId: number; startY: number; startHeight: number; lastHeight: number } | null>(null);
-  const minimum = 28;
-  const clamp = (value: number) => Math.max(minimum, Math.min(160, Math.round(value)));
-  const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    event.stopPropagation();
-    dragRef.current = { pointerId: event.pointerId, startY: event.clientY, startHeight: height, lastHeight: height };
-    event.currentTarget.setPointerCapture(event.pointerId);
-  };
-  const onPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    const next = clamp(drag.startHeight + event.clientY - drag.startY);
-    if (next === drag.lastHeight) return;
-    drag.lastHeight = next;
-    onResize(next, false);
-  };
-  const onPointerEnd = (event: React.PointerEvent<HTMLDivElement>) => {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    dragRef.current = null;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    onResize(drag.lastHeight, true);
-  };
-  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Home") {
-      event.preventDefault();
-      event.stopPropagation();
-      onResize(null, true);
-      return;
-    }
-    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
-    event.preventDefault();
-    event.stopPropagation();
-    const step = event.shiftKey ? 10 : 4;
-    onResize(clamp(height + (event.key === "ArrowDown" ? step : -step)), true);
-  };
-  return (
-    <div
-      className="timeline-track-resize"
-      role="separator"
-      aria-orientation="horizontal"
-      aria-label={`调整轨道 ${trackId} 高度`}
-      aria-valuemin={minimum}
-      aria-valuemax={160}
-      aria-valuenow={height}
-      aria-valuetext={`${height} 像素`}
-      aria-keyshortcuts="ArrowUp ArrowDown Shift+ArrowUp Shift+ArrowDown Home"
-      tabIndex={0}
-      title={`拖动调整轨道 ${trackId} 高度；方向键微调；Home 恢复默认`}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerEnd}
-      onPointerCancel={onPointerEnd}
-      onDoubleClick={event => { event.stopPropagation(); onResize(null, true); }}
-      onKeyDown={onKeyDown}
-    />
-  );
 }
 
 // ── WP-P232 预抽 sprite 装载（可测的调度体） ────────────────────────────────
@@ -679,39 +601,6 @@ function loadRuntimePrefs(projectId?: string): TimelineRuntimePrefs {
 
 // ── Canvas drawing (delegated to ./canvas/render/*) ───────────────────────────
 
-const TimelineFilmstripCanvas = memo(function TimelineFilmstripCanvas({ cell }: { cell: FilmstripOverlayCell }) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  useLayoutEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || canvas.width !== cell.sourceWidth || canvas.height !== cell.sourceHeight) return;
-    const context = canvas.getContext("2d");
-    if (!context) return;
-    context.clearRect(0, 0, canvas.width, canvas.height);
-    context.drawImage(cell.source, cell.sourceX, cell.sourceY, cell.sourceWidth, cell.sourceHeight,
-      0, 0, canvas.width, canvas.height);
-  }, [cell]);
-  return (
-    <canvas
-      ref={canvasRef}
-      data-timeline-filmstrip-cell={cell.key}
-      width={cell.sourceWidth}
-      height={cell.sourceHeight}
-      aria-hidden="true"
-      style={{
-        position: "absolute",
-        left: cell.x,
-        top: 0,
-        width: cell.width,
-        height: cell.height,
-        objectFit: "cover",
-        objectPosition: "center",
-        opacity: 0.9,
-        pointerEvents: "none",
-      }}
-    />
-  );
-});
-
 // ── Component ────────────────────────────────────────────────────────────────
 
 export function TimelinePanel({
@@ -930,18 +819,8 @@ export function TimelinePanel({
   // Round 4: whether the in-flight marquee mousedown used Shift (keep selection).
   const shiftClickRef = useRef(false);
   // Round 4: context menu state (null = closed).
-  const [contextMenu, setContextMenu] = useState<{
-    x: number;
-    y: number;
-    target:
-      | { kind: "clip"; clipId: TimelineClipId }
-      | { kind: "caption"; captionId: string }
-      | { kind: "transition"; transitionId: string }
-      | { kind: "active-transition"; transitionId: string }
-      | { kind: "empty"; trackId: string | null };
-    timeUs: number;
-  } | null>(null);
-  const [trackMenu, setTrackMenu] = useState<{ trackId: string; x: number; y: number; trigger: HTMLElement } | null>(null);
+  const [contextMenu, setContextMenu] = useState<TimelineCanvasContextMenuState | null>(null);
+  const [trackMenu, setTrackMenu] = useState<TrackContextMenuState | null>(null);
   const trackDragRef = useRef<{ id: string; startY: number; moved: boolean } | null>(null);
   const [trackDragTarget, setTrackDragTarget] = useState<string | null>(null);
 
@@ -3869,207 +3748,50 @@ export function TimelinePanel({
         setTimeRange(null);
       }}>
         <div ref={scrollRef} className="timeline-scroll" onScroll={onTimelineScroll}>
-        {/* Left gutter (DOM)：每条轨道一个属性头
-            [类型标识] [锁定] [隐藏(视频/文本)] [静音(视频/音频)] [独奏(视频/音频)] */}
-        <div className="timeline-left" data-scrolled={view.scrollX > 0 ? "1" : undefined} style={{ width: trackHeadWidth, height: contentHeight, position: "relative" }}>
-          <div className="timeline-left-corner" style={{ height: view.rulerHeight }} />
-          {tracks.length > 0 && (
-            <button
-              type="button"
-              className="timeline-track-head-divider"
-              aria-label={headsCollapsed ? "展开轨道控制栏" : "收起轨道控制栏"}
-              aria-expanded={!headsCollapsed}
-              title={headsCollapsed ? "展开轨道控制栏" : "收起轨道控制栏"}
-              style={{ left: trackHeadWidth - 6, top: Math.max(view.rulerHeight + 4, contentHeight / 2 - 10) }}
-              onClick={() => setHeadsCollapsed(value => !value)}
-            >
-              {headsCollapsed ? <PanelLeftOpen size={13} /> : <PanelLeftClose size={13} />}
-            </button>
-          )}
-          {trackRows.map((row) => {
-            // 兼容旧文档/旧 core 的轨道 kind（visual→video、caption→text）。
-            const rawKind: string = row.track.kind;
-            const kind = rawKind === "visual" ? "video" : rawKind === "caption" ? "text" : rawKind;
-            // 剪映式：轨道上没有素材时不显示属性开关（仅保留类型标识）。
-            const hasClips = clips.some((clip) => clip.track_id === row.track.id);
-            return (
-              <div
-                key={row.track.id}
-                className="timeline-track-head"
-                data-track-kind={kind}
-                data-track-id={row.track.id}
-                data-head-collapsed={headsCollapsed ? "true" : undefined}
-                data-track-drop-target={trackDragTarget === row.track.id ? "true" : undefined}
-                tabIndex={0}
-                role="group"
-                aria-label={`轨道 ${row.track.id}`}
-                aria-keyshortcuts={row.track.id !== "V1" && row.track.id !== "A1" ? "Alt+ArrowUp Alt+ArrowDown Shift+F10" : undefined}
-                title={row.track.id !== "V1" && row.track.id !== "A1" ? "拖动轨道编号或使用 Alt+↑/↓ 排序；右键打开菜单" : undefined}
-                onContextMenu={event => {
-                  event.preventDefault(); event.stopPropagation();
-                  if (["V1", "A1", "C1"].includes(row.track.id)) return;
-                  setTrackMenu({ trackId: row.track.id, x: event.clientX, y: event.clientY, trigger: event.currentTarget });
-                }}
-                onKeyDown={event => {
-                  if (event.target === event.currentTarget && event.altKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
-                    const dynamic = trackRows.filter(item => item.track.id !== "V1" && item.track.id !== "A1");
-                    const from = dynamic.findIndex(item => item.track.id === row.track.id);
-                    const to = from + (event.key === "ArrowUp" ? -1 : 1);
-                    if (from >= 0 && to >= 0 && to < dynamic.length) void onPatch([{ op: "move_track", track_id: row.track.id, to_index: to }], "调整轨道顺序");
-                    event.preventDefault(); event.stopPropagation(); return;
-                  }
-                  if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
-                  event.preventDefault(); event.stopPropagation();
-                  if (["V1", "A1", "C1"].includes(row.track.id)) return;
-                  const rect = event.currentTarget.getBoundingClientRect();
-                  setTrackMenu({ trackId: row.track.id, x: rect.left, y: rect.bottom, trigger: event.currentTarget });
-                }}
-                data-flag-cols={kind === "text" ? "2" : "4"}
-                data-lane-picked={trackRows.some(r => selection?.kind === "clip" && clips.some(c => c.clip_id === selection.id && c.track_id === row.track.id)) ? "1" : undefined}
-                style={{ top: row.y, height: row.height }}
-              >
-                <TrackResizeHandle trackId={row.track.id} height={row.height}
-                  onResize={(height, done) => resizeTrack(row.track.id, height, done)} />
-                {/* 2026-11-11 对齐 OpenFilm 的 LaneMark（Timeline.tsx:295）：
-                   轨道头左侧是**纯文字轨号**，没有图标、没有色块底、没有方块边框。
-                   原来是「图标 + 轨号」的小徽章，在 119px 的头列里占了 30px，
-                   且带一层与图标同色的小方框；参照软件里这一格只是个 10.5px
-                   的灰字，左侧留白、右侧才是开关图标列。 */}
-                <span className="timeline-track-badge" title={`${row.track.id} ${kind === "video" ? "视频" : kind === "text" ? "文本" : "音频"}轨道`}
-                  onPointerDown={event => {
-                    if (event.button !== 0 || row.track.id === "V1" || row.track.id === "A1") return;
-                    event.preventDefault(); event.stopPropagation();
-                    event.currentTarget.setPointerCapture?.(event.pointerId);
-                    trackDragRef.current = { id: row.track.id, startY: event.clientY, moved: false };
-                  }}
-                  onPointerMove={event => {
-                    const drag = trackDragRef.current;
-                    if (drag && Math.abs(event.clientY - drag.startY) >= 5) {
-                      drag.moved = true;
-                      setTrackDragTarget(trackDropTarget(event.clientY).id);
-                    }
-                  }}
-                  onPointerCancel={() => { trackDragRef.current = null; setTrackDragTarget(null); }}
-                  onPointerUp={event => {
-                    const drag = trackDragRef.current;
-                    trackDragRef.current = null;
-                    setTrackDragTarget(null);
-                    if (!drag?.moved) return;
-                    const { dynamic, targetIndex } = trackDropTarget(event.clientY);
-                    if (targetIndex !== dynamic.findIndex(item => item.track.id === drag.id)) void onPatch([{ op: "move_track", track_id: drag.id, to_index: targetIndex }], "调整轨道顺序");
-                  }}>
-                  <small>{row.track.id}</small>
-                </span>
-                {headsCollapsed && (
-                  <button
-                    type="button"
-                    className="timeline-track-collapsed-menu"
-                    aria-label={`打开轨道 ${row.track.id} 控制菜单`}
-                    aria-haspopup="menu"
-                    onClick={event => {
-                      event.stopPropagation();
-                      const rect = event.currentTarget.getBoundingClientRect();
-                      setTrackMenu({ trackId: row.track.id, x: rect.right + 4, y: rect.top, trigger: event.currentTarget });
-                    }}
-                  >
-                    <MoreHorizontal size={14} />
-                  </button>
-                )}
-                {!headsCollapsed && (
-                  <>
-                    {/* OpenFilm 轨号与开关列间固定留 4px。 */}
-                    <span aria-hidden />
-                    {hasClips && <>
-                    <button
-                      className="track-flag"
-                      aria-label={`锁定轨道 ${row.track.id}`}
-                      aria-pressed={row.track.locked}
-                      title="锁定轨道"
-                      onClick={() => patchTrackFlags(row.track.id, { locked: !row.track.locked })}
-                    >
-                      {row.track.locked ? <Lock size={11} /> : <LockOpen size={11} />}
-                    </button>
-                    <button
-                      className="track-flag"
-                      aria-label={`隐藏轨道 ${row.track.id}`}
-                      aria-pressed={row.track.hidden}
-                      title="隐藏轨道（预览不渲染该轨内容）"
-                      onClick={() => patchTrackFlags(row.track.id, { hidden: !row.track.hidden })}
-                    >
-                      {row.track.hidden ? <EyeOff size={11} /> : <Eye size={11} />}
-                    </button>
-                    {kind !== "text" && (
-                      <button
-                        className="track-flag"
-                        aria-label={`静音轨道 ${row.track.id}`}
-                        aria-pressed={row.track.muted}
-                        title="关闭原声"
-                        onClick={() => patchTrackFlags(row.track.id, { muted: !row.track.muted })}
-                      >
-                        {row.track.muted ? <VolumeX size={11} /> : <Volume2 size={11} />}
-                      </button>
-                    )}
-                    {kind !== "text" && (
-                      <button
-                        className={`track-flag track-solo${row.track.solo ? " active" : ""}`}
-                        aria-label={`独奏轨道 ${row.track.id}`}
-                        aria-pressed={row.track.solo}
-                        title="独奏（仅播放该轨声音）"
-                        onClick={() => patchTrackFlags(row.track.id, { solo: !row.track.solo })}
-                      >
-                        S
-                      </button>
-                    )}
-                    </>}
-                  </>
-                )}
-              </div>
-            );
-          })}
-        </div>
+        <TrackHeadColumn
+          tracks={tracks}
+          trackRows={trackRows}
+          clips={clips}
+          selection={selection}
+          scrollX={view.scrollX}
+          trackHeadWidth={trackHeadWidth}
+          contentHeight={contentHeight}
+          rulerHeight={view.rulerHeight}
+          headsCollapsed={headsCollapsed}
+          onToggleHeadsCollapsed={() => setHeadsCollapsed((value) => !value)}
+          trackDragTarget={trackDragTarget}
+          setTrackDragTarget={setTrackDragTarget}
+          trackDragRef={trackDragRef}
+          trackDropTarget={trackDropTarget}
+          resizeTrack={resizeTrack}
+          patchTrackFlags={patchTrackFlags}
+          onPatch={onPatch}
+          onOpenTrackMenu={setTrackMenu}
+        />
         {trackMenu && (() => {
-          const track = tracks.find(item => item.id === trackMenu.trackId);
-          const members = clips.filter(clip => clip.track_id === trackMenu.trackId);
-          const fixed = trackMenu.trackId === "V1" || trackMenu.trackId === "A1" || trackMenu.trackId === "C1";
-          const disabled = !track || track.locked || members.some(clip => isClipLocked(clip.clip_id));
-          const height = trackRows.find(row => row.track.id === trackMenu.trackId)?.height;
-          const sizeKind = track?.kind === "audio" ? "audio" : track?.kind === "video" ? "visual" : null;
-          const close = () => { setTrackMenu(null); trackMenu.trigger.focus({ preventScroll: true }); };
-          const presetItems = sizeKind ? (["small", "medium", "large"] as const).map(size => ({
-            id: `height-${size}`,
-            label: `轨道高度：${size === "small" ? "小" : size === "medium" ? "中" : "大"}`,
-            note: `${TRACK_SIZES[size][sizeKind]} px`,
-            checked: height === TRACK_SIZES[size][sizeKind],
-            onSelect: () => { resizeTrack(trackMenu.trackId, TRACK_SIZES[size][sizeKind], true); close(); },
-          })) : [];
-          const items = [
-            ...(track ? [{
-              id: "toggle-lock", label: track.locked ? "解锁轨道" : "锁定轨道", checked: track.locked,
-              onSelect: () => { patchTrackFlags(track.id, { locked: !track.locked }); close(); },
-            }, {
-              id: "toggle-hidden", label: track.hidden ? "显示轨道" : "隐藏轨道", checked: track.hidden,
-              onSelect: () => { patchTrackFlags(track.id, { hidden: !track.hidden }); close(); },
-            }, ...(track.kind !== "text" ? [{
-              id: "toggle-muted", label: track.muted ? "开启声音" : "关闭声音", checked: track.muted,
-              onSelect: () => { patchTrackFlags(track.id, { muted: !track.muted }); close(); },
-            }, {
-              id: "toggle-solo", label: track.solo ? "取消独奏" : "独奏", checked: track.solo,
-              onSelect: () => { patchTrackFlags(track.id, { solo: !track.solo }); close(); },
-            }] : [])] : []),
-            ...(track && (presetItems.length || height !== undefined) ? [{ id: "track-options-separator", separator: true as const }] : []),
-            ...presetItems,
-            ...(track && height !== undefined ? [{
-              id: "height-default", label: "恢复默认高度", checked: !prefs.trackHeights[trackMenu.trackId],
-              onSelect: () => { resizeTrack(trackMenu.trackId, null, true); close(); },
-            }] : []),
-            ...(members.length && !fixed ? [{ id: "delete-track-separator", separator: true as const }] : []),
-            ...(members.length && !fixed ? [{
-              id: "delete-track", label: "删除轨道", danger: true, disabled,
-              hint: disabled ? "轨道或轨道中的片段已锁定" : undefined,
-              onSelect: () => { void onPatch([{ op: "remove_track", track_id: trackMenu.trackId }], "删除轨道"); close(); },
-            }] : []),
-          ];
-          return <ContextMenu x={trackMenu.x} y={trackMenu.y} onClose={close} items={items} />;
+          const close = () => {
+            setTrackMenu(null);
+            trackMenu.trigger.focus({ preventScroll: true });
+          };
+          return (
+            <ContextMenu
+              x={trackMenu.x}
+              y={trackMenu.y}
+              onClose={close}
+              items={buildTrackContextMenuItems({
+                trackId: trackMenu.trackId,
+                tracks,
+                trackRows,
+                clips,
+                prefs,
+                isClipLocked,
+                resizeTrack,
+                patchTrackFlags,
+                onPatch,
+                close,
+              })}
+            />
+          );
         })()}
 
         {/* Canvas area */}
@@ -4123,92 +3845,14 @@ export function TimelinePanel({
               top: canvasTopY,
             }}
           />
-          {filmstripOverlayGroups.length > 0 && (
-            <div
-              data-timeline-filmstrip-overlay="1"
-              aria-hidden="true"
-              style={{
-                position: "absolute",
-                left: 0,
-                top: canvasTopY,
-                width: canvasSize.width,
-                height: canvasViewportHeight,
-                overflow: "hidden",
-                pointerEvents: "none",
-                zIndex: 0,
-              }}
-            >
-              {filmstripOverlayGroups.map(group => (
-                <div
-                  key={group.clipId}
-                  data-timeline-filmstrip-clip={group.clipId}
-                  style={{
-                    position: "absolute",
-                    left: group.x,
-                    top: group.y - canvasTopY,
-                    width: group.width,
-                    height: group.height,
-                    overflow: "hidden",
-                    borderRadius: `0 0 ${CLIP_RADIUS}px ${CLIP_RADIUS}px`,
-                    filter: group.filter,
-                  }}
-                >
-                  {group.cells.map(cell => <TimelineFilmstripCanvas key={cell.key} cell={cell} />)}
-                </div>
-              ))}
-            </div>
-          )}
-          <div className="timeline-clip-label-layer" aria-hidden="true">
-            {clipLabelRects.map((label) => (
-              <div
-                key={label.id}
-                className="timeline-clip-label"
-                data-timeline-clip-label={label.id}
-                data-speed={label.speed}
-                style={{
-                  left: label.x,
-                  top: label.y,
-                  width: label.width,
-                  height: label.height,
-                  filter: label.hidden ? "grayscale(1)" : undefined,
-                }}
-              >
-                <div className="timeline-clip-label-info" style={{ height: CLIP_HEADER_H, backgroundColor: label.headerColor }}>
-                  <span className="timeline-clip-label-pin" data-label-pin="" style={{ translate: label.pinShift > 0 ? `${label.pinShift}px 0` : undefined }}>
-                    <span className="timeline-clip-label-name" data-label-text="">{label.title}</span>
-                    {label.speed && <span className="timeline-clip-label-speed" data-label-text="">{label.speed}</span>}
-                    {label.showDuration && <span className="timeline-clip-label-duration" data-label-text="">{label.duration}</span>}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-          {interaction?.kind === "move" && !interaction.copyOnStart && interaction.moveMode === "insert" &&
-            interaction.dragPlan?.lead && !interaction.dragPlan.reason && (() => {
-              const lead = interaction.dragPlan.lead;
-              const row = trackRowOf(trackRows, lead.trackId);
-              if (!row) return null;
-              const top = row.y + CLIP_ROW_INSET - 3;
-              const clipHeight = Math.max(4, row.height - CLIP_ROW_INSET * 2);
-              return (
-                <div
-                  data-timeline-insert-point={Math.round(lead.startUs)}
-                  aria-hidden="true"
-                  style={{
-                    position: "absolute",
-                    zIndex: 3,
-                    pointerEvents: "none",
-                    left: Math.round(timeToX(lead.startUs, view)) - 1,
-                    top,
-                    width: 3,
-                    height: clipHeight + 6,
-                    borderRadius: 999,
-                    background: "var(--accent)",
-                    boxShadow: "0 0 6px color-mix(in srgb, var(--accent) 70%, transparent)",
-                  }}
-                />
-              );
-            })()}
+          <TimelineFilmstripOverlay
+            groups={filmstripOverlayGroups}
+            canvasTopY={canvasTopY}
+            canvasWidth={canvasSize.width}
+            canvasViewportHeight={canvasViewportHeight}
+          />
+          <TimelineClipLabelsOverlay labels={clipLabelRects} />
+          <TimelineInsertIndicator interaction={interaction} trackRows={trackRows} view={view} />
           {/* 主轨封面入口（剪映式）：仅主轨一处，钉在 V1 轨道头列（与左侧
               图标区同高齐平——上方有字幕轨/动态视频轨时仍随 V1 行定位，
               不再写死标尺下方首行）；点击截取当前播放头画面设为项目封面。 */}
@@ -4227,607 +3871,85 @@ export function TimelinePanel({
               </button>
             );
           })()}
-          {/* Accessible clip list (DOM): mirrors selection so keyboard /
-              screen-reader users and tests can select clips. */}
-          <div
-            className="timeline-a11y-clips"
-            style={{
-              position: "absolute",
-              width: 1,
-              height: 1,
-              padding: 0,
-              margin: -1,
-              overflow: "hidden",
-              clip: "rect(0 0 0 0)",
-              whiteSpace: "nowrap",
-              border: 0,
-            }}
-          >
-            {clips.map((clip, index) => {
-              const isSelected =
-                selection?.kind === "clip"
-                  ? selection.id === clip.clip_id
-                  : selection?.kind === "clips"
-                    ? selection.ids.includes(clip.clip_id)
-                    : false;
-              return (
-                <button
-                  key={clip.clip_id}
-                  data-clip-id={clip.clip_id}
-                  aria-label={`Clip ${index + 1} ${clip.asset_kind} ${formatTime(clip.timeline_end_us - clip.timeline_start_us)}`}
-                  aria-pressed={isSelected}
-                  onClick={event => setSelection(event.shiftKey || event.ctrlKey || event.metaKey
-                    ? toggleClipSelection(clip, event.altKey)
-                    : event.altKey ? { kind: "clip", id: clip.clip_id } : linkedSelection(clip))}
-                />
-              );
-            })}
-            {captions.map((caption, index) => {
-              const isSelected =
-                selection?.kind === "caption" && selection.id === caption.caption_id;
-              return (
-                <button
-                  key={caption.caption_id}
-                  aria-label={caption.text || `字幕 ${index + 1}`}
-                  aria-pressed={isSelected}
-                  onClick={() => setSelection({ kind: "caption", id: caption.caption_id })}
-                />
-              );
-            })}
-          </div>
-          {/* B2: transition markers (DOM overlay for hover/selection styles) */}
-          {transitionRects.map((rect) => {
-            const isSelected =
-              selection?.kind === "transition" &&
-              selection.id === rect.transition.transition_id;
-            // T9 参照 Timeline.tsx:3489-3526：16px 高芯片、行垂直居中（不低于信息条）、
-            // 未选 rgba(255,255,255,.88)+#1b1e25、选中 accent、X 交叉线 1.2px、>70px 显示名、左右 6px 拖条。
-            const chipTop = Math.max(rect.y + 16, rect.y + Math.round(rect.height / 2) - 8);
-            const chipW = Math.max(10, rect.width);
-            return (
-              <div
-                key={rect.transition.transition_id}
-                role="button"
-                tabIndex={-1}
-                className={`timeline-transition-marker${isSelected ? " selected" : ""}`}
-                data-transition={rect.transition.kind}
-                style={{
-                  position: "absolute",
-                  left: rect.x,
-                  top: chipTop,
-                  width: chipW,
-                  height: 16,
-                  pointerEvents: "auto",
-                }}
-                title={`转场 ${rect.transition.kind} · ${(rect.transition.duration_us / 1_000_000).toFixed(2)}s`}
-                aria-label={`转场 ${rect.transition.kind} ${(rect.transition.duration_us / 1_000_000).toFixed(2)}秒`}
-                aria-pressed={isSelected}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setSelection({ kind: "transition", id: rect.transition.transition_id });
-                }}
-              >
-                <svg aria-hidden className="transition-x" viewBox="0 0 100 16" preserveAspectRatio="none">
-                  <path d="M0 15 L100 1" vectorEffect="non-scaling-stroke" fill="none" />
-                  <path d="M0 1 L100 15" vectorEffect="non-scaling-stroke" fill="none" />
-                </svg>
-                {chipW > 70 ? <span className="transition-name">{rect.transition.kind}</span> : null}
-                {(["start", "end"] as const).map(side => (
-                  <span key={side} role="presentation" className={`transition-edge ${side}`}
-                    aria-label={`调整转场时长 ${side === "start" ? "起点" : "终点"}`}
-                    onPointerDown={event => {
-                      event.stopPropagation();
-                      beginTransitionResize(rect.transition, side, event);
-                    }}
-                    onPointerMove={moveTransitionResize}
-                    onPointerUp={endTransitionResize}
-                    onPointerCancel={endTransitionResize} />
-                ))}
-              </div>
-            );
-          })}
-          {/* Core-projected source-fact transitions have their own identity path;
-              these IDs are never passed to legacy update/remove_transition ops. */}
-          {activeTransitionRects.map((rect) => {
-            const transition = rect.transition;
-            const isSelected = selection?.kind === "active-transition" && selection.id === transition.transition_id;
-            const chipTop = Math.max(rect.y + 16, rect.y + Math.round(rect.height / 2) - 8);
-            const chipW = Math.max(10, rect.width);
-            const title = `${transition.kind} · ${((transition.end_us - transition.start_us) / 1_000_000).toFixed(2)}s`;
-            return (
-              <div
-                key={`active:${transition.transition_id}`}
-                role="button"
-                tabIndex={-1}
-                className={`timeline-transition-marker timeline-active-transition-marker${isSelected ? " selected" : ""}${rect.editable ? " editable" : " read-only"}`}
-                data-transition={transition.kind}
-                data-active-transition-id={transition.transition_id}
-                style={{
-                  position: "absolute",
-                  left: rect.x,
-                  top: chipTop,
-                  width: chipW,
-                  height: 16,
-                  pointerEvents: "auto",
-                }}
-                title={`${title}${transition.rest_clip_id ? ` · rest ${transition.rest_clip_id}` : ""}${rect.editable ? " · 拖动边缘调整" : " · 只读"}`}
-                aria-label={`活动转场 ${title}`}
-                aria-pressed={isSelected}
-                onClick={event => {
-                  event.stopPropagation();
-                  setSelection({ kind: "active-transition", id: transition.transition_id });
-                }}
-                onContextMenu={event => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  const coords = canvasCoords(event);
-                  if (!coords) return;
-                  setSelection({ kind: "active-transition", id: transition.transition_id });
-                  setContextMenu({ x: coords.x, y: coords.y, target: { kind: "active-transition", transitionId: transition.transition_id }, timeUs: xToTime(coords.x, view) });
-                }}
-              >
-                <svg aria-hidden className="transition-x" viewBox="0 0 100 16" preserveAspectRatio="none">
-                  <path d="M0 15 L100 1" vectorEffect="non-scaling-stroke" fill="none" />
-                  <path d="M0 1 L100 15" vectorEffect="non-scaling-stroke" fill="none" />
-                </svg>
-                {chipW > 70 ? <span className="transition-name">{transition.kind}</span> : null}
-                {rect.editable ? (["start", "end"] as const).map(edge => (
-                  <span
-                    key={edge}
-                    role="presentation"
-                    className={`transition-edge ${edge}`}
-                    aria-label={`调整活动转场${edge === "start" ? "起点" : "终点"}`}
-                    onPointerDown={event => beginActiveTransitionResize(rect, edge, event)}
-                    onPointerMove={moveActiveTransitionResize}
-                    onPointerUp={endActiveTransitionResize}
-                    onPointerCancel={endActiveTransitionResize}
-                  />
-                )) : null}
-              </div>
-            );
-          })}
-          {/* B3/Round5: keyframe dots on selected clips, laid out in the expanded lanes */}
-          {clips.map((clip) => {
-            if (!clip.keyframes || selection?.kind !== "clip" || selection.id !== clip.clip_id) return null;
-            const rect = clipRects.find((item) => item.clip.clip_id === clip.clip_id);
-            if (!rect) return null;
-            const colors: Record<string, string> = { position: "#6fd3d3", scale: "#f0d264", rotate: "#f0a264", opacity: "#ffffff" };
-            const props = KEYFRAME_ORDER.filter((property) => clip.keyframes?.[property]);
-            return props.flatMap((property) => {
-              const track = clip.keyframes?.[property as keyof NonNullable<TimelineClip["keyframes"]>];
-              if (!track) return [];
-              const laneIndex = props.indexOf(property);
-              const laneCenterY =
-                rect.y + rect.height + 2 + 4 + laneIndex * KEYFRAME_LANE_HEIGHT + KEYFRAME_LANE_HEIGHT / 2;
-              return track.frames.map((frame: { t_us: number; x?: number; y?: number; v?: number }) => {
-                const x = timeToX(clip.timeline_start_us + frame.t_us, view);
-                if (x < rect.x || x > rect.x + rect.width) return null;
-                const commit = (newTUs: number) => {
-                  const frames = track.frames
-                    .map((f: { t_us: number; x?: number; y?: number; v?: number }) => (f.t_us === frame.t_us ? { ...f, t_us: Math.max(0, Math.min(clip.timeline_end_us - clip.timeline_start_us, Math.round(newTUs))) } : { ...f, t_us: Math.round(f.t_us) }))
-                    .sort((a: { t_us: number }, b: { t_us: number }) => a.t_us - b.t_us);
-                  void onPatch(
-                    [{ op: "set_clip_keyframes", clip_id: clip.clip_id, property: property as never, frames }],
-                    `调整${property}关键帧时间`,
-                  );
-                };
-                return (
-                  <button
-                    key={`${clip.clip_id}-${property}-${frame.t_us}`}
-                    className="timeline-keyframe-dot"
-                    data-property={property}
-                    style={{ position: "absolute", left: x - 4, top: laneCenterY - 4, width: 8, height: 8, background: colors[property] ?? "#fff", pointerEvents: "auto" }}
-                    aria-label={`${property} 关键帧 ${formatTime(frame.t_us)}`}
-                    title={`${property} @ ${formatTime(frame.t_us)}（拖动改时间）`}
-                    draggable
-                    onDragEnd={(event) => {
-                      const canvas = canvasRef.current;
-                      if (!canvas) return;
-                      const bounds = canvas.getBoundingClientRect();
-                      const scale = canvas.width / bounds.width || 1;
-                      const newTUs = Math.max(0, Math.min(clip.timeline_end_us - clip.timeline_start_us, Math.round(xToTime((event.clientX - bounds.left) * scale, view))));
-                      commit(newTUs);
-                    }}
-                    onClick={(event) => event.stopPropagation()}
-                  />
-                );
-              });
-            });
-          })}
-          {/* Drop zone overlay when dragging assets */}
-          {dropIndex !== null && (
-            <div
-              className="timeline-drop-overlay"
-              style={{
-                position: "absolute",
-                left: view.headerWidth,
-                top: view.rulerHeight,
-                right: 0,
-                bottom: 0,
-                pointerEvents: "none",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              {dropIntent?.accepts && (() => {
-                const row = dropIntent.trackId !== "new" && dropIntent.trackId ? trackRowOf(trackRows, dropIntent.trackId) : null;
-                const anchor = dropIntent.newTrackAnchorId ? trackRowOf(trackRows, dropIntent.newTrackAnchorId) : null;
-                const startX = timeToX(dropIntent.atUs, view) - view.headerWidth;
-                const width = Math.max(8, timeToX(dropIntent.atUs + dropIntent.previewDurationUs, view) - timeToX(dropIntent.atUs, view));
-                const previewColor = dropIntent.mode === "overwrite" ? "var(--warn, #f0b45a)" : "var(--accent, #16c7c2)";
-                const rowTop = row ? row.y - view.rulerHeight : 0;
-                const lineY = anchor
-                  ? (dropIntent.newTrackSide === "after" ? anchor.y + anchor.height - view.rulerHeight : anchor.y - view.rulerHeight)
-                  : 0;
-                const shiftIds = new Set(clips.filter(clip => row && clip.track_id === row.track.id && clip.timeline_start_us >= dropIntent.atUs).map(clip => clip.clip_id));
-                if (prefs.linkageEnabled) {
-                  const groups = new Set(clips.filter(clip => shiftIds.has(clip.clip_id) && clip.link_group_id).map(clip => clip.link_group_id));
-                  for (const clip of clips) if (clip.link_group_id && groups.has(clip.link_group_id)) shiftIds.add(clip.clip_id);
-                }
-                const ripples = dropIntent.mode === "insert" ? clips.filter(clip => shiftIds.has(clip.clip_id)) : [];
-                return <>
-                  {row && dropIntent.trackId !== "new" && <div
-                    aria-hidden="true"
-                    style={{
-                      position: "absolute", left: startX, top: rowTop,
-                      width, height: row.height, boxSizing: "border-box",
-                      border: `1px dashed ${previewColor}`,
-                      background: dropIntent.mode === "overwrite" ? "rgba(240, 180, 90, 0.20)" : "rgba(22, 199, 194, 0.16)",
-                      borderRadius: 3,
-                    }}
-                  />}
-                  {dropIntent.trackId === "new" && <div
-                    aria-hidden="true"
-                    style={{ position: "absolute", left: 0, right: 0, top: lineY, height: 2, background: "var(--accent, #16c7c2)", boxShadow: "0 0 0 1px rgba(22, 199, 194, 0.18)" }}
-                  />}
-                  {ripples.map(clip => {
-                    const clipRow = trackRowOf(trackRows, clip.track_id);
-                    if (!clipRow) return null;
-                    const shiftedStart = clip.timeline_start_us + dropIntent.previewDurationUs;
-                    const left = timeToX(shiftedStart, view) - view.headerWidth;
-                    const right = timeToX(clip.timeline_end_us + dropIntent.previewDurationUs, view) - view.headerWidth;
-                    return <div key={`asset-drop-ripple-${clip.clip_id}`} aria-hidden="true" style={{
-                      position: "absolute", left, top: clipRow.y - view.rulerHeight,
-                      width: Math.max(2, right - left), height: clipRow.height,
-                      border: "1px dashed var(--accent, #16c7c2)", boxSizing: "border-box",
-                      background: "rgba(22, 199, 194, 0.08)", borderRadius: 3,
-                    }} />;
-                  })}
-                </>;
-              })()}
-              {dropIntent?.accepts === false && <span className="drop-hint" role="status" aria-live="polite">无法放入已锁定或不兼容的轨道</span>}
-              {dropIntent?.accepts && dropIntent.zone === "center" && dropItemCountRef.current === 1 && <span className="drop-hint" role="status" aria-live="polite">释放以确认替换此片段</span>}
-              {dropIntent?.accepts && dropIntent.mode === "place" && <span className="drop-hint" role="status" aria-live="polite">{dropIntent.trackId === "new" ? "释放以新建轨道并放置素材" : "释放以放置素材"} · {formatTime(dropIntent.atUs)}</span>}
-              {dropIntent?.accepts && dropIntent.mode === "insert" && <span className="drop-hint" role="status" aria-live="polite">释放以插入到时间线（后续片段顺延） · {formatTime(dropIntent.atUs)}</span>}
-              {dropIntent?.accepts && dropIntent.mode === "overwrite" && dropIntent.zone !== "center" && <span className="drop-hint" role="status" aria-live="polite">释放以覆盖 · {formatTime(dropIntent.atUs)}</span>}
-            </div>
-          )}
-          {replaceAssetRequest && (
-            <div className="modal-backdrop timeline-drop-replace-backdrop" onClick={cancelReplaceAsset}>
-              <section
-                className="modal timeline-drop-replace-dialog"
-                role="alertdialog"
-                aria-modal="true"
-                aria-labelledby="timeline-drop-replace-title"
-                aria-describedby="timeline-drop-replace-description"
-                tabIndex={-1}
-                ref={element => { if (element && !element.contains(window.document.activeElement)) element.focus(); }}
-                onClick={event => event.stopPropagation()}
-                onKeyDown={event => {
-                  if (event.key === "Escape") {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    cancelReplaceAsset();
-                  }
-                }}
-              >
-                <div className="modal-heading">
-                  <div><h2 id="timeline-drop-replace-title">替换时间线素材？</h2></div>
-                  <button type="button" className="icon-btn" aria-label="取消替换" title="取消 · Esc" onClick={cancelReplaceAsset}><X size={15} /></button>
-                </div>
-                <div className="modal-body">
-                  <p id="timeline-drop-replace-description">
-                    将替换“{clipNames.get(replaceAssetRequest.targetClipId) ?? "此片段"}”引用的素材。确认后只提交一次时间线修改。
-                  </p>
-                </div>
-                <div className="modal-footer">
-                  <button type="button" className="btn secondary" onClick={cancelReplaceAsset}>取消</button>
-                  <button type="button" className="btn primary" onClick={confirmReplaceAsset}>确认替换</button>
-                </div>
-              </section>
-            </div>
-          )}
-          {replaceClipRequest && (
-            <div className="modal-backdrop timeline-drop-replace-backdrop" onClick={cancelReplaceClip}>
-              <section
-                className="modal timeline-drop-replace-dialog"
-                role="alertdialog"
-                aria-modal="true"
-                aria-labelledby="timeline-clip-replace-title"
-                aria-describedby="timeline-clip-replace-description"
-                tabIndex={-1}
-                ref={element => { if (element && !element.contains(window.document.activeElement)) element.focus(); }}
-                onClick={event => event.stopPropagation()}
-                onKeyDown={event => {
-                  if (event.key === "Escape") {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    cancelReplaceClip();
-                  }
-                }}
-              >
-                <div className="modal-heading">
-                  <div><h2 id="timeline-clip-replace-title">替换时间线片段？</h2></div>
-                  <button type="button" className="icon-btn" aria-label="取消替换" title="取消 · Esc" onClick={cancelReplaceClip}><X size={15} /></button>
-                </div>
-                <div className="modal-body">
-                  <p id="timeline-clip-replace-description">
-                    将移除“{clipNames.get(replaceClipRequest.targetClipId) ?? "目标片段"}”，并把拖动的片段放到该位置。确认后一次提交时间线修改。
-                  </p>
-                </div>
-                <div className="modal-footer">
-                  <button type="button" className="btn secondary" onClick={cancelReplaceClip}>取消</button>
-                  <button type="button" className="btn primary" onClick={confirmReplaceClip}>确认替换</button>
-                </div>
-              </section>
-            </div>
-          )}
-          {clips.length === 0 && (
-            // 空态提示（2026-11-11 对齐 OpenFilm 的 data-timeline-empty）：
-            // 虚线框铺满整个轨道区，而不是只占首行一条带。参照软件里这块虚线
-            // 就是「整片区域都能接住拖放」的视觉承诺；只框住一行时，用户会以为
-            // 只有那一行能放。内缩 10px 上下留白，与行组的 TL_VPAD 一致。
-            <div
-              className="timeline-empty-drop"
-              style={{
-                position: "absolute",
-                left: view.headerWidth,
-                top: view.rulerHeight,
-                right: 0,
-                bottom: SCROLLBAR_HEIGHT_PX,
-                margin: TRACK_VIEW_PAD,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                pointerEvents: "none",
-              }}
-            >
-              <Film size={15} aria-hidden="true" style={{ marginRight: 8, flex: "0 0 auto", color: "var(--tl-label)" }} />
-              将视频或图片拖到这里开始剪辑
-            </div>
-          )}
-          {/* T10 参照 Timeline.tsx:3771-3960 + ContextMenu.tsx：body portal 菜单（键盘导航/
-              翻边定位/danger/hint）。条目只接已有 op；删除类 danger；禁用项留原因。 */}
+          <TimelineAccessibleClipList
+            clips={clips}
+            captions={captions}
+            selection={selection}
+            setSelection={setSelection}
+            toggleClipSelection={toggleClipSelection}
+            linkedSelection={linkedSelection}
+          />
+          <TimelineTransitionAndKeyframeOverlays
+            transitionRects={transitionRects}
+            activeTransitionRects={activeTransitionRects}
+            clips={clips}
+            clipRects={clipRects}
+            selection={selection}
+            view={view}
+            canvasRef={canvasRef}
+            canvasCoords={canvasCoords}
+            setSelection={setSelection}
+            setContextMenu={setContextMenu}
+            beginTransitionResize={beginTransitionResize}
+            moveTransitionResize={moveTransitionResize}
+            endTransitionResize={endTransitionResize}
+            beginActiveTransitionResize={beginActiveTransitionResize}
+            moveActiveTransitionResize={moveActiveTransitionResize}
+            endActiveTransitionResize={endActiveTransitionResize}
+            onPatch={onPatch}
+          />
+          <TimelineDropAndReplaceOverlays
+            dropIndex={dropIndex}
+            dropIntent={dropIntent}
+            dropItemCount={dropItemCountRef.current}
+            clips={clips}
+            trackRows={trackRows}
+            view={view}
+            prefs={prefs}
+            clipNames={clipNames}
+            replaceAssetRequest={replaceAssetRequest}
+            cancelReplaceAsset={cancelReplaceAsset}
+            confirmReplaceAsset={confirmReplaceAsset}
+            replaceClipRequest={replaceClipRequest}
+            cancelReplaceClip={cancelReplaceClip}
+            confirmReplaceClip={confirmReplaceClip}
+          />
           {contextMenu && (
             <ContextMenu
               x={contextMenu.x}
               y={contextMenu.y}
               onClose={() => setContextMenu(null)}
-              items={((): ContextMenuEntry[] => {
-                const target = contextMenu.target;
-                const close = (fn: () => void) => () => { fn(); setContextMenu(null); };
-                if (target.kind === "clip") {
-                  const clip = clips.find((c) => c.clip_id === target.clipId);
-                  if (!clip) return [];
-                  const locked = isClipLocked(clip.clip_id);
-                  const clipItselfLocked = Boolean(document?.locked_elements?.includes(clip.clip_id));
-                  const deleteTargets = selectedClips.some(item => item.clip_id === clip.clip_id) ? selectedClips : [clip];
-                  const magneticDelete = document && prefs.mainTrackMagnet && clip.track_id === "V1"
-                    ? planMagneticDelete(document, deleteTargets, prefs.linkageEnabled)
-                    : undefined;
-                  const ripple = document ? planRippleDelete(document, deleteTargets, prefs.linkageEnabled) : { operations: [] };
-                  const magneticMove = document && clip.track_id === "V1" ? planMagneticMove(document, clip.clip_id, activePlayheadStore.get(), true) : { operations: [] };
-                  const playheadNowUs = activePlayheadStore.get();
-                  const split = splitClipAt(clip, playheadNowUs, document);
-                  const visualClip = clip.asset_kind === "video" || clip.asset_kind === "image";
-                  const visualFactItems: ContextMenuEntry[] = visualClip ? [
-                    {
-                      id: "picture-fade-in",
-                      label: clip.picture_fade_in_us ? "清除画面淡入" : "添加画面淡入（0.5 秒）",
-                      disabled: locked,
-                      onSelect: close(() => void onPatch([{
-                        op: "set_clip_transition_facts",
-                        clip_id: clip.clip_id,
-                        picture_fade_in_us: clip.picture_fade_in_us ? null : 500_000,
-                      }], clip.picture_fade_in_us ? "清除画面淡入" : "添加画面淡入")),
-                    },
-                    {
-                      id: "picture-fade-out",
-                      label: clip.picture_fade_out_us ? "清除画面淡出" : "添加画面淡出（0.5 秒）",
-                      disabled: locked,
-                      onSelect: close(() => void onPatch([{
-                        op: "set_clip_transition_facts",
-                        clip_id: clip.clip_id,
-                        picture_fade_out_us: clip.picture_fade_out_us ? null : 500_000,
-                      }], clip.picture_fade_out_us ? "清除画面淡出" : "添加画面淡出")),
-                    },
-                  ] : [];
-                  const moveFactItem: ContextMenuEntry | null = clip.asset_kind === "video" ? {
-                    id: "picture-move-in",
-                    label: clip.move_in ? "清除进入运动" : "添加推入进入（0.5 秒）",
-                    disabled: locked,
-                    onSelect: close(() => void onPatch([{
-                      op: "set_clip_transition_facts",
-                      clip_id: clip.clip_id,
-                      move_in: clip.move_in ? null : { preset_id: "motions/move-push-left", duration_us: 500_000 },
-                    }], clip.move_in ? "清除进入运动" : "添加进入运动")),
-                  } : null;
-                  const pickedIds = selectedClips.some(item => item.clip_id === clip.clip_id)
-                    ? selectedClips.map(item => item.clip_id)
-                    : clip.link_group_id ? clips.filter(item => item.link_group_id === clip.link_group_id).map(item => item.clip_id) : [clip.clip_id];
-                  const pickedKey = [...pickedIds].sort().join("|");
-                  const pickedSpeedClips = pickedIds.map(id => clips.find(item => item.clip_id === id)).filter((item): item is TimelineClip => Boolean(item));
-                  const speedable = pickedSpeedClips.some(canChangeClipSpeed);
-                  const speedLocked = pickedSpeedClips.some(item => isClipLocked(item.clip_id, true));
-                  return [
-                    { id: "split", label: "在播放头处拆分", disabled: !split, hint: split ? undefined : locked ? "片段已锁定" : "播放头不在可拆分区间", onSelect: close(() => { if (split) void onPatch([split], "在播放头处拆分"); }) },
-                    { id: "copy", label: "复制", disabled: locked, hint: locked ? "片段已锁定" : undefined, onSelect: close(() => onCommand?.("timeline.copy")) },
-                    ...(canLinkMembers ? [{ id: "link", label: "链接片段", icon: <Link2 size={14} />, disabled: locked, hint: locked ? "片段已锁定" : undefined,
-                      onSelect: close(() => void onPatch([{ op: "set_clip_link", clip_ids: linkMembers.map(item => item.clip_id) }], "链接片段")) }] : []),
-                    ...(unlinkRepresentatives.length ? [{ id: "unlink", label: "取消片段链接", icon: <Link2Off size={14} />, disabled: locked, hint: locked ? "片段已锁定" : undefined,
-                      onSelect: close(() => void onPatch(unlinkRepresentatives.map(item => ({ op: "clear_clip_link" as const, clip_id: item.clip_id })), "取消片段链接")) }] : []),
-                    { id: "lock", label: clipItselfLocked ? "解锁片段" : "锁定片段", onSelect: close(() => void onPatch([{ op: "set_clip_locked", clip_id: clip.clip_id, locked: !clipItselfLocked }], clipItselfLocked ? "解锁片段" : "锁定片段")) },
-                    { id: "speed", label: "速度", checked: speedModeKey === pickedKey, disabled: !speedable || speedLocked, hint: !speedable ? "只有具有确定源区间的视频/音频片段可以变速" : speedLocked ? "片段或所在轨道已锁定" : undefined,
-                      onSelect: close(() => setSpeedModeKey(current => current === pickedKey ? null : pickedKey)) },
-                    ...(visualFactItems.length || moveFactItem ? [{ id: "source-transition-separator", separator: true as const }, ...visualFactItems, ...(moveFactItem ? [moveFactItem] : [])] : []),
-                    { id: "sep1", separator: true as const },
-                    { id: "del", label: magneticDelete ? "删除并闭合主轨" : "删除片段", danger: true, disabled: locked || magneticDelete?.operations.length === 0, hint: locked ? "片段已锁定" : magneticDelete?.reason, onSelect: close(() => void onPatch(magneticDelete?.operations ?? [{ op: "remove_clip", clip_id: clip.clip_id }], magneticDelete ? "主轨磁吸删除" : "删除片段")) },
-                    { id: "ripple-delete", label: "波纹删除", disabled: locked || !ripple.operations.length, hint: locked ? "片段已锁定" : "reason" in ripple ? ripple.reason : undefined, onSelect: close(() => void onPatch(ripple.operations, "波纹删除")) },
-                    { id: "magnetic-move", label: "主轨插入到播放头", disabled: !magneticMove.operations.length, hint: "reason" in magneticMove ? magneticMove.reason : undefined, onSelect: close(() => void onPatch(magneticMove.operations, "主轨插入到播放头")) },
-                    { id: "sep2", separator: true as const },
-                    { id: "seek", label: "定位播放头", onSelect: close(() => onSeek?.(contextMenu.timeUs)) },
-                  ];
-                }
-                if (target.kind === "caption") {
-                  return [
-                    { id: "del", label: "删除字幕", danger: true, onSelect: close(() => void onPatch([{ op: "remove_caption", caption_id: target.captionId as never }], "删除字幕")) },
-                    { id: "sep", separator: true as const },
-                    { id: "seek", label: "定位播放头", onSelect: close(() => onSeek?.(contextMenu.timeUs)) },
-                  ];
-                }
-                if (target.kind === "transition") {
-                  return [
-                    { id: "del", label: "删除转场", danger: true, onSelect: close(() => void onPatch([{ op: "remove_transition", transition_id: target.transitionId as never }], "删除转场")) },
-                  ];
-                }
-                if (target.kind === "active-transition") {
-                  const transition = activeTransitions.find(item => item.transition_id === target.transitionId);
-                  if (!transition) return [];
-                  const operations = clearActiveTransitionOperations(transition);
-                  const blockedHint = transition.kind === "dip-white"
-                    ? "白闪依赖 Core 的页面帧系统角色，目前只显示、不编辑"
-                    : transition.kind === "crossfade"
-                      ? "音频交叉淡化目前只读"
-                      : undefined;
-                  return operations.length
-                    ? [{ id: "clear-active-transition", label: "清除片段转场事实", danger: true, onSelect: close(() => void onPatch(operations, "清除片段转场事实")) }]
-                    : [{ id: "active-transition-readonly", label: "此转场当前只读", disabled: true, hint: blockedHint }];
-                }
-                const closeGap = closeGapAt(document, target.trackId, contextMenu.timeUs);
-                const compact = document ? planCompactMainTrack(document, true) : { operations: [] };
-                const waveformRatios = [
-                  { value: 1, label: "100%" },
-                  { value: 0.6, label: "60%" },
-                  { value: 0.4, label: "40%" },
-                  { value: 0.3, label: "30%" },
-                ] as const;
-                return [
-                  { id: "close-gap", label: "关闭空隙", disabled: !closeGap.length, hint: closeGap.length ? undefined : "此处没有可关闭的空隙，或后续片段无法安全移动", onSelect: close(() => void onPatch(closeGap, "关闭空隙")) },
-                  { id: "compact-main", label: "关闭主轨全部空隙", disabled: !compact.operations.length, hint: "reason" in compact ? compact.reason : undefined, onSelect: close(() => void onPatch(compact.operations, "关闭主轨全部空隙")) },
-                  { id: "paste", label: "粘贴到播放头", onSelect: close(() => onCommand?.("timeline.paste")) },
-                  { id: "sep1", separator: true as const },
-                  { id: "seek", label: "定位播放头", onSelect: close(() => onSeek?.(contextMenu.timeUs)) },
-                  { id: "clear", label: "取消选择", onSelect: close(() => setSelection(null)) },
-                  { id: "sep-timeline-tools", separator: true as const },
-                  {
-                    id: "add-track",
-                    label: "添加轨道",
-                    submenu: [
-                      { id: "add-video-track", label: "视频轨道", onSelect: close(() => addTrack("video")) },
-                      { id: "add-text-track", label: "文本轨道", onSelect: close(() => addTrack("text")) },
-                    ],
-                  },
-                  {
-                    id: "fit-content",
-                    label: "缩放到全部素材",
-                    shortcut: "Shift+Z",
-                    onSelect: close(fitToContent),
-                  },
-                  {
-                    id: "timeline-display-settings",
-                    label: "显示设置",
-                    submenu: [
-                      { id: "track-height-label", label: `默认轨道高度 · ${prefs.trackHeight}px`, disabled: true },
-                      {
-                        id: "track-height-down",
-                        label: "降低 4px",
-                        disabled: prefs.trackHeight <= 40,
-                        onSelect: close(() => updateTimelinePrefs(current => ({ ...current, trackHeight: Math.max(40, current.trackHeight - 4) }))),
-                      },
-                      {
-                        id: "track-height-up",
-                        label: "增加 4px",
-                        disabled: prefs.trackHeight >= 128,
-                        onSelect: close(() => updateTimelinePrefs(current => ({ ...current, trackHeight: Math.min(128, current.trackHeight + 4) }))),
-                      },
-                      {
-                        id: "track-height-reset",
-                        label: "恢复默认高度 · 56px",
-                        checked: prefs.trackHeight === 56,
-                        onSelect: close(() => updateTimelinePrefs(current => ({ ...current, trackHeight: 56 }))),
-                      },
-                      { id: "display-separator", separator: true as const },
-                      ...waveformRatios.map(({ value, label }) => ({
-                        id: `waveform-${label}`,
-                        label: `波形占比 ${label}`,
-                        checked: prefs.waveformRatio === value,
-                        onSelect: close(() => updateTimelinePrefs(current => ({ ...current, waveformRatio: value }))),
-                      })),
-                    ],
-                  },
-                ];
-              })()}
+              items={buildCanvasContextMenuItems({
+                menu: contextMenu,
+                document,
+                clips,
+                selectedClips,
+                activeTransitions,
+                playheadUs: activePlayheadStore.get(),
+                prefs,
+                speedModeKey,
+                setSpeedModeKey,
+                isClipLocked,
+                canLinkMembers,
+                linkMembers,
+                unlinkRepresentatives,
+                onPatch,
+                onSeek,
+                onCommand,
+                setSelection,
+                addTrack,
+                fitToContent,
+                updateTimelinePrefs,
+                closeMenu: () => setContextMenu(null),
+              })}
             />
           )}
         </div>
-        {/* B2: 添加转场浮层——点击两片段边界后出现。
-            与共享 Dialog 同骨架：标题区 / 内容区 / 关闭钮，补齐 aria-modal、
-            初始焦点、Escape 与焦点返回；点击背幕关闭的既有语义保留。 */}
-        {addTransitionAnchor && (
-          <div
-            className="modal-backdrop add-transition-popover"
-            onClick={() => setAddTransitionAnchor(null)}
-          >
-            <section
-              className="modal add-transition-card"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="add-transition-title"
-              tabIndex={-1}
-              ref={(element) => {
-                if (!element) return;
-                const active = window.document.activeElement;
-                if (active !== element && !element.contains(active)) element.focus();
-              }}
-              onClick={(event) => event.stopPropagation()}
-              onKeyDown={(event) => {
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  setAddTransitionAnchor(null);
-                }
-              }}
-            >
-              <div className="modal-heading">
-                <div><h2 id="add-transition-title">在此处添加转场</h2></div>
-                <button type="button" className="icon-btn" aria-label="关闭添加转场" title="关闭 · Esc" onClick={() => setAddTransitionAnchor(null)}>
-                  <X size={15} />
-                </button>
-              </div>
-              <div className="modal-body">
-                <div className="add-transition-kinds">
-                  {TRANSITION_KINDS.map((kind) => (
-                    <button
-                      key={kind}
-                      className="add-transition-kind"
-                      onClick={() => {
-                        void onPatch(
-                          [{ op: "add_transition", after_clip_id: addTransitionAnchor as never, kind, duration_us: 500_000 }],
-                          `添加转场 ${kind}`,
-                        );
-                        setAddTransitionAnchor(null);
-                      }}
-                    >
-                      {kind}
-                    </button>
-                  ))}
-                </div>
-                <p className="modal-caption">默认 0.5s，添加后可在属性面板调整时长；仅权威预览渲染转场效果。</p>
-              </div>
-            </section>
-          </div>
-        )}
+        <TimelineAddTransitionDialog
+          anchorClipId={addTransitionAnchor}
+          onClose={() => setAddTransitionAnchor(null)}
+          onPatch={onPatch}
+        />
         </div>
         {/* 固定标尺条带：.timeline-body 直属（滚动区外，Excel 冻结表头式，零抖动）；
             绝对定位覆盖滚动视口顶部 rulerHeight 像素——主画布自带的标尺带正好被
