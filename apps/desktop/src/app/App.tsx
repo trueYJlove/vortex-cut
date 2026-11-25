@@ -54,201 +54,50 @@ import { AssetSelectionProperties, ClipGroupAlignmentProperties, ClipProperties,
 import { JobEta } from "./JobEta.js";
 import { WorkspaceFooter } from "./workspace/WorkspaceFooter.js";
 import { ProjectLibraryDialog } from "./ProjectLibraryDialog.js";
-
-type SaveState = "已保存" | "保存中" | "保存失败" | "草稿冲突";
-type NoticeTone = "success" | "warning" | "error" | "info";
-type Notice = { text: string; tone: NoticeTone } | "";
-type Selection = { kind: "clip"; id: string } | { kind: "clips"; ids: string[] } | { kind: "caption"; id: string } | { kind: "transition"; id: string } | { kind: "active-transition"; id: string } | null;
-function reconcileTimelineSelection(selection: Selection, state: TimelineState): Selection {
-  if (!selection) return null;
-  const document = state.current_revision.document;
-  if (selection.kind === "clip") return document.clips.some(clip => clip.clip_id === selection.id) ? selection : null;
-  if (selection.kind === "caption") return document.captions.some(caption => caption.caption_id === selection.id) ? selection : null;
-  if (selection.kind === "transition") return document.transitions?.some(transition => transition.transition_id === selection.id) ? selection : null;
-  if (selection.kind === "active-transition") return state.active_transitions.some(transition => transition.transition_id === selection.id) ? selection : null;
-  const ids = selection.ids.filter(id => document.clips.some(clip => clip.clip_id === id));
-  if (ids.length === selection.ids.length) return selection;
-  return ids.length > 1 ? { kind: "clips", ids } : ids.length === 1 ? { kind: "clip", id: ids[0] } : null;
-}
-const layouts: { value: TimelineLayout; label: string }[] = [{ value: "blurred_background", label: "模糊背景" }, { value: "crop_fill", label: "裁切填满" }, { value: "fit", label: "完整适配" }];
-const previewRatios: { value: string; label: string; ratio: number | null }[] = [{ value: "fit", label: "原始", ratio: null }, { value: "169", label: "16:9", ratio: 16 / 9 }, { value: "916", label: "9:16", ratio: 9 / 16 }, { value: "11", label: "1:1", ratio: 1 }, { value: "43", label: "4:3", ratio: 4 / 3 }, { value: "34", label: "3:4", ratio: 3 / 4 }];
-/** 新建项目画布预设（比例真源 = 项目画布）：PlayRes 基准 1080 短边，@30fps。 */
-const projectCanvasPresets: Record<string, { width: number; height: number; fps_num: number; fps_den: number }> = {
-  "169": { width: 1920, height: 1080, fps_num: 30, fps_den: 1 },
-  "916": { width: 1080, height: 1920, fps_num: 30, fps_den: 1 },
-  "11": { width: 1080, height: 1080, fps_num: 30, fps_den: 1 },
-  "43": { width: 1440, height: 1080, fps_num: 30, fps_den: 1 },
-  "34": { width: 1080, height: 1440, fps_num: 30, fps_den: 1 },
-};
-const presets: { value: CaptionPresetId; label: string }[] = [{ value: "default-bottom", label: "默认底部" }, { value: "game-safe-bottom", label: "游戏安全区" }, { value: "high-contrast", label: "高对比" }];
-/** P195：时间线装载瞬时失败的退避序列（下标即第几次重试）——首次 + 2 次，之后如实报错。 */
-const timelineRetryDelaysMs = [1000, 4000];
-/** 时间线面板默认高度：视口高的 34%（参照 OpenFilm 录屏 490/1440 ≈ 34%）。
- *  固定值在窗口缩放后就与参照脱节，所以由调用方在窗口 resize 时重算。
- *  下限 220 保证 1080 高以下的窗口里轨道区仍放得下两条轨 + 标尺。 */
-const defaultTimelineHeight = (): number =>
-  typeof window === "undefined" ? 320 : Math.round(Math.max(220, window.innerHeight * 0.34));
-const formatTime = (us: number) => {
-  const totalSeconds = us / 1_000_000;
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  if (hours > 0) return `${hours}:${String(minutes).padStart(2, "0")}:${String(Math.floor(seconds)).padStart(2, "0")}`;
-  if (minutes > 0) return `${minutes}:${String(Math.floor(seconds)).padStart(2, "0")}`;
-  return `${seconds.toFixed(2)}s`;
-};
-// 剪映式 SMPTE 时间码：HH:MM:SS:FF（FF 为帧号，按画布帧率取整）。
-const formatSmpteTimecode = (us: number, fps: number) => {
-  const safeFps = fps > 0 ? fps : 30;
-  const totalSeconds = Math.max(0, us) / 1_000_000;
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = Math.floor(totalSeconds % 60);
-  const frames = Math.min(Math.round(safeFps) - 1, Math.floor((totalSeconds - Math.floor(totalSeconds)) * safeFps));
-  // 参照 timecode.ts:143-145：<1h 的影片省略小时位（00:05:12），≥1h 才补回并保持宽度稳定。
-  const hh = `${String(hours).padStart(2, "0")}:`;
-  const head = us >= 3_600_000_000 ? hh : "";
-  return `${head}${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}:${String(frames).padStart(2, "0")}`;
-};
-const duration = (document?: TimelineDocument) => document?.clips.reduce((max, clip) => Math.max(max, clip.timeline_end_us), 0) ?? 0;
-const formatRulerTime = (us: number) => {
-  const totalSeconds = us / 1_000_000;
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = Math.floor(totalSeconds % 60);
-  if (hours > 0) return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-};
-function buildClipFrames(url: string | null, assetKind: AssetKind, sourceStartUs: number, sourceEndUs: number, pps: number): { kind: "video" | "image"; src: string }[] {
-  if (!url) return [];
-  if (assetKind === "image") return [{ kind: "image", src: url }];
-  if (assetKind !== "video") return [];
-  const sourceDurationUs = sourceEndUs - sourceStartUs;
-  if (sourceDurationUs <= 0) return [];
-  const widthPx = (sourceDurationUs / 1_000_000) * pps;
-  const count = Math.max(1, Math.min(16, Math.round(widthPx / 56)));
-  const frames: { kind: "video"; src: string }[] = [];
-  for (let i = 0; i < count; i += 1) {
-    const tUs = sourceStartUs + ((i + 0.5) * sourceDurationUs) / count;
-    frames.push({ kind: "video", src: `${url}#t=${tUs / 1_000_000}` });
-  }
-  return frames;
-}
-const assetKinds: AssetKind[] = ["video", "audio", "image", "text"];
-const assetKindLabels: Record<AssetKind, string> = { video: "视频", audio: "音频", image: "图片", text: "文本" };
-type AssetFilter = "all" | AssetKind;
-const availabilityLabels = { available: "可用", missing: "缺失", changed: "已变更", unsupported: "不支持" } as const;
-const modelStatusLabels: Record<ModelSummary["status"], string> = { unavailable: "未安装", queued: "排队中", downloading: "下载中", paused: "已暂停", verifying: "校验中", ready: "已就绪", cancelled: "已取消", failed: "下载失败", corrupt: "模型文件已损坏" };
-const jobStatusLabels: Record<Job["status"], string> = { queued: "排队中", running: "运行中", succeeded: "已完成", failed: "失败", cancelling: "取消中", cancelled: "已取消", interrupted: "已中断" };
-// C22 渲染/校验细分阶段标签；未知 phase 原样显示（旧 Core 无 phase 字段时退回 stage 文本）。
-const jobPhaseLabels: Record<string, string> = { preparing: "准备中", encoding: "编码中", validating_probe: "校验（探测）", validating_decode: "校验（完整解码）", hashing: "完整性哈希", publishing: "正在完成发布" };
-const modelBadgeLabels: Record<ModelSummary["status"], string> = { unavailable: "未下载", queued: "排队中", downloading: "下载中", paused: "已暂停", verifying: "校验中", ready: "就绪", cancelled: "已取消", failed: "失败", corrupt: "已损坏" };
-const jobKindLabels: Partial<Record<Job["kind"], string>> = { transcription: "本地转录", proxy: "代理素材", portrait_sample: "竖版样本", authoritative_preview: "权威预览", final_export: "最终导出", waveform: "音频波形" };
-const transcriptStatusLabels: Record<TranscriptSummary["status"], string> = { pending: "排队中", ready: "就绪", stale: "已过期", failed: "失败" };
-/** 任务行副标题：同类任务（如多次转录）必须能区分是哪一条。 */
-const jobDetailText = (job: Job, assetName?: string): string => {
-  const parts: string[] = [];
-  if (assetName) parts.push(assetName);
-  // Core 落库的是 UTC ISO 串；直接 slice 会显示 UTC 时间（用户实测
-  // 本地 19:25 的事件显示成 11:25）。必须转本地时区后再格式化。
-  if (job.created_at) parts.push(formatLocalStamp(job.created_at));
-  return parts.join(" · ");
-};
-// 任务从最后一次可见进度平滑跑到 100% 的收尾窗口（问题1：短片在两次轮询
-// 间隔内完成时 56%→成功跳变突兀）。进度条 CSS transition .4s + 完成停留。
-const FINALIZING_MS = 900;
-const formatBytes = (bytes: number) => bytes < 1024 ? `${bytes} B` : bytes < 1024 ** 2 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 ** 2).toFixed(1)} MB`;
-// ISO 时间 → 相对时间（导出产物行锚点："3 分钟前"比绝对时间戳更易扫读）。
-const formatRelativeTime = (iso: string) => {
-  const then = Date.parse(iso);
-  if (Number.isNaN(then)) return "";
-  const seconds = Math.max(0, Math.floor((Date.now() - then) / 1000));
-  if (seconds < 60) return "刚刚";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes} 分钟前`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} 小时前`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days} 天前`;
-  return new Date(then).toLocaleDateString();
-};
-// fallback_reason 是 Core 的 API 语义值（encoders.py 硬编码英文串），UI 层映射为
-// 中文；未知值原样透出兜底。导出不受影响，仅是编码器选择的补充说明。
-const fallbackReasonLabel = (reason: string) => reason === "hardware encoder smoke test failed; fell back to software" ? "硬件编码不可用，已用软件编码完成" : reason;
-const isTranscribable = (asset: Asset) => (asset.kind === "video" || asset.kind === "audio") && asset.availability === "available";
-/** P199 资产集合签名（对账端点用）：只看组成，不看时间戳。素材导入不推进
- *  projects.updated_at（Core projects.py 只有改名/归档/重开 UPDATE projects），
- *  所以 P195 的时间线键在这里不可用——集合变了才是重新装载的唯一信号。
- *  用 sort 后拼串而不是逐位比较：Core 每次 list 返回的列表是服务端顺序。 */
-const assetCollectionSignature = (items: AssetPresentation[]) =>
-  items.map(item => String(item.asset.asset_id)).sort().join("|");
-/** 对账只取第一页，条数与 loadProjectData 的首屏一致（Core 默认 50、上限 100）。 */
-const assetReconcilePageLimit = 50;
-type RenditionTarget = { key: string; platform_preset_id: string; rendition_preset_id: string; layout_policy: LayoutPolicy };
-type ReframeAnchor = Pick<RenditionReframeAdjustment, "horizontal_anchor" | "vertical_anchor">;
-type ReframeSelections = Record<string, Record<string, ReframeAnchor>>;
-const horizontalAnchors: HorizontalAnchor[] = ["left", "center", "right"];
-const verticalAnchors: VerticalAnchor[] = ["top", "center", "bottom"];
-const anchorLabels: Record<string, string> = { "left:top": "左上", "center:top": "上", "right:top": "右上", "left:center": "左", "center:center": "中心", "right:center": "右", "left:bottom": "左下", "center:bottom": "下", "right:bottom": "右下" };
-const layoutPolicies: { value: LayoutPolicy; label: string }[] = [{ value: "preserve_timeline", label: "沿用时间线" }, { value: "fit_all", label: "完整适配" }, { value: "crop_fill_all", label: "裁切填满" }, { value: "blurred_background_all", label: "模糊背景" }];
-
-function IconButton({ label, disabled, onClick, children }: { label: string; disabled?: boolean; onClick: () => void; children: React.ReactNode }) {
-  return <button className="icon-btn" title={label} aria-label={label} disabled={disabled} onClick={onClick}>{children}</button>;
-}
-
-function storedAssetView(projectId: string): "grid" | "list" {
-  try {
-    return localStorage.getItem(`vortex.asset-view.${projectId}`) === "list" ? "list" : "grid";
-  } catch {
-    return "grid";
-  }
-}
-
-function navigateAssetLibrary(event: React.KeyboardEvent<HTMLButtonElement>, view: "grid" | "list") {
-  const { key, currentTarget } = event;
-  if (!["ArrowLeft", "ArrowUp", "ArrowRight", "ArrowDown", "Home", "End"].includes(key)) return;
-  const list = currentTarget.closest(".asset-list");
-  if (!list) return;
-  const buttons = Array.from(list.querySelectorAll<HTMLButtonElement>(".asset-select"));
-  const index = buttons.indexOf(currentTarget);
-  const gridColumns = getComputedStyle(list).gridTemplateColumns.trim();
-  const columns = view === "grid" && gridColumns ? gridColumns.split(/\s+/).length : 1;
-  const steps: Record<string, number> = { ArrowLeft: -1, ArrowUp: -columns, ArrowRight: 1, ArrowDown: columns };
-  const target = key === "Home" ? 0 : key === "End" ? buttons.length - 1 : index + steps[key];
-  event.preventDefault();
-  event.stopPropagation();
-  const next = buttons[Math.max(0, Math.min(buttons.length - 1, target))];
-  next?.focus();
-  return next?.dataset.assetId as AssetId | undefined;
-}
-
-const ASSET_FAVORITES_KEY = "vortexcut.asset-favorites";
-function readAssetFavorites(): AssetId[] {
-  try {
-    const saved: unknown = JSON.parse(localStorage.getItem(ASSET_FAVORITES_KEY) ?? "[]");
-    return Array.isArray(saved) ? saved.filter((id): id is AssetId => typeof id === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-function ReframeTargetEditor({ clips, selections, preview, pending, onSelect, onGenerate, onPlay }: {
-  clips: TimelineClip[];
-  selections: Record<string, ReframeAnchor>;
-  preview?: RenditionReframePreviewPresentation;
-  pending: boolean;
-  onSelect: (clipId: string, anchor: ReframeAnchor) => void;
-  onGenerate: () => void;
-  onPlay: () => void;
-}) {
-  const adjustmentCount = Object.keys(selections).length;
-  return <section className="reframe-editor" aria-label="静态焦点重构图">
-    <div className="reframe-heading"><strong>静态焦点重构图</strong><small>本地 3×3 静态锚点；非自动识别、非动态跟踪，也不保证平台审核安全区。</small></div>
-    {!clips.length && <p className="reframe-unavailable">此基础目标没有解析为 crop_fill 的 Clip，不能使用静态焦点。</p>}
-    {clips.map(clip => { const selected = selections[clip.clip_id] ?? { horizontal_anchor: "center", vertical_anchor: "center" }; return <div className="reframe-clip" key={clip.clip_id}><span>Clip {clip.order_index + 1}</span><div className="anchor-grid" role="group" aria-label={`Clip ${clip.order_index + 1} 静态焦点`}>{verticalAnchors.flatMap(vertical => horizontalAnchors.map(horizontal => { const key = `${horizontal}:${vertical}`; const active = selected.horizontal_anchor === horizontal && selected.vertical_anchor === vertical; return <button key={key} className={active ? "active" : ""} aria-label={`Clip ${clip.order_index + 1} ${anchorLabels[key]}`} aria-pressed={active} onClick={() => onSelect(clip.clip_id, { horizontal_anchor: horizontal, vertical_anchor: vertical })}>{anchorLabels[key]}</button>; }))}</div></div>; })}
-    <div className="reframe-actions"><small>{adjustmentCount ? `${adjustmentCount} 个非中心调整；交互构图仅为非权威近似。` : "中心为基础行为，不会持久化或发送。"}</small><button disabled={!adjustmentCount || pending} onClick={onGenerate}>{pending ? "正在生成重构图预览" : preview ? "重新生成重构图预览" : "生成重构图权威预览"}</button>{preview && <button onClick={onPlay}>播放重构图预览</button>}</div>
-  </section>;
-}
+import {
+  ASSET_FAVORITES_KEY,
+  assetCollectionSignature,
+  assetDurationLabel,
+  assetKindLabels,
+  assetKinds,
+  assetMetaText,
+  assetReconcilePageLimit,
+  availabilityLabels,
+  cvSparkPath,
+  duration,
+  fallbackReasonLabel,
+  FINALIZING_MS,
+  formatBytes,
+  formatRelativeTime,
+  formatSmpteTimecode,
+  isTranscribable,
+  jobDetailText,
+  jobKindLabels,
+  jobPhaseLabels,
+  jobStatusLabels,
+  layoutPolicies,
+  modelBadgeLabels,
+  modelStatusLabels,
+  navigateAssetLibrary,
+  previewRatios,
+  projectCanvasPresets,
+  readAssetFavorites,
+  reconcileTimelineSelection,
+  storedAssetView,
+  timelineRetryDelaysMs,
+  toggle,
+  transcriptStatusLabels,
+  type AssetFilter,
+  type Notice,
+  type NoticeTone,
+  type ReframeAnchor,
+  type ReframeSelections,
+  type RenditionTarget,
+  type SaveState,
+  type Selection,
+} from "./appHelpers.js";
+import { IconButton, ReframeTargetEditor, SegmentRow } from "./layout/AppMicroComponents.js";
+import { useWorkspaceLayout } from "./hooks/useWorkspaceLayout.js";
 
 export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -503,40 +352,23 @@ export function App() {
   const [reframeError, setReframeError] = useState("");
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
   const [projectManagerRefreshing, setProjectManagerRefreshing] = useState(false);
-  const [projectSwitcherOpen, setProjectSwitcherOpen] = useState(false);
-  const [projectSwitcherQuery, setProjectSwitcherQuery] = useState("");
-  const projectSwitcherRef = useRef<HTMLDivElement | null>(null);
-  const [activeMenu, setActiveMenu] = useState<string | null>(null);
-  const appMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const appMenuCategoryRefs = useRef<(HTMLButtonElement | null)[]>([]);
-  const appMenuPopoverRef = useRef<HTMLDivElement | null>(null);
-  const [leftWidth, setLeftWidth] = useState(320);
-  // P4 参照窗格栏（ProjectView.tsx:4639-4661）的 layers/inspector 开关：映射为左素材池/右属性栏显隐。
-  const [leftPaneOpen, setLeftPaneOpen] = useState(true);
-  const [rightPaneOpen, setRightPaneOpen] = useState(true);
-  const [paneSettingsOpen, setPaneSettingsOpen] = useState(false);
-  const paneSettingsRef = useRef<HTMLSpanElement | null>(null);
-  // 参照 DEFAULT_INSPECTOR = 360（openfilm PaneDivider.tsx:50）；原 336 是自定值。
-  const [rightWidth, setRightWidth] = useState(360);
-  // 时间线面板高度默认按视口比例给（2026-11-11）：参照 OpenFilm 录屏实测
-  // 490px / 1440px ≈ 34%。固定 230px 在 1440 高窗口上只占 16%，轨道区一屏
-  // 只能看到两轨半，与参照软件"时间线是画面下方一整块工作区"的观感差一倍。
-  // 比例随窗口重算（下面的 effect）；用户一旦拖过，就以用户值为准。
-  const [timelineHeight, setTimelineHeight] = useState(() => defaultTimelineHeight());
-  // 用户是否亲手调过时间线高度。调过之后窗口缩放不再覆盖用户的选择。
-  const timelineHeightPinnedRef = useRef(false);
-  const resizeRef = useRef<{ kind: "left" | "right" | "timeline"; start: number; value: number } | undefined>(undefined);
+  const {
+    projectSwitcherOpen, setProjectSwitcherOpen,
+    projectSwitcherQuery, setProjectSwitcherQuery, projectSwitcherRef,
+    activeMenu, setActiveMenu, appMenuTriggerRef, appMenuCategoryRefs, appMenuPopoverRef,
+    leftWidth, setLeftWidth, rightWidth, setRightWidth, timelineHeight, setTimelineHeight,
+    leftPaneOpen, setLeftPaneOpen, rightPaneOpen, setRightPaneOpen,
+    paneSettingsOpen, setPaneSettingsOpen, paneSettingsRef, beginResize,
+    zoomPopOpen, setZoomPopOpen, zoomPopRef,
+    volPopOpen, setVolPopOpen, volPopRef,
+    ratePopOpen, setRatePopOpen, ratePopRef,
+  } = useWorkspaceLayout();
   // C3：快捷键自定义（注册表 + localStorage 持久化 + 面板录制状态）。
   const [shortcuts, setShortcuts] = useState<Record<ShortcutCommandId, ShortcutEntry>>(() => loadShortcuts());
   const shortcutsRef = useRef(shortcuts);
   shortcutsRef.current = shortcuts;
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [recordingId, setRecordingId] = useState<ShortcutCommandId | null>(null);
-  // 剪映式播放器控件状态：画布缩放（点击弹滑条）、音量（点击弹竖向滑条）、全屏、电平表。
-  const [zoomPopOpen, setZoomPopOpen] = useState(false);
-  const zoomPopRef = useRef<HTMLDivElement | null>(null);
-  const [volPopOpen, setVolPopOpen] = useState(false);
-  const volPopRef = useRef<HTMLDivElement | null>(null);
   const [volume, setVolume] = useState(80);
   // 播放设置（2026-11-11 对齐 OpenFilm PlaybackMenu）：循环 + 全局倍速。
   // uiRate 只作用于预览播放节奏（交互时钟步长 / 媒体 playbackRate / 播放头直线），
@@ -554,8 +386,6 @@ export function App() {
   };
   useEffect(() => () => cancelLoopRestart(), [project?.project_id]);
   const [uiRate, setUiRate] = useState(1);
-  const [ratePopOpen, setRatePopOpen] = useState(false);
-  const ratePopRef = useRef<HTMLDivElement | null>(null);
   // scrub 直通（2026-11-11）：拖拽风暴中绕过 React 提交直接驱动预览会话——
   // dev 构建下每次 setPlayhead 触发整树提交（实测 ~36ms/次）是「拖动像快进
   // 卡顿」的主因。prod 下提交便宜，此通道同样减少主线程抖动。
@@ -640,35 +470,7 @@ export function App() {
       window.clearInterval(keepAlive);
     };
   }, [playing, progressDragging]);
-  // 时间线高度跟随窗口比例：窗口缩放（含最大化）时重算，除非用户拖过。
-  useEffect(() => {
-    const onResize = () => {
-      if (timelineHeightPinnedRef.current) return;
-      setTimelineHeight(defaultTimelineHeight());
-    };
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, []);
-  useEffect(() => {
-    const move = (event: PointerEvent) => {
-      const resize = resizeRef.current;
-      if (!resize) return;
-      const delta = event.clientX - resize.start;
-      if (resize.kind === "left") setLeftWidth(Math.max(220, Math.min(420, resize.value + delta)));
-      else if (resize.kind === "right") setRightWidth(Math.max(240, Math.min(460, resize.value - delta)));
-      else setTimelineHeight(Math.max(150, Math.min(520, resize.value - (event.clientY - resize.start))));
-    };
-    const end = () => { resizeRef.current = undefined; document.body.classList.remove("is-resizing"); };
-    window.addEventListener("pointermove", move); window.addEventListener("pointerup", end);
-    return () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", end); };
-  }, []);
-  const beginResize = (kind: "left" | "right" | "timeline", event: React.PointerEvent) => {
-    event.preventDefault();
-    // 用户开始拖时间线高度：从此这个高度归用户，窗口缩放不再重算。
-    if (kind === "timeline") timelineHeightPinnedRef.current = true;
-    resizeRef.current = { kind, start: kind === "timeline" ? event.clientY : event.clientX, value: kind === "left" ? leftWidth : kind === "right" ? rightWidth : timelineHeight };
-    document.body.classList.add("is-resizing");
-  };
+  // resize 与 timelineHeight 跟随视口已拆入 hooks/useWorkspaceLayout.ts
 
   const refreshProjects = async () => {
     const page = await window.desktop.listProjects({ limit: 100 });
@@ -2443,34 +2245,8 @@ export function App() {
       .then(page => { if (projectRef.current?.project_id === projectId && projectDataEpochRef.current === epoch) setCvSparkSamples(page.samples); })
       .catch(() => { if (projectRef.current?.project_id === projectId && projectDataEpochRef.current === epoch) { setCvSparkSamples([]); showNotice("CV 信号样本加载失败。", "error"); } });
   };
-  const cvSparkPath = (samples: CvSample[], key: "motion_energy" | "audio_energy"): string => {
-    if (samples.length < 2) return "";
-    const maxT = samples[samples.length - 1].timestamp_us || 1;
-    return samples.map((s, i) => `${i === 0 ? "M" : "L"}${(s.timestamp_us / maxT * 100).toFixed(2)},${(1 - Math.min(1, s[key])).toFixed(3)}`).join(" ");
-  };
-  // 素材元信息行：视频=高度p · 帧率fps · 体积；音频=编码 · 体积；图片=体积（时长单独展示在行尾）。
-  const assetMediaInfo = (asset: Asset): MediaInfo | undefined => (asset.media_info && typeof asset.media_info === "object" && "video_streams" in asset.media_info ? asset.media_info as MediaInfo : undefined);
-  const formatAssetSize = (bytes: number) => bytes >= 1_073_741_824 ? `${(bytes / 1_073_741_824).toFixed(1)} GB` : bytes >= 1_048_576 ? `${Math.round(bytes / 1_048_576)} MB` : `${Math.max(1, Math.round(bytes / 1_024))} KB`;
-  const assetMetaText = (asset: Asset) => {
-    const info = assetMediaInfo(asset);
-    const size = formatAssetSize(asset.size_bytes);
-    if (asset.kind === "video") {
-      const stream = info?.video_streams?.[0];
-      const fps = stream?.avg_frame_rate_num && stream?.avg_frame_rate_den ? Math.round(stream.avg_frame_rate_num / stream.avg_frame_rate_den) : undefined;
-      return [stream?.height ? `${stream.height}p` : null, fps ? `${fps}fps` : null, size].filter(Boolean).join(" · ") || size;
-    }
-    if (asset.kind === "audio") {
-      const codec = info?.audio_streams?.[0]?.codec;
-      return [codec ? codec.toUpperCase() : null, size].filter(Boolean).join(" · ") || size;
-    }
-    return size;
-  };
-  const assetDurationLabel = (asset: Asset) => {
-    const info = assetMediaInfo(asset);
-    if (!info?.duration_us) return "—";
-    const total = Math.round(info.duration_us / 1_000_000);
-    return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
-  };
+
+  // 体积/元信息辅助函数已拆入 appHelpers.ts
   // 打开素材所在文件夹：文件缺失时弹框提供 重新定位 / 移除 恢复路径（主进程完成交互）。
   const revealAsset = async (asset: Asset) => {
     try {
@@ -3201,64 +2977,6 @@ export function App() {
     return () => window.removeEventListener("keydown", listener);
   }, []);
 
-  useEffect(() => {
-    if (!activeMenu) return;
-    const onPointerDown = (event: MouseEvent) => {
-      const target = event.target as Node;
-      if (appMenuPopoverRef.current?.contains(target) || appMenuTriggerRef.current?.contains(target)) return;
-      setActiveMenu(null);
-    };
-    window.addEventListener("mousedown", onPointerDown);
-    return () => window.removeEventListener("mousedown", onPointerDown);
-  }, [activeMenu]);
-
-  useEffect(() => {
-    if (!zoomPopOpen && !volPopOpen && !ratePopOpen) return;
-    const listener = (event: MouseEvent) => {
-      if (zoomPopRef.current && !zoomPopRef.current.contains(event.target as Node)) setZoomPopOpen(false);
-      if (volPopRef.current && !volPopRef.current.contains(event.target as Node)) setVolPopOpen(false);
-      if (ratePopRef.current && !ratePopRef.current.contains(event.target as Node)) setRatePopOpen(false);
-    };
-    window.addEventListener("mousedown", listener);
-    return () => window.removeEventListener("mousedown", listener);
-  }, [zoomPopOpen, volPopOpen, ratePopOpen]);
-  useEffect(() => {
-    if (!paneSettingsOpen) return;
-    const closeOnOutsidePointer = (event: MouseEvent) => {
-      if (!paneSettingsRef.current?.contains(event.target as Node)) setPaneSettingsOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault(); event.stopPropagation();
-      setPaneSettingsOpen(false);
-      paneSettingsRef.current?.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true });
-    };
-    window.addEventListener("mousedown", closeOnOutsidePointer);
-    window.addEventListener("keydown", closeOnEscape);
-    return () => {
-      window.removeEventListener("mousedown", closeOnOutsidePointer);
-      window.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [paneSettingsOpen]);
-  useEffect(() => {
-    if (!zoomPopOpen && !volPopOpen && !ratePopOpen) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      if (zoomPopOpen) {
-        setZoomPopOpen(false);
-        (zoomPopRef.current?.previousElementSibling as HTMLButtonElement | null)?.focus();
-      } else if (volPopOpen) {
-        setVolPopOpen(false);
-        (volPopRef.current?.previousElementSibling as HTMLButtonElement | null)?.focus();
-      } else if (ratePopOpen) {
-        setRatePopOpen(false);
-        (ratePopRef.current?.previousElementSibling as HTMLButtonElement | null)?.focus();
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [zoomPopOpen, volPopOpen, ratePopOpen]);
   // 全屏：跟随浏览器全屏状态（Esc 退出时按钮图标同步复原）。
   useEffect(() => {
     const listener = () => setIsFullscreen(Boolean(document.fullscreenElement));
@@ -3530,15 +3248,6 @@ export function App() {
     window.addEventListener("resize", sync);
     return () => { ro.disconnect(); window.removeEventListener("resize", sync); };
   }, [previewClass, canvasSize, showSelBox]);
-  useEffect(() => {
-    if (!projectSwitcherOpen) return;
-    const listener = (event: MouseEvent) => {
-      if (projectSwitcherRef.current && !projectSwitcherRef.current.contains(event.target as Node)) { setProjectSwitcherOpen(false); setProjectSwitcherQuery(""); }
-    };
-    window.addEventListener("mousedown", listener);
-    return () => window.removeEventListener("mousedown", listener);
-  }, [projectSwitcherOpen]);
-
   const menuShortcut = (label: string): string | undefined => {
       const command = editorCommands.find(item => item.label === label);
       if (!command) return undefined;
@@ -4209,7 +3918,4 @@ export function App() {
     </Dialog>}
 </main>;
 }
-
-function SegmentRow({ segment, selected, onToggle }: { segment: TranscriptSegment; selected: boolean; onToggle: () => void }) { return <label className="segment-row"><input type="checkbox" checked={selected} onChange={onToggle} /><span>{formatTime(segment.start_us)}-{formatTime(segment.end_us)}</span><p>{segment.text}</p></label>; }
-function toggle(items: string[], id: string) { return items.includes(id) ? items.filter(item => item !== id) : [...items, id]; }
 
