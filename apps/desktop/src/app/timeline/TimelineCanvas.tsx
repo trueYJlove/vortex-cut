@@ -87,7 +87,7 @@ import {
 import { TimelinePlayheadLayer } from "./TimelinePlayheadLayer.js";
 import { MarkerLane } from "./MarkerLane.js";
 import type { TimelineMarker } from "./markers.js";
-import { formatRange, normalizeRange, rangeDuration, MIN_RANGE_US, type TimeRange } from "./time-range.js";
+import { formatRange, MIN_RANGE_US, type TimeRange } from "./time-range.js";
 import { createPlayheadStore, type PlayheadStore } from "./playhead-store.js";
 import { ThumbnailLoader, defaultFilmstripSourceFactory } from "./thumbnail-loader.js";
 import { OVERSCAN_ROWS } from "./viewport-index.js";
@@ -131,6 +131,7 @@ import {
   hitTestCanvasContextMenuTarget,
   hitTestCanvasPointerDown,
 } from "./canvas/hit-test.js";
+import { clampRulerTime as clampRulerTimeToTotal, useRulerScrubGesture } from "./canvas/gestures/ruler-scrub.js";
 
 export {
   THUMB_CELL_PX,
@@ -1493,8 +1494,6 @@ export function TimelinePanel({
 
   // 固定标尺条带：绘制到覆盖层 Canvas（随纵向滚动钉在可视区顶部）。
   const rulerCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const rulerPointerId = useRef<number | null>(null);
-  const rulerScrubOrigin = useRef(0);
   const rulerScrubbingRef = useRef(false);
   /** 擦洗态（镜像 rulerScrubbingRef，供旋钮实心/空心渲染）。
    *  ref 用于事件路径同步判断，state 只用于把"按住"这件事画出来。 */
@@ -1567,7 +1566,6 @@ export function TimelinePanel({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [activePlayheadStore, document, totalUs]);
-  const rangeDragRef = useRef<{ anchorUs: number; previous: TimeRange | null } | null>(null);
   useEffect(() => {
     const canvas = rulerCanvasRef.current;
     if (!canvas) return;
@@ -1584,72 +1582,32 @@ export function TimelinePanel({
     drawRulerStrip(ctx, width, view.rulerHeight, trackHeadWidth, view, ticks, totalUs, rulerHoverUs);
   }, [view, canvasSize, trackHeadWidth, ticks, totalUs, rulerHoverUs, themeEpoch]);
 
-  // 纵向滚动时把覆盖层钉在滚动容器可视区顶部（直接写样式，避免重渲染）。
-  const rulerPinTimeAt = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    return xToTime(event.clientX - rect.left - trackHeadWidth, view);
-  };
-  // 标尺寻址不越过素材终点（标尺本身也画到终点为止）。
-  const clampRulerTime = (us: number) => (totalUs > 0 ? Math.min(us, totalUs) : us);
-  const rulerSeekTime = (us: number) => {
-    const clamped = clampRulerTime(us);
-    if (!prefs.snappingEnabled) return clamped;
-    const edges = [...clipRects.flatMap(({ clip }) => [clip.timeline_start_us, clip.timeline_end_us]), ...markers.map(marker => marker.timeUs), 0, totalUs];
-    return clampRulerTime(snapValue(clamped, edges, (SNAP_PX / view.pixelsPerSecond) * 1_000_000));
-  };
-  const handleRulerPinMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (rulerPointerId.current !== null && rulerPointerId.current !== event.pointerId) return;
-    if (rulerPointerId.current === null &&
-        event.clientX - event.currentTarget.getBoundingClientRect().left < trackHeadWidth + view.headerWidth) {
-      setRulerHoverUs(null);
-      return;
-    }
-    const timeUs = clampRulerTime(rulerPinTimeAt(event));
-    setRulerHoverUs(timeUs);
-    const rangeDrag = rangeDragRef.current;
-    if (rangeDrag) {
-      setTimeRange(normalizeRange({ startUs: rangeDrag.anchorUs, endUs: timeUs }, totalUs));
-      return;
-    }
-    if (rulerScrubbingRef.current) onSeek?.(rulerSeekTime(timeUs));
-  };
-  const handleRulerPinDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (event.button !== 0 || rulerPointerId.current !== null || totalUs <= 0 ||
-        event.clientX - event.currentTarget.getBoundingClientRect().left < trackHeadWidth + view.headerWidth) return;
-    rulerPointerId.current = event.pointerId;
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-    event.currentTarget.focus({ preventScroll: true });
-    // Shift + 拖动 = 框选时间区间（不擦洗、不动播放头）。
-    // 与普通拖动的区别只在 Shift，因此不会误触。
-    if (event.shiftKey) {
-      const anchorUs = clampRulerTime(rulerPinTimeAt(event));
-      rangeDragRef.current = { anchorUs, previous: timeRange };
-      setTimeRange({ startUs: anchorUs, endUs: anchorUs });
-      return;
-    }
-    rulerScrubOrigin.current = activePlayheadStore.get();
-    rulerScrubbingRef.current = true;
-    setScrubbing(true);
-    event.currentTarget.style.cursor = "col-resize";
-    onSeek?.(rulerSeekTime(rulerPinTimeAt(event)));
-  };
-  const finishRulerGesture = (event: React.PointerEvent<HTMLCanvasElement>, commit: boolean) => {
-    if (rulerPointerId.current === null || rulerPointerId.current !== event.pointerId) return;
-    rulerPointerId.current = null;
-    const rangeDrag = rangeDragRef.current;
-    rangeDragRef.current = null;
-    if (rangeDrag) {
-      const range = normalizeRange({ startUs: rangeDrag.anchorUs, endUs: clampRulerTime(rulerPinTimeAt(event)) }, totalUs);
-      setTimeRange(commit && range && rangeDuration(range) >= MIN_RANGE_US ? range : rangeDrag.previous);
-    } else if (rulerScrubbingRef.current) {
-      onSeekCommit?.(commit ? rulerSeekTime(rulerPinTimeAt(event)) : rulerScrubOrigin.current);
-    }
-    rulerScrubbingRef.current = false;
-    setScrubbing(false);
-    setRulerHoverUs(null);
-    event.currentTarget.style.cursor = "default";
-  };
-  const handleRulerPinDoubleClick = () => fitToContent();
+  // 标尺擦洗与 Shift 区间框选（委托 gestures/ruler-scrub.ts）。
+  const clampRulerTime = (us: number) => clampRulerTimeToTotal(us, totalUs);
+  const {
+    rulerSeekTime,
+    handleRulerPinMove,
+    handleRulerPinDown,
+    finishRulerGesture,
+    handleRulerPinLeave,
+    handleRulerPinDoubleClick,
+  } = useRulerScrubGesture({
+    view,
+    trackHeadWidth,
+    totalUs,
+    snappingEnabled: prefs.snappingEnabled,
+    clipRects,
+    markers,
+    activePlayheadStore,
+    rulerScrubbingRef,
+    setScrubbing,
+    setRulerHoverUs,
+    timeRange,
+    setTimeRange,
+    onSeek,
+    onSeekCommit,
+    fitToContent: () => fitToContent(),
+  });
   const rulerGuideX = rulerHoverUs === null ? null : trackHeadWidth + timeToX(rulerHoverUs, view);
 
 
@@ -3929,7 +3887,7 @@ export function TimelinePanel({
           onPointerUp={event => finishRulerGesture(event, true)}
           onPointerCancel={event => finishRulerGesture(event, false)}
           onLostPointerCapture={event => finishRulerGesture(event, false)}
-          onPointerLeave={() => { if (rulerPointerId.current === null) setRulerHoverUs(null); }}
+          onPointerLeave={handleRulerPinLeave}
           onDoubleClick={handleRulerPinDoubleClick}
         />
         <div className="timeline-ruler-tick-layer" aria-hidden="true">
