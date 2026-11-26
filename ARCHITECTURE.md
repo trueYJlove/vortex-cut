@@ -522,6 +522,8 @@ docs/
 
 **仍然成立**：`apps/desktop/`、`services/core/`、`packages/contracts/`、`resources/`、`docs/design/adr/` 的位置与职责描述；以及"Python 领域层不得导入 FastAPI、Electron 或具体 Provider SDK"——该约束由代码证据支持（`ADR-0002` 评审结论：领域层纯净）。
 
+**Electron 桌面层目录约定**：主进程入口 `apps/desktop/electron/main/index.ts` 仅负责启动顺序编排与生命周期管理，启动引导模块位于 `apps/desktop/electron/main/bootstrap/`（`protocol.ts`、`window.ts`、`runtime.ts`），按业务域拆分的 IPC 注册器位于 `apps/desktop/electron/main/ipc/`；Preload 桥接入口 `apps/desktop/electron/preload/index.ts` 汇总暴露 `apps/desktop/electron/preload/domains/*.ts` 各业务域接口。
+
 ## 18. 分阶段实施计划
 
 以下周期按一名熟悉 Python/TypeScript 的全职工程师估算，仅用于规划。

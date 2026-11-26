@@ -1,7 +1,5 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { readDesktopStyles } from "./helpers/read-styles.js";
 
 /**
  * 弹窗盒式缩进回归（2026-10-06）。
@@ -16,8 +14,7 @@ import { describe, expect, it } from "vitest";
  * 特异性不足正是最初的失效方式。
  */
 
-const cssPath = resolve(dirname(fileURLToPath(import.meta.url)), "../src/styles.css");
-const css = readFileSync(cssPath, "utf8");
+const css = readDesktopStyles();
 
 /** 计算选择器特异性 [id, class/attr/pseudo-class, type]（:not() 内部按其参数计入）。 */
 function specificity(selector: string): [number, number, number] {

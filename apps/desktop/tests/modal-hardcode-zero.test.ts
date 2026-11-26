@@ -1,7 +1,5 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { readDesktopStyles } from "./helpers/read-styles.js";
 
 /**
  * .modal 作用域内的硬编码色值必须为零（2026-11-09 完成）。
@@ -32,8 +30,7 @@ import { describe, expect, it } from "vitest";
  *    不能凭位置直觉。
  */
 
-const cssPath = resolve(dirname(fileURLToPath(import.meta.url)), "../src/styles.css");
-const raw = readFileSync(cssPath, "utf8");
+const raw = readDesktopStyles();
 const css = raw.replace(/\/\*[\s\S]*?\*\//g, "");
 
 type Rule = { sels: string[]; body: string; line: number };

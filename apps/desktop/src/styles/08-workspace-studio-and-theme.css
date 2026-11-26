@@ -1,0 +1,573 @@
+/* ── 主工作区精修 v2（Graphite Studio）────────────────────────
+   在真实软件上重建最初设计稿的层次：卡片化分组、更舒展的留白、
+   实心化控件、独立播放控制条、更深的预览井。
+   顶栏 36px / 三栏宽度 / 时间线高度 / 拖拽命中区全部不变；
+   不覆盖 --vc-* / --dlg-* 弹窗令牌，所有规则限定 .editor-shell。 */
+/* 令牌层：只挂在 .editor-shell 上，而不是 :root。
+   理由：这批值的语义是「主工作区的材质」，不是全局主题；挂在 :root 会让
+   它们对弹窗子树同样可见，日后误用就会穿透到已冻结的弹窗样式里。
+   限定作用域后，文件里任何 --ws-* 的消费者都必然在工作区内。 */
+/* 令牌层：只挂在 .editor-shell 上，而不是 :root。
+   理由：这批值的语义是「主工作区的材质」，不是全局主题；挂在 :root 会让
+   它们对弹窗子树同样可见，日后误用就会穿透到已冻结的弹窗样式里。
+
+   2026-11-10 GATE-4：按中性灰阶重建，收敛到 4 级表面深度
+   （canvas 最暗 → shell → panel → raise），与成熟编辑器一致：
+   深色界面里"层级更多的灰"不产生秩序感，只产生脏污感。
+   强调色保持品牌青，但只用于选中与关键动作，不做装饰。 */
+.editor-shell {
+  /* 表面：4 级，中性灰（无色相偏置） */
+  --ws-canvas:#0d0d0f;   /* 预览井：最深，让画面浮起 */
+  --ws-shell:#141414;    /* 窗口底 / 时间线 */
+  --ws-panel:#191919;    /* 左右面板 */
+  --ws-raise:#202020;    /* 顶栏 / 浮层 */
+  /* 悬停底：必须比它所在的面更高一档。曾直接用 --ws-raise 当悬停底，
+     而 --ws-raise 正是下拉面板自己的底色 ⇒ 深色下 hover 与面板同色、
+     完全看不见（浅色下侥幸可见，是被 [data-theme="light"] button:hover
+     那条通用规则抢先覆盖成 #e8e8ea，属于巧合而非设计）。
+     取值与浅色档对齐：对面板的对比 1.22（#2b2b31 只有 1.15，肉眼偏弱）。 */
+  --ws-hover:#2f2f35;
+  --ws-inset:#101012;    /* 输入框 / 凹陷底 */
+  /* 分隔：一条发丝线即可，静止态不画第二层 */
+  --ws-line:rgba(245,245,255,.08); --ws-line-2:rgba(245,245,255,.15);
+  /* 文字：三级，第三级只给真正的辅助信息 */
+  /* 三级文字（辅助信息）。原值 #77777f 实测对 shell/panel/raise 仅 4.14/3.99/3.66:1，
+     而它是素材元信息、总时长、页脚状态的正文色 ⇒ 不满足 4.5:1（WCAG 1.4.3）。
+     改为 #8a8a93：5.38/5.18/4.74，三面都过，且仍明显弱于 --ws-text-2。 */
+  --ws-text:#e9e9ec; --ws-text-2:#a6a6ad; --ws-text-3:#8a8a93;
+  /* 强调：品牌青，仅选中态与主操作 */
+  /* 深色强调色当文字实测 7.35:1（对 --ws-raise），达标，故文字色与填充色同值 */
+  --ws-accent:#00c1cd; --ws-accent-text:#00c1cd; --ws-accent-ink:#00262a; --ws-focus:#00c1cd;
+  --ws-accent-dim:rgba(0,193,205,.12); --ws-accent-line:rgba(0,193,205,.4);
+  --ws-radius:8px;
+}
+/* body 在 .editor-shell 之外，取不到 --ws-*（令牌已限定作用域），
+   这里按同一色值直接给字面量，保持视觉一致。 */
+body { background:var(--surface-body); }
+.editor-shell, .editor-grid { background:var(--ws-shell); }
+
+/* 顶栏：仍是 36px，去掉纯黑断层，与面板同族 */
+.editor-shell .editor-titlebar { background:var(--ws-shell); border-bottom:1px solid var(--ws-line); }
+.editor-shell .brand-lockup strong { color:var(--ws-text); font-size:13px; font-weight:650; letter-spacing:.35px; }
+.editor-shell .menu-item > button { color:var(--ws-text-2); font-size:13px; }
+.editor-shell .menu-item > button:hover, .editor-shell .menu-item > button.active { background:var(--rgba-94); color:var(--ws-text); }
+.editor-shell .titlebar-project-switcher-toggle { background:var(--ws-inset); border-color:var(--ws-line-2); color:var(--ws-text); border-radius:7px; }
+.editor-shell .project-switcher-dropdown, .editor-shell .menu-dropdown { background:var(--ws-raise); border-color:var(--ws-line-2); }
+
+/* 三栏：统一面板材质与更舒展的留白 */
+.editor-shell .library-pane, .editor-shell .properties-pane { background:var(--ws-panel); }
+.editor-shell .library-pane { border-right:1px solid var(--ws-line); }
+.editor-shell .properties-pane { border-left:1px solid var(--ws-line); padding:16px; }
+.editor-shell .properties-pane:has(> .pp-panel) { background:var(--ws-panel); padding:0; }
+/* --pp-accent 同时用于文字与描边 ⇒ 必须取文字安全值，否则浅色下页签/数值用强调色时 <4.5:1 */
+.editor-shell .pp-panel { --pp-border:var(--ws-line); --pp-border-2:var(--ws-line-2); --pp-text:var(--ws-text); --pp-text-2:var(--ws-text-2); --pp-text-3:var(--ws-text-3); --pp-inset:var(--ws-inset); --pp-sep:var(--ws-line); --pp-accent:var(--ws-accent-text); }
+/* 左栏分区页签（2026-11-16 与右侧属性面板 .pp-tab 重新同构）：
+   参照的两个分类条（左栏 LibraryDrawer 与右栏 InspectorWorkspace）形态相同——
+   40px 条高、11.5px、选中 = 强调色 + 600 + 一层强调底，**没有下划线**
+   （InspectorWorkspace.module.css:4-8；该文件注释明写「as the library's beside them」）。
+   我们必须同构，否则同一屏里两条分类条讲两种选中语言。 */
+.editor-shell .left-seg { height:40px; padding:0 8px; border-bottom-color:var(--ws-line); }
+.editor-shell .left-seg button { color:var(--ws-text-2); font-size:11.5px; font-weight:500; margin:6px 0; border-radius:6px; padding:0 10px; transition:color .12s, background-color .12s; }
+.editor-shell .left-seg button:hover { color:var(--ws-text); }
+.editor-shell .left-seg button.active { color:var(--ws-accent-text); font-weight:600; background:var(--ws-accent-dim); }
+.editor-shell .left-seg button.active::after { content: none; }
+.editor-shell .left-seg button:focus-visible { box-shadow:inset 0 0 0 1.5px var(--ws-focus); outline:none; }
+
+/* 自查修正：editor-shell 大卡覆盖整块删除——导入区统一走基础 .library-toolbar 紧凑行
+   （此前「基础已改紧凑、shell 层又加回大卡」正是新旧并存造成的 4 不像来源之一）。 */
+.editor-shell .text-materials { gap:8px; padding:8px 16px 0; }
+.editor-shell .text-materials button { color:var(--text-muted); font-size:12px; height:28px; background: var(--bg-field); border-radius: 5px; border: none; }
+.editor-shell .text-materials button:hover:not(:disabled) { color:var(--text); background:var(--bg-hover); }
+.editor-shell .library-filter-toolbar { margin:14px 16px 6px; }
+.editor-shell .library-filter-toolbar input, .editor-shell .library-filter-toolbar select, .editor-shell .library-filter-toolbar .icon-btn { background:var(--ws-inset); border-color:var(--ws-line); color:var(--ws-text-2); border-radius:7px; height:30px; }
+.editor-shell .library-filter-toolbar input:focus { border-color:var(--ws-accent-line); }
+.editor-shell .library-filter-toolbar input::placeholder { color:var(--ws-text-3); }
+.editor-shell .asset-list { padding:8px 16px 24px; gap:8px; }
+/* 素材行（2026-11-16 左栏视觉对齐 OpenFilm MediaPool 卡面）：
+   参照的素材卡**静止态没有描边**，只靠一层比面板略亮的面 + 圆角成形；
+   描边只在悬停/选中时出现。原来每行都带 1px 描边 + 抬升底，一屏十几行
+   就变成一张表格——线的数量本身就是噪音（better-layout「用空间分组，不用线」）。 */
+.editor-shell .asset-item, .editor-shell .asset-row, .editor-shell .transcript-item { background:var(--bg-raised); border-color:var(--border); border-radius:6px; transition:background-color .12s, border-color .12s; }
+.editor-shell .asset-row { padding:0; }
+.editor-shell .asset-row:hover { background:var(--bg-raised); border-color:var(--border-strong); }
+/* 选中：**不能只靠颜色**（WCAG 1.4.1）。实测浅色下 hover 与 selected 的底色
+   只差 1.07:1、深色 1.00:1（同色不同色相），纯色区分等于没区分。
+   因此加两条与颜色无关的线索：左侧 3px 强调竖标 + 素材名加粗/提亮。
+   hover 与 selected 也各走各的底，选中的那一行悬停时仍看得出「已选中」。 */
+/* 自查修正：瓦片选中态统一参照形态（accent 边+环），弃旧左侧内条 */
+.editor-shell .asset-row.sel { background:var(--bg-raised); border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
+.editor-shell .asset-row.sel:hover { background:var(--bg-raised); border-color:var(--accent); }
+.editor-shell .asset-item.sel strong, .editor-shell .asset-row.sel strong { font-weight:700; }
+.editor-shell .asset-item strong, .editor-shell .asset-row strong { color:var(--ws-text); }
+.editor-shell .asset-item small, .editor-shell .asset-row small { color:var(--ws-text-3); }
+.editor-shell .library-pane .panel-hint { background:var(--ws-inset); border-color:var(--ws-line); color:var(--ws-text-3); }
+
+/* 项目属性：卡片化分组 + 明确的三级按钮（只作用于项目属性视图） */
+.editor-shell .properties-project { gap:16px; }
+.editor-shell .properties-project .property-block { gap:8px; padding:13px 14px; border:1px solid var(--ws-line); border-radius:var(--ws-radius); background:var(--ws-raise); }
+.editor-shell .properties-project .property-block h2 { margin:0 0 4px; font-size:11px; font-weight:600; letter-spacing:.08em; color:var(--ws-text-3); }
+.editor-shell .properties-project .property-line { font-size:12px; line-height:2.2; }
+.editor-shell .properties-project .property-line span { color:var(--ws-text-3); }
+.editor-shell .properties-project .property-line strong { color:var(--ws-text); font-weight:550; }
+.editor-shell .properties-project .properties-status { color:var(--ws-text-2); font-size:12px; }
+.editor-shell .properties-project .properties-actions { gap:8px; }
+.editor-shell .properties-project .properties-actions button { min-height:34px; border:1px solid var(--ws-line-2); background:var(--ws-raise); color:var(--ws-text-2); border-radius:7px; font-size:13px; }
+.editor-shell .properties-project .properties-actions button:first-child { background:var(--ws-accent); border-color:var(--ws-accent); color:var(--ws-accent-ink); font-weight:650; }
+.editor-shell .properties-project .properties-actions button:first-child:hover:not(:disabled) { background:var(--brand-hi); }
+.editor-shell .properties-project .properties-actions button:hover:not(:disabled) { border-color:var(--ws-accent-line); color:var(--ws-text); }
+.editor-shell .properties-project .properties-actions button:last-child:not(:first-child) { background:transparent; border-color:transparent; color:var(--ws-text-3); }
+
+/* 预览工作台：更深的画布井，让画面浮起来 */
+/* 预览区外边距收窄：用户指出「播放条应更贴近时间线工具栏」。
+   参照的画面区上下是 40px 铬框、**四周没有额外面板内边距**（ProjectView.tsx:4638 起，
+   PANE 本身无 padding，只有画面区内部 px-3 py-2.5）。
+   原来 14px 的四周内边距把播放条整体推离时间线，实测差 14px。 */
+.editor-shell .stage-pane { background:var(--ws-shell); padding:0; }
+/* 预览区（2026-11-16 复刻 OpenFilm 舞台）：参照的画面是**一个纯黑方块浮在面板面上**——
+   无圆角、无描边、无阴影（openfilm globals.css:530-541 实测 .stage/.stage-box 均无
+   border-radius；--bg-viewer 与面板同色）。
+   原来这里是「圆角卡片 + 1px 描边 + 卡片底」，画面被套进一个框里，这是观感差得最远处。
+   注意内边距**要保留**：参照 ProjectView.tsx:4691 有 px-3 py-2.5。 */
+.editor-shell .stage-column { gap:0; }
+/* 画面区的内边距是**参照本来就有**的（ProjectView.tsx:4691 px-3 py-2.5 = 12px 左右 / 10px 上下），
+   无的是**边框、圆角、卡片底**。我第一版把 padding 也删了，等于让画面顶到边上——
+   那是把「去卡片化」做过头了。这里恢复内边距，只去掉边框与圆角。 */
+.editor-shell .stage-view { background:var(--ws-shell); border:0; border-radius:0; padding:10px 12px; }
+/* 画面本体：参照是一个纯黑矩形，**无圆角无阴影**（openfilm globals.css:530-535）。
+   原来的 6px 圆角 + 大投影 + 1px 环，是「卡片里放视频」的观感；
+   参照是「视频本身就是那块黑」——这层阴影是两者观感差得最远的地方之一。 */
+.editor-shell .preview-canvas { box-shadow:none; border-radius:0; }
+/* 预览窗格栏（参照 dock-pane-bar.ts:8-13 的 PANE_BAR / PANE_BTN / PANE_TOGGLE）：
+   40px 高、左右 padding 6px、gap 4px；按钮 28×28（PANE_TOGGLE）；
+   标题 12px medium 的 --text-muted；不带文字的控件一律收进图标盒 + tooltip。 */
+.editor-shell .pane-bar { display: flex; align-items: center; gap: 4px; height: 40px; flex: 0 0 auto; padding: 0 6px; }
+.editor-shell .pane-bar-spacer { flex: 1 1 auto; min-width: 0; }
+.editor-shell .pane-bar-btn { display: flex; align-items: center; justify-content: center; position: relative; width: 28px; height: 28px; min-height: 0; border: 0; border-radius: 6px; background: none; color: var(--text-muted); cursor: pointer; transition: background-color .15s, color .15s; }
+.editor-shell .pane-bar-btn:hover { background: var(--bg-hover); color: var(--text); }
+/* P4 开关 on 态：参照图层/检查器开关的选中感知（bg-selected + 正文色） */
+.editor-shell .pane-bar-btn.on { background: var(--bg-selected); color: var(--text); }
+.editor-shell .pane-bar .render-badge { position: absolute; top: 3px; right: 3px; }
+/* P4 预览设置弹层：比例/编码/渲染导出收进图标按钮（参照 MenuSelect 卡片形态） */
+.editor-shell .pane-settings-anchor { position: relative; display: inline-flex; }
+.editor-shell .pane-settings-pop { position: absolute; top: calc(100% + 6px); right: 0; z-index: 220; display: flex; flex-direction: column; gap: 8px; min-width: 200px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-raised); box-shadow: var(--shadow-lg); }
+.editor-shell .pane-settings-row { display: flex; gap: 6px; }
+.editor-shell .pane-settings-row select { height: 26px; padding: 0 4px; border: 1px solid transparent; border-radius: 5px; background: var(--bg-field); color: var(--text); font-size: 11px; cursor: pointer; }
+.editor-shell .pane-settings-row select:hover { border-color: var(--border); }
+.editor-shell .pane-settings-action { display: inline-flex; align-items: center; justify-content: center; gap: 4px; position: relative; height: 28px; border: 0; border-radius: 6px; background: var(--bg-field); color: var(--text); font-size: 11px; cursor: pointer; }
+.editor-shell .pane-settings-action:hover { background: var(--bg-hover); }
+.editor-shell .pane-settings-action .render-badge { position: static; margin-left: 2px; }
+
+/* 预览上下铬框对称 40px（参照 dock-pane-bar.ts:8 顶栏 h-10 与 ViewerBar.tsx:51 h-10）。
+   原来上面 44、下面 40——差 4px 会让画面在视觉上偏下，这正是「不像」的细处来源之一。 */
+.editor-shell .preview-toolbar { height:40px; }
+.editor-shell .preview-toolbar .tb-field { color:var(--ws-text-3); font-size:12px; }
+.editor-shell .preview-toolbar .tb-field select { background:var(--ws-raise); border-color:var(--ws-line-2); color:var(--ws-text); font-size:12px; border-radius:7px; }
+.editor-shell .preview-toolbar .tb-sep { background:var(--ws-line); }
+.editor-shell .render-panel-toggle { background:var(--ws-raise); border-color:var(--ws-line-2); color:var(--ws-text); border-radius:7px; font-size:12px; }
+.editor-shell .render-panel-toggle:hover { border-color:var(--ws-accent-line); }
+/* 预览状态胶囊：编辑器画布井是主题面——浅色用浅底深字，深色走基础令牌值。 */
+
+/* 播放控制（2026-11-16 复刻 OpenFilm ViewerBar）：高度仍是 40px，
+   但**去掉卡片化的描边与底色**——参照里播放条是透明地贴在画面下方的留白上，
+   与画面只隔一条画面自己的黑边（openfilm ViewerBar.tsx:51 无 bg/border）。
+   播放键也从「实心强调色圆」改为「安静的 22px 图标按钮」——
+   参照的主播放键是普通 muted 图标，强调色只留给 focus ring
+   （dock-pane-bar.ts:10-11、ViewerBar.tsx:16,70）。 */
+.editor-shell .playback-bar { height:40px; padding:0 8px; background:transparent; border:0; border-radius:0; }
+.editor-shell .pb-play { width:22px; height:22px; border:0; background:transparent; color:var(--ws-text-2); border-radius:6px; transition:background-color .15s, color .15s; }
+.editor-shell .pb-play:hover:not(:disabled) { background:var(--ws-hover); color:var(--ws-text); }
+.editor-shell .pb-play:focus-visible { outline:2px solid var(--ws-focus); outline-offset:2px; }
+.editor-shell .pb-play svg { width:14px; height:14px; fill:currentColor; }
+/* 右侧工具按钮：与主播放键同一套盒子（参照 PANE_BTN = 22×22 / 图标 14 /
+   圆角 6 / muted 字色 / hover 用 --bg-hover + --text）。
+   原来这里是 28×28 / 图标 15，且 hover 用的是 --rgba-95（自造色），
+   于是同一条播放条上主键与工具键尺寸、悬停色都不一致。 */
+.editor-shell .pb-icon { width:22px; height:22px; border-radius:6px; color:var(--text-muted); transition:background-color .15s, color .15s; }
+/* 带文字的工具键（缩放「适应」/ 倍速）：参照用 !w-auto min-w-[22px] gap-1 px-1 —— 
+   固定 22px 宽会把中文挤成竖排（实测「适应」被拆成两行）。 */
+.editor-shell .pb-icon.zoom-btn, .editor-shell .pb-icon.rate-btn { width:auto; min-width:22px; padding:0 4px; gap:3px; }
+.editor-shell .zoom-label, .editor-shell .rate-txt { white-space:nowrap; font-size:12px; font-variant-numeric:tabular-nums; }
+.editor-shell .pb-icon svg { width:14px; height:14px; }
+.editor-shell .pb-icon:hover { background:var(--bg-hover); color:var(--text); }
+.editor-shell .pb-icon:focus-visible { outline:2px solid var(--ws-focus); outline-offset:2px; }
+/* 时间码：参照是 12px 正文色 + 11px 更淡的时长（ViewerBar.tsx:54-58） */
+.editor-shell .tc { font-size:12px; color:var(--text); }
+.editor-shell .tc b { color:var(--text); font-weight:400; }
+.editor-shell .tc i, .editor-shell .tc .tot { color:var(--text-faint); font-size:11px; }
+
+/* 时间线：统一深色、静止态只留发丝线 */
+.editor-shell .timeline-pane { --tl-panel:var(--bg-panel); --tl-gap:var(--tl-panel); --accent:#0098a3; --editor-control:#222226; --editor-control-disabled:#a6a6ad; background:var(--tl-panel); border-top:0; box-shadow:inset 0 1px 0 var(--ws-line); }
+html[data-theme="dark"] .editor-shell .timeline-pane { --tl-panel:#191919; --accent:#00bec8; --editor-control:#f0f0f0; --editor-control-disabled:#464646; }
+/* OpenFilm TOOLBAR_H = 34px; paired with its 20px ruler. */
+.editor-shell .timeline-toolbar { height:34px; min-height:34px; background:var(--tl-panel); border-bottom-color:var(--border); padding:0 8px; gap:6px; color:var(--editor-control); }
+.editor-shell .timeline-toolbar button { width:28px; min-width:28px; height:28px; min-height:28px; padding:0; border-radius:6px; }
+.editor-shell .timeline-toolbar button:disabled { opacity:1; }
+.editor-shell .timeline-toolbar button[aria-pressed="true"] { color:var(--accent); background:color-mix(in srgb,var(--accent) 14%,transparent); }
+.editor-shell .timeline-toolbar .timeline-zoom button { width:28px; min-width:28px; height:28px; min-height:28px; padding:0; border-radius:6px; }
+.editor-shell .timeline-zoom button { color:var(--editor-control); }
+.editor-shell .timeline-zoom button:disabled { opacity:1; color:var(--editor-control-disabled); }
+.editor-shell .timeline-toolbar button[aria-pressed="true"] > svg,
+.editor-shell .timeline-zoom button > svg { width:15px; height:15px; }
+.editor-shell .timeline-mode-picker-select > svg { width:12px; height:12px; }
+.editor-shell .timeline-toolbar .timeline-mode-sep { margin-left:2px; margin-right:2px; }
+.editor-shell .timeline-toolbar .toolbar-zoom-sep { height:16px; margin:0 2px; }
+/* OpenFilm paints each track head and canvas lane with the same solid row color;
+   the 2px panel-colored gap between rows remains visible in both columns. */
+.editor-shell .timeline-ruler, .editor-shell .timeline-left, .editor-shell .timeline-left-corner { background:var(--tl-panel); border-color:var(--ws-line); }
+.editor-shell .timeline-left { border-right-color:var(--tl-hairline); }
+.editor-shell .timeline-ruler-tick-layer { color:var(--editor-control); }
+.editor-shell .timeline-track-head { right:-1px; background:var(--tl-head-bg); border-color:var(--ws-line); }
+.editor-shell .timeline-track-head .track-flag { width:24px; height:24px; justify-self:center; color:var(--text); }
+.editor-shell .timeline-track-head .track-flag svg { width:12px; height:12px; }
+html[data-theme="dark"] .editor-shell .timeline-track-head .track-flag { color:var(--tl-cover-ink); }
+.editor-shell .timeline-track-head .track-solo { font-size:12px; font-weight:600; line-height:12px; }
+.editor-shell .timeline-track-head .timeline-track-badge { transform:translateX(1.5px); }
+.editor-shell .timeline-track-head[data-lane-picked="1"] { background:var(--tl-lane-on); }
+.editor-shell .timeline-clip-label-name { color:var(--tl-clip-ink); }
+.editor-shell .timeline-clip-label-speed { color:var(--tl-clip-ink); }
+.editor-shell .timeline-clip-label-duration { color:var(--tl-clip-ink-dim); }
+html[data-theme="dark"] .editor-shell .timeline-cover-entry { color:var(--tl-cover-ink); border-color:var(--tl-hairline); }
+/* Keep the Vortex-only head-collapse affordance out of the default OpenFilm
+   surface; reveal it when the head column is hovered or keyboard-focused. */
+.editor-shell .timeline-track-head-divider { opacity:0; pointer-events:none; }
+.editor-shell .timeline-left:hover .timeline-track-head-divider,
+.editor-shell .timeline-track-head-divider:focus-visible { opacity:1; pointer-events:auto; }
+/* Track head and canvas lane fills share the same opaque --tl-row token. */
+.editor-shell .timeline-left-track { border-bottom-color:var(--ws-line); }
+.editor-shell .timeline-resize-handle { height:7px; background:transparent; border-top:1px solid var(--ws-line); }
+/* 衔接处拖拽提示：不要整条高亮。悬停时只把 7px 命中区染成一层极淡的中性色，
+   视觉强度不高于面板分隔线——拖拽提示不该是画面里最亮的东西。 */
+.editor-shell .timeline-resize-handle:hover { background:var(--rgba-53); }
+.editor-shell .resize-handle:hover { background:var(--rgba-95); }
+
+.editor-shell .timeline-zoom-value { color:var(--ws-text-3); }
+
+/* 底栏：安静的常驻信息 */
+.editor-shell > footer { background:var(--ws-shell); border-top-color:var(--ws-line); }
+.editor-shell .footer-status .save-state, .editor-shell .footer-status .job-state { color:var(--ws-text-3); }
+.editor-shell .footer-actions .ai-entry { color:var(--ws-text-2); }
+.editor-shell .footer-actions .ai-entry:hover { color:var(--ws-text); background:var(--rgba-94); }
+.editor-shell .footer-version { color:var(--ws-text-3); }
+.editor-shell .banner-stack .notice { border-bottom-color:var(--ws-line-2); }
+
+/* ═══════════════════════════════════════════════════════════════
+   主题覆盖层（2026-11-10）
+   参照 OpenFilm 的双主题：暗色为默认，[data-theme="light"] 覆盖令牌。
+   只改令牌，不改任何选择器结构——因此换肤不会触碰布局与交互。
+   所有值取中性灰阶（与 Round 4 定的 --ws-* 同一体系），不用蓝色调。
+   ═══════════════════════════════════════════════════════════════ */
+
+/* 注意选择器：--ws-* 原本定义在 .editor-shell 上，而 CSS 自定义属性
+   在**元素自身的声明**胜过从祖先继承的值。因此光写 [data-theme="light"]
+   覆盖无效——必须以同样的 .editor-shell 作前缀，才能在同一起点上覆盖。
+   （实测：只写 [data-theme] 时 .library-pane 仍是 rgb(24,24,27)。） */
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* 旧令牌体系（vc-*，106 处使用）——挂在 :root 后代即可，无需前缀 */
+  --vc-bg:#ececed;
+  --vc-panel:#f7f7f8;
+  --vc-panel-2:#ffffff;
+  --vc-raised:#ffffff;
+  --vc-border:rgba(16,16,24,.10);
+  --vc-border-2:rgba(16,16,24,.18);
+  --vc-text:#1a1a1f;
+  --vc-text-2:#5a5a63;
+  --vc-accent:#0098a3;
+  --vc-accent-soft:rgba(0,152,163,.14);
+}
+
+/* 工作区令牌必须与 .editor-shell 同前缀覆盖：
+   --ws-* 是定义在 .editor-shell 元素上的，而元素自身的声明胜过从祖先
+   （html[data-theme]）继承的值。实测：只写 [data-theme="light"] 时
+   .library-pane 仍是 rgb(24,24,27)。 */
+[data-theme="light"] .editor-shell {
+  --ws-canvas:#f2f2f4;
+  --ws-shell:#ececed;
+  --ws-panel:#fbfbfc;   /* 参照 globals.css:47 --bg-panel light */
+  --ws-raise:#ffffff;
+  /* 与浅色下既有观感一致（原本由 [data-theme="light"] button:hover 的
+     --ctl-bg-hover #e8e8ea 提供），此处只是把它显式化，视觉零变化。 */
+  --ws-hover:#e8e8ea;
+  --ws-inset:#e9e9eb;
+  --ws-line:rgba(16,16,24,.10);
+  --ws-line-2:rgba(16,16,24,.18);
+  --ws-text:#1a1a1f;
+  --ws-text-2:#5a5a63;
+  /* 浅色三级文字：原 #8a8a93 对 shell/panel/raise 仅 2.90/3.20/3.42:1。
+     #696972 = 4.60/5.08/5.43，三面都过。 */
+  --ws-text-3:#696972;
+  /* --ws-accent 是 OpenFilm 的浅色强调色 #0098a3，用作填充/描边/焦点环
+     （非文本，3:1 即可，实测对白底 3.49、对面板底 3.26，达标）。
+     但它**不能当文字色**：对 --ws-panel 只有 3.26:1，不满足正文字号 4.5:1
+     （WCAG 1.4.3）。因此另立 --ws-accent-text，只用于文字，实测：
+     对 --ws-panel #f7f7f8 = 6.93:1，对 --ws-raise #ffffff = 7.42:1。 */
+  /* 焦点环专用：环要压在它实际跨过的每个面之上（--ws-shell/#ececed 最亮），
+     实测 --ws-accent 只有 2.95:1（<3，WCAG 1.4.11），故单立一个环令牌：
+     #007a83 = 对 shell 4.33 / 对 panel 4.77 / 对 raise 5.11，三面都过。 */
+  --ws-focus:#007a83;
+  --ws-accent:#0098a3;
+  --ws-accent-text:#005f66;
+  /* 主按钮文字压在 --ws-accent 填充上：白字实测仅 3.49:1（<4.5，WCAG 1.4.3 不过）。
+     改用深青墨 #00262a = 4.59:1，与深色主题的主按钮同一种「墨压青」关系。 */
+  --ws-accent-ink:#00262a;
+  --ws-accent-dim:rgba(0,152,163,.12);
+  --ws-accent-line:rgba(0,152,163,.45);
+}
+
+/* 浅色下的页面底与滚动条 */
+[data-theme="light"] body { background:#ececed; }
+[data-theme="light"] ::-webkit-scrollbar-thumb { background:#c9c9cf; }
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover { background:#b5b5bd; }
+
+
+/* ═══════════════════════════════════════════════════════════════
+   设置页：左侧导航 + 右侧内容（2026-11-10，参照 OpenFilm SettingsModal）
+   导航 264px、搜索框 40px、导航项 40px（18px 图标 + 15px 文字）、
+   选中项底色 pressed + 文字提亮。弹窗本身加宽以容纳两栏。
+   ═══════════════════════════════════════════════════════════════ */
+.modal.settings-dialog-nav { width: min(880px, calc(100vw - 32px)); max-height: 82vh; }
+.modal.settings-dialog-nav > .modal-heading { padding-bottom: 12px; }
+
+.settings-shell {
+  display: grid;
+  grid-template-columns: 264px minmax(0, 1fr);
+  gap: 0;
+  margin: 0 calc(var(--dlg-hpad, 22px) * -1);
+  border-top: 1px solid var(--dlg-line);
+  min-height: 420px;
+}
+
+/* 左侧导航 */
+.settings-nav {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 12px 12px 16px;
+  border-right: 1px solid var(--dlg-line);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--dlg-scroll-thumb) transparent;
+}
+.settings-search {
+  display: flex; align-items: center; gap: 10px;
+  height: 40px; margin-bottom: 10px; padding: 0 12px;
+  border: 1px solid var(--dlg-line); border-radius: 9px;
+  color: var(--dlg-text-3); cursor: text;
+  transition: border-color .12s;
+}
+.settings-search:focus-within { border-color: var(--dlg-text-3); }
+.settings-search input {
+  flex: 1; min-width: 0; border: 0; background: none; outline: none;
+  color: var(--dlg-text); font-size: 15px;
+}
+.settings-search input::placeholder { color: var(--dlg-text-4); }
+
+.settings-nav-item {
+  display: flex; align-items: center; gap: 12px;
+  height: 40px; min-height: 40px; padding: 0 10px;
+  border: 0; border-radius: 8px; background: transparent;
+  color: var(--dlg-text-2); font-size: 15px; text-align: left;
+  cursor: pointer; transition: background .12s, color .12s;
+}
+.settings-nav-item:hover:not(.active) { background: var(--ctl-bg); color: var(--dlg-text); }
+.settings-nav-item.active { background: var(--ctl-bg-hover); color: var(--dlg-text); }
+.settings-nav-icon { flex: none; display: grid; place-items: center; }
+.settings-nav-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-nav-empty { padding: 16px 10px; color: var(--dlg-text-4); font-size: 14px; }
+
+/* 右侧内容 */
+.settings-content {
+  display: flex; flex-direction: column; gap: 14px;
+  padding: 16px 22px 22px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--dlg-scroll-thumb) transparent;
+}
+.settings-content > fieldset { margin: 0; }
+
+/* 覆盖 .modal label 的 grid（第 1131 行）与 .modal button 的 min-height：
+   设置页导航里这两者都要按行内 flex / 固定 40px 排，不能被通用规则压成
+   竖排或 34px（实测搜索图标被推到输入框上方、导航项高 34px）。 */
+.modal.settings-dialog-nav .settings-search {
+  display: flex; align-items: center; gap: 10px;
+  height: 40px; min-height: 40px;
+}
+.modal.settings-dialog-nav .settings-nav-item {
+  height: 40px; min-height: 40px;
+  border: 0; border-radius: 8px;
+}
+.modal.settings-dialog-nav .settings-nav-item:hover:not(.active) { border: 0; }
+.modal.settings-dialog-nav .settings-content { padding: 16px 22px 22px; }
+.modal.settings-dialog-nav .settings-content > fieldset:first-child { margin-top: 0; }
+
+/* 导航项之间出现横线：.modal button 带了 border（第 1163 行），
+   我上一条只清了 border 的宽度值，:hover 规则又把它带回来。
+   这里用 border: 0 !important 等效的特异性彻底清掉四个边。 */
+.modal.settings-dialog-nav .settings-nav .settings-nav-item,
+.modal.settings-dialog-nav .settings-nav .settings-nav-item:hover,
+.modal.settings-dialog-nav .settings-nav .settings-nav-item:focus {
+  border-width: 0;
+  border-style: none;
+  box-shadow: none;
+}
+/* 内容区第一块不要顶在分隔线上 */
+.modal.settings-dialog-nav .settings-content > :first-child { margin-top: 0; }
+
+/* ═══════════════════════════════════════════════════════════════
+   标记行（2026-11-10，对齐 OpenFilm 的 MARKER_ROW_H = 16）
+   浮在轨道区顶部、绝对定位，**不占布局高度**——所以增删标记不会让
+   轨道上下跳动。只在有标记时渲染。
+   ═══════════════════════════════════════════════════════════════ */
+.timeline-marker-lane {
+  position: absolute;
+  left: 0;
+  top: var(--tl-ruler-h, 20px);
+  height: 16px;
+  right: 0;
+  z-index: 8;
+  pointer-events: none;   /* 默认不吃事件；只有图钉与按钮可交互 */
+}
+.timeline-marker-lane > * { pointer-events: auto; }
+
+.timeline-marker-add {
+  position: absolute;
+  left: calc(50% - 8px);
+  top: 0;
+  width: 16px; height: 16px; min-height: 16px;
+  padding: 0; border: 0; border-radius: 4px;
+  background: transparent; color: var(--ws-text-3, #8a8a93);
+  font-size: 13px; line-height: 1; cursor: pointer;
+  opacity: 0; transition: opacity .12s, background .12s;
+}
+.timeline-marker-lane:hover .timeline-marker-add { opacity: 1; }
+.timeline-marker-add:hover { background: var(--ws-raise, #202024); color: var(--ws-text, #e9e9ec); }
+
+.timeline-marker {
+  position: absolute;
+  left: 0; top: 0;
+  height: 16px;
+  display: flex; align-items: center;
+  will-change: transform;
+}
+.timeline-marker-pin {
+  width: 9.6px; height: 12px; min-height: 12px;
+  padding: 0; border: 0; border-radius: 0;
+  margin-left: -4.8px;
+  cursor: ew-resize;
+  background: transparent;
+  transition: transform .1s;
+}
+.timeline-marker-pin > svg { width: 9.6px; height: 12px; }
+.timeline-marker-pin:hover { transform: scaleY(1.15); }
+
+.timeline-marker-editor {
+  position: absolute;
+  left: 8px; top: 16px;
+  display: grid; gap: 6px;
+  min-width: 180px; padding: 8px;
+  border: 1px solid var(--dlg-border, rgba(255,255,255,.12));
+  border-radius: 8px;
+  background: var(--dlg-raise, #1d2326);
+  box-shadow: 0 8px 24px var(--rgba-14);
+  z-index: 30;
+}
+.timeline-marker-editor input {
+  width: 100%; height: 26px;
+  padding: 0 7px;
+  border: 1px solid var(--dlg-line, rgba(255,255,255,.075));
+  border-radius: 5px;
+  background: var(--dlg-inset, #101416);
+  color: var(--dlg-text, var(--ink-1-c));
+  font-size: 12px; outline: none;
+}
+.timeline-marker-editor input:focus { border-color: var(--ws-accent, var(--brand-b)); }
+.timeline-marker-colors { display: flex; align-items: center; gap: 5px; }
+.timeline-marker-colors .swatch {
+  width: 14px; height: 14px; min-height: 14px;
+  padding: 0; border: 1px solid transparent; border-radius: 50%;
+  cursor: pointer;
+}
+.timeline-marker-colors .swatch.active { border-color: var(--dlg-text, var(--ink-1-c)); }
+.timeline-marker-delete {
+  margin-left: auto; height: 20px; min-height: 20px;
+  padding: 0 7px; border: 0; border-radius: 4px;
+  background: transparent; color: var(--dlg-danger, #e35d62);
+  font-size: 11px; cursor: pointer;
+}
+.timeline-marker-delete:hover { background: var(--dlg-danger-dim, rgba(227,93,98,.09)); }
+
+/* 标记的贯穿引导线（悬停或拖动时） */
+.timeline-marker-guide {
+  position: absolute;
+  top: 0; bottom: 0; left: 0; width: 0;
+  border-left: 1px dashed currentColor;
+  pointer-events: none;
+  z-index: 7;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   时间区间选取（2026-11-10）：Shift + 在标尺上拖动。
+   只做视觉：标尺段实心、贯穿轨道区的淡填充、两端把手、角标文本、清除按钮。
+   刻意不接任何操作——驱动什么（导出/删除/循环）尚未定义。
+   ═══════════════════════════════════════════════════════════════ */
+.timeline-range-band {
+  position: absolute;
+  top: 0; bottom: 0; left: 0;
+  background: var(--rgba-96);
+  border-left: 1px solid var(--ws-accent, var(--brand-b));
+  border-right: 1px solid var(--ws-accent, var(--brand-b));
+  pointer-events: none;
+  z-index: 6;
+  will-change: transform, width;
+}
+/* 标尺那 20px 段实心加深，与 OpenFilm 的 28% 强调一致 */
+.timeline-range-ruler {
+  position: absolute;
+  left: 0; right: 0; top: 0;
+  height: var(--tl-ruler-h, 20px);
+  background: var(--rgba-80);
+}
+.timeline-range-edge {
+  position: absolute;
+  top: 0;
+  width: 10px; height: var(--tl-ruler-h, 20px);
+  padding: 0; border: 0; border-radius: 0;
+  background: transparent;
+  pointer-events: auto;
+  cursor: ew-resize;
+  touch-action: none;
+}
+.timeline-range-edge.start { left: -5px; }
+.timeline-range-edge.end { right: -5px; }
+.timeline-range-edge::after {
+  content: ""; position: absolute; inset: 0 4px;
+  background: var(--ws-accent, var(--brand-b));
+}
+.timeline-range-label {
+  position: absolute;
+  top: calc(var(--tl-ruler-h, 20px) + 4px);
+  left: 6px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  /* 用令牌而非硬编码：浅色主题下必须是浅底深字，否则区间角标变成一块黑斑 */
+  background: var(--dlg-raise, #1d2326);
+  border: 1px solid var(--ws-accent-line, rgba(0, 193, 205, .35));
+  /* 文字用 --ws-accent-text（浅色 #005f66 = 对白底 7.42:1）；--ws-accent 在浅色下
+     当文字只有 3.49:1，是这一轮专门为「填充可以、文字不行」拆开的两个令牌。 */
+  color: var(--ws-accent-text, var(--brand-b));
+  font: 11px/1.4 ui-monospace, Consolas, monospace;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.timeline-range-clear {
+  position: absolute;
+  top: 2px; right: 8px;
+  width: 18px; height: 18px; min-height: 18px;
+  padding: 0; border: 0; border-radius: 4px;
+  background: var(--dlg-raise, #1d2326);
+  color: var(--ws-text-2, #a6a6ad);
+  font-size: 13px; line-height: 1; cursor: pointer;
+  z-index: 9;
+}
+.timeline-range-clear:hover { background: var(--ws-raise, #202024); color: var(--ws-text, #e9e9ec); }
+
+

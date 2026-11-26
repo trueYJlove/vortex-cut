@@ -1,7 +1,5 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { readDesktopStyles } from "./helpers/read-styles.js";
 
 /**
  * 版本比较（revision-compare）— C 族审计（2026-11-09）。
@@ -22,8 +20,7 @@ import { describe, expect, it } from "vitest";
  * 令牌化会同时影响这 4 处 —— 这是有意的：它们本来就该同一个颜色语义。
  */
 
-const cssPath = resolve(dirname(fileURLToPath(import.meta.url)), "../src/styles.css");
-const raw = readFileSync(cssPath, "utf8");
+const raw = readDesktopStyles();
 const css = raw.replace(/\/\*[\s\S]*?\*\//g, "");
 
 type Rule = { selectors: string[]; body: string; order: number; inMedia: boolean };

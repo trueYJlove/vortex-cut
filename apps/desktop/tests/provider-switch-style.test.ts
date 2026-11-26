@@ -1,7 +1,5 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { readDesktopStyles } from "./helpers/read-styles.js";
 
 /**
  * Provider 启用开关的级联回归（2026-11-09）。
@@ -27,8 +25,7 @@ import { afterEach, describe, expect, it } from "vitest";
  * 16px 当成了轨道宽度。命中是浏览器的既有语义，不该在这里重造。
  */
 
-const cssPath = resolve(dirname(fileURLToPath(import.meta.url)), "../src/styles.css");
-const css = readFileSync(cssPath, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+const css = readDesktopStyles().replace(/\/\*[\s\S]*?\*\//g, "");
 
 type Rule = { selectors: string[]; body: string; order: number; inMedia: boolean };
 

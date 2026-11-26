@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { readDesktopStyles } from "./helpers/read-styles.js";
 
 /**
  * 规范档位闭环：DESIGN.md 定义的每一档，实现里不得出现档外取值（2026-11-09）。
@@ -22,7 +23,7 @@ import { describe, expect, it } from "vitest";
  */
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const css = readFileSync(resolve(root, "src/styles.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+const css = readDesktopStyles().replace(/\/\*[\s\S]*?\*\//g, "");
 const design = readFileSync(resolve(root, "../../docs/design/ui-mockups/dialog-system-v2/DESIGN.md"), "utf8");
 
 type Rule = { sels: string[]; body: string; inMedia: boolean };

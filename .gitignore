@@ -100,3 +100,12 @@ resources/.test-model-cache/
 
 # Agent / Codex 临时工具目录（匹配根级与子包下的 .codex-tmp/）
 .codex-tmp/
+
+# uv 本地缓存
+.uv-cache/
+
+# 脚本可确定性再生的本地对比媒体夹具
+tools/openfilm-timeline-parity/media/p235-timeline-audio.wav
+
+# 证据目录下的音频波形等大型媒体文件（保留轻量 <200KB JSON 摘要）
+evidence/**/*.wav

@@ -1,6 +1,5 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { readDesktopStyles } from "./helpers/read-styles.js";
 
 /**
  * 主题令牌覆盖率守卫（2026-11-11）。
@@ -22,7 +21,6 @@ import { describe, expect, it } from "vitest";
  * 其余任何规则里的颜色字面量都必须走 var(--token)。
  */
 
-const CSS_PATH = resolve(__dirname, "../src/styles.css");
 
 /** 从 CSS 里取出所有规则（选择器 + 声明体），跳过注释与 @ 规则。 */
 function rules(css: string): { selector: string; body: string; line: number }[] {
@@ -52,7 +50,7 @@ const ALLOWED = [
 ];
 
 describe("主题令牌覆盖率", () => {
-  const css = readFileSync(CSS_PATH, "utf8");
+  const css = readDesktopStyles();
   const all = rules(css);
 
   it("样式表能被解析出规则（防止解析器本身失效导致测试形同虚设）", () => {

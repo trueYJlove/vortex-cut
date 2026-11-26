@@ -1,0 +1,587 @@
+/* ===== Wave 1 剪辑手法面板（对齐 export-dialog v5 / --dlg-* 令牌） ===== */
+.modal.editing-tools {
+  row-gap: 12px;
+}
+.editing-tools .et-wrap {
+  padding-left: var(--dlg-hpad);
+  padding-right: var(--dlg-hpad);
+  display: grid;
+  gap: 12px;
+}
+.editing-tools .et-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  width: fit-content;
+  border: 1px solid var(--dlg-line);
+  border-radius: var(--r-box);
+  background: var(--dlg-raise);
+}
+.editing-tools .et-tabs button {
+  min-width: 108px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 12px;
+  flex-direction: column;
+  gap: 1px;
+  justify-content: center;
+  background: transparent;
+  color: var(--dlg-text-3);
+  font-size: var(--dlg-fs-label);
+}
+.editing-tools .et-tabs button strong {
+  font-size: var(--dlg-fs-body);
+  font-weight: 600;
+  color: var(--dlg-text-2);
+}
+.editing-tools .et-tabs button span {
+  font-size: var(--dlg-fs-caption);
+  color: var(--dlg-text-4);
+}
+.editing-tools .et-tabs button:hover:not(:disabled) {
+  background: var(--ctl-bg-hover);
+}
+.editing-tools .et-tabs button.on {
+  background: var(--tab-active);
+}
+.editing-tools .et-tabs button.on strong { color: var(--dlg-text); }
+.editing-tools .et-tabs button.on span { color: var(--dlg-text-3); }
+
+.editing-tools .et-ctx {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: var(--dlg-fs-caption);
+  color: var(--dlg-text-3);
+}
+.editing-tools .et-ctx b {
+  color: var(--dlg-text-2);
+  font-weight: 500;
+}
+
+.editing-tools .et-shell {
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  border: 1px solid var(--dlg-line);
+  border-radius: var(--r-box);
+  background: var(--dlg-raise);
+  overflow: hidden;
+}
+.editing-tools .et-col {
+  min-width: 0;
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+.editing-tools .et-col + .et-col {
+  border-left: 1px solid var(--dlg-line);
+}
+
+.editing-tools .et-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.editing-tools .et-field > label {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--dlg-fs-label);
+  color: var(--dlg-text-3);
+}
+.editing-tools .et-val {
+  font-size: var(--dlg-fs-body);
+  color: var(--dlg-text-2);
+  font-variant-numeric: tabular-nums;
+}
+.editing-tools .et-field input[type="range"] {
+  width: 100%;
+  height: 22px;
+  min-height: 22px;
+  padding: 0;
+  accent-color: var(--dlg-primary);
+}
+.editing-tools .et-field select {
+  width: 100%;
+  max-width: 100%;
+  text-overflow: ellipsis;
+}
+.editing-tools .et-seg {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--dlg-line);
+  border-radius: var(--r-ctl);
+  background: var(--ctl-bg);
+}
+.editing-tools .et-seg button {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 26px;
+  min-height: 26px;
+  padding: 0 8px;
+  background: transparent;
+  color: var(--dlg-text-3);
+  font-size: var(--dlg-fs-label);
+}
+.editing-tools .et-seg button:hover:not(:disabled) {
+  background: var(--ctl-bg-hover);
+}
+.editing-tools .et-seg button.on {
+  background: var(--tab-active);
+  color: var(--dlg-text);
+}
+.editing-tools .et-adv {
+  border-top: 1px solid var(--dlg-line);
+  padding-top: 10px;
+}
+.editing-tools .et-adv summary {
+  cursor: pointer;
+  font-size: var(--dlg-fs-label);
+  color: var(--dlg-text-3);
+  margin-bottom: 8px;
+}
+.editing-tools .et-note {
+  margin: 0;
+  font-size: var(--dlg-fs-caption);
+  color: var(--dlg-text-4);
+  line-height: 1.65;
+}
+.editing-tools .et-note.ok { color: var(--dlg-primary); }
+.editing-tools .et-note.warn { color: var(--dlg-warn); }
+
+.editing-tools .et-preview {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--dlg-line);
+  border-radius: var(--r-box);
+  background: var(--dlg-bg);
+}
+.editing-tools .et-ph {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.editing-tools .et-ph h3 {
+  margin: 0;
+  font-size: var(--dlg-fs-label);
+  font-weight: 600;
+  color: var(--dlg-text-2);
+}
+.editing-tools .et-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: var(--dlg-fs-caption);
+  color: var(--dlg-text-4);
+}
+.editing-tools .et-legend i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  margin-right: 4px;
+  vertical-align: -1px;
+}
+.editing-tools .et-timeline {
+  position: relative;
+  height: 72px;
+  border: 1px solid var(--dlg-line);
+  border-radius: var(--r-ctl);
+  background: var(--surface-inset-deep-2);
+  overflow: hidden;
+}
+.editing-tools .et-lane {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 8px;
+  height: 24px;
+}
+.editing-tools .et-seg-blk {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 2px;
+  border-radius: 3px;
+}
+.editing-tools .et-seg-blk.keep { background: var(--dlg-primary); opacity: .85; }
+.editing-tools .et-seg-blk.silence { background: var(--ctl-bg); }
+.editing-tools .et-seg-blk.shot {
+  position: relative;
+  top: auto;
+  bottom: auto;
+  left: auto !important;
+  right: auto !important;
+  width: auto !important;
+  background: var(--ctl-bg);
+  border: 1px solid var(--dlg-border);
+}
+.editing-tools .et-ticks {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 40px;
+  height: 28px;
+}
+.editing-tools .et-tick {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 12px;
+  background: var(--dlg-primary);
+  opacity: .55;
+}
+.editing-tools .et-tick.down {
+  height: 18px;
+  opacity: 1;
+}
+.editing-tools .et-cut {
+  position: absolute;
+  top: 14px;
+  width: 2px;
+  height: 10px;
+  background: var(--dlg-text);
+}
+.editing-tools .et-axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--dlg-fs-caption);
+  color: var(--dlg-text-4);
+  font-variant-numeric: tabular-nums;
+}
+.editing-tools .et-av { display: grid; gap: 8px; }
+.editing-tools .et-av-row {
+  padding: 10px;
+  border: 1px solid var(--dlg-line);
+  border-radius: var(--r-ctl);
+  background: var(--dlg-bg);
+}
+.editing-tools .et-av-lbl {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: var(--dlg-fs-caption);
+  color: var(--dlg-text-4);
+}
+.editing-tools .et-bar-track {
+  position: relative;
+  height: 20px;
+  border-radius: 4px;
+  background: var(--ctl-bg);
+  overflow: hidden;
+}
+.editing-tools .et-bar-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--dlg-primary);
+  opacity: .55;
+}
+.editing-tools .et-bar-fill.gold {
+  background: var(--dlg-warn);
+  opacity: .7;
+}
+.editing-tools .et-bar-cut {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  background: var(--dlg-text);
+}
+.editing-tools .et-bar-cut.audio {
+  background: var(--dlg-warn);
+}
+.editing-tools .et-word {
+  position: absolute;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--dlg-primary);
+  transform: translate(-50%, -50%);
+}
+.editing-tools .et-dry {
+  border-top: 1px solid var(--dlg-line);
+  padding-top: 10px;
+}
+.editing-tools .et-dry h4 {
+  margin: 0 0 6px;
+  font-size: var(--dlg-fs-label);
+  font-weight: 600;
+  color: var(--dlg-text-2);
+}
+.editing-tools .et-dry p {
+  margin: 0;
+  font-size: var(--dlg-fs-label);
+  color: var(--dlg-text-2);
+}
+.editing-tools .et-proposal {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--dlg-line);
+  border-radius: var(--r-box);
+  background: var(--dlg-bg);
+}
+.editing-tools .et-proposal h4 {
+  margin: 0;
+  font-size: var(--dlg-fs-label);
+  font-weight: 600;
+  color: var(--dlg-text-2);
+}
+.editing-tools .et-sum {
+  margin: 0;
+  font-size: var(--dlg-fs-label);
+  color: var(--dlg-text-2);
+  line-height: 1.7;
+}
+.editing-tools .et-diff {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.editing-tools .et-cell {
+  padding: 10px;
+  border: 1px solid var(--dlg-line);
+  border-radius: var(--r-ctl);
+  background: var(--dlg-raise);
+}
+.editing-tools .et-n {
+  font-size: 16px;
+  font-weight: 650;
+  color: var(--dlg-primary);
+  font-variant-numeric: tabular-nums;
+}
+.editing-tools .et-k {
+  font-size: var(--dlg-fs-caption);
+  color: var(--dlg-text-4);
+}
+.editing-tools .et-shots { display: grid; gap: 6px; }
+.editing-tools .et-shot-row {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  margin: 0 !important;
+  padding: 8px 10px;
+  border: 1px solid var(--dlg-line);
+  border-radius: var(--r-ctl);
+  background: var(--ctl-bg);
+  color: var(--dlg-text-2);
+  font-size: var(--dlg-fs-label);
+  cursor: pointer;
+}
+.editing-tools .et-shot-row > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.editing-tools .et-hist {
+  display: grid;
+  gap: 4px;
+}
+.editing-tools .et-hist button {
+  width: 100%;
+  justify-content: flex-start;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 10px;
+  background: transparent;
+  color: var(--dlg-text-2);
+  font-size: var(--dlg-fs-label);
+}
+.editing-tools .et-hist button:hover:not(:disabled) {
+  background: var(--ctl-bg-hover);
+}
+@media (max-width: 860px) {
+  .editing-tools .et-shell { grid-template-columns: 1fr; }
+  .editing-tools .et-col + .et-col {
+    border-left: 0;
+    border-top: 1px solid var(--dlg-line);
+  }
+}
+
+/* W2.1 机位同步面板（只做表格/勾选列表排版；提示盒沿用既有 .readonly-note / .ai-status 收口） */
+.angle-sync-modal .angle-sync-create { display: grid; gap: 8px; }
+.angle-sync-modal .angle-sync-members { display: grid; gap: 4px; max-height: 160px; overflow: auto; }
+.angle-sync-modal .angle-sync-member { display: flex; gap: 6px; align-items: center; }
+.angle-sync-modal .angle-sync-groups { display: flex; gap: 8px; align-items: flex-end; margin-top: 10px; }
+/* C 族「列表型」· 形态 2（机位同步的表格）。
+   结构稿：prototype-list-family.html
+
+   改造前的实测问题（Chromium 量出，不是读代码猜的）：
+   1. 表头 13px —— 与正文同号，表头与数据分不出层级（稿：10.5px）；
+   2. 单元格内边距 4px 6px —— 过挤，行高 43 但内容贴边；
+   3. 偏移/置信度是数字列却全部左对齐 —— 位数不同的数字无法纵向比较，
+      而这张表的用途恰恰是「一眼看出各机位差多少」；
+   4. 分隔线用 var(--ctl-bg)（控件底色）当线色 —— 令牌层级用错，
+      稿里是 var(--dlg-line)（发丝线）。 */
+.angle-sync-modal .angle-sync-table {
+  width: 100%; border-collapse: collapse; margin-top: 12px;
+  font-size: 12px;
+  /* 显式列宽。auto 布局会把剩余宽度摊给「最宽那列」，实测状态列被撑到
+     144px 而内部只有 62px 的徽章 —— 机位与数字列之间裂开一大段空白。
+     这张表是 6 列固定语义的检视表，不需要自适应；给机位列吃掉剩余空间即可。 */
+  table-layout: fixed;
+}
+.angle-sync-modal .angle-sync-table th:nth-child(1) { width: auto; }
+.angle-sync-modal .angle-sync-table th:nth-child(2) { width: 92px; }
+.angle-sync-modal .angle-sync-table th:nth-child(3) { width: 84px; }
+.angle-sync-modal .angle-sync-table th:nth-child(4) { width: 72px; }
+.angle-sync-modal .angle-sync-table th:nth-child(5) { width: 64px; }
+.angle-sync-modal .angle-sync-table th:nth-child(6) { width: 176px; }
+.angle-sync-modal .angle-sync-table th {
+  text-align: left; padding: 0 8px 8px;
+  color: var(--dlg-text-3); font-size: var(--dlg-fs-caption); font-weight: 500;
+  border-bottom: 1px solid var(--dlg-line);
+}
+.angle-sync-modal .angle-sync-table td {
+  text-align: left; padding: 9px 8px;
+  color: var(--dlg-text-2);
+  border-bottom: 1px solid var(--dlg-line);
+  font-variant-numeric: tabular-nums;
+}
+.angle-sync-modal .angle-sync-table tr:last-child td { border-bottom: 0; }
+.angle-sync-modal .angle-sync-table tbody tr:hover td { background: var(--dlg-raise); }
+/* 数字列右对齐：偏移与置信度需要纵向比较；左对齐时位数不同看不出大小关系。
+   列序：机位 | 状态 | 偏移 | 置信度 | 来源 | 手填。 */
+.angle-sync-modal .angle-sync-table th:nth-child(3),
+.angle-sync-modal .angle-sync-table td:nth-child(3),
+.angle-sync-modal .angle-sync-table th:nth-child(4),
+.angle-sync-modal .angle-sync-table td:nth-child(4) {
+  text-align: right;
+}
+.angle-sync-modal .angle-sync-table input { width: 72px; }
+/* 状态单元格是「徽章 + 原因」的组合。92px 列宽下两者放不下一行，
+   让原因整行换到徽章下方，而不是把「· 音频损坏」挤成一个孤零零的换行。 */
+.angle-sync-modal .angle-sync-table td:nth-child(2) { white-space: normal; }
+.angle-sync-modal .angle-sync-table td small {
+  display: block; margin-top: 3px;
+  color: var(--dlg-text-3); font-size: 10.5px; line-height: 1.4;
+}
+.angle-sync-modal .angle-sync-table td small:empty { display: none; }
+
+/* 状态列的表头必须与它管辖的数据对齐。
+   实测：表头「状态」文字左缘 455，徽章左缘 477 —— 差 22px，看着就是错位。
+   根因：徽章定宽 62px 且居中，表头却按列左缘左对齐。
+   修法让表头居中（与徽章一致），而不是把徽章改左对齐——定宽居中是
+   keyframe / 语义检索 / 机位同步三个弹窗共用的契约，不为一张表破例。 */
+.angle-sync-modal .angle-sync-table th:nth-child(2),
+.angle-sync-modal .angle-sync-table td:nth-child(2) { text-align: center; }
+
+/* 状态徽章：固定 62px，与 keyframe / 语义检索同一契约。
+   纯色文字会让「可用」与「不可用」宽度不同，把后面的偏移列推歪。 */
+.angle-sync-modal .angle-status {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 62px; height: 18px; border-radius: 999px;
+  background: var(--ctl-bg); color: var(--dlg-text-3);
+  font-size: 10.5px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  vertical-align: middle;
+}
+.angle-sync-modal .angle-status.ready { background: var(--dlg-accent-dim); color: var(--dlg-primary); }
+.angle-sync-modal .angle-status.unavailable,
+.angle-sync-modal .angle-status.failed,
+.angle-sync-modal .angle-status.stale { background: var(--dlg-warn-dim); color: var(--dlg-warn); }
+
+/* ── W3.1 素材语义检索面板 ── */
+/* C 族「列表型」· 组合态（素材语义检索）。
+   结构稿：prototype-list-family.html
+
+   改造前的问题（实测，不是观感）：
+   1. 本段有 8 处硬编码色值（var(--line-danger-3) / var(--surface-danger-2) / var(--ink-danger) / var(--line-1-b) ×3 /
+      var(--warn) / #8b9aa1），完全绕过 Graphite 令牌——改令牌或换主题时这段不跟随；
+   2. 列表行只有下划线分隔，与 C 族「卡片行 + 圆角 + 6px 间距」不一致；
+   3. 状态是纯文字，宽度随文案变化——与 keyframe 同一个缺陷（右缘会漂）。 */
+.modal.semantic-search .semantic-search-form { display: flex; gap: 8px; margin-bottom: 12px; }
+.modal.semantic-search .semantic-search-form input { flex: 1; min-width: 0; }
+
+.modal.semantic-search .semantic-search-error {
+  margin: 10px 0 0; padding: 11px 13px;
+  border: 1px solid var(--rgba-77); border-radius: var(--r-box);
+  background: var(--dlg-danger-dim); color: var(--dlg-text-2);
+  font-size: var(--dlg-fs-caption); line-height: 1.7;
+}
+
+/* 命中列表：C 族行形态——卡片行、6px 间距 */
+.modal.semantic-search .semantic-search-hits {
+  margin: 0 0 4px; padding: 0; list-style: none;
+  display: grid; gap: 6px;
+  max-height: 46vh; overflow-y: auto;
+}
+.modal.semantic-search .semantic-search-hits li {
+  display: flex; align-items: center; gap: 12px;
+  padding: 9px 12px;
+  border: 1px solid transparent; border-radius: var(--r-ctl);
+  background: var(--dlg-raise);
+  transition: background .15s, border-color .15s;
+}
+.modal.semantic-search .semantic-search-hits li:hover {
+  background: var(--ctl-bg); border-color: var(--dlg-line);
+}
+.modal.semantic-search .hit-name {
+  flex: 1; min-width: 0; overflow-wrap: anywhere;
+  color: var(--dlg-text); font-size: 12.5px;
+}
+/* 分数列固定 56px：与徽章同理，「0.912」与「0.5」位数不同会把右缘推歪。 */
+.modal.semantic-search .hit-score {
+  flex: none; width: 56px; text-align: right;
+  color: var(--dlg-primary); font-size: var(--dlg-fs-caption); font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 语义索引（检索面板内建索引入口） ── */
+.modal.semantic-search .semantic-index {
+  margin-top: 16px; padding-top: 14px;
+  border-top: 1px solid var(--dlg-line);
+}
+.modal.semantic-search .semantic-index-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-bottom: 6px;
+}
+.modal.semantic-search .semantic-index-head strong {
+  color: var(--dlg-text-2); font-size: var(--dlg-fs-label); font-weight: 600;
+}
+.modal.semantic-search .semantic-index-list {
+  margin: 10px 0 0; padding: 0; list-style: none;
+  display: grid; gap: 6px;
+  max-height: 30vh; overflow-y: auto;
+}
+.modal.semantic-search .semantic-index-list li {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid transparent; border-radius: var(--r-ctl);
+  background: var(--dlg-raise);
+}
+.modal.semantic-search .index-name {
+  flex: 1; min-width: 0; overflow-wrap: anywhere;
+  color: var(--dlg-text); font-size: 12.5px;
+}
+/* 状态徽章固定 62px —— 与 keyframe 行同一契约，宽度不随文案漂移。 */
+.modal.semantic-search .index-status {
+  flex: none; width: 62px;
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 18px; border-radius: 999px;
+  background: var(--ctl-bg); color: var(--dlg-text-3);
+  font-size: 10.5px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.modal.semantic-search .index-status.ready { background: var(--dlg-accent-dim); color: var(--dlg-primary); }
+.modal.semantic-search .index-status.unavailable,
+.modal.semantic-search .index-status.failed,
+.modal.semantic-search .index-status.stale { background: var(--dlg-warn-dim); color: var(--dlg-warn); }
+.modal.semantic-search .index-hint {
+  flex-basis: 100%; color: var(--dlg-warn);
+  font-size: var(--dlg-fs-caption); line-height: 1.6;
+}
+
+

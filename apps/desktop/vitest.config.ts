@@ -21,12 +21,13 @@ export default defineConfig({
         "src/lib/**/*.ts",
         "electron/main/candidate-media.ts",
         "electron/main/provider-secrets.ts",
-        "electron/main/stage2a-ipc.ts",
-        "electron/main/stage2b-ipc.ts",
+        "electron/main/ipc/planning-provider-ipc.ts",
+        "electron/main/ipc/ai-editing-analysis-ipc.ts",
         "electron/main/restricted-media.ts",
         "electron/main/export-destination.ts",
         "electron/main/logging.ts",
-        "electron/preload/index.ts"
+        "electron/preload/index.ts",
+        "electron/preload/domains/*.ts"
       ],
       exclude: ["out/**", "coverage/**", "tests/**", "e2e/**", "scripts/**", "**/*.config.*"],
       thresholds: { statements: 82, lines: 82, functions: 68, branches: 72 }

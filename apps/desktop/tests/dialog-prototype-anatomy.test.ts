@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { readDesktopStyles } from "./helpers/read-styles.js";
 
 /**
  * 原型组件落地回归（2026-11-06）。
@@ -17,9 +18,9 @@ import { describe, expect, it } from "vitest";
 const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (p: string) => readFileSync(resolve(desktopRoot, p), "utf8");
 const exportSource = read("src/app/ExportDialog.tsx");
-const appSource = read("src/app/App.tsx");
+const appSource = read("src/app/layout/AppDialogs.tsx");
 const commandSource = read("src/app/editorCommands.ts");
-const css = read("src/styles.css");
+const css = readDesktopStyles();
 
 describe("导出弹窗必须使用原型的内容级解剖", () => {
   const required = ["project-strip", "project-cover", "project-name", "project-stats", "filename", "file-ext", "section-label", "export-grid", "form-grid", "field-hint", "span-2", "path-control", "path-value", "ratio-panel", "ratio-frame", "ratio-name", "ratio-dim", "ratio-sub", "footer-note"];

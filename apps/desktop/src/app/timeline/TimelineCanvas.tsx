@@ -1,16 +1,11 @@
 import { editorPerf } from "../preview/perf-metrics.js";
 import { ToolButton } from "../../ui/of/ToolButton.js";
 import { ModePicker, timelineModeFromKeyEvent, type TimelineMode } from "../../ui/of/ModePicker.js";
-import { ContextMenu, type ContextMenuEntry } from "../../ui/of/ContextMenu.js";
+import { ContextMenu } from "../../ui/of/ContextMenu.js";
 import { ASSET_BATCH_DRAG, ASSET_DRAG, SYSTEM_FILE_DROP_ID, assetDropKindFromFile, clearSystemFileDrop, getActiveDraggedAssetIds, hasAssetDrag, peekSystemFileDrop, readAssetDrop, resolveTimelineAssetDropIntent, restoreSystemFileDrop, setActiveDraggedAssetIds } from "./asset-drop.js";
 import { splitClipAt, splitSelectionAt } from "./split-point.js";
-import { expandLinkedClipIds, mergeLinkedMarqueeSelection, removeLinkedClips } from "./linked-clips.js";
-import { closeGapAt } from "./close-gap.js";
-import { planCompactMainTrack, planMagneticDelete, planMagneticDrop, planMagneticMove, planMagneticTrim, planMagneticImageTrim, planRippleDelete } from "./magnetic-plan.js";
-import { createClipDragPlanner, linkedRiderClipIdsForDrag } from "./clip-drag-plan.js";
-import { hasLiftedTimelineDrag } from "./drag-threshold.js";
+import { createClipDragPlanner } from "./clip-drag-plan.js";
 import { planAdvancedEdit, type AdvancedEditMode } from "./advanced-edit.js";
-import { planTimelineSpeedEdge, speedMilliForLength } from "./speed-edge-plan.js";
 import { AudioMeters } from "../../ui/of/AudioMeters.js";
 /**
  * Timeline — Canvas + DOM hybrid timeline component.
@@ -27,39 +22,24 @@ import { AudioMeters } from "../../ui/of/AudioMeters.js";
  *           highlight, trim handles, snap guides, marquee, drag ghosts
  */
 import {
-  memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
-  useLayoutEffect,
   useSyncExternalStore,
 } from "react";
 import {
   ChevronLeft,
   ChevronRight,
-  Eye,
-  EyeOff,
-  Film,
-  Lock,
-  LockOpen,
-  Link2,
-  Link2Off,
   Magnet,
-  MoreHorizontal,
   Paperclip,
   PenLine,
-  PanelLeftClose,
-  PanelLeftOpen,
   Redo2,
   SeparatorVertical,
   SquareDashed,
-  Trash2,
   Undo2,
-  Volume2,
-  VolumeX,
-  X,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
@@ -102,14 +82,84 @@ import {
 import { TimelinePlayheadLayer } from "./TimelinePlayheadLayer.js";
 import { MarkerLane } from "./MarkerLane.js";
 import type { TimelineMarker } from "./markers.js";
-import { formatRange, normalizeRange, rangeDuration, MIN_RANGE_US, type TimeRange } from "./time-range.js";
+import { formatRange, MIN_RANGE_US, type TimeRange } from "./time-range.js";
 import { createPlayheadStore, type PlayheadStore } from "./playhead-store.js";
 import { ThumbnailLoader, defaultFilmstripSourceFactory } from "./thumbnail-loader.js";
-import { OVERSCAN_ROWS, filterVisibleRects } from "./viewport-index.js";
+import { OVERSCAN_ROWS } from "./viewport-index.js";
 import type { WaveformCache } from "./waveform-cache.js";
+import {
+  CLIP_ROW_INSET,
+  KIND_COLOR_VARS,
+  formatTimelineHoverTime,
+} from "./canvas/render/theme.js";
+import {
+  THUMB_CELL_PX,
+  buildFilmstripOverlayGroups,
+  cachedFilmstripFallback,
+  cellSourceTimeSec,
+  filmstripCachePrefix,
+  frameTierFor,
+  quantizeFrameCount,
+  thumbnailStepMs,
+  type FilmstripSprite,
+} from "./canvas/render/filmstrip-index.js";
+import { drawRulerStrip } from "./canvas/render/ruler.js";
+import { drawTimelineFrame } from "./canvas/render/render-frame.js";
+import { TrackHeadColumn } from "./canvas/TrackHeadColumn.js";
+import {
+  buildCanvasContextMenuItems,
+  buildTrackContextMenuItems,
+  type TimelineCanvasContextMenuState,
+  type TrackContextMenuState,
+} from "./canvas/contextMenuBuilder.js";
+import {
+  TimelineAccessibleClipList,
+  TimelineAddTransitionDialog,
+  TimelineClipLabelsOverlay,
+  TimelineDropAndReplaceOverlays,
+  TimelineFilmstripOverlay,
+  TimelineInsertIndicator,
+  TimelineTransitionAndKeyframeOverlays,
+} from "./canvas/TimelineOverlays.js";
+import {
+  detectCanvasHover,
+  hitTestCanvasContextMenuTarget,
+  hitTestCanvasPointerDown,
+} from "./canvas/hit-test.js";
+import { clampRulerTime as clampRulerTimeToTotal, useRulerScrubGesture } from "./canvas/gestures/ruler-scrub.js";
+import {
+  beginMoveGesture,
+  commitMoveGesture,
+  stepAutoScrollMoveInteraction,
+  stepGroupMoveGesture,
+  stepMoveGesture,
+  type MoveSnapTargetCache,
+} from "./canvas/gestures/move-gesture.js";
+import {
+  commitClipTrimGesture,
+  stepAdvancedEdgeEdit,
+  stepCaptionMoveGesture,
+  stepCaptionTrimGesture,
+  stepClipTrimGesture,
+  stepSpeedEdgeGesture,
+} from "./canvas/gestures/edge-trim-gesture.js";
+import {
+  buildGroupMovePatchOperations,
+  checkInteractionDragLifted,
+  commitMarqueeGesture,
+  stepMarqueeGesture,
+  stepScrollbarDrag,
+} from "./canvas/gestures/marquee-gesture.js";
 
-/** B2 转场种类（与 core TRANSITION_KINDS 对齐）。 */
-const TRANSITION_KINDS = ["fade", "fadeblack", "dissolve", "wipeleft", "wiperight", "slideleft", "slideup", "zoomin"] as const;
+export {
+  THUMB_CELL_PX,
+  cachedFilmstripFallback,
+  cellSourceTimeSec,
+  filmstripCachePrefix,
+  frameTierFor,
+  quantizeFrameCount,
+  thumbnailStepMs,
+};
 
 const canChangeClipSpeed = (clip: TimelineClip): boolean =>
   (clip.asset_kind === "video" || clip.asset_kind === "audio")
@@ -118,60 +168,38 @@ const canChangeClipSpeed = (clip: TimelineClip): boolean =>
   && clip.source_end_us > clip.source_start_us;
 
 import {
-  MIN_CLIP_US,
   SCROLLBAR_HEIGHT_PX,
   SNAP_PX,
-  TRIM_HANDLE_PX,
-  CLIP_HEADER_H,
-  CAPTION_ROW_H,
-  clampGroupDelta,
   clampMoveStart,
   clampScrollX,
   clampTimelineZoom,
   clipAudioBand,
   clipLabelPinShift,
   timelineWheelPanDelta,
-  timelineGestureDeltaUs,
   clipDuration,
   computeTimelineTicks,
-  clipsInTimelineMarquee,
   computeClipRects,
   computeTrackRows,
   computeTransitionRects,
   computeActiveTransitionRects,
-  TRACK_VIEW_PAD,
   TRACK_SIZES,
+  TRACK_VIEW_PAD,
   dragEdgeAutoScrollStep,
   hitTestClips,
-  hitTestTransitionGap,
-  hitTestTransitions,
-  hitTestActiveTransitions,
-  hitTestTrimHandle,
-  hitTestVolumeLine,
-  marqueeRect,
-  orderedMoveSnapTargets,
-  resolveGroupMove,
-  resolveMoveTarget,
   scrollBounds,
   snapCandidates,
-  snapResult,
-  snapResultSorted,
-  snapValue,
   snapClipPaintRect,
+  snapValue,
   stepTimelineZoom,
   timeToX,
+  timelineDropHit,
   timelineSliderToZoom,
   timelineZoomAfterDurationChange,
   timelineZoomLimits,
   timelineZoomToPps,
   timelineZoomToSlider,
-  trimHitPx,
-  trackRowAt,
   trackRowOf,
-  timelineDropHit,
-  timelineDragDropExcludedClipIds,
   trackRowsTotalHeight,
-  volumeToY,
   xToTime,
   snapTimeToFrame,
   yToVolume,
@@ -180,23 +208,9 @@ import {
 } from "./geometry.js";
 import { clearActiveTransitionOperations, planActiveTransitionResize } from "./active-transition-edit.js";
 
-/** Keyframe lane order for the expanded panel (matches contracts' four properties). */
-const KEYFRAME_ORDER = ["position", "scale", "rotate", "opacity"] as const;
-const KEYFRAME_LANE_LABELS: Record<string, string> = { position: "位", scale: "缩", rotate: "旋", opacity: "透" };
-const KEYFRAME_LANE_HEIGHT = 14;
-
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-const formatTime = (us: number) => {
-  const totalSeconds = us / 1_000_000;
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  if (hours > 0)
-    return `${hours}:${String(minutes).padStart(2, "0")}:${String(Math.floor(seconds)).padStart(2, "0")}`;
-  if (minutes > 0) return `${minutes}:${String(Math.floor(seconds)).padStart(2, "0")}`;
-  return `${seconds.toFixed(2)}s`;
-};
+const formatTime = formatTimelineHoverTime;
 
 const createTimelineClipId = (): TimelineClipId => {
   const uuid = globalThis.crypto?.randomUUID?.().replaceAll("-", "");
@@ -280,78 +294,6 @@ function SplitToolbarGlyph() {
   return <svg aria-hidden="true" width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="square">
     <path d="M5 4h4v16H5m14-16h-4v16h4" />
   </svg>;
-}
-
-/** OpenFilm-style track head resize target. Pointer dragging edits one row;
- * keyboard arrows resize it too, and Home/double-click restore its role height. */
-function TrackResizeHandle({
-  trackId,
-  height,
-  onResize,
-}: {
-  trackId: string;
-  height: number;
-  onResize: (height: number | null, done: boolean) => void;
-}) {
-  const dragRef = useRef<{ pointerId: number; startY: number; startHeight: number; lastHeight: number } | null>(null);
-  const minimum = 28;
-  const clamp = (value: number) => Math.max(minimum, Math.min(160, Math.round(value)));
-  const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    event.stopPropagation();
-    dragRef.current = { pointerId: event.pointerId, startY: event.clientY, startHeight: height, lastHeight: height };
-    event.currentTarget.setPointerCapture(event.pointerId);
-  };
-  const onPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    const next = clamp(drag.startHeight + event.clientY - drag.startY);
-    if (next === drag.lastHeight) return;
-    drag.lastHeight = next;
-    onResize(next, false);
-  };
-  const onPointerEnd = (event: React.PointerEvent<HTMLDivElement>) => {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    dragRef.current = null;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    onResize(drag.lastHeight, true);
-  };
-  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Home") {
-      event.preventDefault();
-      event.stopPropagation();
-      onResize(null, true);
-      return;
-    }
-    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
-    event.preventDefault();
-    event.stopPropagation();
-    const step = event.shiftKey ? 10 : 4;
-    onResize(clamp(height + (event.key === "ArrowDown" ? step : -step)), true);
-  };
-  return (
-    <div
-      className="timeline-track-resize"
-      role="separator"
-      aria-orientation="horizontal"
-      aria-label={`调整轨道 ${trackId} 高度`}
-      aria-valuemin={minimum}
-      aria-valuemax={160}
-      aria-valuenow={height}
-      aria-valuetext={`${height} 像素`}
-      aria-keyshortcuts="ArrowUp ArrowDown Shift+ArrowUp Shift+ArrowDown Home"
-      tabIndex={0}
-      title={`拖动调整轨道 ${trackId} 高度；方向键微调；Home 恢复默认`}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerEnd}
-      onPointerCancel={onPointerEnd}
-      onDoubleClick={event => { event.stopPropagation(); onResize(null, true); }}
-      onKeyDown={onKeyDown}
-    />
-  );
 }
 
 // ── WP-P232 预抽 sprite 装载（可测的调度体） ────────────────────────────────
@@ -478,108 +420,6 @@ export function loadFilmstripsOnce(
 
 // ── Thumbnail frame computation（剪映式：抽帧铺满片段） ──────────────────────
 
-/** Legacy frame-count tiers used by reverse playback strips and sprite fallbacks. */
-const FRAME_COUNT_STEPS = [1, 2, 3, 4, 5, 6, 8, 10, 13, 16, 20, 24, 29, 35, 42, 50, 58, 64];
-/** 缩略格目标宽（px）：请求侧、绘制侧、档位清理侧必须同源。
- *  T8 参照 BlockThumbs.tsx:21 THUMB_CELL_PX=80。任一处写死不同数值都会
- *  让缓存键与档位集合对不上（历史缺陷：清理侧残留 44）。 */
-export const THUMB_CELL_PX = 80;
-
-/** Legacy reverse-strip cache tier. Forward strips use a source-time ladder instead. */
-export function frameTierFor(clipDurationUs: number, pixelsPerSecond: number): number {
-  if (clipDurationUs <= 0) return 1;
-  return quantizeFrameCount(Math.round(((clipDurationUs / 1_000_000) * pixelsPerSecond) / THUMB_CELL_PX));
-}
-
-/** Keep cached cells tied to the source window, even while zoom and placement change. */
-export function filmstripCachePrefix(clip: TimelineClip): string {
-  return [clip.clip_id, clip.asset_id, clip.source_start_us, clip.source_end_us, clip.speed_milli ?? 1000,
-    Number(Boolean(clip.reverse_playback)), clip.timeline_end_us - clip.timeline_start_us].join(":");
-}
-
-export function cachedFilmstripFallback<T>(
-  cache: ReadonlyMap<string, T>,
-  prefix: string,
-  count: number,
-  index: number,
-): T | undefined {
-  const position = (index + 0.5) / count;
-  let closest: T | undefined;
-  let minDistance = Infinity;
-  for (const tier of FRAME_COUNT_STEPS) {
-    if (tier === count) continue;
-    const cell = Math.min(tier - 1, Math.floor(position * tier));
-    const distance = Math.abs((cell + 0.5) / tier - position);
-    if (distance >= minDistance) continue;
-    const frame = cache.get(`${prefix}:${tier}:${cell}`);
-    if (frame !== undefined) {
-      closest = frame;
-      minDistance = distance;
-    }
-  }
-  return closest ?? cache.get(`${prefix}:preview`);
-}
-
-export function quantizeFrameCount(raw: number): number {
-  const capped = Math.max(1, Math.min(64, raw));
-  let best = FRAME_COUNT_STEPS[0];
-  let bestDistance = Number.POSITIVE_INFINITY;
-  for (const step of FRAME_COUNT_STEPS) {
-    const distance = Math.abs(step - capped);
-    if (distance < bestDistance) {
-      bestDistance = distance;
-      best = step;
-    }
-  }
-  return best;
-}
-
-/** 第 i 个缩略格的**源时刻**（秒）——请求侧与绘制侧共用的唯一映射。
- *  格位由片段的【时间线】时长均匀切分，取格中心；含变速/倒放：
- *  源时刻 = source_start + 时间线偏移 × speed（倒放从 source_end 反向）。
- *
- *  独立成函数的原因：绘制侧要在缓存未命中时同步查 sprite 表（P232 预抽），
- *  必须算出与请求侧**逐位相同**的时刻，否则查到的格子内容与位置对不上。 */
-export function cellSourceTimeSec(
-  clip: {
-    timeline_start_us: number; timeline_end_us: number;
-    source_start_us?: number | null; source_end_us?: number | null;
-    speed_milli?: number | null; reverse_playback?: boolean | null;
-  },
-  index: number,
-  frameCount: number,
-): number {
-  const timelineDurUs = clip.timeline_end_us - clip.timeline_start_us;
-  const count = Math.max(1, frameCount);
-  const fromUs = clip.timeline_start_us + (index * timelineDurUs) / count;
-  const toUs = clip.timeline_start_us + ((index + 1) * timelineDurUs) / count;
-  const offsetUs = (fromUs + toUs) / 2 - clip.timeline_start_us;
-  const speed = (clip.speed_milli ?? 1000) / 1000;
-  const srcUs = clip.reverse_playback
-    ? (clip.source_end_us ?? 0) - offsetUs * speed
-    : (clip.source_start_us ?? 0) + offsetUs * speed;
-  return Math.max(0, srcUs) / 1_000_000;
-}
-
-/** Compute source-time samples for an OpenFilm 80px filmstrip grid.
- * Forward playback samples the source-time ladder; reverse playback retains
- * its frame-tier mapping because the samples are requested in reverse order.
- */
-const THUMB_TIME_LADDER = [1, 2, 2.5, 5] as const;
-
-/** OpenFilm keeps thumbnail cells at 80 CSS px and snaps source seeks to this ladder. */
-export function thumbnailStepMs(rawMs: number): number {
-  if (!(rawMs > 0) || !Number.isFinite(rawMs)) return rawMs;
-  let scale = 10 ** Math.floor(Math.log10(rawMs));
-  for (;;) {
-    for (const factor of THUMB_TIME_LADDER) {
-      const step = factor * scale;
-      if (step >= rawMs - 1e-9) return step;
-    }
-    scale *= 10;
-  }
-}
-
 export interface FilmstripRequestWindow { fromUs: number; toUs: number }
 
 interface FilmstripFrameRequest {
@@ -694,34 +534,6 @@ function computeCaptionRects(
 // 按 clip 源区间/速度/倒放取窗）。Renderer 不再保留整媒体 decodeAudioData
 // 链路（旧 getAudioDecodeContext/extractPeaks/decodeAudioPeaks 已移除）。
 
-/** Amplitude gain applied at draw time so quiet audio stays visible. */
-const WAVEFORM_GAIN = 1.4;
-/** 绘制路径每 clip 峰值数上限。须 ≥ 片段像素宽——旧值 200 会把宽片段
- *  拉成大块台阶（剪映是近似 1 峰/像素的密柱）。 */
-const WAVEFORM_PEAK_COUNT_MAX = 4096;
-
-// ── 剪映式片段外观（1:1 复刻参考） ────────────────────────────────────────────
-/** 片段圆角半径（px）。 */
-// 参照片段圆角 4px（openfilm Timeline.tsx:3247 rounded-[4px]）；原 3px。
-const CLIP_RADIUS = 4;
-/** 片段在轨道行内的上下留白（px）——相邻轨道片段之间形成剪映式缝隙。 */
-// OpenFilm uses a 0.5px vertical clip inset (Timeline.tsx:261).
-const CLIP_ROW_INSET = 0.5;
-/** 片段配色（2026-11-11 对齐 OpenFilm 的 KIND_COLOR 令牌，globals.css:87-94/163-170）：
- *  按素材类别取色（video/image/page/text/sticker/filter/effect/audio），浅深双主题各一套。
- *  画布不吃 CSS 选择器——cssColor() 运行期读 [data-theme] 命中的变量值。
- *  选中不变色——只叠加外扩描边。 */
-const KIND_COLOR_VARS: Record<string, { body: string; header: string; band: string; wave: string }> = {
-  video:   { body: "--clip-video",  header: "--clip-video",  band: "--clip-video",  wave: "--clip-video" },
-  image:   { body: "--clip-image",  header: "--clip-image",  band: "--clip-image",  wave: "--clip-image" },
-  page:    { body: "--clip-page",   header: "--clip-page",   band: "--clip-page",   wave: "--clip-page" },
-  text:    { body: "--clip-text",   header: "--clip-text",   band: "--clip-text",   wave: "--clip-text" },
-  sticker: { body: "--clip-sticker", header: "--clip-sticker", band: "--clip-sticker", wave: "--clip-sticker" },
-  filter:  { body: "--clip-filter", header: "--clip-filter", band: "--clip-filter", wave: "--clip-filter" },
-  effect:  { body: "--clip-effect", header: "--clip-effect", band: "--clip-effect", wave: "--clip-effect" },
-  audio:   { body: "--clip-audio",  header: "--clip-audio",  band: "--clip-audio",  wave: "--clip-audio" },
-};
-
 // ── Runtime prefs (magnetic snapping) ────────────────────────────────────────
 
 const projectTrackHeightKey = (projectId: string) => `${TIMELINE_PREFS_STORAGE_KEY}.project.${encodeURIComponent(projectId)}.track-heights`;
@@ -789,1415 +601,7 @@ function loadRuntimePrefs(projectId?: string): TimelineRuntimePrefs {
   return DEFAULT_RUNTIME_PREFS;
 }
 
-// ── Canvas drawing ───────────────────────────────────────────────────────────
-
-/** Small dark tooltip shown above a drag ghost (timecode + duration/delta). */
-function drawDragTooltip(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  lines: string[],
-  viewportWidth: number,
-) {
-  ctx.save();
-  ctx.font = "10px monospace";
-  const textWidth = Math.max(...lines.map((line) => ctx.measureText(line).width));
-  const boxWidth = textWidth + 12;
-  const boxHeight = lines.length * 13 + 7;
-  const boxX = Math.max(2, Math.min(viewportWidth - boxWidth - 2, x - boxWidth / 2));
-  const boxY = Math.max(2, y - boxHeight);
-  ctx.fillStyle = "rgba(10, 14, 20, 0.85)";
-  ctx.strokeStyle = "#5a6a72";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.roundRect(boxX, boxY, boxWidth, boxHeight, 4);
-  ctx.fill();
-  ctx.stroke();
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  lines.forEach((line, index) => {
-    ctx.fillStyle = index === 0 ? "#ffd76e" : "#d7e2e8";
-    ctx.fillText(line, boxX + boxWidth / 2, boxY + 9 + index * 13);
-  });
-  ctx.restore();
-}
-
-// ── 标尺外观常量（drawTimeline 与固定标尺覆盖层 drawRulerStrip 共享，
-//    保证两条绘制路径像素级一致）──────────────────────────────────────────
-/* 画布颜色改为从 CSS 变量读取（2026-11-10）：主题切换时画布也要跟随，
-   否则浅色主题下时间线仍是一整块深色（实测截图确认）。
-   取不到变量时回退到原深色常量，保证独立渲染（测试/离屏）不依赖样式表。 */
-const cssColor = (name: string, fallback: string): string => {
-  if (typeof window === "undefined" || typeof document === "undefined") return fallback;
-  // Timeline-scoped theme tokens can differ from the app shell (OpenFilm uses
-  // #191919 for this surface while the Vortex workspace panel is #181818).
-  // Read the timeline's resolved value first so canvas paint follows the same
-  // local surface as its DOM controls; retain the document root for isolated
-  // renderers and tokens that are only defined globally.
-  const timeline = document.querySelector<HTMLElement>(".timeline-pane");
-  const value = getComputedStyle(timeline ?? document.documentElement).getPropertyValue(name).trim()
-    || getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  return value || fallback;
-};
-const RULER_DEAD_BG = () => cssColor("--tl-dead-bg", "#161618"); // 素材终点外的死区底色
-const RULER_BG_TOP = () => cssColor("--tl-ruler-top", "#1c1c1f"); // 标尺带渐变顶
-const RULER_BG_BOTTOM = () => cssColor("--tl-ruler-bottom", "#17171a"); // 标尺带渐变底
-const RULER_END_EDGE = () => cssColor("--tl-end-edge", "#3d4a5c"); // 素材终点竖标线（主题令牌）
-const HOVER_CHIP_BG = () => cssColor("--tl-chip-bg", "rgba(9, 12, 24, 0.88)");
-const HOVER_CHIP_EDGE = () => cssColor("--tl-chip-edge", "rgba(0, 193, 205, 0.45)");
-const HOVER_CHIP_TEXT = "#d6e1ff";
-// 播放头线/手柄已拆为独立 DOM 覆盖层（A06，TimelinePlayheadLayer），
-// 外观常量与绘制函数不再在 Canvas 路径保留。
-
-/** 标尺面（两条绘制路径共享的标尺带外观）：渐变底 + 悬停竖线/时间胶囊 +
- *  刻度 + 素材范围条 + 素材终点标线 + 终点外死区。
- *  bandX/width/height 为目标画布坐标系；xOffset 把刻度 x 映射到本画布；
- *  xAt 把时间映射到本画布 x；endX 为素材终点 x（自动收敛到 width 内）。 */
-function drawRulerFace(
-  ctx: CanvasRenderingContext2D,
-  opts: {
-    bandX: number;
-    width: number;
-    height: number;
-    endX: number;
-    xOffset: number;
-    ticks: TickMark[];
-    hoverUs: number | null | undefined;
-    hoverText: string;
-    xAt: (us: number) => number;
-  },
-) {
-  const { bandX, width, height, xOffset, ticks, hoverUs, hoverText, xAt } = opts;
-  const endX = Math.max(bandX, Math.min(width, opts.endX));
-
-  // ④修正：标尺面 = 纯平 var(--bg-panel)（参照 Timeline.tsx:273 TL.ruler——无渐变）。
-  // 原「纵向微渐变」顶色偏亮，在工具栏 border-bottom 之下叠出用户指认的「加粗顶边」。
-  // 死区同底色；素材终点竖标线保留（参照 endX 也有收尾线）。
-  ctx.fillStyle = cssColor("--tl-panel", "#191919");
-  ctx.fillRect(bandX, 0, Math.max(0, width - bandX), height);
-  if (endX < width) {
-    ctx.strokeStyle = RULER_END_EDGE();
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(Math.round(endX) + 0.5, 0);
-    ctx.lineTo(Math.round(endX) + 0.5, height);
-    ctx.stroke();
-  }
-
-  // 悬停竖线（带内部分；整高引导线由主画布另绘）。
-  if (hoverUs !== null && hoverUs !== undefined) {
-    const hx = xAt(hoverUs);
-    if (hx >= bandX && hx <= width) {
-      ctx.strokeStyle = cssColor("--tl-tick-major", "#8a95a5");
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(hx, 0);
-      ctx.lineTo(hx, height);
-      ctx.stroke();
-
-    }
-  }
-
-  // Tick borders and labels are rendered in the DOM overlay, using OpenFilm's
-  // own CSS border/text rasterization. Canvas put the same labels on half-pixel
-  // anchors and produced visible glyph/tick differences at the same zoom.
-  // OpenFilm's fixed ruler has no canvas-painted divider at its bottom edge.
-  // The lane surface starts directly below the 20px ruler; painting a second
-  // hairline here made Vortex's last ruler row visibly brighter.
-  // P230-③（2026-11-17）：内容范围条已删除——参照标尺无此元素
-  // （Timeline.tsx:4284-4316：标尺 = 平底 + tickMarks + border-b，别无长条）。
-  // 它是用户指认的「刻度上方粗线」：素材最左到最右的一条 3px 渐变条常驻在
-  // 刻度上方，读起来像一条加粗的顶边。素材范围信息已由泳道带与死区表达。
-
-  // 悬停时间胶囊（圆角底 + 描边，保证任何刻度上都可读）。
-  if (hoverUs !== null && hoverUs !== undefined) {
-    const hx = xAt(hoverUs);
-    if (hx >= bandX && hx <= endX) {
-      ctx.font = "10px Consolas, monospace";
-      const chipW = ctx.measureText(hoverText).width + 10;
-      const chipH = Math.min(14, Math.max(10, height - 2));
-      const cx = hx > width - chipW - 10 ? hx - chipW - 4 : hx + 4;
-      const cy = Math.max(1, height - chipH - 1);
-      ctx.fillStyle = HOVER_CHIP_BG();
-      ctx.strokeStyle = HOVER_CHIP_EDGE();
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.roundRect(cx, cy, chipW, chipH, 4);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = HOVER_CHIP_TEXT;
-      ctx.textBaseline = "middle";
-      ctx.textAlign = "left";
-      ctx.fillText(hoverText, cx + 5, cy + chipH / 2 + 0.5);
-      ctx.textAlign = "left";
-    }
-  }
-}
-
-/** OpenFilm's persistent 4px range thumb under the lanes. */
-function drawScrollbar(
-  ctx: CanvasRenderingContext2D,
-  width: number,
-  height: number,
-  view: TimelineViewState,
-  totalUs: number,
-) {
-  const { maxScrollX } = scrollBounds(view, totalUs, width);
-  const timeViewportWidth = Math.max(0, width - view.headerWidth);
-  const visibleRatio = maxScrollX > 0
-    ? Math.min(1, timeViewportWidth / (timeViewportWidth + maxScrollX))
-    : 1;
-  const thumbWidth = Math.min(width, Math.max(16, width * visibleRatio));
-  const thumbX = maxScrollX > 0
-    ? (view.scrollX / maxScrollX) * (width - thumbWidth)
-    : 0;
-  const thumbHeight = 4;
-  const thumbY = height - SCROLLBAR_HEIGHT_PX + (SCROLLBAR_HEIGHT_PX - thumbHeight) / 2;
-  ctx.save();
-  ctx.globalAlpha = 0.28;
-  ctx.fillStyle = cssColor("--text", "#e5e7eb");
-  ctx.beginPath();
-  ctx.roundRect(thumbX, thumbY, thumbWidth, thumbHeight, 2);
-  ctx.fill();
-  ctx.restore();
-}
-
-interface FilmstripSprite {
-  bitmap: ImageBitmap;
-  stepMs: number;
-  cellW: number;
-  cellH: number;
-  count: number;
-}
-
-interface CachedSourceFrame {
-  timeMs: number;
-  canvas: HTMLCanvasElement;
-}
-
-function indexCachedSourceFrames(
-  cache?: Map<string, HTMLCanvasElement>,
-): Map<string, CachedSourceFrame[]> {
-  const result = new Map<string, CachedSourceFrame[]>();
-  if (!cache) return result;
-  for (const [key, canvas] of cache) {
-    const marker = key.lastIndexOf(":source:");
-    if (marker < 0) continue;
-    const timeMs = Number(key.slice(marker + ":source:".length));
-    if (!Number.isFinite(timeMs)) continue;
-    const prefix = key.slice(0, marker);
-    const frames = result.get(prefix) ?? [];
-    frames.push({ timeMs, canvas });
-    result.set(prefix, frames);
-  }
-  for (const frames of result.values()) frames.sort((a, b) => a.timeMs - b.timeMs);
-  return result;
-}
-
-function nearestSourceFrame(
-  frames: readonly CachedSourceFrame[],
-  targetMs: number,
-): HTMLCanvasElement | undefined {
-  if (!frames.length) return undefined;
-  let lo = 0;
-  let hi = frames.length;
-  while (lo < hi) {
-    const mid = (lo + hi) >>> 1;
-    if (frames[mid]!.timeMs < targetMs) lo = mid + 1;
-    else hi = mid;
-  }
-  const before = frames[Math.max(0, lo - 1)];
-  const after = frames[Math.min(frames.length - 1, lo)];
-  if (!before) return after?.canvas;
-  if (!after) return before.canvas;
-  return targetMs - before.timeMs <= after.timeMs - targetMs ? before.canvas : after.canvas;
-}
-
-interface FilmstripOverlayCell {
-  key: string;
-  x: number;
-  width: number;
-  height: number;
-  source: CanvasImageSource;
-  sourceX: number;
-  sourceY: number;
-  sourceWidth: number;
-  sourceHeight: number;
-}
-
-interface FilmstripOverlayGroup {
-  clipId: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  filter?: string;
-  cells: FilmstripOverlayCell[];
-}
-
-/**
- * Build only the filmstrip cells visible in the canvas viewport. Keep the decoded frame
- * at its source size and let Chromium's replaced-element `object-fit: cover` compositor
- * scale it, matching OpenFilm's BlockThumbs `<img>` path without asking the decoder again.
- */
-function buildFilmstripOverlayGroups(
-  clipRects: readonly ClipRenderRect[],
-  view: TimelineViewState,
-  viewport: { top: number; bottom: number; width: number },
-  cache: Map<string, HTMLCanvasElement>,
-  sprites: ReadonlyMap<string, FilmstripSprite>,
-  hiddenTrackIds: ReadonlySet<string>,
-): FilmstripOverlayGroup[] {
-  if (view.pixelsPerSecond <= 0) return [];
-  const framesByPrefix = indexCachedSourceFrames(cache);
-  const groups: FilmstripOverlayGroup[] = [];
-  const infoHeight = 15; // OpenFilm Timeline.tsx INFO_H
-  for (const sourceRect of clipRects) {
-    const clip = sourceRect.clip;
-    if (clip.asset_kind !== "video" && clip.asset_kind !== "image") continue;
-    if (sourceRect.width <= 10 || sourceRect.x + sourceRect.width < view.headerWidth - THUMB_CELL_PX || sourceRect.x > viewport.width + THUMB_CELL_PX) continue;
-    const clipHeight = Math.max(4, sourceRect.height - CLIP_ROW_INSET * 2);
-    const clipY = sourceRect.y + CLIP_ROW_INSET;
-    if (clipY + clipHeight <= viewport.top || clipY >= viewport.bottom) continue;
-
-    // OpenFilm rounds the clip's right edge and leaves a 1px trailing gap. The
-    // decoded filmstrip overlay must stop at that same painted edge; using the
-    // logical hit-test width here leaks a column into the next timeline gap.
-    const contentLeft = sourceRect.x + view.scrollX;
-    const x = Math.round(contentLeft) - view.scrollX;
-    const right = Math.round(contentLeft + sourceRect.width) - view.scrollX;
-    const width = Math.max(1, right - x - 1);
-    const height = clipHeight;
-    const soundBandHeight = clip.asset_kind === "video"
-      ? Math.max(15, Math.round((height - infoHeight) * 0.3))
-      : 0;
-    const bodyHeight = Math.max(0, height - infoHeight - soundBandHeight);
-    if (bodyHeight <= 0) continue;
-
-    const clipDurationUs = clip.timeline_end_us - clip.timeline_start_us;
-    if (clipDurationUs <= 0) continue;
-    const speed = Math.max(0.001, (clip.speed_milli ?? 1000) / 1000);
-    const sourceStartUs = Math.max(0, clip.source_start_us ?? 0);
-    const sourceEndUs = Math.max(sourceStartUs, clip.source_end_us ?? sourceStartUs + clipDurationUs);
-    const prefix = filmstripCachePrefix(clip);
-    const frames = framesByPrefix.get(prefix) ?? [];
-    const sprite = sprites.get(clip.asset_id);
-    const visibleFromUs = Math.max(clip.timeline_start_us, xToTime(view.headerWidth - THUMB_CELL_PX, view));
-    const visibleToUs = Math.min(clip.timeline_end_us, xToTime(viewport.width + THUMB_CELL_PX, view));
-    const stepUs = THUMB_CELL_PX * 1_000_000 / view.pixelsPerSecond * speed;
-    const sourceAtVisibleFromUs = sourceStartUs + (visibleFromUs - clip.timeline_start_us) * speed;
-    const sourceAtVisibleToUs = sourceStartUs + (visibleToUs - clip.timeline_start_us) * speed;
-    const firstCell = Math.floor(sourceAtVisibleFromUs / stepUs) - 1;
-    const lastCell = Math.ceil(sourceAtVisibleToUs / stepUs) + 1;
-    const cells: FilmstripOverlayCell[] = [];
-    for (let cell = firstCell; cell <= lastCell; cell += 1) {
-      const sourceCellFromUs = cell * stepUs;
-      const sourceCellToUs = sourceCellFromUs + stepUs;
-      const cellFromUs = clip.timeline_start_us + (sourceCellFromUs - sourceStartUs) / speed;
-      const cellToUs = clip.timeline_start_us + (sourceCellToUs - sourceStartUs) / speed;
-      if (cellToUs <= clip.timeline_start_us || cellFromUs >= clip.timeline_end_us) continue;
-      const cellX = timeToX(cellFromUs, view);
-      const cellRight = timeToX(cellToUs, view);
-      if (cellRight <= view.headerWidth || cellX >= viewport.width) continue;
-
-      const wantedSourceUs = Math.max(sourceStartUs, Math.min(sourceEndUs, sourceCellFromUs));
-      const frame = nearestSourceFrame(frames, Math.round(wantedSourceUs / 1000));
-      let source: CanvasImageSource | undefined = frame;
-      let sourceX = 0;
-      let sourceY = 0;
-      let sourceWidth = frame?.width ?? 0;
-      let sourceHeight = frame?.height ?? 0;
-      if (!source && sprite && sprite.count > 0 && sprite.stepMs > 0) {
-        source = sprite.bitmap;
-        sourceWidth = sprite.cellW;
-        sourceHeight = sprite.cellH;
-        sourceY = Math.max(0, Math.min(sprite.count - 1, Math.round(wantedSourceUs / 1000 / sprite.stepMs))) * sprite.cellH;
-      }
-      if (!source || sourceWidth <= 0 || sourceHeight <= 0) continue;
-      cells.push({
-        key: `${clip.clip_id}:${cell}:${Math.round(wantedSourceUs / 1000)}`,
-        x: cellX - x,
-        width: Math.max(1, cellRight - cellX),
-        height: bodyHeight,
-        source,
-        sourceX,
-        sourceY,
-        sourceWidth,
-        sourceHeight,
-      });
-    }
-    if (cells.length) groups.push({
-      clipId: clip.clip_id,
-      x,
-      y: clipY + infoHeight,
-      width,
-      height: bodyHeight,
-      filter: hiddenTrackIds.has(clip.track_id) ? "grayscale(1)" : undefined,
-      cells,
-    });
-  }
-  return groups;
-}
-
-const TimelineFilmstripCanvas = memo(function TimelineFilmstripCanvas({ cell }: { cell: FilmstripOverlayCell }) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  useLayoutEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || canvas.width !== cell.sourceWidth || canvas.height !== cell.sourceHeight) return;
-    const context = canvas.getContext("2d");
-    if (!context) return;
-    context.clearRect(0, 0, canvas.width, canvas.height);
-    context.drawImage(cell.source, cell.sourceX, cell.sourceY, cell.sourceWidth, cell.sourceHeight,
-      0, 0, canvas.width, canvas.height);
-  }, [cell]);
-  return (
-    <canvas
-      ref={canvasRef}
-      data-timeline-filmstrip-cell={cell.key}
-      width={cell.sourceWidth}
-      height={cell.sourceHeight}
-      aria-hidden="true"
-      style={{
-        position: "absolute",
-        left: cell.x,
-        top: 0,
-        width: cell.width,
-        height: cell.height,
-        objectFit: "cover",
-        objectPosition: "center",
-        opacity: 0.9,
-        pointerEvents: "none",
-      }}
-    />
-  );
-});
-
-function drawTimeline(
-  ctx: CanvasRenderingContext2D,
-  width: number,
-  height: number,
-  view: TimelineViewState,
-  trackRows: TrackRowLayout[],
-  clipRects: ClipRenderRect[],
-  captionRects: CaptionRenderRect[],
-  captions: TimelineCaption[],
-  selection: TimelineSelection,
-  speedModeActive: boolean,
-  interaction: TimelineInteraction | null,
-  hover: TimelineHover,
-  playheadUs: number,
-  totalUs: number,
-  lockedElements: string[],
-  clipNames: Map<string, string>,
-  frameRate: number,
-  pendingKeep: {
-    placements: Array<{ clipId: TimelineClipId; trackId: string; startUs: number }>;
-    copies: Array<{ clipId: TimelineClipId; sourceClipId: TimelineClipId; trackId: string; startUs: number }>;
-  } | null,
-  thumbnailCache?: Map<string, HTMLCanvasElement>,
-  sprites?: ReadonlyMap<string, FilmstripSprite>,
-  waveformCache?: WaveformCache | null,
-  waveformRatio?: number,
-  /** 面板可视高度（画布可能高于面板——纵向滚动时滚动条仍钉在可视区底部）。 */
-  viewportHeight?: number,
-  /** B17：画布顶的内容 y（viewport 化画布在内容空间中覆盖
-   *  [contentTopY, contentTopY + height)——内容坐标绘制照常，ctx 统一
-   *  平移 -contentTopY；底部滚动条带除外（画布底部固定）。 */
-  contentTopY?: number,
-  /** B17：当前纵向滚动位置（滚动条带定位用）。 */
-  contentScrollTop?: number,
-) {
-  const dpr = window.devicePixelRatio || 1;
-  const cachedSourceFrames = indexCachedSourceFrames(thumbnailCache);
-  const topY = contentTopY ?? 0;
-  const scrollTopRaw = contentScrollTop ?? 0;
-  // 内容坐标统一平移：内容 y → 画布 y = 内容 y - topY（矩阵一步到位，
-  // 不用 ctx.translate——测试桩只实现常用 API 面）。
-  ctx.setTransform(dpr, 0, 0, dpr, 0, -topY * dpr);
-  ctx.clearRect(0, topY, width, height);
-
-  // Background（没有轨道的地方；内容空间全画布）
-  // 2026-11-10：改读主题变量，否则浅色主题下空白区仍是一整块深色。
-  ctx.fillStyle = cssColor("--tl-canvas-bg", "#161618");
-  ctx.fillRect(0, topY, width, height);
-
-  const selectedTrackId = selection?.kind === "clip"
-    ? clipRects.find(rect => rect.clip.clip_id === selection.id)?.clip.track_id
-    : undefined;
-  const laneTone = (row: (typeof trackRows)[number]): string => {
-    // 被选中片段所在的轨道深一档：选中这件事既落在片段上，也落在它所在的泳道上
-    // （OpenFilm laneTone 的 picked 分支，Timeline.tsx:286）。
-    if (row.track.id === selectedTrackId) return cssColor("--tl-lane-on", "#232323");
-    return cssColor("--tl-row", "#1d1d1d");
-  };
-  // 带子铺满画布宽度（不是到素材终点）：泳道的长度感来自标尺与死区，不来自色带。
-  for (const row of trackRows) {
-    if (row.y + row.height <= topY || row.y >= topY + height) continue;
-    ctx.fillStyle = laneTone(row);
-    ctx.fillRect(view.headerWidth, row.y, Math.max(0, width - view.headerWidth), row.height);
-  }
-
-  // Timeline content scrolls behind the fixed cover column.
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(view.headerWidth, topY, Math.max(0, width - view.headerWidth), height);
-  ctx.clip();
-
-  // B17：可见区裁剪窗口（文档坐标）——画布只覆盖视口+overscan，clip/
-  // caption 循环先过滤，draw 访问量随可见元素而非文档总量增长。命中/
-  // 框选仍走全量 clipRects（不因不画丢文档元素——drawClipRects 变量名
-  // 只指绘制输入，交互几何一律用未裁剪的 clipRects）。
-  const viewport = height > 0
-    ? { left: 0, right: width, top: topY, bottom: topY + height }
-    : null;
-  const drawClipRects = viewport
-    ? filterVisibleRects(clipRects, viewport, 0)
-    : [];
-  const drawCaptionRects = viewport
-    ? filterVisibleRects(captionRects, viewport, 0)
-    : [];
-
-  const selectedIds =
-    selection?.kind === "clip"
-      ? [selection.id]
-      : selection?.kind === "clips"
-        ? selection.ids
-        : [];
-
-  const hiddenTrackIds = new Set(
-    trackRows.filter((row) => row.track.hidden).map((row) => row.track.id),
-  );
-
-  // Clips（拖动中的片段最后绘制在顶层、按鼠标自由跟随——剪映式）
-  const movingId = interaction?.kind === "move" && !interaction.copyOnStart ? interaction.clipId : null;
-  const movingClip = movingId ? clipRects.find(item => item.clip.clip_id === movingId)?.clip : undefined;
-  // OpenFilm moves affected clips in the live preview. Keep the same semantic
-  // position map here so their old positions are replaced by normal clip draws
-  // instead of leaving the source in place beneath a dashed duplicate.
-  const movePreviewPositions = interaction?.kind === "move" && !interaction.copyOnStart && !interaction.dragPlan?.reason
-    ? interaction.dragPlan?.placements ?? []
-    : [];
-  const movePreviewPositionById = new Map(movePreviewPositions.map(position => [position.clipId, position]));
-  const movePreviewFollowerIds = new Set(movePreviewPositions
-    .filter(position => position.clipId !== movingId && clipRects.some(rect => {
-      const clip = rect.clip;
-      return clip.clip_id === position.clipId &&
-        (clip.track_id !== position.trackId || clip.timeline_start_us !== position.startUs);
-    }))
-    .map(position => position.clipId));
-  const drawClipRect = (sourceRect: ClipRenderRect) => {
-    // 轨道行内上下留白：相邻轨道片段之间形成剪映式缝隙。
-    const baseRect: ClipRenderRect = {
-      ...sourceRect,
-      y: sourceRect.y + CLIP_ROW_INSET,
-      height: Math.max(4, sourceRect.height - CLIP_ROW_INSET * 2),
-    };
-    let rect = baseRect;
-    const speedTarget = interaction?.kind === "speed"
-      ? interaction.targets.find(target => target.clipId === sourceRect.clip.clip_id && interaction.linkedClipIds.includes(target.clipId))
-      : undefined;
-    if (speedTarget) {
-      const speedRow = trackRowOf(trackRows, speedTarget.trackId);
-      const previewClip = {
-        ...sourceRect.clip,
-        timeline_start_us: speedTarget.startUs,
-        timeline_end_us: speedTarget.endUs,
-        speed_milli: speedTarget.speedMilli as TimelineClip["speed_milli"],
-      };
-      rect = {
-        ...baseRect,
-        clip: previewClip,
-        x: timeToX(speedTarget.startUs, view),
-        width: Math.max(1, ((speedTarget.endUs - speedTarget.startUs) / 1_000_000) * view.pixelsPerSecond),
-        y: (speedRow?.y ?? baseRect.y - CLIP_ROW_INSET) + CLIP_ROW_INSET,
-      };
-    }
-    const isMovingClip =
-      movingId !== null && movingId === sourceRect.clip.clip_id && interaction?.kind === "move";
-    // 拖拽提交态（防回弹）：补丁在途时片段（与被交换片段）保持渲染在目标位置。
-    let keepOverride: { trackId: string; startUs: number } | null = null;
-    if (pendingKeep && interaction === null) {
-      const kept = pendingKeep.placements.find(item => item.clipId === sourceRect.clip.clip_id);
-      if (kept) keepOverride = { trackId: kept.trackId, startUs: kept.startUs };
-    }
-    if (keepOverride) {
-      const keepRow = trackRowOf(trackRows, keepOverride.trackId);
-      rect = {
-        ...baseRect,
-        x: timeToX(keepOverride.startUs, view),
-        y: (keepRow ? keepRow.y : baseRect.y - CLIP_ROW_INSET) + CLIP_ROW_INSET,
-      };
-    }
-    if (isMovingClip && interaction?.kind === "move") {
-      // OpenFilm floats the clip at raw pointer time. The final edit plan is
-      // shown on affected neighbours and committed on pointerup.
-      const floatY = baseRect.y + (interaction.currentY - interaction.startY);
-      const minY = view.rulerHeight + CLIP_ROW_INSET;
-      const maxY = Math.max(minY, height - baseRect.height);
-      const durationUs = sourceRect.clip.timeline_end_us - sourceRect.clip.timeline_start_us;
-      const previewStartUs = Math.round(interaction.previewStartUs);
-      rect = {
-        ...baseRect,
-        // Filmstrip cells and waveform buckets are positioned from the clip's
-        // timeline interval. Move that interval with the floating body so its
-        // media does not remain painted at the old lane/time.
-        clip: {
-          ...baseRect.clip,
-          timeline_start_us: previewStartUs,
-          timeline_end_us: previewStartUs + durationUs,
-        },
-        x: timeToX(previewStartUs, view),
-        y: Math.min(maxY, Math.max(minY, floatY)),
-      };
-    }
-    const isLinkedFollower = interaction?.kind === "move" && !interaction.copyOnStart && !interaction.ignoreLink &&
-      movingClip?.link_group_id && sourceRect.clip.clip_id !== movingId &&
-      sourceRect.clip.link_group_id === movingClip.link_group_id;
-    if (isLinkedFollower && interaction?.kind === "move" && movingClip) {
-      const target = interaction.previewStartUs;
-      rect = { ...rect, x: timeToX(sourceRect.clip.timeline_start_us + target - movingClip.timeline_start_us, view) };
-    }
-    // Paint rectangles follow OpenFilm's integer edges with a 1px trailing inset.
-    // Keep clipRects untouched: pointer hit zones, snapping, and edit plans must
-    // continue to use the full logical duration.
-    rect = snapClipPaintRect(rect, view.scrollX);
-    const isSelected = selectedIds.includes(rect.clip.clip_id);
-    const isLocked = lockedElements.includes(rect.clip.clip_id);
-    const isHiddenTrack = hiddenTrackIds.has(rect.clip.track_id);
-    // OpenFilm applies grayscale to the whole hidden row. Keep that filter on
-    // the clip's Canvas decorations as well as its DOM filmstrip and label.
-    ctx.save();
-    ctx.filter = isHiddenTrack ? "grayscale(1)" : "none";
-    ctx.globalAlpha = 1;
-
-    const clipKind = rect.clip.asset_kind;
-    const isAudioClip = clipKind === "audio";
-    const isVisualClip = clipKind === "video" || clipKind === "image";
-    const kindKey = String((rect.clip as unknown as { asset_kind?: string }).asset_kind ?? (isAudioClip ? "audio" : "video"));
-    const vars = KIND_COLOR_VARS[kindKey] ?? (isAudioClip ? KIND_COLOR_VARS.audio : KIND_COLOR_VARS.video);
-    const palette = {
-      body: cssColor(vars.body, isAudioClip ? "#318383" : "#54789d"),
-      header: cssColor(vars.header, isAudioClip ? "#1c5757" : "#354f6a"),
-      band: cssColor(vars.band, isAudioClip ? "#1c5757" : "#354f6a"),
-      wave: cssColor(vars.wave, isAudioClip ? "#318383" : "#54789d"),
-    };
-    const headerH = Math.min(CLIP_HEADER_H, rect.height);
-    // 音频区域（剪映式）：视频 = 底部原声带（高度 = 占比 × 名称条以下区域），
-    // 纯音频 = 名称条以下全部（占比只作用于波形振幅）。
-    const band = clipAudioBand(rect.clip, rect, waveformRatio);
-    const bodyTop = rect.y + headerH;
-    const bodyBottom = band?.top ?? rect.y + rect.height;
-    const bodyH = Math.max(4, bodyBottom - bodyTop);
-
-    ctx.save();
-    // 圆角裁剪区域：名称条、缩略图、波形全部限制在片段圆角矩形内。
-    ctx.beginPath();
-    ctx.roundRect(rect.x, rect.y, rect.width, rect.height, CLIP_RADIUS);
-    ctx.clip();
-
-    // 1) 片段体底色（视频/图片：近黑；音频：剪映蓝）。
-    ctx.fillStyle = palette.body;
-    ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
-
-    // 2) OpenFilm filmstrip: cells stay 80px wide on a source-time grid; each
-    //    cell picks the nearest loaded shot inside this clip's source window.
-    if (thumbnailCache && isVisualClip && rect.width > 10) {
-      const clipDurUs = rect.clip.timeline_end_us - rect.clip.timeline_start_us;
-      if (clipDurUs > 0) {
-        const clipRight = rect.x + rect.width;
-        const cachePrefix = filmstripCachePrefix(rect.clip);
-        const clipFrames = cachedSourceFrames.get(cachePrefix) ?? [];
-        const spriteEntry = sprites?.get(rect.clip.asset_id);
-        const sprite = spriteEntry && spriteEntry.count > 0 && spriteEntry.stepMs > 0 ? spriteEntry : undefined;
-        // 帧只画在名称条以下的体内；cover 的垂直溢出由该矩形裁掉。
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(rect.x, bodyTop, rect.width, bodyH);
-        ctx.clip();
-        const visibleFromUs = Math.max(rect.clip.timeline_start_us, xToTime(view.headerWidth - THUMB_CELL_PX, view));
-        const visibleToUs = Math.min(rect.clip.timeline_end_us, xToTime(width + THUMB_CELL_PX, view));
-        const speed = Math.max(0.001, (rect.clip.speed_milli ?? 1000) / 1000);
-        const sourceStartUs = Math.max(0, rect.clip.source_start_us ?? 0);
-        const sourceEndUs = Math.max(sourceStartUs, rect.clip.source_end_us ?? sourceStartUs + clipDurUs);
-
-        const drawFrame = (cellFromUs: number, cellToUs: number, sourceTimeUs: number, frame?: HTMLCanvasElement) => {
-          const cellX = timeToX(cellFromUs, view);
-          if (cellX >= clipRight) return;
-          const cellW = Math.max(1, timeToX(cellToUs, view) - cellX);
-          if (cellX + cellW <= view.headerWidth || cellX >= width) return;
-          const source = frame && frame.width > 0 && frame.height > 0 ? frame : sprite?.bitmap;
-          const sourceWidth = frame?.width && frame.width > 0 ? frame.width : sprite?.cellW ?? 0;
-          const sourceHeight = frame?.height && frame.height > 0 ? frame.height : sprite?.cellH ?? 0;
-          if (!source || sourceWidth <= 0 || sourceHeight <= 0) return;
-          const sourceY = sprite && source === sprite.bitmap
-            ? Math.max(0, Math.min(sprite.count - 1, Math.round(sourceTimeUs / 1000 / sprite.stepMs))) * sourceHeight
-            : 0;
-          const scale = Math.max(cellW / sourceWidth, bodyH / sourceHeight);
-          const cropWidth = cellW / scale;
-          const cropHeight = bodyH / scale;
-          try {
-            // OpenFilm's thumbCellStyle applies opacity: 0.9 to every cell.
-            ctx.globalAlpha = (isHiddenTrack ? 0.35 : 1) * 0.9;
-            ctx.drawImage(source, (sourceWidth - cropWidth) / 2, sourceY + (sourceHeight - cropHeight) / 2,
-              cropWidth, cropHeight, cellX, bodyTop, cellW, bodyH);
-          } catch { /* The bitmap may become unavailable while changing projects. */ }
-          finally { ctx.globalAlpha = isHiddenTrack ? 0.35 : 1; }
-        };
-
-        if (rect.clip.reverse_playback) {
-          const frameCount = frameTierFor(clipDurUs, view.pixelsPerSecond);
-          for (let fi = 0; fi < frameCount; fi += 1) {
-            const cellFromUs = rect.clip.timeline_start_us + (fi * clipDurUs) / frameCount;
-            const cellToUs = rect.clip.timeline_start_us + ((fi + 1) * clipDurUs) / frameCount;
-            const sourceTimeUs = Math.round(cellSourceTimeSec(rect.clip, fi, frameCount) * 1_000_000);
-            const exactFrame = thumbnailCache.get(`${cachePrefix}:${frameCount}:${fi}`);
-            const fallback = exactFrame ?? cachedFilmstripFallback(thumbnailCache, cachePrefix, frameCount, fi);
-            drawFrame(cellFromUs, cellToUs, sourceTimeUs, fallback);
-          }
-        } else if (visibleToUs >= visibleFromUs && view.pixelsPerSecond > 0) {
-          const stepUs = (THUMB_CELL_PX * 1_000_000 / view.pixelsPerSecond) * speed;
-          const sourceAtVisibleFromUs = sourceStartUs + (visibleFromUs - rect.clip.timeline_start_us) * speed;
-          const sourceAtVisibleToUs = sourceStartUs + (visibleToUs - rect.clip.timeline_start_us) * speed;
-          const firstCell = Math.floor(sourceAtVisibleFromUs / stepUs) - 1;
-          const lastCell = Math.ceil(sourceAtVisibleToUs / stepUs) + 1;
-          for (let cell = firstCell; cell <= lastCell; cell += 1) {
-            const sourceCellFromUs = cell * stepUs;
-            const sourceCellToUs = sourceCellFromUs + stepUs;
-            const cellFromUs = rect.clip.timeline_start_us + (sourceCellFromUs - sourceStartUs) / speed;
-            const cellToUs = rect.clip.timeline_start_us + (sourceCellToUs - sourceStartUs) / speed;
-            if (cellToUs <= rect.clip.timeline_start_us || cellFromUs >= rect.clip.timeline_end_us) continue;
-            const wantedSourceUs = Math.max(sourceStartUs, Math.min(sourceEndUs, sourceCellFromUs));
-            const frame = nearestSourceFrame(clipFrames, Math.round(wantedSourceUs / 1000));
-            drawFrame(cellFromUs, cellToUs, wantedSourceUs, frame);
-          }
-        }
-        ctx.restore();
-      }
-    }
-
-    // 3) Audio waveform columns follow OpenFilm's source-time envelope and
-    //    only sample the visible slice, so off-screen clips add no work.
-    if (waveformCache && band && rect.width > 20) {
-      const visibleLeft = Math.max(rect.x, view.headerWidth);
-      const visibleRight = Math.min(rect.x + rect.width, width);
-      const visibleWidth = Math.max(0, visibleRight - visibleLeft);
-      const pxWidth = Math.min(WAVEFORM_PEAK_COUNT_MAX, Math.max(1, Math.round(visibleWidth)));
-      const timelineSpanUs = rect.clip.timeline_end_us - rect.clip.timeline_start_us;
-      const sourceStartUs = rect.clip.source_start_us ?? 0;
-      const sourceEndUs = rect.clip.source_end_us ?? sourceStartUs;
-      const sourceSpanUs = Math.max(0, sourceEndUs - sourceStartUs);
-      const fromFraction = rect.width > 0 ? Math.max(0, Math.min(1, (visibleLeft - rect.x) / rect.width)) : 0;
-      const toFraction = rect.width > 0 ? Math.max(fromFraction, Math.min(1, (visibleRight - rect.x) / rect.width)) : 1;
-      const sourceWindowStartUs = rect.clip.reverse_playback
-        ? sourceStartUs + (1 - toFraction) * sourceSpanUs
-        : sourceStartUs + fromFraction * sourceSpanUs;
-      const sourceWindowEndUs = rect.clip.reverse_playback
-        ? sourceStartUs + (1 - fromFraction) * sourceSpanUs
-        : sourceStartUs + toFraction * sourceSpanUs;
-      const peaks = visibleWidth > 0 && timelineSpanUs > 0 ? waveformCache.peaksFor({
-        clipId: rect.clip.clip_id,
-        assetId: rect.clip.asset_id,
-        sourceStartUs: Math.round(sourceWindowStartUs),
-        sourceEndUs: Math.round(sourceWindowEndUs),
-        speedMilli: rect.clip.speed_milli ?? 1000,
-        reverse: rect.clip.reverse_playback ?? false,
-      }, pxWidth) : null;
-      if (peaks && peaks.length > 0) {
-        if (!isAudioClip) {
-          // T7 修正（Timeline.tsx:3350）：视频原声带底 = rgba(0,0,0,0.22)（非令牌色）
-          ctx.fillStyle = cssColor("--tl-band-bg", "rgba(0,0,0,0.22)");
-          ctx.fillRect(rect.x, band.top, rect.width, band.height);
-        }
-        const baseline = band.top + band.height;
-        // T7 参照 Timeline.tsx:241,3145 + globals.css:96-109：视频原声带固定 AUDIO_BAND_H=15px；
-        // 纯音频片段仍占满轨高。
-        const maxH = Math.max(6, band.height - 2);
-        const columnWidth = visibleWidth / peaks.length;
-        // T7 修正（对齐 BlockWaveform.tsx 注释 + waveBarPx）：无造形曲线——柱高 = peak × 音量（线性），
-        // 音量 = 10^(gain_db/20)（0dB=1）；削波 cap 在带顶并把削波部分染 --tl-wave-clip。静音片段 = 1px 线。
-        const volumeLin = Math.max(0, Math.pow(10, (rect.clip.audio.gain_db ?? 0) / 20));
-        const clipped = new Path2D();
-        let hasClippedPeaks = false;
-        ctx.beginPath();
-        for (let px = 0; px < peaks.length; px += 1) {
-          const peak = peaks[px] ?? 0;
-          const level = Math.max(0, peak) * volumeLin;
-          const barH = Math.max(1, Math.min(1, level) * maxH);
-          const clipH = level > 1 ? Math.min(barH, Math.max(2, Math.min(1 / 3, 1 - 1 / level) * maxH)) : 0;
-          const columnX = visibleLeft + px * columnWidth;
-          const columnY = baseline - barH;
-          ctx.rect(columnX, columnY + clipH, columnWidth, barH - clipH);
-          if (clipH > 0) {
-            clipped.rect(columnX, columnY, columnWidth, clipH);
-            hasClippedPeaks = true;
-          }
-        }
-        // 波形色：纯音轨主波形 --tl-wave；视频原声带 --tl-wave-band（Timeline.tsx:3353）。
-        ctx.fillStyle = cssColor(isAudioClip ? "--tl-wave" : "--tl-wave-band", "rgba(255,255,255,.4)");
-        ctx.fill();
-        if (hasClippedPeaks) {
-          ctx.fillStyle = cssColor("--tl-wave-clip", "#f2665f");
-          ctx.fill(clipped);
-        }
-      }
-    }
-
-    // 4) 名称条底色。Text is a visible-clip DOM overlay below so Chromium uses
-    // the same font shaping/raster path as OpenFilm's DOM labels.
-    if (headerH > 0) {
-      ctx.fillStyle = palette.header;
-      ctx.fillRect(rect.x, rect.y, rect.width, headerH);
-    }
-
-    // Locked indicator
-    if (isLocked) {
-      ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
-      ctx.fillRect(rect.x, rect.y + 2, rect.width, rect.height - 4);
-      ctx.fillStyle = "#cccccc";
-      ctx.font = '9px "Inter Variable", sans-serif';
-      ctx.textBaseline = "middle";
-      ctx.fillText("🔒", rect.x + rect.width - 14, rect.y + rect.height / 2);
-    } else if (hover.clipId === rect.clip.clip_id && !isSelected) {
-      // 悬停高亮（非边框）。
-      ctx.fillStyle = cssColor("--tl-row-hover", "rgba(255, 255, 255, 0.07)");
-      ctx.fillRect(rect.x, rect.y + 2, rect.width, rect.height - 4);
-    }
-    ctx.restore();
-
-    // 5) 选中效果（P230-②b 2026-11-17 修正为参照 SelectFrame 的**纯描边**）：
-    //    旧实现先以 70% alpha 整面填充外扩矩形再压左右实边——等价于给片段罩了
-    //    一圈半透明「背景板」（用户指认的选中背景异常）。参照是 border-box 描边：
-    //    borderColor = `Y X`（上/下 70%、左/右 实色）， borderWidth = `1px 3px`，
-    //    盒子外扩到片段外 3px/1px，内部完全透明。
-    if (isSelected && !isMovingClip) {
-      const sx = 3, sy = 1;
-      const frame = speedModeActive && (rect.clip.asset_kind === "video" || rect.clip.asset_kind === "audio")
-        ? cssColor("--accent", "#00c1cd")
-        : cssColor("--tl-select", "#161619");
-      ctx.save();
-      // 外框 = 片段矩形外扩 (sx, sy)。逐边画，绝不填充内部：
-      //   上/下：1px @70%（color-mix 70% 等效——globalAlpha 只作用这两条）
-      //   左/右：3px 实色
-      ctx.globalAlpha = 0.7;
-      ctx.fillStyle = frame;
-      ctx.fillRect(rect.x - sx, rect.y - sy, rect.width + sx * 2, sy);                    // 上
-      ctx.fillRect(rect.x - sx, rect.y + rect.height, rect.width + sx * 2, sy);           // 下
-      ctx.globalAlpha = 1;
-      ctx.fillRect(rect.x - sx, rect.y - sy, sx, rect.height + sy * 2);                   // 左
-      ctx.fillRect(rect.x + rect.width, rect.y - sy, sx, rect.height + sy * 2);           // 右
-      ctx.restore();
-    }
-
-    // 6) Volume line is revealed only for the hovered clip, as in OpenFilm.
-    const volBand = clipAudioBand(rect.clip, rect, waveformRatio);
-    if (volBand && rect.width > 30) {
-      const draggingVolume =
-        interaction?.kind === "volume" && interaction.clipId === rect.clip.clip_id;
-      const hoveredClip = !isMovingClip && !isLinkedFollower && hover.clipId === rect.clip.clip_id;
-      if ((draggingVolume || hoveredClip) && !isLocked) {
-        const gainDb = draggingVolume
-          ? (interaction as { targetGainDb: number }).targetGainDb
-          : rect.clip.audio.gain_db;
-        const shownY = volumeToY(gainDb, volBand);
-        ctx.save();
-        ctx.strokeStyle = draggingVolume ? "rgba(255, 255, 255, 1)" : "rgba(255, 255, 255, 0.6)";
-        // 0.5 对齐：DPR 缩放下让 1px 线落在单设备像素上（避免被取整成 2px）。
-        const lineY = Math.round(shownY) + 0.5;
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(rect.x, lineY);
-        ctx.lineTo(rect.x + rect.width, lineY);
-        ctx.stroke();
-        if (draggingVolume) {
-          const label = `${gainDb >= 0 ? "+" : ""}${gainDb.toFixed(1)}dB`;
-          ctx.font = '9px "Inter Variable", sans-serif';
-          const chipWidth = ctx.measureText(label).width + 10;
-          ctx.fillStyle = "rgba(8, 14, 16, 0.8)";
-          ctx.beginPath();
-          ctx.roundRect(rect.x + 19, lineY - 8, chipWidth, 16, 3);
-          ctx.fill();
-          ctx.fillStyle = "#eef4f6";
-          ctx.textBaseline = "middle";
-          ctx.textAlign = "left";
-          ctx.fillText(label, rect.x + 24, lineY + 0.5);
-        }
-        ctx.restore();
-      }
-    }
-
-    // Speed / reverse badge (M2 B1)
-    const clipSpeed = rect.clip.speed_milli ?? 1000;
-    if (clipSpeed !== 1000 || rect.clip.reverse_playback) {
-      const badge = [
-        clipSpeed !== 1000 ? `${(clipSpeed / 1000).toFixed(clipSpeed % 1000 === 0 ? 1 : 2)}x` : "",
-        rect.clip.reverse_playback ? "◀◀" : "",
-      ]
-        .filter(Boolean)
-        .join(" ");
-      ctx.font = '9px "Inter Variable", sans-serif';
-      const badgeWidth = ctx.measureText(badge).width + 8;
-      const badgeX = rect.x + rect.width - badgeWidth - 4;
-      const badgeY = rect.y + headerH + 2;
-      if (badgeX > rect.x + 4) {
-        ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
-        ctx.fillRect(badgeX, badgeY, badgeWidth, 14);
-        ctx.fillStyle = "#ffd27a";
-        ctx.textBaseline = "middle";
-        ctx.fillText(badge, badgeX + 4, badgeY + 7);
-      }
-    }
-    ctx.restore();
-  };
-  for (const sourceRect of drawClipRects) {
-    if (interaction?.kind === "move" && !interaction.copyOnStart && interaction.clipIds.includes(sourceRect.clip.clip_id)) continue;
-    if (movePreviewFollowerIds.has(sourceRect.clip.clip_id)) continue;
-    drawClipRect(sourceRect);
-  }
-
-  if (interaction?.kind === "speed") {
-    for (const target of interaction.targets) {
-      if (interaction.linkedClipIds.includes(target.clipId)) continue;
-      const source = clipRects.find(rect => rect.clip.clip_id === target.clipId);
-      const row = trackRowOf(trackRows, target.trackId);
-      if (!source || !row) continue;
-      const x = timeToX(target.startUs, view);
-      const y = row.y + CLIP_ROW_INSET;
-      const w = Math.max(2, ((target.endUs - target.startUs) / 1_000_000) * view.pixelsPerSecond);
-      const h = Math.max(4, row.height - CLIP_ROW_INSET * 2);
-      ctx.save();
-      ctx.globalAlpha = 0.42;
-      ctx.fillStyle = cssColor(KIND_COLOR_VARS[String(source.clip.asset_kind ?? "video")]?.band ?? "--clip-video", "#354f6a");
-      ctx.strokeStyle = "#a8e8d5";
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([5, 3]);
-      ctx.beginPath();
-      ctx.roundRect(x, y, w, h, CLIP_RADIUS);
-      ctx.fill();
-      ctx.stroke();
-      ctx.restore();
-    }
-    const lead = interaction.targets.find(target => target.clipId === interaction.clipId);
-    if (lead) {
-      const headRipples = interaction.edge === "left" && lead.startUs === interaction.originalTimelineStartUs;
-      const x = interaction.edge === "left" && !headRipples ? timeToX(lead.startUs, view) : timeToX(lead.endUs, view);
-      const row = trackRowOf(trackRows, lead.trackId);
-      drawDragTooltip(ctx, x, row?.y ?? view.rulerHeight, [
-        `${(interaction.targetSpeedMilli / 1_000).toFixed(2)}x`,
-        `${((lead.endUs - lead.startUs) / 1_000_000).toFixed(2)}s`,
-      ], width);
-    }
-  }
-
-  // A copied clip is not in the Core document until its Patch resolves. Keep
-  // its landed preview visible during that gap, using the source clip's media.
-  if (pendingKeep && interaction === null) for (const copy of pendingKeep.copies) {
-    if (clipRects.some(rect => rect.clip.clip_id === copy.clipId)) continue;
-    const sourceRect = clipRects.find(rect => rect.clip.clip_id === copy.sourceClipId);
-    const targetRow = trackRowOf(trackRows, copy.trackId);
-    if (!sourceRect || !targetRow) continue;
-    const durationUs = sourceRect.clip.timeline_end_us - sourceRect.clip.timeline_start_us;
-    drawClipRect({
-      ...sourceRect,
-      clip: {
-        ...sourceRect.clip,
-        clip_id: copy.clipId,
-        track_id: copy.trackId,
-        timeline_start_us: copy.startUs,
-        timeline_end_us: copy.startUs + durationUs,
-      },
-      x: timeToX(copy.startUs, view),
-      y: targetRow.y,
-      height: targetRow.height,
-    });
-  }
-
-  // Place/Insert followers render at their live planned geometry, as OpenFilm
-  // does. The same planner output still powers pointerup, so preview and commit
-  // cannot disagree about the follower's track or time.
-  if (interaction?.kind === "move" && !interaction.copyOnStart && interaction.dragPlan?.lead && !interaction.dragPlan.reason) {
-    for (const clipId of movePreviewFollowerIds) {
-      const placement = movePreviewPositionById.get(clipId);
-      const sourceRect = clipRects.find(rect => rect.clip.clip_id === clipId);
-      const targetRow = placement ? trackRowOf(trackRows, placement.trackId) : null;
-      if (!placement || !sourceRect || !targetRow) continue;
-      const durationUs = sourceRect.clip.timeline_end_us - sourceRect.clip.timeline_start_us;
-      drawClipRect({
-        ...sourceRect,
-        clip: {
-          ...sourceRect.clip,
-          track_id: placement.trackId,
-          timeline_start_us: placement.startUs,
-          timeline_end_us: placement.startUs + durationUs,
-        },
-        x: timeToX(placement.startUs, view),
-        y: targetRow.y,
-        height: targetRow.height,
-      });
-    }
-  }
-
-  // Copy and refused-plan previews remain overlays: their originals stay in
-  // place while the attempted target needs a distinct visual cue.
-  if (interaction?.kind === "move" && interaction.dragPlan?.lead) {
-    const copySources = new Map<string, string>();
-    for (const operation of interaction.dragPlan.operations) if (operation.op === "duplicate_timeline_items") {
-      for (const copy of operation.copies) if (copy.item_kind === "clip") copySources.set(copy.copy_id, copy.source_id);
-    }
-    for (const placement of interaction.copyOnStart || interaction.dragPlan.reason ? interaction.dragPlan.placements : []) {
-      // The dragged clip follows the pointer. Only the other positions changed
-      // by the plan are shown as ghosts, matching OpenFilm's useBlockDrag.
-      if (!interaction.copyOnStart && interaction.clipIds.some((clipId) => clipId === placement.clipId)) continue;
-      const sourceId = copySources.get(placement.clipId) ?? placement.clipId;
-      const source = clipRects.find(rect => rect.clip.clip_id === sourceId)?.clip;
-      if (!source) continue;
-      const targetRow = trackRowOf(trackRows, placement.trackId);
-      const hitRow = interaction.dropHit?.trackId ? trackRowOf(trackRows, interaction.dropHit.trackId) : null;
-      const sourceKind = source.asset_kind === "audio" ? "audio" : "video";
-      const anchorRow = hitRow?.track.kind === sourceKind ? hitRow : trackRowOf(trackRows, source.track_id) ?? hitRow;
-      const rowHeight = targetRow?.height ?? anchorRow?.height ?? view.trackHeight;
-      const gy = targetRow?.y ?? (anchorRow
-        ? source.asset_kind === "audio" ? anchorRow.y + anchorRow.height : anchorRow.y - rowHeight
-        : view.rulerHeight);
-      const gx = timeToX(placement.startUs, view);
-      const gw = Math.max(2, (clipDuration(source) / 1_000_000) * view.pixelsPerSecond);
-      ctx.save();
-      ctx.globalAlpha = interaction.dragPlan.reason ? 0.16 : 0.42;
-      ctx.fillStyle = cssColor(KIND_COLOR_VARS[String(source.asset_kind ?? "video")]?.band ?? "--clip-video", "#354f6a");
-      ctx.strokeStyle = interaction.copyOnStart ? "#63d3c5" : "#a8e8d5";
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([5, 3]);
-      ctx.beginPath();
-      ctx.roundRect(gx, gy + CLIP_ROW_INSET, gw, Math.max(4, rowHeight - CLIP_ROW_INSET * 2), CLIP_RADIUS);
-      ctx.fill();
-      ctx.stroke();
-      ctx.restore();
-    }
-  }
-
-  // 拖动中的片段最后绘制：半透明"提起来"、带投影，压过邻居。
-  const movingRect = movingId !== null ? clipRects.find((r) => r.clip.clip_id === movingId) : null;
-  if (movingRect) {
-    if (interaction?.kind === "move") {
-      const projected = snapClipPaintRect({
-        ...movingRect,
-        x: timeToX(Math.round(interaction.previewStartUs), view),
-        y: movingRect.y + interaction.currentY - interaction.startY + CLIP_ROW_INSET,
-        height: Math.max(4, movingRect.height - CLIP_ROW_INSET * 2),
-      }, view.scrollX);
-      // OpenFilm shadows the lifted clip's outer box. Cast one silhouette
-      // shadow, then paint the media normally; applying Canvas shadow to every
-      // thumbnail cell darkens and blurs the filmstrip during the drag.
-      ctx.save();
-      ctx.shadowColor = "rgba(0, 0, 0, 0.32)";
-      ctx.shadowBlur = 18;
-      ctx.shadowOffsetY = 8;
-      ctx.fillStyle = "rgba(0, 0, 0, 0.01)";
-      ctx.beginPath();
-      ctx.roundRect(projected.x, projected.y, projected.width, projected.height, CLIP_RADIUS);
-      ctx.fill();
-      ctx.restore();
-    }
-    drawClipRect(movingRect);
-  }
-
-  // 修剪端点的可视反馈已并入片段绘制（底边两角圆形端点柄）；
-  // 命中区仍由 hitTestTrimHandle 的左右 ±6px 区域提供。
-
-  // Captions (enhanced transcript style)
-  // 播放头驻留高亮（A06 语义调整）：主画布不再跟随播放头逐帧重绘，驻留态
-  // 改由命中测试选中/悬停通道驱动——选中字幕仍保留其较强的激活外观。
-  // B17：只画可见区字幕（选中字幕即使不可见也保留在过滤结果外——canvas
-  // 交互反馈由选中描边表达，不因裁剪丢语义）。
-  for (const rect of drawCaptionRects) {
-    const isSelected = selection?.kind === "caption" && selection.id === rect.caption.caption_id;
-    const isActive = isSelected;
-    const isEdited = rect.caption.edited;
-
-    // Skip if too narrow
-    if (rect.width < 10) continue;
-
-    // Background with rounded corners（剪映式：手工/导入文本 = 橘色条）。
-    const bgY = rect.y + 2;
-    const bgH = rect.height - 4;
-    const manualText = rect.caption.origin === "user";
-    ctx.fillStyle = isSelected
-      ? manualText ? "#e8622a" : "#d9a04a"
-      : isActive
-        ? manualText ? "#d95b24" : "#b8863a"
-        : manualText
-          ? "#c6511e"
-          : "#8a6a3a";
-    ctx.beginPath();
-    ctx.roundRect(rect.x, bgY, rect.width, bgH, 4);
-    ctx.fill();
-
-    // Selection/active border
-    if (isSelected || isActive) {
-      ctx.strokeStyle = isSelected ? "#ffc87a" : "#e0b060";
-      ctx.lineWidth = isSelected ? 2 : 1.5;
-      ctx.stroke();
-    }
-
-    // Text with ellipsis
-    if (rect.width > 20) {
-      ctx.fillStyle = "#ffffff";
-      ctx.font = isEdited ? 'italic 10px "Inter Variable", sans-serif' : '10px "Inter Variable", sans-serif';
-      ctx.textBaseline = "middle";
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(rect.x + 4, bgY, rect.width - 8, bgH);
-      ctx.clip();
-
-      // Truncate with ellipsis
-      let displayText = rect.caption.text;
-      const maxWidth = rect.width - 12;
-      if (ctx.measureText(displayText).width > maxWidth) {
-        while (displayText.length > 0 && ctx.measureText(displayText + "…").width > maxWidth) {
-          displayText = displayText.slice(0, -1);
-        }
-        displayText += "…";
-      }
-      ctx.fillText(displayText, rect.x + 6, bgY + bgH / 2);
-      ctx.restore();
-    }
-
-    // Edited indicator dot
-    if (isEdited && rect.width > 30) {
-      ctx.fillStyle = "#ffcc00";
-      ctx.beginPath();
-      ctx.arc(rect.x + rect.width - 8, bgY + 8, 3, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-
-  // Keyframe lanes (Round 5): expanded panel below the selected clip.
-  const laneColors: Record<string, string> = { position: "#6fd3d3", scale: "#f0d264", rotate: "#f0a264", opacity: "#ffffff" };
-  if (selection?.kind === "clip") {
-    const rect = clipRects.find((r) => r.clip.clip_id === selection.id);
-    const props = rect?.clip.keyframes
-      ? KEYFRAME_ORDER.filter((property) => rect.clip.keyframes?.[property])
-      : [];
-    if (rect && props.length > 0) {
-      const panelTop = rect.y + rect.height + 2;
-      const panelHeight = props.length * KEYFRAME_LANE_HEIGHT + 4;
-      ctx.save();
-      ctx.fillStyle = "rgba(10, 14, 20, 0.92)";
-      ctx.strokeStyle = cssColor("--tl-snap", "#0098a3");
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.roundRect(rect.x, panelTop, rect.width, panelHeight, 4);
-      ctx.fill();
-      ctx.stroke();
-      ctx.font = '9px "Inter Variable", sans-serif';
-      ctx.textBaseline = "middle";
-      ctx.textAlign = "left";
-      props.forEach((property, laneIndex) => {
-        const laneY = panelTop + 4 + laneIndex * KEYFRAME_LANE_HEIGHT + KEYFRAME_LANE_HEIGHT / 2;
-        ctx.fillStyle = "#9fb3bd";
-        ctx.fillText(KEYFRAME_LANE_LABELS[property] ?? property, rect.x + 5, laneY);
-        const track = rect.clip.keyframes?.[property as keyof NonNullable<TimelineClip["keyframes"]>];
-        if (!track) return;
-        for (const frame of track.frames) {
-          const fx = timeToX(rect.clip.timeline_start_us + frame.t_us, view);
-          if (fx < rect.x + 14 || fx > rect.x + rect.width - 4) continue;
-          ctx.fillStyle = laneColors[property] ?? "#ffffff";
-          ctx.beginPath();
-          ctx.moveTo(fx, laneY - 4);
-          ctx.lineTo(fx + 4, laneY);
-          ctx.lineTo(fx, laneY + 4);
-          ctx.lineTo(fx - 4, laneY);
-          ctx.closePath();
-          ctx.fill();
-        }
-      });
-      ctx.restore();
-    }
-  }
-
-  // Drag feedback (move / group-move / trim)。
-  // OpenFilm shows no tooltip for a regular move: the clip follows the pointer.
-  if (interaction?.kind === "move") {
-    // Intentionally empty; the moving clip itself is the feedback.
-  } else if (interaction?.kind === "group-move") {
-    // 组移动 ghost：按平移后的目标位置绘制（V1 已钳制为合法位置）。
-    {
-      ctx.save();
-      ctx.globalAlpha = 0.55;
-      for (const clipId of interaction.clipIds) {
-        const rect = clipRects.find((r) => r.clip.clip_id === clipId);
-        const targetUs = interaction.targetStartUsByClip[clipId];
-        if (!rect || targetUs === undefined) continue;
-        const gw = Math.max(2, (clipDuration(rect.clip) / 1_000_000) * view.pixelsPerSecond);
-        const gx = timeToX(targetUs, view);
-        ctx.fillStyle = cssColor(KIND_COLOR_VARS[String(rect.clip.asset_kind ?? "video")]?.band ?? "--clip-video", "#354f6a");
-        ctx.fillRect(gx, rect.y + 2, gw, rect.height - 4);
-        // 描边走强调令牌（原 #2fc9a5 是旧青绿，色相与新强调色差 30°，且落在自己的填充上只有 1.05:1）。
-        // 必须用 :root 上真实存在的令牌：cssColor() 读的是 documentElement 的计算样式，
-        // 而 --ws-accent-text 只声明在 .editor-shell 上 ⇒ 永远取不到、恒走兜底值
-        // （实测深色因此从 8.62:1 掉到 2.43:1，属回归）。--brand-b 才是挂在 :root 的那一个。
-        ctx.strokeStyle = cssColor("--tl-canvas-accent", "#00c1cd");
-        ctx.lineWidth = 1.5;
-        ctx.strokeRect(gx, rect.y + 2, gw, rect.height - 4);
-      }
-      ctx.restore();
-      // Keep group movement feedback on the clips and snap guide only.
-    }
-  } else if (interaction?.kind === "volume") {
-    const rect = clipRects.find((r) => r.clip.clip_id === interaction.clipId);
-    const band = rect ? clipAudioBand(rect.clip, rect, waveformRatio) : null;
-    if (rect && band) {
-      const shownY = volumeToY(interaction.targetGainDb, band);
-      ctx.save();
-      ctx.strokeStyle = "#ffd76e";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(rect.x + 4, Math.round(shownY) + 0.5);
-      ctx.lineTo(rect.x + rect.width - 4, Math.round(shownY) + 0.5);
-      ctx.stroke();
-      ctx.restore();
-      drawDragTooltip(
-        ctx,
-        rect.x + rect.width / 2,
-        shownY - 4,
-        [
-          `${interaction.targetGainDb >= 0 ? "+" : ""}${interaction.targetGainDb.toFixed(1)}dB`,
-          `${interaction.startGainDb >= 0 ? "+" : ""}${interaction.startGainDb.toFixed(1)} → ${interaction.targetGainDb >= 0 ? "+" : ""}${interaction.targetGainDb.toFixed(1)}`,
-        ],
-        width,
-      );
-    }
-  } else if (interaction?.kind === "trim") {
-    const lead = clipRects.find((rect) => rect.clip.clip_id === interaction.clipId)?.clip;
-    if (lead) {
-      const leadSpeed = Math.max(1, lead.speed_milli ?? 1000);
-      const sourceDelta = interaction.edge === "left"
-        ? interaction.targetStartUs - interaction.originalStartUs
-        : interaction.targetEndUs - interaction.originalEndUs;
-      const edgeDeltaUs = lead.asset_kind === "image"
-        ? interaction.edge === "left"
-          ? interaction.targetTimelineStartUs - interaction.originalTimelineStartUs
-          : interaction.targetTimelineEndUs - interaction.originalTimelineEndUs
-        : Math.round(sourceDelta * 1000 / leadSpeed);
-      for (const clipId of interaction.linkedClipIds) {
-        const rect = clipRects.find((item) => item.clip.clip_id === clipId);
-        if (!rect) continue;
-        const clip = rect.clip;
-        const ghostStartUs = interaction.edge === "left"
-          ? clip.timeline_start_us + edgeDeltaUs
-          : clip.timeline_start_us;
-        const ghostEndUs = interaction.edge === "right"
-          ? clip.timeline_end_us + edgeDeltaUs
-          : clip.timeline_end_us;
-        if (ghostEndUs - ghostStartUs < MIN_CLIP_US) continue;
-        const gx = timeToX(ghostStartUs, view);
-        const trimRow = trackRowOf(trackRows, clip.track_id);
-        const gy = trimRow?.y ?? view.rulerHeight;
-        const gh = trimRow?.height ?? view.trackHeight;
-        const gw = Math.max(2, ((ghostEndUs - ghostStartUs) / 1_000_000) * view.pixelsPerSecond);
-        ctx.save();
-        ctx.globalAlpha = clipId === interaction.clipId ? 0.55 : 0.34;
-        ctx.fillStyle = cssColor(KIND_COLOR_VARS[String(clip.asset_kind ?? "video")]?.band ?? "--clip-video", "#354f6a");
-        ctx.fillRect(gx, gy + 2, gw, gh - 4);
-        ctx.strokeStyle = "#ffd76e";
-        ctx.lineWidth = 1.5;
-        ctx.strokeRect(gx, gy + 2, gw, gh - 4);
-        ctx.restore();
-        if (clipId === interaction.clipId) {
-          drawDragTooltip(
-            ctx,
-            interaction.edge === "left" ? gx : gx + gw,
-            gy,
-            [
-              `${((ghostEndUs - ghostStartUs) / 1_000_000).toFixed(2)}s`,
-              `Δ${edgeDeltaUs >= 0 ? "+" : ""}${(edgeDeltaUs / 1_000_000).toFixed(2)}s`,
-            ],
-            width,
-          );
-        }
-      }
-    }
-  } else if (interaction?.kind === "edge-edit") {
-    const label = interaction.mode === "roll" ? "滚动修剪" : interaction.mode === "slip" ? "滑移素材" : "滑动片段";
-    for (const target of interaction.targets) {
-      const rect = clipRects.find(item => item.clip.clip_id === target.clipId);
-      if (!rect) continue;
-      const gx = timeToX(target.timelineStartUs, view);
-      const gy = rect.y;
-      const gw = Math.max(2, ((target.timelineEndUs - target.timelineStartUs) / 1_000_000) * view.pixelsPerSecond);
-      ctx.save();
-      ctx.globalAlpha = interaction.mode === "slip" ? 0.28 : 0.46;
-      ctx.fillStyle = interaction.mode === "slip" ? "#00aeb7" : cssColor(KIND_COLOR_VARS[String(rect.clip.asset_kind ?? "video")]?.band ?? "--clip-video", "#354f6a");
-      ctx.fillRect(gx, gy + 2, gw, rect.height - 4);
-      ctx.globalAlpha = 0.9;
-      ctx.strokeStyle = "#ffd76e";
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([4, 3]);
-      ctx.strokeRect(gx, gy + 2, gw, rect.height - 4);
-      ctx.restore();
-    }
-    const focusId = interaction.mode === "slide" ? interaction.clipIds[1] : interaction.clipIds[0];
-    const target = interaction.targets.find(item => item.clipId === focusId);
-    const rect = clipRects.find(item => item.clip.clip_id === focusId);
-    if (target && rect) {
-      const x = interaction.mode === "roll"
-        ? timeToX(target.timelineEndUs, view)
-        : timeToX((target.timelineStartUs + target.timelineEndUs) / 2, view);
-      const delta = `${interaction.deltaUs >= 0 ? "+" : "−"}${Math.abs(interaction.deltaUs / 1_000_000).toFixed(2)}s`;
-      drawDragTooltip(ctx, x, rect.y, [label, interaction.mode === "slip" ? `源偏移 ${delta}` : `边界 ${delta}`], width);
-    }
-  } else if (interaction?.kind === "caption-trim") {
-    const caption = captions.find((c: TimelineCaption) => c.caption_id === interaction.captionId);
-    if (caption) {
-      let ghostStartUs = caption.start_us;
-      let ghostEndUs = caption.end_us;
-      if (interaction.edge === "left") {
-        ghostStartUs = interaction.targetStartUs;
-      } else {
-        ghostEndUs = interaction.targetEndUs;
-      }
-      const gx = timeToX(ghostStartUs, view);
-      const captionRow = trackRowOf(trackRows, "C1");
-      const gy = captionRow?.y ?? view.rulerHeight;
-      const gh = captionRow?.height ?? CAPTION_ROW_H;
-      const gw = Math.max(2, ((ghostEndUs - ghostStartUs) / 1_000_000) * view.pixelsPerSecond);
-      ctx.save();
-      ctx.globalAlpha = 0.55;
-      ctx.fillStyle = "#7a6a3a";
-      ctx.fillRect(gx, gy + 2, gw, gh - 4);
-      ctx.strokeStyle = "#ffd76e";
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(gx, gy + 2, gw, gh - 4);
-      ctx.restore();
-      const edgeDelta =
-        interaction.edge === "left"
-          ? interaction.targetStartUs - interaction.originalStartUs
-          : interaction.targetEndUs - interaction.originalEndUs;
-      drawDragTooltip(
-        ctx,
-        interaction.edge === "left" ? gx : gx + gw,
-        gy,
-        [
-          `${((ghostEndUs - ghostStartUs) / 1_000_000).toFixed(2)}s`,
-          `Δ${edgeDelta >= 0 ? "+" : ""}${(edgeDelta / 1_000_000).toFixed(2)}s`,
-        ],
-        width,
-      );
-    }
-  } else if (interaction?.kind === "caption-move") {
-    const caption = captions.find((c: TimelineCaption) => c.caption_id === interaction.captionId);
-    if (caption) {
-      const gx = timeToX(interaction.targetStartUs, view);
-      const captionRow = trackRowOf(trackRows, "C1");
-      const gy = captionRow?.y ?? view.rulerHeight;
-      const gh = captionRow?.height ?? CAPTION_ROW_H;
-      const gw = Math.max(2, ((interaction.targetEndUs - interaction.targetStartUs) / 1_000_000) * view.pixelsPerSecond);
-      ctx.save();
-      ctx.globalAlpha = 0.55;
-      ctx.fillStyle = "#7a6a3a";
-      ctx.fillRect(gx, gy + 2, gw, gh - 4);
-      ctx.strokeStyle = "#ffd76e";
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(gx, gy + 2, gw, gh - 4);
-      ctx.restore();
-    }
-  }
-
-  // Snap guide (Phase 4; group-move included since Round 4)
-  const snapUs =
-    (interaction?.kind === "move" ||
-      interaction?.kind === "trim" ||
-      interaction?.kind === "edge-edit" ||
-      interaction?.kind === "group-move")
-      ? interaction.snapUs
-      : null;
-  if (snapUs !== null && snapUs !== undefined) {
-    const sx = timeToX(snapUs, view);
-    if (sx >= view.headerWidth && sx <= width && Math.abs(sx - timeToX(playheadUs, view)) >= 0.5) {
-      // T12 参照 Timeline.tsx:4391-4403：吸附线 = 1px 实线 --accent，无时间标签；
-      // 吸附到播放头时不画（ref：候选命中播放头则跳过 guide）。
-      ctx.strokeStyle = cssColor("--accent", "#00c1cd");
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(sx, 0);
-      ctx.lineTo(sx, height);
-      ctx.stroke();
-    }
-  }
-
-  // Marquee selection rect (Phase 4) — coords are content-space, scroll applied
-  if (interaction?.kind === "marquee") {
-    const rect = marqueeRect(
-      interaction.startX,
-      interaction.startY,
-      interaction.currentX,
-      interaction.currentY,
-    );
-    // T12 参照 Timeline.tsx:4502-4515：框选 = 实线边 + accent 18% 填充 + r2
-    ctx.fillStyle = cssColor("--accent-soft", "rgba(0,193,205,.14)");
-    ctx.fillRect(rect.x - view.scrollX, rect.y, rect.width, rect.height);
-    ctx.strokeStyle = cssColor("--accent", "#00c1cd");
-    ctx.lineWidth = 1;
-    ctx.strokeRect(rect.x - view.scrollX, rect.y, rect.width, rect.height);
-  }
-
-  // 播放头已拆为独立 DOM 覆盖层（A06：TimelinePlayheadLayer + playhead-store），
-  // 主画布/固定标尺不再绘制播放头线与手柄——播放期间不再触发全量重绘。
-
-  // Bottom scrollbar strip (Round 4)：绘制在可视区底部（而非画布内容底部），
-  // 内容高于面板时滚动条始终可见、可拖。
-  // B17：画布 viewport 化后画布顶 = scrollTop - overscan——可视区底部在
-  // 画布坐标 = scrollTop + 面板高 - topY。滚动条是画布固定 UI（不随内容
-  // 平移）：先复位变换再画。
-  ctx.restore();
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const viewportBottom = Math.min(height, scrollTopRaw + (viewportHeight ?? height) - topY);
-  drawScrollbar(ctx, width, viewportBottom, view, totalUs);
-}
-
-/** 固定标尺由独立画布绘制，纵向滚动时轨道从标尺下方经过。 */
-function drawRulerStrip(
-  ctx: CanvasRenderingContext2D,
-  width: number,
-  height: number,
-  headWidth: number,
-  view: TimelineViewState,
-  ticks: TickMark[],
-  totalUs: number,
-  rulerHoverUs: number | null | undefined,
-) {
-  const dpr = window.devicePixelRatio || 1;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, width, height);
-  // 三段几何：[0, headW) 轨头角区 · [headW, rulerX) 51px 封面条带
-  // · [rulerX, width) 标尺/片段区；封面条宽度与轨头列宽独立。
-  // 注意 tick.x / timeToX 均已含 headerWidth（画布内坐标，内容自 x=headW 起），
-  // 而覆盖层横跨整个 .timeline-body（主画布在头列右侧 headW 处开始），
-  // 因此屏幕对齐 = tick.x + headW，刻度 0 落在 rulerX = headW+51。
-  const headW = headWidth;
-  const stripW = view.headerWidth;
-  const rulerX = headW + stripW;
-  // 角区与封面条带都使用 OpenFilm 的 panel surface，分隔线走网格线令牌
-  //（2026-11-11 浅色修复——此前硬编码，浅色下角区仍是一块深色）。
-  ctx.fillStyle = cssColor("--tl-rail-bg", "#191919");
-  ctx.fillRect(0, 0, headW, height);
-  ctx.fillStyle = cssColor("--tl-rail-bg", "#191919");
-  ctx.fillRect(headW, 0, stripW, height);
-  // 标尺面（与主绘制完全同源）：渐变底 + 刻度 + 素材范围条 + 终点标线/死区 +
-  // 悬停时间胶囊。终点外同样压平——固定标尺不会长过素材。
-  drawRulerFace(ctx, {
-    bandX: rulerX,
-    width,
-    height,
-    endX: totalUs > 0 ? timeToX(totalUs, view) + headW : width,
-    xOffset: headW,
-    ticks,
-    hoverUs: rulerHoverUs,
-    hoverText: rulerHoverUs !== null && rulerHoverUs !== undefined ? formatTime(rulerHoverUs) : "",
-    xAt: (us) => timeToX(us, view) + headW,
-  });
-
-  // 播放头（含手柄）由独立 DOM 覆盖层 TimelinePlayheadLayer 绘制（A06）。
-}
+// ── Canvas drawing (delegated to ./canvas/render/*) ───────────────────────────
 
 // ── Component ────────────────────────────────────────────────────────────────
 
@@ -2366,14 +770,7 @@ export function TimelinePanel({
   } | null>(null);
   // Synchronous mirror of interaction so pointer handlers always read the latest value.
   const interactionRef = useRef<TimelineInteraction | null>(null);
-  const moveSnapTargetsRef = useRef<{
-    clipRects: ClipRenderRect[];
-    markers: TimelineMarker[];
-    withoutRiders: number[];
-    withRiders: number[];
-    withoutRidersOrder: ReadonlyMap<number, number>;
-    withRidersOrder: ReadonlyMap<number, number>;
-  } | null>(null);
+  const moveSnapTargetsRef = useRef<MoveSnapTargetCache | null>(null);
   const activeCanvasPointerIdRef = useRef<number | null>(null);
   const lastClientPointerRef = useRef<{ clientX: number; clientY: number; pointerId: number; altKey: boolean } | null>(null);
   const pointerDragLiftedRef = useRef(false);
@@ -2417,18 +814,8 @@ export function TimelinePanel({
   // Round 4: whether the in-flight marquee mousedown used Shift (keep selection).
   const shiftClickRef = useRef(false);
   // Round 4: context menu state (null = closed).
-  const [contextMenu, setContextMenu] = useState<{
-    x: number;
-    y: number;
-    target:
-      | { kind: "clip"; clipId: TimelineClipId }
-      | { kind: "caption"; captionId: string }
-      | { kind: "transition"; transitionId: string }
-      | { kind: "active-transition"; transitionId: string }
-      | { kind: "empty"; trackId: string | null };
-    timeUs: number;
-  } | null>(null);
-  const [trackMenu, setTrackMenu] = useState<{ trackId: string; x: number; y: number; trigger: HTMLElement } | null>(null);
+  const [contextMenu, setContextMenu] = useState<TimelineCanvasContextMenuState | null>(null);
+  const [trackMenu, setTrackMenu] = useState<TrackContextMenuState | null>(null);
   const trackDragRef = useRef<{ id: string; startY: number; moved: boolean } | null>(null);
   const [trackDragTarget, setTrackDragTarget] = useState<string | null>(null);
 
@@ -3060,7 +1447,7 @@ export function TimelinePanel({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     editorPerf.record("timeline_draw");
-    drawTimeline(
+    drawTimelineFrame(
       ctx,
       canvasSize.width,
       canvasHeight,
@@ -3096,8 +1483,6 @@ export function TimelinePanel({
 
   // 固定标尺条带：绘制到覆盖层 Canvas（随纵向滚动钉在可视区顶部）。
   const rulerCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const rulerPointerId = useRef<number | null>(null);
-  const rulerScrubOrigin = useRef(0);
   const rulerScrubbingRef = useRef(false);
   /** 擦洗态（镜像 rulerScrubbingRef，供旋钮实心/空心渲染）。
    *  ref 用于事件路径同步判断，state 只用于把"按住"这件事画出来。 */
@@ -3170,7 +1555,6 @@ export function TimelinePanel({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [activePlayheadStore, document, totalUs]);
-  const rangeDragRef = useRef<{ anchorUs: number; previous: TimeRange | null } | null>(null);
   useEffect(() => {
     const canvas = rulerCanvasRef.current;
     if (!canvas) return;
@@ -3187,72 +1571,32 @@ export function TimelinePanel({
     drawRulerStrip(ctx, width, view.rulerHeight, trackHeadWidth, view, ticks, totalUs, rulerHoverUs);
   }, [view, canvasSize, trackHeadWidth, ticks, totalUs, rulerHoverUs, themeEpoch]);
 
-  // 纵向滚动时把覆盖层钉在滚动容器可视区顶部（直接写样式，避免重渲染）。
-  const rulerPinTimeAt = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    return xToTime(event.clientX - rect.left - trackHeadWidth, view);
-  };
-  // 标尺寻址不越过素材终点（标尺本身也画到终点为止）。
-  const clampRulerTime = (us: number) => (totalUs > 0 ? Math.min(us, totalUs) : us);
-  const rulerSeekTime = (us: number) => {
-    const clamped = clampRulerTime(us);
-    if (!prefs.snappingEnabled) return clamped;
-    const edges = [...clipRects.flatMap(({ clip }) => [clip.timeline_start_us, clip.timeline_end_us]), ...markers.map(marker => marker.timeUs), 0, totalUs];
-    return clampRulerTime(snapValue(clamped, edges, (SNAP_PX / view.pixelsPerSecond) * 1_000_000));
-  };
-  const handleRulerPinMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (rulerPointerId.current !== null && rulerPointerId.current !== event.pointerId) return;
-    if (rulerPointerId.current === null &&
-        event.clientX - event.currentTarget.getBoundingClientRect().left < trackHeadWidth + view.headerWidth) {
-      setRulerHoverUs(null);
-      return;
-    }
-    const timeUs = clampRulerTime(rulerPinTimeAt(event));
-    setRulerHoverUs(timeUs);
-    const rangeDrag = rangeDragRef.current;
-    if (rangeDrag) {
-      setTimeRange(normalizeRange({ startUs: rangeDrag.anchorUs, endUs: timeUs }, totalUs));
-      return;
-    }
-    if (rulerScrubbingRef.current) onSeek?.(rulerSeekTime(timeUs));
-  };
-  const handleRulerPinDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (event.button !== 0 || rulerPointerId.current !== null || totalUs <= 0 ||
-        event.clientX - event.currentTarget.getBoundingClientRect().left < trackHeadWidth + view.headerWidth) return;
-    rulerPointerId.current = event.pointerId;
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-    event.currentTarget.focus({ preventScroll: true });
-    // Shift + 拖动 = 框选时间区间（不擦洗、不动播放头）。
-    // 与普通拖动的区别只在 Shift，因此不会误触。
-    if (event.shiftKey) {
-      const anchorUs = clampRulerTime(rulerPinTimeAt(event));
-      rangeDragRef.current = { anchorUs, previous: timeRange };
-      setTimeRange({ startUs: anchorUs, endUs: anchorUs });
-      return;
-    }
-    rulerScrubOrigin.current = activePlayheadStore.get();
-    rulerScrubbingRef.current = true;
-    setScrubbing(true);
-    event.currentTarget.style.cursor = "col-resize";
-    onSeek?.(rulerSeekTime(rulerPinTimeAt(event)));
-  };
-  const finishRulerGesture = (event: React.PointerEvent<HTMLCanvasElement>, commit: boolean) => {
-    if (rulerPointerId.current === null || rulerPointerId.current !== event.pointerId) return;
-    rulerPointerId.current = null;
-    const rangeDrag = rangeDragRef.current;
-    rangeDragRef.current = null;
-    if (rangeDrag) {
-      const range = normalizeRange({ startUs: rangeDrag.anchorUs, endUs: clampRulerTime(rulerPinTimeAt(event)) }, totalUs);
-      setTimeRange(commit && range && rangeDuration(range) >= MIN_RANGE_US ? range : rangeDrag.previous);
-    } else if (rulerScrubbingRef.current) {
-      onSeekCommit?.(commit ? rulerSeekTime(rulerPinTimeAt(event)) : rulerScrubOrigin.current);
-    }
-    rulerScrubbingRef.current = false;
-    setScrubbing(false);
-    setRulerHoverUs(null);
-    event.currentTarget.style.cursor = "default";
-  };
-  const handleRulerPinDoubleClick = () => fitToContent();
+  // 标尺擦洗与 Shift 区间框选（委托 gestures/ruler-scrub.ts）。
+  const clampRulerTime = (us: number) => clampRulerTimeToTotal(us, totalUs);
+  const {
+    rulerSeekTime,
+    handleRulerPinMove,
+    handleRulerPinDown,
+    finishRulerGesture,
+    handleRulerPinLeave,
+    handleRulerPinDoubleClick,
+  } = useRulerScrubGesture({
+    view,
+    trackHeadWidth,
+    totalUs,
+    snappingEnabled: prefs.snappingEnabled,
+    clipRects,
+    markers,
+    activePlayheadStore,
+    rulerScrubbingRef,
+    setScrubbing,
+    setRulerHoverUs,
+    timeRange,
+    setTimeRange,
+    onSeek,
+    onSeekCommit,
+    fitToContent: () => fitToContent(),
+  });
   const rulerGuideX = rulerHoverUs === null ? null : trackHeadWidth + timeToX(rulerHoverUs, view);
 
 
@@ -3409,37 +1753,6 @@ export function TimelinePanel({
     return next.length === 0 ? null : next.length === 1 ? { kind: "clip", id: next[0] } : { kind: "clips", ids: next };
   };
 
-  /** Resolve a drop from the pointer's real row and OpenFilm's clip/lane edge zones. */
-  const resolveDragTargeting = useCallback(
-    (active: MoveInteraction): { targetTrackId: string | null; pointerRatio: number; dropHit: ReturnType<typeof timelineDropHit> } => {
-      const draggedClip = clips.find((c) => c.clip_id === active.clipId);
-      // OpenFilm removes linked main-track riders from clip-drop hit testing while linkage is on.
-      // Their row remains a valid destination; the rider itself cannot become a replace/edge target.
-      const excluded = timelineDragDropExcludedClipIds(
-        active.clipIds,
-        active.linkedRiderClipIds,
-        prefs.linkageEnabled,
-      );
-      const hit = timelineDropHit(active.currentX, active.currentY, trackRows, clipRects, excluded);
-      // OpenFilm copy gestures ignore clip edge/replace targets; they still honor the row's lane band.
-      const dropHit = active.copyOnStart && hit.band === "body"
-        ? { ...hit, clipId: null, zone: null }
-        : hit;
-      if (!draggedClip) return { targetTrackId: null, pointerRatio: 0, dropHit };
-      let pointerRatio = 0;
-      const row = dropHit.rowIndex >= 0 ? trackRows[dropHit.rowIndex] : null;
-      const targetTrackId = dropHit.band === "body" && row
-        ? row.track.id
-        : null;
-      if (dropHit.clipId) {
-        const targetRect = clipRects.find(rect => rect.clip.clip_id === dropHit.clipId);
-        if (targetRect?.width) pointerRatio = Math.max(0, Math.min(1, (active.currentX - targetRect.x) / targetRect.width));
-      }
-      return { targetTrackId, pointerRatio, dropHit };
-    },
-    [clips, trackRows, clipRects, prefs.linkageEnabled],
-  );
-
   // ── 轨道管理：新增/删除/换位/属性开关 ────────────────────────────────────
   const addTrack = (kind: "video" | "text") => {
     void onPatch(
@@ -3478,28 +1791,29 @@ export function TimelinePanel({
       const { x, y } = coords;
       const canvas = canvasRef.current;
       if (!canvas) return;
-      if (x < view.headerWidth) {
-        if (speedModeActive) setSpeedModeKey(null);
-        return;
-      }
-      let speedHandle: ReturnType<typeof hitTestTrimHandle> = null;
-      if (speedModeActive) {
-        for (const id of selectedSpeedClipIds) {
-          const candidate = clips.find(clip => clip.clip_id === id);
-          if (!candidate || !canChangeClipSpeed(candidate) || isClipLocked(candidate.clip_id)) continue;
-          const candidateRect = clipRects.find(rect => rect.clip.clip_id === id);
-          if (!candidateRect) continue;
-          speedHandle = hitTestTrimHandle(x, y, [candidateRect]);
-          if (speedHandle) break;
-        }
-        if (!speedHandle) setSpeedModeKey(null);
-      }
+      const { hit, speedHandleMiss } = hitTestCanvasPointerDown({
+        x,
+        y,
+        view,
+        totalUs,
+        canvasWidth: canvasSize.width,
+        canvasHeight: canvasSize.height,
+        scrollTop: scrollTopRef.current,
+        clips,
+        clipRects,
+        captionRects,
+        transitionRects,
+        activeTransitionRects,
+        speedModeActive,
+        selectedSpeedClipIds,
+        isClipLocked,
+        waveformRatio: prefs.waveformRatio,
+      });
+      if (speedHandleMiss) setSpeedModeKey(null);
+      if (hit.kind === "header-rail") return;
 
       // Bottom scrollbar strip → scrollbar drag (Round 4)
-      // B17：滚动条钉在可视区底部——内容空间 y 带 = scrollTop + 视口高。
-      const { maxScrollX } = scrollBounds(view, totalUs, canvasSize.width);
-      const scrollbarBandTop = scrollTopRef.current + canvasSize.height - SCROLLBAR_HEIGHT_PX;
-      if (maxScrollX > 0 && y >= scrollbarBandTop) {
+      if (hit.kind === "scrollbar") {
         const next: TimelineInteraction = {
           kind: "scrollbar",
           startX: x,
@@ -3512,38 +1826,30 @@ export function TimelinePanel({
       }
 
       // Ruler area → playhead drag（寻址钳制在素材终点内）
-      if (y <= view.rulerHeight) {
+      if (hit.kind === "ruler") {
         const startTimeUs = activePlayheadStore.get();
         const timeUs = clampRulerTime(xToTime(x, view));
         onSeek?.(timeUs);
         const next: TimelineInteraction = { kind: "playhead", startX: x, startTimeUs };
         interactionRef.current = next;
         setInteraction(next);
-        // 擦洗态必须在这里也置位：本路径是「在标尺区按下开始拖播放头」，
-        // 与 handleRulerPinDown 是两条入口。此前只在后者里 setScrubbing(true)，
-        // 于是一路拖动时旋钮一直是空心的（参照：按住实心、松开空心）。
         rulerScrubbingRef.current = true;
         setScrubbing(true);
         canvas.style.cursor = "col-resize";
         return;
       }
 
-      // Transition marker → select (checked before clips; markers overlap edges)
-      const activeTransitionId = hitTestActiveTransitions(x, y, activeTransitionRects);
-      if (activeTransitionId) {
-        setSelection({ kind: "active-transition", id: activeTransitionId });
+      if (hit.kind === "active-transition") {
+        setSelection({ kind: "active-transition", id: hit.transitionId });
         return;
       }
-      const transitionId = hitTestTransitions(x, y, transitionRects);
-      if (transitionId) {
-        setSelection({ kind: "transition", id: transitionId });
+      if (hit.kind === "transition") {
+        setSelection({ kind: "transition", id: hit.transitionId });
         return;
       }
 
-      // Trim handle → trim drag (must take priority over plain clip hit)
-      const handle = speedHandle ?? hitTestTrimHandle(x, y, clipRects);
-      if (speedHandle) {
-        const clip = clips.find(candidate => candidate.clip_id === speedHandle!.clipId);
+      if (hit.kind === "speed-handle") {
+        const clip = clips.find(candidate => candidate.clip_id === hit.clipId);
         if (!clip || isClipLocked(clip.clip_id, event.altKey)) return;
         const linkedClipIds = clip.link_group_id && !event.altKey
           ? clips.filter(member => member.link_group_id === clip.link_group_id && !isClipLocked(member.clip_id, true) && canChangeClipSpeed(member)).map(member => member.clip_id)
@@ -3556,7 +1862,7 @@ export function TimelinePanel({
           clipId: clip.clip_id,
           linkedClipIds,
           ignoreLink: event.altKey,
-          edge: speedHandle.edge,
+          edge: hit.edge,
           startX: x,
           startScrollX: view.scrollX,
           originalSpeedMilli: clip.speed_milli ?? 1_000,
@@ -3574,37 +1880,37 @@ export function TimelinePanel({
         canvas.style.cursor = "ew-resize";
         return;
       }
-      if (handle && scrubMode === "roll") {
-        const clip = clips.find((c) => c.clip_id === handle.clipId);
-        if (!clip || isClipLocked(handle.clipId)) return;
+      if (hit.kind === "trim-handle" && scrubMode === "roll") {
+        const clip = clips.find((c) => c.clip_id === hit.clipId);
+        if (!clip || isClipLocked(hit.clipId)) return;
         const adjacent = clips.find(candidate => candidate.track_id === clip.track_id &&
-          (handle.edge === "right" ? candidate.timeline_start_us === clip.timeline_end_us : candidate.timeline_end_us === clip.timeline_start_us));
+          (hit.edge === "right" ? candidate.timeline_start_us === clip.timeline_end_us : candidate.timeline_end_us === clip.timeline_start_us));
         if (!adjacent) {
           setToolbarFeedback("滚动修剪需要拖动两个首尾相接片段的公共边缘");
           return;
         }
-        const clipIds = handle.edge === "right" ? [clip.clip_id, adjacent.clip_id] : [adjacent.clip_id, clip.clip_id];
+        const clipIds = hit.edge === "right" ? [clip.clip_id, adjacent.clip_id] : [adjacent.clip_id, clip.clip_id];
         setSelection({ kind: "clips", ids: clipIds });
         beginAdvancedEdit("roll", clipIds, x, canvas);
         return;
       }
-      if (handle && (scrubMode === "slip" || scrubMode === "slide")) {
+      if (hit.kind === "trim-handle" && (scrubMode === "slip" || scrubMode === "slide")) {
         setToolbarFeedback(scrubMode === "slip" ? "滑移素材请拖动片段主体" : "滑动片段请拖动片段主体");
         return;
       }
-      if (handle && !isClipLocked(handle.clipId, true)) {
-        const clip = clips.find((c) => c.clip_id === handle.clipId);
+      if (hit.kind === "trim-handle" && !isClipLocked(hit.clipId, true)) {
+        const clip = clips.find((c) => c.clip_id === hit.clipId);
         if (clip) {
           const linkedClipIds = clip.link_group_id && !event.altKey
             ? clips.filter(member => member.link_group_id === clip.link_group_id && !isClipLocked(member.clip_id, true)).map(member => member.clip_id)
             : [clip.clip_id];
-          setSelection(event.altKey ? { kind: "clip", id: handle.clipId } : linkedSelection(clip));
+          setSelection(event.altKey ? { kind: "clip", id: hit.clipId } : linkedSelection(clip));
           const next: TimelineInteraction = {
             kind: "trim",
-            clipId: handle.clipId,
+            clipId: hit.clipId,
             linkedClipIds,
             ignoreLink: event.altKey,
-            edge: handle.edge,
+            edge: hit.edge,
             startX: x,
             startScrollX: view.scrollX,
             originalStartUs: clip.source_start_us ?? 0,
@@ -3624,15 +1930,13 @@ export function TimelinePanel({
         }
       }
 
-      // Volume line → gain drag (checked after trim handles; Round 5)
-      const volumeId = hitTestVolumeLine(x, y, clipRects, isClipLocked, prefs.waveformRatio);
-      if (volumeId) {
-        const clip = clips.find((c) => c.clip_id === volumeId);
+      if (hit.kind === "volume-line") {
+        const clip = clips.find((c) => c.clip_id === hit.clipId);
         if (clip) {
-          setSelection({ kind: "clip", id: volumeId });
+          setSelection({ kind: "clip", id: hit.clipId });
           const next: TimelineInteraction = {
             kind: "volume",
-            clipId: volumeId,
+            clipId: hit.clipId,
             startY: y,
             startGainDb: clip.audio.gain_db,
             targetGainDb: clip.audio.gain_db,
@@ -3644,9 +1948,8 @@ export function TimelinePanel({
         }
       }
 
-      // Clip body → move drag (single) or group move (multi-selection of A1)
-      const clipId = hitTestClips(x, y, clipRects);
-      if (clipId) {
+      if (hit.kind === "clip") {
+        const clipId = hit.clipId;
         // A locked linked partner is left in place (OpenFilm's writable crowd); only the grabbed clip itself blocks
         // the gesture. Alt-copy already acts on the grabbed clip alone.
         if (isClipLocked(clipId, true)) return;
@@ -3731,117 +2034,58 @@ export function TimelinePanel({
           beginAdvancedEdit("slide", [previous.clip_id, clip.clip_id, next.clip_id], x, canvas);
           return;
         }
-        const selectedGroup = selectionForDrag?.kind === "clips" && selectionForDrag.ids.includes(clipId)
-          ? selectionForDrag.ids
-          : selectionForDrag?.kind === "clip" && selectionForDrag.id === clipId ? [selectionForDrag.id] : [clipId];
-        const capturedClipIds = [...new Set(selectedGroup.flatMap(id => {
-          const member = clips.find(item => item.clip_id === id);
-          return member?.link_group_id
-            ? clips.filter(item => item.link_group_id === member.link_group_id).map(item => item.clip_id)
-            : [id];
-        }))].filter(id => clips.some(item => item.clip_id === id) && !isClipLocked(id as TimelineClipId, true));
-        const capturedMembers = capturedClipIds.map(id => clips.find(item => item.clip_id === id)!).filter(Boolean);
-        const copyIds = event.altKey ? capturedClipIds.map(() => createTimelineClipId()) : [];
-        const moveClipIds = capturedMembers.map(member => member.clip_id);
-        const linkedRiderClipIds = document
-          ? linkedRiderClipIdsForDrag(document, moveClipIds, event.altKey)
-          : [];
-        if (prefs.snappingEnabled) {
-          const makeSnapTargets = (excluded: Set<TimelineClipId>) => orderedMoveSnapTargets(
-            clipRects,
-            markers.map(marker => marker.timeUs),
-            excluded,
-          );
-          const withoutRiders = makeSnapTargets(new Set(moveClipIds));
-          const withRiderExclusions = new Set(moveClipIds);
-          for (const riderId of linkedRiderClipIds) withRiderExclusions.add(riderId);
-          const withRiders = makeSnapTargets(withRiderExclusions);
-          moveSnapTargetsRef.current = {
-            clipRects,
-            markers,
-            withoutRiders: withoutRiders.times,
-            withRiders: withRiders.times,
-            withoutRidersOrder: withoutRiders.orderByTime,
-            withRidersOrder: withRiders.orderByTime,
-          };
-        } else {
-          moveSnapTargetsRef.current = null;
-        }
-        if (!event.altKey) {
-          setSelection(capturedClipIds.length > 1
-            ? { kind: "clips", ids: capturedClipIds }
-            : { kind: "clip", id: capturedClipIds[0] ?? clipId });
-        } else if (!(selection?.kind === "clips" && selection.ids.includes(clipId))) {
-          setSelection(capturedClipIds.length > 1
-            ? { kind: "clips", ids: capturedClipIds }
-            : { kind: "clip", id: clipId });
-        }
-        const next: TimelineInteraction = {
-          kind: "move",
+        const started = beginMoveGesture({
           clipId,
-          ignoreLink: false,
-          startX: x,
-          startY: y,
-          currentX: x,
-          currentY: y,
-          startUs: clip.timeline_start_us,
-          previewStartUs: clip.timeline_start_us,
-          targetStartUs: clip.timeline_start_us,
-          targetTrackId: null,
-          resolution: null,
-          snapUs: null,
-          copyOnStart: event.altKey,
-          moveMode: "place",
-          clipIds: moveClipIds,
-          linkedRiderClipIds,
-          copyIds,
-          dragPlan: null,
-          dropHit: null,
-        };
-        interactionRef.current = next;
-        setInteraction(next);
+          clip,
+          x,
+          y,
+          altKey: event.altKey,
+          clips,
+          clipRects,
+          markers,
+          document,
+          snappingEnabled: prefs.snappingEnabled,
+          selectionForDrag,
+          selection,
+          isClipLocked,
+          createClipId: createTimelineClipId,
+        });
+        moveSnapTargetsRef.current = started.snapTargets;
+        if (started.shouldSetSelection) setSelection(started.nextSelection);
+        interactionRef.current = started.interaction;
+        setInteraction(started.interaction);
         return;
       }
 
-      // B4：字幕端点拖拽（C1 轨；±8px 边缘容差，复用 trim 交互）。
-      const CAPTION_EDGE_PX = 8;
-      const captionHit = hitTestCaptions(x, y, captionRects);
-      if (captionHit) {
-        const caption = captions.find((c) => c.caption_id === captionHit);
-        const rect = captionRects.find((r) => r.caption.caption_id === captionHit);
-        if (caption && rect) {
-          const fromLeft = x <= rect.x + CAPTION_EDGE_PX;
-          const fromRight = x >= rect.x + rect.width - CAPTION_EDGE_PX;
-          if (fromLeft || fromRight) {
-            setSelection({ kind: "caption", id: captionHit });
-            const next: TimelineInteraction = {
-              kind: "caption-trim",
-              captionId: captionHit,
-              edge: fromLeft ? "left" : "right",
-              startX: x,
-              startScrollX: view.scrollX,
-              originalStartUs: caption.start_us,
-              originalEndUs: caption.end_us,
-              targetStartUs: caption.start_us,
-              targetEndUs: caption.end_us,
-            };
-            interactionRef.current = next;
-            setInteraction(next);
-            canvas.style.cursor = "ew-resize";
-            return;
-          }
+      if (hit.kind === "caption-edge") {
+        const caption = captions.find((c) => c.caption_id === hit.captionId);
+        if (caption) {
+          setSelection({ kind: "caption", id: hit.captionId });
+          const next: TimelineInteraction = {
+            kind: "caption-trim",
+            captionId: hit.captionId,
+            edge: hit.edge,
+            startX: x,
+            startScrollX: view.scrollX,
+            originalStartUs: caption.start_us,
+            originalEndUs: caption.end_us,
+            targetStartUs: caption.start_us,
+            targetEndUs: caption.end_us,
+          };
+          interactionRef.current = next;
+          setInteraction(next);
+          canvas.style.cursor = "ew-resize";
+          return;
         }
       }
 
-      // Caption → 整体拖拽启动（B4 追加；松手提交 set_caption_timing 平移）。
-      const captionId = hitTestCaptions(x, y, captionRects);
-      if (captionId) {
-        const caption = captions.find((c) => c.caption_id === captionId);
+      if (hit.kind === "caption") {
+        const caption = captions.find((c) => c.caption_id === hit.captionId);
         if (caption) {
-          setSelection({ kind: "caption", id: captionId });
+          setSelection({ kind: "caption", id: hit.captionId });
           const next: TimelineInteraction = {
             kind: "caption-move",
-            captionId,
+            captionId: hit.captionId,
             startX: x,
             startScrollX: view.scrollX,
             startY: y,
@@ -3856,11 +2100,9 @@ export function TimelinePanel({
         }
       }
 
-      // V1 boundary gap → offer adding a transition (B2)
-      const gapAnchor = hitTestTransitionGap(x, y, clipRects);
-      if (gapAnchor) {
+      if (hit.kind === "transition-gap") {
         setSelection(null);
-        setAddTransitionAnchor(gapAnchor);
+        setAddTransitionAnchor(hit.afterClipId);
         return;
       }
 
@@ -3901,16 +2143,13 @@ export function TimelinePanel({
       if (active) {
         lastPointerRef.current = { x, y };
         if (!pointerDragLiftedRef.current) {
-          if (active.kind === "move" || active.kind === "group-move" || active.kind === "caption-move") {
-            if (!hasLiftedTimelineDrag("move", x - active.startX, y - active.startY)) return;
+          const lift = checkInteractionDragLifted(active, x, y, event.clientX);
+          if (lift.stillBelowThreshold) return;
+          if (lift.liftedNow) {
             pointerDragLiftedRef.current = true;
-            collapseSelectedClickRef.current = null;
-          } else if (active.kind === "marquee") {
-            if (!hasLiftedTimelineDrag("marquee", event.clientX - active.startClientX, 0)) return;
-            pointerDragLiftedRef.current = true;
-          } else if (active.kind === "trim" || active.kind === "speed" || active.kind === "edge-edit" || active.kind === "caption-trim") {
-            if (!hasLiftedTimelineDrag("edge", x - active.startX, 0)) return;
-            pointerDragLiftedRef.current = true;
+            if (active.kind === "move" || active.kind === "group-move" || active.kind === "caption-move") {
+              collapseSelectedClickRef.current = null;
+            }
           }
         }
         const pps = view.pixelsPerSecond;
@@ -3934,394 +2173,134 @@ export function TimelinePanel({
           }
         }
         if (active.kind === "scrollbar") {
-          const { maxScrollX } = scrollBounds(view, totalUs, canvasSize.width);
-          const nextScrollX = clampScrollX(active.startScrollX + (x - active.startX), maxScrollX);
+          const nextScrollX = stepScrollbarDrag({
+            startX: active.startX,
+            startScrollX: active.startScrollX,
+            x,
+            view,
+            totalUs,
+            canvasWidth: canvasSize.width,
+          });
           setView((v) => ({ ...v, scrollX: nextScrollX }));
           canvas.style.cursor = "col-resize";
           return;
         }
         if (active.kind === "marquee") {
-          // Marquee coords are content-space so auto-scroll keeps the rect anchored.
-          const next: TimelineInteraction = {
-            ...active,
-            currentX: x + view.scrollX,
-            currentY: y,
-          };
+          const next = stepMarqueeGesture(active, x, y, view.scrollX);
           interactionRef.current = next;
           setInteraction(next);
           canvas.style.cursor = "crosshair";
           return;
         }
         if (active.kind === "move") {
-          const deltaUs = ((x - active.startX) / pps) * 1_000_000;
-          const movingClip = clips.find(c => c.clip_id === active.clipId);
-          const captured = active.clipIds.map(id => clips.find(clip => clip.clip_id === id)).filter((clip): clip is TimelineClip => Boolean(clip));
-          const linkedStarts = captured.length ? captured.map(clip => clip.timeline_start_us) : [active.startUs];
-          const minStartUs = Math.max(0, active.startUs - Math.min(...linkedStarts));
-          const rawStartUs = Math.max(minStartUs, active.startUs + deltaUs);
-          const clipDurationUs = movingClip ? movingClip.timeline_end_us - movingClip.timeline_start_us : 0;
-          const threshold = (SNAP_PX / pps) * 1_000_000;
-          const moveMode = active.copyOnStart ? "place" : event.altKey ? "insert" : "place";
-          const frameAlignedStartUs = Math.max(minStartUs, snapTimeToFrame(rawStartUs, fpsNum, fpsDen));
-          const rawStep: MoveInteraction = {
-            ...active,
-            currentX: x,
-            currentY: y,
-            targetStartUs: frameAlignedStartUs,
-            moveMode,
-          };
-          const { targetTrackId, dropHit } = resolveDragTargeting(rawStep);
-          const planAt = (leadStartUs: number) => clipDragPlanner?.({
-            clipIds: active.clipIds,
-            leadClipId: active.clipId,
-            leadStartUs,
-            pointerTimeUs: xToTime(x, view),
-            dropHit,
-            targetTrackId,
-            mode: moveMode,
-            copyOnStart: active.copyOnStart,
-            copyIds: active.copyIds,
+          const moved = stepMoveGesture({
+            active,
+            x,
+            y,
+            altKey: event.altKey,
+            view,
+            clips,
+            trackRows,
+            clipRects,
+            markers,
+            playheadUs: activePlayheadStore.get(),
+            fpsNum,
+            fpsDen,
+            snappingEnabled: prefs.snappingEnabled,
             mainTrackMagnet: prefs.mainTrackMagnet,
             linkageEnabled: prefs.linkageEnabled,
-            snappingEnabled: prefs.snappingEnabled,
-            flushToleranceUs: threshold,
-          }) ?? null;
-          // Candidate times are sorted and cached for the gesture. Rebuild only if the latest
-          // document geometry or marker list changes; the moving playhead is supplied separately.
-          let snapTargets = moveSnapTargetsRef.current;
-          if (!snapTargets || snapTargets.clipRects !== clipRects || snapTargets.markers !== markers) {
-            const makeSnapTargets = (excluded: Set<TimelineClipId>) => orderedMoveSnapTargets(
-              clipRects,
-              markers.map(marker => marker.timeUs),
-              excluded,
-            );
-            const withoutRiders = makeSnapTargets(new Set(active.clipIds));
-            const withRiderExclusions = new Set(active.clipIds);
-            for (const riderId of active.linkedRiderClipIds) withRiderExclusions.add(riderId);
-            const withRiders = makeSnapTargets(withRiderExclusions);
-            snapTargets = {
-              clipRects,
-              markers,
-              withoutRiders: withoutRiders.times,
-              withRiders: withRiders.times,
-              withoutRidersOrder: withoutRiders.orderByTime,
-              withRidersOrder: withRiders.orderByTime,
-            };
-            moveSnapTargetsRef.current = snapTargets;
-          }
-          const selectedSnapTargets = prefs.snappingEnabled
-            ? (prefs.linkageEnabled
-              ? { values: snapTargets.withRiders, order: snapTargets.withRidersOrder }
-              : { values: snapTargets.withoutRiders, order: snapTargets.withoutRidersOrder })
-            : { values: [] as number[], order: undefined };
-          const candidates = selectedSnapTargets.values;
-          const playheadUs = activePlayheadStore.get();
-          const startSnap = prefs.snappingEnabled
-            ? snapResultSorted(rawStartUs, candidates, threshold, playheadUs, selectedSnapTargets.order)
-            : { valueUs: rawStartUs, snappedTo: null };
-          const endSnap = prefs.snappingEnabled
-            ? snapResultSorted(rawStartUs + clipDurationUs, candidates, threshold, playheadUs, selectedSnapTargets.order)
-            : { valueUs: rawStartUs + clipDurationUs, snappedTo: null };
-          const startDelta = startSnap.valueUs - rawStartUs;
-          const endDelta = endSnap.valueUs - (rawStartUs + clipDurationUs);
-          const useEnd = endSnap.snappedTo !== null && (startSnap.snappedTo === null || Math.abs(endDelta) < Math.abs(startDelta));
-          const snappedTo = useEnd ? endSnap.snappedTo : startSnap.snappedTo;
-          const landedStartUs = snappedTo === null
-            ? snapTimeToFrame(rawStartUs + (useEnd ? endDelta : startDelta), fpsNum, fpsDen)
-            : Math.round(rawStartUs + (useEnd ? endDelta : startDelta));
-          const targetStartUs = Math.max(minStartUs, landedStartUs);
-          const step: MoveInteraction = {
-            ...rawStep,
-            currentX: x,
-            currentY: y,
-            targetStartUs,
-            moveMode,
-          };
-          const dragPlan = planAt(targetStartUs);
-          const landed = dragPlan?.lead;
-          const resolution = landed ? {
-            startUs: landed.startUs,
-            trackId: landed.trackId,
-            mode: dropHit?.zone === "before" ? "before" as const : dropHit?.zone === "after" ? "after" as const : "free" as const,
-          } : null;
-          const next: TimelineInteraction = {
-            ...step,
-            previewStartUs: rawStartUs,
-            targetStartUs: landed?.startUs ?? targetStartUs,
-            targetTrackId: landed?.trackId ?? targetTrackId,
-            dropHit,
-            resolution,
-            dragPlan,
-            snapUs: landed?.startUs === targetStartUs && targetStartUs === rawStartUs + (useEnd ? endDelta : startDelta)
-              ? (useEnd ? endSnap.snappedTo : startSnap.snappedTo) : null,
-          };
-          interactionRef.current = next;
-          setInteraction(next);
+            snapTargetsCache: moveSnapTargetsRef.current,
+            clipDragPlanner,
+          });
+          moveSnapTargetsRef.current = moved.snapTargetsCache;
+          interactionRef.current = moved.interaction;
+          setInteraction(moved.interaction);
           canvas.style.cursor = "grabbing";
           return;
         }
         if (active.kind === "group-move") {
-          const deltaUs = ((x - active.startX) / pps) * 1_000_000;
-          const starts = active.clipIds.map((id) => active.startUsByClip[id] ?? 0);
-          const anchorStart = Math.min(...starts);
-          const rawAnchor = Math.max(0, anchorStart + deltaUs);
-          const threshold = (SNAP_PX / pps) * 1_000_000;
-          const excluded = new Set(active.clipIds);
-          const candidates = prefs.snappingEnabled
-            ? [
-                ...snapCandidates(clipRects, activePlayheadStore.get(), excluded),
-                ...markers.map(marker => marker.timeUs),
-              ]
-            : [];
-          const snappedAnchor = snapValue(rawAnchor, candidates, threshold);
-          const rawDelta = snappedAnchor - anchorStart;
-          const members = active.clipIds
-            .map((id) => clips.find((c) => c.clip_id === id))
-            .filter((c): c is TimelineClip => Boolean(c));
-          // 视频组：刚体平移 + 同轨无重叠钳制；音频组：自由平移（原点钳制）。
-          const groupTrackId = members[0]?.track_id ?? null;
-          const finalDelta =
-            members.length > 0 && members[0].asset_kind !== "audio"
-              ? clampGroupDelta(
-                  members,
-                  clips.filter(
-                    (c) => c.track_id === groupTrackId && !excluded.has(c.clip_id),
-                  ),
-                  rawDelta,
-                )
-              : resolveGroupMove(starts, rawDelta).actualDeltaUs;
-          const targetStartUsByClip: Record<string, number> = {};
-          for (const id of active.clipIds) {
-            targetStartUsByClip[id] = Math.max(0, (active.startUsByClip[id] ?? 0) + finalDelta);
-          }
-          const next: TimelineInteraction = {
-            ...active,
-            targetStartUsByClip,
-            snapUs: Math.abs(snappedAnchor - rawAnchor) > 1 ? snappedAnchor : null,
-          };
+          const next = stepGroupMoveGesture({
+            active,
+            x,
+            pixelsPerSecond: pps,
+            snappingEnabled: prefs.snappingEnabled,
+            clips,
+            clipRects,
+            playheadUs: activePlayheadStore.get(),
+            markers,
+          });
           interactionRef.current = next;
           setInteraction(next);
           canvas.style.cursor = "grabbing";
           return;
         }
         if (active.kind === "edge-edit") {
-          const rawDeltaUs = timelineGestureDeltaUs(x, active.startX, viewRef.current.scrollX, active.startScrollX, pps);
-          let requestedDeltaUs = rawDeltaUs;
-          let snapUs: number | null = null;
-          if (active.mode !== "slip" && prefs.snappingEnabled) {
-            const originClipId = active.mode === "roll" ? active.clipIds[0] : active.clipIds[1];
-            const originClip = clips.find(clip => clip.clip_id === originClipId);
-            if (originClip) {
-              const originUs = active.mode === "roll" ? originClip.timeline_end_us : originClip.timeline_start_us;
-              const candidates = [
-                ...snapCandidates(clipRects, activePlayheadStore.get(), new Set(active.clipIds)),
-                ...markers.map(marker => marker.timeUs),
-              ];
-              const snapped = snapValue(originUs + rawDeltaUs, candidates, (SNAP_PX / pps) * 1_000_000);
-              requestedDeltaUs = snapped - originUs;
-              if (Math.abs(snapped - (originUs + rawDeltaUs)) > 1) snapUs = snapped;
-            }
-          }
-          const plan = getAdvancedEditPlan(active.mode, active.clipIds, requestedDeltaUs);
-          if (!plan || plan.reason) {
-            setToolbarFeedback(plan?.reason ?? "编辑无法完成");
+          const result = stepAdvancedEdgeEdit({
+            active,
+            x,
+            scrollX: viewRef.current.scrollX,
+            pixelsPerSecond: pps,
+            frameUs,
+            snappingEnabled: prefs.snappingEnabled,
+            clips,
+            clipRects,
+            playheadUs: activePlayheadStore.get(),
+            markers,
+            getAdvancedEditPlan,
+          });
+          if ("blockedReason" in result) {
+            setToolbarFeedback(result.blockedReason);
             return;
           }
-          const next: TimelineInteraction = { ...active, deltaUs: plan.deltaUs, targets: plan.targets, operations: plan.operations,
-            snapUs: snapUs !== null && Math.abs(plan.deltaUs - requestedDeltaUs) < frameUs ? snapUs : null };
-          interactionRef.current = next;
-          setInteraction(next);
-          const label = active.mode === "roll" ? "滚动修剪" : active.mode === "slip" ? "滑移素材" : "滑动片段";
-          setToolbarFeedback(`${label} ${plan.deltaUs >= 0 ? "+" : "−"}${Math.abs(plan.deltaUs / 1_000_000).toFixed(2)} 秒`);
+          interactionRef.current = result.interaction;
+          setInteraction(result.interaction);
+          setToolbarFeedback(result.feedback);
           canvas.style.cursor = "ew-resize";
           return;
         }
         if (active.kind === "speed") {
-          const clip = clips.find(item => item.clip_id === active.clipId);
-          if (!clip || !canChangeClipSpeed(clip) || !document) return;
-          const mainRipple = prefs.mainTrackMagnet && clip.track_id === "V1" && clip.asset_kind === "video";
-          const effectiveEdge: TrimEdge = mainRipple ? "right" : active.edge;
-          const pointerDeltaUs = timelineGestureDeltaUs(x, active.startX, viewRef.current.scrollX, active.startScrollX, pps);
-          const effectiveDeltaUs = mainRipple && active.edge === "left" ? -pointerDeltaUs : pointerDeltaUs;
-          const originalEdgeUs = effectiveEdge === "left" ? active.originalTimelineStartUs : active.originalTimelineEndUs;
-          const rawEdgeUs = originalEdgeUs + effectiveDeltaUs;
-          const movingIds = new Set(active.linkedClipIds);
-          const candidates = prefs.snappingEnabled
-            ? [...snapCandidates(clipRects, activePlayheadStore.get(), movingIds), ...markers.map(marker => marker.timeUs)]
-              .filter(candidate => Math.abs(candidate - originalEdgeUs) >= 1_000)
-            : [];
-          const snappedEdgeUs = snapValue(rawEdgeUs, candidates, (SNAP_PX / pps) * 1_000_000);
-          const didSnap = Math.abs(snappedEdgeUs - rawEdgeUs) > 1;
-          let targetEdgeUs = didSnap ? snappedEdgeUs : snapTimeToFrame(rawEdgeUs, fpsNum, fpsDen);
-          if (!mainRipple) {
-            const groupIds = new Set(active.linkedClipIds);
-            const neighbors = clips.filter(item => item.track_id === clip.track_id && !groupIds.has(item.clip_id));
-            if (effectiveEdge === "left") {
-              const previousEnd = Math.max(0, ...neighbors.filter(item => item.timeline_end_us <= active.originalTimelineStartUs).map(item => item.timeline_end_us));
-              targetEdgeUs = Math.max(previousEnd, Math.min(active.originalTimelineEndUs - 1, targetEdgeUs));
-            } else {
-              const nextStart = Math.min(Number.MAX_SAFE_INTEGER, ...neighbors.filter(item => item.timeline_start_us >= active.originalTimelineEndUs).map(item => item.timeline_start_us));
-              targetEdgeUs = Math.max(active.originalTimelineStartUs + 1, Math.min(nextStart, targetEdgeUs));
-            }
-          }
-          const targetLengthUs = effectiveEdge === "left"
-            ? active.originalTimelineEndUs - targetEdgeUs
-            : targetEdgeUs - active.originalTimelineStartUs;
-          const sourceDurationUs = clip.source_end_us! - clip.source_start_us!;
-          const edgeHeld = Math.abs(targetEdgeUs - snapTimeToFrame(rawEdgeUs, fpsNum, fpsDen)) >= 0.5;
-          const requestedSpeedMilli = speedMilliForLength(sourceDurationUs, targetLengthUs, didSnap || edgeHeld);
-          const plan = planTimelineSpeedEdge(document, clip, requestedSpeedMilli, active.edge, prefs.mainTrackMagnet, prefs.linkageEnabled, active.ignoreLink);
-          if (plan.reason) {
-            const reset: TimelineInteraction = {
-              ...active,
-              targetSpeedMilli: active.originalSpeedMilli,
-              targetTimelineStartUs: active.originalTimelineStartUs,
-              targetTimelineEndUs: active.originalTimelineEndUs,
-              targets: [],
-              operations: [],
-              snapUs: null,
-            };
-            interactionRef.current = reset;
-            setInteraction(reset);
-            setToolbarFeedback(plan.reason);
+          const result = stepSpeedEdgeGesture({
+            active,
+            x,
+            scrollX: viewRef.current.scrollX,
+            pixelsPerSecond: pps,
+            fpsNum,
+            fpsDen,
+            frameUs,
+            snappingEnabled: prefs.snappingEnabled,
+            mainTrackMagnet: prefs.mainTrackMagnet,
+            linkageEnabled: prefs.linkageEnabled,
+            document,
+            clips,
+            clipRects,
+            playheadUs: activePlayheadStore.get(),
+            markers,
+          });
+          if (result) {
+            interactionRef.current = result.interaction;
+            setInteraction(result.interaction);
+            setToolbarFeedback(result.feedback);
+            if (!result.invalid) canvas.style.cursor = "ew-resize";
             return;
           }
-          const lead = plan.targets.find(item => item.clipId === active.clipId);
-          if (!lead && plan.operations.length) return;
-          const landedEdgeUs = lead
-            ? effectiveEdge === "left" ? lead.startUs : lead.endUs
-            : originalEdgeUs;
-          const snapUs = didSnap && Math.abs(landedEdgeUs - snappedEdgeUs) <= frameUs / 2 ? snappedEdgeUs : null;
-          const next: TimelineInteraction = {
-            ...active,
-            targetSpeedMilli: plan.speedMilli,
-            targetTimelineStartUs: lead?.startUs ?? active.originalTimelineStartUs,
-            targetTimelineEndUs: lead?.endUs ?? active.originalTimelineEndUs,
-            targets: plan.targets,
-            operations: plan.operations,
-            snapUs,
-          };
-          interactionRef.current = next;
-          setInteraction(next);
-          setToolbarFeedback(`${(plan.speedMilli / 1_000).toFixed(2)}x`);
-          canvas.style.cursor = "ew-resize";
-          return;
         }
         if (active.kind === "trim") {
-          const clip = clips.find((c) => c.clip_id === active.clipId);
-          if (clip) {
-            const deltaUs = timelineGestureDeltaUs(x, active.startX, viewRef.current.scrollX, active.startScrollX, pps);
-            const threshold = (SNAP_PX / pps) * 1_000_000;
-            const movingIds = new Set(active.linkedClipIds);
-            const originalEdgeUs = active.edge === "left" ? clip.timeline_start_us : clip.timeline_end_us;
-            const candidates = prefs.snappingEnabled
-              ? [
-                  ...snapCandidates(clipRects, activePlayheadStore.get(), movingIds),
-                  ...markers.map(marker => marker.timeUs),
-                ].filter(candidate => Math.abs(candidate - originalEdgeUs) >= 1000)
-              : [];
-            const rawEdgeUs = originalEdgeUs + deltaUs;
-            const snappedEdgeUs = snapValue(rawEdgeUs, candidates, threshold);
-            const snapped = Math.abs(snappedEdgeUs - rawEdgeUs) > 1;
-            const desiredEdgeUs = snapped ? snappedEdgeUs : snapTimeToFrame(rawEdgeUs, fpsNum, fpsDen);
-            if (clip.asset_kind === "image") {
-              let lowerDeltaUs = -Number.MAX_SAFE_INTEGER;
-              let upperDeltaUs = Number.MAX_SAFE_INTEGER;
-              const mainMagnetRipple = prefs.mainTrackMagnet && clip.track_id === "V1";
-              for (const memberId of active.linkedClipIds) {
-                const member = clips.find(item => item.clip_id === memberId);
-                if (!member) continue;
-                const durationUs = member.timeline_end_us - member.timeline_start_us;
-                const minimumLengthUs = MIN_CLIP_US;
-                if (active.edge === "left") {
-                  lowerDeltaUs = Math.max(lowerDeltaUs, -member.timeline_start_us);
-                  upperDeltaUs = Math.min(upperDeltaUs, durationUs - minimumLengthUs);
-                  if (!mainMagnetRipple) for (const other of clips) {
-                    if (other.track_id === member.track_id && !movingIds.has(other.clip_id) && other.timeline_start_us < member.timeline_start_us) {
-                      lowerDeltaUs = Math.max(lowerDeltaUs, Math.min(other.timeline_end_us, member.timeline_start_us) - member.timeline_start_us);
-                    }
-                  }
-                } else {
-                  lowerDeltaUs = Math.max(lowerDeltaUs, minimumLengthUs - durationUs);
-                  if (!mainMagnetRipple) for (const other of clips) {
-                    if (other.track_id === member.track_id && !movingIds.has(other.clip_id) && other.timeline_start_us >= member.timeline_end_us) {
-                      upperDeltaUs = Math.min(upperDeltaUs, Math.max(other.timeline_start_us, member.timeline_end_us) - member.timeline_end_us);
-                    }
-                  }
-                }
-              }
-              const edgeDeltaUs = Math.max(lowerDeltaUs, Math.min(upperDeltaUs, desiredEdgeUs - originalEdgeUs));
-              const targetTimelineEdgeUs = originalEdgeUs + edgeDeltaUs;
-              const next: TimelineInteraction = {
-                ...active,
-                targetTimelineStartUs: active.edge === "left" ? targetTimelineEdgeUs : active.originalTimelineStartUs,
-                targetTimelineEndUs: active.edge === "right" ? targetTimelineEdgeUs : active.originalTimelineEndUs,
-                snapUs: snapped && Math.abs(targetTimelineEdgeUs - snappedEdgeUs) <= 1 ? snappedEdgeUs : null,
-              };
-              interactionRef.current = next;
-              setInteraction(next);
-              canvas.style.cursor = "ew-resize";
-              return;
-            }
-            let lowerDeltaUs = -Number.MAX_SAFE_INTEGER;
-            let upperDeltaUs = Number.MAX_SAFE_INTEGER;
-            const mainMagnetRipple = prefs.mainTrackMagnet && clip.track_id === "V1";
-            for (const memberId of active.linkedClipIds) {
-              const member = clips.find(item => item.clip_id === memberId);
-              if (!member) continue;
-              const durationUs = member.timeline_end_us - member.timeline_start_us;
-              const speed = Math.max(1, member.speed_milli ?? 1000);
-              const sourceToTimeline = (sourceUs: number) => member.asset_kind !== "image"
-                ? Math.round(sourceUs * 1000 / speed)
-                : sourceUs;
-              const minimumLengthUs = MIN_CLIP_US;
-              if (active.edge === "left") {
-                lowerDeltaUs = Math.max(lowerDeltaUs, -member.timeline_start_us, -sourceToTimeline(member.source_start_us ?? 0));
-                upperDeltaUs = Math.min(upperDeltaUs, durationUs - minimumLengthUs);
-                if (!mainMagnetRipple) {
-                  for (const other of clips) {
-                    if (other.track_id !== member.track_id || movingIds.has(other.clip_id)) continue;
-                    if (other.timeline_start_us < member.timeline_start_us) {
-                      const fence = Math.min(other.timeline_end_us, member.timeline_start_us);
-                      lowerDeltaUs = Math.max(lowerDeltaUs, fence - member.timeline_start_us);
-                    }
-                  }
-                }
-              } else {
-                lowerDeltaUs = Math.max(lowerDeltaUs, minimumLengthUs - durationUs);
-                const sourceDurationUs = assetDurationById.get(member.asset_id) ?? Number.MAX_SAFE_INTEGER;
-                upperDeltaUs = Math.min(upperDeltaUs, sourceToTimeline(Math.max(0, sourceDurationUs - (member.source_end_us ?? sourceDurationUs))));
-                if (!mainMagnetRipple) {
-                  for (const other of clips) {
-                    if (other.track_id !== member.track_id || movingIds.has(other.clip_id)) continue;
-                    if (other.timeline_start_us >= member.timeline_end_us) {
-                      const fence = Math.max(other.timeline_start_us, member.timeline_end_us);
-                      upperDeltaUs = Math.min(upperDeltaUs, fence - member.timeline_end_us);
-                    }
-                  }
-                }
-              }
-            }
-            const edgeDeltaUs = Math.max(lowerDeltaUs, Math.min(upperDeltaUs, desiredEdgeUs - originalEdgeUs));
-            const targetTimelineEdgeUs = originalEdgeUs + edgeDeltaUs;
-            const sourceDeltaUs = Math.round(edgeDeltaUs * Math.max(1, clip.speed_milli ?? 1000) / 1000);
-            let targetStartUs = active.targetStartUs;
-            let targetEndUs = active.targetEndUs;
-            let snapUs: number | null = null;
-            if (active.edge === "left") {
-              targetStartUs = Math.max(0, active.originalStartUs + sourceDeltaUs);
-              targetEndUs = active.originalEndUs;
-            } else {
-              targetStartUs = active.originalStartUs;
-              targetEndUs = Math.max(targetStartUs + MIN_CLIP_US, active.originalEndUs + sourceDeltaUs);
-            }
-            if (snapped && Math.abs(targetTimelineEdgeUs - snappedEdgeUs) <= 1) snapUs = snappedEdgeUs;
-            const next: TimelineInteraction = {
-              ...active,
-              targetStartUs,
-              targetEndUs,
-              snapUs,
-            };
+          const next = stepClipTrimGesture({
+            active,
+            x,
+            scrollX: viewRef.current.scrollX,
+            pixelsPerSecond: pps,
+            fpsNum,
+            fpsDen,
+            snappingEnabled: prefs.snappingEnabled,
+            mainTrackMagnet: prefs.mainTrackMagnet,
+            clips,
+            clipRects,
+            playheadUs: activePlayheadStore.get(),
+            markers,
+            assetDurationById,
+          });
+          if (next) {
             interactionRef.current = next;
             setInteraction(next);
             canvas.style.cursor = "ew-resize";
@@ -4329,27 +2308,14 @@ export function TimelinePanel({
           }
         }
         if (active.kind === "caption-trim") {
-          // B4：字幕端点拖拽。约束：≥200ms（MIN_CAPTION_US）、
-          // 与相邻字幕不重叠（按时间排序取近邻边界）。
-          const caption = captions.find((c) => c.caption_id === active.captionId);
-          if (caption) {
-            const deltaUs = timelineGestureDeltaUs(x, active.startX, viewRef.current.scrollX, active.startScrollX, pps);
-            const sorted = [...captions].sort((a, b) => a.start_us - b.start_us);
-            const idx = sorted.findIndex((c) => c.caption_id === active.captionId);
-            const prev = idx > 0 ? sorted[idx - 1] : null;
-            const nextCap = idx >= 0 && idx < sorted.length - 1 ? sorted[idx + 1] : null;
-            let targetStartUs = active.targetStartUs;
-            let targetEndUs = active.targetEndUs;
-            if (active.edge === "left") {
-              const upper = active.originalEndUs - MIN_CAPTION_US;
-              const lower = Math.max(0, prev ? prev.end_us : 0);
-              targetStartUs = Math.max(lower, Math.min(upper, active.originalStartUs + deltaUs));
-            } else {
-              const lower = active.originalStartUs + MIN_CAPTION_US;
-              const upper = nextCap ? nextCap.start_us : Number.MAX_SAFE_INTEGER;
-              targetEndUs = Math.max(lower, Math.min(upper, active.originalEndUs + deltaUs));
-            }
-            const next: TimelineInteraction = { ...active, targetStartUs, targetEndUs };
+          const next = stepCaptionTrimGesture({
+            active,
+            x,
+            scrollX: viewRef.current.scrollX,
+            pixelsPerSecond: pps,
+            captions,
+          });
+          if (next) {
             interactionRef.current = next;
             setInteraction(next);
             canvas.style.cursor = "ew-resize";
@@ -4357,26 +2323,14 @@ export function TimelinePanel({
           }
         }
         if (active.kind === "caption-move") {
-          // B4 追加：字幕整体平移。约束：与相邻字幕不重叠（保持原时长）。
-          const caption = captions.find((c) => c.caption_id === active.captionId);
-          if (caption) {
-            const deltaUs = timelineGestureDeltaUs(x, active.startX, viewRef.current.scrollX, active.startScrollX, pps);
-            const durationUs = active.originalEndUs - active.originalStartUs;
-            const sorted = [...captions].sort((a, b) => a.start_us - b.start_us);
-            const idx = sorted.findIndex((c) => c.caption_id === active.captionId);
-            const prev = idx > 0 ? sorted[idx - 1] : null;
-            const nextCap = idx >= 0 && idx < sorted.length - 1 ? sorted[idx + 1] : null;
-            const targetStartUs = Math.max(
-              0,
-              Math.max(prev ? prev.end_us : 0,
-                Math.min(active.originalStartUs + deltaUs,
-                  (nextCap ? nextCap.start_us : Number.MAX_SAFE_INTEGER) - durationUs)),
-            );
-            const next: TimelineInteraction = {
-              ...active,
-              targetStartUs,
-              targetEndUs: targetStartUs + durationUs,
-            };
+          const next = stepCaptionMoveGesture({
+            active,
+            x,
+            scrollX: viewRef.current.scrollX,
+            pixelsPerSecond: pps,
+            captions,
+          });
+          if (next) {
             interactionRef.current = next;
             setInteraction(next);
             canvas.style.cursor = "grabbing";
@@ -4386,11 +2340,13 @@ export function TimelinePanel({
       }
 
       // Hover cursor + trim handle detection
-      const handle = hitTestTrimHandle(x, y, clipRects);
-      const volumeHoverId = handle ? null : hitTestVolumeLine(x, y, clipRects, isClipLocked, prefs.waveformRatio);
-      const nextHover: TimelineHover = handle
-        ? { clipId: handle.clipId, edge: handle.edge }
-        : { clipId: volumeHoverId ?? hitTestClips(x, y, clipRects), edge: null };
+      const { hover: nextHover, cursor } = detectCanvasHover({
+        x,
+        y,
+        clipRects,
+        isClipLocked,
+        waveformRatio: prefs.waveformRatio,
+      });
       setHover((prev) =>
         prev.clipId === nextHover.clipId && prev.edge === nextHover.edge ? prev : nextHover,
       );
@@ -4398,17 +2354,9 @@ export function TimelinePanel({
         const next = y <= view.rulerHeight ? clampRulerTime(xToTime(x, view)) : null;
         return prev === next ? prev : next;
       });
-      if (handle) {
-        canvas.style.cursor = "ew-resize";
-      } else if (volumeHoverId) {
-        canvas.style.cursor = "ns-resize";
-      } else {
-        const clipId = hitTestClips(x, y, clipRects);
-        const locked = clipId ? isClipLocked(clipId) : false;
-        canvas.style.cursor = clipId && !locked ? "grab" : "default";
-      }
+      canvas.style.cursor = cursor;
     },
-    [view, onSeek, clipRects, clips, markers, activePlayheadStore, prefs.snappingEnabled, prefs.mainTrackMagnet, totalUs, frameRate, frameUs, fpsNum, fpsDen, assetDurationById, document, canvasSize.width, canvasSize.height, trackRows, resolveDragTargeting, scrubMode, getAdvancedEditPlan, setToolbarFeedback, clipDragPlanner],
+    [view, onSeek, clipRects, clips, markers, activePlayheadStore, prefs.snappingEnabled, prefs.mainTrackMagnet, prefs.linkageEnabled, totalUs, frameRate, frameUs, fpsNum, fpsDen, assetDurationById, document, canvasSize.width, canvasSize.height, trackRows, scrubMode, getAdvancedEditPlan, setToolbarFeedback, clipDragPlanner],
   );
 
   // OpenFilm changes Place ↔ Insert as Alt is pressed/released during an active move,
@@ -4515,87 +2463,22 @@ export function TimelinePanel({
         const x = (event && canvasCoords(event)?.x) ?? lastPointerRef.current?.x ?? active.startX;
         (onSeekCommit ?? onSeek)?.(clampRulerTime(xToTime(x, view)));
       } else if (active.kind === "move") {
-        const clip = clips.find((c) => c.clip_id === active.clipId);
-        const plan = active.dragPlan;
-        if (clip && plan) {
-          if (plan.reason) setToolbarFeedback(plan.reason);
-          else setToolbarFeedback("");
-          if (plan.operations.length) {
-            if (active.copyOnStart) {
-              const copies = plan.operations.find(operation => operation.op === "duplicate_timeline_items");
-              if (copies?.op === "duplicate_timeline_items") {
-                const ids = copies.copies.map(copy => copy.copy_id as TimelineClipId);
-                setSelection(ids.length > 1 ? { kind: "clips", ids } : { kind: "clip", id: ids[0]! });
-              }
-            }
-            const isReplace = plan.operations.some(operation => operation.op === "remove_clip");
-            const isInsert = active.moveMode === "insert" || active.dropHit?.zone === "before" || active.dropHit?.zone === "after";
-            const summary = active.copyOnStart ? "复制片段" : isReplace ? "替换片段" : isInsert ? "插入移动片段" : "移动片段";
-            if (isReplace) {
-              const remove = plan.operations.find(operation => operation.op === "remove_clip");
-              if (remove?.op === "remove_clip") {
-                const affectedIds = new Set<TimelineClipId>([...active.clipIds, remove.clip_id]);
-                for (const operation of plan.operations) if (operation.op === "position_clips") {
-                  for (const placement of operation.placements) affectedIds.add(placement.clip_id);
-                }
-                const expected = (document?.clips ?? []).filter(item => affectedIds.has(item.clip_id)).map(item => ({
-                  clipId: item.clip_id,
-                  trackId: item.track_id,
-                  startUs: item.timeline_start_us,
-                  endUs: item.timeline_end_us,
-                }));
-                setReplaceClipRequest({ operations: plan.operations, targetClipId: remove.clip_id, expected });
-              }
-            } else {
-              if (plan.lead) {
-                const placements = new Map<TimelineClipId, { clipId: TimelineClipId; trackId: string; startUs: number }>();
-                for (const item of plan.placements) placements.set(item.clipId as TimelineClipId, {
-                  clipId: item.clipId as TimelineClipId,
-                  trackId: item.trackId,
-                  startUs: Math.round(item.startUs),
-                });
-                placements.set(plan.lead.clipId as TimelineClipId, {
-                  clipId: plan.lead.clipId as TimelineClipId,
-                  trackId: plan.lead.trackId,
-                  startUs: Math.round(plan.lead.startUs),
-                });
-                const copiesById = new Map<TimelineClipId, TimelineClipId>();
-                for (const operation of plan.operations) if (operation.op === "duplicate_timeline_items") {
-                  for (const copy of operation.copies) if (copy.item_kind === "clip") {
-                    copiesById.set(copy.copy_id as TimelineClipId, copy.source_id as TimelineClipId);
-                  }
-                }
-                const copies = plan.placements.flatMap(item => {
-                  const sourceClipId = copiesById.get(item.clipId as TimelineClipId);
-                  return sourceClipId ? [{
-                    clipId: item.clipId as TimelineClipId,
-                    sourceClipId,
-                    trackId: item.trackId,
-                    startUs: Math.round(item.startUs),
-                  }] : [];
-                });
-                setPendingKeep({ placements: [...placements.values()], copies });
-              }
-              void onPatch(plan.operations, summary);
-            }
-          }
-        }
+        commitMoveGesture({
+          active,
+          clips,
+          document,
+          setToolbarFeedback,
+          setSelection,
+          setReplaceClipRequest,
+          setPendingKeep,
+          onPatch,
+        });
       } else if (active.kind === "group-move") {
-        const ops: TimelinePatchOperation[] = active.clipIds
-          .map((id) => ({
-            clip: clips.find((c) => c.clip_id === id),
-            targetUs: Math.round(active.targetStartUsByClip[id] ?? 0),
-          }))
-          .filter(
-            (item): item is { clip: TimelineClip; targetUs: number } =>
-              Boolean(item.clip) &&
-              Math.abs(item.targetUs - item.clip!.timeline_start_us) >= 1000,
-          )
-          .map((item) => ({
-            op: "position_clip" as const,
-            clip_id: item.clip.clip_id,
-            timeline_start_us: item.targetUs,
-          }));
+        const ops = buildGroupMovePatchOperations({
+          clipIds: active.clipIds,
+          targetStartUsByClip: active.targetStartUsByClip,
+          clips,
+        });
         if (ops.length > 0) void onPatch(ops, "移动音频片段");
       } else if (active.kind === "volume") {
         const clip = clips.find((c) => c.clip_id === active.clipId);
@@ -4624,35 +2507,16 @@ export function TimelinePanel({
           setToolbarFeedback(`速度已提交 · ${(active.targetSpeedMilli / 1_000).toFixed(2)}x`);
         }
       } else if (active.kind === "trim") {
-        const clip = clips.find((c) => c.clip_id === active.clipId);
-        if (clip?.asset_kind === "image") {
-          const edgeDeltaUs = active.edge === "left"
-            ? active.targetTimelineStartUs - active.originalTimelineStartUs
-            : active.targetTimelineEndUs - active.originalTimelineEndUs;
-          if (Math.abs(edgeDeltaUs) >= 1000 && document) {
-            const magnetic = prefs.mainTrackMagnet && clip.track_id === "V1";
-            const plan = planMagneticImageTrim(document, clip, active.edge, Math.round(edgeDeltaUs), prefs.linkageEnabled, magnetic, active.ignoreLink);
-            if (!plan.operations.length) setToolbarFeedback(plan.reason ?? "图片修剪无法完成");
-            else void onPatch(plan.operations, magnetic ? "主轨磁吸修剪" : "修剪图片");
-          }
-          return;
-        }
-        const startChanged = Math.abs(active.targetStartUs - active.originalStartUs) >= 1000;
-        const endChanged = Math.abs(active.targetEndUs - active.originalEndUs) >= 1000;
-        if (clip && (startChanged || endChanged)) {
-            const operations: TimelinePatchOperation[] = [{
-              op: "trim_clip",
-              clip_id: clip.clip_id,
-              source_start_us: Math.round(active.targetStartUs),
-              source_end_us: Math.round(active.targetEndUs),
-              ...(active.ignoreLink ? { ignore_link: true } : {}),
-            }];
-          if (prefs.mainTrackMagnet && clip.track_id === "V1" && document) {
-            const plan = planMagneticTrim(document, clip, Math.round(active.targetStartUs), Math.round(active.targetEndUs), prefs.linkageEnabled, active.ignoreLink);
-            if (!plan.operations.length) setToolbarFeedback(plan.reason ?? "磁吸修剪无法完成");
-            else void onPatch(plan.operations, "主轨磁吸修剪");
-          } else void onPatch(operations, "修剪片段");
-        }
+        const res = commitClipTrimGesture({
+          active,
+          clips,
+          document,
+          mainTrackMagnet: prefs.mainTrackMagnet,
+          linkageEnabled: prefs.linkageEnabled,
+          setToolbarFeedback,
+          onPatch,
+        });
+        if (res === "early-return") return;
       } else if (active.kind === "caption-trim") {
         const startChanged = Math.abs(active.targetStartUs - active.originalStartUs) >= 1000;
         const endChanged = Math.abs(active.targetEndUs - active.originalEndUs) >= 1000;
@@ -4685,21 +2549,20 @@ export function TimelinePanel({
           );
         }
       } else if (active.kind === "marquee") {
-        const rect = marqueeRect(active.startX, active.startY, active.currentX, active.currentY);
-        if (pointerDragLiftedRef.current) {
-          // OpenFilm's marquee selects by horizontal time span and swept rows.
-          const hits = clipsInTimelineMarquee(rect, contentClipRects, trackRows);
-          const merged = shiftClickRef.current
-            ? mergeLinkedMarqueeSelection(selection, hits, clips)
-            : expandLinkedClipIds(hits, clips);
-          setSelection(merged.length > 0 ? { kind: "clips", ids: merged } : null);
-        } else {
-          // Plain click on empty area → move the playhead there (Round 4)，
-          // 寻址同样钳制在素材终点内。
-          const viewportX = active.currentX - view.scrollX;
-          (onSeekCommit ?? onSeek)?.(clampRulerTime(xToTime(viewportX, view)));
-          if (!shiftClickRef.current) setSelection(null);
-        }
+        commitMarqueeGesture({
+          active,
+          dragLifted: pointerDragLiftedRef.current,
+          shiftClicked: shiftClickRef.current,
+          contentClipRects,
+          trackRows,
+          clips,
+          selection,
+          view,
+          totalUs,
+          setSelection,
+          onSeekCommit,
+          onSeek,
+        });
       }
     }
     if (commit && !pointerDragLiftedRef.current && collapseSelectedClickRef.current) {
@@ -4725,7 +2588,7 @@ export function TimelinePanel({
     activeCanvasPointerIdRef.current = null;
     // 依赖里含 clips：文档更新（补丁生效）后本回调重建，但 pendingKeep 已在
     // 下面的 effect 中消费完毕，不会残留。
-  }, [clips, captions, clipRects, contentClipRects, onPatch, setSelection, selection, toggleClipSelection, onSeek, onSeekCommit, view, totalUs, canvasTopY, resolveDragTargeting, document, prefs.mainTrackMagnet, prefs.linkageEnabled, processCanvasPointerMove]);
+  }, [clips, captions, clipRects, contentClipRects, onPatch, setSelection, selection, toggleClipSelection, onSeek, onSeekCommit, view, totalUs, canvasTopY, document, prefs.mainTrackMagnet, prefs.linkageEnabled, processCanvasPointerMove]);
 
   // Pointer capture normally keeps the gesture on canvas; window listeners are
   // a fallback for detached test surfaces and platform capture failures.
@@ -4785,9 +2648,6 @@ export function TimelinePanel({
     if (!["move", "group-move", "trim", "speed", "edge-edit", "caption-trim", "caption-move", "marquee"].includes(interaction.kind)) return;
     if (!pointerDragLiftedRef.current) return;
     let raf = 0;
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- resolveDragTargeting 由 move 分支单独依赖
-    const resolveTargetingRef = { current: resolveDragTargeting };
-    resolveTargetingRef.current = resolveDragTargeting;
     const tick = () => {
       const pointer = lastPointerRef.current;
       const step = pointer ? dragEdgeAutoScrollStep(pointer.x, canvasSize.width) : 0;
@@ -4805,44 +2665,19 @@ export function TimelinePanel({
           if (active) {
             let adjusted: TimelineInteraction = active;
             if (active.kind === "move") {
-              adjusted = {
-                ...active,
-                previewStartUs: active.previewStartUs + deltaUs,
-                targetStartUs: Math.max(0, active.targetStartUs + deltaUs),
-                startUs: active.startUs + deltaUs,
-              };
-              // 滚动改变了片段在视口中的位置：按平移后的 targetStartUs
-              // 重算落点预览，保证预览与内容点始终对齐。
-              const draggedClip = clips.find((c) => c.clip_id === active.clipId);
-              if (draggedClip) {
-                const { targetTrackId, dropHit } = resolveTargetingRef.current(
-                  adjusted as MoveInteraction,
-                );
-                const dragPlan = clipDragPlanner?.({
-                  clipIds: active.clipIds,
-                  leadClipId: active.clipId,
-                  leadStartUs: adjusted.targetStartUs,
-                  pointerTimeUs: pointer ? xToTime(pointer.x, nextView) : adjusted.targetStartUs,
-                  dropHit,
-                  targetTrackId,
-                  mode: active.moveMode,
-                  copyOnStart: active.copyOnStart,
-                  copyIds: active.copyIds,
-                  mainTrackMagnet: prefs.mainTrackMagnet,
-                  linkageEnabled: prefs.linkageEnabled,
-                  snappingEnabled: prefs.snappingEnabled,
-                  flushToleranceUs: (SNAP_PX / nextView.pixelsPerSecond) * 1_000_000,
-                }) ?? null;
-                const landed = dragPlan?.lead;
-                adjusted = {
-                  ...(adjusted as MoveInteraction),
-                  targetStartUs: landed?.startUs ?? adjusted.targetStartUs,
-                  targetTrackId: landed?.trackId ?? targetTrackId,
-                  dropHit,
-                  dragPlan,
-                  resolution: landed ? { startUs: landed.startUs, trackId: landed.trackId, mode: "free" } : null,
-                };
-              }
+              adjusted = stepAutoScrollMoveInteraction({
+                active,
+                deltaUs,
+                pointerX: pointer?.x,
+                nextView,
+                clips,
+                trackRows,
+                clipRects,
+                mainTrackMagnet: prefs.mainTrackMagnet,
+                linkageEnabled: prefs.linkageEnabled,
+                snappingEnabled: prefs.snappingEnabled,
+                clipDragPlanner,
+              });
             } else if (active.kind === "group-move") {
               const startUsByClip: Record<string, number> = {};
               const targetStartUsByClip: Record<string, number> = {};
@@ -4883,23 +2718,26 @@ export function TimelinePanel({
       if (!coords) return;
       const { x, y } = coords;
       const timeUs = xToTime(x, view);
-      const transitionId = hitTestTransitions(x, y, transitionRects);
-      const clipId = hitTestClips(x, y, clipRects);
-      const captionId = hitTestCaptions(x, y, captionRects);
-      if (transitionId) {
-        setSelection({ kind: "transition", id: transitionId });
-        setContextMenu({ x, y, target: { kind: "transition", transitionId }, timeUs });
-      } else if (clipId) {
-        const clip = clips.find(item => item.clip_id === clipId);
-        const alreadySelected = selection?.kind === "clip" ? selection.id === clipId : selection?.kind === "clips" && selection.ids.includes(clipId);
+      const target = hitTestCanvasContextMenuTarget({
+        x,
+        y,
+        transitionRects,
+        clipRects,
+        captionRects,
+        trackRows,
+      });
+      if (target.kind === "transition") {
+        setSelection({ kind: "transition", id: target.transitionId });
+      } else if (target.kind === "clip") {
+        const clip = clips.find((item) => item.clip_id === target.clipId);
+        const alreadySelected = selection?.kind === "clip"
+          ? selection.id === target.clipId
+          : selection?.kind === "clips" && selection.ids.includes(target.clipId);
         if (clip && !alreadySelected) setSelection(linkedSelection(clip));
-        setContextMenu({ x, y, target: { kind: "clip", clipId }, timeUs });
-      } else if (captionId) {
-        setSelection({ kind: "caption", id: captionId });
-        setContextMenu({ x, y, target: { kind: "caption", captionId }, timeUs });
-      } else {
-        setContextMenu({ x, y, target: { kind: "empty", trackId: trackRowAt(trackRows, x, y)?.track.id ?? null }, timeUs });
+      } else if (target.kind === "caption") {
+        setSelection({ kind: "caption", id: target.captionId });
       }
+      setContextMenu({ x, y, target, timeUs });
     },
     [view, transitionRects, clipRects, captionRects, trackRows, clips, selection, setSelection],
   );
@@ -5095,21 +2933,6 @@ export function TimelinePanel({
       setToolbarFeedback("片段替换失败；时间线未修改。");
     });
   };
-
-  // ── Caption hit testing ────────────────────────────────────────────────────
-
-  function hitTestCaptions(
-    x: number,
-    y: number,
-    rects: CaptionRenderRect[],
-  ): string | null {
-    for (const rect of rects) {
-      if (x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height) {
-        return rect.caption.caption_id;
-      }
-    }
-    return null;
-  }
 
   // ── Selection helpers for the toolbar ──────────────────────────────────────
 
@@ -5356,207 +3179,50 @@ export function TimelinePanel({
         setTimeRange(null);
       }}>
         <div ref={scrollRef} className="timeline-scroll" onScroll={onTimelineScroll}>
-        {/* Left gutter (DOM)：每条轨道一个属性头
-            [类型标识] [锁定] [隐藏(视频/文本)] [静音(视频/音频)] [独奏(视频/音频)] */}
-        <div className="timeline-left" data-scrolled={view.scrollX > 0 ? "1" : undefined} style={{ width: trackHeadWidth, height: contentHeight, position: "relative" }}>
-          <div className="timeline-left-corner" style={{ height: view.rulerHeight }} />
-          {tracks.length > 0 && (
-            <button
-              type="button"
-              className="timeline-track-head-divider"
-              aria-label={headsCollapsed ? "展开轨道控制栏" : "收起轨道控制栏"}
-              aria-expanded={!headsCollapsed}
-              title={headsCollapsed ? "展开轨道控制栏" : "收起轨道控制栏"}
-              style={{ left: trackHeadWidth - 6, top: Math.max(view.rulerHeight + 4, contentHeight / 2 - 10) }}
-              onClick={() => setHeadsCollapsed(value => !value)}
-            >
-              {headsCollapsed ? <PanelLeftOpen size={13} /> : <PanelLeftClose size={13} />}
-            </button>
-          )}
-          {trackRows.map((row) => {
-            // 兼容旧文档/旧 core 的轨道 kind（visual→video、caption→text）。
-            const rawKind: string = row.track.kind;
-            const kind = rawKind === "visual" ? "video" : rawKind === "caption" ? "text" : rawKind;
-            // 剪映式：轨道上没有素材时不显示属性开关（仅保留类型标识）。
-            const hasClips = clips.some((clip) => clip.track_id === row.track.id);
-            return (
-              <div
-                key={row.track.id}
-                className="timeline-track-head"
-                data-track-kind={kind}
-                data-track-id={row.track.id}
-                data-head-collapsed={headsCollapsed ? "true" : undefined}
-                data-track-drop-target={trackDragTarget === row.track.id ? "true" : undefined}
-                tabIndex={0}
-                role="group"
-                aria-label={`轨道 ${row.track.id}`}
-                aria-keyshortcuts={row.track.id !== "V1" && row.track.id !== "A1" ? "Alt+ArrowUp Alt+ArrowDown Shift+F10" : undefined}
-                title={row.track.id !== "V1" && row.track.id !== "A1" ? "拖动轨道编号或使用 Alt+↑/↓ 排序；右键打开菜单" : undefined}
-                onContextMenu={event => {
-                  event.preventDefault(); event.stopPropagation();
-                  if (["V1", "A1", "C1"].includes(row.track.id)) return;
-                  setTrackMenu({ trackId: row.track.id, x: event.clientX, y: event.clientY, trigger: event.currentTarget });
-                }}
-                onKeyDown={event => {
-                  if (event.target === event.currentTarget && event.altKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
-                    const dynamic = trackRows.filter(item => item.track.id !== "V1" && item.track.id !== "A1");
-                    const from = dynamic.findIndex(item => item.track.id === row.track.id);
-                    const to = from + (event.key === "ArrowUp" ? -1 : 1);
-                    if (from >= 0 && to >= 0 && to < dynamic.length) void onPatch([{ op: "move_track", track_id: row.track.id, to_index: to }], "调整轨道顺序");
-                    event.preventDefault(); event.stopPropagation(); return;
-                  }
-                  if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
-                  event.preventDefault(); event.stopPropagation();
-                  if (["V1", "A1", "C1"].includes(row.track.id)) return;
-                  const rect = event.currentTarget.getBoundingClientRect();
-                  setTrackMenu({ trackId: row.track.id, x: rect.left, y: rect.bottom, trigger: event.currentTarget });
-                }}
-                data-flag-cols={kind === "text" ? "2" : "4"}
-                data-lane-picked={trackRows.some(r => selection?.kind === "clip" && clips.some(c => c.clip_id === selection.id && c.track_id === row.track.id)) ? "1" : undefined}
-                style={{ top: row.y, height: row.height }}
-              >
-                <TrackResizeHandle trackId={row.track.id} height={row.height}
-                  onResize={(height, done) => resizeTrack(row.track.id, height, done)} />
-                {/* 2026-11-11 对齐 OpenFilm 的 LaneMark（Timeline.tsx:295）：
-                   轨道头左侧是**纯文字轨号**，没有图标、没有色块底、没有方块边框。
-                   原来是「图标 + 轨号」的小徽章，在 119px 的头列里占了 30px，
-                   且带一层与图标同色的小方框；参照软件里这一格只是个 10.5px
-                   的灰字，左侧留白、右侧才是开关图标列。 */}
-                <span className="timeline-track-badge" title={`${row.track.id} ${kind === "video" ? "视频" : kind === "text" ? "文本" : "音频"}轨道`}
-                  onPointerDown={event => {
-                    if (event.button !== 0 || row.track.id === "V1" || row.track.id === "A1") return;
-                    event.preventDefault(); event.stopPropagation();
-                    event.currentTarget.setPointerCapture?.(event.pointerId);
-                    trackDragRef.current = { id: row.track.id, startY: event.clientY, moved: false };
-                  }}
-                  onPointerMove={event => {
-                    const drag = trackDragRef.current;
-                    if (drag && Math.abs(event.clientY - drag.startY) >= 5) {
-                      drag.moved = true;
-                      setTrackDragTarget(trackDropTarget(event.clientY).id);
-                    }
-                  }}
-                  onPointerCancel={() => { trackDragRef.current = null; setTrackDragTarget(null); }}
-                  onPointerUp={event => {
-                    const drag = trackDragRef.current;
-                    trackDragRef.current = null;
-                    setTrackDragTarget(null);
-                    if (!drag?.moved) return;
-                    const { dynamic, targetIndex } = trackDropTarget(event.clientY);
-                    if (targetIndex !== dynamic.findIndex(item => item.track.id === drag.id)) void onPatch([{ op: "move_track", track_id: drag.id, to_index: targetIndex }], "调整轨道顺序");
-                  }}>
-                  <small>{row.track.id}</small>
-                </span>
-                {headsCollapsed && (
-                  <button
-                    type="button"
-                    className="timeline-track-collapsed-menu"
-                    aria-label={`打开轨道 ${row.track.id} 控制菜单`}
-                    aria-haspopup="menu"
-                    onClick={event => {
-                      event.stopPropagation();
-                      const rect = event.currentTarget.getBoundingClientRect();
-                      setTrackMenu({ trackId: row.track.id, x: rect.right + 4, y: rect.top, trigger: event.currentTarget });
-                    }}
-                  >
-                    <MoreHorizontal size={14} />
-                  </button>
-                )}
-                {!headsCollapsed && (
-                  <>
-                    {/* OpenFilm 轨号与开关列间固定留 4px。 */}
-                    <span aria-hidden />
-                    {hasClips && <>
-                    <button
-                      className="track-flag"
-                      aria-label={`锁定轨道 ${row.track.id}`}
-                      aria-pressed={row.track.locked}
-                      title="锁定轨道"
-                      onClick={() => patchTrackFlags(row.track.id, { locked: !row.track.locked })}
-                    >
-                      {row.track.locked ? <Lock size={11} /> : <LockOpen size={11} />}
-                    </button>
-                    <button
-                      className="track-flag"
-                      aria-label={`隐藏轨道 ${row.track.id}`}
-                      aria-pressed={row.track.hidden}
-                      title="隐藏轨道（预览不渲染该轨内容）"
-                      onClick={() => patchTrackFlags(row.track.id, { hidden: !row.track.hidden })}
-                    >
-                      {row.track.hidden ? <EyeOff size={11} /> : <Eye size={11} />}
-                    </button>
-                    {kind !== "text" && (
-                      <button
-                        className="track-flag"
-                        aria-label={`静音轨道 ${row.track.id}`}
-                        aria-pressed={row.track.muted}
-                        title="关闭原声"
-                        onClick={() => patchTrackFlags(row.track.id, { muted: !row.track.muted })}
-                      >
-                        {row.track.muted ? <VolumeX size={11} /> : <Volume2 size={11} />}
-                      </button>
-                    )}
-                    {kind !== "text" && (
-                      <button
-                        className={`track-flag track-solo${row.track.solo ? " active" : ""}`}
-                        aria-label={`独奏轨道 ${row.track.id}`}
-                        aria-pressed={row.track.solo}
-                        title="独奏（仅播放该轨声音）"
-                        onClick={() => patchTrackFlags(row.track.id, { solo: !row.track.solo })}
-                      >
-                        S
-                      </button>
-                    )}
-                    </>}
-                  </>
-                )}
-              </div>
-            );
-          })}
-        </div>
+        <TrackHeadColumn
+          tracks={tracks}
+          trackRows={trackRows}
+          clips={clips}
+          selection={selection}
+          scrollX={view.scrollX}
+          trackHeadWidth={trackHeadWidth}
+          contentHeight={contentHeight}
+          rulerHeight={view.rulerHeight}
+          headsCollapsed={headsCollapsed}
+          onToggleHeadsCollapsed={() => setHeadsCollapsed((value) => !value)}
+          trackDragTarget={trackDragTarget}
+          setTrackDragTarget={setTrackDragTarget}
+          trackDragRef={trackDragRef}
+          trackDropTarget={trackDropTarget}
+          resizeTrack={resizeTrack}
+          patchTrackFlags={patchTrackFlags}
+          onPatch={onPatch}
+          onOpenTrackMenu={setTrackMenu}
+        />
         {trackMenu && (() => {
-          const track = tracks.find(item => item.id === trackMenu.trackId);
-          const members = clips.filter(clip => clip.track_id === trackMenu.trackId);
-          const fixed = trackMenu.trackId === "V1" || trackMenu.trackId === "A1" || trackMenu.trackId === "C1";
-          const disabled = !track || track.locked || members.some(clip => isClipLocked(clip.clip_id));
-          const height = trackRows.find(row => row.track.id === trackMenu.trackId)?.height;
-          const sizeKind = track?.kind === "audio" ? "audio" : track?.kind === "video" ? "visual" : null;
-          const close = () => { setTrackMenu(null); trackMenu.trigger.focus({ preventScroll: true }); };
-          const presetItems = sizeKind ? (["small", "medium", "large"] as const).map(size => ({
-            id: `height-${size}`,
-            label: `轨道高度：${size === "small" ? "小" : size === "medium" ? "中" : "大"}`,
-            note: `${TRACK_SIZES[size][sizeKind]} px`,
-            checked: height === TRACK_SIZES[size][sizeKind],
-            onSelect: () => { resizeTrack(trackMenu.trackId, TRACK_SIZES[size][sizeKind], true); close(); },
-          })) : [];
-          const items = [
-            ...(track ? [{
-              id: "toggle-lock", label: track.locked ? "解锁轨道" : "锁定轨道", checked: track.locked,
-              onSelect: () => { patchTrackFlags(track.id, { locked: !track.locked }); close(); },
-            }, {
-              id: "toggle-hidden", label: track.hidden ? "显示轨道" : "隐藏轨道", checked: track.hidden,
-              onSelect: () => { patchTrackFlags(track.id, { hidden: !track.hidden }); close(); },
-            }, ...(track.kind !== "text" ? [{
-              id: "toggle-muted", label: track.muted ? "开启声音" : "关闭声音", checked: track.muted,
-              onSelect: () => { patchTrackFlags(track.id, { muted: !track.muted }); close(); },
-            }, {
-              id: "toggle-solo", label: track.solo ? "取消独奏" : "独奏", checked: track.solo,
-              onSelect: () => { patchTrackFlags(track.id, { solo: !track.solo }); close(); },
-            }] : [])] : []),
-            ...(track && (presetItems.length || height !== undefined) ? [{ id: "track-options-separator", separator: true as const }] : []),
-            ...presetItems,
-            ...(track && height !== undefined ? [{
-              id: "height-default", label: "恢复默认高度", checked: !prefs.trackHeights[trackMenu.trackId],
-              onSelect: () => { resizeTrack(trackMenu.trackId, null, true); close(); },
-            }] : []),
-            ...(members.length && !fixed ? [{ id: "delete-track-separator", separator: true as const }] : []),
-            ...(members.length && !fixed ? [{
-              id: "delete-track", label: "删除轨道", danger: true, disabled,
-              hint: disabled ? "轨道或轨道中的片段已锁定" : undefined,
-              onSelect: () => { void onPatch([{ op: "remove_track", track_id: trackMenu.trackId }], "删除轨道"); close(); },
-            }] : []),
-          ];
-          return <ContextMenu x={trackMenu.x} y={trackMenu.y} onClose={close} items={items} />;
+          const close = () => {
+            setTrackMenu(null);
+            trackMenu.trigger.focus({ preventScroll: true });
+          };
+          return (
+            <ContextMenu
+              x={trackMenu.x}
+              y={trackMenu.y}
+              onClose={close}
+              items={buildTrackContextMenuItems({
+                trackId: trackMenu.trackId,
+                tracks,
+                trackRows,
+                clips,
+                prefs,
+                isClipLocked,
+                resizeTrack,
+                patchTrackFlags,
+                onPatch,
+                close,
+              })}
+            />
+          );
         })()}
 
         {/* Canvas area */}
@@ -5610,92 +3276,14 @@ export function TimelinePanel({
               top: canvasTopY,
             }}
           />
-          {filmstripOverlayGroups.length > 0 && (
-            <div
-              data-timeline-filmstrip-overlay="1"
-              aria-hidden="true"
-              style={{
-                position: "absolute",
-                left: 0,
-                top: canvasTopY,
-                width: canvasSize.width,
-                height: canvasViewportHeight,
-                overflow: "hidden",
-                pointerEvents: "none",
-                zIndex: 0,
-              }}
-            >
-              {filmstripOverlayGroups.map(group => (
-                <div
-                  key={group.clipId}
-                  data-timeline-filmstrip-clip={group.clipId}
-                  style={{
-                    position: "absolute",
-                    left: group.x,
-                    top: group.y - canvasTopY,
-                    width: group.width,
-                    height: group.height,
-                    overflow: "hidden",
-                    borderRadius: `0 0 ${CLIP_RADIUS}px ${CLIP_RADIUS}px`,
-                    filter: group.filter,
-                  }}
-                >
-                  {group.cells.map(cell => <TimelineFilmstripCanvas key={cell.key} cell={cell} />)}
-                </div>
-              ))}
-            </div>
-          )}
-          <div className="timeline-clip-label-layer" aria-hidden="true">
-            {clipLabelRects.map((label) => (
-              <div
-                key={label.id}
-                className="timeline-clip-label"
-                data-timeline-clip-label={label.id}
-                data-speed={label.speed}
-                style={{
-                  left: label.x,
-                  top: label.y,
-                  width: label.width,
-                  height: label.height,
-                  filter: label.hidden ? "grayscale(1)" : undefined,
-                }}
-              >
-                <div className="timeline-clip-label-info" style={{ height: CLIP_HEADER_H, backgroundColor: label.headerColor }}>
-                  <span className="timeline-clip-label-pin" data-label-pin="" style={{ translate: label.pinShift > 0 ? `${label.pinShift}px 0` : undefined }}>
-                    <span className="timeline-clip-label-name" data-label-text="">{label.title}</span>
-                    {label.speed && <span className="timeline-clip-label-speed" data-label-text="">{label.speed}</span>}
-                    {label.showDuration && <span className="timeline-clip-label-duration" data-label-text="">{label.duration}</span>}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-          {interaction?.kind === "move" && !interaction.copyOnStart && interaction.moveMode === "insert" &&
-            interaction.dragPlan?.lead && !interaction.dragPlan.reason && (() => {
-              const lead = interaction.dragPlan.lead;
-              const row = trackRowOf(trackRows, lead.trackId);
-              if (!row) return null;
-              const top = row.y + CLIP_ROW_INSET - 3;
-              const clipHeight = Math.max(4, row.height - CLIP_ROW_INSET * 2);
-              return (
-                <div
-                  data-timeline-insert-point={Math.round(lead.startUs)}
-                  aria-hidden="true"
-                  style={{
-                    position: "absolute",
-                    zIndex: 3,
-                    pointerEvents: "none",
-                    left: Math.round(timeToX(lead.startUs, view)) - 1,
-                    top,
-                    width: 3,
-                    height: clipHeight + 6,
-                    borderRadius: 999,
-                    background: "var(--accent)",
-                    boxShadow: "0 0 6px color-mix(in srgb, var(--accent) 70%, transparent)",
-                  }}
-                />
-              );
-            })()}
+          <TimelineFilmstripOverlay
+            groups={filmstripOverlayGroups}
+            canvasTopY={canvasTopY}
+            canvasWidth={canvasSize.width}
+            canvasViewportHeight={canvasViewportHeight}
+          />
+          <TimelineClipLabelsOverlay labels={clipLabelRects} />
+          <TimelineInsertIndicator interaction={interaction} trackRows={trackRows} view={view} />
           {/* 主轨封面入口（剪映式）：仅主轨一处，钉在 V1 轨道头列（与左侧
               图标区同高齐平——上方有字幕轨/动态视频轨时仍随 V1 行定位，
               不再写死标尺下方首行）；点击截取当前播放头画面设为项目封面。 */}
@@ -5714,607 +3302,85 @@ export function TimelinePanel({
               </button>
             );
           })()}
-          {/* Accessible clip list (DOM): mirrors selection so keyboard /
-              screen-reader users and tests can select clips. */}
-          <div
-            className="timeline-a11y-clips"
-            style={{
-              position: "absolute",
-              width: 1,
-              height: 1,
-              padding: 0,
-              margin: -1,
-              overflow: "hidden",
-              clip: "rect(0 0 0 0)",
-              whiteSpace: "nowrap",
-              border: 0,
-            }}
-          >
-            {clips.map((clip, index) => {
-              const isSelected =
-                selection?.kind === "clip"
-                  ? selection.id === clip.clip_id
-                  : selection?.kind === "clips"
-                    ? selection.ids.includes(clip.clip_id)
-                    : false;
-              return (
-                <button
-                  key={clip.clip_id}
-                  data-clip-id={clip.clip_id}
-                  aria-label={`Clip ${index + 1} ${clip.asset_kind} ${formatTime(clip.timeline_end_us - clip.timeline_start_us)}`}
-                  aria-pressed={isSelected}
-                  onClick={event => setSelection(event.shiftKey || event.ctrlKey || event.metaKey
-                    ? toggleClipSelection(clip, event.altKey)
-                    : event.altKey ? { kind: "clip", id: clip.clip_id } : linkedSelection(clip))}
-                />
-              );
-            })}
-            {captions.map((caption, index) => {
-              const isSelected =
-                selection?.kind === "caption" && selection.id === caption.caption_id;
-              return (
-                <button
-                  key={caption.caption_id}
-                  aria-label={caption.text || `字幕 ${index + 1}`}
-                  aria-pressed={isSelected}
-                  onClick={() => setSelection({ kind: "caption", id: caption.caption_id })}
-                />
-              );
-            })}
-          </div>
-          {/* B2: transition markers (DOM overlay for hover/selection styles) */}
-          {transitionRects.map((rect) => {
-            const isSelected =
-              selection?.kind === "transition" &&
-              selection.id === rect.transition.transition_id;
-            // T9 参照 Timeline.tsx:3489-3526：16px 高芯片、行垂直居中（不低于信息条）、
-            // 未选 rgba(255,255,255,.88)+#1b1e25、选中 accent、X 交叉线 1.2px、>70px 显示名、左右 6px 拖条。
-            const chipTop = Math.max(rect.y + 16, rect.y + Math.round(rect.height / 2) - 8);
-            const chipW = Math.max(10, rect.width);
-            return (
-              <div
-                key={rect.transition.transition_id}
-                role="button"
-                tabIndex={-1}
-                className={`timeline-transition-marker${isSelected ? " selected" : ""}`}
-                data-transition={rect.transition.kind}
-                style={{
-                  position: "absolute",
-                  left: rect.x,
-                  top: chipTop,
-                  width: chipW,
-                  height: 16,
-                  pointerEvents: "auto",
-                }}
-                title={`转场 ${rect.transition.kind} · ${(rect.transition.duration_us / 1_000_000).toFixed(2)}s`}
-                aria-label={`转场 ${rect.transition.kind} ${(rect.transition.duration_us / 1_000_000).toFixed(2)}秒`}
-                aria-pressed={isSelected}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setSelection({ kind: "transition", id: rect.transition.transition_id });
-                }}
-              >
-                <svg aria-hidden className="transition-x" viewBox="0 0 100 16" preserveAspectRatio="none">
-                  <path d="M0 15 L100 1" vectorEffect="non-scaling-stroke" fill="none" />
-                  <path d="M0 1 L100 15" vectorEffect="non-scaling-stroke" fill="none" />
-                </svg>
-                {chipW > 70 ? <span className="transition-name">{rect.transition.kind}</span> : null}
-                {(["start", "end"] as const).map(side => (
-                  <span key={side} role="presentation" className={`transition-edge ${side}`}
-                    aria-label={`调整转场时长 ${side === "start" ? "起点" : "终点"}`}
-                    onPointerDown={event => {
-                      event.stopPropagation();
-                      beginTransitionResize(rect.transition, side, event);
-                    }}
-                    onPointerMove={moveTransitionResize}
-                    onPointerUp={endTransitionResize}
-                    onPointerCancel={endTransitionResize} />
-                ))}
-              </div>
-            );
-          })}
-          {/* Core-projected source-fact transitions have their own identity path;
-              these IDs are never passed to legacy update/remove_transition ops. */}
-          {activeTransitionRects.map((rect) => {
-            const transition = rect.transition;
-            const isSelected = selection?.kind === "active-transition" && selection.id === transition.transition_id;
-            const chipTop = Math.max(rect.y + 16, rect.y + Math.round(rect.height / 2) - 8);
-            const chipW = Math.max(10, rect.width);
-            const title = `${transition.kind} · ${((transition.end_us - transition.start_us) / 1_000_000).toFixed(2)}s`;
-            return (
-              <div
-                key={`active:${transition.transition_id}`}
-                role="button"
-                tabIndex={-1}
-                className={`timeline-transition-marker timeline-active-transition-marker${isSelected ? " selected" : ""}${rect.editable ? " editable" : " read-only"}`}
-                data-transition={transition.kind}
-                data-active-transition-id={transition.transition_id}
-                style={{
-                  position: "absolute",
-                  left: rect.x,
-                  top: chipTop,
-                  width: chipW,
-                  height: 16,
-                  pointerEvents: "auto",
-                }}
-                title={`${title}${transition.rest_clip_id ? ` · rest ${transition.rest_clip_id}` : ""}${rect.editable ? " · 拖动边缘调整" : " · 只读"}`}
-                aria-label={`活动转场 ${title}`}
-                aria-pressed={isSelected}
-                onClick={event => {
-                  event.stopPropagation();
-                  setSelection({ kind: "active-transition", id: transition.transition_id });
-                }}
-                onContextMenu={event => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  const coords = canvasCoords(event);
-                  if (!coords) return;
-                  setSelection({ kind: "active-transition", id: transition.transition_id });
-                  setContextMenu({ x: coords.x, y: coords.y, target: { kind: "active-transition", transitionId: transition.transition_id }, timeUs: xToTime(coords.x, view) });
-                }}
-              >
-                <svg aria-hidden className="transition-x" viewBox="0 0 100 16" preserveAspectRatio="none">
-                  <path d="M0 15 L100 1" vectorEffect="non-scaling-stroke" fill="none" />
-                  <path d="M0 1 L100 15" vectorEffect="non-scaling-stroke" fill="none" />
-                </svg>
-                {chipW > 70 ? <span className="transition-name">{transition.kind}</span> : null}
-                {rect.editable ? (["start", "end"] as const).map(edge => (
-                  <span
-                    key={edge}
-                    role="presentation"
-                    className={`transition-edge ${edge}`}
-                    aria-label={`调整活动转场${edge === "start" ? "起点" : "终点"}`}
-                    onPointerDown={event => beginActiveTransitionResize(rect, edge, event)}
-                    onPointerMove={moveActiveTransitionResize}
-                    onPointerUp={endActiveTransitionResize}
-                    onPointerCancel={endActiveTransitionResize}
-                  />
-                )) : null}
-              </div>
-            );
-          })}
-          {/* B3/Round5: keyframe dots on selected clips, laid out in the expanded lanes */}
-          {clips.map((clip) => {
-            if (!clip.keyframes || selection?.kind !== "clip" || selection.id !== clip.clip_id) return null;
-            const rect = clipRects.find((item) => item.clip.clip_id === clip.clip_id);
-            if (!rect) return null;
-            const colors: Record<string, string> = { position: "#6fd3d3", scale: "#f0d264", rotate: "#f0a264", opacity: "#ffffff" };
-            const props = KEYFRAME_ORDER.filter((property) => clip.keyframes?.[property]);
-            return props.flatMap((property) => {
-              const track = clip.keyframes?.[property as keyof NonNullable<TimelineClip["keyframes"]>];
-              if (!track) return [];
-              const laneIndex = props.indexOf(property);
-              const laneCenterY =
-                rect.y + rect.height + 2 + 4 + laneIndex * KEYFRAME_LANE_HEIGHT + KEYFRAME_LANE_HEIGHT / 2;
-              return track.frames.map((frame: { t_us: number; x?: number; y?: number; v?: number }) => {
-                const x = timeToX(clip.timeline_start_us + frame.t_us, view);
-                if (x < rect.x || x > rect.x + rect.width) return null;
-                const commit = (newTUs: number) => {
-                  const frames = track.frames
-                    .map((f: { t_us: number; x?: number; y?: number; v?: number }) => (f.t_us === frame.t_us ? { ...f, t_us: Math.max(0, Math.min(clip.timeline_end_us - clip.timeline_start_us, Math.round(newTUs))) } : { ...f, t_us: Math.round(f.t_us) }))
-                    .sort((a: { t_us: number }, b: { t_us: number }) => a.t_us - b.t_us);
-                  void onPatch(
-                    [{ op: "set_clip_keyframes", clip_id: clip.clip_id, property: property as never, frames }],
-                    `调整${property}关键帧时间`,
-                  );
-                };
-                return (
-                  <button
-                    key={`${clip.clip_id}-${property}-${frame.t_us}`}
-                    className="timeline-keyframe-dot"
-                    data-property={property}
-                    style={{ position: "absolute", left: x - 4, top: laneCenterY - 4, width: 8, height: 8, background: colors[property] ?? "#fff", pointerEvents: "auto" }}
-                    aria-label={`${property} 关键帧 ${formatTime(frame.t_us)}`}
-                    title={`${property} @ ${formatTime(frame.t_us)}（拖动改时间）`}
-                    draggable
-                    onDragEnd={(event) => {
-                      const canvas = canvasRef.current;
-                      if (!canvas) return;
-                      const bounds = canvas.getBoundingClientRect();
-                      const scale = canvas.width / bounds.width || 1;
-                      const newTUs = Math.max(0, Math.min(clip.timeline_end_us - clip.timeline_start_us, Math.round(xToTime((event.clientX - bounds.left) * scale, view))));
-                      commit(newTUs);
-                    }}
-                    onClick={(event) => event.stopPropagation()}
-                  />
-                );
-              });
-            });
-          })}
-          {/* Drop zone overlay when dragging assets */}
-          {dropIndex !== null && (
-            <div
-              className="timeline-drop-overlay"
-              style={{
-                position: "absolute",
-                left: view.headerWidth,
-                top: view.rulerHeight,
-                right: 0,
-                bottom: 0,
-                pointerEvents: "none",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              {dropIntent?.accepts && (() => {
-                const row = dropIntent.trackId !== "new" && dropIntent.trackId ? trackRowOf(trackRows, dropIntent.trackId) : null;
-                const anchor = dropIntent.newTrackAnchorId ? trackRowOf(trackRows, dropIntent.newTrackAnchorId) : null;
-                const startX = timeToX(dropIntent.atUs, view) - view.headerWidth;
-                const width = Math.max(8, timeToX(dropIntent.atUs + dropIntent.previewDurationUs, view) - timeToX(dropIntent.atUs, view));
-                const previewColor = dropIntent.mode === "overwrite" ? "var(--warn, #f0b45a)" : "var(--accent, #16c7c2)";
-                const rowTop = row ? row.y - view.rulerHeight : 0;
-                const lineY = anchor
-                  ? (dropIntent.newTrackSide === "after" ? anchor.y + anchor.height - view.rulerHeight : anchor.y - view.rulerHeight)
-                  : 0;
-                const shiftIds = new Set(clips.filter(clip => row && clip.track_id === row.track.id && clip.timeline_start_us >= dropIntent.atUs).map(clip => clip.clip_id));
-                if (prefs.linkageEnabled) {
-                  const groups = new Set(clips.filter(clip => shiftIds.has(clip.clip_id) && clip.link_group_id).map(clip => clip.link_group_id));
-                  for (const clip of clips) if (clip.link_group_id && groups.has(clip.link_group_id)) shiftIds.add(clip.clip_id);
-                }
-                const ripples = dropIntent.mode === "insert" ? clips.filter(clip => shiftIds.has(clip.clip_id)) : [];
-                return <>
-                  {row && dropIntent.trackId !== "new" && <div
-                    aria-hidden="true"
-                    style={{
-                      position: "absolute", left: startX, top: rowTop,
-                      width, height: row.height, boxSizing: "border-box",
-                      border: `1px dashed ${previewColor}`,
-                      background: dropIntent.mode === "overwrite" ? "rgba(240, 180, 90, 0.20)" : "rgba(22, 199, 194, 0.16)",
-                      borderRadius: 3,
-                    }}
-                  />}
-                  {dropIntent.trackId === "new" && <div
-                    aria-hidden="true"
-                    style={{ position: "absolute", left: 0, right: 0, top: lineY, height: 2, background: "var(--accent, #16c7c2)", boxShadow: "0 0 0 1px rgba(22, 199, 194, 0.18)" }}
-                  />}
-                  {ripples.map(clip => {
-                    const clipRow = trackRowOf(trackRows, clip.track_id);
-                    if (!clipRow) return null;
-                    const shiftedStart = clip.timeline_start_us + dropIntent.previewDurationUs;
-                    const left = timeToX(shiftedStart, view) - view.headerWidth;
-                    const right = timeToX(clip.timeline_end_us + dropIntent.previewDurationUs, view) - view.headerWidth;
-                    return <div key={`asset-drop-ripple-${clip.clip_id}`} aria-hidden="true" style={{
-                      position: "absolute", left, top: clipRow.y - view.rulerHeight,
-                      width: Math.max(2, right - left), height: clipRow.height,
-                      border: "1px dashed var(--accent, #16c7c2)", boxSizing: "border-box",
-                      background: "rgba(22, 199, 194, 0.08)", borderRadius: 3,
-                    }} />;
-                  })}
-                </>;
-              })()}
-              {dropIntent?.accepts === false && <span className="drop-hint" role="status" aria-live="polite">无法放入已锁定或不兼容的轨道</span>}
-              {dropIntent?.accepts && dropIntent.zone === "center" && dropItemCountRef.current === 1 && <span className="drop-hint" role="status" aria-live="polite">释放以确认替换此片段</span>}
-              {dropIntent?.accepts && dropIntent.mode === "place" && <span className="drop-hint" role="status" aria-live="polite">{dropIntent.trackId === "new" ? "释放以新建轨道并放置素材" : "释放以放置素材"} · {formatTime(dropIntent.atUs)}</span>}
-              {dropIntent?.accepts && dropIntent.mode === "insert" && <span className="drop-hint" role="status" aria-live="polite">释放以插入到时间线（后续片段顺延） · {formatTime(dropIntent.atUs)}</span>}
-              {dropIntent?.accepts && dropIntent.mode === "overwrite" && dropIntent.zone !== "center" && <span className="drop-hint" role="status" aria-live="polite">释放以覆盖 · {formatTime(dropIntent.atUs)}</span>}
-            </div>
-          )}
-          {replaceAssetRequest && (
-            <div className="modal-backdrop timeline-drop-replace-backdrop" onClick={cancelReplaceAsset}>
-              <section
-                className="modal timeline-drop-replace-dialog"
-                role="alertdialog"
-                aria-modal="true"
-                aria-labelledby="timeline-drop-replace-title"
-                aria-describedby="timeline-drop-replace-description"
-                tabIndex={-1}
-                ref={element => { if (element && !element.contains(window.document.activeElement)) element.focus(); }}
-                onClick={event => event.stopPropagation()}
-                onKeyDown={event => {
-                  if (event.key === "Escape") {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    cancelReplaceAsset();
-                  }
-                }}
-              >
-                <div className="modal-heading">
-                  <div><h2 id="timeline-drop-replace-title">替换时间线素材？</h2></div>
-                  <button type="button" className="icon-btn" aria-label="取消替换" title="取消 · Esc" onClick={cancelReplaceAsset}><X size={15} /></button>
-                </div>
-                <div className="modal-body">
-                  <p id="timeline-drop-replace-description">
-                    将替换“{clipNames.get(replaceAssetRequest.targetClipId) ?? "此片段"}”引用的素材。确认后只提交一次时间线修改。
-                  </p>
-                </div>
-                <div className="modal-footer">
-                  <button type="button" className="btn secondary" onClick={cancelReplaceAsset}>取消</button>
-                  <button type="button" className="btn primary" onClick={confirmReplaceAsset}>确认替换</button>
-                </div>
-              </section>
-            </div>
-          )}
-          {replaceClipRequest && (
-            <div className="modal-backdrop timeline-drop-replace-backdrop" onClick={cancelReplaceClip}>
-              <section
-                className="modal timeline-drop-replace-dialog"
-                role="alertdialog"
-                aria-modal="true"
-                aria-labelledby="timeline-clip-replace-title"
-                aria-describedby="timeline-clip-replace-description"
-                tabIndex={-1}
-                ref={element => { if (element && !element.contains(window.document.activeElement)) element.focus(); }}
-                onClick={event => event.stopPropagation()}
-                onKeyDown={event => {
-                  if (event.key === "Escape") {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    cancelReplaceClip();
-                  }
-                }}
-              >
-                <div className="modal-heading">
-                  <div><h2 id="timeline-clip-replace-title">替换时间线片段？</h2></div>
-                  <button type="button" className="icon-btn" aria-label="取消替换" title="取消 · Esc" onClick={cancelReplaceClip}><X size={15} /></button>
-                </div>
-                <div className="modal-body">
-                  <p id="timeline-clip-replace-description">
-                    将移除“{clipNames.get(replaceClipRequest.targetClipId) ?? "目标片段"}”，并把拖动的片段放到该位置。确认后一次提交时间线修改。
-                  </p>
-                </div>
-                <div className="modal-footer">
-                  <button type="button" className="btn secondary" onClick={cancelReplaceClip}>取消</button>
-                  <button type="button" className="btn primary" onClick={confirmReplaceClip}>确认替换</button>
-                </div>
-              </section>
-            </div>
-          )}
-          {clips.length === 0 && (
-            // 空态提示（2026-11-11 对齐 OpenFilm 的 data-timeline-empty）：
-            // 虚线框铺满整个轨道区，而不是只占首行一条带。参照软件里这块虚线
-            // 就是「整片区域都能接住拖放」的视觉承诺；只框住一行时，用户会以为
-            // 只有那一行能放。内缩 10px 上下留白，与行组的 TL_VPAD 一致。
-            <div
-              className="timeline-empty-drop"
-              style={{
-                position: "absolute",
-                left: view.headerWidth,
-                top: view.rulerHeight,
-                right: 0,
-                bottom: SCROLLBAR_HEIGHT_PX,
-                margin: TRACK_VIEW_PAD,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                pointerEvents: "none",
-              }}
-            >
-              <Film size={15} aria-hidden="true" style={{ marginRight: 8, flex: "0 0 auto", color: "var(--tl-label)" }} />
-              将视频或图片拖到这里开始剪辑
-            </div>
-          )}
-          {/* T10 参照 Timeline.tsx:3771-3960 + ContextMenu.tsx：body portal 菜单（键盘导航/
-              翻边定位/danger/hint）。条目只接已有 op；删除类 danger；禁用项留原因。 */}
+          <TimelineAccessibleClipList
+            clips={clips}
+            captions={captions}
+            selection={selection}
+            setSelection={setSelection}
+            toggleClipSelection={toggleClipSelection}
+            linkedSelection={linkedSelection}
+          />
+          <TimelineTransitionAndKeyframeOverlays
+            transitionRects={transitionRects}
+            activeTransitionRects={activeTransitionRects}
+            clips={clips}
+            clipRects={clipRects}
+            selection={selection}
+            view={view}
+            canvasRef={canvasRef}
+            canvasCoords={canvasCoords}
+            setSelection={setSelection}
+            setContextMenu={setContextMenu}
+            beginTransitionResize={beginTransitionResize}
+            moveTransitionResize={moveTransitionResize}
+            endTransitionResize={endTransitionResize}
+            beginActiveTransitionResize={beginActiveTransitionResize}
+            moveActiveTransitionResize={moveActiveTransitionResize}
+            endActiveTransitionResize={endActiveTransitionResize}
+            onPatch={onPatch}
+          />
+          <TimelineDropAndReplaceOverlays
+            dropIndex={dropIndex}
+            dropIntent={dropIntent}
+            dropItemCount={dropItemCountRef.current}
+            clips={clips}
+            trackRows={trackRows}
+            view={view}
+            prefs={prefs}
+            clipNames={clipNames}
+            replaceAssetRequest={replaceAssetRequest}
+            cancelReplaceAsset={cancelReplaceAsset}
+            confirmReplaceAsset={confirmReplaceAsset}
+            replaceClipRequest={replaceClipRequest}
+            cancelReplaceClip={cancelReplaceClip}
+            confirmReplaceClip={confirmReplaceClip}
+          />
           {contextMenu && (
             <ContextMenu
               x={contextMenu.x}
               y={contextMenu.y}
               onClose={() => setContextMenu(null)}
-              items={((): ContextMenuEntry[] => {
-                const target = contextMenu.target;
-                const close = (fn: () => void) => () => { fn(); setContextMenu(null); };
-                if (target.kind === "clip") {
-                  const clip = clips.find((c) => c.clip_id === target.clipId);
-                  if (!clip) return [];
-                  const locked = isClipLocked(clip.clip_id);
-                  const clipItselfLocked = Boolean(document?.locked_elements?.includes(clip.clip_id));
-                  const deleteTargets = selectedClips.some(item => item.clip_id === clip.clip_id) ? selectedClips : [clip];
-                  const magneticDelete = document && prefs.mainTrackMagnet && clip.track_id === "V1"
-                    ? planMagneticDelete(document, deleteTargets, prefs.linkageEnabled)
-                    : undefined;
-                  const ripple = document ? planRippleDelete(document, deleteTargets, prefs.linkageEnabled) : { operations: [] };
-                  const magneticMove = document && clip.track_id === "V1" ? planMagneticMove(document, clip.clip_id, activePlayheadStore.get(), true) : { operations: [] };
-                  const playheadNowUs = activePlayheadStore.get();
-                  const split = splitClipAt(clip, playheadNowUs, document);
-                  const visualClip = clip.asset_kind === "video" || clip.asset_kind === "image";
-                  const visualFactItems: ContextMenuEntry[] = visualClip ? [
-                    {
-                      id: "picture-fade-in",
-                      label: clip.picture_fade_in_us ? "清除画面淡入" : "添加画面淡入（0.5 秒）",
-                      disabled: locked,
-                      onSelect: close(() => void onPatch([{
-                        op: "set_clip_transition_facts",
-                        clip_id: clip.clip_id,
-                        picture_fade_in_us: clip.picture_fade_in_us ? null : 500_000,
-                      }], clip.picture_fade_in_us ? "清除画面淡入" : "添加画面淡入")),
-                    },
-                    {
-                      id: "picture-fade-out",
-                      label: clip.picture_fade_out_us ? "清除画面淡出" : "添加画面淡出（0.5 秒）",
-                      disabled: locked,
-                      onSelect: close(() => void onPatch([{
-                        op: "set_clip_transition_facts",
-                        clip_id: clip.clip_id,
-                        picture_fade_out_us: clip.picture_fade_out_us ? null : 500_000,
-                      }], clip.picture_fade_out_us ? "清除画面淡出" : "添加画面淡出")),
-                    },
-                  ] : [];
-                  const moveFactItem: ContextMenuEntry | null = clip.asset_kind === "video" ? {
-                    id: "picture-move-in",
-                    label: clip.move_in ? "清除进入运动" : "添加推入进入（0.5 秒）",
-                    disabled: locked,
-                    onSelect: close(() => void onPatch([{
-                      op: "set_clip_transition_facts",
-                      clip_id: clip.clip_id,
-                      move_in: clip.move_in ? null : { preset_id: "motions/move-push-left", duration_us: 500_000 },
-                    }], clip.move_in ? "清除进入运动" : "添加进入运动")),
-                  } : null;
-                  const pickedIds = selectedClips.some(item => item.clip_id === clip.clip_id)
-                    ? selectedClips.map(item => item.clip_id)
-                    : clip.link_group_id ? clips.filter(item => item.link_group_id === clip.link_group_id).map(item => item.clip_id) : [clip.clip_id];
-                  const pickedKey = [...pickedIds].sort().join("|");
-                  const pickedSpeedClips = pickedIds.map(id => clips.find(item => item.clip_id === id)).filter((item): item is TimelineClip => Boolean(item));
-                  const speedable = pickedSpeedClips.some(canChangeClipSpeed);
-                  const speedLocked = pickedSpeedClips.some(item => isClipLocked(item.clip_id, true));
-                  return [
-                    { id: "split", label: "在播放头处拆分", disabled: !split, hint: split ? undefined : locked ? "片段已锁定" : "播放头不在可拆分区间", onSelect: close(() => { if (split) void onPatch([split], "在播放头处拆分"); }) },
-                    { id: "copy", label: "复制", disabled: locked, hint: locked ? "片段已锁定" : undefined, onSelect: close(() => onCommand?.("timeline.copy")) },
-                    ...(canLinkMembers ? [{ id: "link", label: "链接片段", icon: <Link2 size={14} />, disabled: locked, hint: locked ? "片段已锁定" : undefined,
-                      onSelect: close(() => void onPatch([{ op: "set_clip_link", clip_ids: linkMembers.map(item => item.clip_id) }], "链接片段")) }] : []),
-                    ...(unlinkRepresentatives.length ? [{ id: "unlink", label: "取消片段链接", icon: <Link2Off size={14} />, disabled: locked, hint: locked ? "片段已锁定" : undefined,
-                      onSelect: close(() => void onPatch(unlinkRepresentatives.map(item => ({ op: "clear_clip_link" as const, clip_id: item.clip_id })), "取消片段链接")) }] : []),
-                    { id: "lock", label: clipItselfLocked ? "解锁片段" : "锁定片段", onSelect: close(() => void onPatch([{ op: "set_clip_locked", clip_id: clip.clip_id, locked: !clipItselfLocked }], clipItselfLocked ? "解锁片段" : "锁定片段")) },
-                    { id: "speed", label: "速度", checked: speedModeKey === pickedKey, disabled: !speedable || speedLocked, hint: !speedable ? "只有具有确定源区间的视频/音频片段可以变速" : speedLocked ? "片段或所在轨道已锁定" : undefined,
-                      onSelect: close(() => setSpeedModeKey(current => current === pickedKey ? null : pickedKey)) },
-                    ...(visualFactItems.length || moveFactItem ? [{ id: "source-transition-separator", separator: true as const }, ...visualFactItems, ...(moveFactItem ? [moveFactItem] : [])] : []),
-                    { id: "sep1", separator: true as const },
-                    { id: "del", label: magneticDelete ? "删除并闭合主轨" : "删除片段", danger: true, disabled: locked || magneticDelete?.operations.length === 0, hint: locked ? "片段已锁定" : magneticDelete?.reason, onSelect: close(() => void onPatch(magneticDelete?.operations ?? [{ op: "remove_clip", clip_id: clip.clip_id }], magneticDelete ? "主轨磁吸删除" : "删除片段")) },
-                    { id: "ripple-delete", label: "波纹删除", disabled: locked || !ripple.operations.length, hint: locked ? "片段已锁定" : "reason" in ripple ? ripple.reason : undefined, onSelect: close(() => void onPatch(ripple.operations, "波纹删除")) },
-                    { id: "magnetic-move", label: "主轨插入到播放头", disabled: !magneticMove.operations.length, hint: "reason" in magneticMove ? magneticMove.reason : undefined, onSelect: close(() => void onPatch(magneticMove.operations, "主轨插入到播放头")) },
-                    { id: "sep2", separator: true as const },
-                    { id: "seek", label: "定位播放头", onSelect: close(() => onSeek?.(contextMenu.timeUs)) },
-                  ];
-                }
-                if (target.kind === "caption") {
-                  return [
-                    { id: "del", label: "删除字幕", danger: true, onSelect: close(() => void onPatch([{ op: "remove_caption", caption_id: target.captionId as never }], "删除字幕")) },
-                    { id: "sep", separator: true as const },
-                    { id: "seek", label: "定位播放头", onSelect: close(() => onSeek?.(contextMenu.timeUs)) },
-                  ];
-                }
-                if (target.kind === "transition") {
-                  return [
-                    { id: "del", label: "删除转场", danger: true, onSelect: close(() => void onPatch([{ op: "remove_transition", transition_id: target.transitionId as never }], "删除转场")) },
-                  ];
-                }
-                if (target.kind === "active-transition") {
-                  const transition = activeTransitions.find(item => item.transition_id === target.transitionId);
-                  if (!transition) return [];
-                  const operations = clearActiveTransitionOperations(transition);
-                  const blockedHint = transition.kind === "dip-white"
-                    ? "白闪依赖 Core 的页面帧系统角色，目前只显示、不编辑"
-                    : transition.kind === "crossfade"
-                      ? "音频交叉淡化目前只读"
-                      : undefined;
-                  return operations.length
-                    ? [{ id: "clear-active-transition", label: "清除片段转场事实", danger: true, onSelect: close(() => void onPatch(operations, "清除片段转场事实")) }]
-                    : [{ id: "active-transition-readonly", label: "此转场当前只读", disabled: true, hint: blockedHint }];
-                }
-                const closeGap = closeGapAt(document, target.trackId, contextMenu.timeUs);
-                const compact = document ? planCompactMainTrack(document, true) : { operations: [] };
-                const waveformRatios = [
-                  { value: 1, label: "100%" },
-                  { value: 0.6, label: "60%" },
-                  { value: 0.4, label: "40%" },
-                  { value: 0.3, label: "30%" },
-                ] as const;
-                return [
-                  { id: "close-gap", label: "关闭空隙", disabled: !closeGap.length, hint: closeGap.length ? undefined : "此处没有可关闭的空隙，或后续片段无法安全移动", onSelect: close(() => void onPatch(closeGap, "关闭空隙")) },
-                  { id: "compact-main", label: "关闭主轨全部空隙", disabled: !compact.operations.length, hint: "reason" in compact ? compact.reason : undefined, onSelect: close(() => void onPatch(compact.operations, "关闭主轨全部空隙")) },
-                  { id: "paste", label: "粘贴到播放头", onSelect: close(() => onCommand?.("timeline.paste")) },
-                  { id: "sep1", separator: true as const },
-                  { id: "seek", label: "定位播放头", onSelect: close(() => onSeek?.(contextMenu.timeUs)) },
-                  { id: "clear", label: "取消选择", onSelect: close(() => setSelection(null)) },
-                  { id: "sep-timeline-tools", separator: true as const },
-                  {
-                    id: "add-track",
-                    label: "添加轨道",
-                    submenu: [
-                      { id: "add-video-track", label: "视频轨道", onSelect: close(() => addTrack("video")) },
-                      { id: "add-text-track", label: "文本轨道", onSelect: close(() => addTrack("text")) },
-                    ],
-                  },
-                  {
-                    id: "fit-content",
-                    label: "缩放到全部素材",
-                    shortcut: "Shift+Z",
-                    onSelect: close(fitToContent),
-                  },
-                  {
-                    id: "timeline-display-settings",
-                    label: "显示设置",
-                    submenu: [
-                      { id: "track-height-label", label: `默认轨道高度 · ${prefs.trackHeight}px`, disabled: true },
-                      {
-                        id: "track-height-down",
-                        label: "降低 4px",
-                        disabled: prefs.trackHeight <= 40,
-                        onSelect: close(() => updateTimelinePrefs(current => ({ ...current, trackHeight: Math.max(40, current.trackHeight - 4) }))),
-                      },
-                      {
-                        id: "track-height-up",
-                        label: "增加 4px",
-                        disabled: prefs.trackHeight >= 128,
-                        onSelect: close(() => updateTimelinePrefs(current => ({ ...current, trackHeight: Math.min(128, current.trackHeight + 4) }))),
-                      },
-                      {
-                        id: "track-height-reset",
-                        label: "恢复默认高度 · 56px",
-                        checked: prefs.trackHeight === 56,
-                        onSelect: close(() => updateTimelinePrefs(current => ({ ...current, trackHeight: 56 }))),
-                      },
-                      { id: "display-separator", separator: true as const },
-                      ...waveformRatios.map(({ value, label }) => ({
-                        id: `waveform-${label}`,
-                        label: `波形占比 ${label}`,
-                        checked: prefs.waveformRatio === value,
-                        onSelect: close(() => updateTimelinePrefs(current => ({ ...current, waveformRatio: value }))),
-                      })),
-                    ],
-                  },
-                ];
-              })()}
+              items={buildCanvasContextMenuItems({
+                menu: contextMenu,
+                document,
+                clips,
+                selectedClips,
+                activeTransitions,
+                playheadUs: activePlayheadStore.get(),
+                prefs,
+                speedModeKey,
+                setSpeedModeKey,
+                isClipLocked,
+                canLinkMembers,
+                linkMembers,
+                unlinkRepresentatives,
+                onPatch,
+                onSeek,
+                onCommand,
+                setSelection,
+                addTrack,
+                fitToContent,
+                updateTimelinePrefs,
+                closeMenu: () => setContextMenu(null),
+              })}
             />
           )}
         </div>
-        {/* B2: 添加转场浮层——点击两片段边界后出现。
-            与共享 Dialog 同骨架：标题区 / 内容区 / 关闭钮，补齐 aria-modal、
-            初始焦点、Escape 与焦点返回；点击背幕关闭的既有语义保留。 */}
-        {addTransitionAnchor && (
-          <div
-            className="modal-backdrop add-transition-popover"
-            onClick={() => setAddTransitionAnchor(null)}
-          >
-            <section
-              className="modal add-transition-card"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="add-transition-title"
-              tabIndex={-1}
-              ref={(element) => {
-                if (!element) return;
-                const active = window.document.activeElement;
-                if (active !== element && !element.contains(active)) element.focus();
-              }}
-              onClick={(event) => event.stopPropagation()}
-              onKeyDown={(event) => {
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  setAddTransitionAnchor(null);
-                }
-              }}
-            >
-              <div className="modal-heading">
-                <div><h2 id="add-transition-title">在此处添加转场</h2></div>
-                <button type="button" className="icon-btn" aria-label="关闭添加转场" title="关闭 · Esc" onClick={() => setAddTransitionAnchor(null)}>
-                  <X size={15} />
-                </button>
-              </div>
-              <div className="modal-body">
-                <div className="add-transition-kinds">
-                  {TRANSITION_KINDS.map((kind) => (
-                    <button
-                      key={kind}
-                      className="add-transition-kind"
-                      onClick={() => {
-                        void onPatch(
-                          [{ op: "add_transition", after_clip_id: addTransitionAnchor as never, kind, duration_us: 500_000 }],
-                          `添加转场 ${kind}`,
-                        );
-                        setAddTransitionAnchor(null);
-                      }}
-                    >
-                      {kind}
-                    </button>
-                  ))}
-                </div>
-                <p className="modal-caption">默认 0.5s，添加后可在属性面板调整时长；仅权威预览渲染转场效果。</p>
-              </div>
-            </section>
-          </div>
-        )}
+        <TimelineAddTransitionDialog
+          anchorClipId={addTransitionAnchor}
+          onClose={() => setAddTransitionAnchor(null)}
+          onPatch={onPatch}
+        />
         </div>
         {/* 固定标尺条带：.timeline-body 直属（滚动区外，Excel 冻结表头式，零抖动）；
             绝对定位覆盖滚动视口顶部 rulerHeight 像素——主画布自带的标尺带正好被
@@ -6329,7 +3395,7 @@ export function TimelinePanel({
           onPointerUp={event => finishRulerGesture(event, true)}
           onPointerCancel={event => finishRulerGesture(event, false)}
           onLostPointerCapture={event => finishRulerGesture(event, false)}
-          onPointerLeave={() => { if (rulerPointerId.current === null) setRulerHoverUs(null); }}
+          onPointerLeave={handleRulerPinLeave}
           onDoubleClick={handleRulerPinDoubleClick}
         />
         <div className="timeline-ruler-tick-layer" aria-hidden="true">

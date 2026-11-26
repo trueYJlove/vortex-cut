@@ -1,7 +1,5 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { readDesktopStyles } from "./helpers/read-styles.js";
 
 /**
  * C 族「列表型」· 形态 3（AI 字幕优化）回归（2026-11-09）。
@@ -20,8 +18,7 @@ import { describe, expect, it } from "vitest";
  * 另：.captions-provider-diff 原有两处硬编码色值（#cfd8dd / #8fa0a8）。
  */
 
-const cssPath = resolve(dirname(fileURLToPath(import.meta.url)), "../src/styles.css");
-const raw = readFileSync(cssPath, "utf8");
+const raw = readDesktopStyles();
 const css = raw.replace(/\/\*[\s\S]*?\*\//g, "");
 
 type Rule = { selectors: string[]; body: string; order: number; inMedia: boolean };

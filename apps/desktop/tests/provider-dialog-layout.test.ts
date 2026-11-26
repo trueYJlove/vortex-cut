@@ -1,7 +1,7 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { readDesktopStyles } from "./helpers/read-styles.js";
 
-const css = readFileSync("src/styles.css", "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+const css = readDesktopStyles().replace(/\/\*[\s\S]*?\*\//g, "");
 function rules(selector: string) {
   return [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
     .filter(match => match[1].trim() === selector)

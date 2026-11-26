@@ -1,7 +1,5 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { readDesktopStyles } from "./helpers/read-styles.js";
 
 /**
  * Graphite Precision 对话框层回归（docs/design/ui-mockups/dialog-system-v2）。
@@ -13,8 +11,7 @@ import { describe, expect, it } from "vitest";
  * 都记录了同一个教训）。
  */
 
-const cssPath = resolve(dirname(fileURLToPath(import.meta.url)), "../src/styles.css");
-const raw = readFileSync(cssPath, "utf8");
+const raw = readDesktopStyles();
 const css = raw.replace(/\/\*[\s\S]*?\*\//g, "");
 
 /** 计算选择器特异性 [id, class/attr/pseudo-class, type]（:not() 参数计入，自身不计）。 */
